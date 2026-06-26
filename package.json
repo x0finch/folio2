@@ -8,6 +8,7 @@
     "dev": "pnpm --filter @folio/web dev",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
+    "test:packages": "vitest run",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

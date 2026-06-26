@@ -27,6 +27,8 @@
 - **Packages are created on-demand by the phase that needs them** — not pre-stubbed. P1.2 creates `packages/core`, P1.4 `packages/db`, P1.5 `packages/ui`, each provider when built. The workspace globs in `pnpm-workspace.yaml` already cover `packages/*`, `packages/providers/*`, `apps/*`, so new packages need no config change.
 - **Internal-packages pattern**: each `@folio/*` package.json sets `"exports": { ".": "./src/index.ts" }` pointing at source — **no build step** for internal libs (Vite/Vitest transpile TS directly). Consumers depend via `"@folio/<x>": "workspace:*"`.
 - **No TS project references** (overkill here); each package `tsconfig.json` just extends `../../tsconfig.base.json`.
+- **Each package ships its own minimal `vitest.config.ts`** + a `test: "vitest run"` script. This keeps `vitest` from inheriting the root `projects` config when run inside a package, and lets the root runner (`pnpm test:packages`) discover the package. The root `vitest.config.ts` (`test.projects`) is the canonical all-package runner.
+- **A provider serving multiple account types**: keep `BalanceProvider.accountType` singular; use a factory to emit one provider object per type (shared impl), export `providers: BalanceProvider[]`, and let `@folio/sync` flatten them into `buildRegistry`. See arch-design.md §2 (方案 A).
 - Package prefix `@folio/*`. Providers published as `@folio/provider-<name>`.
 
 ## Toolchain notes (current best practices — supersede older wording in arch-design.md)
@@ -47,8 +49,8 @@
 ## Progress
 
 - [x] **P1.1 — monorepo skeleton** (workspace shell + `apps/web` + base configs + this file). Packages created on-demand thereafter.
-- [ ] **P1.2 — core contracts** (creates `packages/core`: types, `BalanceProvider`, registry, errors) ← **next**
-- [ ] P1.3 — credential crypto (`@folio/core/crypto.ts`)
+- [x] **P1.2 — core contracts** (`packages/core`: `types.ts`, `provider.ts`, `registry.ts`, `errors.ts`, `index.ts` + tests). Contracts only; registry auto-assembles by `accountType`; multi-type via factory (方案 A).
+- [ ] **P1.3 — credential crypto** (`@folio/core/crypto.ts`: AES-GCM via Web Crypto, key from env; round-trip + IV-randomness tests) ← **next**
 - [ ] P1.4 — Drizzle schema + `@folio/db` wrappers
 - [ ] P1.5 — `@folio/ui` shadcn init
 - [ ] P1.6 — CI
