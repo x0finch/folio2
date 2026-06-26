@@ -1,0 +1,7 @@
+{
+  "holdings": [
+    { "symbol": "BTC", "amount": 0.5, "usdValue": 32000 },
+    { "symbol": "ETH", "amount": 4, "usdValue": 12000 },
+    { "symbol": "Gold bar (1oz)", "amount": 2, "usdValue": 5200 }
+  ]
+}

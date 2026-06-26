@@ -3,14 +3,22 @@
 export { CryptoError, decrypt, encrypt, generateSecret } from "./crypto";
 export type { ProviderErrorCode, ProviderErrorOptions } from "./errors";
 export { ProviderError } from "./errors";
-export type { BalanceProvider, CredentialFlags, ProviderCredentials } from "./provider";
+export type {
+  BalanceProvider,
+  CredentialFlags,
+  FetchContext,
+  ProviderCredentials,
+} from "./provider";
 export type { ProviderRegistry } from "./registry";
 export { buildRegistry, getProvider } from "./registry";
 export type {
   Account,
+  AccountData,
   AccountType,
   AccountWithFlags,
   AssetSnapshot,
   Balance,
   BalanceKind,
+  ManualData,
+  ManualHolding,
 } from "./types";

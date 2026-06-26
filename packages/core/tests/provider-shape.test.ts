@@ -15,9 +15,14 @@ const stub: BalanceProvider = {
 
 describe("BalanceProvider shape", () => {
   it("can be implemented by a minimal stub", async () => {
+    const ctx = {
+      account: { id: "a1", userId: "u1", type: "manual" as const, label: "Manual" },
+      creds: {},
+      globalKeys: {},
+    };
     expect(stub.accountType).toBe("manual");
-    expect(await stub.fetchBalances({}, {})).toEqual([]);
-    expect(await stub.validate({}, {})).toBe(true);
+    expect(await stub.fetchBalances(ctx)).toEqual([]);
+    expect(await stub.validate(ctx)).toBe(true);
   });
 
   it("derives has* flags from ProviderCredentials (编译期 + 运行期)", () => {

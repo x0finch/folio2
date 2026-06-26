@@ -32,6 +32,9 @@ export interface Account {
   // 仅 onchain_evm 等需要:具体链,如 "ethereum" | "arbitrum" | "base"。
   network?: string;
   label: string;
+  // 按账户类型的额外数据(通用容器,扩展时往 AccountData 并集加一支)。
+  // manual 账户在此装手填持仓;落库时加密存(隐私)。非密钥,与 ProviderCredentials 分离。
+  data?: AccountData;
   // 不在此持有 groupId:账户↔组是多对多,关系由 account_groups 关联表承载。
   // 凭据本身不返回,只返回每个凭据字段是否已设置的 has* 布尔(见 AccountWithFlags)。
 }
@@ -57,3 +60,18 @@ export interface AssetSnapshot {
   totalUsd: number;
   balances: Balance[];
 }
+
+// manual 账户的单条手填持仓:数量与美元价值由用户录入(自动定价为后续增强)。
+export interface ManualHolding {
+  symbol: string;
+  amount: number;
+  usdValue: number;
+}
+
+// manual 账户的 data 载荷。
+export interface ManualData {
+  holdings: ManualHolding[];
+}
+
+// Account.data 的并集:每新增一种带额外数据的账户类型,在此加一支。
+export type AccountData = ManualData;
