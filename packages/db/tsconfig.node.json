@@ -1,0 +1,9 @@
+{
+  // Node 上下文的工具文件(drizzle-kit / vitest 加载,使用 process、node: 模块)。
+  // 与 worker 源码分开,避免给 src 引入 node 全局。
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["drizzle.config.ts", "vitest.config.ts"]
+}

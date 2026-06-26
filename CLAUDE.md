@@ -37,6 +37,9 @@
 - **Cloudflare targeting via `@cloudflare/vite-plugin`** (not the legacy Nitro `cloudflare-module` preset).
 - Package name is **`@tanstack/react-start`** (the old `@tanstack/start` is gone).
 - TypeScript: `module: preserve` + `moduleResolution: bundler` (now the modern defaults) enable extension-less relative imports.
+- **D1 testing**: `@cloudflare/vitest-pool-workers` 0.16.x — use the root `cloudflareTest` plugin + `readD1Migrations` (the old `defineWorkersConfig`/`/config` subpath is removed); `env`/`applyD1Migrations` from `cloudflare:test`; `Cloudflare.Env` augmentation in a test `env.d.ts`. This version doesn't isolate per-test storage → reset state in `beforeEach`.
+- **D1 data layer**: D1 has no interactive `db.transaction()` → atomic multi-writes use `db.batch([...])`. D1 enforces FKs, so `ON DELETE CASCADE` works at runtime. Migrations: `drizzle-kit generate` (out=`drizzle/`) → `wrangler d1 migrations apply` (never `drizzle-kit migrate`); `out` == wrangler `migrations_dir` == test `readD1Migrations` path.
+- TS6 generic `Uint8Array<ArrayBufferLike>` isn't assignable to Web Crypto `BufferSource`/`D1` BufferSource — annotate byte arrays as `Uint8Array<ArrayBuffer>` when needed.
 
 ## Security model (see arch-design.md §3, §7.1)
 - Global provider keys (`ZERION_API_KEY`, etc.) → CF Secret/env. Per-account credentials → D1, AES-GCM encrypted with `SECRETS_KEY`.
@@ -51,7 +54,8 @@
 - [x] **P1.1 — monorepo skeleton** (workspace shell + `apps/web` + base configs + this file). Packages created on-demand thereafter.
 - [x] **P1.2 — core contracts** (`packages/core`: `types.ts`, `provider.ts`, `registry.ts`, `errors.ts`, `index.ts` + tests). Contracts only; registry auto-assembles by `accountType`; multi-type via factory (方案 A).
 - [x] **P1.3 — credential crypto** (`@folio/core/crypto.ts`: Web Crypto AES-GCM `encrypt`/`decrypt`, random 12B IV, `generateSecret`, `CryptoError`; key passed in by caller, never reads env; zero deps). Tests: round-trip/IV-randomness/wrong-key/tamper/invalid-key.
-- [ ] **P1.4 — Drizzle schema + `@folio/db`** (schema, userId-scoped wrapped queries, `getDb` private, migrations; D1 binding in wrangler.jsonc) ← **next**
+- [x] **P1.4 — Drizzle schema + `@folio/db`** (`schema.ts` business tables + indexes/cascade FKs; `getDb` private; `queries.ts` userId-scoped wrapped ops + `writeSnapshot` via `db.batch`; `index.ts` leaks no db/schema). Migrations in `drizzle/` (`drizzle-kit generate` → `wrangler d1 migrations apply`). Tests via `@cloudflare/vitest-pool-workers` (Miniflare D1): CRUD/M2M/cascade/isolation/encapsulation. **Deferred to P2.1**: better-auth tables, `userId→user` FK, `createAuthAdapter`. db stays crypto-agnostic (opaque ciphertext).
+- [ ] **P1.5 — `@folio/ui` shadcn init** (shadcn components.json + Tailwind v4 + named re-exports; consumable by apps/web) ← **next**
 - [ ] P1.4 — Drizzle schema + `@folio/db` wrappers
 - [ ] P1.5 — `@folio/ui` shadcn init
 - [ ] P1.6 — CI

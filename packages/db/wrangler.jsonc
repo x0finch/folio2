@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "folio-db",
+  "compatibility_date": "2025-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  // 仅供本包的 migration 落地与 Vitest(Miniflare D1)用;@folio/db 不是部署单元。
+  // database_id 为占位符,本地 apply 按 database_name 走 Miniflare;真实 id 部署时填(P6.6)。
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "folio",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "drizzle"
+    }
+  ]
+}
