@@ -21,6 +21,8 @@
 9. **Prefer mature, vetted libraries** — before each phase ask if a widely-adopted lib/standard exists (signing, BIP32, crypto, dates, decimals — don't hand-roll). A library must pass 4 gates or be rejected: ① runs on CF Workers (no Node-native deps, reasonable size); ② actively maintained, no known severe CVEs; ③ complexity matches payoff; ④ no conflicting transitive deps. Record the choice (what/why/rejected) in the commit or here.
 10. **kebab-case filenames; exports keep their own convention** — files/dirs lowercase-hyphenated (`balance-table.tsx`, `create-account.ts`), decoupled from export names. Exports: React components PascalCase, functions/vars camelCase, types/interfaces PascalCase, constants UPPER_SNAKE.
 11. **UI = shadcn design system only** — colors/spacing/radius/fonts via shadcn design tokens (CSS vars: `bg-background`, `text-foreground`, `border-border`, …). No hardcoded color values, no arbitrary-value classes (`bg-[#...]`, `p-[13px]`), no editing component internals. New visuals = compose existing shadcn components or adjust theme tokens.
+    - **Base components are added via `shadcn add`, never hand-written.** Run `pnpm dlx shadcn@latest add <comp>` (monorepo-aware: primitives land in `@folio/ui`, blocks in `apps/web`) and export from `@folio/ui/src/index.ts`. Only **app-level compositions** (`apps/web/src/components/`) are authored by hand, by composing `@folio/ui` primitives. Do not transcribe shadcn source manually.
+    - **Vendored shadcn components are not unit-tested** (they're upstream-maintained source). Validate the integration instead — the apps/web build must emit their utility classes (cross-package `@source`). Write tests for our own logic (app compositions, hooks), not for `@folio/ui` primitives.
 12. **Small commits** — commit each acceptance-worthy unit; message ties contract/test/impl together.
 
 ## Package conventions (monorepo)
@@ -55,7 +57,8 @@
 - [x] **P1.2 — core contracts** (`packages/core`: `types.ts`, `provider.ts`, `registry.ts`, `errors.ts`, `index.ts` + tests). Contracts only; registry auto-assembles by `accountType`; multi-type via factory (方案 A).
 - [x] **P1.3 — credential crypto** (`@folio/core/crypto.ts`: Web Crypto AES-GCM `encrypt`/`decrypt`, random 12B IV, `generateSecret`, `CryptoError`; key passed in by caller, never reads env; zero deps). Tests: round-trip/IV-randomness/wrong-key/tamper/invalid-key.
 - [x] **P1.4 — Drizzle schema + `@folio/db`** (`schema.ts` business tables + indexes/cascade FKs; `getDb` private; `queries.ts` userId-scoped wrapped ops + `writeSnapshot` via `db.batch`; `index.ts` leaks no db/schema). Migrations in `drizzle/` (`drizzle-kit generate` → `wrangler d1 migrations apply`). Tests via `@cloudflare/vitest-pool-workers` (Miniflare D1): CRUD/M2M/cascade/isolation/encapsulation. **Deferred to P2.1**: better-auth tables, `userId→user` FK, `createAuthAdapter`. db stays crypto-agnostic (opaque ciphertext).
-- [ ] **P1.5 — `@folio/ui` shadcn init** (shadcn components.json + Tailwind v4 + named re-exports; consumable by apps/web) ← **next**
+- [x] **P1.5 — `@folio/ui` shadcn + Tailwind v4** (`globals.css` owns Tailwind entry + theme tokens; `cn` + `Button` added via `shadcn add`; named re-exports; `components.json` ×2 drive the CLI). apps/web `styles.css` collapses to `@import "@folio/ui/globals.css"` + `@source`. Vendored shadcn components are not unit-tested; rendering verified by the apps/web build emitting their utility classes (cross-package `@source` works → not unstyled).
+- [ ] **P1.6 — CI** (GitHub Actions: install → lint? → typecheck → test on push/PR) ← **next**
 - [ ] P1.4 — Drizzle schema + `@folio/db` wrappers
 - [ ] P1.5 — `@folio/ui` shadcn init
 - [ ] P1.6 — CI

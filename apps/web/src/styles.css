@@ -1,5 +1,9 @@
+/* @folio/ui 拥有 Tailwind 入口 + 主题令牌(@import "tailwindcss" 在该文件内)。
+   这里只做一次引入,避免重复 import tailwindcss。 */
+@import "@folio/ui/globals.css";
 
-@import "tailwindcss";
+/* 显式扫描本应用源码(Tailwind 入口在 @folio/ui,故此处补声明 app 自身的 class 来源)。 */
+@source "./**/*.{ts,tsx}";
 
 * {
   box-sizing: border-box;
@@ -14,4 +18,3 @@ body,
 body {
   margin: 0;
 }
-
