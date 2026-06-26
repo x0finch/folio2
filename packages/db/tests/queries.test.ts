@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   addAccountToGroup,
@@ -17,19 +18,31 @@ import {
   removeAccountFromGroup,
   writeSnapshot,
 } from "../src";
+// 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
+import { user } from "../src/auth-schema";
+import { getDb } from "../src/client";
 
 const USER_A = "user-a";
 const USER_B = "user-b";
 
-// pool-workers 此版本不隔离每个测试的存储,故每个测试前用公共 API 清空(删账户级联快照/配对)。
-async function clearUser(userId: string): Promise<void> {
-  for (const a of await listAccountsByUser(env, userId)) await deleteAccount(env, userId, a.id);
-  for (const g of await listGroupsByUser(env, userId)) await deleteGroup(env, userId, g.id);
+// pool-workers 此版本不隔离每个测试的存储。每个测试前重置:删 user 行(级联清掉其
+// accounts/groups/snapshots/...),再插入干净的 user 行(满足业务表的 userId 外键)。
+async function resetUser(userId: string): Promise<void> {
+  const db = getDb(env);
+  await db.delete(user).where(eq(user.id, userId));
+  await db.insert(user).values({
+    id: userId,
+    name: userId,
+    email: `${userId}@example.com`,
+    emailVerified: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 }
 
 beforeEach(async () => {
-  await clearUser(USER_A);
-  await clearUser(USER_B);
+  await resetUser(USER_A);
+  await resetUser(USER_B);
 });
 
 describe("accounts", () => {

@@ -10,6 +10,7 @@
     "includes": [
       "**",
       "!**/routeTree.gen.ts",
+      "!**/worker-configuration.d.ts",
       "!packages/db/drizzle",
       "!packages/ui/src/components",
       "!packages/ui/src/styles",

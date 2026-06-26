@@ -1,14 +1,18 @@
 import type { AccountType, BalanceKind } from "@folio/core";
 import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { user } from "./auth-schema";
 
-// 注:用户/会话表(user/session/...)由 better-auth 在 P2.1 生成并管理,不在此手写。
-// 业务表的 userId 暂存为 text(P2.1 再加指向 user.id 的外键);业务表之间的外键此处即启用。
+// 身份表(user/session/account/verification)定义在 ./auth-schema(better-auth,P2.1)。
+// 此处再导出,让 drizzle-kit 把它们一并纳入迁移。业务表的 userId 为指向 user.id 的真外键。
+export * from "./auth-schema";
 
 export const groups = sqliteTable(
   "groups",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
   },
@@ -19,7 +23,9 @@ export const accounts = sqliteTable(
   "accounts",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
     type: text("type").$type<AccountType>().notNull(),
     network: text("network"),
     label: text("label").notNull(),
