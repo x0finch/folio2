@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { BalanceProvider } from "../src/provider";
 import { buildRegistry, getProvider } from "../src/registry";
 import type { AccountType, Balance } from "../src/types";
-import type { BalanceProvider } from "../src/provider";
 
 function fakeProvider(type: AccountType): BalanceProvider {
   return {
@@ -35,7 +35,10 @@ describe("buildRegistry", () => {
         validate: async () => true,
       };
     }
-    const coinstats = [makeCoinstats("onchain_sui", "sui"), makeCoinstats("onchain_cosmos", "cosmos")];
+    const coinstats = [
+      makeCoinstats("onchain_sui", "sui"),
+      makeCoinstats("onchain_cosmos", "cosmos"),
+    ];
     // sync 摊平后传入(有的包 1 个、有的多个)。
     const reg = buildRegistry([fakeProvider("onchain_evm"), ...coinstats]);
     expect(reg.onchain_evm).toBeDefined();

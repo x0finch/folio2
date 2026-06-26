@@ -1,5 +1,5 @@
-import { defineConfig } from "vitest/config";
 import viteReact from "@vitejs/plugin-react";
+import { defineConfig } from "vitest/config";
 
 // Dedicated Vitest config so tests don't load the Cloudflare/SSR plugin chain
 // from vite.config.ts (that runtime is for the built worker, not unit tests).

@@ -1,5 +1,5 @@
-import type { AccountType } from "./types";
 import type { BalanceProvider } from "./provider";
+import type { AccountType } from "./types";
 
 // type → provider 的查找,取代 Account.provider 字段。编排层不读 account.provider,
 // 而是拿 account.type 来这里查实现。

@@ -1,5 +1,5 @@
-import { sqliteTable, text, integer, real, primaryKey, index } from "drizzle-orm/sqlite-core";
 import type { AccountType, BalanceKind } from "@folio/core";
+import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // 注:用户/会话表(user/session/...)由 better-auth 在 P2.1 生成并管理,不在此手写。
 // 业务表的 userId 暂存为 text(P2.1 再加指向 user.id 的外键);业务表之间的外键此处即启用。

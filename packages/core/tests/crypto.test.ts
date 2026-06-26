@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { encrypt, decrypt, generateSecret, CryptoError } from "../src/crypto";
+import { describe, expect, it } from "vitest";
+import { CryptoError, decrypt, encrypt, generateSecret } from "../src/crypto";
 
 const KEY = generateSecret();
 

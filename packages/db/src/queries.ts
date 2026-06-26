@@ -1,7 +1,7 @@
-import { and, desc, eq, getTableColumns } from "drizzle-orm";
 import type { AccountType, BalanceKind } from "@folio/core";
-import { getDb, type Db, type DbEnv } from "./client";
-import { accounts, groups, accountGroups, snapshots, snapshotBalances } from "./schema";
+import { and, desc, eq, getTableColumns } from "drizzle-orm";
+import { type Db, type DbEnv, getDb } from "./client";
+import { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
 
 // 安全列:不含 encCredentials,常规查询一律走这组列。
@@ -122,7 +122,9 @@ export function listGroupsByUser(env: DbEnv, userId: string): Promise<Group[]> {
 
 /** 删组:只删该组及其 accountGroups 配对(账户本身不动)。 */
 export async function deleteGroup(env: DbEnv, userId: string, id: string): Promise<void> {
-  await getDb(env).delete(groups).where(and(eq(groups.id, id), eq(groups.userId, userId)));
+  await getDb(env)
+    .delete(groups)
+    .where(and(eq(groups.id, id), eq(groups.userId, userId)));
 }
 
 // ---------- 账户↔组 多对多 ----------

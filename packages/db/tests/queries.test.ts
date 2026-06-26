@@ -1,21 +1,21 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  addAccountToGroup,
   createAccount,
-  listAccountsByUser,
+  createGroup,
+  deleteAccount,
+  deleteGroup,
   getAccountById,
   getEncryptedCredentials,
-  deleteAccount,
-  createGroup,
-  listGroupsByUser,
-  deleteGroup,
-  addAccountToGroup,
-  removeAccountFromGroup,
-  listGroupsByAccount,
-  listAccountsByGroup,
-  writeSnapshot,
-  listSnapshotsByAccount,
   getLatestSnapshotByUser,
+  listAccountsByGroup,
+  listAccountsByUser,
+  listGroupsByAccount,
+  listGroupsByUser,
+  listSnapshotsByAccount,
+  removeAccountFromGroup,
+  writeSnapshot,
 } from "../src";
 
 const USER_A = "user-a";
@@ -66,7 +66,11 @@ describe("accounts", () => {
 
 describe("groups & many-to-many membership", () => {
   it("adds/removes membership idempotently and queries both directions", async () => {
-    const acc = await createAccount(env, USER_A, { type: "manual", label: "A", encCredentials: "x" });
+    const acc = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A",
+      encCredentials: "x",
+    });
     const g1 = await createGroup(env, USER_A, { name: "G1" });
     const g2 = await createGroup(env, USER_A, { name: "G2", sortOrder: 1 });
 
@@ -82,7 +86,11 @@ describe("groups & many-to-many membership", () => {
   });
 
   it("deleteGroup removes only the pairings, keeps the account", async () => {
-    const acc = await createAccount(env, USER_A, { type: "manual", label: "A", encCredentials: "x" });
+    const acc = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A",
+      encCredentials: "x",
+    });
     const g = await createGroup(env, USER_A, { name: "G" });
     await addAccountToGroup(env, USER_A, acc.id, g.id);
 
@@ -94,13 +102,24 @@ describe("groups & many-to-many membership", () => {
 
 describe("snapshots", () => {
   it("writes snapshot + balances atomically and reads them back", async () => {
-    const acc = await createAccount(env, USER_A, { type: "manual", label: "A", encCredentials: "x" });
+    const acc = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A",
+      encCredentials: "x",
+    });
     const id = await writeSnapshot(env, USER_A, acc.id, {
       takenAt: 1000,
       totalUsd: 150,
       balances: [
         { symbol: "BTC", amount: 0.001, usdValue: 100, kind: "spot", source: "manual" },
-        { symbol: "ETH", amount: 0.02, usdValue: 50, kind: "spot", source: "manual", meta: { note: "x" } },
+        {
+          symbol: "ETH",
+          amount: 0.02,
+          usdValue: 50,
+          kind: "spot",
+          source: "manual",
+          meta: { note: "x" },
+        },
       ],
     });
     expect(id).toBeTruthy();
@@ -116,7 +135,11 @@ describe("snapshots", () => {
   });
 
   it("cascades snapshots and pairings when the account is deleted", async () => {
-    const acc = await createAccount(env, USER_A, { type: "manual", label: "A", encCredentials: "x" });
+    const acc = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A",
+      encCredentials: "x",
+    });
     const g = await createGroup(env, USER_A, { name: "G" });
     await addAccountToGroup(env, USER_A, acc.id, g.id);
     await writeSnapshot(env, USER_A, acc.id, {

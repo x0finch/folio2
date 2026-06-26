@@ -1,5 +1,5 @@
-import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
-import type { accounts, groups, snapshots, snapshotBalances, accountGroups } from "./schema";
+import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import type { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
 
 export type Account = InferSelectModel<typeof accounts>;
 export type NewAccount = InferInsertModel<typeof accounts>;
