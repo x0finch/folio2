@@ -15,3 +15,5 @@ export { buildRegistry, getProvider } from "./registry";
 
 export type { ProviderErrorCode, ProviderErrorOptions } from "./errors";
 export { ProviderError } from "./errors";
+
+export { encrypt, decrypt, generateSecret, CryptoError } from "./crypto";

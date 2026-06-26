@@ -50,7 +50,8 @@
 
 - [x] **P1.1 — monorepo skeleton** (workspace shell + `apps/web` + base configs + this file). Packages created on-demand thereafter.
 - [x] **P1.2 — core contracts** (`packages/core`: `types.ts`, `provider.ts`, `registry.ts`, `errors.ts`, `index.ts` + tests). Contracts only; registry auto-assembles by `accountType`; multi-type via factory (方案 A).
-- [ ] **P1.3 — credential crypto** (`@folio/core/crypto.ts`: AES-GCM via Web Crypto, key from env; round-trip + IV-randomness tests) ← **next**
+- [x] **P1.3 — credential crypto** (`@folio/core/crypto.ts`: Web Crypto AES-GCM `encrypt`/`decrypt`, random 12B IV, `generateSecret`, `CryptoError`; key passed in by caller, never reads env; zero deps). Tests: round-trip/IV-randomness/wrong-key/tamper/invalid-key.
+- [ ] **P1.4 — Drizzle schema + `@folio/db`** (schema, userId-scoped wrapped queries, `getDb` private, migrations; D1 binding in wrangler.jsonc) ← **next**
 - [ ] P1.4 — Drizzle schema + `@folio/db` wrappers
 - [ ] P1.5 — `@folio/ui` shadcn init
 - [ ] P1.6 — CI
