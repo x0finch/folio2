@@ -17,6 +17,7 @@
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.26.0",
     "@folio/db": "workspace:*",
+    "@folio/sync": "workspace:*",
     "@folio/ui": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",

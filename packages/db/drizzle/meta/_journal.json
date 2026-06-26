@@ -15,6 +15,13 @@
       "when": 1782465769098,
       "tag": "0001_classy_amphibian",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782500615954,
+      "tag": "0002_certain_zarek",
+      "breakpoints": true
     }
   ]
 }

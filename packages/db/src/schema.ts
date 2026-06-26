@@ -30,6 +30,7 @@ export const accounts = sqliteTable(
     network: text("network"),
     label: text("label").notNull(),
     encCredentials: text("enc_credentials").notNull(), // AES-GCM 密文 blob,db 不解释内容
+    dataJson: text("data_json"), // 非密钥账户数据(manual 持仓)的【明文】JSON,可空;db 不解释内容(见 arch §3)
     createdAt: integer("created_at").notNull(), // epoch ms
   },
   (t) => [index("accounts_user_id_idx").on(t.userId)],

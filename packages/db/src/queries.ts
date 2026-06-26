@@ -4,13 +4,15 @@ import { type Db, type DbEnv, getDb } from "./client";
 import { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
 
-// 安全列:不含 encCredentials,常规查询一律走这组列。
+// 安全列:不含密文 encCredentials,常规查询一律走这组列。
+// dataJson 非密钥(明文持仓),随安全形状一并返回,供 sync 组装 FetchContext。
 const accountSafeColumns = {
   id: accounts.id,
   userId: accounts.userId,
   type: accounts.type,
   network: accounts.network,
   label: accounts.label,
+  dataJson: accounts.dataJson,
   createdAt: accounts.createdAt,
 };
 
@@ -38,6 +40,7 @@ export interface CreateAccountInput {
   network?: string;
   label: string;
   encCredentials: string; // 调用方传入的密文 blob(db 不加密、不解释)
+  dataJson?: string; // 非密钥账户数据的明文 JSON(manual 持仓),可空;db 不解释
 }
 
 export async function createAccount(
@@ -49,6 +52,7 @@ export async function createAccount(
   const id = crypto.randomUUID();
   const createdAt = Date.now();
   const network = input.network ?? null;
+  const dataJson = input.dataJson ?? null;
   await db.insert(accounts).values({
     id,
     userId,
@@ -56,9 +60,10 @@ export async function createAccount(
     network,
     label: input.label,
     encCredentials: input.encCredentials,
+    dataJson,
     createdAt,
   });
-  return { id, userId, type: input.type, network, label: input.label, createdAt };
+  return { id, userId, type: input.type, network, label: input.label, dataJson, createdAt };
 }
 
 export function listAccountsByUser(env: DbEnv, userId: string): Promise<AccountSafe[]> {
