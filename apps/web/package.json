@@ -16,7 +16,9 @@
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.26.0",
+    "@folio/core": "workspace:*",
     "@folio/db": "workspace:*",
+    "@folio/provider-custom": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/ui": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",

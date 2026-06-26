@@ -1,39 +1,27 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { resolveAuth } from "../src/lib/auth-session";
 
-// mock ./auth(避免加载 cloudflare:workers)与 server headers 工具。
-const getSession = vi.fn();
-vi.mock("../src/lib/auth", () => ({ getAuth: () => ({ api: { getSession } }) }));
-vi.mock("@tanstack/react-start/server", () => ({
-  getRequestHeaders: () => ({ cookie: "test" }),
-}));
-
-// 在 mock 之后导入被测模块。
-import { resolveAuth } from "../src/lib/require-auth";
-
-beforeEach(() => {
-  vi.clearAllMocks();
-});
-
+// resolveAuth 现是纯校验函数(取 session 由 requireAuth 的 .server() 完成)。
+// 测两条安全属性:无 session → 401;userId 只来自已验证 session。
 describe("resolveAuth (session guard)", () => {
-  it("rejects with 401 when there is no session", async () => {
-    getSession.mockResolvedValue(null);
-    await expect(resolveAuth()).rejects.toMatchObject({ status: 401 });
+  it("throws a 401 Response when there is no session", () => {
+    let caught: unknown;
+    try {
+      resolveAuth(null);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Response);
+    expect((caught as Response).status).toBe(401);
   });
 
-  it("derives userId only from the validated session", async () => {
-    getSession.mockResolvedValue({
+  it("derives userId only from the validated session", () => {
+    const ctx = resolveAuth({
       user: { id: "u1", email: "a@b.com" },
       session: { id: "s1", userId: "u1" },
     });
-    const ctx = await resolveAuth();
     expect(ctx.userId).toBe("u1");
     expect(ctx.user.id).toBe("u1");
     expect(ctx.session.id).toBe("s1");
-  });
-
-  it("forwards the headers from getRequestHeaders to getSession", async () => {
-    getSession.mockResolvedValue({ user: { id: "u1" }, session: { id: "s1" } });
-    await resolveAuth();
-    expect(getSession).toHaveBeenCalledWith({ headers: { cookie: "test" } });
   });
 });
