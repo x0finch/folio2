@@ -16,7 +16,8 @@ export const triggerSync = createServerFn({ method: "POST" })
         getEncryptedCredentials(env, userId, accountId),
       writeSnapshot: (userId, accountId, input) => writeSnapshot(env, userId, accountId, input),
       secretsKey: env.SECRETS_KEY,
-      globalKeys: {}, // provider 全局 key(ZERION_API_KEY 等)M3+ 接入,manual 无需
+      // provider 全局 key:zerion 等链上源用;manual 无需。逐个 provider 接入时累加。
+      globalKeys: { ZERION_API_KEY: env.ZERION_API_KEY },
     };
     return syncUser(deps, context.userId);
   });
