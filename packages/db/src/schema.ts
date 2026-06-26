@@ -19,6 +19,9 @@ export const groups = sqliteTable(
   (t) => [index("groups_user_id_idx").on(t.userId)],
 );
 
+// 业务账户:被追踪的余额来源(钱包 / CEX / 永续 / manual),由 type 决定派哪个 provider。
+// ⚠️ 勿与 auth-schema.ts 的 `account`(better-auth 的登录方式链接表)混淆——只是单复数相近,
+//    语义完全不同:这张是「资产账户」,那张是「认证」。
 export const accounts = sqliteTable(
   "accounts",
   {

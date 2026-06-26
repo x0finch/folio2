@@ -29,6 +29,11 @@ export const session = sqliteTable("session", {
     .references(() => user.id, { onDelete: "cascade" }),
 });
 
+// better-auth 拥有的「登录方式链接」表(每个用户每种登录方式一行):
+// email+password 在此存凭据(`password` 哈希 / providerId="credential"),OAuth 存第三方
+// provider 账号链接(accessToken 等)。表名 `account` 是 better-auth 约定,勿改。
+// ⚠️ 与业务表 `accounts`(schema.ts,被追踪的余额来源:钱包/CEX/manual)**完全无关**,
+//    只是单复数相近,别混淆:这张是「认证」,那张是「资产账户」。
 export const account = sqliteTable("account", {
   id: text("id").primaryKey(),
   accountId: text("account_id").notNull(),
