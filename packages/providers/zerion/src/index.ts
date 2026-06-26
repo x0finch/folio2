@@ -101,6 +101,7 @@ function getApiKey(ctx: FetchContext): string {
 
 export const zerionProvider: BalanceProvider = {
   accountType: "onchain_evm",
+  usesGlobalKeys: [ZERION_API_KEY], // 最小权限:只下发这个 key 给本 provider
 
   async fetchBalances(ctx: FetchContext): Promise<Balance[]> {
     const address = getAddress(ctx);

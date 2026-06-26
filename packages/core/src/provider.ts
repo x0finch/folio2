@@ -18,10 +18,12 @@ export type CredentialFlags = {
 
 // provider 拉取/校验时拿到的账户上下文。account.data 为类型相关数据的单一事实源
 // (manual 的持仓即在此),creds 为解密后的密钥,globalKeys 为服务端全局 key。
+// 注:globalKeys 已按本 provider 的 usesGlobalKeys 收窄——只含它声明用到的那几个,
+// 而非整张表(最小权限,见 BalanceProvider.usesGlobalKeys)。
 export interface FetchContext {
   account: Account;
   creds: ProviderCredentials;
-  globalKeys: Record<string, string>; // ZERION_API_KEY 等服务端全局 key
+  globalKeys: Record<string, string>; // 仅本 provider 声明用到的全局 key(已收窄)
 }
 
 export interface BalanceProvider {
@@ -30,6 +32,10 @@ export interface BalanceProvider {
   // 一个数据源若服务多个 type(如 coinstats),用工厂导出多个 BalanceProvider 对象、
   // 各绑定一个 type(共享内部实现),由 sync 摊平后传入 buildRegistry。
   readonly accountType: AccountType;
+  // 本 provider 用到的服务端全局 key 名(如 ["ZERION_API_KEY"])。编排层据此把
+  // FetchContext.globalKeys 收窄到这个子集——provider 只拿得到声明过的 key,拿不到别家的
+  // (最小权限)。缺失某个 key 是否致命,由 provider 自己判断(可必需、可选填降级)。默认无。
+  readonly usesGlobalKeys?: readonly string[];
   /** 拉取该账户当前全部余额。失败抛 ProviderError。 */
   fetchBalances(ctx: FetchContext): Promise<Balance[]>;
   /** 校验账户上下文是否可用,加账户时调用。 */

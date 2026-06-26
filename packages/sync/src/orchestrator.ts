@@ -44,6 +44,18 @@ export async function runAccountSync(
   return { balances, totalUsd };
 }
 
+// 把整张全局 key 表收窄到 provider 声明用到的子集(env 里存在的才下发)。
+function scopeGlobalKeys(
+  all: Record<string, string>,
+  names: readonly string[] = [],
+): Record<string, string> {
+  const scoped: Record<string, string> = {};
+  for (const name of names) {
+    if (name in all) scoped[name] = all[name];
+  }
+  return scoped;
+}
+
 // 单账户同步,整段 try/catch:失败返回 ok:false,绝不抛(隔离,不阻断其他账户)。
 export async function syncAccount(
   deps: SyncDeps,
@@ -52,6 +64,7 @@ export async function syncAccount(
 ): Promise<AccountSyncResult> {
   const registry = deps.registry ?? appRegistry;
   try {
+    const provider = getProvider(registry, account.type);
     const encCreds = await deps.getEncryptedCredentials(userId, account.id);
     // 密钥只在此刻解密,用完即弃。manual 账户密文是加密的 {}(无密钥)。
     const creds = encCreds ? JSON.parse(await decrypt(encCreds, deps.secretsKey)) : {};
@@ -65,7 +78,9 @@ export async function syncAccount(
       label: account.label,
       data,
     };
-    const ctx: FetchContext = { account: acc, creds, globalKeys: deps.globalKeys };
+    // 最小权限:只把本 provider 声明用到的全局 key 下发,拿不到别家的(见 BalanceProvider.usesGlobalKeys)。
+    const globalKeys = scopeGlobalKeys(deps.globalKeys, provider.usesGlobalKeys);
+    const ctx: FetchContext = { account: acc, creds, globalKeys };
     const { balances, totalUsd } = await runAccountSync(registry, ctx);
     const snapshotId = await deps.writeSnapshot(userId, account.id, {
       takenAt: Date.now(),

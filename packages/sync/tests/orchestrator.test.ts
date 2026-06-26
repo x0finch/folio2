@@ -135,3 +135,52 @@ describe("runAccountSync — 求和与空持仓", () => {
     expect(writes[0].input.totalUsd).toBe(0);
   });
 });
+
+describe("syncAccount — 全局 key 最小权限下发", () => {
+  it("provider 只拿到 usesGlobalKeys 声明的 key,拿不到别家的", async () => {
+    let seen: Record<string, string> | undefined;
+    // 声明只用 ZERION_API_KEY 的捕获式假 provider。
+    const capturing: BalanceProvider = {
+      accountType: "onchain_evm",
+      usesGlobalKeys: ["ZERION_API_KEY"],
+      fetchBalances: async (ctx) => {
+        seen = ctx.globalKeys;
+        return [];
+      },
+      validate: async () => true,
+    };
+    const registry = buildRegistry([capturing]);
+    const account = manualAccount({ id: "evm", type: "onchain_evm", dataJson: null });
+    const { deps } = makeDeps([account], {
+      registry,
+      globalKeys: { ZERION_API_KEY: "zk", OTHER_KEY: "secret" },
+    });
+
+    await syncUser(deps, "u1");
+
+    expect(seen).toEqual({ ZERION_API_KEY: "zk" });
+    expect(seen).not.toHaveProperty("OTHER_KEY");
+  });
+
+  it("未声明 usesGlobalKeys 的 provider 拿到空对象", async () => {
+    let seen: Record<string, string> | undefined;
+    const noKeys: BalanceProvider = {
+      accountType: "onchain_evm",
+      fetchBalances: async (ctx) => {
+        seen = ctx.globalKeys;
+        return [];
+      },
+      validate: async () => true,
+    };
+    const registry = buildRegistry([noKeys]);
+    const account = manualAccount({ id: "evm", type: "onchain_evm", dataJson: null });
+    const { deps } = makeDeps([account], {
+      registry,
+      globalKeys: { ZERION_API_KEY: "zk", OTHER_KEY: "secret" },
+    });
+
+    await syncUser(deps, "u1");
+
+    expect(seen).toEqual({});
+  });
+});

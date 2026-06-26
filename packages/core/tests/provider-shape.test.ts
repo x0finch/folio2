@@ -21,8 +21,23 @@ describe("BalanceProvider shape", () => {
       globalKeys: {},
     };
     expect(stub.accountType).toBe("manual");
+    expect(stub.usesGlobalKeys).toBeUndefined(); // 可选,默认无(不需要任何全局 key)
     expect(await stub.fetchBalances(ctx)).toEqual([]);
     expect(await stub.validate(ctx)).toBe(true);
+  });
+
+  it("can declare usesGlobalKeys (least-privilege scope of global keys)", () => {
+    const scoped: BalanceProvider = {
+      accountType: "onchain_evm",
+      usesGlobalKeys: ["ZERION_API_KEY"],
+      async fetchBalances() {
+        return [];
+      },
+      async validate() {
+        return true;
+      },
+    };
+    expect(scoped.usesGlobalKeys).toEqual(["ZERION_API_KEY"]);
   });
 
   it("derives has* flags from ProviderCredentials (编译期 + 运行期)", () => {
