@@ -58,8 +58,6 @@
 - [x] **P1.3 — credential crypto** (`@folio/core/crypto.ts`: Web Crypto AES-GCM `encrypt`/`decrypt`, random 12B IV, `generateSecret`, `CryptoError`; key passed in by caller, never reads env; zero deps). Tests: round-trip/IV-randomness/wrong-key/tamper/invalid-key.
 - [x] **P1.4 — Drizzle schema + `@folio/db`** (`schema.ts` business tables + indexes/cascade FKs; `getDb` private; `queries.ts` userId-scoped wrapped ops + `writeSnapshot` via `db.batch`; `index.ts` leaks no db/schema). Migrations in `drizzle/` (`drizzle-kit generate` → `wrangler d1 migrations apply`). Tests via `@cloudflare/vitest-pool-workers` (Miniflare D1): CRUD/M2M/cascade/isolation/encapsulation. **Deferred to P2.1**: better-auth tables, `userId→user` FK, `createAuthAdapter`. db stays crypto-agnostic (opaque ciphertext).
 - [x] **P1.5 — `@folio/ui` shadcn + Tailwind v4** (`globals.css` owns Tailwind entry + theme tokens; `cn` + `Button` added via `shadcn add`; named re-exports; `components.json` ×2 drive the CLI). apps/web `styles.css` collapses to `@import "@folio/ui/globals.css"` + `@source`. Vendored shadcn components are not unit-tested; rendering verified by the apps/web build emitting their utility classes (cross-package `@source` works → not unstyled).
-- [ ] **P1.6 — CI** (GitHub Actions: install → lint? → typecheck → test on push/PR) ← **next**
-- [ ] P1.4 — Drizzle schema + `@folio/db` wrappers
-- [ ] P1.5 — `@folio/ui` shadcn init
-- [ ] P1.6 — CI
-- [ ] M2+ — auth, manual provider, sync, UI loop, on-chain, CEX, perp, polish (see arch-design.md §9)
+- [x] **P1.6 — CI** (`.github/workflows/ci.yml`: push(main)/PR → pnpm install --frozen-lockfile → typecheck → test → build; pnpm via `packageManager`, Node 22, store cache. No lint yet — no linter configured). **M1 complete.**
+- [ ] **M2 — minimal loop** (P2.1 better-auth + CF gotchas, P2.2 session guard/isolation, P2.3 manual provider, P2.4 sync orchestrator, P2.5 minimal UI loop) ← **next**
+- [ ] M3+ — on-chain (zerion/coinstats), CEX, perp, polish (see arch-design.md §9)
