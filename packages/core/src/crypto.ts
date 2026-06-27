@@ -78,3 +78,29 @@ export async function decrypt(payload: string, secret: string): Promise<string> 
 export function generateSecret(): string {
   return bytesToBase64(crypto.getRandomValues(new Uint8Array(KEY_BYTES)));
 }
+
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * HMAC-SHA256 签名(Web Crypto,零依赖)。CEX 请求签名公用件:binance 用 hex、okx 用 base64,
+ * 后续交易所复用同一原语。纯函数 → 可对参考实现(openssl dgst -sha256 -hmac)做 golden。
+ */
+export async function hmacSha256(
+  secret: string,
+  message: string,
+  encoding: "hex" | "base64",
+): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = new Uint8Array(
+    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)),
+  );
+  return encoding === "hex" ? bytesToHex(sig) : bytesToBase64(sig);
+}

@@ -2,6 +2,7 @@ import {
   type Balance,
   type BalanceProvider,
   type FetchContext,
+  hmacSha256,
   ProviderError,
   parseRetryAfter,
 } from "@folio/core";
@@ -14,7 +15,6 @@ import {
   STABLECOINS,
   TICKER_PRICE_PATH,
 } from "./constants";
-import { hmacSha256Hex } from "./sign";
 
 // @folio/provider-binance —— 第一个 CEX(exchange_binance),立 HMAC 只读签名模板。
 // 每账户密钥(apiKey/secret)走 ctx.creds(加密入库),不是全局 key → 不声明 usesGlobalKeys。
@@ -100,7 +100,7 @@ async function signedGet(
   apiKey: string,
   secret: string,
 ): Promise<Response> {
-  const signature = await hmacSha256Hex(secret, query);
+  const signature = await hmacSha256(secret, query, "hex");
   return binanceFetch(`${path}?${query}&signature=${signature}`, apiKey);
 }
 

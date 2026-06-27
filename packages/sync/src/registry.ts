@@ -2,6 +2,7 @@ import { buildRegistry } from "@folio/core";
 import { providers as binanceProviders } from "@folio/provider-binance";
 import { providers as coinstatsProviders } from "@folio/provider-coinstats";
 import { providers as customProviders } from "@folio/provider-custom";
+import { providers as okxProviders } from "@folio/provider-okx";
 import { providers as zerionProviders } from "@folio/provider-zerion";
 
 // 应用级 provider 装配(方案 A 摊平):收集各 provider 包导出的 providers,
@@ -12,5 +13,6 @@ export const appProviders = [
   ...zerionProviders,
   ...coinstatsProviders,
   ...binanceProviders,
+  ...okxProviders,
 ];
 export const appRegistry = buildRegistry(appProviders);

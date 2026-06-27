@@ -17,6 +17,7 @@
     "@folio/provider-binance": "workspace:*",
     "@folio/provider-coinstats": "workspace:*",
     "@folio/provider-custom": "workspace:*",
+    "@folio/provider-okx": "workspace:*",
     "@folio/provider-zerion": "workspace:*"
   },
   "devDependencies": {
