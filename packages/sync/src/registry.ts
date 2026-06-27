@@ -2,6 +2,7 @@ import { buildRegistry } from "@folio/core";
 import { providers as binanceProviders } from "@folio/provider-binance";
 import { providers as coinstatsProviders } from "@folio/provider-coinstats";
 import { providers as customProviders } from "@folio/provider-custom";
+import { providers as hyperliquidProviders } from "@folio/provider-hyperliquid";
 import { providers as okxProviders } from "@folio/provider-okx";
 import { providers as zerionProviders } from "@folio/provider-zerion";
 
@@ -14,5 +15,6 @@ export const appProviders = [
   ...coinstatsProviders,
   ...binanceProviders,
   ...okxProviders,
+  ...hyperliquidProviders,
 ];
 export const appRegistry = buildRegistry(appProviders);
