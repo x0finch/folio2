@@ -9,6 +9,15 @@ export {
   CardHeader,
   CardTitle,
 } from "./components/card";
+export {
+  type ChartConfig,
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartStyle,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "./components/chart";
 export { Input } from "./components/input";
 export { Label } from "./components/label";
 export {

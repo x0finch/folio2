@@ -1,5 +1,5 @@
 import type { AccountType, BalanceKind } from "@folio/core";
-import { and, desc, eq, getTableColumns, inArray, max } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, max } from "drizzle-orm";
 import { type Db, type DbEnv, getDb } from "./client";
 import { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
@@ -260,6 +260,27 @@ export async function listSnapshotsByAccount(
     .from(snapshots)
     .where(eq(snapshots.accountId, accountId))
     .orderBy(desc(snapshots.takenAt));
+}
+
+// 历史曲线数据源:该用户全部快照的 (accountId, takenAt, totalUsd),按 takenAt 升序。
+// 只取这三列、不取 balances(比 getLatestSnapshotByUser 轻);组合净值时间序列在纯函数里
+// 阶梯式重建(见 apps/web buildPortfolioHistory)。
+export interface SnapshotTotal {
+  accountId: string;
+  takenAt: number;
+  totalUsd: number;
+}
+export function listSnapshotTotalsByUser(env: DbEnv, userId: string): Promise<SnapshotTotal[]> {
+  return getDb(env)
+    .select({
+      accountId: snapshots.accountId,
+      takenAt: snapshots.takenAt,
+      totalUsd: snapshots.totalUsd,
+    })
+    .from(snapshots)
+    .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+    .where(eq(accounts.userId, userId))
+    .orderBy(asc(snapshots.takenAt));
 }
 
 /**

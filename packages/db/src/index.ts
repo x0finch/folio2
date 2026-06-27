@@ -8,6 +8,7 @@ export type {
   CreateAccountInput,
   CreateGroupInput,
   SnapshotBalanceInput,
+  SnapshotTotal,
   SnapshotWithBalances,
   WriteSnapshotInput,
 } from "./queries";
@@ -25,6 +26,7 @@ export {
   listGroupsByAccount,
   listGroupsByUser,
   listSnapshotsByAccount,
+  listSnapshotTotalsByUser,
   removeAccountFromGroup,
   writeSnapshot,
 } from "./queries";

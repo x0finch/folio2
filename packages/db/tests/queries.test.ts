@@ -15,6 +15,7 @@ import {
   listGroupsByAccount,
   listGroupsByUser,
   listSnapshotsByAccount,
+  listSnapshotTotalsByUser,
   removeAccountFromGroup,
   writeSnapshot,
 } from "../src";
@@ -238,6 +239,39 @@ describe("snapshots", () => {
     expect(await listGroupsByUser(env, USER_A)).toHaveLength(1); // group kept
     expect(await listAccountsByGroup(env, USER_A, g.id)).toHaveLength(0); // pairing gone
     expect(await getLatestSnapshotByUser(env, USER_A)).toHaveLength(0); // snapshots gone
+  });
+
+  it("lists all snapshot totals for a user, ascending by takenAt, scoped to the user", async () => {
+    const a1 = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A1",
+      encCredentials: "x",
+    });
+    const a2 = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A2",
+      encCredentials: "x",
+    });
+    const b1 = await createAccount(env, USER_B, {
+      type: "manual",
+      label: "B1",
+      encCredentials: "x",
+    });
+    // 跨账户、错时写入(乱序),验证升序返回。
+    await writeSnapshot(env, USER_A, a1.id, { takenAt: 2000, totalUsd: 20, balances: [] });
+    await writeSnapshot(env, USER_A, a1.id, { takenAt: 1000, totalUsd: 10, balances: [] });
+    await writeSnapshot(env, USER_A, a2.id, { takenAt: 1500, totalUsd: 5, balances: [] });
+    await writeSnapshot(env, USER_B, b1.id, { takenAt: 1200, totalUsd: 999, balances: [] });
+
+    const totals = await listSnapshotTotalsByUser(env, USER_A);
+    expect(totals.map((t) => t.takenAt)).toEqual([1000, 1500, 2000]); // 升序、不含 user B
+    expect(totals.map((t) => t.totalUsd)).toEqual([10, 5, 20]);
+    expect(totals.find((t) => t.accountId === b1.id)).toBeUndefined();
+  });
+
+  it("returns [] of totals for a user with no snapshots", async () => {
+    await createAccount(env, USER_A, { type: "manual", label: "A", encCredentials: "x" });
+    expect(await listSnapshotTotalsByUser(env, USER_A)).toEqual([]);
   });
 });
 

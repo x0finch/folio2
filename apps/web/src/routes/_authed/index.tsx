@@ -11,11 +11,16 @@ import {
   TableRow,
 } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { PortfolioChart } from "../../components/portfolio-chart";
 import { type PerpView, toPerpView } from "../../lib/perp";
+import { getPortfolioHistory } from "../../lib/server/history";
 import { getMyOverview } from "../../lib/server/overview";
 
 export const Route = createFileRoute("/_authed/")({
-  loader: () => getMyOverview(),
+  loader: async () => {
+    const [overview, history] = await Promise.all([getMyOverview(), getPortfolioHistory()]);
+    return { ...overview, series: history.series };
+  },
   component: Overview,
 });
 
@@ -107,7 +112,7 @@ function PerpPositions({ view }: { view: PerpView }) {
 }
 
 function Overview() {
-  const { rows, totalUsd } = Route.useLoaderData();
+  const { rows, totalUsd, series } = Route.useLoaderData();
 
   return (
     <div className="flex flex-col gap-6">
@@ -115,6 +120,21 @@ function Overview() {
         <p className="text-sm text-muted-foreground">Total value</p>
         <p className="text-4xl font-bold">{usd(totalUsd)}</p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Portfolio value</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {series.length < 2 ? (
+            <p className="text-sm text-muted-foreground">
+              Not enough history yet — sync a few times to see the trend.
+            </p>
+          ) : (
+            <PortfolioChart series={series} />
+          )}
+        </CardContent>
+      </Card>
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground">
