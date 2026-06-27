@@ -1,10 +1,10 @@
 import { env } from "cloudflare:workers";
-import { encrypt, type FetchContext, type ManualHolding } from "@folio/core";
+import { encrypt, type FetchContext } from "@folio/core";
 import { createAccount, listAccountsByUser } from "@folio/db";
-import { customProvider } from "@folio/provider-custom";
 import { zerionProvider } from "@folio/provider-zerion";
 import { createServerFn } from "@tanstack/react-start";
-import { buildEvmCredentials, normalizeEvmAddress } from "../onchain";
+import { z } from "zod";
+import { buildEvmCredentials, EVM_ADDRESS_RE } from "../onchain";
 import { requireAuth } from "../require-auth";
 
 // 直接用 createServerFn(...).middleware([requireAuth]):Start 编译器按调用点静态识别
@@ -15,72 +15,65 @@ export const listMyAccounts = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(({ context }) => listAccountsByUser(env, context.userId));
 
-interface CreateManualInput {
-  label: string;
-  holdings: ManualHolding[];
-}
+// 输入校验用 zod schema(真·运行时边界校验 + 类型推断)。zod v4 实现 Standard Schema,
+// 直接传给 .validator() 即可(无需 .parse 包装)。zod = 形状校验;provider.validate = 活性校验。
+const ManualInput = z.object({
+  label: z.string().trim().min(1, "label is required"),
+  holdings: z
+    .array(
+      z.object({
+        symbol: z.string().trim().min(1),
+        // zod v4 的 z.number() 默认已拒绝 NaN/Infinity(.finite() 已废弃为 no-op)。
+        amount: z.number(),
+        usdValue: z.number(),
+      }),
+    )
+    .min(1, "add at least one holding"),
+});
 
 // 新建 manual 账户:持仓为非密钥数据 → 明文 dataJson;manual 无密钥 → encCredentials 存加密的 {}。
-// 存前用 provider 契约校验持仓形状(复用 customProvider.validate),不合法则拒。
+// 持仓形状由 zod 全覆盖(取代原 customProvider.validate 调用)。
 export const createManualAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator((input: CreateManualInput) => input)
+  .validator(ManualInput)
   .handler(async ({ data, context }) => {
-    const label = data.label?.trim();
-    if (!label) throw new Error("label is required");
-
-    const ctx: FetchContext = {
-      account: {
-        id: "new",
-        userId: context.userId,
-        type: "manual",
-        label,
-        data: { holdings: data.holdings },
-      },
-      creds: {},
-      globalKeys: {},
-    };
-    if (!(await customProvider.validate(ctx))) {
-      throw new Error("invalid holdings: each needs a symbol and finite amount/usdValue");
-    }
-
     const encCredentials = await encrypt(JSON.stringify({}), env.SECRETS_KEY);
     const dataJson = JSON.stringify({ holdings: data.holdings });
     return createAccount(env, context.userId, {
       type: "manual",
-      label,
+      label: data.label,
       encCredentials,
       dataJson,
     });
   });
 
-interface CreateOnchainEvmInput {
-  label: string;
-  address: string;
-}
+const OnchainEvmInput = z.object({
+  label: z.string().trim().min(1, "label is required"),
+  address: z.string().trim().regex(EVM_ADDRESS_RE, "invalid EVM address (expected 0x + 40 hex)"),
+});
 
 // 新建 onchain_evm 账户:只读地址 → creds.identifier(加密入库);无 dataJson。
-// 创建即 live validate(决策 2):先正则给"地址非法"清晰报错,再 zerionProvider.validate
-// 打一次轻量 portfolio 确认地址 + key 可用,通过才入库(fail-fast)。
+// zod 校验地址格式;再 live validate(zerionProvider.validate 打一次轻量 portfolio 确认
+// 地址 + key 可用),通过才入库(fail-fast)。
 export const createOnchainEvmAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator((input: CreateOnchainEvmInput) => input)
+  .validator(OnchainEvmInput)
   .handler(async ({ data, context }) => {
-    const label = data.label?.trim();
-    if (!label) throw new Error("label is required");
-    const address = normalizeEvmAddress(data.address); // 抛"invalid EVM address"(不发请求)
-
     const ctx: FetchContext = {
-      account: { id: "new", userId: context.userId, type: "onchain_evm", label },
-      creds: { identifier: address },
+      account: { id: "new", userId: context.userId, type: "onchain_evm", label: data.label },
+      creds: { identifier: data.address },
       globalKeys: { ZERION_API_KEY: env.ZERION_API_KEY },
     };
+    // validate=false 可能是地址无效/不可达,或服务端缺 ZERION_API_KEY(运维配置问题)。
+    // 面向用户只提他能改的(地址);key 未配是部署侧的事,不暴露内部 env 名。
     if (!(await zerionProvider.validate(ctx))) {
-      throw new Error(
-        "could not verify address (check the address, and that ZERION_API_KEY is set)",
-      );
+      throw new Error("could not verify the address — please check it and try again");
     }
 
-    const encCredentials = await buildEvmCredentials(address, env.SECRETS_KEY);
-    return createAccount(env, context.userId, { type: "onchain_evm", label, encCredentials });
+    const encCredentials = await buildEvmCredentials(data.address, env.SECRETS_KEY);
+    return createAccount(env, context.userId, {
+      type: "onchain_evm",
+      label: data.label,
+      encCredentials,
+    });
   });
