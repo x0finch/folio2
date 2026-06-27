@@ -147,6 +147,27 @@ describe("snapshots", () => {
     expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.metaJson).toContain("note");
   });
 
+  it("writes many balances by chunking under D1's bound-parameter limit", async () => {
+    const acc = await createAccount(env, USER_A, {
+      type: "onchain_evm",
+      label: "Big wallet",
+      encCredentials: "x",
+    });
+    // 60 条余额 × 8 列 = 480 绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
+    const balances = Array.from({ length: 60 }, (_, i) => ({
+      symbol: `T${i}`,
+      amount: i,
+      usdValue: i * 2,
+      kind: "spot" as const,
+      source: "ethereum",
+    }));
+    await writeSnapshot(env, USER_A, acc.id, { takenAt: 1, totalUsd: 100, balances });
+
+    const latest = await getLatestSnapshotByUser(env, USER_A);
+    expect(latest).toHaveLength(1);
+    expect(latest[0]!.balances).toHaveLength(60); // 全部分块写入、无丢失
+  });
+
   it("returns only the latest snapshot per account, with its balances", async () => {
     const a1 = await createAccount(env, USER_A, {
       type: "manual",

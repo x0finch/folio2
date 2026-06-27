@@ -4,6 +4,9 @@ import { type Db, type DbEnv, getDb } from "./client";
 import { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
 
+// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 8 列 → 每块最多 12 行(96 参数,留余量)。
+const BALANCE_INSERT_CHUNK = 12;
+
 // 安全列:不含密文 encCredentials,常规查询一律走这组列。
 // dataJson 非密钥(明文持仓),随安全形状一并返回,供 sync 组装 FetchContext。
 const accountSafeColumns = {
@@ -222,10 +225,6 @@ export async function writeSnapshot(
   const insertSnapshot = db
     .insert(snapshots)
     .values({ id: snapshotId, accountId, takenAt: input.takenAt, totalUsd: input.totalUsd });
-  if (input.balances.length === 0) {
-    await db.batch([insertSnapshot]);
-    return snapshotId;
-  }
   const balanceRows = input.balances.map((b) => ({
     id: crypto.randomUUID(),
     snapshotId,
@@ -236,7 +235,16 @@ export async function writeSnapshot(
     source: b.source,
     metaJson: b.meta ? JSON.stringify(b.meta) : null,
   }));
-  await db.batch([insertSnapshot, db.insert(snapshotBalances).values(balanceRows)]);
+  // D1 限制每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 8 列 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行。
+  // 一次性大 INSERT 会触发 "too many SQL variables"(地址持仓多时,如链上钱包几十上百条)。
+  const balanceInserts = [];
+  for (let i = 0; i < balanceRows.length; i += BALANCE_INSERT_CHUNK) {
+    balanceInserts.push(
+      db.insert(snapshotBalances).values(balanceRows.slice(i, i + BALANCE_INSERT_CHUNK)),
+    );
+  }
+  // 整批原子写(D1 无交互式事务):snapshot + 各分块余额。空余额则只写 snapshot。
+  await db.batch([insertSnapshot, ...balanceInserts]);
   return snapshotId;
 }
 
