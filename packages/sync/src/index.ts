@@ -2,5 +2,5 @@
 // 数据层注入式依赖(见 orchestrator.ts);provider 装配见 registry.ts(方案 A 摊平)。
 
 export type { AccountSyncResult, SyncDeps, SyncResult } from "./orchestrator";
-export { runAccountSync, syncAccount, syncUser } from "./orchestrator";
+export { runAccountSync, scopeGlobalKeys, syncAccount, syncUser } from "./orchestrator";
 export { appProviders, appRegistry } from "./registry";

@@ -1,6 +1,6 @@
 import { decrypt, generateSecret } from "@folio/core";
 import { describe, expect, it } from "vitest";
-import { buildEvmCredentials, EVM_ADDRESS_RE } from "../src/lib/onchain";
+import { buildAddressCredentials, EVM_ADDRESS_RE } from "../src/lib/onchain";
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
@@ -16,10 +16,10 @@ describe("EVM_ADDRESS_RE", () => {
   });
 });
 
-describe("buildEvmCredentials", () => {
+describe("buildAddressCredentials", () => {
   it("encrypts the address as { identifier } (decrypt round-trip)", async () => {
     const key = generateSecret();
-    const enc = await buildEvmCredentials(ADDR, key);
+    const enc = await buildAddressCredentials(ADDR, key);
     const creds = JSON.parse(await decrypt(enc, key));
     expect(creds).toEqual({ identifier: ADDR });
     expect(enc).not.toContain(ADDR); // ciphertext, not plaintext

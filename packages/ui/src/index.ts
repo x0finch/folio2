@@ -12,6 +12,16 @@ export {
 export { Input } from "./components/input";
 export { Label } from "./components/label";
 export {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "./components/select";
+export {
   Table,
   TableBody,
   TableCaption,

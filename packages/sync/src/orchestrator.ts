@@ -45,7 +45,8 @@ export async function runAccountSync(
 }
 
 // 把整张全局 key 表收窄到 provider 声明用到的子集(env 里存在的才下发)。
-function scopeGlobalKeys(
+// 导出供账户创建时复用(创建即 validate 也要按 usesGlobalKeys 最小权限下发)。
+export function scopeGlobalKeys(
   all: Record<string, string>,
   names: readonly string[] = [],
 ): Record<string, string> {

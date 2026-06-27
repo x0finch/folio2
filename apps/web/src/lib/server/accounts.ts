@@ -1,10 +1,10 @@
 import { env } from "cloudflare:workers";
-import { encrypt, type FetchContext } from "@folio/core";
+import { encrypt, type FetchContext, getProvider } from "@folio/core";
 import { createAccount, listAccountsByUser } from "@folio/db";
-import { zerionProvider } from "@folio/provider-zerion";
+import { appRegistry, scopeGlobalKeys } from "@folio/sync";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { buildEvmCredentials, EVM_ADDRESS_RE } from "../onchain";
+import { buildAddressCredentials, EVM_ADDRESS_RE } from "../onchain";
 import { requireAuth } from "../require-auth";
 
 // 直接用 createServerFn(...).middleware([requireAuth]):Start 编译器按调用点静态识别
@@ -47,32 +47,45 @@ export const createManualAccount = createServerFn({ method: "POST" })
     });
   });
 
-const OnchainEvmInput = z.object({
-  label: z.string().trim().min(1, "label is required"),
-  address: z.string().trim().regex(EVM_ADDRESS_RE, "invalid EVM address (expected 0x + 40 hex)"),
-});
+// 链上账户录入(统一 EVM + coinstats 三链)。type 走白名单(不接受 manual/任意值);
+// 地址非空,EVM 额外正则预检,其余链格式交各 provider/API 判定。
+const OnchainInput = z
+  .object({
+    type: z.enum(["onchain_evm", "onchain_solana", "onchain_sui", "onchain_cosmos"]),
+    label: z.string().trim().min(1, "label is required"),
+    address: z.string().trim().min(1, "address is required"),
+  })
+  .refine((d) => d.type !== "onchain_evm" || EVM_ADDRESS_RE.test(d.address), {
+    error: "invalid EVM address (expected 0x + 40 hex)",
+    path: ["address"],
+  });
 
-// 新建 onchain_evm 账户:只读地址 → creds.identifier(加密入库);无 dataJson。
-// zod 校验地址格式;再 live validate(zerionProvider.validate 打一次轻量 portfolio 确认
-// 地址 + key 可用),通过才入库(fail-fast)。
-export const createOnchainEvmAccount = createServerFn({ method: "POST" })
+// 创建即 live validate(经注册表派发到对应 provider);key 按 provider 的 usesGlobalKeys 最小
+// 权限下发(provider 拿不到别家的)。地址=只读凭据 → creds.identifier 加密入库,无 dataJson。
+const ALL_GLOBAL_KEYS = {
+  ZERION_API_KEY: env.ZERION_API_KEY,
+  COINSTATS_API_KEY: env.COINSTATS_API_KEY,
+};
+
+export const createOnchainAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(OnchainEvmInput)
+  .validator(OnchainInput)
   .handler(async ({ data, context }) => {
+    const provider = getProvider(appRegistry, data.type);
     const ctx: FetchContext = {
-      account: { id: "new", userId: context.userId, type: "onchain_evm", label: data.label },
+      account: { id: "new", userId: context.userId, type: data.type, label: data.label },
       creds: { identifier: data.address },
-      globalKeys: { ZERION_API_KEY: env.ZERION_API_KEY },
+      globalKeys: scopeGlobalKeys(ALL_GLOBAL_KEYS, provider.usesGlobalKeys),
     };
-    // validate=false 可能是地址无效/不可达,或服务端缺 ZERION_API_KEY(运维配置问题)。
+    // validate=false 可能是地址无效/不可达,或服务端缺对应 key(运维配置问题)。
     // 面向用户只提他能改的(地址);key 未配是部署侧的事,不暴露内部 env 名。
-    if (!(await zerionProvider.validate(ctx))) {
+    if (!(await provider.validate(ctx))) {
       throw new Error("could not verify the address — please check it and try again");
     }
 
-    const encCredentials = await buildEvmCredentials(data.address, env.SECRETS_KEY);
+    const encCredentials = await buildAddressCredentials(data.address, env.SECRETS_KEY);
     return createAccount(env, context.userId, {
-      type: "onchain_evm",
+      type: data.type,
       label: data.label,
       encCredentials,
     });

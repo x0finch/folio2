@@ -1,12 +1,34 @@
-import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@folio/ui";
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@folio/ui";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   createManualAccount,
-  createOnchainEvmAccount,
+  createOnchainAccount,
   listMyAccounts,
 } from "../../lib/server/accounts";
 import { triggerSync } from "../../lib/server/sync";
+
+// 可录入的链上账户类型 → 展示名(EVM 走 zerion;其余走 coinstats)。
+const ONCHAIN_TYPES = [
+  { value: "onchain_evm", label: "Ethereum / EVM" },
+  { value: "onchain_solana", label: "Solana" },
+  { value: "onchain_sui", label: "Sui" },
+  { value: "onchain_cosmos", label: "Cosmos" },
+] as const;
+type OnchainType = (typeof ONCHAIN_TYPES)[number]["value"];
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: () => listMyAccounts(),
@@ -30,29 +52,30 @@ function Accounts() {
   const [busy, setBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
-  // on-chain (EVM) 录入表单
-  const [evmLabel, setEvmLabel] = useState("");
-  const [evmAddress, setEvmAddress] = useState("");
-  const [evmError, setEvmError] = useState<string | null>(null);
-  const [evmBusy, setEvmBusy] = useState(false);
+  // on-chain 录入表单(链可选)
+  const [ocType, setOcType] = useState<OnchainType>("onchain_evm");
+  const [ocLabel, setOcLabel] = useState("");
+  const [ocAddress, setOcAddress] = useState("");
+  const [ocError, setOcError] = useState<string | null>(null);
+  const [ocBusy, setOcBusy] = useState(false);
 
   function setRow(i: number, patch: Partial<HoldingRow>) {
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
 
-  async function onCreateEvm(e: React.FormEvent) {
+  async function onCreateOnchain(e: React.FormEvent) {
     e.preventDefault();
-    setEvmError(null);
-    setEvmBusy(true);
+    setOcError(null);
+    setOcBusy(true);
     try {
-      await createOnchainEvmAccount({ data: { label: evmLabel, address: evmAddress } });
-      setEvmLabel("");
-      setEvmAddress("");
+      await createOnchainAccount({ data: { type: ocType, label: ocLabel, address: ocAddress } });
+      setOcLabel("");
+      setOcAddress("");
       await router.invalidate();
     } catch (err) {
-      setEvmError(err instanceof Error ? err.message : String(err));
+      setOcError(err instanceof Error ? err.message : String(err));
     } finally {
-      setEvmBusy(false);
+      setOcBusy(false);
     }
   }
 
@@ -89,8 +112,15 @@ function Accounts() {
     try {
       const { results } = await triggerSync();
       const ok = results.filter((r) => r.ok).length;
-      const failed = results.length - ok;
-      setSyncMsg(`Synced ${ok} account(s)${failed ? `, ${failed} failed` : ""}.`);
+      const failures = results.filter((r) => !r.ok);
+      const labelOf = (id: string) => accounts.find((a) => a.id === id)?.label ?? id;
+      let msg = `Synced ${ok} account(s).`;
+      if (failures.length > 0) {
+        msg += ` ${failures.length} failed — ${failures
+          .map((f) => `${labelOf(f.accountId)}: ${f.error ?? "unknown error"}`)
+          .join("; ")}`;
+      }
+      setSyncMsg(msg);
       await router.invalidate();
     } catch (err) {
       setSyncMsg(err instanceof Error ? err.message : String(err));
@@ -201,36 +231,52 @@ function Accounts() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Add on-chain wallet (EVM)</CardTitle>
+          <CardTitle>Add on-chain wallet</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onCreateEvm} className="flex flex-col gap-4">
+          <form onSubmit={onCreateOnchain} className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="evm-label">Label</Label>
+              <Label htmlFor="oc-chain">Chain</Label>
+              <Select value={ocType} onValueChange={(v) => setOcType(v as OnchainType)}>
+                <SelectTrigger id="oc-chain">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ONCHAIN_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="oc-label">Label</Label>
               <Input
-                id="evm-label"
+                id="oc-label"
                 required
-                value={evmLabel}
-                onChange={(e) => setEvmLabel(e.target.value)}
+                value={ocLabel}
+                onChange={(e) => setOcLabel(e.target.value)}
                 placeholder="e.g. Main wallet"
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="evm-address">Address</Label>
+              <Label htmlFor="oc-address">Address</Label>
               <Input
-                id="evm-address"
+                id="oc-address"
                 required
-                value={evmAddress}
-                onChange={(e) => setEvmAddress(e.target.value)}
-                placeholder="0x…"
+                value={ocAddress}
+                onChange={(e) => setOcAddress(e.target.value)}
+                placeholder={ocType === "onchain_evm" ? "0x…" : "wallet address"}
               />
               <p className="text-sm text-muted-foreground">
-                Read-only. Tokens + DeFi across all EVM chains are fetched via Zerion.
+                Read-only. Tokens (and DeFi on EVM) are fetched by the provider for the chosen
+                chain.
               </p>
             </div>
-            {evmError && <p className="text-sm text-destructive">{evmError}</p>}
-            <Button type="submit" disabled={evmBusy} className="self-start">
-              {evmBusy ? "Verifying…" : "Add wallet"}
+            {ocError && <p className="text-sm text-destructive">{ocError}</p>}
+            <Button type="submit" disabled={ocBusy} className="self-start">
+              {ocBusy ? "Verifying…" : "Add wallet"}
             </Button>
           </form>
         </CardContent>
