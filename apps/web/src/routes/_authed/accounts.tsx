@@ -15,6 +15,7 @@ import {
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import {
+  createExchangeAccount,
   createManualAccount,
   createOnchainAccount,
   listMyAccounts,
@@ -29,6 +30,13 @@ const ONCHAIN_TYPES = [
   { value: "onchain_cosmos", label: "Cosmos" },
 ] as const;
 type OnchainType = (typeof ONCHAIN_TYPES)[number]["value"];
+
+// 可录入的交易所(有 provider 的);okx 需 passphrase。
+const EXCHANGE_TYPES = [
+  { value: "exchange_binance", label: "Binance" },
+  { value: "exchange_okx", label: "OKX" },
+] as const;
+type ExchangeType = (typeof EXCHANGE_TYPES)[number]["value"];
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: () => listMyAccounts(),
@@ -59,8 +67,43 @@ function Accounts() {
   const [ocError, setOcError] = useState<string | null>(null);
   const [ocBusy, setOcBusy] = useState(false);
 
+  // 交易所(CEX)录入表单
+  const [exType, setExType] = useState<ExchangeType>("exchange_binance");
+  const [exLabel, setExLabel] = useState("");
+  const [exApiKey, setExApiKey] = useState("");
+  const [exSecret, setExSecret] = useState("");
+  const [exPassphrase, setExPassphrase] = useState("");
+  const [exError, setExError] = useState<string | null>(null);
+  const [exBusy, setExBusy] = useState(false);
+
   function setRow(i: number, patch: Partial<HoldingRow>) {
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+
+  async function onCreateExchange(e: React.FormEvent) {
+    e.preventDefault();
+    setExError(null);
+    setExBusy(true);
+    try {
+      await createExchangeAccount({
+        data: {
+          type: exType,
+          label: exLabel,
+          apiKey: exApiKey,
+          secret: exSecret,
+          passphrase: exPassphrase || undefined,
+        },
+      });
+      setExLabel("");
+      setExApiKey("");
+      setExSecret("");
+      setExPassphrase("");
+      await router.invalidate();
+    } catch (err) {
+      setExError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExBusy(false);
+    }
   }
 
   async function onCreateOnchain(e: React.FormEvent) {
@@ -277,6 +320,80 @@ function Accounts() {
             {ocError && <p className="text-sm text-destructive">{ocError}</p>}
             <Button type="submit" disabled={ocBusy} className="self-start">
               {ocBusy ? "Verifying…" : "Add wallet"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Add exchange account</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onCreateExchange} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="ex-exchange">Exchange</Label>
+              <Select value={exType} onValueChange={(v) => setExType(v as ExchangeType)}>
+                <SelectTrigger id="ex-exchange">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {EXCHANGE_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="ex-label">Label</Label>
+              <Input
+                id="ex-label"
+                required
+                value={exLabel}
+                onChange={(e) => setExLabel(e.target.value)}
+                placeholder="e.g. Binance main"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="ex-key">API key</Label>
+              <Input
+                id="ex-key"
+                required
+                value={exApiKey}
+                onChange={(e) => setExApiKey(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="ex-secret">API secret</Label>
+              <Input
+                id="ex-secret"
+                type="password"
+                required
+                value={exSecret}
+                onChange={(e) => setExSecret(e.target.value)}
+              />
+            </div>
+            {exType === "exchange_okx" && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="ex-passphrase">Passphrase</Label>
+                <Input
+                  id="ex-passphrase"
+                  type="password"
+                  required
+                  value={exPassphrase}
+                  onChange={(e) => setExPassphrase(e.target.value)}
+                />
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground">
+              Use a <strong>read-only</strong> API key (no trade/withdraw). Stored encrypted; never
+              shown again.
+            </p>
+            {exError && <p className="text-sm text-destructive">{exError}</p>}
+            <Button type="submit" disabled={exBusy} className="self-start">
+              {exBusy ? "Verifying…" : "Add exchange"}
             </Button>
           </form>
         </CardContent>

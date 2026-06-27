@@ -4,6 +4,7 @@ import { createAccount, listAccountsByUser } from "@folio/db";
 import { appRegistry, scopeGlobalKeys } from "@folio/sync";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { buildExchangeCredentials } from "../exchange";
 import { buildAddressCredentials, EVM_ADDRESS_RE } from "../onchain";
 import { requireAuth } from "../require-auth";
 
@@ -84,6 +85,45 @@ export const createOnchainAccount = createServerFn({ method: "POST" })
     }
 
     const encCredentials = await buildAddressCredentials(data.address, env.SECRETS_KEY);
+    return createAccount(env, context.userId, {
+      type: data.type,
+      label: data.label,
+      encCredentials,
+    });
+  });
+
+// CEX 账户录入(binance / okx)。凭据是真密钥(apiKey/secret[/passphrase])→ 加密入库。
+// type 白名单(仅有 provider 的);okx 需 passphrase(refine)。创建即 live validate(签名打只读端点)。
+const ExchangeInput = z
+  .object({
+    type: z.enum(["exchange_binance", "exchange_okx"]),
+    label: z.string().trim().min(1, "label is required"),
+    apiKey: z.string().trim().min(1, "API key is required"),
+    secret: z.string().trim().min(1, "API secret is required"),
+    passphrase: z.string().optional(),
+  })
+  .refine((d) => d.type !== "exchange_okx" || Boolean(d.passphrase?.trim()), {
+    error: "OKX requires a passphrase",
+    path: ["passphrase"],
+  });
+
+export const createExchangeAccount = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(ExchangeInput)
+  .handler(async ({ data, context }) => {
+    const provider = getProvider(appRegistry, data.type);
+    const creds = { apiKey: data.apiKey, secret: data.secret, passphrase: data.passphrase };
+    const ctx: FetchContext = {
+      account: { id: "new", userId: context.userId, type: data.type, label: data.label },
+      creds,
+      // CEX 走 ctx.creds、无 usesGlobalKeys → scopeGlobalKeys 给 {};与下发全局 key 无关。
+      globalKeys: scopeGlobalKeys(ALL_GLOBAL_KEYS, provider.usesGlobalKeys),
+    };
+    if (!(await provider.validate(ctx))) {
+      throw new Error("could not verify these API credentials — please check them and try again");
+    }
+
+    const encCredentials = await buildExchangeCredentials(creds, env.SECRETS_KEY);
     return createAccount(env, context.userId, {
       type: data.type,
       label: data.label,
