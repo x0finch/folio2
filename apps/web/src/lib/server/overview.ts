@@ -20,6 +20,8 @@ export const getMyOverview = createServerFn({ method: "GET" })
         account,
         totalUsd: latest?.snapshot.totalUsd ?? 0,
         takenAt: latest?.snapshot.takenAt ?? null,
+        // balances 原样带 metaJson 过线(JSON 字符串,可序列化);perp 的 metaJson→视图
+        // 解析集中在纯函数 toPerpView 里(一处、可测),组件保持纯展示。
         balances: latest?.balances ?? [],
       };
     });

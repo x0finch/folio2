@@ -2,6 +2,8 @@ import {
   type Balance,
   type BalanceProvider,
   type FetchContext,
+  type PerpEquityMeta,
+  type PerpPositionMeta,
   ProviderError,
   parseRetryAfter,
 } from "@folio/core";
@@ -54,6 +56,8 @@ const num = (s: string | null | undefined): number => Number(s ?? 0);
 export function parseClearinghouseState(state: ClearinghouseState): Balance[] {
   const out: Balance[] = [];
 
+  // meta 用内联字面量 + `satisfies PerpEquityMeta/PerpPositionMeta`:既按契约做生产端编译期
+  // 校验,又因新鲜字面量可直接装进 Balance 的通用 meta 容器(Record<string, unknown>),无需 cast。
   const ms = state.marginSummary;
   if (ms) {
     out.push({
@@ -67,7 +71,7 @@ export function parseClearinghouseState(state: ClearinghouseState): Balance[] {
         withdrawable: num(state.withdrawable),
         totalMarginUsed: num(ms.totalMarginUsed),
         totalNtlPos: num(ms.totalNtlPos),
-      },
+      } satisfies PerpEquityMeta,
     });
   }
 
@@ -91,7 +95,7 @@ export function parseClearinghouseState(state: ClearinghouseState): Balance[] {
         leverageType: p.leverage?.type,
         liquidationPx: p.liquidationPx != null ? num(p.liquidationPx) : null,
         marginUsed: num(p.marginUsed),
-      },
+      } satisfies PerpPositionMeta,
     });
   }
 

@@ -21,4 +21,7 @@ export type {
   BalanceKind,
   ManualData,
   ManualHolding,
+  PerpEquityMeta,
+  PerpMeta,
+  PerpPositionMeta,
 } from "./types";

@@ -92,6 +92,41 @@ export const createOnchainAccount = createServerFn({ method: "POST" })
     });
   });
 
+// 永续账户录入(hyperliquid)。同链上:只读地址(EVM)= 非密钥凭据 → encrypt({identifier}),
+// 无 dataJson。type 走白名单(暂只 perp_hyperliquid;P5.2/5.3 就绪再加)。创建即 live validate。
+const PerpInput = z
+  .object({
+    type: z.enum(["perp_hyperliquid"]),
+    label: z.string().trim().min(1, "label is required"),
+    address: z.string().trim().min(1, "address is required"),
+  })
+  .refine((d) => EVM_ADDRESS_RE.test(d.address), {
+    error: "invalid address (expected 0x + 40 hex)",
+    path: ["address"],
+  });
+
+export const createPerpAccount = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(PerpInput)
+  .handler(async ({ data, context }) => {
+    const provider = getProvider(appRegistry, data.type);
+    const ctx: FetchContext = {
+      account: { id: "new", userId: context.userId, type: data.type, label: data.label },
+      creds: { identifier: data.address },
+      globalKeys: scopeGlobalKeys(ALL_GLOBAL_KEYS, provider.usesGlobalKeys),
+    };
+    if (!(await provider.validate(ctx))) {
+      throw new Error("could not verify the address — please check it and try again");
+    }
+
+    const encCredentials = await buildAddressCredentials(data.address, env.SECRETS_KEY);
+    return createAccount(env, context.userId, {
+      type: data.type,
+      label: data.label,
+      encCredentials,
+    });
+  });
+
 // CEX 账户录入(binance / okx)。凭据是真密钥(apiKey/secret[/passphrase])→ 加密入库。
 // type 白名单(仅有 provider 的);okx 需 passphrase(refine)。创建即 live validate(签名打只读端点)。
 const ExchangeInput = z

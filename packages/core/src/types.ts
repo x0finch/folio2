@@ -54,6 +54,30 @@ export interface Balance {
   meta?: Record<string, unknown>; // DeFi 仓位类型、协议名、所在链等
 }
 
+// perp(kind:"perp")账户的 meta 共享契约。Balance.meta 仍是通用容器(各 kind 自用),
+// 但永续这一类的 meta 形状在此【一处定义】:provider 生产端按它标注(编译期校验)、
+// 消费端(总览展示)窄化到它,避免两端 stringly-typed key 漂移(契约优先,原则 #1)。
+// 永续是杠杆敞口:账户净值由 equity 行承载(usdValue=accountValue),仓位行 usdValue=0、
+// 明细在此 meta 里(见 @folio/provider-hyperliquid 与 P5.1 决策)。
+export interface PerpEquityMeta {
+  role: "equity";
+  withdrawable: number;
+  totalMarginUsed: number;
+  totalNtlPos: number;
+}
+export interface PerpPositionMeta {
+  role: "position";
+  side: "long" | "short";
+  entryPx: number;
+  positionValue: number; // 名义敞口 USD(非净值贡献)
+  unrealizedPnl: number;
+  leverage?: number;
+  leverageType?: string;
+  liquidationPx: number | null;
+  marginUsed: number;
+}
+export type PerpMeta = PerpEquityMeta | PerpPositionMeta;
+
 export interface AssetSnapshot {
   accountId: string;
   takenAt: number; // epoch ms

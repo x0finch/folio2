@@ -18,6 +18,7 @@ import {
   createExchangeAccount,
   createManualAccount,
   createOnchainAccount,
+  createPerpAccount,
   listMyAccounts,
 } from "../../lib/server/accounts";
 import { triggerSync } from "../../lib/server/sync";
@@ -37,6 +38,10 @@ const EXCHANGE_TYPES = [
   { value: "exchange_okx", label: "OKX" },
 ] as const;
 type ExchangeType = (typeof EXCHANGE_TYPES)[number]["value"];
+
+// 可录入的永续 DEX(有 provider 的);地址=EVM 地址。derive/extended 就绪再加。
+const PERP_TYPES = [{ value: "perp_hyperliquid", label: "Hyperliquid" }] as const;
+type PerpType = (typeof PERP_TYPES)[number]["value"];
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: () => listMyAccounts(),
@@ -76,6 +81,13 @@ function Accounts() {
   const [exError, setExError] = useState<string | null>(null);
   const [exBusy, setExBusy] = useState(false);
 
+  // 永续(perp)录入表单(只读地址)
+  const [pType, setPType] = useState<PerpType>("perp_hyperliquid");
+  const [pLabel, setPLabel] = useState("");
+  const [pAddress, setPAddress] = useState("");
+  const [pError, setPError] = useState<string | null>(null);
+  const [pBusy, setPBusy] = useState(false);
+
   function setRow(i: number, patch: Partial<HoldingRow>) {
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
@@ -103,6 +115,22 @@ function Accounts() {
       setExError(err instanceof Error ? err.message : String(err));
     } finally {
       setExBusy(false);
+    }
+  }
+
+  async function onCreatePerp(e: React.FormEvent) {
+    e.preventDefault();
+    setPError(null);
+    setPBusy(true);
+    try {
+      await createPerpAccount({ data: { type: pType, label: pLabel, address: pAddress } });
+      setPLabel("");
+      setPAddress("");
+      await router.invalidate();
+    } catch (err) {
+      setPError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPBusy(false);
     }
   }
 
@@ -394,6 +422,58 @@ function Accounts() {
             {exError && <p className="text-sm text-destructive">{exError}</p>}
             <Button type="submit" disabled={exBusy} className="self-start">
               {exBusy ? "Verifying…" : "Add exchange"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Add perp account</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onCreatePerp} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="p-venue">Venue</Label>
+              <Select value={pType} onValueChange={(v) => setPType(v as PerpType)}>
+                <SelectTrigger id="p-venue">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PERP_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="p-label">Label</Label>
+              <Input
+                id="p-label"
+                required
+                value={pLabel}
+                onChange={(e) => setPLabel(e.target.value)}
+                placeholder="e.g. HL main"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="p-address">Address</Label>
+              <Input
+                id="p-address"
+                required
+                value={pAddress}
+                onChange={(e) => setPAddress(e.target.value)}
+                placeholder="0x…"
+              />
+              <p className="text-sm text-muted-foreground">
+                Read-only. Perp positions and margin are fetched by the provider.
+              </p>
+            </div>
+            {pError && <p className="text-sm text-destructive">{pError}</p>}
+            <Button type="submit" disabled={pBusy} className="self-start">
+              {pBusy ? "Verifying…" : "Add perp account"}
             </Button>
           </form>
         </CardContent>
