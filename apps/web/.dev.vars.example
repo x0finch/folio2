@@ -4,3 +4,5 @@ BETTER_AUTH_URL=http://localhost:3000
 SECRETS_KEY=replace-with-openssl-rand-base64-32
 # Zerion API key (free dev tier at developers.zerion.io) — global provider key for onchain_evm
 ZERION_API_KEY=replace-with-zerion-dev-key
+# CoinStats API key (free tier at openapi.coinstats.app) — global key for onchain_solana/sui/cosmos
+COINSTATS_API_KEY=replace-with-coinstats-key

@@ -16,8 +16,11 @@ export const triggerSync = createServerFn({ method: "POST" })
         getEncryptedCredentials(env, userId, accountId),
       writeSnapshot: (userId, accountId, input) => writeSnapshot(env, userId, accountId, input),
       secretsKey: env.SECRETS_KEY,
-      // provider 全局 key:zerion 等链上源用;manual 无需。逐个 provider 接入时累加。
-      globalKeys: { ZERION_API_KEY: env.ZERION_API_KEY },
+      // provider 全局 key:各 provider 按 usesGlobalKeys 只拿到自己声明的(见 @folio/sync scopeGlobalKeys)。
+      globalKeys: {
+        ZERION_API_KEY: env.ZERION_API_KEY,
+        COINSTATS_API_KEY: env.COINSTATS_API_KEY,
+      },
     };
     return syncUser(deps, context.userId);
   });
