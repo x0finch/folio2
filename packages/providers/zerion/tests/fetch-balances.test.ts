@@ -18,32 +18,53 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// fixture = 录制的真实 positions 响应(解析器输入)。整份解析结果一次性钉成 golden(toEqual),
+// 覆盖:amount=quantity.float、usdValue=value(null→0)、wallet→spot 与 staked/protocol→defi、
+// 每条仓位的 chain 入 source+meta、protocol/positionType 入 meta、跳过 displayable=false。
 describe("parsePositions (golden)", () => {
   const balances = parsePositions(fixture);
 
-  it("maps displayable positions, skips hidden/trash", () => {
-    // fixture 有 5 条,其中 1 条 displayable=false → 应被过滤,余 4 条。
+  it("maps the recorded response to the expected Balance[]", () => {
+    expect(balances).toEqual([
+      {
+        symbol: "ETH",
+        amount: 2.5,
+        usdValue: 6250,
+        source: "ethereum",
+        kind: "spot",
+        meta: { chain: "ethereum", protocol: undefined, positionType: "wallet" },
+      },
+      {
+        symbol: "USDC",
+        amount: 1500,
+        usdValue: 1500,
+        source: "arbitrum",
+        kind: "spot",
+        meta: { chain: "arbitrum", protocol: undefined, positionType: "wallet" },
+      },
+      {
+        symbol: "stETH",
+        amount: 4,
+        usdValue: 10000,
+        source: "ethereum",
+        kind: "defi",
+        meta: { chain: "ethereum", protocol: "Lido", positionType: "staked" },
+      },
+      {
+        symbol: "UNP",
+        amount: 100,
+        usdValue: 0,
+        source: "ethereum",
+        kind: "spot",
+        meta: { chain: "ethereum", protocol: undefined, positionType: "wallet" },
+      },
+    ]);
+  });
+
+  it("excludes hidden/trash (displayable=false) positions", () => {
+    // fixture 有 5 条,其中 1 条 displayable=false → 解析结果 4 条,无该条。
     expect(balances).toHaveLength(4);
     expect(balances.find((b) => b.symbol === "SPAM")).toBeUndefined();
-  });
-
-  it("classifies wallet→spot and staked/protocol→defi", () => {
-    expect(balances.find((b) => b.symbol === "ETH")?.kind).toBe("spot");
-    expect(balances.find((b) => b.symbol === "USDC")?.kind).toBe("spot");
-    const steth = balances.find((b) => b.symbol === "stETH");
-    expect(steth?.kind).toBe("defi");
-    expect(steth?.meta?.protocol).toBe("Lido");
-  });
-
-  it("carries chain into source + meta, amount/usdValue from quantity.float/value", () => {
-    const usdc = balances.find((b) => b.symbol === "USDC");
-    expect(usdc).toMatchObject({ amount: 1500, usdValue: 1500, source: "arbitrum" });
-    expect(usdc?.meta?.chain).toBe("arbitrum");
-    expect(balances.find((b) => b.symbol === "ETH")?.meta?.chain).toBe("ethereum");
-  });
-
-  it("treats null value as 0", () => {
-    expect(balances.find((b) => b.symbol === "UNP")?.usdValue).toBe(0);
   });
 });
 
