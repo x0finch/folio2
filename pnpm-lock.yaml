@@ -32,6 +32,9 @@ importers:
       '@folio/provider-custom':
         specifier: workspace:*
         version: link:../../packages/providers/custom
+      '@folio/provider-zerion':
+        specifier: workspace:*
+        version: link:../../packages/providers/zerion
       '@folio/sync':
         specifier: workspace:*
         version: link:../../packages/sync

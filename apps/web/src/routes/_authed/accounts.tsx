@@ -1,7 +1,11 @@
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@folio/ui";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
-import { createManualAccount, listMyAccounts } from "../../lib/server/accounts";
+import {
+  createManualAccount,
+  createOnchainEvmAccount,
+  listMyAccounts,
+} from "../../lib/server/accounts";
 import { triggerSync } from "../../lib/server/sync";
 
 export const Route = createFileRoute("/_authed/accounts")({
@@ -26,8 +30,30 @@ function Accounts() {
   const [busy, setBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
+  // on-chain (EVM) 录入表单
+  const [evmLabel, setEvmLabel] = useState("");
+  const [evmAddress, setEvmAddress] = useState("");
+  const [evmError, setEvmError] = useState<string | null>(null);
+  const [evmBusy, setEvmBusy] = useState(false);
+
   function setRow(i: number, patch: Partial<HoldingRow>) {
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+
+  async function onCreateEvm(e: React.FormEvent) {
+    e.preventDefault();
+    setEvmError(null);
+    setEvmBusy(true);
+    try {
+      await createOnchainEvmAccount({ data: { label: evmLabel, address: evmAddress } });
+      setEvmLabel("");
+      setEvmAddress("");
+      await router.invalidate();
+    } catch (err) {
+      setEvmError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEvmBusy(false);
+    }
   }
 
   async function onCreate(e: React.FormEvent) {
@@ -168,6 +194,43 @@ function Accounts() {
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" disabled={busy} className="self-start">
               Create account
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Add on-chain wallet (EVM)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onCreateEvm} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="evm-label">Label</Label>
+              <Input
+                id="evm-label"
+                required
+                value={evmLabel}
+                onChange={(e) => setEvmLabel(e.target.value)}
+                placeholder="e.g. Main wallet"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="evm-address">Address</Label>
+              <Input
+                id="evm-address"
+                required
+                value={evmAddress}
+                onChange={(e) => setEvmAddress(e.target.value)}
+                placeholder="0x…"
+              />
+              <p className="text-sm text-muted-foreground">
+                Read-only. Tokens + DeFi across all EVM chains are fetched via Zerion.
+              </p>
+            </div>
+            {evmError && <p className="text-sm text-destructive">{evmError}</p>}
+            <Button type="submit" disabled={evmBusy} className="self-start">
+              {evmBusy ? "Verifying…" : "Add wallet"}
             </Button>
           </form>
         </CardContent>

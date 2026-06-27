@@ -19,6 +19,7 @@
     "@folio/core": "workspace:*",
     "@folio/db": "workspace:*",
     "@folio/provider-custom": "workspace:*",
+    "@folio/provider-zerion": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/ui": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
