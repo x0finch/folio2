@@ -1,4 +1,10 @@
-import { type BalanceProvider, buildRegistry, encrypt, generateSecret } from "@folio/core";
+import {
+  type BalanceProvider,
+  buildRegistry,
+  encrypt,
+  generateSecret,
+  ProviderError,
+} from "@folio/core";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { customProvider } from "@folio/provider-custom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -182,5 +188,86 @@ describe("syncAccount — 全局 key 最小权限下发", () => {
     await syncUser(deps, "u1");
 
     expect(seen).toEqual({});
+  });
+});
+
+describe("syncAccount — 退避重试", () => {
+  // 构造一个对 onchain_evm 的假 provider:前 failTimes 次抛错,之后成功。
+  function flakyRegistry(makeErr: () => unknown, failTimes: number) {
+    let calls = 0;
+    const provider: BalanceProvider = {
+      accountType: "onchain_evm",
+      fetchBalances: async () => {
+        calls++;
+        if (calls <= failTimes) throw makeErr();
+        return [];
+      },
+      validate: async () => true,
+    };
+    return { registry: buildRegistry([provider]), calls: () => calls };
+  }
+  const evm = () => manualAccount({ id: "evm", type: "onchain_evm", dataJson: null });
+
+  it("retries a retryable error and succeeds; honors Retry-After (retryAfterMs)", async () => {
+    const slept: number[] = [];
+    const { registry, calls } = flakyRegistry(
+      () => new ProviderError("RATE_LIMITED", "rate limited", { retryAfterMs: 1234 }),
+      1, // 第 1 次失败,第 2 次成功
+    );
+    const { deps } = makeDeps([evm()], {
+      registry,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+
+    const { results } = await syncUser(deps, "u1");
+
+    expect(results[0].ok).toBe(true);
+    expect(calls()).toBe(2); // 重试了一次
+    expect(slept).toHaveLength(1);
+    expect(slept[0]).toBeGreaterThanOrEqual(1234); // 采用了 Retry-After
+  });
+
+  it("gives up after RETRY_MAX_ATTEMPTS → ok:false (isolated)", async () => {
+    const slept: number[] = [];
+    const { registry, calls } = flakyRegistry(
+      () => new ProviderError("UPSTREAM_ERROR", "5xx"),
+      99, // 一直失败
+    );
+    const { deps, writes } = makeDeps([evm()], {
+      registry,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+
+    const { results } = await syncUser(deps, "u1");
+
+    expect(results[0]).toMatchObject({ accountId: "evm", ok: false });
+    expect(results[0].error).toContain("5xx");
+    expect(calls()).toBe(3); // RETRY_MAX_ATTEMPTS
+    expect(slept).toHaveLength(2); // 两次退避
+    expect(writes).toHaveLength(0); // 没写快照
+  });
+
+  it("does not retry a non-retryable error (e.g. AUTH_FAILED)", async () => {
+    const slept: number[] = [];
+    const { registry, calls } = flakyRegistry(
+      () => new ProviderError("AUTH_FAILED", "bad key"),
+      99,
+    );
+    const { deps } = makeDeps([evm()], {
+      registry,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+
+    const { results } = await syncUser(deps, "u1");
+
+    expect(results[0].ok).toBe(false);
+    expect(calls()).toBe(1); // 不重试
+    expect(slept).toHaveLength(0);
   });
 });

@@ -4,6 +4,7 @@ import {
   type BalanceProvider,
   type FetchContext,
   ProviderError,
+  parseRetryAfter,
 } from "@folio/core";
 import {
   API_KEY_HEADER,
@@ -89,7 +90,11 @@ function ensureOk(res: Response): void {
   if (res.status === 401 || res.status === 403) {
     throw new ProviderError("AUTH_FAILED", `coinstats auth failed (${res.status})`);
   }
-  if (res.status === 429) throw new ProviderError("RATE_LIMITED", "coinstats rate limited");
+  if (res.status === 429) {
+    throw new ProviderError("RATE_LIMITED", "coinstats rate limited", {
+      retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
+    });
+  }
   throw new ProviderError("UPSTREAM_ERROR", `coinstats upstream error (${res.status})`);
 }
 

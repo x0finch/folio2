@@ -2,7 +2,7 @@
 
 export { CryptoError, decrypt, encrypt, generateSecret } from "./crypto";
 export type { ProviderErrorCode, ProviderErrorOptions } from "./errors";
-export { ProviderError } from "./errors";
+export { ProviderError, parseRetryAfter } from "./errors";
 export type {
   BalanceProvider,
   CredentialFlags,

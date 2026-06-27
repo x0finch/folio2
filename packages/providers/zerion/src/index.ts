@@ -1,4 +1,10 @@
-import { type Balance, type BalanceProvider, type FetchContext, ProviderError } from "@folio/core";
+import {
+  type Balance,
+  type BalanceProvider,
+  type FetchContext,
+  ProviderError,
+  parseRetryAfter,
+} from "@folio/core";
 import {
   EVM_ADDRESS_RE,
   PORTFOLIO_PATH,
@@ -79,7 +85,11 @@ function ensureOk(res: Response): void {
   if (res.status === 401 || res.status === 403) {
     throw new ProviderError("AUTH_FAILED", `zerion auth failed (${res.status})`);
   }
-  if (res.status === 429) throw new ProviderError("RATE_LIMITED", "zerion rate limited");
+  if (res.status === 429) {
+    throw new ProviderError("RATE_LIMITED", "zerion rate limited", {
+      retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
+    });
+  }
   throw new ProviderError("UPSTREAM_ERROR", `zerion upstream error (${res.status})`);
 }
 

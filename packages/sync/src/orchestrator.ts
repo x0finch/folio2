@@ -4,10 +4,18 @@ import {
   decrypt,
   type FetchContext,
   getProvider,
+  ProviderError,
   type ProviderRegistry,
 } from "@folio/core";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { appRegistry } from "./registry";
+
+// 退避重试参数(原则 #8:不硬编码散落)。
+const RETRY_MAX_ATTEMPTS = 3; // 总尝试次数(1 + 2 重试)
+const RETRY_BASE_MS = 200; // 指数退避基数
+const RETRY_MAX_MS = 5000; // 单次退避上限(也用于 Retry-After 夹紧)
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // 编排器对数据层【注入式依赖】:db 操作由调用方(server fn)绑好 env 后传入,
 // 于是本包不连 D1、可用普通 vitest 测纯逻辑(解密 → 派发 → 隔离 → 汇总)。
@@ -19,6 +27,7 @@ export interface SyncDeps {
   secretsKey: string;
   globalKeys: Record<string, string>;
   registry?: ProviderRegistry; // 默认用 appRegistry;测试可注入假 registry
+  sleep?: (ms: number) => Promise<void>; // 默认 setTimeout;测试注入即时/捕获版做确定性重试测试
 }
 
 export interface AccountSyncResult {
@@ -57,6 +66,25 @@ export function scopeGlobalKeys(
   return scoped;
 }
 
+// 对可重试的 ProviderError(429/5xx/网络)退避重试;优先采用服务端 Retry-After,否则指数退避+抖动。
+// 不可重试错误 / 重试用尽 → 抛出(由 syncAccount 外层收为 ok:false)。
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  sleep: (ms: number) => Promise<void>,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const retryable = err instanceof ProviderError && err.retryable;
+      if (!retryable || attempt >= RETRY_MAX_ATTEMPTS) throw err;
+      const backoff = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** (attempt - 1));
+      const base = Math.min(RETRY_MAX_MS, err.retryAfterMs ?? backoff);
+      await sleep(base + Math.random() * RETRY_BASE_MS); // 抖动,避免同步雪崩
+    }
+  }
+}
+
 // 单账户同步,整段 try/catch:失败返回 ok:false,绝不抛(隔离,不阻断其他账户)。
 export async function syncAccount(
   deps: SyncDeps,
@@ -82,7 +110,11 @@ export async function syncAccount(
     // 最小权限:只把本 provider 声明用到的全局 key 下发,拿不到别家的(见 BalanceProvider.usesGlobalKeys)。
     const globalKeys = scopeGlobalKeys(deps.globalKeys, provider.usesGlobalKeys);
     const ctx: FetchContext = { account: acc, creds, globalKeys };
-    const { balances, totalUsd } = await runAccountSync(registry, ctx);
+    // 仅 provider 取数部分重试(写快照/解密不重试)。
+    const { balances, totalUsd } = await withRetry(
+      () => runAccountSync(registry, ctx),
+      deps.sleep ?? defaultSleep,
+    );
     const snapshotId = await deps.writeSnapshot(userId, account.id, {
       takenAt: Date.now(),
       totalUsd,

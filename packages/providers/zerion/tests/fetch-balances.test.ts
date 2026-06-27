@@ -93,11 +93,14 @@ describe("zerionProvider.fetchBalances", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("maps 429 → RATE_LIMITED (retryable) and 401 → AUTH_FAILED", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 429 }));
+  it("maps 429 → RATE_LIMITED (retryable, parses Retry-After) and 401 → AUTH_FAILED", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("", { status: 429, headers: { "retry-after": "3" } }),
+    );
     await expect(zerionProvider.fetchBalances(ctx())).rejects.toMatchObject({
       code: "RATE_LIMITED",
       retryable: true,
+      retryAfterMs: 3000,
     });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
     await expect(zerionProvider.fetchBalances(ctx())).rejects.toMatchObject({
