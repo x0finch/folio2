@@ -1,5 +1,5 @@
 import type { AccountType, BalanceKind } from "@folio/core";
-import { and, desc, eq, getTableColumns } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, max } from "drizzle-orm";
 import { type Db, type DbEnv, getDb } from "./client";
 import { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
@@ -254,31 +254,66 @@ export async function listSnapshotsByAccount(
     .orderBy(desc(snapshots.takenAt));
 }
 
-/** 该用户每个账户的最新快照 + 其余额(总览数据源)。 */
+/**
+ * 该用户每个账户的最新快照 + 其余额(总览数据源)。
+ * 常数次查询(与账户数无关):① 每账户最新快照整行 ② 这些快照的全部余额,再 JS 分组。
+ */
 export async function getLatestSnapshotByUser(
   env: DbEnv,
   userId: string,
 ): Promise<SnapshotWithBalances[]> {
   const db = getDb(env);
-  const userAccounts = await db
-    .select({ id: accounts.id })
-    .from(accounts)
-    .where(eq(accounts.userId, userId));
-  const result: SnapshotWithBalances[] = [];
-  for (const account of userAccounts) {
-    const latest = await db
-      .select()
-      .from(snapshots)
-      .where(eq(snapshots.accountId, account.id))
-      .orderBy(desc(snapshots.takenAt))
-      .limit(1);
-    const snapshot = latest[0];
-    if (!snapshot) continue;
-    const balances = await db
-      .select()
-      .from(snapshotBalances)
-      .where(eq(snapshotBalances.snapshotId, snapshot.id));
-    result.push({ snapshot, balances });
+
+  // 子查询:该用户每个账户的最新 takenAt(经 snapshots ⨝ accounts 用 userId 限定)。
+  const latestPerAccount = db
+    .select({
+      accountId: snapshots.accountId,
+      maxTakenAt: max(snapshots.takenAt).as("max_taken_at"),
+    })
+    .from(snapshots)
+    .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+    .where(eq(accounts.userId, userId))
+    .groupBy(snapshots.accountId)
+    .as("latest_per_account");
+
+  // ① 取每账户最新快照整行(1 查询);无快照的账户自然不出现。
+  const latestSnapshots = await db
+    .select(getTableColumns(snapshots))
+    .from(snapshots)
+    .innerJoin(
+      latestPerAccount,
+      and(
+        eq(snapshots.accountId, latestPerAccount.accountId),
+        eq(snapshots.takenAt, latestPerAccount.maxTakenAt),
+      ),
+    );
+
+  // 同毫秒并列保护:每账户保留一条(id 最大者)。
+  const byAccount = new Map<string, Snapshot>();
+  for (const s of latestSnapshots) {
+    const cur = byAccount.get(s.accountId);
+    if (!cur || s.id > cur.id) byAccount.set(s.accountId, s);
   }
-  return result;
+  const snaps = [...byAccount.values()];
+  if (snaps.length === 0) return [];
+
+  // ② 取这些快照的全部余额(1 查询)。
+  const balanceRows = await db
+    .select()
+    .from(snapshotBalances)
+    .where(
+      inArray(
+        snapshotBalances.snapshotId,
+        snaps.map((s) => s.id),
+      ),
+    );
+
+  // JS 按 snapshotId 分组。
+  const bySnapshot = new Map<string, SnapshotBalance[]>();
+  for (const b of balanceRows) {
+    const arr = bySnapshot.get(b.snapshotId);
+    if (arr) arr.push(b);
+    else bySnapshot.set(b.snapshotId, [b]);
+  }
+  return snaps.map((snapshot) => ({ snapshot, balances: bySnapshot.get(snapshot.id) ?? [] }));
 }

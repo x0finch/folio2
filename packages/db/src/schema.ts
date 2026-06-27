@@ -65,7 +65,11 @@ export const snapshots = sqliteTable(
     takenAt: integer("taken_at").notNull(), // epoch ms
     totalUsd: real("total_usd").notNull(),
   },
-  (t) => [index("snapshots_account_id_idx").on(t.accountId)],
+  (t) => [
+    index("snapshots_account_id_idx").on(t.accountId),
+    // greatest-n-per-group:取每账户最新快照(getLatestSnapshotByUser)走这条复合索引。
+    index("snapshots_account_id_taken_at_idx").on(t.accountId, t.takenAt),
+  ],
 );
 
 export const snapshotBalances = sqliteTable(

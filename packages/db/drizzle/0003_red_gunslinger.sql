@@ -1,0 +1,1 @@
+CREATE INDEX `snapshots_account_id_taken_at_idx` ON `snapshots` (`account_id`,`taken_at`);

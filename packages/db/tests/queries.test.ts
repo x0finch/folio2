@@ -147,6 +147,58 @@ describe("snapshots", () => {
     expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.metaJson).toContain("note");
   });
 
+  it("returns only the latest snapshot per account, with its balances", async () => {
+    const a1 = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A1",
+      encCredentials: "x",
+    });
+    const a2 = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A2",
+      encCredentials: "x",
+    });
+    // 一个没有快照的账户:不应出现在结果里。
+    await createAccount(env, USER_A, { type: "manual", label: "A3", encCredentials: "x" });
+
+    // a1:先旧后新两份快照 → 应只回最新那份(takenAt 2000),余额是 NEW 不是 OLD。
+    await writeSnapshot(env, USER_A, a1.id, {
+      takenAt: 1000,
+      totalUsd: 10,
+      balances: [{ symbol: "OLD", amount: 1, usdValue: 10, kind: "spot", source: "s" }],
+    });
+    await writeSnapshot(env, USER_A, a1.id, {
+      takenAt: 2000,
+      totalUsd: 20,
+      balances: [{ symbol: "NEW", amount: 2, usdValue: 20, kind: "spot", source: "s" }],
+    });
+    // a2:单份快照。
+    await writeSnapshot(env, USER_A, a2.id, {
+      takenAt: 1500,
+      totalUsd: 5,
+      balances: [{ symbol: "ATOM", amount: 5, usdValue: 5, kind: "spot", source: "s" }],
+    });
+
+    const latest = await getLatestSnapshotByUser(env, USER_A);
+    expect(latest).toHaveLength(2); // a3 无快照 → 不计
+
+    const byAcc = new Map(latest.map((r) => [r.snapshot.accountId, r]));
+    const r1 = byAcc.get(a1.id)!;
+    expect(r1.snapshot.takenAt).toBe(2000);
+    expect(r1.snapshot.totalUsd).toBe(20);
+    expect(r1.balances).toHaveLength(1);
+    expect(r1.balances[0]!.symbol).toBe("NEW"); // 旧快照的 OLD 不应混入
+
+    const r2 = byAcc.get(a2.id)!;
+    expect(r2.snapshot.takenAt).toBe(1500);
+    expect(r2.balances[0]!.symbol).toBe("ATOM");
+  });
+
+  it("returns [] for a user with no snapshots", async () => {
+    await createAccount(env, USER_A, { type: "manual", label: "A", encCredentials: "x" });
+    expect(await getLatestSnapshotByUser(env, USER_A)).toEqual([]);
+  });
+
   it("cascades snapshots and pairings when the account is deleted", async () => {
     const acc = await createAccount(env, USER_A, {
       type: "manual",
