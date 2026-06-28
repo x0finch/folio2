@@ -2,8 +2,23 @@ import { type BalanceProvider, buildRegistry, generateSecret, ProviderError } fr
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { customProvider } from "@folio/provider-custom";
 import { describe, expect, it } from "vitest";
-import { runAccountSync, type SyncDeps, syncUser } from "../src";
+import { z } from "zod";
+import { runAccountSync, type SyncDeps, type SyncLogger, syncUser } from "../src";
 import { appRegistry } from "../src/registry";
+
+// 捕获式 logger:记录 (level, msg, props),供断言级别 + 安全字段 + 红线(无密钥)。
+function capturingLogger() {
+  const entries: Array<{ level: string; msg: string; props?: Record<string, unknown> }> = [];
+  const mk = (level: string) => (msg: string, props?: Record<string, unknown>) =>
+    entries.push({ level, msg, props });
+  const log: SyncLogger = {
+    debug: mk("debug"),
+    info: mk("info"),
+    warning: mk("warning"),
+    error: mk("error"),
+  };
+  return { log, entries };
+}
 
 const secretsKey = generateSecret();
 
@@ -102,6 +117,61 @@ describe("syncUser — 失败隔离", () => {
     // 只为好账户写了快照(坏账户失败前不写)。
     expect(writes).toHaveLength(1);
     expect(writes[0].accountId).toBe("good");
+  });
+});
+
+describe("结构化日志(级别 + 安全字段 + 红线)", () => {
+  it("成功→info、缺凭据→warning、失败→error;字段只含安全键、无密钥", async () => {
+    const throwing: BalanceProvider = {
+      accountType: "exchange_okx",
+      fetchBalances: async () => {
+        throw new ProviderError("AUTH_FAILED", "bad key");
+      },
+      validate: async () => true,
+    };
+    // 带 semi/secret 输入的假 binance:creds "{}" → !isComplete → 缺凭据跳过。
+    const fakeBinance: BalanceProvider = {
+      accountType: "exchange_binance",
+      inputs: [
+        { key: "apiKey", type: "semi", label: "API Key", validator: z.string().min(1) },
+        { key: "secret", type: "secret", label: "API Secret", validator: z.string().min(1) },
+      ],
+      fetchBalances: async () => [],
+      validate: async () => true,
+    };
+    const registry = buildRegistry([customProvider, throwing, fakeBinance]);
+    const good = manualAccount({ id: "g" });
+    const needs = manualAccount({ id: "n", type: "exchange_binance" }); // creds "{}" → 缺凭据
+    const fail = manualAccount({ id: "f", type: "exchange_okx" }); // throwing → error
+
+    const { log, entries } = capturingLogger();
+    // 各账户 getRawCreds:good=manual creds;okx=有完整 creds(过 isComplete)走 throwing;binance="{}" 缺凭据。
+    const { deps } = makeDeps([good, needs, fail], {
+      registry,
+      getRawCreds: async (_u, id) =>
+        id === "g"
+          ? MANUAL_CREDS
+          : id === "f"
+            ? JSON.stringify({ apiKey: "K", secret: "S", passphrase: "P" })
+            : "{}",
+      log,
+    });
+
+    await syncUser(deps, "u1");
+
+    const byMsg = (m: string) => entries.find((e) => e.msg === m);
+    expect(byMsg("account synced")?.level).toBe("info");
+    expect(byMsg("account synced")?.props).toMatchObject({ accountId: "g", type: "manual" });
+    expect(byMsg("account sync skipped: needs credentials")?.level).toBe("warning");
+    expect(byMsg("account sync failed")?.level).toBe("error");
+    expect(byMsg("account sync failed")?.props).toMatchObject({
+      accountId: "f",
+      code: "AUTH_FAILED",
+    });
+
+    // 红线:任何日志字段都不含密钥真值(K/S/P)。
+    const blob = JSON.stringify(entries);
+    for (const secret of ['"K"', '"S"', '"P"']) expect(blob).not.toContain(secret);
   });
 });
 

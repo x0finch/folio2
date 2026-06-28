@@ -16,9 +16,13 @@ import {
   setAccountCredentials,
 } from "@folio/db";
 import { appRegistry, scopeGlobalKeys } from "@folio/sync";
+import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireAuth } from "../require-auth";
+
+// userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 type/accountId 等安全字段(红线:不打 creds)。
+const log = getLogger(["folio", "web", "accounts"]);
 
 // 原始字符串输入 → 存库 map 的 JSON(secret 字段加密、public/semi 明文,见 @folio/core sealCreds)。
 // 传【原始字符串】(已过 validateCredentials 校验闸);不传其 coerce 输出,保持 creds 为字符串 map。
@@ -73,11 +77,13 @@ export const createManualAccount = createServerFn({ method: "POST" })
     const inputs = getProvider(appRegistry, "manual").inputs ?? [];
     const raw = { symbol: data.symbol, amount: data.amount, usdValue: data.usdValue };
     await validateCredentials(inputs, raw); // 校验闸(amount/usdValue 可 coerce 成数值,否则抛)
-    return createAccount(env, context.userId, {
+    const account = await createAccount(env, context.userId, {
       type: "manual",
       label: data.label,
       creds: await sealJson(inputs, raw),
     });
+    log.info("account created", { type: "manual", accountId: account.id });
+    return account;
   });
 
 // 全局 provider key 表(按 provider 的 usesGlobalKeys 最小权限下发)。
@@ -107,7 +113,13 @@ async function createAddressAccount(
   if (!(await provider.validate(ctx))) {
     throw new Error("could not verify the address — please check it and try again");
   }
-  return createAccount(env, userId, { type, label, creds: await sealJson(inputs, raw) });
+  const account = await createAccount(env, userId, {
+    type,
+    label,
+    creds: await sealJson(inputs, raw),
+  });
+  log.info("account created", { type, accountId: account.id });
+  return account;
 }
 
 const OnchainInput = z.object({
@@ -161,11 +173,13 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
     if (!(await provider.validate(ctx))) {
       throw new Error("could not verify these API credentials — please check them and try again");
     }
-    return createAccount(env, context.userId, {
+    const account = await createAccount(env, context.userId, {
       type: data.type,
       label: data.label,
       creds: await sealJson(inputs, values), // seal 原始字符串(非 coerce 输出)
     });
+    log.info("exchange account created", { type: data.type, accountId: account.id });
+    return account;
   });
 
 // 凭据再水合(P6.6.1):为导入的"缺凭据"账户补录真值。按该账户 type 的 inputs 校验 + live validate +
@@ -197,5 +211,6 @@ export const provideCredentials = createServerFn({ method: "POST" })
       account.id,
       await sealJson(inputs, data.creds),
     );
+    log.info("credentials provided", { type: account.type, accountId: account.id });
     return { ok: true as const };
   });

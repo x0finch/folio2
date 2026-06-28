@@ -22,6 +22,8 @@
     "@folio/provider-zerion": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/ui": "workspace:*",
+    "@logtape/logtape": "^2.2.1",
+    "@logtape/pretty": "^2.2.1",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-router": "latest",

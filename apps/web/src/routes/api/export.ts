@@ -10,6 +10,7 @@ import {
   type SnapshotBalance,
 } from "@folio/db";
 import { appRegistry } from "@folio/sync";
+import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
@@ -35,8 +36,10 @@ export const Route = createFileRoute("/api/export")({
         try {
           userId = resolveAuth(session).userId;
         } catch (err) {
+          getLogger(["folio", "web", "export"]).warning("export unauthorized");
           return err instanceof Response ? err : new Response("Unauthorized", { status: 401 });
         }
+        getLogger(["folio", "web", "export"]).info("export started", { userId });
 
         const encoder = new TextEncoder();
         const stream = new ReadableStream<Uint8Array>({

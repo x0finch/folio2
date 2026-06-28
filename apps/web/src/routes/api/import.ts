@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { type AccountType, getProvider, publicKeys, secretKeys, semiKeys } from "@folio/core";
 import { addAccountToGroup, createAccount, createGroup, writeSnapshot } from "@folio/db";
 import { appRegistry } from "@folio/sync";
+import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/api/import")({
         try {
           userId = resolveAuth(session).userId;
         } catch (err) {
+          getLogger(["folio", "web", "import"]).warning("import unauthorized");
           return err instanceof Response ? err : new Response("Unauthorized", { status: 401 });
         }
         const reader = request.body?.getReader();
@@ -60,9 +62,14 @@ export const Route = createFileRoute("/api/import")({
           }
           const last = parseImportLine(buffer); // 末尾无换行的一行
           if (last) await importer.apply(last);
+          getLogger(["folio", "web", "import"]).info("import complete", {
+            userId,
+            ...importer.counts,
+          });
           return Response.json({ imported: importer.counts });
         } catch (err) {
           const msg = err instanceof ImportError ? err.message : "import failed";
+          getLogger(["folio", "web", "import"]).warning("import rejected", { userId, error: msg });
           return new Response(msg, { status: 400 });
         }
       },

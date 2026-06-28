@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getRawCreds, listAccountsByUser, writeSnapshot } from "@folio/db";
 import { type SyncDeps, syncUser } from "@folio/sync";
+import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { requireAuth } from "../require-auth";
 
@@ -18,10 +19,24 @@ export function buildSyncDeps(bindings: Cloudflare.Env): SyncDeps {
       ZERION_API_KEY: bindings.ZERION_API_KEY,
       COINSTATS_API_KEY: bindings.COINSTATS_API_KEY,
     },
+    // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
+    log: getLogger(["folio", "sync"]),
   };
 }
 
 // 手动触发同步:遍历该用户全部账户,逐账户隔离写快照。返回每账户 ok/fail,不含任何密钥/明文凭据。
+// userId 经 requireAuth 的 withContext 自动带入下游日志(ALS);此处再记一条触发汇总。
 export const triggerSync = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .handler(({ context }) => syncUser(buildSyncDeps(env), context.userId));
+  .handler(async ({ context }) => {
+    const result = await syncUser(buildSyncDeps(env), context.userId);
+    const ok = result.results.filter((r) => r.ok).length;
+    const skipped = result.results.filter((r) => r.skipped).length;
+    getLogger(["folio", "web", "sync"]).info("manual sync triggered", {
+      accounts: result.results.length,
+      ok,
+      skipped,
+      failed: result.results.length - ok - skipped,
+    });
+    return result;
+  });

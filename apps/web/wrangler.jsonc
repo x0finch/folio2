@@ -15,5 +15,9 @@
   ],
 
   // 定时同步(P6.3):每日 UTC 00:00 触发 src/server.ts 的 scheduled() 跑全量 sweep。
-  "triggers": { "crons": ["0 0 * * *"] }
+  "triggers": { "crons": ["0 0 * * *"] },
+
+  // 可观测性(P6.7):开启 Workers Logs —— 自动摄取 console.* / LogTape 的 console sink 输出,
+  // JSON 自动抽成可索引字段(Dashboard Query Builder + wrangler tail)。单用户 → 全量采样。
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
 }
