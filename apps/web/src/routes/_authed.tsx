@@ -30,6 +30,9 @@ function AuthedLayout() {
           <Link to="/accounts" className="text-muted-foreground [&.active]:text-foreground">
             {t("accounts")}
           </Link>
+          <Link to="/settings" className="text-muted-foreground [&.active]:text-foreground">
+            {t("settings")}
+          </Link>
         </nav>
         <div className="ml-auto flex items-center gap-4">
           <LocaleSwitcher />

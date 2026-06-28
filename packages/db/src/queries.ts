@@ -368,3 +368,33 @@ export async function getLatestSnapshotByUser(
   }
   return snaps.map((snapshot) => ({ snapshot, balances: bySnapshot.get(snapshot.id) ?? [] }));
 }
+
+// 导出用:分页取该用户全部快照(按 takenAt,id 稳定排序)。配合 listBalancesForSnapshots 一页页流式
+// 读出,内存恒定;每页配 inArray(≤ 页大小)取余额,避开 D1 100 绑定参数上限。
+export function listSnapshotsPageByUser(
+  env: DbEnv,
+  userId: string,
+  limit: number,
+  offset: number,
+): Promise<Snapshot[]> {
+  return getDb(env)
+    .select(getTableColumns(snapshots))
+    .from(snapshots)
+    .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+    .where(eq(accounts.userId, userId))
+    .orderBy(asc(snapshots.takenAt), asc(snapshots.id))
+    .limit(limit)
+    .offset(offset);
+}
+
+// 取指定快照的余额。调用方须保证 ids 数量 ≤ 分页大小(< D1 100 绑定参数上限)。
+export function listBalancesForSnapshots(
+  env: DbEnv,
+  snapshotIds: string[],
+): Promise<SnapshotBalance[]> {
+  if (snapshotIds.length === 0) return Promise.resolve([]);
+  return getDb(env)
+    .select()
+    .from(snapshotBalances)
+    .where(inArray(snapshotBalances.snapshotId, snapshotIds));
+}

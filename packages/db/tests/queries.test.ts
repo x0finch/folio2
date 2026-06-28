@@ -12,10 +12,12 @@ import {
   getLatestSnapshotByUser,
   listAccountsByGroup,
   listAccountsByUser,
+  listBalancesForSnapshots,
   listGroupsByAccount,
   listGroupsByUser,
   listMembershipsByUser,
   listSnapshotsByAccount,
+  listSnapshotsPageByUser,
   listSnapshotTotalsByUser,
   listUserIdsWithAccounts,
   removeAccountFromGroup,
@@ -324,6 +326,36 @@ describe("snapshots", () => {
   it("returns [] of totals for a user with no snapshots", async () => {
     await createAccount(env, USER_A, { type: "manual", label: "A", encCredentials: "x" });
     expect(await listSnapshotTotalsByUser(env, USER_A)).toEqual([]);
+  });
+
+  it("paginates snapshots (asc takenAt) and fetches balances by id (export)", async () => {
+    const a = await createAccount(env, USER_A, { type: "manual", label: "A", encCredentials: "x" });
+    const b1 = await createAccount(env, USER_B, {
+      type: "manual",
+      label: "B",
+      encCredentials: "x",
+    });
+    for (const t of [3000, 1000, 2000]) {
+      await writeSnapshot(env, USER_A, a.id, {
+        takenAt: t,
+        totalUsd: t,
+        balances: [{ symbol: `S${t}`, amount: 1, usdValue: t, kind: "spot", source: "s" }],
+      });
+    }
+    await writeSnapshot(env, USER_B, b1.id, { takenAt: 9, totalUsd: 9, balances: [] });
+
+    const page1 = await listSnapshotsPageByUser(env, USER_A, 2, 0);
+    const page2 = await listSnapshotsPageByUser(env, USER_A, 2, 2);
+    expect(page1.map((s) => s.takenAt)).toEqual([1000, 2000]); // asc, user A only
+    expect(page2.map((s) => s.takenAt)).toEqual([3000]);
+    expect(page2[0]!.accountId).toBe(a.id); // 不含 user B
+
+    const bal = await listBalancesForSnapshots(
+      env,
+      page1.map((s) => s.id),
+    );
+    expect(bal).toHaveLength(2);
+    expect(await listBalancesForSnapshots(env, [])).toEqual([]);
   });
 });
 

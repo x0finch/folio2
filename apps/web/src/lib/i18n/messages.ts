@@ -12,6 +12,7 @@ export const en = {
   Nav: {
     overview: "Overview",
     accounts: "Accounts",
+    settings: "Settings",
   },
   Login: {
     signInTitle: "Sign in to Folio",
@@ -88,6 +89,16 @@ export const en = {
     perpLabelPlaceholder: "e.g. HL main",
     addPerpBtn: "Add perp account",
   },
+  Settings: {
+    title: "Settings",
+    providerKeys: "Provider API keys",
+    configured: "Configured",
+    notConfigured: "Not configured",
+    export: "Export",
+    exportHint:
+      "Download all your data (accounts, groups, snapshots) as a file. API keys/secrets are never included.",
+    exportData: "Export data",
+  },
 };
 
 export type Messages = typeof en;
@@ -104,6 +115,7 @@ export const zh: Messages = {
   Nav: {
     overview: "总览",
     accounts: "账户",
+    settings: "设置",
   },
   Login: {
     signInTitle: "登录 Folio",
@@ -177,6 +189,15 @@ export const zh: Messages = {
     perpHint: "只读。永续仓位与保证金由 provider 拉取。",
     perpLabelPlaceholder: "如:HL 主账户",
     addPerpBtn: "添加永续账户",
+  },
+  Settings: {
+    title: "设置",
+    providerKeys: "Provider API key",
+    configured: "已配置",
+    notConfigured: "未配置",
+    export: "导出",
+    exportHint: "把你的全部数据(账户、分组、快照)导出为文件。API key/secret 绝不包含在内。",
+    exportData: "导出数据",
   },
 };
 
