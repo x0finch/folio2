@@ -23,7 +23,14 @@ describe("appRegistry inputs", () => {
         { key: "passphrase", type: "secret" },
       ],
     ],
-    ["manual", []],
+    [
+      "manual",
+      [
+        { key: "symbol", type: "public" },
+        { key: "amount", type: "public" },
+        { key: "usdValue", type: "public" },
+      ],
+    ],
   ];
   for (const [type, expected] of cases) {
     it(`${type} inputs → ${JSON.stringify(expected)}`, () => {

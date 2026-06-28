@@ -65,13 +65,6 @@ export const Route = createFileRoute("/_authed/accounts")({
   component: Accounts,
 });
 
-interface HoldingRow {
-  symbol: string;
-  amount: string;
-  usdValue: string;
-}
-const emptyRow = (): HoldingRow => ({ symbol: "", amount: "", usdValue: "" });
-
 function Accounts() {
   const router = useRouter();
   const t = useTranslations("Accounts");
@@ -89,8 +82,11 @@ function Accounts() {
   const [groupName, setGroupName] = useState("");
   const [groupError, setGroupError] = useState<string | null>(null);
 
+  // manual 录入(一账户一资产)
   const [label, setLabel] = useState("");
-  const [rows, setRows] = useState<HoldingRow[]>([emptyRow()]);
+  const [mSymbol, setMSymbol] = useState("");
+  const [mAmount, setMAmount] = useState("");
+  const [mUsd, setMUsd] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
@@ -154,10 +150,6 @@ function Accounts() {
     }
   }
 
-  function setRow(i: number, patch: Partial<HoldingRow>) {
-    setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-  }
-
   async function onCreateExchange(e: React.FormEvent) {
     e.preventDefault();
     setExError(null);
@@ -219,22 +211,15 @@ function Accounts() {
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const holdings = rows
-      .filter((r) => r.symbol.trim())
-      .map((r) => ({
-        symbol: r.symbol.trim(),
-        amount: Number(r.amount),
-        usdValue: Number(r.usdValue),
-      }));
-    if (holdings.length === 0) {
-      setError(t("atLeastOneHolding"));
-      return;
-    }
     setBusy(true);
     try {
-      await createManualAccount({ data: { label, holdings } });
+      await createManualAccount({
+        data: { label, symbol: mSymbol, amount: mAmount, usdValue: mUsd },
+      });
       setLabel("");
-      setRows([emptyRow()]);
+      setMSymbol("");
+      setMAmount("");
+      setMUsd("");
       await router.invalidate();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -405,54 +390,39 @@ function Accounts() {
                 placeholder={t("manualLabelPlaceholder")}
               />
             </div>
-
             <div className="flex flex-col gap-2">
-              <Label>{t("holdings")}</Label>
-              {rows.map((r, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional inputs
-                <div key={i} className="flex gap-2">
-                  <Input
-                    aria-label="Symbol"
-                    placeholder="BTC"
-                    value={r.symbol}
-                    onChange={(e) => setRow(i, { symbol: e.target.value })}
-                  />
-                  <Input
-                    aria-label="Amount"
-                    type="number"
-                    step="any"
-                    placeholder="0.5"
-                    value={r.amount}
-                    onChange={(e) => setRow(i, { amount: e.target.value })}
-                  />
-                  <Input
-                    aria-label="USD value"
-                    type="number"
-                    step="any"
-                    placeholder="32000"
-                    value={r.usdValue}
-                    onChange={(e) => setRow(i, { usdValue: e.target.value })}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={rows.length === 1}
-                    onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}
-                  >
-                    ✕
-                  </Button>
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="self-start"
-                onClick={() => setRows((rs) => [...rs, emptyRow()])}
-              >
-                {t("addHolding")}
-              </Button>
+              <Label htmlFor="m-symbol">{t("symbol")}</Label>
+              <Input
+                id="m-symbol"
+                required
+                value={mSymbol}
+                onChange={(e) => setMSymbol(e.target.value)}
+                placeholder="BTC"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="m-amount">{t("amount")}</Label>
+              <Input
+                id="m-amount"
+                type="number"
+                step="any"
+                required
+                value={mAmount}
+                onChange={(e) => setMAmount(e.target.value)}
+                placeholder="0.5"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="m-usd">{t("usdValue")}</Label>
+              <Input
+                id="m-usd"
+                type="number"
+                step="any"
+                required
+                value={mUsd}
+                onChange={(e) => setMUsd(e.target.value)}
+                placeholder="32000"
+              />
             </div>
 
             {error && <p className="text-sm text-destructive">{error}</p>}

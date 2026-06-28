@@ -1,41 +1,25 @@
-import { type Balance, type BalanceProvider, defineProvider, type ManualData } from "@folio/core";
+import { type Balance, type BalanceProvider, defineProvider } from "@folio/core";
+import { z } from "zod";
 
-// @folio/provider-custom —— 手动资产(manual)。无外部 API:持仓由用户录入,
-// 经 account.data.holdings 传入(落库时加密,sync 解密后组进 FetchContext)。
-// usdValue 用户直接录入(自动定价为后续增强)。
-
-function isValidHolding(h: unknown): boolean {
-  if (typeof h !== "object" || h === null) return false;
-  const { symbol, amount, usdValue } = h as Record<string, unknown>;
-  return (
-    typeof symbol === "string" &&
-    symbol.trim().length > 0 &&
-    typeof amount === "number" &&
-    Number.isFinite(amount) &&
-    typeof usdValue === "number" &&
-    Number.isFinite(usdValue)
-  );
-}
-
+// @folio/provider-custom —— 手动资产(manual)。无外部 API:一个账户 = 一个手记资产。
+// 三个 public 输入(symbol/amount/usdValue)走 creds(明文落库、导出原样、可重建);
+// fetchBalances 把它们 map 成单条 Balance。usdValue 用户直接录入(自动定价为后续增强)。
 export const customProvider = defineProvider({
   accountType: "manual",
-  inputs: [], // manual 无账户输入(持仓走 Account.data,非 creds)
+  inputs: [
+    { key: "symbol", type: "public", label: "Symbol", validator: z.string().trim().min(1) },
+    { key: "amount", type: "public", label: "Amount", validator: z.coerce.number() },
+    { key: "usdValue", type: "public", label: "USD Value", validator: z.coerce.number() },
+  ],
 
   async fetchBalances(ctx): Promise<Balance[]> {
-    const holdings = (ctx.account.data as ManualData | undefined)?.holdings ?? [];
-    return holdings.map((h) => ({
-      symbol: h.symbol,
-      amount: h.amount,
-      usdValue: h.usdValue,
-      source: "manual",
-      kind: "manual" as const,
-    }));
+    const { symbol, amount, usdValue } = ctx.creds;
+    return [{ symbol, amount, usdValue, source: "manual", kind: "manual" as const }];
   },
 
-  async validate(ctx): Promise<boolean> {
-    const holdings = (ctx.account.data as ManualData | undefined)?.holdings;
-    if (!Array.isArray(holdings) || holdings.length === 0) return false;
-    return holdings.every(isValidHolding);
+  // 无外部源;creds 已由 sync/创建流的 validateCredentials(inputs) 校验过。
+  async validate(): Promise<boolean> {
+    return true;
   },
 });
 

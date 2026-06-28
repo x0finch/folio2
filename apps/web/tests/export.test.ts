@@ -22,13 +22,13 @@ describe("metaRecord", () => {
 });
 
 describe("accountRecord", () => {
-  it("attaches the (already-safe) creds + parses dataJson (manual holdings)", () => {
+  it("attaches the (already-safe) creds (P6.6.2: manual holdings ride creds, no data field)", () => {
     const rec = accountRecord(
-      { id: "m", type: "manual", network: null, label: "M", dataJson: '{"holdings":[]}' },
-      { apiKey: "ABCD…5678" }, // route 已用 safeView 脱敏
+      { id: "m", type: "manual", network: null, label: "M" },
+      { symbol: "BTC", amount: "0.5", usdValue: "32000" }, // creds map 是字符串 map(route 经 safeView)
     );
-    expect(rec.data).toEqual({ holdings: [] });
-    expect(rec.creds).toEqual({ apiKey: "ABCD…5678" });
+    expect(rec.creds).toEqual({ symbol: "BTC", amount: "0.5", usdValue: "32000" });
+    expect(rec).not.toHaveProperty("data");
     expect(ndjsonLine(rec).endsWith("\n")).toBe(true);
   });
 });

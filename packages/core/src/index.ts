@@ -24,14 +24,11 @@ export type { ProviderRegistry } from "./registry";
 export { buildRegistry, getProvider } from "./registry";
 export type {
   Account,
-  AccountData,
   AccountType,
   AssetSnapshot,
   Balance,
   BalanceKind,
   DefiMeta,
-  ManualData,
-  ManualHolding,
   PerpEquityMeta,
   PerpMeta,
   PerpPositionMeta,

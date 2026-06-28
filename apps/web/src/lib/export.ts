@@ -8,7 +8,6 @@ interface AccountIn {
   type: string;
   network: string | null;
   label: string;
-  dataJson: string | null;
 }
 interface GroupIn {
   id: string;
@@ -44,6 +43,7 @@ export function metaRecord(exportedAt: number) {
 }
 
 // 账户记录。safeCreds 须为已脱敏的 creds(由 route 经 @folio/core safeView 算出:public 原样、semi 打码、无 secret)。
+// manual 持仓(symbol/amount/usdValue)也是 public creds,随 creds 一并导出(P6.6.2,不再有独立 data 字段)。
 export function accountRecord(account: AccountIn, safeCreds: Record<string, string>) {
   return {
     type: "account" as const,
@@ -51,7 +51,6 @@ export function accountRecord(account: AccountIn, safeCreds: Record<string, stri
     accountType: account.type,
     network: account.network ?? undefined,
     label: account.label,
-    data: safeParse(account.dataJson),
     creds: safeCreds,
   };
 }

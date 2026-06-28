@@ -32,7 +32,6 @@ export interface ImportDeps {
     network?: string;
     label: string;
     creds: string;
-    dataJson?: string;
   }): Promise<{ id: string }>;
   createGroup(input: { name: string; sortOrder?: number }): Promise<{ id: string }>;
   addAccountToGroup(accountId: string, groupId: string): Promise<void>;
@@ -93,7 +92,6 @@ export function createImporter(deps: ImportDeps) {
           network: typeof rec.network === "string" ? rec.network : undefined,
           label: String(rec.label ?? ""),
           creds: JSON.stringify(stored),
-          dataJson: rec.data !== undefined ? JSON.stringify(rec.data) : undefined,
         });
         if (typeof rec.id === "string") accountMap.set(rec.id, created.id);
         counts.accounts++;

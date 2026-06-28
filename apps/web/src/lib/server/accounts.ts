@@ -20,7 +20,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireAuth } from "../require-auth";
 
-// 真值 creds → 存库 map 的 JSON(secret 字段加密、public/semi 明文,见 @folio/core sealCreds)。
+// 原始字符串输入 → 存库 map 的 JSON(secret 字段加密、public/semi 明文,见 @folio/core sealCreds)。
+// 传【原始字符串】(已过 validateCredentials 校验闸);不传其 coerce 输出,保持 creds 为字符串 map。
 function sealJson(
   inputs: readonly ProviderInput[],
   values: Record<string, string>,
@@ -48,7 +49,7 @@ export const listMyAccounts = createServerFn({ method: "GET" })
       return {
         ...a,
         needsCredentials: !isComplete(inputs, stored),
-        credsSafe: safeView(inputs, stored),
+        credsSafe: safeView(inputs, stored), // Record<string,string>(public 原样 / semi 打码)→ JSON 可序列化
       };
     });
   });
@@ -57,31 +58,25 @@ export const listMyAccounts = createServerFn({ method: "GET" })
 // 全由声明派生,见 @folio/core validateCredentials)。外层 zod 只管 wire 形状(type 白名单 + label
 // + 字段存在),不再手写 per-type 的地址正则 / passphrase refine。
 
+// 一个 manual 账户 = 一个手记资产:symbol/amount/usdValue 三个 public 输入,走 creds(明文,见 P6.6.2)。
+// wire 全字符串(amount/usdValue 的数值性由 provider.inputs 的 z.coerce.number 经 validateCredentials 校验)。
 const ManualInput = z.object({
   label: z.string().trim().min(1, "label is required"),
-  holdings: z
-    .array(
-      z.object({
-        symbol: z.string().trim().min(1),
-        amount: z.number(),
-        usdValue: z.number(),
-      }),
-    )
-    .min(1, "add at least one holding"),
+  symbol: z.string().trim().min(1, "symbol is required"),
+  amount: z.string().trim().min(1, "amount is required"),
+  usdValue: z.string().trim().min(1, "usdValue is required"),
 });
-
-// 新建 manual 账户:持仓为非凭据域数据 → 明文 dataJson;manual 无输入 → creds 为空 map "{}"。
 export const createManualAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(ManualInput)
   .handler(async ({ data, context }) => {
-    const creds = await sealJson(getProvider(appRegistry, "manual").inputs ?? [], {});
-    const dataJson = JSON.stringify({ holdings: data.holdings });
+    const inputs = getProvider(appRegistry, "manual").inputs ?? [];
+    const raw = { symbol: data.symbol, amount: data.amount, usdValue: data.usdValue };
+    await validateCredentials(inputs, raw); // 校验闸(amount/usdValue 可 coerce 成数值,否则抛)
     return createAccount(env, context.userId, {
       type: "manual",
       label: data.label,
-      creds,
-      dataJson,
+      creds: await sealJson(inputs, raw),
     });
   });
 
@@ -101,7 +96,8 @@ async function createAddressAccount(
 ): Promise<Awaited<ReturnType<typeof createAccount>>> {
   const provider = getProvider(appRegistry, type);
   const inputs = provider.inputs ?? [];
-  const creds = await validateCredentials(inputs, { identifier: address });
+  const raw = { identifier: address };
+  const creds = await validateCredentials(inputs, raw); // 校验 + 给 ctx 做 liveness
   const ctx: FetchContext = {
     account: { id: "new", userId, type, label },
     creds,
@@ -111,13 +107,13 @@ async function createAddressAccount(
   if (!(await provider.validate(ctx))) {
     throw new Error("could not verify the address — please check it and try again");
   }
-  return createAccount(env, userId, { type, label, creds: await sealJson(inputs, creds) });
+  return createAccount(env, userId, { type, label, creds: await sealJson(inputs, raw) });
 }
 
 const OnchainInput = z.object({
   type: z.enum(["onchain_evm", "onchain_solana", "onchain_sui", "onchain_cosmos"]),
   label: z.string().trim().min(1, "label is required"),
-  address: z.string(),
+  address: z.string().trim(), // seal 的是原始输入 → wire 先 trim 保持落库规范
 });
 export const createOnchainAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
@@ -129,7 +125,7 @@ export const createOnchainAccount = createServerFn({ method: "POST" })
 const PerpInput = z.object({
   type: z.enum(["perp_hyperliquid"]),
   label: z.string().trim().min(1, "label is required"),
-  address: z.string(),
+  address: z.string().trim(),
 });
 export const createPerpAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
@@ -143,9 +139,9 @@ export const createPerpAccount = createServerFn({ method: "POST" })
 const ExchangeInput = z.object({
   type: z.enum(["exchange_binance", "exchange_okx"]),
   label: z.string().trim().min(1, "label is required"),
-  apiKey: z.string(),
-  secret: z.string(),
-  passphrase: z.string().optional(),
+  apiKey: z.string().trim(), // seal 原始输入 → wire 先 trim
+  secret: z.string().trim(),
+  passphrase: z.string().trim().optional(),
 });
 export const createExchangeAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
@@ -153,11 +149,10 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const provider = getProvider(appRegistry, data.type);
     const inputs = provider.inputs ?? [];
-    const creds = await validateCredentials(inputs, {
-      apiKey: data.apiKey,
-      secret: data.secret,
-      passphrase: data.passphrase,
-    });
+    // passphrase 可选(仅 okx):缺省则不放进 values,由 provider.inputs 的 validator 判定是否必填。
+    const values: Record<string, string> = { apiKey: data.apiKey, secret: data.secret };
+    if (data.passphrase !== undefined) values.passphrase = data.passphrase;
+    const creds = await validateCredentials(inputs, values);
     const ctx: FetchContext = {
       account: { id: "new", userId: context.userId, type: data.type, label: data.label },
       creds, // CEX 走 ctx.creds、无 usesGlobalKeys → scopeGlobalKeys 给 {}
@@ -169,7 +164,7 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
     return createAccount(env, context.userId, {
       type: data.type,
       label: data.label,
-      creds: await sealJson(inputs, creds),
+      creds: await sealJson(inputs, values), // seal 原始字符串(非 coerce 输出)
     });
   });
 
@@ -177,7 +172,7 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
 // sealCreds 整张 map 覆盖(占位被真值替换)。creds 字段值的真校验由 validateCredentials(inputs) 负责。
 const ProvideCredentialsInput = z.object({
   accountId: z.string().min(1),
-  creds: z.record(z.string(), z.string()),
+  creds: z.record(z.string(), z.string().trim()), // seal 原始输入 → 值先 trim
 });
 export const provideCredentials = createServerFn({ method: "POST" })
   .middleware([requireAuth])
@@ -196,6 +191,11 @@ export const provideCredentials = createServerFn({ method: "POST" })
     if (!(await provider.validate(ctx))) {
       throw new Error("could not verify these credentials — please check them and try again");
     }
-    await setAccountCredentials(env, context.userId, account.id, await sealJson(inputs, creds));
+    await setAccountCredentials(
+      env,
+      context.userId,
+      account.id,
+      await sealJson(inputs, data.creds),
+    );
     return { ok: true as const };
   });

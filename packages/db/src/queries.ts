@@ -8,14 +8,12 @@ import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-typ
 const BALANCE_INSERT_CHUNK = 12;
 
 // 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
-// dataJson 是非凭据域数据(明文持仓),随安全形状返回供 sync 组 FetchContext.account.data。
 const accountSafeColumns = {
   id: accounts.id,
   userId: accounts.userId,
   type: accounts.type,
   network: accounts.network,
   label: accounts.label,
-  dataJson: accounts.dataJson,
   createdAt: accounts.createdAt,
 };
 
@@ -43,7 +41,6 @@ export interface CreateAccountInput {
   network?: string;
   label: string;
   creds: string | null; // 凭据 map 的 JSON(db 不解释);缺凭据态由 isComplete(inputs, creds) 在内存判定
-  dataJson?: string; // 非凭据域数据的明文 JSON(manual 持仓),可空;db 不解释
 }
 
 export async function createAccount(
@@ -55,7 +52,6 @@ export async function createAccount(
   const id = crypto.randomUUID();
   const createdAt = Date.now();
   const network = input.network ?? null;
-  const dataJson = input.dataJson ?? null;
   await db.insert(accounts).values({
     id,
     userId,
@@ -63,10 +59,9 @@ export async function createAccount(
     network,
     label: input.label,
     creds: input.creds,
-    dataJson,
     createdAt,
   });
-  return { id, userId, type: input.type, network, label: input.label, dataJson, createdAt };
+  return { id, userId, type: input.type, network, label: input.label, createdAt };
 }
 
 export function listAccountsByUser(env: DbEnv, userId: string): Promise<AccountSafe[]> {

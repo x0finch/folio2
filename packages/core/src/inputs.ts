@@ -29,11 +29,13 @@ export class CredentialValidationError extends Error {}
 // 逐字段跑各 input 的 Standard Schema 校验,产出已校验的 creds(只含 inputs 声明的字段);任一不过
 // 即抛 CredentialValidationError(`<key>: <message>`)。创建账户与同步(构造 FetchContext 前)共用 →
 // ctx.creds 在运行时即保证符合 inputs,给 CredsOf 类型以运行时背书。
+// 输入恒为字符串 map(表单 / 解密后的 creds);各 validator 把 string coerce 成各自输出类型(如 number),
+// 故返回是异构 Record<string,unknown>(供 provider 按 CredsOf 消费)。
 export async function validateCredentials(
   inputs: readonly ProviderInput[],
-  values: Record<string, unknown>,
-): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
+  values: Record<string, string>,
+): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
   for (const input of inputs) {
     let result = input.validator["~standard"].validate(values[input.key]);
     if (result instanceof Promise) result = await result;

@@ -36,8 +36,8 @@ export const accounts = sqliteTable(
     // public/semi 明文;导入待补录的 semi 以 `semi_<key>` 占位记录打码片段(见 @folio/core creds.ts / P6.6.1)。
     // 缺凭据态由 `isComplete(provider.inputs, creds)` 在内存判定,不再用列是否为 null。
     // 物理列名沿用历史的 `enc_credentials`(P1.4 起,避免一次纯改名迁移);字段名 creds 才是当前语义。
+    // P6.6.2:manual 持仓也并入 creds(symbol/amount/usdValue 三个 public 输入),原 data_json 列已删。
     creds: text("enc_credentials"),
-    dataJson: text("data_json"), // 非凭据的账户域数据(manual 持仓)的【明文】JSON,可空;db 不解释内容(见 arch §3)
     createdAt: integer("created_at").notNull(), // epoch ms
   },
   (t) => [index("accounts_user_id_idx").on(t.userId)],

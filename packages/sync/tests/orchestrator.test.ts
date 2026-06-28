@@ -7,7 +7,7 @@ import { appRegistry } from "../src/registry";
 
 const secretsKey = generateSecret();
 
-// 一个 manual 账户的安全形状(dataJson 明文持仓;creds map 在 deps 的 getRawCreds 里给空 "{}")。
+// 一个账户的安全形状(creds map 经 deps.getRawCreds 提供;manual 持仓也走 creds,见 P6.6.2)。
 function manualAccount(overrides: Partial<AccountSafe> = {}): AccountSafe {
   return {
     id: "a-manual",
@@ -15,16 +15,12 @@ function manualAccount(overrides: Partial<AccountSafe> = {}): AccountSafe {
     type: "manual",
     network: null,
     label: "Manual wallet",
-    dataJson: JSON.stringify({
-      holdings: [
-        { symbol: "BTC", amount: 0.5, usdValue: 32000 },
-        { symbol: "ETH", amount: 4, usdValue: 12000 },
-      ],
-    }),
     createdAt: 0,
     ...overrides,
   };
 }
+// manual 的单资产 creds(走 getRawCreds;creds map 是字符串 map,amount/usdValue 由 validator coerce 成 number)。
+const MANUAL_CREDS = JSON.stringify({ symbol: "BTC", amount: "0.5", usdValue: "32000" });
 
 // 收集 writeSnapshot 调用,便于断言传入形状。getRawCreds 默认给空 map "{}"(manual 无输入 → isComplete)。
 function makeDeps(
@@ -47,9 +43,9 @@ function makeDeps(
 }
 
 describe("syncUser — manual 端到端", () => {
-  it("解密 → 组 FetchContext → 写出 manual 快照(kind/source=manual,totalUsd 求和)", async () => {
+  it("creds(symbol/amount/usdValue)→ 组 FetchContext → 写出单条 manual 快照", async () => {
     const account = manualAccount();
-    const { deps, writes } = makeDeps([account]);
+    const { deps, writes } = makeDeps([account], { getRawCreds: async () => MANUAL_CREDS });
 
     const { results } = await syncUser(deps, "u1");
 
@@ -58,18 +54,20 @@ describe("syncUser — manual 端到端", () => {
       accountId: "a-manual",
       ok: true,
       snapshotId: "snap-a-manual",
-      totalUsd: 44000,
+      totalUsd: 32000,
     });
 
     expect(writes).toHaveLength(1);
     const { input } = writes[0];
-    expect(input.totalUsd).toBe(44000);
-    expect(input.balances).toHaveLength(2);
-    for (const b of input.balances) {
-      expect(b.kind).toBe("manual");
-      expect(b.source).toBe("manual");
-    }
-    expect(input.balances.find((b) => b.symbol === "BTC")?.usdValue).toBe(32000);
+    expect(input.totalUsd).toBe(32000);
+    expect(input.balances).toHaveLength(1);
+    expect(input.balances[0]).toMatchObject({
+      symbol: "BTC",
+      amount: 0.5,
+      usdValue: 32000,
+      kind: "manual",
+      source: "manual",
+    });
   });
 });
 
@@ -86,8 +84,12 @@ describe("syncUser — 失败隔离", () => {
 
   it("坏账户 ok:false 不阻断好账户;syncUser 不抛;只为好账户写快照", async () => {
     const good = manualAccount({ id: "good" });
-    const bad = manualAccount({ id: "bad", type: "exchange_binance", dataJson: null });
-    const { deps, writes } = makeDeps([good, bad], { registry });
+    const bad = manualAccount({ id: "bad", type: "exchange_binance" });
+    // good=manual 用真 creds 成功;bad 走 throwing(无 inputs → isComplete 通过)→ fetch 抛 boom。
+    const { deps, writes } = makeDeps([good, bad], {
+      registry,
+      getRawCreds: async () => MANUAL_CREDS,
+    });
 
     const { results } = await syncUser(deps, "u1");
 
@@ -106,7 +108,7 @@ describe("syncUser — 失败隔离", () => {
 describe("syncAccount — 缺凭据跳过", () => {
   it("!isComplete(导入待补录:binance 的 apiKey/secret 缺真值)→ ok:false skipped:true,不拉取/不写快照", async () => {
     // 用真 appRegistry(binance 有 apiKey(semi)+secret(secret) 输入);creds 为空 map → 不完整。
-    const acc = manualAccount({ id: "needs", type: "exchange_binance", dataJson: null });
+    const acc = manualAccount({ id: "needs", type: "exchange_binance" });
     const { deps, writes } = makeDeps([acc], { getRawCreds: async () => "{}" });
 
     const { results } = await syncUser(deps, "u1");
@@ -116,22 +118,26 @@ describe("syncAccount — 缺凭据跳过", () => {
   });
 });
 
-describe("runAccountSync — 求和与空持仓", () => {
-  it("totalUsd 为各持仓之和", async () => {
-    const account = manualAccount();
-    const data = JSON.parse(account.dataJson as string);
+describe("runAccountSync — 求和与空 balances", () => {
+  it("manual 单资产 → 单条 balance,totalUsd = usdValue", async () => {
     const { balances, totalUsd } = await runAccountSync(appRegistry, {
-      account: { id: "x", userId: "u1", type: "manual", label: "M", data },
-      creds: {},
+      account: { id: "x", userId: "u1", type: "manual", label: "M" },
+      creds: { symbol: "BTC", amount: 0.5, usdValue: 32000 },
       globalKeys: {},
     });
-    expect(balances).toHaveLength(2);
-    expect(totalUsd).toBe(44000);
+    expect(balances).toHaveLength(1);
+    expect(totalUsd).toBe(32000);
   });
 
-  it("无持仓 → 空 balances、totalUsd 0,仍写空快照", async () => {
-    const empty = manualAccount({ id: "empty", dataJson: null });
-    const { deps, writes } = makeDeps([empty]);
+  it("provider 返回空 balances → ok:true、totalUsd 0、仍写空快照", async () => {
+    const emptyProvider: BalanceProvider = {
+      accountType: "onchain_evm",
+      fetchBalances: async () => [],
+      validate: async () => true,
+    };
+    const registry = buildRegistry([emptyProvider]);
+    const acc = manualAccount({ id: "empty", type: "onchain_evm" });
+    const { deps, writes } = makeDeps([acc], { registry }); // 无 inputs → isComplete("{}") 通过
 
     const { results } = await syncUser(deps, "u1");
 
@@ -156,7 +162,7 @@ describe("syncAccount — 全局 key 最小权限下发", () => {
       validate: async () => true,
     };
     const registry = buildRegistry([capturing]);
-    const account = manualAccount({ id: "evm", type: "onchain_evm", dataJson: null });
+    const account = manualAccount({ id: "evm", type: "onchain_evm" });
     const { deps } = makeDeps([account], {
       registry,
       globalKeys: { ZERION_API_KEY: "zk", OTHER_KEY: "secret" },
@@ -179,7 +185,7 @@ describe("syncAccount — 全局 key 最小权限下发", () => {
       validate: async () => true,
     };
     const registry = buildRegistry([noKeys]);
-    const account = manualAccount({ id: "evm", type: "onchain_evm", dataJson: null });
+    const account = manualAccount({ id: "evm", type: "onchain_evm" });
     const { deps } = makeDeps([account], {
       registry,
       globalKeys: { ZERION_API_KEY: "zk", OTHER_KEY: "secret" },
@@ -206,7 +212,7 @@ describe("syncAccount — 退避重试", () => {
     };
     return { registry: buildRegistry([provider]), calls: () => calls };
   }
-  const evm = () => manualAccount({ id: "evm", type: "onchain_evm", dataJson: null });
+  const evm = () => manualAccount({ id: "evm", type: "onchain_evm" });
 
   it("retries a retryable error and succeeds; honors Retry-After (retryAfterMs)", async () => {
     const slept: number[] = [];

@@ -1,33 +1,23 @@
-import type { Account, AccountData, FetchContext } from "@folio/core";
+import { type FetchContext, publicKeys } from "@folio/core";
 import { describe, expect, it } from "vitest";
 import { customProvider } from "../src";
 
-function ctxWith(data: AccountData | undefined): FetchContext {
-  const account: Account = { id: "a1", userId: "u1", type: "manual", label: "Manual", data };
-  return { account, creds: {}, globalKeys: {} };
-}
+describe("customProvider inputs / validate", () => {
+  it("declares symbol/amount/usdValue as public inputs", () => {
+    expect((customProvider.inputs ?? []).map((i) => [i.key, i.type])).toEqual([
+      ["symbol", "public"],
+      ["amount", "public"],
+      ["usdValue", "public"],
+    ]);
+    expect(publicKeys(customProvider.inputs ?? [])).toEqual(["symbol", "amount", "usdValue"]);
+  });
 
-describe("customProvider.validate", () => {
-  it("accepts well-formed holdings", async () => {
-    const ctx = ctxWith({ holdings: [{ symbol: "BTC", amount: 0.5, usdValue: 32000 }] });
+  it("validate is true (no external source; creds validated upstream by validateCredentials)", async () => {
+    const ctx: FetchContext = {
+      account: { id: "a", userId: "u", type: "manual", label: "M" },
+      creds: {},
+      globalKeys: {},
+    };
     expect(await customProvider.validate(ctx)).toBe(true);
-  });
-
-  it("rejects missing / empty holdings", async () => {
-    expect(await customProvider.validate(ctxWith(undefined))).toBe(false);
-    expect(await customProvider.validate(ctxWith({ holdings: [] }))).toBe(false);
-  });
-
-  it("rejects malformed holdings (empty symbol / non-finite numbers)", async () => {
-    expect(
-      await customProvider.validate(
-        ctxWith({ holdings: [{ symbol: "", amount: 1, usdValue: 1 }] }),
-      ),
-    ).toBe(false);
-    expect(
-      await customProvider.validate(
-        ctxWith({ holdings: [{ symbol: "BTC", amount: Number.NaN, usdValue: 1 }] }),
-      ),
-    ).toBe(false);
   });
 });

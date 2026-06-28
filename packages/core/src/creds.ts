@@ -7,7 +7,9 @@ import type { ProviderInput } from "./provider";
 // 无字段名硬编码。导入待补录账户用 SEMI_PREFIX 占位记录 semi 的打码片段(区分"占位 vs 真值")。
 export const SEMI_PREFIX = "semi_";
 
-// 真值 → 存库 map:secret 逐个加密,public/semi 明文。只收 values 里出现的字段(创建/补录用)。
+// creds map 统一是【字符串 map】:存库一律存 string(secret 加密,public/semi 原样)。number 等类型
+// 只在 validateCredentials 的【输出】(coerce 后)与 CredsOf 出现,供 provider 消费;存储/导出/导入全程 string。
+// 调用方传【原始字符串输入】(validateCredentials 只作校验闸,不把 coerce 输出回灌这里)。
 export async function sealCreds(
   inputs: readonly ProviderInput[],
   values: Record<string, string>,
@@ -22,7 +24,8 @@ export async function sealCreds(
   return out;
 }
 
-// 存库 map → 真值 creds(给 sync):secret 解密,其余原样。缺失/占位字段不带出(由 isComplete 把关)。
+// 存库 map → creds(给 sync 校验):secret 解密,其余原样(均 string)。validateCredentials 再 coerce 成各自类型。
+// 缺失/占位字段不带出(由 isComplete 把关)。
 export async function openCreds(
   inputs: readonly ProviderInput[],
   stored: Record<string, string>,
@@ -48,7 +51,8 @@ export function safeView(
     if (input.type === "public") {
       if (stored[input.key] != null) out[input.key] = stored[input.key];
     } else if (input.type === "semi") {
-      if (stored[input.key] != null) out[input.key] = maskCredential(stored[input.key]);
+      const v = stored[input.key];
+      if (v != null) out[input.key] = maskCredential(v);
       else {
         const placeholder = stored[SEMI_PREFIX + input.key];
         if (placeholder != null) out[input.key] = placeholder;

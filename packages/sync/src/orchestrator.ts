@@ -106,15 +106,12 @@ export async function syncAccount(
     const opened = await openCreds(inputs, stored, deps.secretsKey);
     // 运行时闸:按 provider.inputs 的 validator 校验,通过才进 FetchContext;脏/缺数据 → 本账户 fail。
     const creds = await validateCredentials(inputs, opened);
-    // 非密钥账户数据(manual 持仓)为明文 JSON,直接 parse。
-    const data = account.dataJson ? JSON.parse(account.dataJson) : undefined;
     const acc: Account = {
       id: account.id,
       userId: account.userId,
       type: account.type,
       network: account.network ?? undefined,
       label: account.label,
-      data,
     };
     // 最小权限:只把本 provider 声明用到的全局 key 下发,拿不到别家的(见 BalanceProvider.usesGlobalKeys)。
     const globalKeys = scopeGlobalKeys(deps.globalKeys, provider.usesGlobalKeys);

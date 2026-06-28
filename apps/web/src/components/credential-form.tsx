@@ -17,7 +17,7 @@ export function CredentialForm({
 }: {
   accountId: string;
   specs: InputSpec[];
-  hint?: Record<string, string>;
+  hint?: Record<string, string>; // credsSafe(safeView):public 原样、semi 打码,均为 string
   onDone: () => void;
 }) {
   const ti = useTranslations("Inputs");
@@ -31,8 +31,8 @@ export function CredentialForm({
   // 与打码片段对不上的 semi 字段(首尾比对)。空 = 一致或无片段。
   function mismatchedSemiKeys(): string[] {
     return specs
-      .filter((s) => s.type === "semi" && hint?.[s.key])
-      .filter((s) => maskCredential(values[s.key] ?? "") !== hint?.[s.key])
+      .filter((s) => s.type === "semi" && hint?.[s.key] != null)
+      .filter((s) => maskCredential(values[s.key] ?? "") !== String(hint?.[s.key]))
       .map((s) => s.key);
   }
 

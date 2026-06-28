@@ -4,34 +4,18 @@ import { type SyncDeps, syncAllUsers } from "../src";
 
 // manual 账户(成功路径);bad-type 账户(无 provider → getProvider 抛 → syncAccount 捕获 → ok:false)。
 function manual(id: string, userId: string): AccountSafe {
-  return {
-    id,
-    userId,
-    type: "manual",
-    network: null,
-    label: id,
-    dataJson: JSON.stringify({ holdings: [{ symbol: "BTC", amount: 1, usdValue: 100 }] }),
-    createdAt: 0,
-  };
+  return { id, userId, type: "manual", network: null, label: id, createdAt: 0 };
 }
 function badType(id: string, userId: string): AccountSafe {
-  return {
-    id,
-    userId,
-    type: "exchange_bybit",
-    network: null,
-    label: id,
-    dataJson: null,
-    createdAt: 0,
-  };
+  return { id, userId, type: "exchange_bybit", network: null, label: id, createdAt: 0 };
 }
 
 // 按 userId 返回各自账户的注入式 deps(syncAllUsers 用一个 deps 跑所有用户)。
 function makeDeps(accountsByUser: Record<string, AccountSafe[]>): SyncDeps {
   return {
     listAccounts: async (userId) => accountsByUser[userId] ?? [],
-    // manual 的 creds 是空 map "{}"(无输入 → isComplete 通过)。
-    getRawCreds: async () => "{}",
+    // manual 单资产 creds(symbol/amount/usdValue)→ isComplete 通过、validateCredentials 通过。
+    getRawCreds: async () => JSON.stringify({ symbol: "BTC", amount: 1, usdValue: 100 }),
     writeSnapshot: async (_u, accountId) => `snap-${accountId}`,
     secretsKey: "k",
     globalKeys: {},
