@@ -22,6 +22,7 @@ import {
   createPerpAccount,
   listMyAccounts,
 } from "../../lib/server/accounts";
+import { getCredentialSpecs } from "../../lib/server/credentials";
 import {
   addAccountToGroup,
   createGroup,
@@ -53,8 +54,12 @@ type PerpType = (typeof PERP_TYPES)[number]["value"];
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
-    const [accounts, groups] = await Promise.all([listMyAccounts(), getMyGroups()]);
-    return { accounts, ...groups };
+    const [accounts, groups, credentialSpecs] = await Promise.all([
+      listMyAccounts(),
+      getMyGroups(),
+      getCredentialSpecs(),
+    ]);
+    return { accounts, ...groups, credentialSpecs };
   },
   component: Accounts,
 });
@@ -70,7 +75,7 @@ function Accounts() {
   const router = useRouter();
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const { accounts, groups, memberships } = Route.useLoaderData();
+  const { accounts, groups, memberships, credentialSpecs } = Route.useLoaderData();
   // accountId → 所属 groupId 集合(渲染勾选状态)。
   const groupIdsByAccount = new Map<string, Set<string>>();
   for (const m of memberships) {
@@ -104,6 +109,8 @@ function Accounts() {
   const [exPassphrase, setExPassphrase] = useState("");
   const [exError, setExError] = useState<string | null>(null);
   const [exBusy, setExBusy] = useState(false);
+  // 该交易所是否需要 passphrase(由 provider 的 inputs 派生,不再硬编码 okx)。
+  const exNeedsPassphrase = (credentialSpecs[exType] ?? []).some((i) => i.key === "passphrase");
 
   // 永续(perp)录入表单(只读地址)
   const [pType, setPType] = useState<PerpType>("perp_hyperliquid");
@@ -506,7 +513,7 @@ function Accounts() {
                 onChange={(e) => setExSecret(e.target.value)}
               />
             </div>
-            {exType === "exchange_okx" && (
+            {exNeedsPassphrase && (
               <div className="flex flex-col gap-2">
                 <Label htmlFor="ex-passphrase">{t("passphrase")}</Label>
                 <Input

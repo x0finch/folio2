@@ -110,16 +110,8 @@ describe("hyperliquidProvider.fetchBalances", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ type: "clearinghouseState", user: ADDR });
   });
 
-  it("throws INVALID_CREDENTIALS on missing/invalid address (no request)", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
-    await expect(hyperliquidProvider.fetchBalances(ctx({ creds: {} }))).rejects.toMatchObject({
-      code: "INVALID_CREDENTIALS",
-    });
-    await expect(
-      hyperliquidProvider.fetchBalances(ctx({ creds: { identifier: "not-an-address" } })),
-    ).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
-    expect(spy).not.toHaveBeenCalled();
-  });
+  // 地址格式校验已上移到 sync/create 的 validateCredentials(见 @folio/core inputs.test);
+  // hyperliquid 无全局 key,provider 本身不再预检 creds → 此处不测"无请求即拒"。
 
   it("maps 429 → RATE_LIMITED (retryable, parses Retry-After), 5xx → UPSTREAM_ERROR", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

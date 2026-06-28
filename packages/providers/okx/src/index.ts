@@ -1,11 +1,12 @@
 import {
   type Balance,
   type BalanceProvider,
-  type FetchContext,
+  defineProvider,
   hmacSha256,
   ProviderError,
   parseRetryAfter,
 } from "@folio/core";
+import { z } from "zod";
 import {
   AUTH_ERROR_CODES,
   BALANCE_PATH,
@@ -51,14 +52,6 @@ export function parseBalances(details: OkxDetail[]): Balance[] {
     });
   }
   return out;
-}
-
-function getCreds(ctx: FetchContext): { apiKey: string; secret: string; passphrase: string } {
-  const { apiKey, secret, passphrase } = ctx.creds;
-  if (!apiKey || !secret || !passphrase) {
-    throw new ProviderError("INVALID_CREDENTIALS", "missing OKX apiKey/secret/passphrase");
-  }
-  return { apiKey, secret, passphrase };
 }
 
 // 签名 GET:prehash = timestamp + 'GET' + requestPath;SIGN = base64(HMAC-SHA256)。
@@ -116,24 +109,26 @@ async function readBody(res: Response): Promise<OkxBalanceResponse> {
   }
 }
 
-export const okxProvider: BalanceProvider = {
+export const okxProvider = defineProvider({
   accountType: "exchange_okx",
+  inputs: [
+    { key: "apiKey", type: "secret", validator: z.string().trim().min(1) },
+    { key: "secret", type: "secret", validator: z.string().trim().min(1) },
+    { key: "passphrase", type: "secret", validator: z.string().trim().min(1) },
+  ],
 
-  async fetchBalances(ctx: FetchContext): Promise<Balance[]> {
-    const creds = getCreds(ctx);
-    const res = await okxGet(BALANCE_PATH, creds);
+  async fetchBalances(ctx): Promise<Balance[]> {
+    const res = await okxGet(BALANCE_PATH, ctx.creds);
     ensureHttpOk(res);
     const body = await readBody(res);
     assertCodeOk(body);
     return parseBalances(body.data?.[0]?.details ?? []);
   },
 
-  // 校验:三者非空(不发请求)→ 签名打 balance,HTTP ok 且 code="0" 即 true。任何失败 → false。
-  async validate(ctx: FetchContext): Promise<boolean> {
-    const { apiKey, secret, passphrase } = ctx.creds;
-    if (!apiKey || !secret || !passphrase) return false;
+  // 校验:签名打 balance,HTTP ok 且 code="0" 即 true(creds 已保证三项非空)。任何失败 → false。
+  async validate(ctx): Promise<boolean> {
     try {
-      const res = await okxGet(BALANCE_PATH, { apiKey, secret, passphrase });
+      const res = await okxGet(BALANCE_PATH, ctx.creds);
       if (!res.ok) return false;
       const body = (await res.json()) as OkxBalanceResponse;
       return body.code === "0";
@@ -141,6 +136,6 @@ export const okxProvider: BalanceProvider = {
       return false;
     }
   },
-};
+});
 
 export const providers: BalanceProvider[] = [okxProvider];

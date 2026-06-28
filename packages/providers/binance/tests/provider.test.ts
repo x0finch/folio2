@@ -82,13 +82,8 @@ describe("binanceProvider.fetchBalances", () => {
     expect((init?.headers as Record<string, string>)["X-MBX-APIKEY"]).toBe("k");
   });
 
-  it("throws INVALID_CREDENTIALS on missing key/secret (no request)", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
-    await expect(binanceProvider.fetchBalances(ctx({ apiKey: "k" }))).rejects.toMatchObject({
-      code: "INVALID_CREDENTIALS",
-    });
-    expect(spy).not.toHaveBeenCalled();
-  });
+  // 缺 key/secret 的拒绝已上移到 sync/create 的 validateCredentials(见 @folio/core inputs.test);
+  // provider 信任已校验的 creds,故此处不再测"无请求即拒"。
 
   it("maps 429 → RATE_LIMITED with Retry-After, 401 → AUTH_FAILED", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

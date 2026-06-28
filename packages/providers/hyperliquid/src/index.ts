@@ -1,12 +1,13 @@
 import {
   type Balance,
   type BalanceProvider,
-  type FetchContext,
+  defineProvider,
   type PerpEquityMeta,
   type PerpPositionMeta,
   ProviderError,
   parseRetryAfter,
 } from "@folio/core";
+import { z } from "zod";
 import { CLEARINGHOUSE_TYPE, EVM_ADDRESS_RE, HYPERLIQUID_API_BASE, INFO_PATH } from "./constants";
 
 // @folio/provider-hyperliquid —— 永续 DEX(perp_hyperliquid)。只读地址即查、无需签名/API key
@@ -102,14 +103,6 @@ export function parseClearinghouseState(state: ClearinghouseState): Balance[] {
   return out;
 }
 
-function getAddress(ctx: FetchContext): string {
-  const address = ctx.creds.identifier;
-  if (!address || !EVM_ADDRESS_RE.test(address)) {
-    throw new ProviderError("INVALID_CREDENTIALS", "missing or invalid Hyperliquid address");
-  }
-  return address;
-}
-
 // POST /info(无 auth)。网络故障 → UPSTREAM_ERROR(可重试)。状态码由调用方 ensureOk 处理。
 async function infoPost(address: string): Promise<Response> {
   try {
@@ -133,13 +126,20 @@ function ensureOk(res: Response): void {
   throw new ProviderError("UPSTREAM_ERROR", `hyperliquid upstream error (${res.status})`);
 }
 
-export const hyperliquidProvider: BalanceProvider = {
+export const hyperliquidProvider = defineProvider({
   accountType: "perp_hyperliquid",
   // 只读地址即查,无全局 key/签名 → 不声明 usesGlobalKeys。
+  // identifier 的 EVM 格式由本 validator 体现;创建/同步前经 validateCredentials 保证 → 方法里可直接用。
+  inputs: [
+    {
+      key: "identifier",
+      type: "text",
+      validator: z.string().regex(EVM_ADDRESS_RE, "expected 0x + 40 hex"),
+    },
+  ],
 
-  async fetchBalances(ctx: FetchContext): Promise<Balance[]> {
-    const address = getAddress(ctx);
-    const res = await infoPost(address);
+  async fetchBalances(ctx): Promise<Balance[]> {
+    const res = await infoPost(ctx.creds.identifier);
     ensureOk(res);
     let json: ClearinghouseState;
     try {
@@ -150,19 +150,17 @@ export const hyperliquidProvider: BalanceProvider = {
     return parseClearinghouseState(json);
   },
 
-  // 低消耗校验:先纯格式预检(无 key 可查),再打一次 clearinghouseState 探活。
-  // 未交易过的地址也返回 200 + 空状态 → 视为可用(无法也无需区分)。任何失败 → false。
-  async validate(ctx: FetchContext): Promise<boolean> {
-    const address = ctx.creds.identifier;
-    if (!address || !EVM_ADDRESS_RE.test(address)) return false;
+  // 低消耗校验:打一次 clearinghouseState 探活(地址已由 validateCredentials 保证格式)。
+  // 未交易过的地址也返回 200 + 空状态 → 视为可用。任何失败 → false。
+  async validate(ctx): Promise<boolean> {
     try {
-      const res = await infoPost(address);
+      const res = await infoPost(ctx.creds.identifier);
       return res.ok;
     } catch {
       return false;
     }
   },
-};
+});
 
 // 与方案 A 摊平约定一致:sync 收集各包的 providers 数组后 .flat() 传入 buildRegistry。
 export const providers: BalanceProvider[] = [hyperliquidProvider];

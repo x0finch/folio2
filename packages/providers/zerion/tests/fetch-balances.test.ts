@@ -82,11 +82,10 @@ describe("zerionProvider.fetchBalances", () => {
     );
   });
 
-  it("throws INVALID_CREDENTIALS on missing/invalid address or key (no request)", async () => {
+  // 凭据(地址)由 sync/create 的 validateCredentials 预校验(见 @folio/core inputs.test);
+  // provider 只对【全局 key 未配置】自查(运维问题,非用户输入)→ INVALID_CREDENTIALS,不发请求。
+  it("throws INVALID_CREDENTIALS when the global key is missing (no request)", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    await expect(zerionProvider.fetchBalances(ctx({ creds: {} }))).rejects.toMatchObject({
-      code: "INVALID_CREDENTIALS",
-    });
     await expect(zerionProvider.fetchBalances(ctx({ globalKeys: {} }))).rejects.toMatchObject({
       code: "INVALID_CREDENTIALS",
     });

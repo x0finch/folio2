@@ -1,5 +1,3 @@
-import type { CredentialFlags } from "./provider";
-
 // AccountType 自包含:看值即知具体账户,无需再读 provider 字段。
 // 命名口径:<类别>_<具体>。链上按"生态"分(具体 EVM 链放 network 字段),
 // 交易所/永续到具体机构,manual 单列。
@@ -33,15 +31,12 @@ export interface Account {
   network?: string;
   label: string;
   // 按账户类型的额外数据(通用容器,扩展时往 AccountData 并集加一支)。
-  // manual 账户在此装手填持仓;落库时加密存(隐私)。非密钥,与 ProviderCredentials 分离。
+  // manual 账户在此装手填持仓;明文落库(非密钥)。与凭据(ctx.creds,加密)分离。
   data?: AccountData;
   // 不在此持有 groupId:账户↔组是多对多,关系由 account_groups 关联表承载。
-  // 凭据本身不返回,只返回每个凭据字段是否已设置的 has* 布尔(见 AccountWithFlags)。
+  // 凭据本身不返回(对外用 @folio/db 的 AccountSafe,不含 encCredentials)。某账户需要/已具备
+  // 哪些凭据,由其 type 的 provider.inputs 描述(见 ProviderInput),无需在 Account 上挂 has* 标志。
 }
-
-// 实际对外的账户类型 = 基础字段 + 由 ProviderCredentials 推导出的 has* 标志。
-// 给凭据加字段时这里自动多一个,不会两边不同步(见 provider.ts 的 CredentialFlags)。
-export type AccountWithFlags = Account & CredentialFlags;
 
 export type BalanceKind = "spot" | "defi" | "perp" | "manual";
 

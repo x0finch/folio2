@@ -6,6 +6,7 @@ import {
   getProvider,
   ProviderError,
   type ProviderRegistry,
+  validateCredentials,
 } from "@folio/core";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { appRegistry } from "./registry";
@@ -96,7 +97,10 @@ export async function syncAccount(
     const provider = getProvider(registry, account.type);
     const encCreds = await deps.getEncryptedCredentials(userId, account.id);
     // 密钥只在此刻解密,用完即弃。manual 账户密文是加密的 {}(无密钥)。
-    const creds = encCreds ? JSON.parse(await decrypt(encCreds, deps.secretsKey)) : {};
+    const decrypted = encCreds ? JSON.parse(await decrypt(encCreds, deps.secretsKey)) : {};
+    // 运行时闸:按 provider.inputs 的 validator 校验解密出的 creds,通过才进 FetchContext。
+    // 给 fetchBalances/validate 里 ctx.creds 的 CredsOf 类型以运行时背书;脏/缺数据 → 本账户 fail。
+    const creds = await validateCredentials(provider.inputs ?? [], decrypted);
     // 非密钥账户数据(manual 持仓)为明文 JSON,直接 parse。
     const data = account.dataJson ? JSON.parse(account.dataJson) : undefined;
     const acc: Account = {

@@ -1,4 +1,4 @@
-import type { Balance, BalanceProvider, FetchContext, ManualData } from "@folio/core";
+import { type Balance, type BalanceProvider, defineProvider, type ManualData } from "@folio/core";
 
 // @folio/provider-custom —— 手动资产(manual)。无外部 API:持仓由用户录入,
 // 经 account.data.holdings 传入(落库时加密,sync 解密后组进 FetchContext)。
@@ -17,26 +17,27 @@ function isValidHolding(h: unknown): boolean {
   );
 }
 
-export const customProvider: BalanceProvider = {
+export const customProvider = defineProvider({
   accountType: "manual",
+  inputs: [], // manual 无账户输入(持仓走 Account.data,非 creds)
 
-  async fetchBalances(ctx: FetchContext): Promise<Balance[]> {
+  async fetchBalances(ctx): Promise<Balance[]> {
     const holdings = (ctx.account.data as ManualData | undefined)?.holdings ?? [];
     return holdings.map((h) => ({
       symbol: h.symbol,
       amount: h.amount,
       usdValue: h.usdValue,
       source: "manual",
-      kind: "manual",
+      kind: "manual" as const,
     }));
   },
 
-  async validate(ctx: FetchContext): Promise<boolean> {
+  async validate(ctx): Promise<boolean> {
     const holdings = (ctx.account.data as ManualData | undefined)?.holdings;
     if (!Array.isArray(holdings) || holdings.length === 0) return false;
     return holdings.every(isValidHolding);
   },
-};
+});
 
 // 与方案 A 摊平约定一致:sync 收集各包的 providers 数组后 .flat() 传入 buildRegistry。
 export const providers: BalanceProvider[] = [customProvider];

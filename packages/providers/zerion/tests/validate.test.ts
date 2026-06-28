@@ -17,11 +17,9 @@ afterEach(() => {
 });
 
 describe("zerionProvider.validate", () => {
-  it("returns false on invalid address or missing key WITHOUT a request", async () => {
+  // 地址格式由 validateCredentials 预校验;provider.validate 只对全局 key 缺失自查(不发请求)。
+  it("returns false when the global key is missing, WITHOUT a request", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    expect(
-      await zerionProvider.validate(ctx({ identifier: "nope" }, { ZERION_API_KEY: "k" })),
-    ).toBe(false);
     expect(await zerionProvider.validate(ctx({ identifier: ADDR }, {}))).toBe(false);
     expect(spy).not.toHaveBeenCalled();
   });

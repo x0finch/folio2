@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { BalanceProvider, CredentialFlags } from "../src/provider";
-import type { AccountWithFlags } from "../src/types";
+import { z } from "zod";
+import type { BalanceProvider } from "../src/provider";
 
 // 最小 stub:验证 BalanceProvider 接口形状可被实现(类型标注在编译期校验)。
 const stub: BalanceProvider = {
@@ -40,23 +40,23 @@ describe("BalanceProvider shape", () => {
     expect(scoped.usesGlobalKeys).toEqual(["ZERION_API_KEY"]);
   });
 
-  it("derives has* flags from ProviderCredentials (编译期 + 运行期)", () => {
-    // 编译期:这些 key 必须正好是 CredentialFlags 推导出的形状,写错则 tsc 报错。
-    const flags: CredentialFlags = {
-      hasApiKey: true,
-      hasSecret: false,
-      hasPassphrase: true,
-      hasIdentifier: false,
+  it("can declare inputs (provider self-describes account inputs; zod validator via Standard Schema)", () => {
+    const okxLike: BalanceProvider = {
+      accountType: "exchange_okx",
+      inputs: [
+        { key: "apiKey", type: "secret", validator: z.string().min(1) },
+        { key: "secret", type: "secret", validator: z.string().min(1) },
+        { key: "passphrase", type: "secret", validator: z.string().min(1) },
+      ],
+      async fetchBalances() {
+        return [];
+      },
+      async validate() {
+        return true;
+      },
     };
-    // 运行期:AccountWithFlags = Account + 推导的 has* 标志。
-    const account: AccountWithFlags = {
-      id: "a1",
-      userId: "u1",
-      type: "manual",
-      label: "Manual wallet",
-      hasApiKey: true,
-    };
-    expect(flags.hasApiKey).toBe(true);
-    expect(account.hasApiKey).toBe(true);
+    expect(okxLike.inputs?.map((i) => i.key)).toEqual(["apiKey", "secret", "passphrase"]);
+    expect(okxLike.inputs?.every((i) => i.type === "secret")).toBe(true);
+    expect(stub.inputs).toBeUndefined(); // 可选,默认无
   });
 });

@@ -3,19 +3,26 @@
 export { CryptoError, decrypt, encrypt, generateSecret, hmacSha256 } from "./crypto";
 export type { ProviderErrorCode, ProviderErrorOptions } from "./errors";
 export { ProviderError, parseRetryAfter } from "./errors";
+export {
+  CredentialValidationError,
+  publicKeys,
+  secretKeys,
+  validateCredentials,
+} from "./inputs";
 export type {
   BalanceProvider,
-  CredentialFlags,
+  CredsOf,
   FetchContext,
-  ProviderCredentials,
+  ProviderInput,
+  ProviderInputType,
 } from "./provider";
+export { defineProvider } from "./provider";
 export type { ProviderRegistry } from "./registry";
 export { buildRegistry, getProvider } from "./registry";
 export type {
   Account,
   AccountData,
   AccountType,
-  AccountWithFlags,
   AssetSnapshot,
   Balance,
   BalanceKind,

@@ -2,10 +2,12 @@ import {
   type AccountType,
   type Balance,
   type BalanceProvider,
+  defineProvider,
   type FetchContext,
   ProviderError,
   parseRetryAfter,
 } from "@folio/core";
+import { z } from "zod";
 import {
   API_KEY_HEADER,
   BALANCE_PATH,
@@ -56,21 +58,17 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ba
   return out;
 }
 
-function getAddress(ctx: FetchContext): string {
-  const address = ctx.creds.identifier?.trim();
-  if (!address) {
-    throw new ProviderError("INVALID_CREDENTIALS", "missing wallet address");
-  }
-  return address;
-}
-
-function getApiKey(ctx: FetchContext): string {
-  const apiKey = ctx.globalKeys[COINSTATS_API_KEY];
+// 全局 key 来自服务端 env(非用户输入)→ 仍需自查。
+function getApiKey(globalKeys: Record<string, string>): string {
+  const apiKey = globalKeys[COINSTATS_API_KEY];
   if (!apiKey) {
     throw new ProviderError("INVALID_CREDENTIALS", `${COINSTATS_API_KEY} not configured`);
   }
   return apiKey;
 }
+
+// 各 type 共享:creds 形状 = { identifier }(地址已由 validateCredentials 保证非空)。
+type CoinstatsCtx = FetchContext<{ identifier: string }>;
 
 async function coinstatsGet(
   connectionId: string,
@@ -98,10 +96,9 @@ function ensureOk(res: Response): void {
   throw new ProviderError("UPSTREAM_ERROR", `coinstats upstream error (${res.status})`);
 }
 
-async function fetchCoinstats(connectionId: string, ctx: FetchContext): Promise<Balance[]> {
-  const address = getAddress(ctx);
-  const apiKey = getApiKey(ctx);
-  const res = await coinstatsGet(connectionId, address, apiKey);
+async function fetchCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<Balance[]> {
+  const apiKey = getApiKey(ctx.globalKeys);
+  const res = await coinstatsGet(connectionId, ctx.creds.identifier, apiKey);
   ensureOk(res);
   let json: CoinstatsCoin[];
   try {
@@ -112,14 +109,13 @@ async function fetchCoinstats(connectionId: string, ctx: FetchContext): Promise<
   return parseBalances(json, connectionId);
 }
 
-// 低消耗校验:非空地址 + key 存在(不发请求)→ 打一次 wallet/balance 探活。任何失败 → false。
+// 低消耗校验:打一次 wallet/balance 探活(地址已由 validateCredentials 保证非空)。任何失败 → false。
 // 三链地址格式各异(sui 0x+64hex / cosmos bech32 / solana base58),格式交给 API 判定。
-async function validateCoinstats(connectionId: string, ctx: FetchContext): Promise<boolean> {
-  const address = ctx.creds.identifier?.trim();
+async function validateCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<boolean> {
   const apiKey = ctx.globalKeys[COINSTATS_API_KEY];
-  if (!address || !apiKey) return false;
+  if (!apiKey) return false;
   try {
-    const res = await coinstatsGet(connectionId, address, apiKey);
+    const res = await coinstatsGet(connectionId, ctx.creds.identifier, apiKey);
     return res.ok;
   } catch {
     return false;
@@ -128,12 +124,14 @@ async function validateCoinstats(connectionId: string, ctx: FetchContext): Promi
 
 // 工厂:为一个 type 绑定其 connectionId,产出一个 BalanceProvider(共享上面实现)。
 export function makeCoinstats(accountType: AccountType, connectionId: string): BalanceProvider {
-  return {
+  return defineProvider({
     accountType,
     usesGlobalKeys: [COINSTATS_API_KEY], // 最小权限:只下发这个 key
+    // 地址非空即可(solana/sui/cosmos 格式各异,交 API 判定)。
+    inputs: [{ key: "identifier", type: "text", validator: z.string().trim().min(1) }],
     fetchBalances: (ctx) => fetchCoinstats(connectionId, ctx),
     validate: (ctx) => validateCoinstats(connectionId, ctx),
-  };
+  });
 }
 
 // 方案 A 摊平:每个 type 一个 provider 对象,共享实现。sync 收集后 .flat() 传入 buildRegistry。

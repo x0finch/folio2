@@ -1,11 +1,12 @@
 import {
   type Balance,
   type BalanceProvider,
-  type FetchContext,
+  defineProvider,
   hmacSha256,
   ProviderError,
   parseRetryAfter,
 } from "@folio/core";
+import { z } from "zod";
 import {
   ACCOUNT_PATH,
   API_KEY_HEADER,
@@ -61,15 +62,6 @@ export function parseAccountBalances(
   return out;
 }
 
-function getCreds(ctx: FetchContext): { apiKey: string; secret: string } {
-  const apiKey = ctx.creds.apiKey;
-  const secret = ctx.creds.secret;
-  if (!apiKey || !secret) {
-    throw new ProviderError("INVALID_CREDENTIALS", "missing Binance apiKey/secret");
-  }
-  return { apiKey, secret };
-}
-
 async function binanceFetch(path: string, apiKey?: string): Promise<Response> {
   try {
     return await fetch(`${BINANCE_API_BASE}${path}`, {
@@ -104,11 +96,15 @@ async function signedGet(
   return binanceFetch(`${path}?${query}&signature=${signature}`, apiKey);
 }
 
-export const binanceProvider: BalanceProvider = {
+export const binanceProvider = defineProvider({
   accountType: "exchange_binance",
+  inputs: [
+    { key: "apiKey", type: "secret", validator: z.string().trim().min(1) },
+    { key: "secret", type: "secret", validator: z.string().trim().min(1) },
+  ],
 
-  async fetchBalances(ctx: FetchContext): Promise<Balance[]> {
-    const { apiKey, secret } = getCreds(ctx);
+  async fetchBalances(ctx): Promise<Balance[]> {
+    const { apiKey, secret } = ctx.creds;
     const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;
     const acctRes = await signedGet(ACCOUNT_PATH, query, apiKey, secret);
     ensureOk(acctRes);
@@ -134,11 +130,9 @@ export const binanceProvider: BalanceProvider = {
     return parseAccountBalances(account, prices);
   },
 
-  // 校验:apiKey+secret 非空(不发请求)→ 签名打 /api/v3/account 确认 key + 读权限。任何失败 → false。
-  async validate(ctx: FetchContext): Promise<boolean> {
-    const apiKey = ctx.creds.apiKey;
-    const secret = ctx.creds.secret;
-    if (!apiKey || !secret) return false;
+  // 校验:签名打 /api/v3/account 确认 key + 读权限(creds 已由 validateCredentials 保证非空)。
+  async validate(ctx): Promise<boolean> {
+    const { apiKey, secret } = ctx.creds;
     try {
       const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;
       const res = await signedGet(ACCOUNT_PATH, query, apiKey, secret);
@@ -147,6 +141,6 @@ export const binanceProvider: BalanceProvider = {
       return false;
     }
   },
-};
+});
 
 export const providers: BalanceProvider[] = [binanceProvider];

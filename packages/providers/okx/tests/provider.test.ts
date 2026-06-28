@@ -61,13 +61,8 @@ describe("okxProvider.fetchBalances", () => {
     expect(h["OK-ACCESS-SIGN"]).toMatch(/^[A-Za-z0-9+/]+=*$/); // base64
   });
 
-  it("throws INVALID_CREDENTIALS when any of key/secret/passphrase missing (no request)", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
-    await expect(
-      okxProvider.fetchBalances(ctx({ apiKey: "k", secret: "s" })),
-    ).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
-    expect(spy).not.toHaveBeenCalled();
-  });
+  // 缺 key/secret/passphrase 的拒绝已上移到 sync/create 的 validateCredentials(见 @folio/core
+  // inputs.test);provider 信任已校验的 creds,故此处不再测"无请求即拒"。
 
   it("maps HTTP-200 + auth code → AUTH_FAILED (OKX error model)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(ok({ code: "50113", msg: "Invalid Sign" }));
@@ -91,11 +86,7 @@ describe("okxProvider.fetchBalances", () => {
 });
 
 describe("okxProvider.validate", () => {
-  it("false on missing creds (no request); true on code 0; false on auth code", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
-    expect(await okxProvider.validate(ctx({ apiKey: "k", secret: "s" }))).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
-
+  it("true on code 0; false on auth code (creds pre-validated upstream)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(balance));
     expect(await okxProvider.validate(ctx())).toBe(true);
 

@@ -22,13 +22,7 @@ describe("hyperliquidProvider.validate", () => {
     expect(await hyperliquidProvider.validate(ctx({ identifier: ADDR }))).toBe(true);
   });
 
-  it("returns false for missing/invalid address without a request", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
-    expect(await hyperliquidProvider.validate(ctx({}))).toBe(false);
-    expect(await hyperliquidProvider.validate(ctx({ identifier: "0xnope" }))).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
-  });
-
+  // 地址格式校验已上移到 validateCredentials;hyperliquid.validate 直接探活(不再预检地址)。
   it("returns false on non-ok response or network error", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));
     expect(await hyperliquidProvider.validate(ctx({ identifier: ADDR }))).toBe(false);

@@ -46,13 +46,9 @@ describe("coinstats fetchBalances", () => {
     expect((spy.mock.calls[0][1]?.headers as Record<string, string>)["X-API-KEY"]).toBe("k");
   });
 
-  it("throws INVALID_CREDENTIALS on missing address or key (no request)", async () => {
+  // 地址由 validateCredentials 预校验;provider 只对全局 key 缺失自查(不发请求)。
+  it("throws INVALID_CREDENTIALS when the global key is missing (no request)", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    await expect(provider.fetchBalances(ctx({}, { COINSTATS_API_KEY: "k" }))).rejects.toMatchObject(
-      {
-        code: "INVALID_CREDENTIALS",
-      },
-    );
     await expect(provider.fetchBalances(ctx({ identifier: "addr" }, {}))).rejects.toMatchObject({
       code: "INVALID_CREDENTIALS",
     });
@@ -74,9 +70,8 @@ describe("coinstats fetchBalances", () => {
 describe("coinstats validate", () => {
   const provider = makeCoinstats("onchain_solana", "solana");
 
-  it("false on missing address/key without a request", async () => {
+  it("false when the global key is missing, without a request", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    expect(await provider.validate(ctx({}, { COINSTATS_API_KEY: "k" }))).toBe(false);
     expect(await provider.validate(ctx({ identifier: "addr" }, {}))).toBe(false);
     expect(spy).not.toHaveBeenCalled();
   });

@@ -2,10 +2,11 @@ import {
   type Balance,
   type BalanceProvider,
   type DefiMeta,
-  type FetchContext,
+  defineProvider,
   ProviderError,
   parseRetryAfter,
 } from "@folio/core";
+import { z } from "zod";
 import {
   EVM_ADDRESS_RE,
   PORTFOLIO_PATH,
@@ -96,30 +97,33 @@ function ensureOk(res: Response): void {
   throw new ProviderError("UPSTREAM_ERROR", `zerion upstream error (${res.status})`);
 }
 
-function getAddress(ctx: FetchContext): string {
-  const address = ctx.creds.identifier;
-  if (!address || !EVM_ADDRESS_RE.test(address)) {
-    throw new ProviderError("INVALID_CREDENTIALS", "missing or invalid EVM address");
-  }
-  return address;
-}
-
-function getApiKey(ctx: FetchContext): string {
-  const apiKey = ctx.globalKeys[ZERION_API_KEY];
+// 全局 key 来自服务端 env(非用户输入,不在 inputs/validateCredentials 范围)→ 仍需自查。
+function getApiKey(globalKeys: Record<string, string>): string {
+  const apiKey = globalKeys[ZERION_API_KEY];
   if (!apiKey) {
     throw new ProviderError("INVALID_CREDENTIALS", `${ZERION_API_KEY} not configured`);
   }
   return apiKey;
 }
 
-export const zerionProvider: BalanceProvider = {
+export const zerionProvider = defineProvider({
   accountType: "onchain_evm",
   usesGlobalKeys: [ZERION_API_KEY], // 最小权限:只下发这个 key 给本 provider
+  // identifier 的 EVM 格式由本 validator 体现;创建/同步前经 validateCredentials 保证 → 方法里可直接用。
+  inputs: [
+    {
+      key: "identifier",
+      type: "text",
+      validator: z.string().regex(EVM_ADDRESS_RE, "expected 0x + 40 hex"),
+    },
+  ],
 
-  async fetchBalances(ctx: FetchContext): Promise<Balance[]> {
-    const address = getAddress(ctx);
-    const apiKey = getApiKey(ctx);
-    const res = await zerionGet(`${POSITIONS_PATH(address)}?${POSITIONS_QUERY}`, apiKey);
+  async fetchBalances(ctx): Promise<Balance[]> {
+    const apiKey = getApiKey(ctx.globalKeys);
+    const res = await zerionGet(
+      `${POSITIONS_PATH(ctx.creds.identifier)}?${POSITIONS_QUERY}`,
+      apiKey,
+    );
     ensureOk(res);
     let json: ZerionPositionsResponse;
     try {
@@ -130,19 +134,18 @@ export const zerionProvider: BalanceProvider = {
     return parsePositions(json);
   },
 
-  // 低消耗校验:先纯格式预检(不发请求),再打轻量 portfolio 端点探活。任何失败 → false。
-  async validate(ctx: FetchContext): Promise<boolean> {
-    const address = ctx.creds.identifier;
+  // 低消耗校验:打轻量 portfolio 端点探活(地址已由 validateCredentials 保证格式)。任何失败 → false。
+  async validate(ctx): Promise<boolean> {
     const apiKey = ctx.globalKeys[ZERION_API_KEY];
-    if (!address || !EVM_ADDRESS_RE.test(address) || !apiKey) return false;
+    if (!apiKey) return false;
     try {
-      const res = await zerionGet(PORTFOLIO_PATH(address), apiKey);
+      const res = await zerionGet(PORTFOLIO_PATH(ctx.creds.identifier), apiKey);
       return res.ok;
     } catch {
       return false;
     }
   },
-};
+});
 
 // 与方案 A 摊平约定一致:sync 收集各包的 providers 数组后 .flat() 传入 buildRegistry。
 export const providers: BalanceProvider[] = [zerionProvider];
