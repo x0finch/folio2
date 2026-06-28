@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
-import { decrypt, getProvider, secretKeys } from "@folio/core";
+import { getProvider, safeView } from "@folio/core";
 import {
-  getEncryptedCredentials,
+  getRawCreds,
   listAccountsByUser,
   listBalancesForSnapshots,
   listGroupsByUser,
@@ -48,12 +48,11 @@ export const Route = createFileRoute("/api/export")({
 
               const accounts = await listAccountsByUser(env, userId);
               for (const a of accounts) {
-                const encCreds = await getEncryptedCredentials(env, userId, a.id);
-                const creds: Record<string, string> = encCreds
-                  ? JSON.parse(await decrypt(encCreds, env.SECRETS_KEY))
-                  : {};
-                const sk = secretKeys(getProvider(appRegistry, a.type).inputs ?? []);
-                write(accountRecord(a, creds, sk)); // 密钥已剥离
+                const inputs = getProvider(appRegistry, a.type).inputs ?? [];
+                // safeView 直接从存库 map 投影(无需解密):public 原样、semi 打码、secret 丢弃。
+                const raw = await getRawCreds(env, userId, a.id);
+                const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
+                write(accountRecord(a, safeView(inputs, stored))); // 无完整密钥
               }
 
               for (const g of await listGroupsByUser(env, userId)) write(groupRecord(g));

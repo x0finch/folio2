@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { getEncryptedCredentials, listAccountsByUser, writeSnapshot } from "@folio/db";
+import { getRawCreds, listAccountsByUser, writeSnapshot } from "@folio/db";
 import { type SyncDeps, syncUser } from "@folio/sync";
 import { createServerFn } from "@tanstack/react-start";
 import { requireAuth } from "../require-auth";
@@ -10,8 +10,7 @@ import { requireAuth } from "../require-auth";
 export function buildSyncDeps(bindings: Cloudflare.Env): SyncDeps {
   return {
     listAccounts: (userId) => listAccountsByUser(bindings, userId),
-    getEncryptedCredentials: (userId, accountId) =>
-      getEncryptedCredentials(bindings, userId, accountId),
+    getRawCreds: (userId, accountId) => getRawCreds(bindings, userId, accountId),
     writeSnapshot: (userId, accountId, input) => writeSnapshot(bindings, userId, accountId, input),
     secretsKey: bindings.SECRETS_KEY,
     // provider 全局 key:各 provider 按 usesGlobalKeys 只拿到自己声明的(见 @folio/sync scopeGlobalKeys)。

@@ -1,9 +1,10 @@
 import {
   type Account,
   type Balance,
-  decrypt,
   type FetchContext,
   getProvider,
+  isComplete,
+  openCreds,
   ProviderError,
   type ProviderRegistry,
   validateCredentials,
@@ -23,7 +24,7 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeou
 // 真实数据访问仍只经 @folio/db(server fn 把其包装函数绑进来)。
 export interface SyncDeps {
   listAccounts: (userId: string) => Promise<AccountSafe[]>;
-  getEncryptedCredentials: (userId: string, accountId: string) => Promise<string | null>;
+  getRawCreds: (userId: string, accountId: string) => Promise<string | null>;
   writeSnapshot: (userId: string, accountId: string, input: WriteSnapshotInput) => Promise<string>;
   secretsKey: string;
   globalKeys: Record<string, string>;
@@ -96,14 +97,15 @@ export async function syncAccount(
   const registry = deps.registry ?? appRegistry;
   try {
     const provider = getProvider(registry, account.type);
-    const encCreds = await deps.getEncryptedCredentials(userId, account.id);
-    // 缺凭据态(导入的 CEX,encCredentials=null):跳过,不算失败——补录后下次同步纳入(见 P6.6)。
-    if (encCreds === null) return { accountId: account.id, ok: false, skipped: true };
-    // 密钥只在此刻解密,用完即弃。manual 账户密文是加密的 {}(无密钥);空串按空 creds 处理。
-    const decrypted = encCreds ? JSON.parse(await decrypt(encCreds, deps.secretsKey)) : {};
-    // 运行时闸:按 provider.inputs 的 validator 校验解密出的 creds,通过才进 FetchContext。
-    // 给 fetchBalances/validate 里 ctx.creds 的 CredsOf 类型以运行时背书;脏/缺数据 → 本账户 fail。
-    const creds = await validateCredentials(provider.inputs ?? [], decrypted);
+    const inputs = provider.inputs ?? [];
+    const raw = await deps.getRawCreds(userId, account.id);
+    const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
+    // 缺凭据态(导入待补录:有 semi/secret 字段未填真值)→ 跳过,不算失败,补录后下次纳入(见 P6.6.1)。
+    if (!isComplete(inputs, stored)) return { accountId: account.id, ok: false, skipped: true };
+    // 只在此刻解密 secret 字段、用完即弃(openCreds:public/semi 明文原样、secret 解密)。
+    const opened = await openCreds(inputs, stored, deps.secretsKey);
+    // 运行时闸:按 provider.inputs 的 validator 校验,通过才进 FetchContext;脏/缺数据 → 本账户 fail。
+    const creds = await validateCredentials(inputs, opened);
     // 非密钥账户数据(manual 持仓)为明文 JSON,直接 parse。
     const data = account.dataJson ? JSON.parse(account.dataJson) : undefined;
     const acc: Account = {

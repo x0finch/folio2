@@ -40,11 +40,11 @@ describe("BalanceProvider shape", () => {
     expect(scoped.usesGlobalKeys).toEqual(["ZERION_API_KEY"]);
   });
 
-  it("can declare inputs (provider self-describes account inputs; zod validator via Standard Schema)", () => {
+  it("can declare inputs with three exposure levels (public/semi/secret; zod validator via Standard Schema)", () => {
     const okxLike: BalanceProvider = {
       accountType: "exchange_okx",
       inputs: [
-        { key: "apiKey", type: "secret", label: "API Key", validator: z.string().min(1) },
+        { key: "apiKey", type: "semi", label: "API Key", validator: z.string().min(1) },
         { key: "secret", type: "secret", label: "API Secret", validator: z.string().min(1) },
         { key: "passphrase", type: "secret", label: "Passphrase", validator: z.string().min(1) },
       ],
@@ -56,7 +56,7 @@ describe("BalanceProvider shape", () => {
       },
     };
     expect(okxLike.inputs?.map((i) => i.key)).toEqual(["apiKey", "secret", "passphrase"]);
-    expect(okxLike.inputs?.every((i) => i.type === "secret")).toBe(true);
+    expect(okxLike.inputs?.map((i) => i.type)).toEqual(["semi", "secret", "secret"]);
     expect(stub.inputs).toBeUndefined(); // 可选,默认无
   });
 });

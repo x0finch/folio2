@@ -7,6 +7,9 @@ import {
   snapshotRecord,
 } from "../src/lib/export";
 
+// 注:脱敏(secret 剥 / semi 打码 / public 留)逻辑现在是 @folio/core safeView(在 core creds.test 覆盖);
+// 这里只测记录映射形状。route 把 safeView 的结果传给 accountRecord。
+
 describe("metaRecord", () => {
   it("carries version + app + exportedAt (first line)", () => {
     expect(metaRecord(1700000000000)).toEqual({
@@ -18,43 +21,15 @@ describe("metaRecord", () => {
   });
 });
 
-describe("accountRecord (red line: no secrets)", () => {
-  const account = {
-    id: "a1",
-    type: "exchange_okx",
-    network: null,
-    label: "OKX",
-    dataJson: null,
-  };
-  it("strips secret keys, keeps non-secret (identifier)", () => {
-    const rec = accountRecord(
-      { ...account, type: "onchain_evm" },
-      { identifier: "0xabc", apiKey: "K", secret: "S" },
-      ["apiKey", "secret", "passphrase"],
-    );
-    expect(rec.creds).toEqual({ identifier: "0xabc" });
-    const line = ndjsonLine(rec);
-    expect(line).not.toContain("apiKey");
-    expect(line).not.toContain('"K"');
-    expect(line).not.toContain('"S"');
-    expect(line.endsWith("\n")).toBe(true);
-  });
-  it("CEX account → creds becomes empty after stripping", () => {
-    const rec = accountRecord(account, { apiKey: "K", secret: "S", passphrase: "P" }, [
-      "apiKey",
-      "secret",
-      "passphrase",
-    ]);
-    expect(rec.creds).toEqual({});
-    expect(ndjsonLine(rec)).not.toContain('"P"');
-  });
-  it("parses dataJson (manual holdings)", () => {
+describe("accountRecord", () => {
+  it("attaches the (already-safe) creds + parses dataJson (manual holdings)", () => {
     const rec = accountRecord(
       { id: "m", type: "manual", network: null, label: "M", dataJson: '{"holdings":[]}' },
-      {},
-      [],
+      { apiKey: "ABCD…5678" }, // route 已用 safeView 脱敏
     );
     expect(rec.data).toEqual({ holdings: [] });
+    expect(rec.creds).toEqual({ apiKey: "ABCD…5678" });
+    expect(ndjsonLine(rec).endsWith("\n")).toBe(true);
   });
 });
 

@@ -1,19 +1,13 @@
-import {
-  type BalanceProvider,
-  buildRegistry,
-  encrypt,
-  generateSecret,
-  ProviderError,
-} from "@folio/core";
+import { type BalanceProvider, buildRegistry, generateSecret, ProviderError } from "@folio/core";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { customProvider } from "@folio/provider-custom";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { runAccountSync, type SyncDeps, syncUser } from "../src";
 import { appRegistry } from "../src/registry";
 
 const secretsKey = generateSecret();
 
-// 一个 manual 账户的安全形状(dataJson 明文持仓;encCredentials 在 deps 里给加密的 {})。
+// 一个 manual 账户的安全形状(dataJson 明文持仓;creds map 在 deps 的 getRawCreds 里给空 "{}")。
 function manualAccount(overrides: Partial<AccountSafe> = {}): AccountSafe {
   return {
     id: "a-manual",
@@ -32,7 +26,7 @@ function manualAccount(overrides: Partial<AccountSafe> = {}): AccountSafe {
   };
 }
 
-// 收集 writeSnapshot 调用,便于断言传入形状。
+// 收集 writeSnapshot 调用,便于断言传入形状。getRawCreds 默认给空 map "{}"(manual 无输入 → isComplete)。
 function makeDeps(
   accounts: AccountSafe[],
   over: Partial<SyncDeps> = {},
@@ -40,7 +34,7 @@ function makeDeps(
   const writes: Array<{ accountId: string; input: WriteSnapshotInput }> = [];
   const deps: SyncDeps = {
     listAccounts: async () => accounts,
-    getEncryptedCredentials: async () => encrypt(JSON.stringify({}), secretsKey),
+    getRawCreds: async () => "{}",
     writeSnapshot: async (_userId, accountId, input) => {
       writes.push({ accountId, input });
       return `snap-${accountId}`;
@@ -53,16 +47,9 @@ function makeDeps(
 }
 
 describe("syncUser — manual 端到端", () => {
-  let encCreds: string;
-  beforeEach(async () => {
-    encCreds = await encrypt(JSON.stringify({}), secretsKey);
-  });
-
   it("解密 → 组 FetchContext → 写出 manual 快照(kind/source=manual,totalUsd 求和)", async () => {
     const account = manualAccount();
-    const { deps, writes } = makeDeps([account], {
-      getEncryptedCredentials: async () => encCreds,
-    });
+    const { deps, writes } = makeDeps([account]);
 
     const { results } = await syncUser(deps, "u1");
 
@@ -117,11 +104,10 @@ describe("syncUser — 失败隔离", () => {
 });
 
 describe("syncAccount — 缺凭据跳过", () => {
-  it("encCredentials=null(导入待补录)→ ok:false skipped:true,不拉取/不写快照", async () => {
+  it("!isComplete(导入待补录:binance 的 apiKey/secret 缺真值)→ ok:false skipped:true,不拉取/不写快照", async () => {
+    // 用真 appRegistry(binance 有 apiKey(semi)+secret(secret) 输入);creds 为空 map → 不完整。
     const acc = manualAccount({ id: "needs", type: "exchange_binance", dataJson: null });
-    const { deps, writes } = makeDeps([acc], {
-      getEncryptedCredentials: async () => null, // 缺凭据
-    });
+    const { deps, writes } = makeDeps([acc], { getRawCreds: async () => "{}" });
 
     const { results } = await syncUser(deps, "u1");
 

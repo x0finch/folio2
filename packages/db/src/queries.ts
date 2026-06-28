@@ -1,5 +1,5 @@
 import type { AccountType, BalanceKind } from "@folio/core";
-import { and, asc, desc, eq, getTableColumns, inArray, isNull, max } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, max } from "drizzle-orm";
 import { type Db, type DbEnv, getDb } from "./client";
 import { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
@@ -7,8 +7,8 @@ import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-typ
 // D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 8 列 → 每块最多 12 行(96 参数,留余量)。
 const BALANCE_INSERT_CHUNK = 12;
 
-// 安全列:不含密文 encCredentials,常规查询一律走这组列。
-// dataJson 非密钥(明文持仓),随安全形状一并返回,供 sync 组装 FetchContext。
+// 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
+// dataJson 是非凭据域数据(明文持仓),随安全形状返回供 sync 组 FetchContext.account.data。
 const accountSafeColumns = {
   id: accounts.id,
   userId: accounts.userId,
@@ -42,8 +42,8 @@ export interface CreateAccountInput {
   type: AccountType;
   network?: string;
   label: string;
-  encCredentials: string | null; // 密文 blob(db 不加密/解释);null = 缺凭据态(导入的 CEX,见 P6.6)
-  dataJson?: string; // 非密钥账户数据的明文 JSON(manual 持仓),可空;db 不解释
+  creds: string | null; // 凭据 map 的 JSON(db 不解释);缺凭据态由 isComplete(inputs, creds) 在内存判定
+  dataJson?: string; // 非凭据域数据的明文 JSON(manual 持仓),可空;db 不解释
 }
 
 export async function createAccount(
@@ -62,7 +62,7 @@ export async function createAccount(
     type: input.type,
     network,
     label: input.label,
-    encCredentials: input.encCredentials,
+    creds: input.creds,
     dataJson,
     createdAt,
   });
@@ -73,29 +73,16 @@ export function listAccountsByUser(env: DbEnv, userId: string): Promise<AccountS
   return getDb(env).select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId));
 }
 
-// "缺凭据"账户的 id(encCredentials 为 null,导入的 CEX 待补录;见 P6.6)。供 UI 标记、补录入口。
-// 只回 id,不回任何密文/凭据。
-export async function listAccountsNeedingCredentials(
-  env: DbEnv,
-  userId: string,
-): Promise<string[]> {
-  const rows = await getDb(env)
-    .select({ id: accounts.id })
-    .from(accounts)
-    .where(and(eq(accounts.userId, userId), isNull(accounts.encCredentials)));
-  return rows.map((r) => r.id);
-}
-
-// 补录:为缺凭据账户写入密文(再水合),清除缺凭据态。见 P6.6 provideCredentials。
+// 补录/再水合:整张 creds map 覆盖写入(占位被真值替换,见 P6.6.1 provideCredentials)。
 export async function setAccountCredentials(
   env: DbEnv,
   userId: string,
   id: string,
-  encCredentials: string,
+  creds: string,
 ): Promise<void> {
   await getDb(env)
     .update(accounts)
-    .set({ encCredentials })
+    .set({ creds })
     .where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
 }
 
@@ -119,17 +106,26 @@ export async function getAccountById(
   return rows[0] ?? null;
 }
 
-/** 取密文供取数时解密用(内部接口,返回密文而非明文)。 */
-export async function getEncryptedCredentials(
-  env: DbEnv,
-  userId: string,
-  id: string,
-): Promise<string | null> {
+/** 取原始 creds map(JSON 字符串,含 secret 密文)供 sync 解密 / 服务端投影用(内部接口,绝不裸出网)。 */
+export async function getRawCreds(env: DbEnv, userId: string, id: string): Promise<string | null> {
   const rows = await getDb(env)
-    .select({ encCredentials: accounts.encCredentials })
+    .select({ creds: accounts.creds })
     .from(accounts)
     .where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
-  return rows[0]?.encCredentials ?? null;
+  return rows[0]?.creds ?? null;
+}
+
+// 批量取该用户全部账户的原始 creds(server 端富化 listMyAccounts 用:算 needsCredentials + safeView)。
+// 返回含 secret 密文,只在服务端用、投影后才出网。
+export interface AccountRawCreds {
+  id: string;
+  creds: string | null;
+}
+export function listRawCredsByUser(env: DbEnv, userId: string): Promise<AccountRawCreds[]> {
+  return getDb(env)
+    .select({ id: accounts.id, creds: accounts.creds })
+    .from(accounts)
+    .where(eq(accounts.userId, userId));
 }
 
 /** 删账户:其 accountGroups 配对与 snapshots(及 snapshotBalances)经 ON DELETE CASCADE 级联删除。 */

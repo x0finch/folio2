@@ -2,24 +2,35 @@ import { describe, expect, it } from "vitest";
 import { EXPORT_VERSION } from "../src/lib/export";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "../src/lib/import";
 
-// 假 deps:记录调用 + 返回递增 id,模拟 secret-input 账户类型(CEX 缺凭据)。
-function makeDeps(secretTypes: string[] = ["exchange_okx", "exchange_binance"]) {
+// 按 type 分类输入字段(模拟 provider.inputs:CEX apiKey=semi + secret/passphrase=secret;链上 identifier=public)。
+function categorize(type: string): {
+  publicKeys: string[];
+  semiKeys: string[];
+  secretKeys: string[];
+} {
+  if (type.startsWith("exchange_"))
+    return {
+      publicKeys: [],
+      semiKeys: ["apiKey"],
+      secretKeys: type === "exchange_okx" ? ["secret", "passphrase"] : ["secret"],
+    };
+  if (type.startsWith("onchain_") || type.startsWith("perp_"))
+    return { publicKeys: ["identifier"], semiKeys: [], secretKeys: [] };
+  return { publicKeys: [], semiKeys: [], secretKeys: [] }; // manual
+}
+
+function makeDeps() {
   const calls = {
-    accounts: [] as Array<{ type: string; label: string; encCredentials: string | null }>,
+    accounts: [] as Array<{ type: string; label: string; creds: string }>,
     groups: [] as Array<{ name: string }>,
     memberships: [] as Array<{ accountId: string; groupId: string }>,
     snapshots: [] as Array<{ accountId: string; totalUsd: number }>,
   };
   let n = 0;
   const deps: ImportDeps = {
-    hasSecretInputs: (type) => secretTypes.includes(type),
-    encryptCreds: async (creds) => `enc(${JSON.stringify(creds)})`,
+    categorize,
     createAccount: async (input) => {
-      calls.accounts.push({
-        type: input.type,
-        label: input.label,
-        encCredentials: input.encCredentials,
-      });
+      calls.accounts.push({ type: input.type, label: input.label, creds: input.creds });
       return { id: `acc-${++n}` };
     },
     createGroup: async (input) => {
@@ -57,7 +68,7 @@ describe("createImporter", () => {
     await expect(imp2.apply({ type: "meta", version: 999 })).rejects.toThrow(ImportError);
   });
 
-  it("CEX account (secret inputs) → encCredentials null (needs credentials)", async () => {
+  it("CEX semi field → stored as semi_<key> placeholder (masked,待补录)", async () => {
     const { deps, calls } = makeDeps();
     const imp = createImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
@@ -66,12 +77,13 @@ describe("createImporter", () => {
       id: "x",
       accountType: "exchange_okx",
       label: "OKX",
-      creds: {},
+      creds: { apiKey: "ABCD…5678" }, // 导出已打码的 semi 片段
     });
-    expect(calls.accounts[0]).toMatchObject({ type: "exchange_okx", encCredentials: null });
+    // semi → semi_apiKey 占位;secret 文件里没有 → 不写。
+    expect(JSON.parse(calls.accounts[0].creds)).toEqual({ semi_apiKey: "ABCD…5678" });
   });
 
-  it("non-secret account (onchain) → encrypts exported creds", async () => {
+  it("onchain public field → stored whole (reconstructable)", async () => {
     const { deps, calls } = makeDeps();
     const imp = createImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
@@ -82,7 +94,7 @@ describe("createImporter", () => {
       label: "W",
       creds: { identifier: "0xabc" },
     });
-    expect(calls.accounts[0].encCredentials).toBe('enc({"identifier":"0xabc"})');
+    expect(JSON.parse(calls.accounts[0].creds)).toEqual({ identifier: "0xabc" });
   });
 
   it("remaps account/group ids for memberships and snapshots", async () => {
@@ -100,9 +112,8 @@ describe("createImporter", () => {
       balances: [],
     });
 
-    const accId = calls.accounts.length ? "acc-1" : "";
-    expect(calls.memberships[0]).toEqual({ accountId: accId, groupId: "grp-2" });
-    expect(calls.snapshots[0]).toEqual({ accountId: accId, totalUsd: 42 });
+    expect(calls.memberships[0]).toEqual({ accountId: "acc-1", groupId: "grp-2" });
+    expect(calls.snapshots[0]).toEqual({ accountId: "acc-1", totalUsd: 42 });
     expect(imp.counts).toMatchObject({ accounts: 1, groups: 1, memberships: 1, snapshots: 1 });
   });
 

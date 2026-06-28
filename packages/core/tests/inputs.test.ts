@@ -2,28 +2,42 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   CredentialValidationError,
+  maskCredential,
   publicKeys,
   secretKeys,
+  semiKeys,
   validateCredentials,
 } from "../src/inputs";
 import type { ProviderInput } from "../src/provider";
 
 const EVM = /^0x[0-9a-fA-F]{40}$/;
 const onchain: ProviderInput[] = [
-  { key: "identifier", type: "text", label: "EVM Address", validator: z.string().regex(EVM) },
+  { key: "identifier", type: "public", label: "EVM Address", validator: z.string().regex(EVM) },
 ];
 const okx: ProviderInput[] = [
-  { key: "apiKey", type: "secret", label: "API Key", validator: z.string().trim().min(1) },
+  { key: "apiKey", type: "semi", label: "API Key", validator: z.string().trim().min(1) },
   { key: "secret", type: "secret", label: "API Secret", validator: z.string().trim().min(1) },
   { key: "passphrase", type: "secret", label: "Passphrase", validator: z.string().trim().min(1) },
 ];
 
-describe("secretKeys / publicKeys", () => {
-  it("splits by type (identifier is public, creds are secret)", () => {
+describe("public/semi/secret 分类", () => {
+  it("splits by exposure level (identifier=public, apiKey=semi, secret/passphrase=secret)", () => {
     expect(publicKeys(onchain)).toEqual(["identifier"]);
+    expect(semiKeys(onchain)).toEqual([]);
     expect(secretKeys(onchain)).toEqual([]);
-    expect(secretKeys(okx)).toEqual(["apiKey", "secret", "passphrase"]);
     expect(publicKeys(okx)).toEqual([]);
+    expect(semiKeys(okx)).toEqual(["apiKey"]);
+    expect(secretKeys(okx)).toEqual(["secret", "passphrase"]);
+  });
+});
+
+describe("maskCredential", () => {
+  it("masks the middle, keeps a recognizable head/tail; deterministic", () => {
+    expect(maskCredential("abcdefghijklmnop")).toBe("abcd…mnop"); // 长 → 首4尾4
+    expect(maskCredential("abcdefgh")).toBe("ab…gh"); // 中等(7–11)→ 首2尾2
+    expect(maskCredential("abcdef")).toBe("…"); // ≤6 → 不露真实字符
+    expect(maskCredential("")).toBe(""); // 空 → 空
+    expect(maskCredential("abcdefghijklmnop")).toBe(maskCredential("abcdefghijklmnop")); // 确定性
   });
 });
 
@@ -40,7 +54,7 @@ describe("validateCredentials", () => {
 
   it("only includes declared input keys (ignores extras)", async () => {
     const binance: ProviderInput[] = [
-      { key: "apiKey", type: "secret", label: "API Key", validator: z.string().min(1) },
+      { key: "apiKey", type: "semi", label: "API Key", validator: z.string().min(1) },
       { key: "secret", type: "secret", label: "API Secret", validator: z.string().min(1) },
     ];
     // passphrase 不在 inputs → 不校验、不带出(binance 无 passphrase)。

@@ -3,8 +3,8 @@ import type { accountGroups, accounts, groups, snapshotBalances, snapshots } fro
 
 export type Account = InferSelectModel<typeof accounts>;
 export type NewAccount = InferInsertModel<typeof accounts>;
-// 对外安全形状:绝不含密文 encCredentials。
-export type AccountSafe = Omit<Account, "encCredentials">;
+// 对外安全形状:绝不含 creds(内含 secret 密文 + 不裸给前端;前端拿的是 safeView 投影)。
+export type AccountSafe = Omit<Account, "creds">;
 
 export type Group = InferSelectModel<typeof groups>;
 export type NewGroup = InferInsertModel<typeof groups>;

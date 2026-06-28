@@ -32,10 +32,12 @@ export const accounts = sqliteTable(
     type: text("type").$type<AccountType>().notNull(),
     network: text("network"),
     label: text("label").notNull(),
-    // AES-GCM 密文 blob(db 不解释内容)。可空:导入(P6.6)的 CEX 账户尚无密钥 → null = "缺凭据"态,
-    // 补录前同步跳过;链上/perp 导入带地址、manual 存加密的 {},均非 null。
-    encCredentials: text("enc_credentials"),
-    dataJson: text("data_json"), // 非密钥账户数据(manual 持仓)的【明文】JSON,可空;db 不解释内容(见 arch §3)
+    // 凭据 map(JSON,db 当作不透明 blob、不解释内容):按字段 type 存——secret 字段值为 AES-GCM 密文,
+    // public/semi 明文;导入待补录的 semi 以 `semi_<key>` 占位记录打码片段(见 @folio/core creds.ts / P6.6.1)。
+    // 缺凭据态由 `isComplete(provider.inputs, creds)` 在内存判定,不再用列是否为 null。
+    // 物理列名沿用历史的 `enc_credentials`(P1.4 起,避免一次纯改名迁移);字段名 creds 才是当前语义。
+    creds: text("enc_credentials"),
+    dataJson: text("data_json"), // 非凭据的账户域数据(manual 持仓)的【明文】JSON,可空;db 不解释内容(见 arch §3)
     createdAt: integer("created_at").notNull(), // epoch ms
   },
   (t) => [index("accounts_user_id_idx").on(t.userId)],

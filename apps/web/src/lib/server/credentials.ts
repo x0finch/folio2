@@ -8,7 +8,7 @@ import { requireAuth } from "../require-auth";
 // 走 server fn 是为了不把 provider 实现打进客户端包(只回这张静态规格表)。
 export interface InputSpec {
   key: string;
-  type: "text" | "secret";
+  type: "public" | "semi" | "secret";
   label: string; // 兼作 i18n key(见 ProviderInput.label);desc 同理
   desc?: string;
 }

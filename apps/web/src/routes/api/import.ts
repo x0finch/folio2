@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { type AccountType, encrypt, getProvider, secretKeys } from "@folio/core";
+import { type AccountType, getProvider, publicKeys, secretKeys, semiKeys } from "@folio/core";
 import { addAccountToGroup, createAccount, createGroup, writeSnapshot } from "@folio/db";
 import { appRegistry } from "@folio/sync";
 import { createFileRoute } from "@tanstack/react-router";
@@ -24,9 +24,14 @@ export const Route = createFileRoute("/api/import")({
         if (!reader) return new Response("empty body", { status: 400 });
 
         const deps: ImportDeps = {
-          hasSecretInputs: (type) =>
-            secretKeys(getProvider(appRegistry, type as AccountType).inputs ?? []).length > 0,
-          encryptCreds: (creds) => encrypt(JSON.stringify(creds), env.SECRETS_KEY),
+          categorize: (type) => {
+            const inputs = getProvider(appRegistry, type as AccountType).inputs ?? [];
+            return {
+              publicKeys: publicKeys(inputs),
+              semiKeys: semiKeys(inputs),
+              secretKeys: secretKeys(inputs),
+            };
+          },
           createAccount: (input) =>
             createAccount(env, userId, { ...input, type: input.type as AccountType }),
           createGroup: (input) => createGroup(env, userId, input),

@@ -30,8 +30,8 @@ function badType(id: string, userId: string): AccountSafe {
 function makeDeps(accountsByUser: Record<string, AccountSafe[]>): SyncDeps {
   return {
     listAccounts: async (userId) => accountsByUser[userId] ?? [],
-    // manual 密文 = 加密的 {};这里给空串,syncAccount 会按空 creds 处理(manual 不需要密钥)。
-    getEncryptedCredentials: async () => "",
+    // manual 的 creds 是空 map "{}"(无输入 → isComplete 通过)。
+    getRawCreds: async () => "{}",
     writeSnapshot: async (_u, accountId) => `snap-${accountId}`,
     secretsKey: "k",
     globalKeys: {},

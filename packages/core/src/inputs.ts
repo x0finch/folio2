@@ -2,12 +2,26 @@ import type { ProviderInput } from "./provider";
 
 // ProviderInput[] 的纯工具(库无关:只用 Standard Schema 接口,不依赖 zod)。
 
-// 敏感字段(导出时剥离)与公开字段(如 identifier 地址,导出保留)。
+// 按暴露级别分类字段(导出 / 重建 / 补录据此处理):
+// secret = 导出剥离;semi = 导出打码保留;public = 导出原样保留、导入可重建。
 export function secretKeys(inputs: readonly ProviderInput[]): string[] {
   return inputs.filter((i) => i.type === "secret").map((i) => i.key);
 }
+export function semiKeys(inputs: readonly ProviderInput[]): string[] {
+  return inputs.filter((i) => i.type === "semi").map((i) => i.key);
+}
 export function publicKeys(inputs: readonly ProviderInput[]): string[] {
-  return inputs.filter((i) => i.type !== "secret").map((i) => i.key);
+  return inputs.filter((i) => i.type === "public").map((i) => i.key);
+}
+
+// 把一个凭据值打码成可识别但不泄露的片段(首尾各留一小段,中间省略)。纯字符串、确定性、无 crypto。
+// 通用于所有 semi 字段(不针对 apiKey):既当导出/展示的"身份提示",也当补录时的首尾比对依据。
+export function maskCredential(value: string): string {
+  if (!value) return "";
+  if (value.length <= 6) return "…"; // 太短:不露任何真实字符
+  const head = value.length >= 12 ? 4 : 2;
+  const tail = value.length >= 12 ? 4 : 2;
+  return `${value.slice(0, head)}…${value.slice(-tail)}`;
 }
 
 export class CredentialValidationError extends Error {}

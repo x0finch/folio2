@@ -99,7 +99,8 @@ async function signedGet(
 export const binanceProvider = defineProvider({
   accountType: "exchange_binance",
   inputs: [
-    { key: "apiKey", type: "secret", label: "API Key", validator: z.string().trim().min(1) },
+    // apiKey = 标识符(明文走 header,非认证秘密)→ semi:导出打码保留供补录识别。
+    { key: "apiKey", type: "semi", label: "API Key", validator: z.string().trim().min(1) },
     { key: "secret", type: "secret", label: "API Secret", validator: z.string().trim().min(1) },
   ],
 

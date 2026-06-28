@@ -113,7 +113,7 @@ export const zerionProvider = defineProvider({
   inputs: [
     {
       key: "identifier",
-      type: "text",
+      type: "public",
       label: "EVM Address",
       desc: "0x + 40 hex",
       validator: z.string().regex(EVM_ADDRESS_RE, "expected 0x + 40 hex"),

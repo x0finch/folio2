@@ -21,7 +21,6 @@ import {
   createManualAccount,
   createOnchainAccount,
   createPerpAccount,
-  getAccountsNeedingCredentials,
   listMyAccounts,
 } from "../../lib/server/accounts";
 import { getCredentialSpecs } from "../../lib/server/credentials";
@@ -56,13 +55,12 @@ type PerpType = (typeof PERP_TYPES)[number]["value"];
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
-    const [accounts, groups, credentialSpecs, needsCredentials] = await Promise.all([
+    const [accounts, groups, credentialSpecs] = await Promise.all([
       listMyAccounts(),
       getMyGroups(),
       getCredentialSpecs(),
-      getAccountsNeedingCredentials(),
     ]);
-    return { accounts, ...groups, credentialSpecs, needsCredentials };
+    return { accounts, ...groups, credentialSpecs };
   },
   component: Accounts,
 });
@@ -78,9 +76,7 @@ function Accounts() {
   const router = useRouter();
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const { accounts, groups, memberships, credentialSpecs, needsCredentials } =
-    Route.useLoaderData();
-  const needsCredsSet = new Set(needsCredentials);
+  const { accounts, groups, memberships, credentialSpecs } = Route.useLoaderData();
   // accountId → 所属 groupId 集合(渲染勾选状态)。
   const groupIdsByAccount = new Map<string, Set<string>>();
   for (const m of memberships) {
@@ -311,7 +307,7 @@ function Accounts() {
         <ul className="flex flex-col gap-2">
           {accounts.map((a) => {
             const inGroups = groupIdsByAccount.get(a.id) ?? new Set<string>();
-            const needsCreds = needsCredsSet.has(a.id);
+            const needsCreds = a.needsCredentials;
             return (
               <li key={a.id} className="flex flex-col gap-2 rounded-md border px-4 py-2">
                 <div className="flex items-center justify-between">
@@ -329,6 +325,7 @@ function Accounts() {
                   <CredentialForm
                     accountId={a.id}
                     specs={credentialSpecs[a.type] ?? []}
+                    hint={a.credsSafe}
                     onDone={() => router.invalidate()}
                   />
                 )}

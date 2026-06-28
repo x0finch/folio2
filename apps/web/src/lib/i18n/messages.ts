@@ -6,6 +6,7 @@ export const en = {
     signOut: "Sign out",
     delete: "Delete",
     save: "Save",
+    saveAnyway: "Save anyway",
     verifying: "Verifying…",
     noAccountsYet: "No accounts yet.",
     addOne: "Add one",
@@ -96,6 +97,9 @@ export const en = {
     imported: "Imported {accounts} account(s), {groups} group(s), {snapshots} snapshot(s).",
     needsCredentials: "Needs credentials",
     provideCredentials: "Provide credentials",
+    credHint: "Recorded {field}: {hint}",
+    credMismatch:
+      "These credentials differ from what was exported. If you rotated your key, that's fine — otherwise check the account label.",
   },
   Settings: {
     title: "Settings",
@@ -127,6 +131,7 @@ export const zh: Messages = {
     signOut: "退出登录",
     delete: "删除",
     save: "保存",
+    saveAnyway: "仍要保存",
     verifying: "校验中…",
     noAccountsYet: "还没有账户。",
     addOne: "添加一个",
@@ -214,6 +219,8 @@ export const zh: Messages = {
     imported: "已导入 {accounts} 个账户、{groups} 个分组、{snapshots} 条快照。",
     needsCredentials: "缺凭据",
     provideCredentials: "补录凭据",
+    credHint: "记录的 {field}:{hint}",
+    credMismatch: "凭据与导出时记录的不一致。若你刚轮换过 key 属正常,否则请核对账户 label。",
   },
   Settings: {
     title: "设置",

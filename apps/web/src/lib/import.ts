@@ -1,13 +1,20 @@
-import type { BalanceKind } from "@folio/core";
+import { type BalanceKind, SEMI_PREFIX } from "@folio/core";
 import { EXPORT_VERSION } from "./export";
 
-// 纯导入逻辑(无 server-only import → 可单测,DB/加密经 deps 注入)。
+// 纯导入逻辑(无 server-only import → 可单测,DB 经 deps 注入)。
 // 单遍处理 NDJSON 记录(导出顺序保证 accounts→groups→memberships→snapshots,故 id map 先就绪);
 // **id 重映射**(oldId→newId)避免与现有数据冲突、支持重复导入。
-// 缺凭据判定:provider 有 secret 输入(导出必剥密钥)→ encCredentials=null = "缺凭据";否则用导出的
-// 非密钥 creds(identifier / manual 的 {})重建。
+// 凭据(P6.6.1):重建存库 creds map —— public 字段真值原样;semi 字段(导出已打码)写成 `semi_<key>`
+// 占位待补录;secret 文件里没有 → 不写。缺凭据态由 isComplete(inputs, creds) 在内存判定(见 sync)。
 
 export class ImportError extends Error {}
+
+// 按暴露级别分类某 account type 的输入字段(由 route 用 appRegistry 派生注入)。
+export interface InputKinds {
+  publicKeys: string[];
+  semiKeys: string[];
+  secretKeys: string[];
+}
 
 export interface ImportSnapshotBalance {
   symbol: string;
@@ -19,13 +26,12 @@ export interface ImportSnapshotBalance {
 }
 
 export interface ImportDeps {
-  hasSecretInputs(accountType: string): boolean;
-  encryptCreds(creds: Record<string, string>): Promise<string>;
+  categorize(accountType: string): InputKinds;
   createAccount(input: {
     type: string;
     network?: string;
     label: string;
-    encCredentials: string | null;
+    creds: string;
     dataJson?: string;
   }): Promise<{ id: string }>;
   createGroup(input: { name: string; sortOrder?: number }): Promise<{ id: string }>;
@@ -74,16 +80,19 @@ export function createImporter(deps: ImportDeps) {
     switch (rec.type) {
       case "account": {
         const accountType = String(rec.accountType);
-        const creds = (rec.creds as Record<string, string> | undefined) ?? {};
-        // 有 secret 输入(导出已剥)→ 缺凭据(null);否则用导出的非密钥 creds 重建。
-        const encCredentials = deps.hasSecretInputs(accountType)
-          ? null
-          : await deps.encryptCreds(creds);
+        const fileCreds = (rec.creds as Record<string, string> | undefined) ?? {};
+        const { publicKeys, semiKeys } = deps.categorize(accountType);
+        // 重建存库 map:public 真值原样;semi(导出已打码)写 `semi_<key>` 占位待补录;secret 文件里没有。
+        const stored: Record<string, string> = {};
+        for (const [k, v] of Object.entries(fileCreds)) {
+          if (publicKeys.includes(k)) stored[k] = v;
+          else if (semiKeys.includes(k)) stored[SEMI_PREFIX + k] = v;
+        }
         const created = await deps.createAccount({
           type: accountType,
           network: typeof rec.network === "string" ? rec.network : undefined,
           label: String(rec.label ?? ""),
-          encCredentials,
+          creds: JSON.stringify(stored),
           dataJson: rec.data !== undefined ? JSON.stringify(rec.data) : undefined,
         });
         if (typeof rec.id === "string") accountMap.set(rec.id, created.id);

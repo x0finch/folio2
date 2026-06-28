@@ -1,5 +1,5 @@
 // 纯逻辑(无 server-only import → 可单测)。把各实体映射成导出 NDJSON 记录(逐行一个 JSON)。
-// 红线:accountRecord 按 secretKeys 剥掉密钥(apiKey/secret/passphrase),仅留非密钥(identifier)。
+// 红线:account 的 safeCreds 由 @folio/core safeView 在 route 算好后传入(secret 丢、semi 打码、public 留)。
 
 export const EXPORT_VERSION = 1;
 
@@ -43,16 +43,8 @@ export function metaRecord(exportedAt: number) {
   return { type: "meta" as const, version: EXPORT_VERSION, app: "folio" as const, exportedAt };
 }
 
-// 账户:剥掉 secretKeys 指定的密钥字段,仅导出非密钥(地址 identifier 等)。
-export function accountRecord(
-  account: AccountIn,
-  creds: Record<string, string>,
-  secretKeys: readonly string[],
-) {
-  const safeCreds: Record<string, string> = {};
-  for (const [k, v] of Object.entries(creds)) {
-    if (!secretKeys.includes(k)) safeCreds[k] = v;
-  }
+// 账户记录。safeCreds 须为已脱敏的 creds(由 route 经 @folio/core safeView 算出:public 原样、semi 打码、无 secret)。
+export function accountRecord(account: AccountIn, safeCreds: Record<string, string>) {
   return {
     type: "account" as const,
     id: account.id,

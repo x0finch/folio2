@@ -5,6 +5,7 @@ export { createAuthAdapter } from "./auth"; // better-auth Drizzle adapter(‰∏çÊ≥
 export type { DbEnv } from "./client";
 
 export type {
+  AccountRawCreds,
   CreateAccountInput,
   CreateGroupInput,
   Membership,
@@ -20,15 +21,15 @@ export {
   deleteAccount,
   deleteGroup,
   getAccountById,
-  getEncryptedCredentials,
   getLatestSnapshotByUser,
+  getRawCreds,
   listAccountsByGroup,
   listAccountsByUser,
-  listAccountsNeedingCredentials,
   listBalancesForSnapshots,
   listGroupsByAccount,
   listGroupsByUser,
   listMembershipsByUser,
+  listRawCredsByUser,
   listSnapshotsByAccount,
   listSnapshotsPageByUser,
   listSnapshotTotalsByUser,

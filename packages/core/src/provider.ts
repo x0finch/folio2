@@ -2,10 +2,14 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { Account, AccountType, Balance } from "./types";
 
 // 账户输入的【自描述声明】:每个 provider 通过 BalanceProvider.inputs 列明它需要哪些输入。
-// app 据此派生:录入/补录表单字段、创建/同步时的凭据校验、导出剥密钥。
-// - type:"text"=普通(文本框、导出保留);"secret"=敏感(password、加密落库、导出剥离)。敏感性即 type。
+// app 据此派生:录入/补录表单字段、创建/同步时的凭据校验、导出处理。
+// - type = 单轴【暴露级别】(at-rest 一律加密落库,type 只决定"导出怎么处理"+ 输入框):
+//     "public" = 全留:文本框、导出原样保留、导入可重建(如地址 identifier)
+//     "semi"   = 部分留:文本框、导出【打码保留】(如 abc12…wxyz)、不可重建但供补录时识别(如 apiKey)
+//     "secret" = 不留:password、导出剥离(签名 secret / passphrase)
+//   "能被人认出"是部分暴露的自然副产物,不是另一个职责 —— type 仍纯粹是暴露级别。
 // - validator:用 Standard Schema(zod v4 等均实现)→ 契约不绑定具体校验库,core 保持库无关。
-export type ProviderInputType = "text" | "secret";
+export type ProviderInputType = "public" | "semi" | "secret";
 export interface ProviderInput {
   readonly key: string; // 存进 creds 的字段名(provider 自定;creds 形状由 inputs 推断)
   readonly type: ProviderInputType;
@@ -37,7 +41,7 @@ export interface BalanceProvider<I extends readonly ProviderInput[] = readonly P
   // 本 provider 用到的服务端全局 key 名(最小权限,编排层据此收窄 globalKeys)。默认无。
   readonly usesGlobalKeys?: readonly string[];
   // 本 type 账户需要的【账户输入】(自描述,见 ProviderInput)。creds 形状(CredsOf)由它推断。
-  // 链上/perp → [identifier(text)];binance → [apiKey,secret(secret)];okx → +passphrase;manual → []。
+  // 链上/perp → [identifier(public)];binance → [apiKey(semi),secret(secret)];okx → +passphrase(secret);manual → []。
   readonly inputs?: I;
   /** 拉取该账户当前全部余额。失败抛 ProviderError。 */
   fetchBalances(ctx: FetchContext<CredsOf<I>>): Promise<Balance[]>;

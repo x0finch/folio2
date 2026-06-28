@@ -131,7 +131,7 @@ export function makeCoinstats(accountType: AccountType, connectionId: string): B
     inputs: [
       {
         key: "identifier",
-        type: "text",
+        type: "public",
         label: "Wallet Address",
         validator: z.string().trim().min(1),
       },
