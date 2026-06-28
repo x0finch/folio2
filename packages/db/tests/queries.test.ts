@@ -14,6 +14,7 @@ import {
   listAccountsByUser,
   listGroupsByAccount,
   listGroupsByUser,
+  listMembershipsByUser,
   listSnapshotsByAccount,
   listSnapshotTotalsByUser,
   removeAccountFromGroup,
@@ -111,6 +112,47 @@ describe("groups & many-to-many membership", () => {
     await deleteGroup(env, USER_A, g.id);
     expect(await listGroupsByUser(env, USER_A)).toHaveLength(0);
     expect(await listAccountsByUser(env, USER_A)).toHaveLength(1);
+  });
+
+  it("lists all memberships for a user in one query, scoped to the user", async () => {
+    const a1 = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A1",
+      encCredentials: "x",
+    });
+    const a2 = await createAccount(env, USER_A, {
+      type: "manual",
+      label: "A2",
+      encCredentials: "x",
+    });
+    const g1 = await createGroup(env, USER_A, { name: "G1" });
+    const g2 = await createGroup(env, USER_A, { name: "G2" });
+    await addAccountToGroup(env, USER_A, a1.id, g1.id);
+    await addAccountToGroup(env, USER_A, a1.id, g2.id); // a1 在两个组
+    await addAccountToGroup(env, USER_A, a2.id, g1.id);
+    // user B 自有关联,不应混入。
+    const b1 = await createAccount(env, USER_B, {
+      type: "manual",
+      label: "B1",
+      encCredentials: "x",
+    });
+    const gb = await createGroup(env, USER_B, { name: "GB" });
+    await addAccountToGroup(env, USER_B, b1.id, gb.id);
+
+    const ms = await listMembershipsByUser(env, USER_A);
+    expect(ms).toHaveLength(3);
+    expect(
+      ms
+        .filter((m) => m.accountId === a1.id)
+        .map((m) => m.groupId)
+        .sort(),
+    ).toEqual([g1.id, g2.id].sort());
+    expect(ms.find((m) => m.accountId === b1.id)).toBeUndefined();
+  });
+
+  it("returns [] memberships for a user with none", async () => {
+    await createAccount(env, USER_A, { type: "manual", label: "A", encCredentials: "x" });
+    expect(await listMembershipsByUser(env, USER_A)).toEqual([]);
   });
 });
 

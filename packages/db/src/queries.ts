@@ -190,6 +190,20 @@ export async function listAccountsByGroup(
     .where(and(eq(accountGroups.groupId, groupId), eq(accounts.userId, userId)));
 }
 
+// 该用户的全部 账户↔组 关联(总览按组聚合用)。一次查询(account_groups ⨝ accounts 限 user),
+// 避免按账户逐个 listGroupsByAccount 的 N+1。
+export interface Membership {
+  accountId: string;
+  groupId: string;
+}
+export function listMembershipsByUser(env: DbEnv, userId: string): Promise<Membership[]> {
+  return getDb(env)
+    .select({ accountId: accountGroups.accountId, groupId: accountGroups.groupId })
+    .from(accountGroups)
+    .innerJoin(accounts, eq(accounts.id, accountGroups.accountId))
+    .where(eq(accounts.userId, userId));
+}
+
 // ---------- 快照 ----------
 
 export interface SnapshotBalanceInput {

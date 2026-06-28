@@ -21,6 +21,13 @@ import {
   createPerpAccount,
   listMyAccounts,
 } from "../../lib/server/accounts";
+import {
+  addAccountToGroup,
+  createGroup,
+  deleteGroup,
+  getMyGroups,
+  removeAccountFromGroup,
+} from "../../lib/server/groups";
 import { triggerSync } from "../../lib/server/sync";
 
 // 可录入的链上账户类型 → 展示名(EVM 走 zerion;其余走 coinstats)。
@@ -44,7 +51,10 @@ const PERP_TYPES = [{ value: "perp_hyperliquid", label: "Hyperliquid" }] as cons
 type PerpType = (typeof PERP_TYPES)[number]["value"];
 
 export const Route = createFileRoute("/_authed/accounts")({
-  loader: () => listMyAccounts(),
+  loader: async () => {
+    const [accounts, groups] = await Promise.all([listMyAccounts(), getMyGroups()]);
+    return { accounts, ...groups };
+  },
   component: Accounts,
 });
 
@@ -57,7 +67,18 @@ const emptyRow = (): HoldingRow => ({ symbol: "", amount: "", usdValue: "" });
 
 function Accounts() {
   const router = useRouter();
-  const accounts = Route.useLoaderData();
+  const { accounts, groups, memberships } = Route.useLoaderData();
+  // accountId → 所属 groupId 集合(渲染勾选状态)。
+  const groupIdsByAccount = new Map<string, Set<string>>();
+  for (const m of memberships) {
+    const set = groupIdsByAccount.get(m.accountId) ?? new Set<string>();
+    set.add(m.groupId);
+    groupIdsByAccount.set(m.accountId, set);
+  }
+
+  // 分组管理表单
+  const [groupName, setGroupName] = useState("");
+  const [groupError, setGroupError] = useState<string | null>(null);
 
   const [label, setLabel] = useState("");
   const [rows, setRows] = useState<HoldingRow[]>([emptyRow()]);
@@ -177,6 +198,29 @@ function Accounts() {
     }
   }
 
+  async function onCreateGroup(e: React.FormEvent) {
+    e.preventDefault();
+    setGroupError(null);
+    try {
+      await createGroup({ data: { name: groupName } });
+      setGroupName("");
+      await router.invalidate();
+    } catch (err) {
+      setGroupError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function onDeleteGroup(groupId: string) {
+    await deleteGroup({ data: { groupId } });
+    await router.invalidate();
+  }
+
+  async function onToggleMembership(accountId: string, groupId: string, checked: boolean) {
+    if (checked) await addAccountToGroup({ data: { accountId, groupId } });
+    else await removeAccountFromGroup({ data: { accountId, groupId } });
+    await router.invalidate();
+  }
+
   async function onSync() {
     setSyncMsg(null);
     setBusy(true);
@@ -214,17 +258,73 @@ function Accounts() {
         <p className="text-muted-foreground">No accounts yet.</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {accounts.map((a) => (
-            <li
-              key={a.id}
-              className="flex items-center justify-between rounded-md border px-4 py-2"
-            >
-              <span>{a.label}</span>
-              <span className="text-sm text-muted-foreground">{a.type}</span>
-            </li>
-          ))}
+          {accounts.map((a) => {
+            const inGroups = groupIdsByAccount.get(a.id) ?? new Set<string>();
+            return (
+              <li key={a.id} className="flex flex-col gap-2 rounded-md border px-4 py-2">
+                <div className="flex items-center justify-between">
+                  <span>{a.label}</span>
+                  <span className="text-sm text-muted-foreground">{a.type}</span>
+                </div>
+                {groups.length > 0 && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {groups.map((g) => (
+                      <label
+                        key={g.id}
+                        className="flex items-center gap-1.5 text-sm text-muted-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={inGroups.has(g.id)}
+                          onChange={(e) => onToggleMembership(a.id, g.id, e.target.checked)}
+                        />
+                        {g.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Manage groups</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onCreateGroup} className="flex items-end gap-2">
+            <div className="flex flex-1 flex-col gap-2">
+              <Label htmlFor="group-name">New group</Label>
+              <Input
+                id="group-name"
+                required
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+                placeholder="e.g. Long-term"
+              />
+            </div>
+            <Button type="submit">Add group</Button>
+          </form>
+          {groupError && <p className="mt-2 text-sm text-destructive">{groupError}</p>}
+          {groups.length > 0 && (
+            <ul className="mt-4 flex flex-col gap-2">
+              {groups.map((g) => (
+                <li
+                  key={g.id}
+                  className="flex items-center justify-between rounded-md border px-4 py-2"
+                >
+                  <span>{g.name}</span>
+                  <Button variant="ghost" size="sm" onClick={() => onDeleteGroup(g.id)}>
+                    Delete
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

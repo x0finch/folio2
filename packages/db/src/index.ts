@@ -7,6 +7,7 @@ export type { DbEnv } from "./client";
 export type {
   CreateAccountInput,
   CreateGroupInput,
+  Membership,
   SnapshotBalanceInput,
   SnapshotTotal,
   SnapshotWithBalances,
@@ -25,6 +26,7 @@ export {
   listAccountsByUser,
   listGroupsByAccount,
   listGroupsByUser,
+  listMembershipsByUser,
   listSnapshotsByAccount,
   listSnapshotTotalsByUser,
   removeAccountFromGroup,
