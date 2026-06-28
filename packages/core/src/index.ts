@@ -19,6 +19,7 @@ export type {
   AssetSnapshot,
   Balance,
   BalanceKind,
+  DefiMeta,
   ManualData,
   ManualHolding,
   PerpEquityMeta,

@@ -12,7 +12,8 @@ import {
 } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PortfolioChart } from "../../components/portfolio-chart";
-import { type PerpView, toPerpView } from "../../lib/perp";
+import { type DefiGroup, type SpotRow, toAccountSections } from "../../lib/account-view";
+import type { PerpView } from "../../lib/perp";
 import { getPortfolioHistory } from "../../lib/server/history";
 import { getMyOverview } from "../../lib/server/overview";
 
@@ -27,16 +28,8 @@ export const Route = createFileRoute("/_authed/")({
 const usd = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 
-// 一个账户的余额行(现货表只用 symbol/amount/usdValue;perp 的 metaJson 由 toPerpView 解析)。
-interface OverviewBalance {
-  id: string;
-  symbol: string;
-  amount: number;
-  usdValue: number;
-}
-
 // 现货/CEX/manual:数量 + 美元价值。
-function SpotTable({ balances }: { balances: OverviewBalance[] }) {
+function SpotTable({ rows }: { rows: SpotRow[] }) {
   return (
     <Table>
       <TableHeader>
@@ -47,7 +40,7 @@ function SpotTable({ balances }: { balances: OverviewBalance[] }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {balances.map((b) => (
+        {rows.map((b) => (
           <TableRow key={b.id}>
             <TableCell>{b.symbol}</TableCell>
             <TableCell className="text-right">{b.amount}</TableCell>
@@ -56,6 +49,41 @@ function SpotTable({ balances }: { balances: OverviewBalance[] }) {
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+// DeFi:按协议分组,每组一张小表(Asset / 仓位类型 / 价值)。负值=负债(借出)→ 标红。
+function DefiPositions({ groups }: { groups: DefiGroup[] }) {
+  return (
+    <div className="flex flex-col gap-4">
+      {groups.map((g) => (
+        <div key={g.protocol} className="flex flex-col gap-2">
+          <p className="text-sm font-medium">{g.protocol}</p>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Asset</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">Value</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {g.rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{r.symbol}</TableCell>
+                  <TableCell className="capitalize text-muted-foreground">
+                    {r.positionType ?? "—"}
+                  </TableCell>
+                  <TableCell className={`text-right ${r.usdValue < 0 ? "text-destructive" : ""}`}>
+                    {usd(r.usdValue)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -146,8 +174,8 @@ function Overview() {
         </p>
       ) : (
         rows.map((row) => {
-          // 类别 = type 前缀(契约里约定的访问方式);perp 走专用展示,其余走现货表。
-          const isPerp = row.account.type.split("_")[0] === "perp";
+          // 一个账户卡 = 按 kind 分区组合(净值不变量保证卡标题净值 = 各 usdValue 之和)。
+          const sections = toAccountSections(row.balances);
           return (
             <Card key={row.account.id}>
               <CardHeader>
@@ -163,10 +191,12 @@ function Overview() {
                   <p className="text-sm text-muted-foreground">
                     No snapshot yet — sync from the Accounts page.
                   </p>
-                ) : isPerp ? (
-                  <PerpPositions view={toPerpView(row.balances)} />
                 ) : (
-                  <SpotTable balances={row.balances} />
+                  <div className="flex flex-col gap-6">
+                    {sections.spot.length > 0 && <SpotTable rows={sections.spot} />}
+                    {sections.defi.length > 0 && <DefiPositions groups={sections.defi} />}
+                    {sections.perp && <PerpPositions view={sections.perp} />}
+                  </div>
                 )}
               </CardContent>
             </Card>

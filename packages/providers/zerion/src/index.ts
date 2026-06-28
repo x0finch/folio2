@@ -1,6 +1,7 @@
 import {
   type Balance,
   type BalanceProvider,
+  type DefiMeta,
   type FetchContext,
   ProviderError,
   parseRetryAfter,
@@ -55,11 +56,13 @@ export function parsePositions(res: ZerionPositionsResponse): Balance[] {
       usdValue: a.value ?? 0,
       source: chain,
       kind: isDefi ? "defi" : "spot",
+      // meta 形状对齐共享契约 DefiMeta(消费端总览 DeFi 分区据此窄化);satisfies 在生产端
+      // 做编译期校验,key 改名会被立刻发现(契约优先,见仓位模型加固)。
       meta: {
         chain,
         protocol: a.protocol ?? undefined,
         positionType: a.position_type,
-      },
+      } satisfies DefiMeta,
     });
   }
   return out;

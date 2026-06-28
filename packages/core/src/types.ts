@@ -45,13 +45,20 @@ export type AccountWithFlags = Account & CredentialFlags;
 
 export type BalanceKind = "spot" | "defi" | "perp" | "manual";
 
+// 【净值不变量 —— 全 provider 必守约定】(仓位模型加固,路线①)
+// 账户净值 totalUsd === Σ balances.usdValue;其中 usdValue = 该仓位对组合净值的【带符号净贡献】:
+//   · 负债记负值(借 1000U → -1000);
+//   · 每个经济仓位【只有一行承载价值】,会被拆开重复计的其余行记 usdValue:0
+//     (如 perp 权益行带值、多空仓位行 0;LP 整池带值、底层币 0)。
+// 这样异构仓位也能在账户层、组合层正确相加。子账户(spot/funding/earn)用 source 区分,不影响加总。
+// usdValue 只够【加总】;各仓位的【展示】细节放 meta,按 kind 用下方 typed meta 家族窄化。
 export interface Balance {
   symbol: string;
   amount: number;
   usdValue: number;
   source: string; // 来源标注(子账户 / 协议 / 链等)
   kind: BalanceKind;
-  meta?: Record<string, unknown>; // DeFi 仓位类型、协议名、所在链等
+  meta?: Record<string, unknown>; // 按 kind 的 typed meta(PerpMeta / DefiMeta / …)
 }
 
 // perp(kind:"perp")账户的 meta 共享契约。Balance.meta 仍是通用容器(各 kind 自用),
@@ -77,6 +84,15 @@ export interface PerpPositionMeta {
   marginUsed: number;
 }
 export type PerpMeta = PerpEquityMeta | PerpPositionMeta;
+
+// defi(kind:"defi")仓位的 meta 共享契约(锚定 zerion 现有输出)。consumer(总览 DeFi 分区)
+// 据此窄化、按 protocol 分组展示。positionType 暂用 provider 原始词汇(staked/deposit/loan…),
+// 统一归一化枚举与各类细节字段(借贷健康度、LP 底层币等)留各 provider 落地时逐个填。
+export interface DefiMeta {
+  chain?: string;
+  protocol?: string;
+  positionType?: string;
+}
 
 export interface AssetSnapshot {
   accountId: string;
