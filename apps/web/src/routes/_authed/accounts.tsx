@@ -14,6 +14,7 @@ import {
 } from "@folio/ui";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
+import { useTranslations } from "use-intl";
 import {
   createExchangeAccount,
   createManualAccount,
@@ -67,6 +68,8 @@ const emptyRow = (): HoldingRow => ({ symbol: "", amount: "", usdValue: "" });
 
 function Accounts() {
   const router = useRouter();
+  const t = useTranslations("Accounts");
+  const tc = useTranslations("Common");
   const { accounts, groups, memberships } = Route.useLoaderData();
   // accountId → 所属 groupId 集合(渲染勾选状态)。
   const groupIdsByAccount = new Map<string, Set<string>>();
@@ -182,7 +185,7 @@ function Accounts() {
         usdValue: Number(r.usdValue),
       }));
     if (holdings.length === 0) {
-      setError("Add at least one holding.");
+      setError(t("atLeastOneHolding"));
       return;
     }
     setBusy(true);
@@ -229,11 +232,12 @@ function Accounts() {
       const ok = results.filter((r) => r.ok).length;
       const failures = results.filter((r) => !r.ok);
       const labelOf = (id: string) => accounts.find((a) => a.id === id)?.label ?? id;
-      let msg = `Synced ${ok} account(s).`;
+      let msg = t("synced", { count: ok });
       if (failures.length > 0) {
-        msg += ` ${failures.length} failed — ${failures
+        const details = failures
           .map((f) => `${labelOf(f.accountId)}: ${f.error ?? "unknown error"}`)
-          .join("; ")}`;
+          .join("; ");
+        msg += ` ${t("syncFailed", { count: failures.length, details })}`;
       }
       setSyncMsg(msg);
       await router.invalidate();
@@ -247,15 +251,15 @@ function Accounts() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Accounts</h1>
+        <h1 className="text-2xl font-bold">{t("title")}</h1>
         <Button onClick={onSync} disabled={busy || accounts.length === 0}>
-          Sync now
+          {t("syncNow")}
         </Button>
       </div>
       {syncMsg && <p className="text-sm text-muted-foreground">{syncMsg}</p>}
 
       {accounts.length === 0 ? (
-        <p className="text-muted-foreground">No accounts yet.</p>
+        <p className="text-muted-foreground">{tc("noAccountsYet")}</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {accounts.map((a) => {
@@ -291,21 +295,21 @@ function Accounts() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Manage groups</CardTitle>
+          <CardTitle>{t("manageGroups")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onCreateGroup} className="flex items-end gap-2">
             <div className="flex flex-1 flex-col gap-2">
-              <Label htmlFor="group-name">New group</Label>
+              <Label htmlFor="group-name">{t("newGroup")}</Label>
               <Input
                 id="group-name"
                 required
                 value={groupName}
                 onChange={(e) => setGroupName(e.target.value)}
-                placeholder="e.g. Long-term"
+                placeholder={t("groupNamePlaceholder")}
               />
             </div>
-            <Button type="submit">Add group</Button>
+            <Button type="submit">{t("addGroup")}</Button>
           </form>
           {groupError && <p className="mt-2 text-sm text-destructive">{groupError}</p>}
           {groups.length > 0 && (
@@ -317,7 +321,7 @@ function Accounts() {
                 >
                   <span>{g.name}</span>
                   <Button variant="ghost" size="sm" onClick={() => onDeleteGroup(g.id)}>
-                    Delete
+                    {tc("delete")}
                   </Button>
                 </li>
               ))}
@@ -328,23 +332,23 @@ function Accounts() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Add manual account</CardTitle>
+          <CardTitle>{t("addManual")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onCreate} className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="label">Label</Label>
+              <Label htmlFor="label">{t("label")}</Label>
               <Input
                 id="label"
                 required
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
-                placeholder="e.g. Cold storage"
+                placeholder={t("manualLabelPlaceholder")}
               />
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label>Holdings</Label>
+              <Label>{t("holdings")}</Label>
               {rows.map((r, i) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional inputs
                 <div key={i} className="flex gap-2">
@@ -388,13 +392,13 @@ function Accounts() {
                 className="self-start"
                 onClick={() => setRows((rs) => [...rs, emptyRow()])}
               >
-                Add holding
+                {t("addHolding")}
               </Button>
             </div>
 
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" disabled={busy} className="self-start">
-              Create account
+              {t("createAccount")}
             </Button>
           </form>
         </CardContent>
@@ -402,52 +406,51 @@ function Accounts() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Add on-chain wallet</CardTitle>
+          <CardTitle>{t("addOnchain")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onCreateOnchain} className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="oc-chain">Chain</Label>
+              <Label htmlFor="oc-chain">{t("chain")}</Label>
               <Select value={ocType} onValueChange={(v) => setOcType(v as OnchainType)}>
                 <SelectTrigger id="oc-chain">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ONCHAIN_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
+                  {ONCHAIN_TYPES.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="oc-label">Label</Label>
+              <Label htmlFor="oc-label">{t("label")}</Label>
               <Input
                 id="oc-label"
                 required
                 value={ocLabel}
                 onChange={(e) => setOcLabel(e.target.value)}
-                placeholder="e.g. Main wallet"
+                placeholder={t("walletLabelPlaceholder")}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="oc-address">Address</Label>
+              <Label htmlFor="oc-address">{t("address")}</Label>
               <Input
                 id="oc-address"
                 required
                 value={ocAddress}
                 onChange={(e) => setOcAddress(e.target.value)}
-                placeholder={ocType === "onchain_evm" ? "0x…" : "wallet address"}
+                placeholder={
+                  ocType === "onchain_evm" ? t("addrPlaceholderEvm") : t("addrPlaceholderGeneric")
+                }
               />
-              <p className="text-sm text-muted-foreground">
-                Read-only. Tokens (and DeFi on EVM) are fetched by the provider for the chosen
-                chain.
-              </p>
+              <p className="text-sm text-muted-foreground">{t("onchainHint")}</p>
             </div>
             {ocError && <p className="text-sm text-destructive">{ocError}</p>}
             <Button type="submit" disabled={ocBusy} className="self-start">
-              {ocBusy ? "Verifying…" : "Add wallet"}
+              {ocBusy ? tc("verifying") : t("addWallet")}
             </Button>
           </form>
         </CardContent>
@@ -455,37 +458,37 @@ function Accounts() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Add exchange account</CardTitle>
+          <CardTitle>{t("addExchange")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onCreateExchange} className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="ex-exchange">Exchange</Label>
+              <Label htmlFor="ex-exchange">{t("exchange")}</Label>
               <Select value={exType} onValueChange={(v) => setExType(v as ExchangeType)}>
                 <SelectTrigger id="ex-exchange">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {EXCHANGE_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
+                  {EXCHANGE_TYPES.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="ex-label">Label</Label>
+              <Label htmlFor="ex-label">{t("label")}</Label>
               <Input
                 id="ex-label"
                 required
                 value={exLabel}
                 onChange={(e) => setExLabel(e.target.value)}
-                placeholder="e.g. Binance main"
+                placeholder={t("exchangeLabelPlaceholder")}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="ex-key">API key</Label>
+              <Label htmlFor="ex-key">{t("apiKey")}</Label>
               <Input
                 id="ex-key"
                 required
@@ -494,7 +497,7 @@ function Accounts() {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="ex-secret">API secret</Label>
+              <Label htmlFor="ex-secret">{t("apiSecret")}</Label>
               <Input
                 id="ex-secret"
                 type="password"
@@ -505,7 +508,7 @@ function Accounts() {
             </div>
             {exType === "exchange_okx" && (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="ex-passphrase">Passphrase</Label>
+                <Label htmlFor="ex-passphrase">{t("passphrase")}</Label>
                 <Input
                   id="ex-passphrase"
                   type="password"
@@ -515,13 +518,10 @@ function Accounts() {
                 />
               </div>
             )}
-            <p className="text-sm text-muted-foreground">
-              Use a <strong>read-only</strong> API key (no trade/withdraw). Stored encrypted; never
-              shown again.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("exchangeHint")}</p>
             {exError && <p className="text-sm text-destructive">{exError}</p>}
             <Button type="submit" disabled={exBusy} className="self-start">
-              {exBusy ? "Verifying…" : "Add exchange"}
+              {exBusy ? tc("verifying") : t("addExchangeBtn")}
             </Button>
           </form>
         </CardContent>
@@ -529,51 +529,49 @@ function Accounts() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Add perp account</CardTitle>
+          <CardTitle>{t("addPerp")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onCreatePerp} className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="p-venue">Venue</Label>
+              <Label htmlFor="p-venue">{t("venue")}</Label>
               <Select value={pType} onValueChange={(v) => setPType(v as PerpType)}>
                 <SelectTrigger id="p-venue">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {PERP_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
+                  {PERP_TYPES.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="p-label">Label</Label>
+              <Label htmlFor="p-label">{t("label")}</Label>
               <Input
                 id="p-label"
                 required
                 value={pLabel}
                 onChange={(e) => setPLabel(e.target.value)}
-                placeholder="e.g. HL main"
+                placeholder={t("perpLabelPlaceholder")}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="p-address">Address</Label>
+              <Label htmlFor="p-address">{t("address")}</Label>
               <Input
                 id="p-address"
                 required
                 value={pAddress}
                 onChange={(e) => setPAddress(e.target.value)}
-                placeholder="0x…"
+                placeholder={t("addrPlaceholderEvm")}
               />
-              <p className="text-sm text-muted-foreground">
-                Read-only. Perp positions and margin are fetched by the provider.
-              </p>
+              <p className="text-sm text-muted-foreground">{t("perpHint")}</p>
             </div>
             {pError && <p className="text-sm text-destructive">{pError}</p>}
             <Button type="submit" disabled={pBusy} className="self-start">
-              {pBusy ? "Verifying…" : "Add perp account"}
+              {pBusy ? tc("verifying") : t("addPerpBtn")}
             </Button>
           </form>
         </CardContent>

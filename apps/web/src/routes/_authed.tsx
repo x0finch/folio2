@@ -1,5 +1,7 @@
 import { Button } from "@folio/ui";
 import { createFileRoute, Link, Outlet, redirect, useNavigate } from "@tanstack/react-router";
+import { useTranslations } from "use-intl";
+import { LocaleSwitcher } from "../components/locale-switcher";
 import { signOut } from "../lib/auth-client";
 import { fetchCurrentUser } from "../lib/server/session";
 
@@ -15,29 +17,33 @@ export const Route = createFileRoute("/_authed")({
 
 function AuthedLayout() {
   const navigate = useNavigate();
+  const t = useTranslations("Nav");
+  const tc = useTranslations("Common");
   return (
     <div className="mx-auto max-w-4xl p-6">
       <header className="mb-6 flex items-center gap-4 border-b pb-4">
         <span className="font-bold">Folio</span>
         <nav className="flex gap-4 text-sm">
           <Link to="/" className="text-muted-foreground [&.active]:text-foreground">
-            Overview
+            {t("overview")}
           </Link>
           <Link to="/accounts" className="text-muted-foreground [&.active]:text-foreground">
-            Accounts
+            {t("accounts")}
           </Link>
         </nav>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto"
-          onClick={async () => {
-            await signOut();
-            navigate({ to: "/login" });
-          }}
-        >
-          Sign out
-        </Button>
+        <div className="ml-auto flex items-center gap-4">
+          <LocaleSwitcher />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={async () => {
+              await signOut();
+              navigate({ to: "/login" });
+            }}
+          >
+            {tc("signOut")}
+          </Button>
+        </div>
       </header>
       <Outlet />
     </div>

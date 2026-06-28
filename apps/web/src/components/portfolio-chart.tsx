@@ -1,42 +1,44 @@
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@folio/ui";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { useFormatter, useTranslations } from "use-intl";
 import type { HistoryPoint } from "../lib/history";
-
-// app 级组合(原则 #11):组合 @folio/ui 的 ChartContainer + recharts 原语;配色走 shadcn
-// 图表 token(--chart-1),不写死颜色。ChartContainer 据 config 注入 --color-total。
-const chartConfig = {
-  total: { label: "Portfolio value", color: "var(--chart-1)" },
-} satisfies ChartConfig;
 
 const DAY_MS = 86_400_000;
 
-// 轴上的紧凑金额(避免 "$13,109" 过宽把 Y 轴标签裁掉):$13.1K。
-const fmtAxisUsd = (n: number) =>
-  n.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    notation: "compact",
-    maximumFractionDigits: 1,
-  });
-
-// tooltip 里给完整精度金额与完整日期时间(不丢信息)。
-const fmtFullUsd = (n: number) =>
-  n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
-const fmtFullDateTime = (t: number) =>
-  new Date(t).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
 export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
-  // 自适应 X 轴刻度:整段跨度 < 2 天 → 显示「时:分」(同日多次同步可区分);更长 → 显示「月 日」。
+  const t = useTranslations("Overview");
+  const format = useFormatter();
+
+  // app 级组合(原则 #11):组合 @folio/ui 的 ChartContainer + recharts 原语;配色走 shadcn
+  // 图表 token(--chart-1),不写死颜色。ChartContainer 据 config 注入 --color-total。
+  const chartConfig = {
+    total: { label: t("portfolioValue"), color: "var(--chart-1)" },
+  } satisfies ChartConfig;
+
+  // 紧凑金额(轴):$13.1K,避免过宽裁切;tooltip 用完整精度。均 locale 感知。
+  const axisUsd = (n: number) =>
+    format.number(n, {
+      style: "currency",
+      currency: "USD",
+      notation: "compact",
+      maximumFractionDigits: 1,
+    });
+  const fullUsd = (n: number) =>
+    format.number(n, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+  const fullDateTime = (ms: number) =>
+    format.dateTime(new Date(ms), {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  // 自适应 X 轴刻度:整段跨度 < 2 天 → 「时:分」(同日多次同步可区分);更长 → 「月 日」。
   const spanMs = series.length > 1 ? series[series.length - 1].t - series[0].t : 0;
-  const fmtAxisX = (t: number) =>
+  const axisX = (ms: number) =>
     spanMs < 2 * DAY_MS
-      ? new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
-      : new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      ? format.dateTime(new Date(ms), { hour: "2-digit", minute: "2-digit" })
+      : format.dateTime(new Date(ms), { month: "short", day: "numeric" });
 
   return (
     <ChartContainer config={chartConfig} className="h-[220px] w-full">
@@ -48,20 +50,20 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
           axisLine={false}
           tickMargin={8}
           minTickGap={32}
-          tickFormatter={fmtAxisX}
+          tickFormatter={axisX}
         />
         <YAxis
           tickLine={false}
           axisLine={false}
           width={56}
           tickMargin={4}
-          tickFormatter={fmtAxisUsd}
+          tickFormatter={axisUsd}
         />
         <ChartTooltip
           content={
             <ChartTooltipContent
-              labelFormatter={(_, payload) => fmtFullDateTime(Number(payload?.[0]?.payload?.t))}
-              formatter={(value) => fmtFullUsd(Number(value))}
+              labelFormatter={(_, payload) => fullDateTime(Number(payload?.[0]?.payload?.t))}
+              formatter={(value) => fullUsd(Number(value))}
             />
           }
         />

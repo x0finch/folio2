@@ -1,7 +1,10 @@
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { IntlProvider } from "use-intl";
 
+import { messages } from "../lib/i18n/messages";
+import { getLocale } from "../lib/server/locale";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -25,17 +28,22 @@ export const Route = createRootRoute({
       },
     ],
   }),
+  // SSR 首屏即正确语言:根 loader 定 locale(cookie/Accept-Language);切换时 invalidate 重跑。
+  loader: () => getLocale(),
   shellComponent: RootDocument,
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const locale = Route.useLoaderData();
   return (
-    <html lang="en">
+    <html lang={locale}>
       <head>
         <HeadContent />
       </head>
       <body>
-        {children}
+        <IntlProvider locale={locale} messages={messages[locale]} timeZone="UTC">
+          {children}
+        </IntlProvider>
         <TanStackDevtools
           config={{
             position: "bottom-right",
