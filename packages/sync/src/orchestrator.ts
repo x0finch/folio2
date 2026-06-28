@@ -139,3 +139,35 @@ export async function syncUser(deps: SyncDeps, userId: string): Promise<SyncResu
   }
   return { results };
 }
+
+export interface SweepResult {
+  users: number;
+  ok: number; // 成功账户数
+  failed: number; // 失败账户数
+}
+
+// 定时同步全量 sweep(P6.3):逐用户调 syncUser,逐用户 try/catch 隔离(一个用户炸不影响其余;
+// syncUser 内部已逐账户隔离)。cron 无 UI → 失败用 console.error 记日志(wrangler tail / CF logs 可见)。
+export async function syncAllUsers(deps: SyncDeps, userIds: string[]): Promise<SweepResult> {
+  let ok = 0;
+  let failed = 0;
+  for (const userId of userIds) {
+    try {
+      const { results } = await syncUser(deps, userId);
+      for (const r of results) {
+        if (r.ok) ok++;
+        else {
+          failed++;
+          console.error(`[cron] sync failed: user=${userId} account=${r.accountId} — ${r.error}`);
+        }
+      }
+    } catch (err) {
+      // syncUser 理论上不抛(整体兜底),此处仅防御:整个用户失败也不中断 sweep。
+      failed++;
+      console.error(
+        `[cron] sync threw for user=${userId} — ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+  return { users: userIds.length, ok, failed };
+}

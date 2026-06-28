@@ -17,6 +17,7 @@ import {
   listMembershipsByUser,
   listSnapshotsByAccount,
   listSnapshotTotalsByUser,
+  listUserIdsWithAccounts,
   removeAccountFromGroup,
   writeSnapshot,
 } from "../src";
@@ -76,6 +77,15 @@ describe("accounts", () => {
       encCredentials: "ENC-BLOB",
     });
     expect(await getEncryptedCredentials(env, USER_A, acc.id)).toBe("ENC-BLOB");
+  });
+
+  it("listUserIdsWithAccounts returns distinct user ids that own accounts (cron sweep)", async () => {
+    expect(await listUserIdsWithAccounts(env)).toEqual([]); // 无账户
+    await createAccount(env, USER_A, { type: "manual", label: "A1", encCredentials: "x" });
+    await createAccount(env, USER_A, { type: "manual", label: "A2", encCredentials: "x" }); // 同用户两账户 → 去重
+    await createAccount(env, USER_B, { type: "manual", label: "B1", encCredentials: "x" });
+    const ids = await listUserIdsWithAccounts(env);
+    expect([...ids].sort()).toEqual([USER_A, USER_B].sort());
   });
 });
 

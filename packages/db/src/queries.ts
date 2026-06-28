@@ -73,6 +73,14 @@ export function listAccountsByUser(env: DbEnv, userId: string): Promise<AccountS
   return getDb(env).select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId));
 }
 
+// ⚠️ 系统级查询 —— 原则 #6(全部按 userId 作用域)的【唯一、受控例外】,仅供定时同步调度器(P6.3)
+// 跨用户枚举。不接受/不返回任何用户数据,只回有账户的去重 userId 列表供逐个 syncUser。
+// 不要在请求处理(server fn)里调用它。
+export async function listUserIdsWithAccounts(env: DbEnv): Promise<string[]> {
+  const rows = await getDb(env).selectDistinct({ userId: accounts.userId }).from(accounts);
+  return rows.map((r) => r.userId);
+}
+
 export async function getAccountById(
   env: DbEnv,
   userId: string,

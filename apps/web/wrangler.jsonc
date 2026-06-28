@@ -3,7 +3,7 @@
   "name": "folio-web",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry",
+  "main": "src/server.ts",
   // D1 绑定:auth handler 取数据用。迁移文件在 @folio/db 包;database_id 占位,部署时填(P6.6)。
   "d1_databases": [
     {
@@ -12,7 +12,8 @@
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "../../packages/db/drizzle"
     }
-  ]
+  ],
 
-  // 后续:"triggers": { "crons": [...] } 定时同步(P6.3)
+  // 定时同步(P6.3):每日 UTC 00:00 触发 src/server.ts 的 scheduled() 跑全量 sweep。
+  "triggers": { "crons": ["0 0 * * *"] }
 }

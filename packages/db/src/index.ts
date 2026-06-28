@@ -29,6 +29,7 @@ export {
   listMembershipsByUser,
   listSnapshotsByAccount,
   listSnapshotTotalsByUser,
+  listUserIdsWithAccounts,
   removeAccountFromGroup,
   writeSnapshot,
 } from "./queries";
