@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
+import { Route as ApiImportRouteImport } from './routes/api/import'
 import { Route as ApiExportRouteImport } from './routes/api/export'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedAccountsRouteImport } from './routes/_authed/accounts'
@@ -30,6 +31,11 @@ const AuthedIndexRoute = AuthedIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AuthedRoute,
+} as any)
+const ApiImportRoute = ApiImportRouteImport.update({
+  id: '/api/import',
+  path: '/api/import',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiExportRoute = ApiExportRouteImport.update({
   id: '/api/export',
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AuthedAccountsRoute
   '/settings': typeof AuthedSettingsRoute
   '/api/export': typeof ApiExportRoute
+  '/api/import': typeof ApiImportRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
@@ -65,6 +72,7 @@ export interface FileRoutesByTo {
   '/accounts': typeof AuthedAccountsRoute
   '/settings': typeof AuthedSettingsRoute
   '/api/export': typeof ApiExportRoute
+  '/api/import': typeof ApiImportRoute
   '/': typeof AuthedIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   '/_authed/accounts': typeof AuthedAccountsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
   '/api/export': typeof ApiExportRoute
+  '/api/import': typeof ApiImportRoute
   '/_authed/': typeof AuthedIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -86,9 +95,17 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/settings'
     | '/api/export'
+    | '/api/import'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/accounts' | '/settings' | '/api/export' | '/' | '/api/auth/$'
+  to:
+    | '/login'
+    | '/accounts'
+    | '/settings'
+    | '/api/export'
+    | '/api/import'
+    | '/'
+    | '/api/auth/$'
   id:
     | '__root__'
     | '/_authed'
@@ -96,6 +113,7 @@ export interface FileRouteTypes {
     | '/_authed/accounts'
     | '/_authed/settings'
     | '/api/export'
+    | '/api/import'
     | '/_authed/'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
@@ -104,6 +122,7 @@ export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
   LoginRoute: typeof LoginRoute
   ApiExportRoute: typeof ApiExportRoute
+  ApiImportRoute: typeof ApiImportRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
@@ -129,6 +148,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof AuthedIndexRouteImport
       parentRoute: typeof AuthedRoute
+    }
+    '/api/import': {
+      id: '/api/import'
+      path: '/api/import'
+      fullPath: '/api/import'
+      preLoaderRoute: typeof ApiImportRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/export': {
       id: '/api/export'
@@ -180,6 +206,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
   LoginRoute: LoginRoute,
   ApiExportRoute: ApiExportRoute,
+  ApiImportRoute: ApiImportRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport

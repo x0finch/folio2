@@ -134,6 +134,8 @@ export const hyperliquidProvider = defineProvider({
     {
       key: "identifier",
       type: "text",
+      label: "EVM Address",
+      desc: "0x + 40 hex",
       validator: z.string().regex(EVM_ADDRESS_RE, "expected 0x + 40 hex"),
     },
   ],

@@ -24,6 +24,7 @@ export {
   getLatestSnapshotByUser,
   listAccountsByGroup,
   listAccountsByUser,
+  listAccountsNeedingCredentials,
   listBalancesForSnapshots,
   listGroupsByAccount,
   listGroupsByUser,
@@ -33,6 +34,7 @@ export {
   listSnapshotTotalsByUser,
   listUserIdsWithAccounts,
   removeAccountFromGroup,
+  setAccountCredentials,
   writeSnapshot,
 } from "./queries";
 export type {

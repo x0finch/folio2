@@ -5,6 +5,7 @@ export const en = {
   Common: {
     signOut: "Sign out",
     delete: "Delete",
+    save: "Save",
     verifying: "Verifying…",
     noAccountsYet: "No accounts yet.",
     addOne: "Add one",
@@ -88,6 +89,13 @@ export const en = {
     perpHint: "Read-only. Perp positions and margin are fetched by the provider.",
     perpLabelPlaceholder: "e.g. HL main",
     addPerpBtn: "Add perp account",
+    importTitle: "Import data",
+    importHint:
+      "Restore from a folio-export.ndjson file. Accounts that need API keys will ask you to re-enter them.",
+    importBtn: "Import file",
+    imported: "Imported {accounts} account(s), {groups} group(s), {snapshots} snapshot(s).",
+    needsCredentials: "Needs credentials",
+    provideCredentials: "Provide credentials",
   },
   Settings: {
     title: "Settings",
@@ -99,6 +107,16 @@ export const en = {
       "Download all your data (accounts, groups, snapshots) as a file. API keys/secrets are never included.",
     exportData: "Export data",
   },
+  // 账户输入的标签/说明,key = ProviderInput.label/desc 的英文源串(en 为同值;zh 给翻译;
+  // 缺失时由 IntlProvider 的 getMessageFallback 回退到 key 本身)。
+  Inputs: {
+    "API Key": "API Key",
+    "API Secret": "API Secret",
+    Passphrase: "Passphrase",
+    "EVM Address": "EVM Address",
+    "Wallet Address": "Wallet Address",
+    "0x + 40 hex": "0x + 40 hex",
+  },
 };
 
 export type Messages = typeof en;
@@ -108,6 +126,7 @@ export const zh: Messages = {
   Common: {
     signOut: "退出登录",
     delete: "删除",
+    save: "保存",
     verifying: "校验中…",
     noAccountsYet: "还没有账户。",
     addOne: "添加一个",
@@ -189,6 +208,12 @@ export const zh: Messages = {
     perpHint: "只读。永续仓位与保证金由 provider 拉取。",
     perpLabelPlaceholder: "如:HL 主账户",
     addPerpBtn: "添加永续账户",
+    importTitle: "导入数据",
+    importHint: "从 folio-export.ndjson 文件恢复。需要 API key 的账户会提示你重新填写。",
+    importBtn: "导入文件",
+    imported: "已导入 {accounts} 个账户、{groups} 个分组、{snapshots} 条快照。",
+    needsCredentials: "缺凭据",
+    provideCredentials: "补录凭据",
   },
   Settings: {
     title: "设置",
@@ -198,6 +223,14 @@ export const zh: Messages = {
     export: "导出",
     exportHint: "把你的全部数据(账户、分组、快照)导出为文件。API key/secret 绝不包含在内。",
     exportData: "导出数据",
+  },
+  Inputs: {
+    "API Key": "API Key",
+    "API Secret": "API Secret",
+    Passphrase: "Passphrase",
+    "EVM Address": "EVM 地址",
+    "Wallet Address": "钱包地址",
+    "0x + 40 hex": "0x + 40 位十六进制",
   },
 };
 

@@ -99,8 +99,8 @@ async function signedGet(
 export const binanceProvider = defineProvider({
   accountType: "exchange_binance",
   inputs: [
-    { key: "apiKey", type: "secret", validator: z.string().trim().min(1) },
-    { key: "secret", type: "secret", validator: z.string().trim().min(1) },
+    { key: "apiKey", type: "secret", label: "API Key", validator: z.string().trim().min(1) },
+    { key: "secret", type: "secret", label: "API Secret", validator: z.string().trim().min(1) },
   ],
 
   async fetchBalances(ctx): Promise<Balance[]> {

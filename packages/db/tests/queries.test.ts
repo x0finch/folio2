@@ -12,6 +12,7 @@ import {
   getLatestSnapshotByUser,
   listAccountsByGroup,
   listAccountsByUser,
+  listAccountsNeedingCredentials,
   listBalancesForSnapshots,
   listGroupsByAccount,
   listGroupsByUser,
@@ -21,6 +22,7 @@ import {
   listSnapshotTotalsByUser,
   listUserIdsWithAccounts,
   removeAccountFromGroup,
+  setAccountCredentials,
   writeSnapshot,
 } from "../src";
 // 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
@@ -88,6 +90,26 @@ describe("accounts", () => {
     await createAccount(env, USER_B, { type: "manual", label: "B1", encCredentials: "x" });
     const ids = await listUserIdsWithAccounts(env);
     expect([...ids].sort()).toEqual([USER_A, USER_B].sort());
+  });
+
+  it("supports null encCredentials (imported 'needs credentials') and rehydration", async () => {
+    // 导入的 CEX 账户:密钥被剥 → encCredentials=null = 缺凭据态。
+    const acc = await createAccount(env, USER_A, {
+      type: "exchange_binance",
+      label: "Imported",
+      encCredentials: null,
+    });
+    expect(await getEncryptedCredentials(env, USER_A, acc.id)).toBeNull();
+
+    // 仅缺凭据账户进入待补录列表(user-scoped)。
+    await createAccount(env, USER_A, { type: "manual", label: "Has", encCredentials: "x" });
+    expect(await listAccountsNeedingCredentials(env, USER_A)).toEqual([acc.id]);
+    expect(await listAccountsNeedingCredentials(env, USER_B)).toEqual([]);
+
+    // 补录:写入密文后离开缺凭据态。
+    await setAccountCredentials(env, USER_A, acc.id, "REHYDRATED");
+    expect(await getEncryptedCredentials(env, USER_A, acc.id)).toBe("REHYDRATED");
+    expect(await listAccountsNeedingCredentials(env, USER_A)).toEqual([]);
   });
 });
 

@@ -46,7 +46,7 @@ describe("syncAllUsers (cron sweep)", () => {
       u3: [], // 无账户
     });
     const res = await syncAllUsers(deps, ["u1", "u2", "u3"]);
-    expect(res).toEqual({ users: 3, ok: 2, failed: 1 });
+    expect(res).toEqual({ users: 3, ok: 2, failed: 1, skipped: 0 });
   });
 
   it("isolates a user whose listAccounts throws — others still sync", async () => {
@@ -66,6 +66,6 @@ describe("syncAllUsers (cron sweep)", () => {
 
   it("handles an empty user list", async () => {
     const res = await syncAllUsers(makeDeps({}), []);
-    expect(res).toEqual({ users: 0, ok: 0, failed: 0 });
+    expect(res).toEqual({ users: 0, ok: 0, failed: 0, skipped: 0 });
   });
 });

@@ -13,13 +13,15 @@ import {
   SelectValue,
 } from "@folio/ui";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
+import { CredentialForm } from "../../components/credential-form";
 import {
   createExchangeAccount,
   createManualAccount,
   createOnchainAccount,
   createPerpAccount,
+  getAccountsNeedingCredentials,
   listMyAccounts,
 } from "../../lib/server/accounts";
 import { getCredentialSpecs } from "../../lib/server/credentials";
@@ -54,12 +56,13 @@ type PerpType = (typeof PERP_TYPES)[number]["value"];
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
-    const [accounts, groups, credentialSpecs] = await Promise.all([
+    const [accounts, groups, credentialSpecs, needsCredentials] = await Promise.all([
       listMyAccounts(),
       getMyGroups(),
       getCredentialSpecs(),
+      getAccountsNeedingCredentials(),
     ]);
-    return { accounts, ...groups, credentialSpecs };
+    return { accounts, ...groups, credentialSpecs, needsCredentials };
   },
   component: Accounts,
 });
@@ -75,7 +78,9 @@ function Accounts() {
   const router = useRouter();
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const { accounts, groups, memberships, credentialSpecs } = Route.useLoaderData();
+  const { accounts, groups, memberships, credentialSpecs, needsCredentials } =
+    Route.useLoaderData();
+  const needsCredsSet = new Set(needsCredentials);
   // accountId → 所属 groupId 集合(渲染勾选状态)。
   const groupIdsByAccount = new Map<string, Set<string>>();
   for (const m of memberships) {
@@ -118,6 +123,40 @@ function Accounts() {
   const [pAddress, setPAddress] = useState("");
   const [pError, setPError] = useState<string | null>(null);
   const [pBusy, setPBusy] = useState(false);
+
+  // 导入(P6.6):POST 文件到 /api/import(流式 NDJSON);成功后 invalidate 刷新列表。
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+
+  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportMsg(null);
+    setImportError(null);
+    setImportBusy(true);
+    try {
+      const res = await fetch("/api/import", { method: "POST", body: file });
+      if (!res.ok) throw new Error(await res.text());
+      const { imported } = (await res.json()) as {
+        imported: { accounts: number; groups: number; snapshots: number };
+      };
+      setImportMsg(
+        t("imported", {
+          accounts: imported.accounts,
+          groups: imported.groups,
+          snapshots: imported.snapshots,
+        }),
+      );
+      await router.invalidate();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setImportBusy(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  }
 
   function setRow(i: number, patch: Partial<HoldingRow>) {
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -237,7 +276,8 @@ function Accounts() {
     try {
       const { results } = await triggerSync();
       const ok = results.filter((r) => r.ok).length;
-      const failures = results.filter((r) => !r.ok);
+      // 缺凭据账户(skipped)不算失败(导入待补录)。
+      const failures = results.filter((r) => !r.ok && !r.skipped);
       const labelOf = (id: string) => accounts.find((a) => a.id === id)?.label ?? id;
       let msg = t("synced", { count: ok });
       if (failures.length > 0) {
@@ -271,12 +311,27 @@ function Accounts() {
         <ul className="flex flex-col gap-2">
           {accounts.map((a) => {
             const inGroups = groupIdsByAccount.get(a.id) ?? new Set<string>();
+            const needsCreds = needsCredsSet.has(a.id);
             return (
               <li key={a.id} className="flex flex-col gap-2 rounded-md border px-4 py-2">
                 <div className="flex items-center justify-between">
-                  <span>{a.label}</span>
+                  <span className="flex items-center gap-2">
+                    {a.label}
+                    {needsCreds && (
+                      <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive">
+                        {t("needsCredentials")}
+                      </span>
+                    )}
+                  </span>
                   <span className="text-sm text-muted-foreground">{a.type}</span>
                 </div>
+                {needsCreds && (
+                  <CredentialForm
+                    accountId={a.id}
+                    specs={credentialSpecs[a.type] ?? []}
+                    onDone={() => router.invalidate()}
+                  />
+                )}
                 {groups.length > 0 && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
                     {groups.map((g) => (
@@ -581,6 +636,35 @@ function Accounts() {
               {pBusy ? tc("verifying") : t("addPerpBtn")}
             </Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("importTitle")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">{t("importHint")}</p>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".ndjson,application/x-ndjson,application/json"
+              className="hidden"
+              onChange={onImportFile}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={importBusy}
+              className="self-start"
+              onClick={() => importInputRef.current?.click()}
+            >
+              {importBusy ? tc("verifying") : t("importBtn")}
+            </Button>
+            {importMsg && <p className="text-sm text-muted-foreground">{importMsg}</p>}
+            {importError && <p className="text-sm text-destructive">{importError}</p>}
+          </div>
         </CardContent>
       </Card>
     </div>

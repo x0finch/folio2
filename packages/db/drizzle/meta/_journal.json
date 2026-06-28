@@ -29,6 +29,13 @@
       "when": 1782532653715,
       "tag": "0003_red_gunslinger",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1782636368832,
+      "tag": "0004_zippy_romulus",
+      "breakpoints": true
     }
   ]
 }

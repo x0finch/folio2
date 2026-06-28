@@ -128,7 +128,14 @@ export function makeCoinstats(accountType: AccountType, connectionId: string): B
     accountType,
     usesGlobalKeys: [COINSTATS_API_KEY], // 最小权限:只下发这个 key
     // 地址非空即可(solana/sui/cosmos 格式各异,交 API 判定)。
-    inputs: [{ key: "identifier", type: "text", validator: z.string().trim().min(1) }],
+    inputs: [
+      {
+        key: "identifier",
+        type: "text",
+        label: "Wallet Address",
+        validator: z.string().trim().min(1),
+      },
+    ],
     fetchBalances: (ctx) => fetchCoinstats(connectionId, ctx),
     validate: (ctx) => validateCoinstats(connectionId, ctx),
   });

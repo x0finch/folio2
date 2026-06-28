@@ -21,7 +21,7 @@ export default {
         const userIds = await listUserIdsWithAccounts(env);
         const result = await syncAllUsers(buildSyncDeps(env), userIds);
         console.log(
-          `[cron] ${controller.cron} swept users=${result.users} ok=${result.ok} failed=${result.failed}`,
+          `[cron] ${controller.cron} swept users=${result.users} ok=${result.ok} failed=${result.failed} skipped=${result.skipped}`,
         );
       })(),
     );

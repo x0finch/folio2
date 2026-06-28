@@ -1,6 +1,12 @@
 import { env } from "cloudflare:workers";
 import { encrypt, type FetchContext, getProvider, validateCredentials } from "@folio/core";
-import { createAccount, listAccountsByUser } from "@folio/db";
+import {
+  createAccount,
+  getAccountById,
+  listAccountsByUser,
+  listAccountsNeedingCredentials,
+  setAccountCredentials,
+} from "@folio/db";
 import { appRegistry, scopeGlobalKeys } from "@folio/sync";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -12,6 +18,11 @@ import { requireAuth } from "../require-auth";
 export const listMyAccounts = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(({ context }) => listAccountsByUser(env, context.userId));
+
+// 缺凭据账户 id(导入待补录)。UI 据此标记 + 展开补录表单。只回 id,不回密文。
+export const getAccountsNeedingCredentials = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(({ context }) => listAccountsNeedingCredentials(env, context.userId));
 
 // 凭据字段的【值校验】统一走 provider.inputs 的 validator(EVM 正则 / 非空 / passphrase 必填等
 // 全由声明派生,见 @folio/core validateCredentials)。外层 zod 只管 wire 形状(type 白名单 + label
@@ -131,4 +142,35 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
       label: data.label,
       encCredentials,
     });
+  });
+
+// 凭据再水合(P6.6):为导入的"缺凭据"账户补录密钥。按该账户 type 的 inputs 校验 + live validate +
+// 加密入库,清除缺凭据态。creds 字段值的真校验由 validateCredentials(inputs) 负责(不硬编码 per-type)。
+const ProvideCredentialsInput = z.object({
+  accountId: z.string().min(1),
+  creds: z.record(z.string(), z.string()),
+});
+export const provideCredentials = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(ProvideCredentialsInput)
+  .handler(async ({ data, context }) => {
+    const account = await getAccountById(env, context.userId, data.accountId);
+    if (!account) throw new Error("account not found");
+    const provider = getProvider(appRegistry, account.type);
+    const creds = await validateCredentials(provider.inputs ?? [], data.creds);
+    const ctx: FetchContext = {
+      account: { id: account.id, userId: context.userId, type: account.type, label: account.label },
+      creds,
+      globalKeys: scopeGlobalKeys(ALL_GLOBAL_KEYS, provider.usesGlobalKeys),
+    };
+    if (!(await provider.validate(ctx))) {
+      throw new Error("could not verify these credentials — please check them and try again");
+    }
+    await setAccountCredentials(
+      env,
+      context.userId,
+      account.id,
+      await encrypt(JSON.stringify(creds), env.SECRETS_KEY),
+    );
+    return { ok: true as const };
   });

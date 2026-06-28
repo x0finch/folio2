@@ -9,6 +9,8 @@ import { requireAuth } from "../require-auth";
 export interface InputSpec {
   key: string;
   type: "text" | "secret";
+  label: string; // 兼作 i18n key(见 ProviderInput.label);desc 同理
+  desc?: string;
 }
 export const getCredentialSpecs = createServerFn({ method: "GET" })
   .middleware([requireAuth])
@@ -16,7 +18,12 @@ export const getCredentialSpecs = createServerFn({ method: "GET" })
     const specs: Record<string, InputSpec[]> = {};
     for (const [type, provider] of Object.entries(appRegistry)) {
       if (provider)
-        specs[type] = (provider.inputs ?? []).map((i) => ({ key: i.key, type: i.type }));
+        specs[type] = (provider.inputs ?? []).map((i) => ({
+          key: i.key,
+          type: i.type,
+          label: i.label,
+          desc: i.desc,
+        }));
     }
     return specs;
   });

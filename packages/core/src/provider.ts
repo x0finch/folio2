@@ -10,7 +10,10 @@ export interface ProviderInput {
   readonly key: string; // 存进 creds 的字段名(provider 自定;creds 形状由 inputs 推断)
   readonly type: ProviderInputType;
   readonly validator: StandardSchemaV1<unknown, string>;
-  // 注:label/desc(展示文案 + i18n key)留待 P6.6 动态表单时再加(连同 Inputs i18n + fallback 一起落地)。
+  // 人类可读标签;同时【兼作 i18n key】(源串即 key,gettext 风格):app 在 Inputs namespace 下查翻译,
+  // 缺翻译则回退 label 本身(英文)→ en 无需写、只补 zh。不同 provider 同 key 可给不同 label。desc 同理。
+  readonly label: string;
+  readonly desc?: string;
 }
 
 // 从声明的 inputs 推出该 provider 的 creds 形状(只含其字段、均为已校验的 string)。

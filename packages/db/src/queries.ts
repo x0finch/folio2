@@ -1,5 +1,5 @@
 import type { AccountType, BalanceKind } from "@folio/core";
-import { and, asc, desc, eq, getTableColumns, inArray, max } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, max } from "drizzle-orm";
 import { type Db, type DbEnv, getDb } from "./client";
 import { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
@@ -42,7 +42,7 @@ export interface CreateAccountInput {
   type: AccountType;
   network?: string;
   label: string;
-  encCredentials: string; // 调用方传入的密文 blob(db 不加密、不解释)
+  encCredentials: string | null; // 密文 blob(db 不加密/解释);null = 缺凭据态(导入的 CEX,见 P6.6)
   dataJson?: string; // 非密钥账户数据的明文 JSON(manual 持仓),可空;db 不解释
 }
 
@@ -71,6 +71,32 @@ export async function createAccount(
 
 export function listAccountsByUser(env: DbEnv, userId: string): Promise<AccountSafe[]> {
   return getDb(env).select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId));
+}
+
+// "缺凭据"账户的 id(encCredentials 为 null,导入的 CEX 待补录;见 P6.6)。供 UI 标记、补录入口。
+// 只回 id,不回任何密文/凭据。
+export async function listAccountsNeedingCredentials(
+  env: DbEnv,
+  userId: string,
+): Promise<string[]> {
+  const rows = await getDb(env)
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.userId, userId), isNull(accounts.encCredentials)));
+  return rows.map((r) => r.id);
+}
+
+// 补录:为缺凭据账户写入密文(再水合),清除缺凭据态。见 P6.6 provideCredentials。
+export async function setAccountCredentials(
+  env: DbEnv,
+  userId: string,
+  id: string,
+  encCredentials: string,
+): Promise<void> {
+  await getDb(env)
+    .update(accounts)
+    .set({ encCredentials })
+    .where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
 }
 
 // ⚠️ 系统级查询 —— 原则 #6(全部按 userId 作用域)的【唯一、受控例外】,仅供定时同步调度器(P6.3)

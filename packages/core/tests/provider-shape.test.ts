@@ -44,9 +44,9 @@ describe("BalanceProvider shape", () => {
     const okxLike: BalanceProvider = {
       accountType: "exchange_okx",
       inputs: [
-        { key: "apiKey", type: "secret", validator: z.string().min(1) },
-        { key: "secret", type: "secret", validator: z.string().min(1) },
-        { key: "passphrase", type: "secret", validator: z.string().min(1) },
+        { key: "apiKey", type: "secret", label: "API Key", validator: z.string().min(1) },
+        { key: "secret", type: "secret", label: "API Secret", validator: z.string().min(1) },
+        { key: "passphrase", type: "secret", label: "Passphrase", validator: z.string().min(1) },
       ],
       async fetchBalances() {
         return [];

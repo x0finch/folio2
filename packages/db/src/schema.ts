@@ -32,7 +32,9 @@ export const accounts = sqliteTable(
     type: text("type").$type<AccountType>().notNull(),
     network: text("network"),
     label: text("label").notNull(),
-    encCredentials: text("enc_credentials").notNull(), // AES-GCM 密文 blob,db 不解释内容
+    // AES-GCM 密文 blob(db 不解释内容)。可空:导入(P6.6)的 CEX 账户尚无密钥 → null = "缺凭据"态,
+    // 补录前同步跳过;链上/perp 导入带地址、manual 存加密的 {},均非 null。
+    encCredentials: text("enc_credentials"),
     dataJson: text("data_json"), // 非密钥账户数据(manual 持仓)的【明文】JSON,可空;db 不解释内容(见 arch §3)
     createdAt: integer("created_at").notNull(), // epoch ms
   },

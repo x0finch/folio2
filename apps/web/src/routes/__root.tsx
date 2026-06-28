@@ -41,7 +41,13 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <IntlProvider locale={locale} messages={messages[locale]} timeZone="UTC">
+        <IntlProvider
+          locale={locale}
+          messages={messages[locale]}
+          timeZone="UTC"
+          // 缺翻译 → 回退到请求的 key 本身(对 Inputs 而言即英文源串 label;见 ProviderInput.label)。
+          getMessageFallback={({ key }) => key}
+        >
           {children}
         </IntlProvider>
         <TanStackDevtools

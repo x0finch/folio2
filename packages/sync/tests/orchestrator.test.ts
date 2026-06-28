@@ -116,6 +116,20 @@ describe("syncUser — 失败隔离", () => {
   });
 });
 
+describe("syncAccount — 缺凭据跳过", () => {
+  it("encCredentials=null(导入待补录)→ ok:false skipped:true,不拉取/不写快照", async () => {
+    const acc = manualAccount({ id: "needs", type: "exchange_binance", dataJson: null });
+    const { deps, writes } = makeDeps([acc], {
+      getEncryptedCredentials: async () => null, // 缺凭据
+    });
+
+    const { results } = await syncUser(deps, "u1");
+
+    expect(results[0]).toMatchObject({ accountId: "needs", ok: false, skipped: true });
+    expect(writes).toHaveLength(0);
+  });
+});
+
 describe("runAccountSync — 求和与空持仓", () => {
   it("totalUsd 为各持仓之和", async () => {
     const account = manualAccount();

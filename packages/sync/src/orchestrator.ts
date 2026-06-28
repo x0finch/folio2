@@ -34,6 +34,7 @@ export interface SyncDeps {
 export interface AccountSyncResult {
   accountId: string;
   ok: boolean;
+  skipped?: boolean; // 缺凭据态(导入待补录):跳过、不算失败(见 P6.6)
   snapshotId?: string;
   totalUsd?: number;
   error?: string;
@@ -96,7 +97,9 @@ export async function syncAccount(
   try {
     const provider = getProvider(registry, account.type);
     const encCreds = await deps.getEncryptedCredentials(userId, account.id);
-    // 密钥只在此刻解密,用完即弃。manual 账户密文是加密的 {}(无密钥)。
+    // 缺凭据态(导入的 CEX,encCredentials=null):跳过,不算失败——补录后下次同步纳入(见 P6.6)。
+    if (encCreds === null) return { accountId: account.id, ok: false, skipped: true };
+    // 密钥只在此刻解密,用完即弃。manual 账户密文是加密的 {}(无密钥);空串按空 creds 处理。
     const decrypted = encCreds ? JSON.parse(await decrypt(encCreds, deps.secretsKey)) : {};
     // 运行时闸:按 provider.inputs 的 validator 校验解密出的 creds,通过才进 FetchContext。
     // 给 fetchBalances/validate 里 ctx.creds 的 CredsOf 类型以运行时背书;脏/缺数据 → 本账户 fail。
@@ -148,6 +151,7 @@ export interface SweepResult {
   users: number;
   ok: number; // 成功账户数
   failed: number; // 失败账户数
+  skipped: number; // 缺凭据跳过数(待补录,见 P6.6)
 }
 
 // 定时同步全量 sweep(P6.3):逐用户调 syncUser,逐用户 try/catch 隔离(一个用户炸不影响其余;
@@ -155,11 +159,14 @@ export interface SweepResult {
 export async function syncAllUsers(deps: SyncDeps, userIds: string[]): Promise<SweepResult> {
   let ok = 0;
   let failed = 0;
+  let skipped = 0;
   for (const userId of userIds) {
     try {
       const { results } = await syncUser(deps, userId);
       for (const r of results) {
         if (r.ok) ok++;
+        else if (r.skipped)
+          skipped++; // 缺凭据:不算失败、不记错误日志
         else {
           failed++;
           console.error(`[cron] sync failed: user=${userId} account=${r.accountId} — ${r.error}`);
@@ -173,5 +180,5 @@ export async function syncAllUsers(deps: SyncDeps, userIds: string[]): Promise<S
       );
     }
   }
-  return { users: userIds.length, ok, failed };
+  return { users: userIds.length, ok, failed, skipped };
 }
