@@ -1,36 +1,9 @@
 import { RESOLUTION_DOMINANCE, RESOLUTION_TOP_RANK } from "./constants";
-import type {
-  AssetRef,
-  Confidence,
-  Resolution,
-  TokenCandidate,
-  TokenIndex,
-  TokenRef,
-} from "./types";
+import type { AssetRef, Confidence, Resolution, TokenCandidate, TokenRef } from "./types";
 
-// 符号归一 —— 建索引 / lookupBySymbol / OVERRIDES 三处用同一口径,避免 `USDC`/`usdc` 漏配。
+// 符号归一 —— warm 建候选 / 查候选 / OVERRIDES 三处用同一口径,避免 `USDC`/`usdc` 漏配。
 export function normalizeSymbol(s: string): string {
   return s.trim().toUpperCase();
-}
-
-function contractKey(platform: string, contract: string): string {
-  return `${platform}:${contract.toLowerCase()}`;
-}
-
-// (链,合约) → 规范 ref。链经 platforms 映射到平台(小写),合约小写;任一缺失/未映射 → null。
-export function lookupByContract(
-  index: TokenIndex,
-  chain: string,
-  contract: string,
-): TokenRef | null {
-  const platform = index.platforms.get(chain.toLowerCase());
-  if (!platform) return null;
-  return index.byContract.get(contractKey(platform, contract)) ?? null;
-}
-
-// symbol → 候选(已带 rank)。空 symbol / 未收录 → []。
-export function lookupBySymbol(index: TokenIndex, symbol: string): TokenCandidate[] {
-  return index.bySymbol.get(normalizeSymbol(symbol)) ?? [];
 }
 
 export interface ConfidenceOpts {
@@ -69,6 +42,7 @@ export function pickByConfidence(
 }
 
 // 内核瀑布(纯):explicit > contract > override > symbol(门控) > none。
+// 输入由 `service.resolveAsset` 收集(合约懒解析、warm 候选、覆盖表),本函数只做裁决。
 export function chooseResolution(
   asset: AssetRef,
   inputs: { contractHit?: TokenRef | null; candidates?: TokenCandidate[]; override?: TokenRef },
@@ -82,20 +56,4 @@ export function chooseResolution(
   if (picked) return { ref: picked.ref, confidence: picked.confidence, via: "symbol" };
 
   return { ref: null, confidence: "low", via: "none" };
-}
-
-// 公开入口(纯):查索引 + 覆盖表,拼装后交内核瀑布。调用方(P7.4)只调这一个。
-export function resolve(
-  index: TokenIndex,
-  asset: AssetRef,
-  overrides?: Readonly<Record<string, TokenRef>>,
-): Resolution {
-  if (asset.ref) return { ref: asset.ref, confidence: "high", via: "explicit" };
-
-  const contractHit =
-    asset.contract && asset.chain ? lookupByContract(index, asset.chain, asset.contract) : null;
-  const candidates = lookupBySymbol(index, asset.symbol);
-  const override = overrides?.[normalizeSymbol(asset.symbol)];
-
-  return chooseResolution(asset, { contractHit, candidates, override });
 }

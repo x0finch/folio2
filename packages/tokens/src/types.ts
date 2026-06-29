@@ -4,10 +4,7 @@
 //   · `coin`  = 仅 CoinGecko 角落 —— `CoinId`,只活在 `TokenRef` 的 coingecko 变体里。
 // 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 source 零返工。
 
-// 法币计价单位。P8.6 多法币时扩;现仅 usd,但 `vs` 字段已留,后续不破契约。
-export type Fiat = "usd";
-
-// CoinGecko 的 coin-id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/platform)混用。
+// CoinGecko 的 coin-id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/chain)混用。
 // 仅用于下面的 coingecko `TokenRef` 变体;通过 `as CoinId` 在可信边界(解析 CGK 响应)构造。
 export type CoinId = string & { readonly __brand: "CoinId" };
 
@@ -44,28 +41,18 @@ export interface TokenInfo {
 }
 
 // 价facet,快 TTL。`marketCapRank` 是市场数据,其权威 home 在此。
+// `unitPrice`/`change24h` 一律以 **USD** 计价;多法币在展示层用 USD→法币汇率换算(P8.6),不进本层。
 export interface TokenPrice {
   ref: TokenRef;
   unitPrice: number;
   change24h?: number;
   marketCapRank?: number;
-  vs: Fiat;
   asOf: number;
 }
 
-// —— 解析【过程】类型(瞬时,不进缓存)——
-// 喂 `pickByConfidence`;symbol 是 `TokenIndex.bySymbol` 的 key,值里不带。
-// rank 在建索引/灌 markets 时合并好(P7.2/P7.3),`resolve` 拿到的候选已带 rank。
+// —— 符号消歧的候选(瞬时,喂 `pickByConfidence`)——
+// 来自 warm(top-N markets),已带 `marketCapRank`;symbol 是 store 的 key,值里不带。
 export interface TokenCandidate {
   ref: TokenRef;
   marketCapRank?: number;
-}
-
-// 解析索引(慢变)。键归一见 resolve.ts(`byContract`=`platform:contractLower`、`bySymbol`=normalizeSymbol)。
-// 序列化/落库细节留 P7.3。
-export interface TokenIndex {
-  byContract: Map<string, TokenRef>;
-  bySymbol: Map<string, TokenCandidate[]>;
-  platforms: Map<string, string>; // 我们的 chain 键(小写)→ CoinGecko 平台 id
-  asOf: number;
 }

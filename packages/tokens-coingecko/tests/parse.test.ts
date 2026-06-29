@@ -1,15 +1,14 @@
 import type { CoinId, TokenRef } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
 import {
-  buildIndex,
   parseAssetPlatforms,
-  parseCoinsList,
+  parseContract,
   parseMarkets,
   parseRetryAfter,
   parseSimplePrice,
 } from "../src/parse";
 import platformsJson from "./fixtures/asset_platforms.json";
-import listJson from "./fixtures/coins_list.json";
+import contractJson from "./fixtures/coin_contract.json";
 import marketsJson from "./fixtures/coins_markets_p1.json";
 import simpleJson from "./fixtures/simple_price.json";
 
@@ -32,39 +31,10 @@ describe("parseAssetPlatforms", () => {
   });
 });
 
-describe("parseCoinsList", () => {
-  it("builds byContract (platform:addrLower) + bySymbol (normalized, rank-free)", () => {
-    const { byContract, bySymbol } = parseCoinsList(listJson);
-    expect(byContract).toEqual(
-      new Map([
-        ["ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", cg("usd-coin")],
-        ["polygon-pos:0x2791bca1f2de4661ed88a30c99a7a9449aa84174", cg("usd-coin")],
-        ["solana:fake1111111111111111111111111111111111111111", cg("usdc-fake")],
-      ]),
-    );
-    expect(bySymbol).toEqual(
-      new Map([
-        ["BTC", [{ ref: cg("bitcoin") }]],
-        ["USDC", [{ ref: cg("usd-coin") }, { ref: cg("usdc-fake") }]],
-      ]),
-    );
-  });
-});
-
-describe("buildIndex", () => {
-  it("combines platforms + list + asOf", () => {
-    const index = buildIndex(platformsJson, listJson, 12345);
-    expect(index.asOf).toBe(12345);
-    expect(index.platforms.get("1")).toBe("ethereum");
-    expect(index.byContract.size).toBe(3);
-    expect(index.bySymbol.get("USDC")).toHaveLength(2);
-  });
-});
-
 describe("parseMarkets", () => {
   it("splits each row into {info, price}; skips rows without a price", () => {
     const asOf = Date.parse("2026-06-29T00:00:00.000Z");
-    expect(parseMarkets(marketsJson, "usd")).toEqual([
+    expect(parseMarkets(marketsJson)).toEqual([
       {
         info: {
           ref: cg("bitcoin"),
@@ -72,14 +42,7 @@ describe("parseMarkets", () => {
           name: "Bitcoin",
           logo: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png",
         },
-        price: {
-          ref: cg("bitcoin"),
-          unitPrice: 65000,
-          change24h: 1.5,
-          marketCapRank: 1,
-          vs: "usd",
-          asOf,
-        },
+        price: { ref: cg("bitcoin"), unitPrice: 65000, change24h: 1.5, marketCapRank: 1, asOf },
       },
       {
         info: {
@@ -88,14 +51,7 @@ describe("parseMarkets", () => {
           name: "Ethereum",
           logo: "https://assets.coingecko.com/coins/images/279/large/ethereum.png",
         },
-        price: {
-          ref: cg("ethereum"),
-          unitPrice: 3500,
-          change24h: -2.1,
-          marketCapRank: 2,
-          vs: "usd",
-          asOf,
-        },
+        price: { ref: cg("ethereum"), unitPrice: 3500, change24h: -2.1, marketCapRank: 2, asOf },
       },
     ]);
   });
@@ -103,18 +59,43 @@ describe("parseMarkets", () => {
 
 describe("parseSimplePrice", () => {
   it("maps each id → TokenPrice keyed by refKey (last_updated_at → ms)", () => {
-    expect(parseSimplePrice(simpleJson, "usd")).toEqual(
+    expect(parseSimplePrice(simpleJson)).toEqual(
       new Map([
         [
           "coingecko:bitcoin",
-          { ref: cg("bitcoin"), unitPrice: 65000, change24h: 1.5, vs: "usd", asOf: 1782000000000 },
+          { ref: cg("bitcoin"), unitPrice: 65000, change24h: 1.5, asOf: 1782000000000 },
         ],
         [
           "coingecko:ethereum",
-          { ref: cg("ethereum"), unitPrice: 3500, change24h: -2.1, vs: "usd", asOf: 1782000000000 },
+          { ref: cg("ethereum"), unitPrice: 3500, change24h: -2.1, asOf: 1782000000000 },
         ],
       ]),
     );
+  });
+});
+
+describe("parseContract", () => {
+  it("maps per-contract response → {ref, info(logo from image.large), price(usd under market_data)}", () => {
+    expect(parseContract(contractJson)).toEqual({
+      ref: cg("usd-coin"),
+      info: {
+        ref: cg("usd-coin"),
+        symbol: "usdc",
+        name: "USDC",
+        logo: "https://coin-images.coingecko.com/coins/images/6319/large/usdc.png",
+      },
+      price: {
+        ref: cg("usd-coin"),
+        unitPrice: 1.001,
+        change24h: 0.05,
+        marketCapRank: 6,
+        asOf: Date.parse("2026-06-29T00:00:00.000Z"),
+      },
+    });
+  });
+  it("returns null when no id / no price", () => {
+    expect(parseContract({ id: "x" })).toBeNull();
+    expect(parseContract({ market_data: { current_price: { usd: 1 } } })).toBeNull();
   });
 });
 

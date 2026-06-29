@@ -1,0 +1,17 @@
+{
+  "id": "usd-coin",
+  "symbol": "usdc",
+  "name": "USDC",
+  "asset_platform_id": "ethereum",
+  "image": {
+    "thumb": "https://coin-images.coingecko.com/coins/images/6319/thumb/usdc.png",
+    "small": "https://coin-images.coingecko.com/coins/images/6319/small/usdc.png",
+    "large": "https://coin-images.coingecko.com/coins/images/6319/large/usdc.png"
+  },
+  "market_cap_rank": 6,
+  "market_data": {
+    "current_price": { "usd": 1.001, "eur": 0.92 },
+    "price_change_percentage_24h": 0.05
+  },
+  "last_updated": "2026-06-29T00:00:00.000Z"
+}

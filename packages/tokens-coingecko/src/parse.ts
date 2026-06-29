@@ -1,15 +1,12 @@
 import {
   type CoinId,
-  type Fiat,
-  normalizeSymbol,
   refKey,
-  type TokenCandidate,
   TokenError,
-  type TokenIndex,
   type TokenInfo,
   type TokenPrice,
   type TokenRef,
 } from "@folio/tokens";
+import { VS_USD } from "./constants";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
 
@@ -41,57 +38,19 @@ export function parseAssetPlatforms(json: unknown): Map<string, string> {
   return platforms;
 }
 
-interface RawCoin {
-  id?: string;
-  symbol?: string;
-  name?: string;
-  platforms?: Record<string, string | null>;
-}
-
-// coins/list?include_platform → (平台,合约)→ref 与 symbol→候选。候选 rank 暂空(P7.3 灌 markets 时合并)。
-export function parseCoinsList(json: unknown): {
-  byContract: Map<string, TokenRef>;
-  bySymbol: Map<string, TokenCandidate[]>;
-} {
-  if (!Array.isArray(json)) throw new TokenError("PARSE_ERROR", "coins/list: expected array");
-  const byContract = new Map<string, TokenRef>();
-  const bySymbol = new Map<string, TokenCandidate[]>();
-  for (const c of json as RawCoin[]) {
-    if (!c?.id || !c.symbol) continue;
-    const ref = cg(c.id);
-    const symKey = normalizeSymbol(c.symbol);
-    const list = bySymbol.get(symKey);
-    if (list) list.push({ ref });
-    else bySymbol.set(symKey, [{ ref }]);
-    if (c.platforms) {
-      for (const [platform, addr] of Object.entries(c.platforms)) {
-        if (!platform || !addr) continue;
-        byContract.set(`${platform}:${addr.toLowerCase()}`, ref);
-      }
-    }
-  }
-  return { byContract, bySymbol };
-}
-
-export function buildIndex(platformsJson: unknown, listJson: unknown, asOf: number): TokenIndex {
-  const platforms = parseAssetPlatforms(platformsJson);
-  const { byContract, bySymbol } = parseCoinsList(listJson);
-  return { byContract, bySymbol, platforms, asOf };
-}
-
 interface RawMarket {
   id?: string;
   symbol?: string;
   name?: string;
   image?: string;
-  current_price?: number | null;
+  current_price?: number | null; // 已是 USD(查询时 vs_currency=usd)
   market_cap_rank?: number | null;
   price_change_percentage_24h?: number | null;
   last_updated?: string;
 }
 
-// 一行 markets → {info, price}(价facet + 元信息facet)。跳过无 id / 无价的行。
-export function parseMarkets(json: unknown, vs: Fiat): { info: TokenInfo; price: TokenPrice }[] {
+// 一行 markets → {info, price}(价facet + 元信息facet;价为 USD)。跳过无 id / 无价的行。
+export function parseMarkets(json: unknown): { info: TokenInfo; price: TokenPrice }[] {
   if (!Array.isArray(json)) throw new TokenError("PARSE_ERROR", "coins/markets: expected array");
   const out: { info: TokenInfo; price: TokenPrice }[] = [];
   for (const r of json as RawMarket[]) {
@@ -105,7 +64,6 @@ export function parseMarkets(json: unknown, vs: Fiat): { info: TokenInfo; price:
         unitPrice: r.current_price,
         change24h: r.price_change_percentage_24h ?? undefined,
         marketCapRank: r.market_cap_rank ?? undefined,
-        vs,
         asOf: Number.isFinite(asOf) ? asOf : 0,
       },
     });
@@ -113,24 +71,63 @@ export function parseMarkets(json: unknown, vs: Fiat): { info: TokenInfo; price:
   return out;
 }
 
-// simple/price → 按 refKey 索引的价。
-export function parseSimplePrice(json: unknown, vs: Fiat): Map<string, TokenPrice> {
+// simple/price → 按 refKey 索引的价(USD)。字段键固定为 usd / usd_24h_change(查询时 vs=usd)。
+export function parseSimplePrice(json: unknown): Map<string, TokenPrice> {
   if (typeof json !== "object" || json === null)
     throw new TokenError("PARSE_ERROR", "simple/price: expected object");
   const out = new Map<string, TokenPrice>();
   for (const [id, raw] of Object.entries(json as Record<string, Record<string, number>>)) {
-    const unitPrice = raw?.[vs];
+    const unitPrice = raw?.[VS_USD];
     if (typeof unitPrice !== "number") continue;
-    const change = raw[`${vs}_24h_change`];
+    const change = raw[`${VS_USD}_24h_change`];
     const ts = raw.last_updated_at;
     const ref = cg(id);
     out.set(refKey(ref), {
       ref,
       unitPrice,
       change24h: typeof change === "number" ? change : undefined,
-      vs,
       asOf: typeof ts === "number" ? ts * 1000 : 0,
     });
   }
   return out;
+}
+
+interface RawContract {
+  id?: string;
+  symbol?: string;
+  name?: string;
+  image?: { thumb?: string; small?: string; large?: string }; // per-contract:image 是对象(非 markets 的 string)
+  market_cap_rank?: number | null;
+  market_data?: {
+    current_price?: Record<string, number>;
+    price_change_percentage_24h?: number | null;
+  };
+  last_updated?: string;
+}
+
+// per-contract 端点(coins/{platform}/contract/{addr})→ {ref, info, price}(价 USD)。无 id / 无价 → null。
+export function parseContract(
+  json: unknown,
+): { ref: TokenRef; info: TokenInfo; price: TokenPrice } | null {
+  const c = json as RawContract;
+  const unitPrice = c?.market_data?.current_price?.[VS_USD];
+  if (!c?.id || typeof unitPrice !== "number") return null;
+  const ref = cg(c.id);
+  const asOf = c.last_updated ? Date.parse(c.last_updated) : Number.NaN;
+  return {
+    ref,
+    info: {
+      ref,
+      symbol: c.symbol ?? "",
+      name: c.name ?? "",
+      logo: c.image?.large ?? c.image?.small,
+    },
+    price: {
+      ref,
+      unitPrice,
+      change24h: c.market_data?.price_change_percentage_24h ?? undefined,
+      marketCapRank: c.market_cap_rank ?? undefined,
+      asOf: Number.isFinite(asOf) ? asOf : 0,
+    },
+  };
 }

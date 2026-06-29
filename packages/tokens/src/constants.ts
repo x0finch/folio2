@@ -26,8 +26,12 @@ export const OVERRIDES: Readonly<Record<string, TokenRef>> = {
 export const RESOLUTION_TOP_RANK = 50; // 市值 top-N 内即可信(高置信)
 export const RESOLUTION_DOMINANCE = 5; // 最佳须如此倍数地碾压次席(rank 比)才算高置信
 
-// 缓存 TTL(供 P7.3 store 实现)。索引/元信息慢变,价快变,否定缓存中等。
-export const INDEX_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d
-export const TOKENINFO_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d
-export const PRICE_TTL_MS = 10 * 60 * 1000; // 10min
-export const ABSENT_TTL_MS = 24 * 60 * 60 * 1000; // 1d
+// 预热深度(top-N markets)。
+export const DEFAULT_TOP_N = 1000;
+
+// 缓存 TTL(供 store 实现 / refreshWarm 门控)。warm 承载价要新鲜、合约解析稳定、否定中等。
+// (chain 的源内映射 TTL 由各 source 自管,不在此。)
+export const WARM_TTL_MS = 30 * 60 * 1000; // 30min(warm 承载价,要新鲜)
+export const CONTRACT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d(合约→ref 解析稳定)
+export const PRICE_TTL_MS = 30 * 60 * 1000; // 30min(长尾价)
+export const ABSENT_TTL_MS = 24 * 60 * 60 * 1000; // 1d(否定缓存)

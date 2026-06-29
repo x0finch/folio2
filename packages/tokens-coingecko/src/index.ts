@@ -2,9 +2,8 @@
 // 纯解析器另导出,便于上层(P7.3/P7.4)按需复用。
 
 export {
-  buildIndex,
   parseAssetPlatforms,
-  parseCoinsList,
+  parseContract,
   parseMarkets,
   parseRetryAfter,
   parseSimplePrice,

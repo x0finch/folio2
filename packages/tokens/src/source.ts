@@ -1,15 +1,17 @@
-import type { Fiat, TokenIndex, TokenInfo, TokenPrice, TokenRef } from "./types";
+import type { TokenInfo, TokenPrice, TokenRef } from "./types";
 
-// 可插拔上游(网络)。CoinGecko 是一个实现(`CoinGeckoSource`,P7.2);
-// 将来股票是另一个实现 + 另一种 `TokenRef` 变体。三个 fetch* 同口径。
+// 可插拔上游(网络)。CoinGecko 是一个实现(`CoinGeckoSource`,P7.2);将来股票是另一个实现。
+// 策略:top-N 预热(主流币的 symbol/价/元信息)+ 按需懒解析(链上合约首见时取一次)。
+// 通用层只说 `chain`(我们的链标识);各 source 内部把 chain 翻译成自己的寻址命名,不外泄。
+// 价格一律 USD(多法币用汇率在展示层换算)。
 export interface TokenSource {
-  // asset_platforms + coins/list?include_platform → 归一索引(EVM 子集)。
-  fetchIndex(): Promise<TokenIndex>;
-  // coins/markets top-N:一行同时含两facet(价 + 涨跌 + rank + name + logo)。
-  fetchMarkets(opts: {
-    topN: number;
-    vs?: Fiat;
-  }): Promise<{ info: TokenInfo; price: TokenPrice }[]>;
-  // simple/price 长尾兜底(持有币不在 top-N);返回按 refKey 索引的价。
-  fetchPrices(refs: TokenRef[], opts?: { vs?: Fiat }): Promise<Map<string, TokenPrice>>;
+  // coins/markets top-N 预热:一行含两facet(价 + 涨跌 + rank + name + logo;info 自带 symbol)。
+  fetchMarkets(opts: { topN: number }): Promise<{ info: TokenInfo; price: TokenPrice }[]>;
+  // 按 (chain, contract) 懒解析,一次拿 ref+info+price;chain 未收录 / 无此合约 → null。
+  fetchByContract(
+    chain: string,
+    contract: string,
+  ): Promise<{ ref: TokenRef; info: TokenInfo; price: TokenPrice } | null>;
+  // simple/price 刷新/长尾已知 ref 的价(key=refKey)。
+  fetchPrices(refs: TokenRef[]): Promise<Map<string, TokenPrice>>;
 }

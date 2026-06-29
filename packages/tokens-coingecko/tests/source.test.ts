@@ -138,3 +138,68 @@ describe("fetchPrices", () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+// fetchByContract internally maps chain→platform (CGK's asset_platform slug) via a memoized
+// /asset_platforms fetch, then hits the per-contract endpoint with the resolved platform.
+const PLATFORMS = [
+  { id: "ethereum", chain_identifier: 1 },
+  { id: "polygon-pos", chain_identifier: 137 },
+];
+const USDC_CONTRACT_BODY = {
+  id: "usd-coin",
+  symbol: "usdc",
+  name: "USDC",
+  image: { large: "L" },
+  market_cap_rank: 6,
+  market_data: { current_price: { usd: 1.001 }, price_change_percentage_24h: 0.05 },
+  last_updated: "2026-06-29T00:00:00.000Z",
+};
+
+// route by path: /asset_platforms → PLATFORMS, contract path → contract body
+function contractMock() {
+  return mockFetch((url) =>
+    url.pathname.endsWith("/asset_platforms") ? { body: PLATFORMS } : { body: USDC_CONTRACT_BODY },
+  );
+}
+
+describe("fetchByContract", () => {
+  it("maps chain→platform internally, then resolves; 200 → {ref, info, price}", async () => {
+    const { impl, calls } = contractMock();
+    const out = await new CoinGeckoSource({ fetchImpl: impl }).fetchByContract("ethereum", "0xABC");
+    expect(out?.ref).toEqual(cg("usd-coin"));
+    expect(out?.info.logo).toBe("L");
+    expect(out?.price.unitPrice).toBe(1.001);
+    // first call = asset_platforms, second = per-contract with resolved platform + lowercased addr
+    expect(calls[0].url.pathname.endsWith("/asset_platforms")).toBe(true);
+    expect(calls[1].url.pathname).toBe("/api/v3/coins/ethereum/contract/0xabc");
+  });
+
+  it("translates our chain slug to CGK platform slug (polygon → polygon-pos)", async () => {
+    const { impl, calls } = contractMock();
+    await new CoinGeckoSource({ fetchImpl: impl }).fetchByContract("polygon-pos", "0xABC");
+    expect(calls[1].url.pathname).toBe("/api/v3/coins/polygon-pos/contract/0xabc");
+  });
+
+  it("chain not in asset_platforms → null (no per-contract call)", async () => {
+    const { impl, calls } = contractMock();
+    const out = await new CoinGeckoSource({ fetchImpl: impl }).fetchByContract(
+      "unknownchain",
+      "0x1",
+    );
+    expect(out).toBeNull();
+    expect(calls).toHaveLength(1); // only asset_platforms
+  });
+
+  it("per-contract 404 → null (not thrown)", async () => {
+    const { impl } = mockFetch((url) =>
+      url.pathname.endsWith("/asset_platforms")
+        ? { body: PLATFORMS }
+        : { status: 404, body: { error: "not found" } },
+    );
+    const out = await new CoinGeckoSource({ fetchImpl: impl }).fetchByContract(
+      "ethereum",
+      "0xdead",
+    );
+    expect(out).toBeNull();
+  });
+});
