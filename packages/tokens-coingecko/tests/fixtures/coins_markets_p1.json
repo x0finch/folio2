@@ -1,0 +1,30 @@
+[
+  {
+    "id": "bitcoin",
+    "symbol": "btc",
+    "name": "Bitcoin",
+    "image": "https://assets.coingecko.com/coins/images/1/large/bitcoin.png",
+    "current_price": 65000,
+    "market_cap_rank": 1,
+    "price_change_percentage_24h": 1.5,
+    "last_updated": "2026-06-29T00:00:00.000Z"
+  },
+  {
+    "id": "ethereum",
+    "symbol": "eth",
+    "name": "Ethereum",
+    "image": "https://assets.coingecko.com/coins/images/279/large/ethereum.png",
+    "current_price": 3500,
+    "market_cap_rank": 2,
+    "price_change_percentage_24h": -2.1,
+    "last_updated": "2026-06-29T00:00:00.000Z"
+  },
+  {
+    "id": "broken-no-price",
+    "symbol": "brk",
+    "name": "Broken",
+    "current_price": null,
+    "market_cap_rank": null,
+    "last_updated": "2026-06-29T00:00:00.000Z"
+  }
+]

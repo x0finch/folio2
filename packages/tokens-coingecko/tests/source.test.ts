@@ -1,0 +1,140 @@
+import { type CoinId, TokenError, type TokenRef } from "@folio/tokens";
+import { describe, expect, it } from "vitest";
+import { CG_BASE_FREE, CG_BASE_PRO, HEADER_DEMO, HEADER_PRO, PER_PAGE_MAX } from "../src/constants";
+import { CoinGeckoSource } from "../src/source";
+
+const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
+
+interface Call {
+  url: URL;
+  init?: RequestInit;
+}
+
+type Reply = { body?: unknown; raw?: string; status?: number; headers?: Record<string, string> };
+
+function mockFetch(handler: (url: URL, callNo: number) => Reply) {
+  const calls: Call[] = [];
+  const impl = (async (input: URL | RequestInfo, init?: RequestInit) => {
+    const url = input instanceof URL ? input : new URL(String(input));
+    calls.push({ url, init });
+    const r = handler(url, calls.length);
+    const body = r.raw ?? JSON.stringify(r.body ?? {});
+    return new Response(body, { status: r.status ?? 200, headers: r.headers });
+  }) as unknown as typeof fetch;
+  return { impl, calls };
+}
+
+function genMarketPage(n: number): unknown[] {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `coin-${i}`,
+    symbol: `c${i}`,
+    name: `Coin ${i}`,
+    image: "x",
+    current_price: 1,
+    market_cap_rank: i + 1,
+    price_change_percentage_24h: 0,
+    last_updated: "2026-06-29T00:00:00.000Z",
+  }));
+}
+
+describe("CoinGeckoSource error mapping", () => {
+  it("429 → RATE_LIMITED (retryable) with retryAfterMs from header", async () => {
+    const { impl } = mockFetch(() => ({ status: 429, headers: { "retry-after": "30" } }));
+    const src = new CoinGeckoSource({ fetchImpl: impl });
+    await expect(src.fetchPrices([cg("bitcoin")])).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+      retryable: true,
+      retryAfterMs: 30000,
+    });
+  });
+
+  it("5xx → UPSTREAM_ERROR (retryable)", async () => {
+    const { impl } = mockFetch(() => ({ status: 503 }));
+    const src = new CoinGeckoSource({ fetchImpl: impl });
+    await expect(src.fetchPrices([cg("bitcoin")])).rejects.toMatchObject({
+      code: "UPSTREAM_ERROR",
+      retryable: true,
+    });
+  });
+
+  it("other 4xx → UPSTREAM_ERROR (non-retryable)", async () => {
+    const { impl } = mockFetch(() => ({ status: 400 }));
+    const src = new CoinGeckoSource({ fetchImpl: impl });
+    await expect(src.fetchPrices([cg("bitcoin")])).rejects.toMatchObject({
+      code: "UPSTREAM_ERROR",
+      retryable: false,
+    });
+  });
+
+  it("bad JSON → PARSE_ERROR", async () => {
+    const { impl } = mockFetch(() => ({ raw: "<<notjson>>" }));
+    const src = new CoinGeckoSource({ fetchImpl: impl });
+    await expect(src.fetchPrices([cg("bitcoin")])).rejects.toBeInstanceOf(TokenError);
+    await expect(src.fetchPrices([cg("bitcoin")])).rejects.toMatchObject({ code: "PARSE_ERROR" });
+  });
+});
+
+describe("CoinGeckoSource config", () => {
+  it("free base + demo header when key given", async () => {
+    const { impl, calls } = mockFetch(() => ({ body: {} }));
+    await new CoinGeckoSource({ apiKey: "k", fetchImpl: impl }).fetchPrices([cg("bitcoin")]);
+    expect(calls[0].url.toString().startsWith(CG_BASE_FREE)).toBe(true);
+    expect((calls[0].init?.headers as Record<string, string>)[HEADER_DEMO]).toBe("k");
+  });
+
+  it("pro base + pro header when pro", async () => {
+    const { impl, calls } = mockFetch(() => ({ body: {} }));
+    await new CoinGeckoSource({ apiKey: "k", pro: true, fetchImpl: impl }).fetchPrices([
+      cg("bitcoin"),
+    ]);
+    expect(calls[0].url.toString().startsWith(CG_BASE_PRO)).toBe(true);
+    expect((calls[0].init?.headers as Record<string, string>)[HEADER_PRO]).toBe("k");
+  });
+});
+
+describe("fetchMarkets", () => {
+  it("paginates until a short page, then slices to topN", async () => {
+    const { impl, calls } = mockFetch((_url, n) => ({
+      body: n === 1 ? genMarketPage(PER_PAGE_MAX) : genMarketPage(10),
+    }));
+    const src = new CoinGeckoSource({ fetchImpl: impl });
+    const rows = await src.fetchMarkets({ topN: 300 });
+    expect(calls).toHaveLength(2);
+    expect(rows).toHaveLength(PER_PAGE_MAX + 10);
+    // query params on page 1
+    expect(calls[0].url.searchParams.get("vs_currency")).toBe("usd");
+    expect(calls[0].url.searchParams.get("order")).toBe("market_cap_desc");
+    expect(calls[0].url.searchParams.get("per_page")).toBe(String(PER_PAGE_MAX));
+    expect(calls[0].url.searchParams.get("page")).toBe("1");
+    expect(calls[0].url.searchParams.get("price_change_percentage")).toBe("24h,7d,30d");
+    expect(calls[1].url.searchParams.get("page")).toBe("2");
+  });
+
+  it("single page when topN small (no extra request)", async () => {
+    const { impl, calls } = mockFetch(() => ({ body: genMarketPage(5) }));
+    const src = new CoinGeckoSource({ fetchImpl: impl });
+    const rows = await src.fetchMarkets({ topN: 50 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url.searchParams.get("per_page")).toBe("50");
+    expect(rows).toHaveLength(5);
+  });
+});
+
+describe("fetchPrices", () => {
+  it("joins coingecko ids and parses the response", async () => {
+    const { impl, calls } = mockFetch(() => ({
+      body: { bitcoin: { usd: 65000, usd_24h_change: 1.5, last_updated_at: 1782000000 } },
+    }));
+    const src = new CoinGeckoSource({ fetchImpl: impl });
+    const prices = await src.fetchPrices([cg("bitcoin"), cg("ethereum")]);
+    expect(calls[0].url.searchParams.get("ids")).toBe("bitcoin,ethereum");
+    expect(prices.get("coingecko:bitcoin")?.unitPrice).toBe(65000);
+  });
+
+  it("no refs → empty map, no request", async () => {
+    const { impl, calls } = mockFetch(() => ({ body: {} }));
+    const src = new CoinGeckoSource({ fetchImpl: impl });
+    expect((await src.fetchPrices([])).size).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+});
