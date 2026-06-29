@@ -63,7 +63,7 @@ Per-phase detail (what/why/tests/gates for every P*) lives in **[evolution/check
 - **M3 — on-chain** (P3.1–P3.5) ✅ zerion (EVM) · coinstats (solana/sui/cosmos) · unified on-chain entry UI · retry/backoff + Retry-After
 - **M4 — CEX** (P4.1/P4.2/P4.6) ✅ binance · okx · exchange entry UI — ⏳ P4.3 bybit / P4.4 bitget / P4.5 gate deferred
 - **M5 — perp** (P5.1/P5.4) ✅ hyperliquid + perp UI/meta — ⏳ P5.2 derive / P5.3 extended deferred
-- **M6 — polish** (P6.1–P6.7) ✅ history chart · groups · cron · i18n (use-intl) · Phase A (provider.inputs) · export/import + credential rehydration · unified `creds` model (P6.6.1/P6.6.2) · structured logging (P6.7)
-  - **← next: P6.8 deployment** (CF deploy: remote D1 migrations · `wrangler secret put` · build/deploy verify)
+- **M6 — polish** (P6.1–P6.8) ✅ history chart · groups · cron · i18n (use-intl) · Phase A (provider.inputs) · export/import + credential rehydration · unified `creds` model (P6.6.1/P6.6.2) · structured logging (P6.7) · **P6.8 deploy prep** (wrangler `vars`, [apps/web/DEPLOY.md](apps/web/DEPLOY.md) runbook, `wrangler deploy --dry-run` green)
+  - **Going live is user-run** (per safety rules): `wrangler login` · `d1 create` (fill `database_id`) · `secret put` ×5 (SECRETS_KEY/BETTER_AUTH_SECRET/BETTER_AUTH_URL/ZERION_API_KEY/COINSTATS_API_KEY) · `migrations apply --remote` · `pnpm run deploy` — see DEPLOY.md.
 
 **Deferred backlog:** M4 bybit/bitget/gate · M5 derive/extended · P6.1 history by-account/group + time-range · P6.2 group rename/reorder · P6.3 cron stagger/failure-notify · i18n server-errors/aria-labels · import dedup/merge (MVP new-only) · logging external sinks (Logpush/Sentry/OTel)/requestId.

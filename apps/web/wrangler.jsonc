@@ -4,12 +4,18 @@
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
-  // D1 绑定:auth handler 取数据用。迁移文件在 @folio/db 包;database_id 占位,部署时填(P6.6)。
+  // 非密环境变量(明文、随 git 提交)。密钥(SECRETS_KEY/BETTER_AUTH_*/各 provider key)走
+  // `wrangler secret put`,绝不进这里。LOG_PRETTY 生产不设 → JSON Lines 喂 Workers Logs(见 DEPLOY.md)。
+  "vars": { "LOG_LEVEL": "info" },
+  // CF 账户 id(资源标识,非密钥)。
+  "account_id": "2bce8216267cf76d85fab3ce18abea69",
+
+  // D1 绑定:auth handler 取数据用。迁移文件在 @folio/db 包;database_id 由 `wrangler d1 create folio` 得到(资源 id,非密钥;见 DEPLOY.md)。
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "folio",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "c053dd80-abfa-47d5-8262-01f001e68924",
       "migrations_dir": "../../packages/db/drizzle"
     }
   ],
