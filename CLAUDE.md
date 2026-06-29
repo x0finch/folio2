@@ -1,6 +1,6 @@
 # Folio — Engineering Conventions
 
-> **Folio** is a self-hosted crypto portfolio tracker (on-chain wallets + CEX + perp DEX + manual assets → one dashboard). Full blueprint: [evolution/arch-design.md](evolution/arch-design.md); detailed per-phase log: [evolution/checklist.md](evolution/checklist.md). Read this file first every session, do only the current phase, then update the phase's entry in `evolution/checklist.md` and stop.
+> **Folio** is a self-hosted crypto portfolio tracker (on-chain wallets + CEX + perp DEX + manual assets → one dashboard). M1–M6 are complete and archived under [evolution/milestones/](evolution/milestones/) (blueprint `arch-design.md` + per-phase log `checklist.md` + `plans/`). Forward work lives in [evolution/roadmap.md](evolution/roadmap.md), with new plans in `evolution/plans/`. Read this file first every session, do only the current phase, then update its entry in the relevant log and stop.
 
 ## Tech stack
 - TanStack Start (`@tanstack/react-start`) + Vite — full-stack, server functions
@@ -56,14 +56,6 @@
 
 ## Progress
 
-Per-phase detail (what/why/tests/gates for every P*) lives in **[evolution/checklist.md](evolution/checklist.md)**. Milestone summary:
+**M1–M6 complete** — foundation → on-chain → CEX → perp → polish, deploy-ready (see [apps/web/DEPLOY.md](apps/web/DEPLOY.md); going live is user-run per safety rules). Full per-phase archive (what/why/tests/gates) in **[evolution/milestones/](evolution/milestones/)** (`checklist.md` + `arch-design.md` + `plans/`).
 
-- **M1 — foundation** (P1.1–P1.7) ✅ monorepo · core contracts · AES-GCM crypto · `@folio/db` · `@folio/ui` · CI · Biome
-- **M2 — minimal loop** (P2.1–P2.5) ✅ better-auth · session guard + isolation · manual provider · sync orchestrator · minimal UI loop
-- **M3 — on-chain** (P3.1–P3.5) ✅ zerion (EVM) · coinstats (solana/sui/cosmos) · unified on-chain entry UI · retry/backoff + Retry-After
-- **M4 — CEX** (P4.1/P4.2/P4.6) ✅ binance · okx · exchange entry UI — ⏳ P4.3 bybit / P4.4 bitget / P4.5 gate deferred
-- **M5 — perp** (P5.1/P5.4) ✅ hyperliquid + perp UI/meta — ⏳ P5.2 derive / P5.3 extended deferred
-- **M6 — polish** (P6.1–P6.8) ✅ history chart · groups · cron · i18n (use-intl) · Phase A (provider.inputs) · export/import + credential rehydration · unified `creds` model (P6.6.1/P6.6.2) · structured logging (P6.7) · **P6.8 deploy prep** (wrangler `vars`, [apps/web/DEPLOY.md](apps/web/DEPLOY.md) runbook, `wrangler deploy --dry-run` green)
-  - **Going live is user-run** (per safety rules): `wrangler login` · `d1 create` (fill `database_id`) · `secret put` ×5 (SECRETS_KEY/BETTER_AUTH_SECRET/BETTER_AUTH_URL/ZERION_API_KEY/COINSTATS_API_KEY) · `migrations apply --remote` · `pnpm run deploy` — see DEPLOY.md.
-
-**Deferred backlog:** M4 bybit/bitget/gate · M5 derive/extended · P6.1 history by-account/group + time-range · P6.2 group rename/reorder · P6.3 cron stagger/failure-notify · i18n server-errors/aria-labels · import dedup/merge (MVP new-only) · logging external sinks (Logpush/Sentry/OTel)/requestId.
+Forward work — deferred features + the M7+ roadmap — lives in **[evolution/roadmap.md](evolution/roadmap.md)**; per-phase tracking in **[evolution/checklist.md](evolution/checklist.md)**; new plans go in `evolution/plans/`.
