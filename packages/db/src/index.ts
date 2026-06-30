@@ -3,7 +3,6 @@
 
 export { createAuthAdapter } from "./auth"; // better-auth Drizzle adapter(不泄露 db 实例/schema)
 export type { DbEnv } from "./client";
-
 export type {
   AccountRawCreds,
   CreateAccountInput,
@@ -46,3 +45,4 @@ export type {
   Snapshot,
   SnapshotBalance,
 } from "./schema-types";
+export { createTokenStore, type TokenStoreOpts } from "./token-store"; // 全局代币参考缓存(无 userId,按 source 分桶)

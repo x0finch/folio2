@@ -92,3 +92,70 @@ export const snapshotBalances = sqliteTable(
   },
   (t) => [index("snapshot_balances_snapshot_id_idx").on(t.snapshotId)],
 );
+
+// —— 代币参考缓存(P7.3.1)——
+// 全局参考数据,**无 userId**(原则 #6 受控例外,同 listUserIdsWithAccounts);按 `source` 维度分桶
+// (CGK / 将来 CMC 各自全局成立、共存)。各表 `expires_at`(epoch ms)做 TTL:读时按 > now 过滤,过期当未命中。
+// 经 @folio/db 的 createTokenStore(env,{source}) 访问;db 把内容当不透明数据,不解释。
+
+// warm:top-N markets 的 symbol→候选(带市值排名)。一 symbol 可多候选。
+export const tokenWarm = sqliteTable(
+  "token_warm",
+  {
+    symbol: text("symbol").notNull(), // normalizeSymbol 归一(大写)
+    source: text("source").notNull(),
+    coinId: text("coin_id").notNull(),
+    marketCapRank: integer("market_cap_rank"),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.symbol, t.source, t.coinId] })],
+);
+
+// 元信息 facet(name/symbol/logo),按 (source, coinId) 键。
+export const tokenInfo = sqliteTable(
+  "token_info",
+  {
+    source: text("source").notNull(),
+    coinId: text("coin_id").notNull(),
+    symbol: text("symbol").notNull(),
+    name: text("name").notNull(),
+    logo: text("logo"),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.source, t.coinId] })],
+);
+
+// 价 facet(USD,无 vs 列),按 (source, coinId) 键。
+export const tokenPrice = sqliteTable(
+  "token_price",
+  {
+    source: text("source").notNull(),
+    coinId: text("coin_id").notNull(),
+    unitPrice: real("unit_price").notNull(),
+    change24h: real("change_24h"),
+    marketCapRank: integer("market_cap_rank"),
+    asOf: integer("as_of").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.source, t.coinId] })],
+);
+
+// 合约懒解析缓存,按 (source, chain, contract) 键。coin_id 为 NULL = 该 source 的否定缓存(已知缺失);
+// 无行(或过期)= 未知(去取)。chain/contract 小写归一。
+export const tokenContract = sqliteTable(
+  "token_contract",
+  {
+    source: text("source").notNull(),
+    chain: text("chain").notNull(),
+    contract: text("contract").notNull(),
+    coinId: text("coin_id"),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.source, t.chain, t.contract] })],
+);
+
+// 杂项标量:存 `warm_as_of:<source>`(每源 warm 最近刷新时刻)。
+export const tokenMeta = sqliteTable("token_meta", {
+  k: text("k").primaryKey(),
+  v: integer("v").notNull(),
+});
