@@ -430,6 +430,7 @@ function Accounts() {
                 onChange={(e) => setMUnitPrice(e.target.value)}
                 placeholder="64000"
               />
+              <p className="text-xs text-muted-foreground">{t("unitPriceHint")}</p>
             </div>
 
             {error && <p className="text-sm text-destructive">{error}</p>}

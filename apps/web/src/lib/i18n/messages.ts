@@ -63,6 +63,8 @@ export const en = {
     addGroup: "Add group",
     groupNamePlaceholder: "e.g. Long-term",
     unitPrice: "Unit price (USD)",
+    unitPriceHint:
+      "Recognized coins auto-value at market price; this is only a fallback for unlisted assets.",
     addManual: "Add manual account",
     label: "Label",
     symbol: "Symbol",
@@ -200,6 +202,7 @@ export const zh: Messages = {
     addGroup: "添加分组",
     groupNamePlaceholder: "如:长期持有",
     unitPrice: "单价(美元)",
+    unitPriceHint: "可识别的币会自动用市场价估值;此价仅在无市场价(未上线资产)时作回退。",
     addManual: "添加手动账户",
     label: "标签",
     symbol: "币种",

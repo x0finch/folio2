@@ -84,6 +84,29 @@ describe("syncUser — manual 端到端", () => {
       source: "manual",
     });
   });
+
+  it("revalue 钩子(P7.4.2):写快照前改 usdValue 并重算 totalUsd", async () => {
+    const { deps, writes } = makeDeps([manualAccount()], {
+      getRawCreds: async () => MANUAL_CREDS,
+      revalue: async (_type, balances) => balances.map((b) => ({ ...b, usdValue: b.usdValue * 2 })),
+    });
+    const { results } = await syncUser(deps, "u1");
+    expect(results[0]).toMatchObject({ ok: true, totalUsd: 64000 }); // 32000 × 2
+    expect(writes[0].input.totalUsd).toBe(64000);
+    expect(writes[0].input.balances[0].usdValue).toBe(64000);
+  });
+
+  it("revalue 抛错 → best-effort 保留 provider 原值,账户仍 ok", async () => {
+    const { deps, writes } = makeDeps([manualAccount()], {
+      getRawCreds: async () => MANUAL_CREDS,
+      revalue: async () => {
+        throw new Error("price down");
+      },
+    });
+    const { results } = await syncUser(deps, "u1");
+    expect(results[0]).toMatchObject({ ok: true, totalUsd: 32000 });
+    expect(writes[0].input.totalUsd).toBe(32000);
+  });
 });
 
 describe("syncUser — 失败隔离", () => {

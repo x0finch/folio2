@@ -4,6 +4,7 @@ import { type SyncDeps, syncUser } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { requireAuth } from "../require-auth";
+import { revalueManual } from "../revalue";
 import { buildTokenDeps, warmTokens } from "./tokens";
 
 // 同步后预热代币缓存:取该用户最新快照的全部余额 → refreshWarm + 逐 spot/manual 行懒解析。
@@ -21,6 +22,7 @@ export async function warmTokensForUser(bindings: Cloudflare.Env, userId: string
 // 密钥与全局 key 从 env 取。triggerSync(手动)与 cron(scheduled,见 src/server.ts)共用,
 // 故抽成接收 bindings 的工厂(消除两处重复的 env→deps + globalKeys 装配)。
 export function buildSyncDeps(bindings: Cloudflare.Env): SyncDeps {
+  const tokenDeps = buildTokenDeps(bindings);
   return {
     listAccounts: (userId) => listAccountsByUser(bindings, userId),
     getRawCreds: (userId, accountId) => getRawCreds(bindings, userId, accountId),
@@ -33,6 +35,8 @@ export function buildSyncDeps(bindings: Cloudflare.Env): SyncDeps {
     },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
+    // 写快照前重估(P7.4.2):仅 manual 用市场价改 usdValue(@folio/sync 不依赖 token 层,逻辑注入在此)。
+    revalue: (type, balances) => revalueManual(tokenDeps, type, balances),
   };
 }
 

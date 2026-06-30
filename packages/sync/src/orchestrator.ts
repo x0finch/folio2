@@ -1,5 +1,6 @@
 import {
   type Account,
+  type AccountType,
   type Balance,
   type FetchContext,
   getProvider,
@@ -46,6 +47,9 @@ export interface SyncDeps {
   registry?: ProviderRegistry; // 默认用 appRegistry;测试可注入假 registry
   sleep?: (ms: number) => Promise<void>; // 默认 setTimeout;测试注入即时/捕获版做确定性重试测试
   log?: SyncLogger; // 默认 no-op;app 注入 LogTape logger(见 buildSyncDeps)
+  // 写快照前重估余额(P7.4.2):app 注入 token 感知实现,仅 manual 用市场价改 usdValue,其余原样
+  // (富化不重算)。best-effort:抛错则保留 provider 原值,不让定价故障拖垮同步。@folio/sync 本身不依赖 token 层。
+  revalue?: (accountType: AccountType, balances: Balance[]) => Promise<Balance[]>;
 }
 
 export interface AccountSyncResult {
@@ -147,12 +151,25 @@ export async function syncAccount(
     const globalKeys = scopeGlobalKeys(deps.globalKeys, provider.usesGlobalKeys);
     const ctx: FetchContext = { account: acc, creds, globalKeys };
     // 仅 provider 取数部分重试(写快照/解密不重试)。
-    const { balances, totalUsd } = await withRetry(
+    const fetched = await withRetry(
       () => runAccountSync(registry, ctx),
       deps.sleep ?? defaultSleep,
       log,
       ctxFields,
     );
+    // 重估(P7.4.2):manual 用市场价改 usdValue,再重算 totalUsd。best-effort —— 失败保留 provider 原值。
+    let { balances, totalUsd } = fetched;
+    if (deps.revalue) {
+      try {
+        balances = await deps.revalue(account.type, balances);
+        totalUsd = balances.reduce((sum, b) => sum + b.usdValue, 0);
+      } catch (e) {
+        log.warning("revalue failed; keeping provider values", {
+          ...ctxFields,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
     const snapshotId = await deps.writeSnapshot(userId, account.id, {
       takenAt: Date.now(),
       totalUsd,
