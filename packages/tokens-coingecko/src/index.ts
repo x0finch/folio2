@@ -6,6 +6,7 @@ export {
   parseContract,
   parseMarkets,
   parseRetryAfter,
+  parseSearch,
   parseSimplePrice,
 } from "./parse";
 export type { CoinGeckoConfig } from "./source";

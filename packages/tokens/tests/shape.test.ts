@@ -8,6 +8,7 @@ const source: TokenSource = {
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
   fetchPrices: async () => new Map(),
+  searchCoins: async () => [],
 };
 
 const store: TokenStore = {

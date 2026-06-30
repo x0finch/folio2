@@ -7,6 +7,10 @@ export const EP_ASSET_PLATFORMS = "/asset_platforms";
 export const EP_COINS = "/coins"; // per-contract: `/coins/{platform}/contract/{addr}`
 export const EP_COINS_MARKETS = "/coins/markets";
 export const EP_SIMPLE_PRICE = "/simple/price";
+export const EP_SEARCH = "/search";
+
+// 搜索返回截断(autocomplete 下拉只需前几个)。
+export const SEARCH_LIMIT = 10;
 
 // 鉴权头(demo key 走 free 基址,pro key 走 pro 基址)。
 export const HEADER_DEMO = "x-cg-demo-api-key";

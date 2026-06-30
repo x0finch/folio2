@@ -11,6 +11,7 @@ import {
   EP_ASSET_PLATFORMS,
   EP_COINS,
   EP_COINS_MARKETS,
+  EP_SEARCH,
   EP_SIMPLE_PRICE,
   HEADER_DEMO,
   HEADER_PRO,
@@ -23,6 +24,7 @@ import {
   parseContract,
   parseMarkets,
   parseRetryAfter,
+  parseSearch,
   parseSimplePrice,
 } from "./parse";
 
@@ -124,6 +126,12 @@ export class CoinGeckoSource implements TokenSource {
       if (rows.length < perPage) break; // 末页(不足一页)→ 停
     }
     return out.slice(0, opts.topN);
+  }
+
+  async searchCoins(query: string): Promise<TokenInfo[]> {
+    const q = query.trim();
+    if (!q) return [];
+    return parseSearch(await this.request(EP_SEARCH, { query: q }));
   }
 
   async fetchPrices(refs: TokenRef[]): Promise<Map<string, TokenPrice>> {

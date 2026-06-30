@@ -43,20 +43,30 @@ function fakeStore(): TokenStore {
   };
 }
 
-// source 不会被调用(warm 新鲜 + 无合约 + 价在 store);全 stub。
+// source:fetchPrices 为长尾 coinId 供价(模拟不在 warm 的币);其余 stub。
 const stubSource = {
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
-  fetchPrices: async () => new Map(),
+  fetchPrices: async (refs: TokenRef[]) => {
+    const out = new Map<string, TokenPrice>();
+    for (const r of refs) {
+      if (r.coinId === ("the-open-network" as CoinId)) {
+        out.set(key(r), { ref: r, unitPrice: 5, asOf: 0 });
+      }
+    }
+    return out;
+  },
+  searchCoins: async () => [],
 };
 
 const deps = (): ResolveDeps => ({ source: stubSource, store: fakeStore(), overrides: OVERRIDES });
-const bal = (symbol: string, amount: number, usdValue: number): Balance => ({
+const bal = (symbol: string, amount: number, usdValue: number, coinId?: string): Balance => ({
   symbol,
   amount,
   usdValue,
   source: "manual",
   kind: "manual",
+  ...(coinId ? { meta: { coinId } } : {}),
 });
 
 describe("revalueManual", () => {
@@ -68,6 +78,31 @@ describe("revalueManual", () => {
   it("manual unresolvable → keeps provider usdValue (unitPrice fallback)", async () => {
     const out = await revalueManual(deps(), "manual", [bal("PRIVATETOKEN", 10, 99)]);
     expect(out[0].usdValue).toBe(99);
+  });
+
+  it("meta.fixed → keeps provider usdValue even when symbol resolves", async () => {
+    // BTC 可解析(store 有价 65000),但锁定固定值 → 保留 provider 的 usdValue=1。
+    const locked: Balance = {
+      symbol: "BTC",
+      amount: 0.5,
+      usdValue: 1,
+      source: "manual",
+      kind: "manual",
+      meta: { fixed: true },
+    };
+    const out = await revalueManual(deps(), "manual", [locked]);
+    expect(out[0].usdValue).toBe(1);
+  });
+
+  it("explicit meta.coinId overrides symbol resolution", async () => {
+    // 错的 symbol "XBT" 但显式 coinId=bitcoin → 用 bitcoin 的 store 价 65000。
+    const out = await revalueManual(deps(), "manual", [bal("XBT", 1, 0, "bitcoin")]);
+    expect(out[0].usdValue).toBe(65000);
+  });
+
+  it("explicit coinId not in warm cache → source.fetchPrices supplies the price", async () => {
+    const out = await revalueManual(deps(), "manual", [bal("TONCOIN", 2, 0, "the-open-network")]);
+    expect(out[0].usdValue).toBe(10); // 2 × 5(来自 source.fetchPrices)
   });
 
   it("non-manual → untouched (enrich-not-reprice)", async () => {

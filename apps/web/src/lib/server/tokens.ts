@@ -1,10 +1,24 @@
+import { env } from "cloudflare:workers";
 import { createTokenStore } from "@folio/db";
 import { OVERRIDES, type ResolveDeps, refKey, refreshWarm, resolveAsset } from "@folio/tokens";
 import { CoinGeckoSource } from "@folio/tokens-coingecko";
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { requireAuth } from "../require-auth";
 import { type BalanceLike, balanceToAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
 
 // 当前数据源(P7.4 固定 coingecko;切源是 per-user 设置,留后)。
 const SOURCE = "coingecko" as const;
+
+// 选币 autocomplete(P7.4.3):按关键词搜 CoinGecko;返回 TokenInfo[](ref/symbol/name/logo,JSON 可序列化)。
+export const searchCoins = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(z.object({ query: z.string() }))
+  .handler(async ({ data }) => {
+    const q = data.query.trim();
+    if (!q) return [];
+    return buildTokenDeps(env).source.searchCoins(q);
+  });
 
 // 代币参考层依赖:CoinGecko 源 + D1 store(按 source 分桶)+ 撞名覆盖表。
 // 无 key 也能跑(free 档限流低);bindings 经各调用方传入。

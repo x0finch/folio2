@@ -6,7 +6,7 @@ import {
   type TokenPrice,
   type TokenRef,
 } from "@folio/tokens";
-import { VS_USD } from "./constants";
+import { SEARCH_LIMIT, VS_USD } from "./constants";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
 
@@ -130,4 +130,24 @@ export function parseContract(
       asOf: Number.isFinite(asOf) ? asOf : 0,
     },
   };
+}
+
+interface RawSearchCoin {
+  id?: string;
+  symbol?: string;
+  name?: string;
+  large?: string;
+  thumb?: string;
+}
+
+// /search → coins[] → TokenInfo[](选币 autocomplete 用)。取前 SEARCH_LIMIT;logo 用 large 退 thumb。
+export function parseSearch(json: unknown): TokenInfo[] {
+  const coins = (json as { coins?: RawSearchCoin[] })?.coins;
+  if (!Array.isArray(coins)) throw new TokenError("PARSE_ERROR", "search: expected { coins: [] }");
+  const out: TokenInfo[] = [];
+  for (const c of coins.slice(0, SEARCH_LIMIT)) {
+    if (!c?.id || !c.symbol) continue;
+    out.push({ ref: cg(c.id), symbol: c.symbol, name: c.name ?? "", logo: c.large ?? c.thumb });
+  }
+  return out;
 }

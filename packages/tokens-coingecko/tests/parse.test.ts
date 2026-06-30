@@ -5,11 +5,13 @@ import {
   parseContract,
   parseMarkets,
   parseRetryAfter,
+  parseSearch,
   parseSimplePrice,
 } from "../src/parse";
 import platformsJson from "./fixtures/asset_platforms.json";
 import contractJson from "./fixtures/coin_contract.json";
 import marketsJson from "./fixtures/coins_markets_p1.json";
+import searchJson from "./fixtures/search.json";
 import simpleJson from "./fixtures/simple_price.json";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
@@ -96,6 +98,28 @@ describe("parseContract", () => {
   it("returns null when no id / no price", () => {
     expect(parseContract({ id: "x" })).toBeNull();
     expect(parseContract({ market_data: { current_price: { usd: 1 } } })).toBeNull();
+  });
+});
+
+describe("parseSearch", () => {
+  it("coins[] → TokenInfo[] (logo from large)", () => {
+    expect(parseSearch(searchJson)).toEqual([
+      {
+        ref: cg("bitcoin"),
+        symbol: "BTC",
+        name: "Bitcoin",
+        logo: "https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png",
+      },
+      {
+        ref: cg("wrapped-bitcoin"),
+        symbol: "WBTC",
+        name: "Wrapped Bitcoin",
+        logo: "https://coin-images.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png",
+      },
+    ]);
+  });
+  it("throws PARSE_ERROR when no coins array", () => {
+    expect(() => parseSearch({})).toThrowError(/coins/);
   });
 });
 

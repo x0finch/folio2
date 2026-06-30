@@ -1,10 +1,12 @@
 import type { ManualActivity } from "@folio/db";
+import type { TokenInfo } from "@folio/tokens";
 import {
   Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
+  Checkbox,
   Input,
   Label,
   Select,
@@ -38,6 +40,7 @@ import {
   listManualActivity,
 } from "../../lib/server/manual-activity";
 import { triggerSync } from "../../lib/server/sync";
+import { searchCoins } from "../../lib/server/tokens";
 
 // 可录入的链上账户类型 → 展示名(EVM 走 zerion;其余走 coinstats)。
 const ONCHAIN_TYPES = [
@@ -91,11 +94,29 @@ function Accounts() {
   // manual 录入(一账户一资产)
   const [label, setLabel] = useState("");
   const [mSymbol, setMSymbol] = useState("");
+  const [mCoinId, setMCoinId] = useState(""); // 选币消歧(P7.4.3);空=按 symbol 解析
+  const [coinResults, setCoinResults] = useState<TokenInfo[]>([]);
+  const [mFixed, setMFixed] = useState(false); // 锁定固定值(P7.4.4):跳过市价、钉死 unitPrice
   const [mAmount, setMAmount] = useState("");
   const [mUnitPrice, setMUnitPrice] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+
+  // 选币 autocomplete:symbol 输入防抖搜 CoinGecko;已选定币(mCoinId)或 query 太短则不搜。
+  useEffect(() => {
+    if (mCoinId || mSymbol.trim().length < 2) {
+      setCoinResults([]);
+      return;
+    }
+    const q = mSymbol.trim();
+    const timer = setTimeout(() => {
+      searchCoins({ data: { query: q } })
+        .then(setCoinResults)
+        .catch(() => setCoinResults([]));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [mSymbol, mCoinId]);
 
   // on-chain 录入表单(链可选)
   const [ocType, setOcType] = useState<OnchainType>("onchain_evm");
@@ -220,10 +241,20 @@ function Accounts() {
     setBusy(true);
     try {
       await createManualAccount({
-        data: { label, symbol: mSymbol, amount: mAmount, unitPrice: mUnitPrice },
+        data: {
+          label,
+          symbol: mSymbol,
+          amount: mAmount,
+          unitPrice: mUnitPrice,
+          ...(mCoinId ? { coinId: mCoinId } : {}),
+          ...(mFixed ? { fixed: true } : {}),
+        },
       });
       setLabel("");
       setMSymbol("");
+      setMCoinId("");
+      setCoinResults([]);
+      setMFixed(false);
       setMAmount("");
       setMUnitPrice("");
       await router.invalidate();
@@ -399,13 +430,45 @@ function Accounts() {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="m-symbol">{t("symbol")}</Label>
-              <Input
-                id="m-symbol"
-                required
-                value={mSymbol}
-                onChange={(e) => setMSymbol(e.target.value)}
-                placeholder="BTC"
-              />
+              <div className="relative">
+                <Input
+                  id="m-symbol"
+                  required
+                  autoComplete="off"
+                  value={mSymbol}
+                  onChange={(e) => {
+                    setMSymbol(e.target.value);
+                    setMCoinId(""); // 改 symbol 即取消已选币,重新进入搜索
+                  }}
+                  placeholder="BTC"
+                />
+                {coinResults.length > 0 && (
+                  <ul className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-popover shadow-md">
+                    {coinResults.map((c) => (
+                      <li key={`${c.ref.source}:${c.ref.coinId}`}>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                          onClick={() => {
+                            setMSymbol(c.symbol.toUpperCase());
+                            setMCoinId(c.ref.coinId);
+                            setCoinResults([]);
+                          }}
+                        >
+                          {c.logo && (
+                            <img src={c.logo} alt="" className="h-5 w-5 shrink-0 rounded-full" />
+                          )}
+                          <span className="font-medium">{c.symbol.toUpperCase()}</span>
+                          <span className="truncate text-muted-foreground">{c.name}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {mCoinId ? t("coinLinked", { coinId: mCoinId }) : t("coinPickHint")}
+              </p>
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="m-amount">{t("amount")}</Label>
@@ -431,6 +494,17 @@ function Accounts() {
                 placeholder="64000"
               />
               <p className="text-xs text-muted-foreground">{t("unitPriceHint")}</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="m-fixed"
+                  checked={mFixed}
+                  onCheckedChange={(v) => setMFixed(v === true)}
+                />
+                <Label htmlFor="m-fixed">{t("fixedLabel")}</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("fixedHint")}</p>
             </div>
 
             {error && <p className="text-sm text-destructive">{error}</p>}

@@ -139,6 +139,24 @@ describe("fetchPrices", () => {
   });
 });
 
+describe("searchCoins", () => {
+  it("sends query and parses coins[] → TokenInfo[]", async () => {
+    const { impl, calls } = mockFetch(() => ({
+      body: { coins: [{ id: "bitcoin", symbol: "BTC", name: "Bitcoin", large: "L" }] },
+    }));
+    const out = await new CoinGeckoSource({ fetchImpl: impl }).searchCoins("btc");
+    expect(calls[0].url.pathname.endsWith("/search")).toBe(true);
+    expect(calls[0].url.searchParams.get("query")).toBe("btc");
+    expect(out).toEqual([{ ref: cg("bitcoin"), symbol: "BTC", name: "Bitcoin", logo: "L" }]);
+  });
+
+  it("blank query → [] without a request", async () => {
+    const { impl, calls } = mockFetch(() => ({ body: { coins: [] } }));
+    expect(await new CoinGeckoSource({ fetchImpl: impl }).searchCoins("  ")).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+});
+
 // fetchByContract internally maps chain→platform (CGK's asset_platform slug) via a memoized
 // /asset_platforms fetch, then hits the per-contract endpoint with the resolved platform.
 const PLATFORMS = [
