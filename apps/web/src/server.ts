@@ -3,7 +3,7 @@ import { syncAllUsers } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { configureLogging } from "./lib/log";
-import { buildSyncDeps } from "./lib/server/sync";
+import { buildSyncDeps, warmTokensForUser } from "./lib/server/sync";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
 // 再补一个 CF scheduled() 处理器跑定时同步(cron 只触发 scheduled,不触发 fetch)。
@@ -37,6 +37,8 @@ export default {
           failed: result.failed,
           skipped: result.skipped,
         });
+        // sweep 后预热每用户代币缓存(best-effort),供次日总览 cache-only 富化。
+        for (const userId of userIds) await warmTokensForUser(env, userId);
       })(),
     );
   },

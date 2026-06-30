@@ -21,6 +21,8 @@
     "@folio/provider-custom": "workspace:*",
     "@folio/provider-zerion": "workspace:*",
     "@folio/sync": "workspace:*",
+    "@folio/tokens": "workspace:*",
+    "@folio/tokens-coingecko": "workspace:*",
     "@folio/ui": "workspace:*",
     "@logtape/logtape": "^2.2.1",
     "@logtape/pretty": "^2.2.1",

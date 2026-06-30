@@ -107,6 +107,21 @@ describe("resolveAsset", () => {
     expect(fetchByContract).toHaveBeenCalledWith("ethereum", "0xABC"); // source gets our chain
   });
 
+  it("lazy:false (display) → contract cache miss does NOT hit source", async () => {
+    const store = fakeStore();
+    const fetchByContract = vi.fn(async () => ({
+      ref: cg("usd-coin"),
+      info: info(cg("usd-coin"), "usdc"),
+      price: price(cg("usd-coin"), 6),
+    }));
+    const source = { fetchByContract } as unknown as TokenSource;
+    const asset = { symbol: "USDC", chain: "ethereum", contract: "0xABC" };
+
+    const r = await resolveAsset(asset, { source, store }, { lazy: false });
+    expect(r.via).toBe("none"); // 无 warm/override 时降级
+    expect(fetchByContract).not.toHaveBeenCalled(); // cache-only,零网络
+  });
+
   it("contract: source returns null (unmapped chain / 404) → none, absent cached, no refetch", async () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => null);

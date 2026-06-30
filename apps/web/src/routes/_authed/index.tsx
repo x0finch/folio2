@@ -47,6 +47,8 @@ function SpotTable({ rows }: { rows: SpotRow[] }) {
       <TableHeader>
         <TableRow>
           <TableHead>{t("asset")}</TableHead>
+          <TableHead className="text-right">{t("price")}</TableHead>
+          <TableHead className="text-right">{t("change24h")}</TableHead>
           <TableHead className="text-right">{t("amount")}</TableHead>
           <TableHead className="text-right">{t("value")}</TableHead>
         </TableRow>
@@ -54,13 +56,59 @@ function SpotTable({ rows }: { rows: SpotRow[] }) {
       <TableBody>
         {rows.map((b) => (
           <TableRow key={b.id}>
-            <TableCell>{b.symbol}</TableCell>
+            <TableCell>
+              <AssetCell symbol={b.symbol} name={b.name} logo={b.logo} />
+            </TableCell>
+            <TableCell className="text-right">
+              {b.unitPrice != null ? usd(b.unitPrice) : "—"}
+            </TableCell>
+            <TableCell className="text-right">
+              <Change24h value={b.change24h} />
+            </TableCell>
             <TableCell className="text-right">{b.amount}</TableCell>
             <TableCell className="text-right">{usd(b.usdValue)}</TableCell>
           </TableRow>
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+// 资产单元:logo(热链,失败回退到 symbol 首字母圆标)+ 名称/symbol。
+function AssetCell({ symbol, name, logo }: { symbol: string; name?: string; logo?: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      {logo ? (
+        <img
+          src={logo}
+          alt=""
+          width={20}
+          height={20}
+          className="size-5 rounded-full"
+          onError={(e) => {
+            e.currentTarget.style.display = "none";
+          }}
+        />
+      ) : (
+        <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+          {symbol.slice(0, 1)}
+        </span>
+      )}
+      <span>{name ?? symbol}</span>
+      {name ? <span className="text-xs text-muted-foreground">{symbol}</span> : null}
+    </div>
+  );
+}
+
+// 24h 涨跌:正绿(默认前景)/ 负红(destructive token);无数据 → "—"。仅用 shadcn token,不硬编码色。
+function Change24h({ value }: { value?: number }) {
+  if (value == null) return <span className="text-muted-foreground">—</span>;
+  const sign = value >= 0 ? "+" : "";
+  return (
+    <span className={value < 0 ? "text-destructive" : "text-foreground"}>
+      {sign}
+      {value.toFixed(2)}%
+    </span>
   );
 }
 

@@ -39,6 +39,9 @@ pnpm exec wrangler secret put BETTER_AUTH_SECRET
 pnpm exec wrangler secret put ZERION_API_KEY
 pnpm exec wrangler secret put COINSTATS_API_KEY
 pnpm exec wrangler secret put BETTER_AUTH_URL    # placeholder for now (e.g. https://example.com); fixed in step 6
+# Optional — token prices/logos (CoinGecko). Works without a key on the free tier (low rate limit);
+# set one (demo/pro) to lift limits. Skip this line to run keyless.
+pnpm exec wrangler secret put COINGECKO_API_KEY
 
 # 5. Build + deploy (the `deploy` script runs `vite build` then `wrangler deploy`)
 pnpm run deploy

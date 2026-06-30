@@ -16,15 +16,28 @@ export interface ResolveDeps {
   overrides?: Readonly<Record<string, TokenRef>>;
 }
 
+export interface ResolveOpts {
+  // true(默认,预热路径):合约缓存 miss 时 fetchByContract 取一次并缓存。
+  // false(展示路径):cache-only,合约 miss 不取网络、留空,只读 warm/override → 页面零网络延迟。
+  lazy?: boolean;
+}
+
 // 懒解析编排(接口驱动,无具体依赖):瀑布的输入由此收集,裁决交纯 `chooseResolution`。
-// 合约首见 → `fetchByContract` 取一次并缓存(含 info/price 副作用,P7.4 富化直接读);未收录/404 → 否定缓存。
-export async function resolveAsset(asset: AssetRef, deps: ResolveDeps): Promise<Resolution> {
+// 合约首见(lazy)→ `fetchByContract` 取一次并缓存(含 info/price 副作用,展示直接读);未收录/404 → 否定缓存。
+export async function resolveAsset(
+  asset: AssetRef,
+  deps: ResolveDeps,
+  opts?: ResolveOpts,
+): Promise<Resolution> {
   if (asset.ref) return { ref: asset.ref, confidence: "high", via: "explicit" };
+  const lazy = opts?.lazy ?? true;
 
   let contractHit: TokenRef | null = null;
   if (asset.chain && asset.contract) {
     const cached = await deps.store.getContractRef(asset.chain, asset.contract);
-    if (cached === undefined) {
+    if (cached !== undefined) {
+      contractHit = cached; // TokenRef 命中,或 null(已知缺失)
+    } else if (lazy) {
       const res = await deps.source.fetchByContract(asset.chain, asset.contract);
       if (res) {
         await deps.store.putContractRef(asset.chain, asset.contract, res.ref, CONTRACT_TTL_MS);
@@ -34,9 +47,8 @@ export async function resolveAsset(asset: AssetRef, deps: ResolveDeps): Promise<
       } else {
         await deps.store.putContractRef(asset.chain, asset.contract, null, ABSENT_TTL_MS);
       }
-    } else {
-      contractHit = cached; // TokenRef 命中,或 null(已知缺失)
     }
+    // lazy=false 且 miss:不取网络,contractHit 留空 → 降级到 warm/override/none
   }
 
   const symbol = normalizeSymbol(asset.symbol);

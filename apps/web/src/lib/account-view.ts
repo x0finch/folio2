@@ -13,6 +13,11 @@ export interface OverviewBalance {
   kind: string;
   source: string;
   metaJson: string | null;
+  // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。
+  name?: string;
+  logo?: string;
+  unitPrice?: number;
+  change24h?: number;
 }
 
 export interface SpotRow {
@@ -20,6 +25,10 @@ export interface SpotRow {
   symbol: string;
   amount: number;
   usdValue: number;
+  name?: string;
+  logo?: string;
+  unitPrice?: number;
+  change24h?: number;
 }
 export interface DefiRow {
   id: string;
@@ -73,8 +82,17 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
       if (group) group.push(row);
       else defiByProtocol.set(protocol, [row]);
     } else {
-      // spot / manual:统一现货表
-      spot.push({ id: b.id, symbol: b.symbol, amount: b.amount, usdValue: b.usdValue });
+      // spot / manual:统一现货表(带上富化字段,缺则 undefined)
+      spot.push({
+        id: b.id,
+        symbol: b.symbol,
+        amount: b.amount,
+        usdValue: b.usdValue,
+        name: b.name,
+        logo: b.logo,
+        unitPrice: b.unitPrice,
+        change24h: b.change24h,
+      });
     }
   }
 

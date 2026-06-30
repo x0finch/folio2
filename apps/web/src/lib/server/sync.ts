@@ -1,9 +1,21 @@
 import { env } from "cloudflare:workers";
-import { getRawCreds, listAccountsByUser, writeSnapshot } from "@folio/db";
+import { getLatestSnapshotByUser, getRawCreds, listAccountsByUser, writeSnapshot } from "@folio/db";
 import { type SyncDeps, syncUser } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { requireAuth } from "../require-auth";
+import { buildTokenDeps, warmTokens } from "./tokens";
+
+// 同步后预热代币缓存:取该用户最新快照的全部余额 → refreshWarm + 逐 spot/manual 行懒解析。
+// best-effort(warmTokens 内部吞错),让下次总览能 cache-only 富化出价/logo/涨跌。cron 与手动 sync 共用。
+export async function warmTokensForUser(bindings: Cloudflare.Env, userId: string): Promise<void> {
+  const snapshots = await getLatestSnapshotByUser(bindings, userId);
+  await warmTokens(
+    buildTokenDeps(bindings),
+    snapshots.flatMap((s) => s.balances),
+    Date.now(),
+  );
+}
 
 // 把 @folio/db 的包装函数绑好 env 后装进编排器的注入式依赖(数据访问仍只经 db 包);
 // 密钥与全局 key 从 env 取。triggerSync(手动)与 cron(scheduled,见 src/server.ts)共用,
@@ -38,5 +50,7 @@ export const triggerSync = createServerFn({ method: "POST" })
       skipped,
       failed: result.results.length - ok - skipped,
     });
+    // 预热代币缓存(best-effort,inline:同步本就耗时,可接受;首次有按需取价的额外延迟)。
+    await warmTokensForUser(env, context.userId);
     return result;
   });

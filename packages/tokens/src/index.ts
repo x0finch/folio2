@@ -25,6 +25,7 @@ export {
   type RefreshDeps,
   type RefreshOpts,
   type ResolveDeps,
+  type ResolveOpts,
   refreshWarm,
   resolveAsset,
 } from "./service";
