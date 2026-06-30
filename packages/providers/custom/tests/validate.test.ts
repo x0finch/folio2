@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import { customProvider } from "../src";
 
 describe("customProvider inputs / validate", () => {
-  it("declares symbol/amount/usdValue as public inputs", () => {
+  it("declares symbol/amount/unitPrice as public inputs", () => {
     expect((customProvider.inputs ?? []).map((i) => [i.key, i.type])).toEqual([
       ["symbol", "public"],
       ["amount", "public"],
-      ["usdValue", "public"],
+      ["unitPrice", "public"],
     ]);
-    expect(publicKeys(customProvider.inputs ?? [])).toEqual(["symbol", "amount", "usdValue"]);
+    expect(publicKeys(customProvider.inputs ?? [])).toEqual(["symbol", "amount", "unitPrice"]);
   });
 
   it("validate is true (no external source; creds validated upstream by validateCredentials)", async () => {

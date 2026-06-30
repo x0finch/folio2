@@ -50,6 +50,13 @@
       "when": 1782777124091,
       "tag": "0006_tricky_manta",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1782790401096,
+      "tag": "0007_old_silk_fever",
+      "breakpoints": true
     }
   ]
 }

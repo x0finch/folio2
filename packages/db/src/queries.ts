@@ -1,7 +1,23 @@
 import type { AccountType, BalanceKind } from "@folio/core";
-import { and, asc, desc, eq, getTableColumns, inArray, max } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  type InferSelectModel,
+  inArray,
+  max,
+} from "drizzle-orm";
 import { type Db, type DbEnv, getDb } from "./client";
-import { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
+import {
+  accountGroups,
+  accounts,
+  groups,
+  manualActivity,
+  snapshotBalances,
+  snapshots,
+} from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
 
 // D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 8 列 → 每块最多 12 行(96 参数,留余量)。
@@ -414,4 +430,63 @@ export function listBalancesForSnapshots(
     .select()
     .from(snapshotBalances)
     .where(inArray(snapshotBalances.snapshotId, snapshotIds));
+}
+
+// ---------- manual 活动账本(P7.4.1)----------
+
+export type ManualActivityKind = "add" | "reduce" | "set";
+export interface ManualActivityInput {
+  kind: ManualActivityKind;
+  amount: number;
+  price?: number | null;
+  occurredAt: number;
+  note?: string | null;
+}
+export type ManualActivity = InferSelectModel<typeof manualActivity>;
+
+export async function recordManualActivity(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+  input: ManualActivityInput,
+): Promise<void> {
+  const db = getDb(env);
+  await assertAccountOwned(db, userId, accountId); // 防越权(与组 ops 同约定:不属本人即抛)
+  await db.insert(manualActivity).values({
+    id: crypto.randomUUID(),
+    accountId,
+    kind: input.kind,
+    amount: input.amount,
+    price: input.price ?? null,
+    occurredAt: input.occurredAt,
+    note: input.note ?? null,
+    createdAt: Date.now(),
+  });
+}
+
+// userId-scoped(经 account ⨝ user 归属);按 occurred_at→created_at 升序(deriveAmount 据此定序)。
+export function listManualActivityByAccount(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+): Promise<ManualActivity[]> {
+  return getDb(env)
+    .select(getTableColumns(manualActivity))
+    .from(manualActivity)
+    .innerJoin(accounts, eq(manualActivity.accountId, accounts.id))
+    .where(and(eq(manualActivity.accountId, accountId), eq(accounts.userId, userId)))
+    .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt));
+}
+
+export async function removeManualActivity(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+  id: string,
+): Promise<void> {
+  const db = getDb(env);
+  await assertAccountOwned(db, userId, accountId);
+  await db
+    .delete(manualActivity)
+    .where(and(eq(manualActivity.id, id), eq(manualActivity.accountId, accountId)));
 }

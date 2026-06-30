@@ -13,6 +13,7 @@ import {
   getAccountById,
   listAccountsByUser,
   listRawCredsByUser,
+  recordManualActivity,
   setAccountCredentials,
 } from "@folio/db";
 import { appRegistry, scopeGlobalKeys } from "@folio/sync";
@@ -62,25 +63,31 @@ export const listMyAccounts = createServerFn({ method: "GET" })
 // 全由声明派生,见 @folio/core validateCredentials)。外层 zod 只管 wire 形状(type 白名单 + label
 // + 字段存在),不再手写 per-type 的地址正则 / passphrase refine。
 
-// 一个 manual 账户 = 一个手记资产:symbol/amount/usdValue 三个 public 输入,走 creds(明文,见 P6.6.2)。
-// wire 全字符串(amount/usdValue 的数值性由 provider.inputs 的 z.coerce.number 经 validateCredentials 校验)。
+// 一个 manual 账户 = 一个手记资产:symbol/amount/unitPrice 三个 public 输入,走 creds(明文,见 P6.6.2/P7.4.1)。
+// 创建即写一条初始 `set` 活动(manual_activity),账本从创建起就有基线;之后 amount 经活动账本物化。
 const ManualInput = z.object({
   label: z.string().trim().min(1, "label is required"),
   symbol: z.string().trim().min(1, "symbol is required"),
   amount: z.string().trim().min(1, "amount is required"),
-  usdValue: z.string().trim().min(1, "usdValue is required"),
+  unitPrice: z.string().trim().min(1, "unitPrice is required"),
 });
 export const createManualAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(ManualInput)
   .handler(async ({ data, context }) => {
     const inputs = getProvider(appRegistry, "manual").inputs ?? [];
-    const raw = { symbol: data.symbol, amount: data.amount, usdValue: data.usdValue };
-    await validateCredentials(inputs, raw); // 校验闸(amount/usdValue 可 coerce 成数值,否则抛)
+    const raw = { symbol: data.symbol, amount: data.amount, unitPrice: data.unitPrice };
+    await validateCredentials(inputs, raw); // 校验闸(amount/unitPrice 可 coerce 成数值,否则抛)
     const account = await createAccount(env, context.userId, {
       type: "manual",
       label: data.label,
       creds: await sealJson(inputs, raw),
+    });
+    // 初始 set:账本基线 = 创建时数量(与 creds.amount 一致)。
+    await recordManualActivity(env, context.userId, account.id, {
+      kind: "set",
+      amount: Number(data.amount),
+      occurredAt: Date.now(),
     });
     log.info("account created", { type: "manual", accountId: account.id });
     return account;

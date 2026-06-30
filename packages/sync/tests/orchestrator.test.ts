@@ -35,7 +35,7 @@ function manualAccount(overrides: Partial<AccountSafe> = {}): AccountSafe {
   };
 }
 // manual 的单资产 creds(走 getRawCreds;creds map 是字符串 map,amount/usdValue 由 validator coerce 成 number)。
-const MANUAL_CREDS = JSON.stringify({ symbol: "BTC", amount: "0.5", usdValue: "32000" });
+const MANUAL_CREDS = JSON.stringify({ symbol: "BTC", amount: "0.5", unitPrice: "64000" });
 
 // 收集 writeSnapshot 调用,便于断言传入形状。getRawCreds 默认给空 map "{}"(manual 无输入 → isComplete)。
 function makeDeps(
@@ -192,7 +192,7 @@ describe("runAccountSync — 求和与空 balances", () => {
   it("manual 单资产 → 单条 balance,totalUsd = usdValue", async () => {
     const { balances, totalUsd } = await runAccountSync(appRegistry, {
       account: { id: "x", userId: "u1", type: "manual", label: "M" },
-      creds: { symbol: "BTC", amount: 0.5, usdValue: 32000 },
+      creds: { symbol: "BTC", amount: 0.5, unitPrice: 64000 },
       globalKeys: {},
     });
     expect(balances).toHaveLength(1);

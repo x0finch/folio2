@@ -159,3 +159,22 @@ export const tokenMeta = sqliteTable("token_meta", {
   k: text("k").primaryKey(),
   v: integer("v").notNull(),
 });
+
+// manual 活动账本(P7.4.1):add/reduce/set 动作日志。当前数量由 deriveAmount 推导、物化进 account.creds.amount
+// (provider/sync 不依赖本表)。price 记录单价、留给 M7.3 成本/盈亏,本期不算。与 M7.2 的通用 transactions 表分开。
+export const manualActivity = sqliteTable(
+  "manual_activity",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"add" | "reduce" | "set">().notNull(),
+    amount: real("amount").notNull(),
+    price: real("price"), // 单价(可空),留 M7.3
+    occurredAt: integer("occurred_at").notNull(), // epoch ms
+    note: text("note"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("manual_activity_account_id_occurred_at_idx").on(t.accountId, t.occurredAt)],
+);

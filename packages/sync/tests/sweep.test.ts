@@ -15,7 +15,7 @@ function makeDeps(accountsByUser: Record<string, AccountSafe[]>): SyncDeps {
   return {
     listAccounts: async (userId) => accountsByUser[userId] ?? [],
     // manual 单资产 creds(symbol/amount/usdValue)→ isComplete 通过、validateCredentials 通过。
-    getRawCreds: async () => JSON.stringify({ symbol: "BTC", amount: 1, usdValue: 100 }),
+    getRawCreds: async () => JSON.stringify({ symbol: "BTC", amount: 1, unitPrice: 100 }),
     writeSnapshot: async (_u, accountId) => `snap-${accountId}`,
     secretsKey: "k",
     globalKeys: {},
