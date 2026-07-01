@@ -10,6 +10,7 @@ export {
   PRICE_TTL_MS,
   RESOLUTION_DOMINANCE,
   RESOLUTION_TOP_RANK,
+  TOP_COINS_LIMIT,
   WARM_TTL_MS,
 } from "./constants";
 export type { TokenErrorCode } from "./errors";

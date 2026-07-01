@@ -29,6 +29,9 @@ export const RESOLUTION_DOMINANCE = 5; // 最佳须如此倍数地碾压次席(r
 // 预热深度(top-N markets)。
 export const DEFAULT_TOP_N = 1000;
 
+// 默认选币下拉(空输入)展示的市值 top-N 条数(P7.4.5)。
+export const TOP_COINS_LIMIT = 50;
+
 // 缓存 TTL(供 store 实现 / refreshWarm 门控)。warm 承载价要新鲜、合约解析稳定、否定中等。
 // (chain 的源内映射 TTL 由各 source 自管,不在此。)
 export const WARM_TTL_MS = 30 * 60 * 1000; // 30min(warm 承载价,要新鲜)

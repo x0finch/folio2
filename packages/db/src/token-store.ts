@@ -8,7 +8,7 @@ import {
   type TokenRef,
   type TokenStore,
 } from "@folio/tokens";
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { type DbEnv, getDb } from "./client";
 import { tokenContract, tokenInfo, tokenMeta, tokenPrice, tokenWarm } from "./schema";
 
@@ -87,6 +87,35 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
     async warmAsOf(): Promise<number | null> {
       const rows = await db.select().from(tokenMeta).where(eq(tokenMeta.k, warmKey));
       return rows[0]?.v ?? null;
+    },
+
+    async listTopTokens(limit: number): Promise<TokenInfo[]> {
+      // rank 在 warm、name/logo 在 info → join (source, coinId)。两表都按 TTL 过滤。
+      // 排序:无 rank 者末尾(`rank is null` 先排),再按 rank 升序。
+      const t = now();
+      const rows = await db
+        .select({
+          coinId: tokenWarm.coinId,
+          symbol: tokenInfo.symbol,
+          name: tokenInfo.name,
+          logo: tokenInfo.logo,
+        })
+        .from(tokenWarm)
+        .innerJoin(
+          tokenInfo,
+          and(eq(tokenInfo.source, tokenWarm.source), eq(tokenInfo.coinId, tokenWarm.coinId)),
+        )
+        .where(
+          and(eq(tokenWarm.source, source), gt(tokenWarm.expiresAt, t), gt(tokenInfo.expiresAt, t)),
+        )
+        .orderBy(sql`${tokenWarm.marketCapRank} is null`, asc(tokenWarm.marketCapRank))
+        .limit(limit);
+      return rows.map((r) => ({
+        ref: mk(r.coinId),
+        symbol: r.symbol,
+        name: r.name,
+        logo: r.logo ?? undefined,
+      }));
     },
 
     async getContractRef(chain, contract) {

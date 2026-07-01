@@ -15,6 +15,7 @@ const store: TokenStore = {
   getCandidates: async () => [],
   putWarm: async () => {},
   warmAsOf: async () => null,
+  listTopTokens: async () => [],
   getContractRef: async () => undefined,
   putContractRef: async () => {},
   getInfo: async () => new Map(),

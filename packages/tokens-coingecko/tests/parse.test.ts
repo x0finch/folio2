@@ -102,7 +102,8 @@ describe("parseContract", () => {
 });
 
 describe("parseSearch", () => {
-  it("coins[] → TokenInfo[] (logo from large)", () => {
+  it("coins[] → TokenInfo[] sorted by market_cap_rank asc (unranked last), logo from large", () => {
+    // fixture raw order is WBTC(15), SBF(null), BTC(1) — output must be rank-sorted.
     expect(parseSearch(searchJson)).toEqual([
       {
         ref: cg("bitcoin"),
@@ -115,6 +116,12 @@ describe("parseSearch", () => {
         symbol: "WBTC",
         name: "Wrapped Bitcoin",
         logo: "https://coin-images.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png",
+      },
+      {
+        ref: cg("some-bitcoin-fork"),
+        symbol: "SBF",
+        name: "Some Bitcoin Fork",
+        logo: "https://coin-images.coingecko.com/coins/images/9999/large/sbf.png",
       },
     ]);
   });

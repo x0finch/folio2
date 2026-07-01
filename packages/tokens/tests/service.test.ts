@@ -36,6 +36,9 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
     async warmAsOf() {
       return wAsOf;
     },
+    async listTopTokens() {
+      return [];
+    },
     async getContractRef(chain, contract) {
       const k = ck(chain, contract);
       return contracts.has(k) ? contracts.get(k) : undefined;

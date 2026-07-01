@@ -65,6 +65,48 @@ describe("warm + candidates", () => {
   });
 });
 
+describe("listTopTokens (rank-sorted, join name/logo)", () => {
+  it("orders by marketCapRank asc (unranked last), honors limit, includes name/logo via join", async () => {
+    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
+    await store.putWarm(
+      [
+        { info: info(cg("ethereum"), "eth", "Lo-eth"), price: price(cg("ethereum"), 3500, 2) },
+        { info: info(cg("bitcoin"), "btc", "Lo-btc"), price: price(cg("bitcoin"), 65000, 1) },
+        { info: info(cg("some-fork"), "sbf", "Lo-sbf"), price: price(cg("some-fork"), 0.1) },
+        { info: info(cg("solana"), "sol", "Lo-sol"), price: price(cg("solana"), 150, 5) },
+      ],
+      TTL,
+    );
+    // limit 3 → top three by rank; name/logo pulled from the info table (join worked).
+    const top = await store.listTopTokens(3);
+    expect(top).toEqual([
+      { ref: cg("bitcoin"), symbol: "btc", name: "BTC", logo: "Lo-btc" },
+      { ref: cg("ethereum"), symbol: "eth", name: "ETH", logo: "Lo-eth" },
+      { ref: cg("solana"), symbol: "sol", name: "SOL", logo: "Lo-sol" },
+    ]);
+    expect(top.every((t) => !!t.logo)).toBe(true);
+    // unranked coin sorts last, not dropped when limit allows.
+    const all = await store.listTopTokens(10);
+    expect(all.map((t) => t.ref.coinId)).toEqual(["bitcoin", "ethereum", "solana", "some-fork"]);
+  });
+
+  it("respects TTL and source bucketing", async () => {
+    let clock = 1000;
+    const store = createTokenStore(env, { source: "coingecko", now: () => clock });
+    await store.putWarm(
+      [{ info: info(cg("bitcoin"), "btc", "L"), price: price(cg("bitcoin"), 65000, 1) }],
+      TTL,
+    );
+    const other = createTokenStore(env, {
+      source: "coinmarketcap" as TokenRef["source"],
+      now: () => clock,
+    });
+    expect(await other.listTopTokens(10)).toEqual([]); // 分桶:别的源看不到
+    clock = 1000 + TTL + 1;
+    expect(await store.listTopTokens(10)).toEqual([]); // 过期
+  });
+});
+
 describe("contract cache (three-state + TTL + lowercasing)", () => {
   it("hit / absent / unknown", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });

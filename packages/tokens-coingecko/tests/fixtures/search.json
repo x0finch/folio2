@@ -1,15 +1,6 @@
 {
   "coins": [
     {
-      "id": "bitcoin",
-      "name": "Bitcoin",
-      "api_symbol": "bitcoin",
-      "symbol": "BTC",
-      "market_cap_rank": 1,
-      "thumb": "https://coin-images.coingecko.com/coins/images/1/thumb/bitcoin.png",
-      "large": "https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png"
-    },
-    {
       "id": "wrapped-bitcoin",
       "name": "Wrapped Bitcoin",
       "api_symbol": "wrapped-bitcoin",
@@ -17,6 +8,24 @@
       "market_cap_rank": 15,
       "thumb": "https://coin-images.coingecko.com/coins/images/7598/thumb/wrapped_bitcoin_wbtc.png",
       "large": "https://coin-images.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png"
+    },
+    {
+      "id": "some-bitcoin-fork",
+      "name": "Some Bitcoin Fork",
+      "api_symbol": "some-bitcoin-fork",
+      "symbol": "SBF",
+      "market_cap_rank": null,
+      "thumb": "https://coin-images.coingecko.com/coins/images/9999/thumb/sbf.png",
+      "large": "https://coin-images.coingecko.com/coins/images/9999/large/sbf.png"
+    },
+    {
+      "id": "bitcoin",
+      "name": "Bitcoin",
+      "api_symbol": "bitcoin",
+      "symbol": "BTC",
+      "market_cap_rank": 1,
+      "thumb": "https://coin-images.coingecko.com/coins/images/1/thumb/bitcoin.png",
+      "large": "https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png"
     }
   ],
   "exchanges": [],

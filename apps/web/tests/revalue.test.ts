@@ -27,6 +27,7 @@ function fakeStore(): TokenStore {
     getCandidates: async (s) => candidates.get(s) ?? [],
     putWarm: async () => {},
     warmAsOf: async () => 9_999_999_999_999, // 远未来 → refreshWarm 视为新鲜、跳过取数
+    listTopTokens: async () => [],
     getContractRef: async () => undefined,
     putContractRef: async () => {},
     getInfo: async () => new Map<string, TokenInfo>(),

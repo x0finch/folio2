@@ -136,16 +136,20 @@ interface RawSearchCoin {
   id?: string;
   symbol?: string;
   name?: string;
+  market_cap_rank?: number | null;
   large?: string;
   thumb?: string;
 }
 
-// /search → coins[] → TokenInfo[](选币 autocomplete 用)。取前 SEARCH_LIMIT;logo 用 large 退 thumb。
+// /search → coins[] → TokenInfo[](选币 autocomplete 用)。按 market_cap_rank 升序(无排名末尾)
+// **排序后再截** SEARCH_LIMIT(先切会漏掉靠后但市值更高的项);logo 用 large 退 thumb。
 export function parseSearch(json: unknown): TokenInfo[] {
   const coins = (json as { coins?: RawSearchCoin[] })?.coins;
   if (!Array.isArray(coins)) throw new TokenError("PARSE_ERROR", "search: expected { coins: [] }");
+  const rank = (c: RawSearchCoin) => c.market_cap_rank ?? Number.POSITIVE_INFINITY;
+  const sorted = [...coins].sort((a, b) => rank(a) - rank(b));
   const out: TokenInfo[] = [];
-  for (const c of coins.slice(0, SEARCH_LIMIT)) {
+  for (const c of sorted.slice(0, SEARCH_LIMIT)) {
     if (!c?.id || !c.symbol) continue;
     out.push({ ref: cg(c.id), symbol: c.symbol, name: c.name ?? "", logo: c.large ?? c.thumb });
   }
