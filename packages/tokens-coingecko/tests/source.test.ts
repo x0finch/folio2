@@ -1,8 +1,16 @@
 import { type CoinId, TokenError, type TokenRef } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
-import { CG_BASE_FREE, CG_BASE_PRO, HEADER_DEMO, HEADER_PRO, PER_PAGE_MAX } from "../src/constants";
+import {
+  CG_BASE_FREE,
+  CG_BASE_PRO,
+  HEADER_DEMO,
+  HEADER_PRO,
+  PER_PAGE_MAX,
+  USER_AGENT,
+} from "../src/constants";
 import { CoinGeckoSource } from "../src/source";
 
+const USER_AGENT_HEADER = "user-agent";
 const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
 
 interface Call {
@@ -89,6 +97,13 @@ describe("CoinGeckoSource config", () => {
     ]);
     expect(calls[0].url.toString().startsWith(CG_BASE_PRO)).toBe(true);
     expect((calls[0].init?.headers as Record<string, string>)[HEADER_PRO]).toBe("k");
+  });
+
+  // 回归:CGK 的 Cloudflare WAF 对无 User-Agent 的请求返 403(CF Workers fetch 默认不带 UA)。
+  it("always sends a User-Agent header (keyless too)", async () => {
+    const { impl, calls } = mockFetch(() => ({ body: {} }));
+    await new CoinGeckoSource({ fetchImpl: impl }).fetchPrices([cg("bitcoin")]);
+    expect((calls[0].init?.headers as Record<string, string>)[USER_AGENT_HEADER]).toBe(USER_AGENT);
   });
 });
 

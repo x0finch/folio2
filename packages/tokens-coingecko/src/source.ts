@@ -17,6 +17,7 @@ import {
   HEADER_PRO,
   PER_PAGE_MAX,
   PRICE_CHANGE_WINDOWS,
+  USER_AGENT,
   VS_USD,
 } from "./constants";
 import {
@@ -46,8 +47,10 @@ export class CoinGeckoSource implements TokenSource {
 
   constructor(config: CoinGeckoConfig = {}) {
     this.baseUrl = config.baseUrl ?? (config.pro ? CG_BASE_PRO : CG_BASE_FREE);
-    this.fetchImpl = config.fetchImpl ?? fetch;
-    this.headers = { accept: "application/json" };
+    // 默认全局 `fetch` 必须绑到 globalThis:作为 `this.fetchImpl(...)` 方法调用会丢失全局 this,
+    // 在 CF Workers 触发 "Illegal invocation"(Node 下无害)。注入的 fetchImpl(测试)按原样用。
+    this.fetchImpl = config.fetchImpl ?? fetch.bind(globalThis);
+    this.headers = { accept: "application/json", "user-agent": USER_AGENT };
     if (config.apiKey) this.headers[config.pro ? HEADER_PRO : HEADER_DEMO] = config.apiKey;
   }
 

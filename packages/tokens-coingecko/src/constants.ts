@@ -16,6 +16,10 @@ export const SEARCH_LIMIT = 10;
 export const HEADER_DEMO = "x-cg-demo-api-key";
 export const HEADER_PRO = "x-cg-pro-api-key";
 
+// CGK 的 Cloudflare WAF 对**无 `User-Agent`** 的请求返 403(CF Workers 的 fetch 默认不带 UA)。
+// 显式带标识性 UA,search/markets/contract 等所有端点才不被拦(dev + 生产同理)。
+export const USER_AGENT = "folio-portfolio-tracker/1.0 (+https://github.com/x0finch/folio)";
+
 // /coins/markets 每页上限(CGK 硬上限)+ 默认拉取深度。
 export const PER_PAGE_MAX = 250;
 export const DEFAULT_TOP_N = 1000;
