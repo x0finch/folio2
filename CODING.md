@@ -11,6 +11,12 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 - **Prefer mature, vetted libraries** over hand-rolling (signing, BIP32, crypto, dates, decimals). A new lib must pass 4 gates: ① runs on CF Workers, ② maintained/no severe CVEs, ③ complexity matches payoff, ④ no conflicting deps. Record the choice.
 - **Secrets never leave / never logged** — APIs return only a safe projection; decrypt only at use time and discard.
 
+## Implementation shape
+
+- **Functional factories, not classes.** Stateful implementations are closures: `createXxx(config): Interface` — the closure holds state and returns an object of methods (like `createTokenStore` / `createCoinGeckoSource` / `defineProvider`). No `class` / `this`.
+- **Stateless logic → top-level functions with explicit deps.** Pull pure IO/logic out as module-level functions that take their dependencies as parameters (`request(http, path)`), not hidden behind `this`/closures — easier to test and reuse.
+- **Outbound HTTP: call global `fetch` directly.** `await fetch(url, { headers })` (same as every provider). Never stash fetch on an object / inject a `fetchImpl` seam and call it as a method — that drops the global `this` and throws `Illegal invocation` on CF Workers (and then needs a `bind` patch). Mock it in tests with `vi.spyOn(globalThis, "fetch")` + `afterEach(() => vi.restoreAllMocks())`. Generally: when a dependency is a runtime global (fetch / crypto / clock), mock the global in tests instead of adding an injection param to production code.
+
 ## UI
 
 - **Base UI only, never Radix.** Compose the shadcn design system (`@base-ui/react`); `radix-ui` is not a dependency and must not be reintroduced. Colors/spacing/radius via design tokens (`bg-background`, `text-foreground`, …) — no hardcoded colors, no arbitrary values (`bg-[#…]`, `p-[13px]`), no editing component internals.
@@ -47,9 +53,10 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 
 - **Extract stateful sub-views into named components** (same file) — loading / error / empty branches that have their own structure become `TokenListLoading` / `TokenListError` / `TokenListEmpty`, not inline blocks. Factor shared layout (e.g. a centered `StatusBlock`) so the states stay visually consistent.
 
-## Naming
+## Naming & consistency
 
 - One concept, one word across the codebase (e.g. `token` everywhere — `TokenCombobox`, `TokenRow`, `TokenInfo` — not mixed `coin`/`token`).
+- **One situation, one way.** Before writing a new implementation, check how sibling ones (providers / sources / stores) do it and follow that pattern; deviate only with a clear reason.
 
 ## Tests
 
