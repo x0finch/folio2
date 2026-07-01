@@ -1,14 +1,6 @@
 // @folio/ui —— shadcn 组件,具名 re-export(用到一个加一个,保持引入面最小)。
 export { Button, buttonVariants } from "./components/button";
 export {
-  Combobox,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from "./components/combobox";
-export {
   Card,
   CardAction,
   CardContent,
@@ -27,6 +19,14 @@ export {
   ChartTooltipContent,
 } from "./components/chart";
 export { Checkbox } from "./components/checkbox";
+export {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "./components/combobox";
 export { Input } from "./components/input";
 export { Label } from "./components/label";
 export {

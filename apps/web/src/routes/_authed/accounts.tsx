@@ -19,6 +19,7 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { CredentialForm } from "../../components/credential-form";
+import { TokenCombobox } from "../../components/token-combobox";
 import {
   createExchangeAccount,
   createManualAccount,
@@ -40,7 +41,7 @@ import {
   listManualActivity,
 } from "../../lib/server/manual-activity";
 import { triggerSync } from "../../lib/server/sync";
-import { searchCoins } from "../../lib/server/tokens";
+import { coinPrice } from "../../lib/server/tokens";
 
 // 可录入的链上账户类型 → 展示名(EVM 走 zerion;其余走 coinstats)。
 const ONCHAIN_TYPES = [
@@ -91,32 +92,36 @@ function Accounts() {
   const [groupName, setGroupName] = useState("");
   const [groupError, setGroupError] = useState<string | null>(null);
 
-  // manual 录入(一账户一资产)
+  // manual 录入(一账户一资产)。选币为主路径(P7.4.3):默认搜索 CoinGecko 选定代币(填 symbol + coinId);
+  // 找不到再切手动模式自填 symbol(不关联代币,coinId 空)。
   const [label, setLabel] = useState("");
-  const [mSymbol, setMSymbol] = useState("");
-  const [mCoinId, setMCoinId] = useState(""); // 选币消歧(P7.4.3);空=按 symbol 解析
-  const [coinResults, setCoinResults] = useState<TokenInfo[]>([]);
+  const [mManual, setMManual] = useState(false); // false=搜索选币(默认),true=手动填 symbol
+  const [mPicked, setMPicked] = useState<TokenInfo | null>(null); // 选中的代币
+  const [mSymbol, setMSymbol] = useState(""); // 手动模式下自填的 symbol
   const [mFixed, setMFixed] = useState(false); // 锁定固定值(P7.4.4):跳过市价、钉死 unitPrice
   const [mAmount, setMAmount] = useState("");
   const [mUnitPrice, setMUnitPrice] = useState("");
+  const [mPriceBusy, setMPriceBusy] = useState(false); // 选币后自动取市价中
+  const priceReqRef = useRef(0); // 竞态守卫:只应用最近一次取价结果
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
-  // 选币 autocomplete:symbol 输入防抖搜 CoinGecko;已选定币(mCoinId)或 query 太短则不搜。
-  useEffect(() => {
-    if (mCoinId || mSymbol.trim().length < 2) {
-      setCoinResults([]);
-      return;
+  // 选中代币(P7.4.5):自动取当前市价预填单价(用户可改)。快速改选时靠 priceReqRef 丢弃旧结果。
+  async function onPickCoin(coin: TokenInfo | null) {
+    setMPicked(coin);
+    if (!coin) return;
+    const reqId = ++priceReqRef.current;
+    setMPriceBusy(true);
+    try {
+      const p = await coinPrice({ data: { coinId: coin.ref.coinId } });
+      if (priceReqRef.current === reqId && p?.unitPrice != null) setMUnitPrice(String(p.unitPrice));
+    } catch {
+      // 取价失败不阻断:用户手填单价即可
+    } finally {
+      if (priceReqRef.current === reqId) setMPriceBusy(false);
     }
-    const q = mSymbol.trim();
-    const timer = setTimeout(() => {
-      searchCoins({ data: { query: q } })
-        .then(setCoinResults)
-        .catch(() => setCoinResults([]));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [mSymbol, mCoinId]);
+  }
 
   // on-chain 录入表单(链可选)
   const [ocType, setOcType] = useState<OnchainType>("onchain_evm");
@@ -238,25 +243,34 @@ function Accounts() {
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    // 选币模式取选中代币的 symbol + coinId;手动模式取自填 symbol(不关联)。
+    const symbol = mManual ? mSymbol.trim() : (mPicked?.symbol.toUpperCase() ?? "");
+    const coinId = mManual ? undefined : mPicked?.ref.coinId;
+    if (!symbol) {
+      setError(t("selectCoinRequired"));
+      return;
+    }
     setBusy(true);
     try {
       await createManualAccount({
         data: {
           label,
-          symbol: mSymbol,
+          symbol,
           amount: mAmount,
           unitPrice: mUnitPrice,
-          ...(mCoinId ? { coinId: mCoinId } : {}),
+          ...(coinId ? { coinId } : {}),
           ...(mFixed ? { fixed: true } : {}),
         },
       });
       setLabel("");
+      setMManual(false);
+      setMPicked(null);
       setMSymbol("");
-      setMCoinId("");
-      setCoinResults([]);
       setMFixed(false);
       setMAmount("");
       setMUnitPrice("");
+      priceReqRef.current++; // 作废可能在途的取价,避免填回已清空的表单
+      setMPriceBusy(false);
       await router.invalidate();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -429,46 +443,52 @@ function Accounts() {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="m-symbol">{t("symbol")}</Label>
-              <div className="relative">
-                <Input
-                  id="m-symbol"
-                  required
-                  autoComplete="off"
-                  value={mSymbol}
-                  onChange={(e) => {
-                    setMSymbol(e.target.value);
-                    setMCoinId(""); // 改 symbol 即取消已选币,重新进入搜索
-                  }}
-                  placeholder="BTC"
-                />
-                {coinResults.length > 0 && (
-                  <ul className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-popover shadow-md">
-                    {coinResults.map((c) => (
-                      <li key={`${c.ref.source}:${c.ref.coinId}`}>
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-                          onClick={() => {
-                            setMSymbol(c.symbol.toUpperCase());
-                            setMCoinId(c.ref.coinId);
-                            setCoinResults([]);
-                          }}
-                        >
-                          {c.logo && (
-                            <img src={c.logo} alt="" className="h-5 w-5 shrink-0 rounded-full" />
-                          )}
-                          <span className="font-medium">{c.symbol.toUpperCase()}</span>
-                          <span className="truncate text-muted-foreground">{c.name}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {mCoinId ? t("coinLinked", { coinId: mCoinId }) : t("coinPickHint")}
-              </p>
+              <Label htmlFor="m-coin">{t("coin")}</Label>
+              {mManual ? (
+                // 手动模式:自填 symbol,不关联代币。
+                <>
+                  <Input
+                    id="m-coin"
+                    required
+                    autoComplete="off"
+                    value={mSymbol}
+                    onChange={(e) => setMSymbol(e.target.value)}
+                    placeholder="BTC"
+                  />
+                  <button
+                    type="button"
+                    className="self-start text-xs text-muted-foreground underline"
+                    onClick={() => {
+                      setMManual(false);
+                      setMSymbol("");
+                    }}
+                  >
+                    {t("searchInstead")}
+                  </button>
+                </>
+              ) : (
+                // 默认:搜索选币(Combobox)。搜不到 → onManual 带文本切手动模式。
+                <>
+                  <TokenCombobox
+                    value={mPicked}
+                    onChange={onPickCoin}
+                    onManual={(q) => {
+                      setMManual(true);
+                      setMSymbol(q);
+                      setMPicked(null);
+                    }}
+                  />
+                  {!mPicked && (
+                    <button
+                      type="button"
+                      className="self-start text-xs text-muted-foreground underline"
+                      onClick={() => setMManual(true)}
+                    >
+                      {t("enterManually")}
+                    </button>
+                  )}
+                </>
+              )}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="m-amount">{t("amount")}</Label>
@@ -493,7 +513,9 @@ function Accounts() {
                 onChange={(e) => setMUnitPrice(e.target.value)}
                 placeholder="64000"
               />
-              <p className="text-xs text-muted-foreground">{t("unitPriceHint")}</p>
+              <p className="text-xs text-muted-foreground">
+                {mPriceBusy ? t("fetchingPrice") : t("unitPriceHint")}
+              </p>
             </div>
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
