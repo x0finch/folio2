@@ -1,6 +1,6 @@
 # Folio — Engineering Conventions
 
-> **Folio** is a self-hosted crypto portfolio tracker (on-chain wallets + CEX + perp DEX + manual assets → one dashboard). M1–M6 are complete and archived under [evolution/milestones/](evolution/milestones/) (blueprint `arch-design.md` + per-phase log `checklist.md` + `plans/`). Forward work lives in [evolution/roadmap.md](evolution/roadmap.md), with new plans in `evolution/plans/`. Read this file first every session, do only the current phase, then update its entry in the relevant log and stop.
+> **Folio** is a self-hosted crypto portfolio tracker (on-chain wallets + CEX + perp DEX + manual assets → one dashboard). M1–M6 are complete and archived under [evolution/milestones/](evolution/milestones/) (blueprint `arch-design.md` + per-phase log `checklist.md` + `plans/`). Forward work lives in [evolution/roadmap.md](evolution/roadmap.md), with new plans in `evolution/plans/`. Read this file first every session, do only the current phase, then update its entry in the relevant log and stop. Coding conventions (imports, naming, UI, React, tests, commits): see [CODING.md](CODING.md).
 
 ## Tech stack
 - TanStack Start (`@tanstack/react-start`) + Vite — full-stack, server functions
@@ -10,22 +10,20 @@
 - Vitest (test-first); Wrangler for deploy
 
 ## Core principles (non-negotiable)
+Architecture & security principles (1–6) live here; coding-style principles (7–12) are kept as numbered anchors — full text in **[CODING.md](CODING.md)**.
+
 1. **Contract-first** — define types & the `BalanceProvider` interface before implementations. Every provider implements the same interface.
 2. **Test-first** — each provider adapter gets tests against recorded fixtures before its implementation. Parsing logic must have golden tests.
 3. **Modular** — each provider is an independent package (`@folio/provider-*`, own package.json), interdependency-free, composed via the shared interface. UI lives in `@folio/ui`.
 4. **Tests beside src** — each package's tests go in `tests/` (sibling of `src/`); provider API fixtures in `tests/fixtures/`.
 5. **Secrets never leave / never echoed** — APIs never return credential values; only a safe projection (`safeView`: public whole, semi masked, secret dropped) + `needsCredentials`. Per-account creds are one `creds` map, encrypted **per field by `type`** — only `secret` fields AES-GCM-encrypted (Web Crypto, `SECRETS_KEY` from env); `public`/`semi` plaintext (P6.6.1).
 6. **`@folio/db` exposes only wrapped ops** — no Drizzle instance / schema handle exported; only userId-scoped domain functions. All data access funnels through here.
-7. **Relative imports without extensions** — `moduleResolution: bundler` workspace-wide; write `import './foo'`, never `./foo.js` or `./foo.ts`.
-8. **No hardcoding** — chain IDs, RPCs, API bases, gap limits, derivation paths, timeouts, concurrency, TTLs → config/constants/env. Magic numbers must be named. Volatile env-specific values → env; stable domain constants → each package's `constants.ts`.
-9. **Prefer mature, vetted libraries** — before each phase ask if a widely-adopted lib/standard exists (signing, BIP32, crypto, dates, decimals — don't hand-roll). A library must pass 4 gates or be rejected: ① runs on CF Workers (no Node-native deps, reasonable size); ② actively maintained, no known severe CVEs; ③ complexity matches payoff; ④ no conflicting transitive deps. Record the choice (what/why/rejected) in the commit or here.
-10. **kebab-case filenames; exports keep their own convention** — files/dirs lowercase-hyphenated (`balance-table.tsx`, `create-account.ts`), decoupled from export names. Exports: React components PascalCase, functions/vars camelCase, types/interfaces PascalCase, constants UPPER_SNAKE.
-11. **UI = shadcn design system only** — colors/spacing/radius/fonts via shadcn design tokens (CSS vars: `bg-background`, `text-foreground`, `border-border`, …). No hardcoded color values, no arbitrary-value classes (`bg-[#...]`, `p-[13px]`), no editing component internals. New visuals = compose existing shadcn components or adjust theme tokens.
-    - **Base UI only — never Radix.** The design system is standardized on **Base UI** (`@base-ui/react`); `radix-ui` is not a dependency and must not be reintroduced. All primitives were migrated to Base UI (`shadcn create -b base` / the `base-*` presets). When adding a component, always pull the Base UI variant (`pnpm dlx shadcn@latest add <comp>` with the Base UI registry/`--base base`) and verify its import is `@base-ui/react`, not `radix-ui`.
-    - **Base components are added via `shadcn add`, never hand-written.** Run `pnpm dlx shadcn@latest add <comp>` (monorepo-aware: primitives land in `@folio/ui`, blocks in `apps/web`) and export from `@folio/ui/src/index.ts`. Only **app-level compositions** (`apps/web/src/components/`) are authored by hand, by composing `@folio/ui` primitives. Do not transcribe shadcn source manually.
-    - **Never assert what shadcn does/doesn't have from memory or by probing registry URLs — run `pnpm dlx shadcn@latest add <name>` and read what it creates.** The CLI resolves the *current* registry; static knowledge goes stale (the `style` field moved to named `base-*` presets, e.g. `base-nova`). When `add` introduces a new transitive component file or dependency, surface that cost and run the library gates (#9).
-    - **Vendored shadcn components are not unit-tested** (they're upstream-maintained source). Validate the integration instead — the apps/web build must emit their utility classes (cross-package `@source`). Write tests for our own logic (app compositions, hooks), not for `@folio/ui` primitives.
-12. **Small commits, English messages — but never commit without explicit approval.** **Do not run `git commit` until the user explicitly says so** (e.g. "提交"/"commit"); "执行"/"continue"/"go" authorize doing the work and running gates, NOT committing. Stage nothing and commit nothing on your own initiative — finish the unit, report gates green, then wait for the commit go-ahead. Commit each acceptance-worthy unit; the message ties contract/test/impl together. **Commit messages are written in English** (planning/discussion happens in Chinese, but the git history stays English). Conventional-commit style: `type(scope): summary`.
+7. **Relative imports without extensions** (`moduleResolution: bundler`).
+8. **No hardcoding** — magic numbers named; volatile/env-specific → env, stable domain → each package's `constants.ts`.
+9. **Prefer mature, vetted libraries** — must pass the 4 gates (CF Workers, maintained, complexity-worth-it, no conflicts); record the choice.
+10. **kebab-case filenames**; exports keep their own case convention (components `PascalCase`, funcs `camelCase`, types `PascalCase`, constants `UPPER_SNAKE`).
+11. **UI = Base UI / shadcn design system only — never Radix** — design tokens, no arbitrary values, no editing internals; primitives via `shadcn add`.
+12. **Small commits, English messages — never `git commit` without explicit approval** ("提交"/"commit" authorizes it; "执行"/"go" does NOT).
 
 ## Package conventions (monorepo)
 - **Packages are created on-demand by the phase that needs them** — not pre-stubbed. P1.2 creates `packages/core`, P1.4 `packages/db`, P1.5 `packages/ui`, each provider when built. The workspace globs in `pnpm-workspace.yaml` already cover `packages/*`, `packages/providers/*`, `apps/*`, so new packages need no config change.
