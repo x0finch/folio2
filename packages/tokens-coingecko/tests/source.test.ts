@@ -1,5 +1,5 @@
 import { type CoinId, TokenError, type TokenRef } from "@folio/tokens";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CG_BASE_FREE,
   CG_BASE_PRO,
@@ -8,7 +8,7 @@ import {
   PER_PAGE_MAX,
   USER_AGENT,
 } from "../src/constants";
-import { CoinGeckoSource } from "../src/source";
+import { createCoinGeckoSource } from "../src/source";
 
 const USER_AGENT_HEADER = "user-agent";
 const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
@@ -20,17 +20,23 @@ interface Call {
 
 type Reply = { body?: unknown; raw?: string; status?: number; headers?: Record<string, string> };
 
+// mock 全局 fetch(与各 provider 一致),记录每次调用便于断言 url/headers。afterEach 还原。
 function mockFetch(handler: (url: URL, callNo: number) => Reply) {
   const calls: Call[] = [];
-  const impl = (async (input: URL | RequestInfo, init?: RequestInit) => {
+  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    input: URL | RequestInfo,
+    init?: RequestInit,
+  ) => {
     const url = input instanceof URL ? input : new URL(String(input));
     calls.push({ url, init });
     const r = handler(url, calls.length);
     const body = r.raw ?? JSON.stringify(r.body ?? {});
     return new Response(body, { status: r.status ?? 200, headers: r.headers });
-  }) as unknown as typeof fetch;
-  return { impl, calls };
+  }) as unknown as typeof fetch);
+  return { calls };
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 function genMarketPage(n: number): unknown[] {
   return Array.from({ length: n }, (_, i) => ({
@@ -47,8 +53,8 @@ function genMarketPage(n: number): unknown[] {
 
 describe("CoinGeckoSource error mapping", () => {
   it("429 → RATE_LIMITED (retryable) with retryAfterMs from header", async () => {
-    const { impl } = mockFetch(() => ({ status: 429, headers: { "retry-after": "30" } }));
-    const src = new CoinGeckoSource({ fetchImpl: impl });
+    mockFetch(() => ({ status: 429, headers: { "retry-after": "30" } }));
+    const src = createCoinGeckoSource();
     await expect(src.fetchPrices([cg("bitcoin")])).rejects.toMatchObject({
       code: "RATE_LIMITED",
       retryable: true,
@@ -57,8 +63,8 @@ describe("CoinGeckoSource error mapping", () => {
   });
 
   it("5xx → UPSTREAM_ERROR (retryable)", async () => {
-    const { impl } = mockFetch(() => ({ status: 503 }));
-    const src = new CoinGeckoSource({ fetchImpl: impl });
+    mockFetch(() => ({ status: 503 }));
+    const src = createCoinGeckoSource();
     await expect(src.fetchPrices([cg("bitcoin")])).rejects.toMatchObject({
       code: "UPSTREAM_ERROR",
       retryable: true,
@@ -66,8 +72,8 @@ describe("CoinGeckoSource error mapping", () => {
   });
 
   it("other 4xx → UPSTREAM_ERROR (non-retryable)", async () => {
-    const { impl } = mockFetch(() => ({ status: 400 }));
-    const src = new CoinGeckoSource({ fetchImpl: impl });
+    mockFetch(() => ({ status: 400 }));
+    const src = createCoinGeckoSource();
     await expect(src.fetchPrices([cg("bitcoin")])).rejects.toMatchObject({
       code: "UPSTREAM_ERROR",
       retryable: false,
@@ -75,8 +81,8 @@ describe("CoinGeckoSource error mapping", () => {
   });
 
   it("bad JSON → PARSE_ERROR", async () => {
-    const { impl } = mockFetch(() => ({ raw: "<<notjson>>" }));
-    const src = new CoinGeckoSource({ fetchImpl: impl });
+    mockFetch(() => ({ raw: "<<notjson>>" }));
+    const src = createCoinGeckoSource();
     await expect(src.fetchPrices([cg("bitcoin")])).rejects.toBeInstanceOf(TokenError);
     await expect(src.fetchPrices([cg("bitcoin")])).rejects.toMatchObject({ code: "PARSE_ERROR" });
   });
@@ -84,35 +90,33 @@ describe("CoinGeckoSource error mapping", () => {
 
 describe("CoinGeckoSource config", () => {
   it("free base + demo header when key given", async () => {
-    const { impl, calls } = mockFetch(() => ({ body: {} }));
-    await new CoinGeckoSource({ apiKey: "k", fetchImpl: impl }).fetchPrices([cg("bitcoin")]);
+    const { calls } = mockFetch(() => ({ body: {} }));
+    await createCoinGeckoSource({ apiKey: "k" }).fetchPrices([cg("bitcoin")]);
     expect(calls[0].url.toString().startsWith(CG_BASE_FREE)).toBe(true);
     expect((calls[0].init?.headers as Record<string, string>)[HEADER_DEMO]).toBe("k");
   });
 
   it("pro base + pro header when pro", async () => {
-    const { impl, calls } = mockFetch(() => ({ body: {} }));
-    await new CoinGeckoSource({ apiKey: "k", pro: true, fetchImpl: impl }).fetchPrices([
-      cg("bitcoin"),
-    ]);
+    const { calls } = mockFetch(() => ({ body: {} }));
+    await createCoinGeckoSource({ apiKey: "k", pro: true }).fetchPrices([cg("bitcoin")]);
     expect(calls[0].url.toString().startsWith(CG_BASE_PRO)).toBe(true);
     expect((calls[0].init?.headers as Record<string, string>)[HEADER_PRO]).toBe("k");
   });
 
   // 回归:CGK 的 Cloudflare WAF 对无 User-Agent 的请求返 403(CF Workers fetch 默认不带 UA)。
   it("always sends a User-Agent header (keyless too)", async () => {
-    const { impl, calls } = mockFetch(() => ({ body: {} }));
-    await new CoinGeckoSource({ fetchImpl: impl }).fetchPrices([cg("bitcoin")]);
+    const { calls } = mockFetch(() => ({ body: {} }));
+    await createCoinGeckoSource().fetchPrices([cg("bitcoin")]);
     expect((calls[0].init?.headers as Record<string, string>)[USER_AGENT_HEADER]).toBe(USER_AGENT);
   });
 });
 
 describe("fetchMarkets", () => {
   it("paginates until a short page, then slices to topN", async () => {
-    const { impl, calls } = mockFetch((_url, n) => ({
+    const { calls } = mockFetch((_url, n) => ({
       body: n === 1 ? genMarketPage(PER_PAGE_MAX) : genMarketPage(10),
     }));
-    const src = new CoinGeckoSource({ fetchImpl: impl });
+    const src = createCoinGeckoSource();
     const rows = await src.fetchMarkets({ topN: 300 });
     expect(calls).toHaveLength(2);
     expect(rows).toHaveLength(PER_PAGE_MAX + 10);
@@ -126,8 +130,8 @@ describe("fetchMarkets", () => {
   });
 
   it("single page when topN small (no extra request)", async () => {
-    const { impl, calls } = mockFetch(() => ({ body: genMarketPage(5) }));
-    const src = new CoinGeckoSource({ fetchImpl: impl });
+    const { calls } = mockFetch(() => ({ body: genMarketPage(5) }));
+    const src = createCoinGeckoSource();
     const rows = await src.fetchMarkets({ topN: 50 });
     expect(calls).toHaveLength(1);
     expect(calls[0].url.searchParams.get("per_page")).toBe("50");
@@ -137,18 +141,18 @@ describe("fetchMarkets", () => {
 
 describe("fetchPrices", () => {
   it("joins coingecko ids and parses the response", async () => {
-    const { impl, calls } = mockFetch(() => ({
+    const { calls } = mockFetch(() => ({
       body: { bitcoin: { usd: 65000, usd_24h_change: 1.5, last_updated_at: 1782000000 } },
     }));
-    const src = new CoinGeckoSource({ fetchImpl: impl });
+    const src = createCoinGeckoSource();
     const prices = await src.fetchPrices([cg("bitcoin"), cg("ethereum")]);
     expect(calls[0].url.searchParams.get("ids")).toBe("bitcoin,ethereum");
     expect(prices.get("coingecko:bitcoin")?.unitPrice).toBe(65000);
   });
 
   it("no refs → empty map, no request", async () => {
-    const { impl, calls } = mockFetch(() => ({ body: {} }));
-    const src = new CoinGeckoSource({ fetchImpl: impl });
+    const { calls } = mockFetch(() => ({ body: {} }));
+    const src = createCoinGeckoSource();
     expect((await src.fetchPrices([])).size).toBe(0);
     expect(calls).toHaveLength(0);
   });
@@ -156,18 +160,18 @@ describe("fetchPrices", () => {
 
 describe("searchCoins", () => {
   it("sends query and parses coins[] → TokenInfo[]", async () => {
-    const { impl, calls } = mockFetch(() => ({
+    const { calls } = mockFetch(() => ({
       body: { coins: [{ id: "bitcoin", symbol: "BTC", name: "Bitcoin", large: "L" }] },
     }));
-    const out = await new CoinGeckoSource({ fetchImpl: impl }).searchCoins("btc");
+    const out = await createCoinGeckoSource().searchCoins("btc");
     expect(calls[0].url.pathname.endsWith("/search")).toBe(true);
     expect(calls[0].url.searchParams.get("query")).toBe("btc");
     expect(out).toEqual([{ ref: cg("bitcoin"), symbol: "BTC", name: "Bitcoin", logo: "L" }]);
   });
 
   it("blank query → [] without a request", async () => {
-    const { impl, calls } = mockFetch(() => ({ body: { coins: [] } }));
-    expect(await new CoinGeckoSource({ fetchImpl: impl }).searchCoins("  ")).toEqual([]);
+    const { calls } = mockFetch(() => ({ body: { coins: [] } }));
+    expect(await createCoinGeckoSource().searchCoins("  ")).toEqual([]);
     expect(calls).toHaveLength(0);
   });
 });
@@ -197,8 +201,8 @@ function contractMock() {
 
 describe("fetchByContract", () => {
   it("maps chain→platform internally, then resolves; 200 → {ref, info, price}", async () => {
-    const { impl, calls } = contractMock();
-    const out = await new CoinGeckoSource({ fetchImpl: impl }).fetchByContract("ethereum", "0xABC");
+    const { calls } = contractMock();
+    const out = await createCoinGeckoSource().fetchByContract("ethereum", "0xABC");
     expect(out?.ref).toEqual(cg("usd-coin"));
     expect(out?.info.logo).toBe("L");
     expect(out?.price.unitPrice).toBe(1.001);
@@ -208,31 +212,25 @@ describe("fetchByContract", () => {
   });
 
   it("translates our chain slug to CGK platform slug (polygon → polygon-pos)", async () => {
-    const { impl, calls } = contractMock();
-    await new CoinGeckoSource({ fetchImpl: impl }).fetchByContract("polygon-pos", "0xABC");
+    const { calls } = contractMock();
+    await createCoinGeckoSource().fetchByContract("polygon-pos", "0xABC");
     expect(calls[1].url.pathname).toBe("/api/v3/coins/polygon-pos/contract/0xabc");
   });
 
   it("chain not in asset_platforms → null (no per-contract call)", async () => {
-    const { impl, calls } = contractMock();
-    const out = await new CoinGeckoSource({ fetchImpl: impl }).fetchByContract(
-      "unknownchain",
-      "0x1",
-    );
+    const { calls } = contractMock();
+    const out = await createCoinGeckoSource().fetchByContract("unknownchain", "0x1");
     expect(out).toBeNull();
     expect(calls).toHaveLength(1); // only asset_platforms
   });
 
   it("per-contract 404 → null (not thrown)", async () => {
-    const { impl } = mockFetch((url) =>
+    mockFetch((url) =>
       url.pathname.endsWith("/asset_platforms")
         ? { body: PLATFORMS }
         : { status: 404, body: { error: "not found" } },
     );
-    const out = await new CoinGeckoSource({ fetchImpl: impl }).fetchByContract(
-      "ethereum",
-      "0xdead",
-    );
+    const out = await createCoinGeckoSource().fetchByContract("ethereum", "0xdead");
     expect(out).toBeNull();
   });
 });

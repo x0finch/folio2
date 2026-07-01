@@ -10,4 +10,4 @@ export {
   parseSimplePrice,
 } from "./parse";
 export type { CoinGeckoConfig } from "./source";
-export { CoinGeckoSource } from "./source";
+export { createCoinGeckoSource } from "./source";

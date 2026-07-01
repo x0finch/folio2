@@ -11,7 +11,7 @@ import {
   TOP_COINS_LIMIT,
   type TokenRef,
 } from "@folio/tokens";
-import { CoinGeckoSource } from "@folio/tokens-coingecko";
+import { createCoinGeckoSource } from "@folio/tokens-coingecko";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -116,7 +116,7 @@ async function fetchAndCachePrice(deps: ResolveDeps, ref: TokenRef) {
 // 无 key 也能跑(free 档限流低);bindings 经各调用方传入。
 export function buildTokenDeps(bindings: Cloudflare.Env): ResolveDeps {
   return {
-    source: new CoinGeckoSource({ apiKey: bindings.COINGECKO_API_KEY || undefined }),
+    source: createCoinGeckoSource({ apiKey: bindings.COINGECKO_API_KEY || undefined }),
     store: createTokenStore(bindings, { source: SOURCE }),
     overrides: OVERRIDES,
   };

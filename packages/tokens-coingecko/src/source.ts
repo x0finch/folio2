@@ -1,10 +1,4 @@
-import {
-  TokenError,
-  type TokenInfo,
-  type TokenPrice,
-  type TokenRef,
-  type TokenSource,
-} from "@folio/tokens";
+import { TokenError, type TokenInfo, type TokenPrice, type TokenSource } from "@folio/tokens";
 import {
   CG_BASE_FREE,
   CG_BASE_PRO,
@@ -33,122 +27,122 @@ export interface CoinGeckoConfig {
   apiKey?: string;
   pro?: boolean; // pro key → pro 基址 + pro 头;否则 demo 头 + free 基址
   baseUrl?: string; // 覆盖基址(测试/自托管代理)
-  fetchImpl?: typeof fetch; // 注入便于测试
 }
 
-// CoinGecko 的 TokenSource 实现。薄 IO:拼 URL/头 + 错误映射,解析交纯函数。
-// 通用层只给 `chain`;CGK 的 `platform`(asset_platform slug)是本类内部细节 —— 自己 memo 一份
-// asset_platforms 表,在 fetchByContract 里把 chain → platform。
-export class CoinGeckoSource implements TokenSource {
-  private readonly baseUrl: string;
-  private readonly headers: Record<string, string>;
-  private readonly fetchImpl: typeof fetch;
-  private platformMap?: Map<string, string>; // chain(slug+chainId) → CGK platform slug,首次按需取
+// 单次请求的 IO 依赖(基址 + 头),作为参数传给独立的 `request`——不藏在闭包/this 里。
+// 直接用全局 `fetch`(与各 provider 一致);测试用 `vi.spyOn(globalThis, "fetch")` mock。
+interface HttpCtx {
+  baseUrl: string;
+  headers: Record<string, string>;
+}
 
-  constructor(config: CoinGeckoConfig = {}) {
-    this.baseUrl = config.baseUrl ?? (config.pro ? CG_BASE_PRO : CG_BASE_FREE);
-    // 默认全局 `fetch` 必须绑到 globalThis:作为 `this.fetchImpl(...)` 方法调用会丢失全局 this,
-    // 在 CF Workers 触发 "Illegal invocation"(Node 下无害)。注入的 fetchImpl(测试)按原样用。
-    this.fetchImpl = config.fetchImpl ?? fetch.bind(globalThis);
-    this.headers = { accept: "application/json", "user-agent": USER_AGENT };
-    if (config.apiKey) this.headers[config.pro ? HEADER_PRO : HEADER_DEMO] = config.apiKey;
+// 薄 IO + 错误映射:429→RATE_LIMITED、404(notFoundAsNull)→null、其余非 2xx→UPSTREAM_ERROR、坏 JSON→PARSE_ERROR。
+async function request(
+  http: HttpCtx,
+  path: string,
+  query?: Record<string, string | number>,
+  opts?: { notFoundAsNull?: boolean },
+): Promise<unknown> {
+  const url = new URL(`${http.baseUrl}${path}`);
+  if (query) {
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
   }
 
-  private async request(
-    path: string,
-    query?: Record<string, string | number>,
-    opts?: { notFoundAsNull?: boolean },
-  ): Promise<unknown> {
-    const url = new URL(`${this.baseUrl}${path}`);
-    if (query) {
-      for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
-    }
-
-    let res: Response;
-    try {
-      res = await this.fetchImpl(url, { headers: this.headers });
-    } catch (cause) {
-      throw new TokenError("UPSTREAM_ERROR", `coingecko network error: ${path}`, {
-        retryable: true,
-        cause,
-      });
-    }
-
-    if (!res.ok) {
-      if (res.status === 429) {
-        throw new TokenError("RATE_LIMITED", `coingecko rate limited: ${path}`, {
-          retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
-        });
-      }
-      if (res.status === 404 && opts?.notFoundAsNull) return null; // 未收录 → 调用方降级为 null
-      throw new TokenError("UPSTREAM_ERROR", `coingecko ${res.status} on ${path}`, {
-        retryable: res.status >= 500,
-      });
-    }
-
-    try {
-      return await res.json();
-    } catch (cause) {
-      throw new TokenError("PARSE_ERROR", `coingecko bad json: ${path}`, { cause });
-    }
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: http.headers });
+  } catch (cause) {
+    throw new TokenError("UPSTREAM_ERROR", `coingecko network error: ${path}`, {
+      retryable: true,
+      cause,
+    });
   }
+
+  if (!res.ok) {
+    if (res.status === 429) {
+      throw new TokenError("RATE_LIMITED", `coingecko rate limited: ${path}`, {
+        retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
+      });
+    }
+    if (res.status === 404 && opts?.notFoundAsNull) return null; // 未收录 → 调用方降级为 null
+    throw new TokenError("UPSTREAM_ERROR", `coingecko ${res.status} on ${path}`, {
+      retryable: res.status >= 500,
+    });
+  }
+
+  try {
+    return await res.json();
+  } catch (cause) {
+    throw new TokenError("PARSE_ERROR", `coingecko bad json: ${path}`, { cause });
+  }
+}
+
+// CoinGecko 的 `TokenSource` 实现(functional 工厂,对齐 `createTokenStore`/`defineProvider`——无 class/this)。
+// 薄 IO:拼 URL/头 + 错误映射,解析交纯函数。通用层只给 `chain`;CGK 的 `platform`(asset_platform
+// slug)是内部细节 —— 闭包 memo 一份 asset_platforms 表,在 fetchByContract 里把 chain → platform。
+export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource {
+  const baseUrl = config.baseUrl ?? (config.pro ? CG_BASE_PRO : CG_BASE_FREE);
+  const headers: Record<string, string> = { accept: "application/json", "user-agent": USER_AGENT };
+  if (config.apiKey) headers[config.pro ? HEADER_PRO : HEADER_DEMO] = config.apiKey;
+
+  const http: HttpCtx = { baseUrl, headers };
+  let platformMap: Map<string, string> | undefined; // chain(slug+chainId) → CGK platform slug,首次按需取
 
   // chain → CGK platform slug(memo:每实例一次 asset_platforms)。
-  private async platformFor(chain: string): Promise<string | undefined> {
-    if (!this.platformMap) {
-      this.platformMap = parseAssetPlatforms(await this.request(EP_ASSET_PLATFORMS));
+  const platformFor = async (chain: string): Promise<string | undefined> => {
+    if (!platformMap) {
+      platformMap = parseAssetPlatforms(await request(http, EP_ASSET_PLATFORMS));
     }
-    return this.platformMap.get(chain.toLowerCase());
-  }
+    return platformMap.get(chain.toLowerCase());
+  };
 
-  async fetchByContract(
-    chain: string,
-    contract: string,
-  ): Promise<{ ref: TokenRef; info: TokenInfo; price: TokenPrice } | null> {
-    const platform = await this.platformFor(chain);
-    if (!platform) return null; // chain 未被 CGK 收录
-    const path = `${EP_COINS}/${platform}/contract/${contract.toLowerCase()}`;
-    const json = await this.request(path, undefined, { notFoundAsNull: true });
-    return json === null ? null : parseContract(json);
-  }
+  return {
+    async fetchByContract(chain, contract) {
+      const platform = await platformFor(chain);
+      if (!platform) return null; // chain 未被 CGK 收录
+      const path = `${EP_COINS}/${platform}/contract/${contract.toLowerCase()}`;
+      const json = await request(http, path, undefined, { notFoundAsNull: true });
+      return json === null ? null : parseContract(json);
+    },
 
-  async fetchMarkets(opts: { topN: number }): Promise<{ info: TokenInfo; price: TokenPrice }[]> {
-    const perPage = Math.min(PER_PAGE_MAX, opts.topN);
-    const pages = Math.max(1, Math.ceil(opts.topN / perPage));
-    const out: { info: TokenInfo; price: TokenPrice }[] = [];
-    for (let page = 1; page <= pages; page++) {
-      const json = await this.request(EP_COINS_MARKETS, {
-        vs_currency: VS_USD,
-        order: "market_cap_desc",
-        per_page: perPage,
-        page,
-        price_change_percentage: PRICE_CHANGE_WINDOWS,
+    async fetchMarkets(opts) {
+      const perPage = Math.min(PER_PAGE_MAX, opts.topN);
+      const pages = Math.max(1, Math.ceil(opts.topN / perPage));
+      const out: { info: TokenInfo; price: TokenPrice }[] = [];
+      for (let page = 1; page <= pages; page++) {
+        const json = await request(http, EP_COINS_MARKETS, {
+          vs_currency: VS_USD,
+          order: "market_cap_desc",
+          per_page: perPage,
+          page,
+          price_change_percentage: PRICE_CHANGE_WINDOWS,
+        });
+        const rows = parseMarkets(json);
+        out.push(...rows);
+        if (rows.length < perPage) break; // 末页(不足一页)→ 停
+      }
+      return out.slice(0, opts.topN);
+    },
+
+    async searchCoins(query) {
+      const q = query.trim();
+      if (!q) return [];
+      return parseSearch(await request(http, EP_SEARCH, { query: q }));
+    },
+
+    async fetchPrices(refs) {
+      const ids = refs
+        .filter((r) => r.source === "coingecko")
+        .map((r) => r.coinId)
+        .join(",");
+      if (!ids) return new Map();
+      const json = await request(http, EP_SIMPLE_PRICE, {
+        ids,
+        vs_currencies: VS_USD,
+        include_24hr_change: "true",
+        include_last_updated_at: "true",
       });
-      const rows = parseMarkets(json);
-      out.push(...rows);
-      if (rows.length < perPage) break; // 末页(不足一页)→ 停
-    }
-    return out.slice(0, opts.topN);
-  }
-
-  async searchCoins(query: string): Promise<TokenInfo[]> {
-    const q = query.trim();
-    if (!q) return [];
-    return parseSearch(await this.request(EP_SEARCH, { query: q }));
-  }
-
-  async fetchPrices(refs: TokenRef[]): Promise<Map<string, TokenPrice>> {
-    const ids = refs
-      .filter((r) => r.source === "coingecko")
-      .map((r) => r.coinId)
-      .join(",");
-    if (!ids) return new Map();
-    const json = await this.request(EP_SIMPLE_PRICE, {
-      ids,
-      vs_currencies: VS_USD,
-      include_24hr_change: "true",
-      include_last_updated_at: "true",
-    });
-    return parseSimplePrice(json);
-  }
+      return parseSimplePrice(json);
+    },
+  };
 }
