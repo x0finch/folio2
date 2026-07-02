@@ -1,7 +1,7 @@
 import type { AssetRef, TokenInfo, TokenPrice } from "@folio/tokens";
 
 // 纯逻辑(无 server-only import → 可单测)。把一笔余额(快照行形状)桥接到代币参考层:
-//   · balanceToAssetRef:kind 门控 + 从 metaJson 抽 chain/contract → AssetRef(供 resolveAsset)。
+//   · balanceToAssetRef:kind 门控 + 从 metaJson 抽 chain/contract → AssetRef(喂 tokens.enrich/warm)。
 //   · toEnrichment:把缓存查到的 info/price 折成展示富化字段。
 
 export interface BalanceLike {

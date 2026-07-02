@@ -13,12 +13,14 @@ export type CoinId = string & { readonly __brand: "CoinId" };
 export type TokenRef = { source: "coingecko"; coinId: CoinId };
 
 // 解析【输入】(持仓侧;由调用方从 Balance 抽取)。
-// `ref` = 已知解析(如 manual 资产用户显式选定的币),命中则直接升格,跳过查找。
+// `ref` = 已知解析(命中则直接升格,跳过查找);`coinId` = 用户显式选定的上游 id(如选币),
+// tokens 层据它造 ref —— 调用方无需知道 source / 自己拼 TokenRef。
 export interface AssetRef {
   symbol: string;
   chain?: string;
   contract?: string;
   ref?: TokenRef;
+  coinId?: string;
 }
 
 export type Confidence = "high" | "low";

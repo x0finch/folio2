@@ -6,12 +6,10 @@ import { defineConfig } from "vitest/config";
 // invoked through `pnpm -r test`.
 export default defineConfig({
   test: {
-    projects: [
-      "packages/*",
-      "packages/providers/*",
-      "packages/tokens/*",
-      "packages/tokens/providers/*",
-    ],
+    // Match each package's own vitest.config.ts (any depth) — NOT the dirs, so
+    // container-only folders (packages/providers, packages/tokens, …) aren't
+    // picked up as unnamed, colliding projects.
+    projects: ["packages/**/vitest.config.ts"],
     passWithNoTests: true,
   },
 });

@@ -7,14 +7,13 @@ import { requireAuth } from "../require-auth";
 import { revalueManual } from "../revalue";
 import { buildTokens, warmTokens } from "./tokens";
 
-// 同步后预热代币缓存:取该用户最新快照的全部余额 → refreshWarm + 逐 spot/manual 行懒解析。
+// 同步后预热代币缓存:取该用户最新快照的全部余额 → warm(top-N + 逐 spot/manual 行懒解析)。
 // best-effort(warmTokens 内部吞错),让下次总览能 cache-only 富化出价/logo/涨跌。cron 与手动 sync 共用。
 export async function warmTokensForUser(bindings: Cloudflare.Env, userId: string): Promise<void> {
   const snapshots = await getLatestSnapshotByUser(bindings, userId);
   await warmTokens(
     buildTokens(bindings),
     snapshots.flatMap((s) => s.balances),
-    Date.now(),
   );
 }
 

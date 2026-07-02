@@ -3,4 +3,9 @@
 // 经 Tokens 实例的方法用(或在 store 调用前完成),不单独对外导出。
 
 export * from "@folio/tokens-basic";
-export { type CreateTokensConfig, createTokens, type Tokens } from "./tokens";
+export {
+  type CreateTokensConfig,
+  createTokens,
+  type EnrichedAsset,
+  type Tokens,
+} from "./tokens";
