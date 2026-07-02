@@ -57,6 +57,13 @@
       "when": 1782790401096,
       "tag": "0007_old_silk_fever",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1782968184532,
+      "tag": "0008_past_winter_soldier",
+      "breakpoints": true
     }
   ]
 }

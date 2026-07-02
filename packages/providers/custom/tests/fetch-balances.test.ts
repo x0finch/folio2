@@ -21,14 +21,14 @@ describe("customProvider.fetchBalances", () => {
     ]);
   });
 
-  it("surfaces coinId to meta when present (for sync-time market valuation)", async () => {
+  it("surfaces identifier to meta when present (for sync-time market valuation)", async () => {
     const balances = await customProvider.fetchBalances(
-      ctx({ symbol: "BTC", amount: 1, unitPrice: 64000, coinId: "bitcoin" }),
+      ctx({ symbol: "BTC", amount: 1, unitPrice: 64000, identifier: "bitcoin" }),
     );
     expect(balances[0]).toMatchObject({
       symbol: "BTC",
       usdValue: 64000,
-      meta: { coinId: "bitcoin" },
+      meta: { identifier: "bitcoin" },
     });
   });
 

@@ -17,5 +17,5 @@ export interface TokenProvider {
   // simple/price 刷新/长尾已知 ref 的价(key=refKey)。
   fetchPrices(refs: TokenRef[]): Promise<Map<string, TokenPrice>>;
   // 按关键词搜币(用户选币消歧,P7.4.3)。命中即 TokenInfo(ref + name/symbol/logo)。
-  searchCoins(query: string): Promise<TokenInfo[]>;
+  searchTokens(query: string): Promise<TokenInfo[]>;
 }

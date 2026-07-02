@@ -170,7 +170,7 @@ function PerpPositions({ view }: { view: PerpView }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t("coin")}</TableHead>
+              <TableHead>{t("token")}</TableHead>
               <TableHead>{t("side")}</TableHead>
               <TableHead className="text-right">{t("size")}</TableHead>
               <TableHead className="text-right">{t("entry")}</TableHead>

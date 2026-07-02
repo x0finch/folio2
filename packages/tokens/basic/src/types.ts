@@ -1,26 +1,27 @@
 // 代币参考层的领域类型。命名规则(单一,贯穿全包):
 //   · `asset` = 持仓侧的【输入】(从 Balance 抽出的待解析身份,可能解析不出) —— 仅 `AssetRef`。
 //   · `token` = 参考层的一切(解析后的规范实体及其数据/接口) —— `TokenRef`/`TokenInfo`/…。
-//   · `coin`  = 仅 CoinGecko 角落 —— `CoinId`,只活在 `TokenRef` 的 coingecko 变体里。
+//   · `coin`  = 只保留在 CoinGecko 包内部(局部变量 / `CoinGeckoConfig` / "CoinGecko ID" 文案);
+//     通用契约一律用 `token`,`TokenRef.identifier` 承载上游 id(具体是不是 coin 由 source 决定)。
 // 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 provider 零返工。
 
-// CoinGecko 的 coin-id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/chain)混用。
-// 仅用于下面的 coingecko `TokenRef` 变体;通过 `as CoinId` 在可信边界(解析 CGK 响应)构造。
-export type CoinId = string & { readonly __brand: "CoinId" };
+// 上游代币 id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/chain)混用。
+// 仅用于下面的 `TokenRef.identifier`;通过 `as TokenIdentifier` 在可信边界(解析上游响应)构造。
+export type TokenIdentifier = string & { readonly __brand: "TokenIdentifier" };
 
 // 解析【输出】:带 source 标签的规范引用。判别联合 —— 将来加股票 = 新增 `{ source:"equity"; … }`,
 // 存储/富化 seam 不返工。
-export type TokenRef = { source: "coingecko"; coinId: CoinId };
+export type TokenRef = { source: "coingecko"; identifier: TokenIdentifier };
 
 // 解析【输入】(持仓侧;由调用方从 Balance 抽取)。
-// `ref` = 已知解析(命中则直接升格,跳过查找);`coinId` = 用户显式选定的上游 id(如选币),
+// `ref` = 已知解析(命中则直接升格,跳过查找);`identifier` = 用户显式选定的上游 id(如选币),
 // tokens 层据它造 ref —— 调用方无需知道 source / 自己拼 TokenRef。
 export interface AssetRef {
   symbol: string;
   chain?: string;
   contract?: string;
   ref?: TokenRef;
-  coinId?: string;
+  identifier?: string;
 }
 
 export type Confidence = "high" | "low";

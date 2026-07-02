@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { createTokenStore } from "@folio/db";
-import { createTokens, TOP_COINS_LIMIT, type Tokens } from "@folio/tokens";
+import { createTokens, TOP_TOKENS_LIMIT, type Tokens } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -18,19 +18,19 @@ export function buildTokens(bindings: Cloudflare.Env): Tokens {
 }
 
 // 选币 autocomplete(P7.4.3):按关键词搜;返回 TokenInfo[](JSON 可序列化)。
-export const searchCoins = createServerFn({ method: "GET" })
+export const searchTokens = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ query: z.string() }))
   .handler(async ({ data }) => {
     const q = data.query.trim();
-    tokenLog.debug("searchCoins: enter", { query: q, hasKey: !!env.COINGECKO_API_KEY });
+    tokenLog.debug("searchTokens: enter", { query: q, hasKey: !!env.COINGECKO_API_KEY });
     if (!q) return [];
     try {
       const out = await buildTokens(env).search(q);
-      tokenLog.debug("searchCoins: ok", { query: q, count: out.length });
+      tokenLog.debug("searchTokens: ok", { query: q, count: out.length });
       return out;
     } catch (err) {
-      tokenLog.error("searchCoins: failed", {
+      tokenLog.error("searchTokens: failed", {
         query: q,
         error: err instanceof Error ? err.message : String(err),
         code: (err as { code?: string })?.code,
@@ -40,35 +40,35 @@ export const searchCoins = createServerFn({ method: "GET" })
   });
 
 // 默认选币下拉(P7.4.5,空输入):市值 top-N;冷缓存兜底(单飞预热)由 tokens.topTokens 内部处理。
-export const topCoins = createServerFn({ method: "GET" })
+export const topTokens = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ limit: z.number().int().positive().max(200).optional() }).optional())
   .handler(async ({ data }) => {
-    const limit = data?.limit ?? TOP_COINS_LIMIT;
-    tokenLog.debug("topCoins: enter", { limit, hasKey: !!env.COINGECKO_API_KEY });
+    const limit = data?.limit ?? TOP_TOKENS_LIMIT;
+    tokenLog.debug("topTokens: enter", { limit, hasKey: !!env.COINGECKO_API_KEY });
     const out = await buildTokens(env).topTokens(limit);
-    tokenLog.debug("topCoins: ok", { count: out.length });
+    tokenLog.debug("topTokens: ok", { count: out.length });
     return out;
   });
 
-// 选中代币后取当前市价预填单价(P7.4.5,用户可改)。resolve(显式 coinId)→ priceOf(缓存/回源/写在 tokens 内)。
-export const coinPrice = createServerFn({ method: "GET" })
+// 选中代币后取当前市价预填单价(P7.4.5,用户可改)。resolve(显式 identifier)→ priceOf(缓存/回源/写在 tokens 内)。
+export const tokenPrice = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .validator(z.object({ coinId: z.string().min(1) }))
+  .validator(z.object({ identifier: z.string().min(1) }))
   .handler(async ({ data }) => {
-    tokenLog.debug("coinPrice: enter", { coinId: data.coinId });
+    tokenLog.debug("tokenPrice: enter", { identifier: data.identifier });
     try {
       const tokens = buildTokens(env);
-      // symbol 不参与:显式 coinId 直接升格为 ref(resolve 内部短路)。
-      const res = await tokens.resolve({ symbol: "", coinId: data.coinId });
+      // symbol 不参与:显式 identifier 直接升格为 ref(resolve 内部短路)。
+      const res = await tokens.resolve({ symbol: "", identifier: data.identifier });
       const hit = res.ref ? await tokens.priceOf(res.ref) : undefined;
-      tokenLog.debug("coinPrice: ok", { coinId: data.coinId, found: !!hit });
+      tokenLog.debug("tokenPrice: ok", { identifier: data.identifier, found: !!hit });
       return hit
         ? { unitPrice: hit.unitPrice, change24h: hit.change24h ?? null, asOf: hit.asOf }
         : null;
     } catch (err) {
-      tokenLog.error("coinPrice: failed", {
-        coinId: data.coinId,
+      tokenLog.error("tokenPrice: failed", {
+        identifier: data.identifier,
         error: err instanceof Error ? err.message : String(err),
         code: (err as { code?: string })?.code,
       });

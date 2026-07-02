@@ -12,7 +12,7 @@ import { CircleAlertIcon, LoaderCircleIcon, SearchXIcon, XIcon } from "lucide-re
 import { useDeferredValue, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { matchSegments } from "../lib/highlight";
-import { searchCoins, topCoins } from "../lib/server/tokens";
+import { searchTokens, topTokens } from "../lib/server/tokens";
 
 // 下拉的三种非列表态:统一居中的小块,图标 + 文案。搜索态/错误态横排,空态纵排 + 行动按钮。
 function StatusBlock({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -103,7 +103,7 @@ function TokenRow({ token, query }: { token: TokenInfo; query?: string }) {
 }
 
 // manual 选币(P7.4.5):Base UI Combobox 输入框式。输入框常驻;选中后在同位叠富展示(TokenRow,与选项同款)
-// + 右侧叉叉;点富展示重新展开搜索。数据走 useQuery(空词=topCoins,有词=searchCoins),无 useEffect。
+// + 右侧叉叉;点富展示重新展开搜索。数据走 useQuery(空词=topTokens,有词=searchTokens),无 useEffect。
 export function TokenCombobox({
   value,
   onChange,
@@ -122,7 +122,7 @@ export function TokenCombobox({
   const search = useDeferredValue(query.trim());
   const tokensQuery = useQuery({
     queryKey: ["tokens", search],
-    queryFn: () => (search ? searchCoins({ data: { query: search } }) : topCoins({ data: {} })),
+    queryFn: () => (search ? searchTokens({ data: { query: search } }) : topTokens({ data: {} })),
     enabled: open, // 只在下拉打开时取
     placeholderData: keepPreviousData, // 切词时保留上次结果,不闪空
     staleTime: 60_000,
@@ -168,7 +168,7 @@ export function TokenCombobox({
       </button>
       <button
         type="button"
-        aria-label={t("clearCoin")}
+        aria-label={t("clearToken")}
         onClick={clearSelection}
         className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none"
       >
@@ -185,7 +185,7 @@ export function TokenCombobox({
     <>
       <ComboboxList>
         {(token: TokenInfo) => (
-          <ComboboxItem key={`${token.ref.source}:${token.ref.coinId}`} value={token}>
+          <ComboboxItem key={`${token.ref.source}:${token.ref.identifier}`} value={token}>
             <TokenRow token={token} query={search} />
           </ComboboxItem>
         )}
@@ -208,11 +208,11 @@ export function TokenCombobox({
       filter={null}
       openOnInputClick
       itemToStringLabel={(token: TokenInfo) => (token ? token.symbol.toUpperCase() : "")}
-      isItemEqualToValue={(a: TokenInfo, b: TokenInfo) => a?.ref.coinId === b?.ref.coinId}
+      isItemEqualToValue={(a: TokenInfo, b: TokenInfo) => a?.ref.identifier === b?.ref.identifier}
     >
       {/* 输入框常驻;选中且下拉关闭时,在同位叠富展示覆盖层(点它重新展开)。 */}
       <div ref={boxRef} className="relative">
-        <ComboboxInput className="w-full" placeholder={t("searchCoinPlaceholder")} />
+        <ComboboxInput className="w-full" placeholder={t("searchTokenPlaceholder")} />
         {selectedOverlay}
       </div>
       <ComboboxContent>{dropdownBody}</ComboboxContent>

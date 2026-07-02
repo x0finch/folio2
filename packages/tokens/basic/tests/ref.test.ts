@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { TokenError } from "../src/errors";
 import { parseRefKey, refKey } from "../src/ref";
-import type { CoinId, TokenRef } from "../src/types";
+import type { TokenIdentifier, TokenRef } from "../src/types";
 
-const ref = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
+const ref = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
 
 describe("refKey / parseRefKey", () => {
-  it("serializes to `source:coinId`", () => {
+  it("serializes to `source:identifier`", () => {
     expect(refKey(ref("bitcoin"))).toBe("coingecko:bitcoin");
     expect(refKey(ref("usd-coin"))).toBe("coingecko:usd-coin");
   });

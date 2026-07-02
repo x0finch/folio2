@@ -1,6 +1,6 @@
 import type {
-  CoinId,
   TokenCandidate,
+  TokenIdentifier,
   TokenInfo,
   TokenPrice,
   TokenProvider,
@@ -12,8 +12,8 @@ import { describe, expect, it, vi } from "vitest";
 import { normalizeSymbol } from "../src/normalize";
 import { refreshWarm, resolveAsset } from "../src/service";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
-const key = (r: TokenRef) => `${r.source}:${r.coinId}`;
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
+const key = (r: TokenRef) => `${r.source}:${r.identifier}`;
 const ck = (chain: string, contract: string) => `${chain.toLowerCase()} ${contract.toLowerCase()}`;
 
 // 内存假 store(实现新 TokenStore;合约缓存按 chain 三态、warm 候选、warmAsOf)。

@@ -70,7 +70,7 @@ const ManualInput = z.object({
   symbol: z.string().trim().min(1, "symbol is required"),
   amount: z.string().trim().min(1, "amount is required"),
   unitPrice: z.string().trim().min(1, "unitPrice is required"),
-  coinId: z.string().trim().optional(), // 选币消歧(P7.4.3),可选
+  identifier: z.string().trim().optional(), // 选币消歧(P7.4.3),可选
   fixed: z.boolean().optional(), // 锁定固定值(P7.4.4),可选
 });
 export const createManualAccount = createServerFn({ method: "POST" })
@@ -82,7 +82,7 @@ export const createManualAccount = createServerFn({ method: "POST" })
       symbol: data.symbol,
       amount: data.amount,
       unitPrice: data.unitPrice,
-      ...(data.coinId ? { coinId: data.coinId } : {}),
+      ...(data.identifier ? { identifier: data.identifier } : {}),
       ...(data.fixed ? { fixed: "1" } : {}),
     };
     await validateCredentials(inputs, raw); // 校验闸(amount/unitPrice 可 coerce 成数值,否则抛)

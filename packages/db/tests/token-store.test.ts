@@ -1,11 +1,11 @@
 import { env } from "cloudflare:test";
-import type { CoinId, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
+import type { TokenIdentifier, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTokenStore } from "../src";
 import { getDb } from "../src/client";
 import { tokenContract, tokenInfo, tokenMeta, tokenPrice, tokenWarm } from "../src/schema";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
 const info = (ref: TokenRef, symbol: string, logo?: string): TokenInfo => ({
   ref,
   symbol,
@@ -88,7 +88,12 @@ describe("listTopTokens (rank-sorted, join name/logo)", () => {
     expect(top.every((t) => !!t.logo)).toBe(true);
     // unranked coin sorts last, not dropped when limit allows.
     const all = await store.listTopTokens(10);
-    expect(all.map((t) => t.ref.coinId)).toEqual(["bitcoin", "ethereum", "solana", "some-fork"]);
+    expect(all.map((t) => t.ref.identifier)).toEqual([
+      "bitcoin",
+      "ethereum",
+      "solana",
+      "some-fork",
+    ]);
   });
 
   it("respects TTL and source bucketing", async () => {

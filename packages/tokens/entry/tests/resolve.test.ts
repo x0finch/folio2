@@ -1,9 +1,9 @@
-import type { CoinId, TokenRef } from "@folio/tokens-basic";
+import type { TokenIdentifier, TokenRef } from "@folio/tokens-basic";
 import { describe, expect, it } from "vitest";
 import { normalizeSymbol } from "../src/normalize";
 import { chooseResolution, pickByConfidence } from "../src/resolve";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
 
 describe("normalizeSymbol", () => {
   it("trims + uppercases", () => {

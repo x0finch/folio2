@@ -9,7 +9,7 @@ const source: TokenProvider = {
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
   fetchPrices: async () => new Map(),
-  searchCoins: async () => [],
+  searchTokens: async () => [],
 };
 
 const store: TokenStore = {

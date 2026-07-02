@@ -10,7 +10,7 @@ export {
   PRICE_TTL_MS,
   RESOLUTION_DOMINANCE,
   RESOLUTION_TOP_RANK,
-  TOP_COINS_LIMIT,
+  TOP_TOKENS_LIMIT,
   WARM_TTL_MS,
 } from "./constants";
 export type { TokenErrorCode } from "./errors";
@@ -20,11 +20,11 @@ export { parseRefKey, refKey } from "./ref";
 export type { TokenStore } from "./store";
 export type {
   AssetRef,
-  CoinId,
   Confidence,
   Resolution,
   ResolutionVia,
   TokenCandidate,
+  TokenIdentifier,
   TokenInfo,
   TokenPrice,
   TokenRef,

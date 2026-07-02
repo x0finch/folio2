@@ -1,7 +1,7 @@
 import {
-  type CoinId,
   refKey,
   type TokenCandidate,
+  type TokenIdentifier,
   type TokenInfo,
   type TokenPrice,
   type TokenRef,
@@ -31,7 +31,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   type Stmt = Batch[number];
   const source = opts.source;
   const now = opts.now ?? (() => Date.now());
-  const mk = (coinId: string): TokenRef => ({ source, coinId: coinId as CoinId });
+  const mk = (identifier: string): TokenRef => ({
+    source,
+    identifier: identifier as TokenIdentifier,
+  });
   const warmKey = `warm_as_of:${source}`;
 
   return {
@@ -47,7 +50,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             gt(tokenWarm.expiresAt, now()),
           ),
         );
-      return rows.map((r) => ({ ref: mk(r.coinId), marketCapRank: r.marketCapRank ?? undefined }));
+      return rows.map((r) => ({
+        ref: mk(r.identifier),
+        marketCapRank: r.marketCapRank ?? undefined,
+      }));
     },
 
     async putWarm(rows, ttlMs) {
@@ -61,12 +67,12 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             .values({
               symbol: info.symbol,
               source: info.ref.source,
-              coinId: info.ref.coinId,
+              identifier: info.ref.identifier,
               marketCapRank: price.marketCapRank ?? null,
               expiresAt,
             })
             .onConflictDoUpdate({
-              target: [tokenWarm.symbol, tokenWarm.source, tokenWarm.coinId],
+              target: [tokenWarm.symbol, tokenWarm.source, tokenWarm.identifier],
               set: { marketCapRank: price.marketCapRank ?? null, expiresAt },
             }),
           infoUpsert(db, info, expiresAt),
@@ -89,12 +95,12 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
     },
 
     async listTopTokens(limit: number): Promise<TokenInfo[]> {
-      // rank 在 warm、name/logo 在 info → join (source, coinId)。两表都按 TTL 过滤。
+      // rank 在 warm、name/logo 在 info → join (source, identifier)。两表都按 TTL 过滤。
       // 排序:无 rank 者末尾(`rank is null` 先排),再按 rank 升序。
       const t = now();
       const rows = await db
         .select({
-          coinId: tokenWarm.coinId,
+          identifier: tokenWarm.identifier,
           symbol: tokenInfo.symbol,
           name: tokenInfo.name,
           logo: tokenInfo.logo,
@@ -102,7 +108,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         .from(tokenWarm)
         .innerJoin(
           tokenInfo,
-          and(eq(tokenInfo.source, tokenWarm.source), eq(tokenInfo.coinId, tokenWarm.coinId)),
+          and(
+            eq(tokenInfo.source, tokenWarm.source),
+            eq(tokenInfo.identifier, tokenWarm.identifier),
+          ),
         )
         .where(
           and(eq(tokenWarm.source, source), gt(tokenWarm.expiresAt, t), gt(tokenInfo.expiresAt, t)),
@@ -110,7 +119,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         .orderBy(sql`${tokenWarm.marketCapRank} is null`, asc(tokenWarm.marketCapRank))
         .limit(limit);
       return rows.map((r) => ({
-        ref: mk(r.coinId),
+        ref: mk(r.identifier),
         symbol: r.symbol,
         name: r.name,
         logo: r.logo ?? undefined,
@@ -131,8 +140,8 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           ),
         );
       if (rows.length === 0) return undefined; // 未知(或过期)→ 去取
-      const coinId = rows[0].coinId;
-      return coinId === null ? null : mk(coinId); // null = 已知缺失
+      const identifier = rows[0].identifier;
+      return identifier === null ? null : mk(identifier); // null = 已知缺失
     },
 
     async putContractRef(chain, contract, ref, ttlMs) {
@@ -141,7 +150,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         source,
         chain,
         contract,
-        coinId: ref?.coinId ?? null,
+        identifier: ref?.identifier ?? null,
         expiresAt,
       };
       await db
@@ -149,26 +158,26 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         .values(row)
         .onConflictDoUpdate({
           target: [tokenContract.source, tokenContract.chain, tokenContract.contract],
-          set: { coinId: row.coinId, expiresAt },
+          set: { identifier: row.identifier, expiresAt },
         });
     },
 
     async getInfo(refs) {
       const out = new Map<string, TokenInfo>();
-      const coinIds = refs.filter((r) => r.source === source).map((r) => r.coinId);
-      for (const ids of chunk(coinIds, IN_CHUNK)) {
+      const identifiers = refs.filter((r) => r.source === source).map((r) => r.identifier);
+      for (const ids of chunk(identifiers, IN_CHUNK)) {
         const rows = await db
           .select()
           .from(tokenInfo)
           .where(
             and(
               eq(tokenInfo.source, source),
-              inArray(tokenInfo.coinId, ids),
+              inArray(tokenInfo.identifier, ids),
               gt(tokenInfo.expiresAt, now()),
             ),
           );
         for (const r of rows) {
-          const ref = mk(r.coinId);
+          const ref = mk(r.identifier);
           out.set(refKey(ref), { ref, symbol: r.symbol, name: r.name, logo: r.logo ?? undefined });
         }
       }
@@ -184,20 +193,20 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
 
     async getPrices(refs) {
       const out = new Map<string, TokenPrice>();
-      const coinIds = refs.filter((r) => r.source === source).map((r) => r.coinId);
-      for (const ids of chunk(coinIds, IN_CHUNK)) {
+      const identifiers = refs.filter((r) => r.source === source).map((r) => r.identifier);
+      for (const ids of chunk(identifiers, IN_CHUNK)) {
         const rows = await db
           .select()
           .from(tokenPrice)
           .where(
             and(
               eq(tokenPrice.source, source),
-              inArray(tokenPrice.coinId, ids),
+              inArray(tokenPrice.identifier, ids),
               gt(tokenPrice.expiresAt, now()),
             ),
           );
         for (const r of rows) {
-          const ref = mk(r.coinId);
+          const ref = mk(r.identifier);
           out.set(refKey(ref), {
             ref,
             unitPrice: r.unitPrice,
@@ -224,14 +233,14 @@ function infoUpsert(db: ReturnType<typeof getDb>, i: TokenInfo, expiresAt: numbe
     .insert(tokenInfo)
     .values({
       source: i.ref.source,
-      coinId: i.ref.coinId,
+      identifier: i.ref.identifier,
       symbol: i.symbol,
       name: i.name,
       logo: i.logo ?? null,
       expiresAt,
     })
     .onConflictDoUpdate({
-      target: [tokenInfo.source, tokenInfo.coinId],
+      target: [tokenInfo.source, tokenInfo.identifier],
       set: { symbol: i.symbol, name: i.name, logo: i.logo ?? null, expiresAt },
     });
 }
@@ -241,7 +250,7 @@ function priceUpsert(db: ReturnType<typeof getDb>, p: TokenPrice, expiresAt: num
     .insert(tokenPrice)
     .values({
       source: p.ref.source,
-      coinId: p.ref.coinId,
+      identifier: p.ref.identifier,
       unitPrice: p.unitPrice,
       change24h: p.change24h ?? null,
       marketCapRank: p.marketCapRank ?? null,
@@ -249,7 +258,7 @@ function priceUpsert(db: ReturnType<typeof getDb>, p: TokenPrice, expiresAt: num
       expiresAt,
     })
     .onConflictDoUpdate({
-      target: [tokenPrice.source, tokenPrice.coinId],
+      target: [tokenPrice.source, tokenPrice.identifier],
       set: {
         unitPrice: p.unitPrice,
         change24h: p.change24h ?? null,

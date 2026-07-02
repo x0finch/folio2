@@ -12,17 +12,17 @@ export const customProvider = defineProvider({
     { key: "symbol", type: "public", label: "Symbol", validator: z.string().trim().min(1) },
     { key: "amount", type: "public", label: "Amount", validator: z.coerce.number() },
     { key: "unitPrice", type: "public", label: "Unit price (USD)", validator: z.coerce.number() },
-    // 可选:用户选定的 CoinGecko coinId(消歧,P7.4.3)。有则透出到 meta 供 sync 期市价重估按显式 ref 解析。
-    { key: "coinId", type: "public", label: "CoinGecko ID", validator: z.string().optional() },
+    // 可选:用户选定的 CoinGecko identifier(消歧,P7.4.3)。有则透出到 meta 供 sync 期市价重估按显式 ref 解析。
+    { key: "identifier", type: "public", label: "CoinGecko ID", validator: z.string().optional() },
     // 可选:锁定固定值(P7.4.4)。在则透出 meta.fixed → sync 期跳过市价重估、钉死 amount × unitPrice。
-    // creds 是字符串 map,沿用 coinId 的"在则为真"约定(仅锁定时存 "1")。
+    // creds 是字符串 map,沿用 identifier 的"在则为真"约定(仅锁定时存 "1")。
     { key: "fixed", type: "public", label: "Lock fixed value", validator: z.string().optional() },
   ],
 
   async fetchBalances(ctx): Promise<Balance[]> {
-    const { symbol, amount, unitPrice, coinId, fixed } = ctx.creds;
+    const { symbol, amount, unitPrice, identifier, fixed } = ctx.creds;
     const meta: Record<string, unknown> = {};
-    if (coinId) meta.coinId = coinId;
+    if (identifier) meta.identifier = identifier;
     if (fixed) meta.fixed = true;
     return [
       {

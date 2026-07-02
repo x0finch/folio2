@@ -29,7 +29,7 @@ describe("appRegistry inputs", () => {
         { key: "symbol", type: "public" },
         { key: "amount", type: "public" },
         { key: "unitPrice", type: "public" },
-        { key: "coinId", type: "public" },
+        { key: "identifier", type: "public" },
         { key: "fixed", type: "public" },
       ],
     ],

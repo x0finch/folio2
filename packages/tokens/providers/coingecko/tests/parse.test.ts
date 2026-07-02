@@ -1,4 +1,4 @@
-import type { CoinId, TokenRef } from "@folio/tokens-basic";
+import type { TokenIdentifier, TokenRef } from "@folio/tokens-basic";
 import { describe, expect, it } from "vitest";
 import {
   parseAssetPlatforms,
@@ -14,7 +14,7 @@ import marketsJson from "./fixtures/coins_markets_p1.json";
 import searchJson from "./fixtures/search.json";
 import simpleJson from "./fixtures/simple_price.json";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
 
 describe("parseAssetPlatforms", () => {
   it("maps slug + EVM chainId (both keys) → platform slug; non-EVM slug only", () => {

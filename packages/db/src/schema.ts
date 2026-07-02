@@ -104,43 +104,43 @@ export const tokenWarm = sqliteTable(
   {
     symbol: text("symbol").notNull(), // 归一(大写)key —— 由 @folio/tokens 调用方保证,store 不再自己归一
     source: text("source").notNull(),
-    coinId: text("coin_id").notNull(),
+    identifier: text("identifier").notNull(),
     marketCapRank: integer("market_cap_rank"),
     expiresAt: integer("expires_at").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.symbol, t.source, t.coinId] })],
+  (t) => [primaryKey({ columns: [t.symbol, t.source, t.identifier] })],
 );
 
-// 元信息 facet(name/symbol/logo),按 (source, coinId) 键。
+// 元信息 facet(name/symbol/logo),按 (source, identifier) 键。
 export const tokenInfo = sqliteTable(
   "token_info",
   {
     source: text("source").notNull(),
-    coinId: text("coin_id").notNull(),
+    identifier: text("identifier").notNull(),
     symbol: text("symbol").notNull(),
     name: text("name").notNull(),
     logo: text("logo"),
     expiresAt: integer("expires_at").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.source, t.coinId] })],
+  (t) => [primaryKey({ columns: [t.source, t.identifier] })],
 );
 
-// 价 facet(USD,无 vs 列),按 (source, coinId) 键。
+// 价 facet(USD,无 vs 列),按 (source, identifier) 键。
 export const tokenPrice = sqliteTable(
   "token_price",
   {
     source: text("source").notNull(),
-    coinId: text("coin_id").notNull(),
+    identifier: text("identifier").notNull(),
     unitPrice: real("unit_price").notNull(),
     change24h: real("change_24h"),
     marketCapRank: integer("market_cap_rank"),
     asOf: integer("as_of").notNull(),
     expiresAt: integer("expires_at").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.source, t.coinId] })],
+  (t) => [primaryKey({ columns: [t.source, t.identifier] })],
 );
 
-// 合约懒解析缓存,按 (source, chain, contract) 键。coin_id 为 NULL = 该 source 的否定缓存(已知缺失);
+// 合约懒解析缓存,按 (source, chain, contract) 键。identifier 为 NULL = 该 source 的否定缓存(已知缺失);
 // 无行(或过期)= 未知(去取)。chain/contract 小写归一。
 export const tokenContract = sqliteTable(
   "token_contract",
@@ -148,7 +148,7 @@ export const tokenContract = sqliteTable(
     source: text("source").notNull(),
     chain: text("chain").notNull(),
     contract: text("contract").notNull(),
-    coinId: text("coin_id"),
+    identifier: text("identifier"),
     expiresAt: integer("expires_at").notNull(),
   },
   (t) => [primaryKey({ columns: [t.source, t.chain, t.contract] })],

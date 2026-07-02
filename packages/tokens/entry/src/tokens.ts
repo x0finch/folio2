@@ -1,7 +1,7 @@
 import type {
   AssetRef,
-  CoinId,
   Resolution,
+  TokenIdentifier,
   TokenInfo,
   TokenPrice,
   TokenProvider,
@@ -34,7 +34,7 @@ export interface Tokens {
   search(query: string): Promise<TokenInfo[]>;
   // 市值 top-N(默认选币列表)。空(未预热)→ 单飞预热一次再读。
   topTokens(limit: number): Promise<TokenInfo[]>;
-  // 解析持仓身份 → 规范 ref。asset.coinId(用户显式选)由本层造 ref。
+  // 解析持仓身份 → 规范 ref。asset.identifier(用户显式选)由本层造 ref。
   resolve(asset: AssetRef, opts?: ResolveOpts): Promise<Resolution>;
   // 取单价:缓存优先 → miss 回源 → 写回缓存。
   priceOf(ref: TokenRef): Promise<TokenPrice | undefined>;
@@ -51,10 +51,10 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
   const p = provider ?? createCoinGeckoProvider({ apiKey });
   const deps = { provider: p, store: createStore(p.source), overrides: OVERRIDES };
 
-  // asset.coinId(用户显式选)→ explicit ref(用本 provider 的 source),调用方无需拼 TokenRef。
+  // asset.identifier(用户显式选)→ explicit ref(用本 provider 的 source),调用方无需拼 TokenRef。
   const withExplicit = (asset: AssetRef): AssetRef =>
-    asset.coinId && !asset.ref
-      ? { ...asset, ref: { source: p.source, coinId: asset.coinId as CoinId } }
+    asset.identifier && !asset.ref
+      ? { ...asset, ref: { source: p.source, identifier: asset.identifier as TokenIdentifier } }
       : asset;
 
   const resolve = (asset: AssetRef, opts?: ResolveOpts) =>
@@ -63,7 +63,7 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
   return {
     resolve,
 
-    search: (query) => deps.provider.searchCoins(query),
+    search: (query) => deps.provider.searchTokens(query),
 
     async topTokens(limit) {
       const top = await deps.store.listTopTokens(limit);

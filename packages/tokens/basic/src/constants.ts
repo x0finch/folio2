@@ -1,9 +1,9 @@
-import type { CoinId, TokenRef } from "./types";
+import type { TokenIdentifier, TokenRef } from "./types";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
 
 // symbol → 规范 `TokenRef` 的策展小表:majors + 已知撞名,优先于市值排名(防山寨撞名)。
-// 键须为 `normalizeSymbol` 输出(大写)。大头仍靠 (链,合约) 与显式 coinId;此表只兜 symbol 来源。
+// 键须为 `normalizeSymbol` 输出(大写)。大头仍靠 (链,合约) 与显式 identifier;此表只兜 symbol 来源。
 export const OVERRIDES: Readonly<Record<string, TokenRef>> = {
   BTC: cg("bitcoin"),
   ETH: cg("ethereum"),
@@ -30,7 +30,7 @@ export const RESOLUTION_DOMINANCE = 5; // 最佳须如此倍数地碾压次席(r
 export const DEFAULT_TOP_N = 1000;
 
 // 默认选币下拉(空输入)展示的市值 top-N 条数(P7.4.5)。
-export const TOP_COINS_LIMIT = 50;
+export const TOP_TOKENS_LIMIT = 50;
 
 // 缓存 TTL(供 store 实现 / refreshWarm 门控)。warm 承载价要新鲜、合约解析稳定、否定中等。
 // (chain 的源内映射 TTL 由各 source 自管,不在此。)

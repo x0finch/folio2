@@ -1,9 +1,9 @@
-import type { CoinId, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
+import type { TokenIdentifier, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
 import { balanceToAssetRef, toEnrichment } from "../src/lib/tokens";
 
 const meta = (o: Record<string, unknown>) => JSON.stringify(o);
-const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
 
 describe("balanceToAssetRef", () => {
   it("spot with chain + contractAddress (coinstats) → full AssetRef", () => {

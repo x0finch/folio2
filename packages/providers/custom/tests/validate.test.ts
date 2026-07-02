@@ -3,19 +3,19 @@ import { describe, expect, it } from "vitest";
 import { customProvider } from "../src";
 
 describe("customProvider inputs / validate", () => {
-  it("declares symbol/amount/unitPrice/coinId/fixed as public inputs", () => {
+  it("declares symbol/amount/unitPrice/identifier/fixed as public inputs", () => {
     expect((customProvider.inputs ?? []).map((i) => [i.key, i.type])).toEqual([
       ["symbol", "public"],
       ["amount", "public"],
       ["unitPrice", "public"],
-      ["coinId", "public"],
+      ["identifier", "public"],
       ["fixed", "public"],
     ]);
     expect(publicKeys(customProvider.inputs ?? [])).toEqual([
       "symbol",
       "amount",
       "unitPrice",
-      "coinId",
+      "identifier",
       "fixed",
     ]);
   });

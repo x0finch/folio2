@@ -41,7 +41,7 @@ import {
   listManualActivity,
 } from "../../lib/server/manual-activity";
 import { triggerSync } from "../../lib/server/sync";
-import { coinPrice } from "../../lib/server/tokens";
+import { tokenPrice } from "../../lib/server/tokens";
 
 // 可录入的链上账户类型 → 展示名(EVM 走 zerion;其余走 coinstats)。
 const ONCHAIN_TYPES = [
@@ -92,8 +92,8 @@ function Accounts() {
   const [groupName, setGroupName] = useState("");
   const [groupError, setGroupError] = useState<string | null>(null);
 
-  // manual 录入(一账户一资产)。选币为主路径(P7.4.3):默认搜索 CoinGecko 选定代币(填 symbol + coinId);
-  // 找不到再切手动模式自填 symbol(不关联代币,coinId 空)。
+  // manual 录入(一账户一资产)。选币为主路径(P7.4.3):默认搜索 CoinGecko 选定代币(填 symbol + identifier);
+  // 找不到再切手动模式自填 symbol(不关联代币,identifier 空)。
   const [label, setLabel] = useState("");
   const [mManual, setMManual] = useState(false); // false=搜索选币(默认),true=手动填 symbol
   const [mPicked, setMPicked] = useState<TokenInfo | null>(null); // 选中的代币
@@ -108,13 +108,13 @@ function Accounts() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   // 选中代币(P7.4.5):自动取当前市价预填单价(用户可改)。快速改选时靠 priceReqRef 丢弃旧结果。
-  async function onPickCoin(coin: TokenInfo | null) {
-    setMPicked(coin);
-    if (!coin) return;
+  async function onPickToken(token: TokenInfo | null) {
+    setMPicked(token);
+    if (!token) return;
     const reqId = ++priceReqRef.current;
     setMPriceBusy(true);
     try {
-      const p = await coinPrice({ data: { coinId: coin.ref.coinId } });
+      const p = await tokenPrice({ data: { identifier: token.ref.identifier } });
       if (priceReqRef.current === reqId && p?.unitPrice != null) setMUnitPrice(String(p.unitPrice));
     } catch {
       // 取价失败不阻断:用户手填单价即可
@@ -243,11 +243,11 @@ function Accounts() {
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    // 选币模式取选中代币的 symbol + coinId;手动模式取自填 symbol(不关联)。
+    // 选币模式取选中代币的 symbol + identifier;手动模式取自填 symbol(不关联)。
     const symbol = mManual ? mSymbol.trim() : (mPicked?.symbol.toUpperCase() ?? "");
-    const coinId = mManual ? undefined : mPicked?.ref.coinId;
+    const identifier = mManual ? undefined : mPicked?.ref.identifier;
     if (!symbol) {
-      setError(t("selectCoinRequired"));
+      setError(t("selectTokenRequired"));
       return;
     }
     setBusy(true);
@@ -258,7 +258,7 @@ function Accounts() {
           symbol,
           amount: mAmount,
           unitPrice: mUnitPrice,
-          ...(coinId ? { coinId } : {}),
+          ...(identifier ? { identifier } : {}),
           ...(mFixed ? { fixed: true } : {}),
         },
       });
@@ -443,12 +443,12 @@ function Accounts() {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="m-coin">{t("coin")}</Label>
+              <Label htmlFor="m-token">{t("token")}</Label>
               {mManual ? (
                 // 手动模式:自填 symbol,不关联代币。
                 <>
                   <Input
-                    id="m-coin"
+                    id="m-token"
                     required
                     autoComplete="off"
                     value={mSymbol}
@@ -471,7 +471,7 @@ function Accounts() {
                 <>
                   <TokenCombobox
                     value={mPicked}
-                    onChange={onPickCoin}
+                    onChange={onPickToken}
                     onManual={(q) => {
                       setMManual(true);
                       setMSymbol(q);

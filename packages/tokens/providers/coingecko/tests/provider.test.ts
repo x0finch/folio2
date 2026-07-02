@@ -1,4 +1,4 @@
-import { type CoinId, TokenError, type TokenRef } from "@folio/tokens-basic";
+import { TokenError, type TokenIdentifier, type TokenRef } from "@folio/tokens-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CG_BASE_FREE,
@@ -11,7 +11,7 @@ import {
 import { createCoinGeckoProvider } from "../src/provider";
 
 const USER_AGENT_HEADER = "user-agent";
-const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
 
 interface Call {
   url: URL;
@@ -158,12 +158,12 @@ describe("fetchPrices", () => {
   });
 });
 
-describe("searchCoins", () => {
+describe("searchTokens", () => {
   it("sends query and parses coins[] → TokenInfo[]", async () => {
     const { calls } = mockFetch(() => ({
       body: { coins: [{ id: "bitcoin", symbol: "BTC", name: "Bitcoin", large: "L" }] },
     }));
-    const out = await createCoinGeckoProvider().searchCoins("btc");
+    const out = await createCoinGeckoProvider().searchTokens("btc");
     expect(calls[0].url.pathname.endsWith("/search")).toBe(true);
     expect(calls[0].url.searchParams.get("query")).toBe("btc");
     expect(out).toEqual([{ ref: cg("bitcoin"), symbol: "BTC", name: "Bitcoin", logo: "L" }]);
@@ -171,7 +171,7 @@ describe("searchCoins", () => {
 
   it("blank query → [] without a request", async () => {
     const { calls } = mockFetch(() => ({ body: { coins: [] } }));
-    expect(await createCoinGeckoProvider().searchCoins("  ")).toEqual([]);
+    expect(await createCoinGeckoProvider().searchTokens("  ")).toEqual([]);
     expect(calls).toHaveLength(0);
   });
 });

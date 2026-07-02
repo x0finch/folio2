@@ -1,7 +1,7 @@
 import type { Balance } from "@folio/core";
 import type {
-  CoinId,
   TokenCandidate,
+  TokenIdentifier,
   TokenInfo,
   TokenPrice,
   TokenRef,
@@ -12,8 +12,8 @@ import { createTokens } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
 import { revalueManual } from "../src/lib/revalue";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
-const key = (r: TokenRef) => `${r.source}:${r.coinId}`;
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
+const key = (r: TokenRef) => `${r.source}:${r.identifier}`;
 
 // 假 store:warm 已就绪(warmAsOf 新鲜 → refreshWarm 跳过取数);BTC→bitcoin 候选 + 价。
 function fakeStore(): TokenStore {
@@ -44,7 +44,7 @@ function fakeStore(): TokenStore {
   };
 }
 
-// source:fetchPrices 为长尾 coinId 供价(模拟不在 warm 的币);其余 stub。
+// source:fetchPrices 为长尾 identifier 供价(模拟不在 warm 的币);其余 stub。
 const stubSource = {
   source: "coingecko" as const,
   fetchMarkets: async () => [],
@@ -52,24 +52,24 @@ const stubSource = {
   fetchPrices: async (refs: TokenRef[]) => {
     const out = new Map<string, TokenPrice>();
     for (const r of refs) {
-      if (r.coinId === ("the-open-network" as CoinId)) {
+      if (r.identifier === ("the-open-network" as TokenIdentifier)) {
         out.set(key(r), { ref: r, unitPrice: 5, asOf: 0 });
       }
     }
     return out;
   },
-  searchCoins: async () => [],
+  searchTokens: async () => [],
 };
 
 // tokens 实例:真 createTokens,注入 stub provider + fake store(避免真网络)。
 const tokens = (): Tokens => createTokens({ createStore: () => fakeStore(), provider: stubSource });
-const bal = (symbol: string, amount: number, usdValue: number, coinId?: string): Balance => ({
+const bal = (symbol: string, amount: number, usdValue: number, identifier?: string): Balance => ({
   symbol,
   amount,
   usdValue,
   source: "manual",
   kind: "manual",
-  ...(coinId ? { meta: { coinId } } : {}),
+  ...(identifier ? { meta: { identifier } } : {}),
 });
 
 describe("revalueManual", () => {
@@ -97,13 +97,13 @@ describe("revalueManual", () => {
     expect(out[0].usdValue).toBe(1);
   });
 
-  it("explicit meta.coinId overrides symbol resolution", async () => {
-    // 错的 symbol "XBT" 但显式 coinId=bitcoin → 用 bitcoin 的 store 价 65000。
+  it("explicit meta.identifier overrides symbol resolution", async () => {
+    // 错的 symbol "XBT" 但显式 identifier=bitcoin → 用 bitcoin 的 store 价 65000。
     const out = await revalueManual(tokens(), "manual", [bal("XBT", 1, 0, "bitcoin")]);
     expect(out[0].usdValue).toBe(65000);
   });
 
-  it("explicit coinId not in warm cache → source.fetchPrices supplies the price", async () => {
+  it("explicit identifier not in warm cache → source.fetchPrices supplies the price", async () => {
     const out = await revalueManual(tokens(), "manual", [bal("TONCOIN", 2, 0, "the-open-network")]);
     expect(out[0].usdValue).toBe(10); // 2 × 5(来自 source.fetchPrices)
   });

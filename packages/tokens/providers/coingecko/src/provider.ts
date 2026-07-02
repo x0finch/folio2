@@ -130,7 +130,7 @@ export function createCoinGeckoProvider(config: CoinGeckoConfig = {}): TokenProv
       return out.slice(0, opts.topN);
     },
 
-    async searchCoins(query) {
+    async searchTokens(query) {
       const q = query.trim();
       if (!q) return [];
       return parseSearch(await request(http, EP_SEARCH, { query: q }));
@@ -139,7 +139,7 @@ export function createCoinGeckoProvider(config: CoinGeckoConfig = {}): TokenProv
     async fetchPrices(refs) {
       const ids = refs
         .filter((r) => r.source === "coingecko")
-        .map((r) => r.coinId)
+        .map((r) => r.identifier)
         .join(",");
       if (!ids) return new Map();
       const json = await request(http, EP_SIMPLE_PRICE, {
