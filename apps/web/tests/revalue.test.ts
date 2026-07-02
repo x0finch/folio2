@@ -1,4 +1,4 @@
-import type { Balance } from "@folio/core";
+import type { Balance } from "@folio/balances";
 import type {
   TokenCandidate,
   TokenIdentifier,

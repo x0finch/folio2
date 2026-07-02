@@ -1,4 +1,4 @@
-import { appRegistry } from "@folio/sync";
+import { registry } from "@folio/balances";
 import { createServerFn } from "@tanstack/react-start";
 import { requireAuth } from "../require-auth";
 
@@ -16,7 +16,7 @@ export const getCredentialSpecs = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(() => {
     const specs: Record<string, InputSpec[]> = {};
-    for (const [type, provider] of Object.entries(appRegistry)) {
+    for (const [type, provider] of Object.entries(registry)) {
       if (provider)
         specs[type] = (provider.inputs ?? []).map((i) => ({
           key: i.key,

@@ -15,10 +15,10 @@
     "db:migrate:remote": "wrangler d1 migrations apply folio --remote"
   },
   "dependencies": {
-    "@folio/core": "workspace:*",
     "@folio/tokens": "workspace:*",
     "better-auth": "^1.6.21",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "@folio/balances": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.20",

@@ -1,10 +1,15 @@
-import { type BalanceProvider, buildRegistry, generateSecret, ProviderError } from "@folio/core";
+import {
+  registry as appRegistry,
+  type BalanceProvider,
+  buildRegistry,
+  generateSecret,
+  ProviderError,
+} from "@folio/balances";
+import { customProvider } from "@folio/balances-provider-custom";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
-import { customProvider } from "@folio/provider-custom";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { runAccountSync, type SyncDeps, type SyncLogger, syncUser } from "../src";
-import { appRegistry } from "../src/registry";
 
 // 捕获式 logger:记录 (level, msg, props),供断言级别 + 安全字段 + 红线(无密钥)。
 function capturingLogger() {

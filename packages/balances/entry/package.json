@@ -1,0 +1,27 @@
+{
+  "name": "@folio/balances",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@folio/balances-basic": "workspace:*",
+    "@folio/balances-provider-binance": "workspace:*",
+    "@folio/balances-provider-coinstats": "workspace:*",
+    "@folio/balances-provider-custom": "workspace:*",
+    "@folio/balances-provider-hyperliquid": "workspace:*",
+    "@folio/balances-provider-okx": "workspace:*",
+    "@folio/balances-provider-zerion": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.5"
+  }
+}

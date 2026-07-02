@@ -12,19 +12,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/core": "workspace:*",
     "@folio/db": "workspace:*",
-    "@folio/provider-binance": "workspace:*",
-    "@folio/provider-coinstats": "workspace:*",
-    "@folio/provider-custom": "workspace:*",
-    "@folio/provider-hyperliquid": "workspace:*",
-    "@folio/provider-okx": "workspace:*",
-    "@folio/provider-zerion": "workspace:*"
+    "@folio/balances": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260626.1",
     "typescript": "^6.0.2",
     "vitest": "^4.1.5",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@folio/balances-provider-custom": "workspace:*"
   }
 }

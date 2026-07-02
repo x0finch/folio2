@@ -15,4 +15,3 @@ export {
   syncAllUsers,
   syncUser,
 } from "./orchestrator";
-export { appProviders, appRegistry } from "./registry";

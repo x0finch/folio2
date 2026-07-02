@@ -1,6 +1,7 @@
 import {
   type Account,
   type AccountType,
+  registry as appRegistry,
   type Balance,
   type FetchContext,
   getProvider,
@@ -9,9 +10,8 @@ import {
   ProviderError,
   type ProviderRegistry,
   validateCredentials,
-} from "@folio/core";
+} from "@folio/balances";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
-import { appRegistry } from "./registry";
 
 // 退避重试参数(原则 #8:不硬编码散落)。
 const RETRY_MAX_ATTEMPTS = 3; // 总尝试次数(1 + 2 重试)

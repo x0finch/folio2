@@ -10,7 +10,7 @@ import { SEARCH_LIMIT, VS_USD } from "./constants";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
 
-// Retry-After:数字秒 / HTTP-date → ms(平行 @folio/core 的同名 helper;本包不依赖 core)。
+// Retry-After:数字秒 / HTTP-date → ms(平行 @folio/balances-basic 的同名 helper;本包不依赖 core)。
 // `now` 可注入以便测 HTTP-date 分支。
 export function parseRetryAfter(header: string | null, now = Date.now()): number | undefined {
   if (!header) return undefined;

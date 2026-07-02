@@ -1,5 +1,11 @@
-import { type AccountType, getProvider, publicKeys, secretKeys, semiKeys } from "@folio/core";
-import { appRegistry } from "@folio/sync";
+import {
+  type AccountType,
+  getProvider,
+  publicKeys,
+  registry,
+  secretKeys,
+  semiKeys,
+} from "@folio/balances";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/auth";
@@ -26,7 +32,7 @@ export const Route = createFileRoute("/api/import")({
 
         const deps: ImportDeps = {
           categorize: (type) => {
-            const inputs = getProvider(appRegistry, type as AccountType).inputs ?? [];
+            const inputs = getProvider(registry, type as AccountType).inputs ?? [];
             return {
               publicKeys: publicKeys(inputs),
               semiKeys: semiKeys(inputs),

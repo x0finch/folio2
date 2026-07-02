@@ -1,4 +1,4 @@
-import { type BalanceKind, SEMI_PREFIX } from "@folio/core";
+import { type BalanceKind, SEMI_PREFIX } from "@folio/balances";
 import { EXPORT_VERSION } from "./export";
 
 // 纯导入逻辑(无 server-only import → 可单测,DB 经 deps 注入)。
@@ -9,7 +9,7 @@ import { EXPORT_VERSION } from "./export";
 
 export class ImportError extends Error {}
 
-// 按暴露级别分类某 account type 的输入字段(由 route 用 appRegistry 派生注入)。
+// 按暴露级别分类某 account type 的输入字段(由 route 用 registry 派生注入)。
 export interface InputKinds {
   publicKeys: string[];
   semiKeys: string[];

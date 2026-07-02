@@ -1,9 +1,9 @@
-import type { DefiMeta } from "@folio/core";
+import type { DefiMeta } from "@folio/balances";
 import { type PerpView, toPerpView } from "./perp";
 
 // 纯逻辑(无 server-only import → 可单测)。把一个账户的余额行按 kind 拆成展示分区:
 // 现货/手动 → 一张表;DeFi → 按 protocol 分组;永续 → 复用 toPerpView。
-// 卡片净值仍 = 账户 totalUsd(净值不变量,见 @folio/core)。这里只管"怎么分区展示"。
+// 卡片净值仍 = 账户 totalUsd(净值不变量,见 @folio/balances)。这里只管"怎么分区展示"。
 
 export interface OverviewBalance {
   id: string;

@@ -1,4 +1,4 @@
-import type { AccountType, Balance } from "@folio/core";
+import type { AccountType, Balance } from "@folio/balances";
 import type { Tokens } from "@folio/tokens";
 
 // 同步时重估(P7.4.2/P7.4.3):仅 manual 用市场价改 usdValue,其余 kind 原样(富化不重算)。

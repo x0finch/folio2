@@ -1,4 +1,4 @@
-import type { PerpEquityMeta, PerpMeta, PerpPositionMeta } from "@folio/core";
+import type { PerpEquityMeta, PerpMeta, PerpPositionMeta } from "@folio/balances";
 
 // 纯逻辑(无 server-only import → 可单测,route 保持纯展示)。
 // 把一个永续账户的余额行拆成展示用视图:equity(账户净值/可提/保证金)+ positions[]。

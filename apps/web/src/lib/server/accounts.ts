@@ -4,12 +4,13 @@ import {
   getProvider,
   isComplete,
   type ProviderInput,
+  registry,
   safeView,
   sealCreds,
   validateCredentials,
-} from "@folio/core";
+} from "@folio/balances";
 import type { AccountSafe } from "@folio/db";
-import { appRegistry, scopeGlobalKeys } from "@folio/sync";
+import { scopeGlobalKeys } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -19,7 +20,7 @@ import { db } from "./db";
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 type/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);
 
-// 原始字符串输入 → 存库 map 的 JSON(secret 字段加密、public/semi 明文,见 @folio/core sealCreds)。
+// 原始字符串输入 → 存库 map 的 JSON(secret 字段加密、public/semi 明文,见 @folio/balances sealCreds)。
 // 传【原始字符串】(已过 validateCredentials 校验闸);不传其 coerce 输出,保持 creds 为字符串 map。
 function sealJson(
   inputs: readonly ProviderInput[],
@@ -42,7 +43,7 @@ export const listMyAccounts = createServerFn({ method: "GET" })
     ]);
     const rawById = new Map(rawList.map((r) => [r.id, r.creds]));
     return accounts.map((a) => {
-      const inputs = getProvider(appRegistry, a.type).inputs ?? [];
+      const inputs = getProvider(registry, a.type).inputs ?? [];
       const raw = rawById.get(a.id);
       const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
       return {
@@ -54,7 +55,7 @@ export const listMyAccounts = createServerFn({ method: "GET" })
   });
 
 // 凭据字段的【值校验】统一走 provider.inputs 的 validator(EVM 正则 / 非空 / passphrase 必填等
-// 全由声明派生,见 @folio/core validateCredentials)。外层 zod 只管 wire 形状(type 白名单 + label
+// 全由声明派生,见 @folio/balances validateCredentials)。外层 zod 只管 wire 形状(type 白名单 + label
 // + 字段存在),不再手写 per-type 的地址正则 / passphrase refine。
 
 // 一个 manual 账户 = 一个手记资产:symbol/amount/unitPrice 三个 public 输入,走 creds(明文,见 P6.6.2/P7.4.1)。
@@ -71,7 +72,7 @@ export const createManualAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(ManualInput)
   .handler(async ({ data, context }) => {
-    const inputs = getProvider(appRegistry, "manual").inputs ?? [];
+    const inputs = getProvider(registry, "manual").inputs ?? [];
     const raw: Record<string, string> = {
       symbol: data.symbol,
       amount: data.amount,
@@ -109,7 +110,7 @@ async function createAddressAccount(
   label: string,
   address: string,
 ): Promise<AccountSafe> {
-  const provider = getProvider(appRegistry, type);
+  const provider = getProvider(registry, type);
   const inputs = provider.inputs ?? [];
   const raw = { identifier: address };
   const creds = await validateCredentials(inputs, raw); // 校验 + 给 ctx 做 liveness
@@ -168,7 +169,7 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(ExchangeInput)
   .handler(async ({ data, context }) => {
-    const provider = getProvider(appRegistry, data.type);
+    const provider = getProvider(registry, data.type);
     const inputs = provider.inputs ?? [];
     // passphrase 可选(仅 okx):缺省则不放进 values,由 provider.inputs 的 validator 判定是否必填。
     const values: Record<string, string> = { apiKey: data.apiKey, secret: data.secret };
@@ -203,7 +204,7 @@ export const provideCredentials = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const account = await db.getAccountById(context.userId, data.accountId);
     if (!account) throw new Error("account not found");
-    const provider = getProvider(appRegistry, account.type);
+    const provider = getProvider(registry, account.type);
     const inputs = provider.inputs ?? [];
     const creds = await validateCredentials(inputs, data.creds);
     const ctx: FetchContext = {

@@ -1,4 +1,4 @@
-import type { AccountType, BalanceKind } from "@folio/core";
+import type { AccountType, BalanceKind } from "@folio/balances";
 import {
   and,
   asc,

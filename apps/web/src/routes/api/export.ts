@@ -1,6 +1,5 @@
-import { getProvider, safeView } from "@folio/core";
+import { getProvider, registry, safeView } from "@folio/balances";
 import type { SnapshotBalance } from "@folio/db";
-import { appRegistry } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/auth";
@@ -43,7 +42,7 @@ export const Route = createFileRoute("/api/export")({
 
               const accounts = await db.listAccountsByUser(userId);
               for (const a of accounts) {
-                const inputs = getProvider(appRegistry, a.type).inputs ?? [];
+                const inputs = getProvider(registry, a.type).inputs ?? [];
                 // safeView 直接从存库 map 投影(无需解密):public 原样、semi 打码、secret 丢弃。
                 const raw = await db.getRawCreds(userId, a.id);
                 const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
