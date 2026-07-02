@@ -1,8 +1,9 @@
-import type { AccountType } from "@folio/balances";
+import { env } from "cloudflare:workers";
 import type { AccountSafe } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { isComplete, safeView, sealCreds } from "../creds";
 import { requireAuth } from "../require-auth";
 import { balances } from "./balances";
 import { db } from "./db";
@@ -10,11 +11,14 @@ import { db } from "./db";
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 type/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);
 
-// 凭据的校验/封装/活性校验/安全投影全在 balances 门面内(prepareCredentials/safeCredentials/needsCredentials);
-// 此层只表达意图 —— 不碰 provider.inputs / sealCreds / safeView / validateCredentials / FetchContext / 全局 key。
+// balances 只负责校验/探活(validateCredentials)与字段规格(credentialSpecs);加密/脱敏/补录判定走业务层
+// creds.ts(seal/safeView/isComplete),按字段 type 驱动。SECRETS_KEY 只在本层(app)见,不进 balances。
+const raw2sealed = async (
+  type: Parameters<typeof balances.validateCredentials>[0]["type"],
+  values: Record<string, string>,
+) =>
+  JSON.stringify(await sealCreds(balances.credentialSpecs()[type] ?? [], values, env.SECRETS_KEY));
 
-// 直接用 createServerFn(...).middleware([requireAuth]):Start 编译器按调用点静态识别 createServerFn 才会在
-// 客户端构建剥离 handler 及其 server-only import;包一层 helper 会让识别失效。userId 取自守卫注入的 context。
 // 富化:把每账户的 raw creds 投影成 needsCredentials + credsSafe(public 原样、semi 打码、secret 丢弃);
 // raw creds(含 secret 密文)绝不出网,只出投影。
 export const listMyAccounts = createServerFn({ method: "GET" })
@@ -25,13 +29,15 @@ export const listMyAccounts = createServerFn({ method: "GET" })
       db.listRawCredsByUser(context.userId),
     ]);
     const rawById = new Map(rawList.map((r) => [r.id, r.creds]));
+    const specsByType = balances.credentialSpecs();
     return accounts.map((a) => {
       const raw = rawById.get(a.id);
       const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
+      const specs = specsByType[a.type] ?? [];
       return {
         ...a,
-        needsCredentials: balances.needsCredentials(a.type, stored),
-        credsSafe: balances.safeCredentials(a.type, stored),
+        needsCredentials: !isComplete(specs, stored),
+        credsSafe: safeView(specs, stored),
       };
     });
   });
@@ -57,11 +63,11 @@ export const createManualAccount = createServerFn({ method: "POST" })
       ...(data.identifier ? { identifier: data.identifier } : {}),
       ...(data.fixed ? { fixed: "1" } : {}),
     };
+    await balances.validateCredentials({ type: "manual" }, raw); // 形状校验闸(manual 无需探活)
     const account = await db.createAccount(context.userId, {
       type: "manual",
       label: data.label,
-      // 校验 + 封装(manual 无需活性校验);不合规抛。
-      creds: await balances.prepareCredentials({ type: "manual", label: data.label }, raw),
+      creds: await raw2sealed("manual", raw),
     });
     // 初始 set:账本基线 = 创建时数量(与 creds.amount 一致)。
     await db.recordManualActivity(context.userId, account.id, {
@@ -73,20 +79,21 @@ export const createManualAccount = createServerFn({ method: "POST" })
     return account;
   });
 
-// 地址类账户(链上 + perp):地址→identifier(public)。prepareCredentials({verify:true}) 内部按 usesGlobalKeys
+// 地址类账户(链上 + perp):地址→identifier(public)。validateCredentials({liveness}) 内部按 usesGlobalKeys
 // 收窄全局 key + provider.validate,活性失败即抛(地址无效/不可达或服务端缺 key),通过才封装。
 async function createAddressAccount(
   userId: string,
-  type: AccountType,
+  type: Parameters<typeof balances.validateCredentials>[0]["type"],
   label: string,
   address: string,
 ): Promise<AccountSafe> {
-  const creds = await balances.prepareCredentials(
-    { type, label, userId },
-    { identifier: address },
-    { verify: true },
-  );
-  const account = await db.createAccount(userId, { type, label, creds });
+  const raw = { identifier: address };
+  await balances.validateCredentials({ type, label, userId }, raw, { liveness: true });
+  const account = await db.createAccount(userId, {
+    type,
+    label,
+    creds: await raw2sealed(type, raw),
+  });
   log.info("account created", { type, accountId: account.id });
   return account;
 }
@@ -116,7 +123,7 @@ export const createPerpAccount = createServerFn({ method: "POST" })
   );
 
 // CEX 账户录入:apiKey(semi,明文)+ secret/passphrase(secret,加密)按 type 落库。
-// 字段值校验(非空、okx passphrase 必填)与活性校验都在 balances 门面内。
+// 字段值校验(非空、okx passphrase 必填)与活性校验都在 validateCredentials 内。
 const ExchangeInput = z.object({
   type: z.enum(["exchange_binance", "exchange_okx"]),
   label: z.string().trim().min(1, "label is required"),
@@ -131,15 +138,15 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
     // passphrase 可选(仅 okx):缺省则不放进 values,由 provider.inputs 的 validator 判定是否必填。
     const values: Record<string, string> = { apiKey: data.apiKey, secret: data.secret };
     if (data.passphrase !== undefined) values.passphrase = data.passphrase;
-    const creds = await balances.prepareCredentials(
+    await balances.validateCredentials(
       { type: data.type, label: data.label, userId: context.userId },
       values,
-      { verify: true },
+      { liveness: true },
     );
     const account = await db.createAccount(context.userId, {
       type: data.type,
       label: data.label,
-      creds,
+      creds: await raw2sealed(data.type, values),
     });
     log.info("exchange account created", { type: data.type, accountId: account.id });
     return account;
@@ -156,12 +163,16 @@ export const provideCredentials = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const account = await db.getAccountById(context.userId, data.accountId);
     if (!account) throw new Error("account not found");
-    const creds = await balances.prepareCredentials(
+    await balances.validateCredentials(
       { type: account.type, label: account.label, userId: context.userId, id: account.id },
       data.creds,
-      { verify: true },
+      { liveness: true },
     );
-    await db.setAccountCredentials(context.userId, account.id, creds);
+    await db.setAccountCredentials(
+      context.userId,
+      account.id,
+      await raw2sealed(account.type, data.creds),
+    );
     log.info("credentials provided", { type: account.type, accountId: account.id });
     return { ok: true as const };
   });

@@ -8,7 +8,6 @@ export const balances: Balances = new Proxy({} as Balances, {
   get: (_target, prop: string) =>
     (
       createBalances({
-        secretsKey: env.SECRETS_KEY,
         globalKeys: {
           ZERION_API_KEY: env.ZERION_API_KEY,
           COINSTATS_API_KEY: env.COINSTATS_API_KEY,

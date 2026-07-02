@@ -1,30 +1,32 @@
+import { generateSecret, type InputSpec } from "@folio/balances";
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import { isComplete, openCreds, SEMI_PREFIX, safeView, sealCreds } from "../src/creds";
-import { generateSecret } from "../src/crypto";
-import type { ProviderInput } from "../src/provider";
+import {
+  categorizeFields,
+  isComplete,
+  openCreds,
+  SEMI_PREFIX,
+  safeView,
+  sealCreds,
+} from "../src/lib/creds";
 
 const key = generateSecret();
 
-const okx: ProviderInput[] = [
-  { key: "apiKey", type: "semi", label: "API Key", validator: z.string().min(1) },
-  { key: "secret", type: "secret", label: "API Secret", validator: z.string().min(1) },
-  { key: "passphrase", type: "secret", label: "Passphrase", validator: z.string().min(1) },
+// 字段规格(= balances.credentialSpecs() 的形状:只 key+type+label,无 validator)。
+const okx: InputSpec[] = [
+  { key: "apiKey", type: "semi", label: "API Key" },
+  { key: "secret", type: "secret", label: "API Secret" },
+  { key: "passphrase", type: "secret", label: "Passphrase" },
 ];
-const onchain: ProviderInput[] = [
-  { key: "identifier", type: "public", label: "EVM Address", validator: z.string().min(1) },
-];
+const onchain: InputSpec[] = [{ key: "identifier", type: "public", label: "EVM Address" }];
 
 describe("sealCreds / openCreds", () => {
   it("encrypts only secret fields; public/semi stay plaintext; round-trips", async () => {
     const values = { apiKey: "KEY123", secret: "SIGN", passphrase: "PASS" };
     const sealed = await sealCreds(okx, values, key);
-    // semi(apiKey)明文;secret/passphrase 密文(≠ 原值)。
-    expect(sealed.apiKey).toBe("KEY123");
-    expect(sealed.secret).not.toBe("SIGN");
+    expect(sealed.apiKey).toBe("KEY123"); // semi 明文
+    expect(sealed.secret).not.toBe("SIGN"); // secret 密文
     expect(sealed.passphrase).not.toBe("PASS");
-    // 往返还原。
-    expect(await openCreds(okx, sealed, key)).toEqual(values);
+    expect(await openCreds(okx, sealed, key)).toEqual(values); // 往返还原
   });
 
   it("public field stays plaintext", async () => {
@@ -61,5 +63,16 @@ describe("isComplete (needs-credentials)", () => {
   it("false when a semi_ placeholder or a secret field is missing (imported)", () => {
     expect(isComplete(okx, { [`${SEMI_PREFIX}apiKey`]: "ABCD…5678" })).toBe(false); // 占位、无真值
     expect(isComplete(okx, { apiKey: "K", secret: "S" })).toBe(false); // 缺 passphrase
+  });
+});
+
+describe("categorizeFields", () => {
+  it("buckets keys by exposure", () => {
+    expect(categorizeFields(okx)).toEqual({
+      public: [],
+      semi: ["apiKey"],
+      secret: ["secret", "passphrase"],
+    });
+    expect(categorizeFields(onchain)).toEqual({ public: ["identifier"], semi: [], secret: [] });
   });
 });

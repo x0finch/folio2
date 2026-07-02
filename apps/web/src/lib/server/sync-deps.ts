@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import type { SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
+import { isComplete, openCreds } from "../creds";
 import { revalueManual } from "../revalue";
 import { balances } from "./balances";
 import { db } from "./db";
@@ -28,11 +29,18 @@ export function buildSyncDeps(): SyncDeps {
     listAccounts: (userId) => db.listAccountsByUser(userId),
     getRawCreds: (userId, accountId) => db.getRawCreds(userId, accountId),
     writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
-    // 取余额:解密/校验/ctx/provider 调用/全局 key 收窄全在 balances 门面内(secretsKey/globalKeys 由其绑定)。
-    fetchBalances: (account, stored) => balances.fetchBalances(account, stored),
+    // 取余额:缺凭据判定 + 解密(业务层 creds,靠 credentialSpecs 的 type 驱动)→ balances.fetchBalances(明文)。
+    // 收窄全局 key / 跑 validator / 调 provider 在 balances 内;SECRETS_KEY 只在本层(app)见。
+    fetchBalances: async (account, stored) => {
+      const specs = balances.credentialSpecs()[account.type] ?? [];
+      if (!isComplete(specs, stored)) return { status: "needs-credentials" };
+      const plain = await openCreds(specs, stored, env.SECRETS_KEY);
+      const { balances: rows, totalUsd } = await balances.fetchBalances(account, plain);
+      return { status: "ok", balances: rows, totalUsd };
+    },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
     // 写快照前重估(P7.4.2):仅 manual 用市场价改 usdValue(@folio/sync 不依赖 token 层,逻辑注入在此)。
-    revalue: (type, balances) => revalueManual(tokens, type, balances),
+    revalue: (type, rows) => revalueManual(tokens, type, rows),
   };
 }

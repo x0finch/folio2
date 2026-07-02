@@ -3,6 +3,7 @@ import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
+import { safeView } from "@/lib/creds";
 import {
   accountRecord,
   groupRecord,
@@ -40,12 +41,13 @@ export const Route = createFileRoute("/api/export")({
             try {
               write(metaRecord(Date.now())); // 首行:版本号等
 
+              const specsByType = balances.credentialSpecs();
               const accounts = await db.listAccountsByUser(userId);
               for (const a of accounts) {
                 // 安全投影(无需解密):public 原样、semi 打码、secret 丢弃 —— 绝不导出完整密钥。
                 const raw = await db.getRawCreds(userId, a.id);
                 const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
-                write(accountRecord(a, balances.safeCredentials(a.type, stored)));
+                write(accountRecord(a, safeView(specsByType[a.type] ?? [], stored)));
               }
 
               for (const g of await db.listGroupsByUser(userId)) write(groupRecord(g));

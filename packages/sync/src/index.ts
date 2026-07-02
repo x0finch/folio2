@@ -3,6 +3,7 @@
 
 export type {
   AccountSyncResult,
+  FetchOutcome,
   SweepResult,
   SyncDeps,
   SyncLogger,

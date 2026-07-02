@@ -1,7 +1,7 @@
-import { type Balance, type FetchOutcome, ProviderError } from "@folio/balances";
+import { type Balance, ProviderError } from "@folio/balances";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { describe, expect, it } from "vitest";
-import { type SyncDeps, type SyncLogger, syncUser } from "../src";
+import { type FetchOutcome, type SyncDeps, type SyncLogger, syncUser } from "../src";
 
 // 编排层测试:provider 机制(解密/校验/取数/全局 key 收窄)已内化进注入的 fetchBalances,
 // 这里只测 sync 自己的编排 —— 重试 / 跳过(needs-credentials)/ 重估 / 失败隔离 / 日志 / 写快照。

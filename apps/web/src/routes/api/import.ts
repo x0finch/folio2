@@ -3,6 +3,7 @@ import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
+import { categorizeFields } from "@/lib/creds";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "@/lib/import";
 import { balances } from "@/lib/server/balances";
 import { db } from "@/lib/server/db";
@@ -27,13 +28,8 @@ export const Route = createFileRoute("/api/import")({
         const deps: ImportDeps = {
           categorize: (type) => {
             // 从公开字段规格按暴露级别分桶(import 重建 creds 用);不碰 provider 内部。
-            const specs = balances.credentialSpecs()[type as AccountType] ?? [];
-            const keysOf = (t: string) => specs.filter((s) => s.type === t).map((s) => s.key);
-            return {
-              publicKeys: keysOf("public"),
-              semiKeys: keysOf("semi"),
-              secretKeys: keysOf("secret"),
-            };
+            const f = categorizeFields(balances.credentialSpecs()[type as AccountType] ?? []);
+            return { publicKeys: f.public, semiKeys: f.semi, secretKeys: f.secret };
           },
           createAccount: (input) =>
             db.createAccount(userId, { ...input, type: input.type as AccountType }),

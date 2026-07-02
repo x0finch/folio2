@@ -1,11 +1,11 @@
-import {
-  type Account,
-  type AccountType,
-  type Balance,
-  type FetchOutcome,
-  ProviderError,
-} from "@folio/balances";
+import { type Account, type AccountType, type Balance, ProviderError } from "@folio/balances";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
+
+// 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
+// 由 app 注入的 fetchBalances 产出(内部先判 isComplete 再解密 + 调 balances.fetchBalances)。
+export type FetchOutcome =
+  | { status: "ok"; balances: Balance[]; totalUsd: number }
+  | { status: "needs-credentials" };
 
 // 退避重试参数(原则 #8:不硬编码散落)。
 const RETRY_MAX_ATTEMPTS = 3; // 总尝试次数(1 + 2 重试)

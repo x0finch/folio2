@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createBalances } from "../src";
 
 // 锁定各 type 的 inputs(key+type;录入/补录表单、导出剥密钥都依赖它)。经门面 credentialSpecs()(隐藏 registry)。
-const specs = createBalances({ secretsKey: "k", globalKeys: {} }).credentialSpecs();
+const specs = createBalances({ globalKeys: {} }).credentialSpecs();
 
 describe("balances.credentialSpecs()", () => {
   const cases: Array<[AccountType, { key: string; type: string }[]]> = [
