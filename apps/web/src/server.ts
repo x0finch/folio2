@@ -10,11 +10,23 @@ import { buildSyncDeps, warmTokensForUser } from "./lib/server/sync";
 // wrangler.jsonc 的 main 指向本文件(取代默认的 @tanstack/react-start/server-entry)。
 // 两个入口都先 configureLogging()(幂等)再处理 → LogTape sink/上下文就绪。
 const cronLog = getLogger(["folio", "cron"]);
+const webLog = getLogger(["folio", "web"]);
 
 const serverEntry = createServerEntry({
   fetch: async (request) => {
     await configureLogging();
-    return handler.fetch(request);
+    try {
+      return await handler.fetch(request);
+    } catch (err) {
+      // 顶层兜底:SSR/loader 等非 server-fn 路径抛错不过 requireAuth,不打就无处可见。
+      // 只记 pathname(不带 query,守 P6.7)。
+      webLog.error("fetch handler threw", {
+        path: new URL(request.url).pathname,
+        error: err instanceof Error ? err.message : String(err),
+        code: (err as { code?: string })?.code,
+      });
+      throw err;
+    }
   },
 });
 
@@ -27,18 +39,28 @@ export default {
     ctx.waitUntil(
       (async () => {
         await configureLogging();
-        const userIds = await listUserIdsWithAccounts(env);
-        cronLog.info("cron sweep start", { cron: controller.cron, users: userIds.length });
-        const result = await syncAllUsers(buildSyncDeps(env), userIds);
-        cronLog.info("cron sweep done", {
-          cron: controller.cron,
-          users: result.users,
-          ok: result.ok,
-          failed: result.failed,
-          skipped: result.skipped,
-        });
-        // sweep 后预热每用户代币缓存(best-effort),供次日总览 cache-only 富化。
-        for (const userId of userIds) await warmTokensForUser(env, userId);
+        try {
+          const userIds = await listUserIdsWithAccounts(env);
+          cronLog.info("cron sweep start", { cron: controller.cron, users: userIds.length });
+          const result = await syncAllUsers(buildSyncDeps(env), userIds);
+          cronLog.info("cron sweep done", {
+            cron: controller.cron,
+            users: result.users,
+            ok: result.ok,
+            failed: result.failed,
+            skipped: result.skipped,
+          });
+          // sweep 后预热每用户代币缓存(best-effort),供次日总览 cache-only 富化。
+          for (const userId of userIds) await warmTokensForUser(env, userId);
+        } catch (err) {
+          // waitUntil 里的抛错会变成静默的 unhandled rejection —— 集中打日志再上抛,cron 失败才可见。
+          cronLog.error("cron sweep threw", {
+            cron: controller.cron,
+            error: err instanceof Error ? err.message : String(err),
+            code: (err as { code?: string })?.code,
+          });
+          throw err;
+        }
       })(),
     );
   },

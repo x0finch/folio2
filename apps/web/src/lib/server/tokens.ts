@@ -25,18 +25,10 @@ export const searchTokens = createServerFn({ method: "GET" })
     const q = data.query.trim();
     tokenLog.debug("searchTokens: enter", { query: q, hasKey: !!env.COINGECKO_API_KEY });
     if (!q) return [];
-    try {
-      const out = await buildTokens(env).search(q);
-      tokenLog.debug("searchTokens: ok", { query: q, count: out.length });
-      return out;
-    } catch (err) {
-      tokenLog.error("searchTokens: failed", {
-        query: q,
-        error: err instanceof Error ? err.message : String(err),
-        code: (err as { code?: string })?.code,
-      });
-      throw err;
-    }
+    // 抛错兜底在 requireAuth 中间件集中打日志(带 userId),此处只表达业务。
+    const out = await buildTokens(env).search(q);
+    tokenLog.debug("searchTokens: ok", { query: q, count: out.length });
+    return out;
   });
 
 // 默认选币下拉(P7.4.5,空输入):市值 top-N;冷缓存兜底(单飞预热)由 tokens.topTokens 内部处理。
@@ -57,23 +49,14 @@ export const tokenPrice = createServerFn({ method: "GET" })
   .validator(z.object({ identifier: z.string().min(1) }))
   .handler(async ({ data }) => {
     tokenLog.debug("tokenPrice: enter", { identifier: data.identifier });
-    try {
-      const tokens = buildTokens(env);
-      // symbol 不参与:显式 identifier 直接升格为 ref(resolve 内部短路)。
-      const res = await tokens.resolve({ symbol: "", identifier: data.identifier });
-      const hit = res.ref ? await tokens.priceOf(res.ref) : undefined;
-      tokenLog.debug("tokenPrice: ok", { identifier: data.identifier, found: !!hit });
-      return hit
-        ? { unitPrice: hit.unitPrice, change24h: hit.change24h ?? null, asOf: hit.asOf }
-        : null;
-    } catch (err) {
-      tokenLog.error("tokenPrice: failed", {
-        identifier: data.identifier,
-        error: err instanceof Error ? err.message : String(err),
-        code: (err as { code?: string })?.code,
-      });
-      throw err;
-    }
+    const tokens = buildTokens(env);
+    // symbol 不参与:显式 identifier 直接升格为 ref(resolve 内部短路)。
+    const res = await tokens.resolve({ symbol: "", identifier: data.identifier });
+    const hit = res.ref ? await tokens.priceOf(res.ref) : undefined;
+    tokenLog.debug("tokenPrice: ok", { identifier: data.identifier, found: !!hit });
+    return hit
+      ? { unitPrice: hit.unitPrice, change24h: hit.change24h ?? null, asOf: hit.asOf }
+      : null;
   });
 
 // 展示富化(cache-only,零网络):tokens.enrich 解析 + 批量取 info/price;按行挂富化字段(缺则原样降级)。
