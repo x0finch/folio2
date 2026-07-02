@@ -35,7 +35,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 
 ## Toolchain notes (current best practices — supersede older wording in arch-design.md)
 - **`wrangler.jsonc`** (not `wrangler.toml`) — Cloudflare's recommended format; some features JSON-only. Wrangler v4.
-- **Vitest 4** with root `test.projects` in `vitest.config.ts` (`vitest.workspace.ts` is removed in v4).
+- **Vitest 4** with root `test.projects` in `vitest.config.ts` (`vitest.workspace.ts` is removed in v4). Glob `test.projects` at each package's **config file** (`packages/**/vitest.config.ts`), not at directories — a dir glob (`packages/*`, `packages/tokens/*`) also matches container-only folders (`packages/tokens`, `packages/providers`), which get picked up as unnamed, colliding projects and fail the whole run.
 - **Cloudflare targeting via `@cloudflare/vite-plugin`** (not the legacy Nitro `cloudflare-module` preset).
 - Package name is **`@tanstack/react-start`** (the old `@tanstack/start` is gone).
 - TypeScript: `module: preserve` + `moduleResolution: bundler` (now the modern defaults) enable extension-less relative imports.
