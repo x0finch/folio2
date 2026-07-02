@@ -1,6 +1,7 @@
+import type { AccountType, Balance, BalanceProvider } from "@folio/balances-basic";
 import { describe, expect, it } from "vitest";
-import type { AccountType, Balance } from "../src";
-import { type BalanceProvider, buildRegistry, getProvider } from "../src";
+// 白盒:registry 机制是 @folio/balances 内部件(不对外导出),测试直接引内部模块。
+import { buildRegistry, getProvider } from "../src/registry";
 
 function fakeProvider(type: AccountType): BalanceProvider {
   return {

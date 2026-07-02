@@ -14,11 +14,13 @@ function badType(id: string, userId: string): AccountSafe {
 function makeDeps(accountsByUser: Record<string, AccountSafe[]>): SyncDeps {
   return {
     listAccounts: async (userId) => accountsByUser[userId] ?? [],
-    // manual 单资产 creds(symbol/amount/usdValue)→ isComplete 通过、validateCredentials 通过。
-    getRawCreds: async () => JSON.stringify({ symbol: "BTC", amount: 1, unitPrice: 100 }),
+    getRawCreds: async () => "{}",
     writeSnapshot: async (_u, accountId) => `snap-${accountId}`,
-    secretsKey: "k",
-    globalKeys: {},
+    // manual → ok;未知 type(无 provider)→ 抛(模拟 balances.fetchBalances 内 getProvider 兜底报错)。
+    fetchBalances: async (account) => {
+      if (account.type === "manual") return { status: "ok", balances: [], totalUsd: 0 };
+      throw new Error(`No provider registered for account type: ${account.type}`);
+    },
   };
 }
 

@@ -1,9 +1,12 @@
+import type { AccountType } from "@folio/balances-basic";
 import { describe, expect, it } from "vitest";
-import { registry as appRegistry, getProvider } from "../src";
+import { createBalances } from "../src";
 
-// 锁定各 type 的 inputs(key+type;录入/补录表单、导出剥密钥都依赖它)。
-describe("appRegistry inputs", () => {
-  const cases: Array<[Parameters<typeof getProvider>[1], { key: string; type: string }[]]> = [
+// 锁定各 type 的 inputs(key+type;录入/补录表单、导出剥密钥都依赖它)。经门面 credentialSpecs()(隐藏 registry)。
+const specs = createBalances({ secretsKey: "k", globalKeys: {} }).credentialSpecs();
+
+describe("balances.credentialSpecs()", () => {
+  const cases: Array<[AccountType, { key: string; type: string }[]]> = [
     ["onchain_evm", [{ key: "identifier", type: "public" }]],
     ["onchain_solana", [{ key: "identifier", type: "public" }]],
     ["perp_hyperliquid", [{ key: "identifier", type: "public" }]],
@@ -35,8 +38,7 @@ describe("appRegistry inputs", () => {
   ];
   for (const [type, expected] of cases) {
     it(`${type} inputs → ${JSON.stringify(expected)}`, () => {
-      const inputs = getProvider(appRegistry, type).inputs ?? [];
-      expect(inputs.map((i) => ({ key: i.key, type: i.type }))).toEqual(expected);
+      expect((specs[type] ?? []).map((i) => ({ key: i.key, type: i.type }))).toEqual(expected);
     });
   }
 });

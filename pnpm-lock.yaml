@@ -182,6 +182,9 @@ importers:
       vitest:
         specifier: ^4.1.5
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
 
   packages/balances/providers/binance:
     dependencies:
@@ -328,9 +331,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20260626.1
         version: 4.20260626.1
-      '@folio/balances-provider-custom':
-        specifier: workspace:*
-        version: link:../balances/providers/custom
       typescript:
         specifier: ^6.0.2
         version: 6.0.3

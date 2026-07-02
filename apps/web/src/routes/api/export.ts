@@ -1,4 +1,3 @@
-import { getProvider, registry, safeView } from "@folio/balances";
 import type { SnapshotBalance } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
@@ -12,6 +11,7 @@ import {
   ndjsonLine,
   snapshotRecord,
 } from "@/lib/export";
+import { balances } from "@/lib/server/balances";
 import { db } from "@/lib/server/db";
 
 // 每页快照数:配 inArray(≤ 50 ids) 取余额,远低于 D1 100 绑定参数上限。
@@ -42,11 +42,10 @@ export const Route = createFileRoute("/api/export")({
 
               const accounts = await db.listAccountsByUser(userId);
               for (const a of accounts) {
-                const inputs = getProvider(registry, a.type).inputs ?? [];
-                // safeView 直接从存库 map 投影(无需解密):public 原样、semi 打码、secret 丢弃。
+                // 安全投影(无需解密):public 原样、semi 打码、secret 丢弃 —— 绝不导出完整密钥。
                 const raw = await db.getRawCreds(userId, a.id);
                 const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
-                write(accountRecord(a, safeView(inputs, stored))); // 无完整密钥
+                write(accountRecord(a, balances.safeCredentials(a.type, stored)));
               }
 
               for (const g of await db.listGroupsByUser(userId)) write(groupRecord(g));
@@ -56,9 +55,9 @@ export const Route = createFileRoute("/api/export")({
               for (let offset = 0; ; offset += SNAPSHOT_PAGE) {
                 const page = await db.listSnapshotsPageByUser(userId, SNAPSHOT_PAGE, offset);
                 if (page.length === 0) break;
-                const balances = await db.listBalancesForSnapshots(page.map((s) => s.id));
+                const pageBalances = await db.listBalancesForSnapshots(page.map((s) => s.id));
                 const bySnapshot = new Map<string, SnapshotBalance[]>();
-                for (const b of balances) {
+                for (const b of pageBalances) {
                   const arr = bySnapshot.get(b.snapshotId);
                   if (arr) arr.push(b);
                   else bySnapshot.set(b.snapshotId, [b]);

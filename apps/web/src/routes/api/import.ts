@@ -1,16 +1,10 @@
-import {
-  type AccountType,
-  getProvider,
-  publicKeys,
-  registry,
-  secretKeys,
-  semiKeys,
-} from "@folio/balances";
+import type { AccountType } from "@folio/balances";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "@/lib/import";
+import { balances } from "@/lib/server/balances";
 import { db } from "@/lib/server/db";
 
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。鉴权同其它 server fn。
@@ -32,11 +26,13 @@ export const Route = createFileRoute("/api/import")({
 
         const deps: ImportDeps = {
           categorize: (type) => {
-            const inputs = getProvider(registry, type as AccountType).inputs ?? [];
+            // 从公开字段规格按暴露级别分桶(import 重建 creds 用);不碰 provider 内部。
+            const specs = balances.credentialSpecs()[type as AccountType] ?? [];
+            const keysOf = (t: string) => specs.filter((s) => s.type === t).map((s) => s.key);
             return {
-              publicKeys: publicKeys(inputs),
-              semiKeys: semiKeys(inputs),
-              secretKeys: secretKeys(inputs),
+              publicKeys: keysOf("public"),
+              semiKeys: keysOf("semi"),
+              secretKeys: keysOf("secret"),
             };
           },
           createAccount: (input) =>

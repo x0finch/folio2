@@ -1,15 +1,9 @@
 import {
   type Account,
   type AccountType,
-  registry as appRegistry,
   type Balance,
-  type FetchContext,
-  getProvider,
-  isComplete,
-  openCreds,
+  type FetchOutcome,
   ProviderError,
-  type ProviderRegistry,
-  validateCredentials,
 } from "@folio/balances";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 
@@ -42,9 +36,9 @@ export interface SyncDeps {
   listAccounts: (userId: string) => Promise<AccountSafe[]>;
   getRawCreds: (userId: string, accountId: string) => Promise<string | null>;
   writeSnapshot: (userId: string, accountId: string, input: WriteSnapshotInput) => Promise<string>;
-  secretsKey: string;
-  globalKeys: Record<string, string>;
-  registry?: ProviderRegistry; // 默认用 appRegistry;测试可注入假 registry
+  // 取余额(领域意图):app 注入 balances.fetchBalances —— 解密/校验/ctx 拼装/provider 调用全在其内。
+  // 缺凭据返回 needs-credentials(跳过,不算失败);上游失败抛 ProviderError(本层据 retryable 重试)。
+  fetchBalances: (account: Account, stored: Record<string, string>) => Promise<FetchOutcome>;
   sleep?: (ms: number) => Promise<void>; // 默认 setTimeout;测试注入即时/捕获版做确定性重试测试
   log?: SyncLogger; // 默认 no-op;app 注入 LogTape logger(见 buildSyncDeps)
   // 写快照前重估余额(P7.4.2):app 注入 token 感知实现,仅 manual 用市场价改 usdValue,其余原样
@@ -63,30 +57,6 @@ export interface AccountSyncResult {
 
 export interface SyncResult {
   results: AccountSyncResult[];
-}
-
-// 纯逻辑:按 account.type 取 provider → 拉余额 → 汇总 totalUsd。无 I/O、无解密。
-export async function runAccountSync(
-  registry: ProviderRegistry,
-  ctx: FetchContext,
-): Promise<{ balances: Balance[]; totalUsd: number }> {
-  const provider = getProvider(registry, ctx.account.type);
-  const balances = await provider.fetchBalances(ctx);
-  const totalUsd = balances.reduce((sum, b) => sum + b.usdValue, 0);
-  return { balances, totalUsd };
-}
-
-// 把整张全局 key 表收窄到 provider 声明用到的子集(env 里存在的才下发)。
-// 导出供账户创建时复用(创建即 validate 也要按 usesGlobalKeys 最小权限下发)。
-export function scopeGlobalKeys(
-  all: Record<string, string>,
-  names: readonly string[] = [],
-): Record<string, string> {
-  const scoped: Record<string, string> = {};
-  for (const name of names) {
-    if (name in all) scoped[name] = all[name];
-  }
-  return scoped;
 }
 
 // 对可重试的 ProviderError(429/5xx/网络)退避重试;优先采用服务端 Retry-After,否则指数退避+抖动。
@@ -122,24 +92,12 @@ export async function syncAccount(
   userId: string,
   account: AccountSafe,
 ): Promise<AccountSyncResult> {
-  const registry = deps.registry ?? appRegistry;
   const log = deps.log ?? noopLogger;
   // 安全字段(红线:绝不打 creds/secret/地址);userId 显式带,覆盖 cron 路径(无请求级 withContext)。
   const ctxFields = { userId, accountId: account.id, type: account.type };
   try {
-    const provider = getProvider(registry, account.type);
-    const inputs = provider.inputs ?? [];
     const raw = await deps.getRawCreds(userId, account.id);
     const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
-    // 缺凭据态(导入待补录:有 semi/secret 字段未填真值)→ 跳过,不算失败,补录后下次纳入(见 P6.6.1)。
-    if (!isComplete(inputs, stored)) {
-      log.warning("account sync skipped: needs credentials", ctxFields);
-      return { accountId: account.id, ok: false, skipped: true };
-    }
-    // 只在此刻解密 secret 字段、用完即弃(openCreds:public/semi 明文原样、secret 解密)。
-    const opened = await openCreds(inputs, stored, deps.secretsKey);
-    // 运行时闸:按 provider.inputs 的 validator 校验,通过才进 FetchContext;脏/缺数据 → 本账户 fail。
-    const creds = await validateCredentials(inputs, opened);
     const acc: Account = {
       id: account.id,
       userId: account.userId,
@@ -147,18 +105,20 @@ export async function syncAccount(
       network: account.network ?? undefined,
       label: account.label,
     };
-    // 最小权限:只把本 provider 声明用到的全局 key 下发,拿不到别家的(见 BalanceProvider.usesGlobalKeys)。
-    const globalKeys = scopeGlobalKeys(deps.globalKeys, provider.usesGlobalKeys);
-    const ctx: FetchContext = { account: acc, creds, globalKeys };
-    // 仅 provider 取数部分重试(写快照/解密不重试)。
-    const fetched = await withRetry(
-      () => runAccountSync(registry, ctx),
+    // 取余额(解密/校验/ctx/provider 调用全在 balances.fetchBalances 内)。仅取数部分重试(写快照不重试)。
+    const outcome = await withRetry(
+      () => deps.fetchBalances(acc, stored),
       deps.sleep ?? defaultSleep,
       log,
       ctxFields,
     );
+    // 缺凭据态(导入待补录)→ 跳过,不算失败,补录后下次纳入(见 P6.6.1)。
+    if (outcome.status === "needs-credentials") {
+      log.warning("account sync skipped: needs credentials", ctxFields);
+      return { accountId: account.id, ok: false, skipped: true };
+    }
     // 重估(P7.4.2):manual 用市场价改 usdValue,再重算 totalUsd。best-effort —— 失败保留 provider 原值。
-    let { balances, totalUsd } = fetched;
+    let { balances, totalUsd } = outcome;
     if (deps.revalue) {
       try {
         balances = await deps.revalue(account.type, balances);

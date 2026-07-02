@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import type { SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { revalueManual } from "../revalue";
+import { balances } from "./balances";
 import { db } from "./db";
 import { buildTokens, warmTokens } from "./tokens";
 
@@ -27,12 +28,8 @@ export function buildSyncDeps(): SyncDeps {
     listAccounts: (userId) => db.listAccountsByUser(userId),
     getRawCreds: (userId, accountId) => db.getRawCreds(userId, accountId),
     writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
-    secretsKey: env.SECRETS_KEY,
-    // provider 全局 key:各 provider 按 usesGlobalKeys 只拿到自己声明的(见 @folio/sync scopeGlobalKeys)。
-    globalKeys: {
-      ZERION_API_KEY: env.ZERION_API_KEY,
-      COINSTATS_API_KEY: env.COINSTATS_API_KEY,
-    },
+    // 取余额:解密/校验/ctx/provider 调用/全局 key 收窄全在 balances 门面内(secretsKey/globalKeys 由其绑定)。
+    fetchBalances: (account, stored) => balances.fetchBalances(account, stored),
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
     // 写快照前重估(P7.4.2):仅 manual 用市场价改 usdValue(@folio/sync 不依赖 token 层,逻辑注入在此)。
