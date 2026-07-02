@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import type { TokenIdentifier, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createTokenStore } from "../src";
+import { createTokenStore } from "../src"; // 全局代币缓存:公开独立导出(非 createDb 门面)
 import { getDb } from "../src/client";
 import { tokenContract, tokenInfo, tokenMeta, tokenPrice, tokenWarm } from "../src/schema";
 

@@ -8,19 +8,13 @@ import {
   sealCreds,
   validateCredentials,
 } from "@folio/core";
-import {
-  createAccount,
-  getAccountById,
-  listAccountsByUser,
-  listRawCredsByUser,
-  recordManualActivity,
-  setAccountCredentials,
-} from "@folio/db";
+import type { AccountSafe } from "@folio/db";
 import { appRegistry, scopeGlobalKeys } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireAuth } from "../require-auth";
+import { db } from "./db";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 type/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);
@@ -43,8 +37,8 @@ export const listMyAccounts = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
     const [accounts, rawList] = await Promise.all([
-      listAccountsByUser(env, context.userId),
-      listRawCredsByUser(env, context.userId),
+      db.listAccountsByUser(context.userId),
+      db.listRawCredsByUser(context.userId),
     ]);
     const rawById = new Map(rawList.map((r) => [r.id, r.creds]));
     return accounts.map((a) => {
@@ -86,13 +80,13 @@ export const createManualAccount = createServerFn({ method: "POST" })
       ...(data.fixed ? { fixed: "1" } : {}),
     };
     await validateCredentials(inputs, raw); // 校验闸(amount/unitPrice 可 coerce 成数值,否则抛)
-    const account = await createAccount(env, context.userId, {
+    const account = await db.createAccount(context.userId, {
       type: "manual",
       label: data.label,
       creds: await sealJson(inputs, raw),
     });
     // 初始 set:账本基线 = 创建时数量(与 creds.amount 一致)。
-    await recordManualActivity(env, context.userId, account.id, {
+    await db.recordManualActivity(context.userId, account.id, {
       kind: "set",
       amount: Number(data.amount),
       occurredAt: Date.now(),
@@ -114,7 +108,7 @@ async function createAddressAccount(
   type: Parameters<typeof getProvider>[1],
   label: string,
   address: string,
-): Promise<Awaited<ReturnType<typeof createAccount>>> {
+): Promise<AccountSafe> {
   const provider = getProvider(appRegistry, type);
   const inputs = provider.inputs ?? [];
   const raw = { identifier: address };
@@ -128,7 +122,7 @@ async function createAddressAccount(
   if (!(await provider.validate(ctx))) {
     throw new Error("could not verify the address — please check it and try again");
   }
-  const account = await createAccount(env, userId, {
+  const account = await db.createAccount(userId, {
     type,
     label,
     creds: await sealJson(inputs, raw),
@@ -188,7 +182,7 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
     if (!(await provider.validate(ctx))) {
       throw new Error("could not verify these API credentials — please check them and try again");
     }
-    const account = await createAccount(env, context.userId, {
+    const account = await db.createAccount(context.userId, {
       type: data.type,
       label: data.label,
       creds: await sealJson(inputs, values), // seal 原始字符串(非 coerce 输出)
@@ -207,7 +201,7 @@ export const provideCredentials = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(ProvideCredentialsInput)
   .handler(async ({ data, context }) => {
-    const account = await getAccountById(env, context.userId, data.accountId);
+    const account = await db.getAccountById(context.userId, data.accountId);
     if (!account) throw new Error("account not found");
     const provider = getProvider(appRegistry, account.type);
     const inputs = provider.inputs ?? [];
@@ -220,12 +214,7 @@ export const provideCredentials = createServerFn({ method: "POST" })
     if (!(await provider.validate(ctx))) {
       throw new Error("could not verify these credentials — please check them and try again");
     }
-    await setAccountCredentials(
-      env,
-      context.userId,
-      account.id,
-      await sealJson(inputs, data.creds),
-    );
+    await db.setAccountCredentials(context.userId, account.id, await sealJson(inputs, data.creds));
     log.info("credentials provided", { type: account.type, accountId: account.id });
     return { ok: true as const };
   });

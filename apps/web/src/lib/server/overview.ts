@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
-import { getLatestSnapshotByUser, listAccountsByUser } from "@folio/db";
 import { createServerFn } from "@tanstack/react-start";
 import { requireAuth } from "../require-auth";
+import { db } from "./db";
 import { buildTokens, enrichBalances } from "./tokens";
 
 // 总览:把每个账户与其最新快照合并。从未同步的账户也列出(totalUsd 0、无明细)。
@@ -12,8 +12,8 @@ export const getMyOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
     const [accounts, snapshots] = await Promise.all([
-      listAccountsByUser(env, context.userId),
-      getLatestSnapshotByUser(env, context.userId),
+      db.listAccountsByUser(context.userId),
+      db.getLatestSnapshotByUser(context.userId),
     ]);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     const tokens = buildTokens(env);

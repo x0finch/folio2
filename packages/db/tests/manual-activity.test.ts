@@ -1,15 +1,16 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
+import { user } from "../src/auth-schema";
+import { getDb } from "../src/client";
+// 包内测试白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
 import {
   createAccount,
   deleteAccount,
   listManualActivityByAccount,
   recordManualActivity,
   removeManualActivity,
-} from "../src";
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+} from "../src/queries";
 import { manualActivity } from "../src/schema";
 
 const USER_A = "user-a";

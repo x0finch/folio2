@@ -1,12 +1,11 @@
-import { env } from "cloudflare:workers";
 import { type AccountType, getProvider, publicKeys, secretKeys, semiKeys } from "@folio/core";
-import { addAccountToGroup, createAccount, createGroup, writeSnapshot } from "@folio/db";
 import { appRegistry } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "@/lib/import";
+import { db } from "@/lib/server/db";
 
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。鉴权同其它 server fn。
 // CEX 账户(有 secret 输入、导出已剥密钥)→ encCredentials=null = 缺凭据态,待补录。
@@ -35,12 +34,12 @@ export const Route = createFileRoute("/api/import")({
             };
           },
           createAccount: (input) =>
-            createAccount(env, userId, { ...input, type: input.type as AccountType }),
-          createGroup: (input) => createGroup(env, userId, input),
+            db.createAccount(userId, { ...input, type: input.type as AccountType }),
+          createGroup: (input) => db.createGroup(userId, input),
           addAccountToGroup: (accountId, groupId) =>
-            addAccountToGroup(env, userId, accountId, groupId),
+            db.addAccountToGroup(userId, accountId, groupId),
           writeSnapshot: async (accountId, input) => {
-            await writeSnapshot(env, userId, accountId, input);
+            await db.writeSnapshot(userId, accountId, input);
           },
         };
         const importer = createImporter(deps);

@@ -1,9 +1,9 @@
-import { listUserIdsWithAccounts } from "@folio/db";
 import { syncAllUsers } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { configureLogging } from "./lib/log";
-import { buildSyncDeps, warmTokensForUser } from "./lib/server/sync";
+import { db } from "./lib/server/db";
+import { buildSyncDeps, warmTokensForUser } from "./lib/server/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
 // 再补一个 CF scheduled() 处理器跑定时同步(cron 只触发 scheduled,不触发 fetch)。
@@ -35,14 +35,15 @@ export default {
 
   // 每日定时全量同步(triggers.crons)。无登录用户 → 用系统级 listUserIdsWithAccounts 枚举所有
   // 有账户的用户,逐用户逐账户隔离 sweep。waitUntil 保证 sweep 跑完才结束本次调用。
-  async scheduled(controller: ScheduledController, env: Cloudflare.Env, ctx: ExecutionContext) {
+  // env/ctx 由运行时传入;env 不再单独取用(configureLogging / db / buildSyncDeps 都走 cloudflare:workers 全局)。
+  async scheduled(controller: ScheduledController, _env: Cloudflare.Env, ctx: ExecutionContext) {
     ctx.waitUntil(
       (async () => {
         await configureLogging();
         try {
-          const userIds = await listUserIdsWithAccounts(env);
+          const userIds = await db.listUserIdsWithAccounts();
           cronLog.info("cron sweep start", { cron: controller.cron, users: userIds.length });
-          const result = await syncAllUsers(buildSyncDeps(env), userIds);
+          const result = await syncAllUsers(buildSyncDeps(), userIds);
           cronLog.info("cron sweep done", {
             cron: controller.cron,
             users: result.users,
@@ -51,7 +52,7 @@ export default {
             skipped: result.skipped,
           });
           // sweep 后预热每用户代币缓存(best-effort),供次日总览 cache-only 富化。
-          for (const userId of userIds) await warmTokensForUser(env, userId);
+          for (const userId of userIds) await warmTokensForUser(userId);
         } catch (err) {
           // waitUntil 里的抛错会变成静默的 unhandled rejection —— 集中打日志再上抛,cron 失败才可见。
           cronLog.error("cron sweep threw", {

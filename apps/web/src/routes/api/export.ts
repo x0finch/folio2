@@ -1,14 +1,5 @@
-import { env } from "cloudflare:workers";
 import { getProvider, safeView } from "@folio/core";
-import {
-  getRawCreds,
-  listAccountsByUser,
-  listBalancesForSnapshots,
-  listGroupsByUser,
-  listMembershipsByUser,
-  listSnapshotsPageByUser,
-  type SnapshotBalance,
-} from "@folio/db";
+import type { SnapshotBalance } from "@folio/db";
 import { appRegistry } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
@@ -22,6 +13,7 @@ import {
   ndjsonLine,
   snapshotRecord,
 } from "@/lib/export";
+import { db } from "@/lib/server/db";
 
 // 每页快照数:配 inArray(≤ 50 ids) 取余额,远低于 D1 100 绑定参数上限。
 const SNAPSHOT_PAGE = 50;
@@ -49,26 +41,23 @@ export const Route = createFileRoute("/api/export")({
             try {
               write(metaRecord(Date.now())); // 首行:版本号等
 
-              const accounts = await listAccountsByUser(env, userId);
+              const accounts = await db.listAccountsByUser(userId);
               for (const a of accounts) {
                 const inputs = getProvider(appRegistry, a.type).inputs ?? [];
                 // safeView 直接从存库 map 投影(无需解密):public 原样、semi 打码、secret 丢弃。
-                const raw = await getRawCreds(env, userId, a.id);
+                const raw = await db.getRawCreds(userId, a.id);
                 const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
                 write(accountRecord(a, safeView(inputs, stored))); // 无完整密钥
               }
 
-              for (const g of await listGroupsByUser(env, userId)) write(groupRecord(g));
-              for (const m of await listMembershipsByUser(env, userId)) write(membershipRecord(m));
+              for (const g of await db.listGroupsByUser(userId)) write(groupRecord(g));
+              for (const m of await db.listMembershipsByUser(userId)) write(membershipRecord(m));
 
               // 快照:分页拉取,每页取该页余额、流式写出 → 内存恒定,绕开参数上限。
               for (let offset = 0; ; offset += SNAPSHOT_PAGE) {
-                const page = await listSnapshotsPageByUser(env, userId, SNAPSHOT_PAGE, offset);
+                const page = await db.listSnapshotsPageByUser(userId, SNAPSHOT_PAGE, offset);
                 if (page.length === 0) break;
-                const balances = await listBalancesForSnapshots(
-                  env,
-                  page.map((s) => s.id),
-                );
+                const balances = await db.listBalancesForSnapshots(page.map((s) => s.id));
                 const bySnapshot = new Map<string, SnapshotBalance[]>();
                 for (const b of balances) {
                   const arr = bySnapshot.get(b.snapshotId);
