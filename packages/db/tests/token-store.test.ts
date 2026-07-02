@@ -34,18 +34,19 @@ beforeEach(async () => {
 const TTL = 10_000;
 
 describe("warm + candidates", () => {
-  it("putWarm → getCandidates (symbol normalized, rank, warmAsOf set)", async () => {
+  it("putWarm → getCandidates (store keys the symbol as-is; caller pre-normalizes)", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
+    // 键由调用方归一(store 不做);这里模拟调用方已传归一(大写)symbol。
     await store.putWarm(
       [
-        { info: info(cg("usd-coin"), "usdc"), price: price(cg("usd-coin"), 1, 6) },
+        { info: info(cg("usd-coin"), "USDC"), price: price(cg("usd-coin"), 1, 6) },
         { info: info(cg("usdc-x"), "USDC"), price: price(cg("usdc-x"), 0.9, 9000) },
-        { info: info(cg("ethereum"), "eth"), price: price(cg("ethereum"), 3500, 2) },
+        { info: info(cg("ethereum"), "ETH"), price: price(cg("ethereum"), 3500, 2) },
       ],
       TTL,
     );
-    // 大小写归一:查 "usdc" 命中两个候选
-    const cands = await store.getCandidates("usdc");
+    // 同一归一 key 下的多个候选都返回
+    const cands = await store.getCandidates("USDC");
     expect(cands).toContainEqual({ ref: cg("usd-coin"), marketCapRank: 6 });
     expect(cands).toContainEqual({ ref: cg("usdc-x"), marketCapRank: 9000 });
     expect(cands).toHaveLength(2);
@@ -57,7 +58,7 @@ describe("warm + candidates", () => {
     let clock = 1000;
     const store = createTokenStore(env, { source: "coingecko", now: () => clock });
     await store.putWarm(
-      [{ info: info(cg("ethereum"), "eth"), price: price(cg("ethereum"), 3500, 2) }],
+      [{ info: info(cg("ethereum"), "ETH"), price: price(cg("ethereum"), 3500, 2) }],
       TTL,
     );
     clock = 1000 + TTL + 1; // 过期
@@ -107,14 +108,14 @@ describe("listTopTokens (rank-sorted, join name/logo)", () => {
   });
 });
 
-describe("contract cache (three-state + TTL + lowercasing)", () => {
+describe("contract cache (three-state + TTL; keys pre-normalized by caller)", () => {
   it("hit / absent / unknown", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
     expect(await store.getContractRef("ethereum", "0xabc")).toBeUndefined(); // 未知
 
-    await store.putContractRef("Ethereum", "0xABC", cg("usd-coin"), TTL); // 大小写归一
+    // key(chain, contract)由调用方归一(小写);store 按 key 存/查,不自己归一。
+    await store.putContractRef("ethereum", "0xabc", cg("usd-coin"), TTL);
     expect(await store.getContractRef("ethereum", "0xabc")).toEqual(cg("usd-coin")); // 命中
-    expect(await store.getContractRef("ETHEREUM", "0xAbC")).toEqual(cg("usd-coin")); // 查询也归一
 
     await store.putContractRef("ethereum", "0xdead", null, TTL); // 否定缓存
     expect(await store.getContractRef("ethereum", "0xdead")).toBeNull();

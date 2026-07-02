@@ -2,7 +2,7 @@
 //   · `asset` = 持仓侧的【输入】(从 Balance 抽出的待解析身份,可能解析不出) —— 仅 `AssetRef`。
 //   · `token` = 参考层的一切(解析后的规范实体及其数据/接口) —— `TokenRef`/`TokenInfo`/…。
 //   · `coin`  = 仅 CoinGecko 角落 —— `CoinId`,只活在 `TokenRef` 的 coingecko 变体里。
-// 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 source 零返工。
+// 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 provider 零返工。
 
 // CoinGecko 的 coin-id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/chain)混用。
 // 仅用于下面的 coingecko `TokenRef` 变体;通过 `as CoinId` 在可信边界(解析 CGK 响应)构造。

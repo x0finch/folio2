@@ -6,7 +6,12 @@ import { defineConfig } from "vitest/config";
 // invoked through `pnpm -r test`.
 export default defineConfig({
   test: {
-    projects: ["packages/*", "packages/providers/*"],
+    projects: [
+      "packages/*",
+      "packages/providers/*",
+      "packages/tokens/*",
+      "packages/tokens/providers/*",
+    ],
     passWithNoTests: true,
   },
 });

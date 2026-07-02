@@ -102,7 +102,7 @@ export const snapshotBalances = sqliteTable(
 export const tokenWarm = sqliteTable(
   "token_warm",
   {
-    symbol: text("symbol").notNull(), // normalizeSymbol 归一(大写)
+    symbol: text("symbol").notNull(), // 归一(大写)key —— 由 @folio/tokens 调用方保证,store 不再自己归一
     source: text("source").notNull(),
     coinId: text("coin_id").notNull(),
     marketCapRank: integer("market_cap_rank"),

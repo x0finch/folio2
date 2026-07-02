@@ -1,6 +1,7 @@
+import type { CoinId, TokenRef } from "@folio/tokens-basic";
 import { describe, expect, it } from "vitest";
-import { chooseResolution, normalizeSymbol, pickByConfidence } from "../src/resolve";
-import type { CoinId, TokenRef } from "../src/types";
+import { normalizeSymbol } from "../src/normalize";
+import { chooseResolution, pickByConfidence } from "../src/resolve";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });
 

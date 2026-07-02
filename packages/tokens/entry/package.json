@@ -1,5 +1,5 @@
 {
-  "name": "@folio/tokens-coingecko",
+  "name": "@folio/tokens",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/tokens": "workspace:*"
+    "@folio/tokens-basic": "workspace:*",
+    "@folio/tokens-provider-coingecko": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^6.0.2",

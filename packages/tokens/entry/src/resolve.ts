@@ -1,10 +1,11 @@
-import { RESOLUTION_DOMINANCE, RESOLUTION_TOP_RANK } from "./constants";
-import type { AssetRef, Confidence, Resolution, TokenCandidate, TokenRef } from "./types";
-
-// 符号归一 —— warm 建候选 / 查候选 / OVERRIDES 三处用同一口径,避免 `USDC`/`usdc` 漏配。
-export function normalizeSymbol(s: string): string {
-  return s.trim().toUpperCase();
-}
+import type {
+  AssetRef,
+  Confidence,
+  Resolution,
+  TokenCandidate,
+  TokenRef,
+} from "@folio/tokens-basic";
+import { RESOLUTION_DOMINANCE, RESOLUTION_TOP_RANK } from "@folio/tokens-basic";
 
 export interface ConfidenceOpts {
   topRank?: number;

@@ -1,4 +1,4 @@
-import type { CoinId, TokenRef } from "@folio/tokens";
+import type { CoinId, TokenRef } from "@folio/tokens-basic";
 import { describe, expect, it } from "vitest";
 import {
   parseAssetPlatforms,

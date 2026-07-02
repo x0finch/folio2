@@ -1,6 +1,5 @@
 import {
   type CoinId,
-  normalizeSymbol,
   refKey,
   type TokenCandidate,
   type TokenInfo,
@@ -37,13 +36,13 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
 
   return {
     async getCandidates(symbol: string): Promise<TokenCandidate[]> {
-      const sym = normalizeSymbol(symbol);
+      // `symbol` 视为已归一(口径由调用方 @folio/tokens 保证);store 只按 key 点查,不做业务归一。
       const rows = await db
         .select()
         .from(tokenWarm)
         .where(
           and(
-            eq(tokenWarm.symbol, sym),
+            eq(tokenWarm.symbol, symbol),
             eq(tokenWarm.source, source),
             gt(tokenWarm.expiresAt, now()),
           ),
@@ -60,7 +59,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           db
             .insert(tokenWarm)
             .values({
-              symbol: normalizeSymbol(info.symbol),
+              symbol: info.symbol,
               source: info.ref.source,
               coinId: info.ref.coinId,
               marketCapRank: price.marketCapRank ?? null,
@@ -119,14 +118,15 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
     },
 
     async getContractRef(chain, contract) {
+      // (chain, contract) 视为已归一(小写,调用方保证);store 只按 key 点查。
       const rows = await db
         .select()
         .from(tokenContract)
         .where(
           and(
             eq(tokenContract.source, source),
-            eq(tokenContract.chain, chain.toLowerCase()),
-            eq(tokenContract.contract, contract.toLowerCase()),
+            eq(tokenContract.chain, chain),
+            eq(tokenContract.contract, contract),
             gt(tokenContract.expiresAt, now()),
           ),
         );
@@ -139,8 +139,8 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const expiresAt = now() + ttlMs;
       const row = {
         source,
-        chain: chain.toLowerCase(),
-        contract: contract.toLowerCase(),
+        chain,
+        contract,
         coinId: ref?.coinId ?? null,
         expiresAt,
       };

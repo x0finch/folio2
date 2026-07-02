@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { TokenSource } from "../src/source";
+import type { TokenProvider } from "../src/provider";
 import type { TokenStore } from "../src/store";
 
 // Stubs prove the (reshaped) interfaces are implementable — `satisfies` is the compile-time proof.
 // `: Token{Source,Store}` annotations are the compile-time proof the interfaces are implementable.
-const source: TokenSource = {
+const source: TokenProvider = {
+  source: "coingecko",
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
   fetchPrices: async () => new Map(),
@@ -25,7 +26,7 @@ const store: TokenStore = {
 };
 
 describe("interface shapes", () => {
-  it("TokenSource is implementable", async () => {
+  it("TokenProvider is implementable", async () => {
     expect(await source.fetchMarkets({ topN: 1 })).toEqual([]);
   });
   it("TokenStore is implementable", async () => {

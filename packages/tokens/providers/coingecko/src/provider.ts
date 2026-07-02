@@ -1,4 +1,9 @@
-import { TokenError, type TokenInfo, type TokenPrice, type TokenSource } from "@folio/tokens";
+import {
+  TokenError,
+  type TokenInfo,
+  type TokenPrice,
+  type TokenProvider,
+} from "@folio/tokens-basic";
 import {
   CG_BASE_FREE,
   CG_BASE_PRO,
@@ -77,10 +82,10 @@ async function request(
   }
 }
 
-// CoinGecko 的 `TokenSource` 实现(functional 工厂,对齐 `createTokenStore`/`defineProvider`——无 class/this)。
+// CoinGecko 的 `TokenProvider` 实现(functional 工厂,对齐 `createTokenStore`/`defineProvider`——无 class/this)。
 // 薄 IO:拼 URL/头 + 错误映射,解析交纯函数。通用层只给 `chain`;CGK 的 `platform`(asset_platform
 // slug)是内部细节 —— 闭包 memo 一份 asset_platforms 表,在 fetchByContract 里把 chain → platform。
-export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource {
+export function createCoinGeckoProvider(config: CoinGeckoConfig = {}): TokenProvider {
   const baseUrl = config.baseUrl ?? (config.pro ? CG_BASE_PRO : CG_BASE_FREE);
   const headers: Record<string, string> = { accept: "application/json", "user-agent": USER_AGENT };
   if (config.apiKey) headers[config.pro ? HEADER_PRO : HEADER_DEMO] = config.apiKey;
@@ -97,6 +102,7 @@ export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource
   };
 
   return {
+    source: "coingecko",
     async fetchByContract(chain, contract) {
       const platform = await platformFor(chain);
       if (!platform) return null; // chain 未被 CGK 收录

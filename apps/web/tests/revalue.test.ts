@@ -1,14 +1,14 @@
 import type { Balance } from "@folio/core";
 import type {
   CoinId,
-  ResolveDeps,
   TokenCandidate,
   TokenInfo,
   TokenPrice,
   TokenRef,
   TokenStore,
+  Tokens,
 } from "@folio/tokens";
-import { OVERRIDES } from "@folio/tokens";
+import { createTokens } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
 import { revalueManual } from "../src/lib/revalue";
 
@@ -46,6 +46,7 @@ function fakeStore(): TokenStore {
 
 // source:fetchPrices 为长尾 coinId 供价(模拟不在 warm 的币);其余 stub。
 const stubSource = {
+  source: "coingecko" as const,
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
   fetchPrices: async (refs: TokenRef[]) => {
@@ -60,7 +61,8 @@ const stubSource = {
   searchCoins: async () => [],
 };
 
-const deps = (): ResolveDeps => ({ source: stubSource, store: fakeStore(), overrides: OVERRIDES });
+// tokens 实例:真 createTokens,注入 stub provider + fake store(避免真网络)。
+const tokens = (): Tokens => createTokens({ createStore: () => fakeStore(), provider: stubSource });
 const bal = (symbol: string, amount: number, usdValue: number, coinId?: string): Balance => ({
   symbol,
   amount,
@@ -72,12 +74,12 @@ const bal = (symbol: string, amount: number, usdValue: number, coinId?: string):
 
 describe("revalueManual", () => {
   it("manual resolvable → usdValue = amount × market price", async () => {
-    const out = await revalueManual(deps(), "manual", [bal("BTC", 0.5, 1)]);
+    const out = await revalueManual(tokens(), "manual", [bal("BTC", 0.5, 1)]);
     expect(out[0].usdValue).toBe(32500); // 0.5 × 65000
   });
 
   it("manual unresolvable → keeps provider usdValue (unitPrice fallback)", async () => {
-    const out = await revalueManual(deps(), "manual", [bal("PRIVATETOKEN", 10, 99)]);
+    const out = await revalueManual(tokens(), "manual", [bal("PRIVATETOKEN", 10, 99)]);
     expect(out[0].usdValue).toBe(99);
   });
 
@@ -91,18 +93,18 @@ describe("revalueManual", () => {
       kind: "manual",
       meta: { fixed: true },
     };
-    const out = await revalueManual(deps(), "manual", [locked]);
+    const out = await revalueManual(tokens(), "manual", [locked]);
     expect(out[0].usdValue).toBe(1);
   });
 
   it("explicit meta.coinId overrides symbol resolution", async () => {
     // 错的 symbol "XBT" 但显式 coinId=bitcoin → 用 bitcoin 的 store 价 65000。
-    const out = await revalueManual(deps(), "manual", [bal("XBT", 1, 0, "bitcoin")]);
+    const out = await revalueManual(tokens(), "manual", [bal("XBT", 1, 0, "bitcoin")]);
     expect(out[0].usdValue).toBe(65000);
   });
 
   it("explicit coinId not in warm cache → source.fetchPrices supplies the price", async () => {
-    const out = await revalueManual(deps(), "manual", [bal("TONCOIN", 2, 0, "the-open-network")]);
+    const out = await revalueManual(tokens(), "manual", [bal("TONCOIN", 2, 0, "the-open-network")]);
     expect(out[0].usdValue).toBe(10); // 2 × 5(来自 source.fetchPrices)
   });
 
@@ -114,7 +116,7 @@ describe("revalueManual", () => {
       source: "binance",
       kind: "spot",
     };
-    const out = await revalueManual(deps(), "exchange_binance", [spot]);
+    const out = await revalueManual(tokens(), "exchange_binance", [spot]);
     expect(out[0].usdValue).toBe(60000);
   });
 });

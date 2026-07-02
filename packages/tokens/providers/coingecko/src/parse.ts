@@ -5,7 +5,7 @@ import {
   type TokenInfo,
   type TokenPrice,
   type TokenRef,
-} from "@folio/tokens";
+} from "@folio/tokens-basic";
 import { SEARCH_LIMIT, VS_USD } from "./constants";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", coinId: id as CoinId });

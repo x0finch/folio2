@@ -1,5 +1,5 @@
 {
-  "name": "@folio/tokens",
+  "name": "@folio/tokens-basic",
   "version": "0.0.0",
   "private": true,
   "type": "module",
