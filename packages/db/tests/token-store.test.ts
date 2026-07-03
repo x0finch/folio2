@@ -44,6 +44,7 @@ describe("warm + candidates", () => {
         { info: info(cg("ethereum"), "ETH"), price: price(cg("ethereum"), 3500, 2) },
       ],
       TTL,
+      TTL,
     );
     // 同一归一 key 下的多个候选都返回
     const cands = await store.getCandidates("USDC");
@@ -59,6 +60,7 @@ describe("warm + candidates", () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => clock });
     await store.putWarm(
       [{ info: info(cg("ethereum"), "ETH"), price: price(cg("ethereum"), 3500, 2) }],
+      TTL,
       TTL,
     );
     clock = 1000 + TTL + 1; // 过期
@@ -76,6 +78,7 @@ describe("listTopTokens (rank-sorted, join name/logo)", () => {
         { info: info(cg("some-fork"), "sbf", "Lo-sbf"), price: price(cg("some-fork"), 0.1) },
         { info: info(cg("solana"), "sol", "Lo-sol"), price: price(cg("solana"), 150, 5) },
       ],
+      TTL,
       TTL,
     );
     // limit 3 → top three by rank; name/logo pulled from the info table (join worked).
@@ -101,6 +104,7 @@ describe("listTopTokens (rank-sorted, join name/logo)", () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => clock });
     await store.putWarm(
       [{ info: info(cg("bitcoin"), "btc", "L"), price: price(cg("bitcoin"), 65000, 1) }],
+      TTL,
       TTL,
     );
     const other = createTokenStore(env, {
@@ -170,6 +174,7 @@ describe("source bucketing (no userId — partitioned by source)", () => {
     const cgStore = createTokenStore(env, { source: "coingecko", now: () => 1000 });
     await cgStore.putWarm(
       [{ info: info(cg("ethereum"), "eth"), price: price(cg("ethereum"), 3500, 2) }],
+      TTL,
       TTL,
     );
     await cgStore.putContractRef("ethereum", "0xabc", cg("usd-coin"), TTL);

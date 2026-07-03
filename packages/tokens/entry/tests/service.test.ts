@@ -151,6 +151,7 @@ describe("resolveAsset", () => {
     await store.putWarm(
       [{ info: info(cg("ethereum"), "eth"), price: price(cg("ethereum"), 2) }],
       0,
+      0,
     );
     expect(await resolveAsset({ symbol: "ETH" }, { provider: {} as TokenProvider, store })).toEqual(
       {

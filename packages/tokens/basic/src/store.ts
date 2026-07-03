@@ -5,8 +5,13 @@ import type { TokenCandidate, TokenInfo, TokenPrice, TokenRef } from "./types";
 // 实现 = P7.3.1(KV)。
 export interface TokenStore {
   // warm(top-N markets):symbol→候选(带 rank);`putWarm` 同时落 info/price 供富化读取。
+  // ttlMs 管 warm 承载(rank)与 price(短、要新鲜);infoTtlMs 管 name/logo(长、近静态)。
   getCandidates(symbol: string): Promise<TokenCandidate[]>;
-  putWarm(rows: { info: TokenInfo; price: TokenPrice }[], ttlMs: number): Promise<void>;
+  putWarm(
+    rows: { info: TokenInfo; price: TokenPrice }[],
+    ttlMs: number,
+    infoTtlMs: number,
+  ): Promise<void>;
   warmAsOf(): Promise<number | null>;
   // 默认选币列表(P7.4.5):warm 候选按 `marketCapRank` 升序取前 `limit`,连 name/logo 一并返回。
   // 实现须 join 元信息(rank 在 warm、name/logo 在 info),未预热则空(调用方回退预热)。

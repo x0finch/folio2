@@ -9,6 +9,7 @@ import {
   ABSENT_TTL_MS,
   CONTRACT_TTL_MS,
   DEFAULT_TOP_N,
+  INFO_TTL_MS,
   PRICE_TTL_MS,
   WARM_TTL_MS,
 } from "@folio/tokens-basic";
@@ -94,7 +95,7 @@ export async function refreshWarm(
       price: m.price,
       info: { ...m.info, symbol: normalizeSymbol(m.info.symbol) },
     }));
-    await deps.store.putWarm(rows, warmTtl);
+    await deps.store.putWarm(rows, warmTtl, INFO_TTL_MS);
     return { warm: true };
   }
   return { warm: false };

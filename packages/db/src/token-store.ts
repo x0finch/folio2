@@ -56,9 +56,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       }));
     },
 
-    async putWarm(rows, ttlMs) {
+    async putWarm(rows, ttlMs, infoTtlMs) {
       if (rows.length === 0) return;
-      const expiresAt = now() + ttlMs;
+      const expiresAt = now() + ttlMs; // warm rank + price(短)
+      const infoExpiresAt = now() + infoTtlMs; // name/logo(长、近静态)
       const stmts: Stmt[] = [];
       for (const { info, price } of rows) {
         stmts.push(
@@ -75,7 +76,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               target: [tokenWarm.symbol, tokenWarm.source, tokenWarm.identifier],
               set: { marketCapRank: price.marketCapRank ?? null, expiresAt },
             }),
-          infoUpsert(db, info, expiresAt),
+          infoUpsert(db, info, infoExpiresAt),
           priceUpsert(db, price, expiresAt),
         );
       }
