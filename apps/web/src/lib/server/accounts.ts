@@ -176,3 +176,37 @@ export const provideCredentials = createServerFn({ method: "POST" })
     log.info("credentials provided", { type: account.type, accountId: account.id });
     return { ok: true as const };
   });
+
+// —— 单账户管理(重命名 / 归档 / 删除)——
+// db 层三者都按 (id, userId) 作用域,天然杜绝越权;不存在则影响 0 行(静默),不额外抛。
+
+const AccountIdInput = z.object({ accountId: z.string().min(1) });
+
+export const renameAccount = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(AccountIdInput.extend({ label: z.string().trim().min(1, "label is required") }))
+  .handler(async ({ data, context }) => {
+    await db.renameAccount(context.userId, data.accountId, data.label);
+    log.info("account renamed", { accountId: data.accountId });
+    return { ok: true as const };
+  });
+
+// 归档/取消归档:可逆,数据保留;归档后不计总额、不参与同步(过滤见 overview / sync-deps)。
+export const setAccountArchived = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(AccountIdInput.extend({ archived: z.boolean() }))
+  .handler(async ({ data, context }) => {
+    await db.setArchived(context.userId, data.accountId, data.archived);
+    log.info("account archived toggled", { accountId: data.accountId, archived: data.archived });
+    return { ok: true as const };
+  });
+
+// 删除:不可逆(snapshots/accountGroups/manual_activity 经 ON DELETE CASCADE 级联清)。前端需二次确认。
+export const deleteAccount = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(AccountIdInput)
+  .handler(async ({ data, context }) => {
+    await db.deleteAccount(context.userId, data.accountId);
+    log.info("account deleted", { accountId: data.accountId });
+    return { ok: true as const };
+  });

@@ -64,6 +64,13 @@
       "when": 1782968184532,
       "tag": "0008_past_winter_soldier",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1783060351577,
+      "tag": "0009_smart_big_bertha",
+      "breakpoints": true
     }
   ]
 }

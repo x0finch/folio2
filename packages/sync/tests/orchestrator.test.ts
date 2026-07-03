@@ -28,6 +28,7 @@ function account(overrides: Partial<AccountSafe> = {}): AccountSafe {
     network: null,
     label: "Wallet",
     createdAt: 0,
+    archivedAt: null,
     ...overrides,
   };
 }

@@ -11,10 +11,12 @@ import { buildTokens, enrichBalances } from "./tokens";
 export const getMyOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
-    const [accounts, snapshots] = await Promise.all([
+    const [allAccounts, snapshots] = await Promise.all([
       db.listAccountsByUser(context.userId),
       db.getLatestSnapshotByUser(context.userId),
     ]);
+    // 归档账户不计总额、不列出(数据仍在,只在账户页「已归档」分区可见)。
+    const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     const tokens = buildTokens(env);
 

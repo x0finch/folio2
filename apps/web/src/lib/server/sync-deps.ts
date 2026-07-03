@@ -26,7 +26,9 @@ export async function warmTokensForUser(userId: string): Promise<void> {
 export function buildSyncDeps(): SyncDeps {
   const tokens = buildTokens(env);
   return {
-    listAccounts: (userId) => db.listAccountsByUser(userId),
+    // 归档账户跳过同步(不产生新快照);过滤在此,syncUser 只见活跃账户。
+    listAccounts: async (userId) =>
+      (await db.listAccountsByUser(userId)).filter((a) => a.archivedAt == null),
     listRawCreds: (userId) => db.listRawCredsByUser(userId), // 批量取全用户 creds(消 syncAccount 的 N+1)
     writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
     // 取余额:缺凭据判定 + 解密(业务层 creds,靠 credentialSpecs 的 type 驱动)→ balances.fetchBalances(明文)。

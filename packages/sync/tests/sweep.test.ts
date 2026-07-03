@@ -4,10 +4,18 @@ import { type SyncDeps, syncAllUsers } from "../src";
 
 // manual 账户(成功路径);bad-type 账户(无 provider → getProvider 抛 → syncAccount 捕获 → ok:false)。
 function manual(id: string, userId: string): AccountSafe {
-  return { id, userId, type: "manual", network: null, label: id, createdAt: 0 };
+  return { id, userId, type: "manual", network: null, label: id, createdAt: 0, archivedAt: null };
 }
 function badType(id: string, userId: string): AccountSafe {
-  return { id, userId, type: "exchange_bybit", network: null, label: id, createdAt: 0 };
+  return {
+    id,
+    userId,
+    type: "exchange_bybit",
+    network: null,
+    label: id,
+    createdAt: 0,
+    archivedAt: null,
+  };
 }
 
 // 按 userId 返回各自账户的注入式 deps(syncAllUsers 用一个 deps 跑所有用户)。

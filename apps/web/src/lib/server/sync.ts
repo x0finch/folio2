@@ -1,7 +1,9 @@
-import { syncUser } from "@folio/sync";
+import { syncAccount, syncUser } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireAuth } from "../require-auth";
+import { db } from "./db";
 import { buildSyncDeps, warmTokensForUser } from "./sync-deps";
 
 // 手动触发同步:遍历该用户全部账户,逐账户隔离写快照。返回每账户 ok/fail,不含任何密钥/明文凭据。
@@ -21,5 +23,25 @@ export const triggerSync = createServerFn({ method: "POST" })
     });
     // 预热代币缓存(best-effort,inline:同步本就耗时,可接受;首次有按需取价的额外延迟)。
     await warmTokensForUser(context.userId);
+    return result;
+  });
+
+// 只同步单个账户(详情侧栏「单独同步」):取该账户 + 其 raw creds → syncAccount 隔离写快照。
+// 归档账户理论上侧栏会禁用此项;即便调用,syncAccount 仍按现有逻辑处理(缺凭据→skipped)。
+export const syncOneAccount = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(z.object({ accountId: z.string().min(1) }))
+  .handler(async ({ data, context }) => {
+    const account = await db.getAccountById(context.userId, data.accountId);
+    if (!account) throw new Error("account not found");
+    const rawCreds = await db.getRawCreds(context.userId, data.accountId);
+    const result = await syncAccount(buildSyncDeps(), context.userId, account, rawCreds);
+    getLogger(["folio", "web", "sync"]).info("single account sync", {
+      accountId: account.id,
+      type: account.type,
+      ok: result.ok,
+      skipped: result.skipped,
+    });
+    await warmTokensForUser(context.userId); // 让总览能 cache-only 富化新价
     return result;
   });

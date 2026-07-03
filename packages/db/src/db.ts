@@ -21,6 +21,8 @@ export function createDb(env: DbEnv) {
     listAccountsByUser: b(q.listAccountsByUser),
     getAccountById: b(q.getAccountById),
     setAccountCredentials: b(q.setAccountCredentials),
+    renameAccount: b(q.renameAccount),
+    setArchived: b(q.setArchived),
     deleteAccount: b(q.deleteAccount),
     getRawCreds: b(q.getRawCreds),
     listRawCredsByUser: b(q.listRawCredsByUser),

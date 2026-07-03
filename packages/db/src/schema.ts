@@ -39,6 +39,8 @@ export const accounts = sqliteTable(
     // P6.6.2:manual 持仓也并入 creds(symbol/amount/usdValue 三个 public 输入),原 data_json 列已删。
     creds: text("enc_credentials"),
     createdAt: integer("created_at").notNull(), // epoch ms
+    // 归档:非 null = 已归档(值为归档时刻 epoch ms)。归档账户不计总额、不参与同步、数据保留、可逆。
+    archivedAt: integer("archived_at"), // epoch ms | null(默认 null = 活跃)
   },
   (t) => [index("accounts_user_id_idx").on(t.userId)],
 );

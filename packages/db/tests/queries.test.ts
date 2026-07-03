@@ -25,7 +25,9 @@ import {
   listSnapshotTotalsByUser,
   listUserIdsWithAccounts,
   removeAccountFromGroup,
+  renameAccount,
   setAccountCredentials,
+  setArchived,
   writeSnapshot,
 } from "../src/queries"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
 
@@ -109,6 +111,24 @@ describe("accounts", () => {
     const sealed = JSON.stringify({ apiKey: "REAL", secret: "<enc>", passphrase: "<enc>" });
     await setAccountCredentials(env, USER_A, acc.id, sealed);
     expect(await getRawCreds(env, USER_A, acc.id)).toBe(sealed);
+  });
+
+  it("renameAccount changes the label (user-scoped)", async () => {
+    const acc = await createAccount(env, USER_A, { type: "manual", label: "Old", creds: "x" });
+    await renameAccount(env, USER_A, acc.id, "New");
+    expect((await getAccountById(env, USER_A, acc.id))?.label).toBe("New");
+    // 越权:另一用户改不动。
+    await renameAccount(env, USER_B, acc.id, "Hacked");
+    expect((await getAccountById(env, USER_A, acc.id))?.label).toBe("New");
+  });
+
+  it("setArchived toggles archivedAt (reversible, user-scoped)", async () => {
+    const acc = await createAccount(env, USER_A, { type: "manual", label: "M", creds: "x" });
+    expect((await getAccountById(env, USER_A, acc.id))?.archivedAt).toBeNull();
+    await setArchived(env, USER_A, acc.id, true);
+    expect((await getAccountById(env, USER_A, acc.id))?.archivedAt).toBeGreaterThan(0);
+    await setArchived(env, USER_A, acc.id, false);
+    expect((await getAccountById(env, USER_A, acc.id))?.archivedAt).toBeNull();
   });
 
   it("listRawCredsByUser returns each account's raw creds (user-scoped; for safeView 富化)", async () => {

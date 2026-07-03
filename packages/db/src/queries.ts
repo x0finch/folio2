@@ -31,6 +31,7 @@ const accountSafeColumns = {
   network: accounts.network,
   label: accounts.label,
   createdAt: accounts.createdAt,
+  archivedAt: accounts.archivedAt,
 };
 
 // 归属校验:确保资源属于该 userId,否则抛错(从 API 形状上杜绝越权)。
@@ -77,7 +78,7 @@ export async function createAccount(
     creds: input.creds,
     createdAt,
   });
-  return { id, userId, type: input.type, network, label: input.label, createdAt };
+  return { id, userId, type: input.type, network, label: input.label, createdAt, archivedAt: null };
 }
 
 export function listAccountsByUser(env: DbEnv, userId: string): Promise<AccountSafe[]> {
@@ -137,6 +138,32 @@ export function listRawCredsByUser(env: DbEnv, userId: string): Promise<AccountR
     .select({ id: accounts.id, creds: accounts.creds })
     .from(accounts)
     .where(eq(accounts.userId, userId));
+}
+
+/** 改账户 label(userId 范围)。 */
+export async function renameAccount(
+  env: DbEnv,
+  userId: string,
+  id: string,
+  label: string,
+): Promise<void> {
+  await getDb(env)
+    .update(accounts)
+    .set({ label })
+    .where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
+}
+
+/** 归档/取消归档(userId 范围):archived=true 写当前时刻,false 置 null。可逆,不删数据。 */
+export async function setArchived(
+  env: DbEnv,
+  userId: string,
+  id: string,
+  archived: boolean,
+): Promise<void> {
+  await getDb(env)
+    .update(accounts)
+    .set({ archivedAt: archived ? Date.now() : null })
+    .where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
 }
 
 /** 删账户:其 accountGroups 配对与 snapshots(及 snapshotBalances)经 ON DELETE CASCADE 级联删除。 */
