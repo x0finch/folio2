@@ -30,12 +30,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
   }),
   // SSR 首屏即正确语言:根 loader 定 locale(cookie/Accept-Language);切换时 invalidate 重跑。
-  loader: () => getLocale(),
+  // now 也在此定(服务端时刻,序列化给客户端):作为 IntlProvider 的全局 now,relativeTime 才有基准
+  //(否则 use-intl 抛 ENVIRONMENT_FALLBACK),且 SSR/客户端一致不产生 hydration 抖动。
+  loader: async () => ({ locale: await getLocale(), now: Date.now() }),
   shellComponent: RootDocument,
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  const locale = Route.useLoaderData();
+  const { locale, now } = Route.useLoaderData();
   return (
     <html lang={locale}>
       <head>
@@ -46,6 +48,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           locale={locale}
           messages={messages[locale]}
           timeZone="UTC"
+          now={new Date(now)}
           // 缺翻译 → 回退到请求的 key 本身(对 Inputs 而言即英文源串 label;见 ProviderInput.label)。
           getMessageFallback={({ key }) => key}
         >

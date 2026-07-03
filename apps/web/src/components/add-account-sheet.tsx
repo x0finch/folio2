@@ -23,6 +23,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
+import { type OnchainType, TYPE_GROUPS, typeLabel } from "../lib/account-types";
 import {
   createExchangeAccount,
   createManualAccount,
@@ -32,32 +33,6 @@ import {
 import { getCredentialSpecs, type InputSpec } from "../lib/server/credentials";
 import { tokenPrice } from "../lib/server/tokens";
 import { TokenCombobox } from "./token-combobox";
-
-// 账户类型注册表:分组 Select 的分组 + 选项(具体类型即选项;随 provider 增多只是多几项)。
-// 展示名多为专有名词(链/所/场所),用常量;分组标题走 i18n。
-const TYPE_GROUPS: {
-  category: "manual" | "onchain" | "exchange" | "perp";
-  types: AccountType[];
-}[] = [
-  { category: "manual", types: ["manual"] },
-  {
-    category: "onchain",
-    types: ["onchain_evm", "onchain_solana", "onchain_sui", "onchain_cosmos"],
-  },
-  { category: "exchange", types: ["exchange_binance", "exchange_okx"] },
-  { category: "perp", types: ["perp_hyperliquid"] },
-];
-type OnchainType = "onchain_evm" | "onchain_solana" | "onchain_sui" | "onchain_cosmos";
-const TYPE_LABELS: Partial<Record<AccountType, string>> = {
-  manual: "Manual Asset",
-  onchain_evm: "Ethereum / EVM",
-  onchain_solana: "Solana",
-  onchain_sui: "Sui",
-  onchain_cosmos: "Cosmos",
-  exchange_binance: "Binance",
-  exchange_okx: "OKX",
-  perp_hyperliquid: "Hyperliquid",
-};
 
 // 按类型派发到对应 server fn(键适配:通用字段 identifier→address 等)。统一成单个 createAccount 留 follow-up。
 async function submitAccount(type: AccountType, label: string, values: Record<string, string>) {
@@ -339,7 +314,7 @@ export function AddAccountSheet() {
           <Select value={type} onValueChange={(v) => setType(v as AccountType)}>
             <SelectTrigger id="add-type">
               {/* 显示选中类型的展示名(label),而非裸 type 值。 */}
-              <SelectValue>{(v: AccountType) => TYPE_LABELS[v] ?? v}</SelectValue>
+              <SelectValue>{(v: AccountType) => typeLabel(v)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {TYPE_GROUPS.map((g) => (
@@ -347,7 +322,7 @@ export function AddAccountSheet() {
                   <SelectLabel>{tCat(`cat_${g.category}`)}</SelectLabel>
                   {g.types.map((ty) => (
                     <SelectItem key={ty} value={ty}>
-                      {TYPE_LABELS[ty] ?? ty}
+                      {typeLabel(ty)}
                     </SelectItem>
                   ))}
                 </SelectGroup>

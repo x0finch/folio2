@@ -1,5 +1,6 @@
-import { buttonVariants, Card, CardContent, CardHeader, CardTitle } from "@folio/ui";
-import { createFileRoute } from "@tanstack/react-router";
+import { Button, buttonVariants, Card, CardContent, CardHeader, CardTitle } from "@folio/ui";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { getKeyStatus } from "../../lib/server/settings";
 
@@ -50,6 +51,79 @@ function Settings() {
           </a>
         </CardContent>
       </Card>
+
+      <ImportCard />
     </div>
+  );
+}
+
+// 数据导入(P6.6):POST 文件到 /api/import(流式 NDJSON);成功后 invalidate 刷新。
+// 从账户页迁来(账户页专注展示);文案沿用 Accounts 命名空间的 import* 键。
+function ImportCard() {
+  const router = useRouter();
+  const t = useTranslations("Accounts");
+  const tc = useTranslations("Common");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMsg(null);
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/import", { method: "POST", body: file });
+      if (!res.ok) throw new Error(await res.text());
+      const { imported } = (await res.json()) as {
+        imported: { accounts: number; groups: number; snapshots: number };
+      };
+      setMsg(
+        t("imported", {
+          accounts: imported.accounts,
+          groups: imported.groups,
+          snapshots: imported.snapshots,
+        }),
+      );
+      await router.invalidate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("importTitle")}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-muted-foreground">{t("importHint")}</p>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".ndjson,application/x-ndjson,application/json"
+            className="hidden"
+            onChange={onImportFile}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            className="self-start"
+            onClick={() => inputRef.current?.click()}
+          >
+            {busy ? tc("verifying") : t("importBtn")}
+          </Button>
+          {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
