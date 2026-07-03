@@ -1,6 +1,6 @@
 import { type Balance, ProviderError } from "@folio/balances";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type FetchOutcome, type SyncDeps, type SyncLogger, syncUser } from "../src";
 
 // 编排层测试:provider 机制(解密/校验/取数/全局 key 收窄)已内化进注入的 fetchBalances,
@@ -51,7 +51,7 @@ function makeDeps(
   const writes: Array<{ accountId: string; input: WriteSnapshotInput }> = [];
   const deps: SyncDeps = {
     listAccounts: async () => accounts,
-    getRawCreds: async () => "{}",
+    listRawCreds: async () => [], // 取余额一律 stub,creds 内容无关
     writeSnapshot: async (_userId, accountId, input) => {
       writes.push({ accountId, input });
       return `snap-${accountId}`;
@@ -212,5 +212,53 @@ describe("syncAccount — 退避重试(仅取余额部分)", () => {
     expect(results[0].ok).toBe(false);
     expect(calls()).toBe(1);
     expect(slept).toHaveLength(0);
+  });
+});
+
+describe("syncUser — 有界并发", () => {
+  it("同一时刻在飞账户数不超过并发上限,且全部账户都跑到", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const accounts = Array.from({ length: 10 }, (_, i) => account({ id: `a${i}` }));
+    const { deps, writes } = makeDeps(accounts, {
+      fetchBalances: async () => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 5)); // 制造重叠窗口
+        inFlight--;
+        return ok([]);
+      },
+    });
+    const { results } = await syncUser(deps, "u1");
+    expect(results).toHaveLength(10);
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(writes).toHaveLength(10);
+    expect(maxInFlight).toBe(6); // SYNC_CONCURRENCY;10 账户 > 6 → 恰好打满池
+  });
+});
+
+describe("syncAccount — 取数超时", () => {
+  it("provider 挂住(永不 resolve)→ 超时按 retryable 重试 → 用尽后 ok:false", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const { deps, writes } = makeDeps([account()], {
+        fetchBalances: () => {
+          calls++;
+          return new Promise<never>(() => {}); // 永不 resolve
+        },
+        sleep: async () => {}, // 退避即时(不占 fake timer;超时用真 setTimeout,被 fake 接管)
+      });
+      const promise = syncUser(deps, "u1");
+      // 每次尝试触发一次超时定时器;推进足够时间并冲洗微任务,走完 3 次尝试。
+      await vi.advanceTimersByTimeAsync(100_000);
+      const { results } = await promise;
+      expect(results[0].ok).toBe(false);
+      expect(results[0].error).toContain("timed out");
+      expect(calls).toBe(3); // RETRY_MAX_ATTEMPTS(超时可重试)
+      expect(writes).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

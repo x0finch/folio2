@@ -27,7 +27,7 @@ export function buildSyncDeps(): SyncDeps {
   const tokens = buildTokens(env);
   return {
     listAccounts: (userId) => db.listAccountsByUser(userId),
-    getRawCreds: (userId, accountId) => db.getRawCreds(userId, accountId),
+    listRawCreds: (userId) => db.listRawCredsByUser(userId), // 批量取全用户 creds(消 syncAccount 的 N+1)
     writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
     // 取余额:缺凭据判定 + 解密(业务层 creds,靠 credentialSpecs 的 type 驱动)→ balances.fetchBalances(明文)。
     // 收窄全局 key / 跑 validator / 调 provider 在 balances 内;SECRETS_KEY 只在本层(app)见。

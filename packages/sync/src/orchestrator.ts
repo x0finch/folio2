@@ -1,5 +1,5 @@
 import { type Account, type AccountType, type Balance, ProviderError } from "@folio/balances";
-import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
+import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
 // 由 app 注入的 fetchBalances 产出(内部先判 isComplete 再解密 + 调 balances.fetchBalances)。
@@ -11,6 +11,8 @@ export type FetchOutcome =
 const RETRY_MAX_ATTEMPTS = 3; // 总尝试次数(1 + 2 重试)
 const RETRY_BASE_MS = 200; // 指数退避基数
 const RETRY_MAX_MS = 5000; // 单次退避上限(也用于 Retry-After 夹紧)
+const SYNC_CONCURRENCY = 6; // 每用户账户取数的并发上限(CF subrequest / provider 限流留余量)
+const FETCH_TIMEOUT_MS = 20_000; // 单次取数(单次尝试)超时上限
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -34,7 +36,8 @@ const noopLogger: SyncLogger = {
 // 真实数据访问仍只经 @folio/db(server fn 把其包装函数绑进来)。
 export interface SyncDeps {
   listAccounts: (userId: string) => Promise<AccountSafe[]>;
-  getRawCreds: (userId: string, accountId: string) => Promise<string | null>;
+  // 批量取该用户全部账户的 raw creds(一次查,syncUser 分发给各 syncAccount)—— 消除按账户的 N+1。
+  listRawCreds: (userId: string) => Promise<AccountRawCreds[]>;
   writeSnapshot: (userId: string, accountId: string, input: WriteSnapshotInput) => Promise<string>;
   // 取余额(领域意图):app 注入 balances.fetchBalances —— 解密/校验/ctx 拼装/provider 调用全在其内。
   // 缺凭据返回 needs-credentials(跳过,不算失败);上游失败抛 ProviderError(本层据 retryable 重试)。
@@ -86,18 +89,55 @@ async function withRetry<T>(
   }
 }
 
+// 有界并发:N 个在飞、逐个补位,结果按输入序返回。fn 不抛(syncAccount 已吞错)→ 无需处理 reject。
+async function runPool<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+// 单次取数超时:超时抛 retryable ProviderError(→ withRetry 重试)。用真 setTimeout 计时(独立于退避 sleep,
+// 故注入即时 sleep 的测试不受影响);p 先决出即 clearTimeout,既避免悬空 rejection 又不留 dangling 定时器。
+// 注:仅"停止等待",不真正 abort 底层 fetch(CF 上 dangling fetch 随 isolate 回收)。
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new ProviderError("UPSTREAM_ERROR", "provider fetch timed out", { retryable: true }),
+        ),
+      ms,
+    );
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
 // 单账户同步,整段 try/catch:失败返回 ok:false,绝不抛(隔离,不阻断其他账户)。
 export async function syncAccount(
   deps: SyncDeps,
   userId: string,
   account: AccountSafe,
+  rawCreds: string | null, // 由 syncUser 批量预取分发(见 listRawCreds)
 ): Promise<AccountSyncResult> {
   const log = deps.log ?? noopLogger;
+  const sleep = deps.sleep ?? defaultSleep;
   // 安全字段(红线:绝不打 creds/secret/地址);userId 显式带,覆盖 cron 路径(无请求级 withContext)。
   const ctxFields = { userId, accountId: account.id, type: account.type };
   try {
-    const raw = await deps.getRawCreds(userId, account.id);
-    const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
+    const stored: Record<string, string> = rawCreds ? JSON.parse(rawCreds) : {};
     const acc: Account = {
       id: account.id,
       userId: account.userId,
@@ -105,10 +145,11 @@ export async function syncAccount(
       network: account.network ?? undefined,
       label: account.label,
     };
-    // 取余额(解密/校验/ctx/provider 调用全在 balances.fetchBalances 内)。仅取数部分重试(写快照不重试)。
+    // 取余额(解密/校验/ctx/provider 调用全在 balances.fetchBalances 内)。仅取数部分重试(写快照不重试);
+    // 每次尝试加超时(挂住的 provider → 超时 → 按 retryable 重试),避免内联 triggerSync 被拖住。
     const outcome = await withRetry(
-      () => deps.fetchBalances(acc, stored),
-      deps.sleep ?? defaultSleep,
+      () => withTimeout(deps.fetchBalances(acc, stored), FETCH_TIMEOUT_MS),
+      sleep,
       log,
       ctxFields,
     );
@@ -148,13 +189,16 @@ export async function syncAccount(
   }
 }
 
-// 同步该用户全部账户,逐账户隔离汇总。
+// 同步该用户全部账户,逐账户隔离、有界并发汇总。account/creds 各一次批量读(消 N+1),再分发。
 export async function syncUser(deps: SyncDeps, userId: string): Promise<SyncResult> {
-  const accounts = await deps.listAccounts(userId);
-  const results: AccountSyncResult[] = [];
-  for (const account of accounts) {
-    results.push(await syncAccount(deps, userId, account));
-  }
+  const [accounts, rawList] = await Promise.all([
+    deps.listAccounts(userId),
+    deps.listRawCreds(userId),
+  ]);
+  const credsById = new Map(rawList.map((r) => [r.id, r.creds]));
+  const results = await runPool(accounts, SYNC_CONCURRENCY, (account) =>
+    syncAccount(deps, userId, account, credsById.get(account.id) ?? null),
+  );
   return { results };
 }
 

@@ -14,7 +14,7 @@ function badType(id: string, userId: string): AccountSafe {
 function makeDeps(accountsByUser: Record<string, AccountSafe[]>): SyncDeps {
   return {
     listAccounts: async (userId) => accountsByUser[userId] ?? [],
-    getRawCreds: async () => "{}",
+    listRawCreds: async () => [],
     writeSnapshot: async (_u, accountId) => `snap-${accountId}`,
     // manual → ok;未知 type(无 provider)→ 抛(模拟 balances.fetchBalances 内 getProvider 兜底报错)。
     fetchBalances: async (account) => {
