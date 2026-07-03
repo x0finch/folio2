@@ -139,13 +139,6 @@ export function TokenCombobox({
     });
   };
 
-  // 点富展示 → 展开搜索,预填当前 symbol 并全选。
-  const beginEdit = () => {
-    setOpen(true);
-    setQuery(value ? value.symbol.toUpperCase() : "");
-    focusInput();
-  };
-
   // 点叉叉 → 清除选中,清空搜索词,展开下拉重新选。
   const clearSelection = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -157,20 +150,18 @@ export function TokenCombobox({
 
   const isSelectedAndClosed = value !== null && !open;
 
+  // 选中态覆盖层:整体 pointer-events-none —— 点击「穿透」到底下的输入框,由 Combobox 自身的 openOnInputClick
+  //(与空态同一条打开路径,稳定不闪)展开下拉;富展示纯视觉。只有右侧叉叉恢复 pointer-events 供清除。
   const selectedOverlay = isSelectedAndClosed ? (
-    <div className="absolute inset-0 flex items-center gap-2 rounded-md border border-input bg-background pr-2 pl-3 text-sm">
-      <button
-        type="button"
-        onClick={beginEdit}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
-      >
+    <div className="pointer-events-none absolute inset-0 flex items-center gap-2 rounded-md border border-input bg-background pr-2 pl-3 text-sm">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <TokenRow token={value} />
-      </button>
+      </div>
       <button
         type="button"
         aria-label={t("clearToken")}
         onClick={clearSelection}
-        className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none"
+        className="pointer-events-auto shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none"
       >
         <XIcon className="size-4" />
       </button>
@@ -207,12 +198,18 @@ export function TokenCombobox({
       onInputValueChange={setQuery}
       filter={null}
       openOnInputClick
-      itemToStringLabel={(token: TokenInfo) => (token ? token.symbol.toUpperCase() : "")}
+      // 选中后不把 symbol 回填进搜索框(输入框被富展示覆盖,不需要显示;返回 ""):否则 query 变成 symbol,
+      // 再次点开会以该 symbol 为关键词搜索,而非回到无输入的 top-N 默认列表。
+      itemToStringLabel={() => ""}
       isItemEqualToValue={(a: TokenInfo, b: TokenInfo) => a?.ref.identifier === b?.ref.identifier}
     >
       {/* 输入框常驻;选中且下拉关闭时,在同位叠富展示覆盖层(点它重新展开)。 */}
       <div ref={boxRef} className="relative">
-        <ComboboxInput className="w-full" placeholder={t("searchTokenPlaceholder")} />
+        <ComboboxInput
+          className="w-full"
+          placeholder={t("searchTokenPlaceholder")}
+          onFocus={(e) => e.currentTarget.select()} // 重开选中项时全选,便于一键替换
+        />
         {selectedOverlay}
       </div>
       <ComboboxContent>{dropdownBody}</ComboboxContent>
