@@ -40,6 +40,16 @@ export {
   SelectValue,
 } from "./components/select";
 export {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "./components/sheet";
+export {
   Table,
   TableBody,
   TableCaption,

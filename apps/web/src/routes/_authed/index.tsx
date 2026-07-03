@@ -12,6 +12,7 @@ import {
 } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useFormatter, useTranslations } from "use-intl";
+import { AddAccountSheet } from "../../components/add-account-sheet";
 import { PortfolioChart } from "../../components/portfolio-chart";
 import { type DefiGroup, type SpotRow, toAccountSections } from "../../lib/account-view";
 import { type GroupedView, toGroupedView } from "../../lib/groups-view";
@@ -253,9 +254,12 @@ function Overview() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <p className="text-sm text-muted-foreground">{t("totalValue")}</p>
-        <p className="text-4xl font-bold">{usd(totalUsd)}</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm text-muted-foreground">{t("totalValue")}</p>
+          <p className="text-4xl font-bold">{usd(totalUsd)}</p>
+        </div>
+        <AddAccountSheet />
       </div>
 
       <Card>

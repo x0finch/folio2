@@ -1,12 +1,10 @@
 import type { ManualActivity } from "@folio/db";
-import type { TokenInfo } from "@folio/tokens";
 import {
   Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  Checkbox,
   Input,
   Label,
   Select,
@@ -18,15 +16,9 @@ import {
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
+import { AddAccountSheet } from "../../components/add-account-sheet";
 import { CredentialForm } from "../../components/credential-form";
-import { TokenCombobox } from "../../components/token-combobox";
-import {
-  createExchangeAccount,
-  createManualAccount,
-  createOnchainAccount,
-  createPerpAccount,
-  listMyAccounts,
-} from "../../lib/server/accounts";
+import { listMyAccounts } from "../../lib/server/accounts";
 import { getCredentialSpecs } from "../../lib/server/credentials";
 import {
   addAccountToGroup,
@@ -41,27 +33,6 @@ import {
   listManualActivity,
 } from "../../lib/server/manual-activity";
 import { triggerSync } from "../../lib/server/sync";
-import { tokenPrice } from "../../lib/server/tokens";
-
-// 可录入的链上账户类型 → 展示名(EVM 走 zerion;其余走 coinstats)。
-const ONCHAIN_TYPES = [
-  { value: "onchain_evm", label: "Ethereum / EVM" },
-  { value: "onchain_solana", label: "Solana" },
-  { value: "onchain_sui", label: "Sui" },
-  { value: "onchain_cosmos", label: "Cosmos" },
-] as const;
-type OnchainType = (typeof ONCHAIN_TYPES)[number]["value"];
-
-// 可录入的交易所(有 provider 的);okx 需 passphrase。
-const EXCHANGE_TYPES = [
-  { value: "exchange_binance", label: "Binance" },
-  { value: "exchange_okx", label: "OKX" },
-] as const;
-type ExchangeType = (typeof EXCHANGE_TYPES)[number]["value"];
-
-// 可录入的永续 DEX(有 provider 的);地址=EVM 地址。derive/extended 就绪再加。
-const PERP_TYPES = [{ value: "perp_hyperliquid", label: "Hyperliquid" }] as const;
-type PerpType = (typeof PERP_TYPES)[number]["value"];
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
@@ -92,61 +63,9 @@ function Accounts() {
   const [groupName, setGroupName] = useState("");
   const [groupError, setGroupError] = useState<string | null>(null);
 
-  // manual 录入(一账户一资产)。选币为主路径(P7.4.3):默认搜索 CoinGecko 选定代币(填 symbol + identifier);
-  // 找不到再切手动模式自填 symbol(不关联代币,identifier 空)。
-  const [label, setLabel] = useState("");
-  const [mManual, setMManual] = useState(false); // false=搜索选币(默认),true=手动填 symbol
-  const [mPicked, setMPicked] = useState<TokenInfo | null>(null); // 选中的代币
-  const [mSymbol, setMSymbol] = useState(""); // 手动模式下自填的 symbol
-  const [mFixed, setMFixed] = useState(false); // 锁定固定值(P7.4.4):跳过市价、钉死 unitPrice
-  const [mAmount, setMAmount] = useState("");
-  const [mUnitPrice, setMUnitPrice] = useState("");
-  const [mPriceBusy, setMPriceBusy] = useState(false); // 选币后自动取市价中
-  const priceReqRef = useRef(0); // 竞态守卫:只应用最近一次取价结果
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // 账户录入统一走 AddAccountSheet 侧栏(见 components/add-account-sheet.tsx);本页只留同步/分组/活动/导入。
+  const [busy, setBusy] = useState(false); // 同步中(onSync)
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
-
-  // 选中代币(P7.4.5):自动取当前市价预填单价(用户可改)。快速改选时靠 priceReqRef 丢弃旧结果。
-  async function onPickToken(token: TokenInfo | null) {
-    setMPicked(token);
-    if (!token) return;
-    const reqId = ++priceReqRef.current;
-    setMPriceBusy(true);
-    try {
-      const p = await tokenPrice({ data: { identifier: token.ref.identifier } });
-      if (priceReqRef.current === reqId && p?.unitPrice != null) setMUnitPrice(String(p.unitPrice));
-    } catch {
-      // 取价失败不阻断:用户手填单价即可
-    } finally {
-      if (priceReqRef.current === reqId) setMPriceBusy(false);
-    }
-  }
-
-  // on-chain 录入表单(链可选)
-  const [ocType, setOcType] = useState<OnchainType>("onchain_evm");
-  const [ocLabel, setOcLabel] = useState("");
-  const [ocAddress, setOcAddress] = useState("");
-  const [ocError, setOcError] = useState<string | null>(null);
-  const [ocBusy, setOcBusy] = useState(false);
-
-  // 交易所(CEX)录入表单
-  const [exType, setExType] = useState<ExchangeType>("exchange_binance");
-  const [exLabel, setExLabel] = useState("");
-  const [exApiKey, setExApiKey] = useState("");
-  const [exSecret, setExSecret] = useState("");
-  const [exPassphrase, setExPassphrase] = useState("");
-  const [exError, setExError] = useState<string | null>(null);
-  const [exBusy, setExBusy] = useState(false);
-  // 该交易所是否需要 passphrase(由 provider 的 inputs 派生,不再硬编码 okx)。
-  const exNeedsPassphrase = (credentialSpecs[exType] ?? []).some((i) => i.key === "passphrase");
-
-  // 永续(perp)录入表单(只读地址)
-  const [pType, setPType] = useState<PerpType>("perp_hyperliquid");
-  const [pLabel, setPLabel] = useState("");
-  const [pAddress, setPAddress] = useState("");
-  const [pError, setPError] = useState<string | null>(null);
-  const [pBusy, setPBusy] = useState(false);
 
   // 导入(P6.6):POST 文件到 /api/import(流式 NDJSON);成功后 invalidate 刷新列表。
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -179,103 +98,6 @@ function Accounts() {
     } finally {
       setImportBusy(false);
       if (importInputRef.current) importInputRef.current.value = "";
-    }
-  }
-
-  async function onCreateExchange(e: React.FormEvent) {
-    e.preventDefault();
-    setExError(null);
-    setExBusy(true);
-    try {
-      await createExchangeAccount({
-        data: {
-          type: exType,
-          label: exLabel,
-          apiKey: exApiKey,
-          secret: exSecret,
-          passphrase: exPassphrase || undefined,
-        },
-      });
-      setExLabel("");
-      setExApiKey("");
-      setExSecret("");
-      setExPassphrase("");
-      await router.invalidate();
-    } catch (err) {
-      setExError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setExBusy(false);
-    }
-  }
-
-  async function onCreatePerp(e: React.FormEvent) {
-    e.preventDefault();
-    setPError(null);
-    setPBusy(true);
-    try {
-      await createPerpAccount({ data: { type: pType, label: pLabel, address: pAddress } });
-      setPLabel("");
-      setPAddress("");
-      await router.invalidate();
-    } catch (err) {
-      setPError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPBusy(false);
-    }
-  }
-
-  async function onCreateOnchain(e: React.FormEvent) {
-    e.preventDefault();
-    setOcError(null);
-    setOcBusy(true);
-    try {
-      await createOnchainAccount({ data: { type: ocType, label: ocLabel, address: ocAddress } });
-      setOcLabel("");
-      setOcAddress("");
-      await router.invalidate();
-    } catch (err) {
-      setOcError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setOcBusy(false);
-    }
-  }
-
-  async function onCreate(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    // 选币模式取选中代币的 symbol + identifier;手动模式取自填 symbol(不关联)。
-    const symbol = mManual ? mSymbol.trim() : (mPicked?.symbol.toUpperCase() ?? "");
-    const identifier = mManual ? undefined : mPicked?.ref.identifier;
-    if (!symbol) {
-      setError(t("selectTokenRequired"));
-      return;
-    }
-    setBusy(true);
-    try {
-      await createManualAccount({
-        data: {
-          label,
-          symbol,
-          amount: mAmount,
-          unitPrice: mUnitPrice,
-          ...(identifier ? { identifier } : {}),
-          ...(mFixed ? { fixed: true } : {}),
-        },
-      });
-      setLabel("");
-      setMManual(false);
-      setMPicked(null);
-      setMSymbol("");
-      setMFixed(false);
-      setMAmount("");
-      setMUnitPrice("");
-      priceReqRef.current++; // 作废可能在途的取价,避免填回已清空的表单
-      setMPriceBusy(false);
-      await router.invalidate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -331,9 +153,12 @@ function Accounts() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <Button onClick={onSync} disabled={busy || accounts.length === 0}>
-          {t("syncNow")}
-        </Button>
+        <div className="flex gap-2">
+          <AddAccountSheet />
+          <Button onClick={onSync} disabled={busy || accounts.length === 0}>
+            {t("syncNow")}
+          </Button>
+        </div>
       </div>
       {syncMsg && <p className="text-sm text-muted-foreground">{syncMsg}</p>}
 
@@ -423,290 +248,6 @@ function Accounts() {
               ))}
             </ul>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("addManual")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onCreate} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="label">{t("label")}</Label>
-              <Input
-                id="label"
-                required
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder={t("manualLabelPlaceholder")}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="m-token">{t("token")}</Label>
-              {mManual ? (
-                // 手动模式:自填 symbol,不关联代币。
-                <>
-                  <Input
-                    id="m-token"
-                    required
-                    autoComplete="off"
-                    value={mSymbol}
-                    onChange={(e) => setMSymbol(e.target.value)}
-                    placeholder="BTC"
-                  />
-                  <button
-                    type="button"
-                    className="self-start text-xs text-muted-foreground underline"
-                    onClick={() => {
-                      setMManual(false);
-                      setMSymbol("");
-                    }}
-                  >
-                    {t("searchInstead")}
-                  </button>
-                </>
-              ) : (
-                // 默认:搜索选币(Combobox)。搜不到 → onManual 带文本切手动模式。
-                <>
-                  <TokenCombobox
-                    value={mPicked}
-                    onChange={onPickToken}
-                    onManual={(q) => {
-                      setMManual(true);
-                      setMSymbol(q);
-                      setMPicked(null);
-                    }}
-                  />
-                  {!mPicked && (
-                    <button
-                      type="button"
-                      className="self-start text-xs text-muted-foreground underline"
-                      onClick={() => setMManual(true)}
-                    >
-                      {t("enterManually")}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="m-amount">{t("amount")}</Label>
-              <Input
-                id="m-amount"
-                type="number"
-                step="any"
-                required
-                value={mAmount}
-                onChange={(e) => setMAmount(e.target.value)}
-                placeholder="0.5"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="m-unit-price">{t("unitPrice")}</Label>
-              <Input
-                id="m-unit-price"
-                type="number"
-                step="any"
-                required
-                value={mUnitPrice}
-                onChange={(e) => setMUnitPrice(e.target.value)}
-                placeholder="64000"
-              />
-              <p className="text-xs text-muted-foreground">
-                {mPriceBusy ? t("fetchingPrice") : t("unitPriceHint")}
-              </p>
-            </div>
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="m-fixed"
-                  checked={mFixed}
-                  onCheckedChange={(v) => setMFixed(v === true)}
-                />
-                <Label htmlFor="m-fixed">{t("fixedLabel")}</Label>
-              </div>
-              <p className="text-xs text-muted-foreground">{t("fixedHint")}</p>
-            </div>
-
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" disabled={busy} className="self-start">
-              {t("createAccount")}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("addOnchain")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onCreateOnchain} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="oc-chain">{t("chain")}</Label>
-              <Select value={ocType} onValueChange={(v) => setOcType(v as OnchainType)}>
-                <SelectTrigger id="oc-chain">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ONCHAIN_TYPES.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="oc-label">{t("label")}</Label>
-              <Input
-                id="oc-label"
-                required
-                value={ocLabel}
-                onChange={(e) => setOcLabel(e.target.value)}
-                placeholder={t("walletLabelPlaceholder")}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="oc-address">{t("address")}</Label>
-              <Input
-                id="oc-address"
-                required
-                value={ocAddress}
-                onChange={(e) => setOcAddress(e.target.value)}
-                placeholder={
-                  ocType === "onchain_evm" ? t("addrPlaceholderEvm") : t("addrPlaceholderGeneric")
-                }
-              />
-              <p className="text-sm text-muted-foreground">{t("onchainHint")}</p>
-            </div>
-            {ocError && <p className="text-sm text-destructive">{ocError}</p>}
-            <Button type="submit" disabled={ocBusy} className="self-start">
-              {ocBusy ? tc("verifying") : t("addWallet")}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("addExchange")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onCreateExchange} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="ex-exchange">{t("exchange")}</Label>
-              <Select value={exType} onValueChange={(v) => setExType(v as ExchangeType)}>
-                <SelectTrigger id="ex-exchange">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {EXCHANGE_TYPES.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="ex-label">{t("label")}</Label>
-              <Input
-                id="ex-label"
-                required
-                value={exLabel}
-                onChange={(e) => setExLabel(e.target.value)}
-                placeholder={t("exchangeLabelPlaceholder")}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="ex-key">{t("apiKey")}</Label>
-              <Input
-                id="ex-key"
-                required
-                value={exApiKey}
-                onChange={(e) => setExApiKey(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="ex-secret">{t("apiSecret")}</Label>
-              <Input
-                id="ex-secret"
-                type="password"
-                required
-                value={exSecret}
-                onChange={(e) => setExSecret(e.target.value)}
-              />
-            </div>
-            {exNeedsPassphrase && (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="ex-passphrase">{t("passphrase")}</Label>
-                <Input
-                  id="ex-passphrase"
-                  type="password"
-                  required
-                  value={exPassphrase}
-                  onChange={(e) => setExPassphrase(e.target.value)}
-                />
-              </div>
-            )}
-            <p className="text-sm text-muted-foreground">{t("exchangeHint")}</p>
-            {exError && <p className="text-sm text-destructive">{exError}</p>}
-            <Button type="submit" disabled={exBusy} className="self-start">
-              {exBusy ? tc("verifying") : t("addExchangeBtn")}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("addPerp")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onCreatePerp} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="p-venue">{t("venue")}</Label>
-              <Select value={pType} onValueChange={(v) => setPType(v as PerpType)}>
-                <SelectTrigger id="p-venue">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PERP_TYPES.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="p-label">{t("label")}</Label>
-              <Input
-                id="p-label"
-                required
-                value={pLabel}
-                onChange={(e) => setPLabel(e.target.value)}
-                placeholder={t("perpLabelPlaceholder")}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="p-address">{t("address")}</Label>
-              <Input
-                id="p-address"
-                required
-                value={pAddress}
-                onChange={(e) => setPAddress(e.target.value)}
-                placeholder={t("addrPlaceholderEvm")}
-              />
-              <p className="text-sm text-muted-foreground">{t("perpHint")}</p>
-            </div>
-            {pError && <p className="text-sm text-destructive">{pError}</p>}
-            <Button type="submit" disabled={pBusy} className="self-start">
-              {pBusy ? tc("verifying") : t("addPerpBtn")}
-            </Button>
-          </form>
         </CardContent>
       </Card>
 
