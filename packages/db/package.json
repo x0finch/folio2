@@ -11,7 +11,6 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 migrations apply folio --local",
     "db:migrate:remote": "wrangler d1 migrations apply folio --remote"
   },
   "dependencies": {
