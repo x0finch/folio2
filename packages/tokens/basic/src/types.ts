@@ -6,22 +6,21 @@
 // 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 provider 零返工。
 
 // 上游代币 id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/chain)混用。
-// 仅用于下面的 `TokenRef.identifier`;通过 `as TokenIdentifier` 在可信边界(解析上游响应)构造。
-export type TokenIdentifier = string & { readonly __brand: "TokenIdentifier" };
+// 仅用于下面的 `TokenRef.identifier`;通过 `as CgkCoinId` 在可信边界(解析上游响应)构造。
+export type CgkCoinId = string & { readonly __brand: "CgkCoinId" };
 
 // 解析【输出】:带 source 标签的规范引用。判别联合 —— 将来加股票 = 新增 `{ source:"equity"; … }`,
 // 存储/富化 seam 不返工。
-export type TokenRef = { source: "coingecko"; identifier: TokenIdentifier };
+export type TokenRef = { source: "coingecko"; identifier: CgkCoinId };
 
 // 解析【输入】(持仓侧;由调用方从 Balance 抽取)。
 // `ref` = 已知解析(命中则直接升格,跳过查找);`identifier` = 用户显式选定的上游 id(如选币),
 // tokens 层据它造 ref —— 调用方无需知道 source / 自己拼 TokenRef。
 export interface AssetRef {
   symbol: string;
-  chain?: string;
-  contract?: string;
+  tokenIdentifier?: string; // 已构造的 CAIP-19 标识(持仓侧持久化);解析优先用它(impl key + 懒解析原料)
   ref?: TokenRef;
-  identifier?: string;
+  identifier?: string; // 用户显式选定的上游 id(选币)
 }
 
 export type Confidence = "high" | "low";
@@ -58,4 +57,33 @@ export interface TokenPrice {
 export interface TokenCandidate {
   ref: TokenRef;
   marketCapRank?: number;
+}
+
+// —— 代币表整行读出(store 的统一读单元)——
+// 价格 SWR:过期不删、读出带 stale 标(展示先给旧价,调用方后台刷新)。
+export interface TokenRecordPrice {
+  unitPrice: number;
+  change24h?: number;
+  asOf: number;
+  stale: boolean; // price_expires_at < now
+}
+
+// 代币表一行:CGK 收录币(ref 非空)或 provider 孤儿(CGK 未收录/未解析,ref 为 null)。
+// logo = CGK(canonical);providerLogo = provider 自带备用槽(孤儿的主图;CGK 缺图时兜底)。
+export interface TokenRecord {
+  id: string;
+  ref: TokenRef | null;
+  symbol: string;
+  name: string;
+  logo?: string;
+  providerLogo?: string;
+  marketCapRank?: number;
+  price?: TokenRecordPrice;
+}
+
+// provider 侧 seed(同步时采集):孤儿建行/已有行刷新 providerLogo 用。
+export interface ProviderTokenSeed {
+  symbol: string; // 已归一(大写)
+  name?: string;
+  providerLogo?: string;
 }

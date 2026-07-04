@@ -3,7 +3,7 @@
 // provider 实现(@folio/tokens-provider-coingecko)依赖本包的契约面。
 
 export {
-  ABSENT_TTL_MS,
+  CGK_RECHECK_TTL_MS,
   CONTRACT_TTL_MS,
   DEFAULT_TOP_N,
   INFO_TTL_MS,
@@ -19,14 +19,23 @@ export { TokenError } from "./errors";
 export type { TokenProvider } from "./provider";
 export { parseRefKey, refKey } from "./ref";
 export type { TokenStore } from "./store";
+export {
+  buildTokenIdentifier,
+  type ParsedTokenIdentifier,
+  parseTokenIdentifier,
+  type TokenIdentifierInput,
+} from "./token-identifier";
 export type {
   AssetRef,
+  CgkCoinId,
   Confidence,
+  ProviderTokenSeed,
   Resolution,
   ResolutionVia,
   TokenCandidate,
-  TokenIdentifier,
   TokenInfo,
   TokenPrice,
+  TokenRecord,
+  TokenRecordPrice,
   TokenRef,
 } from "./types";

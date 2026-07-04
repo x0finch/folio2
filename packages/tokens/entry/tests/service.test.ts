@@ -1,9 +1,10 @@
 import type {
+  CgkCoinId,
   TokenCandidate,
-  TokenIdentifier,
   TokenInfo,
   TokenPrice,
   TokenProvider,
+  TokenRecord,
   TokenRef,
   TokenStore,
 } from "@folio/tokens-basic";
@@ -12,17 +13,15 @@ import { describe, expect, it, vi } from "vitest";
 import { normalizeSymbol } from "../src/normalize";
 import { refreshWarm, resolveAsset } from "../src/service";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 const key = (r: TokenRef) => `${r.source}:${r.identifier}`;
-const ck = (chain: string, contract: string) => `${chain.toLowerCase()} ${contract.toLowerCase()}`;
 
-// 内存假 store(实现新 TokenStore;合约缓存按 chain 三态、warm 候选、warmAsOf)。
+// 内存假 store(实现新 TokenStore:代币表按 refKey、实现索引按 caip19 键、warm 候选、warmAsOf)。
 function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
   let wAsOf = seed?.warmAsOf ?? null;
   const candidates = new Map<string, TokenCandidate[]>();
-  const contracts = new Map<string, TokenRef | null>();
-  const infos = new Map<string, TokenInfo>();
-  const prices = new Map<string, TokenPrice>();
+  const byRef = new Map<string, TokenRecord>();
+  const impl = new Map<string, { rec: TokenRecord; cgkCheckedUntil: number | null }>();
 
   return {
     async getCandidates(symbol) {
@@ -34,8 +33,14 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
         const list = candidates.get(sym) ?? [];
         list.push({ ref: info.ref, marketCapRank: price.marketCapRank });
         candidates.set(sym, list);
-        infos.set(key(info.ref), info);
-        prices.set(key(price.ref), price);
+        byRef.set(key(info.ref), {
+          id: key(info.ref),
+          ref: info.ref,
+          symbol: info.symbol,
+          name: info.name,
+          logo: info.logo,
+          price: { unitPrice: price.unitPrice, asOf: price.asOf, stale: false },
+        });
       }
       wAsOf = 0;
     },
@@ -45,34 +50,64 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
     async listTopTokens() {
       return [];
     },
-    async getContractRef(chain, contract) {
-      const k = ck(chain, contract);
-      return contracts.has(k) ? contracts.get(k) : undefined;
-    },
-    async putContractRef(chain, contract, ref) {
-      contracts.set(ck(chain, contract), ref);
-    },
-    async getInfo(refs) {
-      const out = new Map<string, TokenInfo>();
-      for (const r of refs) {
-        const v = infos.get(key(r));
-        if (v) out.set(key(r), v);
+    async getByImpl(keys) {
+      const out = new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
+      for (const k of keys) {
+        const e = impl.get(k);
+        if (e) out.set(k, { ...e.rec, cgkCheckedUntil: e.cgkCheckedUntil });
       }
       return out;
     },
-    async putInfo(list) {
-      for (const i of list) infos.set(key(i.ref), i);
+    async ensureImplToken(k, seed2) {
+      const e = impl.get(k);
+      if (e) {
+        if (seed2.providerLogo) e.rec.providerLogo = seed2.providerLogo;
+        return;
+      }
+      impl.set(k, {
+        rec: {
+          id: k,
+          ref: null,
+          symbol: seed2.symbol,
+          name: seed2.name ?? seed2.symbol,
+          providerLogo: seed2.providerLogo,
+        },
+        cgkCheckedUntil: null,
+      });
     },
-    async getPrices(refs) {
-      const out = new Map<string, TokenPrice>();
+    async markCgkChecked(k, until) {
+      const e = impl.get(k);
+      if (e) e.cgkCheckedUntil = until;
+    },
+    async linkImplToCgk(k, info, price) {
+      const orphan = impl.get(k)?.rec;
+      const rec: TokenRecord = {
+        id: key(info.ref),
+        ref: info.ref,
+        symbol: info.symbol,
+        name: info.name,
+        logo: info.logo,
+        providerLogo: byRef.get(key(info.ref))?.providerLogo ?? orphan?.providerLogo,
+        price: price
+          ? { unitPrice: price.unitPrice, asOf: price.asOf, stale: false }
+          : byRef.get(key(info.ref))?.price,
+      };
+      byRef.set(key(info.ref), rec);
+      impl.set(k, { rec, cgkCheckedUntil: null });
+    },
+    async getByRefs(refs) {
+      const out = new Map<string, TokenRecord>();
       for (const r of refs) {
-        const v = prices.get(key(r));
+        const v = byRef.get(key(r));
         if (v) out.set(key(r), v);
       }
       return out;
     },
     async putPrices(list) {
-      for (const p of list) prices.set(key(p.ref), p);
+      for (const p of list) {
+        const rec = byRef.get(key(p.ref));
+        if (rec) rec.price = { unitPrice: p.unitPrice, asOf: p.asOf, stale: false };
+      }
     },
   };
 }
@@ -95,7 +130,19 @@ describe("resolveAsset", () => {
     ).toEqual({ ref: cg("pinned"), confidence: "high", via: "explicit" });
   });
 
-  it("contract: unknown → fetchByContract, caches ref+info+price; 2nd call no refetch", async () => {
+  it("coingecko: tokenIdentifier (厂商寻址,如 manual 选币) → 直达显式 ref,不查 store/source", async () => {
+    const fetchByContract = vi.fn();
+    const provider = { fetchByContract } as unknown as TokenProvider;
+    expect(
+      await resolveAsset(
+        { symbol: "BTC", tokenIdentifier: "coingecko:bitcoin" },
+        { provider, store: fakeStore() },
+      ),
+    ).toEqual({ ref: cg("bitcoin"), confidence: "high", via: "explicit" });
+    expect(fetchByContract).not.toHaveBeenCalled(); // 已是规范 ref,不回源、不掉 symbol
+  });
+
+  it("contract: unknown → fetchByContract, links impl→cgk; 2nd call no refetch", async () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => ({
       ref: cg("usd-coin"),
@@ -103,20 +150,21 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const provider = { fetchByContract } as unknown as TokenProvider;
-    const asset = { symbol: "USDC", chain: "ethereum", contract: "0xABC" };
+    const asset = { symbol: "USDC", tokenIdentifier: "chain:ethereum/token:0xabc" };
 
     const r1 = await resolveAsset(asset, { provider, store });
     expect(r1).toEqual({ ref: cg("usd-coin"), confidence: "high", via: "contract" });
-    expect((await store.getInfo([cg("usd-coin")])).get("coingecko:usd-coin")?.symbol).toBe("usdc");
-    expect((await store.getPrices([cg("usd-coin")])).size).toBe(1);
+    const rec = (await store.getByRefs([cg("usd-coin")])).get("coingecko:usd-coin");
+    expect(rec?.symbol).toBe("usdc");
+    expect(rec?.price?.unitPrice).toBe(1);
 
     const r2 = await resolveAsset(asset, { provider, store });
     expect(r2.via).toBe("contract");
-    expect(fetchByContract).toHaveBeenCalledTimes(1); // cached
-    expect(fetchByContract).toHaveBeenCalledWith("ethereum", "0xABC"); // source gets our chain
+    expect(fetchByContract).toHaveBeenCalledTimes(1); // impl 索引已指向 cgk,不再回源
+    expect(fetchByContract).toHaveBeenCalledWith("ethereum", "0xabc"); // chainRef + contract parsed from tokenIdentifier
   });
 
-  it("lazy:false (display) → contract cache miss does NOT hit source", async () => {
+  it("lazy:false (display) → impl miss does NOT hit source", async () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => ({
       ref: cg("usd-coin"),
@@ -124,26 +172,33 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const provider = { fetchByContract } as unknown as TokenProvider;
-    const asset = { symbol: "USDC", chain: "ethereum", contract: "0xABC" };
+    const asset = { symbol: "USDC", tokenIdentifier: "chain:ethereum/token:0xabc" };
 
     const r = await resolveAsset(asset, { provider, store }, { lazy: false });
     expect(r.via).toBe("none"); // 无 warm/override 时降级
     expect(fetchByContract).not.toHaveBeenCalled(); // cache-only,零网络
   });
 
-  it("contract: source returns null (unmapped chain / 404) → none, absent cached, no refetch", async () => {
+  it("contract: source returns null (CGK 未收录) → none, orphan seeded + recheck marked, no refetch", async () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => null);
     const provider = { fetchByContract } as unknown as TokenProvider;
-    const asset = { symbol: "ZZZ", chain: "ethereum", contract: "0xDEAD" };
+    const asset = { symbol: "ZZZ", tokenIdentifier: "chain:ethereum/token:0xdead" };
 
     expect(await resolveAsset(asset, { provider, store })).toEqual({
       ref: null,
       confidence: "low",
       via: "none",
     });
+    // 孤儿已 seed(展示仍有 symbol)且记了复查时刻
+    const rec = (await store.getByImpl(["chain:ethereum/token:0xdead"])).get(
+      "chain:ethereum/token:0xdead",
+    );
+    expect(rec).toMatchObject({ ref: null, symbol: "ZZZ" });
+    expect(rec?.cgkCheckedUntil).toBeGreaterThan(Date.now());
+
     await resolveAsset(asset, { provider, store });
-    expect(fetchByContract).toHaveBeenCalledTimes(1); // absent cached
+    expect(fetchByContract).toHaveBeenCalledTimes(1); // 复查时刻未到,不再回源
   });
 
   it("no chain/contract → skips contract path, uses warm symbol", async () => {

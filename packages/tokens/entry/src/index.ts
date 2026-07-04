@@ -7,5 +7,6 @@ export {
   type CreateTokensConfig,
   createTokens,
   type EnrichedAsset,
+  type ProviderAsset,
   type Tokens,
 } from "./tokens";

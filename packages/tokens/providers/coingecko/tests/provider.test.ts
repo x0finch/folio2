@@ -1,4 +1,4 @@
-import { TokenError, type TokenIdentifier, type TokenRef } from "@folio/tokens-basic";
+import { type CgkCoinId, TokenError, type TokenRef } from "@folio/tokens-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CG_BASE_FREE,
@@ -11,7 +11,7 @@ import {
 import { createCoinGeckoProvider } from "../src/provider";
 
 const USER_AGENT_HEADER = "user-agent";
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 
 interface Call {
   url: URL;

@@ -1,15 +1,17 @@
 import type {
   AssetRef,
+  CgkCoinId,
   Resolution,
-  TokenIdentifier,
   TokenInfo,
   TokenPrice,
   TokenProvider,
+  TokenRecord,
   TokenRef,
   TokenStore,
 } from "@folio/tokens-basic";
-import { OVERRIDES, PRICE_TTL_MS, refKey } from "@folio/tokens-basic";
+import { CONTRACT_TTL_MS, OVERRIDES, PRICE_TTL_MS, refKey } from "@folio/tokens-basic";
 import { createCoinGeckoProvider } from "@folio/tokens-provider-coingecko";
+import { normalizeSymbol } from "./normalize";
 import { type ResolveOpts, refreshWarm, resolveAsset } from "./service";
 
 export interface CreateTokensConfig {
@@ -20,11 +22,25 @@ export interface CreateTokensConfig {
   provider?: TokenProvider;
 }
 
-// 单条富化结果(cache-only):按输入 asset 顺序对齐。
+// 单条富化结果(cache-only,扁平):ref=null 但仍可能有展示数据(provider 孤儿)。
+// priceStale:有 ref 而价格过期/缺失(可后台刷新);孤儿无价不算 stale(无处可刷)。
 export interface EnrichedAsset {
   ref: TokenRef | null;
-  info?: TokenInfo;
-  price?: TokenPrice;
+  name?: string;
+  logo?: string; // canonical(CGK)
+  providerLogo?: string; // provider 备用(展示回退链由调用方定序)
+  unitPrice?: number;
+  change24h?: number;
+  priceStale?: boolean;
+}
+
+// provider 采集入参(sync 后调用):可寻址的余额行 → seed/刷新代币表与实现索引。
+// tokenId = 已构造的 CAIP-19 标识(合约形);调用方只传合约类(native/cgk 无需 seed)。
+export interface ProviderAsset {
+  tokenId: string;
+  symbol: string;
+  name?: string;
+  logo?: string;
 }
 
 // tokens 对外的领域实例:只暴露意图方法,内部编排 provider + store。调用方(app)不碰缓存/回源/写回、
@@ -36,12 +52,16 @@ export interface Tokens {
   topTokens(limit: number): Promise<TokenInfo[]>;
   // 解析持仓身份 → 规范 ref。asset.identifier(用户显式选)由本层造 ref。
   resolve(asset: AssetRef, opts?: ResolveOpts): Promise<Resolution>;
-  // 取单价:缓存优先 → miss 回源 → 写回缓存。
+  // 取单价:缓存新鲜 → 直接回;stale/miss → 回源 → 写回。
   priceOf(ref: TokenRef): Promise<TokenPrice | undefined>;
-  // 展示富化(cache-only):对每个 asset 解析 + 批量取 info/price,按输入顺序返回(null 输入 → {ref:null})。
+  // 展示富化(cache-only,零网络):实现键优先(孤儿也出数据),否则 override/symbol 消歧。
   enrich(assets: readonly (AssetRef | null)[]): Promise<EnrichedAsset[]>;
-  // 预热写缓存(best-effort):刷新 top-N warm,并对给定 assets 逐个 lazy 解析(触发合约懒解析入缓存)。
+  // 预热写缓存(best-effort):刷新 top-N warm,并对给定 assets 逐个 lazy 解析(触发升级合并)。
   warm(assets?: readonly (AssetRef | null)[]): Promise<void>;
+  // provider 采集(sync 后):seed 孤儿 / 刷新 providerLogo(备用槽)。best-effort。
+  noteProviderAssets(assets: readonly ProviderAsset[]): Promise<void>;
+  // SWR 刷价:对给定 assets 解析出 ref 且价 stale/缺失者,一次批量回源写回。返回刷新条数。
+  refreshStalePrices(assets: readonly (AssetRef | null)[]): Promise<number>;
 }
 
 // 冷缓存预热的进程内单飞(isolate 级):多个请求同时命中空 warm 时只发一次预热。
@@ -54,11 +74,59 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
   // asset.identifier(用户显式选)→ explicit ref(用本 provider 的 source),调用方无需拼 TokenRef。
   const withExplicit = (asset: AssetRef): AssetRef =>
     asset.identifier && !asset.ref
-      ? { ...asset, ref: { source: p.source, identifier: asset.identifier as TokenIdentifier } }
+      ? { ...asset, ref: { source: p.source, identifier: asset.identifier as CgkCoinId } }
       : asset;
 
   const resolve = (asset: AssetRef, opts?: ResolveOpts) =>
     resolveAsset(withExplicit(asset), deps, opts);
+
+  const toEnriched = (ref: TokenRef | null, rec: TokenRecord | undefined): EnrichedAsset => ({
+    ref,
+    name: rec?.name,
+    logo: rec?.logo,
+    providerLogo: rec?.providerLogo,
+    unitPrice: rec?.price?.unitPrice,
+    change24h: rec?.price?.change24h,
+    // 有 ref 才可刷:价缺失或过期均标 stale;孤儿(ref=null)无价不标(无处可刷)。
+    priceStale: ref ? !rec?.price || rec.price.stale : false,
+  });
+
+  // cache-only 解析 + 记录读取:实现键命中直接用整行(含孤儿);否则 explicit/override/symbol → getByRefs。
+  // 返回与输入等长对齐的 (ref, record) 对。
+  async function lookupAll(
+    assets: readonly (AssetRef | null)[],
+  ): Promise<{ ref: TokenRef | null; rec: TokenRecord | undefined }[]> {
+    const withKeys = assets.map((a) => a?.tokenIdentifier ?? null);
+    const keys = [...new Set(withKeys.filter((k): k is string => k !== null))];
+    const implMap =
+      keys.length > 0
+        ? await deps.store.getByImpl(keys)
+        : new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
+
+    // 实现键未命中(或无键)的走 explicit/override/symbol(cache-only)
+    const rest: { i: number; asset: AssetRef }[] = [];
+    const out: ({ ref: TokenRef | null; rec: TokenRecord | undefined } | null)[] = assets.map(
+      (a, i) => {
+        if (!a) return { ref: null, rec: undefined };
+        const key = withKeys[i];
+        const rec = key ? implMap.get(key) : undefined;
+        if (rec) return { ref: rec.ref, rec };
+        rest.push({ i, asset: a });
+        return null;
+      },
+    );
+    const refs = await Promise.all(
+      rest.map(async ({ asset }) => (await resolve(asset, { lazy: false })).ref),
+    );
+    const present = refs.filter((r): r is TokenRef => r !== null);
+    const refMap =
+      present.length > 0 ? await deps.store.getByRefs(present) : new Map<string, TokenRecord>();
+    rest.forEach(({ i }, j) => {
+      const ref = refs[j];
+      out[i] = { ref, rec: ref ? refMap.get(refKey(ref)) : undefined };
+    });
+    return out as { ref: TokenRef | null; rec: TokenRecord | undefined }[];
+  }
 
   return {
     resolve,
@@ -80,25 +148,24 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
     },
 
     async priceOf(ref) {
-      const cached = (await deps.store.getPrices([ref])).get(refKey(ref));
-      if (cached) return cached;
+      const rec = (await deps.store.getByRefs([ref])).get(refKey(ref));
+      if (rec?.price && !rec.price.stale) {
+        return {
+          ref,
+          unitPrice: rec.price.unitPrice,
+          change24h: rec.price.change24h,
+          marketCapRank: rec.marketCapRank,
+          asOf: rec.price.asOf,
+        };
+      }
       const fetched = (await deps.provider.fetchPrices([ref])).get(refKey(ref));
       if (fetched) await deps.store.putPrices([fetched], PRICE_TTL_MS);
       return fetched;
     },
 
     async enrich(assets) {
-      const refs = await Promise.all(
-        assets.map(async (a) => (a ? (await resolve(a, { lazy: false })).ref : null)),
-      );
-      const present = refs.filter((r) => r !== null);
-      const [infos, prices] = await Promise.all([
-        deps.store.getInfo(present),
-        deps.store.getPrices(present),
-      ]);
-      return refs.map((ref) =>
-        ref ? { ref, info: infos.get(refKey(ref)), price: prices.get(refKey(ref)) } : { ref: null },
-      );
+      const looked = await lookupAll(assets);
+      return looked.map(({ ref, rec }) => toEnriched(ref, rec));
     },
 
     async warm(assets) {
@@ -108,6 +175,33 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
       } catch {
         // best-effort:预热失败不影响主流程,下次再试。
       }
+    },
+
+    async noteProviderAssets(assets) {
+      for (const a of assets) {
+        try {
+          await deps.store.ensureImplToken(
+            a.tokenId,
+            { symbol: normalizeSymbol(a.symbol), name: a.name, providerLogo: a.logo },
+            CONTRACT_TTL_MS,
+          );
+        } catch {
+          // best-effort:单条失败不阻断其余(下次 sync 重试)。
+        }
+      }
+    },
+
+    async refreshStalePrices(assets) {
+      const looked = await lookupAll(assets);
+      const stale = new Map<string, TokenRef>();
+      for (const { ref, rec } of looked) {
+        if (ref && (!rec?.price || rec.price.stale)) stale.set(refKey(ref), ref);
+      }
+      if (stale.size === 0) return 0;
+      const fetched = await deps.provider.fetchPrices([...stale.values()]);
+      const prices = [...fetched.values()];
+      if (prices.length > 0) await deps.store.putPrices(prices, PRICE_TTL_MS);
+      return prices.length;
     },
   };
 }

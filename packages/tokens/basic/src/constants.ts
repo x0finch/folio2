@@ -1,6 +1,6 @@
-import type { TokenIdentifier, TokenRef } from "./types";
+import type { CgkCoinId, TokenRef } from "./types";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 
 // symbol → 规范 `TokenRef` 的策展小表:majors + 已知撞名,优先于市值排名(防山寨撞名)。
 // 键须为 `normalizeSymbol` 输出(大写)。大头仍靠 (链,合约) 与显式 identifier;此表只兜 symbol 来源。
@@ -35,8 +35,8 @@ export const TOP_TOKENS_LIMIT = 50;
 // 缓存 TTL(供 store 实现 / refreshWarm 门控)。warm 承载价要新鲜、合约解析稳定、否定中等。
 // (chain 的源内映射 TTL 由各 source 自管,不在此。)
 export const WARM_TTL_MS = 30 * 60 * 1000; // 30min(warm 承载价,要新鲜)
-export const CONTRACT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d(合约→ref 解析稳定)
-export const PRICE_TTL_MS = 30 * 60 * 1000; // 30min(长尾价)
+export const CONTRACT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d(caip19 索引行;每次 sync 顺延)
+export const PRICE_TTL_MS = 30 * 60 * 1000; // 30min(长尾价;过期=stale 不删,SWR)
 // name/logo 近乎静态,与 warm/price 的短 TTL 解耦:否则每次 warm 一过期,富化就丢 logo/名(回退首字母)。
 export const INFO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d(名称/图标,近静态)
-export const ABSENT_TTL_MS = 24 * 60 * 60 * 1000; // 1d(否定缓存)
+export const CGK_RECHECK_TTL_MS = 24 * 60 * 60 * 1000; // 1d(CGK 未收录的复查间隔,替代旧否定缓存)

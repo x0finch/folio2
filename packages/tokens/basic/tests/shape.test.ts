@@ -17,11 +17,11 @@ const store: TokenStore = {
   putWarm: async () => {},
   warmAsOf: async () => null,
   listTopTokens: async () => [],
-  getContractRef: async () => undefined,
-  putContractRef: async () => {},
-  getInfo: async () => new Map(),
-  putInfo: async () => {},
-  getPrices: async () => new Map(),
+  getByImpl: async () => new Map(),
+  ensureImplToken: async () => {},
+  markCgkChecked: async () => {},
+  linkImplToCgk: async () => {},
+  getByRefs: async () => new Map(),
   putPrices: async () => {},
 };
 
@@ -30,6 +30,6 @@ describe("interface shapes", () => {
     expect(await source.fetchMarkets({ topN: 1 })).toEqual([]);
   });
   it("TokenStore is implementable", async () => {
-    expect(await store.getContractRef("ethereum", "0x0")).toBeUndefined();
+    expect((await store.getByImpl(["eip155:1/erc20:0x0"])).size).toBe(0);
   });
 });

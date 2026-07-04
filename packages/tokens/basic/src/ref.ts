@@ -1,5 +1,5 @@
 import { TokenError } from "./errors";
-import type { TokenIdentifier, TokenRef } from "./types";
+import type { CgkCoinId, TokenRef } from "./types";
 
 // `TokenRef` 的唯一序列化 —— map / store / 否定缓存 全用它做 key,别处不再手拼字符串。
 export function refKey(ref: TokenRef): string {
@@ -16,5 +16,5 @@ export function parseRefKey(key: string): TokenRef {
   if (source !== "coingecko") {
     throw new TokenError("PARSE_ERROR", `unknown ref source: ${source}`);
   }
-  return { source: "coingecko", identifier: id as TokenIdentifier };
+  return { source: "coingecko", identifier: id as CgkCoinId };
 }
