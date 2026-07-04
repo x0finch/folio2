@@ -2,14 +2,17 @@
 // + 常量。无逻辑函数——符号消歧策略 / 解析 / 预热服务在 @folio/tokens(entry)。
 // provider 实现(@folio/tokens-provider-coingecko)依赖本包的契约面。
 
+export type { TokenGroupDef, TokenGroupKey } from "./constants";
 export {
   CGK_RECHECK_TTL_MS,
   DEFAULT_TOP_N,
+  GROUP_MEMBERSHIP,
   INFO_TTL_MS,
   OVERRIDES,
   PRICE_TTL_MS,
   RESOLUTION_DOMINANCE,
   RESOLUTION_TOP_RANK,
+  TOKEN_GROUPS,
   TOKEN_KEY_TTL_MS,
   TOP_TOKENS_LIMIT,
   WARM_TTL_MS,
@@ -33,6 +36,7 @@ export type {
   Resolution,
   ResolutionVia,
   TokenCandidate,
+  TokenGroup,
   TokenInfo,
   TokenPrice,
   TokenRecord,

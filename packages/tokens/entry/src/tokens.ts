@@ -2,6 +2,7 @@ import type {
   AssetRef,
   CgkCoinId,
   Resolution,
+  TokenGroup,
   TokenInfo,
   TokenPrice,
   TokenProvider,
@@ -32,6 +33,7 @@ export interface EnrichedAsset {
   unitPrice?: number;
   change24h?: number;
   priceStale?: boolean;
+  group?: TokenGroup; // 展示分组(P2):命中种子的 cgk 行才有;聚合按它归组
 }
 
 // provider 采集入参(sync 后调用):可寻址的余额行 → seed/刷新代币表与实现索引。
@@ -89,6 +91,7 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
     change24h: rec?.price?.change24h,
     // 有 ref 才可刷:价缺失或过期均标 stale;孤儿(ref=null)无价不标(无处可刷)。
     priceStale: ref ? !rec?.price || rec.price.stale : false,
+    group: rec?.group,
   });
 
   // cache-only 解析 + 记录读取:tokenKey 命中直接用整行(含孤儿);否则 explicit/override/symbol → getByRefs。

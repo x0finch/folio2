@@ -40,3 +40,28 @@ export const PRICE_TTL_MS = 30 * 60 * 1000; // 30min(长尾价;过期=stale 不�
 // name/logo 近乎静态,与 warm/price 的短 TTL 解耦:否则每次 warm 一过期,富化就丢 logo/名(回退首字母)。
 export const INFO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d(名称/图标,近静态)
 export const CGK_RECHECK_TTL_MS = 24 * 60 * 60 * 1000; // 1d(CGK 未收录的复查间隔,替代旧否定缓存)
+
+// —— 展示分组种子(P2,ADR-0001)——
+// TokenGroup = 用户心智里"一个币"的家族;只并 CGK 故意拆开、用户视作同一的币。
+// 组定义(展示 symbol/名)。组的 logo 留空 → 展示时取主成员。
+export interface TokenGroupDef {
+  displaySymbol: string; // normalizeSymbol 口径(大写)
+  name: string;
+}
+export const TOKEN_GROUPS = {
+  usdt: { displaySymbol: "USDT", name: "Tether USD" },
+  usdc: { displaySymbol: "USDC", name: "USD Coin" },
+  dai: { displaySymbol: "DAI", name: "Dai" },
+} as const satisfies Record<string, TokenGroupDef>;
+export type TokenGroupKey = keyof typeof TOKEN_GROUPS;
+
+// CGK coin id → 组。只收 CGK 故意拆开的桥接/变体家族;canonical 成员必收,桥接变体逐个按 CGK 实查确认后加。
+// 【红线】weth≠eth、wbtc≠btc、staked 衍生≠本尊 —— 默认不并,不入此表(ADR-0002 的精神:只并已确认同质的)。
+// 起步:canonical(tether/usd-coin/dai)+ 研究已确认的桥接 usdt0(Arbitrum 等);其余桥接变体(bridged-*,
+// 各链 usdt.e / usdc.e 独立 coin)执行 sync 见到实际 cgk id 后按 CGK /coins/list 核对再增补。
+export const GROUP_MEMBERSHIP: Readonly<Record<string, TokenGroupKey>> = {
+  tether: "usdt",
+  usdt0: "usdt", // Arbitrum 等桥接 USDT(CGK 归 usdt0,非 tether)
+  "usd-coin": "usdc",
+  dai: "dai",
+};

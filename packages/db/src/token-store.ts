@@ -1,7 +1,9 @@
 import {
   type CgkCoinId,
+  GROUP_MEMBERSHIP,
   type ProviderTokenSeed,
   refKey,
+  TOKEN_GROUPS,
   type TokenCandidate,
   type TokenInfo,
   type TokenRecord,
@@ -10,7 +12,7 @@ import {
 } from "@folio/tokens";
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { type DbEnv, getDb } from "./client";
-import { tokenIndex, tokenMeta, tokens } from "./schema";
+import { tokenGroups, tokenIndex, tokenMeta, tokens } from "./schema";
 
 export interface TokenStoreOpts {
   source: TokenRef["source"]; // store 绑定的规范源(如 "coingecko");ref 只对该源的行成立
@@ -45,8 +47,35 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   });
   const warmKey = `warm_as_of:${source}`;
 
-  // 行 → 领域记录。价过期不删:读出带 stale(SWR,展示先给旧价)。
-  const toRecord = (r: TokenRow): TokenRecord => ({
+  // 展示分组(P2):groupKey 直接当 token_groups.id(text PK,deterministic,免 find-or-create)。
+  const groupIdFor = (identifier: string): string | null => GROUP_MEMBERSHIP[identifier] ?? null;
+  const groupUpsert = (groupKey: string): Stmt => {
+    const def = TOKEN_GROUPS[groupKey as keyof typeof TOKEN_GROUPS];
+    return db
+      .insert(tokenGroups)
+      .values({ id: groupKey, displaySymbol: def.displaySymbol, name: def.name })
+      .onConflictDoUpdate({
+        target: tokenGroups.id,
+        set: { displaySymbol: def.displaySymbol, name: def.name },
+      });
+  };
+  // 读时 join 出的组列(leftJoin 未命中则各列为 null)。
+  type GrpSel = {
+    id: string | null;
+    displaySymbol: string | null;
+    name: string | null;
+    logo: string | null;
+  };
+  const grpCols = {
+    id: tokenGroups.id,
+    displaySymbol: tokenGroups.displaySymbol,
+    name: tokenGroups.name,
+    logo: tokenGroups.logo,
+  };
+
+  // 行 → 领域记录。价过期不删:读出带 stale(SWR,展示先给旧价)。grp 命中(id 非空)才挂 group。
+  // grp 为 leftJoin 结果:未命中时整体为 null(drizzle 语义)。
+  const toRecord = (r: TokenRow, grp?: GrpSel | null): TokenRecord => ({
     id: r.id,
     ref: r.source === source ? mk(r.identifier) : null,
     symbol: r.symbol,
@@ -61,6 +90,15 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             change24h: r.change24h ?? undefined,
             asOf: r.priceAsOf,
             stale: (r.priceExpiresAt ?? 0) <= now(),
+          }
+        : undefined,
+    group:
+      grp && grp.id != null && grp.displaySymbol != null && grp.name != null
+        ? {
+            id: grp.id,
+            displaySymbol: grp.displaySymbol,
+            name: grp.name,
+            logo: grp.logo ?? undefined,
           }
         : undefined,
   });
@@ -104,8 +142,11 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const infoExpiresAt = t + infoTtlMs; // name/logo(长)
       const ids = await existingIds(rows.map((r) => r.info.ref.identifier));
       const stmts: Stmt[] = [];
+      const groupKeys = new Set<string>(); // 需 upsert 的组(去重,置于批首满足 FK)
       for (const { info, price } of rows) {
         const id = ids.get(info.ref.identifier) ?? crypto.randomUUID();
+        const groupId = groupIdFor(info.ref.identifier);
+        if (groupId) groupKeys.add(groupId);
         stmts.push(
           db
             .insert(tokens)
@@ -117,6 +158,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               name: info.name,
               logo: info.logo ?? null,
               marketCapRank: price.marketCapRank ?? null,
+              groupId,
               infoExpiresAt,
               unitPrice: price.unitPrice,
               change24h: price.change24h ?? null,
@@ -131,6 +173,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
                 name: info.name,
                 logo: info.logo ?? null,
                 marketCapRank: price.marketCapRank ?? null,
+                groupId,
                 infoExpiresAt,
                 unitPrice: price.unitPrice,
                 change24h: price.change24h ?? null,
@@ -153,7 +196,8 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           .values({ k: warmKey, v: t })
           .onConflictDoUpdate({ target: tokenMeta.k, set: { v: t } }),
       );
-      const [first, ...rest] = stmts;
+      // 组行 upsert 置于批首(tokens.group_id → token_groups.id 的 FK 要求组先在)。
+      const [first, ...rest] = [...[...groupKeys].map(groupUpsert), ...stmts];
       await db.batch([first, ...rest]);
     },
 
@@ -196,9 +240,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const out = new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
       for (const ks of chunk(keys, IN_CHUNK)) {
         const rows = await db
-          .select({ idx: tokenIndex, tok: tokens })
+          .select({ idx: tokenIndex, tok: tokens, grp: grpCols })
           .from(tokenIndex)
           .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
+          .leftJoin(tokenGroups, eq(tokenGroups.id, tokens.groupId))
           .where(
             and(
               eq(tokenIndex.kind, "tokenKey"),
@@ -207,7 +252,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             ),
           );
         for (const r of rows) {
-          out.set(r.idx.key, { ...toRecord(r.tok), cgkCheckedUntil: r.idx.cgkCheckedUntil });
+          out.set(r.idx.key, { ...toRecord(r.tok, r.grp), cgkCheckedUntil: r.idx.cgkCheckedUntil });
         }
       }
       return out;
@@ -309,6 +354,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         .where(and(eq(tokens.source, source), eq(tokens.identifier, info.ref.identifier)));
       const cgkId = existing[0]?.id ?? crypto.randomUUID();
       const carryLogo = orphan?.providerLogo ?? null;
+      const groupId = groupIdFor(info.ref.identifier);
 
       const priceFields = price
         ? {
@@ -330,6 +376,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             name: info.name,
             logo: info.logo ?? null,
             providerLogo: carryLogo,
+            groupId,
             infoExpiresAt: t + ttls.infoTtlMs,
             ...priceFields,
           })
@@ -339,6 +386,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               symbol: info.symbol,
               name: info.name,
               logo: info.logo ?? null,
+              groupId,
               infoExpiresAt: t + ttls.infoTtlMs,
               // 备用槽:已有则保留,空才接孤儿的
               providerLogo: sql`coalesce(${tokens.providerLogo}, ${carryLogo})`,
@@ -353,7 +401,8 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       ];
       // 孤儿行删除(其余索引行经 ON DELETE CASCADE 级联;孤儿 identifier=本 key,唯一)
       if (orphan) stmts.push(db.delete(tokens).where(eq(tokens.id, orphan.id)));
-      const [first, ...rest] = stmts;
+      // 组行 upsert 置于批首(FK:tokens.group_id → token_groups.id)。
+      const [first, ...rest] = groupId ? [groupUpsert(groupId), ...stmts] : stmts;
       await db.batch([first, ...rest]);
     },
 
@@ -362,8 +411,9 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const identifiers = refs.filter((r) => r.source === source).map((r) => r.identifier);
       for (const ids of chunk(identifiers, IN_CHUNK)) {
         const rows = await db
-          .select()
+          .select({ tok: tokens, grp: grpCols })
           .from(tokens)
+          .leftJoin(tokenGroups, eq(tokenGroups.id, tokens.groupId))
           .where(
             and(
               eq(tokens.source, source),
@@ -371,7 +421,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               gt(tokens.infoExpiresAt, now()),
             ),
           );
-        for (const r of rows) out.set(refKey(mk(r.identifier)), toRecord(r));
+        for (const r of rows) out.set(refKey(mk(r.tok.identifier)), toRecord(r.tok, r.grp));
       }
       return out;
     },
