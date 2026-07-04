@@ -11,7 +11,6 @@ export interface OverviewBalance {
   amount: number;
   usdValue: number;
   kind: string;
-  source: string;
   metaJson: string | null;
   // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。
   name?: string;

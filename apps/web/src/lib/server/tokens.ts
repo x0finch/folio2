@@ -6,6 +6,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireAuth } from "../require-auth";
 import { type BalanceLike, balanceToAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
+import { db } from "./db";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
 
@@ -59,17 +60,33 @@ export const tokenPrice = createServerFn({ method: "GET" })
       : null;
   });
 
-// 展示富化(cache-only,零网络):tokens.enrich 解析 + 批量取 info/price;按行挂富化字段(缺则原样降级)。
+// 展示富化(cache-only,零网络):tokens.enrich 解析 + 整行读取;按行挂富化字段(缺则原样降级)。
+// 孤儿(CGK 未收录)也出 name/providerLogo;pricesStale = 任一行价格过期/缺失(SWR:客户端据此触发刷新)。
 export async function enrichBalances<T extends BalanceLike>(
   tokens: Tokens,
   balances: T[],
-): Promise<(T & TokenEnrichment)[]> {
+): Promise<{ rows: (T & TokenEnrichment)[]; pricesStale: boolean }> {
   const enriched = await tokens.enrich(balances.map(balanceToAssetRef));
-  return balances.map((b, i) => {
-    const e = enriched[i];
-    return e?.ref ? { ...b, ...toEnrichment(e.info, e.price) } : b;
-  });
+  return {
+    rows: balances.map((b, i) => {
+      const e = enriched[i];
+      return e ? { ...b, ...toEnrichment(e) } : b;
+    }),
+    pricesStale: enriched.some((e) => e?.priceStale),
+  };
 }
+
+// SWR 刷价(客户端在看到 pricesStale 后调用):对该用户最新快照的全部持仓,凡解析出 ref 且价
+// stale/缺失者一次批量回源写回。服务端自算 stale 集(不信客户端入参);失败静默(下次再试)。
+export const refreshStalePrices = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .handler(async ({ context }) => {
+    const snapshots = await db.getLatestSnapshotByUser(context.userId);
+    const assets = snapshots.flatMap((s) => s.balances).map(balanceToAssetRef);
+    const refreshed = await buildTokens(env).refreshStalePrices(assets);
+    tokenLog.info("stale prices refreshed", { refreshed });
+    return { refreshed };
+  });
 
 // 预热(写缓存,best-effort):tokens.warm 刷新 top-N + 逐行 lazy 解析(合约懒解析入缓存)。
 // cron(waitUntil)与手动 sync 后调用。

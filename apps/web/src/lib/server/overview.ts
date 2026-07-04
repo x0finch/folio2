@@ -23,16 +23,20 @@ export const getMyOverview = createServerFn({ method: "GET" })
     const rows = await Promise.all(
       accounts.map(async (account) => {
         const latest = byAccount.get(account.id);
+        // metaJson 仍原样带过线(perp 的 metaJson→视图解析在纯函数 toPerpView);
+        // 富化字段(name/logo/unitPrice/change24h)由 enrichBalances 挂上(JSON 可序列化)。
+        const enriched = await enrichBalances(tokens, latest?.balances ?? []);
         return {
           account,
           totalUsd: latest?.snapshot.totalUsd ?? 0,
           takenAt: latest?.snapshot.takenAt ?? null,
-          // metaJson 仍原样带过线(perp 的 metaJson→视图解析在纯函数 toPerpView);
-          // 富化字段(name/logo/unitPrice/change24h)由 enrichBalances 挂上(JSON 可序列化)。
-          balances: await enrichBalances(tokens, latest?.balances ?? []),
+          balances: enriched.rows,
+          pricesStale: enriched.pricesStale,
         };
       }),
     );
     const totalUsd = rows.reduce((sum, r) => sum + r.totalUsd, 0);
-    return { rows, totalUsd };
+    // 任一行价格过期 → 客户端触发一次 SWR 刷价(refreshStalePrices)后 invalidate 重展示。
+    const pricesStale = rows.some((r) => r.pricesStale);
+    return { rows, totalUsd, pricesStale };
   });

@@ -41,7 +41,6 @@ describe("snapshotRecord", () => {
         amount: 1,
         usdValue: 50,
         kind: "spot",
-        source: "ethereum",
         metaJson: '{"chain":"ethereum"}',
       },
     ]);

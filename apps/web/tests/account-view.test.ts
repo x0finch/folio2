@@ -7,7 +7,6 @@ const b = (over: Partial<OverviewBalance>): OverviewBalance => ({
   amount: 1,
   usdValue: 0,
   kind: "spot",
-  source: "s",
   metaJson: null,
   ...over,
 });

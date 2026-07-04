@@ -11,6 +11,7 @@ import { listMyAccounts } from "../../lib/server/accounts";
 import { getCredentialSpecs } from "../../lib/server/credentials";
 import { getMyOverview } from "../../lib/server/overview";
 import { triggerSync } from "../../lib/server/sync";
+import { useStalePriceRefresh } from "../../lib/use-stale-price-refresh";
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
@@ -36,7 +37,7 @@ export const Route = createFileRoute("/_authed/accounts")({
         credsSafe: a.credsSafe,
       };
     });
-    return { rows, credentialSpecs };
+    return { rows, credentialSpecs, pricesStale: overview.pricesStale };
   },
   component: Accounts,
 });
@@ -47,7 +48,8 @@ function Accounts() {
   const tc = useTranslations("Common");
   const format = useFormatter();
   const usd = useUsd();
-  const { rows, credentialSpecs } = Route.useLoaderData();
+  const { rows, credentialSpecs, pricesStale } = Route.useLoaderData();
+  useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
 
   const active = rows.filter((r) => r.archivedAt == null);
   const archived = rows.filter((r) => r.archivedAt != null);

@@ -1,11 +1,27 @@
 import { env } from "cloudflare:workers";
+import type { Balance } from "@folio/balances";
 import type { SyncDeps } from "@folio/sync";
+import type { ProviderAsset } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import { isComplete, openCreds } from "../creds";
 import { revalueManual } from "../revalue";
 import { balances } from "./balances";
 import { db } from "./db";
 import { buildTokens, warmTokens } from "./tokens";
+
+// provider 自带代币元信息的采集(canonical P1):合约形 tokenIdentifier 的行 → ProviderAsset,
+// 喂 tokens.noteProviderAssets(seed 孤儿 / 刷新备用 logo)。native/无标识行不 seed(原生币走 symbol 解析)。
+// logo/name 只在取数瞬时存在,不落快照行 —— 参考层是其 home。
+function toProviderAssets(rows: Balance[]): ProviderAsset[] {
+  const out: ProviderAsset[] = [];
+  for (const b of rows) {
+    const id = b.tokenIdentifier;
+    // 只 seed 合约形(erc20/token);native:/coingecko: 无需 seed(前者走 symbol,后者已是 CGK)。
+    if (!id || !(id.includes("/erc20:") || id.includes("/token:"))) continue;
+    out.push({ tokenId: id, symbol: b.symbol, name: b.name, logo: b.logo });
+  }
+  return out;
+}
 
 // server-only 编排装配(引 cloudflare:workers)。独立于 sync.ts —— triggerSync(server fn,被客户端 import)
 // 只在其 handler 内引用本模块,handler 被剥离后客户端不会拉进 cloudflare:workers。cron(server.ts)直接引本模块。
@@ -38,6 +54,8 @@ export function buildSyncDeps(): SyncDeps {
       if (!isComplete(specs, stored)) return { status: "needs-credentials" };
       const plain = await openCreds(specs, stored, env.SECRETS_KEY);
       const { balances: rows, totalUsd } = await balances.fetchBalances(account, plain);
+      // provider 代币元信息入参考层(best-effort,tokens 内部逐条吞错):logo/name 此刻不存就丢了。
+      await tokens.noteProviderAssets(toProviderAssets(rows));
       return { status: "ok", balances: rows, totalUsd };
     },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。

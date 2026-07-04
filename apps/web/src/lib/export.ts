@@ -24,7 +24,6 @@ interface BalanceIn {
   amount: number;
   usdValue: number;
   kind: string;
-  source: string;
   metaJson: string | null;
 }
 
@@ -72,7 +71,6 @@ export function snapshotRecord(s: SnapshotIn, balances: BalanceIn[]) {
       amount: b.amount,
       usdValue: b.usdValue,
       kind: b.kind,
-      source: b.source,
       meta: safeParse(b.metaJson),
     })),
   };

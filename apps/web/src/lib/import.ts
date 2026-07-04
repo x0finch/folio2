@@ -22,7 +22,6 @@ export interface ImportSnapshotBalance {
   amount: number;
   usdValue: number;
   kind: BalanceKind;
-  source: string;
   meta?: Record<string, unknown>;
 }
 

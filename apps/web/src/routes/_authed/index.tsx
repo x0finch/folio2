@@ -8,6 +8,7 @@ import { type GroupedView, toGroupedView } from "../../lib/groups-view";
 import { getMyGroups } from "../../lib/server/groups";
 import { getPortfolioHistory } from "../../lib/server/history";
 import { getMyOverview } from "../../lib/server/overview";
+import { useStalePriceRefresh } from "../../lib/use-stale-price-refresh";
 
 export const Route = createFileRoute("/_authed/")({
   loader: async () => {
@@ -53,10 +54,11 @@ function ByGroup({ view }: { view: GroupedView }) {
 }
 
 function Overview() {
-  const { rows, totalUsd, series, groups, memberships } = Route.useLoaderData();
+  const { rows, totalUsd, series, groups, memberships, pricesStale } = Route.useLoaderData();
   const t = useTranslations("Overview");
   const tc = useTranslations("Common");
   const usd = useUsd();
+  useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(
     rows.map((r) => ({
       account: { id: r.account.id, label: r.account.label },
