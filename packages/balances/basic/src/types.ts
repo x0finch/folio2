@@ -42,14 +42,28 @@ export type BalanceKind = "spot" | "defi" | "perp" | "manual";
 //   · 负债记负值(借 1000U → -1000);
 //   · 每个经济仓位【只有一行承载价值】,会被拆开重复计的其余行记 usdValue:0
 //     (如 perp 权益行带值、多空仓位行 0;LP 整池带值、底层币 0)。
-// 这样异构仓位也能在账户层、组合层正确相加。子账户(spot/funding/earn)用 source 区分,不影响加总。
+// 这样异构仓位也能在账户层、组合层正确相加。(当前各交易所 provider 只拉单一钱包,尚不区分
+// spot/funding/earn 子账户;将来接入多钱包时用 meta 区分,不影响加总。)
 // usdValue 只够【加总】;各仓位的【展示】细节放 meta,按 kind 用下方 typed meta 家族窄化。
 export interface Balance {
   symbol: string;
   amount: number;
-  usdValue: number;
-  source: string; // 来源标注(子账户 / 协议 / 链等)
+  price?: number; // 单价(USD),provider 直接给则带(Zerion attributes.price / CoinStats price / manual 单价);无则省略
+  value: number; // USD 价值(加总权威;原 usdValue)。sync 写快照时映射到 db 的 usdValue,不动表结构
   kind: BalanceKind;
+  // 代币寻址标识(代币参考层的索引键,见 token-identifier.ts):带命名空间前缀的字符串,用来定位
+  // "这是哪个代币",跨多种寻址方案 —— 不限链上:
+  //   · 链寻址:eip155:<chainId>/erc20:<addr> | chain:<slug>/token:<addr> | native
+  //   · 厂商寻址:coingecko:<coin-id>(manual 选币等已知 CGK id 时)
+  // provider 在解析时按能拿到的最强寻址产出:EVM(Zerion)始终产规范 eip155:<chainId>/erc20:<addr>
+  // ——拿不到数字 chainId 时直接抛错、整轮同步失败重试,绝不产分叉的 chain:<slug> 兜底形;
+  // chain:<slug>/token:<addr> 只用于无 eip155 语义的非 EVM 链(CoinStats 的 Solana/Sui/Cosmos)。
+  // 拿不到任何可寻址标识的行(CEX/perp 只有 symbol、无合约/无 CGK id)为 undefined → 解析时退化到按 symbol 归一。
+  tokenIdentifier?: string;
+  // provider 自带的代币元信息(有则带):同步时喂参考层(noteProviderAssets),
+  // 作 CGK 未收录币的展示数据与备用 logo。不落快照行(参考层是其 home)。
+  name?: string;
+  logo?: string;
   meta?: Record<string, unknown>; // 按 kind 的 typed meta(PerpMeta / DefiMeta / …)
 }
 
@@ -80,8 +94,8 @@ export type PerpMeta = PerpEquityMeta | PerpPositionMeta;
 // defi(kind:"defi")仓位的 meta 共享契约(锚定 zerion 现有输出)。consumer(总览 DeFi 分区)
 // 据此窄化、按 protocol 分组展示。positionType 暂用 provider 原始词汇(staked/deposit/loan…),
 // 统一归一化枚举与各类细节字段(借贷健康度、LP 底层币等)留各 provider 落地时逐个填。
+// chain/合约不再进 meta —— 身份走 Balance.tokenIdentifier(CAIP-19);meta 只留展示所需。
 export interface DefiMeta {
-  chain?: string;
   protocol?: string;
   positionType?: string;
 }

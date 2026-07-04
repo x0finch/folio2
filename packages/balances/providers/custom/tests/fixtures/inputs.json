@@ -1,0 +1,14 @@
+[
+  {
+    "name": "single manual holding (value = amount × unitPrice, no meta)",
+    "creds": { "symbol": "BTC", "amount": 0.5, "unitPrice": 64000 }
+  },
+  {
+    "name": "picked CoinGecko id → coingecko tokenIdentifier (sync-time market valuation)",
+    "creds": { "symbol": "BTC", "amount": 1, "unitPrice": 64000, "identifier": "bitcoin" }
+  },
+  {
+    "name": "fixed surfaced to meta (sync skips market valuation)",
+    "creds": { "symbol": "BTC", "amount": 1, "unitPrice": 64000, "fixed": "1" }
+  }
+]

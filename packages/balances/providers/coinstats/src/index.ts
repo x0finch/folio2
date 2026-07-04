@@ -2,6 +2,7 @@ import {
   type AccountType,
   type Balance,
   type BalanceProvider,
+  buildTokenIdentifier,
   defineProvider,
   type FetchContext,
   ProviderError,
@@ -22,19 +23,19 @@ import {
 // 地址走 ctx.creds.identifier;全局 key 走 ctx.globalKeys.COINSTATS_API_KEY(X-API-KEY 头)。
 // 原生 fetch,零依赖。
 
-// CoinStats wallet/balance 返回的单条 coin(仅取用到的字段)。
+// CoinStats wallet/balance 返回的单条 coin(仅取用到的字段;响应无图标字段 → Balance.logo 不产)。
 interface CoinstatsCoin {
   symbol?: string;
+  name?: string;
   amount?: number;
   price?: number | null;
   chain?: string;
-  connectionId?: string;
   contractAddress?: string | null;
 }
 
 // 纯解析:coin[] → Balance[]。与 IO 分离,golden test。
-// 该端点是钱包代币余额(现货)→ kind:"spot";usdValue = amount * price(缺 price 记 0);
-// 跳过无 symbol;链/连接/合约写入 meta,source=链。
+// 该端点是钱包代币余额(现货)→ kind:"spot";value = amount * price(缺 price 记 0)、price 直传;
+// 跳过无 symbol;合约行产代币标识(无数字 chainId → 兜底格式);现货行不产 meta。
 export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Balance[] {
   const out: Balance[] = [];
   for (const c of coins ?? []) {
@@ -45,14 +46,12 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ba
     out.push({
       symbol,
       amount,
-      usdValue: amount * (c.price ?? 0),
-      source: chain,
+      price: c.price ?? undefined,
+      value: amount * (c.price ?? 0),
       kind: "spot",
-      meta: {
-        chain,
-        connectionId: c.connectionId ?? fallbackChain,
-        contractAddress: c.contractAddress ?? undefined,
-      },
+      // 链/合约身份走 tokenIdentifier(CAIP-19),不再进 meta;现货行无展示用 meta → 省略。
+      tokenIdentifier: buildTokenIdentifier({ chain, contract: c.contractAddress ?? undefined }),
+      name: c.name,
     });
   }
   return out;

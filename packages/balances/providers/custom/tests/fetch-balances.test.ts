@@ -1,6 +1,8 @@
 import type { FetchContext } from "@folio/balances-basic";
 import { describe, expect, it } from "vitest";
 import { customProvider, providers } from "../src";
+import expected from "./fixtures/expected-balances.json";
+import inputs from "./fixtures/inputs.json";
 
 // 一个 manual 账户 = 一个手记资产;持仓走 ctx.creds(symbol/amount/unitPrice,P7.4.1)。
 function ctx(creds: Record<string, unknown>): FetchContext {
@@ -11,32 +13,13 @@ function ctx(creds: Record<string, unknown>): FetchContext {
   };
 }
 
-describe("customProvider.fetchBalances", () => {
-  it("maps the single manual holding to one Balance (usdValue = amount × unitPrice)", async () => {
-    const balances = await customProvider.fetchBalances(
-      ctx({ symbol: "BTC", amount: 0.5, unitPrice: 64000 }),
-    );
-    expect(balances).toEqual([
-      { symbol: "BTC", amount: 0.5, usdValue: 32000, source: "manual", kind: "manual" },
-    ]);
-  });
-
-  it("surfaces identifier to meta when present (for sync-time market valuation)", async () => {
-    const balances = await customProvider.fetchBalances(
-      ctx({ symbol: "BTC", amount: 1, unitPrice: 64000, identifier: "bitcoin" }),
-    );
-    expect(balances[0]).toMatchObject({
-      symbol: "BTC",
-      usdValue: 64000,
-      meta: { identifier: "bitcoin" },
-    });
-  });
-
-  it("surfaces fixed to meta when present (sync skips market valuation)", async () => {
-    const balances = await customProvider.fetchBalances(
-      ctx({ symbol: "BTC", amount: 1, unitPrice: 64000, fixed: "1" }),
-    );
-    expect(balances[0]).toMatchObject({ symbol: "BTC", usdValue: 64000, meta: { fixed: true } });
+// manual provider 无外部 API,输入即 creds → 两份 fixture 一一对应(按 case 名连接,与其他 provider 同构):
+// inputs.json(输入 creds 各例)→ expected-balances.json(解析后的期望 Balance[])。
+// 覆盖:value=amount×unitPrice、price=unitPrice;identifier/fixed 在则透出 meta(不在则无 meta 键)。
+describe("customProvider.fetchBalances (golden: fixtures in → fixture out)", () => {
+  it.each(inputs)("$name", async ({ name, creds }) => {
+    const balances = await customProvider.fetchBalances(ctx(creds));
+    expect(balances).toEqual((expected as Record<string, unknown>)[name]);
   });
 
   it("serves accountType 'manual' and is exported in the providers array", () => {

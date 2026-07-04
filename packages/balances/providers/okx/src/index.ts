@@ -34,7 +34,7 @@ interface OkxBalanceResponse {
 }
 
 // 纯解析:details[] → Balance[]。与 IO 分离,golden test。
-// amount=eq、usdValue=eqUsd(OKX 自带);跳过空 ccy / amount≤0;kind:spot、source:okx。
+// amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
 export function parseBalances(details: OkxDetail[]): Balance[] {
   const out: Balance[] = [];
   for (const d of details ?? []) {
@@ -45,10 +45,9 @@ export function parseBalances(details: OkxDetail[]): Balance[] {
     out.push({
       symbol: ccy,
       amount,
-      usdValue: Number(d.eqUsd ?? 0),
-      source: "okx",
+      price: amount > 0 ? Number(d.eqUsd ?? 0) / amount : undefined,
+      value: Number(d.eqUsd ?? 0),
       kind: "spot",
-      meta: { wallet: "trading" },
     });
   }
   return out;

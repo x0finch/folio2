@@ -2,6 +2,7 @@ import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hyperliquidProvider, parseClearinghouseState, providers } from "../src";
 import fixture from "./fixtures/clearinghouse-state.json";
+import expected from "./fixtures/expected-balances.json";
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
@@ -18,62 +19,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// fixture = schema 忠实的 clearinghouseState(基于官方示例 + 一条空头)。整份解析结果钉成 golden:
-// 权益行(唯一带值)+ 每仓位一行(usdValue=0、明细进 meta);字符串字段统一 Number();
-// szi 符号 → side(long/short);liquidationPx 可为 null。
-describe("parseClearinghouseState (golden)", () => {
-  it("maps the recorded response to the expected Balance[]", () => {
-    expect(parseClearinghouseState(fixture)).toEqual([
-      {
-        symbol: "USDC",
-        amount: 13109.482328,
-        usdValue: 13109.482328,
-        source: "hyperliquid",
-        kind: "perp",
-        meta: {
-          role: "equity",
-          withdrawable: 13104.514502,
-          totalMarginUsed: 4.967826,
-          totalNtlPos: 100.02765,
-        },
-      },
-      {
-        symbol: "ETH",
-        amount: 0.0335,
-        usdValue: 0,
-        source: "hyperliquid",
-        kind: "perp",
-        meta: {
-          role: "position",
-          side: "long",
-          entryPx: 2986.3,
-          positionValue: 100.02765,
-          unrealizedPnl: -0.0134,
-          leverage: 20,
-          leverageType: "isolated",
-          liquidationPx: 2866.26936529,
-          marginUsed: 4.967826,
-        },
-      },
-      {
-        symbol: "BTC",
-        amount: -0.01,
-        usdValue: 0,
-        source: "hyperliquid",
-        kind: "perp",
-        meta: {
-          role: "position",
-          side: "short",
-          entryPx: 64000,
-          positionValue: 640,
-          unrealizedPnl: 12.5,
-          leverage: 10,
-          leverageType: "cross",
-          liquidationPx: null,
-          marginUsed: 64,
-        },
-      },
-    ]);
+// 两份 fixture 一一对应:clearinghouse-state.json(schema 忠实的响应,基于官方示例 + 一条空头)→
+// expected-balances.json(解析后的期望值,固化逐一对比)。覆盖:权益行(唯一带值)+ 每仓位一行
+// (value=0、明细进 meta);字符串字段统一 Number();szi 符号→side(long/short);liquidationPx 可为 null。
+describe("parseClearinghouseState (golden: fixture in → fixture out)", () => {
+  it("maps the recorded response to expected-balances", () => {
+    expect(parseClearinghouseState(fixture)).toEqual(expected);
   });
 
   it("emits only the equity row for an account with no open positions", () => {
@@ -88,11 +39,11 @@ describe("parseClearinghouseState (golden)", () => {
       withdrawable: "0.0",
     });
     expect(balances).toHaveLength(1);
-    expect(balances[0]).toMatchObject({ symbol: "USDC", amount: 0, usdValue: 0 });
+    expect(balances[0]).toMatchObject({ symbol: "USDC", amount: 0, value: 0 });
   });
 
-  it("total usdValue equals account equity (positions do not double-count)", () => {
-    const total = parseClearinghouseState(fixture).reduce((s, b) => s + b.usdValue, 0);
+  it("total value equals account equity (positions do not double-count)", () => {
+    const total = parseClearinghouseState(fixture).reduce((s, b) => s + b.value, 0);
     expect(total).toBe(13109.482328);
   });
 });

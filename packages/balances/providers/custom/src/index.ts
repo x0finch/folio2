@@ -1,9 +1,14 @@
-import { type Balance, type BalanceProvider, defineProvider } from "@folio/balances-basic";
+import {
+  type Balance,
+  type BalanceProvider,
+  buildTokenIdentifier,
+  defineProvider,
+} from "@folio/balances-basic";
 import { z } from "zod";
 
 // @folio/balances-provider-custom —— 手动资产(manual)。无外部 API:一个账户 = 一个手记资产。
 // 三个 public 输入(symbol/amount/unitPrice)走 creds(明文落库、导出原样、可重建);
-// fetchBalances map 成单条 Balance:usdValue = amount × unitPrice(P7.4.1)。
+// fetchBalances map 成单条 Balance:value = amount × unitPrice、price = unitPrice(P7.4.1)。
 // `amount` 由 manual 活动账本(manual_activity)推导后【物化】进 creds(见 web server fn);provider 只管读。
 // `unitPrice` 用户填(市价自动估值 = P7.4.2)。
 export const customProvider = defineProvider({
@@ -12,7 +17,8 @@ export const customProvider = defineProvider({
     { key: "symbol", type: "public", label: "Symbol", validator: z.string().trim().min(1) },
     { key: "amount", type: "public", label: "Amount", validator: z.coerce.number() },
     { key: "unitPrice", type: "public", label: "Unit price (USD)", validator: z.coerce.number() },
-    // 可选:用户选定的 CoinGecko identifier(消歧,P7.4.3)。有则透出到 meta 供 sync 期市价重估按显式 ref 解析。
+    // 可选:用户选定的 CoinGecko identifier(消歧,P7.4.3)。有则产 tokenIdentifier(coingecko:<id>)
+    // 供 sync 期市价重估按显式 ref 解析(见 revalueManual / resolveAsset 的 coingecko: 直达)。
     { key: "identifier", type: "public", label: "CoinGecko ID", validator: z.string().optional() },
     // 可选:锁定固定值(P7.4.4)。在则透出 meta.fixed → sync 期跳过市价重估、钉死 amount × unitPrice。
     // creds 是字符串 map,沿用 identifier 的"在则为真"约定(仅锁定时存 "1")。
@@ -21,17 +27,20 @@ export const customProvider = defineProvider({
 
   async fetchBalances(ctx): Promise<Balance[]> {
     const { symbol, amount, unitPrice, identifier, fixed } = ctx.creds;
-    const meta: Record<string, unknown> = {};
-    if (identifier) meta.identifier = identifier;
-    if (fixed) meta.fixed = true;
     return [
       {
         symbol,
         amount,
-        usdValue: amount * unitPrice,
-        source: "manual",
+        price: unitPrice,
+        value: amount * unitPrice,
         kind: "manual" as const,
-        ...(Object.keys(meta).length ? { meta } : {}),
+        // 用户选定的 CGK id = 厂商寻址身份 → tokenIdentifier(coingecko:<id>),不再塞 meta.identifier;
+        // 未选币则无标识,解析时按 symbol 归一(同 CEX)。
+        ...(identifier
+          ? { tokenIdentifier: buildTokenIdentifier({ cgkId: identifier as string }) }
+          : {}),
+        // meta 只留【行为标志】:fixed(锁定固定值 → sync 期跳过市价重估)。身份不进 meta。
+        ...(fixed ? { meta: { fixed: true } } : {}),
       },
     ];
   },

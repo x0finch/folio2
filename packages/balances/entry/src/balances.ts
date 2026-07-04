@@ -109,7 +109,7 @@ export function createBalances(config: CreateBalancesConfig): Balances {
         globalKeys: scopeGlobalKeys(config.globalKeys, provider.usesGlobalKeys),
       };
       const balances = await provider.fetchBalances(ctx);
-      const totalUsd = balances.reduce((sum, b) => sum + b.usdValue, 0);
+      const totalUsd = balances.reduce((sum, b) => sum + b.value, 0);
       return { balances, totalUsd };
     },
   };

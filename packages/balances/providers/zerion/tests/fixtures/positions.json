@@ -1,5 +1,7 @@
 {
-  "links": { "self": "https://api.zerion.io/v1/wallets/0x.../positions/" },
+  "links": {
+    "self": "https://api.zerion.io/v1/wallets/0x.../positions/"
+  },
   "data": [
     {
       "type": "positions",
@@ -17,12 +19,41 @@
         },
         "value": 6250.0,
         "price": 2500.0,
-        "fungible_info": { "name": "Ethereum", "symbol": "ETH", "flags": { "verified": true } },
-        "flags": { "displayable": true, "is_trash": false },
+        "fungible_info": {
+          "name": "Ethereum",
+          "symbol": "ETH",
+          "flags": {
+            "verified": true
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/eth.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": null,
+              "decimals": 18
+            },
+            {
+              "chain_id": "arbitrum",
+              "address": null,
+              "decimals": 18
+            }
+          ]
+        },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
         "updated_at": "2026-06-26T00:00:00Z"
       },
       "relationships": {
-        "chain": { "data": { "type": "chains", "id": "ethereum" } }
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
       }
     },
     {
@@ -33,15 +64,49 @@
         "protocol": null,
         "name": "USD Coin",
         "position_type": "wallet",
-        "quantity": { "int": "1500000000", "decimals": 6, "float": 1500.0, "numeric": "1500.0" },
+        "quantity": {
+          "int": "1500000000",
+          "decimals": 6,
+          "float": 1500.0,
+          "numeric": "1500.0"
+        },
         "value": 1500.0,
         "price": 1.0,
-        "fungible_info": { "name": "USD Coin", "symbol": "USDC", "flags": { "verified": true } },
-        "flags": { "displayable": true, "is_trash": false },
+        "fungible_info": {
+          "name": "USD Coin",
+          "symbol": "USDC",
+          "flags": {
+            "verified": true
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/usdc.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+              "decimals": 6
+            },
+            {
+              "chain_id": "arbitrum",
+              "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+              "decimals": 6
+            }
+          ]
+        },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
         "updated_at": "2026-06-26T00:00:00Z"
       },
       "relationships": {
-        "chain": { "data": { "type": "chains", "id": "arbitrum" } }
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "arbitrum"
+          }
+        }
       }
     },
     {
@@ -63,13 +128,33 @@
         "fungible_info": {
           "name": "Lido Staked Ether",
           "symbol": "stETH",
-          "flags": { "verified": true }
+          "flags": {
+            "verified": true
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/steth.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xabababababababababababababababababababab",
+              "decimals": 18
+            }
+          ]
         },
-        "flags": { "displayable": true, "is_trash": false },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
         "updated_at": "2026-06-26T00:00:00Z"
       },
       "relationships": {
-        "chain": { "data": { "type": "chains", "id": "ethereum" } }
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
       }
     },
     {
@@ -91,13 +176,33 @@
         "fungible_info": {
           "name": "Unpriced Token",
           "symbol": "UNP",
-          "flags": { "verified": false }
+          "flags": {
+            "verified": false
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/unp.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xabababababababababababababababababababab",
+              "decimals": 18
+            }
+          ]
         },
-        "flags": { "displayable": true, "is_trash": false },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
         "updated_at": "2026-06-26T00:00:00Z"
       },
       "relationships": {
-        "chain": { "data": { "type": "chains", "id": "ethereum" } }
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
       }
     },
     {
@@ -108,19 +213,44 @@
         "protocol": null,
         "name": "Hidden Spam",
         "position_type": "wallet",
-        "quantity": { "int": "1", "decimals": 0, "float": 1.0, "numeric": "1.0" },
+        "quantity": {
+          "int": "1",
+          "decimals": 0,
+          "float": 1.0,
+          "numeric": "1.0"
+        },
         "value": 999999.0,
         "price": 999999.0,
         "fungible_info": {
           "name": "Hidden Spam",
           "symbol": "SPAM",
-          "flags": { "verified": false }
+          "flags": {
+            "verified": false
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/spam.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xabababababababababababababababababababab",
+              "decimals": 18
+            }
+          ]
         },
-        "flags": { "displayable": false, "is_trash": true },
+        "flags": {
+          "displayable": false,
+          "is_trash": true
+        },
         "updated_at": "2026-06-26T00:00:00Z"
       },
       "relationships": {
-        "chain": { "data": { "type": "chains", "id": "ethereum" } }
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
       }
     }
   ]

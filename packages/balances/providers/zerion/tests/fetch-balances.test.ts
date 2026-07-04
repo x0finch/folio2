@@ -1,7 +1,20 @@
 import type { FetchContext } from "@folio/balances-basic";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { parsePositions, providers, zerionProvider } from "../src";
-import fixture from "./fixtures/positions.json";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  parseChainIds,
+  parsePositions,
+  providers,
+  resetChainIdsCacheForTests,
+  zerionProvider,
+} from "../src";
+import chainsFixture from "./fixtures/chains.json";
+import expectedBalances from "./fixtures/expected-balances.json";
+import positionsFixture from "./fixtures/positions.json";
+
+// fetchBalances 依赖两个 API:positions(持仓)+ /v1/chains/(slug→数字 chainId,eip155 标识用)。
+// 三份 fixture 一一对应:positions.json / chains.json(录制的两个真实响应)→ expected-balances.json
+// (解析后的结构化期望值,固化在文件里逐一对比,不散写在断言里)。
+// JSON 无法表达 undefined → expected fixture 里省略未定义字段(toEqual 视缺键与 undefined 等价)。
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
@@ -14,72 +27,92 @@ function ctx(overrides: Partial<FetchContext> = {}): FetchContext {
   };
 }
 
+// 按 URL 分流的 fetch mock(两 API 并行,各自新 Response —— body 只能读一次)。
+function mockZerionApis(opts?: {
+  positions?: Response | (() => Response);
+  chains?: Response | (() => Response);
+}) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    const mk = (v: Response | (() => Response) | undefined, fallback: () => Response) =>
+      typeof v === "function" ? v() : (v ?? fallback());
+    if (String(url).includes("/v1/chains/")) {
+      return mk(opts?.chains, () => new Response(JSON.stringify(chainsFixture), { status: 200 }));
+    }
+    return mk(
+      opts?.positions,
+      () => new Response(JSON.stringify(positionsFixture), { status: 200 }),
+    );
+  });
+}
+
+beforeEach(() => {
+  resetChainIdsCacheForTests(); // 链映射有进程内缓存,清掉避免用例顺序耦合
+});
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// fixture = 录制的真实 positions 响应(解析器输入)。整份解析结果一次性钉成 golden(toEqual),
-// 覆盖:amount=quantity.float、usdValue=value(null→0)、wallet→spot 与 staked/protocol→defi、
-// 每条仓位的 chain 入 source+meta、protocol/positionType 入 meta、跳过 displayable=false。
-describe("parsePositions (golden)", () => {
-  const balances = parsePositions(fixture);
+describe("parseChainIds", () => {
+  it("maps slug → decimal chainId from the recorded chains response", () => {
+    expect(parseChainIds(chainsFixture)).toEqual({
+      ethereum: 1,
+      base: 8453,
+      arbitrum: 42161,
+      "binance-smart-chain": 56,
+      avalanche: 43114,
+      xdai: 100,
+    });
+  });
+});
 
-  it("maps the recorded response to the expected Balance[]", () => {
-    expect(balances).toEqual([
-      {
-        symbol: "ETH",
-        amount: 2.5,
-        usdValue: 6250,
-        source: "ethereum",
-        kind: "spot",
-        meta: { chain: "ethereum", protocol: undefined, positionType: "wallet" },
-      },
-      {
-        symbol: "USDC",
-        amount: 1500,
-        usdValue: 1500,
-        source: "arbitrum",
-        kind: "spot",
-        meta: { chain: "arbitrum", protocol: undefined, positionType: "wallet" },
-      },
-      {
-        symbol: "stETH",
-        amount: 4,
-        usdValue: 10000,
-        source: "ethereum",
-        kind: "defi",
-        meta: { chain: "ethereum", protocol: "Lido", positionType: "staked" },
-      },
-      {
-        symbol: "UNP",
-        amount: 100,
-        usdValue: 0,
-        source: "ethereum",
-        kind: "spot",
-        meta: { chain: "ethereum", protocol: undefined, positionType: "wallet" },
-      },
-    ]);
+describe("parsePositions (golden: fixtures in → fixture out)", () => {
+  it("positions + chains → expected-balances(与真实 fetchBalances 同口径:eip155 标准形标识)", () => {
+    const balances = parsePositions(positionsFixture, parseChainIds(chainsFixture));
+    expect(balances).toEqual(expectedBalances);
+  });
+
+  it("链映射缺失 → 抛错(失败即不产,绝不产 slug 兜底形)", () => {
+    // chainIds 映射里没有某仓位的链 → 无法产规范 eip155 标识 → 抛 UPSTREAM_ERROR(可重试)。
+    expect(() => parsePositions(positionsFixture, {})).toThrow(/no chainId/);
   });
 
   it("excludes hidden/trash (displayable=false) positions", () => {
-    // fixture 有 5 条,其中 1 条 displayable=false → 解析结果 4 条,无该条。
-    expect(balances).toHaveLength(4);
+    const balances = parsePositions(positionsFixture, parseChainIds(chainsFixture));
     expect(balances.find((b) => b.symbol === "SPAM")).toBeUndefined();
   });
 });
 
-describe("zerionProvider.fetchBalances", () => {
-  it("fetches positions with Basic auth and parses them", async () => {
-    const spy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify(fixture), { status: 200 }));
+describe("zerionProvider.fetchBalances(双 API)", () => {
+  it("并行取 positions + chains,输出与 expected-balances 完全一致", async () => {
+    const spy = mockZerionApis();
     const balances = await zerionProvider.fetchBalances(ctx());
-    expect(balances).toHaveLength(4);
-    const [url, init] = spy.mock.calls[0];
-    expect(String(url)).toContain(`/v1/wallets/${ADDR}/positions/`);
-    expect((init?.headers as Record<string, string>).Authorization).toBe(
-      `Basic ${btoa("test-key:")}`,
-    );
+    expect(balances).toEqual(expectedBalances);
+    // 两个端点都请求了,且 Basic auth 一致
+    const urls = spy.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes(`/v1/wallets/${ADDR}/positions/`))).toBe(true);
+    expect(urls.some((u) => u.includes("/v1/chains/"))).toBe(true);
+    for (const [, init] of spy.mock.calls) {
+      expect((init?.headers as Record<string, string>).Authorization).toBe(
+        `Basic ${btoa("test-key:")}`,
+      );
+    }
+  });
+
+  it("chains 端点失败(500)且无缓存 → fetchBalances 硬失败(不写含分叉标识的快照)", async () => {
+    mockZerionApis({ chains: () => new Response("", { status: 500 }) });
+    await expect(zerionProvider.fetchBalances(ctx())).rejects.toMatchObject({
+      code: "UPSTREAM_ERROR",
+    });
+  });
+
+  it("chains 映射有进程内缓存:第二次 fetchBalances 不再请求 /v1/chains/", async () => {
+    const spy = mockZerionApis();
+    await zerionProvider.fetchBalances(ctx());
+    const chainCalls = () =>
+      spy.mock.calls.filter((c) => String(c[0]).includes("/v1/chains/")).length;
+    expect(chainCalls()).toBe(1);
+    await zerionProvider.fetchBalances(ctx());
+    expect(chainCalls()).toBe(1); // 仍是 1:走缓存
   });
 
   // 凭据(地址)由 sync/create 的 validateCredentials 预校验(见 @folio/balances-basic inputs.test);
@@ -92,16 +125,18 @@ describe("zerionProvider.fetchBalances", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("maps 429 → RATE_LIMITED (retryable, parses Retry-After) and 401 → AUTH_FAILED", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("", { status: 429, headers: { "retry-after": "3" } }),
-    );
+  it("positions 429 → RATE_LIMITED(可重试,读 Retry-After);401 → AUTH_FAILED", async () => {
+    mockZerionApis({
+      positions: () => new Response("", { status: 429, headers: { "retry-after": "3" } }),
+    });
     await expect(zerionProvider.fetchBalances(ctx())).rejects.toMatchObject({
       code: "RATE_LIMITED",
       retryable: true,
       retryAfterMs: 3000,
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
+    vi.restoreAllMocks();
+    resetChainIdsCacheForTests();
+    mockZerionApis({ positions: () => new Response("", { status: 401 }) });
     await expect(zerionProvider.fetchBalances(ctx())).rejects.toMatchObject({
       code: "AUTH_FAILED",
     });

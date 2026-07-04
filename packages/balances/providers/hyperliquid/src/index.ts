@@ -43,7 +43,6 @@ export interface ClearinghouseState {
   withdrawable?: string;
 }
 
-const SOURCE = "hyperliquid";
 // 永续保证金计价币(账户权益以 USDC 计)。
 const MARGIN_ASSET = "USDC";
 
@@ -64,8 +63,7 @@ export function parseClearinghouseState(state: ClearinghouseState): Balance[] {
     out.push({
       symbol: MARGIN_ASSET,
       amount: num(ms.accountValue),
-      usdValue: num(ms.accountValue),
-      source: SOURCE,
+      value: num(ms.accountValue),
       kind: "perp",
       meta: {
         role: "equity",
@@ -83,8 +81,7 @@ export function parseClearinghouseState(state: ClearinghouseState): Balance[] {
     out.push({
       symbol: p.coin,
       amount: szi,
-      usdValue: 0, // 见上:仓位不计入总额,价值由权益行承载
-      source: SOURCE,
+      value: 0, // 见上:仓位不计入总额,价值由权益行承载
       kind: "perp",
       meta: {
         role: "position",

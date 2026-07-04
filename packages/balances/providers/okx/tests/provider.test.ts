@@ -2,6 +2,7 @@ import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { okxProvider, parseBalances, providers } from "../src";
 import balance from "./fixtures/balance.json";
+import expected from "./fixtures/expected-balances.json";
 
 const CREDS = { apiKey: "k", secret: "s", passphrase: "p" };
 function ctx(creds: FetchContext["creds"] = CREDS): FetchContext {
@@ -15,34 +16,12 @@ const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 }
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("parseBalances (golden)", () => {
-  it("maps eq→amount, eqUsd→usdValue (OKX-provided), skips zero/empty", () => {
-    expect(parseBalances(balance.data[0].details)).toEqual([
-      {
-        symbol: "BTC",
-        amount: 0.5,
-        usdValue: 30000,
-        source: "okx",
-        kind: "spot",
-        meta: { wallet: "trading" },
-      },
-      {
-        symbol: "USDT",
-        amount: 1000,
-        usdValue: 1000,
-        source: "okx",
-        kind: "spot",
-        meta: { wallet: "trading" },
-      },
-      {
-        symbol: "ETH",
-        amount: 2,
-        usdValue: 6000,
-        source: "okx",
-        kind: "spot",
-        meta: { wallet: "trading" },
-      },
-    ]); // DUST (eq 0) excluded
+// 两份 fixture 一一对应:balance.json(录制的 /api/v5/account/balance 响应)→
+// expected-balances.json(解析后的期望值)。覆盖:eq→amount、eqUsd→value(OKX 自带估值)、
+// 跳过零/空(DUST)。JSON 无 undefined → expected 省略未定义字段(toEqual 视缺键==undefined)。
+describe("parseBalances (golden: fixture in → fixture out)", () => {
+  it("maps the recorded balance details to expected-balances", () => {
+    expect(parseBalances(balance.data[0].details)).toEqual(expected);
   });
 });
 

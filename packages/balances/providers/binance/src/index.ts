@@ -47,16 +47,14 @@ export function parseAccountBalances(
     if (!asset) continue;
     const amount = Number(b.free ?? 0) + Number(b.locked ?? 0);
     if (!(amount > 0)) continue;
-    const usdValue = STABLECOINS.has(asset)
-      ? amount
-      : amount * (prices[`${asset}${QUOTE_ASSET}`] ?? 0);
+    const price = STABLECOINS.has(asset) ? 1 : (prices[`${asset}${QUOTE_ASSET}`] ?? undefined);
+    const usdValue = price != null ? amount * price : 0;
     out.push({
       symbol: asset,
       amount,
-      usdValue,
-      source: "binance",
+      price,
+      value: usdValue,
       kind: "spot",
-      meta: { wallet: "spot" },
     });
   }
   return out;

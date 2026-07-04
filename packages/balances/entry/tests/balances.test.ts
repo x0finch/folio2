@@ -73,8 +73,8 @@ describe("createBalances — 只暴露 provider 能力(3 方法)", () => {
           fetchBalances: async (ctx) => {
             seen = ctx.globalKeys;
             return [
-              { symbol: "A", amount: 1, usdValue: 10, source: "evm", kind: "spot" },
-              { symbol: "B", amount: 1, usdValue: 5, source: "evm", kind: "spot" },
+              { symbol: "A", amount: 1, value: 10, source: "evm", kind: "spot" },
+              { symbol: "B", amount: 1, value: 5, source: "evm", kind: "spot" },
             ];
           },
         }),

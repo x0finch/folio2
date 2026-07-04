@@ -2,8 +2,8 @@ import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { binanceProvider, parseAccountBalances, providers } from "../src";
 import account from "./fixtures/account.json";
-
-const prices = { BTCUSDT: 60000, ETHUSDT: 3000, BNBUSDT: 500 };
+import expected from "./fixtures/expected-balances.json";
+import prices from "./fixtures/prices.json";
 
 function ctx(creds: FetchContext["creds"] = { apiKey: "k", secret: "s" }): FetchContext {
   return {
@@ -15,44 +15,14 @@ function ctx(creds: FetchContext["creds"] = { apiKey: "k", secret: "s" }): Fetch
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("parseAccountBalances (golden)", () => {
+// 两份 fixture 一一对应:account.json(录制的 /api/v3/account 响应)+ prices.json(行情价映射)
+// → expected-balances.json(解析后的期望值)。覆盖:free+locked 合并、按价估值(稳定币≈1、
+// 无交易对→0)、跳过零余额(BNB)。JSON 无 undefined → expected 省略未定义字段(toEqual 视缺键==undefined)。
+describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
   const balances = parseAccountBalances(account, prices);
 
-  it("maps free+locked, values via price (stablecoin≈1, no-pair→0), skips zero", () => {
-    expect(balances).toEqual([
-      {
-        symbol: "BTC",
-        amount: 0.5,
-        usdValue: 30000,
-        source: "binance",
-        kind: "spot",
-        meta: { wallet: "spot" },
-      },
-      {
-        symbol: "ETH",
-        amount: 3, // 2 free + 1 locked
-        usdValue: 9000,
-        source: "binance",
-        kind: "spot",
-        meta: { wallet: "spot" },
-      },
-      {
-        symbol: "USDT",
-        amount: 1000,
-        usdValue: 1000, // stablecoin ≈ 1
-        source: "binance",
-        kind: "spot",
-        meta: { wallet: "spot" },
-      },
-      {
-        symbol: "NOPRICE",
-        amount: 5,
-        usdValue: 0, // no NOPRICEUSDT pair
-        source: "binance",
-        kind: "spot",
-        meta: { wallet: "spot" },
-      },
-    ]);
+  it("maps the recorded account + price map to expected-balances", () => {
+    expect(balances).toEqual(expected);
     // BNB has zero balance → excluded
     expect(balances.find((b) => b.symbol === "BNB")).toBeUndefined();
   });

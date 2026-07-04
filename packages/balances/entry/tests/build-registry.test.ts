@@ -30,7 +30,7 @@ describe("buildRegistry", () => {
       return {
         accountType: type,
         fetchBalances: async (): Promise<Balance[]> => [
-          { symbol: chain, amount: 0, usdValue: 0, source: chain, kind: "spot" },
+          { symbol: chain, amount: 0, value: 0, kind: "spot" },
         ],
         validate: async () => true,
       };

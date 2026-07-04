@@ -1,0 +1,45 @@
+[
+  {
+    "symbol": "ETH",
+    "amount": 2.5,
+    "price": 2500,
+    "value": 6250,
+    "kind": "spot",
+    "tokenIdentifier": "eip155:1/native:eth",
+    "name": "Ethereum",
+    "logo": "https://cdn.zerion.io/eth.png",
+    "meta": { "positionType": "wallet" }
+  },
+  {
+    "symbol": "USDC",
+    "amount": 1500,
+    "price": 1,
+    "value": 1500,
+    "kind": "spot",
+    "tokenIdentifier": "eip155:42161/erc20:0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+    "name": "USD Coin",
+    "logo": "https://cdn.zerion.io/usdc.png",
+    "meta": { "positionType": "wallet" }
+  },
+  {
+    "symbol": "stETH",
+    "amount": 4,
+    "price": 2500,
+    "value": 10000,
+    "kind": "defi",
+    "tokenIdentifier": "eip155:1/erc20:0xabababababababababababababababababababab",
+    "name": "Lido Staked Ether",
+    "logo": "https://cdn.zerion.io/steth.png",
+    "meta": { "protocol": "Lido", "positionType": "staked" }
+  },
+  {
+    "symbol": "UNP",
+    "amount": 100,
+    "value": 0,
+    "kind": "spot",
+    "tokenIdentifier": "eip155:1/erc20:0xabababababababababababababababababababab",
+    "name": "Unpriced Token",
+    "logo": "https://cdn.zerion.io/unp.png",
+    "meta": { "positionType": "wallet" }
+  }
+]
