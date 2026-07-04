@@ -16,7 +16,7 @@ import { refreshWarm, resolveAsset } from "../src/service";
 const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 const key = (r: TokenRef) => `${r.source}:${r.identifier}`;
 
-// 内存假 store(实现新 TokenStore:代币表按 refKey、实现索引按 caip19 键、warm 候选、warmAsOf)。
+// 内存假 store(实现新 TokenStore:代币表按 refKey、实现索引按 tokenKey 键、warm 候选、warmAsOf)。
 function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
   let wAsOf = seed?.warmAsOf ?? null;
   const candidates = new Map<string, TokenCandidate[]>();
@@ -50,7 +50,7 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
     async listTopTokens() {
       return [];
     },
-    async getByImpl(keys) {
+    async getByTokenKey(keys) {
       const out = new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
       for (const k of keys) {
         const e = impl.get(k);
@@ -58,7 +58,7 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
       }
       return out;
     },
-    async ensureImplToken(k, seed2) {
+    async ensureTokenKey(k, seed2) {
       const e = impl.get(k);
       if (e) {
         if (seed2.providerLogo) e.rec.providerLogo = seed2.providerLogo;
@@ -79,7 +79,7 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
       const e = impl.get(k);
       if (e) e.cgkCheckedUntil = until;
     },
-    async linkImplToCgk(k, info, price) {
+    async linkTokenKeyToCgk(k, info, price) {
       const orphan = impl.get(k)?.rec;
       const rec: TokenRecord = {
         id: key(info.ref),
@@ -130,12 +130,12 @@ describe("resolveAsset", () => {
     ).toEqual({ ref: cg("pinned"), confidence: "high", via: "explicit" });
   });
 
-  it("coingecko: tokenIdentifier (厂商寻址,如 manual 选币) → 直达显式 ref,不查 store/source", async () => {
+  it("coingecko: tokenKey (厂商寻址,如 manual 选币) → 直达显式 ref,不查 store/source", async () => {
     const fetchByContract = vi.fn();
     const provider = { fetchByContract } as unknown as TokenProvider;
     expect(
       await resolveAsset(
-        { symbol: "BTC", tokenIdentifier: "coingecko:bitcoin" },
+        { symbol: "BTC", tokenKey: "coingecko:bitcoin" },
         { provider, store: fakeStore() },
       ),
     ).toEqual({ ref: cg("bitcoin"), confidence: "high", via: "explicit" });
@@ -150,7 +150,7 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const provider = { fetchByContract } as unknown as TokenProvider;
-    const asset = { symbol: "USDC", tokenIdentifier: "chain:ethereum/token:0xabc" };
+    const asset = { symbol: "USDC", tokenKey: "chain:ethereum/token:0xabc" };
 
     const r1 = await resolveAsset(asset, { provider, store });
     expect(r1).toEqual({ ref: cg("usd-coin"), confidence: "high", via: "contract" });
@@ -160,8 +160,8 @@ describe("resolveAsset", () => {
 
     const r2 = await resolveAsset(asset, { provider, store });
     expect(r2.via).toBe("contract");
-    expect(fetchByContract).toHaveBeenCalledTimes(1); // impl 索引已指向 cgk,不再回源
-    expect(fetchByContract).toHaveBeenCalledWith("ethereum", "0xabc"); // chainRef + contract parsed from tokenIdentifier
+    expect(fetchByContract).toHaveBeenCalledTimes(1); // tokenKey 索引已指向 cgk,不再回源
+    expect(fetchByContract).toHaveBeenCalledWith("ethereum", "0xabc"); // chainRef + contract parsed from tokenKey
   });
 
   it("lazy:false (display) → impl miss does NOT hit source", async () => {
@@ -172,7 +172,7 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const provider = { fetchByContract } as unknown as TokenProvider;
-    const asset = { symbol: "USDC", tokenIdentifier: "chain:ethereum/token:0xabc" };
+    const asset = { symbol: "USDC", tokenKey: "chain:ethereum/token:0xabc" };
 
     const r = await resolveAsset(asset, { provider, store }, { lazy: false });
     expect(r.via).toBe("none"); // 无 warm/override 时降级
@@ -183,7 +183,7 @@ describe("resolveAsset", () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => null);
     const provider = { fetchByContract } as unknown as TokenProvider;
-    const asset = { symbol: "ZZZ", tokenIdentifier: "chain:ethereum/token:0xdead" };
+    const asset = { symbol: "ZZZ", tokenKey: "chain:ethereum/token:0xdead" };
 
     expect(await resolveAsset(asset, { provider, store })).toEqual({
       ref: null,
@@ -191,7 +191,7 @@ describe("resolveAsset", () => {
       via: "none",
     });
     // 孤儿已 seed(展示仍有 symbol)且记了复查时刻
-    const rec = (await store.getByImpl(["chain:ethereum/token:0xdead"])).get(
+    const rec = (await store.getByTokenKey(["chain:ethereum/token:0xdead"])).get(
       "chain:ethereum/token:0xdead",
     );
     expect(rec).toMatchObject({ ref: null, symbol: "ZZZ" });

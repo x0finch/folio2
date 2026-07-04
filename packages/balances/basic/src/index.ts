@@ -2,7 +2,7 @@
 // creds 的存储塑形(seal/open/safeView/isComplete)不在此 —— 归业务层(app lib/creds.ts),靠字段 schema 驱动。
 
 // 代币标识构造:唯一实现在 @folio/tokens-basic(代币身份是参考层的领域核心);此处 re-export 供 providers 用。
-export { buildTokenIdentifier, type TokenIdentifierInput } from "@folio/tokens-basic";
+export { buildTokenKey, type TokenKeyInput } from "@folio/tokens-basic";
 export { CryptoError, decrypt, encrypt, generateSecret, hmacSha256 } from "./crypto";
 export type { ProviderErrorCode, ProviderErrorOptions } from "./errors";
 export { ProviderError, parseRetryAfter } from "./errors";

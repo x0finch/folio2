@@ -4,13 +4,13 @@
 
 export {
   CGK_RECHECK_TTL_MS,
-  CONTRACT_TTL_MS,
   DEFAULT_TOP_N,
   INFO_TTL_MS,
   OVERRIDES,
   PRICE_TTL_MS,
   RESOLUTION_DOMINANCE,
   RESOLUTION_TOP_RANK,
+  TOKEN_KEY_TTL_MS,
   TOP_TOKENS_LIMIT,
   WARM_TTL_MS,
 } from "./constants";
@@ -20,11 +20,11 @@ export type { TokenProvider } from "./provider";
 export { parseRefKey, refKey } from "./ref";
 export type { TokenStore } from "./store";
 export {
-  buildTokenIdentifier,
-  type ParsedTokenIdentifier,
-  parseTokenIdentifier,
-  type TokenIdentifierInput,
-} from "./token-identifier";
+  buildTokenKey,
+  type ParsedTokenKey,
+  parseTokenKey,
+  type TokenKeyInput,
+} from "./token-key";
 export type {
   AssetRef,
   CgkCoinId,

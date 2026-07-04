@@ -9,7 +9,7 @@ import type {
   TokenRef,
   TokenStore,
 } from "@folio/tokens-basic";
-import { CONTRACT_TTL_MS, OVERRIDES, PRICE_TTL_MS, refKey } from "@folio/tokens-basic";
+import { OVERRIDES, PRICE_TTL_MS, refKey, TOKEN_KEY_TTL_MS } from "@folio/tokens-basic";
 import { createCoinGeckoProvider } from "@folio/tokens-provider-coingecko";
 import { normalizeSymbol } from "./normalize";
 import { type ResolveOpts, refreshWarm, resolveAsset } from "./service";
@@ -54,7 +54,7 @@ export interface Tokens {
   resolve(asset: AssetRef, opts?: ResolveOpts): Promise<Resolution>;
   // 取单价:缓存新鲜 → 直接回;stale/miss → 回源 → 写回。
   priceOf(ref: TokenRef): Promise<TokenPrice | undefined>;
-  // 展示富化(cache-only,零网络):实现键优先(孤儿也出数据),否则 override/symbol 消歧。
+  // 展示富化(cache-only,零网络):tokenKey 优先(孤儿也出数据),否则 override/symbol 消歧。
   enrich(assets: readonly (AssetRef | null)[]): Promise<EnrichedAsset[]>;
   // 预热写缓存(best-effort):刷新 top-N warm,并对给定 assets 逐个 lazy 解析(触发升级合并)。
   warm(assets?: readonly (AssetRef | null)[]): Promise<void>;
@@ -91,25 +91,25 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
     priceStale: ref ? !rec?.price || rec.price.stale : false,
   });
 
-  // cache-only 解析 + 记录读取:实现键命中直接用整行(含孤儿);否则 explicit/override/symbol → getByRefs。
+  // cache-only 解析 + 记录读取:tokenKey 命中直接用整行(含孤儿);否则 explicit/override/symbol → getByRefs。
   // 返回与输入等长对齐的 (ref, record) 对。
   async function lookupAll(
     assets: readonly (AssetRef | null)[],
   ): Promise<{ ref: TokenRef | null; rec: TokenRecord | undefined }[]> {
-    const withKeys = assets.map((a) => a?.tokenIdentifier ?? null);
+    const withKeys = assets.map((a) => a?.tokenKey ?? null);
     const keys = [...new Set(withKeys.filter((k): k is string => k !== null))];
-    const implMap =
+    const recordsByKey =
       keys.length > 0
-        ? await deps.store.getByImpl(keys)
+        ? await deps.store.getByTokenKey(keys)
         : new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
 
-    // 实现键未命中(或无键)的走 explicit/override/symbol(cache-only)
+    // tokenKey 未命中(或无键)的走 explicit/override/symbol(cache-only)
     const rest: { i: number; asset: AssetRef }[] = [];
     const out: ({ ref: TokenRef | null; rec: TokenRecord | undefined } | null)[] = assets.map(
       (a, i) => {
         if (!a) return { ref: null, rec: undefined };
         const key = withKeys[i];
-        const rec = key ? implMap.get(key) : undefined;
+        const rec = key ? recordsByKey.get(key) : undefined;
         if (rec) return { ref: rec.ref, rec };
         rest.push({ i, asset: a });
         return null;
@@ -180,10 +180,10 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
     async noteProviderAssets(assets) {
       for (const a of assets) {
         try {
-          await deps.store.ensureImplToken(
+          await deps.store.ensureTokenKey(
             a.tokenId,
             { symbol: normalizeSymbol(a.symbol), name: a.name, providerLogo: a.logo },
-            CONTRACT_TTL_MS,
+            TOKEN_KEY_TTL_MS,
           );
         } catch {
           // best-effort:单条失败不阻断其余(下次 sync 重试)。

@@ -4,7 +4,7 @@
     "creds": { "symbol": "BTC", "amount": 0.5, "unitPrice": 64000 }
   },
   {
-    "name": "picked CoinGecko id → coingecko tokenIdentifier (sync-time market valuation)",
+    "name": "picked CoinGecko id → coingecko tokenKey (sync-time market valuation)",
     "creds": { "symbol": "BTC", "amount": 1, "unitPrice": 64000, "identifier": "bitcoin" }
   },
   {

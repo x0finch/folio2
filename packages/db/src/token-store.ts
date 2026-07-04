@@ -17,7 +17,7 @@ export interface TokenStoreOpts {
   now?: () => number; // 注入便于测 TTL;默认 Date.now
 }
 
-// 孤儿行(CGK 未收录,provider 采集)的 source 标记;identifier = caip19 键。
+// 孤儿行(CGK 未收录,provider 采集)的 source 标记;identifier = tokenKey 键。
 const PROVIDER_SOURCE = "provider";
 
 // D1 上限 ~100 绑定参数;inArray 列表分块取(沿用 listBalancesForSnapshots 的约束)。
@@ -31,7 +31,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 type TokenRow = typeof tokens.$inferSelect;
 
 // 代币表 + 索引表的 D1 实现(无 userId;全局参考数据)。只经此工厂访问,不外泄 db/schema。
-// 并发注记:putWarm/ensureImplToken 先查后批写,极端并发下(cron 与手动 sync 同拍)新行 id 预分配
+// 并发注记:putWarm/ensureTokenKey 先查后批写,极端并发下(cron 与手动 sync 同拍)新行 id 预分配
 // 可能与冲突保留的旧 id 不一致 → 索引 FK 失败、整批回滚 —— 下次 warm/sync 自愈,可接受(warm 已单飞)。
 export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   const db = getDb(env);
@@ -192,7 +192,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       }));
     },
 
-    async getByImpl(keys) {
+    async getByTokenKey(keys) {
       const out = new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
       for (const ks of chunk(keys, IN_CHUNK)) {
         const rows = await db
@@ -201,7 +201,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
           .where(
             and(
-              eq(tokenIndex.kind, "caip19"),
+              eq(tokenIndex.kind, "tokenKey"),
               inArray(tokenIndex.key, ks),
               gt(tokenIndex.expiresAt, now()),
             ),
@@ -213,14 +213,14 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       return out;
     },
 
-    async ensureImplToken(key, seed: ProviderTokenSeed, indexTtlMs) {
+    async ensureTokenKey(key, seed: ProviderTokenSeed, indexTtlMs) {
       const t = now();
       const expiresAt = t + indexTtlMs;
       const cur = await db
         .select({ idx: tokenIndex, tok: tokens })
         .from(tokenIndex)
         .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
-        .where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key)));
+        .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key)));
 
       if (cur[0]) {
         const tok = cur[0].tok;
@@ -228,7 +228,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           db
             .update(tokenIndex)
             .set({ expiresAt })
-            .where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key))),
+            .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key))),
         ];
         if (tok.source === source) {
           // cgk 行:只补/刷备用槽(provider 图更新鲜)
@@ -282,7 +282,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               infoExpiresAt: expiresAt,
             },
           }),
-        db.insert(tokenIndex).values({ kind: "caip19", key, tokenId: id, expiresAt }),
+        db.insert(tokenIndex).values({ kind: "tokenKey", key, tokenId: id, expiresAt }),
       ]);
     },
 
@@ -290,17 +290,17 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       await db
         .update(tokenIndex)
         .set({ cgkCheckedUntil: until })
-        .where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key)));
+        .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key)));
     },
 
-    async linkImplToCgk(key, info, price, ttls) {
+    async linkTokenKeyToCgk(key, info, price, ttls) {
       const t = now();
       // 现指针与其代币(可能是孤儿)
       const cur = await db
         .select({ idx: tokenIndex, tok: tokens })
         .from(tokenIndex)
         .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
-        .where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key)));
+        .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key)));
       const orphan = cur[0] && cur[0].tok.source !== source ? cur[0].tok : null;
       // find-or-create cgk 行
       const existing = await db
@@ -346,10 +346,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             },
           }),
         // 指针重指:清旧(含孤儿指针)→ 插新
-        db.delete(tokenIndex).where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key))),
+        db.delete(tokenIndex).where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key))),
         db
           .insert(tokenIndex)
-          .values({ kind: "caip19", key, tokenId: cgkId, expiresAt: t + ttls.indexTtlMs }),
+          .values({ kind: "tokenKey", key, tokenId: cgkId, expiresAt: t + ttls.indexTtlMs }),
       ];
       // 孤儿行删除(其余索引行经 ON DELETE CASCADE 级联;孤儿 identifier=本 key,唯一)
       if (orphan) stmts.push(db.delete(tokens).where(eq(tokens.id, orphan.id)));

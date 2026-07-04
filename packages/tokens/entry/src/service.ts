@@ -8,11 +8,11 @@ import type {
 } from "@folio/tokens-basic";
 import {
   CGK_RECHECK_TTL_MS,
-  CONTRACT_TTL_MS,
   DEFAULT_TOP_N,
   INFO_TTL_MS,
   PRICE_TTL_MS,
-  parseTokenIdentifier,
+  parseTokenKey,
+  TOKEN_KEY_TTL_MS,
   WARM_TTL_MS,
 } from "@folio/tokens-basic";
 import { normalizeSymbol } from "./normalize";
@@ -25,13 +25,13 @@ export interface ResolveDeps {
 }
 
 export interface ResolveOpts {
-  // true(默认,预热路径):实现键 miss/待复查时 fetchByContract 取一次并落库(升级合并)。
+  // true(默认,预热路径):tokenKey miss/待复查时 fetchByContract 取一次并落库(升级合并)。
   // false(展示路径):cache-only,不取网络 → 页面零网络延迟。
   lazy?: boolean;
 }
 
-// 懒解析编排:实现键(caip19)→ 代币表;命中 cgk 行直接升格;孤儿/miss 且 lazy → 问 CGK,
-// 命中则升级合并(linkImplToCgk),未收录则 seed 孤儿 + 记复查时刻(期间 provider 数据照常展示)。
+// 懒解析编排:tokenKey → 代币表;命中 cgk 行直接升格;孤儿/miss 且 lazy → 问 CGK,
+// 命中则升级合并(linkTokenKeyToCgk),未收录则 seed 孤儿 + 记复查时刻(期间 provider 数据照常展示)。
 export async function resolveAsset(
   asset: AssetRef,
   deps: ResolveDeps,
@@ -41,10 +41,10 @@ export async function resolveAsset(
   const lazy = opts?.lazy ?? true;
 
   let contractHit: TokenRef | null = null;
-  // 实现键(持仓侧已构造的 tokenIdentifier)= impl 索引键 + 懒解析原料。
-  const key = asset.tokenIdentifier;
-  const parsed = key ? parseTokenIdentifier(key) : undefined;
-  // coingecko:<id> 形的 tokenIdentifier 本身就是规范 ref(厂商寻址,如 manual 用户选币)→ 直接命中,
+  // tokenKey(持仓侧已构造)= 索引键 + 懒解析原料。
+  const key = asset.tokenKey;
+  const parsed = key ? parseTokenKey(key) : undefined;
+  // coingecko:<id> 形的 tokenKey 本身就是规范 ref(厂商寻址,如 manual 用户选币)→ 直接命中,
   // 不查索引、不掉回 symbol。等同显式 ref。
   if (parsed?.cgkId) {
     return {
@@ -54,7 +54,7 @@ export async function resolveAsset(
     };
   }
   if (key) {
-    const rec = (await deps.store.getByImpl([key])).get(key);
+    const rec = (await deps.store.getByTokenKey([key])).get(key);
     if (rec?.ref) {
       contractHit = rec.ref;
     } else if (
@@ -66,8 +66,8 @@ export async function resolveAsset(
       // 反查用 chainRef(eip155 的数字 chainId 更可靠地命中 CGK 平台;chain: 形式给 slug)。
       const res = await deps.provider.fetchByContract(parsed.chainRef, parsed.contract);
       if (res) {
-        await deps.store.linkImplToCgk(key, res.info, res.price, {
-          indexTtlMs: CONTRACT_TTL_MS,
+        await deps.store.linkTokenKeyToCgk(key, res.info, res.price, {
+          indexTtlMs: TOKEN_KEY_TTL_MS,
           infoTtlMs: INFO_TTL_MS,
           priceTtlMs: PRICE_TTL_MS,
         });
@@ -75,10 +75,10 @@ export async function resolveAsset(
       } else {
         // CGK 未收录:确保孤儿在(展示仍有 symbol 可用)+ 记复查时刻
         if (!rec) {
-          await deps.store.ensureImplToken(
+          await deps.store.ensureTokenKey(
             key,
             { symbol: normalizeSymbol(asset.symbol) },
-            CONTRACT_TTL_MS,
+            TOKEN_KEY_TTL_MS,
           );
         }
         await deps.store.markCgkChecked(key, Date.now() + CGK_RECHECK_TTL_MS);

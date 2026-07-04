@@ -7,7 +7,7 @@ import type { AssetRef, EnrichedAsset } from "@folio/tokens";
 export interface BalanceLike {
   symbol: string;
   kind: string;
-  tokenIdentifier?: string | null; // 快照持久化的 CAIP-19 标识(解析实现键;CEX/manual/原生为空)
+  tokenKey?: string | null; // 快照持久化的 CAIP-19 标识(解析 tokenKey;CEX/manual/原生为空)
 }
 
 export interface TokenEnrichment {
@@ -18,10 +18,10 @@ export interface TokenEnrichment {
 }
 
 // 只对同质现货解析:spot + manual(按 symbol/标识);defi/perp 不解析(价值/展示走 typed meta)。
-// 解析实现键直接用持久化的 tokenIdentifier(provider 构造,含 chainId → 懒解析更准);无则仅 symbol。
+// 解析直接用持久化的 tokenKey(provider 构造,含 chainId → 懒解析更准);无则仅 symbol。
 export function balanceToAssetRef(b: BalanceLike): AssetRef | null {
   if (b.kind !== "spot" && b.kind !== "manual") return null;
-  return { symbol: b.symbol, tokenIdentifier: b.tokenIdentifier ?? undefined };
+  return { symbol: b.symbol, tokenKey: b.tokenKey ?? undefined };
 }
 
 // logo 优先 CGK(视觉统一,warm 缓存零边际配额),缺则回退 provider 自带图(备用槽);

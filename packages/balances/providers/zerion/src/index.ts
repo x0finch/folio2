@@ -1,7 +1,7 @@
 import {
   type Balance,
   type BalanceProvider,
-  buildTokenIdentifier,
+  buildTokenKey,
   type DefiMeta,
   defineProvider,
   ProviderError,
@@ -59,7 +59,7 @@ interface ZerionChainsResponse {
   data?: ZerionChain[];
 }
 
-// 链清单 → slug→数字 chainId(external_id hex → 十进制)。tokenIdentifier 的 eip155 标准形靠它。
+// 链清单 → slug→数字 chainId(external_id hex → 十进制)。tokenKey 的 eip155 标准形靠它。
 export function parseChainIds(res: ZerionChainsResponse): Record<string, number> {
   const out: Record<string, number> = {};
   for (const c of res.data ?? []) {
@@ -107,7 +107,7 @@ export function parsePositions(
       price: a.price ?? undefined,
       value: a.value ?? 0,
       kind: isDefi ? "defi" : "spot",
-      tokenIdentifier: buildTokenIdentifier({
+      tokenKey: buildTokenKey({
         chainId,
         contract,
         native: impl != null && impl.address == null, // 有该链实现但无合约 → 原生币
@@ -115,7 +115,7 @@ export function parsePositions(
       }),
       name: a.fungible_info?.name,
       logo: a.fungible_info?.icon?.url,
-      // meta 只留展示字段(protocol/positionType);链/合约身份走 tokenIdentifier,不再进 meta。
+      // meta 只留展示字段(protocol/positionType);链/合约身份走 tokenKey,不再进 meta。
       meta: {
         protocol: a.protocol ?? undefined,
         positionType: a.position_type,

@@ -279,7 +279,7 @@ export interface SnapshotBalanceInput {
   amount: number;
   usdValue: number;
   kind: BalanceKind;
-  tokenIdentifier?: string;
+  tokenKey?: string;
   meta?: Record<string, unknown>;
 }
 
@@ -314,7 +314,7 @@ export async function writeSnapshot(
     amount: b.amount,
     usdValue: b.usdValue,
     kind: b.kind,
-    tokenIdentifier: b.tokenIdentifier ?? null,
+    tokenKey: b.tokenKey ?? null,
     metaJson: b.meta ? JSON.stringify(b.meta) : null,
   }));
   // D1 限制每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 7 列 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行。

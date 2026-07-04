@@ -18,7 +18,7 @@ export type TokenRef = { source: "coingecko"; identifier: CgkCoinId };
 // tokens 层据它造 ref —— 调用方无需知道 source / 自己拼 TokenRef。
 export interface AssetRef {
   symbol: string;
-  tokenIdentifier?: string; // 已构造的 CAIP-19 标识(持仓侧持久化);解析优先用它(impl key + 懒解析原料)
+  tokenKey?: string; // 已构造的 CAIP-19 标识(持仓侧持久化);解析优先用它(impl key + 懒解析原料)
   ref?: TokenRef;
   identifier?: string; // 用户显式选定的上游 id(选币)
 }

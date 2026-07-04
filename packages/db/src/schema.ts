@@ -97,8 +97,8 @@ export const snapshotBalances = sqliteTable(
     amount: real("amount").notNull(),
     usdValue: real("usd_value").notNull(),
     kind: text("kind").$type<BalanceKind>().notNull(),
-    // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的实现键。
-    tokenIdentifier: text("token_identifier"),
+    // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的 tokenKey。
+    tokenKey: text("token_key"),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空
   },
   (t) => [index("snapshot_balances_snapshot_id_idx").on(t.snapshotId)],
@@ -106,11 +106,11 @@ export const snapshotBalances = sqliteTable(
 
 // —— 代币参考层(canonical-token-aggregation P1)——
 // 全局参考数据,**无 userId**(原则 #6 受控例外,同 listUserIdsWithAccounts)。
-// 代币表 = 系统认识的每个代币一行(CGK 收录币或 provider 孤儿);索引表 = 纯指针(symbol 候选 / caip19 实现键)。
+// 代币表 = 系统认识的每个代币一行(CGK 收录币或 provider 孤儿);索引表 = 纯指针(symbol 候选 / tokenKey)。
 // 经 @folio/db 的 createTokenStore(env,{source}) 访问;key 归一由 @folio/tokens 调用方保证。
 
 // 代币表:info facet(name/logo,长 TTL)+ price facet(短 TTL;过期=stale 不删,SWR)合一行。
-// cgk 行:source="coingecko"、identifier=CGK coin id;孤儿行:source="provider"、identifier=caip19 键。
+// cgk 行:source="coingecko"、identifier=CGK coin id;孤儿行:source="provider"、identifier=tokenKey 键。
 export const tokens = sqliteTable(
   "tokens",
   {
@@ -133,12 +133,12 @@ export const tokens = sqliteTable(
 
 // 索引表:多种方式找到代币,纯指针不存代币数据。
 // kind="symbol":一 symbol 多候选(消歧输入),随 warm 换血(短 TTL);
-// kind="caip19":实现级键(eip155:<id>/erc20:<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
-// cgk_checked_until(仅 caip19):问过 CGK"未收录"的复查时刻(替代旧否定缓存三态)。
+// kind="tokenKey":代币键(eip155:<id>/erc20:<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
+// cgk_checked_until(仅 tokenKey):问过 CGK"未收录"的复查时刻(替代旧否定缓存三态)。
 export const tokenIndex = sqliteTable(
   "token_index",
   {
-    kind: text("kind").$type<"symbol" | "caip19">().notNull(),
+    kind: text("kind").$type<"symbol" | "tokenKey">().notNull(),
     key: text("key").notNull(),
     tokenId: text("token_id")
       .notNull()

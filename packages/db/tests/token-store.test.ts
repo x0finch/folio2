@@ -96,13 +96,13 @@ describe("warm + candidates + listTopTokens", () => {
   });
 });
 
-describe("impl index (caip19): ensure / getByImpl / markCgkChecked", () => {
+describe("impl index (tokenKey): ensure / getByTokenKey / markCgkChecked", () => {
   const KEY = "eip155:1/erc20:0xabc";
 
-  it("ensureImplToken seeds an orphan (source=provider) with provider data", async () => {
+  it("ensureTokenKey seeds an orphan (source=provider) with provider data", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    await store.ensureImplToken(KEY, { symbol: "FOO", name: "Foo Token", providerLogo: "L" }, TTL);
-    const rec = (await store.getByImpl([KEY])).get(KEY);
+    await store.ensureTokenKey(KEY, { symbol: "FOO", name: "Foo Token", providerLogo: "L" }, TTL);
+    const rec = (await store.getByTokenKey([KEY])).get(KEY);
     expect(rec).toMatchObject({
       ref: null, // 孤儿:CGK 未收录
       symbol: "FOO",
@@ -112,37 +112,42 @@ describe("impl index (caip19): ensure / getByImpl / markCgkChecked", () => {
     });
   });
 
-  it("ensureImplToken on existing orphan refreshes provider data + extends expiry", async () => {
+  it("ensureTokenKey on existing orphan refreshes provider data + extends expiry", async () => {
     let clock = 1000;
     const store = createTokenStore(env, { source: "coingecko", now: () => clock });
-    await store.ensureImplToken(KEY, { symbol: "FOO" }, TTL);
+    await store.ensureTokenKey(KEY, { symbol: "FOO" }, TTL);
     clock = 1000 + TTL - 1; // 未过期时再 seed(模拟下一次 sync)
-    await store.ensureImplToken(KEY, { symbol: "FOO", name: "Foo", providerLogo: "L2" }, TTL);
+    await store.ensureTokenKey(KEY, { symbol: "FOO", name: "Foo", providerLogo: "L2" }, TTL);
     clock = 1000 + TTL + 1; // 原 TTL 已过,但 expiry 被顺延
-    const rec = (await store.getByImpl([KEY])).get(KEY);
+    const rec = (await store.getByTokenKey([KEY])).get(KEY);
     expect(rec).toMatchObject({ name: "Foo", providerLogo: "L2" });
   });
 
   it("markCgkChecked records recheck horizon on the index row", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    await store.ensureImplToken(KEY, { symbol: "FOO" }, TTL);
+    await store.ensureTokenKey(KEY, { symbol: "FOO" }, TTL);
     await store.markCgkChecked(KEY, 5000);
-    expect((await store.getByImpl([KEY])).get(KEY)?.cgkCheckedUntil).toBe(5000);
+    expect((await store.getByTokenKey([KEY])).get(KEY)?.cgkCheckedUntil).toBe(5000);
   });
 
   it("expired index row → miss", async () => {
     let clock = 1000;
     const store = createTokenStore(env, { source: "coingecko", now: () => clock });
-    await store.ensureImplToken(KEY, { symbol: "FOO" }, TTL);
+    await store.ensureTokenKey(KEY, { symbol: "FOO" }, TTL);
     clock = 1000 + TTL + 1;
-    expect((await store.getByImpl([KEY])).size).toBe(0);
+    expect((await store.getByTokenKey([KEY])).size).toBe(0);
   });
 
-  it("ensureImplToken on a cgk-pointed key only refreshes the fallback logo slot", async () => {
+  it("ensureTokenKey on a cgk-pointed key only refreshes the fallback logo slot", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    await store.linkImplToCgk(KEY, info(cg("foo"), "FOO", "cgk-logo"), price(cg("foo"), 1), TTLS);
-    await store.ensureImplToken(KEY, { symbol: "foo2", providerLogo: "prov" }, TTL);
-    const rec = (await store.getByImpl([KEY])).get(KEY);
+    await store.linkTokenKeyToCgk(
+      KEY,
+      info(cg("foo"), "FOO", "cgk-logo"),
+      price(cg("foo"), 1),
+      TTLS,
+    );
+    await store.ensureTokenKey(KEY, { symbol: "foo2", providerLogo: "prov" }, TTL);
+    const rec = (await store.getByTokenKey([KEY])).get(KEY);
     expect(rec).toMatchObject({
       ref: cg("foo"),
       symbol: "FOO", // cgk 行的 symbol/name 不被 provider seed 覆盖
@@ -152,14 +157,19 @@ describe("impl index (caip19): ensure / getByImpl / markCgkChecked", () => {
   });
 });
 
-describe("linkImplToCgk (升级合并)", () => {
+describe("linkTokenKeyToCgk (升级合并)", () => {
   const KEY = "eip155:1/erc20:0xabc";
 
   it("orphan → cgk: creates cgk row, carries provider_logo, repoints, deletes orphan", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    await store.ensureImplToken(KEY, { symbol: "FOO", providerLogo: "prov" }, TTL);
-    await store.linkImplToCgk(KEY, info(cg("foo"), "FOO", "cgk-logo"), price(cg("foo"), 2), TTLS);
-    const rec = (await store.getByImpl([KEY])).get(KEY);
+    await store.ensureTokenKey(KEY, { symbol: "FOO", providerLogo: "prov" }, TTL);
+    await store.linkTokenKeyToCgk(
+      KEY,
+      info(cg("foo"), "FOO", "cgk-logo"),
+      price(cg("foo"), 2),
+      TTLS,
+    );
+    const rec = (await store.getByTokenKey([KEY])).get(KEY);
     expect(rec).toMatchObject({
       ref: cg("foo"),
       logo: "cgk-logo",
@@ -179,9 +189,9 @@ describe("linkImplToCgk (升级合并)", () => {
       TTL,
       TTL,
     );
-    await store.ensureImplToken(KEY, { symbol: "FOO", providerLogo: "prov" }, TTL);
-    await store.linkImplToCgk(KEY, info(cg("foo"), "FOO", "cgk-logo"), undefined, TTLS);
-    const rec = (await store.getByImpl([KEY])).get(KEY);
+    await store.ensureTokenKey(KEY, { symbol: "FOO", providerLogo: "prov" }, TTL);
+    await store.linkTokenKeyToCgk(KEY, info(cg("foo"), "FOO", "cgk-logo"), undefined, TTLS);
+    const rec = (await store.getByTokenKey([KEY])).get(KEY);
     expect(rec).toMatchObject({ ref: cg("foo"), logo: "cgk-logo", providerLogo: "prov" });
     // price 未传 → 保留 warm 写入的价
     expect(rec?.price?.unitPrice).toBe(5);
@@ -190,8 +200,8 @@ describe("linkImplToCgk (升级合并)", () => {
 
   it("no prior row: creates cgk row + index directly", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    await store.linkImplToCgk(KEY, info(cg("foo"), "FOO"), price(cg("foo"), 3), TTLS);
-    expect((await store.getByImpl([KEY])).get(KEY)).toMatchObject({ ref: cg("foo") });
+    await store.linkTokenKeyToCgk(KEY, info(cg("foo"), "FOO"), price(cg("foo"), 3), TTLS);
+    expect((await store.getByTokenKey([KEY])).get(KEY)).toMatchObject({ ref: cg("foo") });
   });
 });
 

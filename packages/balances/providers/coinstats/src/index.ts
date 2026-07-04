@@ -2,7 +2,7 @@ import {
   type AccountType,
   type Balance,
   type BalanceProvider,
-  buildTokenIdentifier,
+  buildTokenKey,
   defineProvider,
   type FetchContext,
   ProviderError,
@@ -49,8 +49,8 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ba
       price: c.price ?? undefined,
       value: amount * (c.price ?? 0),
       kind: "spot",
-      // 链/合约身份走 tokenIdentifier(CAIP-19),不再进 meta;现货行无展示用 meta → 省略。
-      tokenIdentifier: buildTokenIdentifier({ chain, contract: c.contractAddress ?? undefined }),
+      // 链/合约身份走 tokenKey(CAIP-19),不再进 meta;现货行无展示用 meta → 省略。
+      tokenKey: buildTokenKey({ chain, contract: c.contractAddress ?? undefined }),
       name: c.name,
     });
   }

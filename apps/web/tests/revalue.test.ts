@@ -37,10 +37,10 @@ function fakeStore(): TokenStore {
     putWarm: async () => {},
     warmAsOf: async () => 9_999_999_999_999, // 远未来 → refreshWarm 视为新鲜、跳过取数
     listTopTokens: async () => [],
-    getByImpl: async () => new Map(),
-    ensureImplToken: async () => {},
+    getByTokenKey: async () => new Map(),
+    ensureTokenKey: async () => {},
     markCgkChecked: async () => {},
-    linkImplToCgk: async () => {},
+    linkTokenKeyToCgk: async () => {},
     getByRefs: async (refs) => {
       const out = new Map<string, TokenRecord>();
       for (const r of refs) {
@@ -77,8 +77,8 @@ const bal = (symbol: string, amount: number, value: number, identifier?: string)
   amount,
   value,
   kind: "manual",
-  // 用户选币 → tokenIdentifier 的厂商寻址形(coingecko:<id>),身份不再进 meta。
-  ...(identifier ? { tokenIdentifier: `coingecko:${identifier}` } : {}),
+  // 用户选币 → tokenKey 的厂商寻址形(coingecko:<id>),身份不再进 meta。
+  ...(identifier ? { tokenKey: `coingecko:${identifier}` } : {}),
 });
 
 describe("revalueManual", () => {
@@ -105,13 +105,13 @@ describe("revalueManual", () => {
     expect(out[0].value).toBe(1);
   });
 
-  it("explicit coingecko tokenIdentifier overrides symbol resolution", async () => {
-    // 错的 symbol "XBT" 但 tokenIdentifier=coingecko:bitcoin → 用 bitcoin 的 store 价 65000。
+  it("explicit coingecko tokenKey overrides symbol resolution", async () => {
+    // 错的 symbol "XBT" 但 tokenKey=coingecko:bitcoin → 用 bitcoin 的 store 价 65000。
     const out = await revalueManual(tokens(), "manual", [bal("XBT", 1, 0, "bitcoin")]);
     expect(out[0].value).toBe(65000);
   });
 
-  it("explicit tokenIdentifier not in warm cache → source.fetchPrices supplies the price", async () => {
+  it("explicit tokenKey not in warm cache → source.fetchPrices supplies the price", async () => {
     const out = await revalueManual(tokens(), "manual", [bal("TONCOIN", 2, 0, "the-open-network")]);
     expect(out[0].value).toBe(10); // 2 × 5(来自 source.fetchPrices)
   });

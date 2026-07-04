@@ -1,0 +1,1 @@
+ALTER TABLE `snapshot_balances` RENAME COLUMN `token_identifier` TO `token_key`;

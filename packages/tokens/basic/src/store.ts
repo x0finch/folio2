@@ -8,8 +8,8 @@ import type {
 } from "./types";
 
 // 全局参考数据缓存(代币表 + 索引表)。**无 `userId`** —— 价/解析/元信息都是全局事实(原则 #6 受控例外)。
-// 三条查找路径:代币表主键 / (source, identifier) 唯一索引(cgk id)/ 实现级 caip19 键(索引表)。
-// key 归一(symbol 大写、caip19 构造)由调用方(entry 的 normalize)完成,store 只按 key 存/查。
+// 三条查找路径:代币表主键 / (source, identifier) 唯一索引(cgk id)/ tokenKey(索引表)。
+// key 归一(symbol 大写、tokenKey 构造)由调用方(entry 的 normalize)完成,store 只按 key 存/查。
 export interface TokenStore {
   // —— warm(top-N markets):upsert cgk 代币行 + symbol 索引(消歧候选)——
   // warmTtlMs 管 symbol 索引与价(短、要新鲜);infoTtlMs 管 name/logo(长、近静态)。
@@ -24,17 +24,19 @@ export interface TokenStore {
   // 符号消歧候选:symbol 索引 join 代币表取 rank。
   getCandidates(symbol: string): Promise<TokenCandidate[]>;
 
-  // —— 实现级索引(kind="caip19",key=eip155:<id>/erc20:<addr> 等)——
+  // —— tokenKey 索引(kind="tokenKey",key=eip155:<id>/erc20:<addr> 等)——
   // 读:key → 整行(cgk 或孤儿)+ cgkCheckedUntil(未收录的复查时刻;替代旧否定缓存三态)。
-  getByImpl(keys: string[]): Promise<Map<string, TokenRecord & { cgkCheckedUntil: number | null }>>;
+  getByTokenKey(
+    keys: string[],
+  ): Promise<Map<string, TokenRecord & { cgkCheckedUntil: number | null }>>;
   // 同步采集:miss → seed 孤儿行(source="provider",identifier=key)+ 索引行;
   // hit → 刷新 providerLogo(cgk 行填备用槽)/孤儿的 symbol/name,并顺延索引 expiry。
-  ensureImplToken(key: string, seed: ProviderTokenSeed, indexTtlMs: number): Promise<void>;
+  ensureTokenKey(key: string, seed: ProviderTokenSeed, indexTtlMs: number): Promise<void>;
   // 问过 CGK"未收录"→ 记复查时刻(不删孤儿,期间照常展示 provider 数据)。
   markCgkChecked(key: string, until: number): Promise<void>;
   // 升级合并(CGK 收录/懒解析命中):find-or-create cgk 行 → 孤儿的 providerLogo 拷入备用槽(若空)
   // → 索引指针改指 cgk 行 → 删孤儿行;单次原子批。
-  linkImplToCgk(
+  linkTokenKeyToCgk(
     key: string,
     info: TokenInfo,
     price: TokenPrice | undefined,

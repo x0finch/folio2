@@ -1,7 +1,7 @@
 import {
   type Balance,
   type BalanceProvider,
-  buildTokenIdentifier,
+  buildTokenKey,
   defineProvider,
 } from "@folio/balances-basic";
 import { z } from "zod";
@@ -17,7 +17,7 @@ export const customProvider = defineProvider({
     { key: "symbol", type: "public", label: "Symbol", validator: z.string().trim().min(1) },
     { key: "amount", type: "public", label: "Amount", validator: z.coerce.number() },
     { key: "unitPrice", type: "public", label: "Unit price (USD)", validator: z.coerce.number() },
-    // 可选:用户选定的 CoinGecko identifier(消歧,P7.4.3)。有则产 tokenIdentifier(coingecko:<id>)
+    // 可选:用户选定的 CoinGecko identifier(消歧,P7.4.3)。有则产 tokenKey(coingecko:<id>)
     // 供 sync 期市价重估按显式 ref 解析(见 revalueManual / resolveAsset 的 coingecko: 直达)。
     { key: "identifier", type: "public", label: "CoinGecko ID", validator: z.string().optional() },
     // 可选:锁定固定值(P7.4.4)。在则透出 meta.fixed → sync 期跳过市价重估、钉死 amount × unitPrice。
@@ -34,11 +34,9 @@ export const customProvider = defineProvider({
         price: unitPrice,
         value: amount * unitPrice,
         kind: "manual" as const,
-        // 用户选定的 CGK id = 厂商寻址身份 → tokenIdentifier(coingecko:<id>),不再塞 meta.identifier;
+        // 用户选定的 CGK id = 厂商寻址身份 → tokenKey(coingecko:<id>),不再塞 meta.identifier;
         // 未选币则无标识,解析时按 symbol 归一(同 CEX)。
-        ...(identifier
-          ? { tokenIdentifier: buildTokenIdentifier({ cgkId: identifier as string }) }
-          : {}),
+        ...(identifier ? { tokenKey: buildTokenKey({ cgkId: identifier as string }) } : {}),
         // meta 只留【行为标志】:fixed(锁定固定值 → sync 期跳过市价重估)。身份不进 meta。
         ...(fixed ? { meta: { fixed: true } } : {}),
       },

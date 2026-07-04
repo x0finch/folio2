@@ -175,13 +175,13 @@ export async function syncAccount(
       takenAt: Date.now(),
       totalUsd,
       // 边界映射:Balance 契约用 value,快照层沿用 usdValue(不动表结构)。其余字段透传;
-      // token 元信息(name/logo/tokenIdentifier)不落快照,参考层是其 home(见 canonical 计划)。
+      // token 元信息(name/logo/tokenKey)不落快照,参考层是其 home(见 canonical 计划)。
       balances: balances.map((b) => ({
         symbol: b.symbol,
         amount: b.amount,
         usdValue: b.value,
         kind: b.kind,
-        tokenIdentifier: b.tokenIdentifier,
+        tokenKey: b.tokenKey,
         meta: b.meta,
       })),
     });

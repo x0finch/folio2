@@ -1,4 +1,4 @@
-// 代币寻址标识(TokenIdentifier):带命名空间前缀、用来定位"这是哪个代币"的字符串 —— 全体系统一的
+// 代币寻址标识(TokenKey):带命名空间前缀、用来定位"这是哪个代币"的字符串 —— 全体系统一的
 // 代币寻址方式,也是代币参考层(tokens/token_index)的索引键(唯一实现,勿再复制)。
 // 不是"链上寻址"专属:标识空间跨多种寻址方案(链寻址 + 厂商寻址),来源不同、空间同一 ——
 // Zerion 从 implementations、CoinStats 从 contractAddress、CGK/manual 从 coin id 都能产出它;
@@ -13,7 +13,7 @@
 //   …/erc721:<addr>/<tokenId>        NFT(预留)
 // 链/合约/symbol 小写归一,存查同口径。
 
-export interface TokenIdentifierInput {
+export interface TokenKeyInput {
   chain?: string;
   chainId?: number;
   contract?: string;
@@ -23,13 +23,13 @@ export interface TokenIdentifierInput {
 }
 
 // chainId 有则 eip155,否则 slug 兜底;两者都缺 → 无链前缀可用。
-function chainPrefix(input: TokenIdentifierInput): string | undefined {
+function chainPrefix(input: TokenKeyInput): string | undefined {
   if (input.chainId != null && Number.isFinite(input.chainId)) return `eip155:${input.chainId}`;
   const chain = input.chain?.trim().toLowerCase();
   return chain ? `chain:${chain}` : undefined;
 }
 
-export function buildTokenIdentifier(input: TokenIdentifierInput): string | undefined {
+export function buildTokenKey(input: TokenKeyInput): string | undefined {
   const prefix = chainPrefix(input);
   const contract = input.contract?.trim().toLowerCase();
   if (contract && prefix) {
@@ -44,16 +44,16 @@ export function buildTokenIdentifier(input: TokenIdentifierInput): string | unde
   return undefined; // 无任何寻址 → 不产标识
 }
 
-// 解析 tokenIdentifier(buildTokenIdentifier 的逆):
+// 解析 tokenKey(buildTokenKey 的逆):
 //   chainRef = eip155 的数字 chainId 串 / chain: 的 slug —— 喂 provider.fetchByContract(该函数按 slug 或
 //   chainId 都能映射到 CGK 平台;用数字 chainId 反而更可靠,如 Arbitrum slug≠CGK平台名)。
-export interface ParsedTokenIdentifier {
+export interface ParsedTokenKey {
   chainRef?: string;
   contract?: string;
   native?: boolean;
   cgkId?: string;
 }
-export function parseTokenIdentifier(id: string): ParsedTokenIdentifier {
+export function parseTokenKey(id: string): ParsedTokenKey {
   if (id.startsWith("coingecko:")) return { cgkId: id.slice("coingecko:".length) };
   const slash = id.indexOf("/");
   if (slash < 0) return {};

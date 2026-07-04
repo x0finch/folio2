@@ -9,7 +9,7 @@
   },
   {
     "symbol": "USDC",
-    "tokenIdentifier": "chain:solana/token:epjfwdd5aufqssqem2qn1xzybapc8g4weggkzwytdt1v",
+    "tokenKey": "chain:solana/token:epjfwdd5aufqssqem2qn1xzybapc8g4weggkzwytdt1v",
     "name": "USD Coin",
     "amount": 500,
     "price": 1,
@@ -18,7 +18,7 @@
   },
   {
     "symbol": "CT",
-    "tokenIdentifier": "chain:solana/token:6fuwecxzrqeh2wyutg3xeqhgt4wsbiubsdd1pyw3pump",
+    "tokenKey": "chain:solana/token:6fuwecxzrqeh2wyutg3xeqhgt4wsbiubsdd1pyw3pump",
     "name": "Crypto Twitter",
     "amount": 1010,
     "price": 0.00001,
@@ -27,7 +27,7 @@
   },
   {
     "symbol": "UNP",
-    "tokenIdentifier": "chain:solana/token:unpriced11111111111111111111111111111111111",
+    "tokenKey": "chain:solana/token:unpriced11111111111111111111111111111111111",
     "name": "Unpriced Token",
     "amount": 100,
     "value": 0,
@@ -43,7 +43,7 @@
   },
   {
     "symbol": "ATOM",
-    "tokenIdentifier": "chain:cosmos/token:uatom",
+    "tokenKey": "chain:cosmos/token:uatom",
     "name": "Cosmos Hub",
     "amount": 105.29550851642641,
     "price": 1.592410066278476,
