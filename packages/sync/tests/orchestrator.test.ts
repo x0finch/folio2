@@ -32,17 +32,16 @@ function account(overrides: Partial<AccountSafe> = {}): AccountSafe {
     ...overrides,
   };
 }
-const bal = (symbol: string, usdValue: number): Balance => ({
+const bal = (symbol: string, value: number): Balance => ({
   symbol,
   amount: 1,
-  usdValue,
-  source: "manual",
+  value,
   kind: "manual",
 });
 const ok = (balances: Balance[]): FetchOutcome => ({
   status: "ok",
   balances,
-  totalUsd: balances.reduce((s, b) => s + b.usdValue, 0),
+  totalUsd: balances.reduce((s, b) => s + b.value, 0),
 });
 
 function makeDeps(
@@ -80,10 +79,10 @@ describe("syncUser — 取余额 → 写快照", () => {
     expect(writes[0].input.balances).toHaveLength(1);
   });
 
-  it("revalue 钩子(P7.4.2):写快照前改 usdValue 并重算 totalUsd", async () => {
+  it("revalue 钩子(P7.4.2):写快照前改 value 并重算 totalUsd", async () => {
     const { deps, writes } = makeDeps([account()], {
       fetchBalances: async () => ok([bal("BTC", 32000)]),
-      revalue: async (_type, balances) => balances.map((b) => ({ ...b, usdValue: b.usdValue * 2 })),
+      revalue: async (_type, balances) => balances.map((b) => ({ ...b, value: b.value * 2 })),
     });
     const { results } = await syncUser(deps, "u1");
     expect(results[0]).toMatchObject({ ok: true, totalUsd: 64000 });

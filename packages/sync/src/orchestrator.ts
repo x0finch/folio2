@@ -163,7 +163,7 @@ export async function syncAccount(
     if (deps.revalue) {
       try {
         balances = await deps.revalue(account.type, balances);
-        totalUsd = balances.reduce((sum, b) => sum + b.usdValue, 0);
+        totalUsd = balances.reduce((sum, b) => sum + b.value, 0);
       } catch (e) {
         log.warning("revalue failed; keeping provider values", {
           ...ctxFields,
@@ -174,7 +174,16 @@ export async function syncAccount(
     const snapshotId = await deps.writeSnapshot(userId, account.id, {
       takenAt: Date.now(),
       totalUsd,
-      balances,
+      // 边界映射:Balance 契约用 value,快照层沿用 usdValue(不动表结构)。其余字段透传;
+      // token 元信息(name/logo/tokenIdentifier)不落快照,参考层是其 home(见 canonical 计划)。
+      balances: balances.map((b) => ({
+        symbol: b.symbol,
+        amount: b.amount,
+        usdValue: b.value,
+        kind: b.kind,
+        tokenIdentifier: b.tokenIdentifier,
+        meta: b.meta,
+      })),
     });
     log.info("account synced", { ...ctxFields, totalUsd, balances: balances.length });
     return { accountId: account.id, ok: true, snapshotId, totalUsd };
