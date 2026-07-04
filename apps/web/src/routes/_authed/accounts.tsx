@@ -9,7 +9,7 @@ import { useUsd } from "../../components/holdings-sections";
 import { TokenStack } from "../../components/token-stack";
 import { listMyAccounts } from "../../lib/server/accounts";
 import { getCredentialSpecs } from "../../lib/server/credentials";
-import { getMyOverview } from "../../lib/server/overview";
+import { getMyAccountHoldings } from "../../lib/server/overview";
 import { triggerSync } from "../../lib/server/sync";
 import { useStalePriceRefresh } from "../../lib/use-stale-price-refresh";
 
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/_authed/accounts")({
     // 合并两源:getMyOverview 给活跃账户的市值/上次同步/持仓;listMyAccounts 给全部账户(含归档)的
     // 凭据态 + archivedAt。归档账户不在 overview.rows(见 overview.ts 过滤)→ 其 value/holdings 为空。
     const [overview, accounts, credentialSpecs] = await Promise.all([
-      getMyOverview(),
+      getMyAccountHoldings(),
       listMyAccounts(),
       getCredentialSpecs(),
     ]);

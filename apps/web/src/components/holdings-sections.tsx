@@ -52,7 +52,15 @@ function SpotTable({ rows }: { rows: SpotRow[] }) {
 }
 
 // 资产单元:logo(热链,失败回退到 symbol 首字母圆标)+ 名称/symbol。
-function AssetCell({ symbol, name, logo }: { symbol: string; name?: string; logo?: string }) {
+export function AssetCell({
+  symbol,
+  name,
+  logo,
+}: {
+  symbol: string;
+  name?: string;
+  logo?: string;
+}) {
   return (
     <div className="flex items-center gap-2">
       {logo ? (
@@ -90,7 +98,7 @@ function Change24h({ value }: { value?: number }) {
 }
 
 // DeFi:按协议分组,每组一张小表(Asset / 仓位类型 / 价值)。负值=负债(借出)→ 标红。
-function DefiPositions({ groups }: { groups: DefiGroup[] }) {
+export function DefiPositions({ groups }: { groups: DefiGroup[] }) {
   const t = useTranslations("Overview");
   const usd = useUsd();
   return (
@@ -127,7 +135,7 @@ function DefiPositions({ groups }: { groups: DefiGroup[] }) {
 }
 
 // 永续:净值由外层承载;此处展示可提/保证金副行 + 仓位明细(方向/盈亏/杠杆/强平)。
-function PerpPositions({ view }: { view: PerpView }) {
+export function PerpPositions({ view }: { view: PerpView }) {
   const t = useTranslations("Overview");
   const usd = useUsd();
   const { equity, positions } = view;

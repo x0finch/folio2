@@ -2,8 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { AddAccountSheet } from "../../components/add-account-sheet";
-import { AccountHoldings, useUsd } from "../../components/holdings-sections";
+import { DefiPositions, PerpPositions, useUsd } from "../../components/holdings-sections";
 import { PortfolioChart } from "../../components/portfolio-chart";
+import { TokenHoldings } from "../../components/token-holdings";
 import { type GroupedView, toGroupedView } from "../../lib/groups-view";
 import { getMyGroups } from "../../lib/server/groups";
 import { getPortfolioHistory } from "../../lib/server/history";
@@ -54,19 +55,23 @@ function ByGroup({ view }: { view: GroupedView }) {
 }
 
 function Overview() {
-  const { rows, totalUsd, series, groups, memberships, pricesStale } = Route.useLoaderData();
+  const {
+    holdings,
+    sections,
+    accountTotals,
+    totalUsd,
+    holdingsSubtotal,
+    defiSubtotal,
+    series,
+    groups,
+    memberships,
+    pricesStale,
+  } = Route.useLoaderData();
   const t = useTranslations("Overview");
   const tc = useTranslations("Common");
   const usd = useUsd();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
-  const grouped = toGroupedView(
-    rows.map((r) => ({
-      account: { id: r.account.id, label: r.account.label },
-      totalUsd: r.totalUsd,
-    })),
-    groups,
-    memberships,
-  );
+  const grouped = toGroupedView(accountTotals, groups, memberships);
 
   return (
     <div className="flex flex-col gap-6">
@@ -102,7 +107,7 @@ function Overview() {
         </Card>
       )}
 
-      {rows.length === 0 ? (
+      {accountTotals.length === 0 ? (
         <p className="text-muted-foreground">
           {tc("noAccountsYet")}{" "}
           <Link to="/accounts" className="underline">
@@ -111,21 +116,45 @@ function Overview() {
           .
         </p>
       ) : (
-        rows.map((row) => (
-          <Card key={row.account.id}>
-            <CardHeader>
-              <CardTitle className="flex items-baseline justify-between">
-                <span>{row.account.label}</span>
-                <span className="text-base font-normal text-muted-foreground">
-                  {usd(row.totalUsd)}
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <AccountHoldings balances={row.balances} />
-            </CardContent>
-          </Card>
-        ))
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-baseline justify-between">
+              <span>{t("holdings")}</span>
+              <span className="text-base font-normal text-muted-foreground">
+                {usd(holdingsSubtotal)}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {holdings.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>
+            ) : (
+              <TokenHoldings holdings={holdings} />
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {sections.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-baseline justify-between">
+              <span>{t("defiAndPerp")}</span>
+              <span className="text-base font-normal text-muted-foreground">
+                {usd(defiSubtotal)}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-6 overflow-x-auto">
+            {sections.map((s) => (
+              <div key={s.account.id} className="flex flex-col gap-3">
+                <p className="font-medium">{s.account.label}</p>
+                {s.defi.length > 0 && <DefiPositions groups={s.defi} />}
+                {s.perp && s.perp.positions.length > 0 && <PerpPositions view={s.perp} />}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

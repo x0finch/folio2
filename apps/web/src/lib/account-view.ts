@@ -11,6 +11,7 @@ export interface OverviewBalance {
   amount: number;
   usdValue: number;
   kind: string;
+  tokenKey?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
   metaJson: string | null;
   // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。
   name?: string;
