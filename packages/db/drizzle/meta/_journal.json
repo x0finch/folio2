@@ -71,6 +71,27 @@
       "when": 1783060351577,
       "tag": "0009_smart_big_bertha",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1783103949388,
+      "tag": "0010_bright_susan_delgado",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1783110118619,
+      "tag": "0011_flashy_slayback",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1783135013315,
+      "tag": "0012_familiar_wrecking_crew",
+      "breakpoints": true
     }
   ]
 }

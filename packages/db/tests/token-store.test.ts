@@ -1,11 +1,11 @@
 import { env } from "cloudflare:test";
-import type { TokenIdentifier, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
+import type { CgkCoinId, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTokenStore } from "../src"; // 全局代币缓存:公开独立导出(非 createDb 门面)
 import { getDb } from "../src/client";
-import { tokenContract, tokenInfo, tokenMeta, tokenPrice, tokenWarm } from "../src/schema";
+import { tokenIndex, tokenMeta, tokens } from "../src/schema";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as TokenIdentifier });
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 const info = (ref: TokenRef, symbol: string, logo?: string): TokenInfo => ({
   ref,
   symbol,
@@ -19,24 +19,18 @@ const price = (ref: TokenRef, unitPrice: number, rank?: number): TokenPrice => (
   asOf: 111,
 });
 
-// pool 不隔离每测试存储 → 每测试前清空 5 张 token 表(无 userId/FK,直接删)。
+// pool 不隔离每测试存储 → 每测试前清空 token 表(索引 FK → 先删索引)。
 beforeEach(async () => {
   const db = getDb(env);
-  await db.batch([
-    db.delete(tokenWarm),
-    db.delete(tokenInfo),
-    db.delete(tokenPrice),
-    db.delete(tokenContract),
-    db.delete(tokenMeta),
-  ]);
+  await db.batch([db.delete(tokenIndex), db.delete(tokens), db.delete(tokenMeta)]);
 });
 
 const TTL = 10_000;
+const TTLS = { indexTtlMs: TTL, infoTtlMs: TTL, priceTtlMs: TTL };
 
-describe("warm + candidates", () => {
-  it("putWarm → getCandidates (store keys the symbol as-is; caller pre-normalizes)", async () => {
+describe("warm + candidates + listTopTokens", () => {
+  it("putWarm upserts tokens + symbol index; getCandidates returns all per symbol", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    // 键由调用方归一(store 不做);这里模拟调用方已传归一(大写)symbol。
     await store.putWarm(
       [
         { info: info(cg("usd-coin"), "USDC"), price: price(cg("usd-coin"), 1, 6) },
@@ -46,7 +40,6 @@ describe("warm + candidates", () => {
       TTL,
       TTL,
     );
-    // 同一归一 key 下的多个候选都返回
     const cands = await store.getCandidates("USDC");
     expect(cands).toContainEqual({ ref: cg("usd-coin"), marketCapRank: 6 });
     expect(cands).toContainEqual({ ref: cg("usdc-x"), marketCapRank: 9000 });
@@ -55,7 +48,7 @@ describe("warm + candidates", () => {
     expect(await store.warmAsOf()).toBe(1000);
   });
 
-  it("warm respects TTL (expired → not returned)", async () => {
+  it("warm respects TTL (expired symbol index → no candidates)", async () => {
     let clock = 1000;
     const store = createTokenStore(env, { source: "coingecko", now: () => clock });
     await store.putWarm(
@@ -66,106 +59,176 @@ describe("warm + candidates", () => {
     clock = 1000 + TTL + 1; // 过期
     expect(await store.getCandidates("ETH")).toEqual([]);
   });
-});
 
-describe("listTopTokens (rank-sorted, join name/logo)", () => {
-  it("orders by marketCapRank asc (unranked last), honors limit, includes name/logo via join", async () => {
+  it("re-warm keeps a stable token id (upsert, not duplicate)", async () => {
+    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
+    await store.putWarm(
+      [{ info: info(cg("ethereum"), "ETH"), price: price(cg("ethereum"), 1, 2) }],
+      TTL,
+      TTL,
+    );
+    await store.putWarm(
+      [{ info: info(cg("ethereum"), "ETH"), price: price(cg("ethereum"), 2, 2) }],
+      TTL,
+      TTL,
+    );
+    const rows = await getDb(env).select().from(tokens);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.unitPrice).toBe(2);
+  });
+
+  it("listTopTokens orders by rank asc (unranked last), honors limit, includes name/logo", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
     await store.putWarm(
       [
         { info: info(cg("ethereum"), "eth", "Lo-eth"), price: price(cg("ethereum"), 3500, 2) },
         { info: info(cg("bitcoin"), "btc", "Lo-btc"), price: price(cg("bitcoin"), 65000, 1) },
         { info: info(cg("some-fork"), "sbf", "Lo-sbf"), price: price(cg("some-fork"), 0.1) },
-        { info: info(cg("solana"), "sol", "Lo-sol"), price: price(cg("solana"), 150, 5) },
       ],
       TTL,
       TTL,
     );
-    // limit 3 → top three by rank; name/logo pulled from the info table (join worked).
-    const top = await store.listTopTokens(3);
-    expect(top).toEqual([
-      { ref: cg("bitcoin"), symbol: "btc", name: "BTC", logo: "Lo-btc" },
-      { ref: cg("ethereum"), symbol: "eth", name: "ETH", logo: "Lo-eth" },
-      { ref: cg("solana"), symbol: "sol", name: "SOL", logo: "Lo-sol" },
-    ]);
-    expect(top.every((t) => !!t.logo)).toBe(true);
-    // unranked coin sorts last, not dropped when limit allows.
+    const top = await store.listTopTokens(2);
+    expect(top.map((t) => t.ref.identifier)).toEqual(["bitcoin", "ethereum"]);
+    expect(top[0]).toMatchObject({ symbol: "btc", name: "BTC", logo: "Lo-btc" });
     const all = await store.listTopTokens(10);
-    expect(all.map((t) => t.ref.identifier)).toEqual([
-      "bitcoin",
-      "ethereum",
-      "solana",
-      "some-fork",
-    ]);
+    expect(all.map((t) => t.ref.identifier)).toEqual(["bitcoin", "ethereum", "some-fork"]);
+  });
+});
+
+describe("impl index (caip19): ensure / getByImpl / markCgkChecked", () => {
+  const KEY = "eip155:1/erc20:0xabc";
+
+  it("ensureImplToken seeds an orphan (source=provider) with provider data", async () => {
+    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
+    await store.ensureImplToken(KEY, { symbol: "FOO", name: "Foo Token", providerLogo: "L" }, TTL);
+    const rec = (await store.getByImpl([KEY])).get(KEY);
+    expect(rec).toMatchObject({
+      ref: null, // 孤儿:CGK 未收录
+      symbol: "FOO",
+      name: "Foo Token",
+      providerLogo: "L",
+      cgkCheckedUntil: null,
+    });
   });
 
-  it("respects TTL and source bucketing", async () => {
+  it("ensureImplToken on existing orphan refreshes provider data + extends expiry", async () => {
     let clock = 1000;
     const store = createTokenStore(env, { source: "coingecko", now: () => clock });
+    await store.ensureImplToken(KEY, { symbol: "FOO" }, TTL);
+    clock = 1000 + TTL - 1; // 未过期时再 seed(模拟下一次 sync)
+    await store.ensureImplToken(KEY, { symbol: "FOO", name: "Foo", providerLogo: "L2" }, TTL);
+    clock = 1000 + TTL + 1; // 原 TTL 已过,但 expiry 被顺延
+    const rec = (await store.getByImpl([KEY])).get(KEY);
+    expect(rec).toMatchObject({ name: "Foo", providerLogo: "L2" });
+  });
+
+  it("markCgkChecked records recheck horizon on the index row", async () => {
+    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
+    await store.ensureImplToken(KEY, { symbol: "FOO" }, TTL);
+    await store.markCgkChecked(KEY, 5000);
+    expect((await store.getByImpl([KEY])).get(KEY)?.cgkCheckedUntil).toBe(5000);
+  });
+
+  it("expired index row → miss", async () => {
+    let clock = 1000;
+    const store = createTokenStore(env, { source: "coingecko", now: () => clock });
+    await store.ensureImplToken(KEY, { symbol: "FOO" }, TTL);
+    clock = 1000 + TTL + 1;
+    expect((await store.getByImpl([KEY])).size).toBe(0);
+  });
+
+  it("ensureImplToken on a cgk-pointed key only refreshes the fallback logo slot", async () => {
+    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
+    await store.linkImplToCgk(KEY, info(cg("foo"), "FOO", "cgk-logo"), price(cg("foo"), 1), TTLS);
+    await store.ensureImplToken(KEY, { symbol: "foo2", providerLogo: "prov" }, TTL);
+    const rec = (await store.getByImpl([KEY])).get(KEY);
+    expect(rec).toMatchObject({
+      ref: cg("foo"),
+      symbol: "FOO", // cgk 行的 symbol/name 不被 provider seed 覆盖
+      logo: "cgk-logo",
+      providerLogo: "prov", // 备用槽被刷新
+    });
+  });
+});
+
+describe("linkImplToCgk (升级合并)", () => {
+  const KEY = "eip155:1/erc20:0xabc";
+
+  it("orphan → cgk: creates cgk row, carries provider_logo, repoints, deletes orphan", async () => {
+    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
+    await store.ensureImplToken(KEY, { symbol: "FOO", providerLogo: "prov" }, TTL);
+    await store.linkImplToCgk(KEY, info(cg("foo"), "FOO", "cgk-logo"), price(cg("foo"), 2), TTLS);
+    const rec = (await store.getByImpl([KEY])).get(KEY);
+    expect(rec).toMatchObject({
+      ref: cg("foo"),
+      logo: "cgk-logo",
+      providerLogo: "prov", // 孤儿的备用图被拷带
+      price: { unitPrice: 2, stale: false },
+    });
+    // 孤儿行已删(全表只剩 cgk 行)
+    const rows = await getDb(env).select().from(tokens);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.source).toBe("coingecko");
+  });
+
+  it("orphan → existing cgk row (from warm): merges into it, keeps its provider_logo if set", async () => {
+    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
     await store.putWarm(
-      [{ info: info(cg("bitcoin"), "btc", "L"), price: price(cg("bitcoin"), 65000, 1) }],
+      [{ info: info(cg("foo"), "FOO"), price: price(cg("foo"), 5, 7) }],
       TTL,
       TTL,
     );
-    const other = createTokenStore(env, {
-      source: "coinmarketcap" as TokenRef["source"],
-      now: () => clock,
-    });
-    expect(await other.listTopTokens(10)).toEqual([]); // 分桶:别的源看不到
-    clock = 1000 + TTL + 1;
-    expect(await store.listTopTokens(10)).toEqual([]); // 过期
+    await store.ensureImplToken(KEY, { symbol: "FOO", providerLogo: "prov" }, TTL);
+    await store.linkImplToCgk(KEY, info(cg("foo"), "FOO", "cgk-logo"), undefined, TTLS);
+    const rec = (await store.getByImpl([KEY])).get(KEY);
+    expect(rec).toMatchObject({ ref: cg("foo"), logo: "cgk-logo", providerLogo: "prov" });
+    // price 未传 → 保留 warm 写入的价
+    expect(rec?.price?.unitPrice).toBe(5);
+    expect(await getDb(env).select().from(tokens)).toHaveLength(1);
   });
-});
 
-describe("contract cache (three-state + TTL; keys pre-normalized by caller)", () => {
-  it("hit / absent / unknown", async () => {
+  it("no prior row: creates cgk row + index directly", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    expect(await store.getContractRef("ethereum", "0xabc")).toBeUndefined(); // 未知
-
-    // key(chain, contract)由调用方归一(小写);store 按 key 存/查,不自己归一。
-    await store.putContractRef("ethereum", "0xabc", cg("usd-coin"), TTL);
-    expect(await store.getContractRef("ethereum", "0xabc")).toEqual(cg("usd-coin")); // 命中
-
-    await store.putContractRef("ethereum", "0xdead", null, TTL); // 否定缓存
-    expect(await store.getContractRef("ethereum", "0xdead")).toBeNull();
-  });
-
-  it("expired contract → undefined (re-resolve)", async () => {
-    let clock = 1000;
-    const store = createTokenStore(env, { source: "coingecko", now: () => clock });
-    await store.putContractRef("ethereum", "0xabc", cg("usd-coin"), TTL);
-    clock = 1000 + TTL + 1;
-    expect(await store.getContractRef("ethereum", "0xabc")).toBeUndefined();
+    await store.linkImplToCgk(KEY, info(cg("foo"), "FOO"), price(cg("foo"), 3), TTLS);
+    expect((await store.getByImpl([KEY])).get(KEY)).toMatchObject({ ref: cg("foo") });
   });
 });
 
-describe("info / price round-trip", () => {
-  it("putInfo/getInfo + putPrices/getPrices by refKey; miss not in map; TTL", async () => {
+describe("getByRefs + putPrices(SWR:过期=stale 不删)", () => {
+  it("returns record with fresh price; stale after expiry (still returned)", async () => {
     let clock = 1000;
     const store = createTokenStore(env, { source: "coingecko", now: () => clock });
-    await store.putInfo([info(cg("bitcoin"), "btc", "L")], TTL);
-    await store.putPrices([price(cg("bitcoin"), 65000, 1)], TTL);
+    await store.putWarm(
+      [{ info: info(cg("bitcoin"), "BTC", "L"), price: price(cg("bitcoin"), 65000, 1) }],
+      TTL,
+      TTL * 10, // info 更长
+    );
+    let rec = (await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin");
+    expect(rec?.price).toMatchObject({ unitPrice: 65000, stale: false });
 
-    const infos = await store.getInfo([cg("bitcoin"), cg("nope")]);
-    expect(infos.get("coingecko:bitcoin")).toEqual({
-      ref: cg("bitcoin"),
-      symbol: "btc",
-      name: "BTC",
-      logo: "L",
-    });
-    expect(infos.has("coingecko:nope")).toBe(false);
+    clock = 1000 + TTL + 1; // 价过期、info 未过期
+    rec = (await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin");
+    expect(rec).toBeDefined(); // 行仍可见(info 在)
+    expect(rec?.price).toMatchObject({ unitPrice: 65000, stale: true }); // 旧价带 stale
 
-    const prices = await store.getPrices([cg("bitcoin")]);
-    expect(prices.get("coingecko:bitcoin")).toEqual({
-      ref: cg("bitcoin"),
-      unitPrice: 65000,
-      marketCapRank: 1,
-      asOf: 111,
-    });
+    // putPrices 刷新后回到 fresh
+    await store.putPrices([price(cg("bitcoin"), 66000, 1)], TTL);
+    rec = (await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin");
+    expect(rec?.price).toMatchObject({ unitPrice: 66000, stale: false });
+  });
 
-    clock = 1000 + TTL + 1; // 过期
-    expect((await store.getInfo([cg("bitcoin")])).size).toBe(0);
-    expect((await store.getPrices([cg("bitcoin")])).size).toBe(0);
+  it("info expiry hides the record entirely; miss not in map", async () => {
+    let clock = 1000;
+    const store = createTokenStore(env, { source: "coingecko", now: () => clock });
+    await store.putWarm(
+      [{ info: info(cg("bitcoin"), "BTC"), price: price(cg("bitcoin"), 1, 1) }],
+      TTL,
+      TTL,
+    );
+    clock = 1000 + TTL + 1;
+    const map = await store.getByRefs([cg("bitcoin"), cg("nope")]);
+    expect(map.size).toBe(0);
   });
 });
 
@@ -177,17 +240,13 @@ describe("source bucketing (no userId — partitioned by source)", () => {
       TTL,
       TTL,
     );
-    await cgStore.putContractRef("ethereum", "0xabc", cg("usd-coin"), TTL);
-
     // 模拟未来另一数据源(类型上目前仅 coingecko,测试里 cast)
     const other = createTokenStore(env, {
-      source: "coinmarketcap" as TokenRef["source"],
+      source: "cmc" as TokenRef["source"],
       now: () => 1000,
     });
-    expect(await other.getCandidates("ETH")).toEqual([]);
-    expect(await other.getContractRef("ethereum", "0xabc")).toBeUndefined();
-    expect(await other.warmAsOf()).toBeNull();
-    // coingecko 自己仍在
-    expect(await cgStore.warmAsOf()).toBe(1000);
+    expect(await other.getCandidates("eth")).toEqual([]);
+    expect(await other.listTopTokens(5)).toEqual([]);
+    expect((await other.getByRefs([cg("ethereum")])).size).toBe(0);
   });
 });

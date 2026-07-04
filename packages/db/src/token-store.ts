@@ -1,20 +1,24 @@
 import {
+  type CgkCoinId,
+  type ProviderTokenSeed,
   refKey,
   type TokenCandidate,
-  type TokenIdentifier,
   type TokenInfo,
-  type TokenPrice,
+  type TokenRecord,
   type TokenRef,
   type TokenStore,
 } from "@folio/tokens";
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { type DbEnv, getDb } from "./client";
-import { tokenContract, tokenInfo, tokenMeta, tokenPrice, tokenWarm } from "./schema";
+import { tokenIndex, tokenMeta, tokens } from "./schema";
 
 export interface TokenStoreOpts {
-  source: TokenRef["source"]; // store 绑定的源(如 "coingecko");解析向读写按它分桶
+  source: TokenRef["source"]; // store 绑定的规范源(如 "coingecko");ref 只对该源的行成立
   now?: () => number; // 注入便于测 TTL;默认 Date.now
 }
+
+// 孤儿行(CGK 未收录,provider 采集)的 source 标记;identifier = caip19 键。
+const PROVIDER_SOURCE = "provider";
 
 // D1 上限 ~100 绑定参数;inArray 列表分块取(沿用 listBalancesForSnapshots 的约束)。
 const IN_CHUNK = 90;
@@ -24,7 +28,11 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-// 全局代币参考缓存的 D1 实现(无 userId;按 source 分桶)。只经此工厂访问,不外泄 db/schema。
+type TokenRow = typeof tokens.$inferSelect;
+
+// 代币表 + 索引表的 D1 实现(无 userId;全局参考数据)。只经此工厂访问,不外泄 db/schema。
+// 并发注记:putWarm/ensureImplToken 先查后批写,极端并发下(cron 与手动 sync 同拍)新行 id 预分配
+// 可能与冲突保留的旧 id 不一致 → 索引 FK 失败、整批回滚 —— 下次 warm/sync 自愈,可接受(warm 已单飞)。
 export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   const db = getDb(env);
   type Batch = Parameters<typeof db.batch>[0]; // [Stmt, ...Stmt[]];Stmt = drizzle BatchItem
@@ -33,58 +41,117 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   const now = opts.now ?? (() => Date.now());
   const mk = (identifier: string): TokenRef => ({
     source,
-    identifier: identifier as TokenIdentifier,
+    identifier: identifier as CgkCoinId,
   });
   const warmKey = `warm_as_of:${source}`;
 
+  // 行 → 领域记录。价过期不删:读出带 stale(SWR,展示先给旧价)。
+  const toRecord = (r: TokenRow): TokenRecord => ({
+    id: r.id,
+    ref: r.source === source ? mk(r.identifier) : null,
+    symbol: r.symbol,
+    name: r.name,
+    logo: r.logo ?? undefined,
+    providerLogo: r.providerLogo ?? undefined,
+    marketCapRank: r.marketCapRank ?? undefined,
+    price:
+      r.unitPrice != null && r.priceAsOf != null
+        ? {
+            unitPrice: r.unitPrice,
+            change24h: r.change24h ?? undefined,
+            asOf: r.priceAsOf,
+            stale: (r.priceExpiresAt ?? 0) <= now(),
+          }
+        : undefined,
+  });
+
+  // 预取一批 (source=本源, identifier) 的现有行 id;miss 的由调用侧预分配 UUID。
+  async function existingIds(identifiers: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    for (const ids of chunk(identifiers, IN_CHUNK)) {
+      const rows = await db
+        .select({ id: tokens.id, identifier: tokens.identifier })
+        .from(tokens)
+        .where(and(eq(tokens.source, source), inArray(tokens.identifier, ids)));
+      for (const r of rows) out.set(r.identifier, r.id);
+    }
+    return out;
+  }
+
   return {
     async getCandidates(symbol: string): Promise<TokenCandidate[]> {
-      // `symbol` 视为已归一(口径由调用方 @folio/tokens 保证);store 只按 key 点查,不做业务归一。
+      // `symbol` 视为已归一(调用方 @folio/tokens 保证);store 只按 key 点查。
       const rows = await db
-        .select()
-        .from(tokenWarm)
+        .select({ identifier: tokens.identifier, rank: tokens.marketCapRank, src: tokens.source })
+        .from(tokenIndex)
+        .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
         .where(
           and(
-            eq(tokenWarm.symbol, symbol),
-            eq(tokenWarm.source, source),
-            gt(tokenWarm.expiresAt, now()),
+            eq(tokenIndex.kind, "symbol"),
+            eq(tokenIndex.key, symbol),
+            gt(tokenIndex.expiresAt, now()),
           ),
         );
-      return rows.map((r) => ({
-        ref: mk(r.identifier),
-        marketCapRank: r.marketCapRank ?? undefined,
-      }));
+      return rows
+        .filter((r) => r.src === source)
+        .map((r) => ({ ref: mk(r.identifier), marketCapRank: r.rank ?? undefined }));
     },
 
-    async putWarm(rows, ttlMs, infoTtlMs) {
+    async putWarm(rows, warmTtlMs, infoTtlMs) {
       if (rows.length === 0) return;
-      const expiresAt = now() + ttlMs; // warm rank + price(短)
-      const infoExpiresAt = now() + infoTtlMs; // name/logo(长、近静态)
+      const t = now();
+      const symExpiresAt = t + warmTtlMs; // symbol 索引 + 价(短)
+      const infoExpiresAt = t + infoTtlMs; // name/logo(长)
+      const ids = await existingIds(rows.map((r) => r.info.ref.identifier));
       const stmts: Stmt[] = [];
       for (const { info, price } of rows) {
+        const id = ids.get(info.ref.identifier) ?? crypto.randomUUID();
         stmts.push(
           db
-            .insert(tokenWarm)
+            .insert(tokens)
             .values({
-              symbol: info.symbol,
+              id,
               source: info.ref.source,
               identifier: info.ref.identifier,
+              symbol: info.symbol,
+              name: info.name,
+              logo: info.logo ?? null,
               marketCapRank: price.marketCapRank ?? null,
-              expiresAt,
+              infoExpiresAt,
+              unitPrice: price.unitPrice,
+              change24h: price.change24h ?? null,
+              priceAsOf: price.asOf,
+              priceExpiresAt: symExpiresAt,
             })
             .onConflictDoUpdate({
-              target: [tokenWarm.symbol, tokenWarm.source, tokenWarm.identifier],
-              set: { marketCapRank: price.marketCapRank ?? null, expiresAt },
+              target: [tokens.source, tokens.identifier],
+              // 不动 provider_logo(备用槽只由 provider 采集路径写)
+              set: {
+                symbol: info.symbol,
+                name: info.name,
+                logo: info.logo ?? null,
+                marketCapRank: price.marketCapRank ?? null,
+                infoExpiresAt,
+                unitPrice: price.unitPrice,
+                change24h: price.change24h ?? null,
+                priceAsOf: price.asOf,
+                priceExpiresAt: symExpiresAt,
+              },
             }),
-          infoUpsert(db, info, infoExpiresAt),
-          priceUpsert(db, price, expiresAt),
+          db
+            .insert(tokenIndex)
+            .values({ kind: "symbol", key: info.symbol, tokenId: id, expiresAt: symExpiresAt })
+            .onConflictDoUpdate({
+              target: [tokenIndex.kind, tokenIndex.key, tokenIndex.tokenId],
+              set: { expiresAt: symExpiresAt },
+            }),
         );
       }
       stmts.push(
         db
           .insert(tokenMeta)
-          .values({ k: warmKey, v: now() })
-          .onConflictDoUpdate({ target: tokenMeta.k, set: { v: now() } }),
+          .values({ k: warmKey, v: t })
+          .onConflictDoUpdate({ target: tokenMeta.k, set: { v: t } }),
       );
       const [first, ...rest] = stmts;
       await db.batch([first, ...rest]);
@@ -96,28 +163,26 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
     },
 
     async listTopTokens(limit: number): Promise<TokenInfo[]> {
-      // rank 在 warm、name/logo 在 info → join (source, identifier)。两表都按 TTL 过滤。
-      // 排序:无 rank 者末尾(`rank is null` 先排),再按 rank 升序。
+      // 当前 warm 集 = symbol 索引未过期;rank/name/logo 都在代币表。无 rank 者末尾。
       const t = now();
       const rows = await db
         .select({
-          identifier: tokenWarm.identifier,
-          symbol: tokenInfo.symbol,
-          name: tokenInfo.name,
-          logo: tokenInfo.logo,
+          identifier: tokens.identifier,
+          symbol: tokens.symbol,
+          name: tokens.name,
+          logo: tokens.logo,
         })
-        .from(tokenWarm)
-        .innerJoin(
-          tokenInfo,
+        .from(tokenIndex)
+        .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
+        .where(
           and(
-            eq(tokenInfo.source, tokenWarm.source),
-            eq(tokenInfo.identifier, tokenWarm.identifier),
+            eq(tokenIndex.kind, "symbol"),
+            gt(tokenIndex.expiresAt, t),
+            eq(tokens.source, source),
+            gt(tokens.infoExpiresAt, t),
           ),
         )
-        .where(
-          and(eq(tokenWarm.source, source), gt(tokenWarm.expiresAt, t), gt(tokenInfo.expiresAt, t)),
-        )
-        .orderBy(sql`${tokenWarm.marketCapRank} is null`, asc(tokenWarm.marketCapRank))
+        .orderBy(sql`${tokens.marketCapRank} is null`, asc(tokens.marketCapRank))
         .limit(limit);
       return rows.map((r) => ({
         ref: mk(r.identifier),
@@ -127,145 +192,207 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       }));
     },
 
-    async getContractRef(chain, contract) {
-      // (chain, contract) 视为已归一(小写,调用方保证);store 只按 key 点查。
-      const rows = await db
-        .select()
-        .from(tokenContract)
-        .where(
-          and(
-            eq(tokenContract.source, source),
-            eq(tokenContract.chain, chain),
-            eq(tokenContract.contract, contract),
-            gt(tokenContract.expiresAt, now()),
-          ),
-        );
-      if (rows.length === 0) return undefined; // 未知(或过期)→ 去取
-      const identifier = rows[0].identifier;
-      return identifier === null ? null : mk(identifier); // null = 已知缺失
-    },
-
-    async putContractRef(chain, contract, ref, ttlMs) {
-      const expiresAt = now() + ttlMs;
-      const row = {
-        source,
-        chain,
-        contract,
-        identifier: ref?.identifier ?? null,
-        expiresAt,
-      };
-      await db
-        .insert(tokenContract)
-        .values(row)
-        .onConflictDoUpdate({
-          target: [tokenContract.source, tokenContract.chain, tokenContract.contract],
-          set: { identifier: row.identifier, expiresAt },
-        });
-    },
-
-    async getInfo(refs) {
-      const out = new Map<string, TokenInfo>();
-      const identifiers = refs.filter((r) => r.source === source).map((r) => r.identifier);
-      for (const ids of chunk(identifiers, IN_CHUNK)) {
+    async getByImpl(keys) {
+      const out = new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
+      for (const ks of chunk(keys, IN_CHUNK)) {
         const rows = await db
-          .select()
-          .from(tokenInfo)
+          .select({ idx: tokenIndex, tok: tokens })
+          .from(tokenIndex)
+          .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
           .where(
             and(
-              eq(tokenInfo.source, source),
-              inArray(tokenInfo.identifier, ids),
-              gt(tokenInfo.expiresAt, now()),
+              eq(tokenIndex.kind, "caip19"),
+              inArray(tokenIndex.key, ks),
+              gt(tokenIndex.expiresAt, now()),
             ),
           );
         for (const r of rows) {
-          const ref = mk(r.identifier);
-          out.set(refKey(ref), { ref, symbol: r.symbol, name: r.name, logo: r.logo ?? undefined });
+          out.set(r.idx.key, { ...toRecord(r.tok), cgkCheckedUntil: r.idx.cgkCheckedUntil });
         }
       }
       return out;
     },
 
-    async putInfo(infos, ttlMs) {
-      if (infos.length === 0) return;
-      const expiresAt = now() + ttlMs;
-      const [first, ...rest] = infos.map((i) => infoUpsert(db, i, expiresAt));
+    async ensureImplToken(key, seed: ProviderTokenSeed, indexTtlMs) {
+      const t = now();
+      const expiresAt = t + indexTtlMs;
+      const cur = await db
+        .select({ idx: tokenIndex, tok: tokens })
+        .from(tokenIndex)
+        .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
+        .where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key)));
+
+      if (cur[0]) {
+        const tok = cur[0].tok;
+        const stmts: Stmt[] = [
+          db
+            .update(tokenIndex)
+            .set({ expiresAt })
+            .where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key))),
+        ];
+        if (tok.source === source) {
+          // cgk 行:只补/刷备用槽(provider 图更新鲜)
+          if (seed.providerLogo) {
+            stmts.push(
+              db
+                .update(tokens)
+                .set({ providerLogo: seed.providerLogo })
+                .where(eq(tokens.id, tok.id)),
+            );
+          }
+        } else {
+          // 孤儿行:provider 数据即其全部,整体刷新 + 顺延 info TTL
+          stmts.push(
+            db
+              .update(tokens)
+              .set({
+                symbol: seed.symbol,
+                name: seed.name ?? tok.name,
+                providerLogo: seed.providerLogo ?? tok.providerLogo,
+                infoExpiresAt: expiresAt,
+              })
+              .where(eq(tokens.id, tok.id)),
+          );
+        }
+        const [first, ...rest] = stmts;
+        await db.batch([first, ...rest]);
+        return;
+      }
+
+      // miss → seed 孤儿行 + 索引行
+      const id = crypto.randomUUID();
+      await db.batch([
+        db
+          .insert(tokens)
+          .values({
+            id,
+            source: PROVIDER_SOURCE,
+            identifier: key,
+            symbol: seed.symbol,
+            name: seed.name ?? seed.symbol,
+            providerLogo: seed.providerLogo ?? null,
+            infoExpiresAt: expiresAt,
+          })
+          .onConflictDoUpdate({
+            target: [tokens.source, tokens.identifier],
+            set: {
+              symbol: seed.symbol,
+              name: seed.name ?? seed.symbol,
+              providerLogo: seed.providerLogo ?? null,
+              infoExpiresAt: expiresAt,
+            },
+          }),
+        db.insert(tokenIndex).values({ kind: "caip19", key, tokenId: id, expiresAt }),
+      ]);
+    },
+
+    async markCgkChecked(key, until) {
+      await db
+        .update(tokenIndex)
+        .set({ cgkCheckedUntil: until })
+        .where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key)));
+    },
+
+    async linkImplToCgk(key, info, price, ttls) {
+      const t = now();
+      // 现指针与其代币(可能是孤儿)
+      const cur = await db
+        .select({ idx: tokenIndex, tok: tokens })
+        .from(tokenIndex)
+        .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
+        .where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key)));
+      const orphan = cur[0] && cur[0].tok.source !== source ? cur[0].tok : null;
+      // find-or-create cgk 行
+      const existing = await db
+        .select({ id: tokens.id })
+        .from(tokens)
+        .where(and(eq(tokens.source, source), eq(tokens.identifier, info.ref.identifier)));
+      const cgkId = existing[0]?.id ?? crypto.randomUUID();
+      const carryLogo = orphan?.providerLogo ?? null;
+
+      const priceFields = price
+        ? {
+            unitPrice: price.unitPrice,
+            change24h: price.change24h ?? null,
+            marketCapRank: price.marketCapRank ?? null,
+            priceAsOf: price.asOf,
+            priceExpiresAt: t + ttls.priceTtlMs,
+          }
+        : {};
+      const stmts: Stmt[] = [
+        db
+          .insert(tokens)
+          .values({
+            id: cgkId,
+            source: info.ref.source,
+            identifier: info.ref.identifier,
+            symbol: info.symbol,
+            name: info.name,
+            logo: info.logo ?? null,
+            providerLogo: carryLogo,
+            infoExpiresAt: t + ttls.infoTtlMs,
+            ...priceFields,
+          })
+          .onConflictDoUpdate({
+            target: [tokens.source, tokens.identifier],
+            set: {
+              symbol: info.symbol,
+              name: info.name,
+              logo: info.logo ?? null,
+              infoExpiresAt: t + ttls.infoTtlMs,
+              // 备用槽:已有则保留,空才接孤儿的
+              providerLogo: sql`coalesce(${tokens.providerLogo}, ${carryLogo})`,
+              ...priceFields,
+            },
+          }),
+        // 指针重指:清旧(含孤儿指针)→ 插新
+        db.delete(tokenIndex).where(and(eq(tokenIndex.kind, "caip19"), eq(tokenIndex.key, key))),
+        db
+          .insert(tokenIndex)
+          .values({ kind: "caip19", key, tokenId: cgkId, expiresAt: t + ttls.indexTtlMs }),
+      ];
+      // 孤儿行删除(其余索引行经 ON DELETE CASCADE 级联;孤儿 identifier=本 key,唯一)
+      if (orphan) stmts.push(db.delete(tokens).where(eq(tokens.id, orphan.id)));
+      const [first, ...rest] = stmts;
       await db.batch([first, ...rest]);
     },
 
-    async getPrices(refs) {
-      const out = new Map<string, TokenPrice>();
+    async getByRefs(refs) {
+      const out = new Map<string, TokenRecord>();
       const identifiers = refs.filter((r) => r.source === source).map((r) => r.identifier);
       for (const ids of chunk(identifiers, IN_CHUNK)) {
         const rows = await db
           .select()
-          .from(tokenPrice)
+          .from(tokens)
           .where(
             and(
-              eq(tokenPrice.source, source),
-              inArray(tokenPrice.identifier, ids),
-              gt(tokenPrice.expiresAt, now()),
+              eq(tokens.source, source),
+              inArray(tokens.identifier, ids),
+              gt(tokens.infoExpiresAt, now()),
             ),
           );
-        for (const r of rows) {
-          const ref = mk(r.identifier);
-          out.set(refKey(ref), {
-            ref,
-            unitPrice: r.unitPrice,
-            change24h: r.change24h ?? undefined,
-            marketCapRank: r.marketCapRank ?? undefined,
-            asOf: r.asOf,
-          });
-        }
+        for (const r of rows) out.set(refKey(mk(r.identifier)), toRecord(r));
       }
       return out;
     },
 
     async putPrices(prices, ttlMs) {
       if (prices.length === 0) return;
-      const expiresAt = now() + ttlMs;
-      const [first, ...rest] = prices.map((p) => priceUpsert(db, p, expiresAt));
+      const priceExpiresAt = now() + ttlMs;
+      const stmts = prices.map((p) =>
+        db
+          .update(tokens)
+          .set({
+            unitPrice: p.unitPrice,
+            change24h: p.change24h ?? null,
+            marketCapRank: p.marketCapRank ?? null,
+            priceAsOf: p.asOf,
+            priceExpiresAt,
+          })
+          .where(and(eq(tokens.source, p.ref.source), eq(tokens.identifier, p.ref.identifier))),
+      );
+      const [first, ...rest] = stmts;
       await db.batch([first, ...rest]);
     },
   };
-}
-
-function infoUpsert(db: ReturnType<typeof getDb>, i: TokenInfo, expiresAt: number) {
-  return db
-    .insert(tokenInfo)
-    .values({
-      source: i.ref.source,
-      identifier: i.ref.identifier,
-      symbol: i.symbol,
-      name: i.name,
-      logo: i.logo ?? null,
-      expiresAt,
-    })
-    .onConflictDoUpdate({
-      target: [tokenInfo.source, tokenInfo.identifier],
-      set: { symbol: i.symbol, name: i.name, logo: i.logo ?? null, expiresAt },
-    });
-}
-
-function priceUpsert(db: ReturnType<typeof getDb>, p: TokenPrice, expiresAt: number) {
-  return db
-    .insert(tokenPrice)
-    .values({
-      source: p.ref.source,
-      identifier: p.ref.identifier,
-      unitPrice: p.unitPrice,
-      change24h: p.change24h ?? null,
-      marketCapRank: p.marketCapRank ?? null,
-      asOf: p.asOf,
-      expiresAt,
-    })
-    .onConflictDoUpdate({
-      target: [tokenPrice.source, tokenPrice.identifier],
-      set: {
-        unitPrice: p.unitPrice,
-        change24h: p.change24h ?? null,
-        marketCapRank: p.marketCapRank ?? null,
-        asOf: p.asOf,
-        expiresAt,
-      },
-    });
 }

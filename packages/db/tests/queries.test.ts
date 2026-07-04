@@ -237,13 +237,12 @@ describe("snapshots", () => {
       takenAt: 1000,
       totalUsd: 150,
       balances: [
-        { symbol: "BTC", amount: 0.001, usdValue: 100, kind: "spot", source: "manual" },
+        { symbol: "BTC", amount: 0.001, usdValue: 100, kind: "spot" },
         {
           symbol: "ETH",
           amount: 0.02,
           usdValue: 50,
           kind: "spot",
-          source: "manual",
           meta: { note: "x" },
         },
       ],
@@ -272,7 +271,6 @@ describe("snapshots", () => {
       amount: i,
       usdValue: i * 2,
       kind: "spot" as const,
-      source: "ethereum",
     }));
     await writeSnapshot(env, USER_A, acc.id, { takenAt: 1, totalUsd: 100, balances });
 
@@ -299,18 +297,18 @@ describe("snapshots", () => {
     await writeSnapshot(env, USER_A, a1.id, {
       takenAt: 1000,
       totalUsd: 10,
-      balances: [{ symbol: "OLD", amount: 1, usdValue: 10, kind: "spot", source: "s" }],
+      balances: [{ symbol: "OLD", amount: 1, usdValue: 10, kind: "spot" }],
     });
     await writeSnapshot(env, USER_A, a1.id, {
       takenAt: 2000,
       totalUsd: 20,
-      balances: [{ symbol: "NEW", amount: 2, usdValue: 20, kind: "spot", source: "s" }],
+      balances: [{ symbol: "NEW", amount: 2, usdValue: 20, kind: "spot" }],
     });
     // a2:单份快照。
     await writeSnapshot(env, USER_A, a2.id, {
       takenAt: 1500,
       totalUsd: 5,
-      balances: [{ symbol: "ATOM", amount: 5, usdValue: 5, kind: "spot", source: "s" }],
+      balances: [{ symbol: "ATOM", amount: 5, usdValue: 5, kind: "spot" }],
     });
 
     const latest = await getLatestSnapshotByUser(env, USER_A);
@@ -344,7 +342,7 @@ describe("snapshots", () => {
     await writeSnapshot(env, USER_A, acc.id, {
       takenAt: 1,
       totalUsd: 1,
-      balances: [{ symbol: "X", amount: 1, usdValue: 1, kind: "spot", source: "s" }],
+      balances: [{ symbol: "X", amount: 1, usdValue: 1, kind: "spot" }],
     });
 
     await deleteAccount(env, USER_A, acc.id);
@@ -397,7 +395,7 @@ describe("snapshots", () => {
       await writeSnapshot(env, USER_A, a.id, {
         takenAt: t,
         totalUsd: t,
-        balances: [{ symbol: `S${t}`, amount: 1, usdValue: t, kind: "spot", source: "s" }],
+        balances: [{ symbol: `S${t}`, amount: 1, usdValue: t, kind: "spot" }],
       });
     }
     await writeSnapshot(env, USER_B, b1.id, { takenAt: 9, totalUsd: 9, balances: [] });

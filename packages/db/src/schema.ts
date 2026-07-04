@@ -1,5 +1,13 @@
 import type { AccountType, BalanceKind } from "@folio/balances";
-import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { user } from "./auth-schema";
 
 // 身份表(user/session/account/verification)定义在 ./auth-schema(better-auth,P2.1)。
@@ -89,71 +97,59 @@ export const snapshotBalances = sqliteTable(
     amount: real("amount").notNull(),
     usdValue: real("usd_value").notNull(),
     kind: text("kind").$type<BalanceKind>().notNull(),
-    source: text("source").notNull(),
+    // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的实现键。
+    tokenIdentifier: text("token_identifier"),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空
   },
   (t) => [index("snapshot_balances_snapshot_id_idx").on(t.snapshotId)],
 );
 
-// —— 代币参考缓存(P7.3.1)——
-// 全局参考数据,**无 userId**(原则 #6 受控例外,同 listUserIdsWithAccounts);按 `source` 维度分桶
-// (CGK / 将来 CMC 各自全局成立、共存)。各表 `expires_at`(epoch ms)做 TTL:读时按 > now 过滤,过期当未命中。
-// 经 @folio/db 的 createTokenStore(env,{source}) 访问;db 把内容当不透明数据,不解释。
+// —— 代币参考层(canonical-token-aggregation P1)——
+// 全局参考数据,**无 userId**(原则 #6 受控例外,同 listUserIdsWithAccounts)。
+// 代币表 = 系统认识的每个代币一行(CGK 收录币或 provider 孤儿);索引表 = 纯指针(symbol 候选 / caip19 实现键)。
+// 经 @folio/db 的 createTokenStore(env,{source}) 访问;key 归一由 @folio/tokens 调用方保证。
 
-// warm:top-N markets 的 symbol→候选(带市值排名)。一 symbol 可多候选。
-export const tokenWarm = sqliteTable(
-  "token_warm",
+// 代币表:info facet(name/logo,长 TTL)+ price facet(短 TTL;过期=stale 不删,SWR)合一行。
+// cgk 行:source="coingecko"、identifier=CGK coin id;孤儿行:source="provider"、identifier=caip19 键。
+export const tokens = sqliteTable(
+  "tokens",
   {
-    symbol: text("symbol").notNull(), // 归一(大写)key —— 由 @folio/tokens 调用方保证,store 不再自己归一
+    id: text("id").primaryKey(), // UUID
     source: text("source").notNull(),
     identifier: text("identifier").notNull(),
-    marketCapRank: integer("market_cap_rank"),
-    expiresAt: integer("expires_at").notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.symbol, t.source, t.identifier] })],
-);
-
-// 元信息 facet(name/symbol/logo),按 (source, identifier) 键。
-export const tokenInfo = sqliteTable(
-  "token_info",
-  {
-    source: text("source").notNull(),
-    identifier: text("identifier").notNull(),
-    symbol: text("symbol").notNull(),
+    symbol: text("symbol").notNull(), // 归一(大写)
     name: text("name").notNull(),
-    logo: text("logo"),
-    expiresAt: integer("expires_at").notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.source, t.identifier] })],
-);
-
-// 价 facet(USD,无 vs 列),按 (source, identifier) 键。
-export const tokenPrice = sqliteTable(
-  "token_price",
-  {
-    source: text("source").notNull(),
-    identifier: text("identifier").notNull(),
-    unitPrice: real("unit_price").notNull(),
-    change24h: real("change_24h"),
+    logo: text("logo"), // canonical(CGK);孤儿行 NULL
+    providerLogo: text("provider_logo"), // 备用槽:provider 自带图(孤儿主图;cgk 缺图兜底)
     marketCapRank: integer("market_cap_rank"),
-    asOf: integer("as_of").notNull(),
-    expiresAt: integer("expires_at").notNull(),
+    infoExpiresAt: integer("info_expires_at").notNull(), // name/logo 长 TTL
+    unitPrice: real("unit_price"), // 价 facet(可空 = 尚无价)
+    change24h: real("change_24h"),
+    priceAsOf: integer("price_as_of"),
+    priceExpiresAt: integer("price_expires_at"), // 短 TTL;过期读出带 stale
   },
-  (t) => [primaryKey({ columns: [t.source, t.identifier] })],
+  (t) => [uniqueIndex("tokens_source_identifier_idx").on(t.source, t.identifier)],
 );
 
-// 合约懒解析缓存,按 (source, chain, contract) 键。identifier 为 NULL = 该 source 的否定缓存(已知缺失);
-// 无行(或过期)= 未知(去取)。chain/contract 小写归一。
-export const tokenContract = sqliteTable(
-  "token_contract",
+// 索引表:多种方式找到代币,纯指针不存代币数据。
+// kind="symbol":一 symbol 多候选(消歧输入),随 warm 换血(短 TTL);
+// kind="caip19":实现级键(eip155:<id>/erc20:<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
+// cgk_checked_until(仅 caip19):问过 CGK"未收录"的复查时刻(替代旧否定缓存三态)。
+export const tokenIndex = sqliteTable(
+  "token_index",
   {
-    source: text("source").notNull(),
-    chain: text("chain").notNull(),
-    contract: text("contract").notNull(),
-    identifier: text("identifier"),
+    kind: text("kind").$type<"symbol" | "caip19">().notNull(),
+    key: text("key").notNull(),
+    tokenId: text("token_id")
+      .notNull()
+      .references(() => tokens.id, { onDelete: "cascade" }),
+    cgkCheckedUntil: integer("cgk_checked_until"),
     expiresAt: integer("expires_at").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.source, t.chain, t.contract] })],
+  (t) => [
+    primaryKey({ columns: [t.kind, t.key, t.tokenId] }),
+    index("token_index_kind_key_idx").on(t.kind, t.key),
+  ],
 );
 
 // 杂项标量:存 `warm_as_of:<source>`(每源 warm 最近刷新时刻)。
