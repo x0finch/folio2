@@ -14,7 +14,6 @@ export {
   AvatarGroupCount,
   AvatarImage,
 } from "./components/avatar";
-export { Badge, badgeVariants } from "./components/badge";
 export {
   Card,
   CardAction,
@@ -55,22 +54,21 @@ export {
   DrawerTrigger,
 } from "./components/drawer";
 export { Fab, fabVariants } from "./components/fab";
-export { Input } from "./components/input";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
+export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";
 export { Button, buttonVariants, StatefulButton } from "./components/motion/button";
-export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
-export { Toaster, toast } from "./components/motion/toast";
+export { Input } from "./components/motion/input";
 export {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
-  SelectSeparator,
   SelectTrigger,
   SelectValue,
-} from "./components/select";
+} from "./components/motion/select";
+export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
+export { Toaster, toast } from "./components/motion/toast";
+export { Tooltip } from "./components/motion/tooltip";
 export { Separator } from "./components/separator";
 export {
   Sheet,
@@ -111,10 +109,4 @@ export {
   TableHeader,
   TableRow,
 } from "./components/table";
-export {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "./components/tooltip";
 export { cn } from "./lib/utils";

@@ -1,4 +1,4 @@
-import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@folio/ui";
+import { Button, Tooltip } from "@folio/ui";
 import { RefreshCw } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
 import { useAccountSync } from "../lib/use-account-sync";
@@ -21,23 +21,16 @@ export function SyncButton({
     : t("neverSynced");
 
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              size="icon"
-              variant="outline"
-              onClick={sync}
-              disabled={disabled}
-              aria-label={t("syncNow")}
-            >
-              <RefreshCw className={busy ? "animate-spin" : ""} />
-            </Button>
-          }
-        />
-        <TooltipContent>{tip}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip content={tip}>
+      <Button
+        size="icon"
+        variant="outline"
+        onClick={sync}
+        disabled={disabled}
+        aria-label={t("syncNow")}
+      >
+        <RefreshCw className={busy ? "animate-spin" : ""} />
+      </Button>
+    </Tooltip>
   );
 }

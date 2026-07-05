@@ -98,7 +98,13 @@ function Overview() {
           <span className="font-bold text-4xl tracking-tight">{totalInt}</span>
           {totalFrac && <span className="text-muted-foreground text-xl">.{totalFrac}</span>}
           {dayChange != null && (
-            <Badge variant="outline" className="ml-1">
+            <Badge
+              status="neutral"
+              size="sm"
+              showIcon={false}
+              contentKey={dayChange}
+              className="ml-1"
+            >
               <ValueChange value={dayChange} format="currency" className="text-xs" />
             </Badge>
           )}

@@ -105,13 +105,13 @@ export function ManualActivityPanel({ accountId }: { accountId: string }) {
           step="any"
           required
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          onChange={(v) => setAmount(v)}
           placeholder={t("amountPlaceholder")}
           className="w-32"
         />
         <Input
           value={note}
-          onChange={(e) => setNote(e.target.value)}
+          onChange={(v) => setNote(v)}
           placeholder={t("notePlaceholder")}
           className="w-40"
         />

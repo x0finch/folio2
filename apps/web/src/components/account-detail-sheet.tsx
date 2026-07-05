@@ -186,7 +186,7 @@ function DetailBody({
             <Input
               autoFocus
               value={labelDraft}
-              onChange={(e) => setLabelDraft(e.target.value)}
+              onChange={(v) => setLabelDraft(v)}
               className="flex-1"
             />
             <Button type="submit" size="sm" disabled={renameMut.isPending || !labelDraft.trim()}>

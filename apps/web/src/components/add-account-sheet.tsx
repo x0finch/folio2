@@ -7,9 +7,7 @@ import {
   Label,
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
   Sheet,
@@ -124,7 +122,7 @@ function ManualFields({
               required
               autoComplete="off"
               value={values.symbol ?? ""}
-              onChange={(e) => set("symbol", e.target.value)}
+              onChange={(v) => set("symbol", v)}
               placeholder="BTC"
             />
             <button
@@ -165,7 +163,7 @@ function ManualFields({
           required
           inputMode="decimal"
           value={values.amount ?? ""}
-          onChange={(e) => set("amount", e.target.value)}
+          onChange={(v) => set("amount", v)}
           placeholder="0.0"
         />
       </div>
@@ -176,7 +174,7 @@ function ManualFields({
           required
           inputMode="decimal"
           value={values.unitPrice ?? ""}
-          onChange={(e) => set("unitPrice", e.target.value)}
+          onChange={(v) => set("unitPrice", v)}
           placeholder="0.0"
         />
         <p className="text-xs text-muted-foreground">
@@ -223,7 +221,7 @@ function GenericFields({
             autoComplete={s.type === "secret" ? "new-password" : "off"}
             value={values[s.key] ?? ""}
             placeholder={s.desc ? ti(s.desc) : undefined}
-            onChange={(e) => setValues((v) => ({ ...v, [s.key]: e.target.value }))}
+            onChange={(val) => setValues((v) => ({ ...v, [s.key]: val }))}
           />
         </div>
       ))}
@@ -264,7 +262,7 @@ function AccountForm({
           id="add-label"
           required
           value={label}
-          onChange={(e) => setLabel(e.target.value)}
+          onChange={(v) => setLabel(v)}
           placeholder={
             type === "manual" ? t("manualLabelPlaceholder") : t("walletLabelPlaceholder")
           }
@@ -319,22 +317,24 @@ export function AddAccountSheet({ triggerRender }: { triggerRender?: React.React
         </SheetHeader>
 
         <div className="mt-4 flex flex-col gap-2">
-          <Label htmlFor="add-type">{t("accountType")}</Label>
+          <Label>{t("accountType")}</Label>
           <Select value={type} onValueChange={(v) => setType(v as AccountType)}>
-            <SelectTrigger id="add-type">
-              {/* 显示选中类型的展示名(label),而非裸 type 值。 */}
-              <SelectValue>{(v: AccountType) => typeLabel(v)}</SelectValue>
+            <SelectTrigger>
+              {/* 显示选中类型的展示名(label,由 SelectItem 注册),而非裸 type 值。 */}
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {TYPE_GROUPS.map((g) => (
-                <SelectGroup key={g.category}>
-                  <SelectLabel>{tCat(`cat_${g.category}`)}</SelectLabel>
+                <div key={g.category}>
+                  <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                    {tCat(`cat_${g.category}`)}
+                  </div>
                   {g.types.map((ty) => (
                     <SelectItem key={ty} value={ty}>
                       {typeLabel(ty)}
                     </SelectItem>
                   ))}
-                </SelectGroup>
+                </div>
               ))}
             </SelectContent>
           </Select>

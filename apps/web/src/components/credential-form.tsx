@@ -78,7 +78,7 @@ export function CredentialForm({
               required
               value={values[s.key] ?? ""}
               placeholder={s.desc ? ti(s.desc) : undefined}
-              onChange={(e) => setValue(s.key, e.target.value)}
+              onChange={(v) => setValue(s.key, v)}
             />
           </div>
         );

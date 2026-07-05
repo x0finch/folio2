@@ -48,18 +48,12 @@ function LoginPage() {
             {isSignup && (
               <div className="flex flex-col gap-2">
                 <Label htmlFor="name">{t("name")}</Label>
-                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
+                <Input id="name" value={name} onChange={(v) => setName(v)} />
               </div>
             )}
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">{t("email")}</Label>
-              <Input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+              <Input id="email" type="email" required value={email} onChange={(v) => setEmail(v)} />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">{t("password")}</Label>
@@ -69,7 +63,7 @@ function LoginPage() {
                 required
                 minLength={8}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(v) => setPassword(v)}
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
