@@ -1,25 +1,27 @@
-"use client"
+// 手搓分隔线(去 Base UI):按 orientation 渲染 1px 线,带 aria role。
 
-import { Separator as SeparatorPrimitive } from "@base-ui/react/separator"
-
-import { cn } from "@folio/ui/lib/utils"
+import type * as React from "react";
+import { cn } from "@folio/ui/lib/utils";
 
 function Separator({
   className,
   orientation = "horizontal",
   ...props
-}: SeparatorPrimitive.Props) {
+}: React.ComponentProps<"div"> & { orientation?: "horizontal" | "vertical" }) {
   return (
-    <SeparatorPrimitive
+    <div
       data-slot="separator"
-      orientation={orientation}
+      data-orientation={orientation}
+      role="separator"
+      aria-orientation={orientation}
       className={cn(
-        "shrink-0 bg-border data-horizontal:h-px data-horizontal:w-full data-vertical:w-px data-vertical:self-stretch",
-        className
+        "shrink-0 bg-border",
+        orientation === "horizontal" ? "h-px w-full" : "w-px self-stretch",
+        className,
       )}
       {...props}
     />
-  )
+  );
 }
 
-export { Separator }
+export { Separator };
