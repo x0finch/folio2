@@ -67,4 +67,11 @@ export {
   TableHeader,
   TableRow,
 } from "./components/table";
+export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/tabs";
+export {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./components/tooltip";
 export { cn } from "./lib/utils";
