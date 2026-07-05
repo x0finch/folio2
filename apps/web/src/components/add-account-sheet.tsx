@@ -286,8 +286,9 @@ function AccountForm({
   );
 }
 
-// 统一「添加账户」侧栏:分组 Select 切类型 → schema 驱动字段(manual 富控件)。总览/账户页放触发按钮。
-export function AddAccountSheet() {
+// 统一「添加账户」侧栏:分组 Select 切类型 → schema 驱动字段(manual 富控件)。
+// triggerRender:自定义触发元素(账户页传 Fab);缺省用普通按钮。
+export function AddAccountSheet({ triggerRender }: { triggerRender?: React.ReactElement } = {}) {
   const t = useTranslations("Accounts");
   const tCat = useTranslations("Accounts");
   const router = useRouter();
@@ -303,7 +304,7 @@ export function AddAccountSheet() {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger render={<Button size="sm">{t("addAccount")}</Button>} />
+      <SheetTrigger render={triggerRender ?? <Button size="sm">{t("addAccount")}</Button>} />
       <SheetContent side="right" className="w-full overflow-y-auto p-6 sm:max-w-md">
         <SheetHeader className="p-0">
           <SheetTitle>{t("addAccount")}</SheetTitle>

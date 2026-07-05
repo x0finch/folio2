@@ -1,4 +1,6 @@
+import { Fab } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
@@ -65,13 +67,10 @@ function Accounts() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">{t("accountCount", { count: active.length })}</h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <SyncButton
-            accounts={active.map((r) => ({ id: r.id, label: r.label }))}
-            lastSyncedAt={lastSyncedAt}
-          />
-          <AddAccountSheet />
-        </div>
+        <SyncButton
+          accounts={active.map((r) => ({ id: r.id, label: r.label }))}
+          lastSyncedAt={lastSyncedAt}
+        />
       </div>
 
       {rows.length === 0 ? (
@@ -106,6 +105,10 @@ function Accounts() {
         specs={selected ? (credentialSpecs[selected.type] ?? []) : []}
         open={open}
         onOpenChange={setOpen}
+      />
+
+      <AddAccountSheet
+        triggerRender={<Fab position="bottom-right" icon={<Plus />} aria-label={t("addAccount")} />}
       />
     </div>
   );
