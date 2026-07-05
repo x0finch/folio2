@@ -1,16 +1,15 @@
-import { Button } from "@folio/ui";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
 import { AccountTypeBadge } from "../../components/account-type-badge";
 import { AddAccountSheet } from "../../components/add-account-sheet";
 import { useUsd } from "../../components/holdings-sections";
+import { SyncButton } from "../../components/sync-button";
 import { TokenStack } from "../../components/token-stack";
 import { listMyAccounts } from "../../lib/server/accounts";
 import { getCredentialSpecs } from "../../lib/server/credentials";
 import { getMyAccountHoldings } from "../../lib/server/overview";
-import { triggerSync } from "../../lib/server/sync";
 import { useStalePriceRefresh } from "../../lib/use-stale-price-refresh";
 
 export const Route = createFileRoute("/_authed/accounts")({
@@ -43,10 +42,8 @@ export const Route = createFileRoute("/_authed/accounts")({
 });
 
 function Accounts() {
-  const router = useRouter();
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const format = useFormatter();
   const usd = useUsd();
   const { rows, credentialSpecs, pricesStale } = Route.useLoaderData();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
@@ -64,56 +61,18 @@ function Accounts() {
     setOpen(true);
   };
 
-  const [busy, setBusy] = useState(false);
-  const [syncMsg, setSyncMsg] = useState<string | null>(null);
-
-  async function onSync() {
-    setSyncMsg(null);
-    setBusy(true);
-    try {
-      const { results } = await triggerSync();
-      const ok = results.filter((r) => r.ok).length;
-      // 缺凭据账户(skipped)不算失败(导入待补录)。
-      const failures = results.filter((r) => !r.ok && !r.skipped);
-      const labelOf = (id: string) => rows.find((a) => a.id === id)?.label ?? id;
-      let msg = t("synced", { count: ok });
-      if (failures.length > 0) {
-        const details = failures
-          .map((f) => `${labelOf(f.accountId)}: ${f.error ?? "unknown error"}`)
-          .join("; ");
-        msg += ` ${t("syncFailed", { count: failures.length, details })}`;
-      }
-      setSyncMsg(msg);
-      await router.invalidate();
-    } catch (err) {
-      setSyncMsg(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">{t("accountCount", { count: active.length })}</h1>
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-sm text-muted-foreground">
-            {lastSyncedAt
-              ? t("lastSyncedAt", { when: format.relativeTime(new Date(lastSyncedAt)) })
-              : t("neverSynced")}
-          </span>
+          <SyncButton
+            accounts={active.map((r) => ({ id: r.id, label: r.label }))}
+            lastSyncedAt={lastSyncedAt}
+          />
           <AddAccountSheet />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onSync}
-            disabled={busy || active.length === 0}
-          >
-            {busy ? tc("verifying") : t("syncNow")}
-          </Button>
         </div>
       </div>
-      {syncMsg && <p className="text-sm text-muted-foreground">{syncMsg}</p>}
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground">{tc("noAccountsYet")}</p>
@@ -165,6 +124,7 @@ function AccountRowButton({
   onClick: () => void;
 }) {
   const t = useTranslations("Accounts");
+  const format = useFormatter();
   return (
     <button
       type="button"
@@ -182,6 +142,11 @@ function AccountRowButton({
               {t("needsCredentials")}
             </span>
           )}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {row.takenAt
+            ? t("lastSyncedAt", { when: format.relativeTime(new Date(row.takenAt)) })
+            : t("neverSynced")}
         </span>
         {!muted && <TokenStack balances={row.balances} />}
       </span>

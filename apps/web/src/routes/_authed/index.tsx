@@ -1,9 +1,18 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@folio/ui";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
-import { AddAccountSheet } from "../../components/add-account-sheet";
 import { DefiPositions, PerpPositions, useUsd } from "../../components/holdings-sections";
 import { PortfolioChart } from "../../components/portfolio-chart";
+import { SyncButton } from "../../components/sync-button";
 import { TokenHoldings } from "../../components/token-holdings";
 import { type GroupedView, toGroupedView } from "../../lib/groups-view";
 import { getMyGroups } from "../../lib/server/groups";
@@ -72,6 +81,7 @@ function Overview() {
   const usd = useUsd();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(accountTotals, groups, memberships);
+  const lastSyncedAt = accountTotals.reduce((m, r) => Math.max(m, r.takenAt ?? 0), 0) || null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -80,7 +90,7 @@ function Overview() {
           <p className="text-sm text-muted-foreground">{t("totalValue")}</p>
           <p className="text-4xl font-bold">{usd(totalUsd)}</p>
         </div>
-        <AddAccountSheet />
+        <SyncButton accounts={accountTotals.map((r) => r.account)} lastSyncedAt={lastSyncedAt} />
       </div>
 
       <Card>
@@ -96,17 +106,6 @@ function Overview() {
         </CardContent>
       </Card>
 
-      {groups.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("byGroup")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ByGroup view={grouped} />
-          </CardContent>
-        </Card>
-      )}
-
       {accountTotals.length === 0 ? (
         <p className="text-muted-foreground">
           {tc("noAccountsYet")}{" "}
@@ -117,42 +116,50 @@ function Overview() {
         </p>
       ) : (
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-baseline justify-between">
-              <span>{t("holdings")}</span>
-              <span className="text-base font-normal text-muted-foreground">
-                {usd(holdingsSubtotal)}
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {holdings.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>
-            ) : (
-              <TokenHoldings holdings={holdings} />
-            )}
-          </CardContent>
-        </Card>
-      )}
+          <CardContent className="pt-6">
+            <Tabs defaultValue="tokens">
+              <TabsList>
+                <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
+                <TabsTrigger value="defiperp">{t("defiAndPerp")}</TabsTrigger>
+                {groups.length > 0 && <TabsTrigger value="groups">{t("groupsTab")}</TabsTrigger>}
+              </TabsList>
 
-      {sections.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-baseline justify-between">
-              <span>{t("defiAndPerp")}</span>
-              <span className="text-base font-normal text-muted-foreground">
-                {usd(defiSubtotal)}
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-6 overflow-x-auto">
-            {sections.map((s) => (
-              <div key={s.account.id} className="flex flex-col gap-3">
-                <p className="font-medium">{s.account.label}</p>
-                {s.defi.length > 0 && <DefiPositions groups={s.defi} />}
-                {s.perp && s.perp.positions.length > 0 && <PerpPositions view={s.perp} />}
-              </div>
-            ))}
+              <TabsContent value="tokens" className="pt-4">
+                {holdings.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>
+                ) : (
+                  <>
+                    <p className="mb-1 text-right text-sm text-muted-foreground">
+                      {usd(holdingsSubtotal)}
+                    </p>
+                    <TokenHoldings holdings={holdings} />
+                  </>
+                )}
+              </TabsContent>
+
+              <TabsContent value="defiperp" className="pt-4">
+                {sections.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t("noOpenPositions")}</p>
+                ) : (
+                  <div className="flex flex-col gap-6 overflow-x-auto">
+                    <p className="text-right text-sm text-muted-foreground">{usd(defiSubtotal)}</p>
+                    {sections.map((s) => (
+                      <div key={s.account.id} className="flex flex-col gap-3">
+                        <p className="font-medium">{s.account.label}</p>
+                        {s.defi.length > 0 && <DefiPositions groups={s.defi} />}
+                        {s.perp && s.perp.positions.length > 0 && <PerpPositions view={s.perp} />}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {groups.length > 0 && (
+                <TabsContent value="groups" className="pt-4">
+                  <ByGroup view={grouped} />
+                </TabsContent>
+              )}
+            </Tabs>
           </CardContent>
         </Card>
       )}

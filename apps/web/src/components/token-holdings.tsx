@@ -3,8 +3,9 @@ import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { AssetCell, useUsd } from "./holdings-sections";
 
-// 按代币聚合的持仓列表(P2):每行一个 Holding(TokenGroup 总额),点开行内展开各持有点。
-// 小额(< DUST_THRESHOLD)折叠进「N 项小额」footer,可展开。设计见 evolution/plans/p2-token-aggregation.md。
+// 按代币聚合的持仓列表(P2):每行一个 Holding(TokenGroup 总额)。
+// 多来源行(sources>1)可点开"查看更多"看各持有点;单来源行静态、无展开。
+// 小额(< DUST_THRESHOLD)折叠进「N 项小额」footer,可展开。设计见 evolution/plans/overview-ui-polish.md。
 const DUST_THRESHOLD = 1; // USD;待定阈值(计划已记)
 
 function chevron(open: boolean) {
@@ -21,6 +22,7 @@ function HoldingRow({ h }: { h: Holding }) {
   const t = useTranslations("Overview");
   const usd = useUsd();
   const [open, setOpen] = useState(false);
+  const expandable = h.sources.length > 1;
   const chains = h.sources.filter(
     (s) => s.platform.id.startsWith("eip155:") || s.platform.id.startsWith("chain:"),
   ).length;
@@ -28,28 +30,42 @@ function HoldingRow({ h }: { h: Holding }) {
     chains > 0
       ? t("chainsAndSources", { chains, sources: h.sources.length })
       : t("sourcesOnly", { sources: h.sources.length });
+
+  const inner = (
+    <>
+      <span className="w-4 shrink-0">{expandable ? chevron(open) : null}</span>
+      <div className="flex-1">
+        <AssetCell symbol={h.token.symbol} name={h.token.name} logo={h.token.logo} />
+      </div>
+      <span className="text-xs text-muted-foreground">
+        {scale}
+        {expandable && !open && <span className="ml-2">· {t("viewMore")}</span>}
+      </span>
+      <div className="w-32 text-right">
+        <div>{usd(h.totalValue)}</div>
+        {h.totalAmount != null && (
+          <div className="text-xs text-muted-foreground">
+            {h.totalAmount} {h.token.symbol}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div className="border-b last:border-b-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-3 py-3 text-left hover:bg-muted/40"
-      >
-        {chevron(open)}
-        <div className="flex-1">
-          <AssetCell symbol={h.token.symbol} name={h.token.name} logo={h.token.logo} />
-        </div>
-        <span className="text-xs text-muted-foreground">{scale}</span>
-        <div className="w-32 text-right">
-          <div>{usd(h.totalValue)}</div>
-          {h.totalAmount != null && (
-            <div className="text-xs text-muted-foreground">
-              {h.totalAmount} {h.token.symbol}
-            </div>
-          )}
-        </div>
-      </button>
-      {open && (
+      {expandable ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center gap-3 py-3 text-left hover:bg-muted/40"
+        >
+          {inner}
+        </button>
+      ) : (
+        <div className="flex w-full items-center gap-3 py-3">{inner}</div>
+      )}
+      {expandable && open && (
         <div className="flex flex-col gap-1 pb-3 pl-8 pr-1">
           {h.sources.map((s) => (
             <div

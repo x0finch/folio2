@@ -31,6 +31,7 @@ import {
   createPerpAccount,
 } from "../lib/server/accounts";
 import { getCredentialSpecs, type InputSpec } from "../lib/server/credentials";
+import { syncOneAccount } from "../lib/server/sync";
 import { tokenPrice } from "../lib/server/tokens";
 import { TokenCombobox } from "./token-combobox";
 
@@ -237,7 +238,7 @@ function AccountForm({
 }: {
   type: AccountType;
   specs: InputSpec[];
-  onDone: () => void;
+  onDone: (accountId: string) => void;
 }) {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
@@ -245,7 +246,7 @@ function AccountForm({
   const [values, setValues] = useState<Record<string, string>>({});
   const mutation = useMutation({
     mutationFn: () => submitAccount(type, label, values),
-    onSuccess: onDone,
+    onSuccess: (account) => onDone(account.id),
   });
 
   return (
@@ -336,9 +337,13 @@ export function AddAccountSheet() {
           key={type}
           type={type}
           specs={specs}
-          onDone={() => {
+          onDone={(newId) => {
             setOpen(false);
-            router.invalidate();
+            router.invalidate(); // 新账户即时出现(此刻空值)
+            // 方案 A:后台自动同步新账户 → 完成再 invalidate 填充;不阻塞、失败静默(创建流已校验凭据)。
+            void syncOneAccount({ data: { accountId: newId } })
+              .then(() => router.invalidate())
+              .catch(() => {});
           }}
         />
       </SheetContent>
