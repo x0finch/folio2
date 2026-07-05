@@ -1,3 +1,4 @@
+import { Toaster } from "@folio/ui";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, HeadContent, Scripts } from "@tanstack/react-router";
@@ -6,6 +7,7 @@ import { IntlProvider } from "use-intl";
 
 import { messages } from "../lib/i18n/messages";
 import { getLocale } from "../lib/server/locale";
+import { THEME_INIT_SCRIPT } from "../lib/theme";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -39,9 +41,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { locale, now } = Route.useLoaderData();
   return (
-    <html lang={locale}>
+    <html lang={locale} suppressHydrationWarning>
       <head>
         <HeadContent />
+        {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/theme)。 */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body>
         <IntlProvider
@@ -53,6 +58,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           getMessageFallback={({ key }) => key}
         >
           {children}
+          <Toaster />
         </IntlProvider>
         <TanStackDevtools
           config={{

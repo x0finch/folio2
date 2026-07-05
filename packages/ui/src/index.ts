@@ -1,4 +1,11 @@
 // @folio/ui —— shadcn 组件,具名 re-export(用到一个加一个,保持引入面最小)。
+
+export {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "./components/accordion";
 export {
   Avatar,
   AvatarBadge,
@@ -7,6 +14,7 @@ export {
   AvatarGroupCount,
   AvatarImage,
 } from "./components/avatar";
+export { Badge, badgeVariants } from "./components/badge";
 export { Button, buttonVariants } from "./components/button";
 export {
   Card,
@@ -35,8 +43,22 @@ export {
   ComboboxItem,
   ComboboxList,
 } from "./components/combobox";
+export {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerOverlay,
+  DrawerPortal,
+  DrawerTitle,
+  DrawerTrigger,
+} from "./components/drawer";
+export { Fab, fabVariants } from "./components/fab";
 export { Input } from "./components/input";
 export { Label } from "./components/label";
+export { LogoAvatar } from "./components/logo-avatar";
 export {
   Select,
   SelectContent,
@@ -47,6 +69,7 @@ export {
   SelectTrigger,
   SelectValue,
 } from "./components/select";
+export { Separator } from "./components/separator";
 export {
   Sheet,
   SheetClose,
@@ -58,6 +81,26 @@ export {
   SheetTrigger,
 } from "./components/sheet";
 export {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarSeparator,
+  SidebarTrigger,
+  useSidebar,
+} from "./components/sidebar";
+export { Skeleton } from "./components/skeleton";
+export { Toaster } from "./components/sonner";
+export {
   Table,
   TableBody,
   TableCaption,
@@ -68,6 +111,7 @@ export {
   TableRow,
 } from "./components/table";
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/tabs";
+export { TabsListThin, TabsTriggerThin } from "./components/tabs-list-thin";
 export {
   Tooltip,
   TooltipContent,

@@ -2,6 +2,10 @@
    这里只做一次引入,避免重复 import tailwindcss。 */
 @import "@folio/ui/globals.css";
 
+/* Geist 变体字体(自托管 via @fontsource;CF Workers 走静态资源)。--font-sans/mono 映射在 @folio/ui @theme。 */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
 /* 显式扫描本应用源码(Tailwind 入口在 @folio/ui,故此处补声明 app 自身的 class 来源)。 */
 @source "./**/*.{ts,tsx}";
 
