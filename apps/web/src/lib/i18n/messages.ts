@@ -18,6 +18,8 @@ export const en = {
     afternoon: "Good afternoon",
     evening: "Good evening",
     theme: "Theme",
+    commandPlaceholder: "Jump to… or run a command",
+    commandEmpty: "No matches.",
   },
   Insights: {
     allocation: "Allocation",
@@ -222,6 +224,8 @@ export const zh: Messages = {
     afternoon: "下午好",
     evening: "晚上好",
     theme: "主题",
+    commandPlaceholder: "跳转… 或执行命令",
+    commandEmpty: "无匹配。",
   },
   Insights: {
     allocation: "分配",

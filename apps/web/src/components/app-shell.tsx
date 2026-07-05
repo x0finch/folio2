@@ -1,7 +1,17 @@
-import { Dock, DockItem } from "@folio/ui";
+import { CommandPalette, Dock, DockItem } from "@folio/ui";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { BarChart3, Home, LogOut, Moon, Settings, Sun, Wallet } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  BarChart3,
+  Home,
+  LogOut,
+  Moon,
+  Search,
+  Settings,
+  Sun,
+  SunMoon,
+  Wallet,
+} from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
 import { signOut } from "../lib/auth-client";
 import { useTheme } from "../lib/theme";
@@ -50,6 +60,56 @@ export function AppShell({ userName, children }: { userName: string; children: R
   const hour = new Date().getHours();
   const greeting = hour < 12 ? ts("morning") : hour < 18 ? ts("afternoon") : ts("evening");
 
+  // 全局 ⌘K 启动器(复用 CommandPalette 外壳):导航跳转 + 设置 + 主题切换。静态清单,本地按 query 过滤。
+  const { setTheme } = useTheme();
+  const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [cmdkQuery, setCmdkQuery] = useState("");
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCmdkOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const commands = useMemo(
+    () => [
+      ...NAVS.map((n) => ({
+        id: n.key,
+        label: t(n.key),
+        icon: n.icon,
+        run: () => navigate({ to: n.to }),
+      })),
+      {
+        id: "settings",
+        label: t("settings"),
+        icon: Settings,
+        run: () => navigate({ to: "/settings" }),
+      },
+      {
+        id: "theme",
+        label: ts("theme"),
+        icon: SunMoon,
+        run: () => {
+          const el = document.documentElement;
+          setTheme(el.classList.contains("dark") ? "light" : "dark");
+        },
+      },
+    ],
+    [t, ts, navigate, setTheme],
+  );
+  const cmdkq = cmdkQuery.trim().toLowerCase();
+  const filteredCmds = cmdkq
+    ? commands.filter((c) => c.label.toLowerCase().includes(cmdkq))
+    : commands;
+  const runCmd = (run: () => void) => {
+    run();
+    setCmdkOpen(false);
+    setCmdkQuery("");
+  };
+
   return (
     <div className="min-h-svh">
       {/* 顶栏 */}
@@ -63,6 +123,15 @@ export function AppShell({ userName, children }: { userName: string; children: R
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setCmdkOpen(true)}
+              aria-label="⌘K"
+              className="mr-1 hidden items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-muted-foreground text-xs transition-colors hover:text-foreground sm:inline-flex"
+            >
+              <Search className="size-3.5" />
+              <kbd className="font-sans">⌘K</kbd>
+            </button>
             <LocaleSwitcher />
             <ThemeToggle />
             <Link
@@ -106,6 +175,33 @@ export function AppShell({ userName, children }: { userName: string; children: R
           ))}
         </Dock>
       </nav>
+
+      {/* 全局 ⌘K 启动器 */}
+      <CommandPalette
+        open={cmdkOpen}
+        onOpenChange={setCmdkOpen}
+        query={cmdkQuery}
+        onQueryChange={setCmdkQuery}
+        placeholder={ts("commandPlaceholder")}
+      >
+        {filteredCmds.length > 0 ? (
+          filteredCmds.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => runCmd(c.run)}
+              className="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted [&_svg]:size-4 [&_svg]:text-muted-foreground"
+            >
+              <c.icon />
+              <span>{c.label}</span>
+            </button>
+          ))
+        ) : (
+          <div className="px-3 py-8 text-center text-muted-foreground text-sm">
+            {ts("commandEmpty")}
+          </div>
+        )}
+      </CommandPalette>
     </div>
   );
 }

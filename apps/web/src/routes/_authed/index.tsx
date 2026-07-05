@@ -4,6 +4,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  NumberTicker,
   Tabs,
   TabsContent,
   TabsList,
@@ -88,14 +89,18 @@ function Overview() {
   const grouped = toGroupedView(accountTotals, groups, memberships);
   // 头部 24h 价值变化:当前总额 − 约 24h 前的组合净值(基准取最新快照时刻,与 totalUsd 同源)。
   const dayChange = computeDayChange(series, totalUsd, series.at(-1)?.t ?? 0);
-  const [totalInt, totalFrac] = usd(totalUsd).split(".");
+  const totalFrac = usd(totalUsd).split(".")[1];
 
   return (
     <div className="flex flex-col gap-6">
       <div>
         {/* 拆字号总额:整数(含符号)大、小数小;右侧 24h 价值变化 Badge(无参照点则不显示)。 */}
         <div className="flex items-baseline gap-2">
-          <span className="font-bold text-4xl tracking-tight">{totalInt}</span>
+          <NumberTicker
+            value={totalUsd}
+            format={(n) => usd(n).split(".")[0]}
+            className="font-bold text-4xl tracking-tight"
+          />
           {totalFrac && <span className="text-muted-foreground text-xl">.{totalFrac}</span>}
           {dayChange != null && (
             <Badge
