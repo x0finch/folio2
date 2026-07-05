@@ -1,6 +1,5 @@
 // @folio/ui —— shadcn 组件,具名 re-export(用到一个加一个,保持引入面最小)。
 
-export { toast } from "sonner";
 export {
   Accordion,
   AccordionContent,
@@ -61,6 +60,7 @@ export { Input } from "./components/input";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
+export { Toaster, toast } from "./components/motion/toast";
 export {
   Select,
   SelectContent,
@@ -101,7 +101,6 @@ export {
   useSidebar,
 } from "./components/sidebar";
 export { Skeleton } from "./components/skeleton";
-export { Toaster } from "./components/sonner";
 export {
   Table,
   TableBody,
