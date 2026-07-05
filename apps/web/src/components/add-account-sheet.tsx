@@ -27,7 +27,7 @@ import {
 import { getCredentialSpecs, type InputSpec } from "../lib/server/credentials";
 import { syncOneAccount } from "../lib/server/sync";
 import { tokenPrice } from "../lib/server/tokens";
-import { TokenCombobox } from "./token-combobox";
+import { TokenPicker } from "./token-picker";
 
 // 按类型派发到对应 server fn(键适配:通用字段 identifier→address 等)。统一成单个 createAccount 留 follow-up。
 async function submitAccount(type: AccountType, label: string, values: Record<string, string>) {
@@ -133,7 +133,7 @@ function ManualFields({
           </>
         ) : (
           <>
-            <TokenCombobox
+            <TokenPicker
               value={picked}
               onChange={onPick}
               onManual={(q) => {
