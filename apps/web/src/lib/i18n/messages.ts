@@ -12,9 +12,17 @@ export const en = {
     addOne: "Add one",
     cancel: "Cancel",
   },
+  Sidebar: {
+    tagline: "your crypto\nportfolio",
+    morning: "Good morning",
+    afternoon: "Good afternoon",
+    evening: "Good evening",
+    theme: "Theme",
+  },
   Nav: {
     overview: "Overview",
     accounts: "Accounts",
+    insights: "Insights",
     settings: "Settings",
   },
   Login: {
@@ -198,9 +206,17 @@ export const zh: Messages = {
     addOne: "添加一个",
     cancel: "取消",
   },
+  Sidebar: {
+    tagline: "你的\n加密组合",
+    morning: "早上好",
+    afternoon: "下午好",
+    evening: "晚上好",
+    theme: "主题",
+  },
   Nav: {
     overview: "总览",
     accounts: "账户",
+    insights: "洞察",
     settings: "设置",
   },
   Login: {

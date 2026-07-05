@@ -15,6 +15,7 @@ import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as ApiImportRouteImport } from './routes/api/import'
 import { Route as ApiExportRouteImport } from './routes/api/export'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
+import { Route as AuthedInsightsRouteImport } from './routes/_authed/insights'
 import { Route as AuthedAccountsRouteImport } from './routes/_authed/accounts'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -47,6 +48,11 @@ const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedInsightsRoute = AuthedInsightsRouteImport.update({
+  id: '/insights',
+  path: '/insights',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedAccountsRoute = AuthedAccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
@@ -62,6 +68,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/login': typeof LoginRoute
   '/accounts': typeof AuthedAccountsRoute
+  '/insights': typeof AuthedInsightsRoute
   '/settings': typeof AuthedSettingsRoute
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
@@ -70,6 +77,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/accounts': typeof AuthedAccountsRoute
+  '/insights': typeof AuthedInsightsRoute
   '/settings': typeof AuthedSettingsRoute
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
@@ -81,6 +89,7 @@ export interface FileRoutesById {
   '/_authed': typeof AuthedRouteWithChildren
   '/login': typeof LoginRoute
   '/_authed/accounts': typeof AuthedAccountsRoute
+  '/_authed/insights': typeof AuthedInsightsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
@@ -93,6 +102,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/accounts'
+    | '/insights'
     | '/settings'
     | '/api/export'
     | '/api/import'
@@ -101,6 +111,7 @@ export interface FileRouteTypes {
   to:
     | '/login'
     | '/accounts'
+    | '/insights'
     | '/settings'
     | '/api/export'
     | '/api/import'
@@ -111,6 +122,7 @@ export interface FileRouteTypes {
     | '/_authed'
     | '/login'
     | '/_authed/accounts'
+    | '/_authed/insights'
     | '/_authed/settings'
     | '/api/export'
     | '/api/import'
@@ -170,6 +182,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/insights': {
+      id: '/_authed/insights'
+      path: '/insights'
+      fullPath: '/insights'
+      preLoaderRoute: typeof AuthedInsightsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/accounts': {
       id: '/_authed/accounts'
       path: '/accounts'
@@ -189,12 +208,14 @@ declare module '@tanstack/react-router' {
 
 interface AuthedRouteChildren {
   AuthedAccountsRoute: typeof AuthedAccountsRoute
+  AuthedInsightsRoute: typeof AuthedInsightsRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedAccountsRoute: AuthedAccountsRoute,
+  AuthedInsightsRoute: AuthedInsightsRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,
   AuthedIndexRoute: AuthedIndexRoute,
 }
