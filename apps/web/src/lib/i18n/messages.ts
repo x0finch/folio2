@@ -70,6 +70,7 @@ export const en = {
     chainsAndSources: "{chains} chains · {sources} sources",
     smallHoldings: "{n} small holdings",
     viewMore: "View more",
+    sourcesTitle: "Sources",
   },
   Accounts: {
     title: "Accounts",
@@ -264,6 +265,7 @@ export const zh: Messages = {
     chainsAndSources: "{chains} 链 · {sources} 个来源",
     smallHoldings: "{n} 项小额",
     viewMore: "查看更多",
+    sourcesTitle: "各来源",
   },
   Accounts: {
     title: "账户",
