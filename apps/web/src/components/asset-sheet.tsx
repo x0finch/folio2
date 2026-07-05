@@ -55,26 +55,29 @@ export function AssetSheet({
 
             <div className="mt-6">
               <p className="mb-2 font-medium text-muted-foreground text-sm">{t("sourcesTitle")}</p>
-              <div className="flex flex-col divide-y divide-border/60">
-                {holding.sources.map((s) => (
-                  <div
-                    key={`${s.account.id}|${s.platform.id}`}
-                    className="flex items-center gap-3 py-2.5 text-sm"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="text-muted-foreground">{s.platform.name}</span>
-                      <span className="mx-1 text-muted-foreground">·</span>
-                      <span>{s.account.label}</span>
-                      {s.isMargin && (
-                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                          {t("margin")}
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-muted-foreground">{s.amount}</span>
-                    <span className="w-28 text-right font-medium">{usd(s.value)}</span>
-                  </div>
-                ))}
+              {/* 来源多时列表内滚 + 上下渐隐:外层不滚(挂 list-gradient-blur),内层 overflow;渐隐取抽屉底色。 */}
+              <div className="list-gradient-blur [--list-fade:var(--background)]">
+                <div className="flex max-h-80 flex-col divide-y divide-border/60 overflow-y-auto">
+                  {holding.sources.map((s) => (
+                    <div
+                      key={`${s.account.id}|${s.platform.id}`}
+                      className="flex items-center gap-3 py-2.5 text-sm"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="text-muted-foreground">{s.platform.name}</span>
+                        <span className="mx-1 text-muted-foreground">·</span>
+                        <span>{s.account.label}</span>
+                        {s.isMargin && (
+                          <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {t("margin")}
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-muted-foreground">{s.amount}</span>
+                      <span className="w-28 text-right font-medium">{usd(s.value)}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </>

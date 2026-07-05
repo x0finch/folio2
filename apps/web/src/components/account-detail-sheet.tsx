@@ -7,6 +7,7 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
+  toast,
 } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
@@ -86,9 +87,15 @@ function DetailBody({
   const [labelDraft, setLabelDraft] = useState(account.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // 操作反馈统一走 toast(D07):同步给出成/败,写操作失败提示,成功以列表刷新为可见反馈。
   const syncMut = useMutation({
     mutationFn: () => syncOneAccount({ data: { accountId: account.id } }),
-    onSuccess: refresh,
+    onSuccess: async (r) => {
+      if (r.ok) toast.success(t("synced", { count: 1 }));
+      else if (!r.skipped) toast.error(r.error ?? t("syncGenericError"));
+      await refresh();
+    },
+    onError: () => toast.error(t("syncGenericError")),
   });
   const renameMut = useMutation({
     mutationFn: () => renameAccount({ data: { accountId: account.id, label: labelDraft.trim() } }),
@@ -96,10 +103,12 @@ function DetailBody({
       setRenaming(false);
       await refresh();
     },
+    onError: () => toast.error(t("actionFailed")),
   });
   const archiveMut = useMutation({
     mutationFn: () => setAccountArchived({ data: { accountId: account.id, archived: !archived } }),
     onSuccess: refresh,
+    onError: () => toast.error(t("actionFailed")),
   });
   const deleteMut = useMutation({
     mutationFn: () => deleteAccount({ data: { accountId: account.id } }),
@@ -107,12 +116,12 @@ function DetailBody({
       onClose();
       await refresh();
     },
+    onError: () => toast.error(t("actionFailed")),
   });
 
   const lastSynced = account.takenAt
     ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
     : t("neverSynced");
-  const syncResult = syncMut.data;
 
   return (
     <>
@@ -208,13 +217,6 @@ function DetailBody({
               </Button>
             </div>
           </div>
-        )}
-
-        {syncResult && !syncResult.ok && (
-          <p className="text-sm text-destructive">{syncResult.error ?? t("syncGenericError")}</p>
-        )}
-        {(renameMut.isError || archiveMut.isError || deleteMut.isError) && (
-          <p className="text-sm text-destructive">{t("actionFailed")}</p>
         )}
       </div>
 

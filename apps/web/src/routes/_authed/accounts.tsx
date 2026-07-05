@@ -7,6 +7,7 @@ import { AccountDetailSheet, type AccountRow } from "../../components/account-de
 import { AccountTypeBadge } from "../../components/account-type-badge";
 import { AddAccountSheet } from "../../components/add-account-sheet";
 import { useUsd } from "../../components/holdings-sections";
+import { AccountsSkeleton } from "../../components/skeletons";
 import { SyncButton } from "../../components/sync-button";
 import { TokenStack } from "../../components/token-stack";
 import { listMyAccounts } from "../../lib/server/accounts";
@@ -40,6 +41,7 @@ export const Route = createFileRoute("/_authed/accounts")({
     });
     return { rows, credentialSpecs, pricesStale: overview.pricesStale };
   },
+  pendingComponent: AccountsSkeleton,
   component: Accounts,
 });
 

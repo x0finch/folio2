@@ -129,3 +129,29 @@
     @apply bg-background text-foreground font-sans antialiased;
   }
 }
+
+/* 可滚动列表上下缘渐隐(抄 folio-old custom.css)。用法:本类加在【不滚动】的 relative 外层,
+   内层子元素负责 overflow(伪元素固定在外层边缘才不随内容滚走)。渐隐色默认卡片底色,
+   放在别的底色上时用 [--list-fade:var(--background)] 覆写。 */
+.list-gradient-blur {
+  position: relative;
+  --list-fade: var(--card);
+}
+.list-gradient-blur::before,
+.list-gradient-blur::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2rem;
+  pointer-events: none;
+  z-index: 10;
+}
+.list-gradient-blur::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--list-fade), transparent);
+}
+.list-gradient-blur::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--list-fade), transparent);
+}

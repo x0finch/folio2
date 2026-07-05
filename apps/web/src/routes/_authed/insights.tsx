@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { AllocationPie } from "../../components/allocation-pie";
 import { PortfolioChart } from "../../components/portfolio-chart";
+import { InsightsSkeleton } from "../../components/skeletons";
 import { type AllocDimension, buildAllocation } from "../../lib/allocation";
 import { getPortfolioHistory } from "../../lib/server/history";
 import { getMyOverview } from "../../lib/server/overview";
@@ -22,6 +23,7 @@ export const Route = createFileRoute("/_authed/insights")({
     const [overview, history] = await Promise.all([getMyOverview(), getPortfolioHistory()]);
     return { holdings: overview.holdings, series: history.series };
   },
+  pendingComponent: InsightsSkeleton,
   component: Insights,
 });
 

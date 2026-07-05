@@ -13,6 +13,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { DefiPositions, PerpPositions, useUsd } from "../../components/holdings-sections";
 import { PortfolioChart } from "../../components/portfolio-chart";
+import { OverviewSkeleton } from "../../components/skeletons";
 import { SyncFab } from "../../components/sync-fab";
 import { TokenHoldings } from "../../components/token-holdings";
 import { ValueChange } from "../../components/value-change";
@@ -32,6 +33,7 @@ export const Route = createFileRoute("/_authed/")({
     ]);
     return { ...overview, series: history.series, ...groups };
   },
+  pendingComponent: OverviewSkeleton,
   component: Overview,
 });
 
