@@ -19,6 +19,15 @@ export const en = {
     evening: "Good evening",
     theme: "Theme",
   },
+  Insights: {
+    allocation: "Allocation",
+    byToken: "By token",
+    byChain: "By chain",
+    byAccount: "By account",
+    others: "Others",
+    noData: "No data yet.",
+    trend: "Portfolio value",
+  },
   Nav: {
     overview: "Overview",
     accounts: "Accounts",
@@ -213,6 +222,15 @@ export const zh: Messages = {
     afternoon: "下午好",
     evening: "晚上好",
     theme: "主题",
+  },
+  Insights: {
+    allocation: "分配",
+    byToken: "按代币",
+    byChain: "按链",
+    byAccount: "按账户",
+    others: "其他",
+    noData: "暂无数据。",
+    trend: "组合净值",
   },
   Nav: {
     overview: "总览",
