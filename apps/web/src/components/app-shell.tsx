@@ -16,6 +16,7 @@ import { useTranslations } from "use-intl";
 import { signOut } from "../lib/auth-client";
 import { useTheme } from "../lib/theme";
 import { LocaleSwitcher } from "./locale-switcher";
+import { Logo } from "./logo";
 
 const NAVS = [
   { key: "overview", to: "/", icon: Home },
@@ -115,7 +116,8 @@ export function AppShell({ userName, children }: { userName: string; children: R
       {/* 顶栏 */}
       <header className="sticky top-0 z-30 border-border border-b bg-background/80 backdrop-blur-xl">
         <div className="container mx-auto flex items-center justify-between gap-4 px-4 py-3 md:px-8">
-          <div className="flex min-w-0 items-baseline gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Logo className="size-6 shrink-0" />
             <span className="font-semibold text-2xl tracking-tight">folio</span>
             <span className="hidden truncate text-muted-foreground text-sm sm:block">
               {greeting}

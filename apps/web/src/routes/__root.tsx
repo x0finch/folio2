@@ -29,6 +29,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
+      { rel: "icon", type: "image/svg+xml", href: "/icon.svg" },
+      { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
     ],
   }),
   // SSR 首屏即正确语言:根 loader 定 locale(cookie/Accept-Language);切换时 invalidate 重跑。

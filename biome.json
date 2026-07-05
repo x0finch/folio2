@@ -14,6 +14,7 @@
       "!packages/db/drizzle",
       "!packages/ui/src/components",
       "!packages/ui/src/styles",
+      "!**/public",
       "!**/*.css"
     ]
   },
