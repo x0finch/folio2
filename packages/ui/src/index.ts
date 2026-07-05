@@ -41,23 +41,12 @@ export {
   ComboboxItem,
   ComboboxList,
 } from "./components/combobox";
-export {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerOverlay,
-  DrawerPortal,
-  DrawerTitle,
-  DrawerTrigger,
-} from "./components/drawer";
 export { Fab, fabVariants } from "./components/fab";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";
 export { Button, buttonVariants, StatefulButton } from "./components/motion/button";
+export { Drawer } from "./components/motion/drawer";
 export { Input } from "./components/motion/input";
 export {
   Select,
@@ -70,16 +59,6 @@ export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/ta
 export { Toaster, toast } from "./components/motion/toast";
 export { Tooltip } from "./components/motion/tooltip";
 export { Separator } from "./components/separator";
-export {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "./components/sheet";
 export {
   Sidebar,
   SidebarContent,

@@ -3,6 +3,7 @@ import type { TokenInfo } from "@folio/tokens";
 import {
   Button,
   Checkbox,
+  Drawer,
   Input,
   Label,
   Select,
@@ -10,17 +11,11 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
   StatefulButton,
 } from "@folio/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { cloneElement, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { type OnchainType, TYPE_GROUPS, typeLabel } from "../lib/account-types";
 import {
@@ -308,13 +303,21 @@ export function AddAccountSheet({ triggerRender }: { triggerRender?: React.React
   const specs = specsQuery.data?.[type] ?? [];
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger render={triggerRender ?? <Button size="sm">{t("addAccount")}</Button>} />
-      <SheetContent side="right" className="w-full overflow-y-auto p-6 sm:max-w-md">
-        <SheetHeader className="p-0">
-          <SheetTitle>{t("addAccount")}</SheetTitle>
-          <SheetDescription>{t("addAccountHint")}</SheetDescription>
-        </SheetHeader>
+    <>
+      {cloneElement(triggerRender ?? <Button size="sm">{t("addAccount")}</Button>, {
+        onClick: () => setOpen(true),
+      })}
+      <Drawer
+        open={open}
+        onOpenChange={setOpen}
+        side="right"
+        ariaLabel={t("addAccount")}
+        className="w-full overflow-y-auto p-6 sm:max-w-md"
+      >
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-lg font-semibold">{t("addAccount")}</h2>
+          <p className="text-sm text-muted-foreground">{t("addAccountHint")}</p>
+        </div>
 
         <div className="mt-4 flex flex-col gap-2">
           <Label>{t("accountType")}</Label>
@@ -354,7 +357,7 @@ export function AddAccountSheet({ triggerRender }: { triggerRender?: React.React
               .catch(() => {});
           }}
         />
-      </SheetContent>
-    </Sheet>
+      </Drawer>
+    </>
   );
 }

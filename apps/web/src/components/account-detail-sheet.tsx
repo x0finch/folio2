@@ -1,15 +1,5 @@
 import type { AccountType } from "@folio/balances";
-import {
-  Button,
-  Input,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  StatefulButton,
-  toast,
-} from "@folio/ui";
+import { Button, Drawer, Input, StatefulButton, toast } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
@@ -51,18 +41,22 @@ export function AccountDetailSheet({
   onOpenChange: (open: boolean) => void;
 }) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full overflow-y-auto p-6 sm:max-w-lg">
-        {account && (
-          <DetailBody
-            key={account.id}
-            account={account}
-            specs={specs}
-            onClose={() => onOpenChange(false)}
-          />
-        )}
-      </SheetContent>
-    </Sheet>
+    <Drawer
+      open={open}
+      onOpenChange={onOpenChange}
+      side="right"
+      ariaLabel={account?.label}
+      className="w-full overflow-y-auto p-6 sm:max-w-lg"
+    >
+      {account && (
+        <DetailBody
+          key={account.id}
+          account={account}
+          specs={specs}
+          onClose={() => onOpenChange(false)}
+        />
+      )}
+    </Drawer>
   );
 }
 
@@ -126,8 +120,8 @@ function DetailBody({
 
   return (
     <>
-      <SheetHeader className="p-0">
-        <SheetTitle className="flex items-center gap-2">
+      <div className="flex flex-col gap-1.5">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
           <span>{account.label}</span>
           <AccountTypeBadge type={account.type} />
           {archived && (
@@ -135,11 +129,11 @@ function DetailBody({
               {t("archivedBadge")}
             </span>
           )}
-        </SheetTitle>
-        <SheetDescription>
+        </h2>
+        <p className="text-sm text-muted-foreground">
           {usd(account.totalUsd)} · {lastSynced}
-        </SheetDescription>
-      </SheetHeader>
+        </p>
+      </div>
 
       {/* 操作区 */}
       <div className="mt-4 flex flex-col gap-2">
