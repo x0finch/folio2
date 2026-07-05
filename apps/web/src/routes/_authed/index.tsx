@@ -6,8 +6,8 @@ import {
   CardTitle,
   Tabs,
   TabsContent,
-  TabsListThin,
-  TabsTriggerThin,
+  TabsList,
+  TabsTrigger,
 } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
@@ -130,16 +130,14 @@ function Overview() {
       ) : (
         <Card>
           <CardContent className="pt-6">
-            <Tabs defaultValue="tokens">
-              <TabsListThin>
-                <TabsTriggerThin value="tokens">{t("tokensTab")}</TabsTriggerThin>
-                <TabsTriggerThin value="defiperp">{t("defiAndPerp")}</TabsTriggerThin>
-                {groups.length > 0 && (
-                  <TabsTriggerThin value="groups">{t("groupsTab")}</TabsTriggerThin>
-                )}
-              </TabsListThin>
+            <Tabs defaultValue="tokens" variant="underline">
+              <TabsList>
+                <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
+                <TabsTrigger value="defiperp">{t("defiAndPerp")}</TabsTrigger>
+                {groups.length > 0 && <TabsTrigger value="groups">{t("groupsTab")}</TabsTrigger>}
+              </TabsList>
 
-              <TabsContent value="tokens" className="pt-4">
+              <TabsContent value="tokens">
                 {holdings.length === 0 ? (
                   <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>
                 ) : (
@@ -152,7 +150,7 @@ function Overview() {
                 )}
               </TabsContent>
 
-              <TabsContent value="defiperp" className="pt-4">
+              <TabsContent value="defiperp">
                 {sections.length === 0 ? (
                   <p className="text-sm text-muted-foreground">{t("noOpenPositions")}</p>
                 ) : (
@@ -170,7 +168,7 @@ function Overview() {
               </TabsContent>
 
               {groups.length > 0 && (
-                <TabsContent value="groups" className="pt-4">
+                <TabsContent value="groups">
                   <ByGroup view={grouped} />
                 </TabsContent>
               )}

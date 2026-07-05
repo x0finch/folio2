@@ -60,6 +60,7 @@ export { Fab, fabVariants } from "./components/fab";
 export { Input } from "./components/input";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
+export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
 export {
   Select,
   SelectContent,
@@ -111,8 +112,6 @@ export {
   TableHeader,
   TableRow,
 } from "./components/table";
-export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/tabs";
-export { TabsListThin, TabsTriggerThin } from "./components/tabs-list-thin";
 export {
   Tooltip,
   TooltipContent,

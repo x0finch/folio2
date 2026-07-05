@@ -1,12 +1,4 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  Tabs,
-  TabsListThin,
-  TabsTriggerThin,
-} from "@folio/ui";
+import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
@@ -59,14 +51,14 @@ function Insights() {
           <CardTitle>{t("allocation")}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <Tabs value={dim} onValueChange={(v) => setDim(v as AllocDimension)}>
-            <TabsListThin>
+          <Tabs value={dim} onValueChange={(v) => setDim(v as AllocDimension)} variant="underline">
+            <TabsList>
               {DIMS.map((d) => (
-                <TabsTriggerThin key={d.key} value={d.key}>
+                <TabsTrigger key={d.key} value={d.key}>
                   {t(d.label)}
-                </TabsTriggerThin>
+                </TabsTrigger>
               ))}
-            </TabsListThin>
+            </TabsList>
           </Tabs>
           <AllocationPie slices={slices} />
         </CardContent>

@@ -22,7 +22,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 8. **No hardcoding** — magic numbers named; volatile/env-specific → env, stable domain → each package's `constants.ts`.
 9. **Prefer mature, vetted libraries** — must pass the 4 gates (CF Workers, maintained, complexity-worth-it, no conflicts); record the choice.
 10. **kebab-case filenames**; exports keep their own case convention (components `PascalCase`, funcs `camelCase`, types `PascalCase`, constants `UPPER_SNAKE`).
-11. **UI = Base UI / shadcn design system only — never Radix** — design tokens, no arbitrary values, no editing internals; primitives via `shadcn add`.
+11. **UI = beUI (Framer Motion) 动效层 + 少量手搓本地原语,皆经 shadcn registry — 绝不 Radix** — beUI 件经 `@beui/*` registry(`pnpm dlx shadcn add @beui/<name>`)落 `packages/ui/src/components/motion/`,beUI 无对应的基础件(Card/Avatar/Separator/Skeleton)手搓;迁移中残留的 base-vega(Base UI)件正逐步退场,终态移除 `@base-ui/react`(见 [ADR 0004](docs/adr/0004-adopt-beui-motion-layer-drop-base-ui.md))。design tokens 优先(含 `lib/ease.ts` 动效 spring/easing token),避免任意值,不改件内核。
 12. **Small commits, English messages — never `git commit` without explicit approval** ("提交"/"commit" authorizes it; "执行"/"go" does NOT).
 
 ## Package conventions (monorepo)
