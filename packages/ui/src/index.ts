@@ -47,6 +47,7 @@ export { LogoAvatar } from "./components/logo-avatar";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";
 export { Button, buttonVariants, StatefulButton } from "./components/motion/button";
 export { CommandPalette } from "./components/motion/command-palette";
+export { Dock, DockItem, DockSeparator } from "./components/motion/dock";
 export { Drawer } from "./components/motion/drawer";
 export { Input } from "./components/motion/input";
 export {
