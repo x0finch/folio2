@@ -54,6 +54,11 @@
 
 :root {
   --radius: 0.625rem;
+  /* beUI 动效基线(canonical):easing 曲线与 @folio/ui 的 lib/ease.ts 同源。
+     CSS 过渡引用 var(--motion-ease-*);spring 物理仅在 JS(lib/ease.ts)侧。 */
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --motion-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
