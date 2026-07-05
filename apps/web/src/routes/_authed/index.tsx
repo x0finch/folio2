@@ -1,19 +1,22 @@
 import {
+  Badge,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   Tabs,
   TabsContent,
-  TabsList,
-  TabsTrigger,
+  TabsListThin,
+  TabsTriggerThin,
 } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { DefiPositions, PerpPositions, useUsd } from "../../components/holdings-sections";
 import { PortfolioChart } from "../../components/portfolio-chart";
-import { SyncButton } from "../../components/sync-button";
+import { SyncFab } from "../../components/sync-fab";
 import { TokenHoldings } from "../../components/token-holdings";
+import { ValueChange } from "../../components/value-change";
+import { computeDayChange } from "../../lib/day-change";
 import { type GroupedView, toGroupedView } from "../../lib/groups-view";
 import { getMyGroups } from "../../lib/server/groups";
 import { getPortfolioHistory } from "../../lib/server/history";
@@ -81,16 +84,24 @@ function Overview() {
   const usd = useUsd();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(accountTotals, groups, memberships);
-  const lastSyncedAt = accountTotals.reduce((m, r) => Math.max(m, r.takenAt ?? 0), 0) || null;
+  // 头部 24h 价值变化:当前总额 − 约 24h 前的组合净值(基准取最新快照时刻,与 totalUsd 同源)。
+  const dayChange = computeDayChange(series, totalUsd, series.at(-1)?.t ?? 0);
+  const [totalInt, totalFrac] = usd(totalUsd).split(".");
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-muted-foreground">{t("totalValue")}</p>
-          <p className="text-4xl font-bold">{usd(totalUsd)}</p>
+      <div>
+        {/* 拆字号总额:整数(含符号)大、小数小;右侧 24h 价值变化 Badge(无参照点则不显示)。 */}
+        <div className="flex items-baseline gap-2">
+          <span className="font-bold text-4xl tracking-tight">{totalInt}</span>
+          {totalFrac && <span className="text-muted-foreground text-xl">.{totalFrac}</span>}
+          {dayChange != null && (
+            <Badge variant="outline" className="ml-1">
+              <ValueChange value={dayChange} format="currency" className="text-xs" />
+            </Badge>
+          )}
         </div>
-        <SyncButton accounts={accountTotals.map((r) => r.account)} lastSyncedAt={lastSyncedAt} />
+        <p className="mt-1 text-muted-foreground text-sm uppercase">{t("totalValue")}</p>
       </div>
 
       <Card>
@@ -118,11 +129,13 @@ function Overview() {
         <Card>
           <CardContent className="pt-6">
             <Tabs defaultValue="tokens">
-              <TabsList>
-                <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
-                <TabsTrigger value="defiperp">{t("defiAndPerp")}</TabsTrigger>
-                {groups.length > 0 && <TabsTrigger value="groups">{t("groupsTab")}</TabsTrigger>}
-              </TabsList>
+              <TabsListThin>
+                <TabsTriggerThin value="tokens">{t("tokensTab")}</TabsTriggerThin>
+                <TabsTriggerThin value="defiperp">{t("defiAndPerp")}</TabsTriggerThin>
+                {groups.length > 0 && (
+                  <TabsTriggerThin value="groups">{t("groupsTab")}</TabsTriggerThin>
+                )}
+              </TabsListThin>
 
               <TabsContent value="tokens" className="pt-4">
                 {holdings.length === 0 ? (
@@ -163,6 +176,8 @@ function Overview() {
           </CardContent>
         </Card>
       )}
+
+      {accountTotals.length > 0 && <SyncFab accounts={accountTotals.map((r) => r.account)} />}
     </div>
   );
 }

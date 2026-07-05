@@ -23,6 +23,7 @@ export interface AggInput {
   ref?: TokenRef | null; // 解析出的规范 Token(单例组身份)
   name?: string;
   logo?: string; // 已按回退链取好(CGK→provider)
+  change24h?: number; // 每币 24h 涨跌(%);仅单 Token 组用于行内 ValueChange
 }
 
 export interface HoldingSource {
@@ -38,6 +39,7 @@ export interface Holding {
   token: { id?: string; symbol: string; name: string; logo?: string };
   totalValue: number;
   totalAmount?: number; // 仅单一 Token 组
+  change24h?: number; // 仅单一 Token 组(%,每币 CGK 涨跌)
   sources: HoldingSource[];
 }
 
@@ -179,6 +181,7 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
       token: { id: token.id, symbol: token.symbol, name: token.name, logo: token.logo },
       totalValue: a.totalValue,
       totalAmount: a.identities.size === 1 ? a.totalAmount : undefined,
+      change24h: a.identities.size === 1 ? a.first.change24h : undefined,
       sources,
     });
   }

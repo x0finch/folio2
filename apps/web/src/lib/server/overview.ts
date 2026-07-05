@@ -78,6 +78,7 @@ export const getMyOverview = createServerFn({ method: "GET" })
         ref: e?.ref,
         name: e?.name,
         logo: e?.logo ?? e?.providerLogo,
+        change24h: e?.change24h,
       };
     });
     const holdings = buildCanonicalHoldings(aggInputs);
