@@ -7,6 +7,7 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
+  StatefulButton,
   toast,
 } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
@@ -143,14 +144,16 @@ function DetailBody({
       {/* 操作区 */}
       <div className="mt-4 flex flex-col gap-2">
         <div className="flex flex-wrap gap-2">
-          <Button
+          <StatefulButton
             size="sm"
             variant="outline"
+            state={syncMut.isPending ? "loading" : "idle"}
+            loadingText={tc("verifying")}
             disabled={archived || syncMut.isPending}
             onClick={() => syncMut.mutate()}
           >
-            {syncMut.isPending ? tc("verifying") : t("syncThis")}
-          </Button>
+            {t("syncThis")}
+          </StatefulButton>
           <Button size="sm" variant="outline" onClick={() => setRenaming((v) => !v)}>
             {t("rename")}
           </Button>

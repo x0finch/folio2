@@ -15,7 +15,6 @@ export {
   AvatarImage,
 } from "./components/avatar";
 export { Badge, badgeVariants } from "./components/badge";
-export { Button, buttonVariants } from "./components/button";
 export {
   Card,
   CardAction,
@@ -59,6 +58,7 @@ export { Fab, fabVariants } from "./components/fab";
 export { Input } from "./components/input";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
+export { Button, buttonVariants, StatefulButton } from "./components/motion/button";
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
 export { Toaster, toast } from "./components/motion/toast";
 export {

@@ -18,6 +18,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
+  StatefulButton,
 } from "@folio/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
@@ -279,9 +280,15 @@ function AccountForm({
           {mutation.error instanceof Error ? mutation.error.message : String(mutation.error)}
         </p>
       )}
-      <Button type="submit" disabled={mutation.isPending} className="self-start">
-        {mutation.isPending ? tc("verifying") : t("addAccount")}
-      </Button>
+      <StatefulButton
+        type="submit"
+        state={mutation.isPending ? "loading" : "idle"}
+        loadingText={tc("verifying")}
+        disabled={mutation.isPending}
+        className="self-start"
+      >
+        {t("addAccount")}
+      </StatefulButton>
     </form>
   );
 }
