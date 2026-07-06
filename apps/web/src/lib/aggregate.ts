@@ -27,7 +27,7 @@ export interface AggInput {
 }
 
 export interface HoldingSource {
-  platform: { id: string; name: string };
+  platform: { id: string; name: string; logo?: string };
   account: { id: string; label: string };
   amount: number;
   value: number;
@@ -43,27 +43,8 @@ export interface Holding {
   sources: HoldingSource[];
 }
 
-// eip155:<chainId> / chain:<slug> → 展示链名(小静态表;未知则回退原前缀)。
-const CHAIN_LABELS: Readonly<Record<string, string>> = {
-  "eip155:1": "Ethereum",
-  "eip155:10": "Optimism",
-  "eip155:56": "BNB Chain",
-  "eip155:100": "Gnosis",
-  "eip155:137": "Polygon",
-  "eip155:8453": "Base",
-  "eip155:42161": "Arbitrum",
-  "eip155:43114": "Avalanche",
-  "eip155:324": "zkSync Era",
-  "eip155:5000": "Mantle",
-  "eip155:59144": "Linea",
-  "eip155:81457": "Blast",
-  "eip155:534352": "Scroll",
-  "chain:solana": "Solana",
-  "chain:sui": "Sui",
-  "chain:cosmos": "Cosmos",
-};
-
 // 账户 type(<类别>_<具体>)→ 展示平台单元(无链前缀的来源:CEX/perp/manual/非 EVM 原生)。
+// name 仅给 slug 首字母大写的兜底;真名 + logo 由 server 读路径 platforms.resolve 装饰(#02)。
 function platformFromAccount(type: string, network?: string | null): { id: string; name: string } {
   const [category, specific] = [
     type.slice(0, type.indexOf("_")),
@@ -74,7 +55,7 @@ function platformFromAccount(type: string, network?: string | null): { id: strin
   if (category === "perp") return { id: `perp:${specific}`, name: cap(specific) };
   if (category === "onchain") {
     const slug = network ?? specific; // solana/sui/cosmos…
-    return { id: `chain:${slug}`, name: CHAIN_LABELS[`chain:${slug}`] ?? cap(slug) };
+    return { id: `chain:${slug}`, name: cap(slug) };
   }
   return { id: "manual", name: "Manual" };
 }
@@ -86,7 +67,7 @@ function platformOf(row: AggInput): { id: string; name: string } {
     const slash = tk.indexOf("/");
     const prefix = slash > 0 ? tk.slice(0, slash) : "";
     if (prefix.startsWith("eip155:") || prefix.startsWith("chain:")) {
-      return { id: prefix, name: CHAIN_LABELS[prefix] ?? prefix };
+      return { id: prefix, name: prefix }; // 真名由 server 读路径装饰;未收录降级为 id
     }
     // coingecko:<id>(manual 选币)等无链前缀 → 落账户平台
   }

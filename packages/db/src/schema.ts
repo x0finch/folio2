@@ -169,6 +169,16 @@ export const tokenMeta = sqliteTable("token_meta", {
   v: integer("v").notNull(),
 });
 
+// 平台元数据缓存(链 ∪ 交易所/perp 的 name+logo,来自 CoinGecko;近静态,长 TTL)。
+// id = platformKey(eip155:<id> / chain:<slug> / exchange:<slug> / perp:<slug>)。
+// name IS NULL = 否定缓存(问过 CoinGecko、确认不存在);无该行 = 从未取过。
+export const platforms = sqliteTable("platforms", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  logo: text("logo"),
+  expiresAt: integer("expires_at").notNull(),
+});
+
 // manual 活动账本(P7.4.1):add/reduce/set 动作日志。当前数量由 deriveAmount 推导、物化进 account.creds.amount
 // (provider/sync 不依赖本表)。price 记录单价、留给 M7.3 成本/盈亏,本期不算。与 M7.2 的通用 transactions 表分开。
 export const manualActivity = sqliteTable(

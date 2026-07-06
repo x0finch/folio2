@@ -5,6 +5,7 @@ import { type OverviewBalance, toAccountSections } from "../account-view";
 import { type AggInput, buildCanonicalHoldings } from "../aggregate";
 import { requireAuth } from "../require-auth";
 import { db } from "./db";
+import { buildPlatforms } from "./platforms";
 import { buildTokens, enrichBalances } from "./tokens";
 
 // 总览(P2:按代币聚合)。持仓区 = 跨账户按 canonical 代币聚合的 Holdings(spot/manual/CEX/perp 权益);
@@ -82,6 +83,20 @@ export const getMyOverview = createServerFn({ method: "GET" })
       };
     });
     const holdings = buildCanonicalHoldings(aggInputs);
+
+    // 读路径装饰:cache-only 解析平台 name+logo(零网络);未命中保留 aggregate 的 slug 兜底名。
+    const platformIds = [...new Set(holdings.flatMap((h) => h.sources.map((s) => s.platform.id)))];
+    const platformMeta = await buildPlatforms(env).resolve(platformIds);
+    for (const h of holdings) {
+      for (const s of h.sources) {
+        const m = platformMeta.get(s.platform.id);
+        if (m) {
+          s.platform.name = m.name;
+          s.platform.logo = m.logo;
+        }
+      }
+    }
+
     const holdingsSubtotal = holdings.reduce((s, h) => s + h.totalValue, 0);
     const pricesStale = enriched.some((e) => e?.priceStale);
 

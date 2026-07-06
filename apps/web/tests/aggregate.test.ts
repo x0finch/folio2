@@ -64,12 +64,19 @@ describe("buildCanonicalHoldings", () => {
     expect(h.token).toMatchObject({ id: "usdt", symbol: "USDT", name: "Tether USD" });
     expect(h.totalValue).toBe(3600);
     expect(h.totalAmount).toBeUndefined(); // tether + usdt0 = 2 个 Token
+    // aggregate 只产 platform.id + 兜底名(链 = 原前缀);真名/logo 由 server 读路径 platforms.resolve 装饰(#02)。
+    expect(h.sources.map((s) => s.platform.id)).toEqual([
+      "exchange:binance",
+      "eip155:1",
+      "eip155:42161",
+      "manual",
+    ]); // value 降序
     expect(h.sources.map((s) => s.platform.name)).toEqual([
       "Binance",
-      "Ethereum",
-      "Arbitrum",
+      "eip155:1",
+      "eip155:42161",
       "Manual",
-    ]); // value 降序
+    ]);
   });
 
   it("单一 Token 组给 totalAmount;perp 权益作 isMargin 持有点", () => {

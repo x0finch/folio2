@@ -31,3 +31,7 @@ _Avoid_: CanonicalHolding, position
 **HoldingSource**:
 一个 Holding 里的单个持有点 = 某账户在某平台上的这笔持仓(链×账户 / 交易所 / 永续 / manual)。
 _Avoid_: source(泛指时)
+
+**Platform**:
+持仓所在的**链或场馆**(chain ∪ venue),HoldingSource 的定位维度。key 文法:`eip155:<chainId>` / `chain:<slug>`(链)、`exchange:<slug>`、`perp:<slug>`(场馆)、`manual`。带 name + logo,来自 CoinGecko(asset_platforms / exchanges / derivatives),manual 用内置图标。
+_Avoid_: chain(仅指链时才用)、venue(仅指交易所/perp)、network

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@folio/tokens": "workspace:*",
+    "@folio/platforms": "workspace:*",
     "better-auth": "^1.6.21",
     "drizzle-orm": "^0.45.2",
     "@folio/balances": "workspace:*"

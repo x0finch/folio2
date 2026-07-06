@@ -7,6 +7,7 @@
 export { createAuthAdapter } from "./auth"; // 不泄露 db 实例/schema
 export type { DbEnv } from "./client";
 export { createDb, type Db } from "./db";
+export { createPlatformStore } from "./platform-store"; // 平台元数据缓存(链 ∪ 交易所)
 export type {
   AccountRawCreds,
   CreateAccountInput,

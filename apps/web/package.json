@@ -18,6 +18,7 @@
     "@cloudflare/vite-plugin": "^1.26.0",
     "@folio/balances": "workspace:*",
     "@folio/db": "workspace:*",
+    "@folio/platforms": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/tokens": "workspace:*",
     "@folio/ui": "workspace:*",

@@ -7,6 +7,7 @@ import { isComplete, openCreds } from "../creds";
 import { revalueManual } from "../revalue";
 import { balances } from "./balances";
 import { db } from "./db";
+import { warmPlatformsForUser } from "./platforms";
 import { buildTokens, warmTokens } from "./tokens";
 
 // provider 自带代币元信息的采集(canonical P1):合约形 tokenKey 的行 → ProviderAsset,
@@ -35,6 +36,14 @@ export async function warmTokensForUser(userId: string): Promise<void> {
     buildTokens(env),
     snapshots.flatMap((s) => s.balances),
   );
+  // 平台元数据一并预热(链一次取整表;失败不拖垮价格预热)。
+  try {
+    await warmPlatformsForUser(userId);
+  } catch (e) {
+    getLogger(["folio", "web", "sync"]).warn("warmPlatforms failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 }
 
 // 装配编排器的注入式依赖。真正的 DI 缝是这里返回的 SyncDeps(syncUser 只认注入的 deps);
