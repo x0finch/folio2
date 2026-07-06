@@ -11,6 +11,7 @@ import {
   type TokenStore,
 } from "@folio/tokens";
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { chunk, IN_CHUNK } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
 import { tokenGroups, tokenIndex, tokenMeta, tokens } from "./schema";
 
@@ -21,14 +22,6 @@ export interface TokenStoreOpts {
 
 // 孤儿行(CGK 未收录,provider 采集)的 source 标记;identifier = tokenKey 键。
 const PROVIDER_SOURCE = "provider";
-
-// D1 上限 ~100 绑定参数;inArray 列表分块取(沿用 listBalancesForSnapshots 的约束)。
-const IN_CHUNK = 90;
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
 
 type TokenRow = typeof tokens.$inferSelect;
 
