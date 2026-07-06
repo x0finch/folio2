@@ -10,7 +10,7 @@ import type {
 } from "@folio/tokens";
 import { createTokens } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
-import { revalueManual } from "../src/lib/revalue";
+import { revalue } from "../src/lib/revalue";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 const key = (r: TokenRef) => `${r.source}:${r.identifier}`;
@@ -81,14 +81,14 @@ const bal = (symbol: string, amount: number, value: number, identifier?: string)
   ...(identifier ? { tokenKey: `coingecko:${identifier}` } : {}),
 });
 
-describe("revalueManual", () => {
+describe("revalue", () => {
   it("manual resolvable → value = amount × market price", async () => {
-    const out = await revalueManual(tokens(), "manual", [bal("BTC", 0.5, 1)]);
+    const out = await revalue(tokens(), "manual", [bal("BTC", 0.5, 1)]);
     expect(out[0].value).toBe(32500); // 0.5 × 65000
   });
 
   it("manual unresolvable → keeps provider value (unitPrice fallback)", async () => {
-    const out = await revalueManual(tokens(), "manual", [bal("PRIVATETOKEN", 10, 99)]);
+    const out = await revalue(tokens(), "manual", [bal("PRIVATETOKEN", 10, 99)]);
     expect(out[0].value).toBe(99);
   });
 
@@ -101,29 +101,44 @@ describe("revalueManual", () => {
       kind: "manual",
       meta: { fixed: true },
     };
-    const out = await revalueManual(tokens(), "manual", [locked]);
+    const out = await revalue(tokens(), "manual", [locked]);
     expect(out[0].value).toBe(1);
   });
 
   it("explicit coingecko tokenKey overrides symbol resolution", async () => {
     // 错的 symbol "XBT" 但 tokenKey=coingecko:bitcoin → 用 bitcoin 的 store 价 65000。
-    const out = await revalueManual(tokens(), "manual", [bal("XBT", 1, 0, "bitcoin")]);
+    const out = await revalue(tokens(), "manual", [bal("XBT", 1, 0, "bitcoin")]);
     expect(out[0].value).toBe(65000);
   });
 
   it("explicit tokenKey not in warm cache → source.fetchPrices supplies the price", async () => {
-    const out = await revalueManual(tokens(), "manual", [bal("TONCOIN", 2, 0, "the-open-network")]);
+    const out = await revalue(tokens(), "manual", [bal("TONCOIN", 2, 0, "the-open-network")]);
     expect(out[0].value).toBe(10); // 2 × 5(来自 source.fetchPrices)
   });
 
-  it("non-manual → untouched (enrich-not-reprice)", async () => {
+  it("non-revalue type (exchange) → untouched (enrich-not-reprice)", async () => {
     const spot: Balance = {
       symbol: "BTC",
       amount: 1,
       value: 60000,
       kind: "spot",
     };
-    const out = await revalueManual(tokens(), "exchange_binance", [spot]);
+    const out = await revalue(tokens(), "exchange_binance", [spot]);
     expect(out[0].value).toBe(60000);
+  });
+
+  it("onchain_bitcoin → 盯市:provider 只给 amount(value=0),按 BTC 市价算 value", async () => {
+    // bitcoin provider 产 value=0、tokenKey=chain:bitcoin/native:btc,靠 symbol 回退到 bitcoin 价 65000。
+    const btc: Balance = {
+      symbol: "BTC",
+      amount: 0.08,
+      value: 0,
+      kind: "spot",
+      tokenKey: "chain:bitcoin/native:btc",
+      meta: { pendingSats: 500000 },
+    };
+    const out = await revalue(tokens(), "onchain_bitcoin", [btc]);
+    expect(out[0].value).toBe(5200); // 0.08 × 65000
+    expect((out[0].meta as { pendingSats: number }).pendingSats).toBe(500000); // meta 保留
   });
 });

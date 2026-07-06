@@ -1,5 +1,6 @@
 import type { AccountType, BalanceProvider } from "@folio/balances-basic";
 import { providers as binanceProviders } from "@folio/balances-provider-binance";
+import { providers as bitcoinProviders } from "@folio/balances-provider-bitcoin";
 import { providers as coinstatsProviders } from "@folio/balances-provider-coinstats";
 import { providers as customProviders } from "@folio/balances-provider-custom";
 import { providers as hyperliquidProviders } from "@folio/balances-provider-hyperliquid";
@@ -36,6 +37,7 @@ export function getProvider(registry: ProviderRegistry, type: AccountType): Bala
 const providers = [
   ...customProviders,
   ...zerionProviders,
+  ...bitcoinProviders,
   ...coinstatsProviders,
   ...binanceProviders,
   ...okxProviders,

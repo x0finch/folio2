@@ -18,7 +18,7 @@ export const customProvider = defineProvider({
     { key: "amount", type: "public", label: "Amount", validator: z.coerce.number() },
     { key: "unitPrice", type: "public", label: "Unit price (USD)", validator: z.coerce.number() },
     // 可选:用户选定的 CoinGecko identifier(消歧,P7.4.3)。有则产 tokenKey(coingecko:<id>)
-    // 供 sync 期市价重估按显式 ref 解析(见 revalueManual / resolveAsset 的 coingecko: 直达)。
+    // 供 sync 期市价重估按显式 ref 解析(见 revalue / resolveAsset 的 coingecko: 直达)。
     { key: "identifier", type: "public", label: "CoinGecko ID", validator: z.string().optional() },
     // 可选:锁定固定值(P7.4.4)。在则透出 meta.fixed → sync 期跳过市价重估、钉死 amount × unitPrice。
     // creds 是字符串 map,沿用 identifier 的"在则为真"约定(仅锁定时存 "1")。

@@ -99,7 +99,13 @@ async function createAddressAccount(
 }
 
 const OnchainInput = z.object({
-  type: z.enum(["onchain_evm", "onchain_solana", "onchain_sui", "onchain_cosmos"]),
+  type: z.enum([
+    "onchain_evm",
+    "onchain_bitcoin",
+    "onchain_solana",
+    "onchain_sui",
+    "onchain_cosmos",
+  ]),
   label: z.string().trim().min(1, "label is required"),
   address: z.string().trim(), // seal 的是原始输入 → wire 先 trim 保持落库规范
 });

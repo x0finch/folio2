@@ -201,6 +201,8 @@ export const en = {
     "EVM Address": "EVM Address",
     "Wallet Address": "Wallet Address",
     "0x + 40 hex": "0x + 40 hex",
+    "Bitcoin Address": "Bitcoin Address",
+    "BTC address (1…/3…/bc1…)": "BTC address (1…/3…/bc1…)",
   },
   Currency: {
     USD: "Dollar",
@@ -411,6 +413,8 @@ export const zh: Messages = {
     "EVM Address": "EVM 地址",
     "Wallet Address": "钱包地址",
     "0x + 40 hex": "0x + 40 位十六进制",
+    "Bitcoin Address": "比特币地址",
+    "BTC address (1…/3…/bc1…)": "BTC 地址(1…/3…/bc1…)",
   },
   Currency: {
     USD: "美元",

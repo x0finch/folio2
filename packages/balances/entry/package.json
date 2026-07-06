@@ -14,6 +14,7 @@
   "dependencies": {
     "@folio/balances-basic": "workspace:*",
     "@folio/balances-provider-binance": "workspace:*",
+    "@folio/balances-provider-bitcoin": "workspace:*",
     "@folio/balances-provider-coinstats": "workspace:*",
     "@folio/balances-provider-custom": "workspace:*",
     "@folio/balances-provider-hyperliquid": "workspace:*",
