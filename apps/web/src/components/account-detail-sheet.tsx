@@ -5,13 +5,13 @@ import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { OverviewBalance } from "../lib/account-view";
+import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
 import type { InputSpec } from "../lib/server/credentials";
 import { syncOneAccount } from "../lib/server/sync";
 import { AccountTypeBadge } from "./account-type-badge";
 import { CredentialForm } from "./credential-form";
 import { AccountHoldingsCards } from "./holdings-cards";
-import { useUsd } from "./holdings-sections";
 import { ManualActivityPanel } from "./manual-activity-panel";
 
 // 账户页列表行的合并形状(getMyOverview ∪ listMyAccounts,见 accounts.tsx loader)。
@@ -74,7 +74,7 @@ function DetailBody({
   const tc = useTranslations("Common");
   const format = useFormatter();
   const router = useRouter();
-  const usd = useUsd();
+  const usd = useDisplayValue();
   const refresh = () => router.invalidate();
 
   const archived = account.archivedAt != null;

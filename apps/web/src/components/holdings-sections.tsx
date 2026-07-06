@@ -1,24 +1,21 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@folio/ui";
-import { useFormatter, useTranslations } from "use-intl";
+import { useTranslations } from "use-intl";
 import {
   type DefiGroup,
   type OverviewBalance,
   type SpotRow,
   toAccountSections,
 } from "../lib/account-view";
+import { formatNumber } from "../lib/format-number";
+import { useDisplayValue } from "../lib/hooks/use-display-value";
 import type { PerpView } from "../lib/perp";
 
 // 账户持仓渲染:总览页每账户卡与账户详情侧栏共用(从 routes/_authed/index.tsx 提取)。
-// locale 感知的美元格式化(货币恒 USD,locale 决定分隔符)。
-export function useUsd() {
-  const format = useFormatter();
-  return (n: number) => format.number(n, { style: "currency", currency: "USD" });
-}
 
 // 现货/CEX/manual:数量 + 美元价值。
 function SpotTable({ rows }: { rows: SpotRow[] }) {
   const t = useTranslations("Overview");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   return (
     <Table>
       <TableHeader>
@@ -42,7 +39,7 @@ function SpotTable({ rows }: { rows: SpotRow[] }) {
             <TableCell className="text-right">
               <Change24h value={b.change24h} />
             </TableCell>
-            <TableCell className="text-right">{b.amount}</TableCell>
+            <TableCell className="text-right">{formatNumber(b.amount)}</TableCell>
             <TableCell className="text-right">{usd(b.usdValue)}</TableCell>
           </TableRow>
         ))}
@@ -100,7 +97,7 @@ function Change24h({ value }: { value?: number }) {
 // DeFi:按协议分组,每组一张小表(Asset / 仓位类型 / 价值)。负值=负债(借出)→ 标红。
 export function DefiPositions({ groups }: { groups: DefiGroup[] }) {
   const t = useTranslations("Overview");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   return (
     <div className="flex flex-col gap-4">
       {groups.map((g) => (
@@ -137,7 +134,7 @@ export function DefiPositions({ groups }: { groups: DefiGroup[] }) {
 // 永续:净值由外层承载;此处展示可提/保证金副行 + 仓位明细(方向/盈亏/杠杆/强平)。
 export function PerpPositions({ view }: { view: PerpView }) {
   const t = useTranslations("Overview");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   const { equity, positions } = view;
   return (
     <div className="flex flex-col gap-3">
@@ -169,7 +166,7 @@ export function PerpPositions({ view }: { view: PerpView }) {
               <TableRow key={p.coin}>
                 <TableCell>{p.coin}</TableCell>
                 <TableCell>{t(p.side)}</TableCell>
-                <TableCell className="text-right">{Math.abs(p.size)}</TableCell>
+                <TableCell className="text-right">{formatNumber(Math.abs(p.size))}</TableCell>
                 <TableCell className="text-right">{usd(p.entryPx)}</TableCell>
                 <TableCell
                   className={`text-right ${p.unrealizedPnl < 0 ? "text-destructive" : ""}`}

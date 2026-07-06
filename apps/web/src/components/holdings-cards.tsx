@@ -5,8 +5,9 @@ import {
   type SpotRow,
   toAccountSections,
 } from "../lib/account-view";
+import { formatNumber } from "../lib/format-number";
+import { useDisplayValue } from "../lib/hooks/use-display-value";
 import type { PerpView } from "../lib/perp";
-import { useUsd } from "./holdings-sections";
 import { TokenAvatar } from "./token-stack";
 
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 holdings-sections 的表格。
@@ -55,7 +56,7 @@ function RowCard({
 }
 
 function SpotCards({ rows }: { rows: SpotRow[] }) {
-  const usd = useUsd();
+  const usd = useDisplayValue();
   return (
     <div className="flex flex-col gap-2">
       {rows.map((b) => (
@@ -65,7 +66,7 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
           title={b.symbol.toUpperCase()}
           subtitle={
             <>
-              {b.amount}
+              {formatNumber(b.amount)}
               {b.unitPrice != null ? ` · ${usd(b.unitPrice)}` : ""}
             </>
           }
@@ -79,7 +80,7 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
 
 function DefiCards({ groups }: { groups: DefiGroup[] }) {
   const t = useTranslations("Overview");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   return (
     <div className="flex flex-col gap-4">
       {groups.map((g) => (
@@ -105,7 +106,7 @@ function DefiCards({ groups }: { groups: DefiGroup[] }) {
 
 function PerpCards({ view }: { view: PerpView }) {
   const t = useTranslations("Overview");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   const { equity, positions } = view;
   return (
     <div className="flex flex-col gap-2">
@@ -128,7 +129,7 @@ function PerpCards({ view }: { view: PerpView }) {
                 {p.coin} <span className="text-xs text-muted-foreground">{t(p.side)}</span>
               </>
             }
-            subtitle={`${Math.abs(p.size)}${p.leverage != null ? ` · ${p.leverage}x` : ""}`}
+            subtitle={`${formatNumber(Math.abs(p.size))}${p.leverage != null ? ` · ${p.leverage}x` : ""}`}
             primary={
               <span className={p.unrealizedPnl < 0 ? "text-destructive" : undefined}>
                 {usd(p.unrealizedPnl)}

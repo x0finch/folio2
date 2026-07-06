@@ -6,14 +6,14 @@ import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
 import { AccountTypeBadge } from "../../components/account-type-badge";
 import { AddAccountSheet } from "../../components/add-account-sheet";
-import { useUsd } from "../../components/holdings-sections";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { SyncButton } from "../../components/sync-button";
 import { TokenStack } from "../../components/token-stack";
+import { useDisplayValue } from "../../lib/hooks/use-display-value";
+import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { listMyAccounts } from "../../lib/server/accounts";
 import { getCredentialSpecs } from "../../lib/server/credentials";
 import { getMyAccountHoldings } from "../../lib/server/overview";
-import { useStalePriceRefresh } from "../../lib/use-stale-price-refresh";
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
@@ -48,7 +48,7 @@ export const Route = createFileRoute("/_authed/accounts")({
 function Accounts() {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   const { rows, credentialSpecs, pricesStale } = Route.useLoaderData();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
 

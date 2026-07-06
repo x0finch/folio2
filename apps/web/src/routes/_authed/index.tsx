@@ -12,7 +12,7 @@ import {
 } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
-import { DefiPositions, PerpPositions, useUsd } from "../../components/holdings-sections";
+import { DefiPositions, PerpPositions } from "../../components/holdings-sections";
 import { PortfolioChart } from "../../components/portfolio-chart";
 import { OverviewSkeleton } from "../../components/skeletons";
 import { SyncFab } from "../../components/sync-fab";
@@ -20,10 +20,11 @@ import { TokenHoldings } from "../../components/token-holdings";
 import { ValueChange } from "../../components/value-change";
 import { computeDayChange } from "../../lib/day-change";
 import { type GroupedView, toGroupedView } from "../../lib/groups-view";
+import { useDisplayValue } from "../../lib/hooks/use-display-value";
+import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { getMyGroups } from "../../lib/server/groups";
 import { getPortfolioHistory } from "../../lib/server/history";
 import { getMyOverview } from "../../lib/server/overview";
-import { useStalePriceRefresh } from "../../lib/use-stale-price-refresh";
 
 export const Route = createFileRoute("/_authed/")({
   loader: async () => {
@@ -42,7 +43,7 @@ export const Route = createFileRoute("/_authed/")({
 // 组合总净值另由顶部 totalUsd(按账户去重)承载,不由这里求和。
 function ByGroup({ view }: { view: GroupedView }) {
   const t = useTranslations("Overview");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   const labels = (accounts: { id: string; label: string }[]) =>
     accounts.length > 0 ? accounts.map((a) => a.label).join(", ") : "—";
   return (
@@ -84,7 +85,7 @@ function Overview() {
   } = Route.useLoaderData();
   const t = useTranslations("Overview");
   const tc = useTranslations("Common");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(accountTotals, groups, memberships);
   // 头部 24h 价值变化:当前总额 − 约 24h 前的组合净值(基准取最新快照时刻,与 totalUsd 同源)。

@@ -2,8 +2,9 @@ import { LogoAvatar } from "@folio/ui";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
+import { formatNumber } from "../lib/format-number";
+import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { AssetSheet } from "./asset-sheet";
-import { useUsd } from "./holdings-sections";
 import { ValueChange } from "./value-change";
 
 // 按代币聚合的持仓列表(复刻 folio-old:LogoAvatar + 名称/symbol + 值 + 涨跌;点击行 → 详情抽屉)。
@@ -12,7 +13,7 @@ const DUST_THRESHOLD = 1; // USD;待定阈值
 
 function HoldingRow({ h, onOpen }: { h: Holding; onOpen: (h: Holding) => void }) {
   const t = useTranslations("Overview");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   const chains = h.sources.filter(
     (s) => s.platform.id.startsWith("eip155:") || s.platform.id.startsWith("chain:"),
   ).length;
@@ -41,7 +42,7 @@ function HoldingRow({ h, onOpen }: { h: Holding; onOpen: (h: Holding) => void })
           {h.change24h != null && <ValueChange value={h.change24h} format="percent" />}
           {h.totalAmount != null && (
             <span>
-              {h.totalAmount} {h.token.symbol}
+              {formatNumber(h.totalAmount)} {h.token.symbol}
             </span>
           )}
         </div>

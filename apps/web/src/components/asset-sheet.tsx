@@ -2,7 +2,8 @@ import { Drawer, LogoAvatar } from "@folio/ui";
 import { WalletIcon } from "lucide-react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
-import { useUsd } from "./holdings-sections";
+import { formatNumber } from "../lib/format-number";
+import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { ValueChange } from "./value-change";
 
 // 资产 drill-down(复刻 folio-old asset-sheet 的抽屉):代币头部 + 各来源明细(链×账户/交易所/perp 保证金)。
@@ -17,7 +18,7 @@ export function AssetSheet({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations("Overview");
-  const usd = useUsd();
+  const usd = useDisplayValue();
   return (
     <Drawer
       open={open}
@@ -44,7 +45,7 @@ export function AssetSheet({
               )}
               {holding.totalAmount != null && (
                 <span>
-                  {holding.totalAmount} {holding.token.symbol}
+                  {formatNumber(holding.totalAmount)} {holding.token.symbol}
                 </span>
               )}
             </div>
@@ -78,7 +79,7 @@ export function AssetSheet({
                         </span>
                       )}
                     </span>
-                    <span className="text-muted-foreground">{s.amount}</span>
+                    <span className="text-muted-foreground">{formatNumber(s.amount)}</span>
                     <span className="w-28 text-right font-medium">{usd(s.value)}</span>
                   </div>
                 ))}
