@@ -1,28 +1,13 @@
 import { env } from "cloudflare:workers";
-import type { AssetRef } from "@folio/tokens";
 import { createServerFn } from "@tanstack/react-start";
-import { type OverviewBalance, toAccountSections } from "../account-view";
-import { type AggInput, buildCanonicalHoldings } from "../aggregate";
+import { buildOverview } from "../overview-model";
 import { requireAuth } from "../require-auth";
 import { db } from "./db";
 import { buildPlatforms } from "./platforms";
 import { buildTokens, enrichBalances } from "./tokens";
 
-// 总览(P2:按代币聚合)。持仓区 = 跨账户按 canonical 代币聚合的 Holdings(spot/manual/CEX/perp 权益);
-// DeFi 仓位 + perp 敞口走每账户「DeFi & 永续」次级分区(不进聚合)。总额 = 各账户最新快照 totalUsd 之和。
-// 解析读时 cache-only(零网络);perp 权益额外按 symbol 解析并入(ADR-0003,明细标保证金)。
-
-// 从 metaJson 读 perp role(仅判定 equity/position,不做完整窄化)。
-function perpRole(metaJson: string | null): "equity" | "position" | null {
-  if (!metaJson) return null;
-  try {
-    const r = (JSON.parse(metaJson) as { role?: unknown }).role;
-    return r === "equity" || r === "position" ? r : null;
-  } catch {
-    return null;
-  }
-}
-
+// 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做
+// 鉴权 + 加载(accounts / 最新快照)+ 注入依赖(tokens / platforms)+ 调用。
 export const getMyOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
@@ -32,109 +17,10 @@ export const getMyOverview = createServerFn({ method: "GET" })
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-    const tokens = buildTokens(env);
-
-    // 1) 摊平所有(账户 × 持仓);挑出进聚合的 eligible(spot/manual/perp 权益)并备好 AssetRef。
-    type Elig = {
-      account: (typeof accounts)[number];
-      b: OverviewBalance;
-      asset: AssetRef;
-      margin: boolean;
-    };
-    const eligible: Elig[] = [];
-    for (const account of accounts) {
-      const bals = (byAccount.get(account.id)?.balances ?? []) as OverviewBalance[];
-      for (const b of bals) {
-        if (b.kind === "spot" || b.kind === "manual") {
-          eligible.push({
-            account,
-            b,
-            asset: { symbol: b.symbol, tokenKey: b.tokenKey ?? undefined },
-            margin: false,
-          });
-        } else if (b.kind === "perp" && perpRole(b.metaJson) === "equity") {
-          eligible.push({ account, b, asset: { symbol: b.symbol }, margin: true });
-        }
-      }
-    }
-
-    // 2) 一次批量富化(cache-only)→ 组/ref/展示;组装 AggInput → 聚合。
-    const enriched = await tokens.enrich(eligible.map((x) => x.asset));
-    const aggInputs: AggInput[] = eligible.map((x, i) => {
-      const e = enriched[i];
-      return {
-        symbol: x.b.symbol,
-        amount: x.b.amount,
-        value: x.b.usdValue,
-        kind: x.b.kind,
-        tokenKey: x.b.tokenKey,
-        isMargin: x.margin,
-        account: {
-          id: x.account.id,
-          label: x.account.label,
-          type: x.account.type,
-          network: x.account.network,
-        },
-        group: e?.group,
-        ref: e?.ref,
-        name: e?.name,
-        logo: e?.logo ?? e?.providerLogo,
-        change24h: e?.change24h,
-      };
+    return buildOverview(accounts, byAccount, {
+      tokens: buildTokens(env),
+      platforms: buildPlatforms(env),
     });
-    const holdings = buildCanonicalHoldings(aggInputs);
-
-    // 读路径装饰:cache-only 解析平台 name+logo(零网络);未命中保留 aggregate 的 slug 兜底名。
-    const platformIds = [...new Set(holdings.flatMap((h) => h.sources.map((s) => s.platform.id)))];
-    const platformMeta = await buildPlatforms(env).resolve(platformIds);
-    for (const h of holdings) {
-      for (const s of h.sources) {
-        const m = platformMeta.get(s.platform.id);
-        if (m) {
-          s.platform.name = m.name;
-          s.platform.logo = m.logo;
-        }
-      }
-    }
-
-    const holdingsSubtotal = holdings.reduce((s, h) => s + h.totalValue, 0);
-    const pricesStale = enriched.some((e) => e?.priceStale);
-
-    // 3) 次级分区(每账户 defi 分组 + perp 敞口;perp 权益已进 Holdings → 此处只渲染 positions)。
-    let defiSubtotal = 0;
-    const sections = accounts
-      .map((account) => {
-        const bals = (byAccount.get(account.id)?.balances ?? []) as OverviewBalance[];
-        const secs = toAccountSections(bals);
-        defiSubtotal += secs.defi.reduce(
-          (s, g) => s + g.rows.reduce((ss, r) => ss + r.usdValue, 0),
-          0,
-        );
-        return {
-          account: { id: account.id, label: account.label },
-          defi: secs.defi,
-          perp: secs.perp,
-        };
-      })
-      .filter((s) => s.defi.length > 0 || (s.perp?.positions.length ?? 0) > 0);
-
-    // 4) 每账户净值(供 ByGroup 标签分组小计)+ 组合总额(按账户去重)。
-    const accountTotals = accounts.map((account) => ({
-      account: { id: account.id, label: account.label },
-      totalUsd: byAccount.get(account.id)?.snapshot.totalUsd ?? 0,
-      takenAt: byAccount.get(account.id)?.snapshot.takenAt ?? null,
-    }));
-    const totalUsd = accountTotals.reduce((s, r) => s + r.totalUsd, 0);
-
-    return {
-      holdings,
-      sections,
-      accountTotals,
-      totalUsd,
-      holdingsSubtotal,
-      defiSubtotal,
-      pricesStale,
-    };
   });
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个活跃账户 + 其最新快照的富化持仓。
