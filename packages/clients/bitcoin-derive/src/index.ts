@@ -30,22 +30,36 @@ const PURPOSE: Record<ScriptType, number> = { legacy: 44, nested: 49, native: 84
 export const derivationPath = (script: ScriptType, chain: number, index: number): string =>
   `m/${PURPOSE[script]}'/0'/0'/${chain}/${index}`;
 
-const XPUB_VERSION_HEX = "0488b21e";
+// SLIP-132 版本字节(mainnet 公钥):脚本类型 ↔ 前缀一一对应。
+const VERSION_HEX: Record<Exclude<ScriptType, "taproot">, string> = {
+  legacy: "0488b21e", // xpub
+  nested: "049d7cb2", // ypub
+  native: "04b24746", // zpub
+};
 const b58c = base58check(sha256);
 const hexToBytes = (h: string): Uint8Array =>
   Uint8Array.from((h.match(/.{2}/g) ?? []).map((b) => Number.parseInt(b, 16)));
 
-// 任意扩展公钥(xpub/ypub/zpub)→ 换成 xpub 版本字节(公钥材料不变)。
-// @scure/bip32 校验版本字节,直接吃 ypub/zpub 会 "Version mismatch";脚本类型另由调用方选,与前缀解耦。
-function toXpub(ext: string): string {
+// 任意扩展公钥 → 换成目标版本字节(公钥材料不变,仅换前缀语义)。base58 非法 → BitcoinDeriveError。
+function reVersion(ext: string, versionHex: string): string {
   let raw: Uint8Array;
   try {
     raw = b58c.decode(ext);
   } catch (cause) {
     throw new BitcoinDeriveError("invalid extended public key", { cause });
   }
-  raw.set(hexToBytes(XPUB_VERSION_HEX), 0);
+  raw.set(hexToBytes(versionHex), 0);
   return b58c.encode(raw);
+}
+
+// @scure/bip32 校验版本字节,直接吃 ypub/zpub 会 "Version mismatch" → 统一归成 xpub 再解析。
+const toXpub = (ext: string): string => reVersion(ext, VERSION_HEX.legacy);
+
+// 按脚本类型产出发给 Blockbook 的 token:legacy/nested/native → 对应 SLIP-132 前缀(xpub/ypub/zpub),
+// 让 Blockbook 服务端按该脚本派生(与用户所选一致,不受粘贴前缀左右);taproot 无 SLIP-132 前缀 → tr(...) descriptor。
+export function blockbookToken(ext: string, script: ScriptType): string {
+  if (script === "taproot") return `tr(${toXpub(ext)})`;
+  return reVersion(ext, VERSION_HEX[script]);
 }
 
 function encodeAddress(pub: Uint8Array, script: ScriptType): string {
@@ -87,23 +101,4 @@ export function makeDeriver(
     if (!child.publicKey) throw new BitcoinDeriveError("no public key derived");
     return encodeAddress(child.publicKey, script);
   };
-}
-
-export interface DerivedAddress {
-  index: number;
-  address: string;
-  path: string;
-}
-
-// 惰性生成某条链(0 外部 / 1 找零)的派生地址,index 从 0 起、无限;调用方按 gap/上限自行停(与 IO 组合)。
-// 派生器在首个 next() 时构造(此时才校验扩展公钥 → 非法则 BitcoinDeriveError)。
-export function* deriveAddresses(
-  ext: string,
-  script: ScriptType,
-  chain: number,
-): Generator<DerivedAddress> {
-  const derive = makeDeriver(ext, script);
-  for (let index = 0; ; index++) {
-    yield { index, address: derive(chain, index), path: derivationPath(script, chain, index) };
-  }
 }

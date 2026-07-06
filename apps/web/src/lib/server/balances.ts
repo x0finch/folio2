@@ -11,8 +11,6 @@ export const balances: Balances = new Proxy({} as Balances, {
         globalKeys: {
           ZERION_API_KEY: env.ZERION_API_KEY,
           COINSTATS_API_KEY: env.COINSTATS_API_KEY,
-          // 可选自托管 Esplora 节点(空 → provider 回退公共 mempool.space)。
-          BITCOIN_ESPLORA_BASE: env.BITCOIN_ESPLORA_BASE,
         },
       }) as unknown as Record<string, unknown>
     )[prop],

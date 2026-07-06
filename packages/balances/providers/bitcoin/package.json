@@ -15,7 +15,7 @@
     "zod": "^4.0.0",
     "@folio/balances-basic": "workspace:*",
     "@folio/bitcoin-derive": "workspace:*",
-    "@folio/mempool-client": "workspace:*"
+    "@folio/blockbook-client": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^6.0.2",

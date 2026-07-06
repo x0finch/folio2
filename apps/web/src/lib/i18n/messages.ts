@@ -217,6 +217,8 @@ export const en = {
     "Nested SegWit": "Nested SegWit",
     Taproot: "Taproot",
     Legacy: "Legacy",
+    btcScriptHint:
+      "Pick the type matching your wallet — addresses start with 1… (Legacy), 3… (Nested), bc1q… (Native), bc1p… (Taproot).",
   },
   Currency: {
     USD: "Dollar",
@@ -443,6 +445,8 @@ export const zh: Messages = {
     "Nested SegWit": "Nested SegWit(兼容隔离见证)",
     Taproot: "Taproot",
     Legacy: "Legacy(传统)",
+    btcScriptHint:
+      "按你钱包的地址开头选:1… 是 Legacy、3… 是 Nested、bc1q… 是 Native、bc1p… 是 Taproot。",
   },
   Currency: {
     USD: "美元",

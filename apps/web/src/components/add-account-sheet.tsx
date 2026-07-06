@@ -20,6 +20,7 @@ import { useTranslations } from "use-intl";
 import { type OnchainType, TYPE_GROUPS, typeLabel } from "../lib/account-types";
 import {
   BTC_SCRIPT_OPTIONS,
+  isBareXpub,
   isExtendedPubkey,
   recommendedScript,
   type ScriptType,
@@ -262,15 +263,16 @@ function BitcoinFields({
           onChange={(val) =>
             setValues((v) => {
               const next: Record<string, string> = { ...v, identifier: val };
-              // 扩展公钥 → 按前缀预选脚本类型;纯地址 → 无脚本类型。
-              if (isExtendedPubkey(val)) next.scriptType = recommendedScript(val);
+              // 只有裸 xpub 才歧义、需 scriptType(默认 Native);ypub/zpub 前缀已定、单地址无关 → 不带。
+              if (isBareXpub(val)) next.scriptType = recommendedScript(val);
               else delete next.scriptType;
               return next;
             })
           }
         />
       </div>
-      {isExtendedPubkey(id) && (
+      {/* 裸 xpub:歧义 → 让用户选(默认 Native,可改)。 */}
+      {isBareXpub(id) && (
         <div className="flex flex-col gap-2">
           <Label>{ti("Address type")}</Label>
           <Select
@@ -282,12 +284,27 @@ function BitcoinFields({
             </SelectTrigger>
             <SelectContent>
               {BTC_SCRIPT_OPTIONS.map((o) => (
+                // 单字符串 children:SelectItem 才会把它作为 trigger 显示的 label(JSX 会回退成 value)。
+                // 拼上地址前缀,让用户按自己钱包地址的开头对上类型。
                 <SelectItem key={o.value} value={o.value}>
-                  {ti(o.label)}
+                  {`${ti(o.label)} · ${o.addressPrefix}`}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">{ti("btcScriptHint")}</p>
+        </div>
+      )}
+      {/* ypub/zpub:前缀已确定类型 → 只读展示,不必选。 */}
+      {isExtendedPubkey(id) && !isBareXpub(id) && (
+        <div className="flex flex-col gap-1.5">
+          <Label>{ti("Address type")}</Label>
+          <p className="text-sm text-muted-foreground">
+            {(() => {
+              const o = BTC_SCRIPT_OPTIONS.find((x) => x.value === recommendedScript(id));
+              return o ? `${ti(o.label)} · ${o.addressPrefix}` : "";
+            })()}
+          </p>
         </div>
       )}
     </>

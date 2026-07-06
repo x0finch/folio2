@@ -1,5 +1,5 @@
 {
-  "name": "@folio/mempool-client",
+  "name": "@folio/blockbook-client",
   "version": "0.0.0",
   "private": true,
   "type": "module",
