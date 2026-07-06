@@ -2,48 +2,30 @@ import {
   type CoinGeckoConfig,
   CoinGeckoError,
   createCoinGeckoClient,
+  type DerivativesExchange,
+  type Exchange,
 } from "@folio/coingecko-client";
 import { PlatformError, type PlatformMeta, type PlatformSource } from "./types";
 
-interface RawAssetPlatform {
-  id?: string;
-  chain_identifier?: number | null;
-  name?: string;
-  image?: { thumb?: string; small?: string; large?: string } | null;
-}
-
-// /exchanges/{id} 与 /derivatives/exchanges/{id} 的 image 是直链字符串(与 asset_platforms 不同)。
-interface RawVenue {
-  name?: string;
-  image?: string | null;
-}
-
-// venue key → CoinGecko 端点。slug = key 冒号后一段(= 账户 type 的 specific,PRD:无需映射)。
-function venuePath(key: string): string | null {
-  const slug = key.slice(key.indexOf(":") + 1);
-  if (!slug) return null;
-  if (key.startsWith("exchange:")) return `/exchanges/${slug}`;
-  if (key.startsWith("perp:")) return `/derivatives/exchanges/${slug}`;
-  return null;
-}
-
-// CoinGecko 的 PlatformSource 实现。链走 /asset_platforms(整表);把 CoinGeckoError → PlatformError。
+// CoinGecko 的 PlatformSource 实现。链走 assetPlatforms(整表),场馆按 key 前缀走 exchange/derivativesExchange;
+// slug = key 冒号后一段(= 账户 type 的 specific,PRD:无需映射)。把 CoinGeckoError → PlatformError。
 export function createCoinGeckoPlatformSource(config: CoinGeckoConfig = {}): PlatformSource {
   const client = createCoinGeckoClient(config);
+
+  const mapErr = async <T>(p: Promise<T>): Promise<T> => {
+    try {
+      return await p;
+    } catch (e) {
+      if (e instanceof CoinGeckoError) throw new PlatformError(e.code, e.message, { cause: e });
+      throw e;
+    }
+  };
+
   return {
     async fetchChains() {
-      let json: unknown;
-      try {
-        json = await client.request("/asset_platforms");
-      } catch (e) {
-        if (e instanceof CoinGeckoError) throw new PlatformError(e.code, e.message, { cause: e });
-        throw e;
-      }
-      if (!Array.isArray(json)) {
-        throw new PlatformError("PARSE_ERROR", "asset_platforms: expected array");
-      }
+      const platforms = await mapErr(client.assetPlatforms());
       const out: PlatformMeta[] = [];
-      for (const p of json as RawAssetPlatform[]) {
+      for (const p of platforms) {
         if (!p?.id) continue;
         const name = p.name?.trim() || p.id;
         const logo = p.image?.small ?? p.image?.thumb ?? undefined;
@@ -57,20 +39,18 @@ export function createCoinGeckoPlatformSource(config: CoinGeckoConfig = {}): Pla
     },
 
     async fetchVenue(key) {
-      const path = venuePath(key);
-      if (!path) return null;
-      let json: unknown;
-      try {
-        json = await client.request(path, undefined, { notFoundAsNull: true });
-      } catch (e) {
-        if (e instanceof CoinGeckoError) throw new PlatformError(e.code, e.message, { cause: e });
-        throw e;
-      }
-      if (json == null) return null; // 404 未收录
-      const raw = json as RawVenue;
-      const name = raw.name?.trim();
+      const slug = key.slice(key.indexOf(":") + 1);
+      if (!slug) return null;
+
+      let venue: Exchange | DerivativesExchange | null;
+      if (key.startsWith("exchange:")) venue = await mapErr(client.exchange(slug));
+      else if (key.startsWith("perp:")) venue = await mapErr(client.derivativesExchange(slug));
+      else return null;
+
+      if (!venue) return null; // 404 未收录
+      const name = venue.name?.trim();
       if (!name) return null;
-      const logo = raw.image?.trim() || undefined;
+      const logo = venue.image?.trim() || undefined;
       return { key, name, logo };
     },
   };

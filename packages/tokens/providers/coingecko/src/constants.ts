@@ -9,11 +9,7 @@ export {
   USER_AGENT,
 } from "@folio/coingecko-client";
 
-export const EP_ASSET_PLATFORMS = "/asset_platforms";
-export const EP_COINS = "/coins"; // per-contract: `/coins/{platform}/contract/{addr}`
-export const EP_COINS_MARKETS = "/coins/markets";
-export const EP_SIMPLE_PRICE = "/simple/price";
-export const EP_SEARCH = "/search";
+// endpoint 路径已收进 @folio/coingecko-client 的 SDK 方法(不再声明 EP_*)。
 
 // 搜索返回截断(autocomplete 下拉只需前几个)。
 export const SEARCH_LIMIT = 10;
