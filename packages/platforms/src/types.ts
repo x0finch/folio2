@@ -7,10 +7,10 @@ export interface PlatformMeta {
   logo?: string;
 }
 
-// 数据源(CoinGecko):链取整表,场馆(#03)按 key 单查。
+// 数据源(CoinGecko):链取整表,场馆按 key 单查(exchange/perp),null = 未收录(404)。
 export interface PlatformSource {
   fetchChains(): Promise<PlatformMeta[]>;
-  // #03: fetchVenue(key: string): Promise<PlatformMeta | null>;
+  fetchVenue(key: string): Promise<PlatformMeta | null>;
 }
 
 // 缓存行:name === null 表示否定缓存(问过、确认不存在)。

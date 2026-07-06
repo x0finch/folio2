@@ -22,10 +22,10 @@ export async function warmPlatformsForUser(userId: string): Promise<void> {
   const keys = new Set<string>();
   for (const a of accounts) {
     if (a.archivedAt != null) continue;
-    if (a.type.startsWith("onchain_")) {
-      const specific = a.type.slice(a.type.indexOf("_") + 1);
-      keys.add(`chain:${a.network ?? specific}`);
-    }
+    const specific = a.type.slice(a.type.indexOf("_") + 1);
+    if (a.type.startsWith("onchain_")) keys.add(`chain:${a.network ?? specific}`);
+    else if (a.type.startsWith("exchange_")) keys.add(`exchange:${specific}`);
+    else if (a.type.startsWith("perp_")) keys.add(`perp:${specific}`);
   }
   for (const s of snapshots) {
     for (const b of s.balances) {

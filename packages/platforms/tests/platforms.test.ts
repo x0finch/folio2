@@ -22,6 +22,23 @@ function mockFetch(body: unknown) {
     headers: new Headers(),
   } as Response);
 }
+
+// 按 URL 路径分派的 fetch mock(venue 单查用)。
+function mockFetchByPath(routes: Record<string, { status?: number; body?: unknown }>) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input); // 客户端传 URL 对象 → href
+    const hit = Object.entries(routes).find(([p]) => url.includes(p));
+    const r = hit?.[1] ?? { status: 404 };
+    const status = r.status ?? 200;
+    return {
+      ok: status < 400,
+      status,
+      json: async () => r.body ?? {},
+      headers: new Headers(),
+    } as Response;
+  });
+}
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("coingecko fetchChains", () => {
@@ -41,6 +58,36 @@ describe("coingecko fetchChains", () => {
     expect(byKey.has("eip155:999")).toBe(true); // no-image 仍产 key
     expect(byKey.get("chain:no-image")?.name).toBe("no-image"); // 无 name → 降级为 id
     expect(byKey.get("chain:no-image")?.logo).toBeUndefined();
+  });
+});
+
+describe("coingecko fetchVenue", () => {
+  it("exchange:* → /exchanges/{id};perp:* → /derivatives/exchanges/{id};image 是直链", async () => {
+    mockFetchByPath({
+      "/exchanges/binance": { body: { name: "Binance", image: "https://cgk/binance.png" } },
+      "/derivatives/exchanges/hyperliquid": {
+        body: { name: "Hyperliquid (Futures)", image: "https://cgk/hl.png" },
+      },
+    });
+    const src = createCoinGeckoPlatformSource();
+    expect(await src.fetchVenue("exchange:binance")).toEqual({
+      key: "exchange:binance",
+      name: "Binance",
+      logo: "https://cgk/binance.png",
+    });
+    expect(await src.fetchVenue("perp:hyperliquid")).toEqual({
+      key: "perp:hyperliquid",
+      name: "Hyperliquid (Futures)",
+      logo: "https://cgk/hl.png",
+    });
+  });
+
+  it("404 → null;非 venue 前缀 → null(不发请求)", async () => {
+    const spy = mockFetchByPath({}); // 全 404
+    const src = createCoinGeckoPlatformSource();
+    expect(await src.fetchVenue("exchange:nope")).toBeNull();
+    expect(await src.fetchVenue("chain:solana")).toBeNull();
+    expect(spy).toHaveBeenCalledTimes(1); // chain:* 未发请求
   });
 });
 
@@ -79,24 +126,50 @@ describe("createPlatforms.resolve", () => {
 
 describe("createPlatforms.warm", () => {
   it("链缓存缺失/过期 → fetchChains + 写入;全新鲜 → 跳过取数", async () => {
-    let fetches = 0;
+    let chainFetches = 0;
     const source: PlatformSource = {
       async fetchChains(): Promise<PlatformMeta[]> {
-        fetches++;
+        chainFetches++;
         return [{ key: "eip155:1", name: "Ethereum", logo: "e.jpg" }];
+      },
+      async fetchVenue(): Promise<PlatformMeta | null> {
+        return null;
       },
     };
     const store = fakeStore();
     const p = createPlatforms({ source, store, now: () => 1000 });
 
     await p.warm(["eip155:1"]); // 缺失 → 取
-    expect(fetches).toBe(1);
+    expect(chainFetches).toBe(1);
     expect(store.rows.get("eip155:1")?.name).toBe("Ethereum");
 
     await p.warm(["eip155:1"]); // 已新鲜 → 不再取
-    expect(fetches).toBe(1);
+    expect(chainFetches).toBe(1);
+  });
 
-    await p.warm(["exchange:binance"]); // 非链 key → 本期不取
-    expect(fetches).toBe(1);
+  it("venue 单查:命中长 TTL;404 → name=null 短 TTL 否定缓存;新鲜则不再查", async () => {
+    const calls: string[] = [];
+    const source: PlatformSource = {
+      async fetchChains() {
+        return [];
+      },
+      async fetchVenue(key) {
+        calls.push(key);
+        return key === "exchange:binance" ? { key, name: "Binance", logo: "b.png" } : null; // exchange:okx → 未收录
+      },
+    };
+    const store = fakeStore();
+    const p = createPlatforms({ source, store, now: () => 1000 });
+
+    await p.warm(["exchange:binance", "exchange:okx"]);
+    expect(calls).toEqual(["exchange:binance", "exchange:okx"]);
+    expect(store.rows.get("exchange:binance")).toMatchObject({ name: "Binance", logo: "b.png" });
+    const neg = store.rows.get("exchange:okx");
+    expect(neg?.name).toBeNull(); // 否定缓存
+    expect(neg?.expiresAt).toBeLessThan(store.rows.get("exchange:binance")!.expiresAt); // 短 TTL
+
+    // 二次:两者都新鲜 → 不再单查。
+    await p.warm(["exchange:binance", "exchange:okx"]);
+    expect(calls).toEqual(["exchange:binance", "exchange:okx"]);
   });
 });

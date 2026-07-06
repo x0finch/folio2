@@ -1,9 +1,12 @@
-import type { PlatformMeta, PlatformSource, PlatformStore, Platforms } from "./types";
+import type { PlatformMeta, PlatformRow, PlatformSource, PlatformStore, Platforms } from "./types";
 
-// 平台元数据近乎静态 → 长 TTL。
+// 平台元数据近乎静态 → 长 TTL;venue 404(未收录)用短 TTL,新上所日后可补。
 const CHAIN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const VENUE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const VENUE_NEG_TTL_MS = 24 * 60 * 60 * 1000;
 
 const isChainKey = (k: string): boolean => k.startsWith("eip155:") || k.startsWith("chain:");
+const isVenueKey = (k: string): boolean => k.startsWith("exchange:") || k.startsWith("perp:");
 
 export interface CreatePlatformsConfig {
   source: PlatformSource;
@@ -29,21 +32,38 @@ export function createPlatforms({
       return out;
     },
 
-    // 写:sync 后预热。链一次取整表缓存(命中且未过期则跳过);venue 见 #03。
+    // 写:sync 后预热。链一次取整表缓存;venue 按 key 单查(404 → 短 TTL 否定缓存)。
     async warm(keys) {
-      const chainKeys = [...new Set(keys)].filter(isChainKey);
-      if (chainKeys.length === 0) return;
-      const cached = await store.getPlatforms(chainKeys);
-      const stale = chainKeys.some((k) => {
+      const unique = [...new Set(keys)];
+      const cached = await store.getPlatforms(unique.filter((k) => isChainKey(k) || isVenueKey(k)));
+      const isStale = (k: string): boolean => {
         const r = cached.get(k);
         return !r || r.expiresAt <= now();
-      });
-      if (!stale) return;
-      const chains = await source.fetchChains();
-      const expiresAt = now() + CHAIN_TTL_MS;
-      await store.putPlatforms(
-        chains.map((c) => ({ key: c.key, name: c.name, logo: c.logo ?? null, expiresAt })),
-      );
+      };
+      const writes: PlatformRow[] = [];
+
+      // 链:任一 key 过期 → 取整表(一次覆盖所有链)。
+      const chainKeys = unique.filter(isChainKey);
+      if (chainKeys.some(isStale)) {
+        const chains = await source.fetchChains();
+        const expiresAt = now() + CHAIN_TTL_MS;
+        for (const c of chains) {
+          writes.push({ key: c.key, name: c.name, logo: c.logo ?? null, expiresAt });
+        }
+      }
+
+      // venue:逐个单查(命中长 TTL;404 → name=null 短 TTL 否定缓存)。
+      for (const k of unique.filter(isVenueKey)) {
+        if (!isStale(k)) continue;
+        const meta = await source.fetchVenue(k);
+        writes.push(
+          meta
+            ? { key: k, name: meta.name, logo: meta.logo ?? null, expiresAt: now() + VENUE_TTL_MS }
+            : { key: k, name: null, logo: null, expiresAt: now() + VENUE_NEG_TTL_MS },
+        );
+      }
+
+      if (writes.length > 0) await store.putPlatforms(writes);
     },
   };
 }
