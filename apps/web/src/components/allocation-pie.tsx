@@ -1,6 +1,8 @@
 import { Cell, Pie, PieChart } from "recharts";
-import { useFormatter, useTranslations } from "use-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { type AllocSlice, OTHERS_KEY } from "../lib/allocation";
+import { formatMoney } from "../lib/format-number";
+import { usePreferCurrency } from "../lib/hooks/use-prefer-currency";
 
 // 分配饼图 + 图例(Insights)。配色走 shadcn 图表 token(--chart-1..5,循环),不写死颜色。
 const COLORS = [
@@ -13,9 +15,9 @@ const COLORS = [
 
 export function AllocationPie({ slices }: { slices: AllocSlice[] }) {
   const t = useTranslations("Insights");
-  const format = useFormatter();
-  const usd = (n: number) =>
-    format.number(n, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const { currency, rate } = usePreferCurrency();
+  const locale = useLocale();
+  const usd = (n: number) => formatMoney(n, { rate, locale, currency });
 
   if (slices.length === 0) {
     return <p className="text-muted-foreground text-sm">{t("noData")}</p>;

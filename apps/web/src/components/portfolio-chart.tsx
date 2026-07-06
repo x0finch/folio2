@@ -1,13 +1,17 @@
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@folio/ui";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { useFormatter, useTranslations } from "use-intl";
+import { useFormatter, useLocale, useTranslations } from "use-intl";
+import { formatMoney } from "../lib/format-number";
 import type { HistoryPoint } from "../lib/history";
+import { usePreferCurrency } from "../lib/hooks/use-prefer-currency";
 
 const DAY_MS = 86_400_000;
 
 export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
   const t = useTranslations("Overview");
   const format = useFormatter();
+  const { currency, rate } = usePreferCurrency();
+  const locale = useLocale();
 
   // app 级组合(原则 #11):组合 @folio/ui 的 ChartContainer + recharts 原语;配色走 shadcn
   // 图表 token(--chart-1),不写死颜色。ChartContainer 据 config 注入 --color-total。
@@ -15,16 +19,9 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
     total: { label: t("portfolioValue"), color: "var(--chart-1)" },
   } satisfies ChartConfig;
 
-  // 紧凑金额(轴):$13.1K,避免过宽裁切;tooltip 用完整精度。均 locale 感知。
-  const axisUsd = (n: number) =>
-    format.number(n, {
-      style: "currency",
-      currency: "USD",
-      notation: "compact",
-      maximumFractionDigits: 1,
-    });
-  const fullUsd = (n: number) =>
-    format.number(n, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+  // 紧凑金额(轴):$13.1K,避免过宽裁切;tooltip 用完整精度。按偏好币种换算 + locale 感知。
+  const axisUsd = (n: number) => formatMoney(n, { rate, locale, currency, compact: true });
+  const fullUsd = (n: number) => formatMoney(n, { rate, locale, currency });
   const fullDateTime = (ms: number) =>
     format.dateTime(new Date(ms), {
       month: "short",
