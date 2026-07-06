@@ -179,6 +179,14 @@ export const platforms = sqliteTable("platforms", {
   expiresAt: integer("expires_at").notNull(),
 });
 
+// FX 汇率缓存(全局参考,无 userId)。usd_per_unit = 1 单位该币种的美元价。
+// expires_at 只闸 warm;读软过期(见 @folio/fx / ADR 0006)。
+export const fxRates = sqliteTable("fx_rates", {
+  currency: text("currency").primaryKey(),
+  usdPerUnit: real("usd_per_unit").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+});
+
 // manual 活动账本(P7.4.1):add/reduce/set 动作日志。当前数量由 deriveAmount 推导、物化进 account.creds.amount
 // (provider/sync 不依赖本表)。price 记录单价、留给 M7.3 成本/盈亏,本期不算。与 M7.2 的通用 transactions 表分开。
 export const manualActivity = sqliteTable(

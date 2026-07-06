@@ -10,12 +10,12 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate:remote": "wrangler d1 migrations apply folio --remote"
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@folio/tokens": "workspace:*",
     "@folio/platforms": "workspace:*",
+    "@folio/fx": "workspace:*",
     "better-auth": "^1.6.21",
     "drizzle-orm": "^0.45.2",
     "@folio/balances": "workspace:*"
