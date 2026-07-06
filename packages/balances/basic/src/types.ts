@@ -119,7 +119,6 @@ export interface BitcoinMeta {
   pendingSats: number; // 账户净未确认(± mempool);两模式都填
   addresses?: BitcoinAddress[]; // xpub:仅非零(有余额或在途)的派生地址
   receive?: BitcoinReceive; // xpub:收款地址指引
-  truncated?: boolean; // xpub 扫描超地址硬上限,结果不完整
 }
 
 export interface AssetSnapshot {

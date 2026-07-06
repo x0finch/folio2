@@ -89,7 +89,6 @@ export const en = {
     btcNext: "Next available",
     btcReceiveChain: "receive",
     btcChangeChain: "change",
-    btcTruncated: "Some addresses weren’t scanned — this wallet may hold more.",
     addressCopied: "Address copied",
   },
   Accounts: {
@@ -327,7 +326,6 @@ export const zh: Messages = {
     btcNext: "下次可用",
     btcReceiveChain: "收款",
     btcChangeChain: "找零",
-    btcTruncated: "部分地址未扫描 —— 该钱包可能还有更多。",
     addressCopied: "地址已复制",
   },
   Accounts: {

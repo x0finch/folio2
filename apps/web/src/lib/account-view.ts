@@ -75,8 +75,7 @@ function hasBitcoinDetail(m: BitcoinMeta): boolean {
     m.pendingSats !== 0 ||
     Boolean(m.addresses?.length) ||
     Boolean(m.receive?.lastUsed) ||
-    Boolean(m.receive?.next?.length) ||
-    Boolean(m.truncated)
+    Boolean(m.receive?.next?.length)
   );
 }
 

@@ -234,8 +234,6 @@ function BitcoinCards({ meta }: { meta: BitcoinMeta }) {
           ))}
         </div>
       )}
-
-      {meta.truncated && <p className="text-xs text-muted-foreground">{t("btcTruncated")}</p>}
     </div>
   );
 }
