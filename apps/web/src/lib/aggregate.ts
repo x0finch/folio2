@@ -43,35 +43,26 @@ export interface Holding {
   sources: HoldingSource[];
 }
 
-// 账户 type(<类别>_<具体>)→ 展示平台单元(无链前缀的来源:CEX/perp/manual/非 EVM 原生)。
-// name 仅给 slug 首字母大写的兜底;真名 + logo 由 server 读路径 platforms.resolve 装饰(#02)。
-function platformFromAccount(type: string, network?: string | null): { id: string; name: string } {
-  const [category, specific] = [
-    type.slice(0, type.indexOf("_")),
-    type.slice(type.indexOf("_") + 1),
-  ];
-  const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
-  if (category === "exchange") return { id: `exchange:${specific}`, name: cap(specific) };
-  if (category === "perp") return { id: `perp:${specific}`, name: cap(specific) };
-  if (category === "onchain") {
-    const slug = network ?? specific; // solana/sui/cosmos…
-    return { id: `chain:${slug}`, name: cap(slug) };
-  }
-  return { id: "manual", name: "Manual" };
+// 账户 type(<类别>_<具体>)→ 平台单元的 **key**(CEX/perp/manual/非 EVM 原生)。
+// 只产 key;name + logo(含兜底)整个归 @folio/platforms,由 server 读路径装饰。
+function platformIdFromAccount(type: string, network?: string | null): string {
+  const specific = type.slice(type.indexOf("_") + 1);
+  if (type.startsWith("exchange_")) return `exchange:${specific}`;
+  if (type.startsWith("perp_")) return `perp:${specific}`;
+  if (type.startsWith("onchain_")) return `chain:${network ?? specific}`; // solana/sui/cosmos…
+  return "manual";
 }
 
-// 持有点的平台单元:链上优先按 tokenKey 的链前缀拆(同账户多链 → 多 source);否则按账户 type。
-function platformOf(row: AggInput): { id: string; name: string } {
+// 持有点的平台 key:链上优先按 tokenKey 的链前缀拆(同账户多链 → 多 source);否则按账户 type。
+function platformIdOf(row: AggInput): string {
   const tk = row.tokenKey;
   if (tk) {
     const slash = tk.indexOf("/");
     const prefix = slash > 0 ? tk.slice(0, slash) : "";
-    if (prefix.startsWith("eip155:") || prefix.startsWith("chain:")) {
-      return { id: prefix, name: prefix }; // 真名由 server 读路径装饰;未收录降级为 id
-    }
+    if (prefix.startsWith("eip155:") || prefix.startsWith("chain:")) return prefix;
     // coingecko:<id>(manual 选币)等无链前缀 → 落账户平台
   }
-  return platformFromAccount(row.account.type, row.account.network);
+  return platformIdFromAccount(row.account.type, row.account.network);
 }
 
 // 单笔持仓的"代币身份"(用于判断组内是否单一 Token → 决定是否给 totalAmount)。
@@ -126,8 +117,8 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     a.totalValue += row.value;
     a.totalAmount += row.amount;
     if (!a.logoHint && row.logo) a.logoHint = row.logo;
-    const platform = platformOf(row);
-    const sk = `${row.account.id}|${platform.id}`;
+    const platformId = platformIdOf(row);
+    const sk = `${row.account.id}|${platformId}`;
     const existing = a.sources.get(sk);
     if (existing) {
       existing.amount += row.amount;
@@ -135,7 +126,8 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
       existing.isMargin = existing.isMargin || row.isMargin === true;
     } else {
       a.sources.set(sk, {
-        platform,
+        // name = key 占位;真名 + logo 由 server 读路径 platforms.resolve 装饰(每个 key 必有兜底)。
+        platform: { id: platformId, name: platformId },
         account: { id: row.account.id, label: row.account.label },
         amount: row.amount,
         value: row.value,

@@ -111,16 +111,17 @@ function fakeStore(seed: PlatformRow[] = []): PlatformStore & { rows: Map<string
 }
 
 describe("createPlatforms.resolve", () => {
-  it("命中返回 PlatformMeta;name=null(否定缓存)不返回;未命中跳过", async () => {
+  it("每个 key 都给展示:命中用真名;否定缓存/未命中用兜底名(slug-cap;eip155 用原 key)", async () => {
     const store = fakeStore([
       { key: "eip155:1", name: "Ethereum", logo: "e.jpg", expiresAt: 9e15 },
       { key: "exchange:x", name: null, logo: null, expiresAt: 9e15 }, // 否定缓存
     ]);
     const p = createPlatforms({ source: {} as PlatformSource, store });
-    const m = await p.resolve(["eip155:1", "exchange:x", "chain:none"]);
+    const m = await p.resolve(["eip155:1", "exchange:x", "chain:none", "manual"]);
     expect(m.get("eip155:1")).toEqual({ key: "eip155:1", name: "Ethereum", logo: "e.jpg" });
-    expect(m.has("exchange:x")).toBe(false);
-    expect(m.has("chain:none")).toBe(false);
+    expect(m.get("exchange:x")).toEqual({ key: "exchange:x", name: "X" }); // 否定缓存 → 兜底
+    expect(m.get("chain:none")).toEqual({ key: "chain:none", name: "None" }); // 未命中 → 兜底
+    expect(m.get("manual")).toEqual({ key: "manual", name: "Manual" });
   });
 });
 

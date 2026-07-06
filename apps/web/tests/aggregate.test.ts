@@ -64,19 +64,11 @@ describe("buildCanonicalHoldings", () => {
     expect(h.token).toMatchObject({ id: "usdt", symbol: "USDT", name: "Tether USD" });
     expect(h.totalValue).toBe(3600);
     expect(h.totalAmount).toBeUndefined(); // tether + usdt0 = 2 个 Token
-    // aggregate 只产 platform.id + 兜底名(链 = 原前缀);真名/logo 由 server 读路径 platforms.resolve 装饰(#02)。
-    expect(h.sources.map((s) => s.platform.id)).toEqual([
-      "exchange:binance",
-      "eip155:1",
-      "eip155:42161",
-      "manual",
-    ]); // value 降序
-    expect(h.sources.map((s) => s.platform.name)).toEqual([
-      "Binance",
-      "eip155:1",
-      "eip155:42161",
-      "Manual",
-    ]);
+    // aggregate 只产 platform.id(key);name 仅为 key 占位,真名/logo 由 server 读路径
+    // platforms.resolve 装饰(平台"显示成什么"整个归 @folio/platforms)。
+    const ids = ["exchange:binance", "eip155:1", "eip155:42161", "manual"]; // value 降序
+    expect(h.sources.map((s) => s.platform.id)).toEqual(ids);
+    expect(h.sources.map((s) => s.platform.name)).toEqual(ids); // name == key 占位
   });
 
   it("单一 Token 组给 totalAmount;perp 权益作 isMargin 持有点", () => {
@@ -115,7 +107,7 @@ describe("buildCanonicalHoldings", () => {
     expect(h.totalAmount).toBe(1800); // 全是 usd-coin,单一 Token
     const margin = h.sources.find((s) => s.platform.id === "perp:hyperliquid")!;
     expect(margin.isMargin).toBe(true);
-    expect(margin.platform.name).toBe("Hyperliquid");
+    expect(margin.platform.name).toBe("perp:hyperliquid"); // name = key 占位(真名由 resolve 装饰)
   });
 
   it("桥接/未分组不并入本尊;未解析按账户隔离,绝不与已解析同 symbol 合并", () => {

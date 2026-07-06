@@ -8,6 +8,17 @@ const VENUE_NEG_TTL_MS = 24 * 60 * 60 * 1000;
 const isChainKey = (k: string): boolean => k.startsWith("eip155:") || k.startsWith("chain:");
 const isVenueKey = (k: string): boolean => k.startsWith("exchange:") || k.startsWith("perp:");
 
+const cap = (s: string): string => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+// 未收录/未预热/否定缓存平台的兜底展示名(纯由 key 推)。
+// eip155:<id> 无 slug → 用原 key;其余取冒号后一段首字母大写(manual → "Manual")。
+// 平台的"显示成什么"整个归本模块所有(见 ADR 0005/0006 收口);aggregate 只发 key。
+function fallbackName(key: string): string {
+  if (key.startsWith("eip155:")) return key;
+  const slug = key.slice(key.indexOf(":") + 1);
+  return cap(slug || key);
+}
+
 export interface CreatePlatformsConfig {
   source: PlatformSource;
   store: PlatformStore;
@@ -20,14 +31,21 @@ export function createPlatforms({
   now = Date.now,
 }: CreatePlatformsConfig): Platforms {
   return {
-    // 读:只读缓存(展示用),零网络;否定缓存(name=null)不返回。
+    // 读:每个 key 都给一份展示(展示用,零网络)。命中且非否定缓存 → 用缓存 name+logo;
+    // 未命中/否定缓存 → 兜底名(slug-cap)。平台展示的唯一出口,调用方直接用,不再自算兜底。
     async resolve(keys) {
       const unique = [...new Set(keys)];
-      if (unique.length === 0) return new Map();
-      const rows = await store.getPlatforms(unique);
       const out = new Map<string, PlatformMeta>();
-      for (const [key, r] of rows) {
-        if (r.name != null) out.set(key, { key, name: r.name, logo: r.logo ?? undefined });
+      if (unique.length === 0) return out;
+      const rows = await store.getPlatforms(unique);
+      for (const key of unique) {
+        const r = rows.get(key);
+        out.set(
+          key,
+          r?.name != null
+            ? { key, name: r.name, logo: r.logo ?? undefined }
+            : { key, name: fallbackName(key) },
+        );
       }
       return out;
     },
