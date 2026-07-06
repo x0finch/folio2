@@ -18,6 +18,7 @@ Status: accepted (M9.1)
 - **分包**:取数 = `@folio/blockbook-client`(SDK 式,btc2–5 轮询+回退);扩展公钥 token 造型(脚本类型→SLIP-132 前缀 / taproot descriptor)+ 收款地址本地派生 + 校验 = `@folio/bitcoin-derive`;provider 只整合。(初版的 `@folio/mempool-client` 已退场。)
 - **脚本类型建模** = `public` input(enum 校验,仅裸 xpub 消费)+ add-account `BitcoinFields` 定制分支(`ProviderInputType` 无 enum:裸 xpub 给 select,ypub/zpub 只读展示识别到的类型)。zpub/ypub 前缀权威,provider 忽略传入 `scriptType`。
 - **无子请求上限问题**:Blockbook 服务端做 gap 扫描,provider 不再逐地址扫,`GAP_LIMIT`/`ADDRESS_CAP`/`truncated` 随之移除。
+- **逐地址未确认拿不到**:Blockbook `tokens=used` 只给逐地址已确认 `balance`,不含逐地址 unconfirmed → 分布表按已确认非零列,`BitcoinAddress.pendingSats` 恒 0;账户级未确认走顶层 `unconfirmedBalance`(权威 pending)。已知取舍。
 - **无 env**:端点内置(btc2–5 轮询);不设 `BITCOIN_*_BASE`。自托管 Blockbook 若需要,后续再加配置。
 - **零 schema 改动**:`onchain_bitcoin` 已在 `AccountType` 预留;`identifier`/`scriptType` 落现有 `creds`(public)。回滚=从 registry 移除。
 - **BTC 定价**经 symbol 回退(BTC 在 top-markets),`tokenKey = chain:bitcoin/native:btc` 仅作身份 + 平台归属(`chain:bitcoin` → "Bitcoin")。

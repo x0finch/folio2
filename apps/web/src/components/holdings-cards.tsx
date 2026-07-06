@@ -7,12 +7,12 @@ import {
   type SpotRow,
   toAccountSections,
 } from "../lib/account-view";
+import { SATS_PER_BTC } from "../lib/bitcoin-scripts";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import type { PerpView } from "../lib/perp";
 import { TokenAvatar } from "./token-stack";
 
-const SATS_PER_BTC = 100_000_000;
 // 逐地址分布/未确认额是核对用的精确值 → 全精度(8 位),不走总览的 ≤2 位紧凑style。
 const btc = (sats: number): string =>
   formatNumber(sats / SATS_PER_BTC, { compact: false, maxFractionDigits: 8 });

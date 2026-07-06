@@ -55,24 +55,27 @@ function reVersion(ext: string, versionHex: string): string {
 // @scure/bip32 校验版本字节,直接吃 ypub/zpub 会 "Version mismatch" → 统一归成 xpub 再解析。
 const toXpub = (ext: string): string => reVersion(ext, VERSION_HEX.legacy);
 
-// 按脚本类型产出发给 Blockbook 的 token:legacy/nested/native → 对应 SLIP-132 前缀(xpub/ypub/zpub),
-// 让 Blockbook 服务端按该脚本派生(与用户所选一致,不受粘贴前缀左右);taproot 无 SLIP-132 前缀 → tr(...) descriptor。
-export function blockbookToken(ext: string, script: ScriptType): string {
+// 发给 Blockbook /xpub 端点的入参(可能是扩展公钥或 descriptor,故不叫 "token" —— 与地址级 XpubToken 区分):
+// legacy/nested/native → 归一到对应 SLIP-132 前缀(xpub/ypub/zpub),让 Blockbook 服务端按该脚本派生
+// (与用户所选一致,不受粘贴前缀左右);taproot 无 SLIP-132 前缀 → tr(...) descriptor。
+export function blockbookXpubParam(ext: string, script: ScriptType): string {
   if (script === "taproot") return `tr(${toXpub(ext)})`;
   return reVersion(ext, VERSION_HEX[script]);
 }
 
+// 脚本类型 → 地址编码器(map 形,与 PURPOSE/VERSION_HEX 同范式;加脚本类型只改这一处)。
+// taproot 的内部 key 为 x-only(去掉 33 字节压缩前缀 → 32 bytes)。
+const ENCODERS: Record<ScriptType, (pub: Uint8Array) => { address?: string }> = {
+  legacy: (pub) => btc.p2pkh(pub),
+  nested: (pub) => btc.p2sh(btc.p2wpkh(pub)),
+  native: (pub) => btc.p2wpkh(pub),
+  taproot: (pub) => btc.p2tr(pub.slice(1)),
+};
+
 function encodeAddress(pub: Uint8Array, script: ScriptType): string {
-  const payment =
-    script === "legacy"
-      ? btc.p2pkh(pub)
-      : script === "nested"
-        ? btc.p2sh(btc.p2wpkh(pub))
-        : script === "native"
-          ? btc.p2wpkh(pub)
-          : btc.p2tr(pub.slice(1)); // taproot:内部 key 为 x-only(去掉压缩前缀 → 32 bytes)
-  if (!payment.address) throw new BitcoinDeriveError("failed to encode bitcoin address");
-  return payment.address;
+  const { address } = ENCODERS[script](pub);
+  if (!address) throw new BitcoinDeriveError("failed to encode bitcoin address");
+  return address;
 }
 
 // 从账户级扩展公钥造派生器:解析一次,按 (chain, index) 出地址;chain 0=外部收款、1=找零。

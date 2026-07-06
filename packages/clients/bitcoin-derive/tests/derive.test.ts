@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BitcoinDeriveError, blockbookToken, makeDeriver, recommendedScript } from "../src";
+import { BitcoinDeriveError, blockbookXpubParam, makeDeriver, recommendedScript } from "../src";
 
 // 离线派生向量(不联网)。账户级扩展公钥 = 标准 BIP39 助记词 "abandon×11 about"(空密码)在
 // m/purpose'/0'/0' 的公钥;首地址取自 BIP49/84/86 官方测试向量(独立事实源),legacy 由已被三条官方
@@ -72,22 +72,22 @@ describe("makeDeriver — 非法扩展公钥", () => {
   });
 });
 
-describe("blockbookToken(按脚本类型造 Blockbook token)", () => {
+describe("blockbookXpubParam(按脚本类型造 Blockbook token)", () => {
   it("legacy/nested/native → 归一到 xpub/ypub/zpub 前缀(与粘贴前缀无关)", () => {
     // 无论输入是 xpub / ypub / zpub,都按所选脚本类型归一到对应 SLIP-132 前缀。
-    expect(blockbookToken(XPUB84, "native")).toBe(ZPUB84); // xpub → zpub
-    expect(blockbookToken(ZPUB84, "native")).toBe(ZPUB84); // zpub → zpub(原样)
-    expect(blockbookToken(XPUB49, "nested")).toBe(YPUB49); // xpub → ypub
-    expect(blockbookToken(YPUB49, "nested")).toBe(YPUB49);
-    expect(blockbookToken(ZPUB84, "legacy")).toMatch(/^xpub/); // zpub → xpub
+    expect(blockbookXpubParam(XPUB84, "native")).toBe(ZPUB84); // xpub → zpub
+    expect(blockbookXpubParam(ZPUB84, "native")).toBe(ZPUB84); // zpub → zpub(原样)
+    expect(blockbookXpubParam(XPUB49, "nested")).toBe(YPUB49); // xpub → ypub
+    expect(blockbookXpubParam(YPUB49, "nested")).toBe(YPUB49);
+    expect(blockbookXpubParam(ZPUB84, "legacy")).toMatch(/^xpub/); // zpub → xpub
   });
 
   it("taproot → tr(<xpub>) descriptor", () => {
-    const tok = blockbookToken(XPUB86, "taproot");
+    const tok = blockbookXpubParam(XPUB86, "taproot");
     expect(tok).toMatch(/^tr\(xpub.*\)$/);
   });
 
   it("非法扩展公钥 → BitcoinDeriveError", () => {
-    expect(() => blockbookToken("xpubGARBAGE", "native")).toThrow(BitcoinDeriveError);
+    expect(() => blockbookXpubParam("xpubGARBAGE", "native")).toThrow(BitcoinDeriveError);
   });
 });

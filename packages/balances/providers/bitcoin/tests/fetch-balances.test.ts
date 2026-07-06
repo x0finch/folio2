@@ -81,6 +81,30 @@ describe("bitcoinProvider.fetchBalances — xpub 模式(Blockbook 服务端派�
     expect(meta.receive.next[1].index).toBe(2);
   });
 
+  it("已用但零余额地址(如仅 mempool 收过款)算 lastUsed,但不进分布", async () => {
+    // tokens=used 会返回已用地址;0/1 已用但确认余额 0(例如仅 mempool 收款后又转出/未确认)。
+    mockBlockbook({
+      xpub: {
+        address: ZPUB84,
+        balance: "50000",
+        unconfirmedBalance: "0",
+        tokens: [
+          { name: RECV0, path: "m/84'/0'/0'/0/0", transfers: 2, balance: "50000" },
+          { name: RECV1, path: "m/84'/0'/0'/0/1", transfers: 1, balance: "0" },
+        ],
+      },
+    });
+    const [b] = await bitcoinProvider.fetchBalances(ctx({ creds: { identifier: ZPUB84 } }));
+    const meta = b.meta as {
+      addresses: { address: string }[];
+      receive: { lastUsed: { index: number }; next: { index: number }[] };
+    };
+    // 分布只含非零(0/0);但 lastUsed 取到最大已用下标 0/1,next 从 0/2 起。
+    expect(meta.addresses.map((a) => a.address)).toEqual([RECV0]);
+    expect(meta.receive.lastUsed.index).toBe(1);
+    expect(meta.receive.next[0].index).toBe(2);
+  });
+
   it("请求打到 /xpub/ 且带 zpub token(zpub 前缀权威,scriptType 被忽略)", async () => {
     const spy = mockBlockbook({ xpub: XPUB_BODY });
     await bitcoinProvider.fetchBalances(

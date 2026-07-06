@@ -10,7 +10,7 @@ import {
 } from "@folio/balances-basic";
 import {
   BitcoinDeriveError,
-  blockbookToken,
+  blockbookXpubParam,
   isScriptType,
   makeDeriver,
   recommendedScript,
@@ -130,7 +130,7 @@ function toProviderError(err: unknown): ProviderError {
 
 async function fetchXpub(client: BlockbookClient, ext: string, scriptType: string | undefined) {
   const script = effectiveScript(ext, scriptType);
-  const res = await client.getXpub(blockbookToken(ext, script)); // details=tokenBalances&tokens=used
+  const res = await client.getXpub(blockbookXpubParam(ext, script)); // details=tokenBalances&tokens=used
   const { addresses, receive } = buildXpubMeta(ext, script, res.tokens ?? []);
   return toBtcBalances(toSats(res.balance), toSats(res.unconfirmedBalance), { addresses, receive });
 }
@@ -174,7 +174,7 @@ export const bitcoinProvider = defineProvider({
     const client = createBlockbookClient();
     try {
       if (isExtendedPubkey(id)) {
-        await client.getXpub(blockbookToken(id, effectiveScript(id, ctx.creds.scriptType)), {
+        await client.getXpub(blockbookXpubParam(id, effectiveScript(id, ctx.creds.scriptType)), {
           details: "basic",
         });
       } else {

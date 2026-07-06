@@ -251,6 +251,9 @@ function BitcoinFields({
   const ti = useTranslations("Inputs");
   const idSpec = specs.find((s) => s.key === "identifier");
   const id = values.identifier ?? "";
+  // ypub/zpub 前缀已定类型的只读展示文案(具名变量,不在 JSX 里塞 IIFE)。
+  const detected = BTC_SCRIPT_OPTIONS.find((o) => o.value === recommendedScript(id));
+  const detectedLabel = detected ? `${ti(detected.label)} · ${detected.addressPrefix}` : "";
   return (
     <>
       <div className="flex flex-col gap-2">
@@ -299,12 +302,7 @@ function BitcoinFields({
       {isExtendedPubkey(id) && !isBareXpub(id) && (
         <div className="flex flex-col gap-1.5">
           <Label>{ti("Address type")}</Label>
-          <p className="text-sm text-muted-foreground">
-            {(() => {
-              const o = BTC_SCRIPT_OPTIONS.find((x) => x.value === recommendedScript(id));
-              return o ? `${ti(o.label)} · ${o.addressPrefix}` : "";
-            })()}
-          </p>
+          <p className="text-sm text-muted-foreground">{detectedLabel}</p>
         </div>
       )}
     </>
