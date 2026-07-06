@@ -14,5 +14,3 @@ evolution/
 
 .agents/
 skills-lock.json
-# 旧设计参考副本(非本项目构建的一部分;仅供设计复刻参考)
-folio-old/

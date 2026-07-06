@@ -59,3 +59,21 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 **M1–M6 complete** — foundation → on-chain → CEX → perp → polish, deploy-ready (see [apps/web/DEPLOY.md](apps/web/DEPLOY.md); going live is user-run per safety rules). Full per-phase archive (what/why/tests/gates) in **[evolution/milestones/](evolution/milestones/)** (`checklist.md` + `arch-design.md` + `plans/`).
 
 Forward work — deferred features + the M7+ roadmap — lives in **[evolution/roadmap.md](evolution/roadmap.md)**; per-phase tracking in **[evolution/checklist.md](evolution/checklist.md)**; new plans go in `evolution/plans/`.
+
+---
+
+## Agent skills
+
+Per-repo config for the engineering skills (set up by `setup-matt-pocock-skills`).
+
+### Issue tracker
+
+GitHub Issues (repo `x0finch/folio2`), via the `gh` CLI. External PRs are **not** a triage surface. See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Five canonical roles, default names: `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix` (created on first use). See [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See [docs/agents/domain.md](docs/agents/domain.md).
