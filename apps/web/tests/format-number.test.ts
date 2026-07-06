@@ -1,5 +1,11 @@
+import type { Currency } from "@folio/fx";
 import { describe, expect, it } from "vitest";
-import { formatNumber } from "../src/lib/format-number";
+import { formatMoney, formatNumber } from "../src/lib/format-number";
+
+const USD: Currency = { code: "USD", kind: "fiat" };
+const EUR: Currency = { code: "EUR", kind: "fiat" };
+const JPY: Currency = { code: "JPY", kind: "fiat" };
+const BTC: Currency = { code: "BTC", kind: "crypto", symbol: "₿" };
 
 describe("formatNumber — 空值/非法值", () => {
   it("null / undefined / 空串 / NaN / ±Infinity / 非数字串 → '-'", () => {
@@ -103,5 +109,44 @@ describe("formatNumber — 可调小数位 / locale", () => {
   it("跟随 locale:zh 千分位一致,紧凑记法本地化(亿)", () => {
     expect(formatNumber(1234.5, { locale: "zh" })).toBe("1,234.5");
     expect(formatNumber(123_456_789, { locale: "zh" })).toContain("亿");
+  });
+});
+
+describe("formatMoney — fiat(Intl currency style)", () => {
+  it("USD 补两位小数(接受 $5 → $5.00)", () => {
+    expect(formatMoney(5, { currency: USD })).toBe("$5.00");
+    expect(formatMoney(1234.5, { currency: USD })).toBe("$1,234.50");
+    expect(formatMoney(0, { currency: USD })).toBe("$0.00");
+  });
+
+  it("JPY 无小数(随币种)", () => {
+    expect(formatMoney(1234.567, { currency: JPY })).toBe("¥1,235");
+  });
+
+  it("rate 换算:展示值 = usd / rate", () => {
+    expect(formatMoney(100, { currency: EUR, rate: 2 })).toBe("€50.00");
+  });
+
+  it("极小值走下标货币外壳", () => {
+    expect(formatMoney(0.005, { currency: USD })).toBe("$0.0₂5");
+  });
+
+  it("≥1e8 紧凑", () => {
+    expect(formatMoney(123_456_789, { currency: USD })).toBe("$123.46M");
+  });
+});
+
+describe("formatMoney — crypto(₿/Ξ 前缀 + 高精度)", () => {
+  it("前缀 + 高精度数字", () => {
+    expect(formatMoney(50000, { currency: BTC, rate: 100000 })).toBe("₿0.5");
+    expect(formatMoney(1_250_000, { currency: BTC, rate: 100000 })).toBe("₿12.5");
+  });
+
+  it("极小值下标", () => {
+    expect(formatMoney(0.1, { currency: BTC, rate: 100000 })).toBe("₿0.0₅1");
+  });
+
+  it("负值:负号在符号前", () => {
+    expect(formatMoney(-50000, { currency: BTC, rate: 100000 })).toBe("-₿0.5");
   });
 });

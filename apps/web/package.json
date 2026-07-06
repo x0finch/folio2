@@ -12,12 +12,15 @@
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply folio --local",
+    "db:migrate:remote": "wrangler d1 migrations apply folio --remote",
     "deploy": "pnpm run build && wrangler deploy"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.26.0",
     "@folio/balances": "workspace:*",
     "@folio/db": "workspace:*",
+    "@folio/fx": "workspace:*",
     "@folio/platforms": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/tokens": "workspace:*",

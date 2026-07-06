@@ -1,17 +1,15 @@
-// 数字格式化(移植并修复自 folio-old/lib/numbers.ts)。对外只暴露一个 formatNumber:
-//   · |n| ≥ 1e8 且 compact → 紧凑记法(123.46M / 1.5B / 1T)
-//   · 0.01 ≤ |n| < 1e8      → 千分位 + 最多 maxFractionDigits 位小数(去尾零)
-//   · 0 < |n| < 0.01        → 下标记法(0.0₄46)
-//   · 0                      → "0"
-//   · null / undefined / "" / NaN / ±Infinity → "-"
-// 展示规则与 folio-old 一致(平替);实现做了修复与精简:负号(旧版负数无 unit 产出 "-undefined")、
-// 下标有效位改四舍五入(旧版 slice 截断)、bigint、去掉 SmallNumberFormatter 类改纯函数、跟随 locale。
-// 货币 = formatNumber(value, { unit }) 的薄封装(见 useDisplayValue,额外做汇率换算);数量 = formatNumber(n)。
+// 数字格式化。两个入口:
+//   · formatNumber —— 代币「数量」(移植/修复自 folio-old/lib/numbers.ts:紧凑 ≥1e8、≤2 位、下标 <0.01、bigint、负号)。
+//   · formatMoney  —— 「货币」金额:换算(value/rate)后 fiat 走 Intl currency style、crypto 走 ₿/Ξ 前缀高精度(见 ADR 0006)。
+// 数量 vs 货币分开:货币需 currency-aware 格式(符号/位置/小数位随币种),数量是纯量。
+
+import type { Currency } from "@folio/fx";
 
 const SUBSCRIPTS = "₀₁₂₃₄₅₆₇₈₉";
 const TINY_THRESHOLD = 0.01; // 低于此用下标记法
 const COMPACT_THRESHOLD = 100_000_000; // 1e8,不低于此且 compact 用 M/B/T
 const DEFAULT_MAX_FRACTION_DIGITS = 2;
+const CRYPTO_FRACTION_DIGITS = 8; // 加密展示币种(BTC/ETH)的最多小数位
 
 type NumberLike = number | bigint | string | null | undefined;
 
@@ -95,4 +93,85 @@ export const formatNumber = (
 
   // 负号在最前(unit 之前),unit 未传时也不会污染输出(修复旧版 "-undefined")。
   return `${value < 0 ? "-" : ""}${unit}${body}`;
+};
+
+const isTiny = (n: number): boolean =>
+  Number.isFinite(n) && n !== 0 && Math.abs(n) < TINY_THRESHOLD;
+
+// locale+currency+compact 缓存的货币 formatter(Intl currency style)。
+const currencyFormatters = new Map<string, Intl.NumberFormat>();
+const currencyFormatter = (
+  locale: string,
+  currency: string,
+  compact: boolean,
+): Intl.NumberFormat => {
+  const key = `${locale}|${currency}|${compact ? "c" : "s"}`;
+  let f = currencyFormatters.get(key);
+  if (!f) {
+    f = new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      ...(compact
+        ? { notation: "compact", compactDisplay: "short", maximumFractionDigits: 2 }
+        : {}),
+    });
+    currencyFormatters.set(key, f);
+  }
+  return f;
+};
+
+// 极小法币值:取 Intl 货币外壳,把数字部分替换成下标 body(裸 Intl 会把 0.005 舍成 $0.01 丢信息)。
+export const formatTinyCurrency = (
+  value: number,
+  { locale = "en-US", currency = "USD" }: Partial<{ locale: string; currency: string }> = {},
+): string => {
+  const negative = value < 0;
+  const body = formatTiny(Math.abs(value));
+  const parts = new Intl.NumberFormat(locale, { style: "currency", currency }).formatToParts(0);
+  const NUMERIC = new Set(["integer", "group", "decimal", "fraction"]);
+  let emitted = false;
+  let shell = "";
+  for (const p of parts) {
+    if (NUMERIC.has(p.type)) {
+      if (!emitted) {
+        shell += body;
+        emitted = true;
+      }
+      continue;
+    }
+    if (p.type === "minusSign") continue; // 用 abs + 自己的符号
+    shell += p.value; // 货币符号、literal 空格等(跟随 locale)
+  }
+  return `${negative ? "-" : ""}${shell}`;
+};
+
+/**
+ * 货币金额展示。换算(value / rate)后按 currency.kind 分支:
+ *   · fiat  → Intl currency style(符号/位置/小数位随币种+locale;≥1e8 紧凑);极小值走 formatTinyCurrency。
+ *   · crypto→ `₿`/`Ξ` 前缀 + 高精度数字(复用 formatNumber:千分位/去尾零/极小值下标;不 compact)。
+ */
+export const formatMoney = (
+  value: number,
+  {
+    rate = 1,
+    locale = "en-US",
+    currency,
+    compact,
+  }: { rate?: number; locale?: string; currency: Currency; compact?: boolean },
+): string => {
+  const converted = value / rate;
+
+  if (currency.kind === "crypto") {
+    const sym = currency.symbol ?? currency.code;
+    const body = formatNumber(Math.abs(converted), {
+      compact: false,
+      maxFractionDigits: CRYPTO_FRACTION_DIGITS,
+    });
+    return `${converted < 0 ? "-" : ""}${sym}${body}`;
+  }
+
+  if (isTiny(converted)) return formatTinyCurrency(converted, { locale, currency: currency.code });
+  // compact 未显式给时,≥1e8 自动紧凑;图表轴可显式传 true 缩短标签。
+  const useCompact = compact ?? Math.abs(converted) >= COMPACT_THRESHOLD;
+  return currencyFormatter(locale, currency.code, useCompact).format(converted);
 };

@@ -7,6 +7,7 @@ import { isComplete, openCreds } from "../creds";
 import { revalueManual } from "../revalue";
 import { balances } from "./balances";
 import { db } from "./db";
+import { warmFx } from "./fx";
 import { warmPlatformsForUser } from "./platforms";
 import { buildTokens, warmTokens } from "./tokens";
 
@@ -36,11 +37,18 @@ export async function warmTokensForUser(userId: string): Promise<void> {
     buildTokens(env),
     snapshots.flatMap((s) => s.balances),
   );
-  // 平台元数据一并预热(链一次取整表;失败不拖垮价格预热)。
+  // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。
   try {
     await warmPlatformsForUser(userId);
   } catch (e) {
     getLogger(["folio", "web", "sync"]).warn("warmPlatforms failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+  try {
+    await warmFx();
+  } catch (e) {
+    getLogger(["folio", "web", "sync"]).warn("warmFx failed", {
       error: e instanceof Error ? e.message : String(e),
     });
   }

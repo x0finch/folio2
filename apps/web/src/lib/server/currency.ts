@@ -1,0 +1,29 @@
+import { env } from "cloudflare:workers";
+import { createServerFn } from "@tanstack/react-start";
+import { getRequestHeaders } from "@tanstack/react-start/server";
+import { readCurrencyCookie, resolveCurrency } from "../currency";
+import type { PreferCurrency } from "../hooks/use-prefer-currency";
+import { buildFx } from "./fx";
+
+// 服务端定展示币种:读 folio_currency cookie → SUPPORTED 校验 → 取该币种汇率。
+// 冷缓存(尚未 sync 预热)→ 按需 warm 一次(exchange_rates 一次拉全),让首次切换即生效,
+// 不必先同步。仍缺(未收录/离线)/异常 → 回退 USD(rate=1),绝不让认证区加载失败或空白。
+export const getDisplayCurrency = createServerFn({ method: "GET" }).handler(
+  async (): Promise<PreferCurrency> => {
+    const headers = getRequestHeaders();
+    const currency = resolveCurrency(readCurrencyCookie(headers.get("cookie")));
+    if (currency.code === "USD") return { currency, rate: 1 };
+    const fx = buildFx(env);
+    let rate: number | undefined;
+    try {
+      rate = await fx.resolve(currency.code);
+      if (rate == null) {
+        await fx.warm([currency.code]); // 冷缓存 → 按需拉一次
+        rate = await fx.resolve(currency.code);
+      }
+    } catch {
+      rate = undefined;
+    }
+    return rate == null ? { currency: resolveCurrency("USD"), rate: 1 } : { currency, rate };
+  },
+);
