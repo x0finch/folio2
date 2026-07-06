@@ -4,7 +4,7 @@ import type { SyncDeps } from "@folio/sync";
 import type { ProviderAsset } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import { isComplete, openCreds } from "../creds";
-import { revalueManual } from "../revalue";
+import { revalue } from "../revalue";
 import { balances } from "./balances";
 import { db } from "./db";
 import { warmFx } from "./fx";
@@ -77,7 +77,7 @@ export function buildSyncDeps(): SyncDeps {
     },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
-    // 写快照前重估(P7.4.2):仅 manual 用市场价改 usdValue(@folio/sync 不依赖 token 层,逻辑注入在此)。
-    revalue: (type, rows) => revalueManual(tokens, type, rows),
+    // 写快照前重估(P7.4.2):盯市类型(manual / onchain_bitcoin)用市场价改 value(@folio/sync 不依赖 token 层,逻辑注入在此)。
+    revalue: (type, rows) => revalue(tokens, type, rows),
   };
 }

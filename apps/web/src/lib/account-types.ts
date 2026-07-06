@@ -9,17 +9,23 @@ export const TYPE_GROUPS: { category: AccountCategory; types: AccountType[] }[] 
   { category: "manual", types: ["manual"] },
   {
     category: "onchain",
-    types: ["onchain_evm", "onchain_solana", "onchain_sui", "onchain_cosmos"],
+    types: ["onchain_evm", "onchain_bitcoin", "onchain_solana", "onchain_sui", "onchain_cosmos"],
   },
   { category: "exchange", types: ["exchange_binance", "exchange_okx"] },
   { category: "perp", types: ["perp_hyperliquid"] },
 ];
 
-export type OnchainType = "onchain_evm" | "onchain_solana" | "onchain_sui" | "onchain_cosmos";
+export type OnchainType =
+  | "onchain_evm"
+  | "onchain_bitcoin"
+  | "onchain_solana"
+  | "onchain_sui"
+  | "onchain_cosmos";
 
 export const TYPE_LABELS: Partial<Record<AccountType, string>> = {
   manual: "Manual",
   onchain_evm: "EVM",
+  onchain_bitcoin: "Bitcoin",
   onchain_solana: "Solana",
   onchain_sui: "Sui",
   onchain_cosmos: "Cosmos",

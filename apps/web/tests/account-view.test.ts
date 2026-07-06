@@ -90,6 +90,55 @@ describe("toAccountSections", () => {
   });
 
   it("handles an empty account", () => {
-    expect(toAccountSections([])).toEqual({ spot: [], defi: [], perp: null });
+    expect(toAccountSections([])).toEqual({ spot: [], defi: [], perp: null, bitcoin: null });
+  });
+
+  it("extracts Bitcoin meta (pending + xpub distribution/receive) from the BTC balance", () => {
+    const s = toAccountSections([
+      b({
+        id: "1",
+        symbol: "BTC",
+        kind: "spot",
+        usdValue: 5000,
+        tokenKey: "chain:bitcoin/native:btc",
+        metaJson: JSON.stringify({
+          pendingSats: 500000,
+          addresses: [
+            {
+              address: "bc1qrecv",
+              path: "m/84'/0'/0'/0/0",
+              chain: "receive",
+              balanceSats: 50000,
+              pendingSats: 0,
+            },
+          ],
+          receive: {
+            lastUsed: { index: 0, address: "bc1qrecv" },
+            next: [{ index: 1, address: "bc1qnext" }],
+          },
+        }),
+      }),
+    ]);
+    // BTC 仍进现货表
+    expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
+    // 明细抽出
+    expect(s.bitcoin?.pendingSats).toBe(500000);
+    expect(s.bitcoin?.addresses?.[0].address).toBe("bc1qrecv");
+    expect(s.bitcoin?.receive?.next[0]).toEqual({ index: 1, address: "bc1qnext" });
+  });
+
+  it("no Bitcoin detail when meta is empty (address mode, zero pending)", () => {
+    const s = toAccountSections([
+      b({
+        id: "1",
+        symbol: "BTC",
+        kind: "spot",
+        usdValue: 5000,
+        tokenKey: "chain:bitcoin/native:btc",
+        metaJson: JSON.stringify({ pendingSats: 0 }),
+      }),
+    ]);
+    expect(s.bitcoin).toBeNull();
+    expect(s.spot).toHaveLength(1);
   });
 });

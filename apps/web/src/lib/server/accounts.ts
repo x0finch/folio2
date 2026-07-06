@@ -3,6 +3,7 @@ import type { AccountSafe } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { SCRIPT_TYPE_VALUES } from "../bitcoin-scripts";
 import { isComplete, safeView, sealCreds } from "../creds";
 import { requireAuth } from "../require-auth";
 import { balances } from "./balances";
@@ -86,8 +87,9 @@ async function createAddressAccount(
   type: Parameters<typeof balances.validateCredentials>[0]["type"],
   label: string,
   address: string,
+  extra?: Record<string, string>, // bitcoin xpub 的 scriptType 等附加 public 输入
 ): Promise<AccountSafe> {
-  const raw = { identifier: address };
+  const raw = { identifier: address, ...extra };
   await balances.validateCredentials({ type, label, userId }, raw, { liveness: true });
   const account = await db.createAccount(userId, {
     type,
@@ -99,15 +101,29 @@ async function createAddressAccount(
 }
 
 const OnchainInput = z.object({
-  type: z.enum(["onchain_evm", "onchain_solana", "onchain_sui", "onchain_cosmos"]),
+  type: z.enum([
+    "onchain_evm",
+    "onchain_bitcoin",
+    "onchain_solana",
+    "onchain_sui",
+    "onchain_cosmos",
+  ]),
   label: z.string().trim().min(1, "label is required"),
   address: z.string().trim(), // seal 的是原始输入 → wire 先 trim 保持落库规范
+  // bitcoin 扩展公钥的脚本类型(仅 xpub 用,单地址忽略);其它链忽略。枚举与客户端下拉同源。
+  scriptType: z.enum(SCRIPT_TYPE_VALUES).optional(),
 });
 export const createOnchainAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(OnchainInput)
   .handler(({ data, context }) =>
-    createAddressAccount(context.userId, data.type, data.label, data.address),
+    createAddressAccount(
+      context.userId,
+      data.type,
+      data.label,
+      data.address,
+      data.scriptType ? { scriptType: data.scriptType } : undefined,
+    ),
   );
 
 const PerpInput = z.object({
