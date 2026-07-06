@@ -1,6 +1,9 @@
 import {
   type Balance,
   type BalanceProvider,
+  type BitcoinAddress,
+  type BitcoinMeta,
+  type BitcoinReceive,
   buildTokenKey,
   defineProvider,
   ProviderError,
@@ -17,7 +20,13 @@ import {
   GAP_LIMIT,
   SATS_PER_BTC,
 } from "./constants";
-import { isScriptType, makeDeriver, recommendedScript, SCRIPT_TYPES } from "./derive";
+import {
+  derivationPath,
+  isScriptType,
+  makeDeriver,
+  recommendedScript,
+  SCRIPT_TYPES,
+} from "./derive";
 import { ensureOk, esploraGet } from "./source";
 
 export type { ScriptType } from "./derive";
@@ -31,12 +40,7 @@ export { recommendedScript, SCRIPT_TYPES } from "./derive";
 // BTC 身份键:chain:bitcoin/native:btc(仅作身份 + 平台归属 → "Bitcoin")。
 export const BTC_TOKEN_KEY = buildTokenKey({ chain: "bitcoin", native: true, symbol: "BTC" });
 
-// 挂在那条 BTC Balance 上的 meta(未确认额;xpub 超硬上限时标 truncated)。
-// 派生地址分布 + 收款地址指引(addresses/receive)留下一切片。
-export interface BitcoinMeta {
-  pendingSats: number; // 账户净未确认(± mempool)
-  truncated?: boolean; // xpub 扫描超地址硬上限,结果不完整
-}
+// BitcoinMeta 契约在 @folio/balances-basic(provider 生产、app 消费,两端窄化)。
 
 // Esplora /address/:addr 的最小形状(仅取用到的字段)。
 interface AddressStats {
@@ -54,12 +58,12 @@ const netSats = (s?: AddressStats): number => (s?.funded_txo_sum ?? 0) - (s?.spe
 const isUsed = (res: AddressResponse): boolean =>
   (res.chain_stats?.funded_txo_count ?? 0) > 0 || (res.mempool_stats?.funded_txo_count ?? 0) > 0;
 
-// 已确认净额 → amount(BTC);未确认净额 → meta.pendingSats(不进权威值)。
+// 已确认净额 → amount(BTC);未确认净额 → meta.pendingSats(不进权值)。
 // 既无已确认又无未确认且未截断 → 空(无持仓);仅未确认仍产一行(amount=0 + pending 徽标)。
 function toBtcBalances(
   confirmedSats: number,
   pendingSats: number,
-  extra?: { truncated?: boolean },
+  extra?: Partial<Omit<BitcoinMeta, "pendingSats">>,
 ): Balance[] {
   if (confirmedSats <= 0 && pendingSats === 0 && !extra?.truncated) return [];
   return [
@@ -94,19 +98,30 @@ async function fetchAddress(base: string, addr: string): Promise<AddressResponse
   }
 }
 
+interface ScanResult {
+  confirmedSats: number;
+  pendingSats: number;
+  truncated: boolean;
+  addresses: BitcoinAddress[]; // 仅非零
+  receive: BitcoinReceive;
+}
+
 // xpub gap 扫描:外部(0)+ 找零(1)两链,各连续 GAP_LIMIT 个未用地址即停;两链合计超 ADDRESS_CAP
-// 提前停并标 truncated。汇总已确认/未确认净额。逐地址顺序查(gap 逻辑需前一地址结果决定是否续)。
+// 提前停并标 truncated。逐地址顺序查(gap 逻辑需前一地址结果决定是否续),汇总净额 + 产分布 + 收款指引。
 async function scanXpub(
   base: string,
   ext: string,
   scriptType: string | undefined,
-): Promise<{ confirmedSats: number; pendingSats: number; truncated: boolean }> {
+): Promise<ScanResult> {
   const script = isScriptType(scriptType) ? scriptType : recommendedScript(ext);
   const derive = makeDeriver(ext, script);
   let confirmedSats = 0;
   let pendingSats = 0;
   let scanned = 0;
   let truncated = false;
+  const addresses: BitcoinAddress[] = [];
+  const external: { index: number; address: string; used: boolean }[] = []; // 外部链按下标序,算收款指引
+
   for (const chain of [0, 1]) {
     let gap = 0;
     let index = 0;
@@ -115,16 +130,48 @@ async function scanXpub(
         truncated = true;
         break;
       }
-      const res = await fetchAddress(base, derive(chain, index));
-      confirmedSats += netSats(res.chain_stats);
-      pendingSats += netSats(res.mempool_stats);
+      const address = derive(chain, index);
+      const res = await fetchAddress(base, address);
+      const confirmed = netSats(res.chain_stats);
+      const pending = netSats(res.mempool_stats);
+      confirmedSats += confirmed;
+      pendingSats += pending;
+      if (confirmed > 0 || pending !== 0) {
+        addresses.push({
+          address,
+          path: derivationPath(script, chain, index),
+          chain: chain === 0 ? "receive" : "change",
+          balanceSats: confirmed,
+          pendingSats: pending,
+        });
+      }
+      if (chain === 0) external.push({ index, address, used: isUsed(res) });
       gap = isUsed(res) ? 0 : gap + 1;
       index++;
       scanned++;
     }
     if (truncated) break;
   }
-  return { confirmedSats, pendingSats, truncated };
+
+  // 收款指引:lastUsed = 外部链最大已用下标;next = 其后未用的头两个(external 已按下标序)。
+  const used = external.filter((e) => e.used);
+  const lastUsed = used.length > 0 ? used[used.length - 1] : null;
+  const lastIndex = lastUsed ? lastUsed.index : -1;
+  const next = external
+    .filter((e) => e.index > lastIndex && !e.used)
+    .slice(0, 2)
+    .map((e) => ({ index: e.index, address: e.address }));
+
+  return {
+    confirmedSats,
+    pendingSats,
+    truncated,
+    addresses,
+    receive: {
+      lastUsed: lastUsed ? { index: lastUsed.index, address: lastUsed.address } : null,
+      next,
+    },
+  };
 }
 
 export const bitcoinProvider = defineProvider({
@@ -153,12 +200,12 @@ export const bitcoinProvider = defineProvider({
     const id = ctx.creds.identifier;
     const base = baseUrl(ctx.globalKeys);
     if (isExtendedPubkey(id)) {
-      const { confirmedSats, pendingSats, truncated } = await scanXpub(
+      const { confirmedSats, pendingSats, truncated, addresses, receive } = await scanXpub(
         base,
         id,
         ctx.creds.scriptType,
       );
-      return toBtcBalances(confirmedSats, pendingSats, { truncated });
+      return toBtcBalances(confirmedSats, pendingSats, { truncated, addresses, receive });
     }
     const res = await fetchAddress(base, id);
     return addressToBalances(res);

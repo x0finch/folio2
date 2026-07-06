@@ -20,6 +20,11 @@ export function recommendedScript(ext: string): ScriptType {
   return "native";
 }
 
+// BIP purpose(脚本类型 → 派生路径 purpose)。用于展示派生路径(BitcoinMeta.addresses[].path)。
+const PURPOSE: Record<ScriptType, number> = { legacy: 44, nested: 49, native: 84, taproot: 86 };
+export const derivationPath = (script: ScriptType, chain: number, index: number): string =>
+  `m/${PURPOSE[script]}'/0'/0'/${chain}/${index}`;
+
 const b58c = base58check(sha256);
 const hexToBytes = (h: string): Uint8Array =>
   Uint8Array.from((h.match(/.{2}/g) ?? []).map((b) => Number.parseInt(b, 16)));

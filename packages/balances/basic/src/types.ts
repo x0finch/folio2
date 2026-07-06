@@ -100,6 +100,28 @@ export interface DefiMeta {
   positionType?: string;
 }
 
+// bitcoin(kind:"spot",tokenKey chain:bitcoin/native:btc)的 meta 共享契约。
+// provider(@folio/provider-bitcoin)生产、app(account-view/holdings)消费,两端窄化到此,避免 key 漂移。
+// 值不变量照旧:Balance.amount/value = 已确认(≥1 确认);未确认(mempool)只在此 meta 里(pendingSats),
+// 可被 RBF/丢弃,不进权威值。xpub 模式额外带派生地址分布 + 收款地址指引。
+export interface BitcoinAddress {
+  address: string;
+  path: string; // 派生路径 m/purpose'/0'/0'/chain/index
+  chain: "receive" | "change"; // 外部收款链 / 找零链
+  balanceSats: number; // 已确认净额(sats)
+  pendingSats: number; // 未确认净额(± sats)
+}
+export interface BitcoinReceive {
+  lastUsed: { index: number; address: string } | null; // 外部链最大已用下标
+  next: { index: number; address: string }[]; // 其后未用的头两个外部地址
+}
+export interface BitcoinMeta {
+  pendingSats: number; // 账户净未确认(± mempool);两模式都填
+  addresses?: BitcoinAddress[]; // xpub:仅非零(有余额或在途)的派生地址
+  receive?: BitcoinReceive; // xpub:收款地址指引
+  truncated?: boolean; // xpub 扫描超地址硬上限,结果不完整
+}
+
 export interface AssetSnapshot {
   accountId: string;
   takenAt: number; // epoch ms

@@ -126,6 +126,42 @@ describe("bitcoinProvider.fetchBalances — xpub 模式(gap 扫描)", () => {
     expect(spy.mock.calls.length).toBeLessThan(60);
   });
 
+  it("产分布(仅非零)+ 收款指引(lastUsed + 其后两个未用外部地址)", async () => {
+    const RECV0 = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu"; // 外部 0/0
+    const RECV1 = "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g"; // 外部 0/1
+    const CHANGE0 = "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el"; // 找零 1/0
+    const funded = (sats: number) =>
+      new Response(
+        JSON.stringify({
+          chain_stats: { funded_txo_sum: sats, spent_txo_sum: 0, funded_txo_count: 1 },
+          mempool_stats: {},
+        }),
+        { status: 200 },
+      );
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes(RECV0)) return funded(50000);
+      if (u.includes(CHANGE0)) return funded(30000);
+      return empty();
+    });
+    const balances = await bitcoinProvider.fetchBalances(
+      ctx({ creds: { identifier: XPUB84, scriptType: "native" } }),
+    );
+    const meta = balances[0].meta as {
+      addresses: { address: string; chain: string; balanceSats: number }[];
+      receive: { lastUsed: { index: number; address: string }; next: { index: number }[] };
+    };
+    expect(balances[0].amount).toBe(0.0008); // 80000 sats
+    // 分布仅非零:外部 0/0(收款)+ 找零 1/0
+    expect(meta.addresses.map((a) => a.address).sort()).toEqual([CHANGE0, RECV0].sort());
+    expect(meta.addresses.find((a) => a.address === CHANGE0)?.chain).toBe("change");
+    // 收款指引:lastUsed = 外部 0/0;next = 0/1 + 0/2
+    expect(meta.receive.lastUsed).toEqual({ index: 0, address: RECV0 });
+    expect(meta.receive.next[0]).toEqual({ index: 1, address: RECV1 });
+    expect(meta.receive.next).toHaveLength(2);
+    expect(meta.receive.next[1].index).toBe(2);
+  });
+
   it("全用满 → 超地址硬上限提前停并标 truncated", async () => {
     // 每次返回新 Response(body 只能读一次)。
     vi.spyOn(globalThis, "fetch").mockImplementation(
