@@ -19,6 +19,12 @@ import { cloneElement, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { type OnchainType, TYPE_GROUPS, typeLabel } from "../lib/account-types";
 import {
+  BTC_SCRIPT_OPTIONS,
+  isExtendedPubkey,
+  recommendedScript,
+  type ScriptType,
+} from "../lib/bitcoin-scripts";
+import {
   createExchangeAccount,
   createManualAccount,
   createOnchainAccount,
@@ -57,9 +63,15 @@ async function submitAccount(type: AccountType, label: string, values: Record<st
   if (type === "perp_hyperliquid") {
     return createPerpAccount({ data: { type, label, address: values.identifier ?? "" } });
   }
-  // 其余为链上类型(注册表只暴露已实现的 onchain_*)。
+  // 其余为链上类型(注册表只暴露已实现的 onchain_*)。bitcoin 额外带 scriptType(仅 xpub 用)。
   return createOnchainAccount({
-    data: { type: type as OnchainType, label, address: values.identifier ?? "" },
+    data: {
+      type: type as OnchainType,
+      label,
+      address: values.identifier ?? "",
+      // BitcoinFields 只写入合法枚举值;服务端再经 zod enum 校验兜底。
+      scriptType: (values.scriptType as ScriptType | undefined) || undefined,
+    },
   });
 }
 
@@ -224,6 +236,64 @@ function GenericFields({
   );
 }
 
+// Bitcoin 字段:单 identifier(地址或扩展公钥),检测到扩展公钥后动态显示脚本类型下拉、按前缀预选。
+// ProviderInputType 无 enum → 脚本类型的 select + 动态显隐走本定制分支(仿 manual/perp),不走 GenericFields。
+function BitcoinFields({
+  specs,
+  values,
+  setValues,
+}: {
+  specs: InputSpec[];
+  values: Record<string, string>;
+  setValues: (fn: (v: Record<string, string>) => Record<string, string>) => void;
+}) {
+  const ti = useTranslations("Inputs");
+  const idSpec = specs.find((s) => s.key === "identifier");
+  const id = values.identifier ?? "";
+  return (
+    <>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="add-identifier">{ti(idSpec?.label ?? "Bitcoin address or xpub")}</Label>
+        <Input
+          id="add-identifier"
+          required
+          value={id}
+          placeholder={idSpec?.desc ? ti(idSpec.desc) : undefined}
+          onChange={(val) =>
+            setValues((v) => {
+              const next: Record<string, string> = { ...v, identifier: val };
+              // 扩展公钥 → 按前缀预选脚本类型;纯地址 → 无脚本类型。
+              if (isExtendedPubkey(val)) next.scriptType = recommendedScript(val);
+              else delete next.scriptType;
+              return next;
+            })
+          }
+        />
+      </div>
+      {isExtendedPubkey(id) && (
+        <div className="flex flex-col gap-2">
+          <Label>{ti("Address type")}</Label>
+          <Select
+            value={values.scriptType ?? recommendedScript(id)}
+            onValueChange={(v) => setValues((prev) => ({ ...prev, scriptType: v }))}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BTC_SCRIPT_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {ti(o.label)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+    </>
+  );
+}
+
 // 单类型的录入表单。key={type} 重挂 → 切类型自动清空本地态(不用 useEffect→setState)。
 function AccountForm({
   type,
@@ -265,6 +335,8 @@ function AccountForm({
       </div>
       {type === "manual" ? (
         <ManualFields values={values} setValues={setValues} />
+      ) : type === "onchain_bitcoin" ? (
+        <BitcoinFields specs={specs} values={values} setValues={setValues} />
       ) : (
         <GenericFields specs={specs} values={values} setValues={setValues} />
       )}

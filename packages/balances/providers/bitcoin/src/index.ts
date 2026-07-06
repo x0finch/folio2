@@ -7,31 +7,42 @@ import {
 } from "@folio/balances-basic";
 import { z } from "zod";
 import {
+  ADDRESS_CAP,
   ADDRESS_PATH,
   BTC_ADDRESS_RE,
   ESPLORA_BASE_DEFAULT,
+  ESPLORA_BASE_ENV,
+  EXT_PUBKEY_FULL_RE,
   EXT_PUBKEY_RE,
+  GAP_LIMIT,
   SATS_PER_BTC,
 } from "./constants";
+import { isScriptType, makeDeriver, recommendedScript, SCRIPT_TYPES } from "./derive";
 import { ensureOk, esploraGet } from "./source";
 
-// @folio/balances-provider-bitcoin —— 只读 Bitcoin(onchain_bitcoin)。阶段 1:单地址模式。
-// identifier(public)走 ctx.creds.identifier;数据源 Esplora(mempool.space 公共实例),免密钥。零依赖,原生 fetch。
-// (自托管节点覆写 BITCOIN_ESPLORA_BASE 留阶段 2 连同 app 侧接线一起上,阶段 1 不留惰性 plumbing。)
-// 值不在此算:provider 只产 amount(已确认 BTC),value=0 交给 app 的 revalue 盯市(token 层唯一价源)。
+export type { ScriptType } from "./derive";
+export { recommendedScript, SCRIPT_TYPES } from "./derive";
+
+// @folio/balances-provider-bitcoin —— 只读 Bitcoin(onchain_bitcoin)。地址 + xpub 两模式。
+// identifier(public)= BTC 地址或扩展公钥(xpub/ypub/zpub);扩展公钥用 scriptType(public)选脚本类型
+// → 本地派生(@scure)+ gap 扫描汇总。数据源 Esplora(mempool.space),可经 globalKeys[BITCOIN_ESPLORA_BASE]
+// 覆写自托管节点。值不在此算:provider 只产已确认 BTC amount(value=0),交 app 的 revalue 盯市(token 层唯一价源)。
 
 // BTC 身份键:chain:bitcoin/native:btc(仅作身份 + 平台归属 → "Bitcoin")。
 export const BTC_TOKEN_KEY = buildTokenKey({ chain: "bitcoin", native: true, symbol: "BTC" });
 
-// 挂在那条 BTC Balance 上的 meta(阶段 1 仅未确认额;阶段 2 叠加派生分布/收款地址)。
+// 挂在那条 BTC Balance 上的 meta(未确认额;xpub 超硬上限时标 truncated)。
+// 派生地址分布 + 收款地址指引(addresses/receive)留下一切片。
 export interface BitcoinMeta {
   pendingSats: number; // 账户净未确认(± mempool)
+  truncated?: boolean; // xpub 扫描超地址硬上限,结果不完整
 }
 
 // Esplora /address/:addr 的最小形状(仅取用到的字段)。
 interface AddressStats {
   funded_txo_sum?: number;
   spent_txo_sum?: number;
+  funded_txo_count?: number;
 }
 export interface AddressResponse {
   chain_stats?: AddressStats;
@@ -39,14 +50,18 @@ export interface AddressResponse {
 }
 
 const netSats = (s?: AddressStats): number => (s?.funded_txo_sum ?? 0) - (s?.spent_txo_sum ?? 0);
+// used 判定:曾收到过(已确认或在途)→ 用于 gap 扫描是否继续(在途收款也算用过)。
+const isUsed = (res: AddressResponse): boolean =>
+  (res.chain_stats?.funded_txo_count ?? 0) > 0 || (res.mempool_stats?.funded_txo_count ?? 0) > 0;
 
-// 纯解析:Esplora 地址响应 → Balance[]。与 IO 分离,便于 golden test。
-// 已确认 = chain_stats 净额(≥1 确认,进权威 amount);未确认 = mempool_stats 净额(走 meta,不进值)。
-// 既无已确认又无未确认 → 空(无持仓);仅未确认(confirmed=0,pending≠0)仍产一行(amount=0 + pending 徽标)。
-export function addressToBalances(res: AddressResponse): Balance[] {
-  const confirmedSats = netSats(res.chain_stats);
-  const pendingSats = netSats(res.mempool_stats);
-  if (confirmedSats <= 0 && pendingSats === 0) return [];
+// 已确认净额 → amount(BTC);未确认净额 → meta.pendingSats(不进权威值)。
+// 既无已确认又无未确认且未截断 → 空(无持仓);仅未确认仍产一行(amount=0 + pending 徽标)。
+function toBtcBalances(
+  confirmedSats: number,
+  pendingSats: number,
+  extra?: { truncated?: boolean },
+): Balance[] {
+  if (confirmedSats <= 0 && pendingSats === 0 && !extra?.truncated) return [];
   return [
     {
       symbol: "BTC",
@@ -54,48 +69,113 @@ export function addressToBalances(res: AddressResponse): Balance[] {
       value: 0, // 交给 revalue 盯市(amount × BTC 市价)
       kind: "spot",
       tokenKey: BTC_TOKEN_KEY,
-      meta: { pendingSats } satisfies BitcoinMeta,
+      meta: { pendingSats, ...extra } satisfies BitcoinMeta,
     },
   ];
 }
 
+// 纯解析:单地址 Esplora 响应 → Balance[]。与 IO 分离,便于 golden test。
+export function addressToBalances(res: AddressResponse): Balance[] {
+  return toBtcBalances(netSats(res.chain_stats), netSats(res.mempool_stats));
+}
+
 const isExtendedPubkey = (id: string): boolean => EXT_PUBKEY_RE.test(id);
+
+const baseUrl = (globalKeys: Record<string, string>): string =>
+  globalKeys[ESPLORA_BASE_ENV] || ESPLORA_BASE_DEFAULT;
+
+async function fetchAddress(base: string, addr: string): Promise<AddressResponse> {
+  const res = await esploraGet(base, ADDRESS_PATH(addr));
+  ensureOk(res);
+  try {
+    return (await res.json()) as AddressResponse;
+  } catch (cause) {
+    throw new ProviderError("PARSE_ERROR", "esplora returned invalid JSON", { cause });
+  }
+}
+
+// xpub gap 扫描:外部(0)+ 找零(1)两链,各连续 GAP_LIMIT 个未用地址即停;两链合计超 ADDRESS_CAP
+// 提前停并标 truncated。汇总已确认/未确认净额。逐地址顺序查(gap 逻辑需前一地址结果决定是否续)。
+async function scanXpub(
+  base: string,
+  ext: string,
+  scriptType: string | undefined,
+): Promise<{ confirmedSats: number; pendingSats: number; truncated: boolean }> {
+  const script = isScriptType(scriptType) ? scriptType : recommendedScript(ext);
+  const derive = makeDeriver(ext, script);
+  let confirmedSats = 0;
+  let pendingSats = 0;
+  let scanned = 0;
+  let truncated = false;
+  for (const chain of [0, 1]) {
+    let gap = 0;
+    let index = 0;
+    while (gap < GAP_LIMIT) {
+      if (scanned >= ADDRESS_CAP) {
+        truncated = true;
+        break;
+      }
+      const res = await fetchAddress(base, derive(chain, index));
+      confirmedSats += netSats(res.chain_stats);
+      pendingSats += netSats(res.mempool_stats);
+      gap = isUsed(res) ? 0 : gap + 1;
+      index++;
+      scanned++;
+    }
+    if (truncated) break;
+  }
+  return { confirmedSats, pendingSats, truncated };
+}
 
 export const bitcoinProvider = defineProvider({
   accountType: "onchain_bitcoin",
+  usesGlobalKeys: [ESPLORA_BASE_ENV], // 可选自托管 base;不设/空则用公共默认
   inputs: [
     {
       key: "identifier",
       type: "public",
-      label: "Bitcoin Address",
-      desc: "BTC address (1…/3…/bc1…)",
-      validator: z.string().regex(BTC_ADDRESS_RE, "expected a BTC address"),
+      label: "Bitcoin address or xpub",
+      desc: "address (1…/3…/bc1…) or xpub/ypub/zpub",
+      validator: z.string().refine((v) => BTC_ADDRESS_RE.test(v) || EXT_PUBKEY_FULL_RE.test(v), {
+        message: "expected a BTC address or extended public key",
+      }),
+    },
+    {
+      // 仅扩展公钥模式用(单地址忽略);缺省由 recommendedScript 按前缀兜底。
+      key: "scriptType",
+      type: "public",
+      label: "Address type",
+      validator: z.enum(SCRIPT_TYPES).optional(),
     },
   ],
 
   async fetchBalances(ctx): Promise<Balance[]> {
     const id = ctx.creds.identifier;
-    // 阶段 2 才支持扩展公钥派生;阶段 1 明确不支持(validateCredentials 也拒 → 双保险)。
+    const base = baseUrl(ctx.globalKeys);
     if (isExtendedPubkey(id)) {
-      throw new ProviderError("UNSUPPORTED", "extended pubkey not yet supported");
+      const { confirmedSats, pendingSats, truncated } = await scanXpub(
+        base,
+        id,
+        ctx.creds.scriptType,
+      );
+      return toBtcBalances(confirmedSats, pendingSats, { truncated });
     }
-    const res = await esploraGet(ESPLORA_BASE_DEFAULT, ADDRESS_PATH(id));
-    ensureOk(res);
-    let json: AddressResponse;
-    try {
-      json = (await res.json()) as AddressResponse;
-    } catch (cause) {
-      throw new ProviderError("PARSE_ERROR", "esplora returned invalid JSON", { cause });
-    }
-    return addressToBalances(json);
+    const res = await fetchAddress(base, id);
+    return addressToBalances(res);
   },
 
-  // 轻量探活:打地址端点,res.ok 即可(地址格式已由 validateCredentials 保证)。任何失败 → false。
+  // 轻量探活:地址模式打地址端点;xpub 模式派生首地址探端点(顺带校验扩展公钥可解析)。任何失败 → false。
   async validate(ctx): Promise<boolean> {
     const id = ctx.creds.identifier;
-    if (isExtendedPubkey(id)) return false;
+    const base = baseUrl(ctx.globalKeys);
     try {
-      const res = await esploraGet(ESPLORA_BASE_DEFAULT, ADDRESS_PATH(id));
+      const probe = isExtendedPubkey(id)
+        ? makeDeriver(
+            id,
+            isScriptType(ctx.creds.scriptType) ? ctx.creds.scriptType : recommendedScript(id),
+          )(0, 0)
+        : id;
+      const res = await esploraGet(base, ADDRESS_PATH(probe));
       return res.ok;
     } catch {
       return false;

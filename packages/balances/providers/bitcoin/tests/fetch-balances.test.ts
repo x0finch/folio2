@@ -61,12 +61,14 @@ describe("bitcoinProvider.fetchBalances", () => {
     expect(String(spy.mock.calls[0][0])).toContain("https://mempool.space/api");
   });
 
-  it("扩展公钥(xpub)阶段 1 不支持 → UNSUPPORTED,不发请求", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
-    await expect(
-      bitcoinProvider.fetchBalances(ctx({ creds: { identifier: "xpub6C...abc" } })),
-    ).rejects.toMatchObject({ code: "UNSUPPORTED" });
-    expect(spy).not.toHaveBeenCalled();
+  it("globalKeys[BITCOIN_ESPLORA_BASE] 覆写 → 走自托管节点", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify(addressFixture), { status: 200 }));
+    await bitcoinProvider.fetchBalances(
+      ctx({ globalKeys: { BITCOIN_ESPLORA_BASE: "https://node.local/api" } }),
+    );
+    expect(String(spy.mock.calls[0][0])).toContain("https://node.local/api");
   });
 
   it("429 → RATE_LIMITED(可重试,读 Retry-After)", async () => {
@@ -93,24 +95,87 @@ describe("bitcoinProvider.fetchBalances", () => {
   });
 });
 
-describe("identifier 校验(provider.inputs 的 validator)", () => {
-  const accept = async (id: string) =>
-    validateCredentials(bitcoinProvider.inputs ?? [], { identifier: id });
-  const reject = (id: string) => expect(accept(id)).rejects.toThrow(/identifier/);
+describe("bitcoinProvider.fetchBalances — xpub 模式(gap 扫描)", () => {
+  // XPUB84 native 首外部地址(BIP84 向量);其它派生地址视为空 → gap 达标即停。
+  const XPUB84 =
+    "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V";
+  const FIRST = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
+  const empty = () =>
+    new Response(JSON.stringify({ chain_stats: {}, mempool_stats: {} }), { status: 200 });
 
-  it("接受 P2PKH / P2SH / bech32 / taproot 地址", async () => {
-    await expect(accept("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")).resolves.toBeDefined(); // P2PKH
-    await expect(accept("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")).resolves.toBeDefined(); // P2SH
-    await expect(accept("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")).resolves.toBeDefined(); // bech32 P2WPKH
-    await expect(
-      accept("bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr"),
-    ).resolves.toBeDefined(); // bech32m taproot
+  it("单脚本派生 → 汇总已确认净额;连续未用达 gap 即停", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes(FIRST)) {
+        return new Response(
+          JSON.stringify({
+            chain_stats: { funded_txo_sum: 100000, spent_txo_sum: 0, funded_txo_count: 1 },
+            mempool_stats: {},
+          }),
+          { status: 200 },
+        );
+      }
+      return empty();
+    });
+    const balances = await bitcoinProvider.fetchBalances(
+      ctx({ creds: { identifier: XPUB84, scriptType: "native" } }),
+    );
+    expect(balances).toHaveLength(1);
+    expect(balances[0].amount).toBe(0.001); // 100000 sats
+    expect((balances[0].meta as { truncated?: boolean }).truncated).toBeFalsy();
+    // 两链各扫到 gap(20)截止:1 个已用 + 20 空(外链)+ 20 空(找零)≈ 41 次
+    expect(spy.mock.calls.length).toBeLessThan(60);
   });
 
-  it("拒绝 扩展公钥 / EVM 0x / 乱串", async () => {
-    await reject(
-      "xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKrhko4egpiMZbpiaQL2jkwSB1icqYh2cfDfVxdx4df189oLKnC5fSwqPfgyP3hooxujYzAU3",
+  it("全用满 → 超地址硬上限提前停并标 truncated", async () => {
+    // 每次返回新 Response(body 只能读一次)。
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            chain_stats: { funded_txo_sum: 1000, spent_txo_sum: 0, funded_txo_count: 1 },
+            mempool_stats: {},
+          }),
+          { status: 200 },
+        ),
     );
+    const balances = await bitcoinProvider.fetchBalances(
+      ctx({ creds: { identifier: XPUB84, scriptType: "native" } }),
+    );
+    expect((balances[0].meta as { truncated?: boolean }).truncated).toBe(true);
+  });
+});
+
+describe("identifier 校验(provider.inputs 的 validator)", () => {
+  const accept = async (id: string, extra: Record<string, string> = {}) =>
+    validateCredentials(bitcoinProvider.inputs ?? [], { identifier: id, ...extra });
+  const reject = (id: string) => expect(accept(id)).rejects.toThrow(/identifier/);
+
+  it("接受 P2PKH / P2SH / bech32 / taproot 地址 + xpub/ypub/zpub", async () => {
+    await expect(accept("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")).resolves.toBeDefined(); // P2PKH
+    await expect(accept("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")).resolves.toBeDefined(); // P2SH
+    await expect(accept("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")).resolves.toBeDefined(); // bech32
+    await expect(
+      accept("bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr"),
+    ).resolves.toBeDefined(); // taproot
+    await expect(
+      accept(
+        "xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKrhko4egpiMZbpiaQL2jkwSB1icqYh2cfDfVxdx4df189oLKnC5fSwqPfgyP3hooxujYzAU3",
+      ),
+    ).resolves.toBeDefined(); // xpub
+  });
+
+  it("scriptType 接受枚举值、省略时可选", async () => {
+    await expect(
+      accept("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", { scriptType: "taproot" }),
+    ).resolves.toBeDefined();
+    await expect(
+      validateCredentials(bitcoinProvider.inputs ?? [], {
+        identifier: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+      }),
+    ).resolves.toBeDefined(); // scriptType 省略 OK
+  });
+
+  it("拒绝 EVM 0x / 乱串", async () => {
     await reject("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
     await reject("not-an-address");
   });

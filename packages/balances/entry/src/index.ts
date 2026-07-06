@@ -12,5 +12,7 @@ export {
   maskCredential,
   ProviderError,
 } from "@folio/balances-basic";
+// bitcoin 脚本类型(type-only 转发 → 客户端 UI 复用,不拉入 @scure 运行时)。
+export type { ScriptType } from "@folio/balances-provider-bitcoin";
 export type { AccountShell, Balances, CreateBalancesConfig, InputSpec } from "./balances";
 export { createBalances } from "./balances";
