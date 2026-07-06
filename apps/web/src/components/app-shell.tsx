@@ -15,6 +15,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
 import { signOut } from "../lib/auth-client";
 import { useTheme } from "../lib/theme";
+import { CurrencySwitcher } from "./currency-switcher";
 import { LocaleSwitcher } from "./locale-switcher";
 import { Logo } from "./logo";
 
@@ -134,6 +135,7 @@ export function AppShell({ userName, children }: { userName: string; children: R
               <Search className="size-3.5" />
               <kbd className="font-sans">⌘K</kbd>
             </button>
+            <CurrencySwitcher />
             <LocaleSwitcher />
             <ThemeToggle />
             <Link

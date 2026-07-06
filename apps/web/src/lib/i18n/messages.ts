@@ -202,6 +202,20 @@ export const en = {
     "Wallet Address": "Wallet Address",
     "0x + 40 hex": "0x + 40 hex",
   },
+  Currency: {
+    USD: "Dollar",
+    EUR: "Euro",
+    GBP: "Pound",
+    JPY: "Yen",
+    CNY: "Yuan",
+    KRW: "Won",
+    HKD: "HK Dollar",
+    CAD: "CA Dollar",
+    AUD: "AU Dollar",
+    CHF: "Franc",
+    BTC: "Bitcoin",
+    ETH: "Ethereum",
+  },
 };
 
 export type Messages = typeof en;
@@ -397,6 +411,20 @@ export const zh: Messages = {
     "EVM Address": "EVM 地址",
     "Wallet Address": "钱包地址",
     "0x + 40 hex": "0x + 40 位十六进制",
+  },
+  Currency: {
+    USD: "美元",
+    EUR: "欧元",
+    GBP: "英镑",
+    JPY: "日元",
+    CNY: "人民币",
+    KRW: "韩元",
+    HKD: "港元",
+    CAD: "加元",
+    AUD: "澳元",
+    CHF: "瑞士法郎",
+    BTC: "比特币",
+    ETH: "以太坊",
   },
 };
 
