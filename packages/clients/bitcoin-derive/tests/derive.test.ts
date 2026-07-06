@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeDeriver, recommendedScript } from "../src/derive";
+import { BitcoinDeriveError, deriveAddresses, makeDeriver, recommendedScript } from "../src";
 
 // 离线派生向量(不联网)。账户级扩展公钥 = 标准 BIP39 助记词 "abandon×11 about"(空密码)在
 // m/purpose'/0'/0' 的公钥;首地址取自 BIP49/84/86 官方测试向量(独立事实源),legacy 由已被三条官方
@@ -67,7 +67,29 @@ describe("recommendedScript(前缀预选)", () => {
 });
 
 describe("makeDeriver — 非法扩展公钥", () => {
-  it("乱串 → 抛 INVALID_CREDENTIALS", () => {
-    expect(() => makeDeriver("xpubGARBAGE", "native")).toThrow(/invalid extended public key/);
+  it("乱串 → 抛 BitcoinDeriveError", () => {
+    expect(() => makeDeriver("xpubGARBAGE", "native")).toThrow(BitcoinDeriveError);
+  });
+});
+
+describe("deriveAddresses(generator)", () => {
+  it("惰性按序 yield {index, address, path};与 makeDeriver 同址", () => {
+    const gen = deriveAddresses(XPUB84, "native", 0);
+    const d = makeDeriver(XPUB84, "native");
+    const a0 = gen.next().value;
+    const a1 = gen.next().value;
+    expect(a0).toEqual({
+      index: 0,
+      address: d(0, 0),
+      path: "m/84'/0'/0'/0/0",
+    });
+    expect(a1.index).toBe(1);
+    expect(a1.address).toBe(d(0, 1));
+    expect(a1.path).toBe("m/84'/0'/0'/0/1");
+  });
+
+  it("非法扩展公钥在首个 next() 抛(惰性构造)", () => {
+    const gen = deriveAddresses("xpubGARBAGE", "native", 0);
+    expect(() => gen.next()).toThrow(BitcoinDeriveError);
   });
 });

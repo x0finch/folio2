@@ -1,5 +1,5 @@
 {
-  "name": "@folio/balances-provider-bitcoin",
+  "name": "@folio/mempool-client",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,12 +10,6 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "zod": "^4.0.0",
-    "@folio/balances-basic": "workspace:*",
-    "@folio/bitcoin-derive": "workspace:*",
-    "@folio/mempool-client": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^6.0.2",
