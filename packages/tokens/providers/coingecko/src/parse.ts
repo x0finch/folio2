@@ -8,18 +8,10 @@ import {
 } from "@folio/tokens-basic";
 import { SEARCH_LIMIT, VS_USD } from "./constants";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+// Retry-After 解析已移入 @folio/coingecko-client;re-export 保持既有导入面(含测试)。
+export { parseRetryAfter } from "@folio/coingecko-client";
 
-// Retry-After:数字秒 / HTTP-date → ms(平行 @folio/balances-basic 的同名 helper;本包不依赖 core)。
-// `now` 可注入以便测 HTTP-date 分支。
-export function parseRetryAfter(header: string | null, now = Date.now()): number | undefined {
-  if (!header) return undefined;
-  const secs = Number(header);
-  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
-  const date = Date.parse(header);
-  if (Number.isFinite(date)) return Math.max(0, date - now);
-  return undefined;
-}
+const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 
 interface RawPlatform {
   id?: string;

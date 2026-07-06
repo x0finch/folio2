@@ -1,5 +1,6 @@
 packages:
   - "packages/*"
+  - "packages/clients/*"
   - "packages/balances/*"
   - "packages/balances/providers/*"
   - "packages/tokens/*"
