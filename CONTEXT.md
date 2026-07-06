@@ -35,3 +35,17 @@ _Avoid_: source(泛指时)
 **Platform**:
 持仓所在的**链或场馆**(chain ∪ venue),HoldingSource 的定位维度。key 文法:`eip155:<chainId>` / `chain:<slug>`(链)、`exchange:<slug>`、`perp:<slug>`(场馆)、`manual`。带 name + logo,来自 CoinGecko(asset_platforms / exchanges / derivatives),manual 用内置图标。
 _Avoid_: chain(仅指链时才用)、venue(仅指交易所/perp)、network
+
+### 计价与展示币种
+
+**Base currency(计价基准)**:
+USD。全站**存储 / 聚合 / provider** 一律以 USD 计价;非美元只是展示层的一次换算,不改任何存储值。
+_Avoid_: 把 Display currency 也叫 base
+
+**Display currency(展示币种 / 偏好币种)**:
+用户选择的、金额呈现所用的币种 —— **法币或加密**(如 EUR、JPY、BTC、ETH)。按浏览器保存(cookie `folio_currency`),非账户级。仅在展示层生效。
+_Avoid_: base currency(那恒为 USD)、locale(那管语言/分隔符,与币种正交)
+
+**FX rate(汇率)**:
+`usd_per_unit` —— **1 单位展示币种的美元价**(法币与加密同义)。展示值 `= usdValue / rate`。源自 CoinGecko `/exchange_rates`(以 BTC 为基准反算,BTC 约掉)。
+_Avoid_: 反向表述(不用"每美元多少目标币")
