@@ -190,28 +190,6 @@ function BitcoinCards({ meta }: { meta: BitcoinMeta }) {
         </p>
       )}
 
-      {meta.addresses && meta.addresses.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{t("btcDistribution")}</p>
-          {meta.addresses.map((a) => (
-            <RowCard
-              key={a.address}
-              title={<CopyableAddress address={a.address} />}
-              subtitle={<span className="capitalize">{chainLabel(a.chain)}</span>}
-              primary={`${btc(a.balanceSats)} BTC`}
-              secondary={
-                a.pendingSats !== 0 ? (
-                  <span className="text-xs text-muted-foreground">
-                    {t("btcPending")} {a.pendingSats > 0 ? "+" : ""}
-                    {btc(a.pendingSats)}
-                  </span>
-                ) : undefined
-              }
-            />
-          ))}
-        </div>
-      )}
-
       {meta.receive && (meta.receive.lastUsed || meta.receive.next.length > 0) && (
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium">{t("btcReceive")}</p>
@@ -231,6 +209,28 @@ function BitcoinCards({ meta }: { meta: BitcoinMeta }) {
               </span>
               <CopyableAddress address={n.address} />
             </div>
+          ))}
+        </div>
+      )}
+
+      {meta.addresses && meta.addresses.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium">{t("btcDistribution")}</p>
+          {meta.addresses.map((a) => (
+            <RowCard
+              key={a.address}
+              title={<CopyableAddress address={a.address} />}
+              subtitle={<span className="capitalize">{chainLabel(a.chain)}</span>}
+              primary={`${btc(a.balanceSats)} BTC`}
+              secondary={
+                a.pendingSats !== 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    {t("btcPending")} {a.pendingSats > 0 ? "+" : ""}
+                    {btc(a.pendingSats)}
+                  </span>
+                ) : undefined
+              }
+            />
           ))}
         </div>
       )}
