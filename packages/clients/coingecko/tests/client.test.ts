@@ -117,6 +117,13 @@ describe("createCoinGeckoClient · 方法(URL/参数拼装 + 返回)", () => {
     await createCoinGeckoClient().derivativesExchange("hyperliquid");
     expect(urlOf(f2).pathname).toBe("/api/v3/derivatives/exchanges/hyperliquid");
   });
+
+  it("exchangeRates → GET /exchange_rates,返回 { rates }", async () => {
+    const body = { rates: { usd: { value: 100000, type: "fiat" }, eur: { value: 92000 } } };
+    const f = mockFetch(ok(body));
+    expect(await createCoinGeckoClient().exchangeRates()).toEqual(body);
+    expect(urlOf(f).pathname).toBe("/api/v3/exchange_rates");
+  });
 });
 
 describe("createCoinGeckoClient · 404 → null(仅可空方法)", () => {

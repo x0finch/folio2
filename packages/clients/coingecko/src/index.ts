@@ -23,6 +23,8 @@ export type {
   CoinContract,
   DerivativesExchange,
   Exchange,
+  ExchangeRateEntry,
+  ExchangeRates,
   MarketCoin,
   SearchCoin,
   SearchResult,

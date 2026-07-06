@@ -5,6 +5,7 @@ import type {
   CoinContract,
   DerivativesExchange,
   Exchange,
+  ExchangeRates,
   MarketCoin,
   SearchResult,
   SimplePriceMap,
@@ -40,6 +41,8 @@ export interface CoinGeckoClient {
   exchange(id: string): Promise<Exchange | null>;
   /** GET /derivatives/exchanges/{id}(perp);404 → null */
   derivativesExchange(id: string): Promise<DerivativesExchange | null>;
+  /** GET /exchange_rates(以 BTC 为基准的全币种汇率) */
+  exchangeRates(): Promise<ExchangeRates>;
 }
 
 export function createCoinGeckoClient(config: CoinGeckoConfig = {}): CoinGeckoClient {
@@ -103,6 +106,14 @@ export function createCoinGeckoClient(config: CoinGeckoConfig = {}): CoinGeckoCl
         notFoundAsNull: true,
       });
       return json === null ? null : (json as DerivativesExchange);
+    },
+
+    async exchangeRates() {
+      const json = await request("/exchange_rates");
+      if (typeof json !== "object" || json === null) {
+        throw new CoinGeckoError("PARSE_ERROR", "exchange_rates: expected object");
+      }
+      return json as ExchangeRates;
     },
   };
 }

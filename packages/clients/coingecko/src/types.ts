@@ -59,3 +59,15 @@ export interface DerivativesExchange {
   name?: string;
   image?: string;
 }
+
+// GET /exchange_rates → { rates: { <code>: { name, unit, value, type } } }
+// value = 每 1 BTC 值多少该币种;type 区分 fiat / crypto。
+export interface ExchangeRateEntry {
+  name?: string;
+  unit?: string;
+  value?: number;
+  type?: string; // "fiat" | "crypto"
+}
+export interface ExchangeRates {
+  rates?: Record<string, ExchangeRateEntry>;
+}
