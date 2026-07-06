@@ -1,4 +1,5 @@
 import { Drawer, LogoAvatar } from "@folio/ui";
+import { WalletIcon } from "lucide-react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { useUsd } from "./holdings-sections";
@@ -59,7 +60,14 @@ export function AssetSheet({
                     key={`${s.account.id}|${s.platform.id}`}
                     className="flex items-center gap-3 py-2.5 text-sm"
                   >
-                    <LogoAvatar src={s.platform.logo} fallback={s.platform.name} size="sm" />
+                    {/* Manual 来源不入库/不走 CoinGecko:渲染内置钱包图标(非数据映射)。 */}
+                    {s.platform.id === "manual" ? (
+                      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                        <WalletIcon className="size-3.5" />
+                      </span>
+                    ) : (
+                      <LogoAvatar src={s.platform.logo} fallback={s.platform.name} size="sm" />
+                    )}
                     <span className="min-w-0 flex-1">
                       <span className="text-muted-foreground">{s.platform.name}</span>
                       <span className="mx-1 text-muted-foreground">·</span>
