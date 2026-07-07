@@ -8,6 +8,12 @@ const CACHE_HIT = "public, max-age=86400, stale-while-revalidate=2592000"; // 1d
 const CACHE_404 = "public, max-age=3600"; // 短负缓存:图确实没了
 const NO_STORE = "no-store"; // 瞬时故障,可重试
 
+// 只透传栅格图类型;svg/html 等能在本域内联执行脚本的一律降级为 octet-stream(配合 nosniff
+// → 浏览器直下载不渲染,挡住"上游被投毒 → 我方 origin XSS")。真实 logo 都是 png/webp,无损。
+const RASTER_CT = /^image\/(png|jpe?g|gif|webp|avif|x-icon|vnd\.microsoft\.icon)$/i;
+const safeContentType = (ct: string | null): string =>
+  ct && RASTER_CT.test(ct) ? ct : "application/octet-stream";
+
 const negative = (): Response =>
   new Response(null, { status: 404, headers: { "cache-control": CACHE_404 } });
 const transient = (): Response =>
@@ -42,7 +48,8 @@ export async function serveLogo(
   return new Response(res.body, {
     status: 200,
     headers: {
-      "content-type": res.headers.get("content-type") ?? "image/png",
+      "content-type": safeContentType(res.headers.get("content-type")),
+      "x-content-type-options": "nosniff",
       "cache-control": CACHE_HIT,
       "cache-tag": `logo:${kind}:${id}`,
     },

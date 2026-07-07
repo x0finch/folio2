@@ -26,7 +26,21 @@ describe("serveLogo (token)", () => {
       "public, max-age=86400, stale-while-revalidate=2592000",
     );
     expect(res.headers.get("cache-tag")).toBe("logo:token:usd-coin");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(String(spy.mock.calls[0][0])).toBe("https://cgk/usdc.png");
+  });
+
+  it("上游非栅格图(svg/html)→ 降级 octet-stream + nosniff(挡本域内联执行)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Uint8Array([1]), {
+        status: 200,
+        headers: { "content-type": "image/svg+xml" },
+      }),
+    );
+    const res = await serveLogo(tokensWith("https://cgk/x.svg"), "token", "x");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("enrich 无 logo(cache miss/无图)→ 404 + 短负缓存,不打上游", async () => {

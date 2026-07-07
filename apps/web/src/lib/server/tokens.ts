@@ -30,8 +30,10 @@ export const searchTokens = createServerFn({ method: "GET" })
     // 抛错兜底在 requireAuth 中间件集中打日志(带 userId),此处只表达业务。
     const out = await buildTokens(env).search(q);
     tokenLog.debug("searchTokens: ok", { query: q, count: out.length });
-    // logo → 代理 URL,选币面板与 dashboard 一样不直引 CoinGecko(ADR 0008)。
-    return out.map((t) => ({ ...t, logo: tokenLogoUrl(t) }));
+    // logo 不代理:search 是对 CGK 的 live pass-through,结果不写 store;而 /api/logo 只按
+    // 内部 id 读 store(getByRefs,不回源),未持有的搜索命中查不到 → 404 图裂。故直返上游 URL
+    // (ADR 0008 记为已接受的尾巴)。topTokens 走 store,可代理;search 不行。
+    return out;
   });
 
 // 默认选币下拉(P7.4.5,空输入):市值 top-N;冷缓存兜底(单飞预热)由 tokens.topTokens 内部处理。
@@ -43,6 +45,7 @@ export const topTokens = createServerFn({ method: "GET" })
     tokenLog.debug("topTokens: enter", { limit, hasKey: !!env.COINGECKO_API_KEY });
     const out = await buildTokens(env).topTokens(limit);
     tokenLog.debug("topTokens: ok", { count: out.length });
+    // topTokens 读 store(listTopTokens),命中 /api/logo 的 getByRefs → 可安全代理(不同于 search)。
     return out.map((t) => ({ ...t, logo: tokenLogoUrl(t) }));
   });
 

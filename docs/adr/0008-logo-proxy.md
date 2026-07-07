@@ -17,6 +17,7 @@ Status: accepted (planned)
 - **公开端点**:必须 unauth(Workers Cache 对带鉴权请求 bypass;logo 是公共数据),落 `apps/web/src/routes/api/logo/`(`createFileRoute(...).server.handlers`)。
 - **无 R2**:纯代理;R2 作后续升级(若上游频繁 404 / 命中率不佳)。
 - **缓存**:命中 `public, max-age=1d, stale-while-revalidate=30d`;上游 404 → 端点 404 + 短负缓存;上游 5xx/超时 → 502 `no-store`(可重试);挂 `Cache-Tag: logo:<kind>:<id>`,首版不接 purge 触发器(靠 SWR 窗自然收敛)。
-- **客户端不变**:`TokenAvatar` 仍收一个 `logo` URL;重写落在产 `logo` 的各 app 层单点 —— 读模型(dashboard / 持仓)+ 选币 server fn(`searchTokens` / `topTokens`),覆盖全部 token logo 渲染站,客户端无 CoinGecko 直引残留。
+- **客户端不变**:`TokenAvatar` 仍收一个 `logo` URL;重写落在产 `logo` 的各 app 层单点 —— 读模型(dashboard / 持仓)+ 选币默认下拉 `topTokens`(读 store,可代理)。
+- **尾巴:`searchTokens` 结果不代理**。search 是对 CGK 的 live pass-through、结果不写 store;而 `/api/logo` 只按内部 id 读 store(`getByRefs`,不回源),未持有的搜索命中查不到 → 会 404 图裂。故搜索结果直返上游 URL(隐私半吞,仅在用户主动搜索时短暂暴露)。要收口须让 search 结果落 store,或给端点加 live-resolve 回源(重新引入公开端点放大面)—— 留后续。
 - **计费小注**:开启 Workers Cache 后静态资源/worker-to-worker 请求从免费转按标准请求计费(自托管量级可忽略)。
 - **非领域概念** → CONTEXT.md 不加词条;这是基建端点。
