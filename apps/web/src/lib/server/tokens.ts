@@ -4,6 +4,7 @@ import { createTokens, TOP_TOKENS_LIMIT, type Tokens } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { tokenLogoUrl } from "../logo";
 import { requireAuth } from "../require-auth";
 import { type BalanceLike, balanceToAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
 import { db } from "./db";
@@ -29,7 +30,8 @@ export const searchTokens = createServerFn({ method: "GET" })
     // 抛错兜底在 requireAuth 中间件集中打日志(带 userId),此处只表达业务。
     const out = await buildTokens(env).search(q);
     tokenLog.debug("searchTokens: ok", { query: q, count: out.length });
-    return out;
+    // logo → 代理 URL,选币面板与 dashboard 一样不直引 CoinGecko(ADR 0008)。
+    return out.map((t) => ({ ...t, logo: tokenLogoUrl(t) }));
   });
 
 // 默认选币下拉(P7.4.5,空输入):市值 top-N;冷缓存兜底(单飞预热)由 tokens.topTokens 内部处理。
@@ -41,7 +43,7 @@ export const topTokens = createServerFn({ method: "GET" })
     tokenLog.debug("topTokens: enter", { limit, hasKey: !!env.COINGECKO_API_KEY });
     const out = await buildTokens(env).topTokens(limit);
     tokenLog.debug("topTokens: ok", { count: out.length });
-    return out;
+    return out.map((t) => ({ ...t, logo: tokenLogoUrl(t) }));
   });
 
 // 选中代币后取当前市价预填单价(P7.4.5,用户可改)。resolve(显式 identifier)→ priceOf(缓存/回源/写在 tokens 内)。
