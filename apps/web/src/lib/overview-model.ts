@@ -3,6 +3,7 @@ import type { Platforms } from "@folio/platforms";
 import type { AssetRef, Tokens } from "@folio/tokens";
 import { type OverviewBalance, toAccountSections } from "./account-view";
 import { type AggInput, buildCanonicalHoldings } from "./aggregate";
+import { tokenLogoUrl } from "./logo";
 
 // 总览读模型(纯 —— 依赖注入,无 cloudflare env,可脱离 server fn 单测)。
 // 持仓区 = 跨账户按 canonical 代币聚合(spot/manual/CEX/perp 权益);DeFi 仓位 + perp 敞口走
@@ -95,7 +96,7 @@ export async function buildOverview(
     group: e?.group,
     ref: e?.ref,
     name: e?.name,
-    logo: e?.logo ?? e?.providerLogo,
+    logo: e ? tokenLogoUrl(e) : undefined, // 上游 URL → folio 代理(隐私;见 ADR 0008)
     change24h: e?.change24h,
   }));
   const holdings = buildCanonicalHoldings(aggInputs);

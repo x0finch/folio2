@@ -7,6 +7,8 @@
   // 非密环境变量(明文、随 git 提交)。密钥(SECRETS_KEY/BETTER_AUTH_*/各 provider key)走
   // `wrangler secret put`,绝不进这里。LOG_PRETTY 生产不设 → JSON Lines 喂 Workers Logs(见 DEPLOY.md)。
   "vars": { "LOG_LEVEL": "info" },
+  // Workers Cache:边缘缓存 Worker 返回的响应(logo 代理靠它,见 ADR 0008)。按 Cache-Control 头控制。
+  "cache": { "enabled": true },
   // CF 账户 id(资源标识,非密钥)。
   "account_id": "2bce8216267cf76d85fab3ce18abea69",
 
