@@ -38,6 +38,7 @@ export async function serveLogo(
 
   let res: Response;
   try {
+    // await 只等响应头(不等 body):要据 status/content-type 分支。body 不落内存。
     res = await fetch(upstream, { headers: { accept: "image/*" } });
   } catch {
     return transient();
@@ -45,6 +46,7 @@ export async function serveLogo(
   if (res.status === 404) return negative();
   if (!res.ok) return transient();
 
+  // res.body 是 ReadableStream,按引用交出去 → 字节流式透传,worker 不缓冲整张图。
   return new Response(res.body, {
     status: 200,
     headers: {
