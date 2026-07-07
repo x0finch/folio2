@@ -4,6 +4,7 @@ import { createTokens, TOP_TOKENS_LIMIT, type Tokens } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { tokenLogoUrl } from "../logo";
 import { requireAuth } from "../require-auth";
 import { type BalanceLike, balanceToAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
 import { db } from "./db";
@@ -29,6 +30,9 @@ export const searchTokens = createServerFn({ method: "GET" })
     // 抛错兜底在 requireAuth 中间件集中打日志(带 userId),此处只表达业务。
     const out = await buildTokens(env).search(q);
     tokenLog.debug("searchTokens: ok", { query: q, count: out.length });
+    // logo 不代理:search 是对 CGK 的 live pass-through,结果不写 store、无内部 id;而 /api/logo
+    // 按内部 id 读 store(getById,不回源),未持有的搜索命中查不到 → 404 图裂。故直返上游 URL
+    // (ADR 0008 记为已接受的尾巴)。topTokens 走 store 有 id,可代理;search 不行。
     return out;
   });
 
@@ -41,7 +45,9 @@ export const topTokens = createServerFn({ method: "GET" })
     tokenLog.debug("topTokens: enter", { limit, hasKey: !!env.COINGECKO_API_KEY });
     const out = await buildTokens(env).topTokens(limit);
     tokenLog.debug("topTokens: ok", { count: out.length });
-    return out;
+    // topTokens 读 store(listTopTokens 带内部 id),/api/logo 的 getById 能命中 → 可安全代理
+    //(不同于 search:live 结果无内部 id、不在 store)。
+    return out.map((t) => ({ ...t, logo: tokenLogoUrl(t) }));
   });
 
 // 选中代币后取当前市价预填单价(P7.4.5,用户可改)。resolve(显式 identifier)→ priceOf(缓存/回源/写在 tokens 内)。

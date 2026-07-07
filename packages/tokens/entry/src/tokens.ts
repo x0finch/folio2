@@ -27,6 +27,7 @@ export interface CreateTokensConfig {
 // priceStale:有 ref 而价格过期/缺失(可后台刷新);孤儿无价不算 stale(无处可刷)。
 export interface EnrichedAsset {
   ref: TokenRef | null;
+  id?: string; // 内部代币行 id(在 store 才有;logo 代理端点的稳定 key,source 无关)
   name?: string;
   logo?: string; // canonical(CGK)
   providerLogo?: string; // provider 备用(展示回退链由调用方定序)
@@ -58,6 +59,8 @@ export interface Tokens {
   priceOf(ref: TokenRef): Promise<TokenPrice | undefined>;
   // 展示富化(cache-only,零网络):tokenKey 优先(孤儿也出数据),否则 override/symbol 消歧。
   enrich(assets: readonly (AssetRef | null)[]): Promise<EnrichedAsset[]>;
+  // 按内部代币行 id 取上游 logo URL(logo 代理端点用):source 无关,含孤儿 providerLogo;缺则 undefined。
+  logoUrlById(id: string): Promise<string | undefined>;
   // 预热写缓存(best-effort):刷新 top-N warm,并对给定 assets 逐个 lazy 解析(触发升级合并)。
   warm(assets?: readonly (AssetRef | null)[]): Promise<void>;
   // provider 采集(sync 后):seed 孤儿 / 刷新 providerLogo(备用槽)。best-effort。
@@ -84,6 +87,7 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
 
   const toEnriched = (ref: TokenRef | null, rec: TokenRecord | undefined): EnrichedAsset => ({
     ref,
+    id: rec?.id,
     name: rec?.name,
     logo: rec?.logo,
     providerLogo: rec?.providerLogo,
@@ -169,6 +173,11 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
     async enrich(assets) {
       const looked = await lookupAll(assets);
       return looked.map(({ ref, rec }) => toEnriched(ref, rec));
+    },
+
+    async logoUrlById(id) {
+      const rec = await deps.store.getById(id);
+      return rec?.logo ?? rec?.providerLogo;
     },
 
     async warm(assets) {

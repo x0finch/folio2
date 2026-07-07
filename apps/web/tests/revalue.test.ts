@@ -49,6 +49,7 @@ function fakeStore(): TokenStore {
       }
       return out;
     },
+    getById: async (id) => [...records.values()].find((r) => r.id === id),
     putPrices: async () => {},
   };
 }

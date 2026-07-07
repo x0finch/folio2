@@ -103,6 +103,11 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
       }
       return out;
     },
+    async getById(id) {
+      for (const v of byRef.values()) if (v.id === id) return v;
+      for (const e of impl.values()) if (e.rec.id === id) return e.rec;
+      return undefined;
+    },
     async putPrices(list) {
       for (const p of list) {
         const rec = byRef.get(key(p.ref));

@@ -1,4 +1,5 @@
 import type { AssetRef, EnrichedAsset } from "@folio/tokens";
+import { tokenLogoUrl } from "./logo";
 
 // 纯逻辑(无 server-only import → 可单测)。把一笔余额(快照行形状)桥接到代币参考层:
 //   · balanceToAssetRef:kind 门控 + 从 metaJson 抽 chain/contract → AssetRef(喂 tokens.enrich/warm)。
@@ -29,7 +30,7 @@ export function balanceToAssetRef(b: BalanceLike): AssetRef | null {
 export function toEnrichment(e: EnrichedAsset): TokenEnrichment {
   return {
     name: e.name,
-    logo: e.logo ?? e.providerLogo,
+    logo: tokenLogoUrl(e), // 上游 URL → folio 代理(隐私;见 ADR 0008)
     unitPrice: e.unitPrice,
     change24h: e.change24h,
   };

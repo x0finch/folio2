@@ -22,6 +22,7 @@ const store: TokenStore = {
   markCgkChecked: async () => {},
   linkTokenKeyToCgk: async () => {},
   getByRefs: async () => new Map(),
+  getById: async () => undefined,
   putPrices: async () => {},
 };
 
