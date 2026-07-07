@@ -40,10 +40,16 @@ const tokens = {
   },
 } as unknown as Tokens;
 
-// 假 platforms:每个 key 回 "NAME:<key>",验证读路径装饰确实覆写了 aggregate 的占位名。
+// 假 platforms:每个 key 回 "NAME:<key>";manual 无上游图(真实 resolve 对未收录/未 warm 的 key
+// 不带 logo)。验证读路径装饰覆写占位名,并把有图的平台 logo 改写成代理 URL、无图的置 undefined。
 const platforms = {
   async resolve(keys: string[]) {
-    return new Map(keys.map((k) => [k, { key: k, name: `NAME:${k}`, logo: undefined }]));
+    return new Map(
+      keys.map((k) => [
+        k,
+        { key: k, name: `NAME:${k}`, logo: k === "manual" ? undefined : `https://cgk/${k}.png` },
+      ]),
+    );
   },
 } as unknown as Platforms;
 
@@ -78,6 +84,12 @@ describe("buildOverview", () => {
       "NAME:eip155:42161",
       "NAME:manual",
     ]);
+
+    // 平台 logo:有图的链平台改写成 folio 代理 URL(key 含 `:` → 编码);manual 无图 → undefined
+    //(asset-sheet 对 manual 走 WalletIcon,不请求)。客户端不直引 CoinGecko。
+    const platformLogos = view.holdings[0].sources.map((s) => s.platform.logo);
+    expect(platformLogos).toContain("/api/logo/platform/eip155%3A42161");
+    expect(platformLogos).toContain(undefined);
 
     expect(view.totalUsd).toBe(150);
     expect(view.holdingsSubtotal).toBe(150);
