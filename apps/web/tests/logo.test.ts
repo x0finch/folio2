@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tokenLogoUrl } from "../src/lib/logo";
+import { platformLogoUrl, tokenLogoUrl } from "../src/lib/logo";
 
 describe("tokenLogoUrl", () => {
   it("有内部 id + canonical logo → 代理 URL(客户端不引用第三方 CDN)", () => {
@@ -31,5 +31,24 @@ describe("tokenLogoUrl", () => {
 
   it("完全无 logo → undefined(客户端首字母,不发请求)", () => {
     expect(tokenLogoUrl({})).toBeUndefined();
+  });
+});
+
+describe("platformLogoUrl", () => {
+  it("有上游图 → 代理 URL(平台 key 即稳定 id)", () => {
+    expect(platformLogoUrl("chain:bitcoin", "https://cgk/btc.png")).toBe(
+      "/api/logo/platform/chain%3Abitcoin",
+    );
+  });
+
+  it("key 含特殊字符(:)被编码", () => {
+    expect(platformLogoUrl("eip155:1", "https://cgk/eth.png")).toBe(
+      "/api/logo/platform/eip155%3A1",
+    );
+  });
+
+  it("无上游图 → undefined(客户端 fallback,不发请求)", () => {
+    expect(platformLogoUrl("chain:bitcoin")).toBeUndefined();
+    expect(platformLogoUrl("exchange:binance", undefined)).toBeUndefined();
   });
 });

@@ -20,6 +20,7 @@ Status: accepted (planned)
 - **无 R2**:纯代理;R2 作后续升级(若上游频繁 404 / 命中率不佳)。
 - **缓存**:命中 `public, max-age=1d, stale-while-revalidate=30d`;上游 404 → 端点 404 + 短负缓存;上游 5xx/超时 → 502 `no-store`(可重试);挂 `Cache-Tag: logo:<kind>:<id>`,首版不接 purge 触发器(靠 SWR 窗自然收敛)。
 - **契约**:`EnrichedAsset` / `TokenInfo` 带内部 `id`;`TokenStore.getById(id)` / `Tokens.logoUrlById(id)` 按行 id 读上游图 URL(cache-only,不回源)。
+- **平台(#20)**:`GET /api/logo/platform/:key`(key=platform key,如 `chain:bitcoin`/`eip155:1`,含 `:` → URL 编码为一段)。key 本身即稳定 id(无需 token 那样的内部 UUID 间接)。经 `platforms.resolve`(cache-only,不回源)拿上游图;渲染/取图**同一 resolve**,天然一致。`serveLogo` 泛化为收一个 resolve-thunk(token 按行 id / platform 按 key 各自构造),不再按 `kind` 特判。渲染重写落在 overview-model 装饰 `s.platform.logo` 处。
 - **客户端不变**:`TokenAvatar` 仍收一个 `logo` URL;重写落在产 `logo` 的各 app 层单点 —— 读模型(dashboard / 持仓,含孤儿 providerLogo)+ 选币默认下拉 `topTokens`(读 store 带 id,可代理)。
 - **尾巴:`searchTokens` 结果不代理**。search 是对 CGK 的 live pass-through、结果不写 store、无内部 id;而 `/api/logo` 按内部 id 读 store(`getById`,不回源),未持有的搜索命中查不到 → 会 404 图裂。故搜索结果直返上游 URL(隐私半吞,仅在用户主动搜索时短暂暴露)。要收口须让 search 结果落 store,或给端点加 live-resolve 回源(重新引入公开端点放大面)—— 留后续。
 - **安全**:代理响应只透传栅格图 content-type(`png/jpeg/gif/webp/avif/ico`),svg/html 等降级 `application/octet-stream` + `X-Content-Type-Options: nosniff`,挡"上游被投毒 → 本域内联执行"。
