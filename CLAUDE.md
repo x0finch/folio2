@@ -33,6 +33,14 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - **A provider serving multiple account types**: keep `BalanceProvider.accountType` singular; use a factory to emit one provider object per type (shared impl), export `providers: BalanceProvider[]`, and let `@folio/sync` flatten them into `buildRegistry`. See arch-design.md §2 (方案 A).
 - Package prefix `@folio/*`. Providers published as `@folio/provider-<name>`.
 
+## Git & PR 工作流
+- **功能开发走技能链**:think → grill-with-docs → ADR(难回退的决策)→ to-prd → to-issues → 开分支 → implement(内驱 tdd)→ code-review。路由见 `/ask-matt`。
+- **main 只经 PR 收代码**:动代码前从 main 开 `feat/*` 分支;直推 main 被禁。ADR 这类文档基线可先提交 main,代码走 PR。
+- **合并用 Squash**:保留 GitHub 的 Verified 签名;**不要 rebase-merge**(会把提交变 Unverified)。
+- **PR 正文关 issue**:每个都带关键字 + 英文逗号 —— `Closes #2, closes #3, closes #4`;别用中文顿号「、」或裸列表(不会自动关)。
+- **提交已签名(GPG)**:别引入破坏 Verified 的操作。
+- **每片 tracer-bullet 独立可验收**:一片一提交,过四闸(typecheck / test / biome / build)+ code-review 再进下一片。
+
 ## Toolchain notes (current best practices — supersede older wording in arch-design.md)
 - **`wrangler.jsonc`** (not `wrangler.toml`) — Cloudflare's recommended format; some features JSON-only. Wrangler v4.
 - **Vitest 4** with root `test.projects` in `vitest.config.ts` (`vitest.workspace.ts` is removed in v4). Glob `test.projects` at each package's **config file** (`packages/**/vitest.config.ts`), not at directories — a dir glob (`packages/*`, `packages/tokens/*`) also matches container-only folders (`packages/tokens`, `packages/providers`), which get picked up as unnamed, colliding projects and fail the whole run.
@@ -64,7 +72,7 @@ Forward work — deferred features + the M7+ roadmap — lives in **[evolution/r
 
 ## Agent skills
 
-Per-repo config for the engineering skills (set up by `setup-matt-pocock-skills`).
+引用的工程技能(`/ask-matt`、`/grill-with-docs`、`/implement`、`/code-review` 等)经 **`npx skills@latest add mattpocock/skills`** 安装到 `.agents/skills/`(gitignore,不随仓库分发,按开发者各自安装)。仓库只带**配置**(下方 + `docs/agents/*`,由 `setup-matt-pocock-skills` 落地)。
 
 ### Issue tracker
 
