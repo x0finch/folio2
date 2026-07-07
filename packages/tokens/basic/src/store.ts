@@ -46,6 +46,10 @@ export interface TokenStore {
   // —— cgk ref 读写(富化/取价)——
   // 读:refKey → 整行;info 按 TTL 过滤(过期=未命中),价不过滤、带 stale(SWR)。
   getByRefs(refs: TokenRef[]): Promise<Map<string, TokenRecord>>;
+  // 按内部行 id(主键)读整行(logo 代理端点用;source 无关,含孤儿)。**不**门控 info TTL
+  //(与 getByRefs 不同):logo 端点按主键服务字节,只要行在就给 —— 否则 info 过期的长尾币会渲染出
+  // 代理 URL 却在此 404(getByTokenKey 渲染路径也不门控 info)。
+  getById(id: string): Promise<TokenRecord | undefined>;
   // 写价(priceOf 回源 / refreshStalePrices 批量):只更新已存在的行。
   putPrices(prices: TokenPrice[], ttlMs: number): Promise<void>;
 }

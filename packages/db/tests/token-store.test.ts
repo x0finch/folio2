@@ -247,6 +247,43 @@ describe("getByRefs + putPrices(SWR:过期=stale 不删)", () => {
   });
 });
 
+describe("getById (logo 代理端点:按内部行 id 读整行,source 无关)", () => {
+  it("按 id 读出整行(cgk 图与孤儿 providerLogo 都能拿);未知 id → undefined", async () => {
+    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
+    await store.putWarm(
+      [{ info: info(cg("bitcoin"), "BTC", "cgk-L"), price: price(cg("bitcoin"), 65000, 1) }],
+      TTL,
+      TTL,
+    );
+    // 孤儿(source=provider)也能按 id 命中(getById 走主键、不按 source 过滤)。
+    await store.ensureTokenKey(
+      "eip155:1/erc20:0xorphan",
+      { symbol: "ORP", name: "Orphan", providerLogo: "prov-L" },
+      TTL,
+    );
+    const rows = await getDb(env).select().from(tokens);
+    const btcId = rows.find((r) => r.identifier === "bitcoin")!.id;
+    const orphanId = rows.find((r) => r.identifier === "eip155:1/erc20:0xorphan")!.id;
+
+    expect((await store.getById(btcId))?.logo).toBe("cgk-L");
+    expect((await store.getById(orphanId))?.providerLogo).toBe("prov-L");
+    expect(await store.getById("no-such-id")).toBeUndefined();
+  });
+
+  it("info 过期仍按 id 返回(logo 端点按主键服务;与渲染路径 getByTokenKey 一致,不门控 info)", async () => {
+    let clock = 1000;
+    const store = createTokenStore(env, { source: "coingecko", now: () => clock });
+    await store.putWarm(
+      [{ info: info(cg("bitcoin"), "BTC", "cgk-L"), price: price(cg("bitcoin"), 65000, 1) }],
+      TTL,
+      TTL, // infoTtl
+    );
+    const btcId = (await getDb(env).select().from(tokens))[0]!.id;
+    clock = 1000 + TTL + 1; // info 过期
+    expect((await store.getById(btcId))?.logo).toBe("cgk-L"); // 仍返回,不 404
+  });
+});
+
 describe("source bucketing (no userId — partitioned by source)", () => {
   it("a store bound to another source sees nothing", async () => {
     const cgStore = createTokenStore(env, { source: "coingecko", now: () => 1000 });

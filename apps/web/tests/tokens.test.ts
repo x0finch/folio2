@@ -35,11 +35,12 @@ describe("balanceToAssetRef", () => {
   });
 });
 
-describe("toEnrichment(logo 回退链:CGK → provider 备用)", () => {
-  it("flattens a full enriched asset (CGK logo → 代理 URL,不直引 CoinGecko)", () => {
+describe("toEnrichment(logo → 内部 id 代理,source 无关)", () => {
+  it("有内部 id + CGK logo → 代理 URL(不直引 CoinGecko)", () => {
     expect(
       toEnrichment({
         ref: cg("bitcoin"),
+        id: "tok-btc",
         name: "Bitcoin",
         logo: "cgk-L",
         providerLogo: "prov-L",
@@ -48,13 +49,24 @@ describe("toEnrichment(logo 回退链:CGK → provider 备用)", () => {
       }),
     ).toEqual({
       name: "Bitcoin",
-      logo: "/api/logo/token/bitcoin",
+      logo: "/api/logo/token/tok-btc",
       unitPrice: 65000,
       change24h: 1.5,
     });
   });
 
-  it("CGK logo missing → falls back to provider logo(孤儿也有图可显)", () => {
+  it("孤儿(ref=null)有内部 id + 仅 providerLogo → 也代理(不直引 provider CDN)", () => {
+    expect(
+      toEnrichment({ ref: null, id: "tok-orphan", name: "Foo", providerLogo: "prov-L" }),
+    ).toEqual({
+      name: "Foo",
+      logo: "/api/logo/token/tok-orphan",
+      unitPrice: undefined,
+      change24h: undefined,
+    });
+  });
+
+  it("无内部 id(不在 store)+ providerLogo → 原样兜底(降级)", () => {
     expect(toEnrichment({ ref: null, name: "Foo", providerLogo: "prov-L" })).toEqual({
       name: "Foo",
       logo: "prov-L",

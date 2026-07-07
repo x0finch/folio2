@@ -1,12 +1,10 @@
-import type { CgkCoinId, EnrichedAsset, Tokens } from "@folio/tokens";
+import type { Tokens } from "@folio/tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { serveLogo } from "../src/lib/server/logo";
 
-// 注入假 tokens(只需 enrich)+ spy 全局 fetch。断言 serveLogo 的状态/缓存头/透传,不测 Workers Cache 本身。
-const tokensWith = (logo?: string): Pick<Tokens, "enrich"> => ({
-  enrich: async (): Promise<EnrichedAsset[]> => [
-    { ref: { source: "coingecko", identifier: "usd-coin" as CgkCoinId }, logo },
-  ],
+// 注入假 tokens(只需 logoUrlById)+ spy 全局 fetch。断言 serveLogo 的状态/缓存头/透传,不测 Workers Cache 本身。
+const tokensWith = (logo?: string): Pick<Tokens, "logoUrlById"> => ({
+  logoUrlById: async (): Promise<string | undefined> => logo,
 });
 const img = () =>
   new Response(new Uint8Array([1, 2, 3]), {

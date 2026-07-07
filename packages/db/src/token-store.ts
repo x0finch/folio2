@@ -204,6 +204,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const t = now();
       const rows = await db
         .select({
+          id: tokens.id,
           identifier: tokens.identifier,
           symbol: tokens.symbol,
           name: tokens.name,
@@ -223,6 +224,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         .limit(limit);
       return rows.map((r) => ({
         ref: mk(r.identifier),
+        id: r.id,
         symbol: r.symbol,
         name: r.name,
         logo: r.logo ?? undefined,
@@ -417,6 +419,19 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         for (const r of rows) out.set(refKey(mk(r.tok.identifier)), toRecord(r.tok, r.grp));
       }
       return out;
+    },
+
+    async getById(id) {
+      // 不门控 infoExpiresAt(与 getByRefs 不同):logo 端点按主键服务字节,只要行在就给。
+      // 渲染 tokenKey 类持仓的 getByTokenKey 也不门控 info,若这里门控则 info 过期(30d)的
+      // 长尾币会渲染出代理 URL 却在此 404。行删除(如升级合并删孤儿)才是唯一的"没有"。
+      const rows = await db
+        .select({ tok: tokens, grp: grpCols })
+        .from(tokens)
+        .leftJoin(tokenGroups, eq(tokenGroups.id, tokens.groupId))
+        .where(eq(tokens.id, id));
+      const r = rows[0];
+      return r ? toRecord(r.tok, r.grp) : undefined;
     },
 
     async putPrices(prices, ttlMs) {

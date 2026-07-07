@@ -37,6 +37,7 @@ export interface Resolution {
 // 元信息facet,慢 TTL(logo/name 极少变,没必要随价刷)。
 export interface TokenInfo {
   ref: TokenRef;
+  id?: string; // 内部代币行 id(store 读出的才有;provider 直搜结果无)。logo 代理 key。
   symbol: string;
   name: string;
   logo?: string;

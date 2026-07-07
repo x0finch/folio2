@@ -1,8 +1,9 @@
 import type { Tokens } from "@folio/tokens";
 
 // Logo 代理核心(纯逻辑,路由只包一层)。见 ADR 0008 / PRD #18。
-// token:按 cgk id 经 tokens.enrich(cache-only)拿上游 URL → fetch → 透传字节。
-// 客户端零引用 CoinGecko;命中边缘缓存(Workers Cache)时连本函数都不进。
+// token:按内部代币行 id 经 tokens.logoUrlById(cache-only,读 store)拿上游 URL → fetch → 透传字节。
+// source 无关(CGK canonical 或孤儿 providerLogo 都代理);客户端零第三方 CDN 引用;
+// 命中边缘缓存(Workers Cache)时连本函数都不进。
 
 const CACHE_HIT = "public, max-age=86400, stale-while-revalidate=2592000"; // 1d 新鲜 + 30d SWR
 const CACHE_404 = "public, max-age=3600"; // 短负缓存:图确实没了
@@ -19,9 +20,9 @@ const negative = (): Response =>
 const transient = (): Response =>
   new Response(null, { status: 502, headers: { "cache-control": NO_STORE } });
 
-// tokens 只需 enrich(cache-only 读出上游 logo URL)。
+// tokens 只需 logoUrlById(cache-only 读出上游 logo URL,按内部行 id)。
 export async function serveLogo(
-  tokens: Pick<Tokens, "enrich">,
+  tokens: Pick<Tokens, "logoUrlById">,
   kind: string,
   id: string,
 ): Promise<Response> {
@@ -29,8 +30,7 @@ export async function serveLogo(
 
   let upstream: string | undefined;
   try {
-    const [e] = await tokens.enrich([{ symbol: "", identifier: id }]);
-    upstream = e?.logo ?? e?.providerLogo;
+    upstream = await tokens.logoUrlById(id);
   } catch {
     upstream = undefined;
   }
