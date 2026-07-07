@@ -36,7 +36,7 @@ describe("balanceToAssetRef", () => {
 });
 
 describe("toEnrichment(logo 回退链:CGK → provider 备用)", () => {
-  it("flattens a full enriched asset (CGK logo wins)", () => {
+  it("flattens a full enriched asset (CGK logo → 代理 URL,不直引 CoinGecko)", () => {
     expect(
       toEnrichment({
         ref: cg("bitcoin"),
@@ -46,7 +46,12 @@ describe("toEnrichment(logo 回退链:CGK → provider 备用)", () => {
         unitPrice: 65000,
         change24h: 1.5,
       }),
-    ).toEqual({ name: "Bitcoin", logo: "cgk-L", unitPrice: 65000, change24h: 1.5 });
+    ).toEqual({
+      name: "Bitcoin",
+      logo: "/api/logo/token/bitcoin",
+      unitPrice: 65000,
+      change24h: 1.5,
+    });
   });
 
   it("CGK logo missing → falls back to provider logo(孤儿也有图可显)", () => {
