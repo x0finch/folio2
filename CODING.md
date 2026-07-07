@@ -22,8 +22,8 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 
 ## UI
 
-- **Base UI only, never Radix.** Compose the shadcn design system (`@base-ui/react`); `radix-ui` is not a dependency and must not be reintroduced. Colors/spacing/radius via design tokens (`bg-background`, `text-foreground`, …) — no hardcoded colors, no arbitrary values (`bg-[#…]`, `p-[13px]`), no editing component internals.
-- **Primitives are added via `shadcn add`, never hand-written** — `pnpm dlx shadcn@latest add <comp>` with the Base UI registry (`--base base`); verify the import is `@base-ui/react`. Monorepo-aware: primitives land in `@folio/ui` (export from `src/index.ts`), blocks/compositions in `apps/web/src/components/` (hand-authored). A new transitive dep from `add` → run the 4 library gates.
+- **beUI (Framer Motion) motion layer + a few hand-rolled primitives — never Radix, never Base UI** (ADR 0004). `@base-ui/react` and `radix-ui` are not dependencies and must not be reintroduced. Colors/spacing/radius via design tokens (`bg-background`, `text-foreground`, …), motion via the `lib/ease.ts` spring/easing tokens — no hardcoded colors, no arbitrary values (`bg-[#…]`, `p-[13px]`), no editing component internals.
+- **beUI primitives are added via the shadcn CLI + beUI registry, never hand-written** — `pnpm dlx shadcn@latest add @beui/<name>` → lands in `@folio/ui` `src/components/motion/` (export from `src/index.ts`). Basics beUI lacks (Card/Avatar/Separator/Skeleton) are hand-rolled as ~a-dozen-line local primitives; blocks/compositions live in `apps/web/src/components/` (hand-authored). A new transitive dep from `add` → run the 4 library gates.
 - **Use a component's native API, don't be clever.** Prefer controlled props / built-in behavior (`value`, `open`, `filter`, `openOnInputClick`, …) over hand-rolled overlays, focus hacks, or pointer-event tricks. Extend on top of the native structure, minimally.
 - When unsure what a component supports, **read its types / the `shadcn add` output — don't guess.**
 
@@ -64,7 +64,7 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 ## Tests
 
 - **Test-first**: adapters get tests against recorded fixtures before impl; parsing logic gets golden tests. Tests in `tests/` beside `src/`, fixtures in `tests/fixtures/`.
-- Vendored shadcn primitives are not unit-tested — validate integration (build emits their classes); test our own logic (compositions, hooks, pure functions).
+- Vendored beUI primitives are not unit-tested — validate integration (build emits their classes); test our own logic (compositions, hooks, pure functions).
 
 ## Debugging
 

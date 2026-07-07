@@ -3,7 +3,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 // better-auth 身份表(email+password 核心:user/session/account/verification)。
 // 字段名(property)须与 better-auth 约定一致;SQL 列名用 snake_case 与业务表统一。
 // 注:`@better-auth/cli` 当前版本(1.4.x)落后于 better-auth 1.6,generate 在本仓 jiti
-// 解析下失败(拉到旧 better-call),故按官方 Drizzle schema 定义(arch-design §4.2 允许)。
+// 解析下失败(拉到旧 better-call),故按官方 Drizzle schema 手动定义。
 // 运行期由 better-auth 1.6.21 + better-call 1.3.7 正常工作(curl 注册/登录已验证)。
 
 export const user = sqliteTable("user", {

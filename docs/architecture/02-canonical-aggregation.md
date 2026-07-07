@@ -56,13 +56,13 @@ flowchart TD
 
 ## ④ 读出 —— 用户打开总览
 
-📍 **地点**:`apps/web/src/lib/server/overview.ts`(`getMyOverview`)→ `@folio/db` `getLatestSnapshotByUser`(`queries.ts:372`)
+📍 **地点**:`apps/web/src/lib/server/overview.ts`(`getMyOverview`)→ `@folio/db` `getLatestSnapshotByUser`(`queries.ts:348`)
 
 🔧 **做了什么**:取该用户每个账户的**最新**快照,把里面的 Balance 全部读回来 —— 我们这条 Arbitrum USDC 重新出现。
 
 ## ⑤ 富化 —— 给它贴上"真实身份 + 组 + 价格"
 
-📍 **地点**:`overview.ts:61` `tokens.enrich`(cache-only)→ token-store 读出时贴组(`token-store.ts:95`)
+📍 **地点**:`overview-model.ts:39` `tokens.enrich`(cache-only)→ token-store 读出时贴组(`token-store.ts:95`)
 
 🔧 **做了什么**:用 ③ 缓存的结果(零网络)给这条 USDC 补上:
 - `ref = coingecko:usd-coin`(它的规范身份)
@@ -73,7 +73,7 @@ flowchart TD
 
 ## ⑥ 组装 `AggInput` —— 变成聚合器认识的输入
 
-📍 **地点**:`overview.ts:62`
+📍 **地点**:`overview-model.ts:87`
 
 🔧 **做了什么**:把"原始 Balance + 富化结果 + 所属账户"揉成一个 `AggInput`。
 ```jsonc
@@ -85,7 +85,7 @@ flowchart TD
 
 ## ⑦ 聚合 —— 和别处的 USDC 并成一条 Holding
 
-📍 **地点**:`apps/web/src/lib/aggregate.ts:127` `buildCanonicalHoldings`
+📍 **地点**:`apps/web/src/lib/aggregate.ts:99` `buildCanonicalHoldings`
 
 🔧 **做了什么**(对这条 USDC):
 1. 过门槛 `isEligible`:`kind==="spot"` ✅ 进聚合。
@@ -119,7 +119,7 @@ Holding {
 
 **1. 为什么要"聚合"?** ⑤ 的富化只是给每条**贴标签**(它是 usdc);不聚合的话,界面会平铺 5 行 "USDC"。⑦ 才是把"标签相同的"真正合并、求和、收集来源。**解析告诉你是不是同一个,聚合负责把是同一个的合起来。**
 
-**2. 为什么用 `group:usdc`,不用 symbol,也不只用 CGK id?**(四级归并键,`aggregate.ts:104`)
+**2. 为什么用 `group:usdc`,不用 symbol,也不只用 CGK id?**(四级归并键,`aggregate.ts:76`)
 ```ts
 if (row.group)    return `group:${row.group.id}`;    // ① 跨 coin id 的家族(最宽)
 if (row.ref)      return `token:${refKey(row.ref)}`; // ② 同一 CGK coin id
@@ -140,8 +140,8 @@ return `as:${row.account.id}:${norm(row.symbol)}`;   // ④ 账户内兜底(绝�
 | ① 产生 | `packages/balances/providers/zerion/src/index.ts`(`buildTokenKey` @ `packages/tokens/basic/src/token-key.ts:32`) |
 | ② 入库 | `apps/web/src/lib/server/sync.ts:31` → `packages/db/src/queries.ts:298` `writeSnapshot` |
 | ③ 预热 | `apps/web/src/lib/server/tokens.ts`(`warmTokens`)+ 种子 `packages/tokens/basic/src/constants.ts:51/:62` |
-| ④ 读出 | `apps/web/src/lib/server/overview.ts` → `packages/db/src/queries.ts:372` `getLatestSnapshotByUser` |
-| ⑤ 富化 | `overview.ts:61` `tokens.enrich` + 贴组 `packages/db/src/token-store.ts:51/:95` |
-| ⑥ 组装 | `apps/web/src/lib/server/overview.ts:62` |
-| ⑦ 聚合 | `apps/web/src/lib/aggregate.ts:127`(键 `:104` / 门槛 `:111`) |
+| ④ 读出 | `apps/web/src/lib/server/overview.ts` → `packages/db/src/queries.ts:348` `getLatestSnapshotByUser` |
+| ⑤ 富化 | `overview-model.ts:39` `tokens.enrich` + 贴组 `packages/db/src/token-store.ts:51/:95` |
+| ⑥ 组装 | `apps/web/src/lib/overview-model.ts:87` |
+| ⑦ 聚合 | `apps/web/src/lib/aggregate.ts:99`(键 `:76` / 门槛 `:83`) |
 | ⑧ 渲染 | `apps/web/src/routes/_authed/index.tsx` · `components/token-holdings.tsx` · `components/asset-sheet.tsx` |

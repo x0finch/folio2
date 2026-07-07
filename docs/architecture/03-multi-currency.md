@@ -106,7 +106,7 @@ USD: 恒 1
 
 ## 附:为什么这么设计
 
-⑦ 那一步藏着本特性的关键决策(详见 [ADR 0006](../docs/adr/0006-multi-currency-display.md)):
+⑦ 那一步藏着本特性的关键决策(详见 [ADR 0006](../adr/0006-multi-currency-display.md)):
 
 **1. 为什么 USD 基准 + 展示层换算?** 存储/聚合/provider 恒 USD;非美元只是渲染时 `usdValue / rate` 换一次。**不按目标币种查价**(那要把 USD 贯穿整条管线,侵入巨大);**换算只作用于最终展示值,不逐 source 换**。新增 provider 照旧只产 USD,多币种零改动。
 

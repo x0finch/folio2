@@ -47,5 +47,5 @@ _Avoid_: 把 Display currency 也叫 base
 _Avoid_: base currency(那恒为 USD)、locale(那管语言/分隔符,与币种正交)
 
 **FX rate(汇率)**:
-`usd_per_unit` —— **1 单位展示币种的美元价**(法币与加密同义)。展示值 `= usdValue / rate`。源自 CoinGecko `/exchange_rates`(以 BTC 为基准反算,BTC 约掉)。
+`usd_per_unit` —— **1 单位展示币种的美元价**(法币与加密同义)。展示值 `= value / rate`(`value` 为持仓的 USD 权威值)。源自 CoinGecko `/exchange_rates`(以 BTC 为基准反算,BTC 约掉)。
 _Avoid_: 反向表述(不用"每美元多少目标币")

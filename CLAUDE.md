@@ -1,6 +1,6 @@
 # Folio — Engineering Conventions
 
-> **Folio** is a self-hosted crypto portfolio tracker (on-chain wallets + CEX + perp DEX + manual assets → one dashboard). M1–M6 are complete and archived under [evolution/milestones/](evolution/milestones/) (blueprint `arch-design.md` + per-phase log `checklist.md` + `plans/`). Forward work lives in [evolution/roadmap.md](evolution/roadmap.md), with new plans in `evolution/plans/`. Read this file first every session, do only the current phase, then update its entry in the relevant log and stop. Coding conventions (imports, naming, UI, React, tests, commits): see [CODING.md](CODING.md).
+> **Folio** is a self-hosted crypto portfolio tracker (on-chain wallets + Bitcoin + CEX + perp DEX + manual assets → one dashboard). M1–M6 (foundation → on-chain → CEX → perp → polish) are complete and shipped — architecture overview in [docs/architecture/](docs/architecture/00-overview.md); decision history in git log + [docs/adr/](docs/adr/). Forward work: [docs/roadmap.md](docs/roadmap.md) (narrative + scope; links the epic board). Read this file first every session. Coding conventions (imports, naming, UI, React, tests, commits): see [CODING.md](CODING.md).
 
 ## Tech stack
 - TanStack Start (`@tanstack/react-start`) + Vite — full-stack, server functions
@@ -22,7 +22,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 8. **No hardcoding** — magic numbers named; volatile/env-specific → env, stable domain → each package's `constants.ts`.
 9. **Prefer mature, vetted libraries** — must pass the 4 gates (CF Workers, maintained, complexity-worth-it, no conflicts); record the choice.
 10. **kebab-case filenames**; exports keep their own case convention (components `PascalCase`, funcs `camelCase`, types `PascalCase`, constants `UPPER_SNAKE`).
-11. **UI = beUI (Framer Motion) 动效层 + 少量手搓本地原语,皆经 shadcn registry — 绝不 Radix** — beUI 件经 `@beui/*` registry(`pnpm dlx shadcn add @beui/<name>`)落 `packages/ui/src/components/motion/`,beUI 无对应的基础件(Card/Avatar/Separator/Skeleton)手搓;迁移中残留的 base-vega(Base UI)件正逐步退场,终态移除 `@base-ui/react`(见 [ADR 0004](docs/adr/0004-adopt-beui-motion-layer-drop-base-ui.md))。design tokens 优先(含 `lib/ease.ts` 动效 spring/easing token),避免任意值,不改件内核。
+11. **UI = beUI (Framer Motion) 动效层 + 少量手搓本地原语,皆经 shadcn registry — 绝不 Radix** — beUI 件经 `@beui/*` registry(`pnpm dlx shadcn add @beui/<name>`)落 `packages/ui/src/components/motion/`,beUI 无对应的基础件(Card/Avatar/Separator/Skeleton)手搓;`@base-ui/react` 已移除、Base UI 全退场(见 [ADR 0004](docs/adr/0004-adopt-beui-motion-layer-drop-base-ui.md))。design tokens 优先(含 `lib/ease.ts` 动效 spring/easing token),避免任意值,不改件内核。
 12. **Small commits, English messages — never `git commit` without explicit approval** ("提交"/"commit" authorizes it; "执行"/"go" does NOT).
 
 ## Package conventions (monorepo)
@@ -30,7 +30,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - **Internal-packages pattern**: each `@folio/*` package.json sets `"exports": { ".": "./src/index.ts" }` pointing at source — **no build step** for internal libs (Vite/Vitest transpile TS directly). Consumers depend via `"@folio/<x>": "workspace:*"`.
 - **No TS project references** (overkill here); each package `tsconfig.json` just extends `../../tsconfig.base.json`.
 - **Each package ships its own minimal `vitest.config.ts`** + a `test: "vitest run"` script. This keeps `vitest` from inheriting the root `projects` config when run inside a package, and lets the root runner (`pnpm test:packages`) discover the package. The root `vitest.config.ts` (`test.projects`) is the canonical all-package runner.
-- **A provider serving multiple account types**: keep `BalanceProvider.accountType` singular; use a factory to emit one provider object per type (shared impl), export `providers: BalanceProvider[]`, and let `@folio/sync` flatten them into `buildRegistry`. See arch-design.md §2 (方案 A).
+- **A provider serving multiple account types**: keep `BalanceProvider.accountType` singular; use a factory to emit one provider object per type (shared impl), export `providers: BalanceProvider[]`, and let `@folio/sync` flatten them into `buildRegistry` (方案 A).
 - Package prefix `@folio/*`. Providers published as `@folio/provider-<name>`.
 
 ## Git & PR 工作流
@@ -41,7 +41,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - **提交已签名(GPG)**:别引入破坏 Verified 的操作。
 - **每片 tracer-bullet 独立可验收**:一片一提交,过四闸(typecheck / test / biome / build)+ code-review 再进下一片。
 
-## Toolchain notes (current best practices — supersede older wording in arch-design.md)
+## Toolchain notes (current best practices)
 - **`wrangler.jsonc`** (not `wrangler.toml`) — Cloudflare's recommended format; some features JSON-only. Wrangler v4.
 - **Vitest 4** with root `test.projects` in `vitest.config.ts` (`vitest.workspace.ts` is removed in v4). Glob `test.projects` at each package's **config file** (`packages/**/vitest.config.ts`), not at directories — a dir glob (`packages/*`, `packages/tokens/*`) also matches container-only folders (`packages/tokens`, `packages/providers`), which get picked up as unnamed, colliding projects and fail the whole run.
 - **Cloudflare targeting via `@cloudflare/vite-plugin`** (not the legacy Nitro `cloudflare-module` preset).
@@ -50,11 +50,19 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - **D1 testing**: `@cloudflare/vitest-pool-workers` 0.16.x — use the root `cloudflareTest` plugin + `readD1Migrations` (the old `defineWorkersConfig`/`/config` subpath is removed); `env`/`applyD1Migrations` from `cloudflare:test`; `Cloudflare.Env` augmentation in a test `env.d.ts`. This version doesn't isolate per-test storage → reset state in `beforeEach`.
 - **D1 data layer**: D1 has no interactive `db.transaction()` → atomic multi-writes use `db.batch([...])`. D1 enforces FKs, so `ON DELETE CASCADE` works at runtime. Migrations: `drizzle-kit generate` (out=`drizzle/`) → apply (never `drizzle-kit migrate`); `out` == wrangler `migrations_dir` == test `readD1Migrations` path. **Applying**: migrate scripts live in **`apps/web`** (it owns the real `database_id` + `DB` binding + `migrations_dir`): `pnpm --filter @folio/web db:migrate:local` after a schema change, `db:migrate:remote` before deploy. **Must run from `apps/web`, not `packages/db`**: `packages/db/wrangler.jsonc` has a placeholder `database_id` + its own `.wrangler` (Vitest/Miniflare only), so an apply there hits the wrong DB — `--local` writes `packages/db/.wrangler` (≠ the running server's `apps/web/.wrangler`), `--remote` targets a bogus id. `@cloudflare/vite-plugin` *may* auto-apply `drizzle/` on dev-server startup but is unreliable across new migrations → after a schema change run `db:migrate:local` (Miniflare targets by `database_name` → the running server's local D1). `db:generate` stays in `packages/db` (schema owner). Tests apply via `readD1Migrations`, independent of both. **Column renames need a TTY**: `drizzle-kit generate` prompts "created or renamed?" per column and hard-errors headless (no TTY) — drive it with `expect` (spawn `pnpm db:generate`, on each "created or renamed from another column" send down-arrow `\033[B` + `\r` to pick "rename column"). Renaming a PK column → SQLite can't `ALTER`, so drizzle emits create-new-table + `INSERT…SELECT` + drop + rename (data preserved); a non-PK column gets a plain `RENAME COLUMN`.
 - TS6 generic `Uint8Array<ArrayBufferLike>` isn't assignable to Web Crypto `BufferSource`/`D1` BufferSource — annotate byte arrays as `Uint8Array<ArrayBuffer>` when needed.
-- **better-auth on CF Workers** (1.6+): native `node:crypto` scrypt is auto-selected with `nodejs_compat` — no hash override needed (supersedes arch-design §7.1 ①). Build the auth instance lazily (`env` from `cloudflare:workers`), never at module load. `@better-auth/cli` (1.4.x) lags better-auth (1.6.x) and fails under this repo's jiti (pulls a stale `better-call`) → define the Drizzle auth schema by hand per the official spec. Verify auth via curl with an `Origin: http://localhost:3000` header (CSRF guard).
+- **better-auth on CF Workers** (1.6+) — platform-forced gotchas, **different root causes, don't conflate**:
+  - **scrypt**: native `node:crypto` auto-selected with `nodejs_compat` → no hash override needed (pre-1.6 pure-JS scrypt caused intermittent Error 1102 CPU-limit).
+  - **single module-level auth instance**, lazy-init by `env` from `cloudflare:workers`: a *per-request* instance → D1/SQLite write-lock contention → ~33s local-dev hang + prod 503 cascade. One instance kills both.
+  - **`ctx.waitUntil` for post-response work** (token cleanup / session writes): the Worker exits before they finish otherwise → `Network connection lost`.
+  - **secondaryStorage TTL ≥ 60s**: some endpoints pass 10s, below KV's 60s min → silent failure (`Math.max(ttl, 60)`).
+  - **disable cookieCache**: cookieCache + secondaryStorage has an upstream bug → take one extra D1 read/request for correctness.
+  - **no auth calls at module load**: Worker startup-CPU limit → keep all auth calls inside handlers/server fns.
+  - `@better-auth/cli` (1.4.x) lags better-auth (1.6.x) and fails under this repo's jiti (stale `better-call`) → hand-define the Drizzle auth schema per the official spec. Verify via curl with `Origin: http://localhost:3000` (CSRF guard).
 - **TanStack Start server routes**: `createFileRoute("/path/$").server.handlers` (GET/POST → `Response`). The `server` option is a Start augmentation of `@tanstack/router-core`; since app `src` doesn't import `@tanstack/react-start`, add `/// <reference types="@tanstack/react-start" />` (in `src/env.d.ts`) so `tsc` sees it. Run `wrangler types` after editing `wrangler.jsonc` bindings → `worker-configuration.d.ts` (Biome-excluded).
-- **Lint/format = Biome** (`biome.json`, 2.x): `pnpm lint` (check) / `pnpm lint:fix` (write); CI runs `biome ci`. Style: 2-space, double quotes, lineWidth 100. Excludes vendored/generated (shadcn `components/`+`styles/`, `routeTree.gen.ts`, `drizzle/`, all `*.css`); `.gitignore` reused via `vcs.useIgnoreFile`. `noNonNullAssertion` is off in test files only. No ESLint (no type-aware lint yet; `tsc --strict` covers types).
+- **Tailwind v4 in the pnpm monorepo**: v4 doesn't scan `node_modules`, so workspace packages (symlinked there) are invisible → use **`@source`** pointing at the **real source paths**: `@folio/ui` `globals.css` has `@source "../**/*.{ts,tsx}"` (scans ui src), `apps/web` `styles.css` has `@source "./**/*.{ts,tsx}"`. Missing it = "compiles but renders unstyled". Don't `@source "../node_modules/..."` (fails to resolve under pnpm). `@folio/ui` owns the Tailwind entry + theme tokens; `apps/web` just `@import "@folio/ui/globals.css"`.
+- **Lint/format = Biome** (`biome.json`, 2.x): `pnpm lint` (check) / `pnpm lint:fix` (write); CI runs `biome ci`. Style: 2-space, double quotes, lineWidth 100. Excludes vendored/generated (`@folio/ui` `components/`+`styles/` — beUI/motion primitives, `routeTree.gen.ts`, `drizzle/`, `worker-configuration.d.ts`, all `*.css`); `.gitignore` reused via `vcs.useIgnoreFile`. `noNonNullAssertion` is off in test files only. No ESLint (no type-aware lint yet; `tsc --strict` covers types).
 
-## Security model (see arch-design.md §3, §7.1)
+## Security model
 - Global provider keys (`ZERION_API_KEY`, etc.) → CF Secret/env. Per-account creds → D1 as one `creds` map (physical column `enc_credentials`), encrypted **per field by `type`**: `secret` fields AES-GCM with `SECRETS_KEY`, `public`/`semi` plaintext (P6.6.1/P6.6.2; seal/open/safeView/isComplete now in `apps/web/src/lib/creds.ts`, driven by `@folio/balances` `credentialSpecs()` + Web Crypto).
 - Read-only tracking, **no signing** → no private-key field in any `provider.inputs`; on-chain accounts store address/xpub only (`public`).
 - Decrypt (`openCreds`) only inside server functions / sync at fetch time, discard immediately, never log (P6.7 red line: log only accountId/type/code/counts).
@@ -64,9 +72,9 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 
 ## Progress
 
-**M1–M6 complete** — foundation → on-chain → CEX → perp → polish, deploy-ready (see [apps/web/DEPLOY.md](apps/web/DEPLOY.md); going live is user-run per safety rules). Full per-phase archive (what/why/tests/gates) in **[evolution/milestones/](evolution/milestones/)** (`checklist.md` + `arch-design.md` + `plans/`).
+**M1–M6 complete** — foundation → on-chain → CEX → perp → polish, deploy-ready (see [apps/web/DEPLOY.md](apps/web/DEPLOY.md); going live is user-run per safety rules). Shipped-work history lives in git log + [docs/adr/](docs/adr/) — no in-repo phase archive.
 
-Forward work — deferred features + the M7+ roadmap — lives in **[evolution/roadmap.md](evolution/roadmap.md)**; per-phase tracking in **[evolution/checklist.md](evolution/checklist.md)**; new plans go in `evolution/plans/`.
+**前向路线**:见 **[docs/roadmap.md](docs/roadmap.md)**(叙事 / 范围 / 依赖,并链到 epic 看板 GitHub Project;看板是进度事实源)。规划 epic **不打 `ready-for-agent`**;开工某条时经技能链(grill → to-prd → to-issues)拆竖切片才给 agent-ready 标签。规划草稿(plans)写本地 **`.scratch/plans/`**(gitignore,一次性、不入库);耐久产出落 ADR + Issues,不留 plan 文件在仓库。
 
 ---
 

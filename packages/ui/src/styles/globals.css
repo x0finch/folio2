@@ -3,8 +3,8 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* base-vega 组件(Tabs 等)依赖的自定义变体 —— Base UI 用 data-orientation / data-selected。
-   注册后 data-horizontal:/data-vertical:/data-active: 及其 group 形才生效(否则 Tabs 布局/激活态失效)。 */
+/* 手搓/beUI 件(Separator、Tabs 等)用 data-orientation / data-selected 的自定义变体。
+   注册后 data-horizontal:/data-vertical:/data-active: 及其 group 形才生效(否则布局/激活态失效)。 */
 @custom-variant data-horizontal (&[data-orientation="horizontal"]);
 @custom-variant data-vertical (&[data-orientation="vertical"]);
 @custom-variant data-active (&[data-active]);

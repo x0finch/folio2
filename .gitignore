@@ -9,8 +9,8 @@ dist/
 .env
 .env.*
 !.env.example
-evolution/
-
 
 .agents/
 skills-lock.json
+
+.scratch/

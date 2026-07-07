@@ -4,7 +4,7 @@ import { refKey, type TokenGroup, type TokenRef } from "@folio/tokens";
 const norm = (s: string): string => s.trim().toUpperCase();
 
 // 纯逻辑(无 server-only import → 可单测)。把跨账户的持仓行按【规范代币】聚合成 Holding 树。
-// 设计见 evolution/plans/p2-token-aggregation.md + docs/adr 0001–0003;术语见 CONTEXT.md。
+// 设计见 docs/adr 0001–0003;术语见 CONTEXT.md。
 //   · 白名单(进聚合):spot / manual / CEX 现货(kind=spot)/ perp 权益(isMargin) —— ADR-0003。
 //   · 归并键四级(永不裸 symbol,ADR-0002):group → token(ref)→ tokenKey(精确合约)→ account:symbol。
 //   · HoldingSource 粒度 = 账户 × 平台单元:链上按链拆(tokenKey 的 eip155/chain 前缀),其余按账户/场馆。

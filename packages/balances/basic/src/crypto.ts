@@ -1,6 +1,6 @@
 // 凭据加解密原语:Web Crypto AES-GCM(Workers 原生支持)。
 // 用标准算法,不手写密码学;本模块【不读 env】——密钥由调用方传入(env.SECRETS_KEY),
-// 保持 core 运行时无关、可单测。任何上层只回 has* 布尔,密文/明文不外泄(见 arch-design §3)。
+// 保持 core 运行时无关、可单测。任何上层只回 has* 布尔,密文/明文不外泄。
 
 const ALGORITHM = "AES-GCM";
 const KEY_BYTES = 32; // 256-bit 密钥

@@ -1,6 +1,6 @@
 # 采用 beUI 动效层,弃用 Base UI
 
-Status: proposed
+Status: accepted(已实施 —— `@base-ui/react` 已移除,beUI 件全部落地)
 
 UI 从「纯 base-vega(Base UI)shadcn 栈」转为「**beUI(Framer Motion)动效层 + 少量手搓原语**」,经 `@beui/*` shadcn registry 分发。beUI 有的组件(Tabs/Tooltip/Select/Button/Toast/Drawer/Input/Badge/Checkbox)全部替换为 beUI 版;beUI 没有的(Card/Avatar/Separator/Skeleton)手搓成十来行本地件;Combobox → fork Command Palette,Sidebar → beUI 导航(顶栏 + 底部 Dock)。净效果:**移除 `@base-ui/react` 依赖**。beUI 随件附带的 `lib/ease.ts`(spring/easing token)升为全站 canonical 动效基线。
 

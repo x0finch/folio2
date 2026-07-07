@@ -77,7 +77,7 @@ flowchart LR
 快照行 → 富化 → `AggInput` → 聚合:
 
 ```ts
-// apps/web/src/lib/server/overview.ts:61
+// apps/web/src/lib/overview-model.ts:39
 const enriched = await tokens.enrich(eligible.map((x) => x.asset));
 const aggInputs: AggInput[] = eligible.map((x, i) => {
   const e = enriched[i];
@@ -90,20 +90,20 @@ const aggInputs: AggInput[] = eligible.map((x, i) => {
     name: e?.name, logo: e?.logo, change24h: e?.change24h,
   };
 });
-const holdings = buildCanonicalHoldings(aggInputs);   // overview.ts:84
+const holdings = buildCanonicalHoldings(aggInputs);   // overview-model.ts:101
 ```
 
 perp role 判定(equity 进聚合、position 排除):
 
 ```ts
-// apps/web/src/lib/server/overview.ts:18
+// apps/web/src/lib/overview-model.ts:20
 const r = (JSON.parse(metaJson) as { role?: unknown }).role;  // "equity" | "position"
 ```
 
 ### 代码指向
 
-- 读时聚合入口:`apps/web/src/lib/server/overview.ts:61-84`
-- 聚合纯函数:`apps/web/src/lib/aggregate.ts:127` `buildCanonicalHoldings`(详见 [02](./02-canonical-aggregation.md))
+- 读时聚合入口:`apps/web/src/lib/overview-model.ts:39-101`
+- 聚合纯函数:`apps/web/src/lib/aggregate.ts:99` `buildCanonicalHoldings`(详见 [02](./02-canonical-aggregation.md))
 - 派生:`apps/web/src/lib/allocation.ts`(饼图)· `apps/web/src/lib/day-change.ts`(头部价值差)
 - 渲染:`apps/web/src/routes/_authed/index.tsx`(总览)· `apps/web/src/components/token-holdings.tsx`
 

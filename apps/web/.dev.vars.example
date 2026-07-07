@@ -6,6 +6,8 @@ SECRETS_KEY=replace-with-openssl-rand-base64-32
 ZERION_API_KEY=replace-with-zerion-dev-key
 # CoinStats API key (free tier at openapi.coinstats.app) — global key for onchain_solana/sui/cosmos
 COINSTATS_API_KEY=replace-with-coinstats-key
+# CoinGecko API key (OPTIONAL — free tier works keyless; a demo/pro key raises rate limits) — token pricing + FX
+# COINGECKO_API_KEY=replace-with-coingecko-key
 # Logging (P6.7): LOG_LEVEL = trace|debug|info|warning|error|fatal (default info).
 # LOG_PRETTY=true → @logtape/pretty colored output for local dev; unset in prod → JSON Lines for Workers Logs.
 LOG_LEVEL=debug
