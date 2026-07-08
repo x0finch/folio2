@@ -9,6 +9,11 @@ export type { DbEnv } from "./client";
 export { createDb, type Db } from "./db";
 export { createFxStore } from "./fx-store"; // FX 汇率缓存(展示币种,全局无 userId)
 export { createPlatformStore } from "./platform-store"; // 平台元数据缓存(链 ∪ 交易所)
+export {
+  createProviderConfigStore, // provider 全局配置覆盖表(ADR 0009,全局无 userId)
+  type ProviderConfigRow,
+  type ProviderConfigStore,
+} from "./provider-config-store";
 export type {
   AccountRawCreds,
   CreateAccountInput,

@@ -175,6 +175,6 @@ export const entries: ProviderEntry[] = [
       configSchema: [],
       defaultEnabled: true,
     },
-    provider: hyperliquidProvider,
+    create: () => hyperliquidProvider,
   },
 ];

@@ -9,7 +9,6 @@ function ctx(creds: FetchContext["creds"] = CREDS): FetchContext {
   return {
     account: { id: "a1", userId: "u1", type: "exchange_okx", label: "OKX" },
     creds,
-    globalKeys: {},
   };
 }
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
@@ -57,9 +56,8 @@ describe("okxProvider.fetchBalances", () => {
     await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
   });
 
-  it("serves exchange_okx, no usesGlobalKeys, exported in providers", () => {
+  it("serves exchange_okx, exported in providers", () => {
     expect(okxProvider.accountType).toBe("exchange_okx");
-    expect(okxProvider.usesGlobalKeys).toBeUndefined();
     expect(providers).toContain(okxProvider);
   });
 });

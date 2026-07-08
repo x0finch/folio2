@@ -1,16 +1,16 @@
-import type { AccountType, ProviderEntry } from "@folio/balances-basic";
+import type { AccountType, ProviderEntry, ProviderManifest } from "@folio/balances-basic";
 import { describe, expect, it } from "vitest";
 import { ALL_ENTRIES } from "../src/entries";
-import { buildCandidates, resolveActive } from "../src/registry";
+import { buildCandidates, resolveActive, resolveSettings } from "../src/registry";
 
 // 假 entry 工厂:mechanics 是纯函数,用最小形状喂。
 const entry = (id: string, accountType: AccountType, defaultEnabled = true): ProviderEntry => ({
   manifest: { id, accountType, dataSource: id, configSchema: [], defaultEnabled },
-  provider: {
+  create: () => ({
     accountType,
     fetchBalances: async () => [],
     validate: async () => true,
-  },
+  }),
 });
 
 describe("buildCandidates", () => {
@@ -29,39 +29,94 @@ describe("buildCandidates", () => {
       /Duplicate provider manifest id/,
     );
   });
-
-  it("manifest 与 provider 的 accountType 不一致 → 抛错", () => {
-    const bad = entry("x", "manual");
-    (bad.provider as { accountType: AccountType }).accountType = "onchain_evm";
-    expect(() => buildCandidates([bad])).toThrow(/accountType mismatch/);
-  });
 });
 
-describe("resolveActive(本切片:按 manifest 默认)", () => {
-  it("每 type 恰一个 defaultEnabled → 生效;defaultEnabled=false 的候选不生效", () => {
-    const a = entry("evm-a", "onchain_evm");
-    const b = entry("evm-b", "onchain_evm", false);
+describe("resolveActive(启用 = 覆盖 ?? manifest 默认)", () => {
+  const a = entry("evm-a", "onchain_evm");
+  const b = entry("evm-b", "onchain_evm", false);
+
+  it("无覆盖:恰一个 defaultEnabled → 生效;false 默认的候选不生效", () => {
     const active = resolveActive(buildCandidates([a, b]));
-    expect(active.onchain_evm).toBe(a.provider);
+    expect(active.onchain_evm).toBe(a);
     expect(Object.keys(active)).toEqual(["onchain_evm"]);
   });
 
-  it("零个 defaultEnabled → 该 type 缺席(未启用)", () => {
-    const active = resolveActive(buildCandidates([entry("evm-b", "onchain_evm", false)]));
+  it("enabled=true 覆盖 = 选中:压过 manifest 默认(切换后端)", () => {
+    const active = resolveActive(buildCandidates([a, b]), new Map([["evm-b", true]]));
+    expect(active.onchain_evm).toBe(b);
+  });
+
+  it("enabled=false 覆盖:显式停用默认者 → 该 type 缺席(关闭类型)", () => {
+    const active = resolveActive(buildCandidates([a, b]), new Map([["evm-a", false]]));
     expect(active.onchain_evm).toBeUndefined();
   });
 
-  it("同 type 多个 defaultEnabled → 抛错(声明冲突)", () => {
+  it("enabled=null(仅存 settings 的行)不影响启停", () => {
+    const active = resolveActive(buildCandidates([a, b]), new Map([["evm-a", null]]));
+    expect(active.onchain_evm).toBe(a);
+  });
+
+  it("零个 defaultEnabled 且无覆盖 → 缺席(defaultEnabled=false 的冷门 provider)", () => {
+    const active = resolveActive(buildCandidates([b]));
+    expect(active.onchain_evm).toBeUndefined();
+    // 启用覆盖后生效
+    expect(resolveActive(buildCandidates([b]), new Map([["evm-b", true]])).onchain_evm).toBe(b);
+  });
+
+  it("同 type 多条 true 覆盖 → 抛错(store 不变量被破坏)", () => {
     expect(() =>
       resolveActive(
-        buildCandidates([entry("evm-a", "onchain_evm"), entry("evm-b", "onchain_evm")]),
+        buildCandidates([a, b]),
+        new Map([
+          ["evm-a", true],
+          ["evm-b", true],
+        ]),
+      ),
+    ).toThrow(/Multiple enabled/);
+  });
+
+  it("同 type 多个 defaultEnabled → 抛错(manifest 声明冲突)", () => {
+    expect(() =>
+      resolveActive(
+        buildCandidates([entry("evm-a", "onchain_evm"), entry("evm-c", "onchain_evm")]),
       ),
     ).toThrow(/Multiple default-enabled/);
   });
 });
 
+describe("resolveSettings(分层:自定义 → envDefaults 槽 → 缺失)", () => {
+  const manifest: ProviderManifest = {
+    id: "evm-x",
+    accountType: "onchain_evm",
+    dataSource: "x",
+    configSchema: [
+      { key: "apiKey", type: "secret", label: "API Key", validator: { "~standard": {} } as never },
+    ],
+    envDefaults: { apiKey: "X_API_KEY" },
+    defaultEnabled: true,
+  };
+
+  it("自定义值优先于 env 默认", () => {
+    expect(resolveSettings(manifest, { apiKey: "custom" }, { X_API_KEY: "env" })).toEqual({
+      apiKey: "custom",
+    });
+  });
+
+  it("无自定义 → 落到 envDefaults 声明的部署时默认", () => {
+    expect(resolveSettings(manifest, undefined, { X_API_KEY: "env" })).toEqual({ apiKey: "env" });
+  });
+
+  it("都没有 → 字段缺失(生效判定由上层做)", () => {
+    expect(resolveSettings(manifest, undefined, {})).toEqual({});
+  });
+
+  it("只解析 configSchema 声明的字段(不透传杂键)", () => {
+    expect(resolveSettings(manifest, { apiKey: "c", junk: "x" }, {})).toEqual({ apiKey: "c" });
+  });
+});
+
 describe("ALL_ENTRIES(真实组装)", () => {
-  it("id 全局唯一、manifest 与 provider type 一致(buildCandidates 不抛)", () => {
+  it("id 全局唯一(buildCandidates 不抛)", () => {
     expect(() => buildCandidates(ALL_ENTRIES)).not.toThrow();
   });
 
@@ -80,5 +135,11 @@ describe("ALL_ENTRIES(真实组装)", () => {
         "perp_hyperliquid",
       ].sort(),
     );
+  });
+
+  it("manifest 与工厂产物的 accountType 一致", () => {
+    for (const e of ALL_ENTRIES) {
+      expect(e.create().accountType).toBe(e.manifest.accountType);
+    }
   });
 });

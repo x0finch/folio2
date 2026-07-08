@@ -31,18 +31,15 @@ export type CredsOf<I extends readonly ProviderInput[]> = {
 
 // provider 拉取/校验时拿到的账户上下文。creds 形状由各 provider 的 inputs 推断(见 CredsOf);
 // 运行时由 sync/创建流在构造前用 validateCredentials(inputs, …) 校验过 → 类型有运行时背书。
-// globalKeys 已按本 provider 的 usesGlobalKeys 收窄(最小权限)。
+// 全局 key 不在此:它是 provider 的【实例化参数】(ProviderEntry.create(settings),ADR 0009 两层构造)。
 export interface FetchContext<C = Record<string, unknown>> {
   account: Account;
   creds: C;
-  globalKeys: Record<string, string>;
 }
 
 export interface BalanceProvider<I extends readonly ProviderInput[] = readonly ProviderInput[]> {
   // 该实现服务于哪个 AccountType —— "provider ↔ type" 映射的唯一事实源,registry 据此自动组装。
   readonly accountType: AccountType;
-  // 本 provider 用到的服务端全局 key 名(最小权限,编排层据此收窄 globalKeys)。默认无。
-  readonly usesGlobalKeys?: readonly string[];
   // 本 type 账户需要的【账户输入】(自描述,见 ProviderInput)。creds 形状(CredsOf)由它推断。
   // 链上/perp → [identifier(public)];binance → [apiKey(semi),secret];okx → +passphrase;manual → [symbol,amount,usdValue(public)]。
   readonly inputs?: I;

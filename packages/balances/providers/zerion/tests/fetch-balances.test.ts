@@ -1,6 +1,7 @@
 import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  makeZerion,
   parseChainIds,
   parsePositions,
   providers,
@@ -18,11 +19,13 @@ import positionsFixture from "./fixtures/positions.json";
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
+// 全局 key 是实例化参数(工厂闭包,ADR 0009)—— 测试用带 key 实例;无 key 情形用 makeZerion()。
+const zerion = makeZerion("test-key");
+
 function ctx(overrides: Partial<FetchContext> = {}): FetchContext {
   return {
     account: { id: "a1", userId: "u1", type: "onchain_evm", label: "Wallet" },
     creds: { identifier: ADDR },
-    globalKeys: { ZERION_API_KEY: "test-key" },
     ...overrides,
   };
 }
@@ -85,7 +88,7 @@ describe("parsePositions (golden: fixtures in → fixture out)", () => {
 describe("zerionProvider.fetchBalances(双 API)", () => {
   it("并行取 positions + chains,输出与 expected-balances 完全一致", async () => {
     const spy = mockZerionApis();
-    const balances = await zerionProvider.fetchBalances(ctx());
+    const balances = await zerion.fetchBalances(ctx());
     expect(balances).toEqual(expectedBalances);
     // 两个端点都请求了,且 Basic auth 一致
     const urls = spy.mock.calls.map((c) => String(c[0]));
@@ -100,18 +103,18 @@ describe("zerionProvider.fetchBalances(双 API)", () => {
 
   it("chains 端点失败(500)且无缓存 → fetchBalances 硬失败(不写含分叉标识的快照)", async () => {
     mockZerionApis({ chains: () => new Response("", { status: 500 }) });
-    await expect(zerionProvider.fetchBalances(ctx())).rejects.toMatchObject({
+    await expect(zerion.fetchBalances(ctx())).rejects.toMatchObject({
       code: "UPSTREAM_ERROR",
     });
   });
 
   it("chains 映射有进程内缓存:第二次 fetchBalances 不再请求 /v1/chains/", async () => {
     const spy = mockZerionApis();
-    await zerionProvider.fetchBalances(ctx());
+    await zerion.fetchBalances(ctx());
     const chainCalls = () =>
       spy.mock.calls.filter((c) => String(c[0]).includes("/v1/chains/")).length;
     expect(chainCalls()).toBe(1);
-    await zerionProvider.fetchBalances(ctx());
+    await zerion.fetchBalances(ctx());
     expect(chainCalls()).toBe(1); // 仍是 1:走缓存
   });
 
@@ -119,7 +122,7 @@ describe("zerionProvider.fetchBalances(双 API)", () => {
   // provider 只对【全局 key 未配置】自查(运维问题,非用户输入)→ INVALID_CREDENTIALS,不发请求。
   it("throws INVALID_CREDENTIALS when the global key is missing (no request)", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    await expect(zerionProvider.fetchBalances(ctx({ globalKeys: {} }))).rejects.toMatchObject({
+    await expect(makeZerion().fetchBalances(ctx())).rejects.toMatchObject({
       code: "INVALID_CREDENTIALS",
     });
     expect(spy).not.toHaveBeenCalled();
@@ -129,7 +132,7 @@ describe("zerionProvider.fetchBalances(双 API)", () => {
     mockZerionApis({
       positions: () => new Response("", { status: 429, headers: { "retry-after": "3" } }),
     });
-    await expect(zerionProvider.fetchBalances(ctx())).rejects.toMatchObject({
+    await expect(zerion.fetchBalances(ctx())).rejects.toMatchObject({
       code: "RATE_LIMITED",
       retryable: true,
       retryAfterMs: 3000,
@@ -137,7 +140,7 @@ describe("zerionProvider.fetchBalances(双 API)", () => {
     vi.restoreAllMocks();
     resetChainIdsCacheForTests();
     mockZerionApis({ positions: () => new Response("", { status: 401 }) });
-    await expect(zerionProvider.fetchBalances(ctx())).rejects.toMatchObject({
+    await expect(zerion.fetchBalances(ctx())).rejects.toMatchObject({
       code: "AUTH_FAILED",
     });
   });

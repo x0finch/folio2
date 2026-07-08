@@ -9,7 +9,6 @@ function ctx(creds: FetchContext["creds"] = { apiKey: "k", secret: "s" }): Fetch
   return {
     account: { id: "a1", userId: "u1", type: "exchange_binance", label: "Binance" },
     creds,
-    globalKeys: {},
   };
 }
 
@@ -70,9 +69,8 @@ describe("binanceProvider.fetchBalances", () => {
     });
   });
 
-  it("serves exchange_binance, no usesGlobalKeys, exported in providers", () => {
+  it("serves exchange_binance, exported in providers", () => {
     expect(binanceProvider.accountType).toBe("exchange_binance");
-    expect(binanceProvider.usesGlobalKeys).toBeUndefined(); // 每账户密钥,不用全局 key
     expect(providers).toContain(binanceProvider);
   });
 });

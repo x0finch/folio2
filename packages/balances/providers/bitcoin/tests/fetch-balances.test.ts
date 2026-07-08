@@ -16,7 +16,6 @@ function ctx(overrides: Partial<FetchContext> = {}): FetchContext {
   return {
     account: { id: "a1", userId: "u1", type: "onchain_bitcoin", label: "Cold" },
     creds: { identifier: ADDR },
-    globalKeys: {},
     ...overrides,
   };
 }

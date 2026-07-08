@@ -58,9 +58,8 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ba
   return out;
 }
 
-// 全局 key 来自服务端 env(非用户输入)→ 仍需自查。
-function getApiKey(globalKeys: Record<string, string>): string {
-  const apiKey = globalKeys[COINSTATS_API_KEY];
+// 全局 key 是实例化参数(工厂闭包;非用户账户输入)→ 用时自查。
+function requireApiKey(apiKey: string | undefined): string {
   if (!apiKey) {
     throw new ProviderError("INVALID_CREDENTIALS", `${COINSTATS_API_KEY} not configured`);
   }
@@ -96,9 +95,12 @@ function ensureOk(res: Response): void {
   throw new ProviderError("UPSTREAM_ERROR", `coinstats upstream error (${res.status})`);
 }
 
-async function fetchCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<Balance[]> {
-  const apiKey = getApiKey(ctx.globalKeys);
-  const res = await coinstatsGet(connectionId, ctx.creds.identifier, apiKey);
+async function fetchCoinstats(
+  connectionId: string,
+  ctx: CoinstatsCtx,
+  apiKey: string | undefined,
+): Promise<Balance[]> {
+  const res = await coinstatsGet(connectionId, ctx.creds.identifier, requireApiKey(apiKey));
   ensureOk(res);
   let json: CoinstatsCoin[];
   try {
@@ -111,8 +113,11 @@ async function fetchCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<
 
 // 低消耗校验:打一次 wallet/balance 探活(地址已由 validateCredentials 保证非空)。任何失败 → false。
 // 三链地址格式各异(sui 0x+64hex / cosmos bech32 / solana base58),格式交给 API 判定。
-async function validateCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<boolean> {
-  const apiKey = ctx.globalKeys[COINSTATS_API_KEY];
+async function validateCoinstats(
+  connectionId: string,
+  ctx: CoinstatsCtx,
+  apiKey: string | undefined,
+): Promise<boolean> {
   if (!apiKey) return false;
   try {
     const res = await coinstatsGet(connectionId, ctx.creds.identifier, apiKey);
@@ -122,11 +127,14 @@ async function validateCoinstats(connectionId: string, ctx: CoinstatsCtx): Promi
   }
 }
 
-// 工厂:为一个 type 绑定其 connectionId,产出一个 BalanceProvider(共享上面实现)。
-export function makeCoinstats(accountType: AccountType, connectionId: string): BalanceProvider {
+// 工厂(ADR 0009 两层构造):type 绑定 connectionId,全局 apiKey 为实例化参数,共享上面实现。
+export function makeCoinstats(
+  accountType: AccountType,
+  connectionId: string,
+  apiKey?: string,
+): BalanceProvider {
   return defineProvider({
     accountType,
-    usesGlobalKeys: [COINSTATS_API_KEY], // 最小权限:只下发这个 key
     // 地址非空即可(solana/sui/cosmos 格式各异,交 API 判定)。
     inputs: [
       {
@@ -136,19 +144,19 @@ export function makeCoinstats(accountType: AccountType, connectionId: string): B
         validator: z.string().trim().min(1),
       },
     ],
-    fetchBalances: (ctx) => fetchCoinstats(connectionId, ctx),
-    validate: (ctx) => validateCoinstats(connectionId, ctx),
+    fetchBalances: (ctx) => fetchCoinstats(connectionId, ctx, apiKey),
+    validate: (ctx) => validateCoinstats(connectionId, ctx, apiKey),
   });
 }
 
-// 方案 A 摊平:每个 type 一个 provider 对象,共享实现。sync 收集后 .flat() 传入 buildRegistry。
+// 方案 A 摊平(无 key 单例:仅供测试/静态默认 registry;运行时经 entries.create 注入 key)。
 export const providers: BalanceProvider[] = CONNECTION_IDS.map((c) =>
   makeCoinstats(c.accountType, c.connectionId),
 );
 
-// 自描述清单(ADR 0009):每个 type 一个 entry,复用上面的实例(同下标)。
-// id 由生态段派生(onchain_solana → solana-coinstats),跨版本稳定。
-export const entries: ProviderEntry[] = CONNECTION_IDS.map((c, i) => ({
+// 自描述清单(ADR 0009):每个 type 一个 entry。id 由生态段派生(onchain_solana → solana-coinstats),
+// 跨版本稳定。三个 entry 共享同一个 env 默认 key 槽(COINSTATS_API_KEY)。
+export const entries: ProviderEntry[] = CONNECTION_IDS.map((c) => ({
   manifest: {
     id: `${c.accountType.split("_")[1]}-coinstats`,
     accountType: c.accountType,
@@ -156,7 +164,8 @@ export const entries: ProviderEntry[] = CONNECTION_IDS.map((c, i) => ({
     configSchema: [
       { key: "apiKey", type: "secret", label: "CoinStats API Key", validator: z.string().min(1) },
     ],
+    envDefaults: { apiKey: COINSTATS_API_KEY },
     defaultEnabled: true,
   },
-  provider: providers[i],
+  create: (settings) => makeCoinstats(c.accountType, c.connectionId, settings?.apiKey),
 }));

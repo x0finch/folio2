@@ -12,13 +12,17 @@ export interface ProviderManifest {
   readonly dataSource: string;
   // 全局设置的字段声明(如全局 apiKey;复用 ProviderInput 自描述)。空 = 无全局设置,开箱即用。
   readonly configSchema: readonly ProviderInput[];
+  // 「默认 key 槽」:configSchema 字段 → 部署时注入的 env 变量名(如 apiKey → ZERION_API_KEY)。
+  // 分层解析(@folio/provider-registry resolveSettings):用户自定义(D1)→ 此 env 默认 → 缺失。
+  readonly envDefaults?: Readonly<Record<string, string>>;
   // 默认启用与否:免费额度/公共数据/无需 key → true;要付费 key/冷门 → false。
   // 生效 = 启用状态(配置行覆盖 ?? 本默认)且配置解析链能给出必需的 key(见 @folio/provider-registry)。
   readonly defaultEnabled: boolean;
 }
 
-// provider 包的导出单元:manifest + 实现。@folio/provider-registry 收集各包 entries 组装 registry。
+// provider 包的导出单元:manifest + 工厂(ADR 0009 两层构造:启用类型 = 以全局 settings 实例化;
+// 账户级输入仍走 FetchContext.creds)。无全局设置的 provider:create 忽略入参返回单例。
 export interface ProviderEntry {
   readonly manifest: ProviderManifest;
-  readonly provider: BalanceProvider;
+  readonly create: (settings?: Record<string, string>) => BalanceProvider;
 }

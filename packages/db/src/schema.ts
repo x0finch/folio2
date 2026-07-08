@@ -187,6 +187,17 @@ export const fxRates = sqliteTable("fx_rates", {
   expiresAt: integer("expires_at").notNull(),
 });
 
+// provider 全局配置(ADR 0009;纯覆盖表,无 userId):只存偏离 manifest 默认的记录,空表 = 各默认。
+// provider_id = manifest.id(跨版本稳定);enabled NULL = 不覆盖启停(仅存 settings);
+// enabled=true 兼作该 type 的【选中】(resolveActive:true 覆盖 > manifest 默认;每 type 至多一条 true,
+// 由 enable() 的原子批保证)。settings = 全局设置 map 的 sealed JSON(secret 字段密文,app 侧 seal/open)。
+export const providerConfig = sqliteTable("provider_config", {
+  providerId: text("provider_id").primaryKey(),
+  accountType: text("account_type").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }),
+  settings: text("settings"),
+});
+
 // manual 活动账本(P7.4.1):add/reduce/set 动作日志。当前数量由 deriveAmount 推导、物化进 account.creds.amount
 // (provider/sync 不依赖本表)。price 记录单价、留给 M7.3 成本/盈亏,本期不算。与 M7.2 的通用 transactions 表分开。
 export const manualActivity = sqliteTable(

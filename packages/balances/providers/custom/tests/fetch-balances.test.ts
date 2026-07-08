@@ -9,7 +9,6 @@ function ctx(creds: Record<string, unknown>): FetchContext {
   return {
     account: { id: "a1", userId: "u1", type: "manual", label: "Manual" },
     creds,
-    globalKeys: {},
   };
 }
 

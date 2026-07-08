@@ -24,7 +24,6 @@ describe("customProvider inputs / validate", () => {
     const ctx: FetchContext = {
       account: { id: "a", userId: "u", type: "manual", label: "M" },
       creds: {},
-      globalKeys: {},
     };
     expect(await customProvider.validate(ctx)).toBe(true);
   });

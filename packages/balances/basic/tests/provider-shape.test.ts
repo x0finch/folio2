@@ -15,29 +15,14 @@ const stub: BalanceProvider = {
 
 describe("BalanceProvider shape", () => {
   it("can be implemented by a minimal stub", async () => {
+    // FetchContext 无 globalKeys:全局 key 是实例化参数(ProviderEntry.create(settings),ADR 0009)。
     const ctx = {
       account: { id: "a1", userId: "u1", type: "manual" as const, label: "Manual" },
       creds: {},
-      globalKeys: {},
     };
     expect(stub.accountType).toBe("manual");
-    expect(stub.usesGlobalKeys).toBeUndefined(); // 可选,默认无(不需要任何全局 key)
     expect(await stub.fetchBalances(ctx)).toEqual([]);
     expect(await stub.validate(ctx)).toBe(true);
-  });
-
-  it("can declare usesGlobalKeys (least-privilege scope of global keys)", () => {
-    const scoped: BalanceProvider = {
-      accountType: "onchain_evm",
-      usesGlobalKeys: ["ZERION_API_KEY"],
-      async fetchBalances() {
-        return [];
-      },
-      async validate() {
-        return true;
-      },
-    };
-    expect(scoped.usesGlobalKeys).toEqual(["ZERION_API_KEY"]);
   });
 
   it("can declare inputs with three exposure levels (public/semi/secret; zod validator via Standard Schema)", () => {

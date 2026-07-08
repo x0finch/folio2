@@ -35,6 +35,9 @@ importers:
       '@folio/platforms':
         specifier: workspace:*
         version: link:../../packages/platforms
+      '@folio/provider-registry':
+        specifier: workspace:*
+        version: link:../../packages/provider-registry
       '@folio/sync':
         specifier: workspace:*
         version: link:../../packages/sync

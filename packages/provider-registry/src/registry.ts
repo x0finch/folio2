@@ -1,10 +1,15 @@
-import type { AccountType, BalanceProvider, ProviderEntry } from "@folio/balances-basic";
+import type { AccountType, ProviderEntry, ProviderManifest } from "@folio/balances-basic";
 
-// registry 机制(纯函数,ADR 0009):manifest 驱动的候选组装与生效解析。
-// 本切片(#24)无配置层 —— 生效 = manifest.defaultEnabled;#25 起叠加覆盖表(启停/选中/settings)。
+// registry 机制(纯函数,ADR 0009):manifest 驱动的候选组装 + 覆盖表感知的生效解析 + settings 分层。
+// 覆盖表(D1,@folio/db createProviderConfigStore)只存偏离默认的记录;空覆盖 = manifest 默认。
 
 // 候选集合:同一 accountType 可有多个后端(方案 A:一个后端一个独立 entry)。
 export type ProviderCandidates = Map<AccountType, ProviderEntry[]>;
+
+// 启停覆盖:manifest.id → enabled(true=选中启用 / false=显式停用 / null·缺席=不覆盖)。
+export type EnabledOverrides = ReadonlyMap<string, boolean | null>;
+
+const NO_OVERRIDES: EnabledOverrides = new Map();
 
 /** 收集 entries → 按 accountType 分桶。manifest.id 全局唯一(重复 = 组装 bug,抛错)。 */
 export function buildCandidates(entries: readonly ProviderEntry[]): ProviderCandidates {
@@ -14,9 +19,6 @@ export function buildCandidates(entries: readonly ProviderEntry[]): ProviderCand
     const { id, accountType } = entry.manifest;
     if (seen.has(id)) throw new Error(`Duplicate provider manifest id: ${id}`);
     seen.add(id);
-    if (entry.manifest.accountType !== entry.provider.accountType) {
-      throw new Error(`Manifest/provider accountType mismatch for: ${id}`);
-    }
     const list = candidates.get(accountType) ?? [];
     list.push(entry);
     candidates.set(accountType, list);
@@ -25,24 +27,56 @@ export function buildCandidates(entries: readonly ProviderEntry[]): ProviderCand
 }
 
 /**
- * 解析各 type 的生效 provider(本切片按 manifest 默认):
- * 每 type 取 defaultEnabled 的候选;恰一个 → 生效;零个 → 该 type 缺席(未启用);
- * 多个默认启用 = manifest 声明冲突(同 type 至多一个默认),抛错暴露组装 bug。
+ * 解析各 type 的生效 entry(启用状态 = 覆盖 ?? manifest 默认):
+ * 1. 有 enabled=true 覆盖的候选 → 即选中(用户显式选择;store 保证每 type 至多一条 true,>1 抛错);
+ * 2. 否则 defaultEnabled 且未被 enabled=false 覆盖的候选 → 生效(恰一个;>1 = manifest 声明冲突,抛错);
+ * 3. 都没有 → 该 type 缺席(未启用)。
  */
 export function resolveActive(
   candidates: ProviderCandidates,
-): Partial<Record<AccountType, BalanceProvider>> {
-  const active: Partial<Record<AccountType, BalanceProvider>> = {};
+  overrides: EnabledOverrides = NO_OVERRIDES,
+): Partial<Record<AccountType, ProviderEntry>> {
+  const active: Partial<Record<AccountType, ProviderEntry>> = {};
   for (const [type, list] of candidates) {
-    const enabled = list.filter((e) => e.manifest.defaultEnabled);
-    if (enabled.length > 1) {
+    const selected = list.filter((e) => overrides.get(e.manifest.id) === true);
+    if (selected.length > 1) {
       throw new Error(
-        `Multiple default-enabled providers for account type ${type}: ${enabled
-          .map((e) => e.manifest.id)
-          .join(", ")}`,
+        `Multiple enabled providers for account type ${type}: ${ids(selected)} (config invariant broken)`,
       );
     }
-    if (enabled.length === 1) active[type] = enabled[0].provider;
+    if (selected.length === 1) {
+      active[type] = selected[0];
+      continue;
+    }
+    const defaults = list.filter(
+      (e) => e.manifest.defaultEnabled && overrides.get(e.manifest.id) !== false,
+    );
+    if (defaults.length > 1) {
+      throw new Error(
+        `Multiple default-enabled providers for account type ${type}: ${ids(defaults)}`,
+      );
+    }
+    if (defaults.length === 1) active[type] = defaults[0];
   }
   return active;
+}
+
+const ids = (list: ProviderEntry[]): string => list.map((e) => e.manifest.id).join(", ");
+
+/**
+ * settings 分层解析(每字段):用户自定义(D1,已解密)→ envDefaults 声明的部署时默认 → 缺失。
+ * env 以纯 record 传入(本包不碰 cloudflare env);只解析 configSchema 声明的字段。
+ */
+export function resolveSettings(
+  manifest: ProviderManifest,
+  custom: Record<string, string> | undefined,
+  env: Record<string, string | undefined>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const field of manifest.configSchema) {
+    const envName = manifest.envDefaults?.[field.key];
+    const value = custom?.[field.key] ?? (envName ? env[envName] : undefined);
+    if (value) out[field.key] = value;
+  }
+  return out;
 }

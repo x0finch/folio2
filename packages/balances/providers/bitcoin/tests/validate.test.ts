@@ -10,7 +10,6 @@ function ctx(creds: FetchContext["creds"]): FetchContext {
   return {
     account: { id: "a1", userId: "u1", type: "onchain_bitcoin", label: "Cold" },
     creds,
-    globalKeys: {},
   };
 }
 

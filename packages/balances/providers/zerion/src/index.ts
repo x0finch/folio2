@@ -154,9 +154,8 @@ function ensureOk(res: Response): void {
   throw new ProviderError("UPSTREAM_ERROR", `zerion upstream error (${res.status})`);
 }
 
-// 全局 key 来自服务端 env(非用户输入,不在 inputs/validateCredentials 范围)→ 仍需自查。
-function getApiKey(globalKeys: Record<string, string>): string {
-  const apiKey = globalKeys[ZERION_API_KEY];
+// 全局 key 是实例化参数(工厂闭包;非用户账户输入,不在 inputs/validateCredentials 范围)→ 用时自查。
+function requireApiKey(apiKey: string | undefined): string {
   if (!apiKey) {
     throw new ProviderError("INVALID_CREDENTIALS", `${ZERION_API_KEY} not configured`);
   }
@@ -191,52 +190,54 @@ async function getChainIds(apiKey: string): Promise<Record<string, number>> {
   }
 }
 
-export const zerionProvider = defineProvider({
-  accountType: "onchain_evm",
-  usesGlobalKeys: [ZERION_API_KEY], // 最小权限:只下发这个 key 给本 provider
-  // identifier 的 EVM 格式由本 validator 体现;创建/同步前经 validateCredentials 保证 → 方法里可直接用。
-  inputs: [
-    {
-      key: "identifier",
-      type: "public",
-      label: "EVM Address",
-      desc: "0x + 40 hex",
-      validator: z.string().regex(EVM_ADDRESS_RE, "expected 0x + 40 hex"),
+// 工厂(ADR 0009 两层构造):全局 apiKey 是实例化参数;账户级输入(地址)仍走 ctx.creds。
+export function makeZerion(key?: string): BalanceProvider {
+  return defineProvider({
+    accountType: "onchain_evm",
+    // identifier 的 EVM 格式由本 validator 体现;创建/同步前经 validateCredentials 保证 → 方法里可直接用。
+    inputs: [
+      {
+        key: "identifier",
+        type: "public",
+        label: "EVM Address",
+        desc: "0x + 40 hex",
+        validator: z.string().regex(EVM_ADDRESS_RE, "expected 0x + 40 hex"),
+      },
+    ],
+
+    async fetchBalances(ctx): Promise<Balance[]> {
+      const apiKey = requireApiKey(key);
+      // 链映射与 positions 并行取;链映射拿不到会抛错(Promise.all 一并 reject)→ 整轮同步失败重试,
+      // 保证 parsePositions 拿到非空映射、只产规范 eip155 标识(失败即不产,不写含分叉标识的快照)。
+      const [res, chainIds] = await Promise.all([
+        zerionGet(`${POSITIONS_PATH(ctx.creds.identifier)}?${POSITIONS_QUERY}`, apiKey),
+        getChainIds(apiKey),
+      ]);
+      ensureOk(res);
+      let json: ZerionPositionsResponse;
+      try {
+        json = (await res.json()) as ZerionPositionsResponse;
+      } catch (cause) {
+        throw new ProviderError("PARSE_ERROR", "zerion returned invalid JSON", { cause });
+      }
+      return parsePositions(json, chainIds);
     },
-  ],
 
-  async fetchBalances(ctx): Promise<Balance[]> {
-    const apiKey = getApiKey(ctx.globalKeys);
-    // 链映射与 positions 并行取;链映射拿不到会抛错(Promise.all 一并 reject)→ 整轮同步失败重试,
-    // 保证 parsePositions 拿到非空映射、只产规范 eip155 标识(失败即不产,不写含分叉标识的快照)。
-    const [res, chainIds] = await Promise.all([
-      zerionGet(`${POSITIONS_PATH(ctx.creds.identifier)}?${POSITIONS_QUERY}`, apiKey),
-      getChainIds(apiKey),
-    ]);
-    ensureOk(res);
-    let json: ZerionPositionsResponse;
-    try {
-      json = (await res.json()) as ZerionPositionsResponse;
-    } catch (cause) {
-      throw new ProviderError("PARSE_ERROR", "zerion returned invalid JSON", { cause });
-    }
-    return parsePositions(json, chainIds);
-  },
+    // 低消耗校验:打轻量 portfolio 端点探活(地址已由 validateCredentials 保证格式)。任何失败 → false。
+    async validate(ctx): Promise<boolean> {
+      if (!key) return false;
+      try {
+        const res = await zerionGet(PORTFOLIO_PATH(ctx.creds.identifier), key);
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+  });
+}
 
-  // 低消耗校验:打轻量 portfolio 端点探活(地址已由 validateCredentials 保证格式)。任何失败 → false。
-  async validate(ctx): Promise<boolean> {
-    const apiKey = ctx.globalKeys[ZERION_API_KEY];
-    if (!apiKey) return false;
-    try {
-      const res = await zerionGet(PORTFOLIO_PATH(ctx.creds.identifier), apiKey);
-      return res.ok;
-    } catch {
-      return false;
-    }
-  },
-});
-
-// 与方案 A 摊平约定一致:sync 收集各包的 providers 数组后 .flat() 传入 buildRegistry。
+// 与方案 A 摊平约定一致(无 key 单例:仅供测试/静态默认 registry;运行时经 entries.create 注入 key)。
+export const zerionProvider = makeZerion();
 export const providers: BalanceProvider[] = [zerionProvider];
 
 // 自描述清单(ADR 0009):id 跨版本稳定(配置覆盖行按它寻址);configSchema 声明全局设置,
@@ -250,8 +251,9 @@ export const entries: ProviderEntry[] = [
       configSchema: [
         { key: "apiKey", type: "secret", label: "Zerion API Key", validator: z.string().min(1) },
       ],
+      envDefaults: { apiKey: ZERION_API_KEY },
       defaultEnabled: true,
     },
-    provider: zerionProvider,
+    create: (settings) => makeZerion(settings?.apiKey),
   },
 ];

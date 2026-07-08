@@ -10,7 +10,6 @@ function ctx(overrides: Partial<FetchContext> = {}): FetchContext {
   return {
     account: { id: "a1", userId: "u1", type: "perp_hyperliquid", label: "HL" },
     creds: { identifier: ADDR },
-    globalKeys: {},
     ...overrides,
   };
 }
@@ -88,7 +87,6 @@ describe("hyperliquidProvider.fetchBalances", () => {
 
   it("serves accountType perp_hyperliquid and is exported in providers", () => {
     expect(hyperliquidProvider.accountType).toBe("perp_hyperliquid");
-    expect(hyperliquidProvider.usesGlobalKeys).toBeUndefined();
     expect(providers).toContain(hyperliquidProvider);
   });
 });

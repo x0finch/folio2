@@ -151,6 +151,6 @@ export const entries: ProviderEntry[] = [
       configSchema: [],
       defaultEnabled: true,
     },
-    provider: okxProvider,
+    create: () => okxProvider,
   },
 ];

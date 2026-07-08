@@ -3,13 +3,11 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createBalances } from "../src";
 
-const globalKeys = { ZERION_API_KEY: "zk", OTHER: "x" };
-
-// 假 provider(onchain_evm):public identifier + secret token;声明只用 ZERION_API_KEY。
+// 假 provider(onchain_evm):public identifier + secret token。
+// 全局 key 不再经 ctx 下发(ADR 0009:是工厂实例化参数),FetchContext 只有 account/creds。
 function fakeProvider(over: Partial<BalanceProvider> = {}): BalanceProvider {
   return {
     accountType: "onchain_evm",
-    usesGlobalKeys: ["ZERION_API_KEY"],
     inputs: [
       { key: "identifier", type: "public", label: "Address", validator: z.string().min(1) },
       { key: "token", type: "secret", label: "Token", validator: z.string().min(1) },
@@ -21,7 +19,7 @@ function fakeProvider(over: Partial<BalanceProvider> = {}): BalanceProvider {
 }
 const acc = (): Account => ({ id: "a", userId: "u", type: "onchain_evm", label: "W" });
 const mk = (over: Partial<BalanceProvider> = {}) =>
-  createBalances({ globalKeys, providers: [fakeProvider(over)] });
+  createBalances({ providers: [fakeProvider(over)] });
 
 describe("createBalances — 只暴露 provider 能力(3 方法)", () => {
   it("credentialSpecs:剥掉 validator 的可序列化字段规格", () => {
@@ -41,11 +39,11 @@ describe("createBalances — 只暴露 provider 能力(3 方法)", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("validateCredentials{liveness}:按 usesGlobalKeys 收窄全局 key + provider.validate;失败抛", async () => {
-    let seen: Record<string, string> | undefined;
+  it("validateCredentials{liveness}:provider.validate 探活;失败抛", async () => {
+    let called = false;
     await mk({
-      validate: async (ctx) => {
-        seen = ctx.globalKeys;
+      validate: async () => {
+        called = true;
         return true;
       },
     }).validateCredentials(
@@ -53,7 +51,7 @@ describe("createBalances — 只暴露 provider 能力(3 方法)", () => {
       { identifier: "0xabc", token: "t" },
       { liveness: true },
     );
-    expect(seen).toEqual({ ZERION_API_KEY: "zk" }); // 拿不到 OTHER
+    expect(called).toBe(true);
 
     await expect(
       mk({ validate: async () => false }).validateCredentials(
@@ -64,26 +62,36 @@ describe("createBalances — 只暴露 provider 能力(3 方法)", () => {
     ).rejects.toThrow(/could not verify/);
   });
 
-  it("fetchBalances:运行时闸 + 收窄 key + 调 provider + 汇总 totalUsd", async () => {
-    let seen: Record<string, string> | undefined;
+  it("fetchBalances:运行时闸 + 调 provider + 汇总 totalUsd", async () => {
     const b = createBalances({
-      globalKeys,
       providers: [
         fakeProvider({
-          fetchBalances: async (ctx) => {
-            seen = ctx.globalKeys;
-            return [
-              { symbol: "A", amount: 1, value: 10, source: "evm", kind: "spot" },
-              { symbol: "B", amount: 1, value: 5, source: "evm", kind: "spot" },
-            ];
-          },
+          fetchBalances: async () => [
+            { symbol: "A", amount: 1, value: 10, source: "evm", kind: "spot" },
+            { symbol: "B", amount: 1, value: 5, source: "evm", kind: "spot" },
+          ],
         }),
       ],
     });
     const out = await b.fetchBalances(acc(), { identifier: "0xabc", token: "t" });
     expect(out.totalUsd).toBe(15);
-    expect(seen).toEqual({ ZERION_API_KEY: "zk" });
     // 明文 creds 不合规(缺 token)→ 运行时闸抛。
     await expect(b.fetchBalances(acc(), { identifier: "" })).rejects.toThrow();
+  });
+
+  it("resolveProvider 注入:运行时解析生效 provider;undefined → 明确报错(未启用)", async () => {
+    const injected = fakeProvider({
+      fetchBalances: async () => [
+        { symbol: "A", amount: 1, value: 7, source: "evm", kind: "spot" },
+      ],
+    });
+    const b = createBalances({ resolveProvider: async () => injected });
+    const out = await b.fetchBalances(acc(), { identifier: "0xabc", token: "t" });
+    expect(out.totalUsd).toBe(7);
+
+    const none = createBalances({ resolveProvider: async () => undefined });
+    await expect(none.fetchBalances(acc(), { identifier: "0xabc", token: "t" })).rejects.toThrow(
+      /No provider enabled/,
+    );
   });
 });

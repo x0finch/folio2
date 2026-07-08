@@ -63,6 +63,6 @@ export const entries: ProviderEntry[] = [
       configSchema: [],
       defaultEnabled: true,
     },
-    provider: customProvider,
+    create: () => customProvider,
   },
 ];

@@ -22,6 +22,7 @@
     "@folio/db": "workspace:*",
     "@folio/fx": "workspace:*",
     "@folio/platforms": "workspace:*",
+    "@folio/provider-registry": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/tokens": "workspace:*",
     "@folio/ui": "workspace:*",

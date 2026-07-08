@@ -155,6 +155,6 @@ export const entries: ProviderEntry[] = [
       configSchema: [],
       defaultEnabled: true,
     },
-    provider: binanceProvider,
+    create: () => binanceProvider,
   },
 ];

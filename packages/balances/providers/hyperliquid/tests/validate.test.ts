@@ -8,7 +8,6 @@ function ctx(creds: FetchContext["creds"]): FetchContext {
   return {
     account: { id: "a1", userId: "u1", type: "perp_hyperliquid", label: "HL" },
     creds,
-    globalKeys: {},
   };
 }
 
