@@ -1,0 +1,55 @@
+{
+  "links": {
+    "self": "https://api.zerion.io/v1/chains/"
+  },
+  "data": [
+    {
+      "type": "chains",
+      "id": "ethereum",
+      "attributes": {
+        "external_id": "0x1",
+        "name": "Ethereum"
+      }
+    },
+    {
+      "type": "chains",
+      "id": "base",
+      "attributes": {
+        "external_id": "0x2105",
+        "name": "Base"
+      }
+    },
+    {
+      "type": "chains",
+      "id": "arbitrum",
+      "attributes": {
+        "external_id": "0xa4b1",
+        "name": "Arbitrum"
+      }
+    },
+    {
+      "type": "chains",
+      "id": "binance-smart-chain",
+      "attributes": {
+        "external_id": "0x38",
+        "name": "BNB Chain"
+      }
+    },
+    {
+      "type": "chains",
+      "id": "avalanche",
+      "attributes": {
+        "external_id": "0xa86a",
+        "name": "Avalanche"
+      }
+    },
+    {
+      "type": "chains",
+      "id": "xdai",
+      "attributes": {
+        "external_id": "0x64",
+        "name": "Gnosis Chain"
+      }
+    }
+  ]
+}

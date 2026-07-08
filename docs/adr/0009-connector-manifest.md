@@ -10,7 +10,7 @@ Status: accepted (planned)
 
 ## 决策(grilling 锁定)
 
-1. **概念 = Connector**,包 `@folio/connectors`;旧"链∪场馆元数据"包 `@folio/platforms`(词汇表的 Platform)不动。
+1. **概念 = Connector**,**三层子包**(镜像旧 balances 机制,面向远期第三方 provider 独立分发):`@folio/connectors-basic`(契约)+ `@folio/connectors-provider-*`(各数据源实现,一包一 provider)+ `@folio/connectors`(entry:registry + connector manifest,只组合)。DAG:basic ← provider-\* ← entry。旧"链∪场馆元数据"包 `@folio/platforms`(词汇表的 Platform)不动。
 2. **connectorId = 干净短名**(`evm`/`binance`/`bitcoin`/`solana`/`sui`/`cosmos`/`okx`/`hyperliquid`/`manual`),D1 `account.type` 列做**值迁移**(`onchain_evm`→`evm`…)。
 3. **category 撤销**——加账户弹窗平铺,删 `TYPE_GROUPS`/`AccountCategory`/`cat_*`(实证:category 全仓仅 add-account 分节标题一处用到,且本就是显式表非字符串切割)。
 4. **Balance = 5-kind 扁平判别**(见下);`manual→spot`、`bitcoin→utxo`。
@@ -94,10 +94,10 @@ utxo          // UTXO 型自托管持仓(BTC 及将来 UTXO 链)。meta: pending
 
 ## Consequences
 
-- **新包 `@folio/connectors`**(`packages/connectors/`):`src/{balance.ts, creds.ts, connectors/*.ts, registry.ts, index.ts}`,connector 一文件、provider 实现内联。删除 `packages/balances/*` 9 包及所有 `@folio/balances*` 引用。**`@folio/platforms`(Platform 元数据包)不动** —— 它是 chain∪venue 的 name+logo 层,与 Connector 正交,仍被 logo 代理 #20 / overview 装饰用。
-- **改 CLAUDE.md 原则 #3**:原"每个 provider 独立包 `@folio/provider-*`" → "每个 connector 一个模块文件、provider 实现内联于其 manifest"。方案 A(工厂产多 type)相应变为"一个数据源(如 coinstats)出现在多个 connector 文件里(solana/sui/cosmos)"。
+- **新三层子树 `packages/connectors/{basic,providers/*,entry}`**:`basic`(`@folio/connectors-basic`:balance/creds/connector/errors 契约)、`providers/<源>`(`@folio/connectors-provider-<源>`:一包一 provider 实现,内含该 connector 的 `account.creds` 声明与其天然消费者同处)、`entry`(`@folio/connectors`:registry + `connectors/*.ts` manifest,只组合引用 provider + 再导出契约给 app)。删除 `packages/balances/*` 9 包及所有 `@folio/balances*` 引用。**`@folio/platforms`(Platform 元数据包)不动** —— 它是 chain∪venue 的 name+logo 层,与 Connector 正交,仍被 logo 代理 #20 / overview 装饰用。
+- **CLAUDE.md 原则 #3 保留"每个 provider 独立包"的精神**,措辞更新:provider 包命名 `@folio/provider-*` → `@folio/connectors-provider-*`;connector(entry manifest)只组合、不含实现。方案 A(共享数据源)相应为"一个 provider 包(如 coinstats)被多个 connector manifest import"(不再是"出现在多个文件里")。
 - **creds 边界不变(原则 #5 红线)**:`@folio/connectors` 只做 provider 面向的活(`validateAccount`/`fetchBalances`/`validateCreds`),**永不碰 `SECRETS_KEY`**;加解密/脱敏(seal/open/safeView)仍归 app `lib/creds.ts`,改由读 `connector.account.creds` 规格驱动(取代旧 `credentialSpecs`)。
-- **两 creds / 两校验,两组都类型化(决策 #6)**:`account.creds`(账户级)与 provider 的 `creds`(PC,provider 级)靠所属对象区分;`validateAccount` / `validateCreds`(非 `validateKey`)。creds 形状不再 loose,经 `CredsOf<const 字面量>` 穿进 `FetchContext<CredsOf<AC>, CredsOf<PC>>` —— provider 体内 `creds.apiKey` 有编译期类型。代价:泛型三轴(B + AC + PC),靠 `defineConnector`/`defineProvider` 的 `const` 推断承载。scope-A 下 PC 恒空(全局 key 照旧走 env,不新增存储)。
+- **两 creds / 两校验,两组都类型化(决策 #6)**:`account.creds`(账户级)与 provider 的 `creds`(PC,provider 级)靠所属对象区分;`validateAccount` / `validateCreds`(非 `validateKey`)。creds 形状不再 loose,经 `CredsOf<const 字面量>` 穿进 `FetchContext<CredsOf<AC>, CredsOf<PC>>` —— provider 体内 `creds.apiKey` 有编译期类型。代价:泛型三轴(B + AC + PC),靠 `defineConnector`/`defineProvider` 的 `const` 推断承载。PC 无 per-account 存储;provider 声明它需要的 key(如 ZERION_API_KEY),app 分派桥按 `field.key === env 变量名`从 env 注入**默认值**,用户自配留后续 phase。
 - **两处数据迁移**:①`account.type` 值一次性 UPDATE 映射(`onchain_evm`→`evm`…,决策 #2/#8);②`balance.kind` 语义 forward-only **不迁移**(决策 #4)——`kind`/`meta` 已落进快照(`orchestrator.ts` 写 `kind: b.kind`),改分类法(perp→perp_equity/perp_position、bitcoin→utxo、manual→spot)使旧快照行 per-balance 语义失配,故读端须对**遗留/未知 `kind` 容错降级(default 分支,不 throw)**;历史时间线图只用 `totalUsd`(单列,不受影响),当前持仓来自最新快照(下次同步即写新 kind)。
 - **Balance 判别联合是最大 blast radius**:overview-model / aggregate / account-view / 各展示组件全线适配(收益:去 cast、穷尽 switch)。`manual→spot` 让读端现有三处 `spot || manual` 分支(`overview-model.ts:73`/`tokens.ts:24`/`aggregate.ts:84`)收敛成 `spot`。
 - **范围(本次)= 模型 + provider 重写;current 取数/展示行为不变,但 Balance 分类法 + account.type 改版**:空配置 = 现状,全局 key 照旧走;历史快照 per-balance 分类被破坏(见上,接受)。运行时"选/配 provider/免重部署 + 类型管理 UI + 生命周期(关闭归档/切换)"作为**后续 phase**(旧 epic 目标不丢,分期做)。

@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@standard-schema/spec": "^1.1.0",
+    "@folio/connectors-basic": "workspace:*",
+    "@folio/connectors-provider-zerion": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {
