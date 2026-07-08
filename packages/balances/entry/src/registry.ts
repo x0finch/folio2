@@ -1,15 +1,10 @@
 import type { AccountType, BalanceProvider } from "@folio/balances-basic";
-import { providers as binanceProviders } from "@folio/balances-provider-binance";
-import { providers as bitcoinProviders } from "@folio/balances-provider-bitcoin";
-import { providers as coinstatsProviders } from "@folio/balances-provider-coinstats";
-import { providers as customProviders } from "@folio/balances-provider-custom";
-import { providers as hyperliquidProviders } from "@folio/balances-provider-hyperliquid";
-import { providers as okxProviders } from "@folio/balances-provider-okx";
-import { providers as zerionProviders } from "@folio/balances-provider-zerion";
+import { ALL_ENTRIES, buildCandidates, resolveActive } from "@folio/provider-registry";
 
-// registry 机制 + 应用级组装 —— 均为 @folio/balances 内部件,仅 createBalances(及白盒测试)使用,不对外导出。
-// type → provider 查找:不手写映射表,由各 provider 的 accountType 字段【自动组装】(单一事实源);
-// 新增 provider 只需加进下面的列表,不可能写错或漏登记 key。用 Partial:未实现的 type 允许缺席,运行时兜底报错。
+// registry 机制 —— @folio/balances 内部件,仅 createBalances(及白盒测试)使用,不对外导出。
+// 应用级组装(provider 包 import 清单 + manifest 候选/生效解析)已迁至 @folio/provider-registry
+// (ADR 0009):本包不再持有 type→provider 硬编码;默认 registry 由 manifest 解析而来。
+// buildRegistry 保留给注入路径(createBalances({providers}),测试用)。
 export type ProviderRegistry = Partial<Record<AccountType, BalanceProvider>>;
 
 /** 从一组 provider 自动组装 registry(同一 type 重复实现则抛错,防止静默覆盖)。 */
@@ -32,16 +27,5 @@ export function getProvider(registry: ProviderRegistry, type: AccountType): Bala
   return provider;
 }
 
-// 应用级 provider 装配(方案 A 摊平):收集各 provider 包导出的 providers。新增 provider 包 → 在此 import 并摊平。
-// coinstats 是多类型包(一包多 provider),摊平各自登记。
-const providers = [
-  ...customProviders,
-  ...zerionProviders,
-  ...bitcoinProviders,
-  ...coinstatsProviders,
-  ...binanceProviders,
-  ...okxProviders,
-  ...hyperliquidProviders,
-];
-
-export const registry = buildRegistry(providers);
+// 默认 registry:manifest 驱动(defaultEnabled 的候选生效)。#25 起改为叠加全局配置覆盖解析。
+export const registry: ProviderRegistry = resolveActive(buildCandidates(ALL_ENTRIES));

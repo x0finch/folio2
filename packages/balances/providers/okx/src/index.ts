@@ -3,6 +3,7 @@ import {
   type BalanceProvider,
   defineProvider,
   hmacSha256,
+  type ProviderEntry,
   ProviderError,
   parseRetryAfter,
 } from "@folio/balances-basic";
@@ -139,3 +140,17 @@ export const okxProvider = defineProvider({
 });
 
 export const providers: BalanceProvider[] = [okxProvider];
+
+// 自描述清单(ADR 0009)。凭据是每账户 API key(inputs),无全局设置。
+export const entries: ProviderEntry[] = [
+  {
+    manifest: {
+      id: "okx-api",
+      accountType: "exchange_okx",
+      dataSource: "okx",
+      configSchema: [],
+      defaultEnabled: true,
+    },
+    provider: okxProvider,
+  },
+];

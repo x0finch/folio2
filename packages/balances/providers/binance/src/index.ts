@@ -3,6 +3,7 @@ import {
   type BalanceProvider,
   defineProvider,
   hmacSha256,
+  type ProviderEntry,
   ProviderError,
   parseRetryAfter,
 } from "@folio/balances-basic";
@@ -143,3 +144,17 @@ export const binanceProvider = defineProvider({
 });
 
 export const providers: BalanceProvider[] = [binanceProvider];
+
+// 自描述清单(ADR 0009)。凭据是每账户 API key(inputs),无全局设置。
+export const entries: ProviderEntry[] = [
+  {
+    manifest: {
+      id: "binance-api",
+      accountType: "exchange_binance",
+      dataSource: "binance",
+      configSchema: [],
+      defaultEnabled: true,
+    },
+    provider: binanceProvider,
+  },
+];

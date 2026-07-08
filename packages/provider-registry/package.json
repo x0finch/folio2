@@ -1,5 +1,5 @@
 {
-  "name": "@folio/balances",
+  "name": "@folio/provider-registry",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,8 +13,13 @@
   },
   "dependencies": {
     "@folio/balances-basic": "workspace:*",
+    "@folio/balances-provider-binance": "workspace:*",
     "@folio/balances-provider-bitcoin": "workspace:*",
-    "@folio/provider-registry": "workspace:*"
+    "@folio/balances-provider-coinstats": "workspace:*",
+    "@folio/balances-provider-custom": "workspace:*",
+    "@folio/balances-provider-hyperliquid": "workspace:*",
+    "@folio/balances-provider-okx": "workspace:*",
+    "@folio/balances-provider-zerion": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^6.0.2",

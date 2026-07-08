@@ -6,6 +6,7 @@ import {
   type BitcoinReceive,
   buildTokenKey,
   defineProvider,
+  type ProviderEntry,
   ProviderError,
 } from "@folio/balances-basic";
 import {
@@ -189,3 +190,17 @@ export const bitcoinProvider = defineProvider({
 
 // 与方案 A 摊平约定一致:sync 收集各包的 providers 数组后 .flat() 传入 buildRegistry。
 export const providers: BalanceProvider[] = [bitcoinProvider];
+
+// 自描述清单(ADR 0009)。公共 Blockbook 实例,无全局设置,开箱即用。
+export const entries: ProviderEntry[] = [
+  {
+    manifest: {
+      id: "bitcoin-blockbook",
+      accountType: "onchain_bitcoin",
+      dataSource: "blockbook",
+      configSchema: [],
+      defaultEnabled: true,
+    },
+    provider: bitcoinProvider,
+  },
+];

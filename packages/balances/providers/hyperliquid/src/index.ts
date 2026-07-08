@@ -4,6 +4,7 @@ import {
   defineProvider,
   type PerpEquityMeta,
   type PerpPositionMeta,
+  type ProviderEntry,
   ProviderError,
   parseRetryAfter,
 } from "@folio/balances-basic";
@@ -163,3 +164,17 @@ export const hyperliquidProvider = defineProvider({
 
 // 与方案 A 摊平约定一致:sync 收集各包的 providers 数组后 .flat() 传入 buildRegistry。
 export const providers: BalanceProvider[] = [hyperliquidProvider];
+
+// 自描述清单(ADR 0009)。公开 info API,无全局设置,开箱即用。
+export const entries: ProviderEntry[] = [
+  {
+    manifest: {
+      id: "hyperliquid-api",
+      accountType: "perp_hyperliquid",
+      dataSource: "hyperliquid",
+      configSchema: [],
+      defaultEnabled: true,
+    },
+    provider: hyperliquidProvider,
+  },
+];

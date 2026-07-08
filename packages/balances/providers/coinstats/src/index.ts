@@ -5,6 +5,7 @@ import {
   buildTokenKey,
   defineProvider,
   type FetchContext,
+  type ProviderEntry,
   ProviderError,
   parseRetryAfter,
 } from "@folio/balances-basic";
@@ -144,3 +145,18 @@ export function makeCoinstats(accountType: AccountType, connectionId: string): B
 export const providers: BalanceProvider[] = CONNECTION_IDS.map((c) =>
   makeCoinstats(c.accountType, c.connectionId),
 );
+
+// 自描述清单(ADR 0009):每个 type 一个 entry,复用上面的实例(同下标)。
+// id 由生态段派生(onchain_solana → solana-coinstats),跨版本稳定。
+export const entries: ProviderEntry[] = CONNECTION_IDS.map((c, i) => ({
+  manifest: {
+    id: `${c.accountType.split("_")[1]}-coinstats`,
+    accountType: c.accountType,
+    dataSource: "coinstats",
+    configSchema: [
+      { key: "apiKey", type: "secret", label: "CoinStats API Key", validator: z.string().min(1) },
+    ],
+    defaultEnabled: true,
+  },
+  provider: providers[i],
+}));

@@ -4,6 +4,7 @@ import {
   buildTokenKey,
   type DefiMeta,
   defineProvider,
+  type ProviderEntry,
   ProviderError,
   parseRetryAfter,
 } from "@folio/balances-basic";
@@ -237,3 +238,20 @@ export const zerionProvider = defineProvider({
 
 // 与方案 A 摊平约定一致:sync 收集各包的 providers 数组后 .flat() 传入 buildRegistry。
 export const providers: BalanceProvider[] = [zerionProvider];
+
+// 自描述清单(ADR 0009):id 跨版本稳定(配置覆盖行按它寻址);configSchema 声明全局设置,
+// 注册/启用/配置层(@folio/provider-registry)据此驱动。
+export const entries: ProviderEntry[] = [
+  {
+    manifest: {
+      id: "evm-zerion",
+      accountType: "onchain_evm",
+      dataSource: "zerion",
+      configSchema: [
+        { key: "apiKey", type: "secret", label: "Zerion API Key", validator: z.string().min(1) },
+      ],
+      defaultEnabled: true,
+    },
+    provider: zerionProvider,
+  },
+];

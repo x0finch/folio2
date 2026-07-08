@@ -14,6 +14,7 @@ export {
   semiKeys,
   validateCredentials,
 } from "./inputs";
+export type { ProviderEntry, ProviderManifest } from "./manifest";
 export type {
   BalanceProvider,
   CredsOf,
