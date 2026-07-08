@@ -6,6 +6,7 @@ import {
   type BitcoinReceive,
   buildTokenKey,
   defineProvider,
+  type FetchContext,
   type ProviderEntry,
   ProviderError,
 } from "@folio/balances-basic";
@@ -15,7 +16,6 @@ import {
   isScriptType,
   makeDeriver,
   recommendedScript,
-  SCRIPT_TYPES,
   type ScriptType,
 } from "@folio/bitcoin-derive";
 import {
@@ -24,8 +24,7 @@ import {
   createBlockbookClient,
   type XpubToken,
 } from "@folio/blockbook-client";
-import { z } from "zod";
-import { BTC_ADDRESS_RE, EXT_PUBKEY_FULL_RE, EXT_PUBKEY_RE, SATS_PER_BTC } from "./constants";
+import { EXT_PUBKEY_RE, SATS_PER_BTC } from "./constants";
 
 export type { ScriptType } from "@folio/bitcoin-derive";
 export { recommendedScript, SCRIPT_TYPES } from "@folio/bitcoin-derive";
@@ -136,28 +135,13 @@ async function fetchXpub(client: BlockbookClient, ext: string, scriptType: strin
   return toBtcBalances(toSats(res.balance), toSats(res.unconfirmedBalance), { addresses, receive });
 }
 
+// 账户 creds 形状(schema 归 accountType 层;scriptType 为可选枚举)。
+type BtcCreds = { identifier: string; scriptType?: ScriptType };
+
 export const bitcoinProvider = defineProvider({
   accountType: "onchain_bitcoin",
-  inputs: [
-    {
-      key: "identifier",
-      type: "public",
-      label: "Bitcoin address or xpub",
-      desc: "address (1…/3…/bc1…) or xpub/ypub/zpub",
-      validator: z.string().refine((v) => BTC_ADDRESS_RE.test(v) || EXT_PUBKEY_FULL_RE.test(v), {
-        message: "expected a BTC address or extended public key",
-      }),
-    },
-    {
-      // 仅裸 xpub 用(zpub/ypub 前缀已定、单地址无关);缺省由 recommendedScript 兜底。
-      key: "scriptType",
-      type: "public",
-      label: "Address type",
-      validator: z.enum(SCRIPT_TYPES).optional(),
-    },
-  ],
 
-  async fetchBalances(ctx): Promise<Balance[]> {
+  async fetchBalances(ctx: FetchContext<BtcCreds>): Promise<Balance[]> {
     const id = ctx.creds.identifier;
     const client = createBlockbookClient();
     try {
@@ -169,8 +153,8 @@ export const bitcoinProvider = defineProvider({
     }
   },
 
-  // 轻量探活:地址模式打地址端点;xpub 模式造 token 打 xpub 端点(顺带校验扩展公钥可解析)。任何失败 → false。
-  async validate(ctx): Promise<boolean> {
+  // 账户 liveness:地址模式打地址端点;xpub 模式造 token 打 xpub 端点(顺带校验扩展公钥可解析)。任何失败 → false。
+  async validateAccount(ctx: FetchContext<BtcCreds>): Promise<boolean> {
     const id = ctx.creds.identifier;
     const client = createBlockbookClient();
     try {

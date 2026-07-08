@@ -18,14 +18,14 @@ afterEach(() => {
 describe("hyperliquidProvider.validate", () => {
   it("returns true when the address probes the info endpoint with 200", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
-    expect(await hyperliquidProvider.validate(ctx({ identifier: ADDR }))).toBe(true);
+    expect(await hyperliquidProvider.validateAccount(ctx({ identifier: ADDR }))).toBe(true);
   });
 
   // 地址格式校验已上移到 validateCredentials;hyperliquid.validate 直接探活(不再预检地址)。
   it("returns false on non-ok response or network error", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));
-    expect(await hyperliquidProvider.validate(ctx({ identifier: ADDR }))).toBe(false);
+    expect(await hyperliquidProvider.validateAccount(ctx({ identifier: ADDR }))).toBe(false);
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
-    expect(await hyperliquidProvider.validate(ctx({ identifier: ADDR }))).toBe(false);
+    expect(await hyperliquidProvider.validateAccount(ctx({ identifier: ADDR }))).toBe(false);
   });
 });

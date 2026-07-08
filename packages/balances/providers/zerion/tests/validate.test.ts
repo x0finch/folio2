@@ -19,7 +19,7 @@ describe("zerionProvider.validate", () => {
   // 地址格式由 validateCredentials 预校验;provider.validate 只对全局 key 缺失自查(不发请求)。
   it("returns false when the global key is missing, WITHOUT a request", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    expect(await makeZerion().validate(ctx({ identifier: ADDR }))).toBe(false);
+    expect(await makeZerion().validateAccount(ctx({ identifier: ADDR }))).toBe(false);
     expect(spy).not.toHaveBeenCalled();
   });
 
@@ -27,12 +27,12 @@ describe("zerionProvider.validate", () => {
     const spy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(JSON.stringify({ data: {} }), { status: 200 }));
-    expect(await makeZerion("k").validate(ctx({ identifier: ADDR }))).toBe(true);
+    expect(await makeZerion("k").validateAccount(ctx({ identifier: ADDR }))).toBe(true);
     expect(String(spy.mock.calls[0][0])).toContain(`/v1/wallets/${ADDR}/portfolio`);
   });
 
   it("returns false on 401/403", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    expect(await makeZerion("k").validate(ctx({ identifier: ADDR }))).toBe(false);
+    expect(await makeZerion("k").validateAccount(ctx({ identifier: ADDR }))).toBe(false);
   });
 });

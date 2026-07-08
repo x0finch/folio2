@@ -8,6 +8,7 @@ import { z } from "zod";
 import { sealCreds } from "../creds";
 import { type AccountTypeStatusView, buildProviderStatusView } from "../provider-status";
 import { requireAuth } from "../require-auth";
+import { balances } from "./balances";
 import { db } from "./db";
 
 const log = getLogger(["folio", "web", "providers"]);
@@ -28,10 +29,13 @@ function entryOf(providerId: string) {
   throw new Error(`Unknown provider: ${providerId}`);
 }
 
-// 校验(按 manifest.configSchema 的 validator)→ seal(secret 加密)→ JSON。
+// 形状校验 → config liveness(输入 4:实例化 provider 打 key-only 探活)→ seal(secret 加密)→ JSON。
 async function sealSettings(providerId: string, settings: Record<string, string>): Promise<string> {
   const entry = entryOf(providerId);
-  await validateCredentials(entry.manifest.configSchema, settings); // 不合规抛
+  await validateCredentials(entry.manifest.configSchema, settings); // 形状不合规抛
+  // liveness(输入 4):用明文 settings 实例化 → balances.validateProviderConfig 探活
+  //(provider 声明了 validateConfig 才打端点;否则仅形状校验)。错误文案统一在 balances 侧。
+  await balances.validateProviderConfig(entry.create(settings));
   const specs = entry.manifest.configSchema.map((i) => ({
     key: i.key,
     type: i.type,

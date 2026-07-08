@@ -9,7 +9,7 @@ const entry = (id: string, accountType: AccountType, defaultEnabled = true): Pro
   create: () => ({
     accountType,
     fetchBalances: async () => [],
-    validate: async () => true,
+    validateAccount: async () => true,
   }),
 });
 

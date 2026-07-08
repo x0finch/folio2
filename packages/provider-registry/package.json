@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@folio/balances-basic": "workspace:*",
+    "@folio/bitcoin-derive": "workspace:*",
     "@folio/balances-provider-binance": "workspace:*",
     "@folio/balances-provider-bitcoin": "workspace:*",
     "@folio/balances-provider-coinstats": "workspace:*",

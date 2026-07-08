@@ -2,12 +2,12 @@ import {
   type Balance,
   type BalanceProvider,
   defineProvider,
+  type FetchContext,
   hmacSha256,
   type ProviderEntry,
   ProviderError,
   parseRetryAfter,
 } from "@folio/balances-basic";
-import { z } from "zod";
 import {
   AUTH_ERROR_CODES,
   BALANCE_PATH,
@@ -109,16 +109,12 @@ async function readBody(res: Response): Promise<OkxBalanceResponse> {
   }
 }
 
+type OkxCreds = { apiKey: string; secret: string; passphrase: string };
+
 export const okxProvider = defineProvider({
   accountType: "exchange_okx",
-  inputs: [
-    // apiKey = 标识符(明文走 header,非认证秘密)→ semi:导出打码保留供补录识别。
-    { key: "apiKey", type: "semi", label: "API Key", validator: z.string().trim().min(1) },
-    { key: "secret", type: "secret", label: "API Secret", validator: z.string().trim().min(1) },
-    { key: "passphrase", type: "secret", label: "Passphrase", validator: z.string().trim().min(1) },
-  ],
 
-  async fetchBalances(ctx): Promise<Balance[]> {
+  async fetchBalances(ctx: FetchContext<OkxCreds>): Promise<Balance[]> {
     const res = await okxGet(BALANCE_PATH, ctx.creds);
     ensureHttpOk(res);
     const body = await readBody(res);
@@ -126,8 +122,8 @@ export const okxProvider = defineProvider({
     return parseBalances(body.data?.[0]?.details ?? []);
   },
 
-  // 校验:签名打 balance,HTTP ok 且 code="0" 即 true(creds 已保证三项非空)。任何失败 → false。
-  async validate(ctx): Promise<boolean> {
+  // 账户 liveness:签名打 balance,HTTP ok 且 code="0" 即 true(creds 已保证三项非空)。任何失败 → false。
+  async validateAccount(ctx: FetchContext<OkxCreds>): Promise<boolean> {
     try {
       const res = await okxGet(BALANCE_PATH, ctx.creds);
       if (!res.ok) return false;

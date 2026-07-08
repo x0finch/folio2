@@ -2,12 +2,12 @@ import {
   type Balance,
   type BalanceProvider,
   defineProvider,
+  type FetchContext,
   hmacSha256,
   type ProviderEntry,
   ProviderError,
   parseRetryAfter,
 } from "@folio/balances-basic";
-import { z } from "zod";
 import {
   ACCOUNT_PATH,
   API_KEY_HEADER,
@@ -95,15 +95,12 @@ async function signedGet(
   return binanceFetch(`${path}?${query}&signature=${signature}`, apiKey);
 }
 
+type CexCreds = { apiKey: string; secret: string };
+
 export const binanceProvider = defineProvider({
   accountType: "exchange_binance",
-  inputs: [
-    // apiKey = 标识符(明文走 header,非认证秘密)→ semi:导出打码保留供补录识别。
-    { key: "apiKey", type: "semi", label: "API Key", validator: z.string().trim().min(1) },
-    { key: "secret", type: "secret", label: "API Secret", validator: z.string().trim().min(1) },
-  ],
 
-  async fetchBalances(ctx): Promise<Balance[]> {
+  async fetchBalances(ctx: FetchContext<CexCreds>): Promise<Balance[]> {
     const { apiKey, secret } = ctx.creds;
     const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;
     const acctRes = await signedGet(ACCOUNT_PATH, query, apiKey, secret);
@@ -131,7 +128,7 @@ export const binanceProvider = defineProvider({
   },
 
   // 校验:签名打 /api/v3/account 确认 key + 读权限(creds 已由 validateCredentials 保证非空)。
-  async validate(ctx): Promise<boolean> {
+  async validateAccount(ctx: FetchContext<CexCreds>): Promise<boolean> {
     const { apiKey, secret } = ctx.creds;
     try {
       const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;

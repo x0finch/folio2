@@ -135,17 +135,12 @@ export function makeCoinstats(
 ): BalanceProvider {
   return defineProvider({
     accountType,
-    // 地址非空即可(solana/sui/cosmos 格式各异,交 API 判定)。
-    inputs: [
-      {
-        key: "identifier",
-        type: "public",
-        label: "Wallet Address",
-        validator: z.string().trim().min(1),
-      },
-    ],
-    fetchBalances: (ctx) => fetchCoinstats(connectionId, ctx, apiKey),
-    validate: (ctx) => validateCoinstats(connectionId, ctx, apiKey),
+    async fetchBalances(ctx: CoinstatsCtx) {
+      return fetchCoinstats(connectionId, ctx, apiKey);
+    },
+    async validateAccount(ctx: CoinstatsCtx) {
+      return validateCoinstats(connectionId, ctx, apiKey);
+    },
   });
 }
 

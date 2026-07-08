@@ -65,9 +65,9 @@ describe("okxProvider.fetchBalances", () => {
 describe("okxProvider.validate", () => {
   it("true on code 0; false on auth code (creds pre-validated upstream)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(balance));
-    expect(await okxProvider.validate(ctx())).toBe(true);
+    expect(await okxProvider.validateAccount(ctx())).toBe(true);
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(ok({ code: "50111", msg: "Invalid Key" }));
-    expect(await okxProvider.validate(ctx())).toBe(false);
+    expect(await okxProvider.validateAccount(ctx())).toBe(false);
   });
 });

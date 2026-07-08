@@ -1,4 +1,4 @@
-import { type FetchContext, validateCredentials } from "@folio/balances-basic";
+import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bitcoinProvider, providers } from "../src";
 
@@ -131,23 +131,5 @@ describe("bitcoinProvider.fetchBalances — 错误映射", () => {
   it("serves accountType onchain_bitcoin and is exported in providers", () => {
     expect(bitcoinProvider.accountType).toBe("onchain_bitcoin");
     expect(providers).toContain(bitcoinProvider);
-  });
-});
-
-describe("identifier 校验(provider.inputs 的 validator)", () => {
-  const accept = (id: string, extra: Record<string, string> = {}) =>
-    validateCredentials(bitcoinProvider.inputs ?? [], { identifier: id, ...extra });
-  const reject = (id: string) => expect(accept(id)).rejects.toThrow(/identifier/);
-
-  it("接受地址 + xpub/ypub/zpub;scriptType 可选", async () => {
-    await expect(accept("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")).resolves.toBeDefined();
-    await expect(accept("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")).resolves.toBeDefined();
-    await expect(accept(ZPUB84)).resolves.toBeDefined();
-    await expect(accept(ADDR, { scriptType: "taproot" })).resolves.toBeDefined();
-  });
-
-  it("拒绝 EVM 0x / 乱串", async () => {
-    await reject("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
-    await reject("not-an-address");
   });
 });

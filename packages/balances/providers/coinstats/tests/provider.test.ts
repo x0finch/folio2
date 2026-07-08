@@ -71,14 +71,14 @@ describe("coinstats validate", () => {
   it("false when the global key is missing, without a request", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     const keyless = makeCoinstats("onchain_solana", "solana");
-    expect(await keyless.validate(ctx({ identifier: "addr" }))).toBe(false);
+    expect(await keyless.validateAccount(ctx({ identifier: "addr" }))).toBe(false);
     expect(spy).not.toHaveBeenCalled();
   });
 
   it("true on 200, false on 401", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]", { status: 200 }));
-    expect(await provider.validate(ctx({ identifier: "addr" }))).toBe(true);
+    expect(await provider.validateAccount(ctx({ identifier: "addr" }))).toBe(true);
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    expect(await provider.validate(ctx({ identifier: "addr" }))).toBe(false);
+    expect(await provider.validateAccount(ctx({ identifier: "addr" }))).toBe(false);
   });
 });

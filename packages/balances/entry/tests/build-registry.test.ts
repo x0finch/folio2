@@ -7,7 +7,7 @@ function fakeProvider(type: AccountType): BalanceProvider {
   return {
     accountType: type,
     fetchBalances: async () => [],
-    validate: async () => true,
+    validateAccount: async () => true,
   };
 }
 
@@ -32,7 +32,7 @@ describe("buildRegistry", () => {
         fetchBalances: async (): Promise<Balance[]> => [
           { symbol: chain, amount: 0, value: 0, kind: "spot" },
         ],
-        validate: async () => true,
+        validateAccount: async () => true,
       };
     }
     const coinstats = [

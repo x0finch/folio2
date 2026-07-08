@@ -1,59 +1,47 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { Account, AccountType, Balance } from "./types";
 
-// 账户输入的【自描述声明】:每个 provider 通过 BalanceProvider.inputs 列明它需要哪些输入。
-// app 据此派生:录入/补录表单字段、创建/同步时的凭据校验、导出处理。
+// 账户输入的【自描述声明】。**归属 accountType 数据约束层**(ADR 0009 两层:见 @folio/provider-registry
+// ACCOUNT_TYPE_SPECS),不再挂在 provider 上 —— 一个类型的账户长什么样与用哪个 provider 取数无关。
 // - type = 单轴【暴露级别】(at-rest 一律加密落库,type 只决定"导出怎么处理"+ 输入框):
-//     "public" = 全留:文本框、导出原样保留、导入可重建(如地址 identifier)
-//     "semi"   = 部分留:文本框、导出【打码保留】(如 abc12…wxyz)、不可重建但供补录时识别(如 apiKey)
+//     "public" = 全留:文本框、导出原样、可重建(如地址 identifier)
+//     "semi"   = 部分留:文本框、导出【打码保留】供补录识别(如 apiKey)
 //     "secret" = 不留:password、导出剥离(签名 secret / passphrase)
-//   "能被人认出"是部分暴露的自然副产物,不是另一个职责 —— type 仍纯粹是暴露级别。
-// - validator:用 Standard Schema(zod v4 等均实现)→ 契约不绑定具体校验库,core 保持库无关。
+// - validator:Standard Schema(zod 等实现)→ 契约不绑定具体校验库。
 export type ProviderInputType = "public" | "semi" | "secret";
-// 值类型 T 由 validator 推断(string / number / …):provider 即"input 类型 → output 类型"的 map。
-// 默认 T=unknown(即"任意值类型的 input"),让辅助函数/约束写裸 `ProviderInput[]` 即可接受异构 inputs;
-// 具体 T(如 amount 的 number)在 defineProvider 的 const 字面量推断里由 validator 给出(P6.6.2)。
 export interface ProviderInput<T = unknown> {
-  readonly key: string; // 存进 creds 的字段名(provider 自定;creds 形状由 inputs 推断)
+  readonly key: string;
   readonly type: ProviderInputType;
   readonly validator: StandardSchemaV1<unknown, T>;
-  // 人类可读标签;同时【兼作 i18n key】(源串即 key,gettext 风格):app 在 Inputs namespace 下查翻译,
-  // 缺翻译则回退 label 本身(英文)→ en 无需写、只补 zh。不同 provider 同 key 可给不同 label。desc 同理。
+  // 人类可读标签,兼作 i18n key(Inputs namespace;缺翻译回退 label 本身)。desc 同理。
   readonly label: string;
   readonly desc?: string;
 }
 
-// 从声明的 inputs 推出该 provider 的 creds 形状:每个字段 → 其 validator 的输出类型(异构)。
-// 默认(未具体化的 inputs)退化为 Record<string, unknown>,正是 sync 边界拿到的运行时形状。
-export type CredsOf<I extends readonly ProviderInput[]> = {
-  readonly [E in I[number] as E["key"]]: E extends ProviderInput<infer T> ? T : never;
-};
-
-// provider 拉取/校验时拿到的账户上下文。creds 形状由各 provider 的 inputs 推断(见 CredsOf);
-// 运行时由 sync/创建流在构造前用 validateCredentials(inputs, …) 校验过 → 类型有运行时背书。
-// 全局 key 不在此:它是 provider 的【实例化参数】(ProviderEntry.create(settings),ADR 0009 两层构造)。
+// provider 拉取/校验时拿到的账户上下文。creds 形状 = accountType 层 accountInputs 的校验输出;
+// provider 各自本地标注期望的 C(如 { identifier: string })。运行时由 validateCredentials 校验过 → 有背书。
+// 全局 key 不在此:它是 provider 的【实例化参数】(ProviderEntry.create(settings),ADR 0009)。
 export interface FetchContext<C = Record<string, unknown>> {
   account: Account;
   creds: C;
 }
 
-export interface BalanceProvider<I extends readonly ProviderInput[] = readonly ProviderInput[]> {
-  // 该实现服务于哪个 AccountType —— "provider ↔ type" 映射的唯一事实源,registry 据此自动组装。
+// provider 层(ADR 0009):只管自己的取数 + 两个 liveness 校验。账户输入 schema 归 accountType 层。
+export interface BalanceProvider {
+  // 注册进哪个 AccountType —— registry 据此分桶组装。
   readonly accountType: AccountType;
-  // 本 type 账户需要的【账户输入】(自描述,见 ProviderInput)。creds 形状(CredsOf)由它推断。
-  // 链上/perp → [identifier(public)];binance → [apiKey(semi),secret];okx → +passphrase;manual → [symbol,amount,usdValue(public)]。
-  readonly inputs?: I;
-  /** 拉取该账户当前全部余额。失败抛 ProviderError。 */
-  fetchBalances(ctx: FetchContext<CredsOf<I>>): Promise<Balance[]>;
-  /** 校验账户上下文是否可用,加账户时调用。 */
-  validate(ctx: FetchContext<CredsOf<I>>): Promise<boolean>;
+  /** 拉取该账户当前全部余额(账户级 creds 走 ctx.creds;全局 config 已在实例化时注入)。失败抛 ProviderError。 */
+  fetchBalances(ctx: FetchContext): Promise<Balance[]>;
+  /** 账户 liveness(输入 5):加账户时校验这份账户 creds 经本 provider 能否取到数。 */
+  validateAccount(ctx: FetchContext): Promise<boolean>;
+  /**
+   * 配置 liveness(输入 4,可选):启用/改 key 时校验注入的全局 config(如 API key)是否可用。
+   * 打一个【只需 config、不需 account】的探活端点;无此能力的 provider 不声明(退化到形状校验)。
+   */
+  validateConfig?(): Promise<boolean>;
 }
 
-// 定义 provider 的工厂:`const I` 从字面量 inputs 推断,使 fetchBalances/validate 的 ctx.creds
-// 精确成 CredsOf<inputs>(如 okx → {apiKey,secret,passphrase})。返回擦除版 BalanceProvider 供注册表
-// 异构存储。不用工厂、直接 `: BalanceProvider` 注解会让 I 退化成默认(失去推断)。
-export function defineProvider<const I extends readonly ProviderInput[]>(
-  provider: BalanceProvider<I>,
-): BalanceProvider {
-  return provider as BalanceProvider;
+// 定义 provider(薄标识包装,便于将来加统一处理)。provider 各自标注方法 ctx 的 creds 类型。
+export function defineProvider(provider: BalanceProvider): BalanceProvider {
+  return provider;
 }

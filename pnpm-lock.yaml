@@ -445,6 +445,9 @@ importers:
       '@folio/balances-provider-zerion':
         specifier: workspace:*
         version: link:../balances/providers/zerion
+      '@folio/bitcoin-derive':
+        specifier: workspace:*
+        version: link:../clients/bitcoin-derive
     devDependencies:
       typescript:
         specifier: ^6.0.2

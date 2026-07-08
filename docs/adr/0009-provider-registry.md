@@ -16,6 +16,13 @@ Status: accepted (planned)
 
 ## Consequences
 
+### 两层(数据约束层 / provider 层)+ 两次校验
+- **层 1 · accountType 数据约束**(`@folio/provider-registry` `ACCOUNT_TYPE_SPECS`):每个账户类型声明**账户输入 schema**(地址/xpub/CEX per-account key/manual 字段)+ 产出的数据 facet(`balance`,将来 `transaction`)。是"这个类型的账户长什么样"的唯一事实源,**与用哪个 provider 无关**(换 provider,账户输入不变)。`credentialSpecs()` / 加账户表单 / 运行时 creds 校验都读这层。
+- **层 2 · provider**(`BalanceProvider`):只管自己的**全局 config**(`manifest.configSchema`,如 Zerion key)+ 怎么取数。契约瘦身:去掉 `inputs`(账户输入归层 1);`validate` → `validateAccount`;新增可选 `validateConfig`。
+- **两次输入 × 两次校验**:
+  - **输入 4(enable,provider 全局 config/key)** → `validateConfig()` liveness(实例化后打 key-only 探活;Zerion 用 `/chains`,无此端点的 provider 不声明 → 退化到形状校验)。
+  - **输入 5(add-account,账户 creds)** → 层 1 validator 形状校验 + `validateAccount()` liveness。
+
 ### 用户模型(两层构造,provider 级配置与账户级输入分离)
 - **UI 主体 = 账户类型**:类型管理页列出所有支持的 `AccountType` + 状态;provider 是"启用该类型"流程里的**选择项**(如启用 EVM → 展示 zerion/debank… 选一个 + 配 key 或用默认),**没有独立的 provider 管理页**。
 - **两层构造**(有 `makeCoinstats` 工厂先例):

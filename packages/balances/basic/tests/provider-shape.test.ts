@@ -1,47 +1,43 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import type { BalanceProvider } from "../src/provider";
 
-// 最小 stub:验证 BalanceProvider 接口形状可被实现(类型标注在编译期校验)。
+// 最小 stub:验证瘦身后的 BalanceProvider 契约可被实现(ADR 0009 层2:只管取数 + 两 liveness)。
+// 账户输入 schema 归 accountType 层(ACCOUNT_TYPE_SPECS,见 @folio/provider-registry),不在 provider 上。
 const stub: BalanceProvider = {
   accountType: "manual",
   async fetchBalances() {
     return [];
   },
-  async validate() {
+  async validateAccount() {
     return true;
   },
 };
 
 describe("BalanceProvider shape", () => {
-  it("can be implemented by a minimal stub", async () => {
-    // FetchContext 无 globalKeys:全局 key 是实例化参数(ProviderEntry.create(settings),ADR 0009)。
+  it("最小实现:accountType + fetchBalances + validateAccount", async () => {
     const ctx = {
       account: { id: "a1", userId: "u1", type: "manual" as const, label: "Manual" },
       creds: {},
     };
     expect(stub.accountType).toBe("manual");
     expect(await stub.fetchBalances(ctx)).toEqual([]);
-    expect(await stub.validate(ctx)).toBe(true);
+    expect(await stub.validateAccount(ctx)).toBe(true);
+    expect(stub.validateConfig).toBeUndefined(); // 可选:无全局 config 的 provider 不声明
   });
 
-  it("can declare inputs with three exposure levels (public/semi/secret; zod validator via Standard Schema)", () => {
-    const okxLike: BalanceProvider = {
-      accountType: "exchange_okx",
-      inputs: [
-        { key: "apiKey", type: "semi", label: "API Key", validator: z.string().min(1) },
-        { key: "secret", type: "secret", label: "API Secret", validator: z.string().min(1) },
-        { key: "passphrase", type: "secret", label: "Passphrase", validator: z.string().min(1) },
-      ],
+  it("可声明 validateConfig(输入4:全局 config liveness)", async () => {
+    const withConfig: BalanceProvider = {
+      accountType: "onchain_evm",
       async fetchBalances() {
         return [];
       },
-      async validate() {
+      async validateAccount() {
+        return true;
+      },
+      async validateConfig() {
         return true;
       },
     };
-    expect(okxLike.inputs?.map((i) => i.key)).toEqual(["apiKey", "secret", "passphrase"]);
-    expect(okxLike.inputs?.map((i) => i.type)).toEqual(["semi", "secret", "secret"]);
-    expect(stub.inputs).toBeUndefined(); // 可选,默认无
+    expect(await withConfig.validateConfig?.()).toBe(true);
   });
 });

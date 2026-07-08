@@ -4,6 +4,7 @@ import {
   buildTokenKey,
   type DefiMeta,
   defineProvider,
+  type FetchContext,
   type ProviderEntry,
   ProviderError,
   parseRetryAfter,
@@ -12,7 +13,6 @@ import { z } from "zod";
 import {
   CHAINS_CACHE_TTL_MS,
   CHAINS_PATH,
-  EVM_ADDRESS_RE,
   PORTFOLIO_PATH,
   POSITIONS_PATH,
   POSITIONS_QUERY,
@@ -190,22 +190,15 @@ async function getChainIds(apiKey: string): Promise<Record<string, number>> {
   }
 }
 
-// 工厂(ADR 0009 两层构造):全局 apiKey 是实例化参数;账户级输入(地址)仍走 ctx.creds。
+// 账户级 creds 形状(账户输入 schema 归 accountType 层,provider 只本地标注期望形状)。
+type EvmCreds = { identifier: string };
+
+// 工厂(ADR 0009 两层构造):全局 apiKey 是实例化参数;账户级输入(地址)走 ctx.creds。
 export function makeZerion(key?: string): BalanceProvider {
   return defineProvider({
     accountType: "onchain_evm",
-    // identifier 的 EVM 格式由本 validator 体现;创建/同步前经 validateCredentials 保证 → 方法里可直接用。
-    inputs: [
-      {
-        key: "identifier",
-        type: "public",
-        label: "EVM Address",
-        desc: "0x + 40 hex",
-        validator: z.string().regex(EVM_ADDRESS_RE, "expected 0x + 40 hex"),
-      },
-    ],
 
-    async fetchBalances(ctx): Promise<Balance[]> {
+    async fetchBalances(ctx: FetchContext<EvmCreds>): Promise<Balance[]> {
       const apiKey = requireApiKey(key);
       // 链映射与 positions 并行取;链映射拿不到会抛错(Promise.all 一并 reject)→ 整轮同步失败重试,
       // 保证 parsePositions 拿到非空映射、只产规范 eip155 标识(失败即不产,不写含分叉标识的快照)。
@@ -223,12 +216,22 @@ export function makeZerion(key?: string): BalanceProvider {
       return parsePositions(json, chainIds);
     },
 
-    // 低消耗校验:打轻量 portfolio 端点探活(地址已由 validateCredentials 保证格式)。任何失败 → false。
-    async validate(ctx): Promise<boolean> {
+    // 账户 liveness(输入 5):打轻量 portfolio 端点探活(地址格式已由层1 validator 保证)。任何失败 → false。
+    async validateAccount(ctx: FetchContext<EvmCreds>): Promise<boolean> {
       if (!key) return false;
       try {
         const res = await zerionGet(PORTFOLIO_PATH(ctx.creds.identifier), key);
         return res.ok;
+      } catch {
+        return false;
+      }
+    },
+
+    // 配置 liveness(输入 4):/chains 只需 key、不需 account → 校验注入的 API key 是否可用。
+    async validateConfig(): Promise<boolean> {
+      if (!key) return false;
+      try {
+        return (await zerionGet(CHAINS_PATH, key)).ok;
       } catch {
         return false;
       }

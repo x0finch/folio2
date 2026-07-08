@@ -78,13 +78,13 @@ describe("binanceProvider.fetchBalances", () => {
 describe("binanceProvider.validate", () => {
   it("false on missing creds without a request; true on 200; false on 401", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    expect(await binanceProvider.validate(ctx({ apiKey: "k" }))).toBe(false);
+    expect(await binanceProvider.validateAccount(ctx({ apiKey: "k" }))).toBe(false);
     expect(spy).not.toHaveBeenCalled();
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
-    expect(await binanceProvider.validate(ctx())).toBe(true);
+    expect(await binanceProvider.validateAccount(ctx())).toBe(true);
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    expect(await binanceProvider.validate(ctx())).toBe(false);
+    expect(await binanceProvider.validateAccount(ctx())).toBe(false);
   });
 });

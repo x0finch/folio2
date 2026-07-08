@@ -2,14 +2,14 @@ import {
   type Balance,
   type BalanceProvider,
   defineProvider,
+  type FetchContext,
   type PerpEquityMeta,
   type PerpPositionMeta,
   type ProviderEntry,
   ProviderError,
   parseRetryAfter,
 } from "@folio/balances-basic";
-import { z } from "zod";
-import { CLEARINGHOUSE_TYPE, EVM_ADDRESS_RE, HYPERLIQUID_API_BASE, INFO_PATH } from "./constants";
+import { CLEARINGHOUSE_TYPE, HYPERLIQUID_API_BASE, INFO_PATH } from "./constants";
 
 // @folio/balances-provider-hyperliquid —— 永续 DEX(perp_hyperliquid)。只读地址即查、无需签名/API key
 // (最接近链上 provider)。POST /info { type:"clearinghouseState", user }。地址走
@@ -126,19 +126,8 @@ function ensureOk(res: Response): void {
 
 export const hyperliquidProvider = defineProvider({
   accountType: "perp_hyperliquid",
-  // 只读地址即查,无全局 key/签名 → 不声明 usesGlobalKeys。
-  // identifier 的 EVM 格式由本 validator 体现;创建/同步前经 validateCredentials 保证 → 方法里可直接用。
-  inputs: [
-    {
-      key: "identifier",
-      type: "public",
-      label: "EVM Address",
-      desc: "0x + 40 hex",
-      validator: z.string().regex(EVM_ADDRESS_RE, "expected 0x + 40 hex"),
-    },
-  ],
 
-  async fetchBalances(ctx): Promise<Balance[]> {
+  async fetchBalances(ctx: FetchContext<{ identifier: string }>): Promise<Balance[]> {
     const res = await infoPost(ctx.creds.identifier);
     ensureOk(res);
     let json: ClearinghouseState;
@@ -150,9 +139,9 @@ export const hyperliquidProvider = defineProvider({
     return parseClearinghouseState(json);
   },
 
-  // 低消耗校验:打一次 clearinghouseState 探活(地址已由 validateCredentials 保证格式)。
+  // 账户 liveness:打一次 clearinghouseState 探活(地址格式已由层1 validator 保证)。
   // 未交易过的地址也返回 200 + 空状态 → 视为可用。任何失败 → false。
-  async validate(ctx): Promise<boolean> {
+  async validateAccount(ctx: FetchContext<{ identifier: string }>): Promise<boolean> {
     try {
       const res = await infoPost(ctx.creds.identifier);
       return res.ok;

@@ -3,30 +3,28 @@ import {
   type BalanceProvider,
   buildTokenKey,
   defineProvider,
+  type FetchContext,
   type ProviderEntry,
 } from "@folio/balances-basic";
-import { z } from "zod";
 
 // @folio/balances-provider-custom —— 手动资产(manual)。无外部 API:一个账户 = 一个手记资产。
 // 三个 public 输入(symbol/amount/unitPrice)走 creds(明文落库、导出原样、可重建);
 // fetchBalances map 成单条 Balance:value = amount × unitPrice、price = unitPrice(P7.4.1)。
 // `amount` 由 manual 活动账本(manual_activity)推导后【物化】进 creds(见 web server fn);provider 只管读。
 // `unitPrice` 用户填(市价自动估值 = P7.4.2)。
+// 账户 creds 形状(schema 归 accountType 层;amount/unitPrice 经 z.coerce.number 校验后为 number)。
+type ManualCreds = {
+  symbol: string;
+  amount: number;
+  unitPrice: number;
+  identifier?: string;
+  fixed?: string;
+};
+
 export const customProvider = defineProvider({
   accountType: "manual",
-  inputs: [
-    { key: "symbol", type: "public", label: "Symbol", validator: z.string().trim().min(1) },
-    { key: "amount", type: "public", label: "Amount", validator: z.coerce.number() },
-    { key: "unitPrice", type: "public", label: "Unit price (USD)", validator: z.coerce.number() },
-    // 可选:用户选定的 CoinGecko identifier(消歧,P7.4.3)。有则产 tokenKey(coingecko:<id>)
-    // 供 sync 期市价重估按显式 ref 解析(见 revalue / resolveAsset 的 coingecko: 直达)。
-    { key: "identifier", type: "public", label: "CoinGecko ID", validator: z.string().optional() },
-    // 可选:锁定固定值(P7.4.4)。在则透出 meta.fixed → sync 期跳过市价重估、钉死 amount × unitPrice。
-    // creds 是字符串 map,沿用 identifier 的"在则为真"约定(仅锁定时存 "1")。
-    { key: "fixed", type: "public", label: "Lock fixed value", validator: z.string().optional() },
-  ],
 
-  async fetchBalances(ctx): Promise<Balance[]> {
+  async fetchBalances(ctx: FetchContext<ManualCreds>): Promise<Balance[]> {
     const { symbol, amount, unitPrice, identifier, fixed } = ctx.creds;
     return [
       {
@@ -37,15 +35,15 @@ export const customProvider = defineProvider({
         kind: "manual" as const,
         // 用户选定的 CGK id = 厂商寻址身份 → tokenKey(coingecko:<id>),不再塞 meta.identifier;
         // 未选币则无标识,解析时按 symbol 归一(同 CEX)。
-        ...(identifier ? { tokenKey: buildTokenKey({ cgkId: identifier as string }) } : {}),
+        ...(identifier ? { tokenKey: buildTokenKey({ cgkId: identifier }) } : {}),
         // meta 只留【行为标志】:fixed(锁定固定值 → sync 期跳过市价重估)。身份不进 meta。
         ...(fixed ? { meta: { fixed: true } } : {}),
       },
     ];
   },
 
-  // 无外部源;creds 已由 sync/创建流的 validateCredentials(inputs) 校验过。
-  async validate(): Promise<boolean> {
+  // 无外部源;账户 creds 已由 accountType 层 validator 校验过 → 恒可用。
+  async validateAccount(): Promise<boolean> {
     return true;
   },
 });

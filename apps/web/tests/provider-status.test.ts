@@ -19,7 +19,7 @@ const entry = (
     ...(opts.envName ? { envDefaults: { apiKey: opts.envName } } : {}),
     defaultEnabled: opts.defaultEnabled ?? true,
   },
-  create: () => ({ accountType, fetchBalances: async () => [], validate: async () => true }),
+  create: () => ({ accountType, fetchBalances: async () => [], validateAccount: async () => true }),
 });
 
 const row = (providerId: string, over: Partial<ProviderConfigRow> = {}): ProviderConfigRow => ({

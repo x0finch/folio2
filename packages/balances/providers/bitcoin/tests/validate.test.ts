@@ -22,7 +22,7 @@ describe("bitcoinProvider.validate", () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ address: ADDR, balance: "0" }), { status: 200 }),
       );
-    expect(await bitcoinProvider.validate(ctx({ identifier: ADDR }))).toBe(true);
+    expect(await bitcoinProvider.validateAccount(ctx({ identifier: ADDR }))).toBe(true);
     expect(String(spy.mock.calls[0][0])).toContain("/address/");
   });
 
@@ -32,16 +32,16 @@ describe("bitcoinProvider.validate", () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ address: ZPUB84, balance: "0" }), { status: 200 }),
       );
-    expect(await bitcoinProvider.validate(ctx({ identifier: ZPUB84 }))).toBe(true);
+    expect(await bitcoinProvider.validateAccount(ctx({ identifier: ZPUB84 }))).toBe(true);
     expect(String(spy.mock.calls[0][0])).toContain("/xpub/");
   });
 
   it("端点全故障 → false", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));
-    expect(await bitcoinProvider.validate(ctx({ identifier: ADDR }))).toBe(false);
+    expect(await bitcoinProvider.validateAccount(ctx({ identifier: ADDR }))).toBe(false);
   });
 
   it("非法扩展公钥(乱串)→ false,造 token 即失败", async () => {
-    expect(await bitcoinProvider.validate(ctx({ identifier: "zpubGARBAGE" }))).toBe(false);
+    expect(await bitcoinProvider.validateAccount(ctx({ identifier: "zpubGARBAGE" }))).toBe(false);
   });
 });
