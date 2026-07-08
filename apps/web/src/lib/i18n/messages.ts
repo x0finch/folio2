@@ -221,6 +221,8 @@ export const en = {
   // 缺失时由 IntlProvider 的 getMessageFallback 回退到 key 本身)。
   Inputs: {
     "API Key": "API Key",
+    "Zerion API Key": "Zerion API Key",
+    "CoinStats API Key": "CoinStats API Key",
     "API Secret": "API Secret",
     Passphrase: "Passphrase",
     "EVM Address": "EVM Address",
@@ -463,6 +465,8 @@ export const zh: Messages = {
   },
   Inputs: {
     "API Key": "API Key",
+    "Zerion API Key": "Zerion API Key",
+    "CoinStats API Key": "CoinStats API Key",
     "API Secret": "API Secret",
     Passphrase: "Passphrase",
     "EVM Address": "EVM 地址",

@@ -22,7 +22,7 @@ import {
 
 // @folio/balances-provider-zerion —— EVM 链上(onchain_evm)。只读地址,一次取回跨所有 EVM 链的
 // 代币 + DeFi 仓位、自带 USD 估值。地址走 ctx.creds.identifier;全局 key 走
-// ctx.globalKeys.ZERION_API_KEY(HTTP Basic:key 作 username、密码空)。零依赖,用原生 fetch。
+// 工厂参数 apiKey(HTTP Basic:key 作 username、密码空)。零依赖,用原生 fetch。
 
 // —— Zerion 响应的最小形状(仅取用到的字段)——
 interface ZerionQuantity {

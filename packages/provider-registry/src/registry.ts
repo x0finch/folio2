@@ -31,6 +31,8 @@ export function buildCandidates(entries: readonly ProviderEntry[]): ProviderCand
  * 1. 有 enabled=true 覆盖的候选 → 即选中(用户显式选择;store 保证每 type 至多一条 true,>1 抛错);
  * 2. 否则 defaultEnabled 且未被 enabled=false 覆盖的候选 → 生效(恰一个;>1 = manifest 声明冲突,抛错);
  * 3. 都没有 → 该 type 缺席(未启用)。
+ * 指向已从代码移除的 provider 的陈旧覆盖行(id 不在候选里)被静默忽略 → 优雅降级回 manifest 默认
+ * (manifest 是事实源,DB 只是覆盖;不因脏行拒绝启动)。
  */
 export function resolveActive(
   candidates: ProviderCandidates,

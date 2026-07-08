@@ -16,6 +16,7 @@ describe("@folio/db encapsulation", () => {
     // 非 userId 作用域的全局 infra:独立导出(不进 createDb 门面)。
     expect(typeof db.createAuthAdapter).toBe("function");
     expect(typeof db.createTokenStore).toBe("function");
+    expect(typeof db.createProviderConfigStore).toBe("function"); // ADR 0009:provider 全局配置覆盖表
     // 原始 query 函数不再直接导出 —— 都收进 createDb(env) 返回的实例(db.xxx)。
     expect(surface.createAccount).toBeUndefined();
     expect(surface.writeSnapshot).toBeUndefined();

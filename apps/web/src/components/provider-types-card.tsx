@@ -92,9 +92,10 @@ function EnableDrawer({ status, onClose }: { status: AccountTypeStatusView; onCl
   const router = useRouter();
   const [providerId, setProviderId] = useState(status.activeId ?? status.candidates[0]?.id ?? "");
   const candidate = status.candidates.find((c) => c.id === providerId);
-  const [useCustom, setUseCustom] = useState(
-    Boolean(candidate && !candidate.hasEnvDefault && candidate.configFields.length > 0),
-  );
+  // 无内置默认可用时只能自定义 → 初始即展开;切 provider 时按新候选重算(见 onPickProvider)。
+  const needsCustom = (c?: ProviderCandidateView) =>
+    Boolean(c && !c.hasEnvDefault && c.configFields.length > 0);
+  const [useCustom, setUseCustom] = useState(needsCustom(candidate));
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -151,7 +152,15 @@ function EnableDrawer({ status, onClose }: { status: AccountTypeStatusView; onCl
       {status.candidates.length > 1 && (
         <div className="mt-4 flex flex-col gap-2">
           <Label>{t("provider")}</Label>
-          <Select value={providerId} onValueChange={(v) => setProviderId(v)}>
+          <Select
+            value={providerId}
+            onValueChange={(v) => {
+              // 切候选:清残留输入 + 按新候选重算默认/自定义(否则旧值/旧态串到新 provider)。
+              setProviderId(v);
+              setValues({});
+              setUseCustom(needsCustom(status.candidates.find((c) => c.id === v)));
+            }}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>

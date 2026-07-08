@@ -21,7 +21,7 @@ import {
 // @folio/balances-provider-coinstats —— 首个【多账户类型】provider(方案 A 工厂)。
 // 一个数据源服务多个 onchain_* type(Solana / Sui / Cosmos),共享内部实现,
 // 用工厂为每个 type 产出一个 BalanceProvider 对象,sync 摊平后传入 buildRegistry。
-// 地址走 ctx.creds.identifier;全局 key 走 ctx.globalKeys.COINSTATS_API_KEY(X-API-KEY 头)。
+// 地址走 ctx.creds.identifier;全局 key 走工厂参数 apiKey(X-API-KEY 头)。
 // 原生 fetch,零依赖。
 
 // CoinStats wallet/balance 返回的单条 coin(仅取用到的字段;响应无图标字段 → Balance.logo 不产)。
