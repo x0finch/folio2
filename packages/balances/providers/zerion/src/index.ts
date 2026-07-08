@@ -196,8 +196,6 @@ type EvmCreds = { identifier: string };
 // 工厂(ADR 0009 两层构造):全局 apiKey 是实例化参数;账户级输入(地址)走 ctx.creds。
 export function makeZerion(key?: string): BalanceProvider {
   return defineProvider({
-    accountType: "onchain_evm",
-
     async fetchBalances(ctx: FetchContext<EvmCreds>): Promise<Balance[]> {
       const apiKey = requireApiKey(key);
       // 链映射与 positions 并行取;链映射拿不到会抛错(Promise.all 一并 reject)→ 整轮同步失败重试,
@@ -239,9 +237,8 @@ export function makeZerion(key?: string): BalanceProvider {
   });
 }
 
-// 与方案 A 摊平约定一致(无 key 单例:仅供测试/静态默认 registry;运行时经 entries.create 注入 key)。
+// 无 key 单例:仅供测试/静态默认 registry;运行时经 entries.create 注入 key。
 export const zerionProvider = makeZerion();
-export const providers: BalanceProvider[] = [zerionProvider];
 
 // 自描述清单(ADR 0009):id 跨版本稳定(配置覆盖行按它寻址);configSchema 声明全局设置,
 // 注册/启用/配置层(@folio/provider-registry)据此驱动。

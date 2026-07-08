@@ -6,7 +6,6 @@ import { createBalances } from "../src";
 // 假 provider 服务 onchain_evm(层1 输入 = [identifier])。
 function fakeProvider(over: Partial<BalanceProvider> = {}): BalanceProvider {
   return {
-    accountType: "onchain_evm",
     validateAccount: async () => true,
     fetchBalances: async () => [],
     ...over,
@@ -14,7 +13,7 @@ function fakeProvider(over: Partial<BalanceProvider> = {}): BalanceProvider {
 }
 const acc = (): Account => ({ id: "a", userId: "u", type: "onchain_evm", label: "W" });
 const mk = (over: Partial<BalanceProvider> = {}) =>
-  createBalances({ providers: [fakeProvider(over)] });
+  createBalances({ registry: { onchain_evm: fakeProvider(over) } });
 
 const EVM = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
@@ -76,14 +75,14 @@ describe("createBalances — 账户输入来自 accountType 层", () => {
 
   it("fetchBalances:运行时闸 + 调 provider + 汇总 totalUsd", async () => {
     const b = createBalances({
-      providers: [
-        fakeProvider({
+      registry: {
+        onchain_evm: fakeProvider({
           fetchBalances: async () => [
             { symbol: "A", amount: 1, value: 10, kind: "spot" },
             { symbol: "B", amount: 1, value: 5, kind: "spot" },
           ],
         }),
-      ],
+      },
     });
     const out = await b.fetchBalances(acc(), { identifier: EVM });
     expect(out.totalUsd).toBe(15);

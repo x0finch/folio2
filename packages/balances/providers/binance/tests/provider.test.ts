@@ -1,6 +1,6 @@
 import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { binanceProvider, parseAccountBalances, providers } from "../src";
+import { binanceProvider, entries, parseAccountBalances } from "../src";
 import account from "./fixtures/account.json";
 import expected from "./fixtures/expected-balances.json";
 import prices from "./fixtures/prices.json";
@@ -69,9 +69,8 @@ describe("binanceProvider.fetchBalances", () => {
     });
   });
 
-  it("serves exchange_binance, exported in providers", () => {
-    expect(binanceProvider.accountType).toBe("exchange_binance");
-    expect(providers).toContain(binanceProvider);
+  it("entry registers accountType exchange_binance", () => {
+    expect(entries.map((e) => e.manifest.accountType)).toContain("exchange_binance");
   });
 });
 

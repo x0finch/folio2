@@ -1,6 +1,6 @@
 import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { bitcoinProvider, providers } from "../src";
+import { bitcoinProvider, entries } from "../src";
 
 // provider 只整合:取数走 @folio/blockbook-client(Trezor Blockbook)。这里按 URL(/xpub/ vs /address/)
 // 打桩 fetch,断言整合后的 Balance/BitcoinMeta。派生正确性在 @folio/bitcoin-derive 的离线向量测里。
@@ -128,8 +128,7 @@ describe("bitcoinProvider.fetchBalances — 错误映射", () => {
     });
   });
 
-  it("serves accountType onchain_bitcoin and is exported in providers", () => {
-    expect(bitcoinProvider.accountType).toBe("onchain_bitcoin");
-    expect(providers).toContain(bitcoinProvider);
+  it("entry registers accountType onchain_bitcoin", () => {
+    expect(entries.map((e) => e.manifest.accountType)).toContain("onchain_bitcoin");
   });
 });

@@ -1,6 +1,6 @@
 import type { FetchContext } from "@folio/balances-basic";
 import { describe, expect, it } from "vitest";
-import { customProvider, providers } from "../src";
+import { customProvider, entries } from "../src";
 import expected from "./fixtures/expected-balances.json";
 import inputs from "./fixtures/inputs.json";
 
@@ -21,8 +21,7 @@ describe("customProvider.fetchBalances (golden: fixtures in → fixture out)", (
     expect(balances).toEqual((expected as Record<string, unknown>)[name]);
   });
 
-  it("serves accountType 'manual' and is exported in the providers array", () => {
-    expect(customProvider.accountType).toBe("manual");
-    expect(providers).toContain(customProvider);
+  it("entry registers accountType 'manual'", () => {
+    expect(entries.map((e) => e.manifest.accountType)).toContain("manual");
   });
 });

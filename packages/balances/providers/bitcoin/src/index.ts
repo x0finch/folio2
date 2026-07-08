@@ -1,6 +1,5 @@
 import {
   type Balance,
-  type BalanceProvider,
   type BitcoinAddress,
   type BitcoinMeta,
   type BitcoinReceive,
@@ -139,8 +138,6 @@ async function fetchXpub(client: BlockbookClient, ext: string, scriptType: strin
 type BtcCreds = { identifier: string; scriptType?: ScriptType };
 
 export const bitcoinProvider = defineProvider({
-  accountType: "onchain_bitcoin",
-
   async fetchBalances(ctx: FetchContext<BtcCreds>): Promise<Balance[]> {
     const id = ctx.creds.identifier;
     const client = createBlockbookClient();
@@ -171,9 +168,6 @@ export const bitcoinProvider = defineProvider({
     }
   },
 });
-
-// 与方案 A 摊平约定一致:sync 收集各包的 providers 数组后 .flat() 传入 buildRegistry。
-export const providers: BalanceProvider[] = [bitcoinProvider];
 
 // 自描述清单(ADR 0009)。公共 Blockbook 实例,无全局设置,开箱即用。
 export const entries: ProviderEntry[] = [

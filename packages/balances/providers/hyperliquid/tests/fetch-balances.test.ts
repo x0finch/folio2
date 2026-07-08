@@ -1,6 +1,6 @@
 import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hyperliquidProvider, parseClearinghouseState, providers } from "../src";
+import { entries, hyperliquidProvider, parseClearinghouseState } from "../src";
 import fixture from "./fixtures/clearinghouse-state.json";
 import expected from "./fixtures/expected-balances.json";
 
@@ -85,8 +85,7 @@ describe("hyperliquidProvider.fetchBalances", () => {
     });
   });
 
-  it("serves accountType perp_hyperliquid and is exported in providers", () => {
-    expect(hyperliquidProvider.accountType).toBe("perp_hyperliquid");
-    expect(providers).toContain(hyperliquidProvider);
+  it("entry registers accountType perp_hyperliquid", () => {
+    expect(entries.map((e) => e.manifest.accountType)).toContain("perp_hyperliquid");
   });
 });

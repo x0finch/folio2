@@ -1,13 +1,14 @@
 import type { BalanceProvider, ProviderInput } from "./provider";
+import type { AccountType } from "./types";
 
-// Provider 自描述清单(ADR 0009)—— registry 组装与运行时启用/配置的唯一事实源。
-// 类型放本包(契约地基)而非 @folio/provider-registry:provider 包导出 entries 需要它,
-// 而 @folio/provider-registry 反向 import 各 provider 包做集中组装 —— 类型在此才无环。
+// Provider 自描述清单(ADR 0009)—— provider 注册进哪个 accountType 的【唯一事实源】(provider 实现本身
+// 不带 accountType,只有纯行为)。类型放本包(契约地基)而非 @folio/provider-registry:provider 包导出
+// entries 需要它,而 @folio/provider-registry 反向 import 各 provider 包集中组装 —— 类型在此才无环。
 export interface ProviderManifest {
   // 全局唯一 id(kebab,如 "evm-zerion")。配置覆盖行按它寻址;跨版本稳定,不可改。
   readonly id: string;
-  // 服务的账户类型(与 BalanceProvider.accountType 一致;registry 按它分桶出候选集合)。
-  readonly accountType: BalanceProvider["accountType"];
+  // 注册进哪个账户类型(registry 按它分桶出候选集合)。
+  readonly accountType: AccountType;
   // 数据后端标识(如 "zerion" / "blockbook" / "coinstats");同 type 多后端 = 多个独立 entry(方案 A)。
   readonly dataSource: string;
   // 全局设置的字段声明(如全局 apiKey;复用 ProviderInput 自描述)。空 = 无全局设置,开箱即用。

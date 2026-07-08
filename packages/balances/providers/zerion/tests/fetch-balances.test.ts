@@ -1,12 +1,11 @@
 import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  entries,
   makeZerion,
   parseChainIds,
   parsePositions,
-  providers,
   resetChainIdsCacheForTests,
-  zerionProvider,
 } from "../src";
 import chainsFixture from "./fixtures/chains.json";
 import expectedBalances from "./fixtures/expected-balances.json";
@@ -145,8 +144,7 @@ describe("zerionProvider.fetchBalances(双 API)", () => {
     });
   });
 
-  it("serves accountType onchain_evm and is exported in providers", () => {
-    expect(zerionProvider.accountType).toBe("onchain_evm");
-    expect(providers).toContain(zerionProvider);
+  it("entry registers accountType onchain_evm", () => {
+    expect(entries.map((e) => e.manifest.accountType)).toContain("onchain_evm");
   });
 });

@@ -1,5 +1,4 @@
 import {
-  type AccountType,
   type Balance,
   type BalanceProvider,
   buildTokenKey,
@@ -18,11 +17,10 @@ import {
   CONNECTION_IDS,
 } from "./constants";
 
-// @folio/balances-provider-coinstats —— 首个【多账户类型】provider(方案 A 工厂)。
-// 一个数据源服务多个 onchain_* type(Solana / Sui / Cosmos),共享内部实现,
-// 用工厂为每个 type 产出一个 BalanceProvider 对象,sync 摊平后传入 buildRegistry。
-// 地址走 ctx.creds.identifier;全局 key 走工厂参数 apiKey(X-API-KEY 头)。
-// 原生 fetch,零依赖。
+// @folio/balances-provider-coinstats —— 首个【多账户类型】数据源(方案 A 工厂)。
+// 一个数据源服务多个 onchain_* type(Solana / Sui / Cosmos),共享内部实现;导出多个 entry
+// (每 type 一个,manifest.accountType 声明归属),@folio/provider-registry 收集组装。
+// 地址走 ctx.creds.identifier;全局 key 走工厂参数 apiKey(X-API-KEY 头)。原生 fetch,零依赖。
 
 // CoinStats wallet/balance 返回的单条 coin(仅取用到的字段;响应无图标字段 → Balance.logo 不产)。
 interface CoinstatsCoin {
@@ -127,14 +125,10 @@ async function validateCoinstats(
   }
 }
 
-// 工厂(ADR 0009 两层构造):type 绑定 connectionId,全局 apiKey 为实例化参数,共享上面实现。
-export function makeCoinstats(
-  accountType: AccountType,
-  connectionId: string,
-  apiKey?: string,
-): BalanceProvider {
+// 工厂(ADR 0009 两层构造):connectionId 绑定后端,全局 apiKey 为实例化参数,共享上面实现。
+// provider 不带身份 —— 服务哪个 type 由下面各 entry 的 manifest.accountType 声明。
+export function makeCoinstats(connectionId: string, apiKey?: string): BalanceProvider {
   return defineProvider({
-    accountType,
     async fetchBalances(ctx: CoinstatsCtx) {
       return fetchCoinstats(connectionId, ctx, apiKey);
     },
@@ -143,11 +137,6 @@ export function makeCoinstats(
     },
   });
 }
-
-// 方案 A 摊平(无 key 单例:仅供测试/静态默认 registry;运行时经 entries.create 注入 key)。
-export const providers: BalanceProvider[] = CONNECTION_IDS.map((c) =>
-  makeCoinstats(c.accountType, c.connectionId),
-);
 
 // 自描述清单(ADR 0009):每个 type 一个 entry。id 由生态段派生(onchain_solana → solana-coinstats),
 // 跨版本稳定。三个 entry 共享同一个 env 默认 key 槽(COINSTATS_API_KEY)。
@@ -162,5 +151,5 @@ export const entries: ProviderEntry[] = CONNECTION_IDS.map((c) => ({
     envDefaults: { apiKey: COINSTATS_API_KEY },
     defaultEnabled: true,
   },
-  create: (settings) => makeCoinstats(c.accountType, c.connectionId, settings?.apiKey),
+  create: (settings) => makeCoinstats(c.connectionId, settings?.apiKey),
 }));

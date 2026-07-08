@@ -7,7 +7,7 @@ import {
   validateCredentials as runValidators,
 } from "@folio/balances-basic";
 import { ACCOUNT_TYPE_SPECS } from "@folio/provider-registry";
-import { buildRegistry, getProvider, type ProviderRegistry, registry } from "./registry";
+import { getProvider, type ProviderRegistry, registry } from "./registry";
 
 // ProviderInput 的可序列化投影(剥掉不可序列化的 validator,客户端只需 key+type+label 渲染)。
 export interface InputSpec {
@@ -29,8 +29,8 @@ export interface CreateBalancesConfig {
   // 生效 provider 解析(app 注入:覆盖表 + settings 分层 + 工厂实例化,见 ADR 0009)。
   // 返回 undefined = 该 type 未启用/未配置。缺省 = 静态默认 registry(manifest 默认、无 settings)。
   resolveProvider?: (type: AccountType) => Promise<BalanceProvider | undefined>;
-  // 测试可注入 provider 列表覆盖默认 registry。
-  providers?: BalanceProvider[];
+  // 测试可注入 type→provider 映射覆盖默认 registry。
+  registry?: ProviderRegistry;
 }
 
 // 余额侧领域实例。账户输入 schema 归 accountType 数据约束层(ACCOUNT_TYPE_SPECS,ADR 0009 层1);
@@ -60,7 +60,7 @@ function inputsOf(type: AccountType) {
 }
 
 export function createBalances(config: CreateBalancesConfig = {}): Balances {
-  const reg: ProviderRegistry = config.providers ? buildRegistry(config.providers) : registry;
+  const reg: ProviderRegistry = config.registry ?? registry;
   const active = async (type: AccountType): Promise<BalanceProvider> => {
     if (config.resolveProvider) {
       const provider = await config.resolveProvider(type);

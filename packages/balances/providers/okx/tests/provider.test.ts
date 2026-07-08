@@ -1,6 +1,6 @@
 import type { FetchContext } from "@folio/balances-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { okxProvider, parseBalances, providers } from "../src";
+import { entries, okxProvider, parseBalances } from "../src";
 import balance from "./fixtures/balance.json";
 import expected from "./fixtures/expected-balances.json";
 
@@ -56,9 +56,8 @@ describe("okxProvider.fetchBalances", () => {
     await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
   });
 
-  it("serves exchange_okx, exported in providers", () => {
-    expect(okxProvider.accountType).toBe("exchange_okx");
-    expect(providers).toContain(okxProvider);
+  it("entry registers accountType exchange_okx", () => {
+    expect(entries.map((e) => e.manifest.accountType)).toContain("exchange_okx");
   });
 });
 

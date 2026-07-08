@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type { Account, AccountType, Balance } from "./types";
+import type { Account, Balance } from "./types";
 
 // 账户输入的【自描述声明】。**归属 accountType 数据约束层**(ADR 0009 两层:见 @folio/provider-registry
 // ACCOUNT_TYPE_SPECS),不再挂在 provider 上 —— 一个类型的账户长什么样与用哪个 provider 取数无关。
@@ -26,10 +26,9 @@ export interface FetchContext<C = Record<string, unknown>> {
   creds: C;
 }
 
-// provider 层(ADR 0009):只管自己的取数 + 两个 liveness 校验。账户输入 schema 归 accountType 层。
+// provider 层(ADR 0009):纯行为 —— 只管取数 + 两个 liveness 校验,不带身份。
+// 注册进哪个 AccountType 由 ProviderManifest.accountType 声明(唯一事实源),provider 实现不再重复。
 export interface BalanceProvider {
-  // 注册进哪个 AccountType —— registry 据此分桶组装。
-  readonly accountType: AccountType;
   /** 拉取该账户当前全部余额(账户级 creds 走 ctx.creds;全局 config 已在实例化时注入)。失败抛 ProviderError。 */
   fetchBalances(ctx: FetchContext): Promise<Balance[]>;
   /** 账户 liveness(输入 5):加账户时校验这份账户 creds 经本 provider 能否取到数。 */

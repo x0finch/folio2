@@ -1,6 +1,5 @@
 import {
   type Balance,
-  type BalanceProvider,
   defineProvider,
   type FetchContext,
   hmacSha256,
@@ -112,8 +111,6 @@ async function readBody(res: Response): Promise<OkxBalanceResponse> {
 type OkxCreds = { apiKey: string; secret: string; passphrase: string };
 
 export const okxProvider = defineProvider({
-  accountType: "exchange_okx",
-
   async fetchBalances(ctx: FetchContext<OkxCreds>): Promise<Balance[]> {
     const res = await okxGet(BALANCE_PATH, ctx.creds);
     ensureHttpOk(res);
@@ -134,8 +131,6 @@ export const okxProvider = defineProvider({
     }
   },
 });
-
-export const providers: BalanceProvider[] = [okxProvider];
 
 // 自描述清单(ADR 0009)。凭据是每账户 API key(inputs),无全局设置。
 export const entries: ProviderEntry[] = [

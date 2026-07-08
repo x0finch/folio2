@@ -137,9 +137,12 @@ describe("ALL_ENTRIES(真实组装)", () => {
     );
   });
 
-  it("manifest 与工厂产物的 accountType 一致", () => {
+  it("每个 entry 的工厂产出可用的 provider(accountType 只在 manifest,provider 无身份)", () => {
     for (const e of ALL_ENTRIES) {
-      expect(e.create().accountType).toBe(e.manifest.accountType);
+      const p = e.create();
+      expect(typeof p.fetchBalances).toBe("function");
+      expect(typeof p.validateAccount).toBe("function");
+      expect("accountType" in p).toBe(false);
     }
   });
 });

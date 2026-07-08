@@ -1,6 +1,5 @@
 import {
   type Balance,
-  type BalanceProvider,
   defineProvider,
   type FetchContext,
   hmacSha256,
@@ -98,8 +97,6 @@ async function signedGet(
 type CexCreds = { apiKey: string; secret: string };
 
 export const binanceProvider = defineProvider({
-  accountType: "exchange_binance",
-
   async fetchBalances(ctx: FetchContext<CexCreds>): Promise<Balance[]> {
     const { apiKey, secret } = ctx.creds;
     const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;
@@ -139,8 +136,6 @@ export const binanceProvider = defineProvider({
     }
   },
 });
-
-export const providers: BalanceProvider[] = [binanceProvider];
 
 // 自描述清单(ADR 0009)。凭据是每账户 API key(inputs),无全局设置。
 export const entries: ProviderEntry[] = [
