@@ -3,7 +3,6 @@ import {
   type BalanceProvider,
   buildTokenKey,
   type DefiMeta,
-  defineProvider,
   type FetchContext,
   type ProviderEntry,
   ProviderError,
@@ -195,7 +194,7 @@ type EvmCreds = { identifier: string };
 
 // 工厂(ADR 0009 两层构造):全局 apiKey 是实例化参数;账户级输入(地址)走 ctx.creds。
 export function makeZerion(key?: string): BalanceProvider {
-  return defineProvider({
+  return {
     async fetchBalances(ctx: FetchContext<EvmCreds>): Promise<Balance[]> {
       const apiKey = requireApiKey(key);
       // 链映射与 positions 并行取;链映射拿不到会抛错(Promise.all 一并 reject)→ 整轮同步失败重试,
@@ -234,7 +233,7 @@ export function makeZerion(key?: string): BalanceProvider {
         return false;
       }
     },
-  });
+  };
 }
 
 // 无 key 单例:仅供测试/静态默认 registry;运行时经 entries.create 注入 key。

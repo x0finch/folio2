@@ -1,7 +1,7 @@
 import {
   type Balance,
+  type BalanceProvider,
   buildTokenKey,
-  defineProvider,
   type FetchContext,
   type ProviderEntry,
 } from "@folio/balances-basic";
@@ -20,7 +20,7 @@ type ManualCreds = {
   fixed?: string;
 };
 
-export const customProvider = defineProvider({
+export const customProvider: BalanceProvider = {
   async fetchBalances(ctx: FetchContext<ManualCreds>): Promise<Balance[]> {
     const { symbol, amount, unitPrice, identifier, fixed } = ctx.creds;
     return [
@@ -43,7 +43,7 @@ export const customProvider = defineProvider({
   async validateAccount(): Promise<boolean> {
     return true;
   },
-});
+};
 
 // 自描述清单(ADR 0009)。手动资产无外部数据源,恒可用。
 export const entries: ProviderEntry[] = [

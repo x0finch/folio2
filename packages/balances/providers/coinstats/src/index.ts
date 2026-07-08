@@ -2,7 +2,6 @@ import {
   type Balance,
   type BalanceProvider,
   buildTokenKey,
-  defineProvider,
   type FetchContext,
   type ProviderEntry,
   ProviderError,
@@ -128,14 +127,14 @@ async function validateCoinstats(
 // 工厂(ADR 0009 两层构造):connectionId 绑定后端,全局 apiKey 为实例化参数,共享上面实现。
 // provider 不带身份 —— 服务哪个 type 由下面各 entry 的 manifest.accountType 声明。
 export function makeCoinstats(connectionId: string, apiKey?: string): BalanceProvider {
-  return defineProvider({
+  return {
     async fetchBalances(ctx: CoinstatsCtx) {
       return fetchCoinstats(connectionId, ctx, apiKey);
     },
     async validateAccount(ctx: CoinstatsCtx) {
       return validateCoinstats(connectionId, ctx, apiKey);
     },
-  });
+  };
 }
 
 // 自描述清单(ADR 0009):每个 type 一个 entry。id 由生态段派生(onchain_solana → solana-coinstats),

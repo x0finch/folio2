@@ -1,10 +1,10 @@
 import {
   type Balance,
+  type BalanceProvider,
   type BitcoinAddress,
   type BitcoinMeta,
   type BitcoinReceive,
   buildTokenKey,
-  defineProvider,
   type FetchContext,
   type ProviderEntry,
   ProviderError,
@@ -137,7 +137,7 @@ async function fetchXpub(client: BlockbookClient, ext: string, scriptType: strin
 // 账户 creds 形状(schema 归 accountType 层;scriptType 为可选枚举)。
 type BtcCreds = { identifier: string; scriptType?: ScriptType };
 
-export const bitcoinProvider = defineProvider({
+export const bitcoinProvider: BalanceProvider = {
   async fetchBalances(ctx: FetchContext<BtcCreds>): Promise<Balance[]> {
     const id = ctx.creds.identifier;
     const client = createBlockbookClient();
@@ -167,7 +167,7 @@ export const bitcoinProvider = defineProvider({
       return false;
     }
   },
-});
+};
 
 // 自描述清单(ADR 0009)。公共 Blockbook 实例,无全局设置,开箱即用。
 export const entries: ProviderEntry[] = [

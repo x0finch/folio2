@@ -39,8 +39,3 @@ export interface BalanceProvider {
    */
   validateConfig?(): Promise<boolean>;
 }
-
-// 定义 provider(薄标识包装,便于将来加统一处理)。provider 各自标注方法 ctx 的 creds 类型。
-export function defineProvider(provider: BalanceProvider): BalanceProvider {
-  return provider;
-}

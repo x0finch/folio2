@@ -21,7 +21,6 @@ export type {
   ProviderInput,
   ProviderInputType,
 } from "./provider";
-export { defineProvider } from "./provider";
 export type {
   Account,
   AccountType,

@@ -1,6 +1,6 @@
 import {
   type Balance,
-  defineProvider,
+  type BalanceProvider,
   type FetchContext,
   type PerpEquityMeta,
   type PerpPositionMeta,
@@ -123,7 +123,7 @@ function ensureOk(res: Response): void {
   throw new ProviderError("UPSTREAM_ERROR", `hyperliquid upstream error (${res.status})`);
 }
 
-export const hyperliquidProvider = defineProvider({
+export const hyperliquidProvider: BalanceProvider = {
   async fetchBalances(ctx: FetchContext<{ identifier: string }>): Promise<Balance[]> {
     const res = await infoPost(ctx.creds.identifier);
     ensureOk(res);
@@ -146,7 +146,7 @@ export const hyperliquidProvider = defineProvider({
       return false;
     }
   },
-});
+};
 
 // 自描述清单(ADR 0009)。公开 info API,无全局设置,开箱即用。
 export const entries: ProviderEntry[] = [
