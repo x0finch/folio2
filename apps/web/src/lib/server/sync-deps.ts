@@ -9,6 +9,7 @@ import { balances } from "./balances";
 import { db } from "./db";
 import { warmFx } from "./fx";
 import { warmPlatformsForUser } from "./platforms";
+import { resolveProvider } from "./provider-config";
 import { buildTokens, warmTokens } from "./tokens";
 
 // provider 自带代币元信息的采集(canonical P1):合约形 tokenKey 的行 → ProviderAsset,
@@ -67,6 +68,8 @@ export function buildSyncDeps(): SyncDeps {
     // 取余额:缺凭据判定 + 解密(业务层 creds,靠 credentialSpecs 的 type 驱动)→ balances.fetchBalances(明文)。
     // 收窄全局 key / 跑 validator / 调 provider 在 balances 内;SECRETS_KEY 只在本层(app)见。
     fetchBalances: async (account, stored) => {
+      // 类型无生效 provider(已关闭/未配置,ADR 0009)→ 跳过态(编排层明确记录,不重试)。
+      if (!(await resolveProvider(account.type))) return { status: "provider-disabled" };
       const specs = balances.credentialSpecs()[account.type] ?? [];
       if (!isComplete(specs, stored)) return { status: "needs-credentials" };
       const plain = await openCreds(specs, stored, env.SECRETS_KEY);

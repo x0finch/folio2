@@ -112,6 +112,23 @@ describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
     expect(writes).toHaveLength(0);
   });
 
+  it("provider-disabled(类型关闭/未配置,ADR 0009)→ 跳过、明确记录、不重试不写快照", async () => {
+    let calls = 0;
+    const { log, entries } = capturingLogger();
+    const { deps, writes } = makeDeps([account({ id: "d" })], {
+      log,
+      fetchBalances: async () => {
+        calls += 1;
+        return { status: "provider-disabled" };
+      },
+    });
+    const { results } = await syncUser(deps, "u1");
+    expect(results[0]).toMatchObject({ accountId: "d", ok: false, skipped: true });
+    expect(writes).toHaveLength(0);
+    expect(calls).toBe(1); // 跳过态不算失败 → 无重试
+    expect(entries.some((e) => e.msg.includes("provider disabled"))).toBe(true);
+  });
+
   it("坏账户 ok:false 不阻断好账户;syncUser 不抛;只为好账户写快照", async () => {
     const good = account({ id: "good" });
     const bad = account({ id: "bad" });

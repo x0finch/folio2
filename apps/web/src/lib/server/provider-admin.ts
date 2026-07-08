@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { validateCredentials } from "@folio/balances";
+import { type AccountType, validateCredentials } from "@folio/balances";
 import { createProviderConfigStore } from "@folio/db";
 import { ALL_ENTRIES, buildCandidates } from "@folio/provider-registry";
 import { getLogger } from "@logtape/logtape";
@@ -8,6 +8,7 @@ import { z } from "zod";
 import { sealCreds } from "../creds";
 import { type AccountTypeStatusView, buildProviderStatusView } from "../provider-status";
 import { requireAuth } from "../require-auth";
+import { db } from "./db";
 
 const log = getLogger(["folio", "web", "providers"]);
 
@@ -41,9 +42,50 @@ async function sealSettings(providerId: string, settings: Record<string, string>
 
 export const listProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(async (): Promise<AccountTypeStatusView[]> => {
-    const rows = await createProviderConfigStore(env).getAll();
-    return buildProviderStatusView(candidates, rows, envHas);
+  .handler(async ({ context }): Promise<AccountTypeStatusView[]> => {
+    const [rows, accounts] = await Promise.all([
+      createProviderConfigStore(env).getAll(),
+      db.listAccountsByUser(context.userId),
+    ]);
+    // 每类型未归档账户数(关闭确认提示用)。
+    const counts = new Map<AccountType, number>();
+    for (const a of accounts) {
+      if (a.archivedAt != null) continue;
+      const type = a.type as AccountType;
+      counts.set(type, (counts.get(type) ?? 0) + 1);
+    }
+    return buildProviderStatusView(candidates, rows, envHas, counts);
+  });
+
+// 关闭账户类型(ADR 0009 ④):停用该 type 的生效 provider + 归档其全部未归档账户(停止同步)。
+// UI 侧先经 accountCount 提醒确认;归档可逆(账户页可取消归档,但类型未启用时同步仍跳过)。
+export const disableAccountType = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(z.object({ accountType: z.string().min(1) }))
+  .handler(async ({ data, context }) => {
+    const list = [...candidates.entries()].find(([t]) => t === data.accountType)?.[1];
+    if (!list) throw new Error(`Unknown account type: ${data.accountType}`);
+    const store = createProviderConfigStore(env);
+    const rows = await store.getAll();
+    const overrides = new Map(rows.map((r) => [r.providerId, r.enabled]));
+    // 停用生效者:true 覆盖行或 manifest 默认者 → 写 enabled=false(覆盖表语义,可回滚)。
+    const selected = list.find((e) => overrides.get(e.manifest.id) === true);
+    const active =
+      selected ??
+      list.find((e) => e.manifest.defaultEnabled && overrides.get(e.manifest.id) !== false);
+    if (active) await store.disable(active.manifest.id, data.accountType);
+    // 归档该类型全部未归档账户(逐个;单用户量级)。
+    const accounts = await db.listAccountsByUser(context.userId);
+    const targets = accounts.filter((a) => a.type === data.accountType && a.archivedAt == null);
+    for (const a of targets) {
+      await db.setArchived(context.userId, a.id, true);
+    }
+    log.info("account type disabled", {
+      type: data.accountType,
+      providerId: active?.manifest.id,
+      archived: targets.length,
+    });
+    return { archived: targets.length };
   });
 
 // 启用 = 该 type 的选中(store.enable 原子退位同类其它 true 行)。settings 可选:

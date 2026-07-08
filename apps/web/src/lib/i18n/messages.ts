@@ -208,6 +208,10 @@ export const en = {
     cancel: "Cancel",
     saved: "Saved",
     saveFailed: "Save failed",
+    closeType: "Disable this type",
+    closeConfirm:
+      "This archives {count} account(s) of this type and stops their sync. Accounts can be unarchived later.",
+    closeDone: "Type disabled",
     export: "Export",
     exportHint:
       "Download all your data (accounts, groups, snapshots) as a file. API keys/secrets are never included.",
@@ -450,6 +454,9 @@ export const zh: Messages = {
     cancel: "取消",
     saved: "已保存",
     saveFailed: "保存失败",
+    closeType: "关闭该类型",
+    closeConfirm: "将归档该类型下 {count} 个账户并停止其同步。归档可在账户页恢复。",
+    closeDone: "已关闭",
     export: "导出",
     exportHint: "把你的全部数据(账户、分组、快照)导出为文件。API key/secret 绝不包含在内。",
     exportData: "导出数据",

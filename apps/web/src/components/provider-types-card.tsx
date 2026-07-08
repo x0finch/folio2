@@ -21,7 +21,7 @@ import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { TYPE_GROUPS, typeLabel } from "../lib/account-types";
 import type { AccountTypeStatusView, ProviderCandidateView } from "../lib/provider-status";
-import { enableProvider } from "../lib/server/provider-admin";
+import { disableAccountType, enableProvider } from "../lib/server/provider-admin";
 
 // 账户类型管理(ADR 0009 ③):每类型一行(三态)+ 启用/配置抽屉(选 provider、默认/自定义 key)。
 // secret 只进不出:表单值发 server fn 加密落库,永不回显(占位提示"已存自定义")。
@@ -97,6 +97,21 @@ function EnableDrawer({ status, onClose }: { status: AccountTypeStatusView; onCl
   );
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+
+  async function onDisable() {
+    setBusy(true);
+    try {
+      await disableAccountType({ data: { accountType: status.accountType } });
+      toast.success(t("closeDone"));
+      router.invalidate();
+      onClose();
+    } catch {
+      toast.error(t("saveFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onSave() {
     if (!candidate) return;
@@ -171,6 +186,37 @@ function EnableDrawer({ status, onClose }: { status: AccountTypeStatusView; onCl
           {t("enable")}
         </Button>
       </div>
+
+      {/* 关闭类型(仅已启用时可见):有账户 → 行内确认(归档 + 停同步);无账户 → 直接关。 */}
+      {status.activeId && (
+        <div className="mt-6 border-t border-border pt-4">
+          {confirmClose ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm text-destructive">
+                {t("closeConfirm", { count: status.accountCount })}
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="outline" onClick={() => setConfirmClose(false)}>
+                  {t("cancel")}
+                </Button>
+                <Button size="sm" variant="destructive" onClick={onDisable} disabled={busy}>
+                  {t("closeType")}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-destructive"
+              onClick={() => (status.accountCount > 0 ? setConfirmClose(true) : onDisable())}
+              disabled={busy}
+            >
+              {t("closeType")}
+            </Button>
+          )}
+        </div>
+      )}
     </Drawer>
   );
 }

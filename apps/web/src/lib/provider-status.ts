@@ -18,6 +18,7 @@ export interface AccountTypeStatusView {
   accountType: AccountType;
   activeId: string | null; // 生效 provider(resolveActive 语义)
   configured: boolean; // 生效且每个设置字段可解析(自定义 ?? env 默认)→ 真可用
+  accountCount: number; // 该类型下未归档账户数(关闭确认提示用)
   candidates: ProviderCandidateView[];
 }
 
@@ -38,6 +39,7 @@ export function buildProviderStatusView(
   candidates: ReadonlyMap<AccountType, ProviderEntry[]>,
   rows: readonly ProviderConfigRow[],
   envPresence: (envName: string) => boolean,
+  accountCounts: ReadonlyMap<AccountType, number> = new Map(),
 ): AccountTypeStatusView[] {
   const rowById = new Map(rows.map((r) => [r.providerId, r]));
   const overrides = new Map(rows.map((r) => [r.providerId, r.enabled]));
@@ -80,7 +82,13 @@ export function buildProviderStatusView(
         return envName ? envPresence(envName) : false;
       }) &&
       !!activeView;
-    out.push({ accountType, activeId, configured, candidates: views });
+    out.push({
+      accountType,
+      activeId,
+      configured,
+      accountCount: accountCounts.get(accountType) ?? 0,
+      candidates: views,
+    });
   }
   return out;
 }

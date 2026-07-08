@@ -1,11 +1,13 @@
 import { type Account, type AccountType, type Balance, ProviderError } from "@folio/balances";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 
-// 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
-// 由 app 注入的 fetchBalances 产出(内部先判 isComplete 再解密 + 调 balances.fetchBalances)。
+// 取余额结果:缺凭据(导入待补录)→ needs-credentials;类型无生效 provider(关闭/未配置,ADR 0009)
+// → provider-disabled;两者都是跳过、不算失败不重试。否则 ok{balances,totalUsd}。
+// 由 app 注入的 fetchBalances 产出(内部先判 provider 生效 + isComplete 再解密 + 调 balances.fetchBalances)。
 export type FetchOutcome =
   | { status: "ok"; balances: Balance[]; totalUsd: number }
-  | { status: "needs-credentials" };
+  | { status: "needs-credentials" }
+  | { status: "provider-disabled" };
 
 // 退避重试参数(原则 #8:不硬编码散落)。
 const RETRY_MAX_ATTEMPTS = 3; // 总尝试次数(1 + 2 重试)
@@ -156,6 +158,11 @@ export async function syncAccount(
     // 缺凭据态(导入待补录)→ 跳过,不算失败,补录后下次纳入(见 P6.6.1)。
     if (outcome.status === "needs-credentials") {
       log.warning("account sync skipped: needs credentials", ctxFields);
+      return { accountId: account.id, ok: false, skipped: true };
+    }
+    // 类型无生效 provider(已关闭/未配置,ADR 0009)→ 跳过、明确记录,不算失败不重试。
+    if (outcome.status === "provider-disabled") {
+      log.warning("account sync skipped: provider disabled for type", ctxFields);
       return { accountId: account.id, ok: false, skipped: true };
     }
     // 重估(P7.4.2):manual 用市场价改 usdValue,再重算 totalUsd。best-effort —— 失败保留 provider 原值。
