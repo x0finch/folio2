@@ -1,4 +1,4 @@
-import type { BitcoinMeta } from "@folio/balances";
+import type { UtxoMeta } from "@folio/connectors";
 import { toast } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import {
@@ -177,7 +177,7 @@ function CopyableAddress({ address }: { address: string }) {
 }
 
 // Bitcoin 明细:未确认额 + xpub 派生分布(仅非零)+ 收款地址指引(上次用过 / 下次可用)+ 截断提示。
-function BitcoinCards({ meta }: { meta: BitcoinMeta }) {
+function BitcoinCards({ meta }: { meta: UtxoMeta }) {
   const t = useTranslations("Overview");
   const chainLabel = (c: "receive" | "change") =>
     c === "receive" ? t("btcReceiveChain") : t("btcChangeChain");
@@ -248,7 +248,7 @@ export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[]
   return (
     <div className="flex flex-col gap-6">
       {sections.spot.length > 0 && <SpotCards rows={sections.spot} />}
-      {sections.bitcoin && <BitcoinCards meta={sections.bitcoin} />}
+      {sections.utxo && <BitcoinCards meta={sections.utxo} />}
       {sections.defi.length > 0 && <DefiCards groups={sections.defi} />}
       {sections.perp && <PerpCards view={sections.perp} />}
     </div>

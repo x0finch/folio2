@@ -1,4 +1,5 @@
 import type { AssetRef, EnrichedAsset } from "@folio/tokens";
+import { isFungible, viewKind } from "./balance-kind";
 import { tokenLogoUrl } from "./logo";
 
 // 纯逻辑(无 server-only import → 可单测)。把一笔余额(快照行形状)桥接到代币参考层:
@@ -18,10 +19,11 @@ export interface TokenEnrichment {
   change24h?: number; // 百分比
 }
 
-// 只对同质现货解析:spot + manual(按 symbol/标识);defi/perp 不解析(价值/展示走 typed meta)。
+// 只对同质持仓解析:现货 + UTXO(BTC)(按 symbol/标识);defi/perp 不解析(价值/展示走 typed meta)。
+// kind 走 viewKind 归一(并存期兼容遗留 manual→spot、bitcoin→utxo)。
 // 解析直接用持久化的 tokenKey(provider 构造,含 chainId → 懒解析更准);无则仅 symbol。
 export function balanceToAssetRef(b: BalanceLike): AssetRef | null {
-  if (b.kind !== "spot" && b.kind !== "manual") return null;
+  if (!isFungible(viewKind(b))) return null;
   return { symbol: b.symbol, tokenKey: b.tokenKey ?? undefined };
 }
 

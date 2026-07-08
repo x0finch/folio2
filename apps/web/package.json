@@ -19,6 +19,7 @@
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.26.0",
     "@folio/balances": "workspace:*",
+    "@folio/connectors": "workspace:*",
     "@folio/db": "workspace:*",
     "@folio/fx": "workspace:*",
     "@folio/platforms": "workspace:*",

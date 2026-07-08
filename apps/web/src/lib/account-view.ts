@@ -1,9 +1,17 @@
-import type { BitcoinMeta, DefiMeta } from "@folio/balances";
+import {
+  DefiMeta,
+  type DefiMeta as DefiMetaT,
+  UtxoMeta,
+  type UtxoMeta as UtxoMetaT,
+} from "@folio/connectors";
+import { viewKind } from "./balance-kind";
 import { type PerpView, toPerpView } from "./perp";
 
 // 纯逻辑(无 server-only import → 可单测)。把一个账户的余额行按 kind 拆成展示分区:
-// 现货/手动 → 一张表;DeFi → 按 protocol 分组;永续 → 复用 toPerpView。
-// 卡片净值仍 = 账户 totalUsd(净值不变量,见 @folio/balances)。这里只管"怎么分区展示"。
+// 现货/UTXO → 一张表;DeFi → 按 protocol 分组;永续 → 复用 toPerpView。
+// 卡片净值仍 = 账户 totalUsd(净值不变量,见 ADR 0009)。这里只管"怎么分区展示"。
+// kind 走 viewKind 归一(并存期兼容遗留 kind:manual→spot、perp 靠 role、bitcoin→utxo);
+// meta 用 @folio/connectors 的 zod schema safeParse(替代旧 `as` 强转)。
 
 export interface OverviewBalance {
   id: string;
@@ -45,32 +53,31 @@ export interface AccountSections {
   spot: SpotRow[];
   defi: DefiGroup[];
   perp: PerpView | null; // 无永续行 → null
-  bitcoin: BitcoinMeta | null; // BTC 未确认/分布/收款指引(无可展示则 null)
+  utxo: UtxoMetaT | null; // BTC 未确认/分布/收款指引(无可展示则 null)
 }
 
-function parseDefiMeta(metaJson: string | null): DefiMeta {
+function parseDefiMeta(metaJson: string | null): DefiMetaT {
   if (!metaJson) return {};
   try {
-    const m = JSON.parse(metaJson);
-    return m && typeof m === "object" ? (m as DefiMeta) : {};
+    const r = DefiMeta.safeParse(JSON.parse(metaJson));
+    return r.success ? r.data : {};
   } catch {
     return {};
   }
 }
 
-function parseBitcoinMeta(metaJson: string | null): BitcoinMeta | null {
+function parseUtxoMeta(metaJson: string | null): UtxoMetaT | null {
   if (!metaJson) return null;
   try {
-    const m = JSON.parse(metaJson);
-    if (!m || typeof m !== "object" || typeof m.pendingSats !== "number") return null;
-    return m as BitcoinMeta;
+    const r = UtxoMeta.safeParse(JSON.parse(metaJson));
+    return r.success ? r.data : null;
   } catch {
     return null;
   }
 }
 
-// bitcoin 余额:tokenKey chain:bitcoin/native:btc(provider 产)。有内容可展示(未确认/分布/收款)才回。
-function hasBitcoinDetail(m: BitcoinMeta): boolean {
+// 有内容可展示(未确认/分布/收款)才回。
+function hasUtxoDetail(m: UtxoMetaT): boolean {
   return (
     m.pendingSats !== 0 ||
     Boolean(m.addresses?.length) ||
@@ -86,17 +93,18 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
   const perpRows: OverviewBalance[] = [];
   // 保序分组:首次出现的 protocol 顺序即展示顺序。
   const defiByProtocol = new Map<string, DefiRow[]>();
-  let bitcoin: BitcoinMeta | null = null;
+  let utxo: UtxoMetaT | null = null;
 
   for (const b of balances) {
-    // BTC(chain:bitcoin)行:仍进现货表(amount+value),额外抽出 meta 供 Bitcoin 明细分区。
-    if (b.tokenKey?.startsWith("chain:bitcoin")) {
-      const m = parseBitcoinMeta(b.metaJson);
-      if (m && hasBitcoinDetail(m)) bitcoin = m;
+    const vk = viewKind(b);
+    if (vk === "utxo") {
+      // UTXO(BTC)行:进现货表(amount+value),额外抽 meta 供明细分区。
+      const m = parseUtxoMeta(b.metaJson);
+      if (m && hasUtxoDetail(m)) utxo = m;
     }
-    if (b.kind === "perp") {
+    if (vk === "perp_equity" || vk === "perp_position") {
       perpRows.push(b);
-    } else if (b.kind === "defi") {
+    } else if (vk === "defi") {
       const meta = parseDefiMeta(b.metaJson);
       const protocol = meta.protocol ?? DEFI_FALLBACK_PROTOCOL;
       const row: DefiRow = {
@@ -110,7 +118,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
       if (group) group.push(row);
       else defiByProtocol.set(protocol, [row]);
     } else {
-      // spot / manual:统一现货表(带上富化字段,缺则 undefined)
+      // spot / utxo:统一现货表(带上富化字段,缺则 undefined)
       spot.push({
         id: b.id,
         symbol: b.symbol,
@@ -127,5 +135,5 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
   const defi: DefiGroup[] = [...defiByProtocol].map(([protocol, rows]) => ({ protocol, rows }));
   const perp = perpRows.length > 0 ? toPerpView(perpRows) : null;
 
-  return { spot, defi, perp, bitcoin };
+  return { spot, defi, perp, utxo };
 }

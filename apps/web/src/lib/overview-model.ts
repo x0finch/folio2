@@ -1,8 +1,10 @@
+import { PerpEquityMeta } from "@folio/connectors";
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { Platforms } from "@folio/platforms";
 import type { AssetRef, Tokens } from "@folio/tokens";
 import { type OverviewBalance, toAccountSections } from "./account-view";
 import { type AggInput, buildCanonicalHoldings } from "./aggregate";
+import { isFungible, viewKind } from "./balance-kind";
 import { platformLogoUrl, tokenLogoUrl } from "./logo";
 
 // 总览读模型(纯 —— 依赖注入,无 cloudflare env,可脱离 server fn 单测)。
@@ -14,14 +16,15 @@ export interface OverviewDeps {
   platforms: Platforms; // .resolve:platform key → name+logo(含兜底)
 }
 
-// 从 metaJson 读 perp role(仅判定 equity/position,不做完整窄化)。
-function perpRole(metaJson: string | null): "equity" | "position" | null {
-  if (!metaJson) return null;
+// perp 权益行只有 meta 可解析才计入聚合 —— 与 toPerpView 的 safeParse 门一致:
+// 脏/损坏的遗留 perp 行在明细卡与总额两处都排除,避免"总额算它、明细不显"的不一致
+//(承接旧 `perpRole==="equity"` 守卫,守住"单账户脏数据不拖垮总览")。
+function isPerpEquity(metaJson: string | null): boolean {
+  if (!metaJson) return false;
   try {
-    const r = (JSON.parse(metaJson) as { role?: unknown }).role;
-    return r === "equity" || r === "position" ? r : null;
+    return PerpEquityMeta.safeParse(JSON.parse(metaJson)).success;
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -70,14 +73,18 @@ export async function buildOverview(
   const eligible: Elig[] = [];
   for (const account of accounts) {
     for (const b of balancesOf(account.id)) {
-      if (b.kind === "spot" || b.kind === "manual") {
+      const vk = viewKind(b);
+      if (isFungible(vk)) {
+        // 现货 / UTXO(BTC)→ 进跨账户聚合
         eligible.push({
           account,
           b,
           asset: { symbol: b.symbol, tokenKey: b.tokenKey ?? undefined },
           margin: false,
         });
-      } else if (b.kind === "perp" && perpRole(b.metaJson) === "equity") {
+      } else if (vk === "perp_equity" && isPerpEquity(b.metaJson)) {
+        // perp 权益(账户净值载体)→ 进聚合但标 margin;仓位行(perp_position)/ defi 不进。
+        // meta 不可解析(脏/损坏遗留行)则排除,与明细卡一致。
         eligible.push({ account, b, asset: { symbol: b.symbol }, margin: true });
       }
     }
@@ -89,7 +96,7 @@ export async function buildOverview(
     symbol: b.symbol,
     amount: b.amount,
     value: b.usdValue,
-    kind: b.kind,
+    kind: viewKind(b), // 归一到 5-kind(并存期兼容遗留)
     tokenKey: b.tokenKey,
     isMargin: margin,
     account: { id: account.id, label: account.label, type: account.type, network: account.network },

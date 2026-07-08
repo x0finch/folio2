@@ -128,4 +128,35 @@ describe("buildOverview", () => {
     expect(view.sections).toHaveLength(1); // defi 进次级分区
     expect(view.defiSubtotal).toBe(10);
   });
+
+  it("合法遗留 perp 权益行计入聚合(margin 持有点)", async () => {
+    const accounts = [account("h", "Hyper", "perp_hyperliquid")];
+    const meta = JSON.stringify({
+      role: "equity",
+      withdrawable: 900,
+      totalMarginUsed: 100,
+      totalNtlPos: 5000,
+    });
+    const byAccount = new Map([
+      ["h", snap("h", 1000, [bal({ kind: "perp", amount: 1000, usdValue: 1000, metaJson: meta })])],
+    ]);
+    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    expect(view.holdings).toHaveLength(1);
+    expect(view.holdings[0].totalValue).toBe(1000);
+    expect(view.holdings[0].sources[0].isMargin).toBe(true);
+  });
+
+  it("脏 metaJson 的遗留 perp 权益行不计入聚合(与明细卡一致,不虚增总额)", async () => {
+    const accounts = [account("h", "Hyper", "perp_hyperliquid")];
+    const byAccount = new Map([
+      // 损坏 metaJson:viewKind→perp_equity,但 meta 不可解析 → 明细卡与聚合两处都排除
+      [
+        "h",
+        snap("h", 0, [bal({ kind: "perp", amount: 1000, usdValue: 1000, metaJson: "not json" })]),
+      ],
+    ]);
+    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    expect(view.holdings).toHaveLength(0);
+    expect(view.holdingsSubtotal).toBe(0);
+  });
 });
