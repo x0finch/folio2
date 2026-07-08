@@ -51,7 +51,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 100,
         value: 100,
-        kind: "manual",
+        kind: "spot", // 归一后 manual→spot(overview 用 viewKind 归一后才喂 aggregate)
         tokenKey: "coingecko:tether",
         account: manual,
         group: usdt,
@@ -95,7 +95,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 300,
         value: 300,
-        kind: "perp",
+        kind: "perp_equity",
         isMargin: true,
         account: hyper,
         group: usdc,
@@ -155,7 +155,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "ETH",
         amount: 1,
         value: 0,
-        kind: "perp",
+        kind: "perp_position",
         account: hyper,
         ref: cg("ethereum"),
       }), // 仓位:isMargin 未置

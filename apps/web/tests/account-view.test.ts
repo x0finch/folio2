@@ -20,6 +20,7 @@ describe("toAccountSections", () => {
     expect(s.spot.map((r) => r.symbol)).toEqual(["ETH", "CASH"]);
     expect(s.defi).toEqual([]);
     expect(s.perp).toBeNull();
+    expect(s.utxo).toBeNull();
   });
 
   it("groups defi rows by protocol (preserving first-seen order, with fallback)", () => {
@@ -90,7 +91,7 @@ describe("toAccountSections", () => {
   });
 
   it("handles an empty account", () => {
-    expect(toAccountSections([])).toEqual({ spot: [], defi: [], perp: null, bitcoin: null });
+    expect(toAccountSections([])).toEqual({ spot: [], defi: [], perp: null, utxo: null });
   });
 
   it("extracts Bitcoin meta (pending + xpub distribution/receive) from the BTC balance", () => {
@@ -122,9 +123,9 @@ describe("toAccountSections", () => {
     // BTC 仍进现货表
     expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
     // 明细抽出
-    expect(s.bitcoin?.pendingSats).toBe(500000);
-    expect(s.bitcoin?.addresses?.[0].address).toBe("bc1qrecv");
-    expect(s.bitcoin?.receive?.next[0]).toEqual({ index: 1, address: "bc1qnext" });
+    expect(s.utxo?.pendingSats).toBe(500000);
+    expect(s.utxo?.addresses?.[0].address).toBe("bc1qrecv");
+    expect(s.utxo?.receive?.next[0]).toEqual({ index: 1, address: "bc1qnext" });
   });
 
   it("no Bitcoin detail when meta is empty (address mode, zero pending)", () => {
@@ -138,7 +139,58 @@ describe("toAccountSections", () => {
         metaJson: JSON.stringify({ pendingSats: 0 }),
       }),
     ]);
-    expect(s.bitcoin).toBeNull();
+    expect(s.utxo).toBeNull();
     expect(s.spot).toHaveLength(1);
+  });
+
+  // —— 迁移后的新 5-kind(并存期一并支持) ——
+  it("新 kind=utxo:进现货表 + 抽出明细", () => {
+    const s = toAccountSections([
+      b({
+        id: "1",
+        symbol: "BTC",
+        kind: "utxo",
+        usdValue: 5000,
+        tokenKey: "chain:bitcoin/native:btc",
+        metaJson: JSON.stringify({ pendingSats: 12345 }),
+      }),
+    ]);
+    expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
+    expect(s.utxo?.pendingSats).toBe(12345);
+  });
+
+  it("新 kind=perp_equity/perp_position:走 perp 视图", () => {
+    const s = toAccountSections([
+      b({
+        id: "1",
+        symbol: "USDC",
+        kind: "perp_equity",
+        usdValue: 1000,
+        metaJson: JSON.stringify({ withdrawable: 900, totalMarginUsed: 100, totalNtlPos: 5000 }),
+      }),
+      b({
+        id: "2",
+        symbol: "BTC",
+        kind: "perp_position",
+        usdValue: 0,
+        metaJson: JSON.stringify({
+          side: "short",
+          entryPx: 64000,
+          positionValue: 640,
+          unrealizedPnl: 12.5,
+          liquidationPx: null,
+          marginUsed: 64,
+        }),
+      }),
+    ]);
+    expect(s.perp?.equity?.accountValue).toBe(1000);
+    expect(s.perp?.positions).toHaveLength(1);
+    expect(s.perp?.positions[0].side).toBe("short");
+    expect(s.spot).toEqual([]);
+  });
+
+  it("未知 kind 兜底为现货(不 throw)", () => {
+    const s = toAccountSections([b({ id: "1", symbol: "???", kind: "mystery", usdValue: 1 })]);
+    expect(s.spot.map((r) => r.symbol)).toEqual(["???"]);
   });
 });
