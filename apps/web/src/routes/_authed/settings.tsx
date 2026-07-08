@@ -2,18 +2,13 @@ import { Button, buttonVariants, Card, CardContent, CardHeader, CardTitle } from
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { getKeyStatus } from "../../lib/server/settings";
+import { ProviderTypesCard } from "../../components/provider-types-card";
+import { listProviderStatus } from "../../lib/server/provider-admin";
 
 export const Route = createFileRoute("/_authed/settings")({
-  loader: () => getKeyStatus(),
+  loader: () => listProviderStatus(),
   component: Settings,
 });
-
-// 全局 provider key(品牌名不翻译);env 名是 getKeyStatus 返回的 key。
-const PROVIDER_KEYS = [
-  { env: "ZERION_API_KEY", label: "Zerion (EVM)" },
-  { env: "COINSTATS_API_KEY", label: "CoinStats (Solana / Sui / Cosmos)" },
-] as const;
 
 function Settings() {
   const status = Route.useLoaderData();
@@ -22,23 +17,8 @@ function Settings() {
     <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-bold">{t("title")}</h1>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("providerKeys")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="flex flex-col gap-2">
-            {PROVIDER_KEYS.map((k) => (
-              <li key={k.env} className="flex items-center justify-between">
-                <span>{k.label}</span>
-                <span className={status[k.env] ? "text-foreground" : "text-muted-foreground"}>
-                  {status[k.env] ? t("configured") : t("notConfigured")}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
+      {/* 账户类型管理(ADR 0009):启用/配置数据源取代旧的静态 env key 自检卡。 */}
+      <ProviderTypesCard status={status} />
 
       <Card>
         <CardHeader>
