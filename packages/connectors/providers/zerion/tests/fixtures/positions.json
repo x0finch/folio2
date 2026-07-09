@@ -1,0 +1,401 @@
+{
+  "links": {
+    "self": "https://api.zerion.io/v1/wallets/0x.../positions/"
+  },
+  "data": [
+    {
+      "type": "positions",
+      "id": "eth-ethereum-asset-asset",
+      "attributes": {
+        "parent": null,
+        "protocol": null,
+        "name": "Ethereum",
+        "position_type": "wallet",
+        "quantity": {
+          "int": "2500000000000000000",
+          "decimals": 18,
+          "float": 2.5,
+          "numeric": "2.5"
+        },
+        "value": 6250.0,
+        "price": 2500.0,
+        "fungible_info": {
+          "name": "Ethereum",
+          "symbol": "ETH",
+          "flags": {
+            "verified": true
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/eth.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": null,
+              "decimals": 18
+            },
+            {
+              "chain_id": "arbitrum",
+              "address": null,
+              "decimals": 18
+            }
+          ]
+        },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
+        "updated_at": "2026-06-26T00:00:00Z"
+      },
+      "relationships": {
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
+      }
+    },
+    {
+      "type": "positions",
+      "id": "usdc-arbitrum-asset-asset",
+      "attributes": {
+        "parent": null,
+        "protocol": null,
+        "name": "USD Coin",
+        "position_type": "wallet",
+        "quantity": {
+          "int": "1500000000",
+          "decimals": 6,
+          "float": 1500.0,
+          "numeric": "1500.0"
+        },
+        "value": 1500.0,
+        "price": 1.0,
+        "fungible_info": {
+          "name": "USD Coin",
+          "symbol": "USDC",
+          "flags": {
+            "verified": true
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/usdc.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+              "decimals": 6
+            },
+            {
+              "chain_id": "arbitrum",
+              "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+              "decimals": 6
+            }
+          ]
+        },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
+        "updated_at": "2026-06-26T00:00:00Z"
+      },
+      "relationships": {
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "arbitrum"
+          }
+        }
+      }
+    },
+    {
+      "type": "positions",
+      "id": "steth-ethereum-lido-staked",
+      "attributes": {
+        "parent": null,
+        "protocol": "Lido",
+        "name": "Staked Ether",
+        "position_type": "staked",
+        "quantity": {
+          "int": "4000000000000000000",
+          "decimals": 18,
+          "float": 4.0,
+          "numeric": "4.0"
+        },
+        "value": 10000.0,
+        "price": 2500.0,
+        "fungible_info": {
+          "name": "Lido Staked Ether",
+          "symbol": "stETH",
+          "flags": {
+            "verified": true
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/steth.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xabababababababababababababababababababab",
+              "decimals": 18
+            }
+          ]
+        },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
+        "updated_at": "2026-06-26T00:00:00Z"
+      },
+      "relationships": {
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
+      }
+    },
+    {
+      "type": "positions",
+      "id": "noprice-ethereum-asset-asset",
+      "attributes": {
+        "parent": null,
+        "protocol": null,
+        "name": "Unpriced Token",
+        "position_type": "wallet",
+        "quantity": {
+          "int": "100000000000000000000",
+          "decimals": 18,
+          "float": 100.0,
+          "numeric": "100.0"
+        },
+        "value": null,
+        "price": null,
+        "fungible_info": {
+          "name": "Unpriced Token",
+          "symbol": "UNP",
+          "flags": {
+            "verified": false
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/unp.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xabababababababababababababababababababab",
+              "decimals": 18
+            }
+          ]
+        },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
+        "updated_at": "2026-06-26T00:00:00Z"
+      },
+      "relationships": {
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
+      }
+    },
+    {
+      "type": "positions",
+      "id": "hidden-ethereum-asset-asset",
+      "attributes": {
+        "parent": null,
+        "protocol": null,
+        "name": "Hidden Spam",
+        "position_type": "wallet",
+        "quantity": {
+          "int": "1",
+          "decimals": 0,
+          "float": 1.0,
+          "numeric": "1.0"
+        },
+        "value": 999999.0,
+        "price": 999999.0,
+        "fungible_info": {
+          "name": "Hidden Spam",
+          "symbol": "SPAM",
+          "flags": {
+            "verified": false
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/spam.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xabababababababababababababababababababab",
+              "decimals": 18
+            }
+          ]
+        },
+        "flags": {
+          "displayable": false,
+          "is_trash": true
+        },
+        "updated_at": "2026-06-26T00:00:00Z"
+      },
+      "relationships": {
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
+      }
+    },
+    {
+      "type": "positions",
+      "id": "dai-ethereum-aave-loan",
+      "attributes": {
+        "parent": null,
+        "protocol": "Aave",
+        "name": "Aave Variable Debt DAI",
+        "position_type": "loan",
+        "quantity": {
+          "int": "3000000000000000000000",
+          "decimals": 18,
+          "float": 3000.0,
+          "numeric": "3000.0"
+        },
+        "value": -3000.0,
+        "price": 1.0,
+        "fungible_info": {
+          "name": "Dai Stablecoin",
+          "symbol": "DAI",
+          "flags": {
+            "verified": true
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/dai.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+              "decimals": 18
+            }
+          ]
+        },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
+        "updated_at": "2026-06-26T00:00:00Z"
+      },
+      "relationships": {
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
+      }
+    },
+    {
+      "type": "positions",
+      "id": "univ3-arbitrum-uniswap-lp",
+      "attributes": {
+        "parent": null,
+        "protocol": "Uniswap V3",
+        "name": "Uniswap V3 Position",
+        "position_type": "liquidity",
+        "quantity": {
+          "int": "1",
+          "decimals": 0,
+          "float": 1.0,
+          "numeric": "1.0"
+        },
+        "value": 5000.0,
+        "price": null,
+        "fungible_info": {
+          "name": "Uniswap V3 Position",
+          "symbol": "UNI-V3",
+          "flags": {
+            "verified": true
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/univ3.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "arbitrum",
+              "address": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+              "decimals": 18
+            }
+          ]
+        },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
+        "updated_at": "2026-06-26T00:00:00Z"
+      },
+      "relationships": {
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "arbitrum"
+          }
+        }
+      }
+    },
+    {
+      "type": "positions",
+      "id": "comp-ethereum-compound-reward",
+      "attributes": {
+        "parent": null,
+        "protocol": "Compound",
+        "name": "Compound",
+        "position_type": "wallet",
+        "quantity": {
+          "int": "4000000000000000000",
+          "decimals": 18,
+          "float": 4.0,
+          "numeric": "4.0"
+        },
+        "value": 200.0,
+        "price": 50.0,
+        "fungible_info": {
+          "name": "Compound",
+          "symbol": "COMP",
+          "flags": {
+            "verified": true
+          },
+          "icon": {
+            "url": "https://cdn.zerion.io/comp.png"
+          },
+          "implementations": [
+            {
+              "chain_id": "ethereum",
+              "address": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+              "decimals": 18
+            }
+          ]
+        },
+        "flags": {
+          "displayable": true,
+          "is_trash": false
+        },
+        "updated_at": "2026-06-26T00:00:00Z"
+      },
+      "relationships": {
+        "chain": {
+          "data": {
+            "type": "chains",
+            "id": "ethereum"
+          }
+        }
+      }
+    }
+  ]
+}

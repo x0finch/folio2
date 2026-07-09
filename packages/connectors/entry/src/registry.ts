@@ -1,5 +1,5 @@
-import type { Balance } from "./balance";
-import type { BalanceProvider, ConnectorManifest } from "./connector";
+import type { Balance, BalanceProvider, ConnectorManifest } from "@folio/connectors-basic";
+import { evm } from "./connectors/evm";
 
 // connectorId → manifest 的登记表。每个 connector 自带 providers → 无全局 provider 汤、无按 type 去重。
 export type ConnectorRegistry = ReadonlyMap<string, ConnectorManifest>;
@@ -29,6 +29,6 @@ export function selectProvider(manifest: ConnectorManifest): BalanceProvider<Bal
   );
 }
 
-// 全部 connector 在此登记(各 connector 文件后续片逐个填入)。#30 骨架:暂空。
-export const connectors: readonly ConnectorManifest[] = [];
+// 全部 connector 在此登记(各 connector 文件逐个填入)。#31:evm(zerion)。
+export const connectors: readonly ConnectorManifest[] = [evm];
 export const registry: ConnectorRegistry = buildRegistry(connectors);

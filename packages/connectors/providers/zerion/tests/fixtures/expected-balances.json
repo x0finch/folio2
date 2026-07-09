@@ -1,0 +1,86 @@
+[
+  {
+    "symbol": "ETH",
+    "amount": 2.5,
+    "price": 2500,
+    "value": 6250,
+    "kind": "spot",
+    "tokenKey": "eip155:1/native:eth",
+    "name": "Ethereum",
+    "logo": "https://cdn.zerion.io/eth.png"
+  },
+  {
+    "symbol": "USDC",
+    "amount": 1500,
+    "price": 1,
+    "value": 1500,
+    "kind": "spot",
+    "tokenKey": "eip155:42161/erc20:0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+    "name": "USD Coin",
+    "logo": "https://cdn.zerion.io/usdc.png"
+  },
+  {
+    "symbol": "stETH",
+    "amount": 4,
+    "price": 2500,
+    "value": 10000,
+    "kind": "defi",
+    "tokenKey": "eip155:1/erc20:0xabababababababababababababababababababab",
+    "name": "Lido Staked Ether",
+    "logo": "https://cdn.zerion.io/steth.png",
+    "meta": {
+      "protocol": "Lido",
+      "positionType": "staked"
+    }
+  },
+  {
+    "symbol": "UNP",
+    "amount": 100,
+    "value": 0,
+    "kind": "spot",
+    "tokenKey": "eip155:1/erc20:0xabababababababababababababababababababab",
+    "name": "Unpriced Token",
+    "logo": "https://cdn.zerion.io/unp.png"
+  },
+  {
+    "symbol": "DAI",
+    "amount": 3000,
+    "price": 1,
+    "value": -3000,
+    "kind": "defi",
+    "tokenKey": "eip155:1/erc20:0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "name": "Dai Stablecoin",
+    "logo": "https://cdn.zerion.io/dai.png",
+    "meta": {
+      "protocol": "Aave",
+      "positionType": "loan"
+    }
+  },
+  {
+    "symbol": "UNI-V3",
+    "amount": 1,
+    "value": 5000,
+    "kind": "defi",
+    "tokenKey": "eip155:42161/erc20:0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "name": "Uniswap V3 Position",
+    "logo": "https://cdn.zerion.io/univ3.png",
+    "meta": {
+      "protocol": "Uniswap V3",
+      "positionType": "liquidity"
+    }
+  },
+  {
+    "symbol": "COMP",
+    "amount": 4,
+    "price": 50,
+    "value": 200,
+    "kind": "defi",
+    "tokenKey": "eip155:1/erc20:0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "name": "Compound",
+    "logo": "https://cdn.zerion.io/comp.png",
+    "meta": {
+      "protocol": "Compound",
+      "positionType": "wallet"
+    }
+  }
+]

@@ -1,7 +1,16 @@
 import { env } from "cloudflare:workers";
-import type { Balance } from "@folio/balances";
-import type { SyncDeps } from "@folio/sync";
-import type { ProviderAsset } from "@folio/tokens";
+import type { Account, InputSpec } from "@folio/balances";
+import { type Balance, ProviderError } from "@folio/balances";
+import {
+  type ConnectorManifest,
+  ProviderError as ConnectorProviderError,
+  registry as connectorRegistry,
+  getConnector,
+  selectProvider,
+  validateCredentials,
+} from "@folio/connectors";
+import type { FetchOutcome, SyncDeps } from "@folio/sync";
+import type { ProviderAsset, Tokens } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import { isComplete, openCreds } from "../creds";
 import { revalue } from "../revalue";
@@ -54,6 +63,76 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   }
 }
 
+// 并存期分派:account.type → connectorId(仅本片迁移的 evm)。其余返回 null → 走旧 @folio/balances 路径。
+// #37 删旧包时,全部 type 迁到 connectors 后本函数可退场。
+function connectorIdOf(accountType: string): string | null {
+  return accountType === "onchain_evm" ? "evm" : null;
+}
+
+// 经新 @folio/connectors 取余额(并存期分派的 connector 分支)。前置(缺凭据 / 校验 / 选 provider)走快回退。
+async function fetchViaConnector(
+  cid: string,
+  manifest: ConnectorManifest,
+  account: Account,
+  stored: Record<string, string>,
+  tokens: Tokens,
+): Promise<FetchOutcome> {
+  const specs = manifest.account.creds as unknown as InputSpec[]; // {key,type} 结构 = InputSpec
+  if (!isComplete(specs, stored)) return { status: "needs-credentials" };
+  const plain = await openCreds(specs, stored, env.SECRETS_KEY);
+  // 取数前再跑一次 account.creds 校验闸(与旧 balances.fetchBalances 一致):脏/畸形 identifier 快速失败
+  //(CredentialValidationError 非 ProviderError → 非重试、隔离),不退化成"打坏地址 → 4xx → 白重试"。
+  const validated = await validateCredentials(manifest.account.creds, plain);
+  const provider = selectProvider(manifest);
+  if (!provider) throw new Error(`no provider for connector ${cid}`);
+  // PC 注入:从 env 按 provider 声明的 creds key 取默认值(最小权限:只注入声明的 key)。
+  const providerCreds: Record<string, string> = {};
+  for (const f of provider.creds) {
+    const v = (env as unknown as Record<string, string | undefined>)[f.key];
+    if (v != null) providerCreds[f.key] = v;
+  }
+  const ctx = {
+    account: { id: account.id, label: account.label, connectorId: cid, creds: validated },
+    creds: providerCreds,
+  };
+  let rows: Balance[];
+  try {
+    rows = (await provider.fetchBalances(ctx)) as unknown as Balance[];
+  } catch (e) {
+    // 错误转译桥:sync 的 withRetry 只认 @folio/balances 的 ProviderError;按同 code/retryable 重抛
+    //(#37 删旧时移除)。
+    if (e instanceof ConnectorProviderError) {
+      throw new ProviderError(e.code, e.message, {
+        retryable: e.retryable,
+        retryAfterMs: e.retryAfterMs,
+        cause: e,
+      });
+    }
+    throw e;
+  }
+  const totalUsd = rows.reduce((s, b) => s + b.value, 0);
+  await tokens.noteProviderAssets(toProviderAssets(rows)); // 结构兼容:connectors Balance 同形
+  return { status: "ok", balances: rows, totalUsd };
+}
+
+/**
+ * @deprecated 并存期旧路径:经旧 @folio/balances 取尚未迁移的 account type。
+ * 后续每片(#32–#36)把一类 connector 迁进 @folio/connectors,本路径随之缩小;
+ * #37 全迁完 + 删旧包后连同 connectorIdOf 一并移除。新 connector 一律走 fetchViaConnector。
+ */
+async function deprecatedFetchViaBalances(
+  account: Account,
+  stored: Record<string, string>,
+  tokens: Tokens,
+): Promise<FetchOutcome> {
+  const specs = balances.credentialSpecs()[account.type] ?? [];
+  if (!isComplete(specs, stored)) return { status: "needs-credentials" };
+  const plain = await openCreds(specs, stored, env.SECRETS_KEY);
+  const { balances: rows, totalUsd } = await balances.fetchBalances(account, plain);
+  await tokens.noteProviderAssets(toProviderAssets(rows));
+  return { status: "ok", balances: rows, totalUsd };
+}
+
 // 装配编排器的注入式依赖。真正的 DI 缝是这里返回的 SyncDeps(syncUser 只认注入的 deps);
 // triggerSync(手动)与 cron(scheduled)共用。
 export function buildSyncDeps(): SyncDeps {
@@ -64,16 +143,14 @@ export function buildSyncDeps(): SyncDeps {
       (await db.listAccountsByUser(userId)).filter((a) => a.archivedAt == null),
     listRawCreds: (userId) => db.listRawCredsByUser(userId), // 批量取全用户 creds(消 syncAccount 的 N+1)
     writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
-    // 取余额:缺凭据判定 + 解密(业务层 creds,靠 credentialSpecs 的 type 驱动)→ balances.fetchBalances(明文)。
-    // 收窄全局 key / 跑 validator / 调 provider 在 balances 内;SECRETS_KEY 只在本层(app)见。
+    // 取余额【并存期分派】(快回退,见 CODING.md guard-clause):已迁移 connector → 新 @folio/connectors,
+    // 其余 type → 旧 @folio/balances。两条路径各自成独立方法(缺凭据/解密/校验/取数在其内);
+    // SECRETS_KEY 只在本层(app)见。
     fetchBalances: async (account, stored) => {
-      const specs = balances.credentialSpecs()[account.type] ?? [];
-      if (!isComplete(specs, stored)) return { status: "needs-credentials" };
-      const plain = await openCreds(specs, stored, env.SECRETS_KEY);
-      const { balances: rows, totalUsd } = await balances.fetchBalances(account, plain);
-      // provider 代币元信息入参考层(best-effort,tokens 内部逐条吞错):logo/name 此刻不存就丢了。
-      await tokens.noteProviderAssets(toProviderAssets(rows));
-      return { status: "ok", balances: rows, totalUsd };
+      const cid = connectorIdOf(account.type);
+      const manifest = cid ? getConnector(connectorRegistry, cid) : undefined;
+      if (cid && manifest) return fetchViaConnector(cid, manifest, account, stored, tokens);
+      return deprecatedFetchViaBalances(account, stored, tokens);
     },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
