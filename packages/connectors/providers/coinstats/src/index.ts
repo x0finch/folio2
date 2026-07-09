@@ -18,7 +18,7 @@ import {
 
 // @folio/connectors-provider-coinstats —— 首个【一个 provider 包 → 多个 connector】的用例(方案 A 工厂)。
 // 一个数据源服务多条链(Solana / Sui / Cosmos),共享内部实现;工厂按 connectionId 产出一个 provider,
-// 由 entry 的三份 connector manifest 各自组合。地址走 account.creds.identifier;provider key(COINSTATS_API_KEY)
+// 由 entry 的三份 connector manifest 各自组合。地址走 account.creds.address;provider key(COINSTATS_API_KEY)
 // 走 ctx.creds(app 分派桥按 field.key 从 env 注入默认值),X-API-KEY 头。
 // 零依赖,用原生 fetch;不碰 SECRETS_KEY/cloudflare:workers(原则 #5)。
 
@@ -70,7 +70,7 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ro
 // 地址非空即可(solana base58 / sui 0x+64hex / cosmos bech32 格式各异,交 API 判定,与旧行为一致)。
 export const coinstatsAccountCreds = [
   {
-    key: "identifier",
+    key: "address",
     type: "public",
     label: "Wallet Address",
     validator: z.string().trim().min(1),
@@ -88,8 +88,8 @@ const providerCreds = [
   },
 ] as const satisfies readonly CredField[];
 
-// 各链共享的取数上下文:AC = { identifier },PC = provider key map。
-type CoinstatsCtx = FetchContext<{ identifier: string }, Record<string, string>>;
+// 各链共享的取数上下文:AC = { address },PC = provider key map。
+type CoinstatsCtx = FetchContext<{ address: string }, Record<string, string>>;
 
 // provider key 由 app 从 env 注入(非用户输入)→ 仍需自查。
 function getApiKey(creds: Record<string, string>): string {
@@ -129,7 +129,7 @@ function ensureOk(res: Response): void {
 
 async function fetchCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<Row[]> {
   const apiKey = getApiKey(ctx.creds);
-  const res = await coinstatsGet(connectionId, ctx.account.creds.identifier, apiKey);
+  const res = await coinstatsGet(connectionId, ctx.account.creds.address, apiKey);
   ensureOk(res);
   let json: CoinstatsCoin[];
   try {
@@ -147,7 +147,7 @@ async function validateCoinstats(connectionId: string, ctx: CoinstatsCtx): Promi
   const apiKey = ctx.creds[COINSTATS_API_KEY];
   if (!apiKey) return false;
   try {
-    const res = await coinstatsGet(connectionId, ctx.account.creds.identifier, apiKey);
+    const res = await coinstatsGet(connectionId, ctx.account.creds.address, apiKey);
     return res.ok;
   } catch {
     return false;

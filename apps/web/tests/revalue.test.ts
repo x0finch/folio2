@@ -124,11 +124,11 @@ describe("revalue", () => {
       value: 60000,
       kind: "spot",
     };
-    const out = await revalue(tokens(), "exchange_binance", [spot]);
+    const out = await revalue(tokens(), "binance", [spot]);
     expect(out[0].value).toBe(60000);
   });
 
-  it("onchain_bitcoin → 盯市:provider 只给 amount(value=0),按 BTC 市价算 value", async () => {
+  it("bitcoin → 盯市:provider 只给 amount(value=0),按 BTC 市价算 value", async () => {
     // bitcoin provider 产 value=0、tokenKey=chain:bitcoin/native:btc,靠 symbol 回退到 bitcoin 价 65000。
     const btc: Balance = {
       symbol: "BTC",
@@ -138,7 +138,7 @@ describe("revalue", () => {
       tokenKey: "chain:bitcoin/native:btc",
       meta: { pendingSats: 500000 },
     };
-    const out = await revalue(tokens(), "onchain_bitcoin", [btc]);
+    const out = await revalue(tokens(), "bitcoin", [btc]);
     expect(out[0].value).toBe(5200); // 0.08 × 65000
     expect((out[0].meta as { pendingSats: number }).pendingSats).toBe(500000); // meta 保留
   });

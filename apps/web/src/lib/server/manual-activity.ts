@@ -7,10 +7,10 @@ import { db } from "./db";
 
 const log = getLogger(["folio", "web", "manual-activity"]);
 
-// 账户须存在、属本人、type=manual(否则抛)。
+// 账户须存在、属本人、connectorId=manual(否则抛)。
 async function assertManual(userId: string, accountId: string): Promise<void> {
   const account = await db.getAccountById(userId, accountId);
-  if (account?.type !== "manual") throw new Error("manual account not found");
+  if (account?.connectorId !== "manual") throw new Error("manual account not found");
 }
 
 // 重算账本 → 把当前数量物化进 creds.amount(保留 symbol/unitPrice)。manual creds 全 public、明文 JSON。

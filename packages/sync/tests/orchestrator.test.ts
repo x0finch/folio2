@@ -24,7 +24,7 @@ function account(overrides: Partial<AccountSafe> = {}): AccountSafe {
   return {
     id: "a1",
     userId: "u1",
-    type: "manual",
+    connectorId: "manual",
     network: null,
     label: "Wallet",
     createdAt: 0,
@@ -135,7 +135,7 @@ describe("结构化日志(级别 + 安全字段)", () => {
   it("成功→info、缺凭据→warning、失败→error;字段只含安全键", async () => {
     const { log, entries } = capturingLogger();
     const { deps } = makeDeps(
-      [account({ id: "g" }), account({ id: "n" }), account({ id: "f", type: "exchange_okx" })],
+      [account({ id: "g" }), account({ id: "n" }), account({ id: "f", connectorId: "okx" })],
       {
         log,
         fetchBalances: async (acc) => {
@@ -148,7 +148,7 @@ describe("结构化日志(级别 + 安全字段)", () => {
     await syncUser(deps, "u1");
     const byMsg = (m: string) => entries.find((e) => e.msg === m);
     expect(byMsg("account synced")?.level).toBe("info");
-    expect(byMsg("account synced")?.props).toMatchObject({ accountId: "g", type: "manual" });
+    expect(byMsg("account synced")?.props).toMatchObject({ accountId: "g", connectorId: "manual" });
     expect(byMsg("account sync skipped: needs credentials")?.level).toBe("warning");
     expect(byMsg("account sync failed")?.level).toBe("error");
     expect(byMsg("account sync failed")?.props).toMatchObject({

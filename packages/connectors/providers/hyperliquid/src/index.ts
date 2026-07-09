@@ -11,7 +11,7 @@ import { CLEARINGHOUSE_TYPE, EVM_ADDRESS_RE, HYPERLIQUID_API_BASE, INFO_PATH } f
 
 // @folio/connectors-provider-hyperliquid —— 永续 DEX(hyperliquid connector)。只读地址即查,
 // 无需签名/API key(最接近链上 provider)。POST /info { type:"clearinghouseState", user }。地址走
-// account.creds.identifier;无全局/provider key → creds:[]。零依赖,用原生 fetch;不碰
+// account.creds.address;无全局/provider key → creds:[]。零依赖,用原生 fetch;不碰
 // SECRETS_KEY/cloudflare:workers(原则 #5)。
 // 注:Hyperliquid 响应里数字字段全是字符串,解析时统一 Number()。
 // 【唯一的多 kind connector】:吐 perp_equity(权益行)+ perp_position(仓位行)两 kind
@@ -130,7 +130,7 @@ function ensureOk(res: Response): void {
 // 账户 creds 声明随 provider(其天然消费者)落此;将来同 connector 多 provider 时提到 entry 共享。
 export const hyperliquidAccountCreds = [
   {
-    key: "identifier",
+    key: "address",
     type: "public",
     label: "EVM Address",
     desc: "0x + 40 hex",
@@ -145,7 +145,7 @@ export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccount
   creds: [],
 
   async fetchBalances(ctx): Promise<Row[]> {
-    const res = await infoPost(ctx.account.creds.identifier);
+    const res = await infoPost(ctx.account.creds.address);
     ensureOk(res);
     let json: ClearinghouseState;
     try {
@@ -160,7 +160,7 @@ export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccount
   // 未交易过的地址也返回 200 + 空状态 → 视为可用。任何失败 → false。
   async validateAccount(ctx): Promise<boolean> {
     try {
-      const res = await infoPost(ctx.account.creds.identifier);
+      const res = await infoPost(ctx.account.creds.address);
       return res.ok;
     } catch {
       return false;

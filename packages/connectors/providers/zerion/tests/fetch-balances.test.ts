@@ -18,13 +18,13 @@ const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 const provider: BalanceProvider<Balance> = zerionProvider;
 
 // 新 FetchContext 形状:account.creds(AC)+ creds(PC,provider key)。
-function ctx(overrides?: { identifier?: string; creds?: Record<string, string> }) {
+function ctx(overrides?: { address?: string; creds?: Record<string, string> }) {
   return {
     account: {
       id: "a1",
       label: "Wallet",
       connectorId: "evm",
-      creds: { identifier: overrides?.identifier ?? ADDR },
+      creds: { address: overrides?.address ?? ADDR },
     },
     creds: overrides?.creds ?? { ZERION_API_KEY: "test-key" },
   };

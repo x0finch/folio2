@@ -1,9 +1,9 @@
+import type { ConnectorId } from "@folio/connectors";
 import { Button, Drawer, Input, StatefulButton, toast } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
-import type { AccountType } from "../lib/account-types";
 import type { OverviewBalance } from "../lib/account-view";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
@@ -18,7 +18,7 @@ import { ManualActivityPanel } from "./manual-activity-panel";
 export interface AccountRow {
   id: string;
   label: string;
-  type: AccountType;
+  connectorId: ConnectorId;
   archivedAt: number | null;
   totalUsd: number;
   takenAt: number | null;
@@ -123,7 +123,7 @@ function DetailBody({
       <div className="flex flex-col gap-1.5">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <span>{account.label}</span>
-          <AccountTypeBadge type={account.type} />
+          <AccountTypeBadge connectorId={account.connectorId} />
           {archived && (
             <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
               {t("archivedBadge")}
@@ -236,7 +236,7 @@ function DetailBody({
       </div>
 
       {/* manual 活动 */}
-      {account.type === "manual" && (
+      {account.connectorId === "manual" && (
         <div className="mt-6">
           <ManualActivityPanel accountId={account.id} />
         </div>

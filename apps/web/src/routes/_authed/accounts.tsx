@@ -30,7 +30,7 @@ export const Route = createFileRoute("/_authed/accounts")({
       return {
         id: a.id,
         label: a.label,
-        type: a.type,
+        connectorId: a.connectorId,
         archivedAt: a.archivedAt,
         totalUsd: ov?.totalUsd ?? 0,
         takenAt: ov?.takenAt ?? null,
@@ -104,7 +104,7 @@ function Accounts() {
 
       <AccountDetailSheet
         account={selected}
-        specs={selected ? (credentialSpecs[selected.type] ?? []) : []}
+        specs={selected ? (credentialSpecs[selected.connectorId] ?? []) : []}
         open={open}
         onOpenChange={setOpen}
       />
@@ -141,7 +141,7 @@ function AccountRowButton({
       <span className="flex min-w-0 flex-col gap-1.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{row.label}</span>
-          <AccountTypeBadge type={row.type} />
+          <AccountTypeBadge connectorId={row.connectorId} />
           {row.needsCredentials && (
             <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive">
               {t("needsCredentials")}

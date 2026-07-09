@@ -2,26 +2,30 @@ import { describe, expect, it } from "vitest";
 import { EXPORT_VERSION } from "../src/lib/export";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "../src/lib/import";
 
-// 按 type 分类输入字段(模拟 provider.inputs:CEX apiKey=semi + secret/passphrase=secret;链上 identifier=public)。
-function categorize(type: string): {
+// 按 connectorId 分类输入字段(模拟 provider account.creds:CEX apiKey=semi + secret/passphrase=secret;
+// 链上/perp address=public、bitcoin addressOrXpub=public)。
+const ONCHAIN_ADDRESS = new Set(["evm", "solana", "sui", "cosmos", "hyperliquid"]);
+function categorize(connectorId: string): {
   publicKeys: string[];
   semiKeys: string[];
   secretKeys: string[];
 } {
-  if (type.startsWith("exchange_"))
+  if (connectorId === "binance" || connectorId === "okx")
     return {
       publicKeys: [],
       semiKeys: ["apiKey"],
-      secretKeys: type === "exchange_okx" ? ["secret", "passphrase"] : ["secret"],
+      secretKeys: connectorId === "okx" ? ["secret", "passphrase"] : ["secret"],
     };
-  if (type.startsWith("onchain_") || type.startsWith("perp_"))
-    return { publicKeys: ["identifier"], semiKeys: [], secretKeys: [] };
+  if (connectorId === "bitcoin")
+    return { publicKeys: ["addressOrXpub"], semiKeys: [], secretKeys: [] };
+  if (ONCHAIN_ADDRESS.has(connectorId))
+    return { publicKeys: ["address"], semiKeys: [], secretKeys: [] };
   return { publicKeys: [], semiKeys: [], secretKeys: [] }; // manual
 }
 
 function makeDeps() {
   const calls = {
-    accounts: [] as Array<{ type: string; label: string; creds: string }>,
+    accounts: [] as Array<{ connectorId: string; label: string; creds: string }>,
     groups: [] as Array<{ name: string }>,
     memberships: [] as Array<{ accountId: string; groupId: string }>,
     snapshots: [] as Array<{ accountId: string; totalUsd: number }>,
@@ -30,7 +34,11 @@ function makeDeps() {
   const deps: ImportDeps = {
     categorize,
     createAccount: async (input) => {
-      calls.accounts.push({ type: input.type, label: input.label, creds: input.creds });
+      calls.accounts.push({
+        connectorId: input.connectorId,
+        label: input.label,
+        creds: input.creds,
+      });
       return { id: `acc-${++n}` };
     },
     createGroup: async (input) => {
@@ -75,7 +83,7 @@ describe("createImporter", () => {
     await imp.apply({
       type: "account",
       id: "x",
-      accountType: "exchange_okx",
+      accountType: "okx",
       label: "OKX",
       creds: { apiKey: "ABCD…5678" }, // 导出已打码的 semi 片段
     });
@@ -90,11 +98,11 @@ describe("createImporter", () => {
     await imp.apply({
       type: "account",
       id: "x",
-      accountType: "onchain_evm",
+      accountType: "evm",
       label: "W",
-      creds: { identifier: "0xabc" },
+      creds: { address: "0xabc" },
     });
-    expect(JSON.parse(calls.accounts[0].creds)).toEqual({ identifier: "0xabc" });
+    expect(JSON.parse(calls.accounts[0].creds)).toEqual({ address: "0xabc" });
   });
 
   it("remaps account/group ids for memberships and snapshots", async () => {

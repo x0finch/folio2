@@ -38,7 +38,7 @@ export const syncOneAccount = createServerFn({ method: "POST" })
     const result = await syncAccount(buildSyncDeps(), context.userId, account, rawCreds);
     getLogger(["folio", "web", "sync"]).info("single account sync", {
       accountId: account.id,
-      type: account.type,
+      connectorId: account.connectorId,
       ok: result.ok,
       skipped: result.skipped,
     });

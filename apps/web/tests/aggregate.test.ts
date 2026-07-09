@@ -5,10 +5,10 @@ import { type AggInput, buildCanonicalHoldings, type Holding } from "../src/lib/
 const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 const usdt: TokenGroup = { id: "usdt", displaySymbol: "USDT", name: "Tether USD" };
 const usdc: TokenGroup = { id: "usdc", displaySymbol: "USDC", name: "USD Coin" };
-const zerion = { id: "z1", label: "Wallet", type: "onchain_evm" };
-const binance = { id: "b1", label: "Binance", type: "exchange_binance" };
-const hyper = { id: "h1", label: "HL", type: "perp_hyperliquid" };
-const manual = { id: "m1", label: "备注", type: "manual" };
+const zerion = { id: "z1", label: "Wallet", connectorId: "evm" };
+const binance = { id: "b1", label: "Binance", connectorId: "binance" };
+const hyper = { id: "h1", label: "HL", connectorId: "hyperliquid" };
+const manual = { id: "m1", label: "备注", connectorId: "manual" };
 
 const row = (
   p: Partial<AggInput> & Pick<AggInput, "symbol" | "amount" | "value" | "account">,
@@ -132,8 +132,8 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 50,
         value: 50,
-        account: { id: "k1", label: "Kraken", type: "exchange_kraken" },
-      }), // 未解析 → account:symbol
+        account: { id: "k1", label: "Kraken", connectorId: "kraken" },
+      }), // 未解析 → account:symbol(kraken 未接线,仅作 fallback 素材)
     ]);
     expect(hs).toHaveLength(3);
     expect(byKey(hs, "group:usdt")?.totalValue).toBe(1000);

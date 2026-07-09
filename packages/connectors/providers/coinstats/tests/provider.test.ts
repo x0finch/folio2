@@ -6,15 +6,15 @@ import solanaFixture from "./fixtures/solana.json";
 
 const SUI = "0xc0ffee254729296a45a3885639AC7E10F9d54979c0ffee254729296a45a38856";
 
-// 新 FetchContext 形状:account.creds(AC:identifier)+ creds(PC:COINSTATS_API_KEY)。
+// 新 FetchContext 形状:account.creds(AC:address)+ creds(PC:COINSTATS_API_KEY)。
 // PC 现在承载 provider key(旧 globalKeys 退场)。擦除版类型(= 进 registry 后 manifest 暴露形状)。
-function ctx(overrides?: { identifier?: string; creds?: Record<string, string> }) {
+function ctx(overrides?: { address?: string; creds?: Record<string, string> }) {
   return {
     account: {
       id: "a1",
       label: "Wallet",
       connectorId: "solana",
-      creds: { identifier: overrides?.identifier ?? "addr" },
+      creds: { address: overrides?.address ?? "addr" },
     },
     creds: overrides?.creds ?? { COINSTATS_API_KEY: "k" },
   };
@@ -36,7 +36,7 @@ describe("coinstats factory (一个 provider 包 → 多个 connector)", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("[]", { status: 200 }));
     const sui: BalanceProvider<Balance> = createCoinstatsProvider("sui-wallet");
-    await sui.fetchBalances(ctx({ identifier: SUI }));
+    await sui.fetchBalances(ctx({ address: SUI }));
     expect(String(spy.mock.calls[0][0])).toContain("connectionId=sui-wallet");
   });
 });
@@ -115,15 +115,15 @@ describe("coinstats provider.validateCreds — 实测打 /wallet/blockchains(只
 // account.creds 校验闸(app 分派桥取数前会跑;三链共享此声明,格式交 API 判定 → 仅非空)。
 describe("coinstats account.creds validator gate", () => {
   it("接受非空地址(trim 后)", async () => {
-    await expect(validateCredentials(coinstatsAccountCreds, { identifier: SUI })).resolves.toEqual({
-      identifier: SUI,
+    await expect(validateCredentials(coinstatsAccountCreds, { address: SUI })).resolves.toEqual({
+      address: SUI,
     });
   });
 
   it("拒空/缺失地址(→ CredentialValidationError,桥里即快速非重试失败)", async () => {
-    await expect(validateCredentials(coinstatsAccountCreds, { identifier: "  " })).rejects.toThrow(
-      /identifier/,
+    await expect(validateCredentials(coinstatsAccountCreds, { address: "  " })).rejects.toThrow(
+      /address/,
     );
-    await expect(validateCredentials(coinstatsAccountCreds, {})).rejects.toThrow(/identifier/);
+    await expect(validateCredentials(coinstatsAccountCreds, {})).rejects.toThrow(/address/);
   });
 });

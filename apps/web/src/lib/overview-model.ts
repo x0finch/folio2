@@ -99,7 +99,12 @@ export async function buildOverview(
     kind: viewKind(b), // 归一到 5-kind(并存期兼容遗留)
     tokenKey: b.tokenKey,
     isMargin: margin,
-    account: { id: account.id, label: account.label, type: account.type, network: account.network },
+    account: {
+      id: account.id,
+      label: account.label,
+      connectorId: account.connectorId,
+      network: account.network,
+    },
     group: e?.group,
     ref: e?.ref,
     name: e?.name,

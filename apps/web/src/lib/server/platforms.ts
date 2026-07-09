@@ -20,12 +20,15 @@ export async function warmPlatformsForUser(userId: string): Promise<void> {
     db.getLatestSnapshotByUser(userId),
   ]);
   const keys = new Set<string>();
+  // 与 aggregate.platformIdFromAccount 同口径(#37d 由 connectorId 直接归类);manual 无平台 key(跳过)。
+  const exchangeConnectors = new Set(["binance", "okx"]);
+  const perpConnectors = new Set(["hyperliquid"]);
   for (const a of accounts) {
     if (a.archivedAt != null) continue;
-    const specific = a.type.slice(a.type.indexOf("_") + 1);
-    if (a.type.startsWith("onchain_")) keys.add(`chain:${a.network ?? specific}`);
-    else if (a.type.startsWith("exchange_")) keys.add(`exchange:${specific}`);
-    else if (a.type.startsWith("perp_")) keys.add(`perp:${specific}`);
+    const cid = a.connectorId;
+    if (exchangeConnectors.has(cid)) keys.add(`exchange:${cid}`);
+    else if (perpConnectors.has(cid)) keys.add(`perp:${cid}`);
+    else if (cid !== "manual") keys.add(`chain:${a.network ?? cid}`);
   }
   for (const s of snapshots) {
     for (const b of s.balances) {

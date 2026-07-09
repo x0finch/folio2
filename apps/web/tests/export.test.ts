@@ -24,7 +24,7 @@ describe("metaRecord", () => {
 describe("accountRecord", () => {
   it("attaches the (already-safe) creds (P6.6.2: manual holdings ride creds, no data field)", () => {
     const rec = accountRecord(
-      { id: "m", type: "manual", network: null, label: "M" },
+      { id: "m", connectorId: "manual", network: null, label: "M" },
       { symbol: "BTC", amount: "0.5", usdValue: "32000" }, // creds map 是字符串 map(route 经 safeView)
     );
     expect(rec.creds).toEqual({ symbol: "BTC", amount: "0.5", usdValue: "32000" });

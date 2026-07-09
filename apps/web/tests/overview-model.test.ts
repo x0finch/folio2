@@ -8,8 +8,8 @@ import { buildOverview } from "../src/lib/overview-model";
 // 纯 buildOverview 可脱离 server fn 测(依赖注入)—— 这是 #3 抽读模型的收益。
 // 用假 tokens/platforms + 最小 fixture,覆盖:eligible 过滤 → enrich 附回 → 聚合 → 平台装饰 → 总额。
 
-const account = (id: string, label: string, type = "onchain_evm", network: string | null = null) =>
-  ({ id, label, type, network, archivedAt: null }) as unknown as AccountSafe;
+const account = (id: string, label: string, connectorId = "evm", network: string | null = null) =>
+  ({ id, label, connectorId, network, archivedAt: null }) as unknown as AccountSafe;
 
 const bal = (over: Partial<OverviewBalance>): OverviewBalance => ({
   id: crypto.randomUUID(),
@@ -130,7 +130,7 @@ describe("buildOverview", () => {
   });
 
   it("合法遗留 perp 权益行计入聚合(margin 持有点)", async () => {
-    const accounts = [account("h", "Hyper", "perp_hyperliquid")];
+    const accounts = [account("h", "Hyper", "hyperliquid")];
     const meta = JSON.stringify({
       role: "equity",
       withdrawable: 900,
@@ -147,7 +147,7 @@ describe("buildOverview", () => {
   });
 
   it("脏 metaJson 的遗留 perp 权益行不计入聚合(与明细卡一致,不虚增总额)", async () => {
-    const accounts = [account("h", "Hyper", "perp_hyperliquid")];
+    const accounts = [account("h", "Hyper", "hyperliquid")];
     const byAccount = new Map([
       // 损坏 metaJson:viewKind→perp_equity,但 meta 不可解析 → 明细卡与聚合两处都排除
       [

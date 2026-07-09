@@ -8,10 +8,10 @@ const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 // 擦除版类型(= 进 registry 后暴露形状),ctx 的 creds 走宽松 map,与其它 provider 测一致。
 const provider: BalanceProvider<Balance> = hyperliquidProvider;
 
-// 新 FetchContext 形状:account.creds(AC:identifier)+ creds(PC,恒空)。
-function ctx(identifier: string) {
+// 新 FetchContext 形状:account.creds(AC:address)+ creds(PC,恒空)。
+function ctx(address: string) {
   return {
-    account: { id: "a1", label: "HL", connectorId: "hyperliquid", creds: { identifier } },
+    account: { id: "a1", label: "HL", connectorId: "hyperliquid", creds: { address } },
     creds: {},
   };
 }
@@ -35,18 +35,18 @@ describe("hyperliquidProvider.validateAccount", () => {
   });
 });
 
-// account.creds 校验闸(app 分派桥取数前会跑;守住脏 identifier 快速失败,见 sync-deps 桥)。
+// account.creds 校验闸(app 分派桥取数前会跑;守住脏 address 快速失败,见 sync-deps 桥)。
 describe("hyperliquid account.creds validator gate", () => {
   it("接受合法 EVM 地址", async () => {
-    await expect(
-      validateCredentials(hyperliquidAccountCreds, { identifier: ADDR }),
-    ).resolves.toEqual({ identifier: ADDR });
+    await expect(validateCredentials(hyperliquidAccountCreds, { address: ADDR })).resolves.toEqual({
+      address: ADDR,
+    });
   });
 
   it("拒非法/缺失地址(→ CredentialValidationError,桥里即快速非重试失败)", async () => {
-    await expect(
-      validateCredentials(hyperliquidAccountCreds, { identifier: "nope" }),
-    ).rejects.toThrow(/identifier/);
-    await expect(validateCredentials(hyperliquidAccountCreds, {})).rejects.toThrow(/identifier/);
+    await expect(validateCredentials(hyperliquidAccountCreds, { address: "nope" })).rejects.toThrow(
+      /address/,
+    );
+    await expect(validateCredentials(hyperliquidAccountCreds, {})).rejects.toThrow(/address/);
   });
 });

@@ -10,7 +10,7 @@ import { buildTokenKey } from "@folio/tokens-basic";
 import { z } from "zod";
 
 // @folio/connectors-provider-zerion — zerion provider(evm connector 用)。只读地址,一次取回跨所有
-// EVM 链的代币 + DeFi 仓位、自带 USD 估值。地址走 account.creds.identifier;provider key(ZERION_API_KEY)
+// EVM 链的代币 + DeFi 仓位、自带 USD 估值。地址走 account.creds.address;provider key(ZERION_API_KEY)
 // 走 ctx.creds(app 分派桥按 field.key 从 env 注入默认值)。HTTP Basic:key 作 username、密码空。
 // 零依赖,用原生 fetch;不碰 SECRETS_KEY/cloudflare:workers(原则 #5)。
 
@@ -202,7 +202,7 @@ async function getChainIds(apiKey: string): Promise<Record<string, number>> {
 // 账户 creds 声明随 provider(其天然消费者)落此;将来同 connector 多 provider 时提到 entry 共享。
 export const evmAccountCreds = [
   {
-    key: "identifier",
+    key: "address",
     type: "public",
     validator: z.string().regex(EVM_ADDRESS_RE, "expected 0x + 40 hex"),
     label: "EVM Address",
@@ -244,7 +244,7 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
     if (!apiKey) {
       throw new ProviderError("INVALID_CREDENTIALS", `${ZERION_API_KEY} not configured`);
     }
-    const address = ctx.account.creds.identifier;
+    const address = ctx.account.creds.address;
     // 链映射与 positions 并行取;链映射拿不到会抛错(Promise.all 一并 reject)→ 整轮同步失败重试,
     // 保证 parsePositions 拿到非空映射、只产规范 eip155 标识(失败即不产,不写含分叉标识的快照)。
     const [positions, chainIds] = await Promise.all([
@@ -259,7 +259,7 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
     const apiKey = ctx.creds[ZERION_API_KEY];
     if (!apiKey) return false;
     try {
-      const res = await zerionGet(PORTFOLIO_PATH(ctx.account.creds.identifier), apiKey);
+      const res = await zerionGet(PORTFOLIO_PATH(ctx.account.creds.address), apiKey);
       return res.ok;
     } catch {
       return false;

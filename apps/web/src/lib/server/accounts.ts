@@ -1,22 +1,22 @@
 import { env } from "cloudflare:workers";
+import type { ConnectorId } from "@folio/connectors";
 import type { AccountSafe } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import type { AccountType } from "../account-types";
 import { SCRIPT_TYPE_VALUES } from "../bitcoin-scripts";
 import { isComplete, safeView, sealCreds } from "../creds";
 import { requireAuth } from "../require-auth";
 import { credentialSpecs, validateAccountCreds } from "./connectors";
 import { db } from "./db";
 
-// userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 type/accountId 等安全字段(红线:不打 creds)。
+// userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 connectorId/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);
 
 // connectors 层只负责校验/探活(validateAccountCreds)与字段规格(credentialSpecs);加密/脱敏/补录判定走业务层
 // creds.ts(seal/safeView/isComplete),按字段 type 驱动。SECRETS_KEY 只在本层(app)见,不进 connectors。
-const raw2sealed = async (type: AccountType, values: Record<string, string>) =>
-  JSON.stringify(await sealCreds(credentialSpecs()[type] ?? [], values, env.SECRETS_KEY));
+const raw2sealed = async (connectorId: ConnectorId, values: Record<string, string>) =>
+  JSON.stringify(await sealCreds(credentialSpecs()[connectorId] ?? [], values, env.SECRETS_KEY));
 
 // 富化:把每账户的 raw creds 投影成 needsCredentials + credsSafe(public 原样、semi 打码、secret 丢弃);
 // raw creds(含 secret 密文)绝不出网,只出投影。
@@ -32,7 +32,7 @@ export const listMyAccounts = createServerFn({ method: "GET" })
     return accounts.map((a) => {
       const raw = rawById.get(a.id);
       const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
-      const specs = specsByType[a.type] ?? [];
+      const specs = specsByType[a.connectorId] ?? [];
       return {
         ...a,
         needsCredentials: !isComplete(specs, stored),
@@ -64,7 +64,7 @@ export const createManualAccount = createServerFn({ method: "POST" })
     };
     await validateAccountCreds("manual", raw); // 形状校验闸(manual 无需探活)
     const account = await db.createAccount(context.userId, {
-      type: "manual",
+      connectorId: "manual",
       label: data.label,
       creds: await raw2sealed("manual", raw),
     });
@@ -74,38 +74,34 @@ export const createManualAccount = createServerFn({ method: "POST" })
       amount: Number(data.amount),
       occurredAt: Date.now(),
     });
-    log.info("account created", { type: "manual", accountId: account.id });
+    log.info("account created", { connectorId: "manual", accountId: account.id });
     return account;
   });
 
-// 地址类账户(链上 + perp):地址→identifier(public)。validateAccountCreds({liveness}) 内部注入 provider
-// 声明的 env key + provider.validateAccount,活性失败即抛(地址无效/不可达或服务端缺 key),通过才封装。
+// 地址类账户(链上 + perp):地址落 account.creds —— bitcoin 键为 addressOrXpub,其余(evm/solana/sui/cosmos/
+// hyperliquid)键为 address(与各 connector 的 account.creds 声明一致,#37d)。validateAccountCreds({liveness})
+// 内部注入 provider 声明的 env key + provider.validateAccount,活性失败即抛(地址无效/不可达或服务端缺 key),通过才封装。
 async function createAddressAccount(
   userId: string,
-  type: AccountType,
+  connectorId: ConnectorId,
   label: string,
   address: string,
   extra?: Record<string, string>, // bitcoin xpub 的 scriptType 等附加 public 输入
 ): Promise<AccountSafe> {
-  const raw = { identifier: address, ...extra };
-  await validateAccountCreds(type, raw, { liveness: true, label });
+  const addressKey = connectorId === "bitcoin" ? "addressOrXpub" : "address";
+  const raw = { [addressKey]: address, ...extra };
+  await validateAccountCreds(connectorId, raw, { liveness: true, label });
   const account = await db.createAccount(userId, {
-    type,
+    connectorId,
     label,
-    creds: await raw2sealed(type, raw),
+    creds: await raw2sealed(connectorId, raw),
   });
-  log.info("account created", { type, accountId: account.id });
+  log.info("account created", { connectorId, accountId: account.id });
   return account;
 }
 
 const OnchainInput = z.object({
-  type: z.enum([
-    "onchain_evm",
-    "onchain_bitcoin",
-    "onchain_solana",
-    "onchain_sui",
-    "onchain_cosmos",
-  ]),
+  connectorId: z.enum(["evm", "bitcoin", "solana", "sui", "cosmos"]),
   label: z.string().trim().min(1, "label is required"),
   address: z.string().trim(), // seal 的是原始输入 → wire 先 trim 保持落库规范
   // bitcoin 扩展公钥的脚本类型(仅 xpub 用,单地址忽略);其它链忽略。枚举与客户端下拉同源。
@@ -117,7 +113,7 @@ export const createOnchainAccount = createServerFn({ method: "POST" })
   .handler(({ data, context }) =>
     createAddressAccount(
       context.userId,
-      data.type,
+      data.connectorId,
       data.label,
       data.address,
       data.scriptType ? { scriptType: data.scriptType } : undefined,
@@ -125,7 +121,7 @@ export const createOnchainAccount = createServerFn({ method: "POST" })
   );
 
 const PerpInput = z.object({
-  type: z.enum(["perp_hyperliquid"]),
+  connectorId: z.enum(["hyperliquid"]),
   label: z.string().trim().min(1, "label is required"),
   address: z.string().trim(),
 });
@@ -133,13 +129,13 @@ export const createPerpAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(PerpInput)
   .handler(({ data, context }) =>
-    createAddressAccount(context.userId, data.type, data.label, data.address),
+    createAddressAccount(context.userId, data.connectorId, data.label, data.address),
   );
 
 // CEX 账户录入:apiKey(semi,明文)+ secret/passphrase(secret,加密)按 type 落库。
 // 字段值校验(非空、okx passphrase 必填)与活性校验都在 validateCredentials 内。
 const ExchangeInput = z.object({
-  type: z.enum(["exchange_binance", "exchange_okx"]),
+  connectorId: z.enum(["binance", "okx"]),
   label: z.string().trim().min(1, "label is required"),
   apiKey: z.string().trim(), // seal 原始输入 → wire 先 trim
   secret: z.string().trim(),
@@ -152,13 +148,16 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
     // passphrase 可选(仅 okx):缺省则不放进 values,由 provider.inputs 的 validator 判定是否必填。
     const values: Record<string, string> = { apiKey: data.apiKey, secret: data.secret };
     if (data.passphrase !== undefined) values.passphrase = data.passphrase;
-    await validateAccountCreds(data.type, values, { liveness: true, label: data.label });
+    await validateAccountCreds(data.connectorId, values, { liveness: true, label: data.label });
     const account = await db.createAccount(context.userId, {
-      type: data.type,
+      connectorId: data.connectorId,
       label: data.label,
-      creds: await raw2sealed(data.type, values),
+      creds: await raw2sealed(data.connectorId, values),
     });
-    log.info("exchange account created", { type: data.type, accountId: account.id });
+    log.info("exchange account created", {
+      connectorId: data.connectorId,
+      accountId: account.id,
+    });
     return account;
   });
 
@@ -173,13 +172,16 @@ export const provideCredentials = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const account = await db.getAccountById(context.userId, data.accountId);
     if (!account) throw new Error("account not found");
-    await validateAccountCreds(account.type, data.creds, { liveness: true, label: account.label });
+    await validateAccountCreds(account.connectorId, data.creds, {
+      liveness: true,
+      label: account.label,
+    });
     await db.setAccountCredentials(
       context.userId,
       account.id,
-      await raw2sealed(account.type, data.creds),
+      await raw2sealed(account.connectorId, data.creds),
     );
-    log.info("credentials provided", { type: account.type, accountId: account.id });
+    log.info("credentials provided", { connectorId: account.connectorId, accountId: account.id });
     return { ok: true as const };
   });
 

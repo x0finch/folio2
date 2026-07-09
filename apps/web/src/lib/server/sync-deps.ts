@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import {
+  type ConnectorId,
   type ConnectorManifest,
   registry as connectorRegistry,
   getConnector,
@@ -11,11 +12,9 @@ import type { AccountSafe } from "@folio/db";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import type { ProviderAsset, Tokens } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
-import type { AccountType } from "../account-types";
 import type { InputSpec } from "../creds";
 import { isComplete, openCreds } from "../creds";
 import { revalue } from "../revalue";
-import { connectorIdOf } from "./connectors";
 import { db } from "./db";
 import { warmFx } from "./fx";
 import { warmPlatformsForUser } from "./platforms";
@@ -64,8 +63,8 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   }
 }
 
-// 经 @folio/connectors 取余额(connector 分派分支)。前置(缺凭据 / 校验 / 选 provider)走快回退。
-// account.type → connectorId 映射见 ./connectors 的 connectorIdOf。
+// 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。
+// #37d 起 account.connectorId 直接即 connector 的 id。
 async function fetchViaConnector(
   cid: string,
   manifest: ConnectorManifest,
@@ -108,19 +107,19 @@ export function buildSyncDeps(): SyncDeps {
       (await db.listAccountsByUser(userId)).filter((a) => a.archivedAt == null),
     listRawCreds: (userId) => db.listRawCredsByUser(userId), // 批量取全用户 creds(消 syncAccount 的 N+1)
     writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
-    // 取余额:account.type → connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);
-    // SECRETS_KEY 只在本层(app)见。全 9 类 account.type 均映射到 connector;无 manifest 视为数据错误
-    //(由 syncAccount 逐账户隔离,不阻断其余)。account.type→connectorId 映射 #37d 前仍在(见 connectorIdOf)。
+    // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);
+    // SECRETS_KEY 只在本层(app)见。connectorId 直接即 connector 的 id;无 manifest 视为数据错误
+    //(由 syncAccount 逐账户隔离,不阻断其余)。
     fetchBalances: async (account, stored) => {
-      const cid = connectorIdOf(account.type);
-      const manifest = cid ? getConnector(connectorRegistry, cid) : undefined;
-      if (!cid || !manifest) throw new Error(`no connector for account type ${account.type}`);
+      const cid = account.connectorId;
+      const manifest = getConnector(connectorRegistry, cid);
+      if (!manifest) throw new Error(`no connector for connectorId ${cid}`);
       return fetchViaConnector(cid, manifest, account, stored, tokens);
     },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
-    // 写快照前重估(P7.4.2):盯市类型(manual / onchain_bitcoin)用市场价改 value(@folio/sync 不依赖 token 层,逻辑注入在此)。
-    // revalue 已讲 connectors Balance;SyncDeps 的 accountType 是 string(并存期其值即旧 account.type)→ 收窄到 AccountType。
-    revalue: (type, rows) => revalue(tokens, type as AccountType, rows),
+    // 写快照前重估(P7.4.2):盯市类型(manual / bitcoin)用市场价改 value(@folio/sync 不依赖 token 层,逻辑注入在此)。
+    // revalue 已讲 connectors Balance;SyncDeps 的 accountType 是 string(其值即 account.connectorId)→ 收窄到 ConnectorId。
+    revalue: (type, rows) => revalue(tokens, type as ConnectorId, rows),
   };
 }

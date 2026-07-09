@@ -1,64 +1,45 @@
-// account.type 的联合(旧 DB 值,#37d DB 迁移前保持不变)。app 本地拥有此事实源。
-// 全集与 DB 列(@folio/db 的 AccountType,#37c 前仍源自旧包)结构一致:除下方 9 个已上线的,
-// 还含 5 个"已声明未接线"的 type(exchange_bybit/bitget/gate、perp_derive/extended)——
-// 无 provider、UI 不展示(TYPE_LABELS/TYPE_GROUPS 只列 9 个),但 DB 列类型含之,故本地全集对齐避免边界断言。
-export type AccountType =
-  | "manual"
-  | "onchain_evm"
-  | "onchain_bitcoin"
-  | "onchain_solana"
-  | "onchain_sui"
-  | "onchain_cosmos"
-  | "exchange_binance"
-  | "exchange_okx"
-  | "exchange_bybit"
-  | "exchange_bitget"
-  | "exchange_gate"
-  | "perp_hyperliquid"
-  | "perp_derive"
-  | "perp_extended";
+import type { ConnectorId } from "@folio/connectors";
 
-// 账户类型注册表:分组(Select 分组 + 账户页分区)与展示名。随 provider 增多只是多几项。
+// account.connectorId 的取值域即 @folio/connectors 的 ConnectorId(从 registry 派生的单一事实源,#37d)。
+// 客户端只 type-only 引 ConnectorId(不把 registry 运行时打进 client bundle,见 CODING #客户端打包);
+// 下方 TYPE_GROUPS/TYPE_LABELS 为手写字面量(UI 展示/分组),不从 registry 运行时读取。
+
+// 账户类型注册表:分组(Select 分组 + 账户页分区)与展示名。随 connector 增多只是多几项。
 // 展示名多为专有名词(链/所/场所),不翻译;分组标题走 i18n(Accounts.cat_*)。
 // 由 add-account-sheet(分组 Select)、accounts 页(徽章/分区)、account-detail-sheet 共用。
 export type AccountCategory = "manual" | "onchain" | "exchange" | "perp";
 
-export const TYPE_GROUPS: { category: AccountCategory; types: AccountType[] }[] = [
+export const TYPE_GROUPS: { category: AccountCategory; types: ConnectorId[] }[] = [
   { category: "manual", types: ["manual"] },
   {
     category: "onchain",
-    types: ["onchain_evm", "onchain_bitcoin", "onchain_solana", "onchain_sui", "onchain_cosmos"],
+    types: ["evm", "bitcoin", "solana", "sui", "cosmos"],
   },
-  { category: "exchange", types: ["exchange_binance", "exchange_okx"] },
-  { category: "perp", types: ["perp_hyperliquid"] },
+  { category: "exchange", types: ["binance", "okx"] },
+  { category: "perp", types: ["hyperliquid"] },
 ];
 
-export type OnchainType =
-  | "onchain_evm"
-  | "onchain_bitcoin"
-  | "onchain_solana"
-  | "onchain_sui"
-  | "onchain_cosmos";
+export type OnchainType = "evm" | "bitcoin" | "solana" | "sui" | "cosmos";
 
-export const TYPE_LABELS: Partial<Record<AccountType, string>> = {
+export const TYPE_LABELS: Partial<Record<ConnectorId, string>> = {
   manual: "Manual",
-  onchain_evm: "EVM",
-  onchain_bitcoin: "Bitcoin",
-  onchain_solana: "Solana",
-  onchain_sui: "Sui",
-  onchain_cosmos: "Cosmos",
-  exchange_binance: "Binance",
-  exchange_okx: "OKX",
-  perp_hyperliquid: "Hyperliquid",
+  evm: "EVM",
+  bitcoin: "Bitcoin",
+  solana: "Solana",
+  sui: "Sui",
+  cosmos: "Cosmos",
+  binance: "Binance",
+  okx: "OKX",
+  hyperliquid: "Hyperliquid",
 };
 
-export function typeLabel(type: AccountType): string {
+export function typeLabel(type: ConnectorId): string {
   return TYPE_LABELS[type] ?? type;
 }
 
-const CATEGORY_BY_TYPE = new Map<AccountType, AccountCategory>(
+const CATEGORY_BY_TYPE = new Map<ConnectorId, AccountCategory>(
   TYPE_GROUPS.flatMap((g) => g.types.map((t) => [t, g.category] as const)),
 );
-export function accountCategory(type: AccountType): AccountCategory | undefined {
+export function accountCategory(type: ConnectorId): AccountCategory | undefined {
   return CATEGORY_BY_TYPE.get(type);
 }
