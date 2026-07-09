@@ -10,7 +10,7 @@ import type { InputSpec } from "../creds";
 
 // app 侧 connector 分派中枢(server-only,引 cloudflare:workers)。集中管:
 // 字段规格投影(credentialSpecs)、创建时凭据校验(validateAccountCreds)。
-// #37d 起 account.connectorId 直接即 connectorId(旧 account.type→connectorId 映射表已退场)。
+// account.connectorId 直接就是 connectorId(#37d 后并存期分派表已退场)。
 // 安全边界(原则 #5):此处【不碰 SECRETS_KEY】—— 创建/校验拿到的是表单明文,只做形状闸 + 可选活性探活;
 // 存库前的加密塑形在 lib/creds.ts。
 

@@ -68,7 +68,7 @@ describe("createImporter", () => {
   it("rejects a missing/unsupported meta header", async () => {
     const { deps } = makeDeps();
     const imp = createImporter(deps);
-    await expect(imp.apply({ type: "account", accountType: "manual" })).rejects.toThrow(
+    await expect(imp.apply({ type: "account", connectorId: "manual" })).rejects.toThrow(
       ImportError,
     );
 
@@ -83,7 +83,7 @@ describe("createImporter", () => {
     await imp.apply({
       type: "account",
       id: "x",
-      accountType: "okx",
+      connectorId: "okx",
       label: "OKX",
       creds: { apiKey: "ABCD…5678" }, // 导出已打码的 semi 片段
     });
@@ -98,7 +98,7 @@ describe("createImporter", () => {
     await imp.apply({
       type: "account",
       id: "x",
-      accountType: "evm",
+      connectorId: "evm",
       label: "W",
       creds: { address: "0xabc" },
     });
@@ -109,7 +109,7 @@ describe("createImporter", () => {
     const { deps, calls } = makeDeps();
     const imp = createImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
-    await imp.apply({ type: "account", id: "old-a", accountType: "manual", label: "M", creds: {} });
+    await imp.apply({ type: "account", id: "old-a", connectorId: "manual", label: "M", creds: {} });
     await imp.apply({ type: "group", id: "old-g", name: "G" });
     await imp.apply({ type: "membership", accountId: "old-a", groupId: "old-g" });
     await imp.apply({

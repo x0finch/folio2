@@ -9,7 +9,7 @@ import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
 import type { InputSpec } from "../lib/server/credentials";
 import { syncOneAccount } from "../lib/server/sync";
-import { AccountTypeBadge } from "./account-type-badge";
+import { ConnectorBadge } from "./connector-badge";
 import { CredentialForm } from "./credential-form";
 import { AccountHoldingsCards } from "./holdings-cards";
 import { ManualActivityPanel } from "./manual-activity-panel";
@@ -123,7 +123,7 @@ function DetailBody({
       <div className="flex flex-col gap-1.5">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <span>{account.label}</span>
-          <AccountTypeBadge connectorId={account.connectorId} />
+          <ConnectorBadge connectorId={account.connectorId} />
           {archived && (
             <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
               {t("archivedBadge")}

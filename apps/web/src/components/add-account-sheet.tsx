@@ -17,7 +17,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { cloneElement, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { type OnchainType, TYPE_GROUPS, typeLabel } from "../lib/account-types";
 import {
   BTC_SCRIPT_OPTIONS,
   isBareXpub,
@@ -25,6 +24,7 @@ import {
   recommendedScript,
   type ScriptType,
 } from "../lib/bitcoin-scripts";
+import { CONNECTOR_OPTIONS, connectorLabel, type OnchainConnectorId } from "../lib/connectors";
 import {
   createExchangeAccount,
   createManualAccount,
@@ -73,7 +73,7 @@ async function submitAccount(
   const address = connectorId === "bitcoin" ? (values.addressOrXpub ?? "") : (values.address ?? "");
   return createOnchainAccount({
     data: {
-      connectorId: connectorId as OnchainType,
+      connectorId: connectorId as OnchainConnectorId,
       label,
       address,
       // BitcoinFields 只写入合法枚举值;服务端再经 zod enum 校验兜底。
@@ -315,13 +315,13 @@ function BitcoinFields({
   );
 }
 
-// 单类型的录入表单。key={type} 重挂 → 切类型自动清空本地态(不用 useEffect→setState)。
+// 单个 connector 的录入表单。key={connectorId} 重挂 → 切 connector 自动清空本地态(不用 useEffect→setState)。
 function AccountForm({
-  type,
+  connectorId,
   specs,
   onDone,
 }: {
-  type: ConnectorId;
+  connectorId: ConnectorId;
   specs: InputSpec[];
   onDone: (accountId: string) => void;
 }) {
@@ -330,7 +330,7 @@ function AccountForm({
   const [label, setLabel] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const mutation = useMutation({
-    mutationFn: () => submitAccount(type, label, values),
+    mutationFn: () => submitAccount(connectorId, label, values),
     onSuccess: (account) => onDone(account.id),
   });
 
@@ -350,13 +350,13 @@ function AccountForm({
           value={label}
           onChange={(v) => setLabel(v)}
           placeholder={
-            type === "manual" ? t("manualLabelPlaceholder") : t("walletLabelPlaceholder")
+            connectorId === "manual" ? t("manualLabelPlaceholder") : t("walletLabelPlaceholder")
           }
         />
       </div>
-      {type === "manual" ? (
+      {connectorId === "manual" ? (
         <ManualFields values={values} setValues={setValues} />
-      ) : type === "bitcoin" ? (
+      ) : connectorId === "bitcoin" ? (
         <BitcoinFields specs={specs} values={values} setValues={setValues} />
       ) : (
         <GenericFields specs={specs} values={values} setValues={setValues} />
@@ -379,21 +379,20 @@ function AccountForm({
   );
 }
 
-// 统一「添加账户」侧栏:分组 Select 切类型 → schema 驱动字段(manual 富控件)。
+// 统一「添加账户」侧栏:分组 Select 切 connector → schema 驱动字段(manual 富控件)。
 // triggerRender:自定义触发元素(账户页传 Fab);缺省用普通按钮。
 export function AddAccountSheet({ triggerRender }: { triggerRender?: React.ReactElement } = {}) {
   const t = useTranslations("Accounts");
-  const tCat = useTranslations("Accounts");
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [type, setType] = useState<ConnectorId>("manual");
+  const [connectorId, setConnectorId] = useState<ConnectorId>("manual");
   // 字段规格部署内静态 → 长 staleTime,几乎只取一次。
   const specsQuery = useQuery({
     queryKey: ["credentialSpecs"],
     queryFn: () => getCredentialSpecs(),
     staleTime: 60 * 60_000,
   });
-  const specs = specsQuery.data?.[type] ?? [];
+  const specs = specsQuery.data?.[connectorId] ?? [];
 
   return (
     <>
@@ -414,20 +413,21 @@ export function AddAccountSheet({ triggerRender }: { triggerRender?: React.React
 
         <div className="mt-4 flex flex-col gap-2">
           <Label>{t("accountType")}</Label>
-          <Select value={type} onValueChange={(v) => setType(v as ConnectorId)}>
+          <Select value={connectorId} onValueChange={(v) => setConnectorId(v as ConnectorId)}>
             <SelectTrigger>
-              {/* 显示选中类型的展示名(label,由 SelectItem 注册),而非裸 type 值。 */}
+              {/* 显示选中 connector 的展示名(label,由 SelectItem 注册),而非裸 connectorId 值。 */}
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {TYPE_GROUPS.map((g) => (
-                <div key={g.category}>
+              {/* 固定分组列表(写死的 group 标题 + 选项);顺序即 CONNECTOR_OPTIONS 的定义序。 */}
+              {CONNECTOR_OPTIONS.map((g) => (
+                <div key={g.group}>
                   <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-                    {tCat(`cat_${g.category}`)}
+                    {g.group}
                   </div>
-                  {g.types.map((ty) => (
+                  {g.options.map((ty) => (
                     <SelectItem key={ty} value={ty}>
-                      {typeLabel(ty)}
+                      {connectorLabel(ty)}
                     </SelectItem>
                   ))}
                 </div>
@@ -436,10 +436,10 @@ export function AddAccountSheet({ triggerRender }: { triggerRender?: React.React
           </Select>
         </div>
 
-        {/* key={type} 重挂 → 切类型清空字段态 */}
+        {/* key={connectorId} 重挂 → 切 connector 清空字段态 */}
         <AccountForm
-          key={type}
-          type={type}
+          key={connectorId}
+          connectorId={connectorId}
           specs={specs}
           onDone={(newId) => {
             setOpen(false);

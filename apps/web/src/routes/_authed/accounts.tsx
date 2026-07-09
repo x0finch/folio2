@@ -4,8 +4,8 @@ import { Plus } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
-import { AccountTypeBadge } from "../../components/account-type-badge";
 import { AddAccountSheet } from "../../components/add-account-sheet";
+import { ConnectorBadge } from "../../components/connector-badge";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { SyncButton } from "../../components/sync-button";
 import { TokenStack } from "../../components/token-stack";
@@ -141,7 +141,7 @@ function AccountRowButton({
       <span className="flex min-w-0 flex-col gap-1.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{row.label}</span>
-          <AccountTypeBadge connectorId={row.connectorId} />
+          <ConnectorBadge connectorId={row.connectorId} />
           {row.needsCredentials && (
             <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive">
               {t("needsCredentials")}
