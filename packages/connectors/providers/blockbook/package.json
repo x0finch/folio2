@@ -1,5 +1,5 @@
 {
-  "name": "@folio/connectors",
+  "name": "@folio/connectors-provider-blockbook",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,8 +13,9 @@
   },
   "dependencies": {
     "@folio/connectors-basic": "workspace:*",
-    "@folio/connectors-provider-blockbook": "workspace:*",
-    "@folio/connectors-provider-zerion": "workspace:*",
+    "@folio/tokens-basic": "workspace:*",
+    "@folio/bitcoin-derive": "workspace:*",
+    "@folio/blockbook-client": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import { PerpEquityMeta } from "@folio/connectors";
+import { PerpEquityMeta } from "@folio/connectors-basic";
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { Platforms } from "@folio/platforms";
 import type { AssetRef, Tokens } from "@folio/tokens";
