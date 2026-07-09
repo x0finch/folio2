@@ -1,4 +1,4 @@
-import { type Balance, ProviderError } from "@folio/balances";
+import { type Balance, ProviderError } from "@folio/connectors-basic";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { describe, expect, it, vi } from "vitest";
 import { type FetchOutcome, type SyncDeps, type SyncLogger, syncUser } from "../src";
@@ -36,7 +36,7 @@ const bal = (symbol: string, value: number): Balance => ({
   symbol,
   amount: 1,
   value,
-  kind: "manual",
+  kind: "spot",
 });
 const ok = (balances: Balance[]): FetchOutcome => ({
   status: "ok",
