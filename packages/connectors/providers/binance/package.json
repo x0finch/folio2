@@ -1,5 +1,5 @@
 {
-  "name": "@folio/connectors",
+  "name": "@folio/connectors-provider-binance",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,11 +13,6 @@
   },
   "dependencies": {
     "@folio/connectors-basic": "workspace:*",
-    "@folio/connectors-provider-binance": "workspace:*",
-    "@folio/connectors-provider-blockbook": "workspace:*",
-    "@folio/connectors-provider-coinstats": "workspace:*",
-    "@folio/connectors-provider-okx": "workspace:*",
-    "@folio/connectors-provider-zerion": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {

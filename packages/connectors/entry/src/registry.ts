@@ -1,7 +1,9 @@
 import type { Balance, BalanceProvider, ConnectorManifest } from "@folio/connectors-basic";
+import { binance } from "./connectors/binance";
 import { bitcoin } from "./connectors/bitcoin";
 import { cosmos } from "./connectors/cosmos";
 import { evm } from "./connectors/evm";
+import { okx } from "./connectors/okx";
 import { solana } from "./connectors/solana";
 import { sui } from "./connectors/sui";
 
@@ -34,6 +36,14 @@ export function selectProvider(manifest: ConnectorManifest): BalanceProvider<Bal
 }
 
 // 全部 connector 在此登记(各 connector 文件逐个填入)。#31:evm(zerion);#32:bitcoin(blockbook);
-// #33:solana/sui/cosmos(coinstats —— 一个 provider 包服务三个 connector)。
-export const connectors: readonly ConnectorManifest[] = [evm, bitcoin, solana, sui, cosmos];
+// #33:solana/sui/cosmos(coinstats —— 一个 provider 包服务三个 connector);#34:binance/okx(CEX)。
+export const connectors: readonly ConnectorManifest[] = [
+  evm,
+  bitcoin,
+  solana,
+  sui,
+  cosmos,
+  binance,
+  okx,
+];
 export const registry: ConnectorRegistry = buildRegistry(connectors);
