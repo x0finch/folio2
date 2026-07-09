@@ -1,7 +1,9 @@
 // 纯逻辑(无 server-only import → 可单测)。把各实体映射成导出 NDJSON 记录(逐行一个 JSON)。
 // 红线:account 的 safeCreds 由 lib/creds.ts safeView 在 route 算好后传入(secret 丢、semi 打码、public 留)。
 
-export const EXPORT_VERSION = 1;
+// v2(#37d 起):account 记录的 accountType 值为 connectorId(evm/binance…),creds 键为 address/addressOrXpub。
+// v1(旧值 onchain_evm… / identifier 键)不兼容 → import 的版本闸直接拒绝,避免静默建坏账户(#50)。
+export const EXPORT_VERSION = 2;
 
 interface AccountIn {
   id: string;

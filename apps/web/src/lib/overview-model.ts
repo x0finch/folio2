@@ -13,7 +13,9 @@ import { platformLogoUrl, tokenLogoUrl } from "./logo";
 
 export interface OverviewDeps {
   tokens: Tokens; // .enrich:tokenKey → group/ref/price(cache-only)
-  platforms: Platforms; // .resolve:platform key → name+logo(含兜底)
+  platforms: Platforms; // .resolve:platform key → name+logo(含兜底)——仅链键(chain:/eip155:)
+  // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platforms。
+  connectorMeta?: (key: string) => { name: string; logo?: string } | null;
 }
 
 // perp 权益行只有 meta 可解析才计入聚合 —— 与 toPerpView 的 safeParse 门一致:
@@ -65,7 +67,7 @@ export interface OverviewView {
 export async function buildOverview(
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
-  { tokens, platforms }: OverviewDeps,
+  { tokens, platforms, connectorMeta }: OverviewDeps,
 ): Promise<OverviewView> {
   const balancesOf = (id: string) => (byAccount.get(id)?.balances ?? []) as OverviewBalance[];
 
@@ -114,10 +116,18 @@ export async function buildOverview(
   const holdings = buildCanonicalHoldings(aggInputs);
 
   // 读路径装饰:每个 platform key 都给一份展示(命中真名+logo,否则兜底名),cache-only 零网络。
+  // 场馆键(manual/exchange:/perp:)走连接器自带 name+logo,不进 platforms.resolve;只把链键送去查(#52)。
   const platformIds = [...new Set(holdings.flatMap((h) => h.sources.map((s) => s.platform.id)))];
-  const platformMeta = await platforms.resolve(platformIds);
+  const chainIds = platformIds.filter((id) => !connectorMeta?.(id));
+  const platformMeta = await platforms.resolve(chainIds);
   for (const h of holdings) {
     for (const s of h.sources) {
+      const cm = connectorMeta?.(s.platform.id);
+      if (cm) {
+        s.platform.name = cm.name;
+        s.platform.logo = platformLogoUrl(s.platform.id, cm.logo); // 上游 URL → folio 代理(隐私;ADR 0008)
+        continue;
+      }
       const m = platformMeta.get(s.platform.id);
       if (m) {
         s.platform.name = m.name;

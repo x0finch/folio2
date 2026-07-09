@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { createServerFn } from "@tanstack/react-start";
 import { buildOverview } from "../overview-model";
 import { requireAuth } from "../require-auth";
+import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
 import { buildPlatforms } from "./platforms";
 import { buildTokens, enrichBalances } from "./tokens";
@@ -20,6 +21,7 @@ export const getMyOverview = createServerFn({ method: "GET" })
     return buildOverview(accounts, byAccount, {
       tokens: buildTokens(env),
       platforms: buildPlatforms(env),
+      connectorMeta: connectorPlatformMeta,
     });
   });
 

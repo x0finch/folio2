@@ -97,6 +97,44 @@ describe("buildOverview", () => {
     expect(view.sections).toHaveLength(0); // 无 defi/perp
   });
 
+  it("场馆键(exchange:)走 connectorMeta 装饰,不进 platforms.resolve(#52)", async () => {
+    // binance CEX 账户 + 无链前缀 tokenKey → source.platform.id = "exchange:binance"(aggregate 兜底)。
+    const accounts = [account("cex", "币安", "binance")];
+    const byAccount = new Map([
+      [
+        "cex",
+        snap("cex", 100, [bal({ tokenKey: "coingecko:usd-coin", amount: 100, usdValue: 100 })]),
+      ],
+    ]);
+
+    // 记录 platforms.resolve 实际被问了哪些 key —— 断言场馆键被排除(无多余 CoinGecko 往返)。
+    const asked: string[] = [];
+    const recordingPlatforms = {
+      async resolve(keys: string[]) {
+        asked.push(...keys);
+        return new Map(
+          keys.map((k) => [k, { key: k, name: `NAME:${k}`, logo: `https://cgk/${k}.png` }]),
+        );
+      },
+    } as unknown as Platforms;
+    const connectorMeta = (key: string) =>
+      key === "exchange:binance"
+        ? { name: "Binance", logo: "https://cgk/markets/binance.jpg" }
+        : null;
+
+    const view = await buildOverview(accounts, byAccount, {
+      tokens,
+      platforms: recordingPlatforms,
+      connectorMeta,
+    });
+
+    const src = view.holdings[0].sources[0];
+    expect(src.platform.id).toBe("exchange:binance");
+    expect(src.platform.name).toBe("Binance"); // 连接器自带,非 "NAME:exchange:binance"
+    expect(src.platform.logo).toBe("/api/logo/platform/exchange%3Abinance"); // 代理 URL(key 编码)
+    expect(asked).not.toContain("exchange:binance"); // 关键:未进 platforms.resolve → 无 CoinGecko 往返
+  });
+
   it("非 eligible(defi)不进 Holdings,进次级分区", async () => {
     const accounts = [account("a1", "Arb")];
     const byAccount = new Map([
