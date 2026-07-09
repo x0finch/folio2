@@ -70,14 +70,14 @@ function defineConnector<S extends z.core.$ZodType<Balance>, const AC extends re
 > **`kind` 的定义(governing)= "一套独有的 meta + 渲染契约"的扁平判别**——不是资产、不是链、不是来源。凡不满足"有自己的 meta 且渲染不同于他者"的都不配当 kind。
 
 ```
-spot          // 同质代币持仓(钱包 token / CEX 现货 / 手录持仓)。无额外 meta,基础行
+spot          // 同质代币持仓(钱包 token / CEX 现货 / 手录持仓)。基础行;带一个【可选 typed 行为 meta】SpotMeta{fixed?}(manual 锁定固定值 → revalue 跳过市价重估),不渲染、只供公共逻辑;非开放袋(展示型自定义 meta 待 #43)
 defi          // 协议内仓位。meta: protocol / positionType;按协议分组;LP 整池带值、底层币 value:0
 perp_equity   // 永续账户权益行(净值载体)。meta: withdrawable / totalMarginUsed / totalNtlPos
 perp_position // 单永续仓位。meta: side / entryPx / liqPx / leverage / uPnL;value:0
 utxo          // UTXO 型自托管持仓(BTC 及将来 UTXO 链)。meta: pendingSats / 派生地址表 / 收款指引
 ```
 
-现状是 4-kind(`spot/defi/perp/manual`,perp 靠 `meta.role`、bitcoin 骑 `spot`),本次改判:perp 拆两 kind;bitcoin 以**模型名 `utxo`** 独立(非资产名);**`manual` 撤销**——它渲染/ meta 与 `spot` 全同(读端一路 `spot || manual`、无专属 meta、重估按 `accountType` 非 `kind`),是"来源"不是"契约",故 manual 账户吐 `kind:"spot"`,"手录"这件事留在账户层(`accountType==="manual"`,代码本就如此)。
+现状是 4-kind(`spot/defi/perp/manual`,perp 靠 `meta.role`、bitcoin 骑 `spot`),本次改判:perp 拆两 kind;bitcoin 以**模型名 `utxo`** 独立(非资产名);**`manual` 撤销**——它渲染与 `spot` 全同(读端一路 `spot || manual`、重估按 `accountType` 非 `kind`),是"来源"不是"契约",故 manual 账户吐 `kind:"spot"`,"手录"这件事留在账户层(`accountType==="manual"`,代码本就如此)。其唯一行为标志 `fixed`(锁定固定值)骑 spot 的可选 SpotMeta,不构成独立渲染契约。
 
 每 connector `balance.schema` = 它会吐的 kind 子集判别联合;`B = z.infer<typeof schema>`(schema 是事实源,不反向注解)。写端(provider 返回被 schema 窄化 → 给 perp connector 写 `kind:"spot"` 编译即挂)、运行时(可选 `schema.parse` 校验 provider 输出)、读端(聚合/展示 `switch(kind)` 穷尽、meta 自动窄化、消灭 `meta as X` cast)三处一致。
 

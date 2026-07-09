@@ -21,6 +21,10 @@ export const BalanceBase = z.object({
 
 // —— 各 kind 的 meta 契约(随 kind 精确) ——
 
+// spot:可选的类型化【行为 meta】。当前仅 fixed —— 锁定固定值(手动资产),
+// revalue 据此跳过市价重估、钉死 amount × price。行为标志、不渲染(value/展示仍是普通代币行)。
+export const SpotMeta = z.object({ fixed: z.boolean().optional() });
+
 // defi:协议内仓位。consumer 按 protocol 分组、按 positionType 展示。
 export const DefiMeta = z.object({
   protocol: z.string().optional(),
@@ -65,7 +69,9 @@ export const UtxoMeta = z.object({
 });
 
 // —— 各 kind schema(connector 组合子集用) ——
-export const Spot = BalanceBase.extend({ kind: z.literal("spot") });
+// spot:不再严格无 meta —— 携一个【可选】的类型化行为 meta(当前仅 fixed);value/渲染仍是普通代币行。
+// 保持类型化(不是开放 Record):meta 只放约定内的行为标志。
+export const Spot = BalanceBase.extend({ kind: z.literal("spot"), meta: SpotMeta.optional() });
 export const Defi = BalanceBase.extend({ kind: z.literal("defi"), meta: DefiMeta });
 export const PerpEquity = BalanceBase.extend({
   kind: z.literal("perp_equity"),
@@ -87,6 +93,7 @@ export type Defi = z.infer<typeof Defi>;
 export type PerpEquity = z.infer<typeof PerpEquity>;
 export type PerpPosition = z.infer<typeof PerpPosition>;
 export type Utxo = z.infer<typeof Utxo>;
+export type SpotMeta = z.infer<typeof SpotMeta>;
 export type DefiMeta = z.infer<typeof DefiMeta>;
 export type PerpEquityMeta = z.infer<typeof PerpEquityMeta>;
 export type PerpPositionMeta = z.infer<typeof PerpPositionMeta>;
