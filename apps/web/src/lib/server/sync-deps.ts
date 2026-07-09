@@ -1,20 +1,19 @@
 import { env } from "cloudflare:workers";
-import type { Account, InputSpec } from "@folio/balances";
-import { type Balance, ProviderError } from "@folio/balances";
+import type { AccountType, InputSpec, Balance as LegacyBalance } from "@folio/balances";
 import {
   type ConnectorManifest,
-  ProviderError as ConnectorProviderError,
   registry as connectorRegistry,
   getConnector,
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
+import type { Balance } from "@folio/connectors-basic";
+import type { AccountSafe } from "@folio/db";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import type { ProviderAsset, Tokens } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import { isComplete, openCreds } from "../creds";
 import { revalue } from "../revalue";
-import { balances } from "./balances";
 import { db } from "./db";
 import { warmFx } from "./fx";
 import { warmPlatformsForUser } from "./platforms";
@@ -84,7 +83,7 @@ function connectorIdOf(accountType: string): string | null {
 async function fetchViaConnector(
   cid: string,
   manifest: ConnectorManifest,
-  account: Account,
+  account: AccountSafe,
   stored: Record<string, string>,
   tokens: Tokens,
 ): Promise<FetchOutcome> {
@@ -106,41 +105,10 @@ async function fetchViaConnector(
     account: { id: account.id, label: account.label, connectorId: cid, creds: validated },
     creds: providerCreds,
   };
-  let rows: Balance[];
-  try {
-    rows = (await provider.fetchBalances(ctx)) as unknown as Balance[];
-  } catch (e) {
-    // 错误转译桥:sync 的 withRetry 只认 @folio/balances 的 ProviderError;按同 code/retryable 重抛
-    //(#37 删旧时移除)。
-    if (e instanceof ConnectorProviderError) {
-      throw new ProviderError(e.code, e.message, {
-        retryable: e.retryable,
-        retryAfterMs: e.retryAfterMs,
-        cause: e,
-      });
-    }
-    throw e;
-  }
+  // provider 抛的 @folio/connectors-basic ProviderError 直接向上传播 —— sync 的 withRetry 直接 instanceof 该类。
+  const rows = (await provider.fetchBalances(ctx)) as unknown as Balance[];
   const totalUsd = rows.reduce((s, b) => s + b.value, 0);
   await tokens.noteProviderAssets(toProviderAssets(rows)); // 结构兼容:connectors Balance 同形
-  return { status: "ok", balances: rows, totalUsd };
-}
-
-/**
- * @deprecated 并存期旧路径:经旧 @folio/balances 取尚未迁移的 account type。
- * 后续每片(#32–#36)把一类 connector 迁进 @folio/connectors,本路径随之缩小;
- * #37 全迁完 + 删旧包后连同 connectorIdOf 一并移除。新 connector 一律走 fetchViaConnector。
- */
-async function deprecatedFetchViaBalances(
-  account: Account,
-  stored: Record<string, string>,
-  tokens: Tokens,
-): Promise<FetchOutcome> {
-  const specs = balances.credentialSpecs()[account.type] ?? [];
-  if (!isComplete(specs, stored)) return { status: "needs-credentials" };
-  const plain = await openCreds(specs, stored, env.SECRETS_KEY);
-  const { balances: rows, totalUsd } = await balances.fetchBalances(account, plain);
-  await tokens.noteProviderAssets(toProviderAssets(rows));
   return { status: "ok", balances: rows, totalUsd };
 }
 
@@ -154,18 +122,25 @@ export function buildSyncDeps(): SyncDeps {
       (await db.listAccountsByUser(userId)).filter((a) => a.archivedAt == null),
     listRawCreds: (userId) => db.listRawCredsByUser(userId), // 批量取全用户 creds(消 syncAccount 的 N+1)
     writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
-    // 取余额【并存期分派】(快回退,见 CODING.md guard-clause):已迁移 connector → 新 @folio/connectors,
-    // 其余 type → 旧 @folio/balances。两条路径各自成独立方法(缺凭据/解密/校验/取数在其内);
-    // SECRETS_KEY 只在本层(app)见。
+    // 取余额:account.type → connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);
+    // SECRETS_KEY 只在本层(app)见。全 9 类 account.type 均映射到 connector;无 manifest 视为数据错误
+    //(由 syncAccount 逐账户隔离,不阻断其余)。account.type→connectorId 映射 #37d 前仍在(见 connectorIdOf)。
     fetchBalances: async (account, stored) => {
       const cid = connectorIdOf(account.type);
       const manifest = cid ? getConnector(connectorRegistry, cid) : undefined;
-      if (cid && manifest) return fetchViaConnector(cid, manifest, account, stored, tokens);
-      return deprecatedFetchViaBalances(account, stored, tokens);
+      if (!cid || !manifest) throw new Error(`no connector for account type ${account.type}`);
+      return fetchViaConnector(cid, manifest, account, stored, tokens);
     },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
     // 写快照前重估(P7.4.2):盯市类型(manual / onchain_bitcoin)用市场价改 value(@folio/sync 不依赖 token 层,逻辑注入在此)。
-    revalue: (type, rows) => revalue(tokens, type, rows),
+    // revalue 本体仍讲旧 @folio/balances 类型(AccountType + 旧 Balance);SyncDeps 已切到 string + connectors Balance。
+    // 运行期结构兼容,此处于注入边界做类型桥接(旧 balances 类型迁移属后续子片,不改 revalue 本体)。
+    revalue: (type, rows) =>
+      revalue(
+        tokens,
+        type as AccountType,
+        rows as unknown as LegacyBalance[],
+      ) as unknown as Promise<typeof rows>,
   };
 }

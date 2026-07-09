@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@folio/db": "workspace:*",
-    "@folio/balances": "workspace:*"
+    "@folio/connectors-basic": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260626.1",

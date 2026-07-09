@@ -1,4 +1,4 @@
-import { type Account, type AccountType, type Balance, ProviderError } from "@folio/balances";
+import { type Balance, ProviderError } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
@@ -41,12 +41,12 @@ export interface SyncDeps {
   writeSnapshot: (userId: string, accountId: string, input: WriteSnapshotInput) => Promise<string>;
   // 取余额(领域意图):app 注入 balances.fetchBalances —— 解密/校验/ctx 拼装/provider 调用全在其内。
   // 缺凭据返回 needs-credentials(跳过,不算失败);上游失败抛 ProviderError(本层据 retryable 重试)。
-  fetchBalances: (account: Account, stored: Record<string, string>) => Promise<FetchOutcome>;
+  fetchBalances: (account: AccountSafe, stored: Record<string, string>) => Promise<FetchOutcome>;
   sleep?: (ms: number) => Promise<void>; // 默认 setTimeout;测试注入即时/捕获版做确定性重试测试
   log?: SyncLogger; // 默认 no-op;app 注入 LogTape logger(见 buildSyncDeps)
   // 写快照前重估余额(P7.4.2):app 注入 token 感知实现,仅 manual 用市场价改 usdValue,其余原样
   // (富化不重算)。best-effort:抛错则保留 provider 原值,不让定价故障拖垮同步。@folio/sync 本身不依赖 token 层。
-  revalue?: (accountType: AccountType, balances: Balance[]) => Promise<Balance[]>;
+  revalue?: (accountType: string, balances: Balance[]) => Promise<Balance[]>;
 }
 
 export interface AccountSyncResult {
@@ -138,17 +138,10 @@ export async function syncAccount(
   const ctxFields = { userId, accountId: account.id, type: account.type };
   try {
     const stored: Record<string, string> = rawCreds ? JSON.parse(rawCreds) : {};
-    const acc: Account = {
-      id: account.id,
-      userId: account.userId,
-      type: account.type,
-      network: account.network ?? undefined,
-      label: account.label,
-    };
-    // 取余额(解密/校验/ctx/provider 调用全在 balances.fetchBalances 内)。仅取数部分重试(写快照不重试);
+    // 取余额(解密/校验/ctx/provider 调用全在注入的 fetchBalances 内)。仅取数部分重试(写快照不重试);
     // 每次尝试加超时(挂住的 provider → 超时 → 按 retryable 重试),避免内联 triggerSync 被拖住。
     const outcome = await withRetry(
-      () => withTimeout(deps.fetchBalances(acc, stored), FETCH_TIMEOUT_MS),
+      () => withTimeout(deps.fetchBalances(account, stored), FETCH_TIMEOUT_MS),
       sleep,
       log,
       ctxFields,
@@ -176,11 +169,14 @@ export async function syncAccount(
       totalUsd,
       // 边界映射:Balance 契约用 value,快照层沿用 usdValue(不动表结构)。其余字段透传;
       // token 元信息(name/logo/tokenKey)不落快照,参考层是其 home(见 canonical 计划)。
+      // kind 透传:@folio/db 的 SnapshotBalanceInput.kind 仍取旧 @folio/balances BalanceKind
+      //(spot/defi/perp/manual),而 connectors Balance 是 5-kind 联合(perp_equity/perp_position/utxo)。
+      // 运行期 kind 只作 text 存储,类型迁移(db BalanceKind → connectors)属后续子片,此处按契约透传。
       balances: balances.map((b) => ({
         symbol: b.symbol,
         amount: b.amount,
         usdValue: b.value,
-        kind: b.kind,
+        kind: b.kind as WriteSnapshotInput["balances"][number]["kind"],
         tokenKey: b.tokenKey,
         meta: b.meta,
       })),

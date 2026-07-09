@@ -622,9 +622,9 @@ importers:
 
   packages/sync:
     dependencies:
-      '@folio/balances':
+      '@folio/connectors-basic':
         specifier: workspace:*
-        version: link:../balances/entry
+        version: link:../connectors/basic
       '@folio/db':
         specifier: workspace:*
         version: link:../db
