@@ -1,7 +1,8 @@
-import { generateSecret, type InputSpec } from "@folio/balances";
+import { generateSecret } from "@folio/connectors-basic";
 import { describe, expect, it } from "vitest";
 import {
   categorizeFields,
+  type InputSpec,
   isComplete,
   openCreds,
   SEMI_PREFIX,
@@ -11,7 +12,7 @@ import {
 
 const key = generateSecret();
 
-// 字段规格(= balances.credentialSpecs() 的形状:只 key+type+label,无 validator)。
+// 字段规格(= credentialSpecs() 的形状:只 key+type+label,无 validator)。
 const okx: InputSpec[] = [
   { key: "apiKey", type: "semi", label: "API Key" },
   { key: "secret", type: "secret", label: "API Secret" },

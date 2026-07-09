@@ -1,4 +1,4 @@
-import { maskCredential } from "@folio/balances";
+import { maskCredential } from "@folio/connectors-basic";
 import { Button, Input, Label } from "@folio/ui";
 import { useState } from "react";
 import { useTranslations } from "use-intl";

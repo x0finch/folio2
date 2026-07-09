@@ -1,5 +1,4 @@
 import { env } from "cloudflare:workers";
-import type { AccountType, InputSpec, Balance as LegacyBalance } from "@folio/balances";
 import {
   type ConnectorManifest,
   registry as connectorRegistry,
@@ -12,8 +11,11 @@ import type { AccountSafe } from "@folio/db";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import type { ProviderAsset, Tokens } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
+import type { AccountType } from "../account-types";
+import type { InputSpec } from "../creds";
 import { isComplete, openCreds } from "../creds";
 import { revalue } from "../revalue";
+import { connectorIdOf } from "./connectors";
 import { db } from "./db";
 import { warmFx } from "./fx";
 import { warmPlatformsForUser } from "./platforms";
@@ -62,24 +64,8 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   }
 }
 
-// 并存期分派表:account.type → connectorId(已迁移的 connector)。其余走旧 @folio/balances 路径。
-// 每迁一片在此加一行;#37 全迁完 + 删旧包后,本表 + connectorIdOf 一并退场。
-const CONNECTOR_ID_BY_ACCOUNT_TYPE: Record<string, string> = {
-  onchain_evm: "evm",
-  onchain_bitcoin: "bitcoin",
-  onchain_solana: "solana",
-  onchain_sui: "sui",
-  onchain_cosmos: "cosmos",
-  exchange_binance: "binance",
-  exchange_okx: "okx",
-  perp_hyperliquid: "hyperliquid",
-  manual: "manual",
-};
-function connectorIdOf(accountType: string): string | null {
-  return CONNECTOR_ID_BY_ACCOUNT_TYPE[accountType] ?? null;
-}
-
-// 经新 @folio/connectors 取余额(并存期分派的 connector 分支)。前置(缺凭据 / 校验 / 选 provider)走快回退。
+// 经 @folio/connectors 取余额(connector 分派分支)。前置(缺凭据 / 校验 / 选 provider)走快回退。
+// account.type → connectorId 映射见 ./connectors 的 connectorIdOf。
 async function fetchViaConnector(
   cid: string,
   manifest: ConnectorManifest,
@@ -90,7 +76,7 @@ async function fetchViaConnector(
   const specs = manifest.account.creds as unknown as InputSpec[]; // {key,type} 结构 = InputSpec
   if (!isComplete(specs, stored)) return { status: "needs-credentials" };
   const plain = await openCreds(specs, stored, env.SECRETS_KEY);
-  // 取数前再跑一次 account.creds 校验闸(与旧 balances.fetchBalances 一致):脏/畸形 identifier 快速失败
+  // 取数前再跑一次 account.creds 校验闸:脏/畸形 identifier 快速失败
   //(CredentialValidationError 非 ProviderError → 非重试、隔离),不退化成"打坏地址 → 4xx → 白重试"。
   const validated = await validateCredentials(manifest.account.creds, plain);
   const provider = selectProvider(manifest);
@@ -134,13 +120,7 @@ export function buildSyncDeps(): SyncDeps {
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
     // 写快照前重估(P7.4.2):盯市类型(manual / onchain_bitcoin)用市场价改 value(@folio/sync 不依赖 token 层,逻辑注入在此)。
-    // revalue 本体仍讲旧 @folio/balances 类型(AccountType + 旧 Balance);SyncDeps 已切到 string + connectors Balance。
-    // 运行期结构兼容,此处于注入边界做类型桥接(旧 balances 类型迁移属后续子片,不改 revalue 本体)。
-    revalue: (type, rows) =>
-      revalue(
-        tokens,
-        type as AccountType,
-        rows as unknown as LegacyBalance[],
-      ) as unknown as Promise<typeof rows>,
+    // revalue 已讲 connectors Balance;SyncDeps 的 accountType 是 string(并存期其值即旧 account.type)→ 收窄到 AccountType。
+    revalue: (type, rows) => revalue(tokens, type as AccountType, rows),
   };
 }

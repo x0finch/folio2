@@ -1,9 +1,9 @@
-import type { AccountType } from "@folio/balances";
 import { Button, Drawer, Input, StatefulButton, toast } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
+import type { AccountType } from "../lib/account-types";
 import type { OverviewBalance } from "../lib/account-view";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";

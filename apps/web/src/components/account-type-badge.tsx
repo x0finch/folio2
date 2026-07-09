@@ -1,5 +1,4 @@
-import type { AccountType } from "@folio/balances";
-import { typeLabel } from "../lib/account-types";
+import { type AccountType, typeLabel } from "../lib/account-types";
 
 // 账户类型徽章:统一的 muted 小标(仅 shadcn 设计 token,不用任意色值)。列表行与详情头共用。
 export function AccountTypeBadge({ type }: { type: AccountType }) {
