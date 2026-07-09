@@ -1,4 +1,5 @@
 import { refKey, type TokenGroup, type TokenRef } from "@folio/tokens";
+import { categoryOf } from "./connector-category";
 
 // symbol 归一(与 tokens 层同口径:trim + 大写)—— 仅用于未解析行的分组键/身份。
 const norm = (s: string): string => s.trim().toUpperCase();
@@ -43,16 +44,20 @@ export interface Holding {
   sources: HoldingSource[];
 }
 
-// 账户 connectorId → 平台单元的 **key**(CEX/perp/manual/链上原生)。行为保持不变(#37d 由 <类别>_<具体>
-// 前缀判定改为 connectorId 直接归类):evm 用具体链(network),其余链上用 connectorId 自身。
-// 只产 key;name + logo(含兜底)整个归 @folio/platforms,由 server 读路径装饰。
-const EXCHANGE_CONNECTORS = new Set(["binance", "okx"]);
-const PERP_CONNECTORS = new Set(["hyperliquid"]);
+// 账户 connectorId → 平台单元的 **key**(CEX/perp/manual/链上原生)。类别归类取共享单一事实源
+// connector-category.CONNECTOR_CATEGORY(与 add-account 分组同表)。只产 key;name+logo 归读路径装饰
+//(场馆走连接器自带、链上走 @folio/platforms,见 #52)。未知 connectorId → 兜底按链上处理。
 function platformIdFromAccount(connectorId: string, network?: string | null): string {
-  if (EXCHANGE_CONNECTORS.has(connectorId)) return `exchange:${connectorId}`;
-  if (PERP_CONNECTORS.has(connectorId)) return `perp:${connectorId}`;
-  if (connectorId === "manual") return "manual";
-  return `chain:${network ?? connectorId}`; // evm(network=具体链)/bitcoin/solana/sui/cosmos
+  switch (categoryOf(connectorId)) {
+    case "exchange":
+      return `exchange:${connectorId}`;
+    case "perp":
+      return `perp:${connectorId}`;
+    case "manual":
+      return "manual";
+    default:
+      return `chain:${network ?? connectorId}`; // onchain(evm 用具体链 network)+ 未知兜底
+  }
 }
 
 // 持有点的平台 key:链上优先按 tokenKey 的链前缀拆(同账户多链 → 多 source);否则按账户 connectorId。
