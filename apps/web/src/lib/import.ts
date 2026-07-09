@@ -28,7 +28,7 @@ export interface ImportSnapshotBalance {
 export interface ImportDeps {
   categorize(accountType: string): InputKinds;
   createAccount(input: {
-    type: string;
+    connectorId: string;
     network?: string;
     label: string;
     creds: string;
@@ -88,7 +88,7 @@ export function createImporter(deps: ImportDeps) {
           else if (semiKeys.includes(k)) stored[SEMI_PREFIX + k] = v;
         }
         const created = await deps.createAccount({
-          type: accountType,
+          connectorId: accountType,
           network: typeof rec.network === "string" ? rec.network : undefined,
           label: String(rec.label ?? ""),
           creds: JSON.stringify(stored),

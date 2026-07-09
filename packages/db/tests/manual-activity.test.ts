@@ -35,7 +35,7 @@ beforeEach(async () => {
 });
 
 async function manualAccount(userId: string) {
-  return createAccount(env, userId, { type: "manual", label: "M", creds: "{}" });
+  return createAccount(env, userId, { connectorId: "manual", label: "M", creds: "{}" });
 }
 
 describe("manual_activity ops", () => {

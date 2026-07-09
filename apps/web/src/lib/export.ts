@@ -5,7 +5,7 @@ export const EXPORT_VERSION = 1;
 
 interface AccountIn {
   id: string;
-  type: string;
+  connectorId: string;
   network: string | null;
   label: string;
 }
@@ -47,7 +47,7 @@ export function accountRecord(account: AccountIn, safeCreds: Record<string, stri
   return {
     type: "account" as const,
     id: account.id,
-    accountType: account.type,
+    accountType: account.connectorId,
     network: account.network ?? undefined,
     label: account.label,
     creds: safeCreds,

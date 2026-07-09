@@ -9,14 +9,14 @@ const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 // 擦除版类型(= 进 registry 后 manifest 暴露的形状),ctx 的 creds 走宽松 map,与其它 provider 测一致。
 const provider: BalanceProvider<Balance> = hyperliquidProvider;
 
-// 新 FetchContext 形状:account.creds(AC:identifier)+ creds(PC,hyperliquid 恒空)。
-function ctx(overrides?: { identifier?: string }) {
+// 新 FetchContext 形状:account.creds(AC:address)+ creds(PC,hyperliquid 恒空)。
+function ctx(overrides?: { address?: string }) {
   return {
     account: {
       id: "a1",
       label: "HL",
       connectorId: "hyperliquid",
-      creds: { identifier: overrides?.identifier ?? ADDR },
+      creds: { address: overrides?.address ?? ADDR },
     },
     creds: {},
   };

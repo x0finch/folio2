@@ -14,15 +14,15 @@ const ZPUB84 =
 const RECV0 = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
 const RECV1 = "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g";
 
-// 新 FetchContext 形状:account.creds(AC:identifier + scriptType)+ creds(PC:空)。
+// 新 FetchContext 形状:account.creds(AC:addressOrXpub + scriptType)+ creds(PC:空)。
 // CredsOf 把两字段都作必填键(scriptType 值可为 undefined),故显式带上 scriptType 键。
-function ctx(input: { identifier: string; scriptType?: ScriptType } = { identifier: ADDR }) {
+function ctx(input: { addressOrXpub: string; scriptType?: ScriptType } = { addressOrXpub: ADDR }) {
   return {
     account: {
       id: "a1",
       label: "Cold",
       connectorId: "bitcoin",
-      creds: { identifier: input.identifier, scriptType: input.scriptType },
+      creds: { addressOrXpub: input.addressOrXpub, scriptType: input.scriptType },
     },
     creds: {},
   };
@@ -44,7 +44,7 @@ describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () 
   it("录制响应 → 预期 Utxo[](已确认→amount;未确认→meta.pendingSats;value=0;kind=utxo)", async () => {
     mockBlockbook({ address: addressFixture.response });
     const out = await blockbookProvider.fetchBalances(
-      ctx({ identifier: addressFixture.request.identifier }),
+      ctx({ addressOrXpub: addressFixture.request.addressOrXpub }),
     );
     expect(out).toEqual(addressFixture.expected);
   });
@@ -59,7 +59,7 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
   it("录制 xpub 响应 → 预期 Utxo[](分布仅非零 + receive/change;收款指引 lastUsed + 本地派生 next)", async () => {
     mockBlockbook({ xpub: xpubFixture.response });
     const out = await blockbookProvider.fetchBalances(
-      ctx({ identifier: xpubFixture.request.identifier }),
+      ctx({ addressOrXpub: xpubFixture.request.addressOrXpub }),
     );
     expect(out).toEqual(xpubFixture.expected);
   });
@@ -77,7 +77,7 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
         ],
       },
     });
-    const [b] = await blockbookProvider.fetchBalances(ctx({ identifier: ZPUB84 }));
+    const [b] = await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }));
     const meta = b.meta as {
       addresses: { address: string }[];
       receive: { lastUsed: { index: number }; next: { index: number }[] };
@@ -90,7 +90,7 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
 
   it("请求打到 /xpub/ 且带 zpub token(zpub 前缀权威,scriptType 被忽略)", async () => {
     const spy = mockBlockbook({ xpub: xpubFixture.response });
-    await blockbookProvider.fetchBalances(ctx({ identifier: ZPUB84, scriptType: "legacy" }));
+    await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84, scriptType: "legacy" }));
     const url = String(spy.mock.calls[0][0]);
     expect(url).toContain("/xpub/");
     expect(url).toContain(ZPUB84); // 仍以 zpub 查询,未被 scriptType=legacy 改写
@@ -116,10 +116,10 @@ describe("blockbookProvider.fetchBalances — 错误映射", () => {
   });
 });
 
-describe("identifier 校验(account.creds 的 validator)", () => {
+describe("addressOrXpub 校验(account.creds 的 validator)", () => {
   const accept = (id: string, extra: Record<string, string> = {}) =>
-    validateCredentials(bitcoinAccountCreds, { identifier: id, ...extra });
-  const reject = (id: string) => expect(accept(id)).rejects.toThrow(/identifier/);
+    validateCredentials(bitcoinAccountCreds, { addressOrXpub: id, ...extra });
+  const reject = (id: string) => expect(accept(id)).rejects.toThrow(/addressOrXpub/);
 
   it("接受地址 + xpub/ypub/zpub;scriptType 可选", async () => {
     await expect(accept("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")).resolves.toBeDefined();

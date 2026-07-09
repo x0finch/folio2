@@ -1,3 +1,4 @@
+import type { ConnectorId } from "@folio/connectors";
 import type { BalanceKind } from "@folio/connectors-basic";
 import {
   index,
@@ -8,7 +9,6 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import type { AccountType } from "./account-type";
 import { user } from "./auth-schema";
 
 // 身份表(user/session/account/verification)定义在 ./auth-schema(better-auth,P2.1)。
@@ -28,7 +28,7 @@ export const groups = sqliteTable(
   (t) => [index("groups_user_id_idx").on(t.userId)],
 );
 
-// 业务账户:被追踪的余额来源(钱包 / CEX / 永续 / manual),由 type 决定派哪个 provider。
+// 业务账户:被追踪的余额来源(钱包 / CEX / 永续 / manual),由 connectorId 决定派哪个 connector/provider。
 // ⚠️ 勿与 auth-schema.ts 的 `account`(better-auth 的登录方式链接表)混淆——只是单复数相近,
 //    语义完全不同:这张是「资产账户」,那张是「认证」。
 export const accounts = sqliteTable(
@@ -38,7 +38,7 @@ export const accounts = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    type: text("type").$type<AccountType>().notNull(),
+    connectorId: text("connector_id").$type<ConnectorId>().notNull(),
     network: text("network"),
     label: text("label").notNull(),
     // 凭据 map(JSON,db 当作不透明 blob、不解释内容):按字段 type 存——secret 字段值为 AES-GCM 密文,

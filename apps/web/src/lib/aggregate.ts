@@ -18,7 +18,7 @@ export interface AggInput {
   kind: string; // 归一后的 viewKind:spot | defi | perp_equity | perp_position | utxo
   tokenKey?: string | null;
   isMargin?: boolean; // perp 权益(保证金)—— 进聚合但明细标注
-  account: { id: string; label: string; type: string; network?: string | null };
+  account: { id: string; label: string; connectorId: string; network?: string | null };
   group?: TokenGroup; // 命中种子的展示分组
   ref?: TokenRef | null; // 解析出的规范 Token(单例组身份)
   name?: string;
@@ -43,17 +43,19 @@ export interface Holding {
   sources: HoldingSource[];
 }
 
-// 账户 type(<类别>_<具体>)→ 平台单元的 **key**(CEX/perp/manual/非 EVM 原生)。
+// 账户 connectorId → 平台单元的 **key**(CEX/perp/manual/链上原生)。行为保持不变(#37d 由 <类别>_<具体>
+// 前缀判定改为 connectorId 直接归类):evm 用具体链(network),其余链上用 connectorId 自身。
 // 只产 key;name + logo(含兜底)整个归 @folio/platforms,由 server 读路径装饰。
-function platformIdFromAccount(type: string, network?: string | null): string {
-  const specific = type.slice(type.indexOf("_") + 1);
-  if (type.startsWith("exchange_")) return `exchange:${specific}`;
-  if (type.startsWith("perp_")) return `perp:${specific}`;
-  if (type.startsWith("onchain_")) return `chain:${network ?? specific}`; // solana/sui/cosmos…
-  return "manual";
+const EXCHANGE_CONNECTORS = new Set(["binance", "okx"]);
+const PERP_CONNECTORS = new Set(["hyperliquid"]);
+function platformIdFromAccount(connectorId: string, network?: string | null): string {
+  if (EXCHANGE_CONNECTORS.has(connectorId)) return `exchange:${connectorId}`;
+  if (PERP_CONNECTORS.has(connectorId)) return `perp:${connectorId}`;
+  if (connectorId === "manual") return "manual";
+  return `chain:${network ?? connectorId}`; // evm(network=具体链)/bitcoin/solana/sui/cosmos
 }
 
-// 持有点的平台 key:链上优先按 tokenKey 的链前缀拆(同账户多链 → 多 source);否则按账户 type。
+// 持有点的平台 key:链上优先按 tokenKey 的链前缀拆(同账户多链 → 多 source);否则按账户 connectorId。
 function platformIdOf(row: AggInput): string {
   const tk = row.tokenKey;
   if (tk) {
@@ -62,7 +64,7 @@ function platformIdOf(row: AggInput): string {
     if (prefix.startsWith("eip155:") || prefix.startsWith("chain:")) return prefix;
     // coingecko:<id>(manual 选币)等无链前缀 → 落账户平台
   }
-  return platformIdFromAccount(row.account.type, row.account.network);
+  return platformIdFromAccount(row.account.connectorId, row.account.network);
 }
 
 // 单笔持仓的"代币身份"(用于判断组内是否单一 Token → 决定是否给 totalAmount)。

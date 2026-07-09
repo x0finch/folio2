@@ -29,7 +29,7 @@ import { BTC_ADDRESS_RE, EXT_PUBKEY_FULL_RE, EXT_PUBKEY_RE, SATS_PER_BTC } from 
 // @folio/connectors-provider-blockbook —— 只读 Bitcoin(bitcoin connector)。地址 + xpub 两模式。
 // 只做【整合】:取数走 @folio/blockbook-client(Trezor Blockbook,xpub 服务端派生、一次调用),
 // token 造型/本地下址派生走 @folio/bitcoin-derive,本包串起值/UtxoMeta 组装 + 契约映射。
-// identifier(public)= BTC 地址或扩展公钥;裸 xpub 用 scriptType(public)选脚本类型(zpub/ypub 前缀已定,忽略)。
+// addressOrXpub(public)= BTC 地址或扩展公钥;裸 xpub 用 scriptType(public)选脚本类型(zpub/ypub 前缀已定,忽略)。
 // 值不在此算:provider 只产已确认 BTC amount(value=0),交 app 的 revalue 盯市(token 层唯一价源)。
 // 纯包:blockbook-client / bitcoin-derive 均无 cloudflare:workers / env,不碰 SECRETS_KEY(原则 #5)。
 
@@ -134,11 +134,11 @@ async function fetchXpub(client: BlockbookClient, ext: string, scriptType: strin
 }
 
 // —— 账户级 creds(AC):BTC 地址或扩展公钥,public(明文落库、可导出重建)——
-// identifier:地址(1…/3…/bc1…)或 xpub/ypub/zpub;scriptType:仅裸 xpub 用(zpub/ypub 前缀已定、单地址无关),缺省由 recommendedScript 兜底。
+// addressOrXpub:地址(1…/3…/bc1…)或 xpub/ypub/zpub;scriptType:仅裸 xpub 用(zpub/ypub 前缀已定、单地址无关),缺省由 recommendedScript 兜底。
 // 账户 creds 声明随 provider(其天然消费者)落此;将来同 connector 多 provider 时提到 entry 共享。
 export const bitcoinAccountCreds = [
   {
-    key: "identifier",
+    key: "addressOrXpub",
     type: "public",
     label: "Bitcoin address or xpub",
     desc: "address (1…/3…/bc1…) or xpub/ypub/zpub",
@@ -167,7 +167,7 @@ export const blockbookProvider: BalanceProvider<
   creds: providerCreds,
 
   async fetchBalances(ctx): Promise<Utxo[]> {
-    const id = ctx.account.creds.identifier;
+    const id = ctx.account.creds.addressOrXpub;
     const client = createBlockbookClient();
     try {
       if (isExtendedPubkey(id)) return await fetchXpub(client, id, ctx.account.creds.scriptType);
@@ -180,7 +180,7 @@ export const blockbookProvider: BalanceProvider<
 
   // 轻量探活:地址模式打地址端点;xpub 模式造 token 打 xpub 端点(顺带校验扩展公钥可解析)。任何失败 → false。
   async validateAccount(ctx): Promise<boolean> {
-    const id = ctx.account.creds.identifier;
+    const id = ctx.account.creds.addressOrXpub;
     const client = createBlockbookClient();
     try {
       if (isExtendedPubkey(id)) {

@@ -135,7 +135,7 @@ export async function syncAccount(
   const log = deps.log ?? noopLogger;
   const sleep = deps.sleep ?? defaultSleep;
   // 安全字段(红线:绝不打 creds/secret/地址);userId 显式带,覆盖 cron 路径(无请求级 withContext)。
-  const ctxFields = { userId, accountId: account.id, type: account.type };
+  const ctxFields = { userId, accountId: account.id, connectorId: account.connectorId };
   try {
     const stored: Record<string, string> = rawCreds ? JSON.parse(rawCreds) : {};
     // 取余额(解密/校验/ctx/provider 调用全在注入的 fetchBalances 内)。仅取数部分重试(写快照不重试);
@@ -155,7 +155,7 @@ export async function syncAccount(
     let { balances, totalUsd } = outcome;
     if (deps.revalue) {
       try {
-        balances = await deps.revalue(account.type, balances);
+        balances = await deps.revalue(account.connectorId, balances);
         totalUsd = balances.reduce((sum, b) => sum + b.value, 0);
       } catch (e) {
         log.warning("revalue failed; keeping provider values", {

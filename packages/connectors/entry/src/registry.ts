@@ -41,7 +41,7 @@ export function selectProvider(manifest: ConnectorManifest): BalanceProvider<Bal
 // #33:solana/sui/cosmos(coinstats —— 一个 provider 包服务三个 connector);#34:binance/okx(CEX);
 // #35:hyperliquid(唯一的多 kind connector,吐 perp_equity + perp_position)。
 // #36:manual(custom —— 手动资产,无外部 API,单 kind:spot,携可选 meta.fixed)。全 9 个 connector 齐备。
-export const connectors: readonly ConnectorManifest[] = [
+export const connectors = [
   evm,
   bitcoin,
   solana,
@@ -51,5 +51,10 @@ export const connectors: readonly ConnectorManifest[] = [
   okx,
   hyperliquid,
   manual,
-];
+] as const satisfies readonly ConnectorManifest[];
 export const registry: ConnectorRegistry = buildRegistry(connectors);
+
+// connectorId 事实源(#37d):从 connectors 数组的 id 派生的字面量联合
+// = "evm"|"bitcoin"|"solana"|"sui"|"cosmos"|"binance"|"okx"|"hyperliquid"|"manual"。
+// db 的 account.connectorId 列类型与 app 的 ConnectorId 标注皆取自此单一事实源。
+export type ConnectorId = (typeof connectors)[number]["id"];

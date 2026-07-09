@@ -45,12 +45,14 @@ export interface ConnectorManifest {
 export function defineConnector<
   S extends z.core.$ZodType<Balance>,
   const AC extends readonly CredField[],
+  const Id extends string = string,
 >(m: {
-  id: string;
+  id: Id;
   label: string;
   logo: string;
   account: { creds: AC };
   balance: { schema: S; providers: BalanceProvider<z.infer<S>, AC>[] };
-}): ConnectorManifest {
-  return m as unknown as ConnectorManifest;
+}): ConnectorManifest & { readonly id: Id } {
+  // 保留字面量 id(#37d:entry registry 据此派生 ConnectorId 联合),仍向下兼容擦除版 ConnectorManifest。
+  return m as unknown as ConnectorManifest & { readonly id: Id };
 }

@@ -18,7 +18,7 @@ const okx: InputSpec[] = [
   { key: "secret", type: "secret", label: "API Secret" },
   { key: "passphrase", type: "secret", label: "Passphrase" },
 ];
-const onchain: InputSpec[] = [{ key: "identifier", type: "public", label: "EVM Address" }];
+const onchain: InputSpec[] = [{ key: "address", type: "public", label: "EVM Address" }];
 
 describe("sealCreds / openCreds", () => {
   it("encrypts only secret fields; public/semi stay plaintext; round-trips", async () => {
@@ -31,9 +31,9 @@ describe("sealCreds / openCreds", () => {
   });
 
   it("public field stays plaintext", async () => {
-    const sealed = await sealCreds(onchain, { identifier: "0xabc" }, key);
-    expect(sealed).toEqual({ identifier: "0xabc" });
-    expect(await openCreds(onchain, sealed, key)).toEqual({ identifier: "0xabc" });
+    const sealed = await sealCreds(onchain, { address: "0xabc" }, key);
+    expect(sealed).toEqual({ address: "0xabc" });
+    expect(await openCreds(onchain, sealed, key)).toEqual({ address: "0xabc" });
   });
 });
 
@@ -57,7 +57,7 @@ describe("isComplete (needs-credentials)", () => {
   it("true when every non-public field has a real value", async () => {
     const sealed = await sealCreds(okx, { apiKey: "K", secret: "S", passphrase: "P" }, key);
     expect(isComplete(okx, sealed)).toBe(true);
-    expect(isComplete(onchain, { identifier: "0xabc" })).toBe(true); // 仅 public
+    expect(isComplete(onchain, { address: "0xabc" })).toBe(true); // 仅 public
     expect(isComplete([], {})).toBe(true); // manual 无输入
   });
 
@@ -74,6 +74,6 @@ describe("categorizeFields", () => {
       semi: ["apiKey"],
       secret: ["secret", "passphrase"],
     });
-    expect(categorizeFields(onchain)).toEqual({ public: ["identifier"], semi: [], secret: [] });
+    expect(categorizeFields(onchain)).toEqual({ public: ["address"], semi: [], secret: [] });
   });
 });

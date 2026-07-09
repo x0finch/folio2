@@ -47,7 +47,7 @@ export const Route = createFileRoute("/api/export")({
                 // 安全投影(无需解密):public 原样、semi 打码、secret 丢弃 —— 绝不导出完整密钥。
                 const raw = await db.getRawCreds(userId, a.id);
                 const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
-                write(accountRecord(a, safeView(specsByType[a.type] ?? [], stored)));
+                write(accountRecord(a, safeView(specsByType[a.connectorId] ?? [], stored)));
               }
 
               for (const g of await db.listGroupsByUser(userId)) write(groupRecord(g));

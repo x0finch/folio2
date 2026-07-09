@@ -376,6 +376,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@folio/connectors':
+        specifier: workspace:*
+        version: link:../connectors/entry
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../connectors/basic

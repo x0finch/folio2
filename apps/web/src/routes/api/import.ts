@@ -1,7 +1,7 @@
+import type { ConnectorId } from "@folio/connectors";
 import type { SnapshotBalanceInput } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
-import type { AccountType } from "@/lib/account-types";
 import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
 import { categorizeFields } from "@/lib/creds";
@@ -27,13 +27,13 @@ export const Route = createFileRoute("/api/import")({
         if (!reader) return new Response("empty body", { status: 400 });
 
         const deps: ImportDeps = {
-          categorize: (type) => {
+          categorize: (connectorId) => {
             // 从公开字段规格按暴露级别分桶(import 重建 creds 用);不碰 provider 内部。
-            const f = categorizeFields(credentialSpecs()[type as AccountType] ?? []);
+            const f = categorizeFields(credentialSpecs()[connectorId as ConnectorId] ?? []);
             return { publicKeys: f.public, semiKeys: f.semi, secretKeys: f.secret };
           },
           createAccount: (input) =>
-            db.createAccount(userId, { ...input, type: input.type as AccountType }),
+            db.createAccount(userId, { ...input, connectorId: input.connectorId as ConnectorId }),
           createGroup: (input) => db.createGroup(userId, input),
           addAccountToGroup: (accountId, groupId) =>
             db.addAccountToGroup(userId, accountId, groupId),

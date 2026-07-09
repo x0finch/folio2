@@ -1,3 +1,4 @@
+import type { ConnectorId } from "@folio/connectors";
 import type { BalanceKind } from "@folio/connectors-basic";
 import {
   and,
@@ -9,7 +10,6 @@ import {
   inArray,
   max,
 } from "drizzle-orm";
-import type { AccountType } from "./account-type";
 import { type Db, type DbEnv, getDb } from "./client";
 import {
   accountGroups,
@@ -28,7 +28,7 @@ const BALANCE_INSERT_CHUNK = 12;
 const accountSafeColumns = {
   id: accounts.id,
   userId: accounts.userId,
-  type: accounts.type,
+  connectorId: accounts.connectorId,
   network: accounts.network,
   label: accounts.label,
   createdAt: accounts.createdAt,
@@ -55,7 +55,7 @@ async function assertGroupOwned(db: Db, userId: string, groupId: string): Promis
 // ---------- 账户 ----------
 
 export interface CreateAccountInput {
-  type: AccountType;
+  connectorId: ConnectorId;
   network?: string;
   label: string;
   creds: string | null; // 凭据 map 的 JSON(db 不解释);缺凭据态由 isComplete(inputs, creds) 在内存判定
@@ -73,13 +73,21 @@ export async function createAccount(
   await db.insert(accounts).values({
     id,
     userId,
-    type: input.type,
+    connectorId: input.connectorId,
     network,
     label: input.label,
     creds: input.creds,
     createdAt,
   });
-  return { id, userId, type: input.type, network, label: input.label, createdAt, archivedAt: null };
+  return {
+    id,
+    userId,
+    connectorId: input.connectorId,
+    network,
+    label: input.label,
+    createdAt,
+    archivedAt: null,
+  };
 }
 
 export function listAccountsByUser(env: DbEnv, userId: string): Promise<AccountSafe[]> {

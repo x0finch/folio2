@@ -1,3 +1,4 @@
+import type { ConnectorId } from "@folio/connectors";
 import type { TokenInfo } from "@folio/tokens";
 import {
   Button,
@@ -16,7 +17,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { cloneElement, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { type AccountType, type OnchainType, TYPE_GROUPS, typeLabel } from "../lib/account-types";
+import { type OnchainType, TYPE_GROUPS, typeLabel } from "../lib/account-types";
 import {
   BTC_SCRIPT_OPTIONS,
   isBareXpub,
@@ -35,9 +36,14 @@ import { syncOneAccount } from "../lib/server/sync";
 import { tokenPrice } from "../lib/server/tokens";
 import { TokenPicker } from "./token-picker";
 
-// 按类型派发到对应 server fn(键适配:通用字段 identifier→address 等)。统一成单个 createAccount 留 follow-up。
-async function submitAccount(type: AccountType, label: string, values: Record<string, string>) {
-  if (type === "manual") {
+// 按 connectorId 派发到对应 server fn(#37d:地址字段键随 connector —— bitcoin=addressOrXpub、其余=address;
+// manual 的 identifier 是 CGK 选币 id,语义不同故保留)。统一成单个 createAccount 留 follow-up。
+async function submitAccount(
+  connectorId: ConnectorId,
+  label: string,
+  values: Record<string, string>,
+) {
+  if (connectorId === "manual") {
     return createManualAccount({
       data: {
         label,
@@ -49,10 +55,10 @@ async function submitAccount(type: AccountType, label: string, values: Record<st
       },
     });
   }
-  if (type === "exchange_binance" || type === "exchange_okx") {
+  if (connectorId === "binance" || connectorId === "okx") {
     return createExchangeAccount({
       data: {
-        type,
+        connectorId,
         label,
         apiKey: values.apiKey ?? "",
         secret: values.secret ?? "",
@@ -60,15 +66,16 @@ async function submitAccount(type: AccountType, label: string, values: Record<st
       },
     });
   }
-  if (type === "perp_hyperliquid") {
-    return createPerpAccount({ data: { type, label, address: values.identifier ?? "" } });
+  if (connectorId === "hyperliquid") {
+    return createPerpAccount({ data: { connectorId, label, address: values.address ?? "" } });
   }
-  // 其余为链上类型(注册表只暴露已实现的 onchain_*)。bitcoin 额外带 scriptType(仅 xpub 用)。
+  // 其余为链上类型(注册表只暴露已实现的链)。bitcoin 用 addressOrXpub 键 + scriptType(仅 xpub 用),其余用 address。
+  const address = connectorId === "bitcoin" ? (values.addressOrXpub ?? "") : (values.address ?? "");
   return createOnchainAccount({
     data: {
-      type: type as OnchainType,
+      connectorId: connectorId as OnchainType,
       label,
-      address: values.identifier ?? "",
+      address,
       // BitcoinFields 只写入合法枚举值;服务端再经 zod enum 校验兜底。
       scriptType: (values.scriptType as ScriptType | undefined) || undefined,
     },
@@ -222,7 +229,7 @@ function GenericFields({
           <Input
             id={`add-${s.key}`}
             type={s.type === "secret" ? "password" : "text"}
-            required={s.type !== "public" || s.key === "identifier"}
+            required={s.type !== "public" || s.key === "address"}
             // secret 用 new-password:Chrome 对 password 框忽略 autoComplete="off",会回填本站登录账号/密码;
             // 标成"新密码"既不回填,也打断"前一个文本框=用户名"的登录表单配对,连带 API Key 也不再被填。
             autoComplete={s.type === "secret" ? "new-password" : "off"}
@@ -248,23 +255,23 @@ function BitcoinFields({
   setValues: (fn: (v: Record<string, string>) => Record<string, string>) => void;
 }) {
   const ti = useTranslations("Inputs");
-  const idSpec = specs.find((s) => s.key === "identifier");
-  const id = values.identifier ?? "";
+  const idSpec = specs.find((s) => s.key === "addressOrXpub");
+  const id = values.addressOrXpub ?? "";
   // ypub/zpub 前缀已定类型的只读展示文案(具名变量,不在 JSX 里塞 IIFE)。
   const detected = BTC_SCRIPT_OPTIONS.find((o) => o.value === recommendedScript(id));
   const detectedLabel = detected ? `${ti(detected.label)} · ${detected.addressPrefix}` : "";
   return (
     <>
       <div className="flex flex-col gap-2">
-        <Label htmlFor="add-identifier">{ti(idSpec?.label ?? "Bitcoin address or xpub")}</Label>
+        <Label htmlFor="add-addressOrXpub">{ti(idSpec?.label ?? "Bitcoin address or xpub")}</Label>
         <Input
-          id="add-identifier"
+          id="add-addressOrXpub"
           required
           value={id}
           placeholder={idSpec?.desc ? ti(idSpec.desc) : undefined}
           onChange={(val) =>
             setValues((v) => {
-              const next: Record<string, string> = { ...v, identifier: val };
+              const next: Record<string, string> = { ...v, addressOrXpub: val };
               // 只有裸 xpub 才歧义、需 scriptType(默认 Native);ypub/zpub 前缀已定、单地址无关 → 不带。
               if (isBareXpub(val)) next.scriptType = recommendedScript(val);
               else delete next.scriptType;
@@ -314,7 +321,7 @@ function AccountForm({
   specs,
   onDone,
 }: {
-  type: AccountType;
+  type: ConnectorId;
   specs: InputSpec[];
   onDone: (accountId: string) => void;
 }) {
@@ -349,7 +356,7 @@ function AccountForm({
       </div>
       {type === "manual" ? (
         <ManualFields values={values} setValues={setValues} />
-      ) : type === "onchain_bitcoin" ? (
+      ) : type === "bitcoin" ? (
         <BitcoinFields specs={specs} values={values} setValues={setValues} />
       ) : (
         <GenericFields specs={specs} values={values} setValues={setValues} />
@@ -379,7 +386,7 @@ export function AddAccountSheet({ triggerRender }: { triggerRender?: React.React
   const tCat = useTranslations("Accounts");
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [type, setType] = useState<AccountType>("manual");
+  const [type, setType] = useState<ConnectorId>("manual");
   // 字段规格部署内静态 → 长 staleTime,几乎只取一次。
   const specsQuery = useQuery({
     queryKey: ["credentialSpecs"],
@@ -407,7 +414,7 @@ export function AddAccountSheet({ triggerRender }: { triggerRender?: React.React
 
         <div className="mt-4 flex flex-col gap-2">
           <Label>{t("accountType")}</Label>
-          <Select value={type} onValueChange={(v) => setType(v as AccountType)}>
+          <Select value={type} onValueChange={(v) => setType(v as ConnectorId)}>
             <SelectTrigger>
               {/* 显示选中类型的展示名(label,由 SelectItem 注册),而非裸 type 值。 */}
               <SelectValue />

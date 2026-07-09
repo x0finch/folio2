@@ -2,15 +2,23 @@ import type { AccountSafe } from "@folio/db";
 import { describe, expect, it } from "vitest";
 import { type SyncDeps, syncAllUsers } from "../src";
 
-// manual 账户(成功路径);bad-type 账户(无 provider → getProvider 抛 → syncAccount 捕获 → ok:false)。
+// manual 账户(成功路径);failing 账户(fetchBalances 抛 → syncAccount 捕获 → ok:false)。
 function manual(id: string, userId: string): AccountSafe {
-  return { id, userId, type: "manual", network: null, label: id, createdAt: 0, archivedAt: null };
+  return {
+    id,
+    userId,
+    connectorId: "manual",
+    network: null,
+    label: id,
+    createdAt: 0,
+    archivedAt: null,
+  };
 }
 function badType(id: string, userId: string): AccountSafe {
   return {
     id,
     userId,
-    type: "exchange_bybit",
+    connectorId: "binance",
     network: null,
     label: id,
     createdAt: 0,
@@ -24,10 +32,10 @@ function makeDeps(accountsByUser: Record<string, AccountSafe[]>): SyncDeps {
     listAccounts: async (userId) => accountsByUser[userId] ?? [],
     listRawCreds: async () => [],
     writeSnapshot: async (_u, accountId) => `snap-${accountId}`,
-    // manual → ok;未知 type(无 provider)→ 抛(模拟 balances.fetchBalances 内 getProvider 兜底报错)。
+    // manual → ok;其余 → 抛(模拟 balances.fetchBalances 内取数失败)。
     fetchBalances: async (account) => {
-      if (account.type === "manual") return { status: "ok", balances: [], totalUsd: 0 };
-      throw new Error(`No provider registered for account type: ${account.type}`);
+      if (account.connectorId === "manual") return { status: "ok", balances: [], totalUsd: 0 };
+      throw new Error(`fetch failed for connectorId: ${account.connectorId}`);
     },
   };
 }
