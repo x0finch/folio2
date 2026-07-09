@@ -2,14 +2,15 @@ import type { ScriptType } from "@folio/bitcoin-derive";
 import { validateCredentials } from "@folio/connectors-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bitcoinAccountCreds, blockbookProvider } from "../src";
+import addressFixture from "./fixtures/address.json";
+import xpubFixture from "./fixtures/xpub.json";
 
 // provider 只整合:取数走 @folio/blockbook-client(Trezor Blockbook)。这里按 URL(/xpub/ vs /address/)
 // 打桩 fetch,断言整合后的 Utxo/UtxoMeta。派生正确性在 @folio/bitcoin-derive 的离线向量测里。
-
+// 主 golden 走 JSON fixture(request 原始请求 / response 录制返回 / expected 预期结果三件一体,可直接肉眼核)。
 const ADDR = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
 const ZPUB84 =
   "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
-// ZPUB84 native 派生(BIP84 向量):0/0、0/1
 const RECV0 = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
 const RECV1 = "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g";
 
@@ -39,15 +40,13 @@ function mockBlockbook(opts: { xpub?: unknown; address?: unknown; status?: numbe
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("blockbookProvider.fetchBalances — 地址模式", () => {
-  it("已确认 → amount(BTC);未确认 → meta.pendingSats;value=0;kind=utxo", async () => {
-    mockBlockbook({ address: { address: ADDR, balance: "8000000", unconfirmedBalance: "500000" } });
-    const [b] = await blockbookProvider.fetchBalances(ctx());
-    expect(b.symbol).toBe("BTC");
-    expect(b.kind).toBe("utxo");
-    expect(b.amount).toBe(0.08);
-    expect(b.value).toBe(0);
-    expect(b.meta.pendingSats).toBe(500000);
+describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () => {
+  it("录制响应 → 预期 Utxo[](已确认→amount;未确认→meta.pendingSats;value=0;kind=utxo)", async () => {
+    mockBlockbook({ address: addressFixture.response });
+    const out = await blockbookProvider.fetchBalances(
+      ctx({ identifier: addressFixture.request.identifier }),
+    );
+    expect(out).toEqual(addressFixture.expected);
   });
 
   it("零余额零未确认 → 空", async () => {
@@ -56,36 +55,13 @@ describe("blockbookProvider.fetchBalances — 地址模式", () => {
   });
 });
 
-describe("blockbookProvider.fetchBalances — xpub 模式(Blockbook 服务端派生)", () => {
-  const XPUB_BODY = {
-    address: ZPUB84,
-    balance: "80000", // Blockbook 已汇总
-    unconfirmedBalance: "0",
-    txs: 3,
-    tokens: [
-      { name: RECV0, path: "m/84'/0'/0'/0/0", transfers: 2, balance: "50000" },
-      { name: "bc1qchange0", path: "m/84'/0'/0'/1/0", transfers: 1, balance: "30000" },
-    ],
-  };
-
-  it("顶层 balance → amount;分布(仅非零,含 receive/change);收款指引(lastUsed + 本地派生 next)", async () => {
-    mockBlockbook({ xpub: XPUB_BODY });
-    const [b] = await blockbookProvider.fetchBalances(ctx({ identifier: ZPUB84 }));
-    expect(b.amount).toBe(0.0008); // 80000 sats(不逐地址求和,用顶层)
-    const meta = b.meta as {
-      addresses: { address: string; chain: string; balanceSats: number }[];
-      receive: {
-        lastUsed: { index: number; address: string };
-        next: { index: number; address: string }[];
-      };
-    };
-    expect(meta.addresses.map((a) => a.address).sort()).toEqual([RECV0, "bc1qchange0"].sort());
-    expect(meta.addresses.find((a) => a.address === "bc1qchange0")?.chain).toBe("change");
-    // lastUsed = 外部链最大已用(0/0);next 本地派生 0/1、0/2
-    expect(meta.receive.lastUsed).toEqual({ index: 0, address: RECV0 });
-    expect(meta.receive.next[0]).toEqual({ index: 1, address: RECV1 });
-    expect(meta.receive.next).toHaveLength(2);
-    expect(meta.receive.next[1].index).toBe(2);
+describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbook 服务端派生)", () => {
+  it("录制 xpub 响应 → 预期 Utxo[](分布仅非零 + receive/change;收款指引 lastUsed + 本地派生 next)", async () => {
+    mockBlockbook({ xpub: xpubFixture.response });
+    const out = await blockbookProvider.fetchBalances(
+      ctx({ identifier: xpubFixture.request.identifier }),
+    );
+    expect(out).toEqual(xpubFixture.expected);
   });
 
   it("已用但零余额地址(如仅 mempool 收过款)算 lastUsed,但不进分布", async () => {
@@ -113,7 +89,7 @@ describe("blockbookProvider.fetchBalances — xpub 模式(Blockbook 服务端派
   });
 
   it("请求打到 /xpub/ 且带 zpub token(zpub 前缀权威,scriptType 被忽略)", async () => {
-    const spy = mockBlockbook({ xpub: XPUB_BODY });
+    const spy = mockBlockbook({ xpub: xpubFixture.response });
     await blockbookProvider.fetchBalances(ctx({ identifier: ZPUB84, scriptType: "legacy" }));
     const url = String(spy.mock.calls[0][0]);
     expect(url).toContain("/xpub/");

@@ -63,13 +63,14 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   }
 }
 
-// 并存期分派:account.type → connectorId(已迁移的 evm / bitcoin)。其余返回 null → 走旧 @folio/balances 路径。
-// #37 删旧包时,全部 type 迁到 connectors 后本函数可退场。
+// 并存期分派表:account.type → connectorId(已迁移的 connector)。其余走旧 @folio/balances 路径。
+// 每迁一片在此加一行;#37 全迁完 + 删旧包后,本表 + connectorIdOf 一并退场。
+const CONNECTOR_ID_BY_ACCOUNT_TYPE: Record<string, string> = {
+  onchain_evm: "evm",
+  onchain_bitcoin: "bitcoin",
+};
 function connectorIdOf(accountType: string): string | null {
-  return (
-    ({ onchain_evm: "evm", onchain_bitcoin: "bitcoin" } as Record<string, string>)[accountType] ??
-    null
-  );
+  return CONNECTOR_ID_BY_ACCOUNT_TYPE[accountType] ?? null;
 }
 
 // 经新 @folio/connectors 取余额(并存期分派的 connector 分支)。前置(缺凭据 / 校验 / 选 provider)走快回退。
