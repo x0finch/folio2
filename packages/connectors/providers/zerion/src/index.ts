@@ -221,6 +221,18 @@ const providerCreds = [
   },
 ] as const satisfies readonly CredField[];
 
+// 取该地址的全量仓位(与 getChainIds 对称,抽为独立方法)。网络/状态码错误 → ProviderError;
+// 非法 JSON → PARSE_ERROR。
+async function getPositions(address: string, apiKey: string): Promise<ZerionPositionsResponse> {
+  const res = await zerionGet(`${POSITIONS_PATH(address)}?${POSITIONS_QUERY}`, apiKey);
+  ensureOk(res);
+  try {
+    return (await res.json()) as ZerionPositionsResponse;
+  } catch (cause) {
+    throw new ProviderError("PARSE_ERROR", "zerion returned invalid JSON", { cause });
+  }
+}
+
 export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof providerCreds> = {
   id: "zerion",
   label: "Zerion",
@@ -235,18 +247,11 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
     const address = ctx.account.creds.identifier;
     // 链映射与 positions 并行取;链映射拿不到会抛错(Promise.all 一并 reject)→ 整轮同步失败重试,
     // 保证 parsePositions 拿到非空映射、只产规范 eip155 标识(失败即不产,不写含分叉标识的快照)。
-    const [res, chainIds] = await Promise.all([
-      zerionGet(`${POSITIONS_PATH(address)}?${POSITIONS_QUERY}`, apiKey),
+    const [positions, chainIds] = await Promise.all([
+      getPositions(address, apiKey),
       getChainIds(apiKey),
     ]);
-    ensureOk(res);
-    let json: ZerionPositionsResponse;
-    try {
-      json = (await res.json()) as ZerionPositionsResponse;
-    } catch (cause) {
-      throw new ProviderError("PARSE_ERROR", "zerion returned invalid JSON", { cause });
-    }
-    return parsePositions(json, chainIds);
+    return parsePositions(positions, chainIds);
   },
 
   // 低消耗校验:打轻量 portfolio 端点探活(地址已由 validateCredentials 保证格式)。任何失败 → false。
