@@ -1,4 +1,4 @@
-import type { UtxoMeta } from "@folio/connectors";
+import type { UtxoMeta } from "@folio/connectors-basic";
 import { toast } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import {

@@ -91,3 +91,5 @@ export type DefiMeta = z.infer<typeof DefiMeta>;
 export type PerpEquityMeta = z.infer<typeof PerpEquityMeta>;
 export type PerpPositionMeta = z.infer<typeof PerpPositionMeta>;
 export type UtxoMeta = z.infer<typeof UtxoMeta>;
+export type UtxoAddress = z.infer<typeof UtxoAddress>;
+export type UtxoReceive = z.infer<typeof UtxoReceive>;

@@ -3,7 +3,7 @@ import {
   type DefiMeta as DefiMetaT,
   UtxoMeta,
   type UtxoMeta as UtxoMetaT,
-} from "@folio/connectors";
+} from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
 import { type PerpView, toPerpView } from "./perp";
 

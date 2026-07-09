@@ -3,7 +3,7 @@ import {
   type PerpEquityMeta as PerpEquityMetaT,
   PerpPositionMeta,
   type PerpPositionMeta as PerpPositionMetaT,
-} from "@folio/connectors";
+} from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
 
 // 纯逻辑(无 server-only import → 可单测,route 保持纯展示)。
