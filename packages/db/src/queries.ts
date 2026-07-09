@@ -1,4 +1,4 @@
-import type { AccountType, BalanceKind } from "@folio/balances";
+import type { BalanceKind } from "@folio/connectors-basic";
 import {
   and,
   asc,
@@ -9,6 +9,7 @@ import {
   inArray,
   max,
 } from "drizzle-orm";
+import type { AccountType } from "./account-type";
 import { type Db, type DbEnv, getDb } from "./client";
 import {
   accountGroups,

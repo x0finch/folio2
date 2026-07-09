@@ -1,8 +1,6 @@
 packages:
   - "packages/*"
   - "packages/clients/*"
-  - "packages/balances/*"
-  - "packages/balances/providers/*"
   - "packages/connectors/*"
   - "packages/connectors/providers/*"
   - "packages/tokens/*"
