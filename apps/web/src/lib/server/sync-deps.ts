@@ -115,7 +115,11 @@ async function fetchViaConnector(
   return { status: "ok", balances: rows, totalUsd };
 }
 
-// 经旧 @folio/balances 取余额(尚未迁移的 account type)。#37 全迁完后本分支退场。
+/**
+ * @deprecated 并存期旧路径:经旧 @folio/balances 取尚未迁移的 account type。
+ * 后续每片(#32–#36)把一类 connector 迁进 @folio/connectors,本路径随之缩小;
+ * #37 全迁完 + 删旧包后连同 connectorIdOf 一并移除。新 connector 一律走 fetchViaConnector。
+ */
 async function fetchViaBalances(
   account: Account,
   stored: Record<string, string>,
