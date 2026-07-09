@@ -3,6 +3,7 @@ import { binance } from "./connectors/binance";
 import { bitcoin } from "./connectors/bitcoin";
 import { cosmos } from "./connectors/cosmos";
 import { evm } from "./connectors/evm";
+import { hyperliquid } from "./connectors/hyperliquid";
 import { okx } from "./connectors/okx";
 import { solana } from "./connectors/solana";
 import { sui } from "./connectors/sui";
@@ -36,7 +37,8 @@ export function selectProvider(manifest: ConnectorManifest): BalanceProvider<Bal
 }
 
 // 全部 connector 在此登记(各 connector 文件逐个填入)。#31:evm(zerion);#32:bitcoin(blockbook);
-// #33:solana/sui/cosmos(coinstats —— 一个 provider 包服务三个 connector);#34:binance/okx(CEX)。
+// #33:solana/sui/cosmos(coinstats —— 一个 provider 包服务三个 connector);#34:binance/okx(CEX);
+// #35:hyperliquid(唯一的多 kind connector,吐 perp_equity + perp_position)。
 export const connectors: readonly ConnectorManifest[] = [
   evm,
   bitcoin,
@@ -45,5 +47,6 @@ export const connectors: readonly ConnectorManifest[] = [
   cosmos,
   binance,
   okx,
+  hyperliquid,
 ];
 export const registry: ConnectorRegistry = buildRegistry(connectors);

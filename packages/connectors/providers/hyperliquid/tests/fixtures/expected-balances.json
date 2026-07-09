@@ -1,0 +1,45 @@
+[
+  {
+    "symbol": "USDC",
+    "amount": 13109.482328,
+    "value": 13109.482328,
+    "kind": "perp_equity",
+    "meta": {
+      "withdrawable": 13104.514502,
+      "totalMarginUsed": 4.967826,
+      "totalNtlPos": 100.02765
+    }
+  },
+  {
+    "symbol": "ETH",
+    "amount": 0.0335,
+    "value": 0,
+    "kind": "perp_position",
+    "meta": {
+      "side": "long",
+      "entryPx": 2986.3,
+      "positionValue": 100.02765,
+      "unrealizedPnl": -0.0134,
+      "leverage": 20,
+      "leverageType": "isolated",
+      "liquidationPx": 2866.26936529,
+      "marginUsed": 4.967826
+    }
+  },
+  {
+    "symbol": "BTC",
+    "amount": -0.01,
+    "value": 0,
+    "kind": "perp_position",
+    "meta": {
+      "side": "short",
+      "entryPx": 64000,
+      "positionValue": 640,
+      "unrealizedPnl": 12.5,
+      "leverage": 10,
+      "leverageType": "cross",
+      "liquidationPx": null,
+      "marginUsed": 64
+    }
+  }
+]
