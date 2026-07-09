@@ -45,10 +45,22 @@ describe("zerion provider.validateAccount", () => {
   });
 });
 
-describe("zerion provider.validateCreds", () => {
-  it("presence check: true when key present, false when absent", async () => {
-    expect(await provider.validateCreds?.({ ZERION_API_KEY: "k" })).toBe(true);
+describe("zerion provider.validateCreds — 实测打 /v1/chains/(只需 key)", () => {
+  it("key 缺失/空 → false,且不发请求", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    expect(await provider.validateCreds?.({ ZERION_API_KEY: "" })).toBe(false);
     expect(await provider.validateCreds?.({})).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("打 /v1/chains/:200 → true;401 → false", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    expect(await provider.validateCreds?.({ ZERION_API_KEY: "k" })).toBe(true);
+    expect(String(spy.mock.calls[0][0])).toContain("/v1/chains/");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
+    expect(await provider.validateCreds?.({ ZERION_API_KEY: "k" })).toBe(false);
   });
 });
 

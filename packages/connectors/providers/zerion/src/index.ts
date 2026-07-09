@@ -266,8 +266,16 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
     }
   },
 
-  // provider 自身 creds liveness:仅存在性检查(有 key 即认为可用)。
+  // provider 自身 creds liveness:用 key 实测打 /v1/chains/(只需 key、不需地址)→ res.ok,
+  // 真正验证 key 有效而非仅存在性检查。key 缺失则直接 false 不发请求。
   async validateCreds(creds): Promise<boolean> {
-    return Boolean(creds[ZERION_API_KEY]);
+    const apiKey = creds[ZERION_API_KEY];
+    if (!apiKey) return false;
+    try {
+      const res = await zerionGet(CHAINS_PATH, apiKey);
+      return res.ok;
+    } catch {
+      return false;
+    }
   },
 };
