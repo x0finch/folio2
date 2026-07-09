@@ -120,7 +120,7 @@ async function fetchViaConnector(
  * 后续每片(#32–#36)把一类 connector 迁进 @folio/connectors,本路径随之缩小;
  * #37 全迁完 + 删旧包后连同 connectorIdOf 一并移除。新 connector 一律走 fetchViaConnector。
  */
-async function fetchViaBalances(
+async function deprecatedFetchViaBalances(
   account: Account,
   stored: Record<string, string>,
   tokens: Tokens,
@@ -150,7 +150,7 @@ export function buildSyncDeps(): SyncDeps {
       const cid = connectorIdOf(account.type);
       const manifest = cid ? getConnector(connectorRegistry, cid) : undefined;
       if (cid && manifest) return fetchViaConnector(cid, manifest, account, stored, tokens);
-      return fetchViaBalances(account, stored, tokens);
+      return deprecatedFetchViaBalances(account, stored, tokens);
     },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
