@@ -1,0 +1,53 @@
+[
+  {
+    "symbol": "SOL",
+    "name": "Solana",
+    "amount": 12.5,
+    "price": 150,
+    "value": 1875,
+    "kind": "spot"
+  },
+  {
+    "symbol": "USDC",
+    "tokenKey": "chain:solana/token:epjfwdd5aufqssqem2qn1xzybapc8g4weggkzwytdt1v",
+    "name": "USD Coin",
+    "amount": 500,
+    "price": 1,
+    "value": 500,
+    "kind": "spot"
+  },
+  {
+    "symbol": "CT",
+    "tokenKey": "chain:solana/token:6fuwecxzrqeh2wyutg3xeqhgt4wsbiubsdd1pyw3pump",
+    "name": "Crypto Twitter",
+    "amount": 1010,
+    "price": 0.00001,
+    "value": 0.010100000000000001,
+    "kind": "spot"
+  },
+  {
+    "symbol": "UNP",
+    "tokenKey": "chain:solana/token:unpriced11111111111111111111111111111111111",
+    "name": "Unpriced Token",
+    "amount": 100,
+    "value": 0,
+    "kind": "spot"
+  },
+  {
+    "symbol": "SUI",
+    "name": "Sui",
+    "amount": 40,
+    "price": 3.5,
+    "value": 140,
+    "kind": "spot"
+  },
+  {
+    "symbol": "ATOM",
+    "tokenKey": "chain:cosmos/token:uatom",
+    "name": "Cosmos Hub",
+    "amount": 105.29550851642641,
+    "price": 1.592410066278476,
+    "value": 167.6736276954684,
+    "kind": "spot"
+  }
+]

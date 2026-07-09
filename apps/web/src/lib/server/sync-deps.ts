@@ -68,6 +68,9 @@ export async function warmTokensForUser(userId: string): Promise<void> {
 const CONNECTOR_ID_BY_ACCOUNT_TYPE: Record<string, string> = {
   onchain_evm: "evm",
   onchain_bitcoin: "bitcoin",
+  onchain_solana: "solana",
+  onchain_sui: "sui",
+  onchain_cosmos: "cosmos",
 };
 function connectorIdOf(accountType: string): string | null {
   return CONNECTOR_ID_BY_ACCOUNT_TYPE[accountType] ?? null;
