@@ -1,25 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { parseBalances } from "../src";
-import fixture from "./fixtures/balances.json";
-import expected from "./fixtures/expected-balances.json";
+import cosmosFixture from "./fixtures/cosmos.json";
+import cosmosExpected from "./fixtures/expected-cosmos.json";
+import solanaExpected from "./fixtures/expected-solana.json";
+import suiExpected from "./fixtures/expected-sui.json";
+import solanaFixture from "./fixtures/solana.json";
+import suiFixture from "./fixtures/sui.json";
 
-// 两份 fixture 一一对应:balances.json(录制的真实 wallet/balance 响应,解析器输入)→
-// expected-balances.json(解析后的结构化期望值,固化在文件里逐一对比,不散写在断言里)。
-// 覆盖:value=amount*price、kind=spot、链无关映射(Solana/Sui/Cosmos)、每条 coin 自带 chain、
-// null price→0、原生币(无 contract)→无 tokenKey、跳过无 symbol。
-// JSON 无法表达 undefined → expected 省略未定义字段(toEqual 视缺键与 undefined 等价);
-// 非整数乘积(CT/ATOM)在 fixture 里以位级相等的十进制字面量固化。
-// fallbackChain 传 "solana"(与旧 @folio/balances 测一致);fixture 每条 coin 自带 chain,故不触发兜底。
-describe("parseBalances (golden: fixture in → fixture out)", () => {
-  const balances = parseBalances(fixture, "solana");
-
-  it("maps the recorded response to expected-balances", () => {
-    expect(balances).toEqual(expected);
+// golden 按链分开:每条链一份「录制的 wallet/balance 响应(输入)→ 结构化预期(输出)」,
+// 用该链的 connectionId 作 fallbackChain 调 parseBalances,期望固化在文件里逐一对比。
+// 覆盖:value=amount*price、kind=spot、每条 coin 自带 chain、null price→0、
+// 原生币(无 contract)→ 无 tokenKey、跳过无 symbol;以及【无 chain 的 coin 退化按 fallbackChain 归链】。
+describe("parseBalances — 按链 golden(fixture in → fixture out)", () => {
+  it("solana(含跳过无 symbol 一条)", () => {
+    const out = parseBalances(solanaFixture, "solana");
+    expect(out).toEqual(solanaExpected);
+    expect(out.every((b) => b.symbol.length > 0)).toBe(true); // 无空 symbol
   });
 
-  it("excludes the no-symbol entry", () => {
-    // fixture 有 7 条,其中 1 条 symbol 为空 → 解析结果与 expected 同长,且无空 symbol。
-    expect(balances).toHaveLength(expected.length);
-    expect(balances.every((b) => b.symbol.length > 0)).toBe(true);
+  it("sui(connectionId=sui-wallet;无 chain 的合约币退化按 fallbackChain 归链 → chain:sui-wallet/…)", () => {
+    // sui 的 connectionId 是 "sui-wallet"(非 "sui")。无 chain 字段的 coin 走 fallbackChain,
+    // 故 tokenKey 归到 chain:sui-wallet(behavior-preserving:与旧 @folio/balances 一致)。
+    expect(parseBalances(suiFixture, "sui-wallet")).toEqual(suiExpected);
+  });
+
+  it("cosmos", () => {
+    expect(parseBalances(cosmosFixture, "cosmos")).toEqual(cosmosExpected);
   });
 });

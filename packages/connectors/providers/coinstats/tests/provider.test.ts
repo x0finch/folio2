@@ -2,7 +2,7 @@ import type { Balance, BalanceProvider } from "@folio/connectors-basic";
 import { validateCredentials } from "@folio/connectors-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { coinstatsAccountCreds, createCoinstatsProvider } from "../src";
-import fixture from "./fixtures/balances.json";
+import solanaFixture from "./fixtures/solana.json";
 
 const SUI = "0xc0ffee254729296a45a3885639AC7E10F9d54979c0ffee254729296a45a38856";
 
@@ -47,9 +47,9 @@ describe("coinstats fetchBalances", () => {
   it("sends X-API-KEY and parses balances", async () => {
     const spy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify(fixture), { status: 200 }));
+      .mockResolvedValue(new Response(JSON.stringify(solanaFixture), { status: 200 }));
     const balances = await provider.fetchBalances(ctx());
-    expect(balances).toHaveLength(6);
+    expect(balances).toHaveLength(4); // solana fixture 5 条,1 条无 symbol 被跳过
     expect((spy.mock.calls[0][1]?.headers as Record<string, string>)["X-API-KEY"]).toBe("k");
   });
 
@@ -90,12 +90,25 @@ describe("coinstats validateAccount", () => {
   });
 });
 
-describe("coinstats provider.validateCreds", () => {
+describe("coinstats provider.validateCreds — 实测打 /wallet/blockchains(只需 key)", () => {
   const provider: BalanceProvider<Balance> = createCoinstatsProvider("solana");
 
-  it("presence check: true when key present, false when absent", async () => {
-    expect(await provider.validateCreds?.({ COINSTATS_API_KEY: "k" })).toBe(true);
+  it("key 缺失/空 → false,且不发请求", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    expect(await provider.validateCreds?.({ COINSTATS_API_KEY: "" })).toBe(false);
     expect(await provider.validateCreds?.({})).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("打 /wallet/blockchains:200 → true(带 X-API-KEY);401 → false", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("[]", { status: 200 }));
+    expect(await provider.validateCreds?.({ COINSTATS_API_KEY: "k" })).toBe(true);
+    expect(String(spy.mock.calls[0][0])).toContain("/wallet/blockchains");
+    expect((spy.mock.calls[0][1]?.headers as Record<string, string>)["X-API-KEY"]).toBe("k");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
+    expect(await provider.validateCreds?.({ COINSTATS_API_KEY: "k" })).toBe(false);
   });
 });
 

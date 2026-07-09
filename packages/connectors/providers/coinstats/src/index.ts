@@ -8,7 +8,13 @@ import {
 } from "@folio/connectors-basic";
 import { buildTokenKey } from "@folio/tokens-basic";
 import { z } from "zod";
-import { API_KEY_HEADER, BALANCE_PATH, COINSTATS_API_BASE, COINSTATS_API_KEY } from "./constants";
+import {
+  API_KEY_HEADER,
+  BALANCE_PATH,
+  BLOCKCHAINS_PATH,
+  COINSTATS_API_BASE,
+  COINSTATS_API_KEY,
+} from "./constants";
 
 // @folio/connectors-provider-coinstats —— 首个【一个 provider 包 → 多个 connector】的用例(方案 A 工厂)。
 // 一个数据源服务多条链(Solana / Sui / Cosmos),共享内部实现;工厂按 connectionId 产出一个 provider,
@@ -141,6 +147,20 @@ async function validateCoinstats(connectionId: string, ctx: CoinstatsCtx): Promi
   }
 }
 
+// provider 自身 creds(COINSTATS_API_KEY)liveness:用 key 实测打 /wallet/blockchains
+//(只需 key、不需地址)—— 真正验证 key 有效,而非仅存在性检查。任何失败 → false。
+async function validateApiKey(apiKey: string): Promise<boolean> {
+  if (!apiKey) return false;
+  try {
+    const res = await fetch(`${COINSTATS_API_BASE}${BLOCKCHAINS_PATH}`, {
+      headers: { [API_KEY_HEADER]: apiKey, accept: "application/json" },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // 工厂:为一条链绑定其 connectionId,产出一个 BalanceProvider(共享上面实现)。
 // 三份 connector manifest(solana/sui/cosmos)各调一次 → 一个 provider 包服务多个 connector。
 export function createCoinstatsProvider(
@@ -152,6 +172,6 @@ export function createCoinstatsProvider(
     creds: providerCreds,
     fetchBalances: (ctx) => fetchCoinstats(connectionId, ctx),
     validateAccount: (ctx) => validateCoinstats(connectionId, ctx),
-    validateCreds: async (creds) => Boolean(creds[COINSTATS_API_KEY]),
+    validateCreds: (creds) => validateApiKey(creds[COINSTATS_API_KEY]),
   };
 }

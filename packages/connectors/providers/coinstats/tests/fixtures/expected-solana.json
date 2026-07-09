@@ -21,7 +21,7 @@
     "tokenKey": "chain:solana/token:6fuwecxzrqeh2wyutg3xeqhgt4wsbiubsdd1pyw3pump",
     "name": "Crypto Twitter",
     "amount": 1010,
-    "price": 0.00001,
+    "price": 1e-5,
     "value": 0.010100000000000001,
     "kind": "spot"
   },
@@ -31,23 +31,6 @@
     "name": "Unpriced Token",
     "amount": 100,
     "value": 0,
-    "kind": "spot"
-  },
-  {
-    "symbol": "SUI",
-    "name": "Sui",
-    "amount": 40,
-    "price": 3.5,
-    "value": 140,
-    "kind": "spot"
-  },
-  {
-    "symbol": "ATOM",
-    "tokenKey": "chain:cosmos/token:uatom",
-    "name": "Cosmos Hub",
-    "amount": 105.29550851642641,
-    "price": 1.592410066278476,
-    "value": 167.6736276954684,
     "kind": "spot"
   }
 ]

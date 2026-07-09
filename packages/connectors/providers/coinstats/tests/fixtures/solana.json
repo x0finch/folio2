@@ -2,19 +2,16 @@
   {
     "coinId": "solana",
     "amount": 12.5,
-    "decimals": 9,
     "contractAddress": null,
     "chain": "solana",
     "name": "Solana",
     "symbol": "SOL",
     "price": 150.0,
-    "priceBtc": 0.0025,
     "connectionId": "solana"
   },
   {
     "coinId": "usd-coin_solana",
     "amount": 500,
-    "decimals": 6,
     "contractAddress": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "chain": "solana",
     "name": "USD Coin",
@@ -25,18 +22,16 @@
   {
     "coinId": "ct_solana",
     "amount": 1010,
-    "decimals": 6,
     "contractAddress": "6fUwECXzRQeh2wYuTg3xeQHGt4wSbiUbsdd1PYw3pump",
     "chain": "solana",
     "name": "Crypto Twitter",
     "symbol": "CT",
-    "price": 0.00001,
+    "price": 1e-5,
     "connectionId": "solana"
   },
   {
     "coinId": "unpriced_solana",
     "amount": 100,
-    "decimals": 0,
     "contractAddress": "Unpriced11111111111111111111111111111111111",
     "chain": "solana",
     "name": "Unpriced Token",
@@ -45,31 +40,8 @@
     "connectionId": "solana"
   },
   {
-    "coinId": "sui",
-    "amount": 40,
-    "decimals": 9,
-    "contractAddress": null,
-    "chain": "sui",
-    "name": "Sui",
-    "symbol": "SUI",
-    "price": 3.5,
-    "connectionId": "sui-wallet"
-  },
-  {
-    "coinId": "cosmos",
-    "amount": 105.29550851642641,
-    "decimals": null,
-    "contractAddress": "uatom",
-    "chain": "cosmos",
-    "name": "Cosmos Hub",
-    "symbol": "ATOM",
-    "price": 1.592410066278476,
-    "connectionId": "cosmos"
-  },
-  {
     "coinId": "nosymbol_solana",
     "amount": 7,
-    "decimals": 0,
     "contractAddress": "NoSymbol1111111111111111111111111111111111",
     "chain": "solana",
     "name": "No Symbol",
