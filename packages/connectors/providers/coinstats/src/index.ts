@@ -52,7 +52,14 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ro
       value: amount * (c.price ?? 0),
       kind: "spot",
       // 链/合约身份走 tokenKey(CAIP-19),不再进 meta;现货行无展示用 meta → 省略。
-      tokenKey: buildTokenKey({ chain, contract: c.contractAddress ?? undefined }),
+      // 有合约 → chain:<slug>/token:<addr>;无合约(原生币 SOL/SUI…)→ chain:<slug>/native:<sym>
+      // (与 evm eip155:.../native、bitcoin chain:bitcoin/native 口径一致;native key 解析时降级 symbol,见 tokens service)。
+      tokenKey: buildTokenKey({
+        chain,
+        contract: c.contractAddress ?? undefined,
+        native: c.contractAddress == null,
+        symbol,
+      }),
       name: c.name,
     });
   }

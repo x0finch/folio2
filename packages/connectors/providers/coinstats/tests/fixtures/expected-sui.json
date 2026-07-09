@@ -5,7 +5,8 @@
     "amount": 40,
     "price": 3.5,
     "value": 140,
-    "kind": "spot"
+    "kind": "spot",
+    "tokenKey": "chain:sui/native:sui"
   },
   {
     "symbol": "XSUI",

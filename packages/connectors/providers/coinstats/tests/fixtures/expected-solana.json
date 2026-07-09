@@ -5,7 +5,8 @@
     "amount": 12.5,
     "price": 150,
     "value": 1875,
-    "kind": "spot"
+    "kind": "spot",
+    "tokenKey": "chain:solana/native:sol"
   },
   {
     "symbol": "USDC",
