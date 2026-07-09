@@ -74,6 +74,7 @@ const CONNECTOR_ID_BY_ACCOUNT_TYPE: Record<string, string> = {
   exchange_binance: "binance",
   exchange_okx: "okx",
   perp_hyperliquid: "hyperliquid",
+  manual: "manual",
 };
 function connectorIdOf(accountType: string): string | null {
   return CONNECTOR_ID_BY_ACCOUNT_TYPE[accountType] ?? null;

@@ -1,0 +1,25 @@
+{
+  "single manual holding (value = amount × unitPrice, no meta)": [
+    { "symbol": "BTC", "amount": 0.5, "price": 64000, "value": 32000, "kind": "spot" }
+  ],
+  "picked CoinGecko id → coingecko tokenKey (sync-time market valuation)": [
+    {
+      "symbol": "BTC",
+      "amount": 1,
+      "price": 64000,
+      "value": 64000,
+      "kind": "spot",
+      "tokenKey": "coingecko:bitcoin"
+    }
+  ],
+  "fixed surfaced to meta (sync skips market valuation)": [
+    {
+      "symbol": "BTC",
+      "amount": 1,
+      "price": 64000,
+      "value": 64000,
+      "kind": "spot",
+      "meta": { "fixed": true }
+    }
+  ]
+}
