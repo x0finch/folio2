@@ -1,5 +1,5 @@
 {
-  "name": "@folio/connectors",
+  "name": "@folio/connectors-provider-coinstats",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,9 +13,7 @@
   },
   "dependencies": {
     "@folio/connectors-basic": "workspace:*",
-    "@folio/connectors-provider-blockbook": "workspace:*",
-    "@folio/connectors-provider-coinstats": "workspace:*",
-    "@folio/connectors-provider-zerion": "workspace:*",
+    "@folio/tokens-basic": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {

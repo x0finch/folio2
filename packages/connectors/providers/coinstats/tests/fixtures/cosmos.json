@@ -1,0 +1,12 @@
+[
+  {
+    "coinId": "cosmos",
+    "amount": 105.29550851642641,
+    "contractAddress": "uatom",
+    "chain": "cosmos",
+    "name": "Cosmos Hub",
+    "symbol": "ATOM",
+    "price": 1.592410066278476,
+    "connectionId": "cosmos"
+  }
+]
