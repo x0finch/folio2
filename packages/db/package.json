@@ -18,7 +18,7 @@
     "@folio/fx": "workspace:*",
     "better-auth": "^1.6.21",
     "drizzle-orm": "^0.45.2",
-    "@folio/balances": "workspace:*"
+    "@folio/connectors-basic": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.20",

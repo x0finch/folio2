@@ -1,4 +1,4 @@
-import type { AccountType, BalanceKind } from "@folio/balances";
+import type { BalanceKind } from "@folio/connectors-basic";
 import {
   index,
   integer,
@@ -8,6 +8,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { AccountType } from "./account-type";
 import { user } from "./auth-schema";
 
 // 身份表(user/session/account/verification)定义在 ./auth-schema(better-auth,P2.1)。
@@ -41,7 +42,7 @@ export const accounts = sqliteTable(
     network: text("network"),
     label: text("label").notNull(),
     // 凭据 map(JSON,db 当作不透明 blob、不解释内容):按字段 type 存——secret 字段值为 AES-GCM 密文,
-    // public/semi 明文;导入待补录的 semi 以 `semi_<key>` 占位记录打码片段(见 @folio/balances creds.ts / P6.6.1)。
+    // public/semi 明文;导入待补录的 semi 以 `semi_<key>` 占位记录打码片段(见 app lib/creds.ts / P6.6.1)。
     // 缺凭据态由 `isComplete(provider.inputs, creds)` 在内存判定,不再用列是否为 null。
     // 物理列名沿用历史的 `enc_credentials`(P1.4 起,避免一次纯改名迁移);字段名 creds 才是当前语义。
     // P6.6.2:manual 持仓也并入 creds(symbol/amount/usdValue 三个 public 输入),原 data_json 列已删。

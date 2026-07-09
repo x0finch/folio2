@@ -169,14 +169,13 @@ export async function syncAccount(
       totalUsd,
       // 边界映射:Balance 契约用 value,快照层沿用 usdValue(不动表结构)。其余字段透传;
       // token 元信息(name/logo/tokenKey)不落快照,参考层是其 home(见 canonical 计划)。
-      // kind 透传:@folio/db 的 SnapshotBalanceInput.kind 仍取旧 @folio/balances BalanceKind
-      //(spot/defi/perp/manual),而 connectors Balance 是 5-kind 联合(perp_equity/perp_position/utxo)。
-      // 运行期 kind 只作 text 存储,类型迁移(db BalanceKind → connectors)属后续子片,此处按契约透传。
+      // kind 透传:db 的 SnapshotBalanceInput.kind 与 connectors Balance 同为 5-kind 联合
+      //(spot/defi/perp_equity/perp_position/utxo,#37c 起 db 直取 @folio/connectors-basic),直接透传。
       balances: balances.map((b) => ({
         symbol: b.symbol,
         amount: b.amount,
         usdValue: b.value,
-        kind: b.kind as WriteSnapshotInput["balances"][number]["kind"],
+        kind: b.kind,
         tokenKey: b.tokenKey,
         meta: b.meta,
       })),
