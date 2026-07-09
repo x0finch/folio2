@@ -16,7 +16,12 @@ export const hyperliquid = defineConnector({
   label: "Hyperliquid",
   logo: HYPERLIQUID_LOGO,
   account: { creds: hyperliquidAccountCreds },
-  // 多 kind connector:schema = 该 connector 会吐的 kind 子集判别联合(perp_equity | perp_position)。
+  // balance.schema = 该 connector 会吐的 kind 子集,是 defineConnector 推断 provider 输出类型 B 的**事实源**:
+  //   B = z.infer<typeof schema>,fetchBalances 被窄化到 B → 写错 kind(如 spot)编译即挂(见 provider 的 Row)。
+  // 多 kind(perp 同时吐 perp_equity + perp_position)→ 用 z.discriminatedUnion("kind", [...]);
+  //   判别键 "kind" 让 zod 按 kind 路由,也是 B 的判别式。
+  // 单 kind connector(如 bitcoin 只吐 utxo、solana 只吐 spot)则直接把那个 kind schema(Utxo / Spot)当 schema,无需包一层 union。
+  // (schema 现主要供类型推断;运行时可选 schema.parse 校验 provider 输出,registry/桥当前不强制。)
   balance: {
     schema: z.discriminatedUnion("kind", [PerpEquity, PerpPosition]),
     providers: [hyperliquidProvider],
