@@ -1,4 +1,4 @@
-import type { BalanceKind } from "@folio/balances";
+import type { BalanceKind } from "@folio/connectors-basic";
 import { SEMI_PREFIX } from "./creds";
 import { EXPORT_VERSION } from "./export";
 

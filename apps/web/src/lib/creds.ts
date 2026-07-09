@@ -1,7 +1,16 @@
-import { decrypt, encrypt, type InputSpec, maskCredential } from "@folio/balances";
+import { decrypt, encrypt, maskCredential } from "@folio/connectors-basic";
+
+// provider 的 CredField 的可序列化投影(剥掉不可序列化的 validator,前端/塑形只需 key+type+label)。
+// 由 lib/server/connectors.ts 的 credentialSpecs() 从 connector manifest 的 account.creds 派生。
+export interface InputSpec {
+  key: string;
+  type: "public" | "semi" | "secret";
+  label: string; // 兼作 i18n key;desc 同理
+  desc?: string;
+}
 
 // 凭据的【存储/导出/导入】塑形 —— 业务层的事(app 拥有 SECRETS_KEY 与 DB)。全部只靠字段的 {key,type}
-// (= balances.credentialSpecs() 的 InputSpec)+ 通用 crypto 驱动,不碰 provider/validator。
+// (= credentialSpecs() 的 InputSpec)+ 通用 crypto 驱动,不碰 provider/validator。
 // 存储模型(P6.6.1):一个 creds map,按字段 type 决定加密 —— 只有 secret 加密,public/semi 明文。
 // 导入待补录账户用 SEMI_PREFIX 占位记录 semi 的打码片段(区分"占位 vs 真值")。
 export const SEMI_PREFIX = "semi_";
@@ -21,7 +30,7 @@ export async function sealCreds(
   return out;
 }
 
-// 存库 map → 明文 creds(给 balances.fetchBalances / validate):secret 解密,其余原样。缺失/占位字段不带出。
+// 存库 map → 明文 creds(给 connector 取数 / 校验):secret 解密,其余原样。缺失/占位字段不带出。
 export async function openCreds(
   specs: readonly InputSpec[],
   stored: Record<string, string>,

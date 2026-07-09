@@ -1,10 +1,9 @@
-import type { ScriptType } from "@folio/balances";
-
 // Bitcoin add-account 的脚本类型 UI 辅助(客户端安全:纯字符串,不引 @scure 派生库)。
-// ScriptType 由 provider 定义、经 @folio/balances type-only 转发(单一事实源);此处只做前缀识别与预选,
-// 与 provider 的 recommendedScript 同口径(那份含派生库,不能进客户端 bundle)。
+// ScriptType 本地定义(与 @folio/bitcoin-derive 的 provider 侧同口径;那份含 @scure 派生库,不能进客户端 bundle);
+// SCRIPT_TYPE_VALUES 的 `satisfies readonly ScriptType[]` 守着与枚举的漂移。
 
-export type { ScriptType };
+// bitcoin 派生脚本类型(与 blockbook/@folio/bitcoin-derive 一致的四值)。
+export type ScriptType = "native" | "nested" | "taproot" | "legacy";
 
 export const SATS_PER_BTC = 100_000_000;
 

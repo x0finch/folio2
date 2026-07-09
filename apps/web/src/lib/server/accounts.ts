@@ -3,22 +3,20 @@ import type { AccountSafe } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { AccountType } from "../account-types";
 import { SCRIPT_TYPE_VALUES } from "../bitcoin-scripts";
 import { isComplete, safeView, sealCreds } from "../creds";
 import { requireAuth } from "../require-auth";
-import { balances } from "./balances";
+import { credentialSpecs, validateAccountCreds } from "./connectors";
 import { db } from "./db";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 type/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);
 
-// balances 只负责校验/探活(validateCredentials)与字段规格(credentialSpecs);加密/脱敏/补录判定走业务层
-// creds.ts(seal/safeView/isComplete),按字段 type 驱动。SECRETS_KEY 只在本层(app)见,不进 balances。
-const raw2sealed = async (
-  type: Parameters<typeof balances.validateCredentials>[0]["type"],
-  values: Record<string, string>,
-) =>
-  JSON.stringify(await sealCreds(balances.credentialSpecs()[type] ?? [], values, env.SECRETS_KEY));
+// connectors 层只负责校验/探活(validateAccountCreds)与字段规格(credentialSpecs);加密/脱敏/补录判定走业务层
+// creds.ts(seal/safeView/isComplete),按字段 type 驱动。SECRETS_KEY 只在本层(app)见,不进 connectors。
+const raw2sealed = async (type: AccountType, values: Record<string, string>) =>
+  JSON.stringify(await sealCreds(credentialSpecs()[type] ?? [], values, env.SECRETS_KEY));
 
 // 富化:把每账户的 raw creds 投影成 needsCredentials + credsSafe(public 原样、semi 打码、secret 丢弃);
 // raw creds(含 secret 密文)绝不出网,只出投影。
@@ -30,7 +28,7 @@ export const listMyAccounts = createServerFn({ method: "GET" })
       db.listRawCredsByUser(context.userId),
     ]);
     const rawById = new Map(rawList.map((r) => [r.id, r.creds]));
-    const specsByType = balances.credentialSpecs();
+    const specsByType = credentialSpecs();
     return accounts.map((a) => {
       const raw = rawById.get(a.id);
       const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
@@ -64,7 +62,7 @@ export const createManualAccount = createServerFn({ method: "POST" })
       ...(data.identifier ? { identifier: data.identifier } : {}),
       ...(data.fixed ? { fixed: "1" } : {}),
     };
-    await balances.validateCredentials({ type: "manual" }, raw); // 形状校验闸(manual 无需探活)
+    await validateAccountCreds("manual", raw); // 形状校验闸(manual 无需探活)
     const account = await db.createAccount(context.userId, {
       type: "manual",
       label: data.label,
@@ -80,17 +78,17 @@ export const createManualAccount = createServerFn({ method: "POST" })
     return account;
   });
 
-// 地址类账户(链上 + perp):地址→identifier(public)。validateCredentials({liveness}) 内部按 usesGlobalKeys
-// 收窄全局 key + provider.validate,活性失败即抛(地址无效/不可达或服务端缺 key),通过才封装。
+// 地址类账户(链上 + perp):地址→identifier(public)。validateAccountCreds({liveness}) 内部注入 provider
+// 声明的 env key + provider.validateAccount,活性失败即抛(地址无效/不可达或服务端缺 key),通过才封装。
 async function createAddressAccount(
   userId: string,
-  type: Parameters<typeof balances.validateCredentials>[0]["type"],
+  type: AccountType,
   label: string,
   address: string,
   extra?: Record<string, string>, // bitcoin xpub 的 scriptType 等附加 public 输入
 ): Promise<AccountSafe> {
   const raw = { identifier: address, ...extra };
-  await balances.validateCredentials({ type, label, userId }, raw, { liveness: true });
+  await validateAccountCreds(type, raw, { liveness: true, label });
   const account = await db.createAccount(userId, {
     type,
     label,
@@ -154,11 +152,7 @@ export const createExchangeAccount = createServerFn({ method: "POST" })
     // passphrase 可选(仅 okx):缺省则不放进 values,由 provider.inputs 的 validator 判定是否必填。
     const values: Record<string, string> = { apiKey: data.apiKey, secret: data.secret };
     if (data.passphrase !== undefined) values.passphrase = data.passphrase;
-    await balances.validateCredentials(
-      { type: data.type, label: data.label, userId: context.userId },
-      values,
-      { liveness: true },
-    );
+    await validateAccountCreds(data.type, values, { liveness: true, label: data.label });
     const account = await db.createAccount(context.userId, {
       type: data.type,
       label: data.label,
@@ -179,11 +173,7 @@ export const provideCredentials = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const account = await db.getAccountById(context.userId, data.accountId);
     if (!account) throw new Error("account not found");
-    await balances.validateCredentials(
-      { type: account.type, label: account.label, userId: context.userId, id: account.id },
-      data.creds,
-      { liveness: true },
-    );
+    await validateAccountCreds(account.type, data.creds, { liveness: true, label: account.label });
     await db.setAccountCredentials(
       context.userId,
       account.id,

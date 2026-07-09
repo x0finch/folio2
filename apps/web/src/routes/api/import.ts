@@ -1,11 +1,12 @@
-import type { AccountType } from "@folio/balances";
+import type { SnapshotBalanceInput } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
+import type { AccountType } from "@/lib/account-types";
 import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
 import { categorizeFields } from "@/lib/creds";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "@/lib/import";
-import { balances } from "@/lib/server/balances";
+import { credentialSpecs } from "@/lib/server/connectors";
 import { db } from "@/lib/server/db";
 
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。鉴权同其它 server fn。
@@ -28,7 +29,7 @@ export const Route = createFileRoute("/api/import")({
         const deps: ImportDeps = {
           categorize: (type) => {
             // 从公开字段规格按暴露级别分桶(import 重建 creds 用);不碰 provider 内部。
-            const f = categorizeFields(balances.credentialSpecs()[type as AccountType] ?? []);
+            const f = categorizeFields(credentialSpecs()[type as AccountType] ?? []);
             return { publicKeys: f.public, semiKeys: f.semi, secretKeys: f.secret };
           },
           createAccount: (input) =>
@@ -37,7 +38,15 @@ export const Route = createFileRoute("/api/import")({
           addAccountToGroup: (accountId, groupId) =>
             db.addAccountToGroup(userId, accountId, groupId),
           writeSnapshot: async (accountId, input) => {
-            await db.writeSnapshot(userId, accountId, input);
+            // 边界透传:db 的 SnapshotBalanceInput.kind 仍是旧 4 值 BalanceKind(#37c 前),
+            // 而导入文件的 kind 是 connectors 的 5-kind;运行期只作 text 存储,按契约断言透传(同 @folio/sync)。
+            await db.writeSnapshot(userId, accountId, {
+              ...input,
+              balances: input.balances.map((b) => ({
+                ...b,
+                kind: b.kind as SnapshotBalanceInput["kind"],
+              })),
+            });
           },
         };
         const importer = createImporter(deps);

@@ -1,4 +1,22 @@
-import type { AccountType } from "@folio/balances";
+// account.type 的联合(旧 DB 值,#37d DB 迁移前保持不变)。app 本地拥有此事实源。
+// 全集与 DB 列(@folio/db 的 AccountType,#37c 前仍源自旧包)结构一致:除下方 9 个已上线的,
+// 还含 5 个"已声明未接线"的 type(exchange_bybit/bitget/gate、perp_derive/extended)——
+// 无 provider、UI 不展示(TYPE_LABELS/TYPE_GROUPS 只列 9 个),但 DB 列类型含之,故本地全集对齐避免边界断言。
+export type AccountType =
+  | "manual"
+  | "onchain_evm"
+  | "onchain_bitcoin"
+  | "onchain_solana"
+  | "onchain_sui"
+  | "onchain_cosmos"
+  | "exchange_binance"
+  | "exchange_okx"
+  | "exchange_bybit"
+  | "exchange_bitget"
+  | "exchange_gate"
+  | "perp_hyperliquid"
+  | "perp_derive"
+  | "perp_extended";
 
 // 账户类型注册表:分组(Select 分组 + 账户页分区)与展示名。随 provider 增多只是多几项。
 // 展示名多为专有名词(链/所/场所),不翻译;分组标题走 i18n(Accounts.cat_*)。

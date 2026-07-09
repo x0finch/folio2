@@ -1,4 +1,4 @@
-import type { Balance } from "@folio/balances";
+import type { Balance } from "@folio/connectors-basic";
 import type {
   CgkCoinId,
   TokenCandidate,
@@ -77,7 +77,7 @@ const bal = (symbol: string, amount: number, value: number, identifier?: string)
   symbol,
   amount,
   value,
-  kind: "manual",
+  kind: "spot", // manual connector 产 spot kind(旧 "manual" kind 已并入 5-kind 的 spot)
   // 用户选币 → tokenKey 的厂商寻址形(coingecko:<id>),身份不再进 meta。
   ...(identifier ? { tokenKey: `coingecko:${identifier}` } : {}),
 });
@@ -99,7 +99,7 @@ describe("revalue", () => {
       symbol: "BTC",
       amount: 0.5,
       value: 1,
-      kind: "manual",
+      kind: "spot",
       meta: { fixed: true },
     };
     const out = await revalue(tokens(), "manual", [locked]);
@@ -134,7 +134,7 @@ describe("revalue", () => {
       symbol: "BTC",
       amount: 0.08,
       value: 0,
-      kind: "spot",
+      kind: "utxo", // bitcoin connector 产 utxo kind(pendingSats 在 UtxoMeta)
       tokenKey: "chain:bitcoin/native:btc",
       meta: { pendingSats: 500000 },
     };

@@ -1,6 +1,18 @@
-// CEX 请求签名原语。搬自旧 @folio/balances-basic 的 hmacSha256(纯函数、零依赖)。
-// 安全边界(原则 #5):本模块只做【用用户交易所 secret 在取数时签名】—— 纯运算,不碰 SECRETS_KEY、
-// 不读 env。SECRETS_KEY 级的加解密(encrypt/decrypt/generateSecret)是 app 层的活,留在 app 里(#37 前)。
+// 凭据加解密 + 签名原语(Web Crypto,Workers 原生支持)。皆为【纯运算】:密钥恒由调用方传入
+//(encrypt/decrypt 收 app 的 env.SECRETS_KEY,hmacSha256 收用户交易所 secret)——【本模块不读 env】、
+// 永不把 SECRETS_KEY 当环境隐式量看。安全边界(原则 #5):契约层只做纯密码学运算,存储/塑形归 app lib/creds.ts。
+
+const ALGORITHM = "AES-GCM";
+const KEY_BYTES = 32; // 256-bit 密钥
+const IV_BYTES = 12; // GCM 推荐 96-bit IV
+
+/** 解密失败 / 密钥或载荷格式非法时抛出。 */
+export class CryptoError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
+    this.name = "CryptoError";
+  }
+}
 
 function bytesToHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -10,6 +22,65 @@ function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
+}
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function importKey(secret: string): Promise<CryptoKey> {
+  let raw: Uint8Array<ArrayBuffer>;
+  try {
+    raw = base64ToBytes(secret);
+  } catch (cause) {
+    throw new CryptoError("SECRETS_KEY must be base64 of 32 bytes", { cause });
+  }
+  if (raw.length !== KEY_BYTES) {
+    throw new CryptoError("SECRETS_KEY must be base64 of 32 bytes");
+  }
+  return crypto.subtle.importKey("raw", raw, { name: ALGORITHM }, false, ["encrypt", "decrypt"]);
+}
+
+/** 加密明文,返回 base64( 随机IV(12) ‖ 密文+GCMTag )。同明文每次密文不同。 */
+export async function encrypt(plaintext: string, secret: string): Promise<string> {
+  const key = await importKey(secret);
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const data = new TextEncoder().encode(plaintext);
+  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: ALGORITHM, iv }, key, data));
+  const payload = new Uint8Array(iv.length + cipher.length);
+  payload.set(iv, 0);
+  payload.set(cipher, iv.length);
+  return bytesToBase64(payload);
+}
+
+/** 解密 encrypt 产出的载荷;错误密钥/被篡改数据/格式非法均抛 CryptoError。 */
+export async function decrypt(payload: string, secret: string): Promise<string> {
+  const key = await importKey(secret);
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = base64ToBytes(payload);
+  } catch (cause) {
+    throw new CryptoError("decrypt failed: invalid payload encoding", { cause });
+  }
+  if (bytes.length <= IV_BYTES) {
+    throw new CryptoError("decrypt failed: payload too short");
+  }
+  const iv = bytes.subarray(0, IV_BYTES);
+  const cipher = bytes.subarray(IV_BYTES);
+  try {
+    const plain = await crypto.subtle.decrypt({ name: ALGORITHM, iv }, key, cipher);
+    return new TextDecoder().decode(plain);
+  } catch (cause) {
+    throw new CryptoError("decrypt failed: invalid key or corrupted data", { cause });
+  }
+}
+
+/** 生成一个新的 SECRETS_KEY:base64(32 随机字节)。用于部署初始化。 */
+export function generateSecret(): string {
+  return bytesToBase64(crypto.getRandomValues(new Uint8Array(KEY_BYTES)));
 }
 
 /**

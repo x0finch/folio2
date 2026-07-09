@@ -12,7 +12,7 @@ import {
   ndjsonLine,
   snapshotRecord,
 } from "@/lib/export";
-import { balances } from "@/lib/server/balances";
+import { credentialSpecs } from "@/lib/server/connectors";
 import { db } from "@/lib/server/db";
 
 // 每页快照数:配 inArray(≤ 50 ids) 取余额,远低于 D1 100 绑定参数上限。
@@ -41,7 +41,7 @@ export const Route = createFileRoute("/api/export")({
             try {
               write(metaRecord(Date.now())); // 首行:版本号等
 
-              const specsByType = balances.credentialSpecs();
+              const specsByType = credentialSpecs();
               const accounts = await db.listAccountsByUser(userId);
               for (const a of accounts) {
                 // 安全投影(无需解密):public 原样、semi 打码、secret 丢弃 —— 绝不导出完整密钥。

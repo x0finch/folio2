@@ -7,7 +7,7 @@ import {
   snapshotRecord,
 } from "../src/lib/export";
 
-// 注:脱敏(secret 剥 / semi 打码 / public 留)逻辑现在是 @folio/balances safeView(在 core creds.test 覆盖);
+// 注:脱敏(secret 剥 / semi 打码 / public 留)逻辑是 lib/creds.ts safeView(在 creds.test 覆盖);
 // 这里只测记录映射形状。route 把 safeView 的结果传给 accountRecord。
 
 describe("metaRecord", () => {

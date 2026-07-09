@@ -1,5 +1,6 @@
-import type { AccountType, Balance } from "@folio/balances";
+import type { Balance } from "@folio/connectors-basic";
 import type { Tokens } from "@folio/tokens";
+import type { AccountType } from "./account-types";
 
 // 同步时按市价盯市(mark-to-market)的账户类型:provider 只给 amount、value 交这里算的那些。
 //   · manual —— 用户录数量,市价改 value(P7.4.2/P7.4.3);
@@ -20,7 +21,8 @@ export async function revalue(
   return Promise.all(
     balances.map(async (b) => {
       // 锁定固定值(P7.4.4):即便币可识别也跳过市价、保留 provider 的 amount × unitPrice。
-      if (b.meta?.fixed) return b;
+      // fixed 仅存在于 spot kind 的 meta(manual connector);先按 kind 收窄再读。
+      if (b.kind === "spot" && b.meta?.fixed) return b;
       const res = await tokens.resolve({ symbol: b.symbol, tokenKey: b.tokenKey }, { lazy: true });
       if (!res.ref) return b;
       const p = await tokens.priceOf(res.ref);

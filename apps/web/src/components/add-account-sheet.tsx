@@ -1,4 +1,3 @@
-import type { AccountType } from "@folio/balances";
 import type { TokenInfo } from "@folio/tokens";
 import {
   Button,
@@ -17,7 +16,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { cloneElement, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { type OnchainType, TYPE_GROUPS, typeLabel } from "../lib/account-types";
+import { type AccountType, type OnchainType, TYPE_GROUPS, typeLabel } from "../lib/account-types";
 import {
   BTC_SCRIPT_OPTIONS,
   isBareXpub,
