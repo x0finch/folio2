@@ -1,16 +1,24 @@
 import { env } from "cloudflare:workers";
 import { createFileRoute } from "@tanstack/react-router";
+import { connectorPlatformMeta } from "@/lib/server/connector-platform";
 import { serveLogo } from "@/lib/server/logo";
 import { buildPlatforms } from "@/lib/server/platforms";
 
 // 公开(无 requireAuth)平台 logo 代理:platform key(如 chain:bitcoin,含 `:` → URL 编码为一段)
-// → 经 platforms.resolve(cache-only)拿上游图 → 透传 + 边缘缓存头。见 ADR 0008 / #20。
+// → 上游图 → 透传 + 边缘缓存头。见 ADR 0008 / #20。
+// 场馆键(manual/exchange:/perp:)的图取连接器自带 logo,不查 CoinGecko(#52);链键才经 platforms.resolve(cache-only)。
 export const Route = createFileRoute("/api/logo/platform/$key")({
   server: {
     handlers: {
       GET: ({ params }: { params: { key: string } }) =>
         serveLogo(
-          async () => (await buildPlatforms(env).resolve([params.key])).get(params.key)?.logo,
+          async () => {
+            // 场馆键(manual/exchange:/perp:)命中即用连接器自带 logo,绝不落 platforms(即便 manual 无图);
+            // 只有链键才查 platforms.resolve(cache-only)。
+            const cm = connectorPlatformMeta(params.key);
+            if (cm) return cm.logo;
+            return (await buildPlatforms(env).resolve([params.key])).get(params.key)?.logo;
+          },
           "platform",
           params.key,
         ),
