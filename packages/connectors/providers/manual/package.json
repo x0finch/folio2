@@ -1,5 +1,5 @@
 {
-  "name": "@folio/connectors-provider-custom",
+  "name": "@folio/connectors-provider-manual",
   "version": "0.0.0",
   "private": true,
   "type": "module",

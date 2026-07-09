@@ -21,8 +21,9 @@ export const BalanceBase = z.object({
 
 // —— 各 kind 的 meta 契约(随 kind 精确) ——
 
-// spot:可选的类型化【行为 meta】。当前仅 fixed —— 锁定固定值(手动资产),
-// revalue 据此跳过市价重估、钉死 amount × price。行为标志、不渲染(value/展示仍是普通代币行)。
+// spot:可选的类型化【行为 meta】。**目前只有 manual connector 在用**:唯一字段 fixed —— 锁定固定值,
+// revalue 据此跳过市价重估、钉死 amount × price。行为标志、不渲染(value/展示仍是普通代币行);
+// 其它 spot 发射者(evm/coinstats/CEX)不带 meta。展示型自定义 meta 待 #43。
 export const SpotMeta = z.object({ fixed: z.boolean().optional() });
 
 // defi:协议内仓位。consumer 按 protocol 分组、按 positionType 展示。

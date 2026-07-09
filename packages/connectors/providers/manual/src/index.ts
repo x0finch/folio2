@@ -2,7 +2,7 @@ import type { BalanceProvider, CredField, Spot } from "@folio/connectors-basic";
 import { buildTokenKey } from "@folio/tokens-basic";
 import { z } from "zod";
 
-// @folio/connectors-provider-custom —— 手动资产(manual connector 用)。无外部 API:一个账户 = 一个手记资产。
+// @folio/connectors-provider-manual —— 手动资产(manual connector 的 provider)。无外部 API:一个账户 = 一个手记资产。
 // 持仓(symbol/amount/unitPrice + 可选 identifier/fixed)全走 account.creds(明文 public:落库、导出原样、可重建);
 // fetchBalances map 成单条 kind:"spot" Balance:value = amount × unitPrice、price = unitPrice(P7.4.1)。
 // `amount` 由 manual 活动账本(manual_activity)推导后【物化】进 account.creds(app 层);provider 只管读。
@@ -25,8 +25,8 @@ export const manualAccountCreds = [
 ] as const satisfies readonly CredField[];
 
 // 本 connector 只吐单一 kind:spot。无全局/provider key → creds:[]。
-export const customProvider: BalanceProvider<Spot, typeof manualAccountCreds> = {
-  id: "custom",
+export const manualProvider: BalanceProvider<Spot, typeof manualAccountCreds> = {
+  id: "manual",
   label: "Manual",
   creds: [],
 

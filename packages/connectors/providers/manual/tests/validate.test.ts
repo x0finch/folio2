@@ -1,8 +1,8 @@
 import { publicKeys } from "@folio/connectors-basic";
 import { describe, expect, it } from "vitest";
-import { customProvider, manualAccountCreds } from "../src";
+import { manualAccountCreds, manualProvider } from "../src";
 
-type Ctx = Parameters<typeof customProvider.validateAccount>[0];
+type Ctx = Parameters<typeof manualProvider.validateAccount>[0];
 
 describe("custom account.creds / validateAccount", () => {
   it("declares symbol/amount/unitPrice/identifier/fixed as public account.creds", () => {
@@ -23,7 +23,7 @@ describe("custom account.creds / validateAccount", () => {
   });
 
   it("provider.creds is empty (no external source / provider key)", () => {
-    expect(customProvider.creds).toEqual([]);
+    expect(manualProvider.creds).toEqual([]);
   });
 
   it("validateAccount is true (no external source; creds validated upstream by validateCredentials)", async () => {
@@ -31,6 +31,6 @@ describe("custom account.creds / validateAccount", () => {
       account: { id: "a", label: "M", connectorId: "manual", creds: {} },
       creds: {},
     } as unknown as Ctx;
-    expect(await customProvider.validateAccount(ctx)).toBe(true);
+    expect(await manualProvider.validateAccount(ctx)).toBe(true);
   });
 });
