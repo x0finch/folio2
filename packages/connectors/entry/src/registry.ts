@@ -40,7 +40,7 @@ export function selectProvider(manifest: ConnectorManifest): BalanceProvider<Bal
 // 全部 connector 在此登记(各 connector 文件逐个填入)。#31:evm(zerion);#32:bitcoin(blockbook);
 // #33:solana/sui/cosmos(coinstats —— 一个 provider 包服务三个 connector);#34:binance/okx(CEX);
 // #35:hyperliquid(唯一的多 kind connector,吐 perp_equity + perp_position)。
-// #36:manual(custom —— 手动资产,无外部 API,单 kind:spot,携可选 meta.fixed)。全 9 个 connector 齐备。
+// #36:manual(custom —— 手动资产,无外部 API,单 kind:spot)。全 9 个 connector 齐备。
 export const connectors = [
   evm,
   bitcoin,

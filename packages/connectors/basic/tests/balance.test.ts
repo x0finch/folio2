@@ -2,23 +2,28 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { Balance, type BalanceKind, Defi, type PerpPosition, Spot } from "../src/balance";
 
-describe("Balance 5-kind 判别联合 —— runtime parse", () => {
-  it("spot:无 meta 的基础行(meta 可选)", () => {
+describe("Balance 4-kind 判别联合 —— runtime parse", () => {
+  it("spot:普通代币行(无 meta)", () => {
     const b = Balance.parse({ kind: "spot", symbol: "BTC", amount: 1, value: 100 });
     expect(b).toMatchObject({ kind: "spot", symbol: "BTC", value: 100 });
-    if (b.kind === "spot") expect(b.meta).toBeUndefined();
   });
 
-  it("spot:带可选行为 meta { fixed:true }", () => {
+  it("detail:可选 markdown 字符串,任何 kind 可带", () => {
     const b = Balance.parse({
       kind: "spot",
       symbol: "BTC",
       amount: 1,
       value: 100,
-      meta: { fixed: true },
+      detail: "**Unconfirmed:** +0.005 BTC",
     });
-    expect(b.kind).toBe("spot");
-    if (b.kind === "spot") expect(b.meta?.fixed).toBe(true);
+    expect(b.detail).toBe("**Unconfirmed:** +0.005 BTC");
+    // detail 省略 → undefined
+    const noDetail = Balance.parse({ kind: "spot", symbol: "ETH", amount: 1, value: 1 });
+    expect(noDetail.detail).toBeUndefined();
+    // detail 非字符串 → 拒
+    expect(() =>
+      Balance.parse({ kind: "spot", symbol: "X", amount: 1, value: 1, detail: 123 }),
+    ).toThrow();
   });
 
   it("defi:带 protocol/positionType meta", () => {
@@ -59,20 +64,12 @@ describe("Balance 5-kind 判别联合 —— runtime parse", () => {
     expect(pos.kind).toBe("perp_position");
   });
 
-  it("utxo:pendingSats 必填、地址表/收款可选", () => {
-    const b = Balance.parse({
-      kind: "utxo",
-      symbol: "BTC",
-      amount: 0.5,
-      value: 30000,
-      meta: { pendingSats: 0 },
-    });
-    expect(b.kind).toBe("utxo");
-  });
-
-  it("未知 kind 被拒", () => {
+  it("未知/遗留 kind 被拒(manual / perp / 旧 utxo)", () => {
     expect(() => Balance.parse({ kind: "manual", symbol: "X", amount: 1, value: 1 })).toThrow();
     expect(() => Balance.parse({ kind: "perp", symbol: "X", amount: 1, value: 1 })).toThrow();
+    expect(() =>
+      Balance.parse({ kind: "utxo", symbol: "BTC", amount: 1, value: 1, meta: { pendingSats: 0 } }),
+    ).toThrow();
   });
 
   it("defi 缺 meta 被拒(meta 随 kind 必填)", () => {
@@ -93,10 +90,8 @@ describe("Balance 5-kind 判别联合 —— runtime parse", () => {
 });
 
 describe("Balance —— 类型完备", () => {
-  it("BalanceKind 恰为 5 个 kind", () => {
-    expectTypeOf<BalanceKind>().toEqualTypeOf<
-      "spot" | "defi" | "perp_equity" | "perp_position" | "utxo"
-    >();
+  it("BalanceKind 恰为 4 个 kind", () => {
+    expectTypeOf<BalanceKind>().toEqualTypeOf<"spot" | "defi" | "perp_equity" | "perp_position">();
   });
 
   it("子集 schema 的 z.infer 精确到该子集(defineConnector 推断基础)", () => {

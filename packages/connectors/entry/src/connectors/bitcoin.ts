@@ -1,4 +1,4 @@
-import { defineConnector, Utxo } from "@folio/connectors-basic";
+import { defineConnector, Spot } from "@folio/connectors-basic";
 import { bitcoinAccountCreds, blockbookProvider } from "@folio/connectors-provider-blockbook";
 
 // bitcoin connector manifest —— 组装契约(基座)+ provider(blockbook)。manifest 组装归 entry;
@@ -11,6 +11,6 @@ export const bitcoin = defineConnector({
   label: "Bitcoin",
   logo: BTC_LOGO,
   account: { creds: bitcoinAccountCreds },
-  // 单 kind connector:schema 直接用 Utxo(无需判别联合)。
-  balance: { schema: Utxo, providers: [blockbookProvider] },
+  // 单 kind connector:BTC 吐 kind:"spot"(明细走 markdown detail),schema 直接用 Spot。
+  balance: { schema: Spot, providers: [blockbookProvider] },
 });
