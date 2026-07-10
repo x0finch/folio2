@@ -43,28 +43,20 @@ export interface Holding {
   sources: HoldingSource[];
 }
 
-// 账户 connectorId → 平台单元的 **key**(CEX/perp/manual/链上原生)。行为保持不变(#37d 由 <类别>_<具体>
-// 前缀判定改为 connectorId 直接归类):evm 用具体链(network),其余链上用 connectorId 自身。
-// 只产 key;name + logo(含兜底)整个归 @folio/platforms,由 server 读路径装饰。
-const EXCHANGE_CONNECTORS = new Set(["binance", "okx"]);
-const PERP_CONNECTORS = new Set(["hyperliquid"]);
-function platformIdFromAccount(connectorId: string, network?: string | null): string {
-  if (EXCHANGE_CONNECTORS.has(connectorId)) return `exchange:${connectorId}`;
-  if (PERP_CONNECTORS.has(connectorId)) return `perp:${connectorId}`;
-  if (connectorId === "manual") return "manual";
-  return `chain:${network ?? connectorId}`; // evm(network=具体链)/bitcoin/solana/sui/cosmos
-}
-
-// 持有点的平台 key:链上优先按 tokenKey 的链前缀拆(同账户多链 → 多 source);否则按账户 connectorId。
+// 持有点的平台 key:
+//   · 链上:按 tokenKey 的链前缀拆(eip155:<id> / chain:<slug>);同账户多链 → 多 source。
+//   · 场馆/manual(无链前缀 tokenKey):平台单元 = 连接器本身,key 即 connectorId(binance/okx/hyperliquid/manual);
+//     name+logo 读路径取连接器自带(#53)。链上持仓恒带链前缀(provider 失败即不产),故永不落此分支。
+// 无类别概念:认得 connectorId 的即场馆、认不得的即链键。只产 key;展示由 server 读路径装饰。
 function platformIdOf(row: AggInput): string {
   const tk = row.tokenKey;
   if (tk) {
     const slash = tk.indexOf("/");
     const prefix = slash > 0 ? tk.slice(0, slash) : "";
     if (prefix.startsWith("eip155:") || prefix.startsWith("chain:")) return prefix;
-    // coingecko:<id>(manual 选币)等无链前缀 → 落账户平台
+    // coingecko:<id>(manual 选币)等无链前缀 → 落账户平台(= connectorId)
   }
-  return platformIdFromAccount(row.account.connectorId, row.account.network);
+  return row.account.connectorId;
 }
 
 // 单笔持仓的"代币身份"(用于判断组内是否单一 Token → 决定是否给 totalAmount)。

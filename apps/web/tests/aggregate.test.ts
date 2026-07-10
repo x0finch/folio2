@@ -66,7 +66,7 @@ describe("buildCanonicalHoldings", () => {
     expect(h.totalAmount).toBeUndefined(); // tether + usdt0 = 2 个 Token
     // aggregate 只产 platform.id(key);name 仅为 key 占位,真名/logo 由 server 读路径
     // platforms.resolve 装饰(平台"显示成什么"整个归 @folio/platforms)。
-    const ids = ["exchange:binance", "eip155:1", "eip155:42161", "manual"]; // value 降序
+    const ids = ["binance", "eip155:1", "eip155:42161", "manual"]; // value 降序(场馆键 = connectorId)
     expect(h.sources.map((s) => s.platform.id)).toEqual(ids);
     expect(h.sources.map((s) => s.platform.name)).toEqual(ids); // name == key 占位
   });
@@ -105,9 +105,9 @@ describe("buildCanonicalHoldings", () => {
     const h = byKey(hs, "group:usdc")!;
     expect(h.totalValue).toBe(1800);
     expect(h.totalAmount).toBe(1800); // 全是 usd-coin,单一 Token
-    const margin = h.sources.find((s) => s.platform.id === "perp:hyperliquid")!;
+    const margin = h.sources.find((s) => s.platform.id === "hyperliquid")!;
     expect(margin.isMargin).toBe(true);
-    expect(margin.platform.name).toBe("perp:hyperliquid"); // name = key 占位(真名由 resolve 装饰)
+    expect(margin.platform.name).toBe("hyperliquid"); // name = key 占位(场馆键 = connectorId;真名由读路径装饰)
   });
 
   it("桥接/未分组不并入本尊;未解析按账户隔离,绝不与已解析同 symbol 合并", () => {

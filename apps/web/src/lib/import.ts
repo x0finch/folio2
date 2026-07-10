@@ -10,7 +10,7 @@ import { EXPORT_VERSION } from "./export";
 
 export class ImportError extends Error {}
 
-// 按暴露级别分类某 account type 的输入字段(由 route 用 registry 派生注入)。
+// 按暴露级别分类某 connector 的输入字段(由 route 用 registry 派生注入)。
 export interface InputKinds {
   publicKeys: string[];
   semiKeys: string[];
@@ -26,7 +26,7 @@ export interface ImportSnapshotBalance {
 }
 
 export interface ImportDeps {
-  categorize(accountType: string): InputKinds;
+  categorize(connectorId: string): InputKinds;
   createAccount(input: {
     connectorId: string;
     network?: string;
@@ -78,9 +78,9 @@ export function createImporter(deps: ImportDeps) {
 
     switch (rec.type) {
       case "account": {
-        const accountType = String(rec.accountType);
+        const connectorId = String(rec.connectorId);
         const fileCreds = (rec.creds as Record<string, string> | undefined) ?? {};
-        const { publicKeys, semiKeys } = deps.categorize(accountType);
+        const { publicKeys, semiKeys } = deps.categorize(connectorId);
         // 重建存库 map:public 真值原样;semi(导出已打码)写 `semi_<key>` 占位待补录;secret 文件里没有。
         const stored: Record<string, string> = {};
         for (const [k, v] of Object.entries(fileCreds)) {
@@ -88,7 +88,7 @@ export function createImporter(deps: ImportDeps) {
           else if (semiKeys.includes(k)) stored[SEMI_PREFIX + k] = v;
         }
         const created = await deps.createAccount({
-          connectorId: accountType,
+          connectorId,
           network: typeof rec.network === "string" ? rec.network : undefined,
           label: String(rec.label ?? ""),
           creds: JSON.stringify(stored),

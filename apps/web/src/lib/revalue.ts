@@ -2,7 +2,7 @@ import type { ConnectorId } from "@folio/connectors";
 import type { Balance } from "@folio/connectors-basic";
 import type { Tokens } from "@folio/tokens";
 
-// 同步时按市价盯市(mark-to-market)的账户类型:provider 只给 amount、value 交这里算的那些。
+// 同步时按市价盯市(mark-to-market)的 connector:provider 只给 amount、value 交这里算的那些。
 //   · manual —— 用户录数量,市价改 value(P7.4.2/P7.4.3);
 //   · bitcoin —— provider 只产已确认 BTC amount(value=0),此处 amount × BTC 市价。
 // 其余(zerion/CEX/perp 自带 USD 估值)不动:富化不重算(enrich-not-reprice)。
@@ -14,10 +14,10 @@ const REVALUE_TYPES = new Set<ConnectorId>(["manual", "bitcoin"]);
 // 取价/回源/写缓存全在 tokens 内(priceOf),外面只表达意图。只依赖 tokens 实例(无 db/cloudflare)→ 可纯测。
 export async function revalue(
   tokens: Tokens,
-  accountType: ConnectorId,
+  connectorId: ConnectorId,
   balances: Balance[],
 ): Promise<Balance[]> {
-  if (!REVALUE_TYPES.has(accountType)) return balances;
+  if (!REVALUE_TYPES.has(connectorId)) return balances;
   return Promise.all(
     balances.map(async (b) => {
       // 锁定固定值(P7.4.4):即便币可识别也跳过市价、保留 provider 的 amount × unitPrice。
