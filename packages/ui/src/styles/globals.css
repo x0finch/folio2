@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* @tailwindcss/typography —— `prose` 排印类,给 provider 拼的 markdown detail 直渲上样式
+   (prose prose-sm dark:prose-invert,见 MarkdownDetail)。v4 用 @plugin 显式注册。 */
+@plugin "@tailwindcss/typography";
+
 @custom-variant dark (&:is(.dark *));
 
 /* 手搓/beUI 件(Separator、Tabs 等)用 data-orientation / data-selected 的自定义变体。

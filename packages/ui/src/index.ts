@@ -29,6 +29,7 @@ export {
 export { Fab, fabVariants } from "./components/fab";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
+export { MarkdownDetail } from "./components/markdown-detail";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";
 export { Button, buttonVariants, StatefulButton } from "./components/motion/button";
 export { Checkbox } from "./components/motion/checkbox";
