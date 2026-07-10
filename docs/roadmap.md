@@ -1,7 +1,7 @@
 # Folio Roadmap — 叙事 / 范围 / 依赖
 
 > 前向 **epic 看板 = [GitHub Project #1 "Folio Roadmap"](https://github.com/users/x0finch/projects/1)**(一里程碑一 issue、`roadmap` 标签、Tier 分层,进度事实源)。
-> 本文只留看板放不下的**叙事、依赖、范围边界**;开工某条 epic 时经 `to-issues` 拆竖切片。已交付功能的历史见 git log + [docs/adr/](adr/)。
+> 本文只留看板放不下的**叙事、依赖、范围边界**;开工某条 epic 时经 `to-tickets` 拆竖切片。已交付功能的历史见 git log + [docs/adr/](adr/)。
 
 ## 现状一句话
 

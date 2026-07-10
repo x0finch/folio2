@@ -2,6 +2,8 @@
 
 Status: accepted (planned)
 
+> **部分被取代**:`kind` 治理定义、决策 #4「Balance = 5-kind」、Considered Options #7「kind 分类法」,以及 `SpotMeta`/`fixed` —— 经 [ADR 0010](0010-kind-governance-two-layer-meta-detail.md)(#43)修订为「粗粒度资产类 + 4-kind + 两层 meta/detail(DetailBlock)」。本 ADR 的 connector/manifest/creds/迁移 等其余部分不变。
+
 把余额子系统围绕 **Connector** 概念重写:一个 connector = 我们支持的一类账户(evm / bitcoin / binance / okx / hyperliquid / solana / sui / cosmos / manual,共 9 个)。**不再有独立的 `accountType` 概念** —— connector 即身份。每个 connector 一份**自包含 manifest**,把"这类账户怎么建 + 想要什么余额数据 + 有哪些 provider"绑在一起。取代现有 `packages/balances` 子树(`basic`/`entry`/`providers/*` 共 9 个包)与其 accountType/BalanceProvider 契约。
 
 > **命名:Connector ≠ Platform。** 词汇表里的 **Platform**(持仓所在的**链∪场馆**展示维度,key 如 `eip155:1`/`exchange:binance`,归 `@folio/platforms` 包)是资深、用户可见的概念,保留不动。**Connector** 是本次新增的**可插拔账户类型单元**(归 `@folio/connectors` 包),粒度不同:一个 connector(如 `evm`)的持仓会散落到多个 Platform(`eip155:1`/`eip155:8453`…)。二者正交。(曾把 `@folio/platforms` 临时改名让位,已回退——Connector 用自己的包名,旧包无需让位。)
@@ -101,5 +103,5 @@ utxo          // UTXO 型自托管持仓(BTC 及将来 UTXO 链)。meta: pending
 - **两处数据迁移**:①`account.type` 值一次性 UPDATE 映射(`onchain_evm`→`evm`…,决策 #2/#8);②`balance.kind` 语义 forward-only **不迁移**(决策 #4)——`kind`/`meta` 已落进快照(`orchestrator.ts` 写 `kind: b.kind`),改分类法(perp→perp_equity/perp_position、bitcoin→utxo、manual→spot)使旧快照行 per-balance 语义失配,故读端须对**遗留/未知 `kind` 容错降级(default 分支,不 throw)**;历史时间线图只用 `totalUsd`(单列,不受影响),当前持仓来自最新快照(下次同步即写新 kind)。
 - **Balance 判别联合是最大 blast radius**:overview-model / aggregate / account-view / 各展示组件全线适配(收益:去 cast、穷尽 switch)。`manual→spot` 让读端现有三处 `spot || manual` 分支(`overview-model.ts:73`/`tokens.ts:24`/`aggregate.ts:84`)收敛成 `spot`。
 - **范围(本次)= 模型 + provider 重写;current 取数/展示行为不变,但 Balance 分类法 + account.type 改版**:空配置 = 现状,全局 key 照旧走;历史快照 per-balance 分类被破坏(见上,接受)。运行时"选/配 provider/免重部署 + 类型管理 UI + 生命周期(关闭归档/切换)"作为**后续 phase**(旧 epic 目标不丢,分期做)。
-- **迁移走竖切、并存期分派(to-issues 定案 B,推翻初版"不双跑")**:不再一次性大爆炸。先预制读端(5-kind + 遗留-kind 容错),再**逐 connector** 切到新包 —— sync 注入处按 `account.type`→connectorId **分派新/旧**,新旧短暂并存;收尾片才拆桥、删旧 9 包、跑 `account.type` 值迁移。好处:每 connector 端到端独立验收、小 PR、可回退。切片见 epic #29 的 #30–#37。
+- **迁移走竖切、并存期分派(to-tickets 定案 B,推翻初版"不双跑")**:不再一次性大爆炸。先预制读端(5-kind + 遗留-kind 容错),再**逐 connector** 切到新包 —— sync 注入处按 `account.type`→connectorId **分派新/旧**,新旧短暂并存;收尾片才拆桥、删旧 9 包、跑 `account.type` 值迁移。好处:每 connector 端到端独立验收、小 PR、可回退。切片见 epic #29 的 #30–#37。
 - **CONTEXT.md**:新增 `Connector` 词条,并与既有 `Platform` 显式区分(互列 `_Avoid_`)。

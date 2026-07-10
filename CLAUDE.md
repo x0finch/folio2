@@ -34,7 +34,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - Package prefix `@folio/*`. Providers published as `@folio/provider-<name>`.
 
 ## Git & PR 工作流
-- **功能开发走技能链**:think → grill-with-docs → ADR(难回退的决策)→ to-prd → to-issues → 开分支 → implement(内驱 tdd)→ code-review。路由见 `/ask-matt`。
+- **功能开发走技能链**:think → grill-with-docs → ADR(难回退的决策)→ to-spec → to-tickets → 开分支 → implement(内驱 tdd)→ code-review。路由见 `/ask-matt`。
 - **main 只经 PR 收代码**:动代码前从 main 开 `feat/*` 分支;直推 main 被禁。ADR 这类文档基线可先提交 main,代码走 PR。
 - **合并用 Squash**:保留 GitHub 的 Verified 签名;**不要 rebase-merge**(会把提交变 Unverified)。
 - **PR 正文关 issue**:每个都带关键字 + 英文逗号 —— `Closes #2, closes #3, closes #4`;别用中文顿号「、」或裸列表(不会自动关)。
@@ -74,7 +74,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 
 **M1–M6 complete** — foundation → on-chain → CEX → perp → polish, deploy-ready (see [apps/web/DEPLOY.md](apps/web/DEPLOY.md); going live is user-run per safety rules). Shipped-work history lives in git log + [docs/adr/](docs/adr/) — no in-repo phase archive.
 
-**前向路线**:见 **[docs/roadmap.md](docs/roadmap.md)**(叙事 / 范围 / 依赖,并链到 epic 看板 GitHub Project;看板是进度事实源)。规划 epic **不打 `ready-for-agent`**;开工某条时经技能链(grill → to-prd → to-issues)拆竖切片才给 agent-ready 标签。规划草稿(plans)写本地 **`.scratch/plans/`**(gitignore,一次性、不入库);耐久产出落 ADR + Issues,不留 plan 文件在仓库。
+**前向路线**:见 **[docs/roadmap.md](docs/roadmap.md)**(叙事 / 范围 / 依赖,并链到 epic 看板 GitHub Project;看板是进度事实源)。规划 epic **不打 `ready-for-agent`**;开工某条时经技能链(grill → to-spec → to-tickets)拆竖切片才给 agent-ready 标签。规划草稿(plans)写本地 **`.scratch/plans/`**(gitignore,一次性、不入库);耐久产出落 ADR + Issues,不留 plan 文件在仓库。
 
 ---
 

@@ -32,6 +32,22 @@ _Avoid_: CanonicalHolding, position
 一个 Holding 里的单个持有点 = 某账户在某平台上的这笔持仓(链×账户 / 交易所 / 永续 / manual)。
 _Avoid_: source(泛指时)
 
+**kind(资产类别)**:
+Balance 的粗粒度**资产类别**判别式,唯一职责是驱动**跨 connector 的公共逻辑**:聚合口径(进不进首屏同质加总)、净值不变量(哪行承载 value)、主表/分区路由。**不承载渲染差异**(那是 detail 的事)。四类:`spot`(同质代币,含 BTC / CEX 现货 / 手录)、`defi`(协议仓位)、`perp_equity`(永续净值行)、`perp_position`(单永续仓位)。
+_Avoid_: type(那是 connectorId / 旧 accountType)、asset / chain / source(kind 不按资产/链/来源切)、「独有渲染契约」(旧定义,已弃)
+
+**meta(类型化行为 meta)**:
+Balance 上随 `kind` 精确的**类型化**结构,只放**共享逻辑 / 跨 provider 视图会结构化读**的字段(defi 的 protocol/positionType;perp 的净值与仓位字段)。强类型、穷尽 `switch(kind)`、禁 `as` cast。`spot` 无 meta。
+_Avoid_: detail(那是展示袋,无共享逻辑读)、开放 `Record`(meta 恒 typed)
+
+**detail(展示明细)**:
+Balance 上的 provider 专属、**仅供展示**的细节(BTC 未确认 / 派生地址 / 收款指引;CEX locked/available;将来 staking 到期、减半日期、LP 底层币、健康度…),形态是 `detail?: DetailBlock[]`。没有任何共享逻辑读它。
+_Avoid_: meta(那是共享逻辑读的 typed 层)、per-kind 新增(展示细节不再开新 kind)、markdown 字符串(丢 i18n/币种/交互/安全)
+
+**DetailBlock(展示块)**:
+`detail` 数组里的一个元素,自带「**画法(`type`)+ 数据**」、随数据一起走。`type` 是**画法原语**(`stat` / `keyValue` / `addressList` / `table` / `note`),**不是**业务身份。值结构化(数字即数字)、格式由块的 `format` 声明(前端做,跟随显示币种/locale)、标签用 i18n key(跟随双语)。类型定义在 `@folio/connectors-basic`(provider 拼、前端渲染,单一源)。前端一个 `<BalanceDetail>` 按 `type` 渲染,**永不判断 BTC/CEX**;不认识的块跳过、字段缺则不画。
+_Avoid_: spec / registry / 路径绑定(那是被否的完整 DSL/json-render 路线)、在块里放函数(只放具名 action + 前端 handler)
+
 **Platform**:
 持仓所在的**链或场馆**(chain ∪ venue),HoldingSource 的定位维度。key 文法:`eip155:<chainId>` / `chain:<slug>`(链)、`exchange:<slug>`、`perp:<slug>`(场馆)、`manual`。带 name + logo,来自 CoinGecko(asset_platforms / exchanges / derivatives),manual 用内置图标。**粒度:每条 EVM 链各一个**(`eip155:1`/`eip155:8453`…)。归 `@folio/platforms` 包。
 _Avoid_: chain(仅指链时才用)、venue(仅指交易所/perp)、network、Connector(那是账户类型单元,粒度不同)
