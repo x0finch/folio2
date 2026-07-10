@@ -1,0 +1,1 @@
+ALTER TABLE `snapshot_balances` ADD `detail_json` text;

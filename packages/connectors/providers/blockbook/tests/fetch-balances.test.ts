@@ -6,7 +6,7 @@ import addressFixture from "./fixtures/address.json";
 import xpubFixture from "./fixtures/xpub.json";
 
 // provider 只整合:取数走 @folio/blockbook-client(Trezor Blockbook)。这里按 URL(/xpub/ vs /address/)
-// 打桩 fetch,断言整合后的 Utxo/UtxoMeta。派生正确性在 @folio/bitcoin-derive 的离线向量测里。
+// 打桩 fetch,断言整合后的 Spot + detail 块(kind:"spot",ADR 0010)。派生正确性在 @folio/bitcoin-derive 的离线向量测里。
 // 主 golden 走 JSON fixture(request 原始请求 / response 录制返回 / expected 预期结果三件一体,可直接肉眼核)。
 const ADDR = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
 const ZPUB84 =
@@ -41,7 +41,7 @@ function mockBlockbook(opts: { xpub?: unknown; address?: unknown; status?: numbe
 afterEach(() => vi.restoreAllMocks());
 
 describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () => {
-  it("录制响应 → 预期 Utxo[](已确认→amount;未确认→meta.pendingSats;value=0;kind=utxo)", async () => {
+  it("录制响应 → 预期 Spot[](已确认→amount;未确认→detail stat;value=0;kind=spot)", async () => {
     mockBlockbook({ address: addressFixture.response });
     const out = await blockbookProvider.fetchBalances(
       ctx({ addressOrXpub: addressFixture.request.addressOrXpub }),
@@ -56,7 +56,7 @@ describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () 
 });
 
 describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbook 服务端派生)", () => {
-  it("录制 xpub 响应 → 预期 Utxo[](分布仅非零 + receive/change;收款指引 lastUsed + 本地派生 next)", async () => {
+  it("录制 xpub 响应 → 预期 Spot + detail(分布仅非零;收款指引 lastUsed + 本地派生 next,qr)", async () => {
     mockBlockbook({ xpub: xpubFixture.response });
     const out = await blockbookProvider.fetchBalances(
       ctx({ addressOrXpub: xpubFixture.request.addressOrXpub }),
@@ -78,14 +78,20 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
       },
     });
     const [b] = await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }));
-    const meta = b.meta as {
-      addresses: { address: string }[];
-      receive: { lastUsed: { index: number }; next: { index: number }[] };
-    };
-    // 分布只含非零(0/0);但 lastUsed 取到最大已用下标 0/1,next 从 0/2 起。
-    expect(meta.addresses.map((a) => a.address)).toEqual([RECV0]);
-    expect(meta.receive.lastUsed.index).toBe(1);
-    expect(meta.receive.next[0].index).toBe(2);
+    const detail = b.detail ?? [];
+    const distribution = detail.find(
+      (d): d is Extract<typeof d, { type: "addressList" }> =>
+        d.type === "addressList" && d.label === "Overview.btcDistribution",
+    );
+    const receive = detail.find(
+      (d): d is Extract<typeof d, { type: "addressList" }> =>
+        d.type === "addressList" && d.label === "Overview.btcReceive",
+    );
+    // 分布只含非零(0/0);但 lastUsed 取到最大已用下标 0/1,next 从 0/2 起。收款组开 qr。
+    expect(distribution?.items.map((a) => a.address)).toEqual([RECV0]);
+    expect(receive?.qr).toBe(true);
+    expect(receive?.items[0]).toEqual({ address: RECV1, index: 1 });
+    expect(receive?.items[1]?.index).toBe(2);
   });
 
   it("请求打到 /xpub/ 且带 zpub token(zpub 前缀权威,scriptType 被忽略)", async () => {

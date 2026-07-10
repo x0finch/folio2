@@ -4,7 +4,7 @@ import {
   UtxoMeta,
   type UtxoMeta as UtxoMetaT,
 } from "@folio/connectors-basic";
-import type { DetailBlock } from "@folio/detail-block-basic";
+import { DetailBlock } from "@folio/detail-block-basic";
 import { viewKind } from "./balance-kind";
 import { type PerpView, toPerpView } from "./perp";
 
@@ -22,7 +22,9 @@ export interface OverviewBalance {
   kind: string;
   tokenKey?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
   metaJson: string | null;
-  detail?: DetailBlock[]; // provider 专属仅供展示的结构化块(ADR 0010;provider 吐块前恒空)
+  // detail:provider 专属仅供展示的结构化块的落库 JSON(ADR 0010,detail_json 列)。读端 safeParse
+  // 成 DetailBlock[](与 metaJson 同套路),交前端 <BalanceDetail> 渲染;坏/缺 → 视作无块。
+  detailJson?: string | null;
   // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。
   name?: string;
   logo?: string;
@@ -79,6 +81,24 @@ function parseUtxoMeta(metaJson: string | null): UtxoMetaT | null {
   }
 }
 
+// detail_json → DetailBlock[](ADR 0010)。逐块 safeParse —— 坏 JSON → 空;未知/畸形的【单块】跳过,
+// 其余保留(前向兼容:未来新块类型不拖垮同批已知块)。<BalanceDetail> 再对未知 type / 缺字段做二次跳过。
+function parseDetail(detailJson: string | null | undefined): DetailBlock[] {
+  if (!detailJson) return [];
+  try {
+    const raw = JSON.parse(detailJson);
+    if (!Array.isArray(raw)) return [];
+    const blocks: DetailBlock[] = [];
+    for (const item of raw) {
+      const r = DetailBlock.safeParse(item);
+      if (r.success) blocks.push(r.data);
+    }
+    return blocks;
+  } catch {
+    return [];
+  }
+}
+
 // 有内容可展示(未确认/分布/收款)才回。
 function hasUtxoDetail(m: UtxoMetaT): boolean {
   return (
@@ -100,7 +120,8 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
   const detail: DetailBlock[] = [];
 
   for (const b of balances) {
-    if (b.detail?.length) detail.push(...b.detail);
+    const blocks = parseDetail(b.detailJson);
+    if (blocks.length > 0) detail.push(...blocks);
     const vk = viewKind(b);
     if (vk === "utxo") {
       // UTXO(BTC)行:进现货表(amount+value),额外抽 meta 供明细分区。

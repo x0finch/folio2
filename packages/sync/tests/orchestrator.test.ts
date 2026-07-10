@@ -79,6 +79,17 @@ describe("syncUser — 取余额 → 写快照", () => {
     expect(writes[0].input.balances).toHaveLength(1);
   });
 
+  it("透传 provider detail 块到写快照(ADR 0010:detail 落库 detail_json)", async () => {
+    const detail = [
+      { type: "stat" as const, label: "Overview.btcPending", value: 42, format: "sats" as const },
+    ];
+    const { deps, writes } = makeDeps([account()], {
+      fetchBalances: async () => ok([{ ...bal("BTC", 32000), detail }]),
+    });
+    await syncUser(deps, "u1");
+    expect(writes[0].input.balances[0].detail).toEqual(detail);
+  });
+
   it("revalue 钩子(P7.4.2):写快照前改 value 并重算 totalUsd", async () => {
     const { deps, writes } = makeDeps([account()], {
       fetchBalances: async () => ok([bal("BTC", 32000)]),

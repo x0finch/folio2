@@ -10,3 +10,11 @@ export const BTC_ADDRESS_RE = /^(bc1[a-z0-9]{11,87}|[13][a-km-zA-HJ-NP-Z1-9]{25,
 export const EXT_PUBKEY_RE = /^(xpub|ypub|zpub)/;
 // 扩展公钥完整校验(前缀 + base58 字符集 + 长度 ~111);排除 EVM 0x 与乱串。
 export const EXT_PUBKEY_FULL_RE = /^(xpub|ypub|zpub)[1-9A-HJ-NP-Za-km-z]{100,115}$/;
+
+// detail 块标签 —— app i18n key(前端 translate 解析,跟随中英双语;ADR 0010:标签用 i18n key,非写死文案)。
+// 复用 apps/web 的 Overview 命名空间既有键(btcPending / btcDistribution / btcReceive)。
+export const DETAIL_LABEL = {
+  pending: "Overview.btcPending",
+  distribution: "Overview.btcDistribution",
+  receive: "Overview.btcReceive",
+} as const;

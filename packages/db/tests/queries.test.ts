@@ -269,7 +269,7 @@ describe("snapshots", () => {
       label: "Big wallet",
       creds: "x",
     });
-    // 60 条余额 × 8 列 = 480 绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
+    // 60 条余额 × 9 列 = 540 绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
     const balances = Array.from({ length: 60 }, (_, i) => ({
       symbol: `T${i}`,
       amount: i,

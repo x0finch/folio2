@@ -178,6 +178,8 @@ export async function syncAccount(
         kind: b.kind,
         tokenKey: b.tokenKey,
         meta: b.meta,
+        // detail:provider 专属展示块(ADR 0010),透传落库(detail_json);无块则 undefined。
+        detail: b.detail,
       })),
     });
     log.info("account synced", { ...ctxFields, totalUsd, balances: balances.length });

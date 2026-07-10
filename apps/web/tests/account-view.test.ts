@@ -90,18 +90,46 @@ describe("toAccountSections", () => {
     expect(s.spot).toEqual([]);
   });
 
-  it("aggregates provider detail blocks across balances (empty when none)", () => {
+  it("parses + aggregates provider detail blocks from detailJson (empty when none)", () => {
     expect(toAccountSections([b({ id: "1", symbol: "ETH" })]).detail).toEqual([]);
     const s = toAccountSections([
       b({
         id: "1",
         symbol: "BTC",
-        detail: [{ type: "stat", label: "Overview.btcPending", value: 42, format: "sats" }],
+        detailJson: JSON.stringify([
+          { type: "stat", label: "Overview.btcPending", value: 42, format: "sats" },
+          {
+            type: "addressList",
+            label: "Overview.btcReceive",
+            items: [{ address: "bc1qnext", index: 1 }],
+            qr: true,
+          },
+        ]),
       }),
       b({ id: "2", symbol: "ETH" }),
     ]);
-    expect(s.detail).toHaveLength(1);
+    expect(s.detail).toHaveLength(2);
     expect(s.detail[0]).toMatchObject({ type: "stat", value: 42 });
+    expect(s.detail[1]).toMatchObject({ type: "addressList", qr: true });
+  });
+
+  it("skips malformed / unknown detail blocks per-item (graceful degradation, no throw)", () => {
+    // 坏 JSON / 非数组 → 空;数组内未知的单块跳过,已知块保留(前向兼容)。
+    expect(
+      toAccountSections([b({ id: "1", symbol: "BTC", detailJson: "not json" })]).detail,
+    ).toEqual([]);
+    const s = toAccountSections([
+      b({
+        id: "2",
+        symbol: "BTC",
+        detailJson: JSON.stringify([
+          { type: "mystery", foo: 1 }, // 未知块 → 跳过
+          { type: "stat", label: "Overview.btcPending", value: 7, format: "sats" }, // 保留
+        ]),
+      }),
+    ]);
+    expect(s.detail).toHaveLength(1);
+    expect(s.detail[0]).toMatchObject({ type: "stat", value: 7 });
   });
 
   it("handles an empty account", () => {

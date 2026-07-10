@@ -27,43 +27,47 @@
       "symbol": "BTC",
       "amount": 0.0008,
       "value": 0,
-      "kind": "utxo",
+      "kind": "spot",
       "tokenKey": "chain:bitcoin/native:btc",
-      "meta": {
-        "pendingSats": 0,
-        "addresses": [
-          {
-            "address": "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
-            "path": "m/84'/0'/0'/0/0",
-            "chain": "receive",
-            "balanceSats": 50000,
-            "pendingSats": 0
-          },
-          {
-            "address": "bc1qchange0",
-            "path": "m/84'/0'/0'/1/0",
-            "chain": "change",
-            "balanceSats": 30000,
-            "pendingSats": 0
-          }
-        ],
-        "receive": {
-          "lastUsed": {
-            "index": 0,
-            "address": "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu"
-          },
-          "next": [
+      "detail": [
+        {
+          "type": "addressList",
+          "label": "Overview.btcDistribution",
+          "items": [
             {
-              "index": 1,
-              "address": "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g"
+              "address": "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
+              "path": "m/84'/0'/0'/0/0",
+              "balanceSats": 50000,
+              "pendingSats": 0
             },
             {
-              "index": 2,
-              "address": "bc1qp59yckz4ae5c4efgw2s5wfyvrz0ala7rgvuz8z"
+              "address": "bc1qchange0",
+              "path": "m/84'/0'/0'/1/0",
+              "balanceSats": 30000,
+              "pendingSats": 0
             }
           ]
+        },
+        {
+          "type": "addressList",
+          "label": "Overview.btcReceive",
+          "items": [
+            {
+              "address": "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
+              "index": 0
+            },
+            {
+              "address": "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g",
+              "index": 1
+            },
+            {
+              "address": "bc1qp59yckz4ae5c4efgw2s5wfyvrz0ala7rgvuz8z",
+              "index": 2
+            }
+          ],
+          "qr": true
         }
-      }
+      ]
     }
   ]
 }

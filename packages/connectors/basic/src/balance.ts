@@ -106,3 +106,7 @@ export type PerpPositionMeta = z.infer<typeof PerpPositionMeta>;
 export type UtxoMeta = z.infer<typeof UtxoMeta>;
 export type UtxoAddress = z.infer<typeof UtxoAddress>;
 export type UtxoReceive = z.infer<typeof UtxoReceive>;
+
+// detail 块契约(ADR 0010,词汇表 v1)从 @folio/detail-block-basic 转出:BalanceBase.detail 用它,
+// provider(拼块)/ db(落库)/ 读端 可经契约层单一入口取型,无需各自直依 detail-block-basic。
+export type { DetailBlock } from "@folio/detail-block-basic";

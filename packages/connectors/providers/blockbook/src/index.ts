@@ -16,20 +16,26 @@ import {
 import {
   type BalanceProvider,
   type CredField,
+  type DetailBlock,
   ProviderError,
-  type Utxo,
-  type UtxoAddress,
-  type UtxoMeta,
-  type UtxoReceive,
+  type Spot,
 } from "@folio/connectors-basic";
 import { buildTokenKey } from "@folio/tokens-basic";
 import { z } from "zod";
-import { BTC_ADDRESS_RE, EXT_PUBKEY_FULL_RE, EXT_PUBKEY_RE, SATS_PER_BTC } from "./constants";
+import {
+  BTC_ADDRESS_RE,
+  DETAIL_LABEL,
+  EXT_PUBKEY_FULL_RE,
+  EXT_PUBKEY_RE,
+  SATS_PER_BTC,
+} from "./constants";
 
 // @folio/connectors-provider-blockbook —— 只读 Bitcoin(bitcoin connector)。地址 + xpub 两模式。
 // 只做【整合】:取数走 @folio/blockbook-client(Trezor Blockbook,xpub 服务端派生、一次调用),
-// token 造型/本地下址派生走 @folio/bitcoin-derive,本包串起值/UtxoMeta 组装 + 契约映射。
+// token 造型/本地下址派生走 @folio/bitcoin-derive,本包串起值 + detail 块组装 + 契约映射。
 // addressOrXpub(public)= BTC 地址或扩展公钥;裸 xpub 用 scriptType(public)选脚本类型(zpub/ypub 前缀已定,忽略)。
+// BTC 以【现货口径】进主表/聚合(kind:"spot",ADR 0010:utxo 并回 spot);未确认 / 派生地址 / 收款等
+// 展示细节改由 detail 块承载(DetailBlock[],仅供展示、无共享逻辑读;前端 <BalanceDetail> 按块 type 渲染)。
 // 值不在此算:provider 只产已确认 BTC amount(value=0),交 app 的 revalue 盯市(token 层唯一价源)。
 // 纯包:blockbook-client / bitcoin-derive 均无 cloudflare:workers / env,不碰 SECRETS_KEY(原则 #5)。
 
@@ -56,33 +62,36 @@ function parsePath(path: string): { chain: number; index: number } | null {
   return { chain, index };
 }
 
-// 已确认净额 → amount(BTC);未确认 → meta.pendingSats(不进权值)。
-// 既无已确认又无未确认 → 空(无持仓);仅未确认仍产一行(amount=0 + pending 徽标)。
-function toBtcBalances(
-  confirmedSats: number,
-  pendingSats: number,
-  extra?: Partial<Omit<UtxoMeta, "pendingSats">>,
-): Utxo[] {
+// 已确认净额 → amount(BTC);未确认 / 派生地址 / 收款 → detail 块(不进权值)。
+// 既无已确认又无未确认 → 空(无持仓);仅未确认仍产一行(amount=0 + pending 块)。
+function toBtcBalances(confirmedSats: number, pendingSats: number, detail: DetailBlock[]): Spot[] {
   if (confirmedSats <= 0 && pendingSats === 0) return [];
-  return [
-    {
-      symbol: "BTC",
-      amount: confirmedSats / SATS_PER_BTC,
-      value: 0, // 交给 revalue 盯市(amount × BTC 市价)
-      kind: "utxo",
-      tokenKey: BTC_TOKEN_KEY,
-      meta: { pendingSats, ...extra } satisfies UtxoMeta,
-    },
-  ];
+  const row: Spot = {
+    symbol: "BTC",
+    amount: confirmedSats / SATS_PER_BTC,
+    value: 0, // 交给 revalue 盯市(amount × BTC 市价)
+    kind: "spot",
+    tokenKey: BTC_TOKEN_KEY,
+  };
+  if (detail.length > 0) row.detail = detail;
+  return [row];
 }
 
-// Blockbook xpub 响应 → 分布(仅非零)+ 收款指引(lastUsed 外部最大已用;next 本地派生其后两个)。
-function buildXpubMeta(
-  ext: string,
-  script: ScriptType,
-  tokens: XpubToken[],
-): { addresses: UtxoAddress[]; receive: UtxoReceive } {
-  const addresses: UtxoAddress[] = [];
+// 账户级未确认额 → stat 块(仅非零;pendingSats 结构化,前端按 sats format 显示为 BTC 且跟随 locale)。
+function pendingBlocks(pendingSats: number): DetailBlock[] {
+  if (pendingSats === 0) return [];
+  return [{ type: "stat", label: DETAIL_LABEL.pending, value: pendingSats, format: "sats" }];
+}
+
+// Blockbook xpub 响应 → detail 块:①派生地址分布(仅非零;path 编码 receive/change)②收款指引
+//(lastUsed 外部最大已用 + next 本地派生其后两个,收款组 qr:true)。前端 addressList 原语自带复制/二维码。
+function buildXpubBlocks(ext: string, script: ScriptType, tokens: XpubToken[]): DetailBlock[] {
+  const distribution: Array<{
+    address: string;
+    path: string;
+    balanceSats: number;
+    pendingSats: number;
+  }> = [];
   let lastExternal: { index: number; address: string } | null = null;
 
   for (const t of tokens) {
@@ -90,12 +99,11 @@ function buildXpubMeta(
     if (!parsed) continue;
     const balanceSats = toSats(t.balance);
     if (balanceSats > 0) {
-      addresses.push({
+      distribution.push({
         address: t.name,
-        path: t.path,
-        chain: parsed.chain === 0 ? "receive" : "change",
+        path: t.path, // 派生路径(前端作副标题;receive/change 由路径 chain 段自明)
         balanceSats,
-        pendingSats: 0, // Blockbook 不给逐地址未确认;账户级 pending 走顶层
+        pendingSats: 0, // Blockbook 不给逐地址未确认;账户级 pending 走顶层 stat
       });
     }
     // tokens=used → 返回的都是已用地址;取外部链(chain 0)最大下标作 lastUsed。
@@ -109,7 +117,24 @@ function buildXpubMeta(
   const base = lastExternal ? lastExternal.index + 1 : 0;
   const next = [base, base + 1].map((index) => ({ index, address: derive(0, index) }));
 
-  return { addresses, receive: { lastUsed: lastExternal, next } };
+  const blocks: DetailBlock[] = [];
+  if (distribution.length > 0) {
+    blocks.push({ type: "addressList", label: DETAIL_LABEL.distribution, items: distribution });
+  }
+  // 收款指引:最近用过(如有)+ 下一批未使用,携派生 index;收款组开 qr(前端每项渲染二维码)。
+  const receiveItems = [
+    ...(lastExternal ? [{ address: lastExternal.address, index: lastExternal.index }] : []),
+    ...next.map((n) => ({ address: n.address, index: n.index })),
+  ];
+  if (receiveItems.length > 0) {
+    blocks.push({
+      type: "addressList",
+      label: DETAIL_LABEL.receive,
+      items: receiveItems,
+      qr: true,
+    });
+  }
+  return blocks;
 }
 
 const isExtendedPubkey = (id: string): boolean => EXT_PUBKEY_RE.test(id);
@@ -129,8 +154,9 @@ function toProviderError(err: unknown): ProviderError {
 async function fetchXpub(client: BlockbookClient, ext: string, scriptType: string | undefined) {
   const script = effectiveScript(ext, scriptType);
   const res = await client.getXpub(blockbookXpubParam(ext, script)); // details=tokenBalances&tokens=used
-  const { addresses, receive } = buildXpubMeta(ext, script, res.tokens ?? []);
-  return toBtcBalances(toSats(res.balance), toSats(res.unconfirmedBalance), { addresses, receive });
+  const pendingSats = toSats(res.unconfirmedBalance);
+  const detail = [...pendingBlocks(pendingSats), ...buildXpubBlocks(ext, script, res.tokens ?? [])];
+  return toBtcBalances(toSats(res.balance), pendingSats, detail);
 }
 
 // —— 账户级 creds(AC):BTC 地址或扩展公钥,public(明文落库、可导出重建)——
@@ -158,7 +184,7 @@ export const bitcoinAccountCreds = [
 const providerCreds = [] as const satisfies readonly CredField[];
 
 export const blockbookProvider: BalanceProvider<
-  Utxo,
+  Spot,
   typeof bitcoinAccountCreds,
   typeof providerCreds
 > = {
@@ -166,13 +192,14 @@ export const blockbookProvider: BalanceProvider<
   label: "Blockbook",
   creds: providerCreds,
 
-  async fetchBalances(ctx): Promise<Utxo[]> {
+  async fetchBalances(ctx): Promise<Spot[]> {
     const id = ctx.account.creds.addressOrXpub;
     const client = createBlockbookClient();
     try {
       if (isExtendedPubkey(id)) return await fetchXpub(client, id, ctx.account.creds.scriptType);
       const res = await client.getAddress(id);
-      return toBtcBalances(toSats(res.balance), toSats(res.unconfirmedBalance));
+      const pendingSats = toSats(res.unconfirmedBalance);
+      return toBtcBalances(toSats(res.balance), pendingSats, pendingBlocks(pendingSats));
     } catch (err) {
       throw toProviderError(err);
     }
