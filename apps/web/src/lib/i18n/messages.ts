@@ -82,6 +82,7 @@ export const en = {
     smallHoldings: "{n} small holdings",
     viewMore: "View more",
     sourcesTitle: "Sources",
+    detailsTitle: "Details",
   },
   Accounts: {
     title: "Accounts",
@@ -304,6 +305,7 @@ export const zh: Messages = {
     smallHoldings: "{n} 项小额",
     viewMore: "查看更多",
     sourcesTitle: "各来源",
+    detailsTitle: "明细",
   },
   Accounts: {
     title: "账户",

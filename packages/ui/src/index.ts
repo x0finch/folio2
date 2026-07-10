@@ -31,6 +31,11 @@ export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
 export { MarkdownDetail } from "./components/markdown-detail";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";
+export {
+  BouncyAccordion,
+  type BouncyAccordionItem,
+  type BouncyAccordionProps,
+} from "./components/motion/bouncy-accordion";
 export { Button, buttonVariants, StatefulButton } from "./components/motion/button";
 export { Checkbox } from "./components/motion/checkbox";
 export { CommandPalette } from "./components/motion/command-palette";

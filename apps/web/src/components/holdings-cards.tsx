@@ -1,4 +1,4 @@
-import { MarkdownDetail } from "@folio/ui";
+import { BouncyAccordion, MarkdownDetail } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import {
   type DefiGroup,
@@ -59,10 +59,23 @@ function RowCard({
 
 function SpotCards({ rows }: { rows: SpotRow[] }) {
   const usd = useDisplayValue();
+  const t = useTranslations("Overview");
   return (
     <div className="flex flex-col gap-2">
       {rows.map((b) => (
         <div key={b.id} className="flex flex-col gap-1.5">
+          {/* detail 在 balance 之前,用 bouncy-accordion 包成可折叠的独立区域 */}
+          {b.detail ? (
+            <BouncyAccordion
+              items={[
+                {
+                  id: `${b.id}-detail`,
+                  title: t("detailsTitle"),
+                  description: <MarkdownDetail md={b.detail} />,
+                },
+              ]}
+            />
+          ) : null}
           <RowCard
             avatar={<TokenAvatar symbol={b.symbol} logo={b.logo} />}
             title={b.symbol.toUpperCase()}
@@ -75,7 +88,6 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
             primary={usd(b.usdValue)}
             secondary={<Change24h value={b.change24h} />}
           />
-          {b.detail ? <MarkdownDetail md={b.detail} className="px-3" /> : null}
         </div>
       ))}
     </div>
