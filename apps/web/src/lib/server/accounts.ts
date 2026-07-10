@@ -1,10 +1,8 @@
 import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
-import type { AccountSafe } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { SCRIPT_TYPE_VALUES } from "../bitcoin-scripts";
 import { isComplete, safeView, sealCreds } from "../creds";
 import { requireAuth } from "../require-auth";
 import { credentialSpecs, validateAccountCreds } from "./connectors";
@@ -41,123 +39,38 @@ export const listMyAccounts = createServerFn({ method: "GET" })
     });
   });
 
-// 一个 manual 账户 = 一个手记资产:symbol/amount/unitPrice 三个 public 输入,走 creds(明文,见 P6.6.2/P7.4.1)。
-// 创建即写一条初始 `set` 活动(manual_activity),账本从创建起就有基线;之后 amount 经活动账本物化。
-const ManualInput = z.object({
+// 统一创建入口(connector-driven,#55/#52):表单原始输入 values(键 = connector.account.creds 的 key),
+// 校验/加密/落库全由 connectorId 驱动,不再按类型分派。空串值 = 未填的可选字段,落库前丢弃。
+// manual 账户额外补一条初始 `set` 活动(账本基线);其余无副作用。
+const CreateAccountInput = z.object({
+  connectorId: z.string().min(1),
   label: z.string().trim().min(1, "label is required"),
-  symbol: z.string().trim().min(1, "symbol is required"),
-  amount: z.string().trim().min(1, "amount is required"),
-  unitPrice: z.string().trim().min(1, "unitPrice is required"),
-  identifier: z.string().trim().optional(), // 选币消歧(P7.4.3),可选
-  fixed: z.boolean().optional(), // 锁定固定值(P7.4.4),可选
+  values: z.record(z.string(), z.string().trim()), // 表单原始输入(键 = connector.account.creds 的 key);trim 后落库
 });
-export const createManualAccount = createServerFn({ method: "POST" })
+export const createAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(ManualInput)
+  .validator(CreateAccountInput)
   .handler(async ({ data, context }) => {
-    const raw: Record<string, string> = {
-      symbol: data.symbol,
-      amount: data.amount,
-      unitPrice: data.unitPrice,
-      ...(data.identifier ? { identifier: data.identifier } : {}),
-      ...(data.fixed ? { fixed: "1" } : {}),
-    };
-    await validateAccountCreds("manual", raw); // 形状校验闸(manual 无需探活)
+    const connectorId = data.connectorId as ConnectorId; // 未知 connectorId 由 validateAccountCreds 兜底抛错
+    // 丢掉空串:未填的可选字段缺省即不参与;必填字段留空 → 变 undefined → 下面形状闸直接拒
+    //(必填 validator 对 undefined 均失败,含 manual 的 amount/unitPrice —— z.coerce.number() 拒 undefined)。
+    const values = Object.fromEntries(Object.entries(data.values).filter(([, v]) => v !== ""));
+    // 形状闸(必填/格式)+ 活性探活(manual 的 validateAccount 恒真 → liveness 对其为无副作用的 no-op)。
+    await validateAccountCreds(connectorId, values, { liveness: true, label: data.label });
     const account = await db.createAccount(context.userId, {
-      connectorId: "manual",
+      connectorId,
       label: data.label,
-      creds: await raw2sealed("manual", raw),
+      creds: await raw2sealed(connectorId, values),
     });
-    // 初始 set:账本基线 = 创建时数量(与 creds.amount 一致)。
-    await db.recordManualActivity(context.userId, account.id, {
-      kind: "set",
-      amount: Number(data.amount),
-      occurredAt: Date.now(),
-    });
-    log.info("account created", { connectorId: "manual", accountId: account.id });
-    return account;
-  });
-
-// 地址类账户(链上 + perp):地址落 account.creds —— bitcoin 键为 addressOrXpub,其余(evm/solana/sui/cosmos/
-// hyperliquid)键为 address(与各 connector 的 account.creds 声明一致,#37d)。validateAccountCreds({liveness})
-// 内部注入 provider 声明的 env key + provider.validateAccount,活性失败即抛(地址无效/不可达或服务端缺 key),通过才封装。
-async function createAddressAccount(
-  userId: string,
-  connectorId: ConnectorId,
-  label: string,
-  address: string,
-  extra?: Record<string, string>, // bitcoin xpub 的 scriptType 等附加 public 输入
-): Promise<AccountSafe> {
-  const addressKey = connectorId === "bitcoin" ? "addressOrXpub" : "address";
-  const raw = { [addressKey]: address, ...extra };
-  await validateAccountCreds(connectorId, raw, { liveness: true, label });
-  const account = await db.createAccount(userId, {
-    connectorId,
-    label,
-    creds: await raw2sealed(connectorId, raw),
-  });
-  log.info("account created", { connectorId, accountId: account.id });
-  return account;
-}
-
-const OnchainInput = z.object({
-  connectorId: z.enum(["evm", "bitcoin", "solana", "sui", "cosmos"]),
-  label: z.string().trim().min(1, "label is required"),
-  address: z.string().trim(), // seal 的是原始输入 → wire 先 trim 保持落库规范
-  // bitcoin 扩展公钥的脚本类型(仅 xpub 用,单地址忽略);其它链忽略。枚举与客户端下拉同源。
-  scriptType: z.enum(SCRIPT_TYPE_VALUES).optional(),
-});
-export const createOnchainAccount = createServerFn({ method: "POST" })
-  .middleware([requireAuth])
-  .validator(OnchainInput)
-  .handler(({ data, context }) =>
-    createAddressAccount(
-      context.userId,
-      data.connectorId,
-      data.label,
-      data.address,
-      data.scriptType ? { scriptType: data.scriptType } : undefined,
-    ),
-  );
-
-const PerpInput = z.object({
-  connectorId: z.enum(["hyperliquid"]),
-  label: z.string().trim().min(1, "label is required"),
-  address: z.string().trim(),
-});
-export const createPerpAccount = createServerFn({ method: "POST" })
-  .middleware([requireAuth])
-  .validator(PerpInput)
-  .handler(({ data, context }) =>
-    createAddressAccount(context.userId, data.connectorId, data.label, data.address),
-  );
-
-// CEX 账户录入:apiKey(semi,明文)+ secret/passphrase(secret,加密)按 type 落库。
-// 字段值校验(非空、okx passphrase 必填)与活性校验都在 validateCredentials 内。
-const ExchangeInput = z.object({
-  connectorId: z.enum(["binance", "okx"]),
-  label: z.string().trim().min(1, "label is required"),
-  apiKey: z.string().trim(), // seal 原始输入 → wire 先 trim
-  secret: z.string().trim(),
-  passphrase: z.string().trim().optional(),
-});
-export const createExchangeAccount = createServerFn({ method: "POST" })
-  .middleware([requireAuth])
-  .validator(ExchangeInput)
-  .handler(async ({ data, context }) => {
-    // passphrase 可选(仅 okx):缺省则不放进 values,由 provider.inputs 的 validator 判定是否必填。
-    const values: Record<string, string> = { apiKey: data.apiKey, secret: data.secret };
-    if (data.passphrase !== undefined) values.passphrase = data.passphrase;
-    await validateAccountCreds(data.connectorId, values, { liveness: true, label: data.label });
-    const account = await db.createAccount(context.userId, {
-      connectorId: data.connectorId,
-      label: data.label,
-      creds: await raw2sealed(data.connectorId, values),
-    });
-    log.info("exchange account created", {
-      connectorId: data.connectorId,
-      accountId: account.id,
-    });
+    // manual 初始 set:账本基线 = 创建时数量(与 creds.amount 一致)。
+    if (connectorId === "manual") {
+      await db.recordManualActivity(context.userId, account.id, {
+        kind: "set",
+        amount: Number(values.amount),
+        occurredAt: Date.now(),
+      });
+    }
+    log.info("account created", { connectorId, accountId: account.id });
     return account;
   });
 

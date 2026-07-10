@@ -12,22 +12,3 @@ export const CONNECTOR_OPTIONS: { group: string; options: ConnectorId[] }[] = [
   { group: "Exchange", options: ["binance", "okx"] },
   { group: "Perp DEX", options: ["hyperliquid"] },
 ];
-
-export type OnchainConnectorId = "evm" | "bitcoin" | "solana" | "sui" | "cosmos";
-
-// 展示名(专有名词,不翻译)。由 add-account-sheet(下拉)、accounts 页(徽章)、account-detail-sheet 共用。
-export const CONNECTOR_LABELS: Partial<Record<ConnectorId, string>> = {
-  manual: "Manual",
-  evm: "EVM",
-  bitcoin: "Bitcoin",
-  solana: "Solana",
-  sui: "Sui",
-  cosmos: "Cosmos",
-  binance: "Binance",
-  okx: "OKX",
-  hyperliquid: "Hyperliquid",
-};
-
-export function connectorLabel(connectorId: ConnectorId): string {
-  return CONNECTOR_LABELS[connectorId] ?? connectorId;
-}

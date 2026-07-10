@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { InputSpec } from "../creds";
 import { requireAuth } from "../require-auth";
-import { credentialSpecs } from "./connectors";
+import { connectorCatalog, credentialSpecs } from "./connectors";
 
 // InputSpec 定义在 lib/creds.ts(CredField 的可序列化投影);此处转发给前端类型引用。
 export type { InputSpec };
@@ -12,3 +12,9 @@ export type { InputSpec };
 export const getCredentialSpecs = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(() => credentialSpecs());
+
+// connector 展示名目录(connectorId → label,来自 registry 的单一事实源)。
+// 走 server fn 是为了不把 provider 实现打进客户端包(只回这张静态目录表);客户端经 useConnectorLabels 消费。
+export const getConnectorCatalog = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(() => connectorCatalog());

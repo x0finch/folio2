@@ -14,6 +14,13 @@ import type { InputSpec } from "../creds";
 // 安全边界(原则 #5):此处【不碰 SECRETS_KEY】—— 创建/校验拿到的是表单明文,只做形状闸 + 可选活性探活;
 // 存库前的加密塑形在 lib/creds.ts。
 
+// connector 展示名目录(connectorId → label):遍历 registry(单一事实源),供前端徽章/下拉展示。
+export function connectorCatalog(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [cid, manifest] of connectorRegistry) out[cid] = manifest.label;
+  return out;
+}
+
 // 各 connectorId 的账户输入规格(可序列化):遍历 connector registry → 取 manifest 的 account.creds(CredField[]),
 // 投影成 {key,type,label,desc}(剥掉不可序列化的 validator)。业务层据 type 做 seal/mask/complete/categorize。
 export function credentialSpecs(): Partial<Record<ConnectorId, InputSpec[]>> {
