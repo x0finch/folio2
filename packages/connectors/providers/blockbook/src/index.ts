@@ -17,20 +17,28 @@ import {
   type BalanceProvider,
   type CredField,
   ProviderError,
-  type Utxo,
-  type UtxoAddress,
-  type UtxoMeta,
-  type UtxoReceive,
+  type Spot,
 } from "@folio/connectors-basic";
 import { buildTokenKey } from "@folio/tokens-basic";
 import { z } from "zod";
-import { BTC_ADDRESS_RE, EXT_PUBKEY_FULL_RE, EXT_PUBKEY_RE, SATS_PER_BTC } from "./constants";
+import {
+  ADDR_SHORT_HEAD,
+  ADDR_SHORT_MIN,
+  ADDR_SHORT_TAIL,
+  BTC_ADDRESS_RE,
+  EXT_PUBKEY_FULL_RE,
+  EXT_PUBKEY_RE,
+  MEMPOOL_ADDRESS_URL,
+  SATS_PER_BTC,
+} from "./constants";
 
 // @folio/connectors-provider-blockbook —— 只读 Bitcoin(bitcoin connector)。地址 + xpub 两模式。
 // 只做【整合】:取数走 @folio/blockbook-client(Trezor Blockbook,xpub 服务端派生、一次调用),
-// token 造型/本地下址派生走 @folio/bitcoin-derive,本包串起值/UtxoMeta 组装 + 契约映射。
+// token 造型/本地下址派生走 @folio/bitcoin-derive,本包串起值 + markdown detail 组装 + 契约映射。
 // addressOrXpub(public)= BTC 地址或扩展公钥;裸 xpub 用 scriptType(public)选脚本类型(zpub/ypub 前缀已定,忽略)。
 // 值不在此算:provider 只产已确认 BTC amount(value=0),交 app 的 revalue 盯市(token 层唯一价源)。
+// BTC 明细(未确认/派生分布/收款指引)拼成 markdown 字符串塞 detail(spike markdown-detail):
+//   前端 react-markdown 直渲,provider 零结构化 meta。永久英文(detail 不跟随显示币种/语言)。
 // 纯包:blockbook-client / bitcoin-derive 均无 cloudflare:workers / env,不碰 SECRETS_KEY(原则 #5)。
 
 // BTC 身份键:chain:bitcoin/native:btc(仅作身份 + 平台归属 → "Bitcoin")。
@@ -40,6 +48,19 @@ const toSats = (s: string | undefined): number => {
   const n = Number(s ?? "0");
   return Number.isFinite(n) ? n : 0;
 };
+
+// sats → BTC 全精度串(核对用精确值,8 位、去尾零)。
+const btc = (sats: number): string => {
+  const s = (sats / SATS_PER_BTC).toFixed(8);
+  return s.replace(/\.?0+$/, "");
+};
+
+// 地址中缩:首 ADDR_SHORT_HEAD + 尾 ADDR_SHORT_TAIL;短地址不缩。
+const shortAddr = (a: string): string =>
+  a.length > ADDR_SHORT_MIN ? `${a.slice(0, ADDR_SHORT_HEAD)}…${a.slice(-ADDR_SHORT_TAIL)}` : a;
+
+// 地址 → markdown 外链(文字截断,URL 用全地址)。
+const addrLink = (a: string): string => `[${shortAddr(a)}](${MEMPOOL_ADDRESS_URL}${a})`;
 
 // 生效脚本类型:zpub/ypub 前缀权威(忽略 scriptType);裸 xpub 用所选、缺省按 recommendedScript(native)。
 function effectiveScript(ext: string, scriptType: string | undefined): ScriptType {
@@ -56,33 +77,79 @@ function parsePath(path: string): { chain: number; index: number } | null {
   return { chain, index };
 }
 
-// 已确认净额 → amount(BTC);未确认 → meta.pendingSats(不进权值)。
-// 既无已确认又无未确认 → 空(无持仓);仅未确认仍产一行(amount=0 + pending 徽标)。
+interface AddressDist {
+  address: string;
+  chain: "receive" | "change";
+  balanceSats: number;
+}
+interface ReceiveGuide {
+  lastUsed: { index: number; address: string } | null;
+  next: { index: number; address: string }[];
+}
+
+// 未确认 / 派生分布 / 收款指引 → markdown 字符串(仅非空段落)。全空 → undefined(不塞 detail)。
+// 段落:Unconfirmed(仅非零)· Receive addresses(lastUsed + 本地派生 next)· Distribution(仅非零余额)。
+function buildBtcDetail(
+  pendingSats: number,
+  dist: AddressDist[],
+  receive?: ReceiveGuide,
+): string | undefined {
+  const sections: string[] = [];
+
+  if (pendingSats !== 0) {
+    const sign = pendingSats > 0 ? "+" : "";
+    sections.push(`**Unconfirmed:** ${sign}${btc(pendingSats)} BTC`);
+  }
+
+  if (receive && (receive.lastUsed || receive.next.length > 0)) {
+    const lines: string[] = ["**Receive addresses**"];
+    if (receive.lastUsed) {
+      lines.push(`- Last used (#${receive.lastUsed.index}): ${addrLink(receive.lastUsed.address)}`);
+    }
+    for (const n of receive.next) lines.push(`- Next #${n.index}: ${addrLink(n.address)}`);
+    sections.push(lines.join("\n"));
+  }
+
+  if (dist.length > 0) {
+    const lines = ["**Distribution**"];
+    for (const a of dist) {
+      lines.push(`- ${addrLink(a.address)} — ${a.chain} — ${btc(a.balanceSats)} BTC`);
+    }
+    sections.push(lines.join("\n"));
+  }
+
+  return sections.length > 0 ? sections.join("\n\n") : undefined;
+}
+
+// 已确认净额 → amount(BTC);明细拼进 detail(markdown)。value=0 交 revalue 盯市。
+// 既无已确认又无未确认 → 空(无持仓);仅未确认仍产一行(amount=0 + detail 里的 pending)。
 function toBtcBalances(
   confirmedSats: number,
   pendingSats: number,
-  extra?: Partial<Omit<UtxoMeta, "pendingSats">>,
-): Utxo[] {
+  dist: AddressDist[] = [],
+  receive?: ReceiveGuide,
+): Spot[] {
   if (confirmedSats <= 0 && pendingSats === 0) return [];
+  const detail = buildBtcDetail(pendingSats, dist, receive);
   return [
     {
       symbol: "BTC",
       amount: confirmedSats / SATS_PER_BTC,
       value: 0, // 交给 revalue 盯市(amount × BTC 市价)
-      kind: "utxo",
+      kind: "spot",
       tokenKey: BTC_TOKEN_KEY,
-      meta: { pendingSats, ...extra } satisfies UtxoMeta,
+      ...(detail ? { detail } : {}),
     },
   ];
 }
 
 // Blockbook xpub 响应 → 分布(仅非零)+ 收款指引(lastUsed 外部最大已用;next 本地派生其后两个)。
-function buildXpubMeta(
+function buildXpubDetail(
   ext: string,
   script: ScriptType,
   tokens: XpubToken[],
-): { addresses: UtxoAddress[]; receive: UtxoReceive } {
-  const addresses: UtxoAddress[] = [];
+): { dist: AddressDist[]; receive: ReceiveGuide } {
+  const dist: AddressDist[] = [];
   let lastExternal: { index: number; address: string } | null = null;
 
   for (const t of tokens) {
@@ -90,12 +157,10 @@ function buildXpubMeta(
     if (!parsed) continue;
     const balanceSats = toSats(t.balance);
     if (balanceSats > 0) {
-      addresses.push({
+      dist.push({
         address: t.name,
-        path: t.path,
         chain: parsed.chain === 0 ? "receive" : "change",
         balanceSats,
-        pendingSats: 0, // Blockbook 不给逐地址未确认;账户级 pending 走顶层
       });
     }
     // tokens=used → 返回的都是已用地址;取外部链(chain 0)最大下标作 lastUsed。
@@ -109,7 +174,7 @@ function buildXpubMeta(
   const base = lastExternal ? lastExternal.index + 1 : 0;
   const next = [base, base + 1].map((index) => ({ index, address: derive(0, index) }));
 
-  return { addresses, receive: { lastUsed: lastExternal, next } };
+  return { dist, receive: { lastUsed: lastExternal, next } };
 }
 
 const isExtendedPubkey = (id: string): boolean => EXT_PUBKEY_RE.test(id);
@@ -129,8 +194,8 @@ function toProviderError(err: unknown): ProviderError {
 async function fetchXpub(client: BlockbookClient, ext: string, scriptType: string | undefined) {
   const script = effectiveScript(ext, scriptType);
   const res = await client.getXpub(blockbookXpubParam(ext, script)); // details=tokenBalances&tokens=used
-  const { addresses, receive } = buildXpubMeta(ext, script, res.tokens ?? []);
-  return toBtcBalances(toSats(res.balance), toSats(res.unconfirmedBalance), { addresses, receive });
+  const { dist, receive } = buildXpubDetail(ext, script, res.tokens ?? []);
+  return toBtcBalances(toSats(res.balance), toSats(res.unconfirmedBalance), dist, receive);
 }
 
 // —— 账户级 creds(AC):BTC 地址或扩展公钥,public(明文落库、可导出重建)——
@@ -158,7 +223,7 @@ export const bitcoinAccountCreds = [
 const providerCreds = [] as const satisfies readonly CredField[];
 
 export const blockbookProvider: BalanceProvider<
-  Utxo,
+  Spot,
   typeof bitcoinAccountCreds,
   typeof providerCreds
 > = {
@@ -166,7 +231,7 @@ export const blockbookProvider: BalanceProvider<
   label: "Blockbook",
   creds: providerCreds,
 
-  async fetchBalances(ctx): Promise<Utxo[]> {
+  async fetchBalances(ctx): Promise<Spot[]> {
     const id = ctx.account.creds.addressOrXpub;
     const client = createBlockbookClient();
     try {

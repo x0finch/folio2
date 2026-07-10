@@ -3,6 +3,13 @@
 
 export const SATS_PER_BTC = 100_000_000;
 
+// 区块浏览器地址页(detail markdown 里把地址渲成外链;链接文字截断、URL 用全地址)。
+export const MEMPOOL_ADDRESS_URL = "https://mempool.space/address/";
+// 地址中缩:首 10 + 尾 6(便于核对又不占宽);短地址(≤ 阈值)不缩。
+export const ADDR_SHORT_HEAD = 10;
+export const ADDR_SHORT_TAIL = 6;
+export const ADDR_SHORT_MIN = 20;
+
 // mainnet 地址前缀正则(前缀/字符集/长度粗校验;checksum 交编码环节):
 //   P2PKH 1… / P2SH 3…(base58,排除 0OIl)、bech32/bech32m bc1…(segwit v0/v1,小写)。
 export const BTC_ADDRESS_RE = /^(bc1[a-z0-9]{11,87}|[13][a-km-zA-HJ-NP-Z1-9]{25,39})$/;

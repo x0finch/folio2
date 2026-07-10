@@ -12,11 +12,9 @@
       "symbol": "BTC",
       "amount": 0.08,
       "value": 0,
-      "kind": "utxo",
+      "kind": "spot",
       "tokenKey": "chain:bitcoin/native:btc",
-      "meta": {
-        "pendingSats": 500000
-      }
+      "detail": "**Unconfirmed:** +0.005 BTC"
     }
   ]
 }

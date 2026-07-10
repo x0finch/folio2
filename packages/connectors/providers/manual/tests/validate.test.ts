@@ -5,21 +5,14 @@ import { manualAccountCreds, manualProvider } from "../src";
 type Ctx = Parameters<typeof manualProvider.validateAccount>[0];
 
 describe("custom account.creds / validateAccount", () => {
-  it("declares symbol/amount/unitPrice/identifier/fixed as public account.creds", () => {
+  it("declares symbol/amount/unitPrice/identifier as public account.creds", () => {
     expect(manualAccountCreds.map((i) => [i.key, i.type])).toEqual([
       ["symbol", "public"],
       ["amount", "public"],
       ["unitPrice", "public"],
       ["identifier", "public"],
-      ["fixed", "public"],
     ]);
-    expect(publicKeys(manualAccountCreds)).toEqual([
-      "symbol",
-      "amount",
-      "unitPrice",
-      "identifier",
-      "fixed",
-    ]);
+    expect(publicKeys(manualAccountCreds)).toEqual(["symbol", "amount", "unitPrice", "identifier"]);
   });
 
   it("provider.creds is empty (no external source / provider key)", () => {
