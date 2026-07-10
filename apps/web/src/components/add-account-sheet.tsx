@@ -22,64 +22,23 @@ import {
   isBareXpub,
   isExtendedPubkey,
   recommendedScript,
-  type ScriptType,
 } from "../lib/bitcoin-scripts";
-import { CONNECTOR_OPTIONS, connectorLabel, type OnchainConnectorId } from "../lib/connectors";
-import {
-  createExchangeAccount,
-  createManualAccount,
-  createOnchainAccount,
-  createPerpAccount,
-} from "../lib/server/accounts";
+import { CONNECTOR_OPTIONS } from "../lib/connectors";
+import { createAccount } from "../lib/server/accounts";
 import { getCredentialSpecs, type InputSpec } from "../lib/server/credentials";
 import { syncOneAccount } from "../lib/server/sync";
 import { tokenPrice } from "../lib/server/tokens";
+import { useConnectorLabels } from "../lib/use-connector-labels";
 import { TokenPicker } from "./token-picker";
 
-// 按 connectorId 派发到对应 server fn(#37d:地址字段键随 connector —— bitcoin=addressOrXpub、其余=address;
-// manual 的 identifier 是 CGK 选币 id,语义不同故保留)。统一成单个 createAccount 留 follow-up。
+// connector-driven 创建(#55):字段组件已按 connector.account.creds 的 key 写入 values,
+// 这里只需原样透传给统一的 createAccount(校验/加密/落库全在服务端按 connectorId 驱动)。
 async function submitAccount(
   connectorId: ConnectorId,
   label: string,
   values: Record<string, string>,
 ) {
-  if (connectorId === "manual") {
-    return createManualAccount({
-      data: {
-        label,
-        symbol: values.symbol ?? "",
-        amount: values.amount ?? "",
-        unitPrice: values.unitPrice ?? "",
-        identifier: values.identifier || undefined,
-        fixed: values.fixed === "1",
-      },
-    });
-  }
-  if (connectorId === "binance" || connectorId === "okx") {
-    return createExchangeAccount({
-      data: {
-        connectorId,
-        label,
-        apiKey: values.apiKey ?? "",
-        secret: values.secret ?? "",
-        passphrase: values.passphrase || undefined,
-      },
-    });
-  }
-  if (connectorId === "hyperliquid") {
-    return createPerpAccount({ data: { connectorId, label, address: values.address ?? "" } });
-  }
-  // 其余为链上类型(注册表只暴露已实现的链)。bitcoin 用 addressOrXpub 键 + scriptType(仅 xpub 用),其余用 address。
-  const address = connectorId === "bitcoin" ? (values.addressOrXpub ?? "") : (values.address ?? "");
-  return createOnchainAccount({
-    data: {
-      connectorId: connectorId as OnchainConnectorId,
-      label,
-      address,
-      // BitcoinFields 只写入合法枚举值;服务端再经 zod enum 校验兜底。
-      scriptType: (values.scriptType as ScriptType | undefined) || undefined,
-    },
-  });
+  return createAccount({ data: { connectorId, label, values } });
 }
 
 // manual 的字段:富控件(TokenCombobox 选币联动 symbol+identifier+autofill 单价 / 数字 / 锁定勾选)。
@@ -384,6 +343,7 @@ function AccountForm({
 export function AddAccountSheet({ triggerRender }: { triggerRender?: React.ReactElement } = {}) {
   const t = useTranslations("Accounts");
   const router = useRouter();
+  const labelOf = useConnectorLabels();
   const [open, setOpen] = useState(false);
   const [connectorId, setConnectorId] = useState<ConnectorId>("manual");
   // 字段规格部署内静态 → 长 staleTime,几乎只取一次。
@@ -427,7 +387,7 @@ export function AddAccountSheet({ triggerRender }: { triggerRender?: React.React
                   </div>
                   {g.options.map((ty) => (
                     <SelectItem key={ty} value={ty}>
-                      {connectorLabel(ty)}
+                      {labelOf(ty)}
                     </SelectItem>
                   ))}
                 </div>
