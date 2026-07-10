@@ -77,7 +77,7 @@ const bal = (symbol: string, amount: number, value: number, identifier?: string)
   symbol,
   amount,
   value,
-  kind: "spot", // manual connector 产 spot kind(旧 "manual" kind 已并入 5-kind 的 spot)
+  kind: "spot", // manual connector 产 spot kind(遗留 "manual" kind 已并入 4-kind 的 spot,ADR 0010)
   // 用户选币 → tokenKey 的厂商寻址形(coingecko:<id>),身份不再进 meta。
   ...(identifier ? { tokenKey: `coingecko:${identifier}` } : {}),
 });
@@ -91,19 +91,6 @@ describe("revalue", () => {
   it("manual unresolvable → keeps provider value (unitPrice fallback)", async () => {
     const out = await revalue(tokens(), "manual", [bal("PRIVATETOKEN", 10, 99)]);
     expect(out[0].value).toBe(99);
-  });
-
-  it("meta.fixed → keeps provider value even when symbol resolves", async () => {
-    // BTC 可解析(store 有价 65000),但锁定固定值 → 保留 provider 的 value=1。
-    const locked: Balance = {
-      symbol: "BTC",
-      amount: 0.5,
-      value: 1,
-      kind: "spot",
-      meta: { fixed: true },
-    };
-    const out = await revalue(tokens(), "manual", [locked]);
-    expect(out[0].value).toBe(1);
   });
 
   it("explicit coingecko tokenKey overrides symbol resolution", async () => {
@@ -129,17 +116,18 @@ describe("revalue", () => {
   });
 
   it("bitcoin → 盯市:provider 只给 amount(value=0),按 BTC 市价算 value", async () => {
-    // bitcoin provider 产 value=0、tokenKey=chain:bitcoin/native:btc,靠 symbol 回退到 bitcoin 价 65000。
+    // bitcoin provider 产 kind:"spot"(ADR 0010:utxo 已并回 spot)、value=0、tokenKey=chain:bitcoin/native:btc,
+    // 靠 symbol 回退到 bitcoin 价 65000。展示细节走 detail 块,revalue 透传不动。
     const btc: Balance = {
       symbol: "BTC",
       amount: 0.08,
       value: 0,
-      kind: "utxo", // bitcoin connector 产 utxo kind(pendingSats 在 UtxoMeta)
+      kind: "spot",
       tokenKey: "chain:bitcoin/native:btc",
-      meta: { pendingSats: 500000 },
+      detail: [{ type: "stat", label: "Overview.btcPending", value: 500000, format: "sats" }],
     };
     const out = await revalue(tokens(), "bitcoin", [btc]);
     expect(out[0].value).toBe(5200); // 0.08 × 65000
-    expect((out[0].meta as { pendingSats: number }).pendingSats).toBe(500000); // meta 保留
+    expect(out[0].detail).toEqual(btc.detail); // detail 保留
   });
 });

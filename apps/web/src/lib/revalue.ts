@@ -20,9 +20,6 @@ export async function revalue(
   if (!REVALUE_TYPES.has(connectorId)) return balances;
   return Promise.all(
     balances.map(async (b) => {
-      // 锁定固定值(P7.4.4):即便币可识别也跳过市价、保留 provider 的 amount × unitPrice。
-      // fixed 仅存在于 spot kind 的 meta(manual connector);先按 kind 收窄再读。
-      if (b.kind === "spot" && b.meta?.fixed) return b;
       const res = await tokens.resolve({ symbol: b.symbol, tokenKey: b.tokenKey }, { lazy: true });
       if (!res.ref) return b;
       const p = await tokens.priceOf(res.ref);

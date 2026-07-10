@@ -1,7 +1,5 @@
-import type { UtxoMeta } from "@folio/connectors-basic";
 import { BalanceDetail } from "@folio/detail-block";
 import type { DetailFormat } from "@folio/detail-block-basic";
-import { toast } from "@folio/ui";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
 import {
   type DefiGroup,
@@ -160,86 +158,6 @@ function PerpCards({ view }: { view: PerpView }) {
   );
 }
 
-// 可点击复制的地址(点击 → 写剪贴板 + toast)。
-function CopyableAddress({ address }: { address: string }) {
-  const t = useTranslations("Overview");
-  return (
-    <button
-      type="button"
-      className="truncate font-mono text-xs text-muted-foreground hover:text-foreground"
-      title={address}
-      onClick={() => {
-        navigator.clipboard?.writeText(address);
-        toast.success(t("addressCopied"));
-      }}
-    >
-      {shortAddr(address)}
-    </button>
-  );
-}
-
-// Bitcoin 明细:未确认额 + xpub 派生分布(仅非零)+ 收款地址指引(上次用过 / 下次可用)+ 截断提示。
-function BitcoinCards({ meta }: { meta: UtxoMeta }) {
-  const t = useTranslations("Overview");
-  const chainLabel = (c: "receive" | "change") =>
-    c === "receive" ? t("btcReceiveChain") : t("btcChangeChain");
-  return (
-    <div className="flex flex-col gap-4">
-      {meta.pendingSats !== 0 && (
-        <p className="text-xs text-muted-foreground">
-          {t("btcPending")}: {meta.pendingSats > 0 ? "+" : ""}
-          {btc(meta.pendingSats)} BTC
-        </p>
-      )}
-
-      {meta.receive && (meta.receive.lastUsed || meta.receive.next.length > 0) && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{t("btcReceive")}</p>
-          {meta.receive.lastUsed && (
-            <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-              <span className="text-xs text-muted-foreground">{t("btcLastUsed")}</span>
-              <CopyableAddress address={meta.receive.lastUsed.address} />
-            </div>
-          )}
-          {meta.receive.next.map((n) => (
-            <div
-              key={n.address}
-              className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
-            >
-              <span className="text-xs text-muted-foreground">
-                {t("btcNext")} #{n.index}
-              </span>
-              <CopyableAddress address={n.address} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {meta.addresses && meta.addresses.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{t("btcDistribution")}</p>
-          {meta.addresses.map((a) => (
-            <RowCard
-              key={a.address}
-              title={<CopyableAddress address={a.address} />}
-              subtitle={<span className="capitalize">{chainLabel(a.chain)}</span>}
-              primary={`${btc(a.balanceSats)} BTC`}
-              secondary={
-                a.pendingSats !== 0 ? (
-                  <span className="text-xs text-muted-foreground">
-                    {t("btcPending")} {a.pendingSats > 0 ? "+" : ""}
-                    {btc(a.pendingSats)}
-                  </span>
-                ) : undefined
-              }
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // <BalanceDetail> 的注入接线:把 app 的 i18n(use-intl)与货币/数字格式化(显示币种/locale 感知)
 // 注入到通用渲染器 —— 通用包不直接依赖 use-intl / @folio/fx(ADR 0010:格式化前端做、跟随显示币种/locale)。
 function useDetailRenderProps() {
@@ -270,7 +188,7 @@ function useDetailRenderProps() {
   return { translate, format };
 }
 
-// 一个账户的全部持仓(卡片列表):现货 / DeFi / 永续 / Bitcoin 明细 + provider detail 块(空 → 提示)。
+// 一个账户的全部持仓(卡片列表):现货 / DeFi / 永续 + provider detail 块(BTC 明细走 detail,ADR 0010)。
 export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[] }) {
   const t = useTranslations("Overview");
   const detailProps = useDetailRenderProps();
@@ -281,10 +199,9 @@ export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[]
   return (
     <div className="flex flex-col gap-6">
       {sections.spot.length > 0 && <SpotCards rows={sections.spot} />}
-      {sections.utxo && <BitcoinCards meta={sections.utxo} />}
       {sections.defi.length > 0 && <DefiCards groups={sections.defi} />}
       {sections.perp && <PerpCards view={sections.perp} />}
-      {/* provider detail 块(ADR 0010):此片无 provider 吐块 → 渲染 null,现有行为不受影响。 */}
+      {/* provider detail 块(ADR 0010):BTC 未确认/派生地址/收款等经此渲染;无块 → 渲染 null。 */}
       <BalanceDetail blocks={sections.detail} {...detailProps} />
     </div>
   );

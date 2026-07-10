@@ -1,17 +1,13 @@
-import {
-  DefiMeta,
-  type DefiMeta as DefiMetaT,
-  UtxoMeta,
-  type UtxoMeta as UtxoMetaT,
-} from "@folio/connectors-basic";
+import { DefiMeta, type DefiMeta as DefiMetaT } from "@folio/connectors-basic";
 import { DetailBlock } from "@folio/detail-block-basic";
 import { viewKind } from "./balance-kind";
 import { type PerpView, toPerpView } from "./perp";
 
 // 纯逻辑(无 server-only import → 可单测)。把一个账户的余额行按 kind 拆成展示分区:
-// 现货/UTXO → 一张表;DeFi → 按 protocol 分组;永续 → 复用 toPerpView。
+// 现货(含并回 spot 的 BTC)→ 一张表;DeFi → 按 protocol 分组;永续 → 复用 toPerpView。
 // 卡片净值仍 = 账户 totalUsd(净值不变量,见 ADR 0009)。这里只管"怎么分区展示"。
-// kind 走 viewKind 归一(并存期兼容遗留 kind:manual→spot、perp 靠 role、bitcoin→utxo);
+// kind 走 viewKind 归一(并存期兼容遗留 kind:manual/utxo/bitcoin → spot、perp 靠 role);
+// BTC 展示细节(未确认/派生地址/收款)改由 detail 块承载(ADR 0010),不再从 meta 抽 utxo 分区。
 // meta 用 @folio/connectors 的 zod schema safeParse(替代旧 `as` 强转)。
 
 export interface OverviewBalance {
@@ -57,8 +53,7 @@ export interface AccountSections {
   spot: SpotRow[];
   defi: DefiGroup[];
   perp: PerpView | null; // 无永续行 → null
-  utxo: UtxoMetaT | null; // BTC 未确认/分布/收款指引(无可展示则 null)
-  detail: DetailBlock[]; // provider 专属展示块,跨账户余额聚合(provider 吐块前恒空)
+  detail: DetailBlock[]; // provider 专属展示块(含 BTC 未确认/派生地址/收款,ADR 0010);无块则空
 }
 
 function parseDefiMeta(metaJson: string | null): DefiMetaT {
@@ -68,16 +63,6 @@ function parseDefiMeta(metaJson: string | null): DefiMetaT {
     return r.success ? r.data : {};
   } catch {
     return {};
-  }
-}
-
-function parseUtxoMeta(metaJson: string | null): UtxoMetaT | null {
-  if (!metaJson) return null;
-  try {
-    const r = UtxoMeta.safeParse(JSON.parse(metaJson));
-    return r.success ? r.data : null;
-  } catch {
-    return null;
   }
 }
 
@@ -99,16 +84,6 @@ function parseDetail(detailJson: string | null | undefined): DetailBlock[] {
   }
 }
 
-// 有内容可展示(未确认/分布/收款)才回。
-function hasUtxoDetail(m: UtxoMetaT): boolean {
-  return (
-    m.pendingSats !== 0 ||
-    Boolean(m.addresses?.length) ||
-    Boolean(m.receive?.lastUsed) ||
-    Boolean(m.receive?.next?.length)
-  );
-}
-
 const DEFI_FALLBACK_PROTOCOL = "Other";
 
 export function toAccountSections(balances: OverviewBalance[]): AccountSections {
@@ -116,18 +91,12 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
   const perpRows: OverviewBalance[] = [];
   // 保序分组:首次出现的 protocol 顺序即展示顺序。
   const defiByProtocol = new Map<string, DefiRow[]>();
-  let utxo: UtxoMetaT | null = null;
   const detail: DetailBlock[] = [];
 
   for (const b of balances) {
     const blocks = parseDetail(b.detailJson);
     if (blocks.length > 0) detail.push(...blocks);
     const vk = viewKind(b);
-    if (vk === "utxo") {
-      // UTXO(BTC)行:进现货表(amount+value),额外抽 meta 供明细分区。
-      const m = parseUtxoMeta(b.metaJson);
-      if (m && hasUtxoDetail(m)) utxo = m;
-    }
     if (vk === "perp_equity" || vk === "perp_position") {
       perpRows.push(b);
     } else if (vk === "defi") {
@@ -144,7 +113,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
       if (group) group.push(row);
       else defiByProtocol.set(protocol, [row]);
     } else {
-      // spot / utxo:统一现货表(带上富化字段,缺则 undefined)
+      // spot(含并回 spot 的 BTC 及遗留 utxo/manual):统一现货表(带上富化字段,缺则 undefined)
       spot.push({
         id: b.id,
         symbol: b.symbol,
@@ -161,5 +130,5 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
   const defi: DefiGroup[] = [...defiByProtocol].map(([protocol, rows]) => ({ protocol, rows }));
   const perp = perpRows.length > 0 ? toPerpView(perpRows) : null;
 
-  return { spot, defi, perp, utxo, detail };
+  return { spot, defi, perp, detail };
 }

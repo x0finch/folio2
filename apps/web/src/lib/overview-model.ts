@@ -77,7 +77,7 @@ export async function buildOverview(
     for (const b of balancesOf(account.id)) {
       const vk = viewKind(b);
       if (isFungible(vk)) {
-        // 现货 / UTXO(BTC)→ 进跨账户聚合
+        // 现货(含并回 spot 的 BTC)→ 进跨账户聚合
         eligible.push({
           account,
           b,
@@ -98,7 +98,7 @@ export async function buildOverview(
     symbol: b.symbol,
     amount: b.amount,
     value: b.usdValue,
-    kind: viewKind(b), // 归一到 5-kind(并存期兼容遗留)
+    kind: viewKind(b), // 归一到 4-kind(并存期兼容遗留 utxo/manual/bitcoin → spot)
     tokenKey: b.tokenKey,
     isMargin: margin,
     account: {

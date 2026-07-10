@@ -5,7 +5,7 @@ const norm = (s: string): string => s.trim().toUpperCase();
 
 // 纯逻辑(无 server-only import → 可单测)。把跨账户的持仓行按【规范代币】聚合成 Holding 树。
 // 设计见 docs/adr 0001–0003;术语见 CONTEXT.md。
-//   · 白名单(进聚合):spot / utxo(BTC)/ CEX 现货(kind=spot)/ perp 权益(isMargin) —— ADR-0003。kind 已由 overview 用 viewKind 归一。
+//   · 白名单(进聚合):spot(含 CEX 现货 + 并回 spot 的 BTC)/ perp 权益(isMargin) —— ADR-0003 + ADR-0010。kind 已由 overview 用 viewKind 归一。
 //   · 归并键四级(永不裸 symbol,ADR-0002):group → token(ref)→ tokenKey(精确合约)→ account:symbol。
 //   · HoldingSource 粒度 = 账户 × 平台单元:链上按链拆(tokenKey 的 eip155/chain 前缀),其余按账户/场馆。
 //   · 表头 totalAmount 仅当组内是单一 Token(所有 source 同一身份)时给,跨多 Token(桥接家族)不给。
@@ -15,7 +15,7 @@ export interface AggInput {
   symbol: string;
   amount: number;
   value: number; // USD(provider 权威;聚合按它求和)
-  kind: string; // 归一后的 viewKind:spot | defi | perp_equity | perp_position | utxo
+  kind: string; // 归一后的 viewKind:spot | defi | perp_equity | perp_position
   tokenKey?: string | null;
   isMargin?: boolean; // perp 权益(保证金)—— 进聚合但明细标注
   account: { id: string; label: string; connectorId: string; network?: string | null };
@@ -75,8 +75,8 @@ function holdingKey(row: AggInput): string {
 }
 
 function isEligible(row: AggInput): boolean {
-  // 进聚合的同质口径:现货 / UTXO(BTC)/ perp 权益(isMargin)。kind 已由 overview 用 viewKind 归一。
-  return row.kind === "spot" || row.kind === "utxo" || row.isMargin === true;
+  // 进聚合的同质口径:现货(含并回 spot 的 BTC)/ perp 权益(isMargin)。kind 已由 overview 用 viewKind 归一。
+  return row.kind === "spot" || row.isMargin === true;
 }
 
 interface Acc {

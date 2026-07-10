@@ -6,9 +6,5 @@
   {
     "name": "picked CoinGecko id → coingecko tokenKey (sync-time market valuation)",
     "creds": { "symbol": "BTC", "amount": 1, "unitPrice": 64000, "identifier": "bitcoin" }
-  },
-  {
-    "name": "fixed surfaced to meta (sync skips market valuation)",
-    "creds": { "symbol": "BTC", "amount": 1, "unitPrice": 64000, "fixed": "1" }
   }
 ]

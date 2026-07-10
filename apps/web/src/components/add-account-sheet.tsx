@@ -2,7 +2,6 @@ import type { ConnectorId } from "@folio/connectors";
 import type { TokenInfo } from "@folio/tokens";
 import {
   Button,
-  Checkbox,
   Drawer,
   Input,
   Label,
@@ -153,17 +152,6 @@ function ManualFields({
         <p className="text-xs text-muted-foreground">
           {priceBusy ? t("fetchingPrice") : t("unitPriceHint")}
         </p>
-      </div>
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="m-fixed"
-            checked={values.fixed === "1"}
-            onCheckedChange={(c) => set("fixed", c === true ? "1" : "")}
-          />
-          <Label htmlFor="m-fixed">{t("fixedLabel")}</Label>
-        </div>
-        <p className="text-xs text-muted-foreground">{t("fixedHint")}</p>
       </div>
     </>
   );

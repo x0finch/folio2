@@ -20,7 +20,6 @@ describe("toAccountSections", () => {
     expect(s.spot.map((r) => r.symbol)).toEqual(["ETH", "CASH"]);
     expect(s.defi).toEqual([]);
     expect(s.perp).toBeNull();
-    expect(s.utxo).toBeNull();
   });
 
   it("groups defi rows by protocol (preserving first-seen order, with fallback)", () => {
@@ -137,46 +136,30 @@ describe("toAccountSections", () => {
       spot: [],
       defi: [],
       perp: null,
-      utxo: null,
       detail: [],
     });
   });
 
-  it("extracts Bitcoin meta (pending + xpub distribution/receive) from the BTC balance", () => {
+  // —— 老快照兼容(ADR 0010:遗留 kind 归 spot,BTC 展示细节改走 detail 块,不再从 meta 抽 utxo 分区) ——
+  it("legacy kind='utxo' 行归入现货表(不 throw,老快照的 UtxoMeta 不再解析)", () => {
     const s = toAccountSections([
       b({
         id: "1",
         symbol: "BTC",
-        kind: "spot",
+        kind: "utxo", // 老快照写的遗留 kind 字符串
         usdValue: 5000,
         tokenKey: "chain:bitcoin/native:btc",
-        metaJson: JSON.stringify({
-          pendingSats: 500000,
-          addresses: [
-            {
-              address: "bc1qrecv",
-              path: "m/84'/0'/0'/0/0",
-              chain: "receive",
-              balanceSats: 50000,
-              pendingSats: 0,
-            },
-          ],
-          receive: {
-            lastUsed: { index: 0, address: "bc1qrecv" },
-            next: [{ index: 1, address: "bc1qnext" }],
-          },
-        }),
+        // 老 UtxoMeta metaJson —— 不再被解析成分区,只需不崩
+        metaJson: JSON.stringify({ pendingSats: 12345, addresses: [{ address: "bc1q" }] }),
       }),
     ]);
-    // BTC 仍进现货表
+    // BTC 进现货表(数量/金额口径不变),无 utxo 分区
     expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
-    // 明细抽出
-    expect(s.utxo?.pendingSats).toBe(500000);
-    expect(s.utxo?.addresses?.[0].address).toBe("bc1qrecv");
-    expect(s.utxo?.receive?.next[0]).toEqual({ index: 1, address: "bc1qnext" });
+    expect(s.spot[0].usdValue).toBe(5000);
+    expect("utxo" in s).toBe(false);
   });
 
-  it("no Bitcoin detail when meta is empty (address mode, zero pending)", () => {
+  it("legacy BTC 骑 spot(带 chain:bitcoin tokenKey + 老 UtxoMeta)仍归现货表", () => {
     const s = toAccountSections([
       b({
         id: "1",
@@ -184,27 +167,11 @@ describe("toAccountSections", () => {
         kind: "spot",
         usdValue: 5000,
         tokenKey: "chain:bitcoin/native:btc",
-        metaJson: JSON.stringify({ pendingSats: 0 }),
+        metaJson: JSON.stringify({ pendingSats: 500000 }),
       }),
     ]);
-    expect(s.utxo).toBeNull();
+    expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
     expect(s.spot).toHaveLength(1);
-  });
-
-  // —— 迁移后的新 5-kind(并存期一并支持) ——
-  it("新 kind=utxo:进现货表 + 抽出明细", () => {
-    const s = toAccountSections([
-      b({
-        id: "1",
-        symbol: "BTC",
-        kind: "utxo",
-        usdValue: 5000,
-        tokenKey: "chain:bitcoin/native:btc",
-        metaJson: JSON.stringify({ pendingSats: 12345 }),
-      }),
-    ]);
-    expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
-    expect(s.utxo?.pendingSats).toBe(12345);
   });
 
   it("新 kind=perp_equity/perp_position:走 perp 视图", () => {
