@@ -90,8 +90,28 @@ describe("toAccountSections", () => {
     expect(s.spot).toEqual([]);
   });
 
+  it("aggregates provider detail blocks across balances (empty when none)", () => {
+    expect(toAccountSections([b({ id: "1", symbol: "ETH" })]).detail).toEqual([]);
+    const s = toAccountSections([
+      b({
+        id: "1",
+        symbol: "BTC",
+        detail: [{ type: "stat", label: "Overview.btcPending", value: 42, format: "sats" }],
+      }),
+      b({ id: "2", symbol: "ETH" }),
+    ]);
+    expect(s.detail).toHaveLength(1);
+    expect(s.detail[0]).toMatchObject({ type: "stat", value: 42 });
+  });
+
   it("handles an empty account", () => {
-    expect(toAccountSections([])).toEqual({ spot: [], defi: [], perp: null, utxo: null });
+    expect(toAccountSections([])).toEqual({
+      spot: [],
+      defi: [],
+      perp: null,
+      utxo: null,
+      detail: [],
+    });
   });
 
   it("extracts Bitcoin meta (pending + xpub distribution/receive) from the BTC balance", () => {

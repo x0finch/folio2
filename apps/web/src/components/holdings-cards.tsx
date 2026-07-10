@@ -1,6 +1,8 @@
 import type { UtxoMeta } from "@folio/connectors-basic";
+import { BalanceDetail } from "@folio/detail-block";
+import type { DetailFormat } from "@folio/detail-block-basic";
 import { toast } from "@folio/ui";
-import { useTranslations } from "use-intl";
+import { useFormatter, useLocale, useTranslations } from "use-intl";
 import {
   type DefiGroup,
   type OverviewBalance,
@@ -238,9 +240,40 @@ function BitcoinCards({ meta }: { meta: UtxoMeta }) {
   );
 }
 
-// 一个账户的全部持仓(卡片列表):现货 / DeFi / 永续 / Bitcoin 明细(空 → 提示)。
+// <BalanceDetail> 的注入接线:把 app 的 i18n(use-intl)与货币/数字格式化(显示币种/locale 感知)
+// 注入到通用渲染器 —— 通用包不直接依赖 use-intl / @folio/fx(ADR 0010:格式化前端做、跟随显示币种/locale)。
+function useDetailRenderProps() {
+  const t = useTranslations();
+  const locale = useLocale();
+  const fmt = useFormatter();
+  const usd = useDisplayValue();
+  // i18n key → 文案(blocks 携运行时 key,故对根 translator 做一次宽松转型)。
+  const translate = (key: string) => t(key as never);
+  const format = (value: number | string, f?: DetailFormat): string => {
+    switch (f) {
+      case "usd":
+        return usd(Number(value));
+      case "sats":
+        return `${btc(Number(value))} BTC`;
+      case "btc":
+        return `${formatNumber(Number(value), { compact: false, maxFractionDigits: 8, locale })} BTC`;
+      case "percent":
+        return `${Number(value).toFixed(2)}%`;
+      case "date":
+        return fmt.dateTime(new Date(Number(value)), { dateStyle: "medium" });
+      case "address":
+        return shortAddr(String(value));
+      default:
+        return typeof value === "number" ? formatNumber(value, { locale }) : String(value);
+    }
+  };
+  return { translate, format };
+}
+
+// 一个账户的全部持仓(卡片列表):现货 / DeFi / 永续 / Bitcoin 明细 + provider detail 块(空 → 提示)。
 export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[] }) {
   const t = useTranslations("Overview");
+  const detailProps = useDetailRenderProps();
   if (balances.length === 0) {
     return <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>;
   }
@@ -251,6 +284,8 @@ export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[]
       {sections.utxo && <BitcoinCards meta={sections.utxo} />}
       {sections.defi.length > 0 && <DefiCards groups={sections.defi} />}
       {sections.perp && <PerpCards view={sections.perp} />}
+      {/* provider detail 块(ADR 0010):此片无 provider 吐块 → 渲染 null,现有行为不受影响。 */}
+      <BalanceDetail blocks={sections.detail} {...detailProps} />
     </div>
   );
 }

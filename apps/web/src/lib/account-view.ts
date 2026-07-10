@@ -4,6 +4,7 @@ import {
   UtxoMeta,
   type UtxoMeta as UtxoMetaT,
 } from "@folio/connectors-basic";
+import type { DetailBlock } from "@folio/detail-block-basic";
 import { viewKind } from "./balance-kind";
 import { type PerpView, toPerpView } from "./perp";
 
@@ -21,6 +22,7 @@ export interface OverviewBalance {
   kind: string;
   tokenKey?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
   metaJson: string | null;
+  detail?: DetailBlock[]; // provider 专属仅供展示的结构化块(ADR 0010;provider 吐块前恒空)
   // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。
   name?: string;
   logo?: string;
@@ -54,6 +56,7 @@ export interface AccountSections {
   defi: DefiGroup[];
   perp: PerpView | null; // 无永续行 → null
   utxo: UtxoMetaT | null; // BTC 未确认/分布/收款指引(无可展示则 null)
+  detail: DetailBlock[]; // provider 专属展示块,跨账户余额聚合(provider 吐块前恒空)
 }
 
 function parseDefiMeta(metaJson: string | null): DefiMetaT {
@@ -94,8 +97,10 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
   // 保序分组:首次出现的 protocol 顺序即展示顺序。
   const defiByProtocol = new Map<string, DefiRow[]>();
   let utxo: UtxoMetaT | null = null;
+  const detail: DetailBlock[] = [];
 
   for (const b of balances) {
+    if (b.detail?.length) detail.push(...b.detail);
     const vk = viewKind(b);
     if (vk === "utxo") {
       // UTXO(BTC)行:进现货表(amount+value),额外抽 meta 供明细分区。
@@ -135,5 +140,5 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
   const defi: DefiGroup[] = [...defiByProtocol].map(([protocol, rows]) => ({ protocol, rows }));
   const perp = perpRows.length > 0 ? toPerpView(perpRows) : null;
 
-  return { spot, defi, perp, utxo };
+  return { spot, defi, perp, utxo, detail };
 }
