@@ -101,6 +101,7 @@ export const snapshotBalances = sqliteTable(
     // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的 tokenKey。
     tokenKey: text("token_key"),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空
+    detail: text("detail"), // provider 拼的 markdown 展示细节(spike markdown-detail),可空
   },
   (t) => [index("snapshot_balances_snapshot_id_idx").on(t.snapshotId)],
 );

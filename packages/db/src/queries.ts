@@ -21,8 +21,8 @@ import {
 } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
 
-// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 8 列 → 每块 12 行(96 参数,留余量)。
-const BALANCE_INSERT_CHUNK = 12;
+// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 9 列 → 每块 11 行(99 参数,留余量)。
+const BALANCE_INSERT_CHUNK = 11;
 
 // 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
 const accountSafeColumns = {
@@ -290,6 +290,7 @@ export interface SnapshotBalanceInput {
   kind: BalanceKind;
   tokenKey?: string;
   meta?: Record<string, unknown>;
+  detail?: string; // provider 拼的 markdown 展示细节(可空)
 }
 
 export interface WriteSnapshotInput {
@@ -325,8 +326,9 @@ export async function writeSnapshot(
     kind: b.kind,
     tokenKey: b.tokenKey ?? null,
     metaJson: b.meta ? JSON.stringify(b.meta) : null,
+    detail: b.detail ?? null,
   }));
-  // D1 限制每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 7 列 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行。
+  // D1 限制每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 9 列 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行。
   // 一次性大 INSERT 会触发 "too many SQL variables"(地址持仓多时,如链上钱包几十上百条)。
   const balanceInserts = [];
   for (let i = 0; i < balanceRows.length; i += BALANCE_INSERT_CHUNK) {

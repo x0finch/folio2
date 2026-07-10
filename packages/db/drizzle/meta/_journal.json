@@ -127,6 +127,13 @@
       "when": 1783628708257,
       "tag": "0017_flowery_meteorite",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1783721050207,
+      "tag": "0018_closed_terror",
+      "breakpoints": true
     }
   ]
 }
