@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@folio/detail-block-basic": "workspace:*",
     "@standard-schema/spec": "^1.1.0",
     "zod": "^4.0.0"
   },
