@@ -85,6 +85,10 @@ export const en = {
     btcPending: "Pending",
     btcDistribution: "Distribution",
     btcReceive: "Receive addresses",
+    cexBreakdown: "Balance breakdown",
+    cexAvailable: "Available",
+    cexLocked: "Locked",
+    cexFrozen: "Frozen",
   },
   Accounts: {
     title: "Accounts",
@@ -310,6 +314,10 @@ export const zh: Messages = {
     btcPending: "未确认",
     btcDistribution: "分布",
     btcReceive: "收款地址",
+    cexBreakdown: "余额构成",
+    cexAvailable: "可用",
+    cexLocked: "锁仓",
+    cexFrozen: "冻结",
   },
   Accounts: {
     title: "账户",

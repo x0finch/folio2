@@ -16,3 +16,11 @@ export const STABLECOINS: ReadonlySet<string> = new Set([
   "TUSD",
   "DAI",
 ]);
+
+// detail 块标签 —— app i18n key(前端 translate 解析,跟随中英双语;ADR 0010:标签用 i18n key,非写死文案)。
+// 复用 apps/web 的 Overview 命名空间 CEX 键(cexBreakdown / cexAvailable / cexLocked)。
+export const DETAIL_LABEL = {
+  breakdown: "Overview.cexBreakdown",
+  available: "Overview.cexAvailable",
+  locked: "Overview.cexLocked",
+} as const;

@@ -23,6 +23,25 @@ describe("parseBalances (golden: fixture in → fixture out)", () => {
   it("maps the recorded balance details to expected-balances", () => {
     expect(parseBalances(balance.data[0].details)).toEqual(expected);
   });
+
+  it("emits a keyValue available/frozen detail block only when frozen > 0 (USD)", () => {
+    const balances = parseBalances(balance.data[0].details);
+    // BTC has frozenBal → keyValue block, values in USD (native × price eqUsd/eq = 60000)
+    const btc = balances.find((b) => b.symbol === "BTC");
+    expect(btc?.detail).toEqual([
+      {
+        type: "keyValue",
+        label: "Overview.cexBreakdown",
+        items: [
+          { label: "Overview.cexAvailable", value: 22500, format: "usd" },
+          { label: "Overview.cexFrozen", value: 7500, format: "usd" },
+        ],
+      },
+    ]);
+    // USDT/ETH fully available (frozen 0) → no detail block (avoid noise)
+    expect(balances.find((b) => b.symbol === "USDT")?.detail).toBeUndefined();
+    expect(balances.find((b) => b.symbol === "ETH")?.detail).toBeUndefined();
+  });
 });
 
 describe("okxProvider.fetchBalances", () => {

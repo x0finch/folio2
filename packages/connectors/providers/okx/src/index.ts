@@ -1,6 +1,7 @@
 import {
   type BalanceProvider,
   type CredField,
+  type DetailBlock,
   hmacSha256,
   ProviderError,
   parseRetryAfter,
@@ -10,6 +11,7 @@ import { z } from "zod";
 import {
   AUTH_ERROR_CODES,
   BALANCE_PATH,
+  DETAIL_LABEL,
   HEADER_KEY,
   HEADER_PASSPHRASE,
   HEADER_SIGN,
@@ -27,6 +29,8 @@ interface OkxDetail {
   ccy?: string;
   eq?: string;
   eqUsd?: string;
+  availBal?: string; // 可用余额(原币)
+  frozenBal?: string; // 冻结余额(原币,挂单/借贷占用)
 }
 interface OkxBalanceResponse {
   code?: string;
@@ -34,8 +38,28 @@ interface OkxBalanceResponse {
   data?: Array<{ details?: OkxDetail[] }>;
 }
 
+// available/frozen → keyValue detail 块(仅当有冻结分量且可估值时才吐,避免噪音)。
+// 值用 USD(availBal/frozenBal × price,price=eqUsd/eq,与该行的现货估值同口径)+ format:"usd"
+// → 前端跟随显示币种/双语渲染。全部可用(frozen=0)或无价则不吐块。
+function frozenBlocks(d: OkxDetail, price: number | undefined): DetailBlock[] {
+  const frozen = Number(d.frozenBal ?? 0);
+  const avail = Number(d.availBal ?? 0);
+  if (!(frozen > 0) || price == null) return [];
+  return [
+    {
+      type: "keyValue",
+      label: DETAIL_LABEL.breakdown,
+      items: [
+        { label: DETAIL_LABEL.available, value: avail * price, format: "usd" },
+        { label: DETAIL_LABEL.frozen, value: frozen * price, format: "usd" },
+      ],
+    },
+  ];
+}
+
 // 纯解析:details[] → Spot[]。与 IO 分离,golden test。
 // amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
+// 有冻结分量时挂 keyValue detail 块展示 available/frozen(USD 口径,见 frozenBlocks)。
 export function parseBalances(details: OkxDetail[]): Spot[] {
   const out: Spot[] = [];
   for (const d of details ?? []) {
@@ -43,13 +67,17 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
     if (!ccy) continue;
     const amount = Number(d.eq ?? 0);
     if (!(amount > 0)) continue;
-    out.push({
+    const price = amount > 0 ? Number(d.eqUsd ?? 0) / amount : undefined;
+    const row: Spot = {
       symbol: ccy,
       amount,
-      price: amount > 0 ? Number(d.eqUsd ?? 0) / amount : undefined,
+      price,
       value: Number(d.eqUsd ?? 0),
       kind: "spot",
-    });
+    };
+    const detail = frozenBlocks(d, price);
+    if (detail.length > 0) row.detail = detail;
+    out.push(row);
   }
   return out;
 }

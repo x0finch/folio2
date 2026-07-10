@@ -26,6 +26,25 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
     // BNB has zero balance → excluded
     expect(balances.find((b) => b.symbol === "BNB")).toBeUndefined();
   });
+
+  it("emits a keyValue available/locked detail block only when locked > 0 (USD)", () => {
+    // ETH has locked (free 2 + locked 1) → keyValue block, values in USD (× price 3000)
+    const eth = balances.find((b) => b.symbol === "ETH");
+    expect(eth?.detail).toEqual([
+      {
+        type: "keyValue",
+        label: "Overview.cexBreakdown",
+        items: [
+          { label: "Overview.cexAvailable", value: 6000, format: "usd" },
+          { label: "Overview.cexLocked", value: 3000, format: "usd" },
+        ],
+      },
+    ]);
+    // BTC is fully available (locked 0) → no detail block (avoid noise)
+    expect(balances.find((b) => b.symbol === "BTC")?.detail).toBeUndefined();
+    // NOPRICE has no price → no USD-denominated block even if it had locked
+    expect(balances.find((b) => b.symbol === "NOPRICE")?.detail).toBeUndefined();
+  });
 });
 
 describe("binanceProvider.fetchBalances", () => {

@@ -18,3 +18,11 @@ export const AUTH_ERROR_CODES: ReadonlySet<string> = new Set([
   "50111", // invalid OK-ACCESS-KEY
   "50113", // invalid signature
 ]);
+
+// detail 块标签 —— app i18n key(前端 translate 解析,跟随中英双语;ADR 0010:标签用 i18n key,非写死文案)。
+// 复用 apps/web 的 Overview 命名空间 CEX 键(cexBreakdown / cexAvailable / cexFrozen)。
+export const DETAIL_LABEL = {
+  breakdown: "Overview.cexBreakdown",
+  available: "Overview.cexAvailable",
+  frozen: "Overview.cexFrozen",
+} as const;

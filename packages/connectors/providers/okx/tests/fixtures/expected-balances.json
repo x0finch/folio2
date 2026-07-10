@@ -4,7 +4,17 @@
     "amount": 0.5,
     "price": 60000,
     "value": 30000,
-    "kind": "spot"
+    "kind": "spot",
+    "detail": [
+      {
+        "type": "keyValue",
+        "label": "Overview.cexBreakdown",
+        "items": [
+          { "label": "Overview.cexAvailable", "value": 22500, "format": "usd" },
+          { "label": "Overview.cexFrozen", "value": 7500, "format": "usd" }
+        ]
+      }
+    ]
   },
   {
     "symbol": "USDT",
