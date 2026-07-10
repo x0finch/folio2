@@ -8,7 +8,7 @@ export function Stat({ block }: { block: StatBlock }) {
   return (
     <div className="flex items-center justify-between gap-3 text-sm">
       <span className="text-muted-foreground">{translate(block.label)}</span>
-      <span className="font-medium">{format(block.value, block.format)}</span>
+      <span className="font-medium">{format(block.value, block.format, block.unit)}</span>
     </div>
   );
 }

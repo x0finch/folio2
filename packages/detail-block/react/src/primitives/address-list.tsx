@@ -42,8 +42,8 @@ export function AddressList({ block }: { block: AddressListBlock }) {
       {block.label != null && <p className="text-sm font-medium">{translate(block.label)}</p>}
       {items.map((item) => {
         const meta = item.path ?? (item.index != null ? `#${item.index}` : null);
-        const pendingSats = item.pendingSats;
-        const showPending = pendingSats != null && pendingSats !== 0;
+        const pending = item.pending;
+        const showPending = pending != null && pending.value !== 0;
         return (
           <div key={item.address} className="flex flex-col gap-2 rounded-md border px-3 py-2">
             <div className="flex items-center justify-between gap-3">
@@ -56,14 +56,18 @@ export function AddressList({ block }: { block: AddressListBlock }) {
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {item.balanceSats != null && (
-                  <span className="text-sm font-medium">{format(item.balanceSats, "sats")}</span>
+                {item.balance != null && (
+                  <span className="text-sm font-medium">
+                    {format(item.balance.value, "amount", item.balance.unit)}
+                  </span>
                 )}
                 <CopyButton value={item.address} />
               </div>
             </div>
             {showPending && (
-              <span className="text-xs text-muted-foreground">{format(pendingSats, "sats")}</span>
+              <span className="text-xs text-muted-foreground">
+                {format(pending.value, "amount", pending.unit)}
+              </span>
             )}
             {block.qr && (
               // 二维码需浅底 + 深模块才可扫,与主题无关 → 固定白底(功能性,非装饰色)。

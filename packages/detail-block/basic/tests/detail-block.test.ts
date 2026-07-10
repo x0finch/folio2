@@ -9,14 +9,20 @@ import {
 } from "../src/detail-block";
 
 describe("DetailBlock v1 判别联合 —— runtime parse", () => {
-  it("stat:带标签数值 + format", () => {
+  it("stat:带标签数值 + format + amount 单位(单位是数据)", () => {
     const b = DetailBlock.parse({
       type: "stat",
       label: "Overview.btcPending",
-      value: 12_345,
-      format: "sats",
+      value: 0.00012345,
+      format: "amount",
+      unit: "BTC",
     });
-    expect(b).toMatchObject({ type: "stat", value: 12_345, format: "sats" });
+    expect(b).toMatchObject({
+      type: "stat",
+      value: 0.00012345,
+      format: "amount",
+      unit: "BTC",
+    });
   });
 
   it("keyValue:数字项带 format、字符串项省 format;块级 label 可选", () => {
@@ -41,7 +47,12 @@ describe("DetailBlock v1 判别联合 —— runtime parse", () => {
       label: "Overview.btcDistribution",
       qr: true,
       items: [
-        { address: "bc1qexample", path: "m/84'/0'/0'/0/0", index: 0, balanceSats: 5000 },
+        {
+          address: "bc1qexample",
+          path: "m/84'/0'/0'/0/0",
+          index: 0,
+          balance: { value: 0.00005, unit: "BTC" },
+        },
         { address: "bc1qonly" },
       ],
     });
@@ -82,14 +93,14 @@ describe("DetailBlock —— 类型完备", () => {
     expectTypeOf<DetailBlockType>().toEqualTypeOf<"stat" | "keyValue" | "addressList">();
   });
 
-  it("DetailFormat 恰为 6 个格式", () => {
+  it("DetailFormat 恰为 5 个通用格式(无链专属单位)", () => {
     expectTypeOf<z.infer<typeof DetailFormat>>().toEqualTypeOf<
-      "sats" | "btc" | "usd" | "percent" | "date" | "address"
+      "usd" | "amount" | "percent" | "date" | "address"
     >();
   });
 
   it("窄化后块字段精确(消灭 as cast)", () => {
-    const b = DetailBlock.parse({ type: "stat", label: "x", value: 1, format: "btc" });
+    const b = DetailBlock.parse({ type: "stat", label: "x", value: 1, format: "amount" });
     if (b.type === "stat") {
       expectTypeOf(b).toEqualTypeOf<z.infer<typeof StatBlock>>();
       expect(b.value).toBe(1);

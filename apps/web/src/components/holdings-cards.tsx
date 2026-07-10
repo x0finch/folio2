@@ -249,14 +249,15 @@ function useDetailRenderProps() {
   const usd = useDisplayValue();
   // i18n key → 文案(blocks 携运行时 key,故对根 translator 做一次宽松转型)。
   const translate = (key: string) => t(key as never);
-  const format = (value: number | string, f?: DetailFormat): string => {
+  const format = (value: number | string, f?: DetailFormat, unit?: string): string => {
     switch (f) {
       case "usd":
         return usd(Number(value));
-      case "sats":
-        return `${btc(Number(value))} BTC`;
-      case "btc":
-        return `${formatNumber(Number(value), { compact: false, maxFractionDigits: 8, locale })} BTC`;
+      case "amount": {
+        // 代币原生金额:全精度(核对用)+ 数据带来的单位符号;不做币种换算(单位是数据,词汇表对链无知)。
+        const n = formatNumber(Number(value), { compact: false, maxFractionDigits: 8, locale });
+        return unit ? `${n} ${unit}` : n;
+      }
       case "percent":
         return `${Number(value).toFixed(2)}%`;
       case "date":

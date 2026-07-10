@@ -96,7 +96,9 @@ describe("toAccountSections", () => {
       b({
         id: "1",
         symbol: "BTC",
-        detail: [{ type: "stat", label: "Overview.btcPending", value: 42, format: "sats" }],
+        detail: [
+          { type: "stat", label: "Overview.btcPending", value: 42, format: "amount", unit: "BTC" },
+        ],
       }),
       b({ id: "2", symbol: "ETH" }),
     ]);

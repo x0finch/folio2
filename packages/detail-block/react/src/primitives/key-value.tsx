@@ -13,7 +13,7 @@ export function KeyValue({ block }: { block: KeyValueBlock }) {
         {items.map((item) => (
           <div key={item.label} className="flex items-center justify-between gap-3 py-1.5 text-sm">
             <span className="text-muted-foreground">{translate(item.label)}</span>
-            <span className="font-medium">{format(item.value, item.format)}</span>
+            <span className="font-medium">{format(item.value, item.format, item.unit)}</span>
           </div>
         ))}
       </div>

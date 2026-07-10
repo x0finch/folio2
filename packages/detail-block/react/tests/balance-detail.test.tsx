@@ -5,9 +5,10 @@ import { BalanceDetail } from "../src/balance-detail";
 
 afterEach(cleanup);
 
-// 测试注入:translate 原样回 key(断言 key 出现),format 打上 [fmt] 前缀(断言 format 被传递)。
+// 测试注入:translate 原样回 key(断言 key 出现),format 打上 [fmt]{unit} 标记(断言 format/unit 被传递)。
 const translate = (key: string) => key;
-const format = (value: number | string, fmt?: DetailFormat) => `${value}${fmt ? `[${fmt}]` : ""}`;
+const format = (value: number | string, fmt?: DetailFormat, unit?: string) =>
+  `${value}${fmt ? `[${fmt}]` : ""}${unit ? `{${unit}}` : ""}`;
 
 function renderBlocks(blocks: DetailBlock[]) {
   return render(<BalanceDetail blocks={blocks} translate={translate} format={format} />);
@@ -21,10 +22,12 @@ describe("<BalanceDetail>", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("stat:渲染标签(i18n key)+ 按 format 格式化的值", () => {
-    renderBlocks([{ type: "stat", label: "Overview.btcPending", value: 42, format: "sats" }]);
+  it("stat:渲染标签(i18n key)+ 按 format 格式化的值 + amount 单位", () => {
+    renderBlocks([
+      { type: "stat", label: "Overview.btcPending", value: 42, format: "amount", unit: "BTC" },
+    ]);
     expect(screen.getByText("Overview.btcPending")).toBeTruthy();
-    expect(screen.getByText("42[sats]")).toBeTruthy();
+    expect(screen.getByText("42[amount]{BTC}")).toBeTruthy();
   });
 
   it("keyValue:块标题 + 每项标签/值,数字项带 format、字符串项无", () => {
