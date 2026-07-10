@@ -1,8 +1,6 @@
 import {
   type BalanceProvider,
   type CredField,
-  formatAmount,
-  formatUsd,
   hmacSha256,
   ProviderError,
   parseRetryAfter,
@@ -29,8 +27,6 @@ interface OkxDetail {
   ccy?: string;
   eq?: string;
   eqUsd?: string;
-  availBal?: string; // 可用余额(ccy 单位)
-  frozenBal?: string; // 冻结余额(ccy 单位)
 }
 interface OkxBalanceResponse {
   code?: string;
@@ -38,24 +34,9 @@ interface OkxBalanceResponse {
   data?: Array<{ details?: OkxDetail[] }>;
 }
 
-// 有冻结(frozenBal>0)才拼 markdown detail:available / frozen 分量(有价则附 USD)。无冻结 → undefined(避免噪音)。
-function buildOkxDetail(
-  ccy: string,
-  avail: number,
-  frozen: number,
-  price: number | undefined,
-): string | undefined {
-  if (!(frozen > 0)) return undefined;
-  const usd = (amt: number) => (price != null ? ` (${formatUsd(amt * price)})` : "");
-  return [
-    `- Available: ${formatAmount(avail)} ${ccy}${usd(avail)}`,
-    `- Frozen: ${formatAmount(frozen)} ${ccy}${usd(frozen)}`,
-  ].join("\n");
-}
-
 // 纯解析:details[] → Spot[]。与 IO 分离,golden test。
 // amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
-// detail:有冻结则拼 available/frozen 的 markdown(spike markdown-detail)。
+// CEX 不吐 detail(交易所现货就当普通现货行,不做特殊处理)。
 export function parseBalances(details: OkxDetail[]): Spot[] {
   const out: Spot[] = [];
   for (const d of details ?? []) {
@@ -64,15 +45,7 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
     const amount = Number(d.eq ?? 0);
     if (!(amount > 0)) continue;
     const price = Number(d.eqUsd ?? 0) / amount;
-    const detail = buildOkxDetail(ccy, Number(d.availBal ?? 0), Number(d.frozenBal ?? 0), price);
-    out.push({
-      symbol: ccy,
-      amount,
-      price,
-      value: Number(d.eqUsd ?? 0),
-      kind: "spot",
-      ...(detail ? { detail } : {}),
-    });
+    out.push({ symbol: ccy, amount, price, value: Number(d.eqUsd ?? 0), kind: "spot" });
   }
   return out;
 }

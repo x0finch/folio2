@@ -11,8 +11,7 @@
     "amount": 3,
     "price": 3000,
     "value": 9000,
-    "kind": "spot",
-    "detail": "- Available: 2 ETH ($6,000.00)\n- Locked: 1 ETH ($3,000.00)"
+    "kind": "spot"
   },
   {
     "symbol": "USDT",

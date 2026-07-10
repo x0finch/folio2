@@ -7,11 +7,3 @@ export function formatAmount(n: number): string {
   const s = n.toFixed(8);
   return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
 }
-
-// USD:定点两位 + 千分位(6000 → "$6,000.00")。deterministic,不依赖 toLocaleString 的运行时 locale。
-export function formatUsd(n: number): string {
-  const sign = n < 0 ? "-" : "";
-  const [int, dec] = Math.abs(n).toFixed(2).split(".");
-  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${sign}$${grouped}.${dec}`;
-}

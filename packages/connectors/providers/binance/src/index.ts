@@ -1,8 +1,6 @@
 import {
   type BalanceProvider,
   type CredField,
-  formatAmount,
-  formatUsd,
   hmacSha256,
   ProviderError,
   parseRetryAfter,
@@ -38,24 +36,9 @@ interface TickerPrice {
   price?: string;
 }
 
-// 有锁仓(locked>0)才拼 markdown detail:available / locked 分量(有价则附 USD)。无锁仓 → undefined(避免噪音)。
-function buildBinanceDetail(
-  asset: string,
-  free: number,
-  locked: number,
-  price: number | undefined,
-): string | undefined {
-  if (!(locked > 0)) return undefined;
-  const usd = (amt: number) => (price != null ? ` (${formatUsd(amt * price)})` : "");
-  return [
-    `- Available: ${formatAmount(free)} ${asset}${usd(free)}`,
-    `- Locked: ${formatAmount(locked)} ${asset}${usd(locked)}`,
-  ].join("\n");
-}
-
 // 纯解析:account.balances + 价格表(symbol→price)→ Spot[]。与 IO 分离,golden test。
 // amount = free + locked;跳过 ≤0;usdValue:稳定币≈1,否则 amount × price(`${asset}USDT`),无对→0。
-// detail:有锁仓则拼 available/locked 的 markdown(spike markdown-detail)。
+// CEX 不吐 detail(交易所现货就当普通现货行,不做特殊处理)。
 export function parseAccountBalances(
   account: BinanceAccount,
   prices: Record<string, number>,
@@ -70,15 +53,7 @@ export function parseAccountBalances(
     if (!(amount > 0)) continue;
     const price = STABLECOINS.has(asset) ? 1 : (prices[`${asset}${QUOTE_ASSET}`] ?? undefined);
     const usdValue = price != null ? amount * price : 0;
-    const detail = buildBinanceDetail(asset, free, locked, price);
-    out.push({
-      symbol: asset,
-      amount,
-      price,
-      value: usdValue,
-      kind: "spot",
-      ...(detail ? { detail } : {}),
-    });
+    out.push({ symbol: asset, amount, price, value: usdValue, kind: "spot" });
   }
   return out;
 }

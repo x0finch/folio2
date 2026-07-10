@@ -4,8 +4,7 @@
     "amount": 0.5,
     "price": 60000,
     "value": 30000,
-    "kind": "spot",
-    "detail": "- Available: 0.4 BTC ($24,000.00)\n- Frozen: 0.1 BTC ($6,000.00)"
+    "kind": "spot"
   },
   {
     "symbol": "USDT",
