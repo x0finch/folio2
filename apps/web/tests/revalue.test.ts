@@ -93,19 +93,6 @@ describe("revalue", () => {
     expect(out[0].value).toBe(99);
   });
 
-  it("meta.fixed → keeps provider value even when symbol resolves", async () => {
-    // BTC 可解析(store 有价 65000),但锁定固定值 → 保留 provider 的 value=1。
-    const locked: Balance = {
-      symbol: "BTC",
-      amount: 0.5,
-      value: 1,
-      kind: "spot",
-      meta: { fixed: true },
-    };
-    const out = await revalue(tokens(), "manual", [locked]);
-    expect(out[0].value).toBe(1);
-  });
-
   it("explicit coingecko tokenKey overrides symbol resolution", async () => {
     // 错的 symbol "XBT" 但 tokenKey=coingecko:bitcoin → 用 bitcoin 的 store 价 65000。
     const out = await revalue(tokens(), "manual", [bal("XBT", 1, 0, "bitcoin")]);
@@ -129,17 +116,17 @@ describe("revalue", () => {
   });
 
   it("bitcoin → 盯市:provider 只给 amount(value=0),按 BTC 市价算 value", async () => {
-    // bitcoin provider 产 value=0、tokenKey=chain:bitcoin/native:btc,靠 symbol 回退到 bitcoin 价 65000。
+    // bitcoin provider 产 kind:"spot"、value=0、tokenKey=chain:bitcoin/native:btc,靠 symbol 回退到 bitcoin 价 65000。
     const btc: Balance = {
       symbol: "BTC",
       amount: 0.08,
       value: 0,
-      kind: "utxo", // bitcoin connector 产 utxo kind(pendingSats 在 UtxoMeta)
+      kind: "spot", // bitcoin connector 产 spot kind(明细走 markdown detail)
       tokenKey: "chain:bitcoin/native:btc",
-      meta: { pendingSats: 500000 },
+      detail: "**Unconfirmed:** +0.005 BTC",
     };
     const out = await revalue(tokens(), "bitcoin", [btc]);
     expect(out[0].value).toBe(5200); // 0.08 × 65000
-    expect((out[0].meta as { pendingSats: number }).pendingSats).toBe(500000); // meta 保留
+    expect(out[0].detail).toBe("**Unconfirmed:** +0.005 BTC"); // detail 保留
   });
 });

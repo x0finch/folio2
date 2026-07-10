@@ -5,8 +5,6 @@
 // bitcoin 派生脚本类型(与 blockbook/@folio/bitcoin-derive 一致的四值)。
 export type ScriptType = "native" | "nested" | "taproot" | "legacy";
 
-export const SATS_PER_BTC = 100_000_000;
-
 // 脚本类型枚举值(anchored 到 provider 的 ScriptType):客户端下拉 + 服务端 z.enum 校验同源,
 // 避免 accounts.ts 硬编码字面量漂移。本模块无 @scure 运行时,client/server 皆可 import。
 export const SCRIPT_TYPE_VALUES = [

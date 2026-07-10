@@ -98,7 +98,7 @@ export async function buildOverview(
     symbol: b.symbol,
     amount: b.amount,
     value: b.usdValue,
-    kind: viewKind(b), // 归一到 5-kind(并存期兼容遗留)
+    kind: viewKind(b), // 归一到 4-kind(并存期兼容遗留)
     tokenKey: b.tokenKey,
     isMargin: margin,
     account: {

@@ -75,8 +75,8 @@ function holdingKey(row: AggInput): string {
 }
 
 function isEligible(row: AggInput): boolean {
-  // 进聚合的同质口径:现货 / UTXO(BTC)/ perp 权益(isMargin)。kind 已由 overview 用 viewKind 归一。
-  return row.kind === "spot" || row.kind === "utxo" || row.isMargin === true;
+  // 进聚合的同质口径:现货(含并入的 BTC)/ perp 权益(isMargin)。kind 已由 overview 用 viewKind 归一。
+  return row.kind === "spot" || row.isMargin === true;
 }
 
 interface Acc {

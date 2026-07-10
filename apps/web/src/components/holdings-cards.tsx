@@ -1,5 +1,4 @@
-import type { UtxoMeta } from "@folio/connectors-basic";
-import { toast } from "@folio/ui";
+import { MarkdownDetail } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import {
   type DefiGroup,
@@ -7,19 +6,13 @@ import {
   type SpotRow,
   toAccountSections,
 } from "../lib/account-view";
-import { SATS_PER_BTC } from "../lib/bitcoin-scripts";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import type { PerpView } from "../lib/perp";
 import { TokenAvatar } from "./token-stack";
 
-// 逐地址分布/未确认额是核对用的精确值 → 全精度(8 位),不走总览的 ≤2 位紧凑style。
-const btc = (sats: number): string =>
-  formatNumber(sats / SATS_PER_BTC, { compact: false, maxFractionDigits: 8 });
-// 地址中缩:首 10 + 尾 6,便于核对又不占宽。
-const shortAddr = (a: string): string => (a.length > 20 ? `${a.slice(0, 10)}…${a.slice(-6)}` : a);
-
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 holdings-sections 的表格。
+// 每个持仓行下渲染 provider 拼的 markdown detail(有则渲染;BTC 未确认/派生、CEX available/locked)。
 
 // 24h 涨跌:正绿(前景)/ 负红(destructive);无数据 → "—"。仅用 shadcn token。
 function Change24h({ value }: { value?: number }) {
@@ -69,19 +62,21 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
   return (
     <div className="flex flex-col gap-2">
       {rows.map((b) => (
-        <RowCard
-          key={b.id}
-          avatar={<TokenAvatar symbol={b.symbol} logo={b.logo} />}
-          title={b.symbol.toUpperCase()}
-          subtitle={
-            <>
-              {formatNumber(b.amount)}
-              {b.unitPrice != null ? ` · ${usd(b.unitPrice)}` : ""}
-            </>
-          }
-          primary={usd(b.usdValue)}
-          secondary={<Change24h value={b.change24h} />}
-        />
+        <div key={b.id} className="flex flex-col gap-1.5">
+          <RowCard
+            avatar={<TokenAvatar symbol={b.symbol} logo={b.logo} />}
+            title={b.symbol.toUpperCase()}
+            subtitle={
+              <>
+                {formatNumber(b.amount)}
+                {b.unitPrice != null ? ` · ${usd(b.unitPrice)}` : ""}
+              </>
+            }
+            primary={usd(b.usdValue)}
+            secondary={<Change24h value={b.change24h} />}
+          />
+          {b.detail ? <MarkdownDetail md={b.detail} className="px-3" /> : null}
+        </div>
       ))}
     </div>
   );
@@ -158,87 +153,7 @@ function PerpCards({ view }: { view: PerpView }) {
   );
 }
 
-// 可点击复制的地址(点击 → 写剪贴板 + toast)。
-function CopyableAddress({ address }: { address: string }) {
-  const t = useTranslations("Overview");
-  return (
-    <button
-      type="button"
-      className="truncate font-mono text-xs text-muted-foreground hover:text-foreground"
-      title={address}
-      onClick={() => {
-        navigator.clipboard?.writeText(address);
-        toast.success(t("addressCopied"));
-      }}
-    >
-      {shortAddr(address)}
-    </button>
-  );
-}
-
-// Bitcoin 明细:未确认额 + xpub 派生分布(仅非零)+ 收款地址指引(上次用过 / 下次可用)+ 截断提示。
-function BitcoinCards({ meta }: { meta: UtxoMeta }) {
-  const t = useTranslations("Overview");
-  const chainLabel = (c: "receive" | "change") =>
-    c === "receive" ? t("btcReceiveChain") : t("btcChangeChain");
-  return (
-    <div className="flex flex-col gap-4">
-      {meta.pendingSats !== 0 && (
-        <p className="text-xs text-muted-foreground">
-          {t("btcPending")}: {meta.pendingSats > 0 ? "+" : ""}
-          {btc(meta.pendingSats)} BTC
-        </p>
-      )}
-
-      {meta.receive && (meta.receive.lastUsed || meta.receive.next.length > 0) && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{t("btcReceive")}</p>
-          {meta.receive.lastUsed && (
-            <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-              <span className="text-xs text-muted-foreground">{t("btcLastUsed")}</span>
-              <CopyableAddress address={meta.receive.lastUsed.address} />
-            </div>
-          )}
-          {meta.receive.next.map((n) => (
-            <div
-              key={n.address}
-              className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
-            >
-              <span className="text-xs text-muted-foreground">
-                {t("btcNext")} #{n.index}
-              </span>
-              <CopyableAddress address={n.address} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {meta.addresses && meta.addresses.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{t("btcDistribution")}</p>
-          {meta.addresses.map((a) => (
-            <RowCard
-              key={a.address}
-              title={<CopyableAddress address={a.address} />}
-              subtitle={<span className="capitalize">{chainLabel(a.chain)}</span>}
-              primary={`${btc(a.balanceSats)} BTC`}
-              secondary={
-                a.pendingSats !== 0 ? (
-                  <span className="text-xs text-muted-foreground">
-                    {t("btcPending")} {a.pendingSats > 0 ? "+" : ""}
-                    {btc(a.pendingSats)}
-                  </span>
-                ) : undefined
-              }
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// 一个账户的全部持仓(卡片列表):现货 / DeFi / 永续 / Bitcoin 明细(空 → 提示)。
+// 一个账户的全部持仓(卡片列表):现货(含 BTC,detail 走 markdown)/ DeFi / 永续(空 → 提示)。
 export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[] }) {
   const t = useTranslations("Overview");
   if (balances.length === 0) {
@@ -248,7 +163,6 @@ export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[]
   return (
     <div className="flex flex-col gap-6">
       {sections.spot.length > 0 && <SpotCards rows={sections.spot} />}
-      {sections.utxo && <BitcoinCards meta={sections.utxo} />}
       {sections.defi.length > 0 && <DefiCards groups={sections.defi} />}
       {sections.perp && <PerpCards view={sections.perp} />}
     </div>
