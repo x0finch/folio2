@@ -42,19 +42,18 @@ function mockBlockbook(opts: { xpub?: unknown; address?: unknown; status?: numbe
 
 afterEach(() => vi.restoreAllMocks());
 
-// per-balance detail(DetailBlock 重设计):BTC 展示明细挂在那笔 BTC balance 的 detail 上。
-// golden 比对时先剥 detail(纯映射),detail 单独断言。
-const stripDetail = (balances: { detail?: unknown }[]) => balances.map(({ detail, ...b }) => b);
+// account 级 note(note 重设计,Note[] 整钱包):BTC 展示明细已从 per-balance 提到 fetchBalances 顶层
+// note(整钱包一份)。balances 本身不再带 note;golden 直接比对 out.balances,note 单独断言。
 
 describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () => {
   it("录制响应 → 预期 Utxo[](已确认→amount;未确认→meta.pendingSats;value=0;kind=utxo)", async () => {
     mockBlockbook({ address: addressFixture.response });
-    const out = await blockbookProvider.fetchBalances(
+    const { balances, note } = await blockbookProvider.fetchBalances(
       ctx({ addressOrXpub: addressFixture.request.addressOrXpub }),
     );
-    expect(stripDetail(out)).toEqual(addressFixture.expected);
-    // BTC balance.detail:未确认 500000 sats → 一个 Unconfirmed section(仅 pending 行)。
-    expect(out[0]?.detail).toEqual([
+    expect(balances).toEqual(addressFixture.expected);
+    // account 级 note:未确认 500000 sats → 一个 Unconfirmed section(仅 pending 行)。
+    expect(note).toEqual([
       {
         title: "Unconfirmed",
         icon: "warning",
@@ -63,23 +62,24 @@ describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () 
     ]);
   });
 
-  it("零余额零未确认 → 空(无 balance、故无 detail)", async () => {
+  it("零余额零未确认 → 空(无 balance、故 note 为空)", async () => {
     mockBlockbook({ address: { address: ADDR, balance: "0", unconfirmedBalance: "0" } });
-    const out = await blockbookProvider.fetchBalances(ctx());
-    expect(out).toEqual([]);
+    const { balances, note } = await blockbookProvider.fetchBalances(ctx());
+    expect(balances).toEqual([]);
+    expect(note).toEqual([]);
   });
 });
 
 describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbook 服务端派生)", () => {
   it("录制 xpub 响应 → 预期 Utxo[](分布仅非零 + receive/change;收款指引 lastUsed + 本地派生 next)", async () => {
     mockBlockbook({ xpub: xpubFixture.response });
-    const out = await blockbookProvider.fetchBalances(
+    const { balances, note } = await blockbookProvider.fetchBalances(
       ctx({ addressOrXpub: xpubFixture.request.addressOrXpub }),
     );
-    expect(stripDetail(out)).toEqual(xpubFixture.expected);
-    // BTC balance.detail:无未确认 → 无 Unconfirmed;Receive addresses(lastUsed + 本地派生 next)+
+    expect(balances).toEqual(xpubFixture.expected);
+    // account 级 note:无未确认 → 无 Unconfirmed;Receive addresses(lastUsed + 本地派生 next)+
     // receive/change 派生分布两 section(地址行 value+unit+href)。
-    expect(out[0]?.detail).toEqual([
+    expect(note).toEqual([
       {
         title: "Receive addresses",
         icon: "info",
@@ -117,7 +117,8 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
         ],
       },
     });
-    const [b] = await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }));
+    const { balances } = await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }));
+    const [b] = balances;
     const meta = b.meta as {
       addresses: { address: string }[];
       receive: { lastUsed: { index: number }; next: { index: number }[] };

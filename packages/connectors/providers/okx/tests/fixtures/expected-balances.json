@@ -19,12 +19,10 @@
     "price": 3000,
     "value": 6000,
     "kind": "spot",
-    "detail": [
-      {
-        "title": "Frozen",
-        "icon": "warning",
-        "content": [{ "label": "ETH", "value": 0.5, "unit": "ETH" }]
-      }
-    ]
+    "note": {
+      "title": "Frozen",
+      "icon": "warning",
+      "content": [{ "label": "ETH", "value": 0.5, "unit": "ETH" }]
+    }
   }
 ]

@@ -2,8 +2,8 @@
    这里只做一次引入,避免重复 import tailwindcss。 */
 @import "@folio/ui/globals.css";
 
-/* @folio/detail-block 渲染器的 Tailwind 来源(包自带自扫描 CSS,相对本包解析,pnpm 软链下稳)。 */
-@import "@folio/detail-block/styles.css";
+/* @folio/notes 渲染件的 Tailwind 来源(包自带自扫描 CSS,相对本包解析,pnpm 软链下稳)。 */
+@import "@folio/notes/styles.css";
 
 /* Geist 变体字体(自托管 via @fontsource;CF Workers 走静态资源)。--font-sans/mono 映射在 @folio/ui @theme。 */
 @import "@fontsource-variable/geist";

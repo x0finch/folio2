@@ -38,8 +38,8 @@ interface TickerPrice {
 
 // 纯解析:account.balances + 价格表(symbol→price)→ Spot[]。与 IO 分离,golden test。
 // amount = free + locked;跳过 ≤0;usdValue:稳定币≈1,否则 amount × price(`${asset}USDT`),无对→0。
-// 锁仓明细(DetailBlock 重设计,per-balance):locked>0 的币,在【它自己那笔 balance】上挂一个
-// `Locked` section(1 行 { label:币种, value:锁定数量, unit:币种 },原币口径不换 USD)。无锁仓 → 无 detail。
+// 锁仓 note(note 重设计,balance 级单个 Note):locked>0 的币,在【它自己那笔 balance】上挂一个
+// `Locked` 段(icon warning;1 行 { label:币种, value:锁定数量, unit:币种 },原币口径不换 USD)。无锁仓 → 无 note。
 export function parseAccountBalances(
   account: BinanceAccount,
   prices: Record<string, number>,
@@ -55,13 +55,11 @@ export function parseAccountBalances(
     const usdValue = price != null ? amount * price : 0;
     const row: Spot = { symbol: asset, amount, price, value: usdValue, kind: "spot" };
     if (locked > 0) {
-      row.detail = [
-        {
-          title: "Locked",
-          icon: "warning",
-          content: [{ label: asset, value: locked, unit: asset }],
-        },
-      ];
+      row.note = {
+        title: "Locked",
+        icon: "warning",
+        content: [{ label: asset, value: locked, unit: asset }],
+      };
     }
     out.push(row);
   }
@@ -116,7 +114,7 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
   // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据,走 account.creds。
   creds: [],
 
-  async fetchBalances(ctx): Promise<Spot[]> {
+  async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
     const { apiKey, secret } = ctx.account.creds;
     const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;
     const acctRes = await signedGet(ACCOUNT_PATH, query, apiKey, secret);
@@ -140,7 +138,7 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
     for (const t of tickers) {
       if (t.symbol) prices[t.symbol] = Number(t.price ?? 0);
     }
-    return parseAccountBalances(account, prices);
+    return { balances: parseAccountBalances(account, prices) };
   },
 
   // 校验:签名打 /api/v3/account 确认 key + 读权限(creds 已由 validateCredentials 保证非空)。

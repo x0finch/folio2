@@ -22,6 +22,20 @@ describe("toAccountSections", () => {
     expect(s.perp).toBeNull();
   });
 
+  it("balance 级 note(单个 Note)透传到 SpotRow.note(note 重设计)", () => {
+    const note = {
+      title: "Locked",
+      icon: "warning" as const,
+      content: [{ label: "ETH", value: 1, unit: "ETH" }],
+    };
+    const s = toAccountSections([
+      b({ id: "1", symbol: "ETH", usdValue: 5000, kind: "spot", note }),
+      b({ id: "2", symbol: "BTC", usdValue: 100, kind: "spot" }), // 无 note 的行
+    ]);
+    expect(s.spot.find((r) => r.symbol === "ETH")?.note).toEqual(note);
+    expect(s.spot.find((r) => r.symbol === "BTC")?.note).toBeUndefined();
+  });
+
   it("groups defi rows by protocol (preserving first-seen order, with fallback)", () => {
     const s = toAccountSections([
       b({
@@ -97,7 +111,7 @@ describe("toAccountSections", () => {
     });
   });
 
-  // BTC(utxo/spot 口径)仍进现货表;展示明细(未确认/派生/收款)已提到账户级 detail(DetailBlock 重设计),
+  // BTC(utxo/spot 口径)仍进现货表;展示明细(未确认/派生/收款)已提到账户级 note(note 重设计),
   // 不再由 toAccountSections 从 per-balance meta 抽出。
   it("BTC 行进现货表(spot 口径)", () => {
     const s = toAccountSections([

@@ -30,7 +30,7 @@ const AddInput = z.object({
   amount: z.coerce.number(),
   price: z.coerce.number().nonnegative().optional(),
   occurredAt: z.coerce.number().optional(),
-  note: z.string().trim().max(200).optional(),
+  memo: z.string().trim().max(200).optional(), // 用户手写备注(原 note;note 让给 provider 展示概念)
 });
 
 export const addManualActivity = createServerFn({ method: "POST" })
@@ -53,7 +53,7 @@ export const addManualActivity = createServerFn({ method: "POST" })
       amount: data.amount,
       price: data.price ?? null,
       occurredAt: data.occurredAt ?? Date.now(),
-      note: data.note ?? null,
+      memo: data.memo ?? null,
     });
     const amount = await materializeAmount(context.userId, data.accountId);
     log.info("manual activity added", { accountId: data.accountId, kind: data.kind });

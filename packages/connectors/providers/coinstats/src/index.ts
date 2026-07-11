@@ -177,7 +177,7 @@ export function createCoinstatsProvider(
     id: "coinstats",
     label: "CoinStats",
     creds: providerCreds,
-    fetchBalances: (ctx) => fetchCoinstats(connectionId, ctx),
+    fetchBalances: async (ctx) => ({ balances: await fetchCoinstats(connectionId, ctx) }),
     validateAccount: (ctx) => validateCoinstats(connectionId, ctx),
     validateCreds: (creds) => validateApiKey(creds[COINSTATS_API_KEY]),
   };

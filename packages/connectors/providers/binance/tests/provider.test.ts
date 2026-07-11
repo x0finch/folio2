@@ -22,19 +22,21 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
   const balances = parseAccountBalances(account, prices);
 
   it("maps the recorded account + price map to expected-balances", () => {
-    // per-balance detail(DetailBlock 重设计):ETH locked=1 → 它自己那笔挂 Locked section;其余无 detail。
+    // per-balance note(note 重设计,单个 Note):ETH locked=1 → 它自己那笔挂 Locked note;其余无 note。
     expect(balances).toEqual(expected);
     // BNB has zero balance → excluded
     expect(balances.find((b) => b.symbol === "BNB")).toBeUndefined();
   });
 
-  it("锁仓的币(ETH)自带 Locked detail(数量口径 + 单位);无锁仓的币(BTC/USDT)无 detail", () => {
+  it("锁仓的币(ETH)自带 Locked note(数量口径 + 单位);无锁仓的币(BTC/USDT)无 note", () => {
     const eth = balances.find((b) => b.symbol === "ETH");
-    expect(eth?.detail).toEqual([
-      { title: "Locked", icon: "warning", content: [{ label: "ETH", value: 1, unit: "ETH" }] },
-    ]);
-    expect(balances.find((b) => b.symbol === "BTC")?.detail).toBeUndefined();
-    expect(balances.find((b) => b.symbol === "USDT")?.detail).toBeUndefined();
+    expect(eth?.note).toEqual({
+      title: "Locked",
+      icon: "warning",
+      content: [{ label: "ETH", value: 1, unit: "ETH" }],
+    });
+    expect(balances.find((b) => b.symbol === "BTC")?.note).toBeUndefined();
+    expect(balances.find((b) => b.symbol === "USDT")?.note).toBeUndefined();
   });
 });
 
@@ -53,12 +55,14 @@ describe("binanceProvider.fetchBalances", () => {
       );
     });
 
-    const balances = await binanceProvider.fetchBalances(ctx());
+    const { balances } = await binanceProvider.fetchBalances(ctx());
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "ETH", "USDT", "NOPRICE"]);
-    // per-balance detail:ETH 有 locked=1 → 它自己那笔挂 Locked section。
-    expect(balances.find((b) => b.symbol === "ETH")?.detail).toEqual([
-      { title: "Locked", icon: "warning", content: [{ label: "ETH", value: 1, unit: "ETH" }] },
-    ]);
+    // per-balance note:ETH 有 locked=1 → 它自己那笔挂 Locked note。
+    expect(balances.find((b) => b.symbol === "ETH")?.note).toEqual({
+      title: "Locked",
+      icon: "warning",
+      content: [{ label: "ETH", value: 1, unit: "ETH" }],
+    });
 
     const [acctUrl, init] = spy.mock.calls[0];
     expect(String(acctUrl)).toContain("/api/v3/account?");

@@ -43,6 +43,12 @@ export { Drawer } from "./components/motion/drawer";
 export { Input } from "./components/motion/input";
 export { NumberTicker } from "./components/motion/number-ticker";
 export {
+  Popover,
+  PopoverContent,
+  type PopoverProps,
+  PopoverTrigger,
+} from "./components/motion/popover";
+export {
   Select,
   SelectContent,
   SelectItem,

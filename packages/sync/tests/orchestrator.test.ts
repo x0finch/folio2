@@ -79,16 +79,24 @@ describe("syncUser — 取余额 → 写快照", () => {
     expect(writes[0].input.balances).toHaveLength(1);
   });
 
-  it("per-balance detail(DetailBlock 重设计):balance.detail 随该行透传给 writeSnapshot", async () => {
-    const detail = [{ title: "Locked", icon: "warning" as const, content: "held" }];
-    const withDetail: Balance = { ...bal("BTC", 1), detail };
+  it("note(note 重设计,两级):balance 级单个 note 随行透传 + account 级 Note[] 落顶层", async () => {
+    const note = { title: "Locked", icon: "warning" as const, content: "held" };
+    const withNote: Balance = { ...bal("BTC", 1), note };
+    const accountNote = [{ title: "Unconfirmed", icon: "warning" as const, content: "pending" }];
     const { deps, writes } = makeDeps([account()], {
-      fetchBalances: async () => ok([withDetail, bal("ETH", 2)]),
+      fetchBalances: async () => ({
+        status: "ok",
+        balances: [withNote, bal("ETH", 2)],
+        totalUsd: 3,
+        note: accountNote,
+      }),
     });
     await syncUser(deps, "u1");
-    // 带 detail 的行透传 detail;无 detail 的行 detail=undefined。
-    expect(writes[0].input.balances[0]?.detail).toEqual(detail);
-    expect(writes[0].input.balances[1]?.detail).toBeUndefined();
+    // 带 note 的行透传单个 note;无 note 的行 note=undefined。
+    expect(writes[0].input.balances[0]?.note).toEqual(note);
+    expect(writes[0].input.balances[1]?.note).toBeUndefined();
+    // account 级 note(Note[])落 writeSnapshot 顶层。
+    expect(writes[0].input.note).toEqual(accountNote);
   });
 
   it("revalue 钩子(P7.4.2):写快照前改 value 并重算 totalUsd", async () => {

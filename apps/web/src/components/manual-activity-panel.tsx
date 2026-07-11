@@ -25,7 +25,7 @@ export function ManualActivityPanel({ accountId }: { accountId: string }) {
   const [items, setItems] = useState<ManualActivity[]>([]);
   const [kind, setKind] = useState<"add" | "reduce" | "set">("add");
   const [amount, setAmount] = useState("");
-  const [note, setNote] = useState("");
+  const [memo, setMemo] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -48,10 +48,10 @@ export function ManualActivityPanel({ accountId }: { accountId: string }) {
     setBusy(true);
     try {
       await addManualActivity({
-        data: { accountId, kind, amount: Number(amount), note: note || undefined },
+        data: { accountId, kind, amount: Number(amount), memo: memo || undefined },
       });
       setAmount("");
-      setNote("");
+      setMemo("");
       await reload();
       await router.invalidate(); // 数量变 → 刷新总览/账户
     } catch (err) {
@@ -76,7 +76,7 @@ export function ManualActivityPanel({ accountId }: { accountId: string }) {
             <li key={it.id} className="flex items-center justify-between gap-2">
               <span>
                 <span className="capitalize">{t(it.kind)}</span> {it.amount}
-                {it.note ? <span className="text-muted-foreground"> · {it.note}</span> : null}
+                {it.memo ? <span className="text-muted-foreground"> · {it.memo}</span> : null}
               </span>
               <button
                 type="button"
@@ -110,8 +110,8 @@ export function ManualActivityPanel({ accountId }: { accountId: string }) {
           className="w-32"
         />
         <Input
-          value={note}
-          onChange={(v) => setNote(v)}
+          value={memo}
+          onChange={(v) => setMemo(v)}
           placeholder={t("notePlaceholder")}
           className="w-40"
         />

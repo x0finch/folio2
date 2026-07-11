@@ -1,4 +1,4 @@
-import { DefiMeta, type DefiMeta as DefiMetaT, type DetailSection } from "@folio/connectors-basic";
+import { DefiMeta, type DefiMeta as DefiMetaT, type Note } from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
 import { type PerpView, toPerpView } from "./perp";
 
@@ -7,9 +7,9 @@ import { type PerpView, toPerpView } from "./perp";
 // 卡片净值仍 = 账户 totalUsd(净值不变量,见 ADR 0009)。这里只管"怎么分区展示"。
 // kind 走 viewKind 归一(并存期兼容遗留 kind:manual→spot、perp 靠 role、bitcoin→utxo);
 // meta 用 @folio/connectors 的 zod schema safeParse(替代旧 `as` 强转)。
-// 注:provider 专属展示明细走 per-balance(DetailBlock 重设计):每笔持仓自带 detail(从
-// snapshot_balances.detail safeParse),账户视图收集带 detail 的持仓、前端做成手风琴(item = 持仓),
-// 不由本模块的分区聚合参与。
+// 注:balance 级展示 note(note 重设计,单个 Note)随各 balance(从 snapshot_balances.note safeParse)一路带到
+// SpotRow.note —— 前端在该现货行副行渲染 <NoteBadge>。account 级 note(Note[])是每账户一份,走另一条通道
+// (server row.note → AccountHoldingsCards 的 accountNote prop),不进本模块的分区。
 
 export interface OverviewBalance {
   id: string;
@@ -19,7 +19,7 @@ export interface OverviewBalance {
   kind: string;
   tokenKey?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
   metaJson: string | null;
-  detail?: DetailSection[]; // per-balance 展示明细(BTC 未确认/收款/分布、CEX 锁仓/冻结);无则省略
+  note?: Note; // balance 级展示 note(单个 Note;CEX 该币锁仓/冻结);无则省略
   // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。
   name?: string;
   logo?: string;
@@ -36,6 +36,7 @@ export interface SpotRow {
   logo?: string;
   unitPrice?: number;
   change24h?: number;
+  note?: Note; // balance 级展示 note(有则该行副行渲染 <NoteBadge>)
 }
 export interface DefiRow {
   id: string;
@@ -90,7 +91,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
       if (group) group.push(row);
       else defiByProtocol.set(protocol, [row]);
     } else {
-      // spot / utxo:统一现货表(带上富化字段,缺则 undefined)
+      // spot / utxo:统一现货表(带上富化字段 + balance 级 note,缺则 undefined)
       spot.push({
         id: b.id,
         symbol: b.symbol,
@@ -100,6 +101,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
         logo: b.logo,
         unitPrice: b.unitPrice,
         change24h: b.change24h,
+        note: b.note,
       });
     }
   }

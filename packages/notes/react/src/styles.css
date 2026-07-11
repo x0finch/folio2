@@ -1,4 +1,4 @@
-/* @folio/detail-block 渲染器的 Tailwind 来源自声明(相对本包,pnpm 软链下稳)。
+/* @folio/notes 渲染件的 Tailwind 来源自声明(相对本包,pnpm 软链下稳)。
    本包不在 app / @folio/ui 的 @source 扫描范围;消费方(app)@import 本文件,
    @source 相对此 CSS 解析 → 扫到本包源码,渲染器独有的 class(如 hover:underline)才会生成。
    与 @folio/ui globals.css 的自扫描同套路。无 @import "tailwindcss"(入口在 @folio/ui,避免重复)。 */

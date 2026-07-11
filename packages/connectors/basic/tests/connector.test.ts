@@ -21,17 +21,19 @@ const evmLike = defineConnector({
         id: "demo",
         label: "Demo",
         creds: [],
-        // fetchBalances 返回 B[](窄化到 spot|defi:写 spot/defi 通过);仅供展示的 detail 挂在各 balance 上。
-        fetchBalances: async (ctx) => [
-          {
-            kind: "spot",
-            symbol: ctx.account.creds.address,
-            amount: 1,
-            value: 1,
-            detail: [{ title: "Note", content: "demo detail" }],
-          },
-          { kind: "defi", symbol: "x", amount: 1, value: 1, meta: { protocol: "demo" } },
-        ],
+        // fetchBalances 返回 { balances }(窄化到 spot|defi:写 spot/defi 通过);仅供展示的 note 挂在各 balance 上。
+        fetchBalances: async (ctx) => ({
+          balances: [
+            {
+              kind: "spot",
+              symbol: ctx.account.creds.address,
+              amount: 1,
+              value: 1,
+              note: { title: "Note", content: "demo note" },
+            },
+            { kind: "defi", symbol: "x", amount: 1, value: 1, meta: { protocol: "demo" } },
+          ],
+        }),
         validateAccount: async () => true,
       },
     ],
@@ -51,8 +53,8 @@ describe("defineConnector", () => {
       account: { id: "a", label: "l", connectorId: "evm-like", creds: { address: "0xabc" } },
       creds: {},
     });
-    expect(out[0]).toMatchObject({ kind: "spot", symbol: "0xabc" });
-    // 仅供展示的 detail 挂在该 balance 上(per-balance)。
-    expect(out[0]?.detail).toEqual([{ title: "Note", content: "demo detail" }]);
+    expect(out.balances[0]).toMatchObject({ kind: "spot", symbol: "0xabc" });
+    // 仅供展示的 note(单个 Note)挂在该 balance 上(per-balance)。
+    expect(out.balances[0]?.note).toEqual({ title: "Note", content: "demo note" });
   });
 });

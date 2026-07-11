@@ -16,8 +16,8 @@ import {
 import {
   type BalanceProvider,
   type CredField,
-  type DetailRow,
-  type DetailSection,
+  type Note,
+  type NoteRow,
   ProviderError,
   type Utxo,
   type UtxoAddress,
@@ -114,18 +114,18 @@ function buildXpubMeta(
   return { addresses, receive: { lastUsed: lastExternal, next } };
 }
 
-// BTC 持仓展示明细(DetailBlock 重设计,per-balance):从同一份取数造 DetailSection[](仅供展示),
-// 挂到那笔 BTC balance 的 detail 上。
+// BTC 钱包展示 note(note 重设计,account 级 Note[]):从同一份取数造多段(仅供展示),整钱包一份,
+// 顶层随 fetchBalances 返回(不挂 balance)。前端渲染成持仓区手风琴,一段一个 item。
 //  · Unconfirmed:账户净未确认额一行(仅非零;icon warning)。
 //  · Receive addresses:收款指引(最近用过 + 下一批未使用,地址行 + mempool 外链)。
 //  · Receive/Change distribution:非零派生地址按链拆两 section(地址行 value+unit+href)。
 const mempoolAddr = (address: string): string => `https://mempool.space/address/${address}`;
 
-function buildBtcDetail(
+function buildBtcNote(
   pendingSats: number,
   xpub?: { addresses: UtxoAddress[]; receive: UtxoReceive },
-): DetailSection[] {
-  const sections: DetailSection[] = [];
+): Note[] {
+  const sections: Note[] = [];
 
   if (pendingSats !== 0) {
     sections.push({
@@ -139,7 +139,7 @@ function buildBtcDetail(
     const { addresses, receive } = xpub;
 
     // 收款指引:最近用过(如有)+ 下一批未使用地址。
-    const receiveRows: DetailRow[] = [];
+    const receiveRows: NoteRow[] = [];
     if (receive.lastUsed) {
       receiveRows.push({
         label: `Last used #${receive.lastUsed.index}`,
@@ -159,7 +159,7 @@ function buildBtcDetail(
     }
 
     // 派生分布:仅非零地址,按 receive/change 链拆两 section。
-    const distRow = (a: UtxoAddress): DetailRow => ({
+    const distRow = (a: UtxoAddress): NoteRow => ({
       label: a.address,
       value: a.balanceSats / SATS_PER_BTC,
       unit: "BTC",
@@ -192,23 +192,17 @@ function toProviderError(err: unknown): ProviderError {
   return new ProviderError("UPSTREAM_ERROR", "bitcoin provider failed", { cause: err });
 }
 
-// 把 BTC 展示明细挂到那笔 BTC balance 上(仅当有 balance 且有段);其余 provider 的 balance 无 detail。
-function attachDetail(balances: Utxo[], detail: DetailSection[]): Utxo[] {
-  if (balances[0] && detail.length > 0) balances[0].detail = detail;
-  return balances;
-}
-
 async function fetchXpub(
   client: BlockbookClient,
   ext: string,
   scriptType: string | undefined,
-): Promise<Utxo[]> {
+): Promise<{ balances: Utxo[]; note: Note[] }> {
   const script = effectiveScript(ext, scriptType);
   const res = await client.getXpub(blockbookXpubParam(ext, script)); // details=tokenBalances&tokens=used
   const pendingSats = toSats(res.unconfirmedBalance);
   const { addresses, receive } = buildXpubMeta(ext, script, res.tokens ?? []);
   const balances = toBtcBalances(toSats(res.balance), pendingSats, { addresses, receive });
-  return attachDetail(balances, buildBtcDetail(pendingSats, { addresses, receive }));
+  return { balances, note: buildBtcNote(pendingSats, { addresses, receive }) };
 }
 
 // —— 账户级 creds(AC):BTC 地址或扩展公钥,public(明文落库、可导出重建)——
@@ -244,7 +238,7 @@ export const blockbookProvider: BalanceProvider<
   label: "Blockbook",
   creds: providerCreds,
 
-  async fetchBalances(ctx): Promise<Utxo[]> {
+  async fetchBalances(ctx): Promise<{ balances: Utxo[]; note?: Note[] }> {
     const id = ctx.account.creds.addressOrXpub;
     const client = createBlockbookClient();
     try {
@@ -252,7 +246,7 @@ export const blockbookProvider: BalanceProvider<
       const res = await client.getAddress(id);
       const pendingSats = toSats(res.unconfirmedBalance);
       const balances = toBtcBalances(toSats(res.balance), pendingSats);
-      return attachDetail(balances, buildBtcDetail(pendingSats));
+      return { balances, note: buildBtcNote(pendingSats) };
     } catch (err) {
       throw toProviderError(err);
     }
