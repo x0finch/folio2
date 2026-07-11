@@ -36,10 +36,14 @@ interface TickerPrice {
   price?: string;
 }
 
+// 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
+const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 8 });
+
 // 纯解析:account.balances + 价格表(symbol→price)→ Spot[]。与 IO 分离,golden test。
 // amount = free + locked;跳过 ≤0;usdValue:稳定币≈1,否则 amount × price(`${asset}USDT`),无对→0。
 // 锁仓 note(note 重设计,balance 级单个 Note):locked>0 的币,在【它自己那笔 balance】上挂一个
-// `Locked` 段(icon warning;1 行 { label:币种, value:锁定数量, unit:币种 },原币口径不换 USD)。无锁仓 → 无 note。
+// `Locked` 段(icon warning;content 一行内联文案 `${锁定数量} ${币种} · ${占该币总持有的百分比}`,
+// 如 `1 ETH · 33%`,原币口径不换 USD)。无锁仓 → 无 note。
 export function parseAccountBalances(
   account: BinanceAccount,
   prices: Record<string, number>,
@@ -55,10 +59,11 @@ export function parseAccountBalances(
     const usdValue = price != null ? amount * price : 0;
     const row: Spot = { symbol: asset, amount, price, value: usdValue, kind: "spot" };
     if (locked > 0) {
+      const pct = amount > 0 ? Math.round((locked / amount) * 100) : 0;
       row.note = {
         title: "Locked",
         icon: "warning",
-        content: [{ label: asset, value: locked, unit: asset }],
+        content: `${fmtAmount(locked)} ${asset} · ${pct}%`,
       };
     }
     out.push(row);

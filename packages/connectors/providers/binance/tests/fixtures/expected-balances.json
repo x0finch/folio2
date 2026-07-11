@@ -15,7 +15,7 @@
     "note": {
       "title": "Locked",
       "icon": "warning",
-      "content": [{ "label": "ETH", "value": 1, "unit": "ETH" }]
+      "content": "1 ETH · 33%"
     }
   },
   {

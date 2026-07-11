@@ -38,11 +38,12 @@ export interface NoteViewProps {
   className?: string;
 }
 
-// 单个 NoteIcon → lucide 状态图标(含配色)。给 account 手风琴的 item.icon 用(与 NoteView 段首同图标)。
-export function NoteIconGlyph({ icon }: { icon?: Note["icon"] }) {
+// 单个 NoteIcon → lucide 状态图标(含配色)。给 account 手风琴 item.icon / NoteView 段首 / NoteIndicator
+// 触发共用;className 可覆盖尺寸(默认 h-4;balance 行内指示器传更小的 h-3)。
+export function NoteIconGlyph({ icon, className }: { icon?: Note["icon"]; className?: string }) {
   const key = icon ?? "info";
   const Icon = NOTE_ICON_MAP[key] ?? NOTE_ICON_MAP.info;
-  return <Icon className={`h-4 w-4 shrink-0 ${NOTE_ICON_CLASS[key] ?? ""}`} />;
+  return <Icon className={cn("h-4 w-4 shrink-0", NOTE_ICON_CLASS[key], className)} />;
 }
 
 function RowLine({ row, formatNumber }: { row: NoteRow; formatNumber: (n: number) => string }) {
@@ -100,9 +101,9 @@ export function NoteView({ note, formatNumber, hideHeader, className }: NoteView
   return (
     <div className={cn("flex flex-col gap-2", className)}>
       {!hideHeader && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <NoteIconGlyph icon={note.icon} />
-          <span className="text-sm font-medium text-foreground">{note.title}</span>
+          <span className="text-xs font-medium text-foreground">{note.title}</span>
         </div>
       )}
       <NoteContent content={note.content} formatNumber={fmt} />

@@ -1,5 +1,5 @@
 import type { Note } from "@folio/connectors-basic";
-import { NoteBadge, NoteIconGlyph, NoteView } from "@folio/notes";
+import { NoteIconGlyph, NoteIndicator, NoteView } from "@folio/notes";
 import { BouncyAccordion, type BouncyAccordionItem } from "@folio/ui";
 import { useLocale, useTranslations } from "use-intl";
 import {
@@ -16,7 +16,7 @@ import { TokenAvatar } from "./token-stack";
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 holdings-sections 的表格。
 // provider 展示 note(note 重设计,两级):
 //   · account 级 note(Note[],整钱包)→ 持仓区顶部一个 BouncyAccordion,一段一个 item(BTC 未确认/收款/分布);
-//   · balance 级 note(单个 Note,该币锁仓/冻结)→ 现货行副行一个 <NoteBadge>(click 开 popover)。
+//   · balance 级 note(单个 Note,该币锁仓/冻结)→ 现货行标题右侧一个小 icon <NoteIndicator>(hover 开 popover)。
 
 // 24h 涨跌:正绿(前景)/ 负红(destructive);无数据 → "—"。仅用 shadcn token。
 function Change24h({ value }: { value?: number }) {
@@ -30,19 +30,19 @@ function Change24h({ value }: { value?: number }) {
   );
 }
 
-// 通用行卡:左(头像 + 主/副文本 + 可选 badge 小行)右(上/下两行)。
+// 通用行卡:左(头像 + 标题[右接可选 aside 元素] + 副文本)右(上/下两行)。
 function RowCard({
   avatar,
   title,
   subtitle,
-  badge,
+  aside,
   primary,
   secondary,
 }: {
   avatar?: React.ReactNode;
   title: React.ReactNode;
   subtitle?: React.ReactNode;
-  badge?: React.ReactNode;
+  aside?: React.ReactNode;
   primary: React.ReactNode;
   secondary?: React.ReactNode;
 }) {
@@ -50,12 +50,15 @@ function RowCard({
     <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
       {avatar}
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium">{title}</span>
+        {/* 标题行:symbol(可截断)右接 balance 级 note icon(<NoteIndicator>)。icon 在 truncate span
+            之外 —— 不被 overflow-hidden 裁掉它的 popover。 */}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-medium">{title}</span>
+          {aside}
+        </span>
         {subtitle != null && (
           <span className="truncate text-xs text-muted-foreground">{subtitle}</span>
         )}
-        {/* balance 级 note badge:独占一小行(避免和副行文本挤/换行;窄容器友好)。 */}
-        {badge != null && <span className="mt-1 inline-flex">{badge}</span>}
       </div>
       <div className="flex shrink-0 flex-col items-end">
         <span className="text-sm font-medium">{primary}</span>
@@ -81,7 +84,7 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
               {b.unitPrice != null ? ` · ${usd(b.unitPrice)}` : ""}
             </>
           }
-          badge={b.note ? <NoteBadge note={b.note} formatNumber={fmtNote} /> : undefined}
+          aside={b.note ? <NoteIndicator note={b.note} formatNumber={fmtNote} /> : undefined}
           primary={usd(b.usdValue)}
           secondary={<Change24h value={b.change24h} />}
         />
@@ -161,7 +164,7 @@ function PerpCards({ view }: { view: PerpView }) {
   );
 }
 
-// <NoteView>/<NoteBadge> 的注入接线:数字值 locale 格式化(全精度,核对用);label/title 英文字面无需 translate。
+// <NoteView>/<NoteIndicator> 的注入接线:数字值 locale 格式化(全精度,核对用);label/title 英文字面无需 translate。
 // 通用渲染包不直接依赖 use-intl / @folio/fx(格式化前端做、跟随 locale)。
 function useNoteFormatNumber(): (n: number) => string {
   const locale = useLocale();
@@ -188,7 +191,7 @@ function AccountNoteAccordion({ notes }: { notes: Note[] }) {
   );
 }
 
-// 一个账户的全部持仓(卡片列表):account 级 note 手风琴(顶部)+ 现货(带 balance note badge)/ DeFi / 永续。
+// 一个账户的全部持仓(卡片列表):account 级 note 手风琴(顶部)+ 现货(带 balance note icon)/ DeFi / 永续。
 export function AccountHoldingsCards({
   balances,
   accountNote,

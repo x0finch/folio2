@@ -22,7 +22,7 @@
     "note": {
       "title": "Frozen",
       "icon": "warning",
-      "content": [{ "label": "ETH", "value": 0.5, "unit": "ETH" }]
+      "content": "0.5 ETH · 25%"
     }
   }
 ]

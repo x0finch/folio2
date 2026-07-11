@@ -1,7 +1,7 @@
 import type { Note } from "@folio/connectors-basic";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { NoteBadge } from "../src/note-badge";
+import { NoteIndicator } from "../src/note-indicator";
 import { NoteView } from "../src/note-view";
 
 afterEach(cleanup);
@@ -81,19 +81,18 @@ describe("<NoteView>", () => {
   });
 });
 
-describe("<NoteBadge>", () => {
-  it("渲染段标题的 badge", () => {
+describe("<NoteIndicator>", () => {
+  it("纯 icon 触发(aria-label=段标题)+ popover 内 NoteView 含标题", () => {
     render(
-      <NoteBadge
-        note={{
-          title: "Frozen",
-          icon: "warning",
-          content: [{ label: "ETH", value: 0.5, unit: "ETH" }],
-        }}
+      <NoteIndicator
+        note={{ title: "Frozen", icon: "warning", content: "0.5 ETH · 25%" }}
         formatNumber={formatNumber}
       />,
     );
-    // badge label + popover 内 NoteView 段首都含标题,至少出现一次。
+    // 触发是纯 icon,无文字 → 用 aria-label 暴露段标题(无障碍)。
+    expect(screen.getByLabelText("Frozen")).toBeTruthy();
+    // popover 内容(NoteView 段首)含标题 + 内联文案(内容常驻 DOM,关闭时 inert)。
     expect(screen.getAllByText("Frozen").length).toBeGreaterThan(0);
+    expect(screen.getByText("0.5 ETH · 25%")).toBeTruthy();
   });
 });

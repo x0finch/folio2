@@ -33,7 +33,7 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
     expect(eth?.note).toEqual({
       title: "Locked",
       icon: "warning",
-      content: [{ label: "ETH", value: 1, unit: "ETH" }],
+      content: "1 ETH · 33%",
     });
     expect(balances.find((b) => b.symbol === "BTC")?.note).toBeUndefined();
     expect(balances.find((b) => b.symbol === "USDT")?.note).toBeUndefined();
@@ -61,7 +61,7 @@ describe("binanceProvider.fetchBalances", () => {
     expect(balances.find((b) => b.symbol === "ETH")?.note).toEqual({
       title: "Locked",
       icon: "warning",
-      content: [{ label: "ETH", value: 1, unit: "ETH" }],
+      content: "1 ETH · 33%",
     });
 
     const [acctUrl, init] = spy.mock.calls[0];

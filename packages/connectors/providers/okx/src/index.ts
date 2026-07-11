@@ -35,10 +35,14 @@ interface OkxBalanceResponse {
   data?: Array<{ details?: OkxDetail[] }>;
 }
 
+// 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
+const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 8 });
+
 // 纯解析:details[] → Spot[]。与 IO 分离,golden test。
 // amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
 // 冻结 note(note 重设计,balance 级单个 Note):frozenBal>0 的币,在【它自己那笔 balance】上挂一个
-// `Frozen` 段(icon warning;1 行 { label:币种, value:冻结数量, unit:币种 },原币口径)。无冻结 → 无 note。
+// `Frozen` 段(icon warning;content 一行内联文案 `${冻结数量} ${币种} · ${占该币总持有的百分比}`,
+// 如 `0.5 ETH · 25%`,原币口径)。无冻结 → 无 note。
 export function parseBalances(details: OkxDetail[]): Spot[] {
   const out: Spot[] = [];
   for (const d of details ?? []) {
@@ -55,10 +59,11 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
       kind: "spot",
     };
     if (frozen > 0) {
+      const pct = amount > 0 ? Math.round((frozen / amount) * 100) : 0;
       row.note = {
         title: "Frozen",
         icon: "warning",
-        content: [{ label: ccy, value: frozen, unit: ccy }],
+        content: `${fmtAmount(frozen)} ${ccy} · ${pct}%`,
       };
     }
     out.push(row);

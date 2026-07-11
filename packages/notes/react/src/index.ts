@@ -3,5 +3,5 @@
 //   · account 级:app 用 beUI BouncyAccordion 组装 —— 遍历 Note[],每段一个 item,item 展开体 = <NoteView>。
 //   · balance 级:<NoteBadge note={balance.note}/> —— 副行一个 sm badge(段 icon+标题),click 开 popover 显 <NoteView>。
 // 数字 locale 格式化由 app 注入 formatNumber(通用包不直接依赖 use-intl / @folio/fx)。
-export { NoteBadge, type NoteBadgeProps } from "./note-badge";
+export { NoteIndicator, type NoteIndicatorProps } from "./note-indicator";
 export { NoteIconGlyph, NoteView, type NoteViewProps } from "./note-view";

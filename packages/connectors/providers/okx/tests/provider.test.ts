@@ -30,7 +30,7 @@ describe("parseBalances (golden: fixture in → fixture out)", () => {
     expect(rows.find((b) => b.symbol === "ETH")?.note).toEqual({
       title: "Frozen",
       icon: "warning",
-      content: [{ label: "ETH", value: 0.5, unit: "ETH" }],
+      content: "0.5 ETH · 25%",
     });
     expect(rows.find((b) => b.symbol === "BTC")?.note).toBeUndefined();
     expect(rows.find((b) => b.symbol === "USDT")?.note).toBeUndefined();
@@ -46,7 +46,7 @@ describe("okxProvider.fetchBalances", () => {
     expect(balances.find((b) => b.symbol === "ETH")?.note).toEqual({
       title: "Frozen",
       icon: "warning",
-      content: [{ label: "ETH", value: 0.5, unit: "ETH" }],
+      content: "0.5 ETH · 25%",
     });
 
     const [url, init] = spy.mock.calls[0];
