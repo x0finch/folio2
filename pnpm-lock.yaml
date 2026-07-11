@@ -35,7 +35,7 @@ importers:
       '@folio/fx':
         specifier: workspace:*
         version: link:../../packages/fx
-      '@folio/notes':
+      '@folio/notes-react':
         specifier: workspace:*
         version: link:../../packages/notes/react
       '@folio/platforms':

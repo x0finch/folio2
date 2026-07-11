@@ -20,7 +20,7 @@ Status: accepted — 取代 [ADR 0010](0010-kind-governance-two-layer-meta-detai
    - **account 级** `Note[]`(整钱包):`fetchBalances(ctx) → { balances, note?: Note[] }` 顶层返回,落 `snapshots.note`。BTC(blockbook)产未确认/收款地址/派生分布多段。
    - **balance 级** 单个 `Note`(这笔持仓):挂 `Balance.note`,落 `snapshot_balances.note`。CEX(binance/okx)每锁仓/冻结币产一段。
 
-4. **渲染**(在 `@folio/notes` React 包,不反依赖 app;数字格式化由 app 注入):
+4. **渲染**(在 `@folio/notes-react` React 包,不反依赖 app;数字格式化由 app 注入):
    - account 级 → beUI **BouncyAccordion**,一段一个 item(icon+标题,展开体 = `<NoteView>` 内容)。
    - balance 级 → 现货行标题右侧一个**小状态 icon**(`<NoteIndicator>`),**hover** 开 beUI **Popover** 显 `<NoteView>`(段标题 + content);内容超长 popover 内部滚动,无 modal。打开时 Popover root 抬 z-50(beUI popover 非 portal,否则被后续不透明行盖住)。
 
@@ -37,6 +37,6 @@ Status: accepted — 取代 [ADR 0010](0010-kind-governance-two-layer-meta-detai
 
 - **契约** `@folio/connectors-basic`:`DetailSection/Row/Icon` → `Note/NoteRow/NoteIcon`(`detail-block.ts`→`note.ts`);`Balance.note` 单个;`fetchBalances` 返回 `{ balances, note?: Note[] }`(所有 provider 随之改;非 note provider 返回 `{ balances }`)。
 - **sync/db**:`FetchOutcome.note`;新增 `snapshots.note` + `snapshot_balances.note`(迁移 0019);`manual_activity.note → memo`。
-- **渲染包**:`@folio/detail-block` → `@folio/notes`,`NoteView` / `NoteIndicator` / `NoteIconGlyph`(原 `HoldingDetail`/`<BalanceDetail>` 弃)。
+- **渲染包**:`@folio/detail-block` → `@folio/notes-react`,`NoteView` / `NoteIndicator` / `NoteIconGlyph`(原 `HoldingDetail`/`<BalanceDetail>` 弃)。
 - **web**:account-view / overview 两级透传;holdings-cards 顶部 account 手风琴 + 现货行 balance icon。
 - DetailBlock 词汇表(stat/keyValue/addressList/format)从未落地,无迁移负担。

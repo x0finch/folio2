@@ -1,5 +1,5 @@
 import type { Note } from "@folio/connectors-basic";
-import { NoteIconGlyph, NoteIndicator, NoteView } from "@folio/notes";
+import { NoteIconGlyph, NoteIndicator, NoteView } from "@folio/notes-react";
 import { BouncyAccordion, type BouncyAccordionItem } from "@folio/ui";
 import { useLocale, useTranslations } from "use-intl";
 import {
