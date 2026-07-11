@@ -1,7 +1,7 @@
 import type { DetailSection } from "@folio/connectors-basic";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { BalanceDetail } from "../src/balance-detail";
+import { HoldingDetail } from "../src/holding-detail";
 
 afterEach(cleanup);
 
@@ -9,22 +9,23 @@ afterEach(cleanup);
 const formatNumber = (n: number) => `<${n}>`;
 
 function renderSections(sections: DetailSection[]) {
-  return render(<BalanceDetail sections={sections} formatNumber={formatNumber} />);
+  return render(<HoldingDetail sections={sections} formatNumber={formatNumber} />);
 }
 
-describe("<BalanceDetail>", () => {
+describe("<HoldingDetail>", () => {
   it("无 section → 渲染 null", () => {
-    const { container } = render(<BalanceDetail sections={[]} formatNumber={formatNumber} />);
+    const { container } = render(<HoldingDetail sections={[]} formatNumber={formatNumber} />);
     expect(container.firstChild).toBeNull();
   });
 
-  it("每 section → 一个手风琴 item(title 作触发器)", () => {
+  it("每 section → 一段(段标题直接可见,非折叠)", () => {
     renderSections([
       { title: "Unconfirmed", icon: "warning", content: "Pending funds" },
       { title: "Locked", content: [{ label: "BTC", value: 1, unit: "BTC" }] },
     ]);
-    expect(screen.getByRole("button", { name: /Unconfirmed/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Locked/ })).toBeTruthy();
+    expect(screen.getByText("Unconfirmed")).toBeTruthy();
+    expect(screen.getByText("Locked")).toBeTruthy();
+    expect(screen.getByText("Pending funds")).toBeTruthy();
   });
 
   it("content string → 纯文本;content DetailRow[] → 行列表,数字经 formatNumber + 单位", () => {
@@ -62,13 +63,12 @@ describe("<BalanceDetail>", () => {
         { title: "Weird", icon: "nope", content: "text" },
       ]),
     ).not.toThrow();
-    expect(screen.getByRole("button", { name: /NoIcon/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Weird/ })).toBeTruthy();
+    expect(screen.getByText("NoIcon")).toBeTruthy();
+    expect(screen.getByText("Weird")).toBeTruthy();
   });
 
   it("缺 formatNumber → 数字 String 化(安全退化)", () => {
-    render(<BalanceDetail sections={[{ title: "S", content: [{ label: "x", value: 7 }] }]} />);
-    const region = screen.getByRole("region", { hidden: true });
-    expect(within(region).getByText("7")).toBeTruthy();
+    render(<HoldingDetail sections={[{ title: "S", content: [{ label: "x", value: 7 }] }]} />);
+    expect(screen.getByText("7")).toBeTruthy();
   });
 });

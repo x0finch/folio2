@@ -1,5 +1,4 @@
 import type { DetailRow, DetailSection } from "@folio/connectors-basic";
-import { BouncyAccordion, type BouncyAccordionItem } from "@folio/ui";
 import { cn } from "@folio/ui/lib/utils";
 import {
   CircleAlert,
@@ -10,10 +9,11 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-// 账户级 detail 渲染器(DetailBlock 重设计):sections → beUI BouncyAccordion,每 section 一个 item。
-// icon 名 → lucide 命名图标(缺省/未知 → info);content:string → 纯文本、DetailRow[] → 行列表;
-// 行有 href 则整行包外链(新标签)。数字值经注入的 formatNumber(locale)格式化;label/title 英文字面。
-// React list key(item + row)一律用 index(detail 是只读展示列表,不重排)。
+// 单持仓 detail 渲染器(DetailBlock 重设计,per-balance):把一笔持仓的 DetailSection[] 渲染成一块内容,
+// 供 app 侧塞进 BouncyAccordion 某个 item 的展开区(item = 持仓,item.icon = 币 logo,由 app 组装)。
+// 每 section 一段:段首状态图标(icon 名 → lucide,缺省/未知 → info)+ 段标题;content:string → 纯文本、
+// DetailRow[] → 行列表;行有 href 则整行包外链(新标签)。数字值经注入的 formatNumber(locale)格式化;
+// label/title 英文字面。React list key(段 + 行)一律用 index(detail 是只读展示列表,不重排)。
 
 // 5 个中性状态名 → lucide 命名图标。lucide 已把 AlertTriangle/AlertCircle 改名 TriangleAlert/CircleAlert。
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -30,8 +30,8 @@ const ICON_CLASS: Record<string, string> = {
   error: "text-destructive",
 };
 
-export interface BalanceDetailProps {
-  sections?: DetailSection[];
+export interface HoldingDetailProps {
+  sections: DetailSection[];
   // 数字值 locale 格式化(app 注入;通用包不依赖 use-intl / @folio/fx)。缺省 String 化,安全退化。
   formatNumber?: (n: number) => string;
   className?: string;
@@ -86,27 +86,27 @@ function SectionContent({
   );
 }
 
-// 账户级详情渲染:sections → BouncyAccordion items(id=index)。无 section → 渲染 null。
-export function BalanceDetail({ sections, formatNumber, className }: BalanceDetailProps) {
-  const list = sections ?? [];
-  if (list.length === 0) return null;
+// 一笔持仓的 detail:sections → 逐段渲染(段首状态图标 + 标题,下接 content)。无 section → 渲染 null。
+export function HoldingDetail({ sections, formatNumber, className }: HoldingDetailProps) {
+  if (sections.length === 0) return null;
   const fmt = formatNumber ?? ((n: number) => String(n));
-  const items: BouncyAccordionItem[] = list.map((section, i) => {
-    const key = section.icon ?? "info";
-    const Icon = ICON_MAP[key] ?? ICON_MAP.info;
-    return {
-      // section 无稳定 id,index 作 id(→ 手风琴 React key);detail 只读展示列表,不重排。
-      id: String(i),
-      title: section.title,
-      icon: <Icon className={`h-4 w-4 ${ICON_CLASS[key] ?? ""}`} />,
-      description: <SectionContent content={section.content} formatNumber={fmt} />,
-    };
-  });
   return (
-    <BouncyAccordion
-      items={items}
-      className={cn(className)}
-      classNames={{ item: "border border-border", description: "text-foreground" }}
-    />
+    <div className={cn("flex flex-col gap-4", className)}>
+      {sections.map((section, i) => {
+        const key = section.icon ?? "info";
+        const Icon = ICON_MAP[key] ?? ICON_MAP.info;
+        return (
+          // 段无稳定 id,index 作 key;detail 只读展示列表,不重排。
+          // biome-ignore lint/suspicious/noArrayIndexKey: detail sections are a static display list
+          <div key={i} className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Icon className={`h-4 w-4 shrink-0 ${ICON_CLASS[key] ?? ""}`} />
+              <span className="text-sm font-medium text-foreground">{section.title}</span>
+            </div>
+            <SectionContent content={section.content} formatNumber={fmt} />
+          </div>
+        );
+      })}
+    </div>
   );
 }

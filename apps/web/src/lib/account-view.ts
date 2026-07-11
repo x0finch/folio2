@@ -1,4 +1,4 @@
-import { DefiMeta, type DefiMeta as DefiMetaT } from "@folio/connectors-basic";
+import { DefiMeta, type DefiMeta as DefiMetaT, type DetailSection } from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
 import { type PerpView, toPerpView } from "./perp";
 
@@ -7,8 +7,9 @@ import { type PerpView, toPerpView } from "./perp";
 // 卡片净值仍 = 账户 totalUsd(净值不变量,见 ADR 0009)。这里只管"怎么分区展示"。
 // kind 走 viewKind 归一(并存期兼容遗留 kind:manual→spot、perp 靠 role、bitcoin→utxo);
 // meta 用 @folio/connectors 的 zod schema safeParse(替代旧 `as` 强转)。
-// 注:provider 专属展示明细已提到【账户级】(DetailBlock 重设计):从账户快照 detail 读、
-// 前端 <BalanceDetail sections> 单独渲染,不再由本模块从 per-balance 聚合。
+// 注:provider 专属展示明细走 per-balance(DetailBlock 重设计):每笔持仓自带 detail(从
+// snapshot_balances.detail safeParse),账户视图收集带 detail 的持仓、前端做成手风琴(item = 持仓),
+// 不由本模块的分区聚合参与。
 
 export interface OverviewBalance {
   id: string;
@@ -18,6 +19,7 @@ export interface OverviewBalance {
   kind: string;
   tokenKey?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
   metaJson: string | null;
+  detail?: DetailSection[]; // per-balance 展示明细(BTC 未确认/收款/分布、CEX 锁仓/冻结);无则省略
   // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。
   name?: string;
   logo?: string;

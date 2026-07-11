@@ -45,9 +45,9 @@ export const getMyAccountHoldings = createServerFn({ method: "GET" })
           account: { id: account.id, label: account.label },
           totalUsd: latest?.snapshot.totalUsd ?? 0,
           takenAt: latest?.snapshot.takenAt ?? null,
+          // 每笔持仓自带 detail(DetailBlock 重设计,per-balance):db 已把 snapshot_balances.detail
+          // safeParse 成 DetailSection[],随 balances 透传;账户视图据此把带 detail 的持仓做成手风琴。
           balances: enriched.rows,
-          // 账户级展示明细(DetailBlock 重设计):从账户快照 detail 读出(已 safeParse 成 DetailSection[])。
-          detail: latest?.detail ?? [],
           pricesStale: enriched.pricesStale,
         };
       }),
