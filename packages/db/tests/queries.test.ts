@@ -261,11 +261,11 @@ describe("snapshots", () => {
     expect(latest).toHaveLength(1);
     expect(latest[0]!.balances).toHaveLength(2);
     expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.metaJson).toContain("note");
-    // 无 detail 写入 → 读回为空数组。
-    expect(latest[0]!.detail).toEqual([]);
+    // 无 detail 写入 → 各行 detail 省略。
+    expect(latest[0]!.balances.every((b) => b.detail === undefined)).toBe(true);
   });
 
-  it("persists account-level detail and safeParses it back (DetailBlock 重设计)", async () => {
+  it("persists per-balance detail and safeParses it back (DetailBlock 重设计)", async () => {
     const acc = await createAccount(env, USER_A, {
       connectorId: "bitcoin",
       label: "BTC",
@@ -282,12 +282,16 @@ describe("snapshots", () => {
     await writeSnapshot(env, USER_A, acc.id, {
       takenAt: 1000,
       totalUsd: 0,
-      balances: [{ symbol: "BTC", amount: 0.08, usdValue: 0, kind: "spot" }],
-      detail,
+      balances: [
+        { symbol: "BTC", amount: 0.08, usdValue: 0, kind: "spot", detail },
+        { symbol: "ETH", amount: 1, usdValue: 0, kind: "spot" }, // 无 detail 的行
+      ],
     });
     const latest = await getLatestSnapshotByUser(env, USER_A);
     expect(latest).toHaveLength(1);
-    expect(latest[0]!.detail).toEqual(detail);
+    // detail 挂在该 balance 上(per-balance),safeParse 回 DetailSection[];无 detail 的行为 undefined。
+    expect(latest[0]!.balances.find((b) => b.symbol === "BTC")!.detail).toEqual(detail);
+    expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.detail).toBeUndefined();
   });
 
   it("writes many balances by chunking under D1's bound-parameter limit", async () => {
@@ -296,7 +300,7 @@ describe("snapshots", () => {
       label: "Big wallet",
       creds: "x",
     });
-    // 60 条余额 × 8 列 = 480 绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
+    // 60 条余额 × 9 列 = 540 绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
     const balances = Array.from({ length: 60 }, (_, i) => ({
       symbol: `T${i}`,
       amount: i,

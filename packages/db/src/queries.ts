@@ -21,8 +21,8 @@ import {
 } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
 
-// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 8 列 → 每块 12 行(96 参数,留余量)。
-const BALANCE_INSERT_CHUNK = 12;
+// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 9 列 → 每块 11 行(99 参数,留余量)。
+const BALANCE_INSERT_CHUNK = 11;
 
 // 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
 const accountSafeColumns = {
@@ -290,29 +290,31 @@ export interface SnapshotBalanceInput {
   kind: BalanceKind;
   tokenKey?: string;
   meta?: Record<string, unknown>;
+  detail?: DetailSection[]; // per-balance 展示明细(DetailBlock 重设计);落 snapshot_balances.detail(JSON)
 }
 
 export interface WriteSnapshotInput {
   takenAt: number;
   totalUsd: number;
   balances: SnapshotBalanceInput[];
-  detail?: DetailSection[]; // 账户级展示明细(DetailBlock 重设计);落 snapshots.detail(JSON)
 }
+
+// 读模型的余额行:原始 SnapshotBalance,detail 列已 safeParse 成 DetailSection[](空/损坏 → 省略)。
+export type SnapshotBalanceView = Omit<SnapshotBalance, "detail"> & { detail?: DetailSection[] };
 
 export interface SnapshotWithBalances {
   snapshot: Snapshot;
-  balances: SnapshotBalance[];
-  detail: DetailSection[]; // 从 snapshots.detail safeParse 得(空/损坏 → [])
+  balances: SnapshotBalanceView[];
 }
 
-// 快照 detail 列(JSON 字符串)→ DetailSection[]。损坏/为空 → []。
-function parseSnapshotDetail(raw: string | null): DetailSection[] {
-  if (!raw) return [];
+// 快照余额行的 detail 列(JSON 字符串)→ DetailSection[]。损坏/为空 → undefined(无 detail 的持仓)。
+function parseBalanceDetail(raw: string | null): DetailSection[] | undefined {
+  if (!raw) return undefined;
   try {
     const r = DetailSection.array().safeParse(JSON.parse(raw));
-    return r.success ? r.data : [];
+    return r.success && r.data.length > 0 ? r.data : undefined;
   } catch {
-    return [];
+    return undefined;
   }
 }
 
@@ -331,7 +333,6 @@ export async function writeSnapshot(
     accountId,
     takenAt: input.takenAt,
     totalUsd: input.totalUsd,
-    detail: input.detail && input.detail.length > 0 ? JSON.stringify(input.detail) : null,
   });
   const balanceRows = input.balances.map((b) => ({
     id: crypto.randomUUID(),
@@ -342,8 +343,9 @@ export async function writeSnapshot(
     kind: b.kind,
     tokenKey: b.tokenKey ?? null,
     metaJson: b.meta ? JSON.stringify(b.meta) : null,
+    detail: b.detail && b.detail.length > 0 ? JSON.stringify(b.detail) : null,
   }));
-  // D1 限制每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 7 列 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行。
+  // D1 限制每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 9 列 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行。
   // 一次性大 INSERT 会触发 "too many SQL variables"(地址持仓多时,如链上钱包几十上百条)。
   const balanceInserts = [];
   for (let i = 0; i < balanceRows.length; i += BALANCE_INSERT_CHUNK) {
@@ -445,17 +447,18 @@ export async function getLatestSnapshotByUser(
       ),
     );
 
-  // JS 按 snapshotId 分组。
-  const bySnapshot = new Map<string, SnapshotBalance[]>();
+  // JS 按 snapshotId 分组;每行的 detail 列(JSON)safeParse 成 DetailSection[](per-balance)。
+  const bySnapshot = new Map<string, SnapshotBalanceView[]>();
   for (const b of balanceRows) {
+    const { detail, ...rest } = b;
+    const view: SnapshotBalanceView = { ...rest, detail: parseBalanceDetail(detail) };
     const arr = bySnapshot.get(b.snapshotId);
-    if (arr) arr.push(b);
-    else bySnapshot.set(b.snapshotId, [b]);
+    if (arr) arr.push(view);
+    else bySnapshot.set(b.snapshotId, [view]);
   }
   return snaps.map((snapshot) => ({
     snapshot,
     balances: bySnapshot.get(snapshot.id) ?? [],
-    detail: parseSnapshotDetail(snapshot.detail),
   }));
 }
 

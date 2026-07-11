@@ -18,6 +18,7 @@ export type {
   ManualActivityKind,
   Membership,
   SnapshotBalanceInput,
+  SnapshotBalanceView,
   SnapshotTotal,
   SnapshotWithBalances,
   WriteSnapshotInput,
