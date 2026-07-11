@@ -103,7 +103,7 @@ export function NoteView({ note, formatNumber, hideHeader, className }: NoteView
       {!hideHeader && (
         <div className="flex items-center gap-1.5">
           <NoteIconGlyph icon={note.icon} />
-          <span className="text-xs font-medium text-foreground">{note.title}</span>
+          <span className="text-base font-medium text-foreground">{note.title}</span>
         </div>
       )}
       <NoteContent content={note.content} formatNumber={fmt} />
