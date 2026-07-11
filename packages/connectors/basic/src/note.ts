@@ -5,7 +5,7 @@ import { z } from "zod";
 // 两级挂载(见 balance.ts / connector.ts):
 //   · account 级 `Note[]`(整钱包,BTC:未确认/收款/派生分布) → 前端持仓区手风琴,一段一个 item;
 //     `fetchBalances` 顶层返回 + 落 snapshots.note(JSON)。
-//   · balance 级单个 `Note`(这笔持仓,CEX:该币锁仓/冻结) → 前端行副行 badge + click popover;
+//   · balance 级单个 `Note`(这笔持仓,CEX:该币锁仓/冻结) → 前端行标题右侧小 icon + hover popover;
 //     挂 Balance.note,落 snapshot_balances.note(JSON)。
 // 一种 row、一种 section:无 `type` 判别、无 `format` 枚举。icon 为 5 个中性状态名 → 前端映射 lucide 命名图标。
 // label/title 英文字面串(结构保留,将来可 i18n);value 结构化(数即数),locale 格式化由前端注入的

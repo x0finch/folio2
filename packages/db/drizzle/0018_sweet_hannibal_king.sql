@@ -1,1 +1,1 @@
-ALTER TABLE `snapshot_balances` ADD `detail` text;
+ALTER TABLE `snapshot_balances` ADD `note` text;

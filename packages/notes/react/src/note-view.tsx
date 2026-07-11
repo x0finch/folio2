@@ -11,7 +11,7 @@ import {
 
 // 单个 Note 渲染器(note 重设计):把一个 Note(段首状态 icon + 标题 + content)渲染成一块内容。
 // 复用两处:① account 级手风琴每个 item 的展开体(app 遍历 Note[],每段一 item,item 体 = <NoteView>);
-// ② balance 级 <NoteBadge> 的 popover 内容。content:string → 纯文本、NoteRow[] → 行列表;行有 href 则整行包外链。
+// ② balance 级 <NoteIndicator> 的 popover 内容。content:string → 纯文本、NoteRow[] → 行列表;行有 href 则整行包外链。
 // 数字值经注入的 formatNumber(locale)格式化;label/title 英文字面。React key(行)一律 index(只读展示列表)。
 
 // 5 个中性状态名 → lucide 命名图标。lucide 已把 AlertTriangle/AlertCircle 改名 TriangleAlert/CircleAlert。

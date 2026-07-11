@@ -19,8 +19,8 @@ export const BalanceBase = z.object({
   name: z.string().optional(), // provider 自带代币元信息(喂参考层 / 备用展示)
   logo: z.string().optional(),
   // provider 专属【仅供展示】的 balance 级 note(note 重设计,单个 Note),挂在【这笔持仓】上:
-  // CEX → 该币的锁仓/冻结(一段)。落 snapshot_balances.note(JSON),前端渲染成该行副行的
-  // badge + click popover。无共享逻辑读它 —— 纯展示。account 级 note(Note[])见 fetchBalances 顶层返回。
+  // CEX → 该币的锁仓/冻结(一段)。落 snapshot_balances.note(JSON),前端渲染成该行标题右侧的
+  // 小 icon + hover popover。无共享逻辑读它 —— 纯展示。account 级 note(Note[])见 fetchBalances 顶层返回。
   note: Note.optional(),
 });
 

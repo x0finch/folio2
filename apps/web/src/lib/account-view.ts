@@ -8,7 +8,7 @@ import { type PerpView, toPerpView } from "./perp";
 // kind 走 viewKind 归一(并存期兼容遗留 kind:manual→spot、perp 靠 role、bitcoin→utxo);
 // meta 用 @folio/connectors 的 zod schema safeParse(替代旧 `as` 强转)。
 // 注:balance 级展示 note(note 重设计,单个 Note)随各 balance(从 snapshot_balances.note safeParse)一路带到
-// SpotRow.note —— 前端在该现货行副行渲染 <NoteBadge>。account 级 note(Note[])是每账户一份,走另一条通道
+// SpotRow.note —— 前端在该现货行标题右侧渲染 <NoteIndicator>。account 级 note(Note[])是每账户一份,走另一条通道
 // (server row.note → AccountHoldingsCards 的 accountNote prop),不进本模块的分区。
 
 export interface OverviewBalance {
@@ -36,7 +36,7 @@ export interface SpotRow {
   logo?: string;
   unitPrice?: number;
   change24h?: number;
-  note?: Note; // balance 级展示 note(有则该行副行渲染 <NoteBadge>)
+  note?: Note; // balance 级展示 note(有则该行标题右侧渲染 <NoteIndicator>)
 }
 export interface DefiRow {
   id: string;
