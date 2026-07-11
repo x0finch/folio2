@@ -52,7 +52,7 @@ function RowLine({ row, formatNumber }: { row: DetailRow; formatNumber: (n: numb
         href={row.href}
         target="_blank"
         rel="noopener noreferrer"
-        className="block font-mono text-xs hover:text-foreground"
+        className="block font-mono text-xs hover:text-foreground hover:underline"
       >
         {body}
       </a>
