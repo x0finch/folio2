@@ -24,6 +24,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
   help: CircleHelp,
 };
 
+// 状态图标配色:warning 琥珀、error 用 destructive token;其余走默认(继承 muted-foreground)。
+const ICON_CLASS: Record<string, string> = {
+  warning: "text-amber-500",
+  error: "text-destructive",
+};
+
 export interface BalanceDetailProps {
   sections?: DetailSection[];
   // 数字值 locale 格式化(app 注入;通用包不依赖 use-intl / @folio/fx)。缺省 String 化,安全退化。
@@ -86,12 +92,13 @@ export function BalanceDetail({ sections, formatNumber, className }: BalanceDeta
   if (list.length === 0) return null;
   const fmt = formatNumber ?? ((n: number) => String(n));
   const items: BouncyAccordionItem[] = list.map((section, i) => {
-    const Icon = ICON_MAP[section.icon ?? "info"] ?? ICON_MAP.info;
+    const key = section.icon ?? "info";
+    const Icon = ICON_MAP[key] ?? ICON_MAP.info;
     return {
       // section 无稳定 id,index 作 id(→ 手风琴 React key);detail 只读展示列表,不重排。
       id: String(i),
       title: section.title,
-      icon: <Icon className="h-4 w-4" />,
+      icon: <Icon className={`h-4 w-4 ${ICON_CLASS[key] ?? ""}`} />,
       description: <SectionContent content={section.content} formatNumber={fmt} />,
     };
   });
