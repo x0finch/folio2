@@ -1,5 +1,5 @@
 import type { ConnectorId } from "@folio/connectors";
-import type { BalanceKind } from "@folio/connectors-basic";
+import { type BalanceKind, DetailSection } from "@folio/connectors-basic";
 import {
   and,
   asc,
@@ -296,11 +296,24 @@ export interface WriteSnapshotInput {
   takenAt: number;
   totalUsd: number;
   balances: SnapshotBalanceInput[];
+  detail?: DetailSection[]; // 账户级展示明细(DetailBlock 重设计);落 snapshots.detail(JSON)
 }
 
 export interface SnapshotWithBalances {
   snapshot: Snapshot;
   balances: SnapshotBalance[];
+  detail: DetailSection[]; // 从 snapshots.detail safeParse 得(空/损坏 → [])
+}
+
+// 快照 detail 列(JSON 字符串)→ DetailSection[]。损坏/为空 → []。
+function parseSnapshotDetail(raw: string | null): DetailSection[] {
+  if (!raw) return [];
+  try {
+    const r = DetailSection.array().safeParse(JSON.parse(raw));
+    return r.success ? r.data : [];
+  } catch {
+    return [];
+  }
 }
 
 /** 一次原子写 snapshot + balances(D1 用 db.batch,无交互式事务)。返回 snapshotId。 */
@@ -313,9 +326,13 @@ export async function writeSnapshot(
   const db = getDb(env);
   await assertAccountOwned(db, userId, accountId);
   const snapshotId = crypto.randomUUID();
-  const insertSnapshot = db
-    .insert(snapshots)
-    .values({ id: snapshotId, accountId, takenAt: input.takenAt, totalUsd: input.totalUsd });
+  const insertSnapshot = db.insert(snapshots).values({
+    id: snapshotId,
+    accountId,
+    takenAt: input.takenAt,
+    totalUsd: input.totalUsd,
+    detail: input.detail && input.detail.length > 0 ? JSON.stringify(input.detail) : null,
+  });
   const balanceRows = input.balances.map((b) => ({
     id: crypto.randomUUID(),
     snapshotId,
@@ -435,7 +452,11 @@ export async function getLatestSnapshotByUser(
     if (arr) arr.push(b);
     else bySnapshot.set(b.snapshotId, [b]);
   }
-  return snaps.map((snapshot) => ({ snapshot, balances: bySnapshot.get(snapshot.id) ?? [] }));
+  return snaps.map((snapshot) => ({
+    snapshot,
+    balances: bySnapshot.get(snapshot.id) ?? [],
+    detail: parseSnapshotDetail(snapshot.detail),
+  }));
 }
 
 // 导出用:分页取该用户全部快照(按 takenAt,id 稳定排序)。配合 listBalancesForSnapshots 一页页流式

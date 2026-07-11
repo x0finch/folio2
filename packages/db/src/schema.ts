@@ -79,6 +79,9 @@ export const snapshots = sqliteTable(
       .references(() => accounts.id, { onDelete: "cascade" }),
     takenAt: integer("taken_at").notNull(), // epoch ms
     totalUsd: real("total_usd").notNull(),
+    // 账户级展示明细(DetailBlock 重设计):JSON.stringify(DetailSection[]),可空。
+    // provider.fetchBalances 返回的 detail 落这里(不再 per-balance);读时 safeParse 回 DetailSection[]。
+    detail: text("detail"),
   },
   (t) => [
     index("snapshots_account_id_idx").on(t.accountId),

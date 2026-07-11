@@ -79,6 +79,23 @@ describe("syncUser — 取余额 → 写快照", () => {
     expect(writes[0].input.balances).toHaveLength(1);
   });
 
+  it("账户级 detail(DetailBlock 重设计):outcome.detail 透传给 writeSnapshot", async () => {
+    const detail = [{ title: "Locked", icon: "warning" as const, content: "held" }];
+    const { deps, writes } = makeDeps([account()], {
+      fetchBalances: async () => ({ ...ok([bal("BTC", 1)]), detail }),
+    });
+    await syncUser(deps, "u1");
+    expect(writes[0].input.detail).toEqual(detail);
+  });
+
+  it("无 detail 的 outcome → writeSnapshot 收到 detail=undefined", async () => {
+    const { deps, writes } = makeDeps([account()], {
+      fetchBalances: async () => ok([bal("BTC", 1)]),
+    });
+    await syncUser(deps, "u1");
+    expect(writes[0].input.detail).toBeUndefined();
+  });
+
   it("revalue 钩子(P7.4.2):写快照前改 value 并重算 totalUsd", async () => {
     const { deps, writes } = makeDeps([account()], {
       fetchBalances: async () => ok([bal("BTC", 32000)]),

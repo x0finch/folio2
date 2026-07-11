@@ -261,6 +261,33 @@ describe("snapshots", () => {
     expect(latest).toHaveLength(1);
     expect(latest[0]!.balances).toHaveLength(2);
     expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.metaJson).toContain("note");
+    // 无 detail 写入 → 读回为空数组。
+    expect(latest[0]!.detail).toEqual([]);
+  });
+
+  it("persists account-level detail and safeParses it back (DetailBlock 重设计)", async () => {
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "bitcoin",
+      label: "BTC",
+      creds: "x",
+    });
+    const detail = [
+      {
+        title: "Unconfirmed",
+        icon: "warning" as const,
+        content: [{ label: "Pending", value: 0.005, unit: "BTC" }],
+      },
+      { title: "Note", content: "all available" },
+    ];
+    await writeSnapshot(env, USER_A, acc.id, {
+      takenAt: 1000,
+      totalUsd: 0,
+      balances: [{ symbol: "BTC", amount: 0.08, usdValue: 0, kind: "spot" }],
+      detail,
+    });
+    const latest = await getLatestSnapshotByUser(env, USER_A);
+    expect(latest).toHaveLength(1);
+    expect(latest[0]!.detail).toEqual(detail);
   });
 
   it("writes many balances by chunking under D1's bound-parameter limit", async () => {
