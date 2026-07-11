@@ -24,10 +24,10 @@ describe("parseBalances (golden: fixture in → fixture out)", () => {
     expect(parseBalances(balance.data[0].details)).toEqual(expected);
   });
 
-  it("emits a `- CCY: N` frozen detail line only when frozen > 0", () => {
+  it("emits a `**Frozen**` header + `- CCY: N` line only when frozen > 0", () => {
     const rows = parseBalances(balance.data[0].details);
-    // BTC: frozenBal 0.1 → detail line (数量,不带 USD)
-    expect(rows.find((b) => b.symbol === "BTC")?.detail).toBe("- BTC: 0.1");
+    // BTC: frozenBal 0.1 → 首个冻结币带 Frozen 列名 + 行(数量,不带 USD)
+    expect(rows.find((b) => b.symbol === "BTC")?.detail).toBe("**Frozen**\n\n- BTC: 0.1");
     // USDT/ETH: frozenBal 0 → no detail
     expect(rows.find((b) => b.symbol === "USDT")?.detail).toBeUndefined();
     expect(rows.find((b) => b.symbol === "ETH")?.detail).toBeUndefined();

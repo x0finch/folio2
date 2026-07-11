@@ -27,9 +27,9 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
     expect(balances.find((b) => b.symbol === "BNB")).toBeUndefined();
   });
 
-  it("emits a `- SYM: N` locked detail line only when locked > 0", () => {
-    // ETH: free 2 + locked 1 → detail line (数量,不带 USD)
-    expect(balances.find((b) => b.symbol === "ETH")?.detail).toBe("- ETH: 1");
+  it("emits a `**Locked**` header + `- SYM: N` line only when locked > 0", () => {
+    // ETH: free 2 + locked 1 → 首个锁仓币带 Locked 列名 + 行(数量,不带 USD)
+    expect(balances.find((b) => b.symbol === "ETH")?.detail).toBe("**Locked**\n\n- ETH: 1");
     // BTC/USDT/NOPRICE: no locked → no detail
     expect(balances.find((b) => b.symbol === "BTC")?.detail).toBeUndefined();
     expect(balances.find((b) => b.symbol === "USDT")?.detail).toBeUndefined();

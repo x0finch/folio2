@@ -39,9 +39,10 @@ interface OkxBalanceResponse {
 // 纯解析:details[] → Spot[]。与 IO 分离,golden test。
 // amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
 // 冻结(frozenBal>0):拼一行 markdown detail(`- CCY: N`,只数量、不带 USD)—— 账户级聚合后即该
-// 交易所全部冻结币的列表。无冻结 → 不带 detail。
+// 交易所全部冻结币的列表。**首个冻结币带上 `**Frozen**` 列名**(读端聚合后成「列名 + 列表」);无冻结 → 不带 detail。
 export function parseBalances(details: OkxDetail[]): Spot[] {
   const out: Spot[] = [];
+  let frozenHeaderEmitted = false;
   for (const d of details ?? []) {
     const ccy = d.ccy;
     if (!ccy) continue;
@@ -49,14 +50,19 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
     if (!(amount > 0)) continue;
     const price = Number(d.eqUsd ?? 0) / amount;
     const frozen = Number(d.frozenBal ?? 0);
-    // 仅冻结 > 0 才拼一行 detail(冻结列表一行);无冻结不带。
+    let detail: string | undefined;
+    if (frozen > 0) {
+      const line = `- ${ccy}: ${formatAmount(frozen)}`;
+      detail = frozenHeaderEmitted ? line : `**Frozen**\n\n${line}`; // 列名只在首个冻结币前出一次
+      frozenHeaderEmitted = true;
+    }
     out.push({
       symbol: ccy,
       amount,
       price,
       value: Number(d.eqUsd ?? 0),
       kind: "spot",
-      ...(frozen > 0 ? { detail: `- ${ccy}: ${formatAmount(frozen)}` } : {}),
+      ...(detail ? { detail } : {}),
     });
   }
   return out;

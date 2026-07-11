@@ -40,12 +40,13 @@ interface TickerPrice {
 // 纯解析:account.balances + 价格表(symbol→price)→ Spot[]。与 IO 分离,golden test。
 // amount = free + locked;跳过 ≤0;usdValue:稳定币≈1,否则 amount × price(`${asset}USDT`),无对→0。
 // 锁仓数量(locked>0):拼一行 markdown detail(`- SYM: N`,只数量、不带 USD)—— 账户级聚合后即该
-// 交易所全部锁仓币的列表。无锁仓 → 不带 detail。
+// 交易所全部锁仓币的列表。**首个锁仓币带上 `**Locked**` 列名**(读端聚合后成「列名 + 列表」);无锁仓 → 不带 detail。
 export function parseAccountBalances(
   account: BinanceAccount,
   prices: Record<string, number>,
 ): Spot[] {
   const out: Spot[] = [];
+  let lockedHeaderEmitted = false;
   for (const b of account.balances ?? []) {
     const asset = b.asset;
     if (!asset) continue;
@@ -55,14 +56,19 @@ export function parseAccountBalances(
     if (!(amount > 0)) continue;
     const price = STABLECOINS.has(asset) ? 1 : (prices[`${asset}${QUOTE_ASSET}`] ?? undefined);
     const usdValue = price != null ? amount * price : 0;
-    // 仅锁仓 > 0 才拼一行 detail(锁仓列表一行);无锁仓不带。
+    let detail: string | undefined;
+    if (locked > 0) {
+      const line = `- ${asset}: ${formatAmount(locked)}`;
+      detail = lockedHeaderEmitted ? line : `**Locked**\n\n${line}`; // 列名只在首个锁仓币前出一次
+      lockedHeaderEmitted = true;
+    }
     out.push({
       symbol: asset,
       amount,
       price,
       value: usdValue,
       kind: "spot",
-      ...(locked > 0 ? { detail: `- ${asset}: ${formatAmount(locked)}` } : {}),
+      ...(detail ? { detail } : {}),
     });
   }
   return out;
