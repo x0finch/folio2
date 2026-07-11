@@ -7,7 +7,9 @@ import { type PerpView, toPerpView } from "./perp";
 // 卡片净值仍 = 账户 totalUsd(净值不变量,见 ADR 0009)。这里只管"怎么分区展示"。
 // kind 走 viewKind 归一(并存期兼容遗留 kind:manual→spot、perp 靠 role、旧 utxo→spot);
 // meta 用 @folio/connectors 的 zod schema safeParse(替代旧 `as` 强转)。
-// detail:provider 拼的 markdown 展示细节(BTC 未确认/派生、CEX available/locked)→ per-holding 渲染(见 holdings-cards)。
+// detail:provider 拼的 markdown 展示细节(BTC 未确认/派生、CEX 锁仓列表)。改为【账户级聚合】——
+// 把该账户所有 balance 的非空 detail 按 balance 顺序用 \n 连成一个 accountDetail,顶部单手风琴渲染
+// (见 holdings-cards),不再挂到 per-holding 行。
 
 export interface OverviewBalance {
   id: string;
@@ -18,6 +20,7 @@ export interface OverviewBalance {
   tokenKey?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
   metaJson: string | null;
   detail?: string | null; // provider 拼的 markdown 展示细节(快照持久化;缺则 undefined)
+  locked?: number | null; // 锁仓数量(快照持久化;CEX 现货 locked/frozen,缺则 undefined/null)
   // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。
   name?: string;
   logo?: string;
@@ -30,7 +33,7 @@ export interface SpotRow {
   symbol: string;
   amount: number;
   usdValue: number;
-  detail?: string | null; // markdown 展示细节(有则每行下渲染)
+  locked?: number | null; // 锁仓数量(有则行上直接展示 🔒)
   name?: string;
   logo?: string;
   unitPrice?: number;
@@ -51,6 +54,7 @@ export interface AccountSections {
   spot: SpotRow[];
   defi: DefiGroup[];
   perp: PerpView | null; // 无永续行 → null
+  accountDetail: string | null; // 该账户所有 balance 非空 detail 按序 \n 连接;全空 → null
 }
 
 function parseDefiMeta(metaJson: string | null): DefiMetaT {
@@ -68,10 +72,13 @@ const DEFI_FALLBACK_PROTOCOL = "Other";
 export function toAccountSections(balances: OverviewBalance[]): AccountSections {
   const spot: SpotRow[] = [];
   const perpRows: OverviewBalance[] = [];
+  // 账户级 detail 聚合:按 balance 顺序收集非空 detail,最后 \n 连接成一个 accountDetail。
+  const detailParts: string[] = [];
   // 保序分组:首次出现的 protocol 顺序即展示顺序。
   const defiByProtocol = new Map<string, DefiRow[]>();
 
   for (const b of balances) {
+    if (b.detail) detailParts.push(b.detail);
     const vk = viewKind(b);
     if (vk === "perp_equity" || vk === "perp_position") {
       perpRows.push(b);
@@ -89,13 +96,13 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
       if (group) group.push(row);
       else defiByProtocol.set(protocol, [row]);
     } else {
-      // spot(含并入的 BTC):统一现货表(带上富化字段 + markdown detail,缺则 undefined)
+      // spot(含并入的 BTC):统一现货表(带上富化字段;detail 已上移到账户级聚合)
       spot.push({
         id: b.id,
         symbol: b.symbol,
         amount: b.amount,
         usdValue: b.usdValue,
-        detail: b.detail,
+        locked: b.locked,
         name: b.name,
         logo: b.logo,
         unitPrice: b.unitPrice,
@@ -106,6 +113,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
 
   const defi: DefiGroup[] = [...defiByProtocol].map(([protocol, rows]) => ({ protocol, rows }));
   const perp = perpRows.length > 0 ? toPerpView(perpRows) : null;
+  const accountDetail = detailParts.length > 0 ? detailParts.join("\n") : null;
 
-  return { spot, defi, perp };
+  return { spot, defi, perp, accountDetail };
 }

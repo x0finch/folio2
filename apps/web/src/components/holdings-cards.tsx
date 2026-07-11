@@ -1,4 +1,5 @@
 import { BouncyAccordion, MarkdownDetail } from "@folio/ui";
+import { Lock } from "lucide-react";
 import { useTranslations } from "use-intl";
 import {
   type DefiGroup,
@@ -12,7 +13,8 @@ import type { PerpView } from "../lib/perp";
 import { TokenAvatar } from "./token-stack";
 
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 holdings-sections 的表格。
-// 每个持仓行下渲染 provider 拼的 markdown detail(有则渲染;BTC 未确认/派生、CEX available/locked)。
+// provider 拼的 markdown detail 改为【账户级】渲染:该账户所有非空 detail 聚合成一个 accountDetail,
+// 在所有分区之前用一个 bouncy-accordion(单 item)展开(BTC 未确认/派生、CEX 锁仓列表)。
 
 // 24h 涨跌:正绿(前景)/ 负红(destructive);无数据 → "—"。仅用 shadcn token。
 function Change24h({ value }: { value?: number }) {
@@ -59,36 +61,29 @@ function RowCard({
 
 function SpotCards({ rows }: { rows: SpotRow[] }) {
   const usd = useDisplayValue();
-  const t = useTranslations("Overview");
   return (
     <div className="flex flex-col gap-2">
       {rows.map((b) => (
-        <div key={b.id} className="flex flex-col gap-1.5">
-          {/* detail 在 balance 之前,用 bouncy-accordion 包成可折叠的独立区域 */}
-          {b.detail ? (
-            <BouncyAccordion
-              items={[
-                {
-                  id: `${b.id}-detail`,
-                  title: t("detailsTitle"),
-                  description: <MarkdownDetail md={b.detail} />,
-                },
-              ]}
-            />
-          ) : null}
-          <RowCard
-            avatar={<TokenAvatar symbol={b.symbol} logo={b.logo} />}
-            title={b.symbol.toUpperCase()}
-            subtitle={
-              <>
-                {formatNumber(b.amount)}
-                {b.unitPrice != null ? ` · ${usd(b.unitPrice)}` : ""}
-              </>
-            }
-            primary={usd(b.usdValue)}
-            secondary={<Change24h value={b.change24h} />}
-          />
-        </div>
+        <RowCard
+          key={b.id}
+          avatar={<TokenAvatar symbol={b.symbol} logo={b.logo} />}
+          title={b.symbol.toUpperCase()}
+          subtitle={
+            <>
+              {formatNumber(b.amount)}
+              {b.unitPrice != null ? ` · ${usd(b.unitPrice)}` : ""}
+              {b.locked != null && b.locked > 0 ? (
+                <>
+                  {" · "}
+                  <Lock className="inline size-3" />
+                  {formatNumber(b.locked)}
+                </>
+              ) : null}
+            </>
+          }
+          primary={usd(b.usdValue)}
+          secondary={<Change24h value={b.change24h} />}
+        />
       ))}
     </div>
   );
@@ -165,7 +160,8 @@ function PerpCards({ view }: { view: PerpView }) {
   );
 }
 
-// 一个账户的全部持仓(卡片列表):现货(含 BTC,detail 走 markdown)/ DeFi / 永续(空 → 提示)。
+// 一个账户的全部持仓(卡片列表):账户级 detail(markdown,顶部单手风琴)+ 现货(含 BTC)/ DeFi /
+// 永续(空 → 提示)。
 export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[] }) {
   const t = useTranslations("Overview");
   if (balances.length === 0) {
@@ -174,6 +170,17 @@ export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[]
   const sections = toAccountSections(balances);
   return (
     <div className="flex flex-col gap-6">
+      {sections.accountDetail ? (
+        <BouncyAccordion
+          items={[
+            {
+              id: "account-detail",
+              title: t("detailsTitle"),
+              description: <MarkdownDetail md={sections.accountDetail} />,
+            },
+          ]}
+        />
+      ) : null}
       {sections.spot.length > 0 && <SpotCards rows={sections.spot} />}
       {sections.defi.length > 0 && <DefiCards groups={sections.defi} />}
       {sections.perp && <PerpCards view={sections.perp} />}

@@ -90,10 +90,22 @@ describe("toAccountSections", () => {
   });
 
   it("handles an empty account", () => {
-    expect(toAccountSections([])).toEqual({ spot: [], defi: [], perp: null });
+    expect(toAccountSections([])).toEqual({ spot: [], defi: [], perp: null, accountDetail: null });
   });
 
-  it("routes the BTC balance's markdown detail to its spot row", () => {
+  it("aggregates every balance's detail into one accountDetail (order preserved, \\n-joined)", () => {
+    const s = toAccountSections([
+      b({ id: "1", symbol: "BTC", kind: "spot", usdValue: 30000, detail: "- BTC: 0.02" }),
+      b({ id: "2", symbol: "ETH", kind: "spot", usdValue: 9000 }), // 无 detail → 跳过
+      b({ id: "3", symbol: "SOL", kind: "spot", usdValue: 100, detail: "- SOL: 1" }),
+    ]);
+    // 按 balance 顺序、仅非空、\n 连接
+    expect(s.accountDetail).toBe("- BTC: 0.02\n- SOL: 1");
+    // detail 不再挂在 spot 行上
+    expect(s.spot.map((r) => r.symbol)).toEqual(["BTC", "ETH", "SOL"]);
+  });
+
+  it("routes the BTC balance's markdown detail into accountDetail", () => {
     const md = "**Unconfirmed:** +0.005 BTC";
     const s = toAccountSections([
       b({
@@ -105,15 +117,27 @@ describe("toAccountSections", () => {
         detail: md,
       }),
     ]);
-    // BTC 进现货表,detail 挂在该行
+    // BTC 进现货表,detail 上移到账户级
     expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
-    expect(s.spot[0].detail).toBe(md);
+    expect(s.accountDetail).toBe(md);
   });
 
-  it("spot row without detail → detail undefined/null", () => {
-    const s = toAccountSections([b({ id: "1", symbol: "BTC", kind: "spot", usdValue: 5000 })]);
-    expect(s.spot).toHaveLength(1);
-    expect(s.spot[0].detail ?? null).toBeNull();
+  it("carries locked through to the spot row", () => {
+    const s = toAccountSections([
+      b({ id: "1", symbol: "BTC", kind: "spot", usdValue: 30000, locked: 0.02 }),
+      b({ id: "2", symbol: "ETH", kind: "spot", usdValue: 9000 }),
+    ]);
+    expect(s.spot.find((r) => r.symbol === "BTC")?.locked).toBe(0.02);
+    expect(s.spot.find((r) => r.symbol === "ETH")?.locked ?? null).toBeNull();
+  });
+
+  it("no balance has detail → accountDetail null", () => {
+    const s = toAccountSections([
+      b({ id: "1", symbol: "BTC", kind: "spot", usdValue: 5000 }),
+      b({ id: "2", symbol: "ETH", kind: "spot", usdValue: 9000 }),
+    ]);
+    expect(s.spot).toHaveLength(2);
+    expect(s.accountDetail).toBeNull();
   });
 
   // —— 并存期:遗留 kind=utxo(旧 BTC 快照)归一到现货表,不 throw ——
