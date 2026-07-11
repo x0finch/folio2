@@ -1,6 +1,7 @@
 import {
   type BalanceProvider,
   type CredField,
+  formatAmount,
   hmacSha256,
   ProviderError,
   parseRetryAfter,
@@ -38,7 +39,8 @@ interface TickerPrice {
 
 // 纯解析:account.balances + 价格表(symbol→price)→ Spot[]。与 IO 分离,golden test。
 // amount = free + locked;跳过 ≤0;usdValue:稳定币≈1,否则 amount × price(`${asset}USDT`),无对→0。
-// CEX 不吐 detail(交易所现货就当普通现货行,不做特殊处理)。
+// 锁仓数量(locked>0):既作结构化字段直接带在行上,又拼一行 markdown detail(`- SYM: N`,只数量、不带
+// USD)—— 账户级聚合后即该交易所全部锁仓币的列表。无锁仓 → 不带 locked / detail。
 export function parseAccountBalances(
   account: BinanceAccount,
   prices: Record<string, number>,
@@ -53,7 +55,15 @@ export function parseAccountBalances(
     if (!(amount > 0)) continue;
     const price = STABLECOINS.has(asset) ? 1 : (prices[`${asset}${QUOTE_ASSET}`] ?? undefined);
     const usdValue = price != null ? amount * price : 0;
-    out.push({ symbol: asset, amount, price, value: usdValue, kind: "spot" });
+    // 仅锁仓 > 0 才带 locked(行上展示)+ detail(锁仓列表一行);无锁仓不带。
+    out.push({
+      symbol: asset,
+      amount,
+      price,
+      value: usdValue,
+      kind: "spot",
+      ...(locked > 0 ? { locked, detail: `- ${asset}: ${formatAmount(locked)}` } : {}),
+    });
   }
   return out;
 }

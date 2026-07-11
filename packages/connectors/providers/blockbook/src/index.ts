@@ -89,7 +89,9 @@ interface ReceiveGuide {
 
 // 未确认 / 派生分布 / 收款指引 → markdown 字符串(仅非空段落)。全空 → undefined(不塞 detail)。
 // 段落:Unconfirmed(仅非零)· Receive addresses(lastUsed + 本地派生 next)· Distribution(仅非零余额)。
-function buildBtcDetail(
+// Distribution 按 chain 拆成 *Receive* / *Change* 两个斜体子标题的子列表(仅该子列表有地址才出子标题),
+// 每行只写 地址 — 余额(不再在行内写 receive/change)。
+export function buildBtcDetail(
   pendingSats: number,
   dist: AddressDist[],
   receive?: ReceiveGuide,
@@ -112,9 +114,14 @@ function buildBtcDetail(
 
   if (dist.length > 0) {
     const lines = ["**Distribution**"];
-    for (const a of dist) {
-      lines.push(`- ${addrLink(a.address)} — ${a.chain} — ${btc(a.balanceSats)} BTC`);
-    }
+    const sub = (heading: string, chain: AddressDist["chain"]) => {
+      const rows = dist.filter((a) => a.chain === chain);
+      if (rows.length === 0) return;
+      lines.push("", `*${heading}*`);
+      for (const a of rows) lines.push(`- ${addrLink(a.address)} — ${btc(a.balanceSats)} BTC`);
+    };
+    sub("Receive", "receive");
+    sub("Change", "change");
     sections.push(lines.join("\n"));
   }
 

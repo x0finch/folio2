@@ -79,9 +79,11 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
     });
     const [b] = await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }));
     const detail = b.detail as string;
-    // detail markdown:分布只含非零(0/0 = RECV0);lastUsed 取最大已用下标 0/1,next 从 0/2 起。
+    // detail markdown:分布只含非零(0/0 = RECV0);仅有 receive → 只出 *Receive* 子列表,无 *Change*。
     expect(detail).toContain("**Distribution**");
-    expect(detail).toContain(`https://mempool.space/address/${RECV0}) — receive — 0.0005 BTC`);
+    expect(detail).toContain("*Receive*");
+    expect(detail).not.toContain("*Change*");
+    expect(detail).toContain(`https://mempool.space/address/${RECV0}) — 0.0005 BTC`);
     expect(detail).toContain("Last used (#1)");
     expect(detail).toContain("Next #2:");
   });

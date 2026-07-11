@@ -23,6 +23,18 @@ describe("parseBalances (golden: fixture in → fixture out)", () => {
   it("maps the recorded balance details to expected-balances", () => {
     expect(parseBalances(balance.data[0].details)).toEqual(expected);
   });
+
+  it("carries locked + a `- CCY: N` detail line only when frozen > 0", () => {
+    const rows = parseBalances(balance.data[0].details);
+    // BTC: frozenBal 0.1 → locked 0.1 + detail line (数量,不带 USD)
+    expect(rows.find((b) => b.symbol === "BTC")?.locked).toBe(0.1);
+    expect(rows.find((b) => b.symbol === "BTC")?.detail).toBe("- BTC: 0.1");
+    // USDT/ETH: frozenBal 0 → locked + detail both omitted
+    expect(rows.find((b) => b.symbol === "USDT")?.locked).toBeUndefined();
+    expect(rows.find((b) => b.symbol === "USDT")?.detail).toBeUndefined();
+    expect(rows.find((b) => b.symbol === "ETH")?.locked).toBeUndefined();
+    expect(rows.find((b) => b.symbol === "ETH")?.detail).toBeUndefined();
+  });
 });
 
 describe("okxProvider.fetchBalances", () => {

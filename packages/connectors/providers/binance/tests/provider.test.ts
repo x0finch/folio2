@@ -26,6 +26,17 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
     // BNB has zero balance → excluded
     expect(balances.find((b) => b.symbol === "BNB")).toBeUndefined();
   });
+
+  it("carries locked + a `- SYM: N` detail line only when locked > 0", () => {
+    // ETH: free 2 + locked 1 → locked 1 on the row + detail line (数量,不带 USD)
+    expect(balances.find((b) => b.symbol === "ETH")?.locked).toBe(1);
+    expect(balances.find((b) => b.symbol === "ETH")?.detail).toBe("- ETH: 1");
+    // BTC/USDT/NOPRICE: no locked → locked + detail both omitted
+    expect(balances.find((b) => b.symbol === "BTC")?.locked).toBeUndefined();
+    expect(balances.find((b) => b.symbol === "BTC")?.detail).toBeUndefined();
+    expect(balances.find((b) => b.symbol === "USDT")?.locked).toBeUndefined();
+    expect(balances.find((b) => b.symbol === "USDT")?.detail).toBeUndefined();
+  });
 });
 
 describe("binanceProvider.fetchBalances", () => {

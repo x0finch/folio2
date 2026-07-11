@@ -29,7 +29,7 @@
       "value": 0,
       "kind": "spot",
       "tokenKey": "chain:bitcoin/native:btc",
-      "detail": "**Receive addresses**\n- Last used (#0): [bc1qcr8te4…306fyu](https://mempool.space/address/bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu)\n- Next #1: [bc1qnjg0jd…erkf9g](https://mempool.space/address/bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g)\n- Next #2: [bc1qp59yck…gvuz8z](https://mempool.space/address/bc1qp59yckz4ae5c4efgw2s5wfyvrz0ala7rgvuz8z)\n\n**Distribution**\n- [bc1qcr8te4…306fyu](https://mempool.space/address/bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu) — receive — 0.0005 BTC\n- [bc1qchange0](https://mempool.space/address/bc1qchange0) — change — 0.0003 BTC"
+      "detail": "**Receive addresses**\n- Last used (#0): [bc1qcr8te4…306fyu](https://mempool.space/address/bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu)\n- Next #1: [bc1qnjg0jd…erkf9g](https://mempool.space/address/bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g)\n- Next #2: [bc1qp59yck…gvuz8z](https://mempool.space/address/bc1qp59yckz4ae5c4efgw2s5wfyvrz0ala7rgvuz8z)\n\n**Distribution**\n\n*Receive*\n- [bc1qcr8te4…306fyu](https://mempool.space/address/bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu) — 0.0005 BTC\n\n*Change*\n- [bc1qchange0](https://mempool.space/address/bc1qchange0) — 0.0003 BTC"
     }
   ]
 }
