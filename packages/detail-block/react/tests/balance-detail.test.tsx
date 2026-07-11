@@ -1,85 +1,74 @@
-import type { DetailBlock, DetailFormat } from "@folio/detail-block-basic";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DetailSection } from "@folio/connectors-basic";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { BalanceDetail } from "../src/balance-detail";
 
 afterEach(cleanup);
 
-// 测试注入:translate 原样回 key(断言 key 出现),format 打上 [fmt]{unit} 标记(断言 format/unit 被传递)。
-const translate = (key: string) => key;
-const format = (value: number | string, fmt?: DetailFormat, unit?: string) =>
-  `${value}${fmt ? `[${fmt}]` : ""}${unit ? `{${unit}}` : ""}`;
+// formatNumber 注入:打标记 <n>,断言数字值被格式化(而非裸 String)。
+const formatNumber = (n: number) => `<${n}>`;
 
-function renderBlocks(blocks: DetailBlock[]) {
-  return render(<BalanceDetail blocks={blocks} translate={translate} format={format} />);
+function renderSections(sections: DetailSection[]) {
+  return render(<BalanceDetail sections={sections} formatNumber={formatNumber} />);
 }
 
 describe("<BalanceDetail>", () => {
-  it("无块 → 渲染 null(现有行为不受影响)", () => {
-    const { container } = render(
-      <BalanceDetail blocks={[]} translate={translate} format={format} />,
-    );
+  it("无 section → 渲染 null", () => {
+    const { container } = render(<BalanceDetail sections={[]} formatNumber={formatNumber} />);
     expect(container.firstChild).toBeNull();
   });
 
-  it("stat:渲染标签(i18n key)+ 按 format 格式化的值 + amount 单位", () => {
-    renderBlocks([
-      { type: "stat", label: "Overview.btcPending", value: 42, format: "amount", unit: "BTC" },
+  it("每 section → 一个手风琴 item(title 作触发器)", () => {
+    renderSections([
+      { title: "Unconfirmed", icon: "warning", content: "Pending funds" },
+      { title: "Locked", content: [{ label: "BTC", value: 1, unit: "BTC" }] },
     ]);
-    expect(screen.getByText("Overview.btcPending")).toBeTruthy();
-    expect(screen.getByText("42[amount]{BTC}")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Unconfirmed/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Locked/ })).toBeTruthy();
   });
 
-  it("keyValue:块标题 + 每项标签/值,数字项带 format、字符串项无", () => {
-    renderBlocks([
+  it("content string → 纯文本;content DetailRow[] → 行列表,数字经 formatNumber + 单位", () => {
+    renderSections([{ title: "Locked", content: [{ label: "ETH", value: 2.5, unit: "ETH" }] }]);
+    expect(screen.getByText("ETH")).toBeTruthy();
+    // 数字值经注入 formatNumber(<2.5>)+ 单位符号。
+    expect(screen.getByText("<2.5> ETH")).toBeTruthy();
+  });
+
+  it("字符串 value 原样呈现(不经 formatNumber)", () => {
+    renderSections([{ title: "Receive", content: [{ label: "Next #0", value: "bc1qexample" }] }]);
+    expect(screen.getByText("bc1qexample")).toBeTruthy();
+  });
+
+  it("行有 href → 包外链(新标签 + noopener)", () => {
+    const { container } = renderSections([
       {
-        type: "keyValue",
-        label: "Cex.balances",
-        items: [
-          { label: "Cex.locked", value: 1.5, format: "usd" },
-          { label: "Cex.note", value: "n/a" },
+        title: "Distribution",
+        content: [
+          { label: "addr", value: 1, unit: "BTC", href: "https://mempool.space/address/x" },
         ],
       },
     ]);
-    expect(screen.getByText("Cex.balances")).toBeTruthy();
-    expect(screen.getByText("1.5[usd]")).toBeTruthy();
-    expect(screen.getByText("n/a")).toBeTruthy();
+    const a = container.querySelector('a[href="https://mempool.space/address/x"]');
+    expect(a).toBeTruthy();
+    expect(a?.getAttribute("target")).toBe("_blank");
+    expect(a?.getAttribute("rel")).toContain("noopener");
   });
 
-  it("addressList:渲染地址(中缩)+ 复制按钮 + qr 二维码", () => {
-    const address = "bc1qexampleaddress0000000000000000abcdef";
-    const { container } = renderBlocks([
-      { type: "addressList", label: "Overview.btcReceive", qr: true, items: [{ address }] },
-    ]);
-    // 复制按钮存在
-    expect(screen.getByRole("button", { name: "Copy address" })).toBeTruthy();
-    // 二维码(qrcode.react 渲染 svg)出现
-    expect(container.querySelector("svg")).toBeTruthy();
+  it("未知 / 缺省 icon → 不崩(退化 info)", () => {
+    expect(() =>
+      renderSections([
+        { title: "NoIcon", content: "text" },
+        // @ts-expect-error 运行时兜底:未知 icon 名退化 info
+        { title: "Weird", icon: "nope", content: "text" },
+      ]),
+    ).not.toThrow();
+    expect(screen.getByRole("button", { name: /NoIcon/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Weird/ })).toBeTruthy();
   });
 
-  it("addressList:复制按钮点击写剪贴板", () => {
-    const writeText = vi.fn();
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-    const address = "bc1qcopytarget0000000000000000000000abcdef";
-    renderBlocks([{ type: "addressList", items: [{ address }] }]);
-    fireEvent.click(screen.getByRole("button", { name: "Copy address" }));
-    expect(writeText).toHaveBeenCalledWith(address);
-    vi.unstubAllGlobals();
-  });
-
-  it("未知块 type 被跳过、不崩;混入合法块仍渲染", () => {
-    const blocks = [
-      { type: "note", text: "future block" },
-      { type: "stat", label: "keep.me", value: 7, format: "usd" },
-    ] as unknown as DetailBlock[];
-    expect(() => renderBlocks(blocks)).not.toThrow();
-    expect(screen.getByText("keep.me")).toBeTruthy();
-    expect(screen.queryByText("future block")).toBeNull();
-  });
-
-  it("全为未知块 → 渲染 null", () => {
-    const blocks = [{ type: "table", rows: [] }] as unknown as DetailBlock[];
-    const { container } = renderBlocks(blocks);
-    expect(container.firstChild).toBeNull();
+  it("缺 formatNumber → 数字 String 化(安全退化)", () => {
+    render(<BalanceDetail sections={[{ title: "S", content: [{ label: "x", value: 7 }] }]} />);
+    const region = screen.getByRole("region", { hidden: true });
+    expect(within(region).getByText("7")).toBeTruthy();
   });
 });

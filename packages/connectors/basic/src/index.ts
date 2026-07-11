@@ -7,4 +7,5 @@ export * from "./balance";
 export * from "./connector";
 export * from "./creds";
 export * from "./crypto";
+export * from "./detail-block";
 export * from "./errors";

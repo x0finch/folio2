@@ -12,10 +12,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/detail-block-basic": "workspace:*",
+    "@folio/connectors-basic": "workspace:*",
     "@folio/ui": "workspace:*",
-    "lucide-react": "^0.545.0",
-    "qrcode.react": "^4.2.0"
+    "lucide-react": "^0.545.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"

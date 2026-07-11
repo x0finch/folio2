@@ -1,52 +1,105 @@
-import type { DetailBlock } from "@folio/detail-block-basic";
+import type { DetailRow, DetailSection } from "@folio/connectors-basic";
+import { BouncyAccordion, type BouncyAccordionItem } from "@folio/ui";
 import { cn } from "@folio/ui/lib/utils";
-import { useMemo } from "react";
-import { DetailContextProvider, type DetailRenderContext } from "./detail-context";
-import { AddressList } from "./primitives/address-list";
-import { KeyValue } from "./primitives/key-value";
-import { Stat } from "./primitives/stat";
+import {
+  CircleAlert,
+  CircleCheck,
+  CircleHelp,
+  Info,
+  type LucideIcon,
+  TriangleAlert,
+} from "lucide-react";
 
-export interface BalanceDetailProps extends DetailRenderContext {
-  blocks?: DetailBlock[];
+// 账户级 detail 渲染器(DetailBlock 重设计):sections → beUI BouncyAccordion,每 section 一个 item。
+// icon 名 → lucide 命名图标(缺省/未知 → info);content:string → 纯文本、DetailRow[] → 行列表;
+// 行有 href 则整行包外链(新标签)。数字值经注入的 formatNumber(locale)格式化;label/title 英文字面。
+// React list key(item + row)一律用 index(detail 是只读展示列表,不重排)。
+
+// 5 个中性状态名 → lucide 命名图标。lucide 已把 AlertTriangle/AlertCircle 改名 TriangleAlert/CircleAlert。
+const ICON_MAP: Record<string, LucideIcon> = {
+  info: Info,
+  success: CircleCheck,
+  warning: TriangleAlert,
+  error: CircleAlert,
+  help: CircleHelp,
+};
+
+export interface BalanceDetailProps {
+  sections?: DetailSection[];
+  // 数字值 locale 格式化(app 注入;通用包不依赖 use-intl / @folio/fx)。缺省 String 化,安全退化。
+  formatNumber?: (n: number) => string;
   className?: string;
 }
 
-// 词汇表 v1 已知块 type(封闭)。未列入者(旧快照 / 将来新块)一律跳过,不崩。
-const KNOWN_BLOCK_TYPES: ReadonlySet<string> = new Set(["stat", "keyValue", "addressList"]);
-
-function isRenderable(block: DetailBlock): boolean {
-  return KNOWN_BLOCK_TYPES.has((block as { type?: unknown }).type as string);
-}
-
-// 单块分派:按 type 选原语。永不判断业务身份(BTC/CEX),只按画法。
-function BlockView({ block }: { block: DetailBlock }) {
-  switch (block.type) {
-    case "stat":
-      return <Stat block={block} />;
-    case "keyValue":
-      return <KeyValue block={block} />;
-    case "addressList":
-      return <AddressList block={block} />;
-    default:
-      return null; // 未知块跳过(穷尽 switch 的运行时兜底)
+function RowLine({ row, formatNumber }: { row: DetailRow; formatNumber: (n: number) => string }) {
+  const valueText =
+    row.value == null
+      ? null
+      : `${typeof row.value === "number" ? formatNumber(row.value) : row.value}${
+          row.unit ? ` ${row.unit}` : ""
+        }`;
+  const body = (
+    <div className="flex items-center justify-between gap-3">
+      <span className="min-w-0 truncate">{row.label}</span>
+      {valueText != null && (
+        <span className="shrink-0 font-medium text-foreground">{valueText}</span>
+      )}
+    </div>
+  );
+  if (row.href) {
+    return (
+      <a
+        href={row.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block font-mono text-xs hover:text-foreground"
+      >
+        {body}
+      </a>
+    );
   }
+  return body;
 }
 
-// 通用详情渲染器:map + switch(type) 分派到原语。app 注入 translate / format(见 DetailRenderContext)。
-// 无块(或全被跳过)→ 渲染 null,现有行为不受影响。
-export function BalanceDetail({ blocks, translate, format, className }: BalanceDetailProps) {
-  const ctx = useMemo<DetailRenderContext>(() => ({ translate, format }), [translate, format]);
-  const visible = (blocks ?? []).filter(isRenderable);
-  if (visible.length === 0) return null;
+function SectionContent({
+  content,
+  formatNumber,
+}: {
+  content: DetailSection["content"];
+  formatNumber: (n: number) => string;
+}) {
+  if (typeof content === "string") return <p>{content}</p>;
   return (
-    <DetailContextProvider value={ctx}>
-      <div className={cn("flex flex-col gap-4", className)}>
-        {visible.map((block, i) => (
-          // 块无稳定 id,index 作 key(detail 是只读展示袋,不重排)。
-          // biome-ignore lint/suspicious/noArrayIndexKey: detail blocks are a static display list
-          <BlockView key={i} block={block} />
-        ))}
-      </div>
-    </DetailContextProvider>
+    <div className="flex flex-col gap-2">
+      {content.map((row, i) => (
+        // 行无稳定 id,index 作 key(detail 是只读展示列表)。
+        // biome-ignore lint/suspicious/noArrayIndexKey: detail rows are a static display list
+        <RowLine key={i} row={row} formatNumber={formatNumber} />
+      ))}
+    </div>
+  );
+}
+
+// 账户级详情渲染:sections → BouncyAccordion items(id=index)。无 section → 渲染 null。
+export function BalanceDetail({ sections, formatNumber, className }: BalanceDetailProps) {
+  const list = sections ?? [];
+  if (list.length === 0) return null;
+  const fmt = formatNumber ?? ((n: number) => String(n));
+  const items: BouncyAccordionItem[] = list.map((section, i) => {
+    const Icon = ICON_MAP[section.icon ?? "info"] ?? ICON_MAP.info;
+    return {
+      // section 无稳定 id,index 作 id(→ 手风琴 React key);detail 只读展示列表,不重排。
+      id: String(i),
+      title: section.title,
+      icon: <Icon className="h-4 w-4" />,
+      description: <SectionContent content={section.content} formatNumber={fmt} />,
+    };
+  });
+  return (
+    <BouncyAccordion
+      items={items}
+      className={cn(className)}
+      classNames={{ item: "border border-border", description: "text-foreground" }}
+    />
   );
 }

@@ -1,6 +1,14 @@
 import type { z } from "zod";
 import type { Balance } from "./balance";
 import type { CredField, CredsOf } from "./creds";
+import type { DetailSection } from "./detail-block";
+
+// provider.fetchBalances 的返回:该 connector 窄化后的余额行 + 可选账户级展示明细(DetailSection[])。
+// detail 账户级、仅供展示(前端 <BalanceDetail> 渲染);无 detail 的 provider 返回 { balances }。
+export interface FetchResult<B extends Balance> {
+  readonly balances: B[];
+  readonly detail?: DetailSection[];
+}
 
 // 【Connector 契约】(ADR 0009)。一个 connector = 我们支持的一类账户;一份自包含 manifest 绑定
 // account.creds + balance.schema + providers。Connector ≠ Platform(后者是链∪场馆展示维度)。
@@ -21,7 +29,7 @@ export interface BalanceProvider<
   readonly label: string;
   readonly creds: PC; // 实例化本 provider 要的 key(空 = 开箱即用)
   readonly defaultEnabled?: boolean;
-  fetchBalances(ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>): Promise<B[]>; // 窄化到该 connector 的 B
+  fetchBalances(ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>): Promise<FetchResult<B>>; // 窄化到该 connector 的 B + 账户级 detail
   validateAccount(ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>): Promise<boolean>; // 账户 liveness
   validateCreds?(creds: CredsOf<PC>): Promise<boolean>; // provider 自身 creds liveness
 }
