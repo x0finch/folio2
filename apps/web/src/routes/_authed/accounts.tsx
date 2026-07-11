@@ -35,6 +35,7 @@ export const Route = createFileRoute("/_authed/accounts")({
         totalUsd: ov?.totalUsd ?? 0,
         takenAt: ov?.takenAt ?? null,
         balances: ov?.balances ?? [],
+        detail: ov?.detail ?? [],
         needsCredentials: a.needsCredentials,
         credsSafe: a.credsSafe,
       };

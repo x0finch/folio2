@@ -46,6 +46,8 @@ export const getMyAccountHoldings = createServerFn({ method: "GET" })
           totalUsd: latest?.snapshot.totalUsd ?? 0,
           takenAt: latest?.snapshot.takenAt ?? null,
           balances: enriched.rows,
+          // 账户级展示明细(DetailBlock 重设计):从账户快照 detail 读出(已 safeParse 成 DetailSection[])。
+          detail: latest?.detail ?? [],
           pricesStale: enriched.pricesStale,
         };
       }),

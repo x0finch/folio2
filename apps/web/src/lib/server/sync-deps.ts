@@ -91,10 +91,13 @@ async function fetchViaConnector(
     creds: providerCreds,
   };
   // provider 抛的 @folio/connectors-basic ProviderError 直接向上传播 —— sync 的 withRetry 直接 instanceof 该类。
-  const rows = (await provider.fetchBalances(ctx)) as unknown as Balance[];
+  // provider.fetchBalances 返回 { balances, detail? }(账户级 detail,DetailBlock 重设计):detail 透传给
+  // sync → writeSnapshot 落账户快照层。
+  const result = await provider.fetchBalances(ctx);
+  const rows = result.balances as unknown as Balance[];
   const totalUsd = rows.reduce((s, b) => s + b.value, 0);
   await tokens.noteProviderAssets(toProviderAssets(rows)); // 结构兼容:connectors Balance 同形
-  return { status: "ok", balances: rows, totalUsd };
+  return { status: "ok", balances: rows, totalUsd, detail: result.detail };
 }
 
 // 装配编排器的注入式依赖。真正的 DI 缝是这里返回的 SyncDeps(syncUser 只认注入的 deps);

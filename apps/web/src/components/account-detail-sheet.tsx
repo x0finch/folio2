@@ -1,4 +1,5 @@
 import type { ConnectorId } from "@folio/connectors";
+import type { DetailSection } from "@folio/connectors-basic";
 import { Button, Drawer, Input, StatefulButton, toast } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
@@ -23,6 +24,7 @@ export interface AccountRow {
   totalUsd: number;
   takenAt: number | null;
   balances: OverviewBalance[];
+  detail: DetailSection[]; // 账户级 provider 展示明细(DetailBlock 重设计)
   needsCredentials: boolean;
   credsSafe: Record<string, string>;
 }
@@ -230,9 +232,9 @@ function DetailBody({
         </div>
       )}
 
-      {/* 持仓(卡片列表) */}
+      {/* 持仓(卡片列表)+ 账户级 provider 展示明细 */}
       <div className="mt-6">
-        <AccountHoldingsCards balances={account.balances} />
+        <AccountHoldingsCards balances={account.balances} detail={account.detail} />
       </div>
 
       {/* manual 活动 */}

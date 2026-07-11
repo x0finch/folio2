@@ -20,7 +20,6 @@ describe("toAccountSections", () => {
     expect(s.spot.map((r) => r.symbol)).toEqual(["ETH", "CASH"]);
     expect(s.defi).toEqual([]);
     expect(s.perp).toBeNull();
-    expect(s.utxo).toBeNull();
   });
 
   it("groups defi rows by protocol (preserving first-seen order, with fallback)", () => {
@@ -90,33 +89,17 @@ describe("toAccountSections", () => {
     expect(s.spot).toEqual([]);
   });
 
-  it("aggregates provider detail blocks across balances (empty when none)", () => {
-    expect(toAccountSections([b({ id: "1", symbol: "ETH" })]).detail).toEqual([]);
-    const s = toAccountSections([
-      b({
-        id: "1",
-        symbol: "BTC",
-        detail: [
-          { type: "stat", label: "Overview.btcPending", value: 42, format: "amount", unit: "BTC" },
-        ],
-      }),
-      b({ id: "2", symbol: "ETH" }),
-    ]);
-    expect(s.detail).toHaveLength(1);
-    expect(s.detail[0]).toMatchObject({ type: "stat", value: 42 });
-  });
-
   it("handles an empty account", () => {
     expect(toAccountSections([])).toEqual({
       spot: [],
       defi: [],
       perp: null,
-      utxo: null,
-      detail: [],
     });
   });
 
-  it("extracts Bitcoin meta (pending + xpub distribution/receive) from the BTC balance", () => {
+  // BTC(utxo/spot 口径)仍进现货表;展示明细(未确认/派生/收款)已提到账户级 detail(DetailBlock 重设计),
+  // 不再由 toAccountSections 从 per-balance meta 抽出。
+  it("BTC 行进现货表(spot 口径)", () => {
     const s = toAccountSections([
       b({
         id: "1",
@@ -124,49 +107,13 @@ describe("toAccountSections", () => {
         kind: "spot",
         usdValue: 5000,
         tokenKey: "chain:bitcoin/native:btc",
-        metaJson: JSON.stringify({
-          pendingSats: 500000,
-          addresses: [
-            {
-              address: "bc1qrecv",
-              path: "m/84'/0'/0'/0/0",
-              chain: "receive",
-              balanceSats: 50000,
-              pendingSats: 0,
-            },
-          ],
-          receive: {
-            lastUsed: { index: 0, address: "bc1qrecv" },
-            next: [{ index: 1, address: "bc1qnext" }],
-          },
-        }),
+        metaJson: JSON.stringify({ pendingSats: 500000 }),
       }),
     ]);
-    // BTC 仍进现货表
     expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
-    // 明细抽出
-    expect(s.utxo?.pendingSats).toBe(500000);
-    expect(s.utxo?.addresses?.[0].address).toBe("bc1qrecv");
-    expect(s.utxo?.receive?.next[0]).toEqual({ index: 1, address: "bc1qnext" });
   });
 
-  it("no Bitcoin detail when meta is empty (address mode, zero pending)", () => {
-    const s = toAccountSections([
-      b({
-        id: "1",
-        symbol: "BTC",
-        kind: "spot",
-        usdValue: 5000,
-        tokenKey: "chain:bitcoin/native:btc",
-        metaJson: JSON.stringify({ pendingSats: 0 }),
-      }),
-    ]);
-    expect(s.utxo).toBeNull();
-    expect(s.spot).toHaveLength(1);
-  });
-
-  // —— 迁移后的新 5-kind(并存期一并支持) ——
-  it("新 kind=utxo:进现货表 + 抽出明细", () => {
+  it("BTC 行进现货表(utxo 口径)", () => {
     const s = toAccountSections([
       b({
         id: "1",
@@ -178,7 +125,6 @@ describe("toAccountSections", () => {
       }),
     ]);
     expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
-    expect(s.utxo?.pendingSats).toBe(12345);
   });
 
   it("新 kind=perp_equity/perp_position:走 perp 视图", () => {

@@ -1,27 +1,19 @@
-import type { UtxoMeta } from "@folio/connectors-basic";
+import type { DetailSection } from "@folio/connectors-basic";
 import { BalanceDetail } from "@folio/detail-block";
-import type { DetailFormat } from "@folio/detail-block-basic";
-import { toast } from "@folio/ui";
-import { useFormatter, useLocale, useTranslations } from "use-intl";
+import { useLocale, useTranslations } from "use-intl";
 import {
   type DefiGroup,
   type OverviewBalance,
   type SpotRow,
   toAccountSections,
 } from "../lib/account-view";
-import { SATS_PER_BTC } from "../lib/bitcoin-scripts";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import type { PerpView } from "../lib/perp";
 import { TokenAvatar } from "./token-stack";
 
-// 逐地址分布/未确认额是核对用的精确值 → 全精度(8 位),不走总览的 ≤2 位紧凑style。
-const btc = (sats: number): string =>
-  formatNumber(sats / SATS_PER_BTC, { compact: false, maxFractionDigits: 8 });
-// 地址中缩:首 10 + 尾 6,便于核对又不占宽。
-const shortAddr = (a: string): string => (a.length > 20 ? `${a.slice(0, 10)}…${a.slice(-6)}` : a);
-
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 holdings-sections 的表格。
+// provider 专属展示明细走【账户级】<BalanceDetail sections>(DetailBlock 重设计),顶部渲染。
 
 // 24h 涨跌:正绿(前景)/ 负红(destructive);无数据 → "—"。仅用 shadcn token。
 function Change24h({ value }: { value?: number }) {
@@ -160,133 +152,34 @@ function PerpCards({ view }: { view: PerpView }) {
   );
 }
 
-// 可点击复制的地址(点击 → 写剪贴板 + toast)。
-function CopyableAddress({ address }: { address: string }) {
-  const t = useTranslations("Overview");
-  return (
-    <button
-      type="button"
-      className="truncate font-mono text-xs text-muted-foreground hover:text-foreground"
-      title={address}
-      onClick={() => {
-        navigator.clipboard?.writeText(address);
-        toast.success(t("addressCopied"));
-      }}
-    >
-      {shortAddr(address)}
-    </button>
-  );
-}
-
-// Bitcoin 明细:未确认额 + xpub 派生分布(仅非零)+ 收款地址指引(上次用过 / 下次可用)+ 截断提示。
-function BitcoinCards({ meta }: { meta: UtxoMeta }) {
-  const t = useTranslations("Overview");
-  const chainLabel = (c: "receive" | "change") =>
-    c === "receive" ? t("btcReceiveChain") : t("btcChangeChain");
-  return (
-    <div className="flex flex-col gap-4">
-      {meta.pendingSats !== 0 && (
-        <p className="text-xs text-muted-foreground">
-          {t("btcPending")}: {meta.pendingSats > 0 ? "+" : ""}
-          {btc(meta.pendingSats)} BTC
-        </p>
-      )}
-
-      {meta.receive && (meta.receive.lastUsed || meta.receive.next.length > 0) && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{t("btcReceive")}</p>
-          {meta.receive.lastUsed && (
-            <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-              <span className="text-xs text-muted-foreground">{t("btcLastUsed")}</span>
-              <CopyableAddress address={meta.receive.lastUsed.address} />
-            </div>
-          )}
-          {meta.receive.next.map((n) => (
-            <div
-              key={n.address}
-              className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
-            >
-              <span className="text-xs text-muted-foreground">
-                {t("btcNext")} #{n.index}
-              </span>
-              <CopyableAddress address={n.address} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {meta.addresses && meta.addresses.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{t("btcDistribution")}</p>
-          {meta.addresses.map((a) => (
-            <RowCard
-              key={a.address}
-              title={<CopyableAddress address={a.address} />}
-              subtitle={<span className="capitalize">{chainLabel(a.chain)}</span>}
-              primary={`${btc(a.balanceSats)} BTC`}
-              secondary={
-                a.pendingSats !== 0 ? (
-                  <span className="text-xs text-muted-foreground">
-                    {t("btcPending")} {a.pendingSats > 0 ? "+" : ""}
-                    {btc(a.pendingSats)}
-                  </span>
-                ) : undefined
-              }
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// <BalanceDetail> 的注入接线:把 app 的 i18n(use-intl)与货币/数字格式化(显示币种/locale 感知)
-// 注入到通用渲染器 —— 通用包不直接依赖 use-intl / @folio/fx(ADR 0010:格式化前端做、跟随显示币种/locale)。
-function useDetailRenderProps() {
-  const t = useTranslations();
+// 账户级 <BalanceDetail> 的注入接线:数字值 locale 格式化(全精度,核对用);label/title 英文字面无需 translate。
+// 通用渲染包不直接依赖 use-intl / @folio/fx(格式化前端做、跟随 locale)。
+function useDetailFormatNumber(): (n: number) => string {
   const locale = useLocale();
-  const fmt = useFormatter();
-  const usd = useDisplayValue();
-  // i18n key → 文案(blocks 携运行时 key,故对根 translator 做一次宽松转型)。
-  const translate = (key: string) => t(key as never);
-  const format = (value: number | string, f?: DetailFormat, unit?: string): string => {
-    switch (f) {
-      case "usd":
-        return usd(Number(value));
-      case "amount": {
-        // 代币原生金额:全精度(核对用)+ 数据带来的单位符号;不做币种换算(单位是数据,词汇表对链无知)。
-        const n = formatNumber(Number(value), { compact: false, maxFractionDigits: 8, locale });
-        return unit ? `${n} ${unit}` : n;
-      }
-      case "percent":
-        return `${Number(value).toFixed(2)}%`;
-      case "date":
-        return fmt.dateTime(new Date(Number(value)), { dateStyle: "medium" });
-      case "address":
-        return shortAddr(String(value));
-      default:
-        return typeof value === "number" ? formatNumber(value, { locale }) : String(value);
-    }
-  };
-  return { translate, format };
+  return (n: number) => formatNumber(n, { compact: false, maxFractionDigits: 8, locale });
 }
 
-// 一个账户的全部持仓(卡片列表):现货 / DeFi / 永续 / Bitcoin 明细 + provider detail 块(空 → 提示)。
-export function AccountHoldingsCards({ balances }: { balances: OverviewBalance[] }) {
+// 一个账户的全部持仓(卡片列表):账户级 provider detail(顶部,DetailBlock 重设计)+ 现货 / DeFi / 永续。
+export function AccountHoldingsCards({
+  balances,
+  detail,
+}: {
+  balances: OverviewBalance[];
+  detail?: DetailSection[];
+}) {
   const t = useTranslations("Overview");
-  const detailProps = useDetailRenderProps();
+  const formatDetailNumber = useDetailFormatNumber();
   if (balances.length === 0) {
     return <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>;
   }
   const sections = toAccountSections(balances);
   return (
     <div className="flex flex-col gap-6">
+      {/* 账户级 provider 展示明细(BTC 未确认/派生分布/收款、CEX 锁仓/冻结…)。无 detail → 渲染 null。 */}
+      <BalanceDetail sections={detail} formatNumber={formatDetailNumber} />
       {sections.spot.length > 0 && <SpotCards rows={sections.spot} />}
-      {sections.utxo && <BitcoinCards meta={sections.utxo} />}
       {sections.defi.length > 0 && <DefiCards groups={sections.defi} />}
       {sections.perp && <PerpCards view={sections.perp} />}
-      {/* provider detail 块(ADR 0010):此片无 provider 吐块 → 渲染 null,现有行为不受影响。 */}
-      <BalanceDetail blocks={sections.detail} {...detailProps} />
     </div>
   );
 }
