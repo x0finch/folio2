@@ -1,18 +1,22 @@
 "use client";
 // beui.dev/components/motion/bouncy-accordion
 
+import { EASE_OUT } from "@folio/ui/lib/ease";
+import { cn } from "@folio/ui/lib/utils";
 import { ChevronDown } from "lucide-react";
-import { motion, type Transition, useReducedMotion } from "motion/react";
 import {
-  type ReactNode,
+  motion,
+  useReducedMotion,
+  type Transition,
+} from "motion/react";
+import {
   useCallback,
   useId,
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
-import { EASE_OUT } from "@folio/ui/lib/ease";
-import { cn } from "@folio/ui/lib/utils";
 
 export type BouncyAccordionItem = {
   id: string;
@@ -61,8 +65,8 @@ const CONTENT_OPEN_TRANSITION: Transition = {
 
 const CONTENT_CLOSE_TRANSITION: Transition = {
   type: "spring",
-  duration: 0.46,
-  bounce: 0.26,
+  duration: 0.4,
+  bounce: 0,
 };
 
 const DESCRIPTION_TRANSITION: Transition = {
@@ -75,6 +79,7 @@ const CHEVRON_TRANSITION: Transition = {
   duration: 0.42,
   bounce: 0.28,
 };
+
 
 function useControllableAccordionValue({
   value,
@@ -224,7 +229,11 @@ function BouncyAccordionRow({
             height: open && item.description ? contentHeight : 0,
           }}
           transition={
-            reduce ? { duration: 0 } : open ? CONTENT_OPEN_TRANSITION : CONTENT_CLOSE_TRANSITION
+            reduce
+              ? { duration: 0 }
+              : open
+                ? CONTENT_OPEN_TRANSITION
+                : CONTENT_CLOSE_TRANSITION
           }
           className={cn("overflow-hidden", classNames?.content)}
         >
@@ -236,7 +245,12 @@ function BouncyAccordionRow({
             transition={reduce ? { duration: 0 } : DESCRIPTION_TRANSITION}
             className="px-5 pb-5"
           >
-            <div className={cn("text-[15px] leading-6 text-muted-foreground", classNames?.description)}>
+            <div
+              className={cn(
+                "text-[15px] leading-6 text-muted-foreground",
+                classNames?.description,
+              )}
+            >
               {item.description}
             </div>
           </motion.div>
