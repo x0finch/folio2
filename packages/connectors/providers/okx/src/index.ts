@@ -28,7 +28,7 @@ interface OkxDetail {
   ccy?: string;
   eq?: string;
   eqUsd?: string;
-  frozenBal?: string; // 冻结(锁仓)数量;仅用于 locked 结构化字段(不恢复任何 markdown detail)
+  frozenBal?: string; // 冻结(锁仓)数量;>0 时拼一行 markdown detail
 }
 interface OkxBalanceResponse {
   code?: string;
@@ -38,8 +38,8 @@ interface OkxBalanceResponse {
 
 // 纯解析:details[] → Spot[]。与 IO 分离,golden test。
 // amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
-// 冻结(frozenBal>0):既作结构化 locked 字段直接带在行上,又拼一行 markdown detail(`- CCY: N`,只数量、
-// 不带 USD)—— 账户级聚合后即该交易所全部冻结币的列表。无冻结 → 不带 locked / detail。
+// 冻结(frozenBal>0):拼一行 markdown detail(`- CCY: N`,只数量、不带 USD)—— 账户级聚合后即该
+// 交易所全部冻结币的列表。无冻结 → 不带 detail。
 export function parseBalances(details: OkxDetail[]): Spot[] {
   const out: Spot[] = [];
   for (const d of details ?? []) {
@@ -48,15 +48,15 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
     const amount = Number(d.eq ?? 0);
     if (!(amount > 0)) continue;
     const price = Number(d.eqUsd ?? 0) / amount;
-    const locked = Number(d.frozenBal ?? 0);
-    // 仅冻结 > 0 才带 locked(行上展示)+ detail(冻结列表一行);无冻结不带。
+    const frozen = Number(d.frozenBal ?? 0);
+    // 仅冻结 > 0 才拼一行 detail(冻结列表一行);无冻结不带。
     out.push({
       symbol: ccy,
       amount,
       price,
       value: Number(d.eqUsd ?? 0),
       kind: "spot",
-      ...(locked > 0 ? { locked, detail: `- ${ccy}: ${formatAmount(locked)}` } : {}),
+      ...(frozen > 0 ? { detail: `- ${ccy}: ${formatAmount(frozen)}` } : {}),
     });
   }
   return out;

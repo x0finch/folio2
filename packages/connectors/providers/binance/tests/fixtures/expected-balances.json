@@ -12,7 +12,6 @@
     "price": 3000,
     "value": 9000,
     "kind": "spot",
-    "locked": 1,
     "detail": "- ETH: 1"
   },
   {

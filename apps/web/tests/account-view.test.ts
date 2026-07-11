@@ -122,15 +122,6 @@ describe("toAccountSections", () => {
     expect(s.accountDetail).toBe(md);
   });
 
-  it("carries locked through to the spot row", () => {
-    const s = toAccountSections([
-      b({ id: "1", symbol: "BTC", kind: "spot", usdValue: 30000, locked: 0.02 }),
-      b({ id: "2", symbol: "ETH", kind: "spot", usdValue: 9000 }),
-    ]);
-    expect(s.spot.find((r) => r.symbol === "BTC")?.locked).toBe(0.02);
-    expect(s.spot.find((r) => r.symbol === "ETH")?.locked ?? null).toBeNull();
-  });
-
   it("no balance has detail → accountDetail null", () => {
     const s = toAccountSections([
       b({ id: "1", symbol: "BTC", kind: "spot", usdValue: 5000 }),

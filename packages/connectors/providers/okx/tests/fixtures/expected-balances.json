@@ -5,7 +5,6 @@
     "price": 60000,
     "value": 30000,
     "kind": "spot",
-    "locked": 0.1,
     "detail": "- BTC: 0.1"
   },
   {

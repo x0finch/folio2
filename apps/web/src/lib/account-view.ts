@@ -20,7 +20,6 @@ export interface OverviewBalance {
   tokenKey?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
   metaJson: string | null;
   detail?: string | null; // provider 拼的 markdown 展示细节(快照持久化;缺则 undefined)
-  locked?: number | null; // 锁仓数量(快照持久化;CEX 现货 locked/frozen,缺则 undefined/null)
   // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。
   name?: string;
   logo?: string;
@@ -33,7 +32,6 @@ export interface SpotRow {
   symbol: string;
   amount: number;
   usdValue: number;
-  locked?: number | null; // 锁仓数量(有则行上直接展示 🔒)
   name?: string;
   logo?: string;
   unitPrice?: number;
@@ -102,7 +100,6 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
         symbol: b.symbol,
         amount: b.amount,
         usdValue: b.usdValue,
-        locked: b.locked,
         name: b.name,
         logo: b.logo,
         unitPrice: b.unitPrice,

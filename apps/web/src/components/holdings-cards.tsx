@@ -1,5 +1,4 @@
 import { BouncyAccordion, MarkdownDetail } from "@folio/ui";
-import { Lock } from "lucide-react";
 import { useTranslations } from "use-intl";
 import {
   type DefiGroup,
@@ -72,13 +71,6 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
             <>
               {formatNumber(b.amount)}
               {b.unitPrice != null ? ` · ${usd(b.unitPrice)}` : ""}
-              {b.locked != null && b.locked > 0 ? (
-                <>
-                  {" · "}
-                  <Lock className="inline size-3" />
-                  {formatNumber(b.locked)}
-                </>
-              ) : null}
             </>
           }
           primary={usd(b.usdValue)}
