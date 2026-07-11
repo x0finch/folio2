@@ -1,6 +1,8 @@
 import {
   type BalanceProvider,
   type CredField,
+  type DetailRow,
+  type DetailSection,
   hmacSha256,
   ProviderError,
   parseRetryAfter,
@@ -61,6 +63,20 @@ export function parseAccountBalances(
   return out;
 }
 
+// 账户级锁仓明细(DetailBlock 重设计):聚齐所有 locked>0 的币 → 一个 `Locked` section,
+// content = 各币 { label:币种, value:锁定数量, unit:币种 }(原币数量口径,不换 USD)。无锁仓 → 不吐。
+export function buildLockedDetail(account: BinanceAccount): DetailSection[] {
+  const rows: DetailRow[] = [];
+  for (const b of account.balances ?? []) {
+    const asset = b.asset;
+    if (!asset) continue;
+    const locked = Number(b.locked ?? 0);
+    if (!(locked > 0)) continue;
+    rows.push({ label: asset, value: locked, unit: asset });
+  }
+  return rows.length > 0 ? [{ title: "Locked", icon: "warning", content: rows }] : [];
+}
+
 async function binanceFetch(path: string, apiKey?: string): Promise<Response> {
   try {
     return await fetch(`${BINANCE_API_BASE}${path}`, {
@@ -109,7 +125,7 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
   // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据,走 account.creds。
   creds: [],
 
-  async fetchBalances(ctx): Promise<Spot[]> {
+  async fetchBalances(ctx): Promise<{ balances: Spot[]; detail?: DetailSection[] }> {
     const { apiKey, secret } = ctx.account.creds;
     const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;
     const acctRes = await signedGet(ACCOUNT_PATH, query, apiKey, secret);
@@ -133,7 +149,11 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
     for (const t of tickers) {
       if (t.symbol) prices[t.symbol] = Number(t.price ?? 0);
     }
-    return parseAccountBalances(account, prices);
+    const detail = buildLockedDetail(account);
+    return {
+      balances: parseAccountBalances(account, prices),
+      detail: detail.length > 0 ? detail : undefined,
+    };
   },
 
   // 校验:签名打 /api/v3/account 确认 key + 读权限(creds 已由 validateCredentials 保证非空)。

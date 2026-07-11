@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { binanceProvider, parseAccountBalances } from "../src";
+import { binanceProvider, buildLockedDetail, parseAccountBalances } from "../src";
 import account from "./fixtures/account.json";
 import expected from "./fixtures/expected-balances.json";
 import prices from "./fixtures/prices.json";
@@ -28,6 +28,18 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
   });
 });
 
+describe("buildLockedDetail (golden: account → 一个 Locked section)", () => {
+  it("聚齐 locked>0 的币(ETH),数量口径 + 单位符号;无锁仓不计", () => {
+    expect(buildLockedDetail(account)).toEqual([
+      { title: "Locked", icon: "warning", content: [{ label: "ETH", value: 1, unit: "ETH" }] },
+    ]);
+  });
+
+  it("全无锁仓 → 空数组(不吐 section)", () => {
+    expect(buildLockedDetail({ balances: [{ asset: "BTC", free: "1", locked: "0" }] })).toEqual([]);
+  });
+});
+
 describe("binanceProvider.fetchBalances", () => {
   it("signs /api/v3/account (X-MBX-APIKEY + signature) + fetches public prices, then parses", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
@@ -43,8 +55,12 @@ describe("binanceProvider.fetchBalances", () => {
       );
     });
 
-    const balances = await binanceProvider.fetchBalances(ctx());
+    const { balances, detail } = await binanceProvider.fetchBalances(ctx());
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "ETH", "USDT", "NOPRICE"]);
+    // 账户级 detail:ETH 有 locked=1 → 一个 Locked section。
+    expect(detail).toEqual([
+      { title: "Locked", icon: "warning", content: [{ label: "ETH", value: 1, unit: "ETH" }] },
+    ]);
 
     const [acctUrl, init] = spy.mock.calls[0];
     expect(String(acctUrl)).toContain("/api/v3/account?");

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { okxProvider, parseBalances } from "../src";
+import { buildFrozenDetail, okxProvider, parseBalances } from "../src";
 import balance from "./fixtures/balance.json";
 import expected from "./fixtures/expected-balances.json";
 
@@ -25,11 +25,27 @@ describe("parseBalances (golden: fixture in → fixture out)", () => {
   });
 });
 
+describe("buildFrozenDetail (golden: details → 一个 Frozen section)", () => {
+  it("聚齐 frozenBal>0 的币(ETH),数量口径 + 单位符号;无冻结不计", () => {
+    expect(buildFrozenDetail(balance.data[0].details)).toEqual([
+      { title: "Frozen", icon: "warning", content: [{ label: "ETH", value: 0.5, unit: "ETH" }] },
+    ]);
+  });
+
+  it("全无冻结 → 空数组(不吐 section)", () => {
+    expect(buildFrozenDetail([{ ccy: "BTC", eq: "1", eqUsd: "1", frozenBal: "0" }])).toEqual([]);
+  });
+});
+
 describe("okxProvider.fetchBalances", () => {
   it("signs with 4 OK-ACCESS headers (base64 SIGN) and parses balances", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(balance));
-    const balances = await okxProvider.fetchBalances(ctx());
+    const { balances, detail } = await okxProvider.fetchBalances(ctx());
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "USDT", "ETH"]);
+    // 账户级 detail:ETH 有 frozenBal=0.5 → 一个 Frozen section。
+    expect(detail).toEqual([
+      { title: "Frozen", icon: "warning", content: [{ label: "ETH", value: 0.5, unit: "ETH" }] },
+    ]);
 
     const [url, init] = spy.mock.calls[0];
     expect(String(url)).toContain("/api/v5/account/balance");

@@ -127,7 +127,10 @@ function ensureOk(res: Response): void {
   throw new ProviderError("UPSTREAM_ERROR", `coinstats upstream error (${res.status})`);
 }
 
-async function fetchCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<Row[]> {
+async function fetchCoinstats(
+  connectionId: string,
+  ctx: CoinstatsCtx,
+): Promise<{ balances: Row[] }> {
   const apiKey = getApiKey(ctx.creds);
   const res = await coinstatsGet(connectionId, ctx.account.creds.address, apiKey);
   ensureOk(res);
@@ -139,7 +142,7 @@ async function fetchCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<
   }
   // ⚠️ fallbackChain = connectionId(behavior-preserving,含 sui 的 "sui-wallet"):
   // 无 chain 的 coin 退化按 connectionId 归链,与旧 @folio/balances 完全一致。
-  return parseBalances(json, connectionId);
+  return { balances: parseBalances(json, connectionId) };
 }
 
 // 低消耗校验:打一次 wallet/balance 探活(地址已由 validateCredentials 保证非空)。任何失败 → false。

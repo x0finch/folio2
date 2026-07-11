@@ -13,6 +13,8 @@ const ZPUB84 =
   "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
 const RECV0 = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
 const RECV1 = "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g";
+const RECV2 = "bc1qp59yckz4ae5c4efgw2s5wfyvrz0ala7rgvuz8z";
+const mempool = (a: string) => `https://mempool.space/address/${a}`;
 
 // 新 FetchContext 形状:account.creds(AC:addressOrXpub + scriptType)+ creds(PC:空)。
 // CredsOf 把两字段都作必填键(scriptType 值可为 undefined),故显式带上 scriptType 键。
@@ -46,12 +48,22 @@ describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () 
     const out = await blockbookProvider.fetchBalances(
       ctx({ addressOrXpub: addressFixture.request.addressOrXpub }),
     );
-    expect(out).toEqual(addressFixture.expected);
+    expect(out.balances).toEqual(addressFixture.expected);
+    // 账户级 detail:未确认 500000 sats → 一个 Unconfirmed section(仅 pending 行)。
+    expect(out.detail).toEqual([
+      {
+        title: "Unconfirmed",
+        icon: "warning",
+        content: [{ label: "Pending", value: 0.005, unit: "BTC" }],
+      },
+    ]);
   });
 
-  it("零余额零未确认 → 空", async () => {
+  it("零余额零未确认 → 空(balances 空、detail 无)", async () => {
     mockBlockbook({ address: { address: ADDR, balance: "0", unconfirmedBalance: "0" } });
-    expect(await blockbookProvider.fetchBalances(ctx())).toEqual([]);
+    const out = await blockbookProvider.fetchBalances(ctx());
+    expect(out.balances).toEqual([]);
+    expect(out.detail).toBeUndefined();
   });
 });
 
@@ -61,7 +73,32 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
     const out = await blockbookProvider.fetchBalances(
       ctx({ addressOrXpub: xpubFixture.request.addressOrXpub }),
     );
-    expect(out).toEqual(xpubFixture.expected);
+    expect(out.balances).toEqual(xpubFixture.expected);
+    // 账户级 detail:无未确认 → 无 Unconfirmed;Receive addresses(lastUsed + 本地派生 next)+
+    // receive/change 派生分布两 section(地址行 value+unit+href)。
+    expect(out.detail).toEqual([
+      {
+        title: "Receive addresses",
+        icon: "info",
+        content: [
+          { label: "Last used #0", value: RECV0, href: mempool(RECV0) },
+          { label: "Next #1", value: RECV1, href: mempool(RECV1) },
+          { label: "Next #2", value: RECV2, href: mempool(RECV2) },
+        ],
+      },
+      {
+        title: "Receive distribution",
+        icon: "info",
+        content: [{ label: RECV0, value: 0.0005, unit: "BTC", href: mempool(RECV0) }],
+      },
+      {
+        title: "Change distribution",
+        icon: "info",
+        content: [
+          { label: "bc1qchange0", value: 0.0003, unit: "BTC", href: mempool("bc1qchange0") },
+        ],
+      },
+    ]);
   });
 
   it("已用但零余额地址(如仅 mempool 收过款)算 lastUsed,但不进分布", async () => {
@@ -77,7 +114,7 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
         ],
       },
     });
-    const [b] = await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }));
+    const [b] = (await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }))).balances;
     const meta = b.meta as {
       addresses: { address: string }[];
       receive: { lastUsed: { index: number }; next: { index: number }[] };

@@ -96,7 +96,7 @@ describe("parsePositions (golden: fixtures in → fixture out)", () => {
 describe("zerion provider.fetchBalances(双 API)", () => {
   it("并行取 positions + chains,输出与 expected-balances 完全一致", async () => {
     const spy = mockZerionApis();
-    const balances = await provider.fetchBalances(ctx());
+    const { balances } = await provider.fetchBalances(ctx());
     expect(balances).toEqual(expectedBalances);
     // 两个端点都请求了,且 Basic auth 一致
     const urls = spy.mock.calls.map((c) => String(c[0]));
