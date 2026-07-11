@@ -238,7 +238,7 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
   label: "Zerion",
   creds: providerCreds,
 
-  async fetchBalances(ctx): Promise<{ balances: Row[] }> {
+  async fetchBalances(ctx): Promise<Row[]> {
     const apiKey = ctx.creds[ZERION_API_KEY];
     // provider key 由 app 从 env 注入(非用户输入)→ 仍需自查。
     if (!apiKey) {
@@ -251,7 +251,7 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
       getPositions(address, apiKey),
       getChainIds(apiKey),
     ]);
-    return { balances: parsePositions(positions, chainIds) };
+    return parsePositions(positions, chainIds);
   },
 
   // 低消耗校验:打轻量 portfolio 端点探活(地址已由 validateCredentials 保证格式)。任何失败 → false。

@@ -42,15 +42,19 @@ function mockBlockbook(opts: { xpub?: unknown; address?: unknown; status?: numbe
 
 afterEach(() => vi.restoreAllMocks());
 
+// per-balance detail(DetailBlock 重设计):BTC 展示明细挂在那笔 BTC balance 的 detail 上。
+// golden 比对时先剥 detail(纯映射),detail 单独断言。
+const stripDetail = (balances: { detail?: unknown }[]) => balances.map(({ detail, ...b }) => b);
+
 describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () => {
   it("录制响应 → 预期 Utxo[](已确认→amount;未确认→meta.pendingSats;value=0;kind=utxo)", async () => {
     mockBlockbook({ address: addressFixture.response });
     const out = await blockbookProvider.fetchBalances(
       ctx({ addressOrXpub: addressFixture.request.addressOrXpub }),
     );
-    expect(out.balances).toEqual(addressFixture.expected);
-    // 账户级 detail:未确认 500000 sats → 一个 Unconfirmed section(仅 pending 行)。
-    expect(out.detail).toEqual([
+    expect(stripDetail(out)).toEqual(addressFixture.expected);
+    // BTC balance.detail:未确认 500000 sats → 一个 Unconfirmed section(仅 pending 行)。
+    expect(out[0]?.detail).toEqual([
       {
         title: "Unconfirmed",
         icon: "warning",
@@ -59,11 +63,10 @@ describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () 
     ]);
   });
 
-  it("零余额零未确认 → 空(balances 空、detail 无)", async () => {
+  it("零余额零未确认 → 空(无 balance、故无 detail)", async () => {
     mockBlockbook({ address: { address: ADDR, balance: "0", unconfirmedBalance: "0" } });
     const out = await blockbookProvider.fetchBalances(ctx());
-    expect(out.balances).toEqual([]);
-    expect(out.detail).toBeUndefined();
+    expect(out).toEqual([]);
   });
 });
 
@@ -73,10 +76,10 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
     const out = await blockbookProvider.fetchBalances(
       ctx({ addressOrXpub: xpubFixture.request.addressOrXpub }),
     );
-    expect(out.balances).toEqual(xpubFixture.expected);
-    // 账户级 detail:无未确认 → 无 Unconfirmed;Receive addresses(lastUsed + 本地派生 next)+
+    expect(stripDetail(out)).toEqual(xpubFixture.expected);
+    // BTC balance.detail:无未确认 → 无 Unconfirmed;Receive addresses(lastUsed + 本地派生 next)+
     // receive/change 派生分布两 section(地址行 value+unit+href)。
-    expect(out.detail).toEqual([
+    expect(out[0]?.detail).toEqual([
       {
         title: "Receive addresses",
         icon: "info",
@@ -114,7 +117,7 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
         ],
       },
     });
-    const [b] = (await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }))).balances;
+    const [b] = await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }));
     const meta = b.meta as {
       addresses: { address: string }[];
       receive: { lastUsed: { index: number }; next: { index: number }[] };

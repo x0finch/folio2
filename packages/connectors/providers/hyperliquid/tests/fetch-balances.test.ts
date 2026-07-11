@@ -61,7 +61,7 @@ describe("hyperliquidProvider.fetchBalances", () => {
     const spy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(JSON.stringify(fixture), { status: 200 }));
-    const { balances } = await provider.fetchBalances(ctx());
+    const balances = await provider.fetchBalances(ctx());
     expect(balances).toHaveLength(3);
     const [url, init] = spy.mock.calls[0];
     expect(String(url)).toContain("/info");

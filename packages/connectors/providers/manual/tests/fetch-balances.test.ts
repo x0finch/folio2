@@ -17,7 +17,7 @@ function ctx(creds: Record<string, unknown>): Ctx {
 // 覆盖:kind:"spot"、value=amount×unitPrice、price=unitPrice;identifier/fixed 在则透出 tokenKey/meta(不在则无该键)。
 describe("manualProvider.fetchBalances (golden: fixtures in → fixture out)", () => {
   it.each(inputs)("$name", async ({ name, creds }) => {
-    const { balances } = await manualProvider.fetchBalances(ctx(creds));
+    const balances = await manualProvider.fetchBalances(ctx(creds));
     expect(balances).toEqual((expected as Record<string, unknown>)[name]);
   });
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DetailSection } from "./detail-block";
 
 // 【Balance —— 类型完备的 5-kind zod 判别联合】(ADR 0009)
 // 判别式 kind = "一套独有 meta + 渲染契约"的扁平判别(非资产/链/来源)。
@@ -17,8 +18,10 @@ export const BalanceBase = z.object({
   tokenKey: z.string().optional(), // 代币寻址标识(CAIP-19 文法;拿不到则空,退化按 symbol)
   name: z.string().optional(), // provider 自带代币元信息(喂参考层 / 备用展示)
   logo: z.string().optional(),
-  // 注:provider 专属【仅供展示】明细已从 per-balance 提到【账户级】(DetailBlock 重设计):
-  // provider.fetchBalances 返回 { balances, detail? },detail 落账户快照层、前端 <BalanceDetail> 渲染。
+  // provider 专属【仅供展示】明细,挂在【这笔持仓】上(DetailBlock 重设计,per-balance):
+  // BTC → 未确认/收款/派生分布;CEX → 该币的锁仓/冻结。落 snapshot_balances.detail(JSON),
+  // 前端把每笔带 detail 的持仓做成一个手风琴 item(item.icon = 币 logo)。无共享逻辑读它 —— 纯展示。
+  detail: z.array(DetailSection).optional(),
 });
 
 // —— 各 kind 的 meta 契约(随 kind 精确) ——

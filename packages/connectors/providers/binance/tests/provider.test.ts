@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { binanceProvider, buildLockedDetail, parseAccountBalances } from "../src";
+import { binanceProvider, parseAccountBalances } from "../src";
 import account from "./fixtures/account.json";
 import expected from "./fixtures/expected-balances.json";
 import prices from "./fixtures/prices.json";
@@ -22,21 +22,19 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
   const balances = parseAccountBalances(account, prices);
 
   it("maps the recorded account + price map to expected-balances", () => {
+    // per-balance detail(DetailBlock 重设计):ETH locked=1 → 它自己那笔挂 Locked section;其余无 detail。
     expect(balances).toEqual(expected);
     // BNB has zero balance → excluded
     expect(balances.find((b) => b.symbol === "BNB")).toBeUndefined();
   });
-});
 
-describe("buildLockedDetail (golden: account → 一个 Locked section)", () => {
-  it("聚齐 locked>0 的币(ETH),数量口径 + 单位符号;无锁仓不计", () => {
-    expect(buildLockedDetail(account)).toEqual([
+  it("锁仓的币(ETH)自带 Locked detail(数量口径 + 单位);无锁仓的币(BTC/USDT)无 detail", () => {
+    const eth = balances.find((b) => b.symbol === "ETH");
+    expect(eth?.detail).toEqual([
       { title: "Locked", icon: "warning", content: [{ label: "ETH", value: 1, unit: "ETH" }] },
     ]);
-  });
-
-  it("全无锁仓 → 空数组(不吐 section)", () => {
-    expect(buildLockedDetail({ balances: [{ asset: "BTC", free: "1", locked: "0" }] })).toEqual([]);
+    expect(balances.find((b) => b.symbol === "BTC")?.detail).toBeUndefined();
+    expect(balances.find((b) => b.symbol === "USDT")?.detail).toBeUndefined();
   });
 });
 
@@ -55,10 +53,10 @@ describe("binanceProvider.fetchBalances", () => {
       );
     });
 
-    const { balances, detail } = await binanceProvider.fetchBalances(ctx());
+    const balances = await binanceProvider.fetchBalances(ctx());
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "ETH", "USDT", "NOPRICE"]);
-    // 账户级 detail:ETH 有 locked=1 → 一个 Locked section。
-    expect(detail).toEqual([
+    // per-balance detail:ETH 有 locked=1 → 它自己那笔挂 Locked section。
+    expect(balances.find((b) => b.symbol === "ETH")?.detail).toEqual([
       { title: "Locked", icon: "warning", content: [{ label: "ETH", value: 1, unit: "ETH" }] },
     ]);
 

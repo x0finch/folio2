@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-// 【DetailSection —— provider 专属、账户级、仅供展示的「分组列表」】(DetailBlock 重设计)
-// detail 不再挂 Balance,而是账户级:provider.fetchBalances 返回 { balances, detail? };
-// 落账户快照层(snapshots.detail 列),前端 <BalanceDetail sections> 用 bouncy-accordion 渲染,
-// 每 section = 一个手风琴 item。无共享逻辑读它 —— 纯展示。
+// 【DetailSection —— provider 专属、per-balance、仅供展示的「分组列表」】(DetailBlock 重设计)
+// detail 挂在【这笔持仓】上(Balance.detail,见 balance.ts):落 snapshot_balances.detail 列;
+// 前端把每笔带 detail 的持仓做成一个手风琴 item(item.icon = 币 logo),item 展开内容 = 该持仓的
+// DetailSection[](每段:状态 icon + 标题 + content 行/文本)。无共享逻辑读它 —— 纯展示。
 // 一种 row、一种 section:无 `type` 判别、无 `format` 枚举。icon 为 5 个中性状态名 → lucide 命名图标。
 // label/title 为英文字面串(结构保留,将来可 i18n);value 结构化(数即数),locale 格式化由前端注入的
 // formatNumber 做。schema 是事实源,类型一律 z.infer(勿反向注解)。
@@ -20,7 +20,7 @@ export const DetailRow = z.object({
   href: z.string().optional(),
 });
 
-// 一个分组 = 手风琴的一个 item。title = item 标题;icon 中性状态名;
+// 一个分组 = 持仓 detail 里的一段。title = 段标题;icon 中性状态名(段首状态图标);
 // content 为纯文本段(string)或行列表(DetailRow[])。裸联合,接受。
 export const DetailSection = z.object({
   title: z.string(),

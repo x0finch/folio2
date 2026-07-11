@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildFrozenDetail, okxProvider, parseBalances } from "../src";
+import { okxProvider, parseBalances } from "../src";
 import balance from "./fixtures/balance.json";
 import expected from "./fixtures/expected-balances.json";
 
@@ -21,29 +21,27 @@ afterEach(() => vi.restoreAllMocks());
 // 跳过零/空(DUST)。JSON 无 undefined → expected 省略未定义字段(toEqual 视缺键==undefined)。
 describe("parseBalances (golden: fixture in → fixture out)", () => {
   it("maps the recorded balance details to expected-balances", () => {
+    // per-balance detail(DetailBlock 重设计):ETH frozenBal=0.5 → 它自己那笔挂 Frozen section;其余无 detail。
     expect(parseBalances(balance.data[0].details)).toEqual(expected);
   });
-});
 
-describe("buildFrozenDetail (golden: details → 一个 Frozen section)", () => {
-  it("聚齐 frozenBal>0 的币(ETH),数量口径 + 单位符号;无冻结不计", () => {
-    expect(buildFrozenDetail(balance.data[0].details)).toEqual([
+  it("冻结的币(ETH)自带 Frozen detail;无冻结的币(BTC/USDT)无 detail", () => {
+    const rows = parseBalances(balance.data[0].details);
+    expect(rows.find((b) => b.symbol === "ETH")?.detail).toEqual([
       { title: "Frozen", icon: "warning", content: [{ label: "ETH", value: 0.5, unit: "ETH" }] },
     ]);
-  });
-
-  it("全无冻结 → 空数组(不吐 section)", () => {
-    expect(buildFrozenDetail([{ ccy: "BTC", eq: "1", eqUsd: "1", frozenBal: "0" }])).toEqual([]);
+    expect(rows.find((b) => b.symbol === "BTC")?.detail).toBeUndefined();
+    expect(rows.find((b) => b.symbol === "USDT")?.detail).toBeUndefined();
   });
 });
 
 describe("okxProvider.fetchBalances", () => {
   it("signs with 4 OK-ACCESS headers (base64 SIGN) and parses balances", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(balance));
-    const { balances, detail } = await okxProvider.fetchBalances(ctx());
+    const balances = await okxProvider.fetchBalances(ctx());
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "USDT", "ETH"]);
-    // 账户级 detail:ETH 有 frozenBal=0.5 → 一个 Frozen section。
-    expect(detail).toEqual([
+    // per-balance detail:ETH 有 frozenBal=0.5 → 它自己那笔挂 Frozen section。
+    expect(balances.find((b) => b.symbol === "ETH")?.detail).toEqual([
       { title: "Frozen", icon: "warning", content: [{ label: "ETH", value: 0.5, unit: "ETH" }] },
     ]);
 

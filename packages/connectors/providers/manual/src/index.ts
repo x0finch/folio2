@@ -30,24 +30,22 @@ export const manualProvider: BalanceProvider<Spot, typeof manualAccountCreds> = 
   label: "Manual",
   creds: [],
 
-  async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
+  async fetchBalances(ctx): Promise<Spot[]> {
     const { symbol, amount, unitPrice, identifier, fixed } = ctx.account.creds;
-    return {
-      balances: [
-        {
-          symbol,
-          amount,
-          price: unitPrice,
-          value: amount * unitPrice,
-          kind: "spot",
-          // 用户选定的 CGK id = 厂商寻址身份 → tokenKey(coingecko:<id>),不再塞 meta.identifier;
-          // 未选币则无标识,解析时按 symbol 归一(同 CEX)。
-          ...(identifier ? { tokenKey: buildTokenKey({ cgkId: identifier }) } : {}),
-          // meta 只留【行为标志】:fixed(锁定固定值 → sync 期跳过市价重估)。身份不进 meta。
-          ...(fixed ? { meta: { fixed: true } } : {}),
-        },
-      ],
-    };
+    return [
+      {
+        symbol,
+        amount,
+        price: unitPrice,
+        value: amount * unitPrice,
+        kind: "spot",
+        // 用户选定的 CGK id = 厂商寻址身份 → tokenKey(coingecko:<id>),不再塞 meta.identifier;
+        // 未选币则无标识,解析时按 symbol 归一(同 CEX)。
+        ...(identifier ? { tokenKey: buildTokenKey({ cgkId: identifier }) } : {}),
+        // meta 只留【行为标志】:fixed(锁定固定值 → sync 期跳过市价重估)。身份不进 meta。
+        ...(fixed ? { meta: { fixed: true } } : {}),
+      },
+    ];
   },
 
   // 无外部源;creds 已由创建流/同步的 validateCredentials(account.creds) 校验过。

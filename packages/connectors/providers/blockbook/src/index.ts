@@ -114,7 +114,8 @@ function buildXpubMeta(
   return { addresses, receive: { lastUsed: lastExternal, next } };
 }
 
-// 账户级 BTC 展示明细(DetailBlock 重设计):从同一份取数造 DetailSection[](仅供展示)。
+// BTC 持仓展示明细(DetailBlock 重设计,per-balance):从同一份取数造 DetailSection[](仅供展示),
+// 挂到那笔 BTC balance 的 detail 上。
 //  · Unconfirmed:账户净未确认额一行(仅非零;icon warning)。
 //  · Receive addresses:收款指引(最近用过 + 下一批未使用,地址行 + mempool 外链)。
 //  · Receive/Change distribution:非零派生地址按链拆两 section(地址行 value+unit+href)。
@@ -191,18 +192,23 @@ function toProviderError(err: unknown): ProviderError {
   return new ProviderError("UPSTREAM_ERROR", "bitcoin provider failed", { cause: err });
 }
 
+// 把 BTC 展示明细挂到那笔 BTC balance 上(仅当有 balance 且有段);其余 provider 的 balance 无 detail。
+function attachDetail(balances: Utxo[], detail: DetailSection[]): Utxo[] {
+  if (balances[0] && detail.length > 0) balances[0].detail = detail;
+  return balances;
+}
+
 async function fetchXpub(
   client: BlockbookClient,
   ext: string,
   scriptType: string | undefined,
-): Promise<{ balances: Utxo[]; detail?: DetailSection[] }> {
+): Promise<Utxo[]> {
   const script = effectiveScript(ext, scriptType);
   const res = await client.getXpub(blockbookXpubParam(ext, script)); // details=tokenBalances&tokens=used
   const pendingSats = toSats(res.unconfirmedBalance);
   const { addresses, receive } = buildXpubMeta(ext, script, res.tokens ?? []);
   const balances = toBtcBalances(toSats(res.balance), pendingSats, { addresses, receive });
-  const detail = buildBtcDetail(pendingSats, { addresses, receive });
-  return { balances, detail: detail.length > 0 ? detail : undefined };
+  return attachDetail(balances, buildBtcDetail(pendingSats, { addresses, receive }));
 }
 
 // —— 账户级 creds(AC):BTC 地址或扩展公钥,public(明文落库、可导出重建)——
@@ -238,7 +244,7 @@ export const blockbookProvider: BalanceProvider<
   label: "Blockbook",
   creds: providerCreds,
 
-  async fetchBalances(ctx): Promise<{ balances: Utxo[]; detail?: DetailSection[] }> {
+  async fetchBalances(ctx): Promise<Utxo[]> {
     const id = ctx.account.creds.addressOrXpub;
     const client = createBlockbookClient();
     try {
@@ -246,8 +252,7 @@ export const blockbookProvider: BalanceProvider<
       const res = await client.getAddress(id);
       const pendingSats = toSats(res.unconfirmedBalance);
       const balances = toBtcBalances(toSats(res.balance), pendingSats);
-      const detail = buildBtcDetail(pendingSats);
-      return { balances, detail: detail.length > 0 ? detail : undefined };
+      return attachDetail(balances, buildBtcDetail(pendingSats));
     } catch (err) {
       throw toProviderError(err);
     }

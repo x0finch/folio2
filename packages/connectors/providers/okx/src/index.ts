@@ -1,8 +1,6 @@
 import {
   type BalanceProvider,
   type CredField,
-  type DetailRow,
-  type DetailSection,
   hmacSha256,
   ProviderError,
   parseRetryAfter,
@@ -39,6 +37,8 @@ interface OkxBalanceResponse {
 
 // 纯解析:details[] → Spot[]。与 IO 分离,golden test。
 // amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
+// 冻结明细(DetailBlock 重设计,per-balance):frozenBal>0 的币,在【它自己那笔 balance】上挂一个
+// `Frozen` section(1 行 { label:币种, value:冻结数量, unit:币种 },原币口径)。无冻结 → 无 detail。
 export function parseBalances(details: OkxDetail[]): Spot[] {
   const out: Spot[] = [];
   for (const d of details ?? []) {
@@ -46,29 +46,22 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
     if (!ccy) continue;
     const amount = Number(d.eq ?? 0);
     if (!(amount > 0)) continue;
-    out.push({
+    const frozen = Number(d.frozenBal ?? 0);
+    const row: Spot = {
       symbol: ccy,
       amount,
-      price: amount > 0 ? Number(d.eqUsd ?? 0) / amount : undefined,
+      price: Number(d.eqUsd ?? 0) / amount,
       value: Number(d.eqUsd ?? 0),
       kind: "spot",
-    });
+    };
+    if (frozen > 0) {
+      row.detail = [
+        { title: "Frozen", icon: "warning", content: [{ label: ccy, value: frozen, unit: ccy }] },
+      ];
+    }
+    out.push(row);
   }
   return out;
-}
-
-// 账户级冻结明细(DetailBlock 重设计):聚齐所有 frozenBal>0 的币 → 一个 `Frozen` section,
-// content = 各币 { label:币种, value:冻结数量, unit:币种 }(原币数量口径)。无冻结 → 不吐。
-export function buildFrozenDetail(details: OkxDetail[]): DetailSection[] {
-  const rows: DetailRow[] = [];
-  for (const d of details ?? []) {
-    const ccy = d.ccy;
-    if (!ccy) continue;
-    const frozen = Number(d.frozenBal ?? 0);
-    if (!(frozen > 0)) continue;
-    rows.push({ label: ccy, value: frozen, unit: ccy });
-  }
-  return rows.length > 0 ? [{ title: "Frozen", icon: "warning", content: rows }] : [];
 }
 
 // 签名 GET:prehash = timestamp + 'GET' + requestPath;SIGN = base64(HMAC-SHA256)。
@@ -141,14 +134,12 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
   // 无全局 provider key —— 账户自己的 apiKey/secret/passphrase 即凭据,走 account.creds。
   creds: [],
 
-  async fetchBalances(ctx): Promise<{ balances: Spot[]; detail?: DetailSection[] }> {
+  async fetchBalances(ctx): Promise<Spot[]> {
     const res = await okxGet(BALANCE_PATH, ctx.account.creds);
     ensureHttpOk(res);
     const body = await readBody(res);
     assertCodeOk(body);
-    const details = body.data?.[0]?.details ?? [];
-    const detail = buildFrozenDetail(details);
-    return { balances: parseBalances(details), detail: detail.length > 0 ? detail : undefined };
+    return parseBalances(body.data?.[0]?.details ?? []);
   },
 
   // 校验:签名打 balance,HTTP ok 且 code="0" 即 true(creds 已保证三项非空)。任何失败 → false。

@@ -144,7 +144,7 @@ export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccount
   // 只读地址即查,无全局/provider key/签名 → PC 空。
   creds: [],
 
-  async fetchBalances(ctx): Promise<{ balances: Row[] }> {
+  async fetchBalances(ctx): Promise<Row[]> {
     const res = await infoPost(ctx.account.creds.address);
     ensureOk(res);
     let json: ClearinghouseState;
@@ -153,7 +153,7 @@ export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccount
     } catch (cause) {
       throw new ProviderError("PARSE_ERROR", "hyperliquid returned invalid JSON", { cause });
     }
-    return { balances: parseClearinghouseState(json) };
+    return parseClearinghouseState(json);
   },
 
   // 低消耗校验:打一次 clearinghouseState 探活(地址已由 validateCredentials 保证格式)。
