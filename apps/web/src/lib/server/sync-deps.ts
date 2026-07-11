@@ -7,7 +7,7 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
-import type { Balance } from "@folio/connectors-basic";
+import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import type { ProviderAsset, Tokens } from "@folio/tokens";
@@ -91,10 +91,15 @@ async function fetchViaConnector(
     creds: providerCreds,
   };
   // provider 抛的 @folio/connectors-basic ProviderError 直接向上传播 —— sync 的 withRetry 直接 instanceof 该类。
-  const rows = (await provider.fetchBalances(ctx)) as unknown as Balance[];
+  // provider.fetchBalances 返回 { balances, note? }(note 重设计):balance 级单个 note 挂各 balance(随 balances
+  // 透传 → snapshot_balances.note);顶层 note 为 account 级 Note[](整钱包)→ 透传 outcome.note → snapshots.note。
+  const { balances: rows, note } = (await provider.fetchBalances(ctx)) as unknown as {
+    balances: Balance[];
+    note?: Note[];
+  };
   const totalUsd = rows.reduce((s, b) => s + b.value, 0);
   await tokens.noteProviderAssets(toProviderAssets(rows)); // 结构兼容:connectors Balance 同形
-  return { status: "ok", balances: rows, totalUsd };
+  return { status: "ok", balances: rows, totalUsd, note };
 }
 
 // 装配编排器的注入式依赖。真正的 DI 缝是这里返回的 SyncDeps(syncUser 只认注入的 deps);

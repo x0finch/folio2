@@ -1,5 +1,5 @@
 import type { ConnectorId } from "@folio/connectors";
-import type { BalanceKind } from "@folio/connectors-basic";
+import { type BalanceKind, Note } from "@folio/connectors-basic";
 import {
   and,
   asc,
@@ -21,8 +21,8 @@ import {
 } from "./schema";
 import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
 
-// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 8 列 → 每块 12 行(96 参数,留余量)。
-const BALANCE_INSERT_CHUNK = 12;
+// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 9 列 → 每块 11 行(99 参数,留余量)。
+const BALANCE_INSERT_CHUNK = 11;
 
 // 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
 const accountSafeColumns = {
@@ -290,17 +290,45 @@ export interface SnapshotBalanceInput {
   kind: BalanceKind;
   tokenKey?: string;
   meta?: Record<string, unknown>;
+  note?: Note; // balance 级展示 note(note 重设计,单个 Note);落 snapshot_balances.note(JSON)
 }
 
 export interface WriteSnapshotInput {
   takenAt: number;
   totalUsd: number;
+  note?: Note[]; // account 级展示 note(note 重设计,Note[] 整钱包);落 snapshots.note(JSON)
   balances: SnapshotBalanceInput[];
 }
 
+// 读模型的余额行:原始 SnapshotBalance,note 列已 safeParse 成单个 Note(空/损坏 → 省略)。
+export type SnapshotBalanceView = Omit<SnapshotBalance, "note"> & { note?: Note };
+
 export interface SnapshotWithBalances {
   snapshot: Snapshot;
-  balances: SnapshotBalance[];
+  note?: Note[]; // account 级展示 note,已从 snapshot.note(JSON)safeParse 成 Note[](空/损坏 → 省略)
+  balances: SnapshotBalanceView[];
+}
+
+// 快照余额行的 note 列(JSON 字符串)→ 单个 Note。损坏/为空 → undefined(无 note 的持仓)。
+function parseBalanceNote(raw: string | null): Note | undefined {
+  if (!raw) return undefined;
+  try {
+    const r = Note.safeParse(JSON.parse(raw));
+    return r.success ? r.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// 账户快照的 note 列(JSON 字符串)→ account 级 Note[]。损坏/为空 → undefined。
+function parseAccountNote(raw: string | null): Note[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const r = Note.array().safeParse(JSON.parse(raw));
+    return r.success && r.data.length > 0 ? r.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** 一次原子写 snapshot + balances(D1 用 db.batch,无交互式事务)。返回 snapshotId。 */
@@ -313,9 +341,14 @@ export async function writeSnapshot(
   const db = getDb(env);
   await assertAccountOwned(db, userId, accountId);
   const snapshotId = crypto.randomUUID();
-  const insertSnapshot = db
-    .insert(snapshots)
-    .values({ id: snapshotId, accountId, takenAt: input.takenAt, totalUsd: input.totalUsd });
+  const insertSnapshot = db.insert(snapshots).values({
+    id: snapshotId,
+    accountId,
+    takenAt: input.takenAt,
+    totalUsd: input.totalUsd,
+    // account 级 note(Note[] 整钱包)→ JSON;空则 null。
+    note: input.note && input.note.length > 0 ? JSON.stringify(input.note) : null,
+  });
   const balanceRows = input.balances.map((b) => ({
     id: crypto.randomUUID(),
     snapshotId,
@@ -325,8 +358,10 @@ export async function writeSnapshot(
     kind: b.kind,
     tokenKey: b.tokenKey ?? null,
     metaJson: b.meta ? JSON.stringify(b.meta) : null,
+    // balance 级 note(单个 Note)→ JSON;无则 null。
+    note: b.note ? JSON.stringify(b.note) : null,
   }));
-  // D1 限制每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 7 列 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行。
+  // D1 限制每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 9 列 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行。
   // 一次性大 INSERT 会触发 "too many SQL variables"(地址持仓多时,如链上钱包几十上百条)。
   const balanceInserts = [];
   for (let i = 0; i < balanceRows.length; i += BALANCE_INSERT_CHUNK) {
@@ -428,14 +463,21 @@ export async function getLatestSnapshotByUser(
       ),
     );
 
-  // JS 按 snapshotId 分组。
-  const bySnapshot = new Map<string, SnapshotBalance[]>();
+  // JS 按 snapshotId 分组;每行的 note 列(JSON)safeParse 成单个 Note(balance 级)。
+  const bySnapshot = new Map<string, SnapshotBalanceView[]>();
   for (const b of balanceRows) {
+    const { note, ...rest } = b;
+    const view: SnapshotBalanceView = { ...rest, note: parseBalanceNote(note) };
     const arr = bySnapshot.get(b.snapshotId);
-    if (arr) arr.push(b);
-    else bySnapshot.set(b.snapshotId, [b]);
+    if (arr) arr.push(view);
+    else bySnapshot.set(b.snapshotId, [view]);
   }
-  return snaps.map((snapshot) => ({ snapshot, balances: bySnapshot.get(snapshot.id) ?? [] }));
+  return snaps.map((snapshot) => ({
+    snapshot,
+    // account 级 note(Note[])从 snapshot.note(JSON)safeParse。
+    note: parseAccountNote(snapshot.note),
+    balances: bySnapshot.get(snapshot.id) ?? [],
+  }));
 }
 
 // 导出用:分页取该用户全部快照(按 takenAt,id 稳定排序)。配合 listBalancesForSnapshots 一页页流式
@@ -476,7 +518,7 @@ export interface ManualActivityInput {
   amount: number;
   price?: number | null;
   occurredAt: number;
-  note?: string | null;
+  memo?: string | null; // 用户手写备注(原 note;note 让给 provider 展示概念)
 }
 export type ManualActivity = InferSelectModel<typeof manualActivity>;
 
@@ -495,7 +537,7 @@ export async function recordManualActivity(
     amount: input.amount,
     price: input.price ?? null,
     occurredAt: input.occurredAt,
-    note: input.note ?? null,
+    memo: input.memo ?? null,
     createdAt: Date.now(),
   });
 }

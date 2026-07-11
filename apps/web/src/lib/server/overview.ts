@@ -45,6 +45,10 @@ export const getMyAccountHoldings = createServerFn({ method: "GET" })
           account: { id: account.id, label: account.label },
           totalUsd: latest?.snapshot.totalUsd ?? 0,
           takenAt: latest?.snapshot.takenAt ?? null,
+          // note 重设计(两级):① balance 级单个 note 随各 balance 透传(db 已把 snapshot_balances.note
+          // safeParse 成 Note),现货行副行渲染 <NoteBadge>;② account 级 note(Note[],整钱包,BTC 未确认/
+          // 收款/派生分布)是每账户一份,db 已 safeParse 成 Note[],这里随 row.note 带出 → 持仓区手风琴。
+          note: latest?.note,
           balances: enriched.rows,
           pricesStale: enriched.pricesStale,
         };

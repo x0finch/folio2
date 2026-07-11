@@ -261,6 +261,47 @@ describe("snapshots", () => {
     expect(latest).toHaveLength(1);
     expect(latest[0]!.balances).toHaveLength(2);
     expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.metaJson).toContain("note");
+    // 无 note 写入 → 各行 note 省略。
+    expect(latest[0]!.balances.every((b) => b.note === undefined)).toBe(true);
+  });
+
+  it("persists per-balance note (single Note) + account-level note (Note[]) and safeParses back (note 重设计)", async () => {
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "bitcoin",
+      label: "BTC",
+      creds: "x",
+    });
+    // balance 级:单个 Note(CEX 锁仓口径示例)。
+    const note = {
+      title: "Locked",
+      icon: "warning" as const,
+      content: [{ label: "BTC", value: 0.005, unit: "BTC" }],
+    };
+    // account 级:Note[](整钱包)。
+    const accountNote = [
+      {
+        title: "Unconfirmed",
+        icon: "warning" as const,
+        content: [{ label: "Pending", value: 0.005, unit: "BTC" }],
+      },
+      { title: "Note", content: "all available" },
+    ];
+    await writeSnapshot(env, USER_A, acc.id, {
+      takenAt: 1000,
+      totalUsd: 0,
+      note: accountNote,
+      balances: [
+        { symbol: "BTC", amount: 0.08, usdValue: 0, kind: "spot", note },
+        { symbol: "ETH", amount: 1, usdValue: 0, kind: "spot" }, // 无 note 的行
+      ],
+    });
+    const latest = await getLatestSnapshotByUser(env, USER_A);
+    expect(latest).toHaveLength(1);
+    // balance 级 note 挂在该 balance 上(per-balance),safeParse 回单个 Note;无 note 的行为 undefined。
+    expect(latest[0]!.balances.find((b) => b.symbol === "BTC")!.note).toEqual(note);
+    expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.note).toBeUndefined();
+    // account 级 note(Note[])从 snapshot.note safeParse。
+    expect(latest[0]!.note).toEqual(accountNote);
   });
 
   it("writes many balances by chunking under D1's bound-parameter limit", async () => {
@@ -269,7 +310,7 @@ describe("snapshots", () => {
       label: "Big wallet",
       creds: "x",
     });
-    // 60 条余额 × 8 列 = 480 绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
+    // 60 条余额 × 9 列 = 540 绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
     const balances = Array.from({ length: 60 }, (_, i) => ({
       symbol: `T${i}`,
       amount: i,

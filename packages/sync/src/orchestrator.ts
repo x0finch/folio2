@@ -1,10 +1,12 @@
-import { type Balance, ProviderError } from "@folio/connectors-basic";
+import { type Balance, type Note, ProviderError } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
-// 由 app 注入的 fetchBalances 产出(内部先判 isComplete 再解密 + 调 balances.fetchBalances)。
+// 由 app 注入的 fetchBalances 产出(内部先判 isComplete 再解密 + 调 provider.fetchBalances)。
+// note 重设计(两级):balance 级单个 note 挂各 balance(随 balances 透传);account 级 note(Note[],整钱包)
+// 放顶层 note 字段(BTC 未确认/收款/派生分布)。
 export type FetchOutcome =
-  | { status: "ok"; balances: Balance[]; totalUsd: number }
+  | { status: "ok"; balances: Balance[]; totalUsd: number; note?: Note[] }
   | { status: "needs-credentials" };
 
 // 退避重试参数(原则 #8:不硬编码散落)。
@@ -167,10 +169,13 @@ export async function syncAccount(
     const snapshotId = await deps.writeSnapshot(userId, account.id, {
       takenAt: Date.now(),
       totalUsd,
+      // account 级 note(Note[],整钱包)落 snapshots.note;revalue 不动它。
+      note: outcome.note,
       // 边界映射:Balance 契约用 value,快照层沿用 usdValue(不动表结构)。其余字段透传;
       // token 元信息(name/logo/tokenKey)不落快照,参考层是其 home(见 canonical 计划)。
       // kind 透传:db 的 SnapshotBalanceInput.kind 与 connectors Balance 同为 5-kind 联合
       //(spot/defi/perp_equity/perp_position/utxo,#37c 起 db 直取 @folio/connectors-basic),直接透传。
+      // balance 级 note(单个 Note,note 重设计)随各 balance 落 snapshot_balances.note;revalue 不动 note。
       balances: balances.map((b) => ({
         symbol: b.symbol,
         amount: b.amount,
@@ -178,6 +183,7 @@ export async function syncAccount(
         kind: b.kind,
         tokenKey: b.tokenKey,
         meta: b.meta,
+        note: b.note,
       })),
     });
     log.info("account synced", { ...ctxFields, totalUsd, balances: balances.length });

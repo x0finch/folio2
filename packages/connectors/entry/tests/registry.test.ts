@@ -20,10 +20,12 @@ const evmLike = defineConnector({
         id: "demo",
         label: "Demo",
         creds: [],
-        fetchBalances: async (ctx) => [
-          { kind: "spot", symbol: ctx.account.creds.address, amount: 1, value: 1 },
-          { kind: "defi", symbol: "x", amount: 1, value: 1, meta: { protocol: "demo" } },
-        ],
+        fetchBalances: async (ctx) => ({
+          balances: [
+            { kind: "spot", symbol: ctx.account.creds.address, amount: 1, value: 1 },
+            { kind: "defi", symbol: "x", amount: 1, value: 1, meta: { protocol: "demo" } },
+          ],
+        }),
         validateAccount: async () => true,
       },
     ],

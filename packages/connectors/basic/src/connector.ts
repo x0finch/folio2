@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { Balance } from "./balance";
 import type { CredField, CredsOf } from "./creds";
+import type { Note } from "./note";
 
 // 【Connector 契约】(ADR 0009)。一个 connector = 我们支持的一类账户;一份自包含 manifest 绑定
 // account.creds + balance.schema + providers。Connector ≠ Platform(后者是链∪场馆展示维度)。
@@ -21,7 +22,10 @@ export interface BalanceProvider<
   readonly label: string;
   readonly creds: PC; // 实例化本 provider 要的 key(空 = 开箱即用)
   readonly defaultEnabled?: boolean;
-  fetchBalances(ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>): Promise<B[]>; // 窄化到该 connector 的 B
+  // 返回该 connector 的 balances(B 子集;balance 级单个 note 挂在各 balance 上)+ 顶层可选 account 级 note(Note[],整钱包)。
+  fetchBalances(
+    ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>,
+  ): Promise<{ balances: B[]; note?: Note[] }>;
   validateAccount(ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>): Promise<boolean>; // 账户 liveness
   validateCreds?(creds: CredsOf<PC>): Promise<boolean>; // provider 自身 creds liveness
 }

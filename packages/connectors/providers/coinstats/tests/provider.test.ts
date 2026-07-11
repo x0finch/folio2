@@ -48,7 +48,7 @@ describe("coinstats fetchBalances", () => {
     const spy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(JSON.stringify(solanaFixture), { status: 200 }));
-    const balances = await provider.fetchBalances(ctx());
+    const { balances } = await provider.fetchBalances(ctx());
     expect(balances).toHaveLength(4); // solana fixture 5 条,1 条无 symbol 被跳过
     expect((spy.mock.calls[0][1]?.headers as Record<string, string>)["X-API-KEY"]).toBe("k");
   });

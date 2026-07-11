@@ -8,3 +8,4 @@ export * from "./connector";
 export * from "./creds";
 export * from "./crypto";
 export * from "./errors";
+export * from "./note";

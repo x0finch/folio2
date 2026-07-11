@@ -79,6 +79,9 @@ export const snapshots = sqliteTable(
       .references(() => accounts.id, { onDelete: "cascade" }),
     takenAt: integer("taken_at").notNull(), // epoch ms
     totalUsd: real("total_usd").notNull(),
+    // account 级展示 note(note 重设计):JSON.stringify(Note[]),可空。整钱包一份(BTC 未确认/收款/派生分布);
+    // 读时 safeParse 回 Note[](见 getLatestSnapshotByUser)。纯展示,无共享逻辑读它。
+    note: text("note"),
   },
   (t) => [
     index("snapshots_account_id_idx").on(t.accountId),
@@ -101,6 +104,9 @@ export const snapshotBalances = sqliteTable(
     // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的 tokenKey。
     tokenKey: text("token_key"),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空
+    // balance 级展示 note(note 重设计):JSON.stringify(单个 Note),可空。
+    // provider 挂在该 balance 上的 note 落这里;读时 safeParse 回 Note(见 getLatestSnapshotByUser)。
+    note: text("note"),
   },
   (t) => [index("snapshot_balances_snapshot_id_idx").on(t.snapshotId)],
 );
@@ -201,7 +207,7 @@ export const manualActivity = sqliteTable(
     amount: real("amount").notNull(),
     price: real("price"), // 单价(可空),留 M7.3
     occurredAt: integer("occurred_at").notNull(), // epoch ms
-    note: text("note"),
+    memo: text("memo"), // 用户手写备注(原 note;为把 note 让给 provider 展示概念而改名)
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("manual_activity_account_id_occurred_at_idx").on(t.accountId, t.occurredAt)],

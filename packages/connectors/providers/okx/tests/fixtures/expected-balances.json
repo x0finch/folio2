@@ -18,6 +18,11 @@
     "amount": 2,
     "price": 3000,
     "value": 6000,
-    "kind": "spot"
+    "kind": "spot",
+    "note": {
+      "title": "Frozen",
+      "icon": "warning",
+      "content": "0.5 ETH · 25%"
+    }
   }
 ]

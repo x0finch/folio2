@@ -36,8 +36,14 @@ interface TickerPrice {
   price?: string;
 }
 
+// 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
+const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 8 });
+
 // 纯解析:account.balances + 价格表(symbol→price)→ Spot[]。与 IO 分离,golden test。
 // amount = free + locked;跳过 ≤0;usdValue:稳定币≈1,否则 amount × price(`${asset}USDT`),无对→0。
+// 锁仓 note(note 重设计,balance 级单个 Note):locked>0 的币,在【它自己那笔 balance】上挂一个
+// `Locked` 段(icon warning;content 一行内联文案 `${锁定数量} ${币种} · ${占该币总持有的百分比}`,
+// 如 `1 ETH · 33%`,原币口径不换 USD)。无锁仓 → 无 note。
 export function parseAccountBalances(
   account: BinanceAccount,
   prices: Record<string, number>,
@@ -46,17 +52,21 @@ export function parseAccountBalances(
   for (const b of account.balances ?? []) {
     const asset = b.asset;
     if (!asset) continue;
-    const amount = Number(b.free ?? 0) + Number(b.locked ?? 0);
+    const locked = Number(b.locked ?? 0);
+    const amount = Number(b.free ?? 0) + locked;
     if (!(amount > 0)) continue;
     const price = STABLECOINS.has(asset) ? 1 : (prices[`${asset}${QUOTE_ASSET}`] ?? undefined);
     const usdValue = price != null ? amount * price : 0;
-    out.push({
-      symbol: asset,
-      amount,
-      price,
-      value: usdValue,
-      kind: "spot",
-    });
+    const row: Spot = { symbol: asset, amount, price, value: usdValue, kind: "spot" };
+    if (locked > 0) {
+      const pct = amount > 0 ? Math.round((locked / amount) * 100) : 0;
+      row.note = {
+        title: "Locked",
+        icon: "warning",
+        content: `${fmtAmount(locked)} ${asset} · ${pct}%`,
+      };
+    }
+    out.push(row);
   }
   return out;
 }
@@ -109,7 +119,7 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
   // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据,走 account.creds。
   creds: [],
 
-  async fetchBalances(ctx): Promise<Spot[]> {
+  async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
     const { apiKey, secret } = ctx.account.creds;
     const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;
     const acctRes = await signedGet(ACCOUNT_PATH, query, apiKey, secret);
@@ -133,7 +143,7 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
     for (const t of tickers) {
       if (t.symbol) prices[t.symbol] = Number(t.price ?? 0);
     }
-    return parseAccountBalances(account, prices);
+    return { balances: parseAccountBalances(account, prices) };
   },
 
   // 校验:签名打 /api/v3/account 确认 key + 读权限(creds 已由 validateCredentials 保证非空)。

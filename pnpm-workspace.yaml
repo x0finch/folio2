@@ -3,6 +3,7 @@ packages:
   - "packages/clients/*"
   - "packages/connectors/*"
   - "packages/connectors/providers/*"
+  - "packages/notes/*"
   - "packages/tokens/*"
   - "packages/tokens/providers/*"
   - "apps/*"

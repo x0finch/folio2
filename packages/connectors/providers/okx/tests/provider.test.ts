@@ -21,15 +21,33 @@ afterEach(() => vi.restoreAllMocks());
 // 跳过零/空(DUST)。JSON 无 undefined → expected 省略未定义字段(toEqual 视缺键==undefined)。
 describe("parseBalances (golden: fixture in → fixture out)", () => {
   it("maps the recorded balance details to expected-balances", () => {
+    // per-balance note(note 重设计,单个 Note):ETH frozenBal=0.5 → 它自己那笔挂 Frozen note;其余无 note。
     expect(parseBalances(balance.data[0].details)).toEqual(expected);
+  });
+
+  it("冻结的币(ETH)自带 Frozen note;无冻结的币(BTC/USDT)无 note", () => {
+    const rows = parseBalances(balance.data[0].details);
+    expect(rows.find((b) => b.symbol === "ETH")?.note).toEqual({
+      title: "Frozen",
+      icon: "warning",
+      content: "0.5 ETH · 25%",
+    });
+    expect(rows.find((b) => b.symbol === "BTC")?.note).toBeUndefined();
+    expect(rows.find((b) => b.symbol === "USDT")?.note).toBeUndefined();
   });
 });
 
 describe("okxProvider.fetchBalances", () => {
   it("signs with 4 OK-ACCESS headers (base64 SIGN) and parses balances", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(balance));
-    const balances = await okxProvider.fetchBalances(ctx());
+    const { balances } = await okxProvider.fetchBalances(ctx());
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "USDT", "ETH"]);
+    // per-balance note:ETH 有 frozenBal=0.5 → 它自己那笔挂 Frozen note。
+    expect(balances.find((b) => b.symbol === "ETH")?.note).toEqual({
+      title: "Frozen",
+      icon: "warning",
+      content: "0.5 ETH · 25%",
+    });
 
     const [url, init] = spy.mock.calls[0];
     expect(String(url)).toContain("/api/v5/account/balance");

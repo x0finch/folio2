@@ -27,6 +27,7 @@ interface OkxDetail {
   ccy?: string;
   eq?: string;
   eqUsd?: string;
+  frozenBal?: string; // 冻结余额(原币,挂单/借贷占用)
 }
 interface OkxBalanceResponse {
   code?: string;
@@ -34,8 +35,14 @@ interface OkxBalanceResponse {
   data?: Array<{ details?: OkxDetail[] }>;
 }
 
+// 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
+const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 8 });
+
 // 纯解析:details[] → Spot[]。与 IO 分离,golden test。
 // amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
+// 冻结 note(note 重设计,balance 级单个 Note):frozenBal>0 的币,在【它自己那笔 balance】上挂一个
+// `Frozen` 段(icon warning;content 一行内联文案 `${冻结数量} ${币种} · ${占该币总持有的百分比}`,
+// 如 `0.5 ETH · 25%`,原币口径)。无冻结 → 无 note。
 export function parseBalances(details: OkxDetail[]): Spot[] {
   const out: Spot[] = [];
   for (const d of details ?? []) {
@@ -43,13 +50,23 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
     if (!ccy) continue;
     const amount = Number(d.eq ?? 0);
     if (!(amount > 0)) continue;
-    out.push({
+    const frozen = Number(d.frozenBal ?? 0);
+    const row: Spot = {
       symbol: ccy,
       amount,
-      price: amount > 0 ? Number(d.eqUsd ?? 0) / amount : undefined,
+      price: Number(d.eqUsd ?? 0) / amount,
       value: Number(d.eqUsd ?? 0),
       kind: "spot",
-    });
+    };
+    if (frozen > 0) {
+      const pct = amount > 0 ? Math.round((frozen / amount) * 100) : 0;
+      row.note = {
+        title: "Frozen",
+        icon: "warning",
+        content: `${fmtAmount(frozen)} ${ccy} · ${pct}%`,
+      };
+    }
+    out.push(row);
   }
   return out;
 }
@@ -124,12 +141,12 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
   // 无全局 provider key —— 账户自己的 apiKey/secret/passphrase 即凭据,走 account.creds。
   creds: [],
 
-  async fetchBalances(ctx): Promise<Spot[]> {
+  async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
     const res = await okxGet(BALANCE_PATH, ctx.account.creds);
     ensureHttpOk(res);
     const body = await readBody(res);
     assertCodeOk(body);
-    return parseBalances(body.data?.[0]?.details ?? []);
+    return { balances: parseBalances(body.data?.[0]?.details ?? []) };
   },
 
   // 校验:签名打 balance,HTTP ok 且 code="0" 即 true(creds 已保证三项非空)。任何失败 → false。

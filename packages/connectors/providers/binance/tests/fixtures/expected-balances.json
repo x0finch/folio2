@@ -11,7 +11,12 @@
     "amount": 3,
     "price": 3000,
     "value": 9000,
-    "kind": "spot"
+    "kind": "spot",
+    "note": {
+      "title": "Locked",
+      "icon": "warning",
+      "content": "1 ETH · 33%"
+    }
   },
   {
     "symbol": "USDT",

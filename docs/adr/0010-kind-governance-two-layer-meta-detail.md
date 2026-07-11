@@ -2,6 +2,8 @@
 
 Status: accepted — 取代 [ADR 0009](0009-connector-manifest.md) 的 kind 治理部分(governing 定义、决策 #4「5-kind」、决策 #7「EVM」不涉;Considered Options #7「kind 分类法」;及 SpotMeta/`fixed`)。经 grill-with-docs 逐分叉压测定案(#43)。
 
+> **部分被取代**:决策 #5(detail 渲染 = DetailBlock「画法 `type` + `format`」词汇表)经 [ADR 0011](0011-provider-notes-two-level.md) 取代 —— 展示层收敛为固定结构的 `Note`(无 type/format)、`detail` 改名 `note`、分 account/balance 两级。本 ADR 的 kind 治理(粗粒度 4-kind)、两层 meta/note 的**分界原则**仍有效。
+
 ## 背景
 
 ADR 0009 把 `kind` 定义为「**一套独有的 meta + 渲染契约**」的扁平判别,终案 5-kind(`spot/defi/perp_equity/perp_position/utxo`)。connector 重写(epic #29)落地后,从 #32(utxo kind)/#34(CEX locked)的 review 里浮现两点张力:

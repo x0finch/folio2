@@ -22,9 +22,21 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
   const balances = parseAccountBalances(account, prices);
 
   it("maps the recorded account + price map to expected-balances", () => {
+    // per-balance note(note 重设计,单个 Note):ETH locked=1 → 它自己那笔挂 Locked note;其余无 note。
     expect(balances).toEqual(expected);
     // BNB has zero balance → excluded
     expect(balances.find((b) => b.symbol === "BNB")).toBeUndefined();
+  });
+
+  it("锁仓的币(ETH)自带 Locked note(数量口径 + 单位);无锁仓的币(BTC/USDT)无 note", () => {
+    const eth = balances.find((b) => b.symbol === "ETH");
+    expect(eth?.note).toEqual({
+      title: "Locked",
+      icon: "warning",
+      content: "1 ETH · 33%",
+    });
+    expect(balances.find((b) => b.symbol === "BTC")?.note).toBeUndefined();
+    expect(balances.find((b) => b.symbol === "USDT")?.note).toBeUndefined();
   });
 });
 
@@ -43,8 +55,14 @@ describe("binanceProvider.fetchBalances", () => {
       );
     });
 
-    const balances = await binanceProvider.fetchBalances(ctx());
+    const { balances } = await binanceProvider.fetchBalances(ctx());
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "ETH", "USDT", "NOPRICE"]);
+    // per-balance note:ETH 有 locked=1 → 它自己那笔挂 Locked note。
+    expect(balances.find((b) => b.symbol === "ETH")?.note).toEqual({
+      title: "Locked",
+      icon: "warning",
+      content: "1 ETH · 33%",
+    });
 
     const [acctUrl, init] = spy.mock.calls[0];
     expect(String(acctUrl)).toContain("/api/v3/account?");

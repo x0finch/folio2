@@ -16,6 +16,8 @@ import {
 import {
   type BalanceProvider,
   type CredField,
+  type Note,
+  type NoteRow,
   ProviderError,
   type Utxo,
   type UtxoAddress,
@@ -112,6 +114,70 @@ function buildXpubMeta(
   return { addresses, receive: { lastUsed: lastExternal, next } };
 }
 
+// BTC 钱包展示 note(note 重设计,account 级 Note[]):从同一份取数造多段(仅供展示),整钱包一份,
+// 顶层随 fetchBalances 返回(不挂 balance)。前端渲染成持仓区手风琴,一段一个 item。
+//  · Unconfirmed:账户净未确认额一行(仅非零;icon warning)。
+//  · Receive addresses:收款指引(最近用过 + 下一批未使用,地址行 + mempool 外链)。
+//  · Receive/Change distribution:非零派生地址按链拆两 section(地址行 value+unit+href)。
+const mempoolAddr = (address: string): string => `https://mempool.space/address/${address}`;
+
+function buildBtcNote(
+  pendingSats: number,
+  xpub?: { addresses: UtxoAddress[]; receive: UtxoReceive },
+): Note[] {
+  const sections: Note[] = [];
+
+  if (pendingSats !== 0) {
+    sections.push({
+      title: "Unconfirmed",
+      icon: "warning",
+      content: [{ label: "Pending", value: pendingSats / SATS_PER_BTC, unit: "BTC" }],
+    });
+  }
+
+  if (xpub) {
+    const { addresses, receive } = xpub;
+
+    // 收款指引:最近用过(如有)+ 下一批未使用地址。
+    const receiveRows: NoteRow[] = [];
+    if (receive.lastUsed) {
+      receiveRows.push({
+        label: `Last used #${receive.lastUsed.index}`,
+        value: receive.lastUsed.address,
+        href: mempoolAddr(receive.lastUsed.address),
+      });
+    }
+    for (const n of receive.next) {
+      receiveRows.push({
+        label: `Next #${n.index}`,
+        value: n.address,
+        href: mempoolAddr(n.address),
+      });
+    }
+    if (receiveRows.length > 0) {
+      sections.push({ title: "Receive addresses", icon: "info", content: receiveRows });
+    }
+
+    // 派生分布:仅非零地址,按 receive/change 链拆两 section。
+    const distRow = (a: UtxoAddress): NoteRow => ({
+      label: a.address,
+      value: a.balanceSats / SATS_PER_BTC,
+      unit: "BTC",
+      href: mempoolAddr(a.address),
+    });
+    const receiveDist = addresses.filter((a) => a.chain === "receive").map(distRow);
+    const changeDist = addresses.filter((a) => a.chain === "change").map(distRow);
+    if (receiveDist.length > 0) {
+      sections.push({ title: "Receive distribution", icon: "info", content: receiveDist });
+    }
+    if (changeDist.length > 0) {
+      sections.push({ title: "Change distribution", icon: "info", content: changeDist });
+    }
+  }
+
+  return sections;
+}
+
 const isExtendedPubkey = (id: string): boolean => EXT_PUBKEY_RE.test(id);
 
 // 客户端/派生错误 → provider 契约(sync 据 ProviderError 重试)。
@@ -126,11 +192,17 @@ function toProviderError(err: unknown): ProviderError {
   return new ProviderError("UPSTREAM_ERROR", "bitcoin provider failed", { cause: err });
 }
 
-async function fetchXpub(client: BlockbookClient, ext: string, scriptType: string | undefined) {
+async function fetchXpub(
+  client: BlockbookClient,
+  ext: string,
+  scriptType: string | undefined,
+): Promise<{ balances: Utxo[]; note: Note[] }> {
   const script = effectiveScript(ext, scriptType);
   const res = await client.getXpub(blockbookXpubParam(ext, script)); // details=tokenBalances&tokens=used
+  const pendingSats = toSats(res.unconfirmedBalance);
   const { addresses, receive } = buildXpubMeta(ext, script, res.tokens ?? []);
-  return toBtcBalances(toSats(res.balance), toSats(res.unconfirmedBalance), { addresses, receive });
+  const balances = toBtcBalances(toSats(res.balance), pendingSats, { addresses, receive });
+  return { balances, note: buildBtcNote(pendingSats, { addresses, receive }) };
 }
 
 // —— 账户级 creds(AC):BTC 地址或扩展公钥,public(明文落库、可导出重建)——
@@ -166,13 +238,15 @@ export const blockbookProvider: BalanceProvider<
   label: "Blockbook",
   creds: providerCreds,
 
-  async fetchBalances(ctx): Promise<Utxo[]> {
+  async fetchBalances(ctx): Promise<{ balances: Utxo[]; note?: Note[] }> {
     const id = ctx.account.creds.addressOrXpub;
     const client = createBlockbookClient();
     try {
       if (isExtendedPubkey(id)) return await fetchXpub(client, id, ctx.account.creds.scriptType);
       const res = await client.getAddress(id);
-      return toBtcBalances(toSats(res.balance), toSats(res.unconfirmedBalance));
+      const pendingSats = toSats(res.unconfirmedBalance);
+      const balances = toBtcBalances(toSats(res.balance), pendingSats);
+      return { balances, note: buildBtcNote(pendingSats) };
     } catch (err) {
       throw toProviderError(err);
     }

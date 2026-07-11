@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Note } from "./note";
 
 // 【Balance —— 类型完备的 5-kind zod 判别联合】(ADR 0009)
 // 判别式 kind = "一套独有 meta + 渲染契约"的扁平判别(非资产/链/来源)。
@@ -17,6 +18,10 @@ export const BalanceBase = z.object({
   tokenKey: z.string().optional(), // 代币寻址标识(CAIP-19 文法;拿不到则空,退化按 symbol)
   name: z.string().optional(), // provider 自带代币元信息(喂参考层 / 备用展示)
   logo: z.string().optional(),
+  // provider 专属【仅供展示】的 balance 级 note(note 重设计,单个 Note),挂在【这笔持仓】上:
+  // CEX → 该币的锁仓/冻结(一段)。落 snapshot_balances.note(JSON),前端渲染成该行标题右侧的
+  // 小 icon + hover popover。无共享逻辑读它 —— 纯展示。account 级 note(Note[])见 fetchBalances 顶层返回。
+  note: Note.optional(),
 });
 
 // —— 各 kind 的 meta 契约(随 kind 精确) ——

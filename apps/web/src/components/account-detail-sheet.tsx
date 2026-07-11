@@ -1,4 +1,5 @@
 import type { ConnectorId } from "@folio/connectors";
+import type { Note } from "@folio/connectors-basic";
 import { Button, Drawer, Input, StatefulButton, toast } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
@@ -22,7 +23,8 @@ export interface AccountRow {
   archivedAt: number | null;
   totalUsd: number;
   takenAt: number | null;
-  balances: OverviewBalance[];
+  balances: OverviewBalance[]; // 各持仓自带 balance 级 note(note 重设计)
+  note?: Note[]; // account 级展示 note(Note[],整钱包;BTC 未确认/收款/派生分布)
   needsCredentials: boolean;
   credsSafe: Record<string, string>;
 }
@@ -230,9 +232,9 @@ function DetailBody({
         </div>
       )}
 
-      {/* 持仓(卡片列表) */}
+      {/* 持仓(卡片列表)+ 带 provider 展示明细的持仓手风琴(per-balance) */}
       <div className="mt-6">
-        <AccountHoldingsCards balances={account.balances} />
+        <AccountHoldingsCards balances={account.balances} accountNote={account.note} />
       </div>
 
       {/* manual 活动 */}
