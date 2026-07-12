@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
 import {
-  type ConnectorId,
   type ConnectorManifest,
   registry as connectorRegistry,
   getConnector,
@@ -123,8 +122,13 @@ export function buildSyncDeps(): SyncDeps {
     },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
     log: getLogger(["folio", "sync"]),
-    // 写快照前重估(P7.4.2):盯市类型(manual / bitcoin)用市场价改 value(@folio/sync 不依赖 token 层,逻辑注入在此)。
-    // revalue 已讲 connectors Balance;SyncDeps 的 connectorId 形参是 string(其值即 account.connectorId)→ 收窄到 ConnectorId。
-    revalue: (connectorId, rows) => revalue(tokens, connectorId as ConnectorId, rows),
+    // 写快照前重估(P7.4.2):盯市语义由 connector 的 manifest.valuation 声明(不再靠 app 硬编码名单)。
+    // 据 connectorId 查 manifest → 传 markToMarket 布尔给 revalue(@folio/sync 不依赖 token/connector 层,注入在此)。
+    revalue: (connectorId, rows) =>
+      revalue(
+        tokens,
+        getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
+        rows,
+      ),
   };
 }
