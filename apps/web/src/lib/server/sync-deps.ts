@@ -16,7 +16,7 @@ import { isComplete, openCreds } from "../creds";
 import { revalue } from "../revalue";
 import { db } from "./db";
 import { warmFx } from "./fx";
-import { buildOracle } from "./oracle";
+import { oracle } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
 import { warmTokens } from "./tokens";
 
@@ -43,7 +43,7 @@ function toProviderAssets(rows: Balance[]): ProviderAsset[] {
 export async function warmTokensForUser(userId: string): Promise<void> {
   const snapshots = await db.getLatestSnapshotByUser(userId);
   await warmTokens(
-    buildOracle(env).tokens,
+    oracle.tokens,
     snapshots.flatMap((s) => s.balances),
   );
   // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。
@@ -105,7 +105,7 @@ async function fetchViaConnector(
 // 装配编排器的注入式依赖。真正的 DI 缝是这里返回的 SyncDeps(syncUser 只认注入的 deps);
 // triggerSync(手动)与 cron(scheduled)共用。
 export function buildSyncDeps(): SyncDeps {
-  const tokens = buildOracle(env).tokens;
+  const tokens = oracle.tokens;
   return {
     // 归档账户跳过同步(不产生新快照);过滤在此,syncUser 只见活跃账户。
     listAccounts: async (userId) =>

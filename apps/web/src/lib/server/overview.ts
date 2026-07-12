@@ -1,10 +1,9 @@
-import { env } from "cloudflare:workers";
 import { createServerFn } from "@tanstack/react-start";
 import { buildOverview } from "../overview-model";
 import { requireAuth } from "../require-auth";
 import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
-import { buildOracle } from "./oracle";
+import { oracle } from "./oracle";
 import { enrichBalances } from "./tokens";
 
 // 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做
@@ -18,7 +17,6 @@ export const getMyOverview = createServerFn({ method: "GET" })
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-    const oracle = buildOracle(env);
     return buildOverview(accounts, byAccount, {
       tokens: oracle.tokens,
       platforms: oracle.platforms,
@@ -37,7 +35,7 @@ export const getMyAccountHoldings = createServerFn({ method: "GET" })
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-    const tokens = buildOracle(env).tokens;
+    const tokens = oracle.tokens;
     const rows = await Promise.all(
       accounts.map(async (account) => {
         const latest = byAccount.get(account.id);

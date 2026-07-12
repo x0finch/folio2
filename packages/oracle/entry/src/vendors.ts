@@ -17,7 +17,7 @@ import {
 // fxRates→FxSource。createOracle 据此按活跃源选实现,活跃源缺能力则回退 baseline。
 export interface VendorImpl {
   readonly vendor: OracleVendor;
-  readonly tokenProvider?: (cfg: { apiKey?: string }) => TokenProvider;
+  readonly tokenSource?: (cfg: { apiKey?: string }) => TokenProvider;
   readonly platformSource?: (cfg: { apiKey?: string }) => PlatformSource;
   readonly fxSource?: (cfg: { apiKey?: string }) => FxSource;
 }
@@ -27,7 +27,7 @@ export const BASELINE_VENDOR = "coingecko";
 
 const coingecko: VendorImpl = {
   vendor: coinGeckoVendor,
-  tokenProvider: createCoinGeckoProvider,
+  tokenSource: createCoinGeckoProvider,
   platformSource: createCoinGeckoPlatformSource,
   fxSource: createCoinGeckoFxSource,
 };

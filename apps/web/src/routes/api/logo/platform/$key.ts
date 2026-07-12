@@ -1,8 +1,7 @@
-import { env } from "cloudflare:workers";
 import { createFileRoute } from "@tanstack/react-router";
 import { connectorPlatformMeta } from "@/lib/server/connector-platform";
 import { serveLogo } from "@/lib/server/logo";
-import { buildOracle } from "@/lib/server/oracle";
+import { oracle } from "@/lib/server/oracle";
 
 // 公开(无 requireAuth)平台 logo 代理:platform key(如 chain:bitcoin,含 `:` → URL 编码为一段)
 // → 上游图 → 透传 + 边缘缓存头。见 ADR 0008 / #20。
@@ -17,7 +16,7 @@ export const Route = createFileRoute("/api/logo/platform/$key")({
             // 只有链键才查 platforms.resolve(cache-only)。
             const cm = connectorPlatformMeta(params.key);
             if (cm) return cm.logo;
-            return (await buildOracle(env).platforms.resolve([params.key])).get(params.key)?.logo;
+            return (await oracle.platforms.resolve([params.key])).get(params.key)?.logo;
           },
           "platform",
           params.key,

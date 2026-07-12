@@ -17,6 +17,10 @@ export interface CreateOracleConfig {
   // 活跃行情源(用户设置,P3-3 注入);缺省 = baseline(CoinGecko),无需设置。
   activeVendor?: string;
   // store 实现由调用方(app)注入:D1 在 @folio/db,oracle 不依赖它。三类各自的 store 分开传。
+  // 代币 store 是**工厂**(收 source),平台/汇率 store 是**实例** —— 非兼容问题,是领域差异:
+  // 代币缓存按 source 分桶(ref 只对该源成立、warm 标记 `warm_as_of:<source>` 亦分源),多 vendor 共存
+  // (P3-5 起 DefiLlama)时每源一份 store;平台/汇率恒单源(CoinGecko 权威、baseline-only,见 ADR 0013),
+  // 无需分桶 → 直接给实例。tokens 服务在内部按 provider.source 调此工厂建对应 store。
   createTokenStore: (source: TokenRef["source"]) => TokenStore;
   platformStore: PlatformStore;
   fxStore: FxStore;
@@ -41,7 +45,7 @@ export function createOracle(cfg: CreateOracleConfig): Oracle {
   // 代币面(search/meta/prices)整体跟随声明 tokenMeta 的源 —— identity 恒在 baseline(CoinGecko);
   // 价格分源路由(DefiLlama 只供 prices)留待 P3-5/P3-6。测试可用 cfg.provider 直接覆盖。
   const tokenVendor = pickVendor("tokenMeta", activeVendor);
-  const provider = cfg.provider ?? tokenVendor.tokenProvider?.({ apiKey });
+  const provider = cfg.provider ?? tokenVendor.tokenSource?.({ apiKey });
   const platformSource = pickVendor("platformMeta", activeVendor).platformSource?.({ apiKey });
   const fxSource = pickVendor("fxRates", activeVendor).fxSource?.({ apiKey });
   if (!platformSource || !fxSource) {

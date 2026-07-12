@@ -1,6 +1,5 @@
-import { env } from "cloudflare:workers";
 import { db } from "./db";
-import { buildOracle } from "./oracle";
+import { oracle } from "./oracle";
 
 // 平台元数据门面(链 ∪ 场馆的 name+logo)经统一 Oracle 装配(#79)。读走 resolve(cache-only),写走 warm(sync 后)。
 
@@ -20,5 +19,5 @@ export async function warmPlatformsForUser(userId: string): Promise<void> {
     }
   }
   if (keys.size === 0) return;
-  await buildOracle(env).platforms.warm([...keys]);
+  await oracle.platforms.warm([...keys]);
 }
