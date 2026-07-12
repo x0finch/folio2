@@ -16,6 +16,7 @@ export interface OverviewBalance {
   symbol: string;
   amount: number;
   usdValue: number;
+  selfPrice?: number | null; // provider 自带单价(估值原料,Phase 3);读时现推的原料,null=盯市恒用源
   kind: string;
   tokenKey?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
   metaJson: string | null;
