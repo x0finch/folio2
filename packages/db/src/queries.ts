@@ -18,8 +18,16 @@ import {
   manualActivity,
   snapshotBalances,
   snapshots,
+  userSettings,
 } from "./schema";
-import type { AccountSafe, Group, Snapshot, SnapshotBalance } from "./schema-types";
+import type {
+  AccountSafe,
+  Group,
+  Snapshot,
+  SnapshotBalance,
+  UserSettings,
+  ValuationMode,
+} from "./schema-types";
 
 // D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 10 列 → 每块 10 行(100 参数上限内)。
 const BALANCE_INSERT_CHUNK = 10;
@@ -569,4 +577,48 @@ export async function removeManualActivity(
   await db
     .delete(manualActivity)
     .where(and(eq(manualActivity.id, id), eq(manualActivity.accountId, accountId)));
+}
+
+// —— user settings(Phase 3,#82)——
+// 缺省:无行的用户 → coingecko / self-first(= 旧行为)。"coingecko" 即 oracle baseline;
+// db 层不耦合 @folio/oracle,就地写常量。
+const DEFAULT_ACTIVE_VENDOR = "coingecko";
+const DEFAULT_VALUATION_MODE: ValuationMode = "self-first";
+
+export interface UserSettingsView {
+  activeVendor: string;
+  valuationMode: ValuationMode;
+}
+
+// 读带缺省:无行返默认(不为每个用户强制建行)。
+export async function getUserSettings(env: DbEnv, userId: string): Promise<UserSettingsView> {
+  const rows = await getDb(env).select().from(userSettings).where(eq(userSettings.userId, userId));
+  const r = rows[0] as UserSettings | undefined;
+  return {
+    activeVendor: r?.activeVendor ?? DEFAULT_ACTIVE_VENDOR,
+    valuationMode: r?.valuationMode ?? DEFAULT_VALUATION_MODE,
+  };
+}
+
+// upsert:只覆盖给定字段(缺省字段首次建行用默认值,后续保持原值)。
+export async function updateUserSettings(
+  env: DbEnv,
+  userId: string,
+  patch: { activeVendor?: string; valuationMode?: ValuationMode },
+): Promise<void> {
+  const now = Date.now();
+  const set: Partial<{ activeVendor: string; valuationMode: ValuationMode; updatedAt: number }> = {
+    updatedAt: now,
+  };
+  if (patch.activeVendor !== undefined) set.activeVendor = patch.activeVendor;
+  if (patch.valuationMode !== undefined) set.valuationMode = patch.valuationMode;
+  await getDb(env)
+    .insert(userSettings)
+    .values({
+      userId,
+      activeVendor: patch.activeVendor ?? DEFAULT_ACTIVE_VENDOR,
+      valuationMode: patch.valuationMode ?? DEFAULT_VALUATION_MODE,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({ target: userSettings.userId, set });
 }

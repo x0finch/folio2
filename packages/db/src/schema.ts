@@ -203,6 +203,20 @@ export const fxRates = sqliteTable("fx_rates", {
   expiresAt: integer("expires_at").notNull(),
 });
 
+// per-user 设置(Phase 3,#82):活跃行情源 + 估值模式。读带缺省(无行 → coingecko / self-first),
+// 故非全用户都有行 —— 仅在改设置时 upsert。user_id 为 PK 且 FK→user(删用户级联清理)。
+export const userSettings = sqliteTable("user_settings", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  activeVendor: text("active_vendor").notNull().default("coingecko"),
+  valuationMode: text("valuation_mode")
+    .$type<"self-first" | "source-first">()
+    .notNull()
+    .default("self-first"),
+  updatedAt: integer("updated_at").notNull(), // epoch ms
+});
+
 // manual 活动账本(P7.4.1):add/reduce/set 动作日志。当前数量由 deriveAmount 推导、物化进 account.creds.amount
 // (provider/sync 不依赖本表)。price 记录单价、留给 M7.3 成本/盈亏,本期不算。与 M7.2 的通用 transactions 表分开。
 export const manualActivity = sqliteTable(

@@ -1,11 +1,23 @@
-import { Button, buttonVariants, Card, CardContent, CardHeader, CardTitle } from "@folio/ui";
+import {
+  Button,
+  buttonVariants,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Checkbox,
+  Label,
+} from "@folio/ui";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { getKeyStatus } from "../../lib/server/settings";
+import { getKeyStatus, getValuationSettings, setValuationMode } from "../../lib/server/settings";
 
 export const Route = createFileRoute("/_authed/settings")({
-  loader: () => getKeyStatus(),
+  loader: async () => {
+    const [status, valuation] = await Promise.all([getKeyStatus(), getValuationSettings()]);
+    return { status, valuation };
+  },
   component: Settings,
 });
 
@@ -16,7 +28,7 @@ const PROVIDER_KEYS = [
 ] as const;
 
 function Settings() {
-  const status = Route.useLoaderData();
+  const { status, valuation } = Route.useLoaderData();
   const t = useTranslations("Settings");
   return (
     <div className="flex flex-col gap-6">
@@ -40,6 +52,8 @@ function Settings() {
         </CardContent>
       </Card>
 
+      <ValuationCard mode={valuation.valuationMode} />
+
       <Card>
         <CardHeader>
           <CardTitle>{t("export")}</CardTitle>
@@ -54,6 +68,48 @@ function Settings() {
 
       <ImportCard />
     </div>
+  );
+}
+
+// 估值模式(Phase 3,#82):勾选 = source-first(统一采用市场源价);不勾 = self-first(默认)。
+// 切换即写 user_settings + invalidate → 主页/图表现推立即改(历史冻结,无需重 sync)。
+function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
+  const router = useRouter();
+  const t = useTranslations("Settings");
+  const [sourceFirst, setSourceFirst] = useState(mode === "source-first");
+  const [busy, setBusy] = useState(false);
+
+  async function onToggle(checked: boolean) {
+    setSourceFirst(checked); // 乐观更新
+    setBusy(true);
+    try {
+      await setValuationMode({ data: { mode: checked ? "source-first" : "self-first" } });
+      await router.invalidate(); // 刷新总览/图表读路径
+    } catch {
+      setSourceFirst(!checked); // 回滚
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("valuation")}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="valuation-source-first"
+            checked={sourceFirst}
+            disabled={busy}
+            onCheckedChange={onToggle}
+          />
+          <Label htmlFor="valuation-source-first">{t("useSourcePrice")}</Label>
+        </div>
+        <p className="text-sm text-muted-foreground">{t("valuationHint")}</p>
+      </CardContent>
+    </Card>
   );
 }
 

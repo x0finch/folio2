@@ -46,9 +46,10 @@ export interface SyncDeps {
   fetchBalances: (account: AccountSafe, stored: Record<string, string>) => Promise<FetchOutcome>;
   sleep?: (ms: number) => Promise<void>; // 默认 setTimeout;测试注入即时/捕获版做确定性重试测试
   log?: SyncLogger; // 默认 no-op;app 注入 LogTape logger(见 buildSyncDeps)
-  // 写快照前重估余额(P7.4.2):app 注入 token 感知实现,仅 manual 用市场价改 usdValue,其余原样
-  // (富化不重算)。best-effort:抛错则保留 provider 原值,不让定价故障拖垮同步。@folio/sync 本身不依赖 token 层。
-  revalue?: (accountType: string, balances: Balance[]) => Promise<Balance[]>;
+  // 写快照前重估余额(P7.4.2 / Phase 3):app 注入 token 感知实现,按 per-user 估值模式定 value +
+  // 捕获 selfPrice(估值原料)。userId 显式带 —— cron 路径共享一个 deps 跨多用户,模式按 userId 解析。
+  // best-effort:抛错则保留 provider 原值,不让定价故障拖垮同步。@folio/sync 本身不依赖 token 层。
+  revalue?: (userId: string, accountType: string, balances: Balance[]) => Promise<Balance[]>;
 }
 
 export interface AccountSyncResult {
@@ -157,7 +158,7 @@ export async function syncAccount(
     let { balances, totalUsd } = outcome;
     if (deps.revalue) {
       try {
-        balances = await deps.revalue(account.connectorId, balances);
+        balances = await deps.revalue(userId, account.connectorId, balances);
         totalUsd = balances.reduce((sum, b) => sum + b.value, 0);
       } catch (e) {
         log.warning("revalue failed; keeping provider values", {

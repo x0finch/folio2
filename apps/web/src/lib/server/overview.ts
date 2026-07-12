@@ -11,9 +11,10 @@ import { enrichBalances } from "./tokens";
 export const getMyOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
-    const [allAccounts, snapshots] = await Promise.all([
+    const [allAccounts, snapshots, settings] = await Promise.all([
       db.listAccountsByUser(context.userId),
       db.getLatestSnapshotByUser(context.userId),
+      db.getUserSettings(context.userId),
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
@@ -21,6 +22,7 @@ export const getMyOverview = createServerFn({ method: "GET" })
       tokens: oracle.tokens,
       platforms: oracle.platforms,
       connectorMeta: connectorPlatformMeta,
+      mode: settings.valuationMode,
     });
   });
 
