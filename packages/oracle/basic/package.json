@@ -1,5 +1,5 @@
 {
-  "name": "@folio/tokens-provider-coingecko",
+  "name": "@folio/oracle-basic",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,10 +10,6 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@folio/coingecko-client": "workspace:*",
-    "@folio/tokens-basic": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^6.0.2",

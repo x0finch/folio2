@@ -1,5 +1,5 @@
 {
-  "name": "@folio/tokens",
+  "name": "@folio/oracle",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,12 +8,15 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/oracle": "workspace:*"
+    "@folio/oracle-basic": "workspace:*",
+    "@folio/oracle-provider-coingecko": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.5"
   }
 }

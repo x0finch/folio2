@@ -4,8 +4,8 @@ import type {
   Resolution,
   TokenCandidate,
   TokenRef,
-} from "@folio/tokens-basic";
-import { RESOLUTION_DOMINANCE, RESOLUTION_TOP_RANK } from "@folio/tokens-basic";
+} from "@folio/oracle-basic";
+import { RESOLUTION_DOMINANCE, RESOLUTION_TOP_RANK } from "@folio/oracle-basic";
 
 export interface ConfidenceOpts {
   topRank?: number;

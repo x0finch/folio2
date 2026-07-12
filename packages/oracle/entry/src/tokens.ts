@@ -9,9 +9,9 @@ import type {
   TokenRecord,
   TokenRef,
   TokenStore,
-} from "@folio/tokens-basic";
-import { OVERRIDES, PRICE_TTL_MS, refKey, TOKEN_KEY_TTL_MS } from "@folio/tokens-basic";
-import { createCoinGeckoProvider } from "@folio/tokens-provider-coingecko";
+} from "@folio/oracle-basic";
+import { OVERRIDES, PRICE_TTL_MS, refKey, TOKEN_KEY_TTL_MS } from "@folio/oracle-basic";
+import { createCoinGeckoProvider } from "@folio/oracle-provider-coingecko";
 import { normalizeSymbol } from "./normalize";
 import { type ResolveOpts, refreshWarm, resolveAsset } from "./service";
 

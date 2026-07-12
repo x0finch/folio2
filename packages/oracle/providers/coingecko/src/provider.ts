@@ -8,7 +8,7 @@ import {
   type TokenInfo,
   type TokenPrice,
   type TokenProvider,
-} from "@folio/tokens-basic";
+} from "@folio/oracle-basic";
 import { PER_PAGE_MAX, PRICE_CHANGE_WINDOWS, VS_USD } from "./constants";
 import {
   parseAssetPlatforms,
