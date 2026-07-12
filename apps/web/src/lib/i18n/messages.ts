@@ -131,9 +131,6 @@ export const en = {
     searchInstead: "Search for a token instead",
     change: "Change",
     selectTokenRequired: "Select a token, or switch to manual entry.",
-    fixedLabel: "Lock fixed value",
-    fixedHint:
-      "Skip market pricing and always value at amount × unit price (e.g. locked/vesting tokens).",
     addOnchain: "Add on-chain wallet",
     chain: "Chain",
     address: "Address",
@@ -354,8 +351,6 @@ export const zh: Messages = {
     searchInstead: "改为搜索代币",
     change: "更换",
     selectTokenRequired: "请选择代币,或切换为手动输入。",
-    fixedLabel: "锁定固定值",
-    fixedHint: "跳过市场价,始终按 数量 × 单价 估值(如锁仓/vesting 代币)。",
     addOnchain: "添加链上钱包",
     chain: "链",
     address: "地址",

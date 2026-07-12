@@ -3,22 +3,9 @@ import { z } from "zod";
 import { Balance, type BalanceKind, Defi, type PerpPosition, Spot } from "../src/balance";
 
 describe("Balance 4-kind 判别联合 —— runtime parse", () => {
-  it("spot:无 meta 的基础行(meta 可选)", () => {
+  it("spot:普通代币行(零 typed meta)", () => {
     const b = Balance.parse({ kind: "spot", symbol: "BTC", amount: 1, value: 100 });
     expect(b).toMatchObject({ kind: "spot", symbol: "BTC", value: 100 });
-    if (b.kind === "spot") expect(b.meta).toBeUndefined();
-  });
-
-  it("spot:带可选行为 meta { fixed:true }", () => {
-    const b = Balance.parse({
-      kind: "spot",
-      symbol: "BTC",
-      amount: 1,
-      value: 100,
-      meta: { fixed: true },
-    });
-    expect(b.kind).toBe("spot");
-    if (b.kind === "spot") expect(b.meta?.fixed).toBe(true);
   });
 
   it("defi:带 protocol/positionType meta", () => {
