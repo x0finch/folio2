@@ -129,17 +129,16 @@ describe("revalue", () => {
   });
 
   it("bitcoin → 盯市:provider 只给 amount(value=0),按 BTC 市价算 value", async () => {
-    // bitcoin provider 产 value=0、tokenKey=chain:bitcoin/native:btc,靠 symbol 回退到 bitcoin 价 65000。
+    // bitcoin provider 产 value=0、kind=spot(ADR 0010:BTC 并回 spot)、tokenKey=chain:bitcoin/native:btc,
+    // 靠 symbol 回退到 bitcoin 价 65000。未确认/派生明细走 account 级 note,不在 balance meta。
     const btc: Balance = {
       symbol: "BTC",
       amount: 0.08,
       value: 0,
-      kind: "utxo", // bitcoin connector 产 utxo kind(pendingSats 在 UtxoMeta)
+      kind: "spot",
       tokenKey: "chain:bitcoin/native:btc",
-      meta: { pendingSats: 500000 },
     };
     const out = await revalue(tokens(), true, [btc]);
     expect(out[0].value).toBe(5200); // 0.08 × 65000
-    expect((out[0].meta as { pendingSats: number }).pendingSats).toBe(500000); // meta 保留
   });
 });
