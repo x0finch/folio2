@@ -65,4 +65,6 @@ export type {
   TokenRecordPrice,
   TokenRef,
 } from "./types";
+// 估值优先级纯函数 + 模式(Phase 3)。
+export { type ValuationMode, valuate } from "./valuate";
 export type { OracleCapability, OracleVendor } from "./vendor";

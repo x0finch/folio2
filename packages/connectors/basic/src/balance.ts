@@ -15,6 +15,10 @@ export const BalanceBase = z.object({
   amount: z.number(),
   value: z.number(), // USD 加总权威(原 usdValue);sync 写快照时映射 usdValue
   price: z.number().optional(), // 单价 USD(provider 直接给则带)
+  // provider 自带单价(oracle 多源 Phase 3):revalue 从原始余额捕获(price ?? value/amount),
+  // 落 snapshot_balances.self_price —— 作估值「原料」,让切换源/估值模式能从原料重算、可逆、自带价不丢。
+  // 与 price 分开:price 可能被 revalue 改成源价,selfPrice 恒为 provider 原值。
+  selfPrice: z.number().optional(),
   tokenKey: z.string().optional(), // 代币寻址标识(CAIP-19 文法;拿不到则空,退化按 symbol)
   name: z.string().optional(), // provider 自带代币元信息(喂参考层 / 备用展示)
   logo: z.string().optional(),

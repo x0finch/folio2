@@ -128,4 +128,26 @@ describe("revalue", () => {
     const out = await revalue(tokens(), true, [btc]);
     expect(out[0].value).toBe(5200); // 0.08 × 65000
   });
+
+  it("非盯市类型 self-first:捕获 selfPrice(= value/amount)、value 不变、不回源", async () => {
+    const spot: Balance = { symbol: "BTC", amount: 2, value: 120000, kind: "spot" };
+    const out = await revalue(tokens(), false, [spot]); // 默认 self-first
+    expect(out[0].value).toBe(120000); // 自带价权威,不动
+    expect(out[0].selfPrice).toBe(60000); // 120000 / 2,捕获为原料
+  });
+
+  it("source-first:非盯市类型也改用源价,selfPrice 仍作原料留存", async () => {
+    const spot: Balance = { symbol: "BTC", amount: 2, value: 120000, kind: "spot" };
+    const out = await revalue(tokens(), false, [spot], "source-first");
+    expect(out[0].value).toBe(130000); // 2 × 65000(源价)
+    expect(out[0].price).toBe(65000);
+    expect(out[0].selfPrice).toBe(60000); // 自带价不丢 → 可切回
+  });
+
+  it("source-first 源无价 → 回退自带价", async () => {
+    const spot: Balance = { symbol: "PRIVATETOKEN", amount: 10, value: 99, kind: "spot" };
+    const out = await revalue(tokens(), false, [spot], "source-first");
+    expect(out[0].value).toBe(99); // 源无该币 → 自带兜底
+    expect(out[0].selfPrice).toBe(9.9);
+  });
 });
