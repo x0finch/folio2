@@ -1,23 +1,18 @@
-import type { ConnectorId } from "@folio/connectors";
 import type { Balance } from "@folio/connectors-basic";
 import type { Tokens } from "@folio/tokens";
 
-// 同步时按市价盯市(mark-to-market)的 connector:provider 只给 amount、value 交这里算的那些。
-//   · manual —— 用户录数量,市价改 value(P7.4.2/P7.4.3);
-//   · bitcoin —— provider 只产已确认 BTC amount(value=0),此处 amount × BTC 市价。
-// 其余(zerion/CEX/perp 自带 USD 估值)不动:富化不重算(enrich-not-reprice)。
-const REVALUE_TYPES = new Set<ConnectorId>(["manual", "bitcoin"]);
-
-// 同步时重估:仅盯市类型用市场价改 value,其余 kind 原样。
+// 同步时重估:仅盯市(mark-to-market)类型用市场价改 value,其余 kind 原样(富化不重算,enrich-not-reprice)。
+// 「是否盯市」由 connector 的 manifest.valuation 决定,调用方(sync-deps)解析后以 `markToMarket` 布尔注入 ——
+// 不再靠 app 侧硬编码 connectorId 名单,第三方 connector 自带该语义即可(见 @folio/connectors-basic ConnectorValuation)。
 // 解析:有 `tokenKey`(用户选币 → coingecko:<id> / BTC → chain:bitcoin/native:btc)→ 直达 ref;否则按 symbol。
 // 命中且有价 → value = amount × 市场价,否则保留 provider 的 value(manual 的 amount × unitPrice 回退)。
 // 取价/回源/写缓存全在 tokens 内(priceOf),外面只表达意图。只依赖 tokens 实例(无 db/cloudflare)→ 可纯测。
 export async function revalue(
   tokens: Tokens,
-  connectorId: ConnectorId,
+  markToMarket: boolean,
   balances: Balance[],
 ): Promise<Balance[]> {
-  if (!REVALUE_TYPES.has(connectorId)) return balances;
+  if (!markToMarket) return balances;
   return Promise.all(
     balances.map(async (b) => {
       // 锁定固定值(P7.4.4):即便币可识别也跳过市价、保留 provider 的 amount × unitPrice。

@@ -84,12 +84,12 @@ const bal = (symbol: string, amount: number, value: number, identifier?: string)
 
 describe("revalue", () => {
   it("manual resolvable → value = amount × market price", async () => {
-    const out = await revalue(tokens(), "manual", [bal("BTC", 0.5, 1)]);
+    const out = await revalue(tokens(), true, [bal("BTC", 0.5, 1)]);
     expect(out[0].value).toBe(32500); // 0.5 × 65000
   });
 
   it("manual unresolvable → keeps provider value (unitPrice fallback)", async () => {
-    const out = await revalue(tokens(), "manual", [bal("PRIVATETOKEN", 10, 99)]);
+    const out = await revalue(tokens(), true, [bal("PRIVATETOKEN", 10, 99)]);
     expect(out[0].value).toBe(99);
   });
 
@@ -102,18 +102,18 @@ describe("revalue", () => {
       kind: "spot",
       meta: { fixed: true },
     };
-    const out = await revalue(tokens(), "manual", [locked]);
+    const out = await revalue(tokens(), true, [locked]);
     expect(out[0].value).toBe(1);
   });
 
   it("explicit coingecko tokenKey overrides symbol resolution", async () => {
     // 错的 symbol "XBT" 但 tokenKey=coingecko:bitcoin → 用 bitcoin 的 store 价 65000。
-    const out = await revalue(tokens(), "manual", [bal("XBT", 1, 0, "bitcoin")]);
+    const out = await revalue(tokens(), true, [bal("XBT", 1, 0, "bitcoin")]);
     expect(out[0].value).toBe(65000);
   });
 
   it("explicit tokenKey not in warm cache → source.fetchPrices supplies the price", async () => {
-    const out = await revalue(tokens(), "manual", [bal("TONCOIN", 2, 0, "the-open-network")]);
+    const out = await revalue(tokens(), true, [bal("TONCOIN", 2, 0, "the-open-network")]);
     expect(out[0].value).toBe(10); // 2 × 5(来自 source.fetchPrices)
   });
 
@@ -124,7 +124,7 @@ describe("revalue", () => {
       value: 60000,
       kind: "spot",
     };
-    const out = await revalue(tokens(), "binance", [spot]);
+    const out = await revalue(tokens(), false, [spot]);
     expect(out[0].value).toBe(60000);
   });
 
@@ -138,7 +138,7 @@ describe("revalue", () => {
       tokenKey: "chain:bitcoin/native:btc",
       meta: { pendingSats: 500000 },
     };
-    const out = await revalue(tokens(), "bitcoin", [btc]);
+    const out = await revalue(tokens(), true, [btc]);
     expect(out[0].value).toBe(5200); // 0.08 × 65000
     expect((out[0].meta as { pendingSats: number }).pendingSats).toBe(500000); // meta 保留
   });

@@ -10,4 +10,6 @@ export const manual = defineConnector({
   logo: "", // manual 无 logo,UI 走内置 WalletIcon
   account: { creds: manualAccountCreds },
   balance: { schema: Spot, providers: [manualProvider] }, // 单 kind:spot
+  // 无权威价:只录数量 + 初始单价,恒按市场源价盯市重估(见 app revalue)。
+  valuation: "mark-to-market",
 });

@@ -13,4 +13,6 @@ export const bitcoin = defineConnector({
   account: { creds: bitcoinAccountCreds },
   // 单 kind connector:schema 直接用 Utxo(无需判别联合)。
   balance: { schema: Utxo, providers: [blockbookProvider] },
+  // 无权威价:provider 只产已确认 amount(value=0),恒按 BTC 市价盯市。
+  valuation: "mark-to-market",
 });

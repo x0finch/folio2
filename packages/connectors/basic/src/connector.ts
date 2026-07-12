@@ -30,6 +30,12 @@ export interface BalanceProvider<
   validateCreds?(creds: CredsOf<PC>): Promise<boolean>; // provider 自身 creds liveness
 }
 
+// 估值语义:provider 的 value 权不权威。authoritative(默认)= 场馆/链上自带权威 USD 估值,
+// 富化不重算(enrich-not-reprice);mark-to-market = 无权威价、恒按市场源价盯市(如 manual 只录量、
+// bitcoin 只产已确认 amount)。由 connector 在 manifest 自声明 —— 消费方(app revalue)据此决定
+// 是否捕获自带单价 / 恒用源价,第三方 connector 也能自带该语义(不再靠 app 侧硬编码名单)。
+export type ConnectorValuation = "authoritative" | "mark-to-market";
+
 // 擦除版 manifest —— 异构 registry 存储用。具体泛型(AC / 该 connector 的 B 子集 / 各 provider PC)
 // 只在 defineConnector 站点存在并做编译期校验,进 registry 后擦除到 Balance 全集。
 export interface ConnectorManifest {
@@ -41,6 +47,7 @@ export interface ConnectorManifest {
     readonly schema: z.ZodType<Balance>;
     readonly providers: readonly BalanceProvider<Balance>[];
   };
+  readonly valuation?: ConnectorValuation; // 缺省 authoritative
 }
 
 // defineConnector 仅为【类型推断】存在:schema 是事实源、`B = z.infer<S>`(绝不 z.ZodType<B> 注解,
@@ -56,6 +63,7 @@ export function defineConnector<
   logo: string;
   account: { creds: AC };
   balance: { schema: S; providers: BalanceProvider<z.infer<S>, AC>[] };
+  valuation?: ConnectorValuation;
 }): ConnectorManifest & { readonly id: Id } {
   // 保留字面量 id(#37d:entry registry 据此派生 ConnectorId 联合),仍向下兼容擦除版 ConnectorManifest。
   return m as unknown as ConnectorManifest & { readonly id: Id };
