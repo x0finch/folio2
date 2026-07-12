@@ -11,15 +11,5 @@
       "kind": "spot",
       "tokenKey": "coingecko:bitcoin"
     }
-  ],
-  "fixed surfaced to meta (sync skips market valuation)": [
-    {
-      "symbol": "BTC",
-      "amount": 1,
-      "price": 64000,
-      "value": 64000,
-      "kind": "spot",
-      "meta": { "fixed": true }
-    }
   ]
 }

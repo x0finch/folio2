@@ -25,11 +25,7 @@ export const BalanceBase = z.object({
 });
 
 // —— 各 kind 的 meta 契约(随 kind 精确) ——
-
-// spot:可选的类型化【行为 meta】。**目前只有 manual connector 在用**:唯一字段 fixed —— 锁定固定值,
-// revalue 据此跳过市价重估、钉死 amount × price。行为标志、不渲染(value/展示仍是普通代币行);
-// 其它 spot 发射者(evm/coinstats/CEX)不带 meta。展示型自定义 meta 待 #43。
-export const SpotMeta = z.object({ fixed: z.boolean().optional() });
+// spot 零 typed meta(ADR 0010:删 SpotMeta/fixed —— 锁定固定值未用到;manual 统一走市价重估)。
 
 // defi:协议内仓位。consumer 按 protocol 分组、按 positionType 展示。
 export const DefiMeta = z.object({
@@ -60,9 +56,8 @@ export const PerpPositionMeta = z.object({
 // 未确认/派生地址/收款全是展示细节,已由 account 级 Note[](blockbook buildBtcNote,ADR 0011)承载)。
 
 // —— 各 kind schema(connector 组合子集用) ——
-// spot:不再严格无 meta —— 携一个【可选】的类型化行为 meta(当前仅 fixed);value/渲染仍是普通代币行。
-// 保持类型化(不是开放 Record):meta 只放约定内的行为标志。
-export const Spot = BalanceBase.extend({ kind: z.literal("spot"), meta: SpotMeta.optional() });
+// spot:零 typed meta(普通代币行,value/渲染即全部)。
+export const Spot = BalanceBase.extend({ kind: z.literal("spot") });
 export const Defi = BalanceBase.extend({ kind: z.literal("defi"), meta: DefiMeta });
 export const PerpEquity = BalanceBase.extend({
   kind: z.literal("perp_equity"),
@@ -82,7 +77,6 @@ export type Spot = z.infer<typeof Spot>;
 export type Defi = z.infer<typeof Defi>;
 export type PerpEquity = z.infer<typeof PerpEquity>;
 export type PerpPosition = z.infer<typeof PerpPosition>;
-export type SpotMeta = z.infer<typeof SpotMeta>;
 export type DefiMeta = z.infer<typeof DefiMeta>;
 export type PerpEquityMeta = z.infer<typeof PerpEquityMeta>;
 export type PerpPositionMeta = z.infer<typeof PerpPositionMeta>;

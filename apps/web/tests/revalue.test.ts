@@ -93,19 +93,6 @@ describe("revalue", () => {
     expect(out[0].value).toBe(99);
   });
 
-  it("meta.fixed → keeps provider value even when symbol resolves", async () => {
-    // BTC 可解析(store 有价 65000),但锁定固定值 → 保留 provider 的 value=1。
-    const locked: Balance = {
-      symbol: "BTC",
-      amount: 0.5,
-      value: 1,
-      kind: "spot",
-      meta: { fixed: true },
-    };
-    const out = await revalue(tokens(), true, [locked]);
-    expect(out[0].value).toBe(1);
-  });
-
   it("explicit coingecko tokenKey overrides symbol resolution", async () => {
     // 错的 symbol "XBT" 但 tokenKey=coingecko:bitcoin → 用 bitcoin 的 store 价 65000。
     const out = await revalue(tokens(), true, [bal("XBT", 1, 0, "bitcoin")]);

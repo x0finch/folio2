@@ -173,16 +173,17 @@ export async function syncAccount(
       note: outcome.note,
       // 边界映射:Balance 契约用 value,快照层沿用 usdValue(不动表结构)。其余字段透传;
       // token 元信息(name/logo/tokenKey)不落快照,参考层是其 home(见 canonical 计划)。
-      // kind 透传:db 的 SnapshotBalanceInput.kind 与 connectors Balance 同为 5-kind 联合
-      //(spot/defi/perp_equity/perp_position/utxo,#37c 起 db 直取 @folio/connectors-basic),直接透传。
+      // kind 透传:db 的 SnapshotBalanceInput.kind 与 connectors Balance 同为 4-kind 联合
+      //(spot/defi/perp_equity/perp_position,#37c 起 db 直取 @folio/connectors-basic;utxo 已并回 spot,ADR 0010),直接透传。
       // balance 级 note(单个 Note,note 重设计)随各 balance 落 snapshot_balances.note;revalue 不动 note。
+      // meta 仅 defi/perp 有(spot 零 typed meta)→ 用 `in` 收窄后取。
       balances: balances.map((b) => ({
         symbol: b.symbol,
         amount: b.amount,
         usdValue: b.value,
         kind: b.kind,
         tokenKey: b.tokenKey,
-        meta: b.meta,
+        meta: "meta" in b ? b.meta : undefined,
         note: b.note,
       })),
     });
