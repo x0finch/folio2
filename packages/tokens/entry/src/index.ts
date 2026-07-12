@@ -1,12 +1,3 @@
-// @folio/tokens —— 对外门面。只暴露:契约与数据(re-export @folio/tokens-basic:类型 + 接口 + errors + ref + 常量)
-// 以及唯一组装入口 createTokens(返回一个 Tokens 实例)。解析/预热/symbol 归一都是实现细节,
-// 经 Tokens 实例的方法用(或在 store 调用前完成),不单独对外导出。
-
-export * from "@folio/tokens-basic";
-export {
-  type CreateTokensConfig,
-  createTokens,
-  type EnrichedAsset,
-  type ProviderAsset,
-  type Tokens,
-} from "./tokens";
+// Shim(oracle 合包 Phase 1,expand):`@folio/tokens` 门面迁入 `@folio/oracle`,
+// 本包降为 re-export 转发,现有 import 一行不改。Phase 2(contract)删本 shim、把 import 改到 @folio/oracle。
+export * from "@folio/oracle";

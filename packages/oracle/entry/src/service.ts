@@ -5,7 +5,7 @@ import type {
   TokenProvider,
   TokenRef,
   TokenStore,
-} from "@folio/tokens-basic";
+} from "@folio/oracle-basic";
 import {
   CGK_RECHECK_TTL_MS,
   DEFAULT_TOP_N,
@@ -14,7 +14,7 @@ import {
   parseTokenKey,
   TOKEN_KEY_TTL_MS,
   WARM_TTL_MS,
-} from "@folio/tokens-basic";
+} from "@folio/oracle-basic";
 import { normalizeSymbol } from "./normalize";
 import { chooseResolution } from "./resolve";
 

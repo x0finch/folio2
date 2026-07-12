@@ -1,4 +1,4 @@
-import type { CgkCoinId, TokenRef } from "@folio/tokens-basic";
+import type { CgkCoinId, TokenRef } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import {
   parseAssetPlatforms,

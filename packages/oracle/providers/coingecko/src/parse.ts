@@ -5,7 +5,7 @@ import {
   type TokenInfo,
   type TokenPrice,
   type TokenRef,
-} from "@folio/tokens-basic";
+} from "@folio/oracle-basic";
 import { SEARCH_LIMIT, VS_USD } from "./constants";
 
 // Retry-After 解析已移入 @folio/coingecko-client;re-export 保持既有导入面(含测试)。

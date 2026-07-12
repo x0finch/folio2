@@ -7,8 +7,8 @@ import type {
   TokenRecord,
   TokenRef,
   TokenStore,
-} from "@folio/tokens-basic";
-import { OVERRIDES } from "@folio/tokens-basic";
+} from "@folio/oracle-basic";
+import { OVERRIDES } from "@folio/oracle-basic";
 import { describe, expect, it, vi } from "vitest";
 import { normalizeSymbol } from "../src/normalize";
 import { refreshWarm, resolveAsset } from "../src/service";

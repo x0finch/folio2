@@ -1,4 +1,4 @@
-import { type CgkCoinId, TokenError, type TokenRef } from "@folio/tokens-basic";
+import { type CgkCoinId, TokenError, type TokenRef } from "@folio/oracle-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CG_BASE_FREE,

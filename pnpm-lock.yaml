@@ -479,6 +479,47 @@ importers:
         specifier: ^4.1.5
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))
 
+  packages/oracle/basic:
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))
+
+  packages/oracle/entry:
+    dependencies:
+      '@folio/oracle-basic':
+        specifier: workspace:*
+        version: link:../basic
+      '@folio/oracle-provider-coingecko':
+        specifier: workspace:*
+        version: link:../providers/coingecko
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))
+
+  packages/oracle/providers/coingecko:
+    dependencies:
+      '@folio/coingecko-client':
+        specifier: workspace:*
+        version: link:../../../clients/coingecko
+      '@folio/oracle-basic':
+        specifier: workspace:*
+        version: link:../../basic
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))
+
   packages/platforms:
     dependencies:
       '@folio/coingecko-client':
@@ -515,45 +556,24 @@ importers:
         version: 4.4.3
 
   packages/tokens/basic:
+    dependencies:
+      '@folio/oracle-basic':
+        specifier: workspace:*
+        version: link:../../oracle/basic
     devDependencies:
       typescript:
         specifier: ^6.0.2
         version: 6.0.3
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))
 
   packages/tokens/entry:
     dependencies:
-      '@folio/tokens-basic':
+      '@folio/oracle':
         specifier: workspace:*
-        version: link:../basic
-      '@folio/tokens-provider-coingecko':
-        specifier: workspace:*
-        version: link:../providers/coingecko
+        version: link:../../oracle/entry
     devDependencies:
       typescript:
         specifier: ^6.0.2
         version: 6.0.3
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))
-
-  packages/tokens/providers/coingecko:
-    dependencies:
-      '@folio/coingecko-client':
-        specifier: workspace:*
-        version: link:../../../clients/coingecko
-      '@folio/tokens-basic':
-        specifier: workspace:*
-        version: link:../../basic
-    devDependencies:
-      typescript:
-        specifier: ^6.0.2
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))
 
   packages/ui:
     dependencies:
