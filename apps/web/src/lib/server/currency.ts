@@ -3,7 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { readCurrencyCookie, resolveCurrency } from "../currency";
 import type { PreferCurrency } from "../hooks/use-prefer-currency";
-import { buildFx } from "./fx";
+import { buildOracle } from "./oracle";
 
 // 服务端定展示币种:读 folio_currency cookie → SUPPORTED 校验 → 取该币种汇率。
 // 冷缓存(尚未 sync 预热)→ 按需 warm 一次(exchange_rates 一次拉全),让首次切换即生效,
@@ -13,7 +13,7 @@ export const getDisplayCurrency = createServerFn({ method: "GET" }).handler(
     const headers = getRequestHeaders();
     const currency = resolveCurrency(readCurrencyCookie(headers.get("cookie")));
     if (currency.code === "USD") return { currency, rate: 1 };
-    const fx = buildFx(env);
+    const fx = buildOracle(env).fx;
     let rate: number | undefined;
     try {
       rate = await fx.resolve(currency.code);

@@ -4,8 +4,8 @@ import { buildOverview } from "../overview-model";
 import { requireAuth } from "../require-auth";
 import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
-import { buildPlatforms } from "./platforms";
-import { buildTokens, enrichBalances } from "./tokens";
+import { buildOracle } from "./oracle";
+import { enrichBalances } from "./tokens";
 
 // 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做
 // 鉴权 + 加载(accounts / 最新快照)+ 注入依赖(tokens / platforms)+ 调用。
@@ -18,9 +18,10 @@ export const getMyOverview = createServerFn({ method: "GET" })
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+    const oracle = buildOracle(env);
     return buildOverview(accounts, byAccount, {
-      tokens: buildTokens(env),
-      platforms: buildPlatforms(env),
+      tokens: oracle.tokens,
+      platforms: oracle.platforms,
       connectorMeta: connectorPlatformMeta,
     });
   });
@@ -36,7 +37,7 @@ export const getMyAccountHoldings = createServerFn({ method: "GET" })
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-    const tokens = buildTokens(env);
+    const tokens = buildOracle(env).tokens;
     const rows = await Promise.all(
       accounts.map(async (account) => {
         const latest = byAccount.get(account.id);
