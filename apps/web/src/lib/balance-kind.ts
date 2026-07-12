@@ -24,9 +24,6 @@ export interface KindRow {
 
 export function viewKind(row: KindRow): ViewKind {
   switch (row.kind) {
-    case "spot":
-    case "manual": // 遗留:来源不是契约 → 现货
-      return "spot";
     case "defi":
     case "perp_equity":
     case "perp_position":
@@ -34,7 +31,8 @@ export function viewKind(row: KindRow): ViewKind {
     case "perp": // 遗留:单 kind + meta.role
       return legacyPerpRole(row.metaJson) === "position" ? "perp_position" : "perp_equity";
     default:
-      return "spot"; // 未知/遗留(含旧 utxo / 骑 spot 的 BTC)→ 当现货兜底,不 throw
+      // spot / manual(遗留)/ utxo(遗留)/ 骑 spot 的 BTC / 未知 → 一律现货兜底,不 throw。
+      return "spot";
   }
 }
 
