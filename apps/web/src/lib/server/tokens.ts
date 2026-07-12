@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
-import { createTokenStore } from "@folio/db";
-import { createTokens, TOP_TOKENS_LIMIT, type Tokens } from "@folio/tokens";
+import { TOP_TOKENS_LIMIT, type Tokens } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -8,16 +7,9 @@ import { tokenLogoUrl } from "../logo";
 import { requireAuth } from "../require-auth";
 import { type BalanceLike, balanceToAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
 import { db } from "./db";
+import { oracle } from "./oracle";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
-
-// 组装 tokens 实例:默认 provider(CoinGecko)+ D1 store(store 实现经回调注入,tokens 不依赖 @folio/db)。
-export function buildTokens(bindings: Cloudflare.Env): Tokens {
-  return createTokens({
-    apiKey: bindings.COINGECKO_API_KEY || undefined,
-    createStore: (source) => createTokenStore(bindings, { source }),
-  });
-}
 
 // 选币 autocomplete(P7.4.3):按关键词搜;返回 TokenInfo[](JSON 可序列化)。
 export const searchTokens = createServerFn({ method: "GET" })
@@ -28,7 +20,7 @@ export const searchTokens = createServerFn({ method: "GET" })
     tokenLog.debug("searchTokens: enter", { query: q, hasKey: !!env.COINGECKO_API_KEY });
     if (!q) return [];
     // 抛错兜底在 requireAuth 中间件集中打日志(带 userId),此处只表达业务。
-    const out = await buildTokens(env).search(q);
+    const out = await oracle.tokens.search(q);
     tokenLog.debug("searchTokens: ok", { query: q, count: out.length });
     // logo 不代理:search 是对 CGK 的 live pass-through,结果不写 store、无内部 id;而 /api/logo
     // 按内部 id 读 store(getById,不回源),未持有的搜索命中查不到 → 404 图裂。故直返上游 URL
@@ -43,7 +35,7 @@ export const topTokens = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const limit = data?.limit ?? TOP_TOKENS_LIMIT;
     tokenLog.debug("topTokens: enter", { limit, hasKey: !!env.COINGECKO_API_KEY });
-    const out = await buildTokens(env).topTokens(limit);
+    const out = await oracle.tokens.topTokens(limit);
     tokenLog.debug("topTokens: ok", { count: out.length });
     // topTokens 读 store(listTopTokens 带内部 id),/api/logo 的 getById 能命中 → 可安全代理
     //(不同于 search:live 结果无内部 id、不在 store)。
@@ -56,7 +48,7 @@ export const tokenPrice = createServerFn({ method: "GET" })
   .validator(z.object({ identifier: z.string().min(1) }))
   .handler(async ({ data }) => {
     tokenLog.debug("tokenPrice: enter", { identifier: data.identifier });
-    const tokens = buildTokens(env);
+    const tokens = oracle.tokens;
     // symbol 不参与:显式 identifier 直接升格为 ref(resolve 内部短路)。
     const res = await tokens.resolve({ symbol: "", identifier: data.identifier });
     const hit = res.ref ? await tokens.priceOf(res.ref) : undefined;
@@ -89,7 +81,7 @@ export const refreshStalePrices = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const snapshots = await db.getLatestSnapshotByUser(context.userId);
     const assets = snapshots.flatMap((s) => s.balances).map(balanceToAssetRef);
-    const refreshed = await buildTokens(env).refreshStalePrices(assets);
+    const refreshed = await oracle.tokens.refreshStalePrices(assets);
     tokenLog.info("stale prices refreshed", { refreshed });
     return { refreshed };
   });

@@ -38,6 +38,9 @@ importers:
       '@folio/notes-react':
         specifier: workspace:*
         version: link:../../packages/notes/react
+      '@folio/oracle':
+        specifier: workspace:*
+        version: link:../../packages/oracle/entry
       '@folio/platforms':
         specifier: workspace:*
         version: link:../../packages/platforms

@@ -23,6 +23,7 @@
     "@folio/db": "workspace:*",
     "@folio/notes-react": "workspace:*",
     "@folio/fx": "workspace:*",
+    "@folio/oracle": "workspace:*",
     "@folio/platforms": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/tokens": "workspace:*",
