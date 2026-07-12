@@ -502,6 +502,9 @@ importers:
       '@folio/oracle-provider-coingecko':
         specifier: workspace:*
         version: link:../providers/coingecko
+      '@folio/oracle-provider-defillama':
+        specifier: workspace:*
+        version: link:../providers/defillama
     devDependencies:
       typescript:
         specifier: ^6.0.2

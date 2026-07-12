@@ -347,22 +347,62 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
 
     async linkTokenKeyToCgk(key, info, price, ttls) {
       const t = now();
-      // find-or-create cgk 行:按本源 vendor 映射找 tokenId。
+      // find-or-create 本源 canonical 行:按本源 vendor 映射找 tokenId。
       const mapped = await db
         .select({ tokenId: tokenVendorIds.tokenId })
         .from(tokenVendorIds)
         .where(
           and(eq(tokenVendorIds.vendor, source), eq(tokenVendorIds.vendorId, info.ref.identifier)),
         );
-      const cgkId = mapped[0]?.tokenId ?? crypto.randomUUID();
 
-      // 现指针与其代币。若指向的不是 cgk 行(id 不同 → 无本源映射的孤儿),即待合并删除的孤儿。
+      // 现指针与其代币。
       const cur = await db
         .select({ tok: tokens })
         .from(tokenIndex)
         .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
         .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key)));
-      const orphan = cur[0] && cur[0].tok.id !== cgkId ? cur[0].tok : null;
+      const curRow = cur[0]?.tok ?? null;
+
+      // 跨源重锚(#83 换源不碎):本源尚无该 coin 映射,但 tokenKey 已指向某源已建的 canonical 行
+      //(有任意 vendor 映射)→ 复用**同一内部 id**、只挂本源映射 + 刷价,不覆盖别源已有的
+      // name/logo/symbol(本源可能是只供价的 DefiLlama,元信息权威留 baseline)。
+      if (!mapped[0] && curRow) {
+        const anyMap = await db
+          .select({ v: tokenVendorIds.vendor })
+          .from(tokenVendorIds)
+          .where(eq(tokenVendorIds.tokenId, curRow.id))
+          .limit(1);
+        if (anyMap.length > 0) {
+          const stmts: Stmt[] = [
+            vendorMapUpsert(curRow.id, info.ref.identifier),
+            db
+              .update(tokenIndex)
+              .set({ expiresAt: t + ttls.indexTtlMs })
+              .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key))),
+          ];
+          if (price) {
+            stmts.push(
+              db
+                .update(tokens)
+                .set({
+                  unitPrice: price.unitPrice,
+                  change24h: price.change24h ?? null,
+                  marketCapRank: price.marketCapRank ?? null,
+                  priceAsOf: price.asOf,
+                  priceExpiresAt: t + ttls.priceTtlMs,
+                })
+                .where(eq(tokens.id, curRow.id)),
+            );
+          }
+          const [first, ...rest] = stmts;
+          await db.batch([first, ...rest]);
+          return;
+        }
+      }
+
+      const cgkId = mapped[0]?.tokenId ?? crypto.randomUUID();
+      // 若现指针指向的不是本源 canonical 行(id 不同 → 无本源映射的孤儿),即待合并删除的孤儿。
+      const orphan = curRow && curRow.id !== cgkId ? curRow : null;
       const carryLogo = orphan?.providerLogo ?? null;
       const groupId = groupIdFor(info.ref.identifier);
 

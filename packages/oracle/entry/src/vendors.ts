@@ -11,6 +11,7 @@ import {
   createCoinGeckoPlatformSource,
   createCoinGeckoProvider,
 } from "@folio/oracle-provider-coingecko";
+import { createDefiLlamaProvider, defiLlamaVendor } from "@folio/oracle-provider-defillama";
 
 // 一个 vendor 的「描述 + 各能力的具体实现工厂」。工厂当且仅当 vendor 声明了对应能力时在场
 //(见 vendor.capabilities):prices+tokenMeta 共用一个 TokenProvider;platformMeta→PlatformSource;
@@ -32,8 +33,15 @@ const coingecko: VendorImpl = {
   fxSource: createCoinGeckoFxSource,
 };
 
-// vendor 注册表(Phase 3 仅 CoinGecko;P3-5 起挂 DefiLlama 的 prices 面)。
-export const VENDORS: Record<string, VendorImpl> = { coingecko };
+// DefiLlama:只供 prices(vendor 声明);tokenSource 是其取价面(#80)。DefiLlama keyless,忽略 apiKey。
+// platform/fx 无 → 缺能力回退 baseline。
+const defillama: VendorImpl = {
+  vendor: defiLlamaVendor,
+  tokenSource: () => createDefiLlamaProvider(),
+};
+
+// vendor 注册表(#83:CoinGecko baseline + DefiLlama 可切换价格源)。
+export const VENDORS: Record<string, VendorImpl> = { coingecko, defillama };
 
 // 能力路由:活跃源声明该能力 → 用活跃源;否则回退 baseline。未知活跃源亦退化为 baseline。
 export function pickVendor(capability: OracleCapability, activeVendor: string): VendorImpl {

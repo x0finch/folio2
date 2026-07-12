@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@folio/oracle-basic": "workspace:*",
-    "@folio/oracle-provider-coingecko": "workspace:*"
+    "@folio/oracle-provider-coingecko": "workspace:*",
+    "@folio/oracle-provider-defillama": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^6.0.2",
