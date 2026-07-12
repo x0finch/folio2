@@ -1,4 +1,9 @@
-import { type FxRates, type FxSource, type FxStore, SUPPORTED_CURRENCIES } from "./types";
+import {
+  type FxRates,
+  type FxSource,
+  type FxStore,
+  SUPPORTED_CURRENCIES,
+} from "@folio/oracle-basic";
 
 // FX 变化慢 → 6h TTL。TTL 只闸 warm;resolve 软过期(返最近值)。
 const FX_TTL_MS = 6 * 60 * 60 * 1000;

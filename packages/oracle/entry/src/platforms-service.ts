@@ -1,4 +1,10 @@
-import type { PlatformMeta, PlatformRow, PlatformSource, PlatformStore, Platforms } from "./types";
+import type {
+  PlatformMeta,
+  PlatformRow,
+  PlatformSource,
+  PlatformStore,
+  Platforms,
+} from "@folio/oracle-basic";
 
 // 平台元数据近乎静态 → 长 TTL;venue 404(未收录)用短 TTL,新上所日后可补。
 const CHAIN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
