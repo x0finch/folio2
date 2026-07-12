@@ -127,12 +127,12 @@ describe("toAccountSections", () => {
     expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
   });
 
-  it("BTC 行进现货表(utxo 口径)", () => {
+  it("遗留 kind=utxo 老化归现货表(ADR 0010:utxo 并回 spot,viewKind default 兜底)", () => {
     const s = toAccountSections([
       b({
         id: "1",
         symbol: "BTC",
-        kind: "utxo",
+        kind: "utxo", // 旧快照遗留 kind;viewKind 经 default 归 spot
         usdValue: 5000,
         tokenKey: "chain:bitcoin/native:btc",
         metaJson: JSON.stringify({ pendingSats: 12345 }),

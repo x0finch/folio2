@@ -2,7 +2,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { Balance, type BalanceKind, Defi, type PerpPosition, Spot } from "../src/balance";
 
-describe("Balance 5-kind 判别联合 —— runtime parse", () => {
+describe("Balance 4-kind 判别联合 —— runtime parse", () => {
   it("spot:无 meta 的基础行(meta 可选)", () => {
     const b = Balance.parse({ kind: "spot", symbol: "BTC", amount: 1, value: 100 });
     expect(b).toMatchObject({ kind: "spot", symbol: "BTC", value: 100 });
@@ -59,20 +59,13 @@ describe("Balance 5-kind 判别联合 —— runtime parse", () => {
     expect(pos.kind).toBe("perp_position");
   });
 
-  it("utxo:pendingSats 必填、地址表/收款可选", () => {
-    const b = Balance.parse({
-      kind: "utxo",
-      symbol: "BTC",
-      amount: 0.5,
-      value: 30000,
-      meta: { pendingSats: 0 },
-    });
-    expect(b.kind).toBe("utxo");
-  });
-
-  it("未知 kind 被拒", () => {
+  it("未知 kind 被拒(含并回 spot 的旧 utxo)", () => {
     expect(() => Balance.parse({ kind: "manual", symbol: "X", amount: 1, value: 1 })).toThrow();
     expect(() => Balance.parse({ kind: "perp", symbol: "X", amount: 1, value: 1 })).toThrow();
+    // utxo 已并回 spot(ADR 0010)→ 不再是合法 kind;旧快照行由读端 viewKind 老化归 spot。
+    expect(() =>
+      Balance.parse({ kind: "utxo", symbol: "BTC", amount: 0.5, value: 30000 }),
+    ).toThrow();
   });
 
   it("defi 缺 meta 被拒(meta 随 kind 必填)", () => {
@@ -93,10 +86,8 @@ describe("Balance 5-kind 判别联合 —— runtime parse", () => {
 });
 
 describe("Balance —— 类型完备", () => {
-  it("BalanceKind 恰为 5 个 kind", () => {
-    expectTypeOf<BalanceKind>().toEqualTypeOf<
-      "spot" | "defi" | "perp_equity" | "perp_position" | "utxo"
-    >();
+  it("BalanceKind 恰为 4 个 kind", () => {
+    expectTypeOf<BalanceKind>().toEqualTypeOf<"spot" | "defi" | "perp_equity" | "perp_position">();
   });
 
   it("子集 schema 的 z.infer 精确到该子集(defineConnector 推断基础)", () => {

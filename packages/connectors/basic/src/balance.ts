@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Note } from "./note";
 
-// 【Balance —— 类型完备的 5-kind zod 判别联合】(ADR 0009)
+// 【Balance —— 类型完备的 4-kind zod 判别联合】(ADR 0009 → 0010:utxo 并回 spot)
 // 判别式 kind = "一套独有 meta + 渲染契约"的扁平判别(非资产/链/来源)。
 // 净值不变量:账户 totalUsd === Σ value;value = 该仓位对组合净值的【带符号净贡献】
 //   · 负债记负;每个经济仓位只有一行承载价值,会被重复计的其余行 value:0
@@ -56,23 +56,8 @@ export const PerpPositionMeta = z.object({
   marginUsed: z.number(),
 });
 
-// utxo:UTXO 型自托管持仓(BTC 及将来 UTXO 链)。value/amount = 已确认;未确认只在 meta。
-const UtxoAddress = z.object({
-  address: z.string(),
-  path: z.string(), // 派生路径 m/purpose'/0'/0'/chain/index
-  chain: z.enum(["receive", "change"]),
-  balanceSats: z.number(),
-  pendingSats: z.number(),
-});
-const UtxoReceive = z.object({
-  lastUsed: z.object({ index: z.number(), address: z.string() }).nullable(),
-  next: z.array(z.object({ index: z.number(), address: z.string() })),
-});
-export const UtxoMeta = z.object({
-  pendingSats: z.number(), // 账户净未确认(± mempool)
-  addresses: z.array(UtxoAddress).optional(), // xpub:仅非零派生地址
-  receive: UtxoReceive.optional(), // xpub:收款地址指引
-});
+// BTC(及将来 UTXO 链)不再是独立 kind —— 并回 spot(ADR 0010:主表本就当现货聚合,其「独有」的
+// 未确认/派生地址/收款全是展示细节,已由 account 级 Note[](blockbook buildBtcNote,ADR 0011)承载)。
 
 // —— 各 kind schema(connector 组合子集用) ——
 // spot:不再严格无 meta —— 携一个【可选】的类型化行为 meta(当前仅 fixed);value/渲染仍是普通代币行。
@@ -87,10 +72,9 @@ export const PerpPosition = BalanceBase.extend({
   kind: z.literal("perp_position"),
   meta: PerpPositionMeta,
 });
-export const Utxo = BalanceBase.extend({ kind: z.literal("utxo"), meta: UtxoMeta });
 
-// 全集判别联合 —— 聚合/读端消费的完备 Balance。
-export const Balance = z.discriminatedUnion("kind", [Spot, Defi, PerpEquity, PerpPosition, Utxo]);
+// 全集判别联合 —— 聚合/读端消费的完备 Balance(4-kind)。
+export const Balance = z.discriminatedUnion("kind", [Spot, Defi, PerpEquity, PerpPosition]);
 
 export type Balance = z.infer<typeof Balance>;
 export type BalanceKind = Balance["kind"];
@@ -98,11 +82,7 @@ export type Spot = z.infer<typeof Spot>;
 export type Defi = z.infer<typeof Defi>;
 export type PerpEquity = z.infer<typeof PerpEquity>;
 export type PerpPosition = z.infer<typeof PerpPosition>;
-export type Utxo = z.infer<typeof Utxo>;
 export type SpotMeta = z.infer<typeof SpotMeta>;
 export type DefiMeta = z.infer<typeof DefiMeta>;
 export type PerpEquityMeta = z.infer<typeof PerpEquityMeta>;
 export type PerpPositionMeta = z.infer<typeof PerpPositionMeta>;
-export type UtxoMeta = z.infer<typeof UtxoMeta>;
-export type UtxoAddress = z.infer<typeof UtxoAddress>;
-export type UtxoReceive = z.infer<typeof UtxoReceive>;

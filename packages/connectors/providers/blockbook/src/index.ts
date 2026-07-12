@@ -19,18 +19,29 @@ import {
   type Note,
   type NoteRow,
   ProviderError,
-  type Utxo,
-  type UtxoAddress,
-  type UtxoMeta,
-  type UtxoReceive,
+  type Spot,
 } from "@folio/connectors-basic";
 import { buildTokenKey } from "@folio/tokens-basic";
 import { z } from "zod";
 import { BTC_ADDRESS_RE, EXT_PUBKEY_FULL_RE, EXT_PUBKEY_RE, SATS_PER_BTC } from "./constants";
 
+// BTC xpub 处理的本包局部形状(原 @folio/connectors-basic 的 UtxoAddress/UtxoReceive;
+// utxo kind 并回 spot 后这些只服务本包的 Note 组装,不再是公共契约)。
+interface BtcAddress {
+  address: string;
+  path: string; // 派生路径 m/purpose'/0'/0'/chain/index
+  chain: "receive" | "change";
+  balanceSats: number;
+  pendingSats: number;
+}
+interface BtcReceive {
+  lastUsed: { index: number; address: string } | null;
+  next: { index: number; address: string }[];
+}
+
 // @folio/connectors-provider-blockbook —— 只读 Bitcoin(bitcoin connector)。地址 + xpub 两模式。
 // 只做【整合】:取数走 @folio/blockbook-client(Trezor Blockbook,xpub 服务端派生、一次调用),
-// token 造型/本地下址派生走 @folio/bitcoin-derive,本包串起值/UtxoMeta 组装 + 契约映射。
+// token 造型/本地下址派生走 @folio/bitcoin-derive,本包串起值/Note 组装 + 契约映射。
 // addressOrXpub(public)= BTC 地址或扩展公钥;裸 xpub 用 scriptType(public)选脚本类型(zpub/ypub 前缀已定,忽略)。
 // 值不在此算:provider 只产已确认 BTC amount(value=0),交 app 的 revalue 盯市(token 层唯一价源)。
 // 纯包:blockbook-client / bitcoin-derive 均无 cloudflare:workers / env,不碰 SECRETS_KEY(原则 #5)。
@@ -58,22 +69,18 @@ function parsePath(path: string): { chain: number; index: number } | null {
   return { chain, index };
 }
 
-// 已确认净额 → amount(BTC);未确认 → meta.pendingSats(不进权值)。
-// 既无已确认又无未确认 → 空(无持仓);仅未确认仍产一行(amount=0 + pending 徽标)。
-function toBtcBalances(
-  confirmedSats: number,
-  pendingSats: number,
-  extra?: Partial<Omit<UtxoMeta, "pendingSats">>,
-): Utxo[] {
+// 已确认净额 → amount(BTC);未确认/派生地址等展示细节走 account 级 Note[](buildBtcNote),不落 balance。
+// 既无已确认又无未确认 → 空(无持仓);仅未确认仍产一行(amount=0 + Note 里 pending 段)。
+// BTC 并回 spot(ADR 0010):吐 kind:"spot"、零 meta;value=0 交 revalue 盯市。
+function toBtcBalances(confirmedSats: number, pendingSats: number): Spot[] {
   if (confirmedSats <= 0 && pendingSats === 0) return [];
   return [
     {
       symbol: "BTC",
       amount: confirmedSats / SATS_PER_BTC,
       value: 0, // 交给 revalue 盯市(amount × BTC 市价)
-      kind: "utxo",
+      kind: "spot",
       tokenKey: BTC_TOKEN_KEY,
-      meta: { pendingSats, ...extra } satisfies UtxoMeta,
     },
   ];
 }
@@ -83,8 +90,8 @@ function buildXpubMeta(
   ext: string,
   script: ScriptType,
   tokens: XpubToken[],
-): { addresses: UtxoAddress[]; receive: UtxoReceive } {
-  const addresses: UtxoAddress[] = [];
+): { addresses: BtcAddress[]; receive: BtcReceive } {
+  const addresses: BtcAddress[] = [];
   let lastExternal: { index: number; address: string } | null = null;
 
   for (const t of tokens) {
@@ -123,7 +130,7 @@ const mempoolAddr = (address: string): string => `https://mempool.space/address/
 
 function buildBtcNote(
   pendingSats: number,
-  xpub?: { addresses: UtxoAddress[]; receive: UtxoReceive },
+  xpub?: { addresses: BtcAddress[]; receive: BtcReceive },
 ): Note[] {
   const sections: Note[] = [];
 
@@ -159,7 +166,7 @@ function buildBtcNote(
     }
 
     // 派生分布:仅非零地址,按 receive/change 链拆两 section。
-    const distRow = (a: UtxoAddress): NoteRow => ({
+    const distRow = (a: BtcAddress): NoteRow => ({
       label: a.address,
       value: a.balanceSats / SATS_PER_BTC,
       unit: "BTC",
@@ -196,12 +203,12 @@ async function fetchXpub(
   client: BlockbookClient,
   ext: string,
   scriptType: string | undefined,
-): Promise<{ balances: Utxo[]; note: Note[] }> {
+): Promise<{ balances: Spot[]; note: Note[] }> {
   const script = effectiveScript(ext, scriptType);
   const res = await client.getXpub(blockbookXpubParam(ext, script)); // details=tokenBalances&tokens=used
   const pendingSats = toSats(res.unconfirmedBalance);
   const { addresses, receive } = buildXpubMeta(ext, script, res.tokens ?? []);
-  const balances = toBtcBalances(toSats(res.balance), pendingSats, { addresses, receive });
+  const balances = toBtcBalances(toSats(res.balance), pendingSats);
   return { balances, note: buildBtcNote(pendingSats, { addresses, receive }) };
 }
 
@@ -230,7 +237,7 @@ export const bitcoinAccountCreds = [
 const providerCreds = [] as const satisfies readonly CredField[];
 
 export const blockbookProvider: BalanceProvider<
-  Utxo,
+  Spot,
   typeof bitcoinAccountCreds,
   typeof providerCreds
 > = {
@@ -238,7 +245,7 @@ export const blockbookProvider: BalanceProvider<
   label: "Blockbook",
   creds: providerCreds,
 
-  async fetchBalances(ctx): Promise<{ balances: Utxo[]; note?: Note[] }> {
+  async fetchBalances(ctx): Promise<{ balances: Spot[]; note?: Note[] }> {
     const id = ctx.account.creds.addressOrXpub;
     const client = createBlockbookClient();
     try {
