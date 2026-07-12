@@ -93,6 +93,9 @@ export const snapshotBalances = sqliteTable(
     amount: real("amount").notNull(),
     usdValue: real("usd_value").notNull(),
     kind: text("kind").$type<BalanceKind>().notNull(),
+    // provider 自带单价(oracle 多源 Phase 3):估值「原料」,冻结。usd_value 是成品(revalue 按当时 mode 算);
+    // 当前视图从「amount + self_price + 实时源价 + 当前 mode」现推 → 切源/切开关可逆、自带价不丢。
+    selfPrice: real("self_price"),
     // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的 tokenKey。
     tokenKey: text("token_key"),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空

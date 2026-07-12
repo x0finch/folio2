@@ -182,6 +182,8 @@ export async function syncAccount(
         amount: b.amount,
         usdValue: b.value,
         kind: b.kind,
+        // provider 自带单价(估值原料,Phase 3):revalue 捕获,随快照落 self_price。
+        selfPrice: b.selfPrice,
         tokenKey: b.tokenKey,
         meta: "meta" in b ? b.meta : undefined,
         note: b.note,

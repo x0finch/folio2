@@ -241,7 +241,7 @@ describe("snapshots", () => {
       takenAt: 1000,
       totalUsd: 150,
       balances: [
-        { symbol: "BTC", amount: 0.001, usdValue: 100, kind: "spot" },
+        { symbol: "BTC", amount: 0.001, usdValue: 100, kind: "spot", selfPrice: 100000 },
         {
           symbol: "ETH",
           amount: 0.02,
@@ -263,6 +263,9 @@ describe("snapshots", () => {
     expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.metaJson).toContain("note");
     // 无 note 写入 → 各行 note 省略。
     expect(latest[0]!.balances.every((b) => b.note === undefined)).toBe(true);
+    // self_price 落库/读回(估值原料,Phase 3):BTC 行有、ETH 行无(null)。
+    expect(latest[0]!.balances.find((b) => b.symbol === "BTC")!.selfPrice).toBe(100000);
+    expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.selfPrice).toBeNull();
   });
 
   it("persists per-balance note (single Note) + account-level note (Note[]) and safeParses back (note 重设计)", async () => {
