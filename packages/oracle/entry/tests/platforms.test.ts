@@ -1,7 +1,7 @@
+import type { PlatformMeta, PlatformRow, PlatformSource, PlatformStore } from "@folio/oracle-basic";
+import { createCoinGeckoPlatformSource } from "@folio/oracle-provider-coingecko";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCoinGeckoPlatformSource } from "../src/coingecko";
-import { createPlatforms } from "../src/service";
-import type { PlatformMeta, PlatformRow, PlatformSource, PlatformStore } from "../src/types";
+import { createPlatforms } from "../src/platforms-service";
 
 const ASSET_PLATFORMS = [
   {

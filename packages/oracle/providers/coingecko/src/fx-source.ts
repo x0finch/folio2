@@ -3,7 +3,7 @@ import {
   CoinGeckoError,
   createCoinGeckoClient,
 } from "@folio/coingecko-client";
-import { FxError, type FxSource, SUPPORTED_CURRENCIES } from "./types";
+import { FxError, type FxSource, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 
 // CoinGecko 的 FxSource:拉 /exchange_rates(以 BTC 为基准),对 SUPPORTED 各币种反算
 // usdPerUnit = rates.usd.value / rates.<code>.value(BTC 约掉 → 1 单位该币种的美元价)。

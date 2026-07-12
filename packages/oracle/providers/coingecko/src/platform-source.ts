@@ -5,7 +5,7 @@ import {
   type DerivativesExchange,
   type Exchange,
 } from "@folio/coingecko-client";
-import { PlatformError, type PlatformMeta, type PlatformSource } from "./types";
+import { PlatformError, type PlatformMeta, type PlatformSource } from "@folio/oracle-basic";
 
 // CoinGecko 的 PlatformSource 实现。链走 assetPlatforms(整表),场馆按 key 前缀走 exchange/derivativesExchange;
 // slug = key 冒号后一段(= 账户 type 的 specific,PRD:无需映射)。把 CoinGeckoError → PlatformError。
