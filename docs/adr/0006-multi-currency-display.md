@@ -1,6 +1,6 @@
 # 多币种展示:USD 基准 + 展示层换算 + CoinGecko exchange_rates
 
-Status: accepted
+Status: accepted。**打包边界部分被取代**:见 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-multi-source.md)——`@folio/fx` 合入统一门面 `@folio/oracle`;存 USD / 展示层换算的领域决策不变。
 
 全站以 **USD 为唯一计价基准**存储/聚合(provider 权威),多币种只是**展示层的一次换算**:展示值 `= usdValue / rate`,`rate = usd_per_unit`(1 单位展示币种的美元价)。汇率取自 CoinGecko **`/exchange_rates`**(以 BTC 为基准单位一次拿全,`rate = rates.usd.value / rates.<c>.value`,BTC 约掉)。偏好币种按浏览器存于 **cookie `folio_currency`**(仿 locale),非账户级。FX 逻辑做成独立包 **`@folio/fx`**(镜像 `@folio/platforms`),缓存落 `@folio/db` 的 `fx_rates` 表。
 

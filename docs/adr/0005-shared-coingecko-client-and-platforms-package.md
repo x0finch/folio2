@@ -1,6 +1,6 @@
 # 抽出共享 CoinGecko client,新增 @folio/platforms 包
 
-Status: accepted (implemented — platform-meta #01–#04)
+Status: accepted (implemented — platform-meta #01–#04)。**打包边界部分被取代**:见 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-multi-source.md)——`@folio/platforms` 合入统一门面 `@folio/oracle`;平台元数据缓存的领域决策不变。
 
 为了给 HoldingSource 的**平台**(链 + 交易所/perp)补上 name + logo(数据源同为 CoinGecko),把 CoinGecko 的 HTTP 客户端从 `@folio/tokens-provider-coingecko` 抽成独立包 **`packages/clients/coingecko`**(`@folio/coingecko-client`),由 token provider 与新的 **`@folio/platforms`** 包共同引用;平台元数据缓存落 `@folio/db` 的新 `platforms` 表。**不**把平台元数据塞进 `TokenSource`(职责分明)。
 
