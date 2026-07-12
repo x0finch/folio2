@@ -19,7 +19,7 @@ Status: accepted — 激活并扩展 [issue #46](https://github.com/x0finch/foli
 
 1. **合三包为 `@folio/oracle`**(子包 `oracle-basic` 契约 / `oracle-entry` 门面 `createOracle` / `oracle-providers/coingecko`),统一 **vendor 抽象**:每 vendor 声明 `capabilities`(prices / tokenMeta / platformMeta / fxRates);取数入口按**活跃源**路由,活跃源缺某能力 → **回退 baseline(CoinGecko 永在册)**。DefiLlama 只有价、无法币 FX/logo,靠此回退存活;UX 仍是一个源下拉。D1 schema 仍归 `@folio/db`(不搬表)。
 
-2. **币级归并身份去 vendor tag**(#46 核心):归并改按**内部 `tokens.id`**(已中立、已归并跨链同币);各家 coin id 降为映射属性,存 **`token_vendor_ids(tokenId, vendor, vendorId)` 子表**(一行一映射,接新源只加行不改表结构);`tokens` 表**移除 `source`/`identifier` 列**,孤儿行 = 无 vendor 子表行。`TokenRef{source,identifier}` 作废,身份 = 内部 id 引用。balance/快照里的 `coingecko:` tokenKey **不迁移**(经 tokenIndex 仍解析到同一 id);manual 选币不变。
+2. **币级归并身份去 vendor tag**(#46 核心):归并改按**内部 `tokens.id`**(已中立、已归并跨链同币);各家 coin id 降为映射属性,存 **`token_vendor_ids(tokenId, vendor, vendorId)` 子表**(一行一映射,接新源只加行不改表结构);`tokens` 表**移除 `source`/`identifier` 列**,孤儿行 = 无 vendor 子表行。`TokenRef{source,identifier}` **降级**为「某一家 vendor 对某币的寻址引用」——不再是归并身份(内部 id 接管),但保留:它恰好精确建模 `token_vendor_ids` 的一行,Phase 3 接第二源时 CMC 的引用即 `{source:"coinmarketcap",…}`,删之反需重造(修订 grill 决策 D5:作废 → 降级)。balance/快照里的 `coingecko:` tokenKey **不迁移**(经 tokenIndex 仍解析到同一 id);manual 选币不变。
 
 3. **纯 vendor 币接受碎裂**:无链上合约、只靠某家 coin id 存在的币(主要是纯手动选的 CGK 币)换源后**回退自带价/冻结值,不从新源取价**;迁移脚本 log 其数量。**不做 symbol 模糊对映**(误判比碎裂更危险)。同时也在链上持有的币靠合约 tokenKey 自动重认,不碎。
 

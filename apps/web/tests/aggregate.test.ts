@@ -188,4 +188,40 @@ describe("buildCanonicalHoldings", () => {
     expect(h.sources).toHaveLength(1);
     expect(h.sources[0]).toMatchObject({ amount: 150, value: 150 });
   });
+
+  it("同一内部 tokenId、不同 ref → 归并成一个 Holding(#46 去 vendor tag,归并按内部 id 不按 refKey)", () => {
+    // 同一个币,两笔行带不同的 vendor 引用(模拟换源前后 refKey 会不同:如 coingecko:x vs 新源 id),
+    // 但富化都命中同一个内部代币行 → tokenId 相同。按内部 id 归并 → 不碎(旧按 refKey 会分成两个)。
+    const hs = buildCanonicalHoldings([
+      row({
+        symbol: "USDC",
+        amount: 100,
+        value: 100,
+        account: binance,
+        tokenId: "tok-1",
+        ref: cg("usd-coin"),
+      }),
+      row({
+        symbol: "USDC",
+        amount: 50,
+        value: 50,
+        account: hyper,
+        tokenId: "tok-1",
+        ref: cg("usd-coin-legacy"), // 不同 refKey,但同一内部 id
+      }),
+    ]);
+    expect(hs).toHaveLength(1);
+    expect(hs[0]!.key).toBe("token:tok-1"); // 归并键 = 内部 id,非 refKey
+    expect(hs[0]!.totalValue).toBe(150);
+    expect(hs[0]!.totalAmount).toBe(150); // 组内单一 Token(同 tokenId)→ 给 totalAmount
+    expect(hs[0]!.token.id).toBe("tok-1");
+  });
+
+  it("不同内部 tokenId → 保持两个 Holding(内部 id 是归并身份的事实源)", () => {
+    const hs = buildCanonicalHoldings([
+      row({ symbol: "AAA", amount: 1, value: 10, account: binance, tokenId: "tok-a" }),
+      row({ symbol: "BBB", amount: 1, value: 20, account: binance, tokenId: "tok-b" }),
+    ]);
+    expect(hs).toHaveLength(2);
+  });
 });

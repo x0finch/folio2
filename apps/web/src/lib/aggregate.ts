@@ -20,7 +20,8 @@ export interface AggInput {
   isMargin?: boolean; // perp 权益(保证金)—— 进聚合但明细标注
   account: { id: string; label: string; connectorId: string; network?: string | null };
   group?: TokenGroup; // 命中种子的展示分组
-  ref?: TokenRef | null; // 解析出的规范 Token(单例组身份)
+  tokenId?: string; // 内部代币行 id(vendor 中立归并身份,#73;富化命中 store 才有)
+  ref?: TokenRef | null; // 该源对此币的寻址引用(vendor tag;归并回退用,内部 id 缺失时)
   name?: string;
   logo?: string; // 已按回退链取好(CGK→provider)
   change24h?: number; // 每币 24h 涨跌(%);仅单 Token 组用于行内 ValueChange
@@ -61,7 +62,8 @@ function platformIdOf(row: AggInput): string {
 
 // 单笔持仓的"代币身份"(用于判断组内是否单一 Token → 决定是否给 totalAmount)。
 function tokenIdentity(row: AggInput): string {
-  if (row.ref) return refKey(row.ref);
+  if (row.tokenId) return row.tokenId; // vendor 中立内部 id(优先;换源不碎)
+  if (row.ref) return refKey(row.ref); // 回退:已解析 ref 但未命中 store 记录
   if (row.tokenKey) return row.tokenKey;
   return `sym:${norm(row.symbol)}`;
 }
@@ -69,7 +71,8 @@ function tokenIdentity(row: AggInput): string {
 // 四级归并键(ADR-0002:任何一级都不含裸 symbol)。
 function holdingKey(row: AggInput): string {
   if (row.group) return `group:${row.group.id}`;
-  if (row.ref) return `token:${refKey(row.ref)}`;
+  if (row.tokenId) return `token:${row.tokenId}`; // vendor 中立内部 id(优先)
+  if (row.ref) return `token:${refKey(row.ref)}`; // 回退:已解析 ref 但未命中 store 记录
   if (row.tokenKey) return `tk:${row.tokenKey}`;
   return `as:${row.account.id}:${norm(row.symbol)}`;
 }
@@ -139,7 +142,7 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     const token = g
       ? { id: g.id, symbol: g.displaySymbol, name: g.name, logo: g.logo ?? a.logoHint }
       : {
-          id: a.first.ref ? refKey(a.first.ref) : undefined,
+          id: a.first.tokenId ?? (a.first.ref ? refKey(a.first.ref) : undefined),
           symbol: a.first.symbol,
           name: a.first.name ?? a.first.symbol,
           logo: a.first.logo,
