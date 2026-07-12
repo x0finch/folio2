@@ -39,23 +39,43 @@ export interface Oracle {
 
 // 组装入口:按 activeVendor 为每类能力选 provider/source(缺能力回退 baseline),再拼三服务。
 // 本片仅 CoinGecko 一源 → 路由退化为恒等,兜底路径就位(P3-5 起接 DefiLlama)。
+//
+// 惰性:三服务经 getter 首访即建、建后记忆。调用方常只用其一(logo 端点只碰 tokens、货币只碰 fx),
+// 故不预建另两套(省去其 provider/source + store 构造)。app 侧 oracle 代理每次属性访问现造一份门面
+// (见 server/oracle.ts,绑当前 env),配合本惰性 → 一次访问只建被碰的那一服务,不浪费。
 export function createOracle(cfg: CreateOracleConfig): Oracle {
   const { apiKey, activeVendor = BASELINE_VENDOR } = cfg;
-
-  // 代币面(search/meta/prices)整体跟随声明 tokenMeta 的源 —— identity 恒在 baseline(CoinGecko);
-  // 价格分源路由(DefiLlama 只供 prices)留待 P3-5/P3-6。测试可用 cfg.provider 直接覆盖。
-  const tokenVendor = pickVendor("tokenMeta", activeVendor);
-  const provider = cfg.provider ?? tokenVendor.tokenSource?.({ apiKey });
-  const platformSource = pickVendor("platformMeta", activeVendor).platformSource?.({ apiKey });
-  const fxSource = pickVendor("fxRates", activeVendor).fxSource?.({ apiKey });
-  if (!platformSource || !fxSource) {
-    // baseline(CoinGecko)声明全部能力 → pickVendor 兜底后工厂必在场;缺失即注册表配错。
-    throw new Error("oracle: baseline vendor missing platform/fx source");
-  }
+  let tokens: Tokens | undefined;
+  let platforms: Platforms | undefined;
+  let fx: FxRates | undefined;
 
   return {
-    tokens: createTokens({ apiKey, createStore: cfg.createTokenStore, provider }),
-    platforms: createPlatforms({ source: platformSource, store: cfg.platformStore }),
-    fx: createFxRates({ source: fxSource, store: cfg.fxStore }),
+    get tokens() {
+      // 代币面(search/meta/prices)整体跟随声明 tokenMeta 的源 —— identity 恒在 baseline(CoinGecko);
+      // 价格分源路由(DefiLlama 只供 prices)留待 P3-5/P3-6。测试可用 cfg.provider 直接覆盖。
+      if (!tokens) {
+        const provider =
+          cfg.provider ?? pickVendor("tokenMeta", activeVendor).tokenSource?.({ apiKey });
+        tokens = createTokens({ apiKey, createStore: cfg.createTokenStore, provider });
+      }
+      return tokens;
+    },
+    get platforms() {
+      if (!platforms) {
+        const source = pickVendor("platformMeta", activeVendor).platformSource?.({ apiKey });
+        // baseline(CoinGecko)声明全部能力 → pickVendor 兜底后工厂必在场;缺失即注册表配错。
+        if (!source) throw new Error("oracle: baseline vendor missing platform source");
+        platforms = createPlatforms({ source, store: cfg.platformStore });
+      }
+      return platforms;
+    },
+    get fx() {
+      if (!fx) {
+        const source = pickVendor("fxRates", activeVendor).fxSource?.({ apiKey });
+        if (!source) throw new Error("oracle: baseline vendor missing fx source");
+        fx = createFxRates({ source, store: cfg.fxStore });
+      }
+      return fx;
+    },
   };
 }
