@@ -7,11 +7,11 @@ import { BASELINE_VENDOR, pickVendor, VENDORS, type VendorImpl } from "../src/ve
 // #79 AC:createOracle 返回统一 Oracle = {tokens,platforms,fx}。createTokens 仍在(shim/旧 import 用),
 // 但不再是 createOracle 的别名(语义已分离:前者建 Tokens,后者建三服务门面)。
 describe("oracle facade", () => {
-  // store 实例在构造期不被调用(方法惰性)→ 可传最小占位。
+  // store 工厂在被碰的服务首访时才调、方法亦惰性 → 可传最小占位。
   const cfg = {
     createTokenStore: () => ({}) as TokenStore,
-    platformStore: {} as PlatformStore,
-    fxStore: {} as FxStore,
+    platformStore: () => ({}) as PlatformStore,
+    fxStore: () => ({}) as FxStore,
   };
 
   it("createOracle 返回 {tokens,platforms,fx} 三服务", () => {

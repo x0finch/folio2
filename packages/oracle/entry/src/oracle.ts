@@ -17,13 +17,14 @@ export interface CreateOracleConfig {
   // 活跃行情源(用户设置,P3-3 注入);缺省 = baseline(CoinGecko),无需设置。
   activeVendor?: string;
   // store 实现由调用方(app)注入:D1 在 @folio/db,oracle 不依赖它。三类各自的 store 分开传。
-  // 代币 store 是**工厂**(收 source),平台/汇率 store 是**实例** —— 非兼容问题,是领域差异:
-  // 代币缓存按 source 分桶(ref 只对该源成立、warm 标记 `warm_as_of:<source>` 亦分源),多 vendor 共存
-  // (P3-5 起 DefiLlama)时每源一份 store;平台/汇率恒单源(CoinGecko 权威、baseline-only,见 ADR 0013),
-  // 无需分桶 → 直接给实例。tokens 服务在内部按 provider.source 调此工厂建对应 store。
+  // 三者都是**惰性工厂**(不是实例):门面按访问只建被碰的服务(见下 getter),store 也须延到那时才造 ——
+  // 否则 app 侧一拼 config 就把三个 store 全 new 出来(各含 getDb),`oracle.tokens` 也白建平台/汇率 store。
+  // 代币工厂额外收 source:代币缓存按 source 分桶(ref 只对该源成立、warm 标记 `warm_as_of:<source>` 亦分源),
+  // 多 vendor 共存(P3-5 起 DefiLlama)时每源一份;平台/汇率恒单源(CoinGecko 权威、baseline-only,见 ADR 0013),
+  // 无需分桶 → 工厂零参。
   createTokenStore: (source: TokenRef["source"]) => TokenStore;
-  platformStore: PlatformStore;
-  fxStore: FxStore;
+  platformStore: () => PlatformStore;
+  fxStore: () => FxStore;
   // 测试注入:直接覆盖代币 provider(跳过 vendor 路由),避免真网络。
   provider?: TokenProvider;
 }
@@ -65,7 +66,7 @@ export function createOracle(cfg: CreateOracleConfig): Oracle {
         const source = pickVendor("platformMeta", activeVendor).platformSource?.({ apiKey });
         // baseline(CoinGecko)声明全部能力 → pickVendor 兜底后工厂必在场;缺失即注册表配错。
         if (!source) throw new Error("oracle: baseline vendor missing platform source");
-        platforms = createPlatforms({ source, store: cfg.platformStore });
+        platforms = createPlatforms({ source, store: cfg.platformStore() });
       }
       return platforms;
     },
@@ -73,7 +74,7 @@ export function createOracle(cfg: CreateOracleConfig): Oracle {
       if (!fx) {
         const source = pickVendor("fxRates", activeVendor).fxSource?.({ apiKey });
         if (!source) throw new Error("oracle: baseline vendor missing fx source");
-        fx = createFxRates({ source, store: cfg.fxStore });
+        fx = createFxRates({ source, store: cfg.fxStore() });
       }
       return fx;
     },

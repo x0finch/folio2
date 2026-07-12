@@ -17,8 +17,8 @@ export const oracle: Oracle = new Proxy({} as Oracle, {
       createOracle({
         apiKey: env.COINGECKO_API_KEY || undefined,
         createTokenStore: (source) => createTokenStore(env, { source }),
-        platformStore: createPlatformStore(env),
-        fxStore: createFxStore(env),
+        platformStore: () => createPlatformStore(env),
+        fxStore: () => createFxStore(env),
       }) as unknown as Record<string, unknown>
     )[prop],
 });
