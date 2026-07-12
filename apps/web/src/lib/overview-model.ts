@@ -108,6 +108,7 @@ export async function buildOverview(
       network: account.network,
     },
     group: e?.group,
+    tokenId: e?.id, // 内部代币行 id → 聚合的 vendor 中立归并键(#73)
     ref: e?.ref,
     name: e?.name,
     logo: e ? tokenLogoUrl(e) : undefined, // 上游 URL → folio 代理(隐私;见 ADR 0008)

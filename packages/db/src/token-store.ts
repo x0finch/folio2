@@ -13,35 +13,37 @@ import {
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { chunk, IN_CHUNK } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
-import { tokenGroups, tokenIndex, tokenMeta, tokens } from "./schema";
+import { tokenGroups, tokenIndex, tokenMeta, tokens, tokenVendorIds } from "./schema";
 
 export interface TokenStoreOpts {
-  source: TokenRef["source"]; // store 绑定的规范源(如 "coingecko");ref 只对该源的行成立
+  source: TokenRef["source"]; // store 绑定的规范源(如 "coingecko");ref 只对该源的映射成立
   now?: () => number; // 注入便于测 TTL;默认 Date.now
 }
 
-// 孤儿行(CGK 未收录,provider 采集)的 source 标记;identifier = tokenKey 键。
-const PROVIDER_SOURCE = "provider";
-
 type TokenRow = typeof tokens.$inferSelect;
 
-// 代币表 + 索引表的 D1 实现(无 userId;全局参考数据)。只经此工厂访问,不外泄 db/schema。
-// 并发注记:putWarm/ensureTokenKey 先查后批写,极端并发下(cron 与手动 sync 同拍)新行 id 预分配
-// 可能与冲突保留的旧 id 不一致 → 索引 FK 失败、整批回滚 —— 下次 warm/sync 自愈,可接受(warm 已单飞)。
+// 代币表 + 索引表 + vendor 映射表的 D1 实现(无 userId;全局参考数据)。只经此工厂访问,不外泄 db/schema。
+// 归并身份 = tokens.id(vendor 中立,#73)。各家 coin id 存 token_vendor_ids(vendor, vendorId)→tokenId;
+// 本 store 绑定 source(如 "coingecko"):按 (source, vendorId) 找/挂映射,ref = 该映射的 vendorId。
+// 孤儿行(CGK 未收录、provider 采集)= 无 vendor 映射行,其 tokenKey 关联只在 token_index。
+// 并发注记:putWarm/ensureTokenKey 先查后批写,极端并发下(cron 与手动 sync 同拍)可能出重复孤儿行/
+// 索引 FK 失败回滚 —— 下次 warm/sync(cur 命中其一走刷新路径)或升级合并(linkTokenKeyToCgk 删孤儿)自愈,
+// 可接受(warm 已单飞)。孤儿去重原靠 (source,identifier) 列唯一,去 vendor tag 后改由 token_index 的
+// cur 检查兜底(best-effort,自愈)。
 export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   const db = getDb(env);
   type Batch = Parameters<typeof db.batch>[0]; // [Stmt, ...Stmt[]];Stmt = drizzle BatchItem
   type Stmt = Batch[number];
   const source = opts.source;
   const now = opts.now ?? (() => Date.now());
-  const mk = (identifier: string): TokenRef => ({
+  const mk = (vendorId: string): TokenRef => ({
     source,
-    identifier: identifier as CgkCoinId,
+    identifier: vendorId as CgkCoinId,
   });
   const warmKey = `warm_as_of:${source}`;
 
   // 展示分组(P2):groupKey 直接当 token_groups.id(text PK,deterministic,免 find-or-create)。
-  const groupIdFor = (identifier: string): string | null => GROUP_MEMBERSHIP[identifier] ?? null;
+  const groupIdFor = (vendorId: string): string | null => GROUP_MEMBERSHIP[vendorId] ?? null;
   const groupUpsert = (groupKey: string): Stmt => {
     const def = TOKEN_GROUPS[groupKey as keyof typeof TOKEN_GROUPS];
     return db
@@ -52,6 +54,12 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         set: { displaySymbol: def.displaySymbol, name: def.name },
       });
   };
+  // 挂本源 vendor 映射(tokenId ← vendorId)。映射稳定,冲突即已存 → DoNothing。
+  const vendorMapUpsert = (tokenId: string, vendorId: string): Stmt =>
+    db
+      .insert(tokenVendorIds)
+      .values({ tokenId, vendor: source, vendorId })
+      .onConflictDoNothing({ target: [tokenVendorIds.vendor, tokenVendorIds.vendorId] });
   // 读时 join 出的组列(leftJoin 未命中则各列为 null)。
   type GrpSel = {
     id: string | null;
@@ -66,11 +74,11 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
     logo: tokenGroups.logo,
   };
 
-  // 行 → 领域记录。价过期不删:读出带 stale(SWR,展示先给旧价)。grp 命中(id 非空)才挂 group。
-  // grp 为 leftJoin 结果:未命中时整体为 null(drizzle 语义)。
-  const toRecord = (r: TokenRow, grp?: GrpSel | null): TokenRecord => ({
+  // 行 → 领域记录。ref 由本源 vendor 映射的 vendorId 构造(孤儿无映射 → null)。
+  // 价过期不删:读出带 stale(SWR)。grp 命中(id 非空)才挂 group(leftJoin,未命中整体 null)。
+  const toRecord = (r: TokenRow, grp?: GrpSel | null, vendorId?: string | null): TokenRecord => ({
     id: r.id,
-    ref: r.source === source ? mk(r.identifier) : null,
+    ref: vendorId != null ? mk(vendorId) : null,
     symbol: r.symbol,
     name: r.name,
     logo: r.logo ?? undefined,
@@ -96,15 +104,15 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         : undefined,
   });
 
-  // 预取一批 (source=本源, identifier) 的现有行 id;miss 的由调用侧预分配 UUID。
-  async function existingIds(identifiers: string[]): Promise<Map<string, string>> {
+  // 预取一批 (本源, vendorId) 的现有 tokenId;miss 的由调用侧预分配 UUID。
+  async function existingIds(vendorIds: string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
-    for (const ids of chunk(identifiers, IN_CHUNK)) {
+    for (const ids of chunk(vendorIds, IN_CHUNK)) {
       const rows = await db
-        .select({ id: tokens.id, identifier: tokens.identifier })
-        .from(tokens)
-        .where(and(eq(tokens.source, source), inArray(tokens.identifier, ids)));
-      for (const r of rows) out.set(r.identifier, r.id);
+        .select({ tokenId: tokenVendorIds.tokenId, vendorId: tokenVendorIds.vendorId })
+        .from(tokenVendorIds)
+        .where(and(eq(tokenVendorIds.vendor, source), inArray(tokenVendorIds.vendorId, ids)));
+      for (const r of rows) out.set(r.vendorId, r.tokenId);
     }
     return out;
   }
@@ -112,10 +120,15 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   return {
     async getCandidates(symbol: string): Promise<TokenCandidate[]> {
       // `symbol` 视为已归一(调用方 @folio/tokens 保证);store 只按 key 点查。
+      // innerJoin vendor 映射(本源)→ 只出有本源映射的候选。
       const rows = await db
-        .select({ identifier: tokens.identifier, rank: tokens.marketCapRank, src: tokens.source })
+        .select({ vendorId: tokenVendorIds.vendorId, rank: tokens.marketCapRank })
         .from(tokenIndex)
         .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
+        .innerJoin(
+          tokenVendorIds,
+          and(eq(tokenVendorIds.tokenId, tokens.id), eq(tokenVendorIds.vendor, source)),
+        )
         .where(
           and(
             eq(tokenIndex.kind, "symbol"),
@@ -123,9 +136,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             gt(tokenIndex.expiresAt, now()),
           ),
         );
-      return rows
-        .filter((r) => r.src === source)
-        .map((r) => ({ ref: mk(r.identifier), marketCapRank: r.rank ?? undefined }));
+      return rows.map((r) => ({ ref: mk(r.vendorId), marketCapRank: r.rank ?? undefined }));
     },
 
     async putWarm(rows, warmTtlMs, infoTtlMs) {
@@ -145,8 +156,6 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             .insert(tokens)
             .values({
               id,
-              source: info.ref.source,
-              identifier: info.ref.identifier,
               symbol: info.symbol,
               name: info.name,
               logo: info.logo ?? null,
@@ -159,7 +168,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               priceExpiresAt: symExpiresAt,
             })
             .onConflictDoUpdate({
-              target: [tokens.source, tokens.identifier],
+              target: tokens.id,
               // 不动 provider_logo(备用槽只由 provider 采集路径写)
               set: {
                 symbol: info.symbol,
@@ -174,6 +183,8 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
                 priceExpiresAt: symExpiresAt,
               },
             }),
+          // vendor 映射(tokenId ← 本源 vendorId);已存则不动。FK 要求 tokens 先在,故置于其后。
+          vendorMapUpsert(id, info.ref.identifier),
           db
             .insert(tokenIndex)
             .values({ kind: "symbol", key: info.symbol, tokenId: id, expiresAt: symExpiresAt })
@@ -201,29 +212,33 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
 
     async listTopTokens(limit: number): Promise<TokenInfo[]> {
       // 当前 warm 集 = symbol 索引未过期;rank/name/logo 都在代币表。无 rank 者末尾。
+      // innerJoin vendor 映射(本源)→ 只出有本源映射的行,并取 vendorId 造 ref。
       const t = now();
       const rows = await db
         .select({
           id: tokens.id,
-          identifier: tokens.identifier,
+          vendorId: tokenVendorIds.vendorId,
           symbol: tokens.symbol,
           name: tokens.name,
           logo: tokens.logo,
         })
         .from(tokenIndex)
         .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
+        .innerJoin(
+          tokenVendorIds,
+          and(eq(tokenVendorIds.tokenId, tokens.id), eq(tokenVendorIds.vendor, source)),
+        )
         .where(
           and(
             eq(tokenIndex.kind, "symbol"),
             gt(tokenIndex.expiresAt, t),
-            eq(tokens.source, source),
             gt(tokens.infoExpiresAt, t),
           ),
         )
         .orderBy(sql`${tokens.marketCapRank} is null`, asc(tokens.marketCapRank))
         .limit(limit);
       return rows.map((r) => ({
-        ref: mk(r.identifier),
+        ref: mk(r.vendorId),
         id: r.id,
         symbol: r.symbol,
         name: r.name,
@@ -235,10 +250,14 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const out = new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
       for (const ks of chunk(keys, IN_CHUNK)) {
         const rows = await db
-          .select({ idx: tokenIndex, tok: tokens, grp: grpCols })
+          .select({ idx: tokenIndex, tok: tokens, grp: grpCols, vendorId: tokenVendorIds.vendorId })
           .from(tokenIndex)
           .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
           .leftJoin(tokenGroups, eq(tokenGroups.id, tokens.groupId))
+          .leftJoin(
+            tokenVendorIds,
+            and(eq(tokenVendorIds.tokenId, tokens.id), eq(tokenVendorIds.vendor, source)),
+          )
           .where(
             and(
               eq(tokenIndex.kind, "tokenKey"),
@@ -247,7 +266,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             ),
           );
         for (const r of rows) {
-          out.set(r.idx.key, { ...toRecord(r.tok, r.grp), cgkCheckedUntil: r.idx.cgkCheckedUntil });
+          out.set(r.idx.key, {
+            ...toRecord(r.tok, r.grp, r.vendorId),
+            cgkCheckedUntil: r.idx.cgkCheckedUntil,
+          });
         }
       }
       return out;
@@ -256,21 +278,27 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
     async ensureTokenKey(key, seed: ProviderTokenSeed, indexTtlMs) {
       const t = now();
       const expiresAt = t + indexTtlMs;
+      // 现指针指向的代币,并 leftJoin 本源映射判断它是否 cgk 行(有映射)还是孤儿(无映射)。
       const cur = await db
-        .select({ idx: tokenIndex, tok: tokens })
+        .select({ tok: tokens, vendorId: tokenVendorIds.vendorId })
         .from(tokenIndex)
         .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
+        .leftJoin(
+          tokenVendorIds,
+          and(eq(tokenVendorIds.tokenId, tokens.id), eq(tokenVendorIds.vendor, source)),
+        )
         .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key)));
 
       if (cur[0]) {
         const tok = cur[0].tok;
+        const isCgk = cur[0].vendorId != null;
         const stmts: Stmt[] = [
           db
             .update(tokenIndex)
             .set({ expiresAt })
             .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key))),
         ];
-        if (tok.source === source) {
+        if (isCgk) {
           // cgk 行:只补/刷备用槽(provider 图更新鲜)
           if (seed.providerLogo) {
             stmts.push(
@@ -299,29 +327,16 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         return;
       }
 
-      // miss → seed 孤儿行 + 索引行
+      // miss → seed 孤儿行(无 vendor 映射)+ 索引行
       const id = crypto.randomUUID();
       await db.batch([
-        db
-          .insert(tokens)
-          .values({
-            id,
-            source: PROVIDER_SOURCE,
-            identifier: key,
-            symbol: seed.symbol,
-            name: seed.name ?? seed.symbol,
-            providerLogo: seed.providerLogo ?? null,
-            infoExpiresAt: expiresAt,
-          })
-          .onConflictDoUpdate({
-            target: [tokens.source, tokens.identifier],
-            set: {
-              symbol: seed.symbol,
-              name: seed.name ?? seed.symbol,
-              providerLogo: seed.providerLogo ?? null,
-              infoExpiresAt: expiresAt,
-            },
-          }),
+        db.insert(tokens).values({
+          id,
+          symbol: seed.symbol,
+          name: seed.name ?? seed.symbol,
+          providerLogo: seed.providerLogo ?? null,
+          infoExpiresAt: expiresAt,
+        }),
         db.insert(tokenIndex).values({ kind: "tokenKey", key, tokenId: id, expiresAt }),
       ]);
     },
@@ -335,19 +350,22 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
 
     async linkTokenKeyToCgk(key, info, price, ttls) {
       const t = now();
-      // 现指针与其代币(可能是孤儿)
+      // find-or-create cgk 行:按本源 vendor 映射找 tokenId。
+      const mapped = await db
+        .select({ tokenId: tokenVendorIds.tokenId })
+        .from(tokenVendorIds)
+        .where(
+          and(eq(tokenVendorIds.vendor, source), eq(tokenVendorIds.vendorId, info.ref.identifier)),
+        );
+      const cgkId = mapped[0]?.tokenId ?? crypto.randomUUID();
+
+      // 现指针与其代币。若指向的不是 cgk 行(id 不同 → 无本源映射的孤儿),即待合并删除的孤儿。
       const cur = await db
-        .select({ idx: tokenIndex, tok: tokens })
+        .select({ tok: tokens })
         .from(tokenIndex)
         .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
         .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key)));
-      const orphan = cur[0] && cur[0].tok.source !== source ? cur[0].tok : null;
-      // find-or-create cgk 行
-      const existing = await db
-        .select({ id: tokens.id })
-        .from(tokens)
-        .where(and(eq(tokens.source, source), eq(tokens.identifier, info.ref.identifier)));
-      const cgkId = existing[0]?.id ?? crypto.randomUUID();
+      const orphan = cur[0] && cur[0].tok.id !== cgkId ? cur[0].tok : null;
       const carryLogo = orphan?.providerLogo ?? null;
       const groupId = groupIdFor(info.ref.identifier);
 
@@ -365,8 +383,6 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           .insert(tokens)
           .values({
             id: cgkId,
-            source: info.ref.source,
-            identifier: info.ref.identifier,
             symbol: info.symbol,
             name: info.name,
             logo: info.logo ?? null,
@@ -376,7 +392,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             ...priceFields,
           })
           .onConflictDoUpdate({
-            target: [tokens.source, tokens.identifier],
+            target: tokens.id,
             set: {
               symbol: info.symbol,
               name: info.name,
@@ -388,13 +404,15 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               ...priceFields,
             },
           }),
+        // 挂本源 vendor 映射(FK:需 cgk 行先在)
+        vendorMapUpsert(cgkId, info.ref.identifier),
         // 指针重指:清旧(含孤儿指针)→ 插新
         db.delete(tokenIndex).where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key))),
         db
           .insert(tokenIndex)
           .values({ kind: "tokenKey", key, tokenId: cgkId, expiresAt: t + ttls.indexTtlMs }),
       ];
-      // 孤儿行删除(其余索引行经 ON DELETE CASCADE 级联;孤儿 identifier=本 key,唯一)
+      // 孤儿行删除(其余索引行 / vendor 映射经 ON DELETE CASCADE 级联)
       if (orphan) stmts.push(db.delete(tokens).where(eq(tokens.id, orphan.id)));
       // 组行 upsert 置于批首(FK:tokens.group_id → token_groups.id)。
       const [first, ...rest] = groupId ? [groupUpsert(groupId), ...stmts] : stmts;
@@ -403,20 +421,21 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
 
     async getByRefs(refs) {
       const out = new Map<string, TokenRecord>();
-      const identifiers = refs.filter((r) => r.source === source).map((r) => r.identifier);
-      for (const ids of chunk(identifiers, IN_CHUNK)) {
+      const vendorIds = refs.filter((r) => r.source === source).map((r) => r.identifier);
+      for (const ids of chunk(vendorIds, IN_CHUNK)) {
         const rows = await db
-          .select({ tok: tokens, grp: grpCols })
-          .from(tokens)
+          .select({ tok: tokens, grp: grpCols, vendorId: tokenVendorIds.vendorId })
+          .from(tokenVendorIds)
+          .innerJoin(tokens, eq(tokens.id, tokenVendorIds.tokenId))
           .leftJoin(tokenGroups, eq(tokenGroups.id, tokens.groupId))
           .where(
             and(
-              eq(tokens.source, source),
-              inArray(tokens.identifier, ids),
+              eq(tokenVendorIds.vendor, source),
+              inArray(tokenVendorIds.vendorId, ids),
               gt(tokens.infoExpiresAt, now()),
             ),
           );
-        for (const r of rows) out.set(refKey(mk(r.tok.identifier)), toRecord(r.tok, r.grp));
+        for (const r of rows) out.set(refKey(mk(r.vendorId)), toRecord(r.tok, r.grp, r.vendorId));
       }
       return out;
     },
@@ -426,29 +445,41 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       // 渲染 tokenKey 类持仓的 getByTokenKey 也不门控 info,若这里门控则 info 过期(30d)的
       // 长尾币会渲染出代理 URL 却在此 404。行删除(如升级合并删孤儿)才是唯一的"没有"。
       const rows = await db
-        .select({ tok: tokens, grp: grpCols })
+        .select({ tok: tokens, grp: grpCols, vendorId: tokenVendorIds.vendorId })
         .from(tokens)
         .leftJoin(tokenGroups, eq(tokenGroups.id, tokens.groupId))
+        .leftJoin(
+          tokenVendorIds,
+          and(eq(tokenVendorIds.tokenId, tokens.id), eq(tokenVendorIds.vendor, source)),
+        )
         .where(eq(tokens.id, id));
       const r = rows[0];
-      return r ? toRecord(r.tok, r.grp) : undefined;
+      return r ? toRecord(r.tok, r.grp, r.vendorId) : undefined;
     },
 
     async putPrices(prices, ttlMs) {
       if (prices.length === 0) return;
       const priceExpiresAt = now() + ttlMs;
-      const stmts = prices.map((p) =>
-        db
-          .update(tokens)
-          .set({
-            unitPrice: p.unitPrice,
-            change24h: p.change24h ?? null,
-            marketCapRank: p.marketCapRank ?? null,
-            priceAsOf: p.asOf,
-            priceExpiresAt,
-          })
-          .where(and(eq(tokens.source, p.ref.source), eq(tokens.identifier, p.ref.identifier))),
-      );
+      // 价按本源 vendorId 找到 tokenId,再按主键更新(只更新已存在的行)。
+      const ids = await existingIds(prices.map((p) => p.ref.identifier));
+      const stmts: Stmt[] = [];
+      for (const p of prices) {
+        const id = ids.get(p.ref.identifier);
+        if (!id) continue;
+        stmts.push(
+          db
+            .update(tokens)
+            .set({
+              unitPrice: p.unitPrice,
+              change24h: p.change24h ?? null,
+              marketCapRank: p.marketCapRank ?? null,
+              priceAsOf: p.asOf,
+              priceExpiresAt,
+            })
+            .where(eq(tokens.id, id)),
+        );
+      }
+      if (stmts.length === 0) return;
       const [first, ...rest] = stmts;
       await db.batch([first, ...rest]);
     },

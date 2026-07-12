@@ -3,7 +3,7 @@ import type { CgkCoinId, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTokenStore } from "../src"; // 全局代币缓存:公开独立导出(非 createDb 门面)
 import { getDb } from "../src/client";
-import { tokenGroups, tokenIndex, tokenMeta, tokens } from "../src/schema";
+import { tokenGroups, tokenIndex, tokenMeta, tokens, tokenVendorIds } from "../src/schema";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 const info = (ref: TokenRef, symbol: string, logo?: string): TokenInfo => ({
@@ -24,6 +24,7 @@ beforeEach(async () => {
   const db = getDb(env);
   await db.batch([
     db.delete(tokenIndex),
+    db.delete(tokenVendorIds),
     db.delete(tokens),
     db.delete(tokenGroups),
     db.delete(tokenMeta),
@@ -181,10 +182,11 @@ describe("linkTokenKeyToCgk (升级合并)", () => {
       providerLogo: "prov", // 孤儿的备用图被拷带
       price: { unitPrice: 2, stale: false },
     });
-    // 孤儿行已删(全表只剩 cgk 行)
+    // 孤儿行已删(全表只剩 cgk 行);该行有一条 coingecko vendor 映射指向它
     const rows = await getDb(env).select().from(tokens);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.source).toBe("coingecko");
+    const maps = await getDb(env).select().from(tokenVendorIds);
+    expect(maps).toEqual([{ tokenId: rows[0]!.id, vendor: "coingecko", vendorId: "foo" }]);
   });
 
   it("orphan → existing cgk row (from warm): merges into it, keeps its provider_logo if set", async () => {
@@ -207,6 +209,20 @@ describe("linkTokenKeyToCgk (升级合并)", () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
     await store.linkTokenKeyToCgk(KEY, info(cg("foo"), "FOO"), price(cg("foo"), 3), TTLS);
     expect((await store.getByTokenKey([KEY])).get(KEY)).toMatchObject({ ref: cg("foo") });
+  });
+
+  it("跨链同币:两条不同 tokenKey → 同一 cgk coin → 归并进同一个内部 id(#46 关键缝)", async () => {
+    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
+    const K1 = "eip155:1/erc20:0xa0b"; // USDC @ Ethereum
+    const K2 = "eip155:42161/erc20:0xaf8"; // USDC @ Arbitrum
+    await store.linkTokenKeyToCgk(K1, info(cg("usd-coin"), "USDC"), price(cg("usd-coin"), 1), TTLS);
+    await store.linkTokenKeyToCgk(K2, info(cg("usd-coin"), "USDC"), price(cg("usd-coin"), 1), TTLS);
+    // 两条 tokenKey 都解析到同一条 tokens 行(同一内部 id)—— 不因链不同而碎裂。
+    const recs = await store.getByTokenKey([K1, K2]);
+    expect(recs.get(K1)!.id).toBe(recs.get(K2)!.id);
+    // 全表只一条 tokens 行 + 一条 coingecko vendor 映射。
+    expect(await getDb(env).select().from(tokens)).toHaveLength(1);
+    expect(await getDb(env).select().from(tokenVendorIds)).toHaveLength(1);
   });
 });
 
@@ -255,15 +271,19 @@ describe("getById (logo 代理端点:按内部行 id 读整行,source 无关)", 
       TTL,
       TTL,
     );
-    // 孤儿(source=provider)也能按 id 命中(getById 走主键、不按 source 过滤)。
+    // 孤儿(无 vendor 映射)也能按 id 命中(getById 走主键、不过滤)。
     await store.ensureTokenKey(
       "eip155:1/erc20:0xorphan",
       { symbol: "ORP", name: "Orphan", providerLogo: "prov-L" },
       TTL,
     );
-    const rows = await getDb(env).select().from(tokens);
-    const btcId = rows.find((r) => r.identifier === "bitcoin")!.id;
-    const orphanId = rows.find((r) => r.identifier === "eip155:1/erc20:0xorphan")!.id;
+    // btc = cgk 行(经 coingecko vendor 映射找);orphan = 无映射(经 tokenKey 索引找)。
+    const maps = await getDb(env).select().from(tokenVendorIds);
+    const btcId = maps.find((m) => m.vendorId === "bitcoin")!.tokenId;
+    const idxRows = await getDb(env).select().from(tokenIndex);
+    const orphanId = idxRows.find(
+      (r) => r.kind === "tokenKey" && r.key === "eip155:1/erc20:0xorphan",
+    )!.tokenId;
 
     expect((await store.getById(btcId))?.logo).toBe("cgk-L");
     expect((await store.getById(orphanId))?.providerLogo).toBe("prov-L");
