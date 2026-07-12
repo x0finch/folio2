@@ -1,10 +1,11 @@
 import { PerpEquityMeta } from "@folio/connectors-basic";
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { Platforms } from "@folio/platforms";
-import type { AssetRef, Tokens } from "@folio/tokens";
+import type { AssetRef, Tokens, ValuationMode } from "@folio/tokens";
 import { type OverviewBalance, toAccountSections } from "./account-view";
 import { type AggInput, buildCanonicalHoldings } from "./aggregate";
 import { isFungible, viewKind } from "./balance-kind";
+import { deriveLiveAccountTotals, liveValue } from "./live-value";
 import { platformLogoUrl, tokenLogoUrl } from "./logo";
 
 // 总览读模型(纯 —— 依赖注入,无 cloudflare env,可脱离 server fn 单测)。
@@ -16,6 +17,8 @@ export interface OverviewDeps {
   platforms: Platforms; // .resolve:platform key → name+logo(含兜底)——仅链键(chain:/eip155:)
   // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platforms。
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
+  // 估值模式(Phase 3,#81):读时现推 value 用。缺省 self-first(= 旧行为);per-user 设置接入见 P3-3。
+  mode?: ValuationMode;
 }
 
 // perp 权益行只有 meta 可解析才计入聚合 —— 与 toPerpView 的 safeParse 门一致:
@@ -67,7 +70,7 @@ export interface OverviewView {
 export async function buildOverview(
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
-  { tokens, platforms, connectorMeta }: OverviewDeps,
+  { tokens, platforms, connectorMeta, mode = "self-first" }: OverviewDeps,
 ): Promise<OverviewView> {
   const balancesOf = (id: string) => (byAccount.get(id)?.balances ?? []) as OverviewBalance[];
 
@@ -97,7 +100,9 @@ export async function buildOverview(
   const aggInputs: AggInput[] = rows.map(({ account, b, margin, e }) => ({
     symbol: b.symbol,
     amount: b.amount,
-    value: b.usdValue,
+    // 读时现推(不落库):按 mode + 实时源价(cache-only)重算 —— self-first 下 enrich-not-reprice
+    // 行 ≡ 冻结值,盯市行(manual/bitcoin)取实时源价。aggregate 本身不改,只喂现推后的 value。
+    value: liveValue(b, e?.unitPrice, mode),
     kind: viewKind(b), // 归一到 5-kind(并存期兼容遗留)
     tokenKey: b.tokenKey,
     isMargin: margin,
@@ -158,9 +163,12 @@ export async function buildOverview(
     .filter((s) => s.defi.length > 0 || (s.perp?.positions.length ?? 0) > 0);
 
   // 4) 每账户净值(供 ByGroup 标签分组小计)+ 组合总额(按账户去重)。
+  // 现推(不落库):按当前 mode + 实时源价重算每账户净值,替代快照冻结 totalUsd。曲线「当下点」
+  // 复用同一 deriveLiveAccountTotals → 主页总价 ≡ 曲线当下点(#81)。
+  const liveTotals = await deriveLiveAccountTotals(accounts, byAccount, tokens, mode);
   const accountTotals = accounts.map((account) => ({
     account: { id: account.id, label: account.label },
-    totalUsd: byAccount.get(account.id)?.snapshot.totalUsd ?? 0,
+    totalUsd: liveTotals.get(account.id) ?? 0,
     takenAt: byAccount.get(account.id)?.snapshot.takenAt ?? null,
   }));
   const totalUsd = accountTotals.reduce((s, r) => s + r.totalUsd, 0);
