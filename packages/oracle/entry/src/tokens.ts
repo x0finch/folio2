@@ -1,6 +1,5 @@
 import type {
   AssetRef,
-  CgkCoinId,
   Resolution,
   TokenGroup,
   TokenInfo,
@@ -79,7 +78,8 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
   // asset.identifier(用户显式选)→ explicit ref(用本 provider 的 source),调用方无需拼 TokenRef。
   const withExplicit = (asset: AssetRef): AssetRef =>
     asset.identifier && !asset.ref
-      ? { ...asset, ref: { source: p.source, identifier: asset.identifier as CgkCoinId } }
+      ? // source↔identifier 品牌对齐由本 provider 保证 → 整体 as TokenRef(可信边界)。
+        { ...asset, ref: { source: p.source, identifier: asset.identifier } as TokenRef }
       : asset;
 
   const resolve = (asset: AssetRef, opts?: ResolveOpts) =>
