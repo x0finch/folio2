@@ -1,5 +1,12 @@
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
-import type { accountGroups, accounts, groups, snapshotBalances, snapshots } from "./schema";
+import type {
+  accountGroups,
+  accounts,
+  groups,
+  snapshotBalances,
+  snapshots,
+  userSettings,
+} from "./schema";
 
 export type Account = InferSelectModel<typeof accounts>;
 export type NewAccount = InferInsertModel<typeof accounts>;
@@ -13,3 +20,7 @@ export type AccountGroup = InferSelectModel<typeof accountGroups>;
 
 export type Snapshot = InferSelectModel<typeof snapshots>;
 export type SnapshotBalance = InferSelectModel<typeof snapshotBalances>;
+
+export type UserSettings = InferSelectModel<typeof userSettings>;
+// 估值模式(与 @folio/oracle 的 ValuationMode 同集合;db 层不耦合 oracle,就地声明)。
+export type ValuationMode = "self-first" | "source-first";

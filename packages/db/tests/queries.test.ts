@@ -13,6 +13,7 @@ import {
   getAccountById,
   getLatestSnapshotByUser,
   getRawCreds,
+  getUserSettings,
   listAccountsByGroup,
   listAccountsByUser,
   listBalancesForSnapshots,
@@ -28,6 +29,7 @@ import {
   renameAccount,
   setAccountCredentials,
   setArchived,
+  updateUserSettings,
   writeSnapshot,
 } from "../src/queries"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
 
@@ -479,5 +481,33 @@ describe("cross-user isolation", () => {
       writeSnapshot(env, USER_B, a.id, { takenAt: 2, totalUsd: 2, balances: [] }),
     ).rejects.toThrow();
     await expect(addAccountToGroup(env, USER_B, a.id, "nope")).rejects.toThrow();
+  });
+});
+
+describe("user settings", () => {
+  it("读带缺省:无行 → coingecko / self-first", async () => {
+    expect(await getUserSettings(env, USER_A)).toEqual({
+      activeVendor: "coingecko",
+      valuationMode: "self-first",
+    });
+  });
+
+  it("upsert 只覆盖给定字段,其余保持;读回一致", async () => {
+    await updateUserSettings(env, USER_A, { valuationMode: "source-first" });
+    expect(await getUserSettings(env, USER_A)).toEqual({
+      activeVendor: "coingecko", // 未给 → 建行用默认
+      valuationMode: "source-first",
+    });
+    // 再改 activeVendor,valuationMode 保持 source-first(不被默认覆盖)。
+    await updateUserSettings(env, USER_A, { activeVendor: "defillama" });
+    expect(await getUserSettings(env, USER_A)).toEqual({
+      activeVendor: "defillama",
+      valuationMode: "source-first",
+    });
+  });
+
+  it("按 userId 隔离", async () => {
+    await updateUserSettings(env, USER_A, { valuationMode: "source-first" });
+    expect((await getUserSettings(env, USER_B)).valuationMode).toBe("self-first");
   });
 });

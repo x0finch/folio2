@@ -21,6 +21,7 @@ export type {
   SnapshotBalanceView,
   SnapshotTotal,
   SnapshotWithBalances,
+  UserSettingsView,
   WriteSnapshotInput,
 } from "./queries";
 export type {
@@ -30,5 +31,7 @@ export type {
   Group,
   Snapshot,
   SnapshotBalance,
+  UserSettings,
+  ValuationMode,
 } from "./schema-types";
 export { createTokenStore, type TokenStoreOpts } from "./token-store"; // 全局代币参考缓存(无 userId,按 source 分桶)

@@ -9,7 +9,7 @@ import {
 import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
-import type { ProviderAsset, Tokens } from "@folio/tokens";
+import type { ProviderAsset, Tokens, ValuationMode } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import type { InputSpec } from "../creds";
 import { isComplete, openCreds } from "../creds";
@@ -106,6 +106,17 @@ async function fetchViaConnector(
 // triggerSync(手动)与 cron(scheduled)共用。
 export function buildSyncDeps(): SyncDeps {
   const tokens = oracle.tokens;
+  // per-user 估值模式:按 userId 记忆化一次读(revalue 逐账户调,避免 N 次 settings 读)。
+  // 同一 deps 跨多用户(cron sweep)也正确 —— 按 userId 分桶缓存。
+  const modeByUser = new Map<string, Promise<ValuationMode>>();
+  const modeFor = (userId: string): Promise<ValuationMode> => {
+    let p = modeByUser.get(userId);
+    if (!p) {
+      p = db.getUserSettings(userId).then((s) => s.valuationMode);
+      modeByUser.set(userId, p);
+    }
+    return p;
+  };
   return {
     // 归档账户跳过同步(不产生新快照);过滤在此,syncUser 只见活跃账户。
     listAccounts: async (userId) =>
@@ -125,12 +136,13 @@ export function buildSyncDeps(): SyncDeps {
     log: getLogger(["folio", "sync"]),
     // 写快照前重估(oracle 多源 Phase 3):按 mode 定 value + 非盯市类型捕获 selfPrice(原料)。
     // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单):据 connectorId 查 manifest →
-    // 传 markToMarket 布尔。mode 缺省 self-first(= 旧行为);per-user 设置接入见 P3-3。
-    revalue: (connectorId, rows) =>
+    // 传 markToMarket 布尔。mode 按 userId 解析(记忆化);缺省 self-first(无 settings 行的用户)。
+    revalue: async (userId, connectorId, rows) =>
       revalue(
         tokens,
         getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
         rows,
+        await modeFor(userId),
       ),
   };
 }

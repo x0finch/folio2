@@ -184,6 +184,10 @@ export const en = {
     exportHint:
       "Download all your data (accounts, groups, snapshots) as a file. API keys/secrets are never included.",
     exportData: "Export data",
+    valuation: "Valuation",
+    valuationHint:
+      "By default each holding keeps its provider's own value; turn this on to consistently use the market source price and recompute the current view. History stays frozen and no re-sync is needed.",
+    useSourcePrice: "Use market source price for all holdings",
   },
   // 账户输入的标签/说明,key = ProviderInput.label/desc 的英文源串(en 为同值;zh 给翻译;
   // 缺失时由 IntlProvider 的 getMessageFallback 回退到 key 本身)。
@@ -399,6 +403,10 @@ export const zh: Messages = {
     export: "导出",
     exportHint: "把你的全部数据(账户、分组、快照)导出为文件。API key/secret 绝不包含在内。",
     exportData: "导出数据",
+    valuation: "估值",
+    valuationHint:
+      "默认每笔持仓沿用其 provider 自带的价值;打开后统一采用市场源价、重算当前视图。历史保持冻结,无需重新同步。",
+    useSourcePrice: "所有持仓统一采用市场源价",
   },
   Inputs: {
     "API Key": "API Key",

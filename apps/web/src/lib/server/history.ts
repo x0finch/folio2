@@ -12,22 +12,23 @@ import { oracle } from "./oracle";
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
-    const [rows, allAccounts, snapshots] = await Promise.all([
+    const [rows, allAccounts, snapshots, settings] = await Promise.all([
       db.listSnapshotTotalsByUser(context.userId),
       db.listAccountsByUser(context.userId),
       db.getLatestSnapshotByUser(context.userId),
+      db.getUserSettings(context.userId),
     ]);
     const series = buildPortfolioHistory(rows);
     if (series.length === 0) return { series };
 
-    // 当下点 = 与主页同源同算的实时总价(活跃账户,与 getMyOverview 一致的账户集)。
+    // 当下点 = 与主页同源同算的实时总价(活跃账户,与 getMyOverview 一致的账户集 + 同一 mode)。
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     const liveTotals = await deriveLiveAccountTotals(
       accounts,
       byAccount,
       oracle.tokens,
-      "self-first",
+      settings.valuationMode,
     );
     let grand = 0;
     for (const v of liveTotals.values()) grand += v;

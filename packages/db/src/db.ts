@@ -47,6 +47,9 @@ export function createDb(env: DbEnv) {
     recordManualActivity: b(q.recordManualActivity),
     listManualActivityByAccount: b(q.listManualActivityByAccount),
     removeManualActivity: b(q.removeManualActivity),
+    // —— user settings(Phase 3)——
+    getUserSettings: b(q.getUserSettings),
+    updateUserSettings: b(q.updateUserSettings),
   };
 }
 
