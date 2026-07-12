@@ -1,5 +1,4 @@
 import {
-  type CgkCoinId,
   GROUP_MEMBERSHIP,
   type ProviderTokenSeed,
   refKey,
@@ -36,10 +35,8 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   type Stmt = Batch[number];
   const source = opts.source;
   const now = opts.now ?? (() => Date.now());
-  const mk = (vendorId: string): TokenRef => ({
-    source,
-    identifier: vendorId as CgkCoinId,
-  });
+  // source↔identifier 品牌对齐由本源(opts.source)保证 → 整体 as TokenRef(可信边界)。
+  const mk = (vendorId: string): TokenRef => ({ source, identifier: vendorId }) as TokenRef;
   const warmKey = `warm_as_of:${source}`;
 
   // 展示分组(P2):groupKey 直接当 token_groups.id(text PK,deterministic,免 find-or-create)。

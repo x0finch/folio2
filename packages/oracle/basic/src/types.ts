@@ -6,12 +6,16 @@
 // 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 provider 零返工。
 
 // 上游代币 id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/chain)混用。
-// 仅用于下面的 `TokenRef.identifier`;通过 `as CgkCoinId` 在可信边界(解析上游响应)构造。
+// 每源一个品牌(判别联合按 source 区分),通过 `as <Brand>` 在可信边界(解析上游响应)构造。
 export type CgkCoinId = string & { readonly __brand: "CgkCoinId" };
+// DefiLlama 的 coin key:`{chain}:{address}`(如 `ethereum:0x…`)或 `coingecko:{id}`(见 provider,#80)。
+export type DefiLlamaCoinId = string & { readonly __brand: "DefiLlamaCoinId" };
 
-// 解析【输出】:带 source 标签的规范引用。判别联合 —— 将来加股票 = 新增 `{ source:"equity"; … }`,
-// 存储/富化 seam 不返工。
-export type TokenRef = { source: "coingecko"; identifier: CgkCoinId };
+// 解析【输出】:带 source 标签的规范引用。判别联合 —— 每源一个 arm(将来加股票 = 新增
+// `{ source:"equity"; … }`);identifier 品牌随 source 定,存储/富化 seam 不返工。
+export type TokenRef =
+  | { source: "coingecko"; identifier: CgkCoinId }
+  | { source: "defillama"; identifier: DefiLlamaCoinId };
 
 // 解析【输入】(持仓侧;由调用方从 Balance 抽取)。
 // `ref` = 已知解析(命中则直接升格,跳过查找);`identifier` = 用户显式选定的上游 id(如选币),
