@@ -1,6 +1,6 @@
 # 多源定价 + 估值优先级 policy(oracle Phase 3 运行时行为)
 
-Status: accepted — 在 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-multi-source.md) 的身份/打包地基之上,固化多源定价的**运行时行为**(0012 决策 #4 的落地)。经 `grill-with-docs` 定案(决策记录 `.scratch/plans/oracle-phase3-grill-decisions.md`,一次性)。Phase 1(#71/#72/#73)已合:oracle 合包 + 内部-id 归并身份 + `token_vendor_ids`。
+Status: accepted(决策 #1「DefiLlama 第二源」、#3「capability 路由 + baseline 回退」已被 [ADR 0014](0014-drop-runtime-price-source-switching.md) 取代;统一门面 #2、估值 policy #4、存原料实时重算 #5 仍有效)— 在 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-multi-source.md) 的身份/打包地基之上,固化多源定价的**运行时行为**(0012 决策 #4 的落地)。经 `grill-with-docs` 定案(决策记录 `.scratch/plans/oracle-phase3-grill-decisions.md`,一次性)。Phase 1(#71/#72/#73)已合:oracle 合包 + 内部-id 归并身份 + `token_vendor_ids`。
 
 ## 背景
 

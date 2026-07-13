@@ -1,10 +1,9 @@
 import type { TokenInfo, TokenPrice, TokenRef } from "./types";
 
-// 可插拔上游(网络),按能力隔离成两面:
+// 可插拔上游(网络),按能力隔离成两面(便于将来接只供价 / 只供目录的源):
 // · TokenMetaSource —— 目录/发现面(top-N 榜单 + 关键词搜索)。需完整币目录,唯身份权威(CoinGecko)实现。
-// · PriceSource     —— 点查面(按合约懒解析 / 按已知 ref 刷价)。任何行情源(含只供价的 DefiLlama)都能实现。
-// TokenSource = 两面之交,供代币服务(createTokens)消费完整体;单能力源(如 DefiLlama)只实现 PriceSource。
-// 「供哪一面」由 vendor 在注册表(VendorImpl)里挂哪个工厂决定 —— 路由据字段在场与否判定,不另存能力集。
+// · PriceSource     —— 点查面(按合约懒解析 / 按已知 ref 刷价)。
+// TokenSource = 两面之交,供代币服务(createTokens)消费完整体。当前 CoinGecko 实现完整体。
 // 通用层只说 `chain`(我们的链标识);各 source 内部把 chain 翻译成自己的寻址命名,不外泄。价格一律 USD。
 
 // 目录/发现面:top-N 预热 + 关键词搜索(都需完整币目录)。

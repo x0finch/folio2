@@ -46,7 +46,7 @@ export interface ProviderAsset {
 }
 
 // tokens 对外的领域实例:只暴露意图方法,内部编排 source + store。调用方(app)不碰缓存/回源/写回、
-// 不造 TokenRef、不感知具体 source(coingecko/defillama)。
+// 不造 TokenRef、不感知具体 source(当前 CoinGecko)。
 export interface Tokens {
   // 按关键词搜币。
   search(query: string): Promise<TokenInfo[]>;
