@@ -100,6 +100,14 @@ export function createTokens({
   const priceStore = dual ? createStore(price.source) : store;
   const TTLS = { indexTtlMs: TOKEN_KEY_TTL_MS, infoTtlMs: INFO_TTL_MS, priceTtlMs: PRICE_TTL_MS };
 
+  // 合约币判定(双源取价寻址用):tokenKey 解出链+合约 → 可经活跃源合约寻址(fetchByContract)。
+  // 与 ref 无关 —— 孤儿(CGK 未收录)也可有合约,正是活跃源(DefiLlama 链上价)的用武之地。
+  const contractOf = (tokenKey?: string): { chainRef: string; contract: string } | undefined => {
+    if (!tokenKey) return undefined;
+    const p = parseTokenKey(tokenKey);
+    return p.contract && p.chainRef ? { chainRef: p.chainRef, contract: p.contract } : undefined;
+  };
+
   // asset.identifier(用户显式选)→ explicit ref(用 meta 的 source 标签),调用方无需拼 TokenRef。
   const withExplicit = (asset: AssetRef): AssetRef =>
     asset.identifier && !asset.ref
@@ -184,6 +192,7 @@ export function createTokens({
       // 双源:优先活跃源那格的新鲜价(按内部 id 读);否则回退 baseline。priceOf 面向【显式选币】
       // (通常无合约上下文)→ 活跃源没缓存就不合约寻址,直接用 baseline fetch 兜底。
       if (dual) {
+        // 活跃源那格新鲜价优先(按内部 id 读)。
         const ap = rec?.id ? (await priceStore.getPricesByIds([rec.id])).get(rec.id) : undefined;
         if (ap && !ap.stale) {
           return {
@@ -194,7 +203,10 @@ export function createTokens({
             asOf: ap.asOf,
           };
         }
-      } else if (rec?.price && !rec.price.stale) {
+      }
+      // 新鲜 baseline 缓存短路(单源与双源共用):活跃源无新鲜价时也别每次网络取(否则 sync 逐笔打限流)。
+      // priceOf 面向【显式选币】(无合约上下文,不做活跃源合约寻址);缓存皆 stale/缺才回源 baseline。
+      if (rec?.price && !rec.price.stale) {
         return {
           ref,
           unitPrice: rec.price.unitPrice,
@@ -211,16 +223,18 @@ export function createTokens({
     async enrich(assets) {
       const looked = await lookupAll(assets);
       if (!dual) return looked.map(({ ref, rec }) => toEnriched(ref, rec));
-      // 双源 overlay:活跃源那格价(按内部 id)覆盖 baseline 价;活跃源无该币价 → 保留 baseline(native/
-      // 未在活跃源建映射的币仍有 CGK 价可显示,#93「合约优先、CGK 兜底」)。
+      // 双源 overlay(#93):合约币的目标格是【活跃源】那格 —— 有则覆盖价 + 用其 staleness;无则用 baseline 价
+      // 兜底但**标 priceStale=true**,好让 SWR(pricesStale)触发 refreshStalePrices 去活跃源取价(否则
+      // baseline 新鲜时永不刷、换源永不生效)。native/无合约币目标格是 baseline → 原样(其自身 staleness)。
       const ids = looked.map((l) => l.rec?.id).filter((x): x is string => !!x);
       const active = ids.length > 0 ? await priceStore.getPricesByIds(ids) : new Map();
-      return looked.map(({ ref, rec }) => {
+      return looked.map(({ ref, rec }, i) => {
         const base = toEnriched(ref, rec);
+        if (!contractOf(assets[i]?.tokenKey)) return base; // native/无合约:baseline 那格
         const ap = rec?.id ? active.get(rec.id) : undefined;
         return ap
           ? { ...base, unitPrice: ap.unitPrice, change24h: ap.change24h, priceStale: ap.stale }
-          : base;
+          : { ...base, priceStale: true }; // 活跃源尚无价 → 兜底 baseline 价 + 标 stale 触发刷新
       });
     },
 
@@ -267,39 +281,46 @@ export function createTokens({
         return prices.length;
       }
 
-      // 双源:目标格按币型分派 —— 合约币的目标格是【活跃源】那格(缺/过期 → 活跃源合约寻址取价并
-      // link 落该源那格);native/无合约的目标格是【baseline】那格(缺/过期 → CGK 长尾刷价)。
+      // 双源:目标格按币型分派 —— 合约币(含 CGK 未收录的孤儿)目标是【活跃源】那格(缺/过期 → 活跃源
+      // 合约寻址取价并 link 落该源那格);native/无合约(有 ref)目标是【baseline】那格(缺/过期 → CGK 刷)。
       const ids = looked.map((l) => l.rec?.id).filter((x): x is string => !!x);
       const active = ids.length > 0 ? await priceStore.getPricesByIds(ids) : new Map();
-      const contractFetches: { key: string; chainRef: string; contract: string }[] = [];
+      // 按 tokenKey 去重(同一合约跨多账户只取一次);value 带 ref(可空 = 孤儿)供取价失败时回退判定。
+      const contractByKey = new Map<
+        string,
+        { chainRef: string; contract: string; ref: TokenRef | null }
+      >();
       const baselineStale = new Map<string, TokenRef>();
       looked.forEach(({ ref, rec }, i) => {
-        if (!ref) return;
         const key = assets[i]?.tokenKey;
-        const parsed = key ? parseTokenKey(key) : undefined;
-        if (key && parsed?.contract && parsed.chainRef) {
+        const c = contractOf(key);
+        if (c && key) {
+          // 合约币(ref 有无皆可 —— 孤儿正是活跃源的用武之地):活跃源那格缺/过期才取。
           const ap = rec?.id ? active.get(rec.id) : undefined;
-          if (!ap || ap.stale)
-            contractFetches.push({ key, chainRef: parsed.chainRef, contract: parsed.contract });
-        } else if (!rec?.price || rec.price.stale) {
+          if (!ap || ap.stale) contractByKey.set(key, { ...c, ref });
+        } else if (ref && (!rec?.price || rec.price.stale)) {
           baselineStale.set(refKey(ref), ref);
         }
       });
 
       let n = 0;
       // 活跃源合约取价 → link 落活跃源那格(建映射 + 写价;身份/元信息不动,baseline 权威)。
+      const fetches = [...contractByKey.entries()];
       const results = await Promise.all(
-        contractFetches.map((f) =>
-          price.fetchByContract(f.chainRef, f.contract).then((res) => ({ f, res })),
+        fetches.map(([key, f]) =>
+          price.fetchByContract(f.chainRef, f.contract).then((res) => ({ key, f, res })),
         ),
       );
-      for (const { f, res } of results) {
+      for (const { key, f, res } of results) {
         if (res) {
-          await priceStore.linkTokenKeyToCgk(f.key, res.info, res.price, TTLS);
+          await priceStore.linkTokenKeyToCgk(key, res.info, res.price, TTLS);
           n++;
+        } else if (f.ref) {
+          // 活跃源未覆盖该合约币 → 回退刷 baseline(CGK 那格),别让它永远停在过期价。
+          baselineStale.set(refKey(f.ref), f.ref);
         }
       }
-      // baseline 长尾刷价(native/无合约,回退 CGK)。
+      // baseline 长尾刷价(native/无合约 + 活跃源未覆盖的合约币,回退 CGK)。
       if (baselineStale.size > 0) {
         const fetched = await meta.fetchPrices([...baselineStale.values()]);
         const prices = [...fetched.values()];

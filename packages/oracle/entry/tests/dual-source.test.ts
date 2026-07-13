@@ -24,14 +24,15 @@ const KEY = "eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"; // USDC
 const INTERNAL_ID = "internal-usdc";
 
 // 双源 fake stores:meta(身份+baseline 价)共享;每源各自一格价(按 source 分桶,per-vendor)。
-function makeStores() {
-  // baseline 记录:tokenKey → 记录(带 id + coingecko 那格价,标记 stale 以触发刷新)。
+// baselineStale:baseline(CGK)那格价是否过期(默认 true;换源生效性测试用 false 证明不靠 baseline 过期)。
+function makeStores(baselineStale = true) {
+  // baseline 记录:tokenKey → 记录(带 id + coingecko 那格价)。
   const metaRec: TokenRecord & { cgkCheckedUntil: number | null } = {
     id: INTERNAL_ID,
     ref: cg("usd-coin"),
     symbol: "USDC",
     name: "USD Coin",
-    price: { unitPrice: 1, asOf: 0, stale: true },
+    price: { unitPrice: 1, asOf: 0, stale: baselineStale },
     cgkCheckedUntil: null,
   };
   const pricesBySource = new Map<string, Map<string, TokenRecordPrice>>();
@@ -134,16 +135,27 @@ describe("createTokens 双源分派(#93)", () => {
     expect(enriched.unitPrice).toBe(0.999); // 活跃源价,非 baseline 1.0
   });
 
-  it("enrich:活跃源无该币价 → 保留 baseline 价(native/未建映射兜底)", async () => {
-    const { create } = makeStores();
+  it("enrich:活跃源无该币价 → 兜底 baseline 价,但仍标 priceStale=true 触发换源取价(#93 回归)", async () => {
+    // baseline 价【新鲜】(stale=false):证明合约币不靠 baseline 过期也标 stale —— 否则 SWR 永不触发、
+    // DefiLlama 价永不被拉、换源等于没换(code-review 命中的功能失效 bug)。
+    const { create } = makeStores(false);
     const tokens = createTokens({
       createStore: create,
       source: metaStub(),
       priceSource: priceStub(),
     });
-    // 不刷价 → defillama 那格空 → overlay 落空 → 用 baseline 1.0。
     const [enriched] = await tokens.enrich([{ symbol: "USDC", tokenKey: KEY }]);
-    expect(enriched.unitPrice).toBe(1);
+    expect(enriched.unitPrice).toBe(1); // 兜底显示 baseline
+    expect(enriched.priceStale).toBe(true); // 关键:标 stale → SWR 触发 refreshStalePrices 去活跃源取价
+  });
+
+  it("priceOf 双源:活跃源无新鲜价但 baseline 缓存新鲜 → 用 baseline,不网络回源(#93 回归)", async () => {
+    const { create } = makeStores(false); // baseline 新鲜
+    const meta = metaStub();
+    const tokens = createTokens({ createStore: create, source: meta, priceSource: priceStub() });
+    const p = await tokens.priceOf(cg("usd-coin"));
+    expect(p?.unitPrice).toBe(1); // baseline 缓存短路
+    expect(meta.fetchPrices).not.toHaveBeenCalled(); // 不因双源而每次网络(否则 sync 逐笔打限流)
   });
 
   it("search 恒走 meta 源(目录权威在 baseline)", async () => {
