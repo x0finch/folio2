@@ -120,10 +120,11 @@ export const tokenGroups = sqliteTable("token_groups", {
   logo: text("logo"), // 可空:默认取主成员
 });
 
-// 代币表:info facet(name/logo,长 TTL)+ price facet(短 TTL;过期=stale 不删,SWR)合一行。
+// 代币表:info facet(name/logo,长 TTL)。**价 facet 不在此**——价是 per-vendor 事实(#93):
+// 每家源对同一内部币各存一份价,故价列落 token_vendor_ids(每源一行),换源读各自那格、互不覆盖。
 // 归并身份 = tokens.id(UUID,vendor 中立,#73)。各家 vendor 的 coin id 存 token_vendor_ids 子表。
 // cgk 行:有一条 token_vendor_ids(vendor="coingecko");孤儿行(CGK 未收录、provider 采集)= 无 vendor 行,
-// 其 tokenKey 关联存 token_index(kind="tokenKey")。
+// 其 tokenKey 关联存 token_index(kind="tokenKey")。marketCapRank 留本表(全局身份/排序事实,CGK 榜单驱动)。
 export const tokens = sqliteTable("tokens", {
   id: text("id").primaryKey(), // UUID
   symbol: text("symbol").notNull(), // 归一(大写)
@@ -134,15 +135,12 @@ export const tokens = sqliteTable("tokens", {
   // 展示分组(P2):命中种子成员的 cgk 行落库时回填;孤儿/未收录 = NULL(单例组)。组删除则置空。
   groupId: text("group_id").references(() => tokenGroups.id, { onDelete: "set null" }),
   infoExpiresAt: integer("info_expires_at").notNull(), // name/logo 长 TTL
-  unitPrice: real("unit_price"), // 价 facet(可空 = 尚无价)
-  change24h: real("change_24h"),
-  priceAsOf: integer("price_as_of"),
-  priceExpiresAt: integer("price_expires_at"), // 短 TTL;过期读出带 stale
 });
 
-// 代币的 vendor 映射(oracle 多源,#73)。一行 = 「哪个 token × 哪家 vendor × 那家的 coin id」。
-// 归并靠 tokens.id;各家 coin id 是本表的属性,接新源只加行、不改表结构。(vendor, vendorId) 唯一
-// (一家的一个 coin id 只对应一个 token);按 tokenId 反查建二级索引。
+// 代币的 vendor 映射 + per-vendor 价(oracle 多源,#73/#93)。一行 =「哪个 token × 哪家 vendor × 那家的
+// coin id + 那家给的价」。归并靠 tokens.id;各家 coin id 与价是本表属性,接新源只加行、不改表结构。
+// (vendor, vendorId) 唯一(一家的一个 coin id 只对应一个 token);按 tokenId 反查建二级索引。
+// 价 facet 短 TTL(过期=stale 不删,SWR);价列可空 = 该源尚无价(只有映射)。
 export const tokenVendorIds = sqliteTable(
   "token_vendor_ids",
   {
@@ -151,6 +149,10 @@ export const tokenVendorIds = sqliteTable(
       .references(() => tokens.id, { onDelete: "cascade" }),
     vendor: text("vendor").notNull(), // 如 "coingecko"
     vendorId: text("vendor_id").notNull(), // 那家对该币的 id
+    unitPrice: real("unit_price"), // per-vendor 价 facet(可空 = 该源尚无价)
+    change24h: real("change_24h"),
+    priceAsOf: integer("price_as_of"),
+    priceExpiresAt: integer("price_expires_at"), // 短 TTL;过期读出带 stale
   },
   (t) => [
     primaryKey({ columns: [t.vendor, t.vendorId] }),

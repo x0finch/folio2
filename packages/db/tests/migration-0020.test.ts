@@ -36,6 +36,7 @@ describe("migration 0020 — token_vendor_ids 回填(去 vendor tag)", () => {
     await env.DB.prepare("DROP TABLE IF EXISTS _pre0020").run();
 
     const maps = await db.select().from(tokenVendorIds);
-    expect(maps).toEqual([{ tokenId: "cgk-row", vendor: "coingecko", vendorId: "bitcoin" }]);
+    expect(maps).toHaveLength(1);
+    expect(maps[0]).toMatchObject({ tokenId: "cgk-row", vendor: "coingecko", vendorId: "bitcoin" });
   });
 });

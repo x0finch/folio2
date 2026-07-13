@@ -82,7 +82,8 @@ describe("warm + candidates + listTopTokens", () => {
     );
     const rows = await getDb(env).select().from(tokens);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.unitPrice).toBe(2);
+    // 价落 per-vendor 行(token_vendor_ids);经公开读接口拿到刷新后的 2。
+    expect((await store.getByRefs([cg("ethereum")])).get("coingecko:ethereum")?.price?.unitPrice).toBe(2);
   });
 
   it("listTopTokens orders by rank asc (unranked last), honors limit, includes name/logo", async () => {
@@ -188,7 +189,8 @@ describe("linkTokenKeyToCgk (升级合并)", () => {
     const rows = await getDb(env).select().from(tokens);
     expect(rows).toHaveLength(1);
     const maps = await getDb(env).select().from(tokenVendorIds);
-    expect(maps).toEqual([{ tokenId: rows[0]!.id, vendor: "coingecko", vendorId: "foo" }]);
+    expect(maps).toHaveLength(1);
+    expect(maps[0]).toMatchObject({ tokenId: rows[0]!.id, vendor: "coingecko", vendorId: "foo" });
   });
 
   it("orphan → existing cgk row (from warm): merges into it, keeps its provider_logo if set", async () => {
@@ -410,11 +412,13 @@ describe("跨源重锚(linkTokenKeyToCgk 泛化到任意 vendor)", () => {
     expect(maps).toHaveLength(2);
     expect(maps.map((m) => m.vendor).sort()).toEqual(["coingecko", "defillama"]);
 
-    // baseline 的 name/logo 未被 defillama 覆盖;价刷新为 defillama 的 1.001。
+    // baseline 的 name/logo 未被 defillama 覆盖。价是 per-vendor(#93):同一内部行两格价并存,
+    // coingecko 那格仍是 1.0,defillama 那格是 1.001,互不覆盖。
     const row = (await cgk.getById(internalId as string))!;
     expect(row.name).toBe("USDC");
     expect(row.logo).toBe("cgk-logo");
-    expect(row.price?.unitPrice).toBe(1.001);
+    expect(row.price?.unitPrice).toBe(1); // coingecko-bound 读 coingecko 那格
+    expect((await dfl.getById(internalId as string))?.price?.unitPrice).toBe(1.001); // defillama 那格
 
     // defillama 源解析 ref → 同一行(putPrices 走 defillama 映射即可落到共享 id)。
     const byDlRef = await db
@@ -429,7 +433,7 @@ describe("跨源重锚(linkTokenKeyToCgk 泛化到任意 vendor)", () => {
     expect(byDlRef[0]?.tokenId).toBe(internalId);
   });
 
-  it("defillama 侧 putPrices 经重锚映射落到共享 id → 两源都读到该价", async () => {
+  it("defillama putPrices 落 defillama 那格(per-vendor):defillama 读到新价,coingecko 那格不受影响(#93)", async () => {
     const cgk = createTokenStore(env, { source: "coingecko", now: () => 1000 });
     const dfl = createTokenStore(env, { source: "defillama", now: () => 1000 });
     await cgk.linkTokenKeyToCgk(
@@ -439,10 +443,11 @@ describe("跨源重锚(linkTokenKeyToCgk 泛化到任意 vendor)", () => {
       TTLS,
     );
     await dfl.linkTokenKeyToCgk(KEY, info(dl("ethereum:0xusdc"), "USDC"), undefined, TTLS);
-    // 空窗后 defillama 刷价 → 落共享 id。
+    // 空窗后 defillama 刷价 → 只落 defillama 那格(共享内部行,但价按 vendor 分列)。
     await dfl.putPrices([price(dl("ethereum:0xusdc"), 0.999)], TTL);
-    // coingecko 源(baseline)读同一行也见新价。
-    const rec = (await cgk.getByRefs([cg("usd-coin")])).get("coingecko:usd-coin");
-    expect(rec?.price?.unitPrice).toBe(0.999);
+    // defillama 源读到自己的新价。
+    expect((await dfl.getByRefs([dl("ethereum:0xusdc")])).get("defillama:ethereum:0xusdc")?.price?.unitPrice).toBe(0.999);
+    // coingecko 源(baseline)那格仍是 1.0 —— 换源不互相覆盖。
+    expect((await cgk.getByRefs([cg("usd-coin")])).get("coingecko:usd-coin")?.price?.unitPrice).toBe(1);
   });
 });

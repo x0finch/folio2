@@ -162,6 +162,13 @@
       "when": 1783895069065,
       "tag": "0022_even_eternity",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1783926131169,
+      "tag": "0023_safe_havok",
+      "breakpoints": true
     }
   ]
 }
