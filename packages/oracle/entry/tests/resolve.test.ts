@@ -1,7 +1,7 @@
 import type { CgkCoinId, TokenRef } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
-import { normalizeSymbol } from "../src/normalize";
-import { chooseResolution, pickByConfidence } from "../src/resolve";
+import { normalizeSymbol } from "../src/services/tokens/normalize";
+import { chooseResolution, pickByConfidence } from "../src/services/tokens/resolve";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 

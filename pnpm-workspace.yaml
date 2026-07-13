@@ -5,6 +5,6 @@ packages:
   - "packages/connectors/providers/*"
   - "packages/notes/*"
   - "packages/oracle/*"
-  - "packages/oracle/providers/*"
+  - "packages/oracle/sources/*"
   - "packages/tokens/*"
   - "apps/*"

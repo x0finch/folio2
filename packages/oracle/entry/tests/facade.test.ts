@@ -1,8 +1,8 @@
-import type { FxStore, OracleVendor, PlatformStore, TokenStore } from "@folio/oracle-basic";
+import type { FxStore, PlatformStore, TokenStore } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import { createOracle } from "../src/oracle";
-import { createTokens } from "../src/tokens";
-import { BASELINE_VENDOR, pickVendor, VENDORS, type VendorImpl } from "../src/vendors";
+import { createTokens } from "../src/services/tokens";
+import { pickSource, VENDORS } from "../src/vendors";
 
 // #79 AC:createOracle 返回统一 Oracle = {tokens,platforms,fx}。createTokens 仍在(shim/旧 import 用),
 // 但不再是 createOracle 的别名(语义已分离:前者建 Tokens,后者建三服务门面)。
@@ -10,8 +10,8 @@ describe("oracle facade", () => {
   // store 工厂在被碰的服务首访时才调、方法亦惰性 → 可传最小占位。
   const cfg = {
     createTokenStore: () => ({}) as TokenStore,
-    platformStore: () => ({}) as PlatformStore,
-    fxStore: () => ({}) as FxStore,
+    createPlatformStore: () => ({}) as PlatformStore,
+    createFxStore: () => ({}) as FxStore,
   };
 
   it("createOracle 返回 {tokens,platforms,fx} 三服务", () => {
@@ -28,27 +28,20 @@ describe("oracle facade", () => {
   });
 });
 
-describe("pickVendor 能力路由", () => {
-  it("活跃源声明该能力 → 用活跃源(coingecko 全能力)", () => {
-    expect(pickVendor("prices", "coingecko").vendor.id).toBe(BASELINE_VENDOR);
-    expect(pickVendor("fxRates", "coingecko").vendor.id).toBe(BASELINE_VENDOR);
+describe("pickSource 选源路由", () => {
+  it("baseline(coingecko)挂 token/platform/fx → 用它的", () => {
+    expect(pickSource("coingecko", "token")).toBe(VENDORS.coingecko.token);
+    expect(pickSource("coingecko", "fx")).toBe(VENDORS.coingecko.fx);
   });
 
   it("未知活跃源 → 回退 baseline", () => {
-    expect(pickVendor("prices", "does-not-exist").vendor.id).toBe(BASELINE_VENDOR);
+    expect(pickSource("does-not-exist", "token")).toBe(VENDORS.coingecko.token);
   });
 
-  it("活跃源缺该能力 → 回退 baseline(仅供其声明的能力)", () => {
-    // 临时注册一个只声明 prices 的假源(模拟 DefiLlama),验路由:prices 走它、tokenMeta 回退 baseline。
-    const fakeVendor: OracleVendor = { id: "fake", capabilities: new Set(["prices"]) };
-    const fake: VendorImpl = { vendor: fakeVendor };
-    VENDORS.fake = fake;
-    try {
-      expect(pickVendor("prices", "fake").vendor.id).toBe("fake");
-      expect(pickVendor("tokenMeta", "fake").vendor.id).toBe(BASELINE_VENDOR);
-      expect(pickVendor("fxRates", "fake").vendor.id).toBe(BASELINE_VENDOR);
-    } finally {
-      delete VENDORS.fake;
-    }
+  it("活跃源 DefiLlama(仅 price):价走它,token/platform/fx 回退 baseline(#83)", () => {
+    expect(pickSource("defillama", "price")).toBe(VENDORS.defillama.price);
+    expect(pickSource("defillama", "token")).toBe(VENDORS.coingecko.token);
+    expect(pickSource("defillama", "platform")).toBe(VENDORS.coingecko.platform);
+    expect(pickSource("defillama", "fx")).toBe(VENDORS.coingecko.fx);
   });
 });

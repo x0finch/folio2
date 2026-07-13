@@ -6,7 +6,7 @@
 //
 // 文法(参照 CAIP-19:<namespace>/<asset_namespace>:<reference>):
 //   eip155:<chainId>/erc20:<addr>    有数字 chainId 的 EVM 合约(标准形)
-//   chain:<slug>/token:<addr>        无数字 chainId 的链寻址兜底(slug = provider 链命名;稳定唯一)
+//   chain:<slug>/token:<addr>        无数字 chainId 的链寻址兜底(slug = source 链命名;稳定唯一)
 //   eip155:<chainId>/native:<sym>    原生 gas 币(每链唯一 → chainId 已定身份,symbol 仅可读标签,不撞)
 //   chain:<slug>/native:<sym>        无数字 chainId 的原生币兜底
 //   coingecko:<coin-id>              厂商寻址:仅有 CGK coin id、无链上地址时(manual 选币/CEX 解析结果)
@@ -45,7 +45,7 @@ export function buildTokenKey(input: TokenKeyInput): string | undefined {
 }
 
 // 解析 tokenKey(buildTokenKey 的逆):
-//   chainRef = eip155 的数字 chainId 串 / chain: 的 slug —— 喂 provider.fetchByContract(该函数按 slug 或
+//   chainRef = eip155 的数字 chainId 串 / chain: 的 slug —— 喂 source.fetchByContract(该函数按 slug 或
 //   chainId 都能映射到 CGK 平台;用数字 chainId 反而更可靠,如 Arbitrum slug≠CGK平台名)。
 export interface ParsedTokenKey {
   chainRef?: string;

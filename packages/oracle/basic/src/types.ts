@@ -3,12 +3,12 @@
 //   · `token` = 参考层的一切(解析后的规范实体及其数据/接口) —— `TokenRef`/`TokenInfo`/…。
 //   · `coin`  = 只保留在 CoinGecko 包内部(局部变量 / `CoinGeckoConfig` / "CoinGecko ID" 文案);
 //     通用契约一律用 `token`,`TokenRef.identifier` 承载上游 id(具体是不是 coin 由 source 决定)。
-// 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 provider 零返工。
+// 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 source 零返工。
 
 // 上游代币 id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/chain)混用。
 // 每源一个品牌(判别联合按 source 区分),通过 `as <Brand>` 在可信边界(解析上游响应)构造。
 export type CgkCoinId = string & { readonly __brand: "CgkCoinId" };
-// DefiLlama 的 coin key:`{chain}:{address}`(如 `ethereum:0x…`)或 `coingecko:{id}`(见 provider,#80)。
+// DefiLlama 的 coin key:`{chain}:{address}`(如 `ethereum:0x…`)或 `coingecko:{id}`(见 source,#80)。
 export type DefiLlamaCoinId = string & { readonly __brand: "DefiLlamaCoinId" };
 
 // 解析【输出】:带 source 标签的规范引用。判别联合 —— 每源一个 arm(将来加股票 = 新增
@@ -30,7 +30,7 @@ export interface AssetRef {
 export type Confidence = "high" | "low";
 export type ResolutionVia = "explicit" | "contract" | "override" | "symbol" | "none";
 
-// 解析结果。`ref:null` = 无法定价(调用方走 provider 回退);`confidence:"low"` = 调用方应降级,不写进数据。
+// 解析结果。`ref:null` = 无法定价(调用方走 source 回退);`confidence:"low"` = 调用方应降级,不写进数据。
 export interface Resolution {
   ref: TokenRef | null;
   confidence: Confidence;
@@ -41,7 +41,7 @@ export interface Resolution {
 // 元信息facet,慢 TTL(logo/name 极少变,没必要随价刷)。
 export interface TokenInfo {
   ref: TokenRef;
-  id?: string; // 内部代币行 id(store 读出的才有;provider 直搜结果无)。logo 代理 key。
+  id?: string; // 内部代币行 id(store 读出的才有;source 直搜结果无)。logo 代理 key。
   symbol: string;
   name: string;
   logo?: string;

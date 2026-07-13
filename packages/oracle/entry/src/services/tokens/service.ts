@@ -2,8 +2,8 @@ import type {
   AssetRef,
   CgkCoinId,
   Resolution,
-  TokenProvider,
   TokenRef,
+  TokenSource,
   TokenStore,
 } from "@folio/oracle-basic";
 import {
@@ -19,7 +19,7 @@ import { normalizeSymbol } from "./normalize";
 import { chooseResolution } from "./resolve";
 
 export interface ResolveDeps {
-  provider: TokenProvider;
+  source: TokenSource;
   store: TokenStore;
   overrides?: Readonly<Record<string, TokenRef>>;
 }
@@ -31,7 +31,7 @@ export interface ResolveOpts {
 }
 
 // 懒解析编排:tokenKey → 代币表;命中 cgk 行直接升格;孤儿/miss 且 lazy → 问 CGK,
-// 命中则升级合并(linkTokenKeyToCgk),未收录则 seed 孤儿 + 记复查时刻(期间 provider 数据照常展示)。
+// 命中则升级合并(linkTokenKeyToCgk),未收录则 seed 孤儿 + 记复查时刻(期间 source 数据照常展示)。
 export async function resolveAsset(
   asset: AssetRef,
   deps: ResolveDeps,
@@ -64,7 +64,7 @@ export async function resolveAsset(
       (rec?.cgkCheckedUntil ?? 0) <= Date.now()
     ) {
       // 反查用 chainRef(eip155 的数字 chainId 更可靠地命中 CGK 平台;chain: 形式给 slug)。
-      const res = await deps.provider.fetchByContract(parsed.chainRef, parsed.contract);
+      const res = await deps.source.fetchByContract(parsed.chainRef, parsed.contract);
       if (res) {
         await deps.store.linkTokenKeyToCgk(key, res.info, res.price, {
           indexTtlMs: TOKEN_KEY_TTL_MS,
@@ -94,7 +94,7 @@ export async function resolveAsset(
 }
 
 export interface RefreshDeps {
-  provider: TokenProvider;
+  source: TokenSource;
   store: TokenStore;
 }
 
@@ -114,7 +114,7 @@ export async function refreshWarm(
 
   const warmAsOf = await deps.store.warmAsOf();
   if (warmAsOf === null || opts.now - warmAsOf > warmTtl) {
-    const markets = await deps.provider.fetchMarkets({ topN });
+    const markets = await deps.source.fetchMarkets({ topN });
     // 归一 symbol(索引 key 的口径)在写 store 之前完成 —— store 只按 key 存,不做业务归一。
     const rows = markets.map((m) => ({
       price: m.price,

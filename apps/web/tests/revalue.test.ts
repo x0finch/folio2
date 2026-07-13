@@ -71,8 +71,8 @@ const stubSource = {
   searchTokens: async () => [],
 };
 
-// tokens 实例:真 createTokens,注入 stub provider + fake store(避免真网络)。
-const tokens = (): Tokens => createTokens({ createStore: () => fakeStore(), provider: stubSource });
+// tokens 实例:真 createTokens,注入 stub source + fake store(避免真网络)。
+const tokens = (): Tokens => createTokens({ createStore: () => fakeStore(), source: stubSource });
 const bal = (symbol: string, amount: number, value: number, identifier?: string): Balance => ({
   symbol,
   amount,

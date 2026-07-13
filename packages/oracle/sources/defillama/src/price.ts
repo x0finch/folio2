@@ -1,4 +1,4 @@
-import type { TokenInfo, TokenPrice, TokenProvider } from "@folio/oracle-basic";
+import type { PriceSource, TokenPrice } from "@folio/oracle-basic";
 import { CHAIN_ALIASES, PRICE_PATH } from "./constants";
 import { createRequester, type DefiLlamaConfig } from "./http";
 import { parseCoin, parseCurrentPrices } from "./parse";
@@ -11,23 +11,15 @@ function toChainSlug(chain: string): string {
   return CHAIN_ALIASES[chain] ?? CHAIN_ALIASES[c] ?? c;
 }
 
-// DefiLlama 的 `TokenProvider` **取价面**实现(#80):按 coin key(`{chain}:{address}` / `coingecko:{id}`)取价。
-// vendor 仅声明 prices —— 故 markets/search 恒空(它非 tokenMeta/搜索源,身份/元信息权威留 baseline CoinGecko)。
-// fetchByContract 亦走同一 /prices/current 端点(链:合约地址 → 价),info 只带 symbol。尚未 user-facing:
-// 路由/设置接入见 P3-6。
-export function createDefiLlamaProvider(config: DefiLlamaConfig = {}): TokenProvider {
+// DefiLlama 的 `PriceSource` 实现(#80):按 coin key(`{chain}:{address}` / `coingecko:{id}`)取价。
+// 只实现点查面(fetchByContract / fetchPrices)—— DefiLlama 无币目录/搜索(那是 TokenMetaSource,身份/
+// 元信息权威留 baseline CoinGecko),故不实现 markets/search。fetchByContract 亦走 /prices/current 端点
+// (链:合约地址 → 价),info 只带 symbol。运行时价格路由接入见 #83。
+export function createDefiLlamaSource(config: DefiLlamaConfig = {}): PriceSource {
   const request = createRequester(config);
 
-  const provider: TokenProvider = {
+  const source: PriceSource = {
     source: "defillama",
-
-    // 非价面:DefiLlama 无 top-N markets / 搜索 → 恒空(能力仅 prices)。
-    async fetchMarkets(): Promise<{ info: TokenInfo; price: TokenPrice }[]> {
-      return [];
-    },
-    async searchTokens(): Promise<TokenInfo[]> {
-      return [];
-    },
 
     // 链:合约地址 → 价。chain 翻成 DefiLlama slug,拼 key 单查;无价 → null。
     async fetchByContract(chain, contract) {
@@ -44,5 +36,5 @@ export function createDefiLlamaProvider(config: DefiLlamaConfig = {}): TokenProv
       return parseCurrentPrices(json);
     },
   };
-  return provider;
+  return source;
 }

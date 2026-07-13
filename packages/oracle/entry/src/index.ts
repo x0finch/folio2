@@ -9,17 +9,17 @@ export * from "@folio/oracle-basic";
 export {
   createCoinGeckoFxSource,
   createCoinGeckoPlatformSource,
-} from "@folio/oracle-provider-coingecko";
-// 平台 / 汇率的组装服务(折入自 @folio/platforms、@folio/fx,#72)。类型经 @folio/oracle-basic 透出。
-export { type CreateFxRatesConfig, createFxRates } from "./fx-service";
+} from "@folio/oracle-source-coingecko";
 // 统一 Oracle 门面(#79):一个入口组合三服务 + capability 路由。
 export { type CreateOracleConfig, createOracle, type Oracle } from "./oracle";
-export { type CreatePlatformsConfig, createPlatforms } from "./platforms-service";
+// 平台 / 汇率的组装服务(折入自 @folio/platforms、@folio/fx,#72)。类型经 @folio/oracle-basic 透出。
+export { type CreateFxRatesConfig, createFxRates } from "./services/fx";
+export { type CreatePlatformsConfig, createPlatforms } from "./services/platforms";
 export {
   type CreateTokensConfig,
   createTokens,
   type EnrichedAsset,
   type ProviderAsset,
   type Tokens,
-} from "./tokens";
+} from "./services/tokens";
 export { BASELINE_VENDOR, VENDORS, type VendorImpl } from "./vendors";
