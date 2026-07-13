@@ -131,15 +131,7 @@ describe("fetchByContract", () => {
   });
 });
 
-describe("non-price faces (capability = prices only)", () => {
-  it("fetchMarkets / searchTokens → empty, no request", async () => {
-    const { calls } = mockFetch(() => ({ body: {} }));
-    const p = createDefiLlamaProvider();
-    expect(await p.fetchMarkets({ topN: 100 })).toEqual([]);
-    expect(await p.searchTokens("btc")).toEqual([]);
-    expect(calls).toHaveLength(0);
-  });
-
+describe("PriceSource shape", () => {
   it("source tag = defillama", () => {
     expect(createDefiLlamaProvider().source).toBe("defillama");
   });

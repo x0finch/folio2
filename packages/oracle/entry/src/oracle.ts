@@ -56,7 +56,7 @@ export function createOracle(cfg: CreateOracleConfig): Oracle {
       // 价格分源路由(DefiLlama 只供 prices)留待 P3-5/P3-6。测试可用 cfg.provider 直接覆盖。
       if (!tokens) {
         const provider =
-          cfg.provider ?? pickVendor("tokenMeta", activeVendor).tokenSource?.({ apiKey });
+          cfg.provider ?? pickVendor("tokenMeta", activeVendor).tokenMetaSource?.({ apiKey });
         tokens = createTokens({ apiKey, createStore: cfg.createTokenStore, provider });
       }
       return tokens;

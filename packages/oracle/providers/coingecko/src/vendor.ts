@@ -1,7 +1,5 @@
-import type { OracleCapability, OracleVendor } from "@folio/oracle-basic";
+import type { OracleVendor } from "@folio/oracle-basic";
 
-// CoinGecko 作为 oracle vendor 的声明。platforms/fx 折入后(#72)四类能力全有实现,故全声明。
-export const coinGeckoVendor: OracleVendor = {
-  id: "coingecko",
-  capabilities: new Set<OracleCapability>(["prices", "tokenMeta", "platformMeta", "fxRates"]),
-};
+// CoinGecko 作为 oracle vendor 的身份声明。四类能力全供——具体由注册表(VendorImpl)挂满四个工厂体现,
+// 不在此另存能力集(见 @folio/oracle-basic vendor.ts / entry vendors.ts pickVendor)。
+export const coinGeckoVendor: OracleVendor = { id: "coingecko" };

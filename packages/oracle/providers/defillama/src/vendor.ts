@@ -1,8 +1,5 @@
-import type { OracleCapability, OracleVendor } from "@folio/oracle-basic";
+import type { OracleVendor } from "@folio/oracle-basic";
 
-// DefiLlama 作为 oracle vendor 的声明。只供价格 —— 身份/元信息/平台/汇率仍走 baseline(CoinGecko)。
-// createOracle 的 capability 路由据此:活跃源为 defillama 时仅 prices 走它,其余回退 baseline(见 #79)。
-export const defiLlamaVendor: OracleVendor = {
-  id: "defillama",
-  capabilities: new Set<OracleCapability>(["prices"]),
-};
+// DefiLlama 作为 oracle vendor 的身份声明。只供价格——注册表里它只挂 priceSource 工厂,身份/元信息/平台/
+// 汇率无工厂 → pickVendor 缺该实现即回退 baseline(CoinGecko)。见 entry vendors.ts。
+export const defiLlamaVendor: OracleVendor = { id: "defillama" };

@@ -41,7 +41,7 @@ export {
   type PlatformStore,
   type Platforms,
 } from "./platform";
-export type { TokenProvider } from "./provider";
+export type { PriceSource, TokenMetaSource, TokenProvider } from "./provider";
 export { parseRefKey, refKey } from "./ref";
 export type { TokenStore } from "./store";
 export {
