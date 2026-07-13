@@ -580,13 +580,11 @@ export async function removeManualActivity(
 }
 
 // —— user settings(Phase 3,#82)——
-// 缺省:无行的用户 → coingecko / self-first(= 旧行为)。"coingecko" 即 oracle baseline;
-// db 层不耦合 @folio/oracle,就地写常量。
-const DEFAULT_ACTIVE_VENDOR = "coingecko";
+// 缺省:无行的用户 → self-first(= 旧行为)。db 层不耦合 @folio/oracle,就地写常量。
+// 运行时换价源(active_vendor)已废止(ADR 0014)—— CoinGecko 单源,仅留估值模式。
 const DEFAULT_VALUATION_MODE: ValuationMode = "self-first";
 
 export interface UserSettingsView {
-  activeVendor: string;
   valuationMode: ValuationMode;
 }
 
@@ -595,7 +593,6 @@ export async function getUserSettings(env: DbEnv, userId: string): Promise<UserS
   const rows = await getDb(env).select().from(userSettings).where(eq(userSettings.userId, userId));
   const r = rows[0] as UserSettings | undefined;
   return {
-    activeVendor: r?.activeVendor ?? DEFAULT_ACTIVE_VENDOR,
     valuationMode: r?.valuationMode ?? DEFAULT_VALUATION_MODE,
   };
 }
@@ -604,19 +601,17 @@ export async function getUserSettings(env: DbEnv, userId: string): Promise<UserS
 export async function updateUserSettings(
   env: DbEnv,
   userId: string,
-  patch: { activeVendor?: string; valuationMode?: ValuationMode },
+  patch: { valuationMode?: ValuationMode },
 ): Promise<void> {
   const now = Date.now();
-  const set: Partial<{ activeVendor: string; valuationMode: ValuationMode; updatedAt: number }> = {
+  const set: Partial<{ valuationMode: ValuationMode; updatedAt: number }> = {
     updatedAt: now,
   };
-  if (patch.activeVendor !== undefined) set.activeVendor = patch.activeVendor;
   if (patch.valuationMode !== undefined) set.valuationMode = patch.valuationMode;
   await getDb(env)
     .insert(userSettings)
     .values({
       userId,
-      activeVendor: patch.activeVendor ?? DEFAULT_ACTIVE_VENDOR,
       valuationMode: patch.valuationMode ?? DEFAULT_VALUATION_MODE,
       updatedAt: now,
     })

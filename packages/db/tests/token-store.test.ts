@@ -1,13 +1,11 @@
 import { env } from "cloudflare:test";
-import type { CgkCoinId, DefiLlamaCoinId, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
-import { and, eq } from "drizzle-orm";
+import type { CgkCoinId, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTokenStore } from "../src"; // 全局代币缓存:公开独立导出(非 createDb 门面)
 import { getDb } from "../src/client";
 import { tokenGroups, tokenIndex, tokenMeta, tokens, tokenVendorIds } from "../src/schema";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
-const dl = (id: string): TokenRef => ({ source: "defillama", identifier: id as DefiLlamaCoinId });
 const info = (ref: TokenRef, symbol: string, logo?: string): TokenInfo => ({
   ref,
   symbol,
@@ -366,83 +364,5 @@ describe("token_groups (展示分组挂组,P2/ADR-0001)", () => {
     expect(
       (await store.getByRefs([cg("scam-usdt")])).get("coingecko:scam-usdt")?.group,
     ).toBeUndefined();
-  });
-});
-
-// #83 换源不碎:同一 tokenKey 先经 coingecko link,后经 defillama link → 复用同一内部 id,
-// 挂两条 vendor 映射,不覆盖 baseline 的 name/logo。
-describe("跨源重锚(linkTokenKeyToCgk 泛化到任意 vendor)", () => {
-  const KEY = "eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
-
-  it("同一 tokenKey 先 cgk 后 defillama link → 同一内部 id + 两条映射,baseline 元信息保留", async () => {
-    const cgk = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    const dfl = createTokenStore(env, { source: "defillama", now: () => 1000 });
-
-    // 1) coingecko 先建 canonical 行(带 name/logo/价 1.0)。
-    await cgk.linkTokenKeyToCgk(
-      KEY,
-      info(cg("usd-coin"), "USDC", "cgk-logo"),
-      price(cg("usd-coin"), 1),
-      TTLS,
-    );
-    const cgkRec = (await cgk.getByTokenKey([KEY])).get(KEY);
-    const internalId = cgkRec?.id;
-    expect(internalId).toBeTruthy();
-
-    // 2) defillama link 同一 tokenKey(只供 symbol、无 logo、价 1.001)→ 重锚到同一 id。
-    await dfl.linkTokenKeyToCgk(
-      KEY,
-      info(dl("ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"), "USDC"),
-      price(dl("ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"), 1.001),
-      TTLS,
-    );
-
-    // 两源读同一 tokenKey → 同一内部 id(换源不碎)。
-    const dflRec = (await dfl.getByTokenKey([KEY])).get(KEY);
-    expect(dflRec?.id).toBe(internalId);
-
-    // 两条 vendor 映射(coingecko + defillama)挂在同一内部 id。
-    const db = getDb(env);
-    const maps = await db
-      .select({ vendor: tokenVendorIds.vendor, vendorId: tokenVendorIds.vendorId })
-      .from(tokenVendorIds)
-      .where(eq(tokenVendorIds.tokenId, internalId as string));
-    expect(maps).toHaveLength(2);
-    expect(maps.map((m) => m.vendor).sort()).toEqual(["coingecko", "defillama"]);
-
-    // baseline 的 name/logo 未被 defillama 覆盖;价刷新为 defillama 的 1.001。
-    const row = (await cgk.getById(internalId as string))!;
-    expect(row.name).toBe("USDC");
-    expect(row.logo).toBe("cgk-logo");
-    expect(row.price?.unitPrice).toBe(1.001);
-
-    // defillama 源解析 ref → 同一行(putPrices 走 defillama 映射即可落到共享 id)。
-    const byDlRef = await db
-      .select({ tokenId: tokenVendorIds.tokenId })
-      .from(tokenVendorIds)
-      .where(
-        and(
-          eq(tokenVendorIds.vendor, "defillama"),
-          eq(tokenVendorIds.vendorId, "ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
-        ),
-      );
-    expect(byDlRef[0]?.tokenId).toBe(internalId);
-  });
-
-  it("defillama 侧 putPrices 经重锚映射落到共享 id → 两源都读到该价", async () => {
-    const cgk = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    const dfl = createTokenStore(env, { source: "defillama", now: () => 1000 });
-    await cgk.linkTokenKeyToCgk(
-      KEY,
-      info(cg("usd-coin"), "USDC", "l"),
-      price(cg("usd-coin"), 1),
-      TTLS,
-    );
-    await dfl.linkTokenKeyToCgk(KEY, info(dl("ethereum:0xusdc"), "USDC"), undefined, TTLS);
-    // 空窗后 defillama 刷价 → 落共享 id。
-    await dfl.putPrices([price(dl("ethereum:0xusdc"), 0.999)], TTL);
-    // coingecko 源(baseline)读同一行也见新价。
-    const rec = (await cgk.getByRefs([cg("usd-coin")])).get("coingecko:usd-coin");
-    expect(rec?.price?.unitPrice).toBe(0.999);
   });
 });

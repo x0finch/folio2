@@ -54,7 +54,6 @@ export type {
   AssetRef,
   CgkCoinId,
   Confidence,
-  DefiLlamaCoinId,
   ProviderTokenSeed,
   Resolution,
   ResolutionVia,

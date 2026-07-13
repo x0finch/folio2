@@ -203,13 +203,13 @@ export const fxRates = sqliteTable("fx_rates", {
   expiresAt: integer("expires_at").notNull(),
 });
 
-// per-user 设置(Phase 3,#82):活跃行情源 + 估值模式。读带缺省(无行 → coingecko / self-first),
+// per-user 设置(Phase 3,#82):估值模式(自填价 vs 源价谁优先)。读带缺省(无行 → self-first),
 // 故非全用户都有行 —— 仅在改设置时 upsert。user_id 为 PK 且 FK→user(删用户级联清理)。
+// 运行时换价源(active_vendor)已废止(ADR 0014)—— CoinGecko 单源。
 export const userSettings = sqliteTable("user_settings", {
   userId: text("user_id")
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
-  activeVendor: text("active_vendor").notNull().default("coingecko"),
   valuationMode: text("valuation_mode")
     .$type<"self-first" | "source-first">()
     .notNull()
