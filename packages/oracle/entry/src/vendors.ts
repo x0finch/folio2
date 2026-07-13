@@ -1,63 +1,49 @@
-import type {
-  FxSource,
-  OracleCapability,
-  OracleVendor,
-  PlatformSource,
-  PriceSource,
-  TokenProvider,
-} from "@folio/oracle-basic";
+import type { FxSource, PlatformSource, PriceSource, TokenSource } from "@folio/oracle-basic";
 import {
-  coinGeckoVendor,
   createCoinGeckoFxSource,
   createCoinGeckoPlatformSource,
-  createCoinGeckoProvider,
-} from "@folio/oracle-provider-coingecko";
-import { createDefiLlamaProvider, defiLlamaVendor } from "@folio/oracle-provider-defillama";
+  createCoinGeckoSource,
+} from "@folio/oracle-source-coingecko";
+import { createDefiLlamaSource } from "@folio/oracle-source-defillama";
 
-// 一个 vendor 的「身份 + 各能力的实现工厂」。工厂当且仅当 vendor 供该能力时在场——路由(pickVendor)据
-// 「字段在场与否」判定,不另存能力集。代币面拆两工厂:tokenMetaSource(目录/搜索,返回完整 TokenProvider
-// 供代币服务消费)+ priceSource(点查取价,窄 PriceSource);platformMeta→platformSource;fxRates→fxSource。
+// 一个 vendor 供哪几类数据,由它挂了哪些实现工厂决定 —— 没有独立的能力集,也不按能力重复挂同一 client。
+// · token —— 完整代币 client(目录+价,= TokenSource)。身份/元信息权威才有(CoinGecko)。代币服务消费它。
+// · price —— **专用**价源(无目录,= PriceSource)。如 DefiLlama。多能力 vendor(CoinGecko)不挂,
+//            其价走 token 的价面 → 价格消费方回退 `price ?? token`(#83 双源消费时接),故此处不重复挂。
+// · platform / fx —— 各一。选源按「取哪个字段」判空回退(见 pickSource)。
 export interface VendorImpl {
-  readonly vendor: OracleVendor;
-  readonly tokenMetaSource?: (cfg: { apiKey?: string }) => TokenProvider;
-  readonly priceSource?: (cfg: { apiKey?: string }) => PriceSource;
-  readonly platformSource?: (cfg: { apiKey?: string }) => PlatformSource;
-  readonly fxSource?: (cfg: { apiKey?: string }) => FxSource;
+  readonly token?: (cfg: { apiKey?: string }) => TokenSource;
+  readonly price?: (cfg: { apiKey?: string }) => PriceSource;
+  readonly platform?: (cfg: { apiKey?: string }) => PlatformSource;
+  readonly fx?: (cfg: { apiKey?: string }) => FxSource;
 }
 
-// 能力 → VendorImpl 上对应的实现工厂字段。路由判「该字段在不在」取代旧的 capabilities.has(cap)。
-const CAP_FIELD: Record<OracleCapability, keyof Omit<VendorImpl, "vendor">> = {
-  tokenMeta: "tokenMetaSource",
-  prices: "priceSource",
-  platformMeta: "platformSource",
-  fxRates: "fxSource",
-};
-
-// 缺能力回退的兜底源:CoinGecko 供全部四类能力,是 identity/meta/logo 的权威(见 ADR 0013)。
+// 缺能力回退的兜底源:CoinGecko 供全部四类,是 identity/meta/logo 的权威(见 ADR 0013)。
 export const BASELINE_VENDOR = "coingecko";
 
-// CoinGecko 挂满四个工厂;代币两面同源(createCoinGeckoProvider 返回完整 TokenProvider,既是目录面也是价面)。
+// CoinGecko:一个 client(createCoinGeckoSource = 完整 TokenSource)供 token 面;platform/fx 各一。
+// 不挂 price —— 它非专用价源,价走 token(见上)。
 const coingecko: VendorImpl = {
-  vendor: coinGeckoVendor,
-  tokenMetaSource: createCoinGeckoProvider,
-  priceSource: createCoinGeckoProvider,
-  platformSource: createCoinGeckoPlatformSource,
-  fxSource: createCoinGeckoFxSource,
+  token: createCoinGeckoSource,
+  platform: createCoinGeckoPlatformSource,
+  fx: createCoinGeckoFxSource,
 };
 
-// DefiLlama 只挂 priceSource(点查取价)。无 tokenMetaSource/platform/fx → pickVendor 那几类回退 baseline。
+// DefiLlama:只挂 price(专用价源,无目录)。无 token/platform/fx → pickSource 那几类回退 baseline。
 // DefiLlama keyless,忽略 apiKey。
 const defillama: VendorImpl = {
-  vendor: defiLlamaVendor,
-  priceSource: () => createDefiLlamaProvider(),
+  price: () => createDefiLlamaSource(),
 };
 
-// vendor 注册表(#83:CoinGecko baseline + DefiLlama 可切换价格源)。
+// vendor 注册表(#83:CoinGecko baseline + DefiLlama 可切换价格源)。key 即活跃源标识(activeVendor)。
 export const VENDORS: Record<string, VendorImpl> = { coingecko, defillama };
 
-// 能力路由:活跃源挂了该能力的实现工厂 → 用活跃源;否则回退 baseline。未知活跃源亦退化为 baseline。
-export function pickVendor(capability: OracleCapability, activeVendor: string): VendorImpl {
-  const baseline = VENDORS[BASELINE_VENDOR];
-  const active = VENDORS[activeVendor] ?? baseline;
-  return active[CAP_FIELD[capability]] ? active : baseline;
+// 选源:活跃源挂了该工厂字段 → 用活跃源的;否则回退 baseline。未知活跃源亦退化为 baseline。
+// 「能力」即「取哪个字段」—— 调用方直接给字段名(keyof 受检),不再有能力名/映射表这层中转。
+export function pickSource<K extends keyof VendorImpl>(
+  activeVendor: string,
+  field: K,
+): VendorImpl[K] {
+  const active = VENDORS[activeVendor] ?? VENDORS[BASELINE_VENDOR];
+  return active[field] ?? VENDORS[BASELINE_VENDOR][field];
 }

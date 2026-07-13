@@ -1,5 +1,5 @@
 {
-  "name": "@folio/oracle-provider-defillama",
+  "name": "@folio/oracle-source-defillama",
   "version": "0.0.0",
   "private": true,
   "type": "module",

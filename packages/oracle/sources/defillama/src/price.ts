@@ -15,10 +15,10 @@ function toChainSlug(chain: string): string {
 // 只实现点查面(fetchByContract / fetchPrices)—— DefiLlama 无币目录/搜索(那是 TokenMetaSource,身份/
 // 元信息权威留 baseline CoinGecko),故不实现 markets/search。fetchByContract 亦走 /prices/current 端点
 // (链:合约地址 → 价),info 只带 symbol。运行时价格路由接入见 #83。
-export function createDefiLlamaProvider(config: DefiLlamaConfig = {}): PriceSource {
+export function createDefiLlamaSource(config: DefiLlamaConfig = {}): PriceSource {
   const request = createRequester(config);
 
-  const provider: PriceSource = {
+  const source: PriceSource = {
     source: "defillama",
 
     // 链:合约地址 → 价。chain 翻成 DefiLlama slug,拼 key 单查;无价 → null。
@@ -36,5 +36,5 @@ export function createDefiLlamaProvider(config: DefiLlamaConfig = {}): PriceSour
       return parseCurrentPrices(json);
     },
   };
-  return provider;
+  return source;
 }

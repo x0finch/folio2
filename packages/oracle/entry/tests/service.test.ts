@@ -3,15 +3,15 @@ import type {
   TokenCandidate,
   TokenInfo,
   TokenPrice,
-  TokenProvider,
   TokenRecord,
   TokenRef,
+  TokenSource,
   TokenStore,
 } from "@folio/oracle-basic";
 import { OVERRIDES } from "@folio/oracle-basic";
 import { describe, expect, it, vi } from "vitest";
-import { normalizeSymbol } from "../src/normalize";
-import { refreshWarm, resolveAsset } from "../src/service";
+import { normalizeSymbol } from "../src/services/tokens/normalize";
+import { refreshWarm, resolveAsset } from "../src/services/tokens/service";
 
 const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
 const key = (r: TokenRef) => `${r.source}:${r.identifier}`;
@@ -130,18 +130,18 @@ describe("resolveAsset", () => {
     expect(
       await resolveAsset(
         { symbol: "X", ref: cg("pinned") },
-        { provider: {} as TokenProvider, store: fakeStore() },
+        { source: {} as TokenSource, store: fakeStore() },
       ),
     ).toEqual({ ref: cg("pinned"), confidence: "high", via: "explicit" });
   });
 
   it("coingecko: tokenKey (厂商寻址,如 manual 选币) → 直达显式 ref,不查 store/source", async () => {
     const fetchByContract = vi.fn();
-    const provider = { fetchByContract } as unknown as TokenProvider;
+    const source = { fetchByContract } as unknown as TokenSource;
     expect(
       await resolveAsset(
         { symbol: "BTC", tokenKey: "coingecko:bitcoin" },
-        { provider, store: fakeStore() },
+        { source, store: fakeStore() },
       ),
     ).toEqual({ ref: cg("bitcoin"), confidence: "high", via: "explicit" });
     expect(fetchByContract).not.toHaveBeenCalled(); // 已是规范 ref,不回源、不掉 symbol
@@ -154,16 +154,16 @@ describe("resolveAsset", () => {
       info: info(cg("usd-coin"), "usdc"),
       price: price(cg("usd-coin"), 6),
     }));
-    const provider = { fetchByContract } as unknown as TokenProvider;
+    const source = { fetchByContract } as unknown as TokenSource;
     const asset = { symbol: "USDC", tokenKey: "chain:ethereum/token:0xabc" };
 
-    const r1 = await resolveAsset(asset, { provider, store });
+    const r1 = await resolveAsset(asset, { source, store });
     expect(r1).toEqual({ ref: cg("usd-coin"), confidence: "high", via: "contract" });
     const rec = (await store.getByRefs([cg("usd-coin")])).get("coingecko:usd-coin");
     expect(rec?.symbol).toBe("usdc");
     expect(rec?.price?.unitPrice).toBe(1);
 
-    const r2 = await resolveAsset(asset, { provider, store });
+    const r2 = await resolveAsset(asset, { source, store });
     expect(r2.via).toBe("contract");
     expect(fetchByContract).toHaveBeenCalledTimes(1); // tokenKey 索引已指向 cgk,不再回源
     expect(fetchByContract).toHaveBeenCalledWith("ethereum", "0xabc"); // chainRef + contract parsed from tokenKey
@@ -176,10 +176,10 @@ describe("resolveAsset", () => {
       info: info(cg("usd-coin"), "usdc"),
       price: price(cg("usd-coin"), 6),
     }));
-    const provider = { fetchByContract } as unknown as TokenProvider;
+    const source = { fetchByContract } as unknown as TokenSource;
     const asset = { symbol: "USDC", tokenKey: "chain:ethereum/token:0xabc" };
 
-    const r = await resolveAsset(asset, { provider, store }, { lazy: false });
+    const r = await resolveAsset(asset, { source, store }, { lazy: false });
     expect(r.via).toBe("none"); // 无 warm/override 时降级
     expect(fetchByContract).not.toHaveBeenCalled(); // cache-only,零网络
   });
@@ -187,10 +187,10 @@ describe("resolveAsset", () => {
   it("contract: source returns null (CGK 未收录) → none, orphan seeded + recheck marked, no refetch", async () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => null);
-    const provider = { fetchByContract } as unknown as TokenProvider;
+    const source = { fetchByContract } as unknown as TokenSource;
     const asset = { symbol: "ZZZ", tokenKey: "chain:ethereum/token:0xdead" };
 
-    expect(await resolveAsset(asset, { provider, store })).toEqual({
+    expect(await resolveAsset(asset, { source, store })).toEqual({
       ref: null,
       confidence: "low",
       via: "none",
@@ -202,7 +202,7 @@ describe("resolveAsset", () => {
     expect(rec).toMatchObject({ ref: null, symbol: "ZZZ" });
     expect(rec?.cgkCheckedUntil).toBeGreaterThan(Date.now());
 
-    await resolveAsset(asset, { provider, store });
+    await resolveAsset(asset, { source, store });
     expect(fetchByContract).toHaveBeenCalledTimes(1); // 复查时刻未到,不再回源
   });
 
@@ -213,27 +213,25 @@ describe("resolveAsset", () => {
       0,
       0,
     );
-    expect(await resolveAsset({ symbol: "ETH" }, { provider: {} as TokenProvider, store })).toEqual(
-      {
-        ref: cg("ethereum"),
-        confidence: "high",
-        via: "symbol",
-      },
-    );
+    expect(await resolveAsset({ symbol: "ETH" }, { source: {} as TokenSource, store })).toEqual({
+      ref: cg("ethereum"),
+      confidence: "high",
+      via: "symbol",
+    });
   });
 
   it("override (not in warm) → via override", async () => {
     expect(
       await resolveAsset(
         { symbol: "BTC" },
-        { provider: {} as TokenProvider, store: fakeStore(), overrides: OVERRIDES },
+        { source: {} as TokenSource, store: fakeStore(), overrides: OVERRIDES },
       ),
     ).toEqual({ ref: cg("bitcoin"), confidence: "high", via: "override" });
   });
 
   it("nothing resolves → none", async () => {
     expect(
-      await resolveAsset({ symbol: "NOPE" }, { provider: {} as TokenProvider, store: fakeStore() }),
+      await resolveAsset({ symbol: "NOPE" }, { source: {} as TokenSource, store: fakeStore() }),
     ).toEqual({ ref: null, confidence: "low", via: "none" });
   });
 });
@@ -244,9 +242,9 @@ describe("refreshWarm", () => {
     const fetchMarkets = vi.fn(async () => [
       { info: info(cg("bitcoin"), "btc"), price: price(cg("bitcoin"), 1) },
     ]);
-    const provider = { fetchMarkets } as unknown as TokenProvider;
+    const source = { fetchMarkets } as unknown as TokenSource;
 
-    expect(await refreshWarm({ provider, store }, { now: 1_000_000 })).toEqual({ warm: true });
+    expect(await refreshWarm({ source, store }, { now: 1_000_000 })).toEqual({ warm: true });
     expect(fetchMarkets).toHaveBeenCalledTimes(1);
     expect(await store.getCandidates("BTC")).toEqual([{ ref: cg("bitcoin"), marketCapRank: 1 }]);
   });
@@ -255,9 +253,9 @@ describe("refreshWarm", () => {
     const now = 1_000_000;
     const store = fakeStore({ warmAsOf: now });
     const fetchMarkets = vi.fn();
-    const provider = { fetchMarkets } as unknown as TokenProvider;
+    const source = { fetchMarkets } as unknown as TokenSource;
 
-    expect(await refreshWarm({ provider, store }, { now: now + 1000 })).toEqual({ warm: false });
+    expect(await refreshWarm({ source, store }, { now: now + 1000 })).toEqual({ warm: false });
     expect(fetchMarkets).not.toHaveBeenCalled();
   });
 });

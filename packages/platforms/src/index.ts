@@ -5,4 +5,4 @@
 
 export { createPlatforms } from "@folio/oracle";
 export * from "@folio/oracle-basic";
-export { createCoinGeckoPlatformSource } from "@folio/oracle-provider-coingecko";
+export { createCoinGeckoPlatformSource } from "@folio/oracle-source-coingecko";

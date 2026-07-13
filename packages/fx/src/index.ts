@@ -6,4 +6,4 @@
 
 export { createFxRates } from "@folio/oracle";
 export * from "@folio/oracle-basic";
-export { createCoinGeckoFxSource } from "@folio/oracle-provider-coingecko";
+export { createCoinGeckoFxSource } from "@folio/oracle-source-coingecko";

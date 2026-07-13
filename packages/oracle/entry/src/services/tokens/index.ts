@@ -4,22 +4,22 @@ import type {
   TokenGroup,
   TokenInfo,
   TokenPrice,
-  TokenProvider,
   TokenRecord,
   TokenRef,
+  TokenSource,
   TokenStore,
 } from "@folio/oracle-basic";
 import { OVERRIDES, PRICE_TTL_MS, refKey, TOKEN_KEY_TTL_MS } from "@folio/oracle-basic";
-import { createCoinGeckoProvider } from "@folio/oracle-provider-coingecko";
+import { createCoinGeckoSource } from "@folio/oracle-source-coingecko";
 import { normalizeSymbol } from "./normalize";
 import { type ResolveOpts, refreshWarm, resolveAsset } from "./service";
 
 export interface CreateTokensConfig {
   apiKey?: string;
-  // store 实现由调用方注入(D1 在 @folio/db,不该被 tokens 依赖);tokens 把 provider.source 喂进来。
+  // store 实现由调用方注入(D1 在 @folio/db,不该被 tokens 依赖);tokens 把 source.source(源标签)喂进来。
   createStore: (source: TokenRef["source"]) => TokenStore;
-  // 默认 provider = CoinGecko;测试可注入 stub。app 不传 → 用默认,不感知具体上游。
-  provider?: TokenProvider;
+  // 默认 source = CoinGecko;测试可注入 stub。app 不传 → 用默认,不感知具体上游。
+  source?: TokenSource;
 }
 
 // 单条富化结果(cache-only,扁平):ref=null 但仍可能有展示数据(provider 孤儿)。
@@ -45,8 +45,8 @@ export interface ProviderAsset {
   logo?: string;
 }
 
-// tokens 对外的领域实例:只暴露意图方法,内部编排 provider + store。调用方(app)不碰缓存/回源/写回、
-// 不造 TokenRef、不感知具体 provider/source。
+// tokens 对外的领域实例:只暴露意图方法,内部编排 source + store。调用方(app)不碰缓存/回源/写回、
+// 不造 TokenRef、不感知具体 source(coingecko/defillama)。
 export interface Tokens {
   // 按关键词搜币。
   search(query: string): Promise<TokenInfo[]>;
@@ -71,14 +71,14 @@ export interface Tokens {
 // 冷缓存预热的进程内单飞(isolate 级):多个请求同时命中空 warm 时只发一次预热。
 let warmInFlight: Promise<unknown> | null = null;
 
-export function createTokens({ apiKey, createStore, provider }: CreateTokensConfig): Tokens {
-  const p = provider ?? createCoinGeckoProvider({ apiKey });
-  const deps = { provider: p, store: createStore(p.source), overrides: OVERRIDES };
+export function createTokens({ apiKey, createStore, source }: CreateTokensConfig): Tokens {
+  const p = source ?? createCoinGeckoSource({ apiKey });
+  const deps = { source: p, store: createStore(p.source), overrides: OVERRIDES };
 
-  // asset.identifier(用户显式选)→ explicit ref(用本 provider 的 source),调用方无需拼 TokenRef。
+  // asset.identifier(用户显式选)→ explicit ref(用本源的 source 标签),调用方无需拼 TokenRef。
   const withExplicit = (asset: AssetRef): AssetRef =>
     asset.identifier && !asset.ref
-      ? // source↔identifier 品牌对齐由本 provider 保证 → 整体 as TokenRef(可信边界)。
+      ? // source↔identifier 品牌对齐由本源保证 → 整体 as TokenRef(可信边界)。
         { ...asset, ref: { source: p.source, identifier: asset.identifier } as TokenRef }
       : asset;
 
@@ -138,7 +138,7 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
   return {
     resolve,
 
-    search: (query) => deps.provider.searchTokens(query),
+    search: (query) => deps.source.searchTokens(query),
 
     async topTokens(limit) {
       const top = await deps.store.listTopTokens(limit);
@@ -165,7 +165,7 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
           asOf: rec.price.asOf,
         };
       }
-      const fetched = (await deps.provider.fetchPrices([ref])).get(refKey(ref));
+      const fetched = (await deps.source.fetchPrices([ref])).get(refKey(ref));
       if (fetched) await deps.store.putPrices([fetched], PRICE_TTL_MS);
       return fetched;
     },
@@ -210,7 +210,7 @@ export function createTokens({ apiKey, createStore, provider }: CreateTokensConf
         if (ref && (!rec?.price || rec.price.stale)) stale.set(refKey(ref), ref);
       }
       if (stale.size === 0) return 0;
-      const fetched = await deps.provider.fetchPrices([...stale.values()]);
+      const fetched = await deps.source.fetchPrices([...stale.values()]);
       const prices = [...fetched.values()];
       if (prices.length > 0) await deps.store.putPrices(prices, PRICE_TTL_MS);
       return prices.length;

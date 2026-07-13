@@ -5,7 +5,7 @@ import pricesCurrent from "./fixtures/prices_current.json";
 
 const USDC_KEY = "ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 
-// 录制 fixtures 的 golden 测试(镜像 coingecko provider 的 parse 测试:price/contract 形状)。
+// 录制 fixtures 的 golden 测试(镜像 coingecko source 的 parse 测试:price/contract 形状)。
 describe("parseCurrentPrices", () => {
   it("按 refKey(defillama:<coinKey>)索引,价 USD、asOf = timestamp×1000", () => {
     const prices = parseCurrentPrices(pricesCurrent);

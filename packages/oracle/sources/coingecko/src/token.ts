@@ -3,12 +3,7 @@ import {
   CoinGeckoError,
   createCoinGeckoClient,
 } from "@folio/coingecko-client";
-import {
-  TokenError,
-  type TokenInfo,
-  type TokenPrice,
-  type TokenProvider,
-} from "@folio/oracle-basic";
+import { TokenError, type TokenInfo, type TokenPrice, type TokenSource } from "@folio/oracle-basic";
 import { PER_PAGE_MAX, PRICE_CHANGE_WINDOWS, VS_USD } from "./constants";
 import {
   parseAssetPlatforms,
@@ -21,10 +16,10 @@ import {
 // config 由共享 client 定义;这里 re-export 保持既有对外形状。
 export type { CoinGeckoConfig };
 
-// CoinGecko 的 `TokenProvider` 实现。HTTP 走共享 `@folio/coingecko-client` 的 SDK 方法;把 client 的
+// CoinGecko 的 `TokenSource` 实现。HTTP 走共享 `@folio/coingecko-client` 的 SDK 方法;把 client 的
 // `CoinGeckoError` 映射成 token 域的 `TokenError`(错误码 1:1,retryable/retryAfterMs 透传)。
 // 通用层只给 `chain`;CGK 的 `platform`(asset_platform slug)是内部细节 —— 闭包 memo 一份表。
-export function createCoinGeckoProvider(config: CoinGeckoConfig = {}): TokenProvider {
+export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource {
   const client = createCoinGeckoClient(config);
 
   // 把 client 的 CoinGeckoError 映射成 token 域 TokenError(其余异常透传)。

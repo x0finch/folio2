@@ -1,7 +1,7 @@
 import type { FxRow, FxSource, FxStore } from "@folio/oracle-basic";
-import { createCoinGeckoFxSource } from "@folio/oracle-provider-coingecko";
+import { createCoinGeckoFxSource } from "@folio/oracle-source-coingecko";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createFxRates } from "../src/fx-service";
+import { createFxRates } from "../src/services/fx";
 
 function mockFetch(body: unknown) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue({
