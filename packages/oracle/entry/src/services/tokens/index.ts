@@ -1,5 +1,6 @@
 import type {
   AssetRef,
+  PriceSource,
   Resolution,
   TokenGroup,
   TokenInfo,
@@ -9,7 +10,14 @@ import type {
   TokenSource,
   TokenStore,
 } from "@folio/oracle-basic";
-import { OVERRIDES, PRICE_TTL_MS, refKey, TOKEN_KEY_TTL_MS } from "@folio/oracle-basic";
+import {
+  INFO_TTL_MS,
+  OVERRIDES,
+  parseTokenKey,
+  PRICE_TTL_MS,
+  refKey,
+  TOKEN_KEY_TTL_MS,
+} from "@folio/oracle-basic";
 import { createCoinGeckoSource } from "@folio/oracle-source-coingecko";
 import { normalizeSymbol } from "./normalize";
 import { type ResolveOpts, refreshWarm, resolveAsset } from "./service";
@@ -18,8 +26,12 @@ export interface CreateTokensConfig {
   apiKey?: string;
   // store 实现由调用方注入(D1 在 @folio/db,不该被 tokens 依赖);tokens 把 source.source(源标签)喂进来。
   createStore: (source: TokenRef["source"]) => TokenStore;
-  // 默认 source = CoinGecko;测试可注入 stub。app 不传 → 用默认,不感知具体上游。
+  // meta 源(身份/目录/搜索/解析权威):默认 CoinGecko;测试可注入 stub。app 不传 → 用默认。
   source?: TokenSource;
+  // 活跃价源(用户所选,#93):缺省 = meta 自己的价面 → 单源(行为同旧)。当注入一个不同 source 的价源
+  //(如 DefiLlama)→ 进【双源】:meta 仍供身份/元信息/解析,取价与读价改走活跃源(其 store 分桶那格)。
+  // 合约币走活跃源的合约寻址(fetchByContract→link 落该源那格价);native/无合约回退 meta(baseline)价面。
+  priceSource?: PriceSource;
 }
 
 // 单条富化结果(cache-only,扁平):ref=null 但仍可能有展示数据(provider 孤儿)。
@@ -71,15 +83,28 @@ export interface Tokens {
 // 冷缓存预热的进程内单飞(isolate 级):多个请求同时命中空 warm 时只发一次预热。
 let warmInFlight: Promise<unknown> | null = null;
 
-export function createTokens({ apiKey, createStore, source }: CreateTokensConfig): Tokens {
-  const p = source ?? createCoinGeckoSource({ apiKey });
-  const deps = { source: p, store: createStore(p.source), overrides: OVERRIDES };
+export function createTokens({
+  apiKey,
+  createStore,
+  source,
+  priceSource,
+}: CreateTokensConfig): Tokens {
+  const meta = source ?? createCoinGeckoSource({ apiKey });
+  const store = createStore(meta.source);
+  const deps = { source: meta, store, overrides: OVERRIDES };
 
-  // asset.identifier(用户显式选)→ explicit ref(用本源的 source 标签),调用方无需拼 TokenRef。
+  // 活跃价源(#93):缺省 = meta 的价面(单源,行为同旧);注入了不同 source 的价源 → 双源。
+  const price: PriceSource = priceSource ?? meta;
+  const dual = price.source !== meta.source;
+  // 双源时活跃源的 store(按其 source 分桶),读/写活跃源那格价;单源时就是 meta 的 store。
+  const priceStore = dual ? createStore(price.source) : store;
+  const TTLS = { indexTtlMs: TOKEN_KEY_TTL_MS, infoTtlMs: INFO_TTL_MS, priceTtlMs: PRICE_TTL_MS };
+
+  // asset.identifier(用户显式选)→ explicit ref(用 meta 的 source 标签),调用方无需拼 TokenRef。
   const withExplicit = (asset: AssetRef): AssetRef =>
     asset.identifier && !asset.ref
-      ? // source↔identifier 品牌对齐由本源保证 → 整体 as TokenRef(可信边界)。
-        { ...asset, ref: { source: p.source, identifier: asset.identifier } as TokenRef }
+      ? // source↔identifier 品牌对齐由 meta 源保证 → 整体 as TokenRef(可信边界)。
+        { ...asset, ref: { source: meta.source, identifier: asset.identifier } as TokenRef }
       : asset;
 
   const resolve = (asset: AssetRef, opts?: ResolveOpts) =>
@@ -155,8 +180,21 @@ export function createTokens({ apiKey, createStore, source }: CreateTokensConfig
     },
 
     async priceOf(ref) {
-      const rec = (await deps.store.getByRefs([ref])).get(refKey(ref));
-      if (rec?.price && !rec.price.stale) {
+      const rec = (await store.getByRefs([ref])).get(refKey(ref));
+      // 双源:优先活跃源那格的新鲜价(按内部 id 读);否则回退 baseline。priceOf 面向【显式选币】
+      // (通常无合约上下文)→ 活跃源没缓存就不合约寻址,直接用 baseline fetch 兜底。
+      if (dual) {
+        const ap = rec?.id ? (await priceStore.getPricesByIds([rec.id])).get(rec.id) : undefined;
+        if (ap && !ap.stale) {
+          return {
+            ref,
+            unitPrice: ap.unitPrice,
+            change24h: ap.change24h,
+            marketCapRank: rec?.marketCapRank,
+            asOf: ap.asOf,
+          };
+        }
+      } else if (rec?.price && !rec.price.stale) {
         return {
           ref,
           unitPrice: rec.price.unitPrice,
@@ -165,14 +203,25 @@ export function createTokens({ apiKey, createStore, source }: CreateTokensConfig
           asOf: rec.price.asOf,
         };
       }
-      const fetched = (await deps.source.fetchPrices([ref])).get(refKey(ref));
-      if (fetched) await deps.store.putPrices([fetched], PRICE_TTL_MS);
+      const fetched = (await meta.fetchPrices([ref])).get(refKey(ref));
+      if (fetched) await store.putPrices([fetched], PRICE_TTL_MS);
       return fetched;
     },
 
     async enrich(assets) {
       const looked = await lookupAll(assets);
-      return looked.map(({ ref, rec }) => toEnriched(ref, rec));
+      if (!dual) return looked.map(({ ref, rec }) => toEnriched(ref, rec));
+      // 双源 overlay:活跃源那格价(按内部 id)覆盖 baseline 价;活跃源无该币价 → 保留 baseline(native/
+      // 未在活跃源建映射的币仍有 CGK 价可显示,#93「合约优先、CGK 兜底」)。
+      const ids = looked.map((l) => l.rec?.id).filter((x): x is string => !!x);
+      const active = ids.length > 0 ? await priceStore.getPricesByIds(ids) : new Map();
+      return looked.map(({ ref, rec }) => {
+        const base = toEnriched(ref, rec);
+        const ap = rec?.id ? active.get(rec.id) : undefined;
+        return ap
+          ? { ...base, unitPrice: ap.unitPrice, change24h: ap.change24h, priceStale: ap.stale }
+          : base;
+      });
     },
 
     async logoUrlById(id) {
@@ -205,15 +254,61 @@ export function createTokens({ apiKey, createStore, source }: CreateTokensConfig
 
     async refreshStalePrices(assets) {
       const looked = await lookupAll(assets);
-      const stale = new Map<string, TokenRef>();
-      for (const { ref, rec } of looked) {
-        if (ref && (!rec?.price || rec.price.stale)) stale.set(refKey(ref), ref);
+
+      if (!dual) {
+        const stale = new Map<string, TokenRef>();
+        for (const { ref, rec } of looked) {
+          if (ref && (!rec?.price || rec.price.stale)) stale.set(refKey(ref), ref);
+        }
+        if (stale.size === 0) return 0;
+        const fetched = await meta.fetchPrices([...stale.values()]);
+        const prices = [...fetched.values()];
+        if (prices.length > 0) await store.putPrices(prices, PRICE_TTL_MS);
+        return prices.length;
       }
-      if (stale.size === 0) return 0;
-      const fetched = await deps.source.fetchPrices([...stale.values()]);
-      const prices = [...fetched.values()];
-      if (prices.length > 0) await deps.store.putPrices(prices, PRICE_TTL_MS);
-      return prices.length;
+
+      // 双源:目标格按币型分派 —— 合约币的目标格是【活跃源】那格(缺/过期 → 活跃源合约寻址取价并
+      // link 落该源那格);native/无合约的目标格是【baseline】那格(缺/过期 → CGK 长尾刷价)。
+      const ids = looked.map((l) => l.rec?.id).filter((x): x is string => !!x);
+      const active = ids.length > 0 ? await priceStore.getPricesByIds(ids) : new Map();
+      const contractFetches: { key: string; chainRef: string; contract: string }[] = [];
+      const baselineStale = new Map<string, TokenRef>();
+      looked.forEach(({ ref, rec }, i) => {
+        if (!ref) return;
+        const key = assets[i]?.tokenKey;
+        const parsed = key ? parseTokenKey(key) : undefined;
+        if (key && parsed?.contract && parsed.chainRef) {
+          const ap = rec?.id ? active.get(rec.id) : undefined;
+          if (!ap || ap.stale)
+            contractFetches.push({ key, chainRef: parsed.chainRef, contract: parsed.contract });
+        } else if (!rec?.price || rec.price.stale) {
+          baselineStale.set(refKey(ref), ref);
+        }
+      });
+
+      let n = 0;
+      // 活跃源合约取价 → link 落活跃源那格(建映射 + 写价;身份/元信息不动,baseline 权威)。
+      const results = await Promise.all(
+        contractFetches.map((f) =>
+          price.fetchByContract(f.chainRef, f.contract).then((res) => ({ f, res })),
+        ),
+      );
+      for (const { f, res } of results) {
+        if (res) {
+          await priceStore.linkTokenKeyToCgk(f.key, res.info, res.price, TTLS);
+          n++;
+        }
+      }
+      // baseline 长尾刷价(native/无合约,回退 CGK)。
+      if (baselineStale.size > 0) {
+        const fetched = await meta.fetchPrices([...baselineStale.values()]);
+        const prices = [...fetched.values()];
+        if (prices.length > 0) {
+          await store.putPrices(prices, PRICE_TTL_MS);
+          n += prices.length;
+        }
+      }
+      return n;
     },
   };
 }

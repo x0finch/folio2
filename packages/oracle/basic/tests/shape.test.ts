@@ -24,6 +24,7 @@ const store: TokenStore = {
   getByRefs: async () => new Map(),
   getById: async () => undefined,
   putPrices: async () => {},
+  getPricesByIds: async () => new Map(),
 };
 
 describe("interface shapes", () => {

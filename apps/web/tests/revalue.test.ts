@@ -51,6 +51,12 @@ function fakeStore(): TokenStore {
     },
     getById: async (id) => [...records.values()].find((r) => r.id === id),
     putPrices: async () => {},
+    getPricesByIds: async (ids) => {
+      const out = new Map<string, NonNullable<TokenRecord["price"]>>();
+      for (const rec of records.values())
+        if (rec.id && ids.includes(rec.id) && rec.price) out.set(rec.id, rec.price);
+      return out;
+    },
   };
 }
 

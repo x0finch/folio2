@@ -48,11 +48,18 @@ export function createOracle(cfg: CreateOracleConfig): Oracle {
 
   return {
     get tokens() {
-      // 代币面(search/meta/prices)整体跟随 token 源 —— identity 恒在 baseline(CoinGecko);
-      // 价格分源路由(DefiLlama 只供 price)留待 #83。
+      // 身份/目录/搜索/解析恒跟 token 源(baseline CoinGecko);取价/读价跟 price 源(活跃源,#93)。
+      // baseline 无 price 字段 → pickSource 返 undefined → createTokens 退化单源(行为同旧);
+      // 活跃源(如 DefiLlama)挂了 price → 双源:meta 仍 CGK、价走活跃源。
       if (!tokens) {
         const source = pickSource(activeVendor, "token")?.({ apiKey });
-        tokens = createTokens({ apiKey, createStore: cfg.createTokenStore, source });
+        const priceSource = pickSource(activeVendor, "price")?.({ apiKey });
+        tokens = createTokens({
+          apiKey,
+          createStore: cfg.createTokenStore,
+          source,
+          priceSource,
+        });
       }
       return tokens;
     },

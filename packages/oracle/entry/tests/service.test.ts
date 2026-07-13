@@ -114,6 +114,12 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
         if (rec) rec.price = { unitPrice: p.unitPrice, asOf: p.asOf, stale: false };
       }
     },
+    async getPricesByIds(ids) {
+      const out = new Map<string, NonNullable<TokenRecord["price"]>>();
+      const recs = [...byRef.values(), ...[...impl.values()].map((e) => e.rec)];
+      for (const rec of recs) if (rec.id && ids.includes(rec.id) && rec.price) out.set(rec.id, rec.price);
+      return out;
+    },
   };
 }
 

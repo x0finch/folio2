@@ -7,6 +7,7 @@ import {
   type TokenInfo,
   type TokenPrice,
   type TokenRecord,
+  type TokenRecordPrice,
   type TokenRef,
   type TokenStore,
 } from "@folio/tokens";
@@ -533,6 +534,33 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       if (stmts.length === 0) return;
       const [first, ...rest] = stmts;
       await db.batch([first, ...rest]);
+    },
+
+    async getPricesByIds(ids) {
+      const out = new Map<string, TokenRecordPrice>();
+      for (const batch of chunk(ids, IN_CHUNK)) {
+        const rows = await db
+          .select({
+            tokenId: tokenVendorIds.tokenId,
+            unitPrice: tokenVendorIds.unitPrice,
+            change24h: tokenVendorIds.change24h,
+            priceAsOf: tokenVendorIds.priceAsOf,
+            priceExpiresAt: tokenVendorIds.priceExpiresAt,
+          })
+          .from(tokenVendorIds)
+          .where(and(eq(tokenVendorIds.vendor, source), inArray(tokenVendorIds.tokenId, batch)));
+        for (const r of rows) {
+          if (r.unitPrice != null && r.priceAsOf != null) {
+            out.set(r.tokenId, {
+              unitPrice: r.unitPrice,
+              change24h: r.change24h ?? undefined,
+              asOf: r.priceAsOf,
+              stale: (r.priceExpiresAt ?? 0) <= now(),
+            });
+          }
+        }
+      }
+      return out;
     },
   };
 }

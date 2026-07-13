@@ -4,6 +4,7 @@ import type {
   TokenInfo,
   TokenPrice,
   TokenRecord,
+  TokenRecordPrice,
   TokenRef,
 } from "./types";
 
@@ -52,4 +53,7 @@ export interface TokenStore {
   getById(id: string): Promise<TokenRecord | undefined>;
   // 写价(priceOf 回源 / refreshStalePrices 批量):只更新已存在的行。
   putPrices(prices: TokenPrice[], ttlMs: number): Promise<void>;
+  // 按内部行 id 批量读【本源】那格价(per-vendor 价 overlay 用,#93):活跃源 store 据此把
+  // 该源的价叠到 baseline 解析出的记录上。无该源价的 id → 不在返回 map(调用方回退 baseline 价)。
+  getPricesByIds(ids: string[]): Promise<Map<string, TokenRecordPrice>>;
 }
