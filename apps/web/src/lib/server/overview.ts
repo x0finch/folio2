@@ -3,7 +3,7 @@ import { buildOverview } from "../overview-model";
 import { requireAuth } from "../require-auth";
 import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
-import { oracle } from "./oracle";
+import { oracle, oracleFor } from "./oracle";
 import { enrichBalances } from "./tokens";
 
 // 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做
@@ -18,8 +18,9 @@ export const getMyOverview = createServerFn({ method: "GET" })
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+    // 取价按 per-user 活跃源(#93);platforms 与源无关,走全局 baseline。
     return buildOverview(accounts, byAccount, {
-      tokens: oracle.tokens,
+      tokens: oracleFor(settings.activeVendor).tokens,
       platforms: oracle.platforms,
       connectorMeta: connectorPlatformMeta,
       mode: settings.valuationMode,
@@ -31,13 +32,14 @@ export const getMyOverview = createServerFn({ method: "GET" })
 export const getMyAccountHoldings = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
-    const [allAccounts, snapshots] = await Promise.all([
+    const [allAccounts, snapshots, settings] = await Promise.all([
       db.listAccountsByUser(context.userId),
       db.getLatestSnapshotByUser(context.userId),
+      db.getUserSettings(context.userId),
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-    const tokens = oracle.tokens;
+    const tokens = oracleFor(settings.activeVendor).tokens;
     const rows = await Promise.all(
       accounts.map(async (account) => {
         const latest = byAccount.get(account.id);

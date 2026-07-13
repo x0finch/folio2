@@ -7,11 +7,24 @@ import {
   CardTitle,
   Checkbox,
   Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@folio/ui";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { getKeyStatus, getValuationSettings, setValuationMode } from "../../lib/server/settings";
+import {
+  getKeyStatus,
+  getValuationSettings,
+  setValuationMode,
+  setValuationSource,
+} from "../../lib/server/settings";
+
+// 可选行情源(取价来源)。与 @folio/oracle VENDORS 的 key + setValuationSource 校验 enum 对齐。
+const PRICE_SOURCES = ["coingecko", "defillama"] as const;
 
 export const Route = createFileRoute("/_authed/settings")({
   loader: async () => {
@@ -53,6 +66,7 @@ function Settings() {
       </Card>
 
       <ValuationCard mode={valuation.valuationMode} />
+      <SourceCard source={valuation.activeVendor} />
 
       <Card>
         <CardHeader>
@@ -108,6 +122,53 @@ function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
           <Label htmlFor="valuation-source-first">{t("useSourcePrice")}</Label>
         </div>
         <p className="text-sm text-muted-foreground">{t("valuationHint")}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// 行情源(Phase 3,#93):选取价来源(CoinGecko / DefiLlama)。身份/目录/汇率/平台恒 baseline CoinGecko。
+// 切换即写 user_settings.active_vendor + invalidate → 主页/图表现推按新源重算(历史冻结,无需重 sync)。
+function SourceCard({ source }: { source: string }) {
+  const router = useRouter();
+  const t = useTranslations("Settings");
+  const [value, setValue] = useState(source);
+  const [busy, setBusy] = useState(false);
+
+  async function onChange(next: string) {
+    const source = next as (typeof PRICE_SOURCES)[number];
+    const prev = value;
+    setValue(source); // 乐观更新
+    setBusy(true);
+    try {
+      await setValuationSource({ data: { source } });
+      await router.invalidate(); // 刷新总览/图表读路径
+    } catch {
+      setValue(prev); // 回滚
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("priceSource")}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <Select value={value} onValueChange={onChange} disabled={busy}>
+          <SelectTrigger className="w-56">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PRICE_SOURCES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {t(`priceSource_${s}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-sm text-muted-foreground">{t("priceSourceHint")}</p>
       </CardContent>
     </Card>
   );

@@ -13,8 +13,8 @@ import type {
 import {
   INFO_TTL_MS,
   OVERRIDES,
-  parseTokenKey,
   PRICE_TTL_MS,
+  parseTokenKey,
   refKey,
   TOKEN_KEY_TTL_MS,
 } from "@folio/oracle-basic";

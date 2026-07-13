@@ -83,7 +83,9 @@ describe("warm + candidates + listTopTokens", () => {
     const rows = await getDb(env).select().from(tokens);
     expect(rows).toHaveLength(1);
     // 价落 per-vendor 行(token_vendor_ids);经公开读接口拿到刷新后的 2。
-    expect((await store.getByRefs([cg("ethereum")])).get("coingecko:ethereum")?.price?.unitPrice).toBe(2);
+    expect(
+      (await store.getByRefs([cg("ethereum")])).get("coingecko:ethereum")?.price?.unitPrice,
+    ).toBe(2);
   });
 
   it("listTopTokens orders by rank asc (unranked last), honors limit, includes name/logo", async () => {
@@ -446,8 +448,13 @@ describe("跨源重锚(linkTokenKeyToCgk 泛化到任意 vendor)", () => {
     // 空窗后 defillama 刷价 → 只落 defillama 那格(共享内部行,但价按 vendor 分列)。
     await dfl.putPrices([price(dl("ethereum:0xusdc"), 0.999)], TTL);
     // defillama 源读到自己的新价。
-    expect((await dfl.getByRefs([dl("ethereum:0xusdc")])).get("defillama:ethereum:0xusdc")?.price?.unitPrice).toBe(0.999);
+    expect(
+      (await dfl.getByRefs([dl("ethereum:0xusdc")])).get("defillama:ethereum:0xusdc")?.price
+        ?.unitPrice,
+    ).toBe(0.999);
     // coingecko 源(baseline)那格仍是 1.0 —— 换源不互相覆盖。
-    expect((await cgk.getByRefs([cg("usd-coin")])).get("coingecko:usd-coin")?.price?.unitPrice).toBe(1);
+    expect(
+      (await cgk.getByRefs([cg("usd-coin")])).get("coingecko:usd-coin")?.price?.unitPrice,
+    ).toBe(1);
   });
 });

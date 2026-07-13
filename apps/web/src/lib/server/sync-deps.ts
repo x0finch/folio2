@@ -9,14 +9,14 @@ import {
 import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
-import type { ProviderAsset, Tokens, ValuationMode } from "@folio/tokens";
+import type { ProviderAsset, Tokens } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import type { InputSpec } from "../creds";
 import { isComplete, openCreds } from "../creds";
 import { revalue } from "../revalue";
 import { db } from "./db";
 import { warmFx } from "./fx";
-import { oracle } from "./oracle";
+import { oracle, oracleFor } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
 import { warmTokens } from "./tokens";
 
@@ -105,17 +105,27 @@ async function fetchViaConnector(
 // 装配编排器的注入式依赖。真正的 DI 缝是这里返回的 SyncDeps(syncUser 只认注入的 deps);
 // triggerSync(手动)与 cron(scheduled)共用。
 export function buildSyncDeps(): SyncDeps {
-  const tokens = oracle.tokens;
-  // per-user 估值模式:按 userId 记忆化一次读(revalue 逐账户调,避免 N 次 settings 读)。
-  // 同一 deps 跨多用户(cron sweep)也正确 —— 按 userId 分桶缓存。
-  const modeByUser = new Map<string, Promise<ValuationMode>>();
-  const modeFor = (userId: string): Promise<ValuationMode> => {
-    let p = modeByUser.get(userId);
+  const tokens = oracle.tokens; // meta/采集(noteProviderAssets)源无关 → 全局 baseline 即可。
+  // per-user 设置:按 userId 记忆化一次读(revalue 逐账户调,避免 N 次 settings 读)。valuationMode 与
+  // activeVendor 同出一份 settings。同一 deps 跨多用户(cron sweep)也正确 —— 按 userId 分桶缓存。
+  const settingsByUser = new Map<string, ReturnType<typeof db.getUserSettings>>();
+  const settingsFor = (userId: string): ReturnType<typeof db.getUserSettings> => {
+    let p = settingsByUser.get(userId);
     if (!p) {
-      p = db.getUserSettings(userId).then((s) => s.valuationMode);
-      modeByUser.set(userId, p);
+      p = db.getUserSettings(userId);
+      settingsByUser.set(userId, p);
     }
     return p;
+  };
+  // per-user 活跃源的 tokens(取价随源;#93)。按 vendor 分桶缓存(cron sweep 多用户共享同源实例)。
+  const tokensByVendor = new Map<string, Tokens>();
+  const tokensForVendor = (vendor: string): Tokens => {
+    let t = tokensByVendor.get(vendor);
+    if (!t) {
+      t = oracleFor(vendor).tokens;
+      tokensByVendor.set(vendor, t);
+    }
+    return t;
   };
   return {
     // 归档账户跳过同步(不产生新快照);过滤在此,syncUser 只见活跃账户。
@@ -137,12 +147,14 @@ export function buildSyncDeps(): SyncDeps {
     // 写快照前重估(oracle 多源 Phase 3):按 mode 定 value + 非盯市类型捕获 selfPrice(原料)。
     // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单):据 connectorId 查 manifest →
     // 传 markToMarket 布尔。mode 按 userId 解析(记忆化);缺省 self-first(无 settings 行的用户)。
-    revalue: async (userId, connectorId, rows) =>
-      revalue(
-        tokens,
+    revalue: async (userId, connectorId, rows) => {
+      const settings = await settingsFor(userId);
+      return revalue(
+        tokensForVendor(settings.activeVendor), // 源价按 per-user 活跃源
         getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
         rows,
-        await modeFor(userId),
-      ),
+        settings.valuationMode,
+      );
+    },
   };
 }

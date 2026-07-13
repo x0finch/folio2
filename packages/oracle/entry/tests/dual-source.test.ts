@@ -51,9 +51,10 @@ function makeStores() {
       },
       ensureTokenKey: async () => {},
       markCgkChecked: async () => {},
-      linkTokenKeyToCgk: async (_key, info, price) => {
+      linkTokenKeyToCgk: async (_key, _info, price) => {
         // link 落【本源】那格价到共享内部 id(#83 重锚:defillama 映射→同一 id)。
-        if (price) prices.set(INTERNAL_ID, { unitPrice: price.unitPrice, asOf: price.asOf, stale: false });
+        if (price)
+          prices.set(INTERNAL_ID, { unitPrice: price.unitPrice, asOf: price.asOf, stale: false });
       },
       getByRefs: async (refs) => {
         const out = new Map<string, TokenRecord>();
@@ -81,7 +82,9 @@ function metaStub() {
   return {
     source: "coingecko" as const,
     fetchMarkets: vi.fn(async () => []),
-    searchTokens: vi.fn(async (): Promise<TokenInfo[]> => [{ ref: cg("x"), symbol: "X", name: "X" }]),
+    searchTokens: vi.fn(
+      async (): Promise<TokenInfo[]> => [{ ref: cg("x"), symbol: "X", name: "X" }],
+    ),
     fetchByContract: vi.fn(async () => null),
     fetchPrices: vi.fn(async () => new Map<string, TokenPrice>()),
   } satisfies TokenSource;
@@ -133,7 +136,11 @@ describe("createTokens 双源分派(#93)", () => {
 
   it("enrich:活跃源无该币价 → 保留 baseline 价(native/未建映射兜底)", async () => {
     const { create } = makeStores();
-    const tokens = createTokens({ createStore: create, source: metaStub(), priceSource: priceStub() });
+    const tokens = createTokens({
+      createStore: create,
+      source: metaStub(),
+      priceSource: priceStub(),
+    });
     // 不刷价 → defillama 那格空 → overlay 落空 → 用 baseline 1.0。
     const [enriched] = await tokens.enrich([{ symbol: "USDC", tokenKey: KEY }]);
     expect(enriched.unitPrice).toBe(1);

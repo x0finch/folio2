@@ -3,7 +3,7 @@ import { buildPortfolioHistory } from "../history";
 import { deriveLiveAccountTotals } from "../live-value";
 import { requireAuth } from "../require-auth";
 import { db } from "./db";
-import { oracle } from "./oracle";
+import { oracleFor } from "./oracle";
 
 // 组合净值历史:全部快照总额 → 阶梯式重建为时间序列(纯函数,可序列化输出)。
 // 「当下点」(最新点)不用快照冻结总额,而是与主页同款**现推实时总价**(deriveLiveAccountTotals,
@@ -27,7 +27,7 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     const liveTotals = await deriveLiveAccountTotals(
       accounts,
       byAccount,
-      oracle.tokens,
+      oracleFor(settings.activeVendor).tokens,
       settings.valuationMode,
     );
     let grand = 0;

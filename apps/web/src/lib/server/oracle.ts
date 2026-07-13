@@ -11,14 +11,24 @@ import { createOracle, type Oracle } from "@folio/oracle";
 // 不预建 platforms/fx。get 在访问时才碰 env → 模块加载期不触发;env 在 fetch 与 scheduled 上下文
 // 均可用(见 configureLogging),故 cron 路径也走此 oracle。
 // 从 @folio/oracle 门面具名 import createOracle(非客户端 bundle,分层 #21 不涉)。
+function build(activeVendor?: string): Oracle {
+  return createOracle({
+    apiKey: env.COINGECKO_API_KEY || undefined,
+    activeVendor,
+    createTokenStore: (source) => createTokenStore(env, { source }),
+    createPlatformStore: () => createPlatformStore(env),
+    createFxStore: () => createFxStore(env),
+  });
+}
+
+// per-user 活跃源(#93):价格准确性相关路径(overview / history / sync 取价)用它 —— activeVendor 来自
+// user_settings.active_vendor。返回一份绑定该源的门面(createOracle 是廉价惰性组装,见其定义)。
+export function oracleFor(activeVendor: string): Oracle {
+  return build(activeVendor);
+}
+
+// 全局(baseline)代理:无用户上下文 / 与价源无关的服务(platforms / fx / logo 端点)用,activeVendor
+// 缺省 = coingecko。仿 ./db 的 server-only 单例代理:每次属性访问用当前 env 造一份门面再取子服务。
 export const oracle: Oracle = new Proxy({} as Oracle, {
-  get: (_target, prop: string) =>
-    (
-      createOracle({
-        apiKey: env.COINGECKO_API_KEY || undefined,
-        createTokenStore: (source) => createTokenStore(env, { source }),
-        createPlatformStore: () => createPlatformStore(env),
-        createFxStore: () => createFxStore(env),
-      }) as unknown as Record<string, unknown>
-    )[prop],
+  get: (_target, prop: string) => (build() as unknown as Record<string, unknown>)[prop],
 });

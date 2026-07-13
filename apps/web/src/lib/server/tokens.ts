@@ -7,7 +7,7 @@ import { tokenLogoUrl } from "../logo";
 import { requireAuth } from "../require-auth";
 import { type BalanceLike, balanceToAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
 import { db } from "./db";
-import { oracle } from "./oracle";
+import { oracle, oracleFor } from "./oracle";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
 
@@ -79,10 +79,14 @@ export async function enrichBalances<T extends BalanceLike>(
 export const refreshStalePrices = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
-    const snapshots = await db.getLatestSnapshotByUser(context.userId);
+    const [snapshots, settings] = await Promise.all([
+      db.getLatestSnapshotByUser(context.userId),
+      db.getUserSettings(context.userId),
+    ]);
     const assets = snapshots.flatMap((s) => s.balances).map(balanceToAssetRef);
-    const refreshed = await oracle.tokens.refreshStalePrices(assets);
-    tokenLog.info("stale prices refreshed", { refreshed });
+    // per-user 活跃源(#93):双源下合约币经活跃源(如 DefiLlama)合约寻址取价并落其那格。
+    const refreshed = await oracleFor(settings.activeVendor).tokens.refreshStalePrices(assets);
+    tokenLog.info("stale prices refreshed", { refreshed, vendor: settings.activeVendor });
     return { refreshed };
   });
 

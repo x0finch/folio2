@@ -188,6 +188,11 @@ export const en = {
     valuationHint:
       "By default each holding keeps its provider's own value; turn this on to consistently use the market source price and recompute the current view. History stays frozen and no re-sync is needed.",
     useSourcePrice: "Use market source price for all holdings",
+    priceSource: "Price source",
+    priceSourceHint:
+      "Where prices come from. Identity, catalog, FX and platforms always use CoinGecko; only the price changes. Contract tokens use the source's on-chain price, others fall back to CoinGecko. History stays frozen, no re-sync needed.",
+    priceSource_coingecko: "CoinGecko",
+    priceSource_defillama: "DefiLlama (on-chain)",
   },
   // 账户输入的标签/说明,key = ProviderInput.label/desc 的英文源串(en 为同值;zh 给翻译;
   // 缺失时由 IntlProvider 的 getMessageFallback 回退到 key 本身)。
@@ -403,6 +408,11 @@ export const zh: Messages = {
     export: "导出",
     exportHint: "把你的全部数据(账户、分组、快照)导出为文件。API key/secret 绝不包含在内。",
     exportData: "导出数据",
+    priceSource: "行情源",
+    priceSourceHint:
+      "价格来自哪家。身份、目录、汇率、平台恒用 CoinGecko,只有价格切换。带合约的链上代币用该源的链上价,其余回退 CoinGecko。历史冻结,无需重新同步。",
+    priceSource_coingecko: "CoinGecko",
+    priceSource_defillama: "DefiLlama(链上)",
     valuation: "估值",
     valuationHint:
       "默认每笔持仓沿用其 provider 自带的价值;打开后统一采用市场源价、重算当前视图。历史保持冻结,无需重新同步。",

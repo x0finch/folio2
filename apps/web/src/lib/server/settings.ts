@@ -26,3 +26,13 @@ export const setValuationMode = createServerFn({ method: "POST" })
     await db.updateUserSettings(context.userId, { valuationMode: data.mode });
     return { ok: true };
   });
+
+// 切换行情源(#93):activeVendor 决定取价来自哪家(CoinGecko / DefiLlama);身份/目录/汇率/平台恒
+// baseline CoinGecko。纯读路径重算(历史冻结、无需重 sync)。enum 与 @folio/oracle VENDORS 的 key 对齐。
+export const setValuationSource = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(z.object({ source: z.enum(["coingecko", "defillama"]) }))
+  .handler(async ({ context, data }) => {
+    await db.updateUserSettings(context.userId, { activeVendor: data.source });
+    return { ok: true };
+  });

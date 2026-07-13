@@ -60,7 +60,12 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       .values({ tokenId, vendor: source, vendorId })
       .onConflictDoNothing({ target: [tokenVendorIds.vendor, tokenVendorIds.vendorId] });
   // 挂映射并写本源价(per-vendor,#93):映射不存在则建、存在则只刷价列(不碰别源那行)。
-  const vendorPriceUpsert = (tokenId: string, vendorId: string, p: TokenPrice, ttlMs: number): Stmt => {
+  const vendorPriceUpsert = (
+    tokenId: string,
+    vendorId: string,
+    p: TokenPrice,
+    ttlMs: number,
+  ): Stmt => {
     const priceFields = {
       unitPrice: p.unitPrice,
       change24h: p.change24h ?? null,
@@ -481,7 +486,8 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               gt(tokens.infoExpiresAt, now()),
             ),
           );
-        for (const r of rows) out.set(refKey(mk(r.vp.vendorId as string)), toRecord(r.tok, r.grp, r.vp));
+        for (const r of rows)
+          out.set(refKey(mk(r.vp.vendorId as string)), toRecord(r.tok, r.grp, r.vp));
       }
       return out;
     },
