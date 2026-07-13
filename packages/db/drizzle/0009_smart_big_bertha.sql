@@ -1,1 +1,0 @@
-ALTER TABLE `accounts` ADD `archived_at` integer;

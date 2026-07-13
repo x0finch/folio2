@@ -1,1 +1,0 @@
-ALTER TABLE `snapshot_balances` ADD `token_identifier` text;

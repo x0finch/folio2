@@ -1,1 +1,0 @@
-ALTER TABLE `accounts` ADD `data_json` text;
