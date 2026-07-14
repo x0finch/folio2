@@ -32,8 +32,6 @@ function Settings() {
   const t = useTranslations("Settings");
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold">{t("title")}</h1>
-
       <Card>
         <CardHeader>
           <CardTitle>{t("providerKeys")}</CardTitle>
