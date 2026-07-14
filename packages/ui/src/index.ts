@@ -41,6 +41,7 @@ export { CommandPalette } from "./components/motion/command-palette";
 export { Dock, DockItem, DockSeparator } from "./components/motion/dock";
 export { Drawer } from "./components/motion/drawer";
 export { Input } from "./components/motion/input";
+export { MorphingModal, type MorphingModalProps } from "./components/motion/morphing-modal";
 export { NumberTicker } from "./components/motion/number-ticker";
 export {
   Popover,

@@ -1,6 +1,6 @@
 // 纯逻辑(无 server-only / React import → 可单测)。并发编排逐个账户同步,持续报告进度。
 // 现有全量 triggerSync 是原子的(末尾才返回),给不了增量进度 → 客户端逐个跑 worker(= syncOneAccount),
-// 并发封顶,每次状态变化回调 onProgress,供 SyncButton 实时读进度 tooltip。设计见 PRD 02。
+// 并发封顶,每次状态变化回调 onProgress,供同步入口实时读进度 tooltip。设计见 PRD 02。
 
 export interface SyncItem {
   accountId: string;

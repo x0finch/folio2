@@ -7,7 +7,6 @@ import { AccountDetailSheet, type AccountRow } from "../../components/account-de
 import { AddAccountSheet } from "../../components/add-account-sheet";
 import { ConnectorBadge } from "../../components/connector-badge";
 import { AccountsSkeleton } from "../../components/skeletons";
-import { SyncButton } from "../../components/sync-button";
 import { TokenStack } from "../../components/token-stack";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
@@ -55,7 +54,6 @@ function Accounts() {
 
   const active = rows.filter((r) => r.archivedAt == null);
   const archived = rows.filter((r) => r.archivedAt != null);
-  const lastSyncedAt = active.reduce((m, r) => Math.max(m, r.takenAt ?? 0), 0) || null;
 
   // 详情侧栏:存 id 而非行对象 —— invalidate 后从新 rows 派生,侧栏内容随刷新自动更新(归档态等)。
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -68,13 +66,7 @@ function Accounts() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">{t("accountCount", { count: active.length })}</h1>
-        <SyncButton
-          accounts={active.map((r) => ({ id: r.id, label: r.label }))}
-          lastSyncedAt={lastSyncedAt}
-        />
-      </div>
+      <h1 className="font-bold text-2xl">{t("accountCount", { count: active.length })}</h1>
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground">{tc("noAccountsYet")}</p>
