@@ -74,6 +74,10 @@ export const en = {
   },
   Overview: {
     totalValue: "Total value",
+    totalNetWorth: "Total net worth",
+    bestToday: "Top today",
+    worstToday: "Worst today",
+    stableShare: "Stablecoin",
     portfolioValue: "Portfolio value",
     notEnoughHistory: "Not enough history yet — sync a few times to see the trend.",
     noSnapshot: "No snapshot yet — sync from the Accounts page.",
@@ -324,6 +328,10 @@ export const zh: Messages = {
   },
   Overview: {
     totalValue: "总价值",
+    totalNetWorth: "总净值",
+    bestToday: "今日最佳",
+    worstToday: "今日最差",
+    stableShare: "稳定币占比",
     portfolioValue: "组合净值",
     notEnoughHistory: "历史数据不足 —— 多同步几次即可看到走势。",
     noSnapshot: "暂无快照 —— 去账户页同步。",

@@ -15,6 +15,39 @@ export interface HistoryPoint {
   total: number; // 该时刻组合净值
 }
 
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+// 桶粒度阶梯(升序):最细 1 小时、最粗 7 天。降采样时挑"能把点数压到 ≤ maxPoints 的最细桶"。
+const BUCKET_LADDER = [
+  HOUR_MS,
+  2 * HOUR_MS,
+  4 * HOUR_MS,
+  6 * HOUR_MS,
+  12 * HOUR_MS,
+  DAY_MS,
+  2 * DAY_MS,
+  7 * DAY_MS,
+];
+const TARGET_MAX_POINTS = 40;
+
+// 自适应降采样:按数据【实际跨度】选桶,每桶保留最后一个点(该桶收盘值),压掉"日内手动多次
+// 同步"造成的密集簇,同时让粒度随数据量自适应 —— 约 1 天数据 → 小时级点,约 30 天 → 日级点。
+// 快照是事件驱动的(每次同步一个点),直接画会随刷新频率抖动。末点(今日 live 覆写点)天然保留
+// → 与主页总额一致。区间可切换的 Insights 视图应自行按 range 选粒度,不复用此处的自适应策略。
+export function downsampleSeries(
+  series: readonly HistoryPoint[],
+  maxPoints = TARGET_MAX_POINTS,
+): HistoryPoint[] {
+  if (series.length <= 1) return [...series];
+  const span = series[series.length - 1].t - series[0].t; // 约定升序(buildPortfolioHistory 已排序)
+  const bucket =
+    BUCKET_LADDER.find((b) => span / b <= maxPoints) ?? BUCKET_LADDER[BUCKET_LADDER.length - 1];
+  const byBucket = new Map<number, HistoryPoint>();
+  for (const p of series) byBucket.set(Math.floor(p.t / bucket), p); // 升序 → 后写覆盖 = 该桶最后一个
+  return [...byBucket.values()].sort((a, b) => a.t - b.t);
+}
+
 export function buildPortfolioHistory(rows: SnapshotTotalRow[]): HistoryPoint[] {
   // 入参约定升序;为稳健起见自排一次(不依赖调用方排序)。
   const sorted = [...rows].sort((a, b) => a.takenAt - b.takenAt);

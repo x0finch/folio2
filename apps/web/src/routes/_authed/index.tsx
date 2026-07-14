@@ -1,23 +1,10 @@
-import {
-  Badge,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  NumberTicker,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@folio/ui";
+import { Card, CardContent, Tabs, TabsContent, TabsList, TabsTrigger } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { DefiPositions, PerpPositions } from "../../components/holdings-sections";
-import { PortfolioChart } from "../../components/portfolio-chart";
+import { PortfolioHero } from "../../components/portfolio-hero";
 import { OverviewSkeleton } from "../../components/skeletons";
 import { TokenHoldings } from "../../components/token-holdings";
-import { ValueChange } from "../../components/value-change";
-import { computeDayChange } from "../../lib/day-change";
 import { type GroupedView, toGroupedView } from "../../lib/groups-view";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
@@ -87,48 +74,10 @@ function Overview() {
   const usd = useDisplayValue();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(accountTotals, groups, memberships);
-  // 头部 24h 价值变化:当前总额 − 约 24h 前的组合净值(基准取最新快照时刻,与 totalUsd 同源)。
-  const dayChange = computeDayChange(series, totalUsd, series.at(-1)?.t ?? 0);
-  const totalFrac = usd(totalUsd).split(".")[1];
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        {/* 拆字号总额:整数(含符号)大、小数小;右侧 24h 价值变化 Badge(无参照点则不显示)。 */}
-        <div className="flex items-baseline gap-2">
-          <NumberTicker
-            value={totalUsd}
-            format={(n) => usd(n).split(".")[0]}
-            className="font-bold text-4xl tracking-tight"
-          />
-          {totalFrac && <span className="text-muted-foreground text-xl">.{totalFrac}</span>}
-          {dayChange != null && (
-            <Badge
-              status="neutral"
-              size="sm"
-              showIcon={false}
-              contentKey={dayChange}
-              className="ml-1"
-            >
-              <ValueChange value={dayChange} format="currency" className="text-xs" />
-            </Badge>
-          )}
-        </div>
-        <p className="mt-1 text-muted-foreground text-sm uppercase">{t("totalValue")}</p>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("portfolioValue")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {series.length < 2 ? (
-            <p className="text-sm text-muted-foreground">{t("notEnoughHistory")}</p>
-          ) : (
-            <PortfolioChart series={series} />
-          )}
-        </CardContent>
-      </Card>
+      <PortfolioHero series={series} totalUsd={totalUsd} holdings={holdings} />
 
       {accountTotals.length === 0 ? (
         <p className="text-muted-foreground">

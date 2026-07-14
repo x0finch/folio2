@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildPortfolioHistory } from "../src/lib/history";
+import { buildPortfolioHistory, downsampleSeries, type HistoryPoint } from "../src/lib/history";
+
+const HOUR = 3_600_000;
+const DAY = 86_400_000;
 
 describe("buildPortfolioHistory", () => {
   it("steps the portfolio total as each account is (re)synced at different times", () => {
@@ -38,5 +41,42 @@ describe("buildPortfolioHistory", () => {
       { t: 5, total: 3 },
     ]);
     expect(buildPortfolioHistory([])).toEqual([]);
+  });
+});
+
+describe("downsampleSeries", () => {
+  const p = (t: number, total: number): HistoryPoint => ({ t, total });
+
+  it("uses hourly buckets when the span is ~1 day", () => {
+    // 一天里每 10 分钟一个点(144 个,含日内 spam)→ 应压成小时级(≤24 点),每小时留最后一个。
+    const dense = Array.from({ length: 144 }, (_, i) => p(i * 10 * 60_000, 100 + i));
+    const out = downsampleSeries(dense);
+    expect(out.length).toBeLessThanOrEqual(24);
+    // 第 0 小时的最后一个点 = 第 5 个(t=50min, total=105)。
+    expect(out[0]).toEqual(p(50 * 60_000, 105));
+    expect(out.at(-1)).toEqual(dense.at(-1)); // live 末点保留
+  });
+
+  it("uses daily buckets when the span is ~30 days", () => {
+    // 30 天、每天 4 个点 → 应压成日级(≤40 点 → 落到 1 天桶),每天留最后一个。
+    const rows: HistoryPoint[] = [];
+    for (let d = 0; d < 30; d++)
+      for (let k = 0; k < 4; k++) rows.push(p(d * DAY + k * 6 * HOUR, d * 10 + k));
+    const out = downsampleSeries(rows);
+    expect(out).toHaveLength(30);
+    expect(out[0]).toEqual(p(18 * HOUR, 3)); // day 0 的最后一个(k=3)
+    expect(out.at(-1)).toEqual(rows.at(-1));
+  });
+
+  it("collapses an hour of manual-refresh spam to a single point", () => {
+    const spam = Array.from({ length: 12 }, (_, i) => p(i * 5 * 60_000, 100 + i)); // 同一小时 12 次
+    const out = downsampleSeries(spam);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toEqual(p(11 * 5 * 60_000, 111));
+  });
+
+  it("passes through 0/1-point input and keeps chronological order", () => {
+    expect(downsampleSeries([])).toEqual([]);
+    expect(downsampleSeries([p(5, 1)])).toEqual([p(5, 1)]);
   });
 });
