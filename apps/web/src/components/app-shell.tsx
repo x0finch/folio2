@@ -1,12 +1,13 @@
-import { Dock, DockItem } from "@folio/ui";
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { cn, Dock, DockItem, SharedLayoutBg } from "@folio/ui";
+import { Link, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, LogOut, Moon, Settings, Sun, Wallet } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { useTranslations } from "use-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { signOut } from "../lib/auth-client";
+import { LOCALE_COOKIE } from "../lib/i18n/detect";
+import type { Locale } from "../lib/i18n/messages";
 import { useTheme } from "../lib/theme";
 import { CurrencySwitcher } from "./currency-switcher";
-import { LocaleSwitcher } from "./locale-switcher";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
 
@@ -17,9 +18,8 @@ const NAVS = [
   { key: "settings", to: "/settings", icon: Settings },
 ] as const;
 
-// 深色开关:跟随 <html>.dark 显示日/月,点击在 light/dark 间切。
-function ThemeToggle() {
-  const { setTheme } = useTheme();
+// 跟随 <html>.dark 反映当前深浅(主题在 <html> class 上,组件本地镜像一份)。
+function useIsDark() {
   const [dark, setDark] = useState(false);
   useEffect(() => {
     const el = document.documentElement;
@@ -29,30 +29,67 @@ function ThemeToggle() {
     obs.observe(el, { attributes: true, attributeFilter: ["class"] });
     return () => obs.disconnect();
   }, []);
+  return dark;
+}
+
+const CONTROL_BTN =
+  "flex h-9 items-center justify-center rounded-lg border border-border bg-card-2 font-medium text-foreground text-sm transition-colors hover:bg-muted [&_svg]:size-4";
+
+// 描边主题按钮(设计:☀/☾)。
+function ThemeButton({ className }: { className?: string }) {
+  const { setTheme } = useTheme();
+  const dark = useIsDark();
   const ts = useTranslations("Sidebar");
   return (
     <button
       type="button"
       aria-label={ts("theme")}
       onClick={() => setTheme(dark ? "light" : "dark")}
-      className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-4"
+      className={cn(CONTROL_BTN, className)}
     >
       {dark ? <Moon /> : <Sun />}
     </button>
   );
 }
 
-// 应用外壳(v2 layout 骨架,#98 / ADR 0015):响应式二分 —— 桌面常驻左侧栏 + 移动底部 Dock。
-// 每页顶部 PageHeader 承载标题(serif/副标题/同步入口由 H2 等后续切片接入)。
-// active 滑块(shared-layout-bg)+ 身份 footer 打磨在 H1(#100)。
+// 描边语言按钮(设计:中/EN)。切 cookie + invalidate 重跑根 loader → 换 locale。
+function LangButton({ className }: { className?: string }) {
+  const router = useRouter();
+  const locale = useLocale();
+  const ts = useTranslations("Sidebar");
+  const next: Locale = locale === "zh" ? "en" : "zh";
+  const set = () => {
+    document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000`;
+    router.invalidate();
+  };
+  return (
+    <button
+      type="button"
+      aria-label={ts("language")}
+      onClick={set}
+      className={cn(CONTROL_BTN, className)}
+    >
+      {locale === "zh" ? "中" : "EN"}
+    </button>
+  );
+}
+
+const SIGNOUT_BTN =
+  "flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-4";
+
+// 应用外壳(v2,#100 / ADR 0015):桌面常驻左侧栏 + 移动底部 Dock。
+// 侧栏 active = 静态 bg(设计态)+ shared-layout-bg hover 滑动增强。
+// 币种切换与 sign-out 暂留壳内(临时),#112 在 Settings 落地后移除。
 export function AppShell({ userName, children }: { userName: string; children: ReactNode }) {
   const t = useTranslations("Nav");
+  const ts = useTranslations("Sidebar");
   const tc = useTranslations("Common");
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
   const activeNav = NAVS.find((n) => isActive(n.to)) ?? NAVS[0];
   const pageTitle = t(activeNav.key);
+  const initial = userName.trim().charAt(0).toUpperCase() || "?";
 
   const doSignOut = async () => {
     await signOut();
@@ -62,40 +99,59 @@ export function AppShell({ userName, children }: { userName: string; children: R
   return (
     <div className="min-h-svh lg:flex">
       {/* 桌面常驻左侧栏 */}
-      <aside className="hidden w-59 shrink-0 flex-col border-border border-r bg-card p-3 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto">
-        <div className="flex items-center gap-2.5 px-2 py-2">
+      <aside className="hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto">
+        <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-5">
           <Logo className="size-6 shrink-0" />
           <span className="font-semibold text-lg tracking-tight">folio</span>
         </div>
-        <nav className="mt-4 flex flex-col gap-1">
-          {NAVS.map(({ key, to, icon: Icon }) => (
-            <Link
-              key={key}
-              to={to}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 font-medium text-sm transition-colors [&_svg]:size-4 ${
-                isActive(to)
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <Icon />
-              {t(key)}
-            </Link>
-          ))}
+
+        <nav className="mt-4">
+          <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-lg bg-muted">
+            {NAVS.map(({ key, to, icon: Icon }) => (
+              <Link
+                key={key}
+                to={to}
+                aria-current={isActive(to) ? "page" : undefined}
+                className={cn(
+                  "block rounded-lg px-3 py-2 font-medium text-sm transition-colors",
+                  isActive(to)
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {/* icon+label 必须在内层 flex span:SharedLayoutBg 会把 children 塞进一个非 flex 的 z-10 div,
+                    直接放 Link 上的 flex 作用不到 → 否则 icon/文字会竖排(见 #100 目视修正)。 */}
+                <span className="flex items-center gap-3 [&_svg]:size-4">
+                  <Icon />
+                  {t(key)}
+                </span>
+              </Link>
+            ))}
+          </SharedLayoutBg>
         </nav>
-        <div className="mt-auto flex flex-col gap-2 pt-4">
-          <div className="flex items-center gap-1">
-            <CurrencySwitcher />
-            <LocaleSwitcher />
-            <ThemeToggle />
+
+        <div className="mt-auto flex flex-col gap-2.5 pt-4">
+          <div className="flex gap-2">
+            <ThemeButton className="flex-1" />
+            <LangButton className="flex-1" />
           </div>
-          <div className="flex items-center justify-between gap-2 px-2">
-            <span className="min-w-0 truncate text-muted-foreground text-xs">{userName}</span>
+          <div className="flex items-center gap-2.5 px-1">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-foreground text-xs">
+              {initial}
+            </div>
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="truncate font-medium text-xs">{userName}</div>
+              <div className="text-muted-foreground text-xs">{ts("selfHosted")}</div>
+            </div>
+          </div>
+          {/* 临时:币种 + 登出暂留壳内,#112 迁 Settings 后移除 */}
+          <div className="flex items-center justify-between gap-2 px-1">
+            <CurrencySwitcher />
             <button
               type="button"
               aria-label={tc("signOut")}
               onClick={doSignOut}
-              className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-4"
+              className={SIGNOUT_BTN}
             >
               <LogOut />
             </button>
@@ -110,15 +166,15 @@ export function AppShell({ userName, children }: { userName: string; children: R
             <Logo className="size-6 shrink-0" />
             <span className="font-semibold text-lg tracking-tight">folio</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
+            <ThemeButton className="w-9 px-0" />
+            <LangButton className="w-9 px-0" />
             <CurrencySwitcher />
-            <LocaleSwitcher />
-            <ThemeToggle />
             <button
               type="button"
               aria-label={tc("signOut")}
               onClick={doSignOut}
-              className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-4"
+              className={SIGNOUT_BTN}
             >
               <LogOut />
             </button>
