@@ -8,7 +8,8 @@ const norm = (s: string): string => s.trim().toUpperCase();
 //   · 白名单(进聚合):spot / utxo(BTC)/ CEX 现货(kind=spot)/ perp 权益(isMargin) —— ADR-0003。kind 已由 overview 用 viewKind 归一。
 //   · 归并键四级(永不裸 symbol,ADR-0002):group → token(ref)→ tokenKey(精确合约)→ account:symbol。
 //   · HoldingSource 粒度 = 账户 × 平台单元:链上按链拆(tokenKey 的 eip155/chain 前缀),其余按账户/场馆。
-//   · 表头 totalAmount 仅当组内是单一 Token(所有 source 同一身份)时给,跨多 Token(桥接家族)不给。
+//   · 表头 totalAmount = 组内各 source 数量之和。组是「同一逻辑资产」(displaySymbol 统一单位),故跨链/
+//     多源(桥接家族)也可汇总 —— 如 USDT 跨多链合计总枚数。change24h 仍仅单一身份组给(多身份逐币涨跌不同)。
 
 // 聚合输入:一笔持仓 + 其解析结果(group/ref/展示,由 server 富化)。
 export interface AggInput {
@@ -39,7 +40,7 @@ export interface Holding {
   key: string; // 分组键(去重/稳定用)
   token: { id?: string; symbol: string; name: string; logo?: string };
   totalValue: number;
-  totalAmount?: number; // 仅单一 Token 组
+  totalAmount?: number; // 各 source 数量之和(组统一单位,跨链/多源亦可汇总)
   change24h?: number; // 仅单一 Token 组(%,每币 CGK 涨跌)
   sources: HoldingSource[];
 }
@@ -155,7 +156,7 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
       key: a.key,
       token: { id: token.id, symbol: token.symbol, name: token.name, logo: token.logo },
       totalValue: a.totalValue,
-      totalAmount: a.identities.size === 1 ? a.totalAmount : undefined,
+      totalAmount: a.totalAmount, // 组 = 同一资产、统一单位 → 各 source 数量之和恒可汇总
       change24h: a.identities.size === 1 ? a.first.change24h : undefined,
       sources,
     });

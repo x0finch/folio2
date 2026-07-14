@@ -1,7 +1,15 @@
-import { LogoAvatar, SharedLayoutBg } from "@folio/ui";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarGroup,
+  AvatarGroupCount,
+  AvatarImage,
+  LogoAvatar,
+  SharedLayoutBg,
+} from "@folio/ui";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import type { Holding } from "../lib/aggregate";
+import type { Holding, HoldingSource } from "../lib/aggregate";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { AssetSheet } from "./asset-sheet";
@@ -12,49 +20,76 @@ const DUST_THRESHOLD = 1; // USD;待定阈值
 // 持仓总数 < 此值时不折叠小额:列表本就短,折叠反而多一层交互、没收益。
 const MIN_FOLD_COUNT = 10;
 
-// 24h 涨跌(v2 语义色:涨 pos / 跌 neg / 无数据不渲染)。零自定义色,只引用 token。
-function Change24h({ value }: { value?: number }) {
-  if (value == null || value === 0) return null;
-  const positive = value > 0;
+// 24h 增值(美元):由当前市值与 24h% 反推 —— 前值 = 市值/(1+pct/100),增值 = 市值 − 前值。
+// 与 hero 第二行同语义(增值 + %);无 change24h / 恰好 0 / 前值不合法(≤-100%)→ 不显示。
+function dayValueChange(totalValue: number, change24h?: number): number | null {
+  if (change24h == null || change24h === 0) return null;
+  const factor = 1 + change24h / 100;
+  if (factor <= 0) return null;
+  return totalValue - totalValue / factor;
+}
+
+// 多源代币的平台指示:名称右侧叠放各平台/链 logo 小圆(beUI AvatarGroup;缺 logo 回退首字母、
+// title 显示平台名),上限 MAX_PLATFORM_LOGOS,超出以 +N 收尾(AvatarGroupCount)。
+// AvatarImage 垫 bg-logo-bg 恒亮实底 —— 透明 logo 边角不漏底下的 fallback 字母,且不随主题翻转。
+const MAX_PLATFORM_LOGOS = 3;
+
+function PlatformStack({ sources }: { sources: HoldingSource[] }) {
+  const shown = sources.slice(0, MAX_PLATFORM_LOGOS);
+  const extra = sources.length - shown.length;
   return (
-    <span className={positive ? "text-pos" : "text-neg"}>
-      {positive ? "+" : "−"}
-      {Math.abs(value).toFixed(2)}%
-    </span>
+    <AvatarGroup className="ml-1.5 shrink-0 -space-x-1">
+      {shown.map((s) => (
+        <Avatar key={s.platform.id} title={s.platform.name} className="size-4">
+          <AvatarImage src={s.platform.logo} alt="" className="bg-logo-bg" />
+          <AvatarFallback className="text-[8px]">{s.platform.name.slice(0, 1)}</AvatarFallback>
+        </Avatar>
+      ))}
+      {extra > 0 ? (
+        <AvatarGroupCount className="size-4 text-[8px]">+{extra}</AvatarGroupCount>
+      ) : null}
+    </AvatarGroup>
   );
 }
 
 // 行内容:必须是单个 flex 容器 —— SharedLayoutBg 会把 <button> 的 children 塞进一个非 flex 的
 // z-10 div(见 app-shell #100),故 flex 布局放这层内层 span,避免图标/名称/数值竖排。
 function RowContent({ h }: { h: Holding }) {
-  const t = useTranslations("Overview");
   const usd = useDisplayValue();
-  // 单一 Token 组才有数量 → 单价 = 市值 / 数量;跨多 Token(桥接家族)退回展示链/源规模。
-  const price = h.totalAmount != null && h.totalAmount > 0 ? h.totalValue / h.totalAmount : null;
-  const chains = h.sources.filter(
-    (s) => s.platform.id.startsWith("eip155:") || s.platform.id.startsWith("chain:"),
-  ).length;
-  const scale =
-    chains > 0
-      ? t("chainsAndSources", { chains, sources: h.sources.length })
-      : t("sourcesOnly", { sources: h.sources.length });
+  const dayValue = dayValueChange(h.totalValue, h.change24h);
 
   return (
     <div className="flex w-full items-center gap-3">
       <LogoAvatar src={h.token.logo} fallback={h.token.symbol} size="md" />
       <div className="min-w-0 flex-1">
-        {/* symbol 不在名称行重复:已跟数量并列(单一 Token 组);多 Token 组退回展示链/源规模。 */}
-        <div className="truncate font-medium">{h.token.name}</div>
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {h.totalAmount != null ? `${formatNumber(h.totalAmount)} ${h.token.symbol}` : scale}
-        </span>
+        {/* symbol 不在名称行重复:已跟数量并列。数量 = 各源汇总(多链/多源也合计,见 aggregate)。
+            多源(sources > 1)在名称右侧叠放各来源 logo,一眼看出散在哪几处。 */}
+        <div className="flex min-w-0 items-center">
+          {/* min-w-0 让名称在 flex 里可收缩截断,叠 logo(shrink-0)才不会被挤出框、被价值列盖住。 */}
+          <span className="min-w-0 truncate font-medium">{h.token.name}</span>
+          {h.sources.length > 1 ? <PlatformStack sources={h.sources} /> : null}
+        </div>
+        {h.totalAmount != null && (
+          <span className="text-muted-foreground text-xs tabular-nums">
+            {formatNumber(h.totalAmount)} {h.token.symbol}
+          </span>
+        )}
       </div>
       <div className="text-right">
         <div className="font-medium tabular-nums">{usd(h.totalValue)}</div>
-        <div className="flex items-center justify-end gap-2 text-xs tabular-nums">
-          {price != null && <span className="text-muted-foreground">{usd(price)}</span>}
-          <Change24h value={h.change24h} />
-        </div>
+        {dayValue != null && (
+          // 增值 + %:共用一个前置符号(同源同号),同色。
+          <div
+            className={`flex items-center justify-end gap-2 text-xs tabular-nums ${
+              dayValue > 0 ? "text-pos" : "text-neg"
+            }`}
+          >
+            <span>
+              {dayValue > 0 ? "+" : "−"}
+              {usd(Math.abs(dayValue))} {Math.abs(h.change24h ?? 0).toFixed(2)}%
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

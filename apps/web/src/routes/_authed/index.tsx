@@ -104,7 +104,8 @@ function Overview() {
           className="flex flex-col gap-4"
         >
           <div className="flex items-center justify-between gap-4">
-            <TabsList>
+            {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。 */}
+            <TabsList className="bg-transparent p-0">
               <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
               <TabsTrigger value="defiperp">{t("defiAndPerp")}</TabsTrigger>
               {groups.length > 0 && <TabsTrigger value="groups">{t("groupsTab")}</TabsTrigger>}

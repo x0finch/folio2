@@ -63,7 +63,7 @@ describe("buildCanonicalHoldings", () => {
     expect(h.key).toBe("group:usdt");
     expect(h.token).toMatchObject({ id: "usdt", symbol: "USDT", name: "Tether USD" });
     expect(h.totalValue).toBe(3600);
-    expect(h.totalAmount).toBeUndefined(); // tether + usdt0 = 2 个 Token
+    expect(h.totalAmount).toBe(3600); // 多源(跨链 + 交易所 + manual)USDT 合计总枚数,同单位可汇总
     // aggregate 只产 platform.id(key);name 仅为 key 占位,真名/logo 由 server 读路径
     // platforms.resolve 装饰(平台"显示成什么"整个归 @folio/platforms)。
     const ids = ["binance", "eip155:1", "eip155:42161", "manual"]; // value 降序(场馆键 = connectorId)
