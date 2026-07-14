@@ -15,7 +15,6 @@ import { useTranslations } from "use-intl";
 import { DefiPositions, PerpPositions } from "../../components/holdings-sections";
 import { PortfolioChart } from "../../components/portfolio-chart";
 import { OverviewSkeleton } from "../../components/skeletons";
-import { SyncFab } from "../../components/sync-fab";
 import { TokenHoldings } from "../../components/token-holdings";
 import { ValueChange } from "../../components/value-change";
 import { computeDayChange } from "../../lib/day-change";
@@ -188,8 +187,6 @@ function Overview() {
           </CardContent>
         </Card>
       )}
-
-      {accountTotals.length > 0 && <SyncFab accounts={accountTotals.map((r) => r.account)} />}
     </div>
   );
 }

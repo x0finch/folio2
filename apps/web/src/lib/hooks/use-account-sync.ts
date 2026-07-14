@@ -5,7 +5,7 @@ import { useTranslations } from "use-intl";
 import { syncOneAccount } from "../server/sync";
 import { orchestrateSync } from "../sync-orchestrator";
 
-// 账户同步的共享逻辑(SyncButton / SyncFab 复用):并发(≤3)逐个 syncOneAccount,
+// 账户同步的共享逻辑(SyncButton / PageHeader SyncStatus 复用):并发(≤3)逐个 syncOneAccount,
 // 进度/成功/失败统一走 sonner toast(D07 收尾:去掉页面内文字反馈),完成后 invalidate。
 export function useAccountSync(accounts: { id: string; label: string }[]) {
   const t = useTranslations("Accounts");

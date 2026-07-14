@@ -6,10 +6,12 @@ import { useLocale, useTranslations } from "use-intl";
 import { signOut } from "../lib/auth-client";
 import { LOCALE_COOKIE } from "../lib/i18n/detect";
 import type { Locale } from "../lib/i18n/messages";
+import type { SyncStatusSummary } from "../lib/sync-status";
 import { useTheme } from "../lib/theme";
 import { CurrencySwitcher } from "./currency-switcher";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
+import { SyncStatus } from "./sync-status";
 
 const NAVS = [
   { key: "overview", to: "/", icon: Home },
@@ -80,8 +82,17 @@ const SIGNOUT_BTN =
 // 应用外壳(v2,#100 / ADR 0015):桌面常驻左侧栏 + 移动底部 Dock。
 // 侧栏 active = 静态 bg(设计态)+ shared-layout-bg hover 滑动增强。
 // 币种切换与 sign-out 暂留壳内(临时),#112 在 Settings 落地后移除。
-export function AppShell({ userName, children }: { userName: string; children: ReactNode }) {
+export function AppShell({
+  userName,
+  syncStatus,
+  children,
+}: {
+  userName: string;
+  syncStatus: SyncStatusSummary;
+  children: ReactNode;
+}) {
   const t = useTranslations("Nav");
+  const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
   const tc = useTranslations("Common");
   const navigate = useNavigate();
@@ -89,6 +100,10 @@ export function AppShell({ userName, children }: { userName: string; children: R
   const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
   const activeNav = NAVS.find((n) => isActive(n.to)) ?? NAVS[0];
   const pageTitle = t(activeNav.key);
+  const pageSub =
+    activeNav.key === "overview"
+      ? th("overviewSub", { count: syncStatus.total })
+      : th(`${activeNav.key}Sub` as "accountsSub" | "insightsSub" | "settingsSub");
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
 
   const doSignOut = async () => {
@@ -182,7 +197,11 @@ export function AppShell({ userName, children }: { userName: string; children: R
         </header>
 
         <main className="mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">
-          <PageHeader title={pageTitle} />
+          <PageHeader
+            title={pageTitle}
+            subtitle={pageSub}
+            actions={<SyncStatus summary={syncStatus} />}
+          />
           {children}
         </main>
       </div>

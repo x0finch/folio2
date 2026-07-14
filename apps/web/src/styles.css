@@ -8,6 +8,8 @@
 /* Geist 变体字体(自托管 via @fontsource;CF Workers 走静态资源)。--font-sans/mono 映射在 @folio/ui @theme。 */
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
+/* Newsreader 变体 serif(v2 PageHeader 大标题);--font-serif 映射在 @folio/ui @theme。 */
+@import "@fontsource-variable/newsreader";
 
 /* 显式扫描本应用源码(Tailwind 入口在 @folio/ui,故此处补声明 app 自身的 class 来源)。 */
 @source "./**/*.{ts,tsx}";
