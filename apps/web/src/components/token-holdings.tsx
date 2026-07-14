@@ -5,15 +5,28 @@ import type { Holding } from "../lib/aggregate";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { AssetSheet } from "./asset-sheet";
-import { ValueChange } from "./value-change";
 
-// 按代币聚合的持仓列表(复刻 folio-old:LogoAvatar + 名称/symbol + 值 + 涨跌;点击行 → 详情抽屉)。
+// 按代币聚合的持仓列表(v2:LogoAvatar + 名称/symbol / 数量 · 价格 / 市值 · 24h;点击行 → 详情抽屉)。
 // 小额(< DUST_THRESHOLD)折叠进「N 项小额」footer。
 const DUST_THRESHOLD = 1; // USD;待定阈值
+
+// 24h 涨跌(v2 语义色:涨 pos / 跌 neg / 无数据不渲染)。零自定义色,只引用 token。
+function Change24h({ value }: { value?: number }) {
+  if (value == null || value === 0) return null;
+  const positive = value > 0;
+  return (
+    <span className={positive ? "text-pos" : "text-neg"}>
+      {positive ? "+" : "−"}
+      {Math.abs(value).toFixed(2)}%
+    </span>
+  );
+}
 
 function HoldingRow({ h, onOpen }: { h: Holding; onOpen: (h: Holding) => void }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
+  // 单一 Token 组才有数量 → 单价 = 市值 / 数量;跨多 Token(桥接家族)退回展示链/源规模。
+  const price = h.totalAmount != null && h.totalAmount > 0 ? h.totalValue / h.totalAmount : null;
   const chains = h.sources.filter(
     (s) => s.platform.id.startsWith("eip155:") || s.platform.id.startsWith("chain:"),
   ).length;
@@ -34,17 +47,15 @@ function HoldingRow({ h, onOpen }: { h: Holding; onOpen: (h: Holding) => void })
           <span className="truncate font-medium">{h.token.name}</span>
           <span className="text-muted-foreground text-xs uppercase">{h.token.symbol}</span>
         </div>
-        <span className="text-muted-foreground text-xs">{scale}</span>
+        <span className="text-muted-foreground text-xs tabular-nums">
+          {h.totalAmount != null ? `${formatNumber(h.totalAmount)} ${h.token.symbol}` : scale}
+        </span>
       </div>
       <div className="text-right">
-        <div className="font-medium">{usd(h.totalValue)}</div>
-        <div className="flex items-center justify-end gap-2 text-muted-foreground text-xs">
-          {h.change24h != null && <ValueChange value={h.change24h} format="percent" />}
-          {h.totalAmount != null && (
-            <span>
-              {formatNumber(h.totalAmount)} {h.token.symbol}
-            </span>
-          )}
+        <div className="font-medium tabular-nums">{usd(h.totalValue)}</div>
+        <div className="flex items-center justify-end gap-2 text-xs tabular-nums">
+          {price != null && <span className="text-muted-foreground">{usd(price)}</span>}
+          <Change24h value={h.change24h} />
         </div>
       </div>
     </button>
