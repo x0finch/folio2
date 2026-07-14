@@ -56,6 +56,24 @@ _Avoid_: chain(仅指链时才用)、venue(仅指交易所/perp)、network、Con
 可插拔的**账户类型单元** —— 一份 manifest 定义"某类账户怎么建(`account.creds`)+ 想要什么余额(`balance.schema`)+ 用哪些 providers 取数",取代旧的 `accountType`(evm / binance / okx / hyperliquid / bitcoin / solana / sui / cosmos / manual)。**粒度:整个 EVM 是一个** connector(其持仓再散落到多个 Platform)。归 `@folio/connectors` 包。
 _Avoid_: Platform(那是持仓的链∪场馆定位维度,1 connector 可对多 Platform)、accountType(旧称)、plugin
 
+### 分析:分布 / 组成 / 维度
+
+**Dimension(分析维度)**:
+组合金额被分组归拢的轴 —— `token`(按代币)/ `platform`(按链∪场馆,即 [Platform])/ `type`(按 [kind] + 稳定币细分)/ `account`(按账户)。同一套维度供 Allocation 与 Composition 复用。
+_Avoid_: category(那易与 CGK 分类混)、group(那是用户自定义的账户分组 TokenGroup / accountGroups)
+
+**Allocation(当下分布)**:
+**最新快照**下按某 Dimension 的金额占比拆分(Insights 环形 + 图例)。只回答「此刻各占多少」。
+_Avoid_: Composition(那是随时间的)、breakdown(泛指)
+
+**Composition(随时间组成)**:
+组合净值**随时间**按某 Dimension 的堆叠拆分(Insights 堆叠面积图)。历史各点用 `snapshot_balances` 冻结值分桶,**最新点**用 overview 的逐-balance 实时值分桶(∴ Σ 桶 = hero 实时总额)。与 Allocation 的分野:Allocation 是「此刻切一刀」,Composition 是「结构随时间演变」。
+_Avoid_: trend(那专指总净值单线)、history(泛指)
+
+**Stablecoin(稳定币)**:
+经 CoinGecko 分类(`category=stablecoins`)判定的 [Token],落 `tokens.is_stablecoin`(ADR 0016)。驱动 `type` 维的 Stablecoin 桶与 hero 稳定币占比;判定 **kind 先行**(DeFi/Perp 头寸内的稳定币不入此桶)。CGK 未收录的孤儿 token 一律非稳定币。
+_Avoid_: stable(缩写,正式词用 Stablecoin)、按 symbol 硬判(已否,见 ADR 0016)
+
 ### 计价与展示币种
 
 **Base currency(计价基准)**:

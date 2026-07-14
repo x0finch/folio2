@@ -22,7 +22,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 8. **No hardcoding** — magic numbers named; volatile/env-specific → env, stable domain → each package's `constants.ts`.
 9. **Prefer mature, vetted libraries** — must pass the 4 gates (CF Workers, maintained, complexity-worth-it, no conflicts); record the choice.
 10. **kebab-case filenames**; exports keep their own case convention (components `PascalCase`, funcs `camelCase`, types `PascalCase`, constants `UPPER_SNAKE`).
-11. **UI = beUI (Framer Motion) 动效层 + 少量手搓本地原语,皆经 shadcn registry — 绝不 Radix** — beUI 件经 `@beui/*` registry(`pnpm dlx shadcn add @beui/<name>`)落 `packages/ui/src/components/motion/`,beUI 无对应的基础件(Card/Avatar/Separator/Skeleton)手搓;`@base-ui/react` 已移除、Base UI 全退场(见 [ADR 0004](docs/adr/0004-adopt-beui-motion-layer-drop-base-ui.md))。design tokens 优先(含 `lib/ease.ts` 动效 spring/easing token),避免任意值,不改件内核。
+11. **UI = beUI (Framer Motion) 动效层 + 少量手搓本地原语,皆经 shadcn registry — 绝不 Radix** — beUI 件经 `@beui/*` registry(`pnpm dlx shadcn add @beui/<name>`)落 `packages/ui/src/components/motion/`,beUI 无对应的基础件(Card/Avatar/Separator/Skeleton)手搓;`@base-ui/react` 已移除、Base UI 全退场(见 [ADR 0004](docs/adr/0004-adopt-beui-motion-layer-drop-base-ui.md))。design tokens 优先(含 `lib/ease.ts` 动效 spring/easing token),避免任意值,不改件内核。**组件取材决策树(强制)**:① 优先 beUI 组件,或用 beUI/既有原语**组装**;② beUI 没有 → 查 shadcn(非 Radix)可用组件,**告知用户**后再用;③ 两者都没有 → **告知用户 + 提方案**(通常手搓 token-only 本地原语,类比 Card/Avatar/Separator/Skeleton),经用户确认后再动手。安装**「用到再加」**——依赖各归首用切片,不提前引入。**绝不自定义颜色/样式,只引用 design token**(数据可视化 SVG 是唯一例外,颜色仍只走 `--chart-*`/语义色 token)。
 12. **Small commits, English messages — never `git commit` without explicit approval** ("提交"/"commit" authorizes it; "执行"/"go" does NOT).
 
 ## Package conventions (monorepo)
