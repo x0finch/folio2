@@ -55,6 +55,7 @@ export {
   SelectTrigger,
   SelectValue,
 } from "./components/motion/select";
+export { SharedLayoutBg, type SharedLayoutBgProps } from "./components/motion/shared-layout-bg";
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
 export { Toaster, toast } from "./components/motion/toast";
 export { Tooltip } from "./components/motion/tooltip";
