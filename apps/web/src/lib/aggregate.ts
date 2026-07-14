@@ -137,6 +137,10 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
 
   const holdings: Holding[] = [];
   for (const a of acc.values()) {
+    // 无美元价值(未定价/垃圾空投)→ 不进组合持仓:对净值无贡献,却会污染值排序、best/worst
+    // 24h 择取(deriveHeroMetrics 只看 change24h,不看 value)与列表(挤满小额)。账户详情走
+    // toAccountSections 原始余额,仍保留这些行 —— 此处只清「按代币的组合视角」。
+    if (a.totalValue <= 0) continue;
     const g = a.first.group;
     const sources = [...a.sources.values()].sort((x, y) => y.value - x.value);
     const token = g

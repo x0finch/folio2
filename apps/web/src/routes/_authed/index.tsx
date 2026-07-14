@@ -114,7 +114,7 @@ function Overview() {
 
           <TabsContent value="tokens">
             {holdings.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>
+              <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
             ) : (
               <TokenHoldings holdings={holdings} />
             )}
@@ -122,7 +122,9 @@ function Overview() {
 
           <TabsContent value="defiperp">
             {sections.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("noOpenPositions")}</p>
+              <p className="py-12 text-center text-muted-foreground text-sm">
+                {t("noOpenPositions")}
+              </p>
             ) : (
               <div className="flex flex-col gap-6 overflow-x-auto">
                 {sections.map((s) => (
