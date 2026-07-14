@@ -24,7 +24,12 @@ export function LogoAvatar({
   const s = sizes[size];
   return (
     <Avatar className={cn("shrink-0", s.avatar, className)}>
-      <AvatarImage src={src || ""} alt={alt ?? ""} className="rounded-full object-contain" />
+      {/* bg-logo-bg 恒亮实底:object-contain 的透明边角/透明 logo 不漏出底下 fallback 字母,且不随主题翻转。 */}
+      <AvatarImage
+        src={src || ""}
+        alt={alt ?? ""}
+        className="rounded-full bg-logo-bg object-contain"
+      />
       <AvatarFallback className={cn("font-medium text-muted-foreground", s.fallback)}>
         {fallback?.slice(0, 1).toUpperCase()}
       </AvatarFallback>

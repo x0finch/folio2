@@ -63,7 +63,7 @@ describe("buildCanonicalHoldings", () => {
     expect(h.key).toBe("group:usdt");
     expect(h.token).toMatchObject({ id: "usdt", symbol: "USDT", name: "Tether USD" });
     expect(h.totalValue).toBe(3600);
-    expect(h.totalAmount).toBeUndefined(); // tether + usdt0 = 2 个 Token
+    expect(h.totalAmount).toBe(3600); // 多源(跨链 + 交易所 + manual)USDT 合计总枚数,同单位可汇总
     // aggregate 只产 platform.id(key);name 仅为 key 占位,真名/logo 由 server 读路径
     // platforms.resolve 装饰(平台"显示成什么"整个归 @folio/platforms)。
     const ids = ["binance", "eip155:1", "eip155:42161", "manual"]; // value 降序(场馆键 = connectorId)
@@ -223,5 +223,23 @@ describe("buildCanonicalHoldings", () => {
       row({ symbol: "BBB", amount: 1, value: 20, account: binance, tokenId: "tok-b" }),
     ]);
     expect(hs).toHaveLength(2);
+  });
+
+  it("无美元价值(未定价/垃圾币,value=0)→ 不进组合持仓", () => {
+    const hs = buildCanonicalHoldings([
+      row({ symbol: "REAL", amount: 2, value: 50, account: binance, tokenId: "tok-real" }),
+      row({ symbol: "SPAM", amount: 999999, value: 0, account: binance, tokenId: "tok-spam" }),
+    ]);
+    expect(hs).toHaveLength(1);
+    expect(hs[0]!.token.symbol).toBe("REAL");
+  });
+
+  it("同代币多源合计 > 0 仍保留,即使个别源 value=0", () => {
+    const hs = buildCanonicalHoldings([
+      row({ symbol: "AAA", amount: 1, value: 0, account: binance, tokenId: "tok-a" }),
+      row({ symbol: "AAA", amount: 1, value: 5, account: hyper, tokenId: "tok-a" }),
+    ]);
+    expect(hs).toHaveLength(1);
+    expect(hs[0]!.totalValue).toBe(5);
   });
 });

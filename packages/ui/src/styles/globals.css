@@ -48,6 +48,7 @@
   --color-warn-bg: var(--warn-bg);
   --color-card-2: var(--card-2);
   --color-border-2: var(--border-2);
+  --color-logo-bg: var(--logo-bg);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -101,6 +102,8 @@
   --warn-bg: oklch(0.96 0.04 80);
   --card-2: oklch(0.97 0 0);
   --border-2: oklch(0.87 0 0);
+  /* logo 底:恒亮(不随主题翻转)—— 币/链 logo 多为浅底设计,深色主题下也垫亮底保证辨识。 */
+  --logo-bg: oklch(1 0 0);
   --shadow: 0 1px 2px 0 oklch(0 0 0 / 0.05);
   --shadow-lg: 0 10px 30px -12px oklch(0 0 0 / 0.16), 0 2px 8px -2px oklch(0 0 0 / 0.08);
   --sidebar: oklch(0.985 0 0);
@@ -146,6 +149,7 @@
   --warn-bg: oklch(0.3 0.05 78);
   --card-2: oklch(0.269 0 0);
   --border-2: oklch(1 0 0 / 18%);
+  --logo-bg: oklch(1 0 0); /* 恒亮:深色主题下 logo 仍垫亮底(见 :root 注释) */
   --shadow: 0 1px 2px 0 oklch(0 0 0 / 0.3);
   --shadow-lg: 0 16px 40px -12px oklch(0 0 0 / 0.5), 0 2px 10px -2px oklch(0 0 0 / 0.4);
   --sidebar: oklch(0.205 0 0);

@@ -1,5 +1,6 @@
-import { Card, CardContent, Tabs, TabsContent, TabsList, TabsTrigger } from "@folio/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { DefiPositions, PerpPositions } from "../../components/holdings-sections";
 import { PortfolioHero } from "../../components/portfolio-hero";
@@ -74,6 +75,14 @@ function Overview() {
   const usd = useDisplayValue();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(accountTotals, groups, memberships);
+  const [tab, setTab] = useState("tokens");
+  // 分组 tab 仅在有分组时存在;若选中后分组被删空(loader 重跑),受控值会指向已消失的 tab
+  // → 面板全空、指示器无高亮。派生 clamp 回代币,避免陈旧选中。
+  const activeTab = tab === "groups" && groups.length === 0 ? "tokens" : tab;
+  // tab 右侧展示该视角合计:代币 = 现货聚合小计;DeFi & 永续 = DeFi 头寸小计(永续权益已并入代币);
+  // 分组 = 组合总净值(按账户去重,组间可重叠故不求组小计之和)。
+  const viewSubtotal =
+    activeTab === "tokens" ? holdingsSubtotal : activeTab === "defiperp" ? defiSubtotal : totalUsd;
 
   return (
     <div className="flex flex-col gap-6">
@@ -88,53 +97,54 @@ function Overview() {
           .
         </p>
       ) : (
-        <Card>
-          <CardContent className="pt-6">
-            <Tabs defaultValue="tokens" variant="underline">
-              <TabsList>
-                <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
-                <TabsTrigger value="defiperp">{t("defiAndPerp")}</TabsTrigger>
-                {groups.length > 0 && <TabsTrigger value="groups">{t("groupsTab")}</TabsTrigger>}
-              </TabsList>
+        <Tabs
+          value={activeTab}
+          onValueChange={setTab}
+          variant="pill"
+          className="flex flex-col gap-4"
+        >
+          <div className="flex items-center justify-between gap-4">
+            {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。 */}
+            <TabsList className="bg-transparent p-0">
+              <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
+              <TabsTrigger value="defiperp">{t("defiAndPerp")}</TabsTrigger>
+              {groups.length > 0 && <TabsTrigger value="groups">{t("groupsTab")}</TabsTrigger>}
+            </TabsList>
+            <span className="text-muted-foreground text-sm tabular-nums">{usd(viewSubtotal)}</span>
+          </div>
 
-              <TabsContent value="tokens">
-                {holdings.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>
-                ) : (
-                  <>
-                    <p className="mb-1 text-right text-sm text-muted-foreground">
-                      {usd(holdingsSubtotal)}
-                    </p>
-                    <TokenHoldings holdings={holdings} />
-                  </>
-                )}
-              </TabsContent>
+          <TabsContent value="tokens">
+            {holdings.length === 0 ? (
+              <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
+            ) : (
+              <TokenHoldings holdings={holdings} />
+            )}
+          </TabsContent>
 
-              <TabsContent value="defiperp">
-                {sections.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">{t("noOpenPositions")}</p>
-                ) : (
-                  <div className="flex flex-col gap-6 overflow-x-auto">
-                    <p className="text-right text-sm text-muted-foreground">{usd(defiSubtotal)}</p>
-                    {sections.map((s) => (
-                      <div key={s.account.id} className="flex flex-col gap-3">
-                        <p className="font-medium">{s.account.label}</p>
-                        {s.defi.length > 0 && <DefiPositions groups={s.defi} />}
-                        {s.perp && s.perp.positions.length > 0 && <PerpPositions view={s.perp} />}
-                      </div>
-                    ))}
+          <TabsContent value="defiperp">
+            {sections.length === 0 ? (
+              <p className="py-12 text-center text-muted-foreground text-sm">
+                {t("noOpenPositions")}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-6 overflow-x-auto">
+                {sections.map((s) => (
+                  <div key={s.account.id} className="flex flex-col gap-3">
+                    <p className="font-medium">{s.account.label}</p>
+                    {s.defi.length > 0 && <DefiPositions groups={s.defi} />}
+                    {s.perp && s.perp.positions.length > 0 && <PerpPositions view={s.perp} />}
                   </div>
-                )}
-              </TabsContent>
+                ))}
+              </div>
+            )}
+          </TabsContent>
 
-              {groups.length > 0 && (
-                <TabsContent value="groups">
-                  <ByGroup view={grouped} />
-                </TabsContent>
-              )}
-            </Tabs>
-          </CardContent>
-        </Card>
+          {groups.length > 0 && (
+            <TabsContent value="groups">
+              <ByGroup view={grouped} />
+            </TabsContent>
+          )}
+        </Tabs>
       )}
     </div>
   );
