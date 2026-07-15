@@ -170,12 +170,18 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
         <div className="flex items-center gap-3">
           <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
           <div className="min-w-0">
-            {/* 名称 + 价格徽标(中性 pill,无状态图标):价格贴在名称右侧。 */}
+            {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
+                排名走 text-foreground(深色主题即白、亮色主题自动转深),价格保持 muted。 */}
             <div className="flex min-w-0 items-center gap-2">
               <h2 className="truncate font-semibold text-lg">{token.name}</h2>
-              {token.unitPrice != null && (
+              {(token.marketCapRank != null || token.unitPrice != null) && (
                 <Badge status="neutral" size="sm" showIcon={false}>
-                  {usd(token.unitPrice)}
+                  <span className="inline-flex items-center gap-1">
+                    {token.marketCapRank != null && (
+                      <span className="text-foreground">#{token.marketCapRank}</span>
+                    )}
+                    {token.unitPrice != null && <span>{usd(token.unitPrice)}</span>}
+                  </span>
                 </Badge>
               )}
             </div>
@@ -197,13 +203,6 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
             </div>
           )}
         </div>
-
-        {/* 市值排名(已入库字段;缺则不显)。价格已上移到名称右侧徽标。 */}
-        {token.marketCapRank != null && (
-          <div className="text-muted-foreground text-sm tabular-nums">
-            {t("marketCapRank", { rank: token.marketCapRank })}
-          </div>
-        )}
       </div>
 
       {/* 来源:Platforms / Accounts 两视图切换。tab 背景透明,与主页 Tokens/DeFi 一致。 */}
