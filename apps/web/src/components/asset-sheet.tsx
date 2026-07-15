@@ -188,8 +188,9 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
         {series.length >= 2 && (
           <ValueTrendChart series={series} topMargin={56} fillOpacity={0.14} />
         )}
-        {/* 窗口切换:绝对右上角、与 token name 行同高;可交互(独立于 pointer-events-none 内容层)。 */}
-        <div className="absolute top-1 right-0 z-10">
+        {/* 窗口切换:绝对右上角、与 token name 垂直居中(top-0.5 使 tabs 中心 ≈ name 文字中心);
+            可交互(独立于 pointer-events-none 内容层)。 */}
+        <div className="absolute top-0.5 right-0 z-10">
           <RangeTabs value={range} onChange={setRange} />
         </div>
         <div className="pointer-events-none relative flex flex-col gap-3">
