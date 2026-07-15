@@ -29,15 +29,9 @@ import { groupByAccount, groupByPlatform, type SourceGroup } from "../lib/source
 
 const MAX_STACK = 3;
 
-// 组头像:单一 manual → 钱包图标;单 avatar → 单 logo;多 avatar(账户跨多链)→ 叠标 + N。
+// 组头像:单 avatar → 单 logo;多 avatar(账户跨多链)→ 叠标 + N。manual 亦有内置 logo(NotebookPen),
+// 走普通 LogoAvatar,不再特判。
 function GroupAvatar({ group }: { group: SourceGroup }) {
-  if (group.isManual) {
-    return (
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <WalletIcon className="size-3.5" />
-      </span>
-    );
-  }
   const [first] = group.avatars;
   if (group.avatars.length === 1 && first) {
     return <LogoAvatar src={first.logo} fallback={first.name} size="sm" />;

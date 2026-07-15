@@ -13,7 +13,6 @@ export interface SourceGroupAvatar {
 export interface SourceGroup {
   key: string;
   avatars: SourceGroupAvatar[]; // 左侧头像:1 个 = 单 logo,多个 = 叠标
-  isManual: boolean; // 单一 manual 平台 → 钱包图标(无 logo 映射)
   primary: string; // 主行(平台名 / 账户名)
   count: number; // 副维度基数(账户数 / 平台数);=1 时用 single 显具体名
   single: string | null; // count===1 时的具体名(账户名 / 平台名),否则 null
@@ -55,7 +54,6 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
     .map(([key, g]) => ({
       key,
       avatars: [{ logo: g.logo, name: g.name }],
-      isManual: key === "manual",
       primary: g.name,
       count: g.accounts.size,
       single: g.accounts.size === 1 ? g.lastAccount : null,
@@ -93,7 +91,6 @@ export function groupByAccount(sources: readonly HoldingSource[]): SourceGroup[]
       return {
         key,
         avatars: plats.map(([, p]) => ({ logo: p.logo, name: p.name })),
-        isManual: plats.length === 1 && plats[0][0] === "manual",
         primary: g.label,
         count: plats.length,
         single: plats.length === 1 ? plats[0][1].name : null,
