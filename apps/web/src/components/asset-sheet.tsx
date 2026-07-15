@@ -88,14 +88,15 @@ function TokenValueBackdrop({ series }: { series: HistoryPoint[] }) {
   );
 }
 
-// 窗口切换:7D / 30D / 1Y / 全部。beUI Tabs(透明底,与来源 tab 同款);无 TabsContent,value 驱动 chart。
+// 窗口切换:7D / 30D / 1Y / 全部。beUI Tabs(透明底);无 TabsContent,value 驱动 chart。
+// 紧凑款(px-2/py-0.5/text-xs + gap-0.5),叠在头部左上角。
 function RangeTabs({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
   const t = useTranslations("Overview");
   return (
     <Tabs value={value} onValueChange={(v) => onChange(v as Range)} variant="pill">
-      <TabsList className="bg-transparent p-0">
+      <TabsList className="gap-0.5 bg-transparent p-0">
         {RANGES.map((r) => (
-          <TabsTrigger key={r} value={r}>
+          <TabsTrigger key={r} value={r} className="px-2 py-0.5 font-mono text-xs">
             {r === "all" ? t("rangeAll") : r.toUpperCase()}
           </TabsTrigger>
         ))}
@@ -235,60 +236,61 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 头部 + 窗口切换成组。头部预留固定高度(min-h-44)→ 价值历史图异步到达也不撑高、不挤压下方列表。 */}
-      <div className="flex flex-col gap-3">
-        {/* 价值历史图垫底(hover 出 tooltip);内容 pointer-events-none 让 hover 透传;右下角天数 ND(仿 hero)。 */}
-        <div className="relative min-h-44 overflow-hidden">
-          <TokenValueBackdrop series={series} />
-          <div className="pointer-events-none relative flex flex-col gap-3">
-            <div className="flex items-center gap-3">
-              <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
-              <div className="min-w-0">
-                {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
+      {/* 头部:价值历史图垫底(hover 出 tooltip);内容 pointer-events-none 让 hover 透传;窗口切换叠左上角、
+          天数 ND 叠右下角(仿 hero)。预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压下方列表。 */}
+      <div className="relative min-h-44 overflow-hidden">
+        <TokenValueBackdrop series={series} />
+        {/* 窗口切换:绝对左上角、可交互(独立于 pointer-events-none 内容层)。 */}
+        <div className="absolute top-0 left-0 z-10">
+          <RangeTabs value={range} onChange={setRange} />
+        </div>
+        {/* 内容顶部留白避开左上角的窗口切换。 */}
+        <div className="pointer-events-none relative flex flex-col gap-3 pt-7">
+          <div className="flex items-center gap-3">
+            <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
+            <div className="min-w-0">
+              {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
                     排名走 text-foreground(深色主题即白、亮色主题自动转深),价格保持 muted。 */}
-                <div className="flex min-w-0 items-center gap-2">
-                  <h2 className="truncate font-semibold text-lg">{token.name}</h2>
-                  {(token.marketCapRank != null || token.unitPrice != null) && (
-                    <Badge status="neutral" size="sm" showIcon={false}>
-                      <span className="inline-flex items-center gap-1">
-                        {token.marketCapRank != null && (
-                          <span className="text-foreground">#{token.marketCapRank}</span>
-                        )}
-                        {token.unitPrice != null && <span>{usd(token.unitPrice)}</span>}
-                      </span>
-                    </Badge>
-                  )}
-                </div>
-                {totalAmount != null && (
-                  <p className="text-muted-foreground text-sm tabular-nums">
-                    {formatNumber(totalAmount)} {token.symbol}
-                  </p>
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="truncate font-semibold text-lg">{token.name}</h2>
+                {(token.marketCapRank != null || token.unitPrice != null) && (
+                  <Badge status="neutral" size="sm" showIcon={false}>
+                    <span className="inline-flex items-center gap-1">
+                      {token.marketCapRank != null && (
+                        <span className="text-foreground">#{token.marketCapRank}</span>
+                      )}
+                      {token.unitPrice != null && <span>{usd(token.unitPrice)}</span>}
+                    </span>
+                  </Badge>
                 )}
               </div>
-            </div>
-
-            <div>
-              <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
-              {dayValue != null && (
-                // 24h 增值 + %:共用一个前置符号(同源同号)、同色,与代币行/hero 一致。
-                <div
-                  className={`mt-1 text-sm tabular-nums ${dayValue > 0 ? "text-pos" : "text-neg"}`}
-                >
-                  {dayValue > 0 ? "+" : "−"}
-                  {usd(Math.abs(dayValue))} {Math.abs(change24h ?? 0).toFixed(2)}%
-                </div>
+              {totalAmount != null && (
+                <p className="text-muted-foreground text-sm tabular-nums">
+                  {formatNumber(totalAmount)} {token.symbol}
+                </p>
               )}
             </div>
           </div>
 
-          {spanDays >= 1 && (
-            <span className="absolute right-0 bottom-0 z-10 font-mono text-muted-foreground text-xs tracking-wide">
-              {spanDays}D
-            </span>
-          )}
+          <div>
+            <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
+            {dayValue != null && (
+              // 24h 增值 + %:共用一个前置符号(同源同号)、同色,与代币行/hero 一致。
+              <div
+                className={`mt-1 text-sm tabular-nums ${dayValue > 0 ? "text-pos" : "text-neg"}`}
+              >
+                {dayValue > 0 ? "+" : "−"}
+                {usd(Math.abs(dayValue))} {Math.abs(change24h ?? 0).toFixed(2)}%
+              </div>
+            )}
+          </div>
         </div>
 
-        <RangeTabs value={range} onChange={setRange} />
+        {spanDays >= 1 && (
+          <span className="absolute right-0 bottom-0 z-10 font-mono text-muted-foreground text-xs tracking-wide">
+            {spanDays}D
+          </span>
+        )}
       </div>
 
       {/* 来源:Platforms / Accounts 两视图切换。tab 背景透明,与主页 Tokens/DeFi 一致。 */}
