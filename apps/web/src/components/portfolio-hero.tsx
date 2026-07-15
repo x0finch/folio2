@@ -1,17 +1,11 @@
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  cn,
-  NumberTicker,
-} from "@folio/ui";
-import { Area, AreaChart, XAxis, YAxis } from "recharts";
-import { useFormatter, useTranslations } from "use-intl";
+import { type ChartConfig, ChartContainer, cn, NumberTicker } from "@folio/ui";
+import { Area, AreaChart, YAxis } from "recharts";
+import { useTranslations } from "use-intl";
 import { computeDayChange } from "../lib/day-change";
 import { deriveHeroMetrics, type HoldingLike } from "../lib/hero-stats";
 import { downsampleSeries, type HistoryPoint } from "../lib/history";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
+import { ValueTrendChart } from "./value-trend-chart";
 
 const DAY_MS = 86_400_000;
 // hero 趋势最多展示最近 30 天;更长跨度 + 区间切换属于 Insights(不改共享的 getPortfolioHistory)。
@@ -39,7 +33,6 @@ export function PortfolioHero({
 }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
-  const format = useFormatter();
 
   // 裁到最近 30 天窗口(以最新快照时刻为基准,与 SSR/客户端一致、不用客户端时钟),
   // 再自适应降采样:粒度随实际数据量走(约 1 天 → 小时级、约 30 天 → 日级),日内多次手动
@@ -49,7 +42,6 @@ export function PortfolioHero({
     series.filter((p) => p.t >= lastT - HERO_WINDOW_DAYS * DAY_MS),
   );
   const hasHistory = chartSeries.length >= 2;
-  const up = hasHistory ? chartSeries[chartSeries.length - 1].total >= chartSeries[0].total : true;
 
   // 24h 净值变化:绝对差(day-change.ts)+ 由基准反推百分比(基准 ≤ 0 时只显示绝对额,不连带隐藏)。
   const dayAbs = computeDayChange(series, totalUsd, series.at(-1)?.t ?? 0);
@@ -78,57 +70,15 @@ export function PortfolioHero({
   const dot = totalStr.lastIndexOf(".");
   const fracPart = dot >= 0 ? totalStr.slice(dot + 1) : null;
 
-  const realConfig = {
-    total: { label: t("portfolioValue"), color: up ? "var(--pos)" : "var(--neg)" },
-  } satisfies ChartConfig;
   const demoConfig = {
     total: { label: t("portfolioValue"), color: "var(--pos)" },
   } satisfies ChartConfig;
 
-  const fullDateTime = (ms: number) =>
-    format.dateTime(new Date(ms), {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
   return (
     <div className="relative min-h-60 overflow-hidden pt-1">
       {hasHistory ? (
-        // 上留白把折线压到下半区;下/左/右留白给 hover 圆点余量(否则贴 overflow-hidden 边被裁)。
-        <ChartContainer config={realConfig} className="absolute inset-0 h-full w-full">
-          <AreaChart data={chartSeries} margin={{ top: 92, right: 8, bottom: 8, left: 8 }}>
-            <defs>
-              <linearGradient id="hero-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--color-total)" stopOpacity={0.16} />
-                <stop offset="100%" stopColor="var(--color-total)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <XAxis dataKey="t" hide />
-            <YAxis hide domain={["dataMin", "dataMax"]} />
-            <ChartTooltip
-              cursor={{ stroke: "var(--border-2)", strokeDasharray: "3 3" }}
-              content={
-                // indicator 保持默认 "dot":单序列 + "line" 会令 wrapper nestLabel=true,叠加自定义
-                // formatter 时会把标签(格式化时间)一并跳过 → tooltip 里就没时间了。
-                <ChartTooltipContent
-                  labelFormatter={(_, payload) => fullDateTime(Number(payload?.[0]?.payload?.t))}
-                  formatter={(value) => usd(Number(value))}
-                />
-              }
-            />
-            <Area
-              dataKey="total"
-              type="monotone"
-              stroke="var(--color-total)"
-              strokeWidth={2}
-              strokeOpacity={0.5}
-              fill="url(#hero-fill)"
-              dot={false}
-            />
-          </AreaChart>
-        </ChartContainer>
+        // 上留白把折线压到下半区(topMargin=92);共用 ValueTrendChart(--pos/--neg + tooltip + 各边留白给圆点)。
+        <ValueTrendChart series={chartSeries} topMargin={92} />
       ) : (
         // 演示趋势:纯背景装饰,不吃指针、无 tooltip;实线、曲折上扬。
         <ChartContainer

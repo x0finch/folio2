@@ -1,10 +1,6 @@
 import {
   Badge,
   BottomSheet,
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
   Drawer,
   LogoAvatar,
   SharedLayoutBg,
@@ -17,16 +13,15 @@ import {
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { WalletIcon } from "lucide-react";
 import { useState } from "react";
-import { Area, AreaChart, XAxis, YAxis } from "recharts";
-import { useFormatter, useTranslations } from "use-intl";
+import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
-import type { HistoryPoint } from "../lib/history";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { getTokenValueHistory } from "../lib/server/token-history";
 import { groupByAccount, groupByPlatform, type SourceGroup } from "../lib/source-groups";
 import { AvatarStack } from "./avatar-stack";
+import { ValueTrendChart } from "./value-trend-chart";
 
 // 资产 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
 // 头部背景 = 单币【持仓价值】历史(片 2):折线随涨跌走 --pos/--neg,内容浮其上;可切 7d/30d/1y/全部。
@@ -37,66 +32,15 @@ type Range = "7d" | "30d" | "1y" | "all";
 const RANGES: Range[] = ["7d", "30d", "1y", "all"];
 const RANGE_DAYS: Record<Exclude<Range, "all">, number> = { "7d": 7, "30d": 30, "1y": 365 };
 
-// 价值历史背景图(仿 hero):绝对定位垫底,折线压到下半区,内容浮其上;hover 出 tooltip(时间 + 价值)。
-// 内容层 pointer-events-none 让 hover 透传到此图。<2 点不渲染(头部已预留固定高度,故不渲染也不塌陷)。
-function TokenValueBackdrop({ series }: { series: HistoryPoint[] }) {
-  const usd = useDisplayValue();
-  const format = useFormatter();
-  if (series.length < 2) return null;
-  const up = (series.at(-1)?.total ?? 0) >= (series[0]?.total ?? 0);
-  const config = {
-    total: { label: "", color: up ? "var(--pos)" : "var(--neg)" },
-  } satisfies ChartConfig;
-  const fullDateTime = (ms: number) =>
-    format.dateTime(new Date(ms), {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  return (
-    <ChartContainer config={config} className="absolute inset-0 h-full w-full">
-      <AreaChart data={series} margin={{ top: 56, right: 0, bottom: 0, left: 0 }}>
-        <defs>
-          <linearGradient id="asset-value-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-total)" stopOpacity={0.14} />
-            <stop offset="100%" stopColor="var(--color-total)" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <XAxis dataKey="t" hide />
-        <YAxis hide domain={["dataMin", "dataMax"]} />
-        <ChartTooltip
-          cursor={{ stroke: "var(--border-2)", strokeDasharray: "3 3" }}
-          content={
-            <ChartTooltipContent
-              labelFormatter={(_, payload) => fullDateTime(Number(payload?.[0]?.payload?.t))}
-              formatter={(value) => usd(Number(value))}
-            />
-          }
-        />
-        <Area
-          dataKey="total"
-          type="monotone"
-          stroke="var(--color-total)"
-          strokeWidth={2}
-          strokeOpacity={0.5}
-          fill="url(#asset-value-fill)"
-          dot={false}
-        />
-      </AreaChart>
-    </ChartContainer>
-  );
-}
-
 // 窗口切换:7D / 30D / 1Y / 全部。beUI Tabs(透明底);无 TabsContent,value 驱动 chart。
-// 紧凑款(px-2/py-0.5/text-xs + gap-0.5),叠在头部左上角。
+// 紧凑款(px-2/py-0.5/text-xs + gap-0.5);leading-none 让文案在小 pill 里垂直居中。
 function RangeTabs({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
   const t = useTranslations("Overview");
   return (
     <Tabs value={value} onValueChange={(v) => onChange(v as Range)} variant="pill">
       <TabsList className="gap-0.5 bg-transparent p-0">
         {RANGES.map((r) => (
-          <TabsTrigger key={r} value={r} className="px-2 py-0.5 font-mono text-xs">
+          <TabsTrigger key={r} value={r} className="px-2 py-1 font-mono text-xs leading-none">
             {r === "all" ? t("rangeAll") : r.toUpperCase()}
           </TabsTrigger>
         ))}
@@ -236,17 +180,19 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 头部:价值历史图垫底(hover 出 tooltip);内容 pointer-events-none 让 hover 透传;窗口切换叠左上角、
-          天数 ND 叠右下角(仿 hero)。预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压下方列表。 */}
+      {/* 头部:价值历史图垫底(hover 出 tooltip);内容 pointer-events-none 让 hover 透传;窗口切换叠右上角
+          (与 symbol 行同高)、天数 ND 叠右下角(仿 hero)。预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
       <div className="relative min-h-44 overflow-hidden">
-        <TokenValueBackdrop series={series} />
-        {/* 窗口切换:绝对左上角、可交互(独立于 pointer-events-none 内容层)。 */}
-        <div className="absolute top-0 left-0 z-10">
+        {series.length >= 2 && (
+          <ValueTrendChart series={series} topMargin={56} fillOpacity={0.14} />
+        )}
+        {/* 窗口切换:绝对右上角、与 symbol 行同高;可交互(独立于 pointer-events-none 内容层)。 */}
+        <div className="absolute top-3 right-0 z-10">
           <RangeTabs value={range} onChange={setRange} />
         </div>
-        {/* 内容顶部留白避开左上角的窗口切换。 */}
-        <div className="pointer-events-none relative flex flex-col gap-3 pt-7">
-          <div className="flex items-center gap-3">
+        <div className="pointer-events-none relative flex flex-col gap-3">
+          {/* pr 给右上角窗口切换留位,长币名截断而非钻到其下。 */}
+          <div className="flex items-center gap-3 pr-32">
             <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
             <div className="min-w-0">
               {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
