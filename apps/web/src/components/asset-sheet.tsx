@@ -3,6 +3,8 @@ import {
   BottomSheet,
   type ChartConfig,
   ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
   Drawer,
   LogoAvatar,
   SharedLayoutBg,
@@ -16,7 +18,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { Area, AreaChart, XAxis, YAxis } from "recharts";
-import { useTranslations } from "use-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
@@ -35,15 +37,25 @@ type Range = "7d" | "30d" | "1y" | "all";
 const RANGES: Range[] = ["7d", "30d", "1y", "all"];
 const RANGE_DAYS: Record<Exclude<Range, "all">, number> = { "7d": 7, "30d": 30, "1y": 365 };
 
-// 价值历史背景图(仿 hero):绝对定位垫底、不吃指针;折线压到下半区,内容浮其上。<2 点不渲染。
+// 价值历史背景图(仿 hero):绝对定位垫底,折线压到下半区,内容浮其上;hover 出 tooltip(时间 + 价值)。
+// 内容层 pointer-events-none 让 hover 透传到此图。<2 点不渲染(头部已预留固定高度,故不渲染也不塌陷)。
 function TokenValueBackdrop({ series }: { series: HistoryPoint[] }) {
+  const usd = useDisplayValue();
+  const format = useFormatter();
   if (series.length < 2) return null;
   const up = (series.at(-1)?.total ?? 0) >= (series[0]?.total ?? 0);
   const config = {
     total: { label: "", color: up ? "var(--pos)" : "var(--neg)" },
   } satisfies ChartConfig;
+  const fullDateTime = (ms: number) =>
+    format.dateTime(new Date(ms), {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   return (
-    <ChartContainer config={config} className="pointer-events-none absolute inset-0 h-full w-full">
+    <ChartContainer config={config} className="absolute inset-0 h-full w-full">
       <AreaChart data={series} margin={{ top: 56, right: 0, bottom: 0, left: 0 }}>
         <defs>
           <linearGradient id="asset-value-fill" x1="0" y1="0" x2="0" y2="1">
@@ -53,6 +65,15 @@ function TokenValueBackdrop({ series }: { series: HistoryPoint[] }) {
         </defs>
         <XAxis dataKey="t" hide />
         <YAxis hide domain={["dataMin", "dataMax"]} />
+        <ChartTooltip
+          cursor={{ stroke: "var(--border-2)", strokeDasharray: "3 3" }}
+          content={
+            <ChartTooltipContent
+              labelFormatter={(_, payload) => fullDateTime(Number(payload?.[0]?.payload?.t))}
+              formatter={(value) => usd(Number(value))}
+            />
+          }
+        />
         <Area
           dataKey="total"
           type="monotone"
@@ -67,24 +88,19 @@ function TokenValueBackdrop({ series }: { series: HistoryPoint[] }) {
   );
 }
 
-// 窗口切换:7D / 30D / 1Y / 全部。
-function RangeToggle({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
+// 窗口切换:7D / 30D / 1Y / 全部。beUI Tabs(透明底,与来源 tab 同款);无 TabsContent,value 驱动 chart。
+function RangeTabs({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
   const t = useTranslations("Overview");
   return (
-    <div className="flex gap-1">
-      {RANGES.map((r) => (
-        <button
-          key={r}
-          type="button"
-          onClick={() => onChange(r)}
-          className={`rounded-full px-2 py-0.5 font-mono text-xs ${
-            r === value ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {r === "all" ? t("rangeAll") : r.toUpperCase()}
-        </button>
-      ))}
-    </div>
+    <Tabs value={value} onValueChange={(v) => onChange(v as Range)} variant="pill">
+      <TabsList className="bg-transparent p-0">
+        {RANGES.map((r) => (
+          <TabsTrigger key={r} value={r}>
+            {r === "all" ? t("rangeAll") : r.toUpperCase()}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -213,58 +229,66 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
   });
   const series = historyQuery.data?.series ?? [];
   const hasHistory = series.length >= 2;
+  const spanDays = hasHistory
+    ? Math.round(((series.at(-1)?.t ?? 0) - (series[0]?.t ?? 0)) / DAY_MS)
+    : 0;
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 头部:价值历史背景图垫底,内容浮其上;有历史时右下角窗口切换。 */}
-      <div className="relative overflow-hidden">
-        <TokenValueBackdrop series={series} />
-        <div className="relative flex flex-col gap-3">
-          <div className="flex items-center gap-3">
-            <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
-            <div className="min-w-0">
-              {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
-                排名走 text-foreground(深色主题即白、亮色主题自动转深),价格保持 muted。 */}
-              <div className="flex min-w-0 items-center gap-2">
-                <h2 className="truncate font-semibold text-lg">{token.name}</h2>
-                {(token.marketCapRank != null || token.unitPrice != null) && (
-                  <Badge status="neutral" size="sm" showIcon={false}>
-                    <span className="inline-flex items-center gap-1">
-                      {token.marketCapRank != null && (
-                        <span className="text-foreground">#{token.marketCapRank}</span>
-                      )}
-                      {token.unitPrice != null && <span>{usd(token.unitPrice)}</span>}
-                    </span>
-                  </Badge>
+      {/* 头部 + 窗口切换成组。头部预留固定高度(min-h-44)→ 价值历史图异步到达也不撑高、不挤压下方列表。 */}
+      <div className="flex flex-col gap-3">
+        {/* 价值历史图垫底(hover 出 tooltip);内容 pointer-events-none 让 hover 透传;右下角天数 ND(仿 hero)。 */}
+        <div className="relative min-h-44 overflow-hidden">
+          <TokenValueBackdrop series={series} />
+          <div className="pointer-events-none relative flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
+              <div className="min-w-0">
+                {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
+                    排名走 text-foreground(深色主题即白、亮色主题自动转深),价格保持 muted。 */}
+                <div className="flex min-w-0 items-center gap-2">
+                  <h2 className="truncate font-semibold text-lg">{token.name}</h2>
+                  {(token.marketCapRank != null || token.unitPrice != null) && (
+                    <Badge status="neutral" size="sm" showIcon={false}>
+                      <span className="inline-flex items-center gap-1">
+                        {token.marketCapRank != null && (
+                          <span className="text-foreground">#{token.marketCapRank}</span>
+                        )}
+                        {token.unitPrice != null && <span>{usd(token.unitPrice)}</span>}
+                      </span>
+                    </Badge>
+                  )}
+                </div>
+                {totalAmount != null && (
+                  <p className="text-muted-foreground text-sm tabular-nums">
+                    {formatNumber(totalAmount)} {token.symbol}
+                  </p>
                 )}
               </div>
-              {totalAmount != null && (
-                <p className="text-muted-foreground text-sm tabular-nums">
-                  {formatNumber(totalAmount)} {token.symbol}
-                </p>
+            </div>
+
+            <div>
+              <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
+              {dayValue != null && (
+                // 24h 增值 + %:共用一个前置符号(同源同号)、同色,与代币行/hero 一致。
+                <div
+                  className={`mt-1 text-sm tabular-nums ${dayValue > 0 ? "text-pos" : "text-neg"}`}
+                >
+                  {dayValue > 0 ? "+" : "−"}
+                  {usd(Math.abs(dayValue))} {Math.abs(change24h ?? 0).toFixed(2)}%
+                </div>
               )}
             </div>
           </div>
 
-          <div>
-            <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
-            {dayValue != null && (
-              // 24h 增值 + %:共用一个前置符号(同源同号)、同色,与代币行/hero 一致。
-              <div
-                className={`mt-1 text-sm tabular-nums ${dayValue > 0 ? "text-pos" : "text-neg"}`}
-              >
-                {dayValue > 0 ? "+" : "−"}
-                {usd(Math.abs(dayValue))} {Math.abs(change24h ?? 0).toFixed(2)}%
-              </div>
-            )}
-          </div>
-
-          {hasHistory && (
-            <div className="flex justify-end">
-              <RangeToggle value={range} onChange={setRange} />
-            </div>
+          {spanDays >= 1 && (
+            <span className="absolute right-0 bottom-0 z-10 font-mono text-muted-foreground text-xs tracking-wide">
+              {spanDays}D
+            </span>
           )}
         </div>
+
+        <RangeTabs value={range} onChange={setRange} />
       </div>
 
       {/* 来源:Platforms / Accounts 两视图切换。tab 背景透明,与主页 Tokens/DeFi 一致。 */}
