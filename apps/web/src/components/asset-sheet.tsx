@@ -33,12 +33,14 @@ const RANGES: Range[] = ["7d", "30d", "1y", "all"];
 const RANGE_DAYS: Record<Exclude<Range, "all">, number> = { "7d": 7, "30d": 30, "1y": 365 };
 
 // 窗口切换:7D / 30D / 1Y / 全部。beUI Tabs(透明底);无 TabsContent,value 驱动 chart。
-// 紧凑款(px-2/py-0.5/text-xs + gap-0.5);leading-none 让文案在小 pill 里垂直居中。
+// 紧凑款(px-2/py-1/text-xs + gap-0.5)。TabsList 上 leading-none 关键:trigger 外层块 div 的行盒否则被
+// 继承的大 line-height 撑高(24px > 按钮 20px),使按钮(inline-flex)在其中偏移、绿 pill(= 外层 inset-0)
+// 比按钮高而文字相对 pill 不居中;leading-none 让行盒由按钮决定 → pill=按钮 → 文字垂直居中。
 function RangeTabs({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
   const t = useTranslations("Overview");
   return (
     <Tabs value={value} onValueChange={(v) => onChange(v as Range)} variant="pill">
-      <TabsList className="gap-0.5 bg-transparent p-0">
+      <TabsList className="gap-0.5 bg-transparent p-0 leading-none">
         {RANGES.map((r) => (
           <TabsTrigger key={r} value={r} className="px-2 py-1 font-mono text-xs leading-none">
             {r === "all" ? t("rangeAll") : r.toUpperCase()}
