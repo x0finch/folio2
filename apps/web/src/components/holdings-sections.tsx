@@ -1,205 +1,177 @@
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@folio/ui";
+import { cn, LogoAvatar } from "@folio/ui";
 import { useTranslations } from "use-intl";
-import {
-  type DefiGroup,
-  type OverviewBalance,
-  type SpotRow,
-  toAccountSections,
-} from "../lib/account-view";
+import type { DefiGroup } from "../lib/account-view";
+import { protocolDayChange } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
-import type { PerpView } from "../lib/perp";
+import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
+import { LiqRing } from "./liq-ring";
+import { ValueDelta } from "./value-delta";
 
-// 账户持仓渲染:总览页每账户卡与账户详情侧栏共用(从 routes/_authed/index.tsx 提取)。
+// 永续 / DeFi 持仓明细 v2(H5 #120):总览「DeFi & Perps」tab 与账户详情抽屉共用。
+// 与代币行同语言 —— 行式(零表格/表头)、左「标识+标题」右 <ValueDelta>;
+// 行内色语义唯一(rev5):红绿只表达盈亏与负债,--warn/--neg 警报只在 LiqRing 上,
+// 方向 pill 与类型 chip 一律中性灰(方向/类型是事实,不是评价)。
 
-// 现货/CEX/manual:数量 + 美元价值。
-function SpotTable({ rows }: { rows: SpotRow[] }) {
-  const t = useTranslations("Overview");
-  const usd = useDisplayValue();
+// eyebrow 节头:小号大写 + 可选 muted 副标(总览 tab 上是账户名;抽屉单账户上下文不传)。
+function SectionHeader({ title, sub }: { title: string; sub?: string }) {
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t("asset")}</TableHead>
-          <TableHead className="text-right">{t("price")}</TableHead>
-          <TableHead className="text-right">{t("change24h")}</TableHead>
-          <TableHead className="text-right">{t("amount")}</TableHead>
-          <TableHead className="text-right">{t("value")}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((b) => (
-          <TableRow key={b.id}>
-            <TableCell>
-              <AssetCell symbol={b.symbol} name={b.name} logo={b.logo} />
-            </TableCell>
-            <TableCell className="text-right">
-              {b.unitPrice != null ? usd(b.unitPrice) : "—"}
-            </TableCell>
-            <TableCell className="text-right">
-              <Change24h value={b.change24h} />
-            </TableCell>
-            <TableCell className="text-right">{formatNumber(b.amount)}</TableCell>
-            <TableCell className="text-right">{usd(b.usdValue)}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
-// 资产单元:logo(热链,失败回退到 symbol 首字母圆标)+ 名称/symbol。
-export function AssetCell({
-  symbol,
-  name,
-  logo,
-}: {
-  symbol: string;
-  name?: string;
-  logo?: string;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      {logo ? (
-        <img
-          src={logo}
-          alt=""
-          width={20}
-          height={20}
-          className="size-5 rounded-full"
-          onError={(e) => {
-            e.currentTarget.style.display = "none";
-          }}
-        />
-      ) : (
-        <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-          {symbol.slice(0, 1)}
-        </span>
-      )}
-      <span>{name ?? symbol}</span>
-      {name ? <span className="text-xs text-muted-foreground">{symbol}</span> : null}
+    <div className="flex items-baseline gap-2.5">
+      <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
+      {sub && <span className="text-muted-foreground/70 text-xs">{sub}</span>}
     </div>
   );
 }
 
-// 24h 涨跌:正绿(默认前景)/ 负红(destructive token);无数据 → "—"。仅用 shadcn token,不硬编码色。
-function Change24h({ value }: { value?: number }) {
-  if (value == null) return <span className="text-muted-foreground">—</span>;
-  const sign = value >= 0 ? "+" : "";
+// 中性灰 chip:方向 pill(`3x Long`)与 DeFi 类型 chip 共用形。
+function NeutralChip({ children }: { children: React.ReactNode }) {
   return (
-    <span className={value < 0 ? "text-destructive" : "text-foreground"}>
-      {sign}
-      {value.toFixed(2)}%
+    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground text-xs tabular-nums">
+      {children}
     </span>
   );
 }
 
-// DeFi:按协议分组,每组一张小表(Asset / 仓位类型 / 价值)。负值=负债(借出)→ 标红。
-export function DefiPositions({ groups }: { groups: DefiGroup[] }) {
-  const t = useTranslations("Overview");
-  const usd = useDisplayValue();
+// 权益条单项(HeroStat 同款:muted xs label + mono 值)。
+function EquityStat({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
   return (
-    <div className="flex flex-col gap-4">
-      {groups.map((g) => (
-        <div key={g.protocol} className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{g.protocol}</p>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("asset")}</TableHead>
-                <TableHead>{t("type")}</TableHead>
-                <TableHead className="text-right">{t("value")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {g.rows.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell>{r.symbol}</TableCell>
-                  <TableCell className="capitalize text-muted-foreground">
-                    {r.positionType ?? "—"}
-                  </TableCell>
-                  <TableCell className={`text-right ${r.usdValue < 0 ? "text-destructive" : ""}`}>
-                    {usd(r.usdValue)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ))}
+    <div>
+      <div className="mb-0.5 text-muted-foreground text-xs">{label}</div>
+      <div className={cn("font-mono font-semibold text-sm tabular-nums", className)}>{value}</div>
     </div>
   );
 }
 
-// 永续:净值由外层承载;此处展示可提/保证金副行 + 仓位明细(方向/盈亏/杠杆/强平)。
-export function PerpPositions({ view }: { view: PerpView }) {
+// side 原文 capitalize(Long/Short 不翻译 —— 金融术语中性化是设计定稿)。
+const sideLabel = (side: "long" | "short") => side.charAt(0).toUpperCase() + side.slice(1);
+
+function PerpRow({ p }: { p: PerpPositionView }) {
+  const t = useTranslations("Overview");
+  const usd = useDisplayValue();
+  const risk = liqRisk(p);
+  return (
+    <div className="flex items-center gap-3 py-3">
+      <NeutralChip>
+        {p.leverage != null ? `${p.leverage}x ` : ""}
+        {sideLabel(p.side)}
+      </NeutralChip>
+      <span className="font-medium tabular-nums">
+        {formatNumber(Math.abs(p.size))} {p.coin}
+      </span>
+      {risk ? (
+        <LiqRing position={p} />
+      ) : (
+        // 无强平价(如全仓部分场景)→ 环降级为 muted 开仓价文本。
+        <span className="text-muted-foreground text-xs tabular-nums">
+          {t("entry")} {usd(p.entryPx)}
+        </span>
+      )}
+      <div className="min-w-0 flex-1" />
+      {/* 右:当前名义价值 + uPnL(单前置符号,--pos/--neg)。 */}
+      <ValueDelta value={p.positionValue} delta={p.unrealizedPnl} pct={pnlPct(p)} />
+    </div>
+  );
+}
+
+// 永续分区:节头 + 权益条(权益 / Σ uPnL / 保证金占用%)+ 仓位行。
+export function PerpPositions({ view, accountLabel }: { view: PerpView; accountLabel?: string }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
   const { equity, positions } = view;
+  const totalUpnl = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
+  const marginRatio =
+    equity && equity.accountValue > 0 ? equity.totalMarginUsed / equity.accountValue : null;
   return (
-    <div className="flex flex-col gap-3">
+    <section className="flex flex-col gap-3">
+      <SectionHeader title={t("perpSectionTitle")} sub={accountLabel} />
       {equity && (
-        <p className="text-sm text-muted-foreground">
-          {t("withdrawableMargin", {
-            withdrawable: usd(equity.withdrawable),
-            margin: usd(equity.totalMarginUsed),
-          })}
-        </p>
+        <div className="flex flex-wrap gap-x-10 gap-y-2">
+          <EquityStat label={t("accountEquity")} value={usd(equity.accountValue)} />
+          <EquityStat
+            label={t("upnl")}
+            value={`${totalUpnl > 0 ? "+" : totalUpnl < 0 ? "−" : ""}${usd(Math.abs(totalUpnl))}`}
+            className={totalUpnl > 0 ? "text-pos" : totalUpnl < 0 ? "text-neg" : undefined}
+          />
+          {marginRatio != null && (
+            <EquityStat label={t("marginRatio")} value={`${Math.round(marginRatio * 100)}%`} />
+          )}
+        </div>
       )}
       {positions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("noOpenPositions")}</p>
+        <p className="text-muted-foreground text-sm">{t("noOpenPositions")}</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("token")}</TableHead>
-              <TableHead>{t("side")}</TableHead>
-              <TableHead className="text-right">{t("size")}</TableHead>
-              <TableHead className="text-right">{t("entry")}</TableHead>
-              <TableHead className="text-right">{t("upnl")}</TableHead>
-              <TableHead className="text-right">{t("lev")}</TableHead>
-              <TableHead className="text-right">{t("liq")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {positions.map((p) => (
-              <TableRow key={p.coin}>
-                <TableCell>{p.coin}</TableCell>
-                <TableCell>{t(p.side)}</TableCell>
-                <TableCell className="text-right">{formatNumber(Math.abs(p.size))}</TableCell>
-                <TableCell className="text-right">{usd(p.entryPx)}</TableCell>
-                <TableCell
-                  className={`text-right ${p.unrealizedPnl < 0 ? "text-destructive" : ""}`}
-                >
-                  {usd(p.unrealizedPnl)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {p.leverage != null ? `${p.leverage}x` : "—"}
-                </TableCell>
-                <TableCell className="text-right">
-                  {p.liquidationPx != null ? usd(p.liquidationPx) : "—"}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="flex flex-col divide-y divide-border/60">
+          {positions.map((p) => (
+            <PerpRow key={p.coin} p={p} />
+          ))}
+        </div>
       )}
+    </section>
+  );
+}
+
+// 类型 chip 上限:多类型协议(如借贷的 deposit+loan)最多显 2 个,余量折叠成 +n。
+const MAX_TYPE_CHIPS = 2;
+
+function DefiProtocolRow({ group }: { group: DefiGroup }) {
+  const subtotal = group.rows.reduce((s, r) => s + r.usdValue, 0);
+  const change = protocolDayChange(group.rows);
+  const types = [...new Set(group.rows.map((r) => r.positionType).filter((ty) => ty != null))];
+  return (
+    <div className="flex items-center gap-3 py-3">
+      {/* 协议 logo 位:数据管线未建(follow-up issue),恒为首字母 fallback;管线落地原位换图。 */}
+      <LogoAvatar fallback={group.protocol} size="sm" />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-medium">{group.protocol}</span>
+          {types.slice(0, MAX_TYPE_CHIPS).map((ty) => (
+            <NeutralChip key={ty}>
+              <span className="capitalize">{ty}</span>
+            </NeutralChip>
+          ))}
+          {types.length > MAX_TYPE_CHIPS && (
+            <span className="shrink-0 text-muted-foreground text-xs">
+              +{types.length - MAX_TYPE_CHIPS}
+            </span>
+          )}
+        </div>
+        {/* 头寸摘要:数量+币种逐段;负值段(负债/借出)--neg。 */}
+        <div className="truncate text-muted-foreground text-xs tabular-nums">
+          {group.rows.map((r, i) => (
+            <span key={r.id}>
+              {i > 0 && " · "}
+              <span className={r.usdValue < 0 ? "text-neg" : undefined}>
+                {formatNumber(Math.abs(r.amount))} {r.symbol}
+              </span>
+            </span>
+          ))}
+        </div>
+      </div>
+      {/* 右:协议净小计 + 24h 聚合增量(整协议缺 change24h → 只显小计)。 */}
+      <ValueDelta value={subtotal} delta={change?.delta} pct={change?.pct} />
     </div>
   );
 }
 
-// 一个账户的全部持仓:现货 / DeFi / 永续三分区(空 → 提示)。表格在窄容器(详情侧栏)下可横向滚动。
-export function AccountHoldings({ balances }: { balances: OverviewBalance[] }) {
+// DeFi 分区:每协议一行(总览传跨账户合并的 groups,抽屉传单账户 groups)。
+export function DefiPositions({ groups }: { groups: DefiGroup[] }) {
   const t = useTranslations("Overview");
-  if (balances.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>;
-  }
-  const sections = toAccountSections(balances);
   return (
-    <div className="flex flex-col gap-6 overflow-x-auto">
-      {sections.spot.length > 0 && <SpotTable rows={sections.spot} />}
-      {sections.defi.length > 0 && <DefiPositions groups={sections.defi} />}
-      {sections.perp && <PerpPositions view={sections.perp} />}
-    </div>
+    <section className="flex flex-col gap-3">
+      <SectionHeader title={t("defiSectionTitle")} />
+      <div className="flex flex-col divide-y divide-border/60">
+        {groups.map((g) => (
+          <DefiProtocolRow key={g.protocol} group={g} />
+        ))}
+      </div>
+    </section>
   );
 }

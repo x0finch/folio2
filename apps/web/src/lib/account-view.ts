@@ -1,5 +1,6 @@
 import { DefiMeta, type DefiMeta as DefiMetaT, type Note } from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
+import { dayValueChange } from "./day-value-change";
 import { type PerpView, toPerpView } from "./perp";
 
 // 纯逻辑(无 server-only import → 可单测)。把一个账户的余额行按 kind 拆成展示分区:
@@ -45,6 +46,7 @@ export interface DefiRow {
   amount: number;
   usdValue: number;
   positionType?: string;
+  change24h?: number; // 富化字段透传(协议行 24h 聚合用;缺 → 该行不计入聚合)
 }
 export interface DefiGroup {
   protocol: string;
@@ -87,6 +89,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
         amount: b.amount,
         usdValue: b.usdValue,
         positionType: meta.positionType,
+        change24h: b.change24h,
       };
       const group = defiByProtocol.get(protocol);
       if (group) group.push(row);
@@ -111,4 +114,39 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
   const perp = perpRows.length > 0 ? toPerpView(perpRows) : null;
 
   return { spot, defi, perp };
+}
+
+// —— H5 #120:总览「DEFI 头寸」独立分区(跨账户按协议合并)——
+
+// 多账户的 defi 分组按 protocol 保序合并(组序 = 协议首见顺序,行序 = 账户遍历顺序)。
+// 抽屉是单账户上下文,直接用该账户的 defi,不经此函数。
+export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] {
+  const byProtocol = new Map<string, DefiRow[]>();
+  for (const s of sections) {
+    for (const g of s.defi) {
+      const rows = byProtocol.get(g.protocol);
+      if (rows) rows.push(...g.rows);
+      else byProtocol.set(g.protocol, [...g.rows]);
+    }
+  }
+  return [...byProtocol].map(([protocol, rows]) => ({ protocol, rows }));
+}
+
+// 协议行的 24h 增值聚合:逐行 dayValueChange(负债行负值 → 升值为负贡献,方向天然正确),
+// pct 相对前值合计。整协议无一行带 change24h → null(UI 只显小计,不显增量)。
+export function protocolDayChange(
+  rows: Pick<DefiRow, "usdValue" | "change24h">[],
+): { delta: number; pct: number | null } | null {
+  let delta = 0;
+  let prev = 0;
+  let any = false;
+  for (const r of rows) {
+    const d = dayValueChange(r.usdValue, r.change24h);
+    if (d == null) continue;
+    any = true;
+    delta += d;
+    prev += r.usdValue - d;
+  }
+  if (!any) return null;
+  return { delta, pct: prev !== 0 ? (delta / Math.abs(prev)) * 100 : null };
 }

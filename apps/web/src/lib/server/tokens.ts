@@ -5,7 +5,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { tokenLogoUrl } from "../logo";
 import { requireAuth } from "../require-auth";
-import { type BalanceLike, balanceToAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
+import {
+  type BalanceLike,
+  balanceToAssetRef,
+  defiAssetRef,
+  type TokenEnrichment,
+  toEnrichment,
+} from "../tokens";
 import { db } from "./db";
 import { oracle } from "./oracle";
 
@@ -64,7 +70,11 @@ export async function enrichBalances<T extends BalanceLike>(
   tokens: Tokens,
   balances: T[],
 ): Promise<{ rows: (T & TokenEnrichment)[]; pricesStale: boolean }> {
-  const enriched = await tokens.enrich(balances.map(balanceToAssetRef));
+  // defi 行也做展示富化(H5 #120:抽屉协议行的 24h 聚合);估值现推路径不受影响(那里仍只走
+  // balanceToAssetRef 的同质门)。
+  const enriched = await tokens.enrich(
+    balances.map((b) => balanceToAssetRef(b) ?? defiAssetRef(b)),
+  );
   return {
     rows: balances.map((b, i) => {
       const e = enriched[i];

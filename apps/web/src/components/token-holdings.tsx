@@ -4,9 +4,9 @@ import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
-import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { AssetSheet } from "./asset-sheet";
 import { AvatarStack } from "./avatar-stack";
+import { ValueDelta } from "./value-delta";
 
 // 按代币聚合的持仓列表(v2:LogoAvatar + 名称/symbol / 数量 · 价格 / 市值 · 24h;点击行 → 详情抽屉)。
 // hover 高亮由 beUI SharedLayoutBg 的移动滑块承载(行间无分隔线),小额(< DUST_THRESHOLD)折叠进 footer。
@@ -17,7 +17,6 @@ const MIN_FOLD_COUNT = 10;
 // 行内容:必须是单个 flex 容器 —— SharedLayoutBg 会把 <button> 的 children 塞进一个非 flex 的
 // z-10 div(见 app-shell #100),故 flex 布局放这层内层 span,避免图标/名称/数值竖排。
 function RowContent({ h }: { h: Holding }) {
-  const usd = useDisplayValue();
   const dayValue = dayValueChange(h.totalValue, h.change24h);
 
   return (
@@ -46,22 +45,8 @@ function RowContent({ h }: { h: Holding }) {
           </span>
         )}
       </div>
-      <div className="text-right">
-        <div className="font-medium tabular-nums">{usd(h.totalValue)}</div>
-        {dayValue != null && (
-          // 增值 + %:共用一个前置符号(同源同号),同色。
-          <div
-            className={`flex items-center justify-end gap-2 text-xs tabular-nums ${
-              dayValue > 0 ? "text-pos" : "text-neg"
-            }`}
-          >
-            <span>
-              {dayValue > 0 ? "+" : "−"}
-              {usd(Math.abs(dayValue))} {Math.abs(h.change24h ?? 0).toFixed(2)}%
-            </span>
-          </div>
-        )}
-      </div>
+      {/* 价值 + 单符号增量:全站统一 <ValueDelta>(H5 抽取,行为不变)。 */}
+      <ValueDelta value={h.totalValue} delta={dayValue} pct={h.change24h} />
     </div>
   );
 }

@@ -196,3 +196,42 @@ describe("buildOverview", () => {
     expect(view.holdingsSubtotal).toBe(0);
   });
 });
+
+// —— H5 #120:sections 的 defi 行读时富化 change24h(协议行 24h 聚合的数据源) ——
+// defi 不进聚合,故单独一批 enrich;按 tokenKey 命中的行带 change24h,未命中 undefined。
+describe("buildOverview —— defi 行 change24h 富化", () => {
+  it("defi 行经 enrich 附回 change24h 进 sections", async () => {
+    const defiTokens = {
+      async enrich(assets: { symbol: string; tokenKey?: string }[]) {
+        return assets.map((a) => (a?.tokenKey ? { change24h: 2.5, priceStale: false } : undefined));
+      },
+    } as unknown as Tokens;
+    const accounts = [account("w", "Wallet")];
+    const byAccount = new Map([
+      [
+        "w",
+        snap("w", 100, [
+          bal({
+            kind: "defi",
+            symbol: "stETH",
+            amount: 1,
+            usdValue: 100,
+            tokenKey: "eip155:1/erc20:0xae7a",
+            metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
+          }),
+          bal({
+            kind: "defi",
+            symbol: "LP",
+            amount: 1,
+            usdValue: 50,
+            metaJson: JSON.stringify({ protocol: "Uniswap", positionType: "liquidity" }),
+          }),
+        ]),
+      ],
+    ]);
+    const view = await buildOverview(accounts, byAccount, { tokens: defiTokens, platforms });
+    const rows = view.sections[0].defi.flatMap((g) => g.rows);
+    expect(rows.find((r) => r.symbol === "stETH")?.change24h).toBe(2.5);
+    expect(rows.find((r) => r.symbol === "LP")?.change24h).toBeUndefined();
+  });
+});

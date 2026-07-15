@@ -42,6 +42,43 @@ function parseJson(metaJson: string | null): unknown {
   }
 }
 
+// —— v2 展示推导(H5 #120)——全部由既有 meta 字段客户端现推,不动 provider/schema;
+// 除零/缺失一律返回 null,UI 按状态矩阵降级(环不渲染 / 只显价值)。
+
+// 标记价 = 当前名义敞口 / 仓位绝对量。假设 positionValue 为**当前**名义值(Hyperliquid 语义,
+// 见计划脆弱假设 1);若某 provider 落开仓名义值,此处会失真 —— 修正点集中在这一个函数。
+export function markPx(p: PerpPositionView): number | null {
+  const size = Math.abs(p.size);
+  if (size === 0) return null;
+  return p.positionValue / size;
+}
+
+// uPnL%(百分数):相对开仓名义值(|size| × entryPx),与杠杆无关 —— 和交易所仓位列表口径一致。
+export function pnlPct(p: PerpPositionView): number | null {
+  const notional = Math.abs(p.size) * p.entryPx;
+  if (notional === 0) return null;
+  return (p.unrealizedPnl / notional) * 100;
+}
+
+// LiqRing 三态阈值(启发式,无维持保证金率数据;目视校准点,勿散落魔数)。
+export const LIQ_WARN_BELOW = 1; // 余量 < 1(比开仓时更近强平)→ 警告
+export const LIQ_DANGER_BELOW = 0.5; // 余量 < 0.5(已走完一半路程)→ 危险
+
+export type LiqRiskState = "safe" | "warn" | "danger";
+
+// 安全余量 d = |标记 − 强平| / |开仓 − 强平|:1 = 与开仓时等距,0 = 已到强平。
+// 方向无关(多空同构)。强平缺失 / 开仓=强平 / 标记不可推 → null(行内降级为文本)。
+export function liqRisk(p: PerpPositionView): { margin: number; state: LiqRiskState } | null {
+  const mark = markPx(p);
+  if (mark == null || p.liquidationPx == null) return null;
+  const span = Math.abs(p.entryPx - p.liquidationPx);
+  if (span === 0) return null;
+  const margin = Math.abs(mark - p.liquidationPx) / span;
+  const state: LiqRiskState =
+    margin < LIQ_DANGER_BELOW ? "danger" : margin < LIQ_WARN_BELOW ? "warn" : "safe";
+  return { margin, state };
+}
+
 export function toPerpView(balances: PerpBalance[]): PerpView {
   let equity: PerpEquityView | null = null;
   const positions: PerpPositionView[] = [];

@@ -6,6 +6,7 @@ import { DefiPositions, PerpPositions } from "../../components/holdings-sections
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { OverviewSkeleton } from "../../components/skeletons";
 import { TokenHoldings } from "../../components/token-holdings";
+import { mergeDefiGroups } from "../../lib/account-view";
 import { type GroupedView, toGroupedView } from "../../lib/groups-view";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
@@ -75,6 +76,7 @@ function Overview() {
   const usd = useDisplayValue();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(accountTotals, groups, memberships);
+  const defiGroups = mergeDefiGroups(sections);
   const [tab, setTab] = useState("tokens");
   // 分组 tab 仅在有分组时存在;若选中后分组被删空(loader 重跑),受控值会指向已消失的 tab
   // → 面板全空、指示器无高亮。派生 clamp 回代币,避免陈旧选中。
@@ -127,14 +129,20 @@ function Overview() {
                 {t("noOpenPositions")}
               </p>
             ) : (
-              <div className="flex flex-col gap-6 overflow-x-auto">
-                {sections.map((s) => (
-                  <div key={s.account.id} className="flex flex-col gap-3">
-                    <p className="font-medium">{s.account.label}</p>
-                    {s.defi.length > 0 && <DefiPositions groups={s.defi} />}
-                    {s.perp && s.perp.positions.length > 0 && <PerpPositions view={s.perp} />}
-                  </div>
-                ))}
+              // v2(H5 #120):永续每账户一节(账户名进节头);DeFi 跨账户按协议合并成独立一节。
+              <div className="flex flex-col gap-8">
+                {sections.flatMap((s) =>
+                  s.perp && s.perp.positions.length > 0
+                    ? [
+                        <PerpPositions
+                          key={s.account.id}
+                          view={s.perp}
+                          accountLabel={s.account.label}
+                        />,
+                      ]
+                    : [],
+                )}
+                {defiGroups.length > 0 && <DefiPositions groups={defiGroups} />}
               </div>
             )}
           </TabsContent>

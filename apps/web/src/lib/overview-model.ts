@@ -7,6 +7,7 @@ import { type AggInput, buildCanonicalHoldings } from "./aggregate";
 import { isFungible, viewKind } from "./balance-kind";
 import { deriveLiveAccountTotals, liveValue } from "./live-value";
 import { platformLogoUrl, tokenLogoUrl } from "./logo";
+import { defiAssetRef } from "./tokens";
 
 // 总览读模型(纯 —— 依赖注入,无 cloudflare env,可脱离 server fn 单测)。
 // 持仓区 = 跨账户按 canonical 代币聚合(spot/manual/CEX/perp 权益);DeFi 仓位 + perp 敞口走
@@ -148,10 +149,18 @@ export async function buildOverview(
   const pricesStale = rows.some(({ e }) => e?.priceStale);
 
   // 3) 次级分区(每账户 defi 分组 + perp 敞口;perp 权益已进 Holdings → 此处只渲染 positions)。
+  // defi 行先做展示富化(H5 #120:协议行 24h 聚合要 change24h;defi 不进聚合 → 单独一小批
+  // cache-only enrich,只认 tokenKey 明确的行)。
+  const defiFlat = accounts.flatMap((a) => balancesOf(a.id).filter((b) => defiAssetRef(b) != null));
+  const defiEnriched = await tokens.enrich(defiFlat.map((b) => defiAssetRef(b)));
+  const defiChange = new Map(defiFlat.map((b, i) => [b, defiEnriched[i]?.change24h]));
+  const withDefiChange = (bs: OverviewBalance[]) =>
+    bs.map((b) => (defiChange.has(b) ? { ...b, change24h: defiChange.get(b) } : b));
+
   let defiSubtotal = 0;
   const sections = accounts
     .map((account) => {
-      const secs = toAccountSections(balancesOf(account.id));
+      const secs = toAccountSections(withDefiChange(balancesOf(account.id)));
       defiSubtotal += secs.defi.reduce(
         (s, g) => s + g.rows.reduce((ss, r) => ss + r.usdValue, 0),
         0,

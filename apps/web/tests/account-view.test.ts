@@ -176,3 +176,66 @@ describe("toAccountSections", () => {
     expect(s.spot.map((r) => r.symbol)).toEqual(["???"]);
   });
 });
+
+// —— H5 #120:DeFi 行 change24h 透传 + 跨账户协议合并 + 协议级 24h 聚合 ——
+
+import { mergeDefiGroups, protocolDayChange } from "../src/lib/account-view";
+
+describe("DefiRow change24h 透传(富化字段,缺则 undefined)", () => {
+  it("带 change24h 的 defi 行透传到 DefiRow", () => {
+    const s = toAccountSections([
+      b({
+        id: "1",
+        symbol: "stETH",
+        kind: "defi",
+        usdValue: 27040,
+        change24h: 2.1,
+        metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
+      }),
+    ]);
+    expect(s.defi[0].rows[0].change24h).toBe(2.1);
+  });
+});
+
+describe("mergeDefiGroups —— 跨账户按协议保序合并", () => {
+  const g = (protocol: string, id: string, usdValue = 1) => ({
+    protocol,
+    rows: [{ id, symbol: "X", amount: 1, usdValue }],
+  });
+  it("同协议行并入首次出现的组,组序按首见", () => {
+    const merged = mergeDefiGroups([
+      { defi: [g("Aave", "a1"), g("Lido", "l1")] },
+      { defi: [g("Aave", "a2")] },
+      { defi: [] },
+    ]);
+    expect(merged.map((x) => x.protocol)).toEqual(["Aave", "Lido"]);
+    expect(merged[0].rows.map((r) => r.id)).toEqual(["a1", "a2"]);
+  });
+  it("全空 → []", () => {
+    expect(mergeDefiGroups([{ defi: [] }])).toEqual([]);
+  });
+});
+
+describe("protocolDayChange —— 协议级 24h 增值聚合", () => {
+  const row = (usdValue: number, change24h?: number, id = "r") => ({
+    id,
+    symbol: "X",
+    amount: 1,
+    usdValue,
+    change24h,
+  });
+  it("多行聚合:delta = Σ 单行增值,pct 相对前值", () => {
+    // 10100 涨 1% → 增值 100(前值 10000);负债 -5000 涨 0%(缺)→ 不计
+    const c = protocolDayChange([row(10100, 1, "a"), row(-5000, undefined, "b")]);
+    expect(c?.delta).toBeCloseTo(100);
+    expect(c?.pct).toBeCloseTo(1);
+  });
+  it("负债行(负值)升值 → 负贡献(债变贵)", () => {
+    // -20400 涨 2% → 前值 -20000,增值 -400
+    const c = protocolDayChange([row(-20400, 2)]);
+    expect(c?.delta).toBeCloseTo(-400);
+  });
+  it("全行缺 change24h → null(UI 只显小计)", () => {
+    expect(protocolDayChange([row(100), row(-50)])).toBeNull();
+  });
+});
