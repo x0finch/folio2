@@ -249,6 +249,27 @@ describe("getByRefs + putPrices(SWR:过期=stale 不删)", () => {
     expect(rec?.price).toMatchObject({ unitPrice: 66000, stale: false });
   });
 
+  it("刷价不抹排名:putPrices 收到无 rank 的价(simple/price)时,保留 warm 写入的既有排名", async () => {
+    let clock = 1000;
+    const store = createTokenStore(env, { source: "coingecko", now: () => clock });
+    // warm 给排名(top-N markets 带 rank)
+    await store.putWarm(
+      [{ info: info(cg("bitcoin"), "BTC", "L"), price: price(cg("bitcoin"), 65000, 1) }],
+      TTL,
+      TTL * 10,
+    );
+    expect((await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin")?.marketCapRank).toBe(
+      1,
+    );
+
+    // 过期后走 SWR 刷价:simple/price 不含排名(rank 省略),不应把排名清成 null
+    clock = 1000 + TTL + 1;
+    await store.putPrices([price(cg("bitcoin"), 66000)], TTL);
+    const rec = (await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin");
+    expect(rec?.price).toMatchObject({ unitPrice: 66000, stale: false });
+    expect(rec?.marketCapRank).toBe(1); // 排名保留,未被刷价抹掉
+  });
+
   it("info expiry hides the record entirely; miss not in map", async () => {
     let clock = 1000;
     const store = createTokenStore(env, { source: "coingecko", now: () => clock });

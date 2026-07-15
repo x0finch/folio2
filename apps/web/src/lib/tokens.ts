@@ -17,6 +17,7 @@ export interface TokenEnrichment {
   logo?: string;
   unitPrice?: number; // USD
   change24h?: number; // 百分比
+  marketCapRank?: number; // 市值排名(展示用)
 }
 
 // 只对同质持仓解析:现货 + UTXO(BTC)(按 symbol/标识);defi/perp 不解析(价值/展示走 typed meta)。
@@ -35,5 +36,6 @@ export function toEnrichment(e: EnrichedAsset): TokenEnrichment {
     logo: tokenLogoUrl(e), // 上游 URL → folio 代理(隐私;见 ADR 0008)
     unitPrice: e.unitPrice,
     change24h: e.change24h,
+    marketCapRank: e.marketCapRank,
   };
 }

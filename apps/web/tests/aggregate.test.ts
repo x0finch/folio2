@@ -234,6 +234,53 @@ describe("buildCanonicalHoldings", () => {
     expect(hs[0]!.token.symbol).toBe("REAL");
   });
 
+  it("token 带 unitPrice / marketCapRank(详情头部 meta 用)", () => {
+    const hs = buildCanonicalHoldings([
+      row({
+        symbol: "BTC",
+        amount: 1,
+        value: 64789,
+        account: binance,
+        tokenId: "tok-btc",
+        unitPrice: 64789,
+        marketCapRank: 1,
+      }),
+    ]);
+    expect(hs).toHaveLength(1);
+    expect(hs[0]!.token.unitPrice).toBe(64789);
+    expect(hs[0]!.token.marketCapRank).toBe(1);
+  });
+
+  it("多源组价/排名取「首个有值」:首行无价也不漏(不依赖行序)", () => {
+    const hs = buildCanonicalHoldings([
+      // 首行:同组桥接变体,未定价、无 rank(value 由 provider 权威给)
+      row({
+        symbol: "USDC",
+        amount: 100,
+        value: 100,
+        account: zerion,
+        tokenId: "tok-usdc",
+        group: usdc,
+        ref: cg("usd-coin"),
+      }),
+      // 次行:同组,带单价 + 排名
+      row({
+        symbol: "USDC",
+        amount: 50,
+        value: 50,
+        account: binance,
+        tokenId: "tok-usdc",
+        group: usdc,
+        ref: cg("usd-coin"),
+        unitPrice: 1,
+        marketCapRank: 6,
+      }),
+    ]);
+    const h = byKey(hs, "group:usdc")!;
+    expect(h.token.unitPrice).toBe(1); // 取次行,不因首行无价而漏
+    expect(h.token.marketCapRank).toBe(6);
+  });
+
   it("同代币多源合计 > 0 仍保留,即使个别源 value=0", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "AAA", amount: 1, value: 0, account: binance, tokenId: "tok-a" }),

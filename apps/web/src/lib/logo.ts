@@ -23,5 +23,8 @@ export function tokenLogoUrl(e: LogoSource): string | undefined {
 // 平台 logo:平台 key 本身即稳定 id(如 chain:bitcoin / eip155:1 / exchange:binance,含 `:`)。
 // 有上游图 → 代理为 `/api/logo/platform/<key>`;无图 → undefined(客户端 fallback,不发请求)。见 #20。
 export function platformLogoUrl(key: string, logo?: string): string | undefined {
-  return logo ? `/api/logo/platform/${encodeURIComponent(key)}` : undefined;
+  if (!logo) return undefined;
+  // 内置静态图(如 manual 的 NotebookPen data-URI)直挂:无隐私顾虑,且 /api/logo 代理只 fetch http 栅格图。
+  if (logo.startsWith("data:")) return logo;
+  return `/api/logo/platform/${encodeURIComponent(key)}`;
 }

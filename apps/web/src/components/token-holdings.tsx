@@ -10,6 +10,7 @@ import {
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding, HoldingSource } from "../lib/aggregate";
+import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { AssetSheet } from "./asset-sheet";
@@ -19,15 +20,6 @@ import { AssetSheet } from "./asset-sheet";
 const DUST_THRESHOLD = 1; // USD;待定阈值
 // 持仓总数 < 此值时不折叠小额:列表本就短,折叠反而多一层交互、没收益。
 const MIN_FOLD_COUNT = 10;
-
-// 24h 增值(美元):由当前市值与 24h% 反推 —— 前值 = 市值/(1+pct/100),增值 = 市值 − 前值。
-// 与 hero 第二行同语义(增值 + %);无 change24h / 恰好 0 / 前值不合法(≤-100%)→ 不显示。
-function dayValueChange(totalValue: number, change24h?: number): number | null {
-  if (change24h == null || change24h === 0) return null;
-  const factor = 1 + change24h / 100;
-  if (factor <= 0) return null;
-  return totalValue - totalValue / factor;
-}
 
 // 多源代币的平台指示:名称右侧叠放各平台/链 logo 小圆(beUI AvatarGroup;缺 logo 回退首字母、
 // title 显示平台名),上限 MAX_PLATFORM_LOGOS,超出以 +N 收尾(AvatarGroupCount)。

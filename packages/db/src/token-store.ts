@@ -472,7 +472,9 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             .set({
               unitPrice: p.unitPrice,
               change24h: p.change24h ?? null,
-              marketCapRank: p.marketCapRank ?? null,
+              // marketCapRank 不在此写:刷价只管价(喂它的 simple/price 不含排名)。排名是市场数据,
+              // 归 warm(top-N markets)/ resolve(contract)写;若这里写 `?? null` 会把持仓币(反复刷价)
+              // 的排名反复抹成 null —— 只留没被刷价的币有排名。故刷价保留既有排名不动。
               priceAsOf: p.asOf,
               priceExpiresAt,
             })
