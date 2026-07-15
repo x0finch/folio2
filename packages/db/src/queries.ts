@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   getTableColumns,
+  gte,
   type InferSelectModel,
   inArray,
   max,
@@ -416,6 +417,47 @@ export function listSnapshotTotalsByUser(env: DbEnv, userId: string): Promise<Sn
     .from(snapshots)
     .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
     .where(eq(accounts.userId, userId))
+    .orderBy(asc(snapshots.takenAt));
+}
+
+// 全历史余额(跨所有快照,userId 限定):单币价值历史用 —— app 侧按代币身份归属 + 阶梯式重建
+// (见 apps/web buildTokenValueHistory)。每行带其快照的 accountId/takenAt + 该余额的冻结口径列。
+// 可选 since(epoch ms)裁窗口。snapshot_balances 仅按 snapshotId 建索引 → 跨快照全扫;
+// 自托管单用户量级可接受(见 #121 备注),量大再议加 (account_id, taken_at) 复合索引。
+export interface SnapshotBalanceHistoryRow {
+  accountId: string;
+  takenAt: number;
+  symbol: string;
+  amount: number;
+  usdValue: number;
+  kind: BalanceKind;
+  tokenKey: string | null;
+  metaJson: string | null;
+}
+export function listSnapshotBalancesByUser(
+  env: DbEnv,
+  userId: string,
+  since?: number,
+): Promise<SnapshotBalanceHistoryRow[]> {
+  return getDb(env)
+    .select({
+      accountId: snapshots.accountId,
+      takenAt: snapshots.takenAt,
+      symbol: snapshotBalances.symbol,
+      amount: snapshotBalances.amount,
+      usdValue: snapshotBalances.usdValue,
+      kind: snapshotBalances.kind,
+      tokenKey: snapshotBalances.tokenKey,
+      metaJson: snapshotBalances.metaJson,
+    })
+    .from(snapshotBalances)
+    .innerJoin(snapshots, eq(snapshots.id, snapshotBalances.snapshotId))
+    .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+    .where(
+      since != null
+        ? and(eq(accounts.userId, userId), gte(snapshots.takenAt, since))
+        : eq(accounts.userId, userId),
+    )
     .orderBy(asc(snapshots.takenAt));
 }
 

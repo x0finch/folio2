@@ -79,8 +79,8 @@ function tokenIdentity(row: AggInput): string {
   return `sym:${norm(row.symbol)}`;
 }
 
-// 四级归并键(ADR-0002:任何一级都不含裸 symbol)。
-function holdingKey(row: AggInput): string {
+// 四级归并键(ADR-0002:任何一级都不含裸 symbol)。导出供单币价值历史(token-history)按同一身份匹配历史行。
+export function holdingKey(row: AggInput): string {
   if (row.group) return `group:${row.group.id}`;
   if (row.tokenId) return `token:${row.tokenId}`; // vendor 中立内部 id(优先)
   if (row.ref) return `token:${refKey(row.ref)}`; // 回退:已解析 ref 但未命中 store 记录
@@ -88,7 +88,8 @@ function holdingKey(row: AggInput): string {
   return `as:${row.account.id}:${norm(row.symbol)}`;
 }
 
-function isEligible(row: AggInput): boolean {
+// 导出供 token-history 复用(历史行归属同一口径)。
+export function isEligible(row: AggInput): boolean {
   // 进聚合的同质口径:现货(含并回的 BTC)/ perp 权益(isMargin)。kind 已由 overview 用 viewKind 归一。
   return row.kind === "spot" || row.isMargin === true;
 }

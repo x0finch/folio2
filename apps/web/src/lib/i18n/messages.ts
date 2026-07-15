@@ -114,6 +114,7 @@ export const en = {
     accountsTab: "Accounts",
     nAccounts: "{n} accounts",
     nSources: "{n} sources",
+    rangeAll: "All",
   },
   Accounts: {
     title: "Accounts",
@@ -372,6 +373,7 @@ export const zh: Messages = {
     accountsTab: "账户",
     nAccounts: "{n} 个账户",
     nSources: "{n} 处",
+    rangeAll: "全部",
   },
   Accounts: {
     title: "账户",
