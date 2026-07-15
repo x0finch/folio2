@@ -26,6 +26,8 @@ export interface AggInput {
   name?: string;
   logo?: string; // 已按回退链取好(CGK→provider)
   change24h?: number; // 每币 24h 涨跌(%);仅单 Token 组用于行内 ValueChange
+  unitPrice?: number; // 单价(USD;展示用,详情头部)
+  marketCapRank?: number; // 市值排名(展示用,详情头部)
 }
 
 export interface HoldingSource {
@@ -38,7 +40,15 @@ export interface HoldingSource {
 }
 export interface Holding {
   key: string; // 分组键(去重/稳定用)
-  token: { id?: string; symbol: string; name: string; logo?: string };
+  // unitPrice/marketCapRank:详情头部 meta 展示用,取代表行(a.first);缺则不显。
+  token: {
+    id?: string;
+    symbol: string;
+    name: string;
+    logo?: string;
+    unitPrice?: number;
+    marketCapRank?: number;
+  };
   totalValue: number;
   totalAmount?: number; // 各 source 数量之和(组统一单位,跨链/多源亦可汇总)
   change24h?: number; // 仅单一 Token 组(%,每币 CGK 涨跌)
@@ -90,6 +100,10 @@ interface Acc {
   totalValue: number;
   totalAmount: number;
   logoHint?: string; // 首个带 logo 的成员(组 logo 缺省时兜底)
+  // 首个带价/排名的成员(组统一资产 → 单价一致):多源组里 a.first 可能是未定价的桥接/孤儿变体,
+  // 取「首个有值」而非 a.first,避免头部价格/排名随行序偶发隐藏(与 logoHint 同理)。
+  unitPriceHint?: number;
+  marketCapRankHint?: number;
   // 持有点按 (account, platform) 去重合并(红线 3:同地址双 provider 覆盖)。
   sources: Map<string, HoldingSource>;
 }
@@ -116,6 +130,9 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     a.totalValue += row.value;
     a.totalAmount += row.amount;
     if (!a.logoHint && row.logo) a.logoHint = row.logo;
+    if (a.unitPriceHint == null && row.unitPrice != null) a.unitPriceHint = row.unitPrice;
+    if (a.marketCapRankHint == null && row.marketCapRank != null)
+      a.marketCapRankHint = row.marketCapRank;
     const platformId = platformIdOf(row);
     const sk = `${row.account.id}|${platformId}`;
     const existing = a.sources.get(sk);
@@ -154,7 +171,15 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
         };
     holdings.push({
       key: a.key,
-      token: { id: token.id, symbol: token.symbol, name: token.name, logo: token.logo },
+      token: {
+        id: token.id,
+        symbol: token.symbol,
+        name: token.name,
+        logo: token.logo,
+        // 价/排名取组内「首个有值」(见 unitPriceHint 注释):组统一单位 → 单价一致,不依赖行序。
+        unitPrice: a.unitPriceHint,
+        marketCapRank: a.marketCapRankHint,
+      },
       totalValue: a.totalValue,
       totalAmount: a.totalAmount, // 组 = 同一资产、统一单位 → 各 source 数量之和恒可汇总
       change24h: a.identities.size === 1 ? a.first.change24h : undefined,

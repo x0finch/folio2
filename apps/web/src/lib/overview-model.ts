@@ -118,6 +118,8 @@ export async function buildOverview(
     name: e?.name,
     logo: e ? tokenLogoUrl(e) : undefined, // 上游 URL → folio 代理(隐私;见 ADR 0008)
     change24h: e?.change24h,
+    unitPrice: e?.unitPrice, // 详情头部 meta:单价
+    marketCapRank: e?.marketCapRank, // 详情头部 meta:市值排名
   }));
   const holdings = buildCanonicalHoldings(aggInputs);
 

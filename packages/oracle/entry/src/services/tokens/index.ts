@@ -32,6 +32,7 @@ export interface EnrichedAsset {
   providerLogo?: string; // provider 备用(展示回退链由调用方定序)
   unitPrice?: number;
   change24h?: number;
+  marketCapRank?: number; // 市场数据(展示用:市值排名);孤儿/未收录为 undefined
   priceStale?: boolean;
   group?: TokenGroup; // 展示分组(P2):命中种子的 cgk 行才有;聚合按它归组
 }
@@ -93,6 +94,7 @@ export function createTokens({ apiKey, createStore, source }: CreateTokensConfig
     providerLogo: rec?.providerLogo,
     unitPrice: rec?.price?.unitPrice,
     change24h: rec?.price?.change24h,
+    marketCapRank: rec?.marketCapRank,
     // 有 ref 才可刷:价缺失或过期均标 stale;孤儿(ref=null)无价不标(无处可刷)。
     priceStale: ref ? !rec?.price || rec.price.stale : false,
     group: rec?.group,
