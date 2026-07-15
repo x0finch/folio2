@@ -175,27 +175,22 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
     staleTime: 60_000,
   });
   const series = historyQuery.data?.series ?? [];
-  const hasHistory = series.length >= 2;
-  const spanDays = hasHistory
-    ? Math.round(((series.at(-1)?.t ?? 0) - (series[0]?.t ?? 0)) / DAY_MS)
-    : 0;
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 头部:价值历史图垫底(hover 出 tooltip);内容 pointer-events-none 让 hover 透传;窗口切换叠右上角
-          (与 symbol 行同高)、天数 ND 叠右下角(仿 hero)。预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
+      {/* 头部:价值历史图垫底(hover 出 tooltip);内容 pointer-events-none 让 hover 透传。
+          窗口切换叠右下角、独占头部底部一带,与右侧价格徽标错开(name 行用满宽)。
+          预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
       <div className="relative min-h-44 overflow-hidden">
         {series.length >= 2 && (
           <ValueTrendChart series={series} topMargin={56} fillOpacity={0.14} />
         )}
-        {/* 窗口切换:绝对右上角、与 token name 垂直居中(top-0.5 使 tabs 中心 ≈ name 文字中心);
-            可交互(独立于 pointer-events-none 内容层)。 */}
-        <div className="absolute top-0.5 right-0 z-10">
+        {/* 窗口切换(可交互,独立于 pointer-events-none 内容层):右下角独占一带,避开价格徽标。 */}
+        <div className="absolute right-0 bottom-0 z-10">
           <RangeTabs value={range} onChange={setRange} />
         </div>
         <div className="pointer-events-none relative flex flex-col gap-3">
-          {/* pr 给右上角窗口切换留位,长币名截断而非钻到其下。 */}
-          <div className="flex items-center gap-3 pr-32">
+          <div className="flex items-center gap-3">
             <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
             <div className="min-w-0">
               {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
@@ -234,12 +229,6 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
             )}
           </div>
         </div>
-
-        {spanDays >= 1 && (
-          <span className="absolute right-0 bottom-0 z-10 font-mono text-muted-foreground text-xs tracking-wide">
-            {spanDays}D
-          </span>
-        )}
       </div>
 
       {/* 来源:Platforms / Accounts 两视图切换。tab 背景透明,与主页 Tokens/DeFi 一致。 */}
