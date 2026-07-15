@@ -24,7 +24,7 @@ export interface OverviewDeps {
 // perp 权益行只有 meta 可解析才计入聚合 —— 与 toPerpView 的 safeParse 门一致:
 // 脏/损坏的遗留 perp 行在明细卡与总额两处都排除,避免"总额算它、明细不显"的不一致
 //(承接旧 `perpRole==="equity"` 守卫,守住"单账户脏数据不拖垮总览")。
-function isPerpEquity(metaJson: string | null): boolean {
+export function isPerpEquity(metaJson: string | null): boolean {
   if (!metaJson) return false;
   try {
     return PerpEquityMeta.safeParse(JSON.parse(metaJson)).success;

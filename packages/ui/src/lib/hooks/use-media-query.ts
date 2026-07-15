@@ -1,7 +1,12 @@
+"use client";
+
 import { useEffect, useState } from "react";
 
-// SSR 安全的媒体查询:首帧返回 false(服务端无 window),挂载后按实际匹配更新并订阅变化。
-// 用于「桌面用侧滑 Drawer / 移动用 BottomSheet」这类按视口切换承载壳的场景。
+/**
+ * SSR-safe media query. First render returns false (no window on the server);
+ * after mount it reflects the real match and subscribes to changes. Use for
+ * layout that switches on viewport/pointer capability.
+ */
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(false);
 

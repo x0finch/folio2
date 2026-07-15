@@ -40,6 +40,7 @@ export function createDb(env: DbEnv) {
     writeSnapshot: b(q.writeSnapshot),
     listSnapshotsByAccount: b(q.listSnapshotsByAccount),
     listSnapshotTotalsByUser: b(q.listSnapshotTotalsByUser),
+    listSnapshotBalancesByUser: b(q.listSnapshotBalancesByUser),
     getLatestSnapshotByUser: b(q.getLatestSnapshotByUser),
     listSnapshotsPageByUser: b(q.listSnapshotsPageByUser),
     listBalancesForSnapshots: b(q.listBalancesForSnapshots),

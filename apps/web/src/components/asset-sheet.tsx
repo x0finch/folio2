@@ -1,9 +1,4 @@
 import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-  AvatarGroupCount,
-  AvatarImage,
   Badge,
   BottomSheet,
   Drawer,
@@ -13,44 +8,57 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  useMediaQuery,
 } from "@folio/ui";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { WalletIcon } from "lucide-react";
+import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { useMediaQuery } from "../lib/hooks/use-media-query";
+import { getTokenValueHistory } from "../lib/server/token-history";
 import { groupByAccount, groupByPlatform, type SourceGroup } from "../lib/source-groups";
+import { AvatarStack } from "./avatar-stack";
+import { ValueTrendChart } from "./value-trend-chart";
 
 // 资产 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
-// folio2 无每币行情历史 → 不做币价走势;头部预留背景槽位(片 2 填单币【持仓价值】历史图,见 #121)。
+// 头部背景 = 单币【持仓价值】历史(片 2):折线随涨跌走 --pos/--neg,内容浮其上;可切 7d/30d/1y/全部。
 // 来源区是 Platforms / Accounts 两视图的 tab 切换(互为转置):按平台看散在哪些链/场馆,或按账户看散在哪些账户。
 
-const MAX_STACK = 3;
+const DAY_MS = 86_400_000;
+type Range = "7d" | "30d" | "1y" | "all";
+const RANGES: Range[] = ["7d", "30d", "1y", "all"];
+const RANGE_DAYS: Record<Exclude<Range, "all">, number> = { "7d": 7, "30d": 30, "1y": 365 };
 
-// 组头像:单 avatar → 单 logo;多 avatar(账户跨多链)→ 叠标 + N。manual 亦有内置 logo(NotebookPen),
-// 走普通 LogoAvatar,不再特判。
+// 窗口切换:7D / 30D / 1Y / 全部。beUI Tabs(透明底);无 TabsContent,value 驱动 chart。
+// 紧凑款(px-2/py-1/text-xs + gap-0.5)。TabsList 上 leading-none 关键:trigger 外层块 div 的行盒否则被
+// 继承的大 line-height 撑高(24px > 按钮 20px),使按钮(inline-flex)在其中偏移、绿 pill(= 外层 inset-0)
+// 比按钮高而文字相对 pill 不居中;leading-none 让行盒由按钮决定 → pill=按钮 → 文字垂直居中。
+function RangeTabs({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
+  const t = useTranslations("Overview");
+  return (
+    <Tabs value={value} onValueChange={(v) => onChange(v as Range)} variant="pill">
+      <TabsList className="gap-0.5 bg-transparent p-0 leading-none">
+        {RANGES.map((r) => (
+          <TabsTrigger key={r} value={r} className="px-2 py-1 font-mono text-xs leading-none">
+            {r === "all" ? t("rangeAll") : r.toUpperCase()}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
+  );
+}
+
+// 组头像:单 avatar → 单 logo;多 avatar(账户跨多链)→ 叠标 + N(共享 AvatarStack)。
+// manual 亦有内置 logo(NotebookPen),走普通 LogoAvatar,不再特判。
 function GroupAvatar({ group }: { group: SourceGroup }) {
   const [first] = group.avatars;
   if (group.avatars.length === 1 && first) {
     return <LogoAvatar src={first.logo} fallback={first.name} size="sm" />;
   }
-  const shown = group.avatars.slice(0, MAX_STACK);
-  const extra = group.avatars.length - shown.length;
-  return (
-    <AvatarGroup className="shrink-0 -space-x-1">
-      {shown.map((a) => (
-        <Avatar key={a.name} title={a.name} className="size-6">
-          <AvatarImage src={a.logo} alt="" className="bg-logo-bg" />
-          <AvatarFallback className="text-[9px]">{a.name.slice(0, 1)}</AvatarFallback>
-        </Avatar>
-      ))}
-      {extra > 0 ? (
-        <AvatarGroupCount className="size-6 text-[9px]">+{extra}</AvatarGroupCount>
-      ) : null}
-    </AvatarGroup>
-  );
+  return <AvatarStack items={group.avatars} size="md" />;
 }
 
 // 账户名前置 WalletIcon 微图标(与侧栏「Accounts」导航同图标,便于理解):全抽屉「带钱包图标的 = 账户」,
@@ -157,45 +165,69 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
   const platformGroups = groupByPlatform(sources);
   const accountGroups = groupByAccount(sources);
 
+  // 单币持仓价值历史(片 2):按 Holding key + 窗口拉取,喂头部背景图。窗口切换即重取(keepPrevious 防闪)。
+  const [range, setRange] = useState<Range>("30d");
+  const since = range === "all" ? undefined : Date.now() - RANGE_DAYS[range] * DAY_MS;
+  const historyQuery = useQuery({
+    queryKey: ["token-history", holding.key, range],
+    queryFn: () => getTokenValueHistory({ data: { key: holding.key, since } }),
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
+  const series = historyQuery.data?.series ?? [];
+
   return (
     <div className="flex flex-col gap-6">
-      {/* 头部。片 2(#121)在此加单币价值历史背景层(绝对定位垫底 + 内容 relative 浮其上)。 */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-3">
-          <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
-          <div className="min-w-0">
-            {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
-                排名走 text-foreground(深色主题即白、亮色主题自动转深),价格保持 muted。 */}
-            <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate font-semibold text-lg">{token.name}</h2>
-              {(token.marketCapRank != null || token.unitPrice != null) && (
-                <Badge status="neutral" size="sm" showIcon={false}>
-                  <span className="inline-flex items-center gap-1">
-                    {token.marketCapRank != null && (
-                      <span className="text-foreground">#{token.marketCapRank}</span>
-                    )}
-                    {token.unitPrice != null && <span>{usd(token.unitPrice)}</span>}
-                  </span>
-                </Badge>
+      {/* 头部:价值历史图垫底(hover 出 tooltip);内容 pointer-events-none 让 hover 透传。
+          窗口切换叠右下角、独占头部底部一带,与右侧价格徽标错开(name 行用满宽)。
+          预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
+      <div className="relative min-h-44 overflow-hidden">
+        {series.length >= 2 && (
+          <ValueTrendChart series={series} topMargin={56} fillOpacity={0.14} />
+        )}
+        {/* 窗口切换(可交互,独立于 pointer-events-none 内容层):右下角独占一带,避开价格徽标。 */}
+        <div className="absolute right-0 bottom-0 z-10">
+          <RangeTabs value={range} onChange={setRange} />
+        </div>
+        <div className="pointer-events-none relative flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
+            <div className="min-w-0">
+              {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
+                    排名走 text-foreground(深色主题即白、亮色主题自动转深),价格保持 muted。 */}
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="truncate font-semibold text-lg">{token.name}</h2>
+                {(token.marketCapRank != null || token.unitPrice != null) && (
+                  <Badge status="neutral" size="sm" showIcon={false}>
+                    <span className="inline-flex items-center gap-1">
+                      {token.marketCapRank != null && (
+                        <span className="text-foreground">#{token.marketCapRank}</span>
+                      )}
+                      {token.unitPrice != null && <span>{usd(token.unitPrice)}</span>}
+                    </span>
+                  </Badge>
+                )}
+              </div>
+              {totalAmount != null && (
+                <p className="text-muted-foreground text-sm tabular-nums">
+                  {formatNumber(totalAmount)} {token.symbol}
+                </p>
               )}
             </div>
-            {totalAmount != null && (
-              <p className="text-muted-foreground text-sm tabular-nums">
-                {formatNumber(totalAmount)} {token.symbol}
-              </p>
+          </div>
+
+          <div>
+            <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
+            {dayValue != null && (
+              // 24h 增值 + %:共用一个前置符号(同源同号)、同色,与代币行/hero 一致。
+              <div
+                className={`mt-1 text-sm tabular-nums ${dayValue > 0 ? "text-pos" : "text-neg"}`}
+              >
+                {dayValue > 0 ? "+" : "−"}
+                {usd(Math.abs(dayValue))} {Math.abs(change24h ?? 0).toFixed(2)}%
+              </div>
             )}
           </div>
-        </div>
-
-        <div>
-          <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
-          {dayValue != null && (
-            // 24h 增值 + %:共用一个前置符号(同源同号)、同色,与代币行/hero 一致。
-            <div className={`mt-1 text-sm tabular-nums ${dayValue > 0 ? "text-pos" : "text-neg"}`}>
-              {dayValue > 0 ? "+" : "−"}
-              {usd(Math.abs(dayValue))} {Math.abs(change24h ?? 0).toFixed(2)}%
-            </div>
-          )}
         </div>
       </div>
 
