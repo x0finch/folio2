@@ -1,4 +1,4 @@
-import { LogoAvatar, SharedLayoutBg } from "@folio/ui";
+import { LogoAvatar, Separator, SharedLayoutBg } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import type { DefiGroup } from "../lib/account-view";
 import { protocolDayChange } from "../lib/account-view";
@@ -106,9 +106,8 @@ function PerpAccountBody({ view }: { view: PerpView }) {
           )}
         </div>
       )}
-      {positions.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("noOpenPositions")}</p>
-      ) : (
+      {/* 无持仓 → 只显权益条,不加"无持仓"文案(权益条本身即完整状态)。 */}
+      {positions.length > 0 && (
         // hover 高亮 = SharedLayoutBg 移动滑块(与代币行同语言,行间无分隔线);
         // 行必须是直接 DOM 子元素(组件元素收不到注入的 relative/onMouseEnter)。
         <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
@@ -152,8 +151,10 @@ export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
   return (
     // 账户子块间距比块内(gap-3)大一档,块与块分得开。
     <section className="flex flex-col gap-6">
-      {sorted.map((it) => (
+      {sorted.map((it, i) => (
         <div key={it.id} className="flex flex-col gap-3">
+          {/* 账户块之间分隔线(首块不加)。 */}
+          {i > 0 && <Separator />}
           {/* 场馆子头:logo 左跨两行,右侧 场馆名 / 账户名(带钱包图标,统一 <AccountName>)。 */}
           <div className="flex items-center gap-2.5 px-3">
             {it.platform && (
