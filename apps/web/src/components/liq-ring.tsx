@@ -1,7 +1,7 @@
 import { cn, Popover, PopoverContent, PopoverTrigger, useHoverPopover } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
-import type { LiqRisk, LiqRiskState } from "../lib/perp";
+import type { LiqRisk, LiqRiskState, PerpPositionView } from "../lib/perp";
 import { DetailRow } from "./detail-row";
 
 // 强平风险环(H5 #120,概念稿定稿:温度计→血条→环):~20px SVG 圆环把「距强平多远」
@@ -49,7 +49,8 @@ function RiskArc({ margin, state }: { margin: number; state: LiqRiskState }) {
   );
 }
 
-export function LiqRing({ risk, entryPx }: { risk: LiqRisk; entryPx: number }) {
+// position:开仓价 + 仓位级保证金信息(模式/单仓保证金)一并进本弹层——一行一个明细入口。
+export function LiqRing({ risk, position }: { risk: LiqRisk; position: PerpPositionView }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
   const pop = useHoverPopover();
@@ -78,9 +79,16 @@ export function LiqRing({ risk, entryPx }: { risk: LiqRisk; entryPx: number }) {
             value={`${Math.round(risk.margin * 100)}%`}
             className={cn("font-medium", arcClass[risk.state])}
           />
-          <DetailRow label={t("entry")} value={usd(entryPx)} />
+          <DetailRow label={t("entry")} value={usd(position.entryPx)} />
           <DetailRow label={t("mark")} value={usd(risk.mark)} />
           <DetailRow label={t("liq")} value={usd(risk.liquidationPx)} className="text-neg" />
+          {position.leverageType && (
+            <DetailRow
+              label={t("marginMode")}
+              value={position.leverageType.charAt(0).toUpperCase() + position.leverageType.slice(1)}
+            />
+          )}
+          <DetailRow label={t("marginUsedAmount")} value={usd(position.marginUsed)} />
         </div>
       </PopoverContent>
     </Popover>

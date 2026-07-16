@@ -1,11 +1,4 @@
-import {
-  LogoAvatar,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-  SharedLayoutBg,
-  useHoverPopover,
-} from "@folio/ui";
+import { LogoAvatar, SharedLayoutBg } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import type { DefiGroup } from "../lib/account-view";
 import { protocolDayChange } from "../lib/account-view";
@@ -14,7 +7,6 @@ import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
 import { signedUsd } from "../lib/signed-usd";
 import { AccountName } from "./account-name";
-import { DetailRow } from "./detail-row";
 import { LiqRing } from "./liq-ring";
 import { Stat } from "./stat";
 import { ValueDelta } from "./value-delta";
@@ -58,42 +50,17 @@ function PerpRowContent({ p }: { p: PerpPositionView }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
   const risk = liqRisk(p);
-  const pill = useHoverPopover();
   return (
     <div className="flex w-full items-center gap-3">
-      {/* 方向 pill 即杠杆载体:hover/focus 展开 保证金模式(全仓/逐仓)+ 单仓保证金 ——
-          挂 pill 而非环上,无强平价的行(环降级消失)也够得着。 */}
-      <Popover
-        trigger="hover"
-        side={pill.side}
-        onOpenChange={pill.onOpenChange}
-        className={pill.rootClassName}
-      >
-        <PopoverTrigger>
-          <button ref={pill.measureRef} type="button" className="outline-none">
-            <NeutralChip>
-              {p.leverage != null ? `${p.leverage}x ` : ""}
-              {sideLabel(p.side)}
-            </NeutralChip>
-          </button>
-        </PopoverTrigger>
-        <PopoverContent>
-          <div className="flex min-w-36 flex-col gap-1 p-1">
-            {p.leverageType && (
-              <DetailRow
-                label={t("marginMode")}
-                value={p.leverageType.charAt(0).toUpperCase() + p.leverageType.slice(1)}
-              />
-            )}
-            <DetailRow label={t("marginUsedAmount")} value={usd(p.marginUsed)} />
-          </div>
-        </PopoverContent>
-      </Popover>
+      <NeutralChip>
+        {p.leverage != null ? `${p.leverage}x ` : ""}
+        {sideLabel(p.side)}
+      </NeutralChip>
       <span className="font-medium tabular-nums">
         {formatNumber(Math.abs(p.size))} {p.coin}
       </span>
       {risk ? (
-        <LiqRing risk={risk} entryPx={p.entryPx} />
+        <LiqRing risk={risk} position={p} />
       ) : (
         // 无强平价(如全仓部分场景)→ 环降级为 muted 开仓价文本。
         <span className="text-muted-foreground text-xs tabular-nums">
@@ -111,7 +78,6 @@ function PerpRowContent({ p }: { p: PerpPositionView }) {
 function PerpAccountBody({ view }: { view: PerpView }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
-  const margin = useHoverPopover();
   const { equity, positions } = view;
   const totalUpnl = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
   const marginRatio =
@@ -127,30 +93,16 @@ function PerpAccountBody({ view }: { view: PerpView }) {
             className={totalUpnl > 0 ? "text-pos" : totalUpnl < 0 ? "text-neg" : undefined}
           />
           {marginRatio != null && (
-            /* 占用率 hover/focus 展开构成:已用保证金 / 可提 / 总名义敞口 / 账户真实杠杆。 */
-            <Popover
-              trigger="hover"
-              side={margin.side}
-              onOpenChange={margin.onOpenChange}
-              className={margin.rootClassName}
-            >
-              <PopoverTrigger>
-                <button ref={margin.measureRef} type="button" className="text-left outline-none">
-                  <Stat label={t("marginRatio")} value={`${Math.round(marginRatio * 100)}%`} />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent>
-                <div className="flex min-w-40 flex-col gap-1 p-1">
-                  <DetailRow label={t("marginUsedAmount")} value={usd(equity.totalMarginUsed)} />
-                  <DetailRow label={t("withdrawable")} value={usd(equity.withdrawable)} />
-                  <DetailRow label={t("notional")} value={usd(equity.totalNtlPos)} />
-                  <DetailRow
-                    label={t("accountLeverage")}
-                    value={`${(equity.totalNtlPos / equity.accountValue).toFixed(2)}x`}
-                  />
-                </div>
-              </PopoverContent>
-            </Popover>
+            <Stat label={t("marginRatio")} value={`${Math.round(marginRatio * 100)}%`} />
+          )}
+          {/* 账户级字段平铺(flex-wrap 窄容器自动换行):可提 / 名义敞口 / 账户真实杠杆。 */}
+          <Stat label={t("withdrawable")} value={usd(equity.withdrawable)} />
+          <Stat label={t("notional")} value={usd(equity.totalNtlPos)} />
+          {equity.accountValue > 0 && (
+            <Stat
+              label={t("accountLeverage")}
+              value={`${(equity.totalNtlPos / equity.accountValue).toFixed(2)}x`}
+            />
           )}
         </div>
       )}
