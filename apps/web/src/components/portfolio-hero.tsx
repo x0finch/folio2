@@ -5,6 +5,8 @@ import { computeDayChange } from "../lib/day-change";
 import { deriveHeroMetrics, type HoldingLike } from "../lib/hero-stats";
 import { downsampleSeries, type HistoryPoint } from "../lib/history";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
+import { signedUsd } from "../lib/signed-usd";
+import { Stat } from "./stat";
 import { ValueTrendChart } from "./value-trend-chart";
 
 const DAY_MS = 86_400_000;
@@ -57,7 +59,6 @@ export function PortfolioHero({
         ? "bg-neg-bg text-neg"
         : "bg-muted text-muted-foreground";
   const arrow = dir > 0 ? "▲" : dir < 0 ? "▼" : null;
-  const signedAbs = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(Math.abs(n))}`;
 
   const metrics = deriveHeroMetrics(holdings, totalUsd);
   const spanDays = hasHistory
@@ -132,23 +133,23 @@ export function PortfolioHero({
             >
               {arrow ? `${arrow} ` : ""}
               {dayPct != null ? `${fmtPct(dayPct)} · ` : ""}
-              {signedAbs(dayAbs)}
+              {signedUsd(usd, dayAbs)}
             </span>
           )}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-8">
-          <HeroStat
+          <Stat
             label={t("bestToday")}
             value={metrics.best ? `${metrics.best.symbol} ${fmtPct(metrics.best.change24h)}` : "—"}
           />
-          <HeroStat
+          <Stat
             label={t("worstToday")}
             value={
               metrics.worst ? `${metrics.worst.symbol} ${fmtPct(metrics.worst.change24h)}` : "—"
             }
           />
-          <HeroStat
+          <Stat
             label={t("stableShare")}
             value={metrics.stableShare == null ? "—" : `${Math.round(metrics.stableShare * 100)}%`}
           />
@@ -160,15 +161,6 @@ export function PortfolioHero({
           {spanDays}D
         </span>
       )}
-    </div>
-  );
-}
-
-function HeroStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="mb-0.5 text-muted-foreground text-xs">{label}</div>
-      <div className="font-mono font-semibold text-sm">{value}</div>
     </div>
   );
 }

@@ -1,12 +1,14 @@
-import { cn, LogoAvatar, SharedLayoutBg } from "@folio/ui";
+import { LogoAvatar, SharedLayoutBg } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import type { DefiGroup } from "../lib/account-view";
 import { protocolDayChange } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
+import { signedUsd } from "../lib/signed-usd";
 import { AccountName } from "./account-name";
 import { LiqRing } from "./liq-ring";
+import { Stat } from "./stat";
 import { ValueDelta } from "./value-delta";
 
 // 永续 / DeFi 持仓明细 v2(H5 #120):总览「DeFi & Perps」tab 与账户详情抽屉共用。
@@ -14,61 +16,29 @@ import { ValueDelta } from "./value-delta";
 // 行内色语义唯一(rev5):红绿只表达盈亏与负债,--warn/--neg 警报只在 LiqRing 上,
 // 方向 pill 与类型 chip 一律中性灰(方向/类型是事实,不是评价)。
 
-// eyebrow 节头:小号大写 + 可选平台(场馆小 logo + 名)+ 可选 muted 副标(账户名)。
-// 平台/副标只在总览 tab 传(抽屉单账户上下文,头部已有 ConnectorBadge,不重复)。
+// 场馆展示元数据(PerpPositionsList 的账户子头用)。
 export interface PlatformBadge {
   name: string;
   logo?: string;
 }
 
-function SectionHeader({
-  title,
-  platform,
-  sub,
-}: {
-  title: string;
-  platform?: PlatformBadge;
-  sub?: string;
-}) {
+// eyebrow 节头(仅抽屉用:spot/DeFi/perp 堆叠需分区名;总览 tab 即标题不渲染)。
+function SectionHeader({ title }: { title: string }) {
   return (
     <div className="flex items-center gap-2.5 px-3">
       <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
-      {platform && (
-        <span className="flex items-center gap-1.5">
-          <LogoAvatar size="sm" className="size-4" src={platform.logo} fallback={platform.name} />
-          <span className="text-muted-foreground text-xs">{platform.name}</span>
-        </span>
-      )}
-      {sub && <AccountName name={sub} className="text-muted-foreground/70 text-xs" />}
     </div>
   );
 }
 
-// 中性灰 chip:方向 pill(`3x Long`)与 DeFi 类型 chip 共用形(小号,不与标题争重量)。
+// 中性灰 chip:方向 pill(`3x Long`)与 DeFi 类型 chip 共用形(小号,不与标题争重量;
+// 字号走 token 刻度 text-xs,紧 padding 保持「小点」的定稿观感)。
 // 行 hover(SharedLayoutBg 滑块 = bg-muted)时底色换 --background,不与滑块融为一体。
 function NeutralChip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-[11px] text-muted-foreground tabular-nums transition-colors group-hover:bg-background">
+    <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-muted-foreground text-xs tabular-nums transition-colors group-hover:bg-background">
       {children}
     </span>
-  );
-}
-
-// 权益条单项(HeroStat 同款:muted xs label + mono 值)。
-function EquityStat({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
-  return (
-    <div>
-      <div className="mb-0.5 text-muted-foreground text-xs">{label}</div>
-      <div className={cn("font-mono font-semibold text-sm tabular-nums", className)}>{value}</div>
-    </div>
   );
 }
 
@@ -90,7 +60,7 @@ function PerpRowContent({ p }: { p: PerpPositionView }) {
         {formatNumber(Math.abs(p.size))} {p.coin}
       </span>
       {risk ? (
-        <LiqRing position={p} />
+        <LiqRing risk={risk} entryPx={p.entryPx} />
       ) : (
         // 无强平价(如全仓部分场景)→ 环降级为 muted 开仓价文本。
         <span className="text-muted-foreground text-xs tabular-nums">
@@ -116,14 +86,14 @@ function PerpAccountBody({ view }: { view: PerpView }) {
     <>
       {equity && (
         <div className="flex flex-wrap gap-x-10 gap-y-2 px-3">
-          <EquityStat label={t("accountEquity")} value={usd(equity.accountValue)} />
-          <EquityStat
+          <Stat label={t("accountEquity")} value={usd(equity.accountValue)} />
+          <Stat
             label={t("upnl")}
-            value={`${totalUpnl > 0 ? "+" : totalUpnl < 0 ? "−" : ""}${usd(Math.abs(totalUpnl))}`}
+            value={signedUsd(usd, totalUpnl)}
             className={totalUpnl > 0 ? "text-pos" : totalUpnl < 0 ? "text-neg" : undefined}
           />
           {marginRatio != null && (
-            <EquityStat label={t("marginRatio")} value={`${Math.round(marginRatio * 100)}%`} />
+            <Stat label={t("marginRatio")} value={`${Math.round(marginRatio * 100)}%`} />
           )}
         </div>
       )}
@@ -134,7 +104,8 @@ function PerpAccountBody({ view }: { view: PerpView }) {
         // 行必须是直接 DOM 子元素(组件元素收不到注入的 relative/onMouseEnter)。
         <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
           {positions.map((p) => (
-            <div key={p.coin} className="group rounded-xl px-3 py-3">
+            // 行内弹层打开时把整行抬到兄弟行之上(动态 side=bottom 时面板压得住下一行)。
+            <div key={p.coin} className="group rounded-xl px-3 py-3 has-[[data-state=open]]:z-20">
               <PerpRowContent p={p} />
             </div>
           ))}
@@ -144,20 +115,13 @@ function PerpAccountBody({ view }: { view: PerpView }) {
   );
 }
 
-// 永续分区(单账户):节头(+平台/账户名)+ 权益条 + 仓位行。抽屉直接用。
-export function PerpPositions({
-  view,
-  platform,
-  accountLabel,
-}: {
-  view: PerpView;
-  platform?: PlatformBadge;
-  accountLabel?: string;
-}) {
+// 永续分区(单账户,抽屉用):eyebrow 节头 + 权益条 + 仓位行。
+// (总览 tab 用 PerpPositionsList,场馆子头自带 —— 此处不再有 platform/label 死参。)
+export function PerpPositions({ view }: { view: PerpView }) {
   const t = useTranslations("Overview");
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeader title={t("perpSectionTitle")} platform={platform} sub={accountLabel} />
+      <SectionHeader title={t("perpSectionTitle")} />
       <PerpAccountBody view={view} />
     </section>
   );

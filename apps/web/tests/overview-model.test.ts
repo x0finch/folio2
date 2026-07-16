@@ -269,3 +269,23 @@ describe("buildOverview —— sections.account.platform", () => {
     expect(noMeta.sections[0].account.platform).toBeUndefined();
   });
 });
+
+// —— code review #7:仅权益、无持仓的 perp 账户保留在 sections(Perps tab 权益条可见) ——
+describe("buildOverview —— equity-only perp 账户不被过滤", () => {
+  it("有权益无仓位 → sections 保留(perp.equity 非空、positions 空)", async () => {
+    const accounts = [account("h", "Hyper", "hyperliquid")];
+    const meta = JSON.stringify({ withdrawable: 900, totalMarginUsed: 0, totalNtlPos: 0 });
+    const byAccount = new Map([
+      [
+        "h",
+        snap("h", 1000, [
+          bal({ kind: "perp_equity", amount: 1000, usdValue: 1000, metaJson: meta }),
+        ]),
+      ],
+    ]);
+    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    expect(view.sections).toHaveLength(1);
+    expect(view.sections[0].perp?.equity?.accountValue).toBe(1000);
+    expect(view.sections[0].perp?.positions).toEqual([]);
+  });
+});

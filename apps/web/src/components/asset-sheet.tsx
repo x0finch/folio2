@@ -19,6 +19,7 @@ import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { getTokenValueHistory } from "../lib/server/token-history";
+import { signedUsd } from "../lib/signed-usd";
 import { groupByAccount, groupByPlatform, type SourceGroup } from "../lib/source-groups";
 import { AccountName } from "./account-name";
 import { AvatarStack } from "./avatar-stack";
@@ -224,8 +225,7 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
               <div
                 className={`mt-1 text-sm tabular-nums ${dayValue > 0 ? "text-pos" : "text-neg"}`}
               >
-                {dayValue > 0 ? "+" : "−"}
-                {usd(Math.abs(dayValue))} {Math.abs(change24h ?? 0).toFixed(2)}%
+                {signedUsd(usd, dayValue)} {Math.abs(change24h ?? 0).toFixed(2)}%
               </div>
             )}
           </div>

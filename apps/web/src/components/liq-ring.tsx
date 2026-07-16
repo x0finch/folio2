@@ -1,16 +1,15 @@
-import { cn, Popover, PopoverContent, PopoverTrigger } from "@folio/ui";
-import { useState } from "react";
+import { cn, HoverPopover } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { type LiqRiskState, liqRisk, markPx, type PerpPositionView } from "../lib/perp";
+import type { LiqRisk, LiqRiskState } from "../lib/perp";
 
 // 强平风险环(H5 #120,概念稿定稿:温度计→血条→环):~20px SVG 圆环把「距强平多远」
-// 压缩成 占比(安全余量 clamp 到满环)+ 三态色:安全 = --pos、警告 = --warn、危险 = --neg,
-// 无发光(rev6 用户定稿:去泛光、安全态回绿)。
-// 开仓/标记/强平/余量% 走 hover popover 渐进披露(触屏点按;NoteIndicator 同款交互)。
-// liqRisk 为 null(无强平价等)时由父级降级为文本,不渲染本组件。
+// 压缩成 占比(安全余量 clamp 到满环)+ 三态色:安全 --pos、警告 --warn、危险 --neg,无发光。
+// 明细(余量%/开仓/标记/强平)走 <HoverPopover> 渐进披露(hover / 键盘 focus;方向与垫底层
+// 处理都在共享件里)。risk 由父级算好传入(父级本就用它决定渲染与否,不重复推导)。
 
 const R = 8; // viewBox 24 内的环半径
+const STROKE_WIDTH = 3.4; // 底环与彩弧同宽(分开写会悄悄变成两个环)
 const CIRCUMFERENCE = 2 * Math.PI * R;
 
 const arcClass: Record<LiqRiskState, string> = {
@@ -30,7 +29,7 @@ function RiskArc({ margin, state }: { margin: number; state: LiqRiskState }) {
         cy="12"
         r={R}
         fill="none"
-        strokeWidth="3.4"
+        strokeWidth={STROKE_WIDTH}
         className="stroke-muted transition-colors group-hover:stroke-background"
       />
       <circle
@@ -38,7 +37,7 @@ function RiskArc({ margin, state }: { margin: number; state: LiqRiskState }) {
         cy="12"
         r={R}
         fill="none"
-        strokeWidth="3.4"
+        strokeWidth={STROKE_WIDTH}
         strokeLinecap="round"
         strokeDasharray={`${arc} ${CIRCUMFERENCE}`}
         transform="rotate(-90 12 12)"
@@ -65,44 +64,32 @@ function DetailRow({
   );
 }
 
-export function LiqRing({ position }: { position: PerpPositionView }) {
+export function LiqRing({ risk, entryPx }: { risk: LiqRisk; entryPx: number }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
-  const [open, setOpen] = useState(false);
-  const risk = liqRisk(position);
-  if (risk == null || position.liquidationPx == null) return null;
-  const mark = markPx(position);
-
   return (
-    // 打开时抬 z-50:beUI popover 面板 root 内绝对定位、不 portal(同 NoteIndicator 的接线注释)。
-    // side="top":行在 SharedLayoutBg 里各自是 z-10 stacking context,向下开会被后绘制的下一行
-    // 盖住;向上只与更早绘制的行重叠,本行(后绘制)天然在上。
-    // 关闭态隐掉 goo 垫底层(根的直接 aria-hidden 子级 = goo filter svg + 常驻 bg-popover 触发器
-    // 药丸):否则环心被药丸垫成不透明。调用侧选择器覆盖,不改 vendored;测量节点不带
-    // aria-hidden,几何量测不受影响;打开恢复,goo 动效原样。
-    <Popover
-      trigger="hover"
-      side="top"
-      onOpenChange={setOpen}
-      className={cn("shrink-0", open ? "z-50" : "[&>[aria-hidden]]:hidden")}
-    >
-      <PopoverTrigger>
-        <span className="flex items-center" role="img" aria-label={t("safetyMargin")}>
-          <RiskArc margin={risk.margin} state={risk.state} />
-        </span>
-      </PopoverTrigger>
-      <PopoverContent>
+    <HoverPopover
+      content={
         <div className="flex min-w-36 flex-col gap-1 p-1">
           <DetailRow
             label={t("safetyMargin")}
             value={`${Math.round(risk.margin * 100)}%`}
             className={cn("font-medium", arcClass[risk.state])}
           />
-          <DetailRow label={t("entry")} value={usd(position.entryPx)} />
-          {mark != null && <DetailRow label={t("mark")} value={usd(mark)} />}
-          <DetailRow label={t("liq")} value={usd(position.liquidationPx)} className="text-neg" />
+          <DetailRow label={t("entry")} value={usd(entryPx)} />
+          <DetailRow label={t("mark")} value={usd(risk.mark)} />
+          <DetailRow label={t("liq")} value={usd(risk.liquidationPx)} className="text-neg" />
         </div>
-      </PopoverContent>
-    </Popover>
+      }
+    >
+      {/* 可聚焦 button:键盘 Tab → focus 即开(review #6;hover 模式对 focus 同样生效)。 */}
+      <button
+        type="button"
+        aria-label={t("safetyMargin")}
+        className="flex cursor-pointer items-center outline-none"
+      >
+        <RiskArc margin={risk.margin} state={risk.state} />
+      </button>
+    </HoverPopover>
   );
 }

@@ -5,13 +5,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { tokenLogoUrl } from "../logo";
 import { requireAuth } from "../require-auth";
-import {
-  type BalanceLike,
-  balanceToAssetRef,
-  defiAssetRef,
-  type TokenEnrichment,
-  toEnrichment,
-} from "../tokens";
+import { type BalanceLike, displayAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
 import { db } from "./db";
 import { oracle } from "./oracle";
 
@@ -72,9 +66,7 @@ export async function enrichBalances<T extends BalanceLike>(
 ): Promise<{ rows: (T & TokenEnrichment)[]; pricesStale: boolean }> {
   // defi 行也做展示富化(H5 #120:抽屉协议行的 24h 聚合);估值现推路径不受影响(那里仍只走
   // balanceToAssetRef 的同质门)。
-  const enriched = await tokens.enrich(
-    balances.map((b) => balanceToAssetRef(b) ?? defiAssetRef(b)),
-  );
+  const enriched = await tokens.enrich(balances.map(displayAssetRef));
   return {
     rows: balances.map((b, i) => {
       const e = enriched[i];
@@ -90,7 +82,8 @@ export const refreshStalePrices = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
     const snapshots = await db.getLatestSnapshotByUser(context.userId);
-    const assets = snapshots.flatMap((s) => s.balances).map(balanceToAssetRef);
+    // 与 enrichBalances 同门(displayAssetRef):defi 行标了 stale 就必须刷得到。
+    const assets = snapshots.flatMap((s) => s.balances).map(displayAssetRef);
     const refreshed = await oracle.tokens.refreshStalePrices(assets);
     tokenLog.info("stale prices refreshed", { refreshed });
     return { refreshed };
@@ -99,5 +92,6 @@ export const refreshStalePrices = createServerFn({ method: "POST" })
 // 预热(写缓存,best-effort):tokens.warm 刷新 top-N + 逐行 lazy 解析(合约懒解析入缓存)。
 // cron(waitUntil)与手动 sync 后调用。
 export async function warmTokens(tokens: Tokens, balances: BalanceLike[]): Promise<void> {
-  await tokens.warm(balances.map(balanceToAssetRef));
+  // 同 displayAssetRef 门:defi 行的解析/价格也预热,协议行 24h 才有数据可用。
+  await tokens.warm(balances.map(displayAssetRef));
 }

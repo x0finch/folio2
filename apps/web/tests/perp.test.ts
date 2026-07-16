@@ -191,6 +191,17 @@ describe("liqRisk —— 安全余量 d = |标记−强平| / |开仓−强平| 
     const r = liqRisk(pos({ size: 200, entryPx: 155, positionValue: 28000, liquidationPx: 128 }));
     expect(r?.state).toBe("danger");
   });
+  it("标记越过强平另一侧(穿仓/脏快照)→ 余量 clamp 0 → danger,而非误报安全", () => {
+    // long:entry 100、liq 80、mark 60(已穿仓)——无符号距离会得 d=1(safe)。
+    const r = liqRisk(pos({ size: 1, entryPx: 100, positionValue: 60, liquidationPx: 80 }));
+    expect(r?.state).toBe("danger");
+    expect(r?.margin).toBe(0);
+  });
+  it("richer 返回:携带 mark 与非空 liquidationPx(消费端不再重推)", () => {
+    const r = liqRisk(pos({}));
+    expect(r?.mark).toBeCloseTo(3380);
+    expect(r?.liquidationPx).toBe(2140);
+  });
   it("liquidationPx null / 开仓=强平 / size 0 → null(UI 降级为文本)", () => {
     expect(liqRisk(pos({ liquidationPx: null }))).toBeNull();
     expect(liqRisk(pos({ entryPx: 2140 }))).toBeNull();

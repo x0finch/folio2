@@ -66,17 +66,26 @@ export const LIQ_DANGER_BELOW = 0.5; // 余量 < 0.5(已走完一半路程)→ �
 
 export type LiqRiskState = "safe" | "warn" | "danger";
 
-// 安全余量 d = |标记 − 强平| / |开仓 − 强平|:1 = 与开仓时等距,0 = 已到强平。
-// 方向无关(多空同构)。强平缺失 / 开仓=强平 / 标记不可推 → null(行内降级为文本)。
-export function liqRisk(p: PerpPositionView): { margin: number; state: LiqRiskState } | null {
+export interface LiqRisk {
+  margin: number;
+  state: LiqRiskState;
+  mark: number; // 标记价(此处一并携带,消费端不再各自重推)
+  liquidationPx: number; // 非空版强平价(risk 非 null 即有)
+}
+
+// 安全余量 = (标记 − 强平) / (开仓 − 强平),带符号:1 = 与开仓时等距、0 = 已到强平;
+// 标记越到强平**另一侧**(穿仓/脏快照)为负 → clamp 到 0 = danger——无符号距离会把穿仓
+// 误读成「安全」(code review #1)。方向无关(多空同构:分子分母同侧同号)。
+// 强平缺失 / 开仓=强平 / 标记不可推 → null(行内降级为文本)。
+export function liqRisk(p: PerpPositionView): LiqRisk | null {
   const mark = markPx(p);
   if (mark == null || p.liquidationPx == null) return null;
-  const span = Math.abs(p.entryPx - p.liquidationPx);
+  const span = p.entryPx - p.liquidationPx;
   if (span === 0) return null;
-  const margin = Math.abs(mark - p.liquidationPx) / span;
+  const margin = Math.max((mark - p.liquidationPx) / span, 0);
   const state: LiqRiskState =
     margin < LIQ_DANGER_BELOW ? "danger" : margin < LIQ_WARN_BELOW ? "warn" : "safe";
-  return { margin, state };
+  return { margin, state, mark, liquidationPx: p.liquidationPx };
 }
 
 export function toPerpView(balances: PerpBalance[]): PerpView {

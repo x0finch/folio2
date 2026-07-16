@@ -1,5 +1,6 @@
 import { cn } from "@folio/ui";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
+import { signedUsd } from "../lib/signed-usd";
 
 // 全站统一的「价值 + 单符号增量」块(右对齐,H5 #120):上市值,下 `{±}$Δ P%` 单前置符号、
 // 同色 --pos/--neg。代币行(24h)/ 永续仓位(uPnL)/ DeFi 协议行(24h 聚合)共用 ——
@@ -19,8 +20,7 @@ export function ValueDelta({
       <div className={cn("font-medium tabular-nums", value < 0 && "text-neg")}>{usd(value)}</div>
       {delta != null && delta !== 0 && (
         <div className={cn("text-xs tabular-nums", delta > 0 ? "text-pos" : "text-neg")}>
-          {delta > 0 ? "+" : "−"}
-          {usd(Math.abs(delta))}
+          {signedUsd(usd, delta)}
           {pct != null && ` ${Math.abs(pct).toFixed(2)}%`}
         </div>
       )}

@@ -132,21 +132,24 @@ export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] 
   return [...byProtocol].map(([protocol, rows]) => ({ protocol, rows }));
 }
 
-// 协议行的 24h 增值聚合:逐行 dayValueChange(负债行负值 → 升值为负贡献,方向天然正确),
-// pct 相对前值合计。整协议无一行带 change24h → null(UI 只显小计,不显增量)。
+// 协议行的 24h 增值聚合:逐行 dayValueChange(负债行负值 → 升值为负贡献,方向天然正确)。
+// pct 分母 = 协议**总敞口**前值(全量行的 |前值| 之和,缺 change24h 的行按现值计):
+// 用净值当分母会在 对冲仓(存≈借,净值近零)与 部分富化(分母只剩小行)时产生荒谬百分比
+// (code review #3)。整协议无一行带 change24h → null(UI 只显小计,不显增量)。
 export function protocolDayChange(
   rows: Pick<DefiRow, "usdValue" | "change24h">[],
 ): { delta: number; pct: number | null } | null {
   let delta = 0;
-  let prev = 0;
+  let grossPrev = 0;
   let any = false;
   for (const r of rows) {
     const d = dayValueChange(r.usdValue, r.change24h);
-    if (d == null) continue;
-    any = true;
-    delta += d;
-    prev += r.usdValue - d;
+    if (d != null) {
+      any = true;
+      delta += d;
+    }
+    grossPrev += Math.abs(r.usdValue - (d ?? 0));
   }
   if (!any) return null;
-  return { delta, pct: prev !== 0 ? (delta / Math.abs(prev)) * 100 : null };
+  return { delta, pct: grossPrev !== 0 ? (delta / grossPrev) * 100 : null };
 }

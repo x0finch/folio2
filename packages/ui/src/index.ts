@@ -27,6 +27,7 @@ export {
   ChartTooltipContent,
 } from "./components/chart";
 export { Fab, fabVariants } from "./components/fab";
+export { HoverPopover } from "./components/hover-popover";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";

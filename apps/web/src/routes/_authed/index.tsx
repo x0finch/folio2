@@ -77,8 +77,9 @@ function Overview() {
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(accountTotals, groups, memberships);
   const defiGroups = mergeDefiGroups(sections);
+  // 仅权益无持仓的账户也入列(code review #7):权益条可见、权益合计不缺斤短两。
   const perpItems = sections.flatMap((s) =>
-    s.perp && s.perp.positions.length > 0
+    s.perp && (s.perp.positions.length > 0 || s.perp.equity != null)
       ? [
           {
             id: s.account.id,

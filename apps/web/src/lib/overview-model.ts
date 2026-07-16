@@ -97,7 +97,19 @@ export async function buildOverview(
   }
 
   // 2) 富化(附回)→ 组装 AggInput → 聚合。
-  const rows = await enrichEligible(eligible, tokens);
+  // 三批 I/O 互相独立(聚合富化 / defi 展示富化 / 每账户现推净值)→ 并行,不再串行叠加
+  // 每批的 D1 往返延迟(code review #8)。defi 批只认 tokenKey 明确的行(defiAssetRef 门)。
+  const defiFlat = accounts.flatMap((a) =>
+    balancesOf(a.id).flatMap((b) => {
+      const ref = defiAssetRef(b);
+      return ref ? [{ b, ref }] : [];
+    }),
+  );
+  const [rows, defiEnriched, liveTotals] = await Promise.all([
+    enrichEligible(eligible, tokens),
+    tokens.enrich(defiFlat.map((x) => x.ref)),
+    deriveLiveAccountTotals(accounts, byAccount, tokens, mode),
+  ]);
   const aggInputs: AggInput[] = rows.map(({ account, b, margin, e }) => ({
     symbol: b.symbol,
     amount: b.amount,
@@ -148,14 +160,12 @@ export async function buildOverview(
   const holdingsSubtotal = holdings.reduce((sum, h) => sum + h.totalValue, 0);
   const pricesStale = rows.some(({ e }) => e?.priceStale);
 
-  // 3) 次级分区(每账户 defi 分组 + perp 敞口;perp 权益已进 Holdings → 此处只渲染 positions)。
-  // defi 行先做展示富化(H5 #120:协议行 24h 聚合要 change24h;defi 不进聚合 → 单独一小批
-  // cache-only enrich,只认 tokenKey 明确的行)。
-  const defiFlat = accounts.flatMap((a) => balancesOf(a.id).filter((b) => defiAssetRef(b) != null));
-  const defiEnriched = await tokens.enrich(defiFlat.map((b) => defiAssetRef(b)));
-  const defiChange = new Map(defiFlat.map((b, i) => [b, defiEnriched[i]?.change24h]));
+  // 3) 次级分区(每账户 defi 分组 + perp 敞口;perp 权益已进 Holdings → 此处渲染 positions
+  // 与权益)。change24h 按行 id 附回(不按对象引用键——那只在 balancesOf 恰好返回同批对象时
+  // 成立,克隆/规整一步就全落空,code review #9)。
+  const defiChange = new Map(defiFlat.map((x, i) => [x.b.id, defiEnriched[i]?.change24h]));
   const withDefiChange = (bs: OverviewBalance[]) =>
-    bs.map((b) => (defiChange.has(b) ? { ...b, change24h: defiChange.get(b) } : b));
+    bs.map((b) => (defiChange.has(b.id) ? { ...b, change24h: defiChange.get(b.id) } : b));
 
   let defiSubtotal = 0;
   const sections = accounts
@@ -180,12 +190,17 @@ export async function buildOverview(
         perp: secs.perp,
       };
     })
-    .filter((s) => s.defi.length > 0 || (s.perp?.positions.length ?? 0) > 0);
+    // 仅权益、无持仓的 perp 账户也保留(code review #7):Perps tab 显示其权益条 + 无持仓
+    // 文案,权益合计小计才是真「各账户权益合计」。
+    .filter(
+      (s) =>
+        s.defi.length > 0 ||
+        (s.perp != null && (s.perp.positions.length > 0 || s.perp.equity != null)),
+    );
 
   // 4) 每账户净值(供 ByGroup 标签分组小计)+ 组合总额(按账户去重)。
-  // 现推(不落库):按当前 mode + 实时源价重算每账户净值,替代快照冻结 totalUsd。曲线「当下点」
-  // 复用同一 deriveLiveAccountTotals → 主页总价 ≡ 曲线当下点(#81)。
-  const liveTotals = await deriveLiveAccountTotals(accounts, byAccount, tokens, mode);
+  // 现推(不落库,liveTotals 已在步骤 2 并行求得):按当前 mode + 实时源价重算每账户净值,
+  // 替代快照冻结 totalUsd。曲线「当下点」复用同一 deriveLiveAccountTotals → 主页总价 ≡ 曲线当下点(#81)。
   const accountTotals = accounts.map((account) => ({
     account: { id: account.id, label: account.label },
     totalUsd: liveTotals.get(account.id) ?? 0,
