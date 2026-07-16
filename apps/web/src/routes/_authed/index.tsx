@@ -137,6 +137,7 @@ function Overview() {
                         <PerpPositions
                           key={s.account.id}
                           view={s.perp}
+                          platform={s.account.platform}
                           accountLabel={s.account.label}
                         />,
                       ]

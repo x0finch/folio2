@@ -235,3 +235,37 @@ describe("buildOverview —— defi 行 change24h 富化", () => {
     expect(rows.find((r) => r.symbol === "LP")?.change24h).toBeUndefined();
   });
 });
+
+// —— H5 评审:sections.account 带平台展示(永续节头体现场馆) ——
+describe("buildOverview —— sections.account.platform", () => {
+  it("connectorMeta 命中 → name + 代理 logo;未注入 → undefined", async () => {
+    const accounts = [account("h", "watch", "hyperliquid")];
+    const meta = JSON.stringify({ withdrawable: 1, totalMarginUsed: 0, totalNtlPos: 0 });
+    const pos = JSON.stringify({
+      side: "long",
+      entryPx: 1,
+      positionValue: 1,
+      unrealizedPnl: 0,
+      liquidationPx: null,
+      marginUsed: 0,
+    });
+    const byAccount = new Map([
+      [
+        "h",
+        snap("h", 1, [
+          bal({ kind: "perp_equity", amount: 1, usdValue: 1, metaJson: meta }),
+          bal({ kind: "perp_position", symbol: "ETH", amount: 1, metaJson: pos }),
+        ]),
+      ],
+    ]);
+    const connectorMeta = (key: string) =>
+      key === "hyperliquid" ? { key, name: "Hyperliquid", logo: "https://x/hl.png" } : null;
+    const withMeta = await buildOverview(accounts, byAccount, { tokens, platforms, connectorMeta });
+    expect(withMeta.sections[0].account.platform).toEqual({
+      name: "Hyperliquid",
+      logo: `/api/logo/platform/${encodeURIComponent("hyperliquid")}`,
+    });
+    const noMeta = await buildOverview(accounts, byAccount, { tokens, platforms });
+    expect(noMeta.sections[0].account.platform).toBeUndefined();
+  });
+});

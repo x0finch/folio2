@@ -53,7 +53,7 @@ async function enrichEligible(eligible: Elig[], tokens: Tokens): Promise<Enriche
 export interface OverviewView {
   holdings: ReturnType<typeof buildCanonicalHoldings>;
   sections: {
-    account: { id: string; label: string };
+    account: { id: string; label: string; platform?: { name: string; logo?: string } };
     defi: ReturnType<typeof toAccountSections>["defi"];
     perp: ReturnType<typeof toAccountSections>["perp"];
   }[];
@@ -165,8 +165,17 @@ export async function buildOverview(
         (s, g) => s + g.rows.reduce((ss, r) => ss + r.usdValue, 0),
         0,
       );
+      // 平台展示(H5 评审:永续节头体现场馆):connectorId 即平台键,连接器 manifest 自带
+      // name+logo,logo 走代理(ADR 0008)。无 connectorMeta(测试等)→ undefined,UI 只显账户名。
+      const cm = connectorMeta?.(account.connectorId);
       return {
-        account: { id: account.id, label: account.label },
+        account: {
+          id: account.id,
+          label: account.label,
+          platform: cm
+            ? { name: cm.name, logo: platformLogoUrl(account.connectorId, cm.logo) }
+            : undefined,
+        },
         defi: secs.defi,
         perp: secs.perp,
       };

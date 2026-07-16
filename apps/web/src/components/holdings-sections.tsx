@@ -13,11 +13,31 @@ import { ValueDelta } from "./value-delta";
 // 行内色语义唯一(rev5):红绿只表达盈亏与负债,--warn/--neg 警报只在 LiqRing 上,
 // 方向 pill 与类型 chip 一律中性灰(方向/类型是事实,不是评价)。
 
-// eyebrow 节头:小号大写 + 可选 muted 副标(总览 tab 上是账户名;抽屉单账户上下文不传)。
-function SectionHeader({ title, sub }: { title: string; sub?: string }) {
+// eyebrow 节头:小号大写 + 可选平台(场馆小 logo + 名)+ 可选 muted 副标(账户名)。
+// 平台/副标只在总览 tab 传(抽屉单账户上下文,头部已有 ConnectorBadge,不重复)。
+export interface PlatformBadge {
+  name: string;
+  logo?: string;
+}
+
+function SectionHeader({
+  title,
+  platform,
+  sub,
+}: {
+  title: string;
+  platform?: PlatformBadge;
+  sub?: string;
+}) {
   return (
-    <div className="flex items-baseline gap-2.5">
+    <div className="flex items-center gap-2.5">
       <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
+      {platform && (
+        <span className="flex items-center gap-1.5">
+          <LogoAvatar size="sm" className="size-4" src={platform.logo} fallback={platform.name} />
+          <span className="text-muted-foreground text-xs">{platform.name}</span>
+        </span>
+      )}
       {sub && <span className="text-muted-foreground/70 text-xs">{sub}</span>}
     </div>
   );
@@ -81,8 +101,16 @@ function PerpRow({ p }: { p: PerpPositionView }) {
   );
 }
 
-// 永续分区:节头 + 权益条(权益 / Σ uPnL / 保证金占用%)+ 仓位行。
-export function PerpPositions({ view, accountLabel }: { view: PerpView; accountLabel?: string }) {
+// 永续分区:节头(+平台/账户名)+ 权益条(权益 / Σ uPnL / 保证金占用%)+ 仓位行。
+export function PerpPositions({
+  view,
+  platform,
+  accountLabel,
+}: {
+  view: PerpView;
+  platform?: PlatformBadge;
+  accountLabel?: string;
+}) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
   const { equity, positions } = view;
@@ -91,7 +119,7 @@ export function PerpPositions({ view, accountLabel }: { view: PerpView; accountL
     equity && equity.accountValue > 0 ? equity.totalMarginUsed / equity.accountValue : null;
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeader title={t("perpSectionTitle")} sub={accountLabel} />
+      <SectionHeader title={t("perpSectionTitle")} platform={platform} sub={accountLabel} />
       {equity && (
         <div className="flex flex-wrap gap-x-10 gap-y-2">
           <EquityStat label={t("accountEquity")} value={usd(equity.accountValue)} />
