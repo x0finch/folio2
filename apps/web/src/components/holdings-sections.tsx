@@ -5,6 +5,7 @@ import { protocolDayChange } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
+import { AccountName } from "./account-name";
 import { LiqRing } from "./liq-ring";
 import { ValueDelta } from "./value-delta";
 
@@ -38,7 +39,7 @@ function SectionHeader({
           <span className="text-muted-foreground text-xs">{platform.name}</span>
         </span>
       )}
-      {sub && <span className="text-muted-foreground/70 text-xs">{sub}</span>}
+      {sub && <AccountName name={sub} className="text-muted-foreground/70 text-xs" />}
     </div>
   );
 }
@@ -78,7 +79,7 @@ function PerpRow({ p }: { p: PerpPositionView }) {
   const usd = useDisplayValue();
   const risk = liqRisk(p);
   return (
-    <div className="flex items-center gap-3 py-3">
+    <div className="flex items-center gap-3 border-border/60 border-b py-3">
       <NeutralChip>
         {p.leverage != null ? `${p.leverage}x ` : ""}
         {sideLabel(p.side)}
@@ -127,7 +128,8 @@ function PerpAccountBody({ view }: { view: PerpView }) {
       {positions.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("noOpenPositions")}</p>
       ) : (
-        <div className="flex flex-col divide-y divide-border/60">
+        // 行分隔线含末行(section 收尾有界,与下一节明确分开)。
+        <div className="flex flex-col">
           {positions.map((p) => (
             <PerpRow key={p.coin} p={p} />
           ))}
@@ -179,20 +181,19 @@ export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
       <SectionHeader title={t("perpSectionTitle")} />
       {sorted.map((it) => (
         <div key={it.id} className="flex flex-col gap-3">
-          {/* 场馆子头:logo + 场馆名(比 eyebrow 重一档)+ muted 账户名。 */}
-          <div className="flex items-center gap-2">
+          {/* 场馆子头:logo 左跨两行,右侧 场馆名 / 账户名(带钱包图标,统一 <AccountName>)。 */}
+          <div className="flex items-center gap-2.5">
             {it.platform && (
-              <LogoAvatar
-                size="sm"
-                className="size-4"
-                src={it.platform.logo}
-                fallback={it.platform.name}
-              />
+              <LogoAvatar size="sm" src={it.platform.logo} fallback={it.platform.name} />
             )}
-            <span className="font-medium text-sm">{it.platform?.name ?? it.accountLabel}</span>
-            {it.platform && it.accountLabel && (
-              <span className="text-muted-foreground text-xs">{it.accountLabel}</span>
-            )}
+            <div className="min-w-0">
+              <div className="truncate font-medium text-sm">
+                {it.platform?.name ?? it.accountLabel}
+              </div>
+              {it.platform && it.accountLabel && (
+                <AccountName name={it.accountLabel} className="text-muted-foreground text-xs" />
+              )}
+            </div>
           </div>
           <PerpAccountBody view={it.view} />
         </div>
@@ -209,7 +210,7 @@ function DefiProtocolRow({ group }: { group: DefiGroup }) {
   const change = protocolDayChange(group.rows);
   const types = [...new Set(group.rows.map((r) => r.positionType).filter((ty) => ty != null))];
   return (
-    <div className="flex items-center gap-3 py-3">
+    <div className="flex items-center gap-3 border-border/60 border-b py-3">
       {/* 协议 logo 位:数据管线未建(follow-up issue),恒为首字母 fallback;管线落地原位换图。 */}
       <LogoAvatar fallback={group.protocol} size="sm" />
       <div className="min-w-0 flex-1">
@@ -250,7 +251,7 @@ export function DefiPositions({ groups }: { groups: DefiGroup[] }) {
   return (
     <section className="flex flex-col gap-3">
       <SectionHeader title={t("defiSectionTitle")} />
-      <div className="flex flex-col divide-y divide-border/60">
+      <div className="flex flex-col">
         {groups.map((g) => (
           <DefiProtocolRow key={g.protocol} group={g} />
         ))}
