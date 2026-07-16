@@ -59,7 +59,7 @@ export function LiqRing({ risk, position }: { risk: LiqRisk; position: PerpPosit
       trigger="hover"
       side={pop.side}
       onOpenChange={pop.onOpenChange}
-      className={pop.rootClassName}
+      className={cn("shrink-0", pop.rootClassName)}
     >
       <PopoverTrigger>
         {/* 可聚焦 button:键盘 Tab → focus 即开(hover 模式对 focus 同样生效)。 */}

@@ -49,6 +49,7 @@ export function useHoverPopover() {
     side,
     onOpenChange,
     measureRef,
-    rootClassName: cn("shrink-0", open && "z-50", backdropHidden && "[&>[aria-hidden]]:hidden"),
+    // 仅行为类(抬 z / 关闭隐垫底);布局(shrink-0 或 flex-1)由调用方按锚点大小自定。
+    rootClassName: cn(open && "z-50", backdropHidden && "[&>[aria-hidden]]:hidden"),
   };
 }

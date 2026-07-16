@@ -291,3 +291,27 @@ describe("defiSummary", () => {
     expect(more).toBe(0);
   });
 });
+
+// —— H5 评审:摘要腿按角色分组(每条腿对应哪个角色) ——
+
+import { groupLegsByRole } from "../src/lib/account-view";
+
+describe("groupLegsByRole", () => {
+  const r = (id: string, positionType?: string): DefiRow => ({
+    id,
+    symbol: "X",
+    amount: 1,
+    usdValue: 1,
+    positionType,
+  });
+  it("按 positionType 分组,保持传入顺序(值降序)", () => {
+    const g = groupLegsByRole([r("a", "deposit"), r("b", "deposit"), r("c", "loan")]);
+    expect(g.map((x) => x.role)).toEqual(["deposit", "loan"]);
+    expect(g[0].legs.map((l) => l.id)).toEqual(["a", "b"]);
+    expect(g[1].legs.map((l) => l.id)).toEqual(["c"]);
+  });
+  it("无 positionType → role undefined 组", () => {
+    const g = groupLegsByRole([r("a")]);
+    expect(g).toEqual([{ role: undefined, legs: [r("a")] }]);
+  });
+});

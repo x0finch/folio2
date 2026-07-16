@@ -22,7 +22,7 @@ export function NoteIndicator({ note, formatNumber, className }: NoteIndicatorPr
       trigger="hover"
       side={pop.side}
       onOpenChange={pop.onOpenChange}
-      className={pop.rootClassName}
+      className={cn("shrink-0", pop.rootClassName)}
     >
       <PopoverTrigger>
         <button

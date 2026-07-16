@@ -1,7 +1,21 @@
-import { LogoAvatar, Separator, SharedLayoutBg } from "@folio/ui";
+import {
+  cn,
+  LogoAvatar,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Separator,
+  SharedLayoutBg,
+  useHoverPopover,
+} from "@folio/ui";
 import { useTranslations } from "use-intl";
-import type { DefiGroup } from "../lib/account-view";
-import { defiSummary, protocolDayChange } from "../lib/account-view";
+import type { DefiGroup, DefiRow } from "../lib/account-view";
+import {
+  defiMeaningfulLegs,
+  defiSummary,
+  groupLegsByRole,
+  protocolDayChange,
+} from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
@@ -179,49 +193,86 @@ export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
   );
 }
 
-// 类型 chip 上限:多类型协议(如借贷的 deposit+loan)最多显 2 个,余量折叠成 +n。
-const MAX_TYPE_CHIPS = 2;
+// 负债腿的展示:「−」+ 中性色(不用亏损红 —— 负债≠亏损,红/绿只留给涨跌);角色由 chip/分组承载。
+const legText = (r: DefiRow) =>
+  `${r.usdValue < 0 ? "−" : ""}${formatNumber(Math.abs(r.amount))} ${r.symbol}`;
 
-// 行内容:单个 flex 容器(SharedLayoutBg 接线,同上)。
+// 行内每腿的角色小标(B 方案):极小方角标签,capitalize;hover 行时底色翻 --background 不融进滑块。
+function LegRole({ role }: { role?: string }) {
+  if (!role) return null;
+  return (
+    <span className="ml-1 rounded bg-muted px-1 py-px align-middle text-[10px] text-muted-foreground capitalize transition-colors group-hover:bg-background">
+      {role}
+    </span>
+  );
+}
+
+// 行内容:单个 flex 容器(SharedLayoutBg 接线,同上)。左簇(logo+名+摘要)是 hover 弹层触发器。
 function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
+  const usd = useDisplayValue();
   const subtotal = group.rows.reduce((s, r) => s + r.usdValue, 0);
   const change = protocolDayChange(group.rows);
-  const types = [...new Set(group.rows.map((r) => r.positionType).filter((ty) => ty != null))];
-  // 摘要只留有值腿(按值降序、封顶),丢掉几十条 0 值空仓/奖励腿的噪音。
+  // 行内:有值腿按值降序封顶 + 折 more,每腿贴角色 chip。弹层:全量有值腿按角色分组。
   const { legs, more } = defiSummary(group.rows);
+  const roleGroups = groupLegsByRole(defiMeaningfulLegs(group.rows));
+  const pop = useHoverPopover();
   return (
     <div className="flex w-full items-center gap-3">
-      {/* 协议 logo 位:数据管线未建(follow-up issue),恒为首字母 fallback;管线落地原位换图。 */}
-      <LogoAvatar fallback={group.protocol} size="sm" />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-medium">{group.protocol}</span>
-          {types.slice(0, MAX_TYPE_CHIPS).map((ty) => (
-            <NeutralChip key={ty}>
-              <span className="capitalize">{ty}</span>
-            </NeutralChip>
-          ))}
-          {types.length > MAX_TYPE_CHIPS && (
-            <span className="shrink-0 text-muted-foreground text-xs">
-              +{types.length - MAX_TYPE_CHIPS}
-            </span>
-          )}
-        </div>
-        {/* 头寸摘要:有值腿逐段(负值段=负债/借出 --neg);超出封顶数折 +n。 */}
-        <div className="truncate text-muted-foreground text-xs tabular-nums">
-          {legs.map((r, i) => (
-            <span key={r.id}>
-              {i > 0 && " · "}
-              {/* 负债腿:前置「−」+ 红,与抵押/持有腿(同币也可能出现)一眼分开。 */}
-              <span className={r.usdValue < 0 ? "text-neg" : undefined}>
-                {r.usdValue < 0 ? "−" : ""}
-                {formatNumber(Math.abs(r.amount))} {r.symbol}
-              </span>
-            </span>
-          ))}
-          {more > 0 && <span className="text-muted-foreground/70"> +{more}</span>}
-        </div>
-      </div>
+      {/* 左簇即触发器:hover/focus 展开完整分组明细。协议 logo 数据管线未建(follow-up),首字母兜底。 */}
+      <Popover
+        trigger="hover"
+        side={pop.side}
+        onOpenChange={pop.onOpenChange}
+        className={cn("min-w-0 flex-1", pop.rootClassName)}
+      >
+        <PopoverTrigger>
+          <button
+            ref={pop.measureRef}
+            type="button"
+            className="flex w-full min-w-0 items-center gap-3 text-left outline-none"
+          >
+            <LogoAvatar fallback={group.protocol} size="sm" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{group.protocol}</div>
+              {/* 头寸摘要(B):有值腿逐段 + 角色 chip;负债「−」中性色;超出封顶折 +n。 */}
+              <div className="truncate text-muted-foreground text-xs tabular-nums">
+                {legs.map((r, i) => (
+                  <span key={r.id}>
+                    {i > 0 && " · "}
+                    {legText(r)}
+                    <LegRole role={r.positionType} />
+                  </span>
+                ))}
+                {more > 0 && <span className="text-muted-foreground/70"> +{more}</span>}
+              </div>
+            </div>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent>
+          {/* 完整明细:按角色分段,组内全部有值腿 + 每腿美元值;负债「−」中性色;无净值行。 */}
+          <div className="flex min-w-44 flex-col gap-0.5 p-1">
+            <div className="mb-1 font-medium text-sm">{group.protocol}</div>
+            {roleGroups.map((g) => (
+              <div key={g.role ?? "_"}>
+                {g.role && (
+                  <div className="mt-1.5 text-muted-foreground text-xs uppercase tracking-wide">
+                    {g.role}
+                  </div>
+                )}
+                {g.legs.map((r) => (
+                  <div key={r.id} className="flex justify-between gap-6 text-xs tabular-nums">
+                    <span>{legText(r)}</span>
+                    <span className="text-muted-foreground">
+                      {r.usdValue < 0 ? "−" : ""}
+                      {usd(Math.abs(r.usdValue))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
       {/* 右:协议净小计 + 24h 聚合增量(整协议缺 change24h → 只显小计)。 */}
       <ValueDelta value={subtotal} delta={change?.delta} pct={change?.pct} />
     </div>

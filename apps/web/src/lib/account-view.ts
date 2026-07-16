@@ -154,19 +154,41 @@ export function protocolDayChange(
   return { delta, pct: grossPrev !== 0 ? (delta / grossPrev) * 100 : null };
 }
 
-// 协议摘要腿(H5 评审:头寸摘要副行别拼出几十条 0 值空仓/奖励腿 → 一行噪音看不懂)。
-// 规则:按 |美元值| 降序,只留有值的腿(≥ DEFI_SUMMARY_DUST_USD,即不四舍五入成 $0.00 的);
-// 全是 dust 则退回展示最大 1 段(行不空);取前 DEFI_SUMMARY_MAX 段,其余计入 more。
+// 协议有值腿(H5 评审:头寸摘要别拼出几十条 0 值空仓/奖励腿 → 噪音看不懂)。
+// 按 |美元值| 降序,只留不四舍五入成 $0.00 的腿(≥ DEFI_SUMMARY_DUST_USD);全是 dust 则退回
+// 最大 1 段(行不空)。行内摘要取前 N 段 + 折 more(defiSummary),hover 弹层用全量(本函数)。
 const DEFI_SUMMARY_MAX = 3;
 const DEFI_SUMMARY_DUST_USD = 0.005; // < 半分钱即视为空腿
+
+export function defiMeaningfulLegs(rows: DefiRow[]): DefiRow[] {
+  const sorted = [...rows].sort((a, b) => Math.abs(b.usdValue) - Math.abs(a.usdValue));
+  const meaningful = sorted.filter((r) => Math.abs(r.usdValue) >= DEFI_SUMMARY_DUST_USD);
+  return meaningful.length > 0 ? meaningful : sorted.slice(0, 1);
+}
 
 export function defiSummary(
   rows: DefiRow[],
   max: number = DEFI_SUMMARY_MAX,
 ): { legs: DefiRow[]; more: number } {
-  const sorted = [...rows].sort((a, b) => Math.abs(b.usdValue) - Math.abs(a.usdValue));
-  const meaningful = sorted.filter((r) => Math.abs(r.usdValue) >= DEFI_SUMMARY_DUST_USD);
-  const pool = meaningful.length > 0 ? meaningful : sorted.slice(0, 1);
+  const pool = defiMeaningfulLegs(rows);
   const legs = pool.slice(0, max);
   return { legs, more: pool.length - legs.length };
+}
+
+// 摘要腿按角色(positionType)分组,保持传入顺序(= defiSummary 的值降序)。
+// 让副行读成「Deposit 843 GHO, 0.24 WETH · Loan −219 GHO」——每条腿对应哪个角色一目了然
+// (H5 评审:同侧角色/同币腿此前分不清)。无 positionType 的腿归入 role=undefined 组。
+export function groupLegsByRole(legs: DefiRow[]): { role?: string; legs: DefiRow[] }[] {
+  const order: string[] = [];
+  const byRole = new Map<string, DefiRow[]>();
+  for (const l of legs) {
+    const key = l.positionType ?? "";
+    const g = byRole.get(key);
+    if (g) g.push(l);
+    else {
+      byRole.set(key, [l]);
+      order.push(key);
+    }
+  }
+  return order.map((key) => ({ role: key || undefined, legs: byRole.get(key) as DefiRow[] }));
 }
