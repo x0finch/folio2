@@ -4,9 +4,9 @@ import { useTranslations } from "use-intl";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { type LiqRiskState, liqRisk, markPx, type PerpPositionView } from "../lib/perp";
 
-// 强平风险环(H5 #120,概念稿四轮定稿:温度计→血条→环):~20px SVG 圆环把「距强平多远」
-// 压缩成 占比(安全余量 clamp 到满环)+ 三态色。色语义唯一(rev5):安全 = muted 灰(不庆祝),
-// 警告 = --warn,危险 = --neg 且仅此态外发光 —— 红绿留给盈亏,报警才引人注意。
+// 强平风险环(H5 #120,概念稿定稿:温度计→血条→环):~20px SVG 圆环把「距强平多远」
+// 压缩成 占比(安全余量 clamp 到满环)+ 三态色:安全 = --pos、警告 = --warn、危险 = --neg,
+// 无发光(rev6 用户定稿:去泛光、安全态回绿)。
 // 开仓/标记/强平/余量% 走 hover popover 渐进披露(触屏点按;NoteIndicator 同款交互)。
 // liqRisk 为 null(无强平价等)时由父级降级为文本,不渲染本组件。
 
@@ -14,7 +14,7 @@ const R = 8; // viewBox 24 内的环半径
 const CIRCUMFERENCE = 2 * Math.PI * R;
 
 const arcClass: Record<LiqRiskState, string> = {
-  safe: "text-muted-foreground",
+  safe: "text-pos",
   warn: "text-warn",
   danger: "text-neg",
 };
@@ -22,14 +22,7 @@ const arcClass: Record<LiqRiskState, string> = {
 function RiskArc({ margin, state }: { margin: number; state: LiqRiskState }) {
   const arc = Math.min(Math.max(margin, 0), 1) * CIRCUMFERENCE;
   return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      // 发光只在危险态:token 引用(--neg),深浅主题各自成立。
-      style={state === "danger" ? { filter: "drop-shadow(0 0 3px var(--neg))" } : undefined}
-    >
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r={R} fill="none" strokeWidth="3.4" className="stroke-muted" />
       <circle
         cx="12"
@@ -84,7 +77,7 @@ export function LiqRing({ position }: { position: PerpPositionView }) {
           <DetailRow
             label={t("safetyMargin")}
             value={`${Math.round(risk.margin * 100)}%`}
-            className={cn("font-medium", risk.state !== "safe" && arcClass[risk.state])}
+            className={cn("font-medium", arcClass[risk.state])}
           />
           <DetailRow label={t("entry")} value={usd(position.entryPx)} />
           {mark != null && <DetailRow label={t("mark")} value={usd(mark)} />}

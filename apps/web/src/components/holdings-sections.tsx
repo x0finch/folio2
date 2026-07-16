@@ -23,10 +23,10 @@ function SectionHeader({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-// 中性灰 chip:方向 pill(`3x Long`)与 DeFi 类型 chip 共用形。
+// 中性灰 chip:方向 pill(`3x Long`)与 DeFi 类型 chip 共用形(小号,不与标题争重量)。
 function NeutralChip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground text-xs tabular-nums">
+    <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-[11px] text-muted-foreground tabular-nums">
       {children}
     </span>
   );
