@@ -1,4 +1,4 @@
-import { cn, LogoAvatar } from "@folio/ui";
+import { cn, LogoAvatar, SharedLayoutBg } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import type { DefiGroup } from "../lib/account-view";
 import { protocolDayChange } from "../lib/account-view";
@@ -31,7 +31,7 @@ function SectionHeader({
   sub?: string;
 }) {
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="flex items-center gap-2.5 px-3">
       <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
       {platform && (
         <span className="flex items-center gap-1.5">
@@ -74,12 +74,13 @@ function EquityStat({
 // side 原文 capitalize(Long/Short 不翻译 —— 金融术语中性化是设计定稿)。
 const sideLabel = (side: "long" | "short") => side.charAt(0).toUpperCase() + side.slice(1);
 
-function PerpRow({ p }: { p: PerpPositionView }) {
+// 行内容:单个 flex 容器(SharedLayoutBg 会把子元素内容塞进非 flex 的 z-10 div,同 token-holdings 接线)。
+function PerpRowContent({ p }: { p: PerpPositionView }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
   const risk = liqRisk(p);
   return (
-    <div className="flex items-center gap-3 border-border/60 border-b py-3">
+    <div className="flex w-full items-center gap-3">
       <NeutralChip>
         {p.leverage != null ? `${p.leverage}x ` : ""}
         {sideLabel(p.side)}
@@ -113,7 +114,7 @@ function PerpAccountBody({ view }: { view: PerpView }) {
   return (
     <>
       {equity && (
-        <div className="flex flex-wrap gap-x-10 gap-y-2">
+        <div className="flex flex-wrap gap-x-10 gap-y-2 px-3">
           <EquityStat label={t("accountEquity")} value={usd(equity.accountValue)} />
           <EquityStat
             label={t("upnl")}
@@ -128,12 +129,15 @@ function PerpAccountBody({ view }: { view: PerpView }) {
       {positions.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("noOpenPositions")}</p>
       ) : (
-        // 行分隔线含末行(section 收尾有界,与下一节明确分开)。
-        <div className="flex flex-col">
+        // hover 高亮 = SharedLayoutBg 移动滑块(与代币行同语言,行间无分隔线);
+        // 行必须是直接 DOM 子元素(组件元素收不到注入的 relative/onMouseEnter)。
+        <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
           {positions.map((p) => (
-            <PerpRow key={p.coin} p={p} />
+            <div key={p.coin} className="rounded-xl px-3 py-3">
+              <PerpRowContent p={p} />
+            </div>
           ))}
-        </div>
+        </SharedLayoutBg>
       )}
     </>
   );
@@ -177,7 +181,7 @@ export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
       {sorted.map((it) => (
         <div key={it.id} className="flex flex-col gap-3">
           {/* 场馆子头:logo 左跨两行,右侧 场馆名 / 账户名(带钱包图标,统一 <AccountName>)。 */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 px-3">
             {it.platform && (
               <LogoAvatar size="sm" src={it.platform.logo} fallback={it.platform.name} />
             )}
@@ -200,12 +204,13 @@ export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
 // 类型 chip 上限:多类型协议(如借贷的 deposit+loan)最多显 2 个,余量折叠成 +n。
 const MAX_TYPE_CHIPS = 2;
 
-function DefiProtocolRow({ group }: { group: DefiGroup }) {
+// 行内容:单个 flex 容器(SharedLayoutBg 接线,同上)。
+function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
   const subtotal = group.rows.reduce((s, r) => s + r.usdValue, 0);
   const change = protocolDayChange(group.rows);
   const types = [...new Set(group.rows.map((r) => r.positionType).filter((ty) => ty != null))];
   return (
-    <div className="flex items-center gap-3 border-border/60 border-b py-3">
+    <div className="flex w-full items-center gap-3">
       {/* 协议 logo 位:数据管线未建(follow-up issue),恒为首字母 fallback;管线落地原位换图。 */}
       <LogoAvatar fallback={group.protocol} size="sm" />
       <div className="min-w-0 flex-1">
@@ -253,11 +258,13 @@ export function DefiPositions({
   return (
     <section className="flex flex-col gap-3">
       {!hideHeader && <SectionHeader title={t("defiSectionTitle")} />}
-      <div className="flex flex-col">
+      <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
         {groups.map((g) => (
-          <DefiProtocolRow key={g.protocol} group={g} />
+          <div key={g.protocol} className="rounded-xl px-3 py-3">
+            <DefiProtocolRowContent group={g} />
+          </div>
         ))}
-      </div>
+      </SharedLayoutBg>
     </section>
   );
 }

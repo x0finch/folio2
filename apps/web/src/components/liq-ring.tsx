@@ -66,7 +66,14 @@ export function LiqRing({ position }: { position: PerpPositionView }) {
 
   return (
     // 打开时抬 z-50:beUI popover 面板 root 内绝对定位、不 portal(同 NoteIndicator 的接线注释)。
-    <Popover trigger="hover" onOpenChange={setOpen} className={cn("shrink-0", open && "z-50")}>
+    // side="top":行在 SharedLayoutBg 里各自是 z-10 stacking context,向下开会被后绘制的下一行
+    // 盖住;向上只与更早绘制的行重叠,本行(后绘制)天然在上。
+    <Popover
+      trigger="hover"
+      side="top"
+      onOpenChange={setOpen}
+      className={cn("shrink-0", open && "z-50")}
+    >
       <PopoverTrigger>
         <span className="flex items-center" role="img" aria-label={t("safetyMargin")}>
           <RiskArc margin={risk.margin} state={risk.state} />
