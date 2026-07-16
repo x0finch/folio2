@@ -101,16 +101,8 @@ function PerpRow({ p }: { p: PerpPositionView }) {
   );
 }
 
-// 永续分区:节头(+平台/账户名)+ 权益条(权益 / Σ uPnL / 保证金占用%)+ 仓位行。
-export function PerpPositions({
-  view,
-  platform,
-  accountLabel,
-}: {
-  view: PerpView;
-  platform?: PlatformBadge;
-  accountLabel?: string;
-}) {
+// 单账户的权益条 + 仓位行(无节头;PerpPositions / PerpPositionsList 共用)。
+function PerpAccountBody({ view }: { view: PerpView }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
   const { equity, positions } = view;
@@ -118,8 +110,7 @@ export function PerpPositions({
   const marginRatio =
     equity && equity.accountValue > 0 ? equity.totalMarginUsed / equity.accountValue : null;
   return (
-    <section className="flex flex-col gap-3">
-      <SectionHeader title={t("perpSectionTitle")} platform={platform} sub={accountLabel} />
+    <>
       {equity && (
         <div className="flex flex-wrap gap-x-10 gap-y-2">
           <EquityStat label={t("accountEquity")} value={usd(equity.accountValue)} />
@@ -142,6 +133,70 @@ export function PerpPositions({
           ))}
         </div>
       )}
+    </>
+  );
+}
+
+// 永续分区(单账户):节头(+平台/账户名)+ 权益条 + 仓位行。抽屉直接用。
+export function PerpPositions({
+  view,
+  platform,
+  accountLabel,
+}: {
+  view: PerpView;
+  platform?: PlatformBadge;
+  accountLabel?: string;
+}) {
+  const t = useTranslations("Overview");
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeader title={t("perpSectionTitle")} platform={platform} sub={accountLabel} />
+      <PerpAccountBody view={view} />
+    </section>
+  );
+}
+
+export interface PerpSectionItem {
+  id: string;
+  view: PerpView;
+  platform?: PlatformBadge;
+  accountLabel?: string;
+}
+
+// 永续分区(多账户,总览 tab 用):eyebrow 只出现一次,每账户一个子块(场馆子头 + 权益条 + 仓位行),
+// 按账户权益降序(大仓在前)。单账户退化为 <PerpPositions>(与旧渲染逐像素一致)。
+export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
+  const t = useTranslations("Overview");
+  if (items.length === 1) {
+    const it = items[0];
+    return <PerpPositions view={it.view} platform={it.platform} accountLabel={it.accountLabel} />;
+  }
+  const sorted = [...items].sort(
+    (a, b) => (b.view.equity?.accountValue ?? 0) - (a.view.equity?.accountValue ?? 0),
+  );
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeader title={t("perpSectionTitle")} />
+      {sorted.map((it) => (
+        <div key={it.id} className="flex flex-col gap-3">
+          {/* 场馆子头:logo + 场馆名(比 eyebrow 重一档)+ muted 账户名。 */}
+          <div className="flex items-center gap-2">
+            {it.platform && (
+              <LogoAvatar
+                size="sm"
+                className="size-4"
+                src={it.platform.logo}
+                fallback={it.platform.name}
+              />
+            )}
+            <span className="font-medium text-sm">{it.platform?.name ?? it.accountLabel}</span>
+            {it.platform && it.accountLabel && (
+              <span className="text-muted-foreground text-xs">{it.accountLabel}</span>
+            )}
+          </div>
+          <PerpAccountBody view={it.view} />
+        </div>
+      ))}
     </section>
   );
 }

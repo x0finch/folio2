@@ -2,7 +2,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { DefiPositions, PerpPositions } from "../../components/holdings-sections";
+import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { OverviewSkeleton } from "../../components/skeletons";
 import { TokenHoldings } from "../../components/token-holdings";
@@ -77,6 +77,18 @@ function Overview() {
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(accountTotals, groups, memberships);
   const defiGroups = mergeDefiGroups(sections);
+  const perpItems = sections.flatMap((s) =>
+    s.perp && s.perp.positions.length > 0
+      ? [
+          {
+            id: s.account.id,
+            view: s.perp,
+            platform: s.account.platform,
+            accountLabel: s.account.label,
+          },
+        ]
+      : [],
+  );
   const [tab, setTab] = useState("tokens");
   // 分组 tab 仅在有分组时存在;若选中后分组被删空(loader 重跑),受控值会指向已消失的 tab
   // → 面板全空、指示器无高亮。派生 clamp 回代币,避免陈旧选中。
@@ -129,20 +141,10 @@ function Overview() {
                 {t("noOpenPositions")}
               </p>
             ) : (
-              // v2(H5 #120):永续每账户一节(账户名进节头);DeFi 跨账户按协议合并成独立一节。
+              // v2(H5 #120):永续单节、账户为子块(单账户退化为旧节头形态,权益降序);
+              // DeFi 跨账户按协议合并成独立一节。
               <div className="flex flex-col gap-8">
-                {sections.flatMap((s) =>
-                  s.perp && s.perp.positions.length > 0
-                    ? [
-                        <PerpPositions
-                          key={s.account.id}
-                          view={s.perp}
-                          platform={s.account.platform}
-                          accountLabel={s.account.label}
-                        />,
-                      ]
-                    : [],
-                )}
+                {perpItems.length > 0 && <PerpPositionsList items={perpItems} />}
                 {defiGroups.length > 0 && <DefiPositions groups={defiGroups} />}
               </div>
             )}
