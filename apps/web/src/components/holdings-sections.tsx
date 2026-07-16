@@ -212,7 +212,9 @@ function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
           {legs.map((r, i) => (
             <span key={r.id}>
               {i > 0 && " · "}
+              {/* 负债腿:前置「−」+ 红,与抵押/持有腿(同币也可能出现)一眼分开。 */}
               <span className={r.usdValue < 0 ? "text-neg" : undefined}>
+                {r.usdValue < 0 ? "−" : ""}
                 {formatNumber(Math.abs(r.amount))} {r.symbol}
               </span>
             </span>
