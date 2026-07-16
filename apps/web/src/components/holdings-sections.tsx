@@ -45,9 +45,10 @@ function SectionHeader({
 }
 
 // 中性灰 chip:方向 pill(`3x Long`)与 DeFi 类型 chip 共用形(小号,不与标题争重量)。
+// 行 hover(SharedLayoutBg 滑块 = bg-muted)时底色换 --background,不与滑块融为一体。
 function NeutralChip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-[11px] text-muted-foreground tabular-nums">
+    <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-[11px] text-muted-foreground tabular-nums transition-colors group-hover:bg-background">
       {children}
     </span>
   );
@@ -133,7 +134,7 @@ function PerpAccountBody({ view }: { view: PerpView }) {
         // 行必须是直接 DOM 子元素(组件元素收不到注入的 relative/onMouseEnter)。
         <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
           {positions.map((p) => (
-            <div key={p.coin} className="rounded-xl px-3 py-3">
+            <div key={p.coin} className="group rounded-xl px-3 py-3">
               <PerpRowContent p={p} />
             </div>
           ))}
@@ -260,7 +261,7 @@ export function DefiPositions({
       {!hideHeader && <SectionHeader title={t("defiSectionTitle")} />}
       <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
         {groups.map((g) => (
-          <div key={g.protocol} className="rounded-xl px-3 py-3">
+          <div key={g.protocol} className="group rounded-xl px-3 py-3">
             <DefiProtocolRowContent group={g} />
           </div>
         ))}

@@ -22,8 +22,17 @@ const arcClass: Record<LiqRiskState, string> = {
 function RiskArc({ margin, state }: { margin: number; state: LiqRiskState }) {
   const arc = Math.min(Math.max(margin, 0), 1) * CIRCUMFERENCE;
   return (
+    // 环心恒透明(两个 circle 都 fill=none,滑块/底色可透过);行 hover 时底环换 --background,
+    // 不与 bg-muted 滑块融为一体(group 在行包装层)。
     <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r={R} fill="none" strokeWidth="3.4" className="stroke-muted" />
+      <circle
+        cx="12"
+        cy="12"
+        r={R}
+        fill="none"
+        strokeWidth="3.4"
+        className="stroke-muted transition-colors group-hover:stroke-background"
+      />
       <circle
         cx="12"
         cy="12"
