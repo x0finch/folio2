@@ -165,21 +165,15 @@ export interface PerpSectionItem {
   accountLabel?: string;
 }
 
-// 永续分区(多账户,总览 tab 用):eyebrow 只出现一次,每账户一个子块(场馆子头 + 权益条 + 仓位行),
-// 按账户权益降序(大仓在前)。单账户退化为 <PerpPositions>(与旧渲染逐像素一致)。
+// 永续分区(总览「永续」tab 用):每账户一个子块(场馆子头 + 权益条 + 仓位行),按账户权益
+// 降序(大仓在前)。tab 本身即「永续」,不再有 eyebrow 节头,场馆子头就是块的身份。
 export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
-  const t = useTranslations("Overview");
-  if (items.length === 1) {
-    const it = items[0];
-    return <PerpPositions view={it.view} platform={it.platform} accountLabel={it.accountLabel} />;
-  }
   const sorted = [...items].sort(
     (a, b) => (b.view.equity?.accountValue ?? 0) - (a.view.equity?.accountValue ?? 0),
   );
   return (
     // 账户子块间距比块内(gap-3)大一档,块与块分得开。
     <section className="flex flex-col gap-6">
-      <SectionHeader title={t("perpSectionTitle")} />
       {sorted.map((it) => (
         <div key={it.id} className="flex flex-col gap-3">
           {/* 场馆子头:logo 左跨两行,右侧 场馆名 / 账户名(带钱包图标,统一 <AccountName>)。 */}
@@ -247,11 +241,18 @@ function DefiProtocolRow({ group }: { group: DefiGroup }) {
 }
 
 // DeFi 分区:每协议一行(总览传跨账户合并的 groups,抽屉传单账户 groups)。
-export function DefiPositions({ groups }: { groups: DefiGroup[] }) {
+// hideHeader:总览已有独立「DeFi」tab,节头冗余;抽屉无 tab 上下文,保留标题。
+export function DefiPositions({
+  groups,
+  hideHeader,
+}: {
+  groups: DefiGroup[];
+  hideHeader?: boolean;
+}) {
   const t = useTranslations("Overview");
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeader title={t("defiSectionTitle")} />
+      {!hideHeader && <SectionHeader title={t("defiSectionTitle")} />}
       <div className="flex flex-col">
         {groups.map((g) => (
           <DefiProtocolRow key={g.protocol} group={g} />
