@@ -151,3 +151,18 @@ describe("revalue", () => {
     expect(out[0].selfPrice).toBe(9.9);
   });
 });
+
+// —— 永续行不按市价重估(P5.1:仓位 value 恒 0、权益 = 账户净值;否则净值被名义敞口污染) ——
+describe("revalue —— 永续行保留 provider value", () => {
+  const perp = (kind: "perp_position" | "perp_equity", amount: number, value: number): Balance =>
+    ({ symbol: "ETH", amount, value, kind }) as unknown as Balance;
+
+  it("perp_position value 恒 0(即便数量大、币可解析),不重估成 数量×币价", async () => {
+    const out = await revalue(tokens(), true, [perp("perp_position", -40391.56, 0)]);
+    expect(out[0].value).toBe(0);
+  });
+  it("perp_equity 保留账户净值,不按 数量×币价 覆写", async () => {
+    const out = await revalue(tokens(), true, [perp("perp_equity", 34427709, 34425196)]);
+    expect(out[0].value).toBe(34425196);
+  });
+});

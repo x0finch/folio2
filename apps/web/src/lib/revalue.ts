@@ -18,6 +18,10 @@ export async function revalue(
 ): Promise<Balance[]> {
   return Promise.all(
     balances.map(async (b) => {
+      // 永续行的 value 不是「数量 × 单价」,不能按市价重估(否则仓位被算成 数量×币价 的巨额名义值,
+      // 污染净值 —— 见 P5.1):perp_position 恒 0(名义敞口在 meta)、perp_equity = 账户净值(provider 给)。
+      // 保留 provider 原值,不解析币价、不设 selfPrice。
+      if (b.kind === "perp_position" || b.kind === "perp_equity") return b;
       const selfPrice = markToMarket
         ? undefined
         : (b.price ?? (b.amount > 0 && b.value > 0 ? b.value / b.amount : undefined));
