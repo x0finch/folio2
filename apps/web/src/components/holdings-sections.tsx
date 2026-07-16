@@ -153,8 +153,11 @@ export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
     <section className="flex flex-col gap-6">
       {sorted.map((it, i) => (
         <div key={it.id} className="flex flex-col gap-3">
-          {/* 账户块之间分隔线(首块不加)。 */}
-          {i > 0 && <Separator />}
+          {/* 账户块之间分隔线(首块不加):虚线 + 上下留白拉开块间距。
+              Separator 默认是 bg 实线 → 置透明底、改 border-dashed 画虚线。 */}
+          {i > 0 && (
+            <Separator className="mt-2 mb-5 h-0 border-border border-t border-dashed bg-transparent" />
+          )}
           {/* 场馆子头:logo 左跨两行,右侧 场馆名 / 账户名(带钱包图标,统一 <AccountName>)。 */}
           <div className="flex items-center gap-2.5 px-3">
             {it.platform && (
