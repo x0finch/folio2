@@ -25,8 +25,10 @@ const CHAINS_PATH = "/v1/chains/";
 const CHAINS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 // provider key 在 ctx.creds 里的键名(= app 注入的 env 变量名)。
 const ZERION_API_KEY = "ZERION_API_KEY";
-// 滤掉垃圾币 + 以 USD 计价。
-const POSITIONS_QUERY = "filter[trash]=only_non_trash&currency=usd";
+// 滤掉垃圾币 + 以 USD 计价 + **不过滤头寸类型**:Zerion 该接口默认 filter[positions]=only_simple,
+// 只回钱包现货、剔除全部 DeFi(协议)头寸 —— 不显式给 no_filter,defi kind 永远是空的
+// (实测同一地址:默认 101 行 0 defi,no_filter 188 行 87 defi)。
+const POSITIONS_QUERY = "filter[trash]=only_non_trash&currency=usd&filter[positions]=no_filter";
 // EVM 地址格式。
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
