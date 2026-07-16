@@ -1,4 +1,4 @@
-import { cn, Popover, PopoverContent, PopoverTrigger, useHoverPopover } from "@folio/ui";
+import { cn, Popover, PopoverContent, PopoverTrigger, Separator, useHoverPopover } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import type { LiqRisk, LiqRiskState, PerpPositionView } from "../lib/perp";
@@ -73,7 +73,16 @@ export function LiqRing({ risk, position }: { risk: LiqRisk; position: PerpPosit
         </button>
       </PopoverTrigger>
       <PopoverContent>
+        {/* 上:仓位保证金信息(模式/已用);分隔;下:价格/风险(余量/开仓/标记/强平)。 */}
         <div className="flex min-w-36 flex-col gap-1 p-1">
+          {position.leverageType && (
+            <DetailRow
+              label={t("marginMode")}
+              value={position.leverageType.charAt(0).toUpperCase() + position.leverageType.slice(1)}
+            />
+          )}
+          <DetailRow label={t("marginUsedAmount")} value={usd(position.marginUsed)} />
+          <Separator className="my-1" />
           <DetailRow
             label={t("safetyMargin")}
             value={`${Math.round(risk.margin * 100)}%`}
@@ -82,13 +91,6 @@ export function LiqRing({ risk, position }: { risk: LiqRisk; position: PerpPosit
           <DetailRow label={t("entry")} value={usd(position.entryPx)} />
           <DetailRow label={t("mark")} value={usd(risk.mark)} />
           <DetailRow label={t("liq")} value={usd(risk.liquidationPx)} className="text-neg" />
-          {position.leverageType && (
-            <DetailRow
-              label={t("marginMode")}
-              value={position.leverageType.charAt(0).toUpperCase() + position.leverageType.slice(1)}
-            />
-          )}
-          <DetailRow label={t("marginUsedAmount")} value={usd(position.marginUsed)} />
         </div>
       </PopoverContent>
     </Popover>
