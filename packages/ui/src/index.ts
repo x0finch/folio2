@@ -27,7 +27,6 @@ export {
   ChartTooltipContent,
 } from "./components/chart";
 export { Fab, fabVariants } from "./components/fab";
-export { HoverPopover } from "./components/hover-popover";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";
@@ -75,5 +74,6 @@ export {
   TableRow,
 } from "./components/table";
 export { useHoverCapable } from "./lib/hooks/use-hover-capable";
+export { useHoverPopover } from "./lib/hooks/use-hover-popover";
 export { useMediaQuery } from "./lib/hooks/use-media-query";
 export { cn } from "./lib/utils";
