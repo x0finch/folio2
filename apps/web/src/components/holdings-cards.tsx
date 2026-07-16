@@ -130,7 +130,7 @@ export function AccountHoldingsCards({
   }
   const sections = toAccountSections(balances);
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       {/* account 级 note(整钱包:BTC 未确认/收款/派生分布)→ 顶部手风琴。无则不渲染。 */}
       {accountNote && accountNote.length > 0 && <AccountNoteAccordion notes={accountNote} />}
       {sections.spot.length > 0 && <SpotCards rows={sections.spot} />}

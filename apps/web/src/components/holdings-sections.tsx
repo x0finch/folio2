@@ -177,7 +177,8 @@ export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
     (a, b) => (b.view.equity?.accountValue ?? 0) - (a.view.equity?.accountValue ?? 0),
   );
   return (
-    <section className="flex flex-col gap-3">
+    // 账户子块间距比块内(gap-3)大一档,块与块分得开。
+    <section className="flex flex-col gap-6">
       <SectionHeader title={t("perpSectionTitle")} />
       {sorted.map((it) => (
         <div key={it.id} className="flex flex-col gap-3">

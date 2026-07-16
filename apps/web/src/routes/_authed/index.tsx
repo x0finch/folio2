@@ -143,7 +143,7 @@ function Overview() {
             ) : (
               // v2(H5 #120):永续单节、账户为子块(单账户退化为旧节头形态,权益降序);
               // DeFi 跨账户按协议合并成独立一节。
-              <div className="flex flex-col gap-8">
+              <div className="flex flex-col gap-12">
                 {perpItems.length > 0 && <PerpPositionsList items={perpItems} />}
                 {defiGroups.length > 0 && <DefiPositions groups={defiGroups} />}
               </div>
