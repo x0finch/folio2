@@ -1,7 +1,7 @@
 import { LogoAvatar, Separator, SharedLayoutBg } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import type { DefiGroup } from "../lib/account-view";
-import { protocolDayChange } from "../lib/account-view";
+import { defiSummary, protocolDayChange } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
@@ -187,6 +187,8 @@ function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
   const subtotal = group.rows.reduce((s, r) => s + r.usdValue, 0);
   const change = protocolDayChange(group.rows);
   const types = [...new Set(group.rows.map((r) => r.positionType).filter((ty) => ty != null))];
+  // 摘要只留有值腿(按值降序、封顶),丢掉几十条 0 值空仓/奖励腿的噪音。
+  const { legs, more } = defiSummary(group.rows);
   return (
     <div className="flex w-full items-center gap-3">
       {/* 协议 logo 位:数据管线未建(follow-up issue),恒为首字母 fallback;管线落地原位换图。 */}
@@ -205,9 +207,9 @@ function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
             </span>
           )}
         </div>
-        {/* 头寸摘要:数量+币种逐段;负值段(负债/借出)--neg。 */}
+        {/* 头寸摘要:有值腿逐段(负值段=负债/借出 --neg);超出封顶数折 +n。 */}
         <div className="truncate text-muted-foreground text-xs tabular-nums">
-          {group.rows.map((r, i) => (
+          {legs.map((r, i) => (
             <span key={r.id}>
               {i > 0 && " · "}
               <span className={r.usdValue < 0 ? "text-neg" : undefined}>
@@ -215,6 +217,7 @@ function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
               </span>
             </span>
           ))}
+          {more > 0 && <span className="text-muted-foreground/70"> +{more}</span>}
         </div>
       </div>
       {/* 右:协议净小计 + 24h 聚合增量(整协议缺 change24h → 只显小计)。 */}

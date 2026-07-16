@@ -252,3 +252,42 @@ describe("protocolDayChange —— 协议级 24h 增值聚合", () => {
     expect(protocolDayChange([row(100), row(-50)])).toBeNull();
   });
 });
+
+// —— H5 评审:协议摘要腿(丢空腿、按值降序、封顶 +n) ——
+
+import { type DefiRow, defiSummary } from "../src/lib/account-view";
+
+describe("defiSummary", () => {
+  const r = (id: string, usdValue: number, symbol = "X"): DefiRow => ({
+    id,
+    symbol,
+    amount: usdValue,
+    usdValue,
+  });
+  it("丢掉四舍五入为 0 的空腿,只留有值腿", () => {
+    const { legs, more } = defiSummary([r("a", 500, "ETH"), r("b", 0), r("c", 0), r("d", 0)]);
+    expect(legs.map((l) => l.symbol)).toEqual(["ETH"]);
+    expect(more).toBe(0); // 空腿不计入 more(它们是 $0,提了也没意义)
+  });
+  it("按 |美元值| 降序,封顶 3 段,其余进 more", () => {
+    const { legs, more } = defiSummary([
+      r("a", 10),
+      r("b", 500),
+      r("c", 50),
+      r("d", 200),
+      r("e", 5),
+    ]);
+    expect(legs.map((l) => l.usdValue)).toEqual([500, 200, 50]);
+    expect(more).toBe(2);
+  });
+  it("负债(负值)按绝对值排序参与", () => {
+    const { legs } = defiSummary([r("a", 100), r("b", -9000)]);
+    expect(legs[0].usdValue).toBe(-9000);
+  });
+  it("全是 dust → 退回展示最大 1 段(行不空)", () => {
+    const { legs, more } = defiSummary([r("a", 0.001, "stETH"), r("b", 0), r("c", 0)]);
+    expect(legs).toHaveLength(1);
+    expect(legs[0].symbol).toBe("stETH");
+    expect(more).toBe(0);
+  });
+});

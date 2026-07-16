@@ -153,3 +153,20 @@ export function protocolDayChange(
   if (!any) return null;
   return { delta, pct: grossPrev !== 0 ? (delta / grossPrev) * 100 : null };
 }
+
+// 协议摘要腿(H5 评审:头寸摘要副行别拼出几十条 0 值空仓/奖励腿 → 一行噪音看不懂)。
+// 规则:按 |美元值| 降序,只留有值的腿(≥ DEFI_SUMMARY_DUST_USD,即不四舍五入成 $0.00 的);
+// 全是 dust 则退回展示最大 1 段(行不空);取前 DEFI_SUMMARY_MAX 段,其余计入 more。
+const DEFI_SUMMARY_MAX = 3;
+const DEFI_SUMMARY_DUST_USD = 0.005; // < 半分钱即视为空腿
+
+export function defiSummary(
+  rows: DefiRow[],
+  max: number = DEFI_SUMMARY_MAX,
+): { legs: DefiRow[]; more: number } {
+  const sorted = [...rows].sort((a, b) => Math.abs(b.usdValue) - Math.abs(a.usdValue));
+  const meaningful = sorted.filter((r) => Math.abs(r.usdValue) >= DEFI_SUMMARY_DUST_USD);
+  const pool = meaningful.length > 0 ? meaningful : sorted.slice(0, 1);
+  const legs = pool.slice(0, max);
+  return { legs, more: pool.length - legs.length };
+}
