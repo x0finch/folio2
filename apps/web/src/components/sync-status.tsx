@@ -131,6 +131,10 @@ export function SyncStatus({ summary }: { summary: SyncStatusSummary }) {
   const t = useTranslations("Sync");
   const { busy, sync } = useAccountSync(summary.accounts);
   const [modalOpen, setModalOpen] = useState(false);
+  // 桌面 hover popover 打开态抬 z-50:beUI Popover root 是 isolate(z-auto 层叠上下文),
+  // 而其下方的 PortfolioHero 数值层是 relative z-10 且 DOM 在后 → 面板会被数值药丸盖住。
+  // 仅观察 onOpenChange 镜像 open(不传 open,保持组件内建 hover 开合),据此给 root 抬 z。
+  const [popoverOpen, setPopoverOpen] = useState(false);
 
   const attention = busy || summary.failed.length > 0;
   const { dot } = tone(attention);
@@ -144,7 +148,14 @@ export function SyncStatus({ summary }: { summary: SyncStatusSummary }) {
     <>
       {/* 桌面:hover Popover */}
       <div className="hidden lg:block">
-        <Popover trigger="hover" side="bottom" align="end" panelRadius={14}>
+        <Popover
+          trigger="hover"
+          side="bottom"
+          align="end"
+          panelRadius={14}
+          onOpenChange={setPopoverOpen}
+          className={cn(popoverOpen && "z-50")}
+        >
           <PopoverTrigger>
             <SyncTrigger label={triggerLabel} dotClass={dot} busy={busy} onClick={sync} />
           </PopoverTrigger>
