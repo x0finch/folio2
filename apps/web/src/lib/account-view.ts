@@ -110,7 +110,10 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
     }
   }
 
-  const defi: DefiGroup[] = [...defiByProtocol].map(([protocol, rows]) => ({ protocol, rows }));
+  // 分区出口统一丢空仓组($0 毛敞口)——小计 / tab 可见性 / 抽屉 / 总览 merge 都一致,不再各处补丁。
+  const defi = dropEmptyDefiGroups(
+    [...defiByProtocol].map(([protocol, rows]) => ({ protocol, rows })),
+  );
   const perp = perpRows.length > 0 ? toPerpView(perpRows) : null;
 
   return { spot, defi, perp };
@@ -134,7 +137,8 @@ export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] 
 
 // 空仓协议丢弃:整组毛敞口 Σ|usd| < 半分钱 → 视为已清空/dust(如已全额提取/偿还只剩 0 值残腿),
 // 不进展示(否则出现「协议 $0.00」噪音行)。用毛敞口而非净值,保留净≈0 但有真实敞口的对冲仓。
-// 在显示边界调用(总览 merge 后 / 抽屉单账户),数据构建函数保持纯净。
+// 在分区构建出口(toAccountSections)统一调用,所有消费端一致(跨账户 sub-cent 协议合并才够阈值
+// 的极端情形会被逐账户滤掉,金额 <半分钱 × N,可忽略)。
 const DEFI_GROUP_DUST_USD = 0.005;
 
 export function dropEmptyDefiGroups(groups: DefiGroup[]): DefiGroup[] {
@@ -165,25 +169,15 @@ export function protocolDayChange(
   return { delta, pct: grossPrev !== 0 ? (delta / grossPrev) * 100 : null };
 }
 
-// 协议有值腿(H5 评审:头寸摘要别拼出几十条 0 值空仓/奖励腿 → 噪音看不懂)。
-// 按 |美元值| 降序,只留不四舍五入成 $0.00 的腿(≥ DEFI_SUMMARY_DUST_USD);全是 dust 则退回
-// 最大 1 段(行不空)。行内摘要取前 N 段 + 折 more(defiSummary),hover 弹层用全量(本函数)。
-const DEFI_SUMMARY_MAX = 3;
+// 协议有值腿(H5 评审:头寸摘要别拼出几十条 0 值空仓/奖励腿 → 噪音看不懂)。按 |美元值| 降序,
+// 只留不四舍五入成 $0.00 的腿(≥ DEFI_SUMMARY_DUST_USD)。全是 dust → 全展示(组已过
+// dropEmptyDefiGroups 的毛敞口阈值,这些 sub-cent 腿合起来仍有值,截 1 会漏腿)。喂构成条段与 hover 弹层。
 const DEFI_SUMMARY_DUST_USD = 0.005; // < 半分钱即视为空腿
 
 export function defiMeaningfulLegs(rows: DefiRow[]): DefiRow[] {
   const sorted = [...rows].sort((a, b) => Math.abs(b.usdValue) - Math.abs(a.usdValue));
   const meaningful = sorted.filter((r) => Math.abs(r.usdValue) >= DEFI_SUMMARY_DUST_USD);
-  return meaningful.length > 0 ? meaningful : sorted.slice(0, 1);
-}
-
-export function defiSummary(
-  rows: DefiRow[],
-  max: number = DEFI_SUMMARY_MAX,
-): { legs: DefiRow[]; more: number } {
-  const pool = defiMeaningfulLegs(rows);
-  const legs = pool.slice(0, max);
-  return { legs, more: pool.length - legs.length };
+  return meaningful.length > 0 ? meaningful : sorted;
 }
 
 // 摘要腿按角色(positionType)分组,保持传入顺序(= defiSummary 的值降序)。

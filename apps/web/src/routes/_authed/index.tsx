@@ -6,7 +6,7 @@ import { DefiPositions, PerpPositionsList } from "../../components/holdings-sect
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { OverviewSkeleton } from "../../components/skeletons";
 import { TokenHoldings } from "../../components/token-holdings";
-import { dropEmptyDefiGroups, mergeDefiGroups } from "../../lib/account-view";
+import { mergeDefiGroups } from "../../lib/account-view";
 import { type GroupedView, toGroupedView } from "../../lib/groups-view";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
@@ -76,7 +76,7 @@ function Overview() {
   const usd = useDisplayValue();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
   const grouped = toGroupedView(accountTotals, groups, memberships);
-  const defiGroups = dropEmptyDefiGroups(mergeDefiGroups(sections));
+  const defiGroups = mergeDefiGroups(sections); // 空组已在 toAccountSections 出口滤除
   // 仅权益无持仓的账户也入列(code review #7):权益条可见、权益合计不缺斤短两。
   const perpItems = sections.flatMap((s) =>
     s.perp && (s.perp.positions.length > 0 || s.perp.equity != null)
