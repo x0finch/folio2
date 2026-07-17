@@ -74,5 +74,6 @@ export {
   TableRow,
 } from "./components/table";
 export { useHoverCapable } from "./lib/hooks/use-hover-capable";
+export { useHoverPopover } from "./lib/hooks/use-hover-popover";
 export { useMediaQuery } from "./lib/hooks/use-media-query";
 export { cn } from "./lib/utils";

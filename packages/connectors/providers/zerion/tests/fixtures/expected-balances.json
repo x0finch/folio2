@@ -44,7 +44,7 @@
   },
   {
     "symbol": "DAI",
-    "amount": 3000,
+    "amount": -3000,
     "price": 1,
     "value": -3000,
     "kind": "defi",

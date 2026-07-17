@@ -1,205 +1,453 @@
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@folio/ui";
-import { useTranslations } from "use-intl";
 import {
-  type DefiGroup,
-  type OverviewBalance,
-  type SpotRow,
-  toAccountSections,
-} from "../lib/account-view";
+  cn,
+  LogoAvatar,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Separator,
+  SharedLayoutBg,
+  useHoverPopover,
+} from "@folio/ui";
+import { useEffect, useRef } from "react";
+import { useTranslations } from "use-intl";
+import type { DefiGroup, DefiRow } from "../lib/account-view";
+import { defiMeaningfulLegs, groupLegsByRole, protocolDayChange } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
-import type { PerpView } from "../lib/perp";
+import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
+import { signedUsd } from "../lib/signed-usd";
+import { AccountName } from "./account-name";
+import { LiqRing } from "./liq-ring";
+import { Stat } from "./stat";
+import { ValueDelta } from "./value-delta";
 
-// 账户持仓渲染:总览页每账户卡与账户详情侧栏共用(从 routes/_authed/index.tsx 提取)。
+// 永续 / DeFi 持仓明细 v2(H5 #120):总览「DeFi & Perps」tab 与账户详情抽屉共用。
+// 与代币行同语言 —— 行式(零表格/表头)、左「标识+标题」右 <ValueDelta>;
+// 行内色语义唯一(rev5):红绿只表达盈亏与负债,--warn/--neg 警报只在 LiqRing 上,
+// 方向 pill 与类型 chip 一律中性灰(方向/类型是事实,不是评价)。
 
-// 现货/CEX/manual:数量 + 美元价值。
-function SpotTable({ rows }: { rows: SpotRow[] }) {
-  const t = useTranslations("Overview");
-  const usd = useDisplayValue();
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t("asset")}</TableHead>
-          <TableHead className="text-right">{t("price")}</TableHead>
-          <TableHead className="text-right">{t("change24h")}</TableHead>
-          <TableHead className="text-right">{t("amount")}</TableHead>
-          <TableHead className="text-right">{t("value")}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((b) => (
-          <TableRow key={b.id}>
-            <TableCell>
-              <AssetCell symbol={b.symbol} name={b.name} logo={b.logo} />
-            </TableCell>
-            <TableCell className="text-right">
-              {b.unitPrice != null ? usd(b.unitPrice) : "—"}
-            </TableCell>
-            <TableCell className="text-right">
-              <Change24h value={b.change24h} />
-            </TableCell>
-            <TableCell className="text-right">{formatNumber(b.amount)}</TableCell>
-            <TableCell className="text-right">{usd(b.usdValue)}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
+// 场馆展示元数据(PerpPositionsList 的账户子头用)。
+export interface PlatformBadge {
+  name: string;
+  logo?: string;
 }
 
-// 资产单元:logo(热链,失败回退到 symbol 首字母圆标)+ 名称/symbol。
-export function AssetCell({
-  symbol,
-  name,
-  logo,
-}: {
-  symbol: string;
-  name?: string;
-  logo?: string;
-}) {
+// eyebrow 节头(仅抽屉用:spot/DeFi/perp 堆叠需分区名;总览 tab 即标题不渲染)。
+function SectionHeader({ title }: { title: string }) {
   return (
-    <div className="flex items-center gap-2">
-      {logo ? (
-        <img
-          src={logo}
-          alt=""
-          width={20}
-          height={20}
-          className="size-5 rounded-full"
-          onError={(e) => {
-            e.currentTarget.style.display = "none";
-          }}
-        />
-      ) : (
-        <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-          {symbol.slice(0, 1)}
-        </span>
-      )}
-      <span>{name ?? symbol}</span>
-      {name ? <span className="text-xs text-muted-foreground">{symbol}</span> : null}
+    <div className="flex items-center gap-2.5 px-3">
+      <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
     </div>
   );
 }
 
-// 24h 涨跌:正绿(默认前景)/ 负红(destructive token);无数据 → "—"。仅用 shadcn token,不硬编码色。
-function Change24h({ value }: { value?: number }) {
-  if (value == null) return <span className="text-muted-foreground">—</span>;
-  const sign = value >= 0 ? "+" : "";
+// 中性灰 chip:方向 pill(`3x Long`)与 DeFi 类型 chip 共用形(小号,不与标题争重量;
+// 字号走 token 刻度 text-xs,紧 padding 保持「小点」的定稿观感)。
+// 行 hover(SharedLayoutBg 滑块 = bg-muted)时底色换 --background,不与滑块融为一体。
+function NeutralChip({ children }: { children: React.ReactNode }) {
   return (
-    <span className={value < 0 ? "text-destructive" : "text-foreground"}>
-      {sign}
-      {value.toFixed(2)}%
+    <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-muted-foreground text-xs tabular-nums transition-colors group-hover:bg-background">
+      {children}
     </span>
   );
 }
 
-// DeFi:按协议分组,每组一张小表(Asset / 仓位类型 / 价值)。负值=负债(借出)→ 标红。
-export function DefiPositions({ groups }: { groups: DefiGroup[] }) {
+// side 原文 capitalize(Long/Short 不翻译 —— 金融术语中性化是设计定稿)。
+const sideLabel = (side: "long" | "short") => side.charAt(0).toUpperCase() + side.slice(1);
+
+// 行内容:单个 flex 容器(SharedLayoutBg 会把子元素内容塞进非 flex 的 z-10 div,同 token-holdings 接线)。
+function PerpRowContent({ p }: { p: PerpPositionView }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
+  const risk = liqRisk(p);
   return (
-    <div className="flex flex-col gap-4">
-      {groups.map((g) => (
-        <div key={g.protocol} className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{g.protocol}</p>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("asset")}</TableHead>
-                <TableHead>{t("type")}</TableHead>
-                <TableHead className="text-right">{t("value")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {g.rows.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell>{r.symbol}</TableCell>
-                  <TableCell className="capitalize text-muted-foreground">
-                    {r.positionType ?? "—"}
-                  </TableCell>
-                  <TableCell className={`text-right ${r.usdValue < 0 ? "text-destructive" : ""}`}>
-                    {usd(r.usdValue)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+    <div className="flex w-full items-center gap-3">
+      {/* 方向 badge 上;数量+币种 与 强平风险环 同一行水平对齐(环挂在数量行的父容器里)。 */}
+      <div className="flex flex-col items-start gap-1">
+        <NeutralChip>
+          {p.leverage != null ? `${p.leverage}x ` : ""}
+          {sideLabel(p.side)}
+        </NeutralChip>
+        <div className="flex items-center gap-2">
+          <span className="font-medium tabular-nums">
+            {formatNumber(Math.abs(p.size))} {p.coin}
+          </span>
+          {risk ? (
+            <LiqRing risk={risk} position={p} />
+          ) : (
+            // 无强平价(如全仓部分场景)→ 环降级为 muted 开仓价文本。
+            <span className="text-muted-foreground text-xs tabular-nums">
+              {t("entry")} {usd(p.entryPx)}
+            </span>
+          )}
         </div>
-      ))}
+      </div>
+      <div className="min-w-0 flex-1" />
+      {/* 右:当前名义价值 + uPnL(单前置符号,--pos/--neg)。 */}
+      <ValueDelta value={p.positionValue} delta={p.unrealizedPnl} pct={pnlPct(p)} />
     </div>
   );
 }
 
-// 永续:净值由外层承载;此处展示可提/保证金副行 + 仓位明细(方向/盈亏/杠杆/强平)。
-export function PerpPositions({ view }: { view: PerpView }) {
+// 单账户的权益条 + 仓位行(无节头;PerpPositions / PerpPositionsList 共用)。
+function PerpAccountBody({ view }: { view: PerpView }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
   const { equity, positions } = view;
+  const totalUpnl = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
+  const marginRatio =
+    equity && equity.accountValue > 0 ? equity.totalMarginUsed / equity.accountValue : null;
   return (
-    <div className="flex flex-col gap-3">
+    <>
       {equity && (
-        <p className="text-sm text-muted-foreground">
-          {t("withdrawableMargin", {
-            withdrawable: usd(equity.withdrawable),
-            margin: usd(equity.totalMarginUsed),
-          })}
-        </p>
+        <div className="flex flex-wrap gap-x-10 gap-y-2 px-3">
+          <Stat label={t("accountEquity")} value={usd(equity.accountValue)} />
+          <Stat
+            label={t("upnl")}
+            value={signedUsd(usd, totalUpnl)}
+            className={totalUpnl > 0 ? "text-pos" : totalUpnl < 0 ? "text-neg" : undefined}
+          />
+          {marginRatio != null && (
+            <Stat label={t("marginRatio")} value={`${Math.round(marginRatio * 100)}%`} />
+          )}
+          {/* 账户级字段平铺(flex-wrap 窄容器自动换行):可提 / 名义敞口 / 账户真实杠杆。 */}
+          <Stat label={t("withdrawable")} value={usd(equity.withdrawable)} />
+          <Stat label={t("notional")} value={usd(equity.totalNtlPos)} />
+          {equity.accountValue > 0 && (
+            <Stat
+              label={t("accountLeverage")}
+              value={`${(equity.totalNtlPos / equity.accountValue).toFixed(2)}x`}
+            />
+          )}
+        </div>
       )}
-      {positions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("noOpenPositions")}</p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("token")}</TableHead>
-              <TableHead>{t("side")}</TableHead>
-              <TableHead className="text-right">{t("size")}</TableHead>
-              <TableHead className="text-right">{t("entry")}</TableHead>
-              <TableHead className="text-right">{t("upnl")}</TableHead>
-              <TableHead className="text-right">{t("lev")}</TableHead>
-              <TableHead className="text-right">{t("liq")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {positions.map((p) => (
-              <TableRow key={p.coin}>
-                <TableCell>{p.coin}</TableCell>
-                <TableCell>{t(p.side)}</TableCell>
-                <TableCell className="text-right">{formatNumber(Math.abs(p.size))}</TableCell>
-                <TableCell className="text-right">{usd(p.entryPx)}</TableCell>
-                <TableCell
-                  className={`text-right ${p.unrealizedPnl < 0 ? "text-destructive" : ""}`}
-                >
-                  {usd(p.unrealizedPnl)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {p.leverage != null ? `${p.leverage}x` : "—"}
-                </TableCell>
-                <TableCell className="text-right">
-                  {p.liquidationPx != null ? usd(p.liquidationPx) : "—"}
-                </TableCell>
-              </TableRow>
+      {/* 无持仓 → 只显权益条,不加"无持仓"文案(权益条本身即完整状态)。 */}
+      {positions.length > 0 && (
+        // hover 高亮 = SharedLayoutBg 移动滑块(与代币行同语言,行间无分隔线);
+        // 行必须是直接 DOM 子元素(组件元素收不到注入的 relative/onMouseEnter)。
+        <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
+          {positions.map((p) => (
+            // 行内弹层打开时把整行抬到兄弟行之上(动态 side=bottom 时面板压得住下一行)。
+            <div key={p.coin} className="group rounded-xl px-3 py-3 has-[[data-state=open]]:z-20">
+              <PerpRowContent p={p} />
+            </div>
+          ))}
+        </SharedLayoutBg>
+      )}
+    </>
+  );
+}
+
+// 永续分区(单账户,抽屉用):eyebrow 节头 + 权益条 + 仓位行。
+// (总览 tab 用 PerpPositionsList,场馆子头自带 —— 此处不再有 platform/label 死参。)
+export function PerpPositions({ view }: { view: PerpView }) {
+  const t = useTranslations("Overview");
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeader title={t("perpSectionTitle")} />
+      <PerpAccountBody view={view} />
+    </section>
+  );
+}
+
+export interface PerpSectionItem {
+  id: string;
+  view: PerpView;
+  platform?: PlatformBadge;
+  accountLabel?: string;
+}
+
+// 永续分区(总览「永续」tab 用):每账户一个子块(场馆子头 + 权益条 + 仓位行),按账户权益
+// 降序(大仓在前)。tab 本身即「永续」,不再有 eyebrow 节头,场馆子头就是块的身份。
+export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
+  const sorted = [...items].sort(
+    (a, b) => (b.view.equity?.accountValue ?? 0) - (a.view.equity?.accountValue ?? 0),
+  );
+  return (
+    // 账户子块间距比块内(gap-3)大一档,块与块分得开。
+    <section className="flex flex-col gap-6">
+      {sorted.map((it, i) => (
+        <div key={it.id} className="flex flex-col gap-3">
+          {/* 账户块之间分隔线(首块不加):虚线 + 上下留白拉开块间距。
+              Separator 默认是 bg 实线 → 置透明底、改 border-dashed 画虚线。 */}
+          {i > 0 && (
+            <Separator className="mt-2 mb-5 h-0 border-border border-t border-dashed bg-transparent" />
+          )}
+          {/* 场馆子头:logo 左跨两行,右侧 场馆名 / 账户名(带钱包图标,统一 <AccountName>)。 */}
+          <div className="flex items-center gap-2.5 px-3">
+            {it.platform && (
+              <LogoAvatar size="sm" src={it.platform.logo} fallback={it.platform.name} />
+            )}
+            <div className="min-w-0">
+              <div className="truncate font-medium text-sm">
+                {it.platform?.name ?? it.accountLabel}
+              </div>
+              {it.platform && it.accountLabel && (
+                <AccountName name={it.accountLabel} className="text-muted-foreground text-xs" />
+              )}
+            </div>
+          </div>
+          <PerpAccountBody view={it.view} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
+// 负债腿的展示:「−」+ 中性色(不用亏损红 —— 负债≠亏损,红/绿只留给涨跌);角色由 chip/分组承载。
+const legText = (r: DefiRow) =>
+  `${r.usdValue < 0 ? "−" : ""}${formatNumber(Math.abs(r.amount))} ${r.symbol}`;
+
+// 角色 → 图表色(CLAUDE.md 原则 11:数据可视化是唯一取色例外,仍只走 --chart-* token;
+// --chart-1..5 是设计系统既有色板,非自定义)。/50 加透明度让色段不扎眼(与深色轨道相融、更柔)。
+// 负债段不取色,走中性斜纹。
+const CHART_BG = [
+  "bg-chart-1/50",
+  "bg-chart-2/50",
+  "bg-chart-3/50",
+  "bg-chart-4/50",
+  "bg-chart-5/50",
+] as const;
+
+// 强语义「资产」角色固定色(deposit/supply 及同义词 → 恒定 chart-1);负债(borrow/loan)已走斜纹、不进这里。
+// 固定色位从 hash 池排除,保证固定角色永不与 hash 角色撞色。
+const FIXED_ROLE_IDX: Record<string, number> = {
+  deposit: 0,
+  supply: 0,
+  supplied: 0,
+};
+const RESERVED_IDX = new Set(Object.values(FIXED_ROLE_IDX));
+const HASH_POOL = CHART_BG.map((_, i) => i).filter((i) => !RESERVED_IDX.has(i));
+
+// 角色名 → 图表色索引:固定角色取固定色,其余 hash(role) % 池(djb2-lite)。同一角色名跨协议**恒定同色**
+// (便于扫读);代价:同协议内两个 hash 角色可能撞色(角色数通常 1–3,概率低;固定角色已排除撞色)。
+function roleColorIdx(role: string): number {
+  const key = role.toLowerCase();
+  const fixed = FIXED_ROLE_IDX[key];
+  if (fixed != null) return fixed;
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  return HASH_POOL[Math.abs(h) % HASH_POOL.length];
+}
+
+// 负债段:中性色底 + 细斜纹(token-only;负债≠亏损,不用 --neg,靠纹理与资产色段区分)。
+const DEBT_SEG_STYLE: React.CSSProperties = {
+  backgroundColor: "var(--muted-foreground)",
+  backgroundImage: "repeating-linear-gradient(45deg, transparent 0 3px, var(--background) 3px 4px)",
+};
+
+interface RoleSeg {
+  role?: string;
+  legs: DefiRow[];
+  gross: number; // 段宽 = 该角色毛敞口 Σ|usd|
+  debt: boolean; // 该角色净为负 → 负债
+  colorIdx: number | null; // 图表色索引;负债为 null
+}
+
+// 有值腿按角色分组 → 构成条的段。角色净负 = 负债(不取色);其余按 hash(role) 取图表色。
+function toRoleSegs(rows: DefiRow[]): RoleSeg[] {
+  return groupLegsByRole(defiMeaningfulLegs(rows)).map((g) => {
+    const gross = g.legs.reduce((s, r) => s + Math.abs(r.usdValue), 0);
+    const debt = g.legs.reduce((s, r) => s + r.usdValue, 0) < 0;
+    return {
+      role: g.role,
+      legs: g.legs,
+      gross,
+      debt,
+      colorIdx: debt ? null : roleColorIdx(g.role ?? ""),
+    };
+  });
+}
+
+// 段显示权重(%,和恒为 100 → flexGrow 相对分配即百分比):占比 < MIN% 的小段抬到 MIN%(让小仓/小角色
+// 能被感知,不被压成看不见的一线),其余段按毛敞口瓜分剩余空间。标签与色段用同一权重 → 保持对齐。
+const DEFI_BAR_MIN_SEG_PCT = 5;
+
+function displayWeights(segs: RoleSeg[]): number[] {
+  const n = segs.length;
+  if (n === 0) return [];
+  const total = segs.reduce((s, x) => s + x.gross, 0);
+  if (total <= 0) return segs.map(() => 100 / n); // 全 0 值 → 均分
+  const MIN = DEFI_BAR_MIN_SEG_PCT;
+  const small = segs.map((s) => (s.gross / total) * 100 < MIN);
+  const reserved = small.filter(Boolean).length * MIN;
+  const largeTotal = segs.reduce((s, x, i) => (small[i] ? s : s + x.gross), 0);
+  const remaining = Math.max(0, 100 - reserved);
+  // largeTotal===0 仅当全部为小段 → 都取 MIN(flexGrow 相对分配即均分)。
+  return segs.map((s, i) =>
+    small[i] || largeTotal <= 0 ? MIN : (s.gross / largeTotal) * remaining,
+  );
+}
+
+// 构成条(H5 #120 定稿,C 方案):协议名下一条 4px 细条,按角色分段(段宽 = 毛敞口占比),
+// 角色名排条上方、按段宽对齐,写不下则整条隐藏(opacity:0 占位留白,与色段保持对齐)。整块是
+// hover 触发器 → 弹按角色分组的全量明细(方向自适应 / 抬 z / 隐垫底取自 useHoverPopover,与风险环/笔记同款)。
+function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
+  const usd = useDisplayValue();
+  const pop = useHoverPopover();
+  const labelsRef = useRef<HTMLDivElement>(null);
+  // 标签放不下(overflow → scrollWidth > clientWidth)整条隐藏;宽度变化(抽屉/响应式)经 ResizeObserver
+  // 重算,数据变化(段宽)经 fitKey 依赖重跑 —— 段宽变化时容器总宽不变,ResizeObserver 不触发,故需 fitKey。
+  const fitKey = segs.map((s) => `${s.role ?? ""}:${s.gross}`).join("|");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fitKey 不在体内引用,但用于段宽变更后重测标签。
+  useEffect(() => {
+    const el = labelsRef.current;
+    if (!el) return;
+    const measure = () => {
+      for (const lab of el.querySelectorAll<HTMLElement>("[data-lab]")) {
+        lab.style.opacity = "";
+        if (lab.clientWidth < lab.scrollWidth) lab.style.opacity = "0";
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fitKey]);
+
+  // 段宽权重(和为 100):小段抬到 5% 保可感知,其余按毛敞口瓜分。标签与色段共用 → 对齐;和为 100 也顺带
+  // 解决「flex-grow 因子和 < 1 时不填满容器」(sub-dollar 协议)。
+  const weights = displayWeights(segs);
+
+  return (
+    // pt 预留角色名的高度:角色名绝对定位在条上方、不占 root in-flow 盒 → root 顶 = 条顶。
+    <div className="mt-1 ml-9 pt-4">
+      <Popover
+        trigger="hover"
+        side={pop.side}
+        align="start"
+        onOpenChange={pop.onOpenChange}
+        className={cn("w-full", pop.rootClassName)}
+      >
+        {/* 透明 hover 捕获层:把「角色名 + 条 + 条下方一小条」连成一整片 hover 区 —— 否则 root in-flow 盒
+            只有 4px 的条,鼠标稍移到条下方就出判定区而关闭。absolute → 不影响 root 盒(锚点仍在条);
+            **不带 aria-hidden**(否则会被 useHoverPopover 关闭态的 [&>[aria-hidden]]:hidden 隐藏,就捕获不到 hover)。 */}
+        <div className="absolute inset-x-0 -top-4 -bottom-3.5" />
+        {/* 角色名:绝对定位在条正上方,但仍是 Popover root 的 DOM 子级 —— hover 区照样覆盖它(beUI 的
+            mouseenter 挂在 root 上,按 DOM 子树触发、不看几何盒);因不占 root in-flow 盒,root 顶 = 条顶,
+            故面板几何 + goo pill 都以「条」为锚(上下都贴条),而非「标签+条」父块。写不下经 fit 隐藏。 */}
+        <div ref={labelsRef} className="absolute bottom-full left-0 mb-0.5 flex w-full gap-0.5">
+          {segs.map((s, i) => (
+            <div
+              key={s.role ?? `_${i}`}
+              data-lab
+              style={{ flexGrow: weights[i], flexBasis: 0 }}
+              className="min-w-0 overflow-hidden whitespace-nowrap font-medium text-[10px] text-muted-foreground capitalize"
+            >
+              {s.role}
+            </div>
+          ))}
+        </div>
+        <PopoverTrigger>
+          {/* 触发器只包 2px 条 → goo pill 只有条那么大、被条本身盖住(无黑块、退出 melt 自然)。 */}
+          <button
+            ref={pop.measureRef}
+            type="button"
+            aria-label={label}
+            className="block w-full cursor-default outline-none"
+          >
+            {/* 4px 细条:按角色分段;负债段中性斜纹,其余取图表色。 */}
+            <div className="flex h-1 gap-0.5 overflow-hidden rounded-full bg-muted">
+              {segs.map((s, i) => (
+                <div
+                  key={s.role ?? `_${i}`}
+                  style={{
+                    flexGrow: weights[i],
+                    flexBasis: 0,
+                    ...(s.debt ? DEBT_SEG_STYLE : {}),
+                  }}
+                  className={cn("min-w-0", s.colorIdx != null && CHART_BG[s.colorIdx])}
+                />
+              ))}
+            </div>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent>
+          {/* 完整明细:按角色分段(段前色块对应条上色),组内全部有值腿 + 每腿美元值;负债「−」中性色。
+              间隔三级节奏:组间 gap-2.5、组内(角色头↔腿、腿↔腿)gap-1;面板自带 p-4,不再叠 p-1。 */}
+          <div className="flex min-w-52 flex-col gap-2.5">
+            <div className="font-medium text-sm">{label}</div>
+            {segs.map((s, i) => (
+              <div key={s.role ?? `_${i}`} className="flex flex-col gap-1">
+                {s.role && (
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase tracking-wider">
+                    <span
+                      style={s.debt ? DEBT_SEG_STYLE : undefined}
+                      className={cn(
+                        "size-2 shrink-0 rounded-[2px]",
+                        s.colorIdx != null && CHART_BG[s.colorIdx],
+                      )}
+                    />
+                    {s.role}
+                  </div>
+                )}
+                {s.legs.map((r) => (
+                  <div
+                    key={r.id}
+                    className="flex items-baseline justify-between gap-8 text-xs tabular-nums"
+                  >
+                    <span>{legText(r)}</span>
+                    <span className="text-muted-foreground">
+                      {r.usdValue < 0 ? "−" : ""}
+                      {usd(Math.abs(r.usdValue))}
+                    </span>
+                  </div>
+                ))}
+              </div>
             ))}
-          </TableBody>
-        </Table>
-      )}
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
 
-// 一个账户的全部持仓:现货 / DeFi / 永续三分区(空 → 提示)。表格在窄容器(详情侧栏)下可横向滚动。
-export function AccountHoldings({ balances }: { balances: OverviewBalance[] }) {
-  const t = useTranslations("Overview");
-  if (balances.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>;
-  }
-  const sections = toAccountSections(balances);
+// DeFi 协议行:上行 logo+名 与右侧 <ValueDelta>;下方一条构成条(角色分段 + hover 全量明细)。
+// hover 触发器只在构成条上(不再是整行左簇)—— 扫列表不再连炸弹层(H5 定稿)。
+function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
+  const subtotal = group.rows.reduce((s, r) => s + r.usdValue, 0);
+  const change = protocolDayChange(group.rows);
+  const segs = toRoleSegs(group.rows);
   return (
-    <div className="flex flex-col gap-6 overflow-x-auto">
-      {sections.spot.length > 0 && <SpotTable rows={sections.spot} />}
-      {sections.defi.length > 0 && <DefiPositions groups={sections.defi} />}
-      {sections.perp && <PerpPositions view={sections.perp} />}
+    <div className="w-full">
+      <div className="flex w-full items-center gap-3">
+        {/* 协议 logo 数据管线未建(follow-up #126),首字母兜底。 */}
+        <LogoAvatar fallback={group.protocol} size="sm" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium">{group.protocol}</div>
+        </div>
+        {/* 右:协议净小计 + 24h 聚合增量(整协议缺 change24h → 只显小计)。 */}
+        <ValueDelta value={subtotal} delta={change?.delta} pct={change?.pct} />
+      </div>
+      <CompositionBar segs={segs} label={group.protocol} />
     </div>
+  );
+}
+
+// DeFi 分区:每协议一行(总览传跨账户合并的 groups,抽屉传单账户 groups)。
+// hideHeader:总览已有独立「DeFi」tab,节头冗余;抽屉无 tab 上下文,保留标题。
+export function DefiPositions({
+  groups,
+  hideHeader,
+}: {
+  groups: DefiGroup[];
+  hideHeader?: boolean;
+}) {
+  const t = useTranslations("Overview");
+  return (
+    <section className="flex flex-col gap-3">
+      {!hideHeader && <SectionHeader title={t("defiSectionTitle")} />}
+      <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
+        {groups.map((g) => (
+          // 行内 popover 打开时把整行抬到兄弟行之上(否则被后续行盖住;与 perp 行同款)。
+          <div
+            key={g.protocol}
+            className="group rounded-xl px-3 py-1.5 has-[[data-state=open]]:z-20"
+          >
+            <DefiProtocolRowContent group={g} />
+          </div>
+        ))}
+      </SharedLayoutBg>
+    </section>
   );
 }

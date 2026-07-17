@@ -39,8 +39,6 @@ describe("messages (via createTranslator)", () => {
   it("Chinese: interpolation + no plural distinction", () => {
     const t = createTranslator({ locale: "zh", messages: messages.zh });
     expect(t("Accounts.synced", { count: 3 })).toBe("已同步 3 个账户。");
-    expect(t("Overview.withdrawableMargin", { withdrawable: "$1", margin: "$2" })).toBe(
-      "可提 $1 · 已用保证金 $2",
-    );
+    expect(t("Overview.smallHoldings", { n: 4 })).toBe("4 项小额");
   });
 });

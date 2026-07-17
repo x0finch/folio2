@@ -2,15 +2,10 @@ import type { Note } from "@folio/connectors-basic";
 import { NoteIconGlyph, NoteIndicator, NoteView } from "@folio/notes-react";
 import { BouncyAccordion, type BouncyAccordionItem } from "@folio/ui";
 import { useLocale, useTranslations } from "use-intl";
-import {
-  type DefiGroup,
-  type OverviewBalance,
-  type SpotRow,
-  toAccountSections,
-} from "../lib/account-view";
+import { type OverviewBalance, type SpotRow, toAccountSections } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
-import type { PerpView } from "../lib/perp";
+import { DefiPositions, PerpPositions } from "./holdings-sections";
 import { TokenAvatar } from "./token-stack";
 
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 holdings-sections 的表格。
@@ -18,12 +13,12 @@ import { TokenAvatar } from "./token-stack";
 //   · account 级 note(Note[],整钱包)→ 持仓区顶部一个 BouncyAccordion,一段一个 item(BTC 未确认/收款/分布);
 //   · balance 级 note(单个 Note,该币锁仓/冻结)→ 现货行标题右侧一个小 icon <NoteIndicator>(hover 开 popover)。
 
-// 24h 涨跌:正绿(前景)/ 负红(destructive);无数据 → "—"。仅用 shadcn token。
+// 24h 涨跌:负值走语义色 --neg(H5 起全站零 text-destructive 表示涨跌);无数据 → "—"。
 function Change24h({ value }: { value?: number }) {
   if (value == null) return <span className="text-xs text-muted-foreground">—</span>;
   const sign = value >= 0 ? "+" : "";
   return (
-    <span className={`text-xs ${value < 0 ? "text-destructive" : "text-muted-foreground"}`}>
+    <span className={`text-xs ${value < 0 ? "text-neg" : "text-muted-foreground"}`}>
       {sign}
       {value.toFixed(2)}%
     </span>
@@ -93,77 +88,6 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
   );
 }
 
-function DefiCards({ groups }: { groups: DefiGroup[] }) {
-  const t = useTranslations("Overview");
-  const usd = useDisplayValue();
-  return (
-    <div className="flex flex-col gap-4">
-      {groups.map((g) => (
-        <div key={g.protocol} className="flex flex-col gap-2">
-          <p className="text-sm font-medium">{g.protocol}</p>
-          {g.rows.map((r) => (
-            <RowCard
-              key={r.id}
-              title={r.symbol}
-              subtitle={<span className="capitalize">{r.positionType ?? t("type")}</span>}
-              primary={
-                <span className={r.usdValue < 0 ? "text-destructive" : undefined}>
-                  {usd(r.usdValue)}
-                </span>
-              }
-            />
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function PerpCards({ view }: { view: PerpView }) {
-  const t = useTranslations("Overview");
-  const usd = useDisplayValue();
-  const { equity, positions } = view;
-  return (
-    <div className="flex flex-col gap-2">
-      {equity && (
-        <p className="text-xs text-muted-foreground">
-          {t("withdrawableMargin", {
-            withdrawable: usd(equity.withdrawable),
-            margin: usd(equity.totalMarginUsed),
-          })}
-        </p>
-      )}
-      {positions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("noOpenPositions")}</p>
-      ) : (
-        positions.map((p) => (
-          <RowCard
-            key={p.coin}
-            title={
-              <>
-                {p.coin} <span className="text-xs text-muted-foreground">{t(p.side)}</span>
-              </>
-            }
-            subtitle={`${formatNumber(Math.abs(p.size))}${p.leverage != null ? ` · ${p.leverage}x` : ""}`}
-            primary={
-              <span className={p.unrealizedPnl < 0 ? "text-destructive" : undefined}>
-                {usd(p.unrealizedPnl)}
-              </span>
-            }
-            secondary={
-              p.liquidationPx != null ? (
-                <span className="text-xs text-muted-foreground">
-                  {t("liq")} {usd(p.liquidationPx)}
-                </span>
-              ) : undefined
-            }
-          />
-        ))
-      )}
-    </div>
-  );
-}
-
 // <NoteView>/<NoteIndicator> 的注入接线:数字值 locale 格式化(全精度,核对用);label/title 英文字面无需 translate。
 // 通用渲染包不直接依赖 use-intl / @folio/fx(格式化前端做、跟随 locale)。
 function useNoteFormatNumber(): (n: number) => string {
@@ -204,14 +128,16 @@ export function AccountHoldingsCards({
   if (balances.length === 0 && (accountNote?.length ?? 0) === 0) {
     return <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>;
   }
-  const sections = toAccountSections(balances);
+  const sections = toAccountSections(balances); // defi 空组已在此出口滤除
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       {/* account 级 note(整钱包:BTC 未确认/收款/派生分布)→ 顶部手风琴。无则不渲染。 */}
       {accountNote && accountNote.length > 0 && <AccountNoteAccordion notes={accountNote} />}
       {sections.spot.length > 0 && <SpotCards rows={sections.spot} />}
-      {sections.defi.length > 0 && <DefiCards groups={sections.defi} />}
-      {sections.perp && <PerpCards view={sections.perp} />}
+      {/* perp/DeFi 明细:与总览 tab 共用 v2 组件(H5 #120);抽屉单账户上下文,不传 accountLabel、
+          DeFi 直接用本账户分组(不经 mergeDefiGroups)。 */}
+      {sections.defi.length > 0 && <DefiPositions groups={sections.defi} />}
+      {sections.perp && <PerpPositions view={sections.perp} />}
     </div>
   );
 }

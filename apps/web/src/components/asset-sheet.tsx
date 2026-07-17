@@ -11,7 +11,7 @@ import {
   useMediaQuery,
 } from "@folio/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { WalletIcon } from "lucide-react";
+
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
@@ -19,7 +19,9 @@ import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { getTokenValueHistory } from "../lib/server/token-history";
+import { signedUsd } from "../lib/signed-usd";
 import { groupByAccount, groupByPlatform, type SourceGroup } from "../lib/source-groups";
+import { AccountName } from "./account-name";
 import { AvatarStack } from "./avatar-stack";
 import { ValueTrendChart } from "./value-trend-chart";
 
@@ -61,7 +63,7 @@ function GroupAvatar({ group }: { group: SourceGroup }) {
   return <AvatarStack items={group.avatars} size="md" />;
 }
 
-// 账户名前置 WalletIcon 微图标(与侧栏「Accounts」导航同图标,便于理解):全抽屉「带钱包图标的 = 账户」,
+// 账户名统一走 <AccountName>(WalletIcon 前置,H5 评审统一组件):全站「带钱包图标的 = 账户」,
 // 与平台名(有 logo 头像 + 公认名)区分。平台名不加。account slot 由视图决定:平台视图账户在副行、账户视图在主行。
 function NameLine({
   text,
@@ -72,9 +74,9 @@ function NameLine({
   account: boolean;
   className: string;
 }) {
+  if (account) return <AccountName name={text} className={className} />;
   return (
     <span className={`flex min-w-0 items-center gap-1 ${className}`}>
-      {account && <WalletIcon className="size-3 shrink-0 text-muted-foreground" />}
       <span className="truncate">{text}</span>
     </span>
   );
@@ -223,8 +225,7 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
               <div
                 className={`mt-1 text-sm tabular-nums ${dayValue > 0 ? "text-pos" : "text-neg"}`}
               >
-                {dayValue > 0 ? "+" : "−"}
-                {usd(Math.abs(dayValue))} {Math.abs(change24h ?? 0).toFixed(2)}%
+                {signedUsd(usd, dayValue)} {Math.abs(change24h ?? 0).toFixed(2)}%
               </div>
             )}
           </div>

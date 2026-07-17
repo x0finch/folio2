@@ -28,6 +28,22 @@ export function balanceToAssetRef(b: BalanceLike): AssetRef | null {
   return { symbol: b.symbol, tokenKey: b.tokenKey ?? undefined };
 }
 
+// defi 行的**展示用**解析(H5 #120:协议行 24h 聚合需要 change24h):仅 tokenKey 明确的行
+// (LP 份额等无 tokenKey 的头寸不按 symbol 瞎猜)。独立于 balanceToAssetRef —— 那个门喂估值
+// 现推(liveValue),defi 行进去会被重估;这个只喂展示富化。
+export function defiAssetRef(b: BalanceLike): AssetRef | null {
+  if (viewKind(b) !== "defi" || !b.tokenKey) return null;
+  return { symbol: b.symbol, tokenKey: b.tokenKey };
+}
+
+// **展示富化的统一门**(同质 ∪ tokenKey 明确的 defi)。enrich / refreshStalePrices / warmTokens
+// 三处必须同门:enrich 标了 stale 而 refresh/warm 够不到的行会让 pricesStale 永远清不掉、
+// 客户端每次加载空转一次刷新(code review #2)。估值现推(liveValue)不走此门,仍只认
+// balanceToAssetRef 的同质行。
+export function displayAssetRef(b: BalanceLike): AssetRef | null {
+  return balanceToAssetRef(b) ?? defiAssetRef(b);
+}
+
 // logo 优先 CGK(视觉统一,warm 缓存零边际配额),缺则回退 provider 自带图(备用槽);
 // CGK 未收录的孤儿也有 name/providerLogo 可显(不再是裸 symbol+首字母)。
 export function toEnrichment(e: EnrichedAsset): TokenEnrichment {

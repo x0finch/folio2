@@ -25,8 +25,14 @@ const CHAINS_PATH = "/v1/chains/";
 const CHAINS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 // provider key 在 ctx.creds 里的键名(= app 注入的 env 变量名)。
 const ZERION_API_KEY = "ZERION_API_KEY";
-// 滤掉垃圾币 + 以 USD 计价。
-const POSITIONS_QUERY = "filter[trash]=only_non_trash&currency=usd";
+// 滤掉垃圾币 + 以 USD 计价 + **不过滤头寸类型**:Zerion 该接口默认 filter[positions]=only_simple,
+// 只回钱包现货、剔除全部 DeFi(协议)头寸 —— 不显式给 no_filter,defi kind 永远是空的
+// (实测同一地址:默认 101 行 0 defi,no_filter 188 行 87 defi)。
+const POSITIONS_QUERY = "filter[trash]=only_non_trash&currency=usd&filter[positions]=no_filter";
+// 负债类 position_type:数量/价值取负(负债 = 负头寸)。Zerion 的 value 虽自带负号,但下游 revalue/
+// liveValue 会用 正amount × 正单价 重算而丢符号 —— 故把 **amount** 取负(单价保持正),value=amount×单价
+// 在 parse/重估/读时三处都自然为负,净值才正确扣债。
+const DEBT_POSITION_TYPES = new Set(["loan", "borrow"]);
 // EVM 地址格式。
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -113,11 +119,14 @@ export function parsePositions(
     // 当前链的实现:有 address = 合约币;该链有实现但 address 为 null = 原生 gas 币。
     const impl = a.fungible_info?.implementations?.find((i) => i.chain_id === chain);
     const contract = impl?.address ?? undefined;
+    // 负债腿:amount/value 归一为负(见 DEBT_POSITION_TYPES 注释)。单价 price 保持正(诚实单价)。
+    const debt = a.position_type != null && DEBT_POSITION_TYPES.has(a.position_type);
+    const sign = debt ? -1 : 1;
     const base = {
       symbol,
-      amount: a.quantity?.float ?? 0,
+      amount: sign * Math.abs(a.quantity?.float ?? 0),
       price: a.price ?? undefined,
-      value: a.value ?? 0,
+      value: sign * Math.abs(a.value ?? 0),
       tokenKey: buildTokenKey({
         chainId,
         contract,

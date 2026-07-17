@@ -196,3 +196,96 @@ describe("buildOverview", () => {
     expect(view.holdingsSubtotal).toBe(0);
   });
 });
+
+// —— H5 #120:sections 的 defi 行读时富化 change24h(协议行 24h 聚合的数据源) ——
+// defi 不进聚合,故单独一批 enrich;按 tokenKey 命中的行带 change24h,未命中 undefined。
+describe("buildOverview —— defi 行 change24h 富化", () => {
+  it("defi 行经 enrich 附回 change24h 进 sections", async () => {
+    const defiTokens = {
+      async enrich(assets: { symbol: string; tokenKey?: string }[]) {
+        return assets.map((a) => (a?.tokenKey ? { change24h: 2.5, priceStale: false } : undefined));
+      },
+    } as unknown as Tokens;
+    const accounts = [account("w", "Wallet")];
+    const byAccount = new Map([
+      [
+        "w",
+        snap("w", 100, [
+          bal({
+            kind: "defi",
+            symbol: "stETH",
+            amount: 1,
+            usdValue: 100,
+            tokenKey: "eip155:1/erc20:0xae7a",
+            metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
+          }),
+          bal({
+            kind: "defi",
+            symbol: "LP",
+            amount: 1,
+            usdValue: 50,
+            metaJson: JSON.stringify({ protocol: "Uniswap", positionType: "liquidity" }),
+          }),
+        ]),
+      ],
+    ]);
+    const view = await buildOverview(accounts, byAccount, { tokens: defiTokens, platforms });
+    const rows = view.sections[0].defi.flatMap((g) => g.rows);
+    expect(rows.find((r) => r.symbol === "stETH")?.change24h).toBe(2.5);
+    expect(rows.find((r) => r.symbol === "LP")?.change24h).toBeUndefined();
+  });
+});
+
+// —— H5 评审:sections.account 带平台展示(永续节头体现场馆) ——
+describe("buildOverview —— sections.account.platform", () => {
+  it("connectorMeta 命中 → name + 代理 logo;未注入 → undefined", async () => {
+    const accounts = [account("h", "watch", "hyperliquid")];
+    const meta = JSON.stringify({ withdrawable: 1, totalMarginUsed: 0, totalNtlPos: 0 });
+    const pos = JSON.stringify({
+      side: "long",
+      entryPx: 1,
+      positionValue: 1,
+      unrealizedPnl: 0,
+      liquidationPx: null,
+      marginUsed: 0,
+    });
+    const byAccount = new Map([
+      [
+        "h",
+        snap("h", 1, [
+          bal({ kind: "perp_equity", amount: 1, usdValue: 1, metaJson: meta }),
+          bal({ kind: "perp_position", symbol: "ETH", amount: 1, metaJson: pos }),
+        ]),
+      ],
+    ]);
+    const connectorMeta = (key: string) =>
+      key === "hyperliquid" ? { key, name: "Hyperliquid", logo: "https://x/hl.png" } : null;
+    const withMeta = await buildOverview(accounts, byAccount, { tokens, platforms, connectorMeta });
+    expect(withMeta.sections[0].account.platform).toEqual({
+      name: "Hyperliquid",
+      logo: `/api/logo/platform/${encodeURIComponent("hyperliquid")}`,
+    });
+    const noMeta = await buildOverview(accounts, byAccount, { tokens, platforms });
+    expect(noMeta.sections[0].account.platform).toBeUndefined();
+  });
+});
+
+// —— code review #7:仅权益、无持仓的 perp 账户保留在 sections(Perps tab 权益条可见) ——
+describe("buildOverview —— equity-only perp 账户不被过滤", () => {
+  it("有权益无仓位 → sections 保留(perp.equity 非空、positions 空)", async () => {
+    const accounts = [account("h", "Hyper", "hyperliquid")];
+    const meta = JSON.stringify({ withdrawable: 900, totalMarginUsed: 0, totalNtlPos: 0 });
+    const byAccount = new Map([
+      [
+        "h",
+        snap("h", 1000, [
+          bal({ kind: "perp_equity", amount: 1000, usdValue: 1000, metaJson: meta }),
+        ]),
+      ],
+    ]);
+    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    expect(view.sections).toHaveLength(1);
+    expect(view.sections[0].perp?.equity?.accountValue).toBe(1000);
+    expect(view.sections[0].perp?.positions).toEqual([]);
+  });
+});

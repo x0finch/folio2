@@ -176,3 +176,155 @@ describe("toAccountSections", () => {
     expect(s.spot.map((r) => r.symbol)).toEqual(["???"]);
   });
 });
+
+// —— H5 #120:DeFi 行 change24h 透传 + 跨账户协议合并 + 协议级 24h 聚合 ——
+
+import { mergeDefiGroups, protocolDayChange } from "../src/lib/account-view";
+
+describe("DefiRow change24h 透传(富化字段,缺则 undefined)", () => {
+  it("带 change24h 的 defi 行透传到 DefiRow", () => {
+    const s = toAccountSections([
+      b({
+        id: "1",
+        symbol: "stETH",
+        kind: "defi",
+        usdValue: 27040,
+        change24h: 2.1,
+        metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
+      }),
+    ]);
+    expect(s.defi[0].rows[0].change24h).toBe(2.1);
+  });
+});
+
+describe("mergeDefiGroups —— 跨账户按协议保序合并", () => {
+  const g = (protocol: string, id: string, usdValue = 1) => ({
+    protocol,
+    rows: [{ id, symbol: "X", amount: 1, usdValue }],
+  });
+  it("同协议行并入首次出现的组,组序按首见", () => {
+    const merged = mergeDefiGroups([
+      { defi: [g("Aave", "a1"), g("Lido", "l1")] },
+      { defi: [g("Aave", "a2")] },
+      { defi: [] },
+    ]);
+    expect(merged.map((x) => x.protocol)).toEqual(["Aave", "Lido"]);
+    expect(merged[0].rows.map((r) => r.id)).toEqual(["a1", "a2"]);
+  });
+  it("全空 → []", () => {
+    expect(mergeDefiGroups([{ defi: [] }])).toEqual([]);
+  });
+});
+
+describe("protocolDayChange —— 协议级 24h 增值聚合", () => {
+  const row = (usdValue: number, change24h?: number, id = "r") => ({
+    id,
+    symbol: "X",
+    amount: 1,
+    usdValue,
+    change24h,
+  });
+  it("多行聚合:delta = Σ 单行增值,pct 相对总敞口前值(缺 change24h 的行按现值计入分母)", () => {
+    // 10100 涨 1% → 增值 100(前值 10000);负债 -5000 涨 0%(缺)→ 不计 delta,但计分母
+    const c = protocolDayChange([row(10100, 1, "a"), row(-5000, undefined, "b")]);
+    expect(c?.delta).toBeCloseTo(100);
+    expect(c?.pct).toBeCloseTo((100 / 15000) * 100, 3); // ≈0.667%,分母 = 10000 + |−5000|
+  });
+  it("负债行(负值)升值 → 负贡献(债变贵)", () => {
+    // -20400 涨 2% → 前值 -20000,增值 -400;pct 相对 |前值|
+    const c = protocolDayChange([row(-20400, 2)]);
+    expect(c?.delta).toBeCloseTo(-400);
+    expect(c?.pct).toBeCloseTo(-2);
+  });
+  it("对冲仓(存≈借,净值近零)不产生荒谬百分比(分母是总敞口非净值)", () => {
+    // 存 10100(+1% → +100)、借 -5050(+1% → -50):净前值仅 ~$50,若按净值分母 pct 会爆表
+    const c = protocolDayChange([row(10100, 1, "a"), row(-5050, 1, "b")]);
+    expect(c?.delta).toBeCloseTo(50);
+    expect(Math.abs(c?.pct ?? 0)).toBeLessThan(1); // 50 / 15000 ≈ 0.33%
+  });
+  it("部分富化不夸大:分母含未富化大头寸", () => {
+    // $100,000 无 change24h + $1,010(+1% → +10):% 相对全协议敞口而非小行
+    const c = protocolDayChange([row(100000, undefined, "a"), row(1010, 1, "b")]);
+    expect(c?.delta).toBeCloseTo(10);
+    expect(c?.pct).toBeCloseTo((10 / 101000) * 100, 3); // ≈0.0099%
+  });
+  it("全行缺 change24h → null(UI 只显小计)", () => {
+    expect(protocolDayChange([row(100), row(-50)])).toBeNull();
+  });
+});
+
+// —— H5 评审:协议有值腿(丢空腿、按值降序) ——
+
+import { type DefiRow, defiMeaningfulLegs } from "../src/lib/account-view";
+
+describe("defiMeaningfulLegs", () => {
+  const r = (id: string, usdValue: number, symbol = "X"): DefiRow => ({
+    id,
+    symbol,
+    amount: usdValue,
+    usdValue,
+  });
+  it("丢掉四舍五入为 0 的空腿,只留有值腿", () => {
+    const legs = defiMeaningfulLegs([r("a", 500, "ETH"), r("b", 0), r("c", 0), r("d", 0)]);
+    expect(legs.map((l) => l.symbol)).toEqual(["ETH"]);
+  });
+  it("按 |美元值| 降序", () => {
+    const legs = defiMeaningfulLegs([r("a", 10), r("b", 500), r("c", 50), r("d", 200), r("e", 5)]);
+    expect(legs.map((l) => l.usdValue)).toEqual([500, 200, 50, 10, 5]);
+  });
+  it("负债(负值)按绝对值排序参与", () => {
+    const legs = defiMeaningfulLegs([r("a", 100), r("b", -9000)]);
+    expect(legs[0].usdValue).toBe(-9000);
+  });
+  it("全是 sub-cent(组已过毛敞口阈值)→ 全展示,不截 1(否则漏腿)", () => {
+    const legs = defiMeaningfulLegs([r("a", 0.003, "stETH"), r("b", 0.002, "rETH")]);
+    expect(legs.map((l) => l.symbol)).toEqual(["stETH", "rETH"]);
+  });
+});
+
+// —— H5 评审:摘要腿按角色分组(每条腿对应哪个角色) ——
+
+import { groupLegsByRole } from "../src/lib/account-view";
+
+describe("groupLegsByRole", () => {
+  const r = (id: string, positionType?: string): DefiRow => ({
+    id,
+    symbol: "X",
+    amount: 1,
+    usdValue: 1,
+    positionType,
+  });
+  it("按 positionType 分组,保持传入顺序(值降序)", () => {
+    const g = groupLegsByRole([r("a", "deposit"), r("b", "deposit"), r("c", "loan")]);
+    expect(g.map((x) => x.role)).toEqual(["deposit", "loan"]);
+    expect(g[0].legs.map((l) => l.id)).toEqual(["a", "b"]);
+    expect(g[1].legs.map((l) => l.id)).toEqual(["c"]);
+  });
+  it("无 positionType → role undefined 组", () => {
+    const g = groupLegsByRole([r("a")]);
+    expect(g).toEqual([{ role: undefined, legs: [r("a")] }]);
+  });
+});
+
+// —— 空仓协议丢弃(整组毛敞口 < 半分钱 → 不展示,避免「协议 $0.00」噪音行) ——
+
+import { dropEmptyDefiGroups } from "../src/lib/account-view";
+
+describe("dropEmptyDefiGroups", () => {
+  const leg = (usdValue: number): DefiRow => ({ id: "x", symbol: "X", amount: usdValue, usdValue });
+  it("丢掉整组毛敞口≈0 的空仓(全 0 值残腿)", () => {
+    const groups = [
+      { protocol: "Morpho", rows: [leg(0), leg(0), leg(0)] },
+      { protocol: "Lido", rows: [leg(92)] },
+    ];
+    expect(dropEmptyDefiGroups(groups).map((g) => g.protocol)).toEqual(["Lido"]);
+  });
+  it("保留净≈0 但有真实毛敞口的对冲仓(存+借相抵)", () => {
+    const groups = [{ protocol: "Aave", rows: [leg(1000), leg(-1000)] }];
+    expect(dropEmptyDefiGroups(groups).map((g) => g.protocol)).toEqual(["Aave"]);
+  });
+  it("单条 dust(<半分钱)也丢", () => {
+    const groups = [{ protocol: "Dust", rows: [leg(0.001)] }];
+    expect(dropEmptyDefiGroups(groups)).toEqual([]);
+  });
+});

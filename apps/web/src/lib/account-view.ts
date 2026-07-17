@@ -1,5 +1,6 @@
 import { DefiMeta, type DefiMeta as DefiMetaT, type Note } from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
+import { dayValueChange } from "./day-value-change";
 import { type PerpView, toPerpView } from "./perp";
 
 // 纯逻辑(无 server-only import → 可单测)。把一个账户的余额行按 kind 拆成展示分区:
@@ -45,6 +46,7 @@ export interface DefiRow {
   amount: number;
   usdValue: number;
   positionType?: string;
+  change24h?: number; // 富化字段透传(协议行 24h 聚合用;缺 → 该行不计入聚合)
 }
 export interface DefiGroup {
   protocol: string;
@@ -87,6 +89,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
         amount: b.amount,
         usdValue: b.usdValue,
         positionType: meta.positionType,
+        change24h: b.change24h,
       };
       const group = defiByProtocol.get(protocol);
       if (group) group.push(row);
@@ -107,8 +110,90 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
     }
   }
 
-  const defi: DefiGroup[] = [...defiByProtocol].map(([protocol, rows]) => ({ protocol, rows }));
+  // 分区出口统一丢空仓组($0 毛敞口)——小计 / tab 可见性 / 抽屉 / 总览 merge 都一致,不再各处补丁。
+  const defi = dropEmptyDefiGroups(
+    [...defiByProtocol].map(([protocol, rows]) => ({ protocol, rows })),
+  );
   const perp = perpRows.length > 0 ? toPerpView(perpRows) : null;
 
   return { spot, defi, perp };
+}
+
+// —— H5 #120:总览「DEFI 头寸」独立分区(跨账户按协议合并)——
+
+// 多账户的 defi 分组按 protocol 保序合并(组序 = 协议首见顺序,行序 = 账户遍历顺序)。
+// 抽屉是单账户上下文,直接用该账户的 defi,不经此函数。
+export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] {
+  const byProtocol = new Map<string, DefiRow[]>();
+  for (const s of sections) {
+    for (const g of s.defi) {
+      const rows = byProtocol.get(g.protocol);
+      if (rows) rows.push(...g.rows);
+      else byProtocol.set(g.protocol, [...g.rows]);
+    }
+  }
+  return [...byProtocol].map(([protocol, rows]) => ({ protocol, rows }));
+}
+
+// 空仓协议丢弃:整组毛敞口 Σ|usd| < 半分钱 → 视为已清空/dust(如已全额提取/偿还只剩 0 值残腿),
+// 不进展示(否则出现「协议 $0.00」噪音行)。用毛敞口而非净值,保留净≈0 但有真实敞口的对冲仓。
+// 在分区构建出口(toAccountSections)统一调用,所有消费端一致(跨账户 sub-cent 协议合并才够阈值
+// 的极端情形会被逐账户滤掉,金额 <半分钱 × N,可忽略)。
+const DEFI_GROUP_DUST_USD = 0.005;
+
+export function dropEmptyDefiGroups(groups: DefiGroup[]): DefiGroup[] {
+  return groups.filter(
+    (g) => g.rows.reduce((s, r) => s + Math.abs(r.usdValue), 0) >= DEFI_GROUP_DUST_USD,
+  );
+}
+
+// 协议行的 24h 增值聚合:逐行 dayValueChange(负债行负值 → 升值为负贡献,方向天然正确)。
+// pct 分母 = 协议**总敞口**前值(全量行的 |前值| 之和,缺 change24h 的行按现值计):
+// 用净值当分母会在 对冲仓(存≈借,净值近零)与 部分富化(分母只剩小行)时产生荒谬百分比
+// (code review #3)。整协议无一行带 change24h → null(UI 只显小计,不显增量)。
+export function protocolDayChange(
+  rows: Pick<DefiRow, "usdValue" | "change24h">[],
+): { delta: number; pct: number | null } | null {
+  let delta = 0;
+  let grossPrev = 0;
+  let any = false;
+  for (const r of rows) {
+    const d = dayValueChange(r.usdValue, r.change24h);
+    if (d != null) {
+      any = true;
+      delta += d;
+    }
+    grossPrev += Math.abs(r.usdValue - (d ?? 0));
+  }
+  if (!any) return null;
+  return { delta, pct: grossPrev !== 0 ? (delta / grossPrev) * 100 : null };
+}
+
+// 协议有值腿(H5 评审:头寸摘要别拼出几十条 0 值空仓/奖励腿 → 噪音看不懂)。按 |美元值| 降序,
+// 只留不四舍五入成 $0.00 的腿(≥ DEFI_SUMMARY_DUST_USD)。全是 dust → 全展示(组已过
+// dropEmptyDefiGroups 的毛敞口阈值,这些 sub-cent 腿合起来仍有值,截 1 会漏腿)。喂构成条段与 hover 弹层。
+const DEFI_SUMMARY_DUST_USD = 0.005; // < 半分钱即视为空腿
+
+export function defiMeaningfulLegs(rows: DefiRow[]): DefiRow[] {
+  const sorted = [...rows].sort((a, b) => Math.abs(b.usdValue) - Math.abs(a.usdValue));
+  const meaningful = sorted.filter((r) => Math.abs(r.usdValue) >= DEFI_SUMMARY_DUST_USD);
+  return meaningful.length > 0 ? meaningful : sorted;
+}
+
+// 摘要腿按角色(positionType)分组,保持传入顺序(= defiSummary 的值降序)。
+// 让副行读成「Deposit 843 GHO, 0.24 WETH · Loan −219 GHO」——每条腿对应哪个角色一目了然
+// (H5 评审:同侧角色/同币腿此前分不清)。无 positionType 的腿归入 role=undefined 组。
+export function groupLegsByRole(legs: DefiRow[]): { role?: string; legs: DefiRow[] }[] {
+  const order: string[] = [];
+  const byRole = new Map<string, DefiRow[]>();
+  for (const l of legs) {
+    const key = l.positionType ?? "";
+    const g = byRole.get(key);
+    if (g) g.push(l);
+    else {
+      byRole.set(key, [l]);
+      order.push(key);
+    }
+  }
+  return order.map((key) => ({ role: key || undefined, legs: byRole.get(key) as DefiRow[] }));
 }
