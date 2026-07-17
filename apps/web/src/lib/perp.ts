@@ -60,32 +60,36 @@ export function pnlPct(p: PerpPositionView): number | null {
   return (p.unrealizedPnl / notional) * 100;
 }
 
-// LiqRing 三态阈值(启发式,无维持保证金率数据;目视校准点,勿散落魔数)。
-export const LIQ_WARN_BELOW = 1; // 余量 < 1(比开仓时更近强平)→ 警告
-export const LIQ_DANGER_BELOW = 0.5; // 余量 < 0.5(已走完一半路程)→ 危险
+// LiqRing 三态阈值:安全余量 = 距强平价占**现价**的百分比 d = |标记−强平| / 标记(方向感知)。
+// 换掉旧的「开仓→强平走了多少」度量 —— 那个把「安全」锚在开仓价、等价于「是否盈利」(稍亏即 warn),
+// 且不符交易惯例。新度量与盈亏解耦、天然含杠杆(高杠杆→强平更近→d 更小→更危险),贴近交易所/看板显示。
+export const LIQ_WARN_BELOW = 0.15; // d < 15% → 警告
+export const LIQ_DANGER_BELOW = 0.05; // d < 5% → 危险
+const LIQ_RING_FULL = 0.25; // d ≥ 25% → 环满(安全上限;仅决定视觉填充,不影响状态判定)
 
 export type LiqRiskState = "safe" | "warn" | "danger";
 
 export interface LiqRisk {
-  margin: number;
+  distance: number; // 距强平占现价比例(展示为「安全余量 %」;穿仓 clamp 0)
+  fill: number; // 环填充 0..1(distance 相对 LIQ_RING_FULL 封顶)
   state: LiqRiskState;
   mark: number; // 标记价(此处一并携带,消费端不再各自重推)
   liquidationPx: number; // 非空版强平价(risk 非 null 即有)
 }
 
-// 安全余量 = (标记 − 强平) / (开仓 − 强平),带符号:1 = 与开仓时等距、0 = 已到强平;
-// 标记越到强平**另一侧**(穿仓/脏快照)为负 → clamp 到 0 = danger——无符号距离会把穿仓
-// 误读成「安全」(code review #1)。方向无关(多空同构:分子分母同侧同号)。
-// 强平缺失 / 开仓=强平 / 标记不可推 → null(行内降级为文本)。
+// 安全余量 = 距强平占**现价**的比例,方向感知:安全侧为正、标记越到强平另一侧(穿仓/脏快照)为负
+// → clamp 0 = danger(无符号距离会把穿仓误读成安全)。安全方向由 sign(开仓−强平) 定(多头开仓>强平、
+// 空头开仓<强平),故多空同构。强平缺失 / 开仓=强平 / 标记不可推或 ≤0 → null(行内降级为文本)。
 export function liqRisk(p: PerpPositionView): LiqRisk | null {
   const mark = markPx(p);
-  if (mark == null || p.liquidationPx == null) return null;
+  if (mark == null || mark <= 0 || p.liquidationPx == null) return null;
   const span = p.entryPx - p.liquidationPx;
   if (span === 0) return null;
-  const margin = Math.max((mark - p.liquidationPx) / span, 0);
+  const distance = Math.max(((mark - p.liquidationPx) / mark) * Math.sign(span), 0);
   const state: LiqRiskState =
-    margin < LIQ_DANGER_BELOW ? "danger" : margin < LIQ_WARN_BELOW ? "warn" : "safe";
-  return { margin, state, mark, liquidationPx: p.liquidationPx };
+    distance < LIQ_DANGER_BELOW ? "danger" : distance < LIQ_WARN_BELOW ? "warn" : "safe";
+  const fill = Math.min(distance / LIQ_RING_FULL, 1);
+  return { distance, fill, state, mark, liquidationPx: p.liquidationPx };
 }
 
 export function toPerpView(balances: PerpBalance[]): PerpView {

@@ -166,14 +166,16 @@ describe("pnlPct —— uPnL% 相对开仓名义值(百分数)", () => {
   });
 });
 
-describe("liqRisk —— 安全余量 d = |标记−强平| / |开仓−强平| + 三态", () => {
-  it("标记比开仓离强平更远 → d≥1 → safe", () => {
+describe("liqRisk —— 安全余量 d = |标记−强平| / 标记(距强平占现价%)+ 三态", () => {
+  it("强平远在现价 15% 外 → safe;fill 封顶为满环", () => {
+    // long:mark 3380、liq 2140 → d = 1240/3380 ≈ 0.367(> 25% 上限 → 满环)
     const r = liqRisk(pos({}));
     expect(r?.state).toBe("safe");
-    expect(r?.margin).toBeGreaterThanOrEqual(1);
+    expect(r?.distance).toBeCloseTo(0.367, 2);
+    expect(r?.fill).toBe(1);
   });
-  it("余量过半 → warn(空头方向同样成立)", () => {
-    // short:entry 62000、liq 71500、mark 66500 → d = 5000/9500 ≈ 0.53
+  it("距强平 5%~15% → warn(空头方向同样成立)", () => {
+    // short:mark 66500、liq 71500 → d = 5000/66500 ≈ 0.075
     const r = liqRisk(
       pos({
         side: "short",
@@ -184,27 +186,31 @@ describe("liqRisk —— 安全余量 d = |标记−强平| / |开仓−强平| 
       }),
     );
     expect(r?.state).toBe("warn");
-    expect(r?.margin).toBeCloseTo(0.526, 2);
+    expect(r?.distance).toBeCloseTo(0.075, 3);
+    expect(r?.fill).toBeCloseTo(0.301, 2); // 0.075 / 0.25
   });
-  it("余量不足一半 → danger", () => {
-    // long:entry 155、liq 128、mark 140 → d = 12/27 ≈ 0.44
-    const r = liqRisk(pos({ size: 200, entryPx: 155, positionValue: 28000, liquidationPx: 128 }));
+  it("距强平 < 5% → danger", () => {
+    // long:mark 98、liq 95 → d = 3/98 ≈ 0.031
+    const r = liqRisk(pos({ size: 1, entryPx: 100, positionValue: 98, liquidationPx: 95 }));
     expect(r?.state).toBe("danger");
+    expect(r?.distance).toBeCloseTo(0.031, 3);
   });
-  it("标记越过强平另一侧(穿仓/脏快照)→ 余量 clamp 0 → danger,而非误报安全", () => {
-    // long:entry 100、liq 80、mark 60(已穿仓)——无符号距离会得 d=1(safe)。
+  it("标记越过强平另一侧(穿仓/脏快照)→ d clamp 0 → danger,而非误报安全", () => {
+    // long:liq 80、mark 60(已穿仓)——无方向感知会得正距离(误 safe)。
     const r = liqRisk(pos({ size: 1, entryPx: 100, positionValue: 60, liquidationPx: 80 }));
     expect(r?.state).toBe("danger");
-    expect(r?.margin).toBe(0);
+    expect(r?.distance).toBe(0);
+    expect(r?.fill).toBe(0);
   });
   it("richer 返回:携带 mark 与非空 liquidationPx(消费端不再重推)", () => {
     const r = liqRisk(pos({}));
     expect(r?.mark).toBeCloseTo(3380);
     expect(r?.liquidationPx).toBe(2140);
   });
-  it("liquidationPx null / 开仓=强平 / size 0 → null(UI 降级为文本)", () => {
+  it("liquidationPx null / 开仓=强平 / size 0 / mark≤0 → null(UI 降级为文本)", () => {
     expect(liqRisk(pos({ liquidationPx: null }))).toBeNull();
     expect(liqRisk(pos({ entryPx: 2140 }))).toBeNull();
     expect(liqRisk(pos({ size: 0 }))).toBeNull();
+    expect(liqRisk(pos({ positionValue: 0 }))).toBeNull(); // mark = 0 → null
   });
 });

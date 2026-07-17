@@ -20,8 +20,8 @@ const arcClass: Record<LiqRiskState, string> = {
   danger: "text-neg",
 };
 
-function RiskArc({ margin, state }: { margin: number; state: LiqRiskState }) {
-  const arc = Math.min(Math.max(margin, 0), 1) * CIRCUMFERENCE;
+function RiskArc({ fill, state }: { fill: number; state: LiqRiskState }) {
+  const arc = Math.min(Math.max(fill, 0), 1) * CIRCUMFERENCE;
   return (
     // 环心恒透明(两个 circle 都 fill=none,滑块/底色可透过);行 hover 时底环换 --background,
     // 不与 bg-muted 滑块融为一体(group 在行包装层)。
@@ -69,7 +69,7 @@ export function LiqRing({ risk, position }: { risk: LiqRisk; position: PerpPosit
           aria-label={t("safetyMargin")}
           className="flex cursor-pointer items-center outline-none"
         >
-          <RiskArc margin={risk.margin} state={risk.state} />
+          <RiskArc fill={risk.fill} state={risk.state} />
         </button>
       </PopoverTrigger>
       <PopoverContent>
@@ -85,7 +85,7 @@ export function LiqRing({ risk, position }: { risk: LiqRisk; position: PerpPosit
           <Separator className="my-1" />
           <DetailRow
             label={t("safetyMargin")}
-            value={`${Math.round(risk.margin * 100)}%`}
+            value={`${Math.round(risk.distance * 100)}%`}
             className={cn("font-medium", arcClass[risk.state])}
           />
           <DetailRow label={t("entry")} value={usd(position.entryPx)} />
