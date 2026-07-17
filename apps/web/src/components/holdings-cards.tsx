@@ -1,11 +1,11 @@
 import type { Note } from "@folio/connectors-basic";
-import { NoteIconGlyph, NoteIndicator, NoteView } from "@folio/notes-react";
 import { BouncyAccordion, type BouncyAccordionItem } from "@folio/ui";
 import { useLocale, useTranslations } from "use-intl";
 import { type OverviewBalance, type SpotRow, toAccountSections } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { DefiPositions, PerpPositions } from "./holdings-sections";
+import { NoteIconGlyph, NoteIndicator, NoteView } from "./notes";
 import { TokenAvatar } from "./token-stack";
 
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 holdings-sections 的表格。

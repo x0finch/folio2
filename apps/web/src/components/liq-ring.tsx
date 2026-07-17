@@ -1,6 +1,7 @@
-import { cn, Popover, PopoverContent, PopoverTrigger, Separator, useHoverPopover } from "@folio/ui";
+import { cn, Popover, PopoverContent, PopoverTrigger, Separator } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
+import { useHoverPopover } from "../lib/hooks/use-hover-popover";
 import type { LiqRisk, LiqRiskState, PerpPositionView } from "../lib/perp";
 import { DetailRow } from "./detail-row";
 

@@ -1,8 +1,8 @@
 import type { Note } from "@folio/connectors-basic";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { NoteIndicator } from "../src/note-indicator";
-import { NoteView } from "../src/note-view";
+import { NoteIndicator } from "../src/components/notes/note-indicator";
+import { NoteView } from "../src/components/notes/note-view";
 
 afterEach(cleanup);
 
