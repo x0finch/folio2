@@ -13,6 +13,9 @@ import { DetailRow } from "./detail-row";
 const R = 8; // viewBox 24 内的环半径
 const STROKE_WIDTH = 3.4; // 底环与彩弧同宽(分开写会悄悄变成两个环)
 const CIRCUMFERENCE = 2 * Math.PI * R;
+// 危险态非零填充的最小可见红弧:极小 fill 的 strokeDasharray 会缩成 sliver / round-cap 小点,
+// 保底一小段,读作「余量极低」。(穿仓另行给满环,见下。)
+const MIN_DANGER_FILL = 0.08;
 
 const arcClass: Record<LiqRiskState, string> = {
   safe: "text-pos",
@@ -21,7 +24,11 @@ const arcClass: Record<LiqRiskState, string> = {
 };
 
 function RiskArc({ fill, state }: { fill: number; state: LiqRiskState }) {
-  const arc = Math.min(Math.max(fill, 0), 1) * CIRCUMFERENCE;
+  const clamped = Math.min(Math.max(fill, 0), 1);
+  // 危险态:穿仓(fill=0,已到/越过强平)→ 满红环,明确「已穿仓」的终态;其余危险 → 至少 MIN 段红弧。
+  const shown =
+    state === "danger" ? (clamped === 0 ? 1 : Math.max(clamped, MIN_DANGER_FILL)) : clamped;
+  const arc = shown * CIRCUMFERENCE;
   return (
     // 环心恒透明(两个 circle 都 fill=none,滑块/底色可透过);行 hover 时底环换 --background,
     // 不与 bg-muted 滑块融为一体(group 在行包装层)。
@@ -90,7 +97,7 @@ export function LiqRing({ risk, position }: { risk: LiqRisk; position: PerpPosit
           />
           <DetailRow label={t("entry")} value={usd(position.entryPx)} />
           <DetailRow label={t("mark")} value={usd(risk.mark)} />
-          <DetailRow label={t("liq")} value={usd(risk.liquidationPx)} className="text-neg" />
+          <DetailRow label={t("liq")} value={usd(risk.liquidationPx)} />
         </div>
       </PopoverContent>
     </Popover>
