@@ -1,5 +1,5 @@
 import type { Note, NoteRow } from "@folio/connectors-basic";
-import { cn } from "@folio/ui/lib/utils";
+import { cn } from "@folio/ui";
 import {
   CircleAlert,
   CircleCheck,

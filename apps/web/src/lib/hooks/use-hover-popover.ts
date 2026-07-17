@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@folio/ui/lib/utils";
+import { cn } from "@folio/ui";
 import { useEffect, useRef, useState } from "react";
 
 // beUI Popover(trigger="hover")的调用侧补丁行为,做成 hook 而非包装组件——调用方继续直接

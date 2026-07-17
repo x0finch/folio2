@@ -45,7 +45,7 @@ provider 专属、**仅供展示、无共享逻辑读**的分段,分**两级**:*
 _Avoid_: meta(那是共享逻辑读的 typed 层)、per-kind 新增(展示细节不再开新 kind)、markdown 字符串(丢 i18n/币种/结构/安全,#68 已否)、memo(那是 manual 账本的**用户手写备注**,另一回事)
 
 **Note(展示分段)**(ADR 0011):
-一个 note = **固定结构**的一段:`{ title, icon?, content }`;`content` 为纯文本(`string`)或行列表(`NoteRow[] = { label, value?, unit?, href? }`);`icon` 为 5 个中性状态名(info/success/warning/error/help)。**无 `type` 画法、无 `format` 枚举**(旧 DetailBlock 词汇表已弃)。数字即数字,locale 格式化由前端注入的 `formatNumber` 做;label/title 英文字面(结构保留,可后加 i18n)。类型在 `@folio/connectors-basic`,渲染在 `@folio/notes-react`(`NoteView` 单段 / `NoteIndicator` balance 图标+popover / account 手风琴)。
+一个 note = **固定结构**的一段:`{ title, icon?, content }`;`content` 为纯文本(`string`)或行列表(`NoteRow[] = { label, value?, unit?, href? }`);`icon` 为 5 个中性状态名(info/success/warning/error/help)。**无 `type` 画法、无 `format` 枚举**(旧 DetailBlock 词汇表已弃)。数字即数字,locale 格式化由前端注入的 `formatNumber` 做;label/title 英文字面(结构保留,可后加 i18n)。类型在 `@folio/connectors-basic`,渲染件在 `apps/web/src/components/notes/`(`NoteView` 单段 / `NoteIndicator` balance 图标+popover / account 手风琴;原 `@folio/notes-react` 包已迁入 web,见 #128)。
 _Avoid_: `type`/`format` 词汇表(过度设计,已弃)、markdown、在段里放函数
 
 **Platform**:

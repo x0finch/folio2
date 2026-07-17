@@ -6,7 +6,6 @@ import {
   PopoverTrigger,
   Separator,
   SharedLayoutBg,
-  useHoverPopover,
 } from "@folio/ui";
 import { useEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
@@ -14,6 +13,7 @@ import type { DefiGroup, DefiRow } from "../lib/account-view";
 import { defiMeaningfulLegs, groupLegsByRole, protocolDayChange } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
+import { useHoverPopover } from "../lib/hooks/use-hover-popover";
 import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
 import { signedUsd } from "../lib/signed-usd";
 import { AccountName } from "./account-name";

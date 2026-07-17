@@ -22,7 +22,6 @@
     "@folio/connectors-basic": "workspace:*",
     "@folio/db": "workspace:*",
     "@folio/fx": "workspace:*",
-    "@folio/notes-react": "workspace:*",
     "@folio/oracle": "workspace:*",
     "@folio/platforms": "workspace:*",
     "@folio/sync": "workspace:*",

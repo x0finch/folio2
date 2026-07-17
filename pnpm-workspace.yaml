@@ -3,7 +3,6 @@ packages:
   - "packages/clients/*"
   - "packages/connectors/*"
   - "packages/connectors/providers/*"
-  - "packages/notes/*"
   - "packages/oracle/*"
   - "packages/oracle/sources/*"
   - "packages/tokens/*"
