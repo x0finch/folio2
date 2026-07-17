@@ -132,6 +132,17 @@ export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] 
   return [...byProtocol].map(([protocol, rows]) => ({ protocol, rows }));
 }
 
+// 空仓协议丢弃:整组毛敞口 Σ|usd| < 半分钱 → 视为已清空/dust(如已全额提取/偿还只剩 0 值残腿),
+// 不进展示(否则出现「协议 $0.00」噪音行)。用毛敞口而非净值,保留净≈0 但有真实敞口的对冲仓。
+// 在显示边界调用(总览 merge 后 / 抽屉单账户),数据构建函数保持纯净。
+const DEFI_GROUP_DUST_USD = 0.005;
+
+export function dropEmptyDefiGroups(groups: DefiGroup[]): DefiGroup[] {
+  return groups.filter(
+    (g) => g.rows.reduce((s, r) => s + Math.abs(r.usdValue), 0) >= DEFI_GROUP_DUST_USD,
+  );
+}
+
 // 协议行的 24h 增值聚合:逐行 dayValueChange(负债行负值 → 升值为负贡献,方向天然正确)。
 // pct 分母 = 协议**总敞口**前值(全量行的 |前值| 之和,缺 change24h 的行按现值计):
 // 用净值当分母会在 对冲仓(存≈借,净值近零)与 部分富化(分母只剩小行)时产生荒谬百分比

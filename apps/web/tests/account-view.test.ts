@@ -315,3 +315,26 @@ describe("groupLegsByRole", () => {
     expect(g).toEqual([{ role: undefined, legs: [r("a")] }]);
   });
 });
+
+// —— 空仓协议丢弃(整组毛敞口 < 半分钱 → 不展示,避免「协议 $0.00」噪音行) ——
+
+import { dropEmptyDefiGroups } from "../src/lib/account-view";
+
+describe("dropEmptyDefiGroups", () => {
+  const leg = (usdValue: number): DefiRow => ({ id: "x", symbol: "X", amount: usdValue, usdValue });
+  it("丢掉整组毛敞口≈0 的空仓(全 0 值残腿)", () => {
+    const groups = [
+      { protocol: "Morpho", rows: [leg(0), leg(0), leg(0)] },
+      { protocol: "Lido", rows: [leg(92)] },
+    ];
+    expect(dropEmptyDefiGroups(groups).map((g) => g.protocol)).toEqual(["Lido"]);
+  });
+  it("保留净≈0 但有真实毛敞口的对冲仓(存+借相抵)", () => {
+    const groups = [{ protocol: "Aave", rows: [leg(1000), leg(-1000)] }];
+    expect(dropEmptyDefiGroups(groups).map((g) => g.protocol)).toEqual(["Aave"]);
+  });
+  it("单条 dust(<半分钱)也丢", () => {
+    const groups = [{ protocol: "Dust", rows: [leg(0.001)] }];
+    expect(dropEmptyDefiGroups(groups)).toEqual([]);
+  });
+});

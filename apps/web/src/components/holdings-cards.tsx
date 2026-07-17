@@ -2,7 +2,12 @@ import type { Note } from "@folio/connectors-basic";
 import { NoteIconGlyph, NoteIndicator, NoteView } from "@folio/notes-react";
 import { BouncyAccordion, type BouncyAccordionItem } from "@folio/ui";
 import { useLocale, useTranslations } from "use-intl";
-import { type OverviewBalance, type SpotRow, toAccountSections } from "../lib/account-view";
+import {
+  dropEmptyDefiGroups,
+  type OverviewBalance,
+  type SpotRow,
+  toAccountSections,
+} from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { DefiPositions, PerpPositions } from "./holdings-sections";
@@ -129,6 +134,7 @@ export function AccountHoldingsCards({
     return <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>;
   }
   const sections = toAccountSections(balances);
+  const defiGroups = dropEmptyDefiGroups(sections.defi);
   return (
     <div className="flex flex-col gap-8">
       {/* account 级 note(整钱包:BTC 未确认/收款/派生分布)→ 顶部手风琴。无则不渲染。 */}
@@ -136,7 +142,7 @@ export function AccountHoldingsCards({
       {sections.spot.length > 0 && <SpotCards rows={sections.spot} />}
       {/* perp/DeFi 明细:与总览 tab 共用 v2 组件(H5 #120);抽屉单账户上下文,不传 accountLabel、
           DeFi 直接用本账户分组(不经 mergeDefiGroups)。 */}
-      {sections.defi.length > 0 && <DefiPositions groups={sections.defi} />}
+      {defiGroups.length > 0 && <DefiPositions groups={defiGroups} />}
       {sections.perp && <PerpPositions view={sections.perp} />}
     </div>
   );
