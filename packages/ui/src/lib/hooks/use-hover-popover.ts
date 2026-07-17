@@ -19,7 +19,10 @@ const POPOVER_COLLAPSE_MS = 400;
 export function useHoverPopover() {
   const [open, setOpen] = useState(false);
   const [backdropHidden, setBackdropHidden] = useState(true);
-  const [side, setSide] = useState<"top" | "bottom">("bottom");
+  // 默认向上:关闭态面板即使不渲染内容也按 side 布局占位(beUI 需测量它)。默认 bottom 会把最后一行的
+  // 面板排到其下方、撑高文档 → 滚到底出现空白(整页上移错觉)。改 top 让占位重叠上方内容、不撑文档;
+  // 真正打开时 onOpenChange 按可用空间重定方向,不受此默认影响。
+  const [side, setSide] = useState<"top" | "bottom">("top");
   const anchor = useRef<HTMLElement | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
