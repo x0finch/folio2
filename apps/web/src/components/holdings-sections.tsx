@@ -62,21 +62,26 @@ function PerpRowContent({ p }: { p: PerpPositionView }) {
   const risk = liqRisk(p);
   return (
     <div className="flex w-full items-center gap-3">
-      <NeutralChip>
-        {p.leverage != null ? `${p.leverage}x ` : ""}
-        {sideLabel(p.side)}
-      </NeutralChip>
-      <span className="font-medium tabular-nums">
-        {formatNumber(Math.abs(p.size))} {p.coin}
-      </span>
-      {risk ? (
-        <LiqRing risk={risk} position={p} />
-      ) : (
-        // 无强平价(如全仓部分场景)→ 环降级为 muted 开仓价文本。
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {t("entry")} {usd(p.entryPx)}
-        </span>
-      )}
+      {/* 方向 badge 上;数量+币种 与 强平风险环 同一行水平对齐(环挂在数量行的父容器里)。 */}
+      <div className="flex flex-col items-start gap-1">
+        <NeutralChip>
+          {p.leverage != null ? `${p.leverage}x ` : ""}
+          {sideLabel(p.side)}
+        </NeutralChip>
+        <div className="flex items-center gap-2">
+          <span className="font-medium tabular-nums">
+            {formatNumber(Math.abs(p.size))} {p.coin}
+          </span>
+          {risk ? (
+            <LiqRing risk={risk} position={p} />
+          ) : (
+            // 无强平价(如全仓部分场景)→ 环降级为 muted 开仓价文本。
+            <span className="text-muted-foreground text-xs tabular-nums">
+              {t("entry")} {usd(p.entryPx)}
+            </span>
+          )}
+        </div>
+      </div>
       <div className="min-w-0 flex-1" />
       {/* 右:当前名义价值 + uPnL(单前置符号,--pos/--neg)。 */}
       <ValueDelta value={p.positionValue} delta={p.unrealizedPnl} pct={pnlPct(p)} />
