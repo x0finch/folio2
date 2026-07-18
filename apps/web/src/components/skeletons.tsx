@@ -40,20 +40,32 @@ export function OverviewSkeleton() {
   );
 }
 
+// 账户行骨架:贴合 v2 行(无前导头像)—— 左 名称/状态/代币叠标,右 市值/增量;无 Card,与真实列表同 padding。
+function AccountRow() {
+  return (
+    <div className="flex items-center justify-between gap-4 px-3 py-3">
+      <div className="flex flex-col gap-1.5">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-5 w-16 rounded-full" />
+      </div>
+      <div className="flex flex-col items-end gap-1.5">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-3 w-14" />
+      </div>
+    </div>
+  );
+}
+
 export function AccountsSkeleton() {
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <Skeleton className="h-6 w-28" />
-        <Skeleton className="h-9 w-24" />
+      <Skeleton className="h-8 w-40" />
+      <div className="flex flex-col">
+        {ROWS_4.map((k) => (
+          <AccountRow key={k} />
+        ))}
       </div>
-      <Card>
-        <CardContent className="flex flex-col gap-4 pt-6">
-          {ROWS_4.map((k) => (
-            <Row key={k} />
-          ))}
-        </CardContent>
-      </Card>
     </div>
   );
 }

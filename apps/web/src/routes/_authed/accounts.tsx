@@ -1,4 +1,4 @@
-import { cn, Fab } from "@folio/ui";
+import { cn, Fab, SharedLayoutBg } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
 import { useState } from "react";
@@ -74,27 +74,27 @@ function Accounts() {
       {rows.length === 0 ? (
         <p className="text-muted-foreground">{tc("noAccountsYet")}</p>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
           {active.map((r) => (
-            <li key={r.id}>
-              <AccountRowButton row={r} onClick={() => openRow(r)} />
-            </li>
+            <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
+              <AccountRowContent row={r} />
+            </button>
           ))}
-        </ul>
+        </SharedLayoutBg>
       )}
 
       {archived.length > 0 && (
-        <details className="rounded-md border px-4 py-2">
+        <details>
           <summary className="cursor-pointer text-sm text-muted-foreground">
             {t("archivedSection", { count: archived.length })}
           </summary>
-          <ul className="mt-2 flex flex-col gap-2">
+          <SharedLayoutBg className="mt-2" inset={0} pillClassName="rounded-xl bg-muted">
             {archived.map((r) => (
-              <li key={r.id}>
-                <AccountRowButton row={r} muted onClick={() => openRow(r)} />
-              </li>
+              <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
+                <AccountRowContent row={r} muted />
+              </button>
             ))}
-          </ul>
+          </SharedLayoutBg>
         </details>
       )}
 
@@ -150,27 +150,18 @@ function AccountStatusLine({
   );
 }
 
-// 单个账户行:整行可点 → 打开详情侧栏。名称 + Platform 徽章 / 状态行 / 持有代币叠标;右侧市值 + 24h 增量
-// (<ValueDelta> 全站统一,与代币行同款)。缺凭据 → 不显增量(不再同步,无新鲜变化);占比只在抽屉里显示。
-function AccountRowButton({
-  row,
-  muted,
-  onClick,
-}: {
-  row: AccountRow;
-  muted?: boolean;
-  onClick: () => void;
-}) {
+// 行按钮 className:hover 高亮交给 SharedLayoutBg 的移动 pill 承载(行间无分隔线/边框),与代币行一致。
+const ROW_CLASS = "w-full rounded-xl px-3 py-3 text-left";
+
+// 单个账户行内容:名称 + Platform 徽章 / 状态行 / 持有代币叠标;右侧市值 + 24h 增量(<ValueDelta> 全站统一,
+// 与代币行同款)。缺凭据 → 不显增量(不再同步,无新鲜变化);占比只在抽屉里显示。
+// 必须是单个 flex 容器 —— SharedLayoutBg 会把 <button> 的 children 塞进一个非 flex 的 z-10 div(见其实现),
+// 故 flex 布局放这层内层 div,避免竖排(与 token-holdings RowContent 同约束)。
+function AccountRowContent({ row, muted }: { row: AccountRow; muted?: boolean }) {
   const status = accountSyncStatus(row, Date.now());
   const dayChange = row.needsCredentials ? null : aggregateDayChange(row.balances);
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex w-full items-center justify-between gap-4 rounded-md border px-4 py-3 text-left transition-colors hover:bg-muted/50 ${
-        muted ? "opacity-60" : ""
-      }`}
-    >
+    <div className={cn("flex w-full items-center justify-between gap-4", muted && "opacity-60")}>
       <span className="flex min-w-0 flex-col gap-1.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{row.label}</span>
@@ -180,6 +171,6 @@ function AccountRowButton({
         {!muted && <TokenStack balances={row.balances} />}
       </span>
       {!muted && <ValueDelta value={row.totalUsd} delta={dayChange?.delta} pct={dayChange?.pct} />}
-    </button>
+    </div>
   );
 }
