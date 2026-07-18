@@ -124,11 +124,18 @@ export function AccountHoldingsCards({
   accountNote?: Note[];
 }) {
   const t = useTranslations("Overview");
-  // 空持仓且无 account 级 note → 无快照文案。有 account note(如零余额 xpub 的收款地址)仍渲染其手风琴。
-  if (balances.length === 0 && (accountNote?.length ?? 0) === 0) {
-    return <p className="text-sm text-muted-foreground">{t("noSnapshot")}</p>;
+  const sections = toAccountSections(balances); // defi 空组 / 零值现货已在此出口滤除
+  const hasNote = (accountNote?.length ?? 0) > 0;
+  const hasHoldings = sections.spot.length > 0 || sections.defi.length > 0 || sections.perp != null;
+  // 无可展示分区且无 account 级 note → 文案。区分「真无快照」与「有余额但全为零值/尘埃被滤空」
+  // (后者若照旧只判 balances.length 会漏成空白面板,code review #1)。
+  if (!hasHoldings && !hasNote) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {balances.length === 0 ? t("noSnapshot") : t("onlyDustHoldings")}
+      </p>
+    );
   }
-  const sections = toAccountSections(balances); // defi 空组已在此出口滤除
   return (
     <div className="flex flex-col gap-8">
       {/* account 级 note(整钱包:BTC 未确认/收款/派生分布)→ 顶部手风琴。无则不渲染。 */}

@@ -28,7 +28,7 @@ export function AvatarStack({
       {shown.map((a) => (
         <Avatar key={a.k ?? a.name} title={a.name} className={s.avatar}>
           <AvatarImage src={a.logo} alt="" className="bg-logo-bg" />
-          <AvatarFallback className={s.text}>{a.name.slice(0, 1)}</AvatarFallback>
+          <AvatarFallback className={s.text}>{a.name.slice(0, 1).toUpperCase()}</AvatarFallback>
         </Avatar>
       ))}
       {extra > 0 ? (

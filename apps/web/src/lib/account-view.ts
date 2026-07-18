@@ -1,6 +1,6 @@
 import { DefiMeta, type DefiMeta as DefiMetaT, type Note } from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
-import { dayValueChange } from "./day-value-change";
+import { aggregateDayChange } from "./day-value-change";
 import { type PerpView, toPerpView } from "./perp";
 
 // 纯逻辑(无 server-only import → 可单测)。把一个账户的余额行按 kind 拆成展示分区:
@@ -70,6 +70,10 @@ function parseDefiMeta(metaJson: string | null): DefiMetaT {
 
 const DEFI_FALLBACK_PROTOCOL = "Other";
 
+// 价值(美元)绝对值低于此即在 2 位小数下显示为 $0.00 —— 视为「价值 0」。用于现货表与叠标过滤掉
+// 无价/空投尘埃这类零值代币(与 DeFi 空腿的半分钱口径一致)。
+export const ZERO_DISPLAY_USD = 0.005;
+
 export function toAccountSections(balances: OverviewBalance[]): AccountSections {
   const spot: SpotRow[] = [];
   const perpRows: OverviewBalance[] = [];
@@ -95,7 +99,9 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
       if (group) group.push(row);
       else defiByProtocol.set(protocol, [row]);
     } else {
-      // spot / utxo:统一现货表(带上富化字段 + balance 级 note,缺则 undefined)
+      // spot / utxo:统一现货表(带上富化字段 + balance 级 note,缺则 undefined)。
+      // 价值显示为 $0.00 的现货(无价/空投尘埃)不展示 —— 是噪音,不是持仓。
+      if (Math.abs(b.usdValue) < ZERO_DISPLAY_USD) continue;
       spot.push({
         id: b.id,
         symbol: b.symbol,
@@ -154,19 +160,7 @@ export function dropEmptyDefiGroups(groups: DefiGroup[]): DefiGroup[] {
 export function protocolDayChange(
   rows: Pick<DefiRow, "usdValue" | "change24h">[],
 ): { delta: number; pct: number | null } | null {
-  let delta = 0;
-  let grossPrev = 0;
-  let any = false;
-  for (const r of rows) {
-    const d = dayValueChange(r.usdValue, r.change24h);
-    if (d != null) {
-      any = true;
-      delta += d;
-    }
-    grossPrev += Math.abs(r.usdValue - (d ?? 0));
-  }
-  if (!any) return null;
-  return { delta, pct: grossPrev !== 0 ? (delta / grossPrev) * 100 : null };
+  return aggregateDayChange(rows);
 }
 
 // 协议有值腿(H5 评审:头寸摘要别拼出几十条 0 值空仓/奖励腿 → 噪音看不懂)。按 |美元值| 降序,
