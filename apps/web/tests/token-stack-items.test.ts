@@ -41,6 +41,23 @@ describe("tokenStackItems", () => {
     expect(items.map((i) => i.name)).toEqual(["ETH"]);
   });
 
+  it("过滤掉价值显示为 $0.00 的零值代币(无价/空投尘埃)", () => {
+    const items = tokenStackItems([
+      b({ symbol: "ETH", usdValue: 100 }),
+      b({ symbol: "SPAM", usdValue: 0 }), // 无价 → 排除
+      b({ symbol: "DUST", usdValue: 0.004 }), // 不足半分钱、显示 $0.00 → 排除
+    ]);
+    expect(items.map((i) => i.name)).toEqual(["ETH"]);
+  });
+
+  it("同 symbol 多行合计过阈值则保留(逐行尘埃但合计非零)", () => {
+    const items = tokenStackItems([
+      b({ symbol: "ETH", usdValue: 0.004 }),
+      b({ symbol: "eth", usdValue: 0.004 }), // 合计 0.008 ≥ 0.005 → 保留
+    ]);
+    expect(items.map((i) => i.name)).toEqual(["ETH"]);
+  });
+
   it("纯 perp/defi 账户 → [](无现货可叠)", () => {
     expect(
       tokenStackItems([

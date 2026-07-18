@@ -70,6 +70,10 @@ function parseDefiMeta(metaJson: string | null): DefiMetaT {
 
 const DEFI_FALLBACK_PROTOCOL = "Other";
 
+// 价值(美元)绝对值低于此即在 2 位小数下显示为 $0.00 —— 视为「价值 0」。用于现货表与叠标过滤掉
+// 无价/空投尘埃这类零值代币(与 DeFi 空腿的半分钱口径一致)。
+export const ZERO_DISPLAY_USD = 0.005;
+
 export function toAccountSections(balances: OverviewBalance[]): AccountSections {
   const spot: SpotRow[] = [];
   const perpRows: OverviewBalance[] = [];
@@ -95,7 +99,9 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
       if (group) group.push(row);
       else defiByProtocol.set(protocol, [row]);
     } else {
-      // spot / utxo:统一现货表(带上富化字段 + balance 级 note,缺则 undefined)
+      // spot / utxo:统一现货表(带上富化字段 + balance 级 note,缺则 undefined)。
+      // 价值显示为 $0.00 的现货(无价/空投尘埃)不展示 —— 是噪音,不是持仓。
+      if (Math.abs(b.usdValue) < ZERO_DISPLAY_USD) continue;
       spot.push({
         id: b.id,
         symbol: b.symbol,

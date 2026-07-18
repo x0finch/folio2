@@ -22,6 +22,15 @@ describe("toAccountSections", () => {
     expect(s.perp).toBeNull();
   });
 
+  it("过滤掉价值显示为 $0.00 的零值现货(无价/空投尘埃)", () => {
+    const s = toAccountSections([
+      b({ id: "1", symbol: "ETH", usdValue: 5000, kind: "spot" }),
+      b({ id: "2", symbol: "SPAM", usdValue: 0, kind: "spot" }), // 无价 → 排除
+      b({ id: "3", symbol: "DUST", usdValue: 0.004, kind: "spot" }), // 显示 $0.00 → 排除
+    ]);
+    expect(s.spot.map((r) => r.symbol)).toEqual(["ETH"]);
+  });
+
   it("balance 级 note(单个 Note)透传到 SpotRow.note(note 重设计)", () => {
     const note = {
       title: "Locked",
