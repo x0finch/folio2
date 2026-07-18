@@ -186,7 +186,7 @@ function AccountRowContent({
           <span className="truncate font-medium">{row.label}</span>
           <ConnectorBadge
             connectorId={row.connectorId}
-            className="transition-colors group-hover:bg-background"
+            className="transition-colors group-hover:bg-background group-focus-visible:bg-background"
           />
         </span>
         <AccountStatusLine status={status} takenAt={row.takenAt} />
@@ -199,7 +199,7 @@ function AccountRowContent({
           {sharePct > 0 && (
             <span
               aria-hidden
-              className="pointer-events-none absolute top-1/2 right-full -z-10 -translate-y-1/2 translate-x-[0.6em] -rotate-12 whitespace-nowrap font-bold text-8xl text-background/50 leading-none tracking-tighter opacity-0 transition-opacity group-hover:opacity-100"
+              className="pointer-events-none absolute top-1/2 right-full -z-10 -translate-y-1/2 translate-x-[0.6em] -rotate-12 whitespace-nowrap font-bold text-8xl text-background/50 leading-none tracking-tighter opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
             >
               {shareLabel(sharePct)}%
             </span>

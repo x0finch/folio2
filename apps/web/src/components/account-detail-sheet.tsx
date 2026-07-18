@@ -149,7 +149,7 @@ function DetailBody({
           pct={dayChange?.pct}
         />
         <p className="text-sm text-muted-foreground">
-          {!archived && `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
+          {!archived && sharePct > 0 && `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
           {lastSynced}
         </p>
       </div>
