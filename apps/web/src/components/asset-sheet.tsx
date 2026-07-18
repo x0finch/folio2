@@ -23,35 +23,13 @@ import { signedUsd } from "../lib/signed-usd";
 import { groupByAccount, groupByPlatform, type SourceGroup } from "../lib/source-groups";
 import { AccountName } from "./account-name";
 import { AvatarStack } from "./avatar-stack";
+import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { ValueTrendChart } from "./value-trend-chart";
 
 // 资产 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
 // 头部背景 = 单币【持仓价值】历史(片 2):折线随涨跌走 --pos/--neg,内容浮其上;可切 7d/30d/1y/全部。
 // 来源区是 Platforms / Accounts 两视图的 tab 切换(互为转置):按平台看散在哪些链/场馆,或按账户看散在哪些账户。
-
-const DAY_MS = 86_400_000;
-type Range = "7d" | "30d" | "1y" | "all";
-const RANGES: Range[] = ["7d", "30d", "1y", "all"];
-const RANGE_DAYS: Record<Exclude<Range, "all">, number> = { "7d": 7, "30d": 30, "1y": 365 };
-
-// 窗口切换:7D / 30D / 1Y / 全部。beUI Tabs(透明底);无 TabsContent,value 驱动 chart。
-// 紧凑款(px-2/py-1/text-xs + gap-0.5)。TabsList 上 leading-none 关键:trigger 外层块 div 的行盒否则被
-// 继承的大 line-height 撑高(24px > 按钮 20px),使按钮(inline-flex)在其中偏移、绿 pill(= 外层 inset-0)
-// 比按钮高而文字相对 pill 不居中;leading-none 让行盒由按钮决定 → pill=按钮 → 文字垂直居中。
-function RangeTabs({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
-  const t = useTranslations("Overview");
-  return (
-    <Tabs value={value} onValueChange={(v) => onChange(v as Range)} variant="pill">
-      <TabsList className="gap-0.5 bg-transparent p-0 leading-none">
-        {RANGES.map((r) => (
-          <TabsTrigger key={r} value={r} className="px-2 py-1 font-mono text-xs leading-none">
-            {r === "all" ? t("rangeAll") : r.toUpperCase()}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-    </Tabs>
-  );
-}
+// 窗口切换(RangeTabs)与账户抽屉共用,抽到 ./range-tabs。
 
 // 组头像:单 avatar → 单 logo;多 avatar(账户跨多链)→ 叠标 + N(共享 AvatarStack)。
 // manual 亦有内置 logo(NotebookPen),走普通 LogoAvatar,不再特判。
@@ -169,7 +147,7 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
 
   // 单币持仓价值历史(片 2):按 Holding key + 窗口拉取,喂头部背景图。窗口切换即重取(keepPrevious 防闪)。
   const [range, setRange] = useState<Range>("30d");
-  const since = range === "all" ? undefined : Date.now() - RANGE_DAYS[range] * DAY_MS;
+  const since = rangeSince(range, Date.now());
   const historyQuery = useQuery({
     queryKey: ["token-history", holding.key, range],
     queryFn: () => getTokenValueHistory({ data: { key: holding.key, since } }),
