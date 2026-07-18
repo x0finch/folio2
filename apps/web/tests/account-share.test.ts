@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountShare, activeAccountsTotal } from "../src/lib/account-share";
+import { accountShare, activeAccountsTotal, shareLabel } from "../src/lib/account-share";
 
 describe("accountShare", () => {
   it("占比 = 账户市值 / 总计", () => {
@@ -29,5 +29,25 @@ describe("activeAccountsTotal", () => {
 
   it("空列表 → 0", () => {
     expect(activeAccountsTotal([])).toBe(0);
+  });
+});
+
+describe("shareLabel", () => {
+  it('>0 且 <1 → "<1.0"', () => {
+    expect(shareLabel(0.3)).toBe("<1.0");
+    expect(shareLabel(0.99)).toBe("<1.0");
+  });
+
+  it('恰好 1 → "1.0"(不算小于 1)', () => {
+    expect(shareLabel(1)).toBe("1.0");
+  });
+
+  it("≥1 → 一位小数", () => {
+    expect(shareLabel(55.44)).toBe("55.4");
+    expect(shareLabel(100)).toBe("100.0");
+  });
+
+  it('0 → "0.0"(非小于 1 的正数,照常)', () => {
+    expect(shareLabel(0)).toBe("0.0");
   });
 });

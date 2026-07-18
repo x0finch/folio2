@@ -5,7 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
-import { accountShare } from "../lib/account-share";
+import { accountShare, shareLabel } from "../lib/account-share";
 import type { OverviewBalance } from "../lib/account-view";
 import { aggregateDayChange } from "../lib/day-value-change";
 import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
@@ -149,7 +149,7 @@ function DetailBody({
           pct={dayChange?.pct}
         />
         <p className="text-sm text-muted-foreground">
-          {!archived && `${t("shareOfTotal", { pct: sharePct.toFixed(1) })} · `}
+          {!archived && `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
           {lastSynced}
         </p>
       </div>

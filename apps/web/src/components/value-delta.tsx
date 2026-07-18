@@ -11,15 +11,17 @@ export function ValueDelta({
   delta,
   pct,
   align = "right",
+  className,
 }: {
   value: number;
   delta?: number | null;
   pct?: number | null;
   align?: "left" | "right";
+  className?: string;
 }) {
   const usd = useDisplayValue();
   return (
-    <div className={align === "right" ? "shrink-0 text-right" : "text-left"}>
+    <div className={cn(align === "right" ? "shrink-0 text-right" : "text-left", className)}>
       <div className={cn("font-medium tabular-nums", value < 0 && "text-neg")}>{usd(value)}</div>
       {delta != null && delta !== 0 && (
         <div className={cn("text-xs tabular-nums", delta > 0 ? "text-pos" : "text-neg")}>

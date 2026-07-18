@@ -11,3 +11,9 @@ export function activeAccountsTotal(
 export function accountShare(value: number, total: number): number {
   return total > 0 ? value / total : 0;
 }
+
+// 占比展示标签(不含 %,由 UI 补 "%" 后缀):>0 且 <1 统一显示 "<1.0"(→ "<1.0%"),否则一位小数。
+// 让极小占比不显示成误导性的 "0.3%",而是明确的 "<1.0%"。
+export function shareLabel(pct: number): string {
+  return pct > 0 && pct < 1 ? "<1.0" : pct.toFixed(1);
+}

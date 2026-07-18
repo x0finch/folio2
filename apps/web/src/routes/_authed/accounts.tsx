@@ -9,7 +9,8 @@ import { ConnectorBadge } from "../../components/connector-badge";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { TokenStack } from "../../components/token-stack";
 import { ValueDelta } from "../../components/value-delta";
-import { activeAccountsTotal } from "../../lib/account-share";
+import { accountShare, activeAccountsTotal, shareLabel } from "../../lib/account-share";
+import { sortActiveAccounts } from "../../lib/account-sort";
 import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-sync-status";
 import { aggregateDayChange } from "../../lib/day-value-change";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
@@ -54,7 +55,8 @@ function Accounts() {
   const { rows, credentialSpecs, pricesStale } = Route.useLoaderData();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
 
-  const active = rows.filter((r) => r.archivedAt == null);
+  // 活跃账户排序:未同步过(新加)置顶 → 其余按市值倒序;归档在末尾独立分区。
+  const active = sortActiveAccounts(rows.filter((r) => r.archivedAt == null));
   const archived = rows.filter((r) => r.archivedAt != null);
   const total = activeAccountsTotal(rows); // 抽屉占比分母(顶部不显总额)
 
@@ -77,7 +79,7 @@ function Accounts() {
         <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
           {active.map((r) => (
             <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
-              <AccountRowContent row={r} />
+              <AccountRowContent row={r} total={total} />
             </button>
           ))}
         </SharedLayoutBg>
@@ -91,7 +93,7 @@ function Accounts() {
           <SharedLayoutBg className="mt-2" inset={0} pillClassName="rounded-xl bg-muted">
             {archived.map((r) => (
               <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
-                <AccountRowContent row={r} muted />
+                <AccountRowContent row={r} total={total} muted />
               </button>
             ))}
           </SharedLayoutBg>
@@ -151,19 +153,35 @@ function AccountStatusLine({
 }
 
 // 行按钮 className:hover 高亮交给 SharedLayoutBg 的移动 pill 承载(行间无分隔线/边框),与代币行一致。
-// group:让行内徽章能按 group-hover 换底色(pill 是 bg-muted,徽章 hover 切 bg-background 才不融进去)。
-const ROW_CLASS = "group w-full rounded-xl px-3 py-3 text-left";
+// group:让行内徽章/占比底衬能按 group-hover 响应 hover。padding 放内容层(见 AccountRowContent),
+// 按钮本身不裁剪 —— 否则会切掉 SharedLayoutBg 的跨行滑块动画。
+const ROW_CLASS = "group w-full rounded-xl text-left";
 
 // 单个账户行内容:名称 + Platform 徽章 / 状态行 / 持有代币叠标;右侧市值 + 24h 增量(<ValueDelta> 全站统一,
 // 与代币行同款)。缺凭据 → 不显增量(不再同步,无新鲜变化);占比只在抽屉里显示。
 // 必须是单个 flex 容器 —— SharedLayoutBg 会把 <button> 的 children 塞进一个非 flex 的 z-10 div(见其实现),
 // 故 flex 布局放这层内层 div,避免竖排(与 token-holdings RowContent 同约束)。
-function AccountRowContent({ row, muted }: { row: AccountRow; muted?: boolean }) {
+function AccountRowContent({
+  row,
+  total,
+  muted,
+}: {
+  row: AccountRow;
+  total: number;
+  muted?: boolean;
+}) {
   const status = accountSyncStatus(row, Date.now());
   const dayChange = row.needsCredentials ? null : aggregateDayChange(row.balances);
+  const sharePct = accountShare(row.totalUsd, total) * 100;
   return (
-    <div className={cn("flex w-full items-center justify-between gap-4", muted && "opacity-60")}>
-      <span className="flex min-w-0 flex-col gap-1.5">
+    // padding + overflow-hidden 放这层(填满整行):占比大字只被行外框裁,不在内容盒内被切。
+    <div
+      className={cn(
+        "relative flex w-full items-center justify-between gap-4 overflow-hidden rounded-xl px-3 py-3",
+        muted && "opacity-60",
+      )}
+    >
+      <span className="relative flex min-w-0 flex-col gap-1.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{row.label}</span>
           <ConnectorBadge
@@ -174,7 +192,21 @@ function AccountRowContent({ row, muted }: { row: AccountRow; muted?: boolean })
         <AccountStatusLine status={status} takenAt={row.takenAt} />
         {!muted && <TokenStack balances={row.balances} />}
       </span>
-      {!muted && <ValueDelta value={row.totalUsd} delta={dayChange?.delta} pct={dayChange?.pct} />}
+      {!muted && (
+        <div className="relative shrink-0">
+          {/* hover 底衬:超大占比数字倾斜、占满行高,锚在价值左缘(right-full)再右移一个 % 宽度 —— 只有末尾 %
+              掖进价值下、前面数字全露出;-z-10 垫在名称/价值之下,中性淡色、仅 hover 浮现、不可点、不参与朗读。 */}
+          {sharePct > 0 && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 right-full -z-10 -translate-y-1/2 translate-x-[0.6em] -rotate-12 whitespace-nowrap font-bold text-8xl text-background/50 leading-none tracking-tighter opacity-0 transition-opacity group-hover:opacity-100"
+            >
+              {shareLabel(sharePct)}%
+            </span>
+          )}
+          <ValueDelta value={row.totalUsd} delta={dayChange?.delta} pct={dayChange?.pct} />
+        </div>
+      )}
     </div>
   );
 }
