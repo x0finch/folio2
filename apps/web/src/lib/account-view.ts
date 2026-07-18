@@ -1,6 +1,6 @@
 import { DefiMeta, type DefiMeta as DefiMetaT, type Note } from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
-import { dayValueChange } from "./day-value-change";
+import { aggregateDayChange } from "./day-value-change";
 import { type PerpView, toPerpView } from "./perp";
 
 // 纯逻辑(无 server-only import → 可单测)。把一个账户的余额行按 kind 拆成展示分区:
@@ -154,19 +154,7 @@ export function dropEmptyDefiGroups(groups: DefiGroup[]): DefiGroup[] {
 export function protocolDayChange(
   rows: Pick<DefiRow, "usdValue" | "change24h">[],
 ): { delta: number; pct: number | null } | null {
-  let delta = 0;
-  let grossPrev = 0;
-  let any = false;
-  for (const r of rows) {
-    const d = dayValueChange(r.usdValue, r.change24h);
-    if (d != null) {
-      any = true;
-      delta += d;
-    }
-    grossPrev += Math.abs(r.usdValue - (d ?? 0));
-  }
-  if (!any) return null;
-  return { delta, pct: grossPrev !== 0 ? (delta / grossPrev) * 100 : null };
+  return aggregateDayChange(rows);
 }
 
 // 协议有值腿(H5 评审:头寸摘要别拼出几十条 0 值空仓/奖励腿 → 噪音看不懂)。按 |美元值| 降序,

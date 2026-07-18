@@ -1,6 +1,6 @@
-import { Fab } from "@folio/ui";
+import { cn, Fab } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
+import { AlertTriangle, Plus } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
@@ -8,7 +8,10 @@ import { AddAccountSheet } from "../../components/add-account-sheet";
 import { ConnectorBadge } from "../../components/connector-badge";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { TokenStack } from "../../components/token-stack";
-import { useDisplayValue } from "../../lib/hooks/use-display-value";
+import { ValueDelta } from "../../components/value-delta";
+import { activeAccountsTotal } from "../../lib/account-share";
+import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-sync-status";
+import { aggregateDayChange } from "../../lib/day-value-change";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { listMyAccounts } from "../../lib/server/accounts";
 import { getCredentialSpecs } from "../../lib/server/credentials";
@@ -48,12 +51,12 @@ export const Route = createFileRoute("/_authed/accounts")({
 function Accounts() {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const usd = useDisplayValue();
   const { rows, credentialSpecs, pricesStale } = Route.useLoaderData();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
 
   const active = rows.filter((r) => r.archivedAt == null);
   const archived = rows.filter((r) => r.archivedAt != null);
+  const total = activeAccountsTotal(rows); // 抽屉占比分母(顶部不显总额)
 
   // 详情侧栏:存 id 而非行对象 —— invalidate 后从新 rows 派生,侧栏内容随刷新自动更新(归档态等)。
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -74,7 +77,7 @@ function Accounts() {
         <ul className="flex flex-col gap-2">
           {active.map((r) => (
             <li key={r.id}>
-              <AccountRowButton row={r} usd={usd} onClick={() => openRow(r)} />
+              <AccountRowButton row={r} onClick={() => openRow(r)} />
             </li>
           ))}
         </ul>
@@ -88,7 +91,7 @@ function Accounts() {
           <ul className="mt-2 flex flex-col gap-2">
             {archived.map((r) => (
               <li key={r.id}>
-                <AccountRowButton row={r} usd={usd} muted onClick={() => openRow(r)} />
+                <AccountRowButton row={r} muted onClick={() => openRow(r)} />
               </li>
             ))}
           </ul>
@@ -97,6 +100,7 @@ function Accounts() {
 
       <AccountDetailSheet
         account={selected}
+        total={total}
         specs={selected ? (credentialSpecs[selected.connectorId] ?? []) : []}
         open={open}
         onOpenChange={setOpen}
@@ -109,20 +113,56 @@ function Accounts() {
   );
 }
 
-// 单个账户行:整行可点 → 打开详情侧栏。左上 名称 + 类型徽章(+ 缺凭据);左下 持有代币层叠图标;右 市值。
+// 状态行(名称下方一条纯文本,按态染色):缺凭据 / 陈旧 → --warn 警示色 + 前置 ⚠;新鲜 / 从未同步 → muted。
+// 陈旧仍显"同步于 {when}"(带告警),缺凭据显"缺凭据"。派生走 accountSyncStatus 纯函数。
+function AccountStatusLine({
+  status,
+  takenAt,
+}: {
+  status: AccountSyncStatus;
+  takenAt: number | null;
+}) {
+  const t = useTranslations("Accounts");
+  const format = useFormatter();
+  const warn = status === "needsCreds" || status === "stale";
+  // needsCreds/never 无 takenAt(never 定义即无快照)→ 显固定文案;fresh/stale 有 takenAt → 显同步时刻。
+  const text =
+    status === "needsCreds"
+      ? t("needsCredentials")
+      : takenAt != null
+        ? t("lastSyncedAt", { when: format.relativeTime(new Date(takenAt)) })
+        : t("neverSynced");
+  return (
+    <span
+      className={cn(
+        "flex items-center gap-1 text-xs",
+        warn ? "text-warn" : "text-muted-foreground",
+      )}
+    >
+      {warn && (
+        <>
+          <AlertTriangle className="size-3 shrink-0" aria-hidden />
+          <span className="sr-only">{t("syncWarning")}</span>
+        </>
+      )}
+      {text}
+    </span>
+  );
+}
+
+// 单个账户行:整行可点 → 打开详情侧栏。名称 + Platform 徽章 / 状态行 / 持有代币叠标;右侧市值 + 24h 增量
+// (<ValueDelta> 全站统一,与代币行同款)。缺凭据 → 不显增量(不再同步,无新鲜变化);占比只在抽屉里显示。
 function AccountRowButton({
   row,
-  usd,
   muted,
   onClick,
 }: {
   row: AccountRow;
-  usd: (n: number) => string;
   muted?: boolean;
   onClick: () => void;
 }) {
-  const t = useTranslations("Accounts");
-  const format = useFormatter();
+  const status = accountSyncStatus(row, Date.now());
+  const dayChange = row.needsCredentials ? null : aggregateDayChange(row.balances);
   return (
     <button
       type="button"
@@ -135,20 +175,11 @@ function AccountRowButton({
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{row.label}</span>
           <ConnectorBadge connectorId={row.connectorId} />
-          {row.needsCredentials && (
-            <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive">
-              {t("needsCredentials")}
-            </span>
-          )}
         </span>
-        <span className="text-xs text-muted-foreground">
-          {row.takenAt
-            ? t("lastSyncedAt", { when: format.relativeTime(new Date(row.takenAt)) })
-            : t("neverSynced")}
-        </span>
+        <AccountStatusLine status={status} takenAt={row.takenAt} />
         {!muted && <TokenStack balances={row.balances} />}
       </span>
-      {!muted && <span className="shrink-0 font-medium">{usd(row.totalUsd)}</span>}
+      {!muted && <ValueDelta value={row.totalUsd} delta={dayChange?.delta} pct={dayChange?.pct} />}
     </button>
   );
 }

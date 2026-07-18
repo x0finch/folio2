@@ -5,8 +5,9 @@ import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
+import { accountShare } from "../lib/account-share";
 import type { OverviewBalance } from "../lib/account-view";
-import { useDisplayValue } from "../lib/hooks/use-display-value";
+import { aggregateDayChange } from "../lib/day-value-change";
 import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
 import type { InputSpec } from "../lib/server/credentials";
 import { syncOneAccount } from "../lib/server/sync";
@@ -14,6 +15,7 @@ import { ConnectorBadge } from "./connector-badge";
 import { CredentialForm } from "./credential-form";
 import { AccountHoldingsCards } from "./holdings-cards";
 import { ManualActivityPanel } from "./manual-activity-panel";
+import { ValueDelta } from "./value-delta";
 
 // 账户页列表行的合并形状(getMyOverview ∪ listMyAccounts,见 accounts.tsx loader)。
 export interface AccountRow {
@@ -33,11 +35,13 @@ export interface AccountRow {
 // + 全部持仓;manual 账户额外挂活动录入。所有写操作成功后 router.invalidate() 刷新列表与总览。
 export function AccountDetailSheet({
   account,
+  total,
   specs,
   open,
   onOpenChange,
 }: {
   account: AccountRow | null;
+  total: number; // 活跃账户总计 —— 抽屉头占比分母(见 accounts.tsx)
   specs: InputSpec[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -54,6 +58,7 @@ export function AccountDetailSheet({
         <DetailBody
           key={account.id}
           account={account}
+          total={total}
           specs={specs}
           onClose={() => onOpenChange(false)}
         />
@@ -65,10 +70,12 @@ export function AccountDetailSheet({
 // key={account.id} 重挂 → 切账户自动清空 rename/confirm 等本地态。
 function DetailBody({
   account,
+  total,
   specs,
   onClose,
 }: {
   account: AccountRow;
+  total: number;
   specs: InputSpec[];
   onClose: () => void;
 }) {
@@ -76,8 +83,11 @@ function DetailBody({
   const tc = useTranslations("Common");
   const format = useFormatter();
   const router = useRouter();
-  const usd = useDisplayValue();
   const refresh = () => router.invalidate();
+
+  // 头部 24h 增量与账户行同源(缺凭据 → 不显增量);占比 = 本账户市值 / 活跃账户总计。
+  const dayChange = account.needsCredentials ? null : aggregateDayChange(account.balances);
+  const sharePct = accountShare(account.totalUsd, total) * 100;
 
   const archived = account.archivedAt != null;
   const [renaming, setRenaming] = useState(false);
@@ -132,8 +142,15 @@ function DetailBody({
             </span>
           )}
         </h2>
+        <ValueDelta
+          align="left"
+          value={account.totalUsd}
+          delta={dayChange?.delta}
+          pct={dayChange?.pct}
+        />
         <p className="text-sm text-muted-foreground">
-          {usd(account.totalUsd)} · {lastSynced}
+          {!archived && `${t("shareOfTotal", { pct: sharePct.toFixed(1) })} · `}
+          {lastSynced}
         </p>
       </div>
 
