@@ -48,6 +48,20 @@ export function downsampleSeries(
   return [...byBucket.values()].sort((a, b) => a.t - b.t);
 }
 
+// 单账户价值历史(A2 抽屉头部 chart):该账户快照 (takenAt, totalUsd) → 升序 HistoryPoint[]。
+// 单账户即组合净值阶梯重建的退化情形(每 takenAt 一点),故复用 buildPortfolioHistory + 自适应降采样。
+// since 裁窗口(仅保留 takenAt ≥ since 的快照);末点 = 最新快照冻结总额,与账户行/抽屉头
+// account.totalUsd 同源(曲线当下点 ≡ 头部数值,无需 live 覆写 —— 那是主页 hero 专属)。
+export function buildAccountValueHistory(
+  snapshots: { takenAt: number; totalUsd: number }[],
+  since?: number,
+): HistoryPoint[] {
+  const rows: SnapshotTotalRow[] = snapshots
+    .filter((s) => since == null || s.takenAt >= since)
+    .map((s) => ({ accountId: "_", takenAt: s.takenAt, totalUsd: s.totalUsd }));
+  return downsampleSeries(buildPortfolioHistory(rows));
+}
+
 export function buildPortfolioHistory(rows: SnapshotTotalRow[]): HistoryPoint[] {
   // 入参约定升序;为稳健起见自排一次(不依赖调用方排序)。
   const sorted = [...rows].sort((a, b) => a.takenAt - b.takenAt);

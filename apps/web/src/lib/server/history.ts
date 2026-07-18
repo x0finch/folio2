@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { buildPortfolioHistory } from "../history";
+import { z } from "zod";
+import { buildAccountValueHistory, buildPortfolioHistory } from "../history";
 import { deriveLiveAccountTotals } from "../live-value";
 import { requireAuth } from "../require-auth";
 import { db } from "./db";
@@ -34,4 +35,18 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     for (const v of liveTotals.values()) grand += v;
     series[series.length - 1] = { ...series[series.length - 1], total: grand };
     return { series };
+  });
+
+// 单账户价值历史(A2 抽屉头部 chart):该账户全部快照 (takenAt, totalUsd) → 升序序列,since 裁窗口。
+// listSnapshotsByAccount 内含 assertAccountOwned(越权即抛)。过去点与末点均用冻结 usd_value ——
+// 账户页/抽屉头 account.totalUsd 亦为冻结最新快照总额,故曲线当下点 ≡ 头部数值,无需 live 覆写
+// (deriveLiveAccountTotals 是主页 hero 现推专属,见 #81)。轻量:仅一次快照读,不做富化/估值。
+export const getAccountValueHistory = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(
+    z.object({ accountId: z.string().min(1), since: z.number().int().nonnegative().optional() }),
+  )
+  .handler(async ({ data, context }) => {
+    const snapshots = await db.listSnapshotsByAccount(context.userId, data.accountId);
+    return { series: buildAccountValueHistory(snapshots, data.since) };
   });
