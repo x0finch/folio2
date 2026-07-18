@@ -190,7 +190,13 @@ function AccountRowContent({
           />
         </span>
         <AccountStatusLine status={status} takenAt={row.takenAt} />
-        {!muted && <TokenStack balances={row.balances} />}
+        {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),无现货可叠(纯 perp/DeFi 或未同步)的行也不塌矮,
+            全列表行高一致。真 logo 的按-kind 填充(perp coin / DeFi 协议)待 #132 解绑后再接。 */}
+        {!muted && (
+          <span className="flex min-h-6 items-center">
+            <TokenStack balances={row.balances} />
+          </span>
+        )}
       </span>
       {!muted && (
         <div className="relative shrink-0">
