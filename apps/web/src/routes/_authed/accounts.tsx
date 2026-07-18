@@ -151,7 +151,8 @@ function AccountStatusLine({
 }
 
 // 行按钮 className:hover 高亮交给 SharedLayoutBg 的移动 pill 承载(行间无分隔线/边框),与代币行一致。
-const ROW_CLASS = "w-full rounded-xl px-3 py-3 text-left";
+// group:让行内徽章能按 group-hover 换底色(pill 是 bg-muted,徽章 hover 切 bg-background 才不融进去)。
+const ROW_CLASS = "group w-full rounded-xl px-3 py-3 text-left";
 
 // 单个账户行内容:名称 + Platform 徽章 / 状态行 / 持有代币叠标;右侧市值 + 24h 增量(<ValueDelta> 全站统一,
 // 与代币行同款)。缺凭据 → 不显增量(不再同步,无新鲜变化);占比只在抽屉里显示。
@@ -165,7 +166,10 @@ function AccountRowContent({ row, muted }: { row: AccountRow; muted?: boolean })
       <span className="flex min-w-0 flex-col gap-1.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{row.label}</span>
-          <ConnectorBadge connectorId={row.connectorId} />
+          <ConnectorBadge
+            connectorId={row.connectorId}
+            className="transition-colors group-hover:bg-background"
+          />
         </span>
         <AccountStatusLine status={status} takenAt={row.takenAt} />
         {!muted && <TokenStack balances={row.balances} />}
