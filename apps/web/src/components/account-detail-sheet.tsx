@@ -183,9 +183,12 @@ function DetailBody({
       {/* 头部:价值历史图垫底;窗口切换叠右下角、⋯ 菜单叠右上角;名称/市值/占比浮其上。
           预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
       <div className="relative">
-        <div className="relative min-h-44 overflow-hidden">
+        <div className="relative min-h-44">
+          {/* chart 单独一层裁溢出;名称层浮其上不受裁 → 左上角铅笔角标不被 overflow-hidden 切掉。 */}
           {series.length >= 2 && (
-            <ValueTrendChart series={series} topMargin={56} fillOpacity={0.14} />
+            <div className="absolute inset-0 overflow-hidden">
+              <ValueTrendChart series={series} topMargin={56} fillOpacity={0.14} />
+            </div>
           )}
 
           {/* 窗口切换:右下角独占一带(与 asset-sheet 一致)。 */}
@@ -230,28 +233,20 @@ function DetailBody({
                   </Button>
                 </form>
               ) : (
-                // 点名字进入内联重命名;hover 名字:左上角浮出小铅笔角标 + 「点击重命名」tooltip。
-                <span className="group relative inline-flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => setRenaming(true)}
-                    className="relative rounded-md text-left outline-none"
-                  >
-                    {/* 名称字号同代币抽屉头部(text-lg semibold)。 */}
-                    <span className="font-semibold text-lg">{account.label}</span>
-                    {/* 铅笔作左上角角标:绝对定位、不占行宽 → Platform 徽章可紧贴名字;hover/聚焦才现。 */}
-                    <Pencil
-                      className="pointer-events-none absolute -top-1.5 -left-2 size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-                      aria-hidden
-                    />
-                  </button>
-                  <span
-                    role="tooltip"
-                    className="pointer-events-none absolute bottom-full left-0 mb-1.5 whitespace-nowrap rounded-md border border-border bg-card px-2 py-1 text-muted-foreground text-xs opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-                  >
-                    {t("clickToRename")}
-                  </span>
-                </span>
+                // 点名字进入内联重命名;hover 名字:右上角浮出小铅笔角标。
+                <button
+                  type="button"
+                  onClick={() => setRenaming(true)}
+                  className="group relative rounded-md text-left outline-none"
+                >
+                  {/* 名称字号同代币抽屉头部(text-lg semibold)。 */}
+                  <span className="font-semibold text-lg">{account.label}</span>
+                  {/* 铅笔作右上角角标:绝对定位、不占行宽;hover/聚焦才现。 */}
+                  <Pencil
+                    className="pointer-events-none absolute -top-1.5 -right-2 size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                    aria-hidden
+                  />
+                </button>
               )}
               {!renaming && <ConnectorBadge connectorId={account.connectorId} />}
               {!renaming && archived && (
