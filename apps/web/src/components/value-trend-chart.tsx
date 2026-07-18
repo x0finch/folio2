@@ -58,6 +58,10 @@ export function ValueTrendChart({
         <Area
           dataKey="total"
           type="monotone"
+          // baseValue 钉死 dataMin:填充恒在折线下方。默认 "auto" 在 domain 跨 0(账户可有负值历史点)时
+          // 取基线 0 → 负值段填充翻到线上方(阴影反向);dataMin 消除反向。全正序列下 domain=[dataMin,dataMax]
+          // 中 0 本就不在域内、auto 已等于 dataMin,故 hero / 资产抽屉观感不变。
+          baseValue="dataMin"
           stroke="var(--color-total)"
           strokeWidth={2}
           strokeOpacity={0.5}
