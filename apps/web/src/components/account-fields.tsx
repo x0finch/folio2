@@ -1,8 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import type { TokenInfo } from "@folio/tokens";
 import {
-  Button,
-  Drawer,
   Input,
   Label,
   Select,
@@ -12,9 +10,8 @@ import {
   SelectValue,
   StatefulButton,
 } from "@folio/ui";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
-import { cloneElement, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import {
   BTC_SCRIPT_OPTIONS,
@@ -22,16 +19,14 @@ import {
   isExtendedPubkey,
   recommendedScript,
 } from "../lib/bitcoin-scripts";
-import { CONNECTOR_OPTIONS } from "../lib/connectors";
 import { createAccount } from "../lib/server/accounts";
-import { getCredentialSpecs, type InputSpec } from "../lib/server/credentials";
-import { syncOneAccount } from "../lib/server/sync";
+import type { InputSpec } from "../lib/server/credentials";
 import { tokenPrice } from "../lib/server/tokens";
-import { useConnectorLabels } from "../lib/use-connector-labels";
-import { TokenPicker } from "./token-picker";
+import { TokenCombobox } from "./token-combobox";
 
-// connector-driven 创建(#55):字段组件已按 connector.account.creds 的 key 写入 values,
-// 这里只需原样透传给统一的 createAccount(校验/加密/落库全在服务端按 connectorId 驱动)。
+// 添加账户的录入字段与提交(A4 从 add-account-sheet 抽出,供 AddAccountModal 复用)。connector-driven 创建(#55):
+// 字段组件按 connector.account.creds 的 key 写入 values,原样透传给统一 createAccount(校验/加密/落库全在服务端
+// 按 connectorId 驱动)。manual 选币用 TokenCombobox(内联下推,取代旧 TokenPicker 浮层)。
 async function submitAccount(
   connectorId: ConnectorId,
   label: string,
@@ -40,7 +35,7 @@ async function submitAccount(
   return createAccount({ data: { connectorId, label, values } });
 }
 
-// manual 的字段:富控件(TokenCombobox 选币联动 symbol+identifier+autofill 单价 / 数字 / 锁定勾选)。
+// manual 的字段:富控件(TokenCombobox 选币联动 symbol+identifier+autofill 单价 / 数字)。
 // 找不到的币可切"手动输入 symbol"(不关联,identifier 空)。
 function ManualFields({
   values,
@@ -99,7 +94,7 @@ function ManualFields({
             />
             <button
               type="button"
-              className="self-start text-xs text-muted-foreground underline"
+              className="self-start text-muted-foreground text-xs underline"
               onClick={() => {
                 setManualMode(false);
                 set("symbol", "");
@@ -110,7 +105,7 @@ function ManualFields({
           </>
         ) : (
           <>
-            <TokenPicker
+            <TokenCombobox
               value={picked}
               onChange={onPick}
               onManual={(q) => {
@@ -120,7 +115,7 @@ function ManualFields({
             />
             <button
               type="button"
-              className="self-start text-xs text-muted-foreground underline"
+              className="self-start text-muted-foreground text-xs underline"
               onClick={() => setManualMode(true)}
             >
               {t("enterManually")}
@@ -149,7 +144,7 @@ function ManualFields({
           onChange={(v) => set("unitPrice", v)}
           placeholder="0.0"
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-muted-foreground text-xs">
           {priceBusy ? t("fetchingPrice") : t("unitPriceHint")}
         </p>
       </div>
@@ -248,14 +243,14 @@ function BitcoinFields({
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">{ti("btcScriptHint")}</p>
+          <p className="text-muted-foreground text-xs">{ti("btcScriptHint")}</p>
         </div>
       )}
       {/* ypub/zpub:前缀已确定类型 → 只读展示,不必选。 */}
       {isExtendedPubkey(id) && !isBareXpub(id) && (
         <div className="flex flex-col gap-1.5">
           <Label>{ti("Address type")}</Label>
-          <p className="text-sm text-muted-foreground">{detectedLabel}</p>
+          <p className="text-muted-foreground text-sm">{detectedLabel}</p>
         </div>
       )}
     </>
@@ -263,7 +258,7 @@ function BitcoinFields({
 }
 
 // 单个 connector 的录入表单。key={connectorId} 重挂 → 切 connector 自动清空本地态(不用 useEffect→setState)。
-function AccountForm({
+export function AccountForm({
   connectorId,
   specs,
   onDone,
@@ -283,7 +278,7 @@ function AccountForm({
 
   return (
     <form
-      className="mt-4 flex flex-col gap-4"
+      className="flex flex-col gap-4"
       onSubmit={(e) => {
         e.preventDefault();
         mutation.mutate();
@@ -309,7 +304,7 @@ function AccountForm({
         <GenericFields specs={specs} values={values} setValues={setValues} />
       )}
       {mutation.isError && (
-        <p className="text-sm text-destructive">
+        <p className="text-destructive text-sm">
           {mutation.error instanceof Error ? mutation.error.message : String(mutation.error)}
         </p>
       )}
@@ -318,87 +313,10 @@ function AccountForm({
         state={mutation.isPending ? "loading" : "idle"}
         loadingText={tc("verifying")}
         disabled={mutation.isPending}
-        className="self-start"
+        className="self-end"
       >
         {t("addAccount")}
       </StatefulButton>
     </form>
-  );
-}
-
-// 统一「添加账户」侧栏:分组 Select 切 connector → schema 驱动字段(manual 富控件)。
-// triggerRender:自定义触发元素(账户页传 Fab);缺省用普通按钮。
-export function AddAccountSheet({ triggerRender }: { triggerRender?: React.ReactElement } = {}) {
-  const t = useTranslations("Accounts");
-  const router = useRouter();
-  const labelOf = useConnectorLabels();
-  const [open, setOpen] = useState(false);
-  const [connectorId, setConnectorId] = useState<ConnectorId>("manual");
-  // 字段规格部署内静态 → 长 staleTime,几乎只取一次。
-  const specsQuery = useQuery({
-    queryKey: ["credentialSpecs"],
-    queryFn: () => getCredentialSpecs(),
-    staleTime: 60 * 60_000,
-  });
-  const specs = specsQuery.data?.[connectorId] ?? [];
-
-  return (
-    <>
-      {cloneElement(triggerRender ?? <Button size="sm">{t("addAccount")}</Button>, {
-        onClick: () => setOpen(true),
-      })}
-      <Drawer
-        open={open}
-        onOpenChange={setOpen}
-        side="right"
-        ariaLabel={t("addAccount")}
-        className="w-full overflow-y-auto p-6 sm:max-w-md"
-      >
-        <div className="flex flex-col gap-1.5">
-          <h2 className="text-lg font-semibold">{t("addAccount")}</h2>
-          <p className="text-sm text-muted-foreground">{t("addAccountHint")}</p>
-        </div>
-
-        <div className="mt-4 flex flex-col gap-2">
-          <Label>{t("accountType")}</Label>
-          <Select value={connectorId} onValueChange={(v) => setConnectorId(v as ConnectorId)}>
-            <SelectTrigger>
-              {/* 显示选中 connector 的展示名(label,由 SelectItem 注册),而非裸 connectorId 值。 */}
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {/* 固定分组列表(写死的 group 标题 + 选项);顺序即 CONNECTOR_OPTIONS 的定义序。 */}
-              {CONNECTOR_OPTIONS.map((g) => (
-                <div key={g.group}>
-                  <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-                    {g.group}
-                  </div>
-                  {g.options.map((ty) => (
-                    <SelectItem key={ty} value={ty}>
-                      {labelOf(ty)}
-                    </SelectItem>
-                  ))}
-                </div>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* key={connectorId} 重挂 → 切 connector 清空字段态 */}
-        <AccountForm
-          key={connectorId}
-          connectorId={connectorId}
-          specs={specs}
-          onDone={(newId) => {
-            setOpen(false);
-            router.invalidate(); // 新账户即时出现(此刻空值)
-            // 方案 A:后台自动同步新账户 → 完成再 invalidate 填充;不阻塞、失败静默(创建流已校验凭据)。
-            void syncOneAccount({ data: { accountId: newId } })
-              .then(() => router.invalidate())
-              .catch(() => {});
-          }}
-        />
-      </Drawer>
-    </>
   );
 }

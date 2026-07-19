@@ -11,7 +11,6 @@ import { useTheme } from "../lib/theme";
 import { CurrencySwitcher } from "./currency-switcher";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
-import { SyncStatus } from "./sync-status";
 
 const NAVS = [
   { key: "overview", to: "/", icon: Home },
@@ -196,12 +195,9 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">
-          <PageHeader
-            title={pageTitle}
-            subtitle={pageSub}
-            actions={<SyncStatus summary={syncStatus} />}
-          />
+        {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
+        <main className="relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">
+          <PageHeader title={pageTitle} subtitle={pageSub} />
           {children}
         </main>
       </div>

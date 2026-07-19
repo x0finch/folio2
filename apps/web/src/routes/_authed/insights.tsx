@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { AllocationPie } from "../../components/allocation-pie";
+import { HeaderSync } from "../../components/header-sync";
 import { PortfolioChart } from "../../components/portfolio-chart";
 import { InsightsSkeleton } from "../../components/skeletons";
 import { type AllocDimension, buildAllocation } from "../../lib/allocation";
@@ -33,6 +34,7 @@ function Insights() {
 
   return (
     <div className="flex flex-col gap-6">
+      <HeaderSync />
       <Card>
         <CardHeader>
           <CardTitle>{t("trend")}</CardTitle>
