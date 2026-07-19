@@ -15,14 +15,14 @@ import {
 } from "@folio/ui";
 import { createFileRoute, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
 import { LogOut } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../components/currency-switcher";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { signOut } from "../../lib/auth-client";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { getKeyStatus, getValuationSettings, setValuationMode } from "../../lib/server/settings";
-import { type Theme, useTheme } from "../../lib/theme";
+import { type Theme, useMountedTheme } from "../../lib/theme";
 
 const authedApi = getRouteApi("/_authed");
 
@@ -128,13 +128,9 @@ function AppearanceCard() {
   const t = useTranslations("Settings");
   const router = useRouter();
   const locale = useLocale();
-  const { theme, setTheme } = useTheme();
-  // 主题存于 localStorage(客户端专属):SSR 只能得 "system",而 hydration 时 useTheme 已读到真实值
-  // → 首帧不一致会触发 hydration mismatch + pill 硬跳。挂载前统一按 "system" 渲染选中态(与 SSR 齐),
-  // 挂载后再切真实值,pill 借 layoutId 平滑滑到位。语言走 cookie/SSR 一致,无需此处理。
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  const themeValue = mounted ? theme : "system";
+  // 选中态用 useMountedTheme(SSR 安全):挂载前按 "system" 渲染避免 hydration mismatch + pill 硬跳,
+  // 挂载后借 layoutId 平滑滑到位。语言走 cookie/SSR 一致,无需此处理。
+  const { theme: themeValue, setTheme } = useMountedTheme();
 
   function setLocale(next: string) {
     if (next === locale) return;

@@ -59,4 +59,18 @@ describe("messages (via createTranslator)", () => {
     expect(t("Settings.data")).toBe("数据");
     expect(t("Settings.signOutConfirmTitle")).toBe("退出登录?");
   });
+
+  // L1 Login(#113):副标题 + read-only 说明新键,中英双语都产出串(非回退 key)。
+  it("English: new Login keys resolve", () => {
+    const t = createTranslator({ locale: "en", messages: messages.en });
+    expect(t("Login.tagline")).toBe("Your self-hosted portfolio, one dashboard.");
+    expect(t("Login.readOnlyHint")).toBe(
+      "Read-only — Folio never holds your keys or signs transactions.",
+    );
+  });
+  it("Chinese: new Login keys resolve", () => {
+    const t = createTranslator({ locale: "zh", messages: messages.zh });
+    expect(t("Login.tagline")).toBe("自托管的组合追踪,一个面板看全。");
+    expect(t("Login.readOnlyHint")).toBe("只读 —— Folio 从不持有私钥、不签名交易。");
+  });
 });

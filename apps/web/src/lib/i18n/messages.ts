@@ -61,9 +61,9 @@ export const en = {
     password: "Password",
     signIn: "Sign in",
     signUp: "Sign up",
-    toSignIn: "Already have an account? Sign in",
-    toSignUp: "Need an account? Sign up",
     authFailed: "Authentication failed",
+    tagline: "Your self-hosted portfolio, one dashboard.",
+    readOnlyHint: "Read-only — Folio never holds your keys or signs transactions.",
   },
   Overview: {
     totalValue: "Total value",
@@ -327,9 +327,9 @@ export const zh: Messages = {
     password: "密码",
     signIn: "登录",
     signUp: "注册",
-    toSignIn: "已有账户?去登录",
-    toSignUp: "还没有账户?去注册",
     authFailed: "认证失败",
+    tagline: "自托管的组合追踪,一个面板看全。",
+    readOnlyHint: "只读 —— Folio 从不持有私钥、不签名交易。",
   },
   Overview: {
     totalValue: "总价值",
