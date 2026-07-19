@@ -1,6 +1,6 @@
 import { cn, Dock, DockItem, SharedLayoutBg } from "@folio/ui";
 import { Link, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
-import { BarChart3, Home, LogOut, Moon, Plus, Settings, Sun, Wallet } from "lucide-react";
+import { BarChart3, Home, LogOut, Moon, Settings, Sun, Wallet } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { signOut } from "../lib/auth-client";
@@ -8,11 +8,9 @@ import { LOCALE_COOKIE } from "../lib/i18n/detect";
 import type { Locale } from "../lib/i18n/messages";
 import type { SyncStatusSummary } from "../lib/sync-status";
 import { useTheme } from "../lib/theme";
-import { AddAccountModal } from "./add-account-modal";
 import { CurrencySwitcher } from "./currency-switcher";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
-import { SyncStatus } from "./sync-status";
 
 const NAVS = [
   { key: "overview", to: "/", icon: Home },
@@ -96,12 +94,8 @@ export function AppShell({
   const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
   const tc = useTranslations("Common");
-  const ta = useTranslations("Accounts");
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  // 账户页:把「添加账户」融进全局同步钮的 + 段(受控 modal 在壳内渲染)。其余页无 action → 单枚同步 pill。
-  const onAccounts = pathname.startsWith("/accounts");
-  const [addOpen, setAddOpen] = useState(false);
   const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
   const activeNav = NAVS.find((n) => isActive(n.to)) ?? NAVS[0];
   const pageTitle = t(activeNav.key);
@@ -201,28 +195,10 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">
-          <PageHeader
-            title={pageTitle}
-            subtitle={pageSub}
-            actions={
-              <SyncStatus
-                summary={syncStatus}
-                action={
-                  onAccounts
-                    ? {
-                        icon: <Plus />,
-                        label: ta("addAccount"),
-                        onClick: () => setAddOpen(true),
-                      }
-                    : undefined
-                }
-              />
-            }
-          />
+        {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
+        <main className="relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">
+          <PageHeader title={pageTitle} subtitle={pageSub} />
           {children}
-          {/* 账户页专属:受控添加账户 modal(触发在全局同步钮的 + 段)。 */}
-          {onAccounts && <AddAccountModal open={addOpen} onOpenChange={setAddOpen} />}
         </main>
       </div>
 

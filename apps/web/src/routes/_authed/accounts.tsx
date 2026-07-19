@@ -1,10 +1,12 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Plus } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
+import { AddAccountModal } from "../../components/add-account-modal";
 import { ConnectorBadge } from "../../components/connector-badge";
+import { HeaderSync } from "../../components/header-sync";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { TokenStack } from "../../components/token-stack";
 import { ValueDelta } from "../../components/value-delta";
@@ -62,6 +64,7 @@ function Accounts() {
   // 详情侧栏:存 id 而非行对象 —— invalidate 后从新 rows 派生,侧栏内容随刷新自动更新(归档态等)。
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
   const openRow = (r: AccountRow) => {
     setSelectedId(r.id);
@@ -70,7 +73,11 @@ function Accounts() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 添加账户已融进全局同步钮的 + 段(见 app-shell / SyncStatus),此处只留账户数标题。 */}
+      {/* 页头右上角同步入口:账户页额外把「添加账户」融进 + 段(见 SyncStatus.ActionShell),modal 由本页持有。 */}
+      <HeaderSync
+        action={{ icon: <Plus />, label: t("addAccount"), onClick: () => setAddOpen(true) }}
+      />
+      <AddAccountModal open={addOpen} onOpenChange={setAddOpen} />
       <h1 className="font-bold text-2xl">{t("accountCount", { count: active.length })}</h1>
 
       {rows.length === 0 ? (

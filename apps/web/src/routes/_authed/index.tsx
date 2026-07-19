@@ -2,6 +2,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@folio/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
+import { HeaderSync } from "../../components/header-sync";
 import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { OverviewSkeleton } from "../../components/skeletons";
@@ -117,6 +118,7 @@ function Overview() {
 
   return (
     <div className="flex flex-col gap-6">
+      <HeaderSync />
       <PortfolioHero series={series} totalUsd={totalUsd} holdings={holdings} />
 
       {accountTotals.length === 0 ? (
