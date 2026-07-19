@@ -1,38 +1,50 @@
 import type { ConnectorId } from "@folio/connectors";
-import { LogoAvatar } from "@folio/ui";
+import { LogoAvatar, SharedLayoutBg } from "@folio/ui";
 import { CONNECTOR_OPTIONS } from "../lib/connectors";
 import { useConnectorLabels, useConnectorLogos } from "../lib/use-connector-labels";
 
 // 「添加账户」第一步:连接器网格(纯展示)。分组来自 CONNECTOR_OPTIONS,展示名 + logo 来自 registry 目录
 // (useConnectorLabels/useConnectorLogos)—— 图标即各 connector manifest 自带的 logo(经 folio logo 代理),
 // 加载失败/无图由 LogoAvatar 回退首字母。恒显全部 Connector(创建无唯一性约束 → 同一 connector 可多开)。
-// 纯 onSelect 回调,不含表单/创建逻辑。
+//
+// 无 card 边框:hover 高亮交给**单个** SharedLayoutBg 的移动 pill —— 全部类型共享一个 layoutId,pill 在整张网格
+// (跨组)连续 morph。组标题作 col-span-full 的非交互子元素(pointer-events-none → 不触发 pill、不占格),
+// tiles 作格子(inset=0 → pill 恰覆盖单格)。与账户列表/持仓同款交互。纯 onSelect 回调,不含表单/创建逻辑。
 export function ConnectorGrid({ onSelect }: { onSelect: (connectorId: ConnectorId) => void }) {
   const labelOf = useConnectorLabels();
   const logoOf = useConnectorLogos();
   return (
-    <div className="flex flex-col gap-4">
-      {CONNECTOR_OPTIONS.map((group) => (
-        <div key={group.group} className="flex flex-col gap-2">
-          <div className="text-muted-foreground text-xs">{group.group}</div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {group.options.map((id) => {
-              const label = labelOf(id);
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => onSelect(id)}
-                  className="flex flex-col items-start gap-2 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                >
-                  <LogoAvatar src={logoOf(id)} fallback={label} size="sm" alt="" />
-                  <span className="font-medium text-sm">{label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
+    <SharedLayoutBg
+      className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+      inset={0}
+      pillClassName="rounded-xl bg-muted"
+    >
+      {CONNECTOR_OPTIONS.flatMap((group) => [
+        // 组标题:整行、不参与 pill(pointer-events-none),首组不留上边距。
+        <div
+          key={`group-${group.group}`}
+          className="col-span-full pt-3 text-muted-foreground text-xs first:pt-0 pointer-events-none"
+        >
+          {group.group}
+        </div>,
+        ...group.options.map((id) => {
+          const label = labelOf(id);
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onSelect(id)}
+              className="group w-full rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+            >
+              {/* 内容单容器(padding 在此,按钮本身不裁剪 pill);图标 + 名称竖排。 */}
+              <div className="flex flex-col items-start gap-2 rounded-xl p-3">
+                <LogoAvatar src={logoOf(id)} fallback={label} size="sm" alt="" />
+                <span className="font-medium text-sm">{label}</span>
+              </div>
+            </button>
+          );
+        }),
+      ])}
+    </SharedLayoutBg>
   );
 }
