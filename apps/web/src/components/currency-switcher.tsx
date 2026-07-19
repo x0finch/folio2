@@ -23,7 +23,13 @@ export function CurrencySwitcher() {
 
   return (
     <Select value={currency.code} onValueChange={set} className="w-40">
-      <SelectTrigger aria-label="Display currency">
+      {/* rounded-full!:触发器做成全圆角胶囊(与设置页主题/语言 pill 一致)。beUI Select 的圆角由
+          framer inline style 控(不改 registry 件),故消费侧用 important 覆盖。
+          bg-muted dark:bg-background:触发器底色对齐设置页分段器轨道(亮色 muted / 暗色 background)。 */}
+      <SelectTrigger
+        aria-label="Display currency"
+        className="rounded-full! bg-muted dark:bg-background"
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
