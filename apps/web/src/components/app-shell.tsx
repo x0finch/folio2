@@ -1,14 +1,9 @@
 import { cn, Dock, DockItem, SharedLayoutBg } from "@folio/ui";
-import { Link, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
-import { BarChart3, Home, LogOut, Moon, Settings, Sun, Wallet } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
-import { useLocale, useTranslations } from "use-intl";
-import { signOut } from "../lib/auth-client";
-import { LOCALE_COOKIE } from "../lib/i18n/detect";
-import type { Locale } from "../lib/i18n/messages";
+import { Link, useRouterState } from "@tanstack/react-router";
+import { BarChart3, Home, Settings, Wallet } from "lucide-react";
+import type { ReactNode } from "react";
+import { useTranslations } from "use-intl";
 import type { SyncStatusSummary } from "../lib/sync-status";
-import { useTheme } from "../lib/theme";
-import { CurrencySwitcher } from "./currency-switcher";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
 
@@ -19,68 +14,9 @@ const NAVS = [
   { key: "settings", to: "/settings", icon: Settings },
 ] as const;
 
-// 跟随 <html>.dark 反映当前深浅(主题在 <html> class 上,组件本地镜像一份)。
-function useIsDark() {
-  const [dark, setDark] = useState(false);
-  useEffect(() => {
-    const el = document.documentElement;
-    const update = () => setDark(el.classList.contains("dark"));
-    update();
-    const obs = new MutationObserver(update);
-    obs.observe(el, { attributes: true, attributeFilter: ["class"] });
-    return () => obs.disconnect();
-  }, []);
-  return dark;
-}
-
-const CONTROL_BTN =
-  "flex h-9 items-center justify-center rounded-lg border border-border bg-card-2 font-medium text-foreground text-sm transition-colors hover:bg-muted [&_svg]:size-4";
-
-// 描边主题按钮(设计:☀/☾)。
-function ThemeButton({ className }: { className?: string }) {
-  const { setTheme } = useTheme();
-  const dark = useIsDark();
-  const ts = useTranslations("Sidebar");
-  return (
-    <button
-      type="button"
-      aria-label={ts("theme")}
-      onClick={() => setTheme(dark ? "light" : "dark")}
-      className={cn(CONTROL_BTN, className)}
-    >
-      {dark ? <Moon /> : <Sun />}
-    </button>
-  );
-}
-
-// 描边语言按钮(设计:中/EN)。切 cookie + invalidate 重跑根 loader → 换 locale。
-function LangButton({ className }: { className?: string }) {
-  const router = useRouter();
-  const locale = useLocale();
-  const ts = useTranslations("Sidebar");
-  const next: Locale = locale === "zh" ? "en" : "zh";
-  const set = () => {
-    document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000`;
-    router.invalidate();
-  };
-  return (
-    <button
-      type="button"
-      aria-label={ts("language")}
-      onClick={set}
-      className={cn(CONTROL_BTN, className)}
-    >
-      {locale === "zh" ? "中" : "EN"}
-    </button>
-  );
-}
-
-const SIGNOUT_BTN =
-  "flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-4";
-
 // 应用外壳(v2,#100 / ADR 0015):桌面常驻左侧栏 + 移动底部 Dock。
+// 外观 / 语言 / 币种 / 登出集中于 Settings(#112)——外壳只做导航 + 身份展示。
 // 侧栏 active = 静态 bg(设计态)+ shared-layout-bg hover 滑动增强。
-// 币种切换与 sign-out 暂留壳内(临时),#112 在 Settings 落地后移除。
 export function AppShell({
   userName,
   syncStatus,
@@ -93,8 +29,6 @@ export function AppShell({
   const t = useTranslations("Nav");
   const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
-  const tc = useTranslations("Common");
-  const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
   const activeNav = NAVS.find((n) => isActive(n.to)) ?? NAVS[0];
@@ -104,11 +38,6 @@ export function AppShell({
       ? th("overviewSub", { count: syncStatus.total })
       : th(`${activeNav.key}Sub` as "accountsSub" | "insightsSub" | "settingsSub");
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
-
-  const doSignOut = async () => {
-    await signOut();
-    navigate({ to: "/login" });
-  };
 
   return (
     <div className="min-h-svh lg:flex">
@@ -144,55 +73,23 @@ export function AppShell({
           </SharedLayoutBg>
         </nav>
 
-        <div className="mt-auto flex flex-col gap-2.5 pt-4">
-          <div className="flex gap-2">
-            <ThemeButton className="flex-1" />
-            <LangButton className="flex-1" />
+        {/* footer:纯身份展示(账户/外观入口迁 Settings) */}
+        <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-foreground text-xs">
+            {initial}
           </div>
-          <div className="flex items-center gap-2.5 px-1">
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-foreground text-xs">
-              {initial}
-            </div>
-            <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate font-medium text-xs">{userName}</div>
-              <div className="text-muted-foreground text-xs">{ts("selfHosted")}</div>
-            </div>
-          </div>
-          {/* 临时:币种 + 登出暂留壳内,#112 迁 Settings 后移除 */}
-          <div className="flex items-center justify-between gap-2 px-1">
-            <CurrencySwitcher />
-            <button
-              type="button"
-              aria-label={tc("signOut")}
-              onClick={doSignOut}
-              className={SIGNOUT_BTN}
-            >
-              <LogOut />
-            </button>
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate font-medium text-xs">{userName}</div>
+            <div className="text-muted-foreground text-xs">{ts("selfHosted")}</div>
           </div>
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* 移动顶栏(桌面隐藏,控件在侧栏) */}
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-border border-b bg-background/80 px-4 py-3 backdrop-blur-xl lg:hidden">
-          <div className="flex items-center gap-2.5">
-            <Logo className="size-6 shrink-0" />
-            <span className="font-semibold text-lg tracking-tight">folio</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <ThemeButton className="w-9 px-0" />
-            <LangButton className="w-9 px-0" />
-            <CurrencySwitcher />
-            <button
-              type="button"
-              aria-label={tc("signOut")}
-              onClick={doSignOut}
-              className={SIGNOUT_BTN}
-            >
-              <LogOut />
-            </button>
-          </div>
+        {/* 移动顶栏:只剩品牌 logo(控件全迁 Settings);sticky + 毛玻璃锚点 */}
+        <header className="sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 py-3 backdrop-blur-xl lg:hidden">
+          <Logo className="size-6 shrink-0" />
+          <span className="font-semibold text-lg tracking-tight">folio</span>
         </header>
 
         {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}

@@ -41,4 +41,22 @@ describe("messages (via createTranslator)", () => {
     expect(t("Accounts.synced", { count: 3 })).toBe("已同步 3 个账户。");
     expect(t("Overview.smallHoldings", { n: 4 })).toBe("4 项小额");
   });
+
+  // S1 Settings(#112):外观 / 账户 / 主题选项 / 登出确认新键,中英双语都产出串(非回退 key)。
+  it("English: new Settings keys resolve", () => {
+    const t = createTranslator({ locale: "en", messages: messages.en });
+    expect(t("Settings.account")).toBe("Account");
+    expect(t("Settings.appearance")).toBe("Appearance");
+    expect(t("Settings.themeSystem")).toBe("System");
+    expect(t("Settings.data")).toBe("Data");
+    expect(t("Settings.signOutConfirmTitle")).toBe("Sign out?");
+  });
+  it("Chinese: new Settings keys resolve", () => {
+    const t = createTranslator({ locale: "zh", messages: messages.zh });
+    expect(t("Settings.account")).toBe("账户");
+    expect(t("Settings.appearance")).toBe("外观");
+    expect(t("Settings.themeSystem")).toBe("跟随系统");
+    expect(t("Settings.data")).toBe("数据");
+    expect(t("Settings.signOutConfirmTitle")).toBe("退出登录?");
+  });
 });
