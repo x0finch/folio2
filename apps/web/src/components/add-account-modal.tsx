@@ -3,7 +3,7 @@ import { MorphingModal, useMediaQuery } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { ArrowLeft, X } from "lucide-react";
-import { cloneElement, type ReactElement, type ReactNode, useState } from "react";
+import { cloneElement, type ReactElement, type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { getCredentialSpecs } from "../lib/server/credentials";
 import { syncOneAccount } from "../lib/server/sync";
@@ -65,14 +65,33 @@ function ViewShell({ children }: { children: ReactNode }) {
   return <div className="-mx-1.5 max-h-[78vh] overflow-y-auto px-1.5">{children}</div>;
 }
 
-export function AddAccountModal({ triggerRender }: { triggerRender?: ReactElement } = {}) {
+// 两用:自持 open(传 triggerRender,如页面按钮)或受控(传 open/onOpenChange,如全局头部注入的 + 段触发)。
+export function AddAccountModal({
+  triggerRender,
+  open: openProp,
+  onOpenChange,
+}: {
+  triggerRender?: ReactElement<{ onClick?: () => void }>;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+} = {}) {
   const t = useTranslations("Accounts");
   const router = useRouter();
   const labelOf = useConnectorLabels();
   const isDesktop = useMediaQuery("(min-width: 640px)");
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : internalOpen;
+  const setOpen = (v: boolean) => (controlled ? onOpenChange?.(v) : setInternalOpen(v));
   const [step, setStep] = useState<Step>("grid");
   const [connectorId, setConnectorId] = useState<ConnectorId | null>(null);
+  // 每次打开重置回网格步(受控/自持皆然):open false→true 才跑,网格↔表单导航不受影响。
+  useEffect(() => {
+    if (open) {
+      setStep("grid");
+      setConnectorId(null);
+    }
+  }, [open]);
   // 字段规格部署内静态 → 长 staleTime,几乎只取一次;仅打开时取,避免账户页挂载即请求(#107 review)。
   const specsQuery = useQuery({
     queryKey: ["credentialSpecs"],
@@ -81,11 +100,7 @@ export function AddAccountModal({ triggerRender }: { triggerRender?: ReactElemen
     staleTime: 60 * 60_000,
   });
 
-  const openModal = () => {
-    setStep("grid");
-    setConnectorId(null);
-    setOpen(true);
-  };
+  const openModal = () => setOpen(true); // 重置由上面的 open effect 负责
   const close = () => setOpen(false);
   const pick = (id: ConnectorId) => {
     setConnectorId(id);
@@ -109,9 +124,8 @@ export function AddAccountModal({ triggerRender }: { triggerRender?: ReactElemen
 
   return (
     <>
-      {cloneElement(triggerRender ?? <button type="button">{t("addAccount")}</button>, {
-        onClick: openModal,
-      })}
+      {/* 触发器:自持模式渲染(克隆注入 onClick);受控模式无触发器(由外部 open 驱动)。 */}
+      {triggerRender != null && cloneElement(triggerRender, { onClick: openModal })}
       <MorphingModal
         viewId={viewId}
         onClose={close}

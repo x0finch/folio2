@@ -1,10 +1,9 @@
-import { Button, cn, SharedLayoutBg } from "@folio/ui";
+import { cn, SharedLayoutBg } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertTriangle, Plus } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
-import { AddAccountModal } from "../../components/add-account-modal";
 import { ConnectorBadge } from "../../components/connector-badge";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { TokenStack } from "../../components/token-stack";
@@ -71,18 +70,8 @@ function Accounts() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 头部:账户数左、添加按钮右(取代原右下角浮动 Fab)。 */}
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="font-bold text-2xl">{t("accountCount", { count: active.length })}</h1>
-        <AddAccountModal
-          triggerRender={
-            <Button size="sm">
-              <Plus className="size-4" />
-              {t("addAccount")}
-            </Button>
-          }
-        />
-      </div>
+      {/* 添加账户已融进全局同步钮的 + 段(见 app-shell / SyncStatus),此处只留账户数标题。 */}
+      <h1 className="font-bold text-2xl">{t("accountCount", { count: active.length })}</h1>
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground">{tc("noAccountsYet")}</p>
