@@ -65,12 +65,12 @@ describe("messages (via createTranslator)", () => {
     const t = createTranslator({ locale: "en", messages: messages.en });
     expect(t("Login.tagline")).toBe("Your self-hosted portfolio, one dashboard.");
     expect(t("Login.readOnlyHint")).toBe(
-      "Read-only — Folio never holds your keys or signs transactions.",
+      "Read-only, Folio never holds your keys or signs transactions.",
     );
   });
   it("Chinese: new Login keys resolve", () => {
     const t = createTranslator({ locale: "zh", messages: messages.zh });
     expect(t("Login.tagline")).toBe("自托管的组合追踪,一个面板看全。");
-    expect(t("Login.readOnlyHint")).toBe("只读 —— Folio 从不持有私钥、不签名交易。");
+    expect(t("Login.readOnlyHint")).toBe("只读,Folio 从不持有私钥、不签名交易。");
   });
 });
