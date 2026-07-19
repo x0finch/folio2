@@ -28,10 +28,13 @@ export function PortfolioHero({
   series,
   totalUsd,
   holdings,
+  contentClassName,
 }: {
   series: HistoryPoint[];
   totalUsd: number;
   holdings: readonly HoldingLike[];
+  // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
+  contentClassName?: string;
 }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
@@ -109,7 +112,7 @@ export function PortfolioHero({
       )}
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
-      <div className="pointer-events-none relative z-10">
+      <div className={cn("pointer-events-none relative z-10", contentClassName)}>
         <p className="font-medium text-muted-foreground text-xs">{t("totalNetWorth")}</p>
         <div className="mt-2 flex flex-wrap items-baseline gap-3">
           <div className="flex items-baseline">
