@@ -59,8 +59,10 @@ function ModalHeader({
 }
 
 // 面板本体 overflow-hidden 无内滚 → 内容套 max-h 滚动容器,短屏/长表单不被裁。
+// px-1.5:overflow-y-auto 会连带把 overflow-x 算成裁剪,给边缘装饰(返回键 hover 底、网格 focus ring)留缓冲,
+// 免得贴边元素(如带 -ml 的返回键)被横向裁掉;负外边距用 -mx-1.5 抵回,内容左右缘不缩。
 function ViewShell({ children }: { children: ReactNode }) {
-  return <div className="max-h-[78vh] overflow-y-auto">{children}</div>;
+  return <div className="-mx-1.5 max-h-[78vh] overflow-y-auto px-1.5">{children}</div>;
 }
 
 export function AddAccountModal({ triggerRender }: { triggerRender?: ReactElement } = {}) {
@@ -71,10 +73,11 @@ export function AddAccountModal({ triggerRender }: { triggerRender?: ReactElemen
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>("grid");
   const [connectorId, setConnectorId] = useState<ConnectorId | null>(null);
-  // 字段规格部署内静态 → 长 staleTime,几乎只取一次。
+  // 字段规格部署内静态 → 长 staleTime,几乎只取一次;仅打开时取,避免账户页挂载即请求(#107 review)。
   const specsQuery = useQuery({
     queryKey: ["credentialSpecs"],
     queryFn: () => getCredentialSpecs(),
+    enabled: open,
     staleTime: 60 * 60_000,
   });
 
