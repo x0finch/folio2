@@ -14,13 +14,7 @@ export const en = {
     cancel: "Cancel",
   },
   Sidebar: {
-    tagline: "your crypto\nportfolio",
-    morning: "Good morning",
-    afternoon: "Good afternoon",
-    evening: "Good evening",
     selfHosted: "Self-hosted",
-    commandPlaceholder: "Jump to… or run a command",
-    commandEmpty: "No matches.",
   },
   Insights: {
     allocation: "Allocation",
@@ -286,13 +280,7 @@ export const zh: Messages = {
     cancel: "取消",
   },
   Sidebar: {
-    tagline: "你的\n加密组合",
-    morning: "早上好",
-    afternoon: "下午好",
-    evening: "晚上好",
     selfHosted: "自托管",
-    commandPlaceholder: "跳转… 或执行命令",
-    commandEmpty: "无匹配。",
   },
   Insights: {
     allocation: "分配",
