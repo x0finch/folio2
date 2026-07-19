@@ -3,9 +3,10 @@ import { cn, Input } from "@folio/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { type KeyboardEvent, useDeferredValue, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { matchSegments } from "../lib/highlight";
+import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
 import { searchTokens, topTokens } from "../lib/server/tokens";
 
 // manual 选币的内联 Combobox(A4,替代 TokenPicker 的全屏 CommandPalette 浮层):点触发器**就地下推**展开
@@ -17,6 +18,10 @@ import { searchTokens, topTokens } from "../lib/server/tokens";
 
 // 同 beUI 的 EASE_OUT 动效 token 曲线(@folio/ui 未导出 lib/ease → 本地镜像同一 cubic-bezier)。
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
+
+// 搜索节流:停顿 250ms 才发,且需 ≥2 字符(否则退回 topTokens 默认列,不打 CGK /search)。
+const SEARCH_DEBOUNCE_MS = 250;
+const MIN_SEARCH_LEN = 2;
 
 function Highlighted({ text, query }: { text: string; query: string }) {
   return (
@@ -72,7 +77,10 @@ export function TokenCombobox({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const search = useDeferredValue(query.trim());
+  // 防抖 + 最小长度:CGK /search 慢且限流(见 server/tokens),故停顿 250ms 后才搜,且 <2 字符不搜(退回
+  // topTokens 默认列,读本地 store 快)—— 把逐键的上游请求压成「停顿后一次」。
+  const debounced = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
+  const search = debounced.length >= MIN_SEARCH_LEN ? debounced : "";
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
