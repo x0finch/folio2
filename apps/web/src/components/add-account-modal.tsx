@@ -1,12 +1,15 @@
 import type { ConnectorId } from "@folio/connectors";
-import type { TokenInfo } from "@folio/tokens";
 import { MorphingModal, useMediaQuery } from "@folio/ui";
+import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
 import { ArrowLeft, X } from "lucide-react";
 import { cloneElement, type ReactElement, type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
+import { getCredentialSpecs } from "../lib/server/credentials";
+import { syncOneAccount } from "../lib/server/sync";
 import { useConnectorLabels } from "../lib/use-connector-labels";
+import { AccountForm } from "./account-fields";
 import { ConnectorGrid } from "./connector-grid";
-import { TokenCombobox } from "./token-combobox";
 
 // 添加账户 modal(A4):单一 MorphingModal 承载两步 —— 网格(grid)↔ 创建表单(form),viewId=step 驱动 morph 形变。
 // 桌面居中(placement=center)、手机贴底(placement=bottom);自持 open,经 cloneElement 挂账户页 Fab 触发。
@@ -62,13 +65,18 @@ function ViewShell({ children }: { children: ReactNode }) {
 
 export function AddAccountModal({ triggerRender }: { triggerRender?: ReactElement } = {}) {
   const t = useTranslations("Accounts");
+  const router = useRouter();
   const labelOf = useConnectorLabels();
   const isDesktop = useMediaQuery("(min-width: 640px)");
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>("grid");
   const [connectorId, setConnectorId] = useState<ConnectorId | null>(null);
-  // TODO(P4): P3 预览用 —— 真表单接入后随占位一并移除。
-  const [demoToken, setDemoToken] = useState<TokenInfo | null>(null);
+  // 字段规格部署内静态 → 长 staleTime,几乎只取一次。
+  const specsQuery = useQuery({
+    queryKey: ["credentialSpecs"],
+    queryFn: () => getCredentialSpecs(),
+    staleTime: 60 * 60_000,
+  });
 
   const openModal = () => {
     setStep("grid");
@@ -83,6 +91,14 @@ export function AddAccountModal({ triggerRender }: { triggerRender?: ReactElemen
   const back = () => {
     setStep("grid");
     setConnectorId(null);
+  };
+  // 创建成功:关闭 + 即时出现(此刻空值),再后台同步新账户 → 完成二次 invalidate 填充;失败静默(创建流已校验)。
+  const handleDone = (newId: string) => {
+    setOpen(false);
+    router.invalidate();
+    void syncOneAccount({ data: { accountId: newId } })
+      .then(() => router.invalidate())
+      .catch(() => {});
   };
 
   // viewId 驱动 morph:关闭为 null;网格/表单各自的 step 串作 viewId → 两步间形变。
@@ -107,16 +123,13 @@ export function AddAccountModal({ triggerRender }: { triggerRender?: ReactElemen
               onBack={back}
               onClose={close}
             />
-            {/* P2/P3 占位:真表单(复用 AccountForm + Fields)在 P4 接入。manual 先挂 TokenCombobox 预览内联下推。 */}
-            <div className="flex flex-col gap-3">
-              {connectorId === "manual" && (
-                <TokenCombobox value={demoToken} onChange={setDemoToken} onManual={() => {}} />
-              )}
-              <div className="h-9 rounded-lg bg-muted" />
-              <div className="h-9 rounded-lg bg-muted" />
-              <div className="h-9 w-32 rounded-full bg-muted" />
-              <p className="text-muted-foreground text-xs">TODO(P4): real create form</p>
-            </div>
+            {/* key={connectorId} 重挂 → 切 connector 清空字段态。specs 未到位时先给空(manual 无需 specs)。 */}
+            <AccountForm
+              key={connectorId}
+              connectorId={connectorId}
+              specs={specsQuery.data?.[connectorId] ?? []}
+              onDone={handleDone}
+            />
           </ViewShell>
         ) : (
           <ViewShell>

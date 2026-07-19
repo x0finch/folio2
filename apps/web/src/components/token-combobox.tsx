@@ -1,35 +1,16 @@
 import type { TokenInfo } from "@folio/tokens";
 import { Input } from "@folio/ui";
-import { ChevronDownIcon, SearchXIcon, XIcon } from "lucide-react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { useTranslations } from "use-intl";
 import { matchSegments } from "../lib/highlight";
+import { searchTokens, topTokens } from "../lib/server/tokens";
 
 // manual 选币的内联 Combobox(A4,替代 TokenPicker 的全屏 CommandPalette 浮层):点触发器**就地下推**展开
 // 搜索框 + 结果列表(在文档流内、把下方字段推下去,不叠第二层遮罩)。接口与 TokenPicker 对齐(value/onChange/
 // onManual),故可直接替入 ManualFields。命中子串高亮走 matchSegments(design token,禁硬编码色)。
-//
-// P3:结果来自本模块**占位假数据**(下方 FAKE_TOKENS,标注 TODO);P4 换成 searchTokens/topTokens 服务端搜索,
-// 接口/交互不变。
-
-// TODO(P4): 删除 FAKE_TOKENS,改用 searchTokens/topTokens 服务端搜索(见 lib/server/tokens)。
-const fake = (identifier: string, symbol: string, name: string): TokenInfo => ({
-  ref: { source: "coingecko", identifier: identifier as TokenInfo["ref"]["identifier"] },
-  symbol,
-  name,
-});
-const FAKE_TOKENS: TokenInfo[] = [
-  fake("bitcoin", "BTC", "Bitcoin"),
-  fake("ethereum", "ETH", "Ethereum"),
-  fake("usd-coin", "USDC", "USD Coin"),
-  fake("tether", "USDT", "Tether"),
-  fake("solana", "SOL", "Solana"),
-  fake("sui", "SUI", "Sui"),
-  fake("cosmos", "ATOM", "Cosmos Hub"),
-  fake("arbitrum", "ARB", "Arbitrum"),
-  fake("optimism", "OP", "Optimism"),
-  fake("chainlink", "LINK", "Chainlink"),
-];
+// 默认列 topTokens,输入远程搜 searchTokens(仅展开时启用,竞态由 query key 天然处理),搜不到可转手动录入。
 
 function Highlighted({ text, query }: { text: string; query: string }) {
   return (
@@ -86,13 +67,14 @@ export function TokenCombobox({
   const [query, setQuery] = useState("");
   const search = useDeferredValue(query.trim());
 
-  // TODO(P4): 换成 useQuery(searchTokens/topTokens);当前对占位假数据做客户端子串过滤。
-  const q = search.toLowerCase();
-  const tokens = q
-    ? FAKE_TOKENS.filter(
-        (tok) => tok.symbol.toLowerCase().includes(q) || tok.name.toLowerCase().includes(q),
-      )
-    : FAKE_TOKENS;
+  const tokensQuery = useQuery({
+    queryKey: ["tokens", search],
+    queryFn: () => (search ? searchTokens({ data: { query: search } }) : topTokens({ data: {} })),
+    enabled: open,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
+  const tokens = tokensQuery.data ?? [];
 
   const pick = (token: TokenInfo) => {
     onChange(token);
@@ -112,7 +94,12 @@ export function TokenCombobox({
           placeholder={t("searchTokenPlaceholder")}
         />
         <div className="max-h-52 overflow-y-auto rounded-xl border border-border bg-card p-1">
-          {tokens.length > 0 ? (
+          {tokensQuery.isError ? (
+            <div className="flex flex-col items-center gap-2 px-3 py-6 text-center text-destructive text-sm">
+              <CircleAlertIcon className="size-5" />
+              {t("searchFailed")}
+            </div>
+          ) : tokens.length > 0 ? (
             tokens.map((token) => (
               <button
                 key={`${token.ref.source}:${token.ref.identifier}`}
@@ -123,6 +110,10 @@ export function TokenCombobox({
                 <TokenRow token={token} query={search} />
               </button>
             ))
+          ) : tokensQuery.isLoading ? (
+            <div className="flex items-center justify-center px-3 py-6 text-muted-foreground">
+              <Loader2Icon className="size-5 animate-spin" aria-label={t("searching")} />
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-2 px-3 py-6 text-center text-muted-foreground text-sm">
               <SearchXIcon className="size-5" />
