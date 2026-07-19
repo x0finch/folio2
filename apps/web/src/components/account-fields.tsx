@@ -313,7 +313,7 @@ export function AccountForm({
         state={mutation.isPending ? "loading" : "idle"}
         loadingText={tc("verifying")}
         disabled={mutation.isPending}
-        className="self-start"
+        className="self-end"
       >
         {t("addAccount")}
       </StatefulButton>
