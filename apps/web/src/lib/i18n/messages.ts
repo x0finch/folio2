@@ -4,6 +4,7 @@
 export const en = {
   Common: {
     signOut: "Sign out",
+    close: "Close",
     delete: "Delete",
     save: "Save",
     saveAnyway: "Save anyway",
@@ -119,6 +120,7 @@ export const en = {
     title: "Accounts",
     addAccount: "Add account",
     addAccountHint: "Pick a type, then fill in its details.",
+    backToConnectors: "Back to connectors",
     accountType: "Type",
     accountCount: "{count, plural, one {# account} other {# accounts}}",
     lastSyncedAt: "Synced {when}",
@@ -265,6 +267,7 @@ export type Locale = "en" | "zh";
 export const zh: Messages = {
   Common: {
     signOut: "退出登录",
+    close: "关闭",
     delete: "删除",
     save: "保存",
     saveAnyway: "仍要保存",
@@ -380,6 +383,7 @@ export const zh: Messages = {
     title: "账户",
     addAccount: "添加账户",
     addAccountHint: "先选类型,再填写对应信息。",
+    backToConnectors: "返回连接器",
     accountType: "类型",
     accountCount: "{count} 个账户",
     lastSyncedAt: "同步于 {when}",

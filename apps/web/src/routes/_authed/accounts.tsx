@@ -4,7 +4,7 @@ import { AlertTriangle, Plus } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
-import { AddAccountSheet } from "../../components/add-account-sheet";
+import { AddAccountModal } from "../../components/add-account-modal";
 import { ConnectorBadge } from "../../components/connector-badge";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { TokenStack } from "../../components/token-stack";
@@ -108,7 +108,7 @@ function Accounts() {
         onOpenChange={setOpen}
       />
 
-      <AddAccountSheet
+      <AddAccountModal
         triggerRender={<Fab position="bottom-right" icon={<Plus />} aria-label={t("addAccount")} />}
       />
     </div>
