@@ -7,6 +7,7 @@ import {
   validateCredentials,
 } from "@folio/connectors";
 import type { InputSpec } from "../creds";
+import { platformLogoUrl } from "../logo";
 
 // app 侧 connector 分派中枢(server-only,引 cloudflare:workers)。集中管:
 // 字段规格投影(credentialSpecs)、创建时凭据校验(validateAccountCreds)。
@@ -14,10 +15,20 @@ import type { InputSpec } from "../creds";
 // 安全边界(原则 #5):此处【不碰 SECRETS_KEY】—— 创建/校验拿到的是表单明文,只做形状闸 + 可选活性探活;
 // 存库前的加密塑形在 lib/creds.ts。
 
-// connector 展示名目录(connectorId → label):遍历 registry(单一事实源),供前端徽章/下拉展示。
-export function connectorCatalog(): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [cid, manifest] of connectorRegistry) out[cid] = manifest.label;
+export interface ConnectorCatalogEntry {
+  label: string;
+  // 已代理:http 图 → /api/logo/platform/<cid>,manual 的 data: 直挂(platformLogoUrl);无图 → undefined。
+  logo?: string;
+}
+
+// connector 展示目录(connectorId → {label, logo}):遍历 registry(单一事实源),供前端网格/徽章展示。
+// logo 取 manifest 自带图并经 platformLogoUrl 代理(privacy,ADR 0008)—— /api/logo/platform 对场馆/manual
+// 键即按 connectorId 认 manifest(见 connectorPlatformMeta),故这里直接拿 cid 当代理 key。
+export function connectorCatalog(): Record<string, ConnectorCatalogEntry> {
+  const out: Record<string, ConnectorCatalogEntry> = {};
+  for (const [cid, manifest] of connectorRegistry) {
+    out[cid] = { label: manifest.label, logo: platformLogoUrl(cid, manifest.logo) };
+  }
   return out;
 }
 
