@@ -1,4 +1,4 @@
-import { cn, Fab, SharedLayoutBg } from "@folio/ui";
+import { Button, cn, SharedLayoutBg } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
 import { useState } from "react";
@@ -71,7 +71,18 @@ function Accounts() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="font-bold text-2xl">{t("accountCount", { count: active.length })}</h1>
+      {/* 头部:账户数左、添加按钮右(取代原右下角浮动 Fab)。 */}
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="font-bold text-2xl">{t("accountCount", { count: active.length })}</h1>
+        <AddAccountModal
+          triggerRender={
+            <Button size="sm">
+              <Plus className="size-4" />
+              {t("addAccount")}
+            </Button>
+          }
+        />
+      </div>
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground">{tc("noAccountsYet")}</p>
@@ -106,10 +117,6 @@ function Accounts() {
         specs={selected ? (credentialSpecs[selected.connectorId] ?? []) : []}
         open={open}
         onOpenChange={setOpen}
-      />
-
-      <AddAccountModal
-        triggerRender={<Fab position="bottom-right" icon={<Plus />} aria-label={t("addAccount")} />}
       />
     </div>
   );
