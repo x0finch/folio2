@@ -190,7 +190,7 @@ export const en = {
     credHint: "Recorded {field}: {hint}",
     credMismatch:
       "These credentials differ from what was exported. If you rotated your key, that's fine — otherwise check the account label.",
-    completePrompt: "Add credentials to sync",
+    completePrompt: "Click to add credentials",
     completeAccountHint: "Add your read-only API credentials to resume syncing.",
     credSavedSyncing: "Saved, syncing…",
   },
@@ -451,7 +451,7 @@ export const zh: Messages = {
     imported: "已导入 {accounts} 个账户、{groups} 个分组、{snapshots} 条快照。",
     credHint: "记录的 {field}:{hint}",
     credMismatch: "凭据与导出时记录的不一致。若你刚轮换过 key 属正常,否则请核对账户 label。",
-    completePrompt: "补填凭据以同步",
+    completePrompt: "点击补填凭据",
     completeAccountHint: "补填只读 API 凭据以恢复同步。",
     credSavedSyncing: "已保存,正在同步…",
   },

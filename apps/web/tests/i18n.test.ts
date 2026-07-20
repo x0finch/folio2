@@ -77,7 +77,7 @@ describe("messages (via createTranslator)", () => {
   // A3 补录凭据(#106):可点击补录提示文案 + modal 补录副标题 + 保存成功 toast,中英双语都产出串(非回退 key)。
   it("English: new credential-completion keys resolve", () => {
     const t = createTranslator({ locale: "en", messages: messages.en });
-    expect(t("Accounts.completePrompt")).toBe("Add credentials to sync");
+    expect(t("Accounts.completePrompt")).toBe("Click to add credentials");
     expect(t("Accounts.completeAccountHint")).toBe(
       "Add your read-only API credentials to resume syncing.",
     );
@@ -85,7 +85,7 @@ describe("messages (via createTranslator)", () => {
   });
   it("Chinese: new credential-completion keys resolve", () => {
     const t = createTranslator({ locale: "zh", messages: messages.zh });
-    expect(t("Accounts.completePrompt")).toBe("补填凭据以同步");
+    expect(t("Accounts.completePrompt")).toBe("点击补填凭据");
     expect(t("Accounts.completeAccountHint")).toBe("补填只读 API 凭据以恢复同步。");
     expect(t("Accounts.credSavedSyncing")).toBe("已保存,正在同步…");
   });
