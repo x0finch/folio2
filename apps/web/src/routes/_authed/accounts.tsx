@@ -1,10 +1,10 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertTriangle, Plus } from "lucide-react";
+import { AlertTriangle, KeyRound, Plus } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
-import { AddAccountModal } from "../../components/add-account-modal";
+import { AddAccountModal, type CompleteTarget } from "../../components/add-account-modal";
 import { ConnectorBadge } from "../../components/connector-badge";
 import { HeaderSync } from "../../components/header-sync";
 import { AccountsSkeleton } from "../../components/skeletons";
@@ -16,18 +16,14 @@ import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-syn
 import { aggregateDayChange } from "../../lib/day-value-change";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { listMyAccounts } from "../../lib/server/accounts";
-import { getCredentialSpecs } from "../../lib/server/credentials";
 import { getMyAccountHoldings } from "../../lib/server/overview";
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
     // 合并两源:getMyOverview 给活跃账户的市值/上次同步/持仓;listMyAccounts 给全部账户(含归档)的
     // 凭据态 + archivedAt。归档账户不在 overview.rows(见 overview.ts 过滤)→ 其 value/holdings 为空。
-    const [overview, accounts, credentialSpecs] = await Promise.all([
-      getMyAccountHoldings(),
-      listMyAccounts(),
-      getCredentialSpecs(),
-    ]);
+    // 凭据字段规格由补录 modal 自取(AddAccountModal specsQuery),此处不再预取。
+    const [overview, accounts] = await Promise.all([getMyAccountHoldings(), listMyAccounts()]);
     const byId = new Map(overview.rows.map((r) => [r.account.id, r]));
     const rows: AccountRow[] = accounts.map((a) => {
       const ov = byId.get(a.id);
@@ -44,7 +40,7 @@ export const Route = createFileRoute("/_authed/accounts")({
         credsSafe: a.credsSafe,
       };
     });
-    return { rows, credentialSpecs, pricesStale: overview.pricesStale };
+    return { rows, pricesStale: overview.pricesStale };
   },
   pendingComponent: AccountsSkeleton,
   component: Accounts,
@@ -53,7 +49,7 @@ export const Route = createFileRoute("/_authed/accounts")({
 function Accounts() {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const { rows, credentialSpecs, pricesStale } = Route.useLoaderData();
+  const { rows, pricesStale } = Route.useLoaderData();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
 
   // 活跃账户排序:未同步过(新加)置顶 → 其余按市值倒序;归档在末尾独立分区。
@@ -65,11 +61,15 @@ function Accounts() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  // 补录目标(A3):列表/详情点补录 icon → 开加账户 modal 的补录模式(见 AddAccountModal completeFor)。
+  const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
   const openRow = (r: AccountRow) => {
     setSelectedId(r.id);
     setOpen(true);
   };
+  const startComplete = (a: AccountRow) =>
+    setCompleteTarget({ accountId: a.id, connectorId: a.connectorId, credsSafe: a.credsSafe });
 
   return (
     <div className="flex flex-col gap-6">
@@ -77,7 +77,12 @@ function Accounts() {
       <HeaderSync
         action={{ icon: <Plus />, label: t("addAccount"), onClick: () => setAddOpen(true) }}
       />
-      <AddAccountModal open={addOpen} onOpenChange={setAddOpen} />
+      <AddAccountModal
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        completeFor={completeTarget}
+        onCompleteClose={() => setCompleteTarget(null)}
+      />
       <h1 className="font-bold text-2xl">{t("accountCount", { count: active.length })}</h1>
 
       {rows.length === 0 ? (
@@ -86,7 +91,7 @@ function Accounts() {
         <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
           {active.map((r) => (
             <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
-              <AccountRowContent row={r} total={total} />
+              <AccountRowContent row={r} total={total} onComplete={() => startComplete(r)} />
             </button>
           ))}
         </SharedLayoutBg>
@@ -110,9 +115,9 @@ function Accounts() {
       <AccountDetailSheet
         account={selected}
         total={total}
-        specs={selected ? (credentialSpecs[selected.connectorId] ?? []) : []}
         open={open}
         onOpenChange={setOpen}
+        onComplete={startComplete}
       />
     </div>
   );
@@ -123,9 +128,11 @@ function Accounts() {
 function AccountStatusLine({
   status,
   takenAt,
+  onComplete,
 }: {
   status: AccountSyncStatus;
   takenAt: number | null;
+  onComplete?: () => void; // 缺凭据时:行内 ghost 补录按钮(A3),不冒泡到行的打开详情
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
@@ -151,6 +158,29 @@ function AccountStatusLine({
         </>
       )}
       {text}
+      {/* 补录 ghost 按钮:行本身是 <button>,故用 role="button" span + stopPropagation 避免按钮套按钮 / 误触打开详情。 */}
+      {status === "needsCreds" && onComplete && (
+        // biome-ignore lint/a11y/useSemanticElements: 行本身是 <button>,补录控件不能再嵌套 <button>(无效 HTML),故用 role=button span
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={t("completeCredentials")}
+          onClick={(e) => {
+            e.stopPropagation();
+            onComplete();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              onComplete();
+            }
+          }}
+          className="ml-0.5 flex size-5 items-center justify-center rounded-md text-warn/80 transition-colors hover:bg-warn/10 hover:text-warn"
+        >
+          <KeyRound className="size-3.5" aria-hidden />
+        </span>
+      )}
     </span>
   );
 }
@@ -168,10 +198,12 @@ function AccountRowContent({
   row,
   total,
   muted,
+  onComplete,
 }: {
   row: AccountRow;
   total: number;
   muted?: boolean;
+  onComplete?: () => void; // 活跃缺凭据行:行内补录按钮(归档行不传)
 }) {
   const status = accountSyncStatus(row, Date.now());
   const dayChange = row.needsCredentials ? null : aggregateDayChange(row.balances);
@@ -192,7 +224,7 @@ function AccountRowContent({
             className="transition-colors group-hover:bg-background group-focus-visible:bg-background"
           />
         </span>
-        <AccountStatusLine status={status} takenAt={row.takenAt} />
+        <AccountStatusLine status={status} takenAt={row.takenAt} onComplete={onComplete} />
         {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),无现货可叠(纯 perp/DeFi 或未同步)的行也不塌矮,
             全列表行高一致。真 logo 的按-kind 填充(perp coin / DeFi 协议)待 #132 解绑后再接。 */}
         {!muted && (

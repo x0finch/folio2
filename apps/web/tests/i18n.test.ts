@@ -74,24 +74,19 @@ describe("messages (via createTranslator)", () => {
     expect(t("Login.readOnlyHint")).toBe("只读,Folio 从不持有私钥、不签名交易。");
   });
 
-  // A3 补录凭据(#106):callout 标题/说明(缺凭据 vs 陈旧两态)、保存成功 toast、陈旧标注(header 行 +
-  // 快照胶囊,均含 {when} 插值),中英双语都产出串(非回退 key)。
+  // A3 补录凭据(#106):补录 icon 标签 + modal 补录副标题 + 保存成功 toast,中英双语都产出串(非回退 key)。
   it("English: new credential-completion keys resolve", () => {
     const t = createTranslator({ locale: "en", messages: messages.en });
-    expect(t("Accounts.credProvideTitle")).toBe("Add credentials to start syncing");
-    expect(t("Accounts.credRestoreTitle")).toBe("Add credentials to resume syncing");
-    expect(t("Accounts.credSavedSyncing")).toBe("Saved, syncing…");
-    expect(t("Accounts.credStaleLine", { when: "23 days ago" })).toBe(
-      "Last synced 23 days ago · resumes once you add credentials",
+    expect(t("Accounts.completeCredentials")).toBe("Add credentials");
+    expect(t("Accounts.completeAccountHint")).toBe(
+      "Add your read-only API credentials to resume syncing.",
     );
-    expect(t("Accounts.snapshotAge", { when: "23 days ago" })).toBe("Snapshot from 23 days ago");
+    expect(t("Accounts.credSavedSyncing")).toBe("Saved, syncing…");
   });
   it("Chinese: new credential-completion keys resolve", () => {
     const t = createTranslator({ locale: "zh", messages: messages.zh });
-    expect(t("Accounts.credProvideTitle")).toBe("补填凭据以开始同步");
-    expect(t("Accounts.credRestoreTitle")).toBe("补填凭据以恢复同步");
+    expect(t("Accounts.completeCredentials")).toBe("补填凭据");
+    expect(t("Accounts.completeAccountHint")).toBe("补填只读 API 凭据以恢复同步。");
     expect(t("Accounts.credSavedSyncing")).toBe("已保存,正在同步…");
-    expect(t("Accounts.credStaleLine", { when: "23 天前" })).toBe("上次同步 23 天前 · 补填后恢复同步");
-    expect(t("Accounts.snapshotAge", { when: "23 天前" })).toBe("23 天前快照");
   });
 });

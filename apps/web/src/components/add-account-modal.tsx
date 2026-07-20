@@ -1,5 +1,5 @@
 import type { ConnectorId } from "@folio/connectors";
-import { MorphingModal, useMediaQuery } from "@folio/ui";
+import { MorphingModal, toast, useMediaQuery } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { ArrowLeft, X } from "lucide-react";
@@ -10,6 +10,14 @@ import { syncOneAccount } from "../lib/server/sync";
 import { useConnectorLabels } from "../lib/use-connector-labels";
 import { AccountForm } from "./account-fields";
 import { ConnectorGrid } from "./connector-grid";
+import { CredentialForm } from "./credential-form";
+
+// 补录目标(A3):缺凭据账户点补录 icon 时传入,modal 直接进补录视图(跳过网格,锁定 connector)。
+export interface CompleteTarget {
+  accountId: string;
+  connectorId: ConnectorId;
+  credsSafe: Record<string, string>; // safeView 投影:semi 打码片段供识别
+}
 
 // 添加账户 modal(A4):单一 MorphingModal 承载两步 —— 网格(grid)↔ 创建表单(form),viewId=step 驱动 morph 形变。
 // 桌面居中(placement=center)、手机贴底(placement=bottom);自持 open,经 cloneElement 挂账户页 Fab 触发。
@@ -70,10 +78,14 @@ export function AddAccountModal({
   triggerRender,
   open: openProp,
   onOpenChange,
+  completeFor,
+  onCompleteClose,
 }: {
   triggerRender?: ReactElement<{ onClick?: () => void }>;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  completeFor?: CompleteTarget | null; // 非空 → 补录模式(A3):强开 + 直接进补录视图
+  onCompleteClose?: () => void; // 清除补录目标(关闭补录视图)
 } = {}) {
   const t = useTranslations("Accounts");
   const router = useRouter();
@@ -81,7 +93,9 @@ export function AddAccountModal({
   const isDesktop = useMediaQuery("(min-width: 640px)");
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = openProp !== undefined;
-  const open = controlled ? openProp : internalOpen;
+  // 补录目标存在 → 强开(优先于 add 的 open);无补录时回归原 add 逻辑。
+  const completing = completeFor != null;
+  const open = completing ? true : controlled ? (openProp ?? false) : internalOpen;
   const setOpen = (v: boolean) => (controlled ? onOpenChange?.(v) : setInternalOpen(v));
   const [step, setStep] = useState<Step>("grid");
   const [connectorId, setConnectorId] = useState<ConnectorId | null>(null);
@@ -119,8 +133,21 @@ export function AddAccountModal({
       .catch(() => {});
   };
 
-  // viewId 驱动 morph:关闭为 null;网格/表单各自的 step 串作 viewId → 两步间形变。
-  const viewId = open ? step : null;
+  // 补录成功(A3):弹"已保存,正在同步…" + 关补录视图 + 立即刷新(账户翻正)+ 后台补一次 sync 填余额。
+  // 后台 sync 失败静默(凭据已 live 校验、账户健康;下次同步自会补上)——同 handleDone。
+  const handleCompleteDone = () => {
+    if (!completeFor) return;
+    const { accountId } = completeFor;
+    toast.success(t("credSavedSyncing"));
+    onCompleteClose?.();
+    router.invalidate();
+    void syncOneAccount({ data: { accountId } })
+      .then(() => router.invalidate())
+      .catch(() => {});
+  };
+
+  // viewId 驱动 morph:关闭为 null;补录视图独立 id;否则网格/表单各自的 step 串作 viewId → 两步间形变。
+  const viewId = open ? (completing ? "complete" : step) : null;
 
   return (
     <>
@@ -128,11 +155,27 @@ export function AddAccountModal({
       {triggerRender != null && cloneElement(triggerRender, { onClick: openModal })}
       <MorphingModal
         viewId={viewId}
-        onClose={close}
+        onClose={completing ? () => onCompleteClose?.() : close}
         placement={isDesktop ? "center" : "bottom"}
         className="max-w-md"
       >
-        {step === "form" && connectorId ? (
+        {completing && completeFor ? (
+          <ViewShell>
+            <ModalHeader
+              title={labelOf(completeFor.connectorId)}
+              subtitle={t("completeAccountHint")}
+              onClose={() => onCompleteClose?.()}
+            />
+            {/* key={accountId} 重挂 → 切账户清空补录字段态。specs 未到位先给空(CredentialForm 内部再筛非 public)。 */}
+            <CredentialForm
+              key={completeFor.accountId}
+              accountId={completeFor.accountId}
+              specs={specsQuery.data?.[completeFor.connectorId] ?? []}
+              hint={completeFor.credsSafe}
+              onDone={handleCompleteDone}
+            />
+          </ViewShell>
+        ) : step === "form" && connectorId ? (
           <ViewShell>
             <ModalHeader
               title={labelOf(connectorId)}
