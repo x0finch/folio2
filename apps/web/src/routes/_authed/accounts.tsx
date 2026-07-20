@@ -1,6 +1,6 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertTriangle, KeyRound, Plus } from "lucide-react";
+import { AlertTriangle, Plus } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
@@ -124,7 +124,7 @@ function Accounts() {
 }
 
 // 状态行(名称下方一条纯文本,按态染色):缺凭据 / 陈旧 → --warn 警示色 + 前置 ⚠;新鲜 / 从未同步 → muted。
-// 陈旧仍显"同步于 {when}"(带告警),缺凭据显"缺凭据"。派生走 accountSyncStatus 纯函数。
+// 缺凭据 → 显可点击的"补填凭据以同步"提示(文案即入口,点开补录 modal);陈旧显"同步于 {when}"。派生走 accountSyncStatus。
 function AccountStatusLine({
   status,
   takenAt,
@@ -132,18 +132,12 @@ function AccountStatusLine({
 }: {
   status: AccountSyncStatus;
   takenAt: number | null;
-  onComplete?: () => void; // 缺凭据时:行内 ghost 补录按钮(A3),不冒泡到行的打开详情
+  onComplete?: () => void; // 缺凭据时:点提示文案开补录 modal(A3),不冒泡到行的打开详情
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
   const warn = status === "needsCreds" || status === "stale";
-  // needsCreds/never 无 takenAt(never 定义即无快照)→ 显固定文案;fresh/stale 有 takenAt → 显同步时刻。
-  const text =
-    status === "needsCreds"
-      ? t("needsCredentials")
-      : takenAt != null
-        ? t("lastSyncedAt", { when: format.relativeTime(new Date(takenAt)) })
-        : t("neverSynced");
+  const needsCreds = status === "needsCreds";
   return (
     <span
       className={cn(
@@ -157,14 +151,13 @@ function AccountStatusLine({
           <span className="sr-only">{t("syncWarning")}</span>
         </>
       )}
-      {text}
-      {/* 补录 ghost 按钮:行本身是 <button>,故用 role="button" span + stopPropagation 避免按钮套按钮 / 误触打开详情。 */}
-      {status === "needsCreds" && onComplete && (
-        // biome-ignore lint/a11y/useSemanticElements: 行本身是 <button>,补录控件不能再嵌套 <button>(无效 HTML),故用 role=button span
+      {/* 缺凭据 + 可补录 → 可点击提示文案(文案本身即入口);行是 <button>,故用 role=button span +
+          stopPropagation 避免按钮套按钮 / 误触打开详情。归档(无 onComplete)→ 纯文案。 */}
+      {needsCreds && onComplete ? (
+        // biome-ignore lint/a11y/useSemanticElements: 行本身是 <button>,不能再嵌套 <button>(无效 HTML),故用 role=button span
         <span
           role="button"
           tabIndex={0}
-          aria-label={t("completeCredentials")}
           onClick={(e) => {
             e.stopPropagation();
             onComplete();
@@ -176,10 +169,16 @@ function AccountStatusLine({
               onComplete();
             }
           }}
-          className="ml-0.5 flex size-5 items-center justify-center rounded-md text-warn/80 transition-colors hover:bg-warn/10 hover:text-warn"
+          className="rounded-sm underline-offset-2 outline-none hover:underline focus-visible:ring-1 focus-visible:ring-warn"
         >
-          <KeyRound className="size-3.5" aria-hidden />
+          {t("completePrompt")}
         </span>
+      ) : needsCreds ? (
+        t("completePrompt")
+      ) : takenAt != null ? (
+        t("lastSyncedAt", { when: format.relativeTime(new Date(takenAt)) })
+      ) : (
+        t("neverSynced")
       )}
     </span>
   );

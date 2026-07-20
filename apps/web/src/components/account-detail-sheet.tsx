@@ -14,15 +14,7 @@ import {
 } from "@folio/ui";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import {
-  AlertTriangle,
-  Archive,
-  KeyRound,
-  MoreVertical,
-  Pencil,
-  RefreshCw,
-  Trash2,
-} from "lucide-react";
+import { AlertTriangle, Archive, MoreVertical, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { accountShare, shareLabel } from "../lib/account-share";
@@ -276,18 +268,16 @@ function DetailBody({
                 </div>
               )}
             </div>
-            {/* 缺凭据告警行:⚠ + "缺凭据" + ghost 补录按钮(点击开加账户 modal 的补录模式,A3)。 */}
+            {/* 缺凭据告警行:⚠ + 可点击"补填凭据以同步"提示(文案即入口 → 开加账户 modal 的补录模式,A3)。 */}
             {account.needsCredentials && (
               <div className="flex items-center gap-1.5 text-warn text-xs">
                 <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
-                <span>{t("needsCredentials")}</span>
                 <button
                   type="button"
-                  aria-label={t("completeCredentials")}
                   onClick={onComplete}
-                  className="ml-0.5 flex size-5 items-center justify-center rounded-md text-warn/80 transition-colors hover:bg-warn/10 hover:text-warn"
+                  className="rounded-sm underline-offset-2 outline-none transition-colors hover:underline focus-visible:ring-1 focus-visible:ring-warn"
                 >
-                  <KeyRound className="size-3.5" />
+                  {t("completePrompt")}
                 </button>
               </div>
             )}
