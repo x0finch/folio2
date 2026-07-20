@@ -73,4 +73,20 @@ describe("messages (via createTranslator)", () => {
     expect(t("Login.tagline")).toBe("自托管的组合追踪,一个面板看全。");
     expect(t("Login.readOnlyHint")).toBe("只读,Folio 从不持有私钥、不签名交易。");
   });
+
+  // A3 补录凭据(#106):可点击补录提示文案 + modal 补录副标题 + 保存成功 toast,中英双语都产出串(非回退 key)。
+  it("English: new credential-completion keys resolve", () => {
+    const t = createTranslator({ locale: "en", messages: messages.en });
+    expect(t("Accounts.completePrompt")).toBe("Click to add credentials");
+    expect(t("Accounts.completeAccountHint")).toBe(
+      "Add your read-only API credentials to resume syncing.",
+    );
+    expect(t("Accounts.credSavedSyncing")).toBe("Saved, syncing…");
+  });
+  it("Chinese: new credential-completion keys resolve", () => {
+    const t = createTranslator({ locale: "zh", messages: messages.zh });
+    expect(t("Accounts.completePrompt")).toBe("点击补填凭据");
+    expect(t("Accounts.completeAccountHint")).toBe("补填只读 API 凭据以恢复同步。");
+    expect(t("Accounts.credSavedSyncing")).toBe("已保存,正在同步…");
+  });
 });

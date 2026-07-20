@@ -187,11 +187,12 @@ export const en = {
       "Restore from a folio-export.ndjson file. Accounts that need API keys will ask you to re-enter them.",
     importBtn: "Import file",
     imported: "Imported {accounts} account(s), {groups} group(s), {snapshots} snapshot(s).",
-    needsCredentials: "Needs credentials",
-    provideCredentials: "Provide credentials",
     credHint: "Recorded {field}: {hint}",
     credMismatch:
       "These credentials differ from what was exported. If you rotated your key, that's fine — otherwise check the account label.",
+    completePrompt: "Click to add credentials",
+    completeAccountHint: "Add your read-only API credentials to resume syncing.",
+    credSavedSyncing: "Saved, syncing…",
   },
   Activity: {
     title: "Activity",
@@ -448,10 +449,11 @@ export const zh: Messages = {
     importHint: "从 folio-export.ndjson 文件恢复。需要 API key 的账户会提示你重新填写。",
     importBtn: "导入文件",
     imported: "已导入 {accounts} 个账户、{groups} 个分组、{snapshots} 条快照。",
-    needsCredentials: "缺凭据",
-    provideCredentials: "补录凭据",
     credHint: "记录的 {field}:{hint}",
     credMismatch: "凭据与导出时记录的不一致。若你刚轮换过 key 属正常,否则请核对账户 label。",
+    completePrompt: "点击补填凭据",
+    completeAccountHint: "补填只读 API 凭据以恢复同步。",
+    credSavedSyncing: "已保存,正在同步…",
   },
   Activity: {
     title: "活动",

@@ -14,7 +14,7 @@ import {
 } from "@folio/ui";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { Archive, MoreVertical, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, MoreVertical, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { accountShare, shareLabel } from "../lib/account-share";
@@ -23,12 +23,10 @@ import { aggregateDayChange } from "../lib/day-value-change";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
 import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
-import type { InputSpec } from "../lib/server/credentials";
 import { getAccountValueHistory } from "../lib/server/history";
 import { syncOneAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
 import { ConnectorBadge } from "./connector-badge";
-import { CredentialForm } from "./credential-form";
 import { AccountHoldingsCards } from "./holdings-cards";
 import { ManualActivityPanel } from "./manual-activity-panel";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
@@ -53,15 +51,15 @@ export interface AccountRow {
 export function AccountDetailSheet({
   account,
   total,
-  specs,
   open,
   onOpenChange,
+  onComplete,
 }: {
   account: AccountRow | null;
   total: number; // 活跃账户总计 —— 抽屉头占比分母(见 accounts.tsx)
-  specs: InputSpec[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onComplete: (account: AccountRow) => void; // 补录:打开加账户 modal 的补录模式(A3)
 }) {
   const isDesktop = useMediaQuery("(min-width: 640px)");
   // key={account.id} 重挂 → 切账户自动清空 rename/confirm/range 等本地态。
@@ -70,8 +68,8 @@ export function AccountDetailSheet({
       key={account.id}
       account={account}
       total={total}
-      specs={specs}
       onClose={() => onOpenChange(false)}
+      onComplete={() => onComplete(account)}
     />
   );
 
@@ -102,13 +100,13 @@ const menuItemClass =
 function DetailBody({
   account,
   total,
-  specs,
   onClose,
+  onComplete,
 }: {
   account: AccountRow;
   total: number;
-  specs: InputSpec[];
   onClose: () => void;
+  onComplete: () => void;
 }) {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
@@ -270,6 +268,19 @@ function DetailBody({
                 </div>
               )}
             </div>
+            {/* 缺凭据告警行:⚠ + 可点击"补填凭据以同步"提示(文案即入口 → 开加账户 modal 的补录模式,A3)。 */}
+            {account.needsCredentials && (
+              <div className="flex items-center gap-1.5 text-warn text-xs">
+                <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+                <button
+                  type="button"
+                  onClick={onComplete}
+                  className="rounded-sm underline-offset-2 outline-none transition-colors hover:underline focus-visible:ring-1 focus-visible:ring-warn"
+                >
+                  {t("completePrompt")}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -357,20 +368,8 @@ function DetailBody({
         </div>
       )}
 
-      {/* 缺凭据 → 补录(A3 会再 v2 化,此处保持可用) */}
-      {account.needsCredentials && (
-        <div className="mt-4">
-          <p className="font-medium text-destructive text-sm">{t("provideCredentials")}</p>
-          <CredentialForm
-            accountId={account.id}
-            specs={specs}
-            hint={account.credsSafe}
-            onDone={refresh}
-          />
-        </div>
-      )}
-
-      {/* 持仓(卡片列表)+ 带 provider 展示明细的持仓手风琴(per-balance) */}
+      {/* 持仓(卡片列表)+ 带 provider 展示明细的持仓手风琴(per-balance)。
+          缺凭据带导入快照 → 直接渲染陈旧持仓;无快照 → AccountHoldingsCards 内部空态。 */}
       <div className="mt-6">
         <AccountHoldingsCards balances={account.balances} accountNote={account.note} />
       </div>
