@@ -14,10 +14,19 @@ import {
 } from "@folio/ui";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { Archive, MoreVertical, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Archive,
+  ClockAlert,
+  MoreVertical,
+  Pencil,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { accountShare, shareLabel } from "../lib/account-share";
+import { hasStaleHoldings } from "../lib/account-stale";
 import type { OverviewBalance } from "../lib/account-view";
 import { aggregateDayChange } from "../lib/day-value-change";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
@@ -120,6 +129,19 @@ function DetailBody({
   // 头部 24h 增量与账户行同源(缺凭据 → 不显增量);占比 = 本账户市值 / 活跃账户总计。
   const dayChange = account.needsCredentials ? null : aggregateDayChange(account.balances);
   const sharePct = accountShare(account.totalUsd, total) * 100;
+  // 缺凭据但带导入快照 → 有陈旧持仓(显陈旧总值 + "N 天前"标注);否则空态。
+  const stale = account.needsCredentials && hasStaleHoldings(account);
+  const staleWhen = account.takenAt != null ? format.relativeTime(new Date(account.takenAt)) : null;
+
+  // 补录成功:弹"已保存,正在同步…" + 立即刷新(callout 消失、账户翻正)+ 后台补一次 sync 填余额。
+  // 后台 sync 失败静默(凭据已 live 校验、账户健康;下次同步自会补上)——同加账户成功后的后台同步。
+  const handleProvided = () => {
+    toast.success(t("credSavedSyncing"));
+    refresh();
+    void syncOneAccount({ data: { accountId: account.id } })
+      .then(() => refresh())
+      .catch(() => {});
+  };
 
   const archived = account.archivedAt != null;
   const [renaming, setRenaming] = useState(false);
@@ -270,6 +292,21 @@ function DetailBody({
                 </div>
               )}
             </div>
+            {/* 缺凭据告警行:有陈旧快照 → ClockAlert +"上次同步 N 天前·补填后恢复";无快照 → AlertTriangle +"缺凭据"。 */}
+            {account.needsCredentials && (
+              <div className="flex items-center gap-1.5 text-warn text-xs">
+                {stale ? (
+                  <ClockAlert className="size-3.5 shrink-0" aria-hidden />
+                ) : (
+                  <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+                )}
+                <span>
+                  {stale && staleWhen != null
+                    ? t("credStaleLine", { when: staleWhen })
+                    : t("needsCredentials")}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -327,11 +364,14 @@ function DetailBody({
         </div>
       </div>
 
-      {/* 占比 + 同步时间:移到图下方,更小字体 + 更淡(次要信息,弱化)。 */}
-      <p className="mt-2 text-muted-foreground/30 text-xs">
-        {!archived && sharePct > 0 && `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
-        {lastSynced}
-      </p>
+      {/* 占比 + 同步时间:移到图下方,更小字体 + 更淡(次要信息,弱化)。
+          缺凭据时同步状态由上方 warn 告警行承载 → 此处不重复。 */}
+      {!account.needsCredentials && (
+        <p className="mt-2 text-muted-foreground/30 text-xs">
+          {!archived && sharePct > 0 && `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
+          {lastSynced}
+        </p>
+      )}
 
       {confirmDelete && (
         <div className="mt-4 flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
@@ -357,21 +397,37 @@ function DetailBody({
         </div>
       )}
 
-      {/* 缺凭据 → 补录(A3 会再 v2 化,此处保持可用) */}
+      {/* 缺凭据 → 补录 callout(A3):琥珀 --warn 基调(同全站缺凭据语言),标题/说明按有无陈旧快照分两态。 */}
       {account.needsCredentials && (
-        <div className="mt-4">
-          <p className="font-medium text-destructive text-sm">{t("provideCredentials")}</p>
-          <CredentialForm
-            accountId={account.id}
-            specs={specs}
-            hint={account.credsSafe}
-            onDone={refresh}
-          />
+        <div className="mt-4 rounded-xl border border-warn/30 bg-warn-bg p-4">
+          <div className="flex items-center gap-2 font-medium text-sm text-warn">
+            <AlertTriangle className="size-4 shrink-0" aria-hidden />
+            {stale ? t("credRestoreTitle") : t("credProvideTitle")}
+          </div>
+          <p className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
+            {stale ? t("credRestoreDesc") : t("credProvideDesc")}
+          </p>
+          <div className="mt-3">
+            <CredentialForm
+              accountId={account.id}
+              specs={specs}
+              hint={account.credsSafe}
+              onDone={handleProvided}
+            />
+          </div>
         </div>
       )}
 
-      {/* 持仓(卡片列表)+ 带 provider 展示明细的持仓手风琴(per-balance) */}
+      {/* 持仓(卡片列表)+ 带 provider 展示明细的持仓手风琴(per-balance)。
+          缺凭据带陈旧快照时,顶一个"N 天前快照"胶囊,点明持仓是旧数据(标注仅此处 + 上方告警行两处)。 */}
       <div className="mt-6">
+        {stale && staleWhen != null && (
+          <div className="mb-2">
+            <span className="inline-flex rounded-full bg-warn-bg px-2 py-0.5 text-warn text-xs">
+              {t("snapshotAge", { when: staleWhen })}
+            </span>
+          </div>
+        )}
         <AccountHoldingsCards balances={account.balances} accountNote={account.note} />
       </div>
 

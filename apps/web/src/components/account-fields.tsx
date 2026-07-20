@@ -153,34 +153,50 @@ function ManualFields({
 }
 
 // 通用字段(onchain/exchange/perp):按 credentialSpecs 渲染(secret→password,其余 text);label 走 Inputs i18n。
-function GenericFields({
+// 两用:加账户(默认 idPrefix "add",无 hint)与补录(A3,idPrefix "cred" + hint = credsSafe,semi 字段展示
+// "记录的 X:abc…xyz" 供识别)—— 一条字段渲染路径。hint 缺省 → 无提示行,加账户行为不变。
+export function GenericFields({
   specs,
   values,
   setValues,
+  idPrefix = "add",
+  hint,
 }: {
   specs: InputSpec[];
   values: Record<string, string>;
   setValues: (fn: (v: Record<string, string>) => Record<string, string>) => void;
+  idPrefix?: string;
+  hint?: Record<string, string>; // safeView 投影:semi 打码片段(补录时识别用)
 }) {
   const ti = useTranslations("Inputs");
+  const ta = useTranslations("Accounts");
   return (
     <>
-      {specs.map((s) => (
-        <div key={s.key} className="flex flex-col gap-2">
-          <Label htmlFor={`add-${s.key}`}>{ti(s.label)}</Label>
-          <Input
-            id={`add-${s.key}`}
-            type={s.type === "secret" ? "password" : "text"}
-            required={s.type !== "public" || s.key === "address"}
-            // secret 用 new-password:Chrome 对 password 框忽略 autoComplete="off",会回填本站登录账号/密码;
-            // 标成"新密码"既不回填,也打断"前一个文本框=用户名"的登录表单配对,连带 API Key 也不再被填。
-            autoComplete={s.type === "secret" ? "new-password" : "off"}
-            value={values[s.key] ?? ""}
-            placeholder={s.desc ? ti(s.desc) : undefined}
-            onChange={(val) => setValues((v) => ({ ...v, [s.key]: val }))}
-          />
-        </div>
-      ))}
+      {specs.map((s) => {
+        // 仅 semi 字段有可识别的打码片段(public 已知不问、secret 无投影);展示"记录的 X:片段"。
+        const recorded = s.type === "semi" ? hint?.[s.key] : undefined;
+        return (
+          <div key={s.key} className="flex flex-col gap-2">
+            <Label htmlFor={`${idPrefix}-${s.key}`}>{ti(s.label)}</Label>
+            {recorded && (
+              <p className="text-muted-foreground text-xs">
+                {ta("credHint", { field: ti(s.label), hint: recorded })}
+              </p>
+            )}
+            <Input
+              id={`${idPrefix}-${s.key}`}
+              type={s.type === "secret" ? "password" : "text"}
+              required={s.type !== "public" || s.key === "address"}
+              // secret 用 new-password:Chrome 对 password 框忽略 autoComplete="off",会回填本站登录账号/密码;
+              // 标成"新密码"既不回填,也打断"前一个文本框=用户名"的登录表单配对,连带 API Key 也不再被填。
+              autoComplete={s.type === "secret" ? "new-password" : "off"}
+              value={values[s.key] ?? ""}
+              placeholder={s.desc ? ti(s.desc) : undefined}
+              onChange={(val) => setValues((v) => ({ ...v, [s.key]: val }))}
+            />
+          </div>
+        );
+      })}
     </>
   );
 }

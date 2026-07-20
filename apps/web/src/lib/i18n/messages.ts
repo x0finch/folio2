@@ -188,10 +188,18 @@ export const en = {
     importBtn: "Import file",
     imported: "Imported {accounts} account(s), {groups} group(s), {snapshots} snapshot(s).",
     needsCredentials: "Needs credentials",
-    provideCredentials: "Provide credentials",
     credHint: "Recorded {field}: {hint}",
     credMismatch:
       "These credentials differ from what was exported. If you rotated your key, that's fine — otherwise check the account label.",
+    credProvideTitle: "Add credentials to start syncing",
+    credRestoreTitle: "Add credentials to resume syncing",
+    credProvideDesc:
+      "This account is missing its read-only API credentials. Add them to fetch balances — credentials are encrypted locally and never sign transactions.",
+    credRestoreDesc:
+      "The holdings below are an imported snapshot. Add your read-only API credentials to refresh them — credentials are encrypted locally and never sign transactions.",
+    credSavedSyncing: "Saved, syncing…",
+    credStaleLine: "Last synced {when} · resumes once you add credentials",
+    snapshotAge: "Snapshot from {when}",
   },
   Activity: {
     title: "Activity",
@@ -449,9 +457,15 @@ export const zh: Messages = {
     importBtn: "导入文件",
     imported: "已导入 {accounts} 个账户、{groups} 个分组、{snapshots} 条快照。",
     needsCredentials: "缺凭据",
-    provideCredentials: "补录凭据",
     credHint: "记录的 {field}:{hint}",
     credMismatch: "凭据与导出时记录的不一致。若你刚轮换过 key 属正常,否则请核对账户 label。",
+    credProvideTitle: "补填凭据以开始同步",
+    credRestoreTitle: "补填凭据以恢复同步",
+    credProvideDesc: "这个账户缺少只读 API 凭据。补填后即可拉取余额,凭据仅本地加密、绝不签名。",
+    credRestoreDesc: "下方为导入的历史快照。补填只读 API 凭据后即刷新为最新,凭据仅本地加密、绝不签名。",
+    credSavedSyncing: "已保存,正在同步…",
+    credStaleLine: "上次同步 {when} · 补填后恢复同步",
+    snapshotAge: "{when}快照",
   },
   Activity: {
     title: "活动",
