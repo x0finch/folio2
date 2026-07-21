@@ -28,7 +28,7 @@ import { syncOneAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
 import { ConnectorBadge } from "./connector-badge";
 import { AccountHoldingsCards } from "./holdings-cards";
-import { ManualActivityPanel } from "./manual-activity-panel";
+import { ManualHoldingsPanel } from "./manual-holdings-panel";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { ValueTrendChart } from "./value-trend-chart";
 
@@ -368,16 +368,15 @@ function DetailBody({
         </div>
       )}
 
-      {/* 持仓(卡片列表)+ 带 provider 展示明细的持仓手风琴(per-balance)。
-          缺凭据带导入快照 → 直接渲染陈旧持仓;无快照 → AccountHoldingsCards 内部空态。 */}
-      <div className="mt-6">
-        <AccountHoldingsCards balances={account.balances} accountNote={account.note} />
-      </div>
-
-      {/* manual 活动(A5 会再 v2 化,此处保持可用) */}
-      {account.connectorId === "manual" && (
+      {/* manual 账户:多 token 面板(Tokens tab 已含持仓,故不再叠加上方持仓卡)。
+          非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。 */}
+      {account.connectorId === "manual" ? (
         <div className="mt-6">
-          <ManualActivityPanel accountId={account.id} />
+          <ManualHoldingsPanel balances={account.balances} />
+        </div>
+      ) : (
+        <div className="mt-6">
+          <AccountHoldingsCards balances={account.balances} accountNote={account.note} />
         </div>
       )}
     </>

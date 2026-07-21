@@ -170,7 +170,7 @@ export function TokenCombobox({
               <TokenRow token={value} />
             </span>
           ) : (
-            <span className="flex-1 text-left text-muted-foreground">
+            <span className="min-w-0 flex-1 truncate text-left text-muted-foreground">
               {t("searchTokenPlaceholder")}
             </span>
           )}
