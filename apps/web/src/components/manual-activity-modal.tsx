@@ -208,7 +208,11 @@ function ActivityForm({
   const priceTouched = useRef(Boolean(edit));
   // 表单初值快照(挂载一次):判定草稿是否真被改动 → 决定 ✕ 是否需要确认(编辑态预填不算脏)。
   const initialRef = useRef<DraftForm | null>(null);
-  const initialDraft = (initialRef.current ??= emptyDraft());
+  let initialDraft = initialRef.current;
+  if (initialDraft === null) {
+    initialDraft = emptyDraft();
+    initialRef.current = initialDraft;
+  }
 
   // 滚轮展开时点组件外 → 收起回文字态(失焦自动关)。
   useEffect(() => {
