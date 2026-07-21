@@ -129,6 +129,21 @@ function numOrUndef(s: string): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
+// 草稿是否与初值一致(用于判定「是否真被改动」→ 决定 ✕ 是否需要确认)。token 以身份(identifier/symbol)比对。
+function sameDraft(a: DraftForm, b: DraftForm): boolean {
+  const tokA = a.token?.identifier ?? a.token?.symbol ?? null;
+  const tokB = b.token?.identifier ?? b.token?.symbol ?? null;
+  return (
+    tokA === tokB &&
+    a.kind === b.kind &&
+    a.amount === b.amount &&
+    a.price === b.price &&
+    a.fee === b.fee &&
+    a.occurredAt === b.occurredAt &&
+    a.memo === b.memo
+  );
+}
+
 function ActivityForm({
   defaultToken,
   lockToken = false,
@@ -191,6 +206,9 @@ function ActivityForm({
   const dateRef = useRef<HTMLDivElement>(null);
   // 用户是否手改过 price → 是则市价异步回填不再覆写(ref 避免闭包读旧值)。编辑态预填价格,视作已定。
   const priceTouched = useRef(Boolean(edit));
+  // 表单初值快照(挂载一次):判定草稿是否真被改动 → 决定 ✕ 是否需要确认(编辑态预填不算脏)。
+  const initialRef = useRef<DraftForm | null>(null);
+  const initialDraft = (initialRef.current ??= emptyDraft());
 
   // 滚轮展开时点组件外 → 收起回文字态(失焦自动关)。
   useEffect(() => {
@@ -237,7 +255,8 @@ function ActivityForm({
     );
   };
 
-  const dirty = pending.length > 0 || draftValid(draft);
+  // 脏 = 有待提交项 或 草稿相对初值被改动过(编辑态未改则不脏 → ✕ 直接关,不弹确认)。
+  const dirty = pending.length > 0 || !sameDraft(draft, initialDraft);
 
   // 载入某个待提交项到草稿(原位编辑),同步选币/展开态。
   const loadDraft = (d: DraftForm) => {
@@ -333,9 +352,7 @@ function ActivityForm({
     draft.amount.trim() !== "" &&
     Number.isFinite(qty) &&
     qty > 0 &&
-    draft.price.trim() !== "" &&
-    Number.isFinite(priceNum) &&
-    priceNum > 0;
+    numOrUndef(draft.price) != null; // 记录了单价即显(含 0 = 零成本);空/非法不显
   const value = qty * priceNum;
 
   return (
@@ -570,8 +587,8 @@ function ActivityForm({
                   {t(d.kind)} · {format.dateTime(new Date(d.occurredAt), { dateStyle: "medium" })}
                 </div>
               </div>
-              {/* 价值(数量 × 单价);无单价则不显 */}
-              {Number(d.price) > 0 && (
+              {/* 价值(数量 × 单价);记录了单价才显(含 0 = 零成本),空/非法则不显 */}
+              {numOrUndef(d.price) != null && (
                 <span className="shrink-0 text-muted-foreground text-xs tabular-nums">
                   {format.number(Number(d.amount) * Number(d.price), {
                     style: "currency",
@@ -619,7 +636,7 @@ function ActivityForm({
               {t("continueEditing")}
             </Button>
             <Button type="button" variant="destructive" className="flex-1" onClick={onClose}>
-              {t("closeWithoutSaving")}
+              {editing ? t("closeWithoutChanges") : t("closeWithoutSaving")}
             </Button>
           </>
         ) : editing ? (

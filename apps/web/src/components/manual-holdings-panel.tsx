@@ -181,8 +181,8 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
           </div>
         </div>
         <div className="shrink-0 text-right">
-          {/* 价值 = 数量 × 该笔单价(有单价才显),呼应主页代币行右侧市值;日期次要弱化其下 */}
-          {a.price ? (
+          {/* 价值 = 数量 × 该笔单价(记录了单价才显,含 0 = 零成本入仓/空投);呼应主页代币行右侧市值;日期弱化其下 */}
+          {a.price != null ? (
             <div className="font-medium text-sm tabular-nums">
               {format.number(a.amount * a.price, {
                 style: "currency",
