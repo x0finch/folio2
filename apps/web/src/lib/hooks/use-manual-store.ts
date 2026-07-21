@@ -6,11 +6,14 @@ import {
   commitBatch,
   deleteActivity,
   type HoldingInput,
+  holdingValid,
   type ManualState,
   makeSeedHolding,
   mergedActivities,
   removeHolding,
   resolveActivityDrafts,
+  type StoredActivity,
+  updateActivity,
   updateHolding,
   validateBatch,
 } from "../manual-store";
@@ -61,6 +64,17 @@ export function useManualStore(balances: OverviewBalance[]) {
     setState((s) => deleteActivity(s, holdingId, activityId));
   }, []);
 
+  // 编辑一笔既有活动:套用 patch 后校验该 holding 时间线(改 amount/kind/日期可能致超支),合法才写入。
+  const editActivity = useCallback(
+    (holdingId: string, activityId: string, patch: Partial<Omit<StoredActivity, "id">>) => {
+      const next = updateActivity(state, holdingId, activityId, patch);
+      const ok = holdingValid(next, holdingId);
+      if (ok) setState(next);
+      return { ok };
+    },
+    [state],
+  );
+
   // 提交暂存批量（token 维度）:先为未持有 token 现建空 holding,再整批校验(reduce 超支 → 整批拒),合法才入库。
   const commit = useCallback(
     (drafts: ActivityDraft[]) => {
@@ -77,7 +91,16 @@ export function useManualStore(balances: OverviewBalance[]) {
     [state],
   );
 
-  return { holdings, merged, create, edit, remove, removeActivity, commit } as const;
+  return {
+    holdings,
+    merged,
+    create,
+    edit,
+    remove,
+    removeActivity,
+    editActivity,
+    commit,
+  } as const;
 }
 
 export type ManualStoreApi = ReturnType<typeof useManualStore>;

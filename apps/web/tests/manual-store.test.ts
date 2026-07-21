@@ -8,10 +8,12 @@ import {
   findHolding,
   type Holding,
   holdingAmount,
+  holdingValid,
   makeSeedHolding,
   mergedActivities,
   removeHolding,
   resolveActivityDrafts,
+  updateActivity,
   updateHolding,
   validateBatch,
 } from "../src/lib/manual-store";
@@ -188,6 +190,26 @@ describe("resolveActivityDrafts", () => {
     expect(holdingAmount(committed[0])).toBe(10);
   });
 
+  it("threads price/fee cost-basis metadata through to the stored activity", () => {
+    const drafts: ActivityDraft[] = [
+      {
+        token: { symbol: "SOL", identifier: "solana", unitPrice: 150 },
+        kind: "add",
+        amount: 10,
+        occurredAt: 100,
+        createdAt: 0,
+        price: 150.25,
+        fee: 1.5,
+      },
+    ];
+    const { state, holdingDrafts } = resolveActivityDrafts([], drafts, (i) => `new-${i}`);
+    expect(holdingDrafts[0]).toMatchObject({ price: 150.25, fee: 1.5 });
+    const committed = commitBatch(state, holdingDrafts, (i) => `act-${i}`);
+    expect(committed[0].activities[0]).toMatchObject({ price: 150.25, fee: 1.5 });
+    // price/fee 不影响数量折叠
+    expect(holdingAmount(committed[0])).toBe(10);
+  });
+
   it("reuses one created holding across multiple drafts for the same token", () => {
     const tok = { symbol: "SOL", identifier: "solana", unitPrice: 150 };
     const drafts: ActivityDraft[] = [
@@ -215,6 +237,32 @@ describe("resolveActivityDrafts", () => {
     const { state, holdingDrafts } = resolveActivityDrafts(existing, drafts, (i) => `new-${i}`);
     expect(state).toHaveLength(1);
     expect(holdingDrafts[0].holdingId).toBe("h1");
+  });
+});
+
+describe("updateActivity / holdingValid", () => {
+  it("patches a single activity's fields, keeping id and createdAt", () => {
+    const state = [holding("h1", "BTC", [act("a1", "add", 2, 100, 5)])];
+    const next = updateActivity(state, "h1", "a1", { amount: 3, price: 65000, fee: 10 });
+    expect(next[0].activities[0]).toMatchObject({
+      id: "a1",
+      kind: "add",
+      amount: 3,
+      createdAt: 5,
+      price: 65000,
+      fee: 10,
+    });
+    expect(holdingAmount(next[0])).toBe(3);
+  });
+
+  it("holdingValid catches an edit that overdraws the timeline", () => {
+    // add 5 then reduce 3 → ok; edit the add down to 2 → reduce 3 now overdraws.
+    const state = [
+      holding("h1", "BTC", [act("a1", "add", 5, 100, 0), act("a2", "reduce", 3, 200, 1)]),
+    ];
+    expect(holdingValid(state, "h1")).toBe(true);
+    const bad = updateActivity(state, "h1", "a1", { amount: 2 });
+    expect(holdingValid(bad, "h1")).toBe(false);
   });
 });
 

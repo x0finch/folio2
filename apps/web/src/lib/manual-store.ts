@@ -7,6 +7,10 @@ import { type DerivableActivity, deriveAmount } from "./manual-activity";
 export interface StoredActivity extends DerivableActivity {
   id: string;
   memo?: string;
+  // 成本基元数据(不参与 deriveAmount/validateBatch,纯数量之外的记账):每枚价格 + 可选手续费(USD)。
+  // 供 Total 展示与后续 P/L 片使用;历史价的精确化见 #148。
+  price?: number;
+  fee?: number;
 }
 
 // 某 manual 账户持有的一个 token（定义 + 自己的活动账本）。
@@ -37,6 +41,8 @@ export interface DraftActivity {
   occurredAt: number;
   createdAt: number;
   memo?: string;
+  price?: number;
+  fee?: number;
 }
 
 // 活动流的 token 引用（CGK 选币结果 + 市价单价）。活动可指向尚未持有的 token → 提交时按需建 holding。
@@ -56,6 +62,8 @@ export interface ActivityDraft {
   occurredAt: number;
   createdAt: number;
   memo?: string;
+  price?: number;
+  fee?: number;
 }
 
 // 编辑 token 表单的取值（symbol/unitPrice/identifier + 目标 amount）。
@@ -148,6 +156,42 @@ export function deleteActivity(
   );
 }
 
+// 编辑一笔既有活动的字段(保留 id/createdAt;kind/amount/occurredAt/memo/price/fee 可改)。
+export function updateActivity(
+  state: ManualState,
+  holdingId: string,
+  activityId: string,
+  patch: Partial<Omit<StoredActivity, "id">>,
+): ManualState {
+  return state.map((h) =>
+    h.id !== holdingId
+      ? h
+      : {
+          ...h,
+          activities: h.activities.map((a) => (a.id === activityId ? { ...a, ...patch } : a)),
+        },
+  );
+}
+
+// 单个 holding 的时间线是否合法(无 reduce 在其时点超支)。供编辑既有活动后校验(改 amount/kind/日期可能致超支)。
+export function holdingValid(state: ManualState, holdingId: string): boolean {
+  const h = state.find((x) => x.id === holdingId);
+  if (!h) return true;
+  const sorted = [...h.activities].sort(
+    (a, b) => a.occurredAt - b.occurredAt || a.createdAt - b.createdAt,
+  );
+  let running = 0;
+  for (const a of sorted) {
+    if (a.kind === "set") running = a.amount;
+    else if (a.kind === "add") running += a.amount;
+    else {
+      running -= a.amount;
+      if (running < -EPS) return false;
+    }
+  }
+  return true;
+}
+
 export function mergedActivities(state: ManualState): MergedActivityRow[] {
   const rows = state.flatMap((h) =>
     h.activities.map((a) => ({ ...a, holdingId: h.id, symbol: h.symbol, logo: h.logo })),
@@ -206,6 +250,8 @@ export function commitBatch(
       occurredAt: d.occurredAt,
       createdAt: d.createdAt,
       memo: d.memo,
+      price: d.price,
+      fee: d.fee,
     });
     perHolding.set(d.holdingId, list);
   });
@@ -259,6 +305,8 @@ export function resolveActivityDrafts(
       occurredAt: d.occurredAt,
       createdAt: d.createdAt,
       memo: d.memo,
+      price: d.price,
+      fee: d.fee,
     });
   }
   return { state: next, holdingDrafts };

@@ -19,7 +19,7 @@ import type { OverviewBalance } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useManualStore } from "../lib/hooks/use-manual-store";
 import { type DraftTokenRef, type Holding, holdingAmount } from "../lib/manual-store";
-import { ManualActivityModal } from "./manual-activity-modal";
+import { type EditActivityInput, ManualActivityModal } from "./manual-activity-modal";
 import { Portal } from "./portal";
 import { TokenRowContent } from "./token-row";
 
@@ -63,12 +63,13 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
   const store = useManualStore(balances);
 
   const [tab, setTab] = useState("tokens");
-  // Add activity modal:token 可为预选(plus,最新活动的 token)或锁定(token 行编辑)。
+  // Add/Edit activity modal:token 可预选(plus,最新活动的 token)、锁定(token 行编辑)、或编辑既有活动(edit 预填)。
   const [activity, setActivity] = useState<{
     open: boolean;
     token: DraftTokenRef | null;
     lock: boolean;
-  }>({ open: false, token: null, lock: false });
+    edit: EditActivityInput | null;
+  }>({ open: false, token: null, lock: false, edit: null });
   // 删除二次确认 modal。
   const [confirm, setConfirm] = useState<{ title: string; onConfirm: () => void } | null>(null);
 
@@ -77,8 +78,30 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
   const latestHolding = latest && store.holdings.find((h) => h.id === latest.holdingId);
   const latestToken = latestHolding ? tokenRef(latestHolding) : null;
 
-  const openPlus = () => setActivity({ open: true, token: latestToken, lock: false });
-  const openTokenEdit = (h: Holding) => setActivity({ open: true, token: tokenRef(h), lock: true });
+  const openPlus = () => setActivity({ open: true, token: latestToken, lock: false, edit: null });
+  const openTokenEdit = (h: Holding) =>
+    setActivity({ open: true, token: tokenRef(h), lock: true, edit: null });
+  // 活动行「编辑」:锁定该 token,预填这笔活动的全部字段(kind/数量/单价/手续费/日期/备注)。
+  const openActivityEdit = (a: (typeof store.merged)[number]) => {
+    const h = store.holdings.find((x) => x.id === a.holdingId);
+    const token = h ? tokenRef(h) : { symbol: a.symbol, logo: a.logo, unitPrice: 0 };
+    setActivity({
+      open: true,
+      token,
+      lock: true,
+      edit: {
+        holdingId: a.holdingId,
+        activityId: a.id,
+        token,
+        kind: a.kind,
+        amount: a.amount,
+        price: a.price,
+        fee: a.fee,
+        occurredAt: a.occurredAt,
+        memo: a.memo,
+      },
+    });
+  };
   const closeActivity = () => setActivity((s) => ({ ...s, open: false }));
 
   // 列表项直接由内存态派生(小列表,无需 memo);action 回调闭包捕获当前 store。
@@ -126,6 +149,13 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
     id: a.id,
     rightActions: [
       {
+        id: "edit",
+        label: t("editActivityTitle"),
+        icon: <Pencil className="size-4" />,
+        tone: "neutral",
+        onClick: () => openActivityEdit(a),
+      },
+      {
         id: "delete",
         label: tc("delete"),
         icon: <Trash2 className="size-4" />,
@@ -150,9 +180,21 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
             {a.memo ? <span className="text-muted-foreground"> · {a.memo}</span> : null}
           </div>
         </div>
-        <span className="shrink-0 text-muted-foreground text-xs tabular-nums">
-          {format.dateTime(new Date(a.occurredAt), { dateStyle: "medium" })}
-        </span>
+        <div className="shrink-0 text-right">
+          {/* 价值 = 数量 × 该笔单价(有单价才显),呼应主页代币行右侧市值;日期次要弱化其下 */}
+          {a.price ? (
+            <div className="font-medium text-sm tabular-nums">
+              {format.number(a.amount * a.price, {
+                style: "currency",
+                currency: "USD",
+                maximumFractionDigits: 2,
+              })}
+            </div>
+          ) : null}
+          <div className="text-muted-foreground text-xs tabular-nums">
+            {format.dateTime(new Date(a.occurredAt), { dateStyle: "medium" })}
+          </div>
+        </div>
       </div>
     ),
   }));
@@ -196,6 +238,7 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
         open={activity.open}
         defaultToken={activity.token}
         lockToken={activity.lock}
+        edit={activity.edit}
         onClose={closeActivity}
         onSubmit={(drafts) => {
           const res = store.commit(drafts);
@@ -203,6 +246,11 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
             setActivity((s) => ({ ...s, open: false }));
             setTab("activity");
           }
+          return { ok: res.ok };
+        }}
+        onEdit={(holdingId, activityId, patch) => {
+          const res = store.editActivity(holdingId, activityId, patch);
+          if (res.ok) setActivity((s) => ({ ...s, open: false }));
           return { ok: res.ok };
         }}
       />
