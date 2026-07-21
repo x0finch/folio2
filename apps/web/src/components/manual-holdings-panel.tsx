@@ -13,12 +13,18 @@ import {
   useMediaQuery,
 } from "@folio/ui";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { OverviewBalance } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useManualStore } from "../lib/hooks/use-manual-store";
-import { type DraftTokenRef, type Holding, holdingAmount } from "../lib/manual-store";
+import {
+  type DraftTokenRef,
+  type Holding,
+  holdingAmount,
+  type MergedActivityRow,
+} from "../lib/manual-store";
+import { HoverDetail } from "./hover-detail";
 import { type EditActivityInput, ManualActivityModal } from "./manual-activity-modal";
 import { Portal } from "./portal";
 import { TokenRowContent } from "./token-row";
@@ -168,14 +174,22 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
       },
     ],
     // 字体与 <TokenRowContent> 同位对齐:第一行 = 名称位(font-medium 基号)、第二行 = 数量·symbol 位(text-xs)。
+    // 数量·symbol hover → 明细浮层(该笔活动完整信息);hover 时才显实线下划线示意可展开,每条活动都有。
     content: (
       <div className="flex w-full items-center gap-3">
         <LogoAvatar src={a.logo} fallback={a.symbol} size="md" />
         <div className="min-w-0 flex-1">
           <div className="min-w-0 truncate font-medium tabular-nums">
-            {formatNumber(a.amount)} {a.symbol.toUpperCase()}
+            <HoverDetail
+              className="inline underline-offset-4 decoration-muted-foreground/60 hover:underline"
+              detail={<ActivityDetail row={a} t={t} format={format} />}
+            >
+              {formatNumber(a.amount)} {a.symbol.toUpperCase()}
+            </HoverDetail>
           </div>
-          <div className="truncate text-xs">
+          {/* mt-1.5 = 6px:补出与 Token 行相同的两行间距(Token 的 line2 是 inline span,从父 line-height strut
+              得到 6px;这里 line2 是 block div 才能 truncate 长备注,故显式补上,避免两个 tab 行距不一致)。 */}
+          <div className="mt-1.5 truncate text-xs">
             <span className={kindTone[a.kind]}>{t(a.kind)}</span>
             {a.memo ? <span className="text-muted-foreground"> · {a.memo}</span> : null}
           </div>
@@ -315,6 +329,54 @@ function ConfirmModal({
         )}
       </MorphingModal>
     </Portal>
+  );
+}
+
+// 活动行 hover 明细:该笔活动的完整信息(类型/数量/单价/价值/手续费/日期/备注)。
+// 缺省字段(未记单价/手续费/备注)不显示;类型/数量/日期恒有。
+function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <span className="tabular-nums">{children}</span>
+    </div>
+  );
+}
+
+function ActivityDetail({
+  row,
+  t,
+  format,
+}: {
+  row: MergedActivityRow;
+  t: (key: string) => string;
+  format: ReturnType<typeof useFormatter>;
+}) {
+  const usd = (v: number) =>
+    format.number(v, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      <DetailRow label={t("typeLabel")}>
+        <span className={kindTone[row.kind]}>{t(row.kind)}</span>
+      </DetailRow>
+      <DetailRow label={t("amountLabel")}>
+        {formatNumber(row.amount)} {row.symbol.toUpperCase()}
+      </DetailRow>
+      {row.price != null && <DetailRow label={t("priceLabel")}>{usd(row.price)}</DetailRow>}
+      {row.price != null && (
+        <DetailRow label={t("valuePreview")}>{usd(row.amount * row.price)}</DetailRow>
+      )}
+      {row.fee != null && <DetailRow label={t("feeLabel")}>{usd(row.fee)}</DetailRow>}
+      <DetailRow label={t("dateLabel")}>
+        {format.dateTime(new Date(row.occurredAt), { dateStyle: "medium" })}
+      </DetailRow>
+      {row.memo ? (
+        <div className="flex flex-col gap-0.5 border-border border-t pt-2">
+          <span className="text-muted-foreground text-xs">{t("memoLabel")}</span>
+          <p className="whitespace-pre-wrap break-words">{row.memo}</p>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

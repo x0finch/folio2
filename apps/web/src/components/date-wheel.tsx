@@ -61,6 +61,7 @@ export function DateWheel({
         value={String(monthIndex)}
         onValueChange={(v) => compose(year, Number(v), day)}
         className="flex-1 border-0 bg-transparent"
+        sound
         aria-label="Month"
       />
       <WheelPicker
@@ -68,6 +69,7 @@ export function DateWheel({
         value={String(day)}
         onValueChange={(v) => compose(year, monthIndex, Number(v))}
         className="w-14 border-0 bg-transparent"
+        sound
         aria-label="Day"
       />
       <WheelPicker
@@ -75,6 +77,7 @@ export function DateWheel({
         value={String(year)}
         onValueChange={(v) => compose(Number(v), monthIndex, day)}
         className="w-20 border-0 bg-transparent"
+        sound
         aria-label="Year"
       />
     </div>
