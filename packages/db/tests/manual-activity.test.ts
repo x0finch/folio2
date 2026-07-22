@@ -45,14 +45,12 @@ async function manualAccount(userId: string) {
 describe("manual_activity ops", () => {
   it("record + list (ordered by occurred_at)", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, {
-      holdingId: acc.holdingId,
+    await recordManualActivity(env, USER_A, acc.holdingId, {
       kind: "set",
       amount: 10,
       occurredAt: 100,
     });
-    await recordManualActivity(env, USER_A, acc.id, {
-      holdingId: acc.holdingId,
+    await recordManualActivity(env, USER_A, acc.holdingId, {
       kind: "add",
       amount: 5,
       occurredAt: 200,
@@ -66,8 +64,7 @@ describe("manual_activity ops", () => {
 
   it("remove by id", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, {
-      holdingId: acc.holdingId,
+    await recordManualActivity(env, USER_A, acc.holdingId, {
       kind: "set",
       amount: 10,
       occurredAt: 1,
@@ -79,20 +76,14 @@ describe("manual_activity ops", () => {
 
   it("scoped by owner: other user can't record / list / remove", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, {
-      holdingId: acc.holdingId,
+    await recordManualActivity(env, USER_A, acc.holdingId, {
       kind: "set",
       amount: 10,
       occurredAt: 1,
     });
-    // B 记录到 A 的账户 → 抛(assertAccountOwned)
+    // B 记录到 A 的 holding → 抛(assertHoldingOwned:不属本人)
     await expect(
-      recordManualActivity(env, USER_B, acc.id, {
-        holdingId: acc.holdingId,
-        kind: "add",
-        amount: 1,
-        occurredAt: 2,
-      }),
+      recordManualActivity(env, USER_B, acc.holdingId, { kind: "add", amount: 1, occurredAt: 2 }),
     ).rejects.toThrow();
     // B 列 A 的账户 → 空(join 限 userId)
     expect(await listManualActivityByAccount(env, USER_B, acc.id)).toEqual([]);
@@ -102,8 +93,7 @@ describe("manual_activity ops", () => {
 
   it("cascade: deleting the account removes its activity", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, {
-      holdingId: acc.holdingId,
+    await recordManualActivity(env, USER_A, acc.holdingId, {
       kind: "set",
       amount: 10,
       occurredAt: 1,

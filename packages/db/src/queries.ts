@@ -647,7 +647,6 @@ export async function deleteManualHolding(
 
 export type ManualActivityKind = "add" | "reduce" | "set";
 export interface ManualActivityInput {
-  holdingId: string; // 所属 holding(ADR 0017:活动挂 holding);app 层恒设置
   kind: ManualActivityKind;
   amount: number;
   price?: number | null;
@@ -656,18 +655,21 @@ export interface ManualActivityInput {
 }
 export type ManualActivity = InferSelectModel<typeof manualActivity>;
 
+// 活动挂 holding(ADR 0017)。accountId 由 holding **反查**(assertHoldingOwned)而非调用方另传 ——
+// 既保证 activity.accountId 恒 === holding.accountId,又杜绝「传自己的 accountId + 他人的 holdingId」把活动
+// 挂到别账户/别用户 holding 的越权面(不属本人的 holding 直接抛)。
 export async function recordManualActivity(
   env: DbEnv,
   userId: string,
-  accountId: string,
+  holdingId: string,
   input: ManualActivityInput,
 ): Promise<void> {
   const db = getDb(env);
-  await assertAccountOwned(db, userId, accountId); // 防越权(与组 ops 同约定:不属本人即抛)
+  const accountId = await assertHoldingOwned(db, userId, holdingId);
   await db.insert(manualActivity).values({
     id: crypto.randomUUID(),
     accountId,
-    holdingId: input.holdingId,
+    holdingId,
     kind: input.kind,
     amount: input.amount,
     price: input.price ?? null,

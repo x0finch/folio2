@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
+import { CredentialValidationError } from "@folio/connectors-basic";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -68,7 +69,16 @@ export const createAccount = createServerFn({ method: "POST" })
     // manual 特例:表单收标量首 token → 建账户(creds.tokens 先空)+ 首 holding + set 活动 → 物化 creds.tokens。
     // 不走通用 validateAccountCreds/raw2sealed(account.creds 现为单个 tokens JSON 字段,与标量表单不同形)。
     if (connectorId === "manual") {
-      const first = ManualFirstToken.parse(values);
+      // 与通用路径同一错误类型:形状不过抛 CredentialValidationError(而非裸 ZodError)。
+      const parsed = ManualFirstToken.safeParse(values);
+      if (!parsed.success) {
+        throw new CredentialValidationError(
+          parsed.error.issues
+            .map((i) => `${i.path.join(".") || "tokens"}: ${i.message}`)
+            .join("; "),
+        );
+      }
+      const first = parsed.data;
       const account = await db.createAccount(context.userId, {
         connectorId,
         label: data.label,
@@ -79,8 +89,7 @@ export const createAccount = createServerFn({ method: "POST" })
         unitPrice: first.unitPrice,
         identifier: first.identifier,
       });
-      await db.recordManualActivity(context.userId, account.id, {
-        holdingId: holding.id,
+      await db.recordManualActivity(context.userId, holding.id, {
         kind: "set",
         amount: first.amount,
         occurredAt: Date.now(),
