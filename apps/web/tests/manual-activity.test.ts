@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type DerivableActivity, deriveAmount, projectHolding } from "../src/lib/manual-activity";
+import { type DerivableActivity, deriveAmount, projectToken } from "../src/lib/manual-activity";
 
 const a = (
   kind: DerivableActivity["kind"],
@@ -35,25 +35,22 @@ describe("deriveAmount", () => {
   });
 });
 
-// projectHolding:holding 定义 + 活动账本 → creds.tokens 的一项(物化投影,ADR 0017)。
-describe("projectHolding", () => {
+// projectToken:token 定义 + 活动账本 → creds.tokens 的一项(物化投影,ADR 0017)。
+describe("projectToken", () => {
   it("amount = deriveAmount(activities); carries symbol/unitPrice", () => {
-    const t = projectHolding({ symbol: "BTC", unitPrice: 64000 }, [
-      a("set", 1, 1),
-      a("add", 0.5, 2),
-    ]);
+    const t = projectToken({ symbol: "BTC", unitPrice: 64000 }, [a("set", 1, 1), a("add", 0.5, 2)]);
     expect(t).toEqual({ symbol: "BTC", unitPrice: 64000, amount: 1.5 });
   });
 
   it("includes identifier when present", () => {
-    const t = projectHolding({ symbol: "BTC", unitPrice: 64000, identifier: "bitcoin" }, [
+    const t = projectToken({ symbol: "BTC", unitPrice: 64000, identifier: "bitcoin" }, [
       a("set", 2, 1),
     ]);
     expect(t).toEqual({ symbol: "BTC", unitPrice: 64000, amount: 2, identifier: "bitcoin" });
   });
 
   it("omits identifier key when null/absent (provider validator treats it as optional string)", () => {
-    const t = projectHolding({ symbol: "FOO", unitPrice: 0.25, identifier: null }, []);
+    const t = projectToken({ symbol: "FOO", unitPrice: 0.25, identifier: null }, []);
     expect(t).toEqual({ symbol: "FOO", unitPrice: 0.25, amount: 0 });
     expect("identifier" in t).toBe(false);
   });

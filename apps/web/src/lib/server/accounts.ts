@@ -42,7 +42,7 @@ export const listMyAccounts = createServerFn({ method: "GET" })
 
 // 统一创建入口(connector-driven,#55/#52):表单原始输入 values(键 = connector.account.creds 的 key),
 // 校验/加密/落库全由 connectorId 驱动,不再按类型分派。空串值 = 未填的可选字段,落库前丢弃。
-// manual 是特例(ADR 0017):表单收单 token 标量 → createManualAccount(见 ./manual)转换成 holding + 活动
+// manual 是特例(ADR 0017):表单收单 token 标量 → createManualAccount(见 ./manual)转换成 token + 活动
 // + creds.tokens;其余 connector 走通用形状闸 + 探活 + seal 落库。
 const CreateAccountInput = z.object({
   connectorId: z.string().min(1),

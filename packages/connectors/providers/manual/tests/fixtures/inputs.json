@@ -1,6 +1,6 @@
 [
   {
-    "name": "single manual holding (value = amount × unitPrice, no meta)",
+    "name": "single manual token (value = amount × unitPrice, no meta)",
     "creds": { "tokens": [{ "symbol": "BTC", "amount": 0.5, "unitPrice": 64000 }] }
   },
   {
@@ -10,7 +10,7 @@
     }
   },
   {
-    "name": "multiple holdings → one spot each (N tokens)",
+    "name": "multiple tokens → one spot each (N tokens)",
     "creds": {
       "tokens": [
         { "symbol": "BTC", "amount": 0.5, "unitPrice": 64000, "identifier": "bitcoin" },
@@ -20,7 +20,7 @@
     }
   },
   {
-    "name": "no holdings → no balances (empty shell)",
+    "name": "no tokens → no balances (empty shell)",
     "creds": { "tokens": [] }
   }
 ]

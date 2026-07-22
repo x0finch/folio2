@@ -111,7 +111,7 @@ export const en = {
   },
   Accounts: {
     title: "Accounts",
-    holdingsTab: "Tokens",
+    tokensTab: "Tokens",
     addAccount: "Add account",
     addAccountHint: "Pick a type, then fill in its details.",
     backToConnectors: "Back to connectors",
@@ -406,7 +406,7 @@ export const zh: Messages = {
   },
   Accounts: {
     title: "账户",
-    holdingsTab: "代币",
+    tokensTab: "代币",
     addAccount: "添加账户",
     addAccountHint: "先选类型,再填写对应信息。",
     backToConnectors: "返回连接器",

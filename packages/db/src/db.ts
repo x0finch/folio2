@@ -44,14 +44,14 @@ export function createDb(env: DbEnv) {
     getLatestSnapshotByUser: b(q.getLatestSnapshotByUser),
     listSnapshotsPageByUser: b(q.listSnapshotsPageByUser),
     listBalancesForSnapshots: b(q.listBalancesForSnapshots),
-    // —— manual holdings + activity(ADR 0017)——
-    createManualHolding: b(q.createManualHolding),
-    listManualHoldingsByAccount: b(q.listManualHoldingsByAccount),
-    updateManualHolding: b(q.updateManualHolding),
-    deleteManualHolding: b(q.deleteManualHolding),
+    // —— manual tokens + activity(ADR 0017)——
+    createManualToken: b(q.createManualToken),
+    listManualTokensByAccount: b(q.listManualTokensByAccount),
+    updateManualToken: b(q.updateManualToken),
+    deleteManualToken: b(q.deleteManualToken),
     recordManualActivity: b(q.recordManualActivity),
     listManualActivityByAccount: b(q.listManualActivityByAccount),
-    listManualActivityByHolding: b(q.listManualActivityByHolding),
+    listManualActivityByToken: b(q.listManualActivityByToken),
     removeManualActivity: b(q.removeManualActivity),
     // —— user settings(Phase 3)——
     getUserSettings: b(q.getUserSettings),

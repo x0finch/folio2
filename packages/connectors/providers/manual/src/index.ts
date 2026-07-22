@@ -5,12 +5,12 @@ import { z } from "zod";
 // @folio/connectors-provider-manual —— 手动资产(manual connector 的 provider)。无外部 API:一个账户
 // 持有 N 个手记 token(ADR 0017)。各 token 的定义 + 各自账本折叠出的 amount,由 app 物化成一个 public
 // JSON 字段 `creds.tokens`(明文落库、导出原样、可重建);provider 只读它并 map 成 N 条 kind:"spot":
-// value = amount × unitPrice、price = unitPrice(P7.4.1)。`amount` 由各 holding 的 manual 活动账本
-// (manual_activity 挂 holding_id)推导后【物化】进 creds.tokens(app 层);provider 保持纯 / DB-free。
+// value = amount × unitPrice、price = unitPrice(P7.4.1)。`amount` 由各 token 的 manual 活动账本
+// (manual_activity 挂 token_id)推导后【物化】进 creds.tokens(app 层);provider 保持纯 / DB-free。
 // 有 identifier → 产 coingecko: tokenKey 供 revalue 按显式 ref 解析;无则按 symbol 归一(同 CEX)。
 // manual 统一走市价重估(ADR 0010 删 fixed)。零依赖、不碰 SECRETS_KEY/cloudflare:workers(原则 #5)。
 
-// creds.tokens 的一项:token 定义 + 物化出的 amount(= 对应 holding 活动账本的 deriveAmount)。
+// creds.tokens 的一项:token 定义 + 物化出的 amount(= 对应 token 活动账本的 deriveAmount)。
 const manualToken = z.object({
   symbol: z.string().trim().min(1),
   unitPrice: z.coerce.number(),

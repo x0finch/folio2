@@ -1,5 +1,5 @@
 {
-  "single manual holding (value = amount × unitPrice, no meta)": [
+  "single manual token (value = amount × unitPrice, no meta)": [
     { "symbol": "BTC", "amount": 0.5, "price": 64000, "value": 32000, "kind": "spot" }
   ],
   "picked CoinGecko id → coingecko tokenKey (sync-time market valuation)": [
@@ -12,7 +12,7 @@
       "tokenKey": "coingecko:bitcoin"
     }
   ],
-  "multiple holdings → one spot each (N tokens)": [
+  "multiple tokens → one spot each (N tokens)": [
     {
       "symbol": "BTC",
       "amount": 0.5,
@@ -31,5 +31,5 @@
     },
     { "symbol": "FOO", "amount": 1000, "price": 0.25, "value": 250, "kind": "spot" }
   ],
-  "no holdings → no balances (empty shell)": []
+  "no tokens → no balances (empty shell)": []
 }

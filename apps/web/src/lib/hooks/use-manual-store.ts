@@ -2,30 +2,30 @@ import { useCallback, useMemo, useState } from "react";
 import type { OverviewBalance } from "../account-view";
 import {
   type ActivityDraft,
-  addHolding,
+  addToken,
   commitBatch,
   deleteActivity,
-  type HoldingInput,
-  holdingValid,
   type ManualState,
-  makeSeedHolding,
+  makeSeedToken,
   mergedActivities,
-  removeHolding,
+  removeToken,
   resolveActivityDrafts,
   type StoredActivity,
+  type TokenInput,
+  tokenValid,
   updateActivity,
-  updateHolding,
+  updateToken,
   validateBatch,
 } from "../manual-store";
 
 const newId = () => crypto.randomUUID();
 
-// 把账户现有余额行播种成初始 holdings（每条现货 = 一个 token，seed 一条 set 活动）。
+// 把账户现有余额行播种成初始 tokens（每条现货 = 一个 token，seed 一条 set 活动）。
 // 单价:优先 provider 自带 unitPrice,否则从市值/数量反推。
 function seedFromBalances(balances: OverviewBalance[], now: number): ManualState {
   return balances.map((b) => {
     const unitPrice = b.unitPrice ?? (b.amount ? b.usdValue / b.amount : 0);
-    return makeSeedHolding(
+    return makeSeedToken(
       newId(),
       newId(),
       {
@@ -45,46 +45,44 @@ function seedFromBalances(balances: OverviewBalance[], now: number): ManualState
 export function useManualStore(balances: OverviewBalance[]) {
   const [state, setState] = useState<ManualState>(() => seedFromBalances(balances, Date.now()));
 
-  const holdings = state;
+  const tokens = state;
   const merged = useMemo(() => mergedActivities(state), [state]);
 
-  const create = useCallback((input: HoldingInput) => {
-    setState((s) => addHolding(s, makeSeedHolding(newId(), newId(), input, Date.now())));
+  const create = useCallback((input: TokenInput) => {
+    setState((s) => addToken(s, makeSeedToken(newId(), newId(), input, Date.now())));
   }, []);
 
-  const edit = useCallback((holdingId: string, input: HoldingInput) => {
-    setState((s) => updateHolding(s, holdingId, input, { id: newId(), occurredAt: Date.now() }));
+  const edit = useCallback((tokenId: string, input: TokenInput) => {
+    setState((s) => updateToken(s, tokenId, input, { id: newId(), occurredAt: Date.now() }));
   }, []);
 
-  const remove = useCallback((holdingId: string) => {
-    setState((s) => removeHolding(s, holdingId));
+  const remove = useCallback((tokenId: string) => {
+    setState((s) => removeToken(s, tokenId));
   }, []);
 
-  const removeActivity = useCallback((holdingId: string, activityId: string) => {
-    setState((s) => deleteActivity(s, holdingId, activityId));
+  const removeActivity = useCallback((tokenId: string, activityId: string) => {
+    setState((s) => deleteActivity(s, tokenId, activityId));
   }, []);
 
-  // 编辑一笔既有活动:套用 patch 后校验该 holding 时间线(改 amount/kind/日期可能致超支),合法才写入。
+  // 编辑一笔既有活动:套用 patch 后校验该 token 时间线(改 amount/kind/日期可能致超支),合法才写入。
   const editActivity = useCallback(
-    (holdingId: string, activityId: string, patch: Partial<Omit<StoredActivity, "id">>) => {
-      const next = updateActivity(state, holdingId, activityId, patch);
-      const ok = holdingValid(next, holdingId);
+    (tokenId: string, activityId: string, patch: Partial<Omit<StoredActivity, "id">>) => {
+      const next = updateActivity(state, tokenId, activityId, patch);
+      const ok = tokenValid(next, tokenId);
       if (ok) setState(next);
       return { ok };
     },
     [state],
   );
 
-  // 提交暂存批量（token 维度）:先为未持有 token 现建空 holding,再整批校验(reduce 超支 → 整批拒),合法才入库。
+  // 提交暂存批量（token 维度）:先为未持有 token 现建空 token,再整批校验(reduce 超支 → 整批拒),合法才入库。
   const commit = useCallback(
     (drafts: ActivityDraft[]) => {
-      const { state: resolved, holdingDrafts } = resolveActivityDrafts(state, drafts, () =>
-        newId(),
-      );
-      const result = validateBatch(resolved, holdingDrafts);
+      const { state: resolved, tokenDrafts } = resolveActivityDrafts(state, drafts, () => newId());
+      const result = validateBatch(resolved, tokenDrafts);
       if (result.ok) {
         const base = Date.now();
-        setState(commitBatch(resolved, holdingDrafts, (i) => `${base}-${i}`));
+        setState(commitBatch(resolved, tokenDrafts, (i) => `${base}-${i}`));
       }
       return result;
     },
@@ -92,7 +90,7 @@ export function useManualStore(balances: OverviewBalance[]) {
   );
 
   return {
-    holdings,
+    tokens,
     merged,
     create,
     edit,

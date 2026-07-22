@@ -28,7 +28,7 @@ import { syncOneAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
 import { ConnectorBadge } from "./connector-badge";
 import { AccountHoldingsCards } from "./holdings-cards";
-import { ManualHoldingsPanel } from "./manual-holdings-panel";
+import { ManualTokensPanel } from "./manual-tokens-panel";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { ValueTrendChart } from "./value-trend-chart";
 
@@ -372,7 +372,7 @@ function DetailBody({
           非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。 */}
       {account.connectorId === "manual" ? (
         <div className="mt-6">
-          <ManualHoldingsPanel balances={account.balances} />
+          <ManualTokensPanel balances={account.balances} />
         </div>
       ) : (
         <div className="mt-6">

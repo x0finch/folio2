@@ -34,9 +34,9 @@ const EASE_OUT = [0.16, 1, 0.3, 1] as const;
 
 type Kind = ActivityDraft["kind"];
 
-// 编辑既有活动的入参:定位(holdingId/activityId)+ 锁定 token + 预填各字段。
+// 编辑既有活动的入参:定位(tokenId/activityId)+ 锁定 token + 预填各字段。
 export interface EditActivityInput {
-  holdingId: string;
+  tokenId: string;
   activityId: string;
   token: DraftTokenRef;
   kind: Kind;
@@ -157,7 +157,7 @@ function ActivityForm({
   edit?: EditActivityInput | null; // 编辑既有活动:预填 + 锁定 token + 单条保存(非批量)
   onClose: () => void;
   onSubmit: (drafts: ActivityDraft[]) => { ok: boolean };
-  onEdit?: (holdingId: string, activityId: string, patch: ActivityPatch) => { ok: boolean };
+  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => { ok: boolean };
 }) {
   const t = useTranslations("Activity");
   const tc = useTranslations("Common");
@@ -323,7 +323,7 @@ function ActivityForm({
   const saveEdit = () => {
     if (!edit || !onEdit || !draftValid(draft)) return;
     setError(null);
-    const res = onEdit(edit.holdingId, edit.activityId, {
+    const res = onEdit(edit.tokenId, edit.activityId, {
       kind: draft.kind,
       amount: Number(draft.amount),
       occurredAt: draft.occurredAt,
@@ -712,7 +712,7 @@ export function ManualActivityModal({
   edit?: EditActivityInput | null; // 活动行「编辑」进入:预填既有活动、单条保存
   onClose: () => void;
   onSubmit: (drafts: ActivityDraft[]) => { ok: boolean };
-  onEdit?: (holdingId: string, activityId: string, patch: ActivityPatch) => { ok: boolean };
+  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => { ok: boolean };
 }) {
   const isDesktop = useMediaQuery("(min-width: 640px)");
   return (

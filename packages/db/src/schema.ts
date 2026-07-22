@@ -219,10 +219,10 @@ export const userSettings = sqliteTable("user_settings", {
 
 // manual 活动账本(P7.4.1):add/reduce/set 动作日志。当前数量由 deriveAmount 推导、物化进 account.creds.amount
 // (provider/sync 不依赖本表)。price 记录单价、留给 M7.3 成本/盈亏,本期不算。与 M7.2 的通用 transactions 表分开。
-// manual 多 token(ADR 0017):一个账户持有 N 个手记 token,每 token 一行 holding
-// (定义:symbol/unitPrice/可选 identifier)。活动账本(manual_activity)挂 holding_id,各自折叠 amount。
-export const manualHolding = sqliteTable(
-  "manual_holding",
+// manual 多 token(ADR 0017):一个账户持有 N 个手记 token,每 token 一行 token
+// (定义:symbol/unitPrice/可选 identifier)。活动账本(manual_activity)挂 token_id,各自折叠 amount。
+export const manualToken = sqliteTable(
+  "manual_token",
   {
     id: text("id").primaryKey(),
     accountId: text("account_id")
@@ -233,7 +233,7 @@ export const manualHolding = sqliteTable(
     identifier: text("identifier"), // 可选 CoinGecko id(消歧/显式寻址;无则按 symbol 归一)
     createdAt: integer("created_at").notNull(), // epoch ms
   },
-  (t) => [index("manual_holding_account_id_idx").on(t.accountId)],
+  (t) => [index("manual_token_account_id_idx").on(t.accountId)],
 );
 
 export const manualActivity = sqliteTable(
@@ -243,9 +243,9 @@ export const manualActivity = sqliteTable(
     accountId: text("account_id")
       .notNull()
       .references(() => accounts.id, { onDelete: "cascade" }),
-    // 所属 holding(ADR 0017)。DB 层可空(SQLite ADD COLUMN NOT NULL 需默认值,且迁移期无真数据);
-    // app 层恒设置为非空(recordManualActivity 必传 holdingId)。删 holding → 其活动级联清。
-    holdingId: text("holding_id").references(() => manualHolding.id, { onDelete: "cascade" }),
+    // 所属 token(ADR 0017)。DB 层可空(SQLite ADD COLUMN NOT NULL 需默认值,且迁移期无真数据);
+    // app 层恒设置为非空(recordManualActivity 必传 tokenId)。删 token → 其活动级联清。
+    tokenId: text("token_id").references(() => manualToken.id, { onDelete: "cascade" }),
     kind: text("kind").$type<"add" | "reduce" | "set">().notNull(),
     amount: real("amount").notNull(),
     price: real("price"), // 单价(可空),留 M7.3
@@ -255,7 +255,7 @@ export const manualActivity = sqliteTable(
   },
   (t) => [
     index("manual_activity_account_id_occurred_at_idx").on(t.accountId, t.occurredAt),
-    // per-holding 折叠(deriveAmount)走这条:按 holding 取活动、occurredAt 升序。
-    index("manual_activity_holding_id_occurred_at_idx").on(t.holdingId, t.occurredAt),
+    // per-token 折叠(deriveAmount)走这条:按 token 取活动、occurredAt 升序。
+    index("manual_activity_token_id_occurred_at_idx").on(t.tokenId, t.occurredAt),
   ],
 );

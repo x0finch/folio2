@@ -1,19 +1,17 @@
 import { CredentialValidationError } from "@folio/connectors-basic";
 import { z } from "zod";
-import { projectHolding } from "../manual-activity";
+import { projectToken } from "../manual-activity";
 import { db } from "./db";
 
-// 把某 manual 账户的各 holding 定义 + 各自活动账本折叠出的 amount,物化进 public `creds.tokens`
-// (provider 读取的投影,ADR 0017)。**单写者**:任何 holding / 活动写路径改动后都须重跑,维护不变量
-// creds.tokens[i].amount === deriveAmount(holding i 的 activities)。manual creds 全 public、明文 JSON;
+// 把某 manual 账户的各 token 定义 + 各自活动账本折叠出的 amount,物化进 public `creds.tokens`
+// (provider 读取的投影,ADR 0017)。**单写者**:任何 token / 活动写路径改动后都须重跑,维护不变量
+// creds.tokens[i].amount === deriveAmount(token i 的 activities)。manual creds 全 public、明文 JSON;
 // tokens 存为 JSON 字符串(creds map 值恒字符串),provider 侧经 validateCredentials 解析回 typed 数组。
 // identifier 为空时**省略该键**(而非置 null)—— provider 的 tokens validator 视 identifier 为可选 string。
 export async function materializeManualCreds(userId: string, accountId: string): Promise<void> {
-  const holdings = await db.listManualHoldingsByAccount(userId, accountId);
+  const rows = await db.listManualTokensByAccount(userId, accountId);
   const tokens = await Promise.all(
-    holdings.map(async (h) =>
-      projectHolding(h, await db.listManualActivityByHolding(userId, h.id)),
-    ),
+    rows.map(async (r) => projectToken(r, await db.listManualActivityByToken(userId, r.id))),
   );
   const raw = await db.getRawCreds(userId, accountId);
   const creds: Record<string, string> = raw ? JSON.parse(raw) : {};
@@ -29,7 +27,7 @@ const ManualFirstToken = z.object({
   identifier: z.string().trim().min(1).optional(),
 });
 
-// manual 加账户(ADR 0017 特例):表单收单 token 标量 → 建账户(creds.tokens 先空)+ 首 holding
+// manual 加账户(ADR 0017 特例):表单收单 token 标量 → 建账户(creds.tokens 先空)+ 首 token 行
 // + 一条 set 活动 → 物化 creds.tokens。不走通用 validateAccountCreds/raw2sealed(account.creds 现为单个
 // tokens JSON 字段,与标量表单不同形)。形状不过抛 CredentialValidationError(与通用路径同一错误类型,
 // 而非裸 ZodError)。多 token 录入 UI 见 T4。
@@ -50,12 +48,12 @@ export async function createManualAccount(
     label,
     creds: JSON.stringify({ tokens: "[]" }),
   });
-  const holding = await db.createManualHolding(userId, account.id, {
+  const token = await db.createManualToken(userId, account.id, {
     symbol: first.symbol,
     unitPrice: first.unitPrice,
     identifier: first.identifier,
   });
-  await db.recordManualActivity(userId, holding.id, {
+  await db.recordManualActivity(userId, token.id, {
     kind: "set",
     amount: first.amount,
     occurredAt: Date.now(),
