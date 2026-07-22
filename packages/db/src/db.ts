@@ -44,9 +44,14 @@ export function createDb(env: DbEnv) {
     getLatestSnapshotByUser: b(q.getLatestSnapshotByUser),
     listSnapshotsPageByUser: b(q.listSnapshotsPageByUser),
     listBalancesForSnapshots: b(q.listBalancesForSnapshots),
-    // —— manual activity ——
+    // —— manual holdings + activity(ADR 0017)——
+    createManualHolding: b(q.createManualHolding),
+    listManualHoldingsByAccount: b(q.listManualHoldingsByAccount),
+    updateManualHolding: b(q.updateManualHolding),
+    deleteManualHolding: b(q.deleteManualHolding),
     recordManualActivity: b(q.recordManualActivity),
     listManualActivityByAccount: b(q.listManualActivityByAccount),
+    listManualActivityByHolding: b(q.listManualActivityByHolding),
     removeManualActivity: b(q.removeManualActivity),
     // —— user settings(Phase 3)——
     getUserSettings: b(q.getUserSettings),

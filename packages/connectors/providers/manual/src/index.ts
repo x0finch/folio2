@@ -2,22 +2,40 @@ import type { BalanceProvider, CredField, Spot } from "@folio/connectors-basic";
 import { buildTokenKey } from "@folio/tokens-basic";
 import { z } from "zod";
 
-// @folio/connectors-provider-manual —— 手动资产(manual connector 的 provider)。无外部 API:一个账户 = 一个手记资产。
-// 持仓(symbol/amount/unitPrice + 可选 identifier)全走 account.creds(明文 public:落库、导出原样、可重建);
-// fetchBalances map 成单条 kind:"spot" Balance:value = amount × unitPrice、price = unitPrice(P7.4.1)。
-// `amount` 由 manual 活动账本(manual_activity)推导后【物化】进 account.creds(app 层);provider 只管读。
-// `unitPrice` 用户填(市价自动估值 = P7.4.2);identifier 有则产 coingecko: tokenKey 供 revalue 按显式 ref 解析。
-// manual 统一走市价重估(ADR 0010 删 fixed:锁定固定值未用到)。零依赖、不碰 SECRETS_KEY/cloudflare:workers(原则 #5)。
+// @folio/connectors-provider-manual —— 手动资产(manual connector 的 provider)。无外部 API:一个账户
+// 持有 N 个手记 token(ADR 0017)。各 token 的定义 + 各自账本折叠出的 amount,由 app 物化成一个 public
+// JSON 字段 `creds.tokens`(明文落库、导出原样、可重建);provider 只读它并 map 成 N 条 kind:"spot":
+// value = amount × unitPrice、price = unitPrice(P7.4.1)。`amount` 由各 holding 的 manual 活动账本
+// (manual_activity 挂 holding_id)推导后【物化】进 creds.tokens(app 层);provider 保持纯 / DB-free。
+// 有 identifier → 产 coingecko: tokenKey 供 revalue 按显式 ref 解析;无则按 symbol 归一(同 CEX)。
+// manual 统一走市价重估(ADR 0010 删 fixed)。零依赖、不碰 SECRETS_KEY/cloudflare:workers(原则 #5)。
 
-// —— 账户级 creds(AC):手记持仓,全 public(明文落库、可导出重建)——
+// 一个手记持仓:token 定义 + 物化出的 amount(= 该 holding 活动账本的 deriveAmount)。
+const manualHolding = z.object({
+  symbol: z.string().trim().min(1),
+  unitPrice: z.coerce.number(),
+  identifier: z.string().trim().min(1).optional(),
+  amount: z.coerce.number(),
+});
+
+// —— 账户级 creds(AC):单个 public `tokens` 字段,承载 [{symbol,unitPrice,identifier?,amount}] ——
+// 存库为 JSON 字符串(全 public、明文);validateCredentials 用本 validator 把串 parse + coerce 成 typed
+// 数组。JSON 畸形 → 原样落回,数组校验失败 → CredentialValidationError(不裸抛 SyntaxError)。
 // 账户 creds 声明随 provider(其天然消费者)落此;由 entry 的 manual connector 引入组合。
 export const manualAccountCreds = [
-  { key: "symbol", type: "public", label: "Symbol", validator: z.string().trim().min(1) },
-  { key: "amount", type: "public", label: "Amount", validator: z.coerce.number() },
-  { key: "unitPrice", type: "public", label: "Unit price (USD)", validator: z.coerce.number() },
-  // 可选:用户选定的 CoinGecko identifier(消歧,P7.4.3)。有则产 tokenKey(coingecko:<id>)
-  // 供 sync 期市价重估按显式 ref 解析(见 revalue / resolveAsset 的 coingecko: 直达)。
-  { key: "identifier", type: "public", label: "CoinGecko ID", validator: z.string().optional() },
+  {
+    key: "tokens",
+    type: "public",
+    label: "Tokens",
+    validator: z.preprocess((v) => {
+      if (typeof v !== "string") return v;
+      try {
+        return JSON.parse(v);
+      } catch {
+        return v; // → 交给 z.array 判负,报成 tokens 的校验错而非裸 throw
+      }
+    }, z.array(manualHolding)),
+  },
 ] as const satisfies readonly CredField[];
 
 // 本 connector 只吐单一 kind:spot。无全局/provider key → creds:[]。
@@ -27,20 +45,17 @@ export const manualProvider: BalanceProvider<Spot, typeof manualAccountCreds> = 
   creds: [],
 
   async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
-    const { symbol, amount, unitPrice, identifier } = ctx.account.creds;
+    const { tokens } = ctx.account.creds;
     return {
-      balances: [
-        {
-          symbol,
-          amount,
-          price: unitPrice,
-          value: amount * unitPrice,
-          kind: "spot",
-          // 用户选定的 CGK id = 厂商寻址身份 → tokenKey(coingecko:<id>),不再塞 meta.identifier;
-          // 未选币则无标识,解析时按 symbol 归一(同 CEX)。
-          ...(identifier ? { tokenKey: buildTokenKey({ cgkId: identifier }) } : {}),
-        },
-      ],
+      balances: tokens.map((t) => ({
+        symbol: t.symbol,
+        amount: t.amount,
+        price: t.unitPrice,
+        value: t.amount * t.unitPrice,
+        kind: "spot",
+        // 用户选定的 CGK id = 厂商寻址身份 → tokenKey(coingecko:<id>);未选币则无标识,按 symbol 归一。
+        ...(t.identifier ? { tokenKey: buildTokenKey({ cgkId: t.identifier }) } : {}),
+      })),
     };
   },
 

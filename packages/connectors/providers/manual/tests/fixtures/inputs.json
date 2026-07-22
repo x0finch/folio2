@@ -1,10 +1,26 @@
 [
   {
     "name": "single manual holding (value = amount × unitPrice, no meta)",
-    "creds": { "symbol": "BTC", "amount": 0.5, "unitPrice": 64000 }
+    "creds": { "tokens": [{ "symbol": "BTC", "amount": 0.5, "unitPrice": 64000 }] }
   },
   {
     "name": "picked CoinGecko id → coingecko tokenKey (sync-time market valuation)",
-    "creds": { "symbol": "BTC", "amount": 1, "unitPrice": 64000, "identifier": "bitcoin" }
+    "creds": {
+      "tokens": [{ "symbol": "BTC", "amount": 1, "unitPrice": 64000, "identifier": "bitcoin" }]
+    }
+  },
+  {
+    "name": "multiple holdings → one spot each (N tokens)",
+    "creds": {
+      "tokens": [
+        { "symbol": "BTC", "amount": 0.5, "unitPrice": 64000, "identifier": "bitcoin" },
+        { "symbol": "ETH", "amount": 3, "unitPrice": 3200, "identifier": "ethereum" },
+        { "symbol": "FOO", "amount": 1000, "unitPrice": 0.25 }
+      ]
+    }
+  },
+  {
+    "name": "no holdings → no balances (empty shell)",
+    "creds": { "tokens": [] }
   }
 ]

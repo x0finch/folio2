@@ -6,6 +6,7 @@ import { getDb } from "../src/client";
 // 包内测试白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
 import {
   createAccount,
+  createManualHolding,
   deleteAccount,
   listManualActivityByAccount,
   recordManualActivity,
@@ -34,15 +35,28 @@ beforeEach(async () => {
   await resetUser(USER_B);
 });
 
+// 活动挂 holding(ADR 0017):测试账户预建一行 holding,活动都记到它上。
 async function manualAccount(userId: string) {
-  return createAccount(env, userId, { connectorId: "manual", label: "M", creds: "{}" });
+  const acc = await createAccount(env, userId, { connectorId: "manual", label: "M", creds: "{}" });
+  const h = await createManualHolding(env, userId, acc.id, { symbol: "BTC", unitPrice: 1 });
+  return { id: acc.id, holdingId: h.id };
 }
 
 describe("manual_activity ops", () => {
   it("record + list (ordered by occurred_at)", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, { kind: "set", amount: 10, occurredAt: 100 });
-    await recordManualActivity(env, USER_A, acc.id, { kind: "add", amount: 5, occurredAt: 200 });
+    await recordManualActivity(env, USER_A, acc.id, {
+      holdingId: acc.holdingId,
+      kind: "set",
+      amount: 10,
+      occurredAt: 100,
+    });
+    await recordManualActivity(env, USER_A, acc.id, {
+      holdingId: acc.holdingId,
+      kind: "add",
+      amount: 5,
+      occurredAt: 200,
+    });
     const rows = await listManualActivityByAccount(env, USER_A, acc.id);
     expect(rows.map((r) => [r.kind, r.amount])).toEqual([
       ["set", 10],
@@ -52,7 +66,12 @@ describe("manual_activity ops", () => {
 
   it("remove by id", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, { kind: "set", amount: 10, occurredAt: 1 });
+    await recordManualActivity(env, USER_A, acc.id, {
+      holdingId: acc.holdingId,
+      kind: "set",
+      amount: 10,
+      occurredAt: 1,
+    });
     const [row] = await listManualActivityByAccount(env, USER_A, acc.id);
     await removeManualActivity(env, USER_A, acc.id, row.id);
     expect(await listManualActivityByAccount(env, USER_A, acc.id)).toEqual([]);
@@ -60,10 +79,20 @@ describe("manual_activity ops", () => {
 
   it("scoped by owner: other user can't record / list / remove", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, { kind: "set", amount: 10, occurredAt: 1 });
+    await recordManualActivity(env, USER_A, acc.id, {
+      holdingId: acc.holdingId,
+      kind: "set",
+      amount: 10,
+      occurredAt: 1,
+    });
     // B 记录到 A 的账户 → 抛(assertAccountOwned)
     await expect(
-      recordManualActivity(env, USER_B, acc.id, { kind: "add", amount: 1, occurredAt: 2 }),
+      recordManualActivity(env, USER_B, acc.id, {
+        holdingId: acc.holdingId,
+        kind: "add",
+        amount: 1,
+        occurredAt: 2,
+      }),
     ).rejects.toThrow();
     // B 列 A 的账户 → 空(join 限 userId)
     expect(await listManualActivityByAccount(env, USER_B, acc.id)).toEqual([]);
@@ -73,7 +102,12 @@ describe("manual_activity ops", () => {
 
   it("cascade: deleting the account removes its activity", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, { kind: "set", amount: 10, occurredAt: 1 });
+    await recordManualActivity(env, USER_A, acc.id, {
+      holdingId: acc.holdingId,
+      kind: "set",
+      amount: 10,
+      occurredAt: 1,
+    });
     await deleteAccount(env, USER_A, acc.id);
     // 账户已删 → 直接查表确认活动被级联清(经 userId 路径已查不到账户)。
     const rows = await getDb(env).select().from(manualActivity);

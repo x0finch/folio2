@@ -11,5 +11,25 @@
       "kind": "spot",
       "tokenKey": "coingecko:bitcoin"
     }
-  ]
+  ],
+  "multiple holdings → one spot each (N tokens)": [
+    {
+      "symbol": "BTC",
+      "amount": 0.5,
+      "price": 64000,
+      "value": 32000,
+      "kind": "spot",
+      "tokenKey": "coingecko:bitcoin"
+    },
+    {
+      "symbol": "ETH",
+      "amount": 3,
+      "price": 3200,
+      "value": 9600,
+      "kind": "spot",
+      "tokenKey": "coingecko:ethereum"
+    },
+    { "symbol": "FOO", "amount": 1000, "price": 0.25, "value": 250, "kind": "spot" }
+  ],
+  "no holdings → no balances (empty shell)": []
 }

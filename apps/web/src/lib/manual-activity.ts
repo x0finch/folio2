@@ -23,3 +23,26 @@ export function deriveAmount(activities: DerivableActivity[]): number {
   }
   return Math.max(0, amount);
 }
+
+// holding 定义 + 其活动账本 → creds.tokens 的一项(物化投影,ADR 0017)。
+// amount = deriveAmount(activities);identifier 为空(null/undefined)时**省略该键** —— provider 的 tokens
+// validator 视 identifier 为可选 string(置 null 会被拒)。纯逻辑,materializeManualCreds 逐 holding 调。
+export interface HoldingDef {
+  symbol: string;
+  unitPrice: number;
+  identifier?: string | null;
+}
+export interface CredsToken {
+  symbol: string;
+  unitPrice: number;
+  amount: number;
+  identifier?: string;
+}
+export function projectHolding(holding: HoldingDef, activities: DerivableActivity[]): CredsToken {
+  return {
+    symbol: holding.symbol,
+    unitPrice: holding.unitPrice,
+    amount: deriveAmount(activities),
+    ...(holding.identifier ? { identifier: holding.identifier } : {}),
+  };
+}

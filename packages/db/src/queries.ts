@@ -17,6 +17,7 @@ import {
   accounts,
   groups,
   manualActivity,
+  manualHolding,
   snapshotBalances,
   snapshots,
   userSettings,
@@ -562,10 +563,91 @@ export function listBalancesForSnapshots(
     .where(inArray(snapshotBalances.snapshotId, snapshotIds));
 }
 
-// ---------- manual 活动账本(P7.4.1)----------
+// ---------- manual 多 token holdings + 活动账本(P7.4.1 / ADR 0017)----------
+
+// 一个账户下某 holding 归属本人即返回其 accountId,否则抛(holding ⨝ account ⨝ user)。
+async function assertHoldingOwned(db: Db, userId: string, holdingId: string): Promise<string> {
+  const rows = await db
+    .select({ accountId: manualHolding.accountId })
+    .from(manualHolding)
+    .innerJoin(accounts, eq(manualHolding.accountId, accounts.id))
+    .where(and(eq(manualHolding.id, holdingId), eq(accounts.userId, userId)));
+  if (!rows[0]) throw new Error(`manual holding not found: ${holdingId}`);
+  return rows[0].accountId;
+}
+
+export type ManualHolding = InferSelectModel<typeof manualHolding>;
+export interface ManualHoldingInput {
+  symbol: string;
+  unitPrice: number;
+  identifier?: string | null;
+}
+
+export async function createManualHolding(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+  input: ManualHoldingInput,
+): Promise<ManualHolding> {
+  const db = getDb(env);
+  await assertAccountOwned(db, userId, accountId);
+  const row = {
+    id: crypto.randomUUID(),
+    accountId,
+    symbol: input.symbol,
+    unitPrice: input.unitPrice,
+    identifier: input.identifier ?? null,
+    createdAt: Date.now(),
+  };
+  await db.insert(manualHolding).values(row);
+  return row;
+}
+
+// userId-scoped(经 account ⨝ user 归属);按 created_at 升序(稳定的展示序)。
+export function listManualHoldingsByAccount(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+): Promise<ManualHolding[]> {
+  return getDb(env)
+    .select(getTableColumns(manualHolding))
+    .from(manualHolding)
+    .innerJoin(accounts, eq(manualHolding.accountId, accounts.id))
+    .where(and(eq(manualHolding.accountId, accountId), eq(accounts.userId, userId)))
+    .orderBy(asc(manualHolding.createdAt));
+}
+
+export async function updateManualHolding(
+  env: DbEnv,
+  userId: string,
+  holdingId: string,
+  input: ManualHoldingInput,
+): Promise<void> {
+  const db = getDb(env);
+  await assertHoldingOwned(db, userId, holdingId);
+  await db
+    .update(manualHolding)
+    .set({
+      symbol: input.symbol,
+      unitPrice: input.unitPrice,
+      identifier: input.identifier ?? null,
+    })
+    .where(eq(manualHolding.id, holdingId));
+}
+
+export async function deleteManualHolding(
+  env: DbEnv,
+  userId: string,
+  holdingId: string,
+): Promise<void> {
+  const db = getDb(env);
+  await assertHoldingOwned(db, userId, holdingId);
+  await db.delete(manualHolding).where(eq(manualHolding.id, holdingId)); // 活动经 holding_id FK 级联清
+}
 
 export type ManualActivityKind = "add" | "reduce" | "set";
 export interface ManualActivityInput {
+  holdingId: string; // 所属 holding(ADR 0017:活动挂 holding);app 层恒设置
   kind: ManualActivityKind;
   amount: number;
   price?: number | null;
@@ -585,6 +667,7 @@ export async function recordManualActivity(
   await db.insert(manualActivity).values({
     id: crypto.randomUUID(),
     accountId,
+    holdingId: input.holdingId,
     kind: input.kind,
     amount: input.amount,
     price: input.price ?? null,
@@ -592,6 +675,21 @@ export async function recordManualActivity(
     memo: input.memo ?? null,
     createdAt: Date.now(),
   });
+}
+
+// userId-scoped(经 holding ⨝ account ⨝ user 归属);按 occurred_at→created_at 升序(deriveAmount 据此定序)。
+export function listManualActivityByHolding(
+  env: DbEnv,
+  userId: string,
+  holdingId: string,
+): Promise<ManualActivity[]> {
+  return getDb(env)
+    .select(getTableColumns(manualActivity))
+    .from(manualActivity)
+    .innerJoin(manualHolding, eq(manualActivity.holdingId, manualHolding.id))
+    .innerJoin(accounts, eq(manualHolding.accountId, accounts.id))
+    .where(and(eq(manualActivity.holdingId, holdingId), eq(accounts.userId, userId)))
+    .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt));
 }
 
 // userId-scoped(经 account ⨝ user 归属);按 occurred_at→created_at 升序(deriveAmount 据此定序)。
