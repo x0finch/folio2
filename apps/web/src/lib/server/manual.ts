@@ -28,6 +28,8 @@ export async function createManualAccount(userId: string, label: string, tokens:
     identifier?: string;
     amount: number | string;
   }>;
+  // validateAccountCreds 用的 z.array 允许空数组 → 显式挡掉(表单恒发 1 条,防御式)。
+  if (!first) throw new Error("manual account requires at least one token");
   const account = await db.createAccount(userId, {
     connectorId: "manual",
     label,

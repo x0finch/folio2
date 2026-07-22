@@ -11,7 +11,7 @@ import {
   StatefulButton,
 } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import {
   BTC_SCRIPT_OPTIONS,
@@ -49,22 +49,20 @@ function ManualFields({
   const [manualMode, setManualMode] = useState(false);
   const [priceBusy, setPriceBusy] = useState(false);
   const priceReqRef = useRef(0);
-  // 首 token 的本地标量;patch 合并后序列化进 values.tokens。
+  // 首 token 的本地标量;经 effect 序列化进 values.tokens(不在 setState updater 里做副作用)。
   const [tok, setTok] = useState({ symbol: "", amount: "", unitPrice: "", identifier: "" });
+  const patch = (p: Partial<typeof tok>) => setTok((prev) => ({ ...prev, ...p }));
 
-  // 合并首 token 字段并写回 values.tokens(单元素;identifier 空则省略键 —— manualToken 视其为可选)。
-  const patch = (p: Partial<typeof tok>) =>
-    setTok((prev) => {
-      const next = { ...prev, ...p };
-      const entry: Record<string, string> = {
-        symbol: next.symbol,
-        unitPrice: next.unitPrice,
-        amount: next.amount,
-      };
-      if (next.identifier) entry.identifier = next.identifier;
-      setValues(() => ({ tokens: JSON.stringify([entry]) }));
-      return next;
-    });
+  // tok → values.tokens(单元素;identifier 空则省略键 —— manualToken 视其为可选)。
+  useEffect(() => {
+    const entry: Record<string, string> = {
+      symbol: tok.symbol,
+      unitPrice: tok.unitPrice,
+      amount: tok.amount,
+    };
+    if (tok.identifier) entry.identifier = tok.identifier;
+    setValues(() => ({ tokens: JSON.stringify([entry]) }));
+  }, [tok, setValues]);
 
   // 选中币:填 symbol+identifier,并自动取市价预填 unitPrice(用户可改;竞态守卫)。
   async function onPick(token: TokenInfo | null) {
