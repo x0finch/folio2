@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { createAccountFor } from "../../src/lib/server/create-account";
 import { db } from "../../src/lib/server/db";
 import { createManualAccount, materializeManualCreds } from "../../src/lib/server/manual";
 
@@ -58,6 +59,39 @@ describe("createManualAccount (D1 round-trip)", () => {
       JSON.stringify([{ symbol: "ETH", unitPrice: "3200", amount: "2" }]),
     );
     expect(await credsTokens(account.id)).toEqual([{ symbol: "ETH", unitPrice: 3200, amount: 2 }]);
+  });
+});
+
+// #1:createAccount handler 的分派逻辑(createAccountFor)—— manual 经**统一** validateAccountCreds 校验
+// (provider 的 manualToken schema)+ 分派到账本创建。此前只直调 createManualAccount、绕过了这段。
+describe("createAccountFor (manual: shared validate + dispatch)", () => {
+  it("rejects manual creds missing symbol (runs through validateAccountCreds)", async () => {
+    await expect(
+      createAccountFor(USER, "manual", "M", {
+        tokens: JSON.stringify([{ unitPrice: "1", amount: "1" }]),
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects when tokens is absent", async () => {
+    await expect(createAccountFor(USER, "manual", "M", {})).rejects.toThrow();
+  });
+
+  it("valid manual input → account + token row + set activity + materialized creds", async () => {
+    const account = await createAccountFor(USER, "manual", "My BTC", {
+      tokens: JSON.stringify([
+        { symbol: "BTC", unitPrice: "64000", amount: "0.5", identifier: "bitcoin" },
+      ]),
+    });
+    const rows = await db.listManualTokensByAccount(USER, account.id);
+    expect(rows.map((r) => [r.symbol, r.unitPrice, r.identifier])).toEqual([
+      ["BTC", 64000, "bitcoin"],
+    ]);
+    const acts = await db.listManualActivityByToken(USER, rows[0].id);
+    expect(acts.map((a) => [a.kind, a.amount])).toEqual([["set", 0.5]]);
+    expect(await credsTokens(account.id)).toEqual([
+      { symbol: "BTC", unitPrice: 64000, amount: 0.5, identifier: "bitcoin" },
+    ]);
   });
 });
 
