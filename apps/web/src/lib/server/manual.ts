@@ -1,6 +1,5 @@
-import { CredentialValidationError } from "@folio/connectors-basic";
-import { z } from "zod";
 import { projectToken } from "../manual-activity";
+import { validateAccountCreds } from "./connectors";
 import { db } from "./db";
 
 // 把某 manual 账户的各 token 定义 + 各自活动账本折叠出的 amount,物化进 public `creds.tokens`
@@ -19,43 +18,41 @@ export async function materializeManualCreds(userId: string, accountId: string):
   await db.setAccountCredentials(userId, accountId, JSON.stringify(creds));
 }
 
-// manual 加账户首 token 的标量输入(表单 ManualFields 提交);coerce 数字,identifier 可选。
-const ManualFirstToken = z.object({
-  symbol: z.string().trim().min(1),
-  amount: z.coerce.number(),
-  unitPrice: z.coerce.number(),
-  identifier: z.string().trim().min(1).optional(),
-});
-
-// manual 加账户(ADR 0017 特例):表单收单 token 标量 → 建账户(creds.tokens 先空)+ 首 token 行
-// + 一条 set 活动 → 物化 creds.tokens。不走通用 validateAccountCreds/raw2sealed(account.creds 现为单个
-// tokens JSON 字段,与标量表单不同形)。形状不过抛 CredentialValidationError(与通用路径同一错误类型,
-// 而非裸 ZodError)。多 token 录入 UI 见 T4。
+// manual 加账户(ADR 0017 特例):表单收单 token 标量,拼成单元素 `tokens` JSON 走**通用**
+// validateAccountCreds —— 即 provider 的 tokens(manualToken)校验 + liveness(manual 恒真的 no-op),
+// 不另立校验 schema、与其余 connector 同一道形状闸。校验后建账户 + 首 token 行 + 一条开仓 set 活动,
+// 再 materialize 把账本折叠回 creds.tokens(materialize 是 creds.tokens 的单写者)。多 token 录入 UI 见 T4。
 export async function createManualAccount(
   userId: string,
   label: string,
   values: Record<string, string>,
 ) {
-  const parsed = ManualFirstToken.safeParse(values);
-  if (!parsed.success) {
-    throw new CredentialValidationError(
-      parsed.error.issues.map((i) => `${i.path.join(".") || "tokens"}: ${i.message}`).join("; "),
-    );
-  }
-  const first = parsed.data;
+  // 标量 → 单元素 tokens JSON(空串字段已由 createAccount 过滤;undefined 键被 JSON.stringify 丢弃,
+  // 由 manualToken validator 判必填/coerce)。
+  const tokens = JSON.stringify([
+    {
+      symbol: values.symbol,
+      unitPrice: values.unitPrice,
+      identifier: values.identifier,
+      amount: values.amount,
+    },
+  ]);
+  await validateAccountCreds("manual", { tokens }, { liveness: true, label });
+
   const account = await db.createAccount(userId, {
     connectorId: "manual",
     label,
     creds: JSON.stringify({ tokens: "[]" }),
   });
+  // 账本为真:首 token 行 + 一条开仓 set 活动(数量 = 表单 amount),再由 materialize 折叠回 creds.tokens。
   const token = await db.createManualToken(userId, account.id, {
-    symbol: first.symbol,
-    unitPrice: first.unitPrice,
-    identifier: first.identifier,
+    symbol: values.symbol,
+    unitPrice: Number(values.unitPrice),
+    identifier: values.identifier,
   });
   await db.recordManualActivity(userId, token.id, {
     kind: "set",
-    amount: first.amount,
+    amount: Number(values.amount),
     occurredAt: Date.now(),
   });
   await materializeManualCreds(userId, account.id);
