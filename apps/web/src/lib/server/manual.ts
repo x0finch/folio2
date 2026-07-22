@@ -17,43 +17,30 @@ export async function materializeManualCreds(userId: string, accountId: string):
   await db.setAccountCredentials(userId, accountId, JSON.stringify(creds));
 }
 
-// 表单首 token 标量 → 单元素 creds.tokens map,供 createAccount 用**通用** validateAccountCreds 校验
-// (跑的即 provider 的 tokens/manualToken schema);manual 借此和其余 connector 走同一道形状闸,不另立 schema。
-// 空串字段已由 createAccount 过滤;undefined 键被 JSON.stringify 丢弃,由 manualToken validator 判必填/coerce。
-export function manualCredsFromForm(values: Record<string, string>): Record<string, string> {
-  return {
-    tokens: JSON.stringify([
-      {
-        symbol: values.symbol,
-        unitPrice: values.unitPrice,
-        identifier: values.identifier,
-        amount: values.amount,
-      },
-    ]),
-  };
-}
-
-// manual 加账户(ADR 0017 特例):建账户 + 首 token 行 + 一条开仓 set 活动 → materialize 把账本折叠回
-// creds.tokens(单写者)。表单已由 createAccount 的 validateAccountCreds(见上 manualCredsFromForm)校验过。
+// manual 加账户(ADR 0017 特例):前端已把首 token 提交为 `creds.tokens`(单元素 JSON),且已由
+// createAccount 的通用 validateAccountCreds(provider 的 manualToken schema)校验过。这里取首 token →
+// 建账户 + 首 token 行 + 一条开仓 set 活动 → materialize 把账本折叠回 creds.tokens(单写者)。
 // 多 token 录入 UI 见 T4。
-export async function createManualAccount(
-  userId: string,
-  label: string,
-  values: Record<string, string>,
-) {
+export async function createManualAccount(userId: string, label: string, tokens: string) {
+  const [first] = JSON.parse(tokens) as Array<{
+    symbol: string;
+    unitPrice: number | string;
+    identifier?: string;
+    amount: number | string;
+  }>;
   const account = await db.createAccount(userId, {
     connectorId: "manual",
     label,
     creds: JSON.stringify({ tokens: "[]" }),
   });
   const token = await db.createManualToken(userId, account.id, {
-    symbol: values.symbol,
-    unitPrice: Number(values.unitPrice),
-    identifier: values.identifier,
+    symbol: first.symbol,
+    unitPrice: Number(first.unitPrice),
+    identifier: first.identifier,
   });
   await db.recordManualActivity(userId, token.id, {
     kind: "set",
-    amount: Number(values.amount),
+    amount: Number(first.amount),
     occurredAt: Date.now(),
   });
   await materializeManualCreds(userId, account.id);
