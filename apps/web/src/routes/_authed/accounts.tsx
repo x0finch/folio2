@@ -16,6 +16,7 @@ import { sortActiveAccounts } from "../../lib/account-sort";
 import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-sync-status";
 import { aggregateDayChange } from "../../lib/day-value-change";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
+import { isManual } from "../../lib/manual-connector";
 import { listMyAccounts } from "../../lib/server/accounts";
 import { getMyAccountHoldings } from "../../lib/server/overview";
 
@@ -178,7 +179,7 @@ function AccountStatusLine({
         </span>
       ) : needsCreds ? (
         t("completePrompt")
-      ) : connectorId === "manual" ? (
+      ) : isManual(connectorId) ? (
         // manual 不同步,当下值实时由 creds 现造(ADR 0018)→ 显「实时」而非同步时间。
         t("liveValue")
       ) : takenAt != null ? (

@@ -2,6 +2,7 @@ import { syncAccount, syncUser } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { isManual } from "../manual-connector";
 import { requireAuth } from "../require-auth";
 import { db } from "./db";
 import { buildSyncDeps, warmTokensForUser } from "./sync-deps";
@@ -35,7 +36,7 @@ export const syncOneAccount = createServerFn({ method: "POST" })
     const account = await db.getAccountById(context.userId, data.accountId);
     if (!account) throw new Error("account not found");
     // manual 不是同步源(ADR 0018:当下值由 creds 现造,不写快照)。UI 已对 manual 隐藏「同步」;此处防御式跳过。
-    if (account.connectorId === "manual") {
+    if (isManual(account.connectorId)) {
       return { accountId: account.id, ok: false, skipped: true };
     }
     const rawCreds = await db.getRawCreds(context.userId, data.accountId);

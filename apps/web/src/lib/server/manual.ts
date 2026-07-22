@@ -1,6 +1,7 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { CredsToken } from "../manual-activity";
 import { projectToken } from "../manual-activity";
+import { isManual, MANUAL_CONNECTOR_ID } from "../manual-connector";
 import { buildManualSnapshot } from "../manual-snapshot";
 import { type BalanceLike, balanceToAssetRef } from "../tokens";
 import { db } from "./db";
@@ -36,7 +37,7 @@ export async function createManualAccount(userId: string, label: string, tokens:
   // validateAccountCreds 用的 z.array 允许空数组 → 显式挡掉(表单恒发 1 条,防御式)。
   if (!first) throw new Error("manual account requires at least one token");
   const account = await db.createAccount(userId, {
-    connectorId: "manual",
+    connectorId: MANUAL_CONNECTOR_ID,
     label,
     creds: JSON.stringify({ tokens: "[]" }),
   });
@@ -72,7 +73,7 @@ async function manualTokensByAccount(
   userId: string,
   accounts: AccountSafe[],
 ): Promise<{ id: string; tokens: CredsToken[] }[]> {
-  const manual = accounts.filter((a) => a.connectorId === "manual" && a.archivedAt == null);
+  const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
   if (manual.length === 0) return [];
   const rawById = new Map((await db.listRawCredsByUser(userId)).map((r) => [r.id, r.creds]));
   return manual.map((a) => ({ id: a.id, tokens: parseCredsTokens(rawById.get(a.id) ?? null) }));

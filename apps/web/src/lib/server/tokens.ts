@@ -6,6 +6,7 @@ import { z } from "zod";
 import { tokenLogoUrl } from "../logo";
 import { requireAuth } from "../require-auth";
 import { type BalanceLike, displayAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
+import { userDisplayBalances } from "../user-balances";
 import { db } from "./db";
 import { manualBalancesForWarm } from "./manual";
 import { oracle } from "./oracle";
@@ -119,13 +120,11 @@ export const refreshStalePrices = createServerFn({ method: "POST" })
       db.getLatestSnapshotByUser(context.userId),
       db.listAccountsByUser(context.userId),
     ]);
-    // manual 已退出快照(ADR 0018)但其合成余额经 injectManualSnapshots 进 enrich 门 → refresh 门必须同源覆盖,
-    // 否则 manual 代币被标 stale 却刷不到、pricesStale 永清不掉、客户端每次加载空转刷新(见 lib/tokens.ts 同门注)。
+    // 三门同源(userDisplayBalances):manual 已退出快照但其合成余额经 injectManualSnapshots 进 enrich 门 →
+    // refresh 门必须同源覆盖,否则 manual 代币被标 stale 却刷不到、pricesStale 永清不掉、客户端空转刷新。
     const manualBalances = await manualBalancesForWarm(context.userId, accounts);
     // 与 enrichBalances 同门(displayAssetRef):defi 行标了 stale 就必须刷得到。
-    const assets = [...snapshots.flatMap((s) => s.balances), ...manualBalances].map(
-      displayAssetRef,
-    );
+    const assets = userDisplayBalances(snapshots, manualBalances).map(displayAssetRef);
     const refreshed = await oracle.tokens.refreshStalePrices(assets);
     tokenLog.info("stale prices refreshed", { refreshed });
     return { refreshed };

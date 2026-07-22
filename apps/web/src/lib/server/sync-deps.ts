@@ -15,6 +15,7 @@ import type { InputSpec } from "../creds";
 import { isComplete, openCreds } from "../creds";
 import { revalue } from "../revalue";
 import { isSyncableAccount } from "../syncable";
+import { userDisplayBalances } from "../user-balances";
 import { db } from "./db";
 import { warmFx } from "./fx";
 import { manualBalancesForWarm } from "./manual";
@@ -48,8 +49,9 @@ export async function warmTokensForUser(userId: string): Promise<void> {
     db.listAccountsByUser(userId),
   ]);
   // manual 已退出快照(ADR 0018)→ 预热额外从 manual 的 creds 收集合成余额,否则纯 manual 用户的币暖不到实时价。
+  // 与 refreshStalePrices 经同一 userDisplayBalances 收口(三门同源)。
   const manualBalances = await manualBalancesForWarm(userId, accounts);
-  await warmTokens(oracle.tokens, [...snapshots.flatMap((s) => s.balances), ...manualBalances]);
+  await warmTokens(oracle.tokens, userDisplayBalances(snapshots, manualBalances));
   // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。
   try {
     await warmPlatformsForUser(userId);

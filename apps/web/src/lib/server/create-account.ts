@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
 import { getLogger } from "@logtape/logtape";
 import { sealCreds } from "../creds";
+import { isManual } from "../manual-connector";
 import { credentialSpecs, validateAccountCreds } from "./connectors";
 import { db } from "./db";
 import { createManualAccount } from "./manual";
@@ -27,14 +28,13 @@ export async function createAccountFor(
   const values = Object.fromEntries(Object.entries(rawValues).filter(([, v]) => v !== ""));
   await validateAccountCreds(connectorId, values, { liveness: true, label });
 
-  const account =
-    connectorId === "manual"
-      ? await createManualAccount(userId, label, values.tokens)
-      : await db.createAccount(userId, {
-          connectorId,
-          label,
-          creds: await raw2sealed(connectorId, values),
-        });
+  const account = isManual(connectorId)
+    ? await createManualAccount(userId, label, values.tokens)
+    : await db.createAccount(userId, {
+        connectorId,
+        label,
+        creds: await raw2sealed(connectorId, values),
+      });
   log.info("account created", { connectorId, accountId: account.id });
   return account;
 }

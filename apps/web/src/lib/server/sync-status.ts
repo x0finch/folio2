@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { isComplete } from "../creds";
+import { isManual } from "../manual-connector";
 import { requireAuth } from "../require-auth";
 import { type SyncStatusSummary, summarizeSync } from "../sync-status";
 import { credentialSpecs } from "./connectors";
@@ -22,7 +23,7 @@ export const getSyncStatus = createServerFn({ method: "GET" })
     const specsByType = credentialSpecs();
     // manual 不是同步源(ADR 0018:当下值实时由 creds 现造,从不同步)→ 不列入同步面板/「立即同步」集,
     // 也不显示为「未同步」。
-    const syncable = accounts.filter((a) => a.connectorId !== "manual");
+    const syncable = accounts.filter((a) => !isManual(a.connectorId));
     return summarizeSync(
       syncable.map((a) => {
         const raw = rawById.get(a.id);
