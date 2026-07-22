@@ -1,5 +1,4 @@
 import { projectToken } from "../manual-activity";
-import { validateAccountCreds } from "./connectors";
 import { db } from "./db";
 
 // 把某 manual 账户的各 token 定义 + 各自活动账本折叠出的 amount,物化进 public `creds.tokens`
@@ -18,33 +17,35 @@ export async function materializeManualCreds(userId: string, accountId: string):
   await db.setAccountCredentials(userId, accountId, JSON.stringify(creds));
 }
 
-// manual 加账户(ADR 0017 特例):表单收单 token 标量,拼成单元素 `tokens` JSON 走**通用**
-// validateAccountCreds —— 即 provider 的 tokens(manualToken)校验 + liveness(manual 恒真的 no-op),
-// 不另立校验 schema、与其余 connector 同一道形状闸。校验后建账户 + 首 token 行 + 一条开仓 set 活动,
-// 再 materialize 把账本折叠回 creds.tokens(materialize 是 creds.tokens 的单写者)。多 token 录入 UI 见 T4。
+// 表单首 token 标量 → 单元素 creds.tokens map,供 createAccount 用**通用** validateAccountCreds 校验
+// (跑的即 provider 的 tokens/manualToken schema);manual 借此和其余 connector 走同一道形状闸,不另立 schema。
+// 空串字段已由 createAccount 过滤;undefined 键被 JSON.stringify 丢弃,由 manualToken validator 判必填/coerce。
+export function manualCredsFromForm(values: Record<string, string>): Record<string, string> {
+  return {
+    tokens: JSON.stringify([
+      {
+        symbol: values.symbol,
+        unitPrice: values.unitPrice,
+        identifier: values.identifier,
+        amount: values.amount,
+      },
+    ]),
+  };
+}
+
+// manual 加账户(ADR 0017 特例):建账户 + 首 token 行 + 一条开仓 set 活动 → materialize 把账本折叠回
+// creds.tokens(单写者)。表单已由 createAccount 的 validateAccountCreds(见上 manualCredsFromForm)校验过。
+// 多 token 录入 UI 见 T4。
 export async function createManualAccount(
   userId: string,
   label: string,
   values: Record<string, string>,
 ) {
-  // 标量 → 单元素 tokens JSON(空串字段已由 createAccount 过滤;undefined 键被 JSON.stringify 丢弃,
-  // 由 manualToken validator 判必填/coerce)。
-  const tokens = JSON.stringify([
-    {
-      symbol: values.symbol,
-      unitPrice: values.unitPrice,
-      identifier: values.identifier,
-      amount: values.amount,
-    },
-  ]);
-  await validateAccountCreds("manual", { tokens }, { liveness: true, label });
-
   const account = await db.createAccount(userId, {
     connectorId: "manual",
     label,
     creds: JSON.stringify({ tokens: "[]" }),
   });
-  // 账本为真:首 token 行 + 一条开仓 set 活动(数量 = 表单 amount),再由 materialize 折叠回 creds.tokens。
   const token = await db.createManualToken(userId, account.id, {
     symbol: values.symbol,
     unitPrice: Number(values.unitPrice),

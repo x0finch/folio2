@@ -7,7 +7,7 @@ import { isComplete, safeView, sealCreds } from "../creds";
 import { requireAuth } from "../require-auth";
 import { credentialSpecs, validateAccountCreds } from "./connectors";
 import { db } from "./db";
-import { createManualAccount } from "./manual";
+import { createManualAccount, manualCredsFromForm } from "./manual";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 connectorId/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);
@@ -58,19 +58,20 @@ export const createAccount = createServerFn({ method: "POST" })
     //(必填 validator 对 undefined 均失败 —— z.coerce.number() 拒 undefined)。
     const values = Object.fromEntries(Object.entries(data.values).filter(([, v]) => v !== ""));
 
-    if (connectorId === "manual") {
-      const account = await createManualAccount(context.userId, data.label, values);
-      log.info("account created", { connectorId, accountId: account.id });
-      return account;
-    }
+    // 统一形状闸 + 活性探活。manual 的 account.creds 是单个 tokens JSON,故先把表单标量拼成 tokens 再校验
+    // (跑的即 provider 的 manualToken schema);其余 connector 直接用表单 values。
+    const credsToValidate = connectorId === "manual" ? manualCredsFromForm(values) : values;
+    await validateAccountCreds(connectorId, credsToValidate, { liveness: true, label: data.label });
 
-    // 形状闸(必填/格式)+ 活性探活。
-    await validateAccountCreds(connectorId, values, { liveness: true, label: data.label });
-    const account = await db.createAccount(context.userId, {
-      connectorId,
-      label: data.label,
-      creds: await raw2sealed(connectorId, values),
-    });
+    // 创建:manual 走账本(建 token 行 + set 活动 + 物化 creds.tokens);其余 seal 落库。
+    const account =
+      connectorId === "manual"
+        ? await createManualAccount(context.userId, data.label, values)
+        : await db.createAccount(context.userId, {
+            connectorId,
+            label: data.label,
+            creds: await raw2sealed(connectorId, values),
+          });
     log.info("account created", { connectorId, accountId: account.id });
     return account;
   });
