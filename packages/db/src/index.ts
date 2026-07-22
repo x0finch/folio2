@@ -16,6 +16,8 @@ export type {
   ManualActivity,
   ManualActivityInput,
   ManualActivityKind,
+  ManualToken,
+  ManualTokenInput,
   Membership,
   SnapshotBalanceHistoryRow,
   SnapshotBalanceInput,

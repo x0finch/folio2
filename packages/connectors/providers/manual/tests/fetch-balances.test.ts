@@ -3,7 +3,7 @@ import { manualProvider } from "../src";
 import expected from "./fixtures/expected-balances.json";
 import inputs from "./fixtures/inputs.json";
 
-// 新 FetchContext 形状:account.creds(AC:symbol/amount/unitPrice + 可选 identifier,P7.4.1)+ creds(PC:空)。
+// 新 FetchContext 形状:account.creds(AC:单个 tokens 数组 [{symbol,unitPrice,identifier?,amount}],ADR 0017)+ creds(PC:空)。
 type Ctx = Parameters<typeof manualProvider.fetchBalances>[0];
 function ctx(creds: Record<string, unknown>): Ctx {
   return {

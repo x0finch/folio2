@@ -1,20 +1,15 @@
-import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { isComplete, safeView, sealCreds } from "../creds";
+import { isComplete, safeView } from "../creds";
 import { requireAuth } from "../require-auth";
 import { credentialSpecs, validateAccountCreds } from "./connectors";
+import { createAccountFor, raw2sealed } from "./create-account";
 import { db } from "./db";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 connectorId/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);
-
-// connectors 层只负责校验/探活(validateAccountCreds)与字段规格(credentialSpecs);加密/脱敏/补录判定走业务层
-// creds.ts(seal/safeView/isComplete),按字段 type 驱动。SECRETS_KEY 只在本层(app)见,不进 connectors。
-const raw2sealed = async (connectorId: ConnectorId, values: Record<string, string>) =>
-  JSON.stringify(await sealCreds(credentialSpecs()[connectorId] ?? [], values, env.SECRETS_KEY));
 
 // 富化:把每账户的 raw creds 投影成 needsCredentials + credsSafe(public 原样、semi 打码、secret 丢弃);
 // raw creds(含 secret 密文)绝不出网,只出投影。
@@ -39,9 +34,8 @@ export const listMyAccounts = createServerFn({ method: "GET" })
     });
   });
 
-// 统一创建入口(connector-driven,#55/#52):表单原始输入 values(键 = connector.account.creds 的 key),
-// 校验/加密/落库全由 connectorId 驱动,不再按类型分派。空串值 = 未填的可选字段,落库前丢弃。
-// manual 账户额外补一条初始 `set` 活动(账本基线);其余无副作用。
+// 统一创建入口(connector-driven,#55/#52):auth 薄壳 → 分派逻辑在 ./create-account 的 createAccountFor
+// (server fn 之外的纯 async,便于集成测试)。
 const CreateAccountInput = z.object({
   connectorId: z.string().min(1),
   label: z.string().trim().min(1, "label is required"),
@@ -50,29 +44,9 @@ const CreateAccountInput = z.object({
 export const createAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreateAccountInput)
-  .handler(async ({ data, context }) => {
-    const connectorId = data.connectorId as ConnectorId; // 未知 connectorId 由 validateAccountCreds 兜底抛错
-    // 丢掉空串:未填的可选字段缺省即不参与;必填字段留空 → 变 undefined → 下面形状闸直接拒
-    //(必填 validator 对 undefined 均失败,含 manual 的 amount/unitPrice —— z.coerce.number() 拒 undefined)。
-    const values = Object.fromEntries(Object.entries(data.values).filter(([, v]) => v !== ""));
-    // 形状闸(必填/格式)+ 活性探活(manual 的 validateAccount 恒真 → liveness 对其为无副作用的 no-op)。
-    await validateAccountCreds(connectorId, values, { liveness: true, label: data.label });
-    const account = await db.createAccount(context.userId, {
-      connectorId,
-      label: data.label,
-      creds: await raw2sealed(connectorId, values),
-    });
-    // manual 初始 set:账本基线 = 创建时数量(与 creds.amount 一致)。
-    if (connectorId === "manual") {
-      await db.recordManualActivity(context.userId, account.id, {
-        kind: "set",
-        amount: Number(values.amount),
-        occurredAt: Date.now(),
-      });
-    }
-    log.info("account created", { connectorId, accountId: account.id });
-    return account;
-  });
+  .handler(({ data, context }) =>
+    createAccountFor(context.userId, data.connectorId as ConnectorId, data.label, data.values),
+  );
 
 // 凭据再水合(P6.6.1):为导入的"缺凭据"账户补录真值。活性校验通过后整张 map 覆盖(占位被真值替换)。
 const ProvideCredentialsInput = z.object({

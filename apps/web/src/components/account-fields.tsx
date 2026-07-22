@@ -11,7 +11,7 @@ import {
   StatefulButton,
 } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import {
   BTC_SCRIPT_OPTIONS,
@@ -19,6 +19,7 @@ import {
   isExtendedPubkey,
   recommendedScript,
 } from "../lib/bitcoin-scripts";
+import { manualTokensJson } from "../lib/manual-tokens";
 import { createAccount } from "../lib/server/accounts";
 import type { InputSpec } from "../lib/server/credentials";
 import { tokenPrice } from "../lib/server/tokens";
@@ -37,11 +38,11 @@ async function submitAccount(
 
 // manual 的字段:富控件(TokenCombobox 选币联动 symbol+identifier+autofill 单价 / 数字)。
 // 找不到的币可切"手动输入 symbol"(不关联,identifier 空)。
+// manual 的 account.creds 就是单个 `tokens`(ADR 0017)→ 本地维护首 token 标量,序列化成 `values.tokens`
+// (单元素 JSON,数字留字符串由 manualToken validator coerce)提交,服务端不再从标量拼装。
 function ManualFields({
-  values,
   setValues,
 }: {
-  values: Record<string, string>;
   setValues: (fn: (v: Record<string, string>) => Record<string, string>) => void;
 }) {
   const t = useTranslations("Accounts");
@@ -49,25 +50,29 @@ function ManualFields({
   const [manualMode, setManualMode] = useState(false);
   const [priceBusy, setPriceBusy] = useState(false);
   const priceReqRef = useRef(0);
+  // 首 token 的本地标量;经 effect 序列化进 values.tokens(不在 setState updater 里做副作用)。
+  const [tok, setTok] = useState({ symbol: "", amount: "", unitPrice: "", identifier: "" });
+  const patch = (p: Partial<typeof tok>) => setTok((prev) => ({ ...prev, ...p }));
+
+  // tok → values.tokens(纯序列化见 manualTokensJson)。副作用放 effect,不在 setState updater 里。
+  useEffect(() => {
+    setValues(() => ({ tokens: manualTokensJson(tok) }));
+  }, [tok, setValues]);
 
   // 选中币:填 symbol+identifier,并自动取市价预填 unitPrice(用户可改;竞态守卫)。
   async function onPick(token: TokenInfo | null) {
     setPicked(token);
     if (!token) {
-      setValues((v) => ({ ...v, symbol: "", identifier: "" }));
+      patch({ symbol: "", identifier: "" });
       return;
     }
-    setValues((v) => ({
-      ...v,
-      symbol: token.symbol.toUpperCase(),
-      identifier: token.ref.identifier,
-    }));
+    patch({ symbol: token.symbol.toUpperCase(), identifier: token.ref.identifier });
     const reqId = ++priceReqRef.current;
     setPriceBusy(true);
     try {
       const p = await tokenPrice({ data: { identifier: token.ref.identifier } });
       if (priceReqRef.current === reqId && p?.unitPrice != null) {
-        setValues((v) => ({ ...v, unitPrice: String(p.unitPrice) }));
+        patch({ unitPrice: String(p.unitPrice) });
       }
     } catch {
       // 取价失败不阻断:手填单价即可
@@ -75,8 +80,6 @@ function ManualFields({
       if (priceReqRef.current === reqId) setPriceBusy(false);
     }
   }
-
-  const set = (key: string, v: string) => setValues((vs) => ({ ...vs, [key]: v }));
 
   return (
     <>
@@ -88,8 +91,8 @@ function ManualFields({
               id="m-token"
               required
               autoComplete="off"
-              value={values.symbol ?? ""}
-              onChange={(v) => set("symbol", v)}
+              value={tok.symbol}
+              onChange={(v) => patch({ symbol: v })}
               placeholder="BTC"
             />
             <button
@@ -97,7 +100,7 @@ function ManualFields({
               className="self-start text-muted-foreground text-xs underline"
               onClick={() => {
                 setManualMode(false);
-                set("symbol", "");
+                patch({ symbol: "" });
               }}
             >
               {t("searchInstead")}
@@ -110,7 +113,7 @@ function ManualFields({
               onChange={onPick}
               onManual={(q) => {
                 setManualMode(true);
-                setValues((v) => ({ ...v, symbol: q, identifier: "" }));
+                patch({ symbol: q, identifier: "" });
               }}
             />
             <button
@@ -129,8 +132,8 @@ function ManualFields({
           id="m-amount"
           required
           inputMode="decimal"
-          value={values.amount ?? ""}
-          onChange={(v) => set("amount", v)}
+          value={tok.amount}
+          onChange={(v) => patch({ amount: v })}
           placeholder="0.0"
         />
       </div>
@@ -140,8 +143,8 @@ function ManualFields({
           id="m-price"
           required
           inputMode="decimal"
-          value={values.unitPrice ?? ""}
-          onChange={(v) => set("unitPrice", v)}
+          value={tok.unitPrice}
+          onChange={(v) => patch({ unitPrice: v })}
           placeholder="0.0"
         />
         <p className="text-muted-foreground text-xs">
@@ -313,7 +316,7 @@ export function AccountForm({
         />
       </div>
       {connectorId === "manual" ? (
-        <ManualFields values={values} setValues={setValues} />
+        <ManualFields setValues={setValues} />
       ) : connectorId === "bitcoin" ? (
         <BitcoinFields specs={specs} values={values} setValues={setValues} />
       ) : (

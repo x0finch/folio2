@@ -20,9 +20,9 @@ import { formatNumber } from "../lib/format-number";
 import { useManualStore } from "../lib/hooks/use-manual-store";
 import {
   type DraftTokenRef,
-  type Holding,
-  holdingAmount,
   type MergedActivityRow,
+  type Token,
+  tokenAmount,
 } from "../lib/manual-store";
 import { HoverDetail } from "./hover-detail";
 import { type EditActivityInput, ManualActivityModal } from "./manual-activity-modal";
@@ -51,7 +51,7 @@ const flatSwipe: SwipeableListClassNames = {
   action: "[&>span]:group-hover:bg-muted!",
 };
 
-function tokenRef(h: Holding): DraftTokenRef {
+function tokenRef(h: Token): DraftTokenRef {
   return {
     symbol: h.symbol,
     identifier: h.identifier,
@@ -61,7 +61,7 @@ function tokenRef(h: Holding): DraftTokenRef {
   };
 }
 
-export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] }) {
+export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] }) {
   const t = useTranslations("Activity");
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
@@ -81,22 +81,22 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
 
   // 默认选中最新一笔活动的 token(供 plus 预选)。
   const latest = store.merged[0];
-  const latestHolding = latest && store.holdings.find((h) => h.id === latest.holdingId);
-  const latestToken = latestHolding ? tokenRef(latestHolding) : null;
+  const latestTokenRow = latest && store.tokens.find((h) => h.id === latest.tokenId);
+  const latestToken = latestTokenRow ? tokenRef(latestTokenRow) : null;
 
   const openPlus = () => setActivity({ open: true, token: latestToken, lock: false, edit: null });
-  const openTokenEdit = (h: Holding) =>
+  const openTokenEdit = (h: Token) =>
     setActivity({ open: true, token: tokenRef(h), lock: true, edit: null });
   // 活动行「编辑」:锁定该 token,预填这笔活动的全部字段(kind/数量/单价/手续费/日期/备注)。
   const openActivityEdit = (a: (typeof store.merged)[number]) => {
-    const h = store.holdings.find((x) => x.id === a.holdingId);
+    const h = store.tokens.find((x) => x.id === a.tokenId);
     const token = h ? tokenRef(h) : { symbol: a.symbol, logo: a.logo, unitPrice: 0 };
     setActivity({
       open: true,
       token,
       lock: true,
       edit: {
-        holdingId: a.holdingId,
+        tokenId: a.tokenId,
         activityId: a.id,
         token,
         kind: a.kind,
@@ -111,8 +111,8 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
   const closeActivity = () => setActivity((s) => ({ ...s, open: false }));
 
   // 列表项直接由内存态派生(小列表,无需 memo);action 回调闭包捕获当前 store。
-  const tokenItems: SwipeableListItem[] = store.holdings.map((h) => {
-    const amount = holdingAmount(h);
+  const tokenItems: SwipeableListItem[] = store.tokens.map((h) => {
+    const amount = tokenAmount(h);
     const rightActions: SwipeAction[] = [
       {
         id: "edit",
@@ -169,7 +169,7 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
         onClick: () =>
           setConfirm({
             title: t("confirmDeleteActivity"),
-            onConfirm: () => store.removeActivity(a.holdingId, a.id),
+            onConfirm: () => store.removeActivity(a.tokenId, a.id),
           }),
       },
     ],
@@ -218,7 +218,7 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
       <Tabs value={tab} onValueChange={setTab} variant="pill">
         <div className="flex items-center justify-between">
           <TabsList className="bg-transparent p-0">
-            <TabsTrigger value="tokens">{ta("holdingsTab")}</TabsTrigger>
+            <TabsTrigger value="tokens">{ta("tokensTab")}</TabsTrigger>
             <TabsTrigger value="activity">{t("title")}</TabsTrigger>
           </TabsList>
           <button
@@ -262,8 +262,8 @@ export function ManualHoldingsPanel({ balances }: { balances: OverviewBalance[] 
           }
           return { ok: res.ok };
         }}
-        onEdit={(holdingId, activityId, patch) => {
-          const res = store.editActivity(holdingId, activityId, patch);
+        onEdit={(tokenId, activityId, patch) => {
+          const res = store.editActivity(tokenId, activityId, patch);
           if (res.ok) setActivity((s) => ({ ...s, open: false }));
           return { ok: res.ok };
         }}

@@ -17,6 +17,7 @@ import {
   accounts,
   groups,
   manualActivity,
+  manualToken,
   snapshotBalances,
   snapshots,
   userSettings,
@@ -562,7 +563,87 @@ export function listBalancesForSnapshots(
     .where(inArray(snapshotBalances.snapshotId, snapshotIds));
 }
 
-// ---------- manual 活动账本(P7.4.1)----------
+// ---------- manual 多 token tokens + 活动账本(P7.4.1 / ADR 0017)----------
+
+// 一个账户下某 token 归属本人即返回其 accountId,否则抛(token ⨝ account ⨝ user)。
+async function assertTokenOwned(db: Db, userId: string, tokenId: string): Promise<string> {
+  const rows = await db
+    .select({ accountId: manualToken.accountId })
+    .from(manualToken)
+    .innerJoin(accounts, eq(manualToken.accountId, accounts.id))
+    .where(and(eq(manualToken.id, tokenId), eq(accounts.userId, userId)));
+  if (!rows[0]) throw new Error(`manual token not found: ${tokenId}`);
+  return rows[0].accountId;
+}
+
+export type ManualToken = InferSelectModel<typeof manualToken>;
+export interface ManualTokenInput {
+  symbol: string;
+  unitPrice: number;
+  identifier?: string | null;
+}
+
+export async function createManualToken(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+  input: ManualTokenInput,
+): Promise<ManualToken> {
+  const db = getDb(env);
+  await assertAccountOwned(db, userId, accountId);
+  const row = {
+    id: crypto.randomUUID(),
+    accountId,
+    symbol: input.symbol,
+    unitPrice: input.unitPrice,
+    identifier: input.identifier ?? null,
+    createdAt: Date.now(),
+  };
+  await db.insert(manualToken).values(row);
+  return row;
+}
+
+// userId-scoped(经 account ⨝ user 归属);按 created_at 升序(稳定的展示序)。
+export function listManualTokensByAccount(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+): Promise<ManualToken[]> {
+  return getDb(env)
+    .select(getTableColumns(manualToken))
+    .from(manualToken)
+    .innerJoin(accounts, eq(manualToken.accountId, accounts.id))
+    .where(and(eq(manualToken.accountId, accountId), eq(accounts.userId, userId)))
+    .orderBy(asc(manualToken.createdAt));
+}
+
+export async function updateManualToken(
+  env: DbEnv,
+  userId: string,
+  tokenId: string,
+  input: ManualTokenInput,
+): Promise<void> {
+  const db = getDb(env);
+  await assertTokenOwned(db, userId, tokenId);
+  await db
+    .update(manualToken)
+    .set({
+      symbol: input.symbol,
+      unitPrice: input.unitPrice,
+      identifier: input.identifier ?? null,
+    })
+    .where(eq(manualToken.id, tokenId));
+}
+
+export async function deleteManualToken(
+  env: DbEnv,
+  userId: string,
+  tokenId: string,
+): Promise<void> {
+  const db = getDb(env);
+  await assertTokenOwned(db, userId, tokenId);
+  await db.delete(manualToken).where(eq(manualToken.id, tokenId)); // 活动经 token_id FK 级联清
+}
 
 export type ManualActivityKind = "add" | "reduce" | "set";
 export interface ManualActivityInput {
@@ -574,17 +655,21 @@ export interface ManualActivityInput {
 }
 export type ManualActivity = InferSelectModel<typeof manualActivity>;
 
+// 活动挂 token(ADR 0017)。accountId 由 token **反查**(assertTokenOwned)而非调用方另传 ——
+// 既保证 activity.accountId 恒 === token.accountId,又杜绝「传自己的 accountId + 他人的 tokenId」把活动
+// 挂到别账户/别用户 token 的越权面(不属本人的 token 直接抛)。
 export async function recordManualActivity(
   env: DbEnv,
   userId: string,
-  accountId: string,
+  tokenId: string,
   input: ManualActivityInput,
 ): Promise<void> {
   const db = getDb(env);
-  await assertAccountOwned(db, userId, accountId); // 防越权(与组 ops 同约定:不属本人即抛)
+  const accountId = await assertTokenOwned(db, userId, tokenId);
   await db.insert(manualActivity).values({
     id: crypto.randomUUID(),
     accountId,
+    tokenId,
     kind: input.kind,
     amount: input.amount,
     price: input.price ?? null,
@@ -592,6 +677,21 @@ export async function recordManualActivity(
     memo: input.memo ?? null,
     createdAt: Date.now(),
   });
+}
+
+// userId-scoped(经 token ⨝ account ⨝ user 归属);按 occurred_at→created_at 升序(deriveAmount 据此定序)。
+export function listManualActivityByToken(
+  env: DbEnv,
+  userId: string,
+  tokenId: string,
+): Promise<ManualActivity[]> {
+  return getDb(env)
+    .select(getTableColumns(manualActivity))
+    .from(manualActivity)
+    .innerJoin(manualToken, eq(manualActivity.tokenId, manualToken.id))
+    .innerJoin(accounts, eq(manualToken.accountId, accounts.id))
+    .where(and(eq(manualActivity.tokenId, tokenId), eq(accounts.userId, userId)))
+    .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt));
 }
 
 // userId-scoped(经 account ⨝ user 归属);按 occurred_at→created_at 升序(deriveAmount 据此定序)。
