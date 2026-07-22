@@ -19,6 +19,7 @@ import {
   isExtendedPubkey,
   recommendedScript,
 } from "../lib/bitcoin-scripts";
+import { isManual } from "../lib/manual-connector";
 import { manualTokensJson } from "../lib/manual-tokens";
 import { createAccount } from "../lib/server/accounts";
 import type { InputSpec } from "../lib/server/credentials";
@@ -311,11 +312,11 @@ export function AccountForm({
           value={label}
           onChange={(v) => setLabel(v)}
           placeholder={
-            connectorId === "manual" ? t("manualLabelPlaceholder") : t("walletLabelPlaceholder")
+            isManual(connectorId) ? t("manualLabelPlaceholder") : t("walletLabelPlaceholder")
           }
         />
       </div>
-      {connectorId === "manual" ? (
+      {isManual(connectorId) ? (
         <ManualFields setValues={setValues} />
       ) : connectorId === "bitcoin" ? (
         <BitcoinFields specs={specs} values={values} setValues={setValues} />

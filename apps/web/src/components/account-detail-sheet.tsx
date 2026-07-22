@@ -22,6 +22,7 @@ import type { OverviewBalance } from "../lib/account-view";
 import { aggregateDayChange } from "../lib/day-value-change";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
+import { isManual } from "../lib/manual-connector";
 import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
 import { getAccountValueHistory } from "../lib/server/history";
 import { syncOneAccount } from "../lib/server/sync";
@@ -137,6 +138,8 @@ function DetailBody({
       }),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
+    // manual 不写快照(ADR 0018)→ 无单账户价值历史(留待 T5 compute-on-read),不发无谓请求。
+    enabled: !isManual(account.connectorId),
   });
   const series = historyQuery.data?.series ?? [];
 
@@ -172,9 +175,12 @@ function DetailBody({
     onError: () => toast.error(t("actionFailed")),
   });
 
-  const lastSynced = account.takenAt
-    ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
-    : t("neverSynced");
+  // manual 不同步(ADR 0018):当下值实时由 creds 现造 → 显「实时」而非同步时间。
+  const lastSynced = isManual(account.connectorId)
+    ? t("liveValue")
+    : account.takenAt
+      ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
+      : t("neverSynced");
 
   return (
     <>
@@ -306,15 +312,18 @@ function DetailBody({
             </PopoverTrigger>
             <PopoverContent>
               <div className="flex w-40 flex-col gap-0.5">
-                <button
-                  type="button"
-                  className={menuItemClass}
-                  disabled={archived || syncMut.isPending}
-                  onClick={() => syncMut.mutate()}
-                >
-                  <RefreshCw className="size-4 shrink-0" />
-                  {t("syncThis")}
-                </button>
+                {/* manual 不是同步源(ADR 0018)→ 不显「同步」项。 */}
+                {!isManual(account.connectorId) && (
+                  <button
+                    type="button"
+                    className={menuItemClass}
+                    disabled={archived || syncMut.isPending}
+                    onClick={() => syncMut.mutate()}
+                  >
+                    <RefreshCw className="size-4 shrink-0" />
+                    {t("syncThis")}
+                  </button>
+                )}
                 <button
                   type="button"
                   className={menuItemClass}
@@ -370,7 +379,7 @@ function DetailBody({
 
       {/* manual 账户:多 token 面板(Tokens tab 已含持仓,故不再叠加上方持仓卡)。
           非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。 */}
-      {account.connectorId === "manual" ? (
+      {isManual(account.connectorId) ? (
         <div className="mt-6">
           <ManualTokensPanel balances={account.balances} />
         </div>

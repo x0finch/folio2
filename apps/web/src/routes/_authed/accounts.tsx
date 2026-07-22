@@ -1,3 +1,4 @@
+import type { ConnectorId } from "@folio/connectors";
 import { cn, SharedLayoutBg } from "@folio/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
@@ -15,6 +16,7 @@ import { sortActiveAccounts } from "../../lib/account-sort";
 import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-sync-status";
 import { aggregateDayChange } from "../../lib/day-value-change";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
+import { isManual } from "../../lib/manual-connector";
 import { listMyAccounts } from "../../lib/server/accounts";
 import { getMyAccountHoldings } from "../../lib/server/overview";
 
@@ -128,10 +130,12 @@ function Accounts() {
 function AccountStatusLine({
   status,
   takenAt,
+  connectorId,
   onComplete,
 }: {
   status: AccountSyncStatus;
   takenAt: number | null;
+  connectorId: ConnectorId;
   onComplete?: () => void; // 缺凭据时:点提示文案开补录 modal(A3),不冒泡到行的打开详情
 }) {
   const t = useTranslations("Accounts");
@@ -175,6 +179,9 @@ function AccountStatusLine({
         </span>
       ) : needsCreds ? (
         t("completePrompt")
+      ) : isManual(connectorId) ? (
+        // manual 不同步,当下值实时由 creds 现造(ADR 0018)→ 显「实时」而非同步时间。
+        t("liveValue")
       ) : takenAt != null ? (
         t("lastSyncedAt", { when: format.relativeTime(new Date(takenAt)) })
       ) : (
@@ -223,7 +230,12 @@ function AccountRowContent({
             className="transition-colors group-hover:bg-background group-focus-visible:bg-background"
           />
         </span>
-        <AccountStatusLine status={status} takenAt={row.takenAt} onComplete={onComplete} />
+        <AccountStatusLine
+          status={status}
+          takenAt={row.takenAt}
+          connectorId={row.connectorId}
+          onComplete={onComplete}
+        />
         {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),无现货可叠(纯 perp/DeFi 或未同步)的行也不塌矮,
             全列表行高一致。真 logo 的按-kind 填充(perp coin / DeFi 协议)待 #132 解绑后再接。 */}
         {!muted && (

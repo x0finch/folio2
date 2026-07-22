@@ -63,11 +63,11 @@ _Avoid_: Platform(那是持仓的链∪场馆定位维度,1 connector 可对多 
 _Avoid_: category(那易与 CGK 分类混)、group(那是用户自定义的账户分组 TokenGroup / accountGroups)
 
 **Allocation(当下分布)**:
-**最新快照**下按某 Dimension 的金额占比拆分(Insights 环形 + 图例)。只回答「此刻各占多少」。
+**最新快照**下按某 Dimension 的金额占比拆分(Insights 环形 + 图例)。只回答「此刻各占多少」。**manual 例外**(ADR 0018):manual 账户不写快照,其「此刻」由 `creds.tokens` 现造的合成余额注入 overview,故仍进 Allocation。
 _Avoid_: Composition(那是随时间的)、breakdown(泛指)
 
 **Composition(随时间组成)**:
-组合净值**随时间**按某 Dimension 的堆叠拆分(Insights 堆叠面积图)。历史各点用 `snapshot_balances` 冻结值分桶,**最新点**用 overview 的逐-balance 实时值分桶(∴ Σ 桶 = hero 实时总额)。与 Allocation 的分野:Allocation 是「此刻切一刀」,Composition 是「结构随时间演变」。
+组合净值**随时间**按某 Dimension 的堆叠拆分(Insights 堆叠面积图)。历史各点用 `snapshot_balances` 冻结值分桶,**最新点**用 overview 的逐-balance 实时值分桶(∴ Σ 桶 = hero 实时总额)。与 Allocation 的分野:Allocation 是「此刻切一刀」,Composition 是「结构随时间演变」。**manual 例外**(ADR 0018):manual 不写快照,故只进**最新点**(经 overview 注入),**历史各点缺席** manual,直到 T5(compute-on-read 从账本重算历史)补全。
 _Avoid_: trend(那专指总净值单线)、history(泛指)
 
 **Stablecoin(稳定币)**:

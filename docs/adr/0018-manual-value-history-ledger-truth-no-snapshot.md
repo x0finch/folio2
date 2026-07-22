@@ -21,3 +21,14 @@ Folio 每个账户每次 sync 都写一行不可变 `snapshots`(冻结当时 `to
 - **回溯编辑天然正确**:改/删过去活动后曲线整体重算,无 stale;这正是选 compute-on-read 的核心收益。
 - **每次历史读的成本** = 折叠账本(廉价)+ 取 price@T(经缓存的历史价)。若日后 profiling 显示组装是热点 → 升方案 B(物化 + 从编辑日往后失效),届时的缓存即 B 的物化产物。
 - **依赖**:准确市值曲线依赖 #148(oracle 历史价);但因降级链,#148 不阻塞 compute-on-read 骨架落地。
+
+## T2 实施细化(#154,grill 敲定)
+
+落地做法 1 时敲定的几点,0018 主决策未展开、且有非显然处,记此:
+
+- **当下值仍走实时市价盯市,不因退出 snapshot 而回归 unitPrice**。0018 主体谈的是曲线的**历史** price@T(#148);而「当下点」的盯市是另一回事——**现在就有**(oracle 当前价走缓存)。今天 manual 的 identifier 币当下值本就是现价盯市(靠 manual 写 snapshot → 被 `warmTokensForUser` 暖到 → 读时 cache-only 命中)。故合成 snapshot 由 injector 做一次 **cache-only 取价、把现价烘焙进 `usdValue/totalUsd`**(取不到价回退 unitPrice);`selfPrice=null` 保持盯市语义。
+- **manual 退出同步后仍须被预热**(非显然的运维事实)。取实时价的预热(`warmTokensForUser`)今天**从快照收集要暖的币**;manual 不在快照后,预热须改成**额外从 manual 的 `creds.tokens` 收集币**——否则只有 manual 账户、从不同步别的东西的用户,其币永远拿不到实时价(比退出前更差)。
+- **切换即删旧行**(而非留存过渡)。停写新 snapshot 的同时,一支数据迁移删掉 manual 账户已有的 `snapshots`/`snapshot_balances` 行(级联)。**非真数据丢失**:真相是账本 `manual_activity`,快照只是派生值,T5 会从账本重算。
+- **切换期(T2→T5)的已知缺口**:删旧行后,首页净值曲线的**过去段**与 Insights 的 **Composition 历史点**里 manual 缺席(仅**当下点**经 overview 注入含 manual);单账户价值曲线(`getAccountValueHistory`)对 manual 为空,UI 暂隐藏。补全靠 T5(compute-on-read 历史)。
+- **「manual 不是同步源」的判别**:app 层写死 `connectorId === "manual"`(与建账户流程既有写法一致),不新增 manifest 能力位——manual 整条链路(专属 creds 形状 / `manual_token` 表 / `projectToken`)都是专属的,单为「跳过同步」加契约位属过度设计。
+- **UI 呈现**:manual 账户行/详情不显「上次同步 X 前」而显「实时/Live」(`takenAt` 对 manual 置 null),并隐藏其「同步」动作。
