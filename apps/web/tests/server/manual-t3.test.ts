@@ -4,15 +4,15 @@ import type { CredsToken } from "../../src/lib/manual-activity";
 import { db } from "../../src/lib/server/db";
 import {
   addManualActivities,
-  createHolding,
   createManualAccount,
-  deleteHolding,
+  createToken,
   deleteManualActivity,
+  deleteToken,
   editManualActivity,
-  updateHolding,
+  updateToken,
 } from "../../src/lib/server/manual";
 
-// T3(#155)服务端写路径集成:holding CRUD + 批量活动(原子)+ 删/改活动,全落库、写后重跑物化。真实 D1(Miniflare)。
+// T3(#155)服务端写路径集成:token CRUD + 批量活动(原子)+ 删/改活动,全落库、写后重跑物化。真实 D1(Miniflare)。
 // 不隔离每测存储 → beforeEach 重置。断言以 creds.tokens(物化投影)与账本一致为准(单写者不变量)。
 const USER = "user-manual-t3";
 // seedAccount 的开仓 set 活动 occurredAt = Date.now()(≈1.7e12);后续活动须发生在其**之后**,
@@ -49,10 +49,10 @@ async function seedAccount() {
   return account;
 }
 
-describe("createHolding", () => {
-  it("建 token + 开仓 set 活动 → creds.tokens 出现该持仓,amount === 初始", async () => {
+describe("createToken", () => {
+  it("建 token + 开仓 set 活动 → creds.tokens 出现该 token,amount === 初始", async () => {
     const account = await seedAccount();
-    await createHolding(USER, {
+    await createToken(USER, {
       accountId: account.id,
       symbol: "ETH",
       unitPrice: 3000,
@@ -68,11 +68,11 @@ describe("createHolding", () => {
   });
 });
 
-describe("updateHolding", () => {
+describe("updateToken", () => {
   it("改单价/标识即时反映;改目标 amount → 追加 set 对齐,derived === 新值", async () => {
     const account = await seedAccount();
     const [btc] = await db.listManualTokensByAccount(USER, account.id);
-    await updateHolding(USER, {
+    await updateToken(USER, {
       tokenId: btc.id,
       symbol: "BTC",
       unitPrice: 65000,
@@ -90,7 +90,7 @@ describe("updateHolding", () => {
   it("目标 amount 不变 → 不追加活动", async () => {
     const account = await seedAccount();
     const [btc] = await db.listManualTokensByAccount(USER, account.id);
-    await updateHolding(USER, {
+    await updateToken(USER, {
       tokenId: btc.id,
       symbol: "BTC",
       unitPrice: 61000,
@@ -101,10 +101,10 @@ describe("updateHolding", () => {
   });
 });
 
-describe("deleteHolding", () => {
+describe("deleteToken", () => {
   it("删 token → 从 creds.tokens 消失(活动级联清)", async () => {
     const account = await seedAccount();
-    await createHolding(USER, {
+    await createToken(USER, {
       accountId: account.id,
       symbol: "ETH",
       unitPrice: 3000,
@@ -114,7 +114,7 @@ describe("deleteHolding", () => {
       (t) => t.symbol === "ETH",
     );
     if (!eth) throw new Error("eth missing");
-    await deleteHolding(USER, eth.id);
+    await deleteToken(USER, eth.id);
     const tokens = await readTokens(account.id);
     expect(tokens.map((t) => t.symbol)).toEqual(["BTC"]);
   });

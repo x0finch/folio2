@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { DerivableActivity } from "../src/lib/manual-activity";
 import {
   type BatchDraft,
-  findHeld,
-  type HeldToken,
+  findToken,
   planManualBatch,
   runningOk,
+  type Token,
 } from "../src/lib/manual-batch";
 
 const act = (o: Partial<DerivableActivity>): DerivableActivity => ({
@@ -16,7 +16,7 @@ const act = (o: Partial<DerivableActivity>): DerivableActivity => ({
   ...o,
 });
 
-const held = (o: Partial<HeldToken>): HeldToken => ({
+const mkToken = (o: Partial<Token>): Token => ({
   id: "t1",
   symbol: "BTC",
   unitPrice: 1,
@@ -62,20 +62,20 @@ describe("runningOk", () => {
   });
 });
 
-describe("findHeld(标识优先,退回大写 symbol)", () => {
+describe("findToken(标识优先,退回大写 symbol)", () => {
   const tokens = [
-    held({ id: "a", symbol: "BTC", identifier: "bitcoin" }),
-    held({ id: "b", symbol: "ETH", identifier: null }),
+    mkToken({ id: "a", symbol: "BTC", identifier: "bitcoin" }),
+    mkToken({ id: "b", symbol: "ETH", identifier: null }),
   ];
   it("按 identifier 精确命中", () => {
-    expect(findHeld(tokens, { symbol: "x", unitPrice: 1, identifier: "bitcoin" })?.id).toBe("a");
+    expect(findToken(tokens, { symbol: "x", unitPrice: 1, identifier: "bitcoin" })?.id).toBe("a");
   });
   it("无 identifier → 按大写 symbol 命中 identifier-less 持仓", () => {
-    expect(findHeld(tokens, { symbol: "eth", unitPrice: 1 })?.id).toBe("b");
+    expect(findToken(tokens, { symbol: "eth", unitPrice: 1 })?.id).toBe("b");
   });
   it("draft 带 identifier 但无对应 → 不命中 symbol-only 同名(不自动收养)", () => {
     expect(
-      findHeld(tokens, { symbol: "ETH", unitPrice: 1, identifier: "ethereum" }),
+      findToken(tokens, { symbol: "ETH", unitPrice: 1, identifier: "ethereum" }),
     ).toBeUndefined();
   });
 });
@@ -90,7 +90,7 @@ describe("planManualBatch", () => {
   });
 
   it("命中既有持仓 → 只出活动,无新建 token", () => {
-    const existing = [held({ id: "t1", symbol: "BTC", identifier: "bitcoin" })];
+    const existing = [mkToken({ id: "t1", symbol: "BTC", identifier: "bitcoin" })];
     const plan = planManualBatch(existing, [draft({ amount: 2 })], idFactory());
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
@@ -127,7 +127,7 @@ describe("planManualBatch", () => {
 
   it("整批拒:任一 reduce 在其时点超过运行持有(含顶下水既有 reduce)", () => {
     const existing = [
-      held({
+      mkToken({
         id: "t1",
         symbol: "ETH",
         identifier: "ethereum",
@@ -157,7 +157,7 @@ describe("planManualBatch", () => {
 
   it("新 draft 在同一 occurredAt 排在既有之后(不误判超支)", () => {
     const existing = [
-      held({
+      mkToken({
         id: "t1",
         symbol: "BTC",
         identifier: "bitcoin",

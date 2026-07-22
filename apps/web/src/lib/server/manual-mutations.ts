@@ -3,11 +3,11 @@ import { z } from "zod";
 import { requireAuth } from "../require-auth";
 import {
   addManualActivities,
-  createHolding,
-  deleteHolding,
+  createToken,
   deleteManualActivity,
+  deleteToken,
   editManualActivity,
-  updateHolding,
+  updateToken,
 } from "./manual";
 
 // manual 写路径的 server fn(T3,#155)—— 薄壳:auth(requireAuth 经 ALS 带 userId)+ 校验入参 + 调 ./manual 的
@@ -15,40 +15,40 @@ import {
 
 const ActivityKind = z.enum(["add", "reduce", "set"]);
 
-// —— holding(token)CRUD ——
-const HoldingInput = z.object({
+// —— token CRUD ——
+const TokenInput = z.object({
   accountId: z.string().min(1),
   symbol: z.string().trim().min(1),
   unitPrice: z.number().nonnegative(),
   identifier: z.string().trim().min(1).nullish(),
   amount: z.number().nonnegative(),
 });
-export const addHolding = createServerFn({ method: "POST" })
+export const addToken = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(HoldingInput)
-  .handler(({ data, context }) => createHolding(context.userId, data));
+  .validator(TokenInput)
+  .handler(({ data, context }) => createToken(context.userId, data));
 
-const HoldingEdit = z.object({
+const TokenEditInput = z.object({
   tokenId: z.string().min(1),
   symbol: z.string().trim().min(1),
   unitPrice: z.number().nonnegative(),
   identifier: z.string().trim().min(1).nullish(),
   amount: z.number().nonnegative(),
 });
-export const editHolding = createServerFn({ method: "POST" })
+export const editToken = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(HoldingEdit)
+  .validator(TokenEditInput)
   .handler(async ({ data, context }) => {
-    await updateHolding(context.userId, data);
+    await updateToken(context.userId, data);
     return { ok: true as const };
   });
 
-const RemoveHoldingInput = z.object({ tokenId: z.string().min(1) });
-export const removeHolding = createServerFn({ method: "POST" })
+const RemoveTokenInput = z.object({ tokenId: z.string().min(1) });
+export const removeToken = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(RemoveHoldingInput)
+  .validator(RemoveTokenInput)
   .handler(async ({ data, context }) => {
-    await deleteHolding(context.userId, data.tokenId);
+    await deleteToken(context.userId, data.tokenId);
     return { ok: true as const };
   });
 

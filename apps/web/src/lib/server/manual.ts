@@ -1,7 +1,7 @@
 import type { AccountSafe, ManualActivityPatch, SnapshotWithBalances } from "@folio/db";
 import type { CredsToken } from "../manual-activity";
 import { deriveAmount, projectToken } from "../manual-activity";
-import { type BatchDraft, type HeldToken, planManualBatch, runningOk } from "../manual-batch";
+import { type BatchDraft, planManualBatch, runningOk, type Token } from "../manual-batch";
 import { isManual, MANUAL_CONNECTOR_ID } from "../manual-connector";
 import { buildManualSnapshot } from "../manual-snapshot";
 import { type BalanceLike, balanceToAssetRef } from "../tokens";
@@ -118,19 +118,19 @@ export async function manualBalancesForWarm(
   return list.flatMap(({ id, tokens }) => buildManualSnapshot(id, tokens, [], 0).balances);
 }
 
-// —— T3 写路径(#155):holding CRUD + 批量活动(原子)+ 删/改活动 ——
+// —— T3 写路径(#155):token CRUD + 批量活动(原子)+ 删/改活动 ——
 // server fn(manual-mutations.ts)只做 auth 薄壳后调这些纯 async(可在 workers-pool 集成测,不引 createServerFn)。
 // **单写者**:每次写后重跑受影响账户物化(materializeManualCreds),维护 creds.tokens[i].amount === 折叠账本 不变量。
 // 决策逻辑(解析/收养/超支校验)下沉纯模块 manual-batch;这里只做加载 + 调用 + 物化(ADR 0017)。
 
-export interface HoldingInput {
+export interface CreateTokenInput {
   accountId: string;
   symbol: string;
   unitPrice: number;
   identifier?: string | null;
   amount: number;
 }
-export interface HoldingEdit {
+export interface UpdateTokenInput {
   tokenId: string;
   symbol: string;
   unitPrice: number;
@@ -139,8 +139,8 @@ export interface HoldingEdit {
 }
 export type ManualWriteResult = { ok: true } | { ok: false; reason: "overdraw"; symbol?: string };
 
-// 某账户的已持有 token(定义 + 各自活动账本)→ manual-batch 的 HeldToken[]。ManualActivity 结构含 DerivableActivity。
-async function loadHeldTokens(userId: string, accountId: string): Promise<HeldToken[]> {
+// 某账户已有 token(定义 + 各自活动账本)→ manual-batch 的 Token[]。ManualActivity 结构含 DerivableActivity。
+async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
   const tokens = await db.listManualTokensByAccount(userId, accountId);
   return Promise.all(
     tokens.map(async (t) => ({
@@ -153,8 +153,8 @@ async function loadHeldTokens(userId: string, accountId: string): Promise<HeldTo
   );
 }
 
-// 建一个 token(holding):建行 + 一条 occurredAt=now 的开仓 set 活动(使 derived amount === 初始 amount)→ 物化。
-export async function createHolding(userId: string, input: HoldingInput) {
+// 建一个 token:建行 + 一条 occurredAt=now 的开仓 set 活动(使 derived amount === 初始 amount)→ 物化。
+export async function createToken(userId: string, input: CreateTokenInput) {
   const token = await db.createManualToken(userId, input.accountId, {
     symbol: input.symbol,
     unitPrice: input.unitPrice,
@@ -170,7 +170,7 @@ export async function createHolding(userId: string, input: HoldingInput) {
 }
 
 // 改 token 定义;若目标 amount 与当前 derived 不同 → 追加一条 set 活动对齐(播 set 语义,grill Q13)→ 物化。
-export async function updateHolding(userId: string, input: HoldingEdit): Promise<void> {
+export async function updateToken(userId: string, input: UpdateTokenInput): Promise<void> {
   const accountId = await db.getManualTokenAccountId(userId, input.tokenId);
   await db.updateManualToken(userId, input.tokenId, {
     symbol: input.symbol,
@@ -189,20 +189,20 @@ export async function updateHolding(userId: string, input: HoldingEdit): Promise
 }
 
 // 删一个 token(其活动经 FK 级联清)→ 物化(账户仍在)。
-export async function deleteHolding(userId: string, tokenId: string): Promise<void> {
+export async function deleteToken(userId: string, tokenId: string): Promise<void> {
   const accountId = await db.getManualTokenAccountId(userId, tokenId);
   await db.deleteManualToken(userId, tokenId);
   await materializeManualCreds(userId, accountId);
 }
 
-// 批量加活动:载既有持仓 → 纯逻辑解析+校验(整批拒因超支)→ 原子提交(新建 token + 插活动)→ 物化。
+// 批量加活动:载既有 token → 纯逻辑解析+校验(整批拒因超支)→ 原子提交(新建 token + 插活动)→ 物化。
 export async function addManualActivities(
   userId: string,
   accountId: string,
   drafts: BatchDraft[],
 ): Promise<ManualWriteResult> {
-  const held = await loadHeldTokens(userId, accountId);
-  const plan = planManualBatch(held, drafts, () => crypto.randomUUID());
+  const existing = await loadTokens(userId, accountId);
+  const plan = planManualBatch(existing, drafts, () => crypto.randomUUID());
   if (!plan.ok) return { ok: false, reason: "overdraw", symbol: plan.symbol };
   await db.commitManualBatch(userId, {
     accountId,
