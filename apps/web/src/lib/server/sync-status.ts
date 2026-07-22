@@ -20,8 +20,11 @@ export const getSyncStatus = createServerFn({ method: "GET" })
     const rawById = new Map(rawList.map((r) => [r.id, r.creds]));
     const takenAtById = new Map(snapshots.map((s) => [s.snapshot.accountId, s.snapshot.takenAt]));
     const specsByType = credentialSpecs();
+    // manual 不是同步源(ADR 0018:当下值实时由 creds 现造,从不同步)→ 不列入同步面板/「立即同步」集,
+    // 也不显示为「未同步」。
+    const syncable = accounts.filter((a) => a.connectorId !== "manual");
     return summarizeSync(
-      accounts.map((a) => {
+      syncable.map((a) => {
         const raw = rawById.get(a.id);
         const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
         const specs = specsByType[a.connectorId] ?? [];

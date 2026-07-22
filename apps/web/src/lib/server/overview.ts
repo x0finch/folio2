@@ -3,6 +3,7 @@ import { buildOverview } from "../overview-model";
 import { requireAuth } from "../require-auth";
 import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
+import { injectManualSnapshots } from "./manual";
 import { oracle } from "./oracle";
 import { enrichBalances } from "./tokens";
 
@@ -18,6 +19,8 @@ export const getMyOverview = createServerFn({ method: "GET" })
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+    // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
+    await injectManualSnapshots(context.userId, accounts, byAccount);
     return buildOverview(accounts, byAccount, {
       tokens: oracle.tokens,
       platforms: oracle.platforms,
@@ -37,6 +40,8 @@ export const getMyAccountHoldings = createServerFn({ method: "GET" })
     ]);
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+    // manual 不写快照(ADR 0018):注入合成当下项,manual 账户行的市值/持仓由 creds 现造。
+    await injectManualSnapshots(context.userId, accounts, byAccount);
     const tokens = oracle.tokens;
     const rows = await Promise.all(
       accounts.map(async (account) => {

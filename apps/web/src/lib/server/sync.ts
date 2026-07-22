@@ -34,6 +34,10 @@ export const syncOneAccount = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const account = await db.getAccountById(context.userId, data.accountId);
     if (!account) throw new Error("account not found");
+    // manual 不是同步源(ADR 0018:当下值由 creds 现造,不写快照)。UI 已对 manual 隐藏「同步」;此处防御式跳过。
+    if (account.connectorId === "manual") {
+      return { accountId: account.id, ok: false, skipped: true };
+    }
     const rawCreds = await db.getRawCreds(context.userId, data.accountId);
     const result = await syncAccount(buildSyncDeps(), context.userId, account, rawCreds);
     getLogger(["folio", "web", "sync"]).info("single account sync", {

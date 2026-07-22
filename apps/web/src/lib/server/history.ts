@@ -4,6 +4,7 @@ import { buildAccountValueHistory, buildPortfolioHistory } from "../history";
 import { deriveLiveAccountTotals } from "../live-value";
 import { requireAuth } from "../require-auth";
 import { db } from "./db";
+import { injectManualSnapshots } from "./manual";
 import { oracle } from "./oracle";
 
 // 组合净值历史:全部快照总额 → 阶梯式重建为时间序列(纯函数,可序列化输出)。
@@ -25,6 +26,8 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     // 当下点 = 与主页同源同算的实时总价(活跃账户,与 getMyOverview 一致的账户集 + 同一 mode)。
     const accounts = allAccounts.filter((a) => a.archivedAt == null);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+    // manual 不写快照(ADR 0018):当下点的 manual 净值由 creds 现造注入(过去点仍来自真实快照 totals)。
+    await injectManualSnapshots(context.userId, accounts, byAccount);
     const liveTotals = await deriveLiveAccountTotals(
       accounts,
       byAccount,

@@ -137,6 +137,8 @@ function DetailBody({
       }),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
+    // manual 不写快照(ADR 0018)→ 无单账户价值历史(留待 T5 compute-on-read),不发无谓请求。
+    enabled: account.connectorId !== "manual",
   });
   const series = historyQuery.data?.series ?? [];
 
@@ -172,9 +174,13 @@ function DetailBody({
     onError: () => toast.error(t("actionFailed")),
   });
 
-  const lastSynced = account.takenAt
-    ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
-    : t("neverSynced");
+  // manual 不同步(ADR 0018):当下值实时由 creds 现造 → 显「实时」而非同步时间。
+  const lastSynced =
+    account.connectorId === "manual"
+      ? t("liveValue")
+      : account.takenAt
+        ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
+        : t("neverSynced");
 
   return (
     <>
@@ -306,15 +312,18 @@ function DetailBody({
             </PopoverTrigger>
             <PopoverContent>
               <div className="flex w-40 flex-col gap-0.5">
-                <button
-                  type="button"
-                  className={menuItemClass}
-                  disabled={archived || syncMut.isPending}
-                  onClick={() => syncMut.mutate()}
-                >
-                  <RefreshCw className="size-4 shrink-0" />
-                  {t("syncThis")}
-                </button>
+                {/* manual 不是同步源(ADR 0018)→ 不显「同步」项。 */}
+                {account.connectorId !== "manual" && (
+                  <button
+                    type="button"
+                    className={menuItemClass}
+                    disabled={archived || syncMut.isPending}
+                    onClick={() => syncMut.mutate()}
+                  >
+                    <RefreshCw className="size-4 shrink-0" />
+                    {t("syncThis")}
+                  </button>
+                )}
                 <button
                   type="button"
                   className={menuItemClass}

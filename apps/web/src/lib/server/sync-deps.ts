@@ -14,8 +14,10 @@ import { getLogger } from "@logtape/logtape";
 import type { InputSpec } from "../creds";
 import { isComplete, openCreds } from "../creds";
 import { revalue } from "../revalue";
+import { isSyncableAccount } from "../syncable";
 import { db } from "./db";
 import { warmFx } from "./fx";
+import { manualBalancesForWarm } from "./manual";
 import { oracle } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
 import { warmTokens } from "./tokens";
@@ -41,11 +43,13 @@ function toProviderAssets(rows: Balance[]): ProviderAsset[] {
 // 同步后预热代币缓存:取该用户最新快照的全部余额 → warm(top-N + 逐 spot/manual 行懒解析)。
 // best-effort(warmTokens 内部吞错),让下次总览能 cache-only 富化出价/logo/涨跌。cron 与手动 sync 共用。
 export async function warmTokensForUser(userId: string): Promise<void> {
-  const snapshots = await db.getLatestSnapshotByUser(userId);
-  await warmTokens(
-    oracle.tokens,
-    snapshots.flatMap((s) => s.balances),
-  );
+  const [snapshots, accounts] = await Promise.all([
+    db.getLatestSnapshotByUser(userId),
+    db.listAccountsByUser(userId),
+  ]);
+  // manual 已退出快照(ADR 0018)→ 预热额外从 manual 的 creds 收集合成余额,否则纯 manual 用户的币暖不到实时价。
+  const manualBalances = await manualBalancesForWarm(userId, accounts);
+  await warmTokens(oracle.tokens, [...snapshots.flatMap((s) => s.balances), ...manualBalances]);
   // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。
   try {
     await warmPlatformsForUser(userId);
@@ -118,9 +122,9 @@ export function buildSyncDeps(): SyncDeps {
     return p;
   };
   return {
-    // 归档账户跳过同步(不产生新快照);过滤在此,syncUser 只见活跃账户。
-    listAccounts: async (userId) =>
-      (await db.listAccountsByUser(userId)).filter((a) => a.archivedAt == null),
+    // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,不写快照)→ 一并过滤。
+    // syncUser 只见活跃的可同步账户(判别走纯 isSyncableAccount)。
+    listAccounts: async (userId) => (await db.listAccountsByUser(userId)).filter(isSyncableAccount),
     listRawCreds: (userId) => db.listRawCredsByUser(userId), // 批量取全用户 creds(消 syncAccount 的 N+1)
     writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
     // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);
