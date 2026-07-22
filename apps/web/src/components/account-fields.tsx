@@ -19,6 +19,7 @@ import {
   isExtendedPubkey,
   recommendedScript,
 } from "../lib/bitcoin-scripts";
+import { manualTokensJson } from "../lib/manual-tokens";
 import { createAccount } from "../lib/server/accounts";
 import type { InputSpec } from "../lib/server/credentials";
 import { tokenPrice } from "../lib/server/tokens";
@@ -53,15 +54,9 @@ function ManualFields({
   const [tok, setTok] = useState({ symbol: "", amount: "", unitPrice: "", identifier: "" });
   const patch = (p: Partial<typeof tok>) => setTok((prev) => ({ ...prev, ...p }));
 
-  // tok → values.tokens(单元素;identifier 空则省略键 —— manualToken 视其为可选)。
+  // tok → values.tokens(纯序列化见 manualTokensJson)。副作用放 effect,不在 setState updater 里。
   useEffect(() => {
-    const entry: Record<string, string> = {
-      symbol: tok.symbol,
-      unitPrice: tok.unitPrice,
-      amount: tok.amount,
-    };
-    if (tok.identifier) entry.identifier = tok.identifier;
-    setValues(() => ({ tokens: JSON.stringify([entry]) }));
+    setValues(() => ({ tokens: manualTokensJson(tok) }));
   }, [tok, setValues]);
 
   // 选中币:填 symbol+identifier,并自动取市价预填 unitPrice(用户可改;竞态守卫)。

@@ -46,6 +46,10 @@ describe("createManualAccount (D1 round-trip)", () => {
     ]);
   });
 
+  it("rejects an empty tokens array (form always sends one; z.array admits [])", async () => {
+    await expect(createManualAccount(USER, "M", "[]")).rejects.toThrow();
+  });
+
   it("materializes creds.tokens the provider consumes (identifier omitted when absent)", async () => {
     // creds.tokens 即 provider 读取的投影(creds.tokens → N spot 由 provider golden 覆盖);此处验往返产出的形状。
     const account = await createManualAccount(
