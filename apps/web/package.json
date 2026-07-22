@@ -10,7 +10,7 @@
     "generate-routes": "tsr generate",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests && vitest run --config vitest.workers.config.ts",
     "typecheck": "tsc --noEmit",
     "db:migrate:local": "wrangler d1 migrations apply folio --local",
     "db:migrate:remote": "wrangler d1 migrations apply folio --remote",
@@ -51,6 +51,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.20",
     "@tailwindcss/typography": "^0.5.16",
     "@tanstack/devtools-vite": "latest",
     "@tanstack/router-cli": "^1.132.0",

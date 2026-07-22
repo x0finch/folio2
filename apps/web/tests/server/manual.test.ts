@@ -1,0 +1,78 @@
+import { env } from "cloudflare:test";
+import { beforeEach, describe, expect, it } from "vitest";
+import { db } from "../../src/lib/server/db";
+import { createManualAccount, materializeManualCreds } from "../../src/lib/server/manual";
+
+// manual 创建往返的真实 D1 集成测试(jsdom 单测覆盖不到的服务端编排)。
+// 这套 pool 版本不隔离每测存储 → beforeEach 重置(删 user 级联清账户/token/活动)。
+const USER = "user-manual-it";
+
+async function resetUser(): Promise<void> {
+  await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run(); // cascade → accounts → manual_token/activity
+  const now = Date.now();
+  await env.DB.prepare(
+    "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+    .bind(USER, USER, `${USER}@example.com`, 0, now, now)
+    .run();
+}
+
+beforeEach(resetUser);
+
+// 账户存储的 creds.tokens(provider 读的即此投影)。
+async function credsTokens(accountId: string): Promise<unknown> {
+  const raw = await db.getRawCreds(USER, accountId);
+  const creds = JSON.parse(raw ?? "{}") as { tokens?: string };
+  return JSON.parse(creds.tokens ?? "[]");
+}
+
+describe("createManualAccount (D1 round-trip)", () => {
+  it("seeds token row + opening set activity + materialized creds.tokens", async () => {
+    const tokens = JSON.stringify([
+      { symbol: "BTC", unitPrice: "64000", identifier: "bitcoin", amount: "0.5" },
+    ]);
+    const account = await createManualAccount(USER, "My BTC", tokens);
+
+    const rows = await db.listManualTokensByAccount(USER, account.id);
+    expect(rows.map((r) => [r.symbol, r.unitPrice, r.identifier])).toEqual([
+      ["BTC", 64000, "bitcoin"],
+    ]);
+
+    const acts = await db.listManualActivityByToken(USER, rows[0].id);
+    expect(acts.map((a) => [a.kind, a.amount])).toEqual([["set", 0.5]]);
+
+    expect(await credsTokens(account.id)).toEqual([
+      { symbol: "BTC", unitPrice: 64000, amount: 0.5, identifier: "bitcoin" },
+    ]);
+  });
+
+  it("materializes creds.tokens the provider consumes (identifier omitted when absent)", async () => {
+    // creds.tokens 即 provider 读取的投影(creds.tokens → N spot 由 provider golden 覆盖);此处验往返产出的形状。
+    const account = await createManualAccount(
+      USER,
+      "M",
+      JSON.stringify([{ symbol: "ETH", unitPrice: "3200", amount: "2" }]),
+    );
+    expect(await credsTokens(account.id)).toEqual([{ symbol: "ETH", unitPrice: 3200, amount: 2 }]);
+  });
+});
+
+describe("materializeManualCreds (D1 round-trip)", () => {
+  it("recomputes creds.tokens from the ledger after a later activity", async () => {
+    const account = await createManualAccount(
+      USER,
+      "M",
+      JSON.stringify([{ symbol: "BTC", unitPrice: "60000", amount: "1" }]),
+    );
+    const [tokenRow] = await db.listManualTokensByAccount(USER, account.id);
+    await db.recordManualActivity(USER, tokenRow.id, {
+      kind: "add",
+      amount: 0.5,
+      occurredAt: Date.now() + 1,
+    });
+    await materializeManualCreds(USER, account.id);
+    expect(await credsTokens(account.id)).toEqual([
+      { symbol: "BTC", unitPrice: 60000, amount: 1.5 },
+    ]);
+  });
+});

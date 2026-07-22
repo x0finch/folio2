@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "folio-web-server-test",
+  "compatibility_date": "2025-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  // 服务端 lib 的 workers-pool 测试专用:仅 DB(Miniflare D1)绑定 —— 故意不含 app 的 main/crons/cache/vars,
+  // 不加载整个应用 Worker,只跑被测函数(见 vitest.workers.config.ts)。迁移经 readD1Migrations 注入应用。
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "folio",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}
