@@ -1,3 +1,5 @@
+import { CredentialValidationError } from "@folio/connectors-basic";
+import { z } from "zod";
 import { projectHolding } from "../manual-activity";
 import { db } from "./db";
 
@@ -17,4 +19,47 @@ export async function materializeManualCreds(userId: string, accountId: string):
   const creds: Record<string, string> = raw ? JSON.parse(raw) : {};
   creds.tokens = JSON.stringify(tokens);
   await db.setAccountCredentials(userId, accountId, JSON.stringify(creds));
+}
+
+// manual 加账户首 token 的标量输入(表单 ManualFields 提交);coerce 数字,identifier 可选。
+const ManualFirstToken = z.object({
+  symbol: z.string().trim().min(1),
+  amount: z.coerce.number(),
+  unitPrice: z.coerce.number(),
+  identifier: z.string().trim().min(1).optional(),
+});
+
+// manual 加账户(ADR 0017 特例):表单收单 token 标量 → 建账户(creds.tokens 先空)+ 首 holding
+// + 一条 set 活动 → 物化 creds.tokens。不走通用 validateAccountCreds/raw2sealed(account.creds 现为单个
+// tokens JSON 字段,与标量表单不同形)。形状不过抛 CredentialValidationError(与通用路径同一错误类型,
+// 而非裸 ZodError)。多 token 录入 UI 见 T4。
+export async function createManualAccount(
+  userId: string,
+  label: string,
+  values: Record<string, string>,
+) {
+  const parsed = ManualFirstToken.safeParse(values);
+  if (!parsed.success) {
+    throw new CredentialValidationError(
+      parsed.error.issues.map((i) => `${i.path.join(".") || "tokens"}: ${i.message}`).join("; "),
+    );
+  }
+  const first = parsed.data;
+  const account = await db.createAccount(userId, {
+    connectorId: "manual",
+    label,
+    creds: JSON.stringify({ tokens: "[]" }),
+  });
+  const holding = await db.createManualHolding(userId, account.id, {
+    symbol: first.symbol,
+    unitPrice: first.unitPrice,
+    identifier: first.identifier,
+  });
+  await db.recordManualActivity(userId, holding.id, {
+    kind: "set",
+    amount: first.amount,
+    occurredAt: Date.now(),
+  });
+  await materializeManualCreds(userId, account.id);
+  return account;
 }

@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
-import { CredentialValidationError } from "@folio/connectors-basic";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -8,7 +7,7 @@ import { isComplete, safeView, sealCreds } from "../creds";
 import { requireAuth } from "../require-auth";
 import { credentialSpecs, validateAccountCreds } from "./connectors";
 import { db } from "./db";
-import { materializeManualCreds } from "./manual";
+import { createManualAccount } from "./manual";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 connectorId/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);
@@ -43,19 +42,12 @@ export const listMyAccounts = createServerFn({ method: "GET" })
 
 // 统一创建入口(connector-driven,#55/#52):表单原始输入 values(键 = connector.account.creds 的 key),
 // 校验/加密/落库全由 connectorId 驱动,不再按类型分派。空串值 = 未填的可选字段,落库前丢弃。
-// manual 是特例(ADR 0017):表单仍收单 token 标量(symbol/amount/unitPrice/identifier),服务端转换成
-// 首个 holding + 一条 set 活动 + 物化 creds.tokens(多 token 录入 UI 见 T4)。
+// manual 是特例(ADR 0017):表单收单 token 标量 → createManualAccount(见 ./manual)转换成 holding + 活动
+// + creds.tokens;其余 connector 走通用形状闸 + 探活 + seal 落库。
 const CreateAccountInput = z.object({
   connectorId: z.string().min(1),
   label: z.string().trim().min(1, "label is required"),
   values: z.record(z.string(), z.string().trim()), // 表单原始输入(键 = connector.account.creds 的 key);trim 后落库
-});
-// manual 加账户首 token 的标量输入(表单 ManualFields 提交);coerce 数字,identifier 可选。
-const ManualFirstToken = z.object({
-  symbol: z.string().trim().min(1),
-  amount: z.coerce.number(),
-  unitPrice: z.coerce.number(),
-  identifier: z.string().trim().min(1).optional(),
 });
 export const createAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
@@ -66,35 +58,8 @@ export const createAccount = createServerFn({ method: "POST" })
     //(必填 validator 对 undefined 均失败 —— z.coerce.number() 拒 undefined)。
     const values = Object.fromEntries(Object.entries(data.values).filter(([, v]) => v !== ""));
 
-    // manual 特例:表单收标量首 token → 建账户(creds.tokens 先空)+ 首 holding + set 活动 → 物化 creds.tokens。
-    // 不走通用 validateAccountCreds/raw2sealed(account.creds 现为单个 tokens JSON 字段,与标量表单不同形)。
     if (connectorId === "manual") {
-      // 与通用路径同一错误类型:形状不过抛 CredentialValidationError(而非裸 ZodError)。
-      const parsed = ManualFirstToken.safeParse(values);
-      if (!parsed.success) {
-        throw new CredentialValidationError(
-          parsed.error.issues
-            .map((i) => `${i.path.join(".") || "tokens"}: ${i.message}`)
-            .join("; "),
-        );
-      }
-      const first = parsed.data;
-      const account = await db.createAccount(context.userId, {
-        connectorId,
-        label: data.label,
-        creds: JSON.stringify({ tokens: "[]" }),
-      });
-      const holding = await db.createManualHolding(context.userId, account.id, {
-        symbol: first.symbol,
-        unitPrice: first.unitPrice,
-        identifier: first.identifier,
-      });
-      await db.recordManualActivity(context.userId, holding.id, {
-        kind: "set",
-        amount: first.amount,
-        occurredAt: Date.now(),
-      });
-      await materializeManualCreds(context.userId, account.id);
+      const account = await createManualAccount(context.userId, data.label, values);
       log.info("account created", { connectorId, accountId: account.id });
       return account;
     }
