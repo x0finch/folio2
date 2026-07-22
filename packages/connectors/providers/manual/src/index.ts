@@ -10,8 +10,8 @@ import { z } from "zod";
 // 有 identifier → 产 coingecko: tokenKey 供 revalue 按显式 ref 解析;无则按 symbol 归一(同 CEX)。
 // manual 统一走市价重估(ADR 0010 删 fixed)。零依赖、不碰 SECRETS_KEY/cloudflare:workers(原则 #5)。
 
-// 一个手记持仓:token 定义 + 物化出的 amount(= 该 holding 活动账本的 deriveAmount)。
-const manualHolding = z.object({
+// creds.tokens 的一项:token 定义 + 物化出的 amount(= 对应 holding 活动账本的 deriveAmount)。
+const manualToken = z.object({
   symbol: z.string().trim().min(1),
   unitPrice: z.coerce.number(),
   identifier: z.string().trim().min(1).optional(),
@@ -34,7 +34,7 @@ export const manualAccountCreds = [
       } catch {
         return v; // → 交给 z.array 判负,报成 tokens 的校验错而非裸 throw
       }
-    }, z.array(manualHolding)),
+    }, z.array(manualToken)),
   },
 ] as const satisfies readonly CredField[];
 
