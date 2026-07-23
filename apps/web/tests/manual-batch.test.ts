@@ -96,7 +96,7 @@ describe("planManualBatch", () => {
     if (!plan.ok) return;
     expect(plan.newTokens).toEqual([]);
     expect(plan.activities).toEqual([
-      { tokenId: "t1", kind: "add", amount: 2, price: null, occurredAt: 10, memo: null },
+      { tokenId: "t1", kind: "add", amount: 2, price: null, fee: null, occurredAt: 10, memo: null },
     ]);
   });
 
