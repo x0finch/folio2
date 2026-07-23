@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { createTokenPriceHistoryStore } from "@folio/db";
 import type { CgkCoinId, TokenRef } from "@folio/oracle";
 import { beforeEach, describe, expect, it } from "vitest";
+import { buildAccountValueHistory } from "../../src/lib/history";
 import { db } from "../../src/lib/server/db";
 import {
   addManualActivities,
@@ -89,6 +90,25 @@ describe("loadManualAccountSeries (grid)", () => {
     const series = await loadManualAccountSeries(USER, acc.id, D0 + 3 * DAY); // 桶 B0..B0+3
     expect(series).toHaveLength(4);
     expect(series.every((r) => r.totalUsd === 2 * 60000)).toBe(true);
+  });
+
+  // T5 老 bug 原样回归:抽屉切到某时间窗(since 在唯一活动之后),旧实现按「交易时刻」采样 → 窗口内无点 →
+  // 账户在该窗看着是空的。网格修复:逐日铺满,since 之后的点仍反映其前活动折出的存量。这里按 getAccountValueHistory
+  // 的做法组合 loadManualAccountSeries(真实 D1 网格)+ buildAccountValueHistory(rows, since) 端到端钉住。
+  it("since 窗口起点晚于唯一活动 → 窗口内仍显存量(非空),不再被丢(修 T5 老 bug)", async () => {
+    const acc = await emptyAccount();
+    // 唯一一笔活动在 D0;窗口 since = D0+2d(在活动之后)。now = D0+4d。
+    await addManualActivities(USER, acc.id, [
+      { token: localBtc, kind: "add", amount: 2, occurredAt: D0, price: 60000 },
+    ]);
+    const rows = await loadManualAccountSeries(USER, acc.id, D0 + 4 * DAY);
+    const windowed = buildAccountValueHistory(
+      rows.map((r) => ({ takenAt: r.takenAt, totalUsd: r.totalUsd })),
+      D0 + 2 * DAY, // since:晚于唯一活动(D0)
+    );
+    // 旧实现:rows 只有 D0 一个点 → since 过滤后为空。网格:since 之后每天都有点,值 = 带过来的 2×60000。
+    expect(windowed.length).toBeGreaterThan(0);
+    expect(windowed.every((p) => p.total === 2 * 60000)).toBe(true);
   });
 
   it("补录更早活动 → 网格起点前移 + 整条重算", async () => {
