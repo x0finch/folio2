@@ -128,18 +128,22 @@ function DetailBody({
   // 动态 side / 抬 z)。hover 触发,离开即收,不需受控关闭。
   const menuPop = useHoverPopover();
 
-  // 头部背景 = 账户价值历史(窗口可切);末点 = 最新快照冻结总额,与 account.totalUsd 同源 → 曲线当下点 ≡ 头部数值。
+  // 头部背景 = 账户价值历史(窗口可切)。末点均与 account.totalUsd 同源 → 曲线当下点 ≡ 头部数值:
+  // 非-manual 取最新快照冻结总额;manual 走账本 compute-on-read、由服务端补一个实时盯市末点(ADR 0018 / T5)。
   const [range, setRange] = useState<Range>("30d");
   const historyQuery = useQuery({
     queryKey: ["account-history", account.id, range],
     queryFn: () =>
       getAccountValueHistory({
-        data: { accountId: account.id, since: rangeSince(range, Date.now()) },
+        // connectorId 传给服务端做读路径分流(manual→账本 / 其余→快照),省一次账户反查。
+        data: {
+          accountId: account.id,
+          since: rangeSince(range, Date.now()),
+          connectorId: account.connectorId,
+        },
       }),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
-    // manual 不写快照(ADR 0018)→ 无单账户价值历史(留待 T5 compute-on-read),不发无谓请求。
-    enabled: !isManual(account.connectorId),
   });
   const series = historyQuery.data?.series ?? [];
 
