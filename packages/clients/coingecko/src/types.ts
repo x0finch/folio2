@@ -23,6 +23,12 @@ export interface MarketCoin {
 // GET /simple/price → { [coinId]: { usd, usd_24h_change, last_updated_at } }
 export type SimplePriceMap = Record<string, Record<string, number>>;
 
+// GET /coins/{id}/market_chart/range → { prices, market_caps, total_volumes }
+// 每项是 [msTimestamp, value] 对(时间戳为**毫秒**,与 from/to 查询参数的秒不同)。仅消费 prices。
+export interface MarketChartRange {
+  prices?: [number, number][];
+}
+
 // GET /search 的一个 coin
 export interface SearchCoin {
   id?: string;

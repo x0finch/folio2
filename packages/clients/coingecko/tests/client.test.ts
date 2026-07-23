@@ -94,6 +94,34 @@ describe("createCoinGeckoClient · 方法(URL/参数拼装 + 返回)", () => {
     expect(urlOf(f).searchParams.has("include_24hr_change")).toBe(false);
   });
 
+  it("coinsMarketChartRange → /coins/{id}/market_chart/range 带 vs_currency/from/to;返回 prices 对(ms)", async () => {
+    // CGK 返回的 prices 时间戳是**毫秒**(from/to 查询参数是秒)—— client 原样透传。
+    const body = {
+      prices: [
+        [1_600_000_000_000, 60000],
+        [1_600_086_400_000, 65000],
+      ],
+      market_caps: [[1_600_000_000_000, 1e12]],
+      total_volumes: [[1_600_000_000_000, 3e10]],
+    };
+    const f = mockFetch(ok(body));
+    const out = await createCoinGeckoClient().coinsMarketChartRange({
+      id: "bitcoin",
+      vsCurrency: "usd",
+      fromSec: 1_600_000_000,
+      toSec: 1_600_086_400,
+    });
+    expect(out).toEqual([
+      [1_600_000_000_000, 60000],
+      [1_600_086_400_000, 65000],
+    ]);
+    const u = urlOf(f);
+    expect(u.pathname).toBe("/api/v3/coins/bitcoin/market_chart/range");
+    expect(u.searchParams.get("vs_currency")).toBe("usd");
+    expect(u.searchParams.get("from")).toBe("1600000000");
+    expect(u.searchParams.get("to")).toBe("1600086400");
+  });
+
   it("search → /search?query=", async () => {
     const f = mockFetch(ok({ coins: [] }));
     await createCoinGeckoClient().search("btc");
@@ -182,6 +210,22 @@ describe("createCoinGeckoClient · 错误映射(以 assetPlatforms 触发)", () 
       (await grabErr(createCoinGeckoClient().simplePrice({ ids: ["x"], vsCurrencies: ["usd"] })))
         .code,
     ).toBe("PARSE_ERROR");
+  });
+
+  it("coinsMarketChartRange 非对象 / 缺 prices 数组 → PARSE_ERROR", async () => {
+    const params = { id: "bitcoin", vsCurrency: "usd", fromSec: 1, toSec: 2 };
+    mockFetch(ok(null));
+    expect((await grabErr(createCoinGeckoClient().coinsMarketChartRange(params))).code).toBe(
+      "PARSE_ERROR",
+    );
+    mockFetch(ok({ market_caps: [] })); // 缺 prices
+    expect((await grabErr(createCoinGeckoClient().coinsMarketChartRange(params))).code).toBe(
+      "PARSE_ERROR",
+    );
+    mockFetch(ok({ prices: "nope" })); // prices 非数组
+    expect((await grabErr(createCoinGeckoClient().coinsMarketChartRange(params))).code).toBe(
+      "PARSE_ERROR",
+    );
   });
 });
 
