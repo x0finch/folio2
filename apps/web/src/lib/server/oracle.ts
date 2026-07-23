@@ -1,5 +1,10 @@
 import { env } from "cloudflare:workers";
-import { createFxStore, createPlatformStore, createTokenStore } from "@folio/db";
+import {
+  createFxStore,
+  createPlatformStore,
+  createTokenPriceHistoryStore,
+  createTokenStore,
+} from "@folio/db";
 import { createOracle, type Oracle } from "@folio/oracle";
 
 // 统一 Oracle 门面(#79):代币 / 平台 / 汇率三服务经一处 createOracle 组装,替代旧的
@@ -19,6 +24,7 @@ export const oracle: Oracle = new Proxy({} as Oracle, {
         createTokenStore: (source) => createTokenStore(env, { source }),
         createPlatformStore: () => createPlatformStore(env),
         createFxStore: () => createFxStore(env),
+        createPriceHistoryStore: () => createTokenPriceHistoryStore(env),
       }) as unknown as Record<string, unknown>
     )[prop],
 });

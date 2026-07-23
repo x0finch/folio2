@@ -53,3 +53,24 @@ export interface TokenStore {
   // 写价(priceOf 回源 / refreshStalePrices 批量):只更新已存在的行。
   putPrices(prices: TokenPrice[], ttlMs: number): Promise<void>;
 }
+
+// 历史日价缓存(全局参考数据,**无 userId** —— 原则 #6 受控例外,同 TokenStore)。
+// 过去某 UTC 日的历史价不可变 → 永久缓存(无 TTL);键 (source, cgkId, dayBucket)。
+// 今日桶可变 → **不落此表**(调用方走短 TTL / 现价),故本 store 只承载已确定的过去日。
+export interface TokenPriceHistoryStore {
+  // 读:给定 source + 上游 coin id + 一组 UTC 日桶,返回命中的 dayBucket → unitPrice(USD)。
+  getDailyPrices(
+    source: TokenRef["source"],
+    cgkId: string,
+    dayBuckets: number[],
+  ): Promise<Map<number, number>>;
+  // 写:upsert 一批 (source, cgkId, dayBucket, unitPrice)。调用方只应传不可变的过去日。
+  putDailyPrices(
+    rows: {
+      source: TokenRef["source"];
+      cgkId: string;
+      dayBucket: number;
+      unitPrice: number;
+    }[],
+  ): Promise<void>;
+}

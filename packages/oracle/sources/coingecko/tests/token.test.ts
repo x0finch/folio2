@@ -158,6 +158,53 @@ describe("fetchPrices", () => {
   });
 });
 
+describe("fetchPriceSeries", () => {
+  it("hits market_chart/range with from/to seconds; maps prices → ordered ms points", async () => {
+    const { calls } = mockFetch(() => ({
+      body: {
+        prices: [
+          [1_600_086_400_000, 65000],
+          [1_600_000_000_000, 60000], // 乱序 → 解析后按 atMs 升序
+        ],
+        market_caps: [],
+        total_volumes: [],
+      },
+    }));
+    const src = createCoinGeckoSource();
+    const out = await src.fetchPriceSeries(cg("bitcoin"), 1_600_000_000_000, 1_600_086_400_000);
+    expect(calls[0].url.pathname).toBe("/api/v3/coins/bitcoin/market_chart/range");
+    expect(calls[0].url.searchParams.get("vs_currency")).toBe("usd");
+    expect(calls[0].url.searchParams.get("from")).toBe("1600000000"); // floor(ms/1000)
+    expect(calls[0].url.searchParams.get("to")).toBe("1600086400"); // ceil(ms/1000)
+    expect(out).toEqual([
+      { atMs: 1_600_000_000_000, unitPrice: 60000 },
+      { atMs: 1_600_086_400_000, unitPrice: 65000 },
+    ]);
+  });
+
+  it("drops malformed pairs (short tuple / non-finite)", async () => {
+    mockFetch(() => ({
+      body: {
+        prices: [
+          [1_600_000_000_000, 60000],
+          [1_600_050_000_000], // 短元组 → 丢
+          ["x", 5], // 非有限时间戳 → 丢
+          [1_600_086_400_000, null], // 非有限价 → 丢
+        ],
+      },
+    }));
+    const out = await createCoinGeckoSource().fetchPriceSeries(cg("bitcoin"), 1, 2);
+    expect(out).toEqual([{ atMs: 1_600_000_000_000, unitPrice: 60000 }]);
+  });
+
+  it("upstream error → TokenError (mapped, not raw)", async () => {
+    mockFetch(() => ({ status: 503 }));
+    await expect(
+      createCoinGeckoSource().fetchPriceSeries(cg("bitcoin"), 1, 2),
+    ).rejects.toMatchObject({ code: "UPSTREAM_ERROR", retryable: true });
+  });
+});
+
 describe("searchTokens", () => {
   it("sends query and parses coins[] → TokenInfo[]", async () => {
     const { calls } = mockFetch(() => ({

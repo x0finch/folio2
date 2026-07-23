@@ -4,6 +4,7 @@ import {
   TokenError,
   type TokenInfo,
   type TokenPrice,
+  type TokenPricePoint,
   type TokenRef,
 } from "@folio/oracle-basic";
 import { SEARCH_LIMIT, VS_USD } from "./constants";
@@ -81,6 +82,19 @@ export function parseSimplePrice(json: unknown): Map<string, TokenPrice> {
       asOf: typeof ts === "number" ? ts * 1000 : 0,
     });
   }
+  return out;
+}
+
+// market_chart/range 的 prices 对 [msTimestamp, unitPrice] → 升序原始观测点(USD)。
+// 丢弃非二元组 / 非有限值;按 atMs 升序(CGK 本已升序,防御性再排)。日级归一在 tokens 服务侧做。
+export function parsePriceSeries(pairs: [number, number][]): TokenPricePoint[] {
+  const out: TokenPricePoint[] = [];
+  for (const pair of pairs) {
+    if (!Array.isArray(pair) || pair.length < 2) continue;
+    const [atMs, unitPrice] = pair;
+    if (Number.isFinite(atMs) && Number.isFinite(unitPrice)) out.push({ atMs, unitPrice });
+  }
+  out.sort((a, b) => a.atMs - b.atMs);
   return out;
 }
 

@@ -53,6 +53,13 @@ export interface TokenPrice {
   asOf: number;
 }
 
+// 历史价观测点:某时刻的价(USD)。source 侧产原始观测(粒度随上游);tokens 服务按 UTC 日桶归一后
+// 落缓存并对外返回(atMs = 该日桶起点 UTC 零点)。#148 / ADR 0019 的历史价骨架单元。
+export interface TokenPricePoint {
+  atMs: number;
+  unitPrice: number;
+}
+
 // —— 符号消歧的候选(瞬时,喂 `pickByConfidence`)——
 // 来自 warm(top-N markets),已带 `marketCapRank`;symbol 是 store 的 key,值里不带。
 export interface TokenCandidate {

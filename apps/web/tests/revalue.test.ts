@@ -68,6 +68,7 @@ const stubSource = {
     }
     return out;
   },
+  fetchPriceSeries: async () => [],
   searchTokens: async () => [],
 };
 

@@ -3,6 +3,7 @@ import type {
   FxStore,
   PlatformStore,
   Platforms,
+  TokenPriceHistoryStore,
   TokenRef,
   TokenStore,
 } from "@folio/oracle-basic";
@@ -24,6 +25,8 @@ export interface CreateOracleConfig {
   createTokenStore: (source: TokenRef["source"]) => TokenStore;
   createPlatformStore: () => PlatformStore;
   createFxStore: () => FxStore;
+  // 历史日价缓存(#148 / ADR 0019)。可选:不传 → 无历史缓存(priceSeries 现取不落库)。
+  createPriceHistoryStore?: () => TokenPriceHistoryStore;
 }
 
 // 统一 Oracle 门面(Phase 3,#79)。对外一个入口,对内组合 tokens/platforms/fx 三服务、不拆其实现。
@@ -52,7 +55,11 @@ export function createOracle(cfg: CreateOracleConfig): Oracle {
     get tokens() {
       // createTokens 缺省 source = CoinGecko(见其定义),故此处不必显式造源。
       if (!tokens) {
-        tokens = createTokens({ apiKey, createStore: cfg.createTokenStore });
+        tokens = createTokens({
+          apiKey,
+          createStore: cfg.createTokenStore,
+          createPriceHistoryStore: cfg.createPriceHistoryStore,
+        });
       }
       return tokens;
     },

@@ -6,8 +6,10 @@ export type { TokenGroupDef, TokenGroupKey } from "./constants";
 export {
   CGK_RECHECK_TTL_MS,
   DEFAULT_TOP_N,
+  dayBucketOf,
   GROUP_MEMBERSHIP,
   INFO_TTL_MS,
+  MS_PER_DAY,
   OVERRIDES,
   PRICE_TTL_MS,
   RESOLUTION_DOMINANCE,
@@ -42,7 +44,7 @@ export {
   type Platforms,
 } from "./platform";
 export { parseRefKey, refKey } from "./ref";
-export type { TokenStore } from "./store";
+export type { TokenPriceHistoryStore, TokenStore } from "./store";
 export type { PriceSource, TokenMetaSource, TokenSource } from "./token";
 export {
   buildTokenKey,
@@ -61,6 +63,7 @@ export type {
   TokenGroup,
   TokenInfo,
   TokenPrice,
+  TokenPricePoint,
   TokenRecord,
   TokenRecordPrice,
   TokenRef,
