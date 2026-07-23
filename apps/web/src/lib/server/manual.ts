@@ -5,12 +5,18 @@ import type {
   ManualToken,
   SnapshotWithBalances,
 } from "@folio/db";
+import type { CgkCoinId, TokenRef } from "@folio/oracle";
+import { dayBucketOf } from "@folio/oracle";
 import type { SnapshotTotalRow } from "../history";
 import type { CredsToken } from "../manual-activity";
 import { deriveAmount, projectToken } from "../manual-activity";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "../manual-batch";
 import { isManual, MANUAL_CONNECTOR_ID } from "../manual-connector";
-import { buildManualAccountSeries, type HistoryToken } from "../manual-history";
+import {
+  buildManualAccountSeries,
+  type HistoricalPriceAt,
+  type HistoryToken,
+} from "../manual-history";
 import { buildManualSnapshot } from "../manual-snapshot";
 import { type BalanceLike, balanceToAssetRef } from "../tokens";
 import { db } from "./db";
@@ -223,13 +229,41 @@ async function loadHistoryTokens(userId: string, accountId: string): Promise<His
   }));
 }
 
+// 异步 oracle 历史价 → 同步注入闭包(ADR 0019)。按 identifier 区间一次预取 priceSeries(A-2 内部缓存过去日),
+// 建 Map<identifier, Map<dayBucket, unitPrice>>,再包成 buildManualAccountSeries 要的同步 (identifier, t) 查询。
+// 每 identifier 一次网络(之后全缓存命中);取不到的日 → 闭包返 undefined → 纯层降级链落 ②③。manual token 的
+// identifier 定义即 coingecko coin id(选币所选)→ 直接构造 coingecko ref。
+async function buildHistoricalPriceAt(
+  tokens: HistoryToken[],
+  now: number,
+): Promise<HistoricalPriceAt> {
+  const byIdentifier = new Map<string, Map<number, number>>();
+  await Promise.all(
+    tokens.map(async (tk) => {
+      if (!tk.identifier || tk.activities.length === 0 || byIdentifier.has(tk.identifier)) return;
+      const from = Math.min(...tk.activities.map((a) => a.occurredAt));
+      const ref: TokenRef = { source: "coingecko", identifier: tk.identifier as CgkCoinId };
+      const daily = new Map<number, number>();
+      for (const pt of await oracle.tokens.priceSeries(ref, from, now)) {
+        daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
+      }
+      byIdentifier.set(tk.identifier, daily);
+    }),
+  );
+  return (identifier, t) => byIdentifier.get(identifier)?.get(dayBucketOf(t));
+}
+
 // 单 manual 账户的账本价值序列(抽屉头部 chart 用;getAccountValueHistory 对 manual 走此)。
-// #148 未就绪 → 不传 priceAt,走账本价②/unitPrice③降级(有 identifier 者待 #148 切 oracle 历史价)。
+// ADR 0019:日网格采样 + 注入 oracle 历史价(priceAt);取不到者降级链落账本价②/unitPrice③。
+// now 由调用方传入(与 live 末点同源 → 端点对齐);缺省 Date.now()。
 export async function loadManualAccountSeries(
   userId: string,
   accountId: string,
+  now: number = Date.now(),
 ): Promise<SnapshotTotalRow[]> {
-  return buildManualAccountSeries(accountId, await loadHistoryTokens(userId, accountId));
+  const tokens = await loadHistoryTokens(userId, accountId);
+  const priceAt = await buildHistoricalPriceAt(tokens, now);
+  return buildManualAccountSeries(accountId, tokens, now, priceAt);
 }
 
 // 单 manual 账户「当下」实时盯市总额(抽屉曲线末点接它 → 端点与抽屉头 account.totalUsd 同源盯市,不因
@@ -253,9 +287,12 @@ export async function loadManualAccountLiveTotal(
 export async function loadManualHistoryRows(
   userId: string,
   accounts: AccountSafe[],
+  now: number = Date.now(),
 ): Promise<SnapshotTotalRow[]> {
   const manual = accounts.filter((a) => isManual(a.connectorId));
-  const perAccount = await Promise.all(manual.map((a) => loadManualAccountSeries(userId, a.id)));
+  const perAccount = await Promise.all(
+    manual.map((a) => loadManualAccountSeries(userId, a.id, now)),
+  );
   return perAccount.flat();
 }
 

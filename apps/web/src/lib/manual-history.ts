@@ -1,10 +1,19 @@
-// 纯逻辑(缝③,无 server/db import → 可单测)。manual 账户价值历史 compute-on-read(ADR 0018):
+// 纯逻辑(缝③,无 server/db import → 可单测)。manual 账户价值历史 compute-on-read(ADR 0018/0019):
 // value@T = quantity@T × price@T,quantity@T = 折叠 occurredAt ≤ T 的活动。改/删任一过去活动 →
 // 下次读整条曲线重算,永不留 stale。产出的 (takenAt, totalUsd) 阶梯序列直接喂既有 buildPortfolioHistory
 // —— manual 只是「换供货源」(别账户来自 snapshot 表,manual 来自账本现算),无需特殊合并。
+//
+// ADR 0019:采样轴从「交易时刻」改为**区间驱动的规则日网格**—— 组合净值曲线的形状主要来自价格波动而非交易,
+// 按交易时刻采样会漏掉活动之间的市价起伏(一年一次交易只出一个点)。日网格覆盖 [首活动日, now],数量投影
+// 到每个网格日,价由注入的 oracle 历史价(#148)驱动;网格天然覆盖 since→now,顺带修掉「窗口外存量被丢」缺口。
 import type { ManualActivityKind } from "@folio/db";
 import type { SnapshotTotalRow } from "./history";
 import { deriveAmount } from "./manual-activity";
+
+// UTC 日网格步长。与 @folio/oracle-basic 的 dayBucketOf(floor(ms / 86_400_000))同口径 —— 一日的毫秒数是
+// 恒定算术常量(非会漂移的约定),故本纯模块自持一份、不引 oracle 包;server 注入的 priceAt 用 oracle 的
+// dayBucketOf 归桶,二者按构造对齐(网格 τ 落在桶 b ⇔ floor(τ/MS_PER_DAY)===b)。
+const MS_PER_DAY = 86_400_000;
 
 // 折叠 + 定价所需的最小活动形。price 参与 price@T 降级链②,不参与数量折叠。
 export interface HistoryActivity {
@@ -20,11 +29,12 @@ export interface HistoryToken {
   activities: HistoryActivity[];
 }
 
-// #148 就绪后由 server 注入:有 identifier 的 token 在时刻 T 的 oracle 历史价(取不到 → undefined 落降级链)。
+// 由 server 注入(#148 / ADR 0019):有 identifier 的 token 在时刻 T 的 oracle 历史价(取不到 → undefined 落降级链)。
+// server 侧按区间一次预取 priceSeries → 建 Map<identifier, Map<dayBucket, price>>,再包成本同步闭包。
 export type HistoricalPriceAt = (identifier: string, t: number) => number | undefined;
 
-// price@T 降级链(ADR 0018):① 有 identifier → oracle 历史价(#148,经 priceAt 注入)→ ② 账本中
-// occurredAt ≤ T 最近一条**记了 price** 的活动 → ③ 当前 unitPrice 摊平。本片先落 ②③;#148 就绪切 ①。
+// price@T 降级链(ADR 0019):① 有 identifier → oracle 历史价(#148,经 priceAt 注入,市值主路径)→ ② 账本中
+// occurredAt ≤ T 最近一条**记了 price** 的活动(兜底 + 成本原料)→ ③ 当前 unitPrice 摊平(真无市场,平线)。
 export function tokenPriceAt(token: HistoryToken, t: number, priceAt?: HistoricalPriceAt): number {
   if (token.identifier && priceAt) {
     const p = priceAt(token.identifier, t); // ①
@@ -49,20 +59,32 @@ export function tokenQuantityAt(token: HistoryToken, t: number): number {
   return deriveAmount(token.activities.filter((a) => a.occurredAt <= t));
 }
 
-// 某 manual 账户的账本 → (takenAt, totalUsd) 阶梯序列:每个「有活动发生的不同时刻」一行(此刻起某 token
-// 的数量或定价变化 → 账户净值变)。totalUsd@T = Σ_token quantity@T × price@T。空账户/无活动 → 空序列。
+// 某 manual 账户的账本 → (takenAt, totalUsd) 序列,在**规则日网格**上采样(ADR 0019):从首活动所在 UTC 日
+// 到 now,逐日一行 —— 曲线随市价起伏而非只在交易时刻跳变。每行取当日日末(夹到 now)为采样点 τ:数量折叠
+// occurredAt ≤ τ(当日交易计入),价 = tokenPriceAt(τ)(oracle 历史价@当日桶,降级 ②③)。totalUsd@τ =
+// Σ_token quantity@τ × price@τ。空账户 / 无任何活动 → 空序列。网格覆盖全史 → 下游按 since 裁窗、downsample
+// 压点;since 之后的点仍反映其前活动折出的存量(修掉 T5「窗口外存量被丢」缺口)。
 export function buildManualAccountSeries(
   accountId: string,
   tokens: HistoryToken[],
+  now: number,
   priceAt?: HistoricalPriceAt,
 ): SnapshotTotalRow[] {
-  const times = new Set<number>();
-  for (const tk of tokens) for (const a of tk.activities) times.add(a.occurredAt);
-  return [...times]
-    .sort((a, b) => a - b)
-    .map((t) => {
-      let total = 0;
-      for (const tk of tokens) total += tokenQuantityAt(tk, t) * tokenPriceAt(tk, t, priceAt);
-      return { accountId, takenAt: t, totalUsd: total };
-    });
+  let firstOccurred = Number.POSITIVE_INFINITY;
+  for (const tk of tokens)
+    for (const a of tk.activities) firstOccurred = Math.min(firstOccurred, a.occurredAt);
+  if (!Number.isFinite(firstOccurred)) return []; // 无任何活动
+
+  const firstBucket = Math.floor(firstOccurred / MS_PER_DAY);
+  const nowBucket = Math.floor(now / MS_PER_DAY);
+  const rows: SnapshotTotalRow[] = [];
+  for (let b = firstBucket; b <= nowBucket; b++) {
+    // 当日日末(next-day 起点前 1ms),夹到 now → floor(τ/MS_PER_DAY)===b(与注入 priceAt 的日桶对齐);
+    // 当日交易(occurredAt ≤ τ)计入,末桶 τ=now(数量/价均到当下)。
+    const t = Math.min((b + 1) * MS_PER_DAY - 1, now);
+    let total = 0;
+    for (const tk of tokens) total += tokenQuantityAt(tk, t) * tokenPriceAt(tk, t, priceAt);
+    rows.push({ accountId, takenAt: t, totalUsd: total });
+  }
+  return rows;
 }
