@@ -99,11 +99,6 @@ function Expandable({ show, children }: { show: boolean; children: ReactNode }) 
   );
 }
 
-function midnightToday(): number {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
-
 // DraftTokenRef → TokenCombobox 可显示的 TokenInfo(仅展示,不校验 ref.source)。无 identifier → null(走手动模式)。
 function toTokenInfo(token: DraftTokenRef | null): TokenInfo | null {
   if (!token?.identifier) return null;
@@ -170,6 +165,12 @@ function ActivityForm({
   const lockedToken = edit?.token ?? defaultToken;
   const locked = editing || lockToken;
 
+  // 新活动默认发生时刻 = 打开 modal 的真实时刻(非当天 0 点)。开仓 set 由建账户在更早的真实时刻记下,
+  // 若这里用 0 点会让同一天录入的 add/reduce 排到开仓 set 之前(occurredAt 更早)→ 顺序错乱、deriveAmount 也乱序。
+  // 用真实时刻则 occurredAt 随录入递增,与输入顺序一致(展示仍只到日期粒度)。回填过去日期走 DateWheel(该日 0 点)。
+  // useRef 固化到一次打开(emptyDraft 会被调用多次:initialRef 快照 + draft 初值,须取同一值,否则 dirty 误判)。
+  const openedAtRef = useRef(Date.now());
+
   const emptyDraft = (): DraftForm =>
     edit
       ? {
@@ -189,7 +190,7 @@ function ActivityForm({
           // 价格默认取选中币种当前市价(锁定/预选 token 自带 unitPrice)。
           price: defaultToken && defaultToken.unitPrice > 0 ? String(defaultToken.unitPrice) : "",
           fee: "",
-          occurredAt: midnightToday(),
+          occurredAt: openedAtRef.current,
           memo: "",
         };
 
