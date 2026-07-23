@@ -5,10 +5,10 @@ import {
   addManualActivities,
   createManualAccount,
   editManualActivity,
-  loadManualLedger,
+  loadManualAccountDetail,
 } from "../../src/lib/server/manual";
 
-// T4(#156)服务端支撑:抽屉读路径 loadManualLedger(token 定义 + 折叠 amount + 全部活动)+ fee 落库 round-trip。
+// T4(#156)服务端支撑:抽屉读路径 loadManualAccountDetail(token 定义 + 折叠 amount + 全部活动)+ fee 落库 round-trip。
 // 真实 D1(Miniflare);不隔离每测存储 → beforeEach 重置。开仓 set = Date.now(),后续活动用远未来 LATER 排其后。
 const USER = "user-manual-t4";
 const LATER = 4_000_000_000_000;
@@ -32,7 +32,7 @@ async function seedAccount() {
   );
 }
 
-describe("loadManualLedger", () => {
+describe("loadManualAccountDetail", () => {
   it("返回 token(带 DB id + 折叠 amount)+ 全部活动(带 tokenId)", async () => {
     const account = await seedAccount();
     await addManualActivities(USER, account.id, [
@@ -43,28 +43,28 @@ describe("loadManualLedger", () => {
         occurredAt: LATER + 1,
       },
     ]);
-    const ledger = await loadManualLedger(USER, account.id);
+    const detail = await loadManualAccountDetail(USER, account.id);
 
-    expect(ledger.tokens).toHaveLength(1);
-    const [btc] = ledger.tokens;
+    expect(detail.tokens).toHaveLength(1);
+    const [btc] = detail.tokens;
     expect(btc.symbol).toBe("BTC");
     expect(btc.identifier).toBe("bitcoin");
     expect(btc.amount).toBe(1.5); // 开仓 set 1 + add 0.5
     expect(typeof btc.id).toBe("string");
 
     // 活动:开仓 set + add,均挂在该 token 上。
-    expect(ledger.activities.map((a) => a.kind).sort()).toEqual(["add", "set"]);
-    expect(ledger.activities.every((a) => a.tokenId === btc.id)).toBe(true);
+    expect(detail.activities.map((a) => a.kind).sort()).toEqual(["add", "set"]);
+    expect(detail.activities.every((a) => a.tokenId === btc.id)).toBe(true);
   });
 
-  it("空账户(无 token)→ 空 ledger", async () => {
+  it("空账户(无 token)→ 空 detail", async () => {
     const account = await db.createAccount(USER, {
       connectorId: "manual",
       label: "empty",
       creds: JSON.stringify({ tokens: "[]" }),
     });
-    const ledger = await loadManualLedger(USER, account.id);
-    expect(ledger).toEqual({ tokens: [], activities: [] });
+    const detail = await loadManualAccountDetail(USER, account.id);
+    expect(detail).toEqual({ tokens: [], activities: [] });
   });
 });
 
@@ -81,8 +81,8 @@ describe("fee 落库 round-trip", () => {
         fee: 12.5,
       },
     ]);
-    const ledger = await loadManualLedger(USER, account.id);
-    const added = ledger.activities.find((a) => a.kind === "add");
+    const detail = await loadManualAccountDetail(USER, account.id);
+    const added = detail.activities.find((a) => a.kind === "add");
     expect(added?.fee).toBe(12.5);
     expect(added?.price).toBe(60000);
   });
@@ -98,7 +98,7 @@ describe("fee 落库 round-trip", () => {
         fee: 5,
       },
     ]);
-    const added = (await loadManualLedger(USER, account.id)).activities.find(
+    const added = (await loadManualAccountDetail(USER, account.id)).activities.find(
       (a) => a.kind === "add",
     );
     if (!added) throw new Error("add missing");
@@ -107,14 +107,16 @@ describe("fee 落库 round-trip", () => {
     let res = await editManualActivity(USER, added.id, { fee: 20 });
     expect(res.ok).toBe(true);
     expect(
-      (await loadManualLedger(USER, account.id)).activities.find((a) => a.id === added.id)?.fee,
+      (await loadManualAccountDetail(USER, account.id)).activities.find((a) => a.id === added.id)
+        ?.fee,
     ).toBe(20);
 
     // 清空 fee → null
     res = await editManualActivity(USER, added.id, { fee: null });
     expect(res.ok).toBe(true);
     expect(
-      (await loadManualLedger(USER, account.id)).activities.find((a) => a.id === added.id)?.fee,
+      (await loadManualAccountDetail(USER, account.id)).activities.find((a) => a.id === added.id)
+        ?.fee,
     ).toBeNull();
   });
 });

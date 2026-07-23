@@ -158,22 +158,25 @@ async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
   );
 }
 
-// —— 读:抽屉的账本(T4,#156)——
+// —— 读:抽屉账户明细(T4,#156)——
 // creds.tokens(= balances 投影)不含 token 的 DB id、也不含活动账本 → 抽屉的编辑/删除与 Activity tab 需专门读。
 // 返回 tokens(带 DB id + 折叠出的 amount)+ 全部活动(各自带 tokenId,供 Activity tab 按 token 归并展示)。
 // UI 的 logo/name/实时市值仍从 balances(overview)取,按 identifier/symbol 匹配 —— 本读只出账本事实。
-export interface ManualLedgerToken {
+export interface ManualAccountDetailToken {
   id: string;
   symbol: string;
   unitPrice: number;
   identifier: string | null;
   amount: number;
 }
-export interface ManualLedger {
-  tokens: ManualLedgerToken[];
+export interface ManualAccountDetail {
+  tokens: ManualAccountDetailToken[];
   activities: ManualActivity[];
 }
-export async function loadManualLedger(userId: string, accountId: string): Promise<ManualLedger> {
+export async function loadManualAccountDetail(
+  userId: string,
+  accountId: string,
+): Promise<ManualAccountDetail> {
   const rows = await db.listManualTokensByAccount(userId, accountId);
   const perToken = await Promise.all(
     rows.map(async (t) => ({ t, activities: await db.listManualActivityByToken(userId, t.id) })),

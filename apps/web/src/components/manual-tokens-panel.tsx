@@ -25,7 +25,7 @@ import type { DraftTokenRef } from "../lib/manual-types";
 import {
   addActivities,
   editActivity,
-  getManualLedger,
+  getManualAccountDetail,
   removeActivity,
   removeToken,
 } from "../lib/server/manual-mutations";
@@ -38,7 +38,7 @@ import { TokenRowContent } from "./token-row";
 // tab 行右 ghost plus(一律开 Add activity)。两个 SwipeableList 去卡片(surface = 抽屉底色平铺 + hover:bg-muted,
 // 与主页 SharedLayoutBg 药丸同色);Tokens 复用主页 <TokenRowContent>。token 行 swipe:编辑=开 Add activity 并锁定该
 // token(记一笔 set 校准)、删除=确认 modal;activity 行 swipe:编辑=预填 modal、删除=确认 modal。
-// 数据由 getManualLedger 现读(账本事实),写走 T3 server fn,成功后 invalidate ledger 查询 + router 刷新(真持久)。
+// 数据由 getManualAccountDetail 现读(token + 活动账本),写走 T3 server fn,成功后失效明细查询 + router 刷新(真持久)。
 
 const kindTone: Record<string, string> = {
   add: "text-pos",
@@ -75,14 +75,14 @@ export function ManualTokensPanel({
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const ledgerKey = ["manual-ledger", accountId] as const;
-  const ledgerQuery = useQuery({
-    queryKey: ledgerKey,
-    queryFn: () => getManualLedger({ data: { accountId } }),
+  const detailKey = ["manual-account-detail", accountId] as const;
+  const detailQuery = useQuery({
+    queryKey: detailKey,
+    queryFn: () => getManualAccountDetail({ data: { accountId } }),
     staleTime: 30_000,
   });
-  const tokens = useMemo(() => ledgerQuery.data?.tokens ?? [], [ledgerQuery.data]);
-  const activities = useMemo(() => ledgerQuery.data?.activities ?? [], [ledgerQuery.data]);
+  const tokens = useMemo(() => detailQuery.data?.tokens ?? [], [detailQuery.data]);
+  const activities = useMemo(() => detailQuery.data?.activities ?? [], [detailQuery.data]);
 
   // balances(overview,实时富化)提供 logo/name/实时市值;按大写 symbol 匹配账本 token(账本只出事实数量/单价/标识)。
   const balBySymbol = useMemo(
@@ -122,10 +122,10 @@ export function ManualTokensPanel({
   }>({ open: false, token: null, lock: false, edit: null });
   const [confirm, setConfirm] = useState<{ title: string; onConfirm: () => void } | null>(null);
 
-  // 写后刷新:invalidate 账本查询(抽屉列表)+ router(首页净值/账户行同源)。
+  // 写后刷新:失效明细查询(抽屉列表)+ router(首页净值/账户行同源)。
   const refresh = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ledgerKey }),
+      queryClient.invalidateQueries({ queryKey: detailKey }),
       router.invalidate(),
     ]);
   };
@@ -290,8 +290,8 @@ export function ManualTokensPanel({
         </div>
 
         <TabsContent value="tokens">
-          {ledgerQuery.isLoading ? (
-            <LedgerSkeleton />
+          {detailQuery.isLoading ? (
+            <DetailSkeleton />
           ) : tokenItems.length > 0 ? (
             <SwipeableList items={tokenItems} classNames={flatSwipe} />
           ) : (
@@ -300,8 +300,8 @@ export function ManualTokensPanel({
         </TabsContent>
 
         <TabsContent value="activity">
-          {ledgerQuery.isLoading ? (
-            <LedgerSkeleton />
+          {detailQuery.isLoading ? (
+            <DetailSkeleton />
           ) : activityItems.length > 0 ? (
             <SwipeableList items={activityItems} classNames={flatSwipe} />
           ) : (
@@ -380,7 +380,7 @@ export function ManualTokensPanel({
   );
 }
 
-function LedgerSkeleton() {
+function DetailSkeleton() {
   return (
     <div className="flex flex-col gap-1">
       {[0, 1, 2].map((i) => (
