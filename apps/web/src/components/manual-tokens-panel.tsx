@@ -21,6 +21,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { OverviewBalance } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
+import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
 import type { DraftTokenRef } from "../lib/manual-types";
 import {
   addActivities,
@@ -61,6 +62,10 @@ interface ActivityRow extends ManualActivity {
   logo?: string;
 }
 
+// 活动时间按本地时区展示(见 useLocalDateFormat)。列表行只显日期;hover 明细显日期 + 时间(到秒)。
+const LIST_DATE_FMT = { dateStyle: "medium" } as const;
+const DETAIL_DATETIME_FMT = { dateStyle: "medium", timeStyle: "medium" } as const;
+
 export function ManualTokensPanel({
   accountId,
   balances,
@@ -74,6 +79,9 @@ export function ManualTokensPanel({
   const format = useFormatter();
   const router = useRouter();
   const queryClient = useQueryClient();
+
+  const dateFmt = useLocalDateFormat(LIST_DATE_FMT);
+  const dateTimeFmt = useLocalDateFormat(DETAIL_DATETIME_FMT);
 
   const detailKey = ["manual-account-detail", accountId] as const;
   const detailQuery = useQuery({
@@ -243,7 +251,7 @@ export function ManualTokensPanel({
           <div className="min-w-0 truncate font-medium tabular-nums">
             <HoverDetail
               className="inline underline-offset-4 decoration-muted-foreground/60 hover:underline"
-              detail={<ActivityDetail row={a} t={t} format={format} />}
+              detail={<ActivityDetail row={a} t={t} format={format} dateTimeFmt={dateTimeFmt} />}
             >
               {formatNumber(a.amount)} {a.symbol.toUpperCase()}
             </HoverDetail>
@@ -264,7 +272,7 @@ export function ManualTokensPanel({
             </div>
           ) : null}
           <div className="text-muted-foreground text-xs tabular-nums">
-            {format.dateTime(new Date(a.occurredAt), { dateStyle: "medium" })}
+            {dateFmt.format(a.occurredAt)}
           </div>
         </div>
       </div>
@@ -459,10 +467,12 @@ function ActivityDetail({
   row,
   t,
   format,
+  dateTimeFmt,
 }: {
   row: ActivityRow;
   t: (key: string) => string;
   format: ReturnType<typeof useFormatter>;
+  dateTimeFmt: Intl.DateTimeFormat;
 }) {
   const usd = (v: number) =>
     format.number(v, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -479,9 +489,7 @@ function ActivityDetail({
         <DetailRow label={t("valuePreview")}>{usd(row.amount * row.price)}</DetailRow>
       )}
       {row.fee != null && <DetailRow label={t("feeLabel")}>{usd(row.fee)}</DetailRow>}
-      <DetailRow label={t("dateLabel")}>
-        {format.dateTime(new Date(row.occurredAt), { dateStyle: "medium" })}
-      </DetailRow>
+      <DetailRow label={t("dateLabel")}>{dateTimeFmt.format(row.occurredAt)}</DetailRow>
       {row.memo ? (
         <div className="flex flex-col gap-0.5 border-border border-t pt-2">
           <span className="text-muted-foreground text-xs">{t("memoLabel")}</span>

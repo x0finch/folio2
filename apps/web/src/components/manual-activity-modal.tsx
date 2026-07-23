@@ -10,24 +10,26 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
+  Tooltip,
   useMediaQuery,
 } from "@folio/ui";
-import { CalendarDays, DollarSign, Pencil, Plus, X } from "lucide-react";
+import { Receipt, StickyNote, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
-import { formatNumber } from "../lib/format-number";
+import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
 import { useTokenPrice } from "../lib/hooks/use-token-price";
 import type { ActivityDraft, DraftTokenRef } from "../lib/manual-types";
-import { DateWheel } from "./date-wheel";
+import { DateTimeWheel } from "./date-time-wheel";
 import { Portal } from "./portal";
 import { TokenCombobox } from "./token-combobox";
 
-// manual 活动的暂存批量录入(A5 F 片 + 交易模型迭代)。布局照参考稿:type 顶部平铺 tab(add/reduce/set)、token 选币、
-// Quantity + Price 同行、日期/手续费/备注三枚 chip(fee/notes 点开渐进展开,notes 多行默认一行)、Total 汇总卡、主按钮。
+// manual 活动录入(单笔;A5 F 片 + 交易模型迭代)。布局:type 顶部平铺 tab(add/reduce/set)、token 选币、
+// Quantity + Price 同行、常驻「价值预览」卡(右上 手续费/备注 ghost 图标、右下 无边框日期-时间小字)、主按钮。
+// 描述项点开在预览卡外展开对应编辑器(日期/时间=滚轮各自打开、手续费=输入、备注=多行),单开、点外部/失焦收起。
 // 价格默认取当前选中币种市价(useTokenPrice 回填,用户改动后不再覆写)。price/fee 为成本基元数据(不参与数量折叠,
-// 供 Total 与后续 P/L 用;历史价见 #148)。「再添加一笔」压入待提交列表、「提交」= 列表 + 当前草稿。
-// **backdrop 不关**(onClose 传 no-op),仅 ✕ 关;有未保存内容时 ✕ 就地出「不保存关闭 / 继续」两按钮。
+// 供预览与后续 P/L 用;历史价见 #148)。一次录一笔:「提交」提交当前草稿、「取消」关闭(脏则先确认)。
+// **backdrop 不关**(onClose 传 no-op),仅 ✕ 关;有未保存内容时 ✕ 就地出「继续 / 不保存」两按钮。
 
 // beUI EASE_OUT 动效曲线(@folio/ui 未导出 lib/ease → 本地镜像同一 cubic-bezier)。
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
@@ -70,15 +72,19 @@ interface DraftForm {
 const KINDS: Kind[] = ["add", "reduce", "set"];
 
 // 备注多行输入:无 beUI Textarea 组件 → token-only 本地 textarea,镜像 Input 的描边/焦点样式;
-// field-sizing:content 随内容自增,默认一行(min-h-11),封顶 max-h-32。
+// field-sizing:content 随内容自增,默认约 3 行(min-h-24),封顶 max-h-32。
 const NOTES_CLASS =
-  "w-full resize-none rounded-2xl border border-border bg-transparent px-3.5 py-2.5 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/40 [field-sizing:content] min-h-11 max-h-32";
+  "w-full resize-none rounded-2xl border border-border bg-transparent px-3.5 py-2.5 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/40 [field-sizing:content] min-h-24 max-h-32";
 
-// 手续费/备注 chip:窄 pill,点开渐进展开输入;激活态(已展开)着 bg-muted。
-const CHIP_CLASS =
-  "flex h-11 shrink-0 items-center gap-1.5 rounded-full border border-border px-3.5 text-muted-foreground text-sm outline-none transition-colors hover:border-foreground/40 hover:text-foreground";
+// 预览卡右上的 ghost 图标(手续费/备注):透明底、hover 圆形微底;有值着 text-primary,展开态着 bg-background。
+const GHOST_ICON =
+  "flex size-7 items-center justify-center rounded-full outline-none transition-colors hover:bg-background/60";
 
-// 展开/收起容器:height 0↔auto + opacity(EASE_OUT 0.22s),与 DateWheel 原有开合同款。日期/手续费/备注三处共用。
+// 预览卡日期/时间小字(分开点击):日期 = 2 位年 + 月日(裁到 2 位年;滚轮里用完整年份),时间 = 时:分:秒。
+const DATE_FMT = { year: "2-digit", month: "short", day: "numeric" } as const;
+const TIME_FMT = { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false } as const;
+
+// 展开/收起容器:height 0↔auto + opacity(EASE_OUT 0.22s)。预览卡外的单一编辑区(日期时间/手续费/备注)用它开合。
 // 纯 Framer AnimatePresence(收起即 exit 卸载 → 直接作 flex 兄弟也不留幽灵间距);开合由外部布尔驱动。
 function Expandable({ show, children }: { show: boolean; children: ReactNode }) {
   return (
@@ -160,16 +166,19 @@ function ActivityForm({
   const format = useFormatter();
   const { fetchPrice } = useTokenPrice();
 
-  // 编辑态:锁定 token、无批量(pending/再添加一笔),底部换成 取消/保存。
+  // manual 活动时间按本地时区展示(见 useLocalDateFormat;与 DateTimeWheel 的本地墙钟一致)。
+  const dateFmt = useLocalDateFormat(DATE_FMT);
+  const timeFmt = useLocalDateFormat(TIME_FMT);
+
+  // 编辑态(edit 既有活动):锁定 token,底部换成 取消/保存(单条 patch,非新增)。
   const editing = Boolean(edit);
   const lockedToken = edit?.token ?? defaultToken;
   const locked = editing || lockToken;
 
-  // 新活动默认发生时刻 = 打开 modal 的真实时刻(非当天 0 点)。开仓 set 由建账户在更早的真实时刻记下,
-  // 若这里用 0 点会让同一天录入的 add/reduce 排到开仓 set 之前(occurredAt 更早)→ 顺序错乱、deriveAmount 也乱序。
-  // 用真实时刻则 occurredAt 随录入递增,与输入顺序一致(展示仍只到日期粒度)。回填过去日期走 DateWheel(该日 0 点)。
+  // 新活动默认发生时刻 = 打开 modal 的此刻,floor 到秒(occurredAt 精确到秒)。用户可经 DateTimeWheel 改。
+  // 真实时刻确保同一天多笔按先后有序排列 + 折叠;同秒极少见,再靠 createdAt(入库序)兜底。
   // useRef 固化到一次打开(emptyDraft 会被调用多次:initialRef 快照 + draft 初值,须取同一值,否则 dirty 误判)。
-  const openedAtRef = useRef(Date.now());
+  const openedAtRef = useRef(Math.floor(Date.now() / 1000) * 1000);
 
   const emptyDraft = (): DraftForm =>
     edit
@@ -194,17 +203,14 @@ function ActivityForm({
           memo: "",
         };
 
-  const [pending, setPending] = useState<DraftForm[]>([]);
   const [draft, setDraft] = useState<DraftForm>(emptyDraft);
   const [picked, setPicked] = useState<TokenInfo | null>(toTokenInfo(lockedToken));
   const [manualMode, setManualMode] = useState(Boolean(lockedToken && !lockedToken.identifier));
-  const [showWheel, setShowWheel] = useState(false);
-  const [showFee, setShowFee] = useState(Boolean(edit?.fee));
-  const [showMemo, setShowMemo] = useState(Boolean(edit?.memo));
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  // 单开编辑器:日期 / 时间 / 手续费 / 备注 互斥,点开一个在预览卡外展开,点外部或失焦收起(日期与时间也不同时开)。
+  const [openEditor, setOpenEditor] = useState<"date" | "time" | "fee" | "memo" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
-  const dateRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   // 用户是否手改过 price → 是则市价异步回填不再覆写(ref 避免闭包读旧值)。编辑态预填价格,视作已定。
   const priceTouched = useRef(Boolean(edit));
   // 表单初值快照(挂载一次):判定草稿是否真被改动 → 决定 ✕ 是否需要确认(编辑态预填不算脏)。
@@ -215,15 +221,15 @@ function ActivityForm({
     initialRef.current = initialDraft;
   }
 
-  // 滚轮展开时点组件外 → 收起回文字态(失焦自动关)。
+  // 编辑器展开时点组件外 → 收起(失焦自动关)。previewRef 包住预览卡 + 卡外编辑区,内部点击不收。
   useEffect(() => {
-    if (!showWheel) return;
+    if (!openEditor) return;
     const onDown = (e: PointerEvent) => {
-      if (dateRef.current && !dateRef.current.contains(e.target as Node)) setShowWheel(false);
+      if (previewRef.current && !previewRef.current.contains(e.target as Node)) setOpenEditor(null);
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
-  }, [showWheel]);
+  }, [openEditor]);
 
   const setD = <K extends keyof DraftForm>(key: K, v: DraftForm[K]) =>
     setDraft((d) => ({ ...d, [key]: v }));
@@ -260,57 +266,24 @@ function ActivityForm({
     );
   };
 
-  // 脏 = 有待提交项 或 草稿相对初值被改动过(编辑态未改则不脏 → ✕ 直接关,不弹确认)。
-  const dirty = pending.length > 0 || !sameDraft(draft, initialDraft);
+  // 脏 = 草稿相对初值被改动过(未改则 ✕ 直接关,不弹确认)。
+  const dirty = !sameDraft(draft, initialDraft);
 
-  // 载入某个待提交项到草稿(原位编辑),同步选币/展开态。
-  const loadDraft = (d: DraftForm) => {
-    setDraft(d);
-    setPicked(toTokenInfo(d.token));
-    setManualMode(Boolean(d.token && !d.token.identifier));
-    setShowWheel(false);
-    setShowFee(d.fee.trim() !== "");
-    setShowMemo(d.memo.trim() !== "");
-    priceTouched.current = true;
-  };
-
-  const resetAfterStage = () => {
-    // 保留 token/日期/价格/种类(便于连续录同一 token),清 amount/fee/memo 并收起 fee/notes。
-    setDraft((d) => ({ ...d, amount: "", fee: "", memo: "" }));
-    setShowFee(false);
-    setShowMemo(false);
-    document.getElementById("ma-amount")?.focus();
-  };
-
-  const stage = () => {
-    if (!draftValid(draft)) return;
-    setError(null);
-    if (editingIndex != null) {
-      setPending((p) => p.map((d, i) => (i === editingIndex ? draft : d)));
-      setEditingIndex(null);
-    } else {
-      setPending((p) => [...p, draft]);
-    }
-    resetAfterStage();
-  };
-
+  // 当前草稿 → 提交项(单条;server addActivities 仍收数组,此表单一次录一笔,createdAt 服务端重定)。
   const toDrafts = (): ActivityDraft[] => {
-    const all = [...pending];
-    if (draftValid(draft) && editingIndex == null) all.push(draft);
-    const base = Date.now();
-    return all
-      .filter((d): d is DraftForm & { token: DraftTokenRef } => d.token != null)
-      .map((d, i) => ({
-        token: d.token,
-        kind: d.kind,
-        amount: Number(d.amount),
-        occurredAt: d.occurredAt,
-        createdAt: base + i,
-        memo: d.memo.trim() || undefined,
-        price: numOrUndef(d.price),
-        // set(校准)不涉手续费。
-        fee: d.kind === "set" ? undefined : numOrUndef(d.fee),
-      }));
+    if (!draftValid(draft) || !draft.token) return [];
+    return [
+      {
+        token: draft.token,
+        kind: draft.kind,
+        amount: Number(draft.amount),
+        occurredAt: draft.occurredAt,
+        createdAt: draft.occurredAt,
+        memo: draft.memo.trim() || undefined,
+        price: numOrUndef(draft.price),
+        fee: draft.kind === "set" ? undefined : numOrUndef(draft.fee), // set(校准)不涉手续费
+      },
+    ];
   };
 
   // 提交/保存改走服务端(T4)→ 异步。busy 期间禁用按钮防重复提交;超支(res.ok=false)在 modal 内报错。
@@ -350,30 +323,24 @@ function ActivityForm({
     }
   };
 
-  const removePending = (i: number) => {
-    setPending((p) => p.filter((_, idx) => idx !== i));
-    if (editingIndex === i) {
-      setEditingIndex(null);
-      loadDraft(emptyDraft());
-    }
-  };
-
   const requestClose = () => {
     if (dirty) setClosing(true);
     else onClose();
   };
 
-  const submitCount = pending.length + (draftValid(draft) && editingIndex == null ? 1 : 0);
-
-  // 价值预览 = 数量 × 单价(中性,不含 fee)。三种种类通用:add/reduce 是本次变动价值,set 是目标余额价值。
+  // 价值预览 = 数量 × 单价(中性,不含 fee)。卡常驻;但**未记单价**时数字显「—」而非 $0
+  // (避免把「没填价」误显成「价值为 0」);记了价(含 0)才显具体金额。
   const qty = Number(draft.amount);
   const priceNum = Number(draft.price);
-  const showValue =
-    draft.amount.trim() !== "" &&
-    Number.isFinite(qty) &&
-    qty > 0 &&
-    numOrUndef(draft.price) != null; // 记录了单价即显(含 0 = 零成本);空/非法不显
-  const value = qty * priceNum;
+  const hasPrice = numOrUndef(draft.price) != null;
+  const value = Number.isFinite(qty * priceNum) ? qty * priceNum : 0;
+
+  // 描述项已填态(图标着色):手续费记了值(含 0)/ 备注非空。set 不涉手续费。
+  const feeSet = numOrUndef(draft.fee) != null;
+  const memoSet = draft.memo.trim() !== "";
+  // 点开/收起单一编辑器;切到 set 时若手续费编辑器开着则一并收(set 不涉手续费)。
+  const toggleEditor = (k: "date" | "time" | "fee" | "memo") =>
+    setOpenEditor((cur) => (cur === k ? null : k));
 
   return (
     <div className="flex flex-col gap-4">
@@ -394,7 +361,10 @@ function ActivityForm({
       {/* type:顶部平铺 segment tab(中性 bg-muted 指示器,把 primary 留给主 CTA) */}
       <Tabs
         value={draft.kind}
-        onValueChange={(v) => setD("kind", v as Kind)}
+        onValueChange={(v) => {
+          setD("kind", v as Kind);
+          if (v === "set" && openEditor === "fee") setOpenEditor(null);
+        }}
         variant="segment"
         className="w-full"
       >
@@ -490,160 +460,132 @@ function ActivityForm({
         </div>
       </div>
 
-      {/* chips 行 + 三个展开区(日期/手续费/备注)同组,组内无 gap → 收起项(height 0)不留幽灵间距;
-          各展开区自带 pt-3 上间距(计入动画高度,收起即归 0)。fee/notes 点开渐进展开,同 wheel 动效。 */}
-      <div ref={dateRef} className="flex flex-col">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowWheel((s) => !s)}
-            className={cn(
-              "flex h-11 flex-1 items-center gap-2 rounded-full border px-3.5 text-sm outline-none transition-colors",
-              showWheel ? "border-foreground/40" : "border-border hover:border-foreground/40",
+      {/* 常驻价值预览卡 + 卡外单一编辑区(previewRef 包住二者 → 内部点击不收起)。
+          右上 ghost 图标 = 手续费(仅 add/reduce)/ 备注,右下无边框小字 = 日期时间;点任一在卡外展开对应编辑器。 */}
+      <div ref={previewRef} className="flex flex-col">
+        <div className="relative rounded-2xl bg-muted px-4 py-3">
+          <div className="absolute top-2 right-2 flex gap-0.5">
+            {draft.kind !== "set" && (
+              <Tooltip content={t("feeLabel")} side="top">
+                <button
+                  type="button"
+                  onClick={() => toggleEditor("fee")}
+                  aria-label={t("feeLabel")}
+                  className={cn(
+                    GHOST_ICON,
+                    openEditor === "fee"
+                      ? "bg-background text-primary"
+                      : feeSet
+                        ? "text-primary"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  <Receipt className="size-3.5" />
+                </button>
+              </Tooltip>
             )}
-          >
-            <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate">
-              {format.dateTime(new Date(draft.occurredAt), { dateStyle: "medium" })}
-            </span>
-          </button>
-          {draft.kind !== "set" && (
+            <Tooltip content={t("memoLabel")} side="top">
+              <button
+                type="button"
+                onClick={() => toggleEditor("memo")}
+                aria-label={t("memoLabel")}
+                className={cn(
+                  GHOST_ICON,
+                  openEditor === "memo"
+                    ? "bg-background text-primary"
+                    : memoSet
+                      ? "text-primary"
+                      : "text-muted-foreground",
+                )}
+              >
+                <StickyNote className="size-3.5" />
+              </button>
+            </Tooltip>
+          </div>
+
+          {/* 价值 = 数量 × 单价(NumberTicker 内部取整 → 格式化到整美元,预览足够);未记单价则显「—」。 */}
+          <p className="text-muted-foreground text-sm">{t("valuePreview")}</p>
+          <div className="font-bold text-2xl">
+            {hasPrice ? (
+              <NumberTicker
+                value={value}
+                startOnView={false}
+                format={(v) =>
+                  format.number(v, { style: "currency", currency: "USD", maximumFractionDigits: 0 })
+                }
+              />
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </div>
+
+          {/* 日期 / 时间:独立一行右对齐(与价值留足间隔,长数字也不重叠);日期、时间分开点击,各开各的滚轮,用 - 分隔。 */}
+          <div className="mt-2 flex items-center justify-end gap-1.5 text-xs">
             <button
               type="button"
-              onClick={() => {
-                setShowWheel(false);
-                setShowFee((s) => !s);
-              }}
-              className={cn(CHIP_CLASS, showFee && "border-foreground/40 bg-muted text-foreground")}
+              onClick={() => toggleEditor("date")}
+              className={cn(
+                "tabular-nums outline-none transition-colors",
+                openEditor === "date"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
             >
-              <DollarSign className="size-4 shrink-0" />
-              {t("feeLabel")}
+              {dateFmt.format(draft.occurredAt)}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              setShowWheel(false);
-              setShowMemo((s) => !s);
-            }}
-            className={cn(CHIP_CLASS, showMemo && "border-foreground/40 bg-muted text-foreground")}
-          >
-            <Pencil className="size-4 shrink-0" />
-            {t("memoLabel")}
-          </button>
+            <span className="text-muted-foreground">-</span>
+            <button
+              type="button"
+              onClick={() => toggleEditor("time")}
+              className={cn(
+                "tabular-nums outline-none transition-colors",
+                openEditor === "time"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {timeFmt.format(draft.occurredAt)}
+            </button>
+          </div>
         </div>
-        <Expandable show={showWheel}>
-          {/* pt-3 上间距计入动画高度;px-0.5 给焦点 ring 让位,免被 overflow-hidden 裁掉 */}
-          <div className="px-0.5 pt-3">
-            <DateWheel value={draft.occurredAt} onChange={(ms) => setD("occurredAt", ms)} />
-          </div>
-        </Expandable>
 
-        {/* fee 输入(仅 add/reduce,chip 点开) */}
-        <Expandable show={draft.kind !== "set" && showFee}>
+        {/* 卡外单一编辑区:px-0.5 给焦点 ring 让位;pt-3 计入动画高度,收起即归 0。 */}
+        <Expandable show={openEditor !== null}>
           <div className="px-0.5 pt-3">
-            <Input
-              id="ma-fee"
-              inputMode="decimal"
-              leftIcon={<span>$</span>}
-              value={draft.fee}
-              onChange={(v) => setD("fee", v)}
-              placeholder={t("feePlaceholder")}
-            />
-          </div>
-        </Expandable>
-
-        {/* notes 多行(chip 点开,默认一行) */}
-        <Expandable show={showMemo}>
-          <div className="px-0.5 pt-3">
-            <textarea
-              id="ma-memo"
-              rows={1}
-              value={draft.memo}
-              onChange={(e) => setD("memo", e.target.value)}
-              placeholder={t("memoPlaceholder")}
-              className={NOTES_CLASS}
-            />
+            {(openEditor === "date" || openEditor === "time") && (
+              <DateTimeWheel
+                part={openEditor}
+                value={draft.occurredAt}
+                onChange={(ms) => setD("occurredAt", ms)}
+              />
+            )}
+            {openEditor === "fee" && (
+              <Input
+                id="ma-fee"
+                inputMode="decimal"
+                leftIcon={<span>$</span>}
+                value={draft.fee}
+                onChange={(v) => setD("fee", v)}
+                placeholder={t("feePlaceholder")}
+              />
+            )}
+            {openEditor === "memo" && (
+              <textarea
+                id="ma-memo"
+                rows={3}
+                value={draft.memo}
+                onChange={(e) => setD("memo", e.target.value)}
+                placeholder={t("memoPlaceholder")}
+                className={NOTES_CLASS}
+              />
+            )}
           </div>
         </Expandable>
       </div>
 
-      {/* 价值预览卡(三种种类通用;Adjust 显示目标余额价值)。数字用 NumberTicker 滚动动画;
-          它内部四舍五入到整数,故格式化到整美元(预览用,足够)。startOnView=false → 弹层内即刻就绪。 */}
-      {showValue && (
-        <div className="rounded-2xl bg-muted px-4 py-3">
-          <p className="text-muted-foreground text-sm">{t("valuePreview")}</p>
-          <div className="font-bold text-2xl">
-            <NumberTicker
-              value={value}
-              startOnView={false}
-              format={(v) =>
-                format.number(v, { style: "currency", currency: "USD", maximumFractionDigits: 0 })
-              }
-            />
-          </div>
-        </div>
-      )}
-
-      {/* 待提交列表 */}
-      {pending.length > 0 && (
-        <div className="flex flex-col gap-1.5 border-border border-t pt-3">
-          <p className="text-muted-foreground text-xs">{t("pending", { count: pending.length })}</p>
-          {pending.map((d, i) => (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: staged rows are positional, reorder-free
-              key={i}
-              className={cn(
-                "flex items-center gap-2.5 rounded-lg bg-card px-3 py-2",
-                editingIndex === i && "ring-1 ring-primary",
-              )}
-            >
-              <LogoAvatar src={d.token?.logo} fallback={d.token?.symbol ?? "?"} size="sm" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-sm">
-                  {formatNumber(Number(d.amount))} {d.token?.symbol}
-                </div>
-                <div className="truncate text-muted-foreground text-xs">
-                  {t(d.kind)} · {format.dateTime(new Date(d.occurredAt), { dateStyle: "medium" })}
-                </div>
-              </div>
-              {/* 价值(数量 × 单价);记录了单价才显(含 0 = 零成本),空/非法则不显 */}
-              {numOrUndef(d.price) != null && (
-                <span className="shrink-0 text-muted-foreground text-xs tabular-nums">
-                  {format.number(Number(d.amount) * Number(d.price), {
-                    style: "currency",
-                    currency: "USD",
-                    maximumFractionDigits: 2,
-                  })}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingIndex(i);
-                  loadDraft(d);
-                }}
-                aria-label={tc("edit")}
-                className="text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <Pencil className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => removePending(i)}
-                aria-label={t("remove")}
-                className="text-muted-foreground transition-colors hover:text-destructive"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
       {error && <p className="text-destructive text-sm">{error}</p>}
 
-      {/* 底部动作:关闭态 → 两按钮;编辑态 → 取消/保存;否则 → 再添加一笔/提交 */}
+      {/* 底部动作:关闭态 → 继续/放弃;编辑态 → 取消/保存;否则 → 取消/提交(单笔录入,无批量暂存)。 */}
       <div className="mt-1 flex gap-2">
         {closing ? (
           <>
@@ -673,43 +615,18 @@ function ActivityForm({
               {tc("save")}
             </Button>
           </>
-        ) : editingIndex != null ? (
-          <>
-            <Button
-              type="button"
-              variant="ghost"
-              className="flex-1"
-              onClick={() => {
-                setEditingIndex(null);
-                loadDraft(emptyDraft());
-              }}
-            >
-              {tc("cancel")}
-            </Button>
-            <Button type="button" className="flex-1" onClick={stage} disabled={!draftValid(draft)}>
-              {tc("save")}
-            </Button>
-          </>
         ) : (
           <>
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1"
-              onClick={stage}
-              disabled={!draftValid(draft)}
-            >
-              <Plus className="size-4" />
-              {t("addAnother")}
+            <Button type="button" variant="ghost" className="flex-1" onClick={requestClose}>
+              {tc("cancel")}
             </Button>
             <Button
               type="button"
               className="flex-1"
               onClick={submit}
-              disabled={submitCount === 0 || busy}
+              disabled={!draftValid(draft) || busy}
             >
               {t("submit")}
-              {submitCount > 0 ? ` (${submitCount})` : ""}
             </Button>
           </>
         )}
