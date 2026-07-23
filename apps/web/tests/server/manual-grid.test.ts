@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { createTokenPriceHistoryStore } from "@folio/db";
+import type { CgkCoinId, TokenRef } from "@folio/oracle";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../../src/lib/server/db";
 import {
@@ -25,6 +26,8 @@ const dayEnd = (b: number) => (b + 1) * DAY - 1;
 const localBtc = { symbol: "BTC", unitPrice: 100 };
 // 有 identifier(选了币)→ ① 走注入的 oracle 历史价。
 const btcRef = { symbol: "BTC", unitPrice: 100, identifier: "bitcoin" };
+// oracle 历史价缓存的键(TokenRef);identifier 即 manual token 选的 coingecko id。
+const bitcoinRef: TokenRef = { source: "coingecko", identifier: "bitcoin" as CgkCoinId };
 
 async function resetUser(): Promise<void> {
   await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run();
@@ -62,9 +65,9 @@ describe("loadManualAccountSeries (grid)", () => {
 
   it("① 预种历史价 → 网格用 oracle 历史价(非账本 price),按日桶取", async () => {
     // 预种过去两日的 bitcoin 历史价。priceSeries(ref, D0, now) 的桶全在过去 → 命中缓存、零回源。
-    await createTokenPriceHistoryStore(env).putDailyPrices([
-      { source: "coingecko", cgkId: "bitcoin", dayBucket: B0, unitPrice: 50000 },
-      { source: "coingecko", cgkId: "bitcoin", dayBucket: B0 + 1, unitPrice: 52000 },
+    await createTokenPriceHistoryStore(env).putDailyPrices(bitcoinRef, [
+      { dayBucket: B0, unitPrice: 50000 },
+      { dayBucket: B0 + 1, unitPrice: 52000 },
     ]);
     const acc = await emptyAccount();
     await addManualActivities(USER, acc.id, [
