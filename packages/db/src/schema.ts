@@ -249,6 +249,7 @@ export const manualActivity = sqliteTable(
     kind: text("kind").$type<"add" | "reduce" | "set">().notNull(),
     amount: real("amount").notNull(),
     price: real("price"), // 单价(可空),留 M7.3
+    fee: real("fee"), // 手续费 USD(可空;成本基元数据,不参与数量折叠 — 供 P/L 片)
     occurredAt: integer("occurred_at").notNull(), // epoch ms
     memo: text("memo"), // 用户手写备注(原 note;为把 note 让给 provider 展示概念而改名)
     createdAt: integer("created_at").notNull(),

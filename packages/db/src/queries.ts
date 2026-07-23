@@ -650,6 +650,7 @@ export interface ManualActivityInput {
   kind: ManualActivityKind;
   amount: number;
   price?: number | null;
+  fee?: number | null; // 手续费 USD(可空;不参与折叠)
   occurredAt: number;
   memo?: string | null; // 用户手写备注(原 note;note 让给 provider 展示概念)
 }
@@ -673,6 +674,7 @@ export async function recordManualActivity(
     kind: input.kind,
     amount: input.amount,
     price: input.price ?? null,
+    fee: input.fee ?? null,
     occurredAt: input.occurredAt,
     memo: input.memo ?? null,
     createdAt: Date.now(),
@@ -760,6 +762,7 @@ export interface ManualActivityPatch {
   kind?: ManualActivityKind;
   amount?: number;
   price?: number | null;
+  fee?: number | null;
   occurredAt?: number;
   memo?: string | null;
 }
@@ -777,6 +780,7 @@ export async function updateManualActivity(
   if (patch.kind !== undefined) set.kind = patch.kind;
   if (patch.amount !== undefined) set.amount = patch.amount;
   if (patch.price !== undefined) set.price = patch.price;
+  if (patch.fee !== undefined) set.fee = patch.fee;
   if (patch.occurredAt !== undefined) set.occurredAt = patch.occurredAt;
   if (patch.memo !== undefined) set.memo = patch.memo;
   // 空 patch → 无字段可写。drizzle 对空 set 会抛 "No values to set" → 直接短路(归属已校验)。
@@ -794,6 +798,7 @@ export interface ManualBatchPlan {
     kind: ManualActivityKind;
     amount: number;
     price?: number | null;
+    fee?: number | null;
     occurredAt: number;
     memo?: string | null;
   }[];
@@ -840,6 +845,7 @@ export async function commitManualBatch(
         kind: a.kind,
         amount: a.amount,
         price: a.price ?? null,
+        fee: a.fee ?? null,
         occurredAt: a.occurredAt,
         memo: a.memo ?? null,
         createdAt: now + i,

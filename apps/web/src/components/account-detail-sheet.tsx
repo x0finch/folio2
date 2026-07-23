@@ -381,7 +381,7 @@ function DetailBody({
           非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。 */}
       {isManual(account.connectorId) ? (
         <div className="mt-6">
-          <ManualTokensPanel balances={account.balances} />
+          <ManualTokensPanel accountId={account.id} balances={account.balances} />
         </div>
       ) : (
         <div className="mt-6">

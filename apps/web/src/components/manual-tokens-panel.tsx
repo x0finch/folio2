@@ -1,3 +1,4 @@
+import type { ManualActivity } from "@folio/db";
 import {
   Button,
   LogoAvatar,
@@ -10,29 +11,34 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  toast,
   useMediaQuery,
 } from "@folio/ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { OverviewBalance } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
-import { useManualStore } from "../lib/hooks/use-manual-store";
+import type { DraftTokenRef } from "../lib/manual-types";
 import {
-  type DraftTokenRef,
-  type MergedActivityRow,
-  type Token,
-  tokenAmount,
-} from "../lib/manual-store";
+  addActivities,
+  editActivity,
+  getManualAccountDetail,
+  removeActivity,
+  removeToken,
+} from "../lib/server/manual-mutations";
 import { HoverDetail } from "./hover-detail";
 import { type EditActivityInput, ManualActivityModal } from "./manual-activity-modal";
 import { Portal } from "./portal";
 import { TokenRowContent } from "./token-row";
 
-// manual 账户详情抽屉的多 token 面板(A5 F 片,内存态原型)。Tokens|Activity 双 tab(全圆 pill,默认 Tokens)+
+// manual 账户详情抽屉的多 token 面板(A5 F → T4:接服务端)。Tokens|Activity 双 tab(全圆 pill,默认 Tokens)+
 // tab 行右 ghost plus(一律开 Add activity)。两个 SwipeableList 去卡片(surface = 抽屉底色平铺 + hover:bg-muted,
 // 与主页 SharedLayoutBg 药丸同色);Tokens 复用主页 <TokenRowContent>。token 行 swipe:编辑=开 Add activity 并锁定该
-// token、删除=确认 modal;activity 行 swipe:删除=确认 modal。数据暂存内存(useManualStore);持久化见 D 片。
+// token(记一笔 set 校准)、删除=确认 modal;activity 行 swipe:编辑=预填 modal、删除=确认 modal。
+// 数据由 getManualAccountDetail 现读(token + 活动账本),写走 T3 server fn,成功后失效明细查询 + router 刷新(真持久)。
 
 const kindTone: Record<string, string> = {
   add: "text-pos",
@@ -42,8 +48,6 @@ const kindTone: Record<string, string> = {
 
 // swipe 行去卡片:surface 用抽屉底色 bg-background(不透明遮住滑出前的操作轨);flex items-center 垂直居中;
 // min-h-[68px](= 主页代币行高)让 Tokens 与 Activity 两列表行高一致;hover:bg-muted 给悬停反馈。
-// 第二层(滑出的操作轨)背景也用 bg-background(item),与 surface 同底 → 操作图标(neutral = muted-foreground)平铺其上。
-// action:vendored 图标 hover 圈是 group-hover:bg-background,与轨同底(不可见)→ 覆写成 bg-muted(轨上有对比,`!` 压过内建)。
 const flatSwipe: SwipeableListClassNames = {
   item: "rounded-xl bg-background",
   surface:
@@ -51,75 +55,134 @@ const flatSwipe: SwipeableListClassNames = {
   action: "[&>span]:group-hover:bg-muted!",
 };
 
-function tokenRef(h: Token): DraftTokenRef {
-  return {
-    symbol: h.symbol,
-    identifier: h.identifier,
-    logo: h.logo,
-    name: h.name,
-    unitPrice: h.unitPrice,
-  };
+// 账本活动 + 展示用 symbol/logo(logo 自 balances 富化,缺则用 symbol 首字母)。
+interface ActivityRow extends ManualActivity {
+  symbol: string;
+  logo?: string;
 }
 
-export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] }) {
+export function ManualTokensPanel({
+  accountId,
+  balances,
+}: {
+  accountId: string;
+  balances: OverviewBalance[];
+}) {
   const t = useTranslations("Activity");
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
   const format = useFormatter();
-  const store = useManualStore(balances);
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
+  const detailKey = ["manual-account-detail", accountId] as const;
+  const detailQuery = useQuery({
+    queryKey: detailKey,
+    queryFn: () => getManualAccountDetail({ data: { accountId } }),
+    staleTime: 30_000,
+  });
+  const tokens = useMemo(() => detailQuery.data?.tokens ?? [], [detailQuery.data]);
+  const activities = useMemo(() => detailQuery.data?.activities ?? [], [detailQuery.data]);
+
+  // balances(overview,实时富化)提供 logo/name/实时市值;按大写 symbol 匹配账本 token(账本只出事实数量/单价/标识)。
+  const balBySymbol = useMemo(
+    () => new Map(balances.map((b) => [b.symbol.toUpperCase(), b])),
+    [balances],
+  );
+  const tokenById = useMemo(() => new Map(tokens.map((tk) => [tk.id, tk])), [tokens]);
+
+  const tokenRef = (tk: (typeof tokens)[number]): DraftTokenRef => {
+    const bal = balBySymbol.get(tk.symbol.toUpperCase());
+    return {
+      symbol: tk.symbol,
+      identifier: tk.identifier ?? undefined,
+      logo: bal?.logo,
+      name: bal?.name,
+      unitPrice: tk.unitPrice,
+    };
+  };
+
+  // 合并账本(跨 token,新→旧),附展示 symbol/logo。
+  const merged = useMemo<ActivityRow[]>(() => {
+    return [...activities]
+      .sort((a, b) => b.occurredAt - a.occurredAt || b.createdAt - a.createdAt)
+      .map((a) => {
+        const tk = a.tokenId ? tokenById.get(a.tokenId) : undefined;
+        const symbol = tk?.symbol ?? "?";
+        return { ...a, symbol, logo: balBySymbol.get(symbol.toUpperCase())?.logo };
+      });
+  }, [activities, tokenById, balBySymbol]);
 
   const [tab, setTab] = useState("tokens");
-  // Add/Edit activity modal:token 可预选(plus,最新活动的 token)、锁定(token 行编辑)、或编辑既有活动(edit 预填)。
   const [activity, setActivity] = useState<{
     open: boolean;
     token: DraftTokenRef | null;
     lock: boolean;
     edit: EditActivityInput | null;
   }>({ open: false, token: null, lock: false, edit: null });
-  // 删除二次确认 modal。
   const [confirm, setConfirm] = useState<{ title: string; onConfirm: () => void } | null>(null);
 
+  // 写后刷新:失效明细查询(抽屉列表)+ router(首页净值/账户行同源)。
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: detailKey }),
+      router.invalidate(),
+    ]);
+  };
+
+  const removeTokenMut = useMutation({
+    mutationFn: (tokenId: string) => removeToken({ data: { tokenId } }),
+    onSuccess: refresh,
+    onError: () => toast.error(ta("actionFailed")),
+  });
+  const removeActivityMut = useMutation({
+    mutationFn: (activityId: string) => removeActivity({ data: { accountId, activityId } }),
+    onSuccess: refresh,
+    onError: () => toast.error(ta("actionFailed")),
+  });
+
   // 默认选中最新一笔活动的 token(供 plus 预选)。
-  const latest = store.merged[0];
-  const latestTokenRow = latest && store.tokens.find((h) => h.id === latest.tokenId);
+  const latest = merged[0];
+  const latestTokenRow = latest?.tokenId ? tokenById.get(latest.tokenId) : undefined;
   const latestToken = latestTokenRow ? tokenRef(latestTokenRow) : null;
 
   const openPlus = () => setActivity({ open: true, token: latestToken, lock: false, edit: null });
-  const openTokenEdit = (h: Token) =>
-    setActivity({ open: true, token: tokenRef(h), lock: true, edit: null });
+  const openTokenEdit = (tk: (typeof tokens)[number]) =>
+    setActivity({ open: true, token: tokenRef(tk), lock: true, edit: null });
   // 活动行「编辑」:锁定该 token,预填这笔活动的全部字段(kind/数量/单价/手续费/日期/备注)。
-  const openActivityEdit = (a: (typeof store.merged)[number]) => {
-    const h = store.tokens.find((x) => x.id === a.tokenId);
-    const token = h ? tokenRef(h) : { symbol: a.symbol, logo: a.logo, unitPrice: 0 };
+  const openActivityEdit = (a: ActivityRow) => {
+    const tk = a.tokenId ? tokenById.get(a.tokenId) : undefined;
+    const token = tk ? tokenRef(tk) : { symbol: a.symbol, logo: a.logo, unitPrice: 0 };
     setActivity({
       open: true,
       token,
       lock: true,
       edit: {
-        tokenId: a.tokenId,
+        tokenId: a.tokenId ?? "",
         activityId: a.id,
         token,
         kind: a.kind,
         amount: a.amount,
-        price: a.price,
-        fee: a.fee,
+        price: a.price ?? undefined,
+        fee: a.fee ?? undefined,
         occurredAt: a.occurredAt,
-        memo: a.memo,
+        memo: a.memo ?? undefined,
       },
     });
   };
   const closeActivity = () => setActivity((s) => ({ ...s, open: false }));
 
-  // 列表项直接由内存态派生(小列表,无需 memo);action 回调闭包捕获当前 store。
-  const tokenItems: SwipeableListItem[] = store.tokens.map((h) => {
-    const amount = tokenAmount(h);
+  const tokenItems: SwipeableListItem[] = tokens.map((tk) => {
+    const bal = balBySymbol.get(tk.symbol.toUpperCase());
+    // 市值:优先 balances 实时市值(与抽屉头/首页同源);缺则回退 数量 × 单价。
+    const value = bal ? bal.usdValue : tk.amount * tk.unitPrice;
     const rightActions: SwipeAction[] = [
       {
         id: "edit",
         label: t("addActivityTitle"),
         icon: <Pencil className="size-4" />,
         tone: "neutral",
-        onClick: () => openTokenEdit(h),
+        onClick: () => openTokenEdit(tk),
       },
       {
         id: "delete",
@@ -128,22 +191,21 @@ export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] })
         tone: "neutral",
         onClick: () =>
           setConfirm({
-            title: t("confirmDeleteToken", { symbol: h.symbol.toUpperCase() }),
-            onConfirm: () => store.remove(h.id),
+            title: t("confirmDeleteToken", { symbol: tk.symbol.toUpperCase() }),
+            onConfirm: () => removeTokenMut.mutate(tk.id),
           }),
       },
     ];
     return {
-      id: h.id,
-      // 主页 Tokens 视图同一行式布局:logo + 名称 / 数量·symbol + 右侧市值。
+      id: tk.id,
       content: (
         <TokenRowContent
           item={{
-            logo: h.logo,
-            name: h.name ?? h.symbol.toUpperCase(),
-            symbol: h.symbol.toUpperCase(),
-            amount,
-            value: amount * h.unitPrice,
+            logo: bal?.logo,
+            name: bal?.name ?? tk.symbol.toUpperCase(),
+            symbol: tk.symbol.toUpperCase(),
+            amount: tk.amount,
+            value,
           }}
         />
       ),
@@ -151,7 +213,7 @@ export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] })
     };
   });
 
-  const activityItems: SwipeableListItem[] = store.merged.map((a) => ({
+  const activityItems: SwipeableListItem[] = merged.map((a) => ({
     id: a.id,
     rightActions: [
       {
@@ -169,12 +231,11 @@ export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] })
         onClick: () =>
           setConfirm({
             title: t("confirmDeleteActivity"),
-            onConfirm: () => store.removeActivity(a.tokenId, a.id),
+            onConfirm: () => removeActivityMut.mutate(a.id),
           }),
       },
     ],
     // 字体与 <TokenRowContent> 同位对齐:第一行 = 名称位(font-medium 基号)、第二行 = 数量·symbol 位(text-xs)。
-    // 数量·symbol hover → 明细浮层(该笔活动完整信息);hover 时才显实线下划线示意可展开,每条活动都有。
     content: (
       <div className="flex w-full items-center gap-3">
         <LogoAvatar src={a.logo} fallback={a.symbol} size="md" />
@@ -187,15 +248,12 @@ export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] })
               {formatNumber(a.amount)} {a.symbol.toUpperCase()}
             </HoverDetail>
           </div>
-          {/* mt-1.5 = 6px:补出与 Token 行相同的两行间距(Token 的 line2 是 inline span,从父 line-height strut
-              得到 6px;这里 line2 是 block div 才能 truncate 长备注,故显式补上,避免两个 tab 行距不一致)。 */}
           <div className="mt-1.5 truncate text-xs">
             <span className={kindTone[a.kind]}>{t(a.kind)}</span>
             {a.memo ? <span className="text-muted-foreground"> · {a.memo}</span> : null}
           </div>
         </div>
         <div className="shrink-0 text-right">
-          {/* 价值 = 数量 × 该笔单价(记录了单价才显,含 0 = 零成本入仓/空投);呼应主页代币行右侧市值;日期弱化其下 */}
           {a.price != null ? (
             <div className="font-medium text-sm tabular-nums">
               {format.number(a.amount * a.price, {
@@ -232,7 +290,9 @@ export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] })
         </div>
 
         <TabsContent value="tokens">
-          {tokenItems.length > 0 ? (
+          {detailQuery.isLoading ? (
+            <DetailSkeleton />
+          ) : tokenItems.length > 0 ? (
             <SwipeableList items={tokenItems} classNames={flatSwipe} />
           ) : (
             <EmptyState title={t("tokensEmpty")} hint={t("tokensEmptyHint")} />
@@ -240,7 +300,9 @@ export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] })
         </TabsContent>
 
         <TabsContent value="activity">
-          {activityItems.length > 0 ? (
+          {detailQuery.isLoading ? (
+            <DetailSkeleton />
+          ) : activityItems.length > 0 ? (
             <SwipeableList items={activityItems} classNames={flatSwipe} />
           ) : (
             <EmptyState title={t("empty")} hint={t("emptyHint")} />
@@ -254,17 +316,50 @@ export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] })
         lockToken={activity.lock}
         edit={activity.edit}
         onClose={closeActivity}
-        onSubmit={(drafts) => {
-          const res = store.commit(drafts);
+        onSubmit={async (drafts) => {
+          const res = await addActivities({
+            data: {
+              accountId,
+              drafts: drafts.map((d) => ({
+                token: {
+                  symbol: d.token.symbol,
+                  unitPrice: d.token.unitPrice,
+                  identifier: d.token.identifier ?? null,
+                },
+                kind: d.kind,
+                amount: d.amount,
+                occurredAt: d.occurredAt,
+                price: d.price ?? null,
+                fee: d.fee ?? null,
+                memo: d.memo ?? null,
+              })),
+            },
+          });
           if (res.ok) {
+            await refresh();
             setActivity((s) => ({ ...s, open: false }));
             setTab("activity");
           }
           return { ok: res.ok };
         }}
-        onEdit={(tokenId, activityId, patch) => {
-          const res = store.editActivity(tokenId, activityId, patch);
-          if (res.ok) setActivity((s) => ({ ...s, open: false }));
+        onEdit={async (_tokenId, activityId, patch) => {
+          const res = await editActivity({
+            data: {
+              activityId,
+              patch: {
+                kind: patch.kind,
+                amount: patch.amount,
+                occurredAt: patch.occurredAt,
+                price: patch.price ?? null,
+                fee: patch.fee ?? null,
+                memo: patch.memo ?? null,
+              },
+            },
+          });
+          if (res.ok) {
+            await refresh();
+            setActivity((s) => ({ ...s, open: false }));
+          }
           return { ok: res.ok };
         }}
       />
@@ -282,6 +377,23 @@ export function ManualTokensPanel({ balances }: { balances: OverviewBalance[] })
         onClose={() => setConfirm(null)}
       />
     </>
+  );
+}
+
+function DetailSkeleton() {
+  return (
+    <div className="flex flex-col gap-1">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="flex min-h-[68px] items-center gap-3 rounded-xl px-3 py-2.5">
+          <div className="size-9 shrink-0 animate-pulse rounded-full bg-muted" />
+          <div className="flex flex-1 flex-col gap-2">
+            <div className="h-3.5 w-24 animate-pulse rounded bg-muted" />
+            <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+          </div>
+          <div className="h-3.5 w-16 animate-pulse rounded bg-muted" />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -348,7 +460,7 @@ function ActivityDetail({
   t,
   format,
 }: {
-  row: MergedActivityRow;
+  row: ActivityRow;
   t: (key: string) => string;
   format: ReturnType<typeof useFormatter>;
 }) {

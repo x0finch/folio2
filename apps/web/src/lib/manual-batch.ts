@@ -5,7 +5,7 @@ import type { DerivableActivity } from "./manual-activity";
 // 输入既有 token + 一批草稿,输出「写计划」(要新建的 token + 要插入的活动)或整批拒因(超支的 symbol)。
 // 决策全在此,server fn / db op 只执行(ADR 0017 「决策逻辑下沉纯模块」)。
 
-// 浮点折叠余量容差:deriveAmount 末值夹 0,但校验须在夹之前判负(与 manual-store 一致)。
+// 浮点折叠余量容差:deriveAmount 末值夹 0,但校验须在夹之前判负。
 const EPS = 1e-9;
 
 // 运行持有从不为负(reduce 不在任一时点超支)。按 occurredAt→createdAt 折叠;`set` 重置基线、`add` +=、`reduce` -=。
@@ -48,6 +48,7 @@ export interface BatchDraft {
   amount: number;
   occurredAt: number;
   price?: number | null;
+  fee?: number | null;
   memo?: string | null;
 }
 
@@ -63,6 +64,7 @@ export interface PlannedActivity {
   kind: ManualActivityKind;
   amount: number;
   price?: number | null;
+  fee?: number | null;
   occurredAt: number;
   memo?: string | null;
 }
@@ -71,7 +73,7 @@ export type BatchPlan =
   | { ok: true; newTokens: PlannedToken[]; activities: PlannedActivity[] };
 
 // 按 identifier(优先,精确)匹配,退回大写 symbol(仅在无 identifier 时,匹配同样 identifier-less 的 token)。
-// 与前端 manual-store.findToken 语义一致:带 identifier 的 ref 只按 identifier 命中,不自动收养 symbol-only 同名。
+// 带 identifier 的 ref 只按 identifier 命中,不自动收养 symbol-only 同名(与建账户/物化的身份归一一致)。
 export function findToken(tokens: Token[], ref: TokenRef): Token | undefined {
   if (ref.identifier) return tokens.find((t) => t.identifier === ref.identifier);
   const sym = ref.symbol.toUpperCase();
@@ -117,6 +119,7 @@ export function planManualBatch(
       kind: d.kind,
       amount: d.amount,
       price: d.price ?? null,
+      fee: d.fee ?? null,
       occurredAt: d.occurredAt,
       memo: d.memo ?? null,
     });

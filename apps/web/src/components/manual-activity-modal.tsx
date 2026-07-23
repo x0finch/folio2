@@ -18,7 +18,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { formatNumber } from "../lib/format-number";
 import { useTokenPrice } from "../lib/hooks/use-token-price";
-import type { ActivityDraft, DraftTokenRef } from "../lib/manual-store";
+import type { ActivityDraft, DraftTokenRef } from "../lib/manual-types";
 import { DateWheel } from "./date-wheel";
 import { Portal } from "./portal";
 import { TokenCombobox } from "./token-combobox";
@@ -99,11 +99,6 @@ function Expandable({ show, children }: { show: boolean; children: ReactNode }) 
   );
 }
 
-function midnightToday(): number {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
-
 // DraftTokenRef → TokenCombobox 可显示的 TokenInfo(仅展示,不校验 ref.source)。无 identifier → null(走手动模式)。
 function toTokenInfo(token: DraftTokenRef | null): TokenInfo | null {
   if (!token?.identifier) return null;
@@ -156,8 +151,8 @@ function ActivityForm({
   lockToken?: boolean; // 从 token 行「编辑」进入:锁定该 token,不可改
   edit?: EditActivityInput | null; // 编辑既有活动:预填 + 锁定 token + 单条保存(非批量)
   onClose: () => void;
-  onSubmit: (drafts: ActivityDraft[]) => { ok: boolean };
-  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => { ok: boolean };
+  onSubmit: (drafts: ActivityDraft[]) => Promise<{ ok: boolean }>;
+  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => Promise<{ ok: boolean }>;
 }) {
   const t = useTranslations("Activity");
   const tc = useTranslations("Common");
@@ -169,6 +164,12 @@ function ActivityForm({
   const editing = Boolean(edit);
   const lockedToken = edit?.token ?? defaultToken;
   const locked = editing || lockToken;
+
+  // 新活动默认发生时刻 = 打开 modal 的真实时刻(非当天 0 点)。开仓 set 由建账户在更早的真实时刻记下,
+  // 若这里用 0 点会让同一天录入的 add/reduce 排到开仓 set 之前(occurredAt 更早)→ 顺序错乱、deriveAmount 也乱序。
+  // 用真实时刻则 occurredAt 随录入递增,与输入顺序一致(展示仍只到日期粒度)。回填过去日期走 DateWheel(该日 0 点)。
+  // useRef 固化到一次打开(emptyDraft 会被调用多次:initialRef 快照 + draft 初值,须取同一值,否则 dirty 误判)。
+  const openedAtRef = useRef(Date.now());
 
   const emptyDraft = (): DraftForm =>
     edit
@@ -189,7 +190,7 @@ function ActivityForm({
           // 价格默认取选中币种当前市价(锁定/预选 token 自带 unitPrice)。
           price: defaultToken && defaultToken.unitPrice > 0 ? String(defaultToken.unitPrice) : "",
           fee: "",
-          occurredAt: midnightToday(),
+          occurredAt: openedAtRef.current,
           memo: "",
         };
 
@@ -312,26 +313,41 @@ function ActivityForm({
       }));
   };
 
-  const submit = () => {
+  // 提交/保存改走服务端(T4)→ 异步。busy 期间禁用按钮防重复提交;超支(res.ok=false)在 modal 内报错。
+  // 成功由父级 invalidate + 关闭 modal;本组件随之卸载,finally 的 setBusy 是无害 no-op(React 18)。
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
     const drafts = toDrafts();
-    if (drafts.length === 0) return;
-    const res = onSubmit(drafts);
-    if (!res.ok) setError(t("reduceTooMuch"));
+    if (drafts.length === 0 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await onSubmit(drafts);
+      if (!res.ok) setError(t("reduceTooMuch"));
+    } finally {
+      setBusy(false);
+    }
   };
 
   // 编辑态保存:把当前草稿转成 patch,交回父级更新该笔(保留 id/createdAt),超支则报错。
-  const saveEdit = () => {
-    if (!edit || !onEdit || !draftValid(draft)) return;
+  const saveEdit = async () => {
+    if (!edit || !onEdit || !draftValid(draft) || busy) return;
+    setBusy(true);
     setError(null);
-    const res = onEdit(edit.tokenId, edit.activityId, {
-      kind: draft.kind,
-      amount: Number(draft.amount),
-      occurredAt: draft.occurredAt,
-      memo: draft.memo.trim() || undefined,
-      price: numOrUndef(draft.price),
-      fee: draft.kind === "set" ? undefined : numOrUndef(draft.fee),
-    });
-    if (!res.ok) setError(t("reduceTooMuch"));
+    try {
+      const res = await onEdit(edit.tokenId, edit.activityId, {
+        kind: draft.kind,
+        amount: Number(draft.amount),
+        occurredAt: draft.occurredAt,
+        memo: draft.memo.trim() || undefined,
+        price: numOrUndef(draft.price),
+        fee: draft.kind === "set" ? undefined : numOrUndef(draft.fee),
+      });
+      if (!res.ok) setError(t("reduceTooMuch"));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const removePending = (i: number) => {
@@ -652,7 +668,7 @@ function ActivityForm({
               type="button"
               className="flex-1"
               onClick={saveEdit}
-              disabled={!draftValid(draft)}
+              disabled={!draftValid(draft) || busy}
             >
               {tc("save")}
             </Button>
@@ -686,7 +702,12 @@ function ActivityForm({
               <Plus className="size-4" />
               {t("addAnother")}
             </Button>
-            <Button type="button" className="flex-1" onClick={submit} disabled={submitCount === 0}>
+            <Button
+              type="button"
+              className="flex-1"
+              onClick={submit}
+              disabled={submitCount === 0 || busy}
+            >
               {t("submit")}
               {submitCount > 0 ? ` (${submitCount})` : ""}
             </Button>
@@ -711,8 +732,8 @@ export function ManualActivityModal({
   lockToken?: boolean; // token 行「编辑」进入:锁定 token 不可改
   edit?: EditActivityInput | null; // 活动行「编辑」进入:预填既有活动、单条保存
   onClose: () => void;
-  onSubmit: (drafts: ActivityDraft[]) => { ok: boolean };
-  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => { ok: boolean };
+  onSubmit: (drafts: ActivityDraft[]) => Promise<{ ok: boolean }>;
+  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => Promise<{ ok: boolean }>;
 }) {
   const isDesktop = useMediaQuery("(min-width: 640px)");
   return (

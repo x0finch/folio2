@@ -7,8 +7,16 @@ import {
   deleteManualActivity,
   deleteToken,
   editManualActivity,
+  loadManualAccountDetail,
   updateToken,
 } from "./manual";
+
+// —— 读:抽屉账户明细(token 定义 + 折叠 amount + 全部活动)。抽屉 useQuery,写后失效刷新。
+const AccountIdInput = z.object({ accountId: z.string().min(1) });
+export const getManualAccountDetail = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(AccountIdInput)
+  .handler(({ data, context }) => loadManualAccountDetail(context.userId, data.accountId));
 
 // manual 写路径的 server fn(T3,#155)—— 薄壳:auth(requireAuth 经 ALS 带 userId)+ 校验入参 + 调 ./manual 的
 // 纯 async 分派(决策/物化都在那层)。红线:只记安全字段,不打 creds(manual creds 全 public,但仍不入日志)。
@@ -63,6 +71,7 @@ const BatchDraftInput = z.object({
   amount: z.number().nonnegative(),
   occurredAt: z.number().int(),
   price: z.number().nonnegative().nullish(),
+  fee: z.number().nonnegative().nullish(),
   memo: z.string().trim().nullish(),
 });
 const AddActivitiesInput = z.object({
@@ -92,6 +101,7 @@ const EditActivityInput = z.object({
     kind: ActivityKind.optional(),
     amount: z.number().nonnegative().optional(),
     price: z.number().nonnegative().nullish(),
+    fee: z.number().nonnegative().nullish(),
     occurredAt: z.number().int().optional(),
     memo: z.string().trim().nullish(),
   }),
