@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c19b8992-09ee-44e1-b93f-92d530797af1",
+  "id": "02ed8558-5f99-44f3-b015-aa2cb1abbfdd",
   "prevId": "af9668ce-55f2-4ce2-8bb0-eaa8855a6164",
   "tables": {
     "account_groups": {
@@ -813,8 +813,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "cgk_id": {
-          "name": "cgk_id",
+        "identifier": {
+          "name": "identifier",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -838,13 +838,13 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "token_price_history_source_cgk_id_day_bucket_pk": {
+        "token_price_history_source_identifier_day_bucket_pk": {
           "columns": [
             "source",
-            "cgk_id",
+            "identifier",
             "day_bucket"
           ],
-          "name": "token_price_history_source_cgk_id_day_bucket_pk"
+          "name": "token_price_history_source_identifier_day_bucket_pk"
         }
       },
       "uniqueConstraints": {},

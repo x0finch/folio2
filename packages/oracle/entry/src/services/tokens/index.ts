@@ -180,7 +180,7 @@ export function createTokens({
     const todayB = dayBucketOf(Date.now());
     const buckets: number[] = [];
     for (let b = fromB; b <= toB; b++) buckets.push(b);
-    const cached = await history.getDailyPrices(ref.source, ref.identifier, buckets);
+    const cached = await history.getDailyPrices(ref, buckets);
     const missingPast = buckets.filter((b) => b < todayB && !cached.has(b));
     const needsToday = toB >= todayB; // 今日桶恒现取(不缓存)
     const fetched = new Map<number, number>();
@@ -193,13 +193,8 @@ export function createTokens({
       }
       const toPersist = [...fetched.entries()]
         .filter(([b]) => b < todayB && !cached.has(b)) // 只落不可变的过去日,今日桶不缓存
-        .map(([dayBucket, unitPrice]) => ({
-          source: ref.source,
-          cgkId: ref.identifier,
-          dayBucket,
-          unitPrice,
-        }));
-      if (toPersist.length > 0) await history.putDailyPrices(toPersist);
+        .map(([dayBucket, unitPrice]) => ({ dayBucket, unitPrice }));
+      if (toPersist.length > 0) await history.putDailyPrices(ref, toPersist);
     }
     const out: TokenPricePoint[] = [];
     for (const b of buckets) {

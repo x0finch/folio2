@@ -24,18 +24,18 @@ const day = (b: number, offsetMs = 0): number => b * MS_PER_DAY + offsetMs;
 // 进程内历史价缓存(跨调用保留 → 验证第二次全命中)。
 function inMemoryHistory(): TokenPriceHistoryStore {
   const rows = new Map<string, number>();
-  const k = (s: string, id: string, b: number) => `${s}:${id}:${b}`;
+  const k = (ref: TokenRef, b: number) => `${ref.source}:${ref.identifier}:${b}`;
   return {
-    async getDailyPrices(source, cgkId, buckets) {
+    async getDailyPrices(ref, buckets) {
       const out = new Map<number, number>();
       for (const b of buckets) {
-        const v = rows.get(k(source, cgkId, b));
+        const v = rows.get(k(ref, b));
         if (v !== undefined) out.set(b, v);
       }
       return out;
     },
-    async putDailyPrices(list) {
-      for (const r of list) rows.set(k(r.source, r.cgkId, r.dayBucket), r.unitPrice);
+    async putDailyPrices(ref, prices) {
+      for (const p of prices) rows.set(k(ref, p.dayBucket), p.unitPrice);
     },
   };
 }

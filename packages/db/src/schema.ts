@@ -204,17 +204,18 @@ export const fxRates = sqliteTable("fx_rates", {
 });
 
 // 历史日价缓存(全局参考,无 userId;#148 / ADR 0019 网格估值骨架)。过去某 UTC 日的历史价不可变 →
-// 永久缓存,故**无 TTL 列**(今日桶可变,调用方不落此表)。PK (source, cgk_id, day_bucket);
-// day_bucket = floor(atMs / 86_400_000)(UTC 日索引)。unit_price = 该日代表价(USD)。
+// 永久缓存,故**无 TTL 列**(今日桶可变,调用方不落此表)。PK (source, identifier, day_bucket);
+// identifier = TokenRef.identifier(上游 id,通用词,不写 cgk);day_bucket = floor(atMs / 86_400_000)
+// (UTC 日索引)。unit_price = 该日代表价(USD)。
 export const tokenPriceHistory = sqliteTable(
   "token_price_history",
   {
-    source: text("source").notNull(), // 上游源标签(如 "coingecko")
-    cgkId: text("cgk_id").notNull(), // 上游 coin id
+    source: text("source").notNull(), // TokenRef.source(如 "coingecko")
+    identifier: text("identifier").notNull(), // TokenRef.identifier(上游 id)
     dayBucket: integer("day_bucket").notNull(), // UTC 日索引
     unitPrice: real("unit_price").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.source, t.cgkId, t.dayBucket] })],
+  (t) => [primaryKey({ columns: [t.source, t.identifier, t.dayBucket] })],
 );
 
 // per-user 设置(Phase 3,#82):估值模式(自填价 vs 源价谁优先)。读带缺省(无行 → self-first),
