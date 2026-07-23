@@ -59,11 +59,15 @@ export function tokenQuantityAt(token: HistoryToken, t: number): number {
   return deriveAmount(token.activities.filter((a) => a.occurredAt <= t));
 }
 
-// 某 manual 账户的账本 → (takenAt, totalUsd) 序列,在**规则日网格**上采样(ADR 0019):从首活动所在 UTC 日
-// 到 now,逐日一行 —— 曲线随市价起伏而非只在交易时刻跳变。每行取当日日末(夹到 now)为采样点 τ:数量折叠
-// occurredAt ≤ τ(当日交易计入),价 = tokenPriceAt(τ)(oracle 历史价@当日桶,降级 ②③)。totalUsd@τ =
-// Σ_token quantity@τ × price@τ。空账户 / 无任何活动 → 空序列。网格覆盖全史 → 下游按 since 裁窗、downsample
-// 压点;since 之后的点仍反映其前活动折出的存量(修掉 T5「窗口外存量被丢」缺口)。
+// 某 manual 账户的账本 → (takenAt, totalUsd) 序列,在**规则日网格**上采样(ADR 0019):曲线随市价起伏而非
+// 只在交易时刻跳变。采样时刻 = **首活动锚点** ∪ 其后每个 UTC 日末 ∪ now,取并集升序:
+//  · 首活动锚点 —— 曲线从真正开仓时刻起(当日新账户也有起点),而非当日日末;
+//  · 逐日日末 —— 给价格曲线形状(activity 之间的市价起伏);
+//  · now —— 末点(数量/价到当下,server 再用实时盯市覆写)。
+// 任一有活动的账户至少产「首活动 + now」两点 → 抽屉的 series.length ≥ 2 渲染门恒满足(修当日新账户空图)。
+// 每点 totalUsd = Σ_token quantity@t × price@t(数量折叠 occurredAt ≤ t;价走 oracle 历史价@日桶,降级 ②③)。
+// 空账户 / 无活动 → 空序列。网格覆盖全史 → 下游按 since 裁窗、downsample 压点;since 之后的点仍反映其前活动
+// 折出的存量(修掉 T5「窗口外存量被丢」缺口)。
 export function buildManualAccountSeries(
   accountId: string,
   tokens: HistoryToken[],
@@ -73,18 +77,22 @@ export function buildManualAccountSeries(
   let firstOccurred = Number.POSITIVE_INFINITY;
   for (const tk of tokens)
     for (const a of tk.activities) firstOccurred = Math.min(firstOccurred, a.occurredAt);
-  if (!Number.isFinite(firstOccurred)) return []; // 无任何活动
+  if (!Number.isFinite(firstOccurred) || firstOccurred > now) return []; // 无活动 / 活动全在未来
 
+  const times = new Set<number>([firstOccurred, now]); // 首活动锚点 + 末点(保证 ≥2 采样)
   const firstBucket = Math.floor(firstOccurred / MS_PER_DAY);
   const nowBucket = Math.floor(now / MS_PER_DAY);
-  const rows: SnapshotTotalRow[] = [];
   for (let b = firstBucket; b <= nowBucket; b++) {
-    // 当日日末(next-day 起点前 1ms),夹到 now → floor(τ/MS_PER_DAY)===b(与注入 priceAt 的日桶对齐);
-    // 当日交易(occurredAt ≤ τ)计入,末桶 τ=now(数量/价均到当下)。
+    // 当日日末(next-day 起点前 1ms),夹到 now → floor(t/MS_PER_DAY)===b(与注入 priceAt 的日桶对齐)。
     const t = Math.min((b + 1) * MS_PER_DAY - 1, now);
-    let total = 0;
-    for (const tk of tokens) total += tokenQuantityAt(tk, t) * tokenPriceAt(tk, t, priceAt);
-    rows.push({ accountId, takenAt: t, totalUsd: total });
+    if (t > firstOccurred) times.add(t); // 只收首活动之后的日末(之前无持仓)
   }
-  return rows;
+
+  return [...times]
+    .sort((a, b) => a - b)
+    .map((t) => {
+      let total = 0;
+      for (const tk of tokens) total += tokenQuantityAt(tk, t) * tokenPriceAt(tk, t, priceAt);
+      return { accountId, takenAt: t, totalUsd: total };
+    });
 }

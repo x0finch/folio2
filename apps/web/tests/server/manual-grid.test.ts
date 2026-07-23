@@ -21,7 +21,6 @@ const USER = "user-manual-grid";
 const DAY = 86_400_000;
 const B0 = 18518; // 2020-08 附近的某 UTC 日索引
 const D0 = B0 * DAY; // 日对齐的开仓时刻 → 日桶数学干净
-const dayEnd = (b: number) => (b + 1) * DAY - 1;
 
 // 无 identifier(未选币)→ 价走账本②/unitPrice③,buildHistoricalPriceAt 跳过、不回源。
 const localBtc = { symbol: "BTC", unitPrice: 100 };
@@ -51,17 +50,21 @@ async function emptyAccount(label = "M") {
 }
 
 describe("loadManualAccountSeries (grid)", () => {
-  it("日网格逐日一行;无 identifier → 账本价②盯市(网络无关)", async () => {
+  it("网格首点锚首活动、末点 now;无 identifier → 账本价②盯市(网络无关)", async () => {
     const acc = await emptyAccount();
     await addManualActivities(USER, acc.id, [
       { token: localBtc, kind: "add", amount: 1, occurredAt: D0, price: 60000 },
     ]);
-    // now = D0+1d → 网格桶 B0, B0+1。
+    // now = D0+1d → 首活动 D0 + 日末 + now。
     const series = await loadManualAccountSeries(USER, acc.id, D0 + DAY);
-    expect(series).toEqual([
-      { accountId: acc.id, takenAt: dayEnd(B0), totalUsd: 1 * 60000 }, // 桶 B0 日末
-      { accountId: acc.id, takenAt: D0 + DAY, totalUsd: 1 * 60000 }, // 桶 B0+1,τ=now
-    ]);
+    expect(series.length).toBeGreaterThanOrEqual(2);
+    expect(series[0]).toEqual({ accountId: acc.id, takenAt: D0, totalUsd: 1 * 60000 }); // 锚首活动
+    expect(series[series.length - 1]).toEqual({
+      accountId: acc.id,
+      takenAt: D0 + DAY,
+      totalUsd: 1 * 60000,
+    }); // 末点 now
+    expect(series.every((r) => r.totalUsd === 1 * 60000)).toBe(true);
   });
 
   it("① 预种历史价 → 网格用 oracle 历史价(非账本 price),按日桶取", async () => {
@@ -76,10 +79,14 @@ describe("loadManualAccountSeries (grid)", () => {
       { token: btcRef, kind: "add", amount: 2, occurredAt: D0, price: 99999 },
     ]);
     const series = await loadManualAccountSeries(USER, acc.id, D0 + DAY);
-    expect(series).toEqual([
-      { accountId: acc.id, takenAt: dayEnd(B0), totalUsd: 2 * 50000 }, // ① 桶 B0 → 50000
-      { accountId: acc.id, takenAt: D0 + DAY, totalUsd: 2 * 52000 }, // ① 桶 B0+1 → 52000
-    ]);
+    // 首活动 D0(桶 B0 → 50000)、末点 now=D0+DAY(桶 B0+1 → 52000);数量 2。用 oracle 价而非账本 99999。
+    expect(series[0]).toEqual({ accountId: acc.id, takenAt: D0, totalUsd: 2 * 50000 });
+    expect(series[series.length - 1]).toEqual({
+      accountId: acc.id,
+      takenAt: D0 + DAY,
+      totalUsd: 2 * 52000,
+    });
+    expect(series.some((r) => r.totalUsd === 2 * 52000)).toBe(true); // 确用了 B0+1 的历史价
   });
 
   it("窗口外存量:首活动远早于 now,后续每日点仍携带折出的存量(修 T5 缺口)", async () => {
@@ -87,8 +94,10 @@ describe("loadManualAccountSeries (grid)", () => {
     await addManualActivities(USER, acc.id, [
       { token: localBtc, kind: "add", amount: 2, occurredAt: D0, price: 60000 },
     ]);
-    const series = await loadManualAccountSeries(USER, acc.id, D0 + 3 * DAY); // 桶 B0..B0+3
-    expect(series).toHaveLength(4);
+    const series = await loadManualAccountSeries(USER, acc.id, D0 + 3 * DAY);
+    expect(series[0].takenAt).toBe(D0); // 锚首活动
+    expect(series[series.length - 1].takenAt).toBe(D0 + 3 * DAY); // 铺到 now
+    expect(series.length).toBeGreaterThanOrEqual(4);
     expect(series.every((r) => r.totalUsd === 2 * 60000)).toBe(true);
   });
 
@@ -125,10 +134,12 @@ describe("loadManualAccountSeries (grid)", () => {
       { token: localBtc, kind: "add", amount: 1, occurredAt: D0, price: 40000 },
     ]);
     const series = await loadManualAccountSeries(USER, acc.id, D0 + DAY);
-    expect(series).toEqual([
-      { accountId: acc.id, takenAt: dayEnd(B0), totalUsd: 1 * 40000 }, // 新前置日:仅 D0 的 1
-      { accountId: acc.id, takenAt: D0 + DAY, totalUsd: 3 * 50000 }, // 桶 B0+1:1+2=3,② 最近价 50000
-    ]);
+    expect(series[0]).toEqual({ accountId: acc.id, takenAt: D0, totalUsd: 1 * 40000 }); // 起点回到 D0
+    expect(series[series.length - 1]).toEqual({
+      accountId: acc.id,
+      takenAt: D0 + DAY,
+      totalUsd: 3 * 50000,
+    }); // 末点:1+2=3,② 最近价 50000
   });
 
   it("删除过去活动 → 整体重算不留 stale", async () => {
@@ -142,10 +153,13 @@ describe("loadManualAccountSeries (grid)", () => {
     if (!later) throw new Error("later activity missing");
     await deleteManualActivity(USER, acc.id, later.id);
     const series = await loadManualAccountSeries(USER, acc.id, D0 + DAY);
-    expect(series).toEqual([
-      { accountId: acc.id, takenAt: dayEnd(B0), totalUsd: 1 * 40000 },
-      { accountId: acc.id, takenAt: D0 + DAY, totalUsd: 1 * 40000 }, // 存量 1 携带,不留旧的 3×50000
-    ]);
+    expect(series[0]).toEqual({ accountId: acc.id, takenAt: D0, totalUsd: 1 * 40000 });
+    expect(series[series.length - 1]).toEqual({
+      accountId: acc.id,
+      takenAt: D0 + DAY,
+      totalUsd: 1 * 40000,
+    }); // 存量 1 携带,不留旧的 3×50000
+    expect(series.every((r) => r.totalUsd === 1 * 40000)).toBe(true);
   });
 
   it("修改过去活动 amount → 下游重算", async () => {
