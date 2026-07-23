@@ -2,12 +2,15 @@ import type {
   AccountSafe,
   ManualActivity,
   ManualActivityPatch,
+  ManualToken,
   SnapshotWithBalances,
 } from "@folio/db";
+import type { SnapshotTotalRow } from "../history";
 import type { CredsToken } from "../manual-activity";
 import { deriveAmount, projectToken } from "../manual-activity";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "../manual-batch";
 import { isManual, MANUAL_CONNECTOR_ID } from "../manual-connector";
+import { buildManualAccountSeries, type HistoryToken } from "../manual-history";
 import { buildManualSnapshot } from "../manual-snapshot";
 import { type BalanceLike, balanceToAssetRef } from "../tokens";
 import { db } from "./db";
@@ -144,18 +147,36 @@ export interface UpdateTokenInput {
 }
 export type ManualWriteResult = { ok: true } | { ok: false; reason: "overdraw"; symbol?: string };
 
-// 某账户已有 token(定义 + 各自活动账本)→ manual-batch 的 Token[]。ManualActivity 结构含 DerivableActivity。
+// 某账户的各 token 定义 + 各自活动(按 tokenId 归并)。**唯一加载器**:一次账户级活动读 + 分组,消 N+1;
+// 写校验(loadTokens)、抽屉明细(loadManualAccountDetail)、价值历史(loadHistoryTokens)三处读路径共用,
+// 各自再投影成所需形状。DB 层 token_id 可空(迁移遗留)→ 防御式跳过。
+async function loadTokensWithActivities(
+  userId: string,
+  accountId: string,
+): Promise<{ token: ManualToken; activities: ManualActivity[] }[]> {
+  const [tokens, activities] = await Promise.all([
+    db.listManualTokensByAccount(userId, accountId),
+    db.listManualActivityByAccount(userId, accountId),
+  ]);
+  const byToken = new Map<string, ManualActivity[]>();
+  for (const a of activities) {
+    if (a.tokenId == null) continue;
+    const arr = byToken.get(a.tokenId) ?? [];
+    arr.push(a);
+    byToken.set(a.tokenId, arr);
+  }
+  return tokens.map((token) => ({ token, activities: byToken.get(token.id) ?? [] }));
+}
+
+// manual-batch 的 Token[](写路径超支校验用)。ManualActivity 结构含 DerivableActivity。
 async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
-  const tokens = await db.listManualTokensByAccount(userId, accountId);
-  return Promise.all(
-    tokens.map(async (t) => ({
-      id: t.id,
-      symbol: t.symbol,
-      unitPrice: t.unitPrice,
-      identifier: t.identifier,
-      activities: await db.listManualActivityByToken(userId, t.id),
-    })),
-  );
+  return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
+    id: token.id,
+    symbol: token.symbol,
+    unitPrice: token.unitPrice,
+    identifier: token.identifier,
+    activities,
+  }));
 }
 
 // —— 读:抽屉账户明细(T4,#156)——
@@ -177,20 +198,65 @@ export async function loadManualAccountDetail(
   userId: string,
   accountId: string,
 ): Promise<ManualAccountDetail> {
-  const rows = await db.listManualTokensByAccount(userId, accountId);
-  const perToken = await Promise.all(
-    rows.map(async (t) => ({ t, activities: await db.listManualActivityByToken(userId, t.id) })),
-  );
+  const perToken = await loadTokensWithActivities(userId, accountId);
   return {
-    tokens: perToken.map(({ t, activities }) => ({
-      id: t.id,
-      symbol: t.symbol,
-      unitPrice: t.unitPrice,
-      identifier: t.identifier ?? null,
+    tokens: perToken.map(({ token, activities }) => ({
+      id: token.id,
+      symbol: token.symbol,
+      unitPrice: token.unitPrice,
+      identifier: token.identifier ?? null,
       amount: deriveAmount(activities),
     })),
     activities: perToken.flatMap(({ activities }) => activities),
   };
+}
+
+// —— 读:价值历史 compute-on-read(T5,#157,ADR 0018)——
+// manual 账户不写 snapshot → 其历史由账本现算。共用 loadTokensWithActivities(消 N+1),投影成 HistoryToken[]
+// 喂 buildManualAccountSeries 折出 (takenAt, totalUsd) 阶梯序列。ManualActivity 结构含 HistoryActivity
+// (price 参与 price@T 降级链②,见 manual-history)。
+async function loadHistoryTokens(userId: string, accountId: string): Promise<HistoryToken[]> {
+  return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
+    unitPrice: token.unitPrice,
+    identifier: token.identifier,
+    activities,
+  }));
+}
+
+// 单 manual 账户的账本价值序列(抽屉头部 chart 用;getAccountValueHistory 对 manual 走此)。
+// #148 未就绪 → 不传 priceAt,走账本价②/unitPrice③降级(有 identifier 者待 #148 切 oracle 历史价)。
+export async function loadManualAccountSeries(
+  userId: string,
+  accountId: string,
+): Promise<SnapshotTotalRow[]> {
+  return buildManualAccountSeries(accountId, await loadHistoryTokens(userId, accountId));
+}
+
+// 单 manual 账户「当下」实时盯市总额(抽屉曲线末点接它 → 端点与抽屉头 account.totalUsd 同源盯市,不因
+// 账本价/unitPrice 而与头部数值打架)。复用 injectManualSnapshots 的合成余额 + cache-only 现价(取不到回退
+// unitPrice)。账户不存在/非本人 → null(getAccountById 已 userId-scoped)。
+export async function loadManualAccountLiveTotal(
+  userId: string,
+  accountId: string,
+): Promise<number | null> {
+  const account = await db.getAccountById(userId, accountId);
+  if (!account) return null;
+  const byAccount = new Map<string, SnapshotWithBalances>();
+  await injectManualSnapshots(userId, [account], byAccount);
+  return byAccount.get(accountId)?.snapshot.totalUsd ?? null;
+}
+
+// 该用户 manual 账户账本序列的合并行(组合净值历史用)。各账户产各自 (accountId, takenAt, totalUsd) 行,
+// 与别账户的 snapshot 行拼在一起喂 buildPortfolioHistory —— manual 不在 snapshot 表 → 不双算(ADR 0018)。
+// **含归档**:历史保留归档账户的过去贡献(与 synced 账户「归档后旧快照仍在」一致);当下点由调用方的 live
+// 覆写(仅活跃账户)自然把归档剔出末点。故此处不按 archived 过滤(区别于 injector/预热的「当下」三门)。
+export async function loadManualHistoryRows(
+  userId: string,
+  accounts: AccountSafe[],
+): Promise<SnapshotTotalRow[]> {
+  const manual = accounts.filter((a) => isManual(a.connectorId));
+  const perAccount = await Promise.all(manual.map((a) => loadManualAccountSeries(userId, a.id)));
+  return perAccount.flat();
 }
 
 // 建一个 token:建行 + 一条 occurredAt=now 的开仓 set 活动(使 derived amount === 初始 amount)→ 物化。
