@@ -16,6 +16,8 @@ export type {
   ManualActivity,
   ManualActivityInput,
   ManualActivityKind,
+  ManualActivityPatch,
+  ManualBatchPlan,
   ManualToken,
   ManualTokenInput,
   Membership,

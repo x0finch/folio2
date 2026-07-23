@@ -721,6 +721,136 @@ export async function removeManualActivity(
     .where(and(eq(manualActivity.id, id), eq(manualActivity.accountId, accountId)));
 }
 
+// token → 其账户 id(userId-scoped 归属校验)。写路径改完 token 后据此重跑该账户物化(app 层)。
+export async function getManualTokenAccountId(
+  env: DbEnv,
+  userId: string,
+  tokenId: string,
+): Promise<string> {
+  return assertTokenOwned(getDb(env), userId, tokenId);
+}
+
+// 活动 → {tokenId, accountId}(经 activity ⨝ account ⨝ user 归属校验;活动可能无 tokenId 的遗留行 → 抛)。
+// 编辑活动前用它定位所属 token(取时间线校验)+ 账户(重跑物化)。
+async function assertActivityOwned(
+  db: Db,
+  userId: string,
+  activityId: string,
+): Promise<{ tokenId: string; accountId: string }> {
+  const rows = await db
+    .select({ tokenId: manualActivity.tokenId, accountId: manualActivity.accountId })
+    .from(manualActivity)
+    .innerJoin(accounts, eq(manualActivity.accountId, accounts.id))
+    .where(and(eq(manualActivity.id, activityId), eq(accounts.userId, userId)));
+  const row = rows[0];
+  if (!row?.tokenId) throw new Error(`manual activity not found: ${activityId}`);
+  return { tokenId: row.tokenId, accountId: row.accountId };
+}
+
+// 活动 → {tokenId, accountId}(公开读,归属校验)。编辑活动前用它取所属 token 校验超支(改前折叠)。
+export function getManualActivityOwner(
+  env: DbEnv,
+  userId: string,
+  activityId: string,
+): Promise<{ tokenId: string; accountId: string }> {
+  return assertActivityOwned(getDb(env), userId, activityId);
+}
+
+export interface ManualActivityPatch {
+  kind?: ManualActivityKind;
+  amount?: number;
+  price?: number | null;
+  occurredAt?: number;
+  memo?: string | null;
+}
+// 编辑一笔既有活动(保留 id/tokenId/accountId/createdAt;只覆盖给定字段)。返回其 {tokenId, accountId}
+// 供调用方重跑物化。归属经 assertActivityOwned;超支校验在 app 层(改前折叠受影响 token 时间线)。
+export async function updateManualActivity(
+  env: DbEnv,
+  userId: string,
+  activityId: string,
+  patch: ManualActivityPatch,
+): Promise<{ tokenId: string; accountId: string }> {
+  const db = getDb(env);
+  const owner = await assertActivityOwned(db, userId, activityId);
+  const set: Partial<InferSelectModel<typeof manualActivity>> = {};
+  if (patch.kind !== undefined) set.kind = patch.kind;
+  if (patch.amount !== undefined) set.amount = patch.amount;
+  if (patch.price !== undefined) set.price = patch.price;
+  if (patch.occurredAt !== undefined) set.occurredAt = patch.occurredAt;
+  if (patch.memo !== undefined) set.memo = patch.memo;
+  // 空 patch → 无字段可写。drizzle 对空 set 会抛 "No values to set" → 直接短路(归属已校验)。
+  if (Object.keys(set).length > 0) {
+    await db.update(manualActivity).set(set).where(eq(manualActivity.id, activityId));
+  }
+  return owner;
+}
+
+export interface ManualBatchPlan {
+  accountId: string;
+  newTokens: { id: string; symbol: string; unitPrice: number; identifier?: string | null }[];
+  activities: {
+    tokenId: string;
+    kind: ManualActivityKind;
+    amount: number;
+    price?: number | null;
+    occurredAt: number;
+    memo?: string | null;
+  }[];
+}
+// 批量提交写计划(app 层 planManualBatch 产出):新建 token + 插入活动,**整批原子**(D1 无交互式事务 → db.batch)。
+// 归属:assertAccountOwned + 校验每条活动的 tokenId ∈(该账户既有 token ∪ 本批新建)—— 杜绝把活动挂到
+// 他账户/他人 token 的越权面(app 已按 account 作用域解析,此为纵深防御)。活动 createdAt = now + i 保提交序
+// (同 occurredAt 处新活动恒排在既有之后,与 planManualBatch 校验时间线定序一致)。
+export async function commitManualBatch(
+  env: DbEnv,
+  userId: string,
+  plan: ManualBatchPlan,
+): Promise<void> {
+  const db = getDb(env);
+  await assertAccountOwned(db, userId, plan.accountId);
+  const existing = await db
+    .select({ id: manualToken.id })
+    .from(manualToken)
+    .where(eq(manualToken.accountId, plan.accountId));
+  const allowed = new Set<string>([
+    ...existing.map((r) => r.id),
+    ...plan.newTokens.map((t) => t.id),
+  ]);
+  for (const a of plan.activities) {
+    if (!allowed.has(a.tokenId)) throw new Error(`token not in account: ${a.tokenId}`);
+  }
+  const now = Date.now();
+  const stmts = [
+    ...plan.newTokens.map((t) =>
+      db.insert(manualToken).values({
+        id: t.id,
+        accountId: plan.accountId,
+        symbol: t.symbol,
+        unitPrice: t.unitPrice,
+        identifier: t.identifier ?? null,
+        createdAt: now,
+      }),
+    ),
+    ...plan.activities.map((a, i) =>
+      db.insert(manualActivity).values({
+        id: crypto.randomUUID(),
+        accountId: plan.accountId,
+        tokenId: a.tokenId,
+        kind: a.kind,
+        amount: a.amount,
+        price: a.price ?? null,
+        occurredAt: a.occurredAt,
+        memo: a.memo ?? null,
+        createdAt: now + i,
+      }),
+    ),
+  ];
+  if (stmts.length === 0) return;
+  const [first, ...rest] = stmts;
+  await db.batch([first, ...rest]);
+}
+
 // —— user settings(Phase 3,#82)——
 // 缺省:无行的用户 → self-first(= 旧行为)。db 层不耦合 @folio/oracle,就地写常量。
 // 运行时换价源(active_vendor)已废止(ADR 0014)—— CoinGecko 单源,仅留估值模式。

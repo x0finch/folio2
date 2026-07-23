@@ -1,11 +1,15 @@
-import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
+import type { AccountSafe, ManualActivityPatch, SnapshotWithBalances } from "@folio/db";
 import type { CredsToken } from "../manual-activity";
-import { projectToken } from "../manual-activity";
+import { deriveAmount, projectToken } from "../manual-activity";
+import { type BatchDraft, planManualBatch, runningOk, type Token } from "../manual-batch";
 import { isManual, MANUAL_CONNECTOR_ID } from "../manual-connector";
 import { buildManualSnapshot } from "../manual-snapshot";
 import { type BalanceLike, balanceToAssetRef } from "../tokens";
 import { db } from "./db";
 import { oracle } from "./oracle";
+
+// 折叠数量的浮点容差(与 manual-batch/manual-store 一致):目标 amount 与当前 derived 差在此内视为相等。
+const AMOUNT_EPS = 1e-9;
 
 // 把某 manual 账户的各 token 定义 + 各自活动账本折叠出的 amount,物化进 public `creds.tokens`
 // (provider 读取的投影,ADR 0017)。**单写者**:任何 token / 活动写路径改动后都须重跑,维护不变量
@@ -112,4 +116,139 @@ export async function manualBalancesForWarm(
 ): Promise<BalanceLike[]> {
   const list = await manualTokensByAccount(userId, accounts);
   return list.flatMap(({ id, tokens }) => buildManualSnapshot(id, tokens, [], 0).balances);
+}
+
+// —— T3 写路径(#155):token CRUD + 批量活动(原子)+ 删/改活动 ——
+// server fn(manual-mutations.ts)只做 auth 薄壳后调这些纯 async(可在 workers-pool 集成测,不引 createServerFn)。
+// **单写者**:每次写后重跑受影响账户物化(materializeManualCreds),维护 creds.tokens[i].amount === 折叠账本 不变量。
+// 决策逻辑(解析/收养/超支校验)下沉纯模块 manual-batch;这里只做加载 + 调用 + 物化(ADR 0017)。
+
+export interface CreateTokenInput {
+  accountId: string;
+  symbol: string;
+  unitPrice: number;
+  identifier?: string | null;
+  amount: number;
+}
+export interface UpdateTokenInput {
+  tokenId: string;
+  symbol: string;
+  unitPrice: number;
+  identifier?: string | null;
+  amount: number;
+}
+export type ManualWriteResult = { ok: true } | { ok: false; reason: "overdraw"; symbol?: string };
+
+// 某账户已有 token(定义 + 各自活动账本)→ manual-batch 的 Token[]。ManualActivity 结构含 DerivableActivity。
+async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
+  const tokens = await db.listManualTokensByAccount(userId, accountId);
+  return Promise.all(
+    tokens.map(async (t) => ({
+      id: t.id,
+      symbol: t.symbol,
+      unitPrice: t.unitPrice,
+      identifier: t.identifier,
+      activities: await db.listManualActivityByToken(userId, t.id),
+    })),
+  );
+}
+
+// 建一个 token:建行 + 一条 occurredAt=now 的开仓 set 活动(使 derived amount === 初始 amount)→ 物化。
+export async function createToken(userId: string, input: CreateTokenInput) {
+  const token = await db.createManualToken(userId, input.accountId, {
+    symbol: input.symbol,
+    unitPrice: input.unitPrice,
+    identifier: input.identifier,
+  });
+  await db.recordManualActivity(userId, token.id, {
+    kind: "set",
+    amount: input.amount,
+    occurredAt: Date.now(),
+  });
+  await materializeManualCreds(userId, input.accountId);
+  return token;
+}
+
+// 改 token 定义;若目标 amount 与当前 derived 不同 → 追加一条 set 活动对齐(播 set 语义,grill Q13)→ 物化。
+export async function updateToken(userId: string, input: UpdateTokenInput): Promise<void> {
+  const accountId = await db.getManualTokenAccountId(userId, input.tokenId);
+  await db.updateManualToken(userId, input.tokenId, {
+    symbol: input.symbol,
+    unitPrice: input.unitPrice,
+    identifier: input.identifier,
+  });
+  const current = deriveAmount(await db.listManualActivityByToken(userId, input.tokenId));
+  if (Math.abs(current - input.amount) > AMOUNT_EPS) {
+    await db.recordManualActivity(userId, input.tokenId, {
+      kind: "set",
+      amount: input.amount,
+      occurredAt: Date.now(),
+    });
+  }
+  await materializeManualCreds(userId, accountId);
+}
+
+// 删一个 token(其活动经 FK 级联清)→ 物化(账户仍在)。
+export async function deleteToken(userId: string, tokenId: string): Promise<void> {
+  const accountId = await db.getManualTokenAccountId(userId, tokenId);
+  await db.deleteManualToken(userId, tokenId);
+  await materializeManualCreds(userId, accountId);
+}
+
+// 批量加活动:载既有 token → 纯逻辑解析+校验(整批拒因超支)→ 原子提交(新建 token + 插活动)→ 物化。
+export async function addManualActivities(
+  userId: string,
+  accountId: string,
+  drafts: BatchDraft[],
+): Promise<ManualWriteResult> {
+  const existing = await loadTokens(userId, accountId);
+  const plan = planManualBatch(existing, drafts, () => crypto.randomUUID());
+  if (!plan.ok) return { ok: false, reason: "overdraw", symbol: plan.symbol };
+  await db.commitManualBatch(userId, {
+    accountId,
+    newTokens: plan.newTokens,
+    activities: plan.activities,
+  });
+  await materializeManualCreds(userId, accountId);
+  return { ok: true };
+}
+
+// 删一笔活动(不校验:删除只减活动,derived 末值仍夹 0,与前端一致)→ 物化。
+export async function deleteManualActivity(
+  userId: string,
+  accountId: string,
+  activityId: string,
+): Promise<void> {
+  await db.removeManualActivity(userId, accountId, activityId);
+  await materializeManualCreds(userId, accountId);
+}
+
+// 编辑一笔既有活动:取所属 token 时间线、套 patch 折叠校验(改 amount/kind/日期可能致超支)→ 合法才写 → 物化。
+export async function editManualActivity(
+  userId: string,
+  activityId: string,
+  patch: ManualActivityPatch,
+): Promise<ManualWriteResult> {
+  const { tokenId, accountId } = await db.getManualActivityOwner(userId, activityId);
+  const activities = await db.listManualActivityByToken(userId, tokenId);
+  // 只 kind/amount/occurredAt 影响运行持有;price/memo 不参与折叠。
+  const patched = activities.map((a) =>
+    a.id === activityId
+      ? {
+          kind: patch.kind ?? a.kind,
+          amount: patch.amount ?? a.amount,
+          occurredAt: patch.occurredAt ?? a.occurredAt,
+          createdAt: a.createdAt,
+        }
+      : a,
+  );
+  if (!runningOk(patched)) {
+    const symbol = (await db.listManualTokensByAccount(userId, accountId)).find(
+      (t) => t.id === tokenId,
+    )?.symbol;
+    return { ok: false, reason: "overdraw", symbol };
+  }
+  await db.updateManualActivity(userId, activityId, patch);
+  await materializeManualCreds(userId, accountId);
+  return { ok: true };
 }

@@ -53,6 +53,10 @@ export function createDb(env: DbEnv) {
     listManualActivityByAccount: b(q.listManualActivityByAccount),
     listManualActivityByToken: b(q.listManualActivityByToken),
     removeManualActivity: b(q.removeManualActivity),
+    getManualTokenAccountId: b(q.getManualTokenAccountId),
+    getManualActivityOwner: b(q.getManualActivityOwner),
+    updateManualActivity: b(q.updateManualActivity),
+    commitManualBatch: b(q.commitManualBatch),
     // —— user settings(Phase 3)——
     getUserSettings: b(q.getUserSettings),
     updateUserSettings: b(q.updateUserSettings),
