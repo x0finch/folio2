@@ -247,3 +247,76 @@ describe("editManualActivity", () => {
     expect((await readTokens(account.id))[0].amount).toBe(1);
   });
 });
+
+// 越权负路径:验 T3 新增 db ops 的归属守卫(userId-scoped assert + commitManualBatch 的 tokenId∈账户 校验)。
+// 每条守卫失败即抛,从 API 形状上杜绝跨用户/跨账户写。
+describe("越权防御(跨用户 / 跨账户)", () => {
+  const OTHER = "user-manual-t3-other";
+  async function ensureOther(): Promise<void> {
+    await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(OTHER).run();
+    const now = Date.now();
+    await env.DB.prepare(
+      "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind(OTHER, OTHER, `${OTHER}@example.com`, 0, now, now)
+      .run();
+  }
+
+  it("跨用户改 token → 抛(getManualTokenAccountId 归属校验)", async () => {
+    await ensureOther();
+    const account = await seedAccount(); // USER 拥有
+    const [btc] = await db.listManualTokensByAccount(USER, account.id);
+    await expect(
+      updateToken(OTHER, { tokenId: btc.id, symbol: "BTC", unitPrice: 1, amount: 1 }),
+    ).rejects.toThrow();
+  });
+
+  it("跨用户删 token → 抛", async () => {
+    await ensureOther();
+    const account = await seedAccount();
+    const [btc] = await db.listManualTokensByAccount(USER, account.id);
+    await expect(deleteToken(OTHER, btc.id)).rejects.toThrow();
+  });
+
+  it("跨用户往他人账户加活动 → 抛(commitManualBatch assertAccountOwned)", async () => {
+    await ensureOther();
+    const account = await seedAccount();
+    await expect(
+      addManualActivities(OTHER, account.id, [
+        {
+          token: { symbol: "BTC", unitPrice: 60000, identifier: "bitcoin" },
+          kind: "add",
+          amount: 1,
+          occurredAt: LATER + 1,
+        },
+      ]),
+    ).rejects.toThrow();
+    // 未写:USER 的 BTC 仍是 1(OTHER 的操作被挡在 assert,零副作用)。
+    expect((await readTokens(account.id))[0].amount).toBe(1);
+  });
+
+  it("跨用户编辑他人活动 → 抛(getManualActivityOwner)", async () => {
+    await ensureOther();
+    const account = await seedAccount();
+    const set = (await db.listManualActivityByAccount(USER, account.id))[0];
+    await expect(editManualActivity(OTHER, set.id, { amount: 2 })).rejects.toThrow();
+  });
+
+  it("commitManualBatch 拒绝引用非本账户的 tokenId(纵深防御)", async () => {
+    const a = await seedAccount(); // 有 BTC token
+    const b = await createManualAccount(
+      USER,
+      "B",
+      JSON.stringify([{ symbol: "ETH", unitPrice: "1", amount: "1" }]),
+    );
+    const [btcTok] = await db.listManualTokensByAccount(USER, a.id);
+    // 往账户 b 提交一条引用账户 a 的 token 的活动 → 被 allowed-set 校验拒。
+    await expect(
+      db.commitManualBatch(USER, {
+        accountId: b.id,
+        newTokens: [],
+        activities: [{ tokenId: btcTok.id, kind: "add", amount: 1, occurredAt: LATER + 1 }],
+      }),
+    ).rejects.toThrow(/token not in account/);
+  });
+});
