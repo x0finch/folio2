@@ -1,11 +1,11 @@
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../require-auth";
 import { displayAssetRef } from "../tokens";
 import { userDisplayBalances } from "../user-balances";
 import { db } from "./internal/db";
 import { manualBalancesForWarm } from "./internal/manual";
 import { oracle } from "./internal/oracle";
+import { requireAuth } from "./internal/require-auth";
 
 const priceLog = getLogger(["folio", "web", "prices"]);
 

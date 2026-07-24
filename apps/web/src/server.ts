@@ -1,8 +1,8 @@
 import { syncAllUsers } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
-import { configureLogging } from "./lib/log";
 import { db } from "./lib/server/internal/db";
+import { configureLogging } from "./lib/server/internal/log";
 import { buildSyncDeps, warmTokensForUser } from "./lib/server/internal/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),

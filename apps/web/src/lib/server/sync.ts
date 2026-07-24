@@ -4,10 +4,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { isComplete } from "../creds";
 import { isManual } from "../manual-connector";
-import { requireAuth } from "../require-auth";
 import { type SyncStatusSummary, summarizeSync } from "../sync-status";
 import { credentialSpecs } from "./internal/connector-registry";
 import { db } from "./internal/db";
+import { requireAuth } from "./internal/require-auth";
 import { buildSyncDeps, warmTokensForUser } from "./internal/sync-deps";
 
 const syncLog = getLogger(["folio", "web", "sync"]);

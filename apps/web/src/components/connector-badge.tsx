@@ -1,6 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import { cn } from "@folio/ui";
-import { useConnectorLabels } from "../lib/use-connector-labels";
+import { useConnectorLabels } from "../hooks/use-connector-labels";
 
 // connector 徽章:统一的 muted 小标(仅 shadcn 设计 token,不用任意色值)。列表行与详情头共用。
 // 展示名经 useConnectorLabels(server registry 目录,React Query 去重+缓存)。

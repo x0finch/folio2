@@ -3,11 +3,11 @@ import { buildPortfolioHistory } from "../history";
 import { deriveLiveAccountTotals } from "../live-value";
 import { isManual } from "../manual-connector";
 import { buildOverview } from "../overview-model";
-import { requireAuth } from "../require-auth";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { db } from "./internal/db";
 import { injectManualSnapshots, loadManualHistoryRows } from "./internal/manual";
 import { oracle } from "./internal/oracle";
+import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
 
 // 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做

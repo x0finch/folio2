@@ -1,8 +1,6 @@
 import type { SnapshotBalance } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
-import { getAuth } from "@/lib/auth";
-import { resolveAuth } from "@/lib/auth-session";
 import { safeView } from "@/lib/creds";
 import {
   accountRecord,
@@ -12,6 +10,8 @@ import {
   ndjsonLine,
   snapshotRecord,
 } from "@/lib/export";
+import { getAuth } from "@/lib/server/internal/auth";
+import { resolveAuth } from "@/lib/server/internal/auth-session";
 import { credentialSpecs } from "@/lib/server/internal/connector-registry";
 import { db } from "@/lib/server/internal/db";
 

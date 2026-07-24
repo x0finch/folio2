@@ -1,7 +1,7 @@
 import type { ConnectorId } from "@folio/connectors";
 import { LogoAvatar, SharedLayoutBg } from "@folio/ui";
+import { useConnectorLabels, useConnectorLogos } from "../hooks/use-connector-labels";
 import { CONNECTOR_OPTIONS } from "../lib/connectors";
-import { useConnectorLabels, useConnectorLogos } from "../lib/use-connector-labels";
 
 // 「添加账户」第一步:连接器网格(纯展示)。分组来自 CONNECTOR_OPTIONS,展示名 + logo 来自 registry 目录
 // (useConnectorLabels/useConnectorLogos)—— 图标即各 connector manifest 自带的 logo(经 folio logo 代理),

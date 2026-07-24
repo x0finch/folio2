@@ -4,8 +4,8 @@ import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { tokenLogoUrl } from "../logo";
-import { requireAuth } from "../require-auth";
 import { oracle } from "./internal/oracle";
+import { requireAuth } from "./internal/require-auth";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
 
