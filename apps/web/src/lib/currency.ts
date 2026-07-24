@@ -1,4 +1,4 @@
-import { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "@folio/fx";
+import { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 
 // 展示币种偏好(每浏览器,仿 locale)。纯逻辑:cookie 解析 + 按 SUPPORTED 校验。
 export const CURRENCY_COOKIE = "folio_currency";

@@ -1,4 +1,4 @@
-import type { FxStore } from "@folio/fx";
+import type { FxStore } from "@folio/oracle-basic";
 import { batchWrite, selectByKeys } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
 import { fxRates } from "./schema";

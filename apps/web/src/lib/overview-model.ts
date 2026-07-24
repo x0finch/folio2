@@ -1,6 +1,6 @@
 import { PerpEquityMeta } from "@folio/connectors-basic";
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { Platforms } from "@folio/platforms";
+import type { Platforms } from "@folio/oracle-basic";
 import type { AssetRef, Tokens, ValuationMode } from "@folio/tokens";
 import { type OverviewBalance, toAccountSections } from "./account-view";
 import { type AggInput, buildCanonicalHoldings } from "./aggregate";

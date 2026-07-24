@@ -1,4 +1,4 @@
-import type { PlatformStore } from "@folio/platforms";
+import type { PlatformStore } from "@folio/oracle-basic";
 import { batchWrite, selectByKeys } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
 import { platforms } from "./schema";
