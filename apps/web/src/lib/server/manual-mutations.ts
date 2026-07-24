@@ -3,12 +3,10 @@ import { z } from "zod";
 import { requireAuth } from "../require-auth";
 import {
   addManualActivities,
-  createToken,
   deleteManualActivity,
   deleteToken,
   editManualActivity,
   loadManualAccountDetail,
-  updateToken,
 } from "./manual";
 
 // —— 读:抽屉账户明细(token 定义 + 折叠 amount + 全部活动)。抽屉 useQuery,写后失效刷新。
@@ -24,33 +22,6 @@ export const getManualAccountDetail = createServerFn({ method: "GET" })
 const ActivityKind = z.enum(["add", "reduce", "set"]);
 
 // —— token CRUD ——
-const TokenInput = z.object({
-  accountId: z.string().min(1),
-  symbol: z.string().trim().min(1),
-  unitPrice: z.number().nonnegative(),
-  identifier: z.string().trim().min(1).nullish(),
-  amount: z.number().nonnegative(),
-});
-export const addToken = createServerFn({ method: "POST" })
-  .middleware([requireAuth])
-  .validator(TokenInput)
-  .handler(({ data, context }) => createToken(context.userId, data));
-
-const TokenEditInput = z.object({
-  tokenId: z.string().min(1),
-  symbol: z.string().trim().min(1),
-  unitPrice: z.number().nonnegative(),
-  identifier: z.string().trim().min(1).nullish(),
-  amount: z.number().nonnegative(),
-});
-export const editToken = createServerFn({ method: "POST" })
-  .middleware([requireAuth])
-  .validator(TokenEditInput)
-  .handler(async ({ data, context }) => {
-    await updateToken(context.userId, data);
-    return { ok: true as const };
-  });
-
 const RemoveTokenInput = z.object({ tokenId: z.string().min(1) });
 export const removeToken = createServerFn({ method: "POST" })
   .middleware([requireAuth])
