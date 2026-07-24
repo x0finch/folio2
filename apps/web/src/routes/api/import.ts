@@ -2,10 +2,10 @@ import type { ConnectorId } from "@folio/connectors";
 import type { SnapshotBalanceInput } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
-import { getAuth } from "@/lib/auth";
-import { resolveAuth } from "@/lib/auth-session";
 import { categorizeFields } from "@/lib/creds";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "@/lib/import";
+import { getAuth } from "@/lib/server/internal/auth";
+import { resolveAuth } from "@/lib/server/internal/auth-session";
 import { credentialSpecs } from "@/lib/server/internal/connector-registry";
 import { db } from "@/lib/server/internal/db";
 

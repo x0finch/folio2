@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { listConnectors } from "./server/connectors";
+import { listConnectors } from "../lib/server/connectors";
 
 // 连接器展示目录(connectorId → {label, logo},来自 registry,经 server fn;部署内静态 → staleTime Infinity,
 // 全局缓存一次)。label/logo 两个 hook 共用同一 query(React Query 按 key 去重,不多发请求)。

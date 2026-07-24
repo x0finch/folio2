@@ -5,11 +5,11 @@ import { z } from "zod";
 import { isComplete, safeView } from "../creds";
 import { buildAccountValueHistory } from "../history";
 import { MANUAL_CONNECTOR_ID } from "../manual-connector";
-import { requireAuth } from "../require-auth";
 import { credentialSpecs, validateAccountCreds } from "./internal/connector-registry";
 import { createAccountFor, raw2sealed } from "./internal/create-account";
 import { db } from "./internal/db";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "./internal/manual";
+import { requireAuth } from "./internal/require-auth";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 connectorId/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);

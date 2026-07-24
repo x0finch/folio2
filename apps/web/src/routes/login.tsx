@@ -6,11 +6,12 @@ import { useTranslations } from "use-intl";
 import { LocaleSwitcher } from "../components/locale-switcher";
 import { Logo } from "../components/logo";
 import { PortfolioHero } from "../components/portfolio-hero";
+import { useMountedTheme } from "../hooks/use-theme";
 import { signIn, signUp } from "../lib/auth-client";
 import { deriveDefaultName } from "../lib/derive-default-name";
 import type { HoldingLike } from "../lib/hero-stats";
 import type { HistoryPoint } from "../lib/history";
-import { type Theme, useMountedTheme } from "../lib/theme";
+import type { Theme } from "../lib/theme";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
 

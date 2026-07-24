@@ -3,11 +3,12 @@ import { TanStackDevtools } from "@tanstack/react-devtools";
 import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, HeadContent, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { useEffect } from "react";
 import { IntlProvider } from "use-intl";
 
 import { messages } from "../lib/i18n/messages";
 import { getLocalePreference } from "../lib/server/preferences";
-import { THEME_INIT_SCRIPT } from "../lib/theme";
+import { applyStoredTheme, THEME_INIT_SCRIPT } from "../lib/theme";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -42,6 +43,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { locale, now } = Route.useLoaderData();
+  // 挂载后重放主题:<head> 脚本负责首帧无闪,但 hydration recovery / 重渲染可能把它设的 .dark 冲掉
+  // 且全站再无人恢复(useTheme 仅设置页挂载)→ 此处兜底,让 React 生命周期在每次(重)挂载后自愈。见 lib/theme。
+  useEffect(() => {
+    applyStoredTheme();
+  }, []);
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>
