@@ -7,7 +7,7 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { matchSegments } from "../lib/highlight";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
-import { searchTokens, topTokens } from "../lib/server/tokens";
+import { listTokens, listTopTokens } from "../lib/server/tokens";
 
 // manual 选币的内联 Combobox(A4,替代 TokenPicker 的全屏 CommandPalette 浮层):点触发器**就地下推**展开
 // 搜索框 + 结果列表(在文档流内、把下方字段推下去,不叠第二层遮罩)。接口与 TokenPicker 对齐(value/onChange/
@@ -86,7 +86,7 @@ export function TokenCombobox({
 
   const tokensQuery = useQuery({
     queryKey: ["tokens", search],
-    queryFn: () => (search ? searchTokens({ data: { query: search } }) : topTokens({ data: {} })),
+    queryFn: () => (search ? listTokens({ data: { query: search } }) : listTopTokens({ data: {} })),
     enabled: open,
     placeholderData: keepPreviousData,
     staleTime: 60_000,

@@ -23,7 +23,7 @@ import { isManual } from "../lib/manual-connector";
 import { manualTokensJson } from "../lib/manual-tokens";
 import { createAccount } from "../lib/server/accounts";
 import type { InputSpec } from "../lib/server/credentials";
-import { tokenPrice } from "../lib/server/tokens";
+import { getTokenPrice } from "../lib/server/tokens";
 import { TokenCombobox } from "./token-combobox";
 
 // 添加账户的录入字段与提交(A4 从 add-account-sheet 抽出,供 AddAccountModal 复用)。connector-driven 创建(#55):
@@ -71,7 +71,7 @@ function ManualFields({
     const reqId = ++priceReqRef.current;
     setPriceBusy(true);
     try {
-      const p = await tokenPrice({ data: { identifier: token.ref.identifier } });
+      const p = await getTokenPrice({ data: { identifier: token.ref.identifier } });
       if (priceReqRef.current === reqId && p?.unitPrice != null) {
         patch({ unitPrice: String(p.unitPrice) });
       }

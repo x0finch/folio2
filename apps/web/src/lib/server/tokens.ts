@@ -6,9 +6,6 @@ import { z } from "zod";
 import { tokenLogoUrl } from "../logo";
 import { requireAuth } from "../require-auth";
 import { type BalanceLike, displayAssetRef, type TokenEnrichment, toEnrichment } from "../tokens";
-import { userDisplayBalances } from "../user-balances";
-import { db } from "./db";
-import { manualBalancesForWarm } from "./manual";
 import { oracle } from "./oracle";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
@@ -47,7 +44,7 @@ async function cachedSearch(q: string): Promise<TokenInfo[]> {
 }
 
 // 选币 autocomplete(P7.4.3):按关键词搜;返回 TokenInfo[](JSON 可序列化)。
-export const searchTokens = createServerFn({ method: "GET" })
+export const listTokens = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ query: z.string() }))
   .handler(async ({ data }) => {
@@ -64,7 +61,7 @@ export const searchTokens = createServerFn({ method: "GET" })
   });
 
 // 默认选币下拉(P7.4.5,空输入):市值 top-N;冷缓存兜底(单飞预热)由 tokens.topTokens 内部处理。
-export const topTokens = createServerFn({ method: "GET" })
+export const listTopTokens = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ limit: z.number().int().positive().max(200).optional() }).optional())
   .handler(async ({ data }) => {
@@ -78,7 +75,7 @@ export const topTokens = createServerFn({ method: "GET" })
   });
 
 // 选中代币后取当前市价预填单价(P7.4.5,用户可改)。resolve(显式 identifier)→ priceOf(缓存/回源/写在 tokens 内)。
-export const tokenPrice = createServerFn({ method: "GET" })
+export const getTokenPrice = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ identifier: z.string().min(1) }))
   .handler(async ({ data }) => {
@@ -110,25 +107,6 @@ export async function enrichBalances<T extends BalanceLike>(
     pricesStale: enriched.some((e) => e?.priceStale),
   };
 }
-
-// SWR 刷价(客户端在看到 pricesStale 后调用):对该用户最新快照的全部持仓,凡解析出 ref 且价
-// stale/缺失者一次批量回源写回。服务端自算 stale 集(不信客户端入参);失败静默(下次再试)。
-export const refreshStalePrices = createServerFn({ method: "POST" })
-  .middleware([requireAuth])
-  .handler(async ({ context }) => {
-    const [snapshots, accounts] = await Promise.all([
-      db.getLatestSnapshotByUser(context.userId),
-      db.listAccountsByUser(context.userId),
-    ]);
-    // 三门同源(userDisplayBalances):manual 已退出快照但其合成余额经 injectManualSnapshots 进 enrich 门 →
-    // refresh 门必须同源覆盖,否则 manual 代币被标 stale 却刷不到、pricesStale 永清不掉、客户端空转刷新。
-    const manualBalances = await manualBalancesForWarm(context.userId, accounts);
-    // 与 enrichBalances 同门(displayAssetRef):defi 行标了 stale 就必须刷得到。
-    const assets = userDisplayBalances(snapshots, manualBalances).map(displayAssetRef);
-    const refreshed = await oracle.tokens.refreshStalePrices(assets);
-    tokenLog.info("stale prices refreshed", { refreshed });
-    return { refreshed };
-  });
 
 // 预热(写缓存,best-effort):tokens.warm 刷新 top-N + 逐行 lazy 解析(合约懒解析入缓存)。
 // cron(waitUntil)与手动 sync 后调用。
