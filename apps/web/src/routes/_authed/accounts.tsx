@@ -17,15 +17,15 @@ import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-syn
 import { aggregateDayChange } from "../../lib/day-value-change";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { isManual } from "../../lib/manual-connector";
-import { listMyAccounts } from "../../lib/server/accounts";
-import { getMyAccountHoldings } from "../../lib/server/overview";
+import { listAccounts } from "../../lib/server/accounts";
+import { listAccountHoldings } from "../../lib/server/portfolio";
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
-    // 合并两源:getMyOverview 给活跃账户的市值/上次同步/持仓;listMyAccounts 给全部账户(含归档)的
-    // 凭据态 + archivedAt。归档账户不在 overview.rows(见 overview.ts 过滤)→ 其 value/holdings 为空。
+    // 合并两源:listAccountHoldings 给活跃账户的市值/上次同步/持仓;listAccounts 给全部账户(含归档)的
+    // 凭据态 + archivedAt。归档账户不在 overview.rows(见 portfolio.ts 过滤)→ 其 value/holdings 为空。
     // 凭据字段规格由补录 modal 自取(AddAccountModal specsQuery),此处不再预取。
-    const [overview, accounts] = await Promise.all([getMyAccountHoldings(), listMyAccounts()]);
+    const [overview, accounts] = await Promise.all([listAccountHoldings(), listAccounts()]);
     const byId = new Map(overview.rows.map((r) => [r.account.id, r]));
     const rows: AccountRow[] = accounts.map((a) => {
       const ov = byId.get(a.id);

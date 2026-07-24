@@ -1,35 +1,23 @@
-import { syncAccount, syncUser } from "@folio/sync";
+import { syncAccount as syncAccountCore } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { isComplete } from "../creds";
 import { isManual } from "../manual-connector";
 import { requireAuth } from "../require-auth";
+import { type SyncStatusSummary, summarizeSync } from "../sync-status";
+import { credentialSpecs } from "./connector-registry";
 import { db } from "./db";
 import { buildSyncDeps, warmTokensForUser } from "./sync-deps";
 
-// 手动触发同步:遍历该用户全部账户,逐账户隔离写快照。返回每账户 ok/fail,不含任何密钥/明文凭据。
-// userId 经 requireAuth 的 withContext 自动带入下游日志(ALS);此处再记一条触发汇总。
-// 编排装配在 ./sync-deps(server-only)—— 本文件不引 cloudflare:workers,故 triggerSync 可安全被客户端 import。
-export const triggerSync = createServerFn({ method: "POST" })
-  .middleware([requireAuth])
-  .handler(async ({ context }) => {
-    const result = await syncUser(buildSyncDeps(), context.userId);
-    const ok = result.results.filter((r) => r.ok).length;
-    const skipped = result.results.filter((r) => r.skipped).length;
-    getLogger(["folio", "web", "sync"]).info("manual sync triggered", {
-      accounts: result.results.length,
-      ok,
-      skipped,
-      failed: result.results.length - ok - skipped,
-    });
-    // 预热代币缓存(best-effort,inline:同步本就耗时,可接受;首次有按需取价的额外延迟)。
-    await warmTokensForUser(context.userId);
-    return result;
-  });
+const syncLog = getLogger(["folio", "web", "sync"]);
 
-// 只同步单个账户(详情侧栏「单独同步」):取该账户 + 其 raw creds → syncAccount 隔离写快照。
-// 归档账户理论上侧栏会禁用此项;即便调用,syncAccount 仍按现有逻辑处理(缺凭据→skipped)。
-export const syncOneAccount = createServerFn({ method: "POST" })
+// 编排装配在 ./sync-deps(server-only)—— 本文件不引 cloudflare:workers,故这些 server fn 可安全被客户端 import。
+// 全量同步由客户端逐账户编排(见 lib/sync-orchestrator),故此处不再有 triggerSync;只留单账户同步 + 状态。
+
+// 只同步单个账户(详情侧栏「单独同步」):取该账户 + 其 raw creds → syncAccountCore 隔离写快照。
+// 归档账户理论上侧栏会禁用此项;即便调用,syncAccountCore 仍按现有逻辑处理(缺凭据→skipped)。
+export const syncAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(z.object({ accountId: z.string().min(1) }))
   .handler(async ({ data, context }) => {
@@ -40,8 +28,8 @@ export const syncOneAccount = createServerFn({ method: "POST" })
       return { accountId: account.id, ok: false, skipped: true };
     }
     const rawCreds = await db.getRawCreds(context.userId, data.accountId);
-    const result = await syncAccount(buildSyncDeps(), context.userId, account, rawCreds);
-    getLogger(["folio", "web", "sync"]).info("single account sync", {
+    const result = await syncAccountCore(buildSyncDeps(), context.userId, account, rawCreds);
+    syncLog.info("single account sync", {
       accountId: account.id,
       connectorId: account.connectorId,
       ok: result.ok,
@@ -49,4 +37,36 @@ export const syncOneAccount = createServerFn({ method: "POST" })
     });
     await warmTokensForUser(context.userId); // 让总览能 cache-only 富化新价
     return result;
+  });
+
+// 全局同步状态摘要(PageHeader 共享同步面板;每个认证页 loader 消费)。
+// 轻量:仅 3 次 D1 读(accounts / raw creds / 最新快照),不做富化/估值。
+// 缺凭据判定复用 creds.isComplete + connectors.credentialSpecs(与 listAccounts 同源);派生走纯模块 summarizeSync。
+export const getSyncStatus = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(async ({ context }): Promise<SyncStatusSummary> => {
+    const [accounts, rawList, snapshots] = await Promise.all([
+      db.listAccountsByUser(context.userId),
+      db.listRawCredsByUser(context.userId),
+      db.getLatestSnapshotByUser(context.userId),
+    ]);
+    const rawById = new Map(rawList.map((r) => [r.id, r.creds]));
+    const takenAtById = new Map(snapshots.map((s) => [s.snapshot.accountId, s.snapshot.takenAt]));
+    const specsByType = credentialSpecs();
+    // manual 不是同步源(ADR 0018)→ 不列入同步面板/「立即同步」集,也不显示为「未同步」。
+    const syncable = accounts.filter((a) => !isManual(a.connectorId));
+    return summarizeSync(
+      syncable.map((a) => {
+        const raw = rawById.get(a.id);
+        const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
+        const specs = specsByType[a.connectorId] ?? [];
+        return {
+          id: a.id,
+          label: a.label,
+          archivedAt: a.archivedAt,
+          complete: isComplete(specs, stored),
+          takenAt: takenAtById.get(a.id) ?? null,
+        };
+      }),
+    );
   });

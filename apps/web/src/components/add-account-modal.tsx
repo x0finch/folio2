@@ -5,8 +5,8 @@ import { useRouter } from "@tanstack/react-router";
 import { ArrowLeft, X } from "lucide-react";
 import { cloneElement, type ReactElement, type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import { getCredentialSpecs } from "../lib/server/credentials";
-import { syncOneAccount } from "../lib/server/sync";
+import { getConnectorCredentialSpecs } from "../lib/server/connectors";
+import { syncAccount } from "../lib/server/sync";
 import { useConnectorLabels } from "../lib/use-connector-labels";
 import { AccountForm } from "./account-fields";
 import { ConnectorGrid } from "./connector-grid";
@@ -109,7 +109,7 @@ export function AddAccountModal({
   // 字段规格部署内静态 → 长 staleTime,几乎只取一次;仅打开时取,避免账户页挂载即请求(#107 review)。
   const specsQuery = useQuery({
     queryKey: ["credentialSpecs"],
-    queryFn: () => getCredentialSpecs(),
+    queryFn: () => getConnectorCredentialSpecs(),
     enabled: open,
     staleTime: 60 * 60_000,
   });
@@ -128,7 +128,7 @@ export function AddAccountModal({
   const handleDone = (newId: string) => {
     setOpen(false);
     router.invalidate();
-    void syncOneAccount({ data: { accountId: newId } })
+    void syncAccount({ data: { accountId: newId } })
       .then(() => router.invalidate())
       .catch(() => {});
   };
@@ -141,7 +141,7 @@ export function AddAccountModal({
     toast.success(t("credSavedSyncing"));
     onCompleteClose?.();
     router.invalidate();
-    void syncOneAccount({ data: { accountId } })
+    void syncAccount({ data: { accountId } })
       .then(() => router.invalidate())
       .catch(() => {});
   };

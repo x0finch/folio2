@@ -11,16 +11,15 @@ import { mergeDefiGroups } from "../../lib/account-view";
 import { type GroupedView, toGroupedView } from "../../lib/groups-view";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
-import { getMyGroups } from "../../lib/server/groups";
-import { getPortfolioHistory } from "../../lib/server/history";
-import { getMyOverview } from "../../lib/server/overview";
+import { listGroups } from "../../lib/server/groups";
+import { getPortfolioHistory, getPortfolioOverview } from "../../lib/server/portfolio";
 
 export const Route = createFileRoute("/_authed/")({
   loader: async () => {
     const [overview, history, groups] = await Promise.all([
-      getMyOverview(),
+      getPortfolioOverview(),
       getPortfolioHistory(),
-      getMyGroups(),
+      listGroups(),
     ]);
     return { ...overview, series: history.series, ...groups };
   },

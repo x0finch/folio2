@@ -3,7 +3,7 @@ import type { ConnectorId } from "@folio/connectors";
 import { getLogger } from "@logtape/logtape";
 import { sealCreds } from "../creds";
 import { isManual } from "../manual-connector";
-import { credentialSpecs, validateAccountCreds } from "./connectors";
+import { credentialSpecs, validateAccountCreds } from "./connector-registry";
 import { db } from "./db";
 import { createManualAccount } from "./manual";
 

@@ -21,20 +21,24 @@ import { CurrencySwitcher } from "../../components/currency-switcher";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { signOut } from "../../lib/auth-client";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
-import { getKeyStatus, getValuationSettings, setValuationMode } from "../../lib/server/settings";
+import {
+  getProviderKeyStatus,
+  getValuationSettings,
+  updateValuationSettings,
+} from "../../lib/server/settings";
 import { type Theme, useMountedTheme } from "../../lib/theme";
 
 const authedApi = getRouteApi("/_authed");
 
 export const Route = createFileRoute("/_authed/settings")({
   loader: async () => {
-    const [status, valuation] = await Promise.all([getKeyStatus(), getValuationSettings()]);
+    const [status, valuation] = await Promise.all([getProviderKeyStatus(), getValuationSettings()]);
     return { status, valuation };
   },
   component: Settings,
 });
 
-// 全局 provider key(品牌名不翻译);env 名是 getKeyStatus 返回的 key。
+// 全局 provider key(品牌名不翻译);env 名是 getProviderKeyStatus 返回的 key。
 const PROVIDER_KEYS = [
   { env: "ZERION_API_KEY", label: "Zerion (EVM)" },
   { env: "COINSTATS_API_KEY", label: "CoinStats (Solana / Sui / Cosmos)" },
@@ -207,7 +211,7 @@ function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
     setSourceFirst(checked); // 乐观更新
     setBusy(true);
     try {
-      await setValuationMode({ data: { mode: checked ? "source-first" : "self-first" } });
+      await updateValuationSettings({ data: { mode: checked ? "source-first" : "self-first" } });
       await router.invalidate(); // 刷新总览/图表读路径
     } catch {
       setSourceFirst(!checked); // 回滚

@@ -6,7 +6,7 @@ import { db } from "./db";
 
 // 全局 provider key 是否已配置(只回布尔,绝不回值)。自托管者据此自检 env。
 // CEX 用每账户密钥、非全局 key,故不在此列。
-export const getKeyStatus = createServerFn({ method: "GET" })
+export const getProviderKeyStatus = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(() => ({
     ZERION_API_KEY: Boolean(env.ZERION_API_KEY),
@@ -19,7 +19,7 @@ export const getValuationSettings = createServerFn({ method: "GET" })
   .handler(({ context }) => db.getUserSettings(context.userId));
 
 // 切换估值模式:source-first = 统一采用市场源价、重算当前视图(历史冻结、无需重 sync)。
-export const setValuationMode = createServerFn({ method: "POST" })
+export const updateValuationSettings = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(z.object({ mode: z.enum(["self-first", "source-first"]) }))
   .handler(async ({ context, data }) => {

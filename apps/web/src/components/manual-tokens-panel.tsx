@@ -30,12 +30,11 @@ import {
 } from "../lib/manual-history";
 import type { DraftTokenRef } from "../lib/manual-types";
 import {
-  addActivities,
-  editActivity,
-  getManualAccountDetail,
-  removeActivity,
-  removeToken,
-} from "../lib/server/manual-mutations";
+  createManualActivities,
+  removeManualActivity,
+  updateManualActivity,
+} from "../lib/server/manual-activities";
+import { getManualAccount, removeManualToken } from "../lib/server/manual-tokens";
 import { HoverDetail } from "./hover-detail";
 import { type EditActivityInput, ManualActivityModal } from "./manual-activity-modal";
 import { Portal } from "./portal";
@@ -92,7 +91,7 @@ export function ManualTokensPanel({
   const detailKey = ["manual-account-detail", accountId] as const;
   const detailQuery = useQuery({
     queryKey: detailKey,
-    queryFn: () => getManualAccountDetail({ data: { accountId } }),
+    queryFn: () => getManualAccount({ data: { accountId } }),
     staleTime: 30_000,
   });
   const tokens = useMemo(() => detailQuery.data?.tokens ?? [], [detailQuery.data]);
@@ -180,12 +179,12 @@ export function ManualTokensPanel({
   };
 
   const removeTokenMut = useMutation({
-    mutationFn: (tokenId: string) => removeToken({ data: { tokenId } }),
+    mutationFn: (tokenId: string) => removeManualToken({ data: { tokenId } }),
     onSuccess: refresh,
     onError: () => toast.error(ta("actionFailed")),
   });
   const removeActivityMut = useMutation({
-    mutationFn: (activityId: string) => removeActivity({ data: { accountId, activityId } }),
+    mutationFn: (activityId: string) => removeManualActivity({ data: { accountId, activityId } }),
     onSuccess: refresh,
     onError: () => toast.error(ta("actionFailed")),
   });
@@ -386,7 +385,7 @@ export function ManualTokensPanel({
         edit={activity.edit}
         onClose={closeActivity}
         onSubmit={async (drafts) => {
-          const res = await addActivities({
+          const res = await createManualActivities({
             data: {
               accountId,
               drafts: drafts.map((d) => ({
@@ -412,7 +411,7 @@ export function ManualTokensPanel({
           return { ok: res.ok };
         }}
         onEdit={async (_tokenId, activityId, patch) => {
-          const res = await editActivity({
+          const res = await updateManualActivity({
             data: {
               activityId,
               patch: {

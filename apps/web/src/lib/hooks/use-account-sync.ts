@@ -2,10 +2,10 @@ import { toast } from "@folio/ui";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { syncOneAccount } from "../server/sync";
+import { syncAccount } from "../server/sync";
 import { orchestrateSync } from "../sync-orchestrator";
 
-// 账户同步的共享逻辑(PageHeader SyncStatus 复用):并发(≤3)逐个 syncOneAccount,
+// 账户同步的共享逻辑(PageHeader SyncStatus 复用):并发(≤3)逐个 syncAccount,
 // 进度/成功/失败统一走 sonner toast(D07 收尾:去掉页面内文字反馈),完成后 invalidate。
 export function useAccountSync(accounts: { id: string; label: string }[]) {
   const t = useTranslations("Accounts");
@@ -20,7 +20,7 @@ export function useAccountSync(accounts: { id: string; label: string }[]) {
       t("syncingProgress", { done: 0, total: accounts.length, current: "…" }),
     );
     const worker = async (accId: string) => {
-      const r = await syncOneAccount({ data: { accountId: accId } });
+      const r = await syncAccount({ data: { accountId: accId } });
       // skipped(缺凭据)不算失败;其余非 ok → 抛错供编排收集。
       if (!r.ok && !r.skipped) throw new Error(r.error ?? "sync failed");
     };

@@ -1,6 +1,6 @@
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { refreshStalePrices } from "../server/tokens";
+import { refreshStalePrices } from "../server/prices";
 
 // 价格 SWR 的客户端半边:loader 已用旧价渲染(pricesStale=true 时),这里触发一次服务端批量
 // 刷价,成功且确有刷新 → invalidate 重跑 loader 二次展示新价。单飞(每次挂载至多一次),

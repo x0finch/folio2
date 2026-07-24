@@ -23,9 +23,8 @@ import { aggregateDayChange } from "../lib/day-value-change";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
 import { isManual } from "../lib/manual-connector";
-import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
-import { getAccountValueHistory } from "../lib/server/history";
-import { syncOneAccount } from "../lib/server/sync";
+import { getAccountHistory, removeAccount, updateAccount } from "../lib/server/accounts";
+import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
 import { ConnectorBadge } from "./connector-badge";
 import { AccountHoldingsCards } from "./holdings-cards";
@@ -33,7 +32,7 @@ import { ManualTokensPanel } from "./manual-tokens-panel";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { ValueTrendChart } from "./value-trend-chart";
 
-// 账户页列表行的合并形状(getMyOverview ∪ listMyAccounts,见 accounts.tsx loader)。
+// 账户页列表行的合并形状(listAccountHoldings ∪ listAccounts,见 accounts.tsx loader)。
 export interface AccountRow {
   id: string;
   label: string;
@@ -134,7 +133,7 @@ function DetailBody({
   const historyQuery = useQuery({
     queryKey: ["account-history", account.id, range],
     queryFn: () =>
-      getAccountValueHistory({
+      getAccountHistory({
         // connectorId 传给服务端做读路径分流(manual→账本 / 其余→快照),省一次账户反查。
         data: {
           accountId: account.id,
@@ -149,7 +148,7 @@ function DetailBody({
 
   // 操作反馈统一走 toast(D07):同步给出成/败,写操作失败提示,成功以列表刷新为可见反馈。
   const syncMut = useMutation({
-    mutationFn: () => syncOneAccount({ data: { accountId: account.id } }),
+    mutationFn: () => syncAccount({ data: { accountId: account.id } }),
     onSuccess: async (r) => {
       if (r.ok) toast.success(t("synced", { count: 1 }));
       else if (!r.skipped) toast.error(r.error ?? t("syncGenericError"));
@@ -158,7 +157,7 @@ function DetailBody({
     onError: () => toast.error(t("syncGenericError")),
   });
   const renameMut = useMutation({
-    mutationFn: () => renameAccount({ data: { accountId: account.id, label: labelDraft.trim() } }),
+    mutationFn: () => updateAccount({ data: { accountId: account.id, label: labelDraft.trim() } }),
     onSuccess: async () => {
       setRenaming(false);
       await refresh();
@@ -166,12 +165,12 @@ function DetailBody({
     onError: () => toast.error(t("actionFailed")),
   });
   const archiveMut = useMutation({
-    mutationFn: () => setAccountArchived({ data: { accountId: account.id, archived: !archived } }),
+    mutationFn: () => updateAccount({ data: { accountId: account.id, archived: !archived } }),
     onSuccess: refresh,
     onError: () => toast.error(t("actionFailed")),
   });
   const deleteMut = useMutation({
-    mutationFn: () => deleteAccount({ data: { accountId: account.id } }),
+    mutationFn: () => removeAccount({ data: { accountId: account.id } }),
     onSuccess: async () => {
       onClose();
       await refresh();
