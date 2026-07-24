@@ -35,15 +35,12 @@ importers:
       '@folio/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@folio/fx':
-        specifier: workspace:*
-        version: link:../../packages/fx
       '@folio/oracle':
         specifier: workspace:*
         version: link:../../packages/oracle/entry
-      '@folio/platforms':
+      '@folio/oracle-basic':
         specifier: workspace:*
-        version: link:../../packages/platforms
+        version: link:../../packages/oracle/basic
       '@folio/sync':
         specifier: workspace:*
         version: link:../../packages/sync
@@ -394,12 +391,9 @@ importers:
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../connectors/basic
-      '@folio/fx':
+      '@folio/oracle-basic':
         specifier: workspace:*
-        version: link:../fx
-      '@folio/platforms':
-        specifier: workspace:*
-        version: link:../platforms
+        version: link:../oracle/basic
       '@folio/tokens':
         specifier: workspace:*
         version: link:../tokens/entry
@@ -431,22 +425,6 @@ importers:
       wrangler:
         specifier: ^4.105.0
         version: 4.105.0(@cloudflare/workers-types@4.20260626.1)
-
-  packages/fx:
-    dependencies:
-      '@folio/oracle':
-        specifier: workspace:*
-        version: link:../oracle/entry
-      '@folio/oracle-basic':
-        specifier: workspace:*
-        version: link:../oracle/basic
-      '@folio/oracle-source-coingecko':
-        specifier: workspace:*
-        version: link:../oracle/sources/coingecko
-    devDependencies:
-      typescript:
-        specifier: ^6.0.2
-        version: 6.0.3
 
   packages/oracle/basic:
     devDependencies:
@@ -488,22 +466,6 @@ importers:
       vitest:
         specifier: ^4.1.5
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/platforms:
-    dependencies:
-      '@folio/oracle':
-        specifier: workspace:*
-        version: link:../oracle/entry
-      '@folio/oracle-basic':
-        specifier: workspace:*
-        version: link:../oracle/basic
-      '@folio/oracle-source-coingecko':
-        specifier: workspace:*
-        version: link:../oracle/sources/coingecko
-    devDependencies:
-      typescript:
-        specifier: ^6.0.2
-        version: 6.0.3
 
   packages/sync:
     dependencies:
