@@ -9,6 +9,7 @@ import {
   parseAssetPlatforms,
   parseContract,
   parseMarkets,
+  parsePriceSeries,
   parseSearch,
   parseSimplePrice,
 } from "./parse";
@@ -96,6 +97,19 @@ export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource
         }),
       );
       return parseSimplePrice(json);
+    },
+
+    async fetchPriceSeries(ref, fromMs, toMs) {
+      if (ref.source !== "coingecko") return [];
+      const pairs = await mapErr(
+        client.coinsMarketChartRange({
+          id: ref.identifier,
+          vsCurrency: VS_USD,
+          fromSec: Math.floor(fromMs / 1000),
+          toSec: Math.ceil(toMs / 1000),
+        }),
+      );
+      return parsePriceSeries(pairs);
     },
   };
 }

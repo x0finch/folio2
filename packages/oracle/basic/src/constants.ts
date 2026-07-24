@@ -41,6 +41,11 @@ export const PRICE_TTL_MS = 30 * 60 * 1000; // 30min(长尾价;过期=stale 不�
 export const INFO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d(名称/图标,近静态)
 export const CGK_RECHECK_TTL_MS = 24 * 60 * 60 * 1000; // 1d(CGK 未收录的复查间隔,替代旧否定缓存)
 
+// —— 历史价日桶(#148 / ADR 0019)——
+// 历史价按 UTC 日桶缓存/采样。dayBucketOf(ms) = 该时刻所属 UTC 日的整数索引;日桶起点 = bucket * MS_PER_DAY。
+export const MS_PER_DAY = 24 * 60 * 60 * 1000;
+export const dayBucketOf = (ms: number): number => Math.floor(ms / MS_PER_DAY);
+
 // —— 展示分组种子(P2,ADR-0001)——
 // TokenGroup = 用户心智里"一个币"的家族;只并 CGK 故意拆开、用户视作同一的币。
 // 组定义(展示 symbol/名)。组的 logo 留空 → 展示时取主成员。

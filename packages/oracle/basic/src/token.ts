@@ -1,4 +1,4 @@
-import type { TokenInfo, TokenPrice, TokenRef } from "./types";
+import type { TokenInfo, TokenPrice, TokenPricePoint, TokenRef } from "./types";
 
 // 可插拔上游(网络),按能力隔离成两面(便于将来接只供价 / 只供目录的源):
 // · TokenMetaSource —— 目录/发现面(top-N 榜单 + 关键词搜索)。需完整币目录,唯身份权威(CoinGecko)实现。
@@ -27,6 +27,9 @@ export interface PriceSource {
   ): Promise<{ ref: TokenRef; info: TokenInfo; price: TokenPrice } | null>;
   // simple/price 刷新/长尾已知 ref 的价(key=refKey)。
   fetchPrices(refs: TokenRef[]): Promise<Map<string, TokenPrice>>;
+  // 历史价序列:一 ref 一区间**一次**上游调用,升序原始观测点(USD)。非本源 / 无历史 → 空。
+  // 粒度由上游定(CoinGecko:>90d 日级、≤90d 小时级);按日归一在 tokens 服务侧做。
+  fetchPriceSeries(ref: TokenRef, fromMs: number, toMs: number): Promise<TokenPricePoint[]>;
 }
 
 // 完整代币上游 = 目录面 + 点查面。代币服务(createTokens)消费完整体;平台/汇率面另挂(见 vendor)。

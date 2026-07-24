@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { TokenStore } from "../src/store";
+import type { TokenPriceHistoryStore, TokenStore } from "../src/store";
 import type { TokenSource } from "../src/token";
+import type { CgkCoinId, TokenRef } from "../src/types";
 
 // Stubs prove the (reshaped) interfaces are implementable — `satisfies` is the compile-time proof.
 // `: Token{Source,Store}` annotations are the compile-time proof the interfaces are implementable.
@@ -9,7 +10,13 @@ const source: TokenSource = {
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
   fetchPrices: async () => new Map(),
+  fetchPriceSeries: async () => [],
   searchTokens: async () => [],
+};
+
+const priceHistory: TokenPriceHistoryStore = {
+  getDailyPrices: async () => new Map(),
+  putDailyPrices: async () => {},
 };
 
 const store: TokenStore = {
@@ -32,5 +39,9 @@ describe("interface shapes", () => {
   });
   it("TokenStore is implementable", async () => {
     expect((await store.getByTokenKey(["eip155:1/erc20:0x0"])).size).toBe(0);
+  });
+  it("TokenPriceHistoryStore is implementable", async () => {
+    const ref: TokenRef = { source: "coingecko", identifier: "bitcoin" as CgkCoinId };
+    expect((await priceHistory.getDailyPrices(ref, [1])).size).toBe(0);
   });
 });

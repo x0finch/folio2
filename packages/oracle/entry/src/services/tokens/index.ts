@@ -4,12 +4,21 @@ import type {
   TokenGroup,
   TokenInfo,
   TokenPrice,
+  TokenPriceHistoryStore,
+  TokenPricePoint,
   TokenRecord,
   TokenRef,
   TokenSource,
   TokenStore,
 } from "@folio/oracle-basic";
-import { OVERRIDES, PRICE_TTL_MS, refKey, TOKEN_KEY_TTL_MS } from "@folio/oracle-basic";
+import {
+  dayBucketOf,
+  MS_PER_DAY,
+  OVERRIDES,
+  PRICE_TTL_MS,
+  refKey,
+  TOKEN_KEY_TTL_MS,
+} from "@folio/oracle-basic";
 import { createCoinGeckoSource } from "@folio/oracle-source-coingecko";
 import { normalizeSymbol } from "./normalize";
 import { type ResolveOpts, refreshWarm, resolveAsset } from "./service";
@@ -18,9 +27,18 @@ export interface CreateTokensConfig {
   apiKey?: string;
   // store 实现由调用方注入(D1 在 @folio/db,不该被 tokens 依赖);tokens 把 source.source(源标签)喂进来。
   createStore: (source: TokenRef["source"]) => TokenStore;
+  // 历史日价缓存(#148 / ADR 0019)。可选:不传 → 无历史缓存(priceSeries/priceAt 每次现取、不落库,
+  // 冷则空 → 调用方降级)。全局参考(无 userId,无 source 分桶,source 是列)→ 零参工厂。
+  createPriceHistoryStore?: () => TokenPriceHistoryStore;
   // 默认 source = CoinGecko;测试可注入 stub。app 不传 → 用默认,不感知具体上游。
   source?: TokenSource;
 }
+
+// 无历史缓存时的空对象(降级):不读不写 → priceSeries 每次现取、不持久。
+const NOOP_PRICE_HISTORY: TokenPriceHistoryStore = {
+  getDailyPrices: async () => new Map(),
+  putDailyPrices: async () => {},
+};
 
 // 单条富化结果(cache-only,扁平):ref=null 但仍可能有展示数据(provider 孤儿)。
 // priceStale:有 ref 而价格过期/缺失(可后台刷新);孤儿无价不算 stale(无处可刷)。
@@ -57,6 +75,12 @@ export interface Tokens {
   resolve(asset: AssetRef, opts?: ResolveOpts): Promise<Resolution>;
   // 取单价:缓存新鲜 → 直接回;stale/miss → 回源 → 写回。
   priceOf(ref: TokenRef): Promise<TokenPrice | undefined>;
+  // 历史日价序列(#148 / ADR 0019):一 ref 一区间,升序日价点(USD,atMs = UTC 日桶起点)。
+  // 命中缓存的过去日直接用,缺的一次回源补齐并永久落缓存;今日桶恒现取(可变,不缓存)。
+  // 非本源 / 无历史 / 上游失败 → 空(不抛,调用方降级)。
+  priceSeries(ref: TokenRef, fromMs: number, toMs: number): Promise<TokenPricePoint[]>;
+  // 某时刻的历史价(USD):atMs 所属 UTC 日桶的价;该日无数据 → undefined(调用方降级)。
+  priceAt(ref: TokenRef, atMs: number): Promise<number | undefined>;
   // 展示富化(cache-only,零网络):tokenKey 优先(孤儿也出数据),否则 override/symbol 消歧。
   enrich(assets: readonly (AssetRef | null)[]): Promise<EnrichedAsset[]>;
   // 按内部代币行 id 取上游 logo URL(logo 代理端点用):source 无关,含孤儿 providerLogo;缺则 undefined。
@@ -72,9 +96,15 @@ export interface Tokens {
 // 冷缓存预热的进程内单飞(isolate 级):多个请求同时命中空 warm 时只发一次预热。
 let warmInFlight: Promise<unknown> | null = null;
 
-export function createTokens({ apiKey, createStore, source }: CreateTokensConfig): Tokens {
+export function createTokens({
+  apiKey,
+  createStore,
+  createPriceHistoryStore,
+  source,
+}: CreateTokensConfig): Tokens {
   const p = source ?? createCoinGeckoSource({ apiKey });
   const deps = { source: p, store: createStore(p.source), overrides: OVERRIDES };
+  const history = createPriceHistoryStore ? createPriceHistoryStore() : NOOP_PRICE_HISTORY;
 
   // asset.identifier(用户显式选)→ explicit ref(用本源的 source 标签),调用方无需拼 TokenRef。
   const withExplicit = (asset: AssetRef): AssetRef =>
@@ -137,8 +167,53 @@ export function createTokens({ apiKey, createStore, source }: CreateTokensConfig
     return out as { ref: TokenRef | null; rec: TokenRecord | undefined }[];
   }
 
+  // 历史日价:读缓存日桶 → 缺的过去日一次回源补齐并永久落缓存 → 合并升序返回。
+  // 今日桶恒需现取(可变,不落缓存)。上游失败 → 退回仅缓存(不抛,降级)。
+  async function priceSeries(
+    ref: TokenRef,
+    fromMs: number,
+    toMs: number,
+  ): Promise<TokenPricePoint[]> {
+    if (ref.source !== "coingecko" || fromMs > toMs) return [];
+    const fromB = dayBucketOf(fromMs);
+    const toB = dayBucketOf(toMs);
+    const todayB = dayBucketOf(Date.now());
+    const buckets: number[] = [];
+    for (let b = fromB; b <= toB; b++) buckets.push(b);
+    const cached = await history.getDailyPrices(ref, buckets);
+    const missingPast = buckets.filter((b) => b < todayB && !cached.has(b));
+    const needsToday = toB >= todayB; // 今日桶恒现取(不缓存)
+    const fetched = new Map<number, number>();
+    if (missingPast.length > 0 || needsToday) {
+      try {
+        const raw = await deps.source.fetchPriceSeries(ref, fromMs, toMs);
+        for (const pt of raw) fetched.set(dayBucketOf(pt.atMs), pt.unitPrice); // 升序 → 当日最后一点胜出
+      } catch {
+        // 上游失败(限流/无历史/网络)→ 降级到仅缓存,不抛(曲线不因缺价崩)。
+      }
+      const toPersist = [...fetched.entries()]
+        .filter(([b]) => b < todayB && !cached.has(b)) // 只落不可变的过去日,今日桶不缓存
+        .map(([dayBucket, unitPrice]) => ({ dayBucket, unitPrice }));
+      if (toPersist.length > 0) await history.putDailyPrices(ref, toPersist);
+    }
+    const out: TokenPricePoint[] = [];
+    for (const b of buckets) {
+      const price = cached.get(b) ?? fetched.get(b);
+      if (typeof price === "number") out.push({ atMs: b * MS_PER_DAY, unitPrice: price });
+    }
+    return out;
+  }
+
+  async function priceAt(ref: TokenRef, atMs: number): Promise<number | undefined> {
+    const dayStart = dayBucketOf(atMs) * MS_PER_DAY;
+    const series = await priceSeries(ref, dayStart, atMs);
+    return series.length > 0 ? series[series.length - 1].unitPrice : undefined;
+  }
+
   return {
     resolve,
+    priceSeries,
+    priceAt,
 
     search: (query) => deps.source.searchTokens(query),
 

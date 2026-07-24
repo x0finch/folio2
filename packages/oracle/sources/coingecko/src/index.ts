@@ -7,6 +7,7 @@ export {
   parseAssetPlatforms,
   parseContract,
   parseMarkets,
+  parsePriceSeries,
   parseRetryAfter,
   parseSearch,
   parseSimplePrice,
