@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SnapshotTotalRow } from "../src/lib/history";
 import {
+  accountTotalAt,
   buildManualAccountSeries,
   type HistoryToken,
+  isReduceOversold,
   tokenPriceAt,
   tokenQuantityAt,
 } from "../src/lib/manual-history";
@@ -79,6 +81,34 @@ describe("tokenPriceAt 降级链", () => {
 // 网格采样(ADR 0019,锚定模型):采样时刻 = 首活动锚点 ∪ 其后每个 UTC 日末 ∪ now(并集升序)。
 // 首点恒在首活动、末点恒在 now → 任一有活动账户 ≥2 点(抽屉 series.length≥2 渲染门)。DAY 对齐的
 // occurredAt(T1=1×DAY…是日起点)让日桶数学干净;dayEnd(b)=(b+1)×DAY-1。
+describe("accountTotalAt", () => {
+  it("Σ_token quantity@t × price@t(账本价②)", () => {
+    const btc: HistoryToken = { unitPrice: 100, activities: [act("set", 2, T1, 60000)] };
+    const eth: HistoryToken = { unitPrice: 10, activities: [act("set", 3, T1, 3000)] };
+    expect(accountTotalAt([btc, eth], T1)).toBe(2 * 60000 + 3 * 3000);
+    expect(accountTotalAt([btc, eth], T1 - 1)).toBe(0); // 开仓前
+  });
+});
+
+describe("isReduceOversold", () => {
+  it("reduce 超过此前持有 → true", () => {
+    const acts = [act("add", 1, T1), act("reduce", 2, T2)];
+    expect(isReduceOversold(acts, acts[1])).toBe(true); // 持 1 卖 2
+  });
+  it("有更早开仓覆盖 → false", () => {
+    const acts = [act("set", 10, 0), act("add", 1, T1), act("reduce", 2, T2)];
+    expect(isReduceOversold(acts, acts[2])).toBe(false); // 持 11 卖 2
+  });
+  it("恰好卖到 0(未超) → false", () => {
+    const acts = [act("add", 1, T1), act("reduce", 1, T2)];
+    expect(isReduceOversold(acts, acts[1])).toBe(false);
+  });
+  it("非 reduce → false", () => {
+    const acts = [act("add", 1, T1)];
+    expect(isReduceOversold(acts, acts[0])).toBe(false);
+  });
+});
+
 describe("buildManualAccountSeries(grid, ADR 0019)", () => {
   const last = (s: SnapshotTotalRow[]) => s[s.length - 1];
 

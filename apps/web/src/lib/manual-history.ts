@@ -54,9 +54,36 @@ export function tokenPriceAt(token: HistoryToken, t: number, priceAt?: Historica
   return best?.price ?? token.unitPrice; // ②(best.price 恒非空)否则 ③
 }
 
-// quantity@T:折叠 occurredAt ≤ T 的活动(deriveAmount 语义:set 重置 / add += / reduce -= / 末值夹 0)。
+// quantity@T:折叠 occurredAt ≤ T 的活动(deriveAmount 语义:set 重置 / add += / reduce -= / 逐步夹 0)。
 export function tokenQuantityAt(token: HistoryToken, t: number): number {
   return deriveAmount(token.activities.filter((a) => a.occurredAt <= t));
+}
+
+// 账户在时刻 t 的总额:Σ_token quantity@t × price@t(价走降级链 ①oracle→②账本→③unitPrice)。
+// 网格序列与活动明细「此时总额」共用。
+export function accountTotalAt(
+  tokens: HistoryToken[],
+  t: number,
+  priceAt?: HistoricalPriceAt,
+): number {
+  let total = 0;
+  for (const tk of tokens) total += tokenQuantityAt(tk, t) * tokenPriceAt(tk, t, priceAt);
+  return total;
+}
+
+// 某 token 账本里,某笔活动是否「卖超」:该笔为 reduce,且其数量 > 此前(逐步夹 0 后的)运行持有 ——
+// 即这笔减少会把持有压到 0、且仍有卖不掉的余量。用于活动明细里如实提示(不改折叠结果)。
+export function isReduceOversold(
+  activities: HistoryActivity[],
+  activity: Pick<HistoryActivity, "kind" | "amount" | "occurredAt" | "createdAt">,
+): boolean {
+  if (activity.kind !== "reduce") return false;
+  const before = activities.filter(
+    (a) =>
+      a.occurredAt < activity.occurredAt ||
+      (a.occurredAt === activity.occurredAt && a.createdAt < activity.createdAt),
+  );
+  return deriveAmount(before) < activity.amount;
 }
 
 // 某 manual 账户的账本 → (takenAt, totalUsd) 序列,在**规则日网格**上采样(ADR 0019):曲线随市价起伏而非
@@ -90,9 +117,5 @@ export function buildManualAccountSeries(
 
   return [...times]
     .sort((a, b) => a - b)
-    .map((t) => {
-      let total = 0;
-      for (const tk of tokens) total += tokenQuantityAt(tk, t) * tokenPriceAt(tk, t, priceAt);
-      return { accountId, takenAt: t, totalUsd: total };
-    });
+    .map((t) => ({ accountId, takenAt: t, totalUsd: accountTotalAt(tokens, t, priceAt) }));
 }

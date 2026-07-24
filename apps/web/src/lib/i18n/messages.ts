@@ -212,6 +212,9 @@ export const en = {
     feeLabel: "Fee",
     feePlaceholder: "0.00",
     valuePreview: "Value",
+    accountTotalThen: "Account total then",
+    oversoldNotice:
+      "This reduce is more than was held at the time. The excess isn't counted — holdings stop at 0 and never go negative. If that looks off, an earlier buy may be missing.",
     dateLabel: "Date",
     memoLabel: "Notes",
     memoPlaceholder: "Optional note",
@@ -502,6 +505,9 @@ export const zh: Messages = {
     feeLabel: "手续费",
     feePlaceholder: "0.00",
     valuePreview: "价值",
+    accountTotalThen: "此时账户总额",
+    oversoldNotice:
+      "这笔卖出超过了当时的持有量。多出的部分不计入,持有量最多减到 0、不会变成负数。如果和预期不符,可能是漏记了更早的一笔买入。",
     dateLabel: "日期",
     memoLabel: "备注",
     memoPlaceholder: "备注(可选)",
