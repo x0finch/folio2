@@ -12,7 +12,7 @@ import { viewKind } from "./balance-kind";
 // metaJson(落库 JSON)在此 safeParse 到各自 meta(JSON 边界仅此一处;遗留的多余 role 键被 zod strip)。
 // 坏/缺 metaJson 的行被忽略,不抛(单账户脏数据不拖垮总览)。
 
-export interface PerpEquityView extends PerpEquityMetaT {
+interface PerpEquityView extends PerpEquityMetaT {
   accountValue: number; // = equity 行的 usdValue
 }
 export interface PerpPositionView extends PerpPositionMetaT {
@@ -63,8 +63,8 @@ export function pnlPct(p: PerpPositionView): number | null {
 // LiqRing 三态阈值:安全余量 = 距强平价占**现价**的百分比 d = |标记−强平| / 标记(方向感知)。
 // 换掉旧的「开仓→强平走了多少」度量 —— 那个把「安全」锚在开仓价、等价于「是否盈利」(稍亏即 warn),
 // 且不符交易惯例。新度量与盈亏解耦、天然含杠杆(高杠杆→强平更近→d 更小→更危险),贴近交易所/看板显示。
-export const LIQ_WARN_BELOW = 0.15; // d < 15% → 警告
-export const LIQ_DANGER_BELOW = 0.05; // d < 5% → 危险
+const LIQ_WARN_BELOW = 0.15; // d < 15% → 警告
+const LIQ_DANGER_BELOW = 0.05; // d < 5% → 危险
 const LIQ_RING_FULL = 0.25; // d ≥ 25% → 环满(安全上限;仅决定视觉填充,不影响状态判定)
 
 export type LiqRiskState = "safe" | "warn" | "danger";

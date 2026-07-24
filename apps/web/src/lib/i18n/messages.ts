@@ -1,7 +1,7 @@
 // i18n 消息(use-intl)。en 为基准;zh 用 `: Messages` 强制同构 —— 缺键/拼错编译期报错。
 // 品牌/链/交易所/币种符号等专有名词与纯示例值(BTC / 0x… / 数字)不翻译。
 
-export const en = {
+const en = {
   Common: {
     signOut: "Sign out",
     close: "Close",
@@ -297,10 +297,10 @@ export const en = {
   },
 };
 
-export type Messages = typeof en;
+type Messages = typeof en;
 export type Locale = "en" | "zh";
 
-export const zh: Messages = {
+const zh: Messages = {
   Common: {
     signOut: "退出登录",
     close: "关闭",

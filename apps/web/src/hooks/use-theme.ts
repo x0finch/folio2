@@ -12,7 +12,7 @@ export function useMountedTheme() {
 }
 
 // 运行时主题切换 + 持久化 + system 跟随。首帧无闪由 <head> 的 THEME_INIT_SCRIPT 负责(见 lib/theme)。
-export function useTheme() {
+function useTheme() {
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
 
   const setTheme = useCallback((t: Theme) => {

@@ -19,17 +19,17 @@ export interface AccountTotal {
   totalUsd: number;
 }
 
-export interface GroupedAccount {
+interface GroupedAccount {
   id: string;
   label: string;
   totalUsd: number;
 }
-export interface GroupSection {
+interface GroupSection {
   group: GroupInfo;
   subtotalUsd: number;
   accounts: GroupedAccount[];
 }
-export interface UngroupedSection {
+interface UngroupedSection {
   subtotalUsd: number;
   accounts: GroupedAccount[];
 }

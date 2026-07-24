@@ -45,8 +45,8 @@ export interface CoinGeckoConfig {
   baseUrl?: string; // 覆盖基址(测试/自托管代理)
 }
 
-export type Query = Record<string, string | number | undefined>;
-export interface RequestOptions {
+type Query = Record<string, string | number | undefined>;
+interface RequestOptions {
   notFoundAsNull?: boolean;
 }
 

@@ -16,7 +16,6 @@ export const SEARCH_LIMIT = 10;
 
 // /coins/markets 每页上限(CGK 硬上限)+ 默认拉取深度。
 export const PER_PAGE_MAX = 250;
-export const DEFAULT_TOP_N = 1000;
 
 // markets 多窗口涨跌(7d/30d 为 P8.1 预留;TokenPrice 暂只存 24h)。
 export const PRICE_CHANGE_WINDOWS = "24h,7d,30d";

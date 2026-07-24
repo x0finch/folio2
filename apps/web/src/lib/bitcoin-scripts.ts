@@ -1,20 +1,8 @@
 // Bitcoin add-account 的脚本类型 UI 辅助(客户端安全:纯字符串,不引 @scure 派生库)。
-// ScriptType 本地定义(与 @folio/bitcoin-derive 的 provider 侧同口径;那份含 @scure 派生库,不能进客户端 bundle);
-// SCRIPT_TYPE_VALUES 的 `satisfies readonly ScriptType[]` 守着与枚举的漂移。
+// ScriptType 本地定义(与 @folio/bitcoin-derive 的 provider 侧同口径;那份含 @scure 派生库,不能进客户端 bundle)。
 
 // bitcoin 派生脚本类型(与 blockbook/@folio/bitcoin-derive 一致的四值)。
 export type ScriptType = "native" | "nested" | "taproot" | "legacy";
-
-export const SATS_PER_BTC = 100_000_000;
-
-// 脚本类型枚举值(anchored 到 provider 的 ScriptType):客户端下拉 + 服务端 z.enum 校验同源,
-// 避免 accounts.ts 硬编码字面量漂移。本模块无 @scure 运行时,client/server 皆可 import。
-export const SCRIPT_TYPE_VALUES = [
-  "native",
-  "nested",
-  "taproot",
-  "legacy",
-] as const satisfies readonly ScriptType[];
 
 // 下拉选项(推荐项排前);label 走 Inputs i18n,addressPrefix 提示该类型派生地址的开头(语言无关,直接展示)。
 export const BTC_SCRIPT_OPTIONS: { value: ScriptType; label: string; addressPrefix: string }[] = [

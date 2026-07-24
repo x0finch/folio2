@@ -3,7 +3,7 @@
 
 // 稳定币判定的【临时固定清单】(#102):按 CGK 分类的动态 facet(ADR 0016 / #99)落地前先用这份
 // 常见稳定币 symbol 兜底。#99 上线后应换成 tokens.is_stablecoin,并删掉此清单。
-export const STABLECOIN_SYMBOLS: ReadonlySet<string> = new Set([
+const STABLECOIN_SYMBOLS: ReadonlySet<string> = new Set([
   "USDT",
   "USDC",
   "USDC.E",

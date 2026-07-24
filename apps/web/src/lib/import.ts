@@ -11,13 +11,13 @@ import { EXPORT_VERSION } from "./export";
 export class ImportError extends Error {}
 
 // 按暴露级别分类某 connector 的输入字段(由 route 用 registry 派生注入)。
-export interface InputKinds {
+interface InputKinds {
   publicKeys: string[];
   semiKeys: string[];
   secretKeys: string[];
 }
 
-export interface ImportSnapshotBalance {
+interface ImportSnapshotBalance {
   symbol: string;
   amount: number;
   usdValue: number;
@@ -41,7 +41,7 @@ export interface ImportDeps {
   ): Promise<void>;
 }
 
-export interface ImportCounts {
+interface ImportCounts {
   accounts: number;
   groups: number;
   memberships: number;

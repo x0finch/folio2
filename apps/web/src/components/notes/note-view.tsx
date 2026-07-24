@@ -15,7 +15,7 @@ import {
 // 数字值经注入的 formatNumber(locale)格式化;label/title 英文字面。React key(行)一律 index(只读展示列表)。
 
 // 5 个中性状态名 → lucide 命名图标。lucide 已把 AlertTriangle/AlertCircle 改名 TriangleAlert/CircleAlert。
-export const NOTE_ICON_MAP: Record<string, LucideIcon> = {
+const NOTE_ICON_MAP: Record<string, LucideIcon> = {
   info: Info,
   success: CircleCheck,
   warning: TriangleAlert,
@@ -24,7 +24,7 @@ export const NOTE_ICON_MAP: Record<string, LucideIcon> = {
 };
 
 // 状态图标配色:warning 琥珀、error 用 destructive token;其余走默认(继承 muted-foreground)。
-export const NOTE_ICON_CLASS: Record<string, string> = {
+const NOTE_ICON_CLASS: Record<string, string> = {
   warning: "text-amber-500",
   error: "text-destructive",
 };

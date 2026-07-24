@@ -1,4 +1,4 @@
-import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
 import type {
   accountGroups,
   accounts,
@@ -9,12 +9,10 @@ import type {
 } from "./schema";
 
 export type Account = InferSelectModel<typeof accounts>;
-export type NewAccount = InferInsertModel<typeof accounts>;
 // 对外安全形状:绝不含 creds(内含 secret 密文 + 不裸给前端;前端拿的是 safeView 投影)。
 export type AccountSafe = Omit<Account, "creds">;
 
 export type Group = InferSelectModel<typeof groups>;
-export type NewGroup = InferInsertModel<typeof groups>;
 
 export type AccountGroup = InferSelectModel<typeof accountGroups>;
 

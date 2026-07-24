@@ -6,7 +6,7 @@ export interface AccountUser {
   email?: string | null;
 }
 
-export type AccountSecondary = { kind: "email"; value: string } | { kind: "selfHosted" };
+type AccountSecondary = { kind: "email"; value: string } | { kind: "selfHosted" };
 
 export interface AccountIdentity {
   primary: string;

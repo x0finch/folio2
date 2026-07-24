@@ -27,7 +27,7 @@ import { ValueDelta } from "./value-delta";
 // 方向 pill 与类型 chip 一律中性灰(方向/类型是事实,不是评价)。
 
 // 场馆展示元数据(PerpPositionsList 的账户子头用)。
-export interface PlatformBadge {
+interface PlatformBadge {
   name: string;
   logo?: string;
 }
