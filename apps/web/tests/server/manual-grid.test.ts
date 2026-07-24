@@ -265,4 +265,19 @@ describe("loadManualAccountLiveTotal", () => {
   it("账户不存在 / 非本人 → null", async () => {
     expect(await loadManualAccountLiveTotal(USER, "no-such-account")).toBeNull();
   });
+
+  it("live compute-on-read:物化 creds.tokens 过期(amount 0)也按账本折叠,不卡在 stale", async () => {
+    const acc = await emptyAccount();
+    await addManualActivities(USER, acc.id, [
+      { token: localBtc, kind: "add", amount: 1, occurredAt: D0, price: 60000 },
+    ]);
+    // 手动把物化投影弄成过期(amount 0),模拟「删更早活动后 creds 携带旧值 / 折叠语义修正前写入」的 stale 态。
+    await db.setAccountCredentials(
+      USER,
+      acc.id,
+      JSON.stringify({ tokens: JSON.stringify([{ symbol: "BTC", unitPrice: 100, amount: 0 }]) }),
+    );
+    // live 按账本现算(1 × unitPrice 100,缓存冷回退)= 100,而非 stale creds 的 0。
+    expect(await loadManualAccountLiveTotal(USER, acc.id)).toBe(100);
+  });
 });

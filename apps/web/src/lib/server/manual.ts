@@ -73,19 +73,10 @@ export async function createManualAccount(userId: string, label: string, tokens:
   return account;
 }
 
-// 某 manual 账户存库的 creds.tokens(JSON 字符串)→ typed CredsToken[]。畸形/缺失 → 空数组(防御式)。
-function parseCredsTokens(raw: string | null): CredsToken[] {
-  if (!raw) return [];
-  try {
-    const creds = JSON.parse(raw) as { tokens?: string };
-    const tokens = creds.tokens ? JSON.parse(creds.tokens) : [];
-    return Array.isArray(tokens) ? (tokens as CredsToken[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-// 该用户**活跃** manual 账户的 (accountId → 已物化 tokens)。injector 与预热共用(一次批量 raw creds 读,消 N+1)。
+// 该用户**活跃** manual 账户的 (accountId → tokens)。injector 与预热共用。
+// **compute-on-read**(ADR 0018/0019):amount 由账本 deriveAmount 现算,不读物化的 creds.tokens ——
+// 否则「当下」净值(主页/账户/抽屉头 + 抽屉曲线末点实时覆写)会卡在上次物化的 stale 值(如删掉更早活动后
+// creds 未及重物化,或折叠语义修正前写入的旧值)。定义(symbol/unitPrice/identifier)取自 manual_token 行。
 // 排除归档:归档 manual 不进 enrich 门(injector 的调用点已按 active 过滤)→ 预热/刷价也不该碰它,三门同源。
 async function manualTokensByAccount(
   userId: string,
@@ -93,8 +84,14 @@ async function manualTokensByAccount(
 ): Promise<{ id: string; tokens: CredsToken[] }[]> {
   const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
   if (manual.length === 0) return [];
-  const rawById = new Map((await db.listRawCredsByUser(userId)).map((r) => [r.id, r.creds]));
-  return manual.map((a) => ({ id: a.id, tokens: parseCredsTokens(rawById.get(a.id) ?? null) }));
+  return Promise.all(
+    manual.map(async (a) => ({
+      id: a.id,
+      tokens: (await loadTokensWithActivities(userId, a.id)).map(({ token, activities }) =>
+        projectToken(token, activities),
+      ),
+    })),
+  );
 }
 
 // manual 退出 snapshot 后(ADR 0018 做法 1),其「当下」合成余额注入 `byAccount` —— overview/history 三处消费点
