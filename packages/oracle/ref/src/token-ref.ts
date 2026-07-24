@@ -10,12 +10,11 @@
 //
 // 归一:namer / assetNs / address 小写(都是寻址成分);不透明 id **一个字不动** ——
 // 归一是生产者的事(币安 connector 自己保证 symbol 大写),本包只负责别把它改坏。
+//
+// 容旧的三条规则全在 `./legacy`,本文件只在标了 legacy 的三处调用它们。
 
-const SEP = "/";
-const NATIVE = "native";
-// 旧文法的两处遗留形状,parse 容旧(永久要求:历史串必须永远读得出来)。
-const LEGACY_CHAIN_PREFIX = "chain:";
-const LEGACY_SLASHLESS_NAMER = "coingecko";
+import { NATIVE, SEP } from "./constants";
+import { isLegacyNativeAsset, parseLegacySlashless, stripLegacyChainPrefix } from "./legacy";
 
 export type TokenRef =
   | { kind: "native"; namer: string }
@@ -43,23 +42,17 @@ export function parseTokenRef(raw: string): ParsedTokenRef {
   if (!trimmed) return unknown;
 
   const slash = trimmed.indexOf(SEP);
-  // 容旧:旧 refKey 文法 `coingecko:<id>` 没有斜杠,是唯一的无斜杠合法形。
   if (slash < 0) {
-    const colon = trimmed.indexOf(":");
-    const namer = normalize(trimmed.slice(0, colon < 0 ? 0 : colon));
-    const id = trimmed.slice(colon + 1).trim();
-    if (namer !== LEGACY_SLASHLESS_NAMER || !id) return unknown;
-    return { kind: "opaque", namer, id };
+    const legacy = parseLegacySlashless(trimmed, normalize); // legacy
+    return legacy ? { kind: "opaque", ...legacy } : unknown;
   }
 
-  // 容旧:旧的链命名者带 `chain:` 前缀,短形去掉它(`eip155:<id>` 保留,它不是前缀而是名字本身)。
-  const namer = stripPrefix(normalize(trimmed.slice(0, slash)), LEGACY_CHAIN_PREFIX);
+  const namer = stripLegacyChainPrefix(normalize(trimmed.slice(0, slash))); // legacy
   const localName = trimmed.slice(slash + SEP.length).trim();
   if (!namer || !localName) return unknown;
 
   const colon = localName.indexOf(":");
   if (colon < 0) {
-    // 容旧:旧 native 串尾巴挂着 symbol(`native:btc`),从来没被读出来过 → 下面一并丢弃。
     if (normalize(localName) === NATIVE) return { kind: "native", namer };
     return { kind: "opaque", namer, id: localName };
   }
@@ -67,14 +60,10 @@ export function parseTokenRef(raw: string): ParsedTokenRef {
   const assetNs = normalize(localName.slice(0, colon));
   const address = normalize(localName.slice(colon + 1));
   if (!assetNs || !address) return unknown;
-  if (assetNs === NATIVE) return { kind: "native", namer };
+  if (isLegacyNativeAsset(assetNs)) return { kind: "native", namer }; // legacy
   return { kind: "contract", namer, assetNs, address };
 }
 
 function normalize(s: string): string {
   return s.trim().toLowerCase();
-}
-
-function stripPrefix(s: string, prefix: string): string {
-  return s.startsWith(prefix) ? s.slice(prefix.length) : s;
 }
