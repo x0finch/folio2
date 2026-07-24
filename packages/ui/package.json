@@ -10,8 +10,7 @@
     ".": "./src/index.ts",
     "./globals.css": "./src/styles/globals.css",
     "./components/*": "./src/components/*.tsx",
-    "./lib/*": "./src/lib/*.ts",
-    "./hooks/*": "./src/hooks/*.ts"
+    "./lib/*": "./src/lib/*.ts"
   },
   "scripts": {
     "test": "vitest run",
