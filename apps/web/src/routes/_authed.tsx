@@ -1,8 +1,8 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { CurrencyProvider } from "../lib/hooks/use-prefer-currency";
-import { getDisplayCurrency } from "../lib/server/currency";
-import { fetchCurrentUser } from "../lib/server/session";
+import { getCurrencyPreference } from "../lib/server/preferences";
+import { getSession } from "../lib/server/session";
 import { getSyncStatus } from "../lib/server/sync-status";
 
 // 受保护布局:无 session 则重定向到 /login(仅 UX;数据安全靠各 authedServerFn)。
@@ -10,12 +10,15 @@ import { getSyncStatus } from "../lib/server/sync-status";
 // → CurrencyProvider + AppShell 下发给整个认证区。
 export const Route = createFileRoute("/_authed")({
   beforeLoad: async () => {
-    const current = await fetchCurrentUser();
+    const current = await getSession();
     if (!current) throw redirect({ to: "/login" });
     return { user: current.user };
   },
   loader: async () => {
-    const [preferCurrency, syncStatus] = await Promise.all([getDisplayCurrency(), getSyncStatus()]);
+    const [preferCurrency, syncStatus] = await Promise.all([
+      getCurrencyPreference(),
+      getSyncStatus(),
+    ]);
     return { preferCurrency, syncStatus };
   },
   component: AuthedLayout,

@@ -6,7 +6,7 @@ import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { IntlProvider } from "use-intl";
 
 import { messages } from "../lib/i18n/messages";
-import { getLocale } from "../lib/server/locale";
+import { getLocalePreference } from "../lib/server/preferences";
 import { THEME_INIT_SCRIPT } from "../lib/theme";
 import appCss from "../styles.css?url";
 
@@ -36,7 +36,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   // SSR 首屏即正确语言:根 loader 定 locale(cookie/Accept-Language);切换时 invalidate 重跑。
   // now 也在此定(服务端时刻,序列化给客户端):作为 IntlProvider 的全局 now,relativeTime 才有基准
   //(否则 use-intl 抛 ENVIRONMENT_FALLBACK),且 SSR/客户端一致不产生 hydration 抖动。
-  loader: async () => ({ locale: await getLocale(), now: Date.now() }),
+  loader: async () => ({ locale: await getLocalePreference(), now: Date.now() }),
   shellComponent: RootDocument,
 });
 
