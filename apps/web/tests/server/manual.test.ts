@@ -1,8 +1,8 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createAccountFor } from "../../src/lib/server/create-account";
-import { db } from "../../src/lib/server/db";
-import { createManualAccount, materializeManualCreds } from "../../src/lib/server/manual";
+import { createAccountFor } from "../../src/lib/server/internal/create-account";
+import { db } from "../../src/lib/server/internal/db";
+import { createManualAccount, materializeManualCreds } from "../../src/lib/server/internal/manual";
 
 // manual 创建往返的真实 D1 集成测试(jsdom 单测覆盖不到的服务端编排)。
 // 这套 pool 版本不隔离每测存储 → beforeEach 重置(删 user 级联清账户/token/活动)。

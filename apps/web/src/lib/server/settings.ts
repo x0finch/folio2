@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireAuth } from "../require-auth";
-import { db } from "./db";
+import { db } from "./internal/db";
 
 // 全局 provider key 是否已配置(只回布尔,绝不回值)。自托管者据此自检 env。
 // CEX 用每账户密钥、非全局 key,故不在此列。

@@ -6,9 +6,9 @@ import { isComplete } from "../creds";
 import { isManual } from "../manual-connector";
 import { requireAuth } from "../require-auth";
 import { type SyncStatusSummary, summarizeSync } from "../sync-status";
-import { credentialSpecs } from "./connector-registry";
-import { db } from "./db";
-import { buildSyncDeps, warmTokensForUser } from "./sync-deps";
+import { credentialSpecs } from "./internal/connector-registry";
+import { db } from "./internal/db";
+import { buildSyncDeps, warmTokensForUser } from "./internal/sync-deps";
 
 const syncLog = getLogger(["folio", "web", "sync"]);
 

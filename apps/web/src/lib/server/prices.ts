@@ -3,9 +3,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireAuth } from "../require-auth";
 import { displayAssetRef } from "../tokens";
 import { userDisplayBalances } from "../user-balances";
-import { db } from "./db";
-import { manualBalancesForWarm } from "./manual";
-import { oracle } from "./oracle";
+import { db } from "./internal/db";
+import { manualBalancesForWarm } from "./internal/manual";
+import { oracle } from "./internal/oracle";
 
 const priceLog = getLogger(["folio", "web", "prices"]);
 

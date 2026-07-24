@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireAuth } from "../require-auth";
-import { deleteToken, loadManualAccountDetail } from "./manual";
+import { deleteToken, loadManualAccountDetail } from "./internal/manual";
 
 // manual token 资源(账户级)。薄壳:auth(requireAuth 经 ALS 带 userId)+ 校验入参 + 调 ./manual 纯 async。
 // 红线:只记安全字段,不打 creds(manual creds 全 public,但仍不入日志)。

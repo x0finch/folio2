@@ -5,8 +5,8 @@ import { isFungible, viewKind } from "../balance-kind";
 import { isPerpEquity } from "../overview-model";
 import { requireAuth } from "../require-auth";
 import { buildTokenValueHistory, type TokenHistRow } from "../token-history";
-import { db } from "./db";
-import { oracle } from "./oracle";
+import { db } from "./internal/db";
+import { oracle } from "./internal/oracle";
 
 // 单币持仓价值历史(H6 片2):某持仓(按 Holding key)的价值随时间。全历史余额 → 按 eligibility 过滤
 // (与 overview-model 同口径:现货 / meta 可解析的 perp 权益保证金)→ 富化解析代币身份 →

@@ -11,17 +11,17 @@ import type { AccountSafe } from "@folio/db";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import type { ProviderAsset, Tokens, ValuationMode } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
-import type { InputSpec } from "../creds";
-import { isComplete, openCreds } from "../creds";
-import { revalue } from "../revalue";
-import { isSyncableAccount } from "../syncable";
-import { userDisplayBalances } from "../user-balances";
+import type { InputSpec } from "../../creds";
+import { isComplete, openCreds } from "../../creds";
+import { revalue } from "../../revalue";
+import { isSyncableAccount } from "../../syncable";
+import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
 import { warmFx } from "./fx";
 import { manualBalancesForWarm } from "./manual";
 import { oracle } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
-import { warmTokens } from "./tokens";
+import { warmTokens } from "./token-enrich";
 
 // provider 自带代币元信息的采集(canonical P1):合约形 tokenKey 的行 → ProviderAsset,
 // 喂 tokens.noteProviderAssets(seed 孤儿 / 刷新备用 logo)。native/无标识行不 seed(原生币走 symbol 解析)。

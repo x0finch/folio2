@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { connectorPlatformMeta } from "@/lib/server/connector-platform";
-import { serveLogo } from "@/lib/server/logo";
-import { oracle } from "@/lib/server/oracle";
+import { connectorPlatformMeta } from "@/lib/server/internal/connector-platform";
+import { serveLogo } from "@/lib/server/internal/logo";
+import { oracle } from "@/lib/server/internal/oracle";
 
 // 公开(无 requireAuth)平台 logo 代理:platform key(如 chain:bitcoin,含 `:` → URL 编码为一段)
 // → 上游图 → 透传 + 边缘缓存头。见 ADR 0008 / #20。

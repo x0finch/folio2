@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { serveLogo } from "../src/lib/server/logo";
+import { serveLogo } from "../src/lib/server/internal/logo";
 
 // serveLogo 只收一个"解析上游 URL"的 thunk(cache-only)+ spy 全局 fetch。
 // 断言状态/缓存头/透传/Cache-Tag,不测 Workers Cache 本身。kind/id 仅用于 Cache-Tag 命名。

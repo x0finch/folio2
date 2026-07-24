@@ -1,8 +1,8 @@
 import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
 import { getLogger } from "@logtape/logtape";
-import { sealCreds } from "../creds";
-import { isManual } from "../manual-connector";
+import { sealCreds } from "../../creds";
+import { isManual } from "../../manual-connector";
 import { credentialSpecs, validateAccountCreds } from "./connector-registry";
 import { db } from "./db";
 import { createManualAccount } from "./manual";

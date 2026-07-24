@@ -6,8 +6,8 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
-import type { InputSpec } from "../creds";
-import { platformLogoUrl } from "../logo";
+import type { InputSpec } from "../../creds";
+import { platformLogoUrl } from "../../logo";
 
 // app 侧 connector 分派中枢(server-only,引 cloudflare:workers)。集中管:
 // 字段规格投影(credentialSpecs)、创建时凭据校验(validateAccountCreds)、目录(connectorCatalog)。
