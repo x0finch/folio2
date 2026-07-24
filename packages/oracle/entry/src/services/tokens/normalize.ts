@@ -2,5 +2,3 @@
 // 调用方(service)在写/查 store 前经这些函数处理,保证存与查同口径。集中一处,避免散落。
 
 export const normalizeSymbol = (symbol: string): string => symbol.trim().toUpperCase();
-export const normalizeChain = (chain: string): string => chain.trim().toLowerCase();
-export const normalizeContract = (contract: string): string => contract.trim().toLowerCase();

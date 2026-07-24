@@ -53,13 +53,13 @@ export interface BatchDraft {
 }
 
 // 写计划:要新建的 token(id 由调用方注入的工厂给,活动据此引用)。
-export interface PlannedToken {
+interface PlannedToken {
   id: string;
   symbol: string;
   unitPrice: number;
   identifier?: string | null;
 }
-export interface PlannedActivity {
+interface PlannedActivity {
   tokenId: string;
   kind: ManualActivityKind;
   amount: number;

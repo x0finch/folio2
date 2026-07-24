@@ -7,10 +7,10 @@ import { useTranslations } from "use-intl";
 // (24px > 按钮 20px),使按钮(inline-flex)在其中偏移、绿 pill(= 外层 inset-0)比按钮高而文字
 // 相对 pill 不居中;leading-none 让行盒由按钮决定 → pill=按钮 → 文字垂直居中。
 
-export const DAY_MS = 86_400_000;
+const DAY_MS = 86_400_000;
 export type Range = "7d" | "30d" | "1y" | "all";
 const RANGES: Range[] = ["7d", "30d", "1y", "all"];
-export const RANGE_DAYS: Record<Exclude<Range, "all">, number> = { "7d": 7, "30d": 30, "1y": 365 };
+const RANGE_DAYS: Record<Exclude<Range, "all">, number> = { "7d": 7, "30d": 30, "1y": 365 };
 
 // range → since(epoch ms);"all" → undefined(不裁窗口)。nowMs 由调用方传入(可测/可控)。
 export function rangeSince(range: Range, nowMs: number): number | undefined {

@@ -121,7 +121,7 @@ const currencyFormatter = (
 };
 
 // 极小法币值:取 Intl 货币外壳,把数字部分替换成下标 body(裸 Intl 会把 0.005 舍成 $0.01 丢信息)。
-export const formatTinyCurrency = (
+const formatTinyCurrency = (
   value: number,
   { locale = "en-US", currency = "USD" }: Partial<{ locale: string; currency: string }> = {},
 ): string => {

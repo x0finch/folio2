@@ -5,7 +5,7 @@ import type { HoldingSource } from "./aggregate";
 //   · byAccount :按账户聚合 —— 看这个币散在哪些账户,每条列该账户跨了几处平台。
 // 两者对称:一个的主副维度是另一个的副主维度。i18n 留给组件(本层只出 count/single 原料)。
 
-export interface SourceGroupAvatar {
+interface SourceGroupAvatar {
   logo?: string;
   name: string; // 缺 logo 时回退首字母 + title
 }

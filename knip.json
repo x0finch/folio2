@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/web": {
+      "ignoreDependencies": ["cloudflare", "tailwindcss", "@tailwindcss/typography"]
+    },
+    "packages/ui": {
+      "ignoreDependencies": ["tailwindcss"]
+    },
+    "packages/db": {
+      "ignoreDependencies": ["cloudflare", "wrangler"]
+    }
+  }
+}
