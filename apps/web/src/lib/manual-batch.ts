@@ -5,7 +5,7 @@ import type { DerivableActivity } from "./manual-activity";
 // 输入既有 token + 一批草稿,输出「写计划」(要新建的 token + 要插入的活动)或整批拒因(超支的 symbol)。
 // 决策全在此,server fn / db op 只执行(ADR 0017 「决策逻辑下沉纯模块」)。
 
-// 浮点折叠余量容差:deriveAmount 末值夹 0,但校验须在夹之前判负。
+// 浮点折叠余量容差:runningOk 是写时超卖闸(deriveAmount 会把超卖逐步夹到 0、隐去负值),故校验须独立判负。
 const EPS = 1e-9;
 
 // 运行持有从不为负(reduce 不在任一时点超支)。按 occurredAt→createdAt 折叠;`set` 重置基线、`add` +=、`reduce` -=。

@@ -29,6 +29,16 @@ describe("deriveAmount", () => {
     expect(deriveAmount([a("add", 5, 1), a("reduce", 10, 2)])).toBe(0);
   });
 
+  it("每步夹 0:中途超卖归零、不产生负债带到后续(删除更早开仓后的场景)", () => {
+    // add1 → reduce2(超卖,归 0)→ add1 ⇒ 1;而非末值夹 0 的 (1−2+1)=0。
+    // 即用户删掉开仓 set 后剩 add1/reduce2/add1 的原景。
+    expect(deriveAmount([a("add", 1, 1), a("reduce", 2, 2), a("add", 1, 3)])).toBe(1);
+  });
+
+  it("超卖归零后再买入从 0 起算(不倒扣)", () => {
+    expect(deriveAmount([a("set", 10, 1), a("reduce", 15, 2), a("add", 3, 3)])).toBe(3);
+  });
+
   it("orders by occurredAt then createdAt (insertion order tiebreak)", () => {
     // same occurredAt: set(createdAt 1) then add(createdAt 2) → 10 + 1 = 11
     expect(deriveAmount([a("add", 1, 5, 2), a("set", 10, 5, 1)])).toBe(11);

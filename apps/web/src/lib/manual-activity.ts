@@ -2,8 +2,9 @@ import type { ManualActivityKind } from "@folio/db";
 
 // 纯逻辑(无 server-only import → 可单测)。manual 活动账本 → 当前数量。
 // 语义:按 occurred_at(同值用 created_at)升序处理;`set` 重置基线(其前活动作废)、
-// `add` +=、`reduce` -=;无 set 则基线 0;末值夹 max(0)(reduce 过量不为负)。
-
+// `add` +=、`reduce` -=;无 set 则基线 0。**每步夹 max(0)**:持仓不为负 —— 某笔 reduce 超卖即当步归零,
+// 不把负值(欠账)带到后续活动。写路径有 runningOk 挡超卖,但删除更早活动(如开仓 set)会**回溯**造成超卖
+// (delete 不重校验),此时逐步夹 0 才给出直觉值(1 卖 2 归 0、再买 1 = 1),而非末值夹 0 的 (1−2+1)=0。
 export interface DerivableActivity {
   kind: ManualActivityKind;
   amount: number;
@@ -20,8 +21,9 @@ export function deriveAmount(activities: DerivableActivity[]): number {
     if (a.kind === "set") amount = a.amount;
     else if (a.kind === "add") amount += a.amount;
     else amount -= a.amount; // reduce
+    if (amount < 0) amount = 0; // 每步夹 0:超卖当步归零,不把负债带到后续活动
   }
-  return Math.max(0, amount);
+  return amount;
 }
 
 // token 定义 + 其活动账本 → creds.tokens 的一项(物化投影,ADR 0017)。

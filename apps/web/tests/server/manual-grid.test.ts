@@ -175,6 +175,29 @@ describe("loadManualAccountSeries (grid)", () => {
     ]);
   });
 
+  it("删除开仓 set 后账本超卖 → 末值逐步夹 0 后回升,不归零(用户实景回归)", async () => {
+    const acc = await emptyAccount();
+    // set10 开仓,再 add1 / reduce2 / add1(runningOk 写时不超卖:10→11→9→10)。
+    await addManualActivities(USER, acc.id, [
+      { token: localBtc, kind: "set", amount: 10, occurredAt: D0, price: 50000 },
+      { token: localBtc, kind: "add", amount: 1, occurredAt: D0 + DAY, price: 60000 },
+      { token: localBtc, kind: "reduce", amount: 2, occurredAt: D0 + 2 * DAY, price: 61000 },
+      { token: localBtc, kind: "add", amount: 1, occurredAt: D0 + 3 * DAY, price: 62000 },
+    ]);
+    // 删掉开仓 set10 → 账本回溯超卖:add1 / reduce2 / add1(delete 不重校验超卖)。
+    const setAct = (await db.listManualActivityByAccount(USER, acc.id)).find(
+      (x) => x.occurredAt === D0,
+    );
+    if (!setAct) throw new Error("set activity missing");
+    await deleteManualActivity(USER, acc.id, setAct.id);
+
+    const series = await loadManualAccountSeries(USER, acc.id, D0 + 3 * DAY);
+    // 逐步:add1→1、reduce2→归0、add1→1。末点数量 1(非 (1−2+1)=0),值 = 1 × 账本价② 62000。
+    const last = series[series.length - 1];
+    expect(last.totalUsd).toBe(1 * 62000);
+    expect(last.totalUsd).toBeGreaterThan(0); // 关键回归:删开仓后不再整体归 0
+  });
+
   it("空账户 → 空序列", async () => {
     const acc = await emptyAccount();
     expect(await loadManualAccountSeries(USER, acc.id, D0)).toEqual([]);
