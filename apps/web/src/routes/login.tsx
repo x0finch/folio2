@@ -112,16 +112,22 @@ function AuthPanel() {
     e.preventDefault();
     setError(null);
     setBusy(true);
-    // Name 未填时兜底取 email 的 @ 前本地部分(grill Q7),衔接 S1 accountIdentity 身份行。
-    const res = isSignup
-      ? await signUp.email({ email, password, name: name.trim() || deriveDefaultName(email) })
-      : await signIn.email({ email, password });
-    setBusy(false);
-    if (res.error) {
-      setError(res.error.message ?? t("authFailed"));
-      return;
+    try {
+      // Name 未填时兜底取 email 的 @ 前本地部分(grill Q7),衔接 S1 accountIdentity 身份行。
+      const res = isSignup
+        ? await signUp.email({ email, password, name: name.trim() || deriveDefaultName(email) })
+        : await signIn.email({ email, password });
+      if (res.error) {
+        setError(res.error.message ?? t("authFailed"));
+        return;
+      }
+      navigate({ to: "/" });
+    } catch {
+      // 网络等异常(reject)也要落到错误态,否则 busy 卡死、用户无反馈。
+      setError(t("authFailed"));
+    } finally {
+      setBusy(false);
     }
-    navigate({ to: "/" });
   }
 
   return (
