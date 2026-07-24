@@ -3,6 +3,7 @@
 
 export {
   type CoinGeckoClient,
+  type CoinsMarketChartRangeParams,
   type CoinsMarketsParams,
   createCoinGeckoClient,
   type SimplePriceParams,
@@ -25,6 +26,7 @@ export type {
   Exchange,
   ExchangeRateEntry,
   ExchangeRates,
+  MarketChartRange,
   MarketCoin,
   SearchCoin,
   SearchResult,

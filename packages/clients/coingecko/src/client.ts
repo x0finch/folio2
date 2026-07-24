@@ -6,6 +6,7 @@ import type {
   DerivativesExchange,
   Exchange,
   ExchangeRates,
+  MarketChartRange,
   MarketCoin,
   SearchResult,
   SimplePriceMap,
@@ -26,6 +27,13 @@ export interface SimplePriceParams {
   includeLastUpdatedAt?: boolean;
 }
 
+export interface CoinsMarketChartRangeParams {
+  id: string;
+  vsCurrency: string;
+  fromSec: number; // UNIX 秒(查询参数)
+  toSec: number; // UNIX 秒(查询参数)
+}
+
 export interface CoinGeckoClient {
   /** GET /asset_platforms */
   assetPlatforms(): Promise<AssetPlatform[]>;
@@ -33,6 +41,8 @@ export interface CoinGeckoClient {
   coinsMarkets(params: CoinsMarketsParams): Promise<MarketCoin[]>;
   /** GET /simple/price(按 coin id 批量取价) */
   simplePrice(params: SimplePriceParams): Promise<SimplePriceMap>;
+  /** GET /coins/{id}/market_chart/range(一 coin 一区间历史价);返回 prices 对 [msTimestamp, price] */
+  coinsMarketChartRange(params: CoinsMarketChartRangeParams): Promise<[number, number][]>;
   /** GET /search(选币 autocomplete) */
   search(query: string): Promise<SearchResult>;
   /** GET /coins/{platform}/contract/{addr};404 → null */
@@ -81,6 +91,25 @@ export function createCoinGeckoClient(config: CoinGeckoConfig = {}): CoinGeckoCl
         throw new CoinGeckoError("PARSE_ERROR", "simple/price: expected object");
       }
       return json as SimplePriceMap;
+    },
+
+    async coinsMarketChartRange(params) {
+      const json = await request(`/coins/${params.id}/market_chart/range`, {
+        vs_currency: params.vsCurrency,
+        from: params.fromSec,
+        to: params.toSec,
+      });
+      if (
+        typeof json !== "object" ||
+        json === null ||
+        !Array.isArray((json as MarketChartRange).prices)
+      ) {
+        throw new CoinGeckoError(
+          "PARSE_ERROR",
+          "coins/market_chart/range: expected { prices: [] }",
+        );
+      }
+      return (json as MarketChartRange).prices as [number, number][];
     },
 
     async search(query) {
