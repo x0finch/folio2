@@ -31,9 +31,11 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     // manual 历史改由账本 compute-on-read 供货(ADR 0018):防御式排除任何遗留 manual snapshot 行(T2 已删,
     // 正常为空),再拼上账本现算的 manual (takenAt, totalUsd) 行 → 同喂 buildPortfolioHistory,不双算、无需特殊合并。
     // 用 allAccounts(含归档):历史保留归档账户过去贡献(与 synced 快照一致),末点仍由下方 live 覆写(仅活跃)剔出。
+    const now = Date.now();
     const manualIds = new Set(allAccounts.filter((a) => isManual(a.connectorId)).map((a) => a.id));
     const snapRows = rows.filter((r) => !manualIds.has(r.accountId));
-    const manualRows = await loadManualHistoryRows(context.userId, allAccounts);
+    // manual 走日网格 compute-on-read(ADR 0019),末点 τ=now → 与下方 live 覆写同刻对齐。
+    const manualRows = await loadManualHistoryRows(context.userId, allAccounts, now);
     const series = buildPortfolioHistory([...snapRows, ...manualRows]);
     if (series.length === 0) return { series };
 
@@ -72,7 +74,9 @@ export const getAccountValueHistory = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }) => {
     if (data.connectorId === MANUAL_CONNECTOR_ID) {
-      const rows = await loadManualAccountSeries(context.userId, data.accountId);
+      // 日网格 compute-on-read(ADR 0019):同一 now 喂网格(末点 τ=now)与 live 末点 → 端点同刻,replace 分支命中。
+      const now = Date.now();
+      const rows = await loadManualAccountSeries(context.userId, data.accountId, now);
       const series = buildAccountValueHistory(
         rows.map((r) => ({ takenAt: r.takenAt, totalUsd: r.totalUsd })),
         data.since,
@@ -80,7 +84,6 @@ export const getAccountValueHistory = createServerFn({ method: "GET" })
       // 末点接实时盯市(与抽屉头同源):有账本点才补,空账户不凭空造点(与快照路径空态一致)。
       const liveTotal = await loadManualAccountLiveTotal(context.userId, data.accountId);
       if (liveTotal != null && series.length > 0) {
-        const now = Date.now();
         const last = series[series.length - 1];
         if (last.t >= now) series[series.length - 1] = { t: last.t, total: liveTotal };
         else series.push({ t: now, total: liveTotal });

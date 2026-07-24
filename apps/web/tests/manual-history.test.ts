@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { SnapshotTotalRow } from "../src/lib/history";
 import {
+  accountTotalAt,
   buildManualAccountSeries,
   type HistoryToken,
+  isReduceOversold,
   tokenPriceAt,
   tokenQuantityAt,
 } from "../src/lib/manual-history";
@@ -75,77 +78,118 @@ describe("tokenPriceAt 降级链", () => {
   });
 });
 
-describe("buildManualAccountSeries", () => {
-  it("每个活动时刻一行,totalUsd = Σ_token quantity@T × price@T", () => {
+// 网格采样(ADR 0019,锚定模型):采样时刻 = 首活动锚点 ∪ 其后每个 UTC 日末 ∪ now(并集升序)。
+// 首点恒在首活动、末点恒在 now → 任一有活动账户 ≥2 点(抽屉 series.length≥2 渲染门)。DAY 对齐的
+// occurredAt(T1=1×DAY…是日起点)让日桶数学干净;dayEnd(b)=(b+1)×DAY-1。
+describe("accountTotalAt", () => {
+  it("Σ_token quantity@t × price@t(账本价②)", () => {
+    const btc: HistoryToken = { unitPrice: 100, activities: [act("set", 2, T1, 60000)] };
+    const eth: HistoryToken = { unitPrice: 10, activities: [act("set", 3, T1, 3000)] };
+    expect(accountTotalAt([btc, eth], T1)).toBe(2 * 60000 + 3 * 3000);
+    expect(accountTotalAt([btc, eth], T1 - 1)).toBe(0); // 开仓前
+  });
+});
+
+describe("isReduceOversold", () => {
+  it("reduce 超过此前持有 → true", () => {
+    const acts = [act("add", 1, T1), act("reduce", 2, T2)];
+    expect(isReduceOversold(acts, acts[1])).toBe(true); // 持 1 卖 2
+  });
+  it("有更早开仓覆盖 → false", () => {
+    const acts = [act("set", 10, 0), act("add", 1, T1), act("reduce", 2, T2)];
+    expect(isReduceOversold(acts, acts[2])).toBe(false); // 持 11 卖 2
+  });
+  it("恰好卖到 0(未超) → false", () => {
+    const acts = [act("add", 1, T1), act("reduce", 1, T2)];
+    expect(isReduceOversold(acts, acts[1])).toBe(false);
+  });
+  it("非 reduce → false", () => {
+    const acts = [act("add", 1, T1)];
+    expect(isReduceOversold(acts, acts[0])).toBe(false);
+  });
+});
+
+describe("buildManualAccountSeries(grid, ADR 0019)", () => {
+  const last = (s: SnapshotTotalRow[]) => s[s.length - 1];
+
+  it("单笔活动(当日)→ 首活动 + now 两点,可成线(修 series<2 抽屉不渲染)", () => {
+    const btc: HistoryToken = { unitPrice: 100, activities: [act("set", 2, T1, 60000)] };
+    const now = T1 + 6 * 3_600_000; // 同日晚 6h(T1 是日起点,仍在桶1)
+    const series = buildManualAccountSeries("acc", [btc], now);
+    expect(series.length).toBeGreaterThanOrEqual(2); // 关键:当日新账户也 ≥2 点
+    expect(series[0].takenAt).toBe(T1); // 锚在首活动
+    expect(last(series).takenAt).toBe(now); // 末点 = now
+    expect(series.every((p) => p.totalUsd === 2 * 60000)).toBe(true); // 存量 2 × 账本价②
+  });
+
+  it("① 注入 priceAt(oracle 历史价)按日驱动价 + 跨日价格曲线形状", () => {
     const btc: HistoryToken = {
       unitPrice: 100,
       identifier: "bitcoin",
-      activities: [act("set", 1, T1, 60000), act("add", 1, T3, 70000)],
+      activities: [act("set", 1, T1, 60000)],
     };
-    const eth: HistoryToken = {
-      unitPrice: 10,
-      identifier: "ethereum",
-      activities: [act("set", 2, T2, 3000)],
-    };
-    const series = buildManualAccountSeries("acc", [btc, eth]);
-    expect(series).toEqual([
-      { accountId: "acc", takenAt: T1, totalUsd: 60000 }, // btc 1×60000, eth 0
-      { accountId: "acc", takenAt: T2, totalUsd: 60000 + 6000 }, // + eth 2×3000
-      { accountId: "acc", takenAt: T3, totalUsd: 2 * 70000 + 6000 }, // btc 2×70000, eth 2×3000
-    ]);
+    // priceAt 按日桶给价(1000×桶号)→ 验证逐日取 oracle 价(非账本 60000),曲线随价单调升。
+    const priceAt = (id: string, t: number) =>
+      id === "bitcoin" ? 1000 * Math.floor(t / DAY) : undefined;
+    const series = buildManualAccountSeries("acc", [btc], T3, priceAt);
+    expect(series[0]).toEqual({ accountId: "acc", takenAt: T1, totalUsd: 1000 }); // 桶1 → 1000
+    expect(last(series)).toEqual({ accountId: "acc", takenAt: T3, totalUsd: 3000 }); // 桶3 → 3000
+    expect(series.length).toBeGreaterThan(2); // 中间有跨日点体现价格起伏
+    const totals = series.map((p) => p.totalUsd);
+    expect(totals).toEqual([...totals].sort((a, b) => a - b)); // 数量恒1 → 随价单调
+  });
+
+  it("窗口外存量:首活动远早于 now,曲线铺到 now 且每点带折出的存量(修 T5 缺口)", () => {
+    const btc: HistoryToken = { unitPrice: 100, activities: [act("set", 2, T1, 60000)] };
+    const now = T1 + 4 * DAY; // 首活动后 4 天
+    const series = buildManualAccountSeries("acc", [btc], now);
+    expect(series[0].takenAt).toBe(T1);
+    expect(last(series).takenAt).toBe(now);
+    expect(series.length).toBeGreaterThanOrEqual(5); // 首活动 + 逐日 + now(旧实现只有 1 点)
+    expect(series.every((p) => p.totalUsd === 2 * 60000)).toBe(true);
   });
 
   it("空账户 / 无活动 → 空序列", () => {
-    expect(buildManualAccountSeries("acc", [])).toEqual([]);
-    expect(buildManualAccountSeries("acc", [{ unitPrice: 5, activities: [] }])).toEqual([]);
+    expect(buildManualAccountSeries("acc", [], T3)).toEqual([]);
+    expect(buildManualAccountSeries("acc", [{ unitPrice: 5, activities: [] }], T3)).toEqual([]);
   });
 
-  it("补录一条更早活动 → 曲线自该时点起变化(整条重算,新增前置点)", () => {
-    const before: HistoryToken = {
-      unitPrice: 100,
-      activities: [act("set", 1, T2, 50000)],
-    };
-    const base = buildManualAccountSeries("acc", [before]);
-    expect(base.map((p) => p.takenAt)).toEqual([T2]);
+  it("补录更早活动 → 起点前移到新首活动,整条重算", () => {
+    const before: HistoryToken = { unitPrice: 100, activities: [act("set", 1, T2, 50000)] };
+    expect(buildManualAccountSeries("acc", [before], T3)[0].takenAt).toBe(T2); // 起点 = 唯一活动
 
-    // 用户补录「其实 T1 就买了 0.5」→ 序列新增 T1 点,且 T2 的持仓被抬到 1(set 覆盖,但数量口径整体重算)。
+    // 补录「T1 就买了 0.5」→ 起点回到 T1,末点(T3)的 set 仍重置到 1(整体重算)。
     const after: HistoryToken = {
       unitPrice: 100,
       activities: [act("add", 0.5, T1, 40000), act("set", 1, T2, 50000)],
     };
-    const series = buildManualAccountSeries("acc", [after]);
-    expect(series).toEqual([
-      { accountId: "acc", takenAt: T1, totalUsd: 0.5 * 40000 }, // 新前置点
-      { accountId: "acc", takenAt: T2, totalUsd: 1 * 50000 }, // set 重置到 1
-    ]);
+    const series = buildManualAccountSeries("acc", [after], T3);
+    expect(series[0]).toEqual({ accountId: "acc", takenAt: T1, totalUsd: 0.5 * 40000 }); // 新起点
+    expect(last(series)).toEqual({ accountId: "acc", takenAt: T3, totalUsd: 1 * 50000 }); // set 重置到 1
   });
 
-  it("删除过去活动 → 曲线整体重算,无 stale 残留", () => {
+  it("删除过去活动 → 整体重算不留 stale", () => {
     const full: HistoryToken = {
       unitPrice: 100,
       activities: [act("set", 1, T1, 40000), act("add", 2, T2, 50000)],
     };
-    expect(buildManualAccountSeries("acc", [full]).map((p) => p.totalUsd)).toEqual([
-      40000,
-      3 * 50000,
-    ]);
+    // 末点 T3:数量 1+2=3,② 最近价 50000。
+    expect(last(buildManualAccountSeries("acc", [full], T3)).totalUsd).toBe(3 * 50000);
 
-    // 删掉 T2 那笔 add → 只剩 T1 点,T2 点消失(不留旧的 3×50000)。
+    // 删掉 T2 那笔 add → 数量回落到 1(set),不留旧的 3×50000。
     const pruned: HistoryToken = { unitPrice: 100, activities: [act("set", 1, T1, 40000)] };
-    expect(buildManualAccountSeries("acc", [pruned])).toEqual([
-      { accountId: "acc", takenAt: T1, totalUsd: 40000 },
-    ]);
+    const s = buildManualAccountSeries("acc", [pruned], T3);
+    expect(s[0].takenAt).toBe(T1);
+    expect(last(s).totalUsd).toBe(1 * 40000);
   });
 
-  it("修改过去活动 amount → 自该时点起全部下游点重算", () => {
+  it("修改过去活动 amount → 下游重算", () => {
     const edited: HistoryToken = {
       unitPrice: 100,
-      // T1 的 set 从 1 改成 3 → T1 与 T2 两点都变(下游累积基线抬升)。
       activities: [act("set", 3, T1, 40000), act("add", 1, T2, 50000)],
     };
-    expect(buildManualAccountSeries("acc", [edited])).toEqual([
-      { accountId: "acc", takenAt: T1, totalUsd: 3 * 40000 },
-      { accountId: "acc", takenAt: T2, totalUsd: 4 * 50000 },
-    ]);
+    const series = buildManualAccountSeries("acc", [edited], T3);
+    expect(series[0]).toEqual({ accountId: "acc", takenAt: T1, totalUsd: 3 * 40000 });
+    expect(last(series)).toEqual({ accountId: "acc", takenAt: T3, totalUsd: 4 * 50000 });
   });
 });

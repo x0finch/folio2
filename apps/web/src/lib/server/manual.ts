@@ -5,12 +5,18 @@ import type {
   ManualToken,
   SnapshotWithBalances,
 } from "@folio/db";
+import type { CgkCoinId, TokenRef } from "@folio/oracle";
+import { dayBucketOf } from "@folio/oracle";
 import type { SnapshotTotalRow } from "../history";
 import type { CredsToken } from "../manual-activity";
 import { deriveAmount, projectToken } from "../manual-activity";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "../manual-batch";
 import { isManual, MANUAL_CONNECTOR_ID } from "../manual-connector";
-import { buildManualAccountSeries, type HistoryToken } from "../manual-history";
+import {
+  buildManualAccountSeries,
+  type HistoricalPriceAt,
+  type HistoryToken,
+} from "../manual-history";
 import { buildManualSnapshot } from "../manual-snapshot";
 import { type BalanceLike, balanceToAssetRef } from "../tokens";
 import { db } from "./db";
@@ -67,19 +73,10 @@ export async function createManualAccount(userId: string, label: string, tokens:
   return account;
 }
 
-// 某 manual 账户存库的 creds.tokens(JSON 字符串)→ typed CredsToken[]。畸形/缺失 → 空数组(防御式)。
-function parseCredsTokens(raw: string | null): CredsToken[] {
-  if (!raw) return [];
-  try {
-    const creds = JSON.parse(raw) as { tokens?: string };
-    const tokens = creds.tokens ? JSON.parse(creds.tokens) : [];
-    return Array.isArray(tokens) ? (tokens as CredsToken[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-// 该用户**活跃** manual 账户的 (accountId → 已物化 tokens)。injector 与预热共用(一次批量 raw creds 读,消 N+1)。
+// 该用户**活跃** manual 账户的 (accountId → tokens)。injector 与预热共用。
+// **compute-on-read**(ADR 0018/0019):amount 由账本 deriveAmount 现算,不读物化的 creds.tokens ——
+// 否则「当下」净值(主页/账户/抽屉头 + 抽屉曲线末点实时覆写)会卡在上次物化的 stale 值(如删掉更早活动后
+// creds 未及重物化,或折叠语义修正前写入的旧值)。定义(symbol/unitPrice/identifier)取自 manual_token 行。
 // 排除归档:归档 manual 不进 enrich 门(injector 的调用点已按 active 过滤)→ 预热/刷价也不该碰它,三门同源。
 async function manualTokensByAccount(
   userId: string,
@@ -87,8 +84,14 @@ async function manualTokensByAccount(
 ): Promise<{ id: string; tokens: CredsToken[] }[]> {
   const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
   if (manual.length === 0) return [];
-  const rawById = new Map((await db.listRawCredsByUser(userId)).map((r) => [r.id, r.creds]));
-  return manual.map((a) => ({ id: a.id, tokens: parseCredsTokens(rawById.get(a.id) ?? null) }));
+  return Promise.all(
+    manual.map(async (a) => ({
+      id: a.id,
+      tokens: (await loadTokensWithActivities(userId, a.id)).map(({ token, activities }) =>
+        projectToken(token, activities),
+      ),
+    })),
+  );
 }
 
 // manual 退出 snapshot 后(ADR 0018 做法 1),其「当下」合成余额注入 `byAccount` —— overview/history 三处消费点
@@ -223,13 +226,41 @@ async function loadHistoryTokens(userId: string, accountId: string): Promise<His
   }));
 }
 
+// 异步 oracle 历史价 → 同步注入闭包(ADR 0019)。按 identifier 区间一次预取 priceSeries(A-2 内部缓存过去日),
+// 建 Map<identifier, Map<dayBucket, unitPrice>>,再包成 buildManualAccountSeries 要的同步 (identifier, t) 查询。
+// 每 identifier 一次网络(之后全缓存命中);取不到的日 → 闭包返 undefined → 纯层降级链落 ②③。manual token 的
+// identifier 定义即 coingecko coin id(选币所选)→ 直接构造 coingecko ref。
+async function buildHistoricalPriceAt(
+  tokens: HistoryToken[],
+  now: number,
+): Promise<HistoricalPriceAt> {
+  const byIdentifier = new Map<string, Map<number, number>>();
+  await Promise.all(
+    tokens.map(async (tk) => {
+      if (!tk.identifier || tk.activities.length === 0 || byIdentifier.has(tk.identifier)) return;
+      const from = Math.min(...tk.activities.map((a) => a.occurredAt));
+      const ref: TokenRef = { source: "coingecko", identifier: tk.identifier as CgkCoinId };
+      const daily = new Map<number, number>();
+      for (const pt of await oracle.tokens.priceSeries(ref, from, now)) {
+        daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
+      }
+      byIdentifier.set(tk.identifier, daily);
+    }),
+  );
+  return (identifier, t) => byIdentifier.get(identifier)?.get(dayBucketOf(t));
+}
+
 // 单 manual 账户的账本价值序列(抽屉头部 chart 用;getAccountValueHistory 对 manual 走此)。
-// #148 未就绪 → 不传 priceAt,走账本价②/unitPrice③降级(有 identifier 者待 #148 切 oracle 历史价)。
+// ADR 0019:日网格采样 + 注入 oracle 历史价(priceAt);取不到者降级链落账本价②/unitPrice③。
+// now 由调用方传入(与 live 末点同源 → 端点对齐);缺省 Date.now()。
 export async function loadManualAccountSeries(
   userId: string,
   accountId: string,
+  now: number = Date.now(),
 ): Promise<SnapshotTotalRow[]> {
-  return buildManualAccountSeries(accountId, await loadHistoryTokens(userId, accountId));
+  const tokens = await loadHistoryTokens(userId, accountId);
+  const priceAt = await buildHistoricalPriceAt(tokens, now);
+  return buildManualAccountSeries(accountId, tokens, now, priceAt);
 }
 
 // 单 manual 账户「当下」实时盯市总额(抽屉曲线末点接它 → 端点与抽屉头 account.totalUsd 同源盯市,不因
@@ -253,9 +284,12 @@ export async function loadManualAccountLiveTotal(
 export async function loadManualHistoryRows(
   userId: string,
   accounts: AccountSafe[],
+  now: number = Date.now(),
 ): Promise<SnapshotTotalRow[]> {
   const manual = accounts.filter((a) => isManual(a.connectorId));
-  const perAccount = await Promise.all(manual.map((a) => loadManualAccountSeries(userId, a.id)));
+  const perAccount = await Promise.all(
+    manual.map((a) => loadManualAccountSeries(userId, a.id, now)),
+  );
   return perAccount.flat();
 }
 
