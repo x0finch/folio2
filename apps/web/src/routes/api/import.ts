@@ -6,8 +6,8 @@ import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
 import { categorizeFields } from "@/lib/creds";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "@/lib/import";
-import { credentialSpecs } from "@/lib/server/connector-registry";
-import { db } from "@/lib/server/db";
+import { credentialSpecs } from "@/lib/server/internal/connector-registry";
+import { db } from "@/lib/server/internal/db";
 
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。鉴权同其它 server fn。
 // CEX 账户(有 secret 输入、导出已剥密钥)→ encCredentials=null = 缺凭据态,待补录。

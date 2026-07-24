@@ -12,8 +12,8 @@ import {
   ndjsonLine,
   snapshotRecord,
 } from "@/lib/export";
-import { credentialSpecs } from "@/lib/server/connector-registry";
-import { db } from "@/lib/server/db";
+import { credentialSpecs } from "@/lib/server/internal/connector-registry";
+import { db } from "@/lib/server/internal/db";
 
 // 每页快照数:配 inArray(≤ 50 ids) 取余额,远低于 D1 100 绑定参数上限。
 const SNAPSHOT_PAGE = 50;

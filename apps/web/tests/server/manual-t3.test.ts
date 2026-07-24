@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { CredsToken } from "../../src/lib/manual-activity";
-import { db } from "../../src/lib/server/db";
+import { db } from "../../src/lib/server/internal/db";
 import {
   addManualActivities,
   createManualAccount,
@@ -10,7 +10,7 @@ import {
   deleteToken,
   editManualActivity,
   updateToken,
-} from "../../src/lib/server/manual";
+} from "../../src/lib/server/internal/manual";
 
 // T3(#155)服务端写路径集成:token CRUD + 批量活动(原子)+ 删/改活动,全落库、写后重跑物化。真实 D1(Miniflare)。
 // 不隔离每测存储 → beforeEach 重置。断言以 creds.tokens(物化投影)与账本一致为准(单写者不变量)。

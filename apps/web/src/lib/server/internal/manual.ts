@@ -7,18 +7,18 @@ import type {
 } from "@folio/db";
 import type { CgkCoinId, TokenRef } from "@folio/oracle";
 import { dayBucketOf } from "@folio/oracle";
-import type { SnapshotTotalRow } from "../history";
-import type { CredsToken } from "../manual-activity";
-import { deriveAmount, projectToken } from "../manual-activity";
-import { type BatchDraft, planManualBatch, runningOk, type Token } from "../manual-batch";
-import { isManual, MANUAL_CONNECTOR_ID } from "../manual-connector";
+import type { SnapshotTotalRow } from "../../history";
+import type { CredsToken } from "../../manual-activity";
+import { deriveAmount, projectToken } from "../../manual-activity";
+import { type BatchDraft, planManualBatch, runningOk, type Token } from "../../manual-batch";
+import { isManual, MANUAL_CONNECTOR_ID } from "../../manual-connector";
 import {
   buildManualAccountSeries,
   type HistoricalPriceAt,
   type HistoryToken,
-} from "../manual-history";
-import { buildManualSnapshot } from "../manual-snapshot";
-import { type BalanceLike, balanceToAssetRef } from "../tokens";
+} from "../../manual-history";
+import { buildManualSnapshot } from "../../manual-snapshot";
+import { type BalanceLike, balanceToAssetRef } from "../../tokens";
 import { db } from "./db";
 import { oracle } from "./oracle";
 

@@ -1,12 +1,12 @@
 import { env } from "cloudflare:test";
 import type { SnapshotWithBalances } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
-import { db } from "../../src/lib/server/db";
+import { db } from "../../src/lib/server/internal/db";
 import {
   createManualAccount,
   injectManualSnapshots,
   manualBalancesForWarm,
-} from "../../src/lib/server/manual";
+} from "../../src/lib/server/internal/manual";
 
 // T2(ADR 0018)服务端集成:manual 退出 snapshot、当下值由 creds 现造。真实 D1(Miniflare)。
 // 不隔离每测存储 → beforeEach 重置。

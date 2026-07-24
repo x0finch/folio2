@@ -4,11 +4,11 @@ import { deriveLiveAccountTotals } from "../live-value";
 import { isManual } from "../manual-connector";
 import { buildOverview } from "../overview-model";
 import { requireAuth } from "../require-auth";
-import { connectorPlatformMeta } from "./connector-platform";
-import { db } from "./db";
-import { injectManualSnapshots, loadManualHistoryRows } from "./manual";
-import { oracle } from "./oracle";
-import { enrichBalances } from "./tokens";
+import { connectorPlatformMeta } from "./internal/connector-platform";
+import { db } from "./internal/db";
+import { injectManualSnapshots, loadManualHistoryRows } from "./internal/manual";
+import { oracle } from "./internal/oracle";
+import { enrichBalances } from "./internal/token-enrich";
 
 // 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做
 // 鉴权 + 加载(accounts / 最新快照)+ 注入依赖(tokens / platforms)+ 调用。

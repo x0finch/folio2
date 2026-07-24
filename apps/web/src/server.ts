@@ -2,8 +2,8 @@ import { syncAllUsers } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { configureLogging } from "./lib/log";
-import { db } from "./lib/server/db";
-import { buildSyncDeps, warmTokensForUser } from "./lib/server/sync-deps";
+import { db } from "./lib/server/internal/db";
+import { buildSyncDeps, warmTokensForUser } from "./lib/server/internal/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
 // 再补一个 CF scheduled() 处理器跑定时同步(cron 只触发 scheduled,不触发 fetch)。

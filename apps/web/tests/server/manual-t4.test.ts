@@ -1,12 +1,12 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { db } from "../../src/lib/server/db";
+import { db } from "../../src/lib/server/internal/db";
 import {
   addManualActivities,
   createManualAccount,
   editManualActivity,
   loadManualAccountDetail,
-} from "../../src/lib/server/manual";
+} from "../../src/lib/server/internal/manual";
 
 // T4(#156)服务端支撑:抽屉读路径 loadManualAccountDetail(token 定义 + 折叠 amount + 全部活动)+ fee 落库 round-trip。
 // 真实 D1(Miniflare);不隔离每测存储 → beforeEach 重置。开仓 set = Date.now(),后续活动用远未来 LATER 排其后。

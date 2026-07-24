@@ -4,7 +4,7 @@ import { readCurrencyCookie, resolveCurrency } from "../currency";
 import type { PreferCurrency } from "../hooks/use-prefer-currency";
 import { pickLocale, readLocaleCookie } from "../i18n/detect";
 import type { Locale } from "../i18n/messages";
-import { oracle } from "./oracle";
+import { oracle } from "./internal/oracle";
 
 // 展示偏好(币种 / 语言)—— 浏览器级偏好,存 cookie + 请求头,非账户数据 → 公开 server fn(无需 auth)。
 

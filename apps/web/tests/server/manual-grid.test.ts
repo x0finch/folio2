@@ -3,7 +3,7 @@ import { createTokenPriceHistoryStore } from "@folio/db";
 import type { CgkCoinId, TokenRef } from "@folio/oracle";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/history";
-import { db } from "../../src/lib/server/db";
+import { db } from "../../src/lib/server/internal/db";
 import {
   addManualActivities,
   deleteManualActivity,
@@ -11,7 +11,7 @@ import {
   loadManualAccountLiveTotal,
   loadManualAccountSeries,
   loadManualHistoryRows,
-} from "../../src/lib/server/manual";
+} from "../../src/lib/server/internal/manual";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。
 // 网络无关:结构类用例用**无 identifier** 的 token(不触发 oracle priceSeries 回源,走账本价②/unitPrice③);
