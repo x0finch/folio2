@@ -6,8 +6,10 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
+import { createServerFn } from "@tanstack/react-start";
 import type { InputSpec } from "../creds";
 import { platformLogoUrl } from "../logo";
+import { requireAuth } from "../require-auth";
 
 // app 侧 connector 分派中枢(server-only,引 cloudflare:workers)。集中管:
 // 字段规格投影(credentialSpecs)、创建时凭据校验(validateAccountCreds)。
@@ -77,3 +79,15 @@ export async function validateAccountCreds(
     throw new Error("could not verify these credentials — please check them and try again");
   }
 }
+
+// —— server fn:走 server fn 暴露上面的目录/规格,避免把 provider 实现打进客户端包(只回静态表)——
+
+// connector 展示名目录(connectorId → label/logo);客户端经 useConnectorLabels 消费。
+export const listConnectors = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(() => connectorCatalog());
+
+// 各 connector 的账户输入规格(录入/补录表单动态生成字段用)。
+export const getConnectorCredentialSpecs = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(() => credentialSpecs());

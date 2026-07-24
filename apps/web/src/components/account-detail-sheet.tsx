@@ -25,7 +25,7 @@ import { useHoverPopover } from "../lib/hooks/use-hover-popover";
 import { isManual } from "../lib/manual-connector";
 import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
 import { getAccountValueHistory } from "../lib/server/history";
-import { syncOneAccount } from "../lib/server/sync";
+import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
 import { ConnectorBadge } from "./connector-badge";
 import { AccountHoldingsCards } from "./holdings-cards";
@@ -149,7 +149,7 @@ function DetailBody({
 
   // 操作反馈统一走 toast(D07):同步给出成/败,写操作失败提示,成功以列表刷新为可见反馈。
   const syncMut = useMutation({
-    mutationFn: () => syncOneAccount({ data: { accountId: account.id } }),
+    mutationFn: () => syncAccount({ data: { accountId: account.id } }),
     onSuccess: async (r) => {
       if (r.ok) toast.success(t("synced", { count: 1 }));
       else if (!r.skipped) toast.error(r.error ?? t("syncGenericError"));

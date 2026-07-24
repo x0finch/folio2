@@ -19,10 +19,10 @@ import {
   isExtendedPubkey,
   recommendedScript,
 } from "../lib/bitcoin-scripts";
+import type { InputSpec } from "../lib/creds";
 import { isManual } from "../lib/manual-connector";
 import { manualTokensJson } from "../lib/manual-tokens";
 import { createAccount } from "../lib/server/accounts";
-import type { InputSpec } from "../lib/server/credentials";
 import { getTokenPrice } from "../lib/server/tokens";
 import { TokenCombobox } from "./token-combobox";
 
