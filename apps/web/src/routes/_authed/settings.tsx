@@ -18,6 +18,7 @@ import { LogOut } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../components/currency-switcher";
+import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { signOut } from "../../lib/auth-client";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
@@ -26,7 +27,7 @@ import {
   getValuationSettings,
   updateValuationSettings,
 } from "../../lib/server/settings";
-import { type Theme, useMountedTheme } from "../../lib/theme";
+import type { Theme } from "../../lib/theme";
 
 const authedApi = getRouteApi("/_authed");
 
