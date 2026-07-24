@@ -82,57 +82,29 @@ describe("parseTokenRef", () => {
   });
 });
 
-// 历史串必须永远读得出来 —— 容旧是永久要求,不是过渡期措施(ADR 0020)。
-describe("parseTokenRef — legacy tolerance", () => {
-  it("strips the legacy `chain:` namer prefix", () => {
-    expect(parseTokenRef("chain:solana/token:0xabc")).toEqual({
-      kind: "contract",
-      namer: "solana",
-      assetNs: "token",
-      address: "0xabc",
-    });
-  });
-
-  // 旧 native 串尾巴挂着 symbol,从来没人读出来过 → 解析时丢弃。
-  it("drops the decorative symbol from the legacy native form", () => {
-    expect(parseTokenRef("chain:bitcoin/native:btc")).toEqual({
-      kind: "native",
-      namer: "bitcoin",
-    });
-    expect(parseTokenRef("eip155:1/native:eth")).toEqual({ kind: "native", namer: "eip155:1" });
-  });
-
-  // 旧 refKey 文法 `coingecko:<id>` —— 没有斜杠,是唯一的无斜杠合法形。
-  it("reads the legacy slash-less coingecko form", () => {
-    expect(parseTokenRef("coingecko:usd-coin")).toEqual({
-      kind: "opaque",
-      namer: "coingecko",
-      id: "usd-coin",
-    });
-  });
-
-  it("canonicalizes legacy strings on round-trip", () => {
-    const cases: [string, string][] = [
-      ["chain:bitcoin/native:btc", "bitcoin/native"],
-      ["coingecko:usd-coin", "coingecko/usd-coin"],
-      ["chain:solana/token:0xabc", "solana/token:0xabc"],
-      // EVM 规范形本来就没变 —— 往返后一个字不动。
-      ["eip155:42161/erc20:0xaf88", "eip155:42161/erc20:0xaf88"],
-    ];
-    for (const [legacy, canonical] of cases) {
-      const parsed = parseTokenRef(legacy);
-      expect(parsed.kind).not.toBe("unknown");
-      expect(formatTokenRef(parsed as TokenRef)).toBe(canonical);
-    }
-  });
-});
-
 describe("parseTokenRef — unknown", () => {
   it("never throws, and reports unparseable input as unknown", () => {
     for (const raw of ["", "   ", "/", "/native", "bitcoin/", "eip155:1", "nonsense", "a:b:c"]) {
       expect(() => parseTokenRef(raw)).not.toThrow();
       expect(parseTokenRef(raw)).toEqual({ kind: "unknown", raw });
     }
+  });
+
+  // `native` 是保留字,只作完整 localName 出现 —— 接了冒号就不是合法合约形,判 unknown
+  // 而非静默读成一个 assetNs="native" 的合约。
+  it("rejects the colon form of the native reserved word", () => {
+    for (const raw of ["bitcoin/native:btc", "eip155:1/native:eth"]) {
+      expect(parseTokenRef(raw)).toEqual({ kind: "unknown", raw });
+    }
+  });
+
+  // 旧文法一律不认 —— 读旧串是迁移那一片的事,不在本包。
+  it("does not accept the old grammar", () => {
+    for (const raw of ["chain:bitcoin/native:btc", "coingecko:usd-coin"]) {
+      expect(parseTokenRef(raw)).toEqual({ kind: "unknown", raw });
+    }
+    // `chain:` 前缀没有特殊待遇,原样留在 namer 里 —— 与规范形的 `solana` 是两个不同的命名者。
+    expect(parseTokenRef("chain:solana/token:0xabc")).toMatchObject({ namer: "chain:solana" });
   });
 });
 
@@ -163,7 +135,7 @@ describe("round-trip", () => {
   });
 
   it("normalization is idempotent", () => {
-    const once = parseTokenRef("Chain:Solana/TOKEN:0xAbC");
+    const once = parseTokenRef("Solana/TOKEN:0xAbC");
     const twice = parseTokenRef(formatTokenRef(once as TokenRef));
     expect(twice).toEqual(once);
   });
