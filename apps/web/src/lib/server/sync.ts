@@ -6,7 +6,7 @@ import { isComplete } from "../creds";
 import { isManual } from "../manual-connector";
 import { requireAuth } from "../require-auth";
 import { type SyncStatusSummary, summarizeSync } from "../sync-status";
-import { credentialSpecs } from "./connectors";
+import { credentialSpecs } from "./connector-registry";
 import { db } from "./db";
 import { buildSyncDeps, warmTokensForUser } from "./sync-deps";
 

@@ -6,7 +6,7 @@ import { getAuth } from "@/lib/auth";
 import { resolveAuth } from "@/lib/auth-session";
 import { categorizeFields } from "@/lib/creds";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "@/lib/import";
-import { credentialSpecs } from "@/lib/server/connectors";
+import { credentialSpecs } from "@/lib/server/connector-registry";
 import { db } from "@/lib/server/db";
 
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。鉴权同其它 server fn。

@@ -102,7 +102,7 @@ describe("loadManualAccountSeries (grid)", () => {
   });
 
   // T5 老 bug 原样回归:抽屉切到某时间窗(since 在唯一活动之后),旧实现按「交易时刻」采样 → 窗口内无点 →
-  // 账户在该窗看着是空的。网格修复:逐日铺满,since 之后的点仍反映其前活动折出的存量。这里按 getAccountValueHistory
+  // 账户在该窗看着是空的。网格修复:逐日铺满,since 之后的点仍反映其前活动折出的存量。这里按 getAccountHistory
   // 的做法组合 loadManualAccountSeries(真实 D1 网格)+ buildAccountValueHistory(rows, since) 端到端钉住。
   it("since 窗口起点晚于唯一活动 → 窗口内仍显存量(非空),不再被丢(修 T5 老 bug)", async () => {
     const acc = await emptyAccount();

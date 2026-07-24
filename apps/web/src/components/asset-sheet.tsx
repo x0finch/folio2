@@ -18,7 +18,7 @@ import type { Holding } from "../lib/aggregate";
 import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { getTokenValueHistory } from "../lib/server/token-history";
+import { getHoldingHistory } from "../lib/server/holdings";
 import { signedUsd } from "../lib/signed-usd";
 import { groupByAccount, groupByPlatform, type SourceGroup } from "../lib/source-groups";
 import { AccountName } from "./account-name";
@@ -150,7 +150,7 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
   const since = rangeSince(range, Date.now());
   const historyQuery = useQuery({
     queryKey: ["token-history", holding.key, range],
-    queryFn: () => getTokenValueHistory({ data: { key: holding.key, since } }),
+    queryFn: () => getHoldingHistory({ data: { key: holding.key, since } }),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
   });

@@ -8,10 +8,10 @@ import { buildTokenValueHistory, type TokenHistRow } from "../token-history";
 import { db } from "./db";
 import { oracle } from "./oracle";
 
-// 单币持仓价值历史(H6 片2):某代币(按 Holding key)的价值随时间。全历史余额 → 按 eligibility 过滤
+// 单币持仓价值历史(H6 片2):某持仓(按 Holding key)的价值随时间。全历史余额 → 按 eligibility 过滤
 // (与 overview-model 同口径:现货 / meta 可解析的 perp 权益保证金)→ 富化解析代币身份 →
 // buildTokenValueHistory 归属 + 跨账户阶梯重建。过去点用冻结 usd_value(不现推);since 裁窗口。
-export const getTokenValueHistory = createServerFn({ method: "GET" })
+export const getHoldingHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ key: z.string().min(1), since: z.number().int().nonnegative().optional() }))
   .handler(async ({ data, context }) => {

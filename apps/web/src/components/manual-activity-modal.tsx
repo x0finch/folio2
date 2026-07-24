@@ -269,7 +269,7 @@ function ActivityForm({
   // 脏 = 草稿相对初值被改动过(未改则 ✕ 直接关,不弹确认)。
   const dirty = !sameDraft(draft, initialDraft);
 
-  // 当前草稿 → 提交项(单条;server addActivities 仍收数组,此表单一次录一笔,createdAt 服务端重定)。
+  // 当前草稿 → 提交项(单条;server createManualActivities 仍收数组,此表单一次录一笔,createdAt 服务端重定)。
   const toDrafts = (): ActivityDraft[] => {
     if (!draftValid(draft) || !draft.token) return [];
     return [

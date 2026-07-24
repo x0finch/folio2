@@ -23,8 +23,7 @@ import { aggregateDayChange } from "../lib/day-value-change";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
 import { isManual } from "../lib/manual-connector";
-import { deleteAccount, renameAccount, setAccountArchived } from "../lib/server/accounts";
-import { getAccountValueHistory } from "../lib/server/history";
+import { getAccountHistory, removeAccount, updateAccount } from "../lib/server/accounts";
 import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
 import { ConnectorBadge } from "./connector-badge";
@@ -33,7 +32,7 @@ import { ManualTokensPanel } from "./manual-tokens-panel";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { ValueTrendChart } from "./value-trend-chart";
 
-// 账户页列表行的合并形状(getMyOverview ∪ listMyAccounts,见 accounts.tsx loader)。
+// 账户页列表行的合并形状(listAccountHoldings ∪ listAccounts,见 accounts.tsx loader)。
 export interface AccountRow {
   id: string;
   label: string;
@@ -134,7 +133,7 @@ function DetailBody({
   const historyQuery = useQuery({
     queryKey: ["account-history", account.id, range],
     queryFn: () =>
-      getAccountValueHistory({
+      getAccountHistory({
         // connectorId 传给服务端做读路径分流(manual→账本 / 其余→快照),省一次账户反查。
         data: {
           accountId: account.id,
@@ -158,7 +157,7 @@ function DetailBody({
     onError: () => toast.error(t("syncGenericError")),
   });
   const renameMut = useMutation({
-    mutationFn: () => renameAccount({ data: { accountId: account.id, label: labelDraft.trim() } }),
+    mutationFn: () => updateAccount({ data: { accountId: account.id, label: labelDraft.trim() } }),
     onSuccess: async () => {
       setRenaming(false);
       await refresh();
@@ -166,12 +165,12 @@ function DetailBody({
     onError: () => toast.error(t("actionFailed")),
   });
   const archiveMut = useMutation({
-    mutationFn: () => setAccountArchived({ data: { accountId: account.id, archived: !archived } }),
+    mutationFn: () => updateAccount({ data: { accountId: account.id, archived: !archived } }),
     onSuccess: refresh,
     onError: () => toast.error(t("actionFailed")),
   });
   const deleteMut = useMutation({
-    mutationFn: () => deleteAccount({ data: { accountId: account.id } }),
+    mutationFn: () => removeAccount({ data: { accountId: account.id } }),
     onSuccess: async () => {
       onClose();
       await refresh();

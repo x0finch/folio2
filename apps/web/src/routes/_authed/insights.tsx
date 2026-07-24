@@ -7,13 +7,12 @@ import { HeaderSync } from "../../components/header-sync";
 import { PortfolioChart } from "../../components/portfolio-chart";
 import { InsightsSkeleton } from "../../components/skeletons";
 import { type AllocDimension, buildAllocation } from "../../lib/allocation";
-import { getPortfolioHistory } from "../../lib/server/history";
-import { getMyOverview } from "../../lib/server/overview";
+import { getPortfolioHistory, getPortfolioOverview } from "../../lib/server/portfolio";
 
 // 洞察:组合走势(复用 history)+ 分配饼图 + 维度切换(代币/链/账户)。读时算,复用 overview 的 holdings。
 export const Route = createFileRoute("/_authed/insights")({
   loader: async () => {
-    const [overview, history] = await Promise.all([getMyOverview(), getPortfolioHistory()]);
+    const [overview, history] = await Promise.all([getPortfolioOverview(), getPortfolioHistory()]);
     return { holdings: overview.holdings, series: history.series };
   },
   pendingComponent: InsightsSkeleton,

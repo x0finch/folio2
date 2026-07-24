@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { InputSpec } from "../lib/creds";
 import { incompleteSpecs } from "../lib/incomplete-specs";
-import { provideCredentials } from "../lib/server/accounts";
+import { replaceAccountCredentials } from "../lib/server/accounts";
 import { GenericFields } from "./account-fields";
 
 // 动态补录表单(P6.6 → A3 v2):字段复用加账户的 GenericFields(带 new-password 安全 + 统一样式),
@@ -54,7 +54,7 @@ export function CredentialForm({
     }
     setBusy(true);
     try {
-      await provideCredentials({ data: { accountId, creds: values } });
+      await replaceAccountCredentials({ data: { accountId, creds: values } });
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
