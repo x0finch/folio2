@@ -309,7 +309,10 @@ export function ManualTokensPanel({
                 {formatNumber(a.amount)} {a.symbol.toUpperCase()}
                 {/* 卖超警示 icon 并入 hover 触发区(尺寸同 CEX 代币行的 NoteIndicator glyph:size-3;色用语义 --warn)。 */}
                 {oversold ? (
-                  <AlertTriangle className="ml-1 inline size-3 align-middle text-warn" aria-hidden />
+                  <AlertTriangle
+                    className="ml-1 inline size-3 align-middle text-warn"
+                    aria-hidden
+                  />
                 ) : null}
               </HoverDetail>
             </div>
