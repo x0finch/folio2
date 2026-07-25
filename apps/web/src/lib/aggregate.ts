@@ -1,5 +1,5 @@
 import type { TokenGroup, TokenRef } from "@folio/tokens";
-import { chainNamerOf } from "./token-ref";
+import { chainOf } from "./token-ref";
 
 // symbol 归一(与 tokens 层同口径:trim + 大写)—— 仅用于未解析行的分组键/身份。
 const norm = (s: string): string => s.trim().toUpperCase();
@@ -54,16 +54,6 @@ export interface Holding {
   totalAmount?: number; // 各 source 数量之和(组统一单位,跨链/多源亦可汇总)
   change24h?: number; // 仅单一 Token 组(%,每币 CGK 涨跌)
   sources: HoldingSource[];
-}
-
-// 持有点的平台 key:
-//   · 链上:tokenRef 的链命名者(eip155:<id> / <slug>);同账户多链 → 多 source。
-//   · 场馆/manual:平台单元 = 连接器本身,key 即 connectorId(binance/okx/hyperliquid/manual);
-//     name+logo 读路径取连接器自带(#53)。
-// 「是不是链」看 tokenRef 的右半边(见 chainNamerOf),不查表;不透明 id 形的 ref
-// (coingecko/<id> 选币、binance/USDC 场馆命名)不是链 → 落账户平台。
-function platformIdOf(row: AggInput): string {
-  return chainNamerOf(row.tokenRef) ?? row.account.connectorId;
 }
 
 // —— 下面两个产的是【归并键】,不是 tokenRef ——
@@ -138,7 +128,9 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     if (a.unitPriceHint == null && row.unitPrice != null) a.unitPriceHint = row.unitPrice;
     if (a.marketCapRankHint == null && row.marketCapRank != null)
       a.marketCapRankHint = row.marketCapRank;
-    const platformId = platformIdOf(row);
+    // 持有点的平台单元:链上按链拆(同账户多链 → 多 source),场馆/manual 即连接器本身
+    // (name+logo 读路径取连接器自带,#53)。「在不在链上」由 chainOf 看 tokenRef 右半边判定。
+    const platformId = chainOf(row.tokenRef) ?? row.account.connectorId;
     const sk = `${row.account.id}|${platformId}`;
     const existing = a.sources.get(sk);
     if (existing) {

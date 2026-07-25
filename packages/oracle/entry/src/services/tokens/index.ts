@@ -1,6 +1,7 @@
 import type {
   AssetRef,
   Resolution,
+  ResolvableAsset,
   TokenGroup,
   TokenInfo,
   TokenPrice,
@@ -107,12 +108,10 @@ export function createTokens({
   const deps = { source: p, store: createStore(p.namer), overrides: OVERRIDES };
   const history = createPriceHistoryStore ? createPriceHistoryStore() : NOOP_PRICE_HISTORY;
 
-  // asset.identifier(用户显式选)→ explicit ref(用本源的 source 标签),调用方无需拼 TokenRef。
-  const withExplicit = (asset: AssetRef): AssetRef =>
-    asset.identifier && !asset.ref
-      ? // source↔identifier 品牌对齐由本源保证 → 整体 as TokenRef(可信边界)。
-        { ...asset, ref: tokenRef.opaque(p.namer, asset.identifier) }
-      : asset;
+  // asset.identifier(用户显式选)→ 配上本源的命名者造 explicit ref。这是 `ref` 字段的**唯一**
+  // 写入点,故它只存在于门面内部的 ResolvableAsset,不进公开的 AssetRef。
+  const withExplicit = (asset: AssetRef): ResolvableAsset =>
+    asset.identifier ? { ...asset, ref: tokenRef.opaque(p.namer, asset.identifier) } : asset;
 
   const resolve = (asset: AssetRef, opts?: ResolveOpts) =>
     resolveAsset(withExplicit(asset), deps, opts);
@@ -136,7 +135,7 @@ export function createTokens({
   async function lookupAll(
     assets: readonly (AssetRef | null)[],
   ): Promise<{ ref: TokenRef | null; rec: TokenRecord | undefined }[]> {
-    const withKeys = assets.map((a) => a?.providerRef ?? null);
+    const withKeys = assets.map((a) => a?.tokenRef ?? null);
     const keys = [...new Set(withKeys.filter((k): k is string => k !== null))];
     const recordsByKey =
       keys.length > 0

@@ -25,7 +25,7 @@ export interface TokenEnrichment {
 // 解析直接用持久化的 tokenRef(provider 构造,含 chainId → 懒解析更准);无则仅 symbol。
 export function balanceToAssetRef(b: BalanceLike): AssetRef | null {
   if (!isFungible(viewKind(b))) return null;
-  return { symbol: b.symbol, providerRef: b.tokenRef ?? undefined };
+  return { symbol: b.symbol, tokenRef: b.tokenRef ?? undefined };
 }
 
 // defi 行的**展示用**解析(H5 #120:协议行 24h 聚合需要 change24h):仅 tokenRef 明确的行
@@ -33,7 +33,7 @@ export function balanceToAssetRef(b: BalanceLike): AssetRef | null {
 // 现推(liveValue),defi 行进去会被重估;这个只喂展示富化。
 export function defiAssetRef(b: BalanceLike): AssetRef | null {
   if (viewKind(b) !== "defi" || !b.tokenRef) return null;
-  return { symbol: b.symbol, providerRef: b.tokenRef };
+  return { symbol: b.symbol, tokenRef: b.tokenRef };
 }
 
 // **展示富化的统一门**(同质 ∪ tokenRef 明确的 defi)。enrich / refreshStalePrices / warmTokens

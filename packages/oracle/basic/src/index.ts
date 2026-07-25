@@ -51,6 +51,7 @@ export type {
   ProviderTokenSeed,
   Resolution,
   ResolutionVia,
+  ResolvableAsset,
   TokenCandidate,
   TokenGroup,
   TokenInfo,

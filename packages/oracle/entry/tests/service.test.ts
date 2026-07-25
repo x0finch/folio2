@@ -139,7 +139,7 @@ describe("resolveAsset", () => {
     const source = { fetchByContract } as unknown as TokenSource;
     expect(
       await resolveAsset(
-        { symbol: "BTC", providerRef: "coingecko/bitcoin" },
+        { symbol: "BTC", tokenRef: "coingecko/bitcoin" },
         { source, store: fakeStore() },
       ),
     ).toEqual({ ref: cg("bitcoin"), confidence: "high", via: "explicit" });
@@ -154,7 +154,7 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "USDC", providerRef: "ethereum/token:0xabc" };
+    const asset = { symbol: "USDC", tokenRef: "ethereum/token:0xabc" };
 
     const r1 = await resolveAsset(asset, { source, store });
     expect(r1).toEqual({ ref: cg("usd-coin"), confidence: "high", via: "contract" });
@@ -176,7 +176,7 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "USDC", providerRef: "ethereum/token:0xabc" };
+    const asset = { symbol: "USDC", tokenRef: "ethereum/token:0xabc" };
 
     const r = await resolveAsset(asset, { source, store }, { lazy: false });
     expect(r.via).toBe("none"); // 无 warm/override 时降级
@@ -187,7 +187,7 @@ describe("resolveAsset", () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => null);
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "ZZZ", providerRef: "ethereum/token:0xdead" };
+    const asset = { symbol: "ZZZ", tokenRef: "ethereum/token:0xdead" };
 
     expect(await resolveAsset(asset, { source, store })).toEqual({
       ref: null,

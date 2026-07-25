@@ -1,7 +1,7 @@
 import type {
-  AssetRef,
   Confidence,
   Resolution,
+  ResolvableAsset,
   TokenCandidate,
   TokenRef,
 } from "@folio/oracle-basic";
@@ -45,7 +45,7 @@ export function pickByConfidence(
 // 内核瀑布(纯):explicit > contract > override > symbol(门控) > none。
 // 输入由 `service.resolveAsset` 收集(合约懒解析、warm 候选、覆盖表),本函数只做裁决。
 export function chooseResolution(
-  asset: AssetRef,
+  asset: ResolvableAsset,
   inputs: { contractHit?: TokenRef | null; candidates?: TokenCandidate[]; override?: TokenRef },
 ): Resolution {
   if (asset.ref) return { ref: asset.ref, confidence: "high", via: "explicit" };

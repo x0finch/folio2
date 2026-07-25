@@ -1,11 +1,11 @@
 import {
-  type AssetRef,
   CGK_RECHECK_TTL_MS,
   cgkRef,
   DEFAULT_TOP_N,
   INFO_TTL_MS,
   PRICE_TTL_MS,
   type Resolution,
+  type ResolvableAsset,
   TOKEN_REF_TTL_MS,
   type TokenRef,
   type TokenSource,
@@ -40,7 +40,7 @@ const chainRefOf = (namer: string): string =>
   namer.startsWith(EVM_NAMER_PREFIX) ? namer.slice(EVM_NAMER_PREFIX.length) : namer;
 
 export async function resolveAsset(
-  asset: AssetRef,
+  asset: ResolvableAsset,
   deps: ResolveDeps,
   opts?: ResolveOpts,
 ): Promise<Resolution> {
@@ -49,7 +49,7 @@ export async function resolveAsset(
 
   let contractHit: TokenRef | null = null;
   // tokenRef(持仓侧已构造)= 索引键 + 懒解析原料。
-  const key = asset.providerRef;
+  const key = asset.tokenRef;
   const parsed = key ? parseTokenRef(key) : undefined;
   // `coingecko/<id>` 形的 tokenRef 本身就是规范 ref(厂商寻址,如 manual 用户选币)→ 直接命中,
   // 不查索引、不掉回 symbol。等同显式 ref。其余场馆命名(binance/USDC 等)不是规范 ref,照走索引/symbol。

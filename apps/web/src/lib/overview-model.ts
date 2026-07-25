@@ -85,7 +85,7 @@ export async function buildOverview(
         eligible.push({
           account,
           b,
-          asset: { symbol: b.symbol, providerRef: b.tokenRef ?? undefined },
+          asset: { symbol: b.symbol, tokenRef: b.tokenRef ?? undefined },
           margin: false,
         });
       } else if (vk === "perp_equity" && isPerpEquity(b.metaJson)) {

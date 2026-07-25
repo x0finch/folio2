@@ -12,20 +12,20 @@ describe("balanceToAssetRef", () => {
         kind: "spot",
         tokenRef: "eip155:42161/erc20:0xaf88",
       }),
-    ).toEqual({ symbol: "USDC", providerRef: "eip155:42161/erc20:0xaf88" });
+    ).toEqual({ symbol: "USDC", tokenRef: "eip155:42161/erc20:0xaf88" });
   });
 
   it("spot without tokenRef (native/CEX) → symbol only", () => {
     expect(balanceToAssetRef({ symbol: "ETH", kind: "spot", tokenRef: null })).toEqual({
       symbol: "ETH",
-      providerRef: undefined,
+      tokenRef: undefined,
     });
   });
 
   it("manual (no identifier) → symbol only", () => {
     expect(balanceToAssetRef({ symbol: "BTC", kind: "manual" })).toEqual({
       symbol: "BTC",
-      providerRef: undefined,
+      tokenRef: undefined,
     });
   });
 

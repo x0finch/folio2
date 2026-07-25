@@ -30,7 +30,7 @@ const snap = (accountId: string, totalUsd: number, balances: OverviewBalance[]) 
 
 // 假 tokens:每个 asset 都解析成 usdc 组(证明 enrich 结果被正确附回并进聚合)。
 const tokens = {
-  async enrich(assets: { symbol: string; providerRef?: string }[]) {
+  async enrich(assets: { symbol: string; tokenRef?: string }[]) {
     return assets.map(() => ({
       ref: cgkRef("usd-coin"),
       group: { id: "usdc", displaySymbol: "USDC", name: "USD Coin" },
@@ -203,10 +203,8 @@ describe("buildOverview", () => {
 describe("buildOverview —— defi 行 change24h 富化", () => {
   it("defi 行经 enrich 附回 change24h 进 sections", async () => {
     const defiTokens = {
-      async enrich(assets: { symbol: string; providerRef?: string }[]) {
-        return assets.map((a) =>
-          a?.providerRef ? { change24h: 2.5, priceStale: false } : undefined,
-        );
+      async enrich(assets: { symbol: string; tokenRef?: string }[]) {
+        return assets.map((a) => (a?.tokenRef ? { change24h: 2.5, priceStale: false } : undefined));
       },
     } as unknown as Tokens;
     const accounts = [account("w", "Wallet")];

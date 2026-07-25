@@ -16,17 +16,18 @@ export type { TokenRef };
 // 解析【输入】(持仓侧;由调用方从 Balance 抽取)。
 // `ref` = 已知解析(命中则直接升格,跳过查找);`identifier` = 用户显式选定的上游 id(如选币),
 // tokens 层据它造 ref —— 调用方无需知道 source / 自己拼 TokenRef。
-// 三个身份字段都可能给出「这是哪个币」,区别在**成色**(溶解成串后类型已分不出,靠名字分):
-//   · providerRef —— provider 给的命名(`eip155:1/erc20:0x…`、`binance/USDC`),**待解析**
-//   · ref         —— 已解析的规范身份(命中则直接升格,跳过查找)
-//   · identifier  —— 用户显式选定的上游 id(选币);由 tokens 层配上当前命名者造 ref,
-//                    调用方因此不必知道当前是哪家 vendor
+// 持仓侧交来的待解析身份。`tokenRef` 与 Balance 上的同名字段是同一个值 —— 不换名字。
+// `identifier` 是用户显式选中的上游 id(选币):调用方给 id 即可,由 tokens 层配上当前命名者造 ref,
+// 因此调用方不必知道当前是哪家 vendor。
 export interface AssetRef {
   symbol: string;
-  providerRef?: TokenRef;
-  ref?: TokenRef;
+  tokenRef?: TokenRef;
   identifier?: string;
 }
+
+// 门面内部形:`ref` = 已定的规范身份(命中则直接升格,跳过查找)。
+// 只由 `createTokens` 从 `identifier` 填,外部调用方**不设**此字段 —— 故不进公开的 AssetRef。
+export type ResolvableAsset = AssetRef & { ref?: TokenRef };
 
 export type Confidence = "high" | "low";
 export type ResolutionVia = "explicit" | "contract" | "override" | "symbol" | "none";
