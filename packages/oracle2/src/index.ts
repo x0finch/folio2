@@ -59,7 +59,7 @@ export type {
   TokenSource,
   TokenStore,
 } from "./stores";
-export type { Tokens } from "./tokens";
+export { type Tokens, warmedAt } from "./tokens";
 export type {
   CgkRefRow,
   PricePoint,

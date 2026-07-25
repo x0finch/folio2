@@ -21,6 +21,8 @@ export interface OracleConfig {
   overrides?: Readonly<Record<string, string>>;
   // 对照失配这类静默故障的出口(见 cgk-refs.ts)。不传 = 不喊。
   onWarn?: (message: string, meta: Record<string, unknown>) => void;
+  // 注入便于测 TTL / 日桶;默认 Date.now。
+  now?: () => number;
 }
 
 // 一个用户的参考层。三个子服务:
@@ -56,6 +58,7 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
           store: cfg.stores.tokens(userId),
           cache: cfg.stores.cache(userId),
           source: cfg.source,
+          now: cfg.now,
         });
         return tokens;
       },
