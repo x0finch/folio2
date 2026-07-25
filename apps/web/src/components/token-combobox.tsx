@@ -1,4 +1,4 @@
-import type { TokenInfo } from "@folio/tokens";
+import type { TokenInfo } from "@folio/oracle";
 import { cn, Input } from "@folio/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";

@@ -1,4 +1,4 @@
-import type { AssetRef, EnrichedAsset } from "@folio/tokens";
+import type { AssetRef, EnrichedAsset } from "@folio/oracle";
 import { isFungible, viewKind } from "./balance-kind";
 import { tokenLogoUrl } from "./logo";
 

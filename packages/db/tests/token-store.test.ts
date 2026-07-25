@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { cgkRef, type TokenInfo, type TokenPrice, type TokenRef } from "@folio/tokens";
+import { cgkRef, type TokenInfo, type TokenPrice, type TokenRef } from "@folio/oracle-basic";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTokenStore } from "../src"; // 全局代币缓存:公开独立导出(非 createDb 门面)
 import { getDb } from "../src/client";

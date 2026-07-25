@@ -1,4 +1,4 @@
-import { type TokenPriceHistoryStore, type TokenRef, vendorPartsOf } from "@folio/tokens";
+import { type TokenPriceHistoryStore, type TokenRef, vendorPartsOf } from "@folio/oracle-basic";
 import { and, eq, inArray } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";

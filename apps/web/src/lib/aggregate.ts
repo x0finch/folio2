@@ -1,4 +1,4 @@
-import type { TokenGroup, TokenRef } from "@folio/tokens";
+import type { TokenGroup, TokenRef } from "@folio/oracle";
 import { chainOf } from "./token-ref";
 
 // symbol 归一(与 tokens 层同口径:trim + 大写)—— 仅用于未解析行的分组键/身份。

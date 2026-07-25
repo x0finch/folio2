@@ -1,4 +1,4 @@
-import type { AssetRef } from "@folio/tokens";
+import type { AssetRef } from "@folio/oracle";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { isFungible, viewKind } from "../balance-kind";

@@ -2,7 +2,7 @@
 // 读模型在产 `logo` 时用它把上游 URL 改写成 folio 自己的 `/api/logo/...`,使客户端零引用任何
 // 第三方图片 CDN(隐私:不向 CGK / provider CDN 泄露持仓)。见 ADR 0008。
 
-// enrich / TokenInfo 结果的最小形状(见 @folio/tokens EnrichedAsset / TokenInfo)。
+// enrich / TokenInfo 结果的最小形状(见 @folio/oracle EnrichedAsset / TokenInfo)。
 interface LogoSource {
   id?: string; // 内部代币行 id(在 store 才有;logo 代理的稳定 key)
   logo?: string; // canonical(CGK)

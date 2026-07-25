@@ -1,4 +1,4 @@
-import type { TokenGroup } from "@folio/tokens";
+import type { TokenGroup } from "@folio/oracle";
 import { describe, expect, it } from "vitest";
 import { buildTokenValueHistory, type TokenHistRow } from "../src/lib/token-history";
 

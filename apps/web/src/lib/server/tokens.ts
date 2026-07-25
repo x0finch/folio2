@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { TOP_TOKENS_LIMIT, type TokenInfo } from "@folio/tokens";
+import { TOP_TOKENS_LIMIT, type TokenInfo } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";

@@ -1,7 +1,7 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
+import type { Tokens } from "@folio/oracle";
+import { cgkRef } from "@folio/oracle";
 import type { Platforms } from "@folio/oracle-basic";
-import type { Tokens } from "@folio/tokens";
-import { cgkRef } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/account-view";
 import { buildOverview } from "../src/lib/overview-model";

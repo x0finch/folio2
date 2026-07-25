@@ -1,5 +1,5 @@
+import type { TokenInfo } from "@folio/oracle";
 import { CGK_VENDOR, cgkRef, vendorIdOf } from "@folio/oracle";
-import type { TokenInfo } from "@folio/tokens";
 import {
   Button,
   cn,
