@@ -9,6 +9,6 @@ export {
   type ParsedTokenRef,
   parseTokenRef,
   type TokenRef,
-  tokenRef,
   type TokenRefParts,
+  tokenRef,
 } from "./token-ref";

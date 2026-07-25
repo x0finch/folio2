@@ -4,7 +4,6 @@ import type {
   PlatformStore,
   Platforms,
   TokenPriceHistoryStore,
-  TokenRef,
   TokenStore,
 } from "@folio/oracle-basic";
 import {
@@ -22,7 +21,7 @@ export interface CreateOracleConfig {
   // store 全 new 出来(各含 getDb),`oracle.tokens` 也白建平台/汇率 store。代币工厂额外收 source:代币缓存
   // 按 source 分桶(ref 只对该源成立、warm 标记 `warm_as_of:<source>` 亦分源;当前恒 CoinGecko,#73 中立身份
   // 仍以此键 token_vendor_ids)→ 保留分桶签名;平台/汇率恒单源(CoinGecko,见 ADR 0005/0006),工厂零参。
-  createTokenStore: (source: TokenRef["source"]) => TokenStore;
+  createTokenStore: (source: string) => TokenStore;
   createPlatformStore: () => PlatformStore;
   createFxStore: () => FxStore;
   // 历史日价缓存(#148 / ADR 0019)。可选:不传 → 无历史缓存(priceSeries 现取不落库)。

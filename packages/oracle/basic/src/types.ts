@@ -1,17 +1,21 @@
+import type { TokenRef } from "@folio/oracle-ref";
+
 // 代币参考层的领域类型。命名规则(单一,贯穿全包):
 //   · `asset` = 持仓侧的【输入】(从 Balance 抽出的待解析身份,可能解析不出) —— 仅 `AssetRef`。
-//   · `token` = 参考层的一切(解析后的规范实体及其数据/接口) —— `TokenRef`/`TokenInfo`/…。
+//   · `token` = 参考层的一切(解析后的规范实体及其数据/接口) —— `TokenRef`(串)/`TokenInfo`/…。
 //   · `coin`  = 只保留在 CoinGecko 包内部(局部变量 / `CoinGeckoConfig` / "CoinGecko ID" 文案);
-//     通用契约一律用 `token`,`TokenRef.identifier` 承载上游 id(具体是不是 coin 由 source 决定)。
+//     通用契约一律用 `token`;上游 id 由 tokenRef 的 localName 承载(是不是 coin 由命名者决定)。
 // 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 source 零返工。
 
 // 上游代币 id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/chain)混用。
 // 通过 `as <Brand>` 在可信边界(解析上游响应)构造。
 export type CgkCoinId = string & { readonly __brand: "CgkCoinId" };
 
-// 解析【输出】:带 source 标签的规范引用。当前只 CoinGecko 一源;保留判别联合形状(source 标签),
-// 将来加源(股票 = 新增 `{ source:"equity"; … }`)时存储/富化 seam 不返工。
-export type TokenRef = { source: "coingecko"; identifier: CgkCoinId };
+export type { TokenRef };
+
+// 解析【输出】= 一条 tokenRef 串(ADR 0020)。以前这里是 `{ source; identifier }` 判别联合,
+// 与 tokenRef 是同一件事的两种写法(`refKey` 产的 `coingecko:x` 和 `tokenRef` 的 `coingecko/x`
+// 只差一个斜杠)→ 已溶解成串。加新源不需要改类型:换个命名者即可(`coinmarketcap/1027`)。
 
 // 解析【输入】(持仓侧;由调用方从 Balance 抽取)。
 // `ref` = 已知解析(命中则直接升格,跳过查找);`identifier` = 用户显式选定的上游 id(如选币),

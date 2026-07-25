@@ -1,5 +1,5 @@
 import {
-  type CgkCoinId,
+  cgkRef,
   MS_PER_DAY,
   TokenError,
   type TokenPriceHistoryStore,
@@ -13,7 +13,7 @@ import { createTokens } from "../src/services/tokens";
 
 // Tokens.priceSeries / priceAt(#148 / ADR 0019):缓存日桶合并 + 一次回源补缺 + 降级。
 // 用 2020 时间戳(相对 now 恒为过去)→ 今日桶分支不触发,行为确定。
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+const cg = cgkRef;
 const noopStore = () => ({}) as unknown as TokenStore;
 
 const B0 = 18500;
@@ -24,7 +24,7 @@ const day = (b: number, offsetMs = 0): number => b * MS_PER_DAY + offsetMs;
 // 进程内历史价缓存(跨调用保留 → 验证第二次全命中)。
 function inMemoryHistory(): TokenPriceHistoryStore {
   const rows = new Map<string, number>();
-  const k = (ref: TokenRef, b: number) => `${ref.source}:${ref.identifier}:${b}`;
+  const k = (ref: TokenRef, b: number) => `${ref}:${b}`;
   return {
     async getDailyPrices(ref, buckets) {
       const out = new Map<number, number>();

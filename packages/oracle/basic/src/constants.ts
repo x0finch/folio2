@@ -1,6 +1,5 @@
-import type { CgkCoinId, TokenRef } from "./types";
-
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+import type { TokenRef } from "./types";
+import { cgkRef as cg } from "./vendor";
 
 // symbol → 规范 `TokenRef` 的策展小表:majors + 已知撞名,优先于市值排名(防山寨撞名)。
 // 键须为 `normalizeSymbol` 输出(大写)。大头仍靠 (链,合约) 与显式 identifier;此表只兜 symbol 来源。

@@ -3,8 +3,8 @@ import {
   formatTokenRef,
   normalizeAddress,
   parseTokenRef,
-  tokenRef,
   type TokenRefParts,
+  tokenRef,
 } from "../src";
 
 // Solana / Bitcoin 的真实地址 —— base58 与 bech32 都大小写敏感,小写下去就不存在了。

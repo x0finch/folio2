@@ -1,20 +1,19 @@
-import type {
-  CgkCoinId,
-  TokenCandidate,
-  TokenInfo,
-  TokenPrice,
-  TokenRecord,
-  TokenRef,
-  TokenSource,
-  TokenStore,
+import {
+  cgkRef,
+  OVERRIDES,
+  type TokenCandidate,
+  type TokenInfo,
+  type TokenPrice,
+  type TokenRecord,
+  type TokenRef,
+  type TokenSource,
+  type TokenStore,
 } from "@folio/oracle-basic";
-import { OVERRIDES } from "@folio/oracle-basic";
 import { describe, expect, it, vi } from "vitest";
 import { normalizeSymbol } from "../src/services/tokens/normalize";
 import { refreshWarm, resolveAsset } from "../src/services/tokens/service";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
-const key = (r: TokenRef) => `${r.source}:${r.identifier}`;
+const cg = cgkRef;
 
 // 内存假 store(实现新 TokenStore:代币表按 refKey、实现索引按 tokenKey 键、warm 候选、warmAsOf)。
 function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
@@ -33,8 +32,8 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
         const list = candidates.get(sym) ?? [];
         list.push({ ref: info.ref, marketCapRank: price.marketCapRank });
         candidates.set(sym, list);
-        byRef.set(key(info.ref), {
-          id: key(info.ref),
+        byRef.set(info.ref, {
+          id: info.ref,
           ref: info.ref,
           symbol: info.symbol,
           name: info.name,
@@ -82,24 +81,24 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
     async linkTokenKeyToCgk(k, info, price) {
       const orphan = impl.get(k)?.rec;
       const rec: TokenRecord = {
-        id: key(info.ref),
+        id: info.ref,
         ref: info.ref,
         symbol: info.symbol,
         name: info.name,
         logo: info.logo,
-        providerLogo: byRef.get(key(info.ref))?.providerLogo ?? orphan?.providerLogo,
+        providerLogo: byRef.get(info.ref)?.providerLogo ?? orphan?.providerLogo,
         price: price
           ? { unitPrice: price.unitPrice, asOf: price.asOf, stale: false }
-          : byRef.get(key(info.ref))?.price,
+          : byRef.get(info.ref)?.price,
       };
-      byRef.set(key(info.ref), rec);
+      byRef.set(info.ref, rec);
       impl.set(k, { rec, cgkCheckedUntil: null });
     },
     async getByRefs(refs) {
       const out = new Map<string, TokenRecord>();
       for (const r of refs) {
-        const v = byRef.get(key(r));
-        if (v) out.set(key(r), v);
+        const v = byRef.get(r);
+        if (v) out.set(r, v);
       }
       return out;
     },
@@ -110,7 +109,7 @@ function fakeStore(seed?: { warmAsOf?: number }): TokenStore {
     },
     async putPrices(list) {
       for (const p of list) {
-        const rec = byRef.get(key(p.ref));
+        const rec = byRef.get(p.ref);
         if (rec) rec.price = { unitPrice: p.unitPrice, asOf: p.asOf, stale: false };
       }
     },
@@ -159,7 +158,7 @@ describe("resolveAsset", () => {
 
     const r1 = await resolveAsset(asset, { source, store });
     expect(r1).toEqual({ ref: cg("usd-coin"), confidence: "high", via: "contract" });
-    const rec = (await store.getByRefs([cg("usd-coin")])).get("coingecko:usd-coin");
+    const rec = (await store.getByRefs([cg("usd-coin")])).get(cg("usd-coin"));
     expect(rec?.symbol).toBe("usdc");
     expect(rec?.price?.unitPrice).toBe(1);
 

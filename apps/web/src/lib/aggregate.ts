@@ -1,4 +1,4 @@
-import { refKey, type TokenGroup, type TokenRef } from "@folio/tokens";
+import type { TokenGroup, TokenRef } from "@folio/tokens";
 import { chainNamerOf } from "./token-ref";
 
 // symbol 归一(与 tokens 层同口径:trim + 大写)—— 仅用于未解析行的分组键/身份。
@@ -78,7 +78,7 @@ function platformIdOf(row: AggInput): string {
 // 单笔持仓的"代币身份"(用于判断组内是否单一 Token → 决定是否给 totalAmount)。
 function tokenIdentity(row: AggInput): string {
   if (row.tokenId) return row.tokenId; // vendor 中立内部 id(优先;换源不碎)
-  if (row.ref) return refKey(row.ref); // 回退:已解析 ref 但未命中 store 记录
+  if (row.ref) return row.ref; // 回退:已解析 ref 但未命中 store 记录
   if (row.tokenKey) return row.tokenKey;
   return `sym:${norm(row.symbol)}`;
 }
@@ -87,7 +87,7 @@ function tokenIdentity(row: AggInput): string {
 export function holdingKey(row: AggInput): string {
   if (row.group) return `group:${row.group.id}`;
   if (row.tokenId) return `token:${row.tokenId}`; // vendor 中立内部 id(优先)
-  if (row.ref) return `token:${refKey(row.ref)}`; // 回退:已解析 ref 但未命中 store 记录
+  if (row.ref) return `token:${row.ref}`; // 回退:已解析 ref 但未命中 store 记录
   if (row.tokenKey) return `tk:${row.tokenKey}`;
   return `as:${row.account.id}:${norm(row.symbol)}`;
 }
@@ -169,7 +169,7 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     const token = g
       ? { id: g.id, symbol: g.displaySymbol, name: g.name, logo: g.logo ?? a.logoHint }
       : {
-          id: a.first.tokenId ?? (a.first.ref ? refKey(a.first.ref) : undefined),
+          id: a.first.tokenId ?? (a.first.ref ? a.first.ref : undefined),
           symbol: a.first.symbol,
           name: a.first.name ?? a.first.symbol,
           logo: a.first.logo,

@@ -1,6 +1,7 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { Platforms } from "@folio/oracle-basic";
 import type { Tokens } from "@folio/tokens";
+import { cgkRef } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/account-view";
 import { buildOverview } from "../src/lib/overview-model";
@@ -31,7 +32,7 @@ const snap = (accountId: string, totalUsd: number, balances: OverviewBalance[]) 
 const tokens = {
   async enrich(assets: { symbol: string; tokenKey?: string }[]) {
     return assets.map(() => ({
-      ref: { source: "coingecko", identifier: "usd-coin" },
+      ref: cgkRef("usd-coin"),
       group: { id: "usdc", displaySymbol: "USDC", name: "USD Coin" },
       name: "USD Coin",
       logo: "u.png",

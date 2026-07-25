@@ -1,4 +1,4 @@
-import { type CgkCoinId, TokenError, type TokenRef } from "@folio/oracle-basic";
+import { cgkRef, TokenError } from "@folio/oracle-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CG_BASE_FREE,
@@ -11,7 +11,7 @@ import {
 import { createCoinGeckoSource } from "../src/token";
 
 const USER_AGENT_HEADER = "user-agent";
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+const cg = cgkRef;
 
 interface Call {
   url: URL;
@@ -147,7 +147,7 @@ describe("fetchPrices", () => {
     const src = createCoinGeckoSource();
     const prices = await src.fetchPrices([cg("bitcoin"), cg("ethereum")]);
     expect(calls[0].url.searchParams.get("ids")).toBe("bitcoin,ethereum");
-    expect(prices.get("coingecko:bitcoin")?.unitPrice).toBe(65000);
+    expect(prices.get(cg("bitcoin"))?.unitPrice).toBe(65000);
   });
 
   it("no refs → empty map, no request", async () => {

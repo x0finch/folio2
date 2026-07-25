@@ -1,3 +1,4 @@
+import { CGK_VENDOR, cgkRef, vendorIdOf } from "@folio/oracle";
 import type { TokenInfo } from "@folio/tokens";
 import {
   Button,
@@ -109,7 +110,7 @@ function Expandable({ show, children }: { show: boolean; children: ReactNode }) 
 function toTokenInfo(token: PickedToken | null): TokenInfo | null {
   if (!token?.identifier) return null;
   return {
-    ref: { source: "coingecko", identifier: token.identifier as TokenInfo["ref"]["identifier"] },
+    ref: cgkRef(token.identifier),
     symbol: token.symbol,
     name: token.name ?? "",
     logo: token.logo,
@@ -240,7 +241,9 @@ function ActivityForm({
       setD("token", null);
       return;
     }
-    const id = tok.ref.identifier;
+    // 选币结果恒是 CGK 命名的 ref。
+    const id = vendorIdOf(tok.ref, CGK_VENDOR);
+    if (!id) return;
     priceTouched.current = false;
     setDraft((d) => ({
       ...d,

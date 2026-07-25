@@ -5,8 +5,7 @@ import type {
   ManualToken,
   SnapshotWithBalances,
 } from "@folio/db";
-import type { CgkCoinId, TokenRef } from "@folio/oracle";
-import { dayBucketOf } from "@folio/oracle";
+import { cgkRef, dayBucketOf } from "@folio/oracle";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
 import { deriveAmount, projectToken } from "../../manual-activity";
@@ -239,7 +238,7 @@ async function buildHistoricalPriceAt(
     tokens.map(async (tk) => {
       if (!tk.identifier || tk.activities.length === 0 || byIdentifier.has(tk.identifier)) return;
       const from = Math.min(...tk.activities.map((a) => a.occurredAt));
-      const ref: TokenRef = { source: "coingecko", identifier: tk.identifier as CgkCoinId };
+      const ref = cgkRef(tk.identifier);
       const daily = new Map<number, number>();
       for (const pt of await oracle.tokens.priceSeries(ref, from, now)) {
         daily.set(dayBucketOf(pt.atMs), pt.unitPrice);

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { createTokenPriceHistoryStore } from "@folio/db";
-import type { CgkCoinId, TokenRef } from "@folio/oracle";
+import { cgkRef } from "@folio/oracle";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/history";
 import { db } from "../../src/lib/server/internal/db";
@@ -27,7 +27,7 @@ const localBtc = { symbol: "BTC", unitPrice: 100 };
 // 有 identifier(选了币)→ ① 走注入的 oracle 历史价。
 const btcRef = { symbol: "BTC", unitPrice: 100, identifier: "bitcoin" };
 // oracle 历史价缓存的键(TokenRef);identifier 即 manual token 选的 coingecko id。
-const bitcoinRef: TokenRef = { source: "coingecko", identifier: "bitcoin" as CgkCoinId };
+const bitcoinRef = cgkRef("bitcoin");
 
 async function resetUser(): Promise<void> {
   await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run();

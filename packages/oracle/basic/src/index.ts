@@ -43,7 +43,6 @@ export {
   type PlatformStore,
   type Platforms,
 } from "./platform";
-export { parseRefKey, refKey } from "./ref";
 export type { TokenPriceHistoryStore, TokenStore } from "./store";
 export type { PriceSource, TokenMetaSource, TokenSource } from "./token";
 export type {
@@ -60,7 +59,9 @@ export type {
   TokenPricePoint,
   TokenRecord,
   TokenRecordPrice,
+  // tokenRef 串即参考层的解析身份(ADR 0020),源头在 @folio/oracle-ref,此处透出。
   TokenRef,
 } from "./types";
 // 估值优先级纯函数 + 模式(Phase 3)。
 export { type ValuationMode, valuate } from "./valuate";
+export { CGK_VENDOR, cgkRef, vendorIdOf, vendorPartsOf } from "./vendor";

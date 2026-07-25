@@ -209,7 +209,7 @@ export function TokenCombobox({
               ) : tokens.length > 0 ? (
                 tokens.map((token, i) => (
                   <button
-                    key={`${token.ref.source}:${token.ref.identifier}`}
+                    key={token.ref}
                     type="button"
                     data-active={i === active}
                     onPointerMove={() => setActive(i)}

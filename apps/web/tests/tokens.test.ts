@@ -1,8 +1,8 @@
-import type { CgkCoinId, TokenRef } from "@folio/tokens";
+import { cgkRef } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
 import { balanceToAssetRef, toEnrichment } from "../src/lib/tokens";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+const cg = cgkRef;
 
 describe("balanceToAssetRef", () => {
   it("spot with tokenKey → carries it as the resolution impl key", () => {
