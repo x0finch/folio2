@@ -66,6 +66,15 @@ function platformIdOf(row: AggInput): string {
   return chainNamerOf(row.tokenKey) ?? row.account.connectorId;
 }
 
+// —— 下面两个产的是【归并键】,不是 tokenRef ——
+// 相似之处只在长相(都带 `xxx:` 前缀),用途完全不同,别混:
+//   · tokenRef(`bitcoin/native`、`binance/USDC`,见 @folio/oracle-ref)回答「谁管这个币叫什么」,
+//     由 provider 产、落库(`snapshot_balances.token_key`)、跨进程稳定。
+//   · 归并键回答「这两笔持仓算不算界面上的同一行」,**纯运行时**、不落库,前缀标的是这一级取自哪儿
+//     (group / token / tk / as / sym),优先级从高到低。tokenRef 只是其中一级的取值(`tk:` 那级)。
+// 换句话说:tokenRef 是身份,归并键是分组决策 —— 一个 tokenRef 可能因为解析出了 tokenId 而落到
+// 更高的 `token:` 级,压根用不上 `tk:`。
+
 // 单笔持仓的"代币身份"(用于判断组内是否单一 Token → 决定是否给 totalAmount)。
 function tokenIdentity(row: AggInput): string {
   if (row.tokenId) return row.tokenId; // vendor 中立内部 id(优先;换源不碎)

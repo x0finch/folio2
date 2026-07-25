@@ -19,7 +19,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
 import { useTokenPrice } from "../lib/hooks/use-token-price";
-import type { ActivityDraft, DraftTokenRef } from "../lib/manual-types";
+import type { ActivityDraft, PickedToken } from "../lib/manual-types";
 import { DateTimeWheel } from "./date-time-wheel";
 import { Portal } from "./portal";
 import { TokenCombobox } from "./token-combobox";
@@ -40,7 +40,7 @@ type Kind = ActivityDraft["kind"];
 export interface EditActivityInput {
   tokenId: string;
   activityId: string;
-  token: DraftTokenRef;
+  token: PickedToken;
   kind: Kind;
   amount: number;
   price?: number;
@@ -60,7 +60,7 @@ export interface ActivityPatch {
 }
 
 interface DraftForm {
-  token: DraftTokenRef | null;
+  token: PickedToken | null;
   kind: Kind;
   amount: string;
   price: string;
@@ -105,8 +105,8 @@ function Expandable({ show, children }: { show: boolean; children: ReactNode }) 
   );
 }
 
-// DraftTokenRef → TokenCombobox 可显示的 TokenInfo(仅展示,不校验 ref.source)。无 identifier → null(走手动模式)。
-function toTokenInfo(token: DraftTokenRef | null): TokenInfo | null {
+// PickedToken → TokenCombobox 可显示的 TokenInfo(仅展示,不校验 ref.source)。无 identifier → null(走手动模式)。
+function toTokenInfo(token: PickedToken | null): TokenInfo | null {
   if (!token?.identifier) return null;
   return {
     ref: { source: "coingecko", identifier: token.identifier as TokenInfo["ref"]["identifier"] },
@@ -153,7 +153,7 @@ function ActivityForm({
   onSubmit,
   onEdit,
 }: {
-  defaultToken: DraftTokenRef | null;
+  defaultToken: PickedToken | null;
   lockToken?: boolean; // 从 token 行「编辑」进入:锁定该 token,不可改
   edit?: EditActivityInput | null; // 编辑既有活动:预填 + 锁定 token + 单条保存(非批量)
   onClose: () => void;
@@ -645,7 +645,7 @@ export function ManualActivityModal({
   onEdit,
 }: {
   open: boolean;
-  defaultToken: DraftTokenRef | null; // 默认选中(最新一笔活动的 token,或 token 行进入时锁定的 token)
+  defaultToken: PickedToken | null; // 默认选中(最新一笔活动的 token,或 token 行进入时锁定的 token)
   lockToken?: boolean; // token 行「编辑」进入:锁定 token 不可改
   edit?: EditActivityInput | null; // 活动行「编辑」进入:预填既有活动、单条保存
   onClose: () => void;

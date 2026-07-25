@@ -28,7 +28,7 @@ import {
   type HistoryToken,
   isReduceOversold,
 } from "../lib/manual-history";
-import type { DraftTokenRef } from "../lib/manual-types";
+import type { PickedToken } from "../lib/manual-types";
 import {
   createManualActivities,
   removeManualActivity,
@@ -104,7 +104,7 @@ export function ManualTokensPanel({
   );
   const tokenById = useMemo(() => new Map(tokens.map((tk) => [tk.id, tk])), [tokens]);
 
-  const tokenRef = (tk: (typeof tokens)[number]): DraftTokenRef => {
+  const pickedTokenOf = (tk: (typeof tokens)[number]): PickedToken => {
     const bal = balBySymbol.get(tk.symbol.toUpperCase());
     return {
       symbol: tk.symbol,
@@ -164,7 +164,7 @@ export function ManualTokensPanel({
   const [tab, setTab] = useState("tokens");
   const [activity, setActivity] = useState<{
     open: boolean;
-    token: DraftTokenRef | null;
+    token: PickedToken | null;
     lock: boolean;
     edit: EditActivityInput | null;
   }>({ open: false, token: null, lock: false, edit: null });
@@ -192,15 +192,15 @@ export function ManualTokensPanel({
   // 默认选中最新一笔活动的 token(供 plus 预选)。
   const latest = merged[0];
   const latestTokenRow = latest?.tokenId ? tokenById.get(latest.tokenId) : undefined;
-  const latestToken = latestTokenRow ? tokenRef(latestTokenRow) : null;
+  const latestToken = latestTokenRow ? pickedTokenOf(latestTokenRow) : null;
 
   const openPlus = () => setActivity({ open: true, token: latestToken, lock: false, edit: null });
   const openTokenEdit = (tk: (typeof tokens)[number]) =>
-    setActivity({ open: true, token: tokenRef(tk), lock: true, edit: null });
+    setActivity({ open: true, token: pickedTokenOf(tk), lock: true, edit: null });
   // 活动行「编辑」:锁定该 token,预填这笔活动的全部字段(kind/数量/单价/手续费/日期/备注)。
   const openActivityEdit = (a: ActivityRow) => {
     const tk = a.tokenId ? tokenById.get(a.tokenId) : undefined;
-    const token = tk ? tokenRef(tk) : { symbol: a.symbol, logo: a.logo, unitPrice: 0 };
+    const token = tk ? pickedTokenOf(tk) : { symbol: a.symbol, logo: a.logo, unitPrice: 0 };
     setActivity({
       open: true,
       token,
