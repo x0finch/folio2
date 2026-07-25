@@ -5,27 +5,27 @@ import { balanceToAssetRef, toEnrichment } from "../src/lib/tokens";
 const cg = cgkRef;
 
 describe("balanceToAssetRef", () => {
-  it("spot with tokenKey → carries it as the resolution impl key", () => {
+  it("spot with tokenRef → carries it as the resolution impl key", () => {
     expect(
       balanceToAssetRef({
         symbol: "USDC",
         kind: "spot",
-        tokenKey: "eip155:42161/erc20:0xaf88",
+        tokenRef: "eip155:42161/erc20:0xaf88",
       }),
-    ).toEqual({ symbol: "USDC", tokenKey: "eip155:42161/erc20:0xaf88" });
+    ).toEqual({ symbol: "USDC", tokenRef: "eip155:42161/erc20:0xaf88" });
   });
 
-  it("spot without tokenKey (native/CEX) → symbol only", () => {
-    expect(balanceToAssetRef({ symbol: "ETH", kind: "spot", tokenKey: null })).toEqual({
+  it("spot without tokenRef (native/CEX) → symbol only", () => {
+    expect(balanceToAssetRef({ symbol: "ETH", kind: "spot", tokenRef: null })).toEqual({
       symbol: "ETH",
-      tokenKey: undefined,
+      tokenRef: undefined,
     });
   });
 
   it("manual (no identifier) → symbol only", () => {
     expect(balanceToAssetRef({ symbol: "BTC", kind: "manual" })).toEqual({
       symbol: "BTC",
-      tokenKey: undefined,
+      tokenRef: undefined,
     });
   });
 

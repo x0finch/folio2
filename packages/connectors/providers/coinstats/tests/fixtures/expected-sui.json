@@ -6,11 +6,11 @@
     "price": 3.5,
     "value": 140,
     "kind": "spot",
-    "tokenKey": "sui/native"
+    "tokenRef": "sui/native"
   },
   {
     "symbol": "XSUI",
-    "tokenKey": "sui-wallet/token:0xSUITESTTOKEN00000000000000000000000000AB",
+    "tokenRef": "sui-wallet/token:0xSUITESTTOKEN00000000000000000000000000AB",
     "name": "X Sui Token",
     "amount": 10,
     "price": 2,

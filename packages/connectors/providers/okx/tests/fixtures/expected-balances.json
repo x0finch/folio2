@@ -1,7 +1,7 @@
 [
   {
     "symbol": "BTC",
-    "tokenKey": "okx/BTC",
+    "tokenRef": "okx/BTC",
     "amount": 0.5,
     "price": 60000,
     "value": 30000,
@@ -9,7 +9,7 @@
   },
   {
     "symbol": "USDT",
-    "tokenKey": "okx/USDT",
+    "tokenRef": "okx/USDT",
     "amount": 1000,
     "price": 1,
     "value": 1000,
@@ -17,7 +17,7 @@
   },
   {
     "symbol": "ETH",
-    "tokenKey": "okx/ETH",
+    "tokenRef": "okx/ETH",
     "amount": 2,
     "price": 3000,
     "value": 6000,

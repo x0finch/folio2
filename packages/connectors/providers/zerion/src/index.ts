@@ -75,7 +75,7 @@ interface ZerionChainsResponse {
 // 本 connector 会吐的 kind 子集:spot | defi。
 type Row = z.infer<typeof Spot> | z.infer<typeof Defi>;
 
-// 链清单 → slug→数字 chainId(external_id hex → 十进制)。tokenKey 的 eip155 标准形靠它。
+// 链清单 → slug→数字 chainId(external_id hex → 十进制)。tokenRef 的 eip155 标准形靠它。
 export function parseChainIds(res: ZerionChainsResponse): Record<string, number> {
   const out: Record<string, number> = {};
   for (const c of res.data ?? []) {
@@ -99,7 +99,7 @@ function evmTokenRef(chainId: number, contract: string | undefined, native: bool
 // 规则:跳过 displayable=false(垃圾/隐藏);无 symbol 跳过;position_type!=="wallet"
 // 或带 protocol → defi,否则 spot;value 缺失记 0。
 // kind 契约(新 Balance):spot 无 meta;defi 带 meta:{protocol,positionType}(展示字段)。
-// 链/合约身份走 tokenKey,不再进 meta。
+// 链/合约身份走 tokenRef,不再进 meta。
 // 代币标识:implementations 里当前链那条的 address + 数字 chainId → 规范 eip155 CAIP-19。
 // chainIds 必传(由 getChainIds 保证非空):某仓位的链拿不到数字 chainId 就【抛错】——
 // 绝不退化成 chain:<slug> 兜底形(那会与规范形分裂身份、污染代币索引),失败即不产、整轮重试。
@@ -135,7 +135,7 @@ export function parsePositions(
       amount: sign * Math.abs(a.quantity?.float ?? 0),
       price: a.price ?? undefined,
       value: sign * Math.abs(a.value ?? 0),
-      tokenKey: evmTokenRef(chainId, contract, impl != null && impl.address == null),
+      tokenRef: evmTokenRef(chainId, contract, impl != null && impl.address == null),
       name: a.fungible_info?.name,
       logo: a.fungible_info?.icon?.url,
     };

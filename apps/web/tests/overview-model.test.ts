@@ -30,7 +30,7 @@ const snap = (accountId: string, totalUsd: number, balances: OverviewBalance[]) 
 
 // 假 tokens:每个 asset 都解析成 usdc 组(证明 enrich 结果被正确附回并进聚合)。
 const tokens = {
-  async enrich(assets: { symbol: string; tokenKey?: string }[]) {
+  async enrich(assets: { symbol: string; tokenRef?: string }[]) {
     return assets.map(() => ({
       ref: cgkRef("usd-coin"),
       group: { id: "usdc", displaySymbol: "USDC", name: "USD Coin" },
@@ -61,13 +61,13 @@ describe("buildOverview", () => {
       [
         "a1",
         snap("a1", 100, [
-          bal({ tokenKey: "eip155:42161/erc20:0xusdc", amount: 100, usdValue: 100 }),
+          bal({ tokenRef: "eip155:42161/erc20:0xusdc", amount: 100, usdValue: 100 }),
         ]),
       ],
       [
         "a2",
         snap("a2", 50, [
-          bal({ kind: "manual", tokenKey: "coingecko:usd-coin", amount: 50, usdValue: 50 }),
+          bal({ kind: "manual", tokenRef: "coingecko:usd-coin", amount: 50, usdValue: 50 }),
         ]),
       ],
     ]);
@@ -99,12 +99,12 @@ describe("buildOverview", () => {
   });
 
   it("场馆键(= connectorId)走 connectorMeta 装饰,不进 platforms.resolve(#52)", async () => {
-    // binance CEX 账户 + 无链前缀 tokenKey → source.platform.id = "binance"(= connectorId,无类别前缀)。
+    // binance CEX 账户 + 无链前缀 tokenRef → source.platform.id = "binance"(= connectorId,无类别前缀)。
     const accounts = [account("cex", "币安", "binance")];
     const byAccount = new Map([
       [
         "cex",
-        snap("cex", 100, [bal({ tokenKey: "coingecko:usd-coin", amount: 100, usdValue: 100 })]),
+        snap("cex", 100, [bal({ tokenRef: "coingecko:usd-coin", amount: 100, usdValue: 100 })]),
       ],
     ]);
 
@@ -145,7 +145,7 @@ describe("buildOverview", () => {
             kind: "spot",
             amount: 100,
             usdValue: 100,
-            tokenKey: "coingecko:usd-coin",
+            tokenRef: "coingecko:usd-coin",
           }),
           bal({
             symbol: "aUSDC",
@@ -199,12 +199,12 @@ describe("buildOverview", () => {
 });
 
 // —— H5 #120:sections 的 defi 行读时富化 change24h(协议行 24h 聚合的数据源) ——
-// defi 不进聚合,故单独一批 enrich;按 tokenKey 命中的行带 change24h,未命中 undefined。
+// defi 不进聚合,故单独一批 enrich;按 tokenRef 命中的行带 change24h,未命中 undefined。
 describe("buildOverview —— defi 行 change24h 富化", () => {
   it("defi 行经 enrich 附回 change24h 进 sections", async () => {
     const defiTokens = {
-      async enrich(assets: { symbol: string; tokenKey?: string }[]) {
-        return assets.map((a) => (a?.tokenKey ? { change24h: 2.5, priceStale: false } : undefined));
+      async enrich(assets: { symbol: string; tokenRef?: string }[]) {
+        return assets.map((a) => (a?.tokenRef ? { change24h: 2.5, priceStale: false } : undefined));
       },
     } as unknown as Tokens;
     const accounts = [account("w", "Wallet")];
@@ -217,7 +217,7 @@ describe("buildOverview —— defi 行 change24h 富化", () => {
             symbol: "stETH",
             amount: 1,
             usdValue: 100,
-            tokenKey: "eip155:1/erc20:0xae7a",
+            tokenRef: "eip155:1/erc20:0xae7a",
             metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
           }),
           bal({

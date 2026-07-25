@@ -6,7 +6,7 @@ import { cgkRef } from "../src/vendor";
 // Stubs prove the (reshaped) interfaces are implementable — `satisfies` is the compile-time proof.
 // `: Token{Source,Store}` annotations are the compile-time proof the interfaces are implementable.
 const source: TokenSource = {
-  source: "coingecko",
+  id: "coingecko",
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
   fetchPrices: async () => new Map(),
@@ -24,10 +24,10 @@ const store: TokenStore = {
   putWarm: async () => {},
   warmAsOf: async () => null,
   listTopTokens: async () => [],
-  getByTokenKey: async () => new Map(),
-  ensureTokenKey: async () => {},
+  getByTokenRef: async () => new Map(),
+  ensureTokenRef: async () => {},
   markCgkChecked: async () => {},
-  linkTokenKeyToCgk: async () => {},
+  linkTokenRefToCgk: async () => {},
   getByRefs: async () => new Map(),
   getById: async () => undefined,
   putPrices: async () => {},
@@ -38,7 +38,7 @@ describe("interface shapes", () => {
     expect(await source.fetchMarkets({ topN: 1 })).toEqual([]);
   });
   it("TokenStore is implementable", async () => {
-    expect((await store.getByTokenKey(["eip155:1/erc20:0x0"])).size).toBe(0);
+    expect((await store.getByTokenRef(["eip155:1/erc20:0x0"])).size).toBe(0);
   });
   it("TokenPriceHistoryStore is implementable", async () => {
     const ref = cgkRef("bitcoin");

@@ -19,8 +19,8 @@ _Avoid_: CanonicalHolding, canonical token(组不是"单个规范币")
 `eip155:42161/erc20:0xaf88…`、`bitcoin/native`、`solana/token:EPjF…`、`coingecko/usd-coin`、`binance/USDC`。
 一个 token 可有多条 tokenRef(每个命名者一条),故是多对一。文法 + 归一由 `@folio/oracle-ref` 独占实现:`TokenRef` = 串(系统里流通的),`TokenRefParts` = 拆开的结构。
 参考层的「解析结果」也是这条串(厂商作命名者,`coingecko/usd-coin`)—— 旧的 `{ source, identifier }` + `refKey` 已溶解。
-字段名仍叫 `tokenKey`(Balance / `snapshot_balances.token_key`),值是 tokenRef。
-_Avoid_: tokenKey(作为概念名,已由 tokenRef 取代)、caip19、impl key、tokenIdentifier
+字段名一律 `tokenRef`(`Balance.tokenRef` / `snapshot_balances.token_ref`);`AssetRef.providerRef` 是它待解析时的名字。
+_Avoid_: tokenKey / refKey(旧称,已退场)、caip19、impl key、tokenIdentifier
 
 **namer**:
 tokenRef 的左半边 = **命名者**。对 `@folio/oracle-ref` 不透明:包不判断它是链、场馆还是数据源
@@ -30,7 +30,7 @@ _Avoid_: namespace, platformKey(platform 是 namer 的子集,不等同)
 ### 持仓与聚合
 
 **Balance**:
-provider 报出的单个持仓 —— 属于某账户的某次快照,扁平结构(symbol/amount/value/price/kind/tokenKey)。
+provider 报出的单个持仓 —— 属于某账户的某次快照,扁平结构(symbol/amount/value/price/kind/tokenRef)。
 _Avoid_: holding(那是聚合后的)
 
 **Holding**:

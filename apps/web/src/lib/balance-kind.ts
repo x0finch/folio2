@@ -18,7 +18,7 @@ function legacyPerpRole(metaJson: string | null | undefined): "equity" | "positi
 
 export interface KindRow {
   kind: string;
-  tokenKey?: string | null;
+  tokenRef?: string | null;
   metaJson?: string | null;
 }
 

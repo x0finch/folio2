@@ -16,7 +16,7 @@ export const getHoldingHistory = createServerFn({ method: "GET" })
   .validator(z.object({ key: z.string().min(1), since: z.number().int().nonnegative().optional() }))
   .handler(async ({ data, context }) => {
     const rows = await db.listSnapshotBalancesByUser(context.userId, data.since);
-    // eligibility + asset 构造均与 overview-model 一致:现货带 tokenKey(懒解析更准),perp 权益仅 symbol。
+    // eligibility + asset 构造均与 overview-model 一致:现货带 tokenRef(懒解析更准),perp 权益仅 symbol。
     const eligible = rows.filter((r) => {
       const vk = viewKind(r);
       return isFungible(vk) || (vk === "perp_equity" && isPerpEquity(r.metaJson));
@@ -24,7 +24,7 @@ export const getHoldingHistory = createServerFn({ method: "GET" })
     const assets: (AssetRef | null)[] = eligible.map((r) =>
       viewKind(r) === "perp_equity"
         ? { symbol: r.symbol }
-        : { symbol: r.symbol, tokenKey: r.tokenKey ?? undefined },
+        : { symbol: r.symbol, tokenRef: r.tokenRef ?? undefined },
     );
     const enriched = await oracle.tokens.enrich(assets);
     const histRows: TokenHistRow[] = eligible.map((r, i) => {
@@ -35,7 +35,7 @@ export const getHoldingHistory = createServerFn({ method: "GET" })
         amount: r.amount,
         value: r.usdValue, // 冻结口径(过去点用当时快照值,不现推)
         kind: vk,
-        tokenKey: r.tokenKey,
+        tokenRef: r.tokenRef,
         isMargin: vk === "perp_equity",
         account: { id: r.accountId, label: "", connectorId: "" }, // holdingKey 只用 account.id
         group: e?.group,

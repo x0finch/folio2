@@ -7,10 +7,6 @@ import type { TokenRef } from "@folio/oracle-ref";
 //     通用契约一律用 `token`;上游 id 由 tokenRef 的 localName 承载(是不是 coin 由命名者决定)。
 // 通用契约不出现 `coin`;`resolve.ts` 全程认 `TokenRef`,加新 source 零返工。
 
-// 上游代币 id —— 品牌类型,防与裸 string / 其它 id(symbol/contract/chain)混用。
-// 通过 `as <Brand>` 在可信边界(解析上游响应)构造。
-export type CgkCoinId = string & { readonly __brand: "CgkCoinId" };
-
 export type { TokenRef };
 
 // 解析【输出】= 一条 tokenRef 串(ADR 0020)。以前这里是 `{ source; identifier }` 判别联合,
@@ -20,12 +16,18 @@ export type { TokenRef };
 // 解析【输入】(持仓侧;由调用方从 Balance 抽取)。
 // `ref` = 已知解析(命中则直接升格,跳过查找);`identifier` = 用户显式选定的上游 id(如选币),
 // tokens 层据它造 ref —— 调用方无需知道 source / 自己拼 TokenRef。
+// 持仓侧交来的待解析身份。`tokenRef` 与 Balance 上的同名字段是同一个值 —— 不换名字。
+// `identifier` 是用户显式选中的上游 id(选币):调用方给 id 即可,由 tokens 层配上当前命名者造 ref,
+// 因此调用方不必知道当前是哪家 vendor。
 export interface AssetRef {
   symbol: string;
-  tokenKey?: string; // 已构造的 CAIP-19 标识(持仓侧持久化);解析优先用它(impl key + 懒解析原料)
-  ref?: TokenRef;
-  identifier?: string; // 用户显式选定的上游 id(选币)
+  tokenRef?: TokenRef;
+  identifier?: string;
 }
+
+// 门面内部形:`ref` = 已定的规范身份(命中则直接升格,跳过查找)。
+// 只由 `createTokens` 从 `identifier` 填,外部调用方**不设**此字段 —— 故不进公开的 AssetRef。
+export type ResolvableAsset = AssetRef & { ref?: TokenRef };
 
 export type Confidence = "high" | "low";
 export type ResolutionVia = "explicit" | "contract" | "override" | "symbol" | "none";

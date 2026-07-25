@@ -34,7 +34,7 @@ export const TOP_TOKENS_LIMIT = 50;
 // 缓存 TTL(供 store 实现 / refreshWarm 门控)。warm 承载价要新鲜、合约解析稳定、否定中等。
 // (chain 的源内映射 TTL 由各 source 自管,不在此。)
 export const WARM_TTL_MS = 30 * 60 * 1000; // 30min(warm 承载价,要新鲜)
-export const TOKEN_KEY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d(tokenKey 索引行;每次 sync 顺延)
+export const TOKEN_REF_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d(tokenRef 索引行;每次 sync 顺延)
 export const PRICE_TTL_MS = 30 * 60 * 1000; // 30min(长尾价;过期=stale 不删,SWR)
 // name/logo 近乎静态,与 warm/price 的短 TTL 解耦:否则每次 warm 一过期,富化就丢 logo/名(回退首字母)。
 export const INFO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d(名称/图标,近静态)

@@ -9,7 +9,7 @@ import { Note } from "./note";
 // 每 connector 的 balance.schema = 它会吐的 kind 子集判别联合(组合下方各 kind schema),
 // 其余 kind 编译期不可写(见 BalanceProvider<B>)。
 
-// 所有 kind 共享的基座。tokenKey/name/logo/price 由 provider 尽力带,缺则省略。
+// 所有 kind 共享的基座。tokenRef/name/logo/price 由 provider 尽力带,缺则省略。
 export const BalanceBase = z.object({
   symbol: z.string(),
   amount: z.number(),
@@ -19,7 +19,7 @@ export const BalanceBase = z.object({
   // 落 snapshot_balances.self_price —— 作估值「原料」,让切换源/估值模式能从原料重算、可逆、自带价不丢。
   // 与 price 分开:price 可能被 revalue 改成源价,selfPrice 恒为 provider 原值。
   selfPrice: z.number().optional(),
-  tokenKey: z.string().optional(), // 代币寻址标识(CAIP-19 文法;拿不到则空,退化按 symbol)
+  tokenRef: z.string().optional(), // 代币命名(ADR 0020 文法;拿不到则空,退化按 symbol)
   name: z.string().optional(), // provider 自带代币元信息(喂参考层 / 备用展示)
   logo: z.string().optional(),
   // provider 专属【仅供展示】的 balance 级 note(note 重设计,单个 Note),挂在【这笔持仓】上:

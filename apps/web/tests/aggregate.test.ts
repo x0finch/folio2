@@ -25,7 +25,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 1000,
         value: 1000,
-        tokenKey: "eip155:1/erc20:0xdac",
+        tokenRef: "eip155:1/erc20:0xdac",
         account: zerion,
         group: usdt,
         ref: cg("tether"),
@@ -34,7 +34,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 500,
         value: 500,
-        tokenKey: "eip155:42161/erc20:0xfd0",
+        tokenRef: "eip155:42161/erc20:0xfd0",
         account: zerion,
         group: usdt,
         ref: cg("usdt0"),
@@ -52,7 +52,7 @@ describe("buildCanonicalHoldings", () => {
         amount: 100,
         value: 100,
         kind: "spot", // 归一后 manual→spot(overview 用 viewKind 归一后才喂 aggregate)
-        tokenKey: "coingecko:tether",
+        tokenRef: "coingecko:tether",
         account: manual,
         group: usdt,
         ref: cg("tether"),
@@ -77,7 +77,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 1000,
         value: 1000,
-        tokenKey: "eip155:1/erc20:0xa0b",
+        tokenRef: "eip155:1/erc20:0xa0b",
         account: zerion,
         group: usdc,
         ref: cg("usd-coin"),
@@ -86,7 +86,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 500,
         value: 500,
-        tokenKey: "eip155:42161/erc20:0xaf8",
+        tokenRef: "eip155:42161/erc20:0xaf8",
         account: zerion,
         group: usdc,
         ref: cg("usd-coin"),
@@ -124,7 +124,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 100,
         value: 100,
-        tokenKey: "eip155:43114/erc20:0xc7",
+        tokenRef: "eip155:43114/erc20:0xc7",
         account: zerion,
         ref: cg("usdt-avalanche"),
       }), // 无组 → 单例 Token
@@ -169,7 +169,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 100,
         value: 100,
-        tokenKey: "eip155:1/erc20:0xa0b",
+        tokenRef: "eip155:1/erc20:0xa0b",
         account: zerion,
         group: usdc,
         ref: cg("usd-coin"),
@@ -178,7 +178,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 50,
         value: 50,
-        tokenKey: "eip155:1/erc20:0xa0b",
+        tokenRef: "eip155:1/erc20:0xa0b",
         account: zerion,
         group: usdc,
         ref: cg("usd-coin"),
@@ -295,8 +295,8 @@ describe("buildCanonicalHoldings", () => {
   it("同交易所跨账户同名币 → 合并成一行(此前按账户拆)", () => {
     const binance2 = { id: "b2", label: "Binance 2", connectorId: "binance" };
     const hs = buildCanonicalHoldings([
-      row({ symbol: "USDC", amount: 100, value: 100, tokenKey: "binance/USDC", account: binance }),
-      row({ symbol: "USDC", amount: 40, value: 40, tokenKey: "binance/USDC", account: binance2 }),
+      row({ symbol: "USDC", amount: 100, value: 100, tokenRef: "binance/USDC", account: binance }),
+      row({ symbol: "USDC", amount: 40, value: 40, tokenRef: "binance/USDC", account: binance2 }),
     ]);
     expect(hs).toHaveLength(1);
     expect(hs[0]!.key).toBe("tk:binance/USDC");
@@ -306,8 +306,8 @@ describe("buildCanonicalHoldings", () => {
   // 但跨交易所仍不合并:命名者不同 → ref 不同。要合必须先各自解析到同一个 tokens.id(ADR 0002)。
   it("跨交易所同名币 → 仍是两行(未解析前不按 symbol 归并)", () => {
     const hs = buildCanonicalHoldings([
-      row({ symbol: "BTC", amount: 1, value: 60, tokenKey: "binance/BTC", account: binance }),
-      row({ symbol: "BTC", amount: 2, value: 120, tokenKey: "hyperliquid/BTC", account: hyper }),
+      row({ symbol: "BTC", amount: 1, value: 60, tokenRef: "binance/BTC", account: binance }),
+      row({ symbol: "BTC", amount: 2, value: 120, tokenRef: "hyperliquid/BTC", account: hyper }),
     ]);
     expect(hs.map((h) => h.key).sort()).toEqual(["tk:binance/BTC", "tk:hyperliquid/BTC"]);
   });
@@ -315,7 +315,7 @@ describe("buildCanonicalHoldings", () => {
   // 场馆 ref 是不透明 id 形 → 不是链 → 平台单元仍落连接器本身,与迁移前一致。
   it("场馆 ref 不改变平台归属(仍是 connectorId)", () => {
     const hs = buildCanonicalHoldings([
-      row({ symbol: "USDC", amount: 100, value: 100, tokenKey: "binance/USDC", account: binance }),
+      row({ symbol: "USDC", amount: 100, value: 100, tokenRef: "binance/USDC", account: binance }),
     ]);
     expect(hs[0]!.sources.map((s) => s.platform.id)).toEqual(["binance"]);
   });
@@ -324,12 +324,12 @@ describe("buildCanonicalHoldings", () => {
   it("链上 ref 的平台单元 = tokenRef 的链命名者(短形)", () => {
     const btc = { id: "x1", label: "BTC wallet", connectorId: "bitcoin" };
     const hs = buildCanonicalHoldings([
-      row({ symbol: "BTC", amount: 1, value: 60, tokenKey: "bitcoin/native", account: btc }),
+      row({ symbol: "BTC", amount: 1, value: 60, tokenRef: "bitcoin/native", account: btc }),
       row({
         symbol: "ETH",
         amount: 1,
         value: 30,
-        tokenKey: "eip155:1/erc20:0xabc",
+        tokenRef: "eip155:1/erc20:0xabc",
         account: zerion,
       }),
     ]);

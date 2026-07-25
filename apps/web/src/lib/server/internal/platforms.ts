@@ -1,4 +1,4 @@
-import { chainNamerOf } from "../../token-ref";
+import { chainOf } from "../../token-ref";
 import { db } from "./db";
 import { oracle } from "./oracle";
 
@@ -13,7 +13,7 @@ export async function warmPlatformsForUser(userId: string): Promise<void> {
   const keys = new Set<string>();
   for (const s of snapshots) {
     for (const b of s.balances) {
-      const chain = chainNamerOf(b.tokenKey);
+      const chain = chainOf(b.tokenRef);
       if (chain) keys.add(chain);
     }
   }

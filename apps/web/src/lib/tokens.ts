@@ -9,7 +9,7 @@ import { tokenLogoUrl } from "./logo";
 export interface BalanceLike {
   symbol: string;
   kind: string;
-  tokenKey?: string | null; // 快照持久化的 CAIP-19 标识(解析 tokenKey;CEX/manual/原生为空)
+  tokenRef?: string | null; // 快照持久化的 CAIP-19 标识(解析 tokenRef;CEX/manual/原生为空)
 }
 
 export interface TokenEnrichment {
@@ -22,21 +22,21 @@ export interface TokenEnrichment {
 
 // 只对同质持仓解析:现货 + UTXO(BTC)(按 symbol/标识);defi/perp 不解析(价值/展示走 typed meta)。
 // kind 走 viewKind 归一(并存期兼容遗留 manual→spot、bitcoin→utxo)。
-// 解析直接用持久化的 tokenKey(provider 构造,含 chainId → 懒解析更准);无则仅 symbol。
+// 解析直接用持久化的 tokenRef(provider 构造,含 chainId → 懒解析更准);无则仅 symbol。
 export function balanceToAssetRef(b: BalanceLike): AssetRef | null {
   if (!isFungible(viewKind(b))) return null;
-  return { symbol: b.symbol, tokenKey: b.tokenKey ?? undefined };
+  return { symbol: b.symbol, tokenRef: b.tokenRef ?? undefined };
 }
 
-// defi 行的**展示用**解析(H5 #120:协议行 24h 聚合需要 change24h):仅 tokenKey 明确的行
-// (LP 份额等无 tokenKey 的头寸不按 symbol 瞎猜)。独立于 balanceToAssetRef —— 那个门喂估值
+// defi 行的**展示用**解析(H5 #120:协议行 24h 聚合需要 change24h):仅 tokenRef 明确的行
+// (LP 份额等无 tokenRef 的头寸不按 symbol 瞎猜)。独立于 balanceToAssetRef —— 那个门喂估值
 // 现推(liveValue),defi 行进去会被重估;这个只喂展示富化。
 export function defiAssetRef(b: BalanceLike): AssetRef | null {
-  if (viewKind(b) !== "defi" || !b.tokenKey) return null;
-  return { symbol: b.symbol, tokenKey: b.tokenKey };
+  if (viewKind(b) !== "defi" || !b.tokenRef) return null;
+  return { symbol: b.symbol, tokenRef: b.tokenRef };
 }
 
-// **展示富化的统一门**(同质 ∪ tokenKey 明确的 defi)。enrich / refreshStalePrices / warmTokens
+// **展示富化的统一门**(同质 ∪ tokenRef 明确的 defi)。enrich / refreshStalePrices / warmTokens
 // 三处必须同门:enrich 标了 stale 而 refresh/warm 够不到的行会让 pricesStale 永远清不掉、
 // 客户端每次加载空转一次刷新(code review #2)。估值现推(liveValue)不走此门,仍只认
 // balanceToAssetRef 的同质行。

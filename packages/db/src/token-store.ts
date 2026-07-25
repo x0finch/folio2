@@ -25,9 +25,9 @@ type TokenRow = typeof tokens.$inferSelect;
 // 代币表 + 索引表 + vendor 映射表的 D1 实现(无 userId;全局参考数据)。只经此工厂访问,不外泄 db/schema。
 // 归并身份 = tokens.id(vendor 中立,#73)。各家 coin id 存 token_vendor_ids(vendor, vendorId)→tokenId;
 // 本 store 绑定 source(如 "coingecko"):按 (source, vendorId) 找/挂映射,ref = 该映射的 vendorId。
-// 孤儿行(CGK 未收录、provider 采集)= 无 vendor 映射行,其 tokenKey 关联只在 token_index。
-// 并发注记:putWarm/ensureTokenKey 先查后批写,极端并发下(cron 与手动 sync 同拍)可能出重复孤儿行/
-// 索引 FK 失败回滚 —— 下次 warm/sync(cur 命中其一走刷新路径)或升级合并(linkTokenKeyToCgk 删孤儿)自愈,
+// 孤儿行(CGK 未收录、provider 采集)= 无 vendor 映射行,其 tokenRef 关联只在 token_index。
+// 并发注记:putWarm/ensureTokenRef 先查后批写,极端并发下(cron 与手动 sync 同拍)可能出重复孤儿行/
+// 索引 FK 失败回滚 —— 下次 warm/sync(cur 命中其一走刷新路径)或升级合并(linkTokenRefToCgk 删孤儿)自愈,
 // 可接受(warm 已单飞)。孤儿去重原靠 (source,identifier) 列唯一,去 vendor tag 后改由 token_index 的
 // cur 检查兜底(best-effort,自愈)。
 export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
@@ -247,7 +247,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       }));
     },
 
-    async getByTokenKey(keys) {
+    async getByTokenRef(keys) {
       const out = new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
       for (const ks of chunk(keys, IN_CHUNK)) {
         const rows = await db
@@ -261,7 +261,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           )
           .where(
             and(
-              eq(tokenIndex.kind, "tokenKey"),
+              eq(tokenIndex.kind, "tokenRef"),
               inArray(tokenIndex.key, ks),
               gt(tokenIndex.expiresAt, now()),
             ),
@@ -276,7 +276,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       return out;
     },
 
-    async ensureTokenKey(key, seed: ProviderTokenSeed, indexTtlMs) {
+    async ensureTokenRef(key, seed: ProviderTokenSeed, indexTtlMs) {
       const t = now();
       const expiresAt = t + indexTtlMs;
       // 现指针指向的代币,并 leftJoin 本源映射判断它是否 cgk 行(有映射)还是孤儿(无映射)。
@@ -288,7 +288,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           tokenVendorIds,
           and(eq(tokenVendorIds.tokenId, tokens.id), eq(tokenVendorIds.vendor, source)),
         )
-        .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key)));
+        .where(and(eq(tokenIndex.kind, "tokenRef"), eq(tokenIndex.key, key)));
 
       if (cur[0]) {
         const tok = cur[0].tok;
@@ -297,7 +297,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           db
             .update(tokenIndex)
             .set({ expiresAt })
-            .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key))),
+            .where(and(eq(tokenIndex.kind, "tokenRef"), eq(tokenIndex.key, key))),
         ];
         if (isCgk) {
           // cgk 行:只补/刷备用槽(provider 图更新鲜)
@@ -338,7 +338,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           providerLogo: seed.providerLogo ?? null,
           infoExpiresAt: expiresAt,
         }),
-        db.insert(tokenIndex).values({ kind: "tokenKey", key, tokenId: id, expiresAt }),
+        db.insert(tokenIndex).values({ kind: "tokenRef", key, tokenId: id, expiresAt }),
       ]);
     },
 
@@ -346,10 +346,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       await db
         .update(tokenIndex)
         .set({ cgkCheckedUntil: until })
-        .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key)));
+        .where(and(eq(tokenIndex.kind, "tokenRef"), eq(tokenIndex.key, key)));
     },
 
-    async linkTokenKeyToCgk(key, info, price, ttls) {
+    async linkTokenRefToCgk(key, info, price, ttls) {
       const t = now();
       // find-or-create 本源 canonical 行:按本源 vendor 映射找 tokenId。
       const mapped = await db
@@ -362,7 +362,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         .select({ tok: tokens })
         .from(tokenIndex)
         .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
-        .where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key)));
+        .where(and(eq(tokenIndex.kind, "tokenRef"), eq(tokenIndex.key, key)));
       const curRow = cur[0]?.tok ?? null;
 
       const cgkId = mapped[0]?.tokenId ?? crypto.randomUUID();
@@ -409,10 +409,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
         // 挂本源 vendor 映射(FK:需 cgk 行先在)
         vendorMapUpsert(cgkId, vid(info.ref)),
         // 指针重指:清旧(含孤儿指针)→ 插新
-        db.delete(tokenIndex).where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key))),
+        db.delete(tokenIndex).where(and(eq(tokenIndex.kind, "tokenRef"), eq(tokenIndex.key, key))),
         db
           .insert(tokenIndex)
-          .values({ kind: "tokenKey", key, tokenId: cgkId, expiresAt: t + ttls.indexTtlMs }),
+          .values({ kind: "tokenRef", key, tokenId: cgkId, expiresAt: t + ttls.indexTtlMs }),
       ];
       // 孤儿行删除(其余索引行 / vendor 映射经 ON DELETE CASCADE 级联)
       if (orphan) stmts.push(db.delete(tokens).where(eq(tokens.id, orphan.id)));
@@ -444,7 +444,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
 
     async getById(id) {
       // 不门控 infoExpiresAt(与 getByRefs 不同):logo 端点按主键服务字节,只要行在就给。
-      // 渲染 tokenKey 类持仓的 getByTokenKey 也不门控 info,若这里门控则 info 过期(30d)的
+      // 渲染 tokenRef 类持仓的 getByTokenRef 也不门控 info,若这里门控则 info 过期(30d)的
       // 长尾币会渲染出代理 URL 却在此 404。行删除(如升级合并删孤儿)才是唯一的"没有"。
       const rows = await db
         .select({ tok: tokens, grp: grpCols, vendorId: tokenVendorIds.vendorId })

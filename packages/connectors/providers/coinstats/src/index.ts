@@ -62,7 +62,7 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ro
       // 链/合约身份走 tokenRef,不再进 meta;现货行无展示用 meta → 省略。
       // 有合约 → <slug>/token:<addr>;无合约(原生币 SOL/SUI…)→ <slug>/native。
       // 地址不小写:base58 / bech32 大小写敏感,归一由 @folio/oracle-ref 按链决定。
-      tokenKey: chainTokenRef(chain, c.contractAddress ?? undefined),
+      tokenRef: chainTokenRef(chain, c.contractAddress ?? undefined),
       name: c.name,
     });
   }

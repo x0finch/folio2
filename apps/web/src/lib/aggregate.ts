@@ -1,5 +1,5 @@
 import type { TokenGroup, TokenRef } from "@folio/tokens";
-import { chainNamerOf } from "./token-ref";
+import { chainOf } from "./token-ref";
 
 // symbol 归一(与 tokens 层同口径:trim + 大写)—— 仅用于未解析行的分组键/身份。
 const norm = (s: string): string => s.trim().toUpperCase();
@@ -7,8 +7,8 @@ const norm = (s: string): string => s.trim().toUpperCase();
 // 纯逻辑(无 server-only import → 可单测)。把跨账户的持仓行按【规范代币】聚合成 Holding 树。
 // 设计见 docs/adr 0001–0003;术语见 CONTEXT.md。
 //   · 白名单(进聚合):spot / utxo(BTC)/ CEX 现货(kind=spot)/ perp 权益(isMargin) —— ADR-0003。kind 已由 overview 用 viewKind 归一。
-//   · 归并键四级(永不裸 symbol,ADR-0002):group → token(ref)→ tokenKey(精确合约)→ account:symbol。
-//   · HoldingSource 粒度 = 账户 × 平台单元:链上按链拆(tokenKey 的 eip155/chain 前缀),其余按账户/场馆。
+//   · 归并键四级(永不裸 symbol,ADR-0002):group → token(ref)→ tokenRef(精确合约)→ account:symbol。
+//   · HoldingSource 粒度 = 账户 × 平台单元:链上按链拆(tokenRef 的 eip155/chain 前缀),其余按账户/场馆。
 //   · 表头 totalAmount = 组内各 source 数量之和。组是「同一逻辑资产」(displaySymbol 统一单位),故跨链/
 //     多源(桥接家族)也可汇总 —— 如 USDT 跨多链合计总枚数。change24h 仍仅单一身份组给(多身份逐币涨跌不同)。
 
@@ -18,7 +18,7 @@ export interface AggInput {
   amount: number;
   value: number; // USD(provider 权威;聚合按它求和)
   kind: string; // 归一后的 viewKind:spot | defi | perp_equity | perp_position | utxo
-  tokenKey?: string | null;
+  tokenRef?: string | null;
   isMargin?: boolean; // perp 权益(保证金)—— 进聚合但明细标注
   account: { id: string; label: string; connectorId: string; network?: string | null };
   group?: TokenGroup; // 命中种子的展示分组
@@ -56,20 +56,10 @@ export interface Holding {
   sources: HoldingSource[];
 }
 
-// 持有点的平台 key:
-//   · 链上:tokenRef 的链命名者(eip155:<id> / <slug>);同账户多链 → 多 source。
-//   · 场馆/manual:平台单元 = 连接器本身,key 即 connectorId(binance/okx/hyperliquid/manual);
-//     name+logo 读路径取连接器自带(#53)。
-// 「是不是链」看 tokenRef 的右半边(见 chainNamerOf),不查表;不透明 id 形的 ref
-// (coingecko/<id> 选币、binance/USDC 场馆命名)不是链 → 落账户平台。
-function platformIdOf(row: AggInput): string {
-  return chainNamerOf(row.tokenKey) ?? row.account.connectorId;
-}
-
 // —— 下面两个产的是【归并键】,不是 tokenRef ——
 // 相似之处只在长相(都带 `xxx:` 前缀),用途完全不同,别混:
 //   · tokenRef(`bitcoin/native`、`binance/USDC`,见 @folio/oracle-ref)回答「谁管这个币叫什么」,
-//     由 provider 产、落库(`snapshot_balances.token_key`)、跨进程稳定。
+//     由 provider 产、落库(`snapshot_balances.token_ref`)、跨进程稳定。
 //   · 归并键回答「这两笔持仓算不算界面上的同一行」,**纯运行时**、不落库,前缀标的是这一级取自哪儿
 //     (group / token / tk / as / sym),优先级从高到低。tokenRef 只是其中一级的取值(`tk:` 那级)。
 // 换句话说:tokenRef 是身份,归并键是分组决策 —— 一个 tokenRef 可能因为解析出了 tokenId 而落到
@@ -79,7 +69,7 @@ function platformIdOf(row: AggInput): string {
 function tokenIdentity(row: AggInput): string {
   if (row.tokenId) return row.tokenId; // vendor 中立内部 id(优先;换源不碎)
   if (row.ref) return row.ref; // 回退:已解析 ref 但未命中 store 记录
-  if (row.tokenKey) return row.tokenKey;
+  if (row.tokenRef) return row.tokenRef;
   return `sym:${norm(row.symbol)}`;
 }
 
@@ -88,7 +78,7 @@ export function holdingKey(row: AggInput): string {
   if (row.group) return `group:${row.group.id}`;
   if (row.tokenId) return `token:${row.tokenId}`; // vendor 中立内部 id(优先)
   if (row.ref) return `token:${row.ref}`; // 回退:已解析 ref 但未命中 store 记录
-  if (row.tokenKey) return `tk:${row.tokenKey}`;
+  if (row.tokenRef) return `tk:${row.tokenRef}`;
   return `as:${row.account.id}:${norm(row.symbol)}`;
 }
 
@@ -138,7 +128,9 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     if (a.unitPriceHint == null && row.unitPrice != null) a.unitPriceHint = row.unitPrice;
     if (a.marketCapRankHint == null && row.marketCapRank != null)
       a.marketCapRankHint = row.marketCapRank;
-    const platformId = platformIdOf(row);
+    // 持有点的平台单元:链上按链拆(同账户多链 → 多 source),场馆/manual 即连接器本身
+    // (name+logo 读路径取连接器自带,#53)。「在不在链上」由 chainOf 看 tokenRef 右半边判定。
+    const platformId = chainOf(row.tokenRef) ?? row.account.connectorId;
     const sk = `${row.account.id}|${platformId}`;
     const existing = a.sources.get(sk);
     if (existing) {

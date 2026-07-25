@@ -1,7 +1,7 @@
 [
   {
     "symbol": "BTC",
-    "tokenKey": "binance/BTC",
+    "tokenRef": "binance/BTC",
     "amount": 0.5,
     "price": 60000,
     "value": 30000,
@@ -9,7 +9,7 @@
   },
   {
     "symbol": "ETH",
-    "tokenKey": "binance/ETH",
+    "tokenRef": "binance/ETH",
     "amount": 3,
     "price": 3000,
     "value": 9000,
@@ -22,7 +22,7 @@
   },
   {
     "symbol": "USDT",
-    "tokenKey": "binance/USDT",
+    "tokenRef": "binance/USDT",
     "amount": 1000,
     "price": 1,
     "value": 1000,
@@ -30,7 +30,7 @@
   },
   {
     "symbol": "NOPRICE",
-    "tokenKey": "binance/NOPRICE",
+    "tokenRef": "binance/NOPRICE",
     "amount": 5,
     "value": 0,
     "kind": "spot"

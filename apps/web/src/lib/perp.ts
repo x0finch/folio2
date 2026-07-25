@@ -29,7 +29,7 @@ interface PerpBalance {
   amount: number;
   usdValue: number;
   kind: string;
-  tokenKey?: string | null;
+  tokenRef?: string | null;
   metaJson: string | null;
 }
 

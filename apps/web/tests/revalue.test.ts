@@ -36,10 +36,10 @@ function fakeStore(): TokenStore {
     putWarm: async () => {},
     warmAsOf: async () => 9_999_999_999_999, // 远未来 → refreshWarm 视为新鲜、跳过取数
     listTopTokens: async () => [],
-    getByTokenKey: async () => new Map(),
-    ensureTokenKey: async () => {},
+    getByTokenRef: async () => new Map(),
+    ensureTokenRef: async () => {},
     markCgkChecked: async () => {},
-    linkTokenKeyToCgk: async () => {},
+    linkTokenRefToCgk: async () => {},
     getByRefs: async (refs) => {
       const out = new Map<string, TokenRecord>();
       for (const r of refs) {
@@ -55,7 +55,7 @@ function fakeStore(): TokenStore {
 
 // source:fetchPrices 为长尾 identifier 供价(模拟不在 warm 的币);其余 stub。
 const stubSource = {
-  source: "coingecko" as const,
+  id: "coingecko",
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
   fetchPrices: async (refs: TokenRef[]) => {
@@ -79,7 +79,7 @@ const bal = (symbol: string, amount: number, value: number, identifier?: string)
   value,
   kind: "spot", // manual connector 产 spot kind(旧 "manual" kind 已并入 5-kind 的 spot)
   // 用户选币 → tokenRef 的厂商命名形(coingecko/<id>),身份不再进 meta。
-  ...(identifier ? { tokenKey: `coingecko/${identifier}` } : {}),
+  ...(identifier ? { tokenRef: `coingecko/${identifier}` } : {}),
 });
 
 describe("revalue", () => {
@@ -93,13 +93,13 @@ describe("revalue", () => {
     expect(out[0].value).toBe(99);
   });
 
-  it("explicit coingecko tokenKey overrides symbol resolution", async () => {
-    // 错的 symbol "XBT" 但 tokenKey=coingecko/bitcoin → 用 bitcoin 的 store 价 65000。
+  it("explicit coingecko tokenRef overrides symbol resolution", async () => {
+    // 错的 symbol "XBT" 但 tokenRef=coingecko/bitcoin → 用 bitcoin 的 store 价 65000。
     const out = await revalue(tokens(), true, [bal("XBT", 1, 0, "bitcoin")]);
     expect(out[0].value).toBe(65000);
   });
 
-  it("explicit tokenKey not in warm cache → source.fetchPrices supplies the price", async () => {
+  it("explicit tokenRef not in warm cache → source.fetchPrices supplies the price", async () => {
     const out = await revalue(tokens(), true, [bal("TONCOIN", 2, 0, "the-open-network")]);
     expect(out[0].value).toBe(10); // 2 × 5(来自 source.fetchPrices)
   });
@@ -116,14 +116,14 @@ describe("revalue", () => {
   });
 
   it("bitcoin → 盯市:provider 只给 amount(value=0),按 BTC 市价算 value", async () => {
-    // bitcoin provider 产 value=0、kind=spot(ADR 0010:BTC 并回 spot)、tokenKey=bitcoin/native,
+    // bitcoin provider 产 value=0、kind=spot(ADR 0010:BTC 并回 spot)、tokenRef=bitcoin/native,
     // 靠 symbol 回退到 bitcoin 价 65000。未确认/派生明细走 account 级 note,不在 balance meta。
     const btc: Balance = {
       symbol: "BTC",
       amount: 0.08,
       value: 0,
       kind: "spot",
-      tokenKey: "chain:bitcoin/native:btc",
+      tokenRef: "chain:bitcoin/native:btc",
     };
     const out = await revalue(tokens(), true, [btc]);
     expect(out[0].value).toBe(5200); // 0.08 × 65000

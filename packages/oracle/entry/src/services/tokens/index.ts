@@ -1,6 +1,7 @@
 import type {
   AssetRef,
   Resolution,
+  ResolvableAsset,
   TokenGroup,
   TokenInfo,
   TokenPrice,
@@ -16,7 +17,7 @@ import {
   MS_PER_DAY,
   OVERRIDES,
   PRICE_TTL_MS,
-  TOKEN_KEY_TTL_MS,
+  TOKEN_REF_TTL_MS,
   vendorIdOf,
 } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
@@ -82,7 +83,7 @@ export interface Tokens {
   priceSeries(ref: TokenRef, fromMs: number, toMs: number): Promise<TokenPricePoint[]>;
   // 某时刻的历史价(USD):atMs 所属 UTC 日桶的价;该日无数据 → undefined(调用方降级)。
   priceAt(ref: TokenRef, atMs: number): Promise<number | undefined>;
-  // 展示富化(cache-only,零网络):tokenKey 优先(孤儿也出数据),否则 override/symbol 消歧。
+  // 展示富化(cache-only,零网络):tokenRef 优先(孤儿也出数据),否则 override/symbol 消歧。
   enrich(assets: readonly (AssetRef | null)[]): Promise<EnrichedAsset[]>;
   // 按内部代币行 id 取上游 logo URL(logo 代理端点用):source 无关,含孤儿 providerLogo;缺则 undefined。
   logoUrlById(id: string): Promise<string | undefined>;
@@ -104,15 +105,13 @@ export function createTokens({
   source,
 }: CreateTokensConfig): Tokens {
   const p = source ?? createCoinGeckoSource({ apiKey });
-  const deps = { source: p, store: createStore(p.source), overrides: OVERRIDES };
+  const deps = { source: p, store: createStore(p.id), overrides: OVERRIDES };
   const history = createPriceHistoryStore ? createPriceHistoryStore() : NOOP_PRICE_HISTORY;
 
-  // asset.identifier(用户显式选)→ explicit ref(用本源的 source 标签),调用方无需拼 TokenRef。
-  const withExplicit = (asset: AssetRef): AssetRef =>
-    asset.identifier && !asset.ref
-      ? // source↔identifier 品牌对齐由本源保证 → 整体 as TokenRef(可信边界)。
-        { ...asset, ref: tokenRef.opaque(p.source, asset.identifier) }
-      : asset;
+  // asset.identifier(用户显式选)→ 配上本源的命名者造 explicit ref。这是 `ref` 字段的**唯一**
+  // 写入点,故它只存在于门面内部的 ResolvableAsset,不进公开的 AssetRef。
+  const withExplicit = (asset: AssetRef): ResolvableAsset =>
+    asset.identifier ? { ...asset, ref: tokenRef.opaque(p.id, asset.identifier) } : asset;
 
   const resolve = (asset: AssetRef, opts?: ResolveOpts) =>
     resolveAsset(withExplicit(asset), deps, opts);
@@ -131,19 +130,19 @@ export function createTokens({
     group: rec?.group,
   });
 
-  // cache-only 解析 + 记录读取:tokenKey 命中直接用整行(含孤儿);否则 explicit/override/symbol → getByRefs。
+  // cache-only 解析 + 记录读取:tokenRef 命中直接用整行(含孤儿);否则 explicit/override/symbol → getByRefs。
   // 返回与输入等长对齐的 (ref, record) 对。
   async function lookupAll(
     assets: readonly (AssetRef | null)[],
   ): Promise<{ ref: TokenRef | null; rec: TokenRecord | undefined }[]> {
-    const withKeys = assets.map((a) => a?.tokenKey ?? null);
+    const withKeys = assets.map((a) => a?.tokenRef ?? null);
     const keys = [...new Set(withKeys.filter((k): k is string => k !== null))];
     const recordsByKey =
       keys.length > 0
-        ? await deps.store.getByTokenKey(keys)
+        ? await deps.store.getByTokenRef(keys)
         : new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
 
-    // tokenKey 未命中(或无键)的走 explicit/override/symbol(cache-only)
+    // tokenRef 未命中(或无键)的走 explicit/override/symbol(cache-only)
     const rest: { i: number; asset: AssetRef }[] = [];
     const out: ({ ref: TokenRef | null; rec: TokenRecord | undefined } | null)[] = assets.map(
       (a, i) => {
@@ -176,7 +175,7 @@ export function createTokens({
     toMs: number,
   ): Promise<TokenPricePoint[]> {
     // 非本源命名的 ref(链上寻址等)拿不到历史价 —— 本源只认自己给的名字。
-    if (!vendorIdOf(ref, deps.source.source) || fromMs > toMs) return [];
+    if (!vendorIdOf(ref, deps.source.id) || fromMs > toMs) return [];
     const fromB = dayBucketOf(fromMs);
     const toB = dayBucketOf(toMs);
     const todayB = dayBucketOf(Date.now());
@@ -271,10 +270,10 @@ export function createTokens({
     async noteProviderAssets(assets) {
       for (const a of assets) {
         try {
-          await deps.store.ensureTokenKey(
+          await deps.store.ensureTokenRef(
             a.tokenId,
             { symbol: normalizeSymbol(a.symbol), name: a.name, providerLogo: a.logo },
-            TOKEN_KEY_TTL_MS,
+            TOKEN_REF_TTL_MS,
           );
         } catch {
           // best-effort:单条失败不阻断其余(下次 sync 重试)。

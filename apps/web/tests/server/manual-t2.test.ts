@@ -65,7 +65,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
     // 测试环境 token 缓存空 → enrich 无价 → 回退 amount × unitPrice = 0.5 × 64000。
     expect(synth?.snapshot.totalUsd).toBe(32000);
     expect(synth?.balances[0].selfPrice).toBeNull();
-    expect(synth?.balances[0].tokenKey).toBe("coingecko/bitcoin");
+    expect(synth?.balances[0].tokenRef).toBe("coingecko/bitcoin");
   });
 
   it("非 manual 账户不注入", async () => {
@@ -100,7 +100,7 @@ describe("manualBalancesForWarm", () => {
     const balances = await manualBalancesForWarm(USER, accounts);
     // 只应含活跃账户的币(BTC),不含归档账户的币(ETH)。
     expect(balances.map((b) => b.symbol)).toEqual(["BTC"]);
-    expect(balances.every((b) => b.tokenKey === "coingecko/bitcoin")).toBe(true);
+    expect(balances.every((b) => b.tokenRef === "coingecko/bitcoin")).toBe(true);
   });
 });
 
