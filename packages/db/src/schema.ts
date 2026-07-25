@@ -109,7 +109,7 @@ export const snapshotBalances = sqliteTable(
 // —— 代币参考层(canonical-token-aggregation P1)——
 // 全局参考数据,**无 userId**(原则 #6 受控例外,同 listUserIdsWithAccounts)。
 // 代币表 = 系统认识的每个代币一行(CGK 收录币或 provider 孤儿);索引表 = 纯指针(symbol 候选 / tokenRef)。
-// 经 @folio/db 的 createTokenStore(env,{source}) 访问;key 归一由 @folio/tokens 调用方保证。
+// 经 @folio/db 的 createTokenStore(env,{source}) 访问;key 归一由 @folio/oracle-basic 调用方保证。
 
 // 展示分组(P2,ADR-0001):用户心智里的"一个币"的家族,可跨多个 Token(CGK 故意拆开的桥接变体)。
 // 产品自有种子(GROUP_MEMBERSHIP)驱动,不用 CGK coin id 当跨链身份;无组的 Token = 自身单例组。

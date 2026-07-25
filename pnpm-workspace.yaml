@@ -5,5 +5,4 @@ packages:
   - "packages/connectors/providers/*"
   - "packages/oracle/*"
   - "packages/oracle/sources/*"
-  - "packages/tokens/*"
   - "apps/*"

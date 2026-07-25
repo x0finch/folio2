@@ -1,4 +1,3 @@
-import { tokenRef } from "@folio/oracle-ref";
 import {
   GROUP_MEMBERSHIP,
   type ProviderTokenSeed,
@@ -9,7 +8,8 @@ import {
   type TokenRef,
   type TokenStore,
   vendorIdOf,
-} from "@folio/tokens";
+} from "@folio/oracle-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { chunk, IN_CHUNK } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
@@ -120,7 +120,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
 
   return {
     async getCandidates(symbol: string): Promise<TokenCandidate[]> {
-      // `symbol` 视为已归一(调用方 @folio/tokens 保证);store 只按 key 点查。
+      // `symbol` 视为已归一(调用方 @folio/oracle-basic 保证);store 只按 key 点查。
       // innerJoin vendor 映射(本源)→ 只出有本源映射的候选。
       const rows = await db
         .select({ vendorId: tokenVendorIds.vendorId, rank: tokens.marketCapRank })

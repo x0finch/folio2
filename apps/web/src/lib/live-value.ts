@@ -1,5 +1,5 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import { type Tokens, type ValuationMode, valuate } from "@folio/tokens";
+import { type Tokens, type ValuationMode, valuate } from "@folio/oracle";
 import type { OverviewBalance } from "./account-view";
 import { balanceToAssetRef } from "./tokens";
 

@@ -1,5 +1,5 @@
 import type { Balance } from "@folio/connectors-basic";
-import { type Tokens, type ValuationMode, valuate } from "@folio/tokens";
+import { type Tokens, type ValuationMode, valuate } from "@folio/oracle";
 
 // 写快照前的估值(oracle 多源,Phase 3)。对每笔持仓:
 //   · 非盯市类型 → 捕获 selfPrice(自带单价 = price ?? value/amount),作估值「原料」随 balance 落快照;

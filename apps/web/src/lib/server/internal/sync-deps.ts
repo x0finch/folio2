@@ -8,8 +8,8 @@ import {
 } from "@folio/connectors";
 import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
+import type { ProviderAsset, Tokens, ValuationMode } from "@folio/oracle";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
-import type { ProviderAsset, Tokens, ValuationMode } from "@folio/tokens";
 import { getLogger } from "@logtape/logtape";
 import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";

@@ -1,4 +1,4 @@
-import { cgkRef } from "@folio/tokens";
+import { cgkRef } from "@folio/oracle";
 import { describe, expect, it } from "vitest";
 import { balanceToAssetRef, toEnrichment } from "../src/lib/tokens";
 

@@ -25,7 +25,6 @@
     "@folio/oracle-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/sync": "workspace:*",
-    "@folio/tokens": "workspace:*",
     "@folio/ui": "workspace:*",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",

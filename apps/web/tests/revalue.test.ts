@@ -8,7 +8,7 @@ import {
   type TokenRef,
   type TokenStore,
   type Tokens,
-} from "@folio/tokens";
+} from "@folio/oracle";
 import { describe, expect, it } from "vitest";
 import { revalue } from "../src/lib/revalue";
 

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { cgkRef } from "@folio/tokens";
+import { cgkRef } from "@folio/oracle-basic";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTokenPriceHistoryStore } from "../src";
 

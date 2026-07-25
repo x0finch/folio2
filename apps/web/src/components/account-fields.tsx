@@ -1,6 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
+import type { TokenInfo } from "@folio/oracle";
 import { CGK_VENDOR, vendorIdOf } from "@folio/oracle";
-import type { TokenInfo } from "@folio/tokens";
 import {
   Input,
   Label,

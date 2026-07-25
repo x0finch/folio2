@@ -1,4 +1,4 @@
-import { cgkRef, type TokenGroup } from "@folio/tokens";
+import { cgkRef, type TokenGroup } from "@folio/oracle";
 import { describe, expect, it } from "vitest";
 import { type AggInput, buildCanonicalHoldings, type Holding } from "../src/lib/aggregate";
 
