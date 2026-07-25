@@ -6,7 +6,7 @@ import { cgkRef } from "../src/vendor";
 // Stubs prove the (reshaped) interfaces are implementable — `satisfies` is the compile-time proof.
 // `: Token{Source,Store}` annotations are the compile-time proof the interfaces are implementable.
 const source: TokenSource = {
-  vendor: "coingecko",
+  id: "coingecko",
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
   fetchPrices: async () => new Map(),
