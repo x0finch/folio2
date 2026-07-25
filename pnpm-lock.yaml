@@ -494,6 +494,9 @@ importers:
 
   packages/oracle2:
     dependencies:
+      '@folio/coingecko-client':
+        specifier: workspace:*
+        version: link:../clients/coingecko
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../oracle/ref

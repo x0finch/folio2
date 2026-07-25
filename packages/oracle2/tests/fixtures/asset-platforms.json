@@ -1,0 +1,10 @@
+[
+  { "id": "ethereum", "chain_identifier": 1, "name": "Ethereum" },
+  { "id": "arbitrum-one", "chain_identifier": 42161, "name": "Arbitrum One" },
+  { "id": "base", "chain_identifier": 8453, "name": "Base" },
+  { "id": "solana", "chain_identifier": null, "name": "Solana" },
+  { "id": "sui", "chain_identifier": null, "name": "Sui" },
+  { "id": "cosmos", "chain_identifier": null, "name": "Cosmos Hub" },
+  { "id": "tron", "chain_identifier": null, "name": "TRON" },
+  { "id": "no-id-platform", "chain_identifier": 999 }
+]

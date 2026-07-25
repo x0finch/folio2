@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@folio/coingecko-client": "workspace:*",
     "@folio/oracle-ref": "workspace:*"
   },
   "devDependencies": {

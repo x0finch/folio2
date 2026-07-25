@@ -1,0 +1,36 @@
+[
+  { "id": "bitcoin", "symbol": "btc", "name": "Bitcoin", "platforms": { "": "" } },
+  { "id": "ethereum", "symbol": "eth", "name": "Ethereum", "platforms": {} },
+  {
+    "id": "usd-coin",
+    "symbol": "usdc",
+    "name": "USDC",
+    "platforms": {
+      "ethereum": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "arbitrum-one": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+      "base": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "solana": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "tron": "TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8"
+    }
+  },
+  {
+    "id": "cosmos",
+    "symbol": "atom",
+    "name": "Cosmos Hub",
+    "platforms": { "cosmos": "uatom" }
+  },
+  {
+    "id": "suicoin",
+    "symbol": "sui",
+    "name": "Sui Token",
+    "platforms": { "sui": "0xSuiTokenAddress00000000000000000000000000AB" }
+  },
+  { "id": "no-platforms-key", "symbol": "npk", "name": "No Platforms" },
+  { "symbol": "no-id", "name": "Missing id", "platforms": { "ethereum": "0xbeef" } },
+  {
+    "id": "null-address",
+    "symbol": "na",
+    "name": "Null address",
+    "platforms": { "ethereum": null, "base": "   " }
+  }
+]

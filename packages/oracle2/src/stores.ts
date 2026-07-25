@@ -116,7 +116,7 @@ export interface TokenSource {
   // 兜底单查:`cgk_refs` 里没有的(今天刚上线的币)才走这条。链未收录 / 无此合约 → null。
   fetchByRef(ref: TokenRef): Promise<SourceToken | null>;
   // cron:整份 contract → coin 映射(两个端点 + 一次纯转换,见 coingecko/ref-map.ts)。
-  fetchRefMap(): Promise<{ rows: CgkRefRow[]; unmatchedPlatforms: string[] }>;
+  fetchRefMap(): Promise<{ rows: CgkRefRow[]; unmatchedPlatforms: string[]; skipped: number }>;
 }
 
 // 上游给出的一个币:它自己的命名 + 元信息 +(可能有的)价。

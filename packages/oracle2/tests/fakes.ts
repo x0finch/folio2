@@ -231,7 +231,7 @@ export interface FakeSource extends TokenSource {
   prices: Map<TokenRef, SourcePrice>;
   series: PricePoint[];
   byRef: Map<TokenRef, SourceToken>;
-  refMap: { rows: CgkRefRow[]; unmatchedPlatforms: string[] };
+  refMap: { rows: CgkRefRow[]; unmatchedPlatforms: string[]; skipped: number };
 }
 
 export function fakeSource(namer = "coingecko"): FakeSource {
@@ -243,7 +243,7 @@ export function fakeSource(namer = "coingecko"): FakeSource {
     prices: new Map(),
     series: [],
     byRef: new Map(),
-    refMap: { rows: [], unmatchedPlatforms: [] },
+    refMap: { rows: [], unmatchedPlatforms: [], skipped: 0 },
     async fetchMarkets(topN) {
       src.calls.push(`fetchMarkets:${topN}`);
       return src.markets.slice(0, topN);

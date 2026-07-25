@@ -20,7 +20,9 @@ export {
   writeFx,
   writePlatform,
 } from "./cache";
-export type { CgkRefs } from "./cgk-refs";
+export type { CgkRefs, CgkRefsDeps, RefreshSummary } from "./cgk-refs";
+export { NON_EVM_PLATFORMS } from "./coingecko/platform-slugs";
+export { type RefMapResult, toCgkRefRows } from "./coingecko/ref-map";
 export { pickBySymbol } from "./confidence";
 export {
   CGK_NAMER,

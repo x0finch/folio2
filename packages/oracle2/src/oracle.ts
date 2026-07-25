@@ -19,6 +19,8 @@ export interface OracleConfig {
   // symbol → CoinGecko coin id 的策展小表(majors + 已知撞名)。由上游适配器提供 —— 它是
   // vendor 知识,不该硬编码在 vendor 中立的这一层。
   overrides?: Readonly<Record<string, string>>;
+  // 对照失配这类静默故障的出口(见 cgk-refs.ts)。不传 = 不喊。
+  onWarn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
 // 一个用户的参考层。三个子服务:
@@ -67,7 +69,11 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
         return mint;
       },
       get cgkRefs() {
-        cgkRefs ??= createCgkRefs({ store: cfg.stores.cgkRefs(), source: cfg.source });
+        cgkRefs ??= createCgkRefs({
+          store: cfg.stores.cgkRefs(),
+          source: cfg.source,
+          onWarn: cfg.onWarn,
+        });
         return cgkRefs;
       },
     };
