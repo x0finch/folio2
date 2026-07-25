@@ -55,7 +55,7 @@ function fakeStore(): TokenStore {
 
 // source:fetchPrices 为长尾 identifier 供价(模拟不在 warm 的币);其余 stub。
 const stubSource = {
-  namer: "coingecko",
+  vendor: "coingecko",
   fetchMarkets: async () => [],
   fetchByContract: async () => null,
   fetchPrices: async (refs: TokenRef[]) => {

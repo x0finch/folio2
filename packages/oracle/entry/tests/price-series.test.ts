@@ -43,7 +43,7 @@ function inMemoryHistory(): TokenPriceHistoryStore {
 function fakeSource(points: TokenPricePoint[]): TokenSource & { calls: number } {
   const s = {
     calls: 0,
-    namer: "coingecko",
+    vendor: "coingecko",
     fetchMarkets: async () => [],
     fetchByContract: async () => null,
     fetchPrices: async () => new Map(),
@@ -58,7 +58,7 @@ function fakeSource(points: TokenPricePoint[]): TokenSource & { calls: number } 
 
 function throwingSource(): TokenSource {
   return {
-    namer: "coingecko",
+    vendor: "coingecko",
     fetchMarkets: async () => [],
     fetchByContract: async () => null,
     fetchPrices: async () => new Map(),

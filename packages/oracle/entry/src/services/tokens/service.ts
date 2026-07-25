@@ -1,5 +1,6 @@
 import {
   CGK_RECHECK_TTL_MS,
+  CGK_VENDOR,
   cgkRef,
   DEFAULT_TOP_N,
   INFO_TTL_MS,
@@ -30,9 +31,6 @@ export interface ResolveOpts {
 
 // 懒解析编排:tokenRef → 代币表;命中 cgk 行直接升格;孤儿/miss 且 lazy → 问 CGK,
 // 命中则升级合并(linkTokenRefToCgk),未收录则 seed 孤儿 + 记复查时刻(期间 source 数据照常展示)。
-// 厂商命名者:`coingecko/<id>` 形的 tokenRef 即规范 ref。
-const CGK_NAMER = "coingecko";
-
 // 命名者 → 喂 `fetchByContract` 的链引用:EVM 给数字 chainId(比 slug 更可靠地命中 CGK 平台),
 // 其余给 slug 本身。
 const EVM_NAMER_PREFIX = "eip155:";
@@ -53,7 +51,7 @@ export async function resolveAsset(
   const parsed = key ? parseTokenRef(key) : undefined;
   // `coingecko/<id>` 形的 tokenRef 本身就是规范 ref(厂商寻址,如 manual 用户选币)→ 直接命中,
   // 不查索引、不掉回 symbol。等同显式 ref。其余场馆命名(binance/USDC 等)不是规范 ref,照走索引/symbol。
-  if (parsed?.kind === "opaque" && parsed.namer === CGK_NAMER) {
+  if (parsed?.kind === "opaque" && parsed.namer === CGK_VENDOR) {
     return {
       ref: cgkRef(parsed.id),
       confidence: "high",

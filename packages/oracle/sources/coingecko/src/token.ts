@@ -56,7 +56,7 @@ export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource
   };
 
   return {
-    namer: "coingecko",
+    vendor: "coingecko",
     async fetchByContract(chain, contract) {
       const platform = await platformFor(chain);
       if (!platform) return null; // chain 未被 CGK 收录

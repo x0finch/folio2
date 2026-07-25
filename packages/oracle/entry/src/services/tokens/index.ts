@@ -105,13 +105,13 @@ export function createTokens({
   source,
 }: CreateTokensConfig): Tokens {
   const p = source ?? createCoinGeckoSource({ apiKey });
-  const deps = { source: p, store: createStore(p.namer), overrides: OVERRIDES };
+  const deps = { source: p, store: createStore(p.vendor), overrides: OVERRIDES };
   const history = createPriceHistoryStore ? createPriceHistoryStore() : NOOP_PRICE_HISTORY;
 
   // asset.identifier(用户显式选)→ 配上本源的命名者造 explicit ref。这是 `ref` 字段的**唯一**
   // 写入点,故它只存在于门面内部的 ResolvableAsset,不进公开的 AssetRef。
   const withExplicit = (asset: AssetRef): ResolvableAsset =>
-    asset.identifier ? { ...asset, ref: tokenRef.opaque(p.namer, asset.identifier) } : asset;
+    asset.identifier ? { ...asset, ref: tokenRef.opaque(p.vendor, asset.identifier) } : asset;
 
   const resolve = (asset: AssetRef, opts?: ResolveOpts) =>
     resolveAsset(withExplicit(asset), deps, opts);
@@ -175,7 +175,7 @@ export function createTokens({
     toMs: number,
   ): Promise<TokenPricePoint[]> {
     // 非本源命名的 ref(链上寻址等)拿不到历史价 —— 本源只认自己给的名字。
-    if (!vendorIdOf(ref, deps.source.namer) || fromMs > toMs) return [];
+    if (!vendorIdOf(ref, deps.source.vendor) || fromMs > toMs) return [];
     const fromB = dayBucketOf(fromMs);
     const toB = dayBucketOf(toMs);
     const todayB = dayBucketOf(Date.now());
