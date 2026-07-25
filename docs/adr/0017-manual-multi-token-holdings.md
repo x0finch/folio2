@@ -1,5 +1,7 @@
 # manual 账户多 token:`manual_holding` 表 + per-holding 活动账本
 
+Status: superseded by [ADR 0021](0021-per-user-tokens-token-id-as-sole-identity.md) —— `manual_token` 表并入 per-user 的 `tokens`,`manual_activity` 改挂 `tokens.id`,`manualProvider` 连同 `creds.tokens` 那个物化 JSON 字段一起删除(四个值全部落进真表后,provider 只是「app 写进 JSON 列 → 再读回来」的空转)。「一个 manual 账户持有多个 token」这个能力不变,`manual` 仍是 connector。
+
 Folio 的 manual 连接器原本**一个账户 = 一个手记 token**:持仓 `symbol/amount/unitPrice/identifier` 全塞在扁平的 `account.creds` 标量 map 里,`amount` 由**账户级** `manual_activity` 账本 `deriveAmount` 后物化进 `creds.amount`,`manualProvider.fetchBalances` 据此产**单条 spot**。为支持「一个 manual 账户持有多个 token」,决定**新增 `manual_holding` 表**(每 token 一行:`symbol/unitPrice/identifier`),把 `manual_activity` 从账户级改为**挂 `holding_id`**(每 token 各自 add/reduce/set 账本、各自 `deriveAmount`);app 把「各 holding 定义 + 各自推导 amount」序列化成一个 public JSON 字段 `creds.tokens`,供**保持纯/DB-free 的** `manualProvider` 读取并产 **N 条 spot**。估值仍 `mark-to-market`。
 
 ## Considered Options

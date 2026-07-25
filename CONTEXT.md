@@ -7,35 +7,32 @@ Folio 是自托管加密组合追踪器:把链上钱包、CEX、永续 DEX、手
 ### 代币身份
 
 **Token**:
-系统认识的单个代币 —— 一个 CoinGecko coin,或一条 provider 孤儿记录(CGK 未收录)。"canonical token" 专指这个(单个币),不指分组。
-_Avoid_: asset, coin(泛指时)
-
-**TokenGroup**:
-首屏聚合行的身份单位 —— 产品自有的展示家族,可跨多个 Token(如 USDT 家族含 tether + usdt0 + 桥接变体)。没有分组的 Token = 自身单例组。
-_Avoid_: CanonicalHolding, canonical token(组不是"单个规范币")
+**该 user 认识的**单个代币,`tokens.id` 是它在系统内部唯一的身份(ADR 0021)。孤儿币、手记自定义币都自然落在这个 user 的 Token 集里 —— 「有没有被 CoinGecko 认出来」不是它的一种状态,而是看它有没有一条 `coingecko` 命名的 tokenRef。
+_Avoid_: asset, coin(泛指时)、canonical token(不再需要跟"分组"区分)、TokenGroup(展示分组已作废,见 ADR 0021)
 
 **tokenRef**:
-全系统唯一的代币命名法(ADR 0020):`<namer>/<localName>`,恰好两段,第一个斜杠切分。表达「**谁**、管这个 token 叫**什么**」——
-`eip155:42161/erc20:0xaf88…`、`bitcoin/native`、`solana/token:EPjF…`、`coingecko/usd-coin`、`binance/USDC`。
-一个 token 可有多条 tokenRef(每个命名者一条),故是多对一。文法 + 归一由 `@folio/oracle-ref` 独占实现:`TokenRef` = 串(系统里流通的),`TokenRefParts` = 拆开的结构。
-参考层的「解析结果」也是这条串(厂商作命名者,`coingecko/usd-coin`)—— 旧的 `{ source, identifier }` + `refKey` 已溶解。
-字段名一律 `tokenRef`(`Balance.tokenRef` / `snapshot_balances.token_ref`);`AssetRef.providerRef` 是它待解析时的名字。
-_Avoid_: tokenKey / refKey(旧称,已退场)、caip19、impl key、tokenIdentifier
+代币的**外部命名法**(ADR 0020,文法经 ADR 0021 修订):`<namer>/<localName>`,恰好两段,第一个斜杠切分。表达「**谁**、管这个 token 叫**什么**」——
+`evm:42161/0xaf88…`、`bitcoin/native`、`solana/EPjFWdd5…`、`coingecko/usd-coin`、`binance/USDC`。
+localName 只有两种形状:保留字 `native`,或别的(地址 / 不透明 id)。
+一个 Token 可有多条 tokenRef(每个命名者一条),故是多对一 —— 多条链上的同一个币就是一个 Token + 多条 tokenRef。
+它**不是**内部身份(那是 `tokens.id`),只在两个边界出现:连接器报余额、oracle 问 CoinGecko;`apps/web` 见不到。
+文法 + 归一由 `@folio/oracle-ref` 独占实现:`TokenRef` = 串(系统里流通的),`TokenRefParts` = 拆开的结构。
+_Avoid_: tokenKey / refKey(旧称,已退场)、caip19、impl key、tokenIdentifier、把它当身份
 
 **namer**:
-tokenRef 的左半边 = **命名者**。对 `@folio/oracle-ref` 不透明:包不判断它是链、场馆还是数据源
-(右半边自己说明了自己)。链命名者同时就是 `platforms.id`(短形:`eip155:<id>` / `<slug>`)。
-_Avoid_: namespace, platformKey(platform 是 namer 的子集,不等同)
+tokenRef 的左半边 = **命名者**,可以是链(`evm:1` / `bitcoin`)、场馆(`binance`)或数据源(`coingecko`)。对 `@folio/oracle-ref` 不透明,包不判断它属于哪类。
+**跟 Platform 只是常常重合,不等同** —— 手记的 ref 是 `coingecko/<id>`,namer 是数据源而它的 Platform 是 `manual`。所以 Platform 由 provider 直接报,不从 namer 推(ADR 0021)。
+_Avoid_: namespace, platformKey(那是 Platform 的键,两个概念)
 
 ### 持仓与聚合
 
 **Balance**:
-provider 报出的单个持仓 —— 属于某账户的某次快照,扁平结构(symbol/amount/value/price/kind/tokenRef)。
+provider 报出的单个持仓 —— 属于某账户的某次快照,扁平结构(symbol/amount/value/price/kind/tokenRef/platform)。落库时 symbol 与 tokenRef 不存(名字归 Token 那一处、身份换成 `token_id`),platform 存(见其条目)。
 _Avoid_: holding(那是聚合后的)
 
 **Holding**:
-首屏的一个聚合行 —— 一个 TokenGroup 的总额 + 其各持有点明细。按 TokenGroup 聚合,Token 是组的成员。
-_Avoid_: CanonicalHolding, position
+首屏的一个聚合行 —— 一个 **Token** 的总额 + 其各持有点明细。归并只按 `tokens.id` 一条(ADR 0002 的四级键在 ADR 0021 塌成一级),绝不按裸 symbol。
+_Avoid_: CanonicalHolding, position, TokenGroup(展示分组已作废)
 
 **HoldingSource**:
 一个 Holding 里的单个持有点 = 某账户在某平台上的这笔持仓(链×账户 / 交易所 / 永续 / manual)。
@@ -58,8 +55,8 @@ _Avoid_: meta(那是共享逻辑读的 typed 层)、per-kind 新增(展示细节
 _Avoid_: `type`/`format` 词汇表(过度设计,已弃)、markdown、在段里放函数
 
 **Platform**:
-持仓所在的**链或场馆**(chain ∪ venue),HoldingSource 的定位维度。key 文法:`eip155:<chainId>` / `chain:<slug>`(链)、`exchange:<slug>`、`perp:<slug>`(场馆)、`manual`。带 name + logo,来自 CoinGecko(asset_platforms / exchanges / derivatives),manual 用内置图标。**粒度:每条 EVM 链各一个**(`eip155:1`/`eip155:8453`…)。归 `@folio/platforms` 包。
-_Avoid_: chain(仅指链时才用)、venue(仅指交易所/perp)、network、Connector(那是账户类型单元,粒度不同)
+持仓所在的**链或场馆**(chain ∪ venue),HoldingSource 的定位维度,**由 provider 随每笔 Balance 直接报**(ADR 0021)。key 一律短形:`evm:<chainId>` / `<slug>`(链)、`binance` / `okx` / `hyperliquid` / `manual`(场馆,即 connectorId)。链的 name + logo 来自 CoinGecko asset_platforms,场馆的来自 connector manifest 自带。**粒度:每条 EVM 链各一个**(`evm:1` / `evm:8453`…)。归 `@folio/oracle`(原独立的 `@folio/platforms` 包已并入,ADR 0012)。
+_Avoid_: chain(仅指链时才用)、venue(仅指交易所/perp)、network、Connector(那是账户类型单元,粒度不同)、`chain:`/`exchange:`/`perp:` 前缀(旧长形,已退场)
 
 **Connector**:
 可插拔的**账户类型单元** —— 一份 manifest 定义"某类账户怎么建(`account.creds`)+ 想要什么余额(`balance.schema`)+ 用哪些 providers 取数",取代旧的 `accountType`(evm / binance / okx / hyperliquid / bitcoin / solana / sui / cosmos / manual)。**粒度:整个 EVM 是一个** connector(其持仓再散落到多个 Platform)。归 `@folio/connectors` 包。
@@ -69,10 +66,10 @@ _Avoid_: Platform(那是持仓的链∪场馆定位维度,1 connector 可对多 
 
 **Dimension(分析维度)**:
 组合金额被分组归拢的轴 —— `token`(按代币)/ `platform`(按链∪场馆,即 [Platform])/ `type`(按 [kind] + 稳定币细分)/ `account`(按账户)。同一套维度供 Allocation 与 Composition 复用。
-_Avoid_: category(那易与 CGK 分类混)、group(那是用户自定义的账户分组 TokenGroup / accountGroups)
+_Avoid_: category(那易与 CGK 分类混)、group(那是用户自定义的账户分组 accountGroups)
 
 **Allocation(当下分布)**:
-**最新快照**下按某 Dimension 的金额占比拆分(Insights 环形 + 图例)。只回答「此刻各占多少」。**manual 例外**(ADR 0018):manual 账户不写快照,其「此刻」由 `creds.tokens` 现造的合成余额注入 overview,故仍进 Allocation。
+**最新快照**下按某 Dimension 的金额占比拆分(Insights 环形 + 图例)。只回答「此刻各占多少」。**manual 例外**(ADR 0018):manual 账户不写快照,其「此刻」由现造的合成余额注入 overview(ADR 0021 之后由 app 从 `tokens` + `manual_activity` 直接算,不再经 `creds.tokens` 那个物化字段),故仍进 Allocation。
 _Avoid_: Composition(那是随时间的)、breakdown(泛指)
 
 **Composition(随时间组成)**:
@@ -80,8 +77,8 @@ _Avoid_: Composition(那是随时间的)、breakdown(泛指)
 _Avoid_: trend(那专指总净值单线)、history(泛指)
 
 **Stablecoin(稳定币)**:
-经 CoinGecko 分类(`category=stablecoins`)判定的 [Token],落 `tokens.is_stablecoin`(ADR 0016)。驱动 `type` 维的 Stablecoin 桶与 hero 稳定币占比;判定 **kind 先行**(DeFi/Perp 头寸内的稳定币不入此桶)。CGK 未收录的孤儿 token 一律非稳定币。
-_Avoid_: stable(缩写,正式词用 Stablecoin)、按 symbol 硬判(已否,见 ADR 0016)
+驱动 `type` 维的 Stablecoin 桶与 hero 稳定币占比的 [Token] 判别;判定 **kind 先行**(DeFi/Perp 头寸内的稳定币不入此桶)。**目标**是经 CoinGecko 分类(`category=stablecoins`)判定并落库(ADR 0016);**当前实现是 `hero-stats.ts` 里一份临时固定 symbol 清单**(#102 未落地,`tokens` 上还没有那一列)。
+_Avoid_: stable(缩写,正式词用 Stablecoin)
 
 ### 计价与展示币种
 
