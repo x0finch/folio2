@@ -14,7 +14,7 @@ import { defiAssetRef } from "./tokens";
 // 每账户次级分区(不进聚合)。总额 = 各账户最新快照 totalUsd 之和。解析/汇率读时 cache-only。
 
 export interface OverviewDeps {
-  tokens: Tokens; // .enrich:tokenKey → group/ref/price(cache-only)
+  tokens: Tokens; // .enrich:tokenRef → group/ref/price(cache-only)
   platforms: Platforms; // .resolve:platform key → name+logo(含兜底)——仅链键(chain:/eip155:)
   // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platforms。
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
@@ -85,7 +85,7 @@ export async function buildOverview(
         eligible.push({
           account,
           b,
-          asset: { symbol: b.symbol, tokenKey: b.tokenKey ?? undefined },
+          asset: { symbol: b.symbol, providerRef: b.tokenRef ?? undefined },
           margin: false,
         });
       } else if (vk === "perp_equity" && isPerpEquity(b.metaJson)) {
@@ -98,7 +98,7 @@ export async function buildOverview(
 
   // 2) 富化(附回)→ 组装 AggInput → 聚合。
   // 三批 I/O 互相独立(聚合富化 / defi 展示富化 / 每账户现推净值)→ 并行,不再串行叠加
-  // 每批的 D1 往返延迟(code review #8)。defi 批只认 tokenKey 明确的行(defiAssetRef 门)。
+  // 每批的 D1 往返延迟(code review #8)。defi 批只认 tokenRef 明确的行(defiAssetRef 门)。
   const defiFlat = accounts.flatMap((a) =>
     balancesOf(a.id).flatMap((b) => {
       const ref = defiAssetRef(b);
@@ -117,7 +117,7 @@ export async function buildOverview(
     // 行 ≡ 冻结值,盯市行(manual/bitcoin)取实时源价。aggregate 本身不改,只喂现推后的 value。
     value: liveValue(b, e?.unitPrice, mode),
     kind: viewKind(b), // 归一到 5-kind(并存期兼容遗留)
-    tokenKey: b.tokenKey,
+    tokenRef: b.tokenRef,
     isMargin: margin,
     account: {
       id: account.id,

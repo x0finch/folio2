@@ -62,7 +62,7 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
       value: Number(d.eqUsd ?? 0),
       kind: "spot",
       // 场馆命名:OKX 管这个币叫 `ccy`。symbol 大写归一由本 provider 负责(见 @folio/oracle-ref)。
-      tokenKey: tokenRef.opaque(PROVIDER_ID, ccy.trim().toUpperCase()),
+      tokenRef: tokenRef.opaque(PROVIDER_ID, ccy.trim().toUpperCase()),
     };
     if (frozen > 0) {
       const pct = amount > 0 ? Math.round((frozen / amount) * 100) : 0;

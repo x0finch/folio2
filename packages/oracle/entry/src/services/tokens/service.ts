@@ -6,7 +6,7 @@ import {
   INFO_TTL_MS,
   PRICE_TTL_MS,
   type Resolution,
-  TOKEN_KEY_TTL_MS,
+  TOKEN_REF_TTL_MS,
   type TokenRef,
   type TokenSource,
   type TokenStore,
@@ -23,13 +23,13 @@ export interface ResolveDeps {
 }
 
 export interface ResolveOpts {
-  // true(默认,预热路径):tokenKey miss/待复查时 fetchByContract 取一次并落库(升级合并)。
+  // true(默认,预热路径):tokenRef miss/待复查时 fetchByContract 取一次并落库(升级合并)。
   // false(展示路径):cache-only,不取网络 → 页面零网络延迟。
   lazy?: boolean;
 }
 
-// 懒解析编排:tokenKey → 代币表;命中 cgk 行直接升格;孤儿/miss 且 lazy → 问 CGK,
-// 命中则升级合并(linkTokenKeyToCgk),未收录则 seed 孤儿 + 记复查时刻(期间 source 数据照常展示)。
+// 懒解析编排:tokenRef → 代币表;命中 cgk 行直接升格;孤儿/miss 且 lazy → 问 CGK,
+// 命中则升级合并(linkTokenRefToCgk),未收录则 seed 孤儿 + 记复查时刻(期间 source 数据照常展示)。
 // 厂商命名者:`coingecko/<id>` 形的 tokenRef 即规范 ref。
 const CGK_NAMER = "coingecko";
 
@@ -48,8 +48,8 @@ export async function resolveAsset(
   const lazy = opts?.lazy ?? true;
 
   let contractHit: TokenRef | null = null;
-  // tokenKey(持仓侧已构造)= 索引键 + 懒解析原料。
-  const key = asset.tokenKey;
+  // tokenRef(持仓侧已构造)= 索引键 + 懒解析原料。
+  const key = asset.providerRef;
   const parsed = key ? parseTokenRef(key) : undefined;
   // `coingecko/<id>` 形的 tokenRef 本身就是规范 ref(厂商寻址,如 manual 用户选币)→ 直接命中,
   // 不查索引、不掉回 symbol。等同显式 ref。其余场馆命名(binance/USDC 等)不是规范 ref,照走索引/symbol。
@@ -61,15 +61,15 @@ export async function resolveAsset(
     };
   }
   if (key) {
-    const rec = (await deps.store.getByTokenKey([key])).get(key);
+    const rec = (await deps.store.getByTokenRef([key])).get(key);
     if (rec?.ref) {
       contractHit = rec.ref;
     } else if (lazy && parsed?.kind === "contract" && (rec?.cgkCheckedUntil ?? 0) <= Date.now()) {
       // 反查用命名者(eip155:<id> 的数字 chainId 更可靠地命中 CGK 平台;非 EVM 链给 slug)。
       const res = await deps.source.fetchByContract(chainRefOf(parsed.namer), parsed.address);
       if (res) {
-        await deps.store.linkTokenKeyToCgk(key, res.info, res.price, {
-          indexTtlMs: TOKEN_KEY_TTL_MS,
+        await deps.store.linkTokenRefToCgk(key, res.info, res.price, {
+          indexTtlMs: TOKEN_REF_TTL_MS,
           infoTtlMs: INFO_TTL_MS,
           priceTtlMs: PRICE_TTL_MS,
         });
@@ -77,10 +77,10 @@ export async function resolveAsset(
       } else {
         // CGK 未收录:确保孤儿在(展示仍有 symbol 可用)+ 记复查时刻
         if (!rec) {
-          await deps.store.ensureTokenKey(
+          await deps.store.ensureTokenRef(
             key,
             { symbol: normalizeSymbol(asset.symbol) },
-            TOKEN_KEY_TTL_MS,
+            TOKEN_REF_TTL_MS,
           );
         }
         await deps.store.markCgkChecked(key, Date.now() + CGK_RECHECK_TTL_MS);

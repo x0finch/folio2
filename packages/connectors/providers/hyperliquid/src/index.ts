@@ -77,7 +77,7 @@ export function parseClearinghouseState(state: ClearinghouseState): Row[] {
       amount: num(ms.accountValue),
       value: num(ms.accountValue),
       kind: "perp_equity",
-      tokenKey: venueTokenRef(MARGIN_ASSET),
+      tokenRef: venueTokenRef(MARGIN_ASSET),
       meta: {
         withdrawable: num(state.withdrawable),
         totalMarginUsed: num(ms.totalMarginUsed),
@@ -96,7 +96,7 @@ export function parseClearinghouseState(state: ClearinghouseState): Row[] {
       value: 0, // 见上:仓位不计入总额,价值由权益行承载
       kind: "perp_position",
       // 标的的场馆命名(不是「持有该币」,只是身份)—— 值仍由权益行承载,此处不参与计价。
-      tokenKey: venueTokenRef(p.coin),
+      tokenRef: venueTokenRef(p.coin),
       meta: {
         side: szi >= 0 ? "long" : "short",
         entryPx: num(p.entryPx),

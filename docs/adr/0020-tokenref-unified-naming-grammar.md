@@ -26,4 +26,7 @@ Status: accepted。修订 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-m
 - **测试**:迁移前只有 53 行 golden 撑着全系统的代币身份。新包按原则 #2 补:三类形状 build/parse 往返、EVM 地址小写且幂等、**base58 / bech32 地址原样保留**、不透明 id 原样透传、非两段串与旧串判 `unknown`、`unknown` 不抛。
 - **CEX 产 ref 已并入本轮**(原计划另立票):`binance/USDC` / `okx/BTC` / `hyperliquid/ETH` —— ADR 0002 最底级 `account:symbol` 兜底升格成正规 ref。**行为变更**:同一交易所跨账户的同名币从此合并成一行(跨交易所仍不合,要合须先各自解析到同一 `tokens.id`)。已知遗留风险:交易所 symbol 会被回收(某币下架后同名被另一项目占用),届时 ref 指向的东西会悄悄变,链地址与 CGK id 无此问题 —— 暂不处理。
 - **另立票**:`token_index` + `token_vendor_ids` 合成一张 `token_refs`(与 #176 的「vendor 单向桥」正面碰撞,但只碰存储层,本包不受影响)。
-- **CONTEXT.md 词表**:加 `tokenRef` / `namer`,删 `tokenKey` / `refKey`。
+- **词汇也跟着统一**(概念统一之后补的一轮):字段名 `tokenKey` → `tokenRef`(含 `snapshot_balances.token_key` → `token_ref` 与 `token_index.kind` 字面量,迁移 0007);store 方法 `getByTokenKey`/`ensureTokenKey`/`linkTokenKeyToCgk` 同步更名;`TokenSource.source` → `namer`(它一直就是命名者)。
+- **`AssetRef` 的三个身份字段靠名字分辨**:溶解成串后 `tokenKey` 与 `ref` 类型相同、语义相邻 → 前者更名 **`providerRef`**(provider 给的命名,待解析),`ref`(已解析)、`identifier`(用户选的上游 id,由 tokens 层配当前命名者造 ref)各守其位。
+- **死代码清理**:`CgkCoinId` 品牌类型在溶解后无人使用(knip 抓不到 —— 它从 entry 文件导出,正是 `includeEntryExports: false` 的盲区),删除。
+- **CONTEXT.md 词表**:加 `tokenRef` / `namer`,删 `tokenKey` / `refKey`。历史 ADR(0002/0010/0013/0014)里的 `tokenKey` 是当时的决策记录,**不改**。

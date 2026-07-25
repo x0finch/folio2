@@ -7,7 +7,7 @@ import { z } from "zod";
 // JSON 字段 `creds.tokens`(明文落库、导出原样、可重建);provider 只读它并 map 成 N 条 kind:"spot":
 // value = amount × unitPrice、price = unitPrice(P7.4.1)。`amount` 由各 token 的 manual 活动账本
 // (manual_activity 挂 token_id)推导后【物化】进 creds.tokens(app 层);provider 保持纯 / DB-free。
-// 有 identifier → 产 coingecko: tokenKey 供 revalue 按显式 ref 解析;无则按 symbol 归一(同 CEX)。
+// 有 identifier → 产 coingecko: tokenRef 供 revalue 按显式 ref 解析;无则按 symbol 归一(同 CEX)。
 // manual 统一走市价重估(ADR 0010 删 fixed)。零依赖、不碰 SECRETS_KEY/cloudflare:workers(原则 #5)。
 
 // creds.tokens 的一项:token 定义 + 物化出的 amount(= 对应 token 活动账本的 deriveAmount)。
@@ -56,7 +56,7 @@ export const manualProvider: BalanceProvider<Spot, typeof manualAccountCreds> = 
         // 用户选定的 CGK id = 厂商寻址身份 → tokenRef(coingecko/<id>);未选币则无标识,按 symbol 归一。
         ...(t.identifier
           ? // CGK coin id 规范为小写 kebab;归一在生产者这一侧做(oracle-ref 对不透明 id 原样透传)。
-            { tokenKey: tokenRef.opaque("coingecko", t.identifier.toLowerCase()) }
+            { tokenRef: tokenRef.opaque("coingecko", t.identifier.toLowerCase()) }
           : {}),
       })),
     };

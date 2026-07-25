@@ -30,7 +30,7 @@ export async function revalue(
       let sourcePrice: number | undefined;
       if (needSource) {
         const res = await tokens.resolve(
-          { symbol: b.symbol, tokenKey: b.tokenKey },
+          { symbol: b.symbol, providerRef: b.tokenRef },
           { lazy: true },
         );
         if (res.ref) sourcePrice = (await tokens.priceOf(res.ref))?.unitPrice;

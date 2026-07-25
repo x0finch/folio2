@@ -1,7 +1,7 @@
 [
   {
     "symbol": "USDC",
-    "tokenKey": "hyperliquid/USDC",
+    "tokenRef": "hyperliquid/USDC",
     "amount": 13109.482328,
     "value": 13109.482328,
     "kind": "perp_equity",
@@ -13,7 +13,7 @@
   },
   {
     "symbol": "ETH",
-    "tokenKey": "hyperliquid/ETH",
+    "tokenRef": "hyperliquid/ETH",
     "amount": 0.0335,
     "value": 0,
     "kind": "perp_position",
@@ -30,7 +30,7 @@
   },
   {
     "symbol": "BTC",
-    "tokenKey": "hyperliquid/BTC",
+    "tokenRef": "hyperliquid/BTC",
     "amount": -0.01,
     "value": 0,
     "kind": "perp_position",

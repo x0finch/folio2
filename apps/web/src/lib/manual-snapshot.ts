@@ -8,7 +8,7 @@ import type { CredsToken } from "./manual-activity";
 //
 // `prices` 与 `tokens` 按序对齐:第 i 项为该 token 的**现价**(USD/单位,cache-only enrich 取)。
 // 有现价 → usdValue = amount × 现价(实时盯市,与今天一致);取不到(undefined)→ 回退 amount × unitPrice。
-// `selfPrice=null` 保持盯市语义(与 manual 现行为一致);identifier → coingecko: tokenKey(与 manualProvider 同源)。
+// `selfPrice=null` 保持盯市语义(与 manual 现行为一致);identifier → coingecko: tokenRef(与 manualProvider 同源)。
 // takenAt 仅作占位(UI 对 manual 显「实时」而非同步时间,见 ADR 0018 T2 实施细化);id/snapshotId 为合成占位。
 export function buildManualSnapshot(
   accountId: string,
@@ -27,7 +27,7 @@ export function buildManualSnapshot(
       kind: "spot" as const,
       selfPrice: null,
       // CGK coin id 规范为小写 kebab;归一在生产者这一侧做(oracle-ref 对不透明 id 原样透传)。
-      tokenKey: t.identifier ? tokenRef.opaque("coingecko", t.identifier.toLowerCase()) : null,
+      tokenRef: t.identifier ? tokenRef.opaque("coingecko", t.identifier.toLowerCase()) : null,
       metaJson: null,
     };
   });

@@ -47,7 +47,7 @@ interface BtcReceive {
 // 纯包:blockbook-client / bitcoin-derive 均无 cloudflare:workers / env,不碰 SECRETS_KEY(原则 #5)。
 
 // BTC 身份键:bitcoin/native(仅作身份 + 平台归属 → "Bitcoin")。
-export const BTC_TOKEN_KEY = tokenRef.native("bitcoin");
+export const BTC_TOKEN_REF = tokenRef.native("bitcoin");
 
 const toSats = (s: string | undefined): number => {
   const n = Number(s ?? "0");
@@ -80,7 +80,7 @@ function toBtcBalances(confirmedSats: number, pendingSats: number): Spot[] {
       amount: confirmedSats / SATS_PER_BTC,
       value: 0, // 交给 revalue 盯市(amount × BTC 市价)
       kind: "spot",
-      tokenKey: BTC_TOKEN_KEY,
+      tokenRef: BTC_TOKEN_REF,
     },
   ];
 }

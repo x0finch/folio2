@@ -6,13 +6,13 @@ import { userDisplayBalances } from "../src/lib/user-balances";
 const snap = (accountId: string, symbols: string[]): SnapshotWithBalances =>
   ({
     snapshot: { accountId, totalUsd: 0, takenAt: 1000 },
-    balances: symbols.map((symbol) => ({ symbol, kind: "spot", tokenKey: null })),
+    balances: symbols.map((symbol) => ({ symbol, kind: "spot", tokenRef: null })),
   }) as unknown as SnapshotWithBalances;
 
-const manual = (symbol: string, tokenKey: string | null): BalanceLike => ({
+const manual = (symbol: string, tokenRef: string | null): BalanceLike => ({
   symbol,
   kind: "spot",
-  tokenKey,
+  tokenRef,
 });
 
 // 三门同源收口:enrich/warm/refresh 必须喂同一集合。这些用例锁住「manual 合成余额一定在集合里」——
@@ -34,6 +34,6 @@ describe("userDisplayBalances", () => {
   it("纯 manual 用户(无快照)→ 集合仍含 manual(refresh 门够得到 → 不会空转刷新)", () => {
     const out = userDisplayBalances([], [manual("ETH", "coingecko:ethereum")]);
     expect(out.map((b) => b.symbol)).toEqual(["ETH"]);
-    expect(out[0].tokenKey).toBe("coingecko:ethereum");
+    expect(out[0].tokenRef).toBe("coingecko:ethereum");
   });
 });

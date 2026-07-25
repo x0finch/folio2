@@ -9,7 +9,7 @@ import type { TokenInfo, TokenPrice, TokenPricePoint, TokenRef } from "./types";
 // 目录/发现面:top-N 预热 + 关键词搜索(都需完整币目录)。
 export interface TokenMetaSource {
   // 本 source 产出的 tokenRef 的**命名者**(如 "coingecko")。store 按它分桶 —— 这是该值的唯一真相。
-  readonly source: string;
+  readonly namer: string;
   // coins/markets top-N 预热:一行含价 + 涨跌 + rank + name + logo;info 自带 symbol。
   fetchMarkets(opts: { topN: number }): Promise<{ info: TokenInfo; price: TokenPrice }[]>;
   // 按关键词搜币(用户选币消歧,P7.4.3)。命中即 TokenInfo(ref + name/symbol/logo)。
@@ -19,7 +19,7 @@ export interface TokenMetaSource {
 // 点查面:按 (chain, contract) 懒解析、或按已知 ref 刷价。只做点查,不需币目录。
 export interface PriceSource {
   // 本 source 产出的 tokenRef 的**命名者**。
-  readonly source: string;
+  readonly namer: string;
   // 按 (chain, contract) 懒解析,一次拿 ref+info+price;chain 未收录 / 无此合约 → null。
   fetchByContract(
     chain: string,

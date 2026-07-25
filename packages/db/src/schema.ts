@@ -96,8 +96,8 @@ export const snapshotBalances = sqliteTable(
     // provider 自带单价(oracle 多源 Phase 3):估值「原料」,冻结。usd_value 是成品(revalue 按当时 mode 算);
     // 当前视图从「amount + self_price + 实时源价 + 当前 mode」现推 → 切源/切开关可逆、自带价不丢。
     selfPrice: real("self_price"),
-    // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的 tokenKey。
-    tokenKey: text("token_key"),
+    // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的 tokenRef。
+    tokenRef: text("token_ref"),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空
     // balance 级展示 note(note 重设计):JSON.stringify(单个 Note),可空。
     // provider 挂在该 balance 上的 note 落这里;读时 safeParse 回 Note(见 getLatestSnapshotByUser)。
@@ -108,7 +108,7 @@ export const snapshotBalances = sqliteTable(
 
 // —— 代币参考层(canonical-token-aggregation P1)——
 // 全局参考数据,**无 userId**(原则 #6 受控例外,同 listUserIdsWithAccounts)。
-// 代币表 = 系统认识的每个代币一行(CGK 收录币或 provider 孤儿);索引表 = 纯指针(symbol 候选 / tokenKey)。
+// 代币表 = 系统认识的每个代币一行(CGK 收录币或 provider 孤儿);索引表 = 纯指针(symbol 候选 / tokenRef)。
 // 经 @folio/db 的 createTokenStore(env,{source}) 访问;key 归一由 @folio/tokens 调用方保证。
 
 // 展示分组(P2,ADR-0001):用户心智里的"一个币"的家族,可跨多个 Token(CGK 故意拆开的桥接变体)。
@@ -123,7 +123,7 @@ export const tokenGroups = sqliteTable("token_groups", {
 // 代币表:info facet(name/logo,长 TTL)+ price facet(短 TTL;过期=stale 不删,SWR)合一行。
 // 归并身份 = tokens.id(UUID,vendor 中立,#73)。各家 vendor 的 coin id 存 token_vendor_ids 子表。
 // cgk 行:有一条 token_vendor_ids(vendor="coingecko");孤儿行(CGK 未收录、provider 采集)= 无 vendor 行,
-// 其 tokenKey 关联存 token_index(kind="tokenKey")。
+// 其 tokenRef 关联存 token_index(kind="tokenRef")。
 export const tokens = sqliteTable("tokens", {
   id: text("id").primaryKey(), // UUID
   symbol: text("symbol").notNull(), // 归一(大写)
@@ -160,12 +160,12 @@ export const tokenVendorIds = sqliteTable(
 
 // 索引表:多种方式找到代币,纯指针不存代币数据。
 // kind="symbol":一 symbol 多候选(消歧输入),随 warm 换血(短 TTL);
-// kind="tokenKey":代币键(eip155:<id>/erc20:<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
-// cgk_checked_until(仅 tokenKey):问过 CGK"未收录"的复查时刻(替代旧否定缓存三态)。
+// kind="tokenRef":代币键(eip155:<id>/erc20:<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
+// cgk_checked_until(仅 tokenRef):问过 CGK"未收录"的复查时刻(替代旧否定缓存三态)。
 export const tokenIndex = sqliteTable(
   "token_index",
   {
-    kind: text("kind").$type<"symbol" | "tokenKey">().notNull(),
+    kind: text("kind").$type<"symbol" | "tokenRef">().notNull(),
     key: text("key").notNull(),
     tokenId: text("token_id")
       .notNull()
@@ -205,13 +205,14 @@ export const fxRates = sqliteTable("fx_rates", {
 
 // 历史日价缓存(全局参考,无 userId;#148 / ADR 0019 网格估值骨架)。过去某 UTC 日的历史价不可变 →
 // 永久缓存,故**无 TTL 列**(今日桶可变,调用方不落此表)。PK (source, identifier, day_bucket);
-// identifier = TokenRef.identifier(上游 id,通用词,不写 cgk);day_bucket = floor(atMs / 86_400_000)
+// (source, identifier) = tokenRef 拆开的两段(命名者 + 该家的上游 id,见 vendorPartsOf);
+// day_bucket = floor(atMs / 86_400_000)
 // (UTC 日索引)。unit_price = 该日代表价(USD)。
 export const tokenPriceHistory = sqliteTable(
   "token_price_history",
   {
-    source: text("source").notNull(), // TokenRef.source(如 "coingecko")
-    identifier: text("identifier").notNull(), // TokenRef.identifier(上游 id)
+    source: text("source").notNull(), // tokenRef 的命名者(如 "coingecko")
+    identifier: text("identifier").notNull(), // 该命名者给的上游 id
     dayBucket: integer("day_bucket").notNull(), // UTC 日索引
     unitPrice: real("unit_price").notNull(),
   },

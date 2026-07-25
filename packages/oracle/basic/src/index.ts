@@ -15,7 +15,7 @@ export {
   RESOLUTION_DOMINANCE,
   RESOLUTION_TOP_RANK,
   TOKEN_GROUPS,
-  TOKEN_KEY_TTL_MS,
+  TOKEN_REF_TTL_MS,
   TOP_TOKENS_LIMIT,
   WARM_TTL_MS,
 } from "./constants";
@@ -47,7 +47,6 @@ export type { TokenPriceHistoryStore, TokenStore } from "./store";
 export type { PriceSource, TokenMetaSource, TokenSource } from "./token";
 export type {
   AssetRef,
-  CgkCoinId,
   Confidence,
   ProviderTokenSeed,
   Resolution,

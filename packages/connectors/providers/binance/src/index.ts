@@ -68,7 +68,7 @@ export function parseAccountBalances(
       value: usdValue,
       kind: "spot",
       // 场馆命名:币安管这个币叫 `asset`。symbol 大写归一由本 provider 负责(见 @folio/oracle-ref)。
-      tokenKey: tokenRef.opaque(PROVIDER_ID, asset.trim().toUpperCase()),
+      tokenRef: tokenRef.opaque(PROVIDER_ID, asset.trim().toUpperCase()),
     };
     if (locked > 0) {
       const pct = amount > 0 ? Math.round((locked / amount) * 100) : 0;

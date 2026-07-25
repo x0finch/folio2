@@ -299,7 +299,7 @@ export interface SnapshotBalanceInput {
   usdValue: number;
   kind: BalanceKind;
   selfPrice?: number; // provider 自带单价(估值原料,Phase 3);落 snapshot_balances.self_price
-  tokenKey?: string;
+  tokenRef?: string;
   meta?: Record<string, unknown>;
   note?: Note; // balance 级展示 note(note 重设计,单个 Note);落 snapshot_balances.note(JSON)
 }
@@ -368,7 +368,7 @@ export async function writeSnapshot(
     usdValue: b.usdValue,
     kind: b.kind,
     selfPrice: b.selfPrice ?? null,
-    tokenKey: b.tokenKey ?? null,
+    tokenRef: b.tokenRef ?? null,
     metaJson: b.meta ? JSON.stringify(b.meta) : null,
     // balance 级 note(单个 Note)→ JSON;无则 null。
     note: b.note ? JSON.stringify(b.note) : null,
@@ -432,7 +432,7 @@ export interface SnapshotBalanceHistoryRow {
   amount: number;
   usdValue: number;
   kind: BalanceKind;
-  tokenKey: string | null;
+  tokenRef: string | null;
   metaJson: string | null;
 }
 export function listSnapshotBalancesByUser(
@@ -448,7 +448,7 @@ export function listSnapshotBalancesByUser(
       amount: snapshotBalances.amount,
       usdValue: snapshotBalances.usdValue,
       kind: snapshotBalances.kind,
-      tokenKey: snapshotBalances.tokenKey,
+      tokenRef: snapshotBalances.tokenRef,
       metaJson: snapshotBalances.metaJson,
     })
     .from(snapshotBalances)
