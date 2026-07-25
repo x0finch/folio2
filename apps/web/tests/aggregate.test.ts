@@ -1,8 +1,8 @@
-import type { CgkCoinId, TokenGroup, TokenRef } from "@folio/tokens";
+import { cgkRef, type TokenGroup } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
 import { type AggInput, buildCanonicalHoldings, type Holding } from "../src/lib/aggregate";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+const cg = cgkRef;
 const usdt: TokenGroup = { id: "usdt", displaySymbol: "USDT", name: "Tether USD" };
 const usdc: TokenGroup = { id: "usdc", displaySymbol: "USDC", name: "USD Coin" };
 const zerion = { id: "z1", label: "Wallet", connectorId: "evm" };
@@ -137,7 +137,7 @@ describe("buildCanonicalHoldings", () => {
     ]);
     expect(hs).toHaveLength(3);
     expect(byKey(hs, "group:usdt")?.totalValue).toBe(1000);
-    expect(byKey(hs, "token:coingecko:usdt-avalanche")?.totalValue).toBe(100);
+    expect(byKey(hs, `token:${cg("usdt-avalanche")}`)?.totalValue).toBe(100);
     expect(byKey(hs, "as:k1:USDT")?.totalValue).toBe(50);
   });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TokenPriceHistoryStore, TokenStore } from "../src/store";
 import type { TokenSource } from "../src/token";
-import type { CgkCoinId, TokenRef } from "../src/types";
+import { cgkRef } from "../src/vendor";
 
 // Stubs prove the (reshaped) interfaces are implementable — `satisfies` is the compile-time proof.
 // `: Token{Source,Store}` annotations are the compile-time proof the interfaces are implementable.
@@ -41,7 +41,7 @@ describe("interface shapes", () => {
     expect((await store.getByTokenKey(["eip155:1/erc20:0x0"])).size).toBe(0);
   });
   it("TokenPriceHistoryStore is implementable", async () => {
-    const ref: TokenRef = { source: "coingecko", identifier: "bitcoin" as CgkCoinId };
+    const ref = cgkRef("bitcoin");
     expect((await priceHistory.getDailyPrices(ref, [1])).size).toBe(0);
   });
 });

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatTokenRef, normalizeAddress, parseTokenRef, type TokenRef, tokenRef } from "../src";
+import {
+  formatTokenRef,
+  normalizeAddress,
+  parseTokenRef,
+  type TokenRefParts,
+  tokenRef,
+} from "../src";
 
 // Solana / Bitcoin 的真实地址 —— base58 与 bech32 都大小写敏感,小写下去就不存在了。
 const SOL_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -127,12 +133,12 @@ describe("round-trip", () => {
     ]) {
       const parsed = parseTokenRef(s);
       expect(parsed.kind).not.toBe("unknown");
-      expect(formatTokenRef(parsed as TokenRef)).toBe(s);
+      expect(formatTokenRef(parsed as TokenRefParts)).toBe(s);
     }
   });
 
   it("parse ∘ format is identity on canonical refs", () => {
-    const refs: TokenRef[] = [
+    const refs: TokenRefParts[] = [
       { kind: "contract", namer: "eip155:1", assetNs: "erc20", address: "0xabc" },
       { kind: "contract", namer: "solana", assetNs: "token", address: SOL_USDC },
       { kind: "native", namer: "bitcoin" },
@@ -143,7 +149,7 @@ describe("round-trip", () => {
 
   it("normalization is idempotent", () => {
     const once = parseTokenRef("EIP155:1/ERC20:0xAbC");
-    const twice = parseTokenRef(formatTokenRef(once as TokenRef));
+    const twice = parseTokenRef(formatTokenRef(once as TokenRefParts));
     expect(twice).toEqual(once);
   });
 });

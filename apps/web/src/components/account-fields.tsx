@@ -1,4 +1,5 @@
 import type { ConnectorId } from "@folio/connectors";
+import { CGK_VENDOR, vendorIdOf } from "@folio/oracle";
 import type { TokenInfo } from "@folio/tokens";
 import {
   Input,
@@ -67,11 +68,14 @@ function ManualFields({
       patch({ symbol: "", identifier: "" });
       return;
     }
-    patch({ symbol: token.symbol.toUpperCase(), identifier: token.ref.identifier });
+    // 选币结果恒是 CGK 命名的 ref;拿不到上游 id 就只填 symbol,不去问价。
+    const identifier = vendorIdOf(token.ref, CGK_VENDOR);
+    patch({ symbol: token.symbol.toUpperCase(), identifier: identifier ?? "" });
+    if (!identifier) return;
     const reqId = ++priceReqRef.current;
     setPriceBusy(true);
     try {
-      const p = await getTokenPrice({ data: { identifier: token.ref.identifier } });
+      const p = await getTokenPrice({ data: { identifier } });
       if (priceReqRef.current === reqId && p?.unitPrice != null) {
         patch({ unitPrice: String(p.unitPrice) });
       }

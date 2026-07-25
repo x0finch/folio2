@@ -1,11 +1,11 @@
 import { env } from "cloudflare:test";
-import type { CgkCoinId, TokenInfo, TokenPrice, TokenRef } from "@folio/tokens";
+import { cgkRef, type TokenInfo, type TokenPrice, type TokenRef } from "@folio/tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTokenStore } from "../src"; // 全局代币缓存:公开独立导出(非 createDb 门面)
 import { getDb } from "../src/client";
 import { tokenGroups, tokenIndex, tokenMeta, tokens, tokenVendorIds } from "../src/schema";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+const cg = cgkRef;
 const info = (ref: TokenRef, symbol: string, logo?: string): TokenInfo => ({
   ref,
   symbol,
@@ -95,10 +95,10 @@ describe("warm + candidates + listTopTokens", () => {
       TTL,
     );
     const top = await store.listTopTokens(2);
-    expect(top.map((t) => t.ref.identifier)).toEqual(["bitcoin", "ethereum"]);
+    expect(top.map((t) => t.ref)).toEqual([cg("bitcoin"), cg("ethereum")]);
     expect(top[0]).toMatchObject({ symbol: "btc", name: "BTC", logo: "Lo-btc" });
     const all = await store.listTopTokens(10);
-    expect(all.map((t) => t.ref.identifier)).toEqual(["bitcoin", "ethereum", "some-fork"]);
+    expect(all.map((t) => t.ref)).toEqual([cg("bitcoin"), cg("ethereum"), cg("some-fork")]);
   });
 });
 
@@ -235,17 +235,17 @@ describe("getByRefs + putPrices(SWR:过期=stale 不删)", () => {
       TTL,
       TTL * 10, // info 更长
     );
-    let rec = (await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin");
+    let rec = (await store.getByRefs([cg("bitcoin")])).get(cg("bitcoin"));
     expect(rec?.price).toMatchObject({ unitPrice: 65000, stale: false });
 
     clock = 1000 + TTL + 1; // 价过期、info 未过期
-    rec = (await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin");
+    rec = (await store.getByRefs([cg("bitcoin")])).get(cg("bitcoin"));
     expect(rec).toBeDefined(); // 行仍可见(info 在)
     expect(rec?.price).toMatchObject({ unitPrice: 65000, stale: true }); // 旧价带 stale
 
     // putPrices 刷新后回到 fresh
     await store.putPrices([price(cg("bitcoin"), 66000, 1)], TTL);
-    rec = (await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin");
+    rec = (await store.getByRefs([cg("bitcoin")])).get(cg("bitcoin"));
     expect(rec?.price).toMatchObject({ unitPrice: 66000, stale: false });
   });
 
@@ -258,14 +258,12 @@ describe("getByRefs + putPrices(SWR:过期=stale 不删)", () => {
       TTL,
       TTL * 10,
     );
-    expect((await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin")?.marketCapRank).toBe(
-      1,
-    );
+    expect((await store.getByRefs([cg("bitcoin")])).get(cg("bitcoin"))?.marketCapRank).toBe(1);
 
     // 过期后走 SWR 刷价:simple/price 不含排名(rank 省略),不应把排名清成 null
     clock = 1000 + TTL + 1;
     await store.putPrices([price(cg("bitcoin"), 66000)], TTL);
-    const rec = (await store.getByRefs([cg("bitcoin")])).get("coingecko:bitcoin");
+    const rec = (await store.getByRefs([cg("bitcoin")])).get(cg("bitcoin"));
     expect(rec?.price).toMatchObject({ unitPrice: 66000, stale: false });
     expect(rec?.marketCapRank).toBe(1); // 排名保留,未被刷价抹掉
   });
@@ -333,9 +331,9 @@ describe("source bucketing (no userId — partitioned by source)", () => {
       TTL,
       TTL,
     );
-    // 模拟未来另一数据源(类型上目前仅 coingecko,测试里 cast)
+    // 模拟未来另一数据源(命名者换个字符串即可 —— 溶解成串后无需 cast)
     const other = createTokenStore(env, {
-      source: "cmc" as TokenRef["source"],
+      source: "cmc",
       now: () => 1000,
     });
     expect(await other.getCandidates("eth")).toEqual([]);
@@ -359,9 +357,9 @@ describe("token_groups (展示分组挂组,P2/ADR-0001)", () => {
       TTL,
     );
     const recs = await store.getByRefs([cg("tether"), cg("usdt0"), cg("ethereum")]);
-    expect(recs.get("coingecko:tether")?.group).toEqual(USDT_GROUP);
-    expect(recs.get("coingecko:usdt0")?.group).toEqual(USDT_GROUP); // 跨 Token 同一组
-    expect(recs.get("coingecko:ethereum")?.group).toBeUndefined();
+    expect(recs.get(cg("tether"))?.group).toEqual(USDT_GROUP);
+    expect(recs.get(cg("usdt0"))?.group).toEqual(USDT_GROUP); // 跨 Token 同一组
+    expect(recs.get(cg("ethereum"))?.group).toBeUndefined();
     // 组行按 groupKey 去重建了一行
     const groups = await getDb(env).select().from(tokenGroups);
     expect(groups).toEqual([{ id: "usdt", displaySymbol: "USDT", name: "Tether USD", logo: null }]);
@@ -382,8 +380,6 @@ describe("token_groups (展示分组挂组,P2/ADR-0001)", () => {
       TTL,
       TTL,
     );
-    expect(
-      (await store.getByRefs([cg("scam-usdt")])).get("coingecko:scam-usdt")?.group,
-    ).toBeUndefined();
+    expect((await store.getByRefs([cg("scam-usdt")])).get(cg("scam-usdt"))?.group).toBeUndefined();
   });
 });

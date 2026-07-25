@@ -8,8 +8,8 @@ import type { TokenInfo, TokenPrice, TokenPricePoint, TokenRef } from "./types";
 
 // 目录/发现面:top-N 预热 + 关键词搜索(都需完整币目录)。
 export interface TokenMetaSource {
-  // 本 source 产出的 `TokenRef` 的 source 标签(如 "coingecko")。store 按它分桶 —— source 是这个值的唯一真相。
-  readonly source: TokenRef["source"];
+  // 本 source 产出的 tokenRef 的**命名者**(如 "coingecko")。store 按它分桶 —— 这是该值的唯一真相。
+  readonly source: string;
   // coins/markets top-N 预热:一行含价 + 涨跌 + rank + name + logo;info 自带 symbol。
   fetchMarkets(opts: { topN: number }): Promise<{ info: TokenInfo; price: TokenPrice }[]>;
   // 按关键词搜币(用户选币消歧,P7.4.3)。命中即 TokenInfo(ref + name/symbol/logo)。
@@ -18,14 +18,14 @@ export interface TokenMetaSource {
 
 // 点查面:按 (chain, contract) 懒解析、或按已知 ref 刷价。只做点查,不需币目录。
 export interface PriceSource {
-  // 本 source 产出的 `TokenRef` 的 source 标签。
-  readonly source: TokenRef["source"];
+  // 本 source 产出的 tokenRef 的**命名者**。
+  readonly source: string;
   // 按 (chain, contract) 懒解析,一次拿 ref+info+price;chain 未收录 / 无此合约 → null。
   fetchByContract(
     chain: string,
     contract: string,
   ): Promise<{ ref: TokenRef; info: TokenInfo; price: TokenPrice } | null>;
-  // simple/price 刷新/长尾已知 ref 的价(key=refKey)。
+  // simple/price 刷新/长尾已知 ref 的价(key = tokenRef 串本身)。
   fetchPrices(refs: TokenRef[]): Promise<Map<string, TokenPrice>>;
   // 历史价序列:一 ref 一区间**一次**上游调用,升序原始观测点(USD)。非本源 / 无历史 → 空。
   // 粒度由上游定(CoinGecko:>90d 日级、≤90d 小时级);按日归一在 tokens 服务侧做。

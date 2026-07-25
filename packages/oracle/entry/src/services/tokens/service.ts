@@ -1,17 +1,15 @@
-import type {
-  AssetRef,
-  CgkCoinId,
-  Resolution,
-  TokenRef,
-  TokenSource,
-  TokenStore,
-} from "@folio/oracle-basic";
 import {
+  type AssetRef,
   CGK_RECHECK_TTL_MS,
+  cgkRef,
   DEFAULT_TOP_N,
   INFO_TTL_MS,
   PRICE_TTL_MS,
+  type Resolution,
   TOKEN_KEY_TTL_MS,
+  type TokenRef,
+  type TokenSource,
+  type TokenStore,
   WARM_TTL_MS,
 } from "@folio/oracle-basic";
 import { parseTokenRef } from "@folio/oracle-ref";
@@ -57,7 +55,7 @@ export async function resolveAsset(
   // 不查索引、不掉回 symbol。等同显式 ref。其余场馆命名(binance/USDC 等)不是规范 ref,照走索引/symbol。
   if (parsed?.kind === "opaque" && parsed.namer === CGK_NAMER) {
     return {
-      ref: { source: "coingecko", identifier: parsed.id as CgkCoinId },
+      ref: cgkRef(parsed.id),
       confidence: "high",
       via: "explicit",
     };

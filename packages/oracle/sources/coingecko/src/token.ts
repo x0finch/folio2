@@ -3,7 +3,14 @@ import {
   CoinGeckoError,
   createCoinGeckoClient,
 } from "@folio/coingecko-client";
-import { TokenError, type TokenInfo, type TokenPrice, type TokenSource } from "@folio/oracle-basic";
+import {
+  CGK_VENDOR,
+  TokenError,
+  type TokenInfo,
+  type TokenPrice,
+  type TokenSource,
+  vendorIdOf,
+} from "@folio/oracle-basic";
 import { PER_PAGE_MAX, PRICE_CHANGE_WINDOWS, VS_USD } from "./constants";
 import {
   parseAssetPlatforms,
@@ -86,7 +93,7 @@ export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource
     },
 
     async fetchPrices(refs) {
-      const ids = refs.filter((r) => r.source === "coingecko").map((r) => r.identifier);
+      const ids = refs.map((r) => vendorIdOf(r, CGK_VENDOR)).filter((id) => id != null);
       if (ids.length === 0) return new Map();
       const json = await mapErr(
         client.simplePrice({
@@ -100,10 +107,11 @@ export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource
     },
 
     async fetchPriceSeries(ref, fromMs, toMs) {
-      if (ref.source !== "coingecko") return [];
+      const coinId = vendorIdOf(ref, CGK_VENDOR);
+      if (!coinId) return []; // 不是 CGK 的命名 → 本源无从查起
       const pairs = await mapErr(
         client.coinsMarketChartRange({
-          id: ref.identifier,
+          id: coinId,
           vsCurrency: VS_USD,
           fromSec: Math.floor(fromMs / 1000),
           toSec: Math.ceil(toMs / 1000),

@@ -1,13 +1,14 @@
+import { tokenRef } from "@folio/oracle-ref";
 import {
   GROUP_MEMBERSHIP,
   type ProviderTokenSeed,
-  refKey,
   TOKEN_GROUPS,
   type TokenCandidate,
   type TokenInfo,
   type TokenRecord,
   type TokenRef,
   type TokenStore,
+  vendorIdOf,
 } from "@folio/tokens";
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { chunk, IN_CHUNK } from "./cache-util";
@@ -15,7 +16,7 @@ import { type DbEnv, getDb } from "./client";
 import { tokenGroups, tokenIndex, tokenMeta, tokens, tokenVendorIds } from "./schema";
 
 export interface TokenStoreOpts {
-  source: TokenRef["source"]; // store 绑定的规范源(如 "coingecko");ref 只对该源的映射成立
+  source: string; // store 绑定的规范源/命名者(如 "coingecko");ref 只对该源的映射成立
   now?: () => number; // 注入便于测 TTL;默认 Date.now
 }
 
@@ -35,8 +36,11 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   type Stmt = Batch[number];
   const source = opts.source;
   const now = opts.now ?? (() => Date.now());
-  // source↔identifier 品牌对齐由本源(opts.source)保证 → 整体 as TokenRef(可信边界)。
-  const mk = (vendorId: string): TokenRef => ({ source, identifier: vendorId }) as TokenRef;
+  // 本 store 绑定一个命名者 → 上游 id 与 tokenRef 串在此双向转换(可信边界)。
+  const mk = (vendorId: string): TokenRef => tokenRef.opaque(source, vendorId);
+  // 反向:ref → 本源的上游 id。ref 恒由本 store / 本源产出,故正常必有值;
+  // 万一来了别家命名(链上寻址等),回落原串 —— 存进去是坏数据,但不静默丢行。
+  const vid = (ref: TokenRef): string => vendorIdOf(ref, source) ?? ref;
   const warmKey = `warm_as_of:${source}`;
 
   // 展示分组(P2):groupKey 直接当 token_groups.id(text PK,deterministic,免 find-or-create)。
@@ -141,12 +145,12 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const t = now();
       const symExpiresAt = t + warmTtlMs; // symbol 索引 + 价(短)
       const infoExpiresAt = t + infoTtlMs; // name/logo(长)
-      const ids = await existingIds(rows.map((r) => r.info.ref.identifier));
+      const ids = await existingIds(rows.map((r) => vid(r.info.ref)));
       const stmts: Stmt[] = [];
       const groupKeys = new Set<string>(); // 需 upsert 的组(去重,置于批首满足 FK)
       for (const { info, price } of rows) {
-        const id = ids.get(info.ref.identifier) ?? crypto.randomUUID();
-        const groupId = groupIdFor(info.ref.identifier);
+        const id = ids.get(vid(info.ref)) ?? crypto.randomUUID();
+        const groupId = groupIdFor(vid(info.ref));
         if (groupId) groupKeys.add(groupId);
         stmts.push(
           db
@@ -181,7 +185,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               },
             }),
           // vendor 映射(tokenId ← 本源 vendorId);已存则不动。FK 要求 tokens 先在,故置于其后。
-          vendorMapUpsert(id, info.ref.identifier),
+          vendorMapUpsert(id, vid(info.ref)),
           db
             .insert(tokenIndex)
             .values({ kind: "symbol", key: info.symbol, tokenId: id, expiresAt: symExpiresAt })
@@ -351,9 +355,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const mapped = await db
         .select({ tokenId: tokenVendorIds.tokenId })
         .from(tokenVendorIds)
-        .where(
-          and(eq(tokenVendorIds.vendor, source), eq(tokenVendorIds.vendorId, info.ref.identifier)),
-        );
+        .where(and(eq(tokenVendorIds.vendor, source), eq(tokenVendorIds.vendorId, vid(info.ref))));
 
       // 现指针与其代币。
       const cur = await db
@@ -367,7 +369,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       // 若现指针指向的不是本源 canonical 行(id 不同 → 无本源映射的孤儿),即待合并删除的孤儿。
       const orphan = curRow && curRow.id !== cgkId ? curRow : null;
       const carryLogo = orphan?.providerLogo ?? null;
-      const groupId = groupIdFor(info.ref.identifier);
+      const groupId = groupIdFor(vid(info.ref));
 
       const priceFields = price
         ? {
@@ -405,7 +407,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             },
           }),
         // 挂本源 vendor 映射(FK:需 cgk 行先在)
-        vendorMapUpsert(cgkId, info.ref.identifier),
+        vendorMapUpsert(cgkId, vid(info.ref)),
         // 指针重指:清旧(含孤儿指针)→ 插新
         db.delete(tokenIndex).where(and(eq(tokenIndex.kind, "tokenKey"), eq(tokenIndex.key, key))),
         db
@@ -421,7 +423,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
 
     async getByRefs(refs) {
       const out = new Map<string, TokenRecord>();
-      const vendorIds = refs.filter((r) => r.source === source).map((r) => r.identifier);
+      const vendorIds = refs.map((r) => vendorIdOf(r, source)).filter((id) => id != null);
       for (const ids of chunk(vendorIds, IN_CHUNK)) {
         const rows = await db
           .select({ tok: tokens, grp: grpCols, vendorId: tokenVendorIds.vendorId })
@@ -435,7 +437,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               gt(tokens.infoExpiresAt, now()),
             ),
           );
-        for (const r of rows) out.set(refKey(mk(r.vendorId)), toRecord(r.tok, r.grp, r.vendorId));
+        for (const r of rows) out.set(mk(r.vendorId), toRecord(r.tok, r.grp, r.vendorId));
       }
       return out;
     },
@@ -461,10 +463,10 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       if (prices.length === 0) return;
       const priceExpiresAt = now() + ttlMs;
       // 价按本源 vendorId 找到 tokenId,再按主键更新(只更新已存在的行)。
-      const ids = await existingIds(prices.map((p) => p.ref.identifier));
+      const ids = await existingIds(prices.map((p) => vid(p.ref)));
       const stmts: Stmt[] = [];
       for (const p of prices) {
-        const id = ids.get(p.ref.identifier);
+        const id = ids.get(vid(p.ref));
         if (!id) continue;
         stmts.push(
           db

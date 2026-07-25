@@ -17,7 +17,8 @@ _Avoid_: CanonicalHolding, canonical token(组不是"单个规范币")
 **tokenRef**:
 全系统唯一的代币命名法(ADR 0020):`<namer>/<localName>`,恰好两段,第一个斜杠切分。表达「**谁**、管这个 token 叫**什么**」——
 `eip155:42161/erc20:0xaf88…`、`bitcoin/native`、`solana/token:EPjF…`、`coingecko/usd-coin`、`binance/USDC`。
-一个 token 可有多条 tokenRef(每个命名者一条),故是多对一。文法 + 归一由 `@folio/oracle-ref` 独占实现。
+一个 token 可有多条 tokenRef(每个命名者一条),故是多对一。文法 + 归一由 `@folio/oracle-ref` 独占实现:`TokenRef` = 串(系统里流通的),`TokenRefParts` = 拆开的结构。
+参考层的「解析结果」也是这条串(厂商作命名者,`coingecko/usd-coin`)—— 旧的 `{ source, identifier }` + `refKey` 已溶解。
 字段名仍叫 `tokenKey`(Balance / `snapshot_balances.token_key`),值是 tokenRef。
 _Avoid_: tokenKey(作为概念名,已由 tokenRef 取代)、caip19、impl key、tokenIdentifier
 

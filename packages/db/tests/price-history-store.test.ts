@@ -1,11 +1,11 @@
 import { env } from "cloudflare:test";
-import type { CgkCoinId, TokenRef } from "@folio/tokens";
+import { cgkRef } from "@folio/tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTokenPriceHistoryStore } from "../src";
 
 // 历史日价缓存 store 的 D1 集成(#148 / ADR 0019)。真实 D1(Miniflare)。pool 不隔离每测存储 → beforeEach 重置。
 const store = () => createTokenPriceHistoryStore(env);
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+const cg = cgkRef;
 const btc = cg("bitcoin");
 const eth = cg("ethereum");
 

@@ -16,9 +16,10 @@ import {
   MS_PER_DAY,
   OVERRIDES,
   PRICE_TTL_MS,
-  refKey,
   TOKEN_KEY_TTL_MS,
+  vendorIdOf,
 } from "@folio/oracle-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { createCoinGeckoSource } from "@folio/oracle-source-coingecko";
 import { normalizeSymbol } from "./normalize";
 import { type ResolveOpts, refreshWarm, resolveAsset } from "./service";
@@ -26,7 +27,7 @@ import { type ResolveOpts, refreshWarm, resolveAsset } from "./service";
 export interface CreateTokensConfig {
   apiKey?: string;
   // store 实现由调用方注入(D1 在 @folio/db,不该被 tokens 依赖);tokens 把 source.source(源标签)喂进来。
-  createStore: (source: TokenRef["source"]) => TokenStore;
+  createStore: (source: string) => TokenStore;
   // 历史日价缓存(#148 / ADR 0019)。可选:不传 → 无历史缓存(priceSeries/priceAt 每次现取、不落库,
   // 冷则空 → 调用方降级)。全局参考(无 userId,无 source 分桶,source 是列)→ 零参工厂。
   createPriceHistoryStore?: () => TokenPriceHistoryStore;
@@ -110,7 +111,7 @@ export function createTokens({
   const withExplicit = (asset: AssetRef): AssetRef =>
     asset.identifier && !asset.ref
       ? // source↔identifier 品牌对齐由本源保证 → 整体 as TokenRef(可信边界)。
-        { ...asset, ref: { source: p.source, identifier: asset.identifier } as TokenRef }
+        { ...asset, ref: tokenRef.opaque(p.source, asset.identifier) }
       : asset;
 
   const resolve = (asset: AssetRef, opts?: ResolveOpts) =>
@@ -162,7 +163,7 @@ export function createTokens({
       present.length > 0 ? await deps.store.getByRefs(present) : new Map<string, TokenRecord>();
     rest.forEach(({ i }, j) => {
       const ref = refs[j];
-      out[i] = { ref, rec: ref ? refMap.get(refKey(ref)) : undefined };
+      out[i] = { ref, rec: ref ? refMap.get(ref) : undefined };
     });
     return out as { ref: TokenRef | null; rec: TokenRecord | undefined }[];
   }
@@ -174,7 +175,8 @@ export function createTokens({
     fromMs: number,
     toMs: number,
   ): Promise<TokenPricePoint[]> {
-    if (ref.source !== "coingecko" || fromMs > toMs) return [];
+    // 非本源命名的 ref(链上寻址等)拿不到历史价 —— 本源只认自己给的名字。
+    if (!vendorIdOf(ref, deps.source.source) || fromMs > toMs) return [];
     const fromB = dayBucketOf(fromMs);
     const toB = dayBucketOf(toMs);
     const todayB = dayBucketOf(Date.now());
@@ -232,7 +234,7 @@ export function createTokens({
     },
 
     async priceOf(ref) {
-      const rec = (await deps.store.getByRefs([ref])).get(refKey(ref));
+      const rec = (await deps.store.getByRefs([ref])).get(ref);
       if (rec?.price && !rec.price.stale) {
         return {
           ref,
@@ -242,7 +244,7 @@ export function createTokens({
           asOf: rec.price.asOf,
         };
       }
-      const fetched = (await deps.source.fetchPrices([ref])).get(refKey(ref));
+      const fetched = (await deps.source.fetchPrices([ref])).get(ref);
       if (fetched) await deps.store.putPrices([fetched], PRICE_TTL_MS);
       return fetched;
     },
@@ -284,7 +286,7 @@ export function createTokens({
       const looked = await lookupAll(assets);
       const stale = new Map<string, TokenRef>();
       for (const { ref, rec } of looked) {
-        if (ref && (!rec?.price || rec.price.stale)) stale.set(refKey(ref), ref);
+        if (ref && (!rec?.price || rec.price.stale)) stale.set(ref, ref);
       }
       if (stale.size === 0) return 0;
       const fetched = await deps.source.fetchPrices([...stale.values()]);

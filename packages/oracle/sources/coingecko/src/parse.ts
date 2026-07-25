@@ -1,6 +1,5 @@
 import {
-  type CgkCoinId,
-  refKey,
+  cgkRef,
   TokenError,
   type TokenInfo,
   type TokenPrice,
@@ -12,7 +11,7 @@ import { SEARCH_LIMIT, VS_USD } from "./constants";
 // Retry-After 解析已移入 @folio/coingecko-client;re-export 保持既有导入面(含测试)。
 export { parseRetryAfter } from "@folio/coingecko-client";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+const cg = cgkRef;
 
 interface RawPlatform {
   id?: string;
@@ -64,7 +63,7 @@ export function parseMarkets(json: unknown): { info: TokenInfo; price: TokenPric
   return out;
 }
 
-// simple/price → 按 refKey 索引的价(USD)。字段键固定为 usd / usd_24h_change(查询时 vs=usd)。
+// simple/price → 按 tokenRef 串索引的价(USD)。字段键固定为 usd / usd_24h_change(查询时 vs=usd)。
 export function parseSimplePrice(json: unknown): Map<string, TokenPrice> {
   if (typeof json !== "object" || json === null)
     throw new TokenError("PARSE_ERROR", "simple/price: expected object");
@@ -75,7 +74,7 @@ export function parseSimplePrice(json: unknown): Map<string, TokenPrice> {
     const change = raw[`${VS_USD}_24h_change`];
     const ts = raw.last_updated_at;
     const ref = cg(id);
-    out.set(refKey(ref), {
+    out.set(ref, {
       ref,
       unitPrice,
       change24h: typeof change === "number" ? change : undefined,

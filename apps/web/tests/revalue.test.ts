@@ -1,19 +1,18 @@
 import type { Balance } from "@folio/connectors-basic";
-import type {
-  CgkCoinId,
-  TokenCandidate,
-  TokenPrice,
-  TokenRecord,
-  TokenRef,
-  TokenStore,
-  Tokens,
+import {
+  cgkRef,
+  createTokens,
+  type TokenCandidate,
+  type TokenPrice,
+  type TokenRecord,
+  type TokenRef,
+  type TokenStore,
+  type Tokens,
 } from "@folio/tokens";
-import { createTokens } from "@folio/tokens";
 import { describe, expect, it } from "vitest";
 import { revalue } from "../src/lib/revalue";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
-const key = (r: TokenRef) => `${r.source}:${r.identifier}`;
+const cg = cgkRef;
 
 // 假 store:warm 已就绪(warmAsOf 新鲜 → refreshWarm 跳过取数);BTC→bitcoin 候选 + 代币行(新鲜价)。
 function fakeStore(): TokenStore {
@@ -22,7 +21,7 @@ function fakeStore(): TokenStore {
   ]);
   const records = new Map<string, TokenRecord>([
     [
-      key(cg("bitcoin")),
+      cg("bitcoin"),
       {
         id: "bitcoin",
         ref: cg("bitcoin"),
@@ -44,8 +43,8 @@ function fakeStore(): TokenStore {
     getByRefs: async (refs) => {
       const out = new Map<string, TokenRecord>();
       for (const r of refs) {
-        const rec = records.get(key(r));
-        if (rec) out.set(key(r), rec);
+        const rec = records.get(r);
+        if (rec) out.set(r, rec);
       }
       return out;
     },
@@ -62,8 +61,8 @@ const stubSource = {
   fetchPrices: async (refs: TokenRef[]) => {
     const out = new Map<string, TokenPrice>();
     for (const r of refs) {
-      if (r.identifier === ("the-open-network" as CgkCoinId)) {
-        out.set(key(r), { ref: r, unitPrice: 5, asOf: 0 });
+      if (r === cg("the-open-network")) {
+        out.set(r, { ref: r, unitPrice: 5, asOf: 0 });
       }
     }
     return out;

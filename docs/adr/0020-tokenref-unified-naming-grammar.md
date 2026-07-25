@@ -17,7 +17,10 @@ Status: accepted。修订 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-m
 ## Consequences
 
 - **新包** `@folio/oracle-ref`:零依赖零 IO。4 个 connector(zerion / coinstats / blockbook / manual)改依赖它,顺手摘掉 `@folio/tokens-basic` shim 的遗留依赖。
-- **契约**:`buildTokenKey` / `parseTokenKey` 连同 `oracle-basic/token-key.ts` 整个删除;`refKey` / `parseRefKey` 待 vendor 引用溶解时退场。现有 `TokenRef`(= vendor 引用,占着这个名字,约 35 文件)最终会溶解成 namer=`coingecko` 的一个 tokenRef —— 溶解与否 / 是否先改名 `VendorRef`,另立票再定。
+- **契约**:`buildTokenKey` / `parseTokenKey` 连同 `oracle-basic/token-key.ts` 整个删除。
+- **vendor 引用已溶解**(不再需要改名 `VendorRef`):`TokenRef = { source; identifier }` 与 `refKey` 产的 `coingecko:x` 本就是 tokenRef 的第二种写法 → 类型直接变成串,`refKey`/`parseRefKey` 退场,map key 从 `refKey(ref)` 变成 `ref` 本身。`TokenRef` 这个名字现在只指一件事。
+  - **代价(明知接受)**:类型上不再区分「已解析的厂商引用」与「provider 原始命名」—— 两者都是串,`Resolution.ref` 收一个 `binance/USDC` 也能通过编译。换来的是全系统一个身份概念,且解析路径窄(只 `resolveAsset` 一处产)、有测试钉住。
+  - **存储层不动**:`token_vendor_ids` / `token_price_history` 仍按 `(vendor, vendorId)` 两列存 —— 那正是它们的列。串在写库前经 `vendorPartsOf` 拆回两段,读出时经 `cgkRef` 拼回。合成一张 `token_refs` 仍属 #176 那一轮。
 - **迁移**(难回退):`snapshot_balances.token_key` 两类前缀各一条 `UPDATE`;`token_index` 有 TTL 自愈;`token_vendor_ids` 存的是分列的 `vendor` + `vendor_id`,拼串纯内存 → 零迁移。
 - **`platforms.id` 一并迁短形**(`chain:bitcoin` → `bitcoin`,`eip155:<id>` 不变):这样 tokenRef 的左半边**直接就是** `platforms.id`,不用夹一层映射。短形不是新发明 —— 场馆的平台键早就是裸 connectorId(`binance`/`okx`/`manual`,见 `aggregate.platformIdOf`,`exchange:`/`perp:` 前缀在 app 里已无人产出),`connector-platform.ts` 也一直在剥 `chain:` 前缀往短形上凑;迁完可删掉那个 hack 与三处 `chain:` 判断。`platforms` 是**纯缓存表**(带 `expiresAt`),迁移即 `DELETE FROM platforms` 后自行 warm,无需 `UPDATE`。并入「切 producer + 迁移」那一片,不单开。
 - **测试**:迁移前只有 53 行 golden 撑着全系统的代币身份。新包按原则 #2 补:三类形状 build/parse 往返、EVM 地址小写且幂等、**base58 / bech32 地址原样保留**、不透明 id 原样透传、非两段串与旧串判 `unknown`、`unknown` 不抛。

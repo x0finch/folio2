@@ -1,4 +1,4 @@
-import type { TokenPriceHistoryStore, TokenRef } from "@folio/tokens";
+import { type TokenPriceHistoryStore, type TokenRef, vendorPartsOf } from "@folio/tokens";
 import { and, eq, inArray } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
@@ -9,11 +9,21 @@ import { tokenPriceHistory } from "./schema";
 // 加 2 个固定绑定仍稳在 D1 ~100 参数上限内);批量 upsert 见 cache-util。契约只认 TokenRef(不泄源内部词)。
 export function createTokenPriceHistoryStore(env: DbEnv): TokenPriceHistoryStore {
   const db = getDb(env);
-  const whereRef = (ref: TokenRef) =>
-    and(eq(tokenPriceHistory.source, ref.source), eq(tokenPriceHistory.identifier, ref.identifier));
+  // 历史价按 (vendor, vendorId) 两列存 → 写读前把 tokenRef 拆回两段。
+  // 非厂商命名的 ref(链上寻址)在本表没有行:读返回空、写跳过。
+  const whereRef = (ref: TokenRef) => {
+    const parts = vendorPartsOf(ref);
+    return parts
+      ? and(
+          eq(tokenPriceHistory.source, parts.vendor),
+          eq(tokenPriceHistory.identifier, parts.vendorId),
+        )
+      : undefined;
+  };
   return {
     async getDailyPrices(ref, dayBuckets) {
       const out = new Map<number, number>();
+      if (!vendorPartsOf(ref)) return out;
       for (const part of chunk([...new Set(dayBuckets)])) {
         if (part.length === 0) continue;
         const rows = await db
@@ -26,14 +36,16 @@ export function createTokenPriceHistoryStore(env: DbEnv): TokenPriceHistoryStore
     },
 
     async putDailyPrices(ref, prices) {
+      const parts = vendorPartsOf(ref);
+      if (!parts) return;
       await batchWrite(
         db,
         prices.map((p) =>
           db
             .insert(tokenPriceHistory)
             .values({
-              source: ref.source,
-              identifier: ref.identifier,
+              source: parts.vendor,
+              identifier: parts.vendorId,
               dayBucket: p.dayBucket,
               unitPrice: p.unitPrice,
             })

@@ -1,4 +1,4 @@
-import type { CgkCoinId, TokenRef } from "@folio/oracle-basic";
+import { cgkRef } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import {
   parseAssetPlatforms,
@@ -14,7 +14,7 @@ import marketsJson from "./fixtures/coins_markets_p1.json";
 import searchJson from "./fixtures/search.json";
 import simpleJson from "./fixtures/simple_price.json";
 
-const cg = (id: string): TokenRef => ({ source: "coingecko", identifier: id as CgkCoinId });
+const cg = cgkRef;
 
 describe("parseAssetPlatforms", () => {
   it("maps slug + EVM chainId (both keys) → platform slug; non-EVM slug only", () => {
@@ -60,15 +60,15 @@ describe("parseMarkets", () => {
 });
 
 describe("parseSimplePrice", () => {
-  it("maps each id → TokenPrice keyed by refKey (last_updated_at → ms)", () => {
+  it("maps each id → TokenPrice keyed by the tokenRef string (last_updated_at → ms)", () => {
     expect(parseSimplePrice(simpleJson)).toEqual(
       new Map([
         [
-          "coingecko:bitcoin",
+          cg("bitcoin"),
           { ref: cg("bitcoin"), unitPrice: 65000, change24h: 1.5, asOf: 1782000000000 },
         ],
         [
-          "coingecko:ethereum",
+          cg("ethereum"),
           { ref: cg("ethereum"), unitPrice: 3500, change24h: -2.1, asOf: 1782000000000 },
         ],
       ]),

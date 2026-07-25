@@ -406,6 +406,9 @@ importers:
       '@folio/oracle-basic':
         specifier: workspace:*
         version: link:../oracle/basic
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../oracle/ref
       '@folio/tokens':
         specifier: workspace:*
         version: link:../tokens/entry
@@ -439,6 +442,10 @@ importers:
         version: 4.105.0(@cloudflare/workers-types@4.20260626.1)
 
   packages/oracle/basic:
+    dependencies:
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../ref
     devDependencies:
       typescript:
         specifier: ^6.0.2

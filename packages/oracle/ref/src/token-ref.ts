@@ -20,13 +20,18 @@ const SEP = "/";
 const NATIVE = "native";
 const EVM_NAMER_PREFIX = "eip155:";
 
-export type TokenRef =
+// 序列化形 —— **系统里流通的就是它**:Balance 带的、落库的、当 map key 的,都是这个串。
+// 用别名而非裸 string,是为了在签名里说清"这里要的是一个 tokenRef,不是随便什么字符串"。
+export type TokenRef = string;
+
+// 拆开后的三支。造串给 `tokenRef.*` 构造函数即可,这个类型是给「解析 → 改一个字段 → 拼回去」用的。
+export type TokenRefParts =
   | { kind: "native"; namer: string }
   | { kind: "contract"; namer: string; assetNs: string; address: string }
   | { kind: "opaque"; namer: string; id: string };
 
 // parse 的输出多一支 `unknown`:任何读不懂的串都得有个去处,故永不 throw。
-export type ParsedTokenRef = TokenRef | { kind: "unknown"; raw: string };
+export type ParsedTokenRef = TokenRefParts | { kind: "unknown"; raw: string };
 
 /**
  * 地址大小写是**按链**的:EVM 的 hex 大小写不敏感,小写成稳定的 key;
@@ -44,18 +49,18 @@ export function normalizeAddress(namer: string, address: string): string {
  * 本包不按命名者去猜。
  */
 export const tokenRef = {
-  native: (namer: string): string => `${normalize(namer)}${SEP}${NATIVE}`,
+  native: (namer: string): TokenRef => `${normalize(namer)}${SEP}${NATIVE}`,
 
-  contract: (namer: string, assetNs: string, address: string): string => {
+  contract: (namer: string, assetNs: string, address: string): TokenRef => {
     const n = normalize(namer);
     return `${n}${SEP}${normalize(assetNs)}:${normalizeAddress(n, address)}`;
   },
 
   // 不透明 id 一个字不动 —— 归一是生产者的事(币安 connector 自己保证 symbol 大写)。
-  opaque: (namer: string, id: string): string => `${normalize(namer)}${SEP}${id.trim()}`,
+  opaque: (namer: string, id: string): TokenRef => `${normalize(namer)}${SEP}${id.trim()}`,
 } as const;
 
-export function formatTokenRef(ref: TokenRef): string {
+export function formatTokenRef(ref: TokenRefParts): TokenRef {
   switch (ref.kind) {
     case "native":
       return tokenRef.native(ref.namer);
@@ -66,7 +71,7 @@ export function formatTokenRef(ref: TokenRef): string {
   }
 }
 
-export function parseTokenRef(raw: string): ParsedTokenRef {
+export function parseTokenRef(raw: TokenRef): ParsedTokenRef {
   const unknown = { kind: "unknown", raw } as const;
   // 恰好两段:三段(NFT 的 tokenId 之类)在本文法里没有意义,判 unknown 而非折进地址。
   const segments = raw.trim().split(SEP);
