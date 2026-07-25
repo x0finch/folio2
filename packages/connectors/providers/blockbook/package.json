@@ -12,10 +12,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/connectors-basic": "workspace:*",
-    "@folio/tokens-basic": "workspace:*",
     "@folio/bitcoin-derive": "workspace:*",
     "@folio/blockbook-client": "workspace:*",
+    "@folio/connectors-basic": "workspace:*",
+    "@folio/oracle-ref": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {

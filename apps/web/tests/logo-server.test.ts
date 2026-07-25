@@ -28,9 +28,9 @@ describe("serveLogo", () => {
 
   it("platform kind → Cache-Tag 用 platform 命名空间", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(img());
-    const res = await serveLogo(resolving("https://cgk/eth.png"), "platform", "chain:bitcoin");
+    const res = await serveLogo(resolving("https://cgk/eth.png"), "platform", "bitcoin");
     expect(res.status).toBe(200);
-    expect(res.headers.get("cache-tag")).toBe("logo:platform:chain:bitcoin");
+    expect(res.headers.get("cache-tag")).toBe("logo:platform:bitcoin");
   });
 
   it("上游非栅格图(svg/html)→ 降级 octet-stream + nosniff(挡本域内联执行)", async () => {
@@ -82,7 +82,7 @@ describe("serveLogo", () => {
         throw new Error("store down");
       },
       "platform",
-      "chain:bitcoin",
+      "bitcoin",
     );
     expect(res.status).toBe(404);
     expect(spy).not.toHaveBeenCalled();

@@ -6,6 +6,7 @@ import {
   ProviderError,
   parseRetryAfter,
 } from "@folio/connectors-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { z } from "zod";
 import { CLEARINGHOUSE_TYPE, EVM_ADDRESS_RE, HYPERLIQUID_API_BASE, INFO_PATH } from "./constants";
 
@@ -52,6 +53,12 @@ type Row = z.infer<typeof PerpEquity> | z.infer<typeof PerpPosition>;
 // 永续保证金计价币(账户权益以 USDC 计)。
 const MARGIN_ASSET = "USDC";
 
+// 场馆命名者 = connectorId(与 manifest 的 `id` 同源,不许两处各写一遍)。
+const PROVIDER_ID = "hyperliquid";
+
+// symbol 大写归一由本 provider 负责(见 @folio/oracle-ref:不透明 id 原样透传)。
+const venueTokenRef = (symbol: string) => tokenRef.opaque(PROVIDER_ID, symbol.trim().toUpperCase());
+
 const num = (s: string | null | undefined): number => Number(s ?? 0);
 
 // 纯解析:clearinghouseState → Row[]。与 IO 分离,便于 golden test。
@@ -70,6 +77,7 @@ export function parseClearinghouseState(state: ClearinghouseState): Row[] {
       amount: num(ms.accountValue),
       value: num(ms.accountValue),
       kind: "perp_equity",
+      tokenKey: venueTokenRef(MARGIN_ASSET),
       meta: {
         withdrawable: num(state.withdrawable),
         totalMarginUsed: num(ms.totalMarginUsed),
@@ -87,6 +95,8 @@ export function parseClearinghouseState(state: ClearinghouseState): Row[] {
       amount: szi,
       value: 0, // 见上:仓位不计入总额,价值由权益行承载
       kind: "perp_position",
+      // 标的的场馆命名(不是「持有该币」,只是身份)—— 值仍由权益行承载,此处不参与计价。
+      tokenKey: venueTokenRef(p.coin),
       meta: {
         side: szi >= 0 ? "long" : "short",
         entryPx: num(p.entryPx),
@@ -139,7 +149,7 @@ export const hyperliquidAccountCreds = [
 ] as const satisfies readonly CredField[];
 
 export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccountCreds> = {
-  id: "hyperliquid",
+  id: PROVIDER_ID,
   label: "Hyperliquid",
   // 只读地址即查,无全局/provider key/签名 → PC 空。
   creds: [],

@@ -39,9 +39,9 @@ describe("buildManualSnapshot", () => {
     expect(snap.balances[0].metaJson).toBeNull();
   });
 
-  it("有 identifier → tokenKey = coingecko:<小写>;无 → null", () => {
+  it("有 identifier → tokenKey = coingecko/<id>;无 → null", () => {
     const withId = buildManualSnapshot("acc1", [tok({ identifier: "Bitcoin" })], [undefined], TS);
-    expect(withId.balances[0].tokenKey).toBe("coingecko:bitcoin");
+    expect(withId.balances[0].tokenKey).toBe("coingecko/bitcoin");
     const noId = buildManualSnapshot("acc1", [tok({ identifier: undefined })], [undefined], TS);
     expect(noId.balances[0].tokenKey).toBeNull();
   });

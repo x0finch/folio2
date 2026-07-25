@@ -9,7 +9,7 @@
       "price": 64000,
       "value": 64000,
       "kind": "spot",
-      "tokenKey": "coingecko:bitcoin"
+      "tokenKey": "coingecko/bitcoin"
     }
   ],
   "multiple tokens → one spot each (N tokens)": [
@@ -19,7 +19,7 @@
       "price": 64000,
       "value": 32000,
       "kind": "spot",
-      "tokenKey": "coingecko:bitcoin"
+      "tokenKey": "coingecko/bitcoin"
     },
     {
       "symbol": "ETH",
@@ -27,7 +27,7 @@
       "price": 3200,
       "value": 9600,
       "kind": "spot",
-      "tokenKey": "coingecko:ethereum"
+      "tokenKey": "coingecko/ethereum"
     },
     { "symbol": "FOO", "amount": 1000, "price": 0.25, "value": 250, "kind": "spot" }
   ],

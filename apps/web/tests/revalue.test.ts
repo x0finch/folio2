@@ -79,8 +79,8 @@ const bal = (symbol: string, amount: number, value: number, identifier?: string)
   amount,
   value,
   kind: "spot", // manual connector 产 spot kind(旧 "manual" kind 已并入 5-kind 的 spot)
-  // 用户选币 → tokenKey 的厂商寻址形(coingecko:<id>),身份不再进 meta。
-  ...(identifier ? { tokenKey: `coingecko:${identifier}` } : {}),
+  // 用户选币 → tokenRef 的厂商命名形(coingecko/<id>),身份不再进 meta。
+  ...(identifier ? { tokenKey: `coingecko/${identifier}` } : {}),
 });
 
 describe("revalue", () => {
@@ -95,7 +95,7 @@ describe("revalue", () => {
   });
 
   it("explicit coingecko tokenKey overrides symbol resolution", async () => {
-    // 错的 symbol "XBT" 但 tokenKey=coingecko:bitcoin → 用 bitcoin 的 store 价 65000。
+    // 错的 symbol "XBT" 但 tokenKey=coingecko/bitcoin → 用 bitcoin 的 store 价 65000。
     const out = await revalue(tokens(), true, [bal("XBT", 1, 0, "bitcoin")]);
     expect(out[0].value).toBe(65000);
   });
@@ -117,7 +117,7 @@ describe("revalue", () => {
   });
 
   it("bitcoin → 盯市:provider 只给 amount(value=0),按 BTC 市价算 value", async () => {
-    // bitcoin provider 产 value=0、kind=spot(ADR 0010:BTC 并回 spot)、tokenKey=chain:bitcoin/native:btc,
+    // bitcoin provider 产 value=0、kind=spot(ADR 0010:BTC 并回 spot)、tokenKey=bitcoin/native,
     // 靠 symbol 回退到 bitcoin 价 65000。未确认/派生明细走 account 级 note,不在 balance meta。
     const btc: Balance = {
       symbol: "BTC",

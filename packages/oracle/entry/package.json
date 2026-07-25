@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@folio/oracle-basic": "workspace:*",
+    "@folio/oracle-ref": "workspace:*",
     "@folio/oracle-source-coingecko": "workspace:*"
   },
   "devDependencies": {

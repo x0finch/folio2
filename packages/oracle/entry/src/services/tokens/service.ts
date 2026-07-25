@@ -11,10 +11,10 @@ import {
   DEFAULT_TOP_N,
   INFO_TTL_MS,
   PRICE_TTL_MS,
-  parseTokenKey,
   TOKEN_KEY_TTL_MS,
   WARM_TTL_MS,
 } from "@folio/oracle-basic";
+import { parseTokenRef } from "@folio/oracle-ref";
 import { normalizeSymbol } from "./normalize";
 import { chooseResolution } from "./resolve";
 
@@ -32,6 +32,15 @@ export interface ResolveOpts {
 
 // 懒解析编排:tokenKey → 代币表;命中 cgk 行直接升格;孤儿/miss 且 lazy → 问 CGK,
 // 命中则升级合并(linkTokenKeyToCgk),未收录则 seed 孤儿 + 记复查时刻(期间 source 数据照常展示)。
+// 厂商命名者:`coingecko/<id>` 形的 tokenRef 即规范 ref。
+const CGK_NAMER = "coingecko";
+
+// 命名者 → 喂 `fetchByContract` 的链引用:EVM 给数字 chainId(比 slug 更可靠地命中 CGK 平台),
+// 其余给 slug 本身。
+const EVM_NAMER_PREFIX = "eip155:";
+const chainRefOf = (namer: string): string =>
+  namer.startsWith(EVM_NAMER_PREFIX) ? namer.slice(EVM_NAMER_PREFIX.length) : namer;
+
 export async function resolveAsset(
   asset: AssetRef,
   deps: ResolveDeps,
@@ -43,12 +52,12 @@ export async function resolveAsset(
   let contractHit: TokenRef | null = null;
   // tokenKey(持仓侧已构造)= 索引键 + 懒解析原料。
   const key = asset.tokenKey;
-  const parsed = key ? parseTokenKey(key) : undefined;
-  // coingecko:<id> 形的 tokenKey 本身就是规范 ref(厂商寻址,如 manual 用户选币)→ 直接命中,
-  // 不查索引、不掉回 symbol。等同显式 ref。
-  if (parsed?.cgkId) {
+  const parsed = key ? parseTokenRef(key) : undefined;
+  // `coingecko/<id>` 形的 tokenRef 本身就是规范 ref(厂商寻址,如 manual 用户选币)→ 直接命中,
+  // 不查索引、不掉回 symbol。等同显式 ref。其余场馆命名(binance/USDC 等)不是规范 ref,照走索引/symbol。
+  if (parsed?.kind === "opaque" && parsed.namer === CGK_NAMER) {
     return {
-      ref: { source: "coingecko", identifier: parsed.cgkId as CgkCoinId },
+      ref: { source: "coingecko", identifier: parsed.id as CgkCoinId },
       confidence: "high",
       via: "explicit",
     };
@@ -57,14 +66,9 @@ export async function resolveAsset(
     const rec = (await deps.store.getByTokenKey([key])).get(key);
     if (rec?.ref) {
       contractHit = rec.ref;
-    } else if (
-      lazy &&
-      parsed?.contract &&
-      parsed.chainRef &&
-      (rec?.cgkCheckedUntil ?? 0) <= Date.now()
-    ) {
-      // 反查用 chainRef(eip155 的数字 chainId 更可靠地命中 CGK 平台;chain: 形式给 slug)。
-      const res = await deps.source.fetchByContract(parsed.chainRef, parsed.contract);
+    } else if (lazy && parsed?.kind === "contract" && (rec?.cgkCheckedUntil ?? 0) <= Date.now()) {
+      // 反查用命名者(eip155:<id> 的数字 chainId 更可靠地命中 CGK 平台;非 EVM 链给 slug)。
+      const res = await deps.source.fetchByContract(chainRefOf(parsed.namer), parsed.address);
       if (res) {
         await deps.store.linkTokenKeyToCgk(key, res.info, res.price, {
           indexTtlMs: TOKEN_KEY_TTL_MS,

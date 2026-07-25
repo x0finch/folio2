@@ -1,5 +1,5 @@
 import type { SnapshotWithBalances } from "@folio/db";
-import { buildTokenKey } from "@folio/tokens";
+import { tokenRef } from "@folio/oracle-ref";
 import type { CredsToken } from "./manual-activity";
 
 // 纯逻辑(缝③,无 server/db import → 可单测)。manual 账户的 creds.tokens(物化投影,= provider 输出)
@@ -26,7 +26,8 @@ export function buildManualSnapshot(
       usdValue: t.amount * price,
       kind: "spot" as const,
       selfPrice: null,
-      tokenKey: t.identifier ? (buildTokenKey({ cgkId: t.identifier }) ?? null) : null,
+      // CGK coin id 规范为小写 kebab;归一在生产者这一侧做(oracle-ref 对不透明 id 原样透传)。
+      tokenKey: t.identifier ? tokenRef.opaque("coingecko", t.identifier.toLowerCase()) : null,
       metaJson: null,
     };
   });

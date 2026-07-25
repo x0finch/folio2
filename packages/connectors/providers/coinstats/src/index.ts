@@ -6,7 +6,7 @@ import {
   parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
-import { buildTokenKey } from "@folio/tokens-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { z } from "zod";
 import {
   API_KEY_HEADER,
@@ -37,6 +37,14 @@ type Row = z.infer<typeof Spot>;
 
 // 纯解析:coin[] → Spot[]。与 IO 分离,golden test。
 // 该端点是钱包代币余额(现货)→ kind:"spot";value = amount * price(缺 price 记 0)、price 直传;
+// 非 EVM 链持仓的 tokenRef:命名者 = 链 slug(CoinStats 的链命名,短形不带前缀)。
+// 拿不到链名 → 不产标识(退化按 symbol 归一)。
+function chainTokenRef(chain: string | undefined, contract: string | undefined) {
+  const namer = chain?.trim();
+  if (!namer) return undefined;
+  return contract ? tokenRef.contract(namer, "token", contract) : tokenRef.native(namer);
+}
+
 // 跳过无 symbol;合约行产代币标识(无数字 chainId → 兜底格式);现货行不产 meta(新 schema 无 meta 字段)。
 export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Row[] {
   const out: Row[] = [];
@@ -51,15 +59,10 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ro
       price: c.price ?? undefined,
       value: amount * (c.price ?? 0),
       kind: "spot",
-      // 链/合约身份走 tokenKey(CAIP-19),不再进 meta;现货行无展示用 meta → 省略。
-      // 有合约 → chain:<slug>/token:<addr>;无合约(原生币 SOL/SUI…)→ chain:<slug>/native:<sym>
-      // (与 evm eip155:.../native、bitcoin chain:bitcoin/native 口径一致;native key 解析时降级 symbol,见 tokens service)。
-      tokenKey: buildTokenKey({
-        chain,
-        contract: c.contractAddress ?? undefined,
-        native: c.contractAddress == null,
-        symbol,
-      }),
+      // 链/合约身份走 tokenRef,不再进 meta;现货行无展示用 meta → 省略。
+      // 有合约 → <slug>/token:<addr>;无合约(原生币 SOL/SUI…)→ <slug>/native。
+      // 地址不小写:base58 / bech32 大小写敏感,归一由 @folio/oracle-ref 按链决定。
+      tokenKey: chainTokenRef(chain, c.contractAddress ?? undefined),
       name: c.name,
     });
   }

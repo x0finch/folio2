@@ -5,7 +5,7 @@
     "price": 2500,
     "value": 6250,
     "kind": "spot",
-    "tokenKey": "eip155:1/native:eth",
+    "tokenKey": "eip155:1/native",
     "name": "Ethereum",
     "logo": "https://cdn.zerion.io/eth.png"
   },

@@ -42,11 +42,11 @@ function mockFetchByPath(routes: Record<string, { status?: number; body?: unknow
 afterEach(() => vi.restoreAllMocks());
 
 describe("coingecko fetchChains", () => {
-  it("每条链产 chain:<slug>;有数字 chainId 再产 eip155:<id>;取 image.small", async () => {
+  it("每条链产短形 slug;有数字 chainId 再产 eip155:<id>;取 image.small", async () => {
     mockFetch(ASSET_PLATFORMS);
     const rows = await createCoinGeckoPlatformSource().fetchChains();
     const byKey = new Map(rows.map((r) => [r.key, r]));
-    expect(byKey.get("chain:arbitrum-one")).toMatchObject({
+    expect(byKey.get("arbitrum-one")).toMatchObject({
       name: "Arbitrum One",
       logo: "https://cgk/arbitrum.jpg",
     });
@@ -54,10 +54,10 @@ describe("coingecko fetchChains", () => {
       name: "Arbitrum One",
       logo: "https://cgk/arbitrum.jpg",
     });
-    expect(byKey.get("chain:solana")).toMatchObject({ name: "Solana" });
+    expect(byKey.get("solana")).toMatchObject({ name: "Solana" });
     expect(byKey.has("eip155:999")).toBe(true); // no-image 仍产 key
-    expect(byKey.get("chain:no-image")?.name).toBe("no-image"); // 无 name → 降级为 id
-    expect(byKey.get("chain:no-image")?.logo).toBeUndefined();
+    expect(byKey.get("no-image")?.name).toBe("no-image"); // 无 name → 降级为 id
+    expect(byKey.get("no-image")?.logo).toBeUndefined();
   });
 });
 
@@ -86,8 +86,8 @@ describe("coingecko fetchVenue", () => {
     const spy = mockFetchByPath({}); // 全 404
     const src = createCoinGeckoPlatformSource();
     expect(await src.fetchVenue("exchange:nope")).toBeNull();
-    expect(await src.fetchVenue("chain:solana")).toBeNull();
-    expect(spy).toHaveBeenCalledTimes(1); // chain:* 未发请求
+    expect(await src.fetchVenue("solana")).toBeNull();
+    expect(spy).toHaveBeenCalledTimes(1); // 链键未发请求
   });
 });
 
