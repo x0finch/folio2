@@ -1,4 +1,4 @@
-import type { TokenGroup, TokenRef } from "@folio/oracle";
+import type { TokenRef } from "@folio/oracle";
 import { chainOf } from "./token-ref";
 
 // symbol 归一(与 tokens 层同口径:trim + 大写)—— 仅用于未解析行的分组键/身份。
@@ -7,10 +7,11 @@ const norm = (s: string): string => s.trim().toUpperCase();
 // 纯逻辑(无 server-only import → 可单测)。把跨账户的持仓行按【规范代币】聚合成 Holding 树。
 // 设计见 docs/adr 0001–0003;术语见 CONTEXT.md。
 //   · 白名单(进聚合):spot / utxo(BTC)/ CEX 现货(kind=spot)/ perp 权益(isMargin) —— ADR-0003。kind 已由 overview 用 viewKind 归一。
-//   · 归并键四级(永不裸 symbol,ADR-0002):group → token(ref)→ tokenRef(精确合约)→ account:symbol。
+//   · 归并键三级(永不裸 symbol,ADR-0002):token(内部 id / ref)→ tokenRef(精确合约)→ account:symbol。
+//     展示分组那一级已随 ADR 0021 退场 —— WBTC 与 BTC、USDT 各桥接变体从此各占一行。
 //   · HoldingSource 粒度 = 账户 × 平台单元:链上按链拆(tokenRef 的 eip155/chain 前缀),其余按账户/场馆。
-//   · 表头 totalAmount = 组内各 source 数量之和。组是「同一逻辑资产」(displaySymbol 统一单位),故跨链/
-//     多源(桥接家族)也可汇总 —— 如 USDT 跨多链合计总枚数。change24h 仍仅单一身份组给(多身份逐币涨跌不同)。
+//   · 表头 totalAmount = 组内各 source 数量之和。组 = 同一个 Token(单位一致),跨链/多源(同一 Token
+//     的多条链 ref)亦可汇总。change24h 仍仅单一身份组给(多身份逐币涨跌不同)。
 
 // 聚合输入:一笔持仓 + 其解析结果(group/ref/展示,由 server 富化)。
 export interface AggInput {
@@ -21,7 +22,6 @@ export interface AggInput {
   tokenRef?: string | null;
   isMargin?: boolean; // perp 权益(保证金)—— 进聚合但明细标注
   account: { id: string; label: string; connectorId: string; network?: string | null };
-  group?: TokenGroup; // 命中种子的展示分组
   tokenId?: string; // 内部代币行 id(vendor 中立归并身份,#73;富化命中 store 才有)
   ref?: TokenRef | null; // 该源对此币的寻址引用(vendor tag;归并回退用,内部 id 缺失时)
   name?: string;
@@ -61,7 +61,7 @@ export interface Holding {
 //   · tokenRef(`bitcoin/native`、`binance/USDC`,见 @folio/oracle-ref)回答「谁管这个币叫什么」,
 //     由 provider 产、落库(`snapshot_balances.token_ref`)、跨进程稳定。
 //   · 归并键回答「这两笔持仓算不算界面上的同一行」,**纯运行时**、不落库,前缀标的是这一级取自哪儿
-//     (group / token / tk / as / sym),优先级从高到低。tokenRef 只是其中一级的取值(`tk:` 那级)。
+//     (token / tk / as / sym),优先级从高到低。tokenRef 只是其中一级的取值(`tk:` 那级)。
 // 换句话说:tokenRef 是身份,归并键是分组决策 —— 一个 tokenRef 可能因为解析出了 tokenId 而落到
 // 更高的 `token:` 级,压根用不上 `tk:`。
 
@@ -73,9 +73,8 @@ function tokenIdentity(row: AggInput): string {
   return `sym:${norm(row.symbol)}`;
 }
 
-// 四级归并键(ADR-0002:任何一级都不含裸 symbol)。导出供单币价值历史(token-history)按同一身份匹配历史行。
+// 三级归并键(ADR-0002:任何一级都不含裸 symbol)。导出供单币价值历史(token-history)按同一身份匹配历史行。
 export function holdingKey(row: AggInput): string {
-  if (row.group) return `group:${row.group.id}`;
   if (row.tokenId) return `token:${row.tokenId}`; // vendor 中立内部 id(优先)
   if (row.ref) return `token:${row.ref}`; // 回退:已解析 ref 但未命中 store 记录
   if (row.tokenRef) return `tk:${row.tokenRef}`;
@@ -94,7 +93,7 @@ interface Acc {
   identities: Set<string>;
   totalValue: number;
   totalAmount: number;
-  logoHint?: string; // 首个带 logo 的成员(组 logo 缺省时兜底)
+  logoHint?: string; // 首个带 logo 的成员(a.first 富化未命中时兜底,与 unitPriceHint 同理)
   // 首个带价/排名的成员(组统一资产 → 单价一致):多源组里 a.first 可能是未定价的桥接/孤儿变体,
   // 取「首个有值」而非 a.first,避免头部价格/排名随行序偶发隐藏(与 logoHint 同理)。
   unitPriceHint?: number;
@@ -156,16 +155,13 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     // 24h 择取(deriveHeroMetrics 只看 change24h,不看 value)与列表(挤满小额)。账户详情走
     // toAccountSections 原始余额,仍保留这些行 —— 此处只清「按代币的组合视角」。
     if (a.totalValue <= 0) continue;
-    const g = a.first.group;
     const sources = [...a.sources.values()].sort((x, y) => y.value - x.value);
-    const token = g
-      ? { id: g.id, symbol: g.displaySymbol, name: g.name, logo: g.logo ?? a.logoHint }
-      : {
-          id: a.first.tokenId ?? (a.first.ref ? a.first.ref : undefined),
-          symbol: a.first.symbol,
-          name: a.first.name ?? a.first.symbol,
-          logo: a.first.logo,
-        };
+    const token = {
+      id: a.first.tokenId ?? (a.first.ref ? a.first.ref : undefined),
+      symbol: a.first.symbol,
+      name: a.first.name ?? a.first.symbol,
+      logo: a.first.logo ?? a.logoHint,
+    };
     holdings.push({
       key: a.key,
       token: {

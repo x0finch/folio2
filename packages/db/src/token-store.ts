@@ -1,7 +1,5 @@
 import {
-  GROUP_MEMBERSHIP,
   type ProviderTokenSeed,
-  TOKEN_GROUPS,
   type TokenCandidate,
   type TokenInfo,
   type TokenRecord,
@@ -13,7 +11,7 @@ import { tokenRef } from "@folio/oracle-ref";
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { chunk, IN_CHUNK } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
-import { tokenGroups, tokenIndex, tokenMeta, tokens, tokenVendorIds } from "./schema";
+import { tokenIndex, tokenMeta, tokens, tokenVendorIds } from "./schema";
 
 export interface TokenStoreOpts {
   source: string; // store 绑定的规范源/命名者(如 "coingecko");ref 只对该源的映射成立
@@ -43,41 +41,15 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   const vid = (ref: TokenRef): string => vendorIdOf(ref, source) ?? ref;
   const warmKey = `warm_as_of:${source}`;
 
-  // 展示分组(P2):groupKey 直接当 token_groups.id(text PK,deterministic,免 find-or-create)。
-  const groupIdFor = (vendorId: string): string | null => GROUP_MEMBERSHIP[vendorId] ?? null;
-  const groupUpsert = (groupKey: string): Stmt => {
-    const def = TOKEN_GROUPS[groupKey as keyof typeof TOKEN_GROUPS];
-    return db
-      .insert(tokenGroups)
-      .values({ id: groupKey, displaySymbol: def.displaySymbol, name: def.name })
-      .onConflictDoUpdate({
-        target: tokenGroups.id,
-        set: { displaySymbol: def.displaySymbol, name: def.name },
-      });
-  };
   // 挂本源 vendor 映射(tokenId ← vendorId)。映射稳定,冲突即已存 → DoNothing。
   const vendorMapUpsert = (tokenId: string, vendorId: string): Stmt =>
     db
       .insert(tokenVendorIds)
       .values({ tokenId, vendor: source, vendorId })
       .onConflictDoNothing({ target: [tokenVendorIds.vendor, tokenVendorIds.vendorId] });
-  // 读时 join 出的组列(leftJoin 未命中则各列为 null)。
-  type GrpSel = {
-    id: string | null;
-    displaySymbol: string | null;
-    name: string | null;
-    logo: string | null;
-  };
-  const grpCols = {
-    id: tokenGroups.id,
-    displaySymbol: tokenGroups.displaySymbol,
-    name: tokenGroups.name,
-    logo: tokenGroups.logo,
-  };
-
   // 行 → 领域记录。ref 由本源 vendor 映射的 vendorId 构造(孤儿无映射 → null)。
-  // 价过期不删:读出带 stale(SWR)。grp 命中(id 非空)才挂 group(leftJoin,未命中整体 null)。
-  const toRecord = (r: TokenRow, grp?: GrpSel | null, vendorId?: string | null): TokenRecord => ({
+  // 价过期不删:读出带 stale(SWR)。
+  const toRecord = (r: TokenRow, vendorId?: string | null): TokenRecord => ({
     id: r.id,
     ref: vendorId != null ? mk(vendorId) : null,
     symbol: r.symbol,
@@ -92,15 +64,6 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             change24h: r.change24h ?? undefined,
             asOf: r.priceAsOf,
             stale: (r.priceExpiresAt ?? 0) <= now(),
-          }
-        : undefined,
-    group:
-      grp && grp.id != null && grp.displaySymbol != null && grp.name != null
-        ? {
-            id: grp.id,
-            displaySymbol: grp.displaySymbol,
-            name: grp.name,
-            logo: grp.logo ?? undefined,
           }
         : undefined,
   });
@@ -147,11 +110,8 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const infoExpiresAt = t + infoTtlMs; // name/logo(长)
       const ids = await existingIds(rows.map((r) => vid(r.info.ref)));
       const stmts: Stmt[] = [];
-      const groupKeys = new Set<string>(); // 需 upsert 的组(去重,置于批首满足 FK)
       for (const { info, price } of rows) {
         const id = ids.get(vid(info.ref)) ?? crypto.randomUUID();
-        const groupId = groupIdFor(vid(info.ref));
-        if (groupId) groupKeys.add(groupId);
         stmts.push(
           db
             .insert(tokens)
@@ -161,7 +121,6 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               name: info.name,
               logo: info.logo ?? null,
               marketCapRank: price.marketCapRank ?? null,
-              groupId,
               infoExpiresAt,
               unitPrice: price.unitPrice,
               change24h: price.change24h ?? null,
@@ -176,7 +135,6 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
                 name: info.name,
                 logo: info.logo ?? null,
                 marketCapRank: price.marketCapRank ?? null,
-                groupId,
                 infoExpiresAt,
                 unitPrice: price.unitPrice,
                 change24h: price.change24h ?? null,
@@ -201,8 +159,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           .values({ k: warmKey, v: t })
           .onConflictDoUpdate({ target: tokenMeta.k, set: { v: t } }),
       );
-      // 组行 upsert 置于批首(tokens.group_id → token_groups.id 的 FK 要求组先在)。
-      const [first, ...rest] = [...[...groupKeys].map(groupUpsert), ...stmts];
+      const [first, ...rest] = stmts;
       await db.batch([first, ...rest]);
     },
 
@@ -251,10 +208,9 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const out = new Map<string, TokenRecord & { cgkCheckedUntil: number | null }>();
       for (const ks of chunk(keys, IN_CHUNK)) {
         const rows = await db
-          .select({ idx: tokenIndex, tok: tokens, grp: grpCols, vendorId: tokenVendorIds.vendorId })
+          .select({ idx: tokenIndex, tok: tokens, vendorId: tokenVendorIds.vendorId })
           .from(tokenIndex)
           .innerJoin(tokens, eq(tokens.id, tokenIndex.tokenId))
-          .leftJoin(tokenGroups, eq(tokenGroups.id, tokens.groupId))
           .leftJoin(
             tokenVendorIds,
             and(eq(tokenVendorIds.tokenId, tokens.id), eq(tokenVendorIds.vendor, source)),
@@ -268,7 +224,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
           );
         for (const r of rows) {
           out.set(r.idx.key, {
-            ...toRecord(r.tok, r.grp, r.vendorId),
+            ...toRecord(r.tok, r.vendorId),
             cgkCheckedUntil: r.idx.cgkCheckedUntil,
           });
         }
@@ -369,7 +325,6 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       // 若现指针指向的不是本源 canonical 行(id 不同 → 无本源映射的孤儿),即待合并删除的孤儿。
       const orphan = curRow && curRow.id !== cgkId ? curRow : null;
       const carryLogo = orphan?.providerLogo ?? null;
-      const groupId = groupIdFor(vid(info.ref));
 
       const priceFields = price
         ? {
@@ -389,7 +344,6 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
             name: info.name,
             logo: info.logo ?? null,
             providerLogo: carryLogo,
-            groupId,
             infoExpiresAt: t + ttls.infoTtlMs,
             ...priceFields,
           })
@@ -399,7 +353,6 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               symbol: info.symbol,
               name: info.name,
               logo: info.logo ?? null,
-              groupId,
               infoExpiresAt: t + ttls.infoTtlMs,
               // 备用槽:已有则保留,空才接孤儿的
               providerLogo: sql`coalesce(${tokens.providerLogo}, ${carryLogo})`,
@@ -416,8 +369,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       ];
       // 孤儿行删除(其余索引行 / vendor 映射经 ON DELETE CASCADE 级联)
       if (orphan) stmts.push(db.delete(tokens).where(eq(tokens.id, orphan.id)));
-      // 组行 upsert 置于批首(FK:tokens.group_id → token_groups.id)。
-      const [first, ...rest] = groupId ? [groupUpsert(groupId), ...stmts] : stmts;
+      const [first, ...rest] = stmts;
       await db.batch([first, ...rest]);
     },
 
@@ -426,10 +378,9 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       const vendorIds = refs.map((r) => vendorIdOf(r, source)).filter((id) => id != null);
       for (const ids of chunk(vendorIds, IN_CHUNK)) {
         const rows = await db
-          .select({ tok: tokens, grp: grpCols, vendorId: tokenVendorIds.vendorId })
+          .select({ tok: tokens, vendorId: tokenVendorIds.vendorId })
           .from(tokenVendorIds)
           .innerJoin(tokens, eq(tokens.id, tokenVendorIds.tokenId))
-          .leftJoin(tokenGroups, eq(tokenGroups.id, tokens.groupId))
           .where(
             and(
               eq(tokenVendorIds.vendor, source),
@@ -437,7 +388,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
               gt(tokens.infoExpiresAt, now()),
             ),
           );
-        for (const r of rows) out.set(mk(r.vendorId), toRecord(r.tok, r.grp, r.vendorId));
+        for (const r of rows) out.set(mk(r.vendorId), toRecord(r.tok, r.vendorId));
       }
       return out;
     },
@@ -447,16 +398,15 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
       // 渲染 tokenRef 类持仓的 getByTokenRef 也不门控 info,若这里门控则 info 过期(30d)的
       // 长尾币会渲染出代理 URL 却在此 404。行删除(如升级合并删孤儿)才是唯一的"没有"。
       const rows = await db
-        .select({ tok: tokens, grp: grpCols, vendorId: tokenVendorIds.vendorId })
+        .select({ tok: tokens, vendorId: tokenVendorIds.vendorId })
         .from(tokens)
-        .leftJoin(tokenGroups, eq(tokenGroups.id, tokens.groupId))
         .leftJoin(
           tokenVendorIds,
           and(eq(tokenVendorIds.tokenId, tokens.id), eq(tokenVendorIds.vendor, source)),
         )
         .where(eq(tokens.id, id));
       const r = rows[0];
-      return r ? toRecord(r.tok, r.grp, r.vendorId) : undefined;
+      return r ? toRecord(r.tok, r.vendorId) : undefined;
     },
 
     async putPrices(prices, ttlMs) {

@@ -3,7 +3,7 @@ import { cgkRef, type TokenInfo, type TokenPrice, type TokenRef } from "@folio/o
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTokenStore } from "../src"; // 全局代币缓存:公开独立导出(非 createDb 门面)
 import { getDb } from "../src/client";
-import { tokenGroups, tokenIndex, tokenMeta, tokens, tokenVendorIds } from "../src/schema";
+import { tokenIndex, tokenMeta, tokens, tokenVendorIds } from "../src/schema";
 
 const cg = cgkRef;
 const info = (ref: TokenRef, symbol: string, logo?: string): TokenInfo => ({
@@ -19,14 +19,13 @@ const price = (ref: TokenRef, unitPrice: number, rank?: number): TokenPrice => (
   asOf: 111,
 });
 
-// pool 不隔离每测试存储 → 每测试前清空 token 表(FK 顺序:索引 → tokens → groups)。
+// pool 不隔离每测试存储 → 每测试前清空 token 表(FK 顺序:索引 → tokens)。
 beforeEach(async () => {
   const db = getDb(env);
   await db.batch([
     db.delete(tokenIndex),
     db.delete(tokenVendorIds),
     db.delete(tokens),
-    db.delete(tokenGroups),
     db.delete(tokenMeta),
   ]);
 });
@@ -342,44 +341,23 @@ describe("source bucketing (no userId — partitioned by source)", () => {
   });
 });
 
-describe("token_groups (展示分组挂组,P2/ADR-0001)", () => {
-  const USDT_GROUP = { id: "usdt", displaySymbol: "USDT", name: "Tether USD" };
-
-  it("putWarm 命中种子成员 → 挂组 + 建组行;非成员无组", async () => {
+describe("展示分组已退场(ADR 0021):桥接变体各自独立成行", () => {
+  it("tether 与 usdt0 是两个 Token,不再被任何组串起来", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
     await store.putWarm(
       [
         { info: info(cg("tether"), "USDT"), price: price(cg("tether"), 1, 3) },
-        { info: info(cg("usdt0"), "USDT"), price: price(cg("usdt0"), 1, 300) }, // 桥接变体,同组
-        { info: info(cg("ethereum"), "ETH"), price: price(cg("ethereum"), 3500, 2) }, // 无组
+        { info: info(cg("usdt0"), "USDT"), price: price(cg("usdt0"), 1, 300) }, // 桥接变体
       ],
       TTL,
       TTL,
     );
-    const recs = await store.getByRefs([cg("tether"), cg("usdt0"), cg("ethereum")]);
-    expect(recs.get(cg("tether"))?.group).toEqual(USDT_GROUP);
-    expect(recs.get(cg("usdt0"))?.group).toEqual(USDT_GROUP); // 跨 Token 同一组
-    expect(recs.get(cg("ethereum"))?.group).toBeUndefined();
-    // 组行按 groupKey 去重建了一行
-    const groups = await getDb(env).select().from(tokenGroups);
-    expect(groups).toEqual([{ id: "usdt", displaySymbol: "USDT", name: "Tether USD", logo: null }]);
-  });
-
-  it("getByTokenRef 也带出组(linkTokenRefToCgk 挂组)", async () => {
-    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    const KEY = "eip155:42161/erc20:0xfd0";
-    await store.linkTokenRefToCgk(KEY, info(cg("usdt0"), "USDT", "L"), price(cg("usdt0"), 1), TTLS);
-    expect((await store.getByTokenRef([KEY])).get(KEY)?.group).toEqual(USDT_GROUP);
-  });
-
-  it("身份不在种子 → 无组(不按 symbol 挂组,ADR-0002)", async () => {
-    const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    // symbol 是 USDT 但 cgk id 不在 GROUP_MEMBERSHIP → 绝不挂 USDT 组
-    await store.putWarm(
-      [{ info: info(cg("scam-usdt"), "USDT"), price: price(cg("scam-usdt"), 1, 9000) }],
-      TTL,
-      TTL,
-    );
-    expect((await store.getByRefs([cg("scam-usdt")])).get(cg("scam-usdt"))?.group).toBeUndefined();
+    const recs = await store.getByRefs([cg("tether"), cg("usdt0")]);
+    const tetherId = recs.get(cg("tether"))?.id;
+    const usdt0Id = recs.get(cg("usdt0"))?.id;
+    expect(tetherId).toBeDefined();
+    expect(usdt0Id).toBeDefined();
+    expect(tetherId).not.toBe(usdt0Id); // 同 symbol、同组过 —— 现在只按 tokens.id 论身份
+    expect(await getDb(env).select().from(tokens)).toHaveLength(2);
   });
 });

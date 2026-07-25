@@ -14,7 +14,7 @@ import { defiAssetRef } from "./tokens";
 // 每账户次级分区(不进聚合)。总额 = 各账户最新快照 totalUsd 之和。解析/汇率读时 cache-only。
 
 export interface OverviewDeps {
-  tokens: Tokens; // .enrich:tokenRef → group/ref/price(cache-only)
+  tokens: Tokens; // .enrich:tokenRef → ref/price(cache-only)
   platforms: Platforms; // .resolve:platform key → name+logo(含兜底)——仅链键(chain:/eip155:)
   // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platforms。
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
@@ -125,7 +125,6 @@ export async function buildOverview(
       connectorId: account.connectorId,
       network: account.network,
     },
-    group: e?.group,
     tokenId: e?.id, // 内部代币行 id → 聚合的 vendor 中立归并键(#73)
     ref: e?.ref,
     name: e?.name,
