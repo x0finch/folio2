@@ -7,7 +7,36 @@
 // 包名 `oracle2` 是临时的:写到满意之后它改名接管 `oracle`,老包整个删除(#204)。
 // 在那之前它零消费者、不碰 schema —— 老 oracle 全程照跑,CI 一直绿。
 
+export {
+  cacheKeys,
+  type PlatformMeta,
+  readFx,
+  readPlatform,
+  readWarm,
+  refreshWarm,
+  topTokens,
+  type WarmBlob,
+  warmCandidates,
+  writeFx,
+  writePlatform,
+} from "./cache";
 export type { CgkRefs } from "./cgk-refs";
+export { pickBySymbol } from "./confidence";
+export {
+  CGK_NAMER,
+  DEFAULT_TOP_N,
+  dayBucketOf,
+  FX_TTL_MS,
+  INFO_TTL_MS,
+  MS_PER_DAY,
+  normalizeSymbol,
+  PLATFORM_TTL_MS,
+  PRICE_TTL_MS,
+  RESOLUTION_DOMINANCE,
+  RESOLUTION_TOP_RANK,
+  TOP_TOKENS_LIMIT,
+  WARM_TTL_MS,
+} from "./constants";
 export type { Mint, MintInput } from "./mint";
 export {
   createOracleFor,
@@ -19,9 +48,12 @@ export {
 export type {
   CacheEntry,
   CacheStore,
+  CandidateSource,
   CgkRefStore,
   SourcePrice,
   SourceToken,
+  SymbolCandidate,
+  TokenRefHit,
   TokenSource,
   TokenStore,
 } from "./stores";

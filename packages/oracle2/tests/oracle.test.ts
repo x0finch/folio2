@@ -83,7 +83,9 @@ describe("契约往返(内存假实现)", () => {
     const store = fakeTokenStore();
     const id = await store.create({ symbol: "USDC", name: "USD Coin" }, ["evm:1/0xa0b8"]);
 
-    expect(await store.findByRefs(["evm:1/0xa0b8"])).toEqual(new Map([["evm:1/0xa0b8", id]]));
+    expect(await store.findByRefs(["evm:1/0xa0b8"])).toEqual(
+      new Map([["evm:1/0xa0b8", { tokenId: id, linked: false }]]),
+    );
     expect((await store.getByIds([id])).get(id)).toMatchObject({ symbol: "USDC" });
     expect(await store.getById(id)).toMatchObject({ name: "USD Coin" });
     expect(await store.getById("nope")).toBeUndefined();

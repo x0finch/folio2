@@ -10,10 +10,12 @@ import type {
   TokenInfoPatch,
   TokenPriceWrite,
   TokenRef,
+  TokenRefHit,
   TokenSeed,
   TokenSource,
   TokenStore,
 } from "../src";
+import { CGK_NAMER } from "../src";
 
 // 内存假实现 —— 各片的测试都注这一套。
 // 之所以是内存而不是真 D1:oracle2 这几片**一个字都不碰 schema**(真表留到 expand 那一片),
@@ -47,10 +49,14 @@ export function fakeTokenStore(seedRows: Token[] = []): FakeTokenStore {
     now: now0,
 
     async findByRefs(input) {
-      const out = new Map<TokenRef, string>();
+      // linked = 这个 Token 已经有 `coingecko` 那条 ref(真实现里是一次 join)。
+      const linkedIds = new Set<string>();
+      for (const [ref, id] of refs) if (ref.startsWith(`${CGK_NAMER}/`)) linkedIds.add(id);
+
+      const out = new Map<TokenRef, TokenRefHit>();
       for (const ref of input) {
-        const id = refs.get(ref);
-        if (id) out.set(ref, id);
+        const tokenId = refs.get(ref);
+        if (tokenId) out.set(ref, { tokenId, linked: linkedIds.has(tokenId) });
       }
       return out;
     },
@@ -66,9 +72,13 @@ export function fakeTokenStore(seedRows: Token[] = []): FakeTokenStore {
       }
       seq += 1;
       const id = `tk_${seq}`;
-      rows.set(id, { id, symbol: seed.symbol, name: seed.name ?? seed.symbol, logo: undefined });
-      const row = rows.get(id);
-      if (row && seed.logo) row.providerLogo = seed.logo;
+      // provider 的图落 providerLogo(备用槽);`logo` 是 CoinGecko 那一槽,留给后补。
+      rows.set(id, {
+        id,
+        symbol: seed.symbol,
+        name: seed.name ?? seed.symbol,
+        providerLogo: seed.logo,
+      });
       for (const ref of newRefs) refs.set(ref, id);
       return id;
     },

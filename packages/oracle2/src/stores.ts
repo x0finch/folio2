@@ -15,10 +15,18 @@ import type {
 // 拿错用户在编译期就发生不了,而服务代码也不必到处传一个它根本不该关心的东西。
 // 唯一的例外是 `CgkRefStore` —— 它是**全局**的公开知识(哪个合约是哪个币),本来就与用户无关。
 
+// 一条 ref 已经有主了。`linked` = 它指向的那个 Token **已经有 `coingecko` 那条 ref**
+// —— 也就是已经认出来是哪个币了。mint 靠它区分「什么都不用做」与「该补链/该合并」,
+// 免得每次同步都替所有已知的 ref 白查一遍 `cgk_refs`。
+export interface TokenRefHit {
+  tokenId: string;
+  linked: boolean;
+}
+
 // —— per-user 代币表 ——
 export interface TokenStore {
   // mint 第一步:一批 tokenRef 里,哪些已经有 Token 了。绝大多数同步都停在这里。
-  findByRefs(refs: readonly TokenRef[]): Promise<Map<TokenRef, string>>;
+  findByRefs(refs: readonly TokenRef[]): Promise<Map<TokenRef, TokenRefHit>>;
 
   // 建一个新 Token 并挂上这些 ref。**幂等**:账户是并发跑的,同一条 ref 会被同时 mint →
   // 实现须 upsert-then-read,返回最终生效的那个 id(可能不是本次新建的那个)。
@@ -77,6 +85,19 @@ export interface CacheStore {
 export interface CacheEntry {
   value: unknown;
   stale: boolean;
+}
+
+// —— symbol 消歧的候选源 ——
+// 候选恒是 warm 集的子集 → 由 cache 从同一个 blob 里筛(见 cache.ts),**不单独存一份**。
+// 之所以做成一个端口而不是让 mint 直接读 cache:mint 因此在类型上就够不着网络(见 mint.ts)。
+export interface CandidateSource {
+  bySymbol(symbol: string): Promise<SymbolCandidate[]>;
+}
+
+// 某个 symbol 在上游对应的一个币,带市值排名(消歧门控的输入)。
+export interface SymbolCandidate {
+  coinId: string;
+  marketCapRank?: number;
 }
 
 // —— 上游(网络)——

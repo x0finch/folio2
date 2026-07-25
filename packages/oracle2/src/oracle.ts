@@ -1,3 +1,4 @@
+import { warmCandidates } from "./cache";
 import { type CgkRefs, createCgkRefs } from "./cgk-refs";
 import { createMint, type Mint } from "./mint";
 import type { CacheStore, CgkRefStore, TokenSource, TokenStore } from "./stores";
@@ -15,6 +16,9 @@ export interface OracleStores {
 export interface OracleConfig {
   stores: OracleStores;
   source: TokenSource;
+  // symbol → CoinGecko coin id 的策展小表(majors + 已知撞名)。由上游适配器提供 —— 它是
+  // vendor 知识,不该硬编码在 vendor 中立的这一层。
+  overrides?: Readonly<Record<string, string>>;
 }
 
 // 一个用户的参考层。三个子服务:
@@ -57,7 +61,8 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
         mint ??= createMint({
           store: cfg.stores.tokens(userId),
           cgkRefs: cfg.stores.cgkRefs(),
-          source: cfg.source,
+          candidates: warmCandidates(cfg.stores.cache(userId)),
+          overrides: cfg.overrides,
         });
         return mint;
       },
