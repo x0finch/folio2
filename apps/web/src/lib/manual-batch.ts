@@ -34,8 +34,9 @@ export interface Token {
   activities: DerivableActivity[];
 }
 
-// 草稿引用的 token(选币结果:symbol + 市价单价 + 可选标识)。可指向尚未持有的 token → 现建。
-export interface TokenRef {
+// 草稿指向的**选中币**(symbol + 市价单价 + 可选 CGK id)。可指向尚未持有的 token → 现建。
+// 与 tokenRef(代币命名法,见 @folio/oracle-ref)无关 —— 这是 server fn 入参,不是代币身份串。
+export interface PickedTokenInput {
   symbol: string;
   unitPrice: number;
   identifier?: string | null;
@@ -43,7 +44,7 @@ export interface TokenRef {
 
 // 一条批量草稿:token 引用 + 活动字段(createdAt 不由客户端定,服务端按提交序赋值)。
 export interface BatchDraft {
-  token: TokenRef;
+  token: PickedTokenInput;
   kind: ManualActivityKind;
   amount: number;
   occurredAt: number;
@@ -74,7 +75,7 @@ export type BatchPlan =
 
 // 按 identifier(优先,精确)匹配,退回大写 symbol(仅在无 identifier 时,匹配同样 identifier-less 的 token)。
 // 带 identifier 的 ref 只按 identifier 命中,不自动收养 symbol-only 同名(与建账户/物化的身份归一一致)。
-export function findToken(tokens: Token[], ref: TokenRef): Token | undefined {
+export function findToken(tokens: Token[], ref: PickedTokenInput): Token | undefined {
   if (ref.identifier) return tokens.find((t) => t.identifier === ref.identifier);
   const sym = ref.symbol.toUpperCase();
   return tokens.find((t) => !t.identifier && t.symbol.toUpperCase() === sym);
