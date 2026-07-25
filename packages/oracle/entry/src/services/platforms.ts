@@ -11,8 +11,10 @@ const CHAIN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const VENUE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const VENUE_NEG_TTL_MS = 24 * 60 * 60 * 1000;
 
-const isChainKey = (k: string): boolean => k.startsWith("eip155:") || k.startsWith("chain:");
+// 平台键(ADR 0020 起链键用短形,与 tokenRef 的命名者同形):场馆键带前缀 `exchange:`/`perp:`,
+// 链键不带(`eip155:<id>` / `<slug>`)→ 非场馆即链。
 const isVenueKey = (k: string): boolean => k.startsWith("exchange:") || k.startsWith("perp:");
+const isChainKey = (k: string): boolean => !isVenueKey(k);
 
 const cap = (s: string): string => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 

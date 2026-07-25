@@ -46,12 +46,6 @@ export {
 export { parseRefKey, refKey } from "./ref";
 export type { TokenPriceHistoryStore, TokenStore } from "./store";
 export type { PriceSource, TokenMetaSource, TokenSource } from "./token";
-export {
-  buildTokenKey,
-  type ParsedTokenKey,
-  parseTokenKey,
-  type TokenKeyInput,
-} from "./token-key";
 export type {
   AssetRef,
   CgkCoinId,

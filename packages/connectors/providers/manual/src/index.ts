@@ -1,5 +1,5 @@
 import type { BalanceProvider, CredField, Spot } from "@folio/connectors-basic";
-import { buildTokenKey } from "@folio/tokens-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { z } from "zod";
 
 // @folio/connectors-provider-manual —— 手动资产(manual connector 的 provider)。无外部 API:一个账户
@@ -53,8 +53,11 @@ export const manualProvider: BalanceProvider<Spot, typeof manualAccountCreds> = 
         price: t.unitPrice,
         value: t.amount * t.unitPrice,
         kind: "spot",
-        // 用户选定的 CGK id = 厂商寻址身份 → tokenKey(coingecko:<id>);未选币则无标识,按 symbol 归一。
-        ...(t.identifier ? { tokenKey: buildTokenKey({ cgkId: t.identifier }) } : {}),
+        // 用户选定的 CGK id = 厂商寻址身份 → tokenRef(coingecko/<id>);未选币则无标识,按 symbol 归一。
+        ...(t.identifier
+          ? // CGK coin id 规范为小写 kebab;归一在生产者这一侧做(oracle-ref 对不透明 id 原样透传)。
+            { tokenKey: tokenRef.opaque("coingecko", t.identifier.toLowerCase()) }
+          : {}),
       })),
     };
   },

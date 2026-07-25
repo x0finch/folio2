@@ -21,7 +21,7 @@ import {
   ProviderError,
   type Spot,
 } from "@folio/connectors-basic";
-import { buildTokenKey } from "@folio/tokens-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { z } from "zod";
 import { BTC_ADDRESS_RE, EXT_PUBKEY_FULL_RE, EXT_PUBKEY_RE, SATS_PER_BTC } from "./constants";
 
@@ -46,8 +46,8 @@ interface BtcReceive {
 // 值不在此算:provider 只产已确认 BTC amount(value=0),交 app 的 revalue 盯市(token 层唯一价源)。
 // 纯包:blockbook-client / bitcoin-derive 均无 cloudflare:workers / env,不碰 SECRETS_KEY(原则 #5)。
 
-// BTC 身份键:chain:bitcoin/native:btc(仅作身份 + 平台归属 → "Bitcoin")。
-export const BTC_TOKEN_KEY = buildTokenKey({ chain: "bitcoin", native: true, symbol: "BTC" });
+// BTC 身份键:bitcoin/native(仅作身份 + 平台归属 → "Bitcoin")。
+export const BTC_TOKEN_KEY = tokenRef.native("bitcoin");
 
 const toSats = (s: string | undefined): number => {
   const n = Number(s ?? "0");

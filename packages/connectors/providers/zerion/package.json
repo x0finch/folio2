@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@folio/connectors-basic": "workspace:*",
-    "@folio/tokens-basic": "workspace:*",
+    "@folio/oracle-ref": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {

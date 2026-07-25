@@ -6,6 +6,7 @@ import {
   parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { z } from "zod";
 import {
   AUTH_ERROR_CODES,
@@ -39,6 +40,9 @@ interface OkxBalanceResponse {
 const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 8 });
 
 // 纯解析:details[] → Spot[]。与 IO 分离,golden test。
+// 场馆命名者 = connectorId(与 manifest 的 `id` 同源,不许两处各写一遍)。
+const PROVIDER_ID = "okx";
+
 // amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
 // 冻结 note(note 重设计,balance 级单个 Note):frozenBal>0 的币,在【它自己那笔 balance】上挂一个
 // `Frozen` 段(icon warning;content 一行内联文案 `${冻结数量} ${币种} · ${占该币总持有的百分比}`,
@@ -57,6 +61,8 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
       price: Number(d.eqUsd ?? 0) / amount,
       value: Number(d.eqUsd ?? 0),
       kind: "spot",
+      // 场馆命名:OKX 管这个币叫 `ccy`。symbol 大写归一由本 provider 负责(见 @folio/oracle-ref)。
+      tokenKey: tokenRef.opaque(PROVIDER_ID, ccy.trim().toUpperCase()),
     };
     if (frozen > 0) {
       const pct = amount > 0 ? Math.round((frozen / amount) * 100) : 0;
@@ -136,7 +142,7 @@ export const okxAccountCreds = [
 ] as const satisfies readonly CredField[];
 
 export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
-  id: "okx",
+  id: PROVIDER_ID,
   label: "OKX",
   // 无全局 provider key —— 账户自己的 apiKey/secret/passphrase 即凭据,走 account.creds。
   creds: [],

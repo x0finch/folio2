@@ -289,4 +289,53 @@ describe("buildCanonicalHoldings", () => {
     expect(hs).toHaveLength(1);
     expect(hs[0]!.totalValue).toBe(5);
   });
+
+  // ADR 0020:场馆开始产 tokenRef(`binance/USDC`)后,同一交易所的同名币有了正规身份 →
+  // 跨账户合并(此前落 `as:<accountId>:<symbol>`,每个账户各成一行)。
+  it("同交易所跨账户同名币 → 合并成一行(此前按账户拆)", () => {
+    const binance2 = { id: "b2", label: "Binance 2", connectorId: "binance" };
+    const hs = buildCanonicalHoldings([
+      row({ symbol: "USDC", amount: 100, value: 100, tokenKey: "binance/USDC", account: binance }),
+      row({ symbol: "USDC", amount: 40, value: 40, tokenKey: "binance/USDC", account: binance2 }),
+    ]);
+    expect(hs).toHaveLength(1);
+    expect(hs[0]!.key).toBe("tk:binance/USDC");
+    expect(hs[0]!.totalValue).toBe(140);
+  });
+
+  // 但跨交易所仍不合并:命名者不同 → ref 不同。要合必须先各自解析到同一个 tokens.id(ADR 0002)。
+  it("跨交易所同名币 → 仍是两行(未解析前不按 symbol 归并)", () => {
+    const hs = buildCanonicalHoldings([
+      row({ symbol: "BTC", amount: 1, value: 60, tokenKey: "binance/BTC", account: binance }),
+      row({ symbol: "BTC", amount: 2, value: 120, tokenKey: "hyperliquid/BTC", account: hyper }),
+    ]);
+    expect(hs.map((h) => h.key).sort()).toEqual(["tk:binance/BTC", "tk:hyperliquid/BTC"]);
+  });
+
+  // 场馆 ref 是不透明 id 形 → 不是链 → 平台单元仍落连接器本身,与迁移前一致。
+  it("场馆 ref 不改变平台归属(仍是 connectorId)", () => {
+    const hs = buildCanonicalHoldings([
+      row({ symbol: "USDC", amount: 100, value: 100, tokenKey: "binance/USDC", account: binance }),
+    ]);
+    expect(hs[0]!.sources.map((s) => s.platform.id)).toEqual(["binance"]);
+  });
+
+  // 链上 ref 的平台单元 = 短形命名者(此前是 `chain:bitcoin`)。
+  it("链上 ref 的平台单元 = tokenRef 的链命名者(短形)", () => {
+    const btc = { id: "x1", label: "BTC wallet", connectorId: "bitcoin" };
+    const hs = buildCanonicalHoldings([
+      row({ symbol: "BTC", amount: 1, value: 60, tokenKey: "bitcoin/native", account: btc }),
+      row({
+        symbol: "ETH",
+        amount: 1,
+        value: 30,
+        tokenKey: "eip155:1/erc20:0xabc",
+        account: zerion,
+      }),
+    ]);
+    expect(hs.flatMap((h) => h.sources.map((s) => s.platform.id)).sort()).toEqual([
+      "bitcoin",
+      "eip155:1",
+    ]);
+  });
 });

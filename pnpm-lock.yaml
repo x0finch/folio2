@@ -41,6 +41,9 @@ importers:
       '@folio/oracle-basic':
         specifier: workspace:*
         version: link:../../packages/oracle/basic
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../../packages/oracle/ref
       '@folio/sync':
         specifier: workspace:*
         version: link:../../packages/sync
@@ -258,6 +261,9 @@ importers:
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../../basic
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../../../oracle/ref
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -280,9 +286,9 @@ importers:
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../../basic
-      '@folio/tokens-basic':
+      '@folio/oracle-ref':
         specifier: workspace:*
-        version: link:../../../tokens/basic
+        version: link:../../../oracle/ref
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -299,9 +305,9 @@ importers:
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../../basic
-      '@folio/tokens-basic':
+      '@folio/oracle-ref':
         specifier: workspace:*
-        version: link:../../../tokens/basic
+        version: link:../../../oracle/ref
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -318,6 +324,9 @@ importers:
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../../basic
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../../../oracle/ref
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -334,9 +343,9 @@ importers:
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../../basic
-      '@folio/tokens-basic':
+      '@folio/oracle-ref':
         specifier: workspace:*
-        version: link:../../../tokens/basic
+        version: link:../../../oracle/ref
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -353,6 +362,9 @@ importers:
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../../basic
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../../../oracle/ref
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -369,9 +381,9 @@ importers:
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../../basic
-      '@folio/tokens-basic':
+      '@folio/oracle-ref':
         specifier: workspace:*
-        version: link:../../../tokens/basic
+        version: link:../../../oracle/ref
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -440,6 +452,9 @@ importers:
       '@folio/oracle-basic':
         specifier: workspace:*
         version: link:../basic
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../ref
       '@folio/oracle-source-coingecko':
         specifier: workspace:*
         version: link:../sources/coingecko

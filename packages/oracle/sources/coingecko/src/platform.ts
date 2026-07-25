@@ -29,8 +29,8 @@ export function createCoinGeckoPlatformSource(config: CoinGeckoConfig = {}): Pla
         if (!p?.id) continue;
         const name = p.name?.trim() || p.id;
         const logo = p.image?.small ?? p.image?.thumb ?? undefined;
-        // 每条链产 chain:<slug>;有数字 chainId 再产 eip155:<id>(两种 platformKey 都覆盖)。
-        out.push({ key: `chain:${p.id.toLowerCase()}`, name, logo });
+        // 每条链产短形 slug;有数字 chainId 再产 eip155:<id>(两种 platformKey 都覆盖)。
+        out.push({ key: p.id.toLowerCase(), name, logo });
         if (p.chain_identifier != null && Number.isFinite(p.chain_identifier)) {
           out.push({ key: `eip155:${p.chain_identifier}`, name, logo });
         }

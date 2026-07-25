@@ -23,6 +23,7 @@
     "@folio/db": "workspace:*",
     "@folio/oracle": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
+    "@folio/oracle-ref": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/tokens": "workspace:*",
     "@folio/ui": "workspace:*",

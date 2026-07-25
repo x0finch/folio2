@@ -6,7 +6,7 @@ import {
   parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
-import { buildTokenKey } from "@folio/tokens-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { z } from "zod";
 
 // @folio/connectors-provider-zerion — zerion provider(evm connector 用)。只读地址,一次取回跨所有
@@ -87,6 +87,14 @@ export function parseChainIds(res: ZerionChainsResponse): Record<string, number>
   return out;
 }
 
+// EVM 持仓的 tokenRef:命名者恒为 `eip155:<chainId>`(数字 chainId 由 getChainIds 保证)。
+// 合约币 → `erc20:<addr>`;原生 gas 币 → `native`;两者都不是(该链无实现)→ 不产标识。
+function evmTokenRef(chainId: number, contract: string | undefined, native: boolean) {
+  const namer = `eip155:${chainId}`;
+  if (contract) return tokenRef.contract(namer, "erc20", contract);
+  return native ? tokenRef.native(namer) : undefined;
+}
+
 // 纯解析:Zerion positions → Row[]。与 IO 分离,便于 golden test。
 // 规则:跳过 displayable=false(垃圾/隐藏);无 symbol 跳过;position_type!=="wallet"
 // 或带 protocol → defi,否则 spot;value 缺失记 0。
@@ -127,12 +135,7 @@ export function parsePositions(
       amount: sign * Math.abs(a.quantity?.float ?? 0),
       price: a.price ?? undefined,
       value: sign * Math.abs(a.value ?? 0),
-      tokenKey: buildTokenKey({
-        chainId,
-        contract,
-        native: impl != null && impl.address == null, // 有该链实现但无合约 → 原生币
-        symbol,
-      }),
+      tokenKey: evmTokenRef(chainId, contract, impl != null && impl.address == null),
       name: a.fungible_info?.name,
       logo: a.fungible_info?.icon?.url,
     };

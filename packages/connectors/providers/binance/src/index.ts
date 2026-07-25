@@ -6,6 +6,7 @@ import {
   parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { z } from "zod";
 import {
   ACCOUNT_PATH,
@@ -39,6 +40,9 @@ interface TickerPrice {
 // 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
 const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 8 });
 
+// 场馆命名者 = connectorId(与 manifest 的 `id` 同源,不许两处各写一遍)。
+const PROVIDER_ID = "binance";
+
 // 纯解析:account.balances + 价格表(symbol→price)→ Spot[]。与 IO 分离,golden test。
 // amount = free + locked;跳过 ≤0;usdValue:稳定币≈1,否则 amount × price(`${asset}USDT`),无对→0。
 // 锁仓 note(note 重设计,balance 级单个 Note):locked>0 的币,在【它自己那笔 balance】上挂一个
@@ -57,7 +61,15 @@ export function parseAccountBalances(
     if (!(amount > 0)) continue;
     const price = STABLECOINS.has(asset) ? 1 : (prices[`${asset}${QUOTE_ASSET}`] ?? undefined);
     const usdValue = price != null ? amount * price : 0;
-    const row: Spot = { symbol: asset, amount, price, value: usdValue, kind: "spot" };
+    const row: Spot = {
+      symbol: asset,
+      amount,
+      price,
+      value: usdValue,
+      kind: "spot",
+      // 场馆命名:币安管这个币叫 `asset`。symbol 大写归一由本 provider 负责(见 @folio/oracle-ref)。
+      tokenKey: tokenRef.opaque(PROVIDER_ID, asset.trim().toUpperCase()),
+    };
     if (locked > 0) {
       const pct = amount > 0 ? Math.round((locked / amount) * 100) : 0;
       row.note = {
@@ -114,7 +126,7 @@ export const binanceAccountCreds = [
 ] as const satisfies readonly CredField[];
 
 export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> = {
-  id: "binance",
+  id: PROVIDER_ID,
   label: "Binance",
   // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据,走 account.creds。
   creds: [],

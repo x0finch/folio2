@@ -14,9 +14,17 @@ _Avoid_: asset, coin(泛指时)
 首屏聚合行的身份单位 —— 产品自有的展示家族,可跨多个 Token(如 USDT 家族含 tether + usdt0 + 桥接变体)。没有分组的 Token = 自身单例组。
 _Avoid_: CanonicalHolding, canonical token(组不是"单个规范币")
 
-**tokenKey**:
-Balance 携带、也是代币参考层索引键的**代币寻址标识**(CAIP-19 文法:`eip155:…/erc20:…` / `chain:…/token:…` / `native` / `coingecko:…`)。数据源给的**无歧义**寻址;拿不到时为空(退化按 symbol 解析)。
-_Avoid_: tokenIdentifier, impl key, caip19(旧称,已统一)
+**tokenRef**:
+全系统唯一的代币命名法(ADR 0020):`<namer>/<localName>`,恰好两段,第一个斜杠切分。表达「**谁**、管这个 token 叫**什么**」——
+`eip155:42161/erc20:0xaf88…`、`bitcoin/native`、`solana/token:EPjF…`、`coingecko/usd-coin`、`binance/USDC`。
+一个 token 可有多条 tokenRef(每个命名者一条),故是多对一。文法 + 归一由 `@folio/oracle-ref` 独占实现。
+字段名仍叫 `tokenKey`(Balance / `snapshot_balances.token_key`),值是 tokenRef。
+_Avoid_: tokenKey(作为概念名,已由 tokenRef 取代)、caip19、impl key、tokenIdentifier
+
+**namer**:
+tokenRef 的左半边 = **命名者**。对 `@folio/oracle-ref` 不透明:包不判断它是链、场馆还是数据源
+(右半边自己说明了自己)。链命名者同时就是 `platforms.id`(短形:`eip155:<id>` / `<slug>`)。
+_Avoid_: namespace, platformKey(platform 是 namer 的子集,不等同)
 
 ### 持仓与聚合
 

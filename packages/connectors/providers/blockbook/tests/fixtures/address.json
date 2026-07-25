@@ -13,7 +13,7 @@
       "amount": 0.08,
       "value": 0,
       "kind": "spot",
-      "tokenKey": "chain:bitcoin/native:btc"
+      "tokenKey": "bitcoin/native"
     }
   ]
 }
