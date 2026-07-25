@@ -20,7 +20,7 @@ export function tokenLogoUrl(e: LogoSource): string | undefined {
   return e.logo ?? e.providerLogo;
 }
 
-// 平台 logo:平台 key 本身即稳定 id(如 chain:bitcoin / eip155:1 / exchange:binance,含 `:`)。
+// 平台 logo:平台 key 本身即稳定 id(如 bitcoin / evm:1 / exchange:binance,可能含 `:`)。
 // 有上游图 → 代理为 `/api/logo/platform/<key>`;无图 → undefined(客户端 fallback,不发请求)。见 #20。
 export function platformLogoUrl(key: string, logo?: string): string | undefined {
   if (!logo) return undefined;

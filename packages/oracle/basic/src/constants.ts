@@ -1,5 +1,21 @@
 import type { TokenRef } from "./types";
-import { cgkRef as cg } from "./vendor";
+import { CGK_VENDOR, cgkRef as cg } from "./vendor";
+
+// —— 「这个命名者是不是一条链」的临时判据(ADR 0021 / #192)——
+// 文法收窄前,`native` / `<assetNs>:<addr>` 的形状自己就说明了「这是链上寻址」;去掉 assetNs 后
+// `evm:1/0xa0b8…` 与 `binance/USDC` 在串上不可分辨。真正的答案是**平台由 provider 随余额直接报**
+// (#193),届时本表连同所有 `chainOf` 式判断一起删除。在那之前用「非链命名者」的反向名单兜着 ——
+// 它短、稳定,且比按形状猜更诚实:场馆(CEX / perp DEX)与数据源各自只有这几个。
+// 注:`manual` 不在此 —— 手记从不作命名者,它的持仓报的是 `coingecko/<id>`。
+const NON_CHAIN_NAMERS: ReadonlySet<string> = new Set([
+  CGK_VENDOR,
+  "binance",
+  "okx",
+  "hyperliquid",
+]);
+
+// tokenRef 的这个命名者是一条链吗(而不是场馆 / 数据源)。
+export const isChainNamer = (namer: string): boolean => !NON_CHAIN_NAMERS.has(namer);
 
 // symbol → 规范 `TokenRef` 的策展小表:majors + 已知撞名,优先于市值排名(防山寨撞名)。
 // 键须为 `normalizeSymbol` 输出(大写)。大头仍靠 (链,合约) 与显式 identifier;此表只兜 symbol 来源。

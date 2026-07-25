@@ -5,7 +5,6 @@
 
 export {
   formatTokenRef,
-  normalizeAddress,
   type ParsedTokenRef,
   parseTokenRef,
   type TokenRef,

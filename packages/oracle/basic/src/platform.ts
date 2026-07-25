@@ -1,5 +1,5 @@
 // 平台 = 持仓所在的链或场馆(chain ∪ venue),见 CONTEXT.md「Platform」。
-// platformKey 文法:eip155:<chainId> / chain:<slug> / exchange:<slug> / perp:<slug>。
+// platformKey 文法:evm:<chainId> / <slug> / exchange:<slug> / perp:<slug>(链键与 tokenRef 命名者同形)。
 
 export interface PlatformMeta {
   key: string;

@@ -7,6 +7,7 @@ export {
   DEFAULT_TOP_N,
   dayBucketOf,
   INFO_TTL_MS,
+  isChainNamer,
   MS_PER_DAY,
   OVERRIDES,
   PRICE_TTL_MS,

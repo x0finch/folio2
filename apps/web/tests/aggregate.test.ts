@@ -24,7 +24,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 1000,
         value: 1000,
-        tokenRef: "eip155:1/erc20:0xdac",
+        tokenRef: "evm:1/0xdac",
         account: zerion,
         ref: cg("tether"),
       }),
@@ -32,7 +32,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 500,
         value: 500,
-        tokenRef: "eip155:42161/erc20:0xfd0",
+        tokenRef: "evm:42161/0xfd0",
         account: zerion,
         ref: cg("usdt0"),
       }),
@@ -60,7 +60,7 @@ describe("buildCanonicalHoldings", () => {
     expect(h.totalAmount).toBe(3100); // 同一 Token 的多源(链 + 交易所 + manual)合计总枚数
     // aggregate 只产 platform.id(key);name 仅为 key 占位,真名/logo 由 server 读路径
     // platforms.resolve 装饰(平台"显示成什么"整个归 @folio/platforms)。
-    const ids = ["binance", "eip155:1", "manual"]; // value 降序(场馆键 = connectorId)
+    const ids = ["binance", "evm:1", "manual"]; // value 降序(场馆键 = connectorId)
     expect(h.sources.map((s) => s.platform.id)).toEqual(ids);
     expect(h.sources.map((s) => s.platform.name)).toEqual(ids); // name == key 占位
     // 桥接变体自成一行,两行合计 = 未分组前的总额
@@ -74,7 +74,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 1000,
         value: 1000,
-        tokenRef: "eip155:1/erc20:0xa0b",
+        tokenRef: "evm:1/0xa0b",
         account: zerion,
         ref: cg("usd-coin"),
       }),
@@ -82,7 +82,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 500,
         value: 500,
-        tokenRef: "eip155:42161/erc20:0xaf8",
+        tokenRef: "evm:42161/0xaf8",
         account: zerion,
         ref: cg("usd-coin"),
       }),
@@ -117,7 +117,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 100,
         value: 100,
-        tokenRef: "eip155:43114/erc20:0xc7",
+        tokenRef: "evm:43114/0xc7",
         account: zerion,
         ref: cg("usdt-avalanche"),
       }), // 另一个身份 → 另成一行
@@ -162,7 +162,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 100,
         value: 100,
-        tokenRef: "eip155:1/erc20:0xa0b",
+        tokenRef: "evm:1/0xa0b",
         account: zerion,
         ref: cg("usd-coin"),
       }),
@@ -170,7 +170,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 50,
         value: 50,
-        tokenRef: "eip155:1/erc20:0xa0b",
+        tokenRef: "evm:1/0xa0b",
         account: zerion,
         ref: cg("usd-coin"),
       }),
@@ -318,13 +318,13 @@ describe("buildCanonicalHoldings", () => {
         symbol: "ETH",
         amount: 1,
         value: 30,
-        tokenRef: "eip155:1/erc20:0xabc",
+        tokenRef: "evm:1/0xabc",
         account: zerion,
       }),
     ]);
     expect(hs.flatMap((h) => h.sources.map((s) => s.platform.id)).sort()).toEqual([
       "bitcoin",
-      "eip155:1",
+      "evm:1",
     ]);
   });
 });

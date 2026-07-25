@@ -4,6 +4,7 @@ import {
   cgkRef,
   DEFAULT_TOP_N,
   INFO_TTL_MS,
+  isChainNamer,
   PRICE_TTL_MS,
   type Resolution,
   type ResolvableAsset,
@@ -13,7 +14,7 @@ import {
   type TokenStore,
   WARM_TTL_MS,
 } from "@folio/oracle-basic";
-import { parseTokenRef } from "@folio/oracle-ref";
+import { type ParsedTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { normalizeSymbol } from "./normalize";
 import { chooseResolution } from "./resolve";
 
@@ -33,9 +34,17 @@ export interface ResolveOpts {
 // 命中则升级合并(linkTokenRefToCgk),未收录则 seed 孤儿 + 记复查时刻(期间 source 数据照常展示)。
 // 命名者 → 喂 `fetchByContract` 的链引用:EVM 给数字 chainId(比 slug 更可靠地命中 CGK 平台),
 // 其余给 slug 本身。
-const EVM_NAMER_PREFIX = "eip155:";
+const EVM_NAMER_PREFIX = "evm:";
 const chainRefOf = (namer: string): string =>
   namer.startsWith(EVM_NAMER_PREFIX) ? namer.slice(EVM_NAMER_PREFIX.length) : namer;
+
+// 这条 tokenRef 是「某条链上的某个地址」吗 —— 只有这种才值得拿去问 CGK 的合约端点。
+// 文法收窄后串上分辨不出(`evm:1/0xa0b8…` 与 `binance/USDC` 同形),故改问命名者(isChainNamer);
+// 场馆命名(binance/USDC)照旧掉回 symbol 消歧,跨交易所同名币仍并成一行。
+const isChainAddress = (
+  parsed: ParsedTokenRef | undefined,
+): parsed is { kind: "local"; namer: string; localName: string } =>
+  parsed?.kind === "local" && isChainNamer(parsed.namer);
 
 export async function resolveAsset(
   asset: ResolvableAsset,
@@ -51,9 +60,9 @@ export async function resolveAsset(
   const parsed = key ? parseTokenRef(key) : undefined;
   // `coingecko/<id>` 形的 tokenRef 本身就是规范 ref(厂商寻址,如 manual 用户选币)→ 直接命中,
   // 不查索引、不掉回 symbol。等同显式 ref。其余场馆命名(binance/USDC 等)不是规范 ref,照走索引/symbol。
-  if (parsed?.kind === "opaque" && parsed.namer === CGK_VENDOR) {
+  if (parsed?.kind === "local" && parsed.namer === CGK_VENDOR) {
     return {
-      ref: cgkRef(parsed.id),
+      ref: cgkRef(parsed.localName),
       confidence: "high",
       via: "explicit",
     };
@@ -62,9 +71,9 @@ export async function resolveAsset(
     const rec = (await deps.store.getByTokenRef([key])).get(key);
     if (rec?.ref) {
       contractHit = rec.ref;
-    } else if (lazy && parsed?.kind === "contract" && (rec?.cgkCheckedUntil ?? 0) <= Date.now()) {
-      // 反查用命名者(eip155:<id> 的数字 chainId 更可靠地命中 CGK 平台;非 EVM 链给 slug)。
-      const res = await deps.source.fetchByContract(chainRefOf(parsed.namer), parsed.address);
+    } else if (lazy && isChainAddress(parsed) && (rec?.cgkCheckedUntil ?? 0) <= Date.now()) {
+      // 反查用命名者(evm:<id> 的数字 chainId 更可靠地命中 CGK 平台;非 EVM 链给 slug)。
+      const res = await deps.source.fetchByContract(chainRefOf(parsed.namer), parsed.localName);
       if (res) {
         await deps.store.linkTokenRefToCgk(key, res.info, res.price, {
           indexTtlMs: TOKEN_REF_TTL_MS,

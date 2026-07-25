@@ -75,7 +75,7 @@ interface ZerionChainsResponse {
 // 本 connector 会吐的 kind 子集:spot | defi。
 type Row = z.infer<typeof Spot> | z.infer<typeof Defi>;
 
-// 链清单 → slug→数字 chainId(external_id hex → 十进制)。tokenRef 的 eip155 标准形靠它。
+// 链清单 → slug→数字 chainId(external_id hex → 十进制)。tokenRef 的 `evm:<chainId>` 命名者靠它。
 export function parseChainIds(res: ZerionChainsResponse): Record<string, number> {
   const out: Record<string, number> = {};
   for (const c of res.data ?? []) {
@@ -87,11 +87,11 @@ export function parseChainIds(res: ZerionChainsResponse): Record<string, number>
   return out;
 }
 
-// EVM 持仓的 tokenRef:命名者恒为 `eip155:<chainId>`(数字 chainId 由 getChainIds 保证)。
-// 合约币 → `erc20:<addr>`;原生 gas 币 → `native`;两者都不是(该链无实现)→ 不产标识。
+// EVM 持仓的 tokenRef:命名者恒为 `evm:<chainId>`(数字 chainId 由 getChainIds 保证)。
+// 合约币 → `<addr>`;原生 gas 币 → `native`;两者都不是(该链无实现)→ 不产标识。
 function evmTokenRef(chainId: number, contract: string | undefined, native: boolean) {
-  const namer = `eip155:${chainId}`;
-  if (contract) return tokenRef.contract(namer, "erc20", contract);
+  const namer = `evm:${chainId}`;
+  if (contract) return tokenRef.local(namer, contract);
   return native ? tokenRef.native(namer) : undefined;
 }
 
@@ -100,7 +100,7 @@ function evmTokenRef(chainId: number, contract: string | undefined, native: bool
 // 或带 protocol → defi,否则 spot;value 缺失记 0。
 // kind 契约(新 Balance):spot 无 meta;defi 带 meta:{protocol,positionType}(展示字段)。
 // 链/合约身份走 tokenRef,不再进 meta。
-// 代币标识:implementations 里当前链那条的 address + 数字 chainId → 规范 eip155 CAIP-19。
+// 代币标识:implementations 里当前链那条的 address + 数字 chainId → 规范 `evm:<chainId>` 命名。
 // chainIds 必传(由 getChainIds 保证非空):某仓位的链拿不到数字 chainId 就【抛错】——
 // 绝不退化成 chain:<slug> 兜底形(那会与规范形分裂身份、污染代币索引),失败即不产、整轮重试。
 // 代币元信息:name/icon.url 上 Row(喂参考层)。
@@ -258,7 +258,7 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
     }
     const address = ctx.account.creds.address;
     // 链映射与 positions 并行取;链映射拿不到会抛错(Promise.all 一并 reject)→ 整轮同步失败重试,
-    // 保证 parsePositions 拿到非空映射、只产规范 eip155 标识(失败即不产,不写含分叉标识的快照)。
+    // 保证 parsePositions 拿到非空映射、只产规范 `evm:<chainId>` 标识(失败即不产,不写含分叉标识的快照)。
     const [positions, chainIds] = await Promise.all([
       getPositions(address, apiKey),
       getChainIds(apiKey),

@@ -102,7 +102,7 @@ describe("warm + candidates + listTopTokens", () => {
 });
 
 describe("impl index (tokenRef): ensure / getByTokenRef / markCgkChecked", () => {
-  const KEY = "eip155:1/erc20:0xabc";
+  const KEY = "evm:1/0xabc";
 
   it("ensureTokenRef seeds an orphan (source=provider) with provider data", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
@@ -163,7 +163,7 @@ describe("impl index (tokenRef): ensure / getByTokenRef / markCgkChecked", () =>
 });
 
 describe("linkTokenRefToCgk (升级合并)", () => {
-  const KEY = "eip155:1/erc20:0xabc";
+  const KEY = "evm:1/0xabc";
 
   it("orphan → cgk: creates cgk row, carries provider_logo, repoints, deletes orphan", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
@@ -212,8 +212,8 @@ describe("linkTokenRefToCgk (升级合并)", () => {
 
   it("跨链同币:两条不同 tokenRef → 同一 cgk coin → 归并进同一个内部 id(#46 关键缝)", async () => {
     const store = createTokenStore(env, { source: "coingecko", now: () => 1000 });
-    const K1 = "eip155:1/erc20:0xa0b"; // USDC @ Ethereum
-    const K2 = "eip155:42161/erc20:0xaf8"; // USDC @ Arbitrum
+    const K1 = "evm:1/0xa0b"; // USDC @ Ethereum
+    const K2 = "evm:42161/0xaf8"; // USDC @ Arbitrum
     await store.linkTokenRefToCgk(K1, info(cg("usd-coin"), "USDC"), price(cg("usd-coin"), 1), TTLS);
     await store.linkTokenRefToCgk(K2, info(cg("usd-coin"), "USDC"), price(cg("usd-coin"), 1), TTLS);
     // 两条 tokenRef 都解析到同一条 tokens 行(同一内部 id)—— 不因链不同而碎裂。
@@ -291,7 +291,7 @@ describe("getById (logo 代理端点:按内部行 id 读整行,source 无关)", 
     );
     // 孤儿(无 vendor 映射)也能按 id 命中(getById 走主键、不过滤)。
     await store.ensureTokenRef(
-      "eip155:1/erc20:0xorphan",
+      "evm:1/0xorphan",
       { symbol: "ORP", name: "Orphan", providerLogo: "prov-L" },
       TTL,
     );
@@ -300,7 +300,7 @@ describe("getById (logo 代理端点:按内部行 id 读整行,source 无关)", 
     const btcId = maps.find((m) => m.vendorId === "bitcoin")!.tokenId;
     const idxRows = await getDb(env).select().from(tokenIndex);
     const orphanId = idxRows.find(
-      (r) => r.kind === "tokenRef" && r.key === "eip155:1/erc20:0xorphan",
+      (r) => r.kind === "tokenRef" && r.key === "evm:1/0xorphan",
     )!.tokenId;
 
     expect((await store.getById(btcId))?.logo).toBe("cgk-L");

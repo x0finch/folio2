@@ -9,11 +9,11 @@ const norm = (s: string): string => s.trim().toUpperCase();
 //   · 白名单(进聚合):spot / utxo(BTC)/ CEX 现货(kind=spot)/ perp 权益(isMargin) —— ADR-0003。kind 已由 overview 用 viewKind 归一。
 //   · 归并键三级(永不裸 symbol,ADR-0002):token(内部 id / ref)→ tokenRef(精确合约)→ account:symbol。
 //     展示分组那一级已随 ADR 0021 退场 —— WBTC 与 BTC、USDT 各桥接变体从此各占一行。
-//   · HoldingSource 粒度 = 账户 × 平台单元:链上按链拆(tokenRef 的 eip155/chain 前缀),其余按账户/场馆。
+//   · HoldingSource 粒度 = 账户 × 平台单元:链上按链拆(tokenRef 的链命名者),其余按账户/场馆。
 //   · 表头 totalAmount = 组内各 source 数量之和。组 = 同一个 Token(单位一致),跨链/多源(同一 Token
 //     的多条链 ref)亦可汇总。change24h 仍仅单一身份组给(多身份逐币涨跌不同)。
 
-// 聚合输入:一笔持仓 + 其解析结果(group/ref/展示,由 server 富化)。
+// 聚合输入:一笔持仓 + 其解析结果(ref/展示,由 server 富化)。
 export interface AggInput {
   symbol: string;
   amount: number;
@@ -128,7 +128,7 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     if (a.marketCapRankHint == null && row.marketCapRank != null)
       a.marketCapRankHint = row.marketCapRank;
     // 持有点的平台单元:链上按链拆(同账户多链 → 多 source),场馆/manual 即连接器本身
-    // (name+logo 读路径取连接器自带,#53)。「在不在链上」由 chainOf 看 tokenRef 右半边判定。
+    // (name+logo 读路径取连接器自带,#53)。「在不在链上」由 chainOf 看 tokenRef 的命名者判定。
     const platformId = chainOf(row.tokenRef) ?? row.account.connectorId;
     const sk = `${row.account.id}|${platformId}`;
     const existing = a.sources.get(sk);

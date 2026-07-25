@@ -12,17 +12,17 @@ const VENUE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const VENUE_NEG_TTL_MS = 24 * 60 * 60 * 1000;
 
 // 平台键(ADR 0020 起链键用短形,与 tokenRef 的命名者同形):场馆键带前缀 `exchange:`/`perp:`,
-// 链键不带(`eip155:<id>` / `<slug>`)→ 非场馆即链。
+// 链键不带(`evm:<id>` / `<slug>`)→ 非场馆即链。
 const isVenueKey = (k: string): boolean => k.startsWith("exchange:") || k.startsWith("perp:");
 const isChainKey = (k: string): boolean => !isVenueKey(k);
 
 const cap = (s: string): string => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 // 未收录/未预热/否定缓存平台的兜底展示名(纯由 key 推)。
-// eip155:<id> 无 slug → 用原 key;其余取冒号后一段首字母大写(manual → "Manual")。
+// evm:<id> 无 slug → 用原 key;其余取冒号后一段首字母大写(manual → "Manual")。
 // 平台的"显示成什么"整个归本模块所有(见 ADR 0005/0006 收口);aggregate 只发 key。
 function fallbackName(key: string): string {
-  if (key.startsWith("eip155:")) return key;
+  if (key.startsWith("evm:")) return key;
   const slug = key.slice(key.indexOf(":") + 1);
   return cap(slug || key);
 }

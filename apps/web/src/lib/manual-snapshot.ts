@@ -27,7 +27,7 @@ export function buildManualSnapshot(
       kind: "spot" as const,
       selfPrice: null,
       // CGK coin id 规范为小写 kebab;归一在生产者这一侧做(oracle-ref 对不透明 id 原样透传)。
-      tokenRef: t.identifier ? tokenRef.opaque("coingecko", t.identifier.toLowerCase()) : null,
+      tokenRef: t.identifier ? tokenRef.local("coingecko", t.identifier.toLowerCase()) : null,
       metaJson: null,
     };
   });

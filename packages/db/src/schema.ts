@@ -149,7 +149,7 @@ export const tokenVendorIds = sqliteTable(
 
 // 索引表:多种方式找到代币,纯指针不存代币数据。
 // kind="symbol":一 symbol 多候选(消歧输入),随 warm 换血(短 TTL);
-// kind="tokenRef":代币键(eip155:<id>/erc20:<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
+// kind="tokenRef":代币键(evm:<id>/<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
 // cgk_checked_until(仅 tokenRef):问过 CGK"未收录"的复查时刻(替代旧否定缓存三态)。
 export const tokenIndex = sqliteTable(
   "token_index",
@@ -175,7 +175,7 @@ export const tokenMeta = sqliteTable("token_meta", {
 });
 
 // 平台元数据缓存(链 ∪ 交易所/perp 的 name+logo,来自 CoinGecko;近静态,长 TTL)。
-// id = platformKey(eip155:<id> / chain:<slug> / exchange:<slug> / perp:<slug>)。
+// id = platformKey(evm:<id> / <slug> / exchange:<slug> / perp:<slug>)。
 // name IS NULL = 否定缓存(问过 CoinGecko、确认不存在);无该行 = 从未取过。
 export const platforms = sqliteTable("platforms", {
   id: text("id").primaryKey(),

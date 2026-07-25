@@ -35,7 +35,7 @@ export function createTokenStore(env: DbEnv, opts: TokenStoreOpts): TokenStore {
   const source = opts.source;
   const now = opts.now ?? (() => Date.now());
   // 本 store 绑定一个命名者 → 上游 id 与 tokenRef 串在此双向转换(可信边界)。
-  const mk = (vendorId: string): TokenRef => tokenRef.opaque(source, vendorId);
+  const mk = (vendorId: string): TokenRef => tokenRef.local(source, vendorId);
   // 反向:ref → 本源的上游 id。ref 恒由本 store / 本源产出,故正常必有值;
   // 万一来了别家命名(链上寻址等),回落原串 —— 存进去是坏数据,但不静默丢行。
   const vid = (ref: TokenRef): string => vendorIdOf(ref, source) ?? ref;

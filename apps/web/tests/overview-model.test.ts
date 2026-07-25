@@ -58,12 +58,7 @@ describe("buildOverview", () => {
   it("跨账户聚合成一个 Holding + 平台装饰 + 总额", async () => {
     const accounts = [account("a1", "Arb"), account("a2", "Cold", "manual")];
     const byAccount = new Map([
-      [
-        "a1",
-        snap("a1", 100, [
-          bal({ tokenRef: "eip155:42161/erc20:0xusdc", amount: 100, usdValue: 100 }),
-        ]),
-      ],
+      ["a1", snap("a1", 100, [bal({ tokenRef: "evm:42161/0xusdc", amount: 100, usdValue: 100 })])],
       [
         "a2",
         snap("a2", 50, [
@@ -82,14 +77,14 @@ describe("buildOverview", () => {
 
     // 平台名由 platforms.resolve 装饰(覆写 aggregate 的 key 占位):链前缀 + manual。
     expect(view.holdings[0].sources.map((s) => s.platform.name).sort()).toEqual([
-      "NAME:eip155:42161",
+      "NAME:evm:42161",
       "NAME:manual",
     ]);
 
     // 平台 logo:有图的链平台改写成 folio 代理 URL(key 含 `:` → 编码);manual 无图 → undefined
     //(asset-sheet 对 manual 走 WalletIcon,不请求)。客户端不直引 CoinGecko。
     const platformLogos = view.holdings[0].sources.map((s) => s.platform.logo);
-    expect(platformLogos).toContain("/api/logo/platform/eip155%3A42161");
+    expect(platformLogos).toContain("/api/logo/platform/evm%3A42161");
     expect(platformLogos).toContain(undefined);
 
     expect(view.totalUsd).toBe(150);
@@ -217,7 +212,7 @@ describe("buildOverview —— defi 行 change24h 富化", () => {
             symbol: "stETH",
             amount: 1,
             usdValue: 100,
-            tokenRef: "eip155:1/erc20:0xae7a",
+            tokenRef: "evm:1/0xae7a",
             metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
           }),
           bal({

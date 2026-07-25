@@ -15,7 +15,7 @@ import { defiAssetRef } from "./tokens";
 
 export interface OverviewDeps {
   tokens: Tokens; // .enrich:tokenRef → ref/price(cache-only)
-  platforms: Platforms; // .resolve:platform key → name+logo(含兜底)——仅链键(chain:/eip155:)
+  platforms: Platforms; // .resolve:platform key → name+logo(含兜底)——仅链键(evm:<id> / <slug>)
   // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platforms。
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
   // 估值模式(Phase 3,#81):读时现推 value 用。缺省 self-first(= 旧行为);per-user 设置接入见 P3-3。

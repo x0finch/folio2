@@ -109,7 +109,7 @@ export function createTokens({
   // asset.identifier(用户显式选)→ 配上本源的命名者造 explicit ref。这是 `ref` 字段的**唯一**
   // 写入点,故它只存在于门面内部的 ResolvableAsset,不进公开的 AssetRef。
   const withExplicit = (asset: AssetRef): ResolvableAsset =>
-    asset.identifier ? { ...asset, ref: tokenRef.opaque(p.id, asset.identifier) } : asset;
+    asset.identifier ? { ...asset, ref: tokenRef.local(p.id, asset.identifier) } : asset;
 
   const resolve = (asset: AssetRef, opts?: ResolveOpts) =>
     resolveAsset(withExplicit(asset), deps, opts);

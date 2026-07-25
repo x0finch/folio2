@@ -38,7 +38,7 @@ describe("interface shapes", () => {
     expect(await source.fetchMarkets({ topN: 1 })).toEqual([]);
   });
   it("TokenStore is implementable", async () => {
-    expect((await store.getByTokenRef(["eip155:1/erc20:0x0"])).size).toBe(0);
+    expect((await store.getByTokenRef(["evm:1/0x0"])).size).toBe(0);
   });
   it("TokenPriceHistoryStore is implementable", async () => {
     const ref = cgkRef("bitcoin");

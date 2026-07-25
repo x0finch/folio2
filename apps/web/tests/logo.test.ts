@@ -40,9 +40,7 @@ describe("platformLogoUrl", () => {
   });
 
   it("key 含特殊字符(:)被编码", () => {
-    expect(platformLogoUrl("eip155:1", "https://cgk/eth.png")).toBe(
-      "/api/logo/platform/eip155%3A1",
-    );
+    expect(platformLogoUrl("evm:1", "https://cgk/eth.png")).toBe("/api/logo/platform/evm%3A1");
   });
 
   it("无上游图 → undefined(客户端 fallback,不发请求)", () => {
