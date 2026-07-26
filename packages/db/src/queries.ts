@@ -10,6 +10,7 @@ import {
   type InferSelectModel,
   inArray,
   max,
+  sql,
 } from "drizzle-orm";
 import { type Db, type DbEnv, getDb } from "./client";
 import {
@@ -17,9 +18,10 @@ import {
   accounts,
   groups,
   manualActivity,
-  manualToken,
   snapshotBalances,
   snapshots,
+  tokenRefs,
+  tokens,
   userSettings,
 } from "./schema";
 import type {
@@ -576,86 +578,107 @@ export function listBalancesForSnapshots(
     .where(inArray(snapshotBalances.snapshotId, snapshotIds));
 }
 
-// ---------- manual 多 token tokens + 活动账本(P7.4.1 / ADR 0017)----------
+// ---------- manual 持仓 + 活动账本(P7.4.1 / ADR 0017;#203 起并入 tokens)----------
+//
+// **手记的币就是这个用户 `tokens` 里的一行**(#203):身份 / 名字 / 图 / 上游 ref 在 `tokens` +
+// `token_refs`,用户声明的单价在 `tokens.self_price`,数量由 `manual_activity` 折叠。
+// 原来的 `manual_token` 表整个退场 —— 那四个值全部有了真表的家。
+//
+// 于是「这个手记账户持有哪些币」不再单独存一份关系,而是**它账本里出现过的 token**。
+// 副作用是「清空某个币」= 删掉该账户对它的全部活动(见 detachManualHolding),而 `tokens` 那行留着 ——
+// 它是参考层数据,可能别的账户还在用,也可能上游认识它。
 
-// 一个账户下某 token 归属本人即返回其 accountId,否则抛(token ⨝ account ⨝ user)。
-async function assertTokenOwned(db: Db, userId: string, tokenId: string): Promise<string> {
+// 该 token 归属本人即通过,否则抛。`tokens` 直接带 user_id,不必再绕 account。
+async function assertTokenOwned(db: Db, userId: string, tokenId: string): Promise<void> {
   const rows = await db
-    .select({ accountId: manualToken.accountId })
-    .from(manualToken)
-    .innerJoin(accounts, eq(manualToken.accountId, accounts.id))
-    .where(and(eq(manualToken.id, tokenId), eq(accounts.userId, userId)));
-  if (!rows[0]) throw new Error(`manual token not found: ${tokenId}`);
-  return rows[0].accountId;
+    .select({ id: tokens.id })
+    .from(tokens)
+    .where(and(eq(tokens.id, tokenId), eq(tokens.userId, userId)));
+  if (!rows[0]) throw new Error(`token not found: ${tokenId}`);
 }
 
-export type ManualToken = InferSelectModel<typeof manualToken>;
-export interface ManualTokenInput {
+// 手记持仓的定义投影(数量不在内 —— 那是账本折叠出来的)。`id` 就是 `tokens.id`。
+export interface ManualHolding {
+  id: string;
   symbol: string;
-  unitPrice: number;
-  identifier?: string | null;
+  unitPrice: number; // = tokens.self_price;没声明过按 0(展示层退回市场价)
+  identifier: string | null; // 该 token 在 `namer` 那里的叫法(= 用户选的币);没选 → null
 }
 
-export async function createManualToken(
+// 某手记账户的持仓定义。`namer` 决定 `identifier` 从哪个命名者的 ref 读 —— 由调用方传
+// (同 createUserTokenStore),db 层不预设任何厂商。
+// 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
+export async function listManualHoldingsByAccount(
   env: DbEnv,
   userId: string,
   accountId: string,
-  input: ManualTokenInput,
-): Promise<ManualToken> {
+  namer: string,
+): Promise<ManualHolding[]> {
   const db = getDb(env);
   await assertAccountOwned(db, userId, accountId);
-  const row = {
-    id: crypto.randomUUID(),
-    accountId,
-    symbol: input.symbol,
-    unitPrice: input.unitPrice,
-    identifier: input.identifier ?? null,
-    createdAt: Date.now(),
-  };
-  await db.insert(manualToken).values(row);
-  return row;
+  const rows = await db
+    .select({
+      id: tokens.id,
+      symbol: tokens.symbol,
+      selfPrice: tokens.selfPrice,
+      identifier: tokenRefs.localName,
+      since: sql<number>`min(${manualActivity.occurredAt})`,
+    })
+    .from(manualActivity)
+    .innerJoin(tokens, eq(manualActivity.tokenId, tokens.id))
+    .leftJoin(
+      tokenRefs,
+      and(
+        eq(tokenRefs.tokenId, tokens.id),
+        eq(tokenRefs.userId, userId),
+        eq(tokenRefs.namer, namer),
+      ),
+    )
+    .where(and(eq(manualActivity.accountId, accountId), eq(tokens.userId, userId)))
+    .groupBy(tokens.id, tokens.symbol, tokens.selfPrice, tokenRefs.localName)
+    .orderBy(asc(sql`min(${manualActivity.occurredAt})`));
+  return rows.map((r) => ({
+    id: r.id,
+    symbol: r.symbol,
+    unitPrice: r.selfPrice ?? 0,
+    identifier: r.identifier ?? null,
+  }));
 }
 
-// userId-scoped(经 account ⨝ user 归属);按 created_at 升序(稳定的展示序)。
-export function listManualTokensByAccount(
+// 用户对某个币的声明:symbol(他自己的叫法)+ 单价。**只动这两列** —— 名字 / 图 / 上游 ref
+// 归参考层,手记不覆盖它们。
+export async function setManualHoldingDef(
+  env: DbEnv,
+  userId: string,
+  tokenId: string,
+  input: { symbol?: string; unitPrice?: number },
+): Promise<void> {
+  const db = getDb(env);
+  await assertTokenOwned(db, userId, tokenId);
+  const set: Record<string, unknown> = {};
+  if (input.symbol !== undefined) set.symbol = input.symbol;
+  if (input.unitPrice !== undefined) set.selfPrice = input.unitPrice;
+  if (Object.keys(set).length === 0) return;
+  await db
+    .update(tokens)
+    .set(set)
+    .where(and(eq(tokens.id, tokenId), eq(tokens.userId, userId)));
+}
+
+// 该账户不再持有这个币:删它对该币的全部活动。**`tokens` 那行不删** —— 参考层数据,
+// 别的账户可能还在用,而且它带着上游 ref / 历史日价,删了就得重新认一遍。
+export async function detachManualHolding(
   env: DbEnv,
   userId: string,
   accountId: string,
-): Promise<ManualToken[]> {
-  return getDb(env)
-    .select(getTableColumns(manualToken))
-    .from(manualToken)
-    .innerJoin(accounts, eq(manualToken.accountId, accounts.id))
-    .where(and(eq(manualToken.accountId, accountId), eq(accounts.userId, userId)))
-    .orderBy(asc(manualToken.createdAt));
-}
-
-export async function updateManualToken(
-  env: DbEnv,
-  userId: string,
   tokenId: string,
-  input: ManualTokenInput,
 ): Promise<void> {
   const db = getDb(env);
+  await assertAccountOwned(db, userId, accountId);
   await assertTokenOwned(db, userId, tokenId);
   await db
-    .update(manualToken)
-    .set({
-      symbol: input.symbol,
-      unitPrice: input.unitPrice,
-      identifier: input.identifier ?? null,
-    })
-    .where(eq(manualToken.id, tokenId));
-}
-
-export async function deleteManualToken(
-  env: DbEnv,
-  userId: string,
-  tokenId: string,
-): Promise<void> {
-  const db = getDb(env);
-  await assertTokenOwned(db, userId, tokenId);
-  await db.delete(manualToken).where(eq(manualToken.id, tokenId)); // 活动经 token_id FK 级联清
+    .delete(manualActivity)
+    .where(and(eq(manualActivity.accountId, accountId), eq(manualActivity.tokenId, tokenId)));
 }
 
 export type ManualActivityKind = "add" | "reduce" | "set";
@@ -669,17 +692,19 @@ export interface ManualActivityInput {
 }
 export type ManualActivity = InferSelectModel<typeof manualActivity>;
 
-// 活动挂 token(ADR 0017)。accountId 由 token **反查**(assertTokenOwned)而非调用方另传 ——
-// 既保证 activity.accountId 恒 === token.accountId,又杜绝「传自己的 accountId + 他人的 tokenId」把活动
-// 挂到别账户/别用户 token 的越权面(不属本人的 token 直接抛)。
+// 活动挂 (账户, token)。#203 起 **accountId 由调用方显式给** —— token 不再自带账户(`tokens` 是
+// per-user 的,一个币可以被多个手记账户持有),没法再从它反查。
+// 越权面靠两道归属校验各自挡:账户属本人、token 属本人。缺一道就能把活动挂到别人的东西上。
 export async function recordManualActivity(
   env: DbEnv,
   userId: string,
+  accountId: string,
   tokenId: string,
   input: ManualActivityInput,
 ): Promise<void> {
   const db = getDb(env);
-  const accountId = await assertTokenOwned(db, userId, tokenId);
+  await assertAccountOwned(db, userId, accountId);
+  await assertTokenOwned(db, userId, tokenId);
   await db.insert(manualActivity).values({
     id: crypto.randomUUID(),
     accountId,
@@ -694,18 +719,21 @@ export async function recordManualActivity(
   });
 }
 
-// userId-scoped(经 token ⨝ account ⨝ user 归属);按 occurred_at→created_at 升序(deriveAmount 据此定序)。
-export function listManualActivityByToken(
+// 某账户对某个币的账本(userId-scoped 经 account ⨝ user);按 occurred_at→created_at 升序
+// (deriveAmount 据此定序)。**必须带 accountId** —— 同一个 token 可以被多个手记账户持有,
+// 只按 tokenId 取会把别的账户的活动一起折进来,数量直接算错。
+export async function listManualActivityByToken(
   env: DbEnv,
   userId: string,
+  accountId: string,
   tokenId: string,
 ): Promise<ManualActivity[]> {
-  return getDb(env)
+  const db = getDb(env);
+  await assertAccountOwned(db, userId, accountId);
+  return db
     .select(getTableColumns(manualActivity))
     .from(manualActivity)
-    .innerJoin(manualToken, eq(manualActivity.tokenId, manualToken.id))
-    .innerJoin(accounts, eq(manualToken.accountId, accounts.id))
-    .where(and(eq(manualActivity.tokenId, tokenId), eq(accounts.userId, userId)))
+    .where(and(eq(manualActivity.accountId, accountId), eq(manualActivity.tokenId, tokenId)))
     .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt));
 }
 
@@ -734,15 +762,6 @@ export async function removeManualActivity(
   await db
     .delete(manualActivity)
     .where(and(eq(manualActivity.id, id), eq(manualActivity.accountId, accountId)));
-}
-
-// token → 其账户 id(userId-scoped 归属校验)。写路径改完 token 后据此重跑该账户物化(app 层)。
-export async function getManualTokenAccountId(
-  env: DbEnv,
-  userId: string,
-  tokenId: string,
-): Promise<string> {
-  return assertTokenOwned(getDb(env), userId, tokenId);
 }
 
 // 活动 → {tokenId, accountId}(经 activity ⨝ account ⨝ user 归属校验;活动可能无 tokenId 的遗留行 → 抛)。
@@ -805,7 +824,10 @@ export async function updateManualActivity(
 
 export interface ManualBatchPlan {
   accountId: string;
-  newTokens: { id: string; symbol: string; unitPrice: number; identifier?: string | null }[];
+  // 本批要**声明**的持仓:`id` 已经是 mint 出来的 `tokens.id`(app 层在提交前认好币),
+  // 这里只落用户自己的两个字段。原来这叫 `newTokens` 并且真的插一张 `manual_token` 行 ——
+  // 币的身份现在归参考层,不再由手记这条路创建。
+  declare: { id: string; symbol: string; unitPrice: number }[];
   activities: {
     tokenId: string;
     kind: ManualActivityKind;
@@ -816,10 +838,14 @@ export interface ManualBatchPlan {
     memo?: string | null;
   }[];
 }
-// 批量提交写计划(app 层 planManualBatch 产出):新建 token + 插入活动,**整批原子**(D1 无交互式事务 → db.batch)。
-// 归属:assertAccountOwned + 校验每条活动的 tokenId ∈(该账户既有 token ∪ 本批新建)—— 杜绝把活动挂到
-// 他账户/他人 token 的越权面(app 已按 account 作用域解析,此为纵深防御)。活动 createdAt = now + i 保提交序
-// (同 occurredAt 处新活动恒排在既有之后,与 planManualBatch 校验时间线定序一致)。
+// 批量提交写计划(app 层 planManualBatch 产出):落持仓声明 + 插入活动,**整批原子**
+// (D1 无交互式事务 → db.batch)。
+//
+// 归属:assertAccountOwned + 校验每条活动的 tokenId **属于本人**。
+// 注意闸口从「∈ 该账户既有 token」改成了「∈ 本人的 token」—— 账户与币的关系现在**由活动本身承载**,
+// 拿它当前置条件会循环:一个刚声明的持仓在本批插入之前一条活动都没有。
+// 用户维度的闸仍然严格:拿别人的 tokenId 来照样抛。
+// 活动 createdAt = now + i 保提交序(同 occurredAt 处新活动恒排在既有之后,与 planManualBatch 定序一致)。
 export async function commitManualBatch(
   env: DbEnv,
   userId: string,
@@ -827,28 +853,24 @@ export async function commitManualBatch(
 ): Promise<void> {
   const db = getDb(env);
   await assertAccountOwned(db, userId, plan.accountId);
-  const existing = await db
-    .select({ id: manualToken.id })
-    .from(manualToken)
-    .where(eq(manualToken.accountId, plan.accountId));
-  const allowed = new Set<string>([
-    ...existing.map((r) => r.id),
-    ...plan.newTokens.map((t) => t.id),
-  ]);
-  for (const a of plan.activities) {
-    if (!allowed.has(a.tokenId)) throw new Error(`token not in account: ${a.tokenId}`);
+  const ids = [
+    ...new Set([...plan.declare.map((t) => t.id), ...plan.activities.map((a) => a.tokenId)]),
+  ];
+  if (ids.length > 0) {
+    const owned = await db
+      .select({ id: tokens.id })
+      .from(tokens)
+      .where(and(eq(tokens.userId, userId), inArray(tokens.id, ids)));
+    const ok = new Set(owned.map((r) => r.id));
+    for (const id of ids) if (!ok.has(id)) throw new Error(`token not owned: ${id}`);
   }
   const now = Date.now();
   const stmts = [
-    ...plan.newTokens.map((t) =>
-      db.insert(manualToken).values({
-        id: t.id,
-        accountId: plan.accountId,
-        symbol: t.symbol,
-        unitPrice: t.unitPrice,
-        identifier: t.identifier ?? null,
-        createdAt: now,
-      }),
+    ...plan.declare.map((t) =>
+      db
+        .update(tokens)
+        .set({ symbol: t.symbol, selfPrice: t.unitPrice })
+        .where(and(eq(tokens.id, t.id), eq(tokens.userId, userId))),
     ),
     ...plan.activities.map((a, i) =>
       db.insert(manualActivity).values({

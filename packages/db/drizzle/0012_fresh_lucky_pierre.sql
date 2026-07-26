@@ -1,0 +1,1 @@
+ALTER TABLE `tokens` ADD `self_price` real;

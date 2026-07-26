@@ -147,6 +147,15 @@ export const tokens = sqliteTable("tokens", {
   change24h: real("change_24h"),
   priceAsOf: integer("price_as_of"),
   priceExpiresAt: integer("price_expires_at"), // 短 TTL;过期读出带 stale
+  // **用户自己声明的单价**(#203,原 `manual_token.unit_price`)。与上面的 `unit_price` 是两件事:
+  // 那个是市场价(上游给的,会过期会刷新),这个是用户手敲的,只在市场不认识这个币时才用得上
+  // (`buildManualSnapshot` 的 `prices[i] ?? selfPrice`)。永不被上游覆盖。
+  //
+  // 住在 `tokens` 而不是另开一张表:代币表已经是 per-user 的(ADR 0021),「我管这个币叫什么、
+  // 我认为它值多少」是同一类用户私有数据。代价是它**每个币一份、不是每个账户一份** —— 两个手记
+  // 账户持同一个没被收录的币时共用这个声明价。判断是这样更对(同一个币在同一个用户眼里就该一个价),
+  // 而且账户之间的差异本来就由各自的账本承载。
+  selfPrice: real("self_price"),
 });
 
 // 代币的 vendor 映射(oracle 多源,#73)。一行 = 「哪个 token × 哪家 vendor × 那家的 coin id」。
@@ -328,25 +337,13 @@ export const userSettings = sqliteTable("user_settings", {
   updatedAt: integer("updated_at").notNull(), // epoch ms
 });
 
-// manual 活动账本(P7.4.1):add/reduce/set 动作日志。当前数量由 deriveAmount 推导、物化进 account.creds.amount
-// (provider/sync 不依赖本表)。price 记录单价、留给 M7.3 成本/盈亏,本期不算。与 M7.2 的通用 transactions 表分开。
-// manual 多 token(ADR 0017):一个账户持有 N 个手记 token,每 token 一行 token
-// (定义:symbol/unitPrice/可选 identifier)。活动账本(manual_activity)挂 token_id,各自折叠 amount。
-export const manualToken = sqliteTable(
-  "manual_token",
-  {
-    id: text("id").primaryKey(),
-    accountId: text("account_id")
-      .notNull()
-      .references(() => accounts.id, { onDelete: "cascade" }),
-    symbol: text("symbol").notNull(),
-    unitPrice: real("unit_price").notNull(),
-    identifier: text("identifier"), // 可选 CoinGecko id(消歧/显式寻址;无则按 symbol 归一)
-    createdAt: integer("created_at").notNull(), // epoch ms
-  },
-  (t) => [index("manual_token_account_id_idx").on(t.accountId)],
-);
-
+// manual 活动账本(P7.4.1):add/reduce/set 动作日志。**它是手记持仓的唯一事实源**(#203):
+// 数量由 deriveAmount 现算,不再物化进 `account.creds`(那个投影连同 manual provider 一起删了 ——
+// 四个值全部落进真表之后,provider 只是「app 写进 JSON 列 → 再读回来」的空转)。
+// price 记录单价、留给 M7.3 成本/盈亏,本期不算。与 M7.2 的通用 transactions 表分开。
+//
+// 一个手记账户持有哪些币 = **本表里它出现过的 token**(不再有 manual_token 那张关系表):
+// 币的身份/名字/图/上游 ref 在 `tokens` + `token_refs`,用户声明的单价在 `tokens.self_price`。
 export const manualActivity = sqliteTable(
   "manual_activity",
   {
@@ -354,9 +351,11 @@ export const manualActivity = sqliteTable(
     accountId: text("account_id")
       .notNull()
       .references(() => accounts.id, { onDelete: "cascade" }),
-    // 所属 token(ADR 0017)。DB 层可空(SQLite ADD COLUMN NOT NULL 需默认值,且迁移期无真数据);
-    // app 层恒设置为非空(recordManualActivity 必传 tokenId)。删 token → 其活动级联清。
-    tokenId: text("token_id").references(() => manualToken.id, { onDelete: "cascade" }),
+    // 所属 token(ADR 0017)。**#203 起指 `tokens.id`** —— 手记的币不再另有一张表,它就是这个用户
+    // `tokens` 里的一行(symbol / 名字 / 图 / 上游 ref 全在那儿,声明价在 `self_price`)。
+    // 于是「这个手记账户持有哪些币」= 它账本里出现过的 token,不必再存一份账户↔币的关系。
+    // DB 层可空(历史遗留行);app 层恒非空。删 token → 其活动级联清。
+    tokenId: text("token_id").references(() => tokens.id, { onDelete: "cascade" }),
     kind: text("kind").$type<"add" | "reduce" | "set">().notNull(),
     amount: real("amount").notNull(),
     price: real("price"), // 单价(可空),留 M7.3

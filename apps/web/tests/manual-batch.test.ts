@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { DerivableActivity } from "../src/lib/manual-activity";
 import {
-  type BatchDraft,
   findToken,
   planManualBatch,
+  type ResolvedDraft,
   runningOk,
   type Token,
 } from "../src/lib/manual-batch";
@@ -20,16 +20,9 @@ const mkToken = (o: Partial<Token>): Token => ({
   id: "t1",
   symbol: "BTC",
   unitPrice: 1,
-  identifier: null,
   activities: [],
   ...o,
 });
-
-// 顺序自增 id 工厂(确定性,便于断言)。
-const idFactory = () => {
-  let n = 0;
-  return () => `new-${n++}`;
-};
 
 describe("runningOk", () => {
   it("reduce 从不超支 → ok", () => {
@@ -62,75 +55,76 @@ describe("runningOk", () => {
   });
 });
 
-describe("findToken(标识优先,退回大写 symbol)", () => {
-  const tokens = [
-    mkToken({ id: "a", symbol: "BTC", identifier: "bitcoin" }),
-    mkToken({ id: "b", symbol: "ETH", identifier: null }),
-  ];
-  it("按 identifier 精确命中", () => {
-    expect(findToken(tokens, { symbol: "x", unitPrice: 1, identifier: "bitcoin" })?.id).toBe("a");
+// 认币已经在 mint 那一步做完(#203),这里只比 id。原来这个函数自己有一套「identifier 优先、
+// 退回同名 symbol」的启发式 —— 那是跟 mint 平行的第二套认币规则,两处一旦漂移就会认出两个答案。
+describe("findToken(只比 mint 给的 id)", () => {
+  const tokens = [mkToken({ id: "a", symbol: "BTC" }), mkToken({ id: "b", symbol: "ETH" })];
+
+  it("按 tokenId 命中", () => {
+    expect(findToken(tokens, { tokenId: "b", symbol: "ETH", unitPrice: 1 })?.id).toBe("b");
   });
-  it("无 identifier → 按大写 symbol 命中 identifier-less 持仓", () => {
-    expect(findToken(tokens, { symbol: "eth", unitPrice: 1 })?.id).toBe("b");
-  });
-  it("draft 带 identifier 但无对应 → 不命中 symbol-only 同名(不自动收养)", () => {
-    expect(
-      findToken(tokens, { symbol: "ETH", unitPrice: 1, identifier: "ethereum" }),
-    ).toBeUndefined();
+
+  // symbol 相同但 mint 判成了两个币(如山寨合约)→ 绝不并到一起。
+  it("symbol 相同但 id 不同 → 不命中", () => {
+    expect(findToken(tokens, { tokenId: "zzz", symbol: "BTC", unitPrice: 1 })).toBeUndefined();
   });
 });
 
 describe("planManualBatch", () => {
-  const draft = (o: Partial<BatchDraft>): BatchDraft => ({
-    token: { symbol: "BTC", unitPrice: 100, identifier: "bitcoin" },
+  const draft = (o: Partial<ResolvedDraft>): ResolvedDraft => ({
+    token: { tokenId: "tk_btc", symbol: "BTC", unitPrice: 100, identifier: "bitcoin" },
     kind: "add",
     amount: 1,
     occurredAt: 10,
     ...o,
   });
 
-  it("命中既有持仓 → 只出活动,无新建 token", () => {
-    const existing = [mkToken({ id: "t1", symbol: "BTC", identifier: "bitcoin" })];
-    const plan = planManualBatch(existing, [draft({ amount: 2 })], idFactory());
+  it("命中既有持仓 → 只出活动,不重复声明", () => {
+    const existing = [mkToken({ id: "tk_btc", symbol: "BTC" })];
+    const plan = planManualBatch(existing, [draft({ amount: 2 })]);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
-    expect(plan.newTokens).toEqual([]);
+    expect(plan.declare).toEqual([]);
     expect(plan.activities).toEqual([
-      { tokenId: "t1", kind: "add", amount: 2, price: null, fee: null, occurredAt: 10, memo: null },
+      {
+        tokenId: "tk_btc",
+        kind: "add",
+        amount: 2,
+        price: null,
+        fee: null,
+        occurredAt: 10,
+        memo: null,
+      },
     ]);
   });
 
-  it("未持有 token → 现建(id 由工厂给),活动指向新 id", () => {
-    const plan = planManualBatch([], [draft({ amount: 3 })], idFactory());
+  it("本账户还没持有 → 声明一条,id 用 mint 给的(不自己造)", () => {
+    const plan = planManualBatch([], [draft({ amount: 3 })]);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
-    expect(plan.newTokens).toEqual([
-      { id: "new-0", symbol: "BTC", unitPrice: 100, identifier: "bitcoin" },
-    ]);
-    expect(plan.activities[0].tokenId).toBe("new-0");
+    expect(plan.declare).toEqual([{ id: "tk_btc", symbol: "BTC", unitPrice: 100 }]);
+    expect(plan.activities[0].tokenId).toBe("tk_btc");
   });
 
-  it("同批多条指向同一新 token → 只建一次", () => {
+  it("同批多条指向同一个币 → 只声明一次(mint 恒给同一个 id)", () => {
     const plan = planManualBatch(
       [],
       [
         draft({ kind: "add", amount: 3, occurredAt: 10 }),
         draft({ kind: "add", amount: 2, occurredAt: 20 }),
       ],
-      idFactory(),
     );
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
-    expect(plan.newTokens).toHaveLength(1);
-    expect(plan.activities.map((a) => a.tokenId)).toEqual(["new-0", "new-0"]);
+    expect(plan.declare).toHaveLength(1);
+    expect(plan.activities.map((a) => a.tokenId)).toEqual(["tk_btc", "tk_btc"]);
   });
 
   it("整批拒:任一 reduce 在其时点超过运行持有(含顶下水既有 reduce)", () => {
     const existing = [
       mkToken({
-        id: "t1",
+        id: "tk_eth",
         symbol: "ETH",
-        identifier: "ethereum",
         activities: [
           { kind: "set", amount: 5, occurredAt: 100, createdAt: 1 },
           { kind: "reduce", amount: 5, occurredAt: 200, createdAt: 2 },
@@ -138,18 +132,14 @@ describe("planManualBatch", () => {
       }),
     ];
     // 补录一条过去的 reduce 4 @50(基线 0)→ 该 token 时间线超支 → 整批拒。
-    const plan = planManualBatch(
-      existing,
-      [
-        draft({
-          token: { symbol: "ETH", unitPrice: 1, identifier: "ethereum" },
-          kind: "reduce",
-          amount: 4,
-          occurredAt: 50,
-        }),
-      ],
-      idFactory(),
-    );
+    const plan = planManualBatch(existing, [
+      draft({
+        token: { tokenId: "tk_eth", symbol: "ETH", unitPrice: 1 },
+        kind: "reduce",
+        amount: 4,
+        occurredAt: 50,
+      }),
+    ]);
     expect(plan.ok).toBe(false);
     if (plan.ok) return;
     expect(plan.symbol).toBe("ETH");
@@ -158,18 +148,13 @@ describe("planManualBatch", () => {
   it("新 draft 在同一 occurredAt 排在既有之后(不误判超支)", () => {
     const existing = [
       mkToken({
-        id: "t1",
+        id: "tk_btc",
         symbol: "BTC",
-        identifier: "bitcoin",
         activities: [{ kind: "set", amount: 1, occurredAt: 10, createdAt: 1 }],
       }),
     ];
     // 同 occurredAt=10 追加 reduce 1:排在既有 set 1 之后 → 运行持有 0,合法。
-    const plan = planManualBatch(
-      existing,
-      [draft({ kind: "reduce", amount: 1, occurredAt: 10 })],
-      idFactory(),
-    );
+    const plan = planManualBatch(existing, [draft({ kind: "reduce", amount: 1, occurredAt: 10 })]);
     expect(plan.ok).toBe(true);
   });
 });

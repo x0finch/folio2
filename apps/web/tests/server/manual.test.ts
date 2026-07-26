@@ -1,15 +1,17 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { deriveAmount } from "../../src/lib/manual-activity";
 import { createAccountFor } from "../../src/lib/server/internal/create-account";
 import { db } from "../../src/lib/server/internal/db";
-import { createManualAccount, materializeManualCreds } from "../../src/lib/server/internal/manual";
+import { createManualAccount } from "../../src/lib/server/internal/manual";
+import { NAMER } from "../../src/lib/server/internal/oracle2";
 
 // manual 创建往返的真实 D1 集成测试(jsdom 单测覆盖不到的服务端编排)。
 // 这套 pool 版本不隔离每测存储 → beforeEach 重置(删 user 级联清账户/token/活动)。
 const USER = "user-manual-it";
 
 async function resetUser(): Promise<void> {
-  await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run(); // cascade → accounts → manual_token/activity
+  await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run(); // cascade → accounts/tokens → activity
   const now = Date.now();
   await env.DB.prepare(
     "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -20,45 +22,71 @@ async function resetUser(): Promise<void> {
 
 beforeEach(resetUser);
 
-// 账户存储的 creds.tokens(provider 读的即此投影)。
-async function credsTokens(accountId: string): Promise<unknown> {
+// 该账户的持仓(定义 + 账本折叠出的数量)。#203 起这是唯一事实源 —— 没有 creds.tokens 那个投影了。
+async function holdings(accountId: string) {
+  const rows = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
+  return Promise.all(
+    rows.map(async (r) => ({
+      symbol: r.symbol,
+      unitPrice: r.unitPrice,
+      identifier: r.identifier,
+      amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
+    })),
+  );
+}
+
+// 账户的 creds 里**不该**再有持仓数据(物化那一步删了)。
+async function credsOf(accountId: string): Promise<Record<string, unknown>> {
   const raw = await db.getRawCreds(USER, accountId);
-  const creds = JSON.parse(raw ?? "{}") as { tokens?: string };
-  return JSON.parse(creds.tokens ?? "[]");
+  return JSON.parse(raw ?? "{}");
 }
 
 describe("createManualAccount (D1 round-trip)", () => {
-  it("seeds token row + opening set activity + materialized creds.tokens", async () => {
+  it("认币 → 落声明 → 一条开仓 set 活动", async () => {
     const tokens = JSON.stringify([
       { symbol: "BTC", unitPrice: "64000", identifier: "bitcoin", amount: "0.5" },
     ]);
     const account = await createManualAccount(USER, "My BTC", tokens);
 
-    const rows = await db.listManualTokensByAccount(USER, account.id);
-    expect(rows.map((r) => [r.symbol, r.unitPrice, r.identifier])).toEqual([
-      ["BTC", 64000, "bitcoin"],
+    expect(await holdings(account.id)).toEqual([
+      { symbol: "BTC", unitPrice: 64000, identifier: "bitcoin", amount: 0.5 },
     ]);
+  });
 
-    const acts = await db.listManualActivityByToken(USER, rows[0].id);
-    expect(acts.map((a) => [a.kind, a.amount])).toEqual([["set", 0.5]]);
+  // 用户选了币 → ref 是 `coingecko/bitcoin`,在 mint 里本身就是锚 → 直接认出来,不查映射表。
+  it("选了币 → 那条 ref 就是 identifier 的来源", async () => {
+    const account = await createManualAccount(
+      USER,
+      "M",
+      JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", identifier: "bitcoin" }]),
+    );
+    const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    expect(h.identifier).toBe("bitcoin"); // 哪怕 symbol 敲成了 XBT
+  });
 
-    expect(await credsTokens(account.id)).toEqual([
-      { symbol: "BTC", unitPrice: 64000, amount: 0.5, identifier: "bitcoin" },
-    ]);
+  // creds 里那个 `tokens` 字段只剩一个空壳:它是**创建表单的入参声明**,不再是持仓的存储处。
+  it("持仓数据不再写进 creds", async () => {
+    const account = await createManualAccount(
+      USER,
+      "M",
+      JSON.stringify([{ symbol: "BTC", unitPrice: "1", amount: "1" }]),
+    );
+    expect((await credsOf(account.id)).tokens).toBe("[]");
   });
 
   it("rejects an empty tokens array (form always sends one; z.array admits [])", async () => {
     await expect(createManualAccount(USER, "M", "[]")).rejects.toThrow();
   });
 
-  it("materializes creds.tokens the provider consumes (identifier omitted when absent)", async () => {
-    // creds.tokens 即 provider 读取的投影(creds.tokens → N spot 由 provider golden 覆盖);此处验往返产出的形状。
+  it("没选币 → identifier 为空(上游没认出来),照样落库", async () => {
     const account = await createManualAccount(
       USER,
       "M",
-      JSON.stringify([{ symbol: "ETH", unitPrice: "3200", amount: "2" }]),
+      JSON.stringify([{ symbol: "PRIVATETOKEN", unitPrice: "3200", amount: "2" }]),
     );
-    expect(await credsTokens(account.id)).toEqual([{ symbol: "ETH", unitPrice: 3200, amount: 2 }]);
+    expect(await holdings(account.id)).toEqual([
+      { symbol: "PRIVATETOKEN", unitPrice: 3200, identifier: null, amount: 2 },
+    ]);
   });
 });
 
@@ -77,40 +105,33 @@ describe("createAccountFor (manual: shared validate + dispatch)", () => {
     await expect(createAccountFor(USER, "manual", "M", {})).rejects.toThrow();
   });
 
-  it("valid manual input → account + token row + set activity + materialized creds", async () => {
+  it("合法入参 → 账户 + 持仓声明 + 开仓活动", async () => {
     const account = await createAccountFor(USER, "manual", "My BTC", {
       tokens: JSON.stringify([
         { symbol: "BTC", unitPrice: "64000", amount: "0.5", identifier: "bitcoin" },
       ]),
     });
-    const rows = await db.listManualTokensByAccount(USER, account.id);
-    expect(rows.map((r) => [r.symbol, r.unitPrice, r.identifier])).toEqual([
-      ["BTC", 64000, "bitcoin"],
-    ]);
-    const acts = await db.listManualActivityByToken(USER, rows[0].id);
-    expect(acts.map((a) => [a.kind, a.amount])).toEqual([["set", 0.5]]);
-    expect(await credsTokens(account.id)).toEqual([
-      { symbol: "BTC", unitPrice: 64000, amount: 0.5, identifier: "bitcoin" },
+    expect(await holdings(account.id)).toEqual([
+      { symbol: "BTC", unitPrice: 64000, identifier: "bitcoin", amount: 0.5 },
     ]);
   });
 });
 
-describe("materializeManualCreds (D1 round-trip)", () => {
-  it("recomputes creds.tokens from the ledger after a later activity", async () => {
+// #203:数量一律 compute-on-read。原来这里测的是「物化那一步把账本折叠写回 creds」——
+// 那一步删了,于是「忘了重跑物化 → 显示 stale」这类 bug 面也整个消失。
+describe("数量随账本即时变化(无物化)", () => {
+  it("补一笔活动后,读出来的数量立刻是新的", async () => {
     const account = await createManualAccount(
       USER,
       "M",
       JSON.stringify([{ symbol: "BTC", unitPrice: "60000", amount: "1" }]),
     );
-    const [tokenRow] = await db.listManualTokensByAccount(USER, account.id);
-    await db.recordManualActivity(USER, tokenRow.id, {
+    const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    await db.recordManualActivity(USER, account.id, h.id, {
       kind: "add",
       amount: 0.5,
       occurredAt: Date.now() + 1,
     });
-    await materializeManualCreds(USER, account.id);
-    expect(await credsTokens(account.id)).toEqual([
-      { symbol: "BTC", unitPrice: 60000, amount: 1.5 },
-    ]);
+    expect((await holdings(account.id))[0].amount).toBe(1.5);
   });
 });

@@ -1,5 +1,5 @@
-import { defineConnector, Spot } from "@folio/connectors-basic";
-import { manualAccountCreds, manualProvider } from "@folio/connectors-provider-manual";
+import { type CredField, defineConnector, Spot } from "@folio/connectors-basic";
+import { z } from "zod";
 
 // manual 无外部品牌图 → 内置 NotebookPen 字形(lucide v0.545)作 logo:「手动录入」语义,且不与
 // 账户钱包标记(NameLine)撞。单色描边内联 SVG data-URI —— 落在恒亮 bg-logo-bg 上,故描边用中性深色
@@ -19,15 +19,47 @@ const NOTEBOOK_PEN_SVG = `
   </svg>`;
 const MANUAL_LOGO = `data:image/svg+xml,${encodeURIComponent(NOTEBOOK_PEN_SVG.replace(/\s+/g, " ").trim())}`;
 
-// manual connector manifest —— 组装契约(基座)+ provider(manual)。手动资产:无外部 API,
-// 一个账户 = 一个手记持仓,全 public account.creds(symbol/amount/unitPrice + 可选 identifier)。
-// manifest 组装归 entry;account.creds 声明随 provider(其天然消费者)落 provider 包,此处引入组合。
+// 加账户表单首个持仓的入参形状。**只在创建那一刻用** —— #203 之后它不再落库:
+// 四个值分别去了 `tokens.symbol` / `tokens.self_price` / `token_refs`(选的币)/ `manual_activity`(数量),
+// app 侧 `createManualAccount` 收到后就把它们写进真表。
+//
+// 仍然声明在 `account.creds` 里,是因为账户创建那条通用路径(`validateAccountCreds` → 表单字段渲染)
+// 就是按它驱动的,manual 不该为此另开一条并行的表单机制。存库为 JSON 字符串,故 validator 先 parse。
+const manualFirstHolding = z.object({
+  symbol: z.string().trim().min(1),
+  unitPrice: z.coerce.number(),
+  identifier: z.string().trim().min(1).optional(),
+  amount: z.coerce.number(),
+});
+
+const manualAccountCreds = [
+  {
+    key: "tokens",
+    type: "public",
+    label: "Tokens",
+    validator: z.preprocess((v) => {
+      if (typeof v !== "string") return v;
+      try {
+        return JSON.parse(v);
+      } catch {
+        return v; // → 交给 z.array 判负,报成 tokens 的校验错而非裸 throw
+      }
+    }, z.array(manualFirstHolding)),
+  },
+] as const satisfies readonly CredField[];
+
+// manual connector manifest —— 手动资产:无外部 API。
+//
+// **没有 provider**(#203):手记的持仓不再经「app 物化进 creds JSON → provider 读回来」这一圈,
+// 而是由 app 直接从 `tokens` + `manual_activity` 现算(ADR 0018:manual 不写快照,「此刻」是合成的)。
+// 那个 provider 删掉之后 `providers` 就空了 —— manual 本来也不参与同步(见 app 的 isSyncableAccount),
+// 从没有人调它的 fetchBalances。connector 仍在:图标、账户表单、盯市估值声明都由它提供。
 export const manual = defineConnector({
   id: "manual",
   label: "Manual",
   logo: MANUAL_LOGO, // 内置 NotebookPen 字形(见上);data: 直挂不代理
   account: { creds: manualAccountCreds },
-  balance: { schema: Spot, providers: [manualProvider] }, // 单 kind:spot
+  balance: { schema: Spot, providers: [] }, // 单 kind:spot;无 provider(见上)
   // 无权威价:只录数量 + 初始单价,恒按市场源价盯市重估(见 app revalue)。
   valuation: "mark-to-market",
 });

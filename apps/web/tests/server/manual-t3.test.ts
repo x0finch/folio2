@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { CredsToken } from "../../src/lib/manual-activity";
+import { type CredsToken, deriveAmount } from "../../src/lib/manual-activity";
 import { db } from "../../src/lib/server/internal/db";
 import {
   addManualActivities,
@@ -11,9 +11,12 @@ import {
   editManualActivity,
   updateToken,
 } from "../../src/lib/server/internal/manual";
+import { NAMER } from "../../src/lib/server/internal/oracle2";
 
-// T3(#155)服务端写路径集成:token CRUD + 批量活动(原子)+ 删/改活动,全落库、写后重跑物化。真实 D1(Miniflare)。
-// 不隔离每测存储 → beforeEach 重置。断言以 creds.tokens(物化投影)与账本一致为准(单写者不变量)。
+// T3(#155)服务端写路径集成:持仓 CRUD + 批量活动(原子)+ 删/改活动,全落库。真实 D1(Miniflare)。
+// 不隔离每测存储 → beforeEach 重置。
+// #203 起**没有物化那一步了** —— 断言直接读「持仓定义 + 账本折叠」(compute-on-read),
+// 不再比对 creds.tokens 那个投影(它连同 manual provider 一起删了)。
 const USER = "user-manual-t3";
 // seedAccount 的开仓 set 活动 occurredAt = Date.now()(≈1.7e12);后续活动须发生在其**之后**,
 // 否则 set 会重置基线覆盖它们。用一段远未来的时间戳(仍是合法 epoch-ms)确保排序在 set 之后。
@@ -32,11 +35,17 @@ async function resetUser(): Promise<void> {
 beforeEach(resetUser);
 
 // 某 manual 账户已物化的 creds.tokens(投影)。
+// 该账户的持仓:定义 + 账本折叠出的数量(compute-on-read;#203 之后没有 creds.tokens 那个投影了)。
 async function readTokens(accountId: string): Promise<CredsToken[]> {
-  const raw = await db.getRawCreds(USER, accountId);
-  if (!raw) return [];
-  const creds = JSON.parse(raw) as { tokens?: string };
-  return creds.tokens ? (JSON.parse(creds.tokens) as CredsToken[]) : [];
+  const rows = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
+  return Promise.all(
+    rows.map(async (r) => ({
+      symbol: r.symbol,
+      unitPrice: r.unitPrice,
+      amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
+      ...(r.identifier ? { identifier: r.identifier } : {}),
+    })),
+  );
 }
 
 // 建一个仅一 token 的 manual 账户(BTC，初始 amount 1）。
@@ -56,7 +65,6 @@ describe("createToken", () => {
       accountId: account.id,
       symbol: "ETH",
       unitPrice: 3000,
-      identifier: "ethereum",
       amount: 2,
     });
     const tokens = await readTokens(account.id);
@@ -71,33 +79,33 @@ describe("createToken", () => {
 describe("updateToken", () => {
   it("改单价/标识即时反映;改目标 amount → 追加 set 对齐,derived === 新值", async () => {
     const account = await seedAccount();
-    const [btc] = await db.listManualTokensByAccount(USER, account.id);
+    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
     await updateToken(USER, {
+      accountId: account.id,
       tokenId: btc.id,
       symbol: "BTC",
       unitPrice: 65000,
-      identifier: "bitcoin",
       amount: 3, // 从 1 → 3
     });
     const tokens = await readTokens(account.id);
     expect(tokens[0].unitPrice).toBe(65000);
     expect(tokens[0].amount).toBe(3);
     // 应追加了一条对齐 set(原开仓 set + 对齐 set = 2 条）。
-    const activities = await db.listManualActivityByToken(USER, btc.id);
+    const activities = await db.listManualActivityByToken(USER, account.id, btc.id);
     expect(activities.filter((a) => a.kind === "set")).toHaveLength(2);
   });
 
   it("目标 amount 不变 → 不追加活动", async () => {
     const account = await seedAccount();
-    const [btc] = await db.listManualTokensByAccount(USER, account.id);
+    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
     await updateToken(USER, {
+      accountId: account.id,
       tokenId: btc.id,
       symbol: "BTC",
       unitPrice: 61000,
-      identifier: "bitcoin",
       amount: 1, // 不变
     });
-    expect(await db.listManualActivityByToken(USER, btc.id)).toHaveLength(1);
+    expect(await db.listManualActivityByToken(USER, account.id, btc.id)).toHaveLength(1);
   });
 });
 
@@ -110,11 +118,11 @@ describe("deleteToken", () => {
       unitPrice: 3000,
       amount: 2,
     });
-    const eth = (await db.listManualTokensByAccount(USER, account.id)).find(
+    const eth = (await db.listManualHoldingsByAccount(USER, account.id, NAMER)).find(
       (t) => t.symbol === "ETH",
     );
     if (!eth) throw new Error("eth missing");
-    await deleteToken(USER, eth.id);
+    await deleteToken(USER, account.id, eth.id);
     const tokens = await readTokens(account.id);
     expect(tokens.map((t) => t.symbol)).toEqual(["BTC"]);
   });
@@ -175,9 +183,9 @@ describe("addManualActivities", () => {
     expect(res.symbol).toBe("DOGE");
     // 原子:BTC 未变、DOGE 未建。
     expect(await readTokens(account.id)).toEqual(before);
-    expect((await db.listManualTokensByAccount(USER, account.id)).map((t) => t.symbol)).toEqual([
-      "BTC",
-    ]);
+    expect(
+      (await db.listManualHoldingsByAccount(USER, account.id, NAMER)).map((t) => t.symbol),
+    ).toEqual(["BTC"]);
   });
 });
 
@@ -205,7 +213,7 @@ describe("deleteManualActivity", () => {
 describe("editManualActivity", () => {
   it("改活动致超支 → {ok:false},不写", async () => {
     const account = await seedAccount();
-    const [btc] = await db.listManualTokensByAccount(USER, account.id);
+    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
     // 加一条 reduce 1(合法:1-1=0）。
     await addManualActivities(USER, account.id, [
       {
@@ -215,7 +223,7 @@ describe("editManualActivity", () => {
         occurredAt: LATER + 6,
       },
     ]);
-    const reduce = (await db.listManualActivityByToken(USER, btc.id)).find(
+    const reduce = (await db.listManualActivityByToken(USER, account.id, btc.id)).find(
       (a) => a.kind === "reduce",
     );
     if (!reduce) throw new Error("reduce missing");
@@ -223,7 +231,7 @@ describe("editManualActivity", () => {
     const res = await editManualActivity(USER, reduce.id, { amount: 5 });
     expect(res.ok).toBe(false);
     // 未写:活动仍是 1，amount 仍 0。
-    const still = (await db.listManualActivityByToken(USER, btc.id)).find(
+    const still = (await db.listManualActivityByToken(USER, account.id, btc.id)).find(
       (a) => a.id === reduce.id,
     );
     expect(still?.amount).toBe(1);
@@ -232,8 +240,8 @@ describe("editManualActivity", () => {
 
   it("合法改动 → 写入并重折叠", async () => {
     const account = await seedAccount();
-    const [btc] = await db.listManualTokensByAccount(USER, account.id);
-    const set = (await db.listManualActivityByToken(USER, btc.id))[0];
+    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    const set = (await db.listManualActivityByToken(USER, account.id, btc.id))[0];
     const res = await editManualActivity(USER, set.id, { amount: 4 });
     expect(res.ok).toBe(true);
     expect((await readTokens(account.id))[0].amount).toBe(4);
@@ -262,20 +270,26 @@ describe("越权防御(跨用户 / 跨账户)", () => {
       .run();
   }
 
-  it("跨用户改 token → 抛(getManualTokenAccountId 归属校验)", async () => {
+  it("跨用户改持仓 → 抛(token 归属校验)", async () => {
     await ensureOther();
     const account = await seedAccount(); // USER 拥有
-    const [btc] = await db.listManualTokensByAccount(USER, account.id);
+    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
     await expect(
-      updateToken(OTHER, { tokenId: btc.id, symbol: "BTC", unitPrice: 1, amount: 1 }),
+      updateToken(OTHER, {
+        accountId: account.id,
+        tokenId: btc.id,
+        symbol: "BTC",
+        unitPrice: 1,
+        amount: 1,
+      }),
     ).rejects.toThrow();
   });
 
-  it("跨用户删 token → 抛", async () => {
+  it("跨用户清空持仓 → 抛", async () => {
     await ensureOther();
     const account = await seedAccount();
-    const [btc] = await db.listManualTokensByAccount(USER, account.id);
-    await expect(deleteToken(OTHER, btc.id)).rejects.toThrow();
+    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    await expect(deleteToken(OTHER, account.id, btc.id)).rejects.toThrow();
   });
 
   it("跨用户往他人账户加活动 → 抛(commitManualBatch assertAccountOwned)", async () => {
@@ -302,21 +316,43 @@ describe("越权防御(跨用户 / 跨账户)", () => {
     await expect(editManualActivity(OTHER, set.id, { amount: 2 })).rejects.toThrow();
   });
 
-  it("commitManualBatch 拒绝引用非本账户的 tokenId(纵深防御)", async () => {
-    const a = await seedAccount(); // 有 BTC token
+  // 闸口从「∈ 该账户既有 token」改成了「∈ 本人的 token」(#203)。前者现在会循环:
+  // 账户与币的关系**由活动本身承载**,一条刚声明的持仓在活动插进去之前不属于任何账户。
+  it("同一用户的两个手记账户可以持有同一个币(不再按账户设闸)", async () => {
+    const a = await seedAccount(); // 有 BTC
     const b = await createManualAccount(
       USER,
       "B",
       JSON.stringify([{ symbol: "ETH", unitPrice: "1", amount: "1" }]),
     );
-    const [btcTok] = await db.listManualTokensByAccount(USER, a.id);
-    // 往账户 b 提交一条引用账户 a 的 token 的活动 → 被 allowed-set 校验拒。
+    const [btcTok] = await db.listManualHoldingsByAccount(USER, a.id, NAMER);
+
+    await db.commitManualBatch(USER, {
+      accountId: b.id,
+      declare: [],
+      activities: [{ tokenId: btcTok.id, kind: "add", amount: 1, occurredAt: LATER + 1 }],
+    });
+
+    // b 现在也持有它,数量各自独立(a 仍是 1)。
+    expect((await readTokens(b.id)).find((t) => t.symbol === "BTC")?.amount).toBe(1);
+    expect((await readTokens(a.id))[0].amount).toBe(1);
+  });
+
+  it("commitManualBatch 拒绝引用别人的 tokenId(纵深防御)", async () => {
+    await ensureOther();
+    const a = await seedAccount(); // USER 的
+    const [btcTok] = await db.listManualHoldingsByAccount(USER, a.id, NAMER);
+    const other = await createManualAccount(
+      OTHER,
+      "O",
+      JSON.stringify([{ symbol: "ETH", unitPrice: "1", amount: "1" }]),
+    );
     await expect(
-      db.commitManualBatch(USER, {
-        accountId: b.id,
-        newTokens: [],
+      db.commitManualBatch(OTHER, {
+        accountId: other.id,
+        declare: [],
         activities: [{ tokenId: btcTok.id, kind: "add", amount: 1, occurredAt: LATER + 1 }],
       }),
-    ).rejects.toThrow(/token not in account/);
+    ).rejects.toThrow(/token not owned/);
   });
 });

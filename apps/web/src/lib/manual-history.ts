@@ -24,20 +24,21 @@ export interface HistoryActivity {
   price?: number | null;
 }
 export interface HistoryToken {
+  id: string; // tokens.id —— 历史价按它取(#203)
   unitPrice: number;
-  identifier?: string | null;
+  identifier?: string | null; // 当前上游对它的叫法;空 = 上游不认识它 → 跳过历史价那一档
   activities: HistoryActivity[];
 }
 
-// 由 server 注入(#148 / ADR 0019):有 identifier 的 token 在时刻 T 的 oracle 历史价(取不到 → undefined 落降级链)。
-// server 侧按区间一次预取 priceSeries → 建 Map<identifier, Map<dayBucket, price>>,再包成本同步闭包。
-export type HistoricalPriceAt = (identifier: string, t: number) => number | undefined;
+// 由 server 注入(#148 / ADR 0019):某 token 在时刻 T 的 oracle 历史价(取不到 → undefined 落降级链)。
+// server 侧按区间一次预取 priceSeries → 建 Map<tokenId, Map<dayBucket, price>>,再包成本同步闭包。
+export type HistoricalPriceAt = (tokenId: string, t: number) => number | undefined;
 
 // price@T 降级链(ADR 0019):① 有 identifier → oracle 历史价(#148,经 priceAt 注入,市值主路径)→ ② 账本中
 // occurredAt ≤ T 最近一条**记了 price** 的活动(兜底 + 成本原料)→ ③ 当前 unitPrice 摊平(真无市场,平线)。
 export function tokenPriceAt(token: HistoryToken, t: number, priceAt?: HistoricalPriceAt): number {
   if (token.identifier && priceAt) {
-    const p = priceAt(token.identifier, t); // ①
+    const p = priceAt(token.id, t); // ①
     if (p != null) return p;
   }
   let best: HistoryActivity | undefined; // ② 最近(occurredAt→createdAt)且记了 price 的活动

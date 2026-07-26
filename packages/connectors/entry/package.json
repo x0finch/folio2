@@ -16,7 +16,6 @@
     "@folio/connectors-provider-binance": "workspace:*",
     "@folio/connectors-provider-blockbook": "workspace:*",
     "@folio/connectors-provider-coinstats": "workspace:*",
-    "@folio/connectors-provider-manual": "workspace:*",
     "@folio/connectors-provider-hyperliquid": "workspace:*",
     "@folio/connectors-provider-okx": "workspace:*",
     "@folio/connectors-provider-zerion": "workspace:*",

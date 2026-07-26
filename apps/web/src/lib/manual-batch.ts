@@ -25,22 +25,26 @@ export function runningOk(activities: DerivableActivity[]): boolean {
   return true;
 }
 
-// 既有 token(定义 + 活动账本),供解析/折叠。identifier 可空(symbol-only token)。
+// 既有持仓(定义 + 活动账本),供解析/折叠。`id` 就是 `tokens.id`。
 export interface Token {
   id: string;
   symbol: string;
   unitPrice: number;
-  identifier?: string | null;
   activities: DerivableActivity[];
 }
 
-// 草稿指向的**选中币**(symbol + 市价单价 + 可选 CGK id)。可指向尚未持有的 token → 现建。
-// 与 tokenRef(代币命名法,见 @folio/oracle-ref)无关 —— 这是 server fn 入参,不是代币身份串。
-export interface PickedTokenInput {
+// 草稿指向的**选中币** —— 这是 server fn 的入参形状(客户端给什么就是什么)。
+// 与 tokenRef(代币命名法,见 @folio/oracle-ref)无关。
+interface PickedTokenInput {
   symbol: string;
   unitPrice: number;
   identifier?: string | null;
 }
+
+// 认过币之后的选中币:`tokenId` 由调用方在规划**之前**经 mint 换出(见 manualTokenRef)。
+// 于是「这条草稿指的是哪个币」不再由本模块猜 —— 原来这里按 identifier 优先、退回同名 symbol 匹配,
+// 那是一套跟 mint 平行的认币启发式,两处规则一旦漂移就会一个认成 A、一个认成 B。
+export type ResolvedTokenInput = PickedTokenInput & { tokenId: string };
 
 // 一条批量草稿:token 引用 + 活动字段(createdAt 不由客户端定,服务端按提交序赋值)。
 export interface BatchDraft {
@@ -53,12 +57,14 @@ export interface BatchDraft {
   memo?: string | null;
 }
 
-// 写计划:要新建的 token(id 由调用方注入的工厂给,活动据此引用)。
+// 已认过币的草稿 —— planManualBatch 收的是这个。
+export type ResolvedDraft = Omit<BatchDraft, "token"> & { token: ResolvedTokenInput };
+
+// 写计划:本批要**声明**的持仓(id 是已经 mint 出来的 token id;活动据此引用)。
 interface PlannedToken {
   id: string;
   symbol: string;
   unitPrice: number;
-  identifier?: string | null;
 }
 interface PlannedActivity {
   tokenId: string;
@@ -71,26 +77,20 @@ interface PlannedActivity {
 }
 export type BatchPlan =
   | { ok: false; symbol: string }
-  | { ok: true; newTokens: PlannedToken[]; activities: PlannedActivity[] };
+  | { ok: true; declare: PlannedToken[]; activities: PlannedActivity[] };
 
-// 按 identifier(优先,精确)匹配,退回大写 symbol(仅在无 identifier 时,匹配同样 identifier-less 的 token)。
-// 带 identifier 的 ref 只按 identifier 命中,不自动收养 symbol-only 同名(与建账户/物化的身份归一一致)。
-export function findToken(tokens: Token[], ref: PickedTokenInput): Token | undefined {
-  if (ref.identifier) return tokens.find((t) => t.identifier === ref.identifier);
-  const sym = ref.symbol.toUpperCase();
-  return tokens.find((t) => !t.identifier && t.symbol.toUpperCase() === sym);
+// 认币已在 mint 完成 → 这里只比 id。同一个币在同一账户里恒命中同一条既有持仓,
+// 而「同名但不是同一个币」也不会被误收养 —— mint 那一档已经判过(合约不许按 symbol 猜)。
+export function findToken(tokens: Token[], ref: ResolvedTokenInput): Token | undefined {
+  return tokens.find((t) => t.id === ref.tokenId);
 }
 
 // 把一批草稿解析成写计划:逐条命中/现建 token,合成校验时间线(新活动排在同 occurredAt 既有之后、按提交序),
 // 任一 token 时间线超支 → 整批拒(返回超支 symbol);否则出新建 token + 待插入活动。
-export function planManualBatch(
-  existing: Token[],
-  drafts: BatchDraft[],
-  newId: () => string,
-): BatchPlan {
+export function planManualBatch(existing: Token[], drafts: ResolvedDraft[]): BatchPlan {
   // 工作副本:既有活动浅拷,追加草稿以校验;不改入参。
   const working: Token[] = existing.map((t) => ({ ...t, activities: [...t.activities] }));
-  const newTokens: PlannedToken[] = [];
+  const declare: PlannedToken[] = [];
   const activities: PlannedActivity[] = [];
   // 校验时间线里,新草稿的 createdAt 取一段远大于任何真实 epoch-ms createdAt 的序号,
   // 从而在同 occurredAt 处恒排在既有活动之后、且彼此按提交序 —— 与入库(createdAt = now+i)的定序一致。
@@ -99,21 +99,16 @@ export function planManualBatch(
   drafts.forEach((d, i) => {
     let token = findToken(working, d.token);
     if (!token) {
-      const id = newId();
+      // 这个币在本账户还没有持仓 → 声明一条。**id 不在这里造** —— 它是 mint 给的,
+      // 所以同一个币被两条草稿引用时天然落到同一条持仓上。
       token = {
-        id,
+        id: d.token.tokenId,
         symbol: d.token.symbol,
         unitPrice: d.token.unitPrice,
-        identifier: d.token.identifier ?? null,
         activities: [],
       };
       working.push(token);
-      newTokens.push({
-        id,
-        symbol: token.symbol,
-        unitPrice: token.unitPrice,
-        identifier: token.identifier,
-      });
+      declare.push({ id: token.id, symbol: token.symbol, unitPrice: token.unitPrice });
     }
     activities.push({
       tokenId: token.id,
@@ -135,5 +130,5 @@ export function planManualBatch(
   for (const t of working) {
     if (!runningOk(t.activities)) return { ok: false, symbol: t.symbol };
   }
-  return { ok: true, newTokens, activities };
+  return { ok: true, declare, activities };
 }

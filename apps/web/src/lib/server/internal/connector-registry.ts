@@ -63,6 +63,9 @@ export async function validateAccountCreds(
   const validated = await validateCredentials(manifest.account.creds, values);
   if (!opts?.liveness) return;
 
+  // **没有 provider 的 connector 没有「探活」这回事**(manual:无外部 API,#203 起它连 provider 都没了)。
+  // 形状闸已经过了,直接放行。与「声明了 provider 却选不出来」区分开 —— 那是配置错误,仍要抛。
+  if (manifest.balance.providers.length === 0) return;
   const provider = selectProvider(manifest);
   if (!provider) throw new Error(`no provider for connector ${connectorId}`);
   // PC 注入:从 env 按 provider 声明的 creds key 取默认值(最小权限:只注入声明的 key)——与 sync 的 fetchViaConnector 同形。
