@@ -276,3 +276,89 @@ describe("读不懂的 ref", () => {
     expect(store.refs.has(SRC_USDC)).toBe(false);
   });
 });
+
+// —— 七个 producer 的实际输出各走一遍 ——
+// 前面那些测试是按「决策树的分支」组织的;这一组按**来源**组织,确保每个 producer 真实吐出的
+// ref 形状都能落到对的 token 上。形状取自各 provider 的 golden fixture。
+describe("各来源的 ref 都落到对的 token", () => {
+  const USDC_ADDR = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+  const USDC_SOL_ADDR = "solana/contract:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+  // 一份「什么都齐」的环境:映射表收录了两条链上的 USDC,warm 里有 USDC / ETH / BTC / SOL。
+  const fullSetup = () =>
+    setup({
+      index: { [USDC_ADDR]: "usd-coin", [USDC_SOL_ADDR]: "usd-coin" },
+      candidates: {
+        USDC: [{ ref: SRC_USDC, marketCapRank: 6 }],
+        ETH: [{ ref: "src/ethereum", marketCapRank: 2 }],
+        BTC: [{ ref: "src/bitcoin", marketCapRank: 1 }],
+        SOL: [{ ref: "src/solana", marketCapRank: 5 }],
+      },
+    });
+
+  it("六个来源的 USDC 归到同一个 Token(链上合约 / 交易所 / perp / 手记选币)", async () => {
+    const { store, mint } = fullSetup();
+    const got = await mint.of([
+      { ref: USDC_ADDR, seed: seed("USDC") }, // zerion:合约
+      { ref: USDC_SOL_ADDR, seed: seed("USDC") }, // coinstats:合约
+      { ref: "binance/USDC", seed: seed("USDC") }, // binance:上架代号
+      { ref: "okx/USDC", seed: seed("USDC") }, // okx:上架代号
+      { ref: "hyperliquid/USDC", seed: seed("USDC") }, // hyperliquid:保证金币
+      { ref: SRC_USDC, seed: seed("USDC") }, // manual:用户选了币,ref 本身就是锚
+    ]);
+
+    expect(new Set(got.values()).size).toBe(1); // 全落一个 Token
+    expect(store.rows.size).toBe(1);
+    // 六条来源 ref + 锚那一条(手记那条与锚同串,去重后不重复)
+    expect(store.refs.size).toBe(6);
+    expect(store.refs.get(SRC_USDC)).toBe(got.get(USDC_ADDR));
+  });
+
+  it("原生币各自归到自己的 Token —— 它们不在映射表里,靠 symbol", async () => {
+    const { store, mint } = fullSetup();
+    const got = await mint.of([
+      { ref: "evm:1/native", seed: seed("ETH") }, // zerion:ETH
+      { ref: "bitcoin/native", seed: seed("BTC") }, // blockbook:BTC
+      { ref: "solana/native", seed: seed("SOL") }, // coinstats:SOL
+    ]);
+
+    expect(new Set(got.values()).size).toBe(3); // 三个不同的币
+    expect(store.refs.get("src/ethereum")).toBe(got.get("evm:1/native"));
+    expect(store.refs.get("src/bitcoin")).toBe(got.get("bitcoin/native"));
+    expect(store.refs.get("src/solana")).toBe(got.get("solana/native"));
+  });
+
+  it("手记选了币:ref 本身就是锚 —— 不查映射表、不掉回 symbol", async () => {
+    // 故意把 warm 与覆盖表都指到**别的**币上:如果它掉回 symbol 就会认错。
+    const { store, refIndex, mint } = setup({
+      overrides: { USDC: "wrong-coin" },
+      candidates: { USDC: [{ ref: "src/wrong-coin", marketCapRank: 1 }] },
+    });
+    const before = refIndex.lookups;
+
+    const id = (await mint.of([{ ref: SRC_USDC, seed: seed("USDC") }])).get(SRC_USDC);
+    expect(refIndex.lookups).toBe(before); // 没查映射表
+    expect(store.refs.get(SRC_USDC)).toBe(id);
+    expect(store.refs.has("src/wrong-coin")).toBe(false); // 没被 symbol 那档带跑
+    // 只有一条 ref —— 去重生效(ref 与锚同串;不去重会撞 (namer, localName) 主键)
+    expect([...store.refs.keys()]).toEqual([SRC_USDC]);
+    expect(store.rows.get(id as string)?.ref).toBe(SRC_USDC); // 一进来就是「已认出」
+  });
+
+  it("手记没选币:`manual/<SYMBOL>` 认不出就自己一行", async () => {
+    const { store, mint } = fullSetup();
+    const id = (await mint.of([{ ref: "manual/FOO", seed: seed("FOO") }])).get("manual/FOO");
+    expect(store.rows.get(id as string)?.ref).toBeNull();
+    expect([...store.refs.keys()]).toEqual(["manual/FOO"]);
+  });
+
+  it("手记没选币但 symbol 认得出 → 照样归到那个 Token", async () => {
+    const { store, mint } = fullSetup();
+    const got = await mint.of([
+      { ref: "manual/BTC", seed: seed("BTC") },
+      { ref: "bitcoin/native", seed: seed("BTC") },
+    ]);
+    expect(got.get("manual/BTC")).toBe(got.get("bitcoin/native"));
+    expect(store.rows.size).toBe(1);
+  });
+});
