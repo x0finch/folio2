@@ -12,7 +12,7 @@ import { SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";
 // 产出的 tokenRef 命名者恒为本 adapter 的 id;coin id 规范为小写 kebab,归一在生产者侧做。
 
 export const cgkRef = (coinId: string): TokenRef =>
-  tokenRef.local(UPSTREAM_ID, coinId.toLowerCase());
+  tokenRef.opaque(UPSTREAM_ID, coinId.toLowerCase());
 
 // coin id ← 本源命名的 ref。不是本源的命名(链上寻址 / 别家)→ undefined。
 export function coinIdOf(ref: TokenRef): string | undefined {

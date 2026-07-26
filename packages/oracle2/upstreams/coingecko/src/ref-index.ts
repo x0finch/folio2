@@ -54,8 +54,9 @@ export function toRefIndexRows(
         skipped += 1;
         continue;
       }
-      // 地址归一(EVM 小写)由文法层按命名者决定,不在这里猜。
-      rows.push({ ref: tokenRef.local(namer, addr), namer: UPSTREAM_ID, localName: coinId });
+      // 这张表里全是**链上合约**,故产 `contract:` 形(ADR 0020 第三轮)——
+      // mint 的 symbol 闸据此跳过它们。地址归一(EVM 小写)由文法层按命名者决定,不在这里猜。
+      rows.push({ ref: tokenRef.contract(namer, addr), namer: UPSTREAM_ID, localName: coinId });
     }
   }
   return { rows, unmatchedPlatforms, skipped };

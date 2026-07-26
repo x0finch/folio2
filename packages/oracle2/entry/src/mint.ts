@@ -1,4 +1,4 @@
-import { tokenRef as buildRef } from "@folio/oracle-ref";
+import { tokenRef as buildRef, parseTokenRef } from "@folio/oracle-ref";
 import type {
   GlobalTokenRefIndexStore,
   ProviderTokenSeed,
@@ -43,18 +43,26 @@ export interface MintInput {
 }
 
 export function createMint({ store, refIndex, candidates, namer, overrides }: MintDeps): Mint {
-  // 这条 ref 在当前源那里叫什么 —— **地址优先于 symbol**。
+  // 这条 ref 在当前上游那里叫什么 —— **地址优先于 symbol**。
   // 地址是权威答案,symbol 只是猜:换序会把假 USDC 并进真 USDC。
-  async function sourceRefOf(
+  async function upstreamRefOf(
     ref: TokenRef,
     seed: ProviderTokenSeed,
   ): Promise<TokenRef | undefined> {
     const byAddress = (await refIndex.lookup(namer, [ref])).get(ref);
-    if (byAddress) return buildRef.local(namer, byAddress);
+    if (byAddress) return buildRef.opaque(namer, byAddress);
+
+    // **合约不许按 symbol 猜。** 合约的 symbol 字段是部署者随手填的 —— 地址那一档查不到,
+    // 就该老实认不出来,而不是拿一个可以伪造的字符串去认。一个 symbol 写着 `USDC` 的山寨合约
+    // 若走到下面,会被策展表或市值排名判成「有把握」并进真 USDC:总枚数凭空多一百万,盯市的行
+    // 直接多出一百万美元,而且认定冻进快照、永不重判(ADR 0020 第三轮)。
+    // 原生币与场馆代号相反:`bitcoin/native` 的 BTC、`binance/USDC` 的上架代号都可信,而原生币
+    // 按设计不进全局映射表(ADR 0022),symbol 是它们**唯一**的一条路 —— 所以只挡 contract 这一支。
+    if (parseTokenRef(ref).kind === "contract") return undefined;
 
     const symbol = normalizeSymbol(seed.symbol);
     const override = overrides?.[symbol];
-    if (override) return buildRef.local(namer, override);
+    if (override) return buildRef.opaque(namer, override);
     // 没把握的(同名混战的小币)返回 undefined → 各自独立建行、不链上游。
     return pickByConfidence(await candidates.bySymbol(symbol));
   }
@@ -68,17 +76,17 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
     // 已经认出来过(有当前源的 ref 行)→ 什么都不用做,绝大多数行停在这。
     if (hit?.linked) return hit.tokenId;
 
-    const sourceRef = await sourceRefOf(ref, seed);
+    const upstreamRef = await upstreamRefOf(ref, seed);
 
     // 还是认不出来。
-    if (!sourceRef) {
+    if (!upstreamRef) {
       // 已有行:保持原样(只有 provider 那条 ref),下次 sync 再白查一次本地表自动补链。
       if (hit) return hit.tokenId;
       // 新行:只写 provider 那条 ref,快照照写 —— 不卡在上游上。
       return store.create(seed, [ref]);
     }
 
-    const owner = (await store.findByRefs([sourceRef])).get(sourceRef);
+    const owner = (await store.findByRefs([upstreamRef])).get(upstreamRef);
 
     // —— 认出来了 ——
     if (!hit) {
@@ -89,7 +97,7 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
         await store.fillInfo(owner.tokenId, { name: seed.name, providerLogo: seed.providerLogo });
         return store.linkRef(owner.tokenId, ref);
       }
-      return store.create(seed, [ref, sourceRef]);
+      return store.create(seed, [ref, upstreamRef]);
     }
 
     // —— 事后才认出来:合并 ——
@@ -101,7 +109,7 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
       return owner.tokenId;
     }
     // 没人占着 → 就地补上上游那条 ref,行不动(它的历史、它的图都还在)。
-    await store.linkRef(hit.tokenId, sourceRef);
+    await store.linkRef(hit.tokenId, upstreamRef);
     return hit.tokenId;
   }
 
