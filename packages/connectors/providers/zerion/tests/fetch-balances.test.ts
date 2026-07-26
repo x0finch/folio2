@@ -5,7 +5,7 @@ import chainsFixture from "./fixtures/chains.json";
 import expectedBalances from "./fixtures/expected-balances.json";
 import positionsFixture from "./fixtures/positions.json";
 
-// fetchBalances 依赖两个 API:positions(持仓)+ /v1/chains/(slug→数字 chainId,eip155 标识用)。
+// fetchBalances 依赖两个 API:positions(持仓)+ /v1/chains/(slug→数字 chainId,evm:<id> 命名者用)。
 // 三份 fixture 一一对应:positions.json / chains.json(录制的两个真实响应)→ expected-balances.json
 // (解析后的结构化期望值,固化在文件里逐一对比,不散写在断言里)。
 // 新 Balance 契约:spot 行【无 meta】,defi 行带 meta:{protocol,positionType}。
@@ -69,7 +69,7 @@ describe("parseChainIds", () => {
 });
 
 describe("parsePositions (golden: fixtures in → fixture out)", () => {
-  it("positions + chains → expected-balances(eip155 标准形标识;spot 无 meta、defi 带 meta)", () => {
+  it("positions + chains → expected-balances(evm:<id> 标准形标识;spot 无 meta、defi 带 meta)", () => {
     const balances = parsePositions(positionsFixture, parseChainIds(chainsFixture));
     expect(balances).toEqual(expectedBalances);
   });
@@ -83,7 +83,7 @@ describe("parsePositions (golden: fixtures in → fixture out)", () => {
   });
 
   it("链映射缺失 → 抛错(失败即不产,绝不产 slug 兜底形)", () => {
-    // chainIds 映射里没有某仓位的链 → 无法产规范 eip155 标识 → 抛 UPSTREAM_ERROR(可重试)。
+    // chainIds 映射里没有某仓位的链 → 无法产规范 evm:<id> 标识 → 抛 UPSTREAM_ERROR(可重试)。
     expect(() => parsePositions(positionsFixture, {})).toThrow(/no chainId/);
   });
 

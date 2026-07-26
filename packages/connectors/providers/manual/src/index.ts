@@ -56,7 +56,7 @@ export const manualProvider: BalanceProvider<Spot, typeof manualAccountCreds> = 
         // 用户选定的 CGK id = 厂商寻址身份 → tokenRef(coingecko/<id>);未选币则无标识,按 symbol 归一。
         ...(t.identifier
           ? // CGK coin id 规范为小写 kebab;归一在生产者这一侧做(oracle-ref 对不透明 id 原样透传)。
-            { tokenRef: tokenRef.opaque("coingecko", t.identifier.toLowerCase()) }
+            { tokenRef: tokenRef.local("coingecko", t.identifier.toLowerCase()) }
           : {}),
       })),
     };

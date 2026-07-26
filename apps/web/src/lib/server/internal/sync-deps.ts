@@ -15,6 +15,7 @@ import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
 import { revalue } from "../../revalue";
 import { isSyncableAccount } from "../../syncable";
+import { chainAddressOf } from "../../token-ref";
 import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
 import { warmFx } from "./fx";
@@ -23,15 +24,16 @@ import { oracle } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
 import { warmTokens } from "./token-enrich";
 
-// provider 自带代币元信息的采集(canonical P1):合约形 tokenRef 的行 → ProviderAsset,
+// provider 自带代币元信息的采集(canonical P1):链上地址形 tokenRef 的行 → ProviderAsset,
 // 喂 tokens.noteProviderAssets(seed 孤儿 / 刷新备用 logo)。native/无标识行不 seed(原生币走 symbol 解析)。
 // logo/name 只在取数瞬时存在,不落快照行 —— 参考层是其 home。
 function toProviderAssets(rows: Balance[]): ProviderAsset[] {
   const out: ProviderAsset[] = [];
   for (const b of rows) {
-    const id = b.tokenRef;
-    // 只 seed 合约形(erc20/token);native:/coingecko: 无需 seed(前者走 symbol,后者已是 CGK)。
-    if (!id || !(id.includes("/erc20:") || id.includes("/token:"))) continue;
+    // 只 seed 链上地址形;原生币 / `coingecko/<id>` / 场馆命名无需 seed
+    // (原生币走 symbol,CGK 命名已是规范 ref,场馆命名也走 symbol 消歧)。
+    const id = chainAddressOf(b.tokenRef);
+    if (!id) continue;
     out.push({ tokenId: id, symbol: b.symbol, name: b.name, logo: b.logo });
   }
   return out;

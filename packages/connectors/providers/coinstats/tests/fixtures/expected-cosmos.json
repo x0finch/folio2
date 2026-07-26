@@ -1,7 +1,7 @@
 [
   {
     "symbol": "ATOM",
-    "tokenRef": "cosmos/token:uatom",
+    "tokenRef": "cosmos/uatom",
     "name": "Cosmos Hub",
     "amount": 105.29550851642641,
     "price": 1.592410066278476,

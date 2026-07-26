@@ -27,7 +27,7 @@ describe("migration 0020 — token_vendor_ids 回填(去 vendor tag)", () => {
     await env.DB.prepare("DROP TABLE IF EXISTS _pre0020").run();
     await env.DB.prepare("CREATE TABLE _pre0020 (id TEXT, source TEXT, identifier TEXT)").run();
     await env.DB.prepare("INSERT INTO _pre0020 (id, source, identifier) VALUES (?,?,?),(?,?,?)")
-      .bind("cgk-row", "coingecko", "bitcoin", "orphan-row", "provider", "eip155:1/erc20:0xorphan")
+      .bind("cgk-row", "coingecko", "bitcoin", "orphan-row", "provider", "evm:1/0xorphan")
       .run();
     // 与 0020 回填语句同款(来源表 tokens → scratch)。
     await env.DB.prepare(

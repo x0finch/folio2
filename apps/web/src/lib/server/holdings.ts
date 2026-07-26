@@ -38,7 +38,6 @@ export const getHoldingHistory = createServerFn({ method: "GET" })
         tokenRef: r.tokenRef,
         isMargin: vk === "perp_equity",
         account: { id: r.accountId, label: "", connectorId: "" }, // holdingKey 只用 account.id
-        group: e?.group,
         tokenId: e?.id,
         ref: e?.ref,
         takenAt: r.takenAt,

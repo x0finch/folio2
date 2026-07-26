@@ -10,9 +10,9 @@ describe("balanceToAssetRef", () => {
       balanceToAssetRef({
         symbol: "USDC",
         kind: "spot",
-        tokenRef: "eip155:42161/erc20:0xaf88",
+        tokenRef: "evm:42161/0xaf88",
       }),
-    ).toEqual({ symbol: "USDC", tokenRef: "eip155:42161/erc20:0xaf88" });
+    ).toEqual({ symbol: "USDC", tokenRef: "evm:42161/0xaf88" });
   });
 
   it("spot without tokenRef (native/CEX) → symbol only", () => {

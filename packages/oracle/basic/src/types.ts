@@ -82,14 +82,6 @@ export interface TokenRecordPrice {
   stale: boolean; // price_expires_at < now
 }
 
-// 展示分组(P2,ADR-0001):Token 所属的家族(可跨多个 Token)。无组 = undefined(单例组)。
-export interface TokenGroup {
-  id: string;
-  displaySymbol: string;
-  name: string;
-  logo?: string;
-}
-
 // 代币表一行:CGK 收录币(ref 非空)或 provider 孤儿(CGK 未收录/未解析,ref 为 null)。
 // logo = CGK(canonical);providerLogo = provider 自带备用槽(孤儿的主图;CGK 缺图时兜底)。
 export interface TokenRecord {
@@ -101,7 +93,6 @@ export interface TokenRecord {
   providerLogo?: string;
   marketCapRank?: number;
   price?: TokenRecordPrice;
-  group?: TokenGroup; // 命中种子成员的 cgk 行才有;孤儿/未分组为 undefined
 }
 
 // provider 侧 seed(同步时采集):孤儿建行/已有行刷新 providerLogo 用。

@@ -1,5 +1,21 @@
 import type { TokenRef } from "./types";
-import { cgkRef as cg } from "./vendor";
+import { CGK_VENDOR, cgkRef as cg } from "./vendor";
+
+// —— 「这个命名者是不是一条链」的临时判据(ADR 0021 / #192)——
+// 文法收窄前,`native` / `<assetNs>:<addr>` 的形状自己就说明了「这是链上寻址」;去掉 assetNs 后
+// `evm:1/0xa0b8…` 与 `binance/USDC` 在串上不可分辨。真正的答案是**平台由 provider 随余额直接报**
+// (#193),届时本表连同所有 `chainOf` 式判断一起删除。在那之前用「非链命名者」的反向名单兜着 ——
+// 它短、稳定,且比按形状猜更诚实:场馆(CEX / perp DEX)与数据源各自只有这几个。
+// 注:`manual` 不在此 —— 手记从不作命名者,它的持仓报的是 `coingecko/<id>`。
+const NON_CHAIN_NAMERS: ReadonlySet<string> = new Set([
+  CGK_VENDOR,
+  "binance",
+  "okx",
+  "hyperliquid",
+]);
+
+// tokenRef 的这个命名者是一条链吗(而不是场馆 / 数据源)。
+export const isChainNamer = (namer: string): boolean => !NON_CHAIN_NAMERS.has(namer);
 
 // symbol → 规范 `TokenRef` 的策展小表:majors + 已知撞名,优先于市值排名(防山寨撞名)。
 // 键须为 `normalizeSymbol` 输出(大写)。大头仍靠 (链,合约) 与显式 identifier;此表只兜 symbol 来源。
@@ -44,28 +60,3 @@ export const CGK_RECHECK_TTL_MS = 24 * 60 * 60 * 1000; // 1d(CGK 未收录的复
 // 历史价按 UTC 日桶缓存/采样。dayBucketOf(ms) = 该时刻所属 UTC 日的整数索引;日桶起点 = bucket * MS_PER_DAY。
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export const dayBucketOf = (ms: number): number => Math.floor(ms / MS_PER_DAY);
-
-// —— 展示分组种子(P2,ADR-0001)——
-// TokenGroup = 用户心智里"一个币"的家族;只并 CGK 故意拆开、用户视作同一的币。
-// 组定义(展示 symbol/名)。组的 logo 留空 → 展示时取主成员。
-export interface TokenGroupDef {
-  displaySymbol: string; // normalizeSymbol 口径(大写)
-  name: string;
-}
-export const TOKEN_GROUPS = {
-  usdt: { displaySymbol: "USDT", name: "Tether USD" },
-  usdc: { displaySymbol: "USDC", name: "USD Coin" },
-  dai: { displaySymbol: "DAI", name: "Dai" },
-} as const satisfies Record<string, TokenGroupDef>;
-export type TokenGroupKey = keyof typeof TOKEN_GROUPS;
-
-// CGK coin id → 组。只收 CGK 故意拆开的桥接/变体家族;canonical 成员必收,桥接变体逐个按 CGK 实查确认后加。
-// 【红线】weth≠eth、wbtc≠btc、staked 衍生≠本尊 —— 默认不并,不入此表(ADR-0002 的精神:只并已确认同质的)。
-// 起步:canonical(tether/usd-coin/dai)+ 研究已确认的桥接 usdt0(Arbitrum 等);其余桥接变体(bridged-*,
-// 各链 usdt.e / usdc.e 独立 coin)执行 sync 见到实际 cgk id 后按 CGK /coins/list 核对再增补。
-export const GROUP_MEMBERSHIP: Readonly<Record<string, TokenGroupKey>> = {
-  tether: "usdt",
-  usdt0: "usdt", // Arbitrum 等桥接 USDT(CGK 归 usdt0,非 tether)
-  "usd-coin": "usdc",
-  dai: "dai",
-};

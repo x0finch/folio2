@@ -2,19 +2,17 @@
 // + 常量。无逻辑函数——符号消歧策略 / 解析 / 预热服务在 @folio/oracle(entry)。
 // source 实现(@folio/oracle-source-coingecko)依赖本包的契约面。
 
-export type { TokenGroupDef, TokenGroupKey } from "./constants";
 export {
   CGK_RECHECK_TTL_MS,
   DEFAULT_TOP_N,
   dayBucketOf,
-  GROUP_MEMBERSHIP,
   INFO_TTL_MS,
+  isChainNamer,
   MS_PER_DAY,
   OVERRIDES,
   PRICE_TTL_MS,
   RESOLUTION_DOMINANCE,
   RESOLUTION_TOP_RANK,
-  TOKEN_GROUPS,
   TOKEN_REF_TTL_MS,
   TOP_TOKENS_LIMIT,
   WARM_TTL_MS,
@@ -53,7 +51,6 @@ export type {
   ResolutionVia,
   ResolvableAsset,
   TokenCandidate,
-  TokenGroup,
   TokenInfo,
   TokenPrice,
   TokenPricePoint,

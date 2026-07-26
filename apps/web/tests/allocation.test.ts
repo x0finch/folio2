@@ -24,8 +24,8 @@ const holding = (key: string, symbol: string, sources: HoldingSource[]): Holding
 
 const holdings: Holding[] = [
   holding("group:usdc", "USDC", [
-    src("eip155:1", "Ethereum", "z1", 100),
-    src("eip155:42161", "Arbitrum", "z1", 50),
+    src("evm:1", "Ethereum", "z1", 100),
+    src("evm:42161", "Arbitrum", "z1", 50),
     src("exchange:binance", "Binance", "b1", 30),
   ]),
   holding("token:coingecko:bitcoin", "BTC", [src("manual", "Manual", "m1", 700)]),
@@ -55,7 +55,7 @@ describe("buildAllocation", () => {
 
   it("collapses beyond topN into an others slice", () => {
     const many: Holding[] = Array.from({ length: 12 }, (_, i) =>
-      holding(`t${i}`, `T${i}`, [src("eip155:1", "Ethereum", "a", 12 - i)]),
+      holding(`t${i}`, `T${i}`, [src("evm:1", "Ethereum", "a", 12 - i)]),
     );
     const a = buildAllocation(many, "token", 8);
     expect(a).toHaveLength(9); // 8 + others

@@ -154,7 +154,7 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "USDC", tokenRef: "ethereum/token:0xabc" };
+    const asset = { symbol: "USDC", tokenRef: "ethereum/0xabc" };
 
     const r1 = await resolveAsset(asset, { source, store });
     expect(r1).toEqual({ ref: cg("usd-coin"), confidence: "high", via: "contract" });
@@ -176,7 +176,7 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "USDC", tokenRef: "ethereum/token:0xabc" };
+    const asset = { symbol: "USDC", tokenRef: "ethereum/0xabc" };
 
     const r = await resolveAsset(asset, { source, store }, { lazy: false });
     expect(r.via).toBe("none"); // 无 warm/override 时降级
@@ -187,7 +187,7 @@ describe("resolveAsset", () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => null);
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "ZZZ", tokenRef: "ethereum/token:0xdead" };
+    const asset = { symbol: "ZZZ", tokenRef: "ethereum/0xdead" };
 
     expect(await resolveAsset(asset, { source, store })).toEqual({
       ref: null,
@@ -195,7 +195,7 @@ describe("resolveAsset", () => {
       via: "none",
     });
     // 孤儿已 seed(展示仍有 symbol)且记了复查时刻
-    const rec = (await store.getByTokenRef(["ethereum/token:0xdead"])).get("ethereum/token:0xdead");
+    const rec = (await store.getByTokenRef(["ethereum/0xdead"])).get("ethereum/0xdead");
     expect(rec).toMatchObject({ ref: null, symbol: "ZZZ" });
     expect(rec?.cgkCheckedUntil).toBeGreaterThan(Date.now());
 

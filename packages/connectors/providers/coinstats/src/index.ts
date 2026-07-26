@@ -42,7 +42,7 @@ type Row = z.infer<typeof Spot>;
 function chainTokenRef(chain: string | undefined, contract: string | undefined) {
   const namer = chain?.trim();
   if (!namer) return undefined;
-  return contract ? tokenRef.contract(namer, "token", contract) : tokenRef.native(namer);
+  return contract ? tokenRef.local(namer, contract) : tokenRef.native(namer);
 }
 
 // 跳过无 symbol;合约行产代币标识(无数字 chainId → 兜底格式);现货行不产 meta(新 schema 无 meta 字段)。
@@ -60,7 +60,7 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ro
       value: amount * (c.price ?? 0),
       kind: "spot",
       // 链/合约身份走 tokenRef,不再进 meta;现货行无展示用 meta → 省略。
-      // 有合约 → <slug>/token:<addr>;无合约(原生币 SOL/SUI…)→ <slug>/native。
+      // 有合约 → <slug>/<addr>;无合约(原生币 SOL/SUI…)→ <slug>/native。
       // 地址不小写:base58 / bech32 大小写敏感,归一由 @folio/oracle-ref 按链决定。
       tokenRef: chainTokenRef(chain, c.contractAddress ?? undefined),
       name: c.name,

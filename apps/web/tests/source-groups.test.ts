@@ -22,7 +22,7 @@ const src = (p: {
 // 同一账户 "im" 在三条链上持有,外加一个交易所账户在其中一条链。
 const sources: HoldingSource[] = [
   src({
-    platformId: "eip155:42161",
+    platformId: "evm:42161",
     platformName: "Arbitrum",
     accountId: "w1",
     accountLabel: "im",
@@ -30,7 +30,7 @@ const sources: HoldingSource[] = [
     value: 19,
   }),
   src({
-    platformId: "eip155:137",
+    platformId: "evm:137",
     platformName: "Polygon",
     accountId: "w1",
     accountLabel: "im",
@@ -38,7 +38,7 @@ const sources: HoldingSource[] = [
     value: 0.07,
   }),
   src({
-    platformId: "eip155:8453",
+    platformId: "evm:8453",
     platformName: "Base",
     accountId: "w1",
     accountLabel: "im",
@@ -46,7 +46,7 @@ const sources: HoldingSource[] = [
     value: 1,
   }),
   src({
-    platformId: "eip155:42161",
+    platformId: "evm:42161",
     platformName: "Arbitrum",
     accountId: "cex1",
     accountLabel: "Binance",
@@ -58,7 +58,7 @@ const sources: HoldingSource[] = [
 describe("groupByPlatform", () => {
   it("按平台聚合,value 降序;单账户给 single、多账户给 count", () => {
     const gs = groupByPlatform(sources);
-    expect(gs.map((g) => g.key)).toEqual(["eip155:42161", "eip155:8453", "eip155:137"]);
+    expect(gs.map((g) => g.key)).toEqual(["evm:42161", "evm:8453", "evm:137"]);
     const arb = gs[0]!;
     expect(arb.amount).toBe(24); // 19 + 5
     expect(arb.value).toBe(24);

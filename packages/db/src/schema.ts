@@ -111,15 +111,6 @@ export const snapshotBalances = sqliteTable(
 // 代币表 = 系统认识的每个代币一行(CGK 收录币或 provider 孤儿);索引表 = 纯指针(symbol 候选 / tokenRef)。
 // 经 @folio/db 的 createTokenStore(env,{source}) 访问;key 归一由 @folio/oracle-basic 调用方保证。
 
-// 展示分组(P2,ADR-0001):用户心智里的"一个币"的家族,可跨多个 Token(CGK 故意拆开的桥接变体)。
-// 产品自有种子(GROUP_MEMBERSHIP)驱动,不用 CGK coin id 当跨链身份;无组的 Token = 自身单例组。
-export const tokenGroups = sqliteTable("token_groups", {
-  id: text("id").primaryKey(), // UUID
-  displaySymbol: text("display_symbol").notNull(), // 展示 symbol(大写归一)
-  name: text("name").notNull(),
-  logo: text("logo"), // 可空:默认取主成员
-});
-
 // 代币表:info facet(name/logo,长 TTL)+ price facet(短 TTL;过期=stale 不删,SWR)合一行。
 // 归并身份 = tokens.id(UUID,vendor 中立,#73)。各家 vendor 的 coin id 存 token_vendor_ids 子表。
 // cgk 行:有一条 token_vendor_ids(vendor="coingecko");孤儿行(CGK 未收录、provider 采集)= 无 vendor 行,
@@ -131,8 +122,6 @@ export const tokens = sqliteTable("tokens", {
   logo: text("logo"), // canonical(CGK);孤儿行 NULL
   providerLogo: text("provider_logo"), // 备用槽:provider 自带图(孤儿主图;cgk 缺图兜底)
   marketCapRank: integer("market_cap_rank"),
-  // 展示分组(P2):命中种子成员的 cgk 行落库时回填;孤儿/未收录 = NULL(单例组)。组删除则置空。
-  groupId: text("group_id").references(() => tokenGroups.id, { onDelete: "set null" }),
   infoExpiresAt: integer("info_expires_at").notNull(), // name/logo 长 TTL
   unitPrice: real("unit_price"), // 价 facet(可空 = 尚无价)
   change24h: real("change_24h"),
@@ -160,7 +149,7 @@ export const tokenVendorIds = sqliteTable(
 
 // 索引表:多种方式找到代币,纯指针不存代币数据。
 // kind="symbol":一 symbol 多候选(消歧输入),随 warm 换血(短 TTL);
-// kind="tokenRef":代币键(eip155:<id>/erc20:<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
+// kind="tokenRef":代币键(evm:<id>/<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
 // cgk_checked_until(仅 tokenRef):问过 CGK"未收录"的复查时刻(替代旧否定缓存三态)。
 export const tokenIndex = sqliteTable(
   "token_index",
@@ -186,7 +175,7 @@ export const tokenMeta = sqliteTable("token_meta", {
 });
 
 // 平台元数据缓存(链 ∪ 交易所/perp 的 name+logo,来自 CoinGecko;近静态,长 TTL)。
-// id = platformKey(eip155:<id> / chain:<slug> / exchange:<slug> / perp:<slug>)。
+// id = platformKey(evm:<id> / <slug> / exchange:<slug> / perp:<slug>)。
 // name IS NULL = 否定缓存(问过 CoinGecko、确认不存在);无该行 = 从未取过。
 export const platforms = sqliteTable("platforms", {
   id: text("id").primaryKey(),

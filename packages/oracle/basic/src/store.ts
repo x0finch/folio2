@@ -24,7 +24,7 @@ export interface TokenStore {
   // 符号消歧候选:symbol 索引 join 代币表取 rank。
   getCandidates(symbol: string): Promise<TokenCandidate[]>;
 
-  // —— tokenRef 索引(kind="tokenRef",key=eip155:<id>/erc20:<addr> 等)——
+  // —— tokenRef 索引(kind="tokenRef",key=evm:<id>/<addr> 等)——
   // 读:key → 整行(cgk 或孤儿)+ cgkCheckedUntil(未收录的复查时刻;替代旧否定缓存三态)。
   getByTokenRef(
     keys: string[],

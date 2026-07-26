@@ -42,7 +42,7 @@ function mockFetchByPath(routes: Record<string, { status?: number; body?: unknow
 afterEach(() => vi.restoreAllMocks());
 
 describe("coingecko fetchChains", () => {
-  it("每条链产短形 slug;有数字 chainId 再产 eip155:<id>;取 image.small", async () => {
+  it("每条链产短形 slug;有数字 chainId 再产 evm:<id>;取 image.small", async () => {
     mockFetch(ASSET_PLATFORMS);
     const rows = await createCoinGeckoPlatformSource().fetchChains();
     const byKey = new Map(rows.map((r) => [r.key, r]));
@@ -50,12 +50,12 @@ describe("coingecko fetchChains", () => {
       name: "Arbitrum One",
       logo: "https://cgk/arbitrum.jpg",
     });
-    expect(byKey.get("eip155:42161")).toMatchObject({
+    expect(byKey.get("evm:42161")).toMatchObject({
       name: "Arbitrum One",
       logo: "https://cgk/arbitrum.jpg",
     });
     expect(byKey.get("solana")).toMatchObject({ name: "Solana" });
-    expect(byKey.has("eip155:999")).toBe(true); // no-image 仍产 key
+    expect(byKey.has("evm:999")).toBe(true); // no-image 仍产 key
     expect(byKey.get("no-image")?.name).toBe("no-image"); // 无 name → 降级为 id
     expect(byKey.get("no-image")?.logo).toBeUndefined();
   });
@@ -111,14 +111,14 @@ function fakeStore(seed: PlatformRow[] = []): PlatformStore & { rows: Map<string
 }
 
 describe("createPlatforms.resolve", () => {
-  it("每个 key 都给展示:命中用真名;否定缓存/未命中用兜底名(slug-cap;eip155 用原 key)", async () => {
+  it("每个 key 都给展示:命中用真名;否定缓存/未命中用兜底名(slug-cap;evm:<id> 用原 key)", async () => {
     const store = fakeStore([
-      { key: "eip155:1", name: "Ethereum", logo: "e.jpg", expiresAt: 9e15 },
+      { key: "evm:1", name: "Ethereum", logo: "e.jpg", expiresAt: 9e15 },
       { key: "exchange:x", name: null, logo: null, expiresAt: 9e15 }, // 否定缓存
     ]);
     const p = createPlatforms({ source: {} as PlatformSource, store });
-    const m = await p.resolve(["eip155:1", "exchange:x", "chain:none", "manual"]);
-    expect(m.get("eip155:1")).toEqual({ key: "eip155:1", name: "Ethereum", logo: "e.jpg" });
+    const m = await p.resolve(["evm:1", "exchange:x", "chain:none", "manual"]);
+    expect(m.get("evm:1")).toEqual({ key: "evm:1", name: "Ethereum", logo: "e.jpg" });
     expect(m.get("exchange:x")).toEqual({ key: "exchange:x", name: "X" }); // 否定缓存 → 兜底
     expect(m.get("chain:none")).toEqual({ key: "chain:none", name: "None" }); // 未命中 → 兜底
     expect(m.get("manual")).toEqual({ key: "manual", name: "Manual" });
@@ -131,7 +131,7 @@ describe("createPlatforms.warm", () => {
     const source: PlatformSource = {
       async fetchChains(): Promise<PlatformMeta[]> {
         chainFetches++;
-        return [{ key: "eip155:1", name: "Ethereum", logo: "e.jpg" }];
+        return [{ key: "evm:1", name: "Ethereum", logo: "e.jpg" }];
       },
       async fetchVenue(): Promise<PlatformMeta | null> {
         return null;
@@ -140,11 +140,11 @@ describe("createPlatforms.warm", () => {
     const store = fakeStore();
     const p = createPlatforms({ source, store, now: () => 1000 });
 
-    await p.warm(["eip155:1"]); // 缺失 → 取
+    await p.warm(["evm:1"]); // 缺失 → 取
     expect(chainFetches).toBe(1);
-    expect(store.rows.get("eip155:1")?.name).toBe("Ethereum");
+    expect(store.rows.get("evm:1")?.name).toBe("Ethereum");
 
-    await p.warm(["eip155:1"]); // 已新鲜 → 不再取
+    await p.warm(["evm:1"]); // 已新鲜 → 不再取
     expect(chainFetches).toBe(1);
   });
 
