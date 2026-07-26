@@ -19,7 +19,9 @@ export interface OverviewBalance {
   usdValue: number;
   selfPrice?: number | null; // provider 自带单价(估值原料,Phase 3);读时现推的原料,null=盯市恒用源
   kind: string;
-  tokenRef?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
+  // **归并身份**:写快照时 mint 定死的代币行 id(ADR 0021 / #201)。可空:旧快照 / 手记现造的行。
+  tokenId?: string | null;
+  tokenRef?: string | null; // 旧列(写路径仍在写,#202 删);手记那条路还在用
   platform?: string | null; // 这笔持仓所在的链 ∪ 场馆(provider 直接报,#193;本列之前的旧行为空)
   metaJson: string | null;
   note?: Note; // balance 级展示 note(单个 Note;CEX 该币锁仓/冻结);无则省略

@@ -7,6 +7,7 @@ import { connectorPlatformMeta } from "./internal/connector-platform";
 import { db } from "./internal/db";
 import { injectManualSnapshots, loadManualHistoryRows } from "./internal/manual";
 import { oracle } from "./internal/oracle";
+import { oracleFor } from "./internal/oracle2";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
 
@@ -25,7 +26,7 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
     // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
     await injectManualSnapshots(context.userId, accounts, byAccount);
     return buildOverview(accounts, byAccount, {
-      tokens: oracle.tokens,
+      tokens: oracleFor(context.userId).tokens,
       platforms: oracle.platforms,
       connectorMeta: connectorPlatformMeta,
       mode: settings.valuationMode,
@@ -45,7 +46,7 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     // manual 不写快照(ADR 0018):注入合成当下项,manual 账户行的市值/持仓由 creds 现造。
     await injectManualSnapshots(context.userId, accounts, byAccount);
-    const tokens = oracle.tokens;
+    const tokens = oracleFor(context.userId).tokens;
     const rows = await Promise.all(
       accounts.map(async (account) => {
         const latest = byAccount.get(account.id);
@@ -98,7 +99,7 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     const liveTotals = await deriveLiveAccountTotals(
       accounts,
       byAccount,
-      oracle.tokens,
+      oracleFor(context.userId).tokens,
       settings.valuationMode,
     );
     let grand = 0;

@@ -1,16 +1,16 @@
-import type { TokenRef } from "@folio/oracle";
-
-// symbol 归一(与 tokens 层同口径:trim + 大写)—— 仅用于未解析行的分组键/身份。
+// symbol 归一(与 tokens 层同口径:trim + 大写)—— 只用在还没有 token_id 的行上(见 groupKey)。
 const norm = (s: string): string => s.trim().toUpperCase();
 
 // 纯逻辑(无 server-only import → 可单测)。把跨账户的持仓行按【规范代币】聚合成 Holding 树。
 // 设计见 docs/adr 0001–0003;术语见 CONTEXT.md。
 //   · 白名单(进聚合):spot / utxo(BTC)/ CEX 现货(kind=spot)/ perp 权益(isMargin) —— ADR-0003。kind 已由 overview 用 viewKind 归一。
-//   · 归并键三级(永不裸 symbol,ADR-0002):token(内部 id / ref)→ tokenRef(精确合约)→ account:symbol。
+//   · **归并键就是 `token_id`**(ADR 0021 / #201)。认定在写快照时已经定死(mint),读端不再解析、
+//     不再有「三级回退」——「永不裸 symbol」(ADR-0002)因此不是一条要维护的规则,而是结构使然。
 //     展示分组那一级已随 ADR 0021 退场 —— WBTC 与 BTC、USDT 各桥接变体从此各占一行。
 //   · HoldingSource 粒度 = 账户 × 平台单元:平台由 provider 随余额直接报(ADR 0021),链上按链天然拆开。
 //   · 表头 totalAmount = 组内各 source 数量之和。组 = 同一个 Token(单位一致),跨链/多源(同一 Token
-//     的多条链 ref)亦可汇总。change24h 仍仅单一身份组给(多身份逐币涨跌不同)。
+//     的多条链 ref)亦可汇总。**一组恒是一个 Token**,所以 change24h 无条件给 —— 以前那个
+//     「组内是否单一身份」的 Set 判断已随三级键一并删除(键塌成一级后它恒为 1,是死逻辑)。
 
 // 聚合输入:一笔持仓 + 其解析结果(ref/展示,由 server 富化)。
 export interface AggInput {
@@ -18,14 +18,14 @@ export interface AggInput {
   amount: number;
   value: number; // USD(provider 权威;聚合按它求和)
   kind: string; // 归一后的 viewKind:spot | defi | perp_equity | perp_position | utxo
-  tokenRef?: string | null;
   // 这笔持仓所在的链 ∪ 场馆,provider 直接报(#193)。本列之前写下的旧快照行为空 → 退回账户的
   // connectorId(多链钱包会暂时并成一格,下次同步即分开)。
   platform?: string | null;
   isMargin?: boolean; // perp 权益(保证金)—— 进聚合但明细标注
   account: { id: string; label: string; connectorId: string; network?: string | null };
-  tokenId?: string; // 内部代币行 id(vendor 中立归并身份,#73;富化命中 store 才有)
-  ref?: TokenRef | null; // 该源对此币的寻址引用(vendor tag;归并回退用,内部 id 缺失时)
+  // **归并身份**:写快照时 mint 定死的代币行 id(ADR 0021)。
+  // 可空只为兼容两类行:本列之前写下的旧快照,以及手记那种现造的持仓(#203 并入 tokens 后就没了)。
+  tokenId?: string | null;
   name?: string;
   logo?: string; // 已按回退链取好(CGK→provider)
   change24h?: number; // 每币 24h 涨跌(%);仅单 Token 组用于行内 ValueChange
@@ -58,29 +58,14 @@ export interface Holding {
   sources: HoldingSource[];
 }
 
-// —— 下面两个产的是【归并键】,不是 tokenRef ——
-// 相似之处只在长相(都带 `xxx:` 前缀),用途完全不同,别混:
-//   · tokenRef(`bitcoin/native`、`binance/USDC`,见 @folio/oracle-ref)回答「谁管这个币叫什么」,
-//     由 provider 产、落库(`snapshot_balances.token_ref`)、跨进程稳定。
-//   · 归并键回答「这两笔持仓算不算界面上的同一行」,**纯运行时**、不落库,前缀标的是这一级取自哪儿
-//     (token / tk / as / sym),优先级从高到低。tokenRef 只是其中一级的取值(`tk:` 那级)。
-// 换句话说:tokenRef 是身份,归并键是分组决策 —— 一个 tokenRef 可能因为解析出了 tokenId 而落到
-// 更高的 `token:` 级,压根用不上 `tk:`。
-
-// 单笔持仓的"代币身份"(用于判断组内是否单一 Token → 决定是否给 totalAmount)。
-function tokenIdentity(row: AggInput): string {
-  if (row.tokenId) return row.tokenId; // vendor 中立内部 id(优先;换源不碎)
-  if (row.ref) return row.ref; // 回退:已解析 ref 但未命中 store 记录
-  if (row.tokenRef) return row.tokenRef;
-  return `sym:${norm(row.symbol)}`;
-}
-
-// 三级归并键(ADR-0002:任何一级都不含裸 symbol)。导出供单币价值历史(token-history)按同一身份匹配历史行。
-export function holdingKey(row: AggInput): string {
-  if (row.tokenId) return `token:${row.tokenId}`; // vendor 中立内部 id(优先)
-  if (row.ref) return `token:${row.ref}`; // 回退:已解析 ref 但未命中 store 记录
-  if (row.tokenRef) return `tk:${row.tokenRef}`;
-  return `as:${row.account.id}:${norm(row.symbol)}`;
+// 分组键 = `token_id`。以前这里有个三级回退的 `holdingKey`(token → tokenRef → account:symbol),
+// 随认定挪到写路径一并塌成一级 —— 那个函数已删,单币历史(token-history)直接按 token_id 匹配。
+//
+// 还留一条兜底:没有 token_id 的行按 `账户 + symbol` 各自成组。够得到这条的只有两类 ——
+// 本列之前写下的旧快照,和手记那种现造的持仓(#203 之后就没了)。**兜底带账户 id**,
+// 所以它绝不会把两个账户的同名币并到一起:裸 symbol 归并是 ADR-0002 的红线。
+export function groupKey(row: AggInput): string {
+  return row.tokenId ?? `no-token:${row.account.id}:${norm(row.symbol)}`;
 }
 
 // 导出供 token-history 复用(历史行归属同一口径)。
@@ -92,7 +77,6 @@ export function isEligible(row: AggInput): boolean {
 interface Acc {
   key: string;
   first: AggInput;
-  identities: Set<string>;
   totalValue: number;
   totalAmount: number;
   logoHint?: string; // 首个带 logo 的成员(a.first 富化未命中时兜底,与 unitPriceHint 同理)
@@ -109,20 +93,18 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
   const acc = new Map<string, Acc>();
   for (const row of rows) {
     if (!isEligible(row)) continue;
-    const key = holdingKey(row);
+    const key = groupKey(row);
     let a = acc.get(key);
     if (!a) {
       a = {
         key,
         first: row,
-        identities: new Set(),
         totalValue: 0,
         totalAmount: 0,
         sources: new Map(),
       };
       acc.set(key, a);
     }
-    a.identities.add(tokenIdentity(row));
     a.totalValue += row.value;
     a.totalAmount += row.amount;
     if (!a.logoHint && row.logo) a.logoHint = row.logo;
@@ -159,7 +141,7 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     if (a.totalValue <= 0) continue;
     const sources = [...a.sources.values()].sort((x, y) => y.value - x.value);
     const token = {
-      id: a.first.tokenId ?? (a.first.ref ? a.first.ref : undefined),
+      id: a.first.tokenId ?? undefined,
       symbol: a.first.symbol,
       name: a.first.name ?? a.first.symbol,
       logo: a.first.logo ?? a.logoHint,
@@ -177,7 +159,7 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
       },
       totalValue: a.totalValue,
       totalAmount: a.totalAmount, // 组 = 同一资产、统一单位 → 各 source 数量之和恒可汇总
-      change24h: a.identities.size === 1 ? a.first.change24h : undefined,
+      change24h: a.first.change24h,
       sources,
     });
   }

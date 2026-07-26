@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildTokenValueHistory, type TokenHistRow } from "../src/lib/token-history";
 
-const USDC = "tok-usdc"; // 归并键 = 内部 tokenId(展示分组已退场,ADR 0021)
+const USDC = "tok-usdc"; // 归并键**就是** token_id 本身(ADR 0021 / #201:三级键塌成一级)
 
 const r = (p: {
   acct: string;
@@ -31,7 +31,7 @@ describe("buildTokenValueHistory", () => {
         r({ acct: "B", takenAt: 200, value: 5, tokenId: USDC }),
         r({ acct: "B", takenAt: 300, value: 6, tokenId: USDC }),
       ],
-      `token:${USDC}`,
+      USDC,
     );
     // t100: A=10;t200(同刻并入):A=12,B=5→17;t300:A=12(沿用)+B=6→18
     expect(s).toEqual([
@@ -44,11 +44,11 @@ describe("buildTokenValueHistory", () => {
   it("只算匹配本 key 的 eligible 行:别的币 / defi 仓位排除", () => {
     const s = buildTokenValueHistory(
       [
-        r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }), // 命中 token:tok-usdc
+        r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }), // 命中 tok-usdc
         r({ acct: "A", takenAt: 100, value: 99, kind: "defi", tokenId: USDC }), // 同 key 但 defi 不 eligible
         r({ acct: "A", takenAt: 100, value: 7, tokenId: "tok-eth", symbol: "ETH" }), // 别的 key
       ],
-      `token:${USDC}`,
+      USDC,
     );
     expect(s).toEqual([{ t: 100, total: 10 }]);
   });
@@ -59,7 +59,7 @@ describe("buildTokenValueHistory", () => {
         r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }),
         r({ acct: "A", takenAt: 100, value: 4, tokenId: USDC }),
       ],
-      `token:${USDC}`,
+      USDC,
     );
     expect(s).toEqual([{ t: 100, total: 14 }]);
   });
@@ -76,9 +76,9 @@ describe("buildTokenValueHistory", () => {
           tokenId: USDC,
         }),
       ],
-      `token:${USDC}`,
+      USDC,
     );
     expect(margin).toEqual([{ t: 100, total: 8 }]);
-    expect(buildTokenValueHistory([], `token:${USDC}`)).toEqual([]);
+    expect(buildTokenValueHistory([], USDC)).toEqual([]);
   });
 });

@@ -441,6 +441,7 @@ export interface SnapshotBalanceHistoryRow {
   amount: number;
   usdValue: number;
   kind: BalanceKind;
+  tokenId: string | null; // 归并身份(写快照时 mint 定死);单币历史按它归属(#201)
   tokenRef: string | null;
   platform: string | null;
   metaJson: string | null;
@@ -458,6 +459,7 @@ export function listSnapshotBalancesByUser(
       amount: snapshotBalances.amount,
       usdValue: snapshotBalances.usdValue,
       kind: snapshotBalances.kind,
+      tokenId: snapshotBalances.tokenId,
       tokenRef: snapshotBalances.tokenRef,
       platform: snapshotBalances.platform,
       metaJson: snapshotBalances.metaJson,
