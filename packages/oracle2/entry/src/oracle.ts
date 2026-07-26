@@ -5,7 +5,7 @@ import type {
   TokenRefIndexUpstream,
   TokenStore,
   TokenUpstream,
-} from "../contract";
+} from "@folio/oracle2-basic";
 import { createMint, type Mint } from "./mint";
 import { createTokens, type Tokens } from "./tokens";
 

@@ -1,5 +1,5 @@
 import { type CoinGeckoConfig, createCoinGeckoClient } from "@folio/coingecko-client";
-import type { TokenUpstream } from "@folio/oracle2";
+import type { TokenUpstream } from "@folio/oracle2-basic";
 import { EVM_NAMER_PREFIX, MARKETS_PER_PAGE, UPSTREAM_ID, VS_USD } from "./constants";
 import {
   coinIdOf,

@@ -36,4 +36,4 @@ ADR 0012 说过「vendor 中立」,但只做到了**身份**中立(归并靠 `to
 - **服务层的测试不需要任何 vendor**:注内存假 store + 假 source 即可,本来就是这么写的;区别是现在**连依赖都没有**,不是靠自觉不 import。
 - **全局维护任务不挂 per-user 门面**:刷 `global_token_ref_index` 与 userId 无关,单独一个不带 user 的工厂给 cron 用,不必先假造一个用户。
 - **代价:多一层装配噪音**。app 的 oracle 装配文件从注 4 个工厂变成注 5 个,且要显式 import adapter 包。明知接受 —— 这一个文件的显式,换来其余所有文件的中立。
-- **过渡期多两个临时包名**(`@folio/oracle2` / `@folio/oracle2-upstream-coingecko`),#202 那片改名接管 `oracle` / `oracle-source-coingecko` 后消失。
+- **过渡期多三个临时包名**(`@folio/oracle2-basic` / `@folio/oracle2` / `@folio/oracle2-upstream-coingecko`),#202 那片改名接管 `oracle-basic` / `oracle` / `oracle-upstream-coingecko` 后消失。

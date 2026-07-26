@@ -6,9 +6,9 @@ import type {
   TokenRef,
   TokenRefHit,
   TokenStore,
-} from "../contract";
+} from "@folio/oracle2-basic";
+import { normalizeSymbol } from "@folio/oracle2-basic";
 import { pickByConfidence } from "./confidence";
-import { normalizeSymbol } from "./constants";
 
 // symbol 消歧的候选源。候选恒是 warm 集的子集 → 由 cache 从同一个 blob 里筛(见 cache.ts),
 // 不单独存。做成端口是为了让 mint **在类型上就够不着网络**(见下)。

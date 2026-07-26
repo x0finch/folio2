@@ -5,4 +5,7 @@ packages:
   - "packages/connectors/providers/*"
   - "packages/oracle/*"
   - "packages/oracle/sources/*"
+  # oracle2 过渡期(#176):#202 改名接管 oracle 后这两行删掉。
+  - "packages/oracle2/*"
+  - "packages/oracle2/upstreams/*"
   - "apps/*"

@@ -1,5 +1,5 @@
 {
-  "name": "@folio/oracle2",
+  "name": "@folio/oracle2-upstream-coingecko",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/oracle-ref": "workspace:*"
+    "@folio/coingecko-client": "workspace:*",
+    "@folio/oracle-ref": "workspace:*",
+    "@folio/oracle2-basic": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^6.0.2",
