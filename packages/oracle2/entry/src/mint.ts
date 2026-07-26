@@ -49,6 +49,12 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
     ref: TokenRef,
     seed: ProviderTokenSeed,
   ): Promise<TokenRef | undefined> {
+    // **这条 ref 本身就是上游的命名** —— 手记里用户选了币,报的就是 `<上游>/<id>`。
+    // 它已经是锚,直接返回:不查映射表(那张表只装链上地址)、更不掉回 symbol 去猜一个
+    // 用户已经明说了的答案。老 oracle 有这条短路,重写时漏了。
+    const parsed = parseTokenRef(ref);
+    if (parsed.kind === "opaque" && parsed.namer === namer) return ref;
+
     const byAddress = (await refIndex.lookup(namer, [ref])).get(ref);
     if (byAddress) return buildRef.opaque(namer, byAddress);
 
@@ -59,8 +65,7 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
     // 原生币与场馆代号相反:`bitcoin/native` 的 BTC、`binance/USDC` 的上架代号都可信,而原生币
     // 按设计不进全局映射表(ADR 0022),symbol 是它们**唯一**的一条路 —— 所以放行那两支。
     // 读不懂的串一并挡掉:关于它我们什么都不知道,凭一个来源不明的 symbol 认币是最坏的一种猜。
-    const kind = parseTokenRef(ref).kind;
-    if (kind === "contract" || kind === "unknown") return undefined;
+    if (parsed.kind === "contract" || parsed.kind === "unknown") return undefined;
 
     const symbol = normalizeSymbol(seed.symbol);
     const override = overrides?.[symbol];
@@ -99,7 +104,9 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
         await store.fillInfo(owner.tokenId, { name: seed.name, providerLogo: seed.providerLogo });
         return store.linkRef(owner.tokenId, ref);
       }
-      return store.create(seed, [ref, upstreamRef]);
+      // 去重:ref 本身就是上游命名时两者相同(手记选币),而 ref 行的主键是 (namer, localName)
+      // —— 同一批插两条相同的行会撞主键、整批写失败。
+      return store.create(seed, [...new Set([ref, upstreamRef])]);
     }
 
     // —— 事后才认出来:合并 ——
