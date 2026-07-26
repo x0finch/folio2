@@ -94,16 +94,16 @@ describe("惰性", () => {
 describe("契约往返(内存假实现)", () => {
   it("代币表:建行 → 挂 ref → 按 id 读回;并发建同一条 ref 幂等", async () => {
     const store = fakeTokenStore();
-    const id = await store.create({ symbol: "USDC", name: "USD Coin" }, ["evm:1/0xa0b8"]);
+    const id = await store.create({ symbol: "USDC", name: "USD Coin" }, ["evm:1/contract:0xa0b8"]);
 
-    expect(await store.findByRefs(["evm:1/0xa0b8"])).toEqual(
-      new Map([["evm:1/0xa0b8", { tokenId: id, linked: false }]]),
+    expect(await store.findByRefs(["evm:1/contract:0xa0b8"])).toEqual(
+      new Map([["evm:1/contract:0xa0b8", { tokenId: id, linked: false }]]),
     );
     expect(await store.getById(id)).toMatchObject({ symbol: "USDC", ref: null });
 
     const [a, b] = await Promise.all([
-      store.create({ symbol: "X" }, ["evm:1/0xdead"]),
-      store.create({ symbol: "X" }, ["evm:1/0xdead"]),
+      store.create({ symbol: "X" }, ["evm:1/contract:0xdead"]),
+      store.create({ symbol: "X" }, ["evm:1/contract:0xdead"]),
     ]);
     expect(a).toBe(b);
   });
@@ -124,13 +124,16 @@ describe("契约往返(内存假实现)", () => {
     const store = fakeRefIndexStore();
     expect(await store.refreshedAt("src")).toBeNull();
 
-    await store.putAll([{ ref: "evm:1/0xa0b8", namer: "src", localName: "usd-coin" }], 123);
+    await store.putAll(
+      [{ ref: "evm:1/contract:0xa0b8", namer: "src", localName: "usd-coin" }],
+      123,
+    );
     expect(await store.refreshedAt("src")).toBe(123);
-    expect(await store.lookup("src", ["evm:1/0xa0b8", "evm:1/0xdead"])).toEqual(
-      new Map([["evm:1/0xa0b8", "usd-coin"]]),
+    expect(await store.lookup("src", ["evm:1/contract:0xa0b8", "evm:1/contract:0xdead"])).toEqual(
+      new Map([["evm:1/contract:0xa0b8", "usd-coin"]]),
     );
     // 换个命名者就查不到 —— 这正是「加源只加行」的另一面。
-    expect(await store.lookup("other", ["evm:1/0xa0b8"])).toEqual(new Map());
+    expect(await store.lookup("other", ["evm:1/contract:0xa0b8"])).toEqual(new Map());
   });
 });
 
@@ -140,8 +143,8 @@ describe("全局维护任务不挂 per-user 门面", () => {
     const upstream = fakeUpstream();
     upstream.refIndex = {
       rows: [
-        { ref: "evm:1/0xa0b8", namer: "src", localName: "usd-coin" },
-        { ref: "solana/EPjF", namer: "src", localName: "usd-coin" },
+        { ref: "evm:1/contract:0xa0b8", namer: "src", localName: "usd-coin" },
+        { ref: "solana/contract:EPjF", namer: "src", localName: "usd-coin" },
       ],
       unmatchedPlatforms: [],
       skipped: 7,

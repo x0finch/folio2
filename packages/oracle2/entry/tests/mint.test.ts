@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { type CandidateSource, createMint, type TokenCandidate } from "../src";
 import { fakeRefIndexStore, fakeTokenStore } from "./fakes";
 
-const USDC_ETH = "evm:1/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
-const USDC_ARB = "evm:42161/0xaf88d065e77c8cc2239327c5edb3a432268e5831";
-const USDC_SOL = "solana/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const USDC_ARB = "evm:42161/contract:0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+const USDC_SOL = "solana/contract:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SRC_USDC = "src/usd-coin";
 
 const seed = (symbol: string, name?: string, providerLogo?: string) => ({
@@ -62,10 +62,12 @@ describe("三条路径", () => {
 
   it("③ 全局映射也没有 —— 只写 provider 那条 ref,行照建", async () => {
     const { store, mint } = setup();
-    const id = (await mint.of([{ ref: "evm:1/0xdead", seed: seed("WAT") }])).get("evm:1/0xdead");
+    const id = (await mint.of([{ ref: "evm:1/contract:0xdead", seed: seed("WAT") }])).get(
+      "evm:1/contract:0xdead",
+    );
 
     expect(id).toBeDefined();
-    expect([...store.refs.keys()]).toEqual(["evm:1/0xdead"]); // 没有本源那条
+    expect([...store.refs.keys()]).toEqual(["evm:1/contract:0xdead"]); // 没有本源那条
     expect(store.rows.get(id as string)?.ref).toBeNull(); // 上游还没认出它
   });
 });
@@ -149,12 +151,44 @@ describe("并发", () => {
 describe("按 symbol 认币(写时定死)", () => {
   it("地址优先于 symbol —— 换序会把假 USDC 并进真 USDC", async () => {
     const { store, mint } = setup({
-      index: { "evm:1/0xfake": "fake-usdc" },
+      index: { "evm:1/contract:0xfake": "fake-usdc" },
       candidates: { USDC: [{ ref: SRC_USDC, marketCapRank: 6 }] },
     });
-    await mint.of([{ ref: "evm:1/0xfake", seed: seed("USDC") }]);
+    await mint.of([{ ref: "evm:1/contract:0xfake", seed: seed("USDC") }]);
     expect(store.refs.has("src/fake-usdc")).toBe(true);
     expect(store.refs.has(SRC_USDC)).toBe(false);
+  });
+
+  // ADR 0020 第三轮:这是**合约不许按 symbol 猜**那条规则的守卫。
+  it("映射表没收录的合约 → 绝不按 symbol 并进主流币,哪怕它 symbol 写着 USDC", async () => {
+    const { store, mint } = setup({
+      // 映射表里查不到它(昨天刚部署),而 symbol 字段自己填成 USDC。
+      overrides: { USDC: "usd-coin" },
+      candidates: { USDC: [{ ref: SRC_USDC, marketCapRank: 6 }] },
+    });
+    // 先让真 USDC 在库里(以太坊那条已被收录)。
+    const { mint: mint2, store: store2 } = setup({
+      index: { [USDC_ETH]: "usd-coin" },
+      overrides: { USDC: "usd-coin" },
+    });
+    const real = (await mint2.of([{ ref: USDC_ETH, seed: seed("USDC") }])).get(USDC_ETH);
+    expect(store2.refs.get(SRC_USDC)).toBe(real);
+
+    const scam = (await mint.of([{ ref: "evm:1/contract:0xdead", seed: seed("USDC") }])).get(
+      "evm:1/contract:0xdead",
+    );
+    expect(scam).toBeDefined();
+    // 自己一行、不链上游 —— 于是拿不到真 USDC 的价,也不会污染那一行的总枚数。
+    expect(store.rows.get(scam as string)?.ref).toBeNull();
+    expect(store.refs.has(SRC_USDC)).toBe(false);
+  });
+
+  it("原生币仍然按 symbol 认 —— 它们按设计不进映射表,那是唯一的一条路", async () => {
+    const { store, mint } = setup({ overrides: { BTC: "bitcoin" } });
+    const id = (await mint.of([{ ref: "bitcoin/native", seed: seed("BTC") }])).get(
+      "bitcoin/native",
+    );
+    expect(store.refs.get("src/bitcoin")).toBe(id);
   });
 
   it("有把握(top-N 之内)→ 链上上游;跨交易所同名币因此并成一行", async () => {
@@ -179,10 +213,10 @@ describe("按 symbol 认币(写时定死)", () => {
       },
     });
     const got = await mint.of([
-      { ref: "evm:1/0xmoon1", seed: seed("MOON") },
-      { ref: "evm:56/0xmoon2", seed: seed("MOON") },
+      { ref: "evm:1/contract:0xmoon1", seed: seed("MOON") },
+      { ref: "evm:56/contract:0xmoon2", seed: seed("MOON") },
     ]);
-    expect(got.get("evm:1/0xmoon1")).not.toBe(got.get("evm:56/0xmoon2"));
+    expect(got.get("evm:1/contract:0xmoon1")).not.toBe(got.get("evm:56/contract:0xmoon2"));
     expect([...store.refs.keys()].some((r) => r.startsWith("src/"))).toBe(false);
   });
 
