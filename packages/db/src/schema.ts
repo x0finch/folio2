@@ -98,6 +98,9 @@ export const snapshotBalances = sqliteTable(
     selfPrice: real("self_price"),
     // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的 tokenRef。
     tokenRef: text("token_ref"),
+    // 这笔持仓所在的链 ∪ 场馆(Platform),由 provider 随 Balance 直接报(ADR 0021 / #193)。
+    // 可空:本列之前写下的行没有值 —— 读端退回账户的 connectorId,下次同步即补上。
+    platform: text("platform"),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空
     // balance 级展示 note(note 重设计):JSON.stringify(单个 Note),可空。
     // provider 挂在该 balance 上的 note 落这里;读时 safeParse 回 Note(见 getLatestSnapshotByUser)。

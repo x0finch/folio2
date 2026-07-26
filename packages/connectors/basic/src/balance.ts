@@ -9,7 +9,7 @@ import { Note } from "./note";
 // 每 connector 的 balance.schema = 它会吐的 kind 子集判别联合(组合下方各 kind schema),
 // 其余 kind 编译期不可写(见 BalanceProvider<B>)。
 
-// 所有 kind 共享的基座。tokenRef/name/logo/price 由 provider 尽力带,缺则省略。
+// 所有 kind 共享的基座。tokenRef 必填(见其注释);name/logo/price 由 provider 尽力带,缺则省略。
 export const BalanceBase = z.object({
   symbol: z.string(),
   amount: z.number(),
@@ -19,7 +19,11 @@ export const BalanceBase = z.object({
   // 落 snapshot_balances.self_price —— 作估值「原料」,让切换源/估值模式能从原料重算、可逆、自带价不丢。
   // 与 price 分开:price 可能被 revalue 改成源价,selfPrice 恒为 provider 原值。
   selfPrice: z.number().optional(),
-  tokenRef: z.string().optional(), // 代币命名(ADR 0020 文法;拿不到则空,退化按 symbol)
+  // 代币命名(ADR 0020 文法)。**必填** —— provider 总能说出「我管这个币叫什么」:链上是
+  // `<链>/<地址>` 或 `<链>/native`,场馆是 `<场馆>/<代号>`,手记是用户选的 `coingecko/<id>`
+  // 或 `manual/<symbol>`。造不出规范标识的行不产(见各 producer),不再有「拿不到就空着」这一档。
+  // 平台(链 ∪ 场馆)由写路径从它的命名者推出并落库,不占 Balance 一个字段(#193)。
+  tokenRef: z.string(),
   name: z.string().optional(), // provider 自带代币元信息(喂参考层 / 备用展示)
   logo: z.string().optional(),
   // provider 专属【仅供展示】的 balance 级 note(note 重设计,单个 Note),挂在【这笔持仓】上:

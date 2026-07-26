@@ -39,8 +39,10 @@ export const manualAccountCreds = [
 ] as const satisfies readonly CredField[];
 
 // 本 connector 只吐单一 kind:spot。无全局/provider key → creds:[]。
+const PROVIDER_ID = "manual";
+
 export const manualProvider: BalanceProvider<Spot, typeof manualAccountCreds> = {
-  id: "manual",
+  id: PROVIDER_ID,
   label: "Manual",
   creds: [],
 
@@ -53,11 +55,11 @@ export const manualProvider: BalanceProvider<Spot, typeof manualAccountCreds> = 
         price: t.unitPrice,
         value: t.amount * t.unitPrice,
         kind: "spot",
-        // 用户选定的 CGK id = 厂商寻址身份 → tokenRef(coingecko/<id>);未选币则无标识,按 symbol 归一。
-        ...(t.identifier
-          ? // CGK coin id 规范为小写 kebab;归一在生产者这一侧做(oracle-ref 对不透明 id 原样透传)。
-            { tokenRef: tokenRef.local("coingecko", t.identifier.toLowerCase()) }
-          : {}),
+        // 选了币 → 厂商寻址身份 `coingecko/<id>`(CGK coin id 规范为小写 kebab,归一在生产者侧做);
+        // 没选 → 手记自己就是命名者 `manual/<SYMBOL>`。两种都是规范 ref,没有「空着」这一档。
+        tokenRef: t.identifier
+          ? tokenRef.local("coingecko", t.identifier.toLowerCase())
+          : tokenRef.local(PROVIDER_ID, t.symbol.trim().toUpperCase()),
       })),
     };
   },

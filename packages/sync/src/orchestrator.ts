@@ -1,5 +1,6 @@
 import { type Balance, type Note, ProviderError } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
+import { platformOf } from "./platform";
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
 // 由 app 注入的 fetchBalances 产出(内部先判 isComplete 再解密 + 调 provider.fetchBalances)。
@@ -183,6 +184,9 @@ export async function syncAccount(
         amount: b.amount,
         usdValue: b.value,
         kind: b.kind,
+        // 平台(链 ∪ 场馆)在这里算一次、落库(#193):写路径是唯一还认识 tokenRef 的地方,
+        // 读端从此只读这一列。规则见 platformOf。
+        platform: platformOf(b.tokenRef, account.connectorId),
         // provider 自带单价(估值原料,Phase 3):revalue 捕获,随快照落 self_price。
         selfPrice: b.selfPrice,
         tokenRef: b.tokenRef,

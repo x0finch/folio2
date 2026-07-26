@@ -1,6 +1,13 @@
 {
   "single manual token (value = amount × unitPrice, no meta)": [
-    { "symbol": "BTC", "amount": 0.5, "price": 64000, "value": 32000, "kind": "spot" }
+    {
+      "symbol": "BTC",
+      "amount": 0.5,
+      "price": 64000,
+      "value": 32000,
+      "kind": "spot",
+      "tokenRef": "manual/BTC"
+    }
   ],
   "picked CoinGecko id → coingecko tokenRef (sync-time market valuation)": [
     {
@@ -29,7 +36,14 @@
       "kind": "spot",
       "tokenRef": "coingecko/ethereum"
     },
-    { "symbol": "FOO", "amount": 1000, "price": 0.25, "value": 250, "kind": "spot" }
+    {
+      "symbol": "FOO",
+      "amount": 1000,
+      "price": 0.25,
+      "value": 250,
+      "kind": "spot",
+      "tokenRef": "manual/FOO"
+    }
   ],
   "no tokens → no balances (empty shell)": []
 }

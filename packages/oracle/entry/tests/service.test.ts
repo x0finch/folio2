@@ -154,7 +154,9 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "USDC", tokenRef: "ethereum/0xabc" };
+    // chain 由调用方给(app 那边:平台 provider 报 + connector 自声明 chain/venue)——
+    // 不给就不当合约反查,场馆命名因此照旧掉回 symbol 消歧。
+    const asset = { symbol: "USDC", tokenRef: "ethereum/0xabc", chain: "ethereum" };
 
     const r1 = await resolveAsset(asset, { source, store });
     expect(r1).toEqual({ ref: cg("usd-coin"), confidence: "high", via: "contract" });
@@ -168,6 +170,20 @@ describe("resolveAsset", () => {
     expect(fetchByContract).toHaveBeenCalledWith("ethereum", "0xabc"); // chainRef + contract parsed from tokenRef
   });
 
+  // #193:场馆命名(binance/USDC)与链上地址在串上同形,靠调用方给不给 chain 区分。
+  it("没给 chain(场馆命名)→ 不当合约反查,掉回 symbol 消歧", async () => {
+    const store = fakeStore();
+    const fetchByContract = vi.fn(async () => null);
+    const source = { fetchByContract } as unknown as TokenSource;
+
+    const r = await resolveAsset(
+      { symbol: "USDC", tokenRef: "binance/USDC" },
+      { source, store, overrides: { USDC: cg("usd-coin") } },
+    );
+    expect(fetchByContract).not.toHaveBeenCalled();
+    expect(r).toEqual({ ref: cg("usd-coin"), confidence: "high", via: "override" });
+  });
+
   it("lazy:false (display) → impl miss does NOT hit source", async () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => ({
@@ -176,7 +192,9 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "USDC", tokenRef: "ethereum/0xabc" };
+    // chain 由调用方给(app 那边:平台 provider 报 + connector 自声明 chain/venue)——
+    // 不给就不当合约反查,场馆命名因此照旧掉回 symbol 消歧。
+    const asset = { symbol: "USDC", tokenRef: "ethereum/0xabc", chain: "ethereum" };
 
     const r = await resolveAsset(asset, { source, store }, { lazy: false });
     expect(r.via).toBe("none"); // 无 warm/override 时降级
@@ -187,7 +205,7 @@ describe("resolveAsset", () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => null);
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "ZZZ", tokenRef: "ethereum/0xdead" };
+    const asset = { symbol: "ZZZ", tokenRef: "ethereum/0xdead", chain: "ethereum" };
 
     expect(await resolveAsset(asset, { source, store })).toEqual({
       ref: null,

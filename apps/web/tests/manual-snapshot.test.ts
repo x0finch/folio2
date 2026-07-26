@@ -6,7 +6,7 @@ import type { CredsToken } from "../src/lib/manual-activity";
 import { buildManualSnapshot } from "../src/lib/manual-snapshot";
 
 // 缝③ 纯逻辑:manual 的 creds.tokens(+ 逐 token 现价)→ 合成 SnapshotWithBalances(ADR 0018 做法 1)。
-// 现价烘焙进 usdValue/totalUsd(取不到回退 unitPrice);selfPrice=null 走盯市;tokenRef 由 identifier 生。
+// 现价烘焙进 usdValue/totalUsd(取不到回退 unitPrice);selfPrice=null 走盯市;tokenRef 恒有值。
 const TS = 1_700_000_000_000;
 
 const tok = (over: Partial<CredsToken>): CredsToken => ({
@@ -39,11 +39,11 @@ describe("buildManualSnapshot", () => {
     expect(snap.balances[0].metaJson).toBeNull();
   });
 
-  it("有 identifier → tokenRef = coingecko/<id>;无 → null", () => {
+  it("有 identifier → tokenRef = coingecko/<id>;无 → manual/<SYMBOL>(恒有值)", () => {
     const withId = buildManualSnapshot("acc1", [tok({ identifier: "Bitcoin" })], [undefined], TS);
     expect(withId.balances[0].tokenRef).toBe("coingecko/bitcoin");
     const noId = buildManualSnapshot("acc1", [tok({ identifier: undefined })], [undefined], TS);
-    expect(noId.balances[0].tokenRef).toBeNull();
+    expect(noId.balances[0].tokenRef).toBe("manual/BTC");
   });
 
   it("totalUsd = 各余额 usdValue 之和", () => {

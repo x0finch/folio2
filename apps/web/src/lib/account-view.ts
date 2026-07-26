@@ -20,6 +20,7 @@ export interface OverviewBalance {
   selfPrice?: number | null; // provider 自带单价(估值原料,Phase 3);读时现推的原料,null=盯市恒用源
   kind: string;
   tokenRef?: string | null; // 快照持久化的代币寻址标识(聚合/解析用;CEX/perp/原生为空)
+  platform?: string | null; // 这笔持仓所在的链 ∪ 场馆(provider 直接报,#193;本列之前的旧行为空)
   metaJson: string | null;
   note?: Note; // balance 级展示 note(单个 Note;CEX 该币锁仓/冻结);无则省略
   // 代币参考层富化(P7.4,cache-only;缺则 undefined → UI 降级)。

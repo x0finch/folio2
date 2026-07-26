@@ -1,5 +1,4 @@
 import type { TokenRef } from "@folio/oracle";
-import { chainOf } from "./token-ref";
 
 // symbol 归一(与 tokens 层同口径:trim + 大写)—— 仅用于未解析行的分组键/身份。
 const norm = (s: string): string => s.trim().toUpperCase();
@@ -9,7 +8,7 @@ const norm = (s: string): string => s.trim().toUpperCase();
 //   · 白名单(进聚合):spot / utxo(BTC)/ CEX 现货(kind=spot)/ perp 权益(isMargin) —— ADR-0003。kind 已由 overview 用 viewKind 归一。
 //   · 归并键三级(永不裸 symbol,ADR-0002):token(内部 id / ref)→ tokenRef(精确合约)→ account:symbol。
 //     展示分组那一级已随 ADR 0021 退场 —— WBTC 与 BTC、USDT 各桥接变体从此各占一行。
-//   · HoldingSource 粒度 = 账户 × 平台单元:链上按链拆(tokenRef 的链命名者),其余按账户/场馆。
+//   · HoldingSource 粒度 = 账户 × 平台单元:平台由 provider 随余额直接报(ADR 0021),链上按链天然拆开。
 //   · 表头 totalAmount = 组内各 source 数量之和。组 = 同一个 Token(单位一致),跨链/多源(同一 Token
 //     的多条链 ref)亦可汇总。change24h 仍仅单一身份组给(多身份逐币涨跌不同)。
 
@@ -20,6 +19,9 @@ export interface AggInput {
   value: number; // USD(provider 权威;聚合按它求和)
   kind: string; // 归一后的 viewKind:spot | defi | perp_equity | perp_position | utxo
   tokenRef?: string | null;
+  // 这笔持仓所在的链 ∪ 场馆,provider 直接报(#193)。本列之前写下的旧快照行为空 → 退回账户的
+  // connectorId(多链钱包会暂时并成一格,下次同步即分开)。
+  platform?: string | null;
   isMargin?: boolean; // perp 权益(保证金)—— 进聚合但明细标注
   account: { id: string; label: string; connectorId: string; network?: string | null };
   tokenId?: string; // 内部代币行 id(vendor 中立归并身份,#73;富化命中 store 才有)
@@ -128,8 +130,8 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     if (a.marketCapRankHint == null && row.marketCapRank != null)
       a.marketCapRankHint = row.marketCapRank;
     // 持有点的平台单元:链上按链拆(同账户多链 → 多 source),场馆/manual 即连接器本身
-    // (name+logo 读路径取连接器自带,#53)。「在不在链上」由 chainOf 看 tokenRef 的命名者判定。
-    const platformId = chainOf(row.tokenRef) ?? row.account.connectorId;
+    // (name+logo 读路径取连接器自带,#53)。平台由 provider 报,不再从 tokenRef 反推。
+    const platformId = row.platform ?? row.account.connectorId;
     const sk = `${row.account.id}|${platformId}`;
     const existing = a.sources.get(sk);
     if (existing) {

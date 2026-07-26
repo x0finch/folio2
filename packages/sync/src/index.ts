@@ -10,3 +10,5 @@ export type {
   SyncResult,
 } from "./orchestrator";
 export { syncAccount, syncAllUsers, syncUser } from "./orchestrator";
+// 平台推导:写快照时用;app 侧采集 provider 元信息时也用同一条,免得两处口径分叉。
+export { platformOf } from "./platform";

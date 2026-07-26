@@ -500,6 +500,12 @@ importers:
       '@folio/db':
         specifier: workspace:*
         version: link:../db
+      '@folio/oracle-basic':
+        specifier: workspace:*
+        version: link:../oracle/basic
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../oracle/ref
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20260626.1

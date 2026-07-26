@@ -22,6 +22,7 @@ interface ImportSnapshotBalance {
   amount: number;
   usdValue: number;
   kind: BalanceKind;
+  platform?: string; // v2 的文件没有它 —— 缺席即空,下次同步补上
   meta?: Record<string, unknown>;
 }
 
