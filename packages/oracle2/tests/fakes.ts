@@ -3,7 +3,6 @@ import type {
   CacheStore,
   GlobalTokenRefIndexStore,
   ProviderTokenSeed,
-  SourceToken,
   TokenCandidate,
   TokenInfo,
   TokenInfoPatch,
@@ -15,15 +14,16 @@ import type {
   TokenRef,
   TokenRefHit,
   TokenRefIndexRow,
-  TokenSource,
   TokenStore,
+  TokenUpstream,
+  UpstreamToken,
 } from "../src";
 
 // 内存假实现 —— 各片的测试都注这一套。
 // 之所以是内存而不是真 D1:oracle2 这几片**一个字都不碰 schema**(真表留到 expand 那一片),
 // 老 oracle 还在用现有的表跑着,动一下 CI 就红。契约本身在这里被钉死,换真实现时对着它写。
 //
-// 注意假实现里也**没有任何数据源的名字** —— `fakeSource()` 的 id 是参数,默认 `"src"`。
+// 注意假实现里也**没有任何数据源的名字** —— `fakeUpstream()` 的 id 是参数,默认 `"src"`。
 // 服务层的测试因此连「上游是谁」都不知道,这正是 ADR 0023 要的。
 
 const NOW0 = 1_700_000_000_000;
@@ -270,18 +270,18 @@ export function fakeCacheStore(): FakeCacheStore {
 }
 
 // —— 上游 ——
-export interface FakeSource extends TokenSource {
+export interface FakeUpstream extends TokenUpstream {
   readonly calls: string[];
-  markets: SourceToken[];
-  searchResults: SourceToken[];
+  markets: UpstreamToken[];
+  searchResults: UpstreamToken[];
   prices: Map<TokenRef, TokenPrice>;
   series: TokenPricePoint[];
-  byContract: Map<string, SourceToken>;
+  byContract: Map<string, UpstreamToken>;
   refIndex: { rows: TokenRefIndexRow[]; unmatchedPlatforms: string[]; skipped: number };
 }
 
-export function fakeSource(id = "src"): FakeSource {
-  const src: FakeSource = {
+export function fakeUpstream(id = "src"): FakeUpstream {
+  const src: FakeUpstream = {
     id,
     calls: [],
     markets: [],

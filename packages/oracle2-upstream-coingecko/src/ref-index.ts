@@ -1,11 +1,11 @@
 import type { AssetPlatform, CoinListItem } from "@folio/coingecko-client";
 import { tokenRef } from "@folio/oracle-ref";
 import type { RefIndexFetch } from "@folio/oracle2";
-import { NON_EVM_PLATFORMS, SOURCE_ID } from "./constants";
+import { NON_EVM_PLATFORMS, UPSTREAM_ID } from "./constants";
 
 // 把 CoinGecko 的两个端点摊平成全局映射行(ADR 0022)。
 //
-// **纯函数,零 IO** —— 拉取在 source 里,灌库在 store 里,cron 只是把三者串起来的调用点。
+// **纯函数,零 IO** —— 拉取在 upstream 里,灌库在 store 里,cron 只是把三者串起来的调用点。
 // 好处是这一步能拿 fixture 钉死:响应几 MB、四万来行,出了错在生产上是「某条链的币全部
 // 没价没图」,不会有任何报错。
 //
@@ -55,7 +55,7 @@ export function toRefIndexRows(
         continue;
       }
       // 地址归一(EVM 小写)由文法层按命名者决定,不在这里猜。
-      rows.push({ ref: tokenRef.local(namer, addr), namer: SOURCE_ID, localName: coinId });
+      rows.push({ ref: tokenRef.local(namer, addr), namer: UPSTREAM_ID, localName: coinId });
     }
   }
   return { rows, unmatchedPlatforms, skipped };

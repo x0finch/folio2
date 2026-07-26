@@ -1,6 +1,6 @@
 import { type CoinGeckoConfig, createCoinGeckoClient } from "@folio/coingecko-client";
-import type { TokenSource } from "@folio/oracle2";
-import { EVM_NAMER_PREFIX, MARKETS_PER_PAGE, SOURCE_ID, VS_USD } from "./constants";
+import type { TokenUpstream } from "@folio/oracle2";
+import { EVM_NAMER_PREFIX, MARKETS_PER_PAGE, UPSTREAM_ID, VS_USD } from "./constants";
 import {
   coinIdOf,
   parseContract,
@@ -13,12 +13,12 @@ import { toRefIndexRows } from "./ref-index";
 
 export type { CoinGeckoConfig };
 
-// `TokenSource` 三面的 CoinGecko 实现。**全仓只有本包认识 CoinGecko** ——
+// `TokenUpstream` 三面的 CoinGecko 实现。**全仓只有本包认识 CoinGecko** ——
 // 服务层收的是这个接口,由 app 在装配时注入(ADR 0023)。
 //
 // 通用层只说「我们的 chain 标识」(`evm:<chainId>` / `<slug>`);翻成 CoinGecko 的 asset_platform
 // 是本文件的活:EVM 拿数字 chainId 去查平台表(比 slug 更可靠地命中),非 EVM 直接给 slug。
-export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource {
+export function createCoinGeckoUpstream(config: CoinGeckoConfig = {}): TokenUpstream {
   const client = createCoinGeckoClient(config);
   // 平台表进程内记一次:一次 sync 里可能连着单查几个合约,没必要每次重拉。
   let platformsBySlug: Promise<Map<string, string>> | undefined;
@@ -40,7 +40,7 @@ export function createCoinGeckoSource(config: CoinGeckoConfig = {}): TokenSource
   };
 
   return {
-    id: SOURCE_ID,
+    id: UPSTREAM_ID,
 
     async fetchMarkets({ topN }) {
       const pages = Math.max(1, Math.ceil(topN / MARKETS_PER_PAGE));

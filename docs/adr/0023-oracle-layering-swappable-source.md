@@ -8,13 +8,15 @@ ADR 0012 说过「vendor 中立」,但只做到了**身份**中立(归并靠 `to
 
 决定三条:
 
-**一、三层,靠依赖表强制。** 三层的包结构本来就有(`oracle-basic` 契约 / `oracle` 服务 / `oracle-source-*` 源 / `oracle-ref` 文法),此前的错是把它们塌进一个包。规矩明写:**服务层的 `dependencies` 里不许出现任何 client 或 source 包**,只留 `oracle-ref`。目录边界挡不住 `import`,依赖表挡得住,而且 reviewer 一眼能看见。
+**一、三层,靠依赖表强制。** 三层的包结构本来就有(`oracle-basic` 契约 / `oracle` 服务 / `oracle-source-*` 上游 adapter / `oracle-ref` 文法),此前的错是把它们塌进一个包。规矩明写:**服务层的 `dependencies` 里不许出现任何 client 或 source 包**,只留 `oracle-ref`。目录边界挡不住 `import`,依赖表挡得住,而且 reviewer 一眼能看见。
 
-**二、source 与 store 一样,初始化时注入。** 那个 `??` 删掉;`createOracleFor` 收一组同款的**惰性工厂**(`createTokenStore` / `createTokenPriceStore` / `createRefIndexStore` / `createCacheStore` / `createSource`)。`apiKey` 从服务层的 config 里消失 —— 那是 adapter 的事。服务层也不再 re-export `createCoinGecko*Source`。全仓**只有 app 的一个装配文件**同时认识两边(它本来就为 store 而引 `@folio/db`)。
+**二、上游与 store 一样,初始化时注入。** 那个 `??` 删掉;`createOracleFor` 收一组同款的**惰性工厂**(`createTokenStore` / `createTokenPriceStore` / `createRefIndexStore` / `createCacheStore` / `createSource`)。`apiKey` 从服务层的 config 里消失 —— 那是 adapter 的事。服务层也不再 re-export `createCoinGecko*Source`。全仓**只有 app 的一个装配文件**同时认识两边(它本来就为 store 而引 `@folio/db`)。
 
 **三、端口按 info 与价切开,缓存编排收一处。** 现有 `TokenStore` 一个接口塞了 info、价、索引、warm 四件事,这是「混在一起」的根。切两个:`TokenStore`(info facet + ref 行 —— 身份与元信息,长 TTL)、`TokenPriceStore`(价 facet + 历史日价 —— 短 TTL、过期不删只标 stale)。SWR 那套「读本地 → stale → 回源 → 写回」抽成服务层一个函数,price / 历史价 / warm 三处共用。
 
 上游那一面**不用新发明**:`TokenMetaSource`(目录/发现面)+ `PriceSource`(点查面)+ `TokenSource = 两面之交` 已经是同一条切分线,Store 侧照抄即可。
+
+**端口后缀从 `Source` 改叫 `Upstream`**(仅新层;老 oracle 不动,#202 就删了):`Store` 与 `Source` 差两个字母、同长度同后缀,在 import 列表里一眼糊,而这两个词恰恰承担着「这次调用会不会出网」这个最需要一眼看清的区别。中文注释本来通篇写「上游」,标识符跟着对上。`@folio/oracle2-upstream-coingecko` 同理。
 
 ## Considered Options
 
@@ -34,4 +36,4 @@ ADR 0012 说过「vendor 中立」,但只做到了**身份**中立(归并靠 `to
 - **服务层的测试不需要任何 vendor**:注内存假 store + 假 source 即可,本来就是这么写的;区别是现在**连依赖都没有**,不是靠自觉不 import。
 - **全局维护任务不挂 per-user 门面**:刷 `global_token_ref_index` 与 userId 无关,单独一个不带 user 的工厂给 cron 用,不必先假造一个用户。
 - **代价:多一层装配噪音**。app 的 oracle 装配文件从注 4 个工厂变成注 5 个,且要显式 import adapter 包。明知接受 —— 这一个文件的显式,换来其余所有文件的中立。
-- **过渡期多两个临时包名**(`@folio/oracle2` / `@folio/oracle2-source-coingecko`),#202 那片改名接管 `oracle` / `oracle-source-coingecko` 后消失。
+- **过渡期多两个临时包名**(`@folio/oracle2` / `@folio/oracle2-upstream-coingecko`),#202 那片改名接管 `oracle` / `oracle-source-coingecko` 后消失。

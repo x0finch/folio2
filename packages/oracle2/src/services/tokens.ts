@@ -1,11 +1,11 @@
 import type {
   CacheStore,
-  SourceToken,
   TokenPriceStore,
   TokenRecord,
   TokenRecordPrice,
-  TokenSource,
   TokenStore,
+  TokenUpstream,
+  UpstreamToken,
 } from "../contract";
 import { candidatesBySymbol, topByRank, warmRows } from "./cache";
 import { DEFAULT_TOP_N, dayBucketOf, MS_PER_DAY, PRICE_TTL_MS } from "./constants";
@@ -16,7 +16,7 @@ export interface TokensDeps {
   store: TokenStore; // info facet + ref 行
   prices: TokenPriceStore; // 价 facet + 历史日价
   cache: CacheStore;
-  source: TokenSource;
+  upstream: TokenUpstream;
   now?: () => number;
 }
 
@@ -50,17 +50,23 @@ export interface Tokens {
   priceAt(tokenId: string, atMs: number): Promise<number | undefined>;
 
   // 选币橱窗:市值 top-N,走 warm blob(冷则经 SWR 预热一次)。
-  topTokens(limit: number): Promise<SourceToken[]>;
+  topTokens(limit: number): Promise<UpstreamToken[]>;
   // 按关键词搜币(用户选币)。恒回源 —— 结果与用户无关,边缘缓存管它。
-  search(query: string): Promise<SourceToken[]>;
+  search(query: string): Promise<UpstreamToken[]>;
   // symbol 消歧候选源,喂 mint(与橱窗同一份 warm rows,不额外存)。
   candidates: CandidateSource;
 }
 
-export function createTokens({ store, prices, cache, source, now = Date.now }: TokensDeps): Tokens {
-  const rows = () => warmRows(cache, source, DEFAULT_TOP_N, now());
+export function createTokens({
+  store,
+  prices,
+  cache,
+  upstream,
+  now = Date.now,
+}: TokensDeps): Tokens {
+  const rows = () => warmRows(cache, upstream, DEFAULT_TOP_N, now());
 
-  const toSourceToken = (r: Awaited<ReturnType<typeof rows>>[number]): SourceToken => ({
+  const toSourceToken = (r: Awaited<ReturnType<typeof rows>>[number]): UpstreamToken => ({
     ref: r.info.ref,
     symbol: r.info.symbol,
     name: r.info.name,
@@ -86,7 +92,7 @@ export function createTokens({ store, prices, cache, source, now = Date.now }: T
     const fetched = new Map<number, number>();
     if (missingPast.length > 0 || needsToday) {
       try {
-        const raw = await source.fetchPriceSeries(info.ref, fromMs, toMs);
+        const raw = await upstream.fetchPriceSeries(info.ref, fromMs, toMs);
         for (const pt of raw) fetched.set(dayBucketOf(pt.atMs), pt.unitPrice); // 升序 → 当日最后一点胜出
       } catch {
         // 上游失败(限流 / 无历史 / 网络)→ 降级到仅缓存,不抛。
@@ -138,7 +144,7 @@ export function createTokens({ store, prices, cache, source, now = Date.now }: T
         fetch: async () => {
           const info = await store.getById(tokenId);
           if (!info?.ref) return undefined; // 认不出来的币取不了价
-          const got = (await source.fetchPrices([info.ref])).get(info.ref);
+          const got = (await upstream.fetchPrices([info.ref])).get(info.ref);
           return got ? { ...got, stale: false } : undefined;
         },
         write: (value) => prices.put([{ tokenId, ...value }], PRICE_TTL_MS),
@@ -158,7 +164,7 @@ export function createTokens({ store, prices, cache, source, now = Date.now }: T
       }
       if (byRef.size === 0) return 0;
 
-      const fetched = await source.fetchPrices([...byRef.keys()]);
+      const fetched = await upstream.fetchPrices([...byRef.keys()]);
       const writes = [...fetched.entries()]
         .map(([ref, price]) => {
           const tokenId = byRef.get(ref);
@@ -179,6 +185,6 @@ export function createTokens({ store, prices, cache, source, now = Date.now }: T
       return topByRank(await rows(), limit).map(toSourceToken);
     },
 
-    search: (query) => source.searchTokens(query),
+    search: (query) => upstream.searchTokens(query),
   };
 }

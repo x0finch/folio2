@@ -1,6 +1,6 @@
 import type { AssetPlatform, CoinListItem } from "@folio/coingecko-client";
 import { describe, expect, it } from "vitest";
-import { NON_EVM_PLATFORMS, SOURCE_ID, toRefIndexRows } from "../src";
+import { NON_EVM_PLATFORMS, toRefIndexRows, UPSTREAM_ID } from "../src";
 import assetPlatforms from "./fixtures/asset-platforms.json" with { type: "json" };
 import coinsList from "./fixtures/coins-list.json" with { type: "json" };
 
@@ -15,7 +15,7 @@ describe("toRefIndexRows —— 纯转换(golden)", () => {
   const byRef = new Map(result.rows.map((r) => [r.ref, r.localName]));
 
   it("每一行的 namer 都是本 adapter 的 id", () => {
-    expect(new Set(result.rows.map((r) => r.namer))).toEqual(new Set([SOURCE_ID]));
+    expect(new Set(result.rows.map((r) => r.namer))).toEqual(new Set([UPSTREAM_ID]));
   });
 
   it("EVM 平台翻成 evm:<chainId>,地址小写归一", () => {

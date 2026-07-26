@@ -5,23 +5,24 @@ import type {
   SimplePriceMap,
 } from "@folio/coingecko-client";
 import { tokenRef } from "@folio/oracle-ref";
-import type { SourceToken, TokenPrice, TokenPricePoint, TokenRef } from "@folio/oracle2";
-import { SEARCH_LIMIT, SOURCE_ID, VS_USD } from "./constants";
+import type { TokenPrice, TokenPricePoint, TokenRef, UpstreamToken } from "@folio/oracle2";
+import { SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";
 
 // CoinGecko 响应 → 契约形状的纯解析。零 IO,fixture 可钉死。
 // 产出的 tokenRef 命名者恒为本 adapter 的 id;coin id 规范为小写 kebab,归一在生产者侧做。
 
-export const cgkRef = (coinId: string): TokenRef => tokenRef.local(SOURCE_ID, coinId.toLowerCase());
+export const cgkRef = (coinId: string): TokenRef =>
+  tokenRef.local(UPSTREAM_ID, coinId.toLowerCase());
 
 // coin id ← 本源命名的 ref。不是本源的命名(链上寻址 / 别家)→ undefined。
 export function coinIdOf(ref: TokenRef): string | undefined {
-  const prefix = `${SOURCE_ID}/`;
+  const prefix = `${UPSTREAM_ID}/`;
   return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined;
 }
 
-// 一行 markets → SourceToken(元信息 + 价;价为 USD)。跳过无 id 的行。
-export function parseMarkets(rows: readonly MarketCoin[]): SourceToken[] {
-  const out: SourceToken[] = [];
+// 一行 markets → UpstreamToken(元信息 + 价;价为 USD)。跳过无 id 的行。
+export function parseMarkets(rows: readonly MarketCoin[]): UpstreamToken[] {
+  const out: UpstreamToken[] = [];
   for (const m of rows) {
     if (!m?.id || !m.symbol) continue;
     const asOf = Date.parse(m.last_updated ?? "") || Date.now();
@@ -42,8 +43,8 @@ export function parseMarkets(rows: readonly MarketCoin[]): SourceToken[] {
 }
 
 // /search → 前 N 条(选币 autocomplete)。无价。
-export function parseSearch(json: SearchResult): SourceToken[] {
-  const out: SourceToken[] = [];
+export function parseSearch(json: SearchResult): UpstreamToken[] {
+  const out: UpstreamToken[] = [];
   for (const c of json?.coins ?? []) {
     if (!c?.id || !c.symbol) continue;
     out.push({
@@ -76,8 +77,8 @@ export function parseSimplePrice(
   return out;
 }
 
-// /coins/{platform}/contract/{addr} → SourceToken(兜底单查)。
-export function parseContract(json: CoinContract | null): SourceToken | null {
+// /coins/{platform}/contract/{addr} → UpstreamToken(兜底单查)。
+export function parseContract(json: CoinContract | null): UpstreamToken | null {
   if (!json?.id || !json.symbol) return null;
   const md = json.market_data;
   const unitPrice = md?.current_price?.[VS_USD];

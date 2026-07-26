@@ -1,7 +1,7 @@
 // CoinGecko adapter 的常量。**全仓只有本包认识这些东西**(ADR 0023)。
 
 // 本 adapter 自报的标识 —— 它同时是产出 tokenRef 的 namer、以及全局映射表的 `namer` 列。
-export const SOURCE_ID = "coingecko";
+export const UPSTREAM_ID = "coingecko";
 
 export const VS_USD = "usd";
 export const SEARCH_LIMIT = 20;

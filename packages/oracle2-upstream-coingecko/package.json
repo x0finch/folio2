@@ -1,5 +1,5 @@
 {
-  "name": "@folio/oracle2-source-coingecko",
+  "name": "@folio/oracle2-upstream-coingecko",
   "version": "0.0.0",
   "private": true,
   "type": "module",

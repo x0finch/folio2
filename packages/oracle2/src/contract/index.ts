@@ -1,13 +1,6 @@
 // 契约层 —— 类型 + 端口,零逻辑、零依赖(除 tokenRef 文法)。
 // **这一层不许出现任何数据源的名字**;实现由 app 在初始化时注入(ADR 0023)。
-export type {
-  PriceSource,
-  RefIndexFetch,
-  SourceToken,
-  TokenMetaSource,
-  TokenRefIndexSource,
-  TokenSource,
-} from "./source";
+
 export type {
   CacheEntry,
   CacheStore,
@@ -29,3 +22,11 @@ export type {
   TokenRefHit,
   TokenRefIndexRow,
 } from "./types";
+export type {
+  PriceUpstream,
+  RefIndexFetch,
+  TokenMetaUpstream,
+  TokenRefIndexUpstream,
+  TokenUpstream,
+  UpstreamToken,
+} from "./upstream";

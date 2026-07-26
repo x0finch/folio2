@@ -2,27 +2,27 @@ import type {
   CacheStore,
   GlobalTokenRefIndexStore,
   TokenPriceStore,
-  TokenRefIndexSource,
-  TokenSource,
+  TokenRefIndexUpstream,
   TokenStore,
+  TokenUpstream,
 } from "../contract";
 import { createMint, type Mint } from "./mint";
 import { createTokens, type Tokens } from "./tokens";
 
-// 装配。**store 与 source 一样,都是初始化时注入的惰性工厂**(ADR 0023):
+// 装配。**store 与 upstream 一样,都是初始化时注入的惰性工厂**(ADR 0023):
 // 是工厂不是实例,因为门面只建被碰到的那一个子服务 —— 否则 app 一拼 config 就把所有 store
 // 全 new 出来(各含 getDb),`oracle.tokens` 也白建另一批。
 //
-// **没有 `apiKey`、没有默认源** —— 老 oracle 那句 `source ?? createCoinGeckoSource({ apiKey })`
-// 就是服务层永久依赖某一家的根。这里 source 必须由调用方给,本包的 `dependencies` 里
-// 因此不需要(也不许有)任何 client / source 包。
+// **没有 `apiKey`、没有默认上游** —— 老 oracle 那句 `source ?? createCoinGeckoSource({ apiKey })`
+// 就是服务层永久依赖某一家的根。这里 upstream 必须由调用方给,本包的 `dependencies` 里
+// 因此不需要(也不许有)任何 client / upstream 包。
 export interface OracleConfig {
   createTokenStore(userId: string): TokenStore;
   createTokenPriceStore(userId: string): TokenPriceStore;
   createCacheStore(userId: string): CacheStore;
   // 全局知识,与用户无关 → 零参(ADR 0022)。
   createRefIndexStore(): GlobalTokenRefIndexStore;
-  createSource(): TokenSource;
+  createUpstream(): TokenUpstream;
   // symbol → 上游 id 的策展小表。由 adapter 提供(它逐条写的是那一家的 id)。
   overrides?: Readonly<Record<string, string>>;
   now?: () => number;
@@ -59,19 +59,19 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
           store: cfg.createTokenStore(userId),
           prices: cfg.createTokenPriceStore(userId),
           cache: cfg.createCacheStore(userId),
-          source: cfg.createSource(),
+          upstream: cfg.createUpstream(),
           now: cfg.now,
         });
         return tokens;
       },
       get mint() {
-        const source = cfg.createSource();
+        const upstream = cfg.createUpstream();
         mint ??= createMint({
           store: cfg.createTokenStore(userId),
           refIndex: cfg.createRefIndexStore(),
           // 候选与橱窗同一份 warm rows(不额外存);经 tokens 子服务拿,复用它的 SWR。
           candidates: this.tokens.candidates,
-          namer: source.id,
+          namer: upstream.id,
           overrides: cfg.overrides,
         });
         return mint;
@@ -85,7 +85,7 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
 // 工厂给 cron 用,不必先假造一个用户。动词沿用项目现成的 `warm`。
 export interface OracleWarmConfig {
   createRefIndexStore(): GlobalTokenRefIndexStore;
-  createSource(): TokenRefIndexSource;
+  createUpstream(): TokenRefIndexUpstream;
   // 失配是**静默故障**(那条链的币从此没价没图,却不报错)→ 必须喊出来。
   // 做成回调而不是引日志库:这一层不该知道日志怎么落,cron 那头知道。
   onWarn?(message: string, meta: Record<string, unknown>): void;
@@ -103,11 +103,11 @@ export interface OracleWarm {
 export function createOracleWarm(cfg: OracleWarmConfig): OracleWarm {
   return {
     async warmRefIndex(now) {
-      const source = cfg.createSource();
-      const result = await source.fetchRefIndex();
+      const upstream = cfg.createUpstream();
+      const result = await upstream.fetchRefIndex();
       if (result.unmatchedPlatforms.length > 0) {
         cfg.onWarn?.("global_token_ref_index: 链对照失配,这些链的币将没价没图", {
-          namer: source.id,
+          namer: upstream.id,
           platforms: result.unmatchedPlatforms,
         });
       }
@@ -120,7 +120,7 @@ export function createOracleWarm(cfg: OracleWarmConfig): OracleWarm {
     },
 
     refIndexRefreshedAt() {
-      return cfg.createRefIndexStore().refreshedAt(cfg.createSource().id);
+      return cfg.createRefIndexStore().refreshedAt(cfg.createUpstream().id);
     },
   };
 }

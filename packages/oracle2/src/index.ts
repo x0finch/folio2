@@ -3,8 +3,8 @@
 // 与今天的 `@folio/oracle` 的根本差别:
 //   · 代币表**每个用户一份**,`tokens.id` 是系统内部唯一身份,`tokenRef` 退回两个边界
 //   · 认币从**读时**挪到**写时**,结果冻进快照
-//   · **这个包不知道上游是谁** —— store 与 source 都是初始化时注入的惰性工厂,
-//     `dependencies` 里只有 `@folio/oracle-ref`(文法),没有任何 client / source 包
+//   · **这个包不知道上游是谁** —— store 与 upstream 都是初始化时注入的惰性工厂,
+//     `dependencies` 里只有 `@folio/oracle-ref`(文法),没有任何 client / upstream 包
 //
 // 三层:`src/contract/`(类型 + 端口,零逻辑)/ `src/services/`(编排)/ adapter 另成包。
 // 包名 `oracle2` 是临时的:写到满意后改名接管 `oracle`,老包整个删除(#202)。
