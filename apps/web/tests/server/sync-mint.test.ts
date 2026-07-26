@@ -4,6 +4,7 @@ import {
   createUserCacheStore,
   createUserTokenStore,
 } from "@folio/db";
+import { syncAccount } from "@folio/sync";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../src/lib/server/internal/db";
 import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
@@ -72,16 +73,43 @@ async function makeAccount(label = "w"): Promise<string> {
   return account.id;
 }
 
-// provider 报的一笔余额(经编排落到 SnapshotBalanceInput 的形状)。
+// provider 报的一笔余额(`Balance` 形状 —— 这是编排器收到的东西)。
 const bal = (tokenRef: string, symbol: string, over: Record<string, unknown> = {}) => ({
   symbol,
   amount: 1,
-  usdValue: 100,
+  value: 100,
   kind: "spot" as const,
-  platform: tokenRef.split("/")[0],
   tokenRef,
   ...over,
 });
+
+// **走真编排器**(#202 之后 mint 是 `SyncDeps` 上独立的一步,跑在 revalue 之前)。
+// 只把取数那一步打桩,mint / revalue / 写快照全用真实现 —— 顺序与 best-effort 语义因此都被覆盖,
+// 不必在测试里复刻编排逻辑(复刻的话,编排顺序一改测试还是绿的,那就白测了)。
+async function syncWith(
+  balances: ReturnType<typeof bal>[],
+  accountId: string,
+  deps = buildSyncDeps(),
+): Promise<string> {
+  const accounts = await db.listAccountsByUser(USER);
+  const account = accounts.find((a) => a.id === accountId);
+  if (!account) throw new Error(`no such account ${accountId}`);
+  const res = await syncAccount(
+    {
+      ...deps,
+      fetchBalances: async () => ({
+        status: "ok" as const,
+        balances: balances as never,
+        totalUsd: balances.reduce((s, b) => s + b.value, 0),
+      }),
+    },
+    USER,
+    account,
+    null,
+  );
+  if (!res.ok || !res.snapshotId) throw new Error(`sync failed: ${res.error ?? "no snapshot"}`);
+  return res.snapshotId;
+}
 
 async function balancesOf(snapshotId: string) {
   const { results } = await env.DB.prepare(
@@ -97,11 +125,7 @@ describe("落库后快照行带 token_id", () => {
     await seedRefIndex([{ ref: USDC_ETH, localName: "usd-coin" }]);
     const accountId = await makeAccount();
 
-    const snapshotId = await buildSyncDeps().writeSnapshot(USER, accountId, {
-      takenAt: Date.now(),
-      totalUsd: 100,
-      balances: [bal(USDC_ETH, "USDC")],
-    });
+    const snapshotId = await syncWith([bal(USDC_ETH, "USDC")], accountId);
 
     const rows = await balancesOf(snapshotId);
     expect(rows).toHaveLength(1);
@@ -117,11 +141,7 @@ describe("落库后快照行带 token_id", () => {
 
   it("映射表没有的合约 → 也建行、快照照写,只是上游没认出来", async () => {
     const accountId = await makeAccount();
-    const snapshotId = await buildSyncDeps().writeSnapshot(USER, accountId, {
-      takenAt: Date.now(),
-      totalUsd: 100,
-      balances: [bal("evm:1/contract:0xdeadbeef", "SCAM")],
-    });
+    const snapshotId = await syncWith([bal("evm:1/contract:0xdeadbeef", "SCAM")], accountId);
 
     const rows = await balancesOf(snapshotId);
     expect(rows[0].tokenId).toBeTruthy(); // 认不出来也有 token_id,快照不卡在上游上
@@ -136,11 +156,7 @@ describe("落库后快照行带 token_id", () => {
     ]);
     const accountId = await makeAccount();
 
-    const snapshotId = await buildSyncDeps().writeSnapshot(USER, accountId, {
-      takenAt: Date.now(),
-      totalUsd: 200,
-      balances: [bal(USDC_ETH, "USDC"), bal(USDC_ARB, "USDC")],
-    });
+    const snapshotId = await syncWith([bal(USDC_ETH, "USDC"), bal(USDC_ARB, "USDC")], accountId);
 
     const rows = await balancesOf(snapshotId);
     expect(rows).toHaveLength(2);
@@ -155,11 +171,7 @@ describe("落库后快照行带 token_id", () => {
     await seedWarm([{ id: "ethereum", symbol: "ETH", rank: 2 }]);
     const accountId = await makeAccount();
 
-    const snapshotId = await buildSyncDeps().writeSnapshot(USER, accountId, {
-      takenAt: Date.now(),
-      totalUsd: 100,
-      balances: [bal("evm:1/native", "ETH")],
-    });
+    const snapshotId = await syncWith([bal("evm:1/native", "ETH")], accountId);
 
     const rows = await balancesOf(snapshotId);
     const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
@@ -172,11 +184,10 @@ describe("落库后快照行带 token_id", () => {
     await seedWarm([{ id: "usd-coin", symbol: "USDC", rank: 6 }]);
     const accountId = await makeAccount();
 
-    const snapshotId = await buildSyncDeps().writeSnapshot(USER, accountId, {
-      takenAt: Date.now(),
-      totalUsd: 200,
-      balances: [bal(USDC_ETH, "USDC"), bal("evm:1/contract:0xfake", "USDC")],
-    });
+    const snapshotId = await syncWith(
+      [bal(USDC_ETH, "USDC"), bal("evm:1/contract:0xfake", "USDC")],
+      accountId,
+    );
 
     const rows = await balancesOf(snapshotId);
     expect(rows).toHaveLength(2);
@@ -189,15 +200,14 @@ describe("perp 两类行都有 token_id", () => {
     await seedWarm([{ id: "usd-coin", symbol: "USDC", rank: 6 }]);
     const accountId = await makeAccount("perp");
 
-    const snapshotId = await buildSyncDeps().writeSnapshot(USER, accountId, {
-      takenAt: Date.now(),
-      totalUsd: 100,
-      balances: [
+    const snapshotId = await syncWith(
+      [
         bal("hyperliquid/USDC", "USDC", { kind: "perp_equity" }),
         // 单仓位行金额为零、不进聚合,但也该有身份。
         bal("hyperliquid/BTC", "BTC", { kind: "perp_position", usdValue: 0 }),
       ],
-    });
+      accountId,
+    );
 
     const rows = await balancesOf(snapshotId);
     expect(rows).toHaveLength(2);
@@ -206,25 +216,30 @@ describe("perp 两类行都有 token_id", () => {
 });
 
 describe("每账户独立落库的性质保住", () => {
-  it("一个账户的 mint 失败不影响另一个账户落库", async () => {
+  it("一个账户失败不影响另一个账户落库", async () => {
     await seedRefIndex([{ ref: USDC_ETH, localName: "usd-coin" }]);
+    const bad = await makeAccount("bad");
     const good = await makeAccount("good");
     const deps = buildSyncDeps();
+    const accounts = await db.listAccountsByUser(USER);
+    const of = (id: string) => accounts.find((a) => a.id === id) as never;
 
-    // 不存在的账户 → writeSnapshot 抛(归属校验),但 deps 仍可继续服务其他账户。
-    await expect(
-      deps.writeSnapshot(USER, "no-such-account", {
-        takenAt: Date.now(),
-        totalUsd: 1,
-        balances: [bal(USDC_ETH, "USDC")],
-      }),
-    ).rejects.toThrow();
+    // 坏账户:取数直接抛 → syncAccount 收成 ok:false,不落库、不向上抛。
+    const badRes = await syncAccount(
+      {
+        ...deps,
+        fetchBalances: async () => {
+          throw new Error("provider down");
+        },
+      },
+      USER,
+      of(bad),
+      null,
+    );
+    expect(badRes.ok).toBe(false);
 
-    const snapshotId = await deps.writeSnapshot(USER, good, {
-      takenAt: Date.now(),
-      totalUsd: 100,
-      balances: [bal(USDC_ETH, "USDC")],
-    });
+    // 同一份 deps 继续服务另一个账户,照样落库、照样带 token_id。
+    const snapshotId = await syncWith([bal(USDC_ETH, "USDC")], good, deps);
     expect((await balancesOf(snapshotId))[0].tokenId).toBeTruthy();
   });
 
@@ -236,16 +251,8 @@ describe("每账户独立落库的性质保住", () => {
     const deps = buildSyncDeps();
 
     const [s1, s2] = await Promise.all([
-      deps.writeSnapshot(USER, a, {
-        takenAt: Date.now(),
-        totalUsd: 100,
-        balances: [bal(USDC_ETH, "USDC")],
-      }),
-      deps.writeSnapshot(USER, b, {
-        takenAt: Date.now(),
-        totalUsd: 100,
-        balances: [bal(USDC_ETH, "USDC")],
-      }),
+      syncWith([bal(USDC_ETH, "USDC")], a, deps),
+      syncWith([bal(USDC_ETH, "USDC")], b, deps),
     ]);
 
     const [r1, r2] = [await balancesOf(s1), await balancesOf(s2)];
@@ -262,12 +269,9 @@ describe("provider 报的元信息进代币行", () => {
   it("建行用 provider 报的 name / logo(图落备用槽)", async () => {
     const accountId = await makeAccount();
     const deps = buildSyncDeps();
-    // 走 fetchBalances 那条路才会收 seed;这里直接调 writeSnapshot,故只有 symbol 那一项。
-    const snapshotId = await deps.writeSnapshot(USER, accountId, {
-      takenAt: Date.now(),
-      totalUsd: 100,
-      balances: [bal("evm:1/contract:0xnoseed", "FOO")],
-    });
+    // seed 是在 `fetchViaConnector` 里收的;本测试把 `fetchBalances` 整个打了桩、绕开了它,
+    // 所以这里没有 seed —— 正好验「没有 seed 时退回 symbol 一项」这条兜底。
+    const snapshotId = await syncWith([bal("evm:1/contract:0xnoseed", "FOO")], accountId, deps);
     const rows = await balancesOf(snapshotId);
     const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
     const info = await store.getById(rows[0].tokenId as string);
@@ -283,11 +287,7 @@ describe("多行同批不撞 D1 的参数上限", () => {
     const balances = Array.from({ length: 25 }, (_, i) =>
       bal(`evm:1/contract:0x${(i + 1).toString(16).padStart(40, "0")}`, `T${i}`),
     );
-    const snapshotId = await buildSyncDeps().writeSnapshot(USER, accountId, {
-      takenAt: Date.now(),
-      totalUsd: 2500,
-      balances,
-    });
+    const snapshotId = await syncWith(balances, accountId);
     const rows = await balancesOf(snapshotId);
     expect(rows).toHaveLength(25);
     expect(rows.every((r) => r.tokenId)).toBe(true);

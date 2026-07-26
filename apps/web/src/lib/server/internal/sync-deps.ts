@@ -153,44 +153,26 @@ export function buildSyncDeps(): SyncDeps {
     // syncUser 只见活跃的可同步账户(判别走纯 isSyncableAccount)。
     listAccounts: async (userId) => (await db.listAccountsByUser(userId)).filter(isSyncableAccount),
     listRawCreds: (userId) => db.listRawCredsByUser(userId), // 批量取全用户 creds(消 syncAccount 的 N+1)
-    // **写快照前先 mint**:每笔余额的 tokenRef 换成 token_id,认定就此冻进快照(ADR 0021 / #200)。
+    writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
+    // 认币:每笔余额的 tokenRef 换成 token_id,认定就此冻进快照(ADR 0021 / #200)。
     //
-    // 编排在这里而不在 `@folio/sync`:mint 的逻辑归 oracle2,sync 只认注入的 deps,两边都不用动。
+    // **编排在这里、执行在 `@folio/sync` 的 mint 那一步**(#202):它跑在 revalue 之前,一轮同步只跑
+    // 一次,答案同时喂给「按币问价」和「落 token_id」两个消费者。#200 当初把它塞在 writeSnapshot 里,
+    // 那时 revalue 还在用旧参考层的读时解析;新层的 `priceOf` 收 token_id,再留在写快照那头就得
+    // 认两遍(而且中间有别的账户在并发建行,两次结果可能不一致)。
+    //
     // D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两次独立的批。mint 成了而写快照失败
     // 只留下没人引用的 Token 行,无害,下次复用。
     //
     // 不加 barrier:账户是并发跑的,同一条 ref 会被同时 mint,靠 store 的 upsert-then-read 幂等收敛
     // (见 createUserTokenStore.create)。搞「先统一 mint 再并发写」会牺牲「每账户独立落库、
     // 一个失败不影响其他」这条性质。
-    writeSnapshot: async (userId, accountId, input) => {
-      const rows = input.balances;
+    mint: async (userId, rows) => {
       const refs = rows.flatMap((b) =>
         b.tokenRef ? [{ ref: b.tokenRef, seed: seeds.of(b.tokenRef, b.symbol) }] : [],
       );
-      let idByRef = new Map<string, string>();
-      if (refs.length > 0) {
-        try {
-          idByRef = await oracleFor(userId).mint.of(refs);
-        } catch (e) {
-          // best-effort:mint 挂了照样落快照(新列留空,读端退回旧路)。定价/认币故障不该让
-          // 整轮同步丢数据 —— 下次同步会把 token_id 补上。
-          getLogger(["folio", "web", "sync"]).warn(
-            "mint failed; writing snapshot without token_id",
-            {
-              userId,
-              accountId,
-              error: e instanceof Error ? e.message : String(e),
-            },
-          );
-        }
-      }
-      return db.writeSnapshot(userId, accountId, {
-        ...input,
-        balances: rows.map((b) => ({
-          ...b,
-          tokenId: b.tokenRef ? idByRef.get(b.tokenRef) : undefined,
-        })),
-      });
+      if (refs.length === 0) return new Map();
+      return oracleFor(userId).mint.of(refs);
     },
     // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);
     // SECRETS_KEY 只在本层(app)见。connectorId 直接即 connector 的 id;无 manifest 视为数据错误
@@ -206,11 +188,13 @@ export function buildSyncDeps(): SyncDeps {
     // 写快照前重估(oracle 多源 Phase 3):按 mode 定 value + 非盯市类型捕获 selfPrice(原料)。
     // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单):据 connectorId 查 manifest →
     // 传 markToMarket 布尔。mode 按 userId 解析(记忆化);缺省 self-first(无 settings 行的用户)。
-    revalue: async (userId, connectorId, rows) =>
+    // 价从**新参考层**取(#202):`priceOf` 收 token_id,身份由上一步的 mint 给,这里不再解析。
+    revalue: async (userId, connectorId, rows, idByRef) =>
       revalue(
-        tokens,
+        oracleFor(userId).tokens,
         getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
         rows,
+        idByRef,
         await modeFor(userId),
       ),
   };
