@@ -1,6 +1,6 @@
 # tokens 收归 per-user,`tokens.id` 是唯一贯穿身份
 
-Status: accepted。推翻 [ADR 0001](0001-aggregate-by-token-group.md)(展示分组)与 [ADR 0017](0017-manual-multi-token-holdings.md)(`manual_token` 独立表);改写 [ADR 0002](0002-never-merge-by-symbol.md)(四级归并键塌成一级);扩展 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-multi-source.md)(内部身份 + per-user 维度);修订 [ADR 0020](0020-tokenref-unified-naming-grammar.md)(语法去掉 `assetNs` 段、`eip155:` → `evm:`)。全局映射表见 [ADR 0022](0022-cgk-refs-global-contract-to-coin-map.md)。见 [#176](https://github.com/x0finch/folio2/issues/176)。
+Status: accepted。推翻 [ADR 0001](0001-aggregate-by-token-group.md)(展示分组)与 [ADR 0017](0017-manual-multi-token-holdings.md)(`manual_token` 独立表);改写 [ADR 0002](0002-never-merge-by-symbol.md)(四级归并键塌成一级);扩展 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-multi-source.md)(内部身份 + per-user 维度);修订 [ADR 0020](0020-tokenref-unified-naming-grammar.md)(语法去掉 `assetNs` 段、`eip155:` → `evm:`)。全局映射表见 [ADR 0022](0022-global-token-ref-index.md);参考层的分层与可换源见 [ADR 0023](0023-oracle-layering-swappable-source.md)。见 [#176](https://github.com/x0finch/folio2/issues/176)。
 
 `tokens` 原本是**全局共享的参考缓存**(无 `userId`,原则 #6 的受控例外),身份靠读时解析 `tokenRef` 惰性得出,快照存的是 provider 原样命名。决定把 `tokens` 收归 **user 私有**,`tokens.id` 成为系统内部**唯一**的 token 身份 —— `snapshot_balances`、`token_price_history`、`manual_activity` 全部改成 `token_id` FK,`manual_token` 表并入 `tokens`,`snapshot_balances` 的 `symbol` 与 `token_ref` 两列删掉。语境是自托管、单用户量级:**数据隔离 / 可移植 / 可独立备份删除**比用缓存去重换来的复杂度更值。`tokenRef` 不消失,但退到两个边界 —— 连接器报余额、oracle 问 CoinGecko;`apps/web` 一个字都见不到。
 
@@ -18,7 +18,7 @@ Status: accepted。推翻 [ADR 0001](0001-aggregate-by-token-group.md)(展示分
 
 ## Consequences
 
-- **表**:删 `token_index` / `token_groups` / `manual_token` / `token_meta` / `fx_rates` / `platforms`;`token_vendor_ids` 改名 `token_refs`(`namer` / `local_name` / `token_id`,主键就是拆开的 tokenRef,拆两列才能让反查 `token_id + namer` 走索引);新增 `cgk_refs`(见 ADR 0022)与 `user_cache(user_id, k, v, expires_at)`(装 warm 前 N 名、汇率、平台名图;消歧候选恒是 warm 集的子集,从同一个 blob 筛,不单独存)。**界线:整份都要用的存 JSON,只挑几行用的写表。**
+- **表**:删 `token_index` / `token_groups` / `manual_token` / `token_meta` / `fx_rates` / `platforms`;`token_vendor_ids` 改名 `token_refs`(`namer` / `local_name` / `token_id`,主键就是拆开的 tokenRef,拆两列才能让反查 `token_id + namer` 走索引);新增 `global_token_ref_index`(见 ADR 0022)与 `user_cache(user_id, k, v, expires_at)`(装 warm 前 N 名、汇率、平台名图;消歧候选恒是 warm 集的子集,从同一个 blob 筛,不单独存)。**界线:整份都要用的存 JSON,只挑几行用的写表。**
 - **一个 token 多条 ref**:多条链的同一个币是**一个 `tokens` 行 + 多条 `token_refs` 行**,归一靠 `coingecko/<coin_id>` 那条 ref 当锚点。同一个 namer 下允许多条(provider 报了个 CoinGecko 不认识的以太坊合约、按 symbol 并进了 USDC),但 `coingecko` namer 下加部分唯一索引 —— 一个 token 只能对一个 CoinGecko coin,挡住合并写错造成的数据损坏。
 - **认币的确定性变了**:按 symbol 消歧从读时重算变成写时定死。好处是稳、快;坏处是**当时认错就一直错着**,不会自己好。沿用今天的置信度闸(市值前 N 名或碾压次席才算有把握,否则各自独立建行、不链 CoinGecko)。**改绑另立票**,但合并的代码路径与自动补链共用,那张票只剩 UI。
 - **`symbol` 只有一处**:从 `snapshot_balances` 删掉后改一个币的名字,历史快照全部跟着改(今天只影响新快照)。代价是任何进快照的行都必须先有 `tokens` 行 —— 包括 perp 仓位(照现有规则走:`perp_equity` 按 symbol 认成 USDC 并进 USDC 那行,`perp_position` value=0 不进聚合,建了行也是惰性的)与没认出来的币(没有兜底标签了)。
@@ -26,4 +26,4 @@ Status: accepted。推翻 [ADR 0001](0001-aggregate-by-token-group.md)(展示分
 - **`OVERRIDES`(硬编码的 symbol → CoinGecko ref 表)与 `cgkRef` / `CGK_VENDOR` 搬进 coingecko source**,`oracle/basic` 恢复厂商中立;选币不再把 CoinGecko coin id 交给前端,改传 base64url 编码的 tokenRef(前端原样搬运、不解释),点中不建行、提交才建。
 - **导出必须扩**:今天不导 `tokens` 也自洽(快照行自带 `symbol` + `token_ref`、手记数据搭 `account.creds.tokens` 的便车)—— 这两条依赖全砍了,不改就只导出一堆指向空气的 `token_id`。加 `tokens` / `token_refs`(refs 嵌在 token 记录里,同 balances 嵌在 snapshot 记录里)与 `manual_activity`(扁平记录,同 membership);`EXPORT_VERSION` 提到 3,旧文件明确报「太旧」不做兼容。验收口径:**导出的文件能单独导进一个空库,总资产与历史曲线跟原库一致** —— 「可完全隔离、独立成库」只有这一条能验。
 - **CoinGecko 调用量随用户数线性放大**(tokens / 现价 / 历史价 / warm 全部 per-user)。已知,单用户无所谓。
-- **原则 #6 的例外不消失、但收窄** —— 从「全局参考数据」收成 `cgk_refs` 一张公开知识表,细节见 ADR 0022。
+- **原则 #6 的例外不消失、但收窄** —— 从「全局参考数据」收成 `global_token_ref_index` 一张公开知识表,细节见 ADR 0022。
