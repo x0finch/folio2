@@ -24,15 +24,24 @@ export function createCoinGeckoUpstream(config: CoinGeckoConfig = {}): TokenUpst
   let platformsBySlug: Promise<Map<string, string>> | undefined;
 
   const chainToPlatform = async (chain: string): Promise<string | undefined> => {
-    platformsBySlug ??= client.assetPlatforms().then((list) => {
-      const m = new Map<string, string>();
-      for (const p of list) {
-        if (!p?.id) continue;
-        m.set(p.id.toLowerCase(), p.id);
-        if (p.chain_identifier != null) m.set(String(p.chain_identifier), p.id);
-      }
-      return m;
-    });
+    // **失败不进记忆。** 裸 `??=` 会把被拒绝的 promise 也记住:Workers 的 isolate 跨请求存活,
+    // 一次瞬时 429 就让本 isolate 余生所有 fetchByContract 直接失败 —— 而且是静默的
+    // (上层 SWR 把抛错当「上游没有」吞掉)。故先清槽再抛,下一次调用重新拉。
+    platformsBySlug ??= client
+      .assetPlatforms()
+      .then((list) => {
+        const m = new Map<string, string>();
+        for (const p of list) {
+          if (!p?.id) continue;
+          m.set(p.id.toLowerCase(), p.id);
+          if (p.chain_identifier != null) m.set(String(p.chain_identifier), p.id);
+        }
+        return m;
+      })
+      .catch((err) => {
+        platformsBySlug = undefined;
+        throw err;
+      });
     const key = chain.startsWith(EVM_NAMER_PREFIX)
       ? chain.slice(EVM_NAMER_PREFIX.length)
       : chain.toLowerCase();

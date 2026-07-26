@@ -14,11 +14,21 @@ const seed = (symbol: string, name?: string, providerLogo?: string) => ({
 });
 
 // 候选源:mint 的 symbol 那一档。真实现从 warm rows 里筛(见 cache.ts),这里直接给。
-const candidatesOf = (map: Record<string, TokenCandidate[]>): CandidateSource => ({
-  async bySymbol(symbol) {
-    return map[symbol] ?? [];
-  },
-});
+// **记调用次数** —— 「有没有走到 symbol 这一档」本身就是断言对象:#210 的闸在合约上会提前返回,
+// 不记次数的话,一条本想验证判官的用例会因为压根没走到判官而绿掉(空转)。
+interface RecordingCandidates extends CandidateSource {
+  asked: string[];
+}
+const candidatesOf = (map: Record<string, TokenCandidate[]>): RecordingCandidates => {
+  const asked: string[] = [];
+  return {
+    asked,
+    async bySymbol(symbol) {
+      asked.push(symbol);
+      return map[symbol] ?? [];
+    },
+  };
+};
 
 function setup(opts?: {
   index?: Record<string, string>;
@@ -27,14 +37,15 @@ function setup(opts?: {
 }) {
   const store = fakeTokenStore();
   const refIndex = fakeRefIndexStore(opts?.index);
+  const candidates = candidatesOf(opts?.candidates ?? {});
   const mint = createMint({
     store,
     refIndex,
-    candidates: candidatesOf(opts?.candidates ?? {}),
+    candidates,
     namer: "src",
     overrides: opts?.overrides,
   });
-  return { store, refIndex, mint };
+  return { store, refIndex, candidates, mint };
 }
 
 describe("三条路径", () => {
@@ -192,7 +203,7 @@ describe("按 symbol 认币(写时定死)", () => {
   });
 
   it("有把握(top-N 之内)→ 链上上游;跨交易所同名币因此并成一行", async () => {
-    const { store, mint } = setup({
+    const { store, candidates, mint } = setup({
       candidates: { BTC: [{ ref: "src/bitcoin", marketCapRank: 1 }] },
     });
     const got = await mint.of([
@@ -201,10 +212,13 @@ describe("按 symbol 认币(写时定死)", () => {
     ]);
     expect(got.get("binance/BTC")).toBe(got.get("okx/BTC"));
     expect(store.rows.size).toBe(1);
+    expect(candidates.asked).toContain("BTC"); // 确实走到了判官,不是空转
   });
 
+  // 判官本身的分支在 confidence.test.ts 里逐条测;这里只验「不认」如何传导到落库形状。
+  // 用**场馆命名**的 ref:合约会被闸提前挡掉,压根走不到判官 —— 那样这条用例就是空转的。
   it("没把握(同名混战)→ 各自独立成行,不链上游", async () => {
-    const { store, mint } = setup({
+    const { store, candidates, mint } = setup({
       candidates: {
         MOON: [
           { ref: "src/moon-a", marketCapRank: 900 },
@@ -213,11 +227,21 @@ describe("按 symbol 认币(写时定死)", () => {
       },
     });
     const got = await mint.of([
-      { ref: "evm:1/contract:0xmoon1", seed: seed("MOON") },
-      { ref: "evm:56/contract:0xmoon2", seed: seed("MOON") },
+      { ref: "binance/MOON", seed: seed("MOON") },
+      { ref: "okx/MOON", seed: seed("MOON") },
     ]);
-    expect(got.get("evm:1/contract:0xmoon1")).not.toBe(got.get("evm:56/contract:0xmoon2"));
+    expect(candidates.asked).toEqual(["MOON", "MOON"]); // 两条都问过判官
+    expect(got.get("binance/MOON")).not.toBe(got.get("okx/MOON"));
     expect([...store.refs.keys()].some((r) => r.startsWith("src/"))).toBe(false);
+  });
+
+  // 反过来的证明:闸挡掉的合约根本不问判官 —— 这是「假 USDC 不会并进真 USDC」的机制本身。
+  it("合约形的 ref 一次都不问判官(闸在上游)", async () => {
+    const { candidates, mint } = setup({
+      candidates: { MOON: [{ ref: "src/moon-a", marketCapRank: 1 }] }, // 会被认的候选
+    });
+    await mint.of([{ ref: "evm:1/contract:0xmoon1", seed: seed("MOON") }]);
+    expect(candidates.asked).toEqual([]);
   });
 
   it("策展覆盖表压过市值排名(防山寨撞名);它由 adapter 提供,值是上游 id", async () => {

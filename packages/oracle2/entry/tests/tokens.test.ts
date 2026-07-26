@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createTokens, MS_PER_DAY, PRICE_TTL_MS, type TokenInfo } from "../src";
+import { createTokens, dayBucketOf, MS_PER_DAY, PRICE_TTL_MS, type TokenInfo } from "../src";
 import { fakeCacheStore, fakeTokenPriceStore, fakeTokenStore, fakeUpstream } from "./fakes";
 
 const NOW = 1_700_000_000_000; // 落在某个 UTC 日的中段
@@ -226,6 +226,33 @@ describe("历史日价(按 token_id)", () => {
     expect(await tokens.priceAt("tk_1", day(-5) + 3_600_000)).toBe(42);
     expect(await tokens.priceAt("tk_1", day(-6))).toBeUndefined();
   });
+
+  // 桶是 epoch 起算的整日,与月/年边界无关 —— 跨月那一天不该有任何特殊行为。
+  // (日历月边界曾经是这类实现的常见错处:按 `getMonth()` 分组会在月初错一格。)
+  it("priceAt 跨月/跨年的那一天照常取,桶按 epoch 整日切", async () => {
+    const { prices, tokens } = setup([info({ id: "tk_1" })]);
+    // 2023-12-31T23:00Z 与 2024-01-01T01:00Z —— 相邻两日,跨年。
+    const lastDayOf2023 = Date.UTC(2023, 11, 31, 23, 0, 0);
+    const firstDayOf2024 = Date.UTC(2024, 0, 1, 1, 0, 0);
+    await prices.putDaily("tk_1", [
+      { dayBucket: dayBucketOf(lastDayOf2023), unitPrice: 100 },
+      { dayBucket: dayBucketOf(firstDayOf2024), unitPrice: 200 },
+    ]);
+
+    expect(await tokens.priceAt("tk_1", lastDayOf2023)).toBe(100);
+    expect(await tokens.priceAt("tk_1", firstDayOf2024)).toBe(200);
+    // 两个桶号确实相邻,没有因为跨年多出或少掉一格。
+    expect(dayBucketOf(firstDayOf2024) - dayBucketOf(lastDayOf2023)).toBe(1);
+  });
+
+  it("priceAt 取的是**当日**的桶,不会把前一日的价当今天的", async () => {
+    const { prices, tokens } = setup([info({ id: "tk_1" })]);
+    await prices.putDaily("tk_1", [{ dayBucket: TODAY - 3, unitPrice: 7 }]);
+    // 当日零点整(桶起点)也算当日。
+    expect(await tokens.priceAt("tk_1", day(-3))).toBe(7);
+    // 次日零点 → 已是下一个桶,当日无数据。
+    expect(await tokens.priceAt("tk_1", day(-2))).toBeUndefined();
+  });
 });
 
 describe("橱窗与候选", () => {
@@ -254,6 +281,21 @@ describe("橱窗与候选", () => {
     ]);
     expect(upstream.calls).toHaveLength(1);
     expect([...cache.entries.keys()]).toEqual(["warm"]);
+  });
+
+  it("要的比有的多 → 给全部,不补空位", async () => {
+    const { upstream, tokens } = setup();
+    upstream.markets = [
+      {
+        ref: SRC_BTC,
+        symbol: "BTC",
+        name: "Bitcoin",
+        price: { unitPrice: 60000, marketCapRank: 1, asOf: NOW },
+      },
+    ];
+    const got = await tokens.topTokens(50);
+    expect(got.map((t) => t.ref)).toEqual([SRC_BTC]);
+    expect(got.every((t) => t !== undefined)).toBe(true);
   });
 
   it("预热失败不抛,返回空让调用方降级", async () => {
