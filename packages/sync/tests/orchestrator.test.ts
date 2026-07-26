@@ -34,6 +34,7 @@ function account(overrides: Partial<AccountSafe> = {}): AccountSafe {
 }
 const bal = (symbol: string, value: number): Balance => ({
   symbol,
+  tokenRef: `binance/${symbol}`,
   amount: 1,
   value,
   kind: "spot",

@@ -25,6 +25,7 @@ describe("buildCanonicalHoldings", () => {
         amount: 1000,
         value: 1000,
         tokenRef: "evm:1/0xdac",
+        platform: "evm:1",
         account: zerion,
         ref: cg("tether"),
       }),
@@ -33,6 +34,7 @@ describe("buildCanonicalHoldings", () => {
         amount: 500,
         value: 500,
         tokenRef: "evm:42161/0xfd0",
+        platform: "evm:42161",
         account: zerion,
         ref: cg("usdt0"),
       }),
@@ -40,6 +42,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 2000,
         value: 2000,
+        platform: "binance",
         account: binance,
         ref: cg("tether"),
       }),
@@ -48,7 +51,9 @@ describe("buildCanonicalHoldings", () => {
         amount: 100,
         value: 100,
         kind: "spot", // 归一后 manual→spot(overview 用 viewKind 归一后才喂 aggregate)
-        tokenRef: "coingecko:tether",
+        // 手记的 ref 命名者是数据源,平台却是 manual —— 这正是平台不能从 ref 拆的反例。
+        tokenRef: "coingecko/tether",
+        platform: "manual",
         account: manual,
         ref: cg("tether"),
       }),
@@ -309,16 +314,24 @@ describe("buildCanonicalHoldings", () => {
     expect(hs[0]!.sources.map((s) => s.platform.id)).toEqual(["binance"]);
   });
 
-  // 链上 ref 的平台单元 = 短形命名者(此前是 `chain:bitcoin`)。
-  it("链上 ref 的平台单元 = tokenRef 的链命名者(短形)", () => {
+  // 平台单元直接读余额行报来的 platform(#193),不再从 tokenRef 拆。
+  it("平台单元 = provider 报的 platform", () => {
     const btc = { id: "x1", label: "BTC wallet", connectorId: "bitcoin" };
     const hs = buildCanonicalHoldings([
-      row({ symbol: "BTC", amount: 1, value: 60, tokenRef: "bitcoin/native", account: btc }),
+      row({
+        symbol: "BTC",
+        amount: 1,
+        value: 60,
+        tokenRef: "bitcoin/native",
+        platform: "bitcoin",
+        account: btc,
+      }),
       row({
         symbol: "ETH",
         amount: 1,
         value: 30,
         tokenRef: "evm:1/0xabc",
+        platform: "evm:1",
         account: zerion,
       }),
     ]);
@@ -326,5 +339,18 @@ describe("buildCanonicalHoldings", () => {
       "bitcoin",
       "evm:1",
     ]);
+  });
+
+  // 本列之前写下的旧快照行没有 platform → 退回账户的 connectorId(多链钱包暂时并成一格,
+  // 下次同步即分开)。不是永久行为,只是不至于在迁移当下崩掉。
+  it("旧行无 platform → 退回账户的 connectorId", () => {
+    const hs = buildCanonicalHoldings([
+      row({ symbol: "ETH", amount: 1, value: 30, tokenId: "tok-eth", account: zerion }),
+      row({ symbol: "ETH", amount: 1, value: 20, tokenId: "tok-eth", account: zerion }),
+    ]);
+    expect(hs).toHaveLength(1);
+    // 两条链并成了一格(旧行的已知代价),金额仍是全的。
+    expect(hs[0]!.sources.map((s) => s.platform.id)).toEqual(["evm"]);
+    expect(hs[0]!.totalValue).toBe(50);
   });
 });

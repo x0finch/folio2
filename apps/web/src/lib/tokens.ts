@@ -10,6 +10,7 @@ export interface BalanceLike {
   symbol: string;
   kind: string;
   tokenRef?: string | null; // 快照持久化的 CAIP-19 标识(解析 tokenRef;CEX/manual/原生为空)
+  platform?: string | null; // 这笔持仓所在的链 ∪ 场馆(provider 直接报,#193)
 }
 
 export interface TokenEnrichment {

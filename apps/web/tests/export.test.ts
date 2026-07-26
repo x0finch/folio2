@@ -41,10 +41,15 @@ describe("snapshotRecord", () => {
         amount: 1,
         usdValue: 50,
         kind: "spot",
+        platform: "evm:1",
         metaJson: '{"chain":"ethereum"}',
       },
     ]);
     expect(rec).toMatchObject({ type: "snapshot", accountId: "a1", takenAt: 1000, totalUsd: 50 });
-    expect(rec.balances[0]).toMatchObject({ symbol: "ETH", meta: { chain: "ethereum" } });
+    expect(rec.balances[0]).toMatchObject({
+      symbol: "ETH",
+      platform: "evm:1",
+      meta: { chain: "ethereum" },
+    });
   });
 });

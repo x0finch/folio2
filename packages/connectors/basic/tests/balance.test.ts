@@ -4,7 +4,13 @@ import { Balance, type BalanceKind, Defi, type PerpPosition, Spot } from "../src
 
 describe("Balance 4-kind 判别联合 —— runtime parse", () => {
   it("spot:普通代币行(零 typed meta)", () => {
-    const b = Balance.parse({ kind: "spot", symbol: "BTC", amount: 1, value: 100 });
+    const b = Balance.parse({
+      kind: "spot",
+      symbol: "BTC",
+      tokenRef: "bitcoin/native",
+      amount: 1,
+      value: 100,
+    });
     expect(b).toMatchObject({ kind: "spot", symbol: "BTC", value: 100 });
   });
 
@@ -12,6 +18,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
     const b = Balance.parse({
       kind: "defi",
       symbol: "aUSDC",
+      tokenRef: "evm:1/0xa0b8",
       amount: 50,
       value: 50,
       meta: { protocol: "aave", positionType: "deposit" },
@@ -24,6 +31,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
     const eq = Balance.parse({
       kind: "perp_equity",
       symbol: "ACCT",
+      tokenRef: "hyperliquid/X",
       amount: 1,
       value: 1000,
       meta: { withdrawable: 900, totalMarginUsed: 100, totalNtlPos: 5000 },
@@ -32,6 +40,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
     const pos = Balance.parse({
       kind: "perp_position",
       symbol: "BTC-PERP",
+      tokenRef: "hyperliquid/X",
       amount: 1,
       value: 0, // 仓位行不承载净值
       meta: {
@@ -47,16 +56,22 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
   });
 
   it("未知 kind 被拒(含并回 spot 的旧 utxo)", () => {
-    expect(() => Balance.parse({ kind: "manual", symbol: "X", amount: 1, value: 1 })).toThrow();
-    expect(() => Balance.parse({ kind: "perp", symbol: "X", amount: 1, value: 1 })).toThrow();
+    expect(() =>
+      Balance.parse({ kind: "manual", symbol: "X", tokenRef: "x/y", amount: 1, value: 1 }),
+    ).toThrow();
+    expect(() =>
+      Balance.parse({ kind: "perp", symbol: "X", tokenRef: "x/y", amount: 1, value: 1 }),
+    ).toThrow();
     // utxo 已并回 spot(ADR 0010)→ 不再是合法 kind;旧快照行由读端 viewKind 老化归 spot。
     expect(() =>
-      Balance.parse({ kind: "utxo", symbol: "BTC", amount: 0.5, value: 30000 }),
+      Balance.parse({ kind: "utxo", symbol: "BTC", tokenRef: "x/y", amount: 0.5, value: 30000 }),
     ).toThrow();
   });
 
   it("defi 缺 meta 被拒(meta 随 kind 必填)", () => {
-    expect(() => Balance.parse({ kind: "defi", symbol: "X", amount: 1, value: 1 })).toThrow();
+    expect(() =>
+      Balance.parse({ kind: "defi", symbol: "X", tokenRef: "x/y", amount: 1, value: 1 }),
+    ).toThrow();
   });
 
   it("perp_position 缺必填 meta 字段被拒", () => {
@@ -64,6 +79,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
       Balance.parse({
         kind: "perp_position",
         symbol: "X",
+        tokenRef: "hyperliquid/X",
         amount: 1,
         value: 0,
         meta: { side: "long" },
@@ -88,6 +104,7 @@ describe("Balance —— 类型完备", () => {
     const b = Balance.parse({
       kind: "perp_position",
       symbol: "X",
+      tokenRef: "hyperliquid/X",
       amount: 1,
       value: 0,
       meta: {

@@ -38,11 +38,9 @@ type Row = z.infer<typeof Spot>;
 // 纯解析:coin[] → Spot[]。与 IO 分离,golden test。
 // 该端点是钱包代币余额(现货)→ kind:"spot";value = amount * price(缺 price 记 0)、price 直传;
 // 非 EVM 链持仓的 tokenRef:命名者 = 链 slug(CoinStats 的链命名,短形不带前缀)。
-// 拿不到链名 → 不产标识(退化按 symbol 归一)。
-function chainTokenRef(chain: string | undefined, contract: string | undefined) {
-  const namer = chain?.trim();
-  if (!namer) return undefined;
-  return contract ? tokenRef.local(namer, contract) : tokenRef.native(namer);
+// **恒产出** —— 链名恒有(单条 coin 缺 chain 时回落到本 connector 的 fallbackChain,它就是 connectionId)。
+function chainTokenRef(chain: string, contract: string | undefined): string {
+  return contract ? tokenRef.local(chain, contract) : tokenRef.native(chain);
 }
 
 // 跳过无 symbol;合约行产代币标识(无数字 chainId → 兜底格式);现货行不产 meta(新 schema 无 meta 字段)。
@@ -52,7 +50,7 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ro
     const symbol = c.symbol?.trim();
     if (!symbol) continue;
     const amount = c.amount ?? 0;
-    const chain = c.chain ?? fallbackChain;
+    const chain = c.chain?.trim() || fallbackChain;
     out.push({
       symbol,
       amount,

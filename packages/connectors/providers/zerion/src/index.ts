@@ -88,11 +88,11 @@ export function parseChainIds(res: ZerionChainsResponse): Record<string, number>
 }
 
 // EVM 持仓的 tokenRef:命名者恒为 `evm:<chainId>`(数字 chainId 由 getChainIds 保证)。
-// 合约币 → `<addr>`;原生 gas 币 → `native`;两者都不是(该链无实现)→ 不产标识。
-function evmTokenRef(chainId: number, contract: string | undefined, native: boolean) {
+// 合约币 → `<addr>`;原生 gas 币 → `native`。**恒产出** —— 该链没有实现的行在调用处就跳过了
+// (拿不到地址就没有规范身份可言,见 parsePositions)。
+function evmTokenRef(chainId: number, contract: string | undefined): string {
   const namer = `evm:${chainId}`;
-  if (contract) return tokenRef.local(namer, contract);
-  return native ? tokenRef.native(namer) : undefined;
+  return contract ? tokenRef.local(namer, contract) : tokenRef.native(namer);
 }
 
 // 纯解析:Zerion positions → Row[]。与 IO 分离,便于 golden test。
@@ -126,7 +126,10 @@ export function parsePositions(
     const isDefi = a.position_type !== "wallet" || Boolean(a.protocol);
     // 当前链的实现:有 address = 合约币;该链有实现但 address 为 null = 原生 gas 币。
     const impl = a.fungible_info?.implementations?.find((i) => i.chain_id === chain);
-    const contract = impl?.address ?? undefined;
+    // 该链没有任何实现 → 既不是合约币也不是原生币,产不出规范标识。与「无 symbol」一样跳过这行,
+    // 而不是产一个没有标识的行(tokenRef 必填,见 Balance 契约)。
+    if (!impl) continue;
+    const contract = impl.address ?? undefined;
     // 负债腿:amount/value 归一为负(见 DEBT_POSITION_TYPES 注释)。单价 price 保持正(诚实单价)。
     const debt = a.position_type != null && DEBT_POSITION_TYPES.has(a.position_type);
     const sign = debt ? -1 : 1;
@@ -135,7 +138,7 @@ export function parsePositions(
       amount: sign * Math.abs(a.quantity?.float ?? 0),
       price: a.price ?? undefined,
       value: sign * Math.abs(a.value ?? 0),
-      tokenRef: evmTokenRef(chainId, contract, impl != null && impl.address == null),
+      tokenRef: evmTokenRef(chainId, contract),
       name: a.fungible_info?.name,
       logo: a.fungible_info?.icon?.url,
     };

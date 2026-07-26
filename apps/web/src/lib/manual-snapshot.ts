@@ -25,9 +25,14 @@ export function buildManualSnapshot(
       amount: t.amount,
       usdValue: t.amount * price,
       kind: "spot" as const,
+      // 手记的持仓不在任何链上 —— 平台是 manual,**不是** ref 左半边的 coingecko。
+      platform: "manual",
       selfPrice: null,
-      // CGK coin id 规范为小写 kebab;归一在生产者这一侧做(oracle-ref 对不透明 id 原样透传)。
-      tokenRef: t.identifier ? tokenRef.local("coingecko", t.identifier.toLowerCase()) : null,
+      // 与 manual provider 同源:选了币 → `coingecko/<id>`(小写 kebab 归一在生产者侧做),
+      // 没选 → `manual/<SYMBOL>`。tokenRef 恒有值(Balance 契约必填)。
+      tokenRef: t.identifier
+        ? tokenRef.local("coingecko", t.identifier.toLowerCase())
+        : tokenRef.local("manual", t.symbol.trim().toUpperCase()),
       metaJson: null,
     };
   });

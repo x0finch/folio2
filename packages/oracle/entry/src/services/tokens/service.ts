@@ -4,7 +4,6 @@ import {
   cgkRef,
   DEFAULT_TOP_N,
   INFO_TTL_MS,
-  isChainNamer,
   PRICE_TTL_MS,
   type Resolution,
   type ResolvableAsset,
@@ -38,13 +37,15 @@ const EVM_NAMER_PREFIX = "evm:";
 const chainRefOf = (namer: string): string =>
   namer.startsWith(EVM_NAMER_PREFIX) ? namer.slice(EVM_NAMER_PREFIX.length) : namer;
 
-// 这条 tokenRef 是「某条链上的某个地址」吗 —— 只有这种才值得拿去问 CGK 的合约端点。
-// 文法收窄后串上分辨不出(`evm:1/0xa0b8…` 与 `binance/USDC` 同形),故改问命名者(isChainNamer);
-// 场馆命名(binance/USDC)照旧掉回 symbol 消歧,跨交易所同名币仍并成一行。
-const isChainAddress = (
+// 这条 tokenRef 的 localName 能当合约地址去反查吗 —— 要两个条件:形状不是原生币,
+// **且调用方说了这笔持仓在链上**(`asset.chain`)。本层不猜命名者是链还是场馆:文法收窄后
+// 串上分辨不出,而调用方手里就有答案(平台由 provider 直接报,见 #193)。
+// 场馆命名(binance/USDC)因此不带 chain → 照旧掉回 symbol 消歧,跨交易所同名币仍并成一行。
+const isContractLookupable = (
   parsed: ParsedTokenRef | undefined,
+  chain: string | undefined,
 ): parsed is { kind: "local"; namer: string; localName: string } =>
-  parsed?.kind === "local" && isChainNamer(parsed.namer);
+  chain != null && parsed?.kind === "local";
 
 export async function resolveAsset(
   asset: ResolvableAsset,
@@ -71,9 +72,16 @@ export async function resolveAsset(
     const rec = (await deps.store.getByTokenRef([key])).get(key);
     if (rec?.ref) {
       contractHit = rec.ref;
-    } else if (lazy && isChainAddress(parsed) && (rec?.cgkCheckedUntil ?? 0) <= Date.now()) {
-      // 反查用命名者(evm:<id> 的数字 chainId 更可靠地命中 CGK 平台;非 EVM 链给 slug)。
-      const res = await deps.source.fetchByContract(chainRefOf(parsed.namer), parsed.localName);
+    } else if (
+      lazy &&
+      isContractLookupable(parsed, asset.chain) &&
+      (rec?.cgkCheckedUntil ?? 0) <= Date.now()
+    ) {
+      // 反查用调用方给的链(evm:<id> 的数字 chainId 更可靠地命中 CGK 平台;非 EVM 链给 slug)。
+      const res = await deps.source.fetchByContract(
+        chainRefOf(asset.chain as string),
+        parsed.localName,
+      );
       if (res) {
         await deps.store.linkTokenRefToCgk(key, res.info, res.price, {
           indexTtlMs: TOKEN_REF_TTL_MS,

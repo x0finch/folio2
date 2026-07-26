@@ -118,6 +118,7 @@ export async function buildOverview(
     value: liveValue(b, e?.unitPrice, mode),
     kind: viewKind(b), // 归一到 5-kind(并存期兼容遗留)
     tokenRef: b.tokenRef,
+    platform: b.platform, // provider 直接报的链 ∪ 场馆(#193)
     isMargin: margin,
     account: {
       id: account.id,

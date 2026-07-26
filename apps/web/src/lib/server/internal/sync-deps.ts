@@ -9,14 +9,15 @@ import {
 import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import type { ProviderAsset, Tokens, ValuationMode } from "@folio/oracle";
-import type { FetchOutcome, SyncDeps } from "@folio/sync";
+import { parseTokenRef } from "@folio/oracle-ref";
+import { type FetchOutcome, platformOf, type SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
 import { revalue } from "../../revalue";
 import { isSyncableAccount } from "../../syncable";
-import { chainAddressOf } from "../../token-ref";
 import { userDisplayBalances } from "../../user-balances";
+import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
 import { warmFx } from "./fx";
 import { manualBalancesForWarm } from "./manual";
@@ -26,15 +27,20 @@ import { warmTokens } from "./token-enrich";
 
 // provider 自带代币元信息的采集(canonical P1):链上地址形 tokenRef 的行 → ProviderAsset,
 // 喂 tokens.noteProviderAssets(seed 孤儿 / 刷新备用 logo)。native/无标识行不 seed(原生币走 symbol 解析)。
-// logo/name 只在取数瞬时存在,不落快照行 —— 参考层是其 home。
-function toProviderAssets(rows: Balance[]): ProviderAsset[] {
+// 这道筛子是**老 oracle 的**:它按 tokenRef 建孤儿索引,seed 了场馆命名(binance/USDC)就会让
+// 那些行卡在无价的孤儿上、不再掉回 symbol 消歧。oracle2 里身份写时定死、没有孤儿这回事,
+// 整道筛子随老 oracle 一起退场(#202)。
+// 「在不在链上」= 平台(与写快照同一条 platformOf 推导)认不认得出连接器:认得的是场馆/手记,
+// 认不得的(`evm:<chainId>` 等)才是链。logo/name 只在取数瞬时存在,不落快照行 —— 参考层是其 home。
+function toProviderAssets(rows: Balance[], connectorId: string): ProviderAsset[] {
   const out: ProviderAsset[] = [];
   for (const b of rows) {
     // 只 seed 链上地址形;原生币 / `coingecko/<id>` / 场馆命名无需 seed
     // (原生币走 symbol,CGK 命名已是规范 ref,场馆命名也走 symbol 消歧)。
-    const id = chainAddressOf(b.tokenRef);
-    if (!id) continue;
-    out.push({ tokenId: id, symbol: b.symbol, name: b.name, logo: b.logo });
+    if (connectorPlatformMeta(platformOf(b.tokenRef, connectorId))) continue;
+    // 原生币(`<chain>/native`)没有合约地址可 seed。
+    if (parseTokenRef(b.tokenRef).kind !== "local") continue;
+    out.push({ tokenId: b.tokenRef, symbol: b.symbol, name: b.name, logo: b.logo });
   }
   return out;
 }
@@ -106,7 +112,7 @@ async function fetchViaConnector(
     note?: Note[];
   };
   const totalUsd = rows.reduce((s, b) => s + b.value, 0);
-  await tokens.noteProviderAssets(toProviderAssets(rows)); // 结构兼容:connectors Balance 同形
+  await tokens.noteProviderAssets(toProviderAssets(rows, cid)); // 结构兼容:connectors Balance 同形
   return { status: "ok", balances: rows, totalUsd, note };
 }
 

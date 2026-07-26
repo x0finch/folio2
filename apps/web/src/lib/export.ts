@@ -26,6 +26,7 @@ interface BalanceIn {
   amount: number;
   usdValue: number;
   kind: string;
+  platform: string | null;
   metaJson: string | null;
 }
 
@@ -73,6 +74,8 @@ export function snapshotRecord(s: SnapshotIn, balances: BalanceIn[]) {
       amount: b.amount,
       usdValue: b.usdValue,
       kind: b.kind,
+      // 纯增字段:老文件没有它,导入端按可选读(见 ImportSnapshotBalance)。
+      platform: b.platform ?? undefined,
       meta: safeParse(b.metaJson),
     })),
   };

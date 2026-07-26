@@ -58,11 +58,28 @@ describe("buildOverview", () => {
   it("跨账户聚合成一个 Holding + 平台装饰 + 总额", async () => {
     const accounts = [account("a1", "Arb"), account("a2", "Cold", "manual")];
     const byAccount = new Map([
-      ["a1", snap("a1", 100, [bal({ tokenRef: "evm:42161/0xusdc", amount: 100, usdValue: 100 })])],
+      [
+        "a1",
+        snap("a1", 100, [
+          bal({
+            tokenRef: "evm:42161/0xusdc",
+            platform: "evm:42161",
+            amount: 100,
+            usdValue: 100,
+          }),
+        ]),
+      ],
       [
         "a2",
         snap("a2", 50, [
-          bal({ kind: "manual", tokenRef: "coingecko:usd-coin", amount: 50, usdValue: 50 }),
+          // 手记:ref 的命名者是数据源,平台却是 manual —— 平台只能由 provider 报。
+          bal({
+            kind: "manual",
+            tokenRef: "coingecko/usd-coin",
+            platform: "manual",
+            amount: 50,
+            usdValue: 50,
+          }),
         ]),
       ],
     ]);
@@ -94,12 +111,14 @@ describe("buildOverview", () => {
   });
 
   it("场馆键(= connectorId)走 connectorMeta 装饰,不进 platforms.resolve(#52)", async () => {
-    // binance CEX 账户 + 无链前缀 tokenRef → source.platform.id = "binance"(= connectorId,无类别前缀)。
+    // binance CEX 账户 → provider 报 platform = "binance"(场馆键即 connectorId)。
     const accounts = [account("cex", "币安", "binance")];
     const byAccount = new Map([
       [
         "cex",
-        snap("cex", 100, [bal({ tokenRef: "coingecko:usd-coin", amount: 100, usdValue: 100 })]),
+        snap("cex", 100, [
+          bal({ tokenRef: "binance/USDC", platform: "binance", amount: 100, usdValue: 100 }),
+        ]),
       ],
     ]);
 
