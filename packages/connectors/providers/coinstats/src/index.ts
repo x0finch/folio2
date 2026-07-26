@@ -39,8 +39,9 @@ type Row = z.infer<typeof Spot>;
 // 该端点是钱包代币余额(现货)→ kind:"spot";value = amount * price(缺 price 记 0)、price 直传;
 // 非 EVM 链持仓的 tokenRef:命名者 = 链 slug(CoinStats 的链命名,短形不带前缀)。
 // **恒产出** —— 链名恒有(单条 coin 缺 chain 时回落到本 connector 的 fallbackChain,它就是 connectionId)。
+// 合约走 `tokenRef.contract`:声明「symbol 由合约作者填、不可信」(ADR 0020 第三轮)。
 function chainTokenRef(chain: string, contract: string | undefined): string {
-  return contract ? tokenRef.local(chain, contract) : tokenRef.native(chain);
+  return contract ? tokenRef.contract(chain, contract) : tokenRef.native(chain);
 }
 
 // 跳过无 symbol;合约行产代币标识(无数字 chainId → 兜底格式);现货行不产 meta(新 schema 无 meta 字段)。
@@ -58,7 +59,7 @@ export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Ro
       value: amount * (c.price ?? 0),
       kind: "spot",
       // 链/合约身份走 tokenRef,不再进 meta;现货行无展示用 meta → 省略。
-      // 有合约 → <slug>/<addr>;无合约(原生币 SOL/SUI…)→ <slug>/native。
+      // 有合约 → <slug>/contract:<addr>;无合约(原生币 SOL/SUI…)→ <slug>/native。
       // 地址不小写:base58 / bech32 大小写敏感,归一由 @folio/oracle-ref 按链决定。
       tokenRef: chainTokenRef(chain, c.contractAddress ?? undefined),
       name: c.name,

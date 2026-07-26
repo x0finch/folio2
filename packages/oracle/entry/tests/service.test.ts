@@ -154,9 +154,9 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const source = { fetchByContract } as unknown as TokenSource;
-    // chain 由调用方给(app 那边:平台 provider 报 + connector 自声明 chain/venue)——
-    // 不给就不当合约反查,场馆命名因此照旧掉回 symbol 消歧。
-    const asset = { symbol: "USDC", tokenRef: "ethereum/0xabc", chain: "ethereum" };
+    // `contract:` 标记自己就说明了「这是某条链上的合约地址」(ADR 0020 第三轮)——
+    // 不必调用方另外告知。场馆命名(binance/USDC)是 opaque 形,照旧掉回 symbol 消歧。
+    const asset = { symbol: "USDC", tokenRef: "ethereum/contract:0xabc" };
 
     const r1 = await resolveAsset(asset, { source, store });
     expect(r1).toEqual({ ref: cg("usd-coin"), confidence: "high", via: "contract" });
@@ -192,9 +192,9 @@ describe("resolveAsset", () => {
       price: price(cg("usd-coin"), 6),
     }));
     const source = { fetchByContract } as unknown as TokenSource;
-    // chain 由调用方给(app 那边:平台 provider 报 + connector 自声明 chain/venue)——
-    // 不给就不当合约反查,场馆命名因此照旧掉回 symbol 消歧。
-    const asset = { symbol: "USDC", tokenRef: "ethereum/0xabc", chain: "ethereum" };
+    // `contract:` 标记自己就说明了「这是某条链上的合约地址」(ADR 0020 第三轮)——
+    // 不必调用方另外告知。场馆命名(binance/USDC)是 opaque 形,照旧掉回 symbol 消歧。
+    const asset = { symbol: "USDC", tokenRef: "ethereum/contract:0xabc" };
 
     const r = await resolveAsset(asset, { source, store }, { lazy: false });
     expect(r.via).toBe("none"); // 无 warm/override 时降级
@@ -205,7 +205,7 @@ describe("resolveAsset", () => {
     const store = fakeStore();
     const fetchByContract = vi.fn(async () => null);
     const source = { fetchByContract } as unknown as TokenSource;
-    const asset = { symbol: "ZZZ", tokenRef: "ethereum/0xdead", chain: "ethereum" };
+    const asset = { symbol: "ZZZ", tokenRef: "ethereum/contract:0xdead" };
 
     expect(await resolveAsset(asset, { source, store })).toEqual({
       ref: null,
@@ -213,7 +213,9 @@ describe("resolveAsset", () => {
       via: "none",
     });
     // 孤儿已 seed(展示仍有 symbol)且记了复查时刻
-    const rec = (await store.getByTokenRef(["ethereum/0xdead"])).get("ethereum/0xdead");
+    const rec = (await store.getByTokenRef(["ethereum/contract:0xdead"])).get(
+      "ethereum/contract:0xdead",
+    );
     expect(rec).toMatchObject({ ref: null, symbol: "ZZZ" });
     expect(rec?.cgkCheckedUntil).toBeGreaterThan(Date.now());
 

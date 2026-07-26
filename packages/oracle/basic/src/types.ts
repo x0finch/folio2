@@ -23,11 +23,6 @@ export interface AssetRef {
   symbol: string;
   tokenRef?: TokenRef;
   identifier?: string;
-  // 这笔持仓所在的**链**(平台词表:`evm:<chainId>` / `<slug>`);不在链上则不给。
-  // 本层不自己判断「namer 是链还是场馆」—— 文法收窄后串上分辨不出(`evm:1/0xa0b8…` 与
-  // `binance/USDC` 同形),而调用方手里就有答案(平台由 provider 直接报,见 #193)。
-  // 给了它,`localName` 才被当作合约地址拿去反查上游;不给就只走 override / symbol。
-  chain?: string;
 }
 
 // 门面内部形:`ref` = 已定的规范身份(命中则直接升格,跳过查找)。
