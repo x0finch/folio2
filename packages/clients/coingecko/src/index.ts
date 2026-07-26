@@ -22,6 +22,7 @@ export {
 export type {
   AssetPlatform,
   CoinContract,
+  CoinListItem,
   DerivativesExchange,
   Exchange,
   ExchangeRateEntry,

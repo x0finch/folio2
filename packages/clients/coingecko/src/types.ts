@@ -8,6 +8,16 @@ export interface AssetPlatform {
   image?: { thumb?: string; small?: string; large?: string } | null;
 }
 
+// GET /coins/list?include_platform=true 的一项。
+// `platforms` = 「这个币在哪些链上、地址是什么」:键是 CoinGecko 的 asset_platform id,
+// 值是合约地址。原生币(BTC/ETH/SOL…)的字典是空的 —— 它们不在任何链上有合约。
+export interface CoinListItem {
+  id?: string;
+  symbol?: string;
+  name?: string;
+  platforms?: Record<string, string | null>;
+}
+
 // GET /coins/markets 的一项(vs_currency=usd 时 current_price 即 USD)
 export interface MarketCoin {
   id?: string;
