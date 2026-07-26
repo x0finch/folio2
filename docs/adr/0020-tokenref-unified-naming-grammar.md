@@ -1,7 +1,45 @@
 # `tokenRef`:代币命名统一成「谁 / 它在那儿叫什么」
 
-Status: accepted,文法被 [ADR 0021](0021-per-user-tokens-token-id-as-sole-identity.md) 修订 —— **`<assetNs>:` 那一段去掉**(`evm:1/0xa0b8…`,因为 CoinGecko 只给「哪条链、哪个地址」,那个词是各 producer 自己编的、全仓没人读),**`eip155:` 改 `evm:`**(本文法早已不是 CAIP —— 真 CAIP 的比特币是 `bip122:…`,一半标准一半自编更别扭),形状**从三种降到两种**(`<namer>/native` 和 `<namer>/<别的>`)。「合约地址还是场馆代号」不再看字符串:平台改由 provider 直接报,兜底单查靠能不能把 `evm:1` 翻成 CoinGecko slug 判断。下方正文与选项记录的是**当时**的决策,不改。
+Status: accepted,文法经**两轮修订**(本文正文记录的原始决策算第一轮,下方正文与选项一概不改)。
+
+**第二轮**([ADR 0021](0021-per-user-tokens-token-id-as-sole-identity.md) / [#192](https://github.com/x0finch/folio2/issues/192),已实现):**`eip155:` 改 `evm:`** —— 本文法早已不是 CAIP(真 CAIP 的比特币是 `bip122:…`),一半标准一半自编更别扭。同时**去掉 `<assetNs>:` 那一段**,形状从三种降到两种。
+
+**第三轮(本轮):把中间那一段收回来,但只留一个文法自己拥有的固定标记。** 第二轮删它的理由之一是「那个词是各 producer 自己编的、**全仓没有任何地方按它分支**」—— 后半句已被证伪:mint 的 symbol 那一档**必须**知道一条 ref 是不是链上合约地址,否则一个 symbol 写着 `USDC` 的山寨合约会被并进真 USDC(见下「第三轮」小节)。前半句仍然成立,所以回来的**不是** `assetNs`,而是值域封闭、由文法定死的 `contract:`。
+
+形状三种:`<namer>/native`、`<namer>/contract:<地址>`、`<namer>/<不透明 id>`。
 修订 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-multi-source.md) 决策 #2(`TokenRef` 不再是 vendor 引用);聚合原则([ADR 0001](0001-aggregate-by-token-group.md) / [0002](0002-never-merge-by-symbol.md))不变;存储层合表与 mint-on-write 属 [#176](https://github.com/x0finch/folio2/issues/176)。
+
+---
+
+## 第三轮:为什么把标记收回来
+
+mint 认币是个瀑布:**先按地址查全局映射表,查不到才按 symbol 猜**(ADR 0021 / 0022)。地址是权威答案,symbol 只是猜 —— 顺序不能换,换了就会把假 USDC 并进真 USDC。
+
+第二轮之后有个洞:地址那一档 **miss 时会掉到 symbol 那一档**,而「链上合约地址」和「场馆上架代号」在串上不可分辨。于是一个新部署的山寨合约(全局映射表还没收录、symbol 字段自己填成 `USDC`)会走到 symbol 那一档,被策展表或市值排名判成「有把握」,并进真 USDC。后果:
+
+- 首屏那行 USDC 的总枚数凭空多出一百万,而总值没变 —— 数量 × 单价 ≠ 金额
+- **盯市的连接器最惨**:manual / bitcoin 的金额是 `数量 × 源价` 现算的 → 1,000,000 × $1 凭空多出一百万美元
+- 认定结果冻进快照、`token_refs` 里那条指向也留着,下次 sync 第一步就命中并早退,**永远不再重判** —— 只能等改绑那张票做 UI 来纠
+
+根子在于 symbol 这条线索的**证据强度按 ref 的形状变**,不按报它的人变:
+
+| ref | symbol 从哪来 | 能当身份线索吗 |
+|---|---|---|
+| `evm:1/native` + `ETH` | 链本身就是 `evm:1`,原生币唯一 | 可以 |
+| `evm:1/contract:0xdead…` + `USDC` | **合约部署者随手填的字符串** | 不行 |
+| `binance/USDC` | 币安的上架代号,它不会拿假币占 `USDC` | 可以 |
+| `manual/BTC` | 用户自己敲的,那就是他的意图 | 可以 |
+
+标记回来之后,这条规则塌成一句话:
+
+```ts
+const canGuess = parsed.kind !== "contract";
+```
+
+**考虑过、否掉的替代**:给 connector manifest 加 `identifyBySymbol: boolean`(仿 `valuation` 的自声明)。否 —— 同一个连接器既报原生币也报合约,per-connector 的一位表达不了这个差别,还得再补一句「或者它是原生币」;两个来源判一件事,而那件事本质属于**那条 ref 自己**。标记落在串里则跟着数据走:库里任何一条 ref 自己说明自己,读到它的人不必回头问是谁报的。
+
+**没有回来的东西**:producer 自选那个词。`erc20` / `token` / `spl` 这类变体不存在了 —— 只有 `contract:` 一个值,而且它是文法的常量。也刻意**不叫 `erc20:`**:Solana 上那叫 SPL、Sui 上叫 Coin,写 `erc20` 就是又替 producer 编词。
+
 
 同一个 token 在不同地方有不同名字,这件事现在被三套东西各说了一遍:`buildTokenKey` 产链上地址串(`eip155:42161/erc20:0x…`)、`refKey` 产数据源串(`coingecko:usd-coin`——跟 `buildTokenKey({cgkId})` 是同一个串,两套实现互不知情)、CEX 三个 connector 什么都不产、持仓退化成裸 symbol。决定收成一个概念 **`tokenRef` = `<谁>/<它在那儿叫什么>`**,**恰好两段**,落进新的零依赖小包 `@folio/oracle-ref`(`packages/oracle/ref`),它只做三件事:造串、拆串、拼回去(造串走 `tokenRef.native/contract/opaque` 构造函数,调用方不手写 `kind`)。左半边是个**不透明的名字,包基本不判断它是链、交易所还是数据源** —— 右半边自己说明了自己(`native` / `erc20:<addr>` / 一个不透明 id),解析不需要这个分类,不透明 id 的归一是产的时候由生产者做的,连平台预热要的「这是不是链」也能从右半边看出来。**唯一的例外是地址大小写**:EVM 的 hex 大小写不敏感、小写成稳定的 key,而 base58 / bech32(Solana、Bitcoin、Tron)**大小写敏感**,小写下去就是个不存在的地址 —— 这一处绕不开 `eip155:` 前缀判断,明写为例外而不是假装没有。左半边取短形(`bitcoin` / `binance` / `coingecko`),只有 EVM 保留 `eip155:<chainId>` —— 于是今天的 EVM 串一个字不变,`chain:bitcoin/native:btc` 变 `bitcoin/native`(尾巴那个 symbol 从来没人读),`coingecko:x` 变 `coingecko/x`。解析结果按右半边形状分三支 + 一个 `unknown`,**永不 throw** —— 但**只认规范形**:旧串一律判 `unknown`,库里的旧串由一次性迁移改写,不靠解析器容旧。
 
@@ -31,3 +69,15 @@ Status: accepted,文法被 [ADR 0021](0021-per-user-tokens-token-id-as-sole-iden
 - **`AssetRef` 只有两个身份字段**:溶解成串后 `tokenKey` 与 `ref` 类型相同、语义相邻,一度给前者改名 `providerRef` 以示区别 —— 但 `ref` **没有任何外部写入方**(全仓只有门面 `createTokens` 自己从 `identifier` 填一处),是内部细节漏进了公开类型。故 `ref` 收进门面内部的 `ResolvableAsset`,公开的 `AssetRef` 只剩 `{ symbol, tokenRef?, identifier? }`,字段名与 `Balance` 对齐。
 - **死代码清理**:`CgkCoinId` 品牌类型在溶解后无人使用(knip 抓不到 —— 它从 entry 文件导出,正是 `includeEntryExports: false` 的盲区),删除。
 - **CONTEXT.md 词表**:加 `tokenRef` / `namer`,删 `tokenKey` / `refKey`。历史 ADR(0002/0010/0013/0014)里的 `tokenKey` 是当时的决策记录,**不改**。
+
+---
+
+## 第三轮的 Consequences
+
+- **形状 2 → 3**:`native` / `contract:<地址>` / `<不透明 id>`;解析产这三支 + `unknown`,永不 throw。构造函数回到三个(`tokenRef.native` / `.contract` / `.opaque`),调用方声明意图、不手写 `kind` —— 也就是第二轮收成一个 `local` 的那一步一并回退。
+- **地址归一不变**:EVM 的 hex 小写、base58 / bech32 原样,判据仍看 namer 前缀(`evm:`)。这一处从第一轮起就是明写的例外。
+- **七个 producer + 全部 golden fixture 再走一遍**:链上那几个(zerion / coinstats)产 `contract:` 形,场馆与手记不变(它们本来就是不透明 id),blockbook 只产 `native`。这是本 epic 内第三次改 ref 串 —— 库要重建,没有数据迁移成本,但 fixture 与测试的机械改动是实打实的。
+- **`global_token_ref_index` 的键跟着带标记**:那张表里全是链上合约,CoinGecko 的转换直接产 `contract:` 形。表本身不变(仍是 `(ref, namer, local_name)`)。
+- **mint 的 symbol 闸塌成一句** `parsed.kind !== "contract"`。原本要在 connector manifest 加的 `identifyBySymbol` 字段不用加了,mint 里那句「或者它是原生币」也不用写。
+- **「namer 是不是链」仍然不需要**:平台由 provider 随余额直接报(#193),那个问题在展示侧压根不存在;这一轮回来的标记只回答「右半边是不是合约地址」,不回答左半边是什么。
+- **代价(明知接受)**:一个概念在文法里留了个位置,而它当前只有一个消费方(mint 的 symbol 闸)。第二轮正是因为「没有消费方」把它删了,这轮因为找到了消费方把它加回来 —— 判断依据是「有没有人按它分支」,那个判断本身是对的,只是第二轮时我没找全。
