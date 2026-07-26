@@ -3,6 +3,7 @@ import { type CoinGeckoConfig, CoinGeckoError, createRequester } from "./http";
 import type {
   AssetPlatform,
   CoinContract,
+  CoinListItem,
   DerivativesExchange,
   Exchange,
   ExchangeRates,
@@ -37,6 +38,8 @@ export interface CoinsMarketChartRangeParams {
 export interface CoinGeckoClient {
   /** GET /asset_platforms */
   assetPlatforms(): Promise<AssetPlatform[]>;
+  /** GET /coins/list?include_platform=true(整份币目录 + 各链合约地址;几 MB,只在 cron 里拉) */
+  coinsList(): Promise<CoinListItem[]>;
   /** GET /coins/markets(按市值页取) */
   coinsMarkets(params: CoinsMarketsParams): Promise<MarketCoin[]>;
   /** GET /simple/price(按 coin id 批量取价) */
@@ -67,6 +70,11 @@ export function createCoinGeckoClient(config: CoinGeckoConfig = {}): CoinGeckoCl
   return {
     async assetPlatforms() {
       return asArray<AssetPlatform>(await request("/asset_platforms"), "asset_platforms");
+    },
+
+    async coinsList() {
+      const json = await request("/coins/list", { include_platform: "true" });
+      return asArray<CoinListItem>(json, "coins/list");
     },
 
     async coinsMarkets(params) {
