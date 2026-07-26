@@ -1,6 +1,6 @@
 # `global_token_ref_index`:一张全局的「链上 ref → 某命名者叫它什么」表,cron 每日灌
 
-Status: accepted。支撑 [ADR 0021](0021-per-user-tokens-token-id-as-sole-identity.md) 的写路径;是原则 #6「数据访问一律 userId-scoped」**唯一保留的例外**,并把该例外从原来的措辞收窄到这一张表。分层与可换源见 [ADR 0023](0023-oracle-layering-swappable-source.md)。见 [#176](https://github.com/x0finch/folio2/issues/176)。
+Status: accepted。支撑 [ADR 0021](0021-per-user-tokens-token-id-as-sole-identity.md) 的写路径;是原则 #6「数据访问一律 userId-scoped」保留的例外之一,并把该例外从原来的措辞收窄到**同一类的两张表**(见下「例外的范围」)。分层与可换源见 [ADR 0023](0023-oracle-layering-swappable-source.md)。见 [#176](https://github.com/x0finch/folio2/issues/176)。
 
 > **本 ADR 经一轮评审改写**(原名 `cgk_refs`,列 `(ref, coin_id)`):表名与列名把 CoinGecko 焊死在了存储层,换源(cgk → cmc)就得改表。现改为 vendor 中立的 `(ref, namer, local_name)` —— 用的正是 tokenRef 文法既有的两个词(见 CONTEXT.md「namer」)。**决策的实质没变**,变的是它不再姓某一家。
 
@@ -24,6 +24,19 @@ evm:1/0xa0b86991…  +  coinmarketcap  →  3408
 solana/EPjFWdd5…   +  coingecko      →  usd-coin
 ```
 
+### 例外的范围:两张表,同一个理由
+
+原则 #6 的例外现在含**两张**表(#199 落地时定的):
+
+| 表 | 装什么 |
+|---|---|
+| `global_token_ref_index(ref, namer, local_name)` | 「链上这个地址在某人那里叫什么」(本 ADR) |
+| `token_daily_prices(token_ref, day_bucket, unit_price)` | 「某个币某天值多少」 |
+
+**判据是同一条**:里面一条用户数据都没有、可整表重建、跟任何用户无关、删空只是下一轮慢一点。所以这不是新开一类口子,是同一类多一张表。
+
+历史日价为什么也归这一类、以及为什么按 `token_ref` 而不是 `token_id` 作键(后者是 per-user 的随机 UUID,会让每个用户各存一份 BTC 的历史,而且历史不记是谁给的价、换源后同一条曲线前后半段来自两家),记在 [#199](https://github.com/x0finch/folio2/issues/199) 的正文里。
+
 **这张表没有 `userId`**,因为里面一条用户数据都没有 —— 全是上游的公开知识、可整表重建、删空只是下一轮慢一点。这跟今天别扭的那个例外性质不同:今天是 `tokens` 表**混着存用户实际持有的币**。**它是表不是 JSON blob**,因为读法是「四万行里点查几行」;整份塞成 JSON 就得为查 5 个地址把十几 MB 读出来 parse,Workers 的 CPU 顶不住。反过来 warm 前 N 名整份都要用,那才该是 blob(在 `user_cache` 里)。
 
 **`namer` / `local_name` 拆两列存**,不是把 `<namer>/<localName>` 整串塞一列:点查走 `(ref, namer)` 主键;整串一列要 `LIKE '<namer>/%'`。与 per-user 的 `token_refs` 同一条理由、同两个词。
@@ -46,4 +59,6 @@ solana/EPjFWdd5…   +  coingecko      →  usd-coin
 - **「namer 是不是链」不靠这张表回答了**:原方案想让兜底单查顺带解决它(翻得出 CoinGecko slug 就是链)。#193 之后平台由 provider 随余额直接报、写快照时从命名者算出并落库,这个判断在展示侧压根不存在;写路径要的「这条 ref 在哪条链上」由调用方给(`AssetRef.chain`)。
 - **首次部署要先手动触发一次刷表**,否则空表状态下全靠单查兜底,退回今天的样子。
 - **不删行**:下架币的旧映射留着无害,`updated_at` 用来看哪些行这轮没被刷到。
-- **待实测**:整份币目录的响应到底多大、Workers 上 parse 掉多少 CPU(几 MB 量级,好在它在 cron 里不在用户请求路径上);表到底几万行,决定分几批 `batch()` 写。
+- **已实测**(2026-07-26,`/coins/list?include_platform=true`):响应 **2.64 MB**、**17,841** 个币、**300** 条链、含合约地址的行 24,534 条,其中落在我们追踪的 6 条链上 **14,314 行**(其余 294 条链只计数不产行)。据此定批大小:20 行/语句(80 个绑定参数,稳在 D1 的 100 上限内)× 50 语句/批 = 1000 行/批 → 约 **15 批**。
+  实测顺带纠了一处算错:原先按「一批 20 行」切,把那个 100 参数上限当成了**每批**的 —— 它是**每条语句**的,而当时每行本来就是自己一条 INSERT(4 个参数),于是批被切小了 50 倍(14,314 行要 716 次往返)。
+  **Workers 上的 parse CPU 仍未测** —— 那要在真 Worker 里跑才有意义(本机 curl 测不出 isolate 的 CPU 预算)。它在 cron 里、不在用户请求路径上,首次真跑时看 Workers Logs 的耗时即可。

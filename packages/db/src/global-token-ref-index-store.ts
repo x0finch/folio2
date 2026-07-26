@@ -1,6 +1,6 @@
 import { splitTokenRef } from "@folio/oracle-ref";
 import type { GlobalTokenRefIndexStore, TokenRef, TokenRefIndexRow } from "@folio/oracle2-basic";
-import { and, eq, inArray, max } from "drizzle-orm";
+import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
 import { globalTokenRefIndex } from "./schema";
@@ -12,9 +12,20 @@ import { globalTokenRefIndex } from "./schema";
 //
 // cron 一天一次整份灌(几万行 → 必须分批);sync 只正查、零网络。
 
-// 每行 4 个绑定参数(ref / namer / local_name / updated_at)→ 一条 batch 里 20 行 = 80 个,
-// 稳在 D1 ~100 参数上限内。整份四万行 ≈ 2000 批,cron 里跑得完。
-const PUT_ROW_CHUNK = 20;
+// —— 批大小按实测定(#199 的验收项;2026-07-26 实测 `/coins/list?include_platform=true`)——
+//
+//   响应 2.64 MB · 17,841 个币 · 300 条链 · 含合约地址的行 24,534 条
+//   其中落在我们追踪的 6 条链上 = **14,314 行**(其余 294 条链只计数、不产行)
+//
+// **原来的算法是错的**:注释写「每行 4 个参数 → 一批 20 行 = 80 个,稳在 100 参数上限内」——
+// 那个上限是**每条语句**的,而这里每行本来就是自己一条 INSERT(4 个参数),压根碰不到。
+// 于是批被切得过小:14,314 / 20 = **716 次 D1 往返**,全在一个 cron 调用里串着跑。
+//
+// 改成两级:一条语句塞多行(多行 INSERT),一批塞多条语句。
+//   · 20 行/语句 × 4 = 80 个参数 —— 这才是那个上限真正约束的地方
+//   · 50 语句/批 = 1000 行/批 → 14,314 行 ≈ **15 批**
+const ROWS_PER_STATEMENT = 20;
+const STATEMENTS_PER_BATCH = 50;
 
 // 不收 `now`(另外三个 store 都收):本 store 没有一处需要「现在几点」——
 // `putAll` 的时刻由调用方给(契约如此,cron 记的是那一轮的时刻),读侧无 TTL 门控。
@@ -51,26 +62,31 @@ export function createGlobalTokenRefIndexStore(env: DbEnv): GlobalTokenRefIndexS
     },
 
     // 整份刷新。**不删行**:下架币的旧映射留着无害,`updated_at` 用来看哪些行这轮没被刷到。
+    // 两级分批见上面的常量。冲突时用 `excluded`(即本次要插的那一行)—— 多行语句里没法逐行写死值。
     async putAll(rows: readonly TokenRefIndexRow[], updatedAt) {
-      for (const part of chunk(rows, PUT_ROW_CHUNK)) {
-        if (part.length === 0) continue;
-        await batchWrite(
-          db,
-          part.map((r) =>
-            db
-              .insert(globalTokenRefIndex)
-              .values({
+      const stmts = chunk(rows, ROWS_PER_STATEMENT)
+        .filter((part) => part.length > 0)
+        .map((part) =>
+          db
+            .insert(globalTokenRefIndex)
+            .values(
+              part.map((r) => ({
                 ref: r.ref,
                 namer: r.namer,
                 localName: r.localName,
                 updatedAt,
-              })
-              .onConflictDoUpdate({
-                target: [globalTokenRefIndex.ref, globalTokenRefIndex.namer],
-                set: { localName: r.localName, updatedAt },
-              }),
-          ),
+              })),
+            )
+            .onConflictDoUpdate({
+              target: [globalTokenRefIndex.ref, globalTokenRefIndex.namer],
+              set: {
+                localName: sql`excluded.local_name`,
+                updatedAt: sql`excluded.updated_at`,
+              },
+            }),
         );
+      for (const batch of chunk(stmts, STATEMENTS_PER_BATCH)) {
+        await batchWrite(db, batch);
       }
     },
 

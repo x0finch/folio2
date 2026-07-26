@@ -20,6 +20,7 @@ const USER = "user-sync-mint";
 const NAMER = "coingecko";
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const USDC_ARB = "evm:42161/contract:0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+const USDC_SOL = "solana/contract:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 async function resetUser(): Promise<void> {
   await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run();
@@ -192,6 +193,61 @@ describe("落库后快照行带 token_id", () => {
     const rows = await balancesOf(snapshotId);
     expect(rows).toHaveLength(2);
     expect(rows[0].tokenId).not.toBe(rows[1].tokenId); // 各占一行
+  });
+
+  // **这条曾经只在内存假实现里测过,于是漏掉了一个真 bug**:`coingecko/<id>` 形的 ref 本身
+  // 就是上游的命名(手记里用户选了币),它已经是锚 —— 缺了短路的话会把 [ref, upstreamRef]
+  // 两条相同的 ref 塞进同一批,真表上 `token_refs` 的主键会冲突、**整个账户的快照写失败**。
+  // 内存 fake 用 Map,静静吞掉了这个约束。所以这一支必须在真 D1 上跑。
+  it("上游命名形的 ref(手记选了币)→ 自己就是锚,只出一条 ref 行", async () => {
+    const accountId = await makeAccount();
+    const snapshotId = await syncWith([bal("coingecko/usd-coin", "USDC")], accountId);
+
+    const rows = await balancesOf(snapshotId);
+    expect(rows[0].tokenId).toBeTruthy();
+
+    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
+    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/usd-coin");
+    // 只有一条 ref 行 —— 去重生效(不然主键就撞了)。
+    const { results } = await env.DB.prepare(
+      "SELECT count(*) as n FROM token_refs WHERE user_id = ? AND token_id = ?",
+    )
+      .bind(USER, rows[0].tokenId)
+      .all<{ n: number }>();
+    expect(results[0].n).toBe(1);
+  });
+
+  // 六个来源的 USDC 落一个 Token —— 这一组在内存里测过(mint.test.ts),这里验它在真表上也成立:
+  // 六条 ref 行、一个 token,而且 `token_refs` 的主键不会在任何一步撞上。
+  it("六个来源的 USDC → 一个 Token、六条 ref 行", async () => {
+    await seedRefIndex([
+      { ref: USDC_ETH, localName: "usd-coin" },
+      { ref: USDC_ARB, localName: "usd-coin" },
+      { ref: USDC_SOL, localName: "usd-coin" },
+    ]);
+    await seedWarm([{ id: "usd-coin", symbol: "USDC", rank: 6 }]);
+    const accountId = await makeAccount();
+
+    const snapshotId = await syncWith(
+      [
+        bal(USDC_ETH, "USDC"),
+        bal(USDC_ARB, "USDC"),
+        bal(USDC_SOL, "USDC"),
+        bal("binance/USDC", "USDC"),
+        bal("okx/USDC", "USDC"),
+        bal("coingecko/usd-coin", "USDC"),
+      ],
+      accountId,
+    );
+
+    const rows = await balancesOf(snapshotId);
+    expect(new Set(rows.map((r) => r.tokenId)).size).toBe(1); // 全落一个 Token
+    const { results } = await env.DB.prepare(
+      "SELECT count(*) as n FROM token_refs WHERE user_id = ? AND token_id = ?",
+    )
+      .bind(USER, rows[0].tokenId)
+      .all<{ n: number }>();
+    expect(results[0].n).toBe(6); // 六条来源各一行
   });
 });
 

@@ -110,6 +110,38 @@ describe("分批写", () => {
     expect(got.get(rows[136].ref)).toBe("coin-136");
   });
 
+  // 覆盖写走的是 `ON CONFLICT ... SET x = excluded.x`。多行语句里没法逐行写死值,所以这条
+  // 必须**跨过一条语句装得下的行数**(ROWS_PER_STATEMENT)才测得到真形状 ——
+  // 只用一两行的话每条语句就一行,`excluded` 和写死值等价,漏了也是绿的。
+  it("整份重灌:跨多条语句逐行覆盖,不留旧值也不留重复行", async () => {
+    const s = store();
+    const ref = (i: number) => `evm:1/contract:0x${i.toString(16).padStart(40, "0")}`;
+    const first = Array.from({ length: 45 }, (_, i) => ({
+      ref: ref(i),
+      namer: CGK,
+      localName: `old-${i}`,
+    }));
+    await s.putAll(first, 1000);
+
+    // 同样 45 条 ref,叫法全变 —— 每一行都该被自己那条新值覆盖(不是被某一行的值统一刷掉)。
+    const second = first.map((r, i) => ({ ...r, localName: `new-${i}` }));
+    await s.putAll(second, 2000);
+
+    expect(await getDb(env).select().from(globalTokenRefIndex)).toHaveLength(45); // 没重复行
+    const got = await s.lookup(
+      CGK,
+      first.map((r) => r.ref),
+    );
+    expect(got.size).toBe(45);
+    // 首、中、末各验一条:确实是逐行对应,不是整批被同一个值覆盖。
+    expect([got.get(ref(0)), got.get(ref(22)), got.get(ref(44))]).toEqual([
+      "new-0",
+      "new-22",
+      "new-44",
+    ]);
+    expect(await s.refreshedAt(CGK)).toBe(2000); // updated_at 也走 excluded
+  });
+
   // 正查也要分块(每块 ≤90 个键 + 1 个固定绑定)。
   it("一次查上百个 ref 不超参数上限", async () => {
     const s = store();

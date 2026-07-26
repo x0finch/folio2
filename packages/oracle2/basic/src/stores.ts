@@ -35,10 +35,13 @@ export interface TokenStore {
   // 合并:把 `from` 并进 `into` —— ref 改指、**历史快照的 token_id 一并改指**、旧行删除。
   // 身份可变、金额不变:不改历史行的话曲线会在合并那一刻断成两段。
   //
-  // **`from` 的价与历史日价归实现处理**(它们在另一个 store 里,本方法碰不到):真表上
-  // `token_id` 是外键,`ON DELETE CASCADE` 删行时一并带走即可 —— 不必搬到 `into` 名下,
-  // 那些日桶下次读到缺口时会照常回源补齐(见 `TokenPriceStore.getDaily` 的 SWR 语义)。
-  // 写 D1 实现时(#199)务必让这条级联成立,否则孤儿行的价会永远留在表里没人引用。
+  // **`from` 的价与历史日价不用搬**,但两者的理由不同(#199 定案后修正):
+  //   · **现价**在代币行自己那一列上,删行自然带走。
+  //   · **历史日价**按 tokenRef 全局存(与 `token_id` 没有外键关系)—— 什么都不用删,而且
+  //     两个 Token 会被合并,正是因为它们指向同一条上游 ref → 赢家读的就是同一批行,
+  //     **曲线一格都不缺**。
+  // 实现要保证的是另一件事:`token_refs` 的 `token_id` 外键带 `ON DELETE CASCADE`,
+  // 否则删掉旧代币行会留下指向不存在 Token 的 ref 行。
   merge(from: string, into: string): Promise<void>;
 
   // 读:按内部 id 批量 / 按主键单读。**不门控 info TTL** —— 只要行在就给,否则渲染出了
