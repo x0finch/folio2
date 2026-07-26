@@ -20,7 +20,7 @@ export interface MintDeps {
   store: TokenStore;
   refIndex: GlobalTokenRefIndexStore;
   candidates: CandidateSource;
-  // 当前源的标识 —— 它同时是 ref 的 namer 与全局映射表的 `namer` 列。由门面从注入的 source 取。
+  // 当前源的标识 —— 它同时是 ref 的 namer 与全局映射表的 `namer` 列。由门面从注入的 upstream 取。
   namer: string;
   // symbol → 上游 id 的策展小表(majors + 已知撞名),优先于市值排名。防山寨撞名。
   // **由 adapter 提供** —— 逐条写的都是某一家的 id,不该硬编码在中立的这一层(ADR 0023)。
@@ -29,7 +29,7 @@ export interface MintDeps {
 
 // 写路径要的那一步:拿一条 tokenRef 换出一个 `token_id`。
 //
-// **全程不碰网络** —— 这不是约定而是类型事实:MintDeps 里根本没有 source。查的是本地 ref 行,
+// **全程不碰网络** —— 这不是约定而是类型事实:MintDeps 里根本没有 upstream。查的是本地 ref 行,
 // miss 才查本地全局映射,再 miss 才按 symbol 猜。写快照之前必须先过这里(快照行的 token_id 必填),
 // 所以它必须是本地的、快的。
 export interface Mint {

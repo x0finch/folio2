@@ -2,7 +2,7 @@ import type {
   CacheStore,
   TokenCandidate,
   TokenInfo,
-  TokenMetaSource,
+  TokenMetaUpstream,
   TokenPrice,
 } from "../contract";
 import { FX_TTL_MS, normalizeSymbol, PLATFORM_TTL_MS, WARM_TTL_MS } from "./constants";
@@ -31,7 +31,7 @@ export interface WarmBlob {
   rows: { info: WarmInfo; price: TokenPrice }[];
 }
 
-// warm 里的 info 还没进库 → 没有内部 id、`ref` 必然非空(与 `SourceToken` 同源)。
+// warm 里的 info 还没进库 → 没有内部 id、`ref` 必然非空(与 `UpstreamToken` 同源)。
 export type WarmInfo = Omit<TokenInfo, "id" | "ref" | "providerLogo"> & { ref: string };
 
 export interface PlatformMeta {
@@ -44,7 +44,7 @@ export interface PlatformMeta {
 // 排行榜 / 候选都读它。**整份刷新走 SWR**:新鲜就不碰上游(与价、历史价同一个编排函数)。
 export async function warmRows(
   cache: CacheStore,
-  source: TokenMetaSource,
+  upstream: TokenMetaUpstream,
   topN: number,
   now: number,
 ): Promise<WarmBlob["rows"]> {
@@ -55,7 +55,7 @@ export async function warmRows(
       return value && Array.isArray(value.rows) ? { value, stale: hit?.stale ?? true } : undefined;
     },
     fetch: async () => {
-      const tokens = await source.fetchMarkets({ topN });
+      const tokens = await upstream.fetchMarkets({ topN });
       return {
         asOf: now,
         rows: tokens.map((t) => ({

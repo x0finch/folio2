@@ -4,7 +4,7 @@ import type { TokenRef } from "@folio/oracle-ref";
 //   · `asset` = 持仓侧的【输入】(从 Balance 抽出的待解析身份)
 //   · `token` = 参考层的一切(解析后的实体及其数据)
 //   · **不出现任何数据源的名字** —— 「谁管它叫什么」由 tokenRef 的 `namer` 承载,
-//     而那个 namer 是注入的 source 自报的(`TokenSource.id`),契约层不知道是哪家。
+//     而那个 namer 是注入的 upstream 自报的(`TokenUpstream.id`),契约层不知道是哪家。
 //
 // 两条主线(ADR 0021):内部只认 `tokens.id`;`tokenRef` 只在两个边界出现
 // (连接器报余额、oracle 问上游)。「上游认没认出这个币」不是一种状态 —— 看它有没有
@@ -93,6 +93,6 @@ export interface TokenRefHit {
 // 「这条链上的 ref,在**那个命名者**那里叫这个」。两边都是 tokenRef,同一套文法。
 export interface TokenRefIndexRow {
   ref: TokenRef; // 链上寻址:evm:<chainId>/<addr> / <slug>/<addr>
-  namer: string; // 别名的命名者(= 注入 source 的 id)
+  namer: string; // 别名的命名者(= 注入 upstream 的 id)
   localName: string; // 那个命名者对它的叫法
 }

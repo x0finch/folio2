@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTokens, MS_PER_DAY, PRICE_TTL_MS, type TokenInfo } from "../src";
-import { fakeCacheStore, fakeSource, fakeTokenPriceStore, fakeTokenStore } from "./fakes";
+import { fakeCacheStore, fakeTokenPriceStore, fakeTokenStore, fakeUpstream } from "./fakes";
 
 const NOW = 1_700_000_000_000; // 落在某个 UTC 日的中段
 const TODAY = Math.floor(NOW / MS_PER_DAY);
@@ -17,9 +17,9 @@ function setup(rows: TokenInfo[] = []) {
   const store = fakeTokenStore(rows);
   const prices = fakeTokenPriceStore();
   const cache = fakeCacheStore();
-  const source = fakeSource();
-  const tokens = createTokens({ store, prices, cache, source, now: () => NOW });
-  return { store, prices, cache, source, tokens };
+  const upstream = fakeUpstream();
+  const tokens = createTokens({ store, prices, cache, upstream, now: () => NOW });
+  return { store, prices, cache, upstream, tokens };
 }
 
 describe("富化 —— 两个 store 各读自己那半,服务层合成整行", () => {
@@ -78,28 +78,28 @@ describe("富化 —— 两个 store 各读自己那半,服务层合成整行", 
 
 describe("取价 —— 走同一个 SWR 编排", () => {
   it("新鲜 → 直接回,不碰上游", async () => {
-    const { prices, source, tokens } = setup([info({ id: "tk_1" })]);
+    const { prices, upstream, tokens } = setup([info({ id: "tk_1" })]);
     await prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: NOW }], PRICE_TTL_MS);
     expect(await tokens.priceOf("tk_1")).toMatchObject({ unitPrice: 60000, stale: false });
-    expect(source.calls).toEqual([]);
+    expect(upstream.calls).toEqual([]);
   });
 
   it("stale → 回源 → 写回(长尾币按需取价走这条)", async () => {
-    const { prices, source, tokens } = setup([info({ id: "tk_1" })]);
+    const { prices, upstream, tokens } = setup([info({ id: "tk_1" })]);
     await prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: 0 }], PRICE_TTL_MS);
     prices.now = NOW + PRICE_TTL_MS + 1;
-    source.prices.set(SRC_BTC, { unitPrice: 61000, asOf: NOW });
+    upstream.prices.set(SRC_BTC, { unitPrice: 61000, asOf: NOW });
 
     expect(await tokens.priceOf("tk_1")).toMatchObject({ unitPrice: 61000 });
-    expect(source.calls).toEqual([`fetchPrices:${SRC_BTC}`]);
+    expect(upstream.calls).toEqual([`fetchPrices:${SRC_BTC}`]);
     expect(prices.current.get("tk_1")?.price.unitPrice).toBe(61000); // 写回了
   });
 
   it("上游还没认出的币取不了价 —— 不问上游,把旧值原样给出去", async () => {
-    const { prices, source, tokens } = setup([info({ id: "tk_1", ref: null })]);
+    const { prices, upstream, tokens } = setup([info({ id: "tk_1", ref: null })]);
     await prices.put([{ tokenId: "tk_1", unitPrice: 42, asOf: 0 }], 0);
     expect(await tokens.priceOf("tk_1")).toMatchObject({ unitPrice: 42, stale: true });
-    expect(source.calls).toEqual([]);
+    expect(upstream.calls).toEqual([]);
   });
 
   it("上游也没有 → 保留旧值(过期不删)", async () => {
@@ -112,7 +112,7 @@ describe("取价 —— 走同一个 SWR 编排", () => {
 
 describe("批量刷 stale 价", () => {
   it("只刷「认得出来且价 stale/缺失」的,一次批量回源", async () => {
-    const { prices, source, tokens } = setup([
+    const { prices, upstream, tokens } = setup([
       info({ id: "fresh" }),
       info({ id: "stale", ref: "src/ethereum" }),
       info({ id: "nopricexyz", ref: "src/tether" }),
@@ -120,19 +120,19 @@ describe("批量刷 stale 价", () => {
     ]);
     await prices.put([{ tokenId: "fresh", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
     await prices.put([{ tokenId: "stale", unitPrice: 1, asOf: 0 }], 0);
-    source.prices.set("src/ethereum", { unitPrice: 3000, asOf: NOW });
-    source.prices.set("src/tether", { unitPrice: 1, asOf: NOW });
+    upstream.prices.set("src/ethereum", { unitPrice: 3000, asOf: NOW });
+    upstream.prices.set("src/tether", { unitPrice: 1, asOf: NOW });
 
     expect(await tokens.refreshStalePrices(["fresh", "stale", "nopricexyz", "unknown"])).toBe(2);
-    expect(source.calls).toEqual(["fetchPrices:src/ethereum,src/tether"]);
+    expect(upstream.calls).toEqual(["fetchPrices:src/ethereum,src/tether"]);
   });
 
   it("没有要刷的 → 零调用", async () => {
-    const { prices, source, tokens } = setup([info({ id: "tk_1" })]);
+    const { prices, upstream, tokens } = setup([info({ id: "tk_1" })]);
     await prices.put([{ tokenId: "tk_1", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
     expect(await tokens.refreshStalePrices(["tk_1"])).toBe(0);
     expect(await tokens.refreshStalePrices([])).toBe(0);
-    expect(source.calls).toEqual([]);
+    expect(upstream.calls).toEqual([]);
   });
 });
 
@@ -140,9 +140,9 @@ describe("历史日价(按 token_id)", () => {
   const day = (offset: number) => (TODAY + offset) * MS_PER_DAY;
 
   it("范围查:缓存命中的过去日直接用,缺的一次回源补齐并落缓存", async () => {
-    const { prices, source, tokens } = setup([info({ id: "tk_1" })]);
+    const { prices, upstream, tokens } = setup([info({ id: "tk_1" })]);
     await prices.putDaily("tk_1", [{ dayBucket: TODAY - 3, unitPrice: 100 }]);
-    source.series = [
+    upstream.series = [
       { atMs: day(-2), unitPrice: 200 },
       { atMs: day(-1), unitPrice: 300 },
     ];
@@ -162,31 +162,31 @@ describe("历史日价(按 token_id)", () => {
   });
 
   it("全部命中缓存 → 不碰上游", async () => {
-    const { prices, source, tokens } = setup([info({ id: "tk_1" })]);
+    const { prices, upstream, tokens } = setup([info({ id: "tk_1" })]);
     await prices.putDaily("tk_1", [
       { dayBucket: TODAY - 2, unitPrice: 1 },
       { dayBucket: TODAY - 1, unitPrice: 2 },
     ]);
     expect(await tokens.priceSeries("tk_1", day(-2), day(-1))).toHaveLength(2);
-    expect(source.calls).toEqual([]);
+    expect(upstream.calls).toEqual([]);
   });
 
   it("今日桶恒现取、不落缓存(它还会变)", async () => {
-    const { prices, source, tokens } = setup([info({ id: "tk_1" })]);
-    source.series = [{ atMs: NOW, unitPrice: 999 }];
+    const { prices, upstream, tokens } = setup([info({ id: "tk_1" })]);
+    upstream.series = [{ atMs: NOW, unitPrice: 999 }];
 
     expect(await tokens.priceSeries("tk_1", day(0), NOW)).toEqual([
       { atMs: day(0), unitPrice: 999 },
     ]);
     expect(await prices.getDaily("tk_1", [TODAY])).toEqual(new Map());
     await tokens.priceSeries("tk_1", day(0), NOW);
-    expect(source.calls).toHaveLength(2); // 第二次照样回源
+    expect(upstream.calls).toHaveLength(2); // 第二次照样回源
   });
 
   it("上游失败 → 退回仅缓存,不抛", async () => {
-    const { prices, source, tokens } = setup([info({ id: "tk_1" })]);
+    const { prices, upstream, tokens } = setup([info({ id: "tk_1" })]);
     await prices.putDaily("tk_1", [{ dayBucket: TODAY - 2, unitPrice: 7 }]);
-    source.fetchPriceSeries = async () => {
+    upstream.fetchPriceSeries = async () => {
       throw new Error("429");
     };
     expect(await tokens.priceSeries("tk_1", day(-2), day(-1))).toEqual([
@@ -195,10 +195,10 @@ describe("历史日价(按 token_id)", () => {
   });
 
   it("上游没认出的币 / 反向区间 → 空,不碰上游", async () => {
-    const { source, tokens } = setup([info({ id: "unknown", ref: null }), info({ id: "tk_1" })]);
+    const { upstream, tokens } = setup([info({ id: "unknown", ref: null }), info({ id: "tk_1" })]);
     expect(await tokens.priceSeries("unknown", day(-2), day(-1))).toEqual([]);
     expect(await tokens.priceSeries("tk_1", day(-1), day(-2))).toEqual([]);
-    expect(source.calls).toEqual([]);
+    expect(upstream.calls).toEqual([]);
   });
 
   it("priceAt 取该 UTC 日桶的价;那天没数据 → undefined", async () => {
@@ -211,8 +211,8 @@ describe("历史日价(按 token_id)", () => {
 
 describe("橱窗与候选", () => {
   it("排行榜走 warm(经 SWR 预热一次);候选与它同一份 rows", async () => {
-    const { source, cache, tokens } = setup();
-    source.markets = [
+    const { upstream, cache, tokens } = setup();
+    upstream.markets = [
       {
         ref: SRC_BTC,
         symbol: "BTC",
@@ -228,27 +228,27 @@ describe("橱窗与候选", () => {
     ];
 
     expect((await tokens.topTokens(1)).map((t) => t.ref)).toEqual([SRC_BTC]);
-    expect(source.calls).toEqual(["fetchMarkets:1000"]);
+    expect(upstream.calls).toEqual(["fetchMarkets:1000"]);
     // 第二次从 blob 出,不再预热;候选也从同一份出 → 缓存里始终只有一个键。
     expect(await tokens.candidates.bySymbol("USDT")).toEqual([
       { ref: "src/tether", marketCapRank: 3 },
     ]);
-    expect(source.calls).toHaveLength(1);
+    expect(upstream.calls).toHaveLength(1);
     expect([...cache.entries.keys()]).toEqual(["warm"]);
   });
 
   it("预热失败不抛,返回空让调用方降级", async () => {
-    const { source, tokens } = setup();
-    source.fetchMarkets = async () => {
+    const { upstream, tokens } = setup();
+    upstream.fetchMarkets = async () => {
       throw new Error("429");
     };
     expect(await tokens.topTokens(10)).toEqual([]);
   });
 
   it("搜索恒回源(结果与用户无关)", async () => {
-    const { source, tokens } = setup();
-    source.searchResults = [{ ref: SRC_BTC, symbol: "BTC", name: "Bitcoin" }];
+    const { upstream, tokens } = setup();
+    upstream.searchResults = [{ ref: SRC_BTC, symbol: "BTC", name: "Bitcoin" }];
     expect(await tokens.search("bit")).toHaveLength(1);
-    expect(source.calls).toEqual(["searchTokens:bit"]);
+    expect(upstream.calls).toEqual(["searchTokens:bit"]);
   });
 });

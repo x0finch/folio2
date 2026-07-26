@@ -3,9 +3,9 @@ import { createOracleFor, createOracleWarm, type OracleConfig } from "../src";
 import {
   fakeCacheStore,
   fakeRefIndexStore,
-  fakeSource,
   fakeTokenPriceStore,
   fakeTokenStore,
+  fakeUpstream,
 } from "./fakes";
 
 // 记下每个工厂被调了几次、拿到的是哪个 userId —— 惰性与绑定都靠它验。
@@ -15,7 +15,7 @@ function countingConfig() {
   const priceStores = new Map<string, ReturnType<typeof fakeTokenPriceStore>>();
   const caches = new Map<string, ReturnType<typeof fakeCacheStore>>();
   const refIndex = fakeRefIndexStore();
-  const source = fakeSource();
+  const upstream = fakeUpstream();
 
   const memo = <T>(m: Map<string, T>, userId: string, make: () => T): T => {
     const cur = m.get(userId) ?? make();
@@ -40,9 +40,9 @@ function countingConfig() {
       calls.push("refIndex");
       return refIndex;
     },
-    createSource() {
-      calls.push("source");
-      return source;
+    createUpstream() {
+      calls.push("upstream");
+      return upstream;
     },
   };
   return { cfg, calls, tokenStores };
@@ -76,7 +76,7 @@ describe("惰性", () => {
     expect(calls).toEqual([]);
 
     void oracle.tokens;
-    expect(calls).toEqual(["tokenStore:u1", "priceStore:u1", "cache:u1", "source"]);
+    expect(calls).toEqual(["tokenStore:u1", "priceStore:u1", "cache:u1", "upstream"]);
     expect(calls).not.toContain("refIndex");
   });
 
@@ -137,8 +137,8 @@ describe("契约往返(内存假实现)", () => {
 describe("全局维护任务不挂 per-user 门面", () => {
   it("createOracleWarm 不需要 userId:拉 → 一次整份灌 → 记得刷新时刻", async () => {
     const refIndex = fakeRefIndexStore();
-    const source = fakeSource();
-    source.refIndex = {
+    const upstream = fakeUpstream();
+    upstream.refIndex = {
       rows: [
         { ref: "evm:1/0xa0b8", namer: "src", localName: "usd-coin" },
         { ref: "solana/EPjF", namer: "src", localName: "usd-coin" },
@@ -148,7 +148,7 @@ describe("全局维护任务不挂 per-user 门面", () => {
     };
     const warm = createOracleWarm({
       createRefIndexStore: () => refIndex,
-      createSource: () => source,
+      createUpstream: () => upstream,
     });
 
     expect(await warm.refIndexRefreshedAt()).toBeNull();
@@ -161,11 +161,11 @@ describe("全局维护任务不挂 per-user 门面", () => {
 
   it("失配经 onWarn 报出;没有失配就不吵", async () => {
     const warns: { message: string; meta: Record<string, unknown> }[] = [];
-    const source = fakeSource();
-    source.refIndex = { rows: [], unmatchedPlatforms: ["sui"], skipped: 0 };
+    const upstream = fakeUpstream();
+    upstream.refIndex = { rows: [], unmatchedPlatforms: ["sui"], skipped: 0 };
     const warm = createOracleWarm({
       createRefIndexStore: () => fakeRefIndexStore(),
-      createSource: () => source,
+      createUpstream: () => upstream,
       onWarn: (message, meta) => warns.push({ message, meta }),
     });
 
@@ -173,7 +173,7 @@ describe("全局维护任务不挂 per-user 门面", () => {
     expect(warns).toHaveLength(1);
     expect(warns[0]?.meta).toEqual({ namer: "src", platforms: ["sui"] });
 
-    source.refIndex = { rows: [], unmatchedPlatforms: [], skipped: 0 };
+    upstream.refIndex = { rows: [], unmatchedPlatforms: [], skipped: 0 };
     await warm.warmRefIndex(2);
     expect(warns).toHaveLength(1);
   });

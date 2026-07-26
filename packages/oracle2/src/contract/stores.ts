@@ -10,8 +10,8 @@ import type {
   TokenRefIndexRow,
 } from "./types";
 
-// 本地持久化端口。沿用项目既有的 **`Store` = 本地 / `Source` = 上游** 二分 ——
-// 看名字就知道这次调用会不会出网(见 source.ts)。实现在别处(D1 在 `@folio/db`,测试用内存假实现)。
+// 本地持久化端口。**`Store` = 本地 / `Upstream` = 出网**,看名字就知道这次调用会不会碰网络
+// (上游那一面见 upstream.ts;项目原本叫 `Source`,与 `Store` 太像、一眼糊,故改)。实现在别处(D1 在 `@folio/db`,测试用内存假实现)。
 //
 // **per-user 的 store 已经绑好了 userId,但本层不知道有 userId 这回事** —— `oracleFor(userId)`
 // 在工厂那一层就把它吃掉了。所以下面的方法签名里没有 user 参数:拿错用户在编译期就发生不了。
@@ -44,7 +44,7 @@ export interface TokenStore {
   // 只填空槽:undefined 的字段不动,已有值的字段也不动(见 TokenInfoPatch)。
   fillInfo(tokenId: string, patch: TokenInfoPatch): Promise<void>;
 
-  // 符号消歧候选:按 symbol 找当前源认识的币。**不是**从这里生的数据 —— warm 集的子集,
+  // 符号消歧候选:按 symbol 找当前上游认识的币。**不是**从这里生的数据 —— warm 集的子集,
   // 由服务层从 cache 的 warm blob 筛出后交给消歧(见 services/cache.ts);此处只为
   // 「本地已认识的同名币」留一条路,实现可直接查 ref 行。
   candidatesBySymbol(symbol: string): Promise<TokenCandidate[]>;
