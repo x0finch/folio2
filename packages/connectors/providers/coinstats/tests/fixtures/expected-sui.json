@@ -10,7 +10,7 @@
   },
   {
     "symbol": "XSUI",
-    "tokenRef": "sui-wallet/0xSUITESTTOKEN00000000000000000000000000AB",
+    "tokenRef": "sui-wallet/contract:0xSUITESTTOKEN00000000000000000000000000AB",
     "name": "X Sui Token",
     "amount": 10,
     "price": 2,

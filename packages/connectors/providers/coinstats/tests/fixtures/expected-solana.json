@@ -10,7 +10,7 @@
   },
   {
     "symbol": "USDC",
-    "tokenRef": "solana/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "tokenRef": "solana/contract:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "name": "USD Coin",
     "amount": 500,
     "price": 1,
@@ -19,7 +19,7 @@
   },
   {
     "symbol": "CT",
-    "tokenRef": "solana/6fUwECXzRQeh2wYuTg3xeQHGt4wSbiUbsdd1PYw3pump",
+    "tokenRef": "solana/contract:6fUwECXzRQeh2wYuTg3xeQHGt4wSbiUbsdd1PYw3pump",
     "name": "Crypto Twitter",
     "amount": 1010,
     "price": 1e-5,
@@ -28,7 +28,7 @@
   },
   {
     "symbol": "UNP",
-    "tokenRef": "solana/Unpriced11111111111111111111111111111111111",
+    "tokenRef": "solana/contract:Unpriced11111111111111111111111111111111111",
     "name": "Unpriced Token",
     "amount": 100,
     "value": 0,

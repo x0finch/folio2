@@ -15,7 +15,7 @@
     "price": 1,
     "value": 1500,
     "kind": "spot",
-    "tokenRef": "evm:42161/0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+    "tokenRef": "evm:42161/contract:0xaf88d065e77c8cc2239327c5edb3a432268e5831",
     "name": "USD Coin",
     "logo": "https://cdn.zerion.io/usdc.png"
   },
@@ -25,7 +25,7 @@
     "price": 2500,
     "value": 10000,
     "kind": "defi",
-    "tokenRef": "evm:1/0xabababababababababababababababababababab",
+    "tokenRef": "evm:1/contract:0xabababababababababababababababababababab",
     "name": "Lido Staked Ether",
     "logo": "https://cdn.zerion.io/steth.png",
     "meta": {
@@ -38,7 +38,7 @@
     "amount": 100,
     "value": 0,
     "kind": "spot",
-    "tokenRef": "evm:1/0xabababababababababababababababababababab",
+    "tokenRef": "evm:1/contract:0xabababababababababababababababababababab",
     "name": "Unpriced Token",
     "logo": "https://cdn.zerion.io/unp.png"
   },
@@ -48,7 +48,7 @@
     "price": 1,
     "value": -3000,
     "kind": "defi",
-    "tokenRef": "evm:1/0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "tokenRef": "evm:1/contract:0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
     "name": "Dai Stablecoin",
     "logo": "https://cdn.zerion.io/dai.png",
     "meta": {
@@ -61,7 +61,7 @@
     "amount": 1,
     "value": 5000,
     "kind": "defi",
-    "tokenRef": "evm:42161/0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "tokenRef": "evm:42161/contract:0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
     "name": "Uniswap V3 Position",
     "logo": "https://cdn.zerion.io/univ3.png",
     "meta": {
@@ -75,7 +75,7 @@
     "price": 50,
     "value": 200,
     "kind": "defi",
-    "tokenRef": "evm:1/0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "tokenRef": "evm:1/contract:0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
     "name": "Compound",
     "logo": "https://cdn.zerion.io/comp.png",
     "meta": {

@@ -58,8 +58,8 @@ export const manualProvider: BalanceProvider<Spot, typeof manualAccountCreds> = 
         // 选了币 → 厂商寻址身份 `coingecko/<id>`(CGK coin id 规范为小写 kebab,归一在生产者侧做);
         // 没选 → 手记自己就是命名者 `manual/<SYMBOL>`。两种都是规范 ref,没有「空着」这一档。
         tokenRef: t.identifier
-          ? tokenRef.local("coingecko", t.identifier.toLowerCase())
-          : tokenRef.local(PROVIDER_ID, t.symbol.trim().toUpperCase()),
+          ? tokenRef.opaque("coingecko", t.identifier.toLowerCase())
+          : tokenRef.opaque(PROVIDER_ID, t.symbol.trim().toUpperCase()),
       })),
     };
   },

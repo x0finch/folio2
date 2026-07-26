@@ -31,8 +31,8 @@ export function buildManualSnapshot(
       // 与 manual provider 同源:选了币 → `coingecko/<id>`(小写 kebab 归一在生产者侧做),
       // 没选 → `manual/<SYMBOL>`。tokenRef 恒有值(Balance 契约必填)。
       tokenRef: t.identifier
-        ? tokenRef.local("coingecko", t.identifier.toLowerCase())
-        : tokenRef.local("manual", t.symbol.trim().toUpperCase()),
+        ? tokenRef.opaque("coingecko", t.identifier.toLowerCase())
+        : tokenRef.opaque("manual", t.symbol.trim().toUpperCase()),
       metaJson: null,
     };
   });
