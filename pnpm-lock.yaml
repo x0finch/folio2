@@ -492,6 +492,38 @@ importers:
         specifier: ^4.1.5
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
+  packages/oracle2:
+    dependencies:
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../oracle/ref
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/oracle2-source-coingecko:
+    dependencies:
+      '@folio/coingecko-client':
+        specifier: workspace:*
+        version: link:../clients/coingecko
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../oracle/ref
+      '@folio/oracle2':
+        specifier: workspace:*
+        version: link:../oracle2
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
   packages/sync:
     dependencies:
       '@folio/connectors-basic':

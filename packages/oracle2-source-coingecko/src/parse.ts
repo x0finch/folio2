@@ -1,0 +1,107 @@
+import type {
+  CoinContract,
+  MarketCoin,
+  SearchResult,
+  SimplePriceMap,
+} from "@folio/coingecko-client";
+import { tokenRef } from "@folio/oracle-ref";
+import type { SourceToken, TokenPrice, TokenPricePoint, TokenRef } from "@folio/oracle2";
+import { SEARCH_LIMIT, SOURCE_ID, VS_USD } from "./constants";
+
+// CoinGecko 响应 → 契约形状的纯解析。零 IO,fixture 可钉死。
+// 产出的 tokenRef 命名者恒为本 adapter 的 id;coin id 规范为小写 kebab,归一在生产者侧做。
+
+export const cgkRef = (coinId: string): TokenRef => tokenRef.local(SOURCE_ID, coinId.toLowerCase());
+
+// coin id ← 本源命名的 ref。不是本源的命名(链上寻址 / 别家)→ undefined。
+export function coinIdOf(ref: TokenRef): string | undefined {
+  const prefix = `${SOURCE_ID}/`;
+  return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined;
+}
+
+// 一行 markets → SourceToken(元信息 + 价;价为 USD)。跳过无 id 的行。
+export function parseMarkets(rows: readonly MarketCoin[]): SourceToken[] {
+  const out: SourceToken[] = [];
+  for (const m of rows) {
+    if (!m?.id || !m.symbol) continue;
+    const asOf = Date.parse(m.last_updated ?? "") || Date.now();
+    out.push({
+      ref: cgkRef(m.id),
+      symbol: m.symbol,
+      name: m.name ?? m.symbol,
+      logo: m.image ?? undefined,
+      price: {
+        unitPrice: m.current_price ?? 0,
+        change24h: m.price_change_percentage_24h ?? undefined,
+        marketCapRank: m.market_cap_rank ?? undefined,
+        asOf,
+      },
+    });
+  }
+  return out;
+}
+
+// /search → 前 N 条(选币 autocomplete)。无价。
+export function parseSearch(json: SearchResult): SourceToken[] {
+  const out: SourceToken[] = [];
+  for (const c of json?.coins ?? []) {
+    if (!c?.id || !c.symbol) continue;
+    out.push({
+      ref: cgkRef(c.id),
+      symbol: c.symbol,
+      name: c.name ?? c.symbol,
+      logo: c.large ?? c.thumb ?? undefined,
+    });
+    if (out.length >= SEARCH_LIMIT) break;
+  }
+  return out;
+}
+
+// /simple/price → ref → 价。缺 usd 的条目跳过。
+export function parseSimplePrice(
+  json: SimplePriceMap,
+  asOfFallback: number,
+): Map<TokenRef, TokenPrice> {
+  const out = new Map<TokenRef, TokenPrice>();
+  for (const [coinId, v] of Object.entries(json ?? {})) {
+    const unitPrice = v?.[VS_USD];
+    if (typeof unitPrice !== "number") continue;
+    const lastUpdated = v[`${VS_USD}_last_updated_at`];
+    out.set(cgkRef(coinId), {
+      unitPrice,
+      change24h: v[`${VS_USD}_24h_change`],
+      asOf: typeof lastUpdated === "number" ? lastUpdated * 1000 : asOfFallback,
+    });
+  }
+  return out;
+}
+
+// /coins/{platform}/contract/{addr} → SourceToken(兜底单查)。
+export function parseContract(json: CoinContract | null): SourceToken | null {
+  if (!json?.id || !json.symbol) return null;
+  const md = json.market_data;
+  const unitPrice = md?.current_price?.[VS_USD];
+  return {
+    ref: cgkRef(json.id),
+    symbol: json.symbol,
+    name: json.name ?? json.symbol,
+    logo: json.image?.large ?? json.image?.small ?? json.image?.thumb ?? undefined,
+    price:
+      typeof unitPrice === "number"
+        ? {
+            unitPrice,
+            change24h: md?.price_change_percentage_24h ?? undefined,
+            marketCapRank: json.market_cap_rank ?? undefined,
+            asOf: Date.parse(json.last_updated ?? "") || Date.now(),
+          }
+        : undefined,
+  };
+}
+
+// market_chart/range 的 [msTimestamp, price] 对 → 升序观测点。
+export function parsePriceSeries(pairs: readonly [number, number][]): TokenPricePoint[] {
+  return pairs
+    .filter(([atMs, unitPrice]) => Number.isFinite(atMs) && Number.isFinite(unitPrice))
+    .map(([atMs, unitPrice]) => ({ atMs, unitPrice }))
+    .sort((a, b) => a.atMs - b.atMs);
+}
