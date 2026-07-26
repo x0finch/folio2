@@ -2,6 +2,18 @@
 
 > **Folio** is a self-hosted crypto portfolio tracker (on-chain wallets + Bitcoin + CEX + perp DEX + manual assets → one dashboard). M1–M6 (foundation → on-chain → CEX → perp → polish) are complete and shipped — architecture overview in [docs/architecture/](docs/architecture/00-overview.md); decision history in git log + [docs/adr/](docs/adr/). Forward work: [docs/roadmap.md](docs/roadmap.md) (narrative + scope; links the epic board). Read this file first every session. Coding conventions (imports, naming, UI, React, tests, commits): see [CODING.md](CODING.md).
 
+## 0. 说人话(高于本文件其余一切)
+
+**全程中文。默认短。结论先行。**
+
+- **先给答案,再给理由。** 一两句话说完的事就一两句话说完;背景、权衡、边界情况等被问了再给。
+- **别倒术语。** 内部黑话("mint 决策树"、"锚"、"SWR 编排")在自己脑子里用,对外换成日常说法("怎么认出这是哪个币")。首次不得不用某个词时,顺手一句解释。
+- **别一次铺一堆表格。** 表格是被要求"逐个列出"时才用的形状,不是默认形状。
+- **诚实优先于简短。** 说人话不等于打包票:没验过的就说没验过,做砸了就直说,坏消息别裹在长段落里。
+- 用户明确要"详细/逐条/全部列出"时照做 —— 那时长是对的。
+
+**为什么写在这:** 这条被反复纠正过多次("说人话"、"太长了")。它不是风格偏好,是返工成本 —— 一段读不进去的回复等于没回复。
+
 ## Tech stack
 - TanStack Start (`@tanstack/react-start`) + Vite — full-stack, server functions
 - Cloudflare Workers runtime; Cloudflare D1 (SQLite) + Drizzle ORM
