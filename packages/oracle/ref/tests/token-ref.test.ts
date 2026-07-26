@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatTokenRef, parseTokenRef, type TokenRefParts, tokenRef } from "../src";
+import {
+  formatTokenRef,
+  joinTokenRef,
+  parseTokenRef,
+  splitTokenRef,
+  type TokenRefParts,
+  tokenRef,
+} from "../src";
 
 // Solana 的真实地址 —— base58 大小写敏感,小写下去就不存在了。
 const SOL_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -158,5 +165,45 @@ describe("round-trip", () => {
     const once = parseTokenRef("EVM:1/CONTRACT:0xAbC");
     const twice = parseTokenRef(formatTokenRef(once as TokenRefParts));
     expect(twice).toEqual(once);
+  });
+});
+
+// 按两列存 tokenRef 的表(`token_refs` / `global_token_ref_index`)要拆开存、读出来拼回去。
+// 拆/拼放在文法包,存储层因此不必认识 `native` / `contract:` 也不必知道分隔符是斜杠。
+describe("splitTokenRef / joinTokenRef", () => {
+  it("三种形状都拆得出两段,且 join 是 split 的逆", () => {
+    for (const s of [
+      "evm:1/native",
+      "bitcoin/native",
+      `solana/contract:${SOL_USDC}`,
+      `sui/contract:${SUI_COIN}`,
+      "evm:42161/contract:0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+      "coingecko/usd-coin",
+      "binance/USDC",
+    ]) {
+      const parts = splitTokenRef(s);
+      expect(parts).toBeDefined();
+      expect(joinTokenRef(parts!.namer, parts!.localName)).toBe(s);
+    }
+  });
+
+  it("拆出来的是规范形 —— 大小写先归一再拆", () => {
+    expect(splitTokenRef("EVM:1/CONTRACT:0xAbC")).toEqual({
+      namer: "evm:1",
+      localName: "contract:0xabc",
+    });
+  });
+
+  it("右段可以带冒号(合约标记 / Sui 的 coin type),不会被当成第三段", () => {
+    expect(splitTokenRef(`sui/contract:${SUI_COIN}`)).toEqual({
+      namer: "sui",
+      localName: `contract:${SUI_COIN}`,
+    });
+  });
+
+  it("读不懂的串没有两段可拆 → undefined(那种串不进表)", () => {
+    for (const raw of ["", "nonsense", "a/b/c", "evm:1/erc20:0xabc", "evm:1/contract:"]) {
+      expect(splitTokenRef(raw)).toBeUndefined();
+    }
   });
 });

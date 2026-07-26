@@ -33,6 +33,9 @@ export function buildManualSnapshot(
       tokenRef: t.identifier
         ? tokenRef.opaque("coingecko", t.identifier.toLowerCase())
         : tokenRef.opaque("manual", t.symbol.trim().toUpperCase()),
+      // 手记的当下值是**现造的**(ADR 0018:不写快照),所以没有落库时 mint 出来的 token_id。
+      // 读端遇到空 token_id 会退回 tokenRef 那条路。手记并入 tokens 是 #203 的事。
+      tokenId: null,
       metaJson: null,
     };
   });

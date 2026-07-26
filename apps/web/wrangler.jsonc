@@ -22,8 +22,12 @@
     }
   ],
 
-  // 定时同步(P6.3):每日 UTC 00:00 触发 src/server.ts 的 scheduled() 跑全量 sweep。
-  "triggers": { "crons": ["0 0 * * *"] },
+  // 两个定时任务,**刻意拆成两个 trigger**(ADR 0022 / #199):
+  //   · 23:00 —— 刷全局代币映射表(拉几 MB JSON + 写几万行,重活)
+  //   · 00:00 —— 全量 sync sweep
+  // 挤一次调用有超预算风险,而且刷表卡住会拖到 sync 跑不完;拆开则各自一份 CPU / 时间预算,
+  // 且刷表先跑完、sync 当天就能用上新数据。src/server.ts 的 scheduled() 按 controller.cron 分支。
+  "triggers": { "crons": ["0 23 * * *", "0 0 * * *"] },
 
   // 可观测性(P6.7):开启 Workers Logs —— 自动摄取 console.* / LogTape 的 console sink 输出,
   // JSON 自动抽成可索引字段(Dashboard Query Builder + wrangler tail)。单用户 → 全量采样。

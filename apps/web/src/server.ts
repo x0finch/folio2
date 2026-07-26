@@ -3,6 +3,7 @@ import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { db } from "./lib/server/internal/db";
 import { configureLogging } from "./lib/server/internal/log";
+import { oracleWarm } from "./lib/server/internal/oracle2";
 import { buildSyncDeps, warmTokensForUser } from "./lib/server/internal/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
@@ -11,6 +12,25 @@ import { buildSyncDeps, warmTokensForUser } from "./lib/server/internal/sync-dep
 // 两个入口都先 configureLogging()(幂等)再处理 → LogTape sink/上下文就绪。
 const cronLog = getLogger(["folio", "cron"]);
 const webLog = getLogger(["folio", "web"]);
+
+// 刷全局映射表那个 trigger 的表达式(与 wrangler.jsonc 的 triggers.crons 第一条一致)。
+// 硬编码在这里是 Workers 的形状使然:分支只能靠 controller.cron 的字符串比对。
+const REF_INDEX_CRON = "0 23 * * *";
+
+// 刷 `global_token_ref_index`:拉整份币目录 → 转换(在 adapter 里)→ 一次整份灌(分批写)。
+// 与用户无关,所以不枚举用户。失败会上抛到外层统一记 error —— 刷表挂了必须可见,
+// 否则新币会一直认不出来而没有任何迹象。
+async function refreshRefIndex(cron: string): Promise<void> {
+  const before = await oracleWarm.refIndexRefreshedAt();
+  cronLog.info("ref index refresh start", { cron, lastRefreshedAt: before });
+  const result = await oracleWarm.warmRefIndex(Date.now());
+  cronLog.info("ref index refresh done", {
+    cron,
+    rows: result.rows,
+    skipped: result.skipped,
+    unmatchedPlatforms: result.unmatchedPlatforms.length,
+  });
+}
 
 const serverEntry = createServerEntry({
   fetch: async (request) => {
@@ -33,14 +53,21 @@ const serverEntry = createServerEntry({
 export default {
   ...serverEntry,
 
-  // 每日定时全量同步(triggers.crons)。无登录用户 → 用系统级 listUserIdsWithAccounts 枚举所有
-  // 有账户的用户,逐用户逐账户隔离 sweep。waitUntil 保证 sweep 跑完才结束本次调用。
-  // env/ctx 由运行时传入;env 不再单独取用(configureLogging / db / buildSyncDeps 都走 cloudflare:workers 全局)。
+  // 两个定时任务共一个 scheduled(),按 controller.cron 分支(见 wrangler.jsonc 的 triggers):
+  //   · REF_INDEX_CRON(23:00)—— 刷全局代币映射表
+  //   · 其余(00:00)—— 全量 sync sweep
+  // 拆两个 trigger 而不是挤一次:拉几 MB JSON + 写几万行是重活,与 sweep 挤一次调用有超预算风险。
+  // waitUntil 保证跑完才结束本次调用。env/ctx 由运行时传入;env 不单独取用
+  // (configureLogging / db / buildSyncDeps / oracleWarm 都走 cloudflare:workers 全局)。
   async scheduled(controller: ScheduledController, _env: Cloudflare.Env, ctx: ExecutionContext) {
     ctx.waitUntil(
       (async () => {
         await configureLogging();
         try {
+          if (controller.cron === REF_INDEX_CRON) {
+            await refreshRefIndex(controller.cron);
+            return;
+          }
           const userIds = await db.listUserIdsWithAccounts();
           cronLog.info("cron sweep start", { cron: controller.cron, users: userIds.length });
           const result = await syncAllUsers(buildSyncDeps(), userIds);
@@ -55,7 +82,7 @@ export default {
           for (const userId of userIds) await warmTokensForUser(userId);
         } catch (err) {
           // waitUntil 里的抛错会变成静默的 unhandled rejection —— 集中打日志再上抛,cron 失败才可见。
-          cronLog.error("cron sweep threw", {
+          cronLog.error("cron threw", {
             cron: controller.cron,
             error: err instanceof Error ? err.message : String(err),
             code: (err as { code?: string })?.code,

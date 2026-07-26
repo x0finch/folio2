@@ -102,6 +102,24 @@ export function parseTokenRef(raw: TokenRef): ParsedTokenRef {
   return { kind: "opaque", namer, id: localName };
 }
 
+/**
+ * 两段拆分 / 拼回 —— 给**按两列存 tokenRef 的表**用(`token_refs`、`global_token_ref_index`:
+ * 拆开存是为了能按 namer 单独筛 / 反查某个 Token 在某命名者下的叫法,见 ADR 0022)。
+ *
+ * 存储层因此**不必知道右段的文法**:不用 switch `native` / `contract:`,也不用知道分隔符是斜杠。
+ * `splitTokenRef` 读不懂就返回 undefined(那种串不进表);`joinTokenRef` 是它的严格逆。
+ */
+export function splitTokenRef(ref: TokenRef): { namer: string; localName: string } | undefined {
+  const parsed = parseTokenRef(ref);
+  if (parsed.kind === "unknown") return undefined;
+  const [namer = "", localName = ""] = formatTokenRef(parsed).split(SEP);
+  return { namer, localName };
+}
+
+export function joinTokenRef(namer: string, localName: string): TokenRef {
+  return `${normalize(namer)}${SEP}${localName.trim()}`;
+}
+
 function normalize(s: string): string {
   return s.trim().toLowerCase();
 }
