@@ -25,7 +25,7 @@ function account(overrides: Partial<AccountSafe> = {}): AccountSafe {
     id: "a1",
     userId: "u1",
     connectorId: "manual",
-    network: null,
+    platform: null,
     label: "Wallet",
     createdAt: 0,
     archivedAt: null,

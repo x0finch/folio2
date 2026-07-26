@@ -30,7 +30,7 @@ export interface ImportDeps {
   categorize(connectorId: string): InputKinds;
   createAccount(input: {
     connectorId: string;
-    network?: string;
+    platform?: string;
     label: string;
     creds: string;
   }): Promise<{ id: string }>;
@@ -90,7 +90,8 @@ export function createImporter(deps: ImportDeps) {
         }
         const created = await deps.createAccount({
           connectorId,
-          network: typeof rec.network === "string" ? rec.network : undefined,
+          // 线格式的字段名仍是 `network`(见 export.ts 的注释);库里那一列 #203 起叫 platform。
+          platform: typeof rec.network === "string" ? rec.network : undefined,
           label: String(rec.label ?? ""),
           creds: JSON.stringify(stored),
         });

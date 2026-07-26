@@ -23,7 +23,7 @@ const account = (id: string) =>
     id,
     label: id,
     connectorId: "manual",
-    network: null,
+    platform: null,
     archivedAt: null,
   }) as unknown as AccountSafe;
 const snap = (accountId: string, balances: OverviewBalance[]) =>

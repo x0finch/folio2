@@ -22,7 +22,7 @@ export interface AggInput {
   // connectorId(多链钱包会暂时并成一格,下次同步即分开)。
   platform?: string | null;
   isMargin?: boolean; // perp 权益(保证金)—— 进聚合但明细标注
-  account: { id: string; label: string; connectorId: string; network?: string | null };
+  account: { id: string; label: string; connectorId: string; platform?: string | null };
   // **归并身份**:写快照时 mint 定死的代币行 id(ADR 0021)。
   // 可空只为兼容两类行:本列之前写下的旧快照,以及手记那种现造的持仓(#203 并入 tokens 后就没了)。
   tokenId?: string | null;

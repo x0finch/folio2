@@ -40,7 +40,7 @@ const accountSafeColumns = {
   id: accounts.id,
   userId: accounts.userId,
   connectorId: accounts.connectorId,
-  network: accounts.network,
+  platform: accounts.platform,
   label: accounts.label,
   createdAt: accounts.createdAt,
   archivedAt: accounts.archivedAt,
@@ -67,7 +67,7 @@ async function assertGroupOwned(db: Db, userId: string, groupId: string): Promis
 
 export interface CreateAccountInput {
   connectorId: ConnectorId;
-  network?: string;
+  platform?: string;
   label: string;
   creds: string | null; // 凭据 map 的 JSON(db 不解释);缺凭据态由 isComplete(inputs, creds) 在内存判定
 }
@@ -80,12 +80,12 @@ export async function createAccount(
   const db = getDb(env);
   const id = crypto.randomUUID();
   const createdAt = Date.now();
-  const network = input.network ?? null;
+  const platform = input.platform ?? null;
   await db.insert(accounts).values({
     id,
     userId,
     connectorId: input.connectorId,
-    network,
+    platform,
     label: input.label,
     creds: input.creds,
     createdAt,
@@ -94,7 +94,7 @@ export async function createAccount(
     id,
     userId,
     connectorId: input.connectorId,
-    network,
+    platform,
     label: input.label,
     createdAt,
     archivedAt: null,

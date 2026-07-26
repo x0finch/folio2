@@ -31,7 +31,11 @@ export const accounts = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     connectorId: text("connector_id").$type<ConnectorId>().notNull(),
-    network: text("network"),
+    // 账户所在的链 ∪ 场馆(Platform)。原名 `network` —— 与领域词汇表统一(#203):
+    // Platform 是资深概念(见 ADR 0009 的命名注),而 network 是它退休前的旧叫法,只剩这一处。
+    // 与 `snapshot_balances.platform` 同一口径,但粒度不同:这里是账户级(用户建账户时选的),
+    // 那里是持仓级(一个 evm 账户的持仓会散落到多条链)。
+    platform: text("platform"),
     label: text("label").notNull(),
     // 凭据 map(JSON,db 当作不透明 blob、不解释内容):按字段 type 存——secret 字段值为 AES-GCM 密文,
     // public/semi 明文;导入待补录的 semi 以 `semi_<key>` 占位记录打码片段(见 app lib/creds.ts / P6.6.1)。
