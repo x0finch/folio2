@@ -6,9 +6,9 @@ import type {
   TokenStore,
   TokenUpstream,
   UpstreamToken,
-} from "../contract";
+} from "@folio/oracle2-basic";
+import { DEFAULT_TOP_N, dayBucketOf, MS_PER_DAY, PRICE_TTL_MS } from "@folio/oracle2-basic";
 import { candidatesBySymbol, topByRank, warmRows } from "./cache";
-import { DEFAULT_TOP_N, dayBucketOf, MS_PER_DAY, PRICE_TTL_MS } from "./constants";
 import type { CandidateSource } from "./mint";
 import { swr } from "./refresh";
 

@@ -1,5 +1,5 @@
-import type { TokenCandidate, TokenRef } from "../contract";
-import { RESOLUTION_DOMINANCE, RESOLUTION_TOP_RANK } from "./constants";
+import type { TokenCandidate, TokenRef } from "@folio/oracle2-basic";
+import { RESOLUTION_DOMINANCE, RESOLUTION_TOP_RANK } from "@folio/oracle2-basic";
 
 // 按市值排名消歧,**门控与今天逐条对齐**(现有 `pickByConfidence`,沿用其名):
 // top-N 之内 / 只有一个候选 / 碾压次席 → 有把握;否则没把握 → 调用方降级

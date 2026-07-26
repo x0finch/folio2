@@ -1,6 +1,6 @@
 import type { AssetPlatform, CoinListItem } from "@folio/coingecko-client";
 import { tokenRef } from "@folio/oracle-ref";
-import type { RefIndexFetch } from "@folio/oracle2";
+import type { RefIndexFetch } from "@folio/oracle2-basic";
 import { NON_EVM_PLATFORMS, UPSTREAM_ID } from "./constants";
 
 // 把 CoinGecko 的两个端点摊平成全局映射行(ADR 0022)。

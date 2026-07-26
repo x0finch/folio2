@@ -4,8 +4,8 @@ import type {
   TokenInfo,
   TokenMetaUpstream,
   TokenPrice,
-} from "../contract";
-import { FX_TTL_MS, normalizeSymbol, PLATFORM_TTL_MS, WARM_TTL_MS } from "./constants";
+} from "@folio/oracle2-basic";
+import { FX_TTL_MS, normalizeSymbol, PLATFORM_TTL_MS, WARM_TTL_MS } from "@folio/oracle2-basic";
 import { swr } from "./refresh";
 
 // 参考层的三样缓存,一张 per-user 的 KV 表,**只三种键**:

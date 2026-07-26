@@ -5,7 +5,7 @@ import type {
   SimplePriceMap,
 } from "@folio/coingecko-client";
 import { tokenRef } from "@folio/oracle-ref";
-import type { TokenPrice, TokenPricePoint, TokenRef, UpstreamToken } from "@folio/oracle2";
+import type { TokenPrice, TokenPricePoint, TokenRef, UpstreamToken } from "@folio/oracle2-basic";
 import { SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";
 
 // CoinGecko 响应 → 契约形状的纯解析。零 IO,fixture 可钉死。
