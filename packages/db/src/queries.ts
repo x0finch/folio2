@@ -31,8 +31,9 @@ import type {
   ValuationMode,
 } from "./schema-types";
 
-// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 10 列 → 每块 10 行(100 参数上限内)。
-const BALANCE_INSERT_CHUNK = 9;
+// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 现在每行 12 列 → 每块 8 行(96 个,限内)。
+// **加列必须回来改这个数**:12 × 9 = 108 就会 "too many SQL variables",而且只在持仓多的账户上炸。
+const BALANCE_INSERT_CHUNK = 8;
 
 // 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
 const accountSafeColumns = {
@@ -303,6 +304,9 @@ export interface SnapshotBalanceInput {
   platform?: string;
   selfPrice?: number; // provider 自带单价(估值原料,Phase 3);落 snapshot_balances.self_price
   tokenRef?: string;
+  // 认定冻进快照(ADR 0021 / #200):写快照前经 mint 换出的代币行 id。
+  // 可选:expand 期旧路径不给(列可空),导入旧版本文件也没有。编排在 app —— db 只负责落列。
+  tokenId?: string;
   meta?: Record<string, unknown>;
   note?: Note; // balance 级展示 note(note 重设计,单个 Note);落 snapshot_balances.note(JSON)
 }
@@ -373,11 +377,12 @@ export async function writeSnapshot(
     selfPrice: b.selfPrice ?? null,
     tokenRef: b.tokenRef ?? null,
     platform: b.platform ?? null,
+    tokenId: b.tokenId ?? null,
     metaJson: b.meta ? JSON.stringify(b.meta) : null,
     // balance 级 note(单个 Note)→ JSON;无则 null。
     note: b.note ? JSON.stringify(b.note) : null,
   }));
-  // D1 限制每条 SQL 最多 100 个绑定参数;snapshot_balances 每行 11 列 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行。
+  // D1 限制每条 SQL 最多 100 个绑定参数 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行(见其定义)。
   // 一次性大 INSERT 会触发 "too many SQL variables"(地址持仓多时,如链上钱包几十上百条)。
   const balanceInserts = [];
   for (let i = 0; i < balanceRows.length; i += BALANCE_INSERT_CHUNK) {
