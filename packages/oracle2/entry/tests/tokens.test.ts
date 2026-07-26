@@ -136,6 +136,25 @@ describe("批量刷 stale 价", () => {
   });
 });
 
+describe("边角", () => {
+  it("上游回了个映射不到 token 的 ref → 跳过,不写野行", async () => {
+    const { prices, upstream, tokens } = setup([info({ id: "tk_1" })]);
+    // 上游多回了一条我们没问的(或已被合并掉的)ref。
+    upstream.prices.set(SRC_BTC, { unitPrice: 60000, asOf: NOW });
+    upstream.prices.set("src/stranger", { unitPrice: 1, asOf: NOW });
+
+    expect(await tokens.refreshStalePrices(["tk_1"])).toBe(1);
+    expect([...prices.current.keys()]).toEqual(["tk_1"]);
+  });
+
+  it("有价但 info 行没了(合并删过)→ 富化不出这一行", async () => {
+    const { prices, tokens } = setup([info({ id: "tk_1" })]);
+    await prices.put([{ tokenId: "tk_gone", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
+    const got = await tokens.enrich(["tk_1", "tk_gone"]);
+    expect([...got.keys()]).toEqual(["tk_1"]);
+  });
+});
+
 describe("历史日价(按 token_id)", () => {
   const day = (offset: number) => (TODAY + offset) * MS_PER_DAY;
 

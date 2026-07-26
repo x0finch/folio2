@@ -263,3 +263,16 @@ describe("元信息", () => {
     });
   });
 });
+
+describe("读不懂的 ref", () => {
+  it("不按 symbol 猜 —— 关于它我们什么都不知道", async () => {
+    const { store, mint } = setup({
+      overrides: { USDC: "usd-coin" },
+      candidates: { USDC: [{ ref: SRC_USDC, marketCapRank: 6 }] },
+    });
+    const id = (await mint.of([{ ref: "nonsense", seed: seed("USDC") }])).get("nonsense");
+    expect(id).toBeDefined(); // 行照建(快照要有 token_id),但不链上游
+    expect(store.rows.get(id as string)?.ref).toBeNull();
+    expect(store.refs.has(SRC_USDC)).toBe(false);
+  });
+});
