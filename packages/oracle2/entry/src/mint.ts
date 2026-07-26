@@ -57,8 +57,10 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
     // 若走到下面,会被策展表或市值排名判成「有把握」并进真 USDC:总枚数凭空多一百万,盯市的行
     // 直接多出一百万美元,而且认定冻进快照、永不重判(ADR 0020 第三轮)。
     // 原生币与场馆代号相反:`bitcoin/native` 的 BTC、`binance/USDC` 的上架代号都可信,而原生币
-    // 按设计不进全局映射表(ADR 0022),symbol 是它们**唯一**的一条路 —— 所以只挡 contract 这一支。
-    if (parseTokenRef(ref).kind === "contract") return undefined;
+    // 按设计不进全局映射表(ADR 0022),symbol 是它们**唯一**的一条路 —— 所以放行那两支。
+    // 读不懂的串一并挡掉:关于它我们什么都不知道,凭一个来源不明的 symbol 认币是最坏的一种猜。
+    const kind = parseTokenRef(ref).kind;
+    if (kind === "contract" || kind === "unknown") return undefined;
 
     const symbol = normalizeSymbol(seed.symbol);
     const override = overrides?.[symbol];
