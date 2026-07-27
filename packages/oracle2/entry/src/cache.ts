@@ -8,6 +8,7 @@ import type {
 import {
   FX_TTL_MS,
   normalizeSymbol,
+  PLATFORM_NEG_TTL_MS,
   PLATFORM_TTL_MS,
   PRICE_TTL_MS,
   WARM_TTL_MS,
@@ -43,8 +44,10 @@ export type WarmInfo = Omit<TokenInfo, "id" | "ref" | "providerLogo" | "infoStal
   ref: string;
 };
 
-export interface PlatformMeta {
-  name: string;
+// 平台缓存里存的一条。**`name: null` = 否定缓存** —— 问过上游、它的链表里没有这个键。
+// 与「这条压根没有」必须分开:后者会让每一次预热都为了这一个键重拉整张链表。
+export interface PlatformEntry {
+  name: string | null;
   logo?: string;
 }
 
@@ -176,15 +179,23 @@ export function writeFx(cache: CacheStore, currency: string, usdPerUnit: number)
   return cache.put(cacheKeys.fx(currency), usdPerUnit, FX_TTL_MS);
 }
 
+// 读一条平台缓存。**返回 `{name: null}` 与返回 `undefined` 是两件事**:前者是「问过、没有」,
+// 后者是「没问过」。`stale` 一并给出来 —— 预热据它决定要不要重拉,展示则一律用旧的。
 export async function readPlatform(
   cache: CacheStore,
   key: string,
-): Promise<PlatformMeta | undefined> {
+): Promise<{ entry: PlatformEntry; stale: boolean } | undefined> {
   const hit = await cache.get(cacheKeys.platform(key));
-  const meta = hit?.value as PlatformMeta | undefined;
-  return meta && typeof meta.name === "string" ? meta : undefined;
+  const entry = hit?.value as PlatformEntry | undefined;
+  if (!entry || !(typeof entry.name === "string" || entry.name === null)) return undefined;
+  return { entry, stale: hit?.stale ?? true };
 }
 
-export function writePlatform(cache: CacheStore, key: string, meta: PlatformMeta): Promise<void> {
-  return cache.put(cacheKeys.platform(key), meta, PLATFORM_TTL_MS);
+// 命中写长 TTL(名与图近静态),否定写短 TTL(新链随时可能被收录)。
+export function writePlatform(cache: CacheStore, key: string, entry: PlatformEntry): Promise<void> {
+  return cache.put(
+    cacheKeys.platform(key),
+    entry,
+    entry.name === null ? PLATFORM_NEG_TTL_MS : PLATFORM_TTL_MS,
+  );
 }

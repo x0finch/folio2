@@ -19,5 +19,6 @@ export {
   parseSearch,
   parseSimplePrice,
 } from "./parse";
+export { createCoinGeckoPlatformUpstream } from "./platform";
 export { toRefIndexRows } from "./ref-index";
 export { type CoinGeckoConfig, createCoinGeckoUpstream } from "./upstream";

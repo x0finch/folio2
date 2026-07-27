@@ -22,6 +22,9 @@ export const INFO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d
 // 搬过来时沿用 —— 短 TTL 唯一的作用是让预热多刷十二次,而读路径本来就软过期(拿最近值)。
 export const FX_TTL_MS = 6 * 60 * 60 * 1000; // 6h(法币汇率,慢变)
 export const PLATFORM_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d(链/场馆的名与图,近静态)
+// **否定缓存**的 TTL:问过上游、它的链表里没有这个键。短得多 —— 新链随时可能被收录,
+// 而记住「没有」的唯一目的是别让每一次预热都为了这一个键重拉整张链表。
+export const PLATFORM_NEG_TTL_MS = 24 * 60 * 60 * 1000; // 1d
 
 // 预热深度(top-N markets)与默认选币下拉条数。
 export const DEFAULT_TOP_N = 1000;

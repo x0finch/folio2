@@ -38,9 +38,6 @@ importers:
       '@folio/oracle':
         specifier: workspace:*
         version: link:../../packages/oracle/entry
-      '@folio/oracle-basic':
-        specifier: workspace:*
-        version: link:../../packages/oracle/basic
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../packages/oracle/ref

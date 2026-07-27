@@ -18,16 +18,6 @@ export {
 } from "./constants";
 export type { TokenErrorCode } from "./errors";
 export { TokenError } from "./errors";
-// 平台元数据契约(链 ∪ 场馆 name+logo;折入自 @folio/platforms,#72)。
-export {
-  PlatformError,
-  type PlatformErrorCode,
-  type PlatformMeta,
-  type PlatformRow,
-  type PlatformSource,
-  type PlatformStore,
-  type Platforms,
-} from "./platform";
 export type { TokenPriceHistoryStore, TokenStore } from "./store";
 export type { PriceSource, TokenMetaSource, TokenSource } from "./token";
 export type {
