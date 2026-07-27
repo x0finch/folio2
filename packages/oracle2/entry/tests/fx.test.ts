@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFxRates, FX_TTL_MS, SUPPORTED_CURRENCIES } from "../src";
+import { createFxRates, FX_TTL_MS, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "../src";
 import { fakeCacheStore, fakeFxUpstream } from "./fakes";
 
 // 汇率服务:**读软过期、写按 TTL**。两个动词判据不同,下面每一条都在钉这件事。
@@ -34,6 +34,14 @@ describe("resolve —— 读", () => {
     await fx.warm(["EUR"]);
     expect(await fx.resolve("eur")).toBe(1.09);
     expect(await fx.resolve(" Eur ")).toBe(1.09);
+  });
+
+  it("USD 的短路也归一 —— 小写 usd 同样恒 1,不掉进缓存查询", async () => {
+    const cache = fakeCacheStore();
+    const fx = createFxRates({ cache, upstream: fakeFxUpstream() });
+    expect(await fx.resolve("usd")).toBe(1);
+    expect(await fx.resolve(" Usd ")).toBe(1);
+    expect(cache.entries.size).toBe(0);
   });
 });
 
@@ -108,6 +116,18 @@ describe("warm —— 写", () => {
     expect(await fx.resolve("KRW")).toBeUndefined();
   });
 
+  it("小写币种也归一 —— 否则 usd 既不短路又永不落缓存,每次预热白拉一趟", async () => {
+    const upstream = fakeFxUpstream({ USD: 1, EUR: 1.09 });
+    const fx = createFxRates({ cache: fakeCacheStore(), upstream });
+
+    await fx.warm(["usd"]); // 归一成 USD → 无目标
+    expect(upstream.fetches).toBe(0);
+
+    await fx.warm(["eur"]);
+    await fx.warm(["EUR"]); // 上一次写的就是 fx:EUR → 这次判新鲜
+    expect(upstream.fetches).toBe(1);
+  });
+
   it("上游抛错**往上抛** —— 调用方(预热 / 首次切币种)自己决定怎么降级", async () => {
     const upstream = fakeFxUpstream();
     upstream.fetchRates = async () => {
@@ -116,5 +136,13 @@ describe("warm —— 写", () => {
     await expect(
       createFxRates({ cache: fakeCacheStore(), upstream }).warm(["EUR"]),
     ).rejects.toThrow("429");
+  });
+});
+
+// 这个 TTL 是本片唯一改了数值的东西(30min → 6h),而 30min 那个数是**币价**的 TTL。
+// 汇率一天动千分之几 —— 钉住「它属于慢变那一档」,别哪天又被抄回价格那一档。
+describe("TTL 的量级", () => {
+  it("汇率的 TTL 数量级上属于慢变数据,不与长尾币价同档", () => {
+    expect(FX_TTL_MS).toBeGreaterThan(PRICE_TTL_MS * 4);
   });
 });

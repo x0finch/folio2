@@ -18,7 +18,6 @@ import { isSyncableAccount } from "../../syncable";
 import { toProviderAssets } from "../../tokens";
 import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
-import { warmFx } from "./fx";
 import { manualBalancesForWarm } from "./manual";
 import { oracle } from "./oracle";
 import { oracleFor } from "./oracle2";
@@ -40,7 +39,8 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   // 与 refreshStalePrices 经同一 userDisplayBalances 收口(三门同源)。
   const manualBalances = await manualBalancesForWarm(userId, accounts);
   await warmTokens(oracle.tokens, userDisplayBalances(snapshots, manualBalances));
-  // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。
+  // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。两者都按用户 ——
+  // 汇率与平台名图跟代币目录同住一张 per-user 缓存(#202b)。
   try {
     await warmPlatformsForUser(userId);
   } catch (e) {
@@ -49,7 +49,7 @@ export async function warmTokensForUser(userId: string): Promise<void> {
     });
   }
   try {
-    await warmFx(userId);
+    await oracleFor(userId).fx.warm();
   } catch (e) {
     getLogger(["folio", "web", "sync"]).warn("warmFx failed", {
       error: e instanceof Error ? e.message : String(e),

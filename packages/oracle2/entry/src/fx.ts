@@ -21,16 +21,21 @@ export interface FxRatesDeps {
 
 const ALL_CODES = SUPPORTED_CURRENCIES.map((c) => c.code);
 
+// 币种 code 的归一口径,与造缓存键那一处(`cacheKeys.fx`)必须一致。
+// 不归一的话「是不是 USD」这个判断会漏掉 `usd`:它既不短路成 1、又永远不会被写进缓存
+// (写的时候按大写过滤掉了),于是每次预热都白拉一趟上游。
+const norm = (code: string): string => code.trim().toUpperCase();
+
 export function createFxRates({ cache, upstream }: FxRatesDeps): FxRates {
   return {
     async resolve(currency) {
-      if (currency === "USD") return 1;
+      if (norm(currency) === "USD") return 1;
       return readFx(cache, currency);
     },
 
     async warm(currencies = ALL_CODES) {
       // USD 不进目标:它恒为 1、不存缓存,算进去会让「全都新鲜」永远判不成立。
-      const targets = [...new Set(currencies)].filter((c) => c !== "USD");
+      const targets = [...new Set(currencies.map(norm))].filter((c) => c !== "USD");
       if (targets.length === 0) return;
 
       const hits = await Promise.all(targets.map((c) => cache.get(cacheKeys.fx(c))));
@@ -40,7 +45,7 @@ export function createFxRates({ cache, upstream }: FxRatesDeps): FxRates {
       const fresh = await upstream.fetchRates();
       await Promise.all(
         [...fresh]
-          .filter(([code]) => code !== "USD")
+          .filter(([code]) => norm(code) !== "USD")
           .map(([code, usdPerUnit]) => writeFx(cache, code, usdPerUnit)),
       );
     },
