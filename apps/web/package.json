@@ -22,6 +22,8 @@
     "@folio/connectors-basic": "workspace:*",
     "@folio/db": "workspace:*",
     "@folio/oracle": "workspace:*",
+    "@folio/oracle2": "workspace:*",
+    "@folio/oracle2-upstream-coingecko": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/sync": "workspace:*",

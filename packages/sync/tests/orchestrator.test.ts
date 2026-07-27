@@ -284,3 +284,91 @@ describe("syncAccount — 取数超时", () => {
     }
   });
 });
+
+// —— mint:认币是独立一步,跑在 revalue 之前(#202)——
+//
+// #200 当初把 mint 塞在注入的 writeSnapshot 里。那时 revalue 还在用旧参考层的读时解析,所以两者
+// 互不相干;新层的 `priceOf` 收 token_id,mint 要是留在写快照那头,revalue 就得自己再认一遍 ——
+// 同一轮同步认两次,而且中间有别的账户在并发建行,两次答案可能不一致。
+//
+// 下面钉的就是这条顺序契约:**mint 先跑、只跑一次、答案同时喂给 revalue 与写快照**。
+// 顺序错了这几条会红;换成在调用方复刻这段逻辑就测不到了。
+describe("syncAccount — mint 与 revalue 的顺序", () => {
+  it("mint 先于 revalue,且 revalue 拿到的就是 mint 的答案", async () => {
+    const order: string[] = [];
+    const { deps, writes } = makeDeps([account()], {
+      fetchBalances: async () => ok([bal("BTC", 100)]),
+      mint: async (_userId, balances) => {
+        order.push("mint");
+        return new Map(balances.map((b) => [b.tokenRef as string, `tk_${b.symbol}`]));
+      },
+      revalue: async (_userId, _cid, balances, idByRef) => {
+        order.push("revalue");
+        // 拿到的正是上一步的产物 —— 自己不解析身份。
+        expect(idByRef.get("binance/BTC")).toBe("tk_BTC");
+        return balances;
+      },
+    });
+
+    await syncUser(deps, "u1");
+    expect(order).toEqual(["mint", "revalue"]);
+    // 同一份答案也落进了快照列。
+    expect(writes[0].input.balances[0].tokenId).toBe("tk_BTC");
+  });
+
+  it("一轮同步只 mint 一次(写快照不再自己认一遍)", async () => {
+    let calls = 0;
+    const { deps } = makeDeps([account()], {
+      fetchBalances: async () => ok([bal("BTC", 100), bal("ETH", 50)]),
+      mint: async (_userId, balances) => {
+        calls++;
+        return new Map(balances.map((b) => [b.tokenRef as string, `tk_${b.symbol}`]));
+      },
+    });
+
+    await syncUser(deps, "u1");
+    expect(calls).toBe(1); // 两笔持仓、一次批量点查
+  });
+
+  // best-effort:认币故障不该让一轮同步丢数据。
+  it("mint 抛错 → 快照照落(token_id 留空)、价退回 provider 自带、记一条 warning", async () => {
+    const { log, entries } = capturingLogger();
+    const { deps, writes } = makeDeps([account()], {
+      log,
+      fetchBalances: async () => ok([bal("BTC", 100)]),
+      mint: async () => {
+        throw new Error("d1 down");
+      },
+      revalue: async (_userId, _cid, balances, idByRef) => {
+        expect(idByRef.size).toBe(0); // 空 map,不是 undefined —— revalue 不用判空
+        return balances;
+      },
+    });
+
+    await syncUser(deps, "u1");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].input.balances[0].tokenId).toBeUndefined();
+    expect(writes[0].input.totalUsd).toBe(100); // 金额没丢
+    expect(entries.some((e) => e.level === "warning" && e.msg.includes("mint failed"))).toBe(true);
+  });
+
+  it("没注入 mint(旧装配 / 测试)→ 整条路照跑,token_id 留空", async () => {
+    const { deps, writes } = makeDeps([account()], {
+      fetchBalances: async () => ok([bal("BTC", 100)]),
+    });
+    await syncUser(deps, "u1");
+    expect(writes[0].input.balances[0].tokenId).toBeUndefined();
+  });
+
+  it("认不出来的那条 ref 不进 map → 它的 token_id 留空,别的行不受影响", async () => {
+    const { deps, writes } = makeDeps([account()], {
+      fetchBalances: async () => ok([bal("BTC", 100), bal("SCAM", 5)]),
+      mint: async () => new Map([["binance/BTC", "tk_BTC"]]),
+    });
+
+    await syncUser(deps, "u1");
+    const rows = writes[0].input.balances;
+    expect(rows.find((r) => r.symbol === "BTC")?.tokenId).toBe("tk_BTC");
+    expect(rows.find((r) => r.symbol === "SCAM")?.tokenId).toBeUndefined();
+  });
+});

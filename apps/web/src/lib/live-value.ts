@@ -1,7 +1,8 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import { type Tokens, type ValuationMode, valuate } from "@folio/oracle";
+import { type ValuationMode, valuate } from "@folio/oracle";
+import type { Tokens } from "@folio/oracle2";
 import type { OverviewBalance } from "./account-view";
-import { balanceToAssetRef } from "./tokens";
+import { fungibleTokenId } from "./tokens";
 
 // 读时现推(Phase 3,#81):不落库,按当前 mode + 实时源价重算 value。
 // 关键:存储的 `selfPrice` 已编码盯市决策 —— null = 盯市类型(manual/bitcoin,无权威自带价,恒用源);
@@ -32,15 +33,22 @@ export async function deriveLiveAccountTotals(
   mode: ValuationMode,
 ): Promise<Map<string, number>> {
   const balancesOf = (id: string) => (byAccount.get(id)?.balances ?? []) as OverviewBalance[];
-  // 一次性摊平 + 批量 enrich(cache-only,零网络);非同质行 balanceToAssetRef → null → 源价 undefined。
+  // 一次性摊平 + 按 token_id 批量读价(cache-only,零网络);非同质行没有 id → 源价 undefined。
+  // 以前这里靠「enrich 同序返回 + i++ 走下标」配对,是个 locality 隐患;按 id 查表之后不存在了。
   const flat = accounts.flatMap((a) => balancesOf(a.id));
-  const enriched = await tokens.enrich(flat.map(balanceToAssetRef));
+  const ids = [
+    ...new Set(flat.flatMap((b) => (fungibleTokenId(b) ? [fungibleTokenId(b) as string] : []))),
+  ];
+  const enriched = await tokens.enrich(ids);
+  const priceOf = (b: OverviewBalance): number | undefined => {
+    const id = fungibleTokenId(b);
+    return id ? enriched.get(id)?.price?.unitPrice : undefined;
+  };
 
   const totals = new Map<string, number>();
-  let i = 0;
   for (const account of accounts) {
     let total = 0;
-    for (const b of balancesOf(account.id)) total += liveValue(b, enriched[i++]?.unitPrice, mode);
+    for (const b of balancesOf(account.id)) total += liveValue(b, priceOf(b), mode);
     totals.set(account.id, total);
   }
   return totals;

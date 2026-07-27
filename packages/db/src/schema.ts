@@ -101,6 +101,16 @@ export const snapshotBalances = sqliteTable(
     // 这笔持仓所在的链 ∪ 场馆(Platform),由 provider 随 Balance 直接报(ADR 0021 / #193)。
     // 可空:本列之前写下的行没有值 —— 读端退回账户的 connectorId,下次同步即补上。
     platform: text("platform"),
+    // 认定冻进快照(ADR 0021 / #199 expand):写快照前经 mint 换出的代币行 id。
+    // expand 期可空(旧行没有值),#202 改必填并删掉 symbol / token_ref 两列。
+    //
+    // **刻意不加外键。** 两个理由:① `TokenStore.merge` 删旧代币行前会把历史行一并改指,
+    // 有约束反而让「删用户」这类级联的执行顺序变成雷 —— tokens 经 user_id 级联删、
+    // snapshot_balances 经 snapshots 级联删,两条独立分支的先后 SQLite 不保证,
+    // 先删 tokens 就撞约束(packages/db 的测试 teardown 正是直接删 user);
+    // ② 快照是不可变的历史事实,代币表是可变的参考层,让前者的存在挡住后者的维护是反的。
+    // 代价是 merge 漏改指会留下悬空 id → 由 token-store 的 merge 测试盯住。
+    tokenId: text("token_id"),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空
     // balance 级展示 note(note 重设计):JSON.stringify(单个 Note),可空。
     // provider 挂在该 balance 上的 note 落这里;读时 safeParse 回 Note(见 getLatestSnapshotByUser)。
@@ -120,6 +130,9 @@ export const snapshotBalances = sqliteTable(
 // 其 tokenRef 关联存 token_index(kind="tokenRef")。
 export const tokens = sqliteTable("tokens", {
   id: text("id").primaryKey(), // UUID
+  // 归属用户(ADR 0021 / #199 expand):代币表转 per-user —— 「他认识哪些币、他的币叫什么名」
+  // 是用户私有数据。expand 期可空(旧的全局行没有值),#202 改必填。
+  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
   symbol: text("symbol").notNull(), // 归一(大写)
   name: text("name").notNull(),
   logo: text("logo"), // canonical(CGK);孤儿行 NULL
@@ -209,6 +222,92 @@ export const tokenPriceHistory = sqliteTable(
     unitPrice: real("unit_price").notNull(),
   },
   (t) => [primaryKey({ columns: [t.source, t.identifier, t.dayBucket] })],
+);
+
+// —— 新参考层(ADR 0021 / 0022 / 0023,#199 expand)——
+// 下面四张与上面那套并存到 #202:旧 oracle 读旧表、新 oracle 读新表,expand 期两边都对。
+
+// 一个用户对某个命名者叫法的一条映射:「他的 tk_xxx 在 <namer> 那里叫 <local_name>」。
+// 一笔持仓的 tokenRef 拆成两段存(不是整串一列):反查「某个 Token 在当前上游那里叫什么」
+// 走 (token_id, namer) 索引;整串一列得 LIKE。与 global_token_ref_index 同两个词。
+//
+// **PK 带 user_id。** 票上原写 PK(namer, local_name) —— 那是代币表还全局时的写法:
+// tokens 转 per-user 之后两个用户都持有 BTC,`coingecko/bitcoin` 会各指一行,主键必然撞。
+//
+// 「一个 Token 在一个命名者下最多一条 ref」(即一个 Token 只对一个上游币)由 token-store 的
+// linkRef 保证,**不做部分唯一索引** —— 那个索引的 WHERE 里要写死 `namer='coingecko'`,
+// 等于把厂商名刻进迁移文件,与本片「表名列名零 vendor 字样」的验收项直接冲突。
+export const tokenRefs = sqliteTable(
+  "token_refs",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    namer: text("namer").notNull(), // tokenRef 左段:evm:1 / bitcoin / binance / coingecko
+    localName: text("local_name").notNull(), // 右段:native / contract:0x… / 上游 id / 场馆代号
+    tokenId: text("token_id")
+      .notNull()
+      .references(() => tokens.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.namer, t.localName] }),
+    // 反查一个 Token 在某命名者下的叫法(TokenInfo.ref 就是这一查)。
+    index("token_refs_token_id_namer_idx").on(t.tokenId, t.namer),
+  ],
+);
+
+// 全局「链上地址 → 某命名者叫它什么」(ADR 0022)。**无 user_id** —— 上游公开知识、
+// 可整表重建、删空只是下一轮慢一点。cron 一天一次整份灌;sync 只读本地、零网络。
+// 原则 #6「数据访问一律 userId-scoped」的受控例外之一(另一处见 tokenDailyPrices)。
+export const globalTokenRefIndex = sqliteTable(
+  "global_token_ref_index",
+  {
+    ref: text("ref").notNull(), // 链上寻址的完整 tokenRef:evm:1/contract:0x… / solana/contract:…
+    namer: text("namer").notNull(), // 谁给的别名:coingecko / coinmarketcap / …
+    localName: text("local_name").notNull(), // 那家对它的叫法
+    updatedAt: integer("updated_at").notNull(), // 这轮刷到的时刻;不删行,据它看哪些没刷到
+  },
+  (t) => [primaryKey({ columns: [t.ref, t.namer] })],
+);
+
+// per-user KV 缓存:只三种键(`warm` / `fx:<币种>` / `platform:<键>`,见 oracle2 的 cache.ts)。
+// 整张删空功能不坏,只是慢一点。留 user_id 的理由:per-user 缓存只装这个用户实际碰到的
+// (他选的币种、他有持仓的那几条链),全局表得装所有人的并集。
+// #202 起取代 fx_rates + platforms 两张全局表。
+export const userCache = sqliteTable(
+  "user_cache",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    k: text("k").notNull(),
+    v: text("v").notNull(), // JSON.stringify(任意值)
+    expiresAt: integer("expires_at").notNull(), // 过期不删:读出带 stale(SWR)
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.k] })],
+);
+
+// 历史日价,**按 tokenRef 全局存**(#199 定案)。一行 = 「某个上游命名的币在某个 UTC 日值多少」。
+// 过去某日的价不可变 → 永久缓存,无 TTL 列(今日桶可变,调用方不落此表)。
+//
+// **表里没有 token_id。** token_id 是 per-user 的随机 UUID,拿它当键的话每个用户各存一份
+// BTC 的历史、各自回源补;更要命的是历史不记「是谁给的价」,换源(cgk → cmc)之后同一条
+// 曲线前半段一家后半段另一家,接缝跳变还查不出原因。按 tokenRef 存则两家各成一条序列。
+// `TokenPriceStore.getDaily(tokenId)` 收的仍是 token_id —— 翻成本表的键在实现里做。
+//
+// **一列而不是拆两列**(与 global_token_ref_index 相反):这里只有正查,条件永远是
+// `token_ref = ? AND day_bucket IN (…)`,没有按命名者单独筛的场景,拆列没有收益。
+//
+// 与 token_price_history 并存到 #202(那张按 (source, identifier) 存,旧 oracle 还在用)——
+// 历史日价是纯缓存、可从上游重建,故不迁数据,新表从空开始。
+export const tokenDailyPrices = sqliteTable(
+  "token_daily_prices",
+  {
+    tokenRef: text("token_ref").notNull(), // 完整 tokenRef,如 coingecko/bitcoin
+    dayBucket: integer("day_bucket").notNull(), // floor(atMs / 86_400_000),UTC 日索引
+    unitPrice: real("unit_price").notNull(), // 该日代表价(USD)
+  },
+  (t) => [primaryKey({ columns: [t.tokenRef, t.dayBucket] })],
 );
 
 // per-user 设置(Phase 3,#82):估值模式(自填价 vs 源价谁优先)。读带缺省(无行 → self-first),

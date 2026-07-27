@@ -1,18 +1,23 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { Tokens } from "@folio/oracle";
+import type { Tokens } from "@folio/oracle2";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/account-view";
 import { deriveLiveAccountTotals, liveValue } from "../src/lib/live-value";
 
-const bal = (over: Partial<OverviewBalance>): OverviewBalance => ({
-  id: crypto.randomUUID(),
-  symbol: "BTC",
-  amount: 0,
-  usdValue: 0,
-  kind: "spot",
-  metaJson: null,
-  ...over,
-});
+const bal = (over: Partial<OverviewBalance>): OverviewBalance => {
+  const symbol = over.symbol ?? "BTC";
+  return {
+    id: crypto.randomUUID(),
+    symbol,
+    amount: 0,
+    usdValue: 0,
+    kind: "spot",
+    // 认定在写快照时定死(#201);测试里 id 用 `tk-<SYMBOL>`,好让假 tokens 按它供价。
+    tokenId: `tk-${symbol}`,
+    metaJson: null,
+    ...over,
+  };
+};
 const account = (id: string) =>
   ({
     id,
@@ -55,13 +60,25 @@ describe("liveValue", () => {
 
 describe("deriveLiveAccountTotals", () => {
   // 假 tokens:BTC 现价 65000、USDC 1;其余无价(undefined)。按 symbol 供源价(cache-only)。
+  // 按 token_id 供价(#201):测试里 id 直接用 `tk-<SYMBOL>`。
+  const priceById: Record<string, number> = { "tk-BTC": 65000, "tk-USDC": 1 };
   const tokens = {
-    async enrich(assets: ({ symbol: string } | null)[]) {
-      return assets.map((a) => {
-        if (!a) return undefined;
-        const price = a.symbol === "BTC" ? 65000 : a.symbol === "USDC" ? 1 : undefined;
-        return { ref: null, priceStale: false, unitPrice: price };
-      });
+    async enrich(ids: readonly string[]) {
+      return new Map(
+        ids.map((id) => [
+          id,
+          {
+            id,
+            ref: "coingecko/x",
+            symbol: id.replace("tk-", ""),
+            name: id,
+            price:
+              priceById[id] === undefined
+                ? undefined
+                : { unitPrice: priceById[id], asOf: 0, stale: false },
+          },
+        ]),
+      );
     },
   } as unknown as Tokens;
 

@@ -1,5 +1,5 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { Tokens } from "@folio/oracle";
+import type { Tokens } from "@folio/oracle2";
 import { describe, expect, it } from "vitest";
 import { deriveLiveAccountTotals } from "../src/lib/live-value";
 import type { CredsToken } from "../src/lib/manual-activity";
@@ -76,46 +76,58 @@ describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
   const account = () =>
     ({ id: "m1", label: "m1", connectorId: "manual", archivedAt: null }) as unknown as AccountSafe;
   // 假 tokens:BTC 现价 65000,其余无价。
-  const tokensWithBtc = {
-    async enrich(assets: ({ symbol: string } | null)[]) {
-      return assets.map((a) =>
-        a?.symbol === "BTC"
-          ? { ref: null, priceStale: false, unitPrice: 65000 }
-          : { ref: null, priceStale: false, unitPrice: undefined },
-      );
-    },
-  } as unknown as Tokens;
-  const tokensNoPrice = {
-    async enrich(assets: ({ symbol: string } | null)[]) {
-      return assets.map(() => ({ ref: null, priceStale: false, unitPrice: undefined }));
-    },
-  } as unknown as Tokens;
+  // 按 token_id 供价(#201):id 用 `tk-<SYMBOL>`。
+  const fakeTokens = (priceById: Record<string, number>) =>
+    ({
+      async enrich(ids: readonly string[]) {
+        return new Map(
+          ids.map((id) => [
+            id,
+            {
+              id,
+              ref: "coingecko/x",
+              symbol: id.replace("tk-", ""),
+              name: id,
+              price:
+                priceById[id] === undefined
+                  ? undefined
+                  : { unitPrice: priceById[id], asOf: 0, stale: false },
+            },
+          ]),
+        );
+      },
+    }) as unknown as Tokens;
+  const tokensWithBtc = fakeTokens({ "tk-BTC": 65000 });
+  const tokensNoPrice = fakeTokens({});
 
-  // manual 账户:0.5 BTC,建合成时无现价 → 烘焙 usdValue = 0.5×30000 = 15000。
-  const byAccount = () =>
+  // 手记账户:0.5 BTC。**现价在 injectManualSnapshots 那一步就烘焙进 usdValue 了**
+  // (它仍走旧参考层,#203 才把手记并入 tokens),所以这里模拟两种入库形态。
+  const byAccount = (bakedPrice?: number) =>
     new Map<string, SnapshotWithBalances>([
       [
         "m1",
         buildManualSnapshot(
           "m1",
           [{ symbol: "BTC", unitPrice: 30000, amount: 0.5, identifier: "bitcoin" }],
-          [undefined],
+          [bakedPrice],
           TS,
         ),
       ],
     ]);
 
-  it("有实时源价 → 取源价(0.5×65000),不用烘焙的旧值", async () => {
+  // 手记的合成行没有 token_id(它不经写快照、不过 mint)→ 现推取不到源价,退回烘焙好的 usdValue。
+  // 净值因此仍是实时的:实时那一步只是提前到了 inject。
+  it("烘焙进的现价即最终净值(0.5×65000)", async () => {
     const totals = await deriveLiveAccountTotals(
       [account()],
-      byAccount(),
+      byAccount(65000),
       tokensWithBtc,
       "self-first",
     );
     expect(totals.get("m1")).toBe(32500);
   });
 
-  it("源价缺失 → 回退烘焙进 usdValue 的值(0.5×30000)", async () => {
+  it("inject 时也没取到价 → 回退 token 自填单价(0.5×30000)", async () => {
     const totals = await deriveLiveAccountTotals(
       [account()],
       byAccount(),

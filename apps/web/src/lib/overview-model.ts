@@ -1,20 +1,21 @@
 import { PerpEquityMeta } from "@folio/connectors-basic";
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { AssetRef, Tokens, ValuationMode } from "@folio/oracle";
+import type { ValuationMode } from "@folio/oracle";
 import type { Platforms } from "@folio/oracle-basic";
+import type { TokenRecord, Tokens } from "@folio/oracle2";
 import { type OverviewBalance, toAccountSections } from "./account-view";
 import { type AggInput, buildCanonicalHoldings } from "./aggregate";
 import { isFungible, viewKind } from "./balance-kind";
 import { deriveLiveAccountTotals, liveValue } from "./live-value";
 import { platformLogoUrl, tokenLogoUrl } from "./logo";
-import { defiAssetRef } from "./tokens";
+import { defiTokenId } from "./tokens";
 
 // 总览读模型(纯 —— 依赖注入,无 cloudflare env,可脱离 server fn 单测)。
 // 持仓区 = 跨账户按 canonical 代币聚合(spot/manual/CEX/perp 权益);DeFi 仓位 + perp 敞口走
 // 每账户次级分区(不进聚合)。总额 = 各账户最新快照 totalUsd 之和。解析/汇率读时 cache-only。
 
 export interface OverviewDeps {
-  tokens: Tokens; // .enrich:tokenRef → ref/price(cache-only)
+  tokens: Tokens; // .enrich:token_id → 整行(info + 价,cache-only)
   platforms: Platforms; // .resolve:platform key → name+logo(含兜底)——仅链键(evm:<id> / <slug>)
   // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platforms。
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
@@ -37,18 +38,11 @@ export function isPerpEquity(metaJson: string | null): boolean {
 interface Elig {
   account: AccountSafe;
   b: OverviewBalance;
-  asset: AssetRef;
   margin: boolean;
 }
-type Enrichment = Awaited<ReturnType<Tokens["enrich"]>>[number];
-type EnrichedElig = Elig & { e: Enrichment | undefined };
 
-// 一次批量富化,并把结果**附回**每笔 eligible。下标配对只在此一处、紧挨 enrich 调用 ——
-// 调用方拿到的是单一自带富化的列表,再也不用维护两个必须同序的并行数组(消除隐性 locality 隐患)。
-async function enrichEligible(eligible: Elig[], tokens: Tokens): Promise<EnrichedElig[]> {
-  const enriched = await tokens.enrich(eligible.map((x) => x.asset));
-  return eligible.map((x, i) => ({ ...x, e: enriched[i] }));
-}
+// 富化结果**按 token_id 查表**取回。以前是「enrich 返回同序数组 + 下标配对」,那是个长期的
+// locality 隐患(克隆/过滤一步就全错位);认定挪到写路径之后,行自己带着 id,配对问题不存在了。
 
 export interface OverviewView {
   holdings: ReturnType<typeof buildCanonicalHoldings>;
@@ -82,16 +76,11 @@ export async function buildOverview(
       const vk = viewKind(b);
       if (isFungible(vk)) {
         // 现货 / UTXO(BTC)→ 进跨账户聚合
-        eligible.push({
-          account,
-          b,
-          asset: { symbol: b.symbol, tokenRef: b.tokenRef ?? undefined },
-          margin: false,
-        });
+        eligible.push({ account, b, margin: false });
       } else if (vk === "perp_equity" && isPerpEquity(b.metaJson)) {
         // perp 权益(账户净值载体)→ 进聚合但标 margin;仓位行(perp_position)/ defi 不进。
         // meta 不可解析(脏/损坏遗留行)则排除,与明细卡一致。
-        eligible.push({ account, b, asset: { symbol: b.symbol }, margin: true });
+        eligible.push({ account, b, margin: true });
       }
     }
   }
@@ -101,23 +90,31 @@ export async function buildOverview(
   // 每批的 D1 往返延迟(code review #8)。defi 批只认 tokenRef 明确的行(defiAssetRef 门)。
   const defiFlat = accounts.flatMap((a) =>
     balancesOf(a.id).flatMap((b) => {
-      const ref = defiAssetRef(b);
-      return ref ? [{ b, ref }] : [];
+      const id = defiTokenId(b);
+      return id ? [{ b, id }] : [];
     }),
   );
-  const [rows, defiEnriched, liveTotals] = await Promise.all([
-    enrichEligible(eligible, tokens),
-    tokens.enrich(defiFlat.map((x) => x.ref)),
+  // 聚合行与 defi 行的 token_id 合成一批去重后一次读 —— 两处都是「按 id 读整行」,没必要两趟。
+  const idsToEnrich = [
+    ...new Set([
+      ...eligible.flatMap((x) => (x.b.tokenId ? [x.b.tokenId] : [])),
+      ...defiFlat.map((x) => x.id),
+    ]),
+  ];
+  const [enriched, liveTotals] = await Promise.all([
+    tokens.enrich(idsToEnrich),
     deriveLiveAccountTotals(accounts, byAccount, tokens, mode),
   ]);
+  const recordOf = (b: { tokenId?: string | null }): TokenRecord | undefined =>
+    b.tokenId ? enriched.get(b.tokenId) : undefined;
+  const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
   const aggInputs: AggInput[] = rows.map(({ account, b, margin, e }) => ({
     symbol: b.symbol,
     amount: b.amount,
     // 读时现推(不落库):按 mode + 实时源价(cache-only)重算 —— self-first 下 enrich-not-reprice
     // 行 ≡ 冻结值,盯市行(manual/bitcoin)取实时源价。aggregate 本身不改,只喂现推后的 value。
-    value: liveValue(b, e?.unitPrice, mode),
+    value: liveValue(b, e?.price?.unitPrice, mode),
     kind: viewKind(b), // 归一到 5-kind(并存期兼容遗留)
-    tokenRef: b.tokenRef,
     platform: b.platform, // provider 直接报的链 ∪ 场馆(#193)
     isMargin: margin,
     account: {
@@ -126,13 +123,12 @@ export async function buildOverview(
       connectorId: account.connectorId,
       network: account.network,
     },
-    tokenId: e?.id, // 内部代币行 id → 聚合的 vendor 中立归并键(#73)
-    ref: e?.ref,
+    tokenId: b.tokenId, // **归并键**:写快照时定死(ADR 0021),不再由富化结果反推
     name: e?.name,
     logo: e ? tokenLogoUrl(e) : undefined, // 上游 URL → folio 代理(隐私;见 ADR 0008)
-    change24h: e?.change24h,
-    unitPrice: e?.unitPrice, // 详情头部 meta:单价
-    marketCapRank: e?.marketCapRank, // 详情头部 meta:市值排名
+    change24h: e?.price?.change24h,
+    unitPrice: e?.price?.unitPrice, // 详情头部 meta:单价
+    marketCapRank: e?.price?.marketCapRank, // 详情头部 meta:市值排名
   }));
   const holdings = buildCanonicalHoldings(aggInputs);
 
@@ -158,12 +154,13 @@ export async function buildOverview(
   }
 
   const holdingsSubtotal = holdings.reduce((sum, h) => sum + h.totalValue, 0);
-  const pricesStale = rows.some(({ e }) => e?.priceStale);
+  // 价 stale = 有价但过期,或**认得出来却压根没价**(新层刚建行时就是这样)→ 客户端触发一次刷新。
+  const pricesStale = rows.some(({ b, e }) => b.tokenId != null && (e?.price?.stale ?? true));
 
   // 3) 次级分区(每账户 defi 分组 + perp 敞口;perp 权益已进 Holdings → 此处渲染 positions
   // 与权益)。change24h 按行 id 附回(不按对象引用键——那只在 balancesOf 恰好返回同批对象时
   // 成立,克隆/规整一步就全落空,code review #9)。
-  const defiChange = new Map(defiFlat.map((x, i) => [x.b.id, defiEnriched[i]?.change24h]));
+  const defiChange = new Map(defiFlat.map((x) => [x.b.id, enriched.get(x.id)?.price?.change24h]));
   const withDefiChange = (bs: OverviewBalance[]) =>
     bs.map((b) => (defiChange.has(b.id) ? { ...b, change24h: defiChange.get(b.id) } : b));
 

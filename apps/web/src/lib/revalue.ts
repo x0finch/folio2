@@ -1,5 +1,6 @@
 import type { Balance } from "@folio/connectors-basic";
-import { type Tokens, type ValuationMode, valuate } from "@folio/oracle";
+import { type ValuationMode, valuate } from "@folio/oracle";
+import type { Tokens } from "@folio/oracle2";
 
 // 写快照前的估值(oracle 多源,Phase 3)。对每笔持仓:
 //   · 非盯市类型 → 捕获 selfPrice(自带单价 = price ?? value/amount),作估值「原料」随 balance 落快照;
@@ -10,10 +11,15 @@ import { type Tokens, type ValuationMode, valuate } from "@folio/oracle";
 //(不再靠 app 侧硬编码名单;第三方 connector 自带该语义 —— 见 @folio/connectors-basic ConnectorValuation)。
 // 源价仅在需要时取(self-first 且无自带价 / source-first 恒取)—— self-first 下 CEX 有自带价即不回源,
 // 与旧行为同开销、同结果。只依赖 tokens 实例(无 db/cloudflare)→ 可纯测。mode 由调用方按 per-user 设置注入,缺省 self-first。
+//
+// **身份从 `idByRef` 来,不在这里解析**(#202)。以前这里调 `tokens.resolve({symbol, tokenRef})` ——
+// 那是读时解析的最后一处残留:同一笔持仓的身份在写路径上被算了两遍(revalue 一次、写快照一次),
+// 而且两遍中间有别的账户在并发建行,答案可能不一致。现在 mint 在上一步跑完、把答案传下来。
 export async function revalue(
   tokens: Tokens,
   markToMarket: boolean,
   balances: Balance[],
+  idByRef: ReadonlyMap<string, string>,
   mode: ValuationMode = "self-first",
 ): Promise<Balance[]> {
   return Promise.all(
@@ -29,11 +35,9 @@ export async function revalue(
       const needSource = mode === "source-first" || selfPrice == null;
       let sourcePrice: number | undefined;
       if (needSource) {
-        const res = await tokens.resolve(
-          { symbol: b.symbol, tokenRef: b.tokenRef },
-          { lazy: true },
-        );
-        if (res.ref) sourcePrice = (await tokens.priceOf(res.ref))?.unitPrice;
+        // 认不出来的币(mint 没给出 id)拿不到源价 —— 退回自带价 / provider 原值,不猜。
+        const tokenId = b.tokenRef ? idByRef.get(b.tokenRef) : undefined;
+        if (tokenId) sourcePrice = (await tokens.priceOf(tokenId))?.unitPrice;
       }
       const v = valuate(b.amount, selfPrice, sourcePrice, mode);
       return v ? { ...b, selfPrice, price: v.unitPrice, value: v.value } : { ...b, selfPrice };

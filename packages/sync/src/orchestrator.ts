@@ -27,6 +27,9 @@ export interface SyncLogger {
   warning(message: string, properties?: Record<string, unknown>): void;
   error(message: string, properties?: Record<string, unknown>): void;
 }
+// 没有注入 mint(或它抛错)时的空答案。共享一个不可变实例 —— 每账户新建一个空 Map 没有意义。
+const EMPTY_IDS: ReadonlyMap<string, string> = new Map();
+
 const noopLogger: SyncLogger = {
   debug() {},
   info() {},
@@ -47,10 +50,27 @@ export interface SyncDeps {
   fetchBalances: (account: AccountSafe, stored: Record<string, string>) => Promise<FetchOutcome>;
   sleep?: (ms: number) => Promise<void>; // 默认 setTimeout;测试注入即时/捕获版做确定性重试测试
   log?: SyncLogger; // 默认 no-op;app 注入 LogTape logger(见 buildSyncDeps)
+  // 认币(ADR 0021 / #200):一批 tokenRef → 各自的代币行 id。**跑在 revalue 之前、一轮同步只跑一次。**
+  //
+  // 为什么是独立一步而不是塞在 writeSnapshot 里(#200 当初那样):`revalue` 要按币问价,而新参考层的
+  // `priceOf` 收 token_id —— 若 mint 留在写快照那头,revalue 就得自己再 mint 一遍,同一轮同步认两次
+  // (两次结果还可能不一致,因为中间有别的账户在并发建行)。提到前面之后,认定这一轮只发生一次,
+  // 下游两个消费者(revalue 定价、写快照落列)共用同一份答案。
+  //
+  // 返回 `tokenRef → tokenId`;认不出来的 ref 不出现在 map 里。best-effort:抛错当成空 map ——
+  // 快照照落(新列留空)、价退回 provider 自带,认币故障不该让一轮同步丢数据。
+  // @folio/sync 自己不依赖参考层,实现由 app 注入(它才是编排点)。
+  mint?: (userId: string, balances: Balance[]) => Promise<Map<string, string>>;
   // 写快照前重估余额(P7.4.2 / Phase 3):app 注入 token 感知实现,按 per-user 估值模式定 value +
   // 捕获 selfPrice(估值原料)。userId 显式带 —— cron 路径共享一个 deps 跨多用户,模式按 userId 解析。
   // best-effort:抛错则保留 provider 原值,不让定价故障拖垮同步。@folio/sync 本身不依赖 token 层。
-  revalue?: (userId: string, accountType: string, balances: Balance[]) => Promise<Balance[]>;
+  // `idByRef` 由上一步的 mint 给出 —— 实现据它拿 token_id 去问价,不自己解析身份。
+  revalue?: (
+    userId: string,
+    accountType: string,
+    balances: Balance[],
+    idByRef: ReadonlyMap<string, string>,
+  ) => Promise<Balance[]>;
 }
 
 export interface AccountSyncResult {
@@ -155,11 +175,26 @@ export async function syncAccount(
       log.warning("account sync skipped: needs credentials", ctxFields);
       return { accountId: account.id, ok: false, skipped: true };
     }
-    // 重估(P7.4.2):manual 用市场价改 usdValue,再重算 totalUsd。best-effort —— 失败保留 provider 原值。
     let { balances, totalUsd } = outcome;
+
+    // 认币(ADR 0021 / #200):**先于 revalue**,一轮同步只跑一次。见 SyncDeps.mint 的注释。
+    // best-effort:失败当空 map —— 快照照落(新列留空)、价退回 provider 自带。
+    let idByRef: ReadonlyMap<string, string> = EMPTY_IDS;
+    if (deps.mint) {
+      try {
+        idByRef = await deps.mint(userId, balances);
+      } catch (e) {
+        log.warning("mint failed; writing snapshot without token_id", {
+          ...ctxFields,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    // 重估(P7.4.2):manual 用市场价改 usdValue,再重算 totalUsd。best-effort —— 失败保留 provider 原值。
     if (deps.revalue) {
       try {
-        balances = await deps.revalue(userId, account.connectorId, balances);
+        balances = await deps.revalue(userId, account.connectorId, balances, idByRef);
         totalUsd = balances.reduce((sum, b) => sum + b.value, 0);
       } catch (e) {
         log.warning("revalue failed; keeping provider values", {
@@ -190,6 +225,8 @@ export async function syncAccount(
         // provider 自带单价(估值原料,Phase 3):revalue 捕获,随快照落 self_price。
         selfPrice: b.selfPrice,
         tokenRef: b.tokenRef,
+        // 认定冻进快照:用的就是 revalue 定价时那一份答案(同一轮只 mint 一次)。
+        tokenId: b.tokenRef ? idByRef.get(b.tokenRef) : undefined,
         meta: "meta" in b ? b.meta : undefined,
         note: b.note,
       })),

@@ -1,10 +1,10 @@
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
-import { displayAssetRef } from "../tokens";
+import { displayTokenIds } from "../tokens";
 import { userDisplayBalances } from "../user-balances";
 import { db } from "./internal/db";
 import { manualBalancesForWarm } from "./internal/manual";
-import { oracle } from "./internal/oracle";
+import { oracleFor } from "./internal/oracle2";
 import { requireAuth } from "./internal/require-auth";
 
 const priceLog = getLogger(["folio", "web", "prices"]);
@@ -21,9 +21,9 @@ export const refreshStalePrices = createServerFn({ method: "POST" })
     // 三门同源(userDisplayBalances):manual 已退出快照但其合成余额经 injectManualSnapshots 进 enrich 门 →
     // refresh 门必须同源覆盖,否则 manual 代币被标 stale 却刷不到、pricesStale 永清不掉、客户端空转刷新。
     const manualBalances = await manualBalancesForWarm(context.userId, accounts);
-    // 与 enrichBalances 同门(displayAssetRef):defi 行标了 stale 就必须刷得到。
-    const assets = userDisplayBalances(snapshots, manualBalances).map(displayAssetRef);
-    const refreshed = await oracle.tokens.refreshStalePrices(assets);
+    // 与 enrichBalances 同门(displayTokenId):defi 行标了 stale 就必须刷得到。
+    const ids = displayTokenIds(userDisplayBalances(snapshots, manualBalances));
+    const refreshed = await oracleFor(context.userId).tokens.refreshStalePrices(ids);
     priceLog.info("stale prices refreshed", { refreshed });
     return { refreshed };
   });

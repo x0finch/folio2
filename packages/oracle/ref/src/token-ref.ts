@@ -37,8 +37,22 @@ export type TokenRefParts =
   | { kind: "contract"; namer: string; address: string }
   | { kind: "opaque"; namer: string; id: string };
 
-// parse 的输出多一支 `unknown`:任何读不懂的串都得有个去处,故永不 throw。
-export type ParsedTokenRef = TokenRefParts | { kind: "unknown"; raw: string };
+// 两段形:只有左右两段,不表态右段是什么。按两列存的表读写的就是这个形状。
+export interface TokenRefSegments {
+  namer: string;
+  localName: string;
+}
+
+// parse 的输出:三支各自多带一个 `localName`(右段的**规范形**),外加一支 `unknown` ——
+// 任何读不懂的串都得有个去处,故永不 throw。
+//
+// 为什么 parse 要给 localName 而 `TokenRefParts` 不带:按两列存 tokenRef 的表(`token_refs`,
+// ADR 0022)要的正是这两段,而 parse 本来就在半路上算出过它。不给的话调用方只能 parse → format
+// → 再 split 一次,绕一圈把已经有的东西捡回来。反过来 `TokenRefParts` 是**造串的入参**
+// (`formatTokenRef`),那里给 localName 就是让同一件事有两个可以互相矛盾的写法。
+export type ParsedTokenRef =
+  | (TokenRefParts & { localName: string })
+  | { kind: "unknown"; raw: string };
 
 /**
  * 合约地址的大小写是**按链**的:EVM 的 hex 大小写不敏感,小写成稳定的 key;
@@ -67,7 +81,23 @@ export const tokenRef = {
   opaque: (namer: string, id: string): TokenRef => `${normalize(namer)}${SEP}${id.trim()}`,
 } as const;
 
-export function formatTokenRef(ref: TokenRefParts): TokenRef {
+/**
+ * 造串,收**两种描述方式**:
+ *   语义形 `{kind, namer, address|id}` —— 知道这是个什么东西时用(改一个字段再拼回去)。
+ *   两段形 `{namer, localName}` —— 只有两段、不关心右段是什么时用。
+ *
+ * 后者是给**按两列存 tokenRef 的表**的(`token_refs`:拆开存是为了能按 namer 单独筛 /
+ * 反查某个 Token 在某命名者下的叫法,见 ADR 0022)。存储层因此**不必知道右段的文法** ——
+ * 不用 switch `native` / `contract:`,也不用知道分隔符是斜杠;拆的那一半直接读
+ * `parseTokenRef` 的 `namer` / `localName`(读不懂 → `kind === "unknown"`,那种串不进表)。
+ *
+ * 两条路对 parse 的输出**结果相同**(它同时带 `kind` 和 `localName`)—— round-trip 用例钉着这件事。
+ * 两段形**不做文法校验**:表里存的本来就只有规范形,那是写入侧的责任(见 `tokenRef.*` 构造函数)。
+ */
+export function formatTokenRef(ref: TokenRefParts | TokenRefSegments): TokenRef {
+  // `kind` 就是「说话人表没表态右段是什么」的判据:语义形有,两段形没有。
+  const isSemantic = "kind" in ref;
+  if (!isSemantic) return `${normalize(ref.namer)}${SEP}${ref.localName.trim()}`;
   switch (ref.kind) {
     case "native":
       return tokenRef.native(ref.namer);
@@ -88,18 +118,20 @@ export function parseTokenRef(raw: TokenRef): ParsedTokenRef {
   const localName = (segments[1] ?? "").trim();
   if (!namer || !localName) return unknown;
 
-  if (localName.toLowerCase() === NATIVE) return { kind: "native", namer };
+  // 每一支的 localName 都给**规范形**(`native` 小写、EVM 地址小写),不是原样回抛 ——
+  // 它会被直接写进表,而表里必须只有规范形,否则同一个地址大小写不同就是两行。
+  if (localName.toLowerCase() === NATIVE) return { kind: "native", namer, localName: NATIVE };
 
   if (localName.toLowerCase().startsWith(CONTRACT)) {
     const address = normalizeAddress(namer, localName.slice(CONTRACT.length));
-    return address ? { kind: "contract", namer, address } : unknown;
+    return address ? { kind: "contract", namer, address, localName: CONTRACT + address } : unknown;
   }
 
   // 带冒号但不是 `contract:` —— 旧文法(`erc20:` / `token:` / `native:`)或哪个 producer 自己
   // 编的词。不容旧、也不容自创:判 unknown,而不是静默读成一个 id 里带冒号的不透明币。
   if (localName.includes(":")) return unknown;
 
-  return { kind: "opaque", namer, id: localName };
+  return { kind: "opaque", namer, id: localName, localName };
 }
 
 function normalize(s: string): string {

@@ -17,7 +17,7 @@ import {
   type HistoryToken,
 } from "../../manual-history";
 import { buildManualSnapshot } from "../../manual-snapshot";
-import { type BalanceLike, balanceToAssetRef } from "../../tokens";
+import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
 import { oracle } from "./oracle";
 
@@ -108,8 +108,12 @@ export async function injectManualSnapshots(
   // 先各建一份(prices 全缺)拿 assetRef,全部账户**一次批量** enrich(cache-only,与 deriveLiveAccountTotals
   // 同门,避免逐账户串行 D1 往返),再按账户切回各自现价重建终版。
   const drafts = list.map(({ id, tokens }) => buildManualSnapshot(id, tokens, [], takenAt));
+  // 手记仍走**旧参考层**(#203 才并入 tokens:那时它会跟其他持仓一样在写路径上 mint)。
+  // 旧 enrich 收 `AssetRef`,而 lib/tokens 的门已全部改成返回 token_id → 这里就地拼。
   const enriched = await oracle.tokens.enrich(
-    drafts.flatMap((d) => d.balances).map(balanceToAssetRef),
+    drafts
+      .flatMap((d) => d.balances)
+      .map((b) => (b.tokenRef ? { symbol: b.symbol, tokenRef: b.tokenRef } : null)),
   );
   let i = 0;
   list.forEach(({ id, tokens }, k) => {

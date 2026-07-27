@@ -4,6 +4,8 @@
 // 客户端零第三方 CDN 引用;命中边缘缓存(Workers Cache)时连本函数都不进。
 
 const CACHE_HIT = "public, max-age=86400, stale-while-revalidate=2592000"; // 1d 新鲜 + 30d SWR
+// 按用户收口的端点(代币 logo,#201):不能进共享缓存,但浏览器自己缓存照旧。
+const CACHE_HIT_PRIVATE = "private, max-age=86400, stale-while-revalidate=2592000";
 const CACHE_404 = "public, max-age=3600"; // 短负缓存:图确实没了
 const NO_STORE = "no-store"; // 瞬时故障,可重试
 
@@ -23,6 +25,8 @@ export async function serveLogo(
   resolveUpstream: () => Promise<string | undefined>,
   kind: "token" | "platform",
   id: string,
+  // private:该响应按用户收口(见代币 logo 路由),不得进共享/边缘缓存。
+  opts?: { private?: boolean },
 ): Promise<Response> {
   let upstream: string | undefined;
   try {
@@ -48,7 +52,7 @@ export async function serveLogo(
     headers: {
       "content-type": safeContentType(res.headers.get("content-type")),
       "x-content-type-options": "nosniff",
-      "cache-control": CACHE_HIT,
+      "cache-control": opts?.private ? CACHE_HIT_PRIVATE : CACHE_HIT,
       "cache-tag": `logo:${kind}:${id}`,
     },
   });

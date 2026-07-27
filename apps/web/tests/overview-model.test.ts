@@ -1,7 +1,6 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { Tokens } from "@folio/oracle";
-import { cgkRef } from "@folio/oracle";
 import type { Platforms } from "@folio/oracle-basic";
+import type { TokenRecord, Tokens } from "@folio/oracle2";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/account-view";
 import { buildOverview } from "../src/lib/overview-model";
@@ -12,12 +11,14 @@ import { buildOverview } from "../src/lib/overview-model";
 const account = (id: string, label: string, connectorId = "evm", network: string | null = null) =>
   ({ id, label, connectorId, network, archivedAt: null }) as unknown as AccountSafe;
 
+// 默认都带同一个 token_id —— 认定在写快照时就定死了,读端拿到的就是这个(#201)。
 const bal = (over: Partial<OverviewBalance>): OverviewBalance => ({
   id: crypto.randomUUID(),
   symbol: "USDC",
   amount: 0,
   usdValue: 0,
   kind: "spot",
+  tokenId: "usdc",
   metaJson: null,
   ...over,
 });
@@ -28,16 +29,18 @@ const snap = (accountId: string, totalUsd: number, balances: OverviewBalance[]) 
     balances,
   }) as unknown as SnapshotWithBalances;
 
-// 假 tokens:每个 asset 都解析成 usdc 组(证明 enrich 结果被正确附回并进聚合)。
+// 假 tokens:**按 token_id 查表**返回整行(证明富化结果被正确挂回并进聚合)。
+// 不给价 → liveValue 退回冻结的 usdValue,与迁移前这个 fake 的行为一致。
+const record = (id: string): TokenRecord => ({
+  id,
+  ref: "coingecko/usd-coin",
+  symbol: "USDC",
+  name: "USD Coin",
+  logo: "u.png",
+});
 const tokens = {
-  async enrich(assets: { symbol: string; tokenRef?: string }[]) {
-    return assets.map(() => ({
-      ref: cgkRef("usd-coin"),
-      group: { id: "usdc", displaySymbol: "USDC", name: "USD Coin" },
-      name: "USD Coin",
-      logo: "u.png",
-      priceStale: false,
-    }));
+  async enrich(ids: readonly string[]) {
+    return new Map(ids.map((id) => [id, record(id)]));
   },
 } as unknown as Tokens;
 
@@ -106,8 +109,41 @@ describe("buildOverview", () => {
 
     expect(view.totalUsd).toBe(150);
     expect(view.holdingsSubtotal).toBe(150);
-    expect(view.pricesStale).toBe(false);
+    // 这个 fake 不给价 → 「有身份、无价」= 该刷(见下面单独一条)。
+    expect(view.pricesStale).toBe(true);
     expect(view.sections).toHaveLength(0); // 无 defi/perp
+  });
+
+  // pricesStale 的口径:有 token_id **却拿不到新鲜价**就该让客户端刷一次。
+  // 新层刚 mint 出的行正是这样(有身份、无价),漏掉它首屏就永远没价而且没人去取。
+  it("价新鲜 → 不标 stale;有身份但没价 / 价过期 → 标 stale", async () => {
+    const accounts = [account("a1", "W")];
+    const one = (over: Partial<OverviewBalance>) =>
+      new Map([["a1", snap("a1", 100, [bal({ amount: 100, usdValue: 100, ...over })])]]);
+    const withPrice = (stale: boolean) =>
+      ({
+        async enrich(ids: readonly string[]) {
+          return new Map(
+            ids.map((id) => [id, { ...record(id), price: { unitPrice: 1, asOf: 0, stale } }]),
+          );
+        },
+      }) as unknown as Tokens;
+
+    expect(
+      (await buildOverview(accounts, one({}), { tokens: withPrice(false), platforms })).pricesStale,
+    ).toBe(false);
+    expect(
+      (await buildOverview(accounts, one({}), { tokens: withPrice(true), platforms })).pricesStale,
+    ).toBe(true);
+    // 没有身份的行不算 stale —— 刷了也没用(它压根没有可查的键)。
+    expect(
+      (
+        await buildOverview(accounts, one({ tokenId: null }), {
+          tokens: withPrice(false),
+          platforms,
+        })
+      ).pricesStale,
+    ).toBe(false);
   });
 
   it("场馆键(= connectorId)走 connectorMeta 装饰,不进 platforms.resolve(#52)", async () => {
@@ -216,9 +252,17 @@ describe("buildOverview", () => {
 // defi 不进聚合,故单独一批 enrich;按 tokenRef 命中的行带 change24h,未命中 undefined。
 describe("buildOverview —— defi 行 change24h 富化", () => {
   it("defi 行经 enrich 附回 change24h 进 sections", async () => {
+    // 只有 tk-staked 有价 → 只有那一行拿到 change24h;另一行(LP 份额)没有身份,不该被瞎猜。
     const defiTokens = {
-      async enrich(assets: { symbol: string; tokenRef?: string }[]) {
-        return assets.map((a) => (a?.tokenRef ? { change24h: 2.5, priceStale: false } : undefined));
+      async enrich(ids: readonly string[]) {
+        return new Map(
+          ids
+            .filter((id) => id === "tk-staked")
+            .map((id) => [
+              id,
+              { ...record(id), price: { unitPrice: 1, change24h: 2.5, asOf: 0, stale: false } },
+            ]),
+        );
       },
     } as unknown as Tokens;
     const accounts = [account("w", "Wallet")];
@@ -231,7 +275,7 @@ describe("buildOverview —— defi 行 change24h 富化", () => {
             symbol: "stETH",
             amount: 1,
             usdValue: 100,
-            tokenRef: "evm:1/0xae7a",
+            tokenId: "tk-staked",
             metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
           }),
           bal({
@@ -239,6 +283,7 @@ describe("buildOverview —— defi 行 change24h 富化", () => {
             symbol: "LP",
             amount: 1,
             usdValue: 50,
+            tokenId: null, // LP 份额没有代币身份
             metaJson: JSON.stringify({ protocol: "Uniswap", positionType: "liquidity" }),
           }),
         ]),
