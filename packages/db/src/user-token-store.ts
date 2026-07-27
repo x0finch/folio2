@@ -1,4 +1,4 @@
-import { joinTokenRef, parseTokenRef } from "@folio/oracle-ref";
+import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import type {
   ProviderTokenSeed,
   TokenCandidate,
@@ -33,14 +33,14 @@ export interface UserTokenStoreOpts {
 const REF_PAIR_CHUNK = 40;
 
 // tokenRef 串 ↔ 两段列,拆/拼归文法包(见 @folio/oracle-ref)。
-// 本文件因此**不认识右段的文法** —— 不知道有 `native` / `contract:` 这回事,也不知道分隔符是什么。
+// 本文件因此**不认识右段的文法** —— 不知道有 `native` / `contract:` 这回事,也不知道分隔符是什么:
+// 拆只取 parse 的那两段、`kind` 一眼不看,拼走 formatTokenRef 的两段形。
 // 读不懂的串没有两段可拆 → 返回 undefined,不进表,读写都跳过。
-// **只取那两段,不看 `kind`** —— 本文件不认识 `native` / `contract:` 那套文法,也不该认识。
 const partsOf = (ref: string): { namer: string; localName: string } | undefined => {
   const parsed = parseTokenRef(ref);
   return parsed.kind === "unknown" ? undefined : parsed;
 };
-const refOf = joinTokenRef;
+const refOf = (namer: string, localName: string) => formatTokenRef({ namer, localName });
 
 export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): TokenStore {
   const db = getDb(env);

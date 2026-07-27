@@ -1,4 +1,4 @@
-import { joinTokenRef } from "@folio/oracle-ref";
+import { formatTokenRef } from "@folio/oracle-ref";
 import type { TokenPriceStore, TokenPriceWrite, TokenRecordPrice } from "@folio/oracle2-basic";
 import { and, eq, inArray } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
@@ -43,7 +43,7 @@ export function createUserTokenPriceStore(
         ),
       );
     const localName = rows[0]?.localName;
-    return localName === undefined ? undefined : joinTokenRef(namer, localName);
+    return localName === undefined ? undefined : formatTokenRef({ namer, localName });
   }
 
   return {

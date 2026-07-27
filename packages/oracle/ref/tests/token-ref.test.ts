@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTokenRef, joinTokenRef, parseTokenRef, type TokenRefParts, tokenRef } from "../src";
+import { formatTokenRef, parseTokenRef, type TokenRefParts, tokenRef } from "../src";
 
 // Solana 的真实地址 —— base58 大小写敏感,小写下去就不存在了。
 const SOL_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -169,9 +169,10 @@ describe("round-trip", () => {
       const parsed = parseTokenRef(formatTokenRef(ref));
       expect(parsed).toMatchObject(ref);
       // 多出来的那一个字段也得对得上:拼回去要还原成同一个串。
-      expect(parsed.kind !== "unknown" && joinTokenRef(parsed.namer, parsed.localName)).toBe(
-        formatTokenRef(ref),
-      );
+      expect(
+        parsed.kind !== "unknown" &&
+          formatTokenRef({ namer: parsed.namer, localName: parsed.localName }),
+      ).toBe(formatTokenRef(ref));
     }
   });
 
@@ -183,9 +184,9 @@ describe("round-trip", () => {
 });
 
 // 按两列存 tokenRef 的表(`token_refs`,ADR 0022)要拆开存、读出来拼回去。拆的那一半就是
-// `parseTokenRef` 的 `namer` / `localName`,拼回去是 `joinTokenRef`。存储层因此不必认识
+// `parseTokenRef` 的 `namer` / `localName`,拼回去是 `formatTokenRef` 的两段形。存储层因此不必认识
 // `native` / `contract:`,也不必知道分隔符是斜杠 —— 它只读那两个字段,`kind` 一眼都不看。
-describe("两段(namer / localName)与 joinTokenRef 的往返", () => {
+describe("两段(namer / localName)与 formatTokenRef 的往返", () => {
   it("三种形状都给得出两段,且 join 是它的逆", () => {
     for (const s of [
       "evm:1/native",
@@ -199,7 +200,7 @@ describe("两段(namer / localName)与 joinTokenRef 的往返", () => {
       const parts = parseTokenRef(s);
       expect(parts.kind).not.toBe("unknown");
       if (parts.kind === "unknown") continue;
-      expect(joinTokenRef(parts.namer, parts.localName)).toBe(s);
+      expect(formatTokenRef({ namer: parts.namer, localName: parts.localName })).toBe(s);
     }
   });
 

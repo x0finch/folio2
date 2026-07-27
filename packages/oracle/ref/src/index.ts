@@ -5,7 +5,6 @@
 
 export {
   formatTokenRef,
-  joinTokenRef,
   type ParsedTokenRef,
   parseTokenRef,
   type TokenRef,
