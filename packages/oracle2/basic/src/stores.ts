@@ -105,9 +105,22 @@ export interface GlobalTokenRefIndexStore {
 // 只三种键(见 services/cache.ts):`warm` / `fx:<币种>` / `platform:<键>`。
 // 整张删空功能不坏,只是慢一点。它留着 userId 的理由:per-user 缓存只装这个用户实际碰到的
 // (他选的那个币种、他有持仓的那几条链),全局表得装所有人的并集。
+// **批量与单键都有**,同 `TokenStore` 的 `getByIds` / `getById`。批量不是优化而是这一层的常态:
+// 展示一次要这个用户的全部平台,预热一次写十来个币种的汇率 —— 逐键往返会把 1 次 D1 变成 N 次,
+// 而且那 N 次落在总览的读路径上。TTL 按键给,所以「命中长、否定短」这种区分不需要绕开端口。
 export interface CacheStore {
   get(key: string): Promise<CacheEntry | undefined>;
+  // miss 的键不出现在结果里(同 `findByRefs` 的口径)。
+  getMany(keys: readonly string[]): Promise<Map<string, CacheEntry>>;
   put(key: string, value: unknown, ttlMs: number): Promise<void>;
+  // 一次写多个键,各带自己的 TTL。实现须**一个批次**发出去(D1 `batch()`)。
+  putMany(writes: readonly CacheWrite[]): Promise<void>;
+}
+
+export interface CacheWrite {
+  key: string;
+  value: unknown;
+  ttlMs: number;
 }
 
 // 过期不删、读出带 stale —— 与价的 SWR 同一套语义,由调用方决定要不要用旧值。

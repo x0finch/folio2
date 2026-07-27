@@ -46,10 +46,22 @@ describe("resolve —— 读", () => {
     expect(upstream.fetches).toBe(1);
   });
 
+  it("**一次读拿全** —— 问几个平台都只碰缓存一次", async () => {
+    const cache = fakeCacheStore();
+    const p = createPlatforms({ cache, upstream: fakePlatformUpstream(CHAINS) });
+    await p.warm(["evm:1", "solana"]);
+    const before = cache.reads;
+
+    await p.resolve(["evm:1", "solana", "manual", "evm:8453"]);
+    expect(cache.reads - before).toBe(1); // 四个键,一次读 —— 这条是总览的关键路径
+  });
+
   it("空输入 → 空 Map,不碰缓存", async () => {
     const cache = fakeCacheStore();
     const p = createPlatforms({ cache, upstream: fakePlatformUpstream(CHAINS) });
+    const before = cache.reads;
     expect(await p.resolve([])).toEqual(new Map());
+    expect(cache.reads).toBe(before);
   });
 });
 
@@ -71,7 +83,20 @@ describe("warm —— 写", () => {
     const p = createPlatforms({ cache, upstream: fakePlatformUpstream(CHAINS) });
 
     await p.warm(["evm:1"]);
-    expect([...cache.entries.keys()]).toEqual(["platform:evm:1"]);
+    expect([...cache.entries.keys()]).toEqual(["platform:evm:1"]); // 上游给了三条,只写这一条
+  });
+
+  it("**一个批次写回**,不是逐键往返", async () => {
+    const cache = fakeCacheStore();
+    const p = createPlatforms({ cache, upstream: fakePlatformUpstream(CHAINS) });
+
+    await p.warm(["evm:1", "solana", "nosuchchain"]);
+    expect(cache.writes).toBe(1); // 三个键(含一条否定)一个批次
+    expect([...cache.entries.keys()].sort()).toEqual([
+      "platform:evm:1",
+      "platform:nosuchchain",
+      "platform:solana",
+    ]);
   });
 
   it("上游没有这个键 → 写否定缓存(短 TTL),此后不再为它重拉整张表", async () => {

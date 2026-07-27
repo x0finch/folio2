@@ -27,6 +27,7 @@ export type { PlatformMeta } from "./platform";
 export type {
   CacheEntry,
   CacheStore,
+  CacheWrite,
   GlobalTokenRefIndexStore,
   TokenPriceStore,
   TokenStore,

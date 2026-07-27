@@ -16,7 +16,8 @@ export {
   candidatesBySymbol,
   type PlatformEntry,
   readFx,
-  readPlatform,
+  readFxFreshness,
+  readPlatforms,
   refreshCatalogue,
   topByRank,
   type WarmBlob,
@@ -24,7 +25,7 @@ export {
   warmCatalogue,
   warmMarkets,
   writeFx,
-  writePlatform,
+  writePlatforms,
 } from "./cache";
 export { type CandidateSourceDeps, createCandidateSource } from "./candidates";
 export { pickByConfidence } from "./confidence";

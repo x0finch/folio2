@@ -3,7 +3,8 @@ import { db } from "./db";
 import { oracleFor } from "./oracle2";
 
 // 平台元数据(链 ∪ 场馆的 name+logo)。**按用户**(#202b):与汇率、代币目录同住一张
-// per-user 缓存(`platform:<键>` 键)。读走 resolve(cache-only,零网络),写走 warm(同步后)。
+// per-user 缓存(`platform:<键>` 键)。读走 resolve(cache-only、一次批量读、零网络),
+// 写走 warm(同步后,一个批次写回)。
 
 // sync 后预热:收集该用户出现的**链 key**,拉一次整张链表、**只写这几个键**(命中未过期则跳过)。
 // 平台键直接读余额行(provider 报的,#193),不再从 tokenRef 拆。

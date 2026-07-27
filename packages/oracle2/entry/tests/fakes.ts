@@ -269,23 +269,46 @@ export function fakeRefIndexStore(
 // —— per-user KV 缓存 ——
 export interface FakeCacheStore extends CacheStore {
   readonly entries: Map<string, { value: unknown; expiresAt: number }>;
-  writes: number;
+  writes: number; // 写**批次**数(不是键数)—— 「一个批次写回」那类断言看这个
+  reads: number; // 读**往返**数 —— 「一次读拿全」那类断言看这个
   now: number;
 }
 
 export function fakeCacheStore(): FakeCacheStore {
   const entries = new Map<string, { value: unknown; expiresAt: number }>();
+  const read = (key: string): CacheEntry | undefined => {
+    const hit = entries.get(key);
+    return hit ? { value: hit.value, stale: hit.expiresAt <= store.now } : undefined;
+  };
+
   const store: FakeCacheStore = {
     entries,
     writes: 0,
+    reads: 0,
     now: NOW0,
-    async get(key): Promise<CacheEntry | undefined> {
-      const hit = entries.get(key);
-      return hit ? { value: hit.value, stale: hit.expiresAt <= store.now } : undefined;
+    async get(key) {
+      store.reads += 1;
+      return read(key);
+    },
+    // 一次往返 —— 真实现是一条 `WHERE k IN (…)`,所以这里也只记一次读。
+    async getMany(keys) {
+      store.reads += 1;
+      const out = new Map<string, CacheEntry>();
+      for (const key of new Set(keys)) {
+        const hit = read(key);
+        if (hit) out.set(key, hit); // miss 的键不出现(契约如此)
+      }
+      return out;
     },
     async put(key, value, ttlMs) {
       store.writes += 1;
       entries.set(key, { value, expiresAt: store.now + ttlMs });
+    },
+    // 一个批次 —— 真实现是一次 D1 `batch()`,所以 writes 只加一。
+    async putMany(batch) {
+      if (batch.length === 0) return;
+      store.writes += 1;
+      for (const w of batch) entries.set(w.key, { value: w.value, expiresAt: store.now + w.ttlMs });
     },
   };
   return store;
