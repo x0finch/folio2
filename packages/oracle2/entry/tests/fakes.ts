@@ -3,6 +3,8 @@ import type {
   CacheStore,
   FxUpstream,
   GlobalTokenRefIndexStore,
+  PlatformMeta,
+  PlatformUpstream,
   ProviderTokenSeed,
   TokenCandidate,
   TokenInfo,
@@ -364,6 +366,28 @@ export function fakeFxUpstream(rates: Record<string, number> = {}, id = "src"): 
     async fetchRates() {
       src.fetches += 1;
       return new Map(src.rates);
+    },
+  };
+  return src;
+}
+
+// —— 平台上游 ——
+export interface FakePlatformUpstream extends PlatformUpstream {
+  fetches: number;
+  chains: PlatformMeta[];
+}
+
+export function fakePlatformUpstream(
+  chains: PlatformMeta[] = [],
+  id = "src",
+): FakePlatformUpstream {
+  const src: FakePlatformUpstream = {
+    id,
+    fetches: 0,
+    chains,
+    async fetchChains() {
+      src.fetches += 1;
+      return src.chains;
     },
   };
   return src;

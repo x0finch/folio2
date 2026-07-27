@@ -3,6 +3,7 @@ import { createOracleFor, createOracleWarm, type OracleConfig } from "../src";
 import {
   fakeCacheStore,
   fakeFxUpstream,
+  fakePlatformUpstream,
   fakeRefIndexStore,
   fakeTokenPriceStore,
   fakeTokenStore,
@@ -21,6 +22,7 @@ function countingConfig() {
   const refIndex = fakeRefIndexStore();
   const upstream = fakeUpstream();
   const fxUpstream = fakeFxUpstream({ EUR: 1.09 });
+  const platformUpstream = fakePlatformUpstream([{ key: "evm:1", name: "Ethereum" }]);
 
   const memo = <T>(m: Map<string, T>, userId: string, make: () => T): T => {
     const cur = m.get(userId) ?? make();
@@ -53,9 +55,13 @@ function countingConfig() {
       calls.push("fxUpstream");
       return fxUpstream;
     },
+    createPlatformUpstream() {
+      calls.push("platformUpstream");
+      return platformUpstream;
+    },
     now: () => clock.now,
   };
-  return { cfg, calls, tokenStores, caches, upstream, fxUpstream, clock };
+  return { cfg, calls, tokenStores, caches, upstream, fxUpstream, platformUpstream, clock };
 }
 
 describe("oracleFor —— 显式工厂", () => {
@@ -87,6 +93,19 @@ describe("oracleFor —— 显式工厂", () => {
     expect(await oracleFor("u_alice").fx.resolve("EUR")).toBe(1.09);
     expect(await oracleFor("u_bob").fx.resolve("EUR")).toBeUndefined();
   });
+
+  it("平台同理:bob 没预热过就只拿得到兜底名", async () => {
+    const { cfg } = countingConfig();
+    const oracleFor = createOracleFor(cfg);
+
+    await oracleFor("u_alice").platforms.warm(["evm:1"]);
+    expect((await oracleFor("u_alice").platforms.resolve(["evm:1"])).get("evm:1")?.name).toBe(
+      "Ethereum",
+    );
+    expect((await oracleFor("u_bob").platforms.resolve(["evm:1"])).get("evm:1")?.name).toBe(
+      "evm:1",
+    );
+  });
 });
 
 describe("惰性", () => {
@@ -100,12 +119,15 @@ describe("惰性", () => {
     expect(calls).not.toContain("refIndex");
   });
 
-  it("只碰 fx → 不建任何代币 store、也不建代币上游", () => {
+  it("只碰 fx / platforms → 不建任何代币 store、也不建代币上游", () => {
     const { cfg, calls } = countingConfig();
     const oracle = createOracleFor(cfg)("u1");
 
     void oracle.fx;
     expect(calls).toEqual(["cache:u1", "fxUpstream"]);
+
+    void oracle.platforms;
+    expect(calls).toEqual(["cache:u1", "fxUpstream", "cache:u1", "platformUpstream"]);
   });
 
   it("同一个子服务反复访问只建一次(建后记忆)", () => {

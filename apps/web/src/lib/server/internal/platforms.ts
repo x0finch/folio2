@@ -1,10 +1,11 @@
 import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
-import { oracle } from "./oracle";
+import { oracleFor } from "./oracle2";
 
-// 平台元数据门面(链 ∪ 场馆的 name+logo)经统一 Oracle 装配(#79)。读走 resolve(cache-only),写走 warm(sync 后)。
+// 平台元数据(链 ∪ 场馆的 name+logo)。**按用户**(#202b):与汇率、代币目录同住一张
+// per-user 缓存(`platform:<键>` 键)。读走 resolve(cache-only,零网络),写走 warm(同步后)。
 
-// sync 后预热:收集该用户出现的**链 key**,一次取整表缓存(命中未过期则跳过)。
+// sync 后预热:收集该用户出现的**链 key**,拉一次整张链表、**只写这几个键**(命中未过期则跳过)。
 // 平台键直接读余额行(provider 报的,#193),不再从 tokenRef 拆。
 // 「哪些要查 CoinGecko」用与读路径装饰同一条判据(见 overview-model):键认得出连接器的
 // (binance/okx/hyperliquid/manual,以及 slug 与连接器同名的 bitcoin/solana…)其 name+logo
@@ -18,5 +19,5 @@ export async function warmPlatformsForUser(userId: string): Promise<void> {
     }
   }
   if (keys.size === 0) return;
-  await oracle.platforms.warm([...keys]);
+  await oracleFor(userId).platforms.warm([...keys]);
 }

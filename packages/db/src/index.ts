@@ -10,7 +10,6 @@ export { createDb, type Db } from "./db";
 // 新参考层的四个 store(ADR 0021/0022/0023,#199)。与上面那套并存到 #202。
 // 名字带作用域(user / global)—— 旧 store 只说「什么表」,不说「谁的数据」,那正是这次要改的事。
 export { createGlobalTokenRefIndexStore } from "./global-token-ref-index-store";
-export { createPlatformStore } from "./platform-store"; // 平台元数据缓存(链 ∪ 交易所)
 export { createTokenPriceHistoryStore } from "./price-history-store"; // 历史日价缓存(全局无 userId,#148)
 export type {
   AccountRawCreds,

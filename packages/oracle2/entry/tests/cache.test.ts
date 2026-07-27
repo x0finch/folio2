@@ -44,9 +44,12 @@ describe("三种键", () => {
     await writePlatform(cache, "bitcoin", { name: "Bitcoin" });
 
     expect(await readFx(cache, "eur")).toBe(1.08);
-    expect(await readPlatform(cache, "bitcoin")).toEqual({ name: "Bitcoin" });
+    expect((await readPlatform(cache, "bitcoin"))?.entry).toEqual({ name: "Bitcoin" });
     expect(await readFx(cache, "JPY")).toBeUndefined();
     expect(await readPlatform(cache, "nope")).toBeUndefined();
+    // 否定缓存(`name: null`)与「没这条」是两件事 —— 读得出来,只是没有名字。
+    await writePlatform(cache, "nochain", { name: null });
+    expect((await readPlatform(cache, "nochain"))?.entry).toEqual({ name: null });
   });
 
   it("TTL:warm 按**目录**的寿命盖戳,不再按价(#216)", async () => {

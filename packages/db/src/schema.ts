@@ -203,15 +203,8 @@ export const tokenMeta = sqliteTable("token_meta", {
   v: integer("v").notNull(),
 });
 
-// 平台元数据缓存(链 ∪ 交易所/perp 的 name+logo,来自 CoinGecko;近静态,长 TTL)。
-// id = platformKey(evm:<id> / <slug> / exchange:<slug> / perp:<slug>)。
-// name IS NULL = 否定缓存(问过 CoinGecko、确认不存在);无该行 = 从未取过。
-export const platforms = sqliteTable("platforms", {
-  id: text("id").primaryKey(),
-  name: text("name"),
-  logo: text("logo"),
-  expiresAt: integer("expires_at").notNull(),
-});
+// 平台元数据缓存的 `platforms` 表已删(#202b):与汇率同去向 —— `user_cache` 的
+// `platform:<键>` 键。否定缓存(「问过上游、它的链表里没有」)在那边由值里的 `name: null` 承载。
 
 // FX 汇率缓存的 `fx_rates` 表已删(#202b):汇率搬进 `user_cache` 的 `fx:<币种>` 键,
 // 与代币目录、平台名图同一张 per-user KV。纯缓存,不迁数据。

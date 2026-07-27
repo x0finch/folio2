@@ -14,7 +14,7 @@ export * from "@folio/oracle2-basic";
 export {
   cacheKeys,
   candidatesBySymbol,
-  type PlatformMeta,
+  type PlatformEntry,
   readFx,
   readPlatform,
   refreshCatalogue,
@@ -45,5 +45,6 @@ export {
   type OracleWarm,
   type OracleWarmConfig,
 } from "./oracle";
+export { createPlatforms, type Platforms, type PlatformsDeps } from "./platforms";
 export { swr } from "./refresh";
 export { createTokens, type Tokens, type TokensDeps } from "./tokens";
