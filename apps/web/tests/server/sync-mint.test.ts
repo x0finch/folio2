@@ -7,7 +7,7 @@ import {
 import { syncAccount } from "@folio/sync";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../src/lib/server/internal/db";
-import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
+import { buildSyncDeps, warmTokensForUser } from "../../src/lib/server/internal/sync-deps";
 
 // 写路径切到 mint 的端到端测试(#200):喂 provider 余额 → 落库 → 快照行带正确的 token_id。
 //
@@ -33,10 +33,16 @@ async function resetUser(): Promise<void> {
     .run();
 }
 
+// 外呼**计数**,不是抛错。原来这里打桩成抛错、注释写着「任何一次外呼都会让用例红」——
+// 那是假的:SWR 把 fetch 的抛错当「上游没有」吞掉,所以真出网了用例照样绿(#216 顺手修)。
+// 现在既抛错(让意外的外呼有个响动)又记账,断言看的是记账。
+let outbound: string[] = [];
+
 beforeEach(async () => {
   await resetUser();
-  // 任何外呼都算失败:mint 是写路径上的一步,必须纯本地。
+  outbound = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    outbound.push(String(input));
     throw new Error(`写路径不该碰网络,却请求了 ${String(input)}`);
   });
 });
@@ -44,11 +50,14 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 // 预热缓存里放一份 warm 集,让 symbol 那一档在本地就有候选可判(否则它会想回源)。
-async function seedWarm(rows: { id: string; symbol: string; rank: number }[]): Promise<void> {
+async function seedWarm(
+  rows: { id: string; symbol: string; rank: number }[],
+  asOf = Date.now(),
+): Promise<void> {
   await createUserCacheStore(env, { userId: USER }).put(
     "warm",
     {
-      asOf: Date.now(),
+      asOf,
       rows: rows.map((r) => ({
         info: { ref: `${NAMER}/${r.id}`, symbol: r.symbol, name: r.symbol },
         price: { unitPrice: 1, marketCapRank: r.rank, asOf: Date.now() },
@@ -333,6 +342,85 @@ describe("provider 报的元信息进代币行", () => {
     const info = await store.getById(rows[0].tokenId as string);
     // 没有 seed 时退回 symbol 一项 —— 名字等于 symbol,不是空。
     expect(info).toMatchObject({ symbol: "FOO", name: "FOO" });
+  });
+});
+
+// #216:写路径不为目录新鲜度出网。
+//
+// **symbol 用 LINK 而不是 ETH** —— 主流币都在策展表(OVERRIDES)里,策展查在候选源之前,
+// 用 ETH 的话候选源根本不会被问到,断言就空转了(第一版正是这么写的,两条都没验到东西)。
+describe("写路径不为目录新鲜度出网(#216)", () => {
+  const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+  it("目录是一年前的 → symbol 那一档照样认出来,而且零外呼", async () => {
+    await seedWarm([{ id: "chainlink", symbol: "LINK", rank: 15 }], Date.now() - YEAR_MS);
+    const accountId = await makeAccount();
+
+    const snapshotId = await syncWith([bal("binance/LINK", "LINK")], accountId);
+
+    const rows = await balancesOf(snapshotId);
+    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
+    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/chainlink");
+    expect(outbound).toEqual([]); // ← 本条的重点
+  });
+
+  it("目录里没有这个 symbol → 认不出来,快照照落(不卡在上游上)", async () => {
+    await seedWarm([{ id: "chainlink", symbol: "LINK", rank: 15 }], Date.now() - YEAR_MS);
+    const accountId = await makeAccount();
+
+    const snapshotId = await syncWith([bal("binance/ZZZ", "ZZZ")], accountId);
+
+    const rows = await balancesOf(snapshotId);
+    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
+    expect(rows[0].tokenId).toBeTruthy(); // 有身份
+    expect((await store.getById(rows[0].tokenId as string))?.ref).toBeNull(); // 但上游没认出
+    expect(outbound).toEqual([]); // 认不出来也不去问上游
+  });
+});
+
+// 目录唯一主动跟进的那条路。**断言看 blob 有没有被换掉**,不看网络调用数 ——
+// `warmTokensForUser` 里还有旧参考层的预热也在打 `/coins/markets`,按 URL 数数分不清是谁打的。
+describe("同步后的预热把目录刷上(#216)", () => {
+  const blobAsOf = async (): Promise<number | undefined> => {
+    const hit = await createUserCacheStore(env, { userId: USER }).get("warm");
+    return (hit?.value as { asOf: number } | undefined)?.asOf;
+  };
+
+  const marketsCalls = () => outbound.filter((u) => u.includes("/coins/markets")).length;
+  const LINK = [{ id: "chainlink", symbol: "LINK", rank: 15 }];
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+  // **差分**,不是绝对数:`warmTokensForUser` 里还有旧参考层的预热也在打 `/coins/markets`,
+  // 按 URL 数绝对值分不清是谁打的。两次跑只有目录的 asOf 不同 → 差出来的那几次就是它。
+  it("目录旧了会去刷,还新就不刷", async () => {
+    await seedWarm(LINK, Date.now());
+    await warmTokensForUser(USER);
+    const fresh = marketsCalls();
+
+    outbound.length = 0;
+    await seedWarm(LINK, Date.now() - WEEK_MS - 1);
+    await warmTokensForUser(USER);
+    const stale = marketsCalls();
+
+    expect(stale).toBeGreaterThan(fresh);
+  });
+
+  it("还新的那份一个字都没被动过", async () => {
+    const fresh = Date.now();
+    await seedWarm(LINK, fresh);
+
+    await warmTokensForUser(USER);
+
+    expect(await blobAsOf()).toBe(fresh);
+  });
+
+  it("预热去刷但上游挂了 → 旧目录保住,同步收尾不抛(它在 waitUntil 里)", async () => {
+    const stale = Date.now() - WEEK_MS - 1;
+    await seedWarm(LINK, stale);
+
+    await expect(warmTokensForUser(USER)).resolves.toBeUndefined();
+
+    expect(await blobAsOf()).toBe(stale); // 上游被打桩成抛错 → SWR 保留旧值、不写回
   });
 });
 
