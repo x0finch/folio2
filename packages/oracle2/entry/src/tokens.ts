@@ -14,8 +14,7 @@ import {
   MS_PER_DAY,
   PRICE_TTL_MS,
 } from "@folio/oracle2-basic";
-import { candidatesBySymbol, topByRank, warmRows } from "./cache";
-import type { CandidateSource } from "./mint";
+import { topByRank, warmMarkets } from "./cache";
 import { swr } from "./refresh";
 
 export interface TokensDeps {
@@ -58,12 +57,10 @@ export interface Tokens {
   // 某时刻的历史价:atMs 所属 UTC 日桶的价;该日无数据 → undefined(调用方降级)。
   priceAt(tokenId: string, atMs: number): Promise<number | undefined>;
 
-  // 选币橱窗:市值 top-N,走 warm blob(冷则经 SWR 预热一次)。
+  // 选币橱窗:市值 top-N,走 warm blob(冷则预热一次;价旧了也刷 —— 用户在看)。
   topTokens(limit: number): Promise<UpstreamToken[]>;
   // 按关键词搜币(用户选币)。恒回源 —— 结果与用户无关,边缘缓存管它。
   search(query: string): Promise<UpstreamToken[]>;
-  // symbol 消歧候选源,喂 mint(与橱窗同一份 warm rows,不额外存)。
-  candidates: CandidateSource;
 }
 
 export function createTokens({
@@ -73,7 +70,9 @@ export function createTokens({
   upstream,
   now = Date.now,
 }: TokensDeps): Tokens {
-  const rows = () => warmRows(cache, upstream, DEFAULT_TOP_N, now());
+  // 橱窗读者:价旧了就刷(用户点开下拉、正看着这些数字)。**候选源不走这条** ——
+  // 它在写路径上,判据不同,见 ./candidates(#216)。
+  const rows = () => warmMarkets(cache, upstream, DEFAULT_TOP_N, now());
 
   const toSourceToken = (r: Awaited<ReturnType<typeof rows>>[number]): UpstreamToken => ({
     ref: r.info.ref,
@@ -122,12 +121,6 @@ export function createTokens({
 
   return {
     priceSeries,
-
-    candidates: {
-      async bySymbol(symbol) {
-        return candidatesBySymbol(await rows(), symbol);
-      },
-    },
 
     async enrich(ids) {
       if (ids.length === 0) return new Map();

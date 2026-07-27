@@ -6,6 +6,7 @@ import type {
   TokenStore,
   TokenUpstream,
 } from "@folio/oracle2-basic";
+import { createCandidateSource } from "./candidates";
 import { createMint, type Mint } from "./mint";
 import { createTokens, type Tokens } from "./tokens";
 
@@ -69,8 +70,14 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
         mint ??= createMint({
           store: cfg.createTokenStore(userId),
           refIndex: cfg.createRefIndexStore(),
-          // 候选与橱窗同一份 warm rows(不额外存);经 tokens 子服务拿,复用它的 SWR。
-          candidates: this.tokens.candidates,
+          // **候选源独立装,不复用 `tokens`**(#216):`tokens` 里有好几个出网的能力,
+          // 一句 `this.tokens.candidates` 就把整个读路径的网络面接进了写路径。
+          // 这个只读目录缓存,冷启动那一次除外 —— 见 ./candidates。
+          candidates: createCandidateSource({
+            cache: cfg.createCacheStore(userId),
+            coldStart: upstream,
+            now: cfg.now,
+          }),
           namer: upstream.id,
           overrides: cfg.overrides,
         });

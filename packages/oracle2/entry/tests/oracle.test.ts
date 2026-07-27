@@ -11,6 +11,9 @@ import {
 // 记下每个工厂被调了几次、拿到的是哪个 userId —— 惰性与绑定都靠它验。
 function countingConfig() {
   const calls: string[] = [];
+  // 可控时钟:新鲜度判据落在 blob 的 `asOf` 上,所以推的必须是**服务层看到的那个 now**,
+  // 推 fake cache 自己的 now 够不着(那只影响它上报的 stale 标,而两个读者都不看那个标)。
+  const clock = { now: 1_700_000_000_000 };
   const tokenStores = new Map<string, ReturnType<typeof fakeTokenStore>>();
   const priceStores = new Map<string, ReturnType<typeof fakeTokenPriceStore>>();
   const caches = new Map<string, ReturnType<typeof fakeCacheStore>>();
@@ -44,8 +47,9 @@ function countingConfig() {
       calls.push("upstream");
       return upstream;
     },
+    now: () => clock.now,
   };
-  return { cfg, calls, tokenStores };
+  return { cfg, calls, tokenStores, caches, upstream, clock };
 }
 
 describe("oracleFor —— 显式工厂", () => {
@@ -180,5 +184,61 @@ describe("全局维护任务不挂 per-user 门面", () => {
     upstream.refIndex = { rows: [], unmatchedPlatforms: [], skipped: 0 };
     await warm.warmRefIndex(2);
     expect(warns).toHaveLength(1);
+  });
+});
+
+// 本 PR 的核心回归(#216)。装配层是这件事唯一能被验到的地方 —— mint 与候选源各自的单测都
+// 看不见「装配时把哪个实现接了进去」,而洞恰恰在那一行:以前是 `candidates: this.tokens.candidates`。
+describe("写路径不为目录新鲜度出网(#216)", () => {
+  const seedWarm = async (cfg: ReturnType<typeof countingConfig>, userId: string) => {
+    cfg.upstream.markets = [
+      {
+        ref: "src/polygon-ecosystem-token",
+        symbol: "POL",
+        name: "POL",
+        price: { unitPrice: 1, marketCapRank: 76, asOf: 0 },
+      },
+    ];
+    // 先让橱窗把 blob 建起来(用户打开过一次选币下拉)。
+    await createOracleFor(cfg.cfg)(userId).tokens.topTokens(10);
+    return cfg.upstream.calls.length;
+  };
+
+  it("warm 过期之后 mint 按 symbol 认币 —— 零请求", async () => {
+    const c = countingConfig();
+    const after = await seedWarm(c, "u1");
+    // 时钟推过价的 TTL:橱窗会认为该刷了,mint 不该。
+    c.clock.now += 24 * 60 * 60 * 1000;
+    const id = await createOracleFor(c.cfg)("u1").mint.of([
+      { ref: "binance/POL", seed: { symbol: "POL" } },
+    ]);
+
+    expect(id.get("binance/POL")).toBeDefined(); // 认出来了(用的是旧目录)
+    expect(c.upstream.calls).toHaveLength(after); // 而且一次网都没出
+  });
+
+  it("对照:同样过期,橱窗**会**刷 —— 差别只在读者是谁", async () => {
+    const c = countingConfig();
+    const after = await seedWarm(c, "u1");
+    c.clock.now += 24 * 60 * 60 * 1000;
+    await createOracleFor(c.cfg)("u1").tokens.topTokens(10);
+    expect(c.upstream.calls.length).toBeGreaterThan(after);
+  });
+
+  it("冷缓存下 mint 仍取一次 —— 否则按 symbol 认的币集体认不出来", async () => {
+    const c = countingConfig();
+    c.upstream.markets = [
+      {
+        ref: "src/polygon-ecosystem-token",
+        symbol: "POL",
+        name: "POL",
+        price: { unitPrice: 1, marketCapRank: 76, asOf: 0 },
+      },
+    ];
+    const id = await createOracleFor(c.cfg)("u1").mint.of([
+      { ref: "binance/POL", seed: { symbol: "POL" } },
+    ]);
+    expect(id.get("binance/POL")).toBeDefined();
+    expect(c.upstream.calls).toHaveLength(1);
   });
 });

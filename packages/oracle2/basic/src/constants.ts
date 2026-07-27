@@ -7,7 +7,11 @@ export const RESOLUTION_TOP_RANK = 50; // 市值 top-N 内即可信(高置信)
 export const RESOLUTION_DOMINANCE = 5; // 最佳须如此倍数地碾压次席(rank 比)才算高置信
 
 // —— 缓存 TTL ——
-export const WARM_TTL_MS = 30 * 60 * 1000; // 30min(warm 承载价,要新鲜)
+// warm blob 是**目录**(symbol/名/图/排名),按目录的寿命定 —— 它几乎不变。以前是 30min,
+// 理由是「它承载价」,结果整份目录被最短的那个字段拖着刷,而 mint 在写路径上为此出网(#216)。
+// 现在价的新鲜度由读者按 blob 的 `asOf` 自己判(见 entry/cache.ts 的两个读者),这个常量只
+// 决定缓存条目上盖的过期戳。
+export const WARM_TTL_MS = 24 * 60 * 60 * 1000; // 24h(目录,近静态)
 export const PRICE_TTL_MS = 30 * 60 * 1000; // 30min(长尾价;过期=stale 不删,SWR)
 // name/logo 近乎静态,与 warm/price 的短 TTL 解耦:否则 warm 一过期,展示就丢 logo/名。
 export const INFO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d
