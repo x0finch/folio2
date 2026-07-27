@@ -213,13 +213,8 @@ export const platforms = sqliteTable("platforms", {
   expiresAt: integer("expires_at").notNull(),
 });
 
-// FX 汇率缓存(全局参考,无 userId)。usd_per_unit = 1 单位该币种的美元价。
-// expires_at 只闸 warm;读软过期(见 @folio/fx / ADR 0006)。
-export const fxRates = sqliteTable("fx_rates", {
-  currency: text("currency").primaryKey(),
-  usdPerUnit: real("usd_per_unit").notNull(),
-  expiresAt: integer("expires_at").notNull(),
-});
+// FX 汇率缓存的 `fx_rates` 表已删(#202b):汇率搬进 `user_cache` 的 `fx:<币种>` 键,
+// 与代币目录、平台名图同一张 per-user KV。纯缓存,不迁数据。
 
 // 历史日价缓存(全局参考,无 userId;#148 / ADR 0019 网格估值骨架)。过去某 UTC 日的历史价不可变 →
 // 永久缓存,故**无 TTL 列**(今日桶可变,调用方不落此表)。PK (source, identifier, day_bucket);

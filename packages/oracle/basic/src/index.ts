@@ -18,18 +18,6 @@ export {
 } from "./constants";
 export type { TokenErrorCode } from "./errors";
 export { TokenError } from "./errors";
-// 展示币种 + 汇率契约(存 USD、展示层换算;折入自 @folio/fx,#72)。
-export {
-  type Currency,
-  DEFAULT_CURRENCY,
-  FxError,
-  type FxErrorCode,
-  type FxRates,
-  type FxRow,
-  type FxSource,
-  type FxStore,
-  SUPPORTED_CURRENCIES,
-} from "./fx";
 // 平台元数据契约(链 ∪ 场馆 name+logo;折入自 @folio/platforms,#72)。
 export {
   PlatformError,

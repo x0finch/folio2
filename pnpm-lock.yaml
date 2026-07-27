@@ -47,6 +47,9 @@ importers:
       '@folio/oracle2':
         specifier: workspace:*
         version: link:../../packages/oracle2/entry
+      '@folio/oracle2-basic':
+        specifier: workspace:*
+        version: link:../../packages/oracle2/basic
       '@folio/oracle2-upstream-coingecko':
         specifier: workspace:*
         version: link:../../packages/oracle2/upstreams/coingecko

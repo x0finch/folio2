@@ -1,6 +1,7 @@
 import type {
   CacheEntry,
   CacheStore,
+  FxUpstream,
   GlobalTokenRefIndexStore,
   ProviderTokenSeed,
   TokenCandidate,
@@ -344,6 +345,25 @@ export function fakeUpstream(id = "src"): FakeUpstream {
     async fetchRefIndex() {
       src.calls.push("fetchRefIndex");
       return src.refIndex;
+    },
+  };
+  return src;
+}
+
+// —— 汇率上游 ——
+export interface FakeFxUpstream extends FxUpstream {
+  fetches: number;
+  rates: Map<string, number>;
+}
+
+export function fakeFxUpstream(rates: Record<string, number> = {}, id = "src"): FakeFxUpstream {
+  const src: FakeFxUpstream = {
+    id,
+    fetches: 0,
+    rates: new Map(Object.entries(rates)),
+    async fetchRates() {
+      src.fetches += 1;
+      return new Map(src.rates);
     },
   };
   return src;

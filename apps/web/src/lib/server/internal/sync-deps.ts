@@ -49,7 +49,7 @@ export async function warmTokensForUser(userId: string): Promise<void> {
     });
   }
   try {
-    await warmFx();
+    await warmFx(userId);
   } catch (e) {
     getLogger(["folio", "web", "sync"]).warn("warmFx failed", {
       error: e instanceof Error ? e.message : String(e),

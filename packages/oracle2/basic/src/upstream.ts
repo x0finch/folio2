@@ -49,6 +49,17 @@ export interface TokenRefIndexUpstream extends UpstreamIdentity {
 // 完整代币上游 = 三面之交。当前唯一实现是 CoinGecko adapter。
 export type TokenUpstream = TokenMetaUpstream & PriceUpstream & TokenRefIndexUpstream;
 
+// 汇率面(展示币种)。**一次拉全,没有按币种点查** —— 支持的币种就那十来个,而上游那个端点
+// 本来也是一把全给;拆成点查等于同一份数据拉十二遍。
+//
+// **它不是 `TokenUpstream` 的一面**,而是独立一个端口:汇率与「这是哪个币」毫无关系,
+// 完全可以由另一家提供(ADR 0023 的可换源就是这个意思)。装配点因此收两个上游工厂,
+// 当前恰好都指向同一个 CoinGecko adapter。
+export interface FxUpstream extends UpstreamIdentity {
+  // 币种 code(大写)→ usdPerUnit。上游不认识的币种不出现在结果里(不是报错)。
+  fetchRates(): Promise<Map<string, number>>;
+}
+
 // 上游给出的一个币:它自己的命名 + 元信息 +(可能有的)价。
 // 与 `TokenInfo` 的区别:上游结果还没进库,所以没有内部 id、`ref` 必然非空。
 export interface UpstreamToken {

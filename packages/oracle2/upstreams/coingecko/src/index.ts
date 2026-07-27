@@ -8,6 +8,7 @@
 // 临时包名:#202 那片改名接管 `@folio/oracle-upstream-coingecko`(目录 `packages/oracle/upstreams/coingecko`)。
 
 export { NON_EVM_PLATFORMS, OVERRIDES, UPSTREAM_ID } from "./constants";
+export { createCoinGeckoFxUpstream } from "./fx";
 // 纯解析器另导出,便于按 fixture 单测与上层复用。
 export {
   cgkRef,

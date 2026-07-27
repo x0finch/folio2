@@ -1,16 +1,10 @@
 import type {
-  FxRates,
-  FxStore,
   PlatformStore,
   Platforms,
   TokenPriceHistoryStore,
   TokenStore,
 } from "@folio/oracle-basic";
-import {
-  createCoinGeckoFxSource,
-  createCoinGeckoPlatformSource,
-} from "@folio/oracle-source-coingecko";
-import { createFxRates } from "./services/fx";
+import { createCoinGeckoPlatformSource } from "@folio/oracle-source-coingecko";
 import { createPlatforms } from "./services/platforms";
 import { createTokens, type Tokens } from "./services/tokens";
 
@@ -23,32 +17,32 @@ export interface CreateOracleConfig {
   // 仍以此键 token_vendor_ids)→ 保留分桶签名;平台/汇率恒单源(CoinGecko,见 ADR 0005/0006),工厂零参。
   createTokenStore: (source: string) => TokenStore;
   createPlatformStore: () => PlatformStore;
-  createFxStore: () => FxStore;
   // 历史日价缓存(#148 / ADR 0019)。可选:不传 → 无历史缓存(priceSeries 现取不落库)。
   createPriceHistoryStore?: () => TokenPriceHistoryStore;
 }
 
-// 统一 Oracle 门面(Phase 3,#79)。对外一个入口,对内组合 tokens/platforms/fx 三服务、不拆其实现。
-// 三服务经 sub-service 暴露 —— 纯模型层(overview-model / revalue / enrichBalances)按接口隔离只依赖
-// 各自窄契约(Tokens / Platforms / FxRates),故门面透出实例而非把方法拍平重命名。
+// 统一 Oracle 门面(Phase 3,#79)。对外一个入口,对内组合各服务、不拆其实现。
+// 服务经 sub-service 暴露 —— 纯模型层(overview-model / revalue / enrichBalances)按接口隔离只依赖
+// 各自窄契约(Tokens / Platforms),故门面透出实例而非把方法拍平重命名。
+//
+// **汇率已经不在这里了**(#202b):它搬进 `@folio/oracle2`(per-user 缓存 + 独立的 FxUpstream 端口)。
+// 剩下的 tokens / platforms 随 #202b 后续两片一起退场。
 export interface Oracle {
   readonly tokens: Tokens;
   readonly platforms: Platforms;
-  readonly fx: FxRates;
 }
 
-// 组装入口:三服务皆由 CoinGecko 供源(价 / identity / 平台 / 汇率同源,ADR 0013 的估值 policy
+// 组装入口:两服务皆由 CoinGecko 供源(价 / identity / 平台同源,ADR 0013 的估值 policy
 // self-first/source-first 是「自填价 vs 源价」正交维度,与源无关,由 valuate 纯函数在消费层裁决)。
 // 运行时换价源(DefiLlama / activeVendor 路由)已废止,见 ADR 0014。
 //
-// 惰性:三服务经 getter 首访即建、建后记忆。调用方常只用其一(logo 端点只碰 tokens、货币只碰 fx),
-// 故不预建另两套(省去其 source + store 构造)。app 侧 oracle 代理每次属性访问现造一份门面
+// 惰性:各服务经 getter 首访即建、建后记忆。调用方常只用其一(logo 端点只碰 tokens),
+// 故不预建另一套(省去其 source + store 构造)。app 侧 oracle 代理每次属性访问现造一份门面
 // (见 server/oracle.ts,绑当前 env),配合本惰性 → 一次访问只建被碰的那一服务,不浪费。
 export function createOracle(cfg: CreateOracleConfig): Oracle {
   const { apiKey } = cfg;
   let tokens: Tokens | undefined;
   let platforms: Platforms | undefined;
-  let fx: FxRates | undefined;
 
   return {
     get tokens() {
@@ -70,15 +64,6 @@ export function createOracle(cfg: CreateOracleConfig): Oracle {
         });
       }
       return platforms;
-    },
-    get fx() {
-      if (!fx) {
-        fx = createFxRates({
-          source: createCoinGeckoFxSource({ apiKey }),
-          store: cfg.createFxStore(),
-        });
-      }
-      return fx;
     },
   };
 }

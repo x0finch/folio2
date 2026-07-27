@@ -1,4 +1,4 @@
-import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
+import { SUPPORTED_CURRENCIES } from "@folio/oracle2-basic";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@folio/ui";
 import { useRouter } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
