@@ -37,8 +37,16 @@ export type TokenRefParts =
   | { kind: "contract"; namer: string; address: string }
   | { kind: "opaque"; namer: string; id: string };
 
-// parse 的输出多一支 `unknown`:任何读不懂的串都得有个去处,故永不 throw。
-export type ParsedTokenRef = TokenRefParts | { kind: "unknown"; raw: string };
+// parse 的输出:三支各自多带一个 `localName`(右段的**规范形**),外加一支 `unknown` ——
+// 任何读不懂的串都得有个去处,故永不 throw。
+//
+// 为什么 parse 要给 localName 而 `TokenRefParts` 不带:按两列存 tokenRef 的表(`token_refs`,
+// ADR 0022)要的正是这两段,而 parse 本来就在半路上算出过它。不给的话调用方只能 parse → format
+// → 再 split 一次,绕一圈把已经有的东西捡回来。反过来 `TokenRefParts` 是**造串的入参**
+// (`formatTokenRef`),那里给 localName 就是让同一件事有两个可以互相矛盾的写法。
+export type ParsedTokenRef =
+  | (TokenRefParts & { localName: string })
+  | { kind: "unknown"; raw: string };
 
 /**
  * 合约地址的大小写是**按链**的:EVM 的 hex 大小写不敏感,小写成稳定的 key;
@@ -88,34 +96,29 @@ export function parseTokenRef(raw: TokenRef): ParsedTokenRef {
   const localName = (segments[1] ?? "").trim();
   if (!namer || !localName) return unknown;
 
-  if (localName.toLowerCase() === NATIVE) return { kind: "native", namer };
+  // 每一支的 localName 都给**规范形**(`native` 小写、EVM 地址小写),不是原样回抛 ——
+  // 它会被直接写进表,而表里必须只有规范形,否则同一个地址大小写不同就是两行。
+  if (localName.toLowerCase() === NATIVE) return { kind: "native", namer, localName: NATIVE };
 
   if (localName.toLowerCase().startsWith(CONTRACT)) {
     const address = normalizeAddress(namer, localName.slice(CONTRACT.length));
-    return address ? { kind: "contract", namer, address } : unknown;
+    return address ? { kind: "contract", namer, address, localName: CONTRACT + address } : unknown;
   }
 
   // 带冒号但不是 `contract:` —— 旧文法(`erc20:` / `token:` / `native:`)或哪个 producer 自己
   // 编的词。不容旧、也不容自创:判 unknown,而不是静默读成一个 id 里带冒号的不透明币。
   if (localName.includes(":")) return unknown;
 
-  return { kind: "opaque", namer, id: localName };
+  return { kind: "opaque", namer, id: localName, localName };
 }
 
 /**
- * 两段拆分 / 拼回 —— 给**按两列存 tokenRef 的表**用(`token_refs`、`global_token_ref_index`:
- * 拆开存是为了能按 namer 单独筛 / 反查某个 Token 在某命名者下的叫法,见 ADR 0022)。
+ * 两段拼回 —— 给**按两列存 tokenRef 的表**用(`token_refs`:拆开存是为了能按 namer 单独筛 /
+ * 反查某个 Token 在某命名者下的叫法,见 ADR 0022)。拆的那一半直接读 `parseTokenRef` 的
+ * `namer` / `localName`(读不懂 → `kind === "unknown"`,那种串不进表)。
  *
  * 存储层因此**不必知道右段的文法**:不用 switch `native` / `contract:`,也不用知道分隔符是斜杠。
- * `splitTokenRef` 读不懂就返回 undefined(那种串不进表);`joinTokenRef` 是它的严格逆。
  */
-export function splitTokenRef(ref: TokenRef): { namer: string; localName: string } | undefined {
-  const parsed = parseTokenRef(ref);
-  if (parsed.kind === "unknown") return undefined;
-  const [namer = "", localName = ""] = formatTokenRef(parsed).split(SEP);
-  return { namer, localName };
-}
-
 export function joinTokenRef(namer: string, localName: string): TokenRef {
   return `${normalize(namer)}${SEP}${localName.trim()}`;
 }

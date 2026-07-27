@@ -1,4 +1,4 @@
-import { joinTokenRef, splitTokenRef } from "@folio/oracle-ref";
+import { joinTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import type {
   ProviderTokenSeed,
   TokenCandidate,
@@ -32,10 +32,14 @@ export interface UserTokenStoreOpts {
 // 外加 user_id 一个固定参数,故 40 条一批(81 个)稳在限内。
 const REF_PAIR_CHUNK = 40;
 
-// tokenRef 串 ↔ 两段列,拆/拼归文法包(见 @folio/oracle-ref 的 splitTokenRef)。
+// tokenRef 串 ↔ 两段列,拆/拼归文法包(见 @folio/oracle-ref)。
 // 本文件因此**不认识右段的文法** —— 不知道有 `native` / `contract:` 这回事,也不知道分隔符是什么。
-// 读不懂的串没有两段可拆 → 不进表,读写都跳过。
-const partsOf = splitTokenRef;
+// 读不懂的串没有两段可拆 → 返回 undefined,不进表,读写都跳过。
+// **只取那两段,不看 `kind`** —— 本文件不认识 `native` / `contract:` 那套文法,也不该认识。
+const partsOf = (ref: string): { namer: string; localName: string } | undefined => {
+  const parsed = parseTokenRef(ref);
+  return parsed.kind === "unknown" ? undefined : parsed;
+};
 const refOf = joinTokenRef;
 
 export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): TokenStore {

@@ -8,7 +8,6 @@ export {
   joinTokenRef,
   type ParsedTokenRef,
   parseTokenRef,
-  splitTokenRef,
   type TokenRef,
   type TokenRefParts,
   tokenRef,

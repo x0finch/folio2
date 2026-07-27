@@ -1,4 +1,4 @@
-import { splitTokenRef } from "@folio/oracle-ref";
+import { parseTokenRef } from "@folio/oracle-ref";
 import type { GlobalTokenRefIndexStore, TokenRef, TokenRefIndexRow } from "@folio/oracle2-basic";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
@@ -44,8 +44,8 @@ export function createGlobalTokenRefIndexStore(env: DbEnv): GlobalTokenRefIndexS
       // 否则同一个地址大小写不同就查不到。读不懂的串不进表,直接跳过。
       const canonical = new Map<TokenRef, TokenRef>(); // 规范形 → 调用方原样给的串
       for (const raw of new Set(refs)) {
-        const parts = splitTokenRef(raw);
-        if (parts) canonical.set(`${parts.namer}/${parts.localName}`, raw);
+        const parts = parseTokenRef(raw);
+        if (parts.kind !== "unknown") canonical.set(`${parts.namer}/${parts.localName}`, raw);
       }
       if (canonical.size === 0) return out;
 

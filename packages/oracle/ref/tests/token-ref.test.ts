@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatTokenRef,
-  joinTokenRef,
-  parseTokenRef,
-  splitTokenRef,
-  type TokenRefParts,
-  tokenRef,
-} from "../src";
+import { formatTokenRef, joinTokenRef, parseTokenRef, type TokenRefParts, tokenRef } from "../src";
 
 // Solana 的真实地址 —— base58 大小写敏感,小写下去就不存在了。
 const SOL_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -64,23 +57,34 @@ describe("parseTokenRef", () => {
       kind: "contract",
       namer: "evm:42161",
       address: "0xaf88",
+      localName: "contract:0xaf88",
     });
-    expect(parseTokenRef("bitcoin/native")).toEqual({ kind: "native", namer: "bitcoin" });
+    expect(parseTokenRef("bitcoin/native")).toEqual({
+      kind: "native",
+      namer: "bitcoin",
+      localName: "native",
+    });
     expect(parseTokenRef("coingecko/usd-coin")).toEqual({
       kind: "opaque",
       namer: "coingecko",
       id: "usd-coin",
+      localName: "usd-coin",
     });
     expect(parseTokenRef("binance/USDC")).toEqual({
       kind: "opaque",
       namer: "binance",
       id: "USDC",
+      localName: "USDC",
     });
   });
 
   // 左段的冒号(`evm:42161`)不参与切分 —— 切的是斜杠。
   it("命名者里的冒号不影响切分", () => {
-    expect(parseTokenRef("evm:1/native")).toEqual({ kind: "native", namer: "evm:1" });
+    expect(parseTokenRef("evm:1/native")).toEqual({
+      kind: "native",
+      namer: "evm:1",
+      localName: "native",
+    });
   });
 
   // 标记按**前缀**认,所以地址本身带 `::` 的(Sui coin type)照样是合约。
@@ -89,6 +93,7 @@ describe("parseTokenRef", () => {
       kind: "contract",
       namer: "sui",
       address: SUI_COIN,
+      localName: `contract:${SUI_COIN}`,
     });
   });
 });
@@ -151,14 +156,23 @@ describe("round-trip", () => {
     }
   });
 
-  it("parse ∘ format 在规范结构上是恒等", () => {
+  // 在**构造字段**上恒等,不是整个对象相等:`TokenRefParts` 是造串的入参,parse 的输出在它之上
+  // 多一个 `localName`(右段的规范形,给按两列存的表用)。所以是超集,不是等号。
+  it("parse ∘ format 在构造字段上是恒等", () => {
     const refs: TokenRefParts[] = [
       { kind: "contract", namer: "evm:1", address: "0xabc" },
       { kind: "contract", namer: "solana", address: SOL_USDC },
       { kind: "native", namer: "bitcoin" },
       { kind: "opaque", namer: "coingecko", id: "usd-coin" },
     ];
-    for (const ref of refs) expect(parseTokenRef(formatTokenRef(ref))).toEqual(ref);
+    for (const ref of refs) {
+      const parsed = parseTokenRef(formatTokenRef(ref));
+      expect(parsed).toMatchObject(ref);
+      // 多出来的那一个字段也得对得上:拼回去要还原成同一个串。
+      expect(parsed.kind !== "unknown" && joinTokenRef(parsed.namer, parsed.localName)).toBe(
+        formatTokenRef(ref),
+      );
+    }
   });
 
   it("归一幂等", () => {
@@ -168,10 +182,11 @@ describe("round-trip", () => {
   });
 });
 
-// 按两列存 tokenRef 的表(`token_refs` / `global_token_ref_index`)要拆开存、读出来拼回去。
-// 拆/拼放在文法包,存储层因此不必认识 `native` / `contract:` 也不必知道分隔符是斜杠。
-describe("splitTokenRef / joinTokenRef", () => {
-  it("三种形状都拆得出两段,且 join 是 split 的逆", () => {
+// 按两列存 tokenRef 的表(`token_refs`,ADR 0022)要拆开存、读出来拼回去。拆的那一半就是
+// `parseTokenRef` 的 `namer` / `localName`,拼回去是 `joinTokenRef`。存储层因此不必认识
+// `native` / `contract:`,也不必知道分隔符是斜杠 —— 它只读那两个字段,`kind` 一眼都不看。
+describe("两段(namer / localName)与 joinTokenRef 的往返", () => {
+  it("三种形状都给得出两段,且 join 是它的逆", () => {
     for (const s of [
       "evm:1/native",
       "bitcoin/native",
@@ -181,29 +196,38 @@ describe("splitTokenRef / joinTokenRef", () => {
       "coingecko/usd-coin",
       "binance/USDC",
     ]) {
-      const parts = splitTokenRef(s);
-      expect(parts).toBeDefined();
-      expect(joinTokenRef(parts!.namer, parts!.localName)).toBe(s);
+      const parts = parseTokenRef(s);
+      expect(parts.kind).not.toBe("unknown");
+      if (parts.kind === "unknown") continue;
+      expect(joinTokenRef(parts.namer, parts.localName)).toBe(s);
     }
   });
 
-  it("拆出来的是规范形 —— 大小写先归一再拆", () => {
-    expect(splitTokenRef("EVM:1/CONTRACT:0xAbC")).toEqual({
+  it("给的是**规范形**,不是原样回抛 —— 表里只能有规范形", () => {
+    expect(parseTokenRef("EVM:1/CONTRACT:0xAbC")).toMatchObject({
       namer: "evm:1",
       localName: "contract:0xabc",
     });
+    expect(parseTokenRef("bitcoin/NATIVE")).toMatchObject({ localName: "native" });
+  });
+
+  it("localName 与那一支自己的字段一致(同一件事不该有两个说法)", () => {
+    const c = parseTokenRef("evm:1/contract:0xabc");
+    expect(c).toMatchObject({ kind: "contract", address: "0xabc", localName: "contract:0xabc" });
+    const o = parseTokenRef("binance/USDC");
+    expect(o).toMatchObject({ kind: "opaque", id: "USDC", localName: "USDC" });
   });
 
   it("右段可以带冒号(合约标记 / Sui 的 coin type),不会被当成第三段", () => {
-    expect(splitTokenRef(`sui/contract:${SUI_COIN}`)).toEqual({
+    expect(parseTokenRef(`sui/contract:${SUI_COIN}`)).toMatchObject({
       namer: "sui",
       localName: `contract:${SUI_COIN}`,
     });
   });
 
-  it("读不懂的串没有两段可拆 → undefined(那种串不进表)", () => {
+  it("读不懂的串没有两段 → kind 为 unknown(那种串不进表)", () => {
     for (const raw of ["", "nonsense", "a/b/c", "evm:1/erc20:0xabc", "evm:1/contract:"]) {
-      expect(splitTokenRef(raw)).toBeUndefined();
+      expect(parseTokenRef(raw).kind).toBe("unknown");
     }
   });
 });
