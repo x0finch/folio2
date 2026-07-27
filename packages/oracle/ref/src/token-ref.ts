@@ -95,7 +95,9 @@ export const tokenRef = {
  * 两段形**不做文法校验**:表里存的本来就只有规范形,那是写入侧的责任(见 `tokenRef.*` 构造函数)。
  */
 export function formatTokenRef(ref: TokenRefParts | TokenRefSegments): TokenRef {
-  if (!("kind" in ref)) return `${normalize(ref.namer)}${SEP}${ref.localName.trim()}`;
+  // `kind` 就是「说话人表没表态右段是什么」的判据:语义形有,两段形没有。
+  const isSemantic = "kind" in ref;
+  if (!isSemantic) return `${normalize(ref.namer)}${SEP}${ref.localName.trim()}`;
   switch (ref.kind) {
     case "native":
       return tokenRef.native(ref.namer);
