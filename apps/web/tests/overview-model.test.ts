@@ -37,6 +37,7 @@ const record = (id: string): TokenRecord => ({
   symbol: "USDC",
   name: "USD Coin",
   logo: "u.png",
+  infoStale: false,
 });
 const tokens = {
   async enrich(ids: readonly string[]) {

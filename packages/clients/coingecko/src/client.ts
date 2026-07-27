@@ -15,6 +15,9 @@ import type {
 
 export interface CoinsMarketsParams {
   vsCurrency: string;
+  // 指名要哪些币。给了它就不是「按市值翻页」而是「按 id 点查一批」——同一个端点两种用法,
+  // 差别只在这个参数。点查要用它而不是 `/simple/price`:后者只回价,不回 name/symbol/image。
+  ids?: string[];
   order?: string;
   perPage?: number;
   page?: number;
@@ -80,6 +83,7 @@ export function createCoinGeckoClient(config: CoinGeckoConfig = {}): CoinGeckoCl
     async coinsMarkets(params) {
       const json = await request("/coins/markets", {
         vs_currency: params.vsCurrency,
+        ids: params.ids?.join(","),
         order: params.order,
         per_page: params.perPage,
         page: params.page,

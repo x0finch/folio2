@@ -3,6 +3,7 @@ import type {
   TokenCandidate,
   TokenInfo,
   TokenInfoPatch,
+  TokenInfoWrite,
   TokenPriceWrite,
   TokenRecordPrice,
   TokenRef,
@@ -50,7 +51,13 @@ export interface TokenStore {
   getById(id: string): Promise<TokenInfo | undefined>;
 
   // 只填空槽:undefined 的字段不动,已有值的字段也不动(见 TokenInfoPatch)。
+  // 用在「归一到已有 Token」那一步:那一行的元信息可能来自上游,连接器报的不该盖掉它。
   fillInfo(tokenId: string, patch: TokenInfoPatch): Promise<void>;
+
+  // **覆盖**上游那三个字段 + 续 info TTL。与 `fillInfo` 的填空槽相反,这里上游说了算:
+  // 链上合约的 symbol 是部署者写的、可能与上游实际叫法不一致(MATIC→POL),不覆盖的话
+  // 同一个币在链上侧与交易所侧会显示成两个名字。只对**已认出来**的行调(ref 非空)。
+  putInfo(rows: readonly TokenInfoWrite[], ttlMs: number): Promise<void>;
 
   // 符号消歧候选:按 symbol 找当前上游认识的币。**不是**从这里生的数据 —— warm 集的子集,
   // 由服务层从 cache 的 warm blob 筛出后交给消歧(见 services/cache.ts);此处只为

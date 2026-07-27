@@ -6,6 +6,7 @@ import type {
   TokenCandidate,
   TokenInfo,
   TokenInfoPatch,
+  TokenInfoWrite,
   TokenPrice,
   TokenPricePoint,
   TokenPriceStore,
@@ -82,6 +83,8 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
         symbol: s.symbol,
         name: s.name ?? s.symbol,
         providerLogo: s.providerLogo,
+        // 建行时就算「该刷了」—— 这一份是连接器报的,上游那份还没覆盖过(与 D1 实现同)。
+        infoStale: true,
       });
       for (const ref of newRefs) refs.set(ref, id);
       return id;
@@ -129,6 +132,18 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
       if (!row.name && patch.name) row.name = patch.name;
       row.logo ??= patch.logo;
       row.providerLogo ??= patch.providerLogo;
+    },
+
+    // **覆盖**(与 fillInfo 相反)。刷过之后 infoStale 落下 —— 测试据此验「不会每次都白刷」。
+    async putInfo(writes: readonly TokenInfoWrite[]) {
+      for (const w of writes) {
+        const row = rows.get(w.tokenId);
+        if (!row) continue;
+        row.symbol = w.symbol;
+        row.name = w.name;
+        if (w.logo !== undefined) row.logo = w.logo; // 上游没给图 → 保留原有的
+        row.infoStale = false;
+      }
     },
 
     async candidatesBySymbol(symbol) {
@@ -308,6 +323,12 @@ export function fakeUpstream(id = "src"): FakeUpstream {
       }
       return out;
     },
+    async fetchTokens(refs) {
+      src.calls.push(`fetchTokens:${refs.join(",")}`);
+      // 上游没收录的 ref 不出现在结果里(契约如此)。
+      return src.markets.filter((t) => refs.includes(t.ref));
+    },
+
     async fetchPriceSeries(ref, fromMs, toMs) {
       src.calls.push(`fetchPriceSeries:${ref}:${fromMs}:${toMs}`);
       return src.series.filter((p) => p.atMs >= fromMs && p.atMs <= toMs);

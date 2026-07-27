@@ -31,6 +31,7 @@ export type {
   TokenCandidate,
   TokenInfo,
   TokenInfoPatch,
+  TokenInfoWrite,
   TokenPrice,
   TokenPricePoint,
   TokenPriceWrite,

@@ -235,6 +235,62 @@ describe("fillInfo 只填空槽", () => {
   });
 });
 
+// `putInfo` 是 `fillInfo` 的对面:上游说了算。链上合约的 symbol 是部署者写的、可能与上游实际
+// 叫法不一致(MATIC→POL),不覆盖的话同一个币在链上侧与交易所侧显示成两个名字。
+describe("putInfo 覆盖上游那三个字段", () => {
+  it("symbol/name/logo 一律覆盖,连接器自带的备用图不动", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("MATIC", "Matic Network", "zerion.png"), [USDC_ETH]);
+
+    await store.putInfo(
+      [{ tokenId: id, symbol: "POL", name: "POL (ex-MATIC)", logo: "pol.png" }],
+      60_000,
+    );
+
+    const info = await store.getById(id);
+    expect(info).toMatchObject({
+      symbol: "POL",
+      name: "POL (ex-MATIC)",
+      logo: "pol.png",
+      providerLogo: "zerion.png", // 上游无权覆盖备用槽
+    });
+  });
+
+  it("上游这次没给图 → 保留原有的,不擦成 null", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("OLD"), [USDC_ETH]);
+    await store.putInfo([{ tokenId: id, symbol: "OLD", name: "Old", logo: "keep.png" }], 60_000);
+    await store.putInfo([{ tokenId: id, symbol: "NEW", name: "New" }], 60_000);
+    expect(await store.getById(id)).toMatchObject({ symbol: "NEW", logo: "keep.png" });
+  });
+
+  it("info TTL:建行即 stale;刷过转 fresh;过期又变 stale —— 但**过期不删、照样给**", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("USDC"), [USDC_ETH]);
+    // 建行时 info_expires_at = now → 已过期:行是拿连接器报的那份建的,上游还没覆盖过。
+    expect((await store.getById(id))?.infoStale).toBe(true);
+
+    await store.putInfo([{ tokenId: id, symbol: "USDC", name: "USD Coin" }], 60_000);
+    expect((await store.getById(id))?.infoStale).toBe(false);
+
+    // 时钟走到 TTL 之后(now 是注入的 1000 → 用另一个 store 实例看同一行)。
+    const later = createUserTokenStore(env, { userId: USER_A, namer: NAMER, now: () => 100_000 });
+    const info = await later.getById(id);
+    expect(info?.infoStale).toBe(true);
+    expect(info?.name).toBe("USD Coin"); // 仍然给 —— 门控读会让 logo 代理端点 404
+  });
+
+  it("拿别人的 tokenId 调 → 一行都不改(userId 在 where 里)", async () => {
+    const mine = await storeFor(USER_A).create(seed("USDC"), [USDC_ETH]);
+    await storeFor(USER_B).putInfo([{ tokenId: mine, symbol: "HACKED", name: "Hacked" }], 60_000);
+    expect((await storeFor(USER_A).getById(mine))?.symbol).toBe("USDC");
+  });
+
+  it("空数组 → 不发语句", async () => {
+    await expect(storeFor(USER_A).putInfo([], 60_000)).resolves.toBeUndefined();
+  });
+});
+
 describe("价 facet", () => {
   it("写 → 读回;过期不删,读出带 stale", async () => {
     const store = storeFor(USER_A);

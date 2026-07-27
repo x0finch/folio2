@@ -23,6 +23,10 @@ export interface TokenInfo {
   name: string;
   logo?: string; // 源给的图(canonical)
   providerLogo?: string; // 连接器自带的图(备用槽;展示回退链第二档)
+  // 这三个字段该回源重取了(长 TTL,见 INFO_TTL_MS)。**读侧不因此降级** —— 与价的 stale 同一个
+  // 口径:过期不删、照样给,只是标出来让调用方后台刷。建行时置为「已过期」:行是拿连接器报的
+  // 元信息建的,上游那份还没覆盖过。
+  infoStale: boolean;
 }
 
 // 价 facet,快 TTL。`marketCapRank` 是市场数据,其权威 home 在此。
@@ -64,6 +68,16 @@ export interface TokenInfoPatch {
 // 写回一条价(按 token_id,不按 ref)。
 export interface TokenPriceWrite extends TokenPrice {
   tokenId: string;
+}
+
+// 写回一行上游元信息(按 token_id)。**与 `TokenInfoPatch` 相反:这是覆盖,不是填空槽** ——
+// 上游是这三个字段的权威 home,连接器报的那份只是行还没被认出来时的临时值。
+// `providerLogo` 不在这里 —— 那是连接器自带的备用图,上游无权覆盖它。
+export interface TokenInfoWrite {
+  tokenId: string;
+  symbol: string;
+  name: string;
+  logo?: string;
 }
 
 // —— 其余 ——

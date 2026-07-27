@@ -232,6 +232,53 @@ describe("新币:链上 + 交易所,上游后来才收录", () => {
   });
 });
 
+// 同一个币,链上侧按**地址**认、交易所侧按**symbol** 认 —— 两条判据互不相干,所以链上合约里写的
+// symbol 与上游实际叫法不一致时(MATIC 改名 POL 之后,合约里那份还是旧名),两侧仍然归到同一行。
+// 认定是对的,错的只是显示名 —— 修它是 `refreshStaleInfo` 的活(见 tokens.test.ts 那组覆盖用例)。
+const POL_ETH = "evm:1/contract:0x455e53cbb86018ac2b8092fdcd39d8444affc3f6";
+const POL_CEX = "binance/POL";
+const POL_ID = "polygon-ecosystem-token";
+const SRC_POL = `src/${POL_ID}`;
+
+describe("链上 symbol 与上游叫法不一致", () => {
+  it("链上报旧名、交易所报新名 → 仍归到同一行(两条判据互不相干)", async () => {
+    const { store, mint } = setup({
+      index: { [POL_ETH]: POL_ID }, // 链上那条:按地址认,压根不看 symbol
+      candidates: { POL: [{ ref: SRC_POL, marketCapRank: 76 }] }, // 交易所那条:按 symbol 认
+    });
+
+    const ids = await mint.of([
+      { ref: POL_ETH, seed: seed("MATIC", "Matic Network") }, // 合约里写的是旧名
+      { ref: POL_CEX, seed: seed("POL") }, // 交易所报的是新名
+    ]);
+
+    expect(ids.get(POL_CEX)).toBe(ids.get(POL_ETH));
+    expect(store.rows.size).toBe(1);
+    expect(store.refs.get(SRC_POL)).toBe(ids.get(POL_ETH));
+  });
+
+  it("行上留着的是**先到者**报的名字 —— 所以必须由上游覆盖一遍", async () => {
+    const { store, candidates, mint } = setup({
+      index: { [POL_ETH]: POL_ID },
+      candidates: { POL: [{ ref: SRC_POL, marketCapRank: 76 }] },
+    });
+
+    const id = (await mint.of([{ ref: POL_ETH, seed: seed("MATIC", "Matic Network") }])).get(
+      POL_ETH,
+    ) as string;
+    // 链上那条一次都没问判官 —— 它按地址就认出来了,symbol 是什么无关。
+    expect(candidates.asked).toEqual([]);
+
+    // 建行用的是合约里那份旧名:mint 不修显示名(它只管认身份,而且不出网)。
+    expect(store.rows.get(id)).toMatchObject({ symbol: "MATIC", name: "Matic Network" });
+    // 后来交易所那条进来,归到同一行 —— 名字还是旧的,与哪个账户先同步有关。
+    expect((await mint.of([{ ref: POL_CEX, seed: seed("POL") }])).get(POL_CEX)).toBe(id);
+    expect(store.rows.get(id)?.symbol).toBe("MATIC");
+    // 修它归 refreshStaleInfo(读路径、能出网)—— 建行时 infoStale 就是 true,等着被刷。
+    expect(store.rows.get(id)?.infoStale).toBe(true);
+  });
+});
+
 describe("并发", () => {
   it("同一条 ref 被同时 mint → 幂等,只出一行(upsert-then-read,无 barrier)", async () => {
     const { store, mint } = setup({ index: { [USDC_ETH]: "usd-coin" } });
