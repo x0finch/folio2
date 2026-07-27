@@ -16,6 +16,10 @@ import { getLogger } from "@logtape/logtape";
 
 const newUpstream = () => createCoinGeckoUpstream({ apiKey: env.COINGECKO_API_KEY || undefined });
 
+// 当前上游的命名者。db 层不预设任何厂商(表名列名零 vendor 字样,#199),所以凡是要按命名者
+// 点查 `token_refs` 的读(如手记持仓的「用户选了哪个币」)都由 app 把它传进去。
+export const NAMER = UPSTREAM_ID;
+
 // 一个用户的参考层。**显式工厂,不是糖** —— 参考层现在装用户私有数据,拿错用户就是泄露。
 // store 工厂惰性:碰 tokens 才建 tokens 那几个 store,碰 mint 只建它要的两个。
 // env 在工厂被调用时才取 → 模块加载期一次都不碰(Workers 的启动 CPU 限制)。

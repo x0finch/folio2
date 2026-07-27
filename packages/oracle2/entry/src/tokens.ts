@@ -7,7 +7,13 @@ import type {
   TokenUpstream,
   UpstreamToken,
 } from "@folio/oracle2-basic";
-import { DEFAULT_TOP_N, dayBucketOf, MS_PER_DAY, PRICE_TTL_MS } from "@folio/oracle2-basic";
+import {
+  DEFAULT_TOP_N,
+  dayBucketOf,
+  INFO_TTL_MS,
+  MS_PER_DAY,
+  PRICE_TTL_MS,
+} from "@folio/oracle2-basic";
 import { candidatesBySymbol, topByRank, warmRows } from "./cache";
 import type { CandidateSource } from "./mint";
 import { swr } from "./refresh";
@@ -38,6 +44,9 @@ export interface Tokens {
   priceOf(tokenId: string): Promise<TokenRecordPrice | undefined>;
   // SWR 批量刷价:给定 token 里价 stale/缺失的,一次批量回源写回。返回刷新条数。
   refreshStalePrices(ids: readonly string[]): Promise<number>;
+  // 同上,但刷的是 symbol/name/logo,而且是**覆盖**(上游权威,见 TokenStore.putInfo)。
+  // 与刷价分开的理由就是 TTL:名与图近乎静态(30d),价 30min —— 合在一起会把目录端点当价格端点用。
+  refreshStaleInfo(ids: readonly string[]): Promise<number>;
 
   // 历史日价序列(#148 / ADR 0019):命中缓存的过去日直接用,缺的一次回源补齐并永久落缓存;
   // 今日桶恒现取(可变,不缓存)。上游失败 → 退回仅缓存,不抛(曲线不因缺价崩)。
@@ -172,6 +181,44 @@ export function createTokens({
         })
         .filter((w) => w !== undefined);
       if (writes.length > 0) await prices.put(writes, PRICE_TTL_MS);
+      return writes.length;
+    },
+
+    // 刷元信息:**覆盖**已认出来的行的 symbol/name/logo。
+    //
+    // 为什么必须覆盖而不是填空槽:行是拿连接器报的元信息建的,而链上合约的 symbol 是部署者写在
+    // 合约里的字符串 —— MATIC 改名 POL 之后链上那份还写着 MATIC。合约那条 ref 是**按地址**
+    // 认出来的、认定可信,错的只是显示名。同一个币于是在链上侧显示 MATIC、在交易所侧显示 POL,
+    // 而它们其实是同一行 —— 用户看到的名字取决于哪个账户先同步,这不该是随机的。
+    //
+    // 只刷「认得出来(ref 非空)且 info stale」的:认不出来的行没有上游名字可取,
+    // 它显示连接器报的那份就是对的。
+    async refreshStaleInfo(ids) {
+      if (ids.length === 0) return 0;
+      const infos = await store.getByIds(ids);
+
+      const byRef = new Map<string, string>();
+      for (const [id, info] of infos) {
+        if (!info.infoStale || !info.ref) continue;
+        byRef.set(info.ref, id);
+      }
+      if (byRef.size === 0) return 0;
+
+      // 上游失败(限流 / 网络)→ 什么都不写,行保留连接器那份,下次再试。与价同口径:不抛。
+      let fetched: UpstreamToken[];
+      try {
+        fetched = await upstream.fetchTokens([...byRef.keys()]);
+      } catch {
+        return 0;
+      }
+      const writes = fetched
+        .map((t) => {
+          const tokenId = byRef.get(t.ref);
+          // 上游没收录的 ref 不在结果里;回来了却对不上我们要的键 → 丢掉,别乱写。
+          return tokenId ? { tokenId, symbol: t.symbol, name: t.name, logo: t.logo } : undefined;
+        })
+        .filter((w) => w !== undefined);
+      if (writes.length > 0) await store.putInfo(writes, INFO_TTL_MS);
       return writes.length;
     },
 

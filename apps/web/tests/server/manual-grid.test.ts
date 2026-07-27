@@ -1,6 +1,5 @@
 import { env } from "cloudflare:test";
-import { createTokenPriceHistoryStore } from "@folio/db";
-import { cgkRef } from "@folio/oracle";
+import { createUserTokenPriceStore } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/history";
 import { db } from "../../src/lib/server/internal/db";
@@ -12,6 +11,7 @@ import {
   loadManualAccountSeries,
   loadManualHistoryRows,
 } from "../../src/lib/server/internal/manual";
+import { NAMER } from "../../src/lib/server/internal/oracle2";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。
 // 网络无关:结构类用例用**无 identifier** 的 token(不触发 oracle priceSeries 回源,走账本价②/unitPrice③);
@@ -26,12 +26,19 @@ const D0 = B0 * DAY; // 日对齐的开仓时刻 → 日桶数学干净
 const localBtc = { symbol: "BTC", unitPrice: 100 };
 // 有 identifier(选了币)→ ① 走注入的 oracle 历史价。
 const btcRef = { symbol: "BTC", unitPrice: 100, identifier: "bitcoin" };
-// oracle 历史价缓存的键(TokenRef);identifier 即 manual token 选的 coingecko id。
-const bitcoinRef = cgkRef("bitcoin");
+// #203:历史价按 **token_id** 取(新参考层的 priceSeries 收内部 id),不再按厂商 ref 拼键。
+// 所以要先让持仓落库、拿到 mint 出来的 id,再往那个 id 上种价。
+async function seedDaily(
+  accountId: string,
+  rows: { dayBucket: number; unitPrice: number }[],
+): Promise<void> {
+  const [h] = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
+  await createUserTokenPriceStore(env, { userId: USER, namer: NAMER }).putDaily(h.id, rows);
+}
 
 async function resetUser(): Promise<void> {
   await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run();
-  await env.DB.prepare("DELETE FROM token_price_history").run();
+  await env.DB.prepare("DELETE FROM token_daily_prices").run();
   const now = Date.now();
   await env.DB.prepare(
     "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -68,15 +75,15 @@ describe("loadManualAccountSeries (grid)", () => {
   });
 
   it("① 预种历史价 → 网格用 oracle 历史价(非账本 price),按日桶取", async () => {
-    // 预种过去两日的 bitcoin 历史价。priceSeries(ref, D0, now) 的桶全在过去 → 命中缓存、零回源。
-    await createTokenPriceHistoryStore(env).putDailyPrices(bitcoinRef, [
-      { dayBucket: B0, unitPrice: 50000 },
-      { dayBucket: B0 + 1, unitPrice: 52000 },
-    ]);
     const acc = await emptyAccount();
     await addManualActivities(USER, acc.id, [
       // 账本 price=99999,但选了币(identifier)→ 历史应走 oracle 50000/52000,不用账本价。
       { token: btcRef, kind: "add", amount: 2, occurredAt: D0, price: 99999 },
+    ]);
+    // 预种过去两日的历史价。priceSeries 的桶全在过去 → 命中缓存、零回源。
+    await seedDaily(acc.id, [
+      { dayBucket: B0, unitPrice: 50000 },
+      { dayBucket: B0 + 1, unitPrice: 52000 },
     ]);
     const series = await loadManualAccountSeries(USER, acc.id, D0 + DAY);
     // 首活动 D0(桶 B0 → 50000)、末点 now=D0+DAY(桶 B0+1 → 52000);数量 2。用 oracle 价而非账本 99999。

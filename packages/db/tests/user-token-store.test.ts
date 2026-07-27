@@ -235,6 +235,104 @@ describe("fillInfo 只填空槽", () => {
   });
 });
 
+// `putInfo` 是 `fillInfo` 的对面:上游说了算。链上合约的 symbol 是部署者写的、可能与上游实际
+// 叫法不一致(MATIC→POL),不覆盖的话同一个币在链上侧与交易所侧显示成两个名字。
+describe("putInfo 覆盖上游那三个字段", () => {
+  it("symbol/name/logo 一律覆盖,连接器自带的备用图不动", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("MATIC", "Matic Network", "zerion.png"), [USDC_ETH]);
+
+    await store.putInfo(
+      [{ tokenId: id, symbol: "POL", name: "POL (ex-MATIC)", logo: "pol.png" }],
+      60_000,
+    );
+
+    const info = await store.getById(id);
+    expect(info).toMatchObject({
+      symbol: "POL",
+      name: "POL (ex-MATIC)",
+      logo: "pol.png",
+      providerLogo: "zerion.png", // 上游无权覆盖备用槽
+    });
+  });
+
+  it("上游这次没给图 → 保留原有的,不擦成 null", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("OLD"), [USDC_ETH]);
+    await store.putInfo([{ tokenId: id, symbol: "OLD", name: "Old", logo: "keep.png" }], 60_000);
+    await store.putInfo([{ tokenId: id, symbol: "NEW", name: "New" }], 60_000);
+    expect(await store.getById(id)).toMatchObject({ symbol: "NEW", logo: "keep.png" });
+  });
+
+  it("info TTL:建行即 stale;刷过转 fresh;过期又变 stale —— 但**过期不删、照样给**", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("USDC"), [USDC_ETH]);
+    // 建行时 info_expires_at = now → 已过期:行是拿连接器报的那份建的,上游还没覆盖过。
+    expect((await store.getById(id))?.infoStale).toBe(true);
+
+    await store.putInfo([{ tokenId: id, symbol: "USDC", name: "USD Coin" }], 60_000);
+    expect((await store.getById(id))?.infoStale).toBe(false);
+
+    // 时钟走到 TTL 之后(now 是注入的 1000 → 用另一个 store 实例看同一行)。
+    const later = createUserTokenStore(env, { userId: USER_A, namer: NAMER, now: () => 100_000 });
+    const info = await later.getById(id);
+    expect(info?.infoStale).toBe(true);
+    expect(info?.name).toBe("USD Coin"); // 仍然给 —— 门控读会让 logo 代理端点 404
+  });
+
+  it("拿别人的 tokenId 调 → 一行都不改(userId 在 where 里)", async () => {
+    const mine = await storeFor(USER_A).create(seed("USDC"), [USDC_ETH]);
+    await storeFor(USER_B).putInfo([{ tokenId: mine, symbol: "HACKED", name: "Hacked" }], 60_000);
+    expect((await storeFor(USER_A).getById(mine))?.symbol).toBe("USDC");
+  });
+
+  it("空数组 → 不发语句", async () => {
+    await expect(storeFor(USER_A).putInfo([], 60_000)).resolves.toBeUndefined();
+  });
+});
+
+// 上游与交易所改名的时间不一致 → 收敛发生的那一刻就是「叫法变了」的证据。
+// 身份发生变化的写入顺带把 info 标成该刷,否则显示名最长滞后一个 INFO_TTL_MS(30d)。
+describe("身份变化把 info 标成该刷", () => {
+  const freshen = async (store: ReturnType<typeof storeFor>, id: string) => {
+    await store.putInfo([{ tokenId: id, symbol: "MATIC", name: "Matic Network" }], 60_000);
+    expect((await store.getById(id))?.infoStale).toBe(false);
+  };
+
+  it("linkRef 真加了一条 ref → 标脏", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("MATIC"), [USDC_ETH]);
+    await freshen(store, id);
+
+    await store.linkRef(id, USDC_ARB);
+    expect((await store.getById(id))?.infoStale).toBe(true);
+  });
+
+  it("linkRef 的两条早退路径都不写 → 不标脏", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("MATIC"), [USDC_ETH]);
+    await store.linkRef(id, USDC_UP); // 先占上本源那一档
+    await freshen(store, id);
+
+    await store.linkRef(id, USDC_ETH); // 这条 ref 已有主 → 早退
+    expect((await store.getById(id))?.infoStale).toBe(false);
+    await store.linkRef(id, "coingecko/other-coin"); // 该命名者下已有别的叫法 → 不加第二条
+    expect((await store.getById(id))?.infoStale).toBe(false);
+  });
+
+  it("merge 之后赢家标脏 —— 它留的是自己那份(可能是旧)名字", async () => {
+    const store = storeFor(USER_A);
+    const winner = await store.create(seed("MATIC", "Matic Network"), [USDC_ETH]);
+    const loser = await store.create(seed("POL"), [USDC_ARB]);
+    await freshen(store, winner);
+
+    await store.merge(loser, winner);
+    const info = await store.getById(winner);
+    expect(info?.symbol).toBe("MATIC"); // 赢家的名字没被输家改掉
+    expect(info?.infoStale).toBe(true); // 但会被标成该刷
+  });
+});
+
 describe("价 facet", () => {
   it("写 → 读回;过期不删,读出带 stale", async () => {
     const store = storeFor(USER_A);

@@ -46,9 +46,11 @@ async function runDataMigration(): Promise<void> {
 }
 
 // 用【旧形态】种子一行:connector_id 持旧值,enc_credentials 为老键 JSON(或 NULL)。
+// 列名用 `platform`(不是当年的 `network`)—— `readD1Migrations` 把**全部**迁移都应用了,
+// 种子发生在 0011 改名之后。本测试测的是 connector_id 的值迁移与 creds 键改名,与这一列无关。
 async function seed(id: string, connectorId: string, encCredentials: string | null): Promise<void> {
   await env.DB.prepare(
-    "INSERT INTO accounts (id, user_id, connector_id, network, label, enc_credentials, created_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO accounts (id, user_id, connector_id, platform, label, enc_credentials, created_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   )
     .bind(id, USER, connectorId, null, id, encCredentials, 0, null)
     .run();

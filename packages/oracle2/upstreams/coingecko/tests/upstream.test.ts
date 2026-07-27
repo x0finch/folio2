@@ -193,6 +193,44 @@ describe("不是本源命名的 ref → 不发请求", () => {
   });
 });
 
+// 点查一批整行。**必须走 `/coins/markets?ids=`,不能走 `/simple/price`** —— 后者只回价,
+// 不回 name/symbol/image,而这个方法存在的全部理由就是要那三个字段(上游是它们的权威 home)。
+describe("fetchTokens 按 id 点查整行", () => {
+  it("打 /coins/markets 并把 ids 指名送上去,不翻页", async () => {
+    const calls = stubFetch({
+      "/coins/markets": [marketRow("usd-coin", 6), marketRow("ethereum", 2)],
+    });
+    const got = await createCoinGeckoUpstream().fetchTokens([
+      "coingecko/usd-coin",
+      "coingecko/ethereum",
+    ]);
+
+    expect(calls).toHaveLength(1); // 一次,没有 page=2
+    expect(calls[0].path).toContain("/coins/markets");
+    expect(calls[0].query.get("ids")).toBe("usd-coin,ethereum");
+    expect(calls[0].query.get("price_change_percentage")).toBe("24h");
+    expect(got.map((t) => t.ref)).toEqual(["coingecko/usd-coin", "coingecko/ethereum"]);
+    expect(got[0].name).toBe("usd-coin"); // 名与图确实回来了(这才是它与 fetchPrices 的差别)
+  });
+
+  it("一个都翻不出 coin id → 不发请求", async () => {
+    const calls = stubFetch({ "/coins/markets": [] });
+    expect(
+      await createCoinGeckoUpstream().fetchTokens(["evm:1/contract:0xa0b8", "binance/USDC"]),
+    ).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("上游没收录的 id 不出现在结果里(不是报错)", async () => {
+    stubFetch({ "/coins/markets": [marketRow("usd-coin", 6)] });
+    const got = await createCoinGeckoUpstream().fetchTokens([
+      "coingecko/usd-coin",
+      "coingecko/never-listed",
+    ]);
+    expect(got.map((t) => t.ref)).toEqual(["coingecko/usd-coin"]);
+  });
+});
+
 describe("搜索与全局映射", () => {
   it("搜索透传查询词", async () => {
     const calls = stubFetch({ "/search": { coins: [{ id: "usd-coin", symbol: "usdc" }] } });

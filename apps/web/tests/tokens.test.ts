@@ -15,6 +15,7 @@ const rec = (over: Partial<TokenRecord> = {}): TokenRecord => ({
   ref: "coingecko/bitcoin",
   symbol: "BTC",
   name: "Bitcoin",
+  infoStale: false,
   ...over,
 });
 

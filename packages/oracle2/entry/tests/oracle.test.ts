@@ -62,6 +62,7 @@ describe("oracleFor —— 显式工厂", () => {
       ref: "src/bitcoin",
       symbol: "BTC",
       name: "Bitcoin",
+      infoStale: false,
     });
 
     expect((await alice.tokens.enrich(["tk_1"])).get("tk_1")?.symbol).toBe("BTC");

@@ -1,3 +1,4 @@
+import { RESOLUTION_TOP_RANK } from "@folio/oracle2-basic";
 import { describe, expect, it } from "vitest";
 import { type CandidateSource, createMint, type TokenCandidate } from "../src";
 import { fakeRefIndexStore, fakeTokenStore } from "./fakes";
@@ -135,6 +136,240 @@ describe("事后认出来 → 合并", () => {
     expect(store.rows.size).toBe(1);
     expect(store.refs.get(SRC_USDC)).toBe(id);
     expect(store.rows.get(id as string)?.ref).toBe(SRC_USDC); // 这下认出来了
+  });
+});
+
+// 上游还不认识的新币,同时从链上和交易所进来。**两条 ref 失败的原因不同,后来被认出来的路径也不同**:
+//   · 链上合约 → 靠全局映射表,cron 刷到就认出来
+//   · 交易所代号 → 只能靠 symbol,而候选恒是 **warm(市值前 N 名)** 的子集(见 cache.ts)
+// 于是有一段中间状态:「上游收录了」并不等于「两行会并成一行」——那要等它进榜。
+// 上面那组合并用例两边都是合约形,盖不到这条分岔,所以单开一组。
+const XXA_ETH = "evm:1/contract:0xa0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0";
+const XXA_CEX = "binance/XXA";
+const XXA_ID = "xxa-token"; // 上游对它的叫法(映射表的 local_name)
+const SRC_XXA = `src/${XXA_ID}`; // 拼成 ref 之后的样子 = 锚
+
+describe("新币:链上 + 交易所,上游后来才收录", () => {
+  // 第一轮:上游还没收录 → 两条 ref 都认不出来,各自成行。
+  // candidateMap 由调用方持有 → 测试中途往里塞就等于「这个币进榜了」。
+  async function firstRound(candidateMap: Record<string, TokenCandidate[]> = {}) {
+    const ctx = setup({ candidates: candidateMap });
+    const ids = await ctx.mint.of([
+      { ref: XXA_ETH, seed: seed("XXA") },
+      { ref: XXA_CEX, seed: seed("XXA") },
+    ]);
+    return { ...ctx, onchain: ids.get(XXA_ETH) as string, cex: ids.get(XXA_CEX) as string };
+  }
+
+  const bothRefs = [
+    { ref: XXA_ETH, seed: seed("XXA") },
+    { ref: XXA_CEX, seed: seed("XXA") },
+  ];
+
+  it("上游还没收录 → 两行同名代币,各自独立、都没有价", async () => {
+    const { store, candidates, onchain, cex } = await firstRound();
+    expect(onchain).not.toBe(cex);
+    expect(store.rows.size).toBe(2);
+    for (const id of [onchain, cex]) {
+      expect(store.rows.get(id)?.symbol).toBe("XXA");
+      expect(store.rows.get(id)?.ref).toBeNull(); // 没有本源那条 ref → 问不到价
+    }
+    // 两条失败的原因不同:合约形一次都没问判官(闸在上游),交易所那条问了、但候选为空。
+    expect(candidates.asked).toEqual(["XXA"]);
+  });
+
+  it("上游收录了合约但还没进榜 → 只有链上那行认出来,**仍是两行**", async () => {
+    const { store, refIndex, mint, onchain, cex } = await firstRound();
+    refIndex.set("src", XXA_ETH, XXA_ID); // cron 刷到了这个合约
+
+    const ids = await mint.of(bothRefs);
+    // 链上那行就地补上本源那条 ref:行不动、历史不动,从此有价有图。
+    expect(ids.get(XXA_ETH)).toBe(onchain);
+    expect(store.rows.get(onchain)?.ref).toBe(SRC_XXA);
+    // 交易所那行只能靠 symbol,而它还不在 warm 里 → 原样不动,继续是没有价的第二行。
+    expect(ids.get(XXA_CEX)).toBe(cex);
+    expect(store.rows.get(cex)?.ref).toBeNull();
+    expect(store.rows.size).toBe(2);
+  });
+
+  it("再进了市值 100 名 → 两行合并成一行(**单候选那一档,不看排名**)", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, refIndex, mint, onchain, cex } = await firstRound(warm);
+    refIndex.set("src", XXA_ETH, XXA_ID);
+    // 头两轮写下的历史快照行分别指着两个 id。
+    store.snapshotTokenIds.push(onchain, cex);
+
+    warm.XXA = [{ ref: SRC_XXA, marketCapRank: 100 }]; // 进榜了
+
+    const ids = await mint.of(bothRefs);
+    // 哪一行活下来取决于批内顺序(先认出来的那条先占住上游 ref),无所谓 —— 要的是两条 ref 同归一行。
+    const merged = ids.get(XXA_CEX);
+    expect(ids.get(XXA_ETH)).toBe(merged);
+    expect(store.rows.size).toBe(1);
+    // 历史行一并改指 —— 不改的话曲线会在合并这一刻断成两段。
+    expect(store.snapshotTokenIds).toEqual([merged, merged]);
+
+    // **100 名在 top-50 之外**:它能过是因为同名只此一个(单候选),不是因为排名够高。
+    // 换言之这一档是脆的 —— 哪天再来一个 symbol 也叫 XXA 的币进了榜,判官会判「没把握」,
+    // 于是交易所那行又掉回独立一行(下一条用例)。
+    expect(RESOLUTION_TOP_RANK).toBeLessThan(100);
+  });
+
+  it("同名的第二个币也进了榜 → 100 名碾压不了它 → 交易所那行留在原地", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, refIndex, mint, onchain, cex } = await firstRound(warm);
+    refIndex.set("src", XXA_ETH, XXA_ID);
+    // 两个候选:100 名 vs 300 名。300 / 100 = 3 倍 < 碾压线 → 判「没把握」。
+    warm.XXA = [
+      { ref: SRC_XXA, marketCapRank: 100 },
+      { ref: "src/xxa-imposter", marketCapRank: 300 },
+    ];
+
+    const ids = await mint.of(bothRefs);
+    expect(ids.get(XXA_ETH)).toBe(onchain); // 链上那条走地址,不受同名混战影响
+    expect(ids.get(XXA_CEX)).toBe(cex); // 交易所那条认不出来 → 仍是没有价的第二行
+    expect(store.rows.size).toBe(2);
+  });
+});
+
+// 同一个币,链上侧按**地址**认、交易所侧按**symbol** 认 —— 两条判据互不相干,所以链上合约里写的
+// symbol 与上游实际叫法不一致时(MATIC 改名 POL 之后,合约里那份还是旧名),两侧仍然归到同一行。
+// 认定是对的,错的只是显示名 —— 修它是 `refreshStaleInfo` 的活(见 tokens.test.ts 那组覆盖用例)。
+const POL_ETH = "evm:1/contract:0x455e53cbb86018ac2b8092fdcd39d8444affc3f6";
+const POL_CEX = "binance/POL";
+const POL_ID = "polygon-ecosystem-token";
+const SRC_POL = `src/${POL_ID}`;
+
+describe("链上 symbol 与上游叫法不一致", () => {
+  it("链上报旧名、交易所报新名 → 仍归到同一行(两条判据互不相干)", async () => {
+    const { store, mint } = setup({
+      index: { [POL_ETH]: POL_ID }, // 链上那条:按地址认,压根不看 symbol
+      candidates: { POL: [{ ref: SRC_POL, marketCapRank: 76 }] }, // 交易所那条:按 symbol 认
+    });
+
+    const ids = await mint.of([
+      { ref: POL_ETH, seed: seed("MATIC", "Matic Network") }, // 合约里写的是旧名
+      { ref: POL_CEX, seed: seed("POL") }, // 交易所报的是新名
+    ]);
+
+    expect(ids.get(POL_CEX)).toBe(ids.get(POL_ETH));
+    expect(store.rows.size).toBe(1);
+    expect(store.refs.get(SRC_POL)).toBe(ids.get(POL_ETH));
+  });
+
+  it("行上留着的是**先到者**报的名字 —— 所以必须由上游覆盖一遍", async () => {
+    const { store, candidates, mint } = setup({
+      index: { [POL_ETH]: POL_ID },
+      candidates: { POL: [{ ref: SRC_POL, marketCapRank: 76 }] },
+    });
+
+    const id = (await mint.of([{ ref: POL_ETH, seed: seed("MATIC", "Matic Network") }])).get(
+      POL_ETH,
+    ) as string;
+    // 链上那条一次都没问判官 —— 它按地址就认出来了,symbol 是什么无关。
+    expect(candidates.asked).toEqual([]);
+
+    // 建行用的是合约里那份旧名:mint 不修显示名(它只管认身份,而且不出网)。
+    expect(store.rows.get(id)).toMatchObject({ symbol: "MATIC", name: "Matic Network" });
+    // 后来交易所那条进来,归到同一行 —— 名字还是旧的,与哪个账户先同步有关。
+    expect((await mint.of([{ ref: POL_CEX, seed: seed("POL") }])).get(POL_CEX)).toBe(id);
+    expect(store.rows.get(id)?.symbol).toBe("MATIC");
+    // 修它归 refreshStaleInfo(读路径、能出网)—— 建行时 infoStale 就是 true,等着被刷。
+    expect(store.rows.get(id)?.infoStale).toBe(true);
+  });
+});
+
+// 改名不是一次性事件:上游改一次、交易所改一次,**时间还不一致**。中间那段窗口里两侧用不同的名字
+// 称呼同一个币。交易所的 ref 就是它的代号(`binance/<代号>`),所以它改代号 = **来了一条新 ref**。
+//
+// 两种到达顺序身份都收敛,差别在中间那一下;而**收敛发生的那一刻就是「叫法变了」的证据** ——
+// 那时必须把 info 标成该刷,否则光等 30 天的 TTL,收敛之后那一行还显示旧名。
+describe("上游与交易所改名时间不一致", () => {
+  const POL_CEX_OLD = "binance/MATIC"; // 交易所改代号之前用的那条 ref
+
+  // 改名之前的世界:链上(按地址)与交易所(按 symbol MATIC)都已经认出来、归到同一行,
+  // 而且已经被刷成上游**当时**的叫法。
+  async function beforeAnyRename(warm: Record<string, TokenCandidate[]>) {
+    warm.MATIC = [{ ref: SRC_POL, marketCapRank: 76 }];
+    const ctx = setup({ index: { [POL_ETH]: POL_ID }, candidates: warm });
+    const ids = await ctx.mint.of([
+      { ref: POL_ETH, seed: seed("MATIC", "Matic Network") },
+      { ref: POL_CEX_OLD, seed: seed("MATIC") },
+    ]);
+    const id = ids.get(POL_ETH) as string;
+    expect(ids.get(POL_CEX_OLD)).toBe(id);
+    expect(ctx.store.rows.size).toBe(1);
+    // 假装 refreshStaleInfo 刷过了:那时上游还叫 MATIC。
+    await ctx.store.putInfo([{ tokenId: id, symbol: "MATIC", name: "Matic Network" }], 0);
+    expect(ctx.store.rows.get(id)?.infoStale).toBe(false);
+    return { ...ctx, id };
+  }
+
+  it("上游先改、交易所后改 → 新代号挂到同一行,并把 info 标成该刷", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, mint, id } = await beforeAnyRename(warm);
+
+    // ① 上游改了:warm 里 MATIC 变成 POL。交易所这一轮还在报旧代号 ——
+    // 那条 ref 已经认出来了 → 决策树第一步短路,身份不动,**info 也不标脏**:
+    // 本地没有任何「叫法变了」的证据可看,这一档只能靠 TTL 到期(下一条用例钉这件事)。
+    delete warm.MATIC;
+    warm.POL = [{ ref: SRC_POL, marketCapRank: 76 }];
+    expect((await mint.of([{ ref: POL_CEX_OLD, seed: seed("MATIC") }])).get(POL_CEX_OLD)).toBe(id);
+    expect(store.rows.get(id)?.infoStale).toBe(false);
+
+    // ② 交易所终于也改了代号 → 这是**一条新 ref**,按 symbol 认 → 上游已有 POL → 挂到同一行。
+    expect((await mint.of([{ ref: POL_CEX, seed: seed("POL") }])).get(POL_CEX)).toBe(id);
+    expect(store.rows.size).toBe(1);
+    // 收敛那一刻 info 被标脏 → 下一次刷新把显示名换成上游当前的叫法。
+    expect(store.rows.get(id)?.infoStale).toBe(true);
+  });
+
+  it("只有上游改、交易所一直不改 → 没有本地证据,只能等 TTL(这一档不标脏)", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, mint, id } = await beforeAnyRename(warm);
+    delete warm.MATIC;
+    warm.POL = [{ ref: SRC_POL, marketCapRank: 76 }];
+
+    // 连着几轮同步,来的都是已知的 ref → 一个字都不写。
+    for (let i = 0; i < 3; i++) {
+      await mint.of([
+        { ref: POL_ETH, seed: seed("MATIC") },
+        { ref: POL_CEX_OLD, seed: seed("MATIC") },
+      ]);
+    }
+    expect(store.rows.get(id)?.infoStale).toBe(false);
+    expect(store.rows.get(id)?.symbol).toBe("MATIC");
+    // 换言之显示名最长滞后一个 INFO_TTL_MS(30d)。这是明知接受的:标脏要有证据,
+    // 不然每轮同步都得为每一行白问一趟上游。
+  });
+
+  it("交易所先改、上游后改 → 中途多一行,上游跟上后合并并把赢家标成该刷", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, mint, id } = await beforeAnyRename(warm);
+
+    // ① 交易所抢先改了代号:新 ref,而上游还不认识这个 symbol → 认不出来,自己一行。
+    const orphan = (await mint.of([{ ref: POL_CEX, seed: seed("POL") }])).get(POL_CEX) as string;
+    expect(orphan).not.toBe(id);
+    expect(store.rows.size).toBe(2); // 这段窗口里用户会看到两行
+    store.snapshotTokenIds.push(id, orphan); // 两行各写了历史
+
+    // ② 上游随后也改了 → 下一轮认出来 → 合并。
+    delete warm.MATIC;
+    warm.POL = [{ ref: SRC_POL, marketCapRank: 76 }];
+    expect((await mint.of([{ ref: POL_CEX, seed: seed("POL") }])).get(POL_CEX)).toBe(id);
+    expect(store.rows.size).toBe(1);
+    expect(store.snapshotTokenIds).toEqual([id, id]); // 曲线不断
+    // 赢家留的是**自己那份**名字(旧名)—— 所以合并也必须标脏,否则最长 30 天不改。
+    expect(store.rows.get(id)?.symbol).toBe("MATIC");
+    expect(store.rows.get(id)?.infoStale).toBe(true);
+  });
+
+  it("同一条已知 ref 反复来 → 不算证据,不标脏(否则每轮同步都白刷一趟上游)", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, mint, id } = await beforeAnyRename(warm);
+    await mint.of([{ ref: POL_ETH, seed: seed("MATIC") }]);
+    await mint.of([{ ref: POL_CEX_OLD, seed: seed("MATIC") }]);
+    expect(store.rows.get(id)?.infoStale).toBe(false);
   });
 });
 

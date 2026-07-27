@@ -8,7 +8,7 @@ export const EXPORT_VERSION = 2;
 interface AccountIn {
   id: string;
   connectorId: string;
-  network: string | null;
+  platform: string | null;
   label: string;
 }
 interface GroupIn {
@@ -51,7 +51,10 @@ export function accountRecord(account: AccountIn, safeCreds: Record<string, stri
     type: "account" as const,
     id: account.id,
     connectorId: account.connectorId,
-    network: account.network ?? undefined,
+    // **导出文件里的字段名仍是 `network`** —— 它是版本化的线格式,不跟着内部改名走。
+    // 库里那一列 #203 改叫 `platform` 了,但格式还是 v2;跟着改就等于悄悄改了 v2 的形状,
+    // 已导出的文件与新代码就对不上了。格式层面的改名归 #204 的 v3 一起做。
+    network: account.platform ?? undefined,
     label: account.label,
     creds: safeCreds,
   };

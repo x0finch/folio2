@@ -84,6 +84,20 @@ export function createCoinGeckoUpstream(config: CoinGeckoConfig = {}): TokenUpst
       return parseSimplePrice(json, Date.now());
     },
 
+    // 按 id 点查一批整行。走 `/coins/markets?ids=…` 而不是 `/simple/price`:后者只回价,
+    // 而这里要的正是 name/symbol/image。同一个端点、同一个解析器,只是不翻页。
+    async fetchTokens(refs) {
+      const ids = refs.map(coinIdOf).filter((id): id is string => id != null);
+      if (ids.length === 0) return [];
+      const rows = await client.coinsMarkets({
+        vsCurrency: VS_USD,
+        ids,
+        perPage: MARKETS_PER_PAGE,
+        priceChangePercentage: "24h",
+      });
+      return parseMarkets(rows);
+    },
+
     async fetchPriceSeries(ref, fromMs, toMs) {
       const id = coinIdOf(ref);
       if (!id) return []; // 不是本源命名的 ref → 本源给不出历史价

@@ -6,13 +6,13 @@ import { getDb } from "../src/client";
 // 包内测试白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
 import {
   createAccount,
-  createManualToken,
   deleteAccount,
   listManualActivityByAccount,
   recordManualActivity,
   removeManualActivity,
 } from "../src/queries";
 import { manualActivity } from "../src/schema";
+import { createUserTokenStore } from "../src/user-token-store";
 
 const USER_A = "user-a";
 const USER_B = "user-b";
@@ -35,22 +35,25 @@ beforeEach(async () => {
   await resetUser(USER_B);
 });
 
-// 活动挂 token(ADR 0017):测试账户预建一行 token,活动都记到它上。
+// 活动挂 (账户, token)。#203 起 token 就是 `tokens` 里的一行(生产路径是 mint;这里直接用 store)。
 async function manualAccount(userId: string) {
   const acc = await createAccount(env, userId, { connectorId: "manual", label: "M", creds: "{}" });
-  const h = await createManualToken(env, userId, acc.id, { symbol: "BTC", unitPrice: 1 });
-  return { id: acc.id, tokenId: h.id };
+  const tokenId = await createUserTokenStore(env, { userId, namer: "coingecko" }).create(
+    { symbol: "BTC" },
+    [],
+  );
+  return { id: acc.id, tokenId };
 }
 
 describe("manual_activity ops", () => {
   it("record + list (ordered by occurred_at)", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.tokenId, {
+    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
       kind: "set",
       amount: 10,
       occurredAt: 100,
     });
-    await recordManualActivity(env, USER_A, acc.tokenId, {
+    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
       kind: "add",
       amount: 5,
       occurredAt: 200,
@@ -64,7 +67,7 @@ describe("manual_activity ops", () => {
 
   it("remove by id", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.tokenId, {
+    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
       kind: "set",
       amount: 10,
       occurredAt: 1,
@@ -76,14 +79,18 @@ describe("manual_activity ops", () => {
 
   it("scoped by owner: other user can't record / list / remove", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.tokenId, {
+    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
       kind: "set",
       amount: 10,
       occurredAt: 1,
     });
     // B 记录到 A 的 token → 抛(assertTokenOwned:不属本人)
     await expect(
-      recordManualActivity(env, USER_B, acc.tokenId, { kind: "add", amount: 1, occurredAt: 2 }),
+      recordManualActivity(env, USER_B, acc.id, acc.tokenId, {
+        kind: "add",
+        amount: 1,
+        occurredAt: 2,
+      }),
     ).rejects.toThrow();
     // B 列 A 的账户 → 空(join 限 userId)
     expect(await listManualActivityByAccount(env, USER_B, acc.id)).toEqual([]);
@@ -93,7 +100,7 @@ describe("manual_activity ops", () => {
 
   it("cascade: deleting the account removes its activity", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.tokenId, {
+    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
       kind: "set",
       amount: 10,
       occurredAt: 1,

@@ -2,15 +2,15 @@ import type {
   AccountSafe,
   ManualActivity,
   ManualActivityPatch,
-  ManualToken,
+  ManualHolding,
   SnapshotWithBalances,
 } from "@folio/db";
-import { cgkRef, dayBucketOf } from "@folio/oracle";
+import { dayBucketOf } from "@folio/oracle";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
 import { deriveAmount, projectToken } from "../../manual-activity";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "../../manual-batch";
-import { isManual, MANUAL_CONNECTOR_ID } from "../../manual-connector";
+import { isManual, MANUAL_CONNECTOR_ID, manualTokenRef } from "../../manual-connector";
 import {
   buildManualAccountSeries,
   type HistoricalPriceAt,
@@ -20,24 +20,28 @@ import { buildManualSnapshot } from "../../manual-snapshot";
 import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
 import { oracle } from "./oracle";
+import { NAMER, oracleFor } from "./oracle2";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;
 
-// 把某 manual 账户的各 token 定义 + 各自活动账本折叠出的 amount,物化进 public `creds.tokens`
-// (provider 读取的投影,ADR 0017)。**单写者**:任何 token / 活动写路径改动后都须重跑,维护不变量
-// creds.tokens[i].amount === deriveAmount(token i 的 activities)。manual creds 全 public、明文 JSON;
-// tokens 存为 JSON 字符串(creds map 值恒字符串),provider 侧经 validateCredentials 解析回 typed 数组。
-// identifier 为空时**省略该键**(而非置 null)—— provider 的 tokens validator 视 identifier 为可选 string。
-export async function materializeManualCreds(userId: string, accountId: string): Promise<void> {
-  const rows = await db.listManualTokensByAccount(userId, accountId);
-  const tokens = await Promise.all(
-    rows.map(async (r) => projectToken(r, await db.listManualActivityByToken(userId, r.id))),
-  );
-  const raw = await db.getRawCreds(userId, accountId);
-  const creds: Record<string, string> = raw ? JSON.parse(raw) : {};
-  creds.tokens = JSON.stringify(tokens);
-  await db.setAccountCredentials(userId, accountId, JSON.stringify(creds));
+// **物化没有了**(#203)。原来每次写完都要把「各 token 定义 + 折叠出的 amount」写回
+// `creds.tokens`,给 manual provider 读。四个值全部落进真表之后 provider 只是「app 写进 JSON 列 →
+// 再读回来」的空转,连它一起删了 —— 于是「单写者」那条不变量、以及它带来的「忘了重跑就 stale」
+// 这类 bug 面,整个消失。持仓一律 compute-on-read(deriveAmount 现算)。
+
+// 一条手记持仓要用的 token id:先按当前上游的规则造 ref,再经 mint 换出 id(纯本地)。
+// 用户选了币 → ref 本身就是锚,mint 直接返回;没选 → 走 symbol 那一档,认不出来就自己一行。
+async function mintHolding(
+  userId: string,
+  picked: { symbol: string; identifier?: string | null },
+): Promise<string> {
+  const ref = manualTokenRef(picked);
+  const symbol = picked.symbol.trim().toUpperCase();
+  const ids = await oracleFor(userId).mint.of([{ ref, seed: { symbol } }]);
+  const id = ids.get(ref);
+  if (!id) throw new Error(`mint produced no token for ${ref}`);
+  return id;
 }
 
 // manual 加账户(ADR 0017 特例):前端已把首 token 提交为 `creds.tokens`(单元素 JSON),且已由
@@ -58,17 +62,16 @@ export async function createManualAccount(userId: string, label: string, tokens:
     label,
     creds: JSON.stringify({ tokens: "[]" }),
   });
-  const token = await db.createManualToken(userId, account.id, {
-    symbol: first.symbol,
+  const tokenId = await mintHolding(userId, first);
+  await db.setManualHoldingDef(userId, tokenId, {
+    symbol: first.symbol.trim().toUpperCase(),
     unitPrice: Number(first.unitPrice),
-    identifier: first.identifier,
   });
-  await db.recordManualActivity(userId, token.id, {
+  await db.recordManualActivity(userId, account.id, tokenId, {
     kind: "set",
     amount: Number(first.amount),
     occurredAt: Date.now(),
   });
-  await materializeManualCreds(userId, account.id);
   return account;
 }
 
@@ -134,7 +137,7 @@ export async function manualBalancesForWarm(
 
 // —— T3 写路径(#155):token CRUD + 批量活动(原子)+ 删/改活动 ——
 // server fn(manual-mutations.ts)只做 auth 薄壳后调这些纯 async(可在 workers-pool 集成测,不引 createServerFn)。
-// **单写者**:每次写后重跑受影响账户物化(materializeManualCreds),维护 creds.tokens[i].amount === 折叠账本 不变量。
+// **不再有物化那一步**(#203):持仓一律 compute-on-read,写路径只落事实(声明 + 活动)。
 // 决策逻辑(解析/收养/超支校验)下沉纯模块 manual-batch;这里只做加载 + 调用 + 物化(ADR 0017)。
 
 export interface CreateTokenInput {
@@ -145,10 +148,10 @@ export interface CreateTokenInput {
   amount: number;
 }
 export interface UpdateTokenInput {
+  accountId: string; // #203:token 不再自带账户(一个币可被多个手记账户持有)→ 调用方必须带
   tokenId: string;
   symbol: string;
   unitPrice: number;
-  identifier?: string | null;
   amount: number;
 }
 export type ManualWriteResult = { ok: true } | { ok: false; reason: "overdraw"; symbol?: string };
@@ -159,9 +162,9 @@ export type ManualWriteResult = { ok: true } | { ok: false; reason: "overdraw"; 
 async function loadTokensWithActivities(
   userId: string,
   accountId: string,
-): Promise<{ token: ManualToken; activities: ManualActivity[] }[]> {
+): Promise<{ token: ManualHolding; activities: ManualActivity[] }[]> {
   const [tokens, activities] = await Promise.all([
-    db.listManualTokensByAccount(userId, accountId),
+    db.listManualHoldingsByAccount(userId, accountId, NAMER),
     db.listManualActivityByAccount(userId, accountId),
   ]);
   const byToken = new Map<string, ManualActivity[]>();
@@ -180,7 +183,6 @@ async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
     id: token.id,
     symbol: token.symbol,
     unitPrice: token.unitPrice,
-    identifier: token.identifier,
     activities,
   }));
 }
@@ -223,34 +225,36 @@ export async function loadManualAccountDetail(
 // (price 参与 price@T 降级链②,见 manual-history)。
 async function loadHistoryTokens(userId: string, accountId: string): Promise<HistoryToken[]> {
   return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
+    id: token.id,
     unitPrice: token.unitPrice,
     identifier: token.identifier,
     activities,
   }));
 }
 
-// 异步 oracle 历史价 → 同步注入闭包(ADR 0019)。按 identifier 区间一次预取 priceSeries(A-2 内部缓存过去日),
-// 建 Map<identifier, Map<dayBucket, unitPrice>>,再包成 buildManualAccountSeries 要的同步 (identifier, t) 查询。
-// 每 identifier 一次网络(之后全缓存命中);取不到的日 → 闭包返 undefined → 纯层降级链落 ②③。manual token 的
-// identifier 定义即 coingecko coin id(选币所选)→ 直接构造 coingecko ref。
+// 异步 oracle 历史价 → 同步注入闭包(ADR 0019)。按 token 区间一次预取 priceSeries(内部缓存过去日),
+// 建 Map<tokenId, Map<dayBucket, unitPrice>>,再包成 buildManualAccountSeries 要的同步 (tokenId, t) 查询。
+// 每个币一次网络(之后全缓存命中);取不到的日 → 闭包返 undefined → 纯层降级链落 ②③。
 async function buildHistoricalPriceAt(
+  userId: string,
   tokens: HistoryToken[],
   now: number,
 ): Promise<HistoricalPriceAt> {
   const byIdentifier = new Map<string, Map<number, number>>();
   await Promise.all(
     tokens.map(async (tk) => {
-      if (!tk.identifier || tk.activities.length === 0 || byIdentifier.has(tk.identifier)) return;
+      // 上游没认出来的币不问历史价(问了也没有)—— `identifier` 空即「当前上游不认识它」。
+      if (!tk.identifier || tk.activities.length === 0 || byIdentifier.has(tk.id)) return;
       const from = Math.min(...tk.activities.map((a) => a.occurredAt));
-      const ref = cgkRef(tk.identifier);
       const daily = new Map<number, number>();
-      for (const pt of await oracle.tokens.priceSeries(ref, from, now)) {
+      // **按 token_id 取**(#203):新参考层的 priceSeries 收内部 id,不再拼厂商 ref。
+      for (const pt of await oracleFor(userId).tokens.priceSeries(tk.id, from, now)) {
         daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
       }
-      byIdentifier.set(tk.identifier, daily);
+      byIdentifier.set(tk.id, daily);
     }),
   );
-  return (identifier, t) => byIdentifier.get(identifier)?.get(dayBucketOf(t));
+  return (tokenId, t) => byIdentifier.get(tokenId)?.get(dayBucketOf(t));
 }
 
 // 单 manual 账户的账本价值序列(抽屉头部 chart 用;getAccountValueHistory 对 manual 走此)。
@@ -262,7 +266,7 @@ export async function loadManualAccountSeries(
   now: number = Date.now(),
 ): Promise<SnapshotTotalRow[]> {
   const tokens = await loadHistoryTokens(userId, accountId);
-  const priceAt = await buildHistoricalPriceAt(tokens, now);
+  const priceAt = await buildHistoricalPriceAt(userId, tokens, now);
   return buildManualAccountSeries(accountId, tokens, now, priceAt);
 }
 
@@ -296,46 +300,51 @@ export async function loadManualHistoryRows(
   return perAccount.flat();
 }
 
-// 建一个 token:建行 + 一条 occurredAt=now 的开仓 set 活动(使 derived amount === 初始 amount)→ 物化。
+// 加一个持仓:认币(mint)→ 落用户自己的两个字段 → 一条 occurredAt=now 的开仓 set 活动
+//(使 derived amount === 初始 amount)。这个币已经有持仓时不会重复 —— mint 恒返回同一个 id,
+// set 语义又重置基线,所以「再加一次」等于「把数量改成这个」。
 export async function createToken(userId: string, input: CreateTokenInput) {
-  const token = await db.createManualToken(userId, input.accountId, {
-    symbol: input.symbol,
+  const tokenId = await mintHolding(userId, input);
+  await db.setManualHoldingDef(userId, tokenId, {
+    symbol: input.symbol.trim().toUpperCase(),
     unitPrice: input.unitPrice,
-    identifier: input.identifier,
   });
-  await db.recordManualActivity(userId, token.id, {
+  await db.recordManualActivity(userId, input.accountId, tokenId, {
     kind: "set",
     amount: input.amount,
     occurredAt: Date.now(),
   });
-  await materializeManualCreds(userId, input.accountId);
-  return token;
+  return { id: tokenId };
 }
 
 // 改 token 定义;若目标 amount 与当前 derived 不同 → 追加一条 set 活动对齐(播 set 语义,grill Q13)→ 物化。
+// **accountId 由调用方带** —— token 不再自带账户(一个币可以被多个手记账户持有)。
+// 改「这其实是哪个币」(identifier)不在这里:那是改绑,与自动补链的合并同一条路径,另开一票。
 export async function updateToken(userId: string, input: UpdateTokenInput): Promise<void> {
-  const accountId = await db.getManualTokenAccountId(userId, input.tokenId);
-  await db.updateManualToken(userId, input.tokenId, {
-    symbol: input.symbol,
+  await db.setManualHoldingDef(userId, input.tokenId, {
+    symbol: input.symbol.trim().toUpperCase(),
     unitPrice: input.unitPrice,
-    identifier: input.identifier,
   });
-  const current = deriveAmount(await db.listManualActivityByToken(userId, input.tokenId));
+  const current = deriveAmount(
+    await db.listManualActivityByToken(userId, input.accountId, input.tokenId),
+  );
   if (Math.abs(current - input.amount) > AMOUNT_EPS) {
-    await db.recordManualActivity(userId, input.tokenId, {
+    await db.recordManualActivity(userId, input.accountId, input.tokenId, {
       kind: "set",
       amount: input.amount,
       occurredAt: Date.now(),
     });
   }
-  await materializeManualCreds(userId, accountId);
 }
 
-// 删一个 token(其活动经 FK 级联清)→ 物化(账户仍在)。
-export async function deleteToken(userId: string, tokenId: string): Promise<void> {
-  const accountId = await db.getManualTokenAccountId(userId, tokenId);
-  await db.deleteManualToken(userId, tokenId);
-  await materializeManualCreds(userId, accountId);
+// 该账户不再持有这个币:删它对该币的全部活动。**`tokens` 那行留着** —— 它是参考层数据
+//(带着上游 ref、名字、图、历史日价),别的账户可能还在用,删了下次还得重新认一遍。
+export async function deleteToken(
+  userId: string,
+  accountId: string,
+  tokenId: string,
+): Promise<void> {
+  await db.detachManualHolding(userId, accountId, tokenId);
 }
 
 // 批量加活动:载既有 token → 纯逻辑解析+校验(整批拒因超支)→ 原子提交(新建 token + 插活动)→ 物化。
@@ -345,14 +354,21 @@ export async function addManualActivities(
   drafts: BatchDraft[],
 ): Promise<ManualWriteResult> {
   const existing = await loadTokens(userId, accountId);
-  const plan = planManualBatch(existing, drafts, () => crypto.randomUUID());
+  // **先认币**:每条草稿的选中币换出 token id,规划时只比 id(见 planManualBatch)。
+  // 一批里指向同一个币的多条草稿会拿到同一个 id → 天然落到同一条持仓上。
+  const withIds = await Promise.all(
+    drafts.map(async (d) => ({
+      ...d,
+      token: { ...d.token, tokenId: await mintHolding(userId, d.token) },
+    })),
+  );
+  const plan = planManualBatch(existing, withIds);
   if (!plan.ok) return { ok: false, reason: "overdraw", symbol: plan.symbol };
   await db.commitManualBatch(userId, {
     accountId,
-    newTokens: plan.newTokens,
+    declare: plan.declare,
     activities: plan.activities,
   });
-  await materializeManualCreds(userId, accountId);
   return { ok: true };
 }
 
@@ -363,7 +379,6 @@ export async function deleteManualActivity(
   activityId: string,
 ): Promise<void> {
   await db.removeManualActivity(userId, accountId, activityId);
-  await materializeManualCreds(userId, accountId);
 }
 
 // 编辑一笔既有活动:取所属 token 时间线、套 patch 折叠校验(改 amount/kind/日期可能致超支)→ 合法才写 → 物化。
@@ -373,7 +388,7 @@ export async function editManualActivity(
   patch: ManualActivityPatch,
 ): Promise<ManualWriteResult> {
   const { tokenId, accountId } = await db.getManualActivityOwner(userId, activityId);
-  const activities = await db.listManualActivityByToken(userId, tokenId);
+  const activities = await db.listManualActivityByToken(userId, accountId, tokenId);
   // 只 kind/amount/occurredAt 影响运行持有;price/memo 不参与折叠。
   const patched = activities.map((a) =>
     a.id === activityId
@@ -386,12 +401,11 @@ export async function editManualActivity(
       : a,
   );
   if (!runningOk(patched)) {
-    const symbol = (await db.listManualTokensByAccount(userId, accountId)).find(
+    const symbol = (await db.listManualHoldingsByAccount(userId, accountId, NAMER)).find(
       (t) => t.id === tokenId,
     )?.symbol;
     return { ok: false, reason: "overdraw", symbol };
   }
   await db.updateManualActivity(userId, activityId, patch);
-  await materializeManualCreds(userId, accountId);
   return { ok: true };
 }

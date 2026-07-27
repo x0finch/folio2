@@ -25,6 +25,16 @@ export interface TokenMetaUpstream extends UpstreamIdentity {
 // 点查面:按已知 ref 刷价 / 取历史 / 按 (chain, contract) 单查。不需要币目录。
 export interface PriceUpstream extends UpstreamIdentity {
   fetchPrices(refs: readonly TokenRef[]): Promise<Map<TokenRef, TokenPrice>>;
+  // 按已知 ref 批量取**整行**(symbol / name / logo,可能连价)。
+  //
+  // 为什么需要它而不是只有 fetchPrices:**上游是这三个字段的权威 home**。代币行是用连接器报的
+  // 元信息建起来的,而链上合约的 symbol 是部署者写在合约里的字符串 —— 可能过时(MATIC 改名 POL
+  // 之后,链上那份还写着 MATIC),也可能压根与上游的叫法不一致。而合约那条 ref 是**按地址**认出来的,
+  // 认定本身可信;错的只是显示用的名字。于是同一个币在链上与交易所两侧显示成两个名字。
+  // 认出来之后拿上游那份覆盖一遍,这个歧义就没了。
+  //
+  // 未收录的 ref 不出现在结果里(不是报错)。
+  fetchTokens(refs: readonly TokenRef[]): Promise<UpstreamToken[]>;
   // 一 ref 一区间**一次**上游调用,升序原始观测点(粒度随上游;按日归一在服务层做)。
   fetchPriceSeries(ref: TokenRef, fromMs: number, toMs: number): Promise<TokenPricePoint[]>;
   // 兜底单查:全局映射里没有的(今天刚上线的币)才走这条。链未收录 / 无此合约 → null。

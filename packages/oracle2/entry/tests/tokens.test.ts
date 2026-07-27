@@ -10,6 +10,7 @@ const info = (over: Partial<TokenInfo> & { id: string }): TokenInfo => ({
   ref: SRC_BTC,
   symbol: "BTC",
   name: "Bitcoin",
+  infoStale: false, // 默认已刷过 —— 要测刷新的用例自己传 true
   ...over,
 });
 
@@ -132,6 +133,98 @@ describe("批量刷 stale 价", () => {
     await prices.put([{ tokenId: "tk_1", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
     expect(await tokens.refreshStalePrices(["tk_1"])).toBe(0);
     expect(await tokens.refreshStalePrices([])).toBe(0);
+    expect(upstream.calls).toEqual([]);
+  });
+});
+
+// 元信息(symbol/name/logo)的**覆盖**刷新。与刷价分开的理由是 TTL 一长一短(30d / 30min)。
+//
+// 为什么必须是覆盖:代币行是拿连接器报的元信息建起来的,而链上合约的 symbol 是部署者写在合约里的
+// 字符串 —— 可能过时(MATIC 改名 POL 之后,链上那份还写着 MATIC)。合约那条 ref 是**按地址**
+// 认出来的、认定本身可信,错的只是显示名。不覆盖的话同一个币会因为哪个账户先同步而显示成不同的名字。
+describe("批量刷 stale 元信息(覆盖)", () => {
+  it("只刷「认得出来且 info stale」的,一次批量回源", async () => {
+    const { store, upstream, tokens } = setup([
+      info({ id: "fresh" }), // 刷过了 → 跳过
+      info({ id: "stale", ref: "src/ethereum", infoStale: true }),
+      info({ id: "unknown", ref: null, infoStale: true }), // 上游没认出 → 没名字可取,跳过
+    ]);
+    upstream.markets = [{ ref: "src/ethereum", symbol: "ETH", name: "Ethereum", logo: "eth.png" }];
+
+    expect(await tokens.refreshStaleInfo(["fresh", "stale", "unknown"])).toBe(1);
+    expect(upstream.calls).toEqual(["fetchTokens:src/ethereum"]);
+    // 刷过之后不再 stale → 下一次零调用(否则每次访问都白刷一趟上游)。
+    expect(store.rows.get("stale")?.infoStale).toBe(false);
+    expect(await tokens.refreshStaleInfo(["fresh", "stale", "unknown"])).toBe(0);
+    expect(upstream.calls).toEqual(["fetchTokens:src/ethereum"]);
+  });
+
+  it("**链上 symbol 与上游不一致 → 上游那份赢**(MATIC→POL)", async () => {
+    // 行是按合约地址认出来的(认定可信),但建行时拿的是合约里写的 symbol —— 那份是旧名。
+    const { store, upstream, tokens } = setup([
+      info({
+        id: "tk_pol",
+        ref: "src/polygon-ecosystem-token",
+        symbol: "MATIC",
+        name: "Matic Network",
+        providerLogo: "zerion-matic.png",
+        infoStale: true,
+      }),
+    ]);
+    upstream.markets = [
+      {
+        ref: "src/polygon-ecosystem-token",
+        symbol: "POL",
+        name: "POL (ex-MATIC)",
+        logo: "pol.png",
+      },
+    ];
+
+    expect(await tokens.refreshStaleInfo(["tk_pol"])).toBe(1);
+    const row = store.rows.get("tk_pol");
+    expect(row?.symbol).toBe("POL"); // 覆盖,不是填空槽
+    expect(row?.name).toBe("POL (ex-MATIC)");
+    expect(row?.logo).toBe("pol.png");
+    // 连接器自带的备用图不动 —— 上游无权覆盖它(它是展示回退链的第二档)。
+    expect(row?.providerLogo).toBe("zerion-matic.png");
+  });
+
+  it("上游这次没给图 → 保留原有的,别擦成空", async () => {
+    const { store, upstream, tokens } = setup([
+      info({ id: "tk_1", symbol: "OLD", logo: "old.png", infoStale: true }),
+    ]);
+    upstream.markets = [{ ref: SRC_BTC, symbol: "BTC", name: "Bitcoin" }];
+
+    await tokens.refreshStaleInfo(["tk_1"]);
+    expect(store.rows.get("tk_1")).toMatchObject({ symbol: "BTC", logo: "old.png" });
+  });
+
+  it("上游抛错 → 什么都不写、不抛,行保留连接器那份", async () => {
+    const { store, upstream, tokens } = setup([
+      info({ id: "tk_1", symbol: "OLD", infoStale: true }),
+    ]);
+    upstream.fetchTokens = async () => {
+      throw new Error("429");
+    };
+
+    expect(await tokens.refreshStaleInfo(["tk_1"])).toBe(0);
+    expect(store.rows.get("tk_1")).toMatchObject({ symbol: "OLD", infoStale: true });
+  });
+
+  it("上游回了个映射不到 token 的 ref → 丢掉,不乱写", async () => {
+    const { store, upstream, tokens } = setup([
+      info({ id: "tk_1", symbol: "OLD", infoStale: true }),
+    ]);
+    upstream.fetchTokens = async () => [{ ref: "src/somebody-else", symbol: "ELSE", name: "Else" }];
+
+    expect(await tokens.refreshStaleInfo(["tk_1"])).toBe(0);
+    expect(store.rows.get("tk_1")?.symbol).toBe("OLD");
+  });
+
+  it("没有要刷的 → 零调用", async () => {
+    const { upstream, tokens } = setup([info({ id: "tk_1" })]);
+    expect(await tokens.refreshStaleInfo(["tk_1"])).toBe(0);
+    expect(await tokens.refreshStaleInfo([])).toBe(0);
     expect(upstream.calls).toEqual([]);
   });
 });

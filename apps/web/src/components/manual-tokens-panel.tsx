@@ -130,6 +130,7 @@ export function ManualTokensPanel({
   const historyTokens = useMemo<HistoryToken[]>(
     () =>
       tokens.map((tk) => ({
+        id: tk.id,
         unitPrice: tk.unitPrice,
         identifier: tk.identifier,
         activities: activities
@@ -179,7 +180,7 @@ export function ManualTokensPanel({
   };
 
   const removeTokenMut = useMutation({
-    mutationFn: (tokenId: string) => removeManualToken({ data: { tokenId } }),
+    mutationFn: (tokenId: string) => removeManualToken({ data: { accountId, tokenId } }),
     onSuccess: refresh,
     onError: () => toast.error(ta("actionFailed")),
   });

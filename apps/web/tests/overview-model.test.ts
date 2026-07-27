@@ -8,8 +8,8 @@ import { buildOverview } from "../src/lib/overview-model";
 // 纯 buildOverview 可脱离 server fn 测(依赖注入)—— 这是 #3 抽读模型的收益。
 // 用假 tokens/platforms + 最小 fixture,覆盖:eligible 过滤 → enrich 附回 → 聚合 → 平台装饰 → 总额。
 
-const account = (id: string, label: string, connectorId = "evm", network: string | null = null) =>
-  ({ id, label, connectorId, network, archivedAt: null }) as unknown as AccountSafe;
+const account = (id: string, label: string, connectorId = "evm", platform: string | null = null) =>
+  ({ id, label, connectorId, platform, archivedAt: null }) as unknown as AccountSafe;
 
 // 默认都带同一个 token_id —— 认定在写快照时就定死了,读端拿到的就是这个(#201)。
 const bal = (over: Partial<OverviewBalance>): OverviewBalance => ({
@@ -37,6 +37,7 @@ const record = (id: string): TokenRecord => ({
   symbol: "USDC",
   name: "USD Coin",
   logo: "u.png",
+  infoStale: false,
 });
 const tokens = {
   async enrich(ids: readonly string[]) {

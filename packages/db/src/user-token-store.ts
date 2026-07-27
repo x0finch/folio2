@@ -32,6 +32,11 @@ export interface UserTokenStoreOpts {
 // 外加 user_id 一个固定参数,故 40 条一批(81 个)稳在限内。
 const REF_PAIR_CHUNK = 40;
 
+// 元信息覆盖写:逐行一条 UPDATE(symbol/name/logo/info_expires_at + user_id/id 两个 where
+// = 每条最多 6 个参数,单条语句压根碰不到上限),真正约束的是一批发多少条语句。
+// 一次刷的量级是「用户屏幕上的持仓数」(几十到几百),50 条一批 → 常见情形一两批打完。
+const INFO_WRITES_PER_BATCH = 50;
+
 // tokenRef 串 ↔ 两段列,拆/拼归文法包(见 @folio/oracle-ref)。
 // 本文件因此**不认识右段的文法** —— 不知道有 `native` / `contract:` 这回事,也不知道分隔符是什么:
 // 拆只取 parse 的那两段、`kind` 一眼不看,拼走 formatTokenRef 的两段形。
@@ -99,6 +104,13 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
     return out;
   }
 
+  // info 标成「该刷」= 把过期时刻推到过去。`putInfo` 的反面,不带值。
+  const expireInfoStmt = (tokenId: string) =>
+    db
+      .update(tokens)
+      .set({ infoExpiresAt: 0 })
+      .where(and(eq(tokens.userId, userId), eq(tokens.id, tokenId)));
+
   const toInfo = (
     r: {
       id: string;
@@ -106,6 +118,7 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
       name: string;
       logo: string | null;
       providerLogo: string | null;
+      infoExpiresAt: number;
     },
     ref: TokenRef | null,
   ): TokenInfo => ({
@@ -115,6 +128,8 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
     name: r.name,
     logo: r.logo ?? undefined,
     providerLogo: r.providerLogo ?? undefined,
+    // **过期不删、照样给**(与价同口径)—— 只是标出来让上层去刷,见下面 getByIds 的注释。
+    infoStale: r.infoExpiresAt <= now(),
   });
 
   async function readInfos(ids: readonly string[]): Promise<Map<string, TokenInfo>> {
@@ -126,6 +141,7 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
       name: string;
       logo: string | null;
       providerLogo: string | null;
+      infoExpiresAt: number;
     }[] = [];
     for (const part of chunk([...new Set(ids)])) {
       if (part.length === 0) continue;
@@ -137,6 +153,7 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
             name: tokens.name,
             logo: tokens.logo,
             providerLogo: tokens.providerLogo,
+            infoExpiresAt: tokens.infoExpiresAt,
           })
           .from(tokens)
           .where(and(eq(tokens.userId, userId), inArray(tokens.id, part)))),
@@ -241,12 +258,17 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
       if (owner) return owner.tokenId;
       // 这个 Token 在该命名者下已有别的叫法 → 不加第二条。
       if (existing.length > 0) return tokenId;
-      await db
-        .insert(tokenRefs)
-        .values({ userId, namer: p.namer, localName: p.localName, tokenId })
-        .onConflictDoNothing({
-          target: [tokenRefs.userId, tokenRefs.namer, tokenRefs.localName],
-        });
+      // 真加了一条 ref → **info 标成该刷**(契约见 stores.ts):某个来源开始用新名字称呼一个
+      // 我们已经认识的币,这就是改名的证据。同一批发,省一次往返。
+      await batchWrite(db, [
+        db
+          .insert(tokenRefs)
+          .values({ userId, namer: p.namer, localName: p.localName, tokenId })
+          .onConflictDoNothing({
+            target: [tokenRefs.userId, tokenRefs.namer, tokenRefs.localName],
+          }),
+        expireInfoStmt(tokenId),
+      ]);
       return tokenId;
     },
 
@@ -302,6 +324,9 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
           })
           .where(eq(tokens.id, into)),
         db.delete(tokens).where(and(eq(tokens.userId, userId), eq(tokens.id, from))),
+        // 两行会合并,正说明至少有一边的名字与上游当前的叫法不一致 —— 赢家留的是自己那份,
+        // 可能就是旧的那份。标成该刷,别等 30 天的 TTL。
+        expireInfoStmt(into),
       ];
       await batchWrite(db, stmts);
     },
@@ -327,6 +352,32 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
         .update(tokens)
         .set(set)
         .where(and(eq(tokens.userId, userId), eq(tokens.id, tokenId)));
+    },
+
+    // **覆盖**上游那三个字段 + 续 info TTL(与 fillInfo 的填空槽相反,见 stores.ts 的契约注释)。
+    // `providerLogo` 不动 —— 那是连接器自带的备用图,上游无权覆盖。
+    // 逐行一条 UPDATE(每条 5 个参数,远在 D1 的每语句 100 个绑定参数上限内),一批打包发。
+    async putInfo(rows, ttlMs) {
+      if (rows.length === 0) return;
+      const expiresAt = now() + ttlMs;
+      for (const part of chunk([...rows], INFO_WRITES_PER_BATCH)) {
+        if (part.length === 0) continue;
+        await batchWrite(
+          db,
+          part.map((r) =>
+            db
+              .update(tokens)
+              .set({
+                symbol: r.symbol,
+                name: r.name,
+                // 上游这次没给图 → 保留原有的,别用 undefined 把它擦成 null。
+                ...(r.logo === undefined ? {} : { logo: r.logo }),
+                infoExpiresAt: expiresAt,
+              })
+              .where(and(eq(tokens.userId, userId), eq(tokens.id, r.tokenId))),
+          ),
+        );
+      }
     },
 
     // 「本地已认识的同名币」。服务层的 symbol 消歧主路走 warm blob 筛(见 oracle2 的 cache.ts),

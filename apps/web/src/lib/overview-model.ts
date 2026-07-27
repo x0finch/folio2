@@ -121,7 +121,7 @@ export async function buildOverview(
       id: account.id,
       label: account.label,
       connectorId: account.connectorId,
-      network: account.network,
+      platform: account.platform,
     },
     tokenId: b.tokenId, // **归并键**:写快照时定死(ADR 0021),不再由富化结果反推
     name: e?.name,

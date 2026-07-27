@@ -32,7 +32,10 @@ export interface WarmBlob {
 }
 
 // warm 里的 info 还没进库 → 没有内部 id、`ref` 必然非空(与 `UpstreamToken` 同源)。
-export type WarmInfo = Omit<TokenInfo, "id" | "ref" | "providerLogo"> & { ref: string };
+// 也没有 `infoStale`:那是「库里那行该回源刷了吗」,而这份**就是**刚从上游拿的。
+export type WarmInfo = Omit<TokenInfo, "id" | "ref" | "providerLogo" | "infoStale"> & {
+  ref: string;
+};
 
 export interface PlatformMeta {
   name: string;
