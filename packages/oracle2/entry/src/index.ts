@@ -17,13 +17,16 @@ export {
   type PlatformMeta,
   readFx,
   readPlatform,
+  refreshCatalogue,
   topByRank,
   type WarmBlob,
   type WarmInfo,
-  warmRows,
+  warmCatalogue,
+  warmMarkets,
   writeFx,
   writePlatform,
 } from "./cache";
+export { type CandidateSourceDeps, createCandidateSource } from "./candidates";
 export { pickByConfidence } from "./confidence";
 export {
   type CandidateSource,

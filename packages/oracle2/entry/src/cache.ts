@@ -5,7 +5,13 @@ import type {
   TokenMetaUpstream,
   TokenPrice,
 } from "@folio/oracle2-basic";
-import { FX_TTL_MS, normalizeSymbol, PLATFORM_TTL_MS, WARM_TTL_MS } from "@folio/oracle2-basic";
+import {
+  FX_TTL_MS,
+  normalizeSymbol,
+  PLATFORM_TTL_MS,
+  PRICE_TTL_MS,
+  WARM_TTL_MS,
+} from "@folio/oracle2-basic";
 import { swr } from "./refresh";
 
 // 参考层的三样缓存,一张 per-user 的 KV 表,**只三种键**:
@@ -43,19 +49,37 @@ export interface PlatformMeta {
 }
 
 // —— warm ——
+//
+// **同一份 blob,两个读者,新鲜度判据不同**(#216)。里面那 8 个字段的寿命差三个数量级:
+//   价 / 24h 涨跌  分钟级      ← 只有橱窗在乎
+//   市值排名        天级
+//   symbol / 名 / 图  几乎不变  ← 候选源只要这些
+//
+// blob 整份读整份写,所以**不能**让它整体按最短的那个刷 —— 那会让 mint(写路径、用户在等)
+// 为了一份「哪个币叫 POL」的数据去等 4 次目录请求。判据因此从「缓存条目过没过期」挪到
+// **blob 自己的 `asOf`** 上,由各读者按自己的容忍度判。
+//
+// 三个读者,三条判据:
+//   warmCatalogue    mint(写路径)      **永不刷**,只有完全没有时取一次
+//   warmMarkets      选币下拉(用户在等) 价超过 PRICE_TTL_MS 就刷
+//   refreshCatalogue 同步后的后台预热    目录超过 WARM_TTL_MS(一周)就刷 ← 唯一主动跟进的那条
+//
+// 没有第三条的话,不打开选币下拉的用户目录会冻在第一次同步那一刻,此后新进前 1000 的币永远
+// 认不出来。三条都不看 `hit.stale`(store 过期不删),判据一律落在 blob 的 `asOf` 上。
 
-// 排行榜 / 候选都读它。**整份刷新走 SWR**:新鲜就不碰上游(与价、历史价同一个编排函数)。
-export async function warmRows(
+async function warmBlob(
   cache: CacheStore,
   upstream: TokenMetaUpstream,
   topN: number,
   now: number,
+  isStale: (blob: WarmBlob) => boolean,
 ): Promise<WarmBlob["rows"]> {
   const blob = await swr<WarmBlob>({
     read: async () => {
       const hit = await cache.get(cacheKeys.warm);
       const value = hit?.value as WarmBlob | undefined;
-      return value && Array.isArray(value.rows) ? { value, stale: hit?.stale ?? true } : undefined;
+      if (!value || !Array.isArray(value.rows)) return undefined; // 没有 → 回源(躲不掉)
+      return { value, stale: isStale(value) };
     },
     fetch: async () => {
       const tokens = await upstream.fetchMarkets({ topN });
@@ -71,6 +95,56 @@ export async function warmRows(
     write: (value) => cache.put(cacheKeys.warm, value, WARM_TTL_MS),
   });
   return blob?.rows ?? [];
+}
+
+/**
+ * 目录读者(symbol 消歧的候选源)。**有就用,多旧都用;只有完全没有时才回源一次。**
+ *
+ * 它问的是「哪个币叫 POL」—— 这个答案几乎不变,不值得让写路径为它出网。而完全没有时躲不掉:
+ * 候选集为空意味着所有按 symbol 认的币(交易所持仓、没选币的手记)全都认不出来,新用户
+ * 第一次同步会集体没有价。因为 `user_cache` 过期不删,这一取一辈子只会发生一次。
+ *
+ * 代价:某个币新进前 1000,要等下一次橱窗刷新(或预热)之后才认得出来。可接受 —— 它本来
+ * 也得先爬进前 1000。
+ */
+export function warmCatalogue(
+  cache: CacheStore,
+  upstream: TokenMetaUpstream,
+  topN: number,
+  now: number,
+): Promise<WarmBlob["rows"]> {
+  return warmBlob(cache, upstream, topN, now, () => false);
+}
+
+/**
+ * 预热读者(同步之后在后台跑)。**目录旧了就整份刷一次** —— 这是唯一一条「主动让目录跟上」的路。
+ *
+ * 为什么不能指望前两个:`warmCatalogue` 按设计永不刷(它在写路径上),`warmMarkets` 只在用户
+ * 打开选币下拉时才跑 —— 从不开下拉的用户,候选集会冻在第一次同步那一刻,此后新进前 1000 的币
+ * 永远认不出来。
+ *
+ * 跑在同步后的 best-effort 预热里(`waitUntil`,吞错),所以这 4 次请求不在任何人的关键路径上。
+ */
+export function refreshCatalogue(
+  cache: CacheStore,
+  upstream: TokenMetaUpstream,
+  topN: number,
+  now: number,
+): Promise<WarmBlob["rows"]> {
+  return warmBlob(cache, upstream, topN, now, (blob) => now - blob.asOf > WARM_TTL_MS);
+}
+
+/**
+ * 橱窗读者(选币下拉的默认列)。**价旧了就刷** —— 用户正看着这些数字,而且是他自己点开的,
+ * 这一趟网络他等得起。判据是 blob 的 `asOf`,与缓存条目的过期戳无关。
+ */
+export function warmMarkets(
+  cache: CacheStore,
+  upstream: TokenMetaUpstream,
+  topN: number,
+  now: number,
+): Promise<WarmBlob["rows"]> {
+  return warmBlob(cache, upstream, topN, now, (blob) => now - blob.asOf > PRICE_TTL_MS);
 }
 
 // 市值升序取前 limit(无 rank 者垫底)。

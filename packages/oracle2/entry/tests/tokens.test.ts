@@ -368,10 +368,8 @@ describe("橱窗与候选", () => {
 
     expect((await tokens.topTokens(1)).map((t) => t.ref)).toEqual([SRC_BTC]);
     expect(upstream.calls).toEqual(["fetchMarkets:1000"]);
-    // 第二次从 blob 出,不再预热;候选也从同一份出 → 缓存里始终只有一个键。
-    expect(await tokens.candidates.bySymbol("USDT")).toEqual([
-      { ref: "src/tether", marketCapRank: 3 },
-    ]);
+    // 第二次从 blob 出,不再预热 —— 缓存里始终只有一个键。
+    expect((await tokens.topTokens(2)).map((t) => t.ref)).toEqual([SRC_BTC, "src/tether"]);
     expect(upstream.calls).toHaveLength(1);
     expect([...cache.entries.keys()]).toEqual(["warm"]);
   });
