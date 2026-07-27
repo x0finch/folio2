@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart TD
-    P["① 产生<br/>Zerion provider → tokenRef"] --> M["② 认币<br/>mint:tokenRef → token_id(纯本地)"]
+    P["① 产生<br/>Zerion provider → tokenRef"] --> M["② 认币<br/>mint:tokenRef → token_id(本地为主,见 ②)"]
     M --> S["③ 入库<br/>writeSnapshot:行带 token_id"]
     S --> W["④ 预热<br/>warm:价 / 平台名图(异步)"]
     R["⑤ 读出<br/>getPortfolioOverview 读最新 snapshot"] --> E["⑥ 富化<br/>enrich:token_id → 名字 / 图 / 价"]
@@ -53,13 +53,18 @@ flowchart TD
 📍 **地点**:`packages/oracle2/entry/src/mint.ts`,由 app 编排在写快照之前
 (`apps/web/src/lib/server/internal/sync-deps.ts`)
 
-🔧 **做了什么**:一批 `tokenRef` 换出各自的 `token_id`。**全程不碰网络** —— `MintDeps` 里根本
-没有 upstream,判定顺序从便宜到贵:
+🔧 **做了什么**:一批 `tokenRef` 换出各自的 `token_id`。**本该全程不碰网络** —— 类型上也确实
+没给它 upstream(`MintDeps` 里没有那个字段),判定顺序从便宜到贵:
 
 1. **本地已有这条 ref 的行** → 直接返回。绝大多数同步全部停在这一步。
 2. **查本地全局映射表**(`global_token_ref_index`,cron 每日整份灌)→ `evm:1/contract:0xa0b8…`
    查出 `usd-coin`。
 3. **按 symbol 猜** → 先查策展表,再按市值排名挑。
+
+⚠️ **第 3 步今天会出网。** 排名从 warm(市值前 1000 的缓存)来,而候选源接的是会回源的那份:
+warm 过期(30min)时,mint 中途串行夹进 4 次目录请求。第 1、2 步纯本地,走到第 3 步的余额也少
+(合约形有闸、已认识的直接返回),SWR 还兜着不会卡死 —— 但「写快照不挂在第三方 API 上」这条
+目前有个缺口。修法见 [#216](https://github.com/x0finch/folio2/issues/216)。
 
 拿到的上游叫法就是**锚**:六个来源的 USDC 全部指向 `coingecko/usd-coin`,第一个到的建行,后面
 的只加一条 ref 行 —— **多链归一就发生在这里**,不在聚合层。

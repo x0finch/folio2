@@ -24,7 +24,7 @@ flowchart LR
     O --> F["provider.fetchBalances<br/>openCreds 解密"]
     F --> N["归一 Balance<br/>带 tokenRef(必填)"]
     N --> RV["revalue<br/>定 value + 捕获 selfPrice"]
-    RV --> M["mint.of<br/>tokenRef → token_id(纯本地)"]
+    RV --> M["mint.of<br/>tokenRef → token_id(本地为主)"]
     M --> S["写 D1 快照<br/>行带 token_id"]
     F -.失败.-> E["报错 · 不落库"]
     M -.失败.-> M2["token_id 留空<br/>快照照落,下次补"]
@@ -38,9 +38,14 @@ flowchart LR
 冻进快照:身份仍**可变**(事后认出来会**合并**,连历史行的 `token_id` 一并改指),但**同一份
 快照读一百次答案一样**。
 
-**mint 全程不碰网络。** 这不是约定而是类型事实 —— `MintDeps` 里根本没有 upstream。它查本地
+**mint 不该碰网络。** 写快照是用户点了按钮在等的事,不该挂在第三方 API 上。它查本地
 ref 行 → 查本地全局映射表 → 最后才按 symbol 猜(且**合约形的 ref 不许按 symbol 猜**,理由见
-[02](./02-canonical-aggregation.md))。写快照是用户点了按钮在等的事,不该挂在第三方 API 上。
+[02](./02-canonical-aggregation.md))。
+
+⚠️ **今天只做到一半。** 类型上是立住的 —— `MintDeps` 里没有 upstream。但 symbol 那一档要问
+候选源(`CandidateSource`),而装配时接的是会回源的 warm 缓存:它过期(30min)时,mint 中途会
+串行夹进 4 次目录请求。走到那一档的余额很少(合约形有闸、已认识的直接返回),SWR 也兜着不会
+卡死,但「纯本地」这个前提目前不成立。修法见 [#216](https://github.com/x0finch/folio2/issues/216)。
 
 ### 关键代码
 
@@ -65,7 +70,7 @@ function evmTokenRef(chainId: number, contract: string | undefined): string { /*
 
 ```ts
 // apps/web/src/lib/server/internal/sync-deps.ts —— buildSyncDeps().writeSnapshot
-const idByRef = await oracleFor(userId).mint.of(refs);   // 纯本地,一次批量点查
+const idByRef = await oracleFor(userId).mint.of(refs);   // 一次批量点查(本地为主,见上)
 return db.writeSnapshot(userId, accountId, {
   ...input,
   balances: rows.map((b) => ({ ...b, tokenId: b.tokenRef ? idByRef.get(b.tokenRef) : undefined })),
