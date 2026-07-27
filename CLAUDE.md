@@ -29,7 +29,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 3. **Modular** — each provider is an independent package (`@folio/provider-*`, own package.json), interdependency-free, composed via the shared interface. UI lives in `@folio/ui`.
 4. **Tests beside src** — each package's tests go in `tests/` (sibling of `src/`); provider API fixtures in `tests/fixtures/`.
 5. **Secrets never leave / never echoed** — APIs never return credential values; only a safe projection (`safeView`: public whole, semi masked, secret dropped) + `needsCredentials`. Per-account creds are one `creds` map, encrypted **per field by `type`** — only `secret` fields AES-GCM-encrypted (Web Crypto, `SECRETS_KEY` from env); `public`/`semi` plaintext (P6.6.1). **creds shaping lives in the app** (`apps/web/src/lib/creds.ts`: seal/open/safeView/isComplete/categorize), driven by `@folio/balances`'s `credentialSpecs()` field `type`s + Web Crypto — `@folio/balances` only does provider-facing work (`validateCredentials`/`fetchBalances`) and never sees `SECRETS_KEY`.
-6. **`@folio/db` exposes only wrapped ops** — no Drizzle instance / schema handle exported; only userId-scoped domain functions. All data access funnels through here.
+6. **`@folio/db` exposes only wrapped ops** — no Drizzle instance / schema handle exported; only userId-scoped domain functions. All data access funnels through here. **两张表是受控例外**(#199,ADR 0022):`global_token_ref_index`(链上地址 → 上游的叫法)与 `token_daily_prices`(历史日价)不带 `user_id` —— 它们装的**一条用户数据都没有**,是上游的公开知识、可整表重建、删空只是下一轮慢一点,与搜索结果跨用户共用同理。判据就是这个:**表里有没有「谁的」这回事**。有 → 必须 userId-scoped,没有例外。
 7. **Relative imports without extensions** (`moduleResolution: bundler`).
 8. **No hardcoding** — magic numbers named; volatile/env-specific → env, stable domain → each package's `constants.ts`.
 9. **Prefer mature, vetted libraries** — must pass the 4 gates (CF Workers, maintained, complexity-worth-it, no conflicts); record the choice.
@@ -79,6 +79,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - Global provider keys (`ZERION_API_KEY`, etc.) → CF Secret/env. Per-account creds → D1 as one `creds` map (physical column `enc_credentials`), encrypted **per field by `type`**: `secret` fields AES-GCM with `SECRETS_KEY`, `public`/`semi` plaintext (P6.6.1/P6.6.2; seal/open/safeView/isComplete now in `apps/web/src/lib/creds.ts`, driven by `@folio/balances` `credentialSpecs()` + Web Crypto).
 - Read-only tracking, **no signing** → no private-key field in any `provider.inputs`; on-chain accounts store address/xpub only (`public`).
 - Decrypt (`openCreds`) only inside server functions / sync at fetch time, discard immediately, never log (P6.7 red line: log only accountId/type/code/counts).
+- **数据一律按用户隔离**,`@folio/db` 的每个 op 都收 userId(原则 #6)。**两张表除外**:`global_token_ref_index` 与 `token_daily_prices` —— 它们只装上游的公开知识,泄露面为零,所以不隔离也不是风险。判据是「表里有没有『谁的』这回事」,不是「这张表大不大 / 共用起来省不省」。参考层其余部分(代币行、ref 行、per-user 缓存)**全部** per-user,`oracleFor(userId)` 在工厂那一层就把 userId 吃掉,拿错用户在编译期就发生不了。
 - better-auth CF gotchas (apply in P2.1): native `node:crypto` scrypt hash override; single module-level auth instance; `ctx.waitUntil` for background tasks; secondaryStorage TTL ≥ 60s; disable cookieCache; no auth calls at module load.
 
 ---

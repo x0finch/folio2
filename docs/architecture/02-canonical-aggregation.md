@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart TD
-    P["① 产生<br/>Zerion provider → tokenRef"] --> M["② 认币<br/>mint:tokenRef → token_id(本地为主,见 ②)"]
+    P["① 产生<br/>Zerion provider → tokenRef"] --> M["② 认币<br/>mint:tokenRef → token_id(纯本地)"]
     M --> S["③ 入库<br/>writeSnapshot:行带 token_id"]
     S --> W["④ 预热<br/>warm:价 / 平台名图(异步)"]
     R["⑤ 读出<br/>getPortfolioOverview 读最新 snapshot"] --> E["⑥ 富化<br/>enrich:token_id → 名字 / 图 / 价"]
@@ -53,18 +53,17 @@ flowchart TD
 📍 **地点**:`packages/oracle2/entry/src/mint.ts`,由 app 编排在写快照之前
 (`apps/web/src/lib/server/internal/sync-deps.ts`)
 
-🔧 **做了什么**:一批 `tokenRef` 换出各自的 `token_id`。**本该全程不碰网络** —— 类型上也确实
-没给它 upstream(`MintDeps` 里没有那个字段),判定顺序从便宜到贵:
+🔧 **做了什么**:一批 `tokenRef` 换出各自的 `token_id`。**全程不碰网络** —— 类型上没给它
+upstream(`MintDeps` 里没有那个字段),判定顺序从便宜到贵:
 
 1. **本地已有这条 ref 的行** → 直接返回。绝大多数同步全部停在这一步。
 2. **查本地全局映射表**(`global_token_ref_index`,cron 每日整份灌)→ `evm:1/contract:0xa0b8…`
    查出 `usd-coin`。
 3. **按 symbol 猜** → 先查策展表,再按市值排名挑。
 
-⚠️ **第 3 步今天会出网。** 排名从 warm(市值前 1000 的缓存)来,而候选源接的是会回源的那份:
-warm 过期(30min)时,mint 中途串行夹进 4 次目录请求。第 1、2 步纯本地,走到第 3 步的余额也少
-(合约形有闸、已认识的直接返回),SWR 还兜着不会卡死 —— 但「写快照不挂在第三方 API 上」这条
-目前有个缺口。修法见 [#216](https://github.com/x0finch/folio2/issues/216)。
+第 3 步的排名从 warm(市值前 1000 的目录缓存)来,而它读的是一份**只读**的:有就用、多旧都用,
+只有完全没有时才取一次(#216)。让这份目录跟上是**同步之后的后台预热**的活 —— 一周一次,跑在
+`waitUntil` 里。选币下拉那边读同一份 blob,但按价的新鲜度判(30min),因为用户正看着那些数字。
 
 拿到的上游叫法就是**锚**:六个来源的 USDC 全部指向 `coingecko/usd-coin`,第一个到的建行,后面
 的只加一条 ref 行 —— **多链归一就发生在这里**,不在聚合层。
@@ -103,8 +102,11 @@ D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两
 
 📍 **地点**:`apps/web/src/lib/server/internal/sync-deps.ts` `warmTokensForUser`
 
-🔧 **做了什么**:同步后台顺手刷 top-N 市值榜与该用户持仓币的价,写进 per-user 缓存。
+🔧 **做了什么**:同步后台顺手刷该用户持仓币的价、汇率、链与场馆的名图,写进 per-user 缓存。
 **这一步让后面的「读」可以零网络富化。**
+
+还有一件只有它做的事(#216):**把 ② 用的那份目录刷上**,一周一次。写路径按设计永不刷,
+选币下拉只在用户打开时才刷 —— 没有这一步,不开下拉的用户目录会冻在第一次同步那一刻。
 
 注意这里**不再有「拿合约去反查上游」这回事** —— 那是旧参考层的懒解析,已随 ② 退场。
 
@@ -182,8 +184,9 @@ Holding {
 同一个」的判断;认定挪到写路径之后它塌成一级,那个函数已删。
 
 **「永不裸 symbol」(ADR-0002)因此不再是一条要维护的规则,而是结构使然。** 唯一剩下的兜底是
-「没有 `token_id` 的行按 `账户 + symbol` 各自成组」,够得到它的只有两类:本列之前写下的旧快照,
-和手记那种现造的持仓。**兜底带账户 id**,所以它绝不会把两个账户的同名币并到一起。
+「没有 `token_id` 的行按 `账户 + symbol` 各自成组」,而够得到它的只剩一类:**本列之前写下的
+旧快照**(手记的持仓在 [#203](https://github.com/x0finch/folio2/issues/203) 之后也走 mint,
+有自己的 `token_id`)。**兜底带账户 id**,所以它绝不会把两个账户的同名币并到一起。
 
 **2. 展示分组(`group:`)整个退场了**(ADR 0021)。以前有一张种子名单把 `tether` + `usdt0`
 归到一个「USDT 家族」,好让桥接变体并成一行。现在 WBTC 与 BTC、USDT 各桥接变体**各占一行** ——
