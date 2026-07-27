@@ -1,3 +1,4 @@
+import { RESOLUTION_TOP_RANK } from "@folio/oracle2-basic";
 import { describe, expect, it } from "vitest";
 import { type CandidateSource, createMint, type TokenCandidate } from "../src";
 import { fakeRefIndexStore, fakeTokenStore } from "./fakes";
@@ -135,6 +136,99 @@ describe("事后认出来 → 合并", () => {
     expect(store.rows.size).toBe(1);
     expect(store.refs.get(SRC_USDC)).toBe(id);
     expect(store.rows.get(id as string)?.ref).toBe(SRC_USDC); // 这下认出来了
+  });
+});
+
+// 上游还不认识的新币,同时从链上和交易所进来。**两条 ref 失败的原因不同,后来被认出来的路径也不同**:
+//   · 链上合约 → 靠全局映射表,cron 刷到就认出来
+//   · 交易所代号 → 只能靠 symbol,而候选恒是 **warm(市值前 N 名)** 的子集(见 cache.ts)
+// 于是有一段中间状态:「上游收录了」并不等于「两行会并成一行」——那要等它进榜。
+// 上面那组合并用例两边都是合约形,盖不到这条分岔,所以单开一组。
+const XXA_ETH = "evm:1/contract:0xa0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0";
+const XXA_CEX = "binance/XXA";
+const XXA_ID = "xxa-token"; // 上游对它的叫法(映射表的 local_name)
+const SRC_XXA = `src/${XXA_ID}`; // 拼成 ref 之后的样子 = 锚
+
+describe("新币:链上 + 交易所,上游后来才收录", () => {
+  // 第一轮:上游还没收录 → 两条 ref 都认不出来,各自成行。
+  // candidateMap 由调用方持有 → 测试中途往里塞就等于「这个币进榜了」。
+  async function firstRound(candidateMap: Record<string, TokenCandidate[]> = {}) {
+    const ctx = setup({ candidates: candidateMap });
+    const ids = await ctx.mint.of([
+      { ref: XXA_ETH, seed: seed("XXA") },
+      { ref: XXA_CEX, seed: seed("XXA") },
+    ]);
+    return { ...ctx, onchain: ids.get(XXA_ETH) as string, cex: ids.get(XXA_CEX) as string };
+  }
+
+  const bothRefs = [
+    { ref: XXA_ETH, seed: seed("XXA") },
+    { ref: XXA_CEX, seed: seed("XXA") },
+  ];
+
+  it("上游还没收录 → 两行同名代币,各自独立、都没有价", async () => {
+    const { store, candidates, onchain, cex } = await firstRound();
+    expect(onchain).not.toBe(cex);
+    expect(store.rows.size).toBe(2);
+    for (const id of [onchain, cex]) {
+      expect(store.rows.get(id)?.symbol).toBe("XXA");
+      expect(store.rows.get(id)?.ref).toBeNull(); // 没有本源那条 ref → 问不到价
+    }
+    // 两条失败的原因不同:合约形一次都没问判官(闸在上游),交易所那条问了、但候选为空。
+    expect(candidates.asked).toEqual(["XXA"]);
+  });
+
+  it("上游收录了合约但还没进榜 → 只有链上那行认出来,**仍是两行**", async () => {
+    const { store, refIndex, mint, onchain, cex } = await firstRound();
+    refIndex.set("src", XXA_ETH, XXA_ID); // cron 刷到了这个合约
+
+    const ids = await mint.of(bothRefs);
+    // 链上那行就地补上本源那条 ref:行不动、历史不动,从此有价有图。
+    expect(ids.get(XXA_ETH)).toBe(onchain);
+    expect(store.rows.get(onchain)?.ref).toBe(SRC_XXA);
+    // 交易所那行只能靠 symbol,而它还不在 warm 里 → 原样不动,继续是没有价的第二行。
+    expect(ids.get(XXA_CEX)).toBe(cex);
+    expect(store.rows.get(cex)?.ref).toBeNull();
+    expect(store.rows.size).toBe(2);
+  });
+
+  it("再进了市值 100 名 → 两行合并成一行(**单候选那一档,不看排名**)", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, refIndex, mint, onchain, cex } = await firstRound(warm);
+    refIndex.set("src", XXA_ETH, XXA_ID);
+    // 头两轮写下的历史快照行分别指着两个 id。
+    store.snapshotTokenIds.push(onchain, cex);
+
+    warm.XXA = [{ ref: SRC_XXA, marketCapRank: 100 }]; // 进榜了
+
+    const ids = await mint.of(bothRefs);
+    // 哪一行活下来取决于批内顺序(先认出来的那条先占住上游 ref),无所谓 —— 要的是两条 ref 同归一行。
+    const merged = ids.get(XXA_CEX);
+    expect(ids.get(XXA_ETH)).toBe(merged);
+    expect(store.rows.size).toBe(1);
+    // 历史行一并改指 —— 不改的话曲线会在合并这一刻断成两段。
+    expect(store.snapshotTokenIds).toEqual([merged, merged]);
+
+    // **100 名在 top-50 之外**:它能过是因为同名只此一个(单候选),不是因为排名够高。
+    // 换言之这一档是脆的 —— 哪天再来一个 symbol 也叫 XXA 的币进了榜,判官会判「没把握」,
+    // 于是交易所那行又掉回独立一行(下一条用例)。
+    expect(RESOLUTION_TOP_RANK).toBeLessThan(100);
+  });
+
+  it("同名的第二个币也进了榜 → 100 名碾压不了它 → 交易所那行留在原地", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, refIndex, mint, onchain, cex } = await firstRound(warm);
+    refIndex.set("src", XXA_ETH, XXA_ID);
+    // 两个候选:100 名 vs 300 名。300 / 100 = 3 倍 < 碾压线 → 判「没把握」。
+    warm.XXA = [
+      { ref: SRC_XXA, marketCapRank: 100 },
+      { ref: "src/xxa-imposter", marketCapRank: 300 },
+    ];
+
+    const ids = await mint.of(bothRefs);
+    expect(ids.get(XXA_ETH)).toBe(onchain); // 链上那条走地址,不受同名混战影响
+    expect(ids.get(XXA_CEX)).toBe(cex); // 交易所那条认不出来 → 仍是没有价的第二行
+    expect(store.rows.size).toBe(2);
   });
 });
 
