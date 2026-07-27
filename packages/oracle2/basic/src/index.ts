@@ -19,6 +19,8 @@ export {
   TOP_TOKENS_LIMIT,
   WARM_TTL_MS,
 } from "./constants";
+// 展示币种 + 汇率(存储恒 USD,换算只在展示层;ADR 0006)。
+export { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "./fx";
 export type {
   CacheEntry,
   CacheStore,
@@ -42,6 +44,7 @@ export type {
   TokenRefIndexRow,
 } from "./types";
 export type {
+  FxUpstream,
   PriceUpstream,
   RefIndexFetch,
   TokenMetaUpstream,

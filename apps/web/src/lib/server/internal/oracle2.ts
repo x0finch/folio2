@@ -6,7 +6,12 @@ import {
   createUserTokenStore,
 } from "@folio/db";
 import { createOracleFor, createOracleWarm, type OracleFor, type OracleWarm } from "@folio/oracle2";
-import { createCoinGeckoUpstream, OVERRIDES, UPSTREAM_ID } from "@folio/oracle2-upstream-coingecko";
+import {
+  createCoinGeckoFxUpstream,
+  createCoinGeckoUpstream,
+  OVERRIDES,
+  UPSTREAM_ID,
+} from "@folio/oracle2-upstream-coingecko";
 import { getLogger } from "@logtape/logtape";
 
 // 新参考层的装配点(ADR 0023,#199/#200)。**这是全仓唯一同时认识两边的文件** ——
@@ -30,6 +35,9 @@ export const oracleFor: OracleFor = createOracleFor({
   createCacheStore: (userId) => createUserCacheStore(env, { userId }),
   createRefIndexStore: () => createGlobalTokenRefIndexStore(env),
   createUpstream: newUpstream,
+  // 汇率上游是**另一个端口**(见 OracleConfig):当前同样落在 CoinGecko 上,但那是这里的选择,
+  // 服务层不知道两者是同一家。
+  createFxUpstream: () => createCoinGeckoFxUpstream({ apiKey: env.COINGECKO_API_KEY || undefined }),
   // symbol → 上游 id 的策展表由 adapter 提供(它逐条写的是那一家的 id)。
   overrides: OVERRIDES,
 });

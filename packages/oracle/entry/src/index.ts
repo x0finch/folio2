@@ -5,15 +5,11 @@
 // 旧的 @folio/tokens / @folio/tokens-basic shim 已删,调用方直接用 oracle 词汇)。
 
 export * from "@folio/oracle-basic";
-// 平台 / 汇率的 CoinGecko source 经门面透出:调用方「source + service」自行组装。
-export {
-  createCoinGeckoFxSource,
-  createCoinGeckoPlatformSource,
-} from "@folio/oracle-source-coingecko";
-// 统一 Oracle 门面(#79):一个入口组合三服务。
+// 平台的 CoinGecko source 经门面透出:调用方「source + service」自行组装。
+export { createCoinGeckoPlatformSource } from "@folio/oracle-source-coingecko";
+// 统一 Oracle 门面(#79):一个入口组合各服务。
 export { type CreateOracleConfig, createOracle, type Oracle } from "./oracle";
-// 平台 / 汇率的组装服务(折入自 @folio/platforms、@folio/fx,#72)。类型经 @folio/oracle-basic 透出。
-export { type CreateFxRatesConfig, createFxRates } from "./services/fx";
+// 平台的组装服务(折入自 @folio/platforms,#72)。类型经 @folio/oracle-basic 透出。
 export { type CreatePlatformsConfig, createPlatforms } from "./services/platforms";
 export {
   type CreateTokensConfig,

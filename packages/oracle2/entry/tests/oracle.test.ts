@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createOracleFor, createOracleWarm, type OracleConfig } from "../src";
 import {
   fakeCacheStore,
+  fakeFxUpstream,
   fakeRefIndexStore,
   fakeTokenPriceStore,
   fakeTokenStore,
@@ -19,6 +20,7 @@ function countingConfig() {
   const caches = new Map<string, ReturnType<typeof fakeCacheStore>>();
   const refIndex = fakeRefIndexStore();
   const upstream = fakeUpstream();
+  const fxUpstream = fakeFxUpstream({ EUR: 1.09 });
 
   const memo = <T>(m: Map<string, T>, userId: string, make: () => T): T => {
     const cur = m.get(userId) ?? make();
@@ -47,9 +49,13 @@ function countingConfig() {
       calls.push("upstream");
       return upstream;
     },
+    createFxUpstream() {
+      calls.push("fxUpstream");
+      return fxUpstream;
+    },
     now: () => clock.now,
   };
-  return { cfg, calls, tokenStores, caches, upstream, clock };
+  return { cfg, calls, tokenStores, caches, upstream, fxUpstream, clock };
 }
 
 describe("oracleFor —— 显式工厂", () => {
@@ -72,6 +78,15 @@ describe("oracleFor —— 显式工厂", () => {
     expect((await alice.tokens.enrich(["tk_1"])).get("tk_1")?.symbol).toBe("BTC");
     expect(await bob.tokens.enrich(["tk_1"])).toEqual(new Map()); // bob 的库里没有
   });
+
+  it("汇率也按用户分:alice 预热过,bob 那边照旧取不到", async () => {
+    const { cfg } = countingConfig();
+    const oracleFor = createOracleFor(cfg);
+
+    await oracleFor("u_alice").fx.warm(["EUR"]);
+    expect(await oracleFor("u_alice").fx.resolve("EUR")).toBe(1.09);
+    expect(await oracleFor("u_bob").fx.resolve("EUR")).toBeUndefined();
+  });
 });
 
 describe("惰性", () => {
@@ -83,6 +98,14 @@ describe("惰性", () => {
     void oracle.tokens;
     expect(calls).toEqual(["tokenStore:u1", "priceStore:u1", "cache:u1", "upstream"]);
     expect(calls).not.toContain("refIndex");
+  });
+
+  it("只碰 fx → 不建任何代币 store、也不建代币上游", () => {
+    const { cfg, calls } = countingConfig();
+    const oracle = createOracleFor(cfg)("u1");
+
+    void oracle.fx;
+    expect(calls).toEqual(["cache:u1", "fxUpstream"]);
   });
 
   it("同一个子服务反复访问只建一次(建后记忆)", () => {

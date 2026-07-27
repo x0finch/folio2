@@ -28,6 +28,7 @@ export {
 } from "./cache";
 export { type CandidateSourceDeps, createCandidateSource } from "./candidates";
 export { pickByConfidence } from "./confidence";
+export { createFxRates, type FxRates, type FxRatesDeps } from "./fx";
 export {
   type CandidateSource,
   createMint,

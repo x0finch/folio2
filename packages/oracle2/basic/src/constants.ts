@@ -18,7 +18,9 @@ export const WARM_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d(目录,近静态)
 export const PRICE_TTL_MS = 30 * 60 * 1000; // 30min(长尾价;过期=stale 不删,SWR)
 // name/logo 近乎静态,与 warm/price 的短 TTL 解耦:否则 warm 一过期,展示就丢 logo/名。
 export const INFO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d
-export const FX_TTL_MS = 30 * 60 * 1000; // 30min
+// 汇率**不是价**:法币之间一天动千分之几,没有理由跟长尾币价共用 30min。旧 oracle 一直是 6h,
+// 搬过来时沿用 —— 短 TTL 唯一的作用是让预热多刷十二次,而读路径本来就软过期(拿最近值)。
+export const FX_TTL_MS = 6 * 60 * 60 * 1000; // 6h(法币汇率,慢变)
 export const PLATFORM_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d(链/场馆的名与图,近静态)
 
 // 预热深度(top-N markets)与默认选币下拉条数。

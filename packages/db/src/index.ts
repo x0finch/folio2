@@ -7,7 +7,6 @@
 export { createAuthAdapter } from "./auth"; // 不泄露 db 实例/schema
 export type { DbEnv } from "./client";
 export { createDb, type Db } from "./db";
-export { createFxStore } from "./fx-store"; // FX 汇率缓存(展示币种,全局无 userId)
 // 新参考层的四个 store(ADR 0021/0022/0023,#199)。与上面那套并存到 #202。
 // 名字带作用域(user / global)—— 旧 store 只说「什么表」,不说「谁的数据」,那正是这次要改的事。
 export { createGlobalTokenRefIndexStore } from "./global-token-ref-index-store";
