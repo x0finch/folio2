@@ -14,9 +14,10 @@ export * from "@folio/oracle2-basic";
 export {
   cacheKeys,
   candidatesBySymbol,
-  type PlatformMeta,
+  type PlatformEntry,
   readFx,
-  readPlatform,
+  readFxFreshness,
+  readPlatforms,
   refreshCatalogue,
   topByRank,
   type WarmBlob,
@@ -24,7 +25,7 @@ export {
   warmCatalogue,
   warmMarkets,
   writeFx,
-  writePlatform,
+  writePlatforms,
 } from "./cache";
 export { type CandidateSourceDeps, createCandidateSource } from "./candidates";
 export { pickByConfidence } from "./confidence";
@@ -45,5 +46,6 @@ export {
   type OracleWarm,
   type OracleWarmConfig,
 } from "./oracle";
+export { createPlatforms, type Platforms, type PlatformsDeps } from "./platforms";
 export { swr } from "./refresh";
 export { createTokens, type Tokens, type TokensDeps } from "./tokens";

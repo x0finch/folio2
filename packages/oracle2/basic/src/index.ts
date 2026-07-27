@@ -12,6 +12,7 @@ export {
   INFO_TTL_MS,
   MS_PER_DAY,
   normalizeSymbol,
+  PLATFORM_NEG_TTL_MS,
   PLATFORM_TTL_MS,
   PRICE_TTL_MS,
   RESOLUTION_DOMINANCE,
@@ -21,9 +22,12 @@ export {
 } from "./constants";
 // 展示币种 + 汇率(存储恒 USD,换算只在展示层;ADR 0006)。
 export { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "./fx";
+// 平台(链 ∪ 场馆)的名与图。
+export type { PlatformMeta } from "./platform";
 export type {
   CacheEntry,
   CacheStore,
+  CacheWrite,
   GlobalTokenRefIndexStore,
   TokenPriceStore,
   TokenStore,
@@ -45,6 +49,7 @@ export type {
 } from "./types";
 export type {
   FxUpstream,
+  PlatformUpstream,
   PriceUpstream,
   RefIndexFetch,
   TokenMetaUpstream,

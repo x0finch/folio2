@@ -1,4 +1,5 @@
 import type {
+  CacheEntry,
   CacheStore,
   TokenCandidate,
   TokenInfo,
@@ -8,6 +9,7 @@ import type {
 import {
   FX_TTL_MS,
   normalizeSymbol,
+  PLATFORM_NEG_TTL_MS,
   PLATFORM_TTL_MS,
   PRICE_TTL_MS,
   WARM_TTL_MS,
@@ -43,8 +45,10 @@ export type WarmInfo = Omit<TokenInfo, "id" | "ref" | "providerLogo" | "infoStal
   ref: string;
 };
 
-export interface PlatformMeta {
-  name: string;
+// 平台缓存里存的一条。**`name: null` = 否定缓存** —— 问过上游、它的链表里没有这个键。
+// 与「这条压根没有」必须分开:后者会让每一次预热都为了这一个键重拉整张链表。
+export interface PlatformEntry {
+  name: string | null;
   logo?: string;
 }
 
@@ -165,26 +169,60 @@ export function candidatesBySymbol(rows: WarmBlob["rows"], symbol: string): Toke
 }
 
 // —— fx / platform ——
-// 同一张表的另两种键,差别只在 TTL:汇率要新鲜(短),链和场馆的名与图近乎静态(长)。
+// 同一张表的另两种键。**都走批量** —— 汇率一次上游响应写十来个币种,平台展示一次要这个用户的
+// 全部链;逐键往返会把 1 次 D1 变成 N 次。TTL 各键自带:汇率慢变但不静态(6h),
+// 链和场馆的名与图近乎静态(30d),而「问过、上游没有」只记 1d(新链随时可能被收录)。
 
 export async function readFx(cache: CacheStore, currency: string): Promise<number | undefined> {
   const hit = await cache.get(cacheKeys.fx(currency));
   return typeof hit?.value === "number" ? hit.value : undefined;
 }
 
-export function writeFx(cache: CacheStore, currency: string, usdPerUnit: number): Promise<void> {
-  return cache.put(cacheKeys.fx(currency), usdPerUnit, FX_TTL_MS);
-}
-
-export async function readPlatform(
+// 一批币种的新鲜度(预热用):miss 的键不出现,命中的带 stale。
+export function readFxFreshness(
   cache: CacheStore,
-  key: string,
-): Promise<PlatformMeta | undefined> {
-  const hit = await cache.get(cacheKeys.platform(key));
-  const meta = hit?.value as PlatformMeta | undefined;
-  return meta && typeof meta.name === "string" ? meta : undefined;
+  currencies: readonly string[],
+): Promise<Map<string, CacheEntry>> {
+  return cache.getMany(currencies.map((c) => cacheKeys.fx(c)));
 }
 
-export function writePlatform(cache: CacheStore, key: string, meta: PlatformMeta): Promise<void> {
-  return cache.put(cacheKeys.platform(key), meta, PLATFORM_TTL_MS);
+// 一次批量写回。上游那个端点一把全给,所以这里恒是「十来个键一个批次」。
+export function writeFx(
+  cache: CacheStore,
+  rates: readonly { currency: string; usdPerUnit: number }[],
+): Promise<void> {
+  return cache.putMany(
+    rates.map((r) => ({ key: cacheKeys.fx(r.currency), value: r.usdPerUnit, ttlMs: FX_TTL_MS })),
+  );
+}
+
+// 读一批平台缓存。**返回 `{name: null}` 与「键不在结果里」是两件事**:前者是「问过、上游没有」,
+// 后者是「没问过」。`stale` 一并给出来 —— 预热据它决定要不要重拉,展示则一律用旧的。
+export async function readPlatforms(
+  cache: CacheStore,
+  keys: readonly string[],
+): Promise<Map<string, { entry: PlatformEntry; stale: boolean }>> {
+  const hits = await cache.getMany(keys.map(cacheKeys.platform));
+  const out = new Map<string, { entry: PlatformEntry; stale: boolean }>();
+  for (const key of keys) {
+    const hit = hits.get(cacheKeys.platform(key));
+    const entry = hit?.value as PlatformEntry | undefined;
+    if (!entry || !(typeof entry.name === "string" || entry.name === null)) continue;
+    out.set(key, { entry, stale: hit?.stale ?? true });
+  }
+  return out;
+}
+
+// 一次批量写。命中写长 TTL(名与图近静态),否定写短 TTL(新链随时可能被收录)。
+export function writePlatforms(
+  cache: CacheStore,
+  entries: readonly { key: string; entry: PlatformEntry }[],
+): Promise<void> {
+  return cache.putMany(
+    entries.map(({ key, entry }) => ({
+      key: cacheKeys.platform(key),
+      value: entry,
+      ttlMs: entry.name === null ? PLATFORM_NEG_TTL_MS : PLATFORM_TTL_MS,
+    })),
+  );
 }

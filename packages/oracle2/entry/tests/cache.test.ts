@@ -6,14 +6,14 @@ import {
   PLATFORM_TTL_MS,
   PRICE_TTL_MS,
   readFx,
-  readPlatform,
+  readPlatforms,
   refreshCatalogue,
   topByRank,
   WARM_TTL_MS,
   warmCatalogue,
   warmMarkets,
   writeFx,
-  writePlatform,
+  writePlatforms,
 } from "../src";
 import { fakeCacheStore, fakeUpstream } from "./fakes";
 
@@ -31,28 +31,49 @@ describe("三种键", () => {
     upstream.markets = [coin("bitcoin", "BTC", 1)];
 
     await warmMarkets(cache, upstream, 10, cache.now);
-    await writeFx(cache, "eur", 1.08);
-    await writePlatform(cache, "evm:1", { name: "Ethereum", logo: "e.png" });
+    await writeFx(cache, [{ currency: "eur", usdPerUnit: 1.08 }]);
+    await writePlatforms(cache, [{ key: "evm:1", entry: { name: "Ethereum", logo: "e.png" } }]);
 
     expect([...cache.entries.keys()].sort()).toEqual(["fx:EUR", "platform:evm:1", "warm"]);
     expect(cacheKeys.fx(" eur ")).toBe("fx:EUR"); // 键归一在造键那一处
   });
 
-  it("读回:汇率是数、平台是 {name, logo}", async () => {
+  it("读回:汇率是数、平台是 {name, logo};miss 的键不出现", async () => {
     const cache = fakeCacheStore();
-    await writeFx(cache, "EUR", 1.08);
-    await writePlatform(cache, "bitcoin", { name: "Bitcoin" });
+    await writeFx(cache, [{ currency: "EUR", usdPerUnit: 1.08 }]);
+    await writePlatforms(cache, [
+      { key: "bitcoin", entry: { name: "Bitcoin" } },
+      // 否定缓存(`name: null`)与「没这条」是两件事 —— 读得出来,只是没有名字。
+      { key: "nochain", entry: { name: null } },
+    ]);
 
     expect(await readFx(cache, "eur")).toBe(1.08);
-    expect(await readPlatform(cache, "bitcoin")).toEqual({ name: "Bitcoin" });
     expect(await readFx(cache, "JPY")).toBeUndefined();
-    expect(await readPlatform(cache, "nope")).toBeUndefined();
+
+    const hits = await readPlatforms(cache, ["bitcoin", "nochain", "nope"]);
+    expect(hits.get("bitcoin")?.entry).toEqual({ name: "Bitcoin" });
+    expect(hits.get("nochain")?.entry).toEqual({ name: null });
+    expect(hits.has("nope")).toBe(false);
+  });
+
+  it("批量读一次往返、批量写一个批次 —— 逐键往返会把总览的 1 次 D1 变成 N 次", async () => {
+    const cache = fakeCacheStore();
+    await writeFx(cache, [
+      { currency: "EUR", usdPerUnit: 1.08 },
+      { currency: "JPY", usdPerUnit: 0.0067 },
+      { currency: "GBP", usdPerUnit: 1.27 },
+    ]);
+    expect(cache.writes).toBe(1); // 三个币种,一个批次
+
+    const before = cache.reads;
+    await readPlatforms(cache, ["evm:1", "solana", "bitcoin"]);
+    expect(cache.reads - before).toBe(1); // 三个键,一次读
   });
 
   it("TTL:warm 按**目录**的寿命盖戳,不再按价(#216)", async () => {
     const cache = fakeCacheStore();
     await warmMarkets(cache, fakeUpstream(), 10, cache.now);
-    await writePlatform(cache, "evm:1", { name: "Ethereum" });
+    await writePlatforms(cache, [{ key: "evm:1", entry: { name: "Ethereum" } }]);
 
     expect(cache.entries.get("warm")?.expiresAt).toBe(cache.now + WARM_TTL_MS);
     expect(cache.entries.get("platform:evm:1")?.expiresAt).toBe(cache.now + PLATFORM_TTL_MS);

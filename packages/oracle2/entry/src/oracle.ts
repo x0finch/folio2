@@ -2,6 +2,7 @@ import type {
   CacheStore,
   FxUpstream,
   GlobalTokenRefIndexStore,
+  PlatformUpstream,
   TokenPriceStore,
   TokenRefIndexUpstream,
   TokenStore,
@@ -10,6 +11,7 @@ import type {
 import { createCandidateSource } from "./candidates";
 import { createFxRates, type FxRates } from "./fx";
 import { createMint, type Mint } from "./mint";
+import { createPlatforms, type Platforms } from "./platforms";
 import { createTokens, type Tokens } from "./tokens";
 
 // 装配。**store 与 upstream 一样,都是初始化时注入的惰性工厂**(ADR 0023):
@@ -29,6 +31,8 @@ export interface OracleConfig {
   // 汇率上游**单独一个工厂**:汇率跟「这是哪个币」毫无关系,完全可以另换一家(ADR 0023)。
   // 当前两个工厂都指向同一个 CoinGecko adapter,但那是装配点的事,本层不假设。
   createFxUpstream(): FxUpstream;
+  // 平台上游同理:链的名与图跟代币身份是两件事,各走各的端口。
+  createPlatformUpstream(): PlatformUpstream;
   // symbol → 上游 id 的策展小表。由 adapter 提供(它逐条写的是那一家的 id)。
   overrides?: Readonly<Record<string, string>>;
   now?: () => number;
@@ -38,6 +42,7 @@ export interface OracleConfig {
 //   · `tokens` 读路径 —— 富化 / 现价 / 历史价 / 橱窗 / 搜索
 //   · `mint`   写路径 —— tokenRef → token_id,写快照之前必须先过这一步
 //   · `fx`     展示币种汇率 —— 与代币无关的一小块,只共用同一张 per-user 缓存
+//   · `platforms` 链 ∪ 场馆的名与图 —— 同上
 //
 // 「info 数据 vs 价格数据」的分离落在**端口**上(`TokenStore` / `TokenPriceStore`),
 // 不在门面上再切一遍(ADR 0023)。
@@ -45,6 +50,7 @@ export interface Oracle {
   readonly tokens: Tokens;
   readonly mint: Mint;
   readonly fx: FxRates;
+  readonly platforms: Platforms;
 }
 
 // 显式工厂 —— **这是原语**,不是糖。
@@ -59,6 +65,7 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
     let tokens: Tokens | undefined;
     let mint: Mint | undefined;
     let fx: FxRates | undefined;
+    let platforms: Platforms | undefined;
 
     // 子服务经 getter 首访即建、建后记忆。调用方常只用其一(logo 端点只碰 tokens),
     // 不该为此把另一套 store 也 new 出来。
@@ -97,6 +104,13 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
           upstream: cfg.createFxUpstream(),
         });
         return fx;
+      },
+      get platforms() {
+        platforms ??= createPlatforms({
+          cache: cfg.createCacheStore(userId),
+          upstream: cfg.createPlatformUpstream(),
+        });
+        return platforms;
       },
     };
   };

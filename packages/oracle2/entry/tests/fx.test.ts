@@ -98,6 +98,25 @@ describe("warm —— 写", () => {
     expect(upstream.fetches).toBe(1);
   });
 
+  it("**一个批次写回** —— 十来个币种一次 D1,不是十来次往返", async () => {
+    const cache = fakeCacheStore();
+    const rates = Object.fromEntries(SUPPORTED_CURRENCIES.map((c, i) => [c.code, i + 1]));
+    const fx = createFxRates({ cache, upstream: fakeFxUpstream(rates) });
+
+    await fx.warm();
+    expect(cache.writes).toBe(1);
+  });
+
+  it("新鲜度判断也是**一次批量读**,不是逐币种点查", async () => {
+    const cache = fakeCacheStore();
+    const fx = createFxRates({ cache, upstream: fakeFxUpstream({ EUR: 1.09, JPY: 0.0067 }) });
+    await fx.warm(["EUR", "JPY"]);
+    const before = cache.reads;
+
+    await fx.warm(["EUR", "JPY"]); // 都新鲜 → 只为判断读了一次
+    expect(cache.reads - before).toBe(1);
+  });
+
   it("缺省预热全部支持币种", async () => {
     const cache = fakeCacheStore();
     const rates = Object.fromEntries(SUPPORTED_CURRENCIES.map((c, i) => [c.code, i + 1]));

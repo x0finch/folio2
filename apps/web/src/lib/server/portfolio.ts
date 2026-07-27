@@ -6,7 +6,6 @@ import { buildOverview } from "../overview-model";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { db } from "./internal/db";
 import { injectManualSnapshots, loadManualHistoryRows } from "./internal/manual";
-import { oracle } from "./internal/oracle";
 import { oracleFor } from "./internal/oracle2";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
@@ -27,7 +26,7 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
     await injectManualSnapshots(context.userId, accounts, byAccount);
     return buildOverview(accounts, byAccount, {
       tokens: oracleFor(context.userId).tokens,
-      platforms: oracle.platforms,
+      platforms: oracleFor(context.userId).platforms,
       connectorMeta: connectorPlatformMeta,
       mode: settings.valuationMode,
     });

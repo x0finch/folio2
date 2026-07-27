@@ -1,3 +1,4 @@
+import type { PlatformMeta } from "./platform";
 import type { TokenPrice, TokenPricePoint, TokenRef, TokenRefIndexRow } from "./types";
 
 // 上游端口(网络)。沿用现有的**按能力分面**做法(`oracle-basic/src/token.ts` 就是这么分的),
@@ -58,6 +59,17 @@ export type TokenUpstream = TokenMetaUpstream & PriceUpstream & TokenRefIndexUps
 export interface FxUpstream extends UpstreamIdentity {
   // 币种 code(大写)→ usdPerUnit。上游不认识的币种不出现在结果里(不是报错)。
   fetchRates(): Promise<Map<string, number>>;
+}
+
+// 平台面(链的名与图)。同样独立成端口 —— 它跟代币、跟汇率都不是一件事。
+//
+// **只有整张链表,没有按 key 单查。** 上游那边它本来就是一个端点一把全给,而我们要的键
+// (`evm:1` / `solana`)一次也就那么几个。原来还有一个「按 key 单查场馆」的面 ——
+// 场馆键从 ADR 0020 起就不带 `exchange:` / `perp:` 前缀了(命名者是裸 slug),
+// 那条路因此再也走不到,搬家时不带走(见本片 PR 说明)。
+export interface PlatformUpstream extends UpstreamIdentity {
+  // 每条链产短形 slug;有数字 chainId 的再产一条 `evm:<id>`(两种 platformKey 都覆盖)。
+  fetchChains(): Promise<PlatformMeta[]>;
 }
 
 // 上游给出的一个币:它自己的命名 + 元信息 +(可能有的)价。

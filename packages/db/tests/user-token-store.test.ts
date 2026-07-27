@@ -438,6 +438,54 @@ describe("per-user 缓存", () => {
     const a = createUserCacheStore(env, { userId: USER_A });
     expect(await a.get("platform:evm:1")).toBeUndefined();
   });
+
+  it("批量读:一条 IN 拿多个键,miss 的不出现;按用户隔离", async () => {
+    const a = createUserCacheStore(env, { userId: USER_A, now: () => 1000 });
+    const b = createUserCacheStore(env, { userId: USER_B, now: () => 1000 });
+    await a.putMany([
+      { key: "platform:evm:1", value: { name: "Ethereum" }, ttlMs: 500 },
+      { key: "platform:solana", value: { name: "Solana" }, ttlMs: 500 },
+    ]);
+
+    const hits = await a.getMany(["platform:evm:1", "platform:solana", "platform:nope"]);
+    expect([...hits.keys()].sort()).toEqual(["platform:evm:1", "platform:solana"]);
+    expect(hits.get("platform:evm:1")?.value).toEqual({ name: "Ethereum" });
+    expect(await b.getMany(["platform:evm:1"])).toEqual(new Map()); // 别人的看不见
+  });
+
+  it("批量写:**每个键各带自己的 TTL**(平台命中长、否定短就靠这个)", async () => {
+    const a = createUserCacheStore(env, { userId: USER_A, now: () => 1000 });
+    await a.putMany([
+      { key: "platform:evm:1", value: { name: "Ethereum" }, ttlMs: 5000 },
+      { key: "platform:nochain", value: { name: null }, ttlMs: 100 },
+    ]);
+
+    // now=2000:长 TTL 那条还新鲜,短 TTL 那条已 stale —— 过期不删,照样读得出来。
+    const later = createUserCacheStore(env, { userId: USER_A, now: () => 2000 });
+    const hits = await later.getMany(["platform:evm:1", "platform:nochain"]);
+    expect(hits.get("platform:evm:1")?.stale).toBe(false);
+    expect(hits.get("platform:nochain")).toEqual({ value: { name: null }, stale: true });
+  });
+
+  it("批量写是覆盖;空批次是 no-op(不炸)", async () => {
+    const a = createUserCacheStore(env, { userId: USER_A, now: () => 1000 });
+    await a.putMany([{ key: "fx:EUR", value: 1.08, ttlMs: 500 }]);
+    await a.putMany([{ key: "fx:EUR", value: 1.09, ttlMs: 500 }]);
+    expect(await a.get("fx:EUR")).toEqual({ value: 1.09, stale: false });
+
+    await expect(a.putMany([])).resolves.toBeUndefined();
+    expect(await a.getMany([])).toEqual(new Map());
+  });
+
+  it("批量读超过分块大小仍拿全(D1 绑定参数上限 → 分块 IN)", async () => {
+    const a = createUserCacheStore(env, { userId: USER_A, now: () => 1000 });
+    const keys = Array.from({ length: 200 }, (_, i) => `platform:evm:${i}`);
+    await a.putMany(keys.map((key, i) => ({ key, value: { name: `c${i}` }, ttlMs: 500 })));
+
+    const hits = await a.getMany(keys);
+    expect(hits.size).toBe(200);
+    expect(hits.get("platform:evm:199")?.value).toEqual({ name: "c199" });
+  });
 });
 
 describe("删用户级联", () => {

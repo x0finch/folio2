@@ -8,6 +8,7 @@ import {
 import { createOracleFor, createOracleWarm, type OracleFor, type OracleWarm } from "@folio/oracle2";
 import {
   createCoinGeckoFxUpstream,
+  createCoinGeckoPlatformUpstream,
   createCoinGeckoUpstream,
   OVERRIDES,
   UPSTREAM_ID,
@@ -38,6 +39,8 @@ export const oracleFor: OracleFor = createOracleFor({
   // 汇率上游是**另一个端口**(见 OracleConfig):当前同样落在 CoinGecko 上,但那是这里的选择,
   // 服务层不知道两者是同一家。
   createFxUpstream: () => createCoinGeckoFxUpstream({ apiKey: env.COINGECKO_API_KEY || undefined }),
+  createPlatformUpstream: () =>
+    createCoinGeckoPlatformUpstream({ apiKey: env.COINGECKO_API_KEY || undefined }),
   // symbol → 上游 id 的策展表由 adapter 提供(它逐条写的是那一家的 id)。
   overrides: OVERRIDES,
 });
