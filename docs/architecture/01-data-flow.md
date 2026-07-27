@@ -24,7 +24,7 @@ flowchart LR
     O --> F["provider.fetchBalances<br/>openCreds 解密"]
     F --> N["归一 Balance<br/>带 tokenRef(必填)"]
     N --> RV["revalue<br/>定 value + 捕获 selfPrice"]
-    RV --> M["mint.of<br/>tokenRef → token_id(本地为主)"]
+    RV --> M["mint.of<br/>tokenRef → token_id(纯本地)"]
     M --> S["写 D1 快照<br/>行带 token_id"]
     F -.失败.-> E["报错 · 不落库"]
     M -.失败.-> M2["token_id 留空<br/>快照照落,下次补"]
@@ -38,14 +38,13 @@ flowchart LR
 冻进快照:身份仍**可变**(事后认出来会**合并**,连历史行的 `token_id` 一并改指),但**同一份
 快照读一百次答案一样**。
 
-**mint 不该碰网络。** 写快照是用户点了按钮在等的事,不该挂在第三方 API 上。它查本地
+**mint 全程不碰网络。** 写快照是用户点了按钮在等的事,不该挂在第三方 API 上。它查本地
 ref 行 → 查本地全局映射表 → 最后才按 symbol 猜(且**合约形的 ref 不许按 symbol 猜**,理由见
 [02](./02-canonical-aggregation.md))。
 
-⚠️ **今天只做到一半。** 类型上是立住的 —— `MintDeps` 里没有 upstream。但 symbol 那一档要问
-候选源(`CandidateSource`),而装配时接的是会回源的 warm 缓存:它过期(30min)时,mint 中途会
-串行夹进 4 次目录请求。走到那一档的余额很少(合约形有闸、已认识的直接返回),SWR 也兜着不会
-卡死,但「纯本地」这个前提目前不成立。修法见 [#216](https://github.com/x0finch/folio2/issues/216)。
+这条是**两层保的**(#216):类型上 `MintDeps` 里没有 upstream;而 symbol 那一档要问的候选源
+接的是一份**只读目录缓存** —— 有就用,多旧都用,只有完全没有时才取一次(那一次躲不掉:候选集
+为空意味着所有按 symbol 认的币集体认不出来)。让目录跟上是**同步之后的后台预热**的活,一周一次。
 
 ### 关键代码
 
@@ -70,7 +69,7 @@ function evmTokenRef(chainId: number, contract: string | undefined): string { /*
 
 ```ts
 // apps/web/src/lib/server/internal/sync-deps.ts —— buildSyncDeps().writeSnapshot
-const idByRef = await oracleFor(userId).mint.of(refs);   // 一次批量点查(本地为主,见上)
+const idByRef = await oracleFor(userId).mint.of(refs);   // 纯本地,一次批量点查
 return db.writeSnapshot(userId, accountId, {
   ...input,
   balances: rows.map((b) => ({ ...b, tokenId: b.tokenRef ? idByRef.get(b.tokenRef) : undefined })),
@@ -146,9 +145,16 @@ const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
 
 ---
 
-## 手记(manual)不走这条流水线
+## 手记(manual):不写快照,但走同一套身份
 
-手记账户的「此刻」是**现造的**、不写快照([ADR 0018](../adr/0018-manual-holdings-out-of-snapshots.md)):
-持仓由账户 creds 里的数据 + 活动账本推出来,在读路径上注入 `byAccount`。因此手记的行没有
-`token_id`,落在聚合里那条「按账户 + symbol 兜底」的路上 —— 把手记并入 `tokens`
-是 [#203](https://github.com/x0finch/folio2/issues/203) 的事。
+手记账户的「此刻」是**现造的**、不写快照
+([ADR 0018](../adr/0018-manual-value-history-ledger-truth-no-snapshot.md)):持仓由
+`tokens` + `manual_activity` 账本折叠出来,在读路径上注入 `byAccount`。
+
+**但它的币跟别的来源同一套认定**([#203](https://github.com/x0finch/folio2/issues/203)):
+录入时 app 造一条 ref(用户选了币 → `coingecko/<id>`,没选 → `manual/<SYMBOL>`),交给同一个
+mint 换出 `token_id`。所以手记的 USDC 与链上、交易所的 USDC **落同一行** —— 聚合层不需要为它
+开特例,那条「按账户 + symbol」的兜底也够不到它。
+
+`manual` 仍然是个 connector(图标、账户表单、盯市声明都在),只是**不声明 provider** —— 它从来
+不参与同步,四个值都进真表之后,原来那个 provider 只是「app 写进 JSON 列 → 再读回来」的空转。
