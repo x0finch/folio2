@@ -59,8 +59,13 @@ export interface PlatformMeta {
 // 为了一份「哪个币叫 POL」的数据去等 4 次目录请求。判据因此从「缓存条目过没过期」挪到
 // **blob 自己的 `asOf`** 上,由各读者按自己的容忍度判。
 //
-// `WARM_TTL_MS` 于是只剩「缓存条目上盖的过期戳」这一个作用:两个读者都不看 `hit.stale`
-// (store 本来就过期不删)。留着它是为了让那个戳有个合理的值,万一日后有第三个读者。
+// 三个读者,三条判据:
+//   warmCatalogue    mint(写路径)      **永不刷**,只有完全没有时取一次
+//   warmMarkets      选币下拉(用户在等) 价超过 PRICE_TTL_MS 就刷
+//   refreshCatalogue 同步后的后台预热    目录超过 WARM_TTL_MS(一周)就刷 ← 唯一主动跟进的那条
+//
+// 没有第三条的话,不打开选币下拉的用户目录会冻在第一次同步那一刻,此后新进前 1000 的币永远
+// 认不出来。三条都不看 `hit.stale`(store 过期不删),判据一律落在 blob 的 `asOf` 上。
 
 async function warmBlob(
   cache: CacheStore,
@@ -109,6 +114,24 @@ export function warmCatalogue(
   now: number,
 ): Promise<WarmBlob["rows"]> {
   return warmBlob(cache, upstream, topN, now, () => false);
+}
+
+/**
+ * 预热读者(同步之后在后台跑)。**目录旧了就整份刷一次** —— 这是唯一一条「主动让目录跟上」的路。
+ *
+ * 为什么不能指望前两个:`warmCatalogue` 按设计永不刷(它在写路径上),`warmMarkets` 只在用户
+ * 打开选币下拉时才跑 —— 从不开下拉的用户,候选集会冻在第一次同步那一刻,此后新进前 1000 的币
+ * 永远认不出来。
+ *
+ * 跑在同步后的 best-effort 预热里(`waitUntil`,吞错),所以这 4 次请求不在任何人的关键路径上。
+ */
+export function refreshCatalogue(
+  cache: CacheStore,
+  upstream: TokenMetaUpstream,
+  topN: number,
+  now: number,
+): Promise<WarmBlob["rows"]> {
+  return warmBlob(cache, upstream, topN, now, (blob) => now - blob.asOf > WARM_TTL_MS);
 }
 
 /**

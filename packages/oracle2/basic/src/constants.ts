@@ -9,9 +9,12 @@ export const RESOLUTION_DOMINANCE = 5; // 最佳须如此倍数地碾压次席(r
 // —— 缓存 TTL ——
 // warm blob 是**目录**(symbol/名/图/排名),按目录的寿命定 —— 它几乎不变。以前是 30min,
 // 理由是「它承载价」,结果整份目录被最短的那个字段拖着刷,而 mint 在写路径上为此出网(#216)。
-// 现在价的新鲜度由读者按 blob 的 `asOf` 自己判(见 entry/cache.ts 的两个读者),这个常量只
-// 决定缓存条目上盖的过期戳。
-export const WARM_TTL_MS = 24 * 60 * 60 * 1000; // 24h(目录,近静态)
+// 现在价的新鲜度由读者按 blob 的 `asOf` 自己判(见 entry/cache.ts 的三个读者)。
+//
+// 这个值决定的是**后台预热多久刷一次目录** —— 一周。会因此变化的只有「谁新进了前 1000」
+// 与排名,而排名只喂那两道很粗的门槛(前 50 / 5 倍碾压),隔一周毫无影响。
+// 写路径(mint)一次都不看它:有就用、多旧都用(见 `warmCatalogue`)。
+export const WARM_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d(目录,近静态)
 export const PRICE_TTL_MS = 30 * 60 * 1000; // 30min(长尾价;过期=stale 不删,SWR)
 // name/logo 近乎静态,与 warm/price 的短 TTL 解耦:否则 warm 一过期,展示就丢 logo/名。
 export const INFO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d

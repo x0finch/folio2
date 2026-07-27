@@ -55,6 +55,18 @@ export async function warmTokensForUser(userId: string): Promise<void> {
       error: e instanceof Error ? e.message : String(e),
     });
   }
+  // 新参考层的目录(市值前 N 名):**唯一主动让它跟上的那条路**(#216)。
+  // 写路径(mint)按设计永不刷 —— 它只要「哪个币叫 POL」,不该为此让用户等;选币下拉只在
+  // 用户打开时才刷 —— 从不开下拉的用户目录会冻住,此后新进前 1000 的币永远认不出来。
+  // 内部按一周的 TTL 门控,所以绝大多数同步在这里零请求。放这里正因为这是 best-effort 的位置。
+  try {
+    const rows = await oracleFor(userId).tokens.refreshCatalogue();
+    getLogger(["folio", "web", "sync"]).debug("catalogue warmed", { rows });
+  } catch (e) {
+    getLogger(["folio", "web", "sync"]).warn("refreshCatalogue failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 }
 
 // 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。

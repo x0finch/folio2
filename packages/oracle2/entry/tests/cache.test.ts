@@ -7,6 +7,7 @@ import {
   PRICE_TTL_MS,
   readFx,
   readPlatform,
+  refreshCatalogue,
   topByRank,
   WARM_TTL_MS,
   warmCatalogue,
@@ -148,6 +149,59 @@ describe("目录读者:有就用,只有完全没有才取一次", () => {
       throw new Error("429");
     };
     expect(await warmCatalogue(cache, upstream, 50, cache.now)).toEqual([]);
+  });
+});
+
+// 第三个读者:同步之后在后台跑。没有它,不打开选币下拉的用户目录会永远冻在第一次同步那一刻。
+describe("后台预热:目录旧了才刷", () => {
+  it("一周之内 → 零请求(绝大多数同步落在这里)", async () => {
+    const cache = fakeCacheStore();
+    const upstream = fakeUpstream();
+    upstream.markets = [coin("bitcoin", "BTC", 1)];
+    await refreshCatalogue(cache, upstream, 50, cache.now);
+
+    cache.now += WARM_TTL_MS - 1;
+    await refreshCatalogue(cache, upstream, 50, cache.now);
+    expect(upstream.calls).toHaveLength(1);
+  });
+
+  it("超过一周 → 整份刷一次", async () => {
+    const cache = fakeCacheStore();
+    const upstream = fakeUpstream();
+    upstream.markets = [coin("bitcoin", "BTC", 1)];
+    await refreshCatalogue(cache, upstream, 50, cache.now);
+
+    cache.now += WARM_TTL_MS + 1;
+    upstream.markets = [coin("bitcoin", "BTC", 1), coin("newcoin", "NEW", 900)];
+    expect(await refreshCatalogue(cache, upstream, 50, cache.now)).toHaveLength(2);
+    expect(upstream.calls).toHaveLength(2);
+  });
+
+  it("刷完之后 mint 的候选源立刻看得到新币 —— 这才是它存在的理由", async () => {
+    const cache = fakeCacheStore();
+    const upstream = fakeUpstream();
+    upstream.markets = [coin("bitcoin", "BTC", 1)];
+    await warmCatalogue(cache, upstream, 50, cache.now); // 第一次同步建起来的那份
+
+    cache.now += WARM_TTL_MS + 1;
+    upstream.markets = [coin("bitcoin", "BTC", 1), coin("newcoin", "NEW", 900)];
+    await refreshCatalogue(cache, upstream, 50, cache.now); // 后台预热
+
+    const rows = await warmCatalogue(cache, upstream, 50, cache.now);
+    expect(candidatesBySymbol(rows, "NEW")).toEqual([{ ref: "src/newcoin", marketCapRank: 900 }]);
+  });
+
+  it("后台刷挂了 → 给旧的那份,不抛(它在 waitUntil 里,不该让同步收尾炸掉)", async () => {
+    const cache = fakeCacheStore();
+    const upstream = fakeUpstream();
+    upstream.markets = [coin("bitcoin", "BTC", 1)];
+    await refreshCatalogue(cache, upstream, 50, cache.now);
+
+    cache.now += WARM_TTL_MS + 1;
+    upstream.fetchMarkets = async () => {
+      throw new Error("429");
+    };
+    expect(await refreshCatalogue(cache, upstream, 50, cache.now)).toHaveLength(1);
   });
 });
 

@@ -14,7 +14,7 @@ import {
   MS_PER_DAY,
   PRICE_TTL_MS,
 } from "@folio/oracle2-basic";
-import { topByRank, warmMarkets } from "./cache";
+import { refreshCatalogue, topByRank, warmMarkets } from "./cache";
 import { swr } from "./refresh";
 
 export interface TokensDeps {
@@ -61,6 +61,11 @@ export interface Tokens {
   topTokens(limit: number): Promise<UpstreamToken[]>;
   // 按关键词搜币(用户选币)。恒回源 —— 结果与用户无关,边缘缓存管它。
   search(query: string): Promise<UpstreamToken[]>;
+
+  // 后台预热:目录超过 WARM_TTL_MS(一周)就整份刷一次,否则零请求。返回目录条数。
+  // **唯一主动让目录跟上的那条路** —— 写路径按设计永不刷,橱窗只在用户打开下拉时才跑。
+  // 调用方须把它放在 best-effort 的位置(同步后 `waitUntil`),别挂在任何人的关键路径上。
+  refreshCatalogue(): Promise<number>;
 }
 
 export function createTokens({
@@ -226,5 +231,9 @@ export function createTokens({
     },
 
     search: (query) => upstream.searchTokens(query),
+
+    async refreshCatalogue() {
+      return (await refreshCatalogue(cache, upstream, DEFAULT_TOP_N, now())).length;
+    },
   };
 }

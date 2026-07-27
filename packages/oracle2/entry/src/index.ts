@@ -17,6 +17,7 @@ export {
   type PlatformMeta,
   readFx,
   readPlatform,
+  refreshCatalogue,
   topByRank,
   type WarmBlob,
   type WarmInfo,
