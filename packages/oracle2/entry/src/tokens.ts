@@ -1,8 +1,10 @@
 import type {
   CacheStore,
+  TokenPrice,
   TokenPriceStore,
   TokenRecord,
   TokenRecordPrice,
+  TokenRef,
   TokenStore,
   TokenUpstream,
   UpstreamToken,
@@ -41,6 +43,12 @@ export interface Tokens {
 
   // 取单价:新鲜 → 直接回;stale/miss → 回源 → 写回。长尾币按需取价走这条。
   priceOf(tokenId: string): Promise<TokenRecordPrice | undefined>;
+  // 选币表单预填单价:按 ref 现取,**不建行、不写缓存**。
+  //
+  // 为什么不能走 `priceOf`:那个收的是内部 id,而用户此刻只是在下拉里点了一下 —— 按设计
+  // 这一刻还不建行(他可能就把抽屉关了,留一堆没人要的代币行)。行是提交时才由 mint 建的。
+  // 取不到(上游不认识 / 网络出错)→ undefined,表单让用户自己填。
+  priceByRef(ref: TokenRef): Promise<TokenPrice | undefined>;
   // SWR 批量刷价:给定 token 里价 stale/缺失的,一次批量回源写回。返回刷新条数。
   refreshStalePrices(ids: readonly string[]): Promise<number>;
   // 同上,但刷的是 symbol/name/logo,而且是**覆盖**(上游权威,见 TokenStore.putInfo)。
@@ -156,6 +164,15 @@ export function createTokens({
         },
         write: (value) => prices.put([{ tokenId, ...value }], PRICE_TTL_MS),
       });
+    },
+
+    async priceByRef(ref) {
+      try {
+        return (await upstream.fetchPrices([ref])).get(ref);
+      } catch {
+        // 上游失败(限流 / 网络)→ 表单没有预填价,用户手填。与别处同口径:不抛。
+        return undefined;
+      }
     },
 
     async refreshStalePrices(ids) {

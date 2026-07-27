@@ -6,6 +6,8 @@ import type {
   SnapshotWithBalances,
 } from "@folio/db";
 import { dayBucketOf } from "@folio/oracle";
+import { formatTokenRef } from "@folio/oracle-ref";
+import { tokenTicket } from "@folio/oracle2";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
 import { deriveAmount, projectToken } from "../../manual-activity";
@@ -25,18 +27,27 @@ import { NAMER, oracleFor } from "./oracle2";
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;
 
+// db 出来的是「当前命名者对这个币的叫法」(右段),拼回完整 ref 才能编成票。
+const refOfLocalName = (localName: string) => formatTokenRef({ namer: NAMER, localName });
+
 // **物化没有了**(#203)。原来每次写完都要把「各 token 定义 + 折叠出的 amount」写回
 // `creds.tokens`,给 manual provider 读。四个值全部落进真表之后 provider 只是「app 写进 JSON 列 →
 // 再读回来」的空转,连它一起删了 —— 于是「单写者」那条不变量、以及它带来的「忘了重跑就 stale」
 // 这类 bug 面,整个消失。持仓一律 compute-on-read(deriveAmount 现算)。
 
-// 一条手记持仓要用的 token id:先按当前上游的规则造 ref,再经 mint 换出 id(纯本地)。
-// 用户选了币 → ref 本身就是锚,mint 直接返回;没选 → 走 symbol 那一档,认不出来就自己一行。
+// 一条手记持仓要用的 token id:先定 ref,再经 mint 换出 id(纯本地)。
+//
+// **解票就在这一处**(#202b)。表单交上来的 `ticket` 是一串 base64url,里头是选币那一刻
+// 上游对这个币的命名。解不开 / 解出来不合文法 → 当作「没选币」,退回按 symbol 认 ——
+// 票是从网络上来的,不能假设它是我们自己刚发出去的那张。
 async function mintHolding(
   userId: string,
-  picked: { symbol: string; identifier?: string | null },
+  picked: { symbol: string; ticket?: string | null },
 ): Promise<string> {
-  const ref = manualTokenRef(picked);
+  const ref = manualTokenRef({
+    symbol: picked.symbol,
+    ref: picked.ticket ? tokenTicket.decode(picked.ticket) : undefined,
+  });
   const symbol = picked.symbol.trim().toUpperCase();
   const ids = await oracleFor(userId).mint.of([{ ref, seed: { symbol } }]);
   const id = ids.get(ref);
@@ -52,7 +63,7 @@ export async function createManualAccount(userId: string, label: string, tokens:
   const [first] = JSON.parse(tokens) as Array<{
     symbol: string;
     unitPrice: number | string;
-    identifier?: string;
+    ticket?: string;
     amount: number | string;
   }>;
   // validateAccountCreds 用的 z.array 允许空数组 → 显式挡掉(表单恒发 1 条,防御式)。
@@ -144,7 +155,7 @@ export interface CreateTokenInput {
   accountId: string;
   symbol: string;
   unitPrice: number;
-  identifier?: string | null;
+  ticket?: string | null;
   amount: number;
 }
 export interface UpdateTokenInput {
@@ -190,12 +201,16 @@ async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
 // —— 读:抽屉账户明细(T4,#156)——
 // creds.tokens(= balances 投影)不含 token 的 DB id、也不含活动账本 → 抽屉的编辑/删除与 Activity tab 需专门读。
 // 返回 tokens(带 DB id + 折叠出的 amount)+ 全部活动(各自带 tokenId,供 Activity tab 按 token 归并展示)。
-// UI 的 logo/name/实时市值仍从 balances(overview)取,按 identifier/symbol 匹配 —— 本读只出账本事实。
+// UI 的 logo/name/实时市值仍从 balances(overview)取,按 symbol 匹配 —— 本读只出账本事实。
+//
+// `ticket` 与选币下拉发的是同一种串(#202b):抽屉要能把「这个持仓当初选的是哪个币」放回
+// combobox 里显示,所以读路径也得给一张票。库里存的是当前命名者下的叫法,编票在这里做 ——
+// **前端两个方向都只见到票**。没认出来的币没有票(null),UI 那边就是「手动输入的 symbol」。
 interface ManualAccountDetailToken {
   id: string;
   symbol: string;
   unitPrice: number;
-  identifier: string | null;
+  ticket: string | null;
   amount: number;
 }
 export interface ManualAccountDetail {
@@ -212,7 +227,7 @@ export async function loadManualAccountDetail(
       id: token.id,
       symbol: token.symbol,
       unitPrice: token.unitPrice,
-      identifier: token.identifier ?? null,
+      ticket: token.identifier ? tokenTicket.encode(refOfLocalName(token.identifier)) : null,
       amount: deriveAmount(activities),
     })),
     activities: perToken.flatMap(({ activities }) => activities),
@@ -227,7 +242,7 @@ async function loadHistoryTokens(userId: string, accountId: string): Promise<His
   return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
     id: token.id,
     unitPrice: token.unitPrice,
-    identifier: token.identifier,
+    recognized: token.identifier != null,
     activities,
   }));
 }
@@ -243,8 +258,8 @@ async function buildHistoricalPriceAt(
   const byIdentifier = new Map<string, Map<number, number>>();
   await Promise.all(
     tokens.map(async (tk) => {
-      // 上游没认出来的币不问历史价(问了也没有)—— `identifier` 空即「当前上游不认识它」。
-      if (!tk.identifier || tk.activities.length === 0 || byIdentifier.has(tk.id)) return;
+      // 上游没认出来的币不问历史价(问了也没有)。
+      if (!tk.recognized || tk.activities.length === 0 || byIdentifier.has(tk.id)) return;
       const from = Math.min(...tk.activities.map((a) => a.occurredAt));
       const daily = new Map<number, number>();
       // **按 token_id 取**(#203):新参考层的 priceSeries 收内部 id,不再拼厂商 ref。

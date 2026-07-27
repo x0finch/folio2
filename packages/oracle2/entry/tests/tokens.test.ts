@@ -348,6 +348,35 @@ describe("历史日价(按 token_id)", () => {
   });
 });
 
+describe("选币的取价(按 ref,不建行)", () => {
+  it("按 ref 现取 —— 库里既不多一行代币,也不多一条价缓存", async () => {
+    const { store, prices, upstream, tokens } = setup();
+    upstream.prices.set(SRC_BTC, { unitPrice: 60000, change24h: 1.5, asOf: NOW });
+
+    expect(await tokens.priceByRef(SRC_BTC)).toEqual({
+      unitPrice: 60000,
+      change24h: 1.5,
+      asOf: NOW,
+    });
+    // 这一刻用户只是在下拉里点了一下,还没提交 —— 什么都不该落库。
+    expect(store.rows.size).toBe(0);
+    expect(prices.current.size).toBe(0);
+  });
+
+  it("上游不认识这条 ref → undefined(表单让用户自己填)", async () => {
+    const { tokens } = setup();
+    expect(await tokens.priceByRef("src/nope")).toBeUndefined();
+  });
+
+  it("上游抛错 → undefined,不抛 —— 取不到价不该把选币流程打断", async () => {
+    const { upstream, tokens } = setup();
+    upstream.fetchPrices = async () => {
+      throw new Error("429");
+    };
+    expect(await tokens.priceByRef(SRC_BTC)).toBeUndefined();
+  });
+});
+
 describe("橱窗与候选", () => {
   it("排行榜走 warm(经 SWR 预热一次);候选与它同一份 rows", async () => {
     const { upstream, cache, tokens } = setup();

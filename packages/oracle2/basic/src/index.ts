@@ -32,6 +32,8 @@ export type {
   TokenPriceStore,
   TokenStore,
 } from "./stores";
+// tokenRef 交给浏览器时的不透明形(选币用)。
+export { tokenTicket } from "./ticket";
 export type {
   ProviderTokenSeed,
   TokenCandidate,

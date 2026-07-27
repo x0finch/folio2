@@ -1,5 +1,3 @@
-import type { TokenInfo } from "@folio/oracle";
-import { CGK_VENDOR, cgkRef, vendorIdOf } from "@folio/oracle";
 import {
   Button,
   cn,
@@ -21,6 +19,7 @@ import { useFormatter, useTranslations } from "use-intl";
 import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
 import { useTokenPrice } from "../lib/hooks/use-token-price";
 import type { ActivityDraft, PickedToken } from "../lib/manual-types";
+import type { TokenOption } from "../lib/token-option";
 import { DateTimeWheel } from "./date-time-wheel";
 import { Portal } from "./portal";
 import { TokenCombobox } from "./token-combobox";
@@ -106,11 +105,11 @@ function Expandable({ show, children }: { show: boolean; children: ReactNode }) 
   );
 }
 
-// PickedToken → TokenCombobox 可显示的 TokenInfo(仅展示,不校验 ref.source)。无 identifier → null(走手动模式)。
-function toTokenInfo(token: PickedToken | null): TokenInfo | null {
-  if (!token?.identifier) return null;
+// PickedToken → TokenCombobox 能显示的一项(仅展示)。没有票 = 用户当初是手敲的 symbol → null(手动模式)。
+function toOption(token: PickedToken | null): TokenOption | null {
+  if (!token?.ticket) return null;
   return {
-    ref: cgkRef(token.identifier),
+    ticket: token.ticket,
     symbol: token.symbol,
     name: token.name ?? "",
     logo: token.logo,
@@ -131,10 +130,10 @@ function numOrUndef(s: string): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-// 草稿是否与初值一致(用于判定「是否真被改动」→ 决定 ✕ 是否需要确认)。token 以身份(identifier/symbol)比对。
+// 草稿是否与初值一致(用于判定「是否真被改动」→ 决定 ✕ 是否需要确认)。token 以身份(票/symbol)比对。
 function sameDraft(a: DraftForm, b: DraftForm): boolean {
-  const tokA = a.token?.identifier ?? a.token?.symbol ?? null;
-  const tokB = b.token?.identifier ?? b.token?.symbol ?? null;
+  const tokA = a.token?.ticket ?? a.token?.symbol ?? null;
+  const tokB = b.token?.ticket ?? b.token?.symbol ?? null;
   return (
     tokA === tokB &&
     a.kind === b.kind &&
@@ -205,8 +204,8 @@ function ActivityForm({
         };
 
   const [draft, setDraft] = useState<DraftForm>(emptyDraft);
-  const [picked, setPicked] = useState<TokenInfo | null>(toTokenInfo(lockedToken));
-  const [manualMode, setManualMode] = useState(Boolean(lockedToken && !lockedToken.identifier));
+  const [picked, setPicked] = useState<TokenOption | null>(toOption(lockedToken));
+  const [manualMode, setManualMode] = useState(Boolean(lockedToken && !lockedToken.ticket));
   // 单开编辑器:日期 / 时间 / 手续费 / 备注 互斥,点开一个在预览卡外展开,点外部或失焦收起(日期与时间也不同时开)。
   const [openEditor, setOpenEditor] = useState<"date" | "time" | "fee" | "memo" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -235,21 +234,19 @@ function ActivityForm({
   const setD = <K extends keyof DraftForm>(key: K, v: DraftForm[K]) =>
     setDraft((d) => ({ ...d, [key]: v }));
 
-  const onPick = (tok: TokenInfo | null) => {
+  const onPick = (tok: TokenOption | null) => {
     setPicked(tok);
     if (!tok) {
       setD("token", null);
       return;
     }
-    // 选币结果恒是 CGK 命名的 ref。
-    const id = vendorIdOf(tok.ref, CGK_VENDOR);
-    if (!id) return;
+    const { ticket } = tok;
     priceTouched.current = false;
     setDraft((d) => ({
       ...d,
       token: {
         symbol: tok.symbol.toUpperCase(),
-        identifier: id,
+        ticket,
         logo: tok.logo,
         name: tok.name,
         unitPrice: 0,
@@ -257,9 +254,9 @@ function ActivityForm({
       price: "",
     }));
     // 市价异步回填(竞态守卫):仍指向同一 token 才写;未手改 price 时一并回填价格字段。
-    fetchPrice(id, (p) =>
+    fetchPrice(ticket, (p) =>
       setDraft((d) => {
-        if (d.token?.identifier !== id) return d;
+        if (d.token?.ticket !== ticket) return d;
         return {
           ...d,
           token: { ...d.token, unitPrice: p },
@@ -672,7 +669,7 @@ export function ManualActivityModal({
             key={
               edit
                 ? `edit:${edit.activityId}`
-                : `${lockToken ? "lock" : "free"}:${defaultToken?.identifier ?? defaultToken?.symbol ?? "none"}`
+                : `${lockToken ? "lock" : "free"}:${defaultToken?.ticket ?? defaultToken?.symbol ?? "none"}`
             }
             defaultToken={defaultToken}
             lockToken={lockToken}

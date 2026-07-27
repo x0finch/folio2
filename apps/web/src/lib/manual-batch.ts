@@ -34,15 +34,15 @@ export interface Token {
 }
 
 // 草稿指向的**选中币** —— 这是 server fn 的入参形状(客户端给什么就是什么)。
-// 与 tokenRef(代币命名法,见 @folio/oracle-ref)无关。
+// `ticket` 是选币下拉发的那串不透明票(见 lib/token-option.ts);本模块不解释它,只搬运。
 interface PickedTokenInput {
   symbol: string;
   unitPrice: number;
-  identifier?: string | null;
+  ticket?: string | null;
 }
 
 // 认过币之后的选中币:`tokenId` 由调用方在规划**之前**经 mint 换出(见 manualTokenRef)。
-// 于是「这条草稿指的是哪个币」不再由本模块猜 —— 原来这里按 identifier 优先、退回同名 symbol 匹配,
+// 于是「这条草稿指的是哪个币」不再由本模块猜 —— 原来这里按上游 id 优先、退回同名 symbol 匹配,
 // 那是一套跟 mint 平行的认币启发式,两处规则一旦漂移就会一个认成 A、一个认成 B。
 export type ResolvedTokenInput = PickedTokenInput & { tokenId: string };
 

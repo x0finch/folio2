@@ -1,4 +1,3 @@
-import type { TokenInfo } from "@folio/oracle";
 import { cn, Input } from "@folio/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";
@@ -8,6 +7,7 @@ import { useTranslations } from "use-intl";
 import { matchSegments } from "../lib/highlight";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
 import { listTokens, listTopTokens } from "../lib/server/tokens";
+import type { TokenOption } from "../lib/token-option";
 
 // manual 选币的内联 Combobox(A4,替代 TokenPicker 的全屏 CommandPalette 浮层):点触发器**就地下推**展开
 // 搜索框 + 结果列表(在文档流内、把下方字段推下去,不叠第二层遮罩)。接口与 TokenPicker 对齐(value/onChange/
@@ -42,7 +42,7 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 }
 
 // 一行代币:logo + symbol + name(触发器与结果行共用)。
-function TokenRow({ token, query }: { token: TokenInfo; query?: string }) {
+function TokenRow({ token, query }: { token: TokenOption; query?: string }) {
   return (
     <>
       {token.logo ? (
@@ -69,8 +69,8 @@ export function TokenCombobox({
   onChange,
   onManual,
 }: {
-  value: TokenInfo | null;
-  onChange: (token: TokenInfo | null) => void;
+  value: TokenOption | null;
+  onChange: (token: TokenOption | null) => void;
   onManual: (query: string) => void;
 }) {
   const t = useTranslations("Accounts");
@@ -93,7 +93,7 @@ export function TokenCombobox({
   });
   const tokens = tokensQuery.data ?? [];
 
-  const pick = (token: TokenInfo) => {
+  const pick = (token: TokenOption) => {
     onChange(token);
     setOpen(false);
     setQuery("");
@@ -209,7 +209,7 @@ export function TokenCombobox({
               ) : tokens.length > 0 ? (
                 tokens.map((token, i) => (
                   <button
-                    key={token.ref}
+                    key={token.ticket}
                     type="button"
                     data-active={i === active}
                     onPointerMove={() => setActive(i)}

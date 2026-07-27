@@ -108,7 +108,7 @@ export function ManualTokensPanel({
     const bal = balBySymbol.get(tk.symbol.toUpperCase());
     return {
       symbol: tk.symbol,
-      identifier: tk.identifier ?? undefined,
+      ticket: tk.ticket ?? undefined,
       logo: bal?.logo,
       name: bal?.name,
       unitPrice: tk.unitPrice,
@@ -132,7 +132,7 @@ export function ManualTokensPanel({
       tokens.map((tk) => ({
         id: tk.id,
         unitPrice: tk.unitPrice,
-        identifier: tk.identifier,
+        recognized: tk.ticket != null,
         activities: activities
           .filter((a) => a.tokenId === tk.id)
           .map((a) => ({
@@ -393,7 +393,7 @@ export function ManualTokensPanel({
                 token: {
                   symbol: d.token.symbol,
                   unitPrice: d.token.unitPrice,
-                  identifier: d.token.identifier ?? null,
+                  ticket: d.token.ticket ?? null,
                 },
                 kind: d.kind,
                 amount: d.amount,
