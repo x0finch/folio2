@@ -31,6 +31,13 @@ export interface TokenStore {
   create(seed: ProviderTokenSeed, refs: readonly TokenRef[]): Promise<string>;
 
   // 给已有 Token 加一条 ref(多链归一走这里)。已存在则不动;同样返回该 ref 最终指向的 id。
+  //
+  // **真加上了一条 ref 就把 info 标成该刷**(见 `TokenInfo.infoStale`)。这一刻我们拿到了
+  // 「这个币的叫法变了」的**证据**:某个来源开始用一个新名字称呼一个我们已经认识的币 ——
+  // CoinGecko 把 MATIC 改成 POL、交易所随后也改了代号,两边改的时间还不一致。光靠 TTL 到期
+  // (30d)重读的话,收敛之后那一行最长 30 天都显示旧名。**不比较新旧 symbol**:比较要多读一次
+  // 行,而标脏的代价只是下一次批量刷多带一个 id(本来就要发那一次请求)。
+  // 早退的两条路(ref 已有主 / 该 Token 在该命名者下已有别的叫法)不写、也就不标。
   linkRef(tokenId: string, ref: TokenRef): Promise<string>;
 
   // 合并:把 `from` 并进 `into` —— ref 改指、**历史快照的 token_id 一并改指**、旧行删除。
@@ -43,6 +50,9 @@ export interface TokenStore {
   //     **曲线一格都不缺**。
   // 实现要保证的是另一件事:`token_refs` 的 `token_id` 外键带 `ON DELETE CASCADE`,
   // 否则删掉旧代币行会留下指向不存在 Token 的 ref 行。
+  //
+  // 与 `linkRef` 同理:**赢家的 info 一并标成该刷**。两行会合并,正说明至少有一边的名字与
+  // 上游当前的叫法不一致 —— 赢家留的是自己那份,可能就是旧的那份。
   merge(from: string, into: string): Promise<void>;
 
   // 读:按内部 id 批量 / 按主键单读。**不门控 info TTL** —— 只要行在就给,否则渲染出了

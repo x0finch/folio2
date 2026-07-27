@@ -291,6 +291,48 @@ describe("putInfo 覆盖上游那三个字段", () => {
   });
 });
 
+// 上游与交易所改名的时间不一致 → 收敛发生的那一刻就是「叫法变了」的证据。
+// 身份发生变化的写入顺带把 info 标成该刷,否则显示名最长滞后一个 INFO_TTL_MS(30d)。
+describe("身份变化把 info 标成该刷", () => {
+  const freshen = async (store: ReturnType<typeof storeFor>, id: string) => {
+    await store.putInfo([{ tokenId: id, symbol: "MATIC", name: "Matic Network" }], 60_000);
+    expect((await store.getById(id))?.infoStale).toBe(false);
+  };
+
+  it("linkRef 真加了一条 ref → 标脏", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("MATIC"), [USDC_ETH]);
+    await freshen(store, id);
+
+    await store.linkRef(id, USDC_ARB);
+    expect((await store.getById(id))?.infoStale).toBe(true);
+  });
+
+  it("linkRef 的两条早退路径都不写 → 不标脏", async () => {
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("MATIC"), [USDC_ETH]);
+    await store.linkRef(id, USDC_UP); // 先占上本源那一档
+    await freshen(store, id);
+
+    await store.linkRef(id, USDC_ETH); // 这条 ref 已有主 → 早退
+    expect((await store.getById(id))?.infoStale).toBe(false);
+    await store.linkRef(id, "coingecko/other-coin"); // 该命名者下已有别的叫法 → 不加第二条
+    expect((await store.getById(id))?.infoStale).toBe(false);
+  });
+
+  it("merge 之后赢家标脏 —— 它留的是自己那份(可能是旧)名字", async () => {
+    const store = storeFor(USER_A);
+    const winner = await store.create(seed("MATIC", "Matic Network"), [USDC_ETH]);
+    const loser = await store.create(seed("POL"), [USDC_ARB]);
+    await freshen(store, winner);
+
+    await store.merge(loser, winner);
+    const info = await store.getById(winner);
+    expect(info?.symbol).toBe("MATIC"); // 赢家的名字没被输家改掉
+    expect(info?.infoStale).toBe(true); // 但会被标成该刷
+  });
+});
+
 describe("价 facet", () => {
   it("写 → 读回;过期不删,读出带 stale", async () => {
     const store = storeFor(USER_A);

@@ -279,6 +279,100 @@ describe("链上 symbol 与上游叫法不一致", () => {
   });
 });
 
+// 改名不是一次性事件:上游改一次、交易所改一次,**时间还不一致**。中间那段窗口里两侧用不同的名字
+// 称呼同一个币。交易所的 ref 就是它的代号(`binance/<代号>`),所以它改代号 = **来了一条新 ref**。
+//
+// 两种到达顺序身份都收敛,差别在中间那一下;而**收敛发生的那一刻就是「叫法变了」的证据** ——
+// 那时必须把 info 标成该刷,否则光等 30 天的 TTL,收敛之后那一行还显示旧名。
+describe("上游与交易所改名时间不一致", () => {
+  const POL_CEX_OLD = "binance/MATIC"; // 交易所改代号之前用的那条 ref
+
+  // 改名之前的世界:链上(按地址)与交易所(按 symbol MATIC)都已经认出来、归到同一行,
+  // 而且已经被刷成上游**当时**的叫法。
+  async function beforeAnyRename(warm: Record<string, TokenCandidate[]>) {
+    warm.MATIC = [{ ref: SRC_POL, marketCapRank: 76 }];
+    const ctx = setup({ index: { [POL_ETH]: POL_ID }, candidates: warm });
+    const ids = await ctx.mint.of([
+      { ref: POL_ETH, seed: seed("MATIC", "Matic Network") },
+      { ref: POL_CEX_OLD, seed: seed("MATIC") },
+    ]);
+    const id = ids.get(POL_ETH) as string;
+    expect(ids.get(POL_CEX_OLD)).toBe(id);
+    expect(ctx.store.rows.size).toBe(1);
+    // 假装 refreshStaleInfo 刷过了:那时上游还叫 MATIC。
+    await ctx.store.putInfo([{ tokenId: id, symbol: "MATIC", name: "Matic Network" }], 0);
+    expect(ctx.store.rows.get(id)?.infoStale).toBe(false);
+    return { ...ctx, id };
+  }
+
+  it("上游先改、交易所后改 → 新代号挂到同一行,并把 info 标成该刷", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, mint, id } = await beforeAnyRename(warm);
+
+    // ① 上游改了:warm 里 MATIC 变成 POL。交易所这一轮还在报旧代号 ——
+    // 那条 ref 已经认出来了 → 决策树第一步短路,身份不动,**info 也不标脏**:
+    // 本地没有任何「叫法变了」的证据可看,这一档只能靠 TTL 到期(下一条用例钉这件事)。
+    delete warm.MATIC;
+    warm.POL = [{ ref: SRC_POL, marketCapRank: 76 }];
+    expect((await mint.of([{ ref: POL_CEX_OLD, seed: seed("MATIC") }])).get(POL_CEX_OLD)).toBe(id);
+    expect(store.rows.get(id)?.infoStale).toBe(false);
+
+    // ② 交易所终于也改了代号 → 这是**一条新 ref**,按 symbol 认 → 上游已有 POL → 挂到同一行。
+    expect((await mint.of([{ ref: POL_CEX, seed: seed("POL") }])).get(POL_CEX)).toBe(id);
+    expect(store.rows.size).toBe(1);
+    // 收敛那一刻 info 被标脏 → 下一次刷新把显示名换成上游当前的叫法。
+    expect(store.rows.get(id)?.infoStale).toBe(true);
+  });
+
+  it("只有上游改、交易所一直不改 → 没有本地证据,只能等 TTL(这一档不标脏)", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, mint, id } = await beforeAnyRename(warm);
+    delete warm.MATIC;
+    warm.POL = [{ ref: SRC_POL, marketCapRank: 76 }];
+
+    // 连着几轮同步,来的都是已知的 ref → 一个字都不写。
+    for (let i = 0; i < 3; i++) {
+      await mint.of([
+        { ref: POL_ETH, seed: seed("MATIC") },
+        { ref: POL_CEX_OLD, seed: seed("MATIC") },
+      ]);
+    }
+    expect(store.rows.get(id)?.infoStale).toBe(false);
+    expect(store.rows.get(id)?.symbol).toBe("MATIC");
+    // 换言之显示名最长滞后一个 INFO_TTL_MS(30d)。这是明知接受的:标脏要有证据,
+    // 不然每轮同步都得为每一行白问一趟上游。
+  });
+
+  it("交易所先改、上游后改 → 中途多一行,上游跟上后合并并把赢家标成该刷", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, mint, id } = await beforeAnyRename(warm);
+
+    // ① 交易所抢先改了代号:新 ref,而上游还不认识这个 symbol → 认不出来,自己一行。
+    const orphan = (await mint.of([{ ref: POL_CEX, seed: seed("POL") }])).get(POL_CEX) as string;
+    expect(orphan).not.toBe(id);
+    expect(store.rows.size).toBe(2); // 这段窗口里用户会看到两行
+    store.snapshotTokenIds.push(id, orphan); // 两行各写了历史
+
+    // ② 上游随后也改了 → 下一轮认出来 → 合并。
+    delete warm.MATIC;
+    warm.POL = [{ ref: SRC_POL, marketCapRank: 76 }];
+    expect((await mint.of([{ ref: POL_CEX, seed: seed("POL") }])).get(POL_CEX)).toBe(id);
+    expect(store.rows.size).toBe(1);
+    expect(store.snapshotTokenIds).toEqual([id, id]); // 曲线不断
+    // 赢家留的是**自己那份**名字(旧名)—— 所以合并也必须标脏,否则最长 30 天不改。
+    expect(store.rows.get(id)?.symbol).toBe("MATIC");
+    expect(store.rows.get(id)?.infoStale).toBe(true);
+  });
+
+  it("同一条已知 ref 反复来 → 不算证据,不标脏(否则每轮同步都白刷一趟上游)", async () => {
+    const warm: Record<string, TokenCandidate[]> = {};
+    const { store, mint, id } = await beforeAnyRename(warm);
+    await mint.of([{ ref: POL_ETH, seed: seed("MATIC") }]);
+    await mint.of([{ ref: POL_CEX_OLD, seed: seed("MATIC") }]);
+    expect(store.rows.get(id)?.infoStale).toBe(false);
+  });
+});
+
 describe("并发", () => {
   it("同一条 ref 被同时 mint → 幂等,只出一行(upsert-then-read,无 barrier)", async () => {
     const { store, mint } = setup({ index: { [USDC_ETH]: "usd-coin" } });

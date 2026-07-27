@@ -96,6 +96,8 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
       refs.set(ref, tokenId);
       const row = rows.get(tokenId);
       if (row && ref.startsWith(`${store.namer}/`)) row.ref = ref;
+      // 真加了一条 ref → info 标成该刷(契约在 stores.ts:这是改名的证据)。
+      if (row) row.infoStale = true;
       return tokenId;
     },
 
@@ -108,6 +110,8 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
       const dst = rows.get(into);
       // 旧行的 provider 图是回退链的一档,别随行一起丢。
       if (src && dst && !dst.providerLogo && src.providerLogo) dst.providerLogo = src.providerLogo;
+      // 赢家的 info 标成该刷 —— 会合并就说明至少有一边的名字与上游当前叫法不一致。
+      if (dst) dst.infoStale = true;
       rows.delete(from);
     },
 

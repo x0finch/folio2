@@ -104,6 +104,13 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
     return out;
   }
 
+  // info 标成「该刷」= 把过期时刻推到过去。`putInfo` 的反面,不带值。
+  const expireInfoStmt = (tokenId: string) =>
+    db
+      .update(tokens)
+      .set({ infoExpiresAt: 0 })
+      .where(and(eq(tokens.userId, userId), eq(tokens.id, tokenId)));
+
   const toInfo = (
     r: {
       id: string;
@@ -251,12 +258,17 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
       if (owner) return owner.tokenId;
       // 这个 Token 在该命名者下已有别的叫法 → 不加第二条。
       if (existing.length > 0) return tokenId;
-      await db
-        .insert(tokenRefs)
-        .values({ userId, namer: p.namer, localName: p.localName, tokenId })
-        .onConflictDoNothing({
-          target: [tokenRefs.userId, tokenRefs.namer, tokenRefs.localName],
-        });
+      // 真加了一条 ref → **info 标成该刷**(契约见 stores.ts):某个来源开始用新名字称呼一个
+      // 我们已经认识的币,这就是改名的证据。同一批发,省一次往返。
+      await batchWrite(db, [
+        db
+          .insert(tokenRefs)
+          .values({ userId, namer: p.namer, localName: p.localName, tokenId })
+          .onConflictDoNothing({
+            target: [tokenRefs.userId, tokenRefs.namer, tokenRefs.localName],
+          }),
+        expireInfoStmt(tokenId),
+      ]);
       return tokenId;
     },
 
@@ -312,6 +324,9 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
           })
           .where(eq(tokens.id, into)),
         db.delete(tokens).where(and(eq(tokens.userId, userId), eq(tokens.id, from))),
+        // 两行会合并,正说明至少有一边的名字与上游当前的叫法不一致 —— 赢家留的是自己那份,
+        // 可能就是旧的那份。标成该刷,别等 30 天的 TTL。
+        expireInfoStmt(into),
       ];
       await batchWrite(db, stmts);
     },
