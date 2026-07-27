@@ -53,7 +53,7 @@ USD: 恒 1
 
 ## ③ 缓存 —— 写进 `fx_rates`,sync 后顺手预热
 
-📍 **地点**:`apps/web/src/lib/server/fx.ts`(`warmFx`)接在 `sync-deps` 的 `warmTokensForUser` 里 → `@folio/fx` `warm` → `@folio/db` `createFxStore` → `fx_rates` 表
+📍 **地点**:`apps/web/src/lib/server/internal/fx.ts`(`warmFx`)接在 `sync-deps` 的 `warmTokensForUser` 里 → `@folio/oracle` 的 fx 服务 `warm` → `@folio/db` `createFxStore` → `fx_rates` 表
 
 🔧 **做了什么**:同步后台顺手刷新(任一币种缺失/过期才拉),把 usd_per_unit 连同 `expires_at`(TTL ~6h)写入 D1。**`expires_at` 只闸 warm;读时软过期**——宁可返回略旧汇率,也不掉回 USD。
 
@@ -71,7 +71,7 @@ USD: 恒 1
 
 ## ⑤ 读出 —— loader 解析币种 + cache-only 取汇率
 
-📍 **地点**:`apps/web/src/lib/server/currency.ts`(`getDisplayCurrency`)→ `@folio/fx` `resolve`(读 `fx_rates`,零外部网络)
+📍 **地点**:`apps/web/src/lib/server/currency.ts`(`getDisplayCurrency`)→ `@folio/oracle` 的 fx 服务 `resolve`(读 `fx_rates`,零外部网络)
 
 🔧 **做了什么**:读 cookie → `resolveCurrency("EUR")`(按 `SUPPORTED_CURRENCIES` 校验,未知→USD)→ `resolve("EUR")` 取 `usd_per_unit`。**缺(从未预热)→ 回退 `{USD, rate:1}`**,绝不空白/错换算。USD 早返回 `rate:1`,不查 D1。
 

@@ -9,8 +9,8 @@
 | 文档 | 类型 | 内容 |
 |---|---|---|
 | 本页 | 总览 | 技术栈 · 分层图 · 包清单 · 核心原则 |
-| [01-data-flow.md](./01-data-flow.md) | 总览 | 两条运行时数据流:同步(写)与读时(展示 + 聚合) |
-| [02-canonical-aggregation.md](./02-canonical-aggregation.md) | 子系统深讲 | P2 canonical 聚合 + 各 provider 实例 |
+| [01-data-flow.md](./01-data-flow.md) | 总览 | 两条运行时数据流:同步(写,含认币)与读(展示 + 聚合) |
+| [02-canonical-aggregation.md](./02-canonical-aggregation.md) | 子系统深讲 | 一条 USDC 的完整旅程:认币(写路径)→ 聚合(读路径) |
 | [03-multi-currency.md](./03-multi-currency.md) | 子系统深讲 | 多币种 FX:$880 → €809.57 的展示层换算旅程 |
 
 ## 技术栈
@@ -31,16 +31,17 @@ flowchart TB
     end
     subgraph A["应用层 (apps/web · server functions)"]
         SF["Server Functions — userId 作用域"]
-        AGG["读时聚合 P2 — canonical Holdings"]
+        MINT["认币编排 — 写快照前 tokenRef → token_id"]
+        AGG["读时聚合 — 按 token_id 归并成 Holdings"]
         CR["creds 塑形 — seal · open · safeView"]
         RV["revalue — manual / bitcoin 盯市"]
     end
     subgraph D["域包 @folio/*"]
-        SYNC["@folio/sync — 并发编排"]
-        BAL["@folio/balances — Provider + 7 源(含 Bitcoin)"]
-        TOK["@folio/tokens — 代币解析/价格"]
-        FX["@folio/fx — 汇率"]
-        PLAT["@folio/platforms — 链/场馆元信息"]
+        SYNC["@folio/sync — 并发编排 · platformOf"]
+        CONN["@folio/connectors — Provider 契约 + 7 源(含 Bitcoin)"]
+        ORA["@folio/oracle2 — 参考层(认币 · 价 · 名图)"]
+        UPS["@folio/oracle2-upstream-coingecko — 唯一认识 vendor 的包"]
+        REF["@folio/oracle-ref — tokenRef 文法(零依赖)"]
         DB["@folio/db — userId-scoped ops"]
     end
     subgraph C["SDK 客户端 (packages/clients/*)"]
@@ -59,11 +60,11 @@ flowchart TB
         CGK["CoinGecko"]
     end
     P --> A --> D --> R
-    BAL --> CEX
-    BAL --> BBC --> BB
-    BAL -.本地派生.-> DRV
-    TOK --> CGC --> CGK
-    FX --> CGC
+    CONN --> CEX
+    CONN --> BBC --> BB
+    CONN -.本地派生.-> DRV
+    ORA -.app 装配时注入.-> UPS
+    UPS --> CGC --> CGK
     DB --> CF
 ```
 
@@ -73,11 +74,13 @@ flowchart TB
 |---|---|---|
 | `@folio/web` | `apps/web` | TanStack Start 应用 + server functions |
 | `@folio/ui` | `packages/ui` | beUI 动效层 + 手搓原语 |
-| `@folio/sync` | `packages/sync` | 同步编排 |
-| `@folio/balances(-basic)` | `packages/balances/{entry,basic}` | `BalanceProvider` 契约 + registry |
-| `@folio/balances-provider-*` | `packages/balances/providers/*` | binance · okx · zerion · hyperliquid · coinstats · custom · **bitcoin** |
-| `@folio/tokens(-basic)` + coingecko | `packages/tokens/*` | 代币解析/价格(懒解析)+ CoinGecko 源 |
-| `@folio/platforms` · `@folio/fx` | `packages/{platforms,fx}` | 链/场馆元信息 · 多币种汇率 |
+| `@folio/sync` | `packages/sync` | 同步编排 · `platformOf`(tokenRef → 平台) |
+| `@folio/connectors(-basic)` | `packages/connectors/{entry,basic}` | `BalanceProvider` 契约 + registry |
+| `@folio/connectors-provider-*` | `packages/connectors/providers/*` | binance · okx · zerion · hyperliquid · coinstats · blockbook · manual |
+| `@folio/oracle-ref` | `packages/oracle/ref` | `tokenRef` 文法(造串 / 拆串 / 拼回;零依赖零 IO) |
+| `@folio/oracle2{,-basic}` | `packages/oracle2/{entry,basic}` | 参考层:认币 / 价 / 名图。**看不见任何 vendor** |
+| `@folio/oracle2-upstream-coingecko` | `packages/oracle2/upstreams/coingecko` | 全仓唯一认识 CoinGecko 的地方 |
+| `@folio/oracle*`(旧一套) | `packages/oracle/*` | 迁移期并存,[#202](https://github.com/x0finch/folio2/issues/202) 由 oracle2 改名接管后删除 |
 | `@folio/db` | `packages/db` | 封装的数据访问 op |
 | `@folio/{coingecko,blockbook}-client` · `@folio/bitcoin-derive` | `packages/clients/*` | SDK 式 HTTP 客户端 · xpub 本地派生 |
 
