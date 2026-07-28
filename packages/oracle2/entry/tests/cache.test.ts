@@ -5,6 +5,7 @@ import {
   candidatesBySymbol,
   PLATFORM_TTL_MS,
   PRICE_TTL_MS,
+  pickByConfidence,
   readFx,
   readPlatforms,
   refreshCatalogue,
@@ -260,6 +261,44 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     upstream.markets = [coin("bitcoin", "btc", 1)];
     const rows = await warmMarkets(cache, upstream, 50, cache.now);
     expect(candidatesBySymbol(rows, "  BTC ")).toEqual([{ ref: "src/bitcoin", marketCapRank: 1 }]);
+  });
+
+  // 目录里混进同一个币两次(上游分页来自不同快照,见 coingecko adapter)。**不去重的后果是
+  // 静默的**:消歧会拿这个币跟它自己比,谁也碾压不了谁 → 判定没把握 → 这个币从此认不出来,
+  // 表现只是「那个持仓没有实时价」。所以读这一侧再兜一道,不只指望上游。
+  it("同一个币在目录里出现两次 → 候选只留一条", async () => {
+    const cache = fakeCacheStore();
+    const upstream = fakeUpstream();
+    upstream.markets = [coin("usd-coin", "USDC", 6), coin("usd-coin", "USDC", 6)];
+    const rows = await warmMarkets(cache, upstream, 50, cache.now);
+
+    expect(candidatesBySymbol(rows, "USDC")).toEqual([{ ref: "src/usd-coin", marketCapRank: 6 }]);
+  });
+
+  // 去重必须在**读**这一侧,不能只在上游那侧:修好之前存下的脏目录还躺在缓存里,而这份 blob
+  // 一周才刷一次 —— 只修上游的话,已经中招的用户还要再脏一周。
+  it("缓存里已经是脏的 → 读出来就是干净的,且不为此回一趟上游", async () => {
+    const cache = fakeCacheStore();
+    const upstream = fakeUpstream();
+    const row = { info: { ref: "src/usd-coin", symbol: "USDC", name: "USDC" }, price: {} };
+    await cache.put(cacheKeys.warm, { asOf: cache.now, rows: [row, row] }, WARM_TTL_MS);
+
+    const rows = await warmMarkets(cache, upstream, 50, cache.now);
+    expect(rows).toHaveLength(1);
+    expect(upstream.calls).toEqual([]); // 治脏数据不该换来一次回源
+  });
+
+  it("重复的币照样认得出来 —— 不去重的话它会输给自己", async () => {
+    const cache = fakeCacheStore();
+    const upstream = fakeUpstream();
+    // 排名 592:够不上「前 50 直接信」,只能靠碾压次席。自己跟自己比 = 比值 1 → 认不出来。
+    upstream.markets = [
+      coin("collector-crypt", "CARDS", 592),
+      coin("collector-crypt", "CARDS", 592),
+    ];
+    const rows = await warmMarkets(cache, upstream, 50, cache.now);
+
+    expect(pickByConfidence(candidatesBySymbol(rows, "CARDS"))).toBe("src/collector-crypt");
   });
 });
 

@@ -44,8 +44,13 @@ const marketRow = (id: string, rank: number): MarketCoin =>
     market_cap_rank: rank,
   }) as MarketCoin;
 
-const page = (n: number) =>
-  Array.from({ length: n }, (_, i) => marketRow(`coin-${i}`, i + 1)) as MarketCoin[];
+// 第 n 页:币的 id 按页错开,否则两页拿到的是同一批币 —— 那正是「翻页去重」要测的东西,
+// 用同一批币当夹具会让去重和不去重看起来一样。
+const page = (count: number, pageNo = 1) =>
+  Array.from({ length: count }, (_, i) => {
+    const at = (pageNo - 1) * MARKETS_PER_PAGE + i;
+    return marketRow(`coin-${at}`, at + 1);
+  }) as MarketCoin[];
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -57,7 +62,8 @@ describe("自报标识", () => {
 
 describe("fetchMarkets 分页", () => {
   it("topN 跨页 → 逐页取,页码递增,末尾裁到 topN", async () => {
-    const calls = stubFetch({ "/coins/markets": () => page(MARKETS_PER_PAGE) });
+    let n = 0;
+    const calls = stubFetch({ "/coins/markets": () => page(MARKETS_PER_PAGE, ++n) });
     const rows = await createCoinGeckoUpstream().fetchMarkets({ topN: MARKETS_PER_PAGE + 10 });
 
     expect(calls.map((c) => c.query.get("page"))).toEqual(["1", "2"]);
@@ -85,6 +91,55 @@ describe("fetchMarkets 分页", () => {
     const calls = stubFetch({ "/coins/markets": () => page(1) });
     await createCoinGeckoUpstream().fetchMarkets({ topN: 0 });
     expect(calls).toHaveLength(1);
+  });
+});
+
+// CoinGecko 的分页不是同一份榜单切出来的:一次抓取里前两页盖着同一个 last_updated、第三页更新过,
+// 而排序按市值 —— 流通量在两份数据之间被修正过的币,会在旧那份里排进前面一页、新那份里又排进后面
+// 一页。实测 1000 条里 43 个币这样重复。这几条钉的是「拼页时必须去重」。
+describe("fetchMarkets 跨页重复(上游分页来自不同快照)", () => {
+  // 第 1 页的最后一个币,在第 2 页又出现一次(市值被修正 → 排到了后面)。
+  const overlapping = (pageNo: number): MarketCoin[] => {
+    const rows = page(MARKETS_PER_PAGE, pageNo);
+    if (pageNo === 2) rows[0] = marketRow("coin-249", 250); // 与第 1 页末尾同一个币
+    return rows;
+  };
+
+  it("同一个币出现在两页 → 只留一条", async () => {
+    let n = 0;
+    stubFetch({ "/coins/markets": () => overlapping(++n) });
+    const rows = await createCoinGeckoUpstream().fetchMarkets({
+      topN: MARKETS_PER_PAGE * 2,
+    });
+
+    const refs = rows.map((r) => r.ref);
+    expect(new Set(refs).size).toBe(refs.length);
+  });
+
+  it("留下的是**先出现**的那条 —— 它排得更靠前", async () => {
+    let n = 0;
+    stubFetch({ "/coins/markets": () => overlapping(++n) });
+    const rows = await createCoinGeckoUpstream().fetchMarkets({
+      topN: MARKETS_PER_PAGE * 2,
+    });
+
+    const dup = rows.filter((r) => r.ref.endsWith("/coin-249"));
+    expect(dup).toHaveLength(1);
+    // 第 1 页给的排名是 250;第 2 页那条也是 250,但位置在第 1 页 —— 取的是先来的。
+    expect(rows.indexOf(dup[0])).toBe(MARKETS_PER_PAGE - 1);
+  });
+
+  // 去重之后就是会少于 topN。补齐要多翻页,而多翻的那页照样会撞重复 —— 补不出保证,
+  // 少的又都在榜尾最不稳的一段。所以 topN 的意思是「往下抓多深」,不是「保证这么多个币」。
+  it("去重后不足 topN → 就是不足,不再多翻页去补", async () => {
+    let n = 0;
+    const calls = stubFetch({ "/coins/markets": () => overlapping(++n) });
+    const rows = await createCoinGeckoUpstream().fetchMarkets({
+      topN: MARKETS_PER_PAGE * 2,
+    });
+
+    expect(rows).toHaveLength(MARKETS_PER_PAGE * 2 - 1);
+    expect(calls).toHaveLength(2); // 没有第 3 页
   });
 });
 

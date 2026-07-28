@@ -156,10 +156,14 @@ export function TokenCombobox({
   }, [open]);
 
   // 键盘高亮行滚入可视区(列表内滚动,不惊动外层)。active 作触发器,不在 body 直接读。
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run to scroll the newly-active row into view
+  //
+  // **按下标取,不扫 `[data-active="true"]`。** 后者拿的是 DOM 顺序里的第一个,而 DOM 里
+  // 混进过僵尸行(重复 key 导致 React 卸载了却没摘掉的节点),它们身上的标记停在死掉那一刻 ——
+  // 扫到僵尸就把列表滚回了顶部。根因(目录里的重复币)已在上游修掉,但依赖 DOM 顺序本身就脆。
+  // (顺带:改成按下标之后 effect 真的读了 `active`,依赖数组自洽,原先那条 lint 豁免不再需要。)
   useEffect(() => {
     listRef.current
-      ?.querySelector<HTMLElement>('[data-active="true"]')
+      ?.querySelector<HTMLElement>(`[data-index="${active}"]`)
       ?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
@@ -251,6 +255,7 @@ export function TokenCombobox({
                   <button
                     key={token.ticket}
                     type="button"
+                    data-index={i}
                     data-active={i === active}
                     onPointerMove={() => setActive(i)}
                     onClick={() => pick(token)}
