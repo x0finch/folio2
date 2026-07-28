@@ -602,7 +602,9 @@ async function assertTokenOwned(db: Db, userId: string, tokenId: string): Promis
 export interface ManualHolding {
   id: string;
   symbol: string;
-  unitPrice: number; // = tokens.self_price;没声明过按 0(展示层退回市场价)
+  // = tokens.self_price。**空 = 从没声明过**,不塌成 0 —— 那会把「没填」和「填了个 0」
+  // 混成一件事,而展示那一侧要靠这个区分决定退不退到账本价(见 fallbackUnitPrice)。
+  unitPrice: number | null;
   // 这个 token 在 `namer` 那里的 **ref 整条**;那位命名者还没认出它 → null。
   //
   // **给整条,不给右半边。** 原来这里回的是裸的上游 id(`usd-coin`),于是每个调用方都得把 ref
@@ -647,7 +649,7 @@ export async function listManualHoldingsByAccount(
   return rows.map((r) => ({
     id: r.id,
     symbol: r.symbol,
-    unitPrice: r.selfPrice ?? 0,
+    unitPrice: r.selfPrice,
     // 两列 → 整条串,拼法归文法(`token_refs` 按两列存正是为了这个,见 ADR 0022)。
     ref: r.localName === null ? null : formatTokenRef({ namer, localName: r.localName }),
   }));
@@ -835,7 +837,7 @@ export interface ManualBatchPlan {
   // 本批要**声明**的持仓:`id` 已经是 mint 出来的 `tokens.id`(app 层在提交前认好币),
   // 这里只落用户自己的两个字段。原来这叫 `newTokens` 并且真的插一张 `manual_token` 行 ——
   // 币的身份现在归参考层,不再由手记这条路创建。
-  declare: { id: string; symbol: string; unitPrice: number }[];
+  declare: { id: string; symbol: string; unitPrice: number | null }[];
   activities: {
     tokenId: string;
     kind: ManualActivityKind;

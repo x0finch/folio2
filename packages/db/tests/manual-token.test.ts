@@ -169,11 +169,14 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     expect([row.unitPrice, row.ref]).toEqual([2.5, `${NAMER}/issued:foo-token`]); // ref 没被动
   });
 
-  it("没声明过单价 → 读出 0(展示层退回市场价)", async () => {
+  // **null,不是 0。** 「没填过」和「填了个 0」必须分得开 —— 展示那一侧要靠它决定退不退到
+  // 账本里的成交价(见 apps/web 的 fallbackUnitPrice)。塌成 0 就把这个信号毁了,
+  // 结果是手敲的币一行没有价(实测 SSGS)。
+  it("没声明过单价 → 读出 null(不是 0)", async () => {
     const acc = await manualAccount(USER_A);
     const btc = await mintToken(USER_A, "BTC");
     await recordManualActivity(env, USER_A, acc.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
-    expect((await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER))[0].unitPrice).toBe(0);
+    expect((await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER))[0].unitPrice).toBeNull();
   });
 
   // 清空一个持仓 = 删该账户对它的活动。**代币行留着** —— 它带着上游 ref / 名字 / 图,

@@ -12,8 +12,8 @@ const TS = 1_700_000_000_000;
 const tok = (over: Partial<CredsToken>): CredsToken => ({
   id: "tk-BTC",
   symbol: "BTC",
-  unitPrice: 100,
   amount: 2,
+  fallbackPrice: 100,
   ref: null,
   ...over,
 });
@@ -26,12 +26,17 @@ describe("buildManualSnapshot", () => {
   });
 
   it("有现价 → usdValue = amount × 现价(不用 unitPrice)", () => {
-    const snap = buildManualSnapshot("acc1", [tok({ amount: 2, unitPrice: 100 })], [130], TS);
+    const snap = buildManualSnapshot("acc1", [tok({ amount: 2, fallbackPrice: 100 })], [130], TS);
     expect(snap.balances[0].usdValue).toBe(260); // 2 × 130,忽略 unitPrice 100
   });
 
-  it("无现价 → 回退 amount × unitPrice", () => {
-    const snap = buildManualSnapshot("acc1", [tok({ amount: 3, unitPrice: 50 })], [undefined], TS);
+  it("无现价 → 回退 amount × fallbackPrice", () => {
+    const snap = buildManualSnapshot(
+      "acc1",
+      [tok({ amount: 3, fallbackPrice: 50 })],
+      [undefined],
+      TS,
+    );
     expect(snap.balances[0].usdValue).toBe(150); // 3 × 50
   });
 
@@ -65,7 +70,7 @@ describe("buildManualSnapshot", () => {
   it("totalUsd = 各余额 usdValue 之和", () => {
     const snap = buildManualSnapshot(
       "acc1",
-      [tok({ amount: 2 }), tok({ symbol: "ETH", amount: 5, unitPrice: 10 })],
+      [tok({ amount: 2 }), tok({ symbol: "ETH", amount: 5, fallbackPrice: 10 })],
       [130, undefined],
       TS,
     );
@@ -129,8 +134,8 @@ describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
             {
               id: "tk-BTC",
               symbol: "BTC",
-              unitPrice: 30000,
               amount: 0.5,
+              fallbackPrice: 30000,
               ref: "src/issued:bitcoin",
             },
           ],

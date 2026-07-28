@@ -29,7 +29,7 @@ export function runningOk(activities: DerivableActivity[]): boolean {
 export interface Token {
   id: string;
   symbol: string;
-  unitPrice: number;
+  unitPrice: number | null; // 声明价;空 = 从没声明过(见 manual-activity 的 fallbackUnitPrice)
   activities: DerivableActivity[];
 }
 
@@ -64,7 +64,7 @@ export type ResolvedDraft = Omit<BatchDraft, "token"> & { token: ResolvedTokenIn
 interface PlannedToken {
   id: string;
   symbol: string;
-  unitPrice: number;
+  unitPrice: number | null; // 空 = 用户没声明价(如实写 NULL,不写一个假的 0)
 }
 interface PlannedActivity {
   tokenId: string;
@@ -102,13 +102,13 @@ export function planManualBatch(existing: Token[], drafts: ResolvedDraft[]): Bat
       // 这个币在本账户还没有持仓 → 声明一条。**id 不在这里造** —— 它是 mint 给的,
       // 所以同一个币被两条草稿引用时天然落到同一条持仓上。
       //
-      // **没有市价可用时,声明价取这笔活动的成交价。** 录活动那个表单没有单独的「单价」字段:
-      // 选了币的话前端会异步回填市价,而**手敲的币没有票 → 那次回填压根不跑 → unitPrice 恒 0**。
-      // 于是用户明明填了 888,那个币却按 0 估值、列表里一行没有价(实测 SSGS)。
-      // 他给出的唯一一个数字就是成交价,而「市场不认识这个币时用用户声明的价」正是 self_price 的用途。
-      // 只在**新声明**时兜,且只在没有市价时 —— 已有持仓的声明价不该被一笔活动改掉。
-      const unitPrice = d.token.unitPrice > 0 ? d.token.unitPrice : (d.price ?? 0);
-      token = { id: d.token.tokenId, symbol: d.token.symbol, unitPrice, activities: [] };
+      // **不在这里替用户声明价格。** 一度试过「没有市价就把这笔活动的成交价抄进 self_price」——
+      // 那是把派生值存进字段:第一笔活动抄了个 0 进去之后,后面记多少笔都治不好它(实测 SSGS)。
+      // 「市场不认识这个币时它值多少」由展示那一侧**每次算**(见 manual-activity 的 fallbackUnitPrice),
+      // 不落库。这里只忠实记录用户声明了什么 —— 没声明就是 null。
+      // 客户端给 0 的意思是「没填」(录活动那个表单没有单价字段)→ 如实存 NULL,不存一个假的 0。
+      const declared = d.token.unitPrice > 0 ? d.token.unitPrice : null;
+      token = { id: d.token.tokenId, symbol: d.token.symbol, unitPrice: declared, activities: [] };
       working.push(token);
       declare.push({ id: token.id, symbol: token.symbol, unitPrice: token.unitPrice });
     }

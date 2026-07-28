@@ -322,7 +322,9 @@ describe("情景:手动加币的另两条写路径", () => {
   });
 
   // **本轮的 bug**:这条路的表单没有单价字段,只有成交价。
-  it("③ 记一笔活动顺带现建币:没有单价字段 → 声明价取成交价,而不是 0", async () => {
+  // 注意查处 ② 的期望:`self_price` **保持 NULL** —— 不把成交价抄进去(抄进去就成了存派生值,
+  // 第一笔抄了个 0 之后谁都治不好它)。价是展示时按链算出来的。
+  it("③ 记一笔活动顺带现建币:库里不存价,屏幕上按成交价算", async () => {
     const accountId = await manualAccount();
     const res = await addManualActivities(USER, accountId, [
       {
@@ -337,13 +339,38 @@ describe("情景:手动加币的另两条写路径", () => {
     expect(res.ok).toBe(true);
 
     const [row] = (await tokenRows()).filter((r) => r.symbol === "SSGS");
-    expect(row.selfPrice).toBe(888); // ② 库里:声明价落下来了,不是 0
+    expect(row.selfPrice).toBeNull(); // ② 库里:没声明过就是 NULL,不抄成交价进去
     const h = holdingOf(await overview(), "SSGS");
     expect(h?.totalValue).toBe(22 * 888); // ③ 屏幕:22 × 888,不是 $0
     expect(h?.token.logo).toBeUndefined(); // 手敲的币没有图
   });
 
-  it("③ 已有持仓的声明价**不被**一笔活动改掉(只有新声明才兜)", async () => {
+  // 用户第二次加币的情形:再记一笔更新的成交价 → 当下值跟着走(以前它卡在 0 上治不好)。
+  it("③ 再记一笔更新的成交价 → 当下值跟着最近那一笔", async () => {
+    const accountId = await manualAccount();
+    const base = Date.now();
+    await addManualActivities(USER, accountId, [
+      {
+        token: { symbol: "SSGS", unitPrice: 0 },
+        kind: "add",
+        amount: 22,
+        occurredAt: base,
+        price: 888,
+      },
+    ]);
+    await addManualActivities(USER, accountId, [
+      {
+        token: { symbol: "SSGS", unitPrice: 0 },
+        kind: "add",
+        amount: 1,
+        occurredAt: base + 1,
+        price: 999,
+      },
+    ]);
+    expect(holdingOf(await overview(), "SSGS")?.totalValue).toBe(23 * 999);
+  });
+
+  it("③ 声明过价 → 声明优先,不被后来的成交价盖掉(否则编辑框白填)", async () => {
     const accountId = await manualAccount();
     await createToken(USER, { accountId, symbol: "SSGS", unitPrice: 888, amount: 10 });
     await addManualActivities(USER, accountId, [

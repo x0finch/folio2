@@ -18,7 +18,7 @@ export function buildManualSnapshot(
   takenAt: number,
 ): SnapshotWithBalances {
   const balances = tokens.map((t, i) => {
-    const price = prices[i] ?? t.unitPrice;
+    const price = prices[i] ?? t.fallbackPrice ?? 0;
     return {
       id: `manual:${accountId}:${i}`,
       snapshotId: `manual:${accountId}`,

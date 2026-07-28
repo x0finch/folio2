@@ -37,22 +37,59 @@ export function deriveAmount(activities: DerivableActivity[]): number {
 export interface ManualTokenDef {
   id: string;
   symbol: string;
-  unitPrice: number;
+  // 用户**声明**的单价(`tokens.self_price`)。空 = 从没声明过。
+  // `<= 0` 与空同义:声明成 0 的币恒等于 $0,那不是一个价格,是「没填」。
+  unitPrice: number | null;
   ref?: string | null;
 }
 export interface CredsToken {
   id: string;
   symbol: string;
-  unitPrice: number;
   amount: number;
+  // 市场不认识这个币时用哪个价 —— 已经按下面那条链解好了。空 = 一个来源都没有。
+  fallbackPrice: number | null;
   ref: string | null;
 }
-export function projectToken(token: ManualTokenDef, activities: DerivableActivity[]): CredsToken {
+
+/**
+ * 市场不认识这个币时,一单位值多少。**声明优先,再退到账本。**
+ *
+ * 与历史曲线那条链(`manual-history` 的 `tokenPriceAt`)**顺序相反,这是故意的**:
+ *   · 过去某一点上,一笔真实成交比今天的判断更可信 → 那里账本优先
+ *   · 当下值必须让抽屉里的编辑表单说得上话 —— 它写的就是 `self_price`,而它补的那笔 `set`
+ *     活动**不带价**。声明不优先的话,你在编辑框填的数永远被旧成交价盖掉,那个框就是装饰。
+ *
+ * 别把两处「统一」成一条链 —— 那正是会把编辑框废掉的改法。
+ */
+export function fallbackUnitPrice(
+  declared: number | null | undefined,
+  activities: readonly (DerivableActivity & { price?: number | null })[],
+): number | null {
+  if (declared != null && declared > 0) return declared;
+  // 账本里最近一条**记了价**的活动(同 occurredAt 用 createdAt 决胜,与折叠数量同口径)。
+  let best: (DerivableActivity & { price?: number | null }) | undefined;
+  for (const a of activities) {
+    if (a.price == null) continue;
+    if (
+      !best ||
+      a.occurredAt > best.occurredAt ||
+      (a.occurredAt === best.occurredAt && a.createdAt > best.createdAt)
+    ) {
+      best = a;
+    }
+  }
+  return best?.price ?? null;
+}
+
+export function projectToken(
+  token: ManualTokenDef,
+  activities: readonly (DerivableActivity & { price?: number | null })[],
+): CredsToken {
   return {
     id: token.id,
     symbol: token.symbol,
-    unitPrice: token.unitPrice,
-    amount: deriveAmount(activities),
+    amount: deriveAmount([...activities]),
+    fallbackPrice: fallbackUnitPrice(token.unitPrice, activities),
     ref: token.ref ?? null,
   };
 }

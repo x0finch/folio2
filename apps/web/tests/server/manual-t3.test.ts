@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { type CredsToken, deriveAmount } from "../../src/lib/manual-activity";
+import { deriveAmount } from "../../src/lib/manual-activity";
 import { db } from "../../src/lib/server/internal/db";
 import {
   addManualActivities,
@@ -37,13 +37,13 @@ beforeEach(resetUser);
 
 // 某 manual 账户已物化的 creds.tokens(投影)。
 // 该账户的持仓:定义 + 账本折叠出的数量(compute-on-read;#203 之后没有 creds.tokens 那个投影了)。
-async function readTokens(accountId: string): Promise<CredsToken[]> {
+async function readTokens(accountId: string) {
   const rows = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
   return Promise.all(
     rows.map(async (r) => ({
       id: r.id,
       symbol: r.symbol,
-      unitPrice: r.unitPrice,
+      unitPrice: r.unitPrice, // 声明价(可空)
       amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
       ref: r.ref,
     })),

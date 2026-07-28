@@ -230,7 +230,7 @@ async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
 interface ManualAccountDetailToken {
   id: string;
   symbol: string;
-  unitPrice: number;
+  unitPrice: number | null; // 声明价;空 = 从没声明过(编辑表单据此显示空而不是 0)
   ticket: string | null;
   amount: number;
 }
@@ -263,7 +263,8 @@ export async function loadManualAccountDetail(
 async function loadHistoryTokens(userId: string, accountId: string): Promise<HistoryToken[]> {
   return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
     id: token.id,
-    unitPrice: token.unitPrice,
+    // 曲线那条链的第 ③ 档要一个数 —— 没声明过按 0(它自己会先试账本价,见 tokenPriceAt)。
+    unitPrice: token.unitPrice ?? 0,
     recognized: token.ref != null,
     activities,
   }));
