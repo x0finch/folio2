@@ -26,25 +26,26 @@ export function deriveAmount(activities: DerivableActivity[]): number {
   return amount;
 }
 
-// token 定义 + 其活动账本 → creds.tokens 的一项(物化投影,ADR 0017)。
-// amount = deriveAmount(activities);identifier 为空(null/undefined)时**省略该键** —— provider 的 tokens
-// validator 视 identifier 为可选 string(置 null 会被拒)。纯逻辑,materializeManualCreds 逐 token 调。
+// token 定义 + 其活动账本 → 合成持仓的一项。amount = deriveAmount(activities)。
+//
+// `ref` 是这个 token 在当前命名者那里的 ref 整条,由 db 直接给(见 `ManualHolding.ref`)——
+// 本模块**只搬运**:不拼、不拆、不知道命名者是谁。认不出来 → null。
 export interface ManualTokenDef {
   symbol: string;
   unitPrice: number;
-  identifier?: string | null;
+  ref?: string | null;
 }
 export interface CredsToken {
   symbol: string;
   unitPrice: number;
   amount: number;
-  identifier?: string;
+  ref: string | null;
 }
 export function projectToken(token: ManualTokenDef, activities: DerivableActivity[]): CredsToken {
   return {
     symbol: token.symbol,
     unitPrice: token.unitPrice,
     amount: deriveAmount(activities),
-    ...(token.identifier ? { identifier: token.identifier } : {}),
+    ref: token.ref ?? null,
   };
 }

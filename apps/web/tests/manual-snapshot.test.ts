@@ -13,6 +13,7 @@ const tok = (over: Partial<CredsToken>): CredsToken => ({
   symbol: "BTC",
   unitPrice: 100,
   amount: 2,
+  ref: null,
   ...over,
 });
 
@@ -39,11 +40,18 @@ describe("buildManualSnapshot", () => {
     expect(snap.balances[0].metaJson).toBeNull();
   });
 
-  it("有 identifier → coingecko/issued:<id>;无 → manual/custom:<名字>(恒有值)", () => {
-    const withId = buildManualSnapshot("acc1", [tok({ identifier: "Bitcoin" })], [undefined], TS);
-    expect(withId.balances[0].tokenRef).toBe("coingecko/issued:bitcoin");
-    const noId = buildManualSnapshot("acc1", [tok({ identifier: undefined })], [undefined], TS);
-    expect(noId.balances[0].tokenRef).toBe("manual/custom:BTC");
+  // 有 ref → **原样搬**(本文件不认识上游,所以夹具用一个随便的命名者就够);
+  // 没有 → 手记自己命名,`custom:` 说明这个名字没有背书。
+  it("有 ref → 原样搬;无 → manual/custom:<名字>(恒有值)", () => {
+    const withRef = buildManualSnapshot(
+      "acc1",
+      [tok({ ref: "src/issued:bitcoin" })],
+      [undefined],
+      TS,
+    );
+    expect(withRef.balances[0].tokenRef).toBe("src/issued:bitcoin");
+    const noRef = buildManualSnapshot("acc1", [tok({ ref: null })], [undefined], TS);
+    expect(noRef.balances[0].tokenRef).toBe("manual/custom:BTC");
   });
 
   it("totalUsd = 各余额 usdValue 之和", () => {
@@ -108,7 +116,7 @@ describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
         "m1",
         buildManualSnapshot(
           "m1",
-          [{ symbol: "BTC", unitPrice: 30000, amount: 0.5, identifier: "bitcoin" }],
+          [{ symbol: "BTC", unitPrice: 30000, amount: 0.5, ref: "src/issued:bitcoin" }],
           [bakedPrice],
           TS,
         ),

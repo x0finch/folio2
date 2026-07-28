@@ -1,5 +1,4 @@
 import type { SnapshotWithBalances } from "@folio/db";
-import { cgkRef } from "@folio/oracle";
 import { tokenRef } from "@folio/oracle-ref";
 import type { CredsToken } from "./manual-activity";
 import { MANUAL_CONNECTOR_ID } from "./manual-connector";
@@ -10,7 +9,7 @@ import { MANUAL_CONNECTOR_ID } from "./manual-connector";
 //
 // `prices` 与 `tokens` 按序对齐:第 i 项为该 token 的**现价**(USD/单位,cache-only enrich 取)。
 // 有现价 → usdValue = amount × 现价(实时盯市,与今天一致);取不到(undefined)→ 回退 amount × unitPrice。
-// `selfPrice=null` 保持盯市语义(与 manual 现行为一致);identifier → coingecko: tokenRef(与 manualProvider 同源)。
+// `selfPrice=null` 保持盯市语义(与 manual 现行为一致)。
 // takenAt 仅作占位(UI 对 manual 显「实时」而非同步时间,见 ADR 0018 T2 实施细化);id/snapshotId 为合成占位。
 export function buildManualSnapshot(
   accountId: string,
@@ -30,13 +29,10 @@ export function buildManualSnapshot(
       // 手记的持仓不在任何链上 —— 平台是 manual,**不是** ref 左半边的 coingecko。
       platform: MANUAL_CONNECTOR_ID,
       selfPrice: null,
-      // 选了币 → `coingecko/issued:<id>`(小写 kebab 归一在 `cgkRef` 里,即生产者侧);
-      // 没选 → `manual/custom:<名字>`(没有注册表背书,见 manual-connector.ts)。
-      // tokenRef 恒有值(Balance 契约必填)。这条 ref 喂的是**旧参考层**的 enrich,所以命名者
-      // 走旧 oracle 的 `cgkRef` —— #203 手记并入 tokens 之后这一整段跟着退场。
-      tokenRef: t.identifier
-        ? cgkRef(t.identifier)
-        : tokenRef.custom(MANUAL_CONNECTOR_ID, t.symbol),
+      // 选了币 → db 给的那条 ref **原样搬**(上游是谁、它的 id 长什么样,本文件不需要知道);
+      // 没选 → `manual/custom:<名字>`,手记自己就是命名者,而这个名字没有注册表背书
+      // (见 manual-connector.ts)。tokenRef 恒有值(Balance 契约必填)。
+      tokenRef: t.ref ?? tokenRef.custom(MANUAL_CONNECTOR_ID, t.symbol),
       // 手记的当下值是**现造的**(ADR 0018:不写快照),所以没有落库时 mint 出来的 token_id。
       // 读端遇到空 token_id 会退回 tokenRef 那条路。手记并入 tokens 是 #203 的事。
       tokenId: null,

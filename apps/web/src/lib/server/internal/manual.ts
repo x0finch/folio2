@@ -6,7 +6,6 @@ import type {
   SnapshotWithBalances,
 } from "@folio/db";
 import { dayBucketOf } from "@folio/oracle";
-import { tokenRef } from "@folio/oracle-ref";
 import { tokenTicket } from "@folio/oracle2";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
@@ -26,11 +25,6 @@ import { NAMER, oracleFor } from "./oracle2";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;
-
-// db 出来的 `identifier` 是「当前命名者对这个币的叫法」—— **裸标识,不带文法标记**
-// (见 `listManualHoldingsByAccount`)。拼回完整 ref 才能编成票,而它恒是 `issued` 那一支:
-// identifier 有值就意味着上游发了这个标识,合约地址与手敲的名字都读不成 identifier。
-const refOfIdentifier = (identifier: string) => tokenRef.issued(NAMER, identifier);
 
 // **物化没有了**(#203)。原来每次写完都要把「各 token 定义 + 折叠出的 amount」写回
 // `creds.tokens`,给 manual provider 读。四个值全部落进真表之后 provider 只是「app 写进 JSON 列 →
@@ -91,7 +85,7 @@ export async function createManualAccount(userId: string, label: string, tokens:
 // 该用户**活跃** manual 账户的 (accountId → tokens)。injector 与预热共用。
 // **compute-on-read**(ADR 0018/0019):amount 由账本 deriveAmount 现算,不读物化的 creds.tokens ——
 // 否则「当下」净值(主页/账户/抽屉头 + 抽屉曲线末点实时覆写)会卡在上次物化的 stale 值(如删掉更早活动后
-// creds 未及重物化,或折叠语义修正前写入的旧值)。定义(symbol/unitPrice/identifier)取自 manual_token 行。
+// creds 未及重物化,或折叠语义修正前写入的旧值)。定义(symbol/unitPrice/ref)取自 `tokens` 那一行。
 // 排除归档:归档 manual 不进 enrich 门(injector 的调用点已按 active 过滤)→ 预热/刷价也不该碰它,三门同源。
 async function manualTokensByAccount(
   userId: string,
@@ -229,7 +223,8 @@ export async function loadManualAccountDetail(
       id: token.id,
       symbol: token.symbol,
       unitPrice: token.unitPrice,
-      ticket: token.identifier ? tokenTicket.encode(refOfIdentifier(token.identifier)) : null,
+      // 票就是那条 ref 原样编一层 —— app 不拼、不拆、不知道命名者是谁(见 ManualHolding.ref)。
+      ticket: token.ref ? tokenTicket.encode(token.ref) : null,
       amount: deriveAmount(activities),
     })),
     activities: perToken.flatMap(({ activities }) => activities),
@@ -244,7 +239,7 @@ async function loadHistoryTokens(userId: string, accountId: string): Promise<His
   return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
     id: token.id,
     unitPrice: token.unitPrice,
-    recognized: token.identifier != null,
+    recognized: token.ref != null,
     activities,
   }));
 }
@@ -336,7 +331,7 @@ export async function createToken(userId: string, input: CreateTokenInput) {
 
 // 改 token 定义;若目标 amount 与当前 derived 不同 → 追加一条 set 活动对齐(播 set 语义,grill Q13)→ 物化。
 // **accountId 由调用方带** —— token 不再自带账户(一个币可以被多个手记账户持有)。
-// 改「这其实是哪个币」(identifier)不在这里:那是改绑,与自动补链的合并同一条路径,另开一票。
+// 改「这其实是哪个币」(那条上游 ref)不在这里:那是改绑,与自动补链的合并同一条路径,另开一票。
 export async function updateToken(userId: string, input: UpdateTokenInput): Promise<void> {
   await db.setManualHoldingDef(userId, input.tokenId, {
     symbol: input.symbol.trim().toUpperCase(),

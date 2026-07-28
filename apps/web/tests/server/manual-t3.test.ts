@@ -44,7 +44,7 @@ async function readTokens(accountId: string): Promise<CredsToken[]> {
       symbol: r.symbol,
       unitPrice: r.unitPrice,
       amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
-      ...(r.identifier ? { identifier: r.identifier } : {}),
+      ref: r.ref,
     })),
   );
 }
@@ -76,7 +76,7 @@ describe("createToken", () => {
       ["BTC", 1],
       ["ETH", 2],
     ]);
-    expect(tokens.find((t) => t.symbol === "ETH")?.identifier).toBe("ethereum");
+    expect(tokens.find((t) => t.symbol === "ETH")?.ref).toBe(`${NAMER}/issued:ethereum`);
   });
 });
 

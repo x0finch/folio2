@@ -47,10 +47,10 @@ async function manualAccount(userId: string) {
 }
 
 // 建一个该用户的代币行(生产路径是 mint;这里直接用 store,本文件不测认币)。
-// `refs` 给了就顺带挂上 —— identifier 是从 `token_refs` 里当前命名者那条读出来的。
-async function mintToken(userId: string, symbol: string, localName?: string): Promise<string> {
+// `coinId` 给了就顺带挂上那条 ref —— 持仓的 `ref` 就是从 `token_refs` 里当前命名者那行读出来的。
+async function mintToken(userId: string, symbol: string, coinId?: string): Promise<string> {
   const store = createUserTokenStore(env, { userId, namer: NAMER });
-  return store.create({ symbol }, localName ? [`${NAMER}/issued:${localName}`] : []);
+  return store.create({ symbol }, coinId ? [`${NAMER}/issued:${coinId}`] : []);
 }
 
 // 同上,但那条 ref 的 localName 由调用方整段给(用来喂非 `issued` 的形状)。
@@ -64,7 +64,7 @@ async function mintTokenWithRef(
 }
 
 describe("手记持仓(= tokens 行 + 账本)", () => {
-  it("持有哪些币由账本推出来;identifier 读当前命名者那条 ref", async () => {
+  it("持有哪些币由账本推出来;ref 读当前命名者那一行", async () => {
     const acc = await manualAccount(USER_A);
     const btc = await mintToken(USER_A, "BTC", "bitcoin");
     const eth = await mintToken(USER_A, "ETH");
@@ -83,17 +83,17 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     });
 
     const rows = await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER);
-    expect(rows.map((r) => [r.symbol, r.unitPrice, r.identifier])).toEqual([
-      ["BTC", 64000, "bitcoin"],
-      ["ETH", 3200, null],
+    // **整条 ref,不是右半边。** 只回 `bitcoin` 的话,每个调用方都得把 `<命名者>/issued:` 补回去,
+    // 而补它就得知道当前上游是谁 —— 那件事就此漏出 db(#227 评审)。
+    expect(rows.map((r) => [r.symbol, r.unitPrice, r.ref])).toEqual([
+      ["BTC", 64000, `${NAMER}/issued:bitcoin`],
+      ["ETH", 3200, null], // 这位命名者还没认出它
     ]);
   });
 
-  // `identifier` 问的是「用户选了哪个币」,答案只能来自**命名者发的标识**(`issued:`)。
-  // 同一个命名者下的别的形状不是那个答案:合约地址是链上寻址,`custom:` 是用户自己敲的名字
-  // (ADR 0020 第四轮)。这两种要读出 null,而不是把标记后面那段当 coin id 交出去 ——
-  // 交出去的话调用方会拿它去问上游,或者拼成票发给前端。
-  it("identifier 只认 `issued:` 那一支 —— 合约地址与手敲的名字都读成 null", async () => {
+  // 右半边是什么形状,`ref` 都照原样给整条 —— 本层不替调用方判「这算不算用户选的币」。
+  // 挡「拿手敲的名字去认币」是 mint 的活(`hasTrustedSymbol`,ADR 0020 第四轮),不是这个投影的。
+  it("ref 不挑形状:合约地址与手敲的名字也照样给整条", async () => {
     const acc = await manualAccount(USER_A);
     const onchain = await mintTokenWithRef(USER_A, "SCAM", "contract:0xdead");
     const typed = await mintTokenWithRef(USER_A, "MYCOIN", "custom:MYCOIN");
@@ -106,9 +106,9 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     }
 
     const rows = await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER);
-    expect(rows.map((r) => [r.symbol, r.identifier])).toEqual([
-      ["SCAM", null],
-      ["MYCOIN", null],
+    expect(rows.map((r) => [r.symbol, r.ref])).toEqual([
+      ["SCAM", `${NAMER}/contract:0xdead`],
+      ["MYCOIN", `${NAMER}/custom:MYCOIN`],
     ]);
   });
 
@@ -166,7 +166,7 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     await setManualHoldingDef(env, USER_A, foo, { symbol: "FOO", unitPrice: 2.5 });
 
     const [row] = await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER);
-    expect([row.unitPrice, row.identifier]).toEqual([2.5, "foo-token"]); // ref 没被动
+    expect([row.unitPrice, row.ref]).toEqual([2.5, `${NAMER}/issued:foo-token`]); // ref 没被动
   });
 
   it("没声明过单价 → 读出 0(展示层退回市场价)", async () => {

@@ -30,7 +30,7 @@ async function holdings(accountId: string) {
     rows.map(async (r) => ({
       symbol: r.symbol,
       unitPrice: r.unitPrice,
-      identifier: r.identifier,
+      ref: r.ref,
       amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
     })),
   );
@@ -50,7 +50,7 @@ describe("createManualAccount (D1 round-trip)", () => {
     const account = await createManualAccount(USER, "My BTC", tokens);
 
     expect(await holdings(account.id)).toEqual([
-      { symbol: "BTC", unitPrice: 64000, identifier: "bitcoin", amount: 0.5 },
+      { symbol: "BTC", unitPrice: 64000, ref: `${NAMER}/issued:bitcoin`, amount: 0.5 },
     ]);
   });
 
@@ -62,7 +62,7 @@ describe("createManualAccount (D1 round-trip)", () => {
       JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", ticket: ticketOf("bitcoin") }]),
     );
     const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
-    expect(h.identifier).toBe("bitcoin"); // 哪怕 symbol 敲成了 XBT
+    expect(h.ref).toBe(`${NAMER}/issued:bitcoin`); // 哪怕 symbol 敲成了 XBT
   });
 
   // 票是从网络上来的 —— 解不开就当没选币,退回按 symbol 认,而不是崩掉或写脏。
@@ -73,7 +73,7 @@ describe("createManualAccount (D1 round-trip)", () => {
       JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", ticket: "!!!not-base64!!!" }]),
     );
     const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
-    expect(h.identifier).toBeNull(); // 上游不认识 XBT → 自己一行,没有上游命名
+    expect(h.ref).toBeNull(); // 上游不认识 XBT → 自己一行,没有上游命名
   });
 
   // creds 里那个 `tokens` 字段只剩一个空壳:它是**创建表单的入参声明**,不再是持仓的存储处。
@@ -90,14 +90,14 @@ describe("createManualAccount (D1 round-trip)", () => {
     await expect(createManualAccount(USER, "M", "[]")).rejects.toThrow();
   });
 
-  it("没选币 → identifier 为空(上游没认出来),照样落库", async () => {
+  it("没选币 → 那位命名者那条 ref 为空(没认出来),照样落库", async () => {
     const account = await createManualAccount(
       USER,
       "M",
       JSON.stringify([{ symbol: "PRIVATETOKEN", unitPrice: "3200", amount: "2" }]),
     );
     expect(await holdings(account.id)).toEqual([
-      { symbol: "PRIVATETOKEN", unitPrice: 3200, identifier: null, amount: 2 },
+      { symbol: "PRIVATETOKEN", unitPrice: 3200, ref: null, amount: 2 },
     ]);
   });
 });
@@ -124,7 +124,7 @@ describe("createAccountFor (manual: shared validate + dispatch)", () => {
       ]),
     });
     expect(await holdings(account.id)).toEqual([
-      { symbol: "BTC", unitPrice: 64000, identifier: "bitcoin", amount: 0.5 },
+      { symbol: "BTC", unitPrice: 64000, ref: `${NAMER}/issued:bitcoin`, amount: 0.5 },
     ]);
   });
 });
