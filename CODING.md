@@ -92,6 +92,17 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
     刷新函数整个绕开;③ 只 seed 了新层 → bug 在旧层。**写完一条用例,把被测那行改坏,确认它会红。**
   - 对抗性夹具:要验「不该借别人的东西」,就得先把那个「别人」摆上去,而且**摆在它真会去问的那一层**。
 
+- **测试的默认配置要便宜,贵的那档得靠结构自己选中。** apps/web 45 个测试文件里 44 个测的是纯算术,
+  却每个都先搭一套假浏览器(jsdom 凭空造 `document`/`window`,**每文件**约 0.5s)——25 秒的环境准备,
+  换 0.4 秒的断言。修法不是「记得给纯逻辑测试标 node」,而是让**文件后缀**决定环境:
+  `*.test.ts` → node,`*.test.tsx` → jsdom(见 `apps/web/vitest.config.ts`)。组件测试要渲染 JSX、
+  本来就得是 `.tsx`,所以贵的那档**只能被结构选中**,不依赖谁记得写 `// @vitest-environment` 那行注释。
+  同理别把它「简化」回单个 `environment` 设置 —— 那等于把默认值调回贵的那档。
+  - **这类错误的形状:默认值贵,而且贵在没人看的地方。** 总时长只报「7 秒」,不报这里面 25 秒(累计)
+    是在造环境。所以读 vitest 的 `Duration` 那行要看**括号里的分解**(transform / setup / import /
+    tests / environment):哪一项跟 `tests` 差一个数量级,那儿就是问题。1121 个测试真正跑断言只有 5 秒,
+    别一看慢就想删用例 —— **先看时间花在哪,再决定砍什么**。
+
 ## Debugging
 
 - **Don't guess — add logs + make a real request.** Add structured logs (`getLogger(["folio", …])`), run the real path, read the actual error/`cause`, then fix the root cause.
