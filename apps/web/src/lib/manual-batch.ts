@@ -29,7 +29,6 @@ export function runningOk(activities: DerivableActivity[]): boolean {
 export interface Token {
   id: string;
   symbol: string;
-  unitPrice: number | null; // 声明价;空 = 从没声明过(见 manual-activity 的 fallbackUnitPrice)
   activities: DerivableActivity[];
 }
 
@@ -64,7 +63,6 @@ export type ResolvedDraft = Omit<BatchDraft, "token"> & { token: ResolvedTokenIn
 interface PlannedToken {
   id: string;
   symbol: string;
-  unitPrice: number | null; // 空 = 用户没声明价(如实写 NULL,不写一个假的 0)
 }
 interface PlannedActivity {
   tokenId: string;
@@ -106,11 +104,9 @@ export function planManualBatch(existing: Token[], drafts: ResolvedDraft[]): Bat
       // 那是把派生值存进字段:第一笔活动抄了个 0 进去之后,后面记多少笔都治不好它(实测 SSGS)。
       // 「市场不认识这个币时它值多少」由展示那一侧**每次算**(见 manual-activity 的 fallbackUnitPrice),
       // 不落库。这里只忠实记录用户声明了什么 —— 没声明就是 null。
-      // 客户端给 0 的意思是「没填」(录活动那个表单没有单价字段)→ 如实存 NULL,不存一个假的 0。
-      const declared = d.token.unitPrice > 0 ? d.token.unitPrice : null;
-      token = { id: d.token.tokenId, symbol: d.token.symbol, unitPrice: declared, activities: [] };
+      token = { id: d.token.tokenId, symbol: d.token.symbol, activities: [] };
       working.push(token);
-      declare.push({ id: token.id, symbol: token.symbol, unitPrice: token.unitPrice });
+      declare.push({ id: token.id, symbol: token.symbol });
     }
     activities.push({
       tokenId: token.id,

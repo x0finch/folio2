@@ -30,7 +30,6 @@ async function holdings(accountId: string) {
   return Promise.all(
     rows.map(async (r) => ({
       symbol: r.symbol,
-      unitPrice: r.unitPrice,
       ref: r.ref,
       amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
     })),
@@ -51,7 +50,7 @@ describe("createManualAccount (D1 round-trip)", () => {
     const account = await createManualAccount(USER, "My BTC", tokens);
 
     expect(await holdings(account.id)).toEqual([
-      { symbol: "BTC", unitPrice: 64000, ref: `${NAMER}/issued:bitcoin`, amount: 0.5 },
+      { symbol: "BTC", ref: `${NAMER}/issued:bitcoin`, amount: 0.5 },
     ]);
   });
 
@@ -114,9 +113,7 @@ describe("createManualAccount (D1 round-trip)", () => {
       "M",
       JSON.stringify([{ symbol: "PRIVATETOKEN", unitPrice: "3200", amount: "2" }]),
     );
-    expect(await holdings(account.id)).toEqual([
-      { symbol: "PRIVATETOKEN", unitPrice: 3200, ref: null, amount: 2 },
-    ]);
+    expect(await holdings(account.id)).toEqual([{ symbol: "PRIVATETOKEN", ref: null, amount: 2 }]);
   });
 });
 
@@ -142,7 +139,7 @@ describe("createAccountFor (manual: shared validate + dispatch)", () => {
       ]),
     });
     expect(await holdings(account.id)).toEqual([
-      { symbol: "BTC", unitPrice: 64000, ref: `${NAMER}/issued:bitcoin`, amount: 0.5 },
+      { symbol: "BTC", ref: `${NAMER}/issued:bitcoin`, amount: 0.5 },
     ]);
   });
 });

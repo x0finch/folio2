@@ -19,7 +19,6 @@ const act = (o: Partial<DerivableActivity>): DerivableActivity => ({
 const mkToken = (o: Partial<Token>): Token => ({
   id: "t1",
   symbol: "BTC",
-  unitPrice: 1,
   activities: [],
   ...o,
 });
@@ -102,7 +101,8 @@ describe("planManualBatch", () => {
     const plan = planManualBatch([], [draft({ amount: 3 })]);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
-    expect(plan.declare).toEqual([{ id: "tk_btc", symbol: "BTC", unitPrice: 100 }]);
+    // 声明只带 symbol —— 价不在这里,它进的是活动那一侧(价只有账本一个来源)。
+    expect(plan.declare).toEqual([{ id: "tk_btc", symbol: "BTC" }]);
     expect(plan.activities[0].tokenId).toBe("tk_btc");
   });
 

@@ -43,7 +43,6 @@ async function readTokens(accountId: string) {
     rows.map(async (r) => ({
       id: r.id,
       symbol: r.symbol,
-      unitPrice: r.unitPrice, // 声明价(可空)
       amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
       ref: r.ref,
     })),
@@ -93,11 +92,13 @@ describe("updateToken", () => {
       amount: 3, // 从 1 → 3
     });
     const tokens = await readTokens(account.id);
-    expect(tokens[0].unitPrice).toBe(65000);
     expect(tokens[0].amount).toBe(3);
-    // 应追加了一条对齐 set(原开仓 set + 对齐 set = 2 条）。
+    // 应追加了一条对齐 set(原开仓 set + 对齐 set = 2 条),**而改的价落在那一笔上** ——
+    // 价只有账本一个来源,所以「改单价」这件事必须在账本里有落点。
     const activities = await db.listManualActivityByToken(USER, account.id, btc.id);
-    expect(activities.filter((a) => a.kind === "set")).toHaveLength(2);
+    const sets = activities.filter((a) => a.kind === "set");
+    expect(sets).toHaveLength(2);
+    expect(sets.at(-1)?.price).toBe(65000);
   });
 
   it("目标 amount 不变 → 不追加活动", async () => {

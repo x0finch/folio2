@@ -10,7 +10,7 @@ import { tokenRef } from "@folio/oracle-ref";
 import { tokenTicket } from "@folio/oracle2";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
-import { deriveAmount, projectToken } from "../../manual-activity";
+import { deriveAmount, fallbackUnitPrice, projectToken } from "../../manual-activity";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "../../manual-batch";
 import { isManual, MANUAL_CONNECTOR_ID } from "../../manual-connector";
 import {
@@ -90,13 +90,15 @@ export async function createManualAccount(userId: string, label: string, tokens:
     creds: JSON.stringify({ tokens: "[]" }),
   });
   const tokenId = await mintHolding(userId, first);
-  await db.setManualHoldingDef(userId, tokenId, {
-    symbol: first.symbol.trim().toUpperCase(),
-    unitPrice: Number(first.unitPrice),
-  });
+  await db.setManualHoldingDef(userId, tokenId, { symbol: first.symbol.trim().toUpperCase() });
+  // **开仓价进账本,不进 tokens 那一列。** 表单里那个「单价」就是开仓那一刻的价 —— 它是账本里
+  // 的第一笔事实,不是一条压过后续所有成交的声明。原来它写进 `tokens.self_price`,于是同一个
+  // 「这个币值多少」有两个存处,而其中一个可以存歪(实测:SSGS 卡在 0 上治不好)。
+  // 现在价只有账本一个来源(见 manual-activity 的 fallbackUnitPrice)。
   await db.recordManualActivity(userId, account.id, tokenId, {
     kind: "set",
     amount: Number(first.amount),
+    price: Number(first.unitPrice) > 0 ? Number(first.unitPrice) : null,
     occurredAt: Date.now(),
   });
   return account;
@@ -214,7 +216,6 @@ async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
   return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
     id: token.id,
     symbol: token.symbol,
-    unitPrice: token.unitPrice,
     activities,
   }));
 }
@@ -247,7 +248,9 @@ export async function loadManualAccountDetail(
     tokens: perToken.map(({ token, activities }) => ({
       id: token.id,
       symbol: token.symbol,
-      unitPrice: token.unitPrice,
+      // 抽屉要的是「这个币现在按多少算」—— 给**解好的**那个价(账本最近一笔),
+      // 而不是某一列的原始值。市场认识它时展示侧仍会用市价覆盖。
+      unitPrice: fallbackUnitPrice(activities),
       // 票就是那条 ref 原样编一层 —— app 不拼、不拆、不知道命名者是谁(见 ManualHolding.ref)。
       ticket: token.ref ? tokenTicket.encode(token.ref) : null,
       amount: deriveAmount(activities),
@@ -263,8 +266,9 @@ export async function loadManualAccountDetail(
 async function loadHistoryTokens(userId: string, accountId: string): Promise<HistoryToken[]> {
   return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
     id: token.id,
-    // 曲线那条链的第 ③ 档要一个数 —— 没声明过按 0(它自己会先试账本价,见 tokenPriceAt)。
-    unitPrice: token.unitPrice ?? 0,
+    // 曲线那条链的第 ③ 档(平线兜底)。账本成了唯一来源之后 ② 已经覆盖了它能覆盖的一切,
+    // 这一档只剩「连一笔带价的活动都没有」那种情况 → 没有别的可退,0。
+    unitPrice: 0,
     recognized: token.ref != null,
     activities,
   }));
@@ -343,13 +347,12 @@ export async function loadManualHistoryRows(
 // set 语义又重置基线,所以「再加一次」等于「把数量改成这个」。
 export async function createToken(userId: string, input: CreateTokenInput) {
   const tokenId = await mintHolding(userId, input);
-  await db.setManualHoldingDef(userId, tokenId, {
-    symbol: input.symbol.trim().toUpperCase(),
-    unitPrice: input.unitPrice,
-  });
+  await db.setManualHoldingDef(userId, tokenId, { symbol: input.symbol.trim().toUpperCase() });
+  // 开仓价进账本(与 createManualAccount 同口径)—— 价只有账本一个来源。
   await db.recordManualActivity(userId, input.accountId, tokenId, {
     kind: "set",
     amount: input.amount,
+    price: input.unitPrice > 0 ? input.unitPrice : null,
     occurredAt: Date.now(),
   });
   return { id: tokenId };
@@ -361,15 +364,17 @@ export async function createToken(userId: string, input: CreateTokenInput) {
 export async function updateToken(userId: string, input: UpdateTokenInput): Promise<void> {
   await db.setManualHoldingDef(userId, input.tokenId, {
     symbol: input.symbol.trim().toUpperCase(),
-    unitPrice: input.unitPrice,
   });
   const current = deriveAmount(
     await db.listManualActivityByToken(userId, input.accountId, input.tokenId),
   );
+  // 数量变了才补一笔对齐的 set;**它带上传进来的价** —— 不然改价这件事没有落点
+  // (价只有账本一个来源,而这个函数是抽屉里改 token 的那条路)。
   if (Math.abs(current - input.amount) > AMOUNT_EPS) {
     await db.recordManualActivity(userId, input.accountId, input.tokenId, {
       kind: "set",
       amount: input.amount,
+      price: input.unitPrice > 0 ? input.unitPrice : null,
       occurredAt: Date.now(),
     });
   }

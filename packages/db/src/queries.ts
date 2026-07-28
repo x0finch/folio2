@@ -602,9 +602,6 @@ async function assertTokenOwned(db: Db, userId: string, tokenId: string): Promis
 export interface ManualHolding {
   id: string;
   symbol: string;
-  // = tokens.self_price。**空 = 从没声明过**,不塌成 0 —— 那会把「没填」和「填了个 0」
-  // 混成一件事,而展示那一侧要靠这个区分决定退不退到账本价(见 fallbackUnitPrice)。
-  unitPrice: number | null;
   // 这个 token 在 `namer` 那里的 **ref 整条**;那位命名者还没认出它 → null。
   //
   // **给整条,不给右半边。** 原来这里回的是裸的上游 id(`usd-coin`),于是每个调用方都得把 ref
@@ -629,7 +626,6 @@ export async function listManualHoldingsByAccount(
     .select({
       id: tokens.id,
       symbol: tokens.symbol,
-      selfPrice: tokens.selfPrice,
       localName: tokenRefs.localName,
       since: sql<number>`min(${manualActivity.occurredAt})`,
     })
@@ -649,7 +645,6 @@ export async function listManualHoldingsByAccount(
   return rows.map((r) => ({
     id: r.id,
     symbol: r.symbol,
-    unitPrice: r.selfPrice,
     // 两列 → 整条串,拼法归文法(`token_refs` 按两列存正是为了这个,见 ADR 0022)。
     ref: r.localName === null ? null : formatTokenRef({ namer, localName: r.localName }),
   }));
@@ -661,13 +656,14 @@ export async function setManualHoldingDef(
   env: DbEnv,
   userId: string,
   tokenId: string,
-  input: { symbol?: string; unitPrice?: number },
+  // **只改 symbol。** 单价不在这里 —— 「这个币值多少」只有账本一个来源(每笔活动的 price),
+  // 而 `tokens.self_price` 从此没有写者(迁移 0016 把存量搬进账本并清空了它)。
+  input: { symbol?: string },
 ): Promise<void> {
   const db = getDb(env);
   await assertTokenOwned(db, userId, tokenId);
   const set: Record<string, unknown> = {};
   if (input.symbol !== undefined) set.symbol = input.symbol;
-  if (input.unitPrice !== undefined) set.selfPrice = input.unitPrice;
   if (Object.keys(set).length === 0) return;
   await db
     .update(tokens)
@@ -837,7 +833,7 @@ export interface ManualBatchPlan {
   // 本批要**声明**的持仓:`id` 已经是 mint 出来的 `tokens.id`(app 层在提交前认好币),
   // 这里只落用户自己的两个字段。原来这叫 `newTokens` 并且真的插一张 `manual_token` 行 ——
   // 币的身份现在归参考层,不再由手记这条路创建。
-  declare: { id: string; symbol: string; unitPrice: number | null }[];
+  declare: { id: string; symbol: string }[];
   activities: {
     tokenId: string;
     kind: ManualActivityKind;
@@ -879,7 +875,7 @@ export async function commitManualBatch(
     ...plan.declare.map((t) =>
       db
         .update(tokens)
-        .set({ symbol: t.symbol, selfPrice: t.unitPrice })
+        .set({ symbol: t.symbol })
         .where(and(eq(tokens.id, t.id), eq(tokens.userId, userId))),
     ),
     ...plan.activities.map((a, i) =>

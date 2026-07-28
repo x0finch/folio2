@@ -52,32 +52,28 @@ describe("deriveAmount", () => {
 
 // projectToken:token 定义 + 活动账本 → creds.tokens 的一项(物化投影,ADR 0017)。
 describe("projectToken", () => {
-  it("amount = deriveAmount(activities);声明价解成 fallbackPrice", () => {
-    const t = projectToken({ id: "tk1", symbol: "BTC", unitPrice: 64000 }, [
-      a("set", 1, 1),
-      a("add", 0.5, 2),
-    ]);
-    expect(t).toEqual({ id: "tk1", symbol: "BTC", amount: 1.5, fallbackPrice: 64000, ref: null });
+  it("amount = deriveAmount(activities);没带价的活动 → fallbackPrice 为 null", () => {
+    const t = projectToken({ id: "tk1", symbol: "BTC" }, [a("set", 1, 1), a("add", 0.5, 2)]);
+    expect(t).toEqual({ id: "tk1", symbol: "BTC", amount: 1.5, fallbackPrice: null, ref: null });
   });
 
   // ref 原样搬运 —— 本模块不看里面写了什么(命名者是谁、id 长什么样都不是它的事)。
   it("carries the ref through untouched", () => {
-    const t = projectToken(
-      { id: "tk1", symbol: "BTC", unitPrice: 64000, ref: "src/issued:bitcoin" },
-      [a("set", 2, 1)],
-    );
+    const t = projectToken({ id: "tk1", symbol: "BTC", ref: "src/issued:bitcoin" }, [
+      a("set", 2, 1),
+    ]);
     expect(t).toEqual({
       id: "tk1",
       symbol: "BTC",
       amount: 2,
-      fallbackPrice: 64000,
+      fallbackPrice: null,
       ref: "src/issued:bitcoin",
     });
   });
 
   it("no ref (that namer hasn't identified it) → null, never undefined", () => {
-    const t = projectToken({ id: "tk9", symbol: "FOO", unitPrice: 0.25, ref: null }, []);
-    expect(t).toEqual({ id: "tk9", symbol: "FOO", amount: 0, fallbackPrice: 0.25, ref: null });
+    const t = projectToken({ id: "tk9", symbol: "FOO", ref: null }, []);
+    expect(t).toEqual({ id: "tk9", symbol: "FOO", amount: 0, fallbackPrice: null, ref: null });
   });
 });
 
@@ -89,29 +85,25 @@ describe("fallbackUnitPrice", () => {
     price,
   });
 
-  it("声明过 → 用声明的,哪怕账本里有更新的成交价", () => {
-    expect(fallbackUnitPrice(999, [priced(500, 10)])).toBe(999);
+  it("取账本里最近一条记了价的活动", () => {
+    expect(fallbackUnitPrice([priced(888, 10), priced(999, 20)])).toBe(999);
   });
 
-  it("没声明过 → 用账本里最近一条记了价的活动", () => {
-    expect(fallbackUnitPrice(null, [priced(888, 10), priced(999, 20)])).toBe(999);
-  });
-
-  // 这一条就是 SSGS:第一笔活动把 0 写进了 self_price,于是「没填」被读成「填了 0」。
-  it("声明成 0 与没声明同义 —— 照样退到账本", () => {
-    expect(fallbackUnitPrice(0, [priced(888, 10)])).toBe(888);
+  // 开仓价现在也是账本的一笔(加账户表单填的那个),所以「最新」天然包含它。
+  it("只有开仓那一笔 → 就用它", () => {
+    expect(fallbackUnitPrice([priced(777, 10)])).toBe(777);
   });
 
   it("没记价的活动不参与(price 为空的跳过)", () => {
-    expect(fallbackUnitPrice(null, [priced(null, 30), priced(888, 10)])).toBe(888);
+    expect(fallbackUnitPrice([priced(null, 30), priced(888, 10)])).toBe(888);
   });
 
   it("同一时刻两笔 → 后录的那笔胜出(与折叠数量同口径)", () => {
-    expect(fallbackUnitPrice(null, [priced(1, 10, 1), priced(2, 10, 2)])).toBe(2);
+    expect(fallbackUnitPrice([priced(1, 10, 1), priced(2, 10, 2)])).toBe(2);
   });
 
-  it("一个来源都没有 → null(展示层据此显示无价,而不是 $0 的假确定)", () => {
-    expect(fallbackUnitPrice(null, [])).toBeNull();
-    expect(fallbackUnitPrice(0, [priced(null, 10)])).toBeNull();
+  it("一笔带价的都没有 → null(展示层据此显示无价,而不是 $0 的假确定)", () => {
+    expect(fallbackUnitPrice([])).toBeNull();
+    expect(fallbackUnitPrice([priced(null, 10)])).toBeNull();
   });
 });

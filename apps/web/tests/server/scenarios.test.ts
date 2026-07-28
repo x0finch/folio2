@@ -195,12 +195,19 @@ describe("情景:手动加币,在下拉里选了 USDC", () => {
     expect(outbound).toEqual([]); // 写路径不出网
   });
 
-  it("② 数据:symbol 归一大写、用户填的单价落在 self_price、市场价此刻还空着", async () => {
+  // 价**不落 tokens 那一列** —— 表单里填的开仓价进的是账本的第一笔(价只有账本一个来源)。
+  it("② 数据:symbol 归一大写;开仓价落在账本上,tokens 那两列都空着", async () => {
     await add();
     const [row] = await tokenRows();
     expect(row.symbol).toBe("USDC"); // 不是票里那个小写的 coin id
-    expect(row.selfPrice).toBe(777);
+    expect(row.selfPrice).toBeNull();
     expect(row.unitPrice).toBeNull(); // 上游还没刷过
+    const { results } = await env.DB.prepare(
+      "SELECT kind, price FROM manual_activity WHERE token_id = ?",
+    )
+      .bind(row.id)
+      .all<{ kind: string; price: number | null }>();
+    expect(results).toEqual([{ kind: "set", price: 777 }]);
   });
 
   it("③ 展示:上游刷过之后,用**市价**和上游的名字/图", async () => {
@@ -241,11 +248,15 @@ describe("情景:手动加币,不选、自己敲 USDC", () => {
     expect(await refRows(rows[0].id)).toEqual([{ namer: "manual", localName: "custom:USDC" }]);
   });
 
-  it("② 数据:self_price 是用户填的,market 价永远空(没有上游可问)", async () => {
+  it("② 数据:开仓价在账本上,market 价永远空(没有上游可问)", async () => {
     await add();
     const [row] = await tokenRows();
-    expect(row.selfPrice).toBe(777);
+    expect(row.selfPrice).toBeNull();
     expect(row.unitPrice).toBeNull();
+    const { results } = await env.DB.prepare("SELECT price FROM manual_activity WHERE token_id = ?")
+      .bind(row.id)
+      .all<{ price: number | null }>();
+    expect(results).toEqual([{ price: 777 }]);
   });
 
   // #223 的核心承诺,而且是从**屏幕**这一侧验的 —— 上一版只在写路径上成立,显示照旧按市价盯。
@@ -370,7 +381,10 @@ describe("情景:手动加币的另两条写路径", () => {
     expect(holdingOf(await overview(), "SSGS")?.totalValue).toBe(23 * 999);
   });
 
-  it("③ 声明过价 → 声明优先,不被后来的成交价盖掉(否则编辑框白填)", async () => {
+  // **价只有账本一个来源**,所以「最新那笔」永远说话 —— 哪怕它比开仓价低得多。
+  // 这条替掉了先前那版「声明价优先、不被成交价盖掉」的用例:那时开仓价存在 `tokens.self_price`,
+  // 于是同一件事两处存;现在开仓价就是账本的第一笔,后面的成交价是后面几笔,答案恒取最新。
+  it("③ 开仓价也只是账本的一笔 —— 后来的成交价照样接管", async () => {
     const accountId = await manualAccount();
     await createToken(USER, { accountId, symbol: "SSGS", unitPrice: 888, amount: 10 });
     await addManualActivities(USER, accountId, [
@@ -379,12 +393,12 @@ describe("情景:手动加币的另两条写路径", () => {
         kind: "add",
         amount: 1,
         occurredAt: Date.now() + 1,
-        price: 1, // 这次成交价很低,但它不该改掉声明价
+        price: 1,
       },
     ]);
     const [row] = (await tokenRows()).filter((r) => r.symbol === "SSGS");
-    expect(row.selfPrice).toBe(888);
-    expect(holdingOf(await overview(), "SSGS")?.totalValue).toBe(11 * 888);
+    expect(row.selfPrice).toBeNull(); // 库里那一列没人写了
+    expect(holdingOf(await overview(), "SSGS")?.totalValue).toBe(11 * 1);
   });
 });
 

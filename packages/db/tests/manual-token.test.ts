@@ -68,8 +68,8 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     const acc = await manualAccount(USER_A);
     const btc = await mintToken(USER_A, "BTC", "bitcoin");
     const eth = await mintToken(USER_A, "ETH");
-    await setManualHoldingDef(env, USER_A, btc, { symbol: "BTC", unitPrice: 64000 });
-    await setManualHoldingDef(env, USER_A, eth, { symbol: "ETH", unitPrice: 3200 });
+    await setManualHoldingDef(env, USER_A, btc, { symbol: "BTC" });
+    await setManualHoldingDef(env, USER_A, eth, { symbol: "ETH" });
     // BTC 先开仓 → 序在前(按「什么时候开始持有它」排)。
     await recordManualActivity(env, USER_A, acc.id, btc, {
       kind: "set",
@@ -85,9 +85,9 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     const rows = await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER);
     // **整条 ref,不是右半边。** 只回 `bitcoin` 的话,每个调用方都得把 `<命名者>/issued:` 补回去,
     // 而补它就得知道当前上游是谁 —— 那件事就此漏出 db(#227 评审)。
-    expect(rows.map((r) => [r.symbol, r.unitPrice, r.ref])).toEqual([
-      ["BTC", 64000, `${NAMER}/issued:bitcoin`],
-      ["ETH", 3200, null], // 这位命名者还没认出它
+    expect(rows.map((r) => [r.symbol, r.ref])).toEqual([
+      ["BTC", `${NAMER}/issued:bitcoin`],
+      ["ETH", null], // 这位命名者还没认出它
     ]);
   });
 
@@ -159,24 +159,16 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     expect(rows.every((r) => r.tokenId === btc && r.accountId === acc.id)).toBe(true);
   });
 
-  it("改声明只动 symbol 与单价 —— 名字 / 图 / 上游 ref 归参考层,手记不覆盖", async () => {
+  // 改声明**只动 symbol**:名字 / 图 / 上游 ref 归参考层,而**单价压根不在这里** ——
+  // 「这个币值多少」只有账本一个来源(每笔活动的 price),`tokens.self_price` 已没有写者。
+  it("改声明只动 symbol —— 名字 / 图 / 上游 ref 归参考层,手记不覆盖", async () => {
     const acc = await manualAccount(USER_A);
     const foo = await mintToken(USER_A, "FOO", "foo-token");
     await recordManualActivity(env, USER_A, acc.id, foo, { kind: "set", amount: 1, occurredAt: 1 });
-    await setManualHoldingDef(env, USER_A, foo, { symbol: "FOO", unitPrice: 2.5 });
+    await setManualHoldingDef(env, USER_A, foo, { symbol: "FOO" });
 
     const [row] = await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER);
-    expect([row.unitPrice, row.ref]).toEqual([2.5, `${NAMER}/issued:foo-token`]); // ref 没被动
-  });
-
-  // **null,不是 0。** 「没填过」和「填了个 0」必须分得开 —— 展示那一侧要靠它决定退不退到
-  // 账本里的成交价(见 apps/web 的 fallbackUnitPrice)。塌成 0 就把这个信号毁了,
-  // 结果是手敲的币一行没有价(实测 SSGS)。
-  it("没声明过单价 → 读出 null(不是 0)", async () => {
-    const acc = await manualAccount(USER_A);
-    const btc = await mintToken(USER_A, "BTC");
-    await recordManualActivity(env, USER_A, acc.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
-    expect((await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER))[0].unitPrice).toBeNull();
+    expect([row.symbol, row.ref]).toEqual(["FOO", `${NAMER}/issued:foo-token`]); // ref 没被动
   });
 
   // 清空一个持仓 = 删该账户对它的活动。**代币行留着** —— 它带着上游 ref / 名字 / 图,
@@ -223,9 +215,7 @@ describe("归属:两道闸各自都得挡住", () => {
     await recordManualActivity(env, USER_A, acc.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
 
     await expect(listManualHoldingsByAccount(env, USER_B, acc.id, NAMER)).rejects.toThrow();
-    await expect(
-      setManualHoldingDef(env, USER_B, btc, { symbol: "X", unitPrice: 9 }),
-    ).rejects.toThrow();
+    await expect(setManualHoldingDef(env, USER_B, btc, { symbol: "X" })).rejects.toThrow();
     await expect(detachManualHolding(env, USER_B, acc.id, btc)).rejects.toThrow();
     expect(await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER)).toHaveLength(1);
   });

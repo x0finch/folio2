@@ -37,9 +37,6 @@ export function deriveAmount(activities: DerivableActivity[]): number {
 export interface ManualTokenDef {
   id: string;
   symbol: string;
-  // 用户**声明**的单价(`tokens.self_price`)。空 = 从没声明过。
-  // `<= 0` 与空同义:声明成 0 的币恒等于 $0,那不是一个价格,是「没填」。
-  unitPrice: number | null;
   ref?: string | null;
 }
 export interface CredsToken {
@@ -52,21 +49,20 @@ export interface CredsToken {
 }
 
 /**
- * 市场不认识这个币时,一单位值多少。**声明优先,再退到账本。**
+ * 市场不认识这个币时,一单位值多少 —— **账本里最近一条记了价的活动**。
  *
- * 与历史曲线那条链(`manual-history` 的 `tokenPriceAt`)**顺序相反,这是故意的**:
- *   · 过去某一点上,一笔真实成交比今天的判断更可信 → 那里账本优先
- *   · 当下值必须让抽屉里的编辑表单说得上话 —— 它写的就是 `self_price`,而它补的那笔 `set`
- *     活动**不带价**。声明不优先的话,你在编辑框填的数永远被旧成交价盖掉,那个框就是装饰。
+ * 「这个币值多少」只有一个来源:账本。开仓价是账本的第一笔,后续成交价是后面几笔,答案恒取最新。
+ * 原来还有第二个来源(`tokens.self_price`,加账户表单直接写),于是同一件事两处存、其中一处
+ * 可以存歪 —— SSGS 那行卡在 0 上、后面记多少笔都治不好,就是这么来的。那一列现在没有写者
+ * (存量由迁移 0016 搬进账本)。
  *
- * 别把两处「统一」成一条链 —— 那正是会把编辑框废掉的改法。
+ * 与历史曲线那条链(`manual-history` 的 `tokenPriceAt`)一致:那里的 ② 就是这一档,
+ * 只是它按任意 T 取、这里按 now 取。
  */
 export function fallbackUnitPrice(
-  declared: number | null | undefined,
   activities: readonly (DerivableActivity & { price?: number | null })[],
 ): number | null {
-  if (declared != null && declared > 0) return declared;
-  // 账本里最近一条**记了价**的活动(同 occurredAt 用 createdAt 决胜,与折叠数量同口径)。
+  // 最近一条**记了价**的活动(同 occurredAt 用 createdAt 决胜,与折叠数量同口径)。
   let best: (DerivableActivity & { price?: number | null }) | undefined;
   for (const a of activities) {
     if (a.price == null) continue;
@@ -89,7 +85,7 @@ export function projectToken(
     id: token.id,
     symbol: token.symbol,
     amount: deriveAmount([...activities]),
-    fallbackPrice: fallbackUnitPrice(token.unitPrice, activities),
+    fallbackPrice: fallbackUnitPrice(activities),
     ref: token.ref ?? null,
   };
 }
