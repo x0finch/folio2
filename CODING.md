@@ -81,6 +81,17 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 - **Test-first**: adapters get tests against recorded fixtures before impl; parsing logic gets golden tests. Tests in `tests/` beside `src/`, fixtures in `tests/fixtures/`.
 - Vendored beUI primitives are not unit-tested — validate integration (build emits their classes); test our own logic (compositions, hooks, pure functions).
 
+- **情景测试:按用户走一遍,每个情景查三处。** 单元测试各测一个函数,挡不住「跨边界传错值」——
+  边界两侧各自的用例都绿,而中间那一跳没人看。所以每条用户可见的路径要有一条从头走到尾的测试,
+  查这三处:**① 入库了吗(几行、挂了哪些 ref) ② 库里的值对不对 ③ 屏幕上那一行是什么**。
+  参考 `apps/web/tests/server/scenarios.test.ts`(手动选币 / 手动输入 / 链上同步)。
+  - **驱动真链路**:真 D1、真编排器、真展示组装(照抄 server fn 那几行,不复刻业务逻辑 ——
+    复刻的话顺序一改测试还是绿的)。只打桩「取数」与「出网」。
+  - **夹具绕过被测代码 = 断言是空的。** 这是本仓真实漏掉三个 bug 的原因,每次都是同一个形状:
+    ① 缓存是空的 → 「我们没去问」和「问了没查到」长得一样;② 手写 `putInfo` 直塞 → 把要测的
+    刷新函数整个绕开;③ 只 seed 了新层 → bug 在旧层。**写完一条用例,把被测那行改坏,确认它会红。**
+  - 对抗性夹具:要验「不该借别人的东西」,就得先把那个「别人」摆上去,而且**摆在它真会去问的那一层**。
+
 ## Debugging
 
 - **Don't guess — add logs + make a real request.** Add structured logs (`getLogger(["folio", …])`), run the real path, read the actual error/`cause`, then fix the root cause.
