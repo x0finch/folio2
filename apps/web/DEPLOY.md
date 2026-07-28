@@ -54,6 +54,14 @@ pnpm run deploy
 
 **Custom domain:** bind a Workers Custom Domain in the Cloudflare dashboard, then use that domain for `BETTER_AUTH_URL` in step 6.
 
+Worth doing even if the workers.dev URL is fine for you: **the Cache API only works on a custom
+domain.** On `*.workers.dev` every `cache.put`/`cache.match` is a silent no-op ([Cloudflare
+docs](https://developers.cloudflare.com/workers/runtime-apis/cache/)) — the cache in front of the
+token catalogue and token search (`src/lib/server/tokens.ts`) never hits, so both fall through to
+CoinGecko more often than they need to. Nothing breaks; it just costs extra upstream calls. To
+check which side you are on, look for `edge cache: hit` in `wrangler tail` — only ever seeing
+`edge cache: stored` means it is not in effect.
+
 ## Verify
 
 1. Open the URL → **sign up** → you land on the overview.
