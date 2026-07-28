@@ -12,14 +12,15 @@ concurrency:
 # One job, measured. Everything here is CPU-bound compilation on a 2-core
 # runner, so spreading it over more machines is the only lever on wall clock —
 # but Actions bills each job rounded UP to the whole minute, and that rounding
-# is what decides the trade here. Measured on this repo:
+# is what decides the trade here. Measured on this repo (in-job seconds):
 #
-#   one job        ~137s wall  →  3 billed minutes
-#   two jobs        129s wall  →  4 billed minutes  (checks 39s→1, test 125s→3)
+#   one job         145s  →  3 billed minutes
+#   two jobs        125s  →  4 billed minutes  (checks 39s→1, test 125s→3)
 #
-# Splitting bought 8s of wall clock for a whole extra minute, because `test`
-# lands at ~125s — five seconds past the 2-minute line, so it rounds to 3
-# either way. Not worth it.
+# Splitting bought ~20s of wall clock for a whole extra minute, because `test`
+# alone lands at ~125s — five seconds past the 2-minute line, so it rounds to
+# 3 either way. Not worth it. (Both figures are single runs; runner setup
+# swings ±10s between runs, so treat the 20s as the noise floor, not a target.)
 #
 # Before splitting again, the thing to attack is `test` (~97s), which is the
 # only slow step left since TypeScript 7 made tsc cheap (typecheck: 63s → 9s).
