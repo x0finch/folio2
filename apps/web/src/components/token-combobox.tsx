@@ -1,27 +1,35 @@
-import type { TokenInfo } from "@folio/oracle";
+import { TOP_TOKENS_LIMIT } from "@folio/oracle2";
 import { cn, Input } from "@folio/ui";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { matchSegments } from "../lib/highlight";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
-import { listTokens, listTopTokens } from "../lib/server/tokens";
+import { listTokenCatalogue, listTokens } from "../lib/server/tokens";
+import type { TokenOption } from "../lib/token-option";
+import { mergeSearchResults, needsRemoteSearch, searchCatalogue } from "../lib/token-search";
 
 // manual 选币的内联 Combobox(A4,替代 TokenPicker 的全屏 CommandPalette 浮层):点触发器**就地下推**展开
 // 搜索框 + 结果列表(在文档流内、把下方字段推下去,不叠第二层遮罩)。接口与 TokenPicker 对齐(value/onChange/
 // onManual),故可直接替入 ManualFields。命中子串高亮走 matchSegments(design token,禁硬编码色)。
-// 默认列 topTokens,输入远程搜 searchTokens(仅展开时启用,竞态由 query key 天然处理),搜不到可转手动录入。
 // 开合平滑:结果层 Framer 动 height:auto+opacity,承载它的 MorphingModal 面板内容驱动、自然 reflow 跟随。
 // 键盘:↑↓ 移高亮、Enter 选中/转手动、Esc 收起;点组件外亦收起(均保留当前值,不改选)。
+//
+// **搜索先在本地目录里做。** 组件一挂载(= 记账/加账户模态框打开)就预取整份目录(市值前 1000,
+// 约 35KB),默认列取它的前 N 条,敲字则就地筛(见 lib/token-search.ts)—— 零往返、无防抖、
+// 一个字符就出结果。只有本地凑不够(用户在找长尾币)才防抖打一次上游 /search,回来合并进本地那几条。
+// 搜不到可转手动录入。
 
 // 同 beUI 的 EASE_OUT 动效 token 曲线(@folio/ui 未导出 lib/ease → 本地镜像同一 cubic-bezier)。
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
 
-// 搜索节流:停顿 250ms 才发,且需 ≥2 字符(否则退回 topTokens 默认列,不打 CGK /search)。
+// 上游搜索的节流:停顿 250ms 才发,且需 ≥2 字符。本地筛不受这两条约束(它不出网)。
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_LEN = 2;
+// 目录多久算旧。它本身是市值前 1000 的快照,分钟级的变化对选币毫无意义。
+const CATALOGUE_STALE_MS = 10 * 60 * 1000;
 
 function Highlighted({ text, query }: { text: string; query: string }) {
   return (
@@ -42,7 +50,7 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 }
 
 // 一行代币:logo + symbol + name(触发器与结果行共用)。
-function TokenRow({ token, query }: { token: TokenInfo; query?: string }) {
+function TokenRow({ token, query }: { token: TokenOption; query?: string }) {
   return (
     <>
       {token.logo ? (
@@ -69,31 +77,63 @@ export function TokenCombobox({
   onChange,
   onManual,
 }: {
-  value: TokenInfo | null;
-  onChange: (token: TokenInfo | null) => void;
+  value: TokenOption | null;
+  onChange: (token: TokenOption | null) => void;
   onManual: (query: string) => void;
 }) {
   const t = useTranslations("Accounts");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  // 防抖 + 最小长度:CGK /search 慢且限流(见 server/tokens),故停顿 250ms 后才搜,且 <2 字符不搜(退回
-  // topTokens 默认列,读本地 store 快)—— 把逐键的上游请求压成「停顿后一次」。
-  const debounced = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
-  const search = debounced.length >= MIN_SEARCH_LEN ? debounced : "";
+  const search = query.trim();
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const tokensQuery = useQuery({
-    queryKey: ["tokens", search],
-    queryFn: () => (search ? listTokens({ data: { query: search } }) : listTopTokens({ data: {} })),
-    enabled: open,
-    placeholderData: keepPreviousData,
+  // 目录:**挂载即预取**(不等下拉展开)—— 组件出现的时刻就是模态框打开的时刻,用户还要点一下
+  // 才会展开选币,那段时间足够这 35KB 落地。
+  const catalogueQuery = useQuery({
+    queryKey: ["token-catalogue"],
+    queryFn: () => listTokenCatalogue(),
+    staleTime: CATALOGUE_STALE_MS,
+  });
+  const catalogue = useMemo(() => catalogueQuery.data ?? [], [catalogueQuery.data]);
+
+  // 本地筛:随每次按键即时重算,不出网。
+  const local = useMemo(() => searchCatalogue(catalogue, search), [catalogue, search]);
+
+  // 上游只在「目录已落地 + 敲完了(防抖落定)+ 够长 + 本地凑不够」时才问一次。
+  //   · `settled` 让 local 与发出去的词恒是同一个 —— 否则会拿上一个词的本地命中数决定这一个词。
+  //   · 等目录落地是因为它没到时 local 恒为空 —— 那会把「手快的用户」全都推去打上游。
+  //     只等到它**有结论**为止(成功或失败),失败时照样能搜,不然目录一挂搜索就整个瘫了。
+  const debounced = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
+  const settled = debounced === search;
+  const wantRemote =
+    settled &&
+    !catalogueQuery.isLoading &&
+    search.length >= MIN_SEARCH_LEN &&
+    needsRemoteSearch(local);
+  const remoteQuery = useQuery({
+    queryKey: ["token-search", search],
+    queryFn: () => listTokens({ data: { query: search } }),
+    enabled: open && wantRemote,
     staleTime: 60_000,
   });
-  const tokens = tokensQuery.data ?? [];
 
-  const pick = (token: TokenInfo) => {
+  // 空输入 → 目录前 N 条(默认列);有输入 → 本地在前,上游补的接在后面。
+  const tokens = useMemo(
+    () =>
+      search
+        ? mergeSearchResults(local, remoteQuery.data ?? [])
+        : catalogue.slice(0, TOP_TOKENS_LIMIT),
+    [search, local, remoteQuery.data, catalogue],
+  );
+  // 转圈只在「手上一条都没有、还在等」时出现:本地有命中就直接显示,上游那趟在后台补。
+  const isLoading =
+    tokens.length === 0 && (catalogueQuery.isLoading || (wantRemote && remoteQuery.isPending));
+  const isError =
+    tokens.length === 0 && (catalogueQuery.isError || (wantRemote && remoteQuery.isError));
+
+  const pick = (token: TokenOption) => {
     onChange(token);
     setOpen(false);
     setQuery("");
@@ -116,10 +156,14 @@ export function TokenCombobox({
   }, [open]);
 
   // 键盘高亮行滚入可视区(列表内滚动,不惊动外层)。active 作触发器,不在 body 直接读。
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run to scroll the newly-active row into view
+  //
+  // **按下标取,不扫 `[data-active="true"]`。** 后者拿的是 DOM 顺序里的第一个,而 DOM 里
+  // 混进过僵尸行(重复 key 导致 React 卸载了却没摘掉的节点),它们身上的标记停在死掉那一刻 ——
+  // 扫到僵尸就把列表滚回了顶部。根因(目录里的重复币)已在上游修掉,但依赖 DOM 顺序本身就脆。
+  // (顺带:改成按下标之后 effect 真的读了 `active`,依赖数组自洽,原先那条 lint 豁免不再需要。)
   useEffect(() => {
     listRef.current
-      ?.querySelector<HTMLElement>('[data-active="true"]')
+      ?.querySelector<HTMLElement>(`[data-index="${active}"]`)
       ?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
@@ -201,7 +245,7 @@ export function TokenCombobox({
               ref={listRef}
               className="max-h-52 overflow-y-auto rounded-xl border border-border bg-card p-1"
             >
-              {tokensQuery.isError ? (
+              {isError ? (
                 <div className="flex flex-col items-center gap-2 px-3 py-6 text-center text-destructive text-sm">
                   <CircleAlertIcon className="size-5" />
                   {t("searchFailed")}
@@ -209,8 +253,9 @@ export function TokenCombobox({
               ) : tokens.length > 0 ? (
                 tokens.map((token, i) => (
                   <button
-                    key={token.ref}
+                    key={token.ticket}
                     type="button"
+                    data-index={i}
                     data-active={i === active}
                     onPointerMove={() => setActive(i)}
                     onClick={() => pick(token)}
@@ -222,7 +267,7 @@ export function TokenCombobox({
                     <TokenRow token={token} query={search} />
                   </button>
                 ))
-              ) : tokensQuery.isLoading ? (
+              ) : isLoading ? (
                 <div className="flex items-center justify-center px-3 py-6 text-muted-foreground">
                   <Loader2Icon className="size-5 animate-spin" aria-label={t("searching")} />
                 </div>

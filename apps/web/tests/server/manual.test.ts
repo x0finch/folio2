@@ -1,4 +1,6 @@
 import { env } from "cloudflare:test";
+import { formatTokenRef } from "@folio/oracle-ref";
+import { tokenTicket } from "@folio/oracle2";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";
 import { createAccountFor } from "../../src/lib/server/internal/create-account";
@@ -22,6 +24,11 @@ async function resetUser(): Promise<void> {
 
 beforeEach(resetUser);
 
+// 选币下拉发给前端的那张票 = base64url 编过的 tokenRef。测试里现编,与生产同一个编码器 ——
+// 手写 base64 字面量的话,编码规则一改测试就静默失配。
+const ticketOf = (coinId: string) =>
+  tokenTicket.encode(formatTokenRef({ namer: NAMER, localName: coinId }));
+
 // 该账户的持仓(定义 + 账本折叠出的数量)。#203 起这是唯一事实源 —— 没有 creds.tokens 那个投影了。
 async function holdings(accountId: string) {
   const rows = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
@@ -44,7 +51,7 @@ async function credsOf(accountId: string): Promise<Record<string, unknown>> {
 describe("createManualAccount (D1 round-trip)", () => {
   it("认币 → 落声明 → 一条开仓 set 活动", async () => {
     const tokens = JSON.stringify([
-      { symbol: "BTC", unitPrice: "64000", identifier: "bitcoin", amount: "0.5" },
+      { symbol: "BTC", unitPrice: "64000", ticket: ticketOf("bitcoin"), amount: "0.5" },
     ]);
     const account = await createManualAccount(USER, "My BTC", tokens);
 
@@ -53,15 +60,26 @@ describe("createManualAccount (D1 round-trip)", () => {
     ]);
   });
 
-  // 用户选了币 → ref 是 `coingecko/bitcoin`,在 mint 里本身就是锚 → 直接认出来,不查映射表。
-  it("选了币 → 那条 ref 就是 identifier 的来源", async () => {
+  // 用户选了币 → 票解出来的 ref 在 mint 里本身就是锚 → 直接认出来,不查映射表、也不按 symbol 猜。
+  it("选了币 → 票解出来的那条 ref 定身份", async () => {
     const account = await createManualAccount(
       USER,
       "M",
-      JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", identifier: "bitcoin" }]),
+      JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", ticket: ticketOf("bitcoin") }]),
     );
     const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
     expect(h.identifier).toBe("bitcoin"); // 哪怕 symbol 敲成了 XBT
+  });
+
+  // 票是从网络上来的 —— 解不开就当没选币,退回按 symbol 认,而不是崩掉或写脏。
+  it("票是伪造/损坏的 → 当作没选币,按 symbol 认", async () => {
+    const account = await createManualAccount(
+      USER,
+      "M",
+      JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", ticket: "!!!not-base64!!!" }]),
+    );
+    const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    expect(h.identifier).toBeNull(); // 上游不认识 XBT → 自己一行,没有上游命名
   });
 
   // creds 里那个 `tokens` 字段只剩一个空壳:它是**创建表单的入参声明**,不再是持仓的存储处。
@@ -108,7 +126,7 @@ describe("createAccountFor (manual: shared validate + dispatch)", () => {
   it("合法入参 → 账户 + 持仓声明 + 开仓活动", async () => {
     const account = await createAccountFor(USER, "manual", "My BTC", {
       tokens: JSON.stringify([
-        { symbol: "BTC", unitPrice: "64000", amount: "0.5", identifier: "bitcoin" },
+        { symbol: "BTC", unitPrice: "64000", amount: "0.5", ticket: ticketOf("bitcoin") },
       ]),
     });
     expect(await holdings(account.id)).toEqual([

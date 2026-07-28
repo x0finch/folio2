@@ -11,7 +11,9 @@ const BatchDraftInput = z.object({
   token: z.object({
     symbol: z.string().trim().min(1),
     unitPrice: z.number().nonnegative(),
-    identifier: z.string().trim().min(1).nullish(),
+    // 选币下拉发的那张不透明票(#202b)。这一层只校验「是个非空串」—— 解票在 ./internal/manual,
+    // 解不开就当没选币。
+    ticket: z.string().trim().min(1).nullish(),
   }),
   kind: ActivityKind,
   amount: z.number().nonnegative(),

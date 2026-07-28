@@ -25,10 +25,12 @@ const MANUAL_LOGO = `data:image/svg+xml,${encodeURIComponent(NOTEBOOK_PEN_SVG.re
 //
 // 仍然声明在 `account.creds` 里,是因为账户创建那条通用路径(`validateAccountCreds` → 表单字段渲染)
 // 就是按它驱动的,manual 不该为此另开一条并行的表单机制。存库为 JSON 字符串,故 validator 先 parse。
+// `ticket` = 选币下拉发的那串不透明票(base64url 编过的 tokenRef,#202b)。这一层只当它是字符串:
+// 解票是 app 在写路径边界上做的事,连接器不认识代币命名法。没选币就没有这个键。
 const manualFirstHolding = z.object({
   symbol: z.string().trim().min(1),
   unitPrice: z.coerce.number(),
-  identifier: z.string().trim().min(1).optional(),
+  ticket: z.string().trim().min(1).optional(),
   amount: z.coerce.number(),
 });
 

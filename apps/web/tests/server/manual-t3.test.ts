@@ -1,4 +1,6 @@
 import { env } from "cloudflare:test";
+import { formatTokenRef } from "@folio/oracle-ref";
+import { tokenTicket } from "@folio/oracle2";
 import { beforeEach, describe, expect, it } from "vitest";
 import { type CredsToken, deriveAmount } from "../../src/lib/manual-activity";
 import { db } from "../../src/lib/server/internal/db";
@@ -34,6 +36,11 @@ async function resetUser(): Promise<void> {
 
 beforeEach(resetUser);
 
+// 选币下拉发给前端的那张票 = base64url 编过的 tokenRef。测试里现编,与生产同一个编码器 ——
+// 手写 base64 字面量的话,编码规则一改测试就静默失配。
+const ticketOf = (coinId: string) =>
+  tokenTicket.encode(formatTokenRef({ namer: NAMER, localName: coinId }));
+
 // 某 manual 账户已物化的 creds.tokens(投影)。
 // 该账户的持仓:定义 + 账本折叠出的数量(compute-on-read;#203 之后没有 creds.tokens 那个投影了)。
 async function readTokens(accountId: string): Promise<CredsToken[]> {
@@ -53,7 +60,9 @@ async function seedAccount() {
   const account = await createManualAccount(
     USER,
     "M",
-    JSON.stringify([{ symbol: "BTC", unitPrice: "60000", identifier: "bitcoin", amount: "1" }]),
+    JSON.stringify([
+      { symbol: "BTC", unitPrice: "60000", ticket: ticketOf("bitcoin"), amount: "1" },
+    ]),
   );
   return account;
 }
@@ -133,7 +142,7 @@ describe("addManualActivities", () => {
     const account = await seedAccount();
     const res = await addManualActivities(USER, account.id, [
       {
-        token: { symbol: "BTC", unitPrice: 60000, identifier: "bitcoin" },
+        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
         kind: "add",
         amount: 0.5,
         occurredAt: LATER + 1,
@@ -148,7 +157,7 @@ describe("addManualActivities", () => {
     const account = await seedAccount();
     const res = await addManualActivities(USER, account.id, [
       {
-        token: { symbol: "SOL", unitPrice: 150, identifier: "solana" },
+        token: { symbol: "SOL", unitPrice: 150, ticket: ticketOf("solana") },
         kind: "add",
         amount: 10,
         occurredAt: LATER + 2,
@@ -166,13 +175,13 @@ describe("addManualActivities", () => {
     const res = await addManualActivities(USER, account.id, [
       // 既有 BTC 持有 1;这批同时对既有加 0.5(合法)+ 对新 token DOGE reduce 100(基线 0，超支)。
       {
-        token: { symbol: "BTC", unitPrice: 60000, identifier: "bitcoin" },
+        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
         kind: "add",
         amount: 0.5,
         occurredAt: LATER + 3,
       },
       {
-        token: { symbol: "DOGE", unitPrice: 0.1, identifier: "dogecoin" },
+        token: { symbol: "DOGE", unitPrice: 0.1, ticket: ticketOf("dogecoin") },
         kind: "reduce",
         amount: 100,
         occurredAt: LATER + 3,
@@ -194,7 +203,7 @@ describe("deleteManualActivity", () => {
     const account = await seedAccount();
     await addManualActivities(USER, account.id, [
       {
-        token: { symbol: "BTC", unitPrice: 60000, identifier: "bitcoin" },
+        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
         kind: "add",
         amount: 2,
         occurredAt: LATER + 5,
@@ -217,7 +226,7 @@ describe("editManualActivity", () => {
     // 加一条 reduce 1(合法:1-1=0）。
     await addManualActivities(USER, account.id, [
       {
-        token: { symbol: "BTC", unitPrice: 60000, identifier: "bitcoin" },
+        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
         kind: "reduce",
         amount: 1,
         occurredAt: LATER + 6,
@@ -298,7 +307,7 @@ describe("越权防御(跨用户 / 跨账户)", () => {
     await expect(
       addManualActivities(OTHER, account.id, [
         {
-          token: { symbol: "BTC", unitPrice: 60000, identifier: "bitcoin" },
+          token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
           kind: "add",
           amount: 1,
           occurredAt: LATER + 1,

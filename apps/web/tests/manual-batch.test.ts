@@ -55,7 +55,7 @@ describe("runningOk", () => {
   });
 });
 
-// 认币已经在 mint 那一步做完(#203),这里只比 id。原来这个函数自己有一套「identifier 优先、
+// 认币已经在 mint 那一步做完(#203),这里只比 id。原来这个函数自己有一套「上游 id 优先、
 // 退回同名 symbol」的启发式 —— 那是跟 mint 平行的第二套认币规则,两处一旦漂移就会认出两个答案。
 describe("findToken(只比 mint 给的 id)", () => {
   const tokens = [mkToken({ id: "a", symbol: "BTC" }), mkToken({ id: "b", symbol: "ETH" })];
@@ -72,7 +72,7 @@ describe("findToken(只比 mint 给的 id)", () => {
 
 describe("planManualBatch", () => {
   const draft = (o: Partial<ResolvedDraft>): ResolvedDraft => ({
-    token: { tokenId: "tk_btc", symbol: "BTC", unitPrice: 100, identifier: "bitcoin" },
+    token: { tokenId: "tk_btc", symbol: "BTC", unitPrice: 100, ticket: "tkt-btc" },
     kind: "add",
     amount: 1,
     occurredAt: 10,

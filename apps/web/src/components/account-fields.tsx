@@ -1,6 +1,4 @@
 import type { ConnectorId } from "@folio/connectors";
-import type { TokenInfo } from "@folio/oracle";
-import { CGK_VENDOR, vendorIdOf } from "@folio/oracle";
 import {
   Input,
   Label,
@@ -25,6 +23,7 @@ import { isManual } from "../lib/manual-connector";
 import { manualTokensJson } from "../lib/manual-tokens";
 import { createAccount } from "../lib/server/accounts";
 import { getTokenPrice } from "../lib/server/tokens";
+import type { TokenOption } from "../lib/token-option";
 import { TokenCombobox } from "./token-combobox";
 
 // 添加账户的录入字段与提交(A4 从 add-account-sheet 抽出,供 AddAccountModal 复用)。connector-driven 创建(#55):
@@ -38,8 +37,8 @@ async function submitAccount(
   return createAccount({ data: { connectorId, label, values } });
 }
 
-// manual 的字段:富控件(TokenCombobox 选币联动 symbol+identifier+autofill 单价 / 数字)。
-// 找不到的币可切"手动输入 symbol"(不关联,identifier 空)。
+// manual 的字段:富控件(TokenCombobox 选币联动 symbol + 票 + autofill 单价 / 数字)。
+// 找不到的币可切"手动输入 symbol"(不关联,票为空)。
 // manual 的 account.creds 就是单个 `tokens`(ADR 0017)→ 本地维护首 token 标量,序列化成 `values.tokens`
 // (单元素 JSON,数字留字符串由 manualToken validator coerce)提交,服务端不再从标量拼装。
 function ManualFields({
@@ -48,12 +47,12 @@ function ManualFields({
   setValues: (fn: (v: Record<string, string>) => Record<string, string>) => void;
 }) {
   const t = useTranslations("Accounts");
-  const [picked, setPicked] = useState<TokenInfo | null>(null);
+  const [picked, setPicked] = useState<TokenOption | null>(null);
   const [manualMode, setManualMode] = useState(false);
   const [priceBusy, setPriceBusy] = useState(false);
   const priceReqRef = useRef(0);
   // 首 token 的本地标量;经 effect 序列化进 values.tokens(不在 setState updater 里做副作用)。
-  const [tok, setTok] = useState({ symbol: "", amount: "", unitPrice: "", identifier: "" });
+  const [tok, setTok] = useState({ symbol: "", amount: "", unitPrice: "", ticket: "" });
   const patch = (p: Partial<typeof tok>) => setTok((prev) => ({ ...prev, ...p }));
 
   // tok → values.tokens(纯序列化见 manualTokensJson)。副作用放 effect,不在 setState updater 里。
@@ -61,21 +60,20 @@ function ManualFields({
     setValues(() => ({ tokens: manualTokensJson(tok) }));
   }, [tok, setValues]);
 
-  // 选中币:填 symbol+identifier,并自动取市价预填 unitPrice(用户可改;竞态守卫)。
-  async function onPick(token: TokenInfo | null) {
+  // 选中币:填 symbol + 票,并自动取市价预填 unitPrice(用户可改;竞态守卫)。
+  // 票原样搬运 —— 组件不解释它,提交时随 `tokens` JSON 一起交回服务端。
+  async function onPick(token: TokenOption | null) {
     setPicked(token);
     if (!token) {
-      patch({ symbol: "", identifier: "" });
+      patch({ symbol: "", ticket: "" });
       return;
     }
-    // 选币结果恒是 CGK 命名的 ref;拿不到上游 id 就只填 symbol,不去问价。
-    const identifier = vendorIdOf(token.ref, CGK_VENDOR);
-    patch({ symbol: token.symbol.toUpperCase(), identifier: identifier ?? "" });
-    if (!identifier) return;
+    const { ticket } = token;
+    patch({ symbol: token.symbol.toUpperCase(), ticket });
     const reqId = ++priceReqRef.current;
     setPriceBusy(true);
     try {
-      const p = await getTokenPrice({ data: { identifier } });
+      const p = await getTokenPrice({ data: { ticket } });
       if (priceReqRef.current === reqId && p?.unitPrice != null) {
         patch({ unitPrice: String(p.unitPrice) });
       }
@@ -118,7 +116,7 @@ function ManualFields({
               onChange={onPick}
               onManual={(q) => {
                 setManualMode(true);
-                patch({ symbol: q, identifier: "" });
+                patch({ symbol: q, ticket: "" });
               }}
             />
             <button

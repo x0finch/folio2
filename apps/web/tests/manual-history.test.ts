@@ -52,7 +52,7 @@ describe("tokenPriceAt 降级链", () => {
   const tk: HistoryToken = {
     id: "tk",
     unitPrice: 100,
-    identifier: "bitcoin",
+    recognized: true,
     activities: [act("set", 1, T1, 60000), act("add", 1, T2, 65000), act("reduce", 0.5, T3, null)],
   };
 
@@ -79,7 +79,7 @@ describe("tokenPriceAt 降级链", () => {
     // priceAt 返回 undefined → 落回账本价②
     const miss = (_id: string, _t: number) => undefined;
     expect(tokenPriceAt(tk, T2, miss)).toBe(65000);
-    // 无 identifier → 不查 oracle,直接账本价
+    // 上游不认识 → 不查 oracle,直接账本价
     const local: HistoryToken = { id: "tk", unitPrice: 1, activities: [act("set", 1, T1, 7)] };
     expect(tokenPriceAt(local, T1, priceAt)).toBe(7);
   });
@@ -133,7 +133,7 @@ describe("buildManualAccountSeries(grid, ADR 0019)", () => {
     const btc: HistoryToken = {
       id: "tk",
       unitPrice: 100,
-      identifier: "bitcoin",
+      recognized: true,
       activities: [act("set", 1, T1, 60000)],
     };
     // priceAt 按日桶给价(1000×桶号)→ 验证逐日取 oracle 价(非账本 60000),曲线随价单调升。

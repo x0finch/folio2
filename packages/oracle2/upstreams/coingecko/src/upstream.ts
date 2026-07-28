@@ -51,9 +51,24 @@ export function createCoinGeckoUpstream(config: CoinGeckoConfig = {}): TokenUpst
   return {
     id: UPSTREAM_ID,
 
+    // **翻页要去重 —— 同一个币会在两页里各出现一次。**
+    //
+    // CoinGecko 的这几页不是同一份榜单切出来的:一次四页的抓取里,第 1、2 页盖着同一个
+    // `last_updated`,第 3 页每条都更新。而排序按市值,某些币的流通量在两份数据之间被修正过
+    // (实测 collector-crypt 同一个 rank、几乎同一个价,市值 $251M vs $32M),于是它在旧那份里
+    // 排进第 1 页、在新那份里又排进第 3 页。实测 1000 条里 43 个币重复,且**没有一个**两次市值相同。
+    //
+    // 不去重的后果不止是列表里多几行:按 symbol 认币时,重复的币会变成**自己跟自己比**,
+    // 永远碾压不了「次席」,于是判定为没把握 —— 那个币从此认不出来,而且一声不吭
+    // (见 entry 的 `candidatesBySymbol` / `pickByConfidence`)。
+    //
+    // **去重之后拿到的会少于 topN**(43 个重复 = 43 个空位),这是明知接受的:补齐要多翻页,
+    // 而多翻的那页同样会撞重复,补不出保证;少的那几十个又都在榜尾最不稳的一段。
+    // 所以 `topN` 的意思是「往下抓多深」,不是「保证拿到这么多个币」。
     async fetchMarkets({ topN }) {
       const pages = Math.max(1, Math.ceil(topN / MARKETS_PER_PAGE));
       const out = [];
+      const seen = new Set<string>();
       for (let page = 1; page <= pages; page++) {
         const rows = await client.coinsMarkets({
           vsCurrency: VS_USD,
@@ -62,7 +77,11 @@ export function createCoinGeckoUpstream(config: CoinGeckoConfig = {}): TokenUpst
           page,
           priceChangePercentage: "24h",
         });
-        out.push(...parseMarkets(rows));
+        for (const token of parseMarkets(rows)) {
+          if (seen.has(token.ref)) continue; // 先出现的那条胜出(它排得更靠前)
+          seen.add(token.ref);
+          out.push(token);
+        }
         if (rows.length < MARKETS_PER_PAGE) break; // 上游没那么多币了
       }
       return out.slice(0, topN);

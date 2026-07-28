@@ -1,4 +1,6 @@
 import { env } from "cloudflare:test";
+import { formatTokenRef } from "@folio/oracle-ref";
+import { tokenTicket } from "@folio/oracle2";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../../src/lib/server/internal/db";
 import {
@@ -7,6 +9,7 @@ import {
   editManualActivity,
   loadManualAccountDetail,
 } from "../../src/lib/server/internal/manual";
+import { NAMER } from "../../src/lib/server/internal/oracle2";
 
 // T4(#156)服务端支撑:抽屉读路径 loadManualAccountDetail(token 定义 + 折叠 amount + 全部活动)+ fee 落库 round-trip。
 // 真实 D1(Miniflare);不隔离每测存储 → beforeEach 重置。开仓 set = Date.now(),后续活动用远未来 LATER 排其后。
@@ -24,11 +27,18 @@ async function resetUser(): Promise<void> {
 }
 beforeEach(resetUser);
 
+// 选币下拉发给前端的那张票 = base64url 编过的 tokenRef。测试里现编,与生产同一个编码器 ——
+// 手写 base64 字面量的话,编码规则一改测试就静默失配。
+const ticketOf = (coinId: string) =>
+  tokenTicket.encode(formatTokenRef({ namer: NAMER, localName: coinId }));
+
 async function seedAccount() {
   return createManualAccount(
     USER,
     "M",
-    JSON.stringify([{ symbol: "BTC", unitPrice: "60000", identifier: "bitcoin", amount: "1" }]),
+    JSON.stringify([
+      { symbol: "BTC", unitPrice: "60000", ticket: ticketOf("bitcoin"), amount: "1" },
+    ]),
   );
 }
 
@@ -37,7 +47,7 @@ describe("loadManualAccountDetail", () => {
     const account = await seedAccount();
     await addManualActivities(USER, account.id, [
       {
-        token: { symbol: "BTC", unitPrice: 60000, identifier: "bitcoin" },
+        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
         kind: "add",
         amount: 0.5,
         occurredAt: LATER + 1,
@@ -48,7 +58,7 @@ describe("loadManualAccountDetail", () => {
     expect(detail.tokens).toHaveLength(1);
     const [btc] = detail.tokens;
     expect(btc.symbol).toBe("BTC");
-    expect(btc.identifier).toBe("bitcoin");
+    expect(btc.ticket).toBe(ticketOf("bitcoin"));
     expect(btc.amount).toBe(1.5); // 开仓 set 1 + add 0.5
     expect(typeof btc.id).toBe("string");
 
@@ -73,7 +83,7 @@ describe("fee 落库 round-trip", () => {
     const account = await seedAccount();
     await addManualActivities(USER, account.id, [
       {
-        token: { symbol: "BTC", unitPrice: 60000, identifier: "bitcoin" },
+        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
         kind: "add",
         amount: 0.5,
         occurredAt: LATER + 1,
@@ -91,7 +101,7 @@ describe("fee 落库 round-trip", () => {
     const account = await seedAccount();
     await addManualActivities(USER, account.id, [
       {
-        token: { symbol: "BTC", unitPrice: 60000, identifier: "bitcoin" },
+        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
         kind: "add",
         amount: 0.5,
         occurredAt: LATER + 1,

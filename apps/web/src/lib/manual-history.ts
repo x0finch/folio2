@@ -26,7 +26,10 @@ export interface HistoryActivity {
 export interface HistoryToken {
   id: string; // tokens.id —— 历史价按它取(#203)
   unitPrice: number;
-  identifier?: string | null; // 当前上游对它的叫法;空 = 上游不认识它 → 跳过历史价那一档
+  // 上游认不认识这个币。false = 认不出来 → 没有历史价可问,跳过降级链第 ① 档。
+  // 原来这里是「当前上游对它的叫法」,但本模块从没用过那个字符串本身,只判它空不空 ——
+  // 一个字符串字段装一个布尔含义,还逼两处调用方各自去凑一个「叫法」出来(#202b)。
+  recognized?: boolean;
   activities: HistoryActivity[];
 }
 
@@ -34,10 +37,10 @@ export interface HistoryToken {
 // server 侧按区间一次预取 priceSeries → 建 Map<tokenId, Map<dayBucket, price>>,再包成本同步闭包。
 export type HistoricalPriceAt = (tokenId: string, t: number) => number | undefined;
 
-// price@T 降级链(ADR 0019):① 有 identifier → oracle 历史价(#148,经 priceAt 注入,市值主路径)→ ② 账本中
+// price@T 降级链(ADR 0019):① 上游认识它 → oracle 历史价(#148,经 priceAt 注入,市值主路径)→ ② 账本中
 // occurredAt ≤ T 最近一条**记了 price** 的活动(兜底 + 成本原料)→ ③ 当前 unitPrice 摊平(真无市场,平线)。
 export function tokenPriceAt(token: HistoryToken, t: number, priceAt?: HistoricalPriceAt): number {
-  if (token.identifier && priceAt) {
+  if (token.recognized && priceAt) {
     const p = priceAt(token.id, t); // ①
     if (p != null) return p;
   }

@@ -98,7 +98,25 @@ async function warmBlob(
     // **一次整份写**,不是逐行 upsert —— 前 N 名是一个快照,逐行写会写出半新半旧的榜。
     write: (value) => cache.put(cacheKeys.warm, value, WARM_TTL_MS),
   });
-  return blob?.rows ?? [];
+  return dedupeByRef(blob?.rows ?? []);
+}
+
+// 目录是一个**集合**:一个币一行。在**读**这一侧兜住,而不只是在上游那侧去重,有两个理由:
+//   · 已经存进缓存的脏目录得治 —— 这份 blob 一周才刷一次,不然修完还要脏一周
+//   · 三个读者(mint 的候选、选币下拉、搜索)一处覆盖,不用各防一遍
+//
+// 重复不是假想:上游的分页来自不同快照,同一个币会在两页各出现一次(见 coingecko adapter 的注释)。
+// 后果都是静默的 —— 按 symbol 认币时它会跟**自己**比排名、永远碾压不了「次席」,于是那个币
+// 认不出来;选币列表那边则是同一个 key 出现两次,React 卸载了却摘不干净 DOM,留下僵尸行。
+function dedupeByRef(rows: WarmBlob["rows"]): WarmBlob["rows"] {
+  const seen = new Set<string>();
+  const out: WarmBlob["rows"] = [];
+  for (const r of rows) {
+    if (seen.has(r.info.ref)) continue; // 先出现的胜出(它排得更靠前)
+    seen.add(r.info.ref);
+    out.push(r);
+  }
+  return out;
 }
 
 /**
