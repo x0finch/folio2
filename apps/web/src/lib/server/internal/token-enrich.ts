@@ -29,7 +29,11 @@ export async function enrichBalances<T extends BalanceLike>(
     const e = enriched.get(id);
     // stale = 过期**或压根没有价**。新层刚 mint 出的行正是「有身份、无价」,必须让客户端来刷一次,
     // 否则首屏永远没价而且没人去取(pricesStale 与 refreshStalePrices 必须同门,code review #2)。
-    if (e?.price?.stale !== false) pricesStale = true;
+    //
+    // **但只算「刷得出来」的行**:`ref` 空 = 上游还没认出它(手记里自己敲名字的币恒是这样),
+    // 刷价那一侧本来就会跳过它(见 refreshStalePrices:只刷 ref 非空的),所以标脏只会换来
+    // 每次进页白发一次请求、而且永远清不掉。这与上面那句「没有身份的行不算 stale」是同一条理由。
+    if (e?.ref && e.price?.stale !== false) pricesStale = true;
     return e ? { ...b, ...toEnrichment(e) } : b;
   });
   return { rows, pricesStale };

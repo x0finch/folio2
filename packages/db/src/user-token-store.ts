@@ -45,7 +45,6 @@ const partsOf = (ref: string): { namer: string; localName: string } | undefined 
   const parsed = parseTokenRef(ref);
   return parsed.kind === "unknown" ? undefined : parsed;
 };
-const refOf = (namer: string, localName: string) => formatTokenRef({ namer, localName });
 
 export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): TokenStore {
   const db = getDb(env);
@@ -99,7 +98,9 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
           ),
         );
       // 同一个 Token 在一个命名者下应当只有一行(见 linkRef);真出了两行也给一个确定答案。
-      for (const r of rows) if (!out.has(r.tokenId)) out.set(r.tokenId, refOf(namer, r.localName));
+      for (const r of rows)
+        if (!out.has(r.tokenId))
+          out.set(r.tokenId, formatTokenRef({ namer, localName: r.localName }));
     }
     return out;
   }
@@ -187,7 +188,7 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
           })
           .from(tokenRefs)
           .where(whereRefs(part));
-        for (const r of rows) found.push({ ref: refOf(r.namer, r.localName), tokenId: r.tokenId });
+        for (const r of rows) found.push({ ref: formatTokenRef(r), tokenId: r.tokenId });
       }
       const linked = await linkedAmong(found.map((f) => f.tokenId));
       for (const f of found) {
@@ -290,8 +291,9 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
           .from(tokenRefs)
           .where(and(eq(tokenRefs.userId, userId), eq(tokenRefs.tokenId, into))),
       ]);
-      const taken = new Set(intoRefs.map((r) => `${r.namer}/${r.localName}`));
-      const dupes = fromRefs.filter((r) => taken.has(`${r.namer}/${r.localName}`));
+      // 拼串走文法(`formatTokenRef`)—— 分隔符是斜杠这件事只有 @folio/oracle-ref 知道。
+      const taken = new Set(intoRefs.map(formatTokenRef));
+      const dupes = fromRefs.filter((r) => taken.has(formatTokenRef(r)));
 
       const stmts = [
         ...dupes.map((d) =>
@@ -392,7 +394,7 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
         .innerJoin(tokenRefs, and(eq(tokenRefs.tokenId, tokens.id), eq(tokenRefs.namer, namer)))
         .where(and(eq(tokens.userId, userId), eq(tokens.symbol, symbol)));
       return rows.map((r) => ({
-        ref: refOf(namer, r.localName),
+        ref: formatTokenRef({ namer, localName: r.localName }),
         marketCapRank: r.marketCapRank ?? undefined,
       }));
     },

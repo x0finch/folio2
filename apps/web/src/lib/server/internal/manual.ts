@@ -6,13 +6,13 @@ import type {
   SnapshotWithBalances,
 } from "@folio/db";
 import { dayBucketOf } from "@folio/oracle";
-import { formatTokenRef } from "@folio/oracle-ref";
+import { tokenRef } from "@folio/oracle-ref";
 import { tokenTicket } from "@folio/oracle2";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
-import { deriveAmount, projectToken } from "../../manual-activity";
+import { deriveAmount, fallbackUnitPrice, projectToken } from "../../manual-activity";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "../../manual-batch";
-import { isManual, MANUAL_CONNECTOR_ID, manualTokenRef } from "../../manual-connector";
+import { isManual, MANUAL_CONNECTOR_ID } from "../../manual-connector";
 import {
   buildManualAccountSeries,
   type HistoricalPriceAt,
@@ -27,26 +27,42 @@ import { NAMER, oracleFor } from "./oracle2";
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;
 
-// db 出来的是「当前命名者对这个币的叫法」(右段),拼回完整 ref 才能编成票。
-const refOfLocalName = (localName: string) => formatTokenRef({ namer: NAMER, localName });
-
 // **物化没有了**(#203)。原来每次写完都要把「各 token 定义 + 折叠出的 amount」写回
 // `creds.tokens`,给 manual provider 读。四个值全部落进真表之后 provider 只是「app 写进 JSON 列 →
 // 再读回来」的空转,连它一起删了 —— 于是「单写者」那条不变量、以及它带来的「忘了重跑就 stale」
 // 这类 bug 面,整个消失。持仓一律 compute-on-read(deriveAmount 现算)。
 
+// 手记持仓 → tokenRef(#203 起住在 app;原来在已删除的 manual provider 包里)。
+//
+// **写路径的东西,所以住在服务端这一侧。** 它一度和 `isManual` 同住 `lib/manual-connector.ts`,
+// 而那个文件被组件 import(渲染哪套字段要问「是不是手记」)—— 于是每个组件都顺带把 tokenRef
+// 文法包拖进了客户端的依赖图。tree-shaking 当时确实摘掉了它,但那是打包器的结果、不是不变量。
+//
+// 选了币 → 用户那张票解出来的 ref 就是答案。**上游命名的 ref 在 mint 里本身就是锚** ——
+// 不查映射表、也不掉回 symbol 去猜。
+// 没选 → `manual/custom:<名字>`。`custom:` 说的是**这个名字没有注册表背书** —— 用户在
+// 「找不到?手动输入」里敲的东西,意思恰恰是「不是列表里那个」,所以 mint 不拿它去认币
+// (ADR 0020 第四轮 / #223)。认不出来就自己一行,用用户填的单价估值。
+// 两种都是规范 ref,没有「空着」这一档。
+const manualTokenRef = (picked: { symbol: string; ref?: string | null }): string =>
+  picked.ref || tokenRef.custom(MANUAL_CONNECTOR_ID, picked.symbol);
+
 // 一条手记持仓要用的 token id:先定 ref,再经 mint 换出 id(纯本地)。
 //
 // **解票就在这一处**(#202b)。表单交上来的 `ticket` 是一串 base64url,里头是选币那一刻
-// 上游对这个币的命名。解不开 / 解出来不合文法 → 当作「没选币」,退回按 symbol 认 ——
-// 票是从网络上来的,不能假设它是我们自己刚发出去的那张。
+// 上游对这个币的命名。解不开 / 不合文法 / **命名者不是当前那位** → 当作「没选币」,
+// 退回 `manual/custom:<名字>`(而那一支不会被拿去认币,#223)。
+//
+// 命名者那一句必须有:票没有签名,谁都能自己编一张。手编 `<随便什么>/issued:<随便什么>`
+// 塞进来的话,mint 会掉到 symbol 那一档,用户手敲的 symbol 就又成了可信线索。
+// 所以 `decode` 收 NAMER —— 「这是我们发出去的那张」只能靠内容自证(见 tokenTicket)。
 async function mintHolding(
   userId: string,
   picked: { symbol: string; ticket?: string | null },
 ): Promise<string> {
   const ref = manualTokenRef({
     symbol: picked.symbol,
-    ref: picked.ticket ? tokenTicket.decode(picked.ticket) : undefined,
+    ref: picked.ticket ? tokenTicket.decode(picked.ticket, NAMER) : undefined,
   });
   const symbol = picked.symbol.trim().toUpperCase();
   const ids = await oracleFor(userId).mint.of([{ ref, seed: { symbol } }]);
@@ -74,13 +90,15 @@ export async function createManualAccount(userId: string, label: string, tokens:
     creds: JSON.stringify({ tokens: "[]" }),
   });
   const tokenId = await mintHolding(userId, first);
-  await db.setManualHoldingDef(userId, tokenId, {
-    symbol: first.symbol.trim().toUpperCase(),
-    unitPrice: Number(first.unitPrice),
-  });
+  await db.setManualHoldingDef(userId, tokenId, { symbol: first.symbol.trim().toUpperCase() });
+  // **开仓价进账本,不进 tokens 那一列。** 表单里那个「单价」就是开仓那一刻的价 —— 它是账本里
+  // 的第一笔事实,不是一条压过后续所有成交的声明。原来它写进 `tokens.self_price`,于是同一个
+  // 「这个币值多少」有两个存处,而其中一个可以存歪(实测:SSGS 卡在 0 上治不好)。
+  // 现在价只有账本一个来源(见 manual-activity 的 fallbackUnitPrice)。
   await db.recordManualActivity(userId, account.id, tokenId, {
     kind: "set",
     amount: Number(first.amount),
+    price: Number(first.unitPrice) > 0 ? Number(first.unitPrice) : null,
     occurredAt: Date.now(),
   });
   return account;
@@ -89,7 +107,7 @@ export async function createManualAccount(userId: string, label: string, tokens:
 // 该用户**活跃** manual 账户的 (accountId → tokens)。injector 与预热共用。
 // **compute-on-read**(ADR 0018/0019):amount 由账本 deriveAmount 现算,不读物化的 creds.tokens ——
 // 否则「当下」净值(主页/账户/抽屉头 + 抽屉曲线末点实时覆写)会卡在上次物化的 stale 值(如删掉更早活动后
-// creds 未及重物化,或折叠语义修正前写入的旧值)。定义(symbol/unitPrice/identifier)取自 manual_token 行。
+// creds 未及重物化,或折叠语义修正前写入的旧值)。定义(symbol/unitPrice/ref)取自 `tokens` 那一行。
 // 排除归档:归档 manual 不进 enrich 门(injector 的调用点已按 active 过滤)→ 预热/刷价也不该碰它,三门同源。
 async function manualTokensByAccount(
   userId: string,
@@ -119,21 +137,26 @@ export async function injectManualSnapshots(
 ): Promise<void> {
   const list = await manualTokensByAccount(userId, accounts);
   if (list.length === 0) return;
-  // 先各建一份(prices 全缺)拿 assetRef,全部账户**一次批量** enrich(cache-only,与 deriveLiveAccountTotals
-  // 同门,避免逐账户串行 D1 往返),再按账户切回各自现价重建终版。
-  const drafts = list.map(({ id, tokens }) => buildManualSnapshot(id, tokens, [], takenAt));
-  // 手记仍走**旧参考层**(#203 才并入 tokens:那时它会跟其他持仓一样在写路径上 mint)。
-  // 旧 enrich 收 `AssetRef`,而 lib/tokens 的门已全部改成返回 token_id → 这里就地拼。
+
+  // 全部账户**一次批量**取现价(cache-only,与 deriveLiveAccountTotals 同门,避免逐账户串行 D1 往返),
+  // 再按账户切回各自的价重建。手记仍走**旧参考层**(#203 才并入 tokens),旧 enrich 收 `AssetRef`。
+  //
+  // **只问「有上游 ref」的那些,没有的传 null**(#223 / #227)。以前这里问的是合成余额上那条
+  // tokenRef —— 没选币时它是 `manual/custom:<名字>`,而旧 `resolveAsset` 对任何形状都会掉回
+  // symbol 猜(它没有 `hasTrustedSymbol` 那道闸),于是用户手敲的 `USDC` 又被认成真 USDC,
+  // 拿回市价 $1 覆盖掉他自己填的单价。写路径早就不合并了,可展示这一侧照旧按市价盯 —— 实测过。
+  // `enrich` 对 null 是原位对齐的(见 lookupAll),所以传 null 就是「这条不要价」,
+  // 而 buildManualSnapshot 在没价时正好回退到用户填的 `unitPrice`。
   const enriched = await oracle.tokens.enrich(
-    drafts
-      .flatMap((d) => d.balances)
-      .map((b) => (b.tokenRef ? { symbol: b.symbol, tokenRef: b.tokenRef } : null)),
+    list.flatMap(({ tokens }) =>
+      tokens.map((t) => (t.ref ? { symbol: t.symbol, tokenRef: t.ref } : null)),
+    ),
   );
   let i = 0;
-  list.forEach(({ id, tokens }, k) => {
-    const prices = drafts[k].balances.map(() => enriched[i++]?.unitPrice);
+  for (const { id, tokens } of list) {
+    const prices = tokens.map(() => enriched[i++]?.unitPrice);
     byAccount.set(id, buildManualSnapshot(id, tokens, prices, takenAt));
-  });
+  }
 }
 
 // 预热用:该用户全部 manual 账户的合成余额(供 warmTokens 把其代币现价取进缓存)。manual 已退出 snapshot,
@@ -193,7 +216,6 @@ async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
   return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
     id: token.id,
     symbol: token.symbol,
-    unitPrice: token.unitPrice,
     activities,
   }));
 }
@@ -209,7 +231,7 @@ async function loadTokens(userId: string, accountId: string): Promise<Token[]> {
 interface ManualAccountDetailToken {
   id: string;
   symbol: string;
-  unitPrice: number;
+  unitPrice: number | null; // 声明价;空 = 从没声明过(编辑表单据此显示空而不是 0)
   ticket: string | null;
   amount: number;
 }
@@ -226,8 +248,11 @@ export async function loadManualAccountDetail(
     tokens: perToken.map(({ token, activities }) => ({
       id: token.id,
       symbol: token.symbol,
-      unitPrice: token.unitPrice,
-      ticket: token.identifier ? tokenTicket.encode(refOfLocalName(token.identifier)) : null,
+      // 抽屉要的是「这个币现在按多少算」—— 给**解好的**那个价(账本最近一笔),
+      // 而不是某一列的原始值。市场认识它时展示侧仍会用市价覆盖。
+      unitPrice: fallbackUnitPrice(activities),
+      // 票就是那条 ref 原样编一层 —— app 不拼、不拆、不知道命名者是谁(见 ManualHolding.ref)。
+      ticket: token.ref ? tokenTicket.encode(token.ref) : null,
       amount: deriveAmount(activities),
     })),
     activities: perToken.flatMap(({ activities }) => activities),
@@ -241,8 +266,10 @@ export async function loadManualAccountDetail(
 async function loadHistoryTokens(userId: string, accountId: string): Promise<HistoryToken[]> {
   return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
     id: token.id,
-    unitPrice: token.unitPrice,
-    recognized: token.identifier != null,
+    // 曲线那条链的第 ③ 档(平线兜底)。账本成了唯一来源之后 ② 已经覆盖了它能覆盖的一切,
+    // 这一档只剩「连一笔带价的活动都没有」那种情况 → 没有别的可退,0。
+    unitPrice: 0,
+    recognized: token.ref != null,
     activities,
   }));
 }
@@ -320,13 +347,12 @@ export async function loadManualHistoryRows(
 // set 语义又重置基线,所以「再加一次」等于「把数量改成这个」。
 export async function createToken(userId: string, input: CreateTokenInput) {
   const tokenId = await mintHolding(userId, input);
-  await db.setManualHoldingDef(userId, tokenId, {
-    symbol: input.symbol.trim().toUpperCase(),
-    unitPrice: input.unitPrice,
-  });
+  await db.setManualHoldingDef(userId, tokenId, { symbol: input.symbol.trim().toUpperCase() });
+  // 开仓价进账本(与 createManualAccount 同口径)—— 价只有账本一个来源。
   await db.recordManualActivity(userId, input.accountId, tokenId, {
     kind: "set",
     amount: input.amount,
+    price: input.unitPrice > 0 ? input.unitPrice : null,
     occurredAt: Date.now(),
   });
   return { id: tokenId };
@@ -334,19 +360,21 @@ export async function createToken(userId: string, input: CreateTokenInput) {
 
 // 改 token 定义;若目标 amount 与当前 derived 不同 → 追加一条 set 活动对齐(播 set 语义,grill Q13)→ 物化。
 // **accountId 由调用方带** —— token 不再自带账户(一个币可以被多个手记账户持有)。
-// 改「这其实是哪个币」(identifier)不在这里:那是改绑,与自动补链的合并同一条路径,另开一票。
+// 改「这其实是哪个币」(那条上游 ref)不在这里:那是改绑,与自动补链的合并同一条路径,另开一票。
 export async function updateToken(userId: string, input: UpdateTokenInput): Promise<void> {
   await db.setManualHoldingDef(userId, input.tokenId, {
     symbol: input.symbol.trim().toUpperCase(),
-    unitPrice: input.unitPrice,
   });
   const current = deriveAmount(
     await db.listManualActivityByToken(userId, input.accountId, input.tokenId),
   );
+  // 数量变了才补一笔对齐的 set;**它带上传进来的价** —— 不然改价这件事没有落点
+  // (价只有账本一个来源,而这个函数是抽屉里改 token 的那条路)。
   if (Math.abs(current - input.amount) > AMOUNT_EPS) {
     await db.recordManualActivity(userId, input.accountId, input.tokenId, {
       kind: "set",
       amount: input.amount,
+      price: input.unitPrice > 0 ? input.unitPrice : null,
       occurredAt: Date.now(),
     });
   }

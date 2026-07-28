@@ -25,9 +25,13 @@ describe("toProviderAssets", () => {
   });
 
   it("场馆命名不 seed —— 否则那些行会卡在无价的孤儿上", () => {
-    expect(toProviderAssets([bal("binance/USDC"), bal("okx/BTC"), bal("hyperliquid/ETH")])).toEqual(
-      [],
-    );
+    expect(
+      toProviderAssets([
+        bal("binance/issued:USDC"),
+        bal("okx/issued:BTC"),
+        bal("hyperliquid/issued:ETH"),
+      ]),
+    ).toEqual([]);
   });
 
   it("原生币不 seed(没有合约地址可 seed,它们走 symbol 解析)", () => {
@@ -35,7 +39,7 @@ describe("toProviderAssets", () => {
   });
 
   it("`coingecko/<id>` 不 seed —— 它已经是规范 ref", () => {
-    expect(toProviderAssets([bal("coingecko/usd-coin")])).toEqual([]);
+    expect(toProviderAssets([bal("coingecko/issued:usd-coin")])).toEqual([]);
   });
 
   it("读不懂的串不 seed,不抛", () => {

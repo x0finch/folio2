@@ -31,7 +31,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
     const eq = Balance.parse({
       kind: "perp_equity",
       symbol: "ACCT",
-      tokenRef: "hyperliquid/X",
+      tokenRef: "hyperliquid/issued:X",
       amount: 1,
       value: 1000,
       meta: { withdrawable: 900, totalMarginUsed: 100, totalNtlPos: 5000 },
@@ -40,7 +40,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
     const pos = Balance.parse({
       kind: "perp_position",
       symbol: "BTC-PERP",
-      tokenRef: "hyperliquid/X",
+      tokenRef: "hyperliquid/issued:X",
       amount: 1,
       value: 0, // 仓位行不承载净值
       meta: {
@@ -79,7 +79,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
       Balance.parse({
         kind: "perp_position",
         symbol: "X",
-        tokenRef: "hyperliquid/X",
+        tokenRef: "hyperliquid/issued:X",
         amount: 1,
         value: 0,
         meta: { side: "long" },
@@ -104,7 +104,7 @@ describe("Balance —— 类型完备", () => {
     const b = Balance.parse({
       kind: "perp_position",
       symbol: "X",
-      tokenRef: "hyperliquid/X",
+      tokenRef: "hyperliquid/issued:X",
       amount: 1,
       value: 0,
       meta: {

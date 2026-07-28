@@ -1,5 +1,4 @@
 import { env } from "cloudflare:test";
-import { formatTokenRef } from "@folio/oracle-ref";
 import { tokenTicket } from "@folio/oracle2";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";
@@ -7,6 +6,7 @@ import { createAccountFor } from "../../src/lib/server/internal/create-account";
 import { db } from "../../src/lib/server/internal/db";
 import { createManualAccount } from "../../src/lib/server/internal/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle2";
+import { ticketOf } from "./ticket";
 
 // manual 创建往返的真实 D1 集成测试(jsdom 单测覆盖不到的服务端编排)。
 // 这套 pool 版本不隔离每测存储 → beforeEach 重置(删 user 级联清账户/token/活动)。
@@ -24,19 +24,13 @@ async function resetUser(): Promise<void> {
 
 beforeEach(resetUser);
 
-// 选币下拉发给前端的那张票 = base64url 编过的 tokenRef。测试里现编,与生产同一个编码器 ——
-// 手写 base64 字面量的话,编码规则一改测试就静默失配。
-const ticketOf = (coinId: string) =>
-  tokenTicket.encode(formatTokenRef({ namer: NAMER, localName: coinId }));
-
 // 该账户的持仓(定义 + 账本折叠出的数量)。#203 起这是唯一事实源 —— 没有 creds.tokens 那个投影了。
 async function holdings(accountId: string) {
   const rows = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
   return Promise.all(
     rows.map(async (r) => ({
       symbol: r.symbol,
-      unitPrice: r.unitPrice,
-      identifier: r.identifier,
+      ref: r.ref,
       amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
     })),
   );
@@ -56,7 +50,7 @@ describe("createManualAccount (D1 round-trip)", () => {
     const account = await createManualAccount(USER, "My BTC", tokens);
 
     expect(await holdings(account.id)).toEqual([
-      { symbol: "BTC", unitPrice: 64000, identifier: "bitcoin", amount: 0.5 },
+      { symbol: "BTC", ref: `${NAMER}/issued:bitcoin`, amount: 0.5 },
     ]);
   });
 
@@ -68,18 +62,35 @@ describe("createManualAccount (D1 round-trip)", () => {
       JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", ticket: ticketOf("bitcoin") }]),
     );
     const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
-    expect(h.identifier).toBe("bitcoin"); // 哪怕 symbol 敲成了 XBT
+    expect(h.ref).toBe(`${NAMER}/issued:bitcoin`); // 哪怕 symbol 敲成了 XBT
   });
 
-  // 票是从网络上来的 —— 解不开就当没选币,退回按 symbol 认,而不是崩掉或写脏。
-  it("票是伪造/损坏的 → 当作没选币,按 symbol 认", async () => {
+  // 票是从网络上来的 —— 解不开就当没选币(退回 `manual/custom:<名字>`),而不是崩掉或写脏。
+  it("票损坏 → 当作没选币,自己一行", async () => {
     const account = await createManualAccount(
       USER,
       "M",
       JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", ticket: "!!!not-base64!!!" }]),
     );
     const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
-    expect(h.identifier).toBeNull(); // 上游不认识 XBT → 自己一行,没有上游命名
+    expect(h.ref).toBeNull(); // 没有上游命名 → 自己一行,用他填的单价估值
+  });
+
+  // **手编一张合规但别家命名者的票**(#223)。票没有签名,谁都能自己编一张;而 `issued` 的
+  // 含义是「命名者为它负责」—— 不核对命名者的话,这张票会让 mint 掉回 symbol 那一档,
+  // 用户敲的 `BTC` 就又被拿去认币了,正是这一票收紧掉的东西。
+  //
+  // 用 BTC + 一张 `evil/issued:whatever`:BTC 在候选里认得出来,所以「有没有挡住」看得见 ——
+  // 挡住了就是自己一行,没挡住就会挂上上游那条 BTC 的 ref。
+  it("票合规但命名者是别家 → 也当作没选币,且不按 symbol 认", async () => {
+    const forged = tokenTicket.encode("evil/issued:whatever");
+    const account = await createManualAccount(
+      USER,
+      "M",
+      JSON.stringify([{ symbol: "BTC", unitPrice: "1", amount: "1", ticket: forged }]),
+    );
+    const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    expect(h.ref).toBeNull();
   });
 
   // creds 里那个 `tokens` 字段只剩一个空壳:它是**创建表单的入参声明**,不再是持仓的存储处。
@@ -96,15 +107,13 @@ describe("createManualAccount (D1 round-trip)", () => {
     await expect(createManualAccount(USER, "M", "[]")).rejects.toThrow();
   });
 
-  it("没选币 → identifier 为空(上游没认出来),照样落库", async () => {
+  it("没选币 → 那位命名者那条 ref 为空(没认出来),照样落库", async () => {
     const account = await createManualAccount(
       USER,
       "M",
       JSON.stringify([{ symbol: "PRIVATETOKEN", unitPrice: "3200", amount: "2" }]),
     );
-    expect(await holdings(account.id)).toEqual([
-      { symbol: "PRIVATETOKEN", unitPrice: 3200, identifier: null, amount: 2 },
-    ]);
+    expect(await holdings(account.id)).toEqual([{ symbol: "PRIVATETOKEN", ref: null, amount: 2 }]);
   });
 });
 
@@ -130,7 +139,7 @@ describe("createAccountFor (manual: shared validate + dispatch)", () => {
       ]),
     });
     expect(await holdings(account.id)).toEqual([
-      { symbol: "BTC", unitPrice: 64000, identifier: "bitcoin", amount: 0.5 },
+      { symbol: "BTC", ref: `${NAMER}/issued:bitcoin`, amount: 0.5 },
     ]);
   });
 });

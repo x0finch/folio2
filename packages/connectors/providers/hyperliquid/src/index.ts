@@ -56,8 +56,8 @@ const MARGIN_ASSET = "USDC";
 // 场馆命名者 = connectorId(与 manifest 的 `id` 同源,不许两处各写一遍)。
 const PROVIDER_ID = "hyperliquid";
 
-// symbol 大写归一由本 provider 负责(见 @folio/oracle-ref:不透明 id 原样透传)。
-const venueTokenRef = (symbol: string) => tokenRef.opaque(PROVIDER_ID, symbol.trim().toUpperCase());
+// symbol 大写归一由本 provider 负责(见 @folio/oracle-ref:`issued` 的标识原样透传 —— 归一是生产者的事)。
+const venueTokenRef = (symbol: string) => tokenRef.issued(PROVIDER_ID, symbol.trim().toUpperCase());
 
 const num = (s: string | null | undefined): number => Number(s ?? 0);
 

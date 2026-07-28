@@ -19,46 +19,48 @@ describe("无候选 / 独一份", () => {
   });
 
   it("只有一个候选 → 认,哪怕它连排名都没有(没有可混淆的对象)", () => {
-    expect(pickByConfidence([cand("src/lonely")])).toBe("src/lonely");
+    expect(pickByConfidence([cand("src/issued:lonely")])).toBe("src/issued:lonely");
   });
 });
 
 describe(`最佳在 top-${RESOLUTION_TOP_RANK} 之内 → 认`, () => {
   it("头部币压过任何长尾同名币", () => {
-    const got = pickByConfidence([cand("src/scam", 900), cand("src/bitcoin", 1)]);
-    expect(got).toBe("src/bitcoin");
+    const got = pickByConfidence([cand("src/issued:scam", 900), cand("src/issued:bitcoin", 1)]);
+    expect(got).toBe("src/issued:bitcoin");
   });
 
   it("恰好在门上 → 认(门是闭区间)", () => {
     const got = pickByConfidence([
-      cand("src/edge", RESOLUTION_TOP_RANK),
-      cand("src/other", RESOLUTION_TOP_RANK + 1),
+      cand("src/issued:edge", RESOLUTION_TOP_RANK),
+      cand("src/issued:other", RESOLUTION_TOP_RANK + 1),
     ]);
-    expect(got).toBe("src/edge");
+    expect(got).toBe("src/issued:edge");
   });
 
   // 差一名就得走碾压那一档:51 对 52 谁也没碾压谁 → 不认。
   it("差一名出门 → 落到碾压判定,而 51 比 52 算不上碾压 → 不认", () => {
     const got = pickByConfidence([
-      cand("src/a", RESOLUTION_TOP_RANK + 1),
-      cand("src/b", RESOLUTION_TOP_RANK + 2),
+      cand("src/issued:a", RESOLUTION_TOP_RANK + 1),
+      cand("src/issued:b", RESOLUTION_TOP_RANK + 2),
     ]);
     expect(got).toBeUndefined();
   });
 
   it("排序不看入参顺序 —— 最佳排在后面照样认", () => {
-    expect(pickByConfidence([cand("src/z", 999), cand("src/a", 2)])).toBe("src/a");
+    expect(pickByConfidence([cand("src/issued:z", 999), cand("src/issued:a", 2)])).toBe(
+      "src/issued:a",
+    );
   });
 });
 
 describe("只有最佳有排名 → 无歧义", () => {
   it("次席连排名都没有(不在 warm 里)→ 认最佳,哪怕它在门外", () => {
-    const got = pickByConfidence([cand("src/known", 900), cand("src/nameless")]);
-    expect(got).toBe("src/known");
+    const got = pickByConfidence([cand("src/issued:known", 900), cand("src/issued:nameless")]);
+    expect(got).toBe("src/issued:known");
   });
 
   it("全都没排名 → 不认(无从比较,宁可各成一行)", () => {
-    expect(pickByConfidence([cand("src/a"), cand("src/b")])).toBeUndefined();
+    expect(pickByConfidence([cand("src/issued:a"), cand("src/issued:b")])).toBeUndefined();
   });
 });
 
@@ -66,22 +68,26 @@ describe(`碾压次席 ${RESOLUTION_DOMINANCE} 倍 → 认`, () => {
   // 排名是「越小越好」,所以碾压 = 次席的名次数是最佳的若干倍。
   it("倍数达标 → 认", () => {
     const got = pickByConfidence([
-      cand("src/big", 100),
-      cand("src/small", 100 * RESOLUTION_DOMINANCE),
+      cand("src/issued:big", 100),
+      cand("src/issued:small", 100 * RESOLUTION_DOMINANCE),
     ]);
-    expect(got).toBe("src/big");
+    expect(got).toBe("src/issued:big");
   });
 
   it("差一点就不认(比门槛低一名)", () => {
     const got = pickByConfidence([
-      cand("src/big", 100),
-      cand("src/small", 100 * RESOLUTION_DOMINANCE - 1),
+      cand("src/issued:big", 100),
+      cand("src/issued:small", 100 * RESOLUTION_DOMINANCE - 1),
     ]);
     expect(got).toBeUndefined();
   });
 
   it("只看最佳与次席,第三名再远也不影响", () => {
-    const got = pickByConfidence([cand("src/a", 100), cand("src/b", 120), cand("src/c", 99999)]);
+    const got = pickByConfidence([
+      cand("src/issued:a", 100),
+      cand("src/issued:b", 120),
+      cand("src/issued:c", 99999),
+    ]);
     expect(got).toBeUndefined();
   });
 });

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatTokenRef, parseTokenRef, type TokenRefParts, tokenRef } from "../src";
+import {
+  formatTokenRef,
+  hasTrustedSymbol,
+  parseTokenRef,
+  type TokenRefParts,
+  tokenRef,
+} from "../src";
 import cases from "./fixtures/token-ref-cases.json" with { type: "json" };
 
 // tokenRef 文法(ADR 0020)。**用例表在 fixtures/token-ref-cases.json** —— 输入、期望输出、
@@ -13,7 +19,7 @@ import cases from "./fixtures/token-ref-cases.json" with { type: "json" };
 
 interface ConstructCase {
   note: string;
-  kind: "native" | "contract" | "opaque";
+  kind: "native" | "contract" | "issued" | "custom";
   namer: string;
   value?: string;
   ref: string;
@@ -41,14 +47,21 @@ describe("用例表", () => {
 
 // —— 造串:调用方给结构,`kind` 由构造函数定,不手写 ——
 describe("tokenRef.* 构造", () => {
-  it.each(construct)("$kind — $note", ({ kind, namer, value, ref }) => {
-    const built =
-      kind === "native"
-        ? tokenRef.native(namer)
-        : kind === "contract"
-          ? tokenRef.contract(namer, value as string)
-          : tokenRef.opaque(namer, value as string);
-    expect(built).toBe(ref);
+  const build = ({ kind, namer, value }: ConstructCase): string => {
+    switch (kind) {
+      case "native":
+        return tokenRef.native(namer);
+      case "contract":
+        return tokenRef.contract(namer, value as string);
+      case "issued":
+        return tokenRef.issued(namer, value as string);
+      case "custom":
+        return tokenRef.custom(namer, value as string);
+    }
+  };
+
+  it.each(construct)("$kind — $note", (c) => {
+    expect(build(c)).toBe(c.ref);
   });
 
   it("造出来的串拆回去就是同一个结构(构造与解析同一套归一)", () => {
@@ -111,11 +124,47 @@ describe("formatTokenRef", () => {
         address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       },
       { kind: "native", namer: "bitcoin" },
-      { kind: "opaque", namer: "coingecko", id: "usd-coin" },
+      { kind: "issued", namer: "coingecko", id: "usd-coin" },
+      { kind: "custom", namer: "manual", name: "MYCOIN" },
     ];
     for (const p of parts) {
       const parsed = parseTokenRef(formatTokenRef(p));
       expect(parsed).toMatchObject(p);
     }
+  });
+});
+
+// —— 「这条 ref 带来的 symbol 有没有背书人」——
+// 判据收在文法里(而不是留给每个调用方自己 switch),因为它问的就是形状:选哪个构造函数,
+// 就是在声明这条 ref 的证据强度。表是手写的字面表,不从 kind 反算 —— 否则它只会跟着实现走。
+describe("hasTrustedSymbol", () => {
+  const table = [
+    {
+      ref: "bitcoin/native",
+      trusted: true,
+      note: "原生币:symbol 是链自己的,而且原生币按设计不进映射表 —— symbol 是它唯一的一条路",
+    },
+    { ref: "binance/issued:USDC", trusted: true, note: "场馆上架代号:binance 为这个标识负责" },
+    { ref: "coingecko/issued:usd-coin", trusted: true, note: "上游 coin id:命名者就是发它的人" },
+    {
+      ref: "evm:1/contract:0xabc",
+      trusted: false,
+      note: "合约的 symbol 是部署者随手填的 —— 山寨合约照样能写 USDC",
+    },
+    {
+      ref: "manual/custom:USDC",
+      trusted: false,
+      note: "用户自己敲的,没有注册表背书 —— 这一条正是第四轮的由来",
+    },
+    { ref: "nonsense", trusted: false, note: "读不懂 → 关于它我们什么都不知道,最不该猜" },
+  ];
+
+  it.each(table)("$ref → $trusted — $note", ({ ref, trusted }) => {
+    expect(hasTrustedSymbol(parseTokenRef(ref))).toBe(trusted);
+  });
+
+  it("表里两档都有(全 true 或全 false 的表等于没测)", () => {
+    expect(table.some((c) => c.trusted)).toBe(true);
+    expect(table.some((c) => !c.trusted)).toBe(true);
   });
 });

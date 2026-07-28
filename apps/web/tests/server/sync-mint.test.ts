@@ -59,7 +59,7 @@ async function seedWarm(
     {
       asOf,
       rows: rows.map((r) => ({
-        info: { ref: `${NAMER}/${r.id}`, symbol: r.symbol, name: r.symbol },
+        info: { ref: `${NAMER}/issued:${r.id}`, symbol: r.symbol, name: r.symbol },
         price: { unitPrice: 1, marketCapRank: r.rank, asOf: Date.now() },
       })),
     },
@@ -146,7 +146,7 @@ describe("落库后快照行带 token_id", () => {
 
     // 那个 Token 确实被上游认出来了(有 coingecko 那一档的 ref 行)。
     const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/usd-coin");
+    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:usd-coin");
   });
 
   it("映射表没有的合约 → 也建行、快照照写,只是上游没认出来", async () => {
@@ -185,7 +185,7 @@ describe("落库后快照行带 token_id", () => {
 
     const rows = await balancesOf(snapshotId);
     const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/ethereum");
+    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:ethereum");
   });
 
   // 合约的 symbol 是部署者随手填的 —— 地址查不到就该老实认不出来(#210 的闸)。
@@ -210,13 +210,13 @@ describe("落库后快照行带 token_id", () => {
   // 内存 fake 用 Map,静静吞掉了这个约束。所以这一支必须在真 D1 上跑。
   it("上游命名形的 ref(手记选了币)→ 自己就是锚,只出一条 ref 行", async () => {
     const accountId = await makeAccount();
-    const snapshotId = await syncWith([bal("coingecko/usd-coin", "USDC")], accountId);
+    const snapshotId = await syncWith([bal("coingecko/issued:usd-coin", "USDC")], accountId);
 
     const rows = await balancesOf(snapshotId);
     expect(rows[0].tokenId).toBeTruthy();
 
     const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/usd-coin");
+    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:usd-coin");
     // 只有一条 ref 行 —— 去重生效(不然主键就撞了)。
     const { results } = await env.DB.prepare(
       "SELECT count(*) as n FROM token_refs WHERE user_id = ? AND token_id = ?",
@@ -242,9 +242,9 @@ describe("落库后快照行带 token_id", () => {
         bal(USDC_ETH, "USDC"),
         bal(USDC_ARB, "USDC"),
         bal(USDC_SOL, "USDC"),
-        bal("binance/USDC", "USDC"),
-        bal("okx/USDC", "USDC"),
-        bal("coingecko/usd-coin", "USDC"),
+        bal("binance/issued:USDC", "USDC"),
+        bal("okx/issued:USDC", "USDC"),
+        bal("coingecko/issued:usd-coin", "USDC"),
       ],
       accountId,
     );
@@ -267,9 +267,9 @@ describe("perp 两类行都有 token_id", () => {
 
     const snapshotId = await syncWith(
       [
-        bal("hyperliquid/USDC", "USDC", { kind: "perp_equity" }),
+        bal("hyperliquid/issued:USDC", "USDC", { kind: "perp_equity" }),
         // 单仓位行金额为零、不进聚合,但也该有身份。
-        bal("hyperliquid/BTC", "BTC", { kind: "perp_position", usdValue: 0 }),
+        bal("hyperliquid/issued:BTC", "BTC", { kind: "perp_position", usdValue: 0 }),
       ],
       accountId,
     );
@@ -356,11 +356,13 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     await seedWarm([{ id: "chainlink", symbol: "LINK", rank: 15 }], Date.now() - YEAR_MS);
     const accountId = await makeAccount();
 
-    const snapshotId = await syncWith([bal("binance/LINK", "LINK")], accountId);
+    const snapshotId = await syncWith([bal("binance/issued:LINK", "LINK")], accountId);
 
     const rows = await balancesOf(snapshotId);
     const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/chainlink");
+    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe(
+      "coingecko/issued:chainlink",
+    );
     expect(outbound).toEqual([]); // ← 本条的重点
   });
 
@@ -368,7 +370,7 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     await seedWarm([{ id: "chainlink", symbol: "LINK", rank: 15 }], Date.now() - YEAR_MS);
     const accountId = await makeAccount();
 
-    const snapshotId = await syncWith([bal("binance/ZZZ", "ZZZ")], accountId);
+    const snapshotId = await syncWith([bal("binance/issued:ZZZ", "ZZZ")], accountId);
 
     const rows = await balancesOf(snapshotId);
     const store = createUserTokenStore(env, { userId: USER, namer: NAMER });

@@ -69,7 +69,7 @@ describe("deriveLiveAccountTotals", () => {
           id,
           {
             id,
-            ref: "coingecko/x",
+            ref: "coingecko/issued:x",
             symbol: id.replace("tk-", ""),
             name: id,
             price:

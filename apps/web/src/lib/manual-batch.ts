@@ -29,7 +29,6 @@ export function runningOk(activities: DerivableActivity[]): boolean {
 export interface Token {
   id: string;
   symbol: string;
-  unitPrice: number;
   activities: DerivableActivity[];
 }
 
@@ -64,7 +63,6 @@ export type ResolvedDraft = Omit<BatchDraft, "token"> & { token: ResolvedTokenIn
 interface PlannedToken {
   id: string;
   symbol: string;
-  unitPrice: number;
 }
 interface PlannedActivity {
   tokenId: string;
@@ -101,14 +99,14 @@ export function planManualBatch(existing: Token[], drafts: ResolvedDraft[]): Bat
     if (!token) {
       // 这个币在本账户还没有持仓 → 声明一条。**id 不在这里造** —— 它是 mint 给的,
       // 所以同一个币被两条草稿引用时天然落到同一条持仓上。
-      token = {
-        id: d.token.tokenId,
-        symbol: d.token.symbol,
-        unitPrice: d.token.unitPrice,
-        activities: [],
-      };
+      //
+      // **不在这里替用户声明价格。** 一度试过「没有市价就把这笔活动的成交价抄进 self_price」——
+      // 那是把派生值存进字段:第一笔活动抄了个 0 进去之后,后面记多少笔都治不好它(实测 SSGS)。
+      // 「市场不认识这个币时它值多少」由展示那一侧**每次算**(见 manual-activity 的 fallbackUnitPrice),
+      // 不落库。这里只忠实记录用户声明了什么 —— 没声明就是 null。
+      token = { id: d.token.tokenId, symbol: d.token.symbol, activities: [] };
       working.push(token);
-      declare.push({ id: token.id, symbol: token.symbol, unitPrice: token.unitPrice });
+      declare.push({ id: token.id, symbol: token.symbol });
     }
     activities.push({
       tokenId: token.id,

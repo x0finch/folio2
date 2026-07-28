@@ -12,6 +12,7 @@ import {
   loadManualHistoryRows,
 } from "../../src/lib/server/internal/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle2";
+import { ticketOf } from "./ticket";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。
 // 网络无关:结构类用例用**无 identifier** 的 token(不触发 oracle priceSeries 回源,走账本价②/unitPrice③);
@@ -25,7 +26,7 @@ const D0 = B0 * DAY; // 日对齐的开仓时刻 → 日桶数学干净
 // 无 identifier(未选币)→ 价走账本②/unitPrice③,buildHistoricalPriceAt 跳过、不回源。
 const localBtc = { symbol: "BTC", unitPrice: 100 };
 // 有 identifier(选了币)→ ① 走注入的 oracle 历史价。
-const btcRef = { symbol: "BTC", unitPrice: 100, identifier: "bitcoin" };
+const btcRef = { symbol: "BTC", unitPrice: 100, ticket: ticketOf("bitcoin") };
 // #203:历史价按 **token_id** 取(新参考层的 priceSeries 收内部 id),不再按厂商 ref 拼键。
 // 所以要先让持仓落库、拿到 mint 出来的 id,再往那个 id 上种价。
 async function seedDaily(
@@ -260,13 +261,14 @@ describe("loadManualHistoryRows (grid)", () => {
 });
 
 describe("loadManualAccountLiveTotal", () => {
-  it("当下实时盯市总额(测试环境价缓存冷 → 回退 amount × unitPrice)", async () => {
+  it("当下实时盯市总额(缓存冷 → 回退 amount × 账本最近一笔的价)", async () => {
     const acc = await emptyAccount();
     await addManualActivities(USER, acc.id, [
       { token: btcRef, kind: "add", amount: 2, occurredAt: D0, price: 55000 },
     ]);
-    // live 走 enrich 现价盯市;测试环境缓存冷 → 回退 unitPrice=100,amount=2 → 200。
-    expect(await loadManualAccountLiveTotal(USER, acc.id)).toBe(200);
+    // live 走 enrich 现价盯市;测试环境缓存冷 → 回退到**账本**里那笔 55000(价只有账本一个来源),
+    // 2 × 55000 = 110000。以前这里回退的是草稿上那个 `unitPrice: 100`,那条路已经没有了。
+    expect(await loadManualAccountLiveTotal(USER, acc.id)).toBe(110000);
   });
 
   it("账户不存在 / 非本人 → null", async () => {
@@ -284,7 +286,7 @@ describe("loadManualAccountLiveTotal", () => {
       acc.id,
       JSON.stringify({ tokens: JSON.stringify([{ symbol: "BTC", unitPrice: 100, amount: 0 }]) }),
     );
-    // live 按账本现算(1 × unitPrice 100,缓存冷回退)= 100,而非 stale creds 的 0。
-    expect(await loadManualAccountLiveTotal(USER, acc.id)).toBe(100);
+    // live 按账本现算(1 × 账本那笔 60000,缓存冷回退)= 60000,而非 stale creds 的 0。
+    expect(await loadManualAccountLiveTotal(USER, acc.id)).toBe(60000);
   });
 });

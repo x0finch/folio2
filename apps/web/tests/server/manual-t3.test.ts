@@ -1,8 +1,6 @@
 import { env } from "cloudflare:test";
-import { formatTokenRef } from "@folio/oracle-ref";
-import { tokenTicket } from "@folio/oracle2";
 import { beforeEach, describe, expect, it } from "vitest";
-import { type CredsToken, deriveAmount } from "../../src/lib/manual-activity";
+import { deriveAmount } from "../../src/lib/manual-activity";
 import { db } from "../../src/lib/server/internal/db";
 import {
   addManualActivities,
@@ -14,6 +12,7 @@ import {
   updateToken,
 } from "../../src/lib/server/internal/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle2";
+import { ticketOf } from "./ticket";
 
 // T3(#155)服务端写路径集成:持仓 CRUD + 批量活动(原子)+ 删/改活动,全落库。真实 D1(Miniflare)。
 // 不隔离每测存储 → beforeEach 重置。
@@ -36,21 +35,16 @@ async function resetUser(): Promise<void> {
 
 beforeEach(resetUser);
 
-// 选币下拉发给前端的那张票 = base64url 编过的 tokenRef。测试里现编,与生产同一个编码器 ——
-// 手写 base64 字面量的话,编码规则一改测试就静默失配。
-const ticketOf = (coinId: string) =>
-  tokenTicket.encode(formatTokenRef({ namer: NAMER, localName: coinId }));
-
 // 某 manual 账户已物化的 creds.tokens(投影)。
 // 该账户的持仓:定义 + 账本折叠出的数量(compute-on-read;#203 之后没有 creds.tokens 那个投影了)。
-async function readTokens(accountId: string): Promise<CredsToken[]> {
+async function readTokens(accountId: string) {
   const rows = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
   return Promise.all(
     rows.map(async (r) => ({
+      id: r.id,
       symbol: r.symbol,
-      unitPrice: r.unitPrice,
       amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
-      ...(r.identifier ? { identifier: r.identifier } : {}),
+      ref: r.ref,
     })),
   );
 }
@@ -75,13 +69,14 @@ describe("createToken", () => {
       symbol: "ETH",
       unitPrice: 3000,
       amount: 2,
+      ticket: ticketOf("ethereum"),
     });
     const tokens = await readTokens(account.id);
     expect(tokens.map((t) => [t.symbol, t.amount]).sort()).toEqual([
       ["BTC", 1],
       ["ETH", 2],
     ]);
-    expect(tokens.find((t) => t.symbol === "ETH")?.identifier).toBe("ethereum");
+    expect(tokens.find((t) => t.symbol === "ETH")?.ref).toBe(`${NAMER}/issued:ethereum`);
   });
 });
 
@@ -97,11 +92,13 @@ describe("updateToken", () => {
       amount: 3, // 从 1 → 3
     });
     const tokens = await readTokens(account.id);
-    expect(tokens[0].unitPrice).toBe(65000);
     expect(tokens[0].amount).toBe(3);
-    // 应追加了一条对齐 set(原开仓 set + 对齐 set = 2 条）。
+    // 应追加了一条对齐 set(原开仓 set + 对齐 set = 2 条),**而改的价落在那一笔上** ——
+    // 价只有账本一个来源,所以「改单价」这件事必须在账本里有落点。
     const activities = await db.listManualActivityByToken(USER, account.id, btc.id);
-    expect(activities.filter((a) => a.kind === "set")).toHaveLength(2);
+    const sets = activities.filter((a) => a.kind === "set");
+    expect(sets).toHaveLength(2);
+    expect(sets.at(-1)?.price).toBe(65000);
   });
 
   it("目标 amount 不变 → 不追加活动", async () => {

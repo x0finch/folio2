@@ -1,12 +1,14 @@
 # `tokenRef`:代币命名统一成「谁 / 它在那儿叫什么」
 
-Status: accepted,文法经**两轮修订**(本文正文记录的原始决策算第一轮,下方正文与选项一概不改)。
+Status: accepted,文法经**四轮修订**(本文正文记录的原始决策算第一轮,下方正文与选项一概不改)。
 
 **第二轮**([ADR 0021](0021-per-user-tokens-token-id-as-sole-identity.md) / [#192](https://github.com/x0finch/folio2/issues/192),已实现):**`eip155:` 改 `evm:`** —— 本文法早已不是 CAIP(真 CAIP 的比特币是 `bip122:…`),一半标准一半自编更别扭。同时**去掉 `<assetNs>:` 那一段**,形状从三种降到两种。
 
-**第三轮(本轮):把中间那一段收回来,但只留一个文法自己拥有的固定标记。** 第二轮删它的理由之一是「那个词是各 producer 自己编的、**全仓没有任何地方按它分支**」—— 后半句已被证伪:mint 的 symbol 那一档**必须**知道一条 ref 是不是链上合约地址,否则一个 symbol 写着 `USDC` 的山寨合约会被并进真 USDC(见下「第三轮」小节)。前半句仍然成立,所以回来的**不是** `assetNs`,而是值域封闭、由文法定死的 `contract:`。
+**第三轮**([#210](https://github.com/x0finch/folio2/issues/210),已实现):**把中间那一段收回来,但只留一个文法自己拥有的固定标记。** 第二轮删它的理由之一是「那个词是各 producer 自己编的、**全仓没有任何地方按它分支**」—— 后半句已被证伪:mint 的 symbol 那一档**必须**知道一条 ref 是不是链上合约地址,否则一个 symbol 写着 `USDC` 的山寨合约会被并进真 USDC(见下「第三轮」小节)。前半句仍然成立,所以回来的**不是** `assetNs`,而是值域封闭、由文法定死的 `contract:`。
 
-形状三种:`<namer>/native`、`<namer>/contract:<地址>`、`<namer>/<不透明 id>`。
+**第四轮(本轮,[#223](https://github.com/x0finch/folio2/issues/223)):解析改白名单,兜底从「信任」变成「挡住」。** 第三轮之后仍有一支是**反向定义**的桶(「不是 native、不是 contract 的都算」),而 symbol 那一档正是按它放行 —— 于是用户在手记里自己敲的 `manual/USDC` 掉进兜底、被当成「命名者发的标识」,静默并进了真 USDC。本轮给每种形状都配一个标记,并把那一支拆成两支:`issued:`(命名者发的,它为之负责)与 `custom:`(调用方自造,没有背书)。见下「第四轮」小节。
+
+形状四种:`<namer>/native`、`<namer>/contract:<地址>`、`<namer>/issued:<标识>`、`<namer>/custom:<名字>`;**其余一律 `unknown`**。
 修订 [ADR 0012](0012-oracle-merge-vendor-neutral-identity-multi-source.md) 决策 #2(`TokenRef` 不再是 vendor 引用);聚合原则([ADR 0001](0001-aggregate-by-token-group.md) / [0002](0002-never-merge-by-symbol.md))不变;存储层合表与 mint-on-write 属 [#176](https://github.com/x0finch/folio2/issues/176)。
 
 ---
@@ -81,3 +83,78 @@ const canGuess = parsed.kind !== "contract";
 - **mint 的 symbol 闸塌成一句** `parsed.kind !== "contract"`。原本要在 connector manifest 加的 `identifyBySymbol` 字段不用加了,mint 里那句「或者它是原生币」也不用写。
 - **「namer 是不是链」仍然不需要**:平台由 provider 随余额直接报(#193),那个问题在展示侧压根不存在;这一轮回来的标记只回答「右半边是不是合约地址」,不回答左半边是什么。
 - **代价(明知接受)**:一个概念在文法里留了个位置,而它当前只有一个消费方(mint 的 symbol 闸)。第二轮正是因为「没有消费方」把它删了,这轮因为找到了消费方把它加回来 —— 判断依据是「有没有人按它分支」,那个判断本身是对的,只是第二轮时我没找全。
+
+---
+
+## 第四轮:标记为什么打在可信那边
+
+第三轮修好了合约那一支,但**机制原样留着**:解析仍是 fail-open 的,兜底掉进「信任」那一档。
+
+```
+是 native?          → native
+以 contract: 开头?  → contract
+带冒号?             → unknown(挡住)
+其他                → opaque(信任)   ← 兜底
+```
+
+于是手记里**用户自己敲的** symbol —— `manual/USDC` —— 没有冒号,掉进兜底,被当成「命名者发的标识」,mint 就拿它去认币了。用户在下拉里点的是「找不到?手动输入 symbol」,意思是「这不是列表里那个」,而系统把它**静默并进真 USDC**:按市价盯市、和链上持仓聚合,认定还冻进快照。UI 文案写的是「找不到」,代码转头拿这个 symbol 回列表里猜 —— 文案和行为直接矛盾。
+
+### 四形状 + 各自的背书人
+
+| 形状 | 谁在背书 | symbol 能当身份线索吗 |
+|---|---|---|
+| `native` | 链自己(原生币唯一,而且它按设计不进全局映射表 —— symbol 是**唯一**的一条路) | 可以 |
+| `contract:<地址>` | 没有人。symbol 是**部署者随手填的字符串** | 不行 |
+| `issued:<标识>` | **命名者**。它有一份注册表并为这个标识负责(场馆的上架代号 / 上游的 coin id / vendor id) | 可以 |
+| `custom:<名字>` | 没有人。调用方自造,不经任何注册表 | 不行 |
+| 读不懂 | —— 关于它我们什么都不知道 | 不行 |
+
+### 只加一种形状不够
+
+把手敲的那支挪出去能修掉这个实例,但机制留着:下次谁再产出一种没有冒号的新 localName,照样掉进「信任」,照样要等出了事才发现。所以解析改**白名单** —— 没匹配上已知标记的一律 `unknown`,兜底 = 挡住。
+
+### 标记为什么打在可信那边(这一轮最重要的一条)
+
+`binance/USDC` 与 `manual/USDC` **逐字节相同**。内容上分不开,只能靠标记分。那问题就只剩「标记打在哪一边、漏了会怎样」:
+
+| 漏标记的一边 | 后果 |
+|---|---|
+| 打在**可信**那边、漏了 | 被当成不可信 → 自己一行、没实时价。**降级、看得见、能改回来** |
+| 打在**不可信**那边、漏了 | 被当成可信 → 静默并进真 USDC、按市价盯市、冻进快照。**错得无声** |
+
+两种错的代价不对称,所以标记打在**可信**那边(`native` 是完整保留字、`issued:` 是显式标记),漏了往安全的方向倒。
+
+顺带说清 `opaque` 这个名字为什么撒了谎:它说的是「我们不看里面」,可 mint 恰恰在看 —— 它拿随行的 symbol 当身份证据。名字不达意正是这次误分类的根:一个反向定义的桶**没有入门考试**,东西错放进去不会有任何东西响。改名 `issued` 之后,门槛写在了名字里 —— 往里放东西之前先问:**这个 namer 是不是真的发了这个标识?**
+
+### 进桶的门槛(补上反向的那一条)
+
+原来只有一条正向规则:**有消费者按它分支才加形状**(第二轮删 `<assetNs>:`、第三轮加回 `contract:` 都是照这条走的)。本轮补上反向的:**往 `issued` 里放东西之前先问「这个 namer 是不是真的发了这个标识」。** 拿这条把全仓 13 处过了一遍,除手记那两处外全部合格(场馆代号 / 上游 coin id / vendor id)。
+
+### 前缀名的取舍
+
+- **不叫 `manual:`** —— 那是 app 的连接器 id,把它刻进文法与文法自己拒绝 `erc20:` 的理由相同(「又替 producer 编词」),而且左段已经是 `manual` 了。
+- **不叫 `symbol:`** —— `binance/issued:USDC` 也是个 symbol,两个都是 symbol 只给一个安前缀会读不懂。真正的分野是**有没有注册表背书**。
+
+---
+
+## 第四轮的 Consequences
+
+- **形状 3 → 4,解析改白名单**:`native` / `contract:<地址>` / `issued:<标识>` / `custom:<名字>`,其余一律 `unknown`。原来那条 `if (localName.includes(":")) return unknown` 被「必须匹配已知标记」吸收,删掉 —— 不容旧、不容自创、也不容省略标记。
+- **`opaque` → `issued`**(类型、构造函数、`kind` 字符串),**新增 `tokenRef.custom(namer, name)`**。`custom:` 的名字**由文法归一成大写**(同 EVM 地址小写归一),不靠调用点自觉 —— 否则 `custom:usdc` 与 `custom:USDC` 是两行。
+- **背书判据收进文法**:`hasTrustedSymbol(parsed)` 由 `@folio/oracle-ref` 导出,mint 里那段三选一塌成一行 `if (!hasTrustedSymbol(parsed)) return undefined`。`contract` / `custom` / `unknown` 三种从此落在**同一条理由**下,而不是合约有一段注释、手敲的再补一个参数。
+- **行为变更(唯一一处)**:手记没选币时产 `manual/custom:<名字>`,**不再按 symbol 认币** —— 用户敲 `BTC` 得到自己一行,用他填的单价估值,而不是并进真 BTC 拿实时价。这正是本轮要的:UI 说的是「找不到」,行为就该是「找不到」。软着陆(手敲的 symbol 恰好撞上已知币时提示「看起来是 USDC,要关联吗?」)与改绑各另立票 —— **提示,不静默做**。
+- **`binance/USDC` → `binance/issued:USDC`,`coingecko/x` → `coingecko/issued:x`**:串变了,按 symbol 认币的行为**一字不变**(那一支仍然放行)。
+- **切前缀的地方要改成走文法**:`coinIdOf`(coingecko adapter)原来靠切左段前缀取 coin id,现在过 `parseTokenRef` 并只认 `issued` 那一支。**这是对不可信输入的防御,不是在修坏数据** —— 全仓没有生产者产 `coingecko/contract:0x…`(`contract` 形的命名者恒是链,本源产的恒是 `issued:`),它只能从手搓的票进来(`getTokenPrice` 收的 ticket 只过文法校验)。切前缀的后果也不严重:把 `contract:0x…` 当 coin id 发上去,换回一个空结果 —— 白跑一趟而已,认币那条路另有 `hasTrustedSymbol` 挡着。
+- **给整条 ref,不给右半边**(#227 评审):`listManualHoldingsByAccount` 原来回的是裸的上游 id(字段名 `identifier`),于是每个调用方都得把 ref 拼回去才能用 —— 而拼 ref 就得知道命名者是谁,「当前上游是 CoinGecko」这件事因此一路漏进了 apps/web(甚至让它去 import 一个 `cgkRef`)。改成回 `ref: TokenRef | null` 之后调用方只搬运:编成票、或当 Balance 的 tokenRef 交出去。**这是本轮的一条通则** —— 跨层传 ref 就传整条,右半边是文法的内部构造,不是接口。
+  - 连带:`ManualHolding.identifier` → `.ref`、`CredsToken.identifier?` → `.ref`,`identifier` 这个概念从 app 里整个消失;`custom:` 那一支不需要被特别挡掉(挡「拿手敲的名字去认币」是 mint 的活,不是这个投影的)。
+- **`issued` 是个声明,进门那一处得验**:票(ticket)没有签名 —— base64url 谁都能解开,也谁都能自己编一张。手编一张 `<随便什么>/issued:<随便什么>` 塞进手记表单,mint 会「命名者不匹配 → 映射表查不到 → `hasTrustedSymbol(issued)` 为真 → 走 symbol 那一档」,**用户手敲的 symbol 又成了可信线索** —— 本轮刚收紧的东西被绕开了。故 `tokenTicket.decode` 改成收一个必填的 `namer`,命名者对不上就当没选币;顺带回**规范形**而不是原样回抛(这条 ref 会直接落进 `token_refs`,表里只能有规范形)。
+  - **只比命名者就够**,不必再挑形状:命名者对上之后,四种形状在 mint 里各有各的正常去处。
+  - **文法绑不住这件事,所以不该往文法里塞**:namer 与形状在文法层没有绑定关系(`coingecko/native` 语法合法、语义胡说),但就算给 namer 加一张分类表也拦不住手编的票 —— 问题不是分错了类,是「那个命名者我们认不认识」,而这是**部署状态**(装了哪个上游),文法包按设计不知道(ADR 0023)。第一轮否掉「给左半边建分类表」的结论因此仍然成立:没有消费方需要 namer 的*类别*,需要的是进门处一次与配置值的相等比较。
+  - 风险量级(明写,免得后人以为修的是个洞):能编这张票的只有**账号本人**(server fn 挂着同源 CSRF 闸,别的站点构造不出来),而他在选币下拉里点一下就能合法拿到同样结果。补它的理由是**服务端的保证不该依赖客户端守规矩**,不是风险。
+- **时机就是现在**:串一变,库里所有 ref 都要跟着变,但眼下代价接近零 —— `snapshot_balances.token_ref` 本来就要删([#202](https://github.com/x0finch/folio2/issues/202))、`global_token_ref_index` cron 一天一次整表重建、`token_daily_prices` 纯缓存、`token_refs` 的前提本就是删库从头 sync([#176](https://github.com/x0finch/folio2/issues/176))。等 #202 落地、库里跑上真数据之后再动就是一次真迁移了。
+- **标记本身大小写不敏感**(`binance/ISSUED:USDC` 拆出来是 `issued:USDC`),但标记后面那段不动 —— 那是命名者的写法,不是我们的。同 `native` 从第一轮起就大小写不敏感。
+- **代价(明知接受)**:七个 producer 的 golden fixture 与全仓测试串再走一遍 —— 这是本 epic 内第四次改 ref 串。机械改动是实打实的,换来的是「漏标记往安全方向倒」这条不变量。
+- **旧 oracle 的 `resolveAsset` 仍然 fail-open,但唯一还在用它的那条路已经堵上了。** 它对所有形状都掉回 symbol(连合约都放行),而本轮不改它 —— 那个包随 #202 整体退场。
+  - 一度以为这只是「展示侧的已知遗留」,**实测证伪**:自定义一个 USDC、单价填 777,首屏显示的是 10 × $1 而不是 10 × 777。写路径早就不合并了(库里确实是独立一行、只挂 `manual/custom:USDC`),但 `injectManualSnapshots` 拿合成余额上那条 `manual/custom:USDC` 去问旧 enrich,旧 `resolveAsset` 掉回 symbol 认出真 USDC,把市价送了回来。**没有背书的 symbol 换个方向照样把币认了。**
+  - 修在调用点而不是那个包里:旧 `tokens.enrich` 全仓**只剩这一个消费者**,所以「只问有上游 ref 的那些,没有的传 null」既最小也完整(`enrich` 对 null 原位对齐,而 `buildManualSnapshot` 没价时正好回退到用户填的单价)。
+  - 教训值得记下来:**一条不变量只在写路径上成立,等于没成立。** 用户看到的是显示出来的那个数,而读路径可以从完全另一个方向把同一个错误做出来。

@@ -9,7 +9,7 @@ import { fakeCacheStore, fakeUpstream } from "./fakes";
 // SWR:warm 一过期,mint 中途串行夹进 4 次目录请求,而 mint 的注释还写着「全程不碰网络」。
 
 const coin = (id: string, symbol: string, rank?: number): UpstreamToken => ({
-  ref: `src/${id}`,
+  ref: `src/issued:${id}`,
   symbol,
   name: symbol,
   price: { unitPrice: 1, marketCapRank: rank, asOf: 0 },
@@ -27,14 +27,16 @@ describe("按 symbol 出候选", () => {
   it("同名的都给,带上排名(判官自己决定信不信)", async () => {
     const { candidates } = setup([coin("usd-coin", "USDC", 6), coin("fake-usdc", "usdc", 4200)]);
     expect(await candidates.bySymbol("usdc")).toEqual([
-      { ref: "src/usd-coin", marketCapRank: 6 },
-      { ref: "src/fake-usdc", marketCapRank: 4200 },
+      { ref: "src/issued:usd-coin", marketCapRank: 6 },
+      { ref: "src/issued:fake-usdc", marketCapRank: 4200 },
     ]);
   });
 
   it("归一同口径 —— 大小写与空白不影响命中", async () => {
     const { candidates } = setup([coin("bitcoin", "btc", 1)]);
-    expect(await candidates.bySymbol("  BTC ")).toEqual([{ ref: "src/bitcoin", marketCapRank: 1 }]);
+    expect(await candidates.bySymbol("  BTC ")).toEqual([
+      { ref: "src/issued:bitcoin", marketCapRank: 1 },
+    ]);
   });
 
   it("没有同名的 → 空,不报错", async () => {

@@ -19,7 +19,7 @@ import {
 import { fakeCacheStore, fakeUpstream } from "./fakes";
 
 const coin = (id: string, symbol: string, rank?: number): UpstreamToken => ({
-  ref: `src/${id}`,
+  ref: `src/issued:${id}`,
   symbol,
   name: symbol,
   price: { unitPrice: 1, marketCapRank: rank, asOf: 0 },
@@ -210,7 +210,9 @@ describe("后台预热:目录旧了才刷", () => {
     await refreshCatalogue(cache, upstream, 50, cache.now); // 后台预热
 
     const rows = await warmCatalogue(cache, upstream, 50, cache.now);
-    expect(candidatesBySymbol(rows, "NEW")).toEqual([{ ref: "src/newcoin", marketCapRank: 900 }]);
+    expect(candidatesBySymbol(rows, "NEW")).toEqual([
+      { ref: "src/issued:newcoin", marketCapRank: 900 },
+    ]);
   });
 
   it("后台刷挂了 → 给旧的那份,不抛(它在 waitUntil 里,不该让同步收尾炸掉)", async () => {
@@ -238,8 +240,11 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     ];
     const rows = await warmMarkets(cache, upstream, 50, cache.now);
 
-    expect(topByRank(rows, 2).map((r) => r.info.ref)).toEqual(["src/bitcoin", "src/tether"]);
-    expect(topByRank(rows, 9).at(-1)?.info.ref).toBe("src/nameless");
+    expect(topByRank(rows, 2).map((r) => r.info.ref)).toEqual([
+      "src/issued:bitcoin",
+      "src/issued:tether",
+    ]);
+    expect(topByRank(rows, 9).at(-1)?.info.ref).toBe("src/issued:nameless");
   });
 
   it("按 symbol 取候选不额外存一份 —— 缓存里仍只有一个键", async () => {
@@ -249,8 +254,8 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     const rows = await warmMarkets(cache, upstream, 50, cache.now);
 
     expect(candidatesBySymbol(rows, "usdc")).toEqual([
-      { ref: "src/usd-coin", marketCapRank: 6 },
-      { ref: "src/fake-usdc", marketCapRank: 4200 },
+      { ref: "src/issued:usd-coin", marketCapRank: 6 },
+      { ref: "src/issued:fake-usdc", marketCapRank: 4200 },
     ]);
     expect([...cache.entries.keys()]).toEqual(["warm"]);
   });
@@ -260,7 +265,9 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     const upstream = fakeUpstream();
     upstream.markets = [coin("bitcoin", "btc", 1)];
     const rows = await warmMarkets(cache, upstream, 50, cache.now);
-    expect(candidatesBySymbol(rows, "  BTC ")).toEqual([{ ref: "src/bitcoin", marketCapRank: 1 }]);
+    expect(candidatesBySymbol(rows, "  BTC ")).toEqual([
+      { ref: "src/issued:bitcoin", marketCapRank: 1 },
+    ]);
   });
 
   // 目录里混进同一个币两次(上游分页来自不同快照,见 coingecko adapter)。**不去重的后果是
@@ -272,7 +279,9 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     upstream.markets = [coin("usd-coin", "USDC", 6), coin("usd-coin", "USDC", 6)];
     const rows = await warmMarkets(cache, upstream, 50, cache.now);
 
-    expect(candidatesBySymbol(rows, "USDC")).toEqual([{ ref: "src/usd-coin", marketCapRank: 6 }]);
+    expect(candidatesBySymbol(rows, "USDC")).toEqual([
+      { ref: "src/issued:usd-coin", marketCapRank: 6 },
+    ]);
   });
 
   // 去重必须在**读**这一侧,不能只在上游那侧:修好之前存下的脏目录还躺在缓存里,而这份 blob
@@ -280,7 +289,7 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
   it("缓存里已经是脏的 → 读出来就是干净的,且不为此回一趟上游", async () => {
     const cache = fakeCacheStore();
     const upstream = fakeUpstream();
-    const row = { info: { ref: "src/usd-coin", symbol: "USDC", name: "USDC" }, price: {} };
+    const row = { info: { ref: "src/issued:usd-coin", symbol: "USDC", name: "USDC" }, price: {} };
     await cache.put(cacheKeys.warm, { asOf: cache.now, rows: [row, row] }, WARM_TTL_MS);
 
     const rows = await warmMarkets(cache, upstream, 50, cache.now);
@@ -298,7 +307,7 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     ];
     const rows = await warmMarkets(cache, upstream, 50, cache.now);
 
-    expect(pickByConfidence(candidatesBySymbol(rows, "CARDS"))).toBe("src/collector-crypt");
+    expect(pickByConfidence(candidatesBySymbol(rows, "CARDS"))).toBe("src/issued:collector-crypt");
   });
 });
 

@@ -1,5 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import { type BalanceKind, Note } from "@folio/connectors-basic";
+import { formatTokenRef, type TokenRef } from "@folio/oracle-ref";
 import {
   and,
   asc,
@@ -601,11 +602,16 @@ async function assertTokenOwned(db: Db, userId: string, tokenId: string): Promis
 export interface ManualHolding {
   id: string;
   symbol: string;
-  unitPrice: number; // = tokens.self_price;没声明过按 0(展示层退回市场价)
-  identifier: string | null; // 该 token 在 `namer` 那里的叫法(= 用户选的币);没选 → null
+  // 这个 token 在 `namer` 那里的 **ref 整条**;那位命名者还没认出它 → null。
+  //
+  // **给整条,不给右半边。** 原来这里回的是裸的上游 id(`usd-coin`),于是每个调用方都得把 ref
+  // 拼回去才能用 —— 而拼 ref 就得知道命名者是谁,于是「当前上游是 CoinGecko」这件事一路漏进了
+  // apps/web(#227 评审)。整条给出去之后调用方只搬运:编成票、或当 Balance 的 tokenRef 交出去,
+  // 一个字都不用解释。文法留在 `@folio/oracle-ref` 这一侧,`namer` 也不必再往外说。
+  ref: TokenRef | null;
 }
 
-// 某手记账户的持仓定义。`namer` 决定 `identifier` 从哪个命名者的 ref 读 —— 由调用方传
+// 某手记账户的持仓定义。`namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传
 // (同 createUserTokenStore),db 层不预设任何厂商。
 // 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
 export async function listManualHoldingsByAccount(
@@ -620,8 +626,7 @@ export async function listManualHoldingsByAccount(
     .select({
       id: tokens.id,
       symbol: tokens.symbol,
-      selfPrice: tokens.selfPrice,
-      identifier: tokenRefs.localName,
+      localName: tokenRefs.localName,
       since: sql<number>`min(${manualActivity.occurredAt})`,
     })
     .from(manualActivity)
@@ -640,8 +645,8 @@ export async function listManualHoldingsByAccount(
   return rows.map((r) => ({
     id: r.id,
     symbol: r.symbol,
-    unitPrice: r.selfPrice ?? 0,
-    identifier: r.identifier ?? null,
+    // 两列 → 整条串,拼法归文法(`token_refs` 按两列存正是为了这个,见 ADR 0022)。
+    ref: r.localName === null ? null : formatTokenRef({ namer, localName: r.localName }),
   }));
 }
 
@@ -651,13 +656,14 @@ export async function setManualHoldingDef(
   env: DbEnv,
   userId: string,
   tokenId: string,
-  input: { symbol?: string; unitPrice?: number },
+  // **只改 symbol。** 单价不在这里 —— 「这个币值多少」只有账本一个来源(每笔活动的 price),
+  // 而 `tokens.self_price` 从此没有写者(迁移 0016 把存量搬进账本并清空了它)。
+  input: { symbol?: string },
 ): Promise<void> {
   const db = getDb(env);
   await assertTokenOwned(db, userId, tokenId);
   const set: Record<string, unknown> = {};
   if (input.symbol !== undefined) set.symbol = input.symbol;
-  if (input.unitPrice !== undefined) set.selfPrice = input.unitPrice;
   if (Object.keys(set).length === 0) return;
   await db
     .update(tokens)
@@ -827,7 +833,7 @@ export interface ManualBatchPlan {
   // 本批要**声明**的持仓:`id` 已经是 mint 出来的 `tokens.id`(app 层在提交前认好币),
   // 这里只落用户自己的两个字段。原来这叫 `newTokens` 并且真的插一张 `manual_token` 行 ——
   // 币的身份现在归参考层,不再由手记这条路创建。
-  declare: { id: string; symbol: string; unitPrice: number }[];
+  declare: { id: string; symbol: string }[];
   activities: {
     tokenId: string;
     kind: ManualActivityKind;
@@ -869,7 +875,7 @@ export async function commitManualBatch(
     ...plan.declare.map((t) =>
       db
         .update(tokens)
-        .set({ symbol: t.symbol, selfPrice: t.unitPrice })
+        .set({ symbol: t.symbol })
         .where(and(eq(tokens.id, t.id), eq(tokens.userId, userId))),
     ),
     ...plan.activities.map((a, i) =>

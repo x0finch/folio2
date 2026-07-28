@@ -111,7 +111,7 @@ export function ManualTokensPanel({
       ticket: tk.ticket ?? undefined,
       logo: bal?.logo,
       name: bal?.name,
-      unitPrice: tk.unitPrice,
+      unitPrice: tk.unitPrice ?? 0, // 0 = 没声明过
     };
   };
 
@@ -131,7 +131,7 @@ export function ManualTokensPanel({
     () =>
       tokens.map((tk) => ({
         id: tk.id,
-        unitPrice: tk.unitPrice,
+        unitPrice: tk.unitPrice ?? 0,
         recognized: tk.ticket != null,
         activities: activities
           .filter((a) => a.tokenId === tk.id)
@@ -224,7 +224,7 @@ export function ManualTokensPanel({
   const tokenItems: SwipeableListItem[] = tokens.map((tk) => {
     const bal = balBySymbol.get(tk.symbol.toUpperCase());
     // 市值:优先 balances 实时市值(与抽屉头/首页同源);缺则回退 数量 × 单价。
-    const value = bal ? bal.usdValue : tk.amount * tk.unitPrice;
+    const value = bal ? bal.usdValue : tk.amount * (tk.unitPrice ?? 0);
     const rightActions: SwipeAction[] = [
       {
         id: "edit",

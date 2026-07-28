@@ -32,7 +32,7 @@ const snap = (accountId: string, totalUsd: number, balances: OverviewBalance[]) 
 // 不给价 → liveValue 退回冻结的 usdValue,与迁移前这个 fake 的行为一致。
 const record = (id: string): TokenRecord => ({
   id,
-  ref: "coingecko/usd-coin",
+  ref: "coingecko/issued:usd-coin",
   symbol: "USDC",
   name: "USD Coin",
   logo: "u.png",
@@ -78,7 +78,7 @@ describe("buildOverview", () => {
           // 手记:ref 的命名者是数据源,平台却是 manual —— 平台只能由 provider 报。
           bal({
             kind: "manual",
-            tokenRef: "coingecko/usd-coin",
+            tokenRef: "coingecko/issued:usd-coin",
             platform: "manual",
             amount: 50,
             usdValue: 50,
@@ -153,7 +153,7 @@ describe("buildOverview", () => {
       [
         "cex",
         snap("cex", 100, [
-          bal({ tokenRef: "binance/USDC", platform: "binance", amount: 100, usdValue: 100 }),
+          bal({ tokenRef: "binance/issued:USDC", platform: "binance", amount: 100, usdValue: 100 }),
         ]),
       ],
     ]);

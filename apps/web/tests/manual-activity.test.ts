@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { type DerivableActivity, deriveAmount, projectToken } from "../src/lib/manual-activity";
+import {
+  type DerivableActivity,
+  deriveAmount,
+  fallbackUnitPrice,
+  projectToken,
+} from "../src/lib/manual-activity";
 
 const a = (
   kind: DerivableActivity["kind"],
@@ -47,21 +52,58 @@ describe("deriveAmount", () => {
 
 // projectToken:token 定义 + 活动账本 → creds.tokens 的一项(物化投影,ADR 0017)。
 describe("projectToken", () => {
-  it("amount = deriveAmount(activities); carries symbol/unitPrice", () => {
-    const t = projectToken({ symbol: "BTC", unitPrice: 64000 }, [a("set", 1, 1), a("add", 0.5, 2)]);
-    expect(t).toEqual({ symbol: "BTC", unitPrice: 64000, amount: 1.5 });
+  it("amount = deriveAmount(activities);没带价的活动 → fallbackPrice 为 null", () => {
+    const t = projectToken({ id: "tk1", symbol: "BTC" }, [a("set", 1, 1), a("add", 0.5, 2)]);
+    expect(t).toEqual({ id: "tk1", symbol: "BTC", amount: 1.5, fallbackPrice: null, ref: null });
   });
 
-  it("includes identifier when present", () => {
-    const t = projectToken({ symbol: "BTC", unitPrice: 64000, identifier: "bitcoin" }, [
+  // ref 原样搬运 —— 本模块不看里面写了什么(命名者是谁、id 长什么样都不是它的事)。
+  it("carries the ref through untouched", () => {
+    const t = projectToken({ id: "tk1", symbol: "BTC", ref: "src/issued:bitcoin" }, [
       a("set", 2, 1),
     ]);
-    expect(t).toEqual({ symbol: "BTC", unitPrice: 64000, amount: 2, identifier: "bitcoin" });
+    expect(t).toEqual({
+      id: "tk1",
+      symbol: "BTC",
+      amount: 2,
+      fallbackPrice: null,
+      ref: "src/issued:bitcoin",
+    });
   });
 
-  it("omits identifier key when null/absent (provider validator treats it as optional string)", () => {
-    const t = projectToken({ symbol: "FOO", unitPrice: 0.25, identifier: null }, []);
-    expect(t).toEqual({ symbol: "FOO", unitPrice: 0.25, amount: 0 });
-    expect("identifier" in t).toBe(false);
+  it("no ref (that namer hasn't identified it) → null, never undefined", () => {
+    const t = projectToken({ id: "tk9", symbol: "FOO", ref: null }, []);
+    expect(t).toEqual({ id: "tk9", symbol: "FOO", amount: 0, fallbackPrice: null, ref: null });
+  });
+});
+
+// **自定义币怎么定价** —— 声明优先,再退到账本。与历史曲线那条链顺序相反,那是故意的
+// (曲线在过去的点上账本优先;当下值必须让编辑表单说得上话)。见 fallbackUnitPrice 的注释。
+describe("fallbackUnitPrice", () => {
+  const priced = (price: number | null, occurredAt: number, createdAt = 1) => ({
+    ...a("add", 1, occurredAt, createdAt),
+    price,
+  });
+
+  it("取账本里最近一条记了价的活动", () => {
+    expect(fallbackUnitPrice([priced(888, 10), priced(999, 20)])).toBe(999);
+  });
+
+  // 开仓价现在也是账本的一笔(加账户表单填的那个),所以「最新」天然包含它。
+  it("只有开仓那一笔 → 就用它", () => {
+    expect(fallbackUnitPrice([priced(777, 10)])).toBe(777);
+  });
+
+  it("没记价的活动不参与(price 为空的跳过)", () => {
+    expect(fallbackUnitPrice([priced(null, 30), priced(888, 10)])).toBe(888);
+  });
+
+  it("同一时刻两笔 → 后录的那笔胜出(与折叠数量同口径)", () => {
+    expect(fallbackUnitPrice([priced(1, 10, 1), priced(2, 10, 2)])).toBe(2);
+  });
+
+  it("一笔带价的都没有 → null(展示层据此显示无价,而不是 $0 的假确定)", () => {
+    expect(fallbackUnitPrice([])).toBeNull();
+    expect(fallbackUnitPrice([priced(null, 10)])).toBeNull();
   });
 });
