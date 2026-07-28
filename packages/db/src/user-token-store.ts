@@ -291,8 +291,9 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
           .from(tokenRefs)
           .where(and(eq(tokenRefs.userId, userId), eq(tokenRefs.tokenId, into))),
       ]);
-      const taken = new Set(intoRefs.map((r) => `${r.namer}/${r.localName}`));
-      const dupes = fromRefs.filter((r) => taken.has(`${r.namer}/${r.localName}`));
+      // 拼串走文法(`formatTokenRef`)—— 分隔符是斜杠这件事只有 @folio/oracle-ref 知道。
+      const taken = new Set(intoRefs.map(formatTokenRef));
+      const dupes = fromRefs.filter((r) => taken.has(formatTokenRef(r)));
 
       const stmts = [
         ...dupes.map((d) =>

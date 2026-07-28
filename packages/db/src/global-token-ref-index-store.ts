@@ -1,4 +1,4 @@
-import { parseTokenRef } from "@folio/oracle-ref";
+import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import type { GlobalTokenRefIndexStore, TokenRef, TokenRefIndexRow } from "@folio/oracle2-basic";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
@@ -45,7 +45,7 @@ export function createGlobalTokenRefIndexStore(env: DbEnv): GlobalTokenRefIndexS
       const canonical = new Map<TokenRef, TokenRef>(); // 规范形 → 调用方原样给的串
       for (const raw of new Set(refs)) {
         const parts = parseTokenRef(raw);
-        if (parts.kind !== "unknown") canonical.set(`${parts.namer}/${parts.localName}`, raw);
+        if (parts.kind !== "unknown") canonical.set(formatTokenRef(parts), raw);
       }
       if (canonical.size === 0) return out;
 
