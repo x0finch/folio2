@@ -147,6 +147,10 @@ const canGuess = parsed.kind !== "contract";
 - **切前缀的地方要改成走文法**:`coinIdOf`(coingecko adapter)原来靠切左段前缀取 coin id,现在过 `parseTokenRef` 并只认 `issued` 那一支。**这是对不可信输入的防御,不是在修坏数据** —— 全仓没有生产者产 `coingecko/contract:0x…`(`contract` 形的命名者恒是链,本源产的恒是 `issued:`),它只能从手搓的票进来(`getTokenPrice` 收的 ticket 只过文法校验)。切前缀的后果也不严重:把 `contract:0x…` 当 coin id 发上去,换回一个空结果 —— 白跑一趟而已,认币那条路另有 `hasTrustedSymbol` 挡着。
 - **给整条 ref,不给右半边**(#227 评审):`listManualHoldingsByAccount` 原来回的是裸的上游 id(字段名 `identifier`),于是每个调用方都得把 ref 拼回去才能用 —— 而拼 ref 就得知道命名者是谁,「当前上游是 CoinGecko」这件事因此一路漏进了 apps/web(甚至让它去 import 一个 `cgkRef`)。改成回 `ref: TokenRef | null` 之后调用方只搬运:编成票、或当 Balance 的 tokenRef 交出去。**这是本轮的一条通则** —— 跨层传 ref 就传整条,右半边是文法的内部构造,不是接口。
   - 连带:`ManualHolding.identifier` → `.ref`、`CredsToken.identifier?` → `.ref`,`identifier` 这个概念从 app 里整个消失;`custom:` 那一支不需要被特别挡掉(挡「拿手敲的名字去认币」是 mint 的活,不是这个投影的)。
+- **`issued` 是个声明,进门那一处得验**:票(ticket)没有签名 —— base64url 谁都能解开,也谁都能自己编一张。手编一张 `<随便什么>/issued:<随便什么>` 塞进手记表单,mint 会「命名者不匹配 → 映射表查不到 → `hasTrustedSymbol(issued)` 为真 → 走 symbol 那一档」,**用户手敲的 symbol 又成了可信线索** —— 本轮刚收紧的东西被绕开了。故 `tokenTicket.decode` 改成收一个必填的 `namer`,命名者对不上就当没选币;顺带回**规范形**而不是原样回抛(这条 ref 会直接落进 `token_refs`,表里只能有规范形)。
+  - **只比命名者就够**,不必再挑形状:命名者对上之后,四种形状在 mint 里各有各的正常去处。
+  - **文法绑不住这件事,所以不该往文法里塞**:namer 与形状在文法层没有绑定关系(`coingecko/native` 语法合法、语义胡说),但就算给 namer 加一张分类表也拦不住手编的票 —— 问题不是分错了类,是「那个命名者我们认不认识」,而这是**部署状态**(装了哪个上游),文法包按设计不知道(ADR 0023)。第一轮否掉「给左半边建分类表」的结论因此仍然成立:没有消费方需要 namer 的*类别*,需要的是进门处一次与配置值的相等比较。
+  - 风险量级(明写,免得后人以为修的是个洞):能编这张票的只有**账号本人**(server fn 挂着同源 CSRF 闸,别的站点构造不出来),而他在选币下拉里点一下就能合法拿到同样结果。补它的理由是**服务端的保证不该依赖客户端守规矩**,不是风险。
 - **时机就是现在**:串一变,库里所有 ref 都要跟着变,但眼下代价接近零 —— `snapshot_balances.token_ref` 本来就要删([#202](https://github.com/x0finch/folio2/issues/202))、`global_token_ref_index` cron 一天一次整表重建、`token_daily_prices` 纯缓存、`token_refs` 的前提本就是删库从头 sync([#176](https://github.com/x0finch/folio2/issues/176))。等 #202 落地、库里跑上真数据之后再动就是一次真迁移了。
 - **标记本身大小写不敏感**(`binance/ISSUED:USDC` 拆出来是 `issued:USDC`),但标记后面那段不动 —— 那是命名者的写法,不是我们的。同 `native` 从第一轮起就大小写不敏感。
 - **代价(明知接受)**:七个 producer 的 golden fixture 与全仓测试串再走一遍 —— 这是本 epic 内第四次改 ref 串。机械改动是实打实的,换来的是「漏标记往安全方向倒」这条不变量。

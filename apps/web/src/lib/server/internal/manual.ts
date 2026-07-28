@@ -34,15 +34,19 @@ const AMOUNT_EPS = 1e-9;
 // 一条手记持仓要用的 token id:先定 ref,再经 mint 换出 id(纯本地)。
 //
 // **解票就在这一处**(#202b)。表单交上来的 `ticket` 是一串 base64url,里头是选币那一刻
-// 上游对这个币的命名。解不开 / 解出来不合文法 → 当作「没选币」,退回按 symbol 认 ——
-// 票是从网络上来的,不能假设它是我们自己刚发出去的那张。
+// 上游对这个币的命名。解不开 / 不合文法 / **命名者不是当前那位** → 当作「没选币」,
+// 退回 `manual/custom:<名字>`(而那一支不会被拿去认币,#223)。
+//
+// 命名者那一句必须有:票没有签名,谁都能自己编一张。手编 `<随便什么>/issued:<随便什么>`
+// 塞进来的话,mint 会掉到 symbol 那一档,用户手敲的 symbol 就又成了可信线索。
+// 所以 `decode` 收 NAMER —— 「这是我们发出去的那张」只能靠内容自证(见 tokenTicket)。
 async function mintHolding(
   userId: string,
   picked: { symbol: string; ticket?: string | null },
 ): Promise<string> {
   const ref = manualTokenRef({
     symbol: picked.symbol,
-    ref: picked.ticket ? tokenTicket.decode(picked.ticket) : undefined,
+    ref: picked.ticket ? tokenTicket.decode(picked.ticket, NAMER) : undefined,
   });
   const symbol = picked.symbol.trim().toUpperCase();
   const ids = await oracleFor(userId).mint.of([{ ref, seed: { symbol } }]);

@@ -135,7 +135,7 @@ export const getTokenPrice = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ ticket: z.string().min(1) }))
   .handler(async ({ data, context }) => {
-    const ref = tokenTicket.decode(data.ticket);
+    const ref = tokenTicket.decode(data.ticket, NAMER);
     if (!ref) {
       tokenLog.debug("tokenPrice: bad ticket");
       return null;

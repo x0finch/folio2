@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { tokenTicket } from "@folio/oracle2";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";
 import { createAccountFor } from "../../src/lib/server/internal/create-account";
@@ -65,15 +66,32 @@ describe("createManualAccount (D1 round-trip)", () => {
     expect(h.ref).toBe(`${NAMER}/issued:bitcoin`); // 哪怕 symbol 敲成了 XBT
   });
 
-  // 票是从网络上来的 —— 解不开就当没选币,退回按 symbol 认,而不是崩掉或写脏。
-  it("票是伪造/损坏的 → 当作没选币,按 symbol 认", async () => {
+  // 票是从网络上来的 —— 解不开就当没选币(退回 `manual/custom:<名字>`),而不是崩掉或写脏。
+  it("票损坏 → 当作没选币,自己一行", async () => {
     const account = await createManualAccount(
       USER,
       "M",
       JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", ticket: "!!!not-base64!!!" }]),
     );
     const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
-    expect(h.ref).toBeNull(); // 上游不认识 XBT → 自己一行,没有上游命名
+    expect(h.ref).toBeNull(); // 没有上游命名 → 自己一行,用他填的单价估值
+  });
+
+  // **手编一张合规但别家命名者的票**(#223)。票没有签名,谁都能自己编一张;而 `issued` 的
+  // 含义是「命名者为它负责」—— 不核对命名者的话,这张票会让 mint 掉回 symbol 那一档,
+  // 用户敲的 `BTC` 就又被拿去认币了,正是这一票收紧掉的东西。
+  //
+  // 用 BTC + 一张 `evil/issued:whatever`:BTC 在候选里认得出来,所以「有没有挡住」看得见 ——
+  // 挡住了就是自己一行,没挡住就会挂上上游那条 BTC 的 ref。
+  it("票合规但命名者是别家 → 也当作没选币,且不按 symbol 认", async () => {
+    const forged = tokenTicket.encode("evil/issued:whatever");
+    const account = await createManualAccount(
+      USER,
+      "M",
+      JSON.stringify([{ symbol: "BTC", unitPrice: "1", amount: "1", ticket: forged }]),
+    );
+    const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    expect(h.ref).toBeNull();
   });
 
   // creds 里那个 `tokens` 字段只剩一个空壳:它是**创建表单的入参声明**,不再是持仓的存储处。

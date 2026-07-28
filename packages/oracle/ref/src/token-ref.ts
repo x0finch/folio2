@@ -106,6 +106,15 @@ export const tokenRef = {
 } as const;
 
 /**
+ * 命名者的规范形(trim + 小写)。`parseTokenRef` 在拆串时本来就这么归一,导出它是为了让
+ * 「这条 ref 是不是那位命名者发的」这类比较有一处口径 —— 拿原串比大小写就会漏
+ * (`CoinGecko` vs `coingecko`)。左段的归一规则归文法,不该在调用点各写一遍。
+ */
+export function normalizeNamer(namer: string): string {
+  return normalize(namer);
+}
+
+/**
  * 这条 ref 带来的 symbol 有没有背书人。**形状即证据强度。**
  *
  * `native`:symbol 是链自己的,而且原生币按设计不进全局映射表(ADR 0022)—— symbol 是它
