@@ -161,6 +161,24 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     expect(upstream.calls).toEqual(["fetchTokens:src/issued:ethereum"]);
   });
 
+  // **大小写是我们的展示口径,不是上游的。** CoinGecko 给的 symbol 是小写(`usdc`),而建行那一侧
+  // 是大写 —— 不归一就出现「刷一次就变小写」:界面上从 `USDC` 跳成 `usdc`。而且 symbol 还是
+  // symbol 消歧的比较键(candidatesBySymbol),两个写者对同一列口径必须一致。
+  // 覆盖上游给的**名字**仍然是对的(MATIC→POL),那是内容;大小写不是内容。
+  it("上游的 symbol 归一成大写才写(名字照抄,大小写不照抄)", async () => {
+    const { store, upstream, tokens } = setup([
+      info({ id: "t1", ref: "src/issued:usd-coin", symbol: "USDC", infoStale: true }),
+    ]);
+    upstream.markets = [
+      { ref: "src/issued:usd-coin", symbol: "usdc", name: "USDC", logo: "usdc.png" },
+    ];
+
+    expect(await tokens.refreshStaleInfo(["t1"])).toBe(1);
+    expect(store.rows.get("t1")?.symbol).toBe("USDC");
+    expect(store.rows.get("t1")?.name).toBe("USDC");
+    expect(store.rows.get("t1")?.logo).toBe("usdc.png");
+  });
+
   it("**链上 symbol 与上游不一致 → 上游那份赢**(MATIC→POL)", async () => {
     // 行是按合约地址认出来的(认定可信),但建行时拿的是合约里写的 symbol —— 那份是旧名。
     const { store, upstream, tokens } = setup([

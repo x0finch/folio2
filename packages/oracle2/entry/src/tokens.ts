@@ -14,6 +14,7 @@ import {
   dayBucketOf,
   INFO_TTL_MS,
   MS_PER_DAY,
+  normalizeSymbol,
   PRICE_TTL_MS,
 } from "@folio/oracle2-basic";
 import { refreshCatalogue, topByRank, warmMarkets } from "./cache";
@@ -230,7 +231,14 @@ export function createTokens({
         .map((t) => {
           const tokenId = byRef.get(t.ref);
           // 上游没收录的 ref 不在结果里;回来了却对不上我们要的键 → 丢掉,别乱写。
-          return tokenId ? { tokenId, symbol: t.symbol, name: t.name, logo: t.logo } : undefined;
+          //
+          // **symbol 要归一。** 大小写是**我们**的展示口径,不是上游的 —— CoinGecko 给的是小写
+          // (`usdc`),而建行那一侧是大写。不归一就出现「同一行刷一次变小写」:显示从 `USDC`
+          // 跳成 `usdc`,而且 symbol 还是 symbol 消歧的比较键(见 candidatesBySymbol)。
+          // 覆盖上游的**名字**是对的(MATIC→POL,见本函数上面那段),但那是内容,大小写不是。
+          return tokenId
+            ? { tokenId, symbol: normalizeSymbol(t.symbol), name: t.name, logo: t.logo }
+            : undefined;
         })
         .filter((w) => w !== undefined);
       if (writes.length > 0) await store.putInfo(writes, INFO_TTL_MS);

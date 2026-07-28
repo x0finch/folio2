@@ -28,14 +28,20 @@ export function deriveAmount(activities: DerivableActivity[]): number {
 
 // token 定义 + 其活动账本 → 合成持仓的一项。amount = deriveAmount(activities)。
 //
+// `id` 是 `tokens.id`(#203 起手记的币就是那张表里的一行)。**必须一路带到合成余额上** ——
+// 展示富化 / 预热 / 刷价三个门全按 `tokenId` 收口,不带就等于这个币不存在:没有上游名字、
+// 没有 logo、也没人去给它取价。
+//
 // `ref` 是这个 token 在当前命名者那里的 ref 整条,由 db 直接给(见 `ManualHolding.ref`)——
 // 本模块**只搬运**:不拼、不拆、不知道命名者是谁。认不出来 → null。
 export interface ManualTokenDef {
+  id: string;
   symbol: string;
   unitPrice: number;
   ref?: string | null;
 }
 export interface CredsToken {
+  id: string;
   symbol: string;
   unitPrice: number;
   amount: number;
@@ -43,6 +49,7 @@ export interface CredsToken {
 }
 export function projectToken(token: ManualTokenDef, activities: DerivableActivity[]): CredsToken {
   return {
+    id: token.id,
     symbol: token.symbol,
     unitPrice: token.unitPrice,
     amount: deriveAmount(activities),

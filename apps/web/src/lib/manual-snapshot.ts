@@ -33,9 +33,11 @@ export function buildManualSnapshot(
       // 没选 → `manual/custom:<名字>`,手记自己就是命名者,而这个名字没有注册表背书
       // (见 manual-connector.ts)。tokenRef 恒有值(Balance 契约必填)。
       tokenRef: t.ref ?? tokenRef.custom(MANUAL_CONNECTOR_ID, t.symbol),
-      // 手记的当下值是**现造的**(ADR 0018:不写快照),所以没有落库时 mint 出来的 token_id。
-      // 读端遇到空 token_id 会退回 tokenRef 那条路。手记并入 tokens 是 #203 的事。
-      tokenId: null,
+      // 手记的当下值是**现造的**(ADR 0018:不写快照),但身份不是现造的 —— #203 起手记的币就是
+      // `tokens` 里的一行,这个 id 就是那一行。**必须带上**:展示富化 / 预热 / 刷价三个门全按
+      // `tokenId` 收口(见 lib/tokens.ts 的同门注),不带就等于这个币不存在 —— 没有上游名字、
+      // 没有 logo、也没人去给它取价,而库里那行会一直停在连接器报的那份元信息上。
+      tokenId: t.id,
       metaJson: null,
     };
   });

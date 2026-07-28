@@ -10,6 +10,7 @@ import { buildManualSnapshot } from "../src/lib/manual-snapshot";
 const TS = 1_700_000_000_000;
 
 const tok = (over: Partial<CredsToken>): CredsToken => ({
+  id: "tk-BTC",
   symbol: "BTC",
   unitPrice: 100,
   amount: 2,
@@ -32,6 +33,13 @@ describe("buildManualSnapshot", () => {
   it("无现价 → 回退 amount × unitPrice", () => {
     const snap = buildManualSnapshot("acc1", [tok({ amount: 3, unitPrice: 50 })], [undefined], TS);
     expect(snap.balances[0].usdValue).toBe(150); // 3 × 50
+  });
+
+  // **tokenId 必须带上**(#203 的收尾):展示富化 / 预热 / 刷价三个门全按它收口,
+  // 空着就等于这个币不存在 —— 没有上游名字、没有 logo、也没人去给它取价。
+  it("tokenId = tokens.id,不是 null", () => {
+    const snap = buildManualSnapshot("acc1", [tok({ id: "tk-abc" })], [undefined], TS);
+    expect(snap.balances[0].tokenId).toBe("tk-abc");
   });
 
   it("selfPrice 恒 null、metaJson 恒 null(盯市语义)", () => {
@@ -108,23 +116,31 @@ describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
   const tokensWithBtc = fakeTokens({ "tk-BTC": 65000 });
   const tokensNoPrice = fakeTokens({});
 
-  // 手记账户:0.5 BTC。**现价在 injectManualSnapshots 那一步就烘焙进 usdValue 了**
-  // (它仍走旧参考层,#203 才把手记并入 tokens),所以这里模拟两种入库形态。
+  // 手记账户:0.5 BTC。现价在 injectManualSnapshots 那一步就烘焙进了 usdValue(它仍走旧参考层),
+  // 所以这里模拟两种入库形态。合成行**带 token_id**,所以现推这一侧也能按 id 取到源价 ——
+  // 两条路给的是同一个数,下面两条用例分别钉住「取到」与「取不到」。
   const byAccount = (bakedPrice?: number) =>
     new Map<string, SnapshotWithBalances>([
       [
         "m1",
         buildManualSnapshot(
           "m1",
-          [{ symbol: "BTC", unitPrice: 30000, amount: 0.5, ref: "src/issued:bitcoin" }],
+          [
+            {
+              id: "tk-BTC",
+              symbol: "BTC",
+              unitPrice: 30000,
+              amount: 0.5,
+              ref: "src/issued:bitcoin",
+            },
+          ],
           [bakedPrice],
           TS,
         ),
       ],
     ]);
 
-  // 手记的合成行没有 token_id(它不经写快照、不过 mint)→ 现推取不到源价,退回烘焙好的 usdValue。
-  // 净值因此仍是实时的:实时那一步只是提前到了 inject。
+  // 净值是实时的:inject 那一步烘焙过一次,现推按 token_id 又能取到同一个价。
   it("烘焙进的现价即最终净值(0.5×65000)", async () => {
     const totals = await deriveLiveAccountTotals(
       [account()],
@@ -135,6 +151,8 @@ describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
     expect(totals.get("m1")).toBe(32500);
   });
 
+  // 取不到源价(上游还没认出这个币)→ 回退到烘焙好的 usdValue,也就是用户自填的单价。
+  // 这一条正是自定义币的形状:它永远拿不到源价,所以永远用他填的那个数。
   it("inject 时也没取到价 → 回退 token 自填单价(0.5×30000)", async () => {
     const totals = await deriveLiveAccountTotals(
       [account()],

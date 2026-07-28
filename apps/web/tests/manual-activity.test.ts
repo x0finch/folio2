@@ -48,20 +48,30 @@ describe("deriveAmount", () => {
 // projectToken:token 定义 + 活动账本 → creds.tokens 的一项(物化投影,ADR 0017)。
 describe("projectToken", () => {
   it("amount = deriveAmount(activities); carries symbol/unitPrice", () => {
-    const t = projectToken({ symbol: "BTC", unitPrice: 64000 }, [a("set", 1, 1), a("add", 0.5, 2)]);
-    expect(t).toEqual({ symbol: "BTC", unitPrice: 64000, amount: 1.5, ref: null });
+    const t = projectToken({ id: "tk1", symbol: "BTC", unitPrice: 64000 }, [
+      a("set", 1, 1),
+      a("add", 0.5, 2),
+    ]);
+    expect(t).toEqual({ id: "tk1", symbol: "BTC", unitPrice: 64000, amount: 1.5, ref: null });
   });
 
   // ref 原样搬运 —— 本模块不看里面写了什么(命名者是谁、id 长什么样都不是它的事)。
   it("carries the ref through untouched", () => {
-    const t = projectToken({ symbol: "BTC", unitPrice: 64000, ref: "src/issued:bitcoin" }, [
-      a("set", 2, 1),
-    ]);
-    expect(t).toEqual({ symbol: "BTC", unitPrice: 64000, amount: 2, ref: "src/issued:bitcoin" });
+    const t = projectToken(
+      { id: "tk1", symbol: "BTC", unitPrice: 64000, ref: "src/issued:bitcoin" },
+      [a("set", 2, 1)],
+    );
+    expect(t).toEqual({
+      id: "tk1",
+      symbol: "BTC",
+      unitPrice: 64000,
+      amount: 2,
+      ref: "src/issued:bitcoin",
+    });
   });
 
   it("no ref (that namer hasn't identified it) → null, never undefined", () => {
-    const t = projectToken({ symbol: "FOO", unitPrice: 0.25, ref: null }, []);
-    expect(t).toEqual({ symbol: "FOO", unitPrice: 0.25, amount: 0, ref: null });
+    const t = projectToken({ id: "tk9", symbol: "FOO", unitPrice: 0.25, ref: null }, []);
+    expect(t).toEqual({ id: "tk9", symbol: "FOO", unitPrice: 0.25, amount: 0, ref: null });
   });
 });

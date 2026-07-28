@@ -41,6 +41,7 @@ async function readTokens(accountId: string): Promise<CredsToken[]> {
   const rows = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
   return Promise.all(
     rows.map(async (r) => ({
+      id: r.id,
       symbol: r.symbol,
       unitPrice: r.unitPrice,
       amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
