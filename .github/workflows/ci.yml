@@ -9,25 +9,34 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# One job, measured. Everything here is CPU-bound compilation on a 2-core
-# runner, so spreading it over more machines is the only lever on wall clock —
-# but Actions bills each job rounded UP to the whole minute, and that rounding
-# is what decides the trade here. Measured on this repo (in-job seconds):
+# Two jobs, split to balance wall clock — read this before "tidying" it.
 #
-#   one job         145s  →  3 billed minutes
-#   two jobs        125s  →  4 billed minutes  (checks 39s→1, test 125s→3)
+# Everything here is CPU-bound compilation on a 2-core runner, so spreading it
+# over machines is the only lever on wall clock. Actions bills each job rounded
+# UP to the whole minute, so that lever costs money. Measured on this repo:
 #
-# Splitting bought ~20s of wall clock for a whole extra minute, because `test`
-# alone lands at ~125s — five seconds past the 2-minute line, so it rounds to
-# 3 either way. Not worth it. (Both figures are single runs; runner setup
-# swings ±10s between runs, so treat the 20s as the noise floor, not a target.)
+#   one job                                   145–159s  →  3 billed minutes
+#   checks | test  (39s | 125s, unbalanced)        125s  →  4 billed minutes
+#   the split below (~75s | ~90s, balanced)        ~90s  →  4 billed minutes
 #
-# Before splitting again, the thing to attack is `test` (~97s), which is the
-# only slow step left since TypeScript 7 made tsc cheap (typecheck: 63s → 9s).
-# Most of that 97s is transpile + environment setup, not assertions — the
-# 1121 tests themselves run in ~5s.
+# We're paying the 4th minute deliberately; given that, the split has to be
+# balanced or the money buys nothing. Hence the odd-looking grouping: the
+# library-package tests run in `checks`, NOT because they belong with lint, but
+# because `checks` was idle at 39s while `test` ran 125s alone. Moving them
+# evens the two sides out and takes ~35s off the wall clock for free.
+#
+# So the grouping tracks DURATION, not topic. If a step's cost changes,
+# re-balance rather than re-sorting by what things "are".
+#
+# Coverage is unchanged by the split: 663 (library packages, root vitest
+# `test.projects` runner) + 363 + 95 (apps/web jsdom + workers-pool) = 1121,
+# the same total `pnpm test` runs in one go.
+#
+# `apps/web`'s tests are the one indivisible chunk left (~63s), so they set the
+# floor. To go below it, attack the tests themselves: almost all of that time
+# is transpile + environment startup, not assertions — all 1121 run in ~5s.
 jobs:
-  verify:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -47,4 +56,21 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm knip
       - run: pnpm build
-      - run: pnpm test
+      - run: pnpm test:packages
+
+  web-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # jsdom suite, then the D1 workers-pool suite (see apps/web package.json).
+      - run: pnpm --filter @folio/web test
