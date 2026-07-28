@@ -6,12 +6,13 @@ import type {
   SnapshotWithBalances,
 } from "@folio/db";
 import { dayBucketOf } from "@folio/oracle";
+import { tokenRef } from "@folio/oracle-ref";
 import { tokenTicket } from "@folio/oracle2";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
 import { deriveAmount, projectToken } from "../../manual-activity";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "../../manual-batch";
-import { isManual, MANUAL_CONNECTOR_ID, manualTokenRef } from "../../manual-connector";
+import { isManual, MANUAL_CONNECTOR_ID } from "../../manual-connector";
 import {
   buildManualAccountSeries,
   type HistoricalPriceAt,
@@ -30,6 +31,21 @@ const AMOUNT_EPS = 1e-9;
 // `creds.tokens`,给 manual provider 读。四个值全部落进真表之后 provider 只是「app 写进 JSON 列 →
 // 再读回来」的空转,连它一起删了 —— 于是「单写者」那条不变量、以及它带来的「忘了重跑就 stale」
 // 这类 bug 面,整个消失。持仓一律 compute-on-read(deriveAmount 现算)。
+
+// 手记持仓 → tokenRef(#203 起住在 app;原来在已删除的 manual provider 包里)。
+//
+// **写路径的东西,所以住在服务端这一侧。** 它一度和 `isManual` 同住 `lib/manual-connector.ts`,
+// 而那个文件被组件 import(渲染哪套字段要问「是不是手记」)—— 于是每个组件都顺带把 tokenRef
+// 文法包拖进了客户端的依赖图。tree-shaking 当时确实摘掉了它,但那是打包器的结果、不是不变量。
+//
+// 选了币 → 用户那张票解出来的 ref 就是答案。**上游命名的 ref 在 mint 里本身就是锚** ——
+// 不查映射表、也不掉回 symbol 去猜。
+// 没选 → `manual/custom:<名字>`。`custom:` 说的是**这个名字没有注册表背书** —— 用户在
+// 「找不到?手动输入」里敲的东西,意思恰恰是「不是列表里那个」,所以 mint 不拿它去认币
+// (ADR 0020 第四轮 / #223)。认不出来就自己一行,用用户填的单价估值。
+// 两种都是规范 ref,没有「空着」这一档。
+const manualTokenRef = (picked: { symbol: string; ref?: string | null }): string =>
+  picked.ref || tokenRef.custom(MANUAL_CONNECTOR_ID, picked.symbol);
 
 // 一条手记持仓要用的 token id:先定 ref,再经 mint 换出 id(纯本地)。
 //
