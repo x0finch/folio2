@@ -38,15 +38,25 @@ const TARGET_MAX_POINTS = 40;
 export function downsampleSeries(
   series: readonly HistoryPoint[],
   maxPoints = TARGET_MAX_POINTS,
+  minBucket = 0,
 ): HistoryPoint[] {
   if (series.length <= 1) return [...series];
   const span = series[series.length - 1].t - series[0].t; // 约定升序(buildPortfolioHistory 已排序)
   const bucket =
-    BUCKET_LADDER.find((b) => span / b <= maxPoints) ?? BUCKET_LADDER[BUCKET_LADDER.length - 1];
+    BUCKET_LADDER.find((b) => b >= minBucket && span / b <= maxPoints) ??
+    BUCKET_LADDER[BUCKET_LADDER.length - 1];
   const byBucket = new Map<number, HistoryPoint>();
   for (const p of series) byBucket.set(Math.floor(p.t / bucket), p); // 升序 → 后写覆盖 = 该桶最后一个
   return [...byBucket.values()].sort((a, b) => a.t - b.t);
 }
+
+// Insights 的走势图专用:**粒度不细于一天**。
+//
+// 那张图的 X 轴只标到「日」,而上面的自适应策略是按跨度选桶的 —— 6 天数据落在 4 小时桶,
+// 于是「同一天里同步了几次」就变成同一天的好几个点,X 轴连着印出 7 个 "Jul 28"。
+// (自适应本身没错,主页 hero 那张小图不标 X 轴,细粒度正是它要的。)
+export const toDailySeries = (series: readonly HistoryPoint[]): HistoryPoint[] =>
+  downsampleSeries(series, TARGET_MAX_POINTS, DAY_MS);
 
 // 单账户价值历史(A2 抽屉头部 chart):该账户快照 (takenAt, totalUsd) → 升序 HistoryPoint[]。
 // 单账户即组合净值阶梯重建的退化情形(每 takenAt 一点),故复用 buildPortfolioHistory + 自适应降采样。
