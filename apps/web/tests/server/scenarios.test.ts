@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildOverview } from "../../src/lib/overview-model";
 import { connectorPlatformMeta } from "../../src/lib/server/internal/connector-platform";
 import { db } from "../../src/lib/server/internal/db";
-import { createManualAccount, injectManualSnapshots } from "../../src/lib/server/internal/manual";
+import {
+  addManualActivities,
+  createManualAccount,
+  createToken,
+  injectManualSnapshots,
+} from "../../src/lib/server/internal/manual";
 import { NAMER, oracleFor } from "../../src/lib/server/internal/oracle2";
 import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
 import { ticketOf } from "./ticket";
@@ -285,6 +290,74 @@ describe("情景:手动加币,不选、自己敲 USDC", () => {
     );
     const view = await overview();
     expect(view.holdings.filter((h) => h.token.symbol === "USDC")).toHaveLength(2);
+  });
+});
+
+// —— 情景二·下半:同一件事的**另一条写路径** ——
+//
+// 加币有三个入口,而上面只走了「新建手记账户」那一个:
+//   ① createManualAccount —— 建账户时的首个币(表单有独立的「单价」字段)
+//   ② createToken —— 抽屉里「加一个币」(也有单价字段)
+//   ③ addManualActivities —— 抽屉里「记一笔活动」,顺带现建这个币(**没有**单价字段)
+//
+// ③ 是实际会踩坑的那条:表单里只有「成交价」,而单价靠选币之后异步回填市价 —— 手敲的币没有票,
+// 那次回填不跑,unitPrice 恒 0。于是用户填了 888、列表里那一行却没有价(实测 SSGS)。
+// 一条路测过不代表另两条也对,所以三条都要有。
+describe("情景:手动加币的另两条写路径", () => {
+  async function manualAccount() {
+    const a = await createManualAccount(
+      USER,
+      "M",
+      JSON.stringify([{ symbol: "BTC", unitPrice: "1", amount: "1", ticket: ticketOf("bitcoin") }]),
+    );
+    return a.id;
+  }
+
+  it("② 抽屉里加币(createToken):自己敲名字 + 填单价 → 列表按那个价算", async () => {
+    const accountId = await manualAccount();
+    await createToken(USER, { accountId, symbol: "SSGS", unitPrice: 888, amount: 22 });
+
+    const h = holdingOf(await overview(), "SSGS");
+    expect(h?.totalValue).toBe(22 * 888);
+  });
+
+  // **本轮的 bug**:这条路的表单没有单价字段,只有成交价。
+  it("③ 记一笔活动顺带现建币:没有单价字段 → 声明价取成交价,而不是 0", async () => {
+    const accountId = await manualAccount();
+    const res = await addManualActivities(USER, accountId, [
+      {
+        // 手敲的币:没有 ticket,所以前端那次「回填市价」压根不跑,unitPrice 只能是 0。
+        token: { symbol: "SSGS", unitPrice: 0 },
+        kind: "add",
+        amount: 22,
+        occurredAt: Date.now(),
+        price: 888, // 用户唯一给出的数字
+      },
+    ]);
+    expect(res.ok).toBe(true);
+
+    const [row] = (await tokenRows()).filter((r) => r.symbol === "SSGS");
+    expect(row.selfPrice).toBe(888); // ② 库里:声明价落下来了,不是 0
+    const h = holdingOf(await overview(), "SSGS");
+    expect(h?.totalValue).toBe(22 * 888); // ③ 屏幕:22 × 888,不是 $0
+    expect(h?.token.logo).toBeUndefined(); // 手敲的币没有图
+  });
+
+  it("③ 已有持仓的声明价**不被**一笔活动改掉(只有新声明才兜)", async () => {
+    const accountId = await manualAccount();
+    await createToken(USER, { accountId, symbol: "SSGS", unitPrice: 888, amount: 10 });
+    await addManualActivities(USER, accountId, [
+      {
+        token: { symbol: "SSGS", unitPrice: 0 },
+        kind: "add",
+        amount: 1,
+        occurredAt: Date.now() + 1,
+        price: 1, // 这次成交价很低,但它不该改掉声明价
+      },
+    ]);
+    const [row] = (await tokenRows()).filter((r) => r.symbol === "SSGS");
+    expect(row.selfPrice).toBe(888);
+    expect(holdingOf(await overview(), "SSGS")?.totalValue).toBe(11 * 888);
   });
 });
 

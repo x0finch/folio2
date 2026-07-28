@@ -101,12 +101,14 @@ export function planManualBatch(existing: Token[], drafts: ResolvedDraft[]): Bat
     if (!token) {
       // 这个币在本账户还没有持仓 → 声明一条。**id 不在这里造** —— 它是 mint 给的,
       // 所以同一个币被两条草稿引用时天然落到同一条持仓上。
-      token = {
-        id: d.token.tokenId,
-        symbol: d.token.symbol,
-        unitPrice: d.token.unitPrice,
-        activities: [],
-      };
+      //
+      // **没有市价可用时,声明价取这笔活动的成交价。** 录活动那个表单没有单独的「单价」字段:
+      // 选了币的话前端会异步回填市价,而**手敲的币没有票 → 那次回填压根不跑 → unitPrice 恒 0**。
+      // 于是用户明明填了 888,那个币却按 0 估值、列表里一行没有价(实测 SSGS)。
+      // 他给出的唯一一个数字就是成交价,而「市场不认识这个币时用用户声明的价」正是 self_price 的用途。
+      // 只在**新声明**时兜,且只在没有市价时 —— 已有持仓的声明价不该被一笔活动改掉。
+      const unitPrice = d.token.unitPrice > 0 ? d.token.unitPrice : (d.price ?? 0);
+      token = { id: d.token.tokenId, symbol: d.token.symbol, unitPrice, activities: [] };
       working.push(token);
       declare.push({ id: token.id, symbol: token.symbol, unitPrice: token.unitPrice });
     }
