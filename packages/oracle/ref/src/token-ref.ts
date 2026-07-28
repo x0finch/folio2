@@ -89,30 +89,22 @@ function normalizeAddress(namer: string, address: string): string {
  * 场馆的上架代号、上游的 coin id、vendor id 是(它们各有一份注册表);用户在输入框里敲的不是。
  */
 export const tokenRef = {
-  native: (namer: string): TokenRef => `${normalize(namer)}${SEP}${NATIVE}`,
+  native: (namer: string): TokenRef => `${normalizeNamer(namer)}${SEP}${NATIVE}`,
 
   contract: (namer: string, address: string): TokenRef => {
-    const n = normalize(namer);
+    const n = normalizeNamer(namer);
     return `${n}${SEP}${CONTRACT}${normalizeAddress(n, address)}`;
   },
 
   // 命名者发的标识一个字不动 —— 归一是生产者的事(币安 connector 自己保证 symbol 大写)。
-  issued: (namer: string, id: string): TokenRef => `${normalize(namer)}${SEP}${ISSUED}${id.trim()}`,
+  issued: (namer: string, id: string): TokenRef =>
+    `${normalizeNamer(namer)}${SEP}${ISSUED}${id.trim()}`,
 
   // 自造的名字**由文法归一成大写**(同 EVM 地址小写归一)—— 不靠调用点自觉,
   // 否则 `custom:usdc` 与 `custom:USDC` 是两行,同一个用户敲两次大小写不同就多一个币。
   custom: (namer: string, name: string): TokenRef =>
-    `${normalize(namer)}${SEP}${CUSTOM}${normalizeCustom(name)}`,
+    `${normalizeNamer(namer)}${SEP}${CUSTOM}${normalizeCustom(name)}`,
 } as const;
-
-/**
- * 命名者的规范形(trim + 小写)。`parseTokenRef` 在拆串时本来就这么归一,导出它是为了让
- * 「这条 ref 是不是那位命名者发的」这类比较有一处口径 —— 拿原串比大小写就会漏
- * (`CoinGecko` vs `coingecko`)。左段的归一规则归文法,不该在调用点各写一遍。
- */
-export function normalizeNamer(namer: string): string {
-  return normalize(namer);
-}
 
 /**
  * 这条 ref 带来的 symbol 有没有背书人。**形状即证据强度。**
@@ -144,7 +136,7 @@ export function hasTrustedSymbol(parsed: ParsedTokenRef): boolean {
 export function formatTokenRef(ref: TokenRefParts | TokenRefSegments): TokenRef {
   // `kind` 就是「说话人表没表态右段是什么」的判据:语义形有,两段形没有。
   const isSemantic = "kind" in ref;
-  if (!isSemantic) return `${normalize(ref.namer)}${SEP}${ref.localName.trim()}`;
+  if (!isSemantic) return `${normalizeNamer(ref.namer)}${SEP}${ref.localName.trim()}`;
   switch (ref.kind) {
     case "native":
       return tokenRef.native(ref.namer);
@@ -163,7 +155,7 @@ export function parseTokenRef(raw: TokenRef): ParsedTokenRef {
   const segments = raw.trim().split(SEP);
   if (segments.length !== 2) return unknown;
 
-  const namer = normalize(segments[0] ?? "");
+  const namer = normalizeNamer(segments[0] ?? "");
   const localName = (segments[1] ?? "").trim();
   if (!namer || !localName) return unknown;
 
@@ -193,7 +185,11 @@ export function parseTokenRef(raw: TokenRef): ParsedTokenRef {
   return unknown;
 }
 
-function normalize(s: string): string {
+/**
+ * 命名者的规范形。`parseTokenRef` 拆串时就用它归一左段,导出是为了让「这条 ref 是不是那位
+ * 命名者发的」这类比较有一处口径 —— 拿原串比大小写就会漏(`CoinGecko` vs `coingecko`)。
+ */
+export function normalizeNamer(s: string): string {
   return s.trim().toLowerCase();
 }
 

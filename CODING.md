@@ -19,6 +19,19 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 - **Facades expose intent, not primitives.** A package's public interface offers domain-intent methods (`priceOf` / `enrich` / `warm`), not its internal collaborators (`.store` / `.provider`). Orchestration — cache→fetch→write, single-flight, TTL gating, ref construction — lives *inside* the instance; callers express *what* they want, never *how*. Smell: app code doing `store.getX` → `provider.fetchX` → `store.putX`, or building the module's own value objects by hand. Corollary: let callers pass raw identity (`AssetRef.coinId`) and construct the internal ref (`TokenRef`) for them — don't leak the constructor.
 - **Bind ambient env once, at a single call site.** A factory like `createDb(env)` / `createTokens(env)` should be invoked in exactly one server-only module; everything else imports the ready instance (`import { db }` → `db.xxx`), never re-calls the factory. The single binding point is a `Proxy` that builds the facade per access from the `cloudflare:workers` env — deferring the env read to call time (request/scheduled), not module load.
 - **客户端打包的代码只从"契约/basic"包引类型与 schema,绝不从"entry/门面"包引。** entry 包(如 `@folio/connectors`)经其 registry `import` 全部 provider 实现;任何被客户端组件引用的文件(`apps/web/src/lib/*`、组件)只要 **value-import** 它,就会把整张 provider 依赖图打进 client bundle —— 轻则体积膨胀,重则某 provider 的 server-only dep(`cloudflare:workers` 等)直接破坏 client build。契约(`Balance` / `CredField` / 各 `*Meta` schema)一律从 `@folio/connectors-basic` 取;registry / provider / manifest 只在 server 侧(sync)用。同理适用于其它 basic/entry 分层的包。
+- **别造无逻辑的转发。** 一个函数如果只是把参数换个形状递给另一个函数,它就不该存在 —— 直接调那个函数。
+  ```ts
+  // ✗ 只是把两个参数装成对象
+  const refOf = (namer: string, localName: string) => formatTokenRef({ namer, localName });
+  // ✗ 只是换个名字
+  export function normalizeNamer(s: string) { return normalize(s); }
+  // ✓ 直接调;要换名字就把原函数改名,别再包一层
+  formatTokenRef({ namer, localName });
+  ```
+  转发层的代价不是那一行,是**读的人多一跳**:看见 `refOf` 得先跳进去才知道它跟 `formatTokenRef` 是同一件事,而跳完发现什么都没发生。名字还会分叉 —— 同一件事在仓里长出两个叫法,grep 一个漏一个。
+  **有内容就留着**,判据是「它有没有做决定」:绑定了一个常量(`cgkRef` 固定 `CGK_VENDOR` 并小写归一)、闭包住了状态(store 的 `mk` 绑 `source`)、加了一档判定(`partsOf` 把 `unknown` 映射成 `undefined`)—— 这些都不是转发。
+  同理**别为了「统一入口」把两三处一样的调用抽成 helper**:重复三次 `formatTokenRef({...})` 是三次同样清楚的调用,抽出来只是多一个要维护的名字。真要抽,得先有一句它自己的逻辑。
+
 - **快回退降嵌套(guard clause)。** 前置判定(缺凭据 / 分派选路 / 校验失败 / 找不到目标)一律 early-return 或提前抛,不把主逻辑塞进 `if (ok) { … }` 的深层嵌套。**分派型函数只做"选路 + return"**(如 sync 注入的 `fetchBalances`:`if (connector) return fetchViaConnector(…); return fetchViaBalances(…)`),各分支实现抽成独立命名函数;一个函数里与其主职责无关的前置工作,提到独立函数。
 - **Server-only deps (`cloudflare:workers`, node built-ins) belong only in code that gets stripped from the client.** A module imported client-side (e.g. one exporting a `createServerFn`) may reference `cloudflare:workers` *only inside the server-fn handler* (the compiler strips it). A **plain exported function** in that same module referencing the env can't be tree-shaken out → breaks the client build (`Rolldown failed to resolve "cloudflare:workers"`). Fix: move such functions into a separate server-only module the client never imports; the client-facing module references them only from within the stripped handler.
 
