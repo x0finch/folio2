@@ -4,7 +4,7 @@ import type {
   SearchResult,
   SimplePriceMap,
 } from "@folio/coingecko-client";
-import { tokenRef } from "@folio/oracle-ref";
+import { parseTokenRef, tokenRef } from "@folio/oracle-ref";
 import type { TokenPrice, TokenPricePoint, TokenRef, UpstreamToken } from "@folio/oracle2-basic";
 import { SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";
 
@@ -12,12 +12,14 @@ import { SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";
 // 产出的 tokenRef 命名者恒为本 adapter 的 id;coin id 规范为小写 kebab,归一在生产者侧做。
 
 export const cgkRef = (coinId: string): TokenRef =>
-  tokenRef.opaque(UPSTREAM_ID, coinId.toLowerCase());
+  tokenRef.issued(UPSTREAM_ID, coinId.toLowerCase());
 
 // coin id ← 本源命名的 ref。不是本源的命名(链上寻址 / 别家)→ undefined。
+// **走文法拆,不切前缀** —— 光比左段不够:`coingecko/contract:0x…` 左段也是本源,
+// 而它的右段是个地址,不是 coin id。要的是「本源**发的标识**」这一支(ADR 0020 第四轮)。
 export function coinIdOf(ref: TokenRef): string | undefined {
-  const prefix = `${UPSTREAM_ID}/`;
-  return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined;
+  const parsed = parseTokenRef(ref);
+  return parsed.kind === "issued" && parsed.namer === UPSTREAM_ID ? parsed.id : undefined;
 }
 
 // 一行 markets → UpstreamToken(元信息 + 价;价为 USD)。跳过无 id 的行。

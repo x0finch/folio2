@@ -26,11 +26,11 @@ const PRICES = { tk_btc: 65000, tk_ton: 5 };
 // mint 那一步的产物:tokenRef → token_id。认不出来的 ref 不在里面。
 const IDS = new Map([
   ["bitcoin/native", "tk_btc"],
-  ["binance/BTC", "tk_btc"],
-  ["coingecko/bitcoin", "tk_btc"],
-  ["coingecko/the-open-network", "tk_ton"],
+  ["binance/issued:BTC", "tk_btc"],
+  ["coingecko/issued:bitcoin", "tk_btc"],
+  ["coingecko/issued:the-open-network", "tk_ton"],
   // 认得出但上游没价 —— 与「压根认不出」是两种情况,都该回退自带价。
-  ["binance/PRIVATETOKEN", "tk_private"],
+  ["binance/issued:PRIVATETOKEN", "tk_private"],
 ]);
 
 const spot = (over: Partial<Balance> & Pick<Balance, "symbol" | "amount" | "value">): Balance =>
@@ -42,7 +42,7 @@ describe("revalue —— 盯市类型(无权威自带价,恒用源价)", () => {
     const out = await revalue(
       tokens,
       true,
-      [spot({ symbol: "BTC", amount: 0.5, value: 1, tokenRef: "coingecko/bitcoin" })],
+      [spot({ symbol: "BTC", amount: 0.5, value: 1, tokenRef: "coingecko/issued:bitcoin" })],
       IDS,
     );
     expect(out[0].value).toBe(32500); // 0.5 × 65000
@@ -65,7 +65,14 @@ describe("revalue —— 盯市类型(无权威自带价,恒用源价)", () => {
     const out = await revalue(
       tokens,
       true,
-      [spot({ symbol: "PRIVATETOKEN", amount: 10, value: 99, tokenRef: "manual/PRIVATETOKEN" })],
+      [
+        spot({
+          symbol: "PRIVATETOKEN",
+          amount: 10,
+          value: 99,
+          tokenRef: "manual/custom:PRIVATETOKEN",
+        }),
+      ],
       IDS,
     );
     expect(out[0].value).toBe(99);
@@ -86,7 +93,7 @@ describe("revalue —— 非盯市类型(有权威自带价)", () => {
     const out = await revalue(
       tokens,
       false,
-      [spot({ symbol: "BTC", amount: 2, value: 120000, tokenRef: "binance/BTC" })],
+      [spot({ symbol: "BTC", amount: 2, value: 120000, tokenRef: "binance/issued:BTC" })],
       IDS,
     );
     expect(out[0].value).toBe(120000); // 自带价权威,不动
@@ -99,7 +106,7 @@ describe("revalue —— 非盯市类型(有权威自带价)", () => {
     const out = await revalue(
       tokens,
       false,
-      [spot({ symbol: "BTC", amount: 2, value: 120000, tokenRef: "binance/BTC" })],
+      [spot({ symbol: "BTC", amount: 2, value: 120000, tokenRef: "binance/issued:BTC" })],
       IDS,
       "source-first",
     );
@@ -113,7 +120,14 @@ describe("revalue —— 非盯市类型(有权威自带价)", () => {
     const out = await revalue(
       tokens,
       false,
-      [spot({ symbol: "PRIVATETOKEN", amount: 10, value: 99, tokenRef: "binance/PRIVATETOKEN" })],
+      [
+        spot({
+          symbol: "PRIVATETOKEN",
+          amount: 10,
+          value: 99,
+          tokenRef: "binance/issued:PRIVATETOKEN",
+        }),
+      ],
       IDS,
       "source-first",
     );
@@ -126,7 +140,13 @@ describe("revalue —— 非盯市类型(有权威自带价)", () => {
 // —— 永续行不按市价重估(P5.1:仓位 value 恒 0、权益 = 账户净值;否则净值被名义敞口污染) ——
 describe("revalue —— 永续行保留 provider value", () => {
   const perp = (kind: "perp_position" | "perp_equity", amount: number, value: number): Balance =>
-    ({ symbol: "ETH", amount, value, kind, tokenRef: "hyperliquid/ETH" }) as unknown as Balance;
+    ({
+      symbol: "ETH",
+      amount,
+      value,
+      kind,
+      tokenRef: "hyperliquid/issued:ETH",
+    }) as unknown as Balance;
 
   it("perp_position value 恒 0(即便数量大、币认得出),不重估成 数量×币价", async () => {
     const { tokens, asked } = fakeTokens(PRICES);

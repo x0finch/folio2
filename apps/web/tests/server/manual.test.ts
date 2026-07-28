@@ -1,12 +1,11 @@
 import { env } from "cloudflare:test";
-import { formatTokenRef } from "@folio/oracle-ref";
-import { tokenTicket } from "@folio/oracle2";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";
 import { createAccountFor } from "../../src/lib/server/internal/create-account";
 import { db } from "../../src/lib/server/internal/db";
 import { createManualAccount } from "../../src/lib/server/internal/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle2";
+import { ticketOf } from "./ticket";
 
 // manual 创建往返的真实 D1 集成测试(jsdom 单测覆盖不到的服务端编排)。
 // 这套 pool 版本不隔离每测存储 → beforeEach 重置(删 user 级联清账户/token/活动)。
@@ -23,11 +22,6 @@ async function resetUser(): Promise<void> {
 }
 
 beforeEach(resetUser);
-
-// 选币下拉发给前端的那张票 = base64url 编过的 tokenRef。测试里现编,与生产同一个编码器 ——
-// 手写 base64 字面量的话,编码规则一改测试就静默失配。
-const ticketOf = (coinId: string) =>
-  tokenTicket.encode(formatTokenRef({ namer: NAMER, localName: coinId }));
 
 // 该账户的持仓(定义 + 账本折叠出的数量)。#203 起这是唯一事实源 —— 没有 creds.tokens 那个投影了。
 async function holdings(accountId: string) {

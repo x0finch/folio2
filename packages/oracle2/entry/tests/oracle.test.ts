@@ -75,7 +75,7 @@ describe("oracleFor —— 显式工厂", () => {
 
     tokenStores.get("u_alice")?.rows.set("tk_1", {
       id: "tk_1",
-      ref: "src/bitcoin",
+      ref: "src/issued:bitcoin",
       symbol: "BTC",
       name: "Bitcoin",
       infoStale: false,
@@ -238,7 +238,7 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
   const seedWarm = async (cfg: ReturnType<typeof countingConfig>, userId: string) => {
     cfg.upstream.markets = [
       {
-        ref: "src/polygon-ecosystem-token",
+        ref: "src/issued:polygon-ecosystem-token",
         symbol: "POL",
         name: "POL",
         price: { unitPrice: 1, marketCapRank: 76, asOf: 0 },
@@ -255,10 +255,10 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     // 时钟推过价的 TTL:橱窗会认为该刷了,mint 不该。
     c.clock.now += 24 * 60 * 60 * 1000;
     const id = await createOracleFor(c.cfg)("u1").mint.of([
-      { ref: "binance/POL", seed: { symbol: "POL" } },
+      { ref: "binance/issued:POL", seed: { symbol: "POL" } },
     ]);
 
-    expect(id.get("binance/POL")).toBeDefined(); // 认出来了(用的是旧目录)
+    expect(id.get("binance/issued:POL")).toBeDefined(); // 认出来了(用的是旧目录)
     expect(c.upstream.calls).toHaveLength(after); // 而且一次网都没出
   });
 
@@ -274,16 +274,16 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     const c = countingConfig();
     c.upstream.markets = [
       {
-        ref: "src/polygon-ecosystem-token",
+        ref: "src/issued:polygon-ecosystem-token",
         symbol: "POL",
         name: "POL",
         price: { unitPrice: 1, marketCapRank: 76, asOf: 0 },
       },
     ];
     const id = await createOracleFor(c.cfg)("u1").mint.of([
-      { ref: "binance/POL", seed: { symbol: "POL" } },
+      { ref: "binance/issued:POL", seed: { symbol: "POL" } },
     ]);
-    expect(id.get("binance/POL")).toBeDefined();
+    expect(id.get("binance/issued:POL")).toBeDefined();
     expect(c.upstream.calls).toHaveLength(1);
   });
 });

@@ -1,6 +1,4 @@
 import { env } from "cloudflare:test";
-import { formatTokenRef } from "@folio/oracle-ref";
-import { tokenTicket } from "@folio/oracle2";
 import { beforeEach, describe, expect, it } from "vitest";
 import { type CredsToken, deriveAmount } from "../../src/lib/manual-activity";
 import { db } from "../../src/lib/server/internal/db";
@@ -14,6 +12,7 @@ import {
   updateToken,
 } from "../../src/lib/server/internal/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle2";
+import { ticketOf } from "./ticket";
 
 // T3(#155)服务端写路径集成:持仓 CRUD + 批量活动(原子)+ 删/改活动,全落库。真实 D1(Miniflare)。
 // 不隔离每测存储 → beforeEach 重置。
@@ -35,11 +34,6 @@ async function resetUser(): Promise<void> {
 }
 
 beforeEach(resetUser);
-
-// 选币下拉发给前端的那张票 = base64url 编过的 tokenRef。测试里现编,与生产同一个编码器 ——
-// 手写 base64 字面量的话,编码规则一改测试就静默失配。
-const ticketOf = (coinId: string) =>
-  tokenTicket.encode(formatTokenRef({ namer: NAMER, localName: coinId }));
 
 // 某 manual 账户已物化的 creds.tokens(投影)。
 // 该账户的持仓:定义 + 账本折叠出的数量(compute-on-read;#203 之后没有 creds.tokens 那个投影了)。
@@ -75,6 +69,7 @@ describe("createToken", () => {
       symbol: "ETH",
       unitPrice: 3000,
       amount: 2,
+      ticket: ticketOf("ethereum"),
     });
     const tokens = await readTokens(account.id);
     expect(tokens.map((t) => [t.symbol, t.amount]).sort()).toEqual([

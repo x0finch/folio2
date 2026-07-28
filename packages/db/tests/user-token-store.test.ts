@@ -24,7 +24,7 @@ const USER_B = "u-b";
 const NAMER = "coingecko"; // 上游自报的 id;store 只拿它判「认出来了没」
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const USDC_ARB = "evm:42161/contract:0xaf88d065e77c8cc2239327c5edb3a432268e5831";
-const USDC_UP = "coingecko/usd-coin";
+const USDC_UP = "coingecko/issued:usd-coin";
 
 async function resetUser(userId: string): Promise<void> {
   const db = getDb(env);
@@ -147,9 +147,9 @@ describe("多链归一", () => {
   it("一个 Token 已有上游那一档 → 不许再加第二条", async () => {
     const store = storeFor(USER_A);
     const id = await store.create(seed("USDC"), [USDC_ETH, USDC_UP]);
-    await store.linkRef(id, "coingecko/tether"); // 想给同一行挂第二个上游币
+    await store.linkRef(id, "coingecko/issued:tether"); // 想给同一行挂第二个上游币
     expect((await store.getById(id))?.ref).toBe(USDC_UP); // 还是原来那个
-    expect((await store.findByRefs(["coingecko/tether"])).size).toBe(0);
+    expect((await store.findByRefs(["coingecko/issued:tether"])).size).toBe(0);
   });
 });
 
@@ -316,7 +316,7 @@ describe("身份变化把 info 标成该刷", () => {
 
     await store.linkRef(id, USDC_ETH); // 这条 ref 已有主 → 早退
     expect((await store.getById(id))?.infoStale).toBe(false);
-    await store.linkRef(id, "coingecko/other-coin"); // 该命名者下已有别的叫法 → 不加第二条
+    await store.linkRef(id, "coingecko/issued:other-coin"); // 该命名者下已有别的叫法 → 不加第二条
     expect((await store.getById(id))?.infoStale).toBe(false);
   });
 
@@ -379,8 +379,8 @@ describe("历史日价按 tokenRef 全局存", () => {
   it("两个用户的同一个币共用同一批行 —— 谁先写,另一个直接读到", async () => {
     const a = storeFor(USER_A);
     const b = storeFor(USER_B);
-    const idA = await a.create(seed("BTC"), ["coingecko/bitcoin"]);
-    const idB = await b.create(seed("BTC"), ["coingecko/bitcoin"]);
+    const idA = await a.create(seed("BTC"), ["coingecko/issued:bitcoin"]);
+    const idB = await b.create(seed("BTC"), ["coingecko/issued:bitcoin"]);
     expect(idA).not.toBe(idB);
 
     const pricesA = createUserTokenPriceStore(env, { userId: USER_A, namer: NAMER });
@@ -392,7 +392,7 @@ describe("历史日价按 tokenRef 全局存", () => {
     // 表里确实只有一行。
     const rows = await getDb(env).select().from(tokenDailyPrices);
     expect(rows).toHaveLength(1);
-    expect(rows[0].tokenRef).toBe("coingecko/bitcoin");
+    expect(rows[0].tokenRef).toBe("coingecko/issued:bitcoin");
   });
 
   it("上游还没认出来的币没有全局键 → 读空、写跳过,不抛", async () => {
@@ -406,7 +406,7 @@ describe("历史日价按 tokenRef 全局存", () => {
 
   it("同一个 (ref, 日) 再写一次是覆盖,不是重复行", async () => {
     const store = storeFor(USER_A);
-    const id = await store.create(seed("BTC"), ["coingecko/bitcoin"]);
+    const id = await store.create(seed("BTC"), ["coingecko/issued:bitcoin"]);
     const prices = createUserTokenPriceStore(env, { userId: USER_A, namer: NAMER });
     await prices.putDaily(id, [{ dayBucket: 20180, unitPrice: 1 }]);
     await prices.putDaily(id, [{ dayBucket: 20180, unitPrice: 2 }]);
@@ -429,9 +429,9 @@ describe("per-user 缓存", () => {
 
   it("同一个键再写是覆盖", async () => {
     const a = createUserCacheStore(env, { userId: USER_A, now: () => 1000 });
-    await a.put("warm", [{ ref: "coingecko/bitcoin" }], 500);
-    await a.put("warm", [{ ref: "coingecko/ethereum" }], 500);
-    expect(await a.get("warm")).toMatchObject({ value: [{ ref: "coingecko/ethereum" }] });
+    await a.put("warm", [{ ref: "coingecko/issued:bitcoin" }], 500);
+    await a.put("warm", [{ ref: "coingecko/issued:ethereum" }], 500);
+    expect(await a.get("warm")).toMatchObject({ value: [{ ref: "coingecko/issued:ethereum" }] });
   });
 
   it("没有的键 → undefined", async () => {

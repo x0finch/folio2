@@ -6,7 +6,7 @@ import type {
   SnapshotWithBalances,
 } from "@folio/db";
 import { dayBucketOf } from "@folio/oracle";
-import { formatTokenRef } from "@folio/oracle-ref";
+import { tokenRef } from "@folio/oracle-ref";
 import { tokenTicket } from "@folio/oracle2";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
@@ -27,8 +27,10 @@ import { NAMER, oracleFor } from "./oracle2";
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;
 
-// db 出来的是「当前命名者对这个币的叫法」(右段),拼回完整 ref 才能编成票。
-const refOfLocalName = (localName: string) => formatTokenRef({ namer: NAMER, localName });
+// db 出来的 `identifier` 是「当前命名者对这个币的叫法」—— **裸标识,不带文法标记**
+// (见 `listManualHoldingsByAccount`)。拼回完整 ref 才能编成票,而它恒是 `issued` 那一支:
+// identifier 有值就意味着上游发了这个标识,合约地址与手敲的名字都读不成 identifier。
+const refOfIdentifier = (identifier: string) => tokenRef.issued(NAMER, identifier);
 
 // **物化没有了**(#203)。原来每次写完都要把「各 token 定义 + 折叠出的 amount」写回
 // `creds.tokens`,给 manual provider 读。四个值全部落进真表之后 provider 只是「app 写进 JSON 列 →
@@ -227,7 +229,7 @@ export async function loadManualAccountDetail(
       id: token.id,
       symbol: token.symbol,
       unitPrice: token.unitPrice,
-      ticket: token.identifier ? tokenTicket.encode(refOfLocalName(token.identifier)) : null,
+      ticket: token.identifier ? tokenTicket.encode(refOfIdentifier(token.identifier)) : null,
       amount: deriveAmount(activities),
     })),
     activities: perToken.flatMap(({ activities }) => activities),

@@ -51,7 +51,7 @@ export async function resolveAsset(
   const parsed = key ? parseTokenRef(key) : undefined;
   // `coingecko/<id>` 形的 tokenRef 本身就是规范 ref(厂商寻址,如 manual 用户选币)→ 直接命中,
   // 不查索引、不掉回 symbol。等同显式 ref。其余场馆命名(binance/USDC 等)不是规范 ref,照走索引/symbol。
-  if (parsed?.kind === "opaque" && parsed.namer === CGK_VENDOR) {
+  if (parsed?.kind === "issued" && parsed.namer === CGK_VENDOR) {
     return {
       ref: cgkRef(parsed.id),
       confidence: "high",

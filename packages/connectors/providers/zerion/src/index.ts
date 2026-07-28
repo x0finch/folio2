@@ -90,7 +90,7 @@ export function parseChainIds(res: ZerionChainsResponse): Record<string, number>
 // EVM 持仓的 tokenRef:命名者恒为 `evm:<chainId>`(数字 chainId 由 getChainIds 保证)。
 // 合约币 → `contract:<addr>`;原生 gas 币 → `native`。**恒产出** —— 该链没有实现的行在调用处
 // 就跳过了(拿不到地址就没有规范身份可言,见 parsePositions)。
-// 走 `tokenRef.contract` 而不是不透明形,是在声明「这条 ref 的 symbol 由合约部署者填、不可信」
+// 走 `tokenRef.contract` 而不是 `tokenRef.issued`,是在声明「这条 ref 的 symbol 由合约部署者填、不可信」
 // (ADR 0020 第三轮:认币的 symbol 那一档据此跳过它)。
 function evmTokenRef(chainId: number, contract: string | undefined): string {
   const namer = `evm:${chainId}`;

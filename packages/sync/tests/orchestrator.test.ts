@@ -34,7 +34,7 @@ function account(overrides: Partial<AccountSafe> = {}): AccountSafe {
 }
 const bal = (symbol: string, value: number): Balance => ({
   symbol,
-  tokenRef: `binance/${symbol}`,
+  tokenRef: `binance/issued:${symbol}`,
   amount: 1,
   value,
   kind: "spot",
@@ -305,7 +305,7 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
       revalue: async (_userId, _cid, balances, idByRef) => {
         order.push("revalue");
         // 拿到的正是上一步的产物 —— 自己不解析身份。
-        expect(idByRef.get("binance/BTC")).toBe("tk_BTC");
+        expect(idByRef.get("binance/issued:BTC")).toBe("tk_BTC");
         return balances;
       },
     });
@@ -363,7 +363,7 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
   it("认不出来的那条 ref 不进 map → 它的 token_id 留空,别的行不受影响", async () => {
     const { deps, writes } = makeDeps([account()], {
       fetchBalances: async () => ok([bal("BTC", 100), bal("SCAM", 5)]),
-      mint: async () => new Map([["binance/BTC", "tk_BTC"]]),
+      mint: async () => new Map([["binance/issued:BTC", "tk_BTC"]]),
     });
 
     await syncUser(deps, "u1");

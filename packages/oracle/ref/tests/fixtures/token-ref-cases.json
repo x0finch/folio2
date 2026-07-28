@@ -2,11 +2,14 @@
   "_": [
     "tokenRef 文法的黄金表(ADR 0020)。一眼扫完整套行为,不用在断言里翻。",
     "",
-    "construct —— 造串:给结构,拿串。`value` 按 kind 解释(contract=地址,opaque=id,native 不用)。",
+    "construct —— 造串:给结构,拿串。`value` 按 kind 解释(contract=地址,issued=标识,custom=名字,native 不用)。",
     "parse —— 拆串:`parsed` 为 null 表示读不懂(kind=unknown)。`canonical` 缺省即等于 raw;",
     "        给了就表示 raw 不是规范形,拼回去会变成 canonical。",
     "",
-    "每条都同时被三种断言吃:parse 出这个结构 / 语义形拼回去是 canonical / 两段形拼回去也是 canonical。"
+    "每条都同时被三种断言吃:parse 出这个结构 / 语义形拼回去是 canonical / 两段形拼回去也是 canonical。",
+    "",
+    "**四形状都带标记(native 是完整保留字),兜底 = unknown**(第四轮):没有标记的右段一律读不懂,",
+    "而不是掉进一个「信任」的桶里 —— 那正是 `manual/USDC` 被当成命名者发的标识、拿去认币的原因。"
   ],
 
   "construct": [
@@ -52,18 +55,32 @@
       "ref": "evm:1/contract:0xabc"
     },
     {
-      "note": "不透明 id 一个字不动 —— 归一是生产者的事(币安 connector 自己保证大写)",
-      "kind": "opaque",
+      "note": "命名者发的标识一个字不动 —— 归一是生产者的事(币安 connector 自己保证大写)",
+      "kind": "issued",
       "namer": "binance",
       "value": "USDC",
-      "ref": "binance/USDC"
+      "ref": "binance/issued:USDC"
     },
     {
-      "note": "上游 coin id 同样原样",
-      "kind": "opaque",
+      "note": "上游 coin id 同样原样(小写 kebab 由生产者归一)",
+      "kind": "issued",
       "namer": "coingecko",
       "value": "Wrapped-BTC",
-      "ref": "coingecko/Wrapped-BTC"
+      "ref": "coingecko/issued:Wrapped-BTC"
+    },
+    {
+      "note": "调用方自造的名字:**文法**归一成大写,不靠调用点自觉 —— 否则 custom:usdc 与 custom:USDC 是两行",
+      "kind": "custom",
+      "namer": "manual",
+      "value": "usdc",
+      "ref": "manual/custom:USDC"
+    },
+    {
+      "note": "自造的名字也 trim",
+      "kind": "custom",
+      "namer": "Manual",
+      "value": "  my-coin  ",
+      "ref": "manual/custom:MY-COIN"
     }
   ],
 
@@ -109,24 +126,44 @@
       }
     },
     {
-      "note": "上游 coin id",
-      "raw": "coingecko/usd-coin",
+      "note": "上游 coin id —— coingecko 发的,它为这个标识负责",
+      "raw": "coingecko/issued:usd-coin",
       "parsed": {
-        "kind": "opaque",
+        "kind": "issued",
         "namer": "coingecko",
         "id": "usd-coin",
-        "localName": "usd-coin"
+        "localName": "issued:usd-coin"
       }
     },
     {
       "note": "场馆上架代号 —— 大小写不动",
-      "raw": "binance/USDC",
-      "parsed": { "kind": "opaque", "namer": "binance", "id": "USDC", "localName": "USDC" }
+      "raw": "binance/issued:USDC",
+      "parsed": {
+        "kind": "issued",
+        "namer": "binance",
+        "id": "USDC",
+        "localName": "issued:USDC"
+      }
     },
     {
       "note": "永续场馆同理",
-      "raw": "hyperliquid/BTC",
-      "parsed": { "kind": "opaque", "namer": "hyperliquid", "id": "BTC", "localName": "BTC" }
+      "raw": "hyperliquid/issued:BTC",
+      "parsed": {
+        "kind": "issued",
+        "namer": "hyperliquid",
+        "id": "BTC",
+        "localName": "issued:BTC"
+      }
+    },
+    {
+      "note": "用户自己敲的 symbol —— 有形状了,再不会被认成「命名者发的标识」",
+      "raw": "manual/custom:USDC",
+      "parsed": {
+        "kind": "custom",
+        "namer": "manual",
+        "name": "USDC",
+        "localName": "custom:USDC"
+      }
     },
 
     {
@@ -146,6 +183,28 @@
       "canonical": "bitcoin/native",
       "parsed": { "kind": "native", "namer": "bitcoin", "localName": "native" }
     },
+    {
+      "note": "标记本身大小写不敏感,标记后面的标识不动(那是命名者的写法)",
+      "raw": "binance/ISSUED:USDC",
+      "canonical": "binance/issued:USDC",
+      "parsed": {
+        "kind": "issued",
+        "namer": "binance",
+        "id": "USDC",
+        "localName": "issued:USDC"
+      }
+    },
+    {
+      "note": "自造的名字归一成大写 —— 归一在文法里,所以拆出来就已经是规范形",
+      "raw": "manual/custom:usdc",
+      "canonical": "manual/custom:USDC",
+      "parsed": {
+        "kind": "custom",
+        "namer": "manual",
+        "name": "USDC",
+        "localName": "custom:USDC"
+      }
+    },
 
     { "note": "空串", "raw": "", "parsed": null },
     { "note": "纯空白", "raw": "   ", "parsed": null },
@@ -161,6 +220,18 @@
     },
     { "note": "三段", "raw": "a/b/c", "parsed": null },
     { "note": "空地址", "raw": "evm:1/contract:", "parsed": null },
+    { "note": "标记后面空着 —— issued 同理", "raw": "binance/issued:", "parsed": null },
+    { "note": "标记后面空着 —— custom 同理", "raw": "manual/custom:", "parsed": null },
+    {
+      "note": "**没有标记的右段一律读不懂**(第四轮的兜底):这一条正是 `manual/USDC` 那个 bug 的形状",
+      "raw": "manual/USDC",
+      "parsed": null
+    },
+    {
+      "note": "同一个形状换个命名者也一样 —— 兜底不看是谁在说",
+      "raw": "coingecko/usd-coin",
+      "parsed": null
+    },
     {
       "note": "旧文法 `erc20:` —— 不容旧,否则「symbol 可不可信」又变成猜的(ADR 0020 第三轮)",
       "raw": "evm:1/erc20:0xabc",
@@ -169,7 +240,7 @@
     { "note": "旧文法 `token:`", "raw": "solana/token:EPjF", "parsed": null },
     { "note": "旧文法 `native:`", "raw": "bitcoin/native:btc", "parsed": null },
     {
-      "note": "producer 自创的标记 —— 也不容,`contract:` 是文法自己的常量",
+      "note": "producer 自创的标记 —— 也不容,标记是文法自己的常量",
       "raw": "evm:1/spl:0xabc",
       "parsed": null
     },

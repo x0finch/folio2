@@ -39,11 +39,11 @@ describe("buildManualSnapshot", () => {
     expect(snap.balances[0].metaJson).toBeNull();
   });
 
-  it("有 identifier → tokenRef = coingecko/<id>;无 → manual/<SYMBOL>(恒有值)", () => {
+  it("有 identifier → coingecko/issued:<id>;无 → manual/custom:<名字>(恒有值)", () => {
     const withId = buildManualSnapshot("acc1", [tok({ identifier: "Bitcoin" })], [undefined], TS);
-    expect(withId.balances[0].tokenRef).toBe("coingecko/bitcoin");
+    expect(withId.balances[0].tokenRef).toBe("coingecko/issued:bitcoin");
     const noId = buildManualSnapshot("acc1", [tok({ identifier: undefined })], [undefined], TS);
-    expect(noId.balances[0].tokenRef).toBe("manual/BTC");
+    expect(noId.balances[0].tokenRef).toBe("manual/custom:BTC");
   });
 
   it("totalUsd = 各余额 usdValue 之和", () => {
@@ -85,7 +85,7 @@ describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
             id,
             {
               id,
-              ref: "coingecko/x",
+              ref: "coingecko/issued:x",
               symbol: id.replace("tk-", ""),
               name: id,
               price:

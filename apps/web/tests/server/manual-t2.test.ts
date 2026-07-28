@@ -7,6 +7,7 @@ import {
   injectManualSnapshots,
   manualBalancesForWarm,
 } from "../../src/lib/server/internal/manual";
+import { ticketOf } from "./ticket";
 
 // T2(ADR 0018)服务端集成:manual 退出 snapshot、当下值由 creds 现造。真实 D1(Miniflare)。
 // 不隔离每测存储 → beforeEach 重置。
@@ -53,7 +54,9 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
     const account = await createManualAccount(
       USER,
       "My BTC",
-      JSON.stringify([{ symbol: "BTC", unitPrice: "64000", identifier: "bitcoin", amount: "0.5" }]),
+      JSON.stringify([
+        { symbol: "BTC", unitPrice: "64000", ticket: ticketOf("bitcoin"), amount: "0.5" },
+      ]),
     );
     const accounts = await db.listAccountsByUser(USER);
     const byAccount = new Map<string, SnapshotWithBalances>();
@@ -65,7 +68,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
     // 测试环境 token 缓存空 → enrich 无价 → 回退 amount × unitPrice = 0.5 × 64000。
     expect(synth?.snapshot.totalUsd).toBe(32000);
     expect(synth?.balances[0].selfPrice).toBeNull();
-    expect(synth?.balances[0].tokenRef).toBe("coingecko/bitcoin");
+    expect(synth?.balances[0].tokenRef).toBe("coingecko/issued:bitcoin");
   });
 
   it("非 manual 账户不注入", async () => {
@@ -87,12 +90,16 @@ describe("manualBalancesForWarm", () => {
     await createManualAccount(
       USER,
       "Active",
-      JSON.stringify([{ symbol: "BTC", unitPrice: "60000", identifier: "bitcoin", amount: "1" }]),
+      JSON.stringify([
+        { symbol: "BTC", unitPrice: "60000", ticket: ticketOf("bitcoin"), amount: "1" },
+      ]),
     );
     const archived = await createManualAccount(
       USER,
       "Archived",
-      JSON.stringify([{ symbol: "ETH", unitPrice: "3000", identifier: "ethereum", amount: "2" }]),
+      JSON.stringify([
+        { symbol: "ETH", unitPrice: "3000", ticket: ticketOf("ethereum"), amount: "2" },
+      ]),
     );
     await db.setArchived(USER, archived.id, true);
 
@@ -100,7 +107,7 @@ describe("manualBalancesForWarm", () => {
     const balances = await manualBalancesForWarm(USER, accounts);
     // 只应含活跃账户的币(BTC),不含归档账户的币(ETH)。
     expect(balances.map((b) => b.symbol)).toEqual(["BTC"]);
-    expect(balances.every((b) => b.tokenRef === "coingecko/bitcoin")).toBe(true);
+    expect(balances.every((b) => b.tokenRef === "coingecko/issued:bitcoin")).toBe(true);
   });
 });
 

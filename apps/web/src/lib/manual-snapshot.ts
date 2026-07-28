@@ -1,6 +1,8 @@
 import type { SnapshotWithBalances } from "@folio/db";
+import { cgkRef } from "@folio/oracle";
 import { tokenRef } from "@folio/oracle-ref";
 import type { CredsToken } from "./manual-activity";
+import { MANUAL_CONNECTOR_ID } from "./manual-connector";
 
 // 纯逻辑(缝③,无 server/db import → 可单测)。manual 账户的 creds.tokens(物化投影,= provider 输出)
 // → 一份合成 `SnapshotWithBalances`(ADR 0018 做法 1)。manual 不写快照,其「当下」持仓/净值读时现造后
@@ -26,13 +28,15 @@ export function buildManualSnapshot(
       usdValue: t.amount * price,
       kind: "spot" as const,
       // 手记的持仓不在任何链上 —— 平台是 manual,**不是** ref 左半边的 coingecko。
-      platform: "manual",
+      platform: MANUAL_CONNECTOR_ID,
       selfPrice: null,
-      // 与 manual provider 同源:选了币 → `coingecko/<id>`(小写 kebab 归一在生产者侧做),
-      // 没选 → `manual/<SYMBOL>`。tokenRef 恒有值(Balance 契约必填)。
+      // 选了币 → `coingecko/issued:<id>`(小写 kebab 归一在 `cgkRef` 里,即生产者侧);
+      // 没选 → `manual/custom:<名字>`(没有注册表背书,见 manual-connector.ts)。
+      // tokenRef 恒有值(Balance 契约必填)。这条 ref 喂的是**旧参考层**的 enrich,所以命名者
+      // 走旧 oracle 的 `cgkRef` —— #203 手记并入 tokens 之后这一整段跟着退场。
       tokenRef: t.identifier
-        ? tokenRef.opaque("coingecko", t.identifier.toLowerCase())
-        : tokenRef.opaque("manual", t.symbol.trim().toUpperCase()),
+        ? cgkRef(t.identifier)
+        : tokenRef.custom(MANUAL_CONNECTOR_ID, t.symbol),
       // 手记的当下值是**现造的**(ADR 0018:不写快照),所以没有落库时 mint 出来的 token_id。
       // 读端遇到空 token_id 会退回 tokenRef 那条路。手记并入 tokens 是 #203 的事。
       tokenId: null,

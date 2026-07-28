@@ -4,7 +4,7 @@ import { fakeCacheStore, fakeTokenPriceStore, fakeTokenStore, fakeUpstream } fro
 
 const NOW = 1_700_000_000_000; // 落在某个 UTC 日的中段
 const TODAY = Math.floor(NOW / MS_PER_DAY);
-const SRC_BTC = "src/bitcoin";
+const SRC_BTC = "src/issued:bitcoin";
 
 const info = (over: Partial<TokenInfo> & { id: string }): TokenInfo => ({
   ref: SRC_BTC,
@@ -115,17 +115,17 @@ describe("批量刷 stale 价", () => {
   it("只刷「认得出来且价 stale/缺失」的,一次批量回源", async () => {
     const { prices, upstream, tokens } = setup([
       info({ id: "fresh" }),
-      info({ id: "stale", ref: "src/ethereum" }),
-      info({ id: "nopricexyz", ref: "src/tether" }),
+      info({ id: "stale", ref: "src/issued:ethereum" }),
+      info({ id: "nopricexyz", ref: "src/issued:tether" }),
       info({ id: "unknown", ref: null }), // 上游没认出 → 跳过
     ]);
     await prices.put([{ tokenId: "fresh", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
     await prices.put([{ tokenId: "stale", unitPrice: 1, asOf: 0 }], 0);
-    upstream.prices.set("src/ethereum", { unitPrice: 3000, asOf: NOW });
-    upstream.prices.set("src/tether", { unitPrice: 1, asOf: NOW });
+    upstream.prices.set("src/issued:ethereum", { unitPrice: 3000, asOf: NOW });
+    upstream.prices.set("src/issued:tether", { unitPrice: 1, asOf: NOW });
 
     expect(await tokens.refreshStalePrices(["fresh", "stale", "nopricexyz", "unknown"])).toBe(2);
-    expect(upstream.calls).toEqual(["fetchPrices:src/ethereum,src/tether"]);
+    expect(upstream.calls).toEqual(["fetchPrices:src/issued:ethereum,src/issued:tether"]);
   });
 
   it("没有要刷的 → 零调用", async () => {
@@ -146,17 +146,19 @@ describe("批量刷 stale 元信息(覆盖)", () => {
   it("只刷「认得出来且 info stale」的,一次批量回源", async () => {
     const { store, upstream, tokens } = setup([
       info({ id: "fresh" }), // 刷过了 → 跳过
-      info({ id: "stale", ref: "src/ethereum", infoStale: true }),
+      info({ id: "stale", ref: "src/issued:ethereum", infoStale: true }),
       info({ id: "unknown", ref: null, infoStale: true }), // 上游没认出 → 没名字可取,跳过
     ]);
-    upstream.markets = [{ ref: "src/ethereum", symbol: "ETH", name: "Ethereum", logo: "eth.png" }];
+    upstream.markets = [
+      { ref: "src/issued:ethereum", symbol: "ETH", name: "Ethereum", logo: "eth.png" },
+    ];
 
     expect(await tokens.refreshStaleInfo(["fresh", "stale", "unknown"])).toBe(1);
-    expect(upstream.calls).toEqual(["fetchTokens:src/ethereum"]);
+    expect(upstream.calls).toEqual(["fetchTokens:src/issued:ethereum"]);
     // 刷过之后不再 stale → 下一次零调用(否则每次访问都白刷一趟上游)。
     expect(store.rows.get("stale")?.infoStale).toBe(false);
     expect(await tokens.refreshStaleInfo(["fresh", "stale", "unknown"])).toBe(0);
-    expect(upstream.calls).toEqual(["fetchTokens:src/ethereum"]);
+    expect(upstream.calls).toEqual(["fetchTokens:src/issued:ethereum"]);
   });
 
   it("**链上 symbol 与上游不一致 → 上游那份赢**(MATIC→POL)", async () => {
@@ -164,7 +166,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     const { store, upstream, tokens } = setup([
       info({
         id: "tk_pol",
-        ref: "src/polygon-ecosystem-token",
+        ref: "src/issued:polygon-ecosystem-token",
         symbol: "MATIC",
         name: "Matic Network",
         providerLogo: "zerion-matic.png",
@@ -173,7 +175,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     ]);
     upstream.markets = [
       {
-        ref: "src/polygon-ecosystem-token",
+        ref: "src/issued:polygon-ecosystem-token",
         symbol: "POL",
         name: "POL (ex-MATIC)",
         logo: "pol.png",
@@ -215,7 +217,9 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     const { store, upstream, tokens } = setup([
       info({ id: "tk_1", symbol: "OLD", infoStale: true }),
     ]);
-    upstream.fetchTokens = async () => [{ ref: "src/somebody-else", symbol: "ELSE", name: "Else" }];
+    upstream.fetchTokens = async () => [
+      { ref: "src/issued:somebody-else", symbol: "ELSE", name: "Else" },
+    ];
 
     expect(await tokens.refreshStaleInfo(["tk_1"])).toBe(0);
     expect(store.rows.get("tk_1")?.symbol).toBe("OLD");
@@ -234,7 +238,7 @@ describe("边角", () => {
     const { prices, upstream, tokens } = setup([info({ id: "tk_1" })]);
     // 上游多回了一条我们没问的(或已被合并掉的)ref。
     upstream.prices.set(SRC_BTC, { unitPrice: 60000, asOf: NOW });
-    upstream.prices.set("src/stranger", { unitPrice: 1, asOf: NOW });
+    upstream.prices.set("src/issued:stranger", { unitPrice: 1, asOf: NOW });
 
     expect(await tokens.refreshStalePrices(["tk_1"])).toBe(1);
     expect([...prices.current.keys()]).toEqual(["tk_1"]);
@@ -365,7 +369,7 @@ describe("选币的取价(按 ref,不建行)", () => {
 
   it("上游不认识这条 ref → undefined(表单让用户自己填)", async () => {
     const { tokens } = setup();
-    expect(await tokens.priceByRef("src/nope")).toBeUndefined();
+    expect(await tokens.priceByRef("src/issued:nope")).toBeUndefined();
   });
 
   it("上游抛错 → undefined,不抛 —— 取不到价不该把选币流程打断", async () => {
@@ -388,7 +392,7 @@ describe("橱窗与候选", () => {
         price: { unitPrice: 60000, marketCapRank: 1, asOf: NOW },
       },
       {
-        ref: "src/tether",
+        ref: "src/issued:tether",
         symbol: "USDT",
         name: "Tether",
         price: { unitPrice: 1, marketCapRank: 3, asOf: NOW },
@@ -398,7 +402,7 @@ describe("橱窗与候选", () => {
     expect((await tokens.topTokens(1)).map((t) => t.ref)).toEqual([SRC_BTC]);
     expect(upstream.calls).toEqual(["fetchMarkets:1000"]);
     // 第二次从 blob 出,不再预热 —— 缓存里始终只有一个键。
-    expect((await tokens.topTokens(2)).map((t) => t.ref)).toEqual([SRC_BTC, "src/tether"]);
+    expect((await tokens.topTokens(2)).map((t) => t.ref)).toEqual([SRC_BTC, "src/issued:tether"]);
     expect(upstream.calls).toHaveLength(1);
     expect([...cache.entries.keys()]).toEqual(["warm"]);
   });

@@ -139,7 +139,7 @@ describe("resolveAsset", () => {
     const source = { fetchByContract } as unknown as TokenSource;
     expect(
       await resolveAsset(
-        { symbol: "BTC", tokenRef: "coingecko/bitcoin" },
+        { symbol: "BTC", tokenRef: "coingecko/issued:bitcoin" },
         { source, store: fakeStore() },
       ),
     ).toEqual({ ref: cg("bitcoin"), confidence: "high", via: "explicit" });
@@ -155,7 +155,7 @@ describe("resolveAsset", () => {
     }));
     const source = { fetchByContract } as unknown as TokenSource;
     // `contract:` 标记自己就说明了「这是某条链上的合约地址」(ADR 0020 第三轮)——
-    // 不必调用方另外告知。场馆命名(binance/USDC)是 opaque 形,照旧掉回 symbol 消歧。
+    // 不必调用方另外告知。场馆命名(binance/issued:USDC)是 issued 形,照旧掉回 symbol 消歧。
     const asset = { symbol: "USDC", tokenRef: "ethereum/contract:0xabc" };
 
     const r1 = await resolveAsset(asset, { source, store });
@@ -177,7 +177,7 @@ describe("resolveAsset", () => {
     const source = { fetchByContract } as unknown as TokenSource;
 
     const r = await resolveAsset(
-      { symbol: "USDC", tokenRef: "binance/USDC" },
+      { symbol: "USDC", tokenRef: "binance/issued:USDC" },
       { source, store, overrides: { USDC: cg("usd-coin") } },
     );
     expect(fetchByContract).not.toHaveBeenCalled();
@@ -193,7 +193,7 @@ describe("resolveAsset", () => {
     }));
     const source = { fetchByContract } as unknown as TokenSource;
     // `contract:` 标记自己就说明了「这是某条链上的合约地址」(ADR 0020 第三轮)——
-    // 不必调用方另外告知。场馆命名(binance/USDC)是 opaque 形,照旧掉回 symbol 消歧。
+    // 不必调用方另外告知。场馆命名(binance/issued:USDC)是 issued 形,照旧掉回 symbol 消歧。
     const asset = { symbol: "USDC", tokenRef: "ethereum/contract:0xabc" };
 
     const r = await resolveAsset(asset, { source, store }, { lazy: false });

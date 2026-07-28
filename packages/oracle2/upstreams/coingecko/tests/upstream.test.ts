@@ -123,7 +123,7 @@ describe("fetchMarkets 跨页重复(上游分页来自不同快照)", () => {
       topN: MARKETS_PER_PAGE * 2,
     });
 
-    const dup = rows.filter((r) => r.ref.endsWith("/coin-249"));
+    const dup = rows.filter((r) => r.ref === `${UPSTREAM_ID}/issued:coin-249`);
     expect(dup).toHaveLength(1);
     // 第 1 页给的排名是 250;第 2 页那条也是 250,但位置在第 1 页 —— 取的是先来的。
     expect(rows.indexOf(dup[0])).toBe(MARKETS_PER_PAGE - 1);
@@ -212,7 +212,7 @@ describe("不是本源命名的 ref → 不发请求", () => {
     const calls = stubFetch({ "/simple/price": {} });
     const got = await createCoinGeckoUpstream().fetchPrices([
       "evm:1/contract:0xa0b8",
-      "binance/USDC",
+      "binance/issued:USDC",
     ]);
     expect(got.size).toBe(0);
     expect(calls).toHaveLength(0);
@@ -222,11 +222,11 @@ describe("不是本源命名的 ref → 不发请求", () => {
     const calls = stubFetch({ "/simple/price": { "usd-coin": { usd: 1, last_updated_at: 1700 } } });
     const got = await createCoinGeckoUpstream().fetchPrices([
       "evm:1/contract:0xa0b8",
-      "coingecko/usd-coin",
+      "coingecko/issued:usd-coin",
     ]);
 
     expect(calls[0].query.get("ids")).toBe("usd-coin");
-    expect(got.get("coingecko/usd-coin")?.unitPrice).toBe(1);
+    expect(got.get("coingecko/issued:usd-coin")?.unitPrice).toBe(1);
   });
 
   it("历史价:链上寻址的 ref 本源给不出 → 空,不发请求", async () => {
@@ -239,7 +239,11 @@ describe("不是本源命名的 ref → 不发请求", () => {
 
   it("历史价:本源命名的 → 区间按秒送,毫秒向外取整", async () => {
     const calls = stubFetch({ "/market_chart/range": { prices: [[1700000000000, 1]] } });
-    const got = await createCoinGeckoUpstream().fetchPriceSeries("coingecko/usd-coin", 1500, 2500);
+    const got = await createCoinGeckoUpstream().fetchPriceSeries(
+      "coingecko/issued:usd-coin",
+      1500,
+      2500,
+    );
 
     expect(calls[0].path).toContain("/coins/usd-coin/market_chart/range");
     expect(calls[0].query.get("from")).toBe("1"); // floor(1500/1000)
@@ -256,22 +260,25 @@ describe("fetchTokens 按 id 点查整行", () => {
       "/coins/markets": [marketRow("usd-coin", 6), marketRow("ethereum", 2)],
     });
     const got = await createCoinGeckoUpstream().fetchTokens([
-      "coingecko/usd-coin",
-      "coingecko/ethereum",
+      "coingecko/issued:usd-coin",
+      "coingecko/issued:ethereum",
     ]);
 
     expect(calls).toHaveLength(1); // 一次,没有 page=2
     expect(calls[0].path).toContain("/coins/markets");
     expect(calls[0].query.get("ids")).toBe("usd-coin,ethereum");
     expect(calls[0].query.get("price_change_percentage")).toBe("24h");
-    expect(got.map((t) => t.ref)).toEqual(["coingecko/usd-coin", "coingecko/ethereum"]);
+    expect(got.map((t) => t.ref)).toEqual([
+      "coingecko/issued:usd-coin",
+      "coingecko/issued:ethereum",
+    ]);
     expect(got[0].name).toBe("usd-coin"); // 名与图确实回来了(这才是它与 fetchPrices 的差别)
   });
 
   it("一个都翻不出 coin id → 不发请求", async () => {
     const calls = stubFetch({ "/coins/markets": [] });
     expect(
-      await createCoinGeckoUpstream().fetchTokens(["evm:1/contract:0xa0b8", "binance/USDC"]),
+      await createCoinGeckoUpstream().fetchTokens(["evm:1/contract:0xa0b8", "binance/issued:USDC"]),
     ).toEqual([]);
     expect(calls).toHaveLength(0);
   });
@@ -279,10 +286,10 @@ describe("fetchTokens 按 id 点查整行", () => {
   it("上游没收录的 id 不出现在结果里(不是报错)", async () => {
     stubFetch({ "/coins/markets": [marketRow("usd-coin", 6)] });
     const got = await createCoinGeckoUpstream().fetchTokens([
-      "coingecko/usd-coin",
-      "coingecko/never-listed",
+      "coingecko/issued:usd-coin",
+      "coingecko/issued:never-listed",
     ]);
-    expect(got.map((t) => t.ref)).toEqual(["coingecko/usd-coin"]);
+    expect(got.map((t) => t.ref)).toEqual(["coingecko/issued:usd-coin"]);
   });
 });
 
@@ -292,7 +299,7 @@ describe("搜索与全局映射", () => {
     const got = await createCoinGeckoUpstream().searchTokens("usdc");
 
     expect(calls[0].query.get("query")).toBe("usdc");
-    expect(got[0]?.ref).toBe(`${UPSTREAM_ID}/usd-coin`);
+    expect(got[0]?.ref).toBe(`${UPSTREAM_ID}/issued:usd-coin`);
   });
 
   it("全局映射一次并发拉两个端点(币目录 + 平台表)", async () => {

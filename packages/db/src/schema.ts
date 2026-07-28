@@ -245,7 +245,7 @@ export const tokenRefs = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     namer: text("namer").notNull(), // tokenRef 左段:evm:1 / bitcoin / binance / coingecko
-    localName: text("local_name").notNull(), // 右段:native / contract:0x… / 上游 id / 场馆代号
+    localName: text("local_name").notNull(), // 右段(四形状,ADR 0020 第四轮):native / contract:0x… / issued:… / custom:…
     tokenId: text("token_id")
       .notNull()
       .references(() => tokens.id, { onDelete: "cascade" }),

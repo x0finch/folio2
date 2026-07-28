@@ -15,8 +15,10 @@ export function isManual(connectorId: ConnectorId): boolean {
 // 选了币 → 用户那张票解出来的 ref 就是答案(#202b:表单交上来的是票,解票在服务端边界做,
 // 见 server/internal/manual.ts)。**上游命名的 ref 在 mint 里本身就是锚** —— 不查映射表、
 // 也不掉回 symbol 去猜。
-// 没选 → 手记自己就是命名者 `manual/<SYMBOL>`,走 symbol 那一档,认不出来就自己一行。
+// 没选 → `manual/custom:<名字>`。`custom:` 说的是**这个名字没有注册表背书** —— 用户在
+// 「找不到?手动输入」里敲的东西,意思恰恰是「不是列表里那个」,所以 mint 不拿它去认币
+// (ADR 0020 第四轮 / #223)。认不出来就自己一行,用用户填的单价估值。
 // 两种都是规范 ref,没有「空着」这一档。
 export function manualTokenRef(picked: { symbol: string; ref?: string | null }): string {
-  return picked.ref || tokenRef.opaque(MANUAL_CONNECTOR_ID, picked.symbol.trim().toUpperCase());
+  return picked.ref || tokenRef.custom(MANUAL_CONNECTOR_ID, picked.symbol);
 }

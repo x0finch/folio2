@@ -12,6 +12,7 @@ import {
   loadManualHistoryRows,
 } from "../../src/lib/server/internal/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle2";
+import { ticketOf } from "./ticket";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。
 // 网络无关:结构类用例用**无 identifier** 的 token(不触发 oracle priceSeries 回源,走账本价②/unitPrice③);
@@ -25,7 +26,7 @@ const D0 = B0 * DAY; // 日对齐的开仓时刻 → 日桶数学干净
 // 无 identifier(未选币)→ 价走账本②/unitPrice③,buildHistoricalPriceAt 跳过、不回源。
 const localBtc = { symbol: "BTC", unitPrice: 100 };
 // 有 identifier(选了币)→ ① 走注入的 oracle 历史价。
-const btcRef = { symbol: "BTC", unitPrice: 100, identifier: "bitcoin" };
+const btcRef = { symbol: "BTC", unitPrice: 100, ticket: ticketOf("bitcoin") };
 // #203:历史价按 **token_id** 取(新参考层的 priceSeries 收内部 id),不再按厂商 ref 拼键。
 // 所以要先让持仓落库、拿到 mint 出来的 id,再往那个 id 上种价。
 async function seedDaily(

@@ -50,7 +50,17 @@ async function manualAccount(userId: string) {
 // `refs` 给了就顺带挂上 —— identifier 是从 `token_refs` 里当前命名者那条读出来的。
 async function mintToken(userId: string, symbol: string, localName?: string): Promise<string> {
   const store = createUserTokenStore(env, { userId, namer: NAMER });
-  return store.create({ symbol }, localName ? [`${NAMER}/${localName}`] : []);
+  return store.create({ symbol }, localName ? [`${NAMER}/issued:${localName}`] : []);
+}
+
+// 同上,但那条 ref 的 localName 由调用方整段给(用来喂非 `issued` 的形状)。
+async function mintTokenWithRef(
+  userId: string,
+  symbol: string,
+  localName: string,
+): Promise<string> {
+  const store = createUserTokenStore(env, { userId, namer: NAMER });
+  return store.create({ symbol }, [`${NAMER}/${localName}`]);
 }
 
 describe("手记持仓(= tokens 行 + 账本)", () => {
@@ -76,6 +86,29 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     expect(rows.map((r) => [r.symbol, r.unitPrice, r.identifier])).toEqual([
       ["BTC", 64000, "bitcoin"],
       ["ETH", 3200, null],
+    ]);
+  });
+
+  // `identifier` 问的是「用户选了哪个币」,答案只能来自**命名者发的标识**(`issued:`)。
+  // 同一个命名者下的别的形状不是那个答案:合约地址是链上寻址,`custom:` 是用户自己敲的名字
+  // (ADR 0020 第四轮)。这两种要读出 null,而不是把标记后面那段当 coin id 交出去 ——
+  // 交出去的话调用方会拿它去问上游,或者拼成票发给前端。
+  it("identifier 只认 `issued:` 那一支 —— 合约地址与手敲的名字都读成 null", async () => {
+    const acc = await manualAccount(USER_A);
+    const onchain = await mintTokenWithRef(USER_A, "SCAM", "contract:0xdead");
+    const typed = await mintTokenWithRef(USER_A, "MYCOIN", "custom:MYCOIN");
+    for (const [i, id] of [onchain, typed].entries()) {
+      await recordManualActivity(env, USER_A, acc.id, id, {
+        kind: "set",
+        amount: 1,
+        occurredAt: 100 + i,
+      });
+    }
+
+    const rows = await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER);
+    expect(rows.map((r) => [r.symbol, r.identifier])).toEqual([
+      ["SCAM", null],
+      ["MYCOIN", null],
     ]);
   });
 

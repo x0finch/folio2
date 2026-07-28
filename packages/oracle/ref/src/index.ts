@@ -5,6 +5,7 @@
 
 export {
   formatTokenRef,
+  hasTrustedSymbol,
   type ParsedTokenRef,
   parseTokenRef,
   type TokenRef,

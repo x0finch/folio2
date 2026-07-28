@@ -6,7 +6,7 @@ import { fakeRefIndexStore, fakeTokenStore } from "./fakes";
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const USDC_ARB = "evm:42161/contract:0xaf88d065e77c8cc2239327c5edb3a432268e5831";
 const USDC_SOL = "solana/contract:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const SRC_USDC = "src/usd-coin";
+const SRC_USDC = "src/issued:usd-coin";
 
 const seed = (symbol: string, name?: string, providerLogo?: string) => ({
   symbol,
@@ -145,9 +145,9 @@ describe("事后认出来 → 合并", () => {
 // 于是有一段中间状态:「上游收录了」并不等于「两行会并成一行」——那要等它进榜。
 // 上面那组合并用例两边都是合约形,盖不到这条分岔,所以单开一组。
 const XXA_ETH = "evm:1/contract:0xa0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0";
-const XXA_CEX = "binance/XXA";
+const XXA_CEX = "binance/issued:XXA";
 const XXA_ID = "xxa-token"; // 上游对它的叫法(映射表的 local_name)
-const SRC_XXA = `src/${XXA_ID}`; // 拼成 ref 之后的样子 = 锚
+const SRC_XXA = `src/issued:${XXA_ID}`; // 拼成 ref 之后的样子 = 锚
 
 describe("新币:链上 + 交易所,上游后来才收录", () => {
   // 第一轮:上游还没收录 → 两条 ref 都认不出来,各自成行。
@@ -222,7 +222,7 @@ describe("新币:链上 + 交易所,上游后来才收录", () => {
     // 两个候选:100 名 vs 300 名。300 / 100 = 3 倍 < 碾压线 → 判「没把握」。
     warm.XXA = [
       { ref: SRC_XXA, marketCapRank: 100 },
-      { ref: "src/xxa-imposter", marketCapRank: 300 },
+      { ref: "src/issued:xxa-imposter", marketCapRank: 300 },
     ];
 
     const ids = await mint.of(bothRefs);
@@ -236,9 +236,9 @@ describe("新币:链上 + 交易所,上游后来才收录", () => {
 // symbol 与上游实际叫法不一致时(MATIC 改名 POL 之后,合约里那份还是旧名),两侧仍然归到同一行。
 // 认定是对的,错的只是显示名 —— 修它是 `refreshStaleInfo` 的活(见 tokens.test.ts 那组覆盖用例)。
 const POL_ETH = "evm:1/contract:0x455e53cbb86018ac2b8092fdcd39d8444affc3f6";
-const POL_CEX = "binance/POL";
+const POL_CEX = "binance/issued:POL";
 const POL_ID = "polygon-ecosystem-token";
-const SRC_POL = `src/${POL_ID}`;
+const SRC_POL = `src/issued:${POL_ID}`;
 
 describe("链上 symbol 与上游叫法不一致", () => {
   it("链上报旧名、交易所报新名 → 仍归到同一行(两条判据互不相干)", async () => {
@@ -280,12 +280,12 @@ describe("链上 symbol 与上游叫法不一致", () => {
 });
 
 // 改名不是一次性事件:上游改一次、交易所改一次,**时间还不一致**。中间那段窗口里两侧用不同的名字
-// 称呼同一个币。交易所的 ref 就是它的代号(`binance/<代号>`),所以它改代号 = **来了一条新 ref**。
+// 称呼同一个币。交易所的 ref 就是它的代号(`binance/issued:<代号>`),所以它改代号 = **来了一条新 ref**。
 //
 // 两种到达顺序身份都收敛,差别在中间那一下;而**收敛发生的那一刻就是「叫法变了」的证据** ——
 // 那时必须把 info 标成该刷,否则光等 30 天的 TTL,收敛之后那一行还显示旧名。
 describe("上游与交易所改名时间不一致", () => {
-  const POL_CEX_OLD = "binance/MATIC"; // 交易所改代号之前用的那条 ref
+  const POL_CEX_OLD = "binance/issued:MATIC"; // 交易所改代号之前用的那条 ref
 
   // 改名之前的世界:链上(按地址)与交易所(按 symbol MATIC)都已经认出来、归到同一行,
   // 而且已经被刷成上游**当时**的叫法。
@@ -401,7 +401,7 @@ describe("按 symbol 认币(写时定死)", () => {
       candidates: { USDC: [{ ref: SRC_USDC, marketCapRank: 6 }] },
     });
     await mint.of([{ ref: "evm:1/contract:0xfake", seed: seed("USDC") }]);
-    expect(store.refs.has("src/fake-usdc")).toBe(true);
+    expect(store.refs.has("src/issued:fake-usdc")).toBe(true);
     expect(store.refs.has(SRC_USDC)).toBe(false);
   });
 
@@ -434,18 +434,18 @@ describe("按 symbol 认币(写时定死)", () => {
     const id = (await mint.of([{ ref: "bitcoin/native", seed: seed("BTC") }])).get(
       "bitcoin/native",
     );
-    expect(store.refs.get("src/bitcoin")).toBe(id);
+    expect(store.refs.get("src/issued:bitcoin")).toBe(id);
   });
 
   it("有把握(top-N 之内)→ 链上上游;跨交易所同名币因此并成一行", async () => {
     const { store, candidates, mint } = setup({
-      candidates: { BTC: [{ ref: "src/bitcoin", marketCapRank: 1 }] },
+      candidates: { BTC: [{ ref: "src/issued:bitcoin", marketCapRank: 1 }] },
     });
     const got = await mint.of([
-      { ref: "binance/BTC", seed: seed("BTC") },
-      { ref: "okx/BTC", seed: seed("BTC") },
+      { ref: "binance/issued:BTC", seed: seed("BTC") },
+      { ref: "okx/issued:BTC", seed: seed("BTC") },
     ]);
-    expect(got.get("binance/BTC")).toBe(got.get("okx/BTC"));
+    expect(got.get("binance/issued:BTC")).toBe(got.get("okx/issued:BTC"));
     expect(store.rows.size).toBe(1);
     expect(candidates.asked).toContain("BTC"); // 确实走到了判官,不是空转
   });
@@ -456,24 +456,24 @@ describe("按 symbol 认币(写时定死)", () => {
     const { store, candidates, mint } = setup({
       candidates: {
         MOON: [
-          { ref: "src/moon-a", marketCapRank: 900 },
-          { ref: "src/moon-b", marketCapRank: 1000 }, // 没碾压 → 不敢认
+          { ref: "src/issued:moon-a", marketCapRank: 900 },
+          { ref: "src/issued:moon-b", marketCapRank: 1000 }, // 没碾压 → 不敢认
         ],
       },
     });
     const got = await mint.of([
-      { ref: "binance/MOON", seed: seed("MOON") },
-      { ref: "okx/MOON", seed: seed("MOON") },
+      { ref: "binance/issued:MOON", seed: seed("MOON") },
+      { ref: "okx/issued:MOON", seed: seed("MOON") },
     ]);
     expect(candidates.asked).toEqual(["MOON", "MOON"]); // 两条都问过判官
-    expect(got.get("binance/MOON")).not.toBe(got.get("okx/MOON"));
+    expect(got.get("binance/issued:MOON")).not.toBe(got.get("okx/issued:MOON"));
     expect([...store.refs.keys()].some((r) => r.startsWith("src/"))).toBe(false);
   });
 
   // 反过来的证明:闸挡掉的合约根本不问判官 —— 这是「假 USDC 不会并进真 USDC」的机制本身。
   it("合约形的 ref 一次都不问判官(闸在上游)", async () => {
     const { candidates, mint } = setup({
-      candidates: { MOON: [{ ref: "src/moon-a", marketCapRank: 1 }] }, // 会被认的候选
+      candidates: { MOON: [{ ref: "src/issued:moon-a", marketCapRank: 1 }] }, // 会被认的候选
     });
     await mint.of([{ ref: "evm:1/contract:0xmoon1", seed: seed("MOON") }]);
     expect(candidates.asked).toEqual([]);
@@ -482,10 +482,10 @@ describe("按 symbol 认币(写时定死)", () => {
   it("策展覆盖表压过市值排名(防山寨撞名);它由 adapter 提供,值是上游 id", async () => {
     const { store, mint } = setup({
       overrides: { BTC: "bitcoin" },
-      candidates: { BTC: [{ ref: "src/scam-btc", marketCapRank: 2 }] },
+      candidates: { BTC: [{ ref: "src/issued:scam-btc", marketCapRank: 2 }] },
     });
-    await mint.of([{ ref: "binance/BTC", seed: seed("BTC") }]);
-    expect(store.refs.has("src/bitcoin")).toBe(true);
+    await mint.of([{ ref: "binance/issued:BTC", seed: seed("BTC") }]);
+    expect(store.refs.has("src/issued:bitcoin")).toBe(true);
   });
 });
 
@@ -549,9 +549,9 @@ describe("各来源的 ref 都落到对的 token", () => {
       index: { [USDC_ADDR]: "usd-coin", [USDC_SOL_ADDR]: "usd-coin" },
       candidates: {
         USDC: [{ ref: SRC_USDC, marketCapRank: 6 }],
-        ETH: [{ ref: "src/ethereum", marketCapRank: 2 }],
-        BTC: [{ ref: "src/bitcoin", marketCapRank: 1 }],
-        SOL: [{ ref: "src/solana", marketCapRank: 5 }],
+        ETH: [{ ref: "src/issued:ethereum", marketCapRank: 2 }],
+        BTC: [{ ref: "src/issued:bitcoin", marketCapRank: 1 }],
+        SOL: [{ ref: "src/issued:solana", marketCapRank: 5 }],
       },
     });
 
@@ -560,9 +560,9 @@ describe("各来源的 ref 都落到对的 token", () => {
     const got = await mint.of([
       { ref: USDC_ADDR, seed: seed("USDC") }, // zerion:合约
       { ref: USDC_SOL_ADDR, seed: seed("USDC") }, // coinstats:合约
-      { ref: "binance/USDC", seed: seed("USDC") }, // binance:上架代号
-      { ref: "okx/USDC", seed: seed("USDC") }, // okx:上架代号
-      { ref: "hyperliquid/USDC", seed: seed("USDC") }, // hyperliquid:保证金币
+      { ref: "binance/issued:USDC", seed: seed("USDC") }, // binance:上架代号
+      { ref: "okx/issued:USDC", seed: seed("USDC") }, // okx:上架代号
+      { ref: "hyperliquid/issued:USDC", seed: seed("USDC") }, // hyperliquid:保证金币
       { ref: SRC_USDC, seed: seed("USDC") }, // manual:用户选了币,ref 本身就是锚
     ]);
 
@@ -582,42 +582,52 @@ describe("各来源的 ref 都落到对的 token", () => {
     ]);
 
     expect(new Set(got.values()).size).toBe(3); // 三个不同的币
-    expect(store.refs.get("src/ethereum")).toBe(got.get("evm:1/native"));
-    expect(store.refs.get("src/bitcoin")).toBe(got.get("bitcoin/native"));
-    expect(store.refs.get("src/solana")).toBe(got.get("solana/native"));
+    expect(store.refs.get("src/issued:ethereum")).toBe(got.get("evm:1/native"));
+    expect(store.refs.get("src/issued:bitcoin")).toBe(got.get("bitcoin/native"));
+    expect(store.refs.get("src/issued:solana")).toBe(got.get("solana/native"));
   });
 
   it("手记选了币:ref 本身就是锚 —— 不查映射表、不掉回 symbol", async () => {
     // 故意把 warm 与覆盖表都指到**别的**币上:如果它掉回 symbol 就会认错。
     const { store, refIndex, mint } = setup({
       overrides: { USDC: "wrong-coin" },
-      candidates: { USDC: [{ ref: "src/wrong-coin", marketCapRank: 1 }] },
+      candidates: { USDC: [{ ref: "src/issued:wrong-coin", marketCapRank: 1 }] },
     });
     const before = refIndex.lookups;
 
     const id = (await mint.of([{ ref: SRC_USDC, seed: seed("USDC") }])).get(SRC_USDC);
     expect(refIndex.lookups).toBe(before); // 没查映射表
     expect(store.refs.get(SRC_USDC)).toBe(id);
-    expect(store.refs.has("src/wrong-coin")).toBe(false); // 没被 symbol 那档带跑
+    expect(store.refs.has("src/issued:wrong-coin")).toBe(false); // 没被 symbol 那档带跑
     // 只有一条 ref —— 去重生效(ref 与锚同串;不去重会撞 (namer, localName) 主键)
     expect([...store.refs.keys()]).toEqual([SRC_USDC]);
     expect(store.rows.get(id as string)?.ref).toBe(SRC_USDC); // 一进来就是「已认出」
   });
 
-  it("手记没选币:`manual/<SYMBOL>` 认不出就自己一行", async () => {
+  it("手记没选币:`manual/custom:<名字>` 认不出就自己一行", async () => {
     const { store, mint } = fullSetup();
-    const id = (await mint.of([{ ref: "manual/FOO", seed: seed("FOO") }])).get("manual/FOO");
+    const ref = "manual/custom:MYCOIN";
+    const id = (await mint.of([{ ref, seed: seed("MYCOIN") }])).get(ref);
     expect(store.rows.get(id as string)?.ref).toBeNull();
-    expect([...store.refs.keys()]).toEqual(["manual/FOO"]);
+    expect([...store.refs.keys()]).toEqual([ref]);
   });
 
-  it("手记没选币但 symbol 认得出 → 照样归到那个 Token", async () => {
-    const { store, mint } = fullSetup();
+  // **本轮(#223)反过来的那一条。** 以前手敲的 symbol 会被拿去认币:用户在下拉里点了
+  // 「找不到?手动输入」、敲了 BTC,系统转头把他并进真 BTC,按市价盯市、认定还冻进快照。
+  // UI 文案说的是「找不到」,代码干的是「回列表里猜」—— 文案与行为直接矛盾。
+  // 现在 `custom:` 这个形状自己就说明了「没有背书人」,symbol 那一档不再放行它。
+  it("手记没选币:哪怕 symbol 认得出,也**不并进**那个 Token —— 这不是命名者发的标识", async () => {
+    const { store, candidates, mint } = fullSetup();
     const got = await mint.of([
-      { ref: "manual/BTC", seed: seed("BTC") },
+      { ref: "manual/custom:BTC", seed: seed("BTC") },
       { ref: "bitcoin/native", seed: seed("BTC") },
     ]);
-    expect(got.get("manual/BTC")).toBe(got.get("bitcoin/native"));
-    expect(store.rows.size).toBe(1);
+    expect(got.get("manual/custom:BTC")).not.toBe(got.get("bitcoin/native"));
+    expect(store.rows.size).toBe(2);
+    // 手敲那条一次都没问判官(闸在上游);原生币那条问了 —— 两条走的不是同一档。
+    expect(candidates.asked).toEqual(["BTC"]);
+    // 手敲那行没有本源 ref → 没有实时价,按用户填的单价估值(行为不变,只是不再借别人的价)。
+    expect(store.rows.get(got.get("manual/custom:BTC") as string)?.ref).toBeNull();
+    expect(store.rows.get(got.get("bitcoin/native") as string)?.ref).toBe("src/issued:bitcoin");
   });
 });

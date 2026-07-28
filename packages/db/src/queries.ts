@@ -1,5 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import { type BalanceKind, Note } from "@folio/connectors-basic";
+import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import {
   and,
   asc,
@@ -605,6 +606,15 @@ export interface ManualHolding {
   identifier: string | null; // 该 token 在 `namer` 那里的叫法(= 用户选的币);没选 → null
 }
 
+// ref 行的 localName → 上游那边的**裸标识**。表里存的是带标记的规范形(`issued:usd-coin`),
+// 而调用方要的是能喂回上游的那个 id —— 拆标记走文法(拼成整串再拆),不在这里手切前缀。
+// 不是 `issued` 那一支(合约地址、手敲的名字)→ null:那些不是「用户选了哪个币」的答案。
+function identifierOf(namer: string, localName: string | null): string | null {
+  if (!localName) return null;
+  const parsed = parseTokenRef(formatTokenRef({ namer, localName }));
+  return parsed.kind === "issued" ? parsed.id : null;
+}
+
 // 某手记账户的持仓定义。`namer` 决定 `identifier` 从哪个命名者的 ref 读 —— 由调用方传
 // (同 createUserTokenStore),db 层不预设任何厂商。
 // 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
@@ -641,7 +651,7 @@ export async function listManualHoldingsByAccount(
     id: r.id,
     symbol: r.symbol,
     unitPrice: r.selfPrice ?? 0,
-    identifier: r.identifier ?? null,
+    identifier: identifierOf(namer, r.identifier),
   }));
 }
 

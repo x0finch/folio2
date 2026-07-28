@@ -1,4 +1,4 @@
-import { tokenRef as buildRef, parseTokenRef } from "@folio/oracle-ref";
+import { tokenRef as buildRef, hasTrustedSymbol, parseTokenRef } from "@folio/oracle-ref";
 import type {
   GlobalTokenRefIndexStore,
   ProviderTokenSeed,
@@ -53,23 +53,23 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
     // 它已经是锚,直接返回:不查映射表(那张表只装链上地址)、更不掉回 symbol 去猜一个
     // 用户已经明说了的答案。老 oracle 有这条短路,重写时漏了。
     const parsed = parseTokenRef(ref);
-    if (parsed.kind === "opaque" && parsed.namer === namer) return ref;
+    if (parsed.kind === "issued" && parsed.namer === namer) return ref;
 
     const byAddress = (await refIndex.lookup(namer, [ref])).get(ref);
-    if (byAddress) return buildRef.opaque(namer, byAddress);
+    if (byAddress) return buildRef.issued(namer, byAddress);
 
-    // **合约不许按 symbol 猜。** 合约的 symbol 字段是部署者随手填的 —— 地址那一档查不到,
-    // 就该老实认不出来,而不是拿一个可以伪造的字符串去认。一个 symbol 写着 `USDC` 的山寨合约
-    // 若走到下面,会被策展表或市值排名判成「有把握」并进真 USDC:总枚数凭空多一百万,盯市的行
-    // 直接多出一百万美元,而且认定冻进快照、永不重判(ADR 0020 第三轮)。
-    // 原生币与场馆代号相反:`bitcoin/native` 的 BTC、`binance/USDC` 的上架代号都可信,而原生币
-    // 按设计不进全局映射表(ADR 0022),symbol 是它们**唯一**的一条路 —— 所以放行那两支。
-    // 读不懂的串一并挡掉:关于它我们什么都不知道,凭一个来源不明的 symbol 认币是最坏的一种猜。
-    if (parsed.kind === "contract" || parsed.kind === "unknown") return undefined;
+    // **symbol 那一档只放行「有背书人」的形状**(`native` / `issued`)—— 判据在文法里,
+    // 见 `hasTrustedSymbol`。这里只剩一行,因为被挡掉的三种落在同一条理由下:
+    // 合约的 symbol 是部署者随手填的,手敲的(`custom:`)压根没有背书人,读不懂的什么都不知道。
+    //
+    // 挡不住的代价是无声的:一个 symbol 写着 `USDC` 的山寨合约、或者用户在「找不到?手动输入」
+    // 里敲的 `USDC`,会被策展表或市值排名判成「有把握」并进真 USDC —— 总枚数凭空多一百万,
+    // 盯市的行直接多出一百万美元,而且认定冻进快照、永不重判(ADR 0020 第三、四轮)。
+    if (!hasTrustedSymbol(parsed)) return undefined;
 
     const symbol = normalizeSymbol(seed.symbol);
     const override = overrides?.[symbol];
-    if (override) return buildRef.opaque(namer, override);
+    if (override) return buildRef.issued(namer, override);
     // 没把握的(同名混战的小币)返回 undefined → 各自独立建行、不链上游。
     return pickByConfidence(await candidates.bySymbol(symbol));
   }

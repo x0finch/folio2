@@ -12,7 +12,7 @@ import {
 // 认定在写快照时由 mint 定死(ADR 0021 / #201),所以这里不再造 `AssetRef` 让参考层现场解析。
 const rec = (over: Partial<TokenRecord> = {}): TokenRecord => ({
   id: "tk-btc",
-  ref: "coingecko/bitcoin",
+  ref: "coingecko/issued:bitcoin",
   symbol: "BTC",
   name: "Bitcoin",
   infoStale: false,

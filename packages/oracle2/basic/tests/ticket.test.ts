@@ -4,11 +4,11 @@ import { tokenTicket } from "../src";
 // 票 = tokenRef 交给浏览器时的不透明形。往返 + 「从网络上来的东西不能信」两件事。
 
 const REFS = [
-  "coingecko/usd-coin",
+  "coingecko/issued:usd-coin",
   "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
   "bitcoin/native",
-  "binance/BTC",
-  "manual/MY-PRIVATE-TOKEN",
+  "binance/issued:BTC",
+  "manual/custom:MY-PRIVATE-TOKEN",
 ];
 
 describe("往返", () => {
@@ -23,7 +23,7 @@ describe("往返", () => {
   });
 
   it("非 ASCII 的 symbol 也往返得回来(TextEncoder,不是 charCode)", () => {
-    const ref = "manual/比特币";
+    const ref = "manual/custom:比特币";
     expect(tokenTicket.decode(tokenTicket.encode(ref))).toBe(ref);
   });
 
