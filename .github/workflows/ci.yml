@@ -9,24 +9,68 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Two jobs, split to balance wall clock — read this before "tidying" it.
+#
+# Everything here is CPU-bound compilation on a 2-core runner, so spreading it
+# over machines is the only lever on wall clock. Actions bills each job rounded
+# UP to the whole minute, so that lever costs money. Measured on this repo:
+#
+#   one job                                   145–159s  →  3 billed minutes
+#   checks | test  (39s | 125s, unbalanced)        125s  →  4 billed minutes
+#   the split below (~75s | ~90s, balanced)        ~90s  →  4 billed minutes
+#
+# We're paying the 4th minute deliberately; given that, the split has to be
+# balanced or the money buys nothing. Hence the odd-looking grouping: the
+# library-package tests run in `checks`, NOT because they belong with lint, but
+# because `checks` was idle at 39s while `test` ran 125s alone. Moving them
+# evens the two sides out and takes ~35s off the wall clock for free.
+#
+# So the grouping tracks DURATION, not topic. If a step's cost changes,
+# re-balance rather than re-sorting by what things "are".
+#
+# Coverage is unchanged by the split: 663 (library packages, root vitest
+# `test.projects` runner) + 363 + 95 (apps/web jsdom + workers-pool) = 1121,
+# the same total `pnpm test` runs in one go.
+#
+# `apps/web`'s tests are the one indivisible chunk left (~63s), so they set the
+# floor. To go below it, attack the tests themselves: almost all of that time
+# is transpile + environment startup, not assertions — all 1121 run in ~5s.
 jobs:
-  verify:
+  checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Installs pnpm using the version from package.json "packageManager".
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
+      # Cheapest first, so a red PR fails as early as it can.
       - run: pnpm exec biome ci
       - run: pnpm typecheck
       - run: pnpm knip
-      - run: pnpm test
       - run: pnpm build
+      - run: pnpm test:packages
+
+  web-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # jsdom suite, then the D1 workers-pool suite (see apps/web package.json).
+      - run: pnpm --filter @folio/web test
