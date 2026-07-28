@@ -71,6 +71,63 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
     expect(synth?.balances[0].tokenRef).toBe("coingecko/issued:bitcoin");
   });
 
+  // 旧参考层的缓存里塞一个真 USDC(有市价、有 vendor 映射,足以被 symbol 那一档认出来)——
+  // 上面那条用例缓存是空的,所以「有没有拿别人的价」在它那儿看不出来。
+  async function seedMarketUsdc(): Promise<void> {
+    // 这一行是**全局**的(user_id 为 NULL),不随 resetUser 删用户级联走 → 自己先清。
+    await env.DB.prepare("DELETE FROM tokens WHERE id = ?").bind("global-usdc").run();
+    await env.DB.prepare(
+      "INSERT INTO tokens (id, symbol, name, market_cap_rank, info_expires_at, unit_price, price_as_of, price_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+      // `price_as_of` 不能省 —— 旧 store 的 toRecord 要 unitPrice 与 priceAsOf 同时非空才出价。
+      .bind("global-usdc", "USDC", "USD Coin", 5, 4_000_000_000_000, 1, 1, 4_000_000_000_000)
+      .run();
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO token_vendor_ids (token_id, vendor, vendor_id) VALUES (?, ?, ?)",
+    )
+      .bind("global-usdc", "coingecko", "usd-coin")
+      .run();
+  }
+
+  // **#223 / #227:手敲的 symbol 不许拿别人的价。**
+  // 写路径早就不合并了(自己一行、不挂上游 ref),但展示这一侧一度照旧按市价盯 —— 因为这里
+  // 问的是合成余额上那条 `manual/custom:USDC`,而旧 `resolveAsset` 对任何形状都掉回 symbol 猜。
+  // 于是用户填的 777 被市价 $1 覆盖。现在没有上游 ref 的一律不问价。
+  it("没选币 → 用他填的单价,哪怕缓存里有同名的真币", async () => {
+    await seedMarketUsdc();
+    const account = await createManualAccount(
+      USER,
+      "My USDC",
+      JSON.stringify([{ symbol: "USDC", unitPrice: "777", amount: "10" }]),
+    );
+    const accounts = await db.listAccountsByUser(USER);
+    const byAccount = new Map<string, SnapshotWithBalances>();
+    await injectManualSnapshots(USER, accounts, byAccount, 1_700_000_000_000);
+
+    const synth = byAccount.get(account.id);
+    expect(synth?.balances[0].tokenRef).toBe("manual/custom:USDC");
+    expect(synth?.snapshot.totalUsd).toBe(7770); // 10 × 777,不是 10 × 1
+  });
+
+  // 对照:选了币就该拿市价 —— 否则上面那条用「一律不问价」也能绿,等于没测。
+  it("选了币 → 拿市价,不是他填的单价", async () => {
+    await seedMarketUsdc();
+    const account = await createManualAccount(
+      USER,
+      "Picked USDC",
+      JSON.stringify([
+        { symbol: "USDC", unitPrice: "777", amount: "10", ticket: ticketOf("usd-coin") },
+      ]),
+    );
+    const accounts = await db.listAccountsByUser(USER);
+    const byAccount = new Map<string, SnapshotWithBalances>();
+    await injectManualSnapshots(USER, accounts, byAccount, 1_700_000_000_000);
+
+    const synth = byAccount.get(account.id);
+    expect(synth?.balances[0].tokenRef).toBe("coingecko/issued:usd-coin");
+    expect(synth?.snapshot.totalUsd).toBe(10); // 10 × 1
+  });
+
   it("非 manual 账户不注入", async () => {
     const btc = await db.createAccount(USER, {
       connectorId: "bitcoin",

@@ -135,21 +135,26 @@ export async function injectManualSnapshots(
 ): Promise<void> {
   const list = await manualTokensByAccount(userId, accounts);
   if (list.length === 0) return;
-  // 先各建一份(prices 全缺)拿 assetRef,全部账户**一次批量** enrich(cache-only,与 deriveLiveAccountTotals
-  // 同门,避免逐账户串行 D1 往返),再按账户切回各自现价重建终版。
-  const drafts = list.map(({ id, tokens }) => buildManualSnapshot(id, tokens, [], takenAt));
-  // 手记仍走**旧参考层**(#203 才并入 tokens:那时它会跟其他持仓一样在写路径上 mint)。
-  // 旧 enrich 收 `AssetRef`,而 lib/tokens 的门已全部改成返回 token_id → 这里就地拼。
+
+  // 全部账户**一次批量**取现价(cache-only,与 deriveLiveAccountTotals 同门,避免逐账户串行 D1 往返),
+  // 再按账户切回各自的价重建。手记仍走**旧参考层**(#203 才并入 tokens),旧 enrich 收 `AssetRef`。
+  //
+  // **只问「有上游 ref」的那些,没有的传 null**(#223 / #227)。以前这里问的是合成余额上那条
+  // tokenRef —— 没选币时它是 `manual/custom:<名字>`,而旧 `resolveAsset` 对任何形状都会掉回
+  // symbol 猜(它没有 `hasTrustedSymbol` 那道闸),于是用户手敲的 `USDC` 又被认成真 USDC,
+  // 拿回市价 $1 覆盖掉他自己填的单价。写路径早就不合并了,可展示这一侧照旧按市价盯 —— 实测过。
+  // `enrich` 对 null 是原位对齐的(见 lookupAll),所以传 null 就是「这条不要价」,
+  // 而 buildManualSnapshot 在没价时正好回退到用户填的 `unitPrice`。
   const enriched = await oracle.tokens.enrich(
-    drafts
-      .flatMap((d) => d.balances)
-      .map((b) => (b.tokenRef ? { symbol: b.symbol, tokenRef: b.tokenRef } : null)),
+    list.flatMap(({ tokens }) =>
+      tokens.map((t) => (t.ref ? { symbol: t.symbol, tokenRef: t.ref } : null)),
+    ),
   );
   let i = 0;
-  list.forEach(({ id, tokens }, k) => {
-    const prices = drafts[k].balances.map(() => enriched[i++]?.unitPrice);
+  for (const { id, tokens } of list) {
+    const prices = tokens.map(() => enriched[i++]?.unitPrice);
     byAccount.set(id, buildManualSnapshot(id, tokens, prices, takenAt));
-  });
+  }
 }
 
 // 预热用:该用户全部 manual 账户的合成余额(供 warmTokens 把其代币现价取进缓存)。manual 已退出 snapshot,

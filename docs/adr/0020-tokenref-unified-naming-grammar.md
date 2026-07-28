@@ -154,4 +154,7 @@ const canGuess = parsed.kind !== "contract";
 - **时机就是现在**:串一变,库里所有 ref 都要跟着变,但眼下代价接近零 —— `snapshot_balances.token_ref` 本来就要删([#202](https://github.com/x0finch/folio2/issues/202))、`global_token_ref_index` cron 一天一次整表重建、`token_daily_prices` 纯缓存、`token_refs` 的前提本就是删库从头 sync([#176](https://github.com/x0finch/folio2/issues/176))。等 #202 落地、库里跑上真数据之后再动就是一次真迁移了。
 - **标记本身大小写不敏感**(`binance/ISSUED:USDC` 拆出来是 `issued:USDC`),但标记后面那段不动 —— 那是命名者的写法,不是我们的。同 `native` 从第一轮起就大小写不敏感。
 - **代价(明知接受)**:七个 producer 的 golden fixture 与全仓测试串再走一遍 —— 这是本 epic 内第四次改 ref 串。机械改动是实打实的,换来的是「漏标记往安全方向倒」这条不变量。
-- **旧 oracle(`packages/oracle`)的读路径没有这道闸** —— 它的 `resolveAsset` 对所有形状都掉回 symbol(连合约都放行),本轮只机械改名、不动行为。所以在 #202 把读路径切到 oracle2 之前,手记那条 `manual/custom:<名字>` 在**展示侧**仍会被并到同名币上;写路径(mint)从本轮起已经不会了。那个包按计划整体退场,不为它单独补闸。
+- **旧 oracle 的 `resolveAsset` 仍然 fail-open,但唯一还在用它的那条路已经堵上了。** 它对所有形状都掉回 symbol(连合约都放行),而本轮不改它 —— 那个包随 #202 整体退场。
+  - 一度以为这只是「展示侧的已知遗留」,**实测证伪**:自定义一个 USDC、单价填 777,首屏显示的是 10 × $1 而不是 10 × 777。写路径早就不合并了(库里确实是独立一行、只挂 `manual/custom:USDC`),但 `injectManualSnapshots` 拿合成余额上那条 `manual/custom:USDC` 去问旧 enrich,旧 `resolveAsset` 掉回 symbol 认出真 USDC,把市价送了回来。**没有背书的 symbol 换个方向照样把币认了。**
+  - 修在调用点而不是那个包里:旧 `tokens.enrich` 全仓**只剩这一个消费者**,所以「只问有上游 ref 的那些,没有的传 null」既最小也完整(`enrich` 对 null 原位对齐,而 `buildManualSnapshot` 没价时正好回退到用户填的单价)。
+  - 教训值得记下来:**一条不变量只在写路径上成立,等于没成立。** 用户看到的是显示出来的那个数,而读路径可以从完全另一个方向把同一个错误做出来。
