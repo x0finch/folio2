@@ -18,15 +18,29 @@ export interface LimitPolicy {
   scope?: LimitScope; // 默认 isolate
   clock?: () => number; // 默认 Date.now,测试注入
   sleep?: (ms: number) => Promise<void>; // 默认 setTimeout,测试注入
+  cache?: CooldownStore; // 默认 caches.open(),测试注入
   log?: LimitLogger; // 默认静默;传进来才会报告「colo 档没生效」
+  // 冷却期内怎么拒绝。默认抛 RateLimitedError;传这个钩子就能抛调用方自己的错误类型
+  // (provider 对 sync 的契约是「失败一律 ProviderError」)。必须抛,不能返回。
+  onCooldown?: (remainingMs: number, key: string) => never;
 }
 
 export interface Limit {
   // 过闸。subKey 拼在 key 后面 —— 每账户独立额度用它区分。
   acquire(subKey?: string): Promise<void>;
+  // 吃到 429 时告诉闸:这份额度冷却到 now + ms 之前别再打了。ms 会被夹到 COOLDOWN_MAX_MS。
+  // **由调用方显式调**,包不去嗅探 Response —— 那会让 @folio/ratelimit 依赖 HTTP 语义。
+  cooldown(ms: number | undefined, subKey?: string): Promise<void>;
 }
 
 export type LimitLogger = (message: string, properties?: Record<string, unknown>) => void;
+
+// Cache API 里只用到这两个方法 —— 收窄成接口,于是 node 测试注入一个假的就行(node 里没有
+// `caches`),也不必把整个 CacheStorage 的类型拖进来。
+export interface CooldownStore {
+  match(request: string): Promise<Response | undefined>;
+  put(request: string, response: Response): Promise<void>;
+}
 
 export interface RetryInfo {
   attempt: number; // 第几次尝试失败了(1 = 首次)
