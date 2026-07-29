@@ -242,6 +242,9 @@ importers:
       '@folio/connectors-provider-okx':
         specifier: workspace:*
         version: link:../providers/okx
+      '@folio/connectors-provider-rabby':
+        specifier: workspace:*
+        version: link:../providers/rabby
       '@folio/connectors-provider-zerion':
         specifier: workspace:*
         version: link:../providers/zerion
@@ -356,6 +359,31 @@ importers:
       vitest:
         specifier: ^4.1.5
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/connectors/providers/rabby:
+    dependencies:
+      '@folio/connectors-basic':
+        specifier: workspace:*
+        version: link:../../basic
+      '@folio/oracle-ref':
+        specifier: workspace:*
+        version: link:../../../oracle/ref
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+    devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: ^0.16.20
+        version: 0.16.20(@cloudflare/workers-types@4.20260626.1)(@vitest/runner@4.1.9)(@vitest/snapshot@4.1.9)(vitest@4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+      wrangler:
+        specifier: ^4.105.0
+        version: 4.105.0(@cloudflare/workers-types@4.20260626.1)
 
   packages/connectors/providers/zerion:
     dependencies:

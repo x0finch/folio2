@@ -1,7 +1,7 @@
 import { type CredField, Defi, defineConnector, Spot } from "@folio/connectors-basic";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { buildRegistry, getConnector, selectProvider } from "../src/registry";
+import { buildRegistry, getConnector, registry, selectProvider } from "../src/registry";
 
 // 就地造一个 spot·defi 子集的示例 connector,验 registry 组装(buildRegistry/getConnector/selectProvider)。
 const address = [
@@ -69,5 +69,17 @@ describe("registry", () => {
       },
     };
     expect(selectProvider(twoProv)?.id).toBe("on");
+  });
+});
+
+describe("真实 registry —— evm 的取数源", () => {
+  it("evm 默认走 rabby,zerion 在册但不参与取数", () => {
+    // 这条断言的意义:evm 的默认源换成 rabby 是一次**有意的**切换(不要 key、一次拿全链),
+    // 谁不小心把 providers 顺序改了、或把 zerion 的 defaultEnabled 删了,这里会红。
+    const evm = getConnector(registry, "evm");
+    expect(evm).toBeDefined();
+    expect(selectProvider(evm!)?.id).toBe("rabby");
+    expect(evm?.balance.providers.map((p) => p.id)).toEqual(["rabby", "zerion"]);
+    expect(evm?.balance.providers.find((p) => p.id === "zerion")?.defaultEnabled).toBe(false);
   });
 });
