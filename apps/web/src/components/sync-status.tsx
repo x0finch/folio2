@@ -137,7 +137,9 @@ function SyncPanel({ summary, busy, attention, onSync }: PanelProps) {
                 <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warn" />
                 <div className="min-w-0">
                   <div className="font-medium text-xs">{f.label}</div>
-                  <div className="text-warn text-xs leading-snug">{t("missingCredentials")}</div>
+                  <div className="text-warn text-xs leading-snug">
+                    {t(f.reason === "never-synced" ? "neverSynced" : "missingCredentials")}
+                  </div>
                 </div>
               </li>
             ))}

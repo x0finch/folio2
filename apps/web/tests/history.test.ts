@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildPortfolioHistory, downsampleSeries, type HistoryPoint } from "../src/lib/history";
+import {
+  buildPortfolioHistory,
+  downsampleSeries,
+  type HistoryPoint,
+  toDailySeries,
+} from "../src/lib/history";
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
@@ -78,5 +83,42 @@ describe("downsampleSeries", () => {
   it("passes through 0/1-point input and keeps chronological order", () => {
     expect(downsampleSeries([])).toEqual([]);
     expect(downsampleSeries([p(5, 1)])).toEqual([p(5, 1)]);
+  });
+
+  it("honours a bucket floor, so a short span can't fall below it", () => {
+    // 6 天跨度 + 末日多次同步:自适应会挑 4 小时桶(6d/4h=36 ≤ 40),末日就散成好几个点。
+    const rows = [p(0, 10), p(2 * DAY, 20), p(4 * DAY, 30)];
+    for (let k = 0; k < 4; k++) rows.push(p(6 * DAY + k * 5 * HOUR, 40 + k));
+    expect(downsampleSeries(rows).length).toBeGreaterThan(4); // 无下限 → 末日拆开
+    expect(downsampleSeries(rows, 40, DAY)).toHaveLength(4); // 有下限 → 每天一个
+  });
+});
+
+// Insights 的 X 轴只标到「日」。粒度细于一天时,同一天的多个点会各占一个刻度,
+// 于是轴上连着印出同一个日期 —— 实际见过 7 个 "Jul 28"。
+describe("toDailySeries", () => {
+  const p = (t: number, total: number): HistoryPoint => ({ t, total });
+
+  it("gives at most one point per day, keeping that day's last value", () => {
+    const rows = [
+      p(0, 10), // day 0
+      p(2 * DAY, 20), // day 2
+      p(4 * DAY, 30), // day 4
+      p(6 * DAY + 1 * HOUR, 40), // day 6,同日四次同步
+      p(6 * DAY + 7 * HOUR, 41),
+      p(6 * DAY + 13 * HOUR, 42),
+      p(6 * DAY + 19 * HOUR, 43),
+    ];
+    const out = toDailySeries(rows);
+
+    const days = out.map((x) => Math.floor(x.t / DAY));
+    expect(new Set(days).size).toBe(days.length); // 没有重复的日期刻度
+    expect(out).toHaveLength(4);
+    expect(out.at(-1)).toEqual(p(6 * DAY + 19 * HOUR, 43)); // 当天收盘值,与主页总额同源
+  });
+
+  it("leaves an already-daily series alone", () => {
+    const rows = [p(0, 1), p(DAY, 2), p(2 * DAY, 3)];
+    expect(toDailySeries(rows)).toEqual(rows);
   });
 });
