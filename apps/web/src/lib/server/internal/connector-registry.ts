@@ -6,8 +6,16 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
+import { withRetry } from "@folio/ratelimit";
 import type { InputSpec } from "../../creds";
 import { platformLogoUrl } from "../../logo";
+
+// 探活重试参数(原则 #8)。**刻意比 sync 的 3 次 / 5s 紧得多**:那条路是后台同步,没人在等;
+// 这条路用户正盯着表单提交。1 次重试只为躲瞬时抖动;单次最多等 1.5s —— 再久就不如让他自己再点
+// 一次(上游给的 Retry-After 超过它就直接失败,不把表单挂死)。
+const VALIDATE_RETRY_ATTEMPTS = 2; // 总尝试次数(1 + 1 次重试)
+const VALIDATE_RETRY_MAX_WAIT_MS = 1500;
+const VALIDATE_RETRY_BASE_MS = 200;
 
 // app 侧 connector 分派中枢(server-only,引 cloudflare:workers)。集中管:
 // 字段规格投影(credentialSpecs)、创建时凭据校验(validateAccountCreds)、目录(connectorCatalog)。
@@ -78,7 +86,26 @@ export async function validateAccountCreds(
     account: { id: "new", label: opts.label ?? "", connectorId, creds: validated },
     creds: providerCreds,
   };
-  if (!(await provider.validateAccount(ctx))) {
+  // 探活加一次重试。这条路**不走 @folio/sync 的编排**,所以 sync 那套退避重试完全没覆盖它 ——
+  // 上游一次瞬时 429 / 5xx 就让用户看到「添加失败」,而他填的东西完全没错。
+  //
+  // 参数比 sync 紧得多(见常量注释),而且**不加限速闸**:用户正盯着表单,"提交后转 5 秒圈"
+  // 比"失败请重试"更糟 —— 他不知道还要等多久。探活也是一次性单发,不存在突发。
+  //
+  // ⚠️ **今天这个重试一次都不会触发,得说清楚。** `validateAccount` 的签名是 `Promise<boolean>`,
+  // 而**七个 provider 无一例外**写成 `try { return res.ok } catch { return false }` —— 429、5xx、
+  // 网络故障、凭据不对全压成同一个 `false`,withRetry 于是收不到错误对象。
+  //
+  // 仍然接上,是因为它在对的那一层:让 provider 只对「凭据被拒」返回 false、对传输故障抛
+  // retryable 的 ProviderError,这里立刻就活了(那是 provider 契约的改动,单独一票)。
+  // **不**改成「false 也重试」:false 是歧义的,里面混着「这个 key 就是错的」—— 那是最常见的
+  // 失败,给它多赔一个往返还会拿着错凭据再打一次上游。tests/server/validate-retry.test.ts 钉住了现状。
+  const alive = await withRetry(() => provider.validateAccount(ctx), {
+    attempts: VALIDATE_RETRY_ATTEMPTS,
+    maxWaitMs: VALIDATE_RETRY_MAX_WAIT_MS,
+    baseMs: VALIDATE_RETRY_BASE_MS,
+  });
+  if (!alive) {
     throw new Error("could not verify these credentials — please check them and try again");
   }
 }
