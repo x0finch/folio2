@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "folio-web",
+  "name": "folio",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
@@ -17,7 +17,7 @@
     {
       "binding": "DB",
       "database_name": "folio",
-      "database_id": "c053dd80-abfa-47d5-8262-01f001e68924",
+      "database_id": "8f62b220-d84e-43e6-b07e-ecb3edb655cb",
       "migrations_dir": "../../packages/db/drizzle"
     }
   ],
