@@ -23,7 +23,8 @@ export type {
   RetryOpts,
 } from "./types";
 
-const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+let defaultSleep = realSleep;
 
 // 仅测试用:清空所有桶与冷却标记。生产代码勿调。
 export function resetLimitsForTests(): void {
@@ -31,9 +32,18 @@ export function resetLimitsForTests(): void {
   resetCooldownForTests();
 }
 
+// 仅测试用:把「等待」整体换成即时(不传 = 还原成真 setTimeout)。
+//
+// **为什么要一个全局开关,而不是各处传 sleep**:集成测试跑的是**应用的真实接线**
+// (apps/web 的 cgConfig → createCoinGeckoClient),那条路上没有、也不该有测试参数。
+// 不换掉的话闸会让那套测试真等 —— 无 key 档一发就是 6 秒。
+export function setSleepForTests(sleep?: (ms: number) => Promise<void>): void {
+  defaultSleep = sleep ?? realSleep;
+}
+
 export function defineLimit(policy: LimitPolicy): Limit {
   const clock = policy.clock ?? Date.now;
-  const sleep = policy.sleep ?? defaultSleep;
+  const sleep = policy.sleep ?? ((ms: number) => defaultSleep(ms));
   // global 档(Durable Object 真配额)还没实现 —— 降级成 colo 并说一声,而不是假装限住了。
   // 它只在「按 key 计费的上游 + 多用户同时同步」时才需要,自托管单用户碰不到(见 #17 M10.4)。
   const effective: LimitPolicy =

@@ -115,6 +115,44 @@ describe("冷却标记(colo 档)", () => {
     await expect(defineLimit(policy).acquire()).rejects.toBeInstanceOf(RateLimitedError);
   });
 
+  it("冷却期内再写「剩余时长」不续期 —— 否则每次被拒都续,冷却永远不结束", async () => {
+    const cache = fakeCache();
+    let now = 0;
+    const limit = defineLimit({
+      key: "k",
+      scope: "colo",
+      capacity: 1,
+      ratePerSec: 8,
+      clock: () => now,
+      cache,
+    });
+    await limit.cooldown(5000); // 冷却到 5000
+    now = 4000;
+    const err = await limit.acquire().catch((e) => e);
+    expect(err.retryAfterMs).toBe(1000);
+    // 被拒的调用方(比如 http 层的 catch)拿剩余时长又写了一次 —— 不该把终点往后推
+    await limit.cooldown(err.retryAfterMs);
+    expect(cache.puts).toBe(1); // 只有最初那一次
+    now = 5001;
+    await expect(limit.acquire()).resolves.toBeUndefined(); // 到点就放行
+  });
+
+  it("更长的冷却可以覆盖更短的", async () => {
+    const cache = fakeCache();
+    const limit = defineLimit({
+      key: "k",
+      scope: "colo",
+      capacity: 1,
+      ratePerSec: 8,
+      clock: () => 0,
+      cache,
+    });
+    await limit.cooldown(1000);
+    await limit.cooldown(9000);
+    const err = await limit.acquire().catch((e) => e);
+    expect(err.retryAfterMs).toBe(9000);
+  });
+
   it("onCooldown 钩子 → 抛调用方自己的错误类型(provider 对 sync 的契约)", async () => {
     class MyError extends Error {}
     const cache = fakeCache();

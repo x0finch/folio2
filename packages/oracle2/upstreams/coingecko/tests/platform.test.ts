@@ -1,5 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetLimitsForTests } from "@folio/ratelimit";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCoinGeckoPlatformUpstream } from "../src";
+
+// 限速闸:每个用例从干净状态出发,且 sleep 即时 —— 否则无 key 档(10 次/分钟)会让这套测试
+// **真的等**,而上一个用例撞出来的冷却还会漏给下一个。生产不传 sleep(用 setTimeout)。
+const NO_WAIT = { sleep: async () => {} };
+beforeEach(() => resetLimitsForTests());
 
 const ASSET_PLATFORMS = [
   {
@@ -26,7 +32,7 @@ describe("createCoinGeckoPlatformUpstream.fetchChains", () => {
   it("一条链产短形 slug;有数字 chainId 再产 evm:<id>,两条同名同图", async () => {
     mockFetch(ASSET_PLATFORMS);
     const byKey = new Map(
-      (await createCoinGeckoPlatformUpstream().fetchChains()).map((r) => [r.key, r]),
+      (await createCoinGeckoPlatformUpstream(NO_WAIT).fetchChains()).map((r) => [r.key, r]),
     );
 
     expect(byKey.get("arbitrum-one")).toEqual({
@@ -42,7 +48,7 @@ describe("createCoinGeckoPlatformUpstream.fetchChains", () => {
   it("上游没给名字 → 用它的 id;没给图 → 不带 logo", async () => {
     mockFetch(ASSET_PLATFORMS);
     const byKey = new Map(
-      (await createCoinGeckoPlatformUpstream().fetchChains()).map((r) => [r.key, r]),
+      (await createCoinGeckoPlatformUpstream(NO_WAIT).fetchChains()).map((r) => [r.key, r]),
     );
 
     expect(byKey.get("no-image")?.name).toBe("no-image");
@@ -51,6 +57,6 @@ describe("createCoinGeckoPlatformUpstream.fetchChains", () => {
   });
 
   it("id 自报为当前上游", async () => {
-    expect(createCoinGeckoPlatformUpstream().id).toBe("coingecko");
+    expect(createCoinGeckoPlatformUpstream(NO_WAIT).id).toBe("coingecko");
   });
 });

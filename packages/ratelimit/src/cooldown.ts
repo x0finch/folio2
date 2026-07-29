@@ -114,11 +114,16 @@ export async function writeCooldown(
 ): Promise<void> {
   const span =
     Math.min(COOLDOWN_MAX_MS, Math.max(0, ms ?? COOLDOWN_DEFAULT_MS)) || COOLDOWN_DEFAULT_MS;
-  const coolUntil = clock() + span;
+  const now = clock();
+  const coolUntil = now + span;
+
+  // 已经在冷却、而且冷得比这次更久 → 什么都不用做。**这条不只是省一次缓存写**:冷却期内被拒的
+  // 调用会带着「剩余时长」再来写一次,不挡住的话每次被拒都在续期,冷却就永远不结束了。
+  const previous = coolUntilByKey.get(fullKey);
+  if (previous !== undefined && previous > now && previous >= coolUntil) return;
 
   // isolate 层无条件写 —— 就算 scope 是 isolate,自己这一格也该收手。
-  const previous = coolUntilByKey.get(fullKey);
-  if (previous === undefined || coolUntil > previous) coolUntilByKey.set(fullKey, coolUntil);
+  coolUntilByKey.set(fullKey, coolUntil);
 
   if ((policy.scope ?? "isolate") === "isolate") return;
 
