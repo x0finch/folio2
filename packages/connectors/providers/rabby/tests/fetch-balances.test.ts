@@ -5,6 +5,14 @@ import { resetGateForTests } from "../src/gate";
 import tokenList from "./fixtures/cache-token-list.json";
 import chainList from "./fixtures/chain-list.json";
 import protocolList from "./fixtures/complex-protocol-list.json";
+import expectedBalances from "./fixtures/expected-balances.json";
+
+// 四份 fixture 一一对应:三个录制的真实响应(chain-list / cache-token-list /
+// complex-protocol-list)→ expected-balances.json(解析后的结构化期望值,**固化在文件里逐一对比**,
+// 不散写在断言里)。规则层面的「为什么是这样」在 parse.test.ts,这里管「整条链拼起来对不对」。
+// JSON 无法表达 undefined → expected fixture 里省略未定义字段(toEqual 视缺键与 undefined 等价)。
+// 输入 fixture 改了要重生成 expected:跑一遍 parseTokens + parseProtocols 把结果写回去,
+// 别手改 —— 手改会让期望值悄悄跟着实现漂。
 
 // 签名整个 stub 掉:它要 import `.wasm`,而 **node 环境测不了那件事**(node 允许运行时编译 wasm,
 // 过了是假绿灯;真实约束只有 workerd 有)。签名的验证另有其处,见 src/sign.ts 顶部。
@@ -54,13 +62,19 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("fetchBalances", () => {
-  it("两个请求拿回全链:spot + defi 一起产出", async () => {
+  it("两个请求拿回全链 —— 逐字段对上录好的期望值", async () => {
     stubFetch(okRoutes());
     const { balances } = await provider.fetchBalances(ctx());
-    expect(balances.filter((b) => b.kind === "spot").length).toBeGreaterThan(0);
-    expect(balances.filter((b) => b.kind === "defi").length).toBeGreaterThan(0);
-    // 每行都有规范的 evm:<chainId> 命名者
-    for (const b of balances) expect(b.tokenRef).toMatch(/^evm:\d+\//);
+    expect(balances).toEqual(expectedBalances);
+  });
+
+  it("spot 在前、defi 在后,顺序固定", async () => {
+    // 顺序是 fetchBalances 里 [...代币, ...协议] 拼出来的。金额加总不看顺序,但快照落库和
+    // 上面那条 golden 对比都看 —— 钉住它,省得哪天换成 Promise.all 打乱了还以为无所谓。
+    stubFetch(okRoutes());
+    const { balances } = await provider.fetchBalances(ctx());
+    const kinds = balances.map((b) => b.kind);
+    expect(kinds.lastIndexOf("spot")).toBeLessThan(kinds.indexOf("defi"));
   });
 
   it("刻意串行 —— 顺序固定为 链清单 → 代币 → 协议", async () => {
