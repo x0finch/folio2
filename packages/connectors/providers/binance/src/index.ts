@@ -7,15 +7,19 @@ import {
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { defineLimit } from "@folio/ratelimit";
 import { z } from "zod";
 import {
   ACCOUNT_PATH,
   API_KEY_HEADER,
   BINANCE_API_BASE,
+  PUBLIC_LIMIT_KEY,
   QUOTE_ASSET,
   RECV_WINDOW,
   STABLECOINS,
   TICKER_PRICE_PATH,
+  TICKER_RATE_LIMIT_BURST,
+  TICKER_RATE_LIMIT_PER_SEC,
 } from "./constants";
 
 // @folio/connectors-provider-binance —— 首个带 secret 型 account.creds 的 connector(binance)。
@@ -83,14 +87,35 @@ export function parseAccountBalances(
   return out;
 }
 
-async function binanceFetch(path: string, apiKey?: string): Promise<Response> {
+// 公开(免签)端点的速率闸 —— 按出口 IP 共享,见 constants.ts 里为什么只给它装。
+const publicLimit = defineLimit({
+  key: PUBLIC_LIMIT_KEY,
+  scope: "colo", // per-colo ≈ 按出口 IP 分组(Workers 从所在 colo 出口),正好对上这份额度的口径
+  capacity: TICKER_RATE_LIMIT_BURST,
+  ratePerSec: TICKER_RATE_LIMIT_PER_SEC,
+  onCooldown: (remainingMs) => {
+    throw new ProviderError("RATE_LIMITED", "binance cooling down after a rate limit", {
+      retryAfterMs: remainingMs,
+    });
+  },
+});
+
+// `gated` 只对公开端点为 true:签名端点每账户只发一次、不并发,装闸拦不到任何东西。
+async function binanceFetch(path: string, apiKey?: string, gated = false): Promise<Response> {
+  if (gated) await publicLimit.acquire();
+  let res: Response;
   try {
-    return await fetch(`${BINANCE_API_BASE}${path}`, {
+    res = await fetch(`${BINANCE_API_BASE}${path}`, {
       headers: apiKey ? { [API_KEY_HEADER]: apiKey } : {},
     });
   } catch (cause) {
     throw new ProviderError("UPSTREAM_ERROR", "binance request failed", { cause });
   }
+  // 429/418 都要记 —— 418 是「收到 429 还继续打」换来的封 IP,正是冷却要避免的东西。
+  if (gated && (res.status === 429 || res.status === 418)) {
+    await publicLimit.cooldown(parseRetryAfter(res.headers.get("retry-after")));
+  }
+  return res;
 }
 
 function ensureOk(res: Response): void {
@@ -143,7 +168,7 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
       throw new ProviderError("PARSE_ERROR", "binance returned invalid JSON", { cause });
     }
     // 公开免签:全市场价 → symbol→price 表。
-    const priceRes = await binanceFetch(TICKER_PRICE_PATH);
+    const priceRes = await binanceFetch(TICKER_PRICE_PATH, undefined, true);
     ensureOk(priceRes);
     let tickers: TickerPrice[];
     try {

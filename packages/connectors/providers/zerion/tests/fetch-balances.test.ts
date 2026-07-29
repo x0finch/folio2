@@ -1,4 +1,5 @@
 import type { Balance, BalanceProvider } from "@folio/connectors-basic";
+import { resetLimitsForTests, setSleepForTests } from "@folio/ratelimit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseChainIds, parsePositions, resetChainIdsCacheForTests, zerionProvider } from "../src";
 import chainsFixture from "./fixtures/chains.json";
@@ -48,7 +49,12 @@ function mockZerionApis(opts?: {
   });
 }
 
+// 速率闸也是进程内状态:桶要清(否则用例间互相排队),**冷却尤其要清** —— 撞过一次 429 的用例
+// 会给后面的用例留下「冷却中」,于是本该 401 的断言拿到 RATE_LIMITED。sleep 换即时,不真等。
+setSleepForTests(async () => {});
+
 beforeEach(() => {
+  resetLimitsForTests();
   resetChainIdsCacheForTests(); // 链映射有进程内缓存,清掉避免用例顺序耦合
 });
 afterEach(() => {
@@ -146,6 +152,7 @@ describe("zerion provider.fetchBalances(双 API)", () => {
     });
     vi.restoreAllMocks();
     resetChainIdsCacheForTests();
+    resetLimitsForTests(); // 上一半那个 429 写下了冷却,不清掉这一半会拿到 RATE_LIMITED
     mockZerionApis({ positions: () => new Response("", { status: 401 }) });
     await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({
       code: "AUTH_FAILED",

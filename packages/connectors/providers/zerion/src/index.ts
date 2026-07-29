@@ -7,6 +7,7 @@ import {
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { defineLimit } from "@folio/ratelimit";
 import { z } from "zod";
 
 // @folio/connectors-provider-zerion — zerion provider(evm connector 用)。只读地址,一次取回跨所有
@@ -35,6 +36,31 @@ const POSITIONS_QUERY = "filter[trash]=only_non_trash&currency=usd&filter[positi
 const DEBT_POSITION_TYPES = new Set(["loan", "borrow"]);
 // EVM 地址格式。
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+// —— 速率闸 ——
+// **为什么这里要装**:一次 fetchBalances 发 2 个请求而且是 `Promise.all` **并行**的,
+// 而 sync 在账户维度并发 6 → 瞬时 12 个请求打**同一把 key**(ZERION_API_KEY 是全部署共用的,
+// 不是每账户一把)。免费 developer 档的文档限额是 **10 RPS**(60k 次/月),12 已经越线。
+//
+// 容量给 8、速率 8/s:常见情形(6 个账户 12 发)前 8 发直接走、剩下 4 发各错开 125ms,
+// 总共只多约 0.5s;真要冲高也被摊到 8/s 以下。留 20% 余量,因为 429 本身也算一次请求。
+// 出处:https://zerion.io/blog/top-questions-about-zerion-api/(developer 档 10 RPS / 60k 每月)
+const RATE_LIMIT_PER_SEC = 8;
+const RATE_LIMIT_BURST = 8;
+
+// 闸的 key 取**环境变量名**,不是 key 的值 —— key 会进日志属性,而这里只需要一个代表「那把 key」
+// 的稳定标识符。scope colo:撞了 429 之后同一个数据中心的 isolate 一起收手(见 @folio/ratelimit)。
+const limit = defineLimit({
+  key: ZERION_API_KEY,
+  scope: "colo",
+  capacity: RATE_LIMIT_BURST,
+  ratePerSec: RATE_LIMIT_PER_SEC,
+  onCooldown: (remainingMs) => {
+    throw new ProviderError("RATE_LIMITED", "zerion cooling down after a rate limit", {
+      retryAfterMs: remainingMs,
+    });
+  },
+});
 
 // —— Zerion 响应的最小形状(仅取用到的字段)——
 interface ZerionQuantity {
@@ -163,15 +189,20 @@ function basicAuth(apiKey: string): string {
   return `Basic ${btoa(`${apiKey}:`)}`;
 }
 
-// 发起 Zerion GET;网络故障 → UPSTREAM_ERROR(可重试)。状态码由调用方用 ensureOk 处理。
+// 发起 Zerion GET;每发都过速率闸。网络故障 → UPSTREAM_ERROR(可重试)。
+// 状态码由调用方用 ensureOk 处理 —— 但 429 要在这里就告诉闸(ensureOk 是同步的,await 不进去)。
 async function zerionGet(path: string, apiKey: string): Promise<Response> {
+  await limit.acquire();
+  let res: Response;
   try {
-    return await fetch(`${ZERION_API_BASE}${path}`, {
+    res = await fetch(`${ZERION_API_BASE}${path}`, {
       headers: { Authorization: basicAuth(apiKey), accept: "application/json" },
     });
   } catch (cause) {
     throw new ProviderError("UPSTREAM_ERROR", "zerion request failed", { cause });
   }
+  if (res.status === 429) await limit.cooldown(parseRetryAfter(res.headers.get("retry-after")));
+  return res;
 }
 
 function ensureOk(res: Response): void {

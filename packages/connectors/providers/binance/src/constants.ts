@@ -16,3 +16,21 @@ export const STABLECOINS: ReadonlySet<string> = new Set([
   "TUSD",
   "DAI",
 ]);
+
+// —— 速率闸(**只给公开端点,不给签名端点**)——
+// 这个区分是要点:binance 的额度按 **IP** 算,不按 key 算 —— 而 `TICKER_PRICE_PATH` 是公开免签的,
+// 于是所有账户、**所有用户**共花同一份出口 IP 的额度。`ACCOUNT_PATH` 那一发是签名的,
+// 花的仍是同一份 IP 额度,但一个账户只发一次、且不并发,装闸拦不到任何东西(桶永远是满的)。
+//
+// 文档:Spot REST 的 REQUEST_WEIGHT 是 **6000 权重/分钟/IP**;不带 symbol 的
+// `/api/v3/ticker/price` 是全市场,权重上限 200 → 约 30 次/分钟就吃满一个 IP 的额度。
+// 出处:https://developers.binance.com/docs/binance-spot-api-docs/rest-api/limits
+//       (权重上限 6000/min;ticker 每 symbol 权重 4,>50 个 symbol 时封顶 200)
+//
+// 速率 24/分钟(标称 30 的 80%),容量 6 —— **容量刻意等于 SYNC_CONCURRENCY**:常见情形
+// (6 个账户各一发)一口气走完、不给同步添延迟,只有超出这个突发的量才被摊开。
+// 429 之后还会 418(自动封 IP,2 分钟到 3 天),所以这里宁可保守。
+export const TICKER_RATE_LIMIT_PER_SEC = 24 / 60;
+export const TICKER_RATE_LIMIT_BURST = 6;
+// 公开端点闸的 key:**provider 级、按出口 IP**,不是每账户 —— 见上。
+export const PUBLIC_LIMIT_KEY = "binance:public";

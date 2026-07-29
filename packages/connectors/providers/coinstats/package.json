@@ -14,6 +14,7 @@
   "dependencies": {
     "@folio/connectors-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
+    "@folio/ratelimit": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {

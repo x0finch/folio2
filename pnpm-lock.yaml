@@ -274,6 +274,9 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
+      '@folio/ratelimit':
+        specifier: workspace:*
+        version: link:../../../ratelimit
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -318,6 +321,9 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
+      '@folio/ratelimit':
+        specifier: workspace:*
+        version: link:../../../ratelimit
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -403,6 +409,9 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
+      '@folio/ratelimit':
+        specifier: workspace:*
+        version: link:../../../ratelimit
       zod:
         specifier: ^4.0.0
         version: 4.4.3
