@@ -266,3 +266,55 @@ describe("scope: isolate —— 压根不碰缓存", () => {
     await expect(limit.acquire()).rejects.toBeInstanceOf(RateLimitedError);
   });
 });
+
+describe("坏输入 / 坏缓存 —— 每个 catch 都得有人踩过", () => {
+  it("put 抛异常 → 不抛给调用方(isolate 层已经记下了)", async () => {
+    const broken: CooldownStore = {
+      match: async () => undefined,
+      put: async () => {
+        throw new Error("cache write exploded");
+      },
+    };
+    const limit = defineLimit({
+      key: "k",
+      scope: "colo",
+      capacity: 1,
+      ratePerSec: 8,
+      clock: at(0),
+      cache: broken,
+    });
+    await expect(limit.cooldown(5000)).resolves.toBeUndefined();
+    // 写缓存炸了不影响 isolate 层生效
+    await expect(limit.acquire()).rejects.toBeInstanceOf(RateLimitedError);
+  });
+
+  it("缓存里躺着的不是数字 → 当没冷却,照常放行", async () => {
+    const garbage: CooldownStore = {
+      match: async () => new Response("not-a-timestamp"),
+      put: async () => {},
+    };
+    const limit = defineLimit({
+      key: "k",
+      scope: "colo",
+      capacity: 1,
+      ratePerSec: 8,
+      clock: at(0),
+      cache: garbage,
+    });
+    await expect(limit.acquire()).resolves.toBeUndefined();
+  });
+
+  it.each([0, -1, Number.NaN])("cooldown(%p) → 退回保守默认,不产生「已过期」的冷却", async (ms) => {
+    const limit = defineLimit({
+      key: `k${ms}`,
+      scope: "colo",
+      capacity: 1,
+      ratePerSec: 8,
+      clock: at(0),
+      cache: fakeCache(),
+    });
+    await limit.cooldown(ms);
+    const err = await limit.acquire().catch((e) => e);
+    expect(err.retryAfterMs).toBe(COOLDOWN_DEFAULT_MS);
+  });
+});

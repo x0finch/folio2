@@ -347,6 +347,9 @@ importers:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
+      '@folio/ratelimit':
+        specifier: workspace:*
+        version: link:../../../ratelimit
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -366,6 +369,9 @@ importers:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
+      '@folio/ratelimit':
+        specifier: workspace:*
+        version: link:../../../ratelimit
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

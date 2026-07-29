@@ -42,6 +42,15 @@ export function setSleepForTests(sleep?: (ms: number) => Promise<void>): void {
 }
 
 export function defineLimit(policy: LimitPolicy): Limit {
+  // 立刻拒掉说不通的策略。**这不是防御性编程,是防一个静默故障**:`ratePerSec: 0` 会让间隔算成
+  // Infinity、突发额度算成 NaN,于是每次 acquire 的等待都是 NaN —— `NaN > 0` 为假,闸一次都不拦,
+  // 悄悄退化成没装。一个常量打错字就没了限速而且零信号,所以宁可在模块加载期就炸。
+  if (!Number.isFinite(policy.ratePerSec) || policy.ratePerSec <= 0) {
+    throw new Error(`ratelimit: ratePerSec must be a positive finite number (${policy.key})`);
+  }
+  if (!Number.isInteger(policy.capacity) || policy.capacity < 1) {
+    throw new Error(`ratelimit: capacity must be an integer >= 1 (${policy.key})`);
+  }
   const clock = policy.clock ?? Date.now;
   const sleep = policy.sleep ?? ((ms: number) => defaultSleep(ms));
   // global 档(Durable Object 真配额)还没实现 —— 降级成 colo 并说一声,而不是假装限住了。

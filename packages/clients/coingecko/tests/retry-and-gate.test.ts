@@ -153,3 +153,40 @@ describe("限速闸", () => {
     expect(await keyless.assetPlatforms()).toEqual([]);
   });
 });
+
+describe("三个档位各走各的桶", () => {
+  // 三个 `CG_CALLS_PER_MIN_*` 里,pro 那个在别处一次都没被走到过 —— 补上,免得它是个从没执行过的分支。
+  it("pro 档的额度宽得多 → 同样的发数,demo 要等而 pro 不用", async () => {
+    scriptedFetch([ok([])]);
+    const demoWaits: number[] = [];
+    const demo = createCoinGeckoClient({
+      apiKey: "k",
+      sleep: async (ms) => void demoWaits.push(ms),
+    });
+    for (let i = 0; i < CG_BURST + 1; i++) await demo.assetPlatforms();
+    expect(demoWaits).toHaveLength(1);
+
+    resetLimitsForTests();
+    const proWaits: number[] = [];
+    const pro = createCoinGeckoClient({
+      apiKey: "k",
+      pro: true,
+      sleep: async (ms) => void proWaits.push(ms),
+    });
+    for (let i = 0; i < CG_BURST + 1; i++) await pro.assetPlatforms();
+    // 桶容量一样,所以第 CG_BURST+1 发同样要等 —— 但等得**短得多**(速率高)。
+    expect(proWaits).toHaveLength(1);
+    expect(proWaits[0]).toBeLessThan(demoWaits[0]);
+  });
+
+  it("pro 与 demo 共用同一把 key 的额度 → 同一个桶(pro 只是同一把 key 换了档)", async () => {
+    scriptedFetch([ok([])]);
+    const waits: number[] = [];
+    const sleep = async (ms: number) => void waits.push(ms);
+    const demo = createCoinGeckoClient({ apiKey: "k", sleep });
+    const pro = createCoinGeckoClient({ apiKey: "k", pro: true, sleep });
+    for (let i = 0; i < CG_BURST; i++) await demo.assetPlatforms();
+    await pro.assetPlatforms(); // 突发已被 demo 抽干 → pro 这发也得等
+    expect(waits).toHaveLength(1);
+  });
+});

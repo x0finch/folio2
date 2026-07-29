@@ -137,3 +137,21 @@ describe("桶按 key 共享 —— 这是限速真正生效的前提", () => {
     expect(waits).toEqual([125]);
   });
 });
+
+describe("说不通的策略立刻炸,不悄悄退化", () => {
+  // 这一组防的是**静默故障**,不是手滑:ratePerSec 为 0 时间隔算成 Infinity、突发算成 NaN,
+  // 每次的等待都是 NaN,而 `NaN > 0` 为假 —— 闸一次都不拦,悄悄等于没装。
+  // 一个常量打错字就没了限速、还零信号,所以宁可在 defineLimit 当场抛。
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("ratePerSec = %p → 抛", (rate) => {
+    expect(() => defineLimit({ key: "bad", capacity: 1, ratePerSec: rate })).toThrow(/ratePerSec/);
+  });
+
+  it.each([0, -1, 1.5])("capacity = %p → 抛(必须是 ≥1 的整数)", (capacity) => {
+    expect(() => defineLimit({ key: "bad", capacity, ratePerSec: 8 })).toThrow(/capacity/);
+  });
+
+  it("正常策略不抛(免得上面那几条是靠「什么都抛」通过的)", () => {
+    expect(() => defineLimit({ key: "ok", capacity: 1, ratePerSec: 8 })).not.toThrow();
+    expect(() => defineLimit({ key: "ok", capacity: 100, ratePerSec: 0.5 })).not.toThrow();
+  });
+});

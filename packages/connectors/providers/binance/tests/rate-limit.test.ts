@@ -93,3 +93,27 @@ describe("突发额度", () => {
     setSleepForTests(async () => {});
   });
 });
+
+describe("签名端点的 429 **不该**污染公开端点的闸", () => {
+  it("/account 撞 429 → 公开端点的冷却没被写上,下一轮行情照发", async () => {
+    // 这是「只给公开端点装闸」的另一半:闸和冷却都只挂在公开那份额度上。要是把 /account 的 429
+    // 也写进 `binance:public` 的冷却,一个账户的 key 出问题就会连累所有账户的行情取数。
+    const paths: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      paths.push(url.pathname);
+      return url.pathname === ACCOUNT_PATH
+        ? new Response("", { status: 429 })
+        : new Response(JSON.stringify([]));
+    });
+    await expect(binanceProvider.fetchBalances(ctx())).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+    expect(paths).toEqual([ACCOUNT_PATH]); // 签名那发就挂了,没走到行情
+
+    // 下一轮:公开端点没有被冷却,照样出网。
+    const next = stubFetch();
+    await binanceProvider.fetchBalances(ctx());
+    expect(next).toEqual([ACCOUNT_PATH, TICKER_PRICE_PATH]);
+  });
+});
