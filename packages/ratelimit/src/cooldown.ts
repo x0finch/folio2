@@ -5,7 +5,7 @@ import {
   COOLDOWN_URL_PREFIX,
 } from "./constants";
 import { RateLimitedError } from "./errors";
-import type { CooldownStore, LimitPolicy } from "./types";
+import type { CooldownStore, LimitLogger, LimitPolicy } from "./types";
 
 // 冷却标记 —— colo 档。**存的是「冷却到什么时候」,不是「还剩几个令牌」**,这一点是设计的核心:
 //
@@ -49,10 +49,21 @@ export function resetCooldownForTests(): void {
   generation++;
 }
 
+// 报告用的 logger。**装在包这一层,不靠调用方逐个透传** —— 要说的那件事
+// (「这个运行时的 Cache API 不生效」)是**环境**的属性,跟哪个上游无关,每个 defineLimit 都
+// 声明一遍只会漏:五个闸里有四个当初根本没传,于是那条自检只会为 CoinGecko 响。
+// app 在配置日志时设一次(见 apps/web 的 configureLogging),所有闸一起有声音。
+let moduleLogger: LimitLogger | undefined;
+
+export function setLimitLogger(logger?: LimitLogger): void {
+  moduleLogger = logger;
+}
+
 function warnOnce(policy: LimitPolicy, tag: string, message: string): void {
   if (warned.has(tag)) return;
   warned.add(tag);
-  policy.log?.(message, { key: policy.key, scope: policy.scope });
+  // policy.log 优先 —— 测试用它捕获;生产走模块级那个。
+  (policy.log ?? moduleLogger)?.(message, { key: policy.key, scope: policy.scope });
 }
 
 function urlFor(fullKey: string): string {

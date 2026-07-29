@@ -3,7 +3,7 @@
 //   ① 注入 User-Agent —— CGK 的 Cloudflare WAF 对无 UA 请求返 403(Workers fetch 默认不带 UA)。
 //   ② 直接用全局 `fetch`(不存成方法/this,避免 Workers 的 illegal invocation)。
 
-import { defineLimit, type Limit, type LimitLogger, withRetry } from "@folio/ratelimit";
+import { defineLimit, type Limit, withRetry } from "@folio/ratelimit";
 import {
   CG_BURST,
   CG_CALLS_PER_MIN_DEMO,
@@ -58,9 +58,6 @@ export interface CoinGeckoConfig {
   baseUrl?: string; // 覆盖基址(测试/自托管代理)
   // 限速闸和重试的等待实现。生产不传(用 setTimeout);**测试注入即时版** —— 否则闸会让测试真等。
   sleep?: (ms: number) => Promise<void>;
-  // 结构化日志钩子。传了才会报出「colo 档冷却没生效」——`*.workers.dev` 上 Cache API 的
-  // put/match 是静默 no-op(见 apps/web/DEPLOY.md),不传就永远不知道那一层是死的。
-  log?: LimitLogger;
 }
 
 type Query = Record<string, string | number | undefined>;
@@ -90,7 +87,8 @@ function limitFor(config: CoinGeckoConfig): Limit {
     capacity: CG_BURST,
     ratePerSec: callsPerMin / 60,
     sleep: config.sleep,
-    log: config.log,
+    // 「colo 档没生效」那类报告由 @folio/ratelimit 的模块级 logger 负责(app 设一次)——
+    // 那是运行时的属性,不是 CoinGecko 的,不该由每个调用方逐个透传进来。
     // 冷却期内抛本包自己的错误类型 —— 调用方(oracle / oracle2)只认识 CoinGeckoError。
     onCooldown: (remainingMs) => {
       throw new CoinGeckoError("RATE_LIMITED", "coingecko cooling down after a rate limit", {

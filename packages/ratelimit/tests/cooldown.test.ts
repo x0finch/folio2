@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { COOLDOWN_DEFAULT_MS, COOLDOWN_MAX_MS } from "../src/constants";
-import { defineLimit, RateLimitedError, resetLimitsForTests } from "../src/index";
+import { defineLimit, RateLimitedError, resetLimitsForTests, setLimitLogger } from "../src/index";
 import type { CooldownStore } from "../src/types";
 
 // 假的 Cache API。node 里没有 `caches`,而且真货的驱逐/过期不可控 —— 注入一个就能确定性地测。
@@ -342,5 +342,38 @@ describe("resetLimitsForTests 必须真的能重置", () => {
 
     resetLimitsForTests();
     await expect(defineLimit(policy).acquire()).resolves.toBeUndefined();
+  });
+});
+
+describe("模块级 logger —— 一处设置管所有闸", () => {
+  it("没传 policy.log 的闸也会报告(之前正是这里漏的:五个闸四个没声音)", async () => {
+    const log = vi.fn();
+    setLimitLogger(log);
+    // 注意:**不传** log
+    const limit = defineLimit({ key: "k", scope: "colo", capacity: 1, ratePerSec: 8 });
+    await limit.acquire();
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][0]).toContain("no Cache API");
+  });
+
+  it("policy.log 优先于模块级(测试要能就地捕获)", async () => {
+    const moduleLog = vi.fn();
+    const policyLog = vi.fn();
+    setLimitLogger(moduleLog);
+    const limit = defineLimit({
+      key: "k",
+      scope: "colo",
+      capacity: 1,
+      ratePerSec: 8,
+      log: policyLog,
+    });
+    await limit.acquire();
+    expect(policyLog).toHaveBeenCalledTimes(1);
+    expect(moduleLog).not.toHaveBeenCalled();
+  });
+
+  it("没设过就静默 —— 不往 console 上乱吐", async () => {
+    const limit = defineLimit({ key: "k", scope: "colo", capacity: 1, ratePerSec: 8 });
+    await expect(limit.acquire()).resolves.toBeUndefined(); // 不抛、不吐
   });
 });

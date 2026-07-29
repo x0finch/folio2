@@ -20,13 +20,9 @@ import { getLogger } from "@logtape/logtape";
 //
 // 与旧的 ./oracle.ts 并存到 #202(那片让 oracle2 改名接管)。
 
-// CoinGecko client 的公共配置。`log` 是给限速层用的:没它的话「colo 档冷却没生效」这件事
-// 永远不会被说出来(`*.workers.dev` 上 Cache API 的 put/match 是静默 no-op,见 DEPLOY.md)。
-const cgConfig = () => ({
-  apiKey: env.COINGECKO_API_KEY || undefined,
-  log: (message: string, properties?: Record<string, unknown>) =>
-    getLogger(["folio", "oracle"]).warn(message, properties),
-});
+// CoinGecko client 的公共配置(三个上游共用一份)。限速层的报告不在这里 —— 见 log.ts 的
+// setLimitLogger:那件事是运行时的属性,设一次管所有闸,不该逐个上游透传。
+const cgConfig = () => ({ apiKey: env.COINGECKO_API_KEY || undefined });
 
 const newUpstream = () => createCoinGeckoUpstream(cgConfig());
 

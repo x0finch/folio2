@@ -8,9 +8,10 @@
 // 数字不放这个包里 —— 各调用方自己的 constants.ts 说了算(原则 #8),因为限额是上游的属性。
 
 import { acquireFromBucket, fullKeyOf, resetBucketsForTests } from "./bucket";
-import { readCooldown, resetCooldownForTests, writeCooldown } from "./cooldown";
+import { readCooldown, resetCooldownForTests, setLimitLogger, writeCooldown } from "./cooldown";
 import type { Limit, LimitPolicy } from "./types";
 
+export { setLimitLogger } from "./cooldown";
 export { RateLimitedError } from "./errors";
 export { withRetry } from "./retry";
 export type {
@@ -30,6 +31,7 @@ let defaultSleep = realSleep;
 export function resetLimitsForTests(): void {
   resetBucketsForTests();
   resetCooldownForTests();
+  setLimitLogger(undefined);
 }
 
 // 仅测试用:把「等待」整体换成即时(不传 = 还原成真 setTimeout)。
