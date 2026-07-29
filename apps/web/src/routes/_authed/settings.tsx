@@ -40,8 +40,9 @@ export const Route = createFileRoute("/_authed/settings")({
 });
 
 // 全局 provider key(品牌名不翻译);env 名是 getProviderKeyStatus 返回的 key。
+// EVM 默认走 Rabby(不需要 key,所以不在这张表里);Zerion 是可选备源。
 const PROVIDER_KEYS = [
-  { env: "ZERION_API_KEY", label: "Zerion (EVM)" },
+  { env: "ZERION_API_KEY", label: "Zerion (EVM 备源,可不配)" },
   { env: "COINSTATS_API_KEY", label: "CoinStats (Solana / Sui / Cosmos)" },
 ] as const;
 

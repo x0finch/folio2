@@ -2,8 +2,9 @@ BETTER_AUTH_SECRET=replace-with-openssl-rand-hex-32
 BETTER_AUTH_URL=http://localhost:3000
 # base64 of 32 random bytes — `openssl rand -base64 32` (AES-GCM key for encrypting credentials)
 SECRETS_KEY=replace-with-openssl-rand-base64-32
-# Zerion API key (free dev tier at developers.zerion.io) — global provider key for onchain_evm
-ZERION_API_KEY=replace-with-zerion-dev-key
+# Zerion API key (OPTIONAL — EVM defaults to Rabby, which needs no key; Zerion is kept as an
+# alternate EVM source). Free dev tier at developers.zerion.io.
+# ZERION_API_KEY=replace-with-zerion-dev-key
 # CoinStats API key (free tier at openapi.coinstats.app) — global key for onchain_solana/sui/cosmos
 COINSTATS_API_KEY=replace-with-coinstats-key
 # CoinGecko API key (OPTIONAL — free tier works keyless; a demo/pro key raises rate limits) — token pricing + FX

@@ -1,0 +1,160 @@
+[
+  {
+    "symbol": "ETH",
+    "amount": 6.632200430120325,
+    "price": 1908.68,
+    "value": 12658.748316962063,
+    "tokenRef": "evm:1/native",
+    "name": "ETH",
+    "logo": "https://static.debank.com/image/coin/logo_url/eth/6443cdccced33e204d90cb723c632917.png",
+    "kind": "spot"
+  },
+  {
+    "symbol": "ETH",
+    "amount": 0.18052507840784301,
+    "price": 1906.6,
+    "value": 344.18911449239346,
+    "tokenRef": "evm:10/native",
+    "name": "ETH",
+    "logo": "https://static.debank.com/image/coin/logo_url/eth/6443cdccced33e204d90cb723c632917.png",
+    "kind": "spot"
+  },
+  {
+    "symbol": "OPP",
+    "amount": 29422360.73149224,
+    "price": 0.0002779458774427653,
+    "value": 8177.823869952173,
+    "tokenRef": "evm:10/contract:0x676f784d19c7f1ac6c6beaeaac78b02a73427852",
+    "name": "OptimismPrime",
+    "logo": "https://static.debank.com/image/op_token/logo_url/0x676f784d19c7f1ac6c6beaeaac78b02a73427852/cf5cb4e0b69a7f2c838c12afa1f551ed.png",
+    "kind": "spot"
+  },
+  {
+    "symbol": "vitalik.eth",
+    "amount": 700000000,
+    "price": 0.000023163522125855326,
+    "value": 16214.46548809873,
+    "tokenRef": "evm:56/contract:0x176395fcd135f4965eecd182587c8f5d85654444",
+    "name": "vitalik.eth ",
+    "logo": "https://static.debank.com/image/bsc_token/logo_url/0x176395fcd135f4965eecd182587c8f5d85654444/c761245ac7d462466eca3075bfa66105.png",
+    "kind": "spot"
+  },
+  {
+    "symbol": "WLD",
+    "amount": 5.277375163635194,
+    "price": 0.3022,
+    "value": 1.5948227744505559,
+    "tokenRef": "evm:10/contract:0xdc6ff44d5d932cbd77b52e5612ba0529dc6226f1",
+    "name": "Worldcoin",
+    "logo": "https://static.debank.com/image/op_token/logo_url/0xdc6ff44d5d932cbd77b52e5612ba0529dc6226f1/30ac094d49a4b6e7561810c16ddc8c69.png",
+    "kind": "spot"
+  },
+  {
+    "symbol": "BB",
+    "amount": 0.000042,
+    "price": 0.01565,
+    "value": 6.573e-7,
+    "tokenRef": "evm:6001/native",
+    "name": "BB",
+    "logo": "https://static.debank.com/image/bb_token/logo_url/bb/da74a4980f24d870cb43ccd763e0c966.png",
+    "kind": "spot"
+  },
+  {
+    "symbol": "WBTC",
+    "amount": 0.00001846,
+    "price": 63978.8,
+    "value": 1.181048648,
+    "tokenRef": "evm:1/contract:0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+    "name": "Wrapped BTC",
+    "logo": "https://static.debank.com/image/eth_token/logo_url/0x2260fac5e5542a773aa44fbcfedf7c193bc2c599/d3c52e7c7449afa8bd4fad1c93f50d93.png",
+    "kind": "defi",
+    "meta": {
+      "protocol": "Aave V3",
+      "positionType": "Lending"
+    }
+  },
+  {
+    "symbol": "USDT",
+    "amount": -0.182535,
+    "price": 0.9988,
+    "value": -0.182315958,
+    "tokenRef": "evm:1/contract:0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "name": "Tether USD",
+    "logo": "https://static.debank.com/image/eth_token/logo_url/0xdac17f958d2ee523a2206206994597c13d831ec7/1a1d8a5b89114dc183f42b3d33eb3522.png",
+    "kind": "defi",
+    "meta": {
+      "protocol": "Aave V3",
+      "positionType": "Lending"
+    }
+  },
+  {
+    "symbol": "WBTC",
+    "amount": 0.00000136,
+    "price": 63978.8,
+    "value": 0.087011168,
+    "tokenRef": "evm:1/contract:0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+    "name": "Wrapped BTC",
+    "logo": "https://static.debank.com/image/eth_token/logo_url/0x2260fac5e5542a773aa44fbcfedf7c193bc2c599/d3c52e7c7449afa8bd4fad1c93f50d93.png",
+    "kind": "defi",
+    "meta": {
+      "protocol": "Compound V3",
+      "positionType": "Lending"
+    }
+  },
+  {
+    "symbol": "COMP",
+    "amount": 0.000015,
+    "price": 16.05,
+    "value": 0.00024075000000000002,
+    "tokenRef": "evm:1/contract:0xc00e94cb662c3520282e6f5717214004a7f26888",
+    "name": "Compound",
+    "logo": "https://static.debank.com/image/eth_token/logo_url/0xc00e94cb662c3520282e6f5717214004a7f26888/dd174d3d7083fa027a433dc50edaf0bc.png",
+    "kind": "defi",
+    "meta": {
+      "protocol": "Compound V3",
+      "positionType": "Lending"
+    }
+  },
+  {
+    "symbol": "USDT",
+    "amount": -0.108349,
+    "price": 0.9988,
+    "value": -0.10821898120000001,
+    "tokenRef": "evm:1/contract:0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "name": "Tether USD",
+    "logo": "https://static.debank.com/image/eth_token/logo_url/0xdac17f958d2ee523a2206206994597c13d831ec7/1a1d8a5b89114dc183f42b3d33eb3522.png",
+    "kind": "defi",
+    "meta": {
+      "protocol": "Compound V3",
+      "positionType": "Lending"
+    }
+  },
+  {
+    "symbol": "COMP",
+    "amount": 0.000001,
+    "price": 16.05,
+    "value": 0.00001605,
+    "tokenRef": "evm:1/contract:0xc00e94cb662c3520282e6f5717214004a7f26888",
+    "name": "Compound",
+    "logo": "https://static.debank.com/image/eth_token/logo_url/0xc00e94cb662c3520282e6f5717214004a7f26888/dd174d3d7083fa027a433dc50edaf0bc.png",
+    "kind": "defi",
+    "meta": {
+      "protocol": "Compound V3",
+      "positionType": "Lending"
+    }
+  },
+  {
+    "symbol": "DAI",
+    "amount": 1,
+    "price": 0.999844,
+    "value": 0.999844,
+    "tokenRef": "evm:137/contract:0x8f3cf7ad23cd3cadbd9735aff958023239c6a063",
+    "name": "(PoS) Dai Stablecoin",
+    "logo": "https://static.debank.com/image/matic_token/logo_url/0x8f3cf7ad23cd3cadbd9735aff958023239c6a063/b13487f4a2e0c43d8dc9e98194a2dd39.png",
+    "kind": "defi",
+    "meta": {
+      "protocol": "Sablier",
+      "positionType": "Vesting"
+    }
+  }
+]

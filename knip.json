@@ -9,6 +9,9 @@
     },
     "packages/db": {
       "ignoreDependencies": ["cloudflare", "wrangler"]
+    },
+    "packages/connectors/providers/rabby": {
+      "ignoreDependencies": ["wrangler"]
     }
   }
 }

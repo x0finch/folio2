@@ -1,0 +1,56 @@
+[
+  {
+    "id": "op",
+    "community_id": 10,
+    "name": "OP",
+    "native_token_id": "op",
+    "logo_url": "https://static.debank.com/image/chain/logo_url/op/68bef0c9f75488f4e302805ef9c8fc84.png",
+    "wrapped_token_id": "0x4200000000000000000000000000000000000006",
+    "is_support_history": true
+  },
+  {
+    "id": "bsc",
+    "community_id": 56,
+    "name": "BNB Chain",
+    "native_token_id": "bsc",
+    "logo_url": "https://static.debank.com/image/chain/logo_url/bsc/bc73fa84b7fc5337905e527dadcbc854.png",
+    "wrapped_token_id": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "is_support_history": true
+  },
+  {
+    "id": "eth",
+    "community_id": 1,
+    "name": "Ethereum",
+    "native_token_id": "eth",
+    "logo_url": "https://static.debank.com/image/chain/logo_url/eth/42ba589cd077e7bdd97db6480b0ff61d.png",
+    "wrapped_token_id": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+    "is_support_history": true
+  },
+  {
+    "id": "matic",
+    "community_id": 137,
+    "name": "Polygon",
+    "native_token_id": "matic",
+    "logo_url": "https://static.debank.com/image/chain/logo_url/matic/52ca152c08831e4765506c9bd75767e8.png",
+    "wrapped_token_id": "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270",
+    "is_support_history": true
+  },
+  {
+    "id": "bb",
+    "community_id": 6001,
+    "name": "BounceBit",
+    "native_token_id": "bb",
+    "logo_url": "https://static.debank.com/image/chain/logo_url/bb/da74a4980f24d870cb43ccd763e0c966.png",
+    "wrapped_token_id": "0xf4c20e5004c6fdcdda920bdd491ba8c98a9c5863",
+    "is_support_history": false
+  },
+  {
+    "id": "oas",
+    "community_id": 248,
+    "name": "Oasys",
+    "native_token_id": "oas",
+    "logo_url": "https://static.debank.com/image/chain/logo_url/oas/61dfecab1ba8a404354ce94b5a54d4b3.png",
+    "wrapped_token_id": "0x5200000000000000000000000000000000000001",
+    "is_support_history": false
+  }
+]

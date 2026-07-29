@@ -254,6 +254,10 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
   id: "zerion",
   label: "Zerion",
   creds: providerCreds,
+  // **备源**:evm connector 的默认取数已改为 rabby(不要 key、一次拿全链)。这里留着是为了将来
+  // 做「运行时选源」(ADR 0009 决策 #8)—— 有 ZERION_API_KEY 的人可以选回来。
+  // selectProvider 会跳过 defaultEnabled === false 的,所以它现在不参与取数。
+  defaultEnabled: false,
 
   async fetchBalances(ctx): Promise<{ balances: Row[] }> {
     const apiKey = ctx.creds[ZERION_API_KEY];

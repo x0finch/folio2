@@ -33,7 +33,7 @@ pnpm dev                                            # → http://localhost:3000
 
 - `SECRETS_KEY` —— `openssl rand -base64 32`(加密每账户凭据的 AES-GCM key)
 - `BETTER_AUTH_SECRET`、`BETTER_AUTH_URL` —— 鉴权
-- Provider key(可选,按源):`ZERION_API_KEY`(EVM)、`COINSTATS_API_KEY`(Solana/Sui/Cosmos)、`COINGECKO_API_KEY`(定价)。**Bitcoin 无需 key**(公共 Blockbook)。
+- Provider key(可选,按源):`COINSTATS_API_KEY`(Solana/Sui/Cosmos)、`COINGECKO_API_KEY`(定价)、`ZERION_API_KEY`(EVM 备源)。**EVM 与 Bitcoin 都无需 key** —— EVM 默认走 Rabby、Bitcoin 走公共 Blockbook。
 
 ## 部署
 
