@@ -1,1 +1,0 @@
-ALTER TABLE `snapshot_balances` ADD `platform` text;

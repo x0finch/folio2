@@ -1,1 +1,0 @@
-ALTER TABLE `manual_activity` ADD `fee` real;
