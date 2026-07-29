@@ -16,8 +16,11 @@ export const CHAINS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 // dust 闸:低于这个 USD 价值的**合约币**不产行(原生币豁免)。
 // 由来见 parse.ts 的 parseTokens 注释 —— Zerion 靠服务端 only_non_trash,rabby 没有对应参数。
-// 想更贴近 Zerion 的行数就把它抬到 10(实测 $10 一档 174 行 ≈ Zerion 的 188 行)。
-export const DUST_USD = 0.01;
+//
+// 为什么是 $1 而不是 $0.01:同一地址实测,$1 砍掉一半行数(907 → 444)只丢 $104(总额的 0.01%),
+// $1 以下的东西没人是特意持有的。想更贴近 Zerion 的行数可以抬到 10(219 行 ≈ Zerion 的 188 行,
+// 丢 $880 / 0.10%)—— 但那会开始吞掉真实的小额持仓。
+export const DUST_USD = 1;
 
 // 并发闸:实测 ≤10 并发干净、14 以上开始掉、20 基本全掉,且被压过之后恢复慢。
 // 8 是留了余量的档位(老仓库 axios 那个 throttle limit 也正好是 10 —— 那个数不是瞎写的)。

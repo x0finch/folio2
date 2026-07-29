@@ -60,9 +60,18 @@ function baseRow(token: RabbyToken, chainIds: Record<string, number>, sign: 1 | 
 // 钱包现货(/v1/user/cache_token_list)→ spot[]。
 //
 // dust 闸的由来:Zerion 有服务端 `filter[trash]=only_non_trash`,rabby **没有对应参数** ——
-// 某个公开地址实测 2302 行里只有 893 行值 ≥ $0.01(814 行上游根本不给价)。不设闸,快照行数涨十几倍。
+// 某个公开地址实测 2302 行里 814 行上游根本不给价。不设闸,快照行数涨十几倍。
 // 原生币豁免:某条链的 gas 币再小也留,否则那条链会整个从视野里消失。
-// `is_scam`/`is_suspicious` 照筛,但**别指望它** —— 这个端点里实测全是 false。
+//
+// **能筛的就只有价值这一条,别去筛"币的质量"。** 这个端点上:
+//   · `is_core` / `is_verified` / `is_wallet` 全 true,`is_scam` / `is_suspicious` 全 false ——
+//     一行都滤不掉。(`cache_token_list` 本身就是 core-only 那份:它的 eth 行数与
+//     `token_list?chain_id=eth&is_all=false` 实测同为 1082。老仓库那个 `token.isCore` 滤在这里是空转。)
+//   · `credit_score` 确实有区分度,但性价比差得远:`credit_score === 0` 砍 27% 行数、丢 $23,678
+//     (总额 2.68%),而 dust 抬到 $1 砍 51% 行数只丢 $104(0.01%)。它删的是**有价格的** memecoin
+//     (SNEZHOK $7363、WCHAN $2940 …),留下便宜但"体面"的行 —— 方向就是反的。而且它是个没有文档的
+//     字段,0 也可能只是"还没数据",于是用户刚买的新币会静默消失。
+// 所以这里只按价值筛。
 export function parseTokens(
   tokens: readonly RabbyToken[],
   chainIds: Record<string, number>,

@@ -13,8 +13,9 @@ import protocolList from "./fixtures/complex-protocol-list.json";
 //   op  OPP  合约币 $8177        → 留,evm:10/contract:0x…
 //   bsc vitalik.eth 合约币 $16214 → 留
 //   eth DOJE price=0            → 丢(上游认不出价的垃圾币的典型形状)
-//   op  TUX  $0.0025            → 丢(不足 dust 闸)
-//   op  TKN  $0.2629            → 留(证明闸的边界不是"只留大额")
+//   op  TUX  $0.0025            → 丢(尘埃级)
+//   op  TKN  $0.2629            → 丢(证明闸卡的是 $1,不是 $0.01)
+//   op  WLD  $1.5948            → 留(刚过闸,证明边界不是"只留大额")
 //   bb  BB   原生币 ≈$0         → 留(原生币豁免 dust 闸)
 const chains = chainList as RabbyChain[];
 const tokens = tokenList as RabbyToken[];
@@ -55,11 +56,32 @@ describe("parseTokens", () => {
     expect(eth?.value).toBeCloseTo(6.632200430120325 * 1908.68, 6);
   });
 
-  it("dust 闸:不足 $0.01 的合约币丢掉,价格为 0 的也丢", () => {
+  it("dust 闸:不足 DUST_USD 的合约币丢掉,价格为 0 的也丢", () => {
     const rows = parseTokens(tokens, ids);
-    expect(rows.some((r) => r.symbol === "TUX")).toBe(false); // $0.0025
+    expect(rows.some((r) => r.symbol === "TUX")).toBe(false); // $0.0025,尘埃
+    expect(rows.some((r) => r.symbol === "TKN")).toBe(false); // $0.2629 —— 闸卡的是 $1,不是 $0.01
     expect(rows.some((r) => r.symbol === "DOJE")).toBe(false); // price 0
-    expect(rows.some((r) => r.symbol === "TKN")).toBe(true); // $0.2629,刚好过闸
+    expect(rows.some((r) => r.symbol === "WLD")).toBe(true); // $1.5948,刚过闸
+  });
+
+  it("只按价值筛,不按「币的质量」筛", () => {
+    // 这个端点上 is_core/is_verified/is_wallet 全 true(老仓库那个 isCore 滤在这里是空转),
+    // credit_score 虽有区分度但删的是**有价格的** memecoin —— 详见 parse.ts 的注释。
+    // 这条钉住行为:一个 credit_score=0、没有 cex_ids、名字像垃圾的币,只要值够就必须留下。
+    const rows = parseTokens(
+      [
+        {
+          id: "0xdeadbeef00000000000000000000000000000000",
+          chain: "eth",
+          symbol: "SOMEMEME",
+          amount: 1000,
+          price: 0.01, // = $10,过闸
+        },
+      ],
+      ids,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.value).toBeCloseTo(10, 10);
   });
 
   it("原生币豁免 dust 闸 —— 再小也留(否则某条链会整个从视野消失)", () => {
