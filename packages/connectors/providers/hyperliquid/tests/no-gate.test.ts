@@ -1,11 +1,16 @@
-import { resetLimitsForTests, setSleepForTests } from "@folio/ratelimit";
+import { bypassGatesForTests, resetGatesForTests } from "@folio/ratelimit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hyperliquidProvider } from "../src";
 
-// hyperliquid **刻意没有速率闸** —— 见 src/constants.ts 末尾算的那笔账:
-// 1200 权重/分钟 ÷ 每次权重 2 ≈ 600 次/分钟,而我们峰值 6 发。桶永远是满的,闸拦不到任何东西。
-// 这个文件钉住现状,免得下一个人照着「别的 provider 都有」补一个上来。
-// 哪天这里改成按币种逐个问,就该回去重算那笔账 —— 那时这个文件该被删掉,不是被加断言。
+// hyperliquid **刻意没有速率闸**,这个文件就是钉住这件事的 —— 不然下一个人看到别的 provider 都有闸,
+// 会顺手补一个上来。
+//
+// 见 src/constants.ts 末尾算的那笔账:1200 权重/分钟 ÷ 每次权重 2 ≈ 600 次/分钟,而我们峰值 6 发。
+// 队永远是空的,闸拦不到任何东西。哪天这里改成按币种逐个问,就该回去重算那笔账 ——
+// 那时这个文件该被删掉,不是被加断言。
+//
+// 怎么钉:闸旁路**关掉**(所以如果有闸,它会真的生效),然后连发很多次并断言全部挤在同一刻。
+// 有闸的话额度一用完就会出现第二个时刻。
 
 type Ctx = Parameters<typeof hyperliquidProvider.fetchBalances>[0];
 const ctx = (): Ctx =>
@@ -19,38 +24,35 @@ const ctx = (): Ctx =>
     creds: {},
   }) as unknown as Ctx;
 
-beforeEach(() => resetLimitsForTests());
+beforeEach(() => {
+  bypassGatesForTests(false);
+  resetGatesForTests();
+  vi.useFakeTimers();
+});
 afterEach(() => {
-  setSleepForTests();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("hyperliquid 没有闸", () => {
-  it("连发很多次都不等", async () => {
-    const waits: number[] = [];
-    setSleepForTests(async (ms) => void waits.push(ms));
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      async () =>
-        new Response(JSON.stringify({ marginSummary: { accountValue: "0" }, assetPositions: [] }), {
-          status: 200,
-        }),
-    );
-    for (let i = 0; i < 20; i++) await hyperliquidProvider.fetchBalances(ctx());
-    expect(waits).toEqual([]);
-  });
-
-  it("撞了 429 也不进冷却 —— 下一发照样出网", async () => {
-    let calls = 0;
+  it("连发 20 次,全部在同一刻出去 —— 一次等待都没有", async () => {
+    const at: number[] = [];
+    const t0 = Date.now();
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      calls++;
-      return new Response("", { status: 429 });
+      at.push(Date.now() - t0);
+      return new Response(
+        JSON.stringify({ marginSummary: { accountValue: "0" }, assetPositions: [] }),
+        { status: 200 },
+      );
     });
-    await expect(hyperliquidProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "RATE_LIMITED",
-    });
-    await expect(hyperliquidProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "RATE_LIMITED",
-    });
-    expect(calls).toBe(2);
+
+    const runs = Promise.all(
+      Array.from({ length: 20 }, () => hyperliquidProvider.fetchBalances(ctx())),
+    );
+    for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(60_000);
+    await runs;
+
+    expect(at).toHaveLength(20);
+    expect(new Set(at).size).toBe(1); // 有闸就会有第二个时刻
   });
 });

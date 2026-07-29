@@ -1,6 +1,6 @@
 import type { Balance, BalanceProvider } from "@folio/connectors-basic";
 import { validateCredentials } from "@folio/connectors-basic";
-import { resetLimitsForTests, setSleepForTests } from "@folio/ratelimit";
+import { bypassGatesForTests, resetGatesForTests } from "@folio/ratelimit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coinstatsAccountCreds, createCoinstatsProvider } from "../src";
 import solanaFixture from "./fixtures/solana.json";
@@ -8,8 +8,8 @@ import solanaFixture from "./fixtures/solana.json";
 // 速率闸是进程内状态。桶要清(免得用例间互相排队),**冷却尤其要清** —— 撞过 429 的用例会给后面
 // 的用例留下「冷却中」,于是本该 401 的断言拿到 RATE_LIMITED。sleep 换即时,不真等
 // (免费档 1.6 次/秒,不换的话这套测试会慢一大截)。
-setSleepForTests(async () => {});
-beforeEach(() => resetLimitsForTests());
+bypassGatesForTests(true);
+beforeEach(() => resetGatesForTests());
 
 const SUI = "0xc0ffee254729296a45a3885639AC7E10F9d54979c0ffee254729296a45a38856";
 
@@ -75,7 +75,7 @@ describe("coinstats fetchBalances", () => {
       code: "RATE_LIMITED",
       retryable: true,
     });
-    resetLimitsForTests(); // 上一句那个 429 写下了冷却,不清掉这里会拿到 RATE_LIMITED
+    resetGatesForTests(); // 上一句那个 429 写下了冷却,不清掉这里会拿到 RATE_LIMITED
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
     await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({ code: "AUTH_FAILED" });
   });

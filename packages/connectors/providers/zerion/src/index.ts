@@ -7,7 +7,7 @@ import {
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { defineLimit } from "@folio/ratelimit";
+import { defineRateLimit } from "@folio/ratelimit";
 import { z } from "zod";
 
 // @folio/connectors-provider-zerion — zerion provider(evm connector 用)。只读地址,一次取回跨所有
@@ -48,18 +48,12 @@ const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const RATE_LIMIT_PER_SEC = 8;
 const RATE_LIMIT_BURST = 8;
 
-// 闸的 key 取**环境变量名**,不是 key 的值 —— key 会进日志属性,而这里只需要一个代表「那把 key」
-// 的稳定标识符。scope colo:撞了 429 之后同一个数据中心的 isolate 一起收手(见 @folio/ratelimit)。
-const limit = defineLimit({
+// 闸的 key 取**环境变量名**,不是 key 的值 —— key 会进日志和 Map 的键,而这里只需要一个代表
+// 「那把 key」的稳定标识符。全局一把,所以所有账户共用这一个队。
+const gate = defineRateLimit({
   key: ZERION_API_KEY,
-  scope: "colo",
-  capacity: RATE_LIMIT_BURST,
-  ratePerSec: RATE_LIMIT_PER_SEC,
-  onCooldown: (remainingMs) => {
-    throw new ProviderError("RATE_LIMITED", "zerion cooling down after a rate limit", {
-      retryAfterMs: remainingMs,
-    });
-  },
+  limit: RATE_LIMIT_BURST,
+  interval: (RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000,
 });
 
 // —— Zerion 响应的最小形状(仅取用到的字段)——
@@ -192,17 +186,15 @@ function basicAuth(apiKey: string): string {
 // 发起 Zerion GET;每发都过速率闸。网络故障 → UPSTREAM_ERROR(可重试)。
 // 状态码由调用方用 ensureOk 处理 —— 但 429 要在这里就告诉闸(ensureOk 是同步的,await 不进去)。
 async function zerionGet(path: string, apiKey: string): Promise<Response> {
-  await limit.acquire();
-  let res: Response;
   try {
-    res = await fetch(`${ZERION_API_BASE}${path}`, {
-      headers: { Authorization: basicAuth(apiKey), accept: "application/json" },
-    });
+    return await gate(() =>
+      fetch(`${ZERION_API_BASE}${path}`, {
+        headers: { Authorization: basicAuth(apiKey), accept: "application/json" },
+      }),
+    );
   } catch (cause) {
     throw new ProviderError("UPSTREAM_ERROR", "zerion request failed", { cause });
   }
-  if (res.status === 429) await limit.cooldown(parseRetryAfter(res.headers.get("retry-after")));
-  return res;
 }
 
 function ensureOk(res: Response): void {

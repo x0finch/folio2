@@ -1,4 +1,4 @@
-import { resetLimitsForTests } from "@folio/ratelimit";
+import { resetGatesForTests } from "@folio/ratelimit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateAccountCreds } from "../../src/lib/server/internal/connector-registry";
 
@@ -22,7 +22,7 @@ import { validateAccountCreds } from "../../src/lib/server/internal/connector-re
 
 const ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
-beforeEach(() => resetLimitsForTests());
+beforeEach(() => resetGatesForTests());
 afterEach(() => vi.restoreAllMocks());
 
 // 按次序应答:第 n 次出网返回 statuses[n-1](用尽后重复最后一个)。每次都新建 Response

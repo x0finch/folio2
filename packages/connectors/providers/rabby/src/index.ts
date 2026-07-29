@@ -6,7 +6,7 @@ import {
   parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
-import { defineLimit } from "@folio/ratelimit";
+import { defineRateLimit } from "@folio/ratelimit";
 import { z } from "zod";
 import {
   CACHE_TOKEN_LIST_PATH,
@@ -72,25 +72,15 @@ async function sign(
 // 而 @folio/sync 的 SYNC_CONCURRENCY 是 6,每个账户还要发 2~3 个请求 → 真实瞬时并发 ~12,正压在坎上。
 //
 // **策略是「从不撞」,不是「撞了再重试」**:sync 的退避上限只有 5s,而 rabby 恢复更慢,
-// 撞上了三次重试很可能全白打。所以 `capacity: 1` —— 不许突发,请求被均匀摊成 8 次/秒,
+// 撞上了三次重试很可能全白打。所以 limit=1 —— 不许突发,请求被均匀摊成 8 次/秒,
 // 代价是同一账户的第二发多等 125ms,换限速永不触发。
 //
 // key 取 provider id:rabby 的额度实测跟**签名**走(不跟出口 IP 走),所有账户共用同一份,
 // 所以必须是一个全局的闸,不是每账户一个。
-//
-// scope 取 colo,而且**这里比别处更需要冷却** —— 上面那组数就是它的由来:撞过之后继续打,
-// 恢复得更慢。所以真撞上了要让同一个数据中心的 isolate 一起收手,而不是各自继续试。
-// 冷却时长用包里的保守默认:rabby 的 429 不带 Retry-After(实测)。
-const limit = defineLimit({
+const gate = defineRateLimit({
   key: PROVIDER_ID,
-  scope: "colo",
-  capacity: 1,
-  ratePerSec: MAX_REQUESTS_PER_SECOND,
-  onCooldown: (remainingMs) => {
-    throw new ProviderError("RATE_LIMITED", "rabby cooling down after a rate limit", {
-      retryAfterMs: remainingMs,
-    });
-  },
+  limit: 1,
+  interval: 1000 / MAX_REQUESTS_PER_SECOND,
 });
 
 // 发一个签名过的 GET。每发都过速率闸。
@@ -106,19 +96,15 @@ async function rabbyGet(path: string, params: Record<string, string>): Promise<R
     throw new ProviderError("AUTH_FAILED", "rabby: request signing failed", { cause });
   }
   const query = new URLSearchParams(params).toString();
-  await limit.acquire();
-  let res: Response;
   try {
-    res = await fetch(`${RABBY_API_BASE}${path}${query ? `?${query}` : ""}`, {
-      headers: { ...headers, accept: "application/json" },
-    });
+    return await gate(() =>
+      fetch(`${RABBY_API_BASE}${path}${query ? `?${query}` : ""}`, {
+        headers: { ...headers, accept: "application/json" },
+      }),
+    );
   } catch (cause) {
     throw new ProviderError("UPSTREAM_ERROR", "rabby request failed", { cause });
   }
-  // 撞上了就告诉闸(ensureOk 是同步的,await 不进去)。**这一发比别的 provider 更要紧**:
-  // rabby 的限流是累积的,撞过之后继续打恢复更慢 —— 见上面 limit 那段的实测数。
-  if (res.status === 429) await limit.cooldown(parseRetryAfter(res.headers.get("retry-after")));
-  return res;
 }
 
 // 状态码 → ProviderError。rabby 的 429 **不带 Retry-After**(实测),所以 retryAfterMs 是 undefined,

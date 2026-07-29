@@ -1,81 +1,17 @@
-// @folio/ratelimit —— 跟有限流的上游打交道的两件事:**主动限速的闸** + **被动兜底的重试**。
+// @folio/ratelimit —— 跟有限流的上游打交道的两件事:**按 key 限频的闸** + **认 Retry-After 的重试**。
 //
-// 用法:策略在模块顶层声明一次,`acquire()` 就地调。
+// 用法:闸在模块顶层声明一次,每个请求进它的闭包。
 //
-//   const limit = defineLimit({ key: "rabby", capacity: 1, ratePerSec: 8 });
-//   await limit.acquire();
+//   const gate = defineRateLimit({ key: "COINGECKO_API_KEY", limit: 80, interval: 60_000 });
+//   const rows = await gate(() => fetch(url).then((r) => r.json()));
 //
-// 数字不放这个包里 —— 各调用方自己的 constants.ts 说了算(原则 #8),因为限额是上游的属性。
+// 上游的限额数字**不在这个包里** —— 那是各调用方 constants.ts 的事,因为限额是上游的属性。
+//
+// 限速本身用 p-throttle(零依赖、维护中、workerd 实测可用);本包只加它不管的两件事:
+// 按 key 分队,和把队列钉在模块级(见 gate.ts:那条是正确性问题,不是实现细节)。
+// 重试仍是手写的 —— 没有库能在「Retry-After 超上限就放弃」和「包住非 HTTP 的领域调用」这两点
+// 上同时够用(ky 只做前者的夹紧版、且只包 HTTP;p-retry 读不到 Retry-After)。
 
-import { acquireFromBucket, fullKeyOf, resetBucketsForTests } from "./bucket";
-import { readCooldown, resetCooldownForTests, setLimitLogger, writeCooldown } from "./cooldown";
-import type { Limit, LimitPolicy } from "./types";
-
-export { setLimitLogger } from "./cooldown";
-export { RateLimitedError } from "./errors";
+export { bypassGatesForTests, defineRateLimit, resetGatesForTests } from "./gate";
 export { withRetry } from "./retry";
-export type {
-  CooldownStore,
-  Limit,
-  LimitLogger,
-  LimitPolicy,
-  LimitScope,
-  RetryInfo,
-  RetryOpts,
-} from "./types";
-
-const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-let defaultSleep = realSleep;
-
-// 仅测试用:清空所有桶与冷却标记。生产代码勿调。
-export function resetLimitsForTests(): void {
-  resetBucketsForTests();
-  resetCooldownForTests();
-  setLimitLogger(undefined);
-}
-
-// 仅测试用:把「等待」整体换成即时(不传 = 还原成真 setTimeout)。
-//
-// **为什么要一个全局开关,而不是各处传 sleep**:集成测试跑的是**应用的真实接线**
-// (apps/web 的 cgConfig → createCoinGeckoClient),那条路上没有、也不该有测试参数。
-// 不换掉的话闸会让那套测试真等 —— 无 key 档一发就是 6 秒。
-export function setSleepForTests(sleep?: (ms: number) => Promise<void>): void {
-  defaultSleep = sleep ?? realSleep;
-}
-
-export function defineLimit(policy: LimitPolicy): Limit {
-  // 立刻拒掉说不通的策略。**这不是防御性编程,是防一个静默故障**:`ratePerSec: 0` 会让间隔算成
-  // Infinity、突发额度算成 NaN,于是每次 acquire 的等待都是 NaN —— `NaN > 0` 为假,闸一次都不拦,
-  // 悄悄退化成没装。一个常量打错字就没了限速而且零信号,所以宁可在模块加载期就炸。
-  if (!Number.isFinite(policy.ratePerSec) || policy.ratePerSec <= 0) {
-    throw new Error(`ratelimit: ratePerSec must be a positive finite number (${policy.key})`);
-  }
-  if (!Number.isInteger(policy.capacity) || policy.capacity < 1) {
-    throw new Error(`ratelimit: capacity must be an integer >= 1 (${policy.key})`);
-  }
-  const clock = policy.clock ?? Date.now;
-  const sleep = policy.sleep ?? ((ms: number) => defaultSleep(ms));
-  // global 档(Durable Object 真配额)还没实现 —— 降级成 colo 并说一声,而不是假装限住了。
-  // 它只在「按 key 计费的上游 + 多用户同时同步」时才需要,自托管单用户碰不到(见 #17 M10.4)。
-  const effective: LimitPolicy =
-    policy.scope === "global" ? { ...policy, scope: "colo", log: policy.log } : policy;
-  if (policy.scope === "global") {
-    policy.log?.("ratelimit: scope 'global' is not implemented yet, falling back to 'colo'", {
-      key: policy.key,
-    });
-  }
-
-  return {
-    async acquire(subKey) {
-      const fullKey = fullKeyOf(policy.key, subKey);
-      // 冷却优先于桶:正在冷却就压根不该发,过完闸再拒是白等。
-      await readCooldown(effective, clock, fullKey);
-      const { waitMs } = acquireFromBucket(effective, clock, fullKey);
-      if (waitMs > 0) await sleep(waitMs);
-    },
-
-    async cooldown(ms, subKey) {
-      await writeCooldown(effective, clock, fullKeyOf(policy.key, subKey), ms);
-    },
-  };
-}
+export type { Gate, RateLimitOptions, RetryInfo, RetryOpts } from "./types";

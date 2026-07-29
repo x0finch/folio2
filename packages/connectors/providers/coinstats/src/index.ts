@@ -7,7 +7,7 @@ import {
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { defineLimit } from "@folio/ratelimit";
+import { defineRateLimit } from "@folio/ratelimit";
 import { z } from "zod";
 import {
   API_KEY_HEADER,
@@ -105,19 +105,12 @@ function getApiKey(creds: Record<string, string>): string {
   return apiKey;
 }
 
-// 速率闸。key 取**环境变量名**(不是 key 的值 —— 它会进日志属性),于是 sui / cosmos / solana
-// 三个 connector 各自 import 本模块也共享同一个桶 —— 这正是需要的:它们花的是同一把 key 的额度。
-// scope colo:撞了 429 之后同一个数据中心的 isolate 一起收手(见 @folio/ratelimit)。
-const limit = defineLimit({
+// 速率闸。key 取**环境变量名**(不是 key 的值 —— 它会进日志),于是 sui / cosmos / solana
+// 三个 connector 各自 import 本模块也共享同一个队 —— 这正是需要的:它们花的是同一把 key 的额度。
+const gate = defineRateLimit({
   key: COINSTATS_API_KEY,
-  scope: "colo",
-  capacity: RATE_LIMIT_BURST,
-  ratePerSec: RATE_LIMIT_PER_SEC,
-  onCooldown: (remainingMs) => {
-    throw new ProviderError("RATE_LIMITED", "coinstats cooling down after a rate limit", {
-      retryAfterMs: remainingMs,
-    });
-  },
+  limit: RATE_LIMIT_BURST,
+  interval: (RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000,
 });
 
 // 发起 CoinStats GET;每发都过速率闸。网络故障 → UPSTREAM_ERROR(可重试)。
@@ -128,15 +121,13 @@ async function coinstatsGet(
   apiKey: string,
 ): Promise<Response> {
   const url = `${COINSTATS_API_BASE}${BALANCE_PATH}?address=${encodeURIComponent(address)}&connectionId=${encodeURIComponent(connectionId)}`;
-  await limit.acquire();
-  let res: Response;
   try {
-    res = await fetch(url, { headers: { [API_KEY_HEADER]: apiKey, accept: "application/json" } });
+    return await gate(() =>
+      fetch(url, { headers: { [API_KEY_HEADER]: apiKey, accept: "application/json" } }),
+    );
   } catch (cause) {
     throw new ProviderError("UPSTREAM_ERROR", "coinstats request failed", { cause });
   }
-  if (res.status === 429) await limit.cooldown(parseRetryAfter(res.headers.get("retry-after")));
-  return res;
 }
 
 function ensureOk(res: Response): void {

@@ -1,13 +1,6 @@
 import { env } from "cloudflare:workers";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { setLimitLogger } from "@folio/ratelimit";
-import {
-  configure,
-  getConsoleSink,
-  getJsonLinesFormatter,
-  getLogger,
-  type LogLevel,
-} from "@logtape/logtape";
+import { configure, getConsoleSink, getJsonLinesFormatter, type LogLevel } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 
 // LogTape 一次性配置(worker 入口在处理 fetch/scheduled 前调用,幂等)。server-only(读 env)。
@@ -34,12 +27,4 @@ export async function configureLogging(): Promise<void> {
     ],
     contextLocalStorage: new AsyncLocalStorage(),
   });
-
-  // 限速层的报告接到日志上。**一处设置管所有闸** —— 它要说的那件事(「这个运行时的 Cache API
-  // 不生效,colo 档冷却是死的」)是运行时的属性,跟哪个上游无关。之前是让每个调用方把 logger
-  // 逐层透传进 defineLimit,结果五个闸里四个根本没传 —— 那条自检只会为 CoinGecko 响。
-  // `*.workers.dev` 上 Cache API 的 put/match 是静默 no-op(见 DEPLOY.md),没有这声就永远不知道。
-  setLimitLogger((message, properties) =>
-    getLogger(["folio", "ratelimit"]).warn(message, properties),
-  );
 }

@@ -3,7 +3,7 @@
 //   ① 注入 User-Agent —— CGK 的 Cloudflare WAF 对无 UA 请求返 403(Workers fetch 默认不带 UA)。
 //   ② 直接用全局 `fetch`(不存成方法/this,避免 Workers 的 illegal invocation)。
 
-import { defineLimit, type Limit, withRetry } from "@folio/ratelimit";
+import { defineRateLimit, type Gate, withRetry } from "@folio/ratelimit";
 import {
   CG_BURST,
   CG_CALLS_PER_MIN_DEMO,
@@ -75,26 +75,17 @@ export type Requester = (path: string, query?: Query, opts?: RequestOptions) => 
 //
 // scope 取 colo:撞墙之后同一个数据中心的 isolate 一起收手(冷却标记只止损、不管配额)。
 // 精确到「跨 colo 的一把 key」要 Durable Object,见 #17 —— 那一档在自托管量级用不上。
-function limitFor(config: CoinGeckoConfig): Limit {
+function gateFor(config: CoinGeckoConfig): Gate {
   const callsPerMin = config.pro
     ? CG_CALLS_PER_MIN_PRO
     : config.apiKey
       ? CG_CALLS_PER_MIN_DEMO
       : CG_CALLS_PER_MIN_KEYLESS;
-  return defineLimit({
+  return defineRateLimit({
     key: config.apiKey ? CG_LIMIT_KEY : CG_LIMIT_KEY_KEYLESS,
-    scope: "colo",
-    capacity: CG_BURST,
-    ratePerSec: callsPerMin / 60,
-    sleep: config.sleep,
-    // 「colo 档没生效」那类报告由 @folio/ratelimit 的模块级 logger 负责(app 设一次)——
-    // 那是运行时的属性,不是 CoinGecko 的,不该由每个调用方逐个透传进来。
-    // 冷却期内抛本包自己的错误类型 —— 调用方(oracle / oracle2)只认识 CoinGeckoError。
-    onCooldown: (remainingMs) => {
-      throw new CoinGeckoError("RATE_LIMITED", "coingecko cooling down after a rate limit", {
-        retryAfterMs: remainingMs,
-      });
-    },
+    limit: CG_BURST,
+    // 每 interval 放 CG_BURST 发 —— 换算成上游那个「每分钟多少次」的口径。
+    interval: (CG_BURST / (callsPerMin / 60)) * 1000,
   });
 }
 
@@ -104,37 +95,17 @@ function limitFor(config: CoinGeckoConfig): Limit {
 // 于是测重试时压根不用碰 fetch,测映射时压根不用碰闸。
 export function createRequester(config: CoinGeckoConfig = {}): Requester {
   const raw = createRawRequester(config);
-  const limit = limitFor(config);
+  const gate = gateFor(config);
 
-  return async (path, query, opts) => {
-    try {
-      return await withRetry(
-        async () => {
-          await limit.acquire(); // 冷却期内这里就抛,压根不出网
-          return raw(path, query, opts);
-        },
-        {
-          attempts: CG_RETRY_ATTEMPTS,
-          maxWaitMs: CG_RETRY_MAX_WAIT_MS,
-          baseMs: CG_RETRY_BASE_MS,
-          sleep: config.sleep,
-          // exceedsMaxWait 用默认的 "throw":这条路可能挂在用户的写路径上(见 constants.ts)。
-        },
-      );
-    } catch (error) {
-      // **冷却写在重试之外,不在里面。** 写在里面的话它会把自己那次重试也拦掉:冷却时长取
-      // Retry-After(缺了就取包里的保守默认 5s),而退避只有 250ms —— 于是重试永远撞在自己写下
-      // 的冷却上,一次都成功不了。
-      //
-      // 语义上外面也才是对的:冷却是**放弃信号**,不是第一次踉跄的信号。重试成功了的那一次
-      // 429 说明是瞬时抖动,没必要让别的调用者也停;连重试都没救回来才说明该集体收手。
-      // 由调用方显式写,包不去嗅探 Response(那会让 @folio/ratelimit 依赖 HTTP 语义)。
-      if (error instanceof CoinGeckoError && error.code === "RATE_LIMITED") {
-        await limit.cooldown(error.retryAfterMs);
-      }
-      throw error;
-    }
-  };
+  // **闸在重试里面**:重试也该排队,否则退避完立刻插队。
+  return (path, query, opts) =>
+    withRetry(() => gate(() => raw(path, query, opts)), {
+      attempts: CG_RETRY_ATTEMPTS,
+      maxWaitMs: CG_RETRY_MAX_WAIT_MS,
+      baseMs: CG_RETRY_BASE_MS,
+      sleep: config.sleep,
+      // exceedsMaxWait 用默认的 "throw":这条路可能挂在用户的写路径上(见 constants.ts)。
+    });
 }
 
 function createRawRequester(config: CoinGeckoConfig): Requester {

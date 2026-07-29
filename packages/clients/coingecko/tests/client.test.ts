@@ -1,4 +1,4 @@
-import { resetLimitsForTests } from "@folio/ratelimit";
+import { bypassGatesForTests, resetGatesForTests } from "@folio/ratelimit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type CoinGeckoConfig,
@@ -16,7 +16,11 @@ import {
 const newClient = (config: CoinGeckoConfig = {}) =>
   createCoinGeckoClient({ ...config, sleep: async () => {} });
 
-beforeEach(() => resetLimitsForTests());
+// 限速闸旁路:这个文件测的不是限频。闸的行为在 @folio/ratelimit 的单测里用假时钟验过,
+// 这里让它直接放行 —— 否则每个用例都要按窗口真等。
+bypassGatesForTests(true);
+
+beforeEach(() => resetGatesForTests());
 
 function mockFetch(res: Partial<Response> & { json?: () => Promise<unknown> }) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue(res as Response);

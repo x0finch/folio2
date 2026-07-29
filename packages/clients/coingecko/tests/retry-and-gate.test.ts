@@ -1,4 +1,4 @@
-import { resetLimitsForTests } from "@folio/ratelimit";
+import { resetGatesForTests } from "@folio/ratelimit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CG_BURST, CG_RETRY_MAX_WAIT_MS } from "../src/constants";
 import { type CoinGeckoError, createCoinGeckoClient } from "../src/index";
@@ -44,7 +44,7 @@ async function grabErr(p: Promise<unknown>): Promise<CoinGeckoError> {
   }
 }
 
-beforeEach(() => resetLimitsForTests());
+beforeEach(() => resetGatesForTests());
 afterEach(() => vi.restoreAllMocks());
 
 describe("重试", () => {
@@ -62,11 +62,6 @@ describe("重试", () => {
     const { client } = newClient();
     const err = await grabErr(client.assetPlatforms());
     expect(err.code).toBe("RATE_LIMITED");
-    expect(f).toHaveBeenCalledTimes(2);
-
-    // 而且这一下才写冷却(重试都没救回来 = 不是瞬时抖动)→ 下一发不出网。
-    const err2 = await grabErr(client.coinsList());
-    expect(err2.code).toBe("RATE_LIMITED");
     expect(f).toHaveBeenCalledTimes(2);
   });
 
@@ -135,73 +130,83 @@ describe("重试", () => {
 });
 
 describe("限速闸", () => {
-  it("突发额度用完之后请求被摊开,不挤在一起", async () => {
-    scriptedFetch([ok([])]);
-    const { client, slept } = newClient();
-    for (let i = 0; i < CG_BURST + 3; i++) await client.assetPlatforms();
-    // 头 CG_BURST 发不等,之后每发都等,而且越排越后
-    expect(slept).toHaveLength(3);
-    expect(slept[1]).toBeGreaterThan(slept[0]);
-    expect(slept[2]).toBeGreaterThan(slept[1]);
+  // 闸用假时钟验(p-throttle 用 setTimeout,fake timer 接得住);重试那几条不需要,所以只在这一组开。
+  it("突发额度用完之后请求被摊到后面的窗口", async () => {
+    vi.useFakeTimers();
+    try {
+      scriptedFetch([ok([])]);
+      const at: number[] = [];
+      const t0 = Date.now();
+      const client = createCoinGeckoClient({ apiKey: "k" });
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        at.push(Date.now() - t0);
+        return ok([]) as Response;
+      });
+      const runs = Promise.all(Array.from({ length: CG_BURST + 2 }, () => client.assetPlatforms()));
+      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(120_000);
+      await runs;
+
+      expect(at).toHaveLength(CG_BURST + 2);
+      expect(at.filter((t) => t === 0)).toHaveLength(CG_BURST); // 正好一个窗口的量
+      expect(new Set(at).size).toBeGreaterThan(1); // 其余被摊开
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("撞过 429 之后进入冷却 —— 后续调用立刻失败,不再打上游", async () => {
-    // 第一发 429(Retry-After 60s,超上限 → 直接抛),这一下写进冷却标记。
-    const f = scriptedFetch([tooMany("60")]);
-    const { client } = newClient();
-    await grabErr(client.assetPlatforms());
-    expect(f).toHaveBeenCalledTimes(1);
-
-    // 第二发压根不该出网:冷却期内闸直接拒。
-    const err = await grabErr(client.coinsList());
-    expect(err.code).toBe("RATE_LIMITED");
-    expect(f).toHaveBeenCalledTimes(1); // 没有新的出网请求
-  });
-
-  it("无 key 与有 key 是两份额度(前者按 IP 算)—— 闸不共用", async () => {
-    scriptedFetch([tooMany("60")]);
-    const keyed = createCoinGeckoClient({ apiKey: "k", sleep: async () => {} });
-    const keyless = createCoinGeckoClient({ sleep: async () => {} });
-    await grabErr(keyed.assetPlatforms()); // 让有 key 那份进冷却
-    // 无 key 那份不受影响 —— 它会真的出网(于是拿到同一个 429,而不是被冷却拦下)
-    scriptedFetch([ok([])]);
-    expect(await keyless.assetPlatforms()).toEqual([]);
+  it("无 key 与有 key 是两份额度(前者按 IP 算)—— 队不共用", async () => {
+    vi.useFakeTimers();
+    try {
+      const at: Array<{ keyed: boolean; at: number }> = [];
+      const t0 = Date.now();
+      const keyed = createCoinGeckoClient({ apiKey: "k" });
+      const keyless = createCoinGeckoClient();
+      let keyedTurn = true;
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        at.push({ keyed: String(input).includes("x-cg") || keyedTurn, at: Date.now() - t0 });
+        return ok([]) as Response;
+      });
+      // 有 key 那份把自己的额度抽干
+      const a = Promise.all(Array.from({ length: CG_BURST }, () => keyed.assetPlatforms()));
+      for (let i = 0; i < 2; i++) await vi.advanceTimersByTimeAsync(1000);
+      await a;
+      keyedTurn = false;
+      // 无 key 那份不受影响 —— 它自己那队还是空的,第一发不等
+      const before = Date.now();
+      const b = keyless.assetPlatforms();
+      await vi.advanceTimersByTimeAsync(0);
+      await b;
+      expect(Date.now()).toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
-describe("三个档位各走各的桶", () => {
-  // 三个 `CG_CALLS_PER_MIN_*` 里,pro 那个在别处一次都没被走到过 —— 补上,免得它是个从没执行过的分支。
-  it("pro 档的额度宽得多 → 同样的发数,demo 要等而 pro 不用", async () => {
-    scriptedFetch([ok([])]);
-    const demoWaits: number[] = [];
-    const demo = createCoinGeckoClient({
-      apiKey: "k",
-      sleep: async (ms) => void demoWaits.push(ms),
-    });
-    for (let i = 0; i < CG_BURST + 1; i++) await demo.assetPlatforms();
-    expect(demoWaits).toHaveLength(1);
-
-    resetLimitsForTests();
-    const proWaits: number[] = [];
-    const pro = createCoinGeckoClient({
-      apiKey: "k",
-      pro: true,
-      sleep: async (ms) => void proWaits.push(ms),
-    });
-    for (let i = 0; i < CG_BURST + 1; i++) await pro.assetPlatforms();
-    // 桶容量一样,所以第 CG_BURST+1 发同样要等 —— 但等得**短得多**(速率高)。
-    expect(proWaits).toHaveLength(1);
-    expect(proWaits[0]).toBeLessThan(demoWaits[0]);
-  });
-
-  it("pro 与 demo 共用同一把 key 的额度 → 同一个桶(pro 只是同一把 key 换了档)", async () => {
-    scriptedFetch([ok([])]);
-    const waits: number[] = [];
-    const sleep = async (ms: number) => void waits.push(ms);
-    const demo = createCoinGeckoClient({ apiKey: "k", sleep });
-    const pro = createCoinGeckoClient({ apiKey: "k", pro: true, sleep });
-    for (let i = 0; i < CG_BURST; i++) await demo.assetPlatforms();
-    await pro.assetPlatforms(); // 突发已被 demo 抽干 → pro 这发也得等
-    expect(waits).toHaveLength(1);
+describe("三个档位", () => {
+  // 三个 CG_CALLS_PER_MIN_* 里 pro 那个在别处一次都没被走到过 —— 至少让它执行一遍,
+  // 并钉住「pro 只是同一把 key 换了档,不是换了一份额度」。
+  it("pro 与 demo 共用同一把 key 的队(同 key 同队,档位只影响窗口长度)", async () => {
+    vi.useFakeTimers();
+    try {
+      const at: number[] = [];
+      const t0 = Date.now();
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        at.push(Date.now() - t0);
+        return ok([]) as Response;
+      });
+      const demo = createCoinGeckoClient({ apiKey: "k" });
+      const pro = createCoinGeckoClient({ apiKey: "k", pro: true });
+      const runs = Promise.all([
+        ...Array.from({ length: CG_BURST }, () => demo.assetPlatforms()),
+        pro.assetPlatforms(), // 突发已被 demo 抽干 → 这发得等下一个窗口
+      ]);
+      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(120_000);
+      await runs;
+      expect(at.filter((t) => t === 0)).toHaveLength(CG_BURST);
+      expect(new Set(at).size).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

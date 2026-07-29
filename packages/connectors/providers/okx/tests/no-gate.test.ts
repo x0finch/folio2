@@ -1,4 +1,4 @@
-import { resetLimitsForTests, setSleepForTests } from "@folio/ratelimit";
+import { bypassGatesForTests, resetGatesForTests } from "@folio/ratelimit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { okxProvider } from "../src";
 
@@ -6,14 +6,17 @@ import { okxProvider } from "../src";
 // 会顺手补一个上来。
 //
 // 判据是「有没有多个调用挤同一份额度」:okx 的额度按**账户自己那把 key** 算,而一次
-// fetchBalances 只发 1 个请求、不并发。桶永远是满的,闸一次都拦不到 —— 那是装饰,不是保护。
-// 而且加了还有害:两个账户会被塞进同一个桶白白串行化,它们本来花的是各自的额度。
+// fetchBalances 只发 1 个请求、不并发。队永远是空的,闸一次都拦不到 —— 那是装饰,不是保护。
+// 而且加了还有害:两个账户会被塞进同一个队白白串行化,它们本来花的是各自的额度。
+//
+// 怎么钉:闸旁路**关掉**(所以如果有闸,它会真的生效),然后连发很多次并断言全部挤在同一刻。
+// 有闸的话额度一用完就会出现第二个时刻。
 
 type Ctx = Parameters<typeof okxProvider.fetchBalances>[0];
-const ctx = (id = "a1"): Ctx =>
+const ctx = (): Ctx =>
   ({
     account: {
-      id,
+      id: "a1",
       label: "OKX",
       connectorId: "okx",
       creds: { apiKey: "k", secret: "s", passphrase: "p" },
@@ -21,33 +24,30 @@ const ctx = (id = "a1"): Ctx =>
     creds: {},
   }) as unknown as Ctx;
 
-beforeEach(() => resetLimitsForTests());
+beforeEach(() => {
+  bypassGatesForTests(false);
+  resetGatesForTests();
+  vi.useFakeTimers();
+});
 afterEach(() => {
-  setSleepForTests();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("okx 没有闸", () => {
-  it("连发很多次都不等 —— 一次 sleep 都不该发生", async () => {
-    const waits: number[] = [];
-    setSleepForTests(async (ms) => void waits.push(ms));
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      async () => new Response(JSON.stringify({ code: "0", data: [] }), { status: 200 }),
-    );
-    for (let i = 0; i < 20; i++) await okxProvider.fetchBalances(ctx());
-    expect(waits).toEqual([]);
-  });
-
-  it("撞了 429 也不进冷却 —— 下一发照样出网(错的是那把 key,不是共享额度)", async () => {
-    let calls = 0;
+  it("连发 20 次,全部在同一刻出去 —— 一次等待都没有", async () => {
+    const at: number[] = [];
+    const t0 = Date.now();
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      calls++;
-      return new Response("", { status: 429 });
+      at.push(Date.now() - t0);
+      return new Response(JSON.stringify({ code: "0", data: [] }), { status: 200 });
     });
-    await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
-    await expect(okxProvider.fetchBalances(ctx("a2"))).rejects.toMatchObject({
-      code: "RATE_LIMITED",
-    });
-    expect(calls).toBe(2); // 第二发真的出网了,不是被冷却拦下的
+
+    const runs = Promise.all(Array.from({ length: 20 }, () => okxProvider.fetchBalances(ctx())));
+    for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(60_000);
+    await runs;
+
+    expect(at).toHaveLength(20);
+    expect(new Set(at).size).toBe(1); // 有闸就会有第二个时刻
   });
 });
