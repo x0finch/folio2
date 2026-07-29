@@ -1,6 +1,7 @@
 import { syncAllUsers } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
+import { withDefaultNoStore } from "./lib/server/internal/cache-headers";
 import { db } from "./lib/server/internal/db";
 import { configureLogging } from "./lib/server/internal/log";
 import { oracleWarm } from "./lib/server/internal/oracle2";
@@ -36,7 +37,10 @@ const serverEntry = createServerEntry({
   fetch: async (request) => {
     await configureLogging();
     try {
-      return await handler.fetch(request);
+      // 出口统一补「不可缓存」的默认档 —— SSR 文档和 server fn 响应都从这里出去,而 CF 的
+      // 边缘缓存键不含 Cookie,漏一个就会把某个用户的页面发给另一个用户(见 cache-headers.ts)。
+      // 放在这里而不是各路由里:安全默认必须在**唯一出口**上,否则新加的路由默认是漏的。
+      return withDefaultNoStore(await handler.fetch(request));
     } catch (err) {
       // 顶层兜底:SSR/loader 等非 server-fn 路径抛错不过 requireAuth,不打就无处可见。
       // 只记 pathname(不带 query,守 P6.7)。
