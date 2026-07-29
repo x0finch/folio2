@@ -15,7 +15,8 @@
     "@folio/connectors-basic": "workspace:*",
     "@folio/db": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
-    "@folio/oracle-ref": "workspace:*"
+    "@folio/oracle-ref": "workspace:*",
+    "@folio/ratelimit": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260626.1",

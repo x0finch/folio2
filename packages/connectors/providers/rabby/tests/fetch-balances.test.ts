@@ -1,7 +1,7 @@
 import type { Balance, BalanceProvider } from "@folio/connectors-basic";
 import { ProviderError } from "@folio/connectors-basic";
+import { resetLimitsForTests } from "@folio/ratelimit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetGateForTests } from "../src/gate";
 import tokenList from "./fixtures/cache-token-list.json";
 import chainList from "./fixtures/chain-list.json";
 import protocolList from "./fixtures/complex-protocol-list.json";
@@ -56,7 +56,7 @@ const okRoutes = () => ({
 
 beforeEach(() => {
   resetChainIdsCacheForTests();
-  resetGateForTests();
+  resetLimitsForTests();
   signRabbyRequest.mockClear();
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -137,7 +137,7 @@ describe("fetchBalances", () => {
     await provider.fetchBalances(ctx());
     // 让链清单从此 500,余额仍应取到
     stubFetch({ ...okRoutes(), "/v1/chain/list": () => new Response("", { status: 500 }) });
-    resetGateForTests();
+    resetLimitsForTests();
     // 缓存未过期时压根不会打链清单;这里把它当"过期后刷新失败"来验 —— 直接调即可,
     // 因为 24h 内走缓存分支,失败路径由下一条用例(强制过期)覆盖。
     const { balances } = await provider.fetchBalances(ctx());

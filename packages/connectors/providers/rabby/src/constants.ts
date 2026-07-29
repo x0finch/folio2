@@ -1,5 +1,8 @@
 // Rabby provider 常量(不硬编码散落进逻辑,见原则 #8)。
 
+// provider id。也是速率闸的 key —— rabby 的额度跟签名走,所有账户共用同一份。
+export const PROVIDER_ID = "rabby";
+
 export const RABBY_API_BASE = "https://api.rabby.io";
 
 // —— 端点 ——
