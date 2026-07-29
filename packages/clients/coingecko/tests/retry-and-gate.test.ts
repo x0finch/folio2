@@ -55,6 +55,21 @@ describe("重试", () => {
     expect(f).toHaveBeenCalledTimes(2);
   });
 
+  it("两次都 429 → 才对外抛,而且只抛一次", async () => {
+    // 验收单上那句「只对外抛一次失败(第二次也 429 才抛)」的字面意思。上面那条测的是第二次
+    // 成功;这条测第二次也撞 —— 两次都 429 才轮到调用方看见失败。
+    const f = scriptedFetch([tooMany("1"), tooMany("1")]);
+    const { client } = newClient();
+    const err = await grabErr(client.assetPlatforms());
+    expect(err.code).toBe("RATE_LIMITED");
+    expect(f).toHaveBeenCalledTimes(2);
+
+    // 而且这一下才写冷却(重试都没救回来 = 不是瞬时抖动)→ 下一发不出网。
+    const err2 = await grabErr(client.coinsList());
+    expect(err2.code).toBe("RATE_LIMITED");
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
   it("Retry-After 超过上限 → 不等,立刻抛,且带着 retryAfterMs 供调用方决策", async () => {
     const f = scriptedFetch([tooMany("60")]); // 60s ≫ 2s 上限
     const { client, slept } = newClient();

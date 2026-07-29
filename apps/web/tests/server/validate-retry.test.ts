@@ -79,6 +79,22 @@ describe("现状:provider 把一切压成 false,于是重试触发不了", () =>
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  it("反面:provider 抛**不可重试**的错误 → 一次都不重试(用户填错了,等也没用)", async () => {
+    // 验收单上这条今天在 app 这一层造不出来(没有 provider 会抛),所以直接验这一层用的那组参数:
+    // 默认判据只认 `retryable === true`,`INVALID_CREDENTIALS` 那种不带这个标记的一次都不重。
+    // 规则层面的覆盖在 packages/ratelimit/tests/retry.test.ts。
+    const { withRetry } = await import("@folio/ratelimit");
+    let calls = 0;
+    const rejected = async () => {
+      calls++;
+      throw Object.assign(new Error("INVALID_CREDENTIALS"), { retryable: false });
+    };
+    await expect(
+      withRetry(rejected, { attempts: 2, maxWaitMs: 1500, baseMs: 1, sleep: async () => {} }),
+    ).rejects.toThrow(/INVALID_CREDENTIALS/);
+    expect(calls).toBe(1);
+  });
+
   it("但只要 provider 肯抛 retryable 错误,这一层立刻就会重试", async () => {
     // 直接验 withRetry 那一层的接线:manual connector 没有 provider(探活直接放行),所以拿
     // evm 那条路没法造出「抛错的 provider」——用一个抛 retryable 错的假调用证明参数是对的。
