@@ -173,3 +173,30 @@ describe("provider 形状", () => {
     expect(rabbyProvider.validateCreds).toBeUndefined();
   });
 });
+
+describe("撞了限流之后进冷却", () => {
+  // **rabby 比别的 provider 更需要这个**:它的限流是累积的 —— 实测 20 并发丢 5 发,紧接着
+  // 第二轮 14 发丢 12。撞过之后继续打只会让恢复更慢,所以撞一次就该整体收手。
+  it("429 之后下一发压根不出网,直接拿 RATE_LIMITED", async () => {
+    const { fn } = stubFetch({
+      ...okRoutes(),
+      "/v1/chain/list": () => new Response("", { status: 429 }),
+    });
+    await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
+    const before = fn.mock.calls.length;
+
+    // 换一个还没缓存的路径也一样 —— 冷却挂在这份额度上,不挂在某个端点上。
+    const err = await provider.fetchBalances(ctx()).catch((e) => e);
+    expect(err.code).toBe("RATE_LIMITED");
+    expect(err.retryable).toBe(true);
+    expect(fn.mock.calls.length).toBe(before); // 一发都没新增
+  });
+
+  it("正常响应不会误进冷却(免得上面那条是靠「什么都冷却」通过的)", async () => {
+    const { fn } = stubFetch(okRoutes());
+    await provider.fetchBalances(ctx());
+    const before = fn.mock.calls.length;
+    await provider.fetchBalances(ctx());
+    expect(fn.mock.calls.length).toBeGreaterThan(before);
+  });
+});

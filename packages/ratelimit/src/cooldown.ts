@@ -35,11 +35,18 @@ let probe: ProbeState = "unknown";
 let storePromise: Promise<CooldownStore | undefined> | undefined;
 const warned = new Set<string>();
 
+// 缓存 key 里的一段「代」号。**这不是花活,是让重置真的有效**:清内存 Map 清不掉已经写进
+// Cache API 的条目(那是真缓存,没有清空接口),于是在 workerd 里跑的测试会被上一个用例
+// 留下的冷却污染 —— 而且只有真撞过 429 的用例才会暴露。改代号让旧条目直接找不到,
+// 比逐个删干净、也比让测试各用不同的 key 干净(生产 key 是固定的,测试没法换)。
+let generation = 0;
+
 export function resetCooldownForTests(): void {
   coolUntilByKey.clear();
   probe = "unknown";
   storePromise = undefined;
   warned.clear();
+  generation++;
 }
 
 function warnOnce(policy: LimitPolicy, tag: string, message: string): void {
@@ -49,7 +56,8 @@ function warnOnce(policy: LimitPolicy, tag: string, message: string): void {
 }
 
 function urlFor(fullKey: string): string {
-  return `${COOLDOWN_URL_PREFIX}${encodeURIComponent(fullKey)}`;
+  const suffix = generation === 0 ? "" : `?g=${generation}`;
+  return `${COOLDOWN_URL_PREFIX}${encodeURIComponent(fullKey)}${suffix}`;
 }
 
 async function resolveStore(policy: LimitPolicy): Promise<CooldownStore | undefined> {

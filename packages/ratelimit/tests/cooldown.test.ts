@@ -100,19 +100,24 @@ describe("冷却标记(colo 档)", () => {
     await expect(make("a").acquire()).rejects.toBeInstanceOf(RateLimitedError);
   });
 
-  it("冷却写在缓存里 → 另一个 isolate(另一份桶状态)也收手", async () => {
-    const cache = fakeCache();
-    const policy = {
+  it("冷却只躺在缓存里(本地没有)→ 照样收手,这才是「另一个 isolate 也停」", async () => {
+    // 直接给一个「缓存里已经有冷却」的假货:本 isolate 的内存里什么都没写过,冷却完全来自
+    // 共享缓存 —— 这正是另一个 isolate 撞了 429 之后,我们该看到的样子。
+    const foreign: CooldownStore = {
+      match: async () => new Response(String(4000)), // 别人写的:冷却到 4000
+      put: async () => {},
+    };
+    const limit = defineLimit({
       key: "k",
-      scope: "colo" as const,
+      scope: "colo",
       capacity: 1,
       ratePerSec: 8,
-      clock: at(0),
-      cache,
-    };
-    await defineLimit(policy).cooldown(5000);
-    resetLimitsForTests(); // 模拟换了个 isolate:桶和本地冷却都没了,只剩共享缓存
-    await expect(defineLimit(policy).acquire()).rejects.toBeInstanceOf(RateLimitedError);
+      clock: at(1000),
+      cache: foreign,
+    });
+    const err = await limit.acquire().catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.retryAfterMs).toBe(3000);
   });
 
   it("冷却期内再写「剩余时长」不续期 —— 否则每次被拒都续,冷却永远不结束", async () => {
@@ -316,5 +321,26 @@ describe("坏输入 / 坏缓存 —— 每个 catch 都得有人踩过", () => {
     await limit.cooldown(ms);
     const err = await limit.acquire().catch((e) => e);
     expect(err.retryAfterMs).toBe(COOLDOWN_DEFAULT_MS);
+  });
+});
+
+describe("resetLimitsForTests 必须真的能重置", () => {
+  it("清得掉已经写进缓存的冷却 —— 不然 workerd 里的测试会被上一个用例污染", async () => {
+    // 真 Cache API 没有清空接口,所以这里靠换缓存 key 的「代」号让旧条目找不到。
+    // 这条用**保留内容的假缓存**来验:重置之后必须放行,哪怕那条旧记录还躺在缓存里。
+    const cache = fakeCache();
+    const policy = {
+      key: "k",
+      scope: "colo" as const,
+      capacity: 1,
+      ratePerSec: 8,
+      clock: at(0),
+      cache,
+    };
+    await defineLimit(policy).cooldown(5000);
+    await expect(defineLimit(policy).acquire()).rejects.toBeInstanceOf(RateLimitedError);
+
+    resetLimitsForTests();
+    await expect(defineLimit(policy).acquire()).resolves.toBeUndefined();
   });
 });
