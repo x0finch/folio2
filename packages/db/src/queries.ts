@@ -11,8 +11,10 @@ import {
   type InferSelectModel,
   inArray,
   max,
+  or,
   sql,
 } from "drizzle-orm";
+import { batchWrite } from "./cache-util";
 import { type Db, type DbEnv, getDb } from "./client";
 import {
   accountGroups,
@@ -695,6 +697,9 @@ export interface ManualActivityInput {
   fee?: number | null; // 手续费 USD(可空;不参与折叠)
   occurredAt: number;
   memo?: string | null; // 用户手写备注(原 note;note 让给 provider 展示概念)
+  // 仅导入用:保留原 created_at,好让同一 occurred_at 的活动折叠顺序(deriveAmount)不被打乱。
+  // 常规写入不传 → 用当下时刻。
+  createdAt?: number;
 }
 export type ManualActivity = InferSelectModel<typeof manualActivity>;
 
@@ -721,7 +726,7 @@ export async function recordManualActivity(
     fee: input.fee ?? null,
     occurredAt: input.occurredAt,
     memo: input.memo ?? null,
-    createdAt: Date.now(),
+    createdAt: input.createdAt ?? Date.now(),
   });
 }
 
@@ -755,6 +760,129 @@ export function listManualActivityByAccount(
     .innerJoin(accounts, eq(manualActivity.accountId, accounts.id))
     .where(and(eq(manualActivity.accountId, accountId), eq(accounts.userId, userId)))
     .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt));
+}
+
+// 导出用:该用户全部手记活动(跨账户,扁平)。userId-scoped 经 account ⨝ user。
+// accountId / tokenId 都是导出侧的旧 id,导入时按各自的重映射改指。
+export function listManualActivityByUser(env: DbEnv, userId: string): Promise<ManualActivity[]> {
+  return getDb(env)
+    .select(getTableColumns(manualActivity))
+    .from(manualActivity)
+    .innerJoin(accounts, eq(manualActivity.accountId, accounts.id))
+    .where(eq(accounts.userId, userId))
+    .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt));
+}
+
+// ---------- 导出/导入 v3(#204):Token 行 + 其 ref 随文件走 ----------
+
+// 导出一个用户的 Token(ref 嵌在里头)。**价 facet 与 TTL 不导** —— 市场数据可重取;
+// `self_price` 也不导 —— 迁移 0016 后它已无写者(手记声明价在账本的 `price` 列,随活动导)。
+export interface ExportToken {
+  id: string;
+  symbol: string;
+  name: string;
+  logo: string | null;
+  providerLogo: string | null;
+  marketCapRank: number | null;
+  refs: { namer: string; localName: string }[];
+}
+
+export async function listTokensForExport(env: DbEnv, userId: string): Promise<ExportToken[]> {
+  const db = getDb(env);
+  const rows = await db
+    .select({
+      id: tokens.id,
+      symbol: tokens.symbol,
+      name: tokens.name,
+      logo: tokens.logo,
+      providerLogo: tokens.providerLogo,
+      marketCapRank: tokens.marketCapRank,
+    })
+    .from(tokens)
+    .where(eq(tokens.userId, userId))
+    .orderBy(asc(tokens.id));
+  if (rows.length === 0) return [];
+  const refRows = await db
+    .select({ tokenId: tokenRefs.tokenId, namer: tokenRefs.namer, localName: tokenRefs.localName })
+    .from(tokenRefs)
+    .where(eq(tokenRefs.userId, userId));
+  const byToken = new Map<string, { namer: string; localName: string }[]>();
+  for (const r of refRows) {
+    const ref = { namer: r.namer, localName: r.localName };
+    const arr = byToken.get(r.tokenId);
+    if (arr) arr.push(ref);
+    else byToken.set(r.tokenId, [ref]);
+  }
+  return rows.map((t) => ({ ...t, refs: byToken.get(t.id) ?? [] }));
+}
+
+export interface ImportTokenInput {
+  symbol: string;
+  name: string;
+  logo?: string | null;
+  providerLogo?: string | null;
+  marketCapRank?: number | null;
+}
+
+// 导入一个 Token:**find-or-create**。它的任一 ref 已在本地映射到某 Token → 复用那行(把缺的 ref
+// 补挂过去);否则新建一行(新 id,不跟本地已有撞)+ 挂上全部 ref。返回最终 token_id,供调用方建
+// old→new 映射。空库导入是最常见路径:恒无命中 → 每个 Token 各建新行。
+// ref 插入用无目标 onConflict:PK(user_id,namer,local_name)与唯一索引(user_id,token_id,namer)任一撞了都静默。
+export async function importToken(
+  env: DbEnv,
+  userId: string,
+  t: ImportTokenInput,
+  refs: readonly { namer: string; localName: string }[],
+  now: () => number = Date.now,
+): Promise<string> {
+  const db = getDb(env);
+  const refStmt = (tokenId: string, r: { namer: string; localName: string }) =>
+    db
+      .insert(tokenRefs)
+      .values({ userId, namer: r.namer, localName: r.localName, tokenId })
+      .onConflictDoNothing();
+
+  if (refs.length > 0) {
+    const hit = await db
+      .select({ tokenId: tokenRefs.tokenId })
+      .from(tokenRefs)
+      .where(
+        and(
+          eq(tokenRefs.userId, userId),
+          or(
+            ...refs.map((r) =>
+              and(eq(tokenRefs.namer, r.namer), eq(tokenRefs.localName, r.localName)),
+            ),
+          ),
+        ),
+      )
+      .limit(1);
+    const target = hit[0]?.tokenId;
+    if (target) {
+      // 复用已有 Token:把它还没有的 ref 补挂过去(撞约束的静默跳过)。
+      await batchWrite(
+        db,
+        refs.map((r) => refStmt(target, r)),
+      );
+      return target;
+    }
+  }
+
+  const id = crypto.randomUUID();
+  await batchWrite(db, [
+    db.insert(tokens).values({
+      id,
+      userId,
+      symbol: t.symbol,
+      name: t.name,
+      logo: t.logo ?? null,
+      providerLogo: t.providerLogo ?? null,
+      marketCapRank: t.marketCapRank ?? null,
+      infoExpiresAt: now(), // 建行即 stale → 下次刷价/刷图补齐 name/logo/价
+    }),
+    ...refs.map((r) => refStmt(id, r)),
+  ]);
+  return id;
 }
 
 export async function removeManualActivity(

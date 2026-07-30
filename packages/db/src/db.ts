@@ -50,11 +50,15 @@ export function createDb(env: DbEnv) {
     detachManualHolding: b(q.detachManualHolding),
     recordManualActivity: b(q.recordManualActivity),
     listManualActivityByAccount: b(q.listManualActivityByAccount),
+    listManualActivityByUser: b(q.listManualActivityByUser),
     listManualActivityByToken: b(q.listManualActivityByToken),
     removeManualActivity: b(q.removeManualActivity),
     getManualActivityOwner: b(q.getManualActivityOwner),
     updateManualActivity: b(q.updateManualActivity),
     commitManualBatch: b(q.commitManualBatch),
+    // —— 导出/导入 v3(#204)——
+    listTokensForExport: b(q.listTokensForExport),
+    importToken: b(q.importToken),
     // —— user settings(Phase 3)——
     getUserSettings: b(q.getUserSettings),
     updateUserSettings: b(q.updateUserSettings),

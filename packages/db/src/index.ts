@@ -14,6 +14,8 @@ export type {
   AccountRawCreds,
   CreateAccountInput,
   CreateGroupInput,
+  ExportToken,
+  ImportTokenInput,
   ManualActivity,
   ManualActivityInput,
   ManualActivityKind,
