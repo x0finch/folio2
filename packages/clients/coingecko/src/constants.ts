@@ -3,8 +3,15 @@ export const CG_BASE_FREE = "https://api.coingecko.com/api/v3";
 export const CG_BASE_PRO = "https://pro-api.coingecko.com/api/v3";
 export const HEADER_DEMO = "x-cg-demo-api-key";
 export const HEADER_PRO = "x-cg-pro-api-key";
-// **必须注入 UA** —— CGK 的 Cloudflare WAF 对无 UA 请求返 403,而 Workers 的 fetch 默认不带。
-export const USER_AGENT = "folio-portfolio-tracker/1.0 (+https://github.com/x0finch/folio)";
+// **刻意中性:不带项目名、不带仓库地址。**
+// 这些请求打的是第三方(Trezor 的公共节点、CoinGecko),而请求内容本身就是敏感的 ——
+// blockbook 那条带着 **xpub**(整个钱包的观察密钥)。UA 里写上「这是某某项目、作者在这个
+// GitHub」等于把「谁在看这个地址」和一个具体的人绑在一起,而且让所有自托管实例可被归成一类。
+//
+// **不能直接不发**:CGK 的 Cloudflare WAF 对无 UA 请求返 403(Workers 的 fetch 默认不带 UA),
+// 这是仓库里记着的坑。所以给一个最常见、什么都不说的值 —— 它是「未指明客户端」的事实标准,
+// 过 WAF 没问题,而且因为太常见反而不构成指纹。
+export const USER_AGENT = "Mozilla/5.0";
 
 // 限速与重试的数字(原则 #8)。**每个都写出处** —— 猜一个看起来合理的数字然后不留痕迹,
 // 比不填更糟:太紧白白变慢(搜索/选币下拉是用户输入时打的),太松等于没装。

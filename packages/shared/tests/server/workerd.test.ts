@@ -57,9 +57,11 @@ describe("运行时承诺", () => {
       Array.from({ length: 4 }, () => gate(async () => void at.push(Date.now() - t0))),
     );
     at.sort((a, b) => a - b);
-    expect(at[0]).toBeLessThan(INTERVAL / 2); // 第一发不等
+    // **只断言相邻两发的间距**,不断言「第一发在多少毫秒内出去」—— 那是一条绝对延迟断言,
+    // 在全量并行跑时会被机器负载顶穿(实测偶发),而且它也不是这一档要验的东西:
+    // 「第一发不等」在 node 那档用注入时钟确定性地验过了。这里要验的是**真定时器真的会摊开**。
     for (let i = 1; i < at.length; i++) {
-      expect(at[i] - at[i - 1]).toBeGreaterThan(INTERVAL * 0.6); // 后面每发各占一个窗口
+      expect(at[i] - at[i - 1]).toBeGreaterThan(INTERVAL * 0.6);
     }
   });
 
