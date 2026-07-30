@@ -1,5 +1,3 @@
-import type { ProviderAsset } from "@folio/oracle";
-import { parseTokenRef } from "@folio/oracle-ref";
 import type { TokenRecord } from "@folio/oracle2";
 import { isFungible, viewKind } from "./balance-kind";
 import { tokenLogoUrl } from "./logo";
@@ -53,24 +51,6 @@ export function displayTokenIds(rows: readonly BalanceLike[]): string[] {
   return [
     ...new Set(rows.flatMap((b) => (displayTokenId(b) ? [displayTokenId(b) as string] : []))),
   ];
-}
-
-// provider 自带代币元信息的采集:合约形 tokenRef 的行 → ProviderAsset,喂 tokens.noteProviderAssets
-// (seed 孤儿 / 刷新备用 logo)。判据就是 ref 的形状(`contract:` 标记,ADR 0020 第三轮)。
-//
-// **放错一行的后果不对称**:少 seed 一个合约,只是那个币暂时没 provider 名/图;多 seed 一个场馆
-// 命名(binance/USDC),那些行会卡在无价的孤儿上、不再掉回 symbol 消歧 —— 交易所持仓集体失去价格。
-// 这道筛子是老 oracle 孤儿机制的一部分,随它一起退场(#202)。
-// logo/name 只在取数瞬时存在,不落快照行 —— 参考层是其 home。
-export function toProviderAssets(
-  rows: readonly (BalanceLike & { name?: string; logo?: string })[],
-): ProviderAsset[] {
-  const out: ProviderAsset[] = [];
-  for (const b of rows) {
-    if (!b.tokenRef || parseTokenRef(b.tokenRef).kind !== "contract") continue;
-    out.push({ tokenId: b.tokenRef, symbol: b.symbol, name: b.name, logo: b.logo });
-  }
-  return out;
 }
 
 // logo 优先源给的那张(视觉统一,warm 缓存零边际配额),缺则回退连接器自带图(备用槽);

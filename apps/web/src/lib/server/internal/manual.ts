@@ -5,9 +5,8 @@ import type {
   ManualHolding,
   SnapshotWithBalances,
 } from "@folio/db";
-import { dayBucketOf } from "@folio/oracle";
 import { tokenRef } from "@folio/oracle-ref";
-import { tokenTicket } from "@folio/oracle2";
+import { dayBucketOf, tokenTicket } from "@folio/oracle2";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
 import { deriveAmount, fallbackUnitPrice, projectToken } from "../../manual-activity";
@@ -21,7 +20,6 @@ import {
 import { buildManualSnapshot } from "../../manual-snapshot";
 import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
-import { oracle } from "./oracle";
 import { NAMER, oracleFor } from "./oracle2";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
@@ -138,23 +136,19 @@ export async function injectManualSnapshots(
   const list = await manualTokensByAccount(userId, accounts);
   if (list.length === 0) return;
 
-  // 全部账户**一次批量**取现价(cache-only,与 deriveLiveAccountTotals 同门,避免逐账户串行 D1 往返),
-  // 再按账户切回各自的价重建。手记仍走**旧参考层**(#203 才并入 tokens),旧 enrich 收 `AssetRef`。
+  // 全部账户**一次批量**取现价(cache-only,零网络,与其余展示富化同门 —— #202 拔掉旧
+  // `oracle.tokens.enrich(AssetRef[])`,改按 token_id 走新参考层 enrich)。手记已并入 tokens(#203),
+  // 每条手记持仓就是这个用户 `tokens` 里的一行,带自己的 token_id。
   //
-  // **只问「有上游 ref」的那些,没有的传 null**(#223 / #227)。以前这里问的是合成余额上那条
-  // tokenRef —— 没选币时它是 `manual/custom:<名字>`,而旧 `resolveAsset` 对任何形状都会掉回
-  // symbol 猜(它没有 `hasTrustedSymbol` 那道闸),于是用户手敲的 `USDC` 又被认成真 USDC,
-  // 拿回市价 $1 覆盖掉他自己填的单价。写路径早就不合并了,可展示这一侧照旧按市价盯 —— 实测过。
-  // `enrich` 对 null 是原位对齐的(见 lookupAll),所以传 null 就是「这条不要价」,
-  // 而 buildManualSnapshot 在没价时正好回退到用户填的 `unitPrice`。
-  const enriched = await oracle.tokens.enrich(
-    list.flatMap(({ tokens }) =>
-      tokens.map((t) => (t.ref ? { symbol: t.symbol, tokenRef: t.ref } : null)),
-    ),
+  // **缓存冷 → 回退用户自填价**:enrich 是 cache-only,新 mint 的行「有身份、无价」→ prices 为
+  // undefined → buildManualSnapshot 回退 `unitPrice`;价在同步的 warmHeldPrices / 前端 refreshStalePrices
+  // 里补上,补上后展示即市价。**用户自填价不被市价盖**(#223 / #227):没选币的币其 token 行 `ref`
+  // 为空、从不链 CGK,永远回不出市价,自填价恒赢。
+  const enriched = await oracleFor(userId).tokens.enrich(
+    list.flatMap(({ tokens }) => tokens.map((t) => t.id)),
   );
-  let i = 0;
   for (const { id, tokens } of list) {
-    const prices = tokens.map(() => enriched[i++]?.unitPrice);
+    const prices = tokens.map((t) => enriched.get(t.id)?.price?.unitPrice);
     byAccount.set(id, buildManualSnapshot(id, tokens, prices, takenAt));
   }
 }

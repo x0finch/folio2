@@ -1,4 +1,3 @@
-import type { Tokens as LegacyTokens } from "@folio/oracle";
 import type { Tokens } from "@folio/oracle2";
 import {
   type BalanceLike,
@@ -39,14 +38,11 @@ export async function enrichBalances<T extends BalanceLike>(
   return { rows, pricesStale };
 }
 
-// 预热(写缓存,best-effort):刷新 top-N + 逐行懒解析(合约懒解析入缓存)。
-// cron(waitUntil)与手动 sync 后调用。
+// 持仓价预热(写缓存,best-effort):把这批余额里价 stale/缺失的一次批量回源写回。
+// cron(waitUntil)与手动 sync 后调用 —— cron 尤其需要,它没有前端来触发 pricesStale 那条刷价路径。
 //
-// **仍走旧参考层** —— 预热属于写路径,连同 revalue 与手记一起在 #202 / #203 切过去。
-// 旧的 `warm` 收 `AssetRef`(symbol + tokenRef),所以这里就地拼:lib/tokens 那几个门已经全部
-// 改成返回 token_id,借不到了。
-export async function warmTokens(tokens: LegacyTokens, balances: BalanceLike[]): Promise<void> {
-  await tokens.warm(
-    balances.map((b) => (b.tokenRef ? { symbol: b.symbol, tokenRef: b.tokenRef } : null)),
-  );
+// 走新参考层的 `refreshStalePrices`(按 token_id;#202 拔掉旧 `Tokens.warm(AssetRef[])`)。
+// 与 enrich / 客户端 refreshStalePrices 三门同源:都喂 `displayTokenIds` 出来的同一集合(见 lib/tokens)。
+export async function warmHeldPrices(tokens: Tokens, balances: BalanceLike[]): Promise<void> {
+  await tokens.refreshStalePrices(displayTokenIds(balances));
 }

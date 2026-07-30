@@ -1,5 +1,6 @@
 // @folio/oracle2-basic —— 代币参考层的契约与数据:类型 + 端口(`*Store` 本地 / `*Upstream` 出网)
-// + 常量。**无逻辑函数** —— 符号消歧策略 / 缓存编排 / 预热服务在 @folio/oracle2(entry)。
+// + 常量。**唯一例外是 `valuate`** —— 它是纯函数、client 安全,读路径要在客户端 bundle 里用,
+// 只能住这里;符号消歧策略 / 缓存编排 / 预热服务这些带 IO 的仍在 @folio/oracle2(entry)。
 // 上游实现(@folio/oracle2-upstream-coingecko)依赖本包的契约面。
 //
 // **这一层不许出现任何数据源的名字**,dependencies 只有 `@folio/oracle-ref`(文法);
@@ -59,3 +60,5 @@ export type {
   TokenUpstream,
   UpstreamToken,
 } from "./upstream";
+// 估值优先级纯函数 + 模式(Phase 3)。client 安全,故住 basic 而非 entry(见文件头注)。
+export { type ValuationMode, valuate } from "./valuate";
