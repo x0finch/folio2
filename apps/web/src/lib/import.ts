@@ -75,7 +75,9 @@ export interface ImportDeps {
   importManualActivity(accountId: string, tokenId: string, input: ImportActivity): Promise<void>;
 }
 
-interface ImportCounts {
+// 一次导入各类实体的写入计数。**路由把它原样回给客户端**(`{ imported: counts }`),
+// 故导出:客户端的 importData 复用它当返回类型(见 import-data.ts),不另起一份。
+export interface ImportCounts {
   tokens: number;
   accounts: number;
   groups: number;

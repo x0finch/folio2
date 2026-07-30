@@ -23,6 +23,7 @@ import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { signOut } from "../../lib/auth-client";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
+import { importData } from "../../lib/import-data";
 import {
   getDataStats,
   getProviderKeyStatus,
@@ -267,15 +268,9 @@ function DataCard({ hasData }: { hasData: boolean }) {
   // 导入是「选了文件才发生一次的写」——用 useMutation 而非手搓 msg/error/busy 三个 state:
   // isPending 是单一事实源(直接接到 input/按钮的 disabled 上),连点两次也只跑一个;
   // 成功/失败各自的文案直接读 data/error,后回来的请求不会覆写前一条的状态(#241)。
-  // 传的是文件本体(body: file),故走 /api/import 路由而非 server function(二进制不必先 base64)。
+  // 传输层抽在 lib/import-data(与仓里其它 mutation 一样调具名函数,不把 fetch 铺在组件里)。
   const importMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const res = await fetch("/api/import", { method: "POST", body: file });
-      if (!res.ok) throw new Error(await res.text());
-      return (await res.json()) as {
-        imported: { accounts: number; groups: number; snapshots: number };
-      };
-    },
+    mutationFn: importData,
     onSuccess: () => router.invalidate(), // 刷新列表读路径
     onSettled: clearInput, // 成败都清:让同一个文件能再选一次
   });
