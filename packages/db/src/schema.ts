@@ -141,8 +141,11 @@ export const snapshotBalances = sqliteTable(
 export const tokens = sqliteTable("tokens", {
   id: text("id").primaryKey(), // UUID
   // 归属用户(ADR 0021 / #199 expand):代币表转 per-user —— 「他认识哪些币、他的币叫什么名」
-  // 是用户私有数据。expand 期可空(旧的全局行没有值),#202 改必填。
-  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+  // 是用户私有数据。必填(#243 收尾):旧的全局行(userId 为空)随 #202 一起清掉了,写路径
+  // 恒经 per-user store 落 userId,导入不建代币行 —— 再没有产生空 userId 的路径。
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
   symbol: text("symbol").notNull(), // 归一(大写)
   name: text("name").notNull(),
   logo: text("logo"), // canonical(CGK);孤儿行 NULL
