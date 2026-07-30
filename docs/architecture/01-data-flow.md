@@ -65,7 +65,7 @@ provider 产出 `tokenRef`(**必填**,ADR 0020):
 function evmTokenRef(chainId: number, contract: string | undefined): string { /* … */ }
 ```
 
-写快照前换身份(编排在 app,mint 的逻辑在 `@folio/oracle2`):
+写快照前换身份(编排在 app,mint 的逻辑在 `@folio/oracle`):
 
 ```ts
 // apps/web/src/lib/server/internal/sync-deps.ts —— buildSyncDeps().writeSnapshot
@@ -90,7 +90,7 @@ mint 失败是 best-effort:快照照落、新列留空、下次同步补上。�
 - 逐账户隔离与重试:`packages/sync/src/orchestrator.ts` `syncAccount`
 - 凭据解密:`apps/web/src/lib/creds.ts` `openCreds`(仅此处,用完即弃)
 - provider 取数契约:`packages/connectors/basic/src/provider.ts` `BalanceProvider.fetchBalances`
-- 认币决策树:`packages/oracle2/entry/src/mint.ts` `createMint`
+- 认币决策树:`packages/oracle/entry/src/mint.ts` `createMint`
 - 落库(封装 op):`packages/db/src/queries.ts` `writeSnapshot`(userId-scoped)
 
 ---

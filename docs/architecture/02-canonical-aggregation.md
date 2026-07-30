@@ -50,7 +50,7 @@ flowchart TD
 
 ## ② 认币(mint)—— 在落库之前定下「它是哪个币」
 
-📍 **地点**:`packages/oracle2/entry/src/mint.ts`,由 app 编排在写快照之前
+📍 **地点**:`packages/oracle/entry/src/mint.ts`,由 app 编排在写快照之前
 (`apps/web/src/lib/server/internal/sync-deps.ts`)
 
 🔧 **做了什么**:一批 `tokenRef` 换出各自的 `token_id`。**全程不碰网络** —— 类型上没给它
@@ -206,20 +206,20 @@ Holding {
 | 站 | 地点 |
 |---|---|
 | ① 产生 | `packages/connectors/providers/zerion/src/index.ts`(文法 `packages/oracle/ref/src/token-ref.ts`) |
-| ② 认币 | `packages/oracle2/entry/src/mint.ts` · 编排 `apps/web/src/lib/server/internal/sync-deps.ts` |
+| ② 认币 | `packages/oracle/entry/src/mint.ts` · 编排 `apps/web/src/lib/server/internal/sync-deps.ts` |
 | ③ 入库 | `apps/web/src/lib/server/sync.ts` → `packages/db/src/queries.ts` `writeSnapshot` |
 | ④ 预热 | `apps/web/src/lib/server/internal/sync-deps.ts` `warmTokensForUser` |
 | ⑤ 读出 | `apps/web/src/lib/server/portfolio.ts` → `packages/db/src/queries.ts` `getLatestSnapshotByUser` |
-| ⑥ 富化 | `apps/web/src/lib/overview-model.ts` · `packages/oracle2/entry/src/tokens.ts` `enrich` |
+| ⑥ 富化 | `apps/web/src/lib/overview-model.ts` · `packages/oracle/entry/src/tokens.ts` `enrich` |
 | ⑦ 组装 | `apps/web/src/lib/overview-model.ts` |
 | ⑧ 聚合 | `apps/web/src/lib/aggregate.ts` `buildCanonicalHoldings`(分组键 `groupKey` / 门槛 `isEligible`) |
 | ⑨ 渲染 | `apps/web/src/routes/_authed/index.tsx` · `components/token-holdings.tsx` · `components/asset-sheet.tsx` |
 
 | 参考层的三个包 | 职责 |
 |---|---|
-| `packages/oracle2/basic` | 类型 + 四个端口,零逻辑;依赖表里只有文法包 |
-| `packages/oracle2/entry` | 全部编排(mint / 读路径 / SWR / 缓存),**看不见任何 vendor** |
-| `packages/oracle2/upstreams/coingecko` | 全仓唯一认识 CoinGecko 的地方 |
+| `packages/oracle/basic` | 类型 + 四个端口,零逻辑;依赖表里只有文法包 |
+| `packages/oracle/entry` | 全部编排(mint / 读路径 / SWR / 缓存),**看不见任何 vendor** |
+| `packages/oracle/upstreams/coingecko` | 全仓唯一认识 CoinGecko 的地方 |
 
 > 分层与可换源的理由见 [ADR 0023](../adr/0023-oracle-layering-swappable-source.md);
 > 全局映射表见 [ADR 0022](../adr/0022-global-token-ref-index.md)。
