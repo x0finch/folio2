@@ -377,7 +377,10 @@ export async function writeSnapshot(
     kind: b.kind,
     selfPrice: b.selfPrice ?? null,
     platform: b.platform ?? null,
-    tokenId: b.tokenId ?? null,
+    // token_id 现在 NOT NULL(#243)。输入类型仍留可空,好让 v2 导入(无身份可落)能编译 ——
+    // 它写空值时**有意**撞约束、导入失败(#204 的 v3 导入携带身份后恢复)。sync 经 mint、手记合成
+    // 都恒给值,只有那一条活口会 null。cast 把强制点从编译期挪到 DB 约束(唯一真事实源)。
+    tokenId: (b.tokenId ?? null) as string,
     metaJson: b.meta ? JSON.stringify(b.meta) : null,
     // balance 级 note(单个 Note)→ JSON;无则 null。
     note: b.note ? JSON.stringify(b.note) : null,

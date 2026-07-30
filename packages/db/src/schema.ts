@@ -112,15 +112,17 @@ export const snapshotBalances = sqliteTable(
     platform: text("platform"),
     // 认定冻进快照(ADR 0021 / #199 expand):写快照前经 mint 换出的代币行 id。
     // 显示名(symbol / name)从此只住 Token 那一行,读端按 token_id 取 —— 快照不再各存一份
-    // (#243 删了 symbol / token_ref 两列)。expand 期可空(旧行没有值),必填改动见 #243 收尾。
+    // (#243 删了 symbol / token_ref 两列)。**必填**(#243):sync 经 mint 恒给,手记合成也带;
+    // 唯一还写空值的活口是 v2 导入 —— 有意让它撞约束(旧格式没有身份可落),#204 的 v3 导入
+    // 携带 token 身份后恢复。
     //
-    // **刻意不加外键。** 两个理由:① `TokenStore.merge` 删旧代币行前会把历史行一并改指,
-    // 有约束反而让「删用户」这类级联的执行顺序变成雷 —— tokens 经 user_id 级联删、
+    // **刻意不加外键**(约束是 NOT NULL,不是 FK)。两个理由:① `TokenStore.merge` 删旧代币行前会把
+    // 历史行一并改指,有外键反而让「删用户」这类级联的执行顺序变成雷 —— tokens 经 user_id 级联删、
     // snapshot_balances 经 snapshots 级联删,两条独立分支的先后 SQLite 不保证,
     // 先删 tokens 就撞约束(packages/db 的测试 teardown 正是直接删 user);
     // ② 快照是不可变的历史事实,代币表是可变的参考层,让前者的存在挡住后者的维护是反的。
     // 代价是 merge 漏改指会留下悬空 id → 由 token-store 的 merge 测试盯住。
-    tokenId: text("token_id"),
+    tokenId: text("token_id").notNull(),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空
     // balance 级展示 note(note 重设计):JSON.stringify(单个 Note),可空。
     // provider 挂在该 balance 上的 note 落这里;读时 safeParse 回 Note(见 getLatestSnapshotByUser)。
