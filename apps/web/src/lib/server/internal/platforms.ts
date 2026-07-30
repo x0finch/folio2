@@ -1,6 +1,6 @@
 import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
-import { oracleFor } from "./oracle2";
+import { oracleFor } from "./oracle";
 
 // 平台元数据(链 ∪ 场馆的 name+logo)。**按用户**(#202b):与汇率、代币目录同住一张
 // per-user 缓存(`platform:<键>` 键)。读走 resolve(cache-only、一次批量读、零网络),

@@ -1,4 +1,4 @@
-import { TOP_TOKENS_LIMIT } from "@folio/oracle2";
+import { TOP_TOKENS_LIMIT } from "@folio/oracle";
 import { cn, Input } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";

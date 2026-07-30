@@ -271,7 +271,7 @@ export const globalTokenRefIndex = sqliteTable(
   (t) => [primaryKey({ columns: [t.ref, t.namer] })],
 );
 
-// per-user KV 缓存:只三种键(`warm` / `fx:<币种>` / `platform:<键>`,见 oracle2 的 cache.ts)。
+// per-user KV 缓存:只三种键(`warm` / `fx:<币种>` / `platform:<键>`,见 oracle 的 cache.ts)。
 // 整张删空功能不坏,只是慢一点。留 user_id 的理由:per-user 缓存只装这个用户实际碰到的
 // (他选的币种、他有持仓的那几条链),全局表得装所有人的并集。
 // #202 起取代 fx_rates + platforms 两张全局表。

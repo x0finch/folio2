@@ -8,7 +8,7 @@ import {
 } from "@folio/connectors";
 import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
-import type { ValuationMode } from "@folio/oracle2";
+import type { ValuationMode } from "@folio/oracle";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import type { InputSpec } from "../../creds";
@@ -18,7 +18,7 @@ import { isSyncableAccount } from "../../syncable";
 import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
 import { manualBalancesForWarm } from "./manual";
-import { oracleFor } from "./oracle2";
+import { oracleFor } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
 import { warmHeldPrices } from "./token-enrich";
 

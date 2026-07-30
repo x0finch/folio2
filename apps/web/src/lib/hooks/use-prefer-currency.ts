@@ -1,4 +1,4 @@
-import { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "@folio/oracle2-basic";
+import { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { createContext, useContext } from "react";
 
 // 偏好币种 + 汇率,由 _authed loader 解析(cookie + FX cache-only)经 context 下发。

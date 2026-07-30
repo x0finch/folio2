@@ -1,4 +1,4 @@
-import type { TokenRecord } from "@folio/oracle2";
+import type { TokenRecord } from "@folio/oracle";
 import { describe, expect, it } from "vitest";
 import {
   defiTokenId,

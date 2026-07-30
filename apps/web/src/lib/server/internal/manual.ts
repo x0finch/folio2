@@ -5,8 +5,8 @@ import type {
   ManualHolding,
   SnapshotWithBalances,
 } from "@folio/db";
+import { dayBucketOf, tokenTicket } from "@folio/oracle";
 import { tokenRef } from "@folio/oracle-ref";
-import { dayBucketOf, tokenTicket } from "@folio/oracle2";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
 import { deriveAmount, fallbackUnitPrice, projectToken } from "../../manual-activity";
@@ -20,7 +20,7 @@ import {
 import { buildManualSnapshot } from "../../manual-snapshot";
 import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
-import { NAMER, oracleFor } from "./oracle2";
+import { NAMER, oracleFor } from "./oracle";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;

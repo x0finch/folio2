@@ -1,11 +1,11 @@
 import type { Balance } from "@folio/connectors-basic";
-import type { Tokens } from "@folio/oracle2";
+import type { Tokens } from "@folio/oracle";
 import { describe, expect, it } from "vitest";
 import { revalue } from "../src/lib/revalue";
 
 // **本文件只测估值,不测认币。** #202 之前 revalue 自己调 `tokens.resolve` 解析身份,所以这里曾经
 // 搭着一整套假 store + 假 source,还顺带测「按 symbol 认得出 BTC」之类 —— 那些断言现在归
-// `packages/oracle2/entry/tests/mint.test.ts`。revalue 只剩两件事:按 mode 定 value、捕获 selfPrice。
+// `packages/oracle/entry/tests/mint.test.ts`。revalue 只剩两件事:按 mode 定 value、捕获 selfPrice。
 //
 // 于是假件也塌成一个 `priceOf`。**记调用次数**:「有自带价就不回源」是一条性能承诺
 //(self-first 下 CEX 不该为每个币问一次价),不数次数就测不到。

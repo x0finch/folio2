@@ -12,7 +12,7 @@ import {
   createToken,
   injectManualSnapshots,
 } from "../../src/lib/server/internal/manual";
-import { NAMER, oracleFor } from "../../src/lib/server/internal/oracle2";
+import { NAMER, oracleFor } from "../../src/lib/server/internal/oracle";
 import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
 import { ticketOf } from "./ticket";
 

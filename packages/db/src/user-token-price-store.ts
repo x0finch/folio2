@@ -1,5 +1,5 @@
+import type { TokenPriceStore, TokenPriceWrite, TokenRecordPrice } from "@folio/oracle-basic";
 import { formatTokenRef } from "@folio/oracle-ref";
-import type { TokenPriceStore, TokenPriceWrite, TokenRecordPrice } from "@folio/oracle2-basic";
 import { and, eq, inArray } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";

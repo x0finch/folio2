@@ -11,7 +11,7 @@ import {
   loadManualAccountSeries,
   loadManualHistoryRows,
 } from "../../src/lib/server/internal/manual";
-import { NAMER } from "../../src/lib/server/internal/oracle2";
+import { NAMER } from "../../src/lib/server/internal/oracle";
 import { ticketOf } from "./ticket";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。

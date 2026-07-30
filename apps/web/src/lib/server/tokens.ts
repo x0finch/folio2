@@ -1,10 +1,10 @@
 import { env } from "cloudflare:workers";
-import { DEFAULT_TOP_N, tokenTicket, type UpstreamToken } from "@folio/oracle2";
+import { DEFAULT_TOP_N, tokenTicket, type UpstreamToken } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import type { TokenOption } from "../token-option";
-import { NAMER, oracleFor } from "./internal/oracle2";
+import { NAMER, oracleFor } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);

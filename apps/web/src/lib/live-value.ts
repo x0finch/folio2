@@ -1,6 +1,6 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { Tokens } from "@folio/oracle2";
-import { type ValuationMode, valuate } from "@folio/oracle2";
+import type { Tokens } from "@folio/oracle";
+import { type ValuationMode, valuate } from "@folio/oracle";
 import type { OverviewBalance } from "./account-view";
 import { fungibleTokenId } from "./tokens";
 

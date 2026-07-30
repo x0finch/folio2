@@ -15,7 +15,7 @@ import {
 
 // 新参考层三个 per-user store 的真 D1 测试(#199)。
 //
-// **为什么非要对着真表跑一遍**:oracle2 那几片全用内存假实现,fake 的 refs 是个 `Map` ——
+// **为什么非要对着真表跑一遍**:oracle 那几片全用内存假实现,fake 的 refs 是个 `Map` ——
 // 一批里插两条相同的 ref 会被悄悄覆盖,真表上 `token_refs` 的主键会冲突、整批写失败。
 // #212 里那个 `coingecko/<id>` 的 bug 就是这么藏了一阵。这里把 mint 会走到的形状对着约束重跑。
 

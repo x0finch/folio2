@@ -1,4 +1,4 @@
-import type { TokenRecord } from "@folio/oracle2";
+import type { TokenRecord } from "@folio/oracle";
 import { isFungible, viewKind } from "./balance-kind";
 import { tokenLogoUrl } from "./logo";
 

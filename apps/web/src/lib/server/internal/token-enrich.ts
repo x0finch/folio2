@@ -1,4 +1,4 @@
-import type { Tokens } from "@folio/oracle2";
+import type { Tokens } from "@folio/oracle";
 import {
   type BalanceLike,
   displayTokenId,

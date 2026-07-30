@@ -4,7 +4,7 @@ import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { withDefaultNoStore } from "./lib/server/internal/cache-headers";
 import { db } from "./lib/server/internal/db";
 import { configureLogging } from "./lib/server/internal/log";
-import { oracleWarm } from "./lib/server/internal/oracle2";
+import { oracleWarm } from "./lib/server/internal/oracle";
 import { buildSyncDeps, warmTokensForUser } from "./lib/server/internal/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),

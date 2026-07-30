@@ -3,7 +3,7 @@
 //   · formatMoney  —— 「货币」金额:换算(value/rate)后 fiat 走 Intl currency style、crypto 走 ₿/Ξ 前缀高精度(见 ADR 0006)。
 // 数量 vs 货币分开:货币需 currency-aware 格式(符号/位置/小数位随币种),数量是纯量。
 
-import type { Currency } from "@folio/oracle2-basic";
+import type { Currency } from "@folio/oracle-basic";
 
 const SUBSCRIPTS = "₀₁₂₃₄₅₆₇₈₉";
 const TINY_THRESHOLD = 0.01; // 低于此用下标记法

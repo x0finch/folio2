@@ -1,4 +1,4 @@
-import type { Currency } from "@folio/oracle2-basic";
+import type { Currency } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import { formatMoney, formatNumber } from "../src/lib/format-number";
 

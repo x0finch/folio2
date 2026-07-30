@@ -6,7 +6,7 @@ import { buildOverview } from "../overview-model";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { db } from "./internal/db";
 import { injectManualSnapshots, loadManualHistoryRows } from "./internal/manual";
-import { oracleFor } from "./internal/oracle2";
+import { oracleFor } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
 
