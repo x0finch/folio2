@@ -67,3 +67,49 @@ export interface RetryOpts {
   isRetryable?: (error: unknown) => boolean;
   onRetry?: (info: RetryInfo) => void; // 每次重试**之前**回调,日志钩子
 }
+
+// —— http:限频 + 重试 + 失败归类 的薄包装(见 http.ts)——
+
+// 非 2xx / 出不去 / 读不动 的五种归类。**包只负责归类,不负责变成哪个错误类** ——
+// 每家抛自己的(provider 抛 ProviderError、client 抛自己的),所以由 `toFailure` 决定。
+// 只被同文件的 Failure 引用 —— 不导出(仓库规则)。
+type FailureKind =
+  | "network" // 压根没出去(DNS / 断网 / fetch 抛了)
+  | "rate-limited" // 被限流(默认 429;binance 还要认 418)
+  | "auth" // 401 / 403,凭据被拒
+  | "upstream" // 其余非 2xx
+  | "parse"; // 出去了、回来了,但读不成 JSON
+
+export interface Failure {
+  kind: FailureKind;
+  // 出事的**路径**(pathname)。**刻意不带 query** —— 那里面有地址、签名这类东西,
+  // 而这个对象会进错误消息和日志(原则 #5 的红线)。
+  where: string;
+  status?: number;
+  retryAfterMs?: number; // 上游 Retry-After 头解析出来的(秒数或 HTTP-date 都认)
+  cause?: unknown;
+}
+
+export interface FetchOptions {
+  query?: Record<string, string | number | undefined>; // undefined 的键不参与
+  init?: RequestInit;
+  // 404 当成「没有这个东西」而不是故障 → 返回 null。只对「按 id 查一个东西」的端点开。
+  notFoundAsNull?: boolean;
+}
+
+export interface HttpClientOptions {
+  // **必填**:五个真实调用点都有基址,而少了它 `new URL("/path")` 会当场炸 —— 与其留一个
+  // 「忘了传就报 Invalid URL」的失败模式,不如在类型上要求它。
+  baseUrl: string;
+  // 每次请求的头。**是函数而不是对象** —— 签名类的头(rabby 的 wasm 签名、binance 的 HMAC)
+  // 要按路径和参数算,而且是异步的。
+  headers?: (path: string, options: FetchOptions | undefined) => HeadersInit | Promise<HeadersInit>;
+  limit?: RateLimiter; // 不传 = 不限频(判据见 RateLimitOptions.key 的注释:队里没人挤就别装)
+  retry?: RetryOpts; // 不传 = 不重试(provider 那条路由 @folio/sync 统一重试)
+  rateLimitedStatuses?: number[]; // 默认 [429]
+  // 把归类结果变成调用方自己的错误。**必须抛,不能返回** —— 返回的话包无从知道该继续还是停。
+  toFailure: (failure: Failure) => Error;
+}
+
+// 发一个请求,回解析好的 JSON(`notFoundAsNull` 且 404 时回 null)。
+export type Fetcher = (path: string, options?: FetchOptions) => Promise<unknown>;

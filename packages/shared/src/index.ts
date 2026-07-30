@@ -21,6 +21,7 @@
 // **对外只出这五个。** 其余(SlotStore / StoreChoice / RetryOpts / RetryInfo、以及两个 store 类)
 // 只在包内用:它们出现在公开签名里,但调用方传的是对象字面量、靠结构类型对上,不需要能叫出名字。
 // 少一个导出就少一处以后不敢动的地方。
+export { createHttpClient } from "./http";
 export { bypassRateLimitsForTests, defineRateLimit, resetRateLimitsForTests } from "./ratelimit";
 export { withRetry } from "./retry";
-export type { RateLimiter } from "./types";
+export type { Failure, Fetcher, FetchOptions, RateLimiter } from "./types";
