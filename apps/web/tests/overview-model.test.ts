@@ -144,6 +144,29 @@ describe("buildOverview", () => {
     ).toBe(false);
   });
 
+  // #245 Part 2:dust(几乎 $0 的空投/貔貅币)刷价那侧会被跳过,故这侧也不能标脏 —— 否则
+  // pricesStale 永清不掉、客户端每次进页空转刷新(与 refreshStalePrices 同用 refreshableTokenIds)。
+  it("dust(值 < 阈值)且无价 → 不标 stale(刷价那侧会跳过它)", async () => {
+    const accounts = [account("a1", "W")];
+    // 无价的 fake tokens(record 不带 price → stale=true 的口径)。
+    const noPrice = {
+      async enrich(ids: readonly string[]) {
+        return new Map(ids.map((id) => [id, record(id)]));
+      },
+    } as unknown as Tokens;
+
+    // 真持仓(值够)无价 → 该刷;dust(值几乎 0)无价 → 不该刷。
+    const real = new Map([["a1", snap("a1", 100, [bal({ usdValue: 100 })])]]);
+    const dust = new Map([["a1", snap("a1", 0, [bal({ usdValue: 0.0001 })])]]);
+
+    expect((await buildOverview(accounts, real, { tokens: noPrice, platforms })).pricesStale).toBe(
+      true,
+    );
+    expect((await buildOverview(accounts, dust, { tokens: noPrice, platforms })).pricesStale).toBe(
+      false,
+    );
+  });
+
   it("场馆键(= connectorId)走 connectorMeta 装饰,不进 platforms.resolve(#52)", async () => {
     // binance CEX 账户 → provider 报 platform = "binance"(场馆键即 connectorId)。
     const accounts = [account("cex", "币安", "binance")];

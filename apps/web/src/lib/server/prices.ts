@@ -1,6 +1,6 @@
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
-import { displayTokenIds } from "../tokens";
+import { refreshableTokenIds } from "../tokens";
 import { userDisplayBalances } from "../user-balances";
 import { db } from "./internal/db";
 import { manualBalancesForWarm } from "./internal/manual";
@@ -21,8 +21,9 @@ export const refreshStalePrices = createServerFn({ method: "POST" })
     // 三门同源(userDisplayBalances):manual 已退出快照但其合成余额经 injectManualSnapshots 进 enrich 门 →
     // refresh 门必须同源覆盖,否则 manual 代币被标 stale 却刷不到、pricesStale 永清不掉、客户端空转刷新。
     const manualBalances = await manualBalancesForWarm(context.userId, accounts);
-    // 与 enrichBalances 同门(displayTokenId):defi 行标了 stale 就必须刷得到。
-    const ids = displayTokenIds(userDisplayBalances(snapshots, manualBalances));
+    // 与 enrichBalances 的 pricesStale gate 同门(refreshableTokenIds):dust 两侧一致跳过,
+    // 否则被跳过的币标了 stale 却刷不到、pricesStale 永清不掉、客户端空转(#245 / 三门同源)。
+    const ids = refreshableTokenIds(userDisplayBalances(snapshots, manualBalances));
     const tokens = oracleFor(context.userId).tokens;
     // 元信息一并刷:**上游是 symbol/name/logo 的权威源**,行是拿连接器报的那份建起来的,
     // 而链上合约里的 symbol 可能过时(MATIC→POL)→ 同一个币在链上侧与交易所侧显示成两个名字。

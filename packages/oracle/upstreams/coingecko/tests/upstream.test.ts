@@ -13,7 +13,7 @@ bypassRateLimitsForTests(true);
 beforeEach(() => resetRateLimitsForTests());
 
 // 单页上限不进导出面(调用方不需要知道分页存在),测分页边界要从常量模块直接取。
-import { MARKETS_PER_PAGE } from "../src/constants";
+import { IDS_PER_REQUEST, MARKETS_PER_PAGE } from "../src/constants";
 import assetPlatforms from "./fixtures/asset-platforms.json" with { type: "json" };
 
 // 把 `parse.ts` / `ref-index.ts` 的纯转换串成真上游的那一层:分页、链标识翻译、平台表记忆。
@@ -314,6 +314,67 @@ describe("fetchTokens 按 id 点查整行", () => {
       "coingecko/issued:never-listed",
     ]);
     expect(got.map((t) => t.ref)).toEqual(["coingecko/issued:usd-coin"]);
+  });
+});
+
+// 数百币的钱包:id 全塞进一条 GET 的 `ids=` → URL 超 URI 上限 → CoinGecko 414,整批挂
+// (#245)。这几条钉的是「id 必须分块、逐批取、结果合并」—— 单批测试(上面)只覆盖不分块的路径。
+describe("大批 id 分块(#245:避免 414)", () => {
+  const refsOf = (n: number) =>
+    Array.from({ length: n }, (_, i) => `${UPSTREAM_ID}/issued:coin-${i}`);
+
+  // 按 query 里的 ids 动态回响应(stubFetch 的路由值看不到 query,分块测试要的正是这个)。
+  // 每批把它收到的 id 各回一条 —— 于是「合并了所有批」才拿得到全部 n 条。
+  function stubEchoingIds(build: (ids: string[]) => unknown): Call[] {
+    const calls: Call[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      calls.push({ path: url.pathname, query: url.searchParams });
+      const ids = (url.searchParams.get("ids") ?? "").split(",").filter(Boolean);
+      return new Response(JSON.stringify(build(ids)), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    return calls;
+  }
+
+  const eachBatchWithinLimit = (calls: Call[]) => {
+    for (const c of calls) {
+      expect((c.query.get("ids") ?? "").split(",").length).toBeLessThanOrEqual(IDS_PER_REQUEST);
+    }
+  };
+
+  it("取价:id 数 > 单批上限 → 切成多批,每批 ids ≤ 上限,结果合并", async () => {
+    const n = IDS_PER_REQUEST * 2 + 5; // 3 批:满、满、余 5
+    const calls = stubEchoingIds((ids) =>
+      Object.fromEntries(ids.map((id) => [id, { usd: 1, last_updated_at: 1700 }])),
+    );
+
+    const got = await createCoinGeckoUpstream(NO_WAIT).fetchPrices(refsOf(n));
+
+    expect(calls).toHaveLength(3);
+    eachBatchWithinLimit(calls);
+    expect(got.size).toBe(n); // 每一批的价都进了合并后的 Map
+  });
+
+  it("取整行:同样分块,每批 ≤ 上限,行数是各批之和", async () => {
+    const n = IDS_PER_REQUEST + 1; // 2 批
+    const calls = stubEchoingIds((ids) => ids.map((id, i) => marketRow(id, i + 1)));
+
+    const got = await createCoinGeckoUpstream(NO_WAIT).fetchTokens(refsOf(n));
+
+    expect(calls).toHaveLength(2);
+    eachBatchWithinLimit(calls);
+    expect(got).toHaveLength(n);
+  });
+
+  it("恰好一批(= 上限)→ 只发一次,不多切", async () => {
+    const calls = stubFetch({
+      "/simple/price": { "coin-0": { usd: 1, last_updated_at: 1700 } },
+    });
+    await createCoinGeckoUpstream(NO_WAIT).fetchPrices(refsOf(IDS_PER_REQUEST));
+    expect(calls).toHaveLength(1);
   });
 });
 

@@ -7,6 +7,13 @@ export const VS_USD = "usd";
 export const SEARCH_LIMIT = 20;
 export const MARKETS_PER_PAGE = 250; // CoinGecko 单页上限
 
+// 按 id 批量取价 / 取整行时,每次 GET 送多少个 id。`/simple/price` 与 `/coins/markets?ids=`
+// 都把 id 塞进 query 串,id 一多整条 URL 就超服务端 URI 长度上限 → CoinGecko 回 **HTTP 414
+// URI Too Long**,整批失败(#245:数百币的钱包刷价/刷图恒挂)。故按此数分块请求再合并。
+// 取值保守:coin id 是 slug,少数长达 ~40 字符,100 个即便全是长 slug(~4KB)也远在常见 8KB
+// URI 上限内;且 100 ≤ MARKETS_PER_PAGE,故每批 `/coins/markets` 一页就装得下、无需翻页。
+export const IDS_PER_REQUEST = 100;
+
 // 非 EVM 链的显式 slug 对照:**我们的命名者 → CoinGecko 的 asset_platform id**。
 //
 // EVM 不需要这张表:两边都能归到 `evm:<chainId>` —— CoinGecko 的 `chain_identifier` 就是那个

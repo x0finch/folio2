@@ -1,10 +1,12 @@
 import type { TokenRecord } from "@folio/oracle";
 import { describe, expect, it } from "vitest";
+import { ZERO_DISPLAY_USD } from "../src/lib/account-view";
 import {
   defiTokenId,
   displayTokenId,
   displayTokenIds,
   fungibleTokenId,
+  refreshableTokenIds,
   toEnrichment,
 } from "../src/lib/tokens";
 
@@ -68,6 +70,81 @@ describe("displayTokenId / displayTokenIds(展示富化的统一门)", () => {
         { kind: "defi", tokenId: "tk-2" },
       ]),
     ).toEqual(["tk-1", "tk-2"]);
+  });
+});
+
+// #245 Part 2:数百币的钱包绝大多数是几乎 $0 的空投/貔貅币,刷价/刷图之前按值砍掉 dust ——
+// 省 CGK 配额、也避免 id 太多把 GET 的 URL 撑爆(414)。判据 = 展示那条线(不展示的就不刷)。
+describe("refreshableTokenIds(刷前跳过 dust)", () => {
+  it("值 ≥ 阈值 → 留;dust(几乎 $0)→ 砍", () => {
+    expect(
+      refreshableTokenIds([
+        { kind: "spot", tokenId: "tk-real", usdValue: 1200 },
+        { kind: "spot", tokenId: "tk-dust", usdValue: 0.0001 },
+        { kind: "spot", tokenId: "tk-zero", usdValue: 0 },
+      ]),
+    ).toEqual(["tk-real"]);
+  });
+
+  it("同一 token 多笔 → 按聚合值判(单笔 dust 但合起来够 → 留)", () => {
+    const half = ZERO_DISPLAY_USD * 0.6; // 单笔低于阈值,两笔加起来越过
+    expect(
+      refreshableTokenIds([
+        { kind: "spot", tokenId: "tk-1", usdValue: half },
+        { kind: "spot", tokenId: "tk-1", usdValue: half },
+      ]),
+    ).toEqual(["tk-1"]);
+  });
+
+  it("defi 行同样计入(展示门内),按值过滤", () => {
+    expect(
+      refreshableTokenIds([
+        { kind: "defi", tokenId: "tk-defi", usdValue: 500 },
+        { kind: "defi", tokenId: "tk-defi-dust", usdValue: 0.001 },
+      ]),
+    ).toEqual(["tk-defi"]);
+  });
+
+  // 聚合取「绝对值之和」而非「和的绝对值」:同一 token 现货(+)+ defi 借款腿(−,同 tokenId)对冲后
+  // 净值≈0,但两条腿都要这个价 —— 绝不能因净值抵消当它不值钱、不刷(否则标脏侧只见现货腿标脏、
+  // 刷价侧净值 0 跳过 → 客户端永远空转。code-review 抓到的坑)。
+  it("现货 + defi 借款腿对冲(净值≈0)→ 仍留(绝对值之和,不是和的绝对值)", () => {
+    expect(
+      refreshableTokenIds([
+        { kind: "spot", tokenId: "tk-usdc", usdValue: 500 },
+        { kind: "defi", tokenId: "tk-usdc", usdValue: -500 }, // 借款腿:同 tokenId、负值
+      ]),
+    ).toEqual(["tk-usdc"]);
+  });
+
+  it("没身份的行不参与(与 displayTokenIds 同门)", () => {
+    expect(
+      refreshableTokenIds([
+        { kind: "spot", usdValue: 999 },
+        { kind: "perp_position", tokenId: "tk-perp", usdValue: 999 },
+      ]),
+    ).toEqual([]);
+  });
+
+  // 无条件保留①:老调用点只带 BalanceLike、没有 usdValue —— 判不了就别错杀。
+  it("usdValue 缺失 → 无条件保留(判不了不错杀)", () => {
+    expect(refreshableTokenIds([{ kind: "spot", tokenId: "tk-unknown" }])).toEqual(["tk-unknown"]);
+  });
+
+  // 无条件保留②:manual 的 usdValue 是拿(可能冷缓存的)现价现造的,0 常只是「还没定价」。
+  // 选了币但没填价的手记币恒为 0 —— 不豁免会被当 dust 永不刷价、永远显 $0。
+  it("manual 持仓 → 无条件保留,哪怕值算出来是 0", () => {
+    expect(
+      refreshableTokenIds([
+        { kind: "spot", tokenId: "tk-manual", usdValue: 0, platform: "manual" },
+      ]),
+    ).toEqual(["tk-manual"]);
+  });
+
+  it("阈值可传入(默认 = 展示阈值 ZERO_DISPLAY_USD)", () => {
+    const rows = [{ kind: "spot" as const, tokenId: "tk-1", usdValue: 5 }];
+    expect(refreshableTokenIds(rows, 10)).toEqual([]); // 抬高阈值 → 被砍
+    expect(refreshableTokenIds(rows)).toEqual(["tk-1"]); // 默认阈值 → 留
   });
 });
 
