@@ -86,6 +86,7 @@ function gateFor(config: CoinGeckoConfig): Gate {
     limit: CG_BURST,
     // 每 interval 放 CG_BURST 发 —— 换算成上游那个「每分钟多少次」的口径。
     interval: (CG_BURST / (callsPerMin / 60)) * 1000,
+    sleep: config.sleep, // 测试注入即时版,于是闸不会让测试真等
   });
 }
 

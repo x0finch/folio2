@@ -22,6 +22,27 @@ beforeEach(() => {
 });
 
 describe("运行时承诺", () => {
+  it("**默认档的 Cache API 在这里是真的** —— node 上只能退回本地,验不到这一层", async () => {
+    const key = `wd-cache-${Math.round(Date.now())}`;
+    // 不传 store = 默认 cache。第一发把时隙播进缓存。
+    await defineRateLimit({ key, limit: 1, interval: 5000 })(async () => {});
+
+    // 清掉本地那层,模拟「换了个 isolate」:冷启时应该把刚才那个时隙从缓存读回来,于是照样得等,
+    // 而不是白给一整轮突发。**这正是默认不用内存的理由。**
+    resetGatesForTests();
+    bypassGatesForTests(false);
+    let askedToWait = -1;
+    await defineRateLimit({
+      key,
+      limit: 1,
+      interval: 5000,
+      sleep: async (ms) => {
+        askedToWait = ms; // 不真等 5 秒,记下「被要求等多久」——那个数就是证据
+      },
+    })(async () => {});
+    expect(askedToWait).toBeGreaterThan(1000);
+  });
+
   it("setTimeout 之后 Date.now 真的走了(限速的全部依据)", async () => {
     const t0 = Date.now();
     await new Promise((r) => setTimeout(r, INTERVAL));

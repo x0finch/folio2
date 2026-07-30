@@ -7,11 +7,16 @@
 //
 // 上游的限额数字**不在这个包里** —— 那是各调用方 constants.ts 的事,因为限额是上游的属性。
 //
-// 限速本身用 p-throttle(零依赖、维护中、workerd 实测可用);本包只加它不管的两件事:
-// 按 key 分队,和把队列钉在模块级(见 gate.ts:那条是正确性问题,不是实现细节)。
-// 重试仍是手写的 —— 没有库能在「Retry-After 超上限就放弃」和「包住非 HTTP 的领域调用」这两点
-// 上同时够用(ky 只做前者的夹紧版、且只包 HTTP;p-retry 读不到 Retry-After)。
+// **目标是削峰,不是严格限频** —— 严格那档在 Workers 上只有 Durable Object 能做(#17),
+// 而我们不需要:漏出去的那几发由 429 + withRetry 兜底。
+//
+// 存时隙的地方可配(`store`),**默认 Cache API** —— 同一个数据中心的 isolate 共享,于是
+// 新 isolate 不会开局白给一整轮突发。`"memory"` 是每 isolate 一份的退路,测试用它。
+//
+// 都是手写的:限速要能把状态换成外部存储(p-throttle 把状态藏在闭包里,换不了),
+// 重试要能「Retry-After 超上限就放弃」且能包非 HTTP 的领域调用(ky 只做夹紧版、只包 HTTP;
+// p-retry 读不到 Retry-After)。两处都实测过库,都不够用。
 
 export { bypassGatesForTests, defineRateLimit, resetGatesForTests } from "./gate";
 export { withRetry } from "./retry";
-export type { Gate, RateLimitOptions, RetryInfo, RetryOpts } from "./types";
+export type { Gate, RateLimitOptions, RetryInfo, RetryOpts, SlotStore, StoreChoice } from "./types";

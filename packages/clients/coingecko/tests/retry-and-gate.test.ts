@@ -130,83 +130,65 @@ describe("重试", () => {
 });
 
 describe("限速闸", () => {
-  // 闸用假时钟验(p-throttle 用 setTimeout,fake timer 接得住);重试那几条不需要,所以只在这一组开。
-  it("突发额度用完之后请求被摊到后面的窗口", async () => {
-    vi.useFakeTimers();
-    try {
-      scriptedFetch([ok([])]);
-      const at: number[] = [];
-      const t0 = Date.now();
-      const client = createCoinGeckoClient({ apiKey: "k" });
-      vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-        at.push(Date.now() - t0);
-        return ok([]) as Response;
-      });
-      const runs = Promise.all(Array.from({ length: CG_BURST + 2 }, () => client.assetPlatforms()));
-      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(120_000);
-      await runs;
-
-      expect(at).toHaveLength(CG_BURST + 2);
-      expect(at.filter((t) => t === 0)).toHaveLength(CG_BURST); // 正好一个窗口的量
-      expect(new Set(at).size).toBeGreaterThan(1); // 其余被摊开
-    } finally {
-      vi.useRealTimers();
-    }
+  it("突发额度用完之后请求被摊开,而且越排越后", async () => {
+    scriptedFetch([ok([])]);
+    const { client, slept } = newClient();
+    for (let i = 0; i < CG_BURST + 3; i++) await client.assetPlatforms();
+    // 头 CG_BURST 发不等,之后每发都等,而且越排越后
+    expect(slept).toHaveLength(3);
+    expect(slept[1]).toBeGreaterThan(slept[0]);
+    expect(slept[2]).toBeGreaterThan(slept[1]);
   });
 
   it("无 key 与有 key 是两份额度(前者按 IP 算)—— 队不共用", async () => {
-    vi.useFakeTimers();
-    try {
-      const at: Array<{ keyed: boolean; at: number }> = [];
-      const t0 = Date.now();
-      const keyed = createCoinGeckoClient({ apiKey: "k" });
-      const keyless = createCoinGeckoClient();
-      let keyedTurn = true;
-      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        at.push({ keyed: String(input).includes("x-cg") || keyedTurn, at: Date.now() - t0 });
-        return ok([]) as Response;
-      });
-      // 有 key 那份把自己的额度抽干
-      const a = Promise.all(Array.from({ length: CG_BURST }, () => keyed.assetPlatforms()));
-      for (let i = 0; i < 2; i++) await vi.advanceTimersByTimeAsync(1000);
-      await a;
-      keyedTurn = false;
-      // 无 key 那份不受影响 —— 它自己那队还是空的,第一发不等
-      const before = Date.now();
-      const b = keyless.assetPlatforms();
-      await vi.advanceTimersByTimeAsync(0);
-      await b;
-      expect(Date.now()).toBe(before);
-    } finally {
-      vi.useRealTimers();
-    }
+    scriptedFetch([ok([])]);
+    const keyedSlept: number[] = [];
+    const keylessSlept: number[] = [];
+    const keyed = createCoinGeckoClient({
+      apiKey: "k",
+      sleep: async (ms) => void keyedSlept.push(ms),
+    });
+    const keyless = createCoinGeckoClient({ sleep: async (ms) => void keylessSlept.push(ms) });
+    // 有 key 那份把自己的突发抽干
+    for (let i = 0; i < CG_BURST + 1; i++) await keyed.assetPlatforms();
+    expect(keyedSlept).toHaveLength(1);
+    // 无 key 那份自己那队还是空的 → 第一发不等
+    await keyless.assetPlatforms();
+    expect(keylessSlept).toEqual([]);
   });
 });
 
 describe("三个档位", () => {
   // 三个 CG_CALLS_PER_MIN_* 里 pro 那个在别处一次都没被走到过 —— 至少让它执行一遍,
   // 并钉住「pro 只是同一把 key 换了档,不是换了一份额度」。
-  it("pro 与 demo 共用同一把 key 的队(同 key 同队,档位只影响窗口长度)", async () => {
-    vi.useFakeTimers();
-    try {
-      const at: number[] = [];
-      const t0 = Date.now();
-      vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-        at.push(Date.now() - t0);
-        return ok([]) as Response;
-      });
-      const demo = createCoinGeckoClient({ apiKey: "k" });
-      const pro = createCoinGeckoClient({ apiKey: "k", pro: true });
-      const runs = Promise.all([
-        ...Array.from({ length: CG_BURST }, () => demo.assetPlatforms()),
-        pro.assetPlatforms(), // 突发已被 demo 抽干 → 这发得等下一个窗口
-      ]);
-      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(120_000);
-      await runs;
-      expect(at.filter((t) => t === 0)).toHaveLength(CG_BURST);
-      expect(new Set(at).size).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("pro 与 demo 共用同一把 key 的队;pro 的窗口更短所以等得更少", async () => {
+    scriptedFetch([ok([])]);
+    const demoSlept: number[] = [];
+    const demo = createCoinGeckoClient({
+      apiKey: "k",
+      sleep: async (ms) => void demoSlept.push(ms),
+    });
+    for (let i = 0; i < CG_BURST + 1; i++) await demo.assetPlatforms();
+
+    // 同一把 key → 同一个队:突发已被 demo 抽干,pro 这发照样得等
+    const proSlept: number[] = [];
+    const pro = createCoinGeckoClient({
+      apiKey: "k",
+      pro: true,
+      sleep: async (ms) => void proSlept.push(ms),
+    });
+    await pro.assetPlatforms();
+    expect(proSlept).toHaveLength(1);
+
+    // 换一份干净的队,单看 pro 自己:窗口比 demo 短 → 同样的第 CG_BURST+1 发等得更少
+    resetGatesForTests();
+    const proAlone: number[] = [];
+    const pro2 = createCoinGeckoClient({
+      apiKey: "k",
+      pro: true,
+      sleep: async (ms) => void proAlone.push(ms),
+    });
+    for (let i = 0; i < CG_BURST + 1; i++) await pro2.assetPlatforms();
+    expect(proAlone[0]).toBeLessThan(demoSlept[0]);
   });
 });

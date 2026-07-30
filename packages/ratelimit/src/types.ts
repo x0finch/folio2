@@ -1,7 +1,21 @@
+// 存「下一个可用时隙」的地方。**它的作用域就是限速的作用域**:
+//   · memory —— 模块级 Map,每个 isolate 一份。isolate 一回收就归零,新 isolate 开局满额突发
+//   · cache  —— Cache API,同一个数据中心的 isolate 共享。默认用它
+//
+// cache 这一档**没有原子读改写**(两个 isolate 会同时读到同一个时隙、各自拿走),所以它给不了
+// 精确配额。这是明知接受的:我们要的是**削峰**,不是严格限频 —— 漏出去的那几发由 429 + 重试兜。
+// 真要精确得上 Durable Object(见 #17),而那需要多用户同时同步才划得来。
+export interface SlotStore {
+  get(key: string): Promise<number | undefined>;
+  set(key: string, slotAt: number, ttlMs: number): Promise<void>;
+}
+
+export type StoreChoice = "cache" | "memory" | SlotStore;
+
 export interface RateLimitOptions {
   // 闸的 key = **上游拿来计量的那个东西**。三种常见情形都只是往这里填不同的字符串:
   //   · 全局共享一把 API key → 填 **key 的名字**(如 `COINGECKO_API_KEY`)。绝不填 key 的值 ——
-  //     它会进日志和 Map 的键
+  //     它会进日志、进 Map 的键、进缓存的 URL
   //   · 按出口 IP 算(免签的公开端点几乎都是)→ 填一个 provider 级的常量,如 `binance:public`
   //   · 每账户自带一把 key → 填 provider 名,调用时用 `gate(run, accountId)` 分队
   //
@@ -14,6 +28,9 @@ export interface RateLimitOptions {
   key: string;
   limit: number; // 每 interval 允许几发
   interval: number; // 窗口毫秒
+  store?: StoreChoice; // 默认 "cache";测试传 "memory" 或自己的实现
+  clock?: () => number; // 默认 Date.now,测试注入
+  sleep?: (ms: number) => Promise<void>; // 默认 setTimeout,测试注入
 }
 
 // 闸:**调用方把它放模块顶层**,每个请求进它的闭包。
