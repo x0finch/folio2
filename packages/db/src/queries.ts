@@ -565,19 +565,16 @@ export function listSnapshotsPageByUser(
     .offset(offset);
 }
 
-// 取指定快照的余额,带上代币的显示 symbol(导出用)。调用方须保证 ids 数量 ≤ 分页大小
-// (< D1 100 绑定参数上限)。symbol 从此只住 Token 那一行(#243 删了快照的 symbol 列),
-// 而导出文件的 v2 线格式仍带 symbol 字段 → 在这里按 token_id 左连接取回(无 token 的旧行 → null)。
-export type SnapshotBalanceExportRow = SnapshotBalance & { symbol: string | null };
+// 取指定快照的余额。调用方须保证 ids 数量 ≤ 分页大小(< D1 100 绑定参数上限)。
+// 导出(#204)按 token_id 走(v3),不再需要 symbol,故这里不再 join tokens。
 export function listBalancesForSnapshots(
   env: DbEnv,
   snapshotIds: string[],
-): Promise<SnapshotBalanceExportRow[]> {
+): Promise<SnapshotBalance[]> {
   if (snapshotIds.length === 0) return Promise.resolve([]);
   return getDb(env)
-    .select({ ...getTableColumns(snapshotBalances), symbol: tokens.symbol })
+    .select()
     .from(snapshotBalances)
-    .leftJoin(tokens, eq(tokens.id, snapshotBalances.tokenId))
     .where(inArray(snapshotBalances.snapshotId, snapshotIds));
 }
 
