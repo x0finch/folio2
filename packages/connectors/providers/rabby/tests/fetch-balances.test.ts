@@ -1,7 +1,7 @@
 import type { Balance, BalanceProvider } from "@folio/connectors-basic";
 import { ProviderError } from "@folio/connectors-basic";
+import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetGateForTests } from "../src/gate";
 import tokenList from "./fixtures/cache-token-list.json";
 import chainList from "./fixtures/chain-list.json";
 import protocolList from "./fixtures/complex-protocol-list.json";
@@ -54,9 +54,13 @@ const okRoutes = () => ({
   "/v1/user/complex_protocol_list": () => json(protocolList),
 });
 
+// 限速闸旁路:这个文件测的不是限频。闸的行为在 @folio/shared 的单测里用假时钟验过,
+// 这里让它直接放行 —— 否则每个用例都要按窗口真等。
+bypassRateLimitsForTests(true);
+
 beforeEach(() => {
   resetChainIdsCacheForTests();
-  resetGateForTests();
+  resetRateLimitsForTests();
   signRabbyRequest.mockClear();
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -137,7 +141,7 @@ describe("fetchBalances", () => {
     await provider.fetchBalances(ctx());
     // 让链清单从此 500,余额仍应取到
     stubFetch({ ...okRoutes(), "/v1/chain/list": () => new Response("", { status: 500 }) });
-    resetGateForTests();
+    resetRateLimitsForTests();
     // 缓存未过期时压根不会打链清单;这里把它当"过期后刷新失败"来验 —— 直接调即可,
     // 因为 24h 内走缓存分支,失败路径由下一条用例(强制过期)覆盖。
     const { balances } = await provider.fetchBalances(ctx());

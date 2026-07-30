@@ -1,5 +1,6 @@
 import { type Balance, type Note, ProviderError } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
+import { withRetry } from "@folio/shared";
 import { platformOf } from "./platform";
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
@@ -88,29 +89,36 @@ export interface SyncResult {
 
 // 对可重试的 ProviderError(429/5xx/网络)退避重试;优先采用服务端 Retry-After,否则指数退避+抖动。
 // 不可重试错误 / 重试用尽 → 抛出(由 syncAccount 外层收为 ok:false)。logCtx = {accountId,type} 入每条重试日志。
-async function withRetry<T>(
+//
+// 循环本体在 @folio/shared(那儿有它的完整测试;CoinGecko client 和加账户探活用的是同一个)。
+// 这里传两个**刻意保持迁移前行为**的参数:
+//   · isRetryable 仍要求 instanceof ProviderError —— 包的默认判据是鸭子类型(只看 `.retryable`),
+//     对本层收窄回来,免得别处冒上来的、恰好带 `retryable: true` 的对象也被重试
+//   · exceedsMaxWait: "clamp" —— Retry-After 比 RETRY_MAX_MS 大时夹到上限继续等,不放弃。
+//     这条路是**后台同步**,没人在等,多等 5s 换一次成功是划算的;用户在等的路径(CoinGecko
+//     写路径、加账户探活)用的是默认的 "throw"
+async function withRetryLogged<T>(
   fn: () => Promise<T>,
   sleep: (ms: number) => Promise<void>,
   log: SyncLogger,
   logCtx: Record<string, unknown>,
 ): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const retryable = err instanceof ProviderError && err.retryable;
-      if (!retryable || attempt >= RETRY_MAX_ATTEMPTS) throw err;
-      const backoff = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** (attempt - 1));
-      const base = Math.min(RETRY_MAX_MS, err.retryAfterMs ?? backoff);
+  return withRetry(fn, {
+    attempts: RETRY_MAX_ATTEMPTS,
+    maxWaitMs: RETRY_MAX_MS,
+    baseMs: RETRY_BASE_MS,
+    exceedsMaxWait: "clamp",
+    sleep,
+    isRetryable: (err) => err instanceof ProviderError && err.retryable,
+    onRetry: ({ attempt, error }) => {
       log.warning("provider call retrying", {
         ...logCtx,
         attempt,
-        code: err instanceof ProviderError ? err.code : undefined,
-        retryAfterMs: err instanceof ProviderError ? err.retryAfterMs : undefined,
+        code: error instanceof ProviderError ? error.code : undefined,
+        retryAfterMs: error instanceof ProviderError ? error.retryAfterMs : undefined,
       });
-      await sleep(base + Math.random() * RETRY_BASE_MS); // 抖动,避免同步雪崩
-    }
-  }
+    },
+  });
 }
 
 // 有界并发:N 个在飞、逐个补位,结果按输入序返回。fn 不抛(syncAccount 已吞错)→ 无需处理 reject。
@@ -164,7 +172,7 @@ export async function syncAccount(
     const stored: Record<string, string> = rawCreds ? JSON.parse(rawCreds) : {};
     // 取余额(解密/校验/ctx/provider 调用全在注入的 fetchBalances 内)。仅取数部分重试(写快照不重试);
     // 每次尝试加超时(挂住的 provider → 超时 → 按 retryable 重试),避免内联 triggerSync 被拖住。
-    const outcome = await withRetry(
+    const outcome = await withRetryLogged(
       () => withTimeout(deps.fetchBalances(account, stored), FETCH_TIMEOUT_MS),
       sleep,
       log,

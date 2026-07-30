@@ -1,5 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCoinGeckoFxUpstream } from "../src";
+
+// 限速闸:每个用例从干净状态出发,且 sleep 即时 —— 否则无 key 档(10 次/分钟)会让这套测试
+// **真的等**,而上一个用例撞出来的冷却还会漏给下一个。生产不传 sleep(用 setTimeout)。
+const NO_WAIT = { sleep: async () => {} };
+// 限速闸旁路:这个文件测的不是限频。闸的行为在 @folio/shared 的单测里用假时钟验过,
+// 这里让它直接放行 —— 否则每个用例都要按窗口真等。
+bypassRateLimitsForTests(true);
+
+beforeEach(() => resetRateLimitsForTests());
 
 function mockFetch(body: unknown) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -25,7 +35,7 @@ const RATES = {
 describe("createCoinGeckoFxUpstream.fetchRates", () => {
   it("反算 usdPerUnit:USD=1、EUR=usd/eur、ETH=usd/eth、BTC=usd/btc", async () => {
     mockFetch(RATES);
-    const rates = await createCoinGeckoFxUpstream().fetchRates();
+    const rates = await createCoinGeckoFxUpstream(NO_WAIT).fetchRates();
 
     expect(rates.get("USD")).toBe(1);
     expect(rates.get("EUR")).toBeCloseTo(100000 / 92000, 6);
@@ -35,22 +45,22 @@ describe("createCoinGeckoFxUpstream.fetchRates", () => {
 
   it("上游没收录的币种不出现(不是报错)", async () => {
     mockFetch(RATES);
-    const rates = await createCoinGeckoFxUpstream().fetchRates();
+    const rates = await createCoinGeckoFxUpstream(NO_WAIT).fetchRates();
     expect(rates.has("KRW")).toBe(false); // 这份响应里没有 krw
   });
 
   it("只出白名单里的币种 —— 上游多给的不进结果", async () => {
     mockFetch({ rates: { ...RATES.rates, xag: { value: 3000, type: "commodity" } } });
-    const rates = await createCoinGeckoFxUpstream().fetchRates();
+    const rates = await createCoinGeckoFxUpstream(NO_WAIT).fetchRates();
     expect(rates.has("XAG")).toBe(false);
   });
 
   it("基准(usd)缺失 → 抛:这不是「某个币种没有」,是响应坏了", async () => {
     mockFetch({ rates: { eur: { value: 1 } } });
-    await expect(createCoinGeckoFxUpstream().fetchRates()).rejects.toThrow(/usd rate/);
+    await expect(createCoinGeckoFxUpstream(NO_WAIT).fetchRates()).rejects.toThrow(/usd rate/);
   });
 
   it("id 自报为当前上游 —— 与代币那面同一个命名者", async () => {
-    expect(createCoinGeckoFxUpstream().id).toBe("coingecko");
+    expect(createCoinGeckoFxUpstream(NO_WAIT).id).toBe("coingecko");
   });
 });

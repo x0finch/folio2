@@ -9,7 +9,6 @@ import {
 import { SEARCH_LIMIT, VS_USD } from "./constants";
 
 // Retry-After 解析已移入 @folio/coingecko-client;re-export 保持既有导入面(含测试)。
-export { parseRetryAfter } from "@folio/coingecko-client";
 
 const cg = cgkRef;
 

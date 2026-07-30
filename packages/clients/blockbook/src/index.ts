@@ -6,7 +6,6 @@ export {
   BlockbookError,
   type BlockbookErrorCode,
   createBlockbookClient,
-  parseRetryAfter,
   USER_AGENT,
   type XpubQuery,
 } from "./client";

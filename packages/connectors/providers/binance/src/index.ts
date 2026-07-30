@@ -3,19 +3,22 @@ import {
   type CredField,
   hmacSha256,
   ProviderError,
-  parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { createHttpClient, defineRateLimit, type Failure } from "@folio/shared";
 import { z } from "zod";
 import {
   ACCOUNT_PATH,
   API_KEY_HEADER,
   BINANCE_API_BASE,
+  PUBLIC_LIMIT_KEY,
   QUOTE_ASSET,
   RECV_WINDOW,
   STABLECOINS,
   TICKER_PRICE_PATH,
+  TICKER_RATE_LIMIT_BURST,
+  TICKER_RATE_LIMIT_PER_SEC,
 } from "./constants";
 
 // @folio/connectors-provider-binance —— 首个带 secret 型 account.creds 的 connector(binance)。
@@ -83,38 +86,57 @@ export function parseAccountBalances(
   return out;
 }
 
-async function binanceFetch(path: string, apiKey?: string): Promise<Response> {
-  try {
-    return await fetch(`${BINANCE_API_BASE}${path}`, {
-      headers: apiKey ? { [API_KEY_HEADER]: apiKey } : {},
-    });
-  } catch (cause) {
-    throw new ProviderError("UPSTREAM_ERROR", "binance request failed", { cause });
-  }
-}
+// 公开(免签)端点的限频器 —— 按出口 IP 共享,见 constants.ts 里为什么只给它装。
+const publicLimit = defineRateLimit({
+  key: PUBLIC_LIMIT_KEY,
+  limit: TICKER_RATE_LIMIT_BURST,
+  interval: (TICKER_RATE_LIMIT_BURST / TICKER_RATE_LIMIT_PER_SEC) * 1000,
+});
 
-function ensureOk(res: Response): void {
-  if (res.ok) return;
-  if (res.status === 401 || res.status === 403) {
-    throw new ProviderError("AUTH_FAILED", `binance auth failed (${res.status})`);
-  }
-  if (res.status === 418 || res.status === 429) {
-    throw new ProviderError("RATE_LIMITED", `binance rate limited (${res.status})`, {
-      retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
-    });
-  }
-  throw new ProviderError("UPSTREAM_ERROR", `binance upstream error (${res.status})`);
-}
+// **两个 client,因为是两份额度。** 公开端点按出口 IP 算(所有账户所有用户共花一份)→ 过闸;
+// 签名端点按账户自己那把 key 算、每账户只发一次不并发 → 装闸拦不到任何东西,刻意不装。
+// 归类规则两边一样,所以抽出来共用。
+const toFailure = ({ kind, where, status, retryAfterMs, cause }: Failure): Error => {
+  if (kind === "network")
+    return new ProviderError("UPSTREAM_ERROR", "binance request failed", { cause });
+  if (kind === "auth") return new ProviderError("AUTH_FAILED", `binance auth failed (${status})`);
+  // 418 = 收到 429 还继续打换来的封 IP,和限流同类处理。
+  if (kind === "rate-limited")
+    return new ProviderError("RATE_LIMITED", `binance rate limited (${status})`, { retryAfterMs });
+  if (kind === "parse")
+    return new ProviderError("PARSE_ERROR", `binance returned invalid JSON (${where})`, { cause });
+  return new ProviderError("UPSTREAM_ERROR", `binance upstream error (${status})`);
+};
 
-// 签名拉取 SIGNED 端点(query 串签名后追加 &signature=)。
+const publicRequest = createHttpClient({
+  baseUrl: BINANCE_API_BASE,
+  limit: publicLimit,
+  rateLimitedStatuses: [429, 418],
+  toFailure,
+});
+
+const signedRequest = createHttpClient<string>({
+  baseUrl: BINANCE_API_BASE,
+  rateLimitedStatuses: [429, 418],
+  headers: (_path, options) => ({ [API_KEY_HEADER]: options?.context ?? "" }),
+  toFailure,
+});
+
+// 签名拉取 SIGNED 端点。**签名算的是「除 signature 外、按发送顺序拼起来的 query」**,
+// 所以这里先按同样的顺序拼一遍来签,再把 signature 追加到最后 —— URLSearchParams 保持插入序,
+// 两边一致。
 async function signedGet(
   path: string,
-  query: string,
+  params: Record<string, string | number>,
   apiKey: string,
   secret: string,
-): Promise<Response> {
-  const signature = await hmacSha256(secret, query, "hex");
-  return binanceFetch(`${path}?${query}&signature=${signature}`, apiKey);
+): Promise<unknown> {
+  const signature = await hmacSha256(
+    secret,
+    new URLSearchParams(params as never).toString(),
+    "hex",
+  );
+  return signedRequest(path, { query: { ...params, signature }, context: apiKey });
 }
 
 // —— 账户级 creds(AC):apiKey/secret。apiKey = 标识符(明文走 header,非认证秘密)→ semi:
@@ -133,24 +155,14 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
 
   async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
     const { apiKey, secret } = ctx.account.creds;
-    const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;
-    const acctRes = await signedGet(ACCOUNT_PATH, query, apiKey, secret);
-    ensureOk(acctRes);
-    let account: BinanceAccount;
-    try {
-      account = (await acctRes.json()) as BinanceAccount;
-    } catch (cause) {
-      throw new ProviderError("PARSE_ERROR", "binance returned invalid JSON", { cause });
-    }
-    // 公开免签:全市场价 → symbol→price 表。
-    const priceRes = await binanceFetch(TICKER_PRICE_PATH);
-    ensureOk(priceRes);
-    let tickers: TickerPrice[];
-    try {
-      tickers = (await priceRes.json()) as TickerPrice[];
-    } catch (cause) {
-      throw new ProviderError("PARSE_ERROR", "binance returned invalid JSON", { cause });
-    }
+    const account = (await signedGet(
+      ACCOUNT_PATH,
+      { recvWindow: RECV_WINDOW, timestamp: Date.now() },
+      apiKey,
+      secret,
+    )) as BinanceAccount;
+    // 公开免签:全市场价 → symbol→price 表。**这一发过闸**(按出口 IP 算的那份额度)。
+    const tickers = (await publicRequest(TICKER_PRICE_PATH)) as TickerPrice[];
     const prices: Record<string, number> = {};
     for (const t of tickers) {
       if (t.symbol) prices[t.symbol] = Number(t.price ?? 0);
@@ -162,9 +174,13 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
   async validateAccount(ctx): Promise<boolean> {
     const { apiKey, secret } = ctx.account.creds;
     try {
-      const query = `recvWindow=${RECV_WINDOW}&timestamp=${Date.now()}`;
-      const res = await signedGet(ACCOUNT_PATH, query, apiKey, secret);
-      return res.ok;
+      await signedGet(
+        ACCOUNT_PATH,
+        { recvWindow: RECV_WINDOW, timestamp: Date.now() },
+        apiKey,
+        secret,
+      );
+      return true;
     } catch {
       return false;
     }

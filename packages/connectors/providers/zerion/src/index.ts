@@ -3,10 +3,10 @@ import {
   type CredField,
   type Defi,
   ProviderError,
-  parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { createHttpClient, defineRateLimit } from "@folio/shared";
 import { z } from "zod";
 
 // @folio/connectors-provider-zerion — zerion provider(evm connector 用)。只读地址,一次取回跨所有
@@ -35,6 +35,25 @@ const POSITIONS_QUERY = "filter[trash]=only_non_trash&currency=usd&filter[positi
 const DEBT_POSITION_TYPES = new Set(["loan", "borrow"]);
 // EVM 地址格式。
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+// —— 速率闸 ——
+// **为什么这里要装**:一次 fetchBalances 发 2 个请求而且是 `Promise.all` **并行**的,
+// 而 sync 在账户维度并发 6 → 瞬时 12 个请求打**同一把 key**(ZERION_API_KEY 是全部署共用的,
+// 不是每账户一把)。免费 developer 档的文档限额是 **10 RPS**(60k 次/月),12 已经越线。
+//
+// 容量给 8、速率 8/s:常见情形(6 个账户 12 发)前 8 发直接走、剩下 4 发各错开 125ms,
+// 总共只多约 0.5s;真要冲高也被摊到 8/s 以下。留 20% 余量,因为 429 本身也算一次请求。
+// 出处:https://zerion.io/blog/top-questions-about-zerion-api/(developer 档 10 RPS / 60k 每月)
+const RATE_LIMIT_PER_SEC = 8;
+const RATE_LIMIT_BURST = 8;
+
+// 闸的 key 取**环境变量名**,不是 key 的值 —— key 会进日志和 Map 的键,而这里只需要一个代表
+// 「那把 key」的稳定标识符。全局一把,所以所有账户共用这一个队。
+const limit = defineRateLimit({
+  key: ZERION_API_KEY,
+  limit: RATE_LIMIT_BURST,
+  interval: (RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000,
+});
 
 // —— Zerion 响应的最小形状(仅取用到的字段)——
 interface ZerionQuantity {
@@ -163,29 +182,27 @@ function basicAuth(apiKey: string): string {
   return `Basic ${btoa(`${apiKey}:`)}`;
 }
 
-// 发起 Zerion GET;网络故障 → UPSTREAM_ERROR(可重试)。状态码由调用方用 ensureOk 处理。
-async function zerionGet(path: string, apiKey: string): Promise<Response> {
-  try {
-    return await fetch(`${ZERION_API_BASE}${path}`, {
-      headers: { Authorization: basicAuth(apiKey), accept: "application/json" },
-    });
-  } catch (cause) {
-    throw new ProviderError("UPSTREAM_ERROR", "zerion request failed", { cause });
-  }
-}
-
-function ensureOk(res: Response): void {
-  if (res.ok) return;
-  if (res.status === 401 || res.status === 403) {
-    throw new ProviderError("AUTH_FAILED", `zerion auth failed (${res.status})`);
-  }
-  if (res.status === 429) {
-    throw new ProviderError("RATE_LIMITED", "zerion rate limited", {
-      retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
-    });
-  }
-  throw new ProviderError("UPSTREAM_ERROR", `zerion upstream error (${res.status})`);
-}
+// 出网:限频 + Basic 认证头 + 失败归类,都在共享的 http 包装里(@folio/shared)。
+// **apiKey 每次请求现取** —— 它来自 ctx.creds(app 从 env 注入),不是模块级常量,
+// 所以经 per-request 的 context 递进去(见 FetchOptions.context)。
+const request = createHttpClient<string>({
+  baseUrl: ZERION_API_BASE,
+  limit,
+  headers: (_path, options) => ({
+    Authorization: basicAuth(options?.context ?? ""),
+    accept: "application/json",
+  }),
+  toFailure: ({ kind, where, status, retryAfterMs, cause }) => {
+    if (kind === "network")
+      return new ProviderError("UPSTREAM_ERROR", "zerion request failed", { cause });
+    if (kind === "auth") return new ProviderError("AUTH_FAILED", `zerion auth failed (${status})`);
+    if (kind === "rate-limited")
+      return new ProviderError("RATE_LIMITED", "zerion rate limited", { retryAfterMs });
+    if (kind === "parse")
+      return new ProviderError("PARSE_ERROR", `zerion returned invalid JSON (${where})`, { cause });
+    return new ProviderError("UPSTREAM_ERROR", `zerion upstream error (${status})`);
+  },
+});
 
 // slug→chainId 映射的进程内缓存(isolate 级;链清单近静态,24h 够)。
 let chainIdsCache: { map: Record<string, number>; fetchedAt: number } | null = null;
@@ -200,9 +217,9 @@ async function getChainIds(apiKey: string): Promise<Record<string, number>> {
     return chainIdsCache.map;
   }
   try {
-    const res = await zerionGet(CHAINS_PATH, apiKey);
-    ensureOk(res); // 非 2xx → 按状态码抛 ProviderError(429 可重试 / 401 认证失败 / 其它 upstream)
-    const map = parseChainIds((await res.json()) as ZerionChainsResponse);
+    const map = parseChainIds(
+      (await request(CHAINS_PATH, { context: apiKey })) as ZerionChainsResponse,
+    );
     if (Object.keys(map).length === 0) {
       throw new ProviderError("UPSTREAM_ERROR", "zerion chains response empty");
     }
@@ -241,13 +258,9 @@ const providerCreds = [
 // 取该地址的全量仓位(与 getChainIds 对称,抽为独立方法)。网络/状态码错误 → ProviderError;
 // 非法 JSON → PARSE_ERROR。
 async function getPositions(address: string, apiKey: string): Promise<ZerionPositionsResponse> {
-  const res = await zerionGet(`${POSITIONS_PATH(address)}?${POSITIONS_QUERY}`, apiKey);
-  ensureOk(res);
-  try {
-    return (await res.json()) as ZerionPositionsResponse;
-  } catch (cause) {
-    throw new ProviderError("PARSE_ERROR", "zerion returned invalid JSON", { cause });
-  }
+  return (await request(`${POSITIONS_PATH(address)}?${POSITIONS_QUERY}`, {
+    context: apiKey,
+  })) as ZerionPositionsResponse;
 }
 
 export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof providerCreds> = {
@@ -280,21 +293,21 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
     const apiKey = ctx.creds[ZERION_API_KEY];
     if (!apiKey) return false;
     try {
-      const res = await zerionGet(PORTFOLIO_PATH(ctx.account.creds.address), apiKey);
-      return res.ok;
+      await request(PORTFOLIO_PATH(ctx.account.creds.address), { context: apiKey });
+      return true;
     } catch {
       return false;
     }
   },
 
-  // provider 自身 creds liveness:用 key 实测打 /v1/chains/(只需 key、不需地址)→ res.ok,
+  // provider 自身 creds liveness:用 key 实测打 /v1/chains/(只需 key、不需地址)—— 不抛就算通,
   // 真正验证 key 有效而非仅存在性检查。key 缺失则直接 false 不发请求。
   async validateCreds(creds): Promise<boolean> {
     const apiKey = creds[ZERION_API_KEY];
     if (!apiKey) return false;
     try {
-      const res = await zerionGet(CHAINS_PATH, apiKey);
-      return res.ok;
+      await request(CHAINS_PATH, { context: apiKey });
+      return true;
     } catch {
       return false;
     }

@@ -20,7 +20,11 @@ import { getLogger } from "@logtape/logtape";
 //
 // 与旧的 ./oracle.ts 并存到 #202(那片让 oracle2 改名接管)。
 
-const newUpstream = () => createCoinGeckoUpstream({ apiKey: env.COINGECKO_API_KEY || undefined });
+// CoinGecko client 的公共配置(三个上游共用一份)。限速层的报告不在这里 —— 见 log.ts 的
+// setLimitLogger:那件事是运行时的属性,设一次管所有闸,不该逐个上游透传。
+const cgConfig = () => ({ apiKey: env.COINGECKO_API_KEY || undefined });
+
+const newUpstream = () => createCoinGeckoUpstream(cgConfig());
 
 // 当前上游的命名者。db 层不预设任何厂商(表名列名零 vendor 字样,#199),所以凡是要按命名者
 // 点查 `token_refs` 的读(如手记持仓的「用户选了哪个币」)都由 app 把它传进去。
@@ -38,9 +42,8 @@ export const oracleFor: OracleFor = createOracleFor({
   createUpstream: newUpstream,
   // 汇率上游是**另一个端口**(见 OracleConfig):当前同样落在 CoinGecko 上,但那是这里的选择,
   // 服务层不知道两者是同一家。
-  createFxUpstream: () => createCoinGeckoFxUpstream({ apiKey: env.COINGECKO_API_KEY || undefined }),
-  createPlatformUpstream: () =>
-    createCoinGeckoPlatformUpstream({ apiKey: env.COINGECKO_API_KEY || undefined }),
+  createFxUpstream: () => createCoinGeckoFxUpstream(cgConfig()),
+  createPlatformUpstream: () => createCoinGeckoPlatformUpstream(cgConfig()),
   // symbol → 上游 id 的策展表由 adapter 提供(它逐条写的是那一家的 id)。
   overrides: OVERRIDES,
 });

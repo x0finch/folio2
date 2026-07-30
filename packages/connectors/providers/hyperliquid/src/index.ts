@@ -4,9 +4,9 @@ import {
   type PerpEquity,
   type PerpPosition,
   ProviderError,
-  parseRetryAfter,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { createHttpClient } from "@folio/shared";
 import { z } from "zod";
 import { CLEARINGHOUSE_TYPE, EVM_ADDRESS_RE, HYPERLIQUID_API_BASE, INFO_PATH } from "./constants";
 
@@ -113,28 +113,29 @@ export function parseClearinghouseState(state: ClearinghouseState): Row[] {
   return out;
 }
 
-// POST /info(无 auth)。网络故障 → UPSTREAM_ERROR(可重试)。状态码由调用方 ensureOk 处理。
-async function infoPost(address: string): Promise<Response> {
-  try {
-    return await fetch(`${HYPERLIQUID_API_BASE}${INFO_PATH}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ type: CLEARINGHOUSE_TYPE, user: address }),
-    });
-  } catch (cause) {
-    throw new ProviderError("UPSTREAM_ERROR", "hyperliquid request failed", { cause });
-  }
-}
+// 出网走共享的 http 包装(@folio/shared)。**没有限频器** —— 见 constants.ts 末尾那笔账:
+// 1200 权重/分钟 ÷ 每次权重 2 ≈ 600 次/分钟,而我们峰值 6 发,队永远是空的。
+const request = createHttpClient({
+  baseUrl: HYPERLIQUID_API_BASE,
+  headers: () => ({ "content-type": "application/json", accept: "application/json" }),
+  toFailure: ({ kind, where, status, retryAfterMs, cause }) => {
+    if (kind === "network")
+      return new ProviderError("UPSTREAM_ERROR", "hyperliquid request failed", { cause });
+    if (kind === "rate-limited")
+      return new ProviderError("RATE_LIMITED", "hyperliquid rate limited", { retryAfterMs });
+    if (kind === "parse")
+      return new ProviderError("PARSE_ERROR", `hyperliquid returned invalid JSON (${where})`, {
+        cause,
+      });
+    return new ProviderError("UPSTREAM_ERROR", `hyperliquid upstream error (${status})`);
+  },
+});
 
-function ensureOk(res: Response): void {
-  if (res.ok) return;
-  if (res.status === 429) {
-    throw new ProviderError("RATE_LIMITED", "hyperliquid rate limited", {
-      retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
-    });
-  }
-  throw new ProviderError("UPSTREAM_ERROR", `hyperliquid upstream error (${res.status})`);
-}
+// POST /info(无 auth)。
+const infoPost = (address: string): Promise<unknown> =>
+  request(INFO_PATH, {
+    init: { method: "POST", body: JSON.stringify({ type: CLEARINGHOUSE_TYPE, user: address }) },
+  });
 
 // —— 账户级 creds(AC):EVM 地址,public(明文落库、可导出重建)——
 // 账户 creds 声明随 provider(其天然消费者)落此;将来同 connector 多 provider 时提到 entry 共享。
@@ -155,14 +156,7 @@ export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccount
   creds: [],
 
   async fetchBalances(ctx): Promise<{ balances: Row[] }> {
-    const res = await infoPost(ctx.account.creds.address);
-    ensureOk(res);
-    let json: ClearinghouseState;
-    try {
-      json = (await res.json()) as ClearinghouseState;
-    } catch (cause) {
-      throw new ProviderError("PARSE_ERROR", "hyperliquid returned invalid JSON", { cause });
-    }
+    const json = (await infoPost(ctx.account.creds.address)) as ClearinghouseState;
     return { balances: parseClearinghouseState(json) };
   },
 
@@ -170,8 +164,8 @@ export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccount
   // 未交易过的地址也返回 200 + 空状态 → 视为可用。任何失败 → false。
   async validateAccount(ctx): Promise<boolean> {
     try {
-      const res = await infoPost(ctx.account.creds.address);
-      return res.ok;
+      await infoPost(ctx.account.creds.address);
+      return true;
     } catch {
       return false;
     }
