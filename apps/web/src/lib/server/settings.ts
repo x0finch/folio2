@@ -13,6 +13,13 @@ export const getProviderKeyStatus = createServerFn({ method: "GET" })
     COINSTATS_API_KEY: Boolean(env.COINSTATS_API_KEY),
   }));
 
+// 库里是否已有账户数据(设置页导入前的提醒用):非空则合并式导入前弹一道确认。只回布尔。
+export const getDataStats = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(async ({ context }) => ({
+    hasData: (await db.listAccountsByUser(context.userId)).length > 0,
+  }));
+
 // per-user 估值设置(Phase 3,#82)。读带缺省(无行 → coingecko / self-first)。
 export const getValuationSettings = createServerFn({ method: "GET" })
   .middleware([requireAuth])
