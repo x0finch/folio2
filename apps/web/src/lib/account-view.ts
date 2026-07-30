@@ -74,9 +74,11 @@ function parseDefiMeta(metaJson: string | null): DefiMetaT {
 
 const DEFI_FALLBACK_PROTOCOL = "Other";
 
-// 价值(美元)绝对值低于此即在 2 位小数下显示为 $0.00 —— 视为「价值 0」。用于现货表与叠标过滤掉
-// 无价/空投尘埃这类零值代币(与 DeFi 空腿的半分钱口径一致)。
-export const ZERO_DISPLAY_USD = 0.005;
+// 「尘埃」阈值(美元):持仓价值绝对值低于此即视为噪音而非持仓 —— 现货表 / 叠标**不展示**,
+// 刷价/刷图那侧也**不去 CGK 刷**(见 tokens.ts `refreshableTokenIds`,#245:一条线「不展示的就不刷」)。
+// 取 $0.10:几乎 $0 的空投/貔貅币成堆,砍到这条线能把数百币的钱包收敛到几十个,列表与 Top/Worst
+// 也更干净(排除「$0.05 涨 900%」这类噪音)。**代价**:$0.10 以下的真实小额持仓也会被隐藏、不刷价。
+export const ZERO_DISPLAY_USD = 0.1;
 
 export function toAccountSections(balances: OverviewBalance[]): AccountSections {
   const spot: SpotRow[] = [];
