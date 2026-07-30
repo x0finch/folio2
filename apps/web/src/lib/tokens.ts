@@ -9,15 +9,14 @@ import { tokenLogoUrl } from "./logo";
 // (symbol + tokenRef)交给参考层现场解析,那一步整个消失了。
 
 export interface BalanceLike {
-  symbol: string;
   kind: string;
   // 写快照时 mint 定死的代币行 id。可空:本列之前写下的旧快照、以及手记那种现造的持仓(#203)。
   tokenId?: string | null;
-  tokenRef?: string | null; // 旧列,写路径仍在写;#202 删
   platform?: string | null; // 这笔持仓所在的链 ∪ 场馆(provider 直接报,#193)
 }
 
 export interface TokenEnrichment {
+  symbol?: string; // 显示名(#243 起从 Token 取,快照不再存);认不出的行取建行时连接器报的那份
   name?: string;
   logo?: string;
   unitPrice?: number; // USD
@@ -57,6 +56,7 @@ export function displayTokenIds(rows: readonly BalanceLike[]): string[] {
 // 上游还没认出来的币也有 name/providerLogo 可显(不再是裸 symbol + 首字母)。
 export function toEnrichment(e: TokenRecord): TokenEnrichment {
   return {
+    symbol: e.symbol,
     name: e.name,
     logo: tokenLogoUrl(e), // 上游 URL → folio 代理(隐私;见 ADR 0008)
     unitPrice: e.price?.unitPrice,

@@ -17,7 +17,7 @@ export const getHoldingHistory = createServerFn({ method: "GET" })
   .validator(z.object({ key: z.string().min(1), since: z.number().int().nonnegative().optional() }))
   .handler(async ({ data, context }) => {
     const rows = await db.listSnapshotBalancesByUser(context.userId, data.since);
-    // eligibility + asset 构造均与 overview-model 一致:现货带 tokenRef(懒解析更准),perp 权益仅 symbol。
+    // eligibility 与 overview-model 同口径:现货 / meta 可解析的 perp 权益保证金。
     const eligible = rows.filter((r) => {
       const vk = viewKind(r);
       return isFungible(vk) || (vk === "perp_equity" && isPerpEquity(r.metaJson));
@@ -25,7 +25,9 @@ export const getHoldingHistory = createServerFn({ method: "GET" })
     const histRows: TokenHistRow[] = eligible.map((r) => {
       const vk = viewKind(r);
       return {
-        symbol: r.symbol,
+        // 历史只按 token_id 归属、求和冻结 value(groupKey 恒命中 tokenId 分支),不显示 symbol
+        // → 不再从快照取(#243 删了该列)。
+        symbol: "",
         amount: r.amount,
         value: r.usdValue, // 冻结口径(过去点用当时快照值,不现推)
         kind: vk,

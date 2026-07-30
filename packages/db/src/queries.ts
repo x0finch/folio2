@@ -34,8 +34,8 @@ import type {
   ValuationMode,
 } from "./schema-types";
 
-// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 现在每行 12 列 → 每块 8 行(96 个,限内)。
-// **加列必须回来改这个数**:12 × 9 = 108 就会 "too many SQL variables",而且只在持仓多的账户上炸。
+// D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 现在每行 10 列 → 每块 8 行(80 个,限内)。
+// **加列必须回来改这个数**:列数 × 块行数不得超 100,否则 "too many SQL variables",只在持仓多的账户上炸。
 const BALANCE_INSERT_CHUNK = 8;
 
 // 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
@@ -298,7 +298,6 @@ export function listMembershipsByUser(env: DbEnv, userId: string): Promise<Membe
 // ---------- 快照 ----------
 
 export interface SnapshotBalanceInput {
-  symbol: string;
   amount: number;
   usdValue: number;
   kind: BalanceKind;
@@ -306,8 +305,8 @@ export interface SnapshotBalanceInput {
   // 但导入旧版本文件(v2 没有这个字段)时缺席 —— 与列本身可空同一个理由。
   platform?: string;
   selfPrice?: number; // provider 自带单价(估值原料,Phase 3);落 snapshot_balances.self_price
-  tokenRef?: string;
-  // 认定冻进快照(ADR 0021 / #200):写快照前经 mint 换出的代币行 id。
+  // 认定冻进快照(ADR 0021 / #200):写快照前经 mint 换出的代币行 id。显示名(symbol)从此只住
+  // Token 那一行,读端按它取 —— 快照不再存 symbol / token_ref(#243)。
   // 可选:expand 期旧路径不给(列可空),导入旧版本文件也没有。编排在 app —— db 只负责落列。
   tokenId?: string;
   meta?: Record<string, unknown>;
@@ -373,12 +372,10 @@ export async function writeSnapshot(
   const balanceRows = input.balances.map((b) => ({
     id: crypto.randomUUID(),
     snapshotId,
-    symbol: b.symbol,
     amount: b.amount,
     usdValue: b.usdValue,
     kind: b.kind,
     selfPrice: b.selfPrice ?? null,
-    tokenRef: b.tokenRef ?? null,
     platform: b.platform ?? null,
     tokenId: b.tokenId ?? null,
     metaJson: b.meta ? JSON.stringify(b.meta) : null,
@@ -440,12 +437,10 @@ export function listSnapshotTotalsByUser(env: DbEnv, userId: string): Promise<Sn
 export interface SnapshotBalanceHistoryRow {
   accountId: string;
   takenAt: number;
-  symbol: string;
   amount: number;
   usdValue: number;
   kind: BalanceKind;
   tokenId: string | null; // 归并身份(写快照时 mint 定死);单币历史按它归属(#201)
-  tokenRef: string | null;
   platform: string | null;
   metaJson: string | null;
 }
@@ -458,12 +453,10 @@ export function listSnapshotBalancesByUser(
     .select({
       accountId: snapshots.accountId,
       takenAt: snapshots.takenAt,
-      symbol: snapshotBalances.symbol,
       amount: snapshotBalances.amount,
       usdValue: snapshotBalances.usdValue,
       kind: snapshotBalances.kind,
       tokenId: snapshotBalances.tokenId,
-      tokenRef: snapshotBalances.tokenRef,
       platform: snapshotBalances.platform,
       metaJson: snapshotBalances.metaJson,
     })
@@ -567,15 +560,19 @@ export function listSnapshotsPageByUser(
     .offset(offset);
 }
 
-// 取指定快照的余额。调用方须保证 ids 数量 ≤ 分页大小(< D1 100 绑定参数上限)。
+// 取指定快照的余额,带上代币的显示 symbol(导出用)。调用方须保证 ids 数量 ≤ 分页大小
+// (< D1 100 绑定参数上限)。symbol 从此只住 Token 那一行(#243 删了快照的 symbol 列),
+// 而导出文件的 v2 线格式仍带 symbol 字段 → 在这里按 token_id 左连接取回(无 token 的旧行 → null)。
+export type SnapshotBalanceExportRow = SnapshotBalance & { symbol: string | null };
 export function listBalancesForSnapshots(
   env: DbEnv,
   snapshotIds: string[],
-): Promise<SnapshotBalance[]> {
+): Promise<SnapshotBalanceExportRow[]> {
   if (snapshotIds.length === 0) return Promise.resolve([]);
   return getDb(env)
-    .select()
+    .select({ ...getTableColumns(snapshotBalances), symbol: tokens.symbol })
     .from(snapshotBalances)
+    .leftJoin(tokens, eq(tokens.id, snapshotBalances.tokenId))
     .where(inArray(snapshotBalances.snapshotId, snapshotIds));
 }
 

@@ -191,7 +191,6 @@ describe("合并", () => {
     await db.insert(snapshotBalances).values({
       id: "bal-1",
       snapshotId: "snap-1",
-      symbol: "USDC",
       amount: 1,
       usdValue: 1,
       kind: "spot",

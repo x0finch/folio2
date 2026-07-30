@@ -1,4 +1,4 @@
-import type { SnapshotBalance } from "@folio/db";
+import type { SnapshotBalanceExportRow } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { safeView } from "@/lib/creds";
@@ -58,7 +58,7 @@ export const Route = createFileRoute("/api/export")({
                 const page = await db.listSnapshotsPageByUser(userId, SNAPSHOT_PAGE, offset);
                 if (page.length === 0) break;
                 const pageBalances = await db.listBalancesForSnapshots(page.map((s) => s.id));
-                const bySnapshot = new Map<string, SnapshotBalance[]>();
+                const bySnapshot = new Map<string, SnapshotBalanceExportRow[]>();
                 for (const b of pageBalances) {
                   const arr = bySnapshot.get(b.snapshotId);
                   if (arr) arr.push(b);

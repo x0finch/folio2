@@ -21,6 +21,7 @@ export type {
   ManualBatchPlan,
   ManualHolding,
   Membership,
+  SnapshotBalanceExportRow,
   SnapshotBalanceHistoryRow,
   SnapshotBalanceInput,
   SnapshotBalanceView,

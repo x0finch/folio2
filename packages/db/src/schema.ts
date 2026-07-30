@@ -101,20 +101,18 @@ export const snapshotBalances = sqliteTable(
     snapshotId: text("snapshot_id")
       .notNull()
       .references(() => snapshots.id, { onDelete: "cascade" }),
-    symbol: text("symbol").notNull(),
     amount: real("amount").notNull(),
     usdValue: real("usd_value").notNull(),
     kind: text("kind").$type<BalanceKind>().notNull(),
     // provider 自带单价(oracle 多源 Phase 3):估值「原料」,冻结。usd_value 是成品(revalue 按当时 mode 算);
     // 当前视图从「amount + self_price + 实时源价 + 当前 mode」现推 → 切源/切开关可逆、自带价不丢。
     selfPrice: real("self_price"),
-    // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的 tokenRef。
-    tokenRef: text("token_ref"),
     // 这笔持仓所在的链 ∪ 场馆(Platform),由 provider 随 Balance 直接报(ADR 0021 / #193)。
     // 可空:本列之前写下的行没有值 —— 读端退回账户的 connectorId,下次同步即补上。
     platform: text("platform"),
     // 认定冻进快照(ADR 0021 / #199 expand):写快照前经 mint 换出的代币行 id。
-    // expand 期可空(旧行没有值),#202 改必填并删掉 symbol / token_ref 两列。
+    // 显示名(symbol / name)从此只住 Token 那一行,读端按 token_id 取 —— 快照不再各存一份
+    // (#243 删了 symbol / token_ref 两列)。expand 期可空(旧行没有值),必填改动见 #243 收尾。
     //
     // **刻意不加外键。** 两个理由:① `TokenStore.merge` 删旧代币行前会把历史行一并改指,
     // 有约束反而让「删用户」这类级联的执行顺序变成雷 —— tokens 经 user_id 级联删、

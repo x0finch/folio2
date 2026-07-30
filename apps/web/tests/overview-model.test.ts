@@ -65,7 +65,6 @@ describe("buildOverview", () => {
         "a1",
         snap("a1", 100, [
           bal({
-            tokenRef: "evm:42161/0xusdc",
             platform: "evm:42161",
             amount: 100,
             usdValue: 100,
@@ -78,7 +77,6 @@ describe("buildOverview", () => {
           // 手记:ref 的命名者是数据源,平台却是 manual —— 平台只能由 provider 报。
           bal({
             kind: "manual",
-            tokenRef: "coingecko/issued:usd-coin",
             platform: "manual",
             amount: 50,
             usdValue: 50,
@@ -150,12 +148,7 @@ describe("buildOverview", () => {
     // binance CEX 账户 → provider 报 platform = "binance"(场馆键即 connectorId)。
     const accounts = [account("cex", "币安", "binance")];
     const byAccount = new Map([
-      [
-        "cex",
-        snap("cex", 100, [
-          bal({ tokenRef: "binance/issued:USDC", platform: "binance", amount: 100, usdValue: 100 }),
-        ]),
-      ],
+      ["cex", snap("cex", 100, [bal({ platform: "binance", amount: 100, usdValue: 100 })])],
     ]);
 
     // 记录 platforms.resolve 实际被问了哪些 key —— 断言场馆键被排除(无多余 CoinGecko 往返)。
@@ -195,7 +188,6 @@ describe("buildOverview", () => {
             kind: "spot",
             amount: 100,
             usdValue: 100,
-            tokenRef: "coingecko:usd-coin",
           }),
           bal({
             symbol: "aUSDC",
@@ -290,9 +282,10 @@ describe("buildOverview —— defi 行 change24h 富化", () => {
       ],
     ]);
     const view = await buildOverview(accounts, byAccount, { tokens: defiTokens, platforms });
-    const rows = view.sections[0].defi.flatMap((g) => g.rows);
-    expect(rows.find((r) => r.symbol === "stETH")?.change24h).toBe(2.5);
-    expect(rows.find((r) => r.symbol === "LP")?.change24h).toBeUndefined();
+    // 按协议组定位(#243:展示 symbol 现从 Token 取,不再是余额那份 stETH/LP)。
+    const defi = view.sections[0].defi;
+    expect(defi.find((g) => g.protocol === "Lido")?.rows[0].change24h).toBe(2.5);
+    expect(defi.find((g) => g.protocol === "Uniswap")?.rows[0].change24h).toBeUndefined();
   });
 });
 

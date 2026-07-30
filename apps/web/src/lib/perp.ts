@@ -25,11 +25,9 @@ export interface PerpView {
 }
 
 interface PerpBalance {
-  symbol: string;
   amount: number;
   usdValue: number;
   kind: string;
-  tokenRef?: string | null;
   metaJson: string | null;
 }
 

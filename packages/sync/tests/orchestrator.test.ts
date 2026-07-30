@@ -367,8 +367,9 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
     });
 
     await syncUser(deps, "u1");
+    // symbol 不再落快照(#243);按 usdValue 区分两行(BTC=100 / SCAM=5)。
     const rows = writes[0].input.balances;
-    expect(rows.find((r) => r.symbol === "BTC")?.tokenId).toBe("tk_BTC");
-    expect(rows.find((r) => r.symbol === "SCAM")?.tokenId).toBeUndefined();
+    expect(rows.find((r) => r.usdValue === 100)?.tokenId).toBe("tk_BTC");
+    expect(rows.find((r) => r.usdValue === 5)?.tokenId).toBeUndefined();
   });
 });

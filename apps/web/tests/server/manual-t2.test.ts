@@ -40,12 +40,24 @@ async function balanceCount(accountId: string): Promise<number> {
   return row?.n ?? 0;
 }
 
+// 合成余额不再带 symbol / tokenRef(#243:都住 Token 那一行)。「这条余额认成了哪个上游币」
+// 改由它的 token_id 反查 token_refs 的 coingecko 那一档 —— 选了币 → `issued:<coinId>`,没选 → null。
+async function coingeckoRefOf(tokenId: string | null | undefined): Promise<string | null> {
+  if (!tokenId) return null;
+  const row = await env.DB.prepare(
+    "SELECT local_name AS n FROM token_refs WHERE user_id = ? AND namer = 'coingecko' AND token_id = ?",
+  )
+    .bind(USER, tokenId)
+    .first<{ n: string }>();
+  return row?.n ?? null;
+}
+
 // 直接写一行快照 + 一条余额(绕过 sync,单测 purge 谓词用)。
 async function seedSnapshot(accountId: string): Promise<void> {
   await db.writeSnapshot(USER, accountId, {
     takenAt: Date.now(),
     totalUsd: 100,
-    balances: [{ symbol: "BTC", amount: 1, usdValue: 100, kind: "spot" }],
+    balances: [{ tokenId: "tk-btc", amount: 1, usdValue: 100, kind: "spot" }],
   });
 }
 
@@ -64,11 +76,12 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
 
     const synth = byAccount.get(account.id);
     expect(synth).toBeDefined();
-    expect(synth?.balances.map((b) => [b.symbol, b.amount])).toEqual([["BTC", 0.5]]);
+    expect(synth?.balances.map((b) => b.amount)).toEqual([0.5]);
     // 测试环境 token 缓存空 → enrich 无价 → 回退 amount × unitPrice = 0.5 × 64000。
     expect(synth?.snapshot.totalUsd).toBe(32000);
     expect(synth?.balances[0].selfPrice).toBeNull();
-    expect(synth?.balances[0].tokenRef).toBe("coingecko/issued:bitcoin");
+    // 选了 bitcoin → 该行的 token 认成 coingecko 的 bitcoin(身份住 Token,#243)。
+    expect(await coingeckoRefOf(synth?.balances[0].tokenId)).toBe("issued:bitcoin");
   });
 
   // 给已 mint 的 per-user token(coingecko ref = `issued:<coinId>`)灌一个市价 —— 模拟同步的
@@ -111,7 +124,8 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
     await injectManualSnapshots(USER, accounts, byAccount, 1_700_000_000_000);
 
     const synth = byAccount.get(account.id);
-    expect(synth?.balances[0].tokenRef).toBe("manual/custom:USDC");
+    // 没选币 → token 没有 coingecko 那一档(它自己命名 manual/custom:USDC),故够不到真 USDC 的价。
+    expect(await coingeckoRefOf(synth?.balances[0].tokenId)).toBeNull();
     expect(synth?.snapshot.totalUsd).toBe(7770); // 10 × 777,不是 10 × 1
   });
 
@@ -130,7 +144,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
     await injectManualSnapshots(USER, accounts, byAccount, 1_700_000_000_000);
 
     const synth = byAccount.get(account.id);
-    expect(synth?.balances[0].tokenRef).toBe("coingecko/issued:usd-coin");
+    expect(await coingeckoRefOf(synth?.balances[0].tokenId)).toBe("issued:usd-coin");
     expect(synth?.snapshot.totalUsd).toBe(10); // 10 × 1
   });
 
@@ -168,9 +182,9 @@ describe("manualBalancesForWarm", () => {
 
     const accounts = await db.listAccountsByUser(USER); // 含归档
     const balances = await manualBalancesForWarm(USER, accounts);
-    // 只应含活跃账户的币(BTC),不含归档账户的币(ETH)。
-    expect(balances.map((b) => b.symbol)).toEqual(["BTC"]);
-    expect(balances.every((b) => b.tokenRef === "coingecko/issued:bitcoin")).toBe(true);
+    // 只应含活跃账户的币(BTC),不含归档账户的币(ETH)。身份走 token_id(#243:无 symbol/tokenRef)。
+    expect(balances).toHaveLength(1);
+    expect(await coingeckoRefOf(balances[0].tokenId)).toBe("issued:bitcoin");
   });
 });
 

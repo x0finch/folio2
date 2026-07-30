@@ -9,7 +9,6 @@ import { toPerpView } from "../src/lib/perp";
 // —— 遗留形态(kind=perp,meta 带 role) ——
 const legacyEquity = {
   kind: "perp",
-  symbol: "USDC",
   amount: 13109.482328,
   usdValue: 13109.482328,
   metaJson: JSON.stringify({
@@ -21,7 +20,6 @@ const legacyEquity = {
 };
 const legacyLong = {
   kind: "perp",
-  symbol: "ETH",
   amount: 0.0335,
   usdValue: 0,
   metaJson: JSON.stringify({
@@ -39,7 +37,6 @@ const legacyLong = {
 };
 const legacyShort = {
   kind: "perp",
-  symbol: "BTC",
   amount: -0.01,
   usdValue: 0,
   metaJson: JSON.stringify({
@@ -78,11 +75,10 @@ describe("toPerpView —— 遗留 kind=perp(靠 meta.role)", () => {
 
   it("坏/缺 metaJson 的行被忽略(不抛)", () => {
     const view = toPerpView([
-      { kind: "perp", symbol: "X", amount: 1, usdValue: 0, metaJson: null },
-      { kind: "perp", symbol: "Y", amount: 1, usdValue: 0, metaJson: "not json" },
+      { kind: "perp", amount: 1, usdValue: 0, metaJson: null },
+      { kind: "perp", amount: 1, usdValue: 0, metaJson: "not json" },
       {
         kind: "perp",
-        symbol: "Z",
         amount: 1,
         usdValue: 0,
         metaJson: JSON.stringify({ role: "weird" }),
@@ -100,14 +96,12 @@ describe("toPerpView —— 新 kind=perp_equity/perp_position(meta 无 role)", 
     const view = toPerpView([
       {
         kind: "perp_equity",
-        symbol: "USDC",
         amount: 1000,
         usdValue: 1000,
         metaJson: JSON.stringify({ withdrawable: 900, totalMarginUsed: 100, totalNtlPos: 5000 }),
       },
       {
         kind: "perp_position",
-        symbol: "BTC",
         amount: 0.5,
         usdValue: 0,
         metaJson: JSON.stringify({

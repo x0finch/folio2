@@ -122,11 +122,12 @@ async function syncWith(
 }
 
 async function balancesOf(snapshotId: string) {
+  // symbol / token_ref 不再落快照(#243):身份只剩 token_id,上游叫法反查走 store.getById().ref。
   const { results } = await env.DB.prepare(
-    "SELECT symbol, token_id as tokenId, token_ref as tokenRef FROM snapshot_balances WHERE snapshot_id = ?",
+    "SELECT token_id as tokenId FROM snapshot_balances WHERE snapshot_id = ?",
   )
     .bind(snapshotId)
-    .all<{ symbol: string; tokenId: string | null; tokenRef: string | null }>();
+    .all<{ tokenId: string | null }>();
   return results;
 }
 
@@ -140,9 +141,6 @@ describe("落库后快照行带 token_id", () => {
     const rows = await balancesOf(snapshotId);
     expect(rows).toHaveLength(1);
     expect(rows[0].tokenId).toBeTruthy();
-    // 旧列仍在写(读路径还没切)。
-    expect(rows[0].tokenRef).toBe(USDC_ETH);
-    expect(rows[0].symbol).toBe("USDC");
 
     // 那个 Token 确实被上游认出来了(有 coingecko 那一档的 ref 行)。
     const store = createUserTokenStore(env, { userId: USER, namer: NAMER });

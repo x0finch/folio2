@@ -130,7 +130,6 @@ describe("toAccountSections", () => {
         symbol: "BTC",
         kind: "spot",
         usdValue: 5000,
-        tokenRef: "bitcoin/native",
         metaJson: JSON.stringify({ pendingSats: 500000 }),
       }),
     ]);
@@ -144,7 +143,6 @@ describe("toAccountSections", () => {
         symbol: "BTC",
         kind: "utxo", // 旧快照遗留 kind;viewKind 经 default 归 spot
         usdValue: 5000,
-        tokenRef: "bitcoin/native",
         metaJson: JSON.stringify({ pendingSats: 12345 }),
       }),
     ]);

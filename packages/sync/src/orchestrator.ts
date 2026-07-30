@@ -223,7 +223,6 @@ export async function syncAccount(
       // balance 级 note(单个 Note,note 重设计)随各 balance 落 snapshot_balances.note;revalue 不动 note。
       // meta 仅 defi/perp 有(spot 零 typed meta)→ 用 `in` 收窄后取。
       balances: balances.map((b) => ({
-        symbol: b.symbol,
         amount: b.amount,
         usdValue: b.value,
         kind: b.kind,
@@ -232,8 +231,8 @@ export async function syncAccount(
         platform: platformOf(b.tokenRef, account.connectorId),
         // provider 自带单价(估值原料,Phase 3):revalue 捕获,随快照落 self_price。
         selfPrice: b.selfPrice,
-        tokenRef: b.tokenRef,
-        // 认定冻进快照:用的就是 revalue 定价时那一份答案(同一轮只 mint 一次)。
+        // 认定冻进快照:用的就是 revalue 定价时那一份答案(同一轮只 mint 一次)。symbol / tokenRef
+        // 不再落快照 —— 显示名住 Token 那一行,读端按 token_id 取(#243)。
         tokenId: b.tokenRef ? idByRef.get(b.tokenRef) : undefined,
         meta: "meta" in b ? b.meta : undefined,
         note: b.note,

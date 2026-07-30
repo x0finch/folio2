@@ -107,7 +107,8 @@ export async function buildOverview(
     b.tokenId ? enriched.get(b.tokenId) : undefined;
   const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
   const aggInputs: AggInput[] = rows.map(({ account, b, margin, e }) => ({
-    symbol: b.symbol,
+    // 显示名从 Token 取(#243:快照不再存 symbol);认不出的行 token 仍带建行时的 symbol。
+    symbol: e?.symbol ?? "",
     amount: b.amount,
     // 读时现推(不落库):按 mode + 实时源价(cache-only)重算 —— self-first 下 enrich-not-reprice
     // 行 ≡ 冻结值,盯市行(manual/bitcoin)取实时源价。aggregate 本身不改,只喂现推后的 value。
@@ -159,13 +160,18 @@ export async function buildOverview(
   // 与权益)。change24h 按行 id 附回(不按对象引用键——那只在 balancesOf 恰好返回同批对象时
   // 成立,克隆/规整一步就全落空,code review #9)。
   const defiChange = new Map(defiFlat.map((x) => [x.b.id, enriched.get(x.id)?.price?.change24h]));
-  const withDefiChange = (bs: OverviewBalance[]) =>
-    bs.map((b) => (defiChange.has(b.id) ? { ...b, change24h: defiChange.get(b.id) } : b));
+  // 每账户明细分区前的富化:① 显示名从 Token 取(#243:快照不再存 symbol)② defi 行附上 24h 涨跌。
+  const decorate = (bs: OverviewBalance[]): OverviewBalance[] =>
+    bs.map((b) => ({
+      ...b,
+      symbol: recordOf(b)?.symbol ?? b.symbol,
+      ...(defiChange.has(b.id) ? { change24h: defiChange.get(b.id) } : {}),
+    }));
 
   let defiSubtotal = 0;
   const sections = accounts
     .map((account) => {
-      const secs = toAccountSections(withDefiChange(balancesOf(account.id)));
+      const secs = toAccountSections(decorate(balancesOf(account.id)));
       defiSubtotal += secs.defi.reduce(
         (s, g) => s + g.rows.reduce((ss, r) => ss + r.usdValue, 0),
         0,
