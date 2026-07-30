@@ -32,6 +32,7 @@ export const Route = createFileRoute("/api/import")({
             const f = categorizeFields(credentialSpecs()[connectorId as ConnectorId] ?? []);
             return { publicKeys: f.public, semiKeys: f.semi, secretKeys: f.secret };
           },
+          isTargetEmpty: async () => (await db.listAccountsByUser(userId)).length === 0,
           importToken: async (t, refs) => ({ id: await db.importToken(userId, t, refs) }),
           createAccount: (input) =>
             db.createAccount(userId, { ...input, connectorId: input.connectorId as ConnectorId }),

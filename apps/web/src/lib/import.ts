@@ -6,9 +6,9 @@ import { EXPORT_VERSION } from "./export";
 // 单遍处理 NDJSON 记录;导出顺序保证 token→account→group→membership→snapshot→manualActivity,
 // 故引用某 id 的记录出现时,其 id map 已就绪。**id 重映射**(oldId→newId):新建的行拿新 id,不跟目标库已有的撞。
 //
-// **设计用途是「导进空库」**(#204 验收)。导进非空库时:**Token 按 ref 去重复用**(find-or-create,见
-// db.importToken),但**账户/分组/快照/账本是追加、不去重** —— 所以重复导入同一文件不是幂等的(账户会翻倍)。
-// 需要「合并进已有库」是另一类需求,不在本片范围。
+// **只允许导进空库**(#204):meta 那一关就查目标是否为空,非空直接拒。这一道闸同时给了两件事——
+// ① 挡住「手滑导两遍 → 账户翻倍」;② 让恢复**天然幂等**:每次都从空库跑、结果恒定(wipe→import)。
+// 「合并进已有库 / 反复往里叠」是另一类需求(要按自然键去重,还得绕开全局 id 主键与多用户的坑),不在本片。
 //
 // v3(#204):文件自带 Token 行(其 ref 嵌在里头)与手记账本;快照余额按 token_id(旧 id → 经 tokenMap 重映射)。
 // **不兼容旧文件** —— 版本闸只收 v3,v1/v2 明确报「太旧」。
@@ -47,6 +47,7 @@ interface ImportActivity {
 
 export interface ImportDeps {
   categorize(connectorId: string): InputKinds;
+  isTargetEmpty(): Promise<boolean>; // 目标用户是否空库(无账户);非空则拒绝导入(见模块头)
   importToken(
     t: {
       symbol: string;
@@ -127,6 +128,10 @@ export function createImporter(deps: ImportDeps) {
             ? `导出文件太旧(v${v}),本版本只支持 v${EXPORT_VERSION};请用新版本重新导出`
             : `unsupported export version: ${String(v)}(expected v${EXPORT_VERSION})`;
         throw new ImportError(hint);
+      }
+      // 空库闸:只往空库导。非空直接拒 —— 既挡住重复导入翻倍,又让恢复天然幂等(见模块头)。
+      if (!(await deps.isTargetEmpty())) {
+        throw new ImportError("导入仅支持空库:当前账户已有数据,请先清空(或用新账户)再导入");
       }
       metaSeen = true;
       return;

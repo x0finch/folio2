@@ -66,6 +66,7 @@ const dstDeps: ImportDeps = {
     connectorId === "evm"
       ? { publicKeys: ["address"], semiKeys: [], secretKeys: [] }
       : { publicKeys: [], semiKeys: [], secretKeys: [] },
+  isTargetEmpty: async () => (await db.listAccountsByUser(DST)).length === 0,
   importToken: async (t, refs) => ({ id: await db.importToken(DST, t, refs) }),
   createAccount: (input) =>
     db.createAccount(DST, { ...input, connectorId: input.connectorId as ConnectorId }),
@@ -329,18 +330,14 @@ describe("export → import v3 往返(空库重建)", () => {
     expect(normalizeExport(dstExport)).toEqual(normalizeExport(srcExport));
   });
 
-  it("导进非空库:Token 按 ref 复用、账户追加(重复导入不幂等 —— 设计取舍,restore-into-empty 才是支持面)", async () => {
+  it("空库闸:导进非空库直接拒(第二次导入同一文件抛错,不翻倍)——恢复因此天然幂等", async () => {
     await seedSource();
     const file = await exportRecords(SRC);
-    await importInto(file);
-    const tokens1 = (await db.listTokensForExport(DST)).length;
+    await importInto(file); // 第一次:空库,成功
     const accts1 = (await db.listAccountsByUser(DST)).length;
 
-    await importInto(file); // 二次导入同一文件
-    const tokens2 = (await db.listTokensForExport(DST)).length;
-    const accts2 = (await db.listAccountsByUser(DST)).length;
-
-    expect(tokens2).toBe(tokens1); // Token 按 ref 去重 → 不增
-    expect(accts2).toBe(accts1 * 2); // 账户无去重 → 翻倍(追加语义,记录在案)
+    // 第二次:DST 已非空 → meta 那一关就拒。
+    await expect(importInto(file)).rejects.toThrow(/空库|已有数据/);
+    expect((await db.listAccountsByUser(DST)).length).toBe(accts1); // 没翻倍
   });
 });

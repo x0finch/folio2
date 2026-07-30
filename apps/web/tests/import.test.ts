@@ -23,7 +23,7 @@ function categorize(connectorId: string): {
   return { publicKeys: [], semiKeys: [], secretKeys: [] }; // manual
 }
 
-function makeDeps() {
+function makeDeps(opts: { empty?: boolean } = {}) {
   const calls = {
     tokens: [] as Array<{ symbol: string; refs: { namer: string; localName: string }[] }>,
     accounts: [] as Array<{ connectorId: string; label: string; creds: string }>,
@@ -36,6 +36,7 @@ function makeDeps() {
   let n = 0;
   const deps: ImportDeps = {
     categorize,
+    isTargetEmpty: async () => opts.empty ?? true,
     importToken: async (t, refs) => {
       calls.tokens.push({ symbol: t.symbol, refs });
       return { id: `tk-${++n}` };
@@ -96,6 +97,14 @@ describe("createImporter —— 版本闸", () => {
     const { deps } = makeDeps();
     const imp = createImporter(deps);
     await expect(imp.apply({ type: "meta", version: 999 })).rejects.toThrow(ImportError);
+  });
+
+  it("目标非空 → 拒绝导入(空库闸:防翻倍 + 让恢复幂等)", async () => {
+    const { deps } = makeDeps({ empty: false });
+    const imp = createImporter(deps);
+    await expect(imp.apply({ type: "meta", version: EXPORT_VERSION })).rejects.toThrow(
+      /空库|已有数据/,
+    );
   });
 });
 
