@@ -3,11 +3,10 @@ import {
   type CredField,
   type FetchContext,
   ProviderError,
-  parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { defineRateLimit } from "@folio/shared";
+import { createHttpClient, defineRateLimit } from "@folio/shared";
 import { z } from "zod";
 import {
   API_KEY_HEADER,
@@ -113,46 +112,41 @@ const limit = defineRateLimit({
   interval: (RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000,
 });
 
-// 发起 CoinStats GET;每发都过速率闸。网络故障 → UPSTREAM_ERROR(可重试)。
-// 状态码由调用方用 ensureOk 处理 —— 但 429 要在这里就告诉闸(ensureOk 是同步的,await 不进去)。
-async function coinstatsGet(
-  connectionId: string,
-  address: string,
-  apiKey: string,
-): Promise<Response> {
-  const url = `${COINSTATS_API_BASE}${BALANCE_PATH}?address=${encodeURIComponent(address)}&connectionId=${encodeURIComponent(connectionId)}`;
-  try {
-    return await limit(() =>
-      fetch(url, { headers: { [API_KEY_HEADER]: apiKey, accept: "application/json" } }),
-    );
-  } catch (cause) {
-    throw new ProviderError("UPSTREAM_ERROR", "coinstats request failed", { cause });
-  }
-}
+// 出网:限频 + key 头 + 失败归类,都在共享的 http 包装里(@folio/shared)。
+// **apiKey 每次请求现取**(来自 ctx.creds,app 从 env 注入),经 per-request 的 context 递进去。
+const request = createHttpClient<string>({
+  baseUrl: COINSTATS_API_BASE,
+  limit,
+  headers: (_path, options) => ({
+    [API_KEY_HEADER]: options?.context ?? "",
+    accept: "application/json",
+  }),
+  toFailure: ({ kind, where, status, retryAfterMs, cause }) => {
+    if (kind === "network")
+      return new ProviderError("UPSTREAM_ERROR", "coinstats request failed", { cause });
+    if (kind === "auth")
+      return new ProviderError("AUTH_FAILED", `coinstats auth failed (${status})`);
+    if (kind === "rate-limited")
+      return new ProviderError("RATE_LIMITED", "coinstats rate limited", { retryAfterMs });
+    if (kind === "parse")
+      return new ProviderError("PARSE_ERROR", `coinstats returned invalid JSON (${where})`, {
+        cause,
+      });
+    return new ProviderError("UPSTREAM_ERROR", `coinstats upstream error (${status})`);
+  },
+});
 
-function ensureOk(res: Response): void {
-  if (res.ok) return;
-  if (res.status === 401 || res.status === 403) {
-    throw new ProviderError("AUTH_FAILED", `coinstats auth failed (${res.status})`);
-  }
-  if (res.status === 429) {
-    throw new ProviderError("RATE_LIMITED", "coinstats rate limited", {
-      retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
-    });
-  }
-  throw new ProviderError("UPSTREAM_ERROR", `coinstats upstream error (${res.status})`);
-}
+// 余额端点:地址 + connectionId 走 query,apiKey 走 context。
+const balanceOf = (connectionId: string, address: string, apiKey: string): Promise<unknown> =>
+  request(BALANCE_PATH, { query: { address, connectionId }, context: apiKey });
 
 async function fetchCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<Row[]> {
   const apiKey = getApiKey(ctx.creds);
-  const res = await coinstatsGet(connectionId, ctx.account.creds.address, apiKey);
-  ensureOk(res);
-  let json: CoinstatsCoin[];
-  try {
-    json = (await res.json()) as CoinstatsCoin[];
-  } catch (cause) {
-    throw new ProviderError("PARSE_ERROR", "coinstats returned invalid JSON", { cause });
-  }
+  const json = (await balanceOf(
+    connectionId,
+    ctx.account.creds.address,
+    apiKey,
+  )) as CoinstatsCoin[];
   // ⚠️ fallbackChain = connectionId(behavior-preserving,含 sui 的 "sui-wallet"):
   // 无 chain 的 coin 退化按 connectionId 归链,与旧 @folio/balances 完全一致。
   return parseBalances(json, connectionId);
@@ -163,8 +157,8 @@ async function validateCoinstats(connectionId: string, ctx: CoinstatsCtx): Promi
   const apiKey = ctx.creds[COINSTATS_API_KEY];
   if (!apiKey) return false;
   try {
-    const res = await coinstatsGet(connectionId, ctx.account.creds.address, apiKey);
-    return res.ok;
+    await balanceOf(connectionId, ctx.account.creds.address, apiKey);
+    return true;
   } catch {
     return false;
   }
@@ -175,10 +169,8 @@ async function validateCoinstats(connectionId: string, ctx: CoinstatsCtx): Promi
 async function validateApiKey(apiKey: string): Promise<boolean> {
   if (!apiKey) return false;
   try {
-    const res = await fetch(`${COINSTATS_API_BASE}${BLOCKCHAINS_PATH}`, {
-      headers: { [API_KEY_HEADER]: apiKey, accept: "application/json" },
-    });
-    return res.ok;
+    await request(BLOCKCHAINS_PATH, { context: apiKey });
+    return true;
   } catch {
     return false;
   }

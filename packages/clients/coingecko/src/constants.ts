@@ -1,3 +1,11 @@
+// —— 传输 ——
+export const CG_BASE_FREE = "https://api.coingecko.com/api/v3";
+export const CG_BASE_PRO = "https://pro-api.coingecko.com/api/v3";
+export const HEADER_DEMO = "x-cg-demo-api-key";
+export const HEADER_PRO = "x-cg-pro-api-key";
+// **必须注入 UA** —— CGK 的 Cloudflare WAF 对无 UA 请求返 403,而 Workers 的 fetch 默认不带。
+export const USER_AGENT = "folio-portfolio-tracker/1.0 (+https://github.com/x0finch/folio)";
+
 // 限速与重试的数字(原则 #8)。**每个都写出处** —— 猜一个看起来合理的数字然后不留痕迹,
 // 比不填更糟:太紧白白变慢(搜索/选币下拉是用户输入时打的),太松等于没装。
 

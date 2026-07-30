@@ -3,10 +3,10 @@ import {
   type CredField,
   hmacSha256,
   ProviderError,
-  parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { createHttpClient } from "@folio/shared";
 import { z } from "zod";
 import {
   AUTH_ERROR_CODES,
@@ -77,41 +77,38 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
   return out;
 }
 
-// 签名 GET:prehash = timestamp + 'GET' + requestPath;SIGN = base64(HMAC-SHA256)。
-async function okxGet(
-  path: string,
-  creds: { apiKey: string; secret: string; passphrase: string },
-): Promise<Response> {
-  const ts = new Date().toISOString();
-  const sign = await hmacSha256(creds.secret, `${ts}GET${path}`, "base64");
-  try {
-    return await fetch(`${OKX_API_BASE}${path}`, {
-      headers: {
-        [HEADER_KEY]: creds.apiKey,
-        [HEADER_SIGN]: sign,
-        [HEADER_TIMESTAMP]: ts,
-        [HEADER_PASSPHRASE]: creds.passphrase,
-        "Content-Type": "application/json",
-      },
-    });
-  } catch (cause) {
-    throw new ProviderError("UPSTREAM_ERROR", "okx request failed", { cause });
-  }
-}
+// 出网:签名头 + 失败归类走共享的 http 包装(@folio/shared)。**没有限频器** —— 额度按账户自己
+// 那把 key 算、一次同步只发 1 个请求,队永远是空的,装了拦不到任何东西(见 tests/no-gate.test.ts)。
+//
+// prehash = timestamp + 'GET' + requestPath;SIGN = base64(HMAC-SHA256)。
+type OkxCreds = { apiKey: string; secret: string; passphrase: string };
 
-// HTTP 层错误(OKX 也用 429 限流;auth 错通常是 200+code,见 assertCodeOk)。
-function ensureHttpOk(res: Response): void {
-  if (res.ok) return;
-  if (res.status === 401 || res.status === 403) {
-    throw new ProviderError("AUTH_FAILED", `okx auth failed (${res.status})`);
-  }
-  if (res.status === 429) {
-    throw new ProviderError("RATE_LIMITED", "okx rate limited", {
-      retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
-    });
-  }
-  throw new ProviderError("UPSTREAM_ERROR", `okx upstream error (${res.status})`);
-}
+const request = createHttpClient<OkxCreds>({
+  baseUrl: OKX_API_BASE,
+  headers: async (path, options) => {
+    const creds = options?.context;
+    if (!creds) throw new ProviderError("INVALID_CREDENTIALS", "okx: missing credentials");
+    const ts = new Date().toISOString();
+    return {
+      [HEADER_KEY]: creds.apiKey,
+      [HEADER_SIGN]: await hmacSha256(creds.secret, `${ts}GET${path}`, "base64"),
+      [HEADER_TIMESTAMP]: ts,
+      [HEADER_PASSPHRASE]: creds.passphrase,
+      "Content-Type": "application/json",
+    };
+  },
+  // OKX 的 auth 错通常是 200 + code(见下面 assertCodeOk),所以这里只管 HTTP 层。
+  toFailure: ({ kind, where, status, retryAfterMs, cause }) => {
+    if (kind === "network")
+      return new ProviderError("UPSTREAM_ERROR", "okx request failed", { cause });
+    if (kind === "auth") return new ProviderError("AUTH_FAILED", `okx auth failed (${status})`);
+    if (kind === "rate-limited")
+      return new ProviderError("RATE_LIMITED", "okx rate limited", { retryAfterMs });
+    if (kind === "parse")
+      return new ProviderError("PARSE_ERROR", `okx returned invalid JSON (${where})`, { cause });
+    return new ProviderError("UPSTREAM_ERROR", `okx upstream error (${status})`);
+  },
+});
 
 // 业务层错误(HTTP 200 + code!="0"):凭据类 code → AUTH_FAILED,其余 → UPSTREAM_ERROR。
 function assertCodeOk(body: OkxBalanceResponse): void {
@@ -122,14 +119,6 @@ function assertCodeOk(body: OkxBalanceResponse): void {
     throw new ProviderError("AUTH_FAILED", `okx auth failed (code ${code}: ${msg})`);
   }
   throw new ProviderError("UPSTREAM_ERROR", `okx error (code ${code}: ${msg})`);
-}
-
-async function readBody(res: Response): Promise<OkxBalanceResponse> {
-  try {
-    return (await res.json()) as OkxBalanceResponse;
-  } catch (cause) {
-    throw new ProviderError("PARSE_ERROR", "okx returned invalid JSON", { cause });
-  }
 }
 
 // —— 账户级 creds(AC):apiKey(semi)/secret(secret)/passphrase(secret)。apiKey = 标识符
@@ -148,19 +137,19 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
   creds: [],
 
   async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
-    const res = await okxGet(BALANCE_PATH, ctx.account.creds);
-    ensureHttpOk(res);
-    const body = await readBody(res);
-    assertCodeOk(body);
+    const body = (await request(BALANCE_PATH, {
+      context: ctx.account.creds,
+    })) as OkxBalanceResponse;
+    assertCodeOk(body); // HTTP 200 + code!="0" 是 OKX 表达错误的主要方式,包管不到这一层
     return { balances: parseBalances(body.data?.[0]?.details ?? []) };
   },
 
   // 校验:签名打 balance,HTTP ok 且 code="0" 即 true(creds 已保证三项非空)。任何失败 → false。
   async validateAccount(ctx): Promise<boolean> {
     try {
-      const res = await okxGet(BALANCE_PATH, ctx.account.creds);
-      if (!res.ok) return false;
-      const body = (await res.json()) as OkxBalanceResponse;
+      const body = (await request(BALANCE_PATH, {
+        context: ctx.account.creds,
+      })) as OkxBalanceResponse;
       return body.code === "0";
     } catch {
       return false;

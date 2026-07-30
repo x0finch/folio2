@@ -20,17 +20,6 @@ export interface ProviderErrorOptions {
   retryAfterMs?: number; // 服务端 Retry-After 建议等待(毫秒),重试方优先采用
 }
 
-// 解析 HTTP `Retry-After` 头 → 毫秒。数字 = 秒;HTTP-date = 距现在的毫秒。无效/非正 → undefined。
-export function parseRetryAfter(header: string | null | undefined): number | undefined {
-  if (!header) return undefined;
-  const secs = Number(header);
-  if (Number.isFinite(secs)) return secs > 0 ? secs * 1000 : undefined;
-  const whenMs = Date.parse(header);
-  if (Number.isNaN(whenMs)) return undefined;
-  const delta = whenMs - Date.now();
-  return delta > 0 ? delta : undefined;
-}
-
 export class ProviderError extends Error {
   readonly code: ProviderErrorCode;
   readonly retryable: boolean;

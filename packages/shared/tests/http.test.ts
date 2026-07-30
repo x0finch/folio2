@@ -96,6 +96,22 @@ describe("URL 与头", () => {
   });
 });
 
+describe("头的异常不归类", () => {
+  it("headers() 抛的错原样抛出,不被当成 network —— rabby 的签名失败靠这条", async () => {
+    stubFetch([ok({})]);
+    class SigningError extends Error {}
+    const get = createHttpClient({
+      baseUrl: BASE,
+      toFailure,
+      headers: () => {
+        throw new SigningError("wasm gone");
+      },
+    });
+    const err = await get("/x").catch((e) => e);
+    expect(err).toBeInstanceOf(SigningError); // 不是 FakeError
+  });
+});
+
 describe("失败归类", () => {
   it("fetch 抛了 → network", async () => {
     stubFetch([new Error("dns down")]);

@@ -343,13 +343,13 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
+      '@folio/shared':
+        specifier: workspace:*
+        version: link:../../../shared
       zod:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -365,13 +365,13 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
+      '@folio/shared':
+        specifier: workspace:*
+        version: link:../../../shared
       zod:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

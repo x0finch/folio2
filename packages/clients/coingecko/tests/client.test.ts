@@ -6,7 +6,6 @@ import {
   createCoinGeckoClient,
   HEADER_DEMO,
   HEADER_PRO,
-  parseRetryAfter,
   USER_AGENT,
 } from "../src/index";
 
@@ -236,14 +235,5 @@ describe("createCoinGeckoClient · 错误映射(以 assetPlatforms 触发)", () 
   });
 });
 
-describe("parseRetryAfter", () => {
-  it("纯秒数 → ms", () => expect(parseRetryAfter("30")).toBe(30000));
-  it("HTTP-date → 相对 ms", () => {
-    const at = Date.parse("Wed, 21 Oct 2026 07:28:00 GMT");
-    expect(parseRetryAfter("Wed, 21 Oct 2026 07:28:00 GMT", at - 5000)).toBe(5000);
-  });
-  it("缺失/坏值 → undefined", () => {
-    expect(parseRetryAfter(null)).toBeUndefined();
-    expect(parseRetryAfter("not-a-date")).toBeUndefined();
-  });
-});
+// `parseRetryAfter` 已随 http.ts 一起删掉 —— 解析 Retry-After 现在是 @folio/shared 的活,
+// 那三种形态(纯秒数 / HTTP-date / 垃圾值)在它的 tests/http.test.ts 里覆盖。

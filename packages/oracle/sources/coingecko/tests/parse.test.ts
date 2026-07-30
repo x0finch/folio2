@@ -4,7 +4,6 @@ import {
   parseAssetPlatforms,
   parseContract,
   parseMarkets,
-  parseRetryAfter,
   parseSearch,
   parseSimplePrice,
 } from "../src/parse";
@@ -130,16 +129,5 @@ describe("parseSearch", () => {
   });
 });
 
-describe("parseRetryAfter", () => {
-  it("numeric seconds → ms", () => {
-    expect(parseRetryAfter("30")).toBe(30000);
-  });
-  it("HTTP-date → ms delta from now", () => {
-    const at = Date.parse("Wed, 21 Oct 2026 07:28:00 GMT");
-    expect(parseRetryAfter("Wed, 21 Oct 2026 07:28:00 GMT", at - 5000)).toBe(5000);
-  });
-  it("null / garbage → undefined", () => {
-    expect(parseRetryAfter(null)).toBeUndefined();
-    expect(parseRetryAfter("not-a-date")).toBeUndefined();
-  });
-});
+// parseRetryAfter 的测试已随实现移走 —— 解析 Retry-After 现在是 @folio/shared 的活
+// (三种形态在它的 tests/http.test.ts 里覆盖),本包只是当年转手再导出了一下。

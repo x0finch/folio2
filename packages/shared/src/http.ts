@@ -30,10 +30,10 @@ function parseRetryAfter(header: string | null, now: number): number | undefined
 
 const DEFAULT_RATE_LIMITED = [429];
 
-export function createHttpClient(opts: HttpClientOptions): Fetcher {
+export function createHttpClient<Ctx = undefined>(opts: HttpClientOptions<Ctx>): Fetcher<Ctx> {
   const rateLimited = new Set(opts.rateLimitedStatuses ?? DEFAULT_RATE_LIMITED);
 
-  const once = async (path: string, options: FetchOptions | undefined): Promise<unknown> => {
+  const once = async (path: string, options: FetchOptions<Ctx> | undefined): Promise<unknown> => {
     const url = new URL(`${opts.baseUrl}${path}`);
     for (const [k, v] of Object.entries(options?.query ?? {})) {
       if (v !== undefined) url.searchParams.set(k, String(v));
@@ -42,9 +42,13 @@ export function createHttpClient(opts: HttpClientOptions): Fetcher {
     // 错误消息和日志(原则 #5 的红线)。
     const where = url.pathname;
 
+    // **头是调用方的代码,它抛什么就原样抛出去** —— 不归类、不重新包装。
+    // rabby 就靠这条:签名算不出来是 AUTH_FAILED(不可重试),不是网络故障。归错了会退化成
+    // 「三次退避全白打」,还把真正的原因盖掉。
+    const headers = opts.headers ? await opts.headers(path, options) : undefined;
+
     let res: Response;
     try {
-      const headers = opts.headers ? await opts.headers(path, options) : undefined;
       res = await fetch(url, { ...options?.init, headers });
     } catch (cause) {
       throw opts.toFailure({ kind: "network", where, cause });

@@ -90,20 +90,27 @@ export interface Failure {
   cause?: unknown;
 }
 
-export interface FetchOptions {
+export interface FetchOptions<Ctx = undefined> {
   query?: Record<string, string | number | undefined>; // undefined 的键不参与
   init?: RequestInit;
   // 404 当成「没有这个东西」而不是故障 → 返回 null。只对「按 id 查一个东西」的端点开。
   notFoundAsNull?: boolean;
+  // 传给 `headers()` 的**每请求上下文**。**包不看它的内容**,只负责递过去。
+  // 为什么需要:有些上游的凭据是每请求现取的(zerion / coinstats 的 key 来自 ctx.creds,
+  // 不是模块级常量),而 `headers()` 是在包里被调用的,拿不到调用点的闭包。
+  context?: Ctx;
 }
 
-export interface HttpClientOptions {
+export interface HttpClientOptions<Ctx = undefined> {
   // **必填**:五个真实调用点都有基址,而少了它 `new URL("/path")` 会当场炸 —— 与其留一个
   // 「忘了传就报 Invalid URL」的失败模式,不如在类型上要求它。
   baseUrl: string;
   // 每次请求的头。**是函数而不是对象** —— 签名类的头(rabby 的 wasm 签名、binance 的 HMAC)
   // 要按路径和参数算,而且是异步的。
-  headers?: (path: string, options: FetchOptions | undefined) => HeadersInit | Promise<HeadersInit>;
+  headers?: (
+    path: string,
+    options: FetchOptions<Ctx> | undefined,
+  ) => HeadersInit | Promise<HeadersInit>;
   limit?: RateLimiter; // 不传 = 不限频(判据见 RateLimitOptions.key 的注释:队里没人挤就别装)
   retry?: RetryOpts; // 不传 = 不重试(provider 那条路由 @folio/sync 统一重试)
   rateLimitedStatuses?: number[]; // 默认 [429]
@@ -112,4 +119,7 @@ export interface HttpClientOptions {
 }
 
 // 发一个请求,回解析好的 JSON(`notFoundAsNull` 且 404 时回 null)。
-export type Fetcher = (path: string, options?: FetchOptions) => Promise<unknown>;
+export type Fetcher<Ctx = undefined> = (
+  path: string,
+  options?: FetchOptions<Ctx>,
+) => Promise<unknown>;

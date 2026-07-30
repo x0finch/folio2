@@ -3,10 +3,9 @@ import {
   type CredField,
   type Defi,
   ProviderError,
-  parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
-import { defineRateLimit } from "@folio/shared";
+import { createHttpClient, defineRateLimit } from "@folio/shared";
 import { z } from "zod";
 import {
   CACHE_TOKEN_LIST_PATH,
@@ -83,54 +82,40 @@ const limit = defineRateLimit({
   interval: 1000 / MAX_REQUESTS_PER_SECOND,
 });
 
-// 发一个签名过的 GET。每发都过速率闸。
-// 网络故障 → UPSTREAM_ERROR(可重试);签名算不出来 → AUTH_FAILED(**不可重试**)。
-// 签名失败归到 AUTH_FAILED 而不是 UPSTREAM_ERROR,是因为它和「凭据被远端拒绝」在处理上同类:
+// 出网:限频 + 签名头 + 失败归类,都在共享的 http 包装里(@folio/shared)。
+//
+// **签名失败归 AUTH_FAILED 而不是 UPSTREAM_ERROR**,因为它和「凭据被远端拒绝」在处理上同类:
 // 重试没有意义、要人介入(通常意味着上游改了签名协议,得重新 vendoring)。若错标成可重试,
-// 会退化成「三次退避全白打」还把真正的原因盖掉。
-async function rabbyGet(path: string, params: Record<string, string>): Promise<Response> {
-  let headers: Record<string, string>;
-  try {
-    headers = await sign("GET", path, params);
-  } catch (cause) {
-    throw new ProviderError("AUTH_FAILED", "rabby: request signing failed", { cause });
-  }
-  const query = new URLSearchParams(params).toString();
-  try {
-    return await limit(() =>
-      fetch(`${RABBY_API_BASE}${path}${query ? `?${query}` : ""}`, {
-        headers: { ...headers, accept: "application/json" },
-      }),
-    );
-  } catch (cause) {
-    throw new ProviderError("UPSTREAM_ERROR", "rabby request failed", { cause });
-  }
-}
+// 会退化成「三次退避全白打」还把真正的原因盖掉。包装器**不碰头函数抛的错**,所以这里抛什么就是什么。
+//
+// rabby 的 429 **不带 Retry-After**(实测),所以 retryAfterMs 恒为 undefined,走 sync 的默认退避 ——
+// 但真撞上了退避大概不够(它恢复得慢),所以指望的是闸而不是重试。
+const request = createHttpClient({
+  baseUrl: RABBY_API_BASE,
+  limit,
+  headers: async (path, options) => {
+    const params = (options?.query ?? {}) as Record<string, string>;
+    try {
+      return { ...(await sign("GET", path, params)), accept: "application/json" };
+    } catch (cause) {
+      throw new ProviderError("AUTH_FAILED", "rabby: request signing failed", { cause });
+    }
+  },
+  toFailure: ({ kind, where, status, retryAfterMs, cause }) => {
+    if (kind === "network")
+      return new ProviderError("UPSTREAM_ERROR", "rabby request failed", { cause });
+    if (kind === "rate-limited")
+      return new ProviderError("RATE_LIMITED", "rabby rate limited", { retryAfterMs });
+    if (kind === "auth") return new ProviderError("AUTH_FAILED", `rabby auth failed (${status})`);
+    if (kind === "parse") {
+      return new ProviderError("PARSE_ERROR", `rabby returned invalid JSON (${where})`, { cause });
+    }
+    return new ProviderError("UPSTREAM_ERROR", `rabby upstream error (${status})`);
+  },
+});
 
-// 状态码 → ProviderError。rabby 的 429 **不带 Retry-After**(实测),所以 retryAfterMs 是 undefined,
-// 走 sync 的默认退避 —— 但真撞上了退避大概不够(它恢复得慢),所以指望的是闸而不是重试。
-function ensureOk(res: Response): void {
-  if (res.ok) return;
-  if (res.status === 429) {
-    throw new ProviderError("RATE_LIMITED", "rabby rate limited", {
-      retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
-    });
-  }
-  if (res.status === 401 || res.status === 403) {
-    throw new ProviderError("AUTH_FAILED", `rabby auth failed (${res.status})`);
-  }
-  throw new ProviderError("UPSTREAM_ERROR", `rabby upstream error (${res.status})`);
-}
-
-async function getJson<T>(path: string, params: Record<string, string>): Promise<T> {
-  const res = await rabbyGet(path, params);
-  ensureOk(res);
-  try {
-    return (await res.json()) as T;
-  } catch (cause) {
-    throw new ProviderError("PARSE_ERROR", `rabby returned invalid JSON (${path})`, { cause });
-  }
-}
+const getJson = async <T>(path: string, params: Record<string, string>): Promise<T> =>
+  (await request(path, { query: params })) as T;
 
 // —— 链清单缓存(isolate 级;chainId 不可变,24h 够)——
 let chainIdsCache: { map: Record<string, number>; fetchedAt: number } | null = null;
@@ -180,8 +165,8 @@ export const rabbyProvider: BalanceProvider<Row, typeof accountCreds, typeof pro
   // 低消耗校验:打最轻的 total_balance 探活(地址格式已由组装处的 validator 保证)。任何失败 → false。
   async validateAccount(ctx): Promise<boolean> {
     try {
-      const res = await rabbyGet(TOTAL_BALANCE_PATH, { id: ctx.account.creds.address });
-      return res.ok;
+      await request(TOTAL_BALANCE_PATH, { query: { id: ctx.account.creds.address } });
+      return true;
     } catch {
       return false;
     }
