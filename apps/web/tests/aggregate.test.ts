@@ -102,6 +102,18 @@ describe("buildCanonicalHoldings", () => {
     expect(hs).toHaveLength(2);
   });
 
+  // #243 删了快照 symbol 列后,没有 token_id 的行(只剩 v2 导入进来的)symbol 为空。若还拿 symbol
+  // 当兜底键,同一账户里所有无 token 的行会塌成一条空名持仓、金额被错误相加。兜底改用余额行 id
+  // → 各自独立成行,金额不混。
+  it("无 token_id 的行按余额行 id 各自成行,不塌成一条空名合并行", () => {
+    const hs = buildCanonicalHoldings([
+      row({ id: "bal-1", symbol: "", amount: 1, value: 10, account: binance }),
+      row({ id: "bal-2", symbol: "", amount: 1, value: 20, account: binance }),
+    ]);
+    expect(hs).toHaveLength(2);
+    expect(hs.map((h) => h.totalValue).sort((a, b) => a - b)).toEqual([10, 20]);
+  });
+
   // 同一个 Token 被不同来源报出(交易所 / 链上),读端只看 token_id → 一行。
   // 换源之后上游 id 变了也不碎:token_id 是 vendor 中立的。
   it("同一个 token_id、来源不同 → 一行", () => {

@@ -107,7 +107,9 @@ export async function buildOverview(
     b.tokenId ? enriched.get(b.tokenId) : undefined;
   const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
   const aggInputs: AggInput[] = rows.map(({ account, b, margin, e }) => ({
-    // 显示名从 Token 取(#243:快照不再存 symbol);认不出的行 token 仍带建行时的 symbol。
+    id: b.id, // 无 token_id 的行按它各自成行(见 aggregate.groupKey)
+    // 显示名从 Token 取(#243:快照不再存 symbol)。有 token_id 但上游没认出的行,token 仍带建行时
+    // 连接器报的 symbol;压根没有 token_id 的行(仅 v2 导入)没有名字 → 空串,靠上面的 id 保持独立。
     symbol: e?.symbol ?? "",
     amount: b.amount,
     // 读时现推(不落库):按 mode + 实时源价(cache-only)重算 —— self-first 下 enrich-not-reprice
