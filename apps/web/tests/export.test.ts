@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   accountRecord,
-  activityRecord,
   EXPORT_VERSION,
+  manualActivityRecord,
   metaRecord,
   ndjsonLine,
   snapshotRecord,
@@ -121,9 +121,9 @@ describe("snapshotRecord", () => {
   });
 });
 
-describe("activityRecord", () => {
+describe("manualActivityRecord", () => {
   it("扁平记录、保留 createdAt、null 字段省略", () => {
-    const rec = activityRecord({
+    const rec = manualActivityRecord({
       accountId: "a",
       tokenId: "tk",
       kind: "add",
@@ -135,7 +135,7 @@ describe("activityRecord", () => {
       createdAt: 5,
     });
     expect(rec).toMatchObject({
-      type: "activity",
+      type: "manualActivity",
       accountId: "a",
       tokenId: "tk",
       kind: "add",

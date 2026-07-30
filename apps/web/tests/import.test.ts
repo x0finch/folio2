@@ -193,7 +193,7 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
     await imp.apply({ type: "token", id: "old-tk", symbol: "BTC", name: "Bitcoin", refs: [] });
     await imp.apply({ type: "account", id: "old-a", connectorId: "manual", label: "M", creds: {} });
     await imp.apply({
-      type: "activity",
+      type: "manualActivity",
       accountId: "old-a",
       tokenId: "old-tk",
       kind: "add",
@@ -203,7 +203,7 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
     });
     // 未知 token → 跳过
     await imp.apply({
-      type: "activity",
+      type: "manualActivity",
       accountId: "old-a",
       tokenId: "ghost",
       kind: "add",

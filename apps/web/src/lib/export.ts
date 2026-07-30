@@ -128,9 +128,10 @@ export function snapshotRecord(s: SnapshotIn, balances: BalanceIn[]) {
 }
 
 // 手记活动记录(#204):扁平,同 membership。accountId/tokenId 是导出侧旧 id,导入各自重映射。
-export function activityRecord(a: ActivityIn) {
+// 类型名带 `manual` 前缀 —— 它只装 `manual_activity`,别用泛名以免与将来别的「活动」概念混。
+export function manualActivityRecord(a: ActivityIn) {
   return {
-    type: "activity" as const,
+    type: "manualActivity" as const,
     accountId: a.accountId,
     tokenId: a.tokenId ?? undefined,
     kind: a.kind,

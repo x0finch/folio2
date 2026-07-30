@@ -3,8 +3,12 @@ import { SEMI_PREFIX } from "./creds";
 import { EXPORT_VERSION } from "./export";
 
 // 纯导入逻辑(无 server-only import → 可单测,DB 经 deps 注入)。
-// 单遍处理 NDJSON 记录;导出顺序保证 token→account→group→membership→snapshot→activity,
-// 故引用某 id 的记录出现时,其 id map 已就绪。**id 重映射**(oldId→newId)避免与现有数据冲突、支持重复导入。
+// 单遍处理 NDJSON 记录;导出顺序保证 token→account→group→membership→snapshot→manualActivity,
+// 故引用某 id 的记录出现时,其 id map 已就绪。**id 重映射**(oldId→newId):新建的行拿新 id,不跟目标库已有的撞。
+//
+// **设计用途是「导进空库」**(#204 验收)。导进非空库时:**Token 按 ref 去重复用**(find-or-create,见
+// db.importToken),但**账户/分组/快照/账本是追加、不去重** —— 所以重复导入同一文件不是幂等的(账户会翻倍)。
+// 需要「合并进已有库」是另一类需求,不在本片范围。
 //
 // v3(#204):文件自带 Token 行(其 ref 嵌在里头)与手记账本;快照余额按 token_id(旧 id → 经 tokenMap 重映射)。
 // **不兼容旧文件** —— 版本闸只收 v3,v1/v2 明确报「太旧」。
@@ -208,7 +212,7 @@ export function createImporter(deps: ImportDeps) {
         }
         break;
       }
-      case "activity": {
+      case "manualActivity": {
         const accountId = accountMap.get(String(rec.accountId));
         const tokenId = tokenMap.get(String(rec.tokenId));
         if (accountId && tokenId) {

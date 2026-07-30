@@ -3,8 +3,8 @@ import type { ConnectorId } from "@folio/connectors";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   accountRecord,
-  activityRecord,
   groupRecord,
+  manualActivityRecord,
   membershipRecord,
   metaRecord,
   ndjsonLine,
@@ -56,7 +56,7 @@ async function exportRecords(userId: string): Promise<unknown[]> {
     else bySnap.set(b.snapshotId, [b]);
   }
   for (const s of page) recs.push(snapshotRecord(s, bySnap.get(s.id) ?? []));
-  for (const a of await db.listManualActivityByUser(userId)) recs.push(activityRecord(a));
+  for (const a of await db.listManualActivityByUser(userId)) recs.push(manualActivityRecord(a));
   return recs;
 }
 
@@ -174,6 +174,46 @@ const normTokens = (
     }))
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
 
+// 把一份导出记录归一成可比较的形状:去掉 exportedAt,把所有 id(token/account/group)换成内容键
+// (导入侧 id 全新,直接比会不等)。用来验「导入后再导出 ≡ 原导出」这个不动点。
+type Rec = Record<string, unknown>;
+function normalizeExport(records: unknown[]): Rec[] {
+  const recs = records as Rec[];
+  const key = new Map<string, string>();
+  for (const r of recs) {
+    if (r.type === "token") key.set(`t:${r.id}`, `token:${String(r.symbol)}`);
+    else if (r.type === "account") key.set(`a:${r.id}`, `acct:${String(r.label)}`);
+    else if (r.type === "group") key.set(`g:${r.id}`, `group:${String(r.name)}`);
+  }
+  const t = (id: unknown) => key.get(`t:${String(id)}`);
+  const a = (id: unknown) => key.get(`a:${String(id)}`);
+  const g = (id: unknown) => key.get(`g:${String(id)}`);
+  return recs
+    .map((r): Rec => {
+      if (r.type === "meta") {
+        const { exportedAt, ...rest } = r;
+        return rest;
+      }
+      if (r.type === "token") return { ...r, id: t(r.id) };
+      if (r.type === "account")
+        // archivedAt 的精确时间戳有意不保真(导入用 now 重归档);只比归档**状态**。
+        return { ...r, id: a(r.id), archivedAt: r.archivedAt === undefined ? undefined : true };
+      if (r.type === "group") return { ...r, id: g(r.id) };
+      if (r.type === "membership")
+        return { ...r, accountId: a(r.accountId), groupId: g(r.groupId) };
+      if (r.type === "snapshot")
+        return {
+          ...r,
+          accountId: a(r.accountId),
+          balances: (r.balances as Rec[]).map((b) => ({ ...b, tokenId: t(b.tokenId) })),
+        };
+      if (r.type === "manualActivity")
+        return { ...r, accountId: a(r.accountId), tokenId: t(r.tokenId) };
+      return r;
+    })
+    .sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y)));
+}
+
 describe("export → import v3 往返(空库重建)", () => {
   it("Token(含 ref)完整复现,id 是新的、不跟源库撞", async () => {
     await seedSource();
@@ -279,5 +319,28 @@ describe("export → import v3 往返(空库重建)", () => {
     await importInto(await exportRecords(SRC));
     const eth = (await db.listTokensForExport(DST)).find((t) => t.symbol === "ETH")!;
     expect(eth.refs).toHaveLength(2);
+  });
+
+  it("导入后再导出 ≡ 原导出(格式是不动点:归一掉 id/时间戳后逐条相等)", async () => {
+    await seedSource();
+    const srcExport = await exportRecords(SRC);
+    await importInto(srcExport);
+    const dstExport = await exportRecords(DST);
+    expect(normalizeExport(dstExport)).toEqual(normalizeExport(srcExport));
+  });
+
+  it("导进非空库:Token 按 ref 复用、账户追加(重复导入不幂等 —— 设计取舍,restore-into-empty 才是支持面)", async () => {
+    await seedSource();
+    const file = await exportRecords(SRC);
+    await importInto(file);
+    const tokens1 = (await db.listTokensForExport(DST)).length;
+    const accts1 = (await db.listAccountsByUser(DST)).length;
+
+    await importInto(file); // 二次导入同一文件
+    const tokens2 = (await db.listTokensForExport(DST)).length;
+    const accts2 = (await db.listAccountsByUser(DST)).length;
+
+    expect(tokens2).toBe(tokens1); // Token 按 ref 去重 → 不增
+    expect(accts2).toBe(accts1 * 2); // 账户无去重 → 翻倍(追加语义,记录在案)
   });
 });

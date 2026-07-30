@@ -4,8 +4,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { safeView } from "@/lib/creds";
 import {
   accountRecord,
-  activityRecord,
   groupRecord,
+  manualActivityRecord,
   membershipRecord,
   metaRecord,
   ndjsonLine,
@@ -75,7 +75,8 @@ export const Route = createFileRoute("/api/export")({
               }
 
               // 手记账本(#204):最后写,accountId/tokenId 引用前面已建的账户/Token。
-              for (const a of await db.listManualActivityByUser(userId)) write(activityRecord(a));
+              for (const a of await db.listManualActivityByUser(userId))
+                write(manualActivityRecord(a));
 
               controller.close();
             } catch (err) {
