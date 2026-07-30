@@ -243,6 +243,10 @@ const en = {
     signOut: "Sign out",
     signOutConfirmTitle: "Sign out?",
     signOutConfirmBody: "You'll need to sign in again to see your portfolio.",
+    importMergeTitle: "Import into existing data?",
+    importMergeBody:
+      "Your library already has data. Importing merges the file in — re-importing the same file won't create duplicates, and different files are combined. Continue?",
+    importMergeConfirm: "Import",
     appearance: "Appearance",
     theme: "Theme",
     themeLight: "Light",
@@ -537,6 +541,10 @@ const zh: Messages = {
     signOut: "退出登录",
     signOutConfirmTitle: "退出登录?",
     signOutConfirmBody: "你需要重新登录才能查看你的组合。",
+    importMergeTitle: "导入到已有数据?",
+    importMergeBody:
+      "你的库里已有数据。导入会把文件合并进来——同一文件再导一遍不会产生重复,不同文件会合并。继续?",
+    importMergeConfirm: "导入",
     appearance: "外观",
     theme: "主题",
     themeLight: "浅色",

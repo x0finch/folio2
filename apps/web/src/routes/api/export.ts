@@ -1,14 +1,16 @@
-import type { SnapshotBalanceExportRow } from "@folio/db";
+import type { SnapshotBalance } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { safeView } from "@/lib/creds";
 import {
   accountRecord,
   groupRecord,
+  manualActivityRecord,
   membershipRecord,
   metaRecord,
   ndjsonLine,
   snapshotRecord,
+  tokenRecord,
 } from "@/lib/export";
 import { getAuth } from "@/lib/server/internal/auth";
 import { resolveAuth } from "@/lib/server/internal/auth-session";
@@ -41,6 +43,10 @@ export const Route = createFileRoute("/api/export")({
             try {
               write(metaRecord(Date.now())); // 首行:版本号等
 
+              // Token 行(#204):必须在 snapshot / activity 之前 —— 它们按 token_id 引用,
+              // 单遍导入据流内顺序先建 Token 映射。
+              for (const t of await db.listTokensForExport(userId)) write(tokenRecord(t));
+
               const specsByType = credentialSpecs();
               const accounts = await db.listAccountsByUser(userId);
               for (const a of accounts) {
@@ -58,7 +64,7 @@ export const Route = createFileRoute("/api/export")({
                 const page = await db.listSnapshotsPageByUser(userId, SNAPSHOT_PAGE, offset);
                 if (page.length === 0) break;
                 const pageBalances = await db.listBalancesForSnapshots(page.map((s) => s.id));
-                const bySnapshot = new Map<string, SnapshotBalanceExportRow[]>();
+                const bySnapshot = new Map<string, SnapshotBalance[]>();
                 for (const b of pageBalances) {
                   const arr = bySnapshot.get(b.snapshotId);
                   if (arr) arr.push(b);
@@ -67,6 +73,10 @@ export const Route = createFileRoute("/api/export")({
                 for (const s of page) write(snapshotRecord(s, bySnapshot.get(s.id) ?? []));
                 if (page.length < SNAPSHOT_PAGE) break;
               }
+
+              // 手记账本(#204):最后写,accountId/tokenId 引用前面已建的账户/Token。
+              for (const a of await db.listManualActivityByUser(userId))
+                write(manualActivityRecord(a));
 
               controller.close();
             } catch (err) {

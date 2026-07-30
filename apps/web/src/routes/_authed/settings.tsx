@@ -23,6 +23,7 @@ import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { signOut } from "../../lib/auth-client";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import {
+  getDataStats,
   getProviderKeyStatus,
   getValuationSettings,
   updateValuationSettings,
@@ -33,8 +34,12 @@ const authedApi = getRouteApi("/_authed");
 
 export const Route = createFileRoute("/_authed/settings")({
   loader: async () => {
-    const [status, valuation] = await Promise.all([getProviderKeyStatus(), getValuationSettings()]);
-    return { status, valuation };
+    const [status, valuation, dataStats] = await Promise.all([
+      getProviderKeyStatus(),
+      getValuationSettings(),
+      getDataStats(),
+    ]);
+    return { status, valuation, dataStats };
   },
   component: Settings,
 });
@@ -49,7 +54,7 @@ const PROVIDER_KEYS = [
 // 设置页(S1,#112):外观 / 账户 / 币种 / 登出全集中于此(外壳退回纯导航 + 身份)。
 // 卡片顺序(grill):账户 → 外观 → Provider key → 估值 → 数据。
 function Settings() {
-  const { status, valuation } = Route.useLoaderData();
+  const { status, valuation, dataStats } = Route.useLoaderData();
   const { user } = authedApi.useRouteContext();
   return (
     <div className="flex flex-col gap-6">
@@ -57,7 +62,7 @@ function Settings() {
       <AppearanceCard />
       <ProviderKeysCard status={status} />
       <ValuationCard mode={valuation.valuationMode} />
-      <DataCard />
+      <DataCard hasData={dataStats.hasData} />
     </div>
   );
 }
@@ -245,7 +250,7 @@ function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
 
 // 数据卡(合一):导出段 + 分隔线 + 导入段。复用现有 /api/export、/api/import 路由。
 // 导入文案沿用 Accounts 命名空间的 import* 键(与账户页导入同源)。
-function DataCard() {
+function DataCard({ hasData }: { hasData: boolean }) {
   const router = useRouter();
   const t = useTranslations("Settings");
   const ta = useTranslations("Accounts");
@@ -254,10 +259,24 @@ function DataCard() {
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 非空库导入是合并式(幂等,不翻倍),但先弹一道确认 —— 让用户明确知道是「并进已有数据」。
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
-  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function clearInput() {
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (hasData) {
+      setPendingFile(file); // 非空 → 先确认(见 MorphingModal),不立即导
+      return;
+    }
+    void runImport(file); // 空库 → 直接导
+  }
+
+  async function runImport(file: File) {
     setMsg(null);
     setError(null);
     setBusy(true);
@@ -279,8 +298,19 @@ function DataCard() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
-      if (inputRef.current) inputRef.current.value = "";
+      clearInput();
     }
+  }
+
+  function confirmImport() {
+    const file = pendingFile;
+    setPendingFile(null);
+    if (file) void runImport(file);
+  }
+
+  function cancelImport() {
+    setPendingFile(null);
+    clearInput();
   }
 
   return (
@@ -329,6 +359,19 @@ function DataCard() {
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
       </CardContent>
+
+      <MorphingModal viewId={pendingFile ? "import-merge" : null} onClose={cancelImport}>
+        <div className="text-left">
+          <p className="font-semibold text-base">{t("importMergeTitle")}</p>
+          <p className="mt-1.5 text-muted-foreground text-sm">{t("importMergeBody")}</p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="outline" onClick={cancelImport}>
+              {tc("cancel")}
+            </Button>
+            <Button onClick={confirmImport}>{t("importMergeConfirm")}</Button>
+          </div>
+        </div>
+      </MorphingModal>
     </Card>
   );
 }

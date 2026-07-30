@@ -1,12 +1,20 @@
-import type { BalanceKind } from "@folio/connectors-basic";
+import type { BalanceKind, Note } from "@folio/connectors-basic";
 import { SEMI_PREFIX } from "./creds";
 import { EXPORT_VERSION } from "./export";
 
 // 纯导入逻辑(无 server-only import → 可单测,DB 经 deps 注入)。
-// 单遍处理 NDJSON 记录(导出顺序保证 accounts→groups→memberships→snapshots,故 id map 先就绪);
-// **id 重映射**(oldId→newId)避免与现有数据冲突、支持重复导入。
+// 单遍处理 NDJSON 记录;导出顺序保证 token→account→group→membership→snapshot→manualActivity,
+// 故引用某 id 的记录出现时,其 id map 已就绪。
+//
+// **合并式导入,幂等**(#204,A 方案):每类实体按**内容自然键** find-or-create(见 db 的 import* op)——
+// token 按 ref、账户按 (connectorId+platform+label+creds)、分组按 (name+sortOrder)、快照按 (account,takenAt)、
+// 手记活动按整条内容。命中既有 → 复用(其新 id 记进映射表),没有 → 建新行。于是:**反复导入同一文件
+// 结果不变(不翻倍),导入不同文件则合并进来**。全程用新 id、按 userId 作用域去重,多用户安全。
+//
+// v3(#204):文件自带 Token 行(其 ref 嵌在里头)与手记账本;快照余额按 token_id(旧 id → 经 tokenMap 重映射)。
+// **不兼容旧文件** —— 版本闸只收 v3,v1/v2 明确报「太旧」。
 // 凭据(P6.6.1):重建存库 creds map —— public 字段真值原样;semi 字段(导出已打码)写成 `semi_<key>`
-// 占位待补录;secret 文件里没有 → 不写。缺凭据态由 isComplete(inputs, creds) 在内存判定(见 sync)。
+// 占位待补录;secret 文件里没有 → 不写。
 
 export class ImportError extends Error {}
 
@@ -18,35 +26,62 @@ interface InputKinds {
 }
 
 interface ImportSnapshotBalance {
-  symbol: string;
+  tokenId?: string; // 身份锚(由 apply 经 tokenMap 重映射后传入);#244 起 DB 必填
   amount: number;
   usdValue: number;
   kind: BalanceKind;
-  platform?: string; // v2 的文件没有它 —— 缺席即空,下次同步补上
+  selfPrice?: number;
+  platform?: string;
   meta?: Record<string, unknown>;
+  note?: Note; // balance 级 note
 }
 
+interface ImportActivity {
+  kind: "add" | "reduce" | "set";
+  amount: number;
+  price?: number | null;
+  fee?: number | null;
+  occurredAt: number;
+  memo?: string | null;
+  createdAt?: number;
+}
+
+// 所有 import* 都是 find-or-create(按各自的内容自然键去重),让反复导入 / 合并幂等。
 export interface ImportDeps {
   categorize(connectorId: string): InputKinds;
-  createAccount(input: {
+  importToken(
+    t: {
+      symbol: string;
+      name: string;
+      logo?: string | null;
+      providerLogo?: string | null;
+      marketCapRank?: number | null;
+    },
+    refs: { namer: string; localName: string }[],
+  ): Promise<{ id: string }>;
+  importAccount(input: {
     connectorId: string;
     platform?: string;
     label: string;
     creds: string;
+    archivedAt?: number | null;
   }): Promise<{ id: string }>;
-  createGroup(input: { name: string; sortOrder?: number }): Promise<{ id: string }>;
+  importGroup(input: { name: string; sortOrder?: number }): Promise<{ id: string }>;
   addAccountToGroup(accountId: string, groupId: string): Promise<void>;
-  writeSnapshot(
+  importSnapshot(
     accountId: string,
-    input: { takenAt: number; totalUsd: number; balances: ImportSnapshotBalance[] },
+    input: { takenAt: number; totalUsd: number; note?: Note[]; balances: ImportSnapshotBalance[] },
   ): Promise<void>;
+  importManualActivity(accountId: string, tokenId: string, input: ImportActivity): Promise<void>;
 }
 
 interface ImportCounts {
+  tokens: number;
   accounts: number;
   groups: number;
   memberships: number;
   snapshots: number;
+  activities: number;
 }
 
 // 解析一行 NDJSON → 记录对象;空行/坏 JSON → null(流式读会有不完整行,调用方按需缓冲)。
@@ -61,16 +96,39 @@ export function parseImportLine(line: string): Record<string, unknown> | null {
   }
 }
 
+const asRefs = (v: unknown): { namer: string; localName: string }[] =>
+  Array.isArray(v)
+    ? v.flatMap((r) =>
+        r && typeof r === "object" && typeof r.namer === "string" && typeof r.localName === "string"
+          ? [{ namer: r.namer, localName: r.localName }]
+          : [],
+      )
+    : [];
+
 export function createImporter(deps: ImportDeps) {
-  const accountMap = new Map<string, string>(); // 导出 id → 新建 id
+  const tokenMap = new Map<string, string>(); // 导出 token id → 新建 id
+  const accountMap = new Map<string, string>();
   const groupMap = new Map<string, string>();
-  const counts: ImportCounts = { accounts: 0, groups: 0, memberships: 0, snapshots: 0 };
+  const counts: ImportCounts = {
+    tokens: 0,
+    accounts: 0,
+    groups: 0,
+    memberships: 0,
+    snapshots: 0,
+    activities: 0,
+  };
   let metaSeen = false;
 
   async function apply(rec: Record<string, unknown>): Promise<void> {
     if (rec.type === "meta") {
-      if (rec.version !== EXPORT_VERSION) {
-        throw new ImportError(`unsupported export version: ${String(rec.version)}`);
+      const v = rec.version;
+      if (v !== EXPORT_VERSION) {
+        // 只收当前版本;旧文件明确报「太旧」而不是崩(#204)。
+        const hint =
+          typeof v === "number" && v < EXPORT_VERSION
+            ? `导出文件太旧(v${v}),本版本只支持 v${EXPORT_VERSION};请用新版本重新导出`
+            : `unsupported export version: ${String(v)}(expected v${EXPORT_VERSION})`;
+        throw new ImportError(hint);
       }
       metaSeen = true;
       return;
@@ -78,6 +136,21 @@ export function createImporter(deps: ImportDeps) {
     if (!metaSeen) throw new ImportError("missing meta header (first line must be type:meta)");
 
     switch (rec.type) {
+      case "token": {
+        const created = await deps.importToken(
+          {
+            symbol: String(rec.symbol ?? ""),
+            name: String(rec.name ?? rec.symbol ?? ""),
+            logo: typeof rec.logo === "string" ? rec.logo : null,
+            providerLogo: typeof rec.providerLogo === "string" ? rec.providerLogo : null,
+            marketCapRank: typeof rec.marketCapRank === "number" ? rec.marketCapRank : null,
+          },
+          asRefs(rec.refs),
+        );
+        if (typeof rec.id === "string") tokenMap.set(rec.id, created.id);
+        counts.tokens++;
+        break;
+      }
       case "account": {
         const connectorId = String(rec.connectorId);
         const fileCreds = (rec.creds as Record<string, string> | undefined) ?? {};
@@ -88,19 +161,21 @@ export function createImporter(deps: ImportDeps) {
           if (publicKeys.includes(k)) stored[k] = v;
           else if (semiKeys.includes(k)) stored[SEMI_PREFIX + k] = v;
         }
-        const created = await deps.createAccount({
+        const created = await deps.importAccount({
           connectorId,
-          // 线格式的字段名仍是 `network`(见 export.ts 的注释);库里那一列 #203 起叫 platform。
-          platform: typeof rec.network === "string" ? rec.network : undefined,
+          // v3 线格式字段名为 `platform`(v2 是 network);库里那一列 #203 起叫 platform。
+          platform: typeof rec.platform === "string" ? rec.platform : undefined,
           label: String(rec.label ?? ""),
           creds: JSON.stringify(stored),
+          // 归档态随文件带进 find-or-create(见 importAccount:命中既有则对齐归档)。
+          archivedAt: typeof rec.archivedAt === "number" ? rec.archivedAt : undefined,
         });
         if (typeof rec.id === "string") accountMap.set(rec.id, created.id);
         counts.accounts++;
         break;
       }
       case "group": {
-        const created = await deps.createGroup({
+        const created = await deps.importGroup({
           name: String(rec.name ?? ""),
           sortOrder: typeof rec.sortOrder === "number" ? rec.sortOrder : undefined,
         });
@@ -120,12 +195,39 @@ export function createImporter(deps: ImportDeps) {
       case "snapshot": {
         const accountId = accountMap.get(String(rec.accountId));
         if (accountId) {
-          await deps.writeSnapshot(accountId, {
+          const rawBalances = Array.isArray(rec.balances) ? rec.balances : [];
+          // 余额的 token_id 是导出侧旧 id → 经 tokenMap 重映射;映射不到的行丢弃(#244 起 token_id 必填,
+          // 且合法 v3 文件里每条余额的 token 都在前面导出过 → 恒能映射)。
+          const balances: ImportSnapshotBalance[] = rawBalances.flatMap((b) => {
+            const oldId = typeof b.tokenId === "string" ? b.tokenId : undefined;
+            const tokenId = oldId ? tokenMap.get(oldId) : undefined;
+            if (!tokenId) return [];
+            return [{ ...(b as ImportSnapshotBalance), tokenId }];
+          });
+          await deps.importSnapshot(accountId, {
             takenAt: Number(rec.takenAt),
             totalUsd: Number(rec.totalUsd),
-            balances: Array.isArray(rec.balances) ? (rec.balances as ImportSnapshotBalance[]) : [],
+            note: Array.isArray(rec.note) ? (rec.note as Note[]) : undefined,
+            balances,
           });
           counts.snapshots++;
+        }
+        break;
+      }
+      case "manualActivity": {
+        const accountId = accountMap.get(String(rec.accountId));
+        const tokenId = tokenMap.get(String(rec.tokenId));
+        if (accountId && tokenId) {
+          await deps.importManualActivity(accountId, tokenId, {
+            kind: rec.kind as ImportActivity["kind"],
+            amount: Number(rec.amount),
+            price: typeof rec.price === "number" ? rec.price : null,
+            fee: typeof rec.fee === "number" ? rec.fee : null,
+            occurredAt: Number(rec.occurredAt),
+            memo: typeof rec.memo === "string" ? rec.memo : null,
+            createdAt: typeof rec.createdAt === "number" ? rec.createdAt : undefined,
+          });
+          counts.activities++;
         }
         break;
       }
