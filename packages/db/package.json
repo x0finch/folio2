@@ -15,7 +15,6 @@
   "dependencies": {
     "@folio/connectors": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
-    "@folio/oracle-basic": "workspace:*",
     "@folio/oracle2-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "better-auth": "^1.6.21",

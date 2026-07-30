@@ -5,7 +5,7 @@ import * as q from "./queries";
 // 每个方法 = queries.ts 现有函数去掉首个 env 参数(userId 及其余入参、返回类型、归属校验语义全不变)。
 // 仍恪守原则 #6:只暴露包装 ops,绝不外泄 getDb / drizzle 实例 / schema。
 // bind() 把 (env, ...rest) 的函数柯里成 (...rest),类型经推断保留 —— 方法仍逐个显式列出,不做 Proxy/循环魔法。
-// createTokenStore / createAuthAdapter 是非 userId 作用域的全局 infra(代币缓存 / better-auth),
+// createAuthAdapter 与新参考层的 store 是非 userId 作用域的全局 infra(better-auth / 全局参考数据),
 // 不进本 facade,由 index 独立导出。
 const bindEnv =
   (env: DbEnv) =>

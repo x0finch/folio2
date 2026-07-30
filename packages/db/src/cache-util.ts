@@ -8,7 +8,7 @@ type Db = ReturnType<typeof getDb>;
 type Stmt = Parameters<Db["batch"]>[0][number]; // drizzle BatchItem
 
 // D1 ~100 绑定参数上限 → inArray 列表分块。
-export const IN_CHUNK = 90;
+const IN_CHUNK = 90;
 export function chunk<T>(arr: readonly T[], size = IN_CHUNK): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
