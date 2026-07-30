@@ -15,6 +15,13 @@
       "when": 1785396158808,
       "tag": "0001_greedy_whistler",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785400428331,
+      "tag": "0002_far_mindworm",
+      "breakpoints": true
     }
   ]
 }

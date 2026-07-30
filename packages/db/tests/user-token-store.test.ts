@@ -10,6 +10,7 @@ import {
   snapshotBalances,
   snapshots,
   tokenDailyPrices,
+  tokenRefs,
   tokens,
 } from "../src/schema";
 
@@ -143,13 +144,29 @@ describe("多链归一", () => {
   });
 
   // 「一个 Token 在一个命名者下最多一条 ref」= 一个 Token 只对一个上游币。
-  // 不做部分唯一索引(那要把 `coingecko` 写进迁移),改在这里挡。
+  // 应用层 linkRef 先挡一道,DB 层再由唯一索引 (user_id, token_id, namer) 兜底(见下一个用例)。
   it("一个 Token 已有上游那一档 → 不许再加第二条", async () => {
     const store = storeFor(USER_A);
     const id = await store.create(seed("USDC"), [USDC_ETH, USDC_UP]);
     await store.linkRef(id, "coingecko/issued:tether"); // 想给同一行挂第二个上游币
     expect((await store.getById(id))?.ref).toBe(USDC_UP); // 还是原来那个
     expect((await store.findByRefs(["coingecko/issued:tether"])).size).toBe(0);
+  });
+
+  // 应用层的先查后写在 Workers 多实例下不是原子的 —— 唯一索引是唯一真正防竞态的那道。
+  // 绕开 store 直接对表插两条「同 (user_id, token_id, namer)、不同 local_name」验证约束确实在。
+  it("唯一索引挡住「同一 Token 一个命名者两条 ref」—— 第二条直插报错", async () => {
+    const db = getDb(env);
+    const store = storeFor(USER_A);
+    const id = await store.create(seed("USDC"), [USDC_UP]); // coingecko/issued:usd-coin
+    await expect(
+      db.insert(tokenRefs).values({
+        userId: USER_A,
+        namer: "coingecko",
+        localName: "issued:tether", // 同 Token、同命名者、不同币 → 撞唯一索引
+        tokenId: id,
+      }),
+    ).rejects.toThrow();
   });
 });
 
@@ -203,6 +220,26 @@ describe("合并", () => {
     await store.merge(a, b);
     expect((await store.findByRefs([USDC_ETH, USDC_ARB])).size).toBe(2);
     expect(await store.getById(a)).toBeUndefined();
+  });
+
+  // 两边各有一条**同命名者、不同币**的 ref(各自被上游认成不同 coingecko coin)。改指会让 into
+  // 在同命名者下出现两条 → 撞唯一索引。merge 按命名者去重、留 into 那份,收敛到一个上游币、不抛。
+  it("两边各有一条同命名者不同币的 ref → 留 into 的,不撞唯一索引", async () => {
+    const store = storeFor(USER_A);
+    const from = await store.create(seed("BTC"), ["coingecko/issued:bitcoin"]);
+    const into = await store.create(seed("BTC"), ["coingecko/issued:wrapped-bitcoin"]);
+
+    await store.merge(from, into);
+
+    expect(await store.getById(from)).toBeUndefined();
+    // into 保住自己那份;from 的 coingecko/bitcoin 被剔掉,不并入。
+    expect((await store.getById(into))?.ref).toBe("coingecko/issued:wrapped-bitcoin");
+    expect((await store.findByRefs(["coingecko/issued:bitcoin"])).size).toBe(0);
+    const refs = await getDb(env)
+      .select({ tokenId: tokenRefs.tokenId })
+      .from(tokenRefs)
+      .where(eq(tokenRefs.tokenId, into));
+    expect(refs).toHaveLength(1); // 一个 Token 在 coingecko 下就一条
   });
 
   // 历史日价按 tokenRef 全局存,与 token_id 无关 → 合并不该让曲线缺一格(#199 定案)。

@@ -1,6 +1,14 @@
 import type { ConnectorId } from "@folio/connectors";
 import type { BalanceKind } from "@folio/connectors-basic";
-import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { user } from "./auth-schema";
 
 // 身份表(user/session/account/verification)定义在 ./auth-schema(better-auth,P2.1)。
@@ -172,9 +180,14 @@ export const tokens = sqliteTable("tokens", {
 // **PK 带 user_id。** 票上原写 PK(namer, local_name) —— 那是代币表还全局时的写法:
 // tokens 转 per-user 之后两个用户都持有 BTC,`coingecko/bitcoin` 会各指一行,主键必然撞。
 //
-// 「一个 Token 在一个命名者下最多一条 ref」(即一个 Token 只对一个上游币)由 token-store 的
-// linkRef 保证,**不做部分唯一索引** —— 那个索引的 WHERE 里要写死 `namer='coingecko'`,
-// 等于把厂商名刻进迁移文件,与本片「表名列名零 vendor 字样」的验收项直接冲突。
+// 「一个 Token 在一个命名者下最多一条 ref」(即一个 Token 只对一个上游币)由下面的唯一索引
+// `(user_id, token_id, namer)` 在 DB 层保证 —— `linkRef` 的应用层检查在单实例下先挡一道,
+// 但 Workers 多实例并发时「先查后写」不是原子的(两个实例可能都读到「还没有」再各插一条),
+// 唯一约束是唯一真正防竞态的那道。
+//
+// **刻意是厂商中立的**:索引落在 `namer` 列上、不写死 `coingecko`,所以它对每个命名者都成立
+// (evm:1 / bitcoin / binance / coingecko 一视同仁),既堵住了「一个 Token 挂两个上游币」的
+// 数据损坏,又不把厂商名刻进迁移文件 —— 与本片「表名列名零 vendor 字样」的验收项不冲突。
 export const tokenRefs = sqliteTable(
   "token_refs",
   {
@@ -189,8 +202,9 @@ export const tokenRefs = sqliteTable(
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.namer, t.localName] }),
-    // 反查一个 Token 在某命名者下的叫法(TokenInfo.ref 就是这一查)。
-    index("token_refs_token_id_namer_idx").on(t.tokenId, t.namer),
+    // 一个 Token 在一个命名者下最多一条 ref(见表头注释)。反查「某 Token 在某命名者下叫什么」
+    // (TokenInfo.ref 那一查)也正好走这个索引的前缀。
+    uniqueIndex("token_refs_token_id_namer_uidx").on(t.userId, t.tokenId, t.namer),
   ],
 );
 
