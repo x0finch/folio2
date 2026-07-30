@@ -1,10 +1,9 @@
-import { env } from "cloudflare:workers";
-import { DEFAULT_TOP_N, tokenTicket, type UpstreamToken } from "@folio/oracle2";
+import { DEFAULT_TOP_N, tokenTicket, type UpstreamToken } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import type { TokenOption } from "../token-option";
-import { NAMER, oracleFor } from "./internal/oracle2";
+import { NAMER, oracleFor } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
@@ -100,7 +99,7 @@ async function edgeCached(
 export const listTokenCatalogue = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }): Promise<TokenOption[]> => {
-    tokenLog.debug("catalogue: enter", { hasKey: !!env.COINGECKO_API_KEY });
+    tokenLog.debug("catalogue: enter");
     const out = await edgeCached(
       "token-catalogue",
       CATALOGUE_CACHE_TTL_S,
@@ -118,7 +117,7 @@ export const listTokens = createServerFn({ method: "GET" })
   .validator(z.object({ query: z.string() }))
   .handler(async ({ data, context }): Promise<TokenOption[]> => {
     const q = data.query.trim();
-    tokenLog.debug("searchTokens: enter", { query: q, hasKey: !!env.COINGECKO_API_KEY });
+    tokenLog.debug("searchTokens: enter", { query: q });
     if (!q) return [];
     // 抛错兜底在 requireAuth 中间件集中打日志(带 userId),此处只表达业务。
     const out = await edgeCached(

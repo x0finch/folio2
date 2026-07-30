@@ -85,7 +85,7 @@ export interface CoinGeckoClient {
 
 // —— 错误 ——
 // 传输层的失败归类由 @folio/shared 做,这里只负责「变成 CGK 自己的错误类型」——
-// 调用方(oracle / oracle2)只认识它。字段名与仓库里另外三个错误类一致,于是 withRetry 认得。
+// 调用方(oracle / oracle)只认识它。字段名与仓库里另外三个错误类一致,于是 withRetry 认得。
 export type CoinGeckoErrorCode = "RATE_LIMITED" | "UPSTREAM_ERROR" | "PARSE_ERROR";
 
 export class CoinGeckoError extends Error {

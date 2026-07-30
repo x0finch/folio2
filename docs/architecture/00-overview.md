@@ -39,8 +39,8 @@ flowchart TB
     subgraph D["域包 @folio/*"]
         SYNC["@folio/sync — 并发编排 · platformOf"]
         CONN["@folio/connectors — Provider 契约 + 7 源(含 Bitcoin)"]
-        ORA["@folio/oracle2 — 参考层(认币 · 价 · 名图)"]
-        UPS["@folio/oracle2-upstream-coingecko — 唯一认识 vendor 的包"]
+        ORA["@folio/oracle — 参考层(认币 · 价 · 名图)"]
+        UPS["@folio/oracle-upstream-coingecko — 唯一认识 vendor 的包"]
         REF["@folio/oracle-ref — tokenRef 文法(零依赖)"]
         DB["@folio/db — userId-scoped ops"]
     end
@@ -78,9 +78,8 @@ flowchart TB
 | `@folio/connectors(-basic)` | `packages/connectors/{entry,basic}` | `BalanceProvider` 契约 + registry |
 | `@folio/connectors-provider-*` | `packages/connectors/providers/*` | binance · okx · zerion · hyperliquid · coinstats · blockbook · manual |
 | `@folio/oracle-ref` | `packages/oracle/ref` | `tokenRef` 文法(造串 / 拆串 / 拼回;零依赖零 IO) |
-| `@folio/oracle2{,-basic}` | `packages/oracle2/{entry,basic}` | 参考层:认币 / 价 / 名图。**看不见任何 vendor** |
-| `@folio/oracle2-upstream-coingecko` | `packages/oracle2/upstreams/coingecko` | 全仓唯一认识 CoinGecko 的地方 |
-| `@folio/oracle*`(旧一套) | `packages/oracle/*` | 迁移期并存,[#202](https://github.com/x0finch/folio2/issues/202) 由 oracle2 改名接管后删除 |
+| `@folio/oracle{,-basic}` | `packages/oracle/{entry,basic}` | 参考层:认币 / 价 / 名图。**看不见任何 vendor** |
+| `@folio/oracle-upstream-coingecko` | `packages/oracle/upstreams/coingecko` | 全仓唯一认识 CoinGecko 的地方 |
 | `@folio/db` | `packages/db` | 封装的数据访问 op |
 | `@folio/{coingecko,blockbook}-client` · `@folio/bitcoin-derive` | `packages/clients/*` | SDK 式 HTTP 客户端 · xpub 本地派生 |
 

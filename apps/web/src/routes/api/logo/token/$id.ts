@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { serveLogo } from "@/lib/server/internal/logo";
-import { oracleFor } from "@/lib/server/internal/oracle2";
+import { oracleFor } from "@/lib/server/internal/oracle";
 import { userIdOf } from "@/lib/server/internal/route-auth";
 
 // 代币 logo 代理:内部代币行 id → 经该用户的参考层拿上游图 → 透传 + 缓存头。见 ADR 0008 / PRD #18。

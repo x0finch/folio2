@@ -12,9 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/oracle-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
-    "@folio/oracle-source-coingecko": "workspace:*"
+    "@folio/oracle-basic": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

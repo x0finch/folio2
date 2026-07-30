@@ -1,5 +1,5 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { Tokens } from "@folio/oracle2";
+import type { Tokens } from "@folio/oracle";
 import { describe, expect, it } from "vitest";
 import { deriveLiveAccountTotals } from "../src/lib/live-value";
 import type { CredsToken } from "../src/lib/manual-activity";

@@ -158,75 +158,12 @@ export const tokens = sqliteTable("tokens", {
   selfPrice: real("self_price"),
 });
 
-// 代币的 vendor 映射(oracle 多源,#73)。一行 = 「哪个 token × 哪家 vendor × 那家的 coin id」。
-// 归并靠 tokens.id;各家 coin id 是本表的属性,接新源只加行、不改表结构。(vendor, vendorId) 唯一
-// (一家的一个 coin id 只对应一个 token);按 tokenId 反查建二级索引。
-export const tokenVendorIds = sqliteTable(
-  "token_vendor_ids",
-  {
-    tokenId: text("token_id")
-      .notNull()
-      .references(() => tokens.id, { onDelete: "cascade" }),
-    vendor: text("vendor").notNull(), // 如 "coingecko"
-    vendorId: text("vendor_id").notNull(), // 那家对该币的 id
-  },
-  (t) => [
-    primaryKey({ columns: [t.vendor, t.vendorId] }),
-    index("token_vendor_ids_token_idx").on(t.tokenId),
-  ],
-);
+// 旧参考层的四张全局表 —— `token_vendor_ids` / `token_index` / `token_meta` / `token_price_history` ——
+// 随旧 oracle 一起退场(#202)。它们的活儿都被下面这套 per-user 表接了:vendor 映射与 tokenRef 指针
+// → `token_refs`,warm 标量 → `user_cache`,历史日价 → `token_daily_prices`(按 tokenRef 全局存)。
+// `fx_rates` / `platforms` 两张更早在 #202b 就并进了 `user_cache`。
 
-// 索引表:多种方式找到代币,纯指针不存代币数据。
-// kind="symbol":一 symbol 多候选(消歧输入),随 warm 换血(短 TTL);
-// kind="tokenRef":代币键(evm:<id>/<addr> 等)一对一(代码维护唯一),长 TTL(sync 顺延);
-// cgk_checked_until(仅 tokenRef):问过 CGK"未收录"的复查时刻(替代旧否定缓存三态)。
-export const tokenIndex = sqliteTable(
-  "token_index",
-  {
-    kind: text("kind").$type<"symbol" | "tokenRef">().notNull(),
-    key: text("key").notNull(),
-    tokenId: text("token_id")
-      .notNull()
-      .references(() => tokens.id, { onDelete: "cascade" }),
-    cgkCheckedUntil: integer("cgk_checked_until"),
-    expiresAt: integer("expires_at").notNull(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.kind, t.key, t.tokenId] }),
-    index("token_index_kind_key_idx").on(t.kind, t.key),
-  ],
-);
-
-// 杂项标量:存 `warm_as_of:<source>`(每源 warm 最近刷新时刻)。
-export const tokenMeta = sqliteTable("token_meta", {
-  k: text("k").primaryKey(),
-  v: integer("v").notNull(),
-});
-
-// 平台元数据缓存的 `platforms` 表已删(#202b):与汇率同去向 —— `user_cache` 的
-// `platform:<键>` 键。否定缓存(「问过上游、它的链表里没有」)在那边由值里的 `name: null` 承载。
-
-// FX 汇率缓存的 `fx_rates` 表已删(#202b):汇率搬进 `user_cache` 的 `fx:<币种>` 键,
-// 与代币目录、平台名图同一张 per-user KV。纯缓存,不迁数据。
-
-// 历史日价缓存(全局参考,无 userId;#148 / ADR 0019 网格估值骨架)。过去某 UTC 日的历史价不可变 →
-// 永久缓存,故**无 TTL 列**(今日桶可变,调用方不落此表)。PK (source, identifier, day_bucket);
-// (source, identifier) = tokenRef 拆开的两段(命名者 + 该家的上游 id,见 vendorPartsOf);
-// day_bucket = floor(atMs / 86_400_000)
-// (UTC 日索引)。unit_price = 该日代表价(USD)。
-export const tokenPriceHistory = sqliteTable(
-  "token_price_history",
-  {
-    source: text("source").notNull(), // tokenRef 的命名者(如 "coingecko")
-    identifier: text("identifier").notNull(), // 该命名者给的上游 id
-    dayBucket: integer("day_bucket").notNull(), // UTC 日索引
-    unitPrice: real("unit_price").notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.source, t.identifier, t.dayBucket] })],
-);
-
-// —— 新参考层(ADR 0021 / 0022 / 0023,#199 expand)——
-// 下面四张与上面那套并存到 #202:旧 oracle 读旧表、新 oracle 读新表,expand 期两边都对。
+// —— 参考层(ADR 0021 / 0022 / 0023;#199 expand 建、#202 起是唯一一套)——
 
 // 一个用户对某个命名者叫法的一条映射:「他的 tk_xxx 在 <namer> 那里叫 <local_name>」。
 // 一笔持仓的 tokenRef 拆成两段存(不是整串一列):反查「某个 Token 在当前上游那里叫什么」
@@ -271,7 +208,7 @@ export const globalTokenRefIndex = sqliteTable(
   (t) => [primaryKey({ columns: [t.ref, t.namer] })],
 );
 
-// per-user KV 缓存:只三种键(`warm` / `fx:<币种>` / `platform:<键>`,见 oracle2 的 cache.ts)。
+// per-user KV 缓存:只三种键(`warm` / `fx:<币种>` / `platform:<键>`,见 oracle 的 cache.ts)。
 // 整张删空功能不坏,只是慢一点。留 user_id 的理由:per-user 缓存只装这个用户实际碰到的
 // (他选的币种、他有持仓的那几条链),全局表得装所有人的并集。
 // #202 起取代 fx_rates + platforms 两张全局表。

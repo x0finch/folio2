@@ -1,48 +1,162 @@
-import type { TokenPriceHistoryStore, TokenStore } from "@folio/oracle-basic";
-import { createTokens, type Tokens } from "./services/tokens";
+import type {
+  CacheStore,
+  FxUpstream,
+  GlobalTokenRefIndexStore,
+  PlatformUpstream,
+  TokenPriceStore,
+  TokenRefIndexUpstream,
+  TokenStore,
+  TokenUpstream,
+} from "@folio/oracle-basic";
+import { createCandidateSource } from "./candidates";
+import { createFxRates, type FxRates } from "./fx";
+import { createMint, type Mint } from "./mint";
+import { createPlatforms, type Platforms } from "./platforms";
+import { createTokens, type Tokens } from "./tokens";
 
-export interface CreateOracleConfig {
-  apiKey?: string;
-  // store 实现由调用方(app)注入:D1 在 @folio/db,oracle 不依赖它。都是**惰性工厂**(不是实例):
-  // 门面按访问只建被碰的服务(见下 getter),store 也须延到那时才造。代币工厂额外收 source:代币缓存
-  // 按 source 分桶(ref 只对该源成立、warm 标记 `warm_as_of:<source>` 亦分源;当前恒 CoinGecko,#73 中立身份
-  // 仍以此键 token_vendor_ids)→ 保留分桶签名。
-  createTokenStore: (source: string) => TokenStore;
-  // 历史日价缓存(#148 / ADR 0019)。可选:不传 → 无历史缓存(priceSeries 现取不落库)。
-  createPriceHistoryStore?: () => TokenPriceHistoryStore;
+// 装配。**store 与 upstream 一样,都是初始化时注入的惰性工厂**(ADR 0023):
+// 是工厂不是实例,因为门面只建被碰到的那一个子服务 —— 否则 app 一拼 config 就把所有 store
+// 全 new 出来(各含 getDb),`oracle.tokens` 也白建另一批。
+//
+// **没有 `apiKey`、没有默认上游** —— 老 oracle 那句 `source ?? createCoinGeckoSource({ apiKey })`
+// 就是服务层永久依赖某一家的根。这里 upstream 必须由调用方给,本包的 `dependencies` 里
+// 因此不需要(也不许有)任何 client / upstream 包。
+export interface OracleConfig {
+  createTokenStore(userId: string): TokenStore;
+  createTokenPriceStore(userId: string): TokenPriceStore;
+  createCacheStore(userId: string): CacheStore;
+  // 全局知识,与用户无关 → 零参(ADR 0022)。
+  createRefIndexStore(): GlobalTokenRefIndexStore;
+  createUpstream(): TokenUpstream;
+  // 汇率上游**单独一个工厂**:汇率跟「这是哪个币」毫无关系,完全可以另换一家(ADR 0023)。
+  // 当前两个工厂都指向同一个 CoinGecko adapter,但那是装配点的事,本层不假设。
+  createFxUpstream(): FxUpstream;
+  // 平台上游同理:链的名与图跟代币身份是两件事,各走各的端口。
+  createPlatformUpstream(): PlatformUpstream;
+  // symbol → 上游 id 的策展小表。由 adapter 提供(它逐条写的是那一家的 id)。
+  overrides?: Readonly<Record<string, string>>;
+  now?: () => number;
 }
 
-// 统一 Oracle 门面(Phase 3,#79)。对外一个入口,对内组合各服务、不拆其实现。
-// 服务经 sub-service 暴露 —— 纯模型层(overview-model / revalue / enrichBalances)按接口隔离只依赖
-// 各自窄契约(Tokens),故门面透出实例而非把方法拍平重命名。
+// 一个用户的参考层。子服务按**领域**分(ADR 0012 的口径),不按能力切碎:
+//   · `tokens` 读路径 —— 富化 / 现价 / 历史价 / 橱窗 / 搜索
+//   · `mint`   写路径 —— tokenRef → token_id,写快照之前必须先过这一步
+//   · `fx`     展示币种汇率 —— 与代币无关的一小块,只共用同一张 per-user 缓存
+//   · `platforms` 链 ∪ 场馆的名与图 —— 同上
 //
-// **汇率与平台都已经不在这里了**(#202b):它们搬进了 `@folio/oracle2`(per-user 缓存 +
-// 各自独立的上游端口)。只剩代币,随选币与预热两片一起退场。
+// 「info 数据 vs 价格数据」的分离落在**端口**上(`TokenStore` / `TokenPriceStore`),
+// 不在门面上再切一遍(ADR 0023)。
 export interface Oracle {
   readonly tokens: Tokens;
+  readonly mint: Mint;
+  readonly fx: FxRates;
+  readonly platforms: Platforms;
 }
 
-// 组装入口:由 CoinGecko 供源(价 / identity 同源,ADR 0013 的估值 policy
-// self-first/source-first 是「自填价 vs 源价」正交维度,与源无关,由 valuate 纯函数在消费层裁决)。
-// 运行时换价源(DefiLlama / activeVendor 路由)已废止,见 ADR 0014。
+// 显式工厂 —— **这是原语**,不是糖。
 //
-// 惰性:服务经 getter 首访即建、建后记忆。app 侧 oracle 代理每次属性访问现造一份门面
-// (见 server/oracle.ts,绑当前 env),配合本惰性 → 一次访问只建被碰的那一服务,不浪费。
-export function createOracle(cfg: CreateOracleConfig): Oracle {
-  const { apiKey } = cfg;
-  let tokens: Tokens | undefined;
+// 参考层现在装的是**用户私有**数据(他认识哪些币、他的币叫什么名),拿错用户就是数据泄露。
+// 做成参数,编译期就挡住了;`requireAuth` 那种把它绑进 ctx 的写法只是外面一层糖。
+// cron 没有 auth 上下文,得逐用户自己 `oracleFor(u)` —— 那正是本签名想让它显而易见的事。
+export type OracleFor = (userId: string) => Oracle;
 
+export function createOracleFor(cfg: OracleConfig): OracleFor {
+  return (userId: string): Oracle => {
+    let tokens: Tokens | undefined;
+    let mint: Mint | undefined;
+    let fx: FxRates | undefined;
+    let platforms: Platforms | undefined;
+
+    // 子服务经 getter 首访即建、建后记忆。调用方常只用其一(logo 端点只碰 tokens),
+    // 不该为此把另一套 store 也 new 出来。
+    return {
+      get tokens() {
+        tokens ??= createTokens({
+          store: cfg.createTokenStore(userId),
+          prices: cfg.createTokenPriceStore(userId),
+          cache: cfg.createCacheStore(userId),
+          upstream: cfg.createUpstream(),
+          now: cfg.now,
+        });
+        return tokens;
+      },
+      get mint() {
+        const upstream = cfg.createUpstream();
+        mint ??= createMint({
+          store: cfg.createTokenStore(userId),
+          refIndex: cfg.createRefIndexStore(),
+          // **候选源独立装,不复用 `tokens`**(#216):`tokens` 里有好几个出网的能力,
+          // 一句 `this.tokens.candidates` 就把整个读路径的网络面接进了写路径。
+          // 这个只读目录缓存,冷启动那一次除外 —— 见 ./candidates。
+          candidates: createCandidateSource({
+            cache: cfg.createCacheStore(userId),
+            coldStart: upstream,
+            now: cfg.now,
+          }),
+          namer: upstream.id,
+          overrides: cfg.overrides,
+        });
+        return mint;
+      },
+      get fx() {
+        fx ??= createFxRates({
+          cache: cfg.createCacheStore(userId),
+          upstream: cfg.createFxUpstream(),
+        });
+        return fx;
+      },
+      get platforms() {
+        platforms ??= createPlatforms({
+          cache: cfg.createCacheStore(userId),
+          upstream: cfg.createPlatformUpstream(),
+        });
+        return platforms;
+      },
+    };
+  };
+}
+
+// —— 全局维护任务 ——
+// 刷全局映射表跟 userId 毫无关系,挂在 `oracleFor(u)` 上本来就别扭 —— 单独一个不带 user 的
+// 工厂给 cron 用,不必先假造一个用户。动词沿用项目现成的 `warm`。
+export interface OracleWarmConfig {
+  createRefIndexStore(): GlobalTokenRefIndexStore;
+  createUpstream(): TokenRefIndexUpstream;
+  // 失配是**静默故障**(那条链的币从此没价没图,却不报错)→ 必须喊出来。
+  // 做成回调而不是引日志库:这一层不该知道日志怎么落,cron 那头知道。
+  onWarn?(message: string, meta: Record<string, unknown>): void;
+}
+
+export interface OracleWarm {
+  // cron 调用点:拉 → 转换(在 adapter 里)→ 一次整份灌。返回这轮的账,供调用方记日志。
+  warmRefIndex(
+    now: number,
+  ): Promise<{ rows: number; unmatchedPlatforms: string[]; skipped: number }>;
+  // 某个源最近一次成功刷新的时刻;从未刷过 → null(首次部署要手动触发一次)。
+  refIndexRefreshedAt(): Promise<number | null>;
+}
+
+export function createOracleWarm(cfg: OracleWarmConfig): OracleWarm {
   return {
-    get tokens() {
-      // createTokens 缺省 source = CoinGecko(见其定义),故此处不必显式造源。
-      if (!tokens) {
-        tokens = createTokens({
-          apiKey,
-          createStore: cfg.createTokenStore,
-          createPriceHistoryStore: cfg.createPriceHistoryStore,
+    async warmRefIndex(now) {
+      const upstream = cfg.createUpstream();
+      const result = await upstream.fetchRefIndex();
+      if (result.unmatchedPlatforms.length > 0) {
+        cfg.onWarn?.("global_token_ref_index: 链对照失配,这些链的币将没价没图", {
+          namer: upstream.id,
+          platforms: result.unmatchedPlatforms,
         });
       }
-      return tokens;
+      await cfg.createRefIndexStore().putAll(result.rows, now);
+      return {
+        rows: result.rows.length,
+        unmatchedPlatforms: result.unmatchedPlatforms,
+        skipped: result.skipped,
+      };
+    },
+
+    refIndexRefreshedAt() {
+      return cfg.createRefIndexStore().refreshedAt(cfg.createUpstream().id);
     },
   };
 }

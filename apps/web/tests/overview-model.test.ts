@@ -1,5 +1,5 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { Platforms, TokenRecord, Tokens } from "@folio/oracle2";
+import type { Platforms, TokenRecord, Tokens } from "@folio/oracle";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/account-view";
 import { buildOverview } from "../src/lib/overview-model";

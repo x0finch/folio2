@@ -4,7 +4,7 @@ import { displayTokenIds } from "../tokens";
 import { userDisplayBalances } from "../user-balances";
 import { db } from "./internal/db";
 import { manualBalancesForWarm } from "./internal/manual";
-import { oracleFor } from "./internal/oracle2";
+import { oracleFor } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 
 const priceLog = getLogger(["folio", "web", "prices"]);

@@ -1,4 +1,3 @@
-import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import type {
   ProviderTokenSeed,
   TokenCandidate,
@@ -7,7 +6,8 @@ import type {
   TokenRef,
   TokenRefHit,
   TokenStore,
-} from "@folio/oracle2-basic";
+} from "@folio/oracle-basic";
+import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
@@ -382,7 +382,7 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
       }
     },
 
-    // 「本地已认识的同名币」。服务层的 symbol 消歧主路走 warm blob 筛(见 oracle2 的 cache.ts),
+    // 「本地已认识的同名币」。服务层的 symbol 消歧主路走 warm blob 筛(见 oracle 的 cache.ts),
     // 这里只是另一条路:本用户已有的、且已被上游认出的同 symbol 币。
     async candidatesBySymbol(symbol): Promise<TokenCandidate[]> {
       const rows = await db

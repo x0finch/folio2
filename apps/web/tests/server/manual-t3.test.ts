@@ -11,7 +11,7 @@ import {
   editManualActivity,
   updateToken,
 } from "../../src/lib/server/internal/manual";
-import { NAMER } from "../../src/lib/server/internal/oracle2";
+import { NAMER } from "../../src/lib/server/internal/oracle";
 import { ticketOf } from "./ticket";
 
 // T3(#155)服务端写路径集成:持仓 CRUD + 批量活动(原子)+ 删/改活动,全落库。真实 D1(Miniflare)。

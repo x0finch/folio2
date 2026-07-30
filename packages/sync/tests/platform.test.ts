@@ -16,10 +16,8 @@ describe("platformOf", () => {
     expect(platformOf("hyperliquid/issued:ETH", "hyperliquid")).toBe("hyperliquid");
   });
 
-  it("唯一例外:价格源作命名者(手记选了币)→ 回落 connectorId", () => {
-    // `coingecko/bitcoin` 说的是「谁管它叫什么」,不是「它在哪」—— 手记的位置是 manual。
-    expect(platformOf("coingecko/issued:bitcoin", "manual")).toBe("manual");
-    // 手记没选币时命名者就是自己,走常规路径,答案一样。
+  it("手记没选币:命名者就是自己(manual),走常规路径", () => {
+    // manual 账户不经 sync 编排(isSyncableAccount 已挡),这里只验函数对 manual 命名者的常规行为。
     expect(platformOf("manual/custom:FOO", "manual")).toBe("manual");
   });
 

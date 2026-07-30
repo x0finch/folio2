@@ -1,5 +1,5 @@
+import type { GlobalTokenRefIndexStore, TokenRef, TokenRefIndexRow } from "@folio/oracle-basic";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
-import type { GlobalTokenRefIndexStore, TokenRef, TokenRefIndexRow } from "@folio/oracle2-basic";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";

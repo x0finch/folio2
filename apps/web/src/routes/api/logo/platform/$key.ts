@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { connectorPlatformMeta } from "@/lib/server/internal/connector-platform";
 import { serveLogo } from "@/lib/server/internal/logo";
-import { oracleFor } from "@/lib/server/internal/oracle2";
+import { oracleFor } from "@/lib/server/internal/oracle";
 import { userIdOf } from "@/lib/server/internal/route-auth";
 
 // 平台 logo 代理:platform key(如 evm:1,含 `:` → URL 编码为一段)→ 上游图 → 透传 + 缓存头。

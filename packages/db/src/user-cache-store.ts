@@ -1,11 +1,11 @@
-import type { CacheEntry, CacheStore, CacheWrite } from "@folio/oracle2-basic";
+import type { CacheEntry, CacheStore, CacheWrite } from "@folio/oracle-basic";
 import { and, eq, inArray } from "drizzle-orm";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
 import { userCache } from "./schema";
 
 // `CacheStore` 的 D1 实现(#199)。per-user 的 KV,只三种键(`warm` / `fx:<币种>` / `platform:<键>`,
-// 键的形状归 oracle2 的 cache.ts,本文件不解释键)。值是 JSON,db 当不透明 blob。
+// 键的形状归 oracle 的 cache.ts,本文件不解释键)。值是 JSON,db 当不透明 blob。
 //
 // **过期不删、读出带 stale** —— 与价同一套 SWR 语义:展示先给旧的,调用方决定要不要后台刷。
 // 整张删空功能不坏,只是下次访问慢一点。
