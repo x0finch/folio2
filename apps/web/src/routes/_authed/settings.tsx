@@ -13,6 +13,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@folio/ui";
+import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
 import { LogOut } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
@@ -256,15 +257,28 @@ function DataCard({ hasData }: { hasData: boolean }) {
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
   const inputRef = useRef<HTMLInputElement>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   // 非空库导入是合并式(幂等,不翻倍),但先弹一道确认 —— 让用户明确知道是「并进已有数据」。
   const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   function clearInput() {
     if (inputRef.current) inputRef.current.value = "";
   }
+
+  // 导入是「选了文件才发生一次的写」——用 useMutation 而非手搓 msg/error/busy 三个 state:
+  // isPending 是单一事实源(直接接到 input/按钮的 disabled 上),连点两次也只跑一个;
+  // 成功/失败各自的文案直接读 data/error,后回来的请求不会覆写前一条的状态(#241)。
+  // 传的是文件本体(body: file),故走 /api/import 路由而非 server function(二进制不必先 base64)。
+  const importMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const res = await fetch("/api/import", { method: "POST", body: file });
+      if (!res.ok) throw new Error(await res.text());
+      return (await res.json()) as {
+        imported: { accounts: number; groups: number; snapshots: number };
+      };
+    },
+    onSuccess: () => router.invalidate(), // 刷新列表读路径
+    onSettled: clearInput, // 成败都清:让同一个文件能再选一次
+  });
 
   function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -273,39 +287,13 @@ function DataCard({ hasData }: { hasData: boolean }) {
       setPendingFile(file); // 非空 → 先确认(见 MorphingModal),不立即导
       return;
     }
-    void runImport(file); // 空库 → 直接导
-  }
-
-  async function runImport(file: File) {
-    setMsg(null);
-    setError(null);
-    setBusy(true);
-    try {
-      const res = await fetch("/api/import", { method: "POST", body: file });
-      if (!res.ok) throw new Error(await res.text());
-      const { imported } = (await res.json()) as {
-        imported: { accounts: number; groups: number; snapshots: number };
-      };
-      setMsg(
-        ta("imported", {
-          accounts: imported.accounts,
-          groups: imported.groups,
-          snapshots: imported.snapshots,
-        }),
-      );
-      await router.invalidate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-      clearInput();
-    }
+    importMutation.mutate(file); // 空库 → 直接导
   }
 
   function confirmImport() {
     const file = pendingFile;
     setPendingFile(null);
-    if (file) void runImport(file);
+    if (file) importMutation.mutate(file);
   }
 
   function cancelImport() {
@@ -343,20 +331,31 @@ function DataCard({ hasData }: { hasData: boolean }) {
               type="file"
               accept=".ndjson,application/x-ndjson,application/json"
               className="hidden"
+              disabled={importMutation.isPending}
               onChange={onImportFile}
             />
             <Button
               type="button"
               variant="outline"
-              disabled={busy}
+              disabled={importMutation.isPending}
               className="shrink-0 whitespace-nowrap"
               onClick={() => inputRef.current?.click()}
             >
-              {busy ? tc("verifying") : ta("importBtn")}
+              {importMutation.isPending ? tc("verifying") : ta("importBtn")}
             </Button>
           </div>
-          {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {importMutation.isSuccess && (
+            <p className="text-sm text-muted-foreground">
+              {ta("imported", {
+                accounts: importMutation.data.imported.accounts,
+                groups: importMutation.data.imported.groups,
+                snapshots: importMutation.data.imported.snapshots,
+              })}
+            </p>
+          )}
+          {importMutation.isError && (
+            <p className="text-sm text-destructive">{importMutation.error.message}</p>
+          )}
         </div>
       </CardContent>
 
