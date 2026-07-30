@@ -98,6 +98,7 @@ export function parseClearinghouseState(state: ClearinghouseState): Row[] {
       // 标的的场馆命名(不是「持有该币」,只是身份)—— 值仍由权益行承载,此处不参与计价。
       tokenRef: venueTokenRef(p.coin),
       meta: {
+        coin: p.coin, // 展示用币名,住 meta(不再靠快照 symbol 列,#243)
         side: szi >= 0 ? "long" : "short",
         entryPx: num(p.entryPx),
         positionValue: num(p.positionValue),

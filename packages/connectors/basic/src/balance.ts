@@ -50,6 +50,9 @@ export const PerpEquityMeta = z.object({
 
 // perp_position:单个永续仓位(value:0,名义敞口在 meta)。
 export const PerpPositionMeta = z.object({
+  // 标的币代号(BTC / ETH …)。永续仓位是衍生品、不是持仓,展示用的币名是它的固有属性,
+  // 与 side/entryPx 同类住在 meta —— 不再依赖已删的 snapshot_balances.symbol 列(#243)。
+  coin: z.string(),
   side: z.enum(["long", "short"]),
   entryPx: z.number(),
   positionValue: z.number(), // 名义敞口 USD(非净值贡献)

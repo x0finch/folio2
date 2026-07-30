@@ -26,6 +26,7 @@ const legacyLong = {
   usdValue: 0,
   metaJson: JSON.stringify({
     role: "position",
+    coin: "ETH",
     side: "long",
     entryPx: 2986.3,
     positionValue: 100,
@@ -43,6 +44,7 @@ const legacyShort = {
   usdValue: 0,
   metaJson: JSON.stringify({
     role: "position",
+    coin: "BTC",
     side: "short",
     entryPx: 64000,
     positionValue: 640,
@@ -109,6 +111,7 @@ describe("toPerpView —— 新 kind=perp_equity/perp_position(meta 无 role)", 
         amount: 0.5,
         usdValue: 0,
         metaJson: JSON.stringify({
+          coin: "BTC",
           side: "long",
           entryPx: 60000,
           positionValue: 30000,
