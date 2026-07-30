@@ -17,10 +17,11 @@ export function tokenStackItems(balances: OverviewBalance[]): StackItem[] {
   const byToken = new Map<string, { symbol: string; logo?: string; value: number }>();
   for (const bal of balances) {
     if (viewKind(bal) !== "spot") continue; // 只叠现货持币,滤掉 defi/perp
-    const key = bal.symbol.toUpperCase();
+    const symbol = bal.symbol ?? ""; // 富化后恒有(#243:显示名从 Token 取);缺失兜底空串
+    const key = symbol.toUpperCase();
     const cur = byToken.get(key);
     if (cur) cur.value += bal.usdValue;
-    else byToken.set(key, { symbol: bal.symbol, logo: bal.logo, value: bal.usdValue });
+    else byToken.set(key, { symbol, logo: bal.logo, value: bal.usdValue });
   }
   return [...byToken.values()]
     .filter((t) => Math.abs(t.value) >= ZERO_DISPLAY_USD) // 合计后显示为 $0.00 的零值代币不入叠标

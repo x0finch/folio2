@@ -99,7 +99,7 @@ export function ManualTokensPanel({
 
   // balances(overview,实时富化)提供 logo/name/实时市值;按大写 symbol 匹配账本 token(账本只出事实数量/单价/标识)。
   const balBySymbol = useMemo(
-    () => new Map(balances.map((b) => [b.symbol.toUpperCase(), b])),
+    () => new Map(balances.map((b) => [(b.symbol ?? "").toUpperCase(), b])),
     [balances],
   );
   const tokenById = useMemo(() => new Map(tokens.map((tk) => [tk.id, tk])), [tokens]);

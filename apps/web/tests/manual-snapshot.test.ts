@@ -6,7 +6,8 @@ import type { CredsToken } from "../src/lib/manual-activity";
 import { buildManualSnapshot } from "../src/lib/manual-snapshot";
 
 // 缝③ 纯逻辑:manual 的 creds.tokens(+ 逐 token 现价)→ 合成 SnapshotWithBalances(ADR 0018 做法 1)。
-// 现价烘焙进 usdValue/totalUsd(取不到回退 unitPrice);selfPrice=null 走盯市;tokenRef 恒有值。
+// 现价烘焙进 usdValue/totalUsd(取不到回退 unitPrice);selfPrice=null 走盯市。身份走 tokenId,
+// 显示名(symbol)与 ref 都住 Token 那一行,合成快照不再各带一份(#243)。
 const TS = 1_700_000_000_000;
 
 const tok = (over: Partial<CredsToken>): CredsToken => ({
@@ -19,10 +20,10 @@ const tok = (over: Partial<CredsToken>): CredsToken => ({
 });
 
 describe("buildManualSnapshot", () => {
-  it("每个 token 造一条 spot 余额,symbol/amount 透传", () => {
-    const snap = buildManualSnapshot("acc1", [tok({ symbol: "BTC", amount: 2 })], [undefined], TS);
+  it("每个 token 造一条 spot 余额,amount/tokenId 透传(symbol 住 Token,不再合成)", () => {
+    const snap = buildManualSnapshot("acc1", [tok({ id: "tk-BTC", amount: 2 })], [undefined], TS);
     expect(snap.balances).toHaveLength(1);
-    expect(snap.balances[0]).toMatchObject({ symbol: "BTC", amount: 2, kind: "spot" });
+    expect(snap.balances[0]).toMatchObject({ amount: 2, kind: "spot", tokenId: "tk-BTC" });
   });
 
   it("有现价 → usdValue = amount × 现价(不用 unitPrice)", () => {
@@ -51,20 +52,6 @@ describe("buildManualSnapshot", () => {
     const snap = buildManualSnapshot("acc1", [tok({})], [130], TS);
     expect(snap.balances[0].selfPrice).toBeNull();
     expect(snap.balances[0].metaJson).toBeNull();
-  });
-
-  // 有 ref → **原样搬**(本文件不认识上游,所以夹具用一个随便的命名者就够);
-  // 没有 → 手记自己命名,`custom:` 说明这个名字没有背书。
-  it("有 ref → 原样搬;无 → manual/custom:<名字>(恒有值)", () => {
-    const withRef = buildManualSnapshot(
-      "acc1",
-      [tok({ ref: "src/issued:bitcoin" })],
-      [undefined],
-      TS,
-    );
-    expect(withRef.balances[0].tokenRef).toBe("src/issued:bitcoin");
-    const noRef = buildManualSnapshot("acc1", [tok({ ref: null })], [undefined], TS);
-    expect(noRef.balances[0].tokenRef).toBe("manual/custom:BTC");
   });
 
   it("totalUsd = 各余额 usdValue 之和", () => {

@@ -16,7 +16,7 @@ interface PerpEquityView extends PerpEquityMetaT {
   accountValue: number; // = equity 行的 usdValue
 }
 export interface PerpPositionView extends PerpPositionMetaT {
-  coin: string;
+  // coin 由 PerpPositionMetaT 提供(#243:住 meta)。
   size: number; // 带符号:正=多、负=空(side 同时给出)
 }
 export interface PerpView {
@@ -25,11 +25,9 @@ export interface PerpView {
 }
 
 interface PerpBalance {
-  symbol: string;
   amount: number;
   usdValue: number;
   kind: string;
-  tokenRef?: string | null;
   metaJson: string | null;
 }
 
@@ -104,7 +102,8 @@ export function toPerpView(balances: PerpBalance[]): PerpView {
       if (r.success) equity = { ...r.data, accountValue: b.usdValue };
     } else if (vk === "perp_position") {
       const r = PerpPositionMeta.safeParse(raw);
-      if (r.success) positions.push({ ...r.data, coin: b.symbol, size: b.amount });
+      // coin 从 meta 取(#243:不再依赖快照 symbol 列)。PerpPositionView 的 coin 即 meta.coin。
+      if (r.success) positions.push({ ...r.data, size: b.amount });
     }
   }
 

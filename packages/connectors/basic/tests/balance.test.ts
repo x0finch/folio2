@@ -44,6 +44,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
       amount: 1,
       value: 0, // 仓位行不承载净值
       meta: {
+        coin: "BTC",
         side: "long",
         entryPx: 60000,
         positionValue: 60000,
@@ -108,6 +109,7 @@ describe("Balance —— 类型完备", () => {
       amount: 1,
       value: 0,
       meta: {
+        coin: "X",
         side: "short",
         entryPx: 1,
         positionValue: 1,

@@ -14,14 +14,15 @@ import { type PerpView, toPerpView } from "./perp";
 
 export interface OverviewBalance {
   id: string;
-  symbol: string;
+  // 显示名:由 overview-model 按 token_id 从 Token 取好后填入(#243:快照不再存 symbol)。
+  // 可选 —— 从快照直接读出的行还没富化,富化那步(decorate)才填上。
+  symbol?: string;
   amount: number;
   usdValue: number;
   selfPrice?: number | null; // provider 自带单价(估值原料,Phase 3);读时现推的原料,null=盯市恒用源
   kind: string;
   // **归并身份**:写快照时 mint 定死的代币行 id(ADR 0021 / #201)。可空:旧快照 / 手记现造的行。
   tokenId?: string | null;
-  tokenRef?: string | null; // 旧列(写路径仍在写,#202 删);手记那条路还在用
   platform?: string | null; // 这笔持仓所在的链 ∪ 场馆(provider 直接报,#193;本列之前的旧行为空)
   metaJson: string | null;
   note?: Note; // balance 级展示 note(单个 Note;CEX 该币锁仓/冻结);无则省略
@@ -92,7 +93,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
       const protocol = meta.protocol ?? DEFI_FALLBACK_PROTOCOL;
       const row: DefiRow = {
         id: b.id,
-        symbol: b.symbol,
+        symbol: b.symbol ?? "",
         amount: b.amount,
         usdValue: b.usdValue,
         positionType: meta.positionType,
@@ -107,7 +108,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
       if (Math.abs(b.usdValue) < ZERO_DISPLAY_USD) continue;
       spot.push({
         id: b.id,
-        symbol: b.symbol,
+        symbol: b.symbol ?? "",
         amount: b.amount,
         usdValue: b.usdValue,
         name: b.name,

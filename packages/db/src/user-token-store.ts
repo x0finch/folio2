@@ -240,8 +240,9 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
     async linkRef(tokenId, ref) {
       const p = partsOf(ref);
       if (!p) return tokenId;
-      // 「一个 Token 在一个命名者下最多一条 ref」在这里保证(不做部分唯一索引,见 schema.ts):
-      // 已经有那一档了就什么都不做 —— 挡住合并写错把两个上游币挂到同一行。
+      // 「一个 Token 在一个命名者下最多一条 ref」由唯一索引 `(user_id, token_id, namer)` 在 DB 层
+      // 兜底(见 schema.ts);这里先在应用层挡一道 —— 已经有那一档了就什么都不做,给个确定的返回值,
+      // 不必等约束抛错。约束存在的意义是并发:两个实例同时走到这、都读到「还没有」时,谁插进去谁生效。
       const existing = await db
         .select({ tokenId: tokenRefs.tokenId, localName: tokenRefs.localName })
         .from(tokenRefs)
@@ -262,12 +263,13 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
       // 真加了一条 ref → **info 标成该刷**(契约见 stores.ts):某个来源开始用新名字称呼一个
       // 我们已经认识的币,这就是改名的证据。同一批发,省一次往返。
       await batchWrite(db, [
+        // 无目标 onConflict:两道约束(PK 与 `(user_id, token_id, namer)` 唯一索引)任一撞了都静默。
+        // 并发时另一个实例可能已给同一 Token 在同命名者下插了条**不同 local_name** 的 ref —— 那撞的是
+        // 唯一索引而非 PK,只认 PK 会抛。输家在此 no-op、返回原 tokenId,收敛到先到者那条。
         db
           .insert(tokenRefs)
           .values({ userId, namer: p.namer, localName: p.localName, tokenId })
-          .onConflictDoNothing({
-            target: [tokenRefs.userId, tokenRefs.namer, tokenRefs.localName],
-          }),
+          .onConflictDoNothing(),
         expireInfoStmt(tokenId),
       ]);
       return tokenId;
@@ -291,9 +293,14 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
           .from(tokenRefs)
           .where(and(eq(tokenRefs.userId, userId), eq(tokenRefs.tokenId, into))),
       ]);
-      // 拼串走文法(`formatTokenRef`)—— 分隔符是斜杠这件事只有 @folio/oracle-ref 知道。
-      const taken = new Set(intoRefs.map(formatTokenRef));
-      const dupes = fromRefs.filter((r) => taken.has(formatTokenRef(r)));
+      // 改指前先剔掉会撞约束的 `from` ref。约束有两道:PK `(user_id, namer, local_name)` 挡
+      // 整条重复;唯一索引 `(user_id, token_id, namer)` 挡「同一 Token 一个命名者两条 ref」——
+      // 后者意味着 `into` 已有某命名者的 ref 时,`from` 在**同命名者**下的 ref(哪怕 local_name
+      // 不同)也不能改指过去。两道都归结为「按命名者去重,留 `into` 那份」:命名者已被 `into`
+      // 占了的,`from` 那条一律删。两行会合并本就说明至少一边的名字与上游当前叫法不一致,丢的是
+      // 输家那份候选,赢家(`into`,通常是被上游认出的那行)的身份保持不变。
+      const taken = new Set(intoRefs.map((r) => r.namer));
+      const dupes = fromRefs.filter((r) => taken.has(r.namer));
 
       const stmts = [
         ...dupes.map((d) =>

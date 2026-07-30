@@ -1,6 +1,14 @@
 import type { ConnectorId } from "@folio/connectors";
 import type { BalanceKind } from "@folio/connectors-basic";
-import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { user } from "./auth-schema";
 
 // 身份表(user/session/account/verification)定义在 ./auth-schema(better-auth,P2.1)。
@@ -93,28 +101,28 @@ export const snapshotBalances = sqliteTable(
     snapshotId: text("snapshot_id")
       .notNull()
       .references(() => snapshots.id, { onDelete: "cascade" }),
-    symbol: text("symbol").notNull(),
     amount: real("amount").notNull(),
     usdValue: real("usd_value").notNull(),
     kind: text("kind").$type<BalanceKind>().notNull(),
     // provider 自带单价(oracle 多源 Phase 3):估值「原料」,冻结。usd_value 是成品(revalue 按当时 mode 算);
     // 当前视图从「amount + self_price + 实时源价 + 当前 mode」现推 → 切源/切开关可逆、自带价不丢。
     selfPrice: real("self_price"),
-    // CAIP-19 代币标识(provider 构造;可空:CEX/manual/原生缺失)。读取时富化/解析的 tokenRef。
-    tokenRef: text("token_ref"),
     // 这笔持仓所在的链 ∪ 场馆(Platform),由 provider 随 Balance 直接报(ADR 0021 / #193)。
     // 可空:本列之前写下的行没有值 —— 读端退回账户的 connectorId,下次同步即补上。
     platform: text("platform"),
     // 认定冻进快照(ADR 0021 / #199 expand):写快照前经 mint 换出的代币行 id。
-    // expand 期可空(旧行没有值),#202 改必填并删掉 symbol / token_ref 两列。
+    // 显示名(symbol / name)从此只住 Token 那一行,读端按 token_id 取 —— 快照不再各存一份
+    // (#243 删了 symbol / token_ref 两列)。**必填**(#243):sync 经 mint 恒给,手记合成也带;
+    // 唯一还写空值的活口是 v2 导入 —— 有意让它撞约束(旧格式没有身份可落),#204 的 v3 导入
+    // 携带 token 身份后恢复。
     //
-    // **刻意不加外键。** 两个理由:① `TokenStore.merge` 删旧代币行前会把历史行一并改指,
-    // 有约束反而让「删用户」这类级联的执行顺序变成雷 —— tokens 经 user_id 级联删、
+    // **刻意不加外键**(约束是 NOT NULL,不是 FK)。两个理由:① `TokenStore.merge` 删旧代币行前会把
+    // 历史行一并改指,有外键反而让「删用户」这类级联的执行顺序变成雷 —— tokens 经 user_id 级联删、
     // snapshot_balances 经 snapshots 级联删,两条独立分支的先后 SQLite 不保证,
     // 先删 tokens 就撞约束(packages/db 的测试 teardown 正是直接删 user);
     // ② 快照是不可变的历史事实,代币表是可变的参考层,让前者的存在挡住后者的维护是反的。
     // 代价是 merge 漏改指会留下悬空 id → 由 token-store 的 merge 测试盯住。
-    tokenId: text("token_id"),
+    tokenId: text("token_id").notNull(),
     metaJson: text("meta_json"), // JSON.stringify(meta),可空
     // balance 级展示 note(note 重设计):JSON.stringify(单个 Note),可空。
     // provider 挂在该 balance 上的 note 落这里;读时 safeParse 回 Note(见 getLatestSnapshotByUser)。
@@ -135,8 +143,11 @@ export const snapshotBalances = sqliteTable(
 export const tokens = sqliteTable("tokens", {
   id: text("id").primaryKey(), // UUID
   // 归属用户(ADR 0021 / #199 expand):代币表转 per-user —— 「他认识哪些币、他的币叫什么名」
-  // 是用户私有数据。expand 期可空(旧的全局行没有值),#202 改必填。
-  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+  // 是用户私有数据。必填(#243 收尾):旧的全局行(userId 为空)随 #202 一起清掉了,写路径
+  // 恒经 per-user store 落 userId,导入不建代币行 —— 再没有产生空 userId 的路径。
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
   symbol: text("symbol").notNull(), // 归一(大写)
   name: text("name").notNull(),
   logo: text("logo"), // canonical(CGK);孤儿行 NULL
@@ -172,9 +183,14 @@ export const tokens = sqliteTable("tokens", {
 // **PK 带 user_id。** 票上原写 PK(namer, local_name) —— 那是代币表还全局时的写法:
 // tokens 转 per-user 之后两个用户都持有 BTC,`coingecko/bitcoin` 会各指一行,主键必然撞。
 //
-// 「一个 Token 在一个命名者下最多一条 ref」(即一个 Token 只对一个上游币)由 token-store 的
-// linkRef 保证,**不做部分唯一索引** —— 那个索引的 WHERE 里要写死 `namer='coingecko'`,
-// 等于把厂商名刻进迁移文件,与本片「表名列名零 vendor 字样」的验收项直接冲突。
+// 「一个 Token 在一个命名者下最多一条 ref」(即一个 Token 只对一个上游币)由下面的唯一索引
+// `(user_id, token_id, namer)` 在 DB 层保证 —— `linkRef` 的应用层检查在单实例下先挡一道,
+// 但 Workers 多实例并发时「先查后写」不是原子的(两个实例可能都读到「还没有」再各插一条),
+// 唯一约束是唯一真正防竞态的那道。
+//
+// **刻意是厂商中立的**:索引落在 `namer` 列上、不写死 `coingecko`,所以它对每个命名者都成立
+// (evm:1 / bitcoin / binance / coingecko 一视同仁),既堵住了「一个 Token 挂两个上游币」的
+// 数据损坏,又不把厂商名刻进迁移文件 —— 与本片「表名列名零 vendor 字样」的验收项不冲突。
 export const tokenRefs = sqliteTable(
   "token_refs",
   {
@@ -189,8 +205,9 @@ export const tokenRefs = sqliteTable(
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.namer, t.localName] }),
-    // 反查一个 Token 在某命名者下的叫法(TokenInfo.ref 就是这一查)。
-    index("token_refs_token_id_namer_idx").on(t.tokenId, t.namer),
+    // 一个 Token 在一个命名者下最多一条 ref(见表头注释)。反查「某 Token 在某命名者下叫什么」
+    // (TokenInfo.ref 那一查)也正好走这个索引的前缀。
+    uniqueIndex("token_refs_token_id_namer_uidx").on(t.userId, t.tokenId, t.namer),
   ],
 );
 

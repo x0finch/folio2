@@ -98,6 +98,7 @@ describe("toAccountSections", () => {
         usdValue: 0,
         metaJson: JSON.stringify({
           role: "position",
+          coin: "ETH",
           side: "long",
           entryPx: 2986,
           positionValue: 100,
@@ -129,7 +130,6 @@ describe("toAccountSections", () => {
         symbol: "BTC",
         kind: "spot",
         usdValue: 5000,
-        tokenRef: "bitcoin/native",
         metaJson: JSON.stringify({ pendingSats: 500000 }),
       }),
     ]);
@@ -143,7 +143,6 @@ describe("toAccountSections", () => {
         symbol: "BTC",
         kind: "utxo", // 旧快照遗留 kind;viewKind 经 default 归 spot
         usdValue: 5000,
-        tokenRef: "bitcoin/native",
         metaJson: JSON.stringify({ pendingSats: 12345 }),
       }),
     ]);
@@ -165,6 +164,7 @@ describe("toAccountSections", () => {
         kind: "perp_position",
         usdValue: 0,
         metaJson: JSON.stringify({
+          coin: "BTC",
           side: "short",
           entryPx: 64000,
           positionValue: 640,

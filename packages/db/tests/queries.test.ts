@@ -242,9 +242,10 @@ describe("snapshots", () => {
     const id = await writeSnapshot(env, USER_A, acc.id, {
       takenAt: 1000,
       totalUsd: 150,
+      // symbol 不再落快照(#243);行按 token_id 区分。
       balances: [
         {
-          symbol: "BTC",
+          tokenId: "tk-btc",
           amount: 0.001,
           usdValue: 100,
           kind: "spot",
@@ -252,7 +253,7 @@ describe("snapshots", () => {
           selfPrice: 100000,
         },
         {
-          symbol: "ETH",
+          tokenId: "tk-eth",
           amount: 0.02,
           usdValue: 50,
           kind: "spot",
@@ -270,12 +271,12 @@ describe("snapshots", () => {
     const latest = await getLatestSnapshotByUser(env, USER_A);
     expect(latest).toHaveLength(1);
     expect(latest[0]!.balances).toHaveLength(2);
-    expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.metaJson).toContain("note");
+    expect(latest[0]!.balances.find((b) => b.tokenId === "tk-eth")!.metaJson).toContain("note");
     // 无 note 写入 → 各行 note 省略。
     expect(latest[0]!.balances.every((b) => b.note === undefined)).toBe(true);
     // self_price 落库/读回(估值原料,Phase 3):BTC 行有、ETH 行无(null)。
-    expect(latest[0]!.balances.find((b) => b.symbol === "BTC")!.selfPrice).toBe(100000);
-    expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.selfPrice).toBeNull();
+    expect(latest[0]!.balances.find((b) => b.tokenId === "tk-btc")!.selfPrice).toBe(100000);
+    expect(latest[0]!.balances.find((b) => b.tokenId === "tk-eth")!.selfPrice).toBeNull();
   });
 
   it("persists per-balance note (single Note) + account-level note (Note[]) and safeParses back (note 重设计)", async () => {
@@ -304,15 +305,15 @@ describe("snapshots", () => {
       totalUsd: 0,
       note: accountNote,
       balances: [
-        { symbol: "BTC", amount: 0.08, usdValue: 0, kind: "spot", platform: "binance", note },
-        { symbol: "ETH", amount: 1, usdValue: 0, kind: "spot", platform: "binance" }, // 无 note 的行
+        { tokenId: "tk-btc", amount: 0.08, usdValue: 0, kind: "spot", platform: "binance", note },
+        { tokenId: "tk-eth", amount: 1, usdValue: 0, kind: "spot", platform: "binance" }, // 无 note 的行
       ],
     });
     const latest = await getLatestSnapshotByUser(env, USER_A);
     expect(latest).toHaveLength(1);
     // balance 级 note 挂在该 balance 上(per-balance),safeParse 回单个 Note;无 note 的行为 undefined。
-    expect(latest[0]!.balances.find((b) => b.symbol === "BTC")!.note).toEqual(note);
-    expect(latest[0]!.balances.find((b) => b.symbol === "ETH")!.note).toBeUndefined();
+    expect(latest[0]!.balances.find((b) => b.tokenId === "tk-btc")!.note).toEqual(note);
+    expect(latest[0]!.balances.find((b) => b.tokenId === "tk-eth")!.note).toBeUndefined();
     // account 级 note(Note[])从 snapshot.note safeParse。
     expect(latest[0]!.note).toEqual(accountNote);
   });
@@ -323,9 +324,9 @@ describe("snapshots", () => {
       label: "Big wallet",
       creds: "x",
     });
-    // 60 条余额 × 9 列 = 540 绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
+    // 60 条余额 × 每行多列 = 数百绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
     const balances = Array.from({ length: 60 }, (_, i) => ({
-      symbol: `T${i}`,
+      tokenId: `tk-${i}`,
       amount: i,
       usdValue: i * 2,
       kind: "spot" as const,
@@ -356,18 +357,18 @@ describe("snapshots", () => {
     await writeSnapshot(env, USER_A, a1.id, {
       takenAt: 1000,
       totalUsd: 10,
-      balances: [{ symbol: "OLD", amount: 1, usdValue: 10, kind: "spot", platform: "binance" }],
+      balances: [{ tokenId: "tk-old", amount: 1, usdValue: 10, kind: "spot", platform: "binance" }],
     });
     await writeSnapshot(env, USER_A, a1.id, {
       takenAt: 2000,
       totalUsd: 20,
-      balances: [{ symbol: "NEW", amount: 2, usdValue: 20, kind: "spot", platform: "binance" }],
+      balances: [{ tokenId: "tk-new", amount: 2, usdValue: 20, kind: "spot", platform: "binance" }],
     });
     // a2:单份快照。
     await writeSnapshot(env, USER_A, a2.id, {
       takenAt: 1500,
       totalUsd: 5,
-      balances: [{ symbol: "ATOM", amount: 5, usdValue: 5, kind: "spot", platform: "binance" }],
+      balances: [{ tokenId: "tk-atom", amount: 5, usdValue: 5, kind: "spot", platform: "binance" }],
     });
 
     const latest = await getLatestSnapshotByUser(env, USER_A);
@@ -378,11 +379,11 @@ describe("snapshots", () => {
     expect(r1.snapshot.takenAt).toBe(2000);
     expect(r1.snapshot.totalUsd).toBe(20);
     expect(r1.balances).toHaveLength(1);
-    expect(r1.balances[0]!.symbol).toBe("NEW"); // 旧快照的 OLD 不应混入
+    expect(r1.balances[0]!.tokenId).toBe("tk-new"); // 旧快照的 OLD 不应混入
 
     const r2 = byAcc.get(a2.id)!;
     expect(r2.snapshot.takenAt).toBe(1500);
-    expect(r2.balances[0]!.symbol).toBe("ATOM");
+    expect(r2.balances[0]!.tokenId).toBe("tk-atom");
   });
 
   it("returns [] for a user with no snapshots", async () => {
@@ -401,7 +402,7 @@ describe("snapshots", () => {
     await writeSnapshot(env, USER_A, acc.id, {
       takenAt: 1,
       totalUsd: 1,
-      balances: [{ symbol: "X", amount: 1, usdValue: 1, kind: "spot", platform: "binance" }],
+      balances: [{ tokenId: "tk-x", amount: 1, usdValue: 1, kind: "spot", platform: "binance" }],
     });
 
     await deleteAccount(env, USER_A, acc.id);
@@ -454,7 +455,9 @@ describe("snapshots", () => {
       await writeSnapshot(env, USER_A, a.id, {
         takenAt: t,
         totalUsd: t,
-        balances: [{ symbol: `S${t}`, amount: 1, usdValue: t, kind: "spot", platform: "binance" }],
+        balances: [
+          { tokenId: `tk-${t}`, amount: 1, usdValue: t, kind: "spot", platform: "binance" },
+        ],
       });
     }
     await writeSnapshot(env, USER_B, b1.id, { takenAt: 9, totalUsd: 9, balances: [] });

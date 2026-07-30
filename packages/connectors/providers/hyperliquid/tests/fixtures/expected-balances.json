@@ -18,6 +18,7 @@
     "value": 0,
     "kind": "perp_position",
     "meta": {
+      "coin": "ETH",
       "side": "long",
       "entryPx": 2986.3,
       "positionValue": 100.02765,
@@ -35,6 +36,7 @@
     "value": 0,
     "kind": "perp_position",
     "meta": {
+      "coin": "BTC",
       "side": "short",
       "entryPx": 64000,
       "positionValue": 640,

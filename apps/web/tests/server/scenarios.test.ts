@@ -443,12 +443,13 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
   it("② 数据:快照行的 token_id 指向那一行(身份写时定死)", async () => {
     const snapshotId = await syncOnchain();
     const [row] = await tokenRows();
+    // symbol / token_ref 不再落快照(#243):身份只剩 token_id,反查上游叫法走 token_refs。
     const { results } = await env.DB.prepare(
-      "SELECT token_id AS tokenId, token_ref AS tokenRef FROM snapshot_balances WHERE snapshot_id = ?",
+      "SELECT token_id AS tokenId FROM snapshot_balances WHERE snapshot_id = ?",
     )
       .bind(snapshotId)
-      .all<{ tokenId: string | null; tokenRef: string | null }>();
-    expect(results).toEqual([{ tokenId: row.id, tokenRef: USDC_ETH }]);
+      .all<{ tokenId: string | null }>();
+    expect(results).toEqual([{ tokenId: row.id }]);
   });
 
   it("③ 展示:刷过之后有上游的名字与图", async () => {

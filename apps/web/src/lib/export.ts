@@ -22,7 +22,7 @@ interface SnapshotIn {
   totalUsd: number;
 }
 interface BalanceIn {
-  symbol: string;
+  symbol: string | null; // 显示名(#243 起从 Token join 取);无 token 的旧行 → null
   amount: number;
   usdValue: number;
   kind: string;
@@ -73,7 +73,7 @@ export function snapshotRecord(s: SnapshotIn, balances: BalanceIn[]) {
     takenAt: s.takenAt,
     totalUsd: s.totalUsd,
     balances: balances.map((b) => ({
-      symbol: b.symbol,
+      symbol: b.symbol ?? "", // v2 线格式恒有 symbol 字段;无 token 的旧行给空串
       amount: b.amount,
       usdValue: b.usdValue,
       kind: b.kind,

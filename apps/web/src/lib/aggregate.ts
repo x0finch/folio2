@@ -14,6 +14,7 @@ const norm = (s: string): string => s.trim().toUpperCase();
 
 // 聚合输入:一笔持仓 + 其解析结果(ref/展示,由 server 富化)。
 export interface AggInput {
+  id?: string; // 余额行 id;仅用作没有 token_id 的行的稳定分组键(见 groupKey)
   symbol: string;
   amount: number;
   value: number; // USD(provider 权威;聚合按它求和)
@@ -61,11 +62,13 @@ export interface Holding {
 // 分组键 = `token_id`。以前这里有个三级回退的 `holdingKey`(token → tokenRef → account:symbol),
 // 随认定挪到写路径一并塌成一级 —— 那个函数已删,单币历史(token-history)直接按 token_id 匹配。
 //
-// 还留一条兜底:没有 token_id 的行按 `账户 + symbol` 各自成组。够得到这条的只有两类 ——
-// 本列之前写下的旧快照,和手记那种现造的持仓(#203 之后就没了)。**兜底带账户 id**,
-// 所以它绝不会把两个账户的同名币并到一起:裸 symbol 归并是 ADR-0002 的红线。
+// 还留一条兜底:没有 token_id 的行**各自成行**,键 = `账户 + 余额行 id`。够得到这条的只有导入进来
+// 的 v2 旧行(sync 恒经 mint 定死 token_id;#243 删了 symbol 列后这类行也没名字可归并了)。
+// 键带**余额行 id** 而非 symbol —— symbol 已不在行上,再拿它当键会让一个账户里所有无 token 的行
+// 塌成一条空名持仓、金额被错误相加(裸 symbol 归并本就是 ADR-0002 的红线)。带账户 id 兼防跨账户混。
+// id 缺席(历史行不带)→ 回落空 symbol,那条恒不匹配任何真 token_id 键,只会被 token-history 排除。
 export function groupKey(row: AggInput): string {
-  return row.tokenId ?? `no-token:${row.account.id}:${norm(row.symbol)}`;
+  return row.tokenId ?? `no-token:${row.account.id}:${row.id ?? norm(row.symbol)}`;
 }
 
 // 导出供 token-history 复用(历史行归属同一口径)。
