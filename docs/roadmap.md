@@ -5,7 +5,9 @@
 
 ## 现状一句话
 
-Folio 今天是**带统一定价 + 多币种展示 + 分析拆分**的多源组合追踪器:链上 / CEX / perp / manual / **Bitcoin(地址 + xpub)** 余额 → 归一 USD → **canonical 代币聚合** → 展示(24h 涨跌 / 占比 / 单资产 drill-down / 净值曲线),可切法币或 BTC/ETH 计价。DB 已从最初 5 表长出代币参考层(tokens/index/meta/groups)、平台元信息(platforms)、FX 汇率(fx_rates)、manual 活动(manual_activity)。`snapshot_balances` 存逐资产 `unit_price`。
+Folio 今天是**带统一定价 + 多币种展示 + 分析拆分**的多源组合追踪器:链上 / CEX / perp / manual / **Bitcoin(地址 + xpub)** 余额 → 归一 USD → **canonical 代币聚合** → 展示(24h 涨跌 / 占比 / 单资产 drill-down / 净值曲线),可切法币或 BTC/ETH 计价。DB 现由 **per-user 代币层**(`tokens`,以 `tokens.id` 为唯一贯穿身份,vendor 叫法退到 `token_refs` 边界)、**全局公开参考层**(`global_token_ref_index` 地址→上游叫法、`token_daily_prices` 历史日价)、**per-user 缓存**(`user_cache`,吞掉旧 FX/平台表)、`manual_activity` 与 `snapshot_balances`(逐资产存 `amount`/`usd_value`/`self_price`,身份为必填 `token_id`)组成。
+
+> **代币身份 epic 已完工**(#176:tokens 收归 per-user + `tokens.id` 唯一身份 → ADR 0021/0022;含导出/导入 v3 #204)。旧代币层 `token_index`/`token_meta`/`token_groups`/`platforms`/`fx_rates` 已删,业务/展示层零 vendor(CGK 只在 oracle 组合根这一处边缘)。
 
 **仍缺 Tier-0 最后一环:通用交易流 + 成本/盈亏** —— 还回答不了"我赚亏多少",当前最大缺口。
 
@@ -21,7 +23,7 @@ Folio 今天是**带统一定价 + 多币种展示 + 分析拆分**的多源组�
 
 ## 架构就绪度
 
-`provider.inputs + creds + 注册表`让**加数据源很便宜**(M9.1 多为新 provider 包,如 Bitcoin 已循此路)。代币层 / 平台层 / FX 层 / 快照逐资产价均已就位。**真正的大件只剩一块:`transactions` 表 + 摄取 → cost-basis/P&L 层**(schema 前提已备,`snapshot_balances.unit_price` 已存)。其余多为在既有契约上叠加。
+`provider.inputs + creds + 注册表`让**加数据源很便宜**(M9.1 多为新 provider 包,如 Bitcoin 已循此路)。per-user 代币层 / 参考层 / 快照逐资产价均已就位(代币身份 epic #176 已收口)。**真正的大件只剩一块:`transactions` 表 + 摄取 → cost-basis/P&L 层**(schema 前提已备,`snapshot_balances` 已逐资产存 `usd_value`/`self_price`)。其余多为在既有契约上叠加。
 
 ## 不在本路线内(明确不做 / 远期)
 
