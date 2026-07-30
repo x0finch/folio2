@@ -6,7 +6,7 @@ import { type AggInput, buildCanonicalHoldings } from "./aggregate";
 import { isFungible, viewKind } from "./balance-kind";
 import { deriveLiveAccountTotals, liveValue } from "./live-value";
 import { platformLogoUrl, tokenLogoUrl } from "./logo";
-import { defiTokenId } from "./tokens";
+import { defiTokenId, refreshableTokenIds } from "./tokens";
 
 // 总览读模型(纯 —— 依赖注入,无 cloudflare env,可脱离 server fn 单测)。
 // 持仓区 = 跨账户按 canonical 代币聚合(spot/manual/CEX/perp 权益);DeFi 仓位 + perp 敞口走
@@ -156,7 +156,12 @@ export async function buildOverview(
 
   const holdingsSubtotal = holdings.reduce((sum, h) => sum + h.totalValue, 0);
   // 价 stale = 有价但过期,或**认得出来却压根没价**(新层刚建行时就是这样)→ 客户端触发一次刷新。
-  const pricesStale = rows.some(({ b, e }) => b.tokenId != null && (e?.price?.stale ?? true));
+  // **只在刷价集合内判脏**(#245:dust 跳过):否则被跳过的 dust 标了脏、刷价那侧(refreshStalePrices
+  // 同用 refreshableTokenIds)又不刷 → pricesStale 永清不掉、客户端每次进页空转。与 token-enrich 同门。
+  const refreshable = new Set(refreshableTokenIds(rows.map((r) => r.b)));
+  const pricesStale = rows.some(
+    ({ b, e }) => b.tokenId != null && refreshable.has(b.tokenId) && (e?.price?.stale ?? true),
+  );
 
   // 3) 次级分区(每账户 defi 分组 + perp 敞口;perp 权益已进 Holdings → 此处渲染 positions
   // 与权益)。change24h 按行 id 附回(不按对象引用键——那只在 balancesOf 恰好返回同批对象时
