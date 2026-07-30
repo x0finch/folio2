@@ -156,25 +156,6 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
   });
 }
 
-// **旧参考层**里也摆一个真 USDC(有市价、有 vendor 映射,足以被它的 symbol 那一档认出来)。
-//
-// 为什么必须有:自定义币借真币价那个 bug 就在旧层 —— 手记的合成余额去问旧 `enrich`,而旧
-// `resolveAsset` 对任何形状都掉回 symbol 猜。旧层空着的话,「我们没去问」与「问了但没查到」
-// 在断言里长得一样(实测:把那个 bug 打回去,12 条全绿),这正是 `manual-t2` 当初漏掉它的原因。
-async function seedOldLayerUsdc(): Promise<void> {
-  await env.DB.prepare("DELETE FROM tokens WHERE id = ?").bind("old-layer-usdc").run();
-  await env.DB.prepare(
-    "INSERT INTO tokens (id, symbol, name, market_cap_rank, info_expires_at, unit_price, price_as_of, price_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-  )
-    .bind("old-layer-usdc", "USDC", "USD Coin", 5, 4e12, MARKET_PRICE, 1, 4e12)
-    .run();
-  await env.DB.prepare(
-    "INSERT OR REPLACE INTO token_vendor_ids (token_id, vendor, vendor_id) VALUES (?, ?, ?)",
-  )
-    .bind("old-layer-usdc", NAMER, USDC_ID)
-    .run();
-}
-
 // —— 情景一:在下拉里选了币 ——
 describe("情景:手动加币,在下拉里选了 USDC", () => {
   const add = () =>
@@ -260,8 +241,7 @@ describe("情景:手动加币,不选、自己敲 USDC", () => {
   });
 
   // #223 的核心承诺,而且是从**屏幕**这一侧验的 —— 上一版只在写路径上成立,显示照旧按市价盯。
-  it("③ 展示:用他填的价、没有 logo —— 哪怕两层缓存里都摆着一个真 USDC", async () => {
-    await seedOldLayerUsdc(); // 旧层也摆一个,否则这条断言是空的(见该函数注释)
+  it("③ 展示:用他填的价、没有 logo —— 哪怕参考层里摆着一个同名的真 USDC", async () => {
     await add();
     // 另开一个账户选真 USDC,让参考层里确实有一个刷过的、同名的、有价有图的币。
     await createManualAccount(

@@ -16,7 +16,7 @@ import { ticketOf } from "./ticket";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。
 // 网络无关:结构类用例用**无 identifier** 的 token(不触发 oracle priceSeries 回源,走账本价②/unitPrice③);
-// ① oracle 历史价用例**预种 token_price_history** + 传过去的 now(priceSeries 的 real-today 判定 → 不取今日桶,
+// ① oracle 历史价用例**预种 token_daily_prices** + 传过去的 now(priceSeries 的 real-today 判定 → 不取今日桶,
 // 请求的过去桶全命中缓存 → 零网络)。beforeEach 重置(pool 不隔离每测存储)。
 const USER = "user-manual-grid";
 const DAY = 86_400_000;
