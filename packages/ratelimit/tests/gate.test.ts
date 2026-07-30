@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bypassGatesForTests,
+  CacheSlotStore,
   defineRateLimit,
+  MemorySlotStore,
   resetGatesForTests,
-  type SlotStore,
 } from "../src/index";
 
 // 时钟和 sleep 都注入 —— 于是「谁被要求等多久」是确定的数,整个文件跑不到一秒。
-// 默认的 cache 档在 node 里没有 `caches`,会自己退回本地那层,所以这里显式传 store 说清意图。
+// 默认的 cache 档在 node 里没有 `caches`,会自己退回本地那层;这里显式传 `store: "memory"` 说清意图。
 
 function fakeClock(start = 0) {
   let now = start;
@@ -162,31 +163,54 @@ describe("按 key 分队", () => {
   });
 });
 
-describe("跨 isolate 的时隙存储", () => {
-  // 这一组是**为什么默认不用内存**:新 isolate 从空队列开始的话开局白给一整轮突发,
+describe("两个 store 实现", () => {
+  // 这一组是**为什么默认不用纯内存**:新 isolate 从零开始的话开局白给一整轮突发,
   // 而 Cloudflare 什么时候开新 isolate 我们控制不了。
-  function fakeShared(initial?: number) {
-    const box: { slot?: number; sets: number } = { slot: initial, sets: 0 };
-    const store: SlotStore = {
-      async get() {
-        return box.slot;
-      },
-      async set(_k, at) {
-        box.slot = at;
-        box.sets++;
+
+  // 假的 Cache API,可以预置「别的 isolate 已经排到哪了」。
+  function fakeCache(preset?: { key: string; slot: number }) {
+    const store = new Map<string, string>();
+    if (preset) {
+      store.set(CacheSlotStore.URL_PREFIX + encodeURIComponent(preset.key), String(preset.slot));
+    }
+    const calls = { match: 0, put: 0 };
+    return {
+      calls,
+      cache: {
+        async match(req: string) {
+          calls.match++;
+          const body = store.get(req);
+          return body === undefined ? undefined : new Response(body);
+        },
+        async put(req: string, res: Response) {
+          calls.put++;
+          store.set(req, await res.text());
+        },
       },
     };
-    return { store, box };
   }
 
-  it("冷启时读回别人的进度 → 不白给一整轮突发", async () => {
-    const { store } = fakeShared(1000); // 别的 isolate 已经排到 1000 了
+  it("MemorySlotStore:advance 返回推之前的游标,并把它往后推", async () => {
+    const store = new MemorySlotStore();
+    expect(await store.advance("k", 100, 1000)).toBe(1000);
+    expect(await store.advance("k", 100, 1000)).toBe(1100);
+    expect(await store.advance("k", 100, 1000)).toBe(1200);
+  });
+
+  it("MemorySlotStore:游标落在过去 → 抬到 now(闲置不惩罚)", async () => {
+    const store = new MemorySlotStore();
+    await store.advance("k", 100, 0);
+    expect(await store.advance("k", 100, 60_000)).toBe(60_000);
+  });
+
+  it("CacheSlotStore:冷启时读回别人的进度 → 不白给一整轮突发", async () => {
+    const { cache } = fakeCache({ key: "k", slot: 1000 }); // 别的 isolate 已经排到 1000
     const r = recorder();
     const gate = defineRateLimit({
       key: "k",
       limit: 1,
       interval: 125,
-      store,
+      store: new CacheSlotStore(new MemorySlotStore(), cache),
       clock: () => 0,
       sleep: r.sleep,
     });
@@ -194,56 +218,83 @@ describe("跨 isolate 的时隙存储", () => {
     expect(r.waits).toEqual([1000]); // 老实等到别人腾出来
   });
 
-  it("放行之后把新时隙播出去", async () => {
-    const { store, box } = fakeShared();
+  it("CacheSlotStore:抢完把新游标播出去", async () => {
+    const { cache, calls } = fakeCache();
     const gate = defineRateLimit({
       key: "k",
       limit: 1,
       interval: 125,
-      store,
+      store: new CacheSlotStore(new MemorySlotStore(), cache),
       clock: () => 0,
       sleep: async () => {},
     });
     await gate(async () => {});
-    expect(box.slot).toBe(125);
-    expect(box.sets).toBe(1);
+    expect(calls.put).toBe(1);
+    const hit = await cache.match(`${CacheSlotStore.URL_PREFIX}k`);
+    expect(await hit?.text()).toBe("125");
   });
 
-  it("每个 key 只读一次共享存储 —— 不给每个请求都付一次查询", async () => {
-    let gets = 0;
-    const store: SlotStore = {
-      async get() {
-        gets++;
-        return undefined;
-      },
-      async set() {},
-    };
+  it("CacheSlotStore:每个 key 只读一次共享进度,不给每个请求都付一次查询", async () => {
+    const { cache, calls } = fakeCache();
     const gate = defineRateLimit({
       key: "k",
       limit: 10,
       interval: 1000,
-      store,
+      store: new CacheSlotStore(new MemorySlotStore(), cache),
       clock: () => 0,
       sleep: async () => {},
     });
     for (let i = 0; i < 5; i++) await gate(async () => {});
-    expect(gets).toBe(1);
+    expect(calls.match).toBe(2); // 一次 seed + 第一次 put 之后那次生效探测
   });
 
-  it("共享存储炸了 → 照常放行,退化成本地那层", async () => {
-    const store: SlotStore = {
-      async get() {
-        throw new Error("store down");
+  it("CacheSlotStore:抢的原子性来自委托 —— 并发调用仍各拿一个时隙", async () => {
+    const { cache } = fakeCache();
+    const r = recorder();
+    const gate = defineRateLimit({
+      key: "k",
+      limit: 1,
+      interval: 125,
+      store: new CacheSlotStore(new MemorySlotStore(), cache),
+      clock: () => 0,
+      sleep: r.sleep,
+    });
+    await Promise.all(Array.from({ length: 5 }, () => gate(async () => {})));
+    expect(r.waits.sort((a, b) => a - b)).toEqual([125, 250, 375, 500]);
+  });
+
+  it("CacheSlotStore:缓存炸了 → 兜底成纯内存,照常摊开", async () => {
+    const broken = {
+      async match(): Promise<Response | undefined> {
+        throw new Error("cache down");
       },
-      async set() {
-        throw new Error("store down");
+      async put(): Promise<void> {
+        throw new Error("cache down");
       },
     };
-    const gate = defineRateLimit({ key: "k", limit: 1, interval: 125, store });
-    await expect(gate(async () => "ok")).rejects.toThrow("store down");
+    const t = fakeClock();
+    const gate = defineRateLimit({
+      key: "k",
+      limit: 1,
+      interval: 125,
+      store: new CacheSlotStore(new MemorySlotStore(), broken),
+      ...t,
+    });
+    await gate(async () => {});
+    await gate(async () => {});
+    expect(t.at()).toBe(125); // 本地那份照样在限
   });
 
-  it("node 里没有 caches → 默认档静默退回本地,**不喊也不抛**", async () => {
+  it("memory 与 cache 共用同一份内存状态 —— 混用不会各记一套", async () => {
+    const r = recorder();
+    const common = { key: "shared", limit: 1, interval: 125, clock: () => 0, sleep: r.sleep };
+    await defineRateLimit({ ...common, store: "memory" as const })(async () => {});
+    // 默认 cache 档在 node 里拿不到 caches → 只剩委托,委托的正是同一个内存单例
+    await defineRateLimit(common)(async () => {});
+    expect(r.waits).toEqual([125]);
+  });
+
+  it("node 里没有 caches → 静默兜底,**不喊也不抛**", async () => {
     // 不喊是刻意的:没有 Cache API 说明压根不在 Workers 上,那不是部署配错了。
     // 该喊的是「有 caches 但写进去读不回来」(workers.dev),那条只有 workerd 里才验得到。
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -251,7 +302,7 @@ describe("跨 isolate 的时隙存储", () => {
     const gate = defineRateLimit({ key: "k", limit: 1, interval: 125, ...t }); // 不传 store = cache
     await gate(async () => {});
     await gate(async () => {});
-    expect(t.at()).toBe(125); // 本地那层照样摊开
+    expect(t.at()).toBe(125);
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });

@@ -1,13 +1,20 @@
-// 存「下一个可用时隙」的地方。**它的作用域就是限速的作用域**:
-//   · memory —— 模块级 Map,每个 isolate 一份。isolate 一回收就归零,新 isolate 开局满额突发
-//   · cache  —— Cache API,同一个数据中心的 isolate 共享。默认用它
+// 时隙游标存在哪。**它的作用域就是限速的作用域**:
+//   · cache(默认)—— Cache API,同一个数据中心的 isolate 共享;缓存不可用时**兜底退到 memory**
+//   · memory        —— 模块级 Map,每个 isolate 一份。isolate 一回收就归零、新 isolate 开局满额
+//                      突发,所以生产别单用;测试用它
 //
-// cache 这一档**没有原子读改写**(两个 isolate 会同时读到同一个时隙、各自拿走),所以它给不了
-// 精确配额。这是明知接受的:我们要的是**削峰**,不是严格限频 —— 漏出去的那几发由 429 + 重试兜。
+// cache 这一档**没有原子读改写**(两个 isolate 会读到同一个游标),所以它给不了精确配额。
+// 这是明知接受的:我们要的是**削峰**,不是严格限频 —— 漏出去的那几发由 429 + 重试兜。
 // 真要精确得上 Durable Object(见 #17),而那需要多用户同时同步才划得来。
 export interface SlotStore {
-  get(key: string): Promise<number | undefined>;
-  set(key: string, slotAt: number, ttlMs: number): Promise<void>;
+  // 把 key 的时隙游标往后推 spacingMs,返回**推之前**的值(不早于 now)——也就是本次拿到的时隙。
+  //
+  // **实现必须保证同一 isolate 内的原子性**:读和写之间不能有 `await`,否则两个并发调用会读到
+  // 同一个游标、各自以为拿到了那个时隙,闸就漏了。跨 isolate 的原子性做不到,也不要求(见上)。
+  advance(key: string, spacingMs: number, now: number): Promise<number>;
+  // 仅测试用:清掉这个实现自己的状态。**由实现方自己清** —— 否则 resetGatesForTests
+  // 得知道每种存储的内部长什么样。测试里传的假 store 不需要它,所以是可选的。
+  reset?(): void;
 }
 
 export type StoreChoice = "cache" | "memory" | SlotStore;
