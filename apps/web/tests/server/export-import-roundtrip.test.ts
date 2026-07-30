@@ -69,6 +69,7 @@ const dstDeps: ImportDeps = {
   importToken: async (t, refs) => ({ id: await db.importToken(DST, t, refs) }),
   createAccount: (input) =>
     db.createAccount(DST, { ...input, connectorId: input.connectorId as ConnectorId }),
+  setArchived: (accountId) => db.setArchived(DST, accountId, true),
   createGroup: (input) => db.createGroup(DST, input),
   addAccountToGroup: (accountId, groupId) => db.addAccountToGroup(DST, accountId, groupId),
   writeSnapshot: async (accountId, input) => {
@@ -101,6 +102,14 @@ async function seedSource() {
     label: "Manual",
     creds: JSON.stringify({}),
   });
+  // 一个归档账户(无快照):验证归档态随导出/导入保真,不会变回活跃(#204 review 发现)。
+  const accArch = await db.createAccount(SRC, {
+    connectorId: "evm",
+    platform: "evm:1",
+    label: "Archived",
+    creds: JSON.stringify({ address: "0xarch" }),
+  });
+  await db.setArchived(SRC, accArch.id, true);
   const btc = await db.importToken(
     SRC,
     { symbol: "BTC", name: "Bitcoin", logo: "b.png", providerLogo: null, marketCapRank: 1 },
@@ -125,8 +134,19 @@ async function seedSource() {
   await db.writeSnapshot(SRC, accW.id, {
     takenAt: 2000,
     totalUsd: 150,
+    // 账户级 note(整钱包)
+    note: [{ title: "Wallet note", content: "hi" }],
     balances: [
-      { tokenId: btc, amount: 0.001, usdValue: 90, kind: "spot", platform: "evm:1" },
+      {
+        tokenId: btc,
+        amount: 0.001,
+        usdValue: 90,
+        kind: "spot",
+        platform: "evm:1",
+        selfPrice: 90000, // 估值原料
+        meta: { foo: "bar" }, // typed meta(perp coin 也走这条)
+        note: { title: "Locked", content: "x" }, // balance 级 note
+      },
       { tokenId: eth, amount: 0.02, usdValue: 60, kind: "spot", platform: "evm:1" },
     ],
   });
@@ -177,12 +197,30 @@ describe("export → import v3 往返(空库重建)", () => {
         .map((a) => ({ connectorId: a.connectorId, label: a.label, platform: a.platform }))
         .sort((x, y) => x.label.localeCompare(y.label)),
     ).toEqual([
+      { connectorId: "evm", label: "Archived", platform: "evm:1" },
       { connectorId: "manual", label: "Manual", platform: "manual" },
       { connectorId: "evm", label: "Wallet", platform: "evm:1" },
     ]);
-    const evm = dstAccts.find((a) => a.connectorId === "evm")!;
-    expect(JSON.parse((await db.getRawCreds(DST, evm.id))!)).toEqual({ address: "0xabc" });
+    const wallet = dstAccts.find((a) => a.label === "Wallet")!;
+    expect(JSON.parse((await db.getRawCreds(DST, wallet.id))!)).toEqual({ address: "0xabc" });
     expect(await db.listMembershipsByUser(DST)).toHaveLength(1);
+    // 归档态保真:归档账户导入后仍归档,活跃账户仍活跃(#204 review 修复)。
+    expect(dstAccts.find((a) => a.label === "Archived")!.archivedAt).toBeGreaterThan(0);
+    expect(wallet.archivedAt).toBeNull();
+  });
+
+  it("估值原料 / meta / balance note / 账户级 note 端到端保真", async () => {
+    await seedSource();
+    await importInto(await exportRecords(SRC));
+
+    const dstTokens = await db.listTokensForExport(DST);
+    const btcId = dstTokens.find((t) => t.symbol === "BTC")!.id;
+    const latest = (await db.getLatestSnapshotByUser(DST))[0]!;
+    expect(latest.note).toEqual([{ title: "Wallet note", content: "hi" }]); // 账户级 note
+    const btcBal = latest.balances.find((b) => b.tokenId === btcId)!;
+    expect(btcBal.selfPrice).toBe(90000);
+    expect(JSON.parse(btcBal.metaJson ?? "{}")).toEqual({ foo: "bar" });
+    expect(btcBal.note).toEqual({ title: "Locked", content: "x" });
   });
 
   it("历史曲线逐点一致(总资产同源)", async () => {

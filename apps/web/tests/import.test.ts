@@ -31,6 +31,7 @@ function makeDeps() {
     memberships: [] as Array<{ accountId: string; groupId: string }>,
     snapshots: [] as Array<{ accountId: string; totalUsd: number; balances: unknown[] }>,
     activities: [] as Array<{ accountId: string; tokenId: string; amount: number }>,
+    archived: [] as string[],
   };
   let n = 0;
   const deps: ImportDeps = {
@@ -46,6 +47,9 @@ function makeDeps() {
         creds: input.creds,
       });
       return { id: `acc-${++n}` };
+    },
+    setArchived: async (accountId) => {
+      calls.archived.push(accountId);
     },
     createGroup: async (input) => {
       calls.groups.push({ name: input.name });
@@ -77,7 +81,9 @@ describe("createImporter —— 版本闸", () => {
   it("缺 meta 头 → 报错", async () => {
     const { deps } = makeDeps();
     const imp = createImporter(deps);
-    await expect(imp.apply({ type: "account", connectorId: "manual" })).rejects.toThrow(ImportError);
+    await expect(imp.apply({ type: "account", connectorId: "manual" })).rejects.toThrow(
+      ImportError,
+    );
   });
 
   it("旧版本文件(v2)→ 明确报「太旧」,不崩", async () => {
@@ -120,6 +126,22 @@ describe("createImporter —— creds 重建", () => {
       creds: { address: "0xabc" },
     });
     expect(JSON.parse(calls.accounts[0]!.creds)).toEqual({ address: "0xabc" });
+    expect(calls.archived).toHaveLength(0); // 无 archivedAt → 不归档
+  });
+
+  it("带 archivedAt 的账户 → 导入后重新归档", async () => {
+    const { deps, calls } = makeDeps();
+    const imp = createImporter(deps);
+    await imp.apply({ type: "meta", version: EXPORT_VERSION });
+    await imp.apply({
+      type: "account",
+      id: "x",
+      connectorId: "evm",
+      label: "W",
+      creds: { address: "0xabc" },
+      archivedAt: 1700000000000,
+    });
+    expect(calls.archived).toEqual(["acc-1"]);
   });
 });
 

@@ -825,6 +825,11 @@ export interface ImportTokenInput {
 // 补挂过去);否则新建一行(新 id,不跟本地已有撞)+ 挂上全部 ref。返回最终 token_id,供调用方建
 // old→new 映射。空库导入是最常见路径:恒无命中 → 每个 Token 各建新行。
 // ref 插入用无目标 onConflict:PK(user_id,namer,local_name)与唯一索引(user_id,token_id,namer)任一撞了都静默。
+//
+// **已知限制(仅非空库的分叉场景)**:若这批 ref 分别命中本地**不同**的 Token(源库把多链归并成一行、
+// 目标库却各自建了行),这里按第一条命中复用、其余 ref 撞约束被静默跳过 → 文件里那个 Token 的身份被
+// 部分并到一行上。**空库恢复(#204 验收目标)不触发**(恒无命中);**幂等重导入也不触发**(ref 恒命中同一行)。
+// 跨实例、双方 mint 历史分叉后再合并,留给「改绑」那张票统一处理。
 export async function importToken(
   env: DbEnv,
   userId: string,

@@ -21,6 +21,7 @@ interface AccountIn {
   connectorId: string;
   platform: string | null;
   label: string;
+  archivedAt: number | null;
 }
 interface GroupIn {
   id: string;
@@ -84,7 +85,8 @@ export function tokenRecord(t: TokenIn) {
 }
 
 // 账户记录。safeCreds 须为已脱敏的 creds(由 route 经 lib/creds.ts safeView 算出:public 原样、semi 打码、无 secret)。
-// manual 持仓(symbol/amount/usdValue)也是 public creds,随 creds 一并导出(P6.6.2,不再有独立 data 字段)。
+// manual 的持仓 #203 起不在 creds 里(creds 只剩 `{tokens:"[]"}`)—— 它的身份/账本走本次新增的
+// token 记录 + activity 记录。归档态随 `archivedAt` 带走,否则归档账户导入回来会变回活跃(#204)。
 export function accountRecord(account: AccountIn, safeCreds: Record<string, string>) {
   return {
     type: "account" as const,
@@ -93,6 +95,7 @@ export function accountRecord(account: AccountIn, safeCreds: Record<string, stri
     // v3 起字段名跟库里对齐叫 `platform`(v2 的旧名 `network` 随本次版本提升一并改)。
     platform: account.platform ?? undefined,
     label: account.label,
+    archivedAt: account.archivedAt ?? undefined, // 有值即归档;导入据此重新归档
     creds: safeCreds,
   };
 }

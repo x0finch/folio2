@@ -59,6 +59,7 @@ export interface ImportDeps {
     label: string;
     creds: string;
   }): Promise<{ id: string }>;
+  setArchived(accountId: string): Promise<void>; // 仅在记录带 archivedAt 时调用(#204:恢复归档态)
   createGroup(input: { name: string; sortOrder?: number }): Promise<{ id: string }>;
   addAccountToGroup(accountId: string, groupId: string): Promise<void>;
   writeSnapshot(
@@ -162,6 +163,8 @@ export function createImporter(deps: ImportDeps) {
           creds: JSON.stringify(stored),
         });
         if (typeof rec.id === "string") accountMap.set(rec.id, created.id);
+        // 归档态:有 archivedAt 即重新归档(setArchived 用当下时刻,精确时间戳无需保真)。
+        if (typeof rec.archivedAt === "number") await deps.setArchived(created.id);
         counts.accounts++;
         break;
       }

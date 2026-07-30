@@ -49,20 +49,39 @@ describe("tokenRecord", () => {
 describe("accountRecord", () => {
   it("v3 输出 platform 字段(旧名 network 已随版本提升改掉);creds 原样", () => {
     const rec = accountRecord(
-      { id: "m", connectorId: "manual", platform: "manual", label: "M" },
+      { id: "m", connectorId: "manual", platform: "manual", label: "M", archivedAt: null },
       { symbol: "BTC", amount: "0.5", usdValue: "32000" },
     );
-    expect(rec).toMatchObject({ type: "account", id: "m", connectorId: "manual", platform: "manual" });
+    expect(rec).toMatchObject({
+      type: "account",
+      id: "m",
+      connectorId: "manual",
+      platform: "manual",
+    });
     expect(rec.creds).toEqual({ symbol: "BTC", amount: "0.5", usdValue: "32000" });
     const parsed = line(rec);
     expect(parsed).not.toHaveProperty("network"); // v2 的旧字段名不再出现
     expect(parsed).not.toHaveProperty("data");
+    expect(parsed).not.toHaveProperty("archivedAt"); // 活跃账户不带
   });
 
-  it("platform 为 null → 省略", () => {
-    expect(line(accountRecord({ id: "a", connectorId: "evm", platform: null, label: "W" }, {}))).not.toHaveProperty(
-      "platform",
-    );
+  it("platform 为 null → 省略;archivedAt 有值 → 带上(归档态保真)", () => {
+    expect(
+      line(
+        accountRecord(
+          { id: "a", connectorId: "evm", platform: null, label: "W", archivedAt: null },
+          {},
+        ),
+      ),
+    ).not.toHaveProperty("platform");
+    expect(
+      line(
+        accountRecord(
+          { id: "a", connectorId: "evm", platform: null, label: "W", archivedAt: 123 },
+          {},
+        ),
+      ).archivedAt,
+    ).toBe(123);
   });
 });
 

@@ -94,22 +94,25 @@ describe("importToken —— find-or-create", () => {
       USDC_ETH,
     ]);
     expect(id2).toBe(id1);
-    const refs = await getDb(env)
-      .select()
-      .from(tokenRefs)
-      .where(eq(tokenRefs.tokenId, id1));
+    const refs = await getDb(env).select().from(tokenRefs).where(eq(tokenRefs.tokenId, id1));
     expect(new Set(refs.map(refKey))).toEqual(new Set([refKey(USDC_CGK), refKey(USDC_ETH)]));
   });
 
   it("无 ref 的 Token(理论边界)→ 照样建行", async () => {
     const id = await importToken(env, USER_A, { symbol: "FOO", name: "Foo" }, []);
-    expect((await getDb(env).select().from(tokens).where(eq(tokens.id, id)))[0]!.symbol).toBe("FOO");
+    expect((await getDb(env).select().from(tokens).where(eq(tokens.id, id)))[0]!.symbol).toBe(
+      "FOO",
+    );
   });
 });
 
 describe("listManualActivityByUser", () => {
   it("跨账户扁平返回、按 occurred→created 升序、createdAt 保留、按用户隔离", async () => {
-    const acc = await createAccount(env, USER_A, { connectorId: "manual", label: "M", creds: "{}" });
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "manual",
+      label: "M",
+      creds: "{}",
+    });
     const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
     await recordManualActivity(env, USER_A, acc.id, tk, {
       kind: "add",

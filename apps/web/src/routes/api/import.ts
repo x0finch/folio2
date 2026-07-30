@@ -35,6 +35,7 @@ export const Route = createFileRoute("/api/import")({
           importToken: async (t, refs) => ({ id: await db.importToken(userId, t, refs) }),
           createAccount: (input) =>
             db.createAccount(userId, { ...input, connectorId: input.connectorId as ConnectorId }),
+          setArchived: (accountId) => db.setArchived(userId, accountId, true),
           createGroup: (input) => db.createGroup(userId, input),
           addAccountToGroup: (accountId, groupId) =>
             db.addAccountToGroup(userId, accountId, groupId),
