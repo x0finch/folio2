@@ -4,11 +4,12 @@ import { EXPORT_VERSION } from "./export";
 
 // 纯导入逻辑(无 server-only import → 可单测,DB 经 deps 注入)。
 // 单遍处理 NDJSON 记录;导出顺序保证 token→account→group→membership→snapshot→manualActivity,
-// 故引用某 id 的记录出现时,其 id map 已就绪。**id 重映射**(oldId→newId):新建的行拿新 id,不跟目标库已有的撞。
+// 故引用某 id 的记录出现时,其 id map 已就绪。
 //
-// **只允许导进空库**(#204):meta 那一关就查目标是否为空,非空直接拒。这一道闸同时给了两件事——
-// ① 挡住「手滑导两遍 → 账户翻倍」;② 让恢复**天然幂等**:每次都从空库跑、结果恒定(wipe→import)。
-// 「合并进已有库 / 反复往里叠」是另一类需求(要按自然键去重,还得绕开全局 id 主键与多用户的坑),不在本片。
+// **合并式导入,幂等**(#204,A 方案):每类实体按**内容自然键** find-or-create(见 db 的 import* op)——
+// token 按 ref、账户按 (connectorId+platform+label+creds)、分组按 (name+sortOrder)、快照按 (account,takenAt)、
+// 手记活动按整条内容。命中既有 → 复用(其新 id 记进映射表),没有 → 建新行。于是:**反复导入同一文件
+// 结果不变(不翻倍),导入不同文件则合并进来**。全程用新 id、按 userId 作用域去重,多用户安全。
 //
 // v3(#204):文件自带 Token 行(其 ref 嵌在里头)与手记账本;快照余额按 token_id(旧 id → 经 tokenMap 重映射)。
 // **不兼容旧文件** —— 版本闸只收 v3,v1/v2 明确报「太旧」。
@@ -45,9 +46,9 @@ interface ImportActivity {
   createdAt?: number;
 }
 
+// 所有 import* 都是 find-or-create(按各自的内容自然键去重),让反复导入 / 合并幂等。
 export interface ImportDeps {
   categorize(connectorId: string): InputKinds;
-  isTargetEmpty(): Promise<boolean>; // 目标用户是否空库(无账户);非空则拒绝导入(见模块头)
   importToken(
     t: {
       symbol: string;
@@ -58,20 +59,20 @@ export interface ImportDeps {
     },
     refs: { namer: string; localName: string }[],
   ): Promise<{ id: string }>;
-  createAccount(input: {
+  importAccount(input: {
     connectorId: string;
     platform?: string;
     label: string;
     creds: string;
+    archivedAt?: number | null;
   }): Promise<{ id: string }>;
-  setArchived(accountId: string): Promise<void>; // 仅在记录带 archivedAt 时调用(#204:恢复归档态)
-  createGroup(input: { name: string; sortOrder?: number }): Promise<{ id: string }>;
+  importGroup(input: { name: string; sortOrder?: number }): Promise<{ id: string }>;
   addAccountToGroup(accountId: string, groupId: string): Promise<void>;
-  writeSnapshot(
+  importSnapshot(
     accountId: string,
     input: { takenAt: number; totalUsd: number; note?: Note[]; balances: ImportSnapshotBalance[] },
   ): Promise<void>;
-  recordManualActivity(accountId: string, tokenId: string, input: ImportActivity): Promise<void>;
+  importManualActivity(accountId: string, tokenId: string, input: ImportActivity): Promise<void>;
 }
 
 interface ImportCounts {
@@ -129,10 +130,6 @@ export function createImporter(deps: ImportDeps) {
             : `unsupported export version: ${String(v)}(expected v${EXPORT_VERSION})`;
         throw new ImportError(hint);
       }
-      // 空库闸:只往空库导。非空直接拒 —— 既挡住重复导入翻倍,又让恢复天然幂等(见模块头)。
-      if (!(await deps.isTargetEmpty())) {
-        throw new ImportError("导入仅支持空库:当前账户已有数据,请先清空(或用新账户)再导入");
-      }
       metaSeen = true;
       return;
     }
@@ -164,21 +161,21 @@ export function createImporter(deps: ImportDeps) {
           if (publicKeys.includes(k)) stored[k] = v;
           else if (semiKeys.includes(k)) stored[SEMI_PREFIX + k] = v;
         }
-        const created = await deps.createAccount({
+        const created = await deps.importAccount({
           connectorId,
           // v3 线格式字段名为 `platform`(v2 是 network);库里那一列 #203 起叫 platform。
           platform: typeof rec.platform === "string" ? rec.platform : undefined,
           label: String(rec.label ?? ""),
           creds: JSON.stringify(stored),
+          // 归档态随文件带进 find-or-create(见 importAccount:命中既有则对齐归档)。
+          archivedAt: typeof rec.archivedAt === "number" ? rec.archivedAt : undefined,
         });
         if (typeof rec.id === "string") accountMap.set(rec.id, created.id);
-        // 归档态:有 archivedAt 即重新归档(setArchived 用当下时刻,精确时间戳无需保真)。
-        if (typeof rec.archivedAt === "number") await deps.setArchived(created.id);
         counts.accounts++;
         break;
       }
       case "group": {
-        const created = await deps.createGroup({
+        const created = await deps.importGroup({
           name: String(rec.name ?? ""),
           sortOrder: typeof rec.sortOrder === "number" ? rec.sortOrder : undefined,
         });
@@ -207,7 +204,7 @@ export function createImporter(deps: ImportDeps) {
             if (!tokenId) return [];
             return [{ ...(b as ImportSnapshotBalance), tokenId }];
           });
-          await deps.writeSnapshot(accountId, {
+          await deps.importSnapshot(accountId, {
             takenAt: Number(rec.takenAt),
             totalUsd: Number(rec.totalUsd),
             note: Array.isArray(rec.note) ? (rec.note as Note[]) : undefined,
@@ -221,7 +218,7 @@ export function createImporter(deps: ImportDeps) {
         const accountId = accountMap.get(String(rec.accountId));
         const tokenId = tokenMap.get(String(rec.tokenId));
         if (accountId && tokenId) {
-          await deps.recordManualActivity(accountId, tokenId, {
+          await deps.importManualActivity(accountId, tokenId, {
             kind: rec.kind as ImportActivity["kind"],
             amount: Number(rec.amount),
             price: typeof rec.price === "number" ? rec.price : null,

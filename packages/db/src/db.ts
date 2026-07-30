@@ -59,6 +59,10 @@ export function createDb(env: DbEnv) {
     // —— 导出/导入 v3(#204)——
     listTokensForExport: b(q.listTokensForExport),
     importToken: b(q.importToken),
+    importAccount: b(q.importAccount),
+    importGroup: b(q.importGroup),
+    importSnapshot: b(q.importSnapshot),
+    importManualActivity: b(q.importManualActivity),
     // —— user settings(Phase 3)——
     getUserSettings: b(q.getUserSettings),
     updateUserSettings: b(q.updateUserSettings),

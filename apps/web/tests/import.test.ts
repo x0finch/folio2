@@ -23,46 +23,47 @@ function categorize(connectorId: string): {
   return { publicKeys: [], semiKeys: [], secretKeys: [] }; // manual
 }
 
-function makeDeps(opts: { empty?: boolean } = {}) {
+function makeDeps() {
   const calls = {
     tokens: [] as Array<{ symbol: string; refs: { namer: string; localName: string }[] }>,
-    accounts: [] as Array<{ connectorId: string; label: string; creds: string }>,
+    accounts: [] as Array<{
+      connectorId: string;
+      label: string;
+      creds: string;
+      archivedAt?: number | null;
+    }>,
     groups: [] as Array<{ name: string }>,
     memberships: [] as Array<{ accountId: string; groupId: string }>,
     snapshots: [] as Array<{ accountId: string; totalUsd: number; balances: unknown[] }>,
     activities: [] as Array<{ accountId: string; tokenId: string; amount: number }>,
-    archived: [] as string[],
   };
   let n = 0;
   const deps: ImportDeps = {
     categorize,
-    isTargetEmpty: async () => opts.empty ?? true,
     importToken: async (t, refs) => {
       calls.tokens.push({ symbol: t.symbol, refs });
       return { id: `tk-${++n}` };
     },
-    createAccount: async (input) => {
+    importAccount: async (input) => {
       calls.accounts.push({
         connectorId: input.connectorId,
         label: input.label,
         creds: input.creds,
+        archivedAt: input.archivedAt,
       });
       return { id: `acc-${++n}` };
     },
-    setArchived: async (accountId) => {
-      calls.archived.push(accountId);
-    },
-    createGroup: async (input) => {
+    importGroup: async (input) => {
       calls.groups.push({ name: input.name });
       return { id: `grp-${++n}` };
     },
     addAccountToGroup: async (accountId, groupId) => {
       calls.memberships.push({ accountId, groupId });
     },
-    writeSnapshot: async (accountId, input) => {
+    importSnapshot: async (accountId, input) => {
       calls.snapshots.push({ accountId, totalUsd: input.totalUsd, balances: input.balances });
     },
-    recordManualActivity: async (accountId, tokenId, input) => {
+    importManualActivity: async (accountId, tokenId, input) => {
       calls.activities.push({ accountId, tokenId, amount: input.amount });
     },
   };
@@ -98,14 +99,6 @@ describe("createImporter —— 版本闸", () => {
     const imp = createImporter(deps);
     await expect(imp.apply({ type: "meta", version: 999 })).rejects.toThrow(ImportError);
   });
-
-  it("目标非空 → 拒绝导入(空库闸:防翻倍 + 让恢复幂等)", async () => {
-    const { deps } = makeDeps({ empty: false });
-    const imp = createImporter(deps);
-    await expect(imp.apply({ type: "meta", version: EXPORT_VERSION })).rejects.toThrow(
-      /空库|已有数据/,
-    );
-  });
 });
 
 describe("createImporter —— creds 重建", () => {
@@ -135,10 +128,10 @@ describe("createImporter —— creds 重建", () => {
       creds: { address: "0xabc" },
     });
     expect(JSON.parse(calls.accounts[0]!.creds)).toEqual({ address: "0xabc" });
-    expect(calls.archived).toHaveLength(0); // 无 archivedAt → 不归档
+    expect(calls.accounts[0]!.archivedAt).toBeUndefined(); // 无 archivedAt → 不归档
   });
 
-  it("带 archivedAt 的账户 → 导入后重新归档", async () => {
+  it("带 archivedAt 的账户 → 归档态透传给 importAccount(恢复归档)", async () => {
     const { deps, calls } = makeDeps();
     const imp = createImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
@@ -150,7 +143,7 @@ describe("createImporter —— creds 重建", () => {
       creds: { address: "0xabc" },
       archivedAt: 1700000000000,
     });
-    expect(calls.archived).toEqual(["acc-1"]);
+    expect(calls.accounts[0]!.archivedAt).toBe(1700000000000);
   });
 });
 

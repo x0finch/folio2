@@ -10,6 +10,7 @@ import {
   gte,
   type InferSelectModel,
   inArray,
+  isNull,
   max,
   or,
   sql,
@@ -885,6 +886,135 @@ export async function importToken(
     ...refs.map((r) => refStmt(id, r)),
   ]);
   return id;
+}
+
+// —— 合并式导入(#204,A 方案):按内容自然键 find-or-create,让「反复导入 / 合并不同文件」幂等。 ——
+// 全程用**新 id**(不碰全局 id 主键,多用户安全);去重靠 per-user 自然键。原样再导一遍 = 命中既有、不新建。
+
+// 账户自然键 = (connectorId, platform, label, creds) 全同即同一个。归档态是可变属性、不进键 ——
+// 命中时若文件说归档而现有未归档,则对齐成归档。
+export async function importAccount(
+  env: DbEnv,
+  userId: string,
+  input: CreateAccountInput & { archivedAt?: number | null },
+): Promise<{ id: string; created: boolean }> {
+  const db = getDb(env);
+  const platform = input.platform ?? null;
+  const creds = input.creds ?? null;
+  const existing = await db
+    .select({ id: accounts.id, archivedAt: accounts.archivedAt })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.userId, userId),
+        eq(accounts.connectorId, input.connectorId),
+        platform === null ? isNull(accounts.platform) : eq(accounts.platform, platform),
+        eq(accounts.label, input.label),
+        creds === null ? isNull(accounts.creds) : eq(accounts.creds, creds),
+      ),
+    )
+    .limit(1);
+  const hit = existing[0];
+  if (hit) {
+    if (input.archivedAt != null && hit.archivedAt == null) {
+      await db
+        .update(accounts)
+        .set({ archivedAt: input.archivedAt })
+        .where(and(eq(accounts.id, hit.id), eq(accounts.userId, userId)));
+    }
+    return { id: hit.id, created: false };
+  }
+  const id = crypto.randomUUID();
+  await db.insert(accounts).values({
+    id,
+    userId,
+    connectorId: input.connectorId,
+    platform,
+    label: input.label,
+    creds,
+    createdAt: Date.now(),
+    archivedAt: input.archivedAt ?? null,
+  });
+  return { id, created: true };
+}
+
+// 分组自然键 = (name, sortOrder)。
+export async function importGroup(
+  env: DbEnv,
+  userId: string,
+  input: CreateGroupInput,
+): Promise<{ id: string }> {
+  const db = getDb(env);
+  const sortOrder = input.sortOrder ?? 0;
+  const existing = await db
+    .select({ id: groups.id })
+    .from(groups)
+    .where(
+      and(eq(groups.userId, userId), eq(groups.name, input.name), eq(groups.sortOrder, sortOrder)),
+    )
+    .limit(1);
+  if (existing[0]) return { id: existing[0].id };
+  const id = crypto.randomUUID();
+  await db.insert(groups).values({ id, userId, name: input.name, sortOrder });
+  return { id };
+}
+
+// 快照自然键 = (accountId, takenAt) —— 一个账户一个时刻一份。已存在则整份跳过(余额不重复写)。
+export async function importSnapshot(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+  input: WriteSnapshotInput,
+): Promise<{ created: boolean }> {
+  const db = getDb(env);
+  await assertAccountOwned(db, userId, accountId);
+  const existing = await db
+    .select({ id: snapshots.id })
+    .from(snapshots)
+    .where(and(eq(snapshots.accountId, accountId), eq(snapshots.takenAt, input.takenAt)))
+    .limit(1);
+  if (existing[0]) return { created: false };
+  await writeSnapshot(env, userId, accountId, input);
+  return { created: true };
+}
+
+// 手记活动自然键 = 整条内容(账户+币+kind+amount+price+fee+occurredAt+memo+createdAt)。
+// **createdAt 必须进键**:系统允许同一 occurredAt 有多笔、靠 createdAt 排序折叠(deriveAmount);
+// 两笔除 createdAt 外全同是合法的不同事件,漏掉它会把它们折成一笔、丢数量(连首次恢复都出错)。
+// v3 导出恒带 createdAt,故加进键后再导仍命中(幂等)。createdAt 缺席(非导入路径)才退回内容键。
+export async function importManualActivity(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+  tokenId: string,
+  input: ManualActivityInput,
+): Promise<{ created: boolean }> {
+  const db = getDb(env);
+  await assertAccountOwned(db, userId, accountId);
+  await assertTokenOwned(db, userId, tokenId);
+  const price = input.price ?? null;
+  const fee = input.fee ?? null;
+  const memo = input.memo ?? null;
+  const existing = await db
+    .select({ id: manualActivity.id })
+    .from(manualActivity)
+    .where(
+      and(
+        eq(manualActivity.accountId, accountId),
+        eq(manualActivity.tokenId, tokenId),
+        eq(manualActivity.kind, input.kind),
+        eq(manualActivity.amount, input.amount),
+        price === null ? isNull(manualActivity.price) : eq(manualActivity.price, price),
+        fee === null ? isNull(manualActivity.fee) : eq(manualActivity.fee, fee),
+        eq(manualActivity.occurredAt, input.occurredAt),
+        memo === null ? isNull(manualActivity.memo) : eq(manualActivity.memo, memo),
+        input.createdAt != null ? eq(manualActivity.createdAt, input.createdAt) : undefined,
+      ),
+    )
+    .limit(1);
+  if (existing[0]) return { created: false };
+  await recordManualActivity(env, userId, accountId, tokenId, input);
+  return { created: true };
 }
 
 export async function removeManualActivity(

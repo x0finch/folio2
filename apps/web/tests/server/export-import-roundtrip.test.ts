@@ -60,24 +60,23 @@ async function exportRecords(userId: string): Promise<unknown[]> {
   return recs;
 }
 
-// route 的导入 deps,绑到 DST 用户。
+// route 的导入 deps,绑到 DST 用户。全走 import*(按内容自然键 find-or-create,幂等/可合并)。
 const dstDeps: ImportDeps = {
   categorize: (connectorId) =>
     connectorId === "evm"
       ? { publicKeys: ["address"], semiKeys: [], secretKeys: [] }
       : { publicKeys: [], semiKeys: [], secretKeys: [] },
-  isTargetEmpty: async () => (await db.listAccountsByUser(DST)).length === 0,
   importToken: async (t, refs) => ({ id: await db.importToken(DST, t, refs) }),
-  createAccount: (input) =>
-    db.createAccount(DST, { ...input, connectorId: input.connectorId as ConnectorId }),
-  setArchived: (accountId) => db.setArchived(DST, accountId, true),
-  createGroup: (input) => db.createGroup(DST, input),
+  importAccount: (input) =>
+    db.importAccount(DST, { ...input, connectorId: input.connectorId as ConnectorId }),
+  importGroup: (input) => db.importGroup(DST, input),
   addAccountToGroup: (accountId, groupId) => db.addAccountToGroup(DST, accountId, groupId),
-  writeSnapshot: async (accountId, input) => {
-    await db.writeSnapshot(DST, accountId, input);
+  importSnapshot: async (accountId, input) => {
+    await db.importSnapshot(DST, accountId, input);
   },
-  recordManualActivity: (accountId, tokenId, input) =>
-    db.recordManualActivity(DST, accountId, tokenId, input),
+  importManualActivity: async (accountId, tokenId, input) => {
+    await db.importManualActivity(DST, accountId, tokenId, input);
+  },
 };
 
 async function importInto(records: unknown[]): Promise<void> {
@@ -330,14 +329,68 @@ describe("export → import v3 往返(空库重建)", () => {
     expect(normalizeExport(dstExport)).toEqual(normalizeExport(srcExport));
   });
 
-  it("空库闸:导进非空库直接拒(第二次导入同一文件抛错,不翻倍)——恢复因此天然幂等", async () => {
+  it("幂等:同一文件导 3 次,库内数据不翻倍;且再导出 ≡ 原导出(A 方案不动点)", async () => {
     await seedSource();
     const file = await exportRecords(SRC);
-    await importInto(file); // 第一次:空库,成功
-    const accts1 = (await db.listAccountsByUser(DST)).length;
+    const srcNorm = normalizeExport(file);
 
-    // 第二次:DST 已非空 → meta 那一关就拒。
-    await expect(importInto(file)).rejects.toThrow(/空库|已有数据/);
-    expect((await db.listAccountsByUser(DST)).length).toBe(accts1); // 没翻倍
+    for (let i = 0; i < 3; i++) await importInto(file); // 反复导入同一文件
+
+    // 各类实体计数不随导入次数增长(按内容自然键去重)。
+    expect(await db.listAccountsByUser(DST)).toHaveLength(3);
+    expect(await db.listTokensForExport(DST)).toHaveLength(3);
+    expect(await db.listGroupsByUser(DST)).toHaveLength(1);
+    expect(await db.listMembershipsByUser(DST)).toHaveLength(1);
+    expect(await db.listManualActivityByUser(DST)).toHaveLength(1);
+    const snapCount = (await db.listSnapshotsPageByUser(DST, 1000, 0)).length;
+    expect(snapCount).toBe(2); // evm 账户两份快照,不重复
+    // 手记不折叠翻倍:数量还是 10(不是 30)。
+    expect((await db.listManualActivityByUser(DST))[0]!.amount).toBe(10);
+
+    // 反复导入后再导出,归一后仍逐条等于原导出。
+    expect(normalizeExport(await exportRecords(DST))).toEqual(srcNorm);
+  });
+
+  it("合并:两份不同来源的文件能并进同一库,各自数据都在", async () => {
+    await seedSource();
+    const fileA = await exportRecords(SRC);
+
+    // 造第二份来源:一个新账户 + 新币 + 一笔账本,导出成 fileB。
+    const OTHER = "user-export-other";
+    await resetUser(OTHER);
+    const accB = await db.createAccount(OTHER, {
+      connectorId: "manual",
+      platform: "manual",
+      label: "OtherManual",
+      creds: JSON.stringify({}),
+    });
+    const solId = await db.importToken(OTHER, { symbol: "SOL", name: "Solana" }, [
+      { namer: "coingecko", localName: "issued:solana" },
+    ]);
+    await db.recordManualActivity(OTHER, accB.id, solId, {
+      kind: "add",
+      amount: 7,
+      occurredAt: 900,
+      createdAt: 200,
+    });
+    const fileB = await (async () => {
+      const recs: unknown[] = [metaRecord(1_700_000_000_000)];
+      for (const t of await db.listTokensForExport(OTHER)) recs.push(tokenRecord(t));
+      for (const a of await db.listAccountsByUser(OTHER)) {
+        const raw = await db.getRawCreds(OTHER, a.id);
+        recs.push(accountRecord(a, raw ? JSON.parse(raw) : {}));
+      }
+      for (const a of await db.listManualActivityByUser(OTHER)) recs.push(manualActivityRecord(a));
+      return recs;
+    })();
+
+    await importInto(fileA);
+    await importInto(fileB);
+
+    // A(3 账户)+ B(1 账户)= 4;币 3 + 1 = 4;账本 1 + 1 = 2。
+    expect(await db.listAccountsByUser(DST)).toHaveLength(4);
+    const dstTokens = await db.listTokensForExport(DST);
+    expect(dstTokens.map((t) => t.symbol).sort()).toEqual(["BTC", "ETH", "MYCOIN", "SOL"]);
+    expect(await db.listManualActivityByUser(DST)).toHaveLength(2);
   });
 });

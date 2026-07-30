@@ -32,18 +32,16 @@ export const Route = createFileRoute("/api/import")({
             const f = categorizeFields(credentialSpecs()[connectorId as ConnectorId] ?? []);
             return { publicKeys: f.public, semiKeys: f.semi, secretKeys: f.secret };
           },
-          isTargetEmpty: async () => (await db.listAccountsByUser(userId)).length === 0,
           importToken: async (t, refs) => ({ id: await db.importToken(userId, t, refs) }),
-          createAccount: (input) =>
-            db.createAccount(userId, { ...input, connectorId: input.connectorId as ConnectorId }),
-          setArchived: (accountId) => db.setArchived(userId, accountId, true),
-          createGroup: (input) => db.createGroup(userId, input),
+          importAccount: async (input) =>
+            db.importAccount(userId, { ...input, connectorId: input.connectorId as ConnectorId }),
+          importGroup: async (input) => db.importGroup(userId, input),
           addAccountToGroup: (accountId, groupId) =>
             db.addAccountToGroup(userId, accountId, groupId),
-          writeSnapshot: async (accountId, input) => {
+          importSnapshot: async (accountId, input) => {
             // 边界透传:db 的 SnapshotBalanceInput.kind 仍是旧 4 值 BalanceKind(#37c 前),
             // 而导入文件的 kind 是 connectors 的 5-kind;运行期只作 text 存储,按契约断言透传(同 @folio/sync)。
-            await db.writeSnapshot(userId, accountId, {
+            await db.importSnapshot(userId, accountId, {
               ...input,
               balances: input.balances.map((b) => ({
                 ...b,
@@ -51,8 +49,9 @@ export const Route = createFileRoute("/api/import")({
               })),
             });
           },
-          recordManualActivity: (accountId, tokenId, input) =>
-            db.recordManualActivity(userId, accountId, tokenId, input),
+          importManualActivity: async (accountId, tokenId, input) => {
+            await db.importManualActivity(userId, accountId, tokenId, input);
+          },
         };
         const importer = createImporter(deps);
 

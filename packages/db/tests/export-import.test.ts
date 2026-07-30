@@ -5,15 +5,24 @@ import { user } from "../src/auth-schema";
 import { getDb } from "../src/client";
 import {
   createAccount,
+  importAccount,
+  importGroup,
+  importManualActivity,
+  importSnapshot,
   importToken,
+  listAccountsByUser,
+  listGroupsByUser,
+  listManualActivityByAccount,
   listManualActivityByUser,
+  listSnapshotsByAccount,
   listTokensForExport,
   recordManualActivity,
 } from "../src/queries";
 import { tokenRefs, tokens } from "../src/schema";
 
-// 导出/导入 v3 的 db 支持(#204):listTokensForExport(带 ref)、importToken(find-or-create)、
-// listManualActivityByUser(扁平跨账户)。对着真 D1 跑(约束/唯一索引会在这里真生效)。
+// 导出/导入 v3 的 db 支持(#204):listTokensForExport(带 ref)、listManualActivityByUser(扁平跨账户),
+// 以及 A 方案的 find-or-create 一族(importToken/importAccount/importGroup/importSnapshot/
+// importManualActivity)—— 各按内容自然键去重,让反复导入/合并幂等。对着真 D1 跑(约束/唯一索引真生效)。
 
 const USER_A = "u-a";
 const USER_B = "u-b";
@@ -103,6 +112,152 @@ describe("importToken —— find-or-create", () => {
     expect((await getDb(env).select().from(tokens).where(eq(tokens.id, id)))[0]!.symbol).toBe(
       "FOO",
     );
+  });
+});
+
+describe("importAccount —— find-or-create(自然键 = connectorId+platform+label+creds)", () => {
+  it("同内容再导 → 复用,不新建;created 标志正确", async () => {
+    const input = {
+      connectorId: "evm" as const,
+      platform: "evm:1",
+      label: "W",
+      creds: JSON.stringify({ address: "0xabc" }),
+    };
+    const a = await importAccount(env, USER_A, input);
+    const b = await importAccount(env, USER_A, input);
+    expect(a.created).toBe(true);
+    expect(b.created).toBe(false);
+    expect(b.id).toBe(a.id);
+    expect(await listAccountsByUser(env, USER_A)).toHaveLength(1);
+  });
+
+  it("任一自然键字段不同 → 视为新账户", async () => {
+    const base = { connectorId: "evm" as const, platform: "evm:1", label: "W" };
+    await importAccount(env, USER_A, { ...base, creds: JSON.stringify({ address: "0x1" }) });
+    await importAccount(env, USER_A, { ...base, creds: JSON.stringify({ address: "0x2" }) }); // creds 不同
+    await importAccount(env, USER_A, {
+      ...base,
+      label: "W2",
+      creds: JSON.stringify({ address: "0x1" }),
+    }); // label 不同
+    expect(await listAccountsByUser(env, USER_A)).toHaveLength(3);
+  });
+
+  it("命中既有、文件说归档而现有未归档 → 对齐成归档", async () => {
+    const input = {
+      connectorId: "evm" as const,
+      platform: "evm:1",
+      label: "W",
+      creds: JSON.stringify({ address: "0xabc" }),
+    };
+    await importAccount(env, USER_A, input);
+    await importAccount(env, USER_A, { ...input, archivedAt: 1700000000000 });
+    const acc = (await listAccountsByUser(env, USER_A))[0]!;
+    expect(acc.archivedAt).toBe(1700000000000);
+  });
+
+  it("按用户隔离:同内容不同用户各建各的", async () => {
+    const input = {
+      connectorId: "evm" as const,
+      platform: "evm:1",
+      label: "W",
+      creds: JSON.stringify({ address: "0xabc" }),
+    };
+    await importAccount(env, USER_A, input);
+    const b = await importAccount(env, USER_B, input);
+    expect(b.created).toBe(true);
+    expect(await listAccountsByUser(env, USER_A)).toHaveLength(1);
+    expect(await listAccountsByUser(env, USER_B)).toHaveLength(1);
+  });
+});
+
+describe("importGroup —— find-or-create(自然键 = name+sortOrder)", () => {
+  it("同名同序 → 复用;name 或 sortOrder 不同 → 新建", async () => {
+    const g1 = await importGroup(env, USER_A, { name: "G", sortOrder: 0 });
+    const g2 = await importGroup(env, USER_A, { name: "G", sortOrder: 0 });
+    expect(g2.id).toBe(g1.id);
+    await importGroup(env, USER_A, { name: "G", sortOrder: 1 }); // sortOrder 不同
+    await importGroup(env, USER_A, { name: "G2", sortOrder: 0 }); // name 不同
+    expect(await listGroupsByUser(env, USER_A)).toHaveLength(3);
+  });
+});
+
+describe("importSnapshot —— find-or-create(自然键 = account+takenAt)", () => {
+  it("同 (账户,takenAt) 再导 → 整份跳过,不重复写", async () => {
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "evm",
+      label: "W",
+      creds: "{}",
+    });
+    const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    const snap = {
+      takenAt: 1000,
+      totalUsd: 100,
+      balances: [{ tokenId: tk, amount: 1, usdValue: 100, kind: "spot" as const }],
+    };
+    const a = await importSnapshot(env, USER_A, acc.id, snap);
+    const b = await importSnapshot(env, USER_A, acc.id, snap);
+    expect(a.created).toBe(true);
+    expect(b.created).toBe(false);
+    expect(await listSnapshotsByAccount(env, USER_A, acc.id)).toHaveLength(1);
+    // 不同 takenAt → 新快照
+    await importSnapshot(env, USER_A, acc.id, { ...snap, takenAt: 2000 });
+    expect(await listSnapshotsByAccount(env, USER_A, acc.id)).toHaveLength(2);
+  });
+});
+
+describe("importManualActivity —— find-or-create(自然键 = 整条内容)", () => {
+  it("同内容再导 → 跳过(不折叠翻倍);任一字段不同 → 新增", async () => {
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "manual",
+      label: "M",
+      creds: "{}",
+    });
+    const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    const act = { kind: "add" as const, amount: 1, price: 60000, occurredAt: 1000, createdAt: 5 };
+    const a = await importManualActivity(env, USER_A, acc.id, tk, act);
+    const b = await importManualActivity(env, USER_A, acc.id, tk, act);
+    expect(a.created).toBe(true);
+    expect(b.created).toBe(false);
+    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(1);
+    // amount 不同 → 新增一条
+    await importManualActivity(env, USER_A, acc.id, tk, { ...act, amount: 2 });
+    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(2);
+  });
+
+  it("price/fee/memo 的 null 与有值区分正确(isNull 分支)", async () => {
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "manual",
+      label: "M",
+      creds: "{}",
+    });
+    const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    const base = { kind: "add" as const, amount: 1, occurredAt: 1000 };
+    await importManualActivity(env, USER_A, acc.id, tk, base); // price/fee/memo 全 null
+    const dup = await importManualActivity(env, USER_A, acc.id, tk, base);
+    expect(dup.created).toBe(false); // null 内容也能命中
+    const withPrice = await importManualActivity(env, USER_A, acc.id, tk, { ...base, price: 1 });
+    expect(withPrice.created).toBe(true); // null vs 有值 → 不同
+    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(2);
+  });
+
+  it("两笔除 createdAt 外全同 → 是不同事件,都保留(createdAt 进键,防折叠丢量)", async () => {
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "manual",
+      label: "M",
+      creds: "{}",
+    });
+    const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    const base = { kind: "add" as const, amount: 1, price: 60000, occurredAt: 1000 };
+    const a = await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 5 });
+    const b = await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 9 });
+    expect(a.created).toBe(true);
+    expect(b.created).toBe(true); // createdAt 不同 → 不折叠
+    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(2);
+    // 再导同两条 → 都命中、不新增(幂等)。
+    await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 5 });
+    await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 9 });
+    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(2);
   });
 });
 
