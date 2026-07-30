@@ -214,15 +214,20 @@ export const tokenRefs = sqliteTable(
 // 全局「链上地址 → 某命名者叫它什么」(ADR 0022)。**无 user_id** —— 上游公开知识、
 // 可整表重建、删空只是下一轮慢一点。cron 一天一次整份灌;sync 只读本地、零网络。
 // 原则 #6「数据访问一律 userId-scoped」的受控例外之一(另一处见 tokenDailyPrices)。
+// **表里有两条 ref**(链上寻址的 + 上游命名的),故列名带 `upstream_` 前缀区分谁是谁(#228 / ADR 0022):
+//   chain_ref            链上寻址的完整 tokenRef;左段 `evm:1` 本身就是个命名者(链)
+//   upstream             另一个命名者 —— 上游(coingecko / …),**不是链**
+//   upstream_local_name  上游 ref 的 localName **规范形**(`issued:bitcoin`,不是裸 `bitcoin`)
+// 两列 (upstream, upstream_local_name) 拼回整条 upstream ref。`token_refs` 只有一条 ref → 不加前缀。
 export const globalTokenRefIndex = sqliteTable(
   "global_token_ref_index",
   {
-    ref: text("ref").notNull(), // 链上寻址的完整 tokenRef:evm:1/contract:0x… / solana/contract:…
-    namer: text("namer").notNull(), // 谁给的别名:coingecko / coinmarketcap / …
-    localName: text("local_name").notNull(), // 那家对它的叫法
+    chainRef: text("chain_ref").notNull(), // 链上寻址:evm:1/contract:0x… / solana/contract:…
+    upstream: text("upstream").notNull(), // 上游命名者:coingecko / coinmarketcap / …(不是链)
+    upstreamLocalName: text("upstream_local_name").notNull(), // 上游 ref 的 localName 规范形:issued:bitcoin
     updatedAt: integer("updated_at").notNull(), // 这轮刷到的时刻;不删行,据它看哪些没刷到
   },
-  (t) => [primaryKey({ columns: [t.ref, t.namer] })],
+  (t) => [primaryKey({ columns: [t.chainRef, t.upstream] })],
 );
 
 // per-user KV 缓存:只三种键(`warm` / `fx:<币种>` / `platform:<键>`,见 oracle 的 cache.ts)。

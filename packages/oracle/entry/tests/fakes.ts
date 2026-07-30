@@ -1,3 +1,4 @@
+import { parseTokenRef } from "@folio/oracle-ref";
 import type {
   CacheEntry,
   CacheStore,
@@ -221,46 +222,52 @@ export function fakeTokenPriceStore(): FakeTokenPriceStore {
 export interface FakeRefIndexStore extends GlobalTokenRefIndexStore {
   // 测试用它直接塞一条映射(模拟 cron 刷完表)。**不暴露内部键格式** ——
   // 让测试自己拼键的话,键格式一改测试就静默失配(踩过一次)。
-  set(namer: string, ref: string, localName: string): void;
+  // chainRef → 整条 upstreamRef(#228:值是整条,不是裸 id)。
+  set(upstream: string, chainRef: string, upstreamRef: TokenRef): void;
   writes: number; // putAll 调用次数(验「整份写一次」而非逐行 upsert)
   lookups: number;
 }
 
-const idxKey = (namer: string, ref: string) => `${namer} ${ref}`;
+const idxKey = (upstream: string, chainRef: string) => `${upstream} ${chainRef}`;
 
 export function fakeRefIndexStore(
-  seed: Record<string, string> = {},
-  namer = "src",
+  seed: Record<string, TokenRef> = {}, // chainRef → 整条 upstreamRef
+  upstream = "src",
 ): FakeRefIndexStore {
-  const map = new Map<string, string>();
-  for (const [ref, localName] of Object.entries(seed)) map.set(idxKey(namer, ref), localName);
+  const map = new Map<string, TokenRef>();
+  for (const [chainRef, upstreamRef] of Object.entries(seed)) {
+    map.set(idxKey(upstream, chainRef), upstreamRef);
+  }
   const refreshedAt = new Map<string, number>();
 
   const store: FakeRefIndexStore = {
-    set(n, ref, localName) {
-      map.set(idxKey(n, ref), localName);
+    set(u, chainRef, upstreamRef) {
+      map.set(idxKey(u, chainRef), upstreamRef);
     },
     writes: 0,
     lookups: 0,
-    async lookup(n, refs) {
+    async lookup(u, chainRefs) {
       store.lookups += 1;
-      const out = new Map<TokenRef, string>();
-      for (const ref of refs) {
-        const localName = map.get(idxKey(n, ref));
-        if (localName) out.set(ref, localName);
+      const out = new Map<TokenRef, TokenRef>();
+      for (const chainRef of chainRefs) {
+        const v = map.get(idxKey(u, chainRef));
+        if (v) out.set(chainRef, v);
       }
       return out;
     },
     async putAll(rows: readonly TokenRefIndexRow[], updatedAt) {
       store.writes += 1;
       for (const r of rows) {
-        map.set(idxKey(r.namer, r.ref), r.localName);
-        refreshedAt.set(r.namer, updatedAt);
+        // upstream 由整条 upstreamRef 解出(与真 store 拆列同理)。
+        const parts = parseTokenRef(r.upstreamRef);
+        if (parts.kind === "unknown") continue;
+        map.set(idxKey(parts.namer, r.chainRef), r.upstreamRef);
+        refreshedAt.set(parts.namer, updatedAt);
       }
-      if (rows.length === 0) refreshedAt.set(namer, updatedAt);
+      if (rows.length === 0) refreshedAt.set(upstream, updatedAt);
     },
-    async refreshedAt(n) {
-      return refreshedAt.get(n) ?? null;
+    async refreshedAt(u) {
+      return refreshedAt.get(u) ?? null;
     },
   };
   return store;

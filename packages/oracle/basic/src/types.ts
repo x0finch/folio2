@@ -103,10 +103,10 @@ export interface TokenRefHit {
   linked: boolean;
 }
 
-// 全局映射表(`global_token_ref_index`,ADR 0022)一行:
-// 「这条链上的 ref,在**那个命名者**那里叫这个」。两边都是 tokenRef,同一套文法。
+// 全局映射表(`global_token_ref_index`,ADR 0022)一行:「这条**链上** ref,在**那个上游**那里叫这个」。
+// **两边都是整条 tokenRef**(#228):不再是「一条 ref + 半截叫法」——右边给整条,落表时才由 store 拆成
+// (upstream, upstream_local_name) 两列。给半截会迫使每个调用方知道命名者是谁、自己拼回去(#227 通则)。
 export interface TokenRefIndexRow {
-  ref: TokenRef; // 链上寻址:evm:<chainId>/<addr> / <slug>/<addr>
-  namer: string; // 别名的命名者(= 注入 upstream 的 id)
-  localName: string; // 那个命名者对它的叫法
+  chainRef: TokenRef; // 链上寻址:evm:<chainId>/contract:<addr> / <slug>/contract:<addr>
+  upstreamRef: TokenRef; // 上游对它的整条命名:coingecko/issued:bitcoin
 }

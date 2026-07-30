@@ -170,19 +170,19 @@ describe("契约往返(内存假实现)", () => {
     expect((await prices.getByIds(["tk_1"])).get("tk_1")).toMatchObject({ stale: true });
   });
 
-  it("全局映射:按 (namer, ref) 点查;miss 的键不出现", async () => {
+  it("全局映射:按 (upstream, chainRef) 点查回整条 upstream ref;miss 的键不出现", async () => {
     const store = fakeRefIndexStore();
     expect(await store.refreshedAt("src")).toBeNull();
 
     await store.putAll(
-      [{ ref: "evm:1/contract:0xa0b8", namer: "src", localName: "usd-coin" }],
+      [{ chainRef: "evm:1/contract:0xa0b8", upstreamRef: "src/issued:usd-coin" }],
       123,
     );
     expect(await store.refreshedAt("src")).toBe(123);
     expect(await store.lookup("src", ["evm:1/contract:0xa0b8", "evm:1/contract:0xdead"])).toEqual(
-      new Map([["evm:1/contract:0xa0b8", "usd-coin"]]),
+      new Map([["evm:1/contract:0xa0b8", "src/issued:usd-coin"]]),
     );
-    // 换个命名者就查不到 —— 这正是「加源只加行」的另一面。
+    // 换个上游就查不到 —— 这正是「加源只加行」的另一面。
     expect(await store.lookup("other", ["evm:1/contract:0xa0b8"])).toEqual(new Map());
   });
 });
@@ -193,8 +193,8 @@ describe("全局维护任务不挂 per-user 门面", () => {
     const upstream = fakeUpstream();
     upstream.refIndex = {
       rows: [
-        { ref: "evm:1/contract:0xa0b8", namer: "src", localName: "usd-coin" },
-        { ref: "solana/contract:EPjF", namer: "src", localName: "usd-coin" },
+        { chainRef: "evm:1/contract:0xa0b8", upstreamRef: "src/issued:usd-coin" },
+        { chainRef: "solana/contract:EPjF", upstreamRef: "src/issued:usd-coin" },
       ],
       unmatchedPlatforms: [],
       skipped: 7,

@@ -92,13 +92,14 @@ export interface TokenPriceStore {
 // —— 全局:`global_token_ref_index`(ADR 0022)——
 // 无 userId:公开知识、可整表重建、跟任何用户无关(CLAUDE.md 原则 #6 的受控例外)。
 export interface GlobalTokenRefIndexStore {
-  // 正查一批:某个命名者对这些链上 ref 的叫法。miss 的键不出现。
-  lookup(namer: string, refs: readonly TokenRef[]): Promise<Map<TokenRef, string>>;
+  // 正查一批:上游 `upstream` 对这些**链上** ref 的整条叫法。miss 的键不出现。
+  // 值是**整条** upstream ref(coingecko/issued:bitcoin),不是半截 —— 调用方拿来直接用,不再拼装(#228)。
+  lookup(upstream: string, chainRefs: readonly TokenRef[]): Promise<Map<TokenRef, TokenRef>>;
   // cron 一天一次整份刷新。四万行量级 → 实现须分批写(D1 `batch()`)。
   // `updatedAt` 用来看哪些行这轮没刷到(下架币);不删行,留着无害。
   putAll(rows: readonly TokenRefIndexRow[], updatedAt: number): Promise<void>;
-  // 某个命名者最近一次成功刷新的时刻;从未刷过 → null(首次部署要手动触发一次)。
-  refreshedAt(namer: string): Promise<number | null>;
+  // 上游 `upstream` 最近一次成功刷新的时刻;从未刷过 → null(首次部署要手动触发一次)。
+  refreshedAt(upstream: string): Promise<number | null>;
 }
 
 // —— per-user KV 缓存 ——

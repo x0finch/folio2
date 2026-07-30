@@ -51,7 +51,7 @@ function setup(opts?: {
 
 describe("三条路径", () => {
   it("① 命中本地 ref 行 —— 纯本地一次点查,不碰全局映射", async () => {
-    const { store, refIndex, mint } = setup({ index: { [USDC_ETH]: "usd-coin" } });
+    const { store, refIndex, mint } = setup({ index: { [USDC_ETH]: SRC_USDC } });
     const id = (await mint.of([{ ref: USDC_ETH, seed: seed("USDC") }])).get(USDC_ETH);
 
     const before = refIndex.lookups;
@@ -62,7 +62,7 @@ describe("三条路径", () => {
 
   it("② 经全局映射归一到已有 Token —— 只加一条 ref,不建行", async () => {
     const { store, mint } = setup({
-      index: { [USDC_ETH]: "usd-coin", [USDC_ARB]: "usd-coin" },
+      index: { [USDC_ETH]: SRC_USDC, [USDC_ARB]: SRC_USDC },
     });
     const a = (await mint.of([{ ref: USDC_ETH, seed: seed("USDC") }])).get(USDC_ETH);
     const b = (await mint.of([{ ref: USDC_ARB, seed: seed("USDC") }])).get(USDC_ARB);
@@ -87,7 +87,7 @@ describe("三条路径", () => {
 describe("多链归一", () => {
   it("同一个币的三条链 ref 指向同一个 Token", async () => {
     const { store, mint } = setup({
-      index: { [USDC_ETH]: "usd-coin", [USDC_ARB]: "usd-coin", [USDC_SOL]: "usd-coin" },
+      index: { [USDC_ETH]: SRC_USDC, [USDC_ARB]: SRC_USDC, [USDC_SOL]: SRC_USDC },
     });
     const got = await mint.of([
       { ref: USDC_ETH, seed: seed("USDC") },
@@ -103,7 +103,7 @@ describe("多链归一", () => {
 
 describe("事后认出来 → 合并", () => {
   it("ref 改指、历史快照 token_id 改指、旧行删除", async () => {
-    const { store, refIndex, mint } = setup({ index: { [USDC_ETH]: "usd-coin" } });
+    const { store, refIndex, mint } = setup({ index: { [USDC_ETH]: SRC_USDC } });
     const good = (await mint.of([{ ref: USDC_ETH, seed: seed("USDC") }])).get(USDC_ETH);
     const orphan = (
       await mint.of([{ ref: USDC_ARB, seed: seed("USDC", "USD Coin", "arb.png") }])
@@ -115,7 +115,7 @@ describe("事后认出来 → 合并", () => {
     store.snapshotTokenIds.push(orphan as string, orphan as string, good as string);
 
     // 第二轮:cron 刷完表,本地认出来了。
-    refIndex.set("src", USDC_ARB, "usd-coin");
+    refIndex.set("src", USDC_ARB, SRC_USDC);
     expect((await mint.of([{ ref: USDC_ARB, seed: seed("USDC") }])).get(USDC_ARB)).toBe(good);
 
     expect(store.rows.size).toBe(1);
@@ -131,7 +131,7 @@ describe("事后认出来 → 合并", () => {
     const { store, refIndex, mint } = setup();
     const id = (await mint.of([{ ref: USDC_ARB, seed: seed("USDC") }])).get(USDC_ARB);
 
-    refIndex.set("src", USDC_ARB, "usd-coin");
+    refIndex.set("src", USDC_ARB, SRC_USDC);
     expect((await mint.of([{ ref: USDC_ARB, seed: seed("USDC") }])).get(USDC_ARB)).toBe(id);
     expect(store.rows.size).toBe(1);
     expect(store.refs.get(SRC_USDC)).toBe(id);
@@ -180,7 +180,7 @@ describe("新币:链上 + 交易所,上游后来才收录", () => {
 
   it("上游收录了合约但还没进榜 → 只有链上那行认出来,**仍是两行**", async () => {
     const { store, refIndex, mint, onchain, cex } = await firstRound();
-    refIndex.set("src", XXA_ETH, XXA_ID); // cron 刷到了这个合约
+    refIndex.set("src", XXA_ETH, SRC_XXA); // cron 刷到了这个合约
 
     const ids = await mint.of(bothRefs);
     // 链上那行就地补上本源那条 ref:行不动、历史不动,从此有价有图。
@@ -195,7 +195,7 @@ describe("新币:链上 + 交易所,上游后来才收录", () => {
   it("再进了市值 100 名 → 两行合并成一行(**单候选那一档,不看排名**)", async () => {
     const warm: Record<string, TokenCandidate[]> = {};
     const { store, refIndex, mint, onchain, cex } = await firstRound(warm);
-    refIndex.set("src", XXA_ETH, XXA_ID);
+    refIndex.set("src", XXA_ETH, SRC_XXA);
     // 头两轮写下的历史快照行分别指着两个 id。
     store.snapshotTokenIds.push(onchain, cex);
 
@@ -218,7 +218,7 @@ describe("新币:链上 + 交易所,上游后来才收录", () => {
   it("同名的第二个币也进了榜 → 100 名碾压不了它 → 交易所那行留在原地", async () => {
     const warm: Record<string, TokenCandidate[]> = {};
     const { store, refIndex, mint, onchain, cex } = await firstRound(warm);
-    refIndex.set("src", XXA_ETH, XXA_ID);
+    refIndex.set("src", XXA_ETH, SRC_XXA);
     // 两个候选:100 名 vs 300 名。300 / 100 = 3 倍 < 碾压线 → 判「没把握」。
     warm.XXA = [
       { ref: SRC_XXA, marketCapRank: 100 },
@@ -243,7 +243,7 @@ const SRC_POL = `src/issued:${POL_ID}`;
 describe("链上 symbol 与上游叫法不一致", () => {
   it("链上报旧名、交易所报新名 → 仍归到同一行(两条判据互不相干)", async () => {
     const { store, mint } = setup({
-      index: { [POL_ETH]: POL_ID }, // 链上那条:按地址认,压根不看 symbol
+      index: { [POL_ETH]: SRC_POL }, // 链上那条:按地址认,压根不看 symbol
       candidates: { POL: [{ ref: SRC_POL, marketCapRank: 76 }] }, // 交易所那条:按 symbol 认
     });
 
@@ -259,7 +259,7 @@ describe("链上 symbol 与上游叫法不一致", () => {
 
   it("行上留着的是**先到者**报的名字 —— 所以必须由上游覆盖一遍", async () => {
     const { store, candidates, mint } = setup({
-      index: { [POL_ETH]: POL_ID },
+      index: { [POL_ETH]: SRC_POL },
       candidates: { POL: [{ ref: SRC_POL, marketCapRank: 76 }] },
     });
 
@@ -291,7 +291,7 @@ describe("上游与交易所改名时间不一致", () => {
   // 而且已经被刷成上游**当时**的叫法。
   async function beforeAnyRename(warm: Record<string, TokenCandidate[]>) {
     warm.MATIC = [{ ref: SRC_POL, marketCapRank: 76 }];
-    const ctx = setup({ index: { [POL_ETH]: POL_ID }, candidates: warm });
+    const ctx = setup({ index: { [POL_ETH]: SRC_POL }, candidates: warm });
     const ids = await ctx.mint.of([
       { ref: POL_ETH, seed: seed("MATIC", "Matic Network") },
       { ref: POL_CEX_OLD, seed: seed("MATIC") },
@@ -375,7 +375,7 @@ describe("上游与交易所改名时间不一致", () => {
 
 describe("并发", () => {
   it("同一条 ref 被同时 mint → 幂等,只出一行(upsert-then-read,无 barrier)", async () => {
-    const { store, mint } = setup({ index: { [USDC_ETH]: "usd-coin" } });
+    const { store, mint } = setup({ index: { [USDC_ETH]: SRC_USDC } });
     const results = await Promise.all(
       [1, 2, 3, 4].map(() => mint.of([{ ref: USDC_ETH, seed: seed("USDC") }])),
     );
@@ -397,7 +397,7 @@ describe("并发", () => {
 describe("按 symbol 认币(写时定死)", () => {
   it("地址优先于 symbol —— 换序会把假 USDC 并进真 USDC", async () => {
     const { store, mint } = setup({
-      index: { "evm:1/contract:0xfake": "fake-usdc" },
+      index: { "evm:1/contract:0xfake": "src/issued:fake-usdc" },
       candidates: { USDC: [{ ref: SRC_USDC, marketCapRank: 6 }] },
     });
     await mint.of([{ ref: "evm:1/contract:0xfake", seed: seed("USDC") }]);
@@ -414,7 +414,7 @@ describe("按 symbol 认币(写时定死)", () => {
     });
     // 先让真 USDC 在库里(以太坊那条已被收录)。
     const { mint: mint2, store: store2 } = setup({
-      index: { [USDC_ETH]: "usd-coin" },
+      index: { [USDC_ETH]: SRC_USDC },
       overrides: { USDC: "usd-coin" },
     });
     const real = (await mint2.of([{ ref: USDC_ETH, seed: seed("USDC") }])).get(USDC_ETH);
@@ -504,7 +504,7 @@ describe("元信息", () => {
   });
 
   it("归一到已有 Token 时不覆盖它已有的元信息,只填空槽", async () => {
-    const { store, mint } = setup({ index: { [USDC_ETH]: "usd-coin", [USDC_ARB]: "usd-coin" } });
+    const { store, mint } = setup({ index: { [USDC_ETH]: SRC_USDC, [USDC_ARB]: SRC_USDC } });
     const id = (await mint.of([{ ref: USDC_ETH, seed: seed("USDC", "USD Coin") }])).get(USDC_ETH);
     // 假装上游后来把好数据填了进来。
     const row = store.rows.get(id as string);
@@ -546,7 +546,7 @@ describe("各来源的 ref 都落到对的 token", () => {
   // 一份「什么都齐」的环境:映射表收录了两条链上的 USDC,warm 里有 USDC / ETH / BTC / SOL。
   const fullSetup = () =>
     setup({
-      index: { [USDC_ADDR]: "usd-coin", [USDC_SOL_ADDR]: "usd-coin" },
+      index: { [USDC_ADDR]: SRC_USDC, [USDC_SOL_ADDR]: SRC_USDC },
       candidates: {
         USDC: [{ ref: SRC_USDC, marketCapRank: 6 }],
         ETH: [{ ref: "src/issued:ethereum", marketCapRank: 2 }],

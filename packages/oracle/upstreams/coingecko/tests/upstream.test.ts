@@ -402,7 +402,7 @@ describe("搜索与全局映射", () => {
       "true",
     );
     expect(got.rows).toEqual([
-      { ref: "evm:1/contract:0xa0b8", namer: UPSTREAM_ID, localName: "usd-coin" },
+      { chainRef: "evm:1/contract:0xa0b8", upstreamRef: `${UPSTREAM_ID}/issued:usd-coin` },
     ]);
   });
 });

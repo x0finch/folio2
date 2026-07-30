@@ -36,14 +36,14 @@ export function createGlobalTokenRefIndexStore(env: DbEnv): GlobalTokenRefIndexS
   const db = getDb(env);
 
   return {
-    // 正查一批:某个命名者对这些链上 ref 的叫法。miss 的键不出现。
-    async lookup(namer, refs) {
-      const out = new Map<TokenRef, string>();
-      if (refs.length === 0) return out;
-      // 表里存的是规范形(灌表时经文法构造),查之前把入参也归一一遍 ——
+    // 正查一批:上游 `upstream` 对这些链上 ref 的**整条**叫法。miss 的键不出现。
+    async lookup(upstream, chainRefs) {
+      const out = new Map<TokenRef, TokenRef>();
+      if (chainRefs.length === 0) return out;
+      // 表里 chain_ref 存的是规范形(灌表时经文法构造),查之前把入参也归一一遍 ——
       // 否则同一个地址大小写不同就查不到。读不懂的串不进表,直接跳过。
       const canonical = new Map<TokenRef, TokenRef>(); // 规范形 → 调用方原样给的串
-      for (const raw of new Set(refs)) {
+      for (const raw of new Set(chainRefs)) {
         const parts = parseTokenRef(raw);
         if (parts.kind !== "unknown") canonical.set(formatTokenRef(parts), raw);
       }
@@ -52,38 +52,51 @@ export function createGlobalTokenRefIndexStore(env: DbEnv): GlobalTokenRefIndexS
       for (const part of chunk([...canonical.keys()])) {
         if (part.length === 0) continue;
         const rows = await db
-          .select({ ref: globalTokenRefIndex.ref, localName: globalTokenRefIndex.localName })
+          .select({
+            chainRef: globalTokenRefIndex.chainRef,
+            upstreamLocalName: globalTokenRefIndex.upstreamLocalName,
+          })
           .from(globalTokenRefIndex)
-          .where(and(eq(globalTokenRefIndex.namer, namer), inArray(globalTokenRefIndex.ref, part)));
-        // 用调用方原样给的串作键回填 —— 它拿这个键去 .get(),不该被我们的归一改掉。
+          .where(
+            and(
+              eq(globalTokenRefIndex.upstream, upstream),
+              inArray(globalTokenRefIndex.chainRef, part),
+            ),
+          );
+        // 值 = 整条 upstream ref:两列 (upstream, upstream_local_name) 经文法拼回(与 user-token-store
+        // 同构;#228:调用方拿整条直接用,不再自己拼 issued: 那段)。键用调用方原样给的串回填。
         for (const r of rows) {
-          const key = canonical.get(r.ref);
-          if (key !== undefined) out.set(key, r.localName);
+          const key = canonical.get(r.chainRef);
+          if (key !== undefined) {
+            out.set(key, formatTokenRef({ namer: upstream, localName: r.upstreamLocalName }));
+          }
         }
       }
       return out;
     },
 
     // 整份刷新。**不删行**:下架币的旧映射留着无害,`updated_at` 用来看哪些行这轮没被刷到。
-    // 两级分批见上面的常量。冲突时用 `excluded`(即本次要插的那一行)—— 多行语句里没法逐行写死值。
+    // 落表时把整条 `upstreamRef` 拆成 (upstream, upstream_local_name) 两列 —— 与 user-token-store 同构。
+    // 读不懂的 upstreamRef(理论上不会,adapter 恒产规范形)直接跳过。两级分批见上面的常量。
     async putAll(rows: readonly TokenRefIndexRow[], updatedAt) {
-      const stmts = chunk(rows, ROWS_PER_STATEMENT)
+      const split = rows.flatMap((r) => {
+        const parts = parseTokenRef(r.upstreamRef);
+        if (parts.kind === "unknown") return [];
+        return [
+          { chainRef: r.chainRef, upstream: parts.namer, upstreamLocalName: parts.localName },
+        ];
+      });
+      const stmts = chunk(split, ROWS_PER_STATEMENT)
         .filter((part) => part.length > 0)
         .map((part) =>
           db
             .insert(globalTokenRefIndex)
-            .values(
-              part.map((r) => ({
-                ref: r.ref,
-                namer: r.namer,
-                localName: r.localName,
-                updatedAt,
-              })),
-            )
+            .values(part.map((r) => ({ ...r, updatedAt })))
+            // 冲突时用 `excluded`(本次要插的那一行)—— 多行语句里没法逐行写死值。
             .onConflictDoUpdate({
-              target: [globalTokenRefIndex.ref, globalTokenRefIndex.namer],
+              target: [globalTokenRefIndex.chainRef, globalTokenRefIndex.upstream],
               set: {
-                localName: sql`excluded.local_name`,
+                upstreamLocalName: sql`excluded.upstream_local_name`,
                 updatedAt: sql`excluded.updated_at`,
               },
             }),
@@ -93,13 +106,13 @@ export function createGlobalTokenRefIndexStore(env: DbEnv): GlobalTokenRefIndexS
       }
     },
 
-    // 某个命名者最近一次成功刷新的时刻。从未刷过 → null(首次部署要手动触发一次)。
-    // 取该命名者所有行里最大的 updated_at —— 不另存一个标记行,少一处可能与真实数据不一致的状态。
-    async refreshedAt(namer) {
+    // 上游最近一次成功刷新的时刻。从未刷过 → null(首次部署要手动触发一次)。
+    // 取该上游所有行里最大的 updated_at —— 不另存标记行,少一处可能与真实数据不一致的状态。
+    async refreshedAt(upstream) {
       const rows = await db
         .select({ latest: max(globalTokenRefIndex.updatedAt) })
         .from(globalTokenRefIndex)
-        .where(eq(globalTokenRefIndex.namer, namer));
+        .where(eq(globalTokenRefIndex.upstream, upstream));
       return rows[0]?.latest ?? null;
     },
   };

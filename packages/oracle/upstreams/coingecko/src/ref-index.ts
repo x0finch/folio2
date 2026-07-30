@@ -1,7 +1,8 @@
 import type { AssetPlatform, CoinListItem } from "@folio/coingecko-client";
 import type { RefIndexFetch } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { NON_EVM_PLATFORMS, UPSTREAM_ID } from "./constants";
+import { NON_EVM_PLATFORMS } from "./constants";
+import { cgkRef } from "./parse";
 
 // 把 CoinGecko 的两个端点摊平成全局映射行(ADR 0022)。
 //
@@ -54,9 +55,10 @@ export function toRefIndexRows(
         skipped += 1;
         continue;
       }
-      // 这张表里全是**链上合约**,故产 `contract:` 形(ADR 0020 第三轮)——
-      // mint 的 symbol 闸据此跳过它们。地址归一(EVM 小写)由文法层按命名者决定,不在这里猜。
-      rows.push({ ref: tokenRef.contract(namer, addr), namer: UPSTREAM_ID, localName: coinId });
+      // 左边(chainRef):全是**链上合约**,故产 `contract:` 形(ADR 0020 第三轮)—— mint 的 symbol 闸
+      // 据此跳过它们;地址归一(EVM 小写)由文法层按命名者决定。右边(upstreamRef):整条上游命名
+      // (`coingecko/issued:<id>`,#228 起不再产裸 id —— 半截会逼调用方拼回去)。
+      rows.push({ chainRef: tokenRef.contract(namer, addr), upstreamRef: cgkRef(coinId) });
     }
   }
   return { rows, unmatchedPlatforms, skipped };
