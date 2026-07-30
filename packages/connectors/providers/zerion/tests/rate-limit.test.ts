@@ -1,4 +1,4 @@
-import { bypassGatesForTests, resetGatesForTests } from "@folio/ratelimit";
+import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetChainIdsCacheForTests, zerionProvider } from "../src";
 import chainsFixture from "./fixtures/chains.json";
@@ -31,8 +31,8 @@ function stubFetch() {
 }
 
 beforeEach(() => {
-  bypassGatesForTests(false);
-  resetGatesForTests();
+  bypassRateLimitsForTests(false);
+  resetRateLimitsForTests();
   resetChainIdsCacheForTests();
   vi.useFakeTimers();
 });

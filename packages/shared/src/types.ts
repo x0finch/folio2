@@ -12,7 +12,7 @@ export interface SlotStore {
   // **实现必须保证同一 isolate 内的原子性**:读和写之间不能有 `await`,否则两个并发调用会读到
   // 同一个游标、各自以为拿到了那个时隙,闸就漏了。跨 isolate 的原子性做不到,也不要求(见上)。
   advance(key: string, spacingMs: number, now: number): Promise<number>;
-  // 仅测试用:清掉这个实现自己的状态。**由实现方自己清** —— 否则 resetGatesForTests
+  // 仅测试用:清掉这个实现自己的状态。**由实现方自己清** —— 否则 resetRateLimitsForTests
   // 得知道每种存储的内部长什么样。测试里传的假 store 不需要它,所以是可选的。
   reset?(): void;
 }
@@ -24,7 +24,7 @@ export interface RateLimitOptions {
   //   · 全局共享一把 API key → 填 **key 的名字**(如 `COINGECKO_API_KEY`)。绝不填 key 的值 ——
   //     它会进日志、进 Map 的键、进缓存的 URL
   //   · 按出口 IP 算(免签的公开端点几乎都是)→ 填一个 provider 级的常量,如 `binance:public`
-  //   · 每账户自带一把 key → 填 provider 名,调用时用 `gate(run, accountId)` 分队
+  //   · 每账户自带一把 key → 填 provider 名,调用时用 `limit(run, accountId)` 分队
   //
   // 前两种是「一份额度、很多调用者」,第三种是「很多份额度、各自一个调用者」—— 上游数的都是
   // API key,区别只在我们手里有几把。
@@ -42,7 +42,7 @@ export interface RateLimitOptions {
 
 // 闸:**调用方把它放模块顶层**,每个请求进它的闭包。
 // 请求写在参数里而不是「先 acquire 再自己发」——想绕过它得刻意不调,不会写漏。
-export type Gate = <T>(run: () => Promise<T>, subKey?: string) => Promise<T>;
+export type RateLimiter = <T>(run: () => Promise<T>, subKey?: string) => Promise<T>;
 
 export interface RetryInfo {
   attempt: number; // 第几次尝试失败了(1 = 首次)

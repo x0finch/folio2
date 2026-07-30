@@ -1,4 +1,4 @@
-import type { Gate, RateLimitOptions, SlotStore, StoreChoice } from "./types";
+import type { RateLimiter, RateLimitOptions, SlotStore, StoreChoice } from "./types";
 
 // 出站请求的速率闸。**目标是削峰,不是严格限频** —— 严格那档在 Workers 上只有 Durable Object 能做
 // (见 #17),而我们不需要:漏出去的那几发由 429 + `withRetry` 兜底。
@@ -151,7 +151,7 @@ function resolveStore(choice: StoreChoice | undefined): SlotStore {
 }
 
 // 仅测试用:让各存储清掉自己的状态。生产代码勿调。
-export function resetGatesForTests(): void {
+export function resetRateLimitsForTests(): void {
   memoryStore.reset();
   cacheStore.reset();
 }
@@ -159,11 +159,11 @@ export function resetGatesForTests(): void {
 // 仅测试用:让所有闸直接放行。集成测试跑的是应用真实接线,那条路上没有测试参数可传,
 // 而闸真等的话那套会从 1 秒涨到几十秒。限速本身在本包的单测里验。
 let bypass = false;
-export function bypassGatesForTests(on: boolean): void {
+export function bypassRateLimitsForTests(on: boolean): void {
   bypass = on;
 }
 
-export function defineRateLimit(opts: RateLimitOptions): Gate {
+export function defineRateLimit(opts: RateLimitOptions): RateLimiter {
   if (!Number.isInteger(opts.limit) || opts.limit < 1) {
     throw new Error(`ratelimit: limit must be an integer >= 1 (${opts.key})`);
   }

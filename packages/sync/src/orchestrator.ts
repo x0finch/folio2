@@ -1,6 +1,6 @@
 import { type Balance, type Note, ProviderError } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
-import { withRetry } from "@folio/ratelimit";
+import { withRetry } from "@folio/shared";
 import { platformOf } from "./platform";
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
@@ -90,7 +90,7 @@ export interface SyncResult {
 // 对可重试的 ProviderError(429/5xx/网络)退避重试;优先采用服务端 Retry-After,否则指数退避+抖动。
 // 不可重试错误 / 重试用尽 → 抛出(由 syncAccount 外层收为 ok:false)。logCtx = {accountId,type} 入每条重试日志。
 //
-// 循环本体在 @folio/ratelimit(那儿有它的完整测试;CoinGecko client 和加账户探活用的是同一个)。
+// 循环本体在 @folio/shared(那儿有它的完整测试;CoinGecko client 和加账户探活用的是同一个)。
 // 这里传两个**刻意保持迁移前行为**的参数:
 //   · isRetryable 仍要求 instanceof ProviderError —— 包的默认判据是鸭子类型(只看 `.retryable`),
 //     对本层收窄回来,免得别处冒上来的、恰好带 `retryable: true` 的对象也被重试

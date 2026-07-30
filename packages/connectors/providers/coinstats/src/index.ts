@@ -7,7 +7,7 @@ import {
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { defineRateLimit } from "@folio/ratelimit";
+import { defineRateLimit } from "@folio/shared";
 import { z } from "zod";
 import {
   API_KEY_HEADER,
@@ -107,7 +107,7 @@ function getApiKey(creds: Record<string, string>): string {
 
 // 速率闸。key 取**环境变量名**(不是 key 的值 —— 它会进日志),于是 sui / cosmos / solana
 // 三个 connector 各自 import 本模块也共享同一个队 —— 这正是需要的:它们花的是同一把 key 的额度。
-const gate = defineRateLimit({
+const limit = defineRateLimit({
   key: COINSTATS_API_KEY,
   limit: RATE_LIMIT_BURST,
   interval: (RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000,
@@ -122,7 +122,7 @@ async function coinstatsGet(
 ): Promise<Response> {
   const url = `${COINSTATS_API_BASE}${BALANCE_PATH}?address=${encodeURIComponent(address)}&connectionId=${encodeURIComponent(connectionId)}`;
   try {
-    return await gate(() =>
+    return await limit(() =>
       fetch(url, { headers: { [API_KEY_HEADER]: apiKey, accept: "application/json" } }),
     );
   } catch (cause) {

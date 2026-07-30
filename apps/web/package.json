@@ -26,7 +26,7 @@
     "@folio/oracle2": "workspace:*",
     "@folio/oracle2-basic": "workspace:*",
     "@folio/oracle2-upstream-coingecko": "workspace:*",
-    "@folio/ratelimit": "workspace:*",
+    "@folio/shared": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/ui": "workspace:*",
     "@fontsource-variable/geist": "^5.2.9",

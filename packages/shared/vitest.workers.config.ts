@@ -15,5 +15,5 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [cloudflareTest({ wrangler: { configPath: "./tests/server/wrangler.test.jsonc" } })],
   // name 必须与 vitest.config.ts 那个不同 —— 同一个包出两个 project,重名会撞(见根 vitest.config.ts)。
-  test: { name: "ratelimit-workers", include: ["tests/server/**/*.test.ts"] },
+  test: { name: "shared-workers", include: ["tests/server/**/*.test.ts"] },
 });

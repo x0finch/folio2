@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
 // 跨 isolate 那一档在这里用注入的假 store 验形状;它在 workerd 里的真实行为见 tests/server。
 export default defineConfig({
   test: {
-    name: "ratelimit",
+    name: "shared",
     environment: "node",
     include: ["tests/**/*.test.ts"],
     // **必须排掉 tests/server** —— 那一档是 workerd 专属的(见 vitest.workers.config.ts)。

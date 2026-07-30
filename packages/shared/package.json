@@ -1,5 +1,5 @@
 {
-  "name": "@folio/ratelimit",
+  "name": "@folio/shared",
   "version": "0.0.0",
   "private": true,
   "type": "module",

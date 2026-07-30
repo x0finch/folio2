@@ -1,7 +1,7 @@
-import { bypassGatesForTests, resetGatesForTests } from "@folio/ratelimit";
+import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { binanceProvider } from "../src";
-import { ACCOUNT_PATH, TICKER_PRICE_PATH } from "../src/constants";
+import { ACCOUNT_PATH, TICKER_PRICE_PATH, TICKER_RATE_LIMIT_BURST } from "../src/constants";
 import account from "./fixtures/account.json";
 import prices from "./fixtures/prices.json";
 
@@ -44,8 +44,8 @@ const drain = async () => {
 };
 
 beforeEach(() => {
-  bypassGatesForTests(false);
-  resetGatesForTests();
+  bypassRateLimitsForTests(false);
+  resetRateLimitsForTests();
   vi.useFakeTimers();
 });
 afterEach(() => {
@@ -54,29 +54,30 @@ afterEach(() => {
 });
 
 describe("只有公开端点过闸", () => {
-  // **断言的是对比,不是具体时刻。** fetchBalances 是两段的(先签名、再行情),而假时钟推进时
-  // 后半段可能还没入队 —— 于是「第几发在第几毫秒」会被推进粒度污染。真正的不变量是:
-  // 签名那批全在同一刻出去(没有闸),行情那批被分散到多个时刻(有闸)。
-  it("签名那批挤在同一刻,行情那批被分散 —— 闸只作用在后者", async () => {
+  // **断言的是个数,不是时刻。** 时刻分不开两种「被拉开」:闸拉开的,和假时钟推进拉开的
+  // (fetchBalances 里签名那步要过一次异步 HMAC,推进时它可能还没落地)。所以改成:
+  // 先只冲微任务、**一点时间都不推**,这时出去了几个就是「不用等就能出去的有几个」。
+  //   · 签名端点没有闸 → 12 个全出去
+  //   · 行情端点有闸 → 只出去一个窗口的量(6 个),其余卡在闸上
+  // 然后再推时间,其余才出来。
+  const flushMicrotasks = async () => {
+    for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(0);
+  };
+
+  it("不推时间时:签名 12 发全出去,行情只出去一个窗口的量", async () => {
     const calls = stubFetch();
-    // 额度 6 发/窗口,这里跑 12 个账户 → 行情端点一定跨窗口。
     const runs = Promise.all(
       Array.from({ length: 12 }, () => binanceProvider.fetchBalances(ctx())),
     );
+    await flushMicrotasks();
+
+    const countOf = (path: string) => calls.filter((c) => c.path === path).length;
+    expect(countOf(ACCOUNT_PATH)).toBe(12); // 没有闸
+    expect(countOf(TICKER_PRICE_PATH)).toBe(TICKER_RATE_LIMIT_BURST); // 有闸,正好一个窗口
+
+    // 推进时间之后,剩下的行情请求才陆续出去。
     await drain();
     await runs;
-
-    const signedAt = calls.filter((c) => c.path === ACCOUNT_PATH).map((c) => c.at);
-    const tickerAt = calls.filter((c) => c.path === TICKER_PRICE_PATH).map((c) => c.at);
-    expect(signedAt).toHaveLength(12);
-    expect(tickerAt).toHaveLength(12);
-
-    // 签名端点没有闸 → 12 发同一刻
-    expect(new Set(signedAt).size).toBe(1);
-    // 行情端点有闸 → 分散到多个刻,而且每个窗口最多 6 发
-    expect(new Set(tickerAt).size).toBeGreaterThan(1);
-    for (const t of new Set(tickerAt)) {
-      expect(tickerAt.filter((x) => x === t).length).toBeLessThanOrEqual(6);
-    }
+    expect(countOf(TICKER_PRICE_PATH)).toBe(12);
   });
 });

@@ -6,7 +6,7 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
-import { withRetry } from "@folio/ratelimit";
+import { withRetry } from "@folio/shared";
 import type { InputSpec } from "../../creds";
 import { platformLogoUrl } from "../../logo";
 

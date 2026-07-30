@@ -7,7 +7,7 @@ import {
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { defineRateLimit } from "@folio/ratelimit";
+import { defineRateLimit } from "@folio/shared";
 import { z } from "zod";
 import {
   ACCOUNT_PATH,
@@ -87,8 +87,8 @@ export function parseAccountBalances(
   return out;
 }
 
-// 公开(免签)端点的速率闸 —— 按出口 IP 共享,见 constants.ts 里为什么只给它装。
-const publicGate = defineRateLimit({
+// 公开(免签)端点的限频器 —— 按出口 IP 共享,见 constants.ts 里为什么只给它装。
+const publicLimit = defineRateLimit({
   key: PUBLIC_LIMIT_KEY,
   limit: TICKER_RATE_LIMIT_BURST,
   interval: (TICKER_RATE_LIMIT_BURST / TICKER_RATE_LIMIT_PER_SEC) * 1000,
@@ -99,7 +99,7 @@ async function binanceFetch(path: string, apiKey?: string, gated = false): Promi
   const send = () =>
     fetch(`${BINANCE_API_BASE}${path}`, { headers: apiKey ? { [API_KEY_HEADER]: apiKey } : {} });
   try {
-    return await (gated ? publicGate(send) : send());
+    return await (gated ? publicLimit(send) : send());
   } catch (cause) {
     throw new ProviderError("UPSTREAM_ERROR", "binance request failed", { cause });
   }

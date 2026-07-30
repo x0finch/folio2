@@ -1,4 +1,4 @@
-import { resetGatesForTests } from "@folio/ratelimit";
+import { resetRateLimitsForTests } from "@folio/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CG_BURST, CG_RETRY_MAX_WAIT_MS } from "../src/constants";
 import { type CoinGeckoError, createCoinGeckoClient } from "../src/index";
@@ -44,7 +44,7 @@ async function grabErr(p: Promise<unknown>): Promise<CoinGeckoError> {
   }
 }
 
-beforeEach(() => resetGatesForTests());
+beforeEach(() => resetRateLimitsForTests());
 afterEach(() => vi.restoreAllMocks());
 
 describe("重试", () => {
@@ -181,7 +181,7 @@ describe("三个档位", () => {
     expect(proSlept).toHaveLength(1);
 
     // 换一份干净的队,单看 pro 自己:窗口比 demo 短 → 同样的第 CG_BURST+1 发等得更少
-    resetGatesForTests();
+    resetRateLimitsForTests();
     const proAlone: number[] = [];
     const pro2 = createCoinGeckoClient({
       apiKey: "k",

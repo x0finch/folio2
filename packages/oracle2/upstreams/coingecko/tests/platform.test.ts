@@ -1,15 +1,15 @@
-import { bypassGatesForTests, resetGatesForTests } from "@folio/ratelimit";
+import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCoinGeckoPlatformUpstream } from "../src";
 
 // 限速闸:每个用例从干净状态出发,且 sleep 即时 —— 否则无 key 档(10 次/分钟)会让这套测试
 // **真的等**,而上一个用例撞出来的冷却还会漏给下一个。生产不传 sleep(用 setTimeout)。
 const NO_WAIT = { sleep: async () => {} };
-// 限速闸旁路:这个文件测的不是限频。闸的行为在 @folio/ratelimit 的单测里用假时钟验过,
+// 限速闸旁路:这个文件测的不是限频。闸的行为在 @folio/shared 的单测里用假时钟验过,
 // 这里让它直接放行 —— 否则每个用例都要按窗口真等。
-bypassGatesForTests(true);
+bypassRateLimitsForTests(true);
 
-beforeEach(() => resetGatesForTests());
+beforeEach(() => resetRateLimitsForTests());
 
 const ASSET_PLATFORMS = [
   {

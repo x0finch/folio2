@@ -1,4 +1,4 @@
-import { bypassGatesForTests, resetGatesForTests } from "@folio/ratelimit";
+import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hyperliquidProvider } from "../src";
 
@@ -25,8 +25,8 @@ const ctx = (): Ctx =>
   }) as unknown as Ctx;
 
 beforeEach(() => {
-  bypassGatesForTests(false);
-  resetGatesForTests();
+  bypassRateLimitsForTests(false);
+  resetRateLimitsForTests();
   vi.useFakeTimers();
 });
 afterEach(() => {

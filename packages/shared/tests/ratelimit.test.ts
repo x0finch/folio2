@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  bypassGatesForTests,
+  bypassRateLimitsForTests,
   CacheSlotStore,
   defineRateLimit,
   MemorySlotStore,
-  resetGatesForTests,
+  resetRateLimitsForTests,
 } from "../src/index";
 
 // 时钟和 sleep 都注入 —— 于是「谁被要求等多久」是确定的数,整个文件跑不到一秒。
@@ -32,8 +32,8 @@ function recorder() {
 }
 
 beforeEach(() => {
-  resetGatesForTests();
-  bypassGatesForTests(false);
+  resetRateLimitsForTests();
+  bypassRateLimitsForTests(false);
 });
 
 describe("摊开请求", () => {
@@ -325,7 +325,7 @@ describe("说不通的配置立刻炸,不悄悄退化", () => {
 
 describe("测试旁路", () => {
   it("开了之后直接放行,一次都不等", async () => {
-    bypassGatesForTests(true);
+    bypassRateLimitsForTests(true);
     const t = fakeClock();
     const gate = defineRateLimit({ key: "k", limit: 1, interval: 10_000, store: "memory", ...t });
     for (let i = 0; i < 10; i++) await gate(async () => {});
@@ -333,7 +333,7 @@ describe("测试旁路", () => {
   });
 
   it("旁路不吞返回值,也不吞异常", async () => {
-    bypassGatesForTests(true);
+    bypassRateLimitsForTests(true);
     const gate = defineRateLimit({ key: "k", limit: 1, interval: 10_000, store: "memory" });
     expect(await gate(async () => 42)).toBe(42);
     await expect(

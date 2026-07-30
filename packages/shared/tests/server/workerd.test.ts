@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  bypassGatesForTests,
+  bypassRateLimitsForTests,
   defineRateLimit,
-  resetGatesForTests,
+  resetRateLimitsForTests,
   withRetry,
 } from "../../src/index";
 
@@ -17,8 +17,8 @@ import {
 const INTERVAL = 60;
 
 beforeEach(() => {
-  resetGatesForTests();
-  bypassGatesForTests(false); // 这一档就是要看真闸,别旁路
+  resetRateLimitsForTests();
+  bypassRateLimitsForTests(false); // 这一档就是要看真闸,别旁路
 });
 
 describe("运行时承诺", () => {
@@ -29,8 +29,8 @@ describe("运行时承诺", () => {
 
     // 清掉本地那层,模拟「换了个 isolate」:冷启时应该把刚才那个时隙从缓存读回来,于是照样得等,
     // 而不是白给一整轮突发。**这正是默认不用内存的理由。**
-    resetGatesForTests();
-    bypassGatesForTests(false);
+    resetRateLimitsForTests();
+    bypassRateLimitsForTests(false);
     let askedToWait = -1;
     await defineRateLimit({
       key,

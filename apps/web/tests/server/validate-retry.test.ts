@@ -1,4 +1,4 @@
-import { resetGatesForTests } from "@folio/ratelimit";
+import { resetRateLimitsForTests } from "@folio/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateAccountCreds } from "../../src/lib/server/internal/connector-registry";
 
@@ -22,7 +22,7 @@ import { validateAccountCreds } from "../../src/lib/server/internal/connector-re
 
 const ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
-beforeEach(() => resetGatesForTests());
+beforeEach(() => resetRateLimitsForTests());
 afterEach(() => vi.restoreAllMocks());
 
 // 按次序应答:第 n 次出网返回 statuses[n-1](用尽后重复最后一个)。每次都新建 Response
@@ -83,7 +83,7 @@ describe("现状:provider 把一切压成 false,于是重试触发不了", () =>
     // 验收单上这条今天在 app 这一层造不出来(没有 provider 会抛),所以直接验这一层用的那组参数:
     // 默认判据只认 `retryable === true`,`INVALID_CREDENTIALS` 那种不带这个标记的一次都不重。
     // 规则层面的覆盖在 packages/ratelimit/tests/retry.test.ts。
-    const { withRetry } = await import("@folio/ratelimit");
+    const { withRetry } = await import("@folio/shared");
     let calls = 0;
     const rejected = async () => {
       calls++;
@@ -98,7 +98,7 @@ describe("现状:provider 把一切压成 false,于是重试触发不了", () =>
   it("但只要 provider 肯抛 retryable 错误,这一层立刻就会重试", async () => {
     // 直接验 withRetry 那一层的接线:manual connector 没有 provider(探活直接放行),所以拿
     // evm 那条路没法造出「抛错的 provider」——用一个抛 retryable 错的假调用证明参数是对的。
-    const { withRetry } = await import("@folio/ratelimit");
+    const { withRetry } = await import("@folio/shared");
     let calls = 0;
     const flaky = async () => {
       calls++;

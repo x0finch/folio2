@@ -3,7 +3,7 @@
 //   ① 注入 User-Agent —— CGK 的 Cloudflare WAF 对无 UA 请求返 403(Workers fetch 默认不带 UA)。
 //   ② 直接用全局 `fetch`(不存成方法/this,避免 Workers 的 illegal invocation)。
 
-import { defineRateLimit, type Gate, withRetry } from "@folio/ratelimit";
+import { defineRateLimit, type RateLimiter, withRetry } from "@folio/shared";
 import {
   CG_BURST,
   CG_CALLS_PER_MIN_DEMO,
@@ -75,7 +75,7 @@ export type Requester = (path: string, query?: Query, opts?: RequestOptions) => 
 //
 // scope 取 colo:撞墙之后同一个数据中心的 isolate 一起收手(冷却标记只止损、不管配额)。
 // 精确到「跨 colo 的一把 key」要 Durable Object,见 #17 —— 那一档在自托管量级用不上。
-function gateFor(config: CoinGeckoConfig): Gate {
+function rateLimitFor(config: CoinGeckoConfig): RateLimiter {
   const callsPerMin = config.pro
     ? CG_CALLS_PER_MIN_PRO
     : config.apiKey
@@ -96,11 +96,11 @@ function gateFor(config: CoinGeckoConfig): Gate {
 // 于是测重试时压根不用碰 fetch,测映射时压根不用碰闸。
 export function createRequester(config: CoinGeckoConfig = {}): Requester {
   const raw = createRawRequester(config);
-  const gate = gateFor(config);
+  const limit = rateLimitFor(config);
 
   // **闸在重试里面**:重试也该排队,否则退避完立刻插队。
   return (path, query, opts) =>
-    withRetry(() => gate(() => raw(path, query, opts)), {
+    withRetry(() => limit(() => raw(path, query, opts)), {
       attempts: CG_RETRY_ATTEMPTS,
       maxWaitMs: CG_RETRY_MAX_WAIT_MS,
       baseMs: CG_RETRY_BASE_MS,

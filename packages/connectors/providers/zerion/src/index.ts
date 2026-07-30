@@ -7,7 +7,7 @@ import {
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { defineRateLimit } from "@folio/ratelimit";
+import { defineRateLimit } from "@folio/shared";
 import { z } from "zod";
 
 // @folio/connectors-provider-zerion — zerion provider(evm connector 用)。只读地址,一次取回跨所有
@@ -50,7 +50,7 @@ const RATE_LIMIT_BURST = 8;
 
 // 闸的 key 取**环境变量名**,不是 key 的值 —— key 会进日志和 Map 的键,而这里只需要一个代表
 // 「那把 key」的稳定标识符。全局一把,所以所有账户共用这一个队。
-const gate = defineRateLimit({
+const limit = defineRateLimit({
   key: ZERION_API_KEY,
   limit: RATE_LIMIT_BURST,
   interval: (RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000,
@@ -187,7 +187,7 @@ function basicAuth(apiKey: string): string {
 // 状态码由调用方用 ensureOk 处理 —— 但 429 要在这里就告诉闸(ensureOk 是同步的,await 不进去)。
 async function zerionGet(path: string, apiKey: string): Promise<Response> {
   try {
-    return await gate(() =>
+    return await limit(() =>
       fetch(`${ZERION_API_BASE}${path}`, {
         headers: { Authorization: basicAuth(apiKey), accept: "application/json" },
       }),

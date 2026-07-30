@@ -6,7 +6,7 @@ import {
   parseRetryAfter,
   type Spot,
 } from "@folio/connectors-basic";
-import { defineRateLimit } from "@folio/ratelimit";
+import { defineRateLimit } from "@folio/shared";
 import { z } from "zod";
 import {
   CACHE_TOKEN_LIST_PATH,
@@ -77,7 +77,7 @@ async function sign(
 //
 // key 取 provider id:rabby 的额度实测跟**签名**走(不跟出口 IP 走),所有账户共用同一份,
 // 所以必须是一个全局的闸,不是每账户一个。
-const gate = defineRateLimit({
+const limit = defineRateLimit({
   key: PROVIDER_ID,
   limit: 1,
   interval: 1000 / MAX_REQUESTS_PER_SECOND,
@@ -97,7 +97,7 @@ async function rabbyGet(path: string, params: Record<string, string>): Promise<R
   }
   const query = new URLSearchParams(params).toString();
   try {
-    return await gate(() =>
+    return await limit(() =>
       fetch(`${RABBY_API_BASE}${path}${query ? `?${query}` : ""}`, {
         headers: { ...headers, accept: "application/json" },
       }),

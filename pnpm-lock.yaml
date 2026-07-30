@@ -50,9 +50,9 @@ importers:
       '@folio/oracle2-upstream-coingecko':
         specifier: workspace:*
         version: link:../../packages/oracle2/upstreams/coingecko
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../packages/ratelimit
+        version: link:../../packages/shared
       '@folio/sync':
         specifier: workspace:*
         version: link:../../packages/sync
@@ -202,9 +202,9 @@ importers:
 
   packages/clients/coingecko:
     dependencies:
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../ratelimit
+        version: link:../../shared
     devDependencies:
       typescript:
         specifier: ^7.0.2
@@ -274,9 +274,9 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../../ratelimit
+        version: link:../../../shared
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -321,9 +321,9 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../../ratelimit
+        version: link:../../../shared
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -347,9 +347,9 @@ importers:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../../ratelimit
+        version: link:../../../shared
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -369,9 +369,9 @@ importers:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../../ratelimit
+        version: link:../../../shared
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -387,9 +387,9 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../../ratelimit
+        version: link:../../../shared
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -415,9 +415,9 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../../ratelimit
+        version: link:../../../shared
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -525,9 +525,9 @@ importers:
         specifier: workspace:*
         version: link:../../basic
     devDependencies:
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../../ratelimit
+        version: link:../../../shared
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -576,9 +576,9 @@ importers:
         specifier: workspace:*
         version: link:../../basic
     devDependencies:
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../../../ratelimit
+        version: link:../../../shared
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -586,7 +586,7 @@ importers:
         specifier: ^4.1.5
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
-  packages/ratelimit:
+  packages/shared:
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.16.20
@@ -615,9 +615,9 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../oracle/ref
-      '@folio/ratelimit':
+      '@folio/shared':
         specifier: workspace:*
-        version: link:../ratelimit
+        version: link:../shared
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20260626.1
