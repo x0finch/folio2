@@ -1,6 +1,12 @@
 import { type CoinGeckoConfig, createCoinGeckoClient } from "@folio/coingecko-client";
 import type { TokenUpstream } from "@folio/oracle-basic";
-import { EVM_NAMER_PREFIX, MARKETS_PER_PAGE, UPSTREAM_ID, VS_USD } from "./constants";
+import {
+  EVM_NAMER_PREFIX,
+  IDS_PER_REQUEST,
+  MARKETS_PER_PAGE,
+  UPSTREAM_ID,
+  VS_USD,
+} from "./constants";
 import {
   coinIdOf,
   parseContract,
@@ -12,6 +18,13 @@ import {
 import { toRefIndexRows } from "./ref-index";
 
 export type { CoinGeckoConfig };
+
+// id 列表切成每片 ≤ size(避免 GET 的 ids 串把 URL 撑爆 → 414,见 constants.IDS_PER_REQUEST)。
+function chunk<T>(arr: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 // `TokenUpstream` 三面的 CoinGecko 实现。**全仓只有本包认识 CoinGecko** ——
 // 服务层收的是这个接口,由 app 在装配时注入(ADR 0023)。
@@ -91,30 +104,42 @@ export function createCoinGeckoUpstream(config: CoinGeckoConfig = {}): TokenUpst
       return parseSearch(await client.search(query));
     },
 
+    // **id 必须分块**:全塞进一条 GET 的 `ids=` → URL 过长 → CoinGecko 414,整批失败
+    // (#245)。按 IDS_PER_REQUEST 切片、逐批取、合并成一个 Map。
     async fetchPrices(refs) {
       const ids = refs.map(coinIdOf).filter((id): id is string => id != null);
       if (ids.length === 0) return new Map();
-      const json = await client.simplePrice({
-        ids,
-        vsCurrencies: [VS_USD],
-        include24hrChange: true,
-        includeLastUpdatedAt: true,
-      });
-      return parseSimplePrice(json, Date.now());
+      const now = Date.now();
+      const merged: ReturnType<typeof parseSimplePrice> = new Map();
+      for (const batch of chunk(ids, IDS_PER_REQUEST)) {
+        const json = await client.simplePrice({
+          ids: batch,
+          vsCurrencies: [VS_USD],
+          include24hrChange: true,
+          includeLastUpdatedAt: true,
+        });
+        for (const [ref, price] of parseSimplePrice(json, now)) merged.set(ref, price);
+      }
+      return merged;
     },
 
     // 按 id 点查一批整行。走 `/coins/markets?ids=…` 而不是 `/simple/price`:后者只回价,
     // 而这里要的正是 name/symbol/image。同一个端点、同一个解析器,只是不翻页。
+    // 同样**必须分块**(#245):每批 ≤ IDS_PER_REQUEST ≤ MARKETS_PER_PAGE,故一批一页装得下。
     async fetchTokens(refs) {
       const ids = refs.map(coinIdOf).filter((id): id is string => id != null);
       if (ids.length === 0) return [];
-      const rows = await client.coinsMarkets({
-        vsCurrency: VS_USD,
-        ids,
-        perPage: MARKETS_PER_PAGE,
-        priceChangePercentage: "24h",
-      });
-      return parseMarkets(rows);
+      const out = [];
+      for (const batch of chunk(ids, IDS_PER_REQUEST)) {
+        const rows = await client.coinsMarkets({
+          vsCurrency: VS_USD,
+          ids: batch,
+          perPage: MARKETS_PER_PAGE,
+          priceChangePercentage: "24h",
+        });
+        out.push(...parseMarkets(rows));
+      }
+      return out;
     },
 
     async fetchPriceSeries(ref, fromMs, toMs) {
