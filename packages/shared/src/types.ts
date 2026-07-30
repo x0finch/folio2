@@ -44,7 +44,8 @@ export interface RateLimitOptions {
 // 请求写在参数里而不是「先 acquire 再自己发」——想绕过它得刻意不调,不会写漏。
 export type RateLimiter = <T>(run: () => Promise<T>, subKey?: string) => Promise<T>;
 
-export interface RetryInfo {
+// 只在本文件内被 RetryOpts.onRetry 引用 —— 不导出(仓库规则:只在自己文件里用到就别 export)。
+interface RetryInfo {
   attempt: number; // 第几次尝试失败了(1 = 首次)
   error: unknown;
   waitMs: number;

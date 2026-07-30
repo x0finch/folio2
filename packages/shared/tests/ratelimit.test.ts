@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  bypassRateLimitsForTests,
-  CacheSlotStore,
-  defineRateLimit,
-  MemorySlotStore,
-  resetRateLimitsForTests,
-} from "../src/index";
+import { bypassRateLimitsForTests, defineRateLimit, resetRateLimitsForTests } from "../src/index";
+// 两个 store 类不在包的对外面上(包外没人用)—— 包内测试直接引实现文件。
+import { CacheSlotStore, MemorySlotStore } from "../src/ratelimit";
 
 // 时钟和 sleep 都注入 —— 于是「谁被要求等多久」是确定的数,整个文件跑不到一秒。
 // 默认的 cache 档在 node 里没有 `caches`,会自己退回本地那层;这里显式传 `store: "memory"` 说清意图。
