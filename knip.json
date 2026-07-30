@@ -12,6 +12,9 @@
     },
     "packages/connectors/providers/rabby": {
       "ignoreDependencies": ["wrangler"]
+    },
+    "packages/ratelimit": {
+      "ignoreDependencies": ["wrangler"]
     }
   }
 }
