@@ -33,3 +33,17 @@ export class ProviderError extends Error {
     this.retryAfterMs = options.retryAfterMs;
   }
 }
+
+// 「上游拒了这份凭据」的 code。**给 `validateAccount` 用**(契约见 connector.ts):探活的 catch 里
+// 用它区分两类失败 —— 凭据被拒(`AUTH_FAILED`)或凭据本身不成立(`INVALID_CREDENTIALS`,如 blockbook
+// 的 xpub 解析不出来)→ 判账户不通过、返回 `false`;其余(`RATE_LIMITED` / `UPSTREAM_ERROR` /
+// `PARSE_ERROR` / 非 ProviderError)都是「够不到上游 / 说不清」,让它冒出去交调用方重试。
+const CREDENTIAL_REJECTION_CODES: ReadonlySet<ProviderErrorCode> = new Set<ProviderErrorCode>([
+  "AUTH_FAILED",
+  "INVALID_CREDENTIALS",
+]);
+
+// validateAccount 的 catch 判据:这个错误是不是「凭据被拒/不成立」(→ false),而非传输故障(→ 抛)。
+export function isCredentialRejection(err: unknown): boolean {
+  return err instanceof ProviderError && CREDENTIAL_REJECTION_CODES.has(err.code);
+}

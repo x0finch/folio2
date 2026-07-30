@@ -92,14 +92,11 @@ export async function validateAccountCreds(
   // 参数比 sync 紧得多(见常量注释),而且**不加限速闸**:用户正盯着表单,"提交后转 5 秒圈"
   // 比"失败请重试"更糟 —— 他不知道还要等多久。探活也是一次性单发,不存在突发。
   //
-  // ⚠️ **今天这个重试一次都不会触发,得说清楚。** `validateAccount` 的签名是 `Promise<boolean>`,
-  // 而**七个 provider 无一例外**写成 `try { return res.ok } catch { return false }` —— 429、5xx、
-  // 网络故障、凭据不对全压成同一个 `false`,withRetry 于是收不到错误对象。
-  //
-  // 仍然接上,是因为它在对的那一层:让 provider 只对「凭据被拒」返回 false、对传输故障抛
-  // retryable 的 ProviderError,这里立刻就活了(那是 provider 契约的改动,单独一票)。
-  // **不**改成「false 也重试」:false 是歧义的,里面混着「这个 key 就是错的」—— 那是最常见的
-  // 失败,给它多赔一个往返还会拿着错凭据再打一次上游。tests/server/validate-retry.test.ts 钉住了现状。
+  // 重试只吃「够不到上游」这一类:`validateAccount` 的契约(#240,见 connectors/basic 的 connector.ts)
+  // 是 —— 凭据被拒返回 `false`、传输故障(429/5xx/网络)抛 retryable 的 ProviderError。于是这里:
+  // 瞬时 429 → provider 抛 → withRetry 再打一发;凭据真错 → provider 返回 false(不抛)→ 不重试、
+  // 直接报「could not verify」。**不**改成「false 也重试」:false 现在只剩「这个 key 就是错的」,
+  // 给它多赔往返还会拿着错凭据再打上游。tests/server/validate-retry.test.ts 钉住这两条。
   const alive = await withRetry(() => provider.validateAccount(ctx), {
     attempts: VALIDATE_RETRY_ATTEMPTS,
     maxWaitMs: VALIDATE_RETRY_MAX_WAIT_MS,

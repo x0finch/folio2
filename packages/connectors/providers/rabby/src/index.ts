@@ -2,6 +2,7 @@ import {
   type BalanceProvider,
   type CredField,
   type Defi,
+  isCredentialRejection,
   ProviderError,
   type Spot,
 } from "@folio/connectors-basic";
@@ -162,13 +163,15 @@ export const rabbyProvider: BalanceProvider<Row, typeof accountCreds, typeof pro
     };
   },
 
-  // 低消耗校验:打最轻的 total_balance 探活(地址格式已由组装处的 validator 保证)。任何失败 → false。
+  // 低消耗校验:打最轻的 total_balance 探活(地址格式已由组装处的 validator 保证)。
+  // 凭据被拒 → false;够不到上游 → 抛 ProviderError(契约见 connector.ts / errors.ts)。
   async validateAccount(ctx): Promise<boolean> {
     try {
       await request(TOTAL_BALANCE_PATH, { query: { id: ctx.account.creds.address } });
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      if (isCredentialRejection(err)) return false;
+      throw err;
     }
   },
 

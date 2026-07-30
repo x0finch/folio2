@@ -155,19 +155,38 @@ describe("validateAccount", () => {
     expect(await provider.validateAccount(ctx())).toBe(true);
   });
 
-  it("上游拒 → false(不抛)", async () => {
-    stubFetch({ "/v1/user/total_balance": () => new Response("", { status: 400 }) });
+  // 契约(#240):凭据被拒 → false;够不到上游 → 抛 ProviderError,让调用方重试。
+  it("凭据被拒(403 → AUTH_FAILED)→ false,不抛", async () => {
+    stubFetch({ "/v1/user/total_balance": () => new Response("", { status: 403 }) });
     expect(await provider.validateAccount(ctx())).toBe(false);
   });
 
-  it("网络炸 → false(不抛)", async () => {
+  it("429 → 抛 RATE_LIMITED(retryable),不压成 false", async () => {
+    stubFetch({ "/v1/user/total_balance": () => new Response("", { status: 429 }) });
+    const err = await provider.validateAccount(ctx()).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("RATE_LIMITED");
+    expect(err.retryable).toBe(true);
+  });
+
+  it("5xx → 抛 UPSTREAM_ERROR(retryable)", async () => {
+    stubFetch({ "/v1/user/total_balance": () => new Response("", { status: 503 }) });
+    const err = await provider.validateAccount(ctx()).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("UPSTREAM_ERROR");
+    expect(err.retryable).toBe(true);
+  });
+
+  it("网络炸 → 抛 UPSTREAM_ERROR(不压成 false)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
         throw new Error("boom");
       }),
     );
-    expect(await provider.validateAccount(ctx())).toBe(false);
+    const err = await provider.validateAccount(ctx()).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("UPSTREAM_ERROR");
   });
 });
 

@@ -2,6 +2,7 @@ import {
   type BalanceProvider,
   type CredField,
   hmacSha256,
+  isCredentialRejection,
   ProviderError,
   type Spot,
 } from "@folio/connectors-basic";
@@ -100,6 +101,11 @@ const toFailure = ({ kind, where, status, retryAfterMs, cause }: Failure): Error
   if (kind === "network")
     return new ProviderError("UPSTREAM_ERROR", "binance request failed", { cause });
   if (kind === "auth") return new ProviderError("AUTH_FAILED", `binance auth failed (${status})`);
+  // **binance 用 HTTP 400 表达「这份签名请求被拒」** —— 最常见的是错 secret(签名对不上,-1022)
+  // 或 key 格式非法(-2014)。它们是凭据问题、非传输故障:重试没用,还会拿着错凭据再打一次上游
+  // (binance 会把重复认证失败当探测行为,见 #240)。故 400 → AUTH_FAILED(不可重试;validateAccount
+  // 据此返回 false)。极少数非凭据 400(如 -1021 时钟偏移)也归此 —— 同样非瞬时,且与旧行为一致。
+  if (status === 400) return new ProviderError("AUTH_FAILED", "binance rejected request (400)");
   // 418 = 收到 429 还继续打换来的封 IP,和限流同类处理。
   if (kind === "rate-limited")
     return new ProviderError("RATE_LIMITED", `binance rate limited (${status})`, { retryAfterMs });
@@ -171,6 +177,7 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
   },
 
   // 校验:签名打 /api/v3/account 确认 key + 读权限(creds 已由 validateCredentials 保证非空)。
+  // 凭据被拒(-2014/-2015 等 → AUTH_FAILED)→ false;够不到上游 → 抛(契约见 connector.ts / errors.ts)。
   async validateAccount(ctx): Promise<boolean> {
     const { apiKey, secret } = ctx.account.creds;
     try {
@@ -181,8 +188,9 @@ export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> 
         secret,
       );
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      if (isCredentialRejection(err)) return false;
+      throw err;
     }
   },
 };

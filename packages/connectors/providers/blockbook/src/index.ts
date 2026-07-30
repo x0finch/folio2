@@ -16,6 +16,7 @@ import {
 import {
   type BalanceProvider,
   type CredField,
+  isCredentialRejection,
   type Note,
   type NoteRow,
   ProviderError,
@@ -191,7 +192,14 @@ const isExtendedPubkey = (id: string): boolean => EXT_PUBKEY_RE.test(id);
 function toProviderError(err: unknown): ProviderError {
   if (err instanceof ProviderError) return err;
   if (err instanceof BlockbookError) {
-    return new ProviderError(err.code, err.message, { retryAfterMs: err.retryAfterMs, cause: err });
+    // **保留 retryable** —— 客户端会把「非 401/403/429 的 4xx」(如无效 xpub 的 400)标成
+    // UPSTREAM_ERROR + retryable:false;不透传就会被 ProviderError 按 code 重算成 true,
+    // 于是一个永久 400 被反复重试(validateAccount 与 fetchBalances 都受影响)。
+    return new ProviderError(err.code, err.message, {
+      retryable: err.retryable,
+      retryAfterMs: err.retryAfterMs,
+      cause: err,
+    });
   }
   if (err instanceof BitcoinDeriveError) {
     return new ProviderError("INVALID_CREDENTIALS", err.message, { cause: err });
@@ -259,7 +267,9 @@ export const blockbookProvider: BalanceProvider<
     }
   },
 
-  // 轻量探活:地址模式打地址端点;xpub 模式造 token 打 xpub 端点(顺带校验扩展公钥可解析)。任何失败 → false。
+  // 轻量探活:地址模式打地址端点;xpub 模式造 token 打 xpub 端点(顺带校验扩展公钥可解析)。
+  // 凭据被拒 / xpub 解析不出来(INVALID_CREDENTIALS)→ false;够不到上游 → 抛 ProviderError
+  // (经 toProviderError 归一,与 fetchBalances 同口径;契约见 connector.ts / errors.ts)。
   async validateAccount(ctx): Promise<boolean> {
     const id = ctx.account.creds.addressOrXpub;
     const client = createBlockbookClient();
@@ -273,8 +283,10 @@ export const blockbookProvider: BalanceProvider<
         await client.getAddress(id);
       }
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      const pe = toProviderError(err);
+      if (isCredentialRejection(pe)) return false;
+      throw pe;
     }
   },
 };
