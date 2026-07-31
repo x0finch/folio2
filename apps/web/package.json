@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit",
     "db:migrate:local": "wrangler d1 migrations apply folio --local",
     "db:migrate:remote": "wrangler d1 migrations apply folio --remote",
+    "sync:ref:local": "curl -sS \"http://localhost:3000/cdn-cgi/handler/scheduled?cron=0%2023%20*%20*%20*\"",
+    "sync:balances:local": "curl -sS \"http://localhost:3000/cdn-cgi/handler/scheduled?cron=0%200%20*%20*%20*\"",
     "deploy": "pnpm run build && wrangler deploy"
   },
   "dependencies": {
