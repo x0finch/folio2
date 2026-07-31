@@ -1,5 +1,6 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { Platforms, TokenRecord, Tokens, ValuationMode } from "@folio/oracle";
+import { fiatCodeOf } from "@folio/oracle-basic";
 import { type OverviewBalance, toAccountSections } from "./account-view";
 import { type AggInput, buildCanonicalHoldings } from "./aggregate";
 import { isFungible, viewKind } from "./balance-kind";
@@ -19,6 +20,11 @@ export interface OverviewDeps {
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
   // 估值模式(Phase 3,#81):读时现推 value 用。缺省 self-first(= 旧行为);per-user 设置接入见 P3-3。
   mode?: ValuationMode;
+  // tokenId → 该 token 在 fiat 命名者下的 ref(`fiat/issued:<CODE>`);server 从 token_refs 按 FIAT_NAMER 取。
+  // **法币身份不能走 `TokenRecord.ref`**:那条是上游(CGK)那一档,法币没有上游 → 恒 null;且 ADR 0021
+  // 把 `ref` 空不空定义成「上游认没认出」,法币借它会被刷价/取价路径误当已收录。故身份单独注入,overview
+  // 经 `fiatCodeOf` 判定(白名单校验、**不看裸 symbol**,防 "USD" 撞普通币)。缺省空 → 无法币。
+  fiatRefs?: ReadonlyMap<string, string>;
 }
 
 interface Elig {
@@ -50,9 +56,14 @@ export interface OverviewView {
 export async function buildOverview(
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
-  { tokens, platforms, connectorMeta, mode = "self-first" }: OverviewDeps,
+  { tokens, platforms, connectorMeta, mode = "self-first", fiatRefs }: OverviewDeps,
 ): Promise<OverviewView> {
   const balancesOf = (id: string) => (byAccount.get(id)?.balances ?? []) as OverviewBalance[];
+  // 法币身份:该 token 有 fiat 命名者的 ref、且经 fiatCodeOf 落在白名单内 → 是法币(身份驱动,不看 symbol)。
+  const isFiatToken = (tokenId?: string | null): boolean => {
+    const ref = tokenId ? fiatRefs?.get(tokenId) : undefined;
+    return ref ? fiatCodeOf(ref) != null : false;
+  };
 
   // 1) 摊平所有(账户 × 持仓),挑出进聚合的 eligible —— **只认现货**(spot/manual/CEX/UTXO)。
   // perp 权益、perp 仓位、defi 都不进聚合(#129:perp 权益并入会与 Perps tab 双算),各走次级分区。
@@ -104,6 +115,7 @@ export async function buildOverview(
       platform: account.platform,
     },
     tokenId: b.tokenId, // **归并键**:写快照时定死(ADR 0021),不再由富化结果反推
+    isFiat: isFiatToken(b.tokenId), // 法币身份(#271):稳定占比 + 展示用,身份驱动(见 fiatRefs 注释)
     name: e?.name,
     logo: e ? tokenLogoUrl(e) : undefined, // 上游 URL → folio 代理(隐私;见 ADR 0008)
     change24h: e?.price?.change24h,

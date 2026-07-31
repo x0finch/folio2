@@ -31,7 +31,9 @@ export function isStablecoin(symbol: string): boolean {
 }
 
 export interface HoldingLike {
-  token: { symbol: string };
+  // isFiat:法币身份(ADR 0025),由 fiat 命名者的 ref 经 fiatCodeOf 推出、不看裸 symbol —— 由上游
+  // (aggregate → overview-model)填好。稳定口径把所有法币都算稳定(现金类、非加密波动)。
+  token: { symbol: string; isFiat?: boolean };
   totalValue: number;
   change24h?: number;
 }
@@ -53,7 +55,8 @@ export function deriveHeroMetrics(
   let worst: HeroMetrics["worst"] = null;
   let stableSum = 0;
   for (const h of holdings) {
-    if (isStablecoin(h.token.symbol)) stableSum += h.totalValue;
+    // 稳定 = 法币(身份驱动,USD 与非 USD 法币皆是)‖ 稳定币 symbol 表(#102 临时清单)。
+    if (h.token.isFiat || isStablecoin(h.token.symbol)) stableSum += h.totalValue;
     if (h.change24h == null) continue;
     const entry = { symbol: h.token.symbol, change24h: h.change24h };
     // 严格大于/小于 → 并列时保留先出现者(与设计的排序取首一致)。

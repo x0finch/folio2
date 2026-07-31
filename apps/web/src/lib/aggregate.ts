@@ -30,6 +30,9 @@ export interface AggInput {
   tokenId?: string | null;
   name?: string;
   logo?: string; // 已按回退链取好(CGK→provider)
+  // 法币身份(ADR 0025 / #271):由该 token 在 fiat 命名者下的 ref 经 fiatCodeOf 推出(server 富化处算)。
+  // 一组 = 一个 token_id → 组内 isFiat 一致,取代表值即可。稳定占比据此把法币算稳定(见 hero-stats)。
+  isFiat?: boolean;
   change24h?: number; // 每币 24h 涨跌(%);仅单 Token 组用于行内 ValueChange
   unitPrice?: number; // 单价(USD;展示用,详情头部)
   marketCapRank?: number; // 市值排名(展示用,详情头部)
@@ -52,6 +55,7 @@ export interface Holding {
     logo?: string;
     unitPrice?: number;
     marketCapRank?: number;
+    isFiat?: boolean; // 法币身份(ADR 0025);组 = 一个 token → 取组内代表值。
   };
   totalValue: number;
   totalAmount?: number; // 各 source 数量之和(组统一单位,跨链/多源亦可汇总)
@@ -158,6 +162,8 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
         // 价/排名取组内「首个有值」(见 unitPriceHint 注释):组统一单位 → 单价一致,不依赖行序。
         unitPrice: a.unitPriceHint,
         marketCapRank: a.marketCapRankHint,
+        // 组 = 一个 token_id → isFiat 组内一致,取代表行(a.first)即可。
+        isFiat: a.first.isFiat,
       },
       totalValue: a.totalValue,
       totalAmount: a.totalAmount, // 组 = 同一资产、统一单位 → 各 source 数量之和恒可汇总

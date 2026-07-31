@@ -7,6 +7,12 @@ const h = (symbol: string, totalValue: number, change24h?: number): HoldingLike 
   ...(change24h === undefined ? {} : { change24h }),
 });
 
+// 法币行:身份驱动(isFiat),symbol 只是展示 —— 稳定判定不看它。
+const fiat = (symbol: string, totalValue: number): HoldingLike => ({
+  token: { symbol, isFiat: true },
+  totalValue,
+});
+
 describe("isStablecoin", () => {
   it("matches known stablecoins case-insensitively", () => {
     expect(isStablecoin("USDC")).toBe(true);
@@ -52,6 +58,25 @@ describe("deriveHeroMetrics", () => {
 
   it("stableShare is null when total is zero", () => {
     expect(deriveHeroMetrics([], 0).stableShare).toBeNull();
+  });
+
+  // #271:所有法币(身份驱动)都算稳定 —— USD 与非 USD 皆是,不管 symbol 在不在稳定币表里。
+  it("counts fiat holdings as stable (USD and non-USD alike)", () => {
+    const m = deriveHeroMetrics([h("BTC", 50, 1), fiat("USD", 30), fiat("EUR", 20)], 100);
+    // BTC 非稳定;USD + EUR 两笔法币计入 → 0.5。
+    expect(m.stableShare).toBeCloseTo(0.5);
+  });
+
+  it("fiat identity drives stable, not the bare symbol", () => {
+    // symbol 恰好叫 "USD" 但 isFiat 未置 → 不算稳定(不撞 symbol 表);置 isFiat 才算。
+    expect(deriveHeroMetrics([h("USD", 100)], 100).stableShare).toBeCloseTo(0);
+    expect(deriveHeroMetrics([fiat("USD", 100)], 100).stableShare).toBeCloseTo(1);
+  });
+
+  it("fiat and stablecoin-symbol holdings both count (no double path conflict)", () => {
+    const m = deriveHeroMetrics([h("BTC", 50, 1), h("USDC", 30), fiat("JPY", 20)], 100);
+    // USDC(symbol 表)+ JPY(法币身份)= 0.5。
+    expect(m.stableShare).toBeCloseTo(0.5);
   });
 
   it("clamps stableShare to 1 when stablecoin value exceeds net worth", () => {

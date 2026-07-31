@@ -314,3 +314,60 @@ describe("没有 token_id 的兜底", () => {
     expect(hs).toHaveLength(2);
   });
 });
+
+// #271:法币持仓(kind="spot")本就走 spot-only 聚合(#129)——无需改 isEligible。isFiat 透传到
+// Holding.token(组 = 一个 token → 取代表值),供 hero 的稳定占比按身份判定(不看裸 symbol)。
+describe("法币聚合(isFiat)", () => {
+  it("法币 spot 行进 holdings、计入净值,并把 isFiat 透传到 Holding.token", () => {
+    const hs = buildCanonicalHoldings([
+      row({
+        symbol: "USD",
+        amount: 100,
+        value: 100,
+        platform: "manual",
+        account: manual,
+        tokenId: "tk-usd",
+        isFiat: true,
+      }),
+    ]);
+    expect(hs).toHaveLength(1);
+    expect(hs[0]!.totalValue).toBe(100); // 计入净值(subtotal 由调用方对 totalValue 求和)
+    expect(hs[0]!.token).toMatchObject({ symbol: "USD", isFiat: true });
+  });
+
+  it("同一法币跨账户按 token_id 归一成一行(与加密同源同键)", () => {
+    const manual2 = { id: "m2", label: "现金2", connectorId: "manual" };
+    const hs = buildCanonicalHoldings([
+      row({
+        symbol: "USD",
+        amount: 100,
+        value: 100,
+        platform: "manual",
+        account: manual,
+        tokenId: "tk-usd",
+        isFiat: true,
+      }),
+      row({
+        symbol: "USD",
+        amount: 40,
+        value: 40,
+        platform: "manual",
+        account: manual2,
+        tokenId: "tk-usd",
+        isFiat: true,
+      }),
+    ]);
+    expect(hs).toHaveLength(1);
+    expect(hs[0]!.totalValue).toBe(140);
+    expect(hs[0]!.totalAmount).toBe(140);
+    expect(hs[0]!.sources).toHaveLength(2); // 两个账户各一个来源
+    expect(hs[0]!.token.isFiat).toBe(true);
+  });
+
+  it("非法币行 isFiat 缺省 → Holding.token.isFiat undefined(不误标)", () => {
+    const hs = buildCanonicalHoldings([
+      row({ symbol: "BTC", amount: 1, value: 65000, account: zerion, tokenId: "tk-btc" }),
+    ]);
+    expect(hs[0]!.token.isFiat).toBeUndefined();
+  });
+});

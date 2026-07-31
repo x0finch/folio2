@@ -6,6 +6,7 @@ import type {
   SnapshotWithBalances,
 } from "@folio/db";
 import { dayBucketOf, tokenTicket } from "@folio/oracle";
+import { FIAT_NAMER } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
@@ -148,13 +149,36 @@ export async function injectManualSnapshots(
   const enriched = await oracle.tokens.enrich(
     list.flatMap(({ tokens }) => tokens.map((t) => t.id)),
   );
-  // 法币持仓的展示价走 FX(ADR 0025 / #270):现算不冻价,取不到汇率照旧回退自填价。
+  // 法币持仓的展示价走 FX(ADR 0025 / #270 / #272):现算不冻价,取不到汇率照旧回退自填价。
   // fx 已在 sync-deps warm 过;这里是展示读,按需 resolve(cache-only,零网络)即可。
+  // **法币身份按 tokenId 从 `fiatRefs` 判**,不靠 `CredsToken.ref`(那是 CGK 档、法币恒 null,#272)——
+  // 一次批量取(manualFiatRefs 内部按账户并发),不 N+1。
   const fxResolve = (code: string) => oracle.fx.resolve(code);
+  const fiatRefs = await manualFiatRefs(userId, accounts);
   for (const { id, tokens } of list) {
-    const prices = await manualUnitPrices(tokens, enriched, fxResolve);
+    const prices = await manualUnitPrices(tokens, enriched, fxResolve, fiatRefs);
     byAccount.set(id, buildManualSnapshot(id, tokens, prices, takenAt));
   }
+}
+
+// 法币身份的 ref 供给(#271):tokenId → 该 token 在 fiat 命名者(`fiat/issued:<CODE>`)下的 ref。
+// 法币目前只来自 manual(链上/CEX 报法币余额不在范围),故只扫活跃 manual 账户;`TokenRecord.ref` 走的是
+// 上游(CGK)那一档、法币恒 null(且 ADR 0021 把它定义成「上游认没认出」),所以身份单独按 FIAT_NAMER 取。
+// 复用既有 `listManualHoldingsByAccount`(换个命名者查),不新增 db 面;判定(fiatCodeOf 白名单)留在 overview。
+export async function manualFiatRefs(
+  userId: string,
+  accounts: AccountSafe[],
+): Promise<Map<string, string>> {
+  const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
+  const out = new Map<string, string>();
+  await Promise.all(
+    manual.map(async (a) => {
+      for (const h of await db.listManualHoldingsByAccount(userId, a.id, FIAT_NAMER)) {
+        if (h.ref) out.set(h.id, h.ref);
+      }
+    }),
+  );
+  return out;
 }
 
 // 预热用:该用户全部 manual 账户的合成余额(供 warmTokens 把其代币现价取进缓存)。manual 已退出 snapshot,
