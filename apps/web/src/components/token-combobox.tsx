@@ -67,13 +67,9 @@ function TokenTriggerLabel({ token }: { token: TokenOption }) {
   );
 }
 
-// 市值排名徽标:name 右侧的低调描边 `#N`。**缺 rank → 调用方不渲染它**(有没有徽标本身就是消歧)。
-function RankBadge({ rank }: { rank: number }) {
-  return (
-    <span className="shrink-0 rounded border border-border px-1 text-muted-foreground text-xs leading-none tabular-nums">
-      #{rank}
-    </span>
-  );
+// 市值排名:name 右侧的低调灰字 `#N`(不加框)。**缺 rank → 调用方不渲染它**(有没有它本身就是消歧)。
+function RankTag({ rank }: { rank: number }) {
+  return <span className="shrink-0 text-muted-foreground text-xs tabular-nums">#{rank}</span>;
 }
 
 // 下拉的一项:仿主页代币行的两行式。左 logo + 名字(粗)/ `#rank` 徽标 / 代号(灰);
@@ -99,7 +95,7 @@ function TokenListRow({
           <span className="min-w-0 truncate font-medium">
             {query ? <Highlighted text={token.name} query={query} /> : token.name}
           </span>
-          {token.rank != null && <RankBadge rank={token.rank} />}
+          {token.rank != null && <RankTag rank={token.rank} />}
         </div>
         <span className="block truncate text-muted-foreground text-xs">
           {query ? (
@@ -207,7 +203,10 @@ export function TokenCombobox({
   }, [open]);
 
   useEffect(() => {
-    if (!open || tokens.length === 0) return;
+    // 只在搜索词**落定后**刷(与 /search 同一个防抖闸):否则每个中间按键都发一次 /simple/price,
+    // 白烧 CGK 额度还跟 /search 抢,免费档下更容易把 /search 挤到限流(搜不存在的币时尤其明显 ——
+    // 本地必然落空、强制打远端)。落定后这批行才稳定,一次批量刷即可。
+    if (!open || !settled || tokens.length === 0) return;
     const stale = staleTickets(tokens, live, requested.current, Date.now());
     if (stale.length === 0) return;
     for (const tk of stale) requested.current.add(tk); // 先占闸,重渲染不重发
@@ -233,7 +232,7 @@ export function TokenCombobox({
     return () => {
       cancelled = true;
     };
-  }, [open, tokens, live]);
+  }, [open, settled, tokens, live]);
   // 转圈只在「手上一条都没有、还在等」时出现:本地有命中就直接显示,上游那趟在后台补。
   const isLoading =
     tokens.length === 0 && (catalogueQuery.isLoading || (wantRemote && remoteQuery.isPending));
@@ -241,7 +240,14 @@ export function TokenCombobox({
     tokens.length === 0 && (catalogueQuery.isError || (wantRemote && remoteQuery.isError));
 
   const pick = (token: TokenOption) => {
-    onChange(token);
+    // 把下拉里**已经显示的那个价**随选中带出去(live 刷来的优先,否则票自带的)——
+    // 让表单直接用它回填单价,不必再单独取一次(见 account-fields 的 onPick)。
+    const lp = live.get(token.ticket);
+    onChange({
+      ...token,
+      price: lp?.price ?? token.price,
+      change24h: lp?.change24h ?? token.change24h,
+    });
     setOpen(false);
     setQuery("");
   };

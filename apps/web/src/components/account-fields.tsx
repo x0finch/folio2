@@ -60,17 +60,26 @@ function ManualFields({
     setValues(() => ({ tokens: manualTokensJson(tok) }));
   }, [tok, setValues]);
 
-  // 选中币:填 symbol + 票,并自动取市价预填 unitPrice(用户可改;竞态守卫)。
+  // 选中币:填 symbol + 票,并回填 unitPrice(用户可改;竞态守卫)。
   // 票原样搬运 —— 组件不解释它,提交时随 `tokens` JSON 一起交回服务端。
   async function onPick(token: TokenOption | null) {
     setPicked(token);
+    // 每次选中都作废上一次还在飞的取价(否则它回来会盖掉这次的填值)。
+    const reqId = ++priceReqRef.current;
     if (!token) {
-      patch({ symbol: "", ticket: "" });
+      patch({ symbol: "", ticket: "", unitPrice: "" });
+      setPriceBusy(false);
       return;
     }
     const { ticket } = token;
     patch({ symbol: token.symbol.toUpperCase(), ticket });
-    const reqId = ++priceReqRef.current;
+    // 下拉里已经显示了价(SWR 刷来的 / 默认列自带的)→ 直接用它回填,零延迟、就是用户点的那个数。
+    if (token.price != null) {
+      patch({ unitPrice: String(token.price) });
+      setPriceBusy(false);
+      return;
+    }
+    // 没有显示价(那行本来就是 `—`,比如刷价失败)→ 才回源现取一次兜底。
     setPriceBusy(true);
     try {
       const p = await getTokenPrice({ data: { ticket } });
