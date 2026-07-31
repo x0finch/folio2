@@ -55,8 +55,9 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
     const parsed = parseTokenRef(ref);
     if (parsed.kind === "issued" && parsed.namer === namer) return ref;
 
-    const byAddress = (await refIndex.lookup(namer, [ref])).get(ref);
-    if (byAddress) return buildRef.issued(namer, byAddress);
+    // 全局表按地址查到的就是**整条** upstream ref(#228:表给整条,不再回半截让这里拼)。
+    const upstreamRef = (await refIndex.lookup(namer, [ref])).get(ref);
+    if (upstreamRef) return upstreamRef;
 
     // **symbol 那一档只放行「有背书人」的形状**(`native` / `issued`)—— 判据在文法里,
     // 见 `hasTrustedSymbol`。这里只剩一行,因为被挡掉的三种落在同一条理由下:

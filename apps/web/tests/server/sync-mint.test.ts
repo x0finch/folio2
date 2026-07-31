@@ -68,8 +68,9 @@ async function seedWarm(
 }
 
 async function seedRefIndex(rows: { ref: string; localName: string }[]): Promise<void> {
+  // chainRef → 整条 upstream ref(#228:表存整条,不是裸 id)。
   await createGlobalTokenRefIndexStore(env).putAll(
-    rows.map((r) => ({ ref: r.ref, namer: NAMER, localName: r.localName })),
+    rows.map((r) => ({ chainRef: r.ref, upstreamRef: `${NAMER}/issued:${r.localName}` })),
     Date.now(),
   );
 }

@@ -39,7 +39,35 @@ solana/EPjFWdd5…   +  coingecko      →  usd-coin
 
 **这张表没有 `userId`**,因为里面一条用户数据都没有 —— 全是上游的公开知识、可整表重建、删空只是下一轮慢一点。这跟今天别扭的那个例外性质不同:今天是 `tokens` 表**混着存用户实际持有的币**。**它是表不是 JSON blob**,因为读法是「四万行里点查几行」;整份塞成 JSON 就得为查 5 个地址把十几 MB 读出来 parse,Workers 的 CPU 顶不住。反过来 warm 前 N 名整份都要用,那才该是 blob(在 `user_cache` 里)。
 
-**`namer` / `local_name` 拆两列存**,不是把 `<namer>/<localName>` 整串塞一列:点查走 `(ref, namer)` 主键;整串一列要 `LIKE '<namer>/%'`。与 per-user 的 `token_refs` 同一条理由、同两个词。
+## 列名与跨层形状(#228,在 [#227](https://github.com/x0finch/folio2/issues/227) 的评审里定案)
+
+这张表里**有两条 ref**,一开始列名不区分谁是谁,后果是调用点读不懂:
+
+```
+chain_ref            evm:1/contract:0xa0b8…   ← 链上寻址。左段 evm:1 本身就是一个命名者(链)
+upstream             coingecko                ← 另一个命名者(上游)
+upstream_local_name  issued:bitcoin           ← 上游 ref 的 localName 规范形
+```
+
+`chain_ref` 与 `upstream` **都是命名者**,原来都叫 `namer` → 一行 `refIndex.lookup(namer, [ref])` 看着像 `namer` 属于 `ref`(那 ref 里不是已经有了吗?),其实一个是链、一个是上游,这一行做的是**换命名者**。改名后自解释;而 `upstream_local_name` 原叫 `local_name`、装的却是裸 coin id(`bitcoin`)而非 tokenRef 的 localName(`issued:bitcoin`),名不副实 —— 改名 + 存规范形一并修。
+
+由此落下两条**通则**(不止这张表):
+
+1. **跨层传 ref 就传整条,落表时才拆。** `TokenRefIndexRow` 两边都是整条 `TokenRef`(`chainRef` / `upstreamRef`),store 落表时才用 `parseTokenRef` 拆成 `(upstream, upstream_local_name)` 两列。右半边(`issued:` 那段)是文法的内部构造,不是接口 —— 给半截会迫使每个调用方知道命名者是谁、自己 `buildRef.issued(namer, …)` 拼回去,那件事就会一路漏出去(#227 已两次踩到:`ManualHolding.ref`、`tokenTicket.decode` 回规范形;这里是第三处,mint 的 `buildRef.issued(namer, byAddress)` 随之消失)。
+
+2. **拆不拆列看查询;一张表里有两条 ref 才给列名加前缀。** 要按左段或右段**单独查** → 拆列;只做**整体等值查** → 一整列。`token_refs`(拆)、`global_token_ref_index`(半拆)、`token_daily_prices`(不拆)三张表按这条量,结构都对。前缀同理:`token_refs` 只有一条 ref → `namer` / `local_name` 不歧义、不加前缀;这张表有两条 → 不加前缀分不清 `local_name` 是谁的,故加 `upstream_`。
+
+**为什么不把 `chain_ref` 掰成 `chain` + `address` 两列**(一度提过,理由是「cron 整表重建 / 链对照失配 / 某条链批量重刷都是按链的操作」)—— 查过代码,三个场景一个都不存在。这张表上一共三个操作:
+
+| 操作 | WHERE | 用到左段单独查吗 |
+|---|---|---|
+| `lookup` | `upstream = ? AND chain_ref IN (…)` | 不。整串等值 |
+| `putAll` | 无(整表 upsert,冲突键 `(chain_ref, upstream)`) | 不 |
+| `refreshedAt` | `upstream = ?` | 不。筛的是**上游** |
+
+`unmatchedPlatforms` 也是 `toRefIndexRows` 在内存里从 API 响应算的,压根没查库。按上面那条判据,`chain_ref` 只做整体等值查 → 一整列;拆列是 speculative generality。反过来 `upstream` **必须**独立成列:它被单独查两次(`lookup` 的 WHERE、`refreshedAt`),且 PK `(chain_ref, upstream)` 靠它保证「一个地址在一个上游下最多一行」——合成一列就得 `LIKE 'coingecko/%'`,主键也挡不住同一地址在同一上游下冒两个 id。
+
+**迁移是 drop + 重建、不迁数据**:这张表是 cron 一天一次整表重建的纯缓存、无 `user_id`,而且 `upstream_local_name` 的**值格式变了**(裸 `bitcoin` → 规范形 `issued:bitcoin`),纯 rename 会留下错值 —— 直接 `DROP` + `CREATE`,下一次 cron 用正确值自动灌满(首次部署本来就要手动触发一次刷表)。
 
 ## Considered Options
 
