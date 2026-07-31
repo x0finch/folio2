@@ -133,13 +133,26 @@ export const listTokenCatalogue = createServerFn({ method: "GET" })
 // 加账户模态里调)。构造逻辑在纯函数 `buildFiatOptions`(server-only 消费,故文法不进客户端 bundle)。
 export const listFiatOptions = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler((): TokenOption[] => {
+  .handler(async ({ context }): Promise<TokenOption[]> => {
     const headers = getRequestHeaders();
     const locale = pickLocale(
       readLocaleCookie(headers.get("cookie")),
       headers.get("accept-language"),
     );
-    return buildFiatOptions(locale);
+    const base = buildFiatOptions(locale);
+    // 法币的「价」= FX 汇率(USD 恒 1),直接填进下拉项 —— 否则价格列显 "—"(法币在代币价格源没有价)。
+    // warm 一次(冷则一把拉全所有支持币种;通常 _authed loader / 切币种时已暖过 → no-op)。
+    // asOf 置当下 → 下拉 SWR(staleTickets)判它新鲜、不会再拿它去 refreshTokenPrices 白刷(那条走代币源)。
+    // 取不到汇率(warm 失败且非 USD)→ 该项不带价,回退 "—"(降级,不阻断)。24h 涨跌法币不给。
+    const fx = oracleFor(context.userId).fx;
+    await fx.warm(base.map((o) => o.symbol));
+    const asOf = Date.now();
+    return Promise.all(
+      base.map(async (o) => {
+        const price = await fx.resolve(o.symbol);
+        return price != null ? { ...o, price, asOf } : o;
+      }),
+    );
   });
 
 // 选币 autocomplete:按关键词问上游。**只在浏览器本地目录凑不够时才被调到**(见 token-search.ts)——
