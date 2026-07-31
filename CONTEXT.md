@@ -11,18 +11,22 @@ Folio 是自托管加密组合追踪器:把链上钱包、CEX、永续 DEX、手
 _Avoid_: asset, coin(泛指时)、canonical token(不再需要跟"分组"区分)、TokenGroup(展示分组已作废,见 ADR 0021)
 
 **tokenRef**:
-代币的**外部命名法**(ADR 0020,文法经 ADR 0021 修订):`<namer>/<localName>`,恰好两段,第一个斜杠切分。表达「**谁**、管这个 token 叫**什么**」——
-`evm:42161/0xaf88…`、`bitcoin/native`、`solana/EPjFWdd5…`、`coingecko/usd-coin`、`binance/USDC`。
-localName 只有两种形状:保留字 `native`,或别的(地址 / 不透明 id)。
+代币的**外部命名法**(ADR 0020,文法经四轮修订):`<namer>/<localName>`,恰好两段,第一个斜杠切分。表达「**谁**、管这个 token 叫**什么**」——
+`evm:42161/contract:0xaf88…`、`bitcoin/native`、`coingecko/issued:usd-coin`、`binance/issued:USDC`、`manual/custom:USDC`、`fiat/issued:USD`。
+localName 四种形状,**每种都有标记**:`native`(保留字,原生 gas 币)、`contract:<地址>`(链上合约)、`issued:<标识>`(命名者背书的标识:场馆代号 / 上游 coin id / 货币码)、`custom:<名字>`(调用方自造、**无注册表背书**,如用户手敲 symbol)。解析是白名单,读不懂一律判 `unknown`(兜底 = 挡住,漏标记往"不可信"倒)。
 一个 Token 可有多条 tokenRef(每个命名者一条),故是多对一 —— 多条链上的同一个币就是一个 Token + 多条 tokenRef。
 它**不是**内部身份(那是 `tokens.id`),只在两个边界出现:连接器报余额、oracle 问 CoinGecko;`apps/web` 见不到。
 文法 + 归一由 `@folio/oracle-ref` 独占实现:`TokenRef` = 串(系统里流通的),`TokenRefParts` = 拆开的结构。
 _Avoid_: tokenKey / refKey(旧称,已退场)、caip19、impl key、tokenIdentifier、把它当身份
 
 **namer**:
-tokenRef 的左半边 = **命名者**,可以是链(`evm:1` / `bitcoin`)、场馆(`binance`)或数据源(`coingecko`)。对 `@folio/oracle-ref` 不透明,包不判断它属于哪类。
+tokenRef 的左半边 = **命名者**,可以是链(`evm:1` / `bitcoin`)、场馆(`binance`)、数据源(`coingecko`)或 `fiat`(为 ISO 货币码背书,见 Fiat 条)。对 `@folio/oracle-ref` 不透明,包不判断它属于哪类。
 **跟 Platform 只是常常重合,不等同** —— 手记的 ref 是 `coingecko/<id>`,namer 是数据源而它的 Platform 是 `manual`。所以 Platform 由 provider 直接报,不从 namer 推(ADR 0021)。
 _Avoid_: namespace, platformKey(那是 Platform 的键,两个概念)
+
+**Fiat(法币持仓)**:
+用户持有的**法定货币现金**(USD/CNY/EUR… 与展示币种同一组 10 种),作为一种特殊 **Token**:身份是 `fiat/issued:<CODE>` 的 tokenRef —— namer=`fiat`,命名者为 ISO 货币码背书(不是手敲无背书的 `custom`)。与加密 Token 同住 `tokens` 表、同走 mint;当 `spot` 同质持仓聚合、计入净值;USD 价按 FX 现算(不冻静态价);稳定口径上**所有法币都算稳定**。
+_Avoid_: cash(口语)、Display currency(那是展示口径/FX,不是持仓)、custom token(法币有背书,custom 无)
 
 ### 持仓与聚合
 
