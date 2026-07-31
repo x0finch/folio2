@@ -125,10 +125,10 @@ describe("合并上游补的那几条", () => {
 });
 
 // 选币下拉的分组(#269):未搜索时不再是「目录前 N 条」一根扁平列表,而是有序的 section ——
-// **已有代币 → 法币 → Tokens(目录)**。这些用例钉的是外部行为:组的顺序、空组不占位、两组
+// **已有代币 → Tokens(目录)→ 法币(Cash)**。这些用例钉的是外部行为:组的顺序、空组不占位、两组
 // **刻意不去重**(同一个币在「已有代币」和「Tokens」各出现一次,有组标题不误导),以及搜索时
-// 各组内部各自过滤(复用 searchCatalogue 那套分档)。法币组本票不填(空数组),只验它占的那个位。
-describe("选币分组:已有代币 → 法币 → Tokens", () => {
+// 各组内部各自过滤(复用 searchCatalogue 那套分档)。
+describe("选币分组:已有代币 → Tokens → 法币", () => {
   const OWNED: TokenOption[] = [
     opt("ETH", "Ethereum"), // 也在目录里 —— 用来验两组不去重
     opt("MYC", "My Custom Coin"), // 自定义 symbol 币,目录里没有
@@ -150,7 +150,7 @@ describe("选币分组:已有代币 → 法币 → Tokens", () => {
     expect(items(secs, "catalogue")).toEqual(["BTC", "USDT", "WETH"]); // 目录前 topN 条
   });
 
-  it("法币组占中间那个位(非空时顺序 已有代币 → 法币 → Tokens)", () => {
+  it("法币组排最下(非空时顺序 已有代币 → Tokens → 法币)", () => {
     const secs = buildTokenSections({
       owned: OWNED,
       fiat: [opt("USD", "US Dollar")],
@@ -158,7 +158,7 @@ describe("选币分组:已有代币 → 法币 → Tokens", () => {
       query: "",
       catalogueTopN: 2,
     });
-    expect(keys(secs)).toEqual(["owned", "fiat", "catalogue"]);
+    expect(keys(secs)).toEqual(["owned", "catalogue", "fiat"]);
   });
 
   it("空组不出现:法币空 → 没有法币组;已有代币空 → 以 Tokens 起头", () => {

@@ -200,7 +200,7 @@ export function TokenCombobox({
   });
   const fiat = useMemo(() => fiatQuery.data ?? [], [fiatQuery.data]);
 
-  // 分组(#269):已有代币 → 法币 → Tokens(目录)。各组内部按 search 过滤,目录再并进
+  // 分组(#269):已有代币 → Tokens(目录)→ 法币(Cash)。各组内部按 search 过滤,目录再并进
   // 上游补的那几条。空组不出现。
   const sections = useMemo(
     () =>

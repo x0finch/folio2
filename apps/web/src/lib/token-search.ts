@@ -52,10 +52,10 @@ export function needsRemoteSearch(localHits: readonly TokenOption[]): boolean {
   return localHits.length < LOCAL_SEARCH_ENOUGH;
 }
 
-// 下拉的分组(#269)。三档,顺序固定:**已有代币 → 法币 → Tokens(市值目录)**。
-//   · owned    该用户已添加过的币(含手敲的自定义 symbol),一眼可复选。
-//   · fiat     法币现金(本票留空,由后续填充;这里只把它的位置占住)。
+// 下拉的分组(#269)。三档,顺序固定:**已有代币 → Tokens(市值目录)→ 法币(Cash)**。
+//   · owned    该用户已添加过的币(含手敲的自定义 symbol),一眼可复选,排最上。
 //   · catalogue 市值目录(长尾币仍从这里选)。
+//   · fiat     法币现金,排最下(记现金是相对少见的操作,让位给代币)。
 // `key` 是语义标识,组标题的 i18n 由渲染层按它映射(纯层不碰文案)。
 export type TokenSectionKey = "owned" | "fiat" | "catalogue";
 export interface TokenSection {
@@ -93,8 +93,8 @@ export function buildTokenSections(input: {
 
   const sections: TokenSection[] = [
     { key: "owned", items: filterOwn(input.owned) },
-    { key: "fiat", items: filterOwn(input.fiat) },
     { key: "catalogue", items: catalogue },
+    { key: "fiat", items: filterOwn(input.fiat) },
   ];
   return sections.filter((s) => s.items.length > 0);
 }
