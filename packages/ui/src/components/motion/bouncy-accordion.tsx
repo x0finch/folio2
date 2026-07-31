@@ -1,14 +1,12 @@
 "use client";
 // beui.dev/components/motion/bouncy-accordion
 
-import { EASE_OUT } from "@folio/ui/lib/ease";
-import { cn } from "@folio/ui/lib/utils";
-import { ChevronDown } from "lucide-react";
 import {
   motion,
   useReducedMotion,
   type Transition,
 } from "motion/react";
+import { ChevronDown } from "lucide-react";
 import {
   useCallback,
   useId,
@@ -17,6 +15,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { EASE_OUT } from "@folio/ui/lib/ease";
+import { cn } from "@folio/ui/lib/utils";
 
 export type BouncyAccordionItem = {
   id: string;
@@ -65,8 +65,8 @@ const CONTENT_OPEN_TRANSITION: Transition = {
 
 const CONTENT_CLOSE_TRANSITION: Transition = {
   type: "spring",
-  duration: 0.4,
-  bounce: 0,
+  duration: 0.46,
+  bounce: 0.26,
 };
 
 const DESCRIPTION_TRANSITION: Transition = {
@@ -154,8 +154,9 @@ function BouncyAccordionRow({
 
   return (
     <motion.div
+      layout="position"
       initial={false}
-      animate={{ marginTop: separatedFromPrevious ? 12 : 0 }}
+      style={{ marginTop: separatedFromPrevious ? 12 : 0 }}
       transition={reduce ? { duration: 0 } : ROW_TRANSITION}
     >
       <motion.div
@@ -220,14 +221,14 @@ function BouncyAccordionRow({
         </button>
 
         <motion.div
+          layout="size"
           id={contentId}
           role="region"
           aria-labelledby={triggerId}
           aria-hidden={!open}
+          inert={!open}
           initial={false}
-          animate={{
-            height: open && item.description ? contentHeight : 0,
-          }}
+          style={{ height: open && item.description ? contentHeight : 0 }}
           transition={
             reduce
               ? { duration: 0 }

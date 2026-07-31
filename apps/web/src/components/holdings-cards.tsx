@@ -58,12 +58,7 @@ function AccountNoteAccordion({ notes }: { notes: Note[] }) {
     title: n.title,
     description: <NoteView note={n} hideHeader formatNumber={fmtNote} />,
   }));
-  return (
-    <BouncyAccordion
-      items={items}
-      classNames={{ item: "border border-border", description: "text-foreground" }}
-    />
-  );
+  return <BouncyAccordion items={items} classNames={{ description: "text-foreground" }} />;
 }
 
 // 一个账户的全部持仓(卡片列表):account 级 note 手风琴(顶部)+ 现货(带 balance note icon)/ DeFi / 永续。
