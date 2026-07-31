@@ -13,7 +13,6 @@ const src = (
   amount: 0,
   value,
   kind: "spot",
-  isMargin: false,
 });
 const holding = (key: string, symbol: string, sources: HoldingSource[]): Holding => ({
   key,

@@ -8,7 +8,6 @@ const r = (p: {
   takenAt: number;
   value: number;
   kind?: string;
-  isMargin?: boolean;
   tokenId?: string;
   symbol?: string;
 }): TokenHistRow => ({
@@ -16,7 +15,6 @@ const r = (p: {
   amount: p.value,
   value: p.value,
   kind: p.kind ?? "spot",
-  isMargin: p.isMargin,
   account: { id: p.acct, label: "", connectorId: "" },
   tokenId: p.tokenId,
   takenAt: p.takenAt,
@@ -64,21 +62,12 @@ describe("buildTokenValueHistory", () => {
     expect(s).toEqual([{ t: 100, total: 14 }]);
   });
 
-  it("perp 权益(isMargin)计入;无匹配 → 空序列", () => {
-    const margin = buildTokenValueHistory(
-      [
-        r({
-          acct: "H",
-          takenAt: 100,
-          value: 8,
-          kind: "perp_equity",
-          isMargin: true,
-          tokenId: USDC,
-        }),
-      ],
+  it("perp 权益不计入(#129:只认现货,与聚合同口径);无匹配 → 空序列", () => {
+    const equity = buildTokenValueHistory(
+      [r({ acct: "H", takenAt: 100, value: 8, kind: "perp_equity", tokenId: USDC })],
       USDC,
     );
-    expect(margin).toEqual([{ t: 100, total: 8 }]);
+    expect(equity).toEqual([]); // 权益不 eligible → 单币历史里也没有它
     expect(buildTokenValueHistory([], USDC)).toEqual([]);
   });
 });

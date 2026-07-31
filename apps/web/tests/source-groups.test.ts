@@ -16,7 +16,6 @@ const src = (p: {
   amount: p.amount,
   value: p.value,
   kind: "spot",
-  isMargin: false,
 });
 
 // 同一账户 "im" 在三条链上持有,外加一个交易所账户在其中一条链。

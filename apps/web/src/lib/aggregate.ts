@@ -3,7 +3,9 @@ const norm = (s: string): string => s.trim().toUpperCase();
 
 // 纯逻辑(无 server-only import → 可单测)。把跨账户的持仓行按【规范代币】聚合成 Holding 树。
 // 设计见 docs/adr 0001–0003;术语见 CONTEXT.md。
-//   · 白名单(进聚合):spot / utxo(BTC)/ CEX 现货(kind=spot)/ perp 权益(isMargin) —— ADR-0003。kind 已由 overview 用 viewKind 归一。
+//   · 白名单(进聚合):spot / utxo(BTC)/ CEX 现货(kind=spot)—— **只认现货**。perp 权益不并入
+//     (#129:并入会让它同时出现在 Tokens 与 Perps 两个 tab,小计双算、三 tab 加起来 ≠ 顶部)。ADR-0003。
+//     kind 已由 overview 用 viewKind 归一。
 //   · **归并键就是 `token_id`**(ADR 0021 / #201)。认定在写快照时已经定死(mint),读端不再解析、
 //     不再有「三级回退」——「永不裸 symbol」(ADR-0002)因此不是一条要维护的规则,而是结构使然。
 //     展示分组那一级已随 ADR 0021 退场 —— WBTC 与 BTC、USDT 各桥接变体从此各占一行。
@@ -22,7 +24,6 @@ export interface AggInput {
   // 这笔持仓所在的链 ∪ 场馆,provider 直接报(#193)。本列之前写下的旧快照行为空 → 退回账户的
   // connectorId(多链钱包会暂时并成一格,下次同步即分开)。
   platform?: string | null;
-  isMargin?: boolean; // perp 权益(保证金)—— 进聚合但明细标注
   account: { id: string; label: string; connectorId: string; platform?: string | null };
   // **归并身份**:写快照时 mint 定死的代币行 id(ADR 0021)。
   // 可空只为兼容两类行:本列之前写下的旧快照,以及手记那种现造的持仓(#203 并入 tokens 后就没了)。
@@ -40,7 +41,6 @@ export interface HoldingSource {
   amount: number;
   value: number;
   kind: string;
-  isMargin: boolean;
 }
 export interface Holding {
   key: string; // 分组键(去重/稳定用)
@@ -73,8 +73,9 @@ export function groupKey(row: AggInput): string {
 
 // 导出供 token-history 复用(历史行归属同一口径)。
 export function isEligible(row: AggInput): boolean {
-  // 进聚合的同质口径:现货(含并回的 BTC)/ perp 权益(isMargin)。kind 已由 overview 用 viewKind 归一。
-  return row.kind === "spot" || row.isMargin === true;
+  // 进聚合的同质口径:只认现货(含并回的 BTC)。perp 权益不并入(#129:避免与 Perps tab 双算,
+  // 让三 tab 小计可相加)。kind 已由 overview 用 viewKind 归一。
+  return row.kind === "spot";
 }
 
 interface Acc {
@@ -122,7 +123,6 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     if (existing) {
       existing.amount += row.amount;
       existing.value += row.value;
-      existing.isMargin = existing.isMargin || row.isMargin === true;
     } else {
       a.sources.set(sk, {
         // name = key 占位;真名 + logo 由 server 读路径 platforms.resolve 装饰(每个 key 必有兜底)。
@@ -131,7 +131,6 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
         amount: row.amount,
         value: row.value,
         kind: row.kind,
-        isMargin: row.isMargin === true,
       });
     }
   }

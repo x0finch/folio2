@@ -72,7 +72,7 @@ describe("buildCanonicalHoldings", () => {
     expect(hs.reduce((n, x) => n + x.totalValue, 0)).toBe(3600);
   });
 
-  it("同一 Token 跨链 + perp 权益 → 一行,给 totalAmount;perp 权益作 isMargin 持有点", () => {
+  it("perp 权益不进聚合(#129):同 token 的现货并成一行,权益那笔被排除、其持有点也不出现", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "USDC", amount: 1000, value: 1000, account: zerion, tokenId: "tk-usdc" }),
       row({ symbol: "USDC", amount: 500, value: 500, account: zerion, tokenId: "tk-usdc" }),
@@ -80,18 +80,16 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 300,
         value: 300,
-        kind: "perp_equity",
-        isMargin: true,
+        kind: "perp_equity", // 永续权益 —— 只应出现在 Perps tab,不折进代币行
         account: hyper,
         tokenId: "tk-usdc",
       }),
     ]);
     const h = byKey(hs, "tk-usdc")!;
-    expect(h.totalValue).toBe(1800);
-    expect(h.totalAmount).toBe(1800);
-    const margin = h.sources.find((s) => s.platform.id === "hyperliquid")!;
-    expect(margin.isMargin).toBe(true);
-    expect(margin.platform.name).toBe("hyperliquid"); // name = key 占位(真名由读路径装饰)
+    expect(h.totalValue).toBe(1500); // 只两笔现货,权益 300 不计
+    expect(h.totalAmount).toBe(1500);
+    // 权益来自 hyperliquid 账户 → 该持有点根本不该出现在这一行
+    expect(h.sources.find((s) => s.platform.id === "hyperliquid")).toBeUndefined();
   });
 
   it("不同 token_id → 各自成行(内部 id 是归并身份的唯一事实源)", () => {
@@ -128,7 +126,7 @@ describe("buildCanonicalHoldings", () => {
     expect(hs[0]!.token.id).toBe("tk-1");
   });
 
-  it("白名单:defi / perp 仓位(非保证金)不进 Holdings", () => {
+  it("白名单:defi / perp 仓位不进 Holdings(只认现货)", () => {
     const hs = buildCanonicalHoldings([
       row({
         symbol: "ETH",
@@ -145,7 +143,7 @@ describe("buildCanonicalHoldings", () => {
         kind: "perp_position",
         account: hyper,
         tokenId: "tk-e",
-      }), // 仓位:isMargin 未置
+      }), // perp 仓位(value=0),不进聚合
     ]);
     expect(hs).toHaveLength(0);
   });
