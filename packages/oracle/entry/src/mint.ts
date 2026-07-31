@@ -91,13 +91,17 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
 
     const parsed = parseTokenRef(ref);
 
-    // —— 法币:身份自锚,**绝不**查上游 / 按 symbol 猜(法币没有上游价,ADR 0025) ——
-    // 白名单内(`SUPPORTED_CURRENCIES` 的 fiat)→ 建 / 复用一条 canonical 行(`symbol=CODE`、
-    // 内嵌 logo);`fiat/` 但非白名单(或 `fiat/native` 之类畸形)→ 按未知处理:一条 plain 行、
-    // 不乱认、不锚 canonical。**幂等**:同一法币复用同一行 —— 靠 `fiat/issued:CODE` 这条 ref 反查
-    //(法币行没有当前源那一档 ref,故 `hit.linked` 恒 false,收敛点在这里而非上面那条短路)。
-    if (parsed.kind !== "unknown" && parsed.namer === FIAT_NAMER) {
+    // 法币走独立分支:身份自锚,**绝不**查上游 / 按 symbol 猜(法币没有上游价,ADR 0025)。
+    // 必须在 `upstreamRefOf` 之前短路 —— 否则 USD 现金会被 symbol 那档猜进某个叫 USD 的代币。
+    const isFiat = parsed.kind !== "unknown" && parsed.namer === FIAT_NAMER;
+    if (isFiat) {
+      // 同一法币再 mint → 复用既有 canonical 行(靠 `fiat/issued:CODE` 反查)。法币没链上游,
+      // 上面那条 `hit?.linked` 短路截不到、收敛在此。`store.create` 本身也按 ref 幂等(撞主键
+      // onConflictDoNothing + upsert-then-read),所以这行不是正确性必需 —— 只省掉「白建一行再删
+      // 孤行」的 churn,并与下面通用分支同款 `hit → 复用` 保持一致。
       if (hit) return hit.tokenId;
+      // 白名单内(`SUPPORTED_CURRENCIES` 的 fiat)→ canonical seed(`symbol=CODE` + 内嵌 logo);
+      // 非白名单(含 `fiat/native` 之类畸形)→ 用 provider seed 建一条 plain 行,不乱认、不锚 canonical。
       const canonical = parsed.kind === "issued" ? fiatSeed(parsed.id) : undefined;
       return store.create(canonical ?? seed, [ref]);
     }
