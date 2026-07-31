@@ -20,6 +20,14 @@ export function tokenLogoUrl(e: LogoSource): string | undefined {
   return e.logo ?? e.providerLogo;
 }
 
+// DeFi 协议 logo:协议名(可能含空格,如 "Opyn V2")即稳定 key。有上游图 → 代理为
+// `/api/logo/defi/<protocol>`(服务端从快照 meta 解析出真 URL,客户端零第三方 CDN);无图 →
+// undefined(客户端 AvatarFallback 首字母,不发请求)。见 ADR 0008 / #126。
+export function defiLogoUrl(protocol: string, logo?: string): string | undefined {
+  if (!logo) return undefined;
+  return `/api/logo/defi/${encodeURIComponent(protocol)}`;
+}
+
 // 平台 logo:平台 key 本身即稳定 id(如 bitcoin / evm:1 / exchange:binance,可能含 `:`)。
 // 有上游图 → 代理为 `/api/logo/platform/<key>`;无图 → undefined(客户端 fallback,不发请求)。见 #20。
 export function platformLogoUrl(key: string, logo?: string): string | undefined {

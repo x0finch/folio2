@@ -16,10 +16,11 @@ import {
 } from "@folio/oracle-basic";
 import { swr } from "./refresh";
 
-// 参考层的三样缓存,一张 per-user 的 KV 表,**只三种键**:
-//   warm            市值前 N 名,整份一个 JSON blob
-//   fx:<币种>       展示币种汇率
-//   platform:<键>   链 ∪ 场馆的名与图
+// 参考层的四样缓存,一张 per-user 的 KV 表,**四种键**:
+//   warm             市值前 N 名,整份一个 JSON blob
+//   fx:<币种>        展示币种汇率
+//   platform:<键>    链 ∪ 场馆的名与图
+//   defi-logo:<协议>  DeFi 协议的图 URL(同步时由余额 meta 直接给,无上游拉取)
 //
 // 界线:**整份都要用 → JSON;只挑几行用 → 表**。warm 每次都是整份读(排行榜、symbol 候选都从它出),
 // 所以是 blob;全局映射每次只挑那么几行,所以是表(ADR 0022)。
@@ -31,6 +32,7 @@ export const cacheKeys = {
   warm: "warm",
   fx: (currency: string) => `fx:${currency.trim().toUpperCase()}`,
   platform: (key: string) => `platform:${key}`,
+  defiLogo: (protocol: string) => `defi-logo:${protocol}`,
 } as const;
 
 // warm blob:一次整份写、一次整份读。行的形状沿用现有 `putWarm` 的 `{ info, price }` 对。
@@ -241,6 +243,36 @@ export function writePlatforms(
       key: cacheKeys.platform(key),
       value: entry,
       ttlMs: entry.name === null ? PLATFORM_NEG_TTL_MS : PLATFORM_TTL_MS,
+    })),
+  );
+}
+
+// —— DeFi 协议 logo ——
+// protocol → 上游图 URL。与 platform 不同:URL 由同步时的余额 meta 直接给(无上游拉取),
+// 因此**无否定缓存** —— 没图就不写,读得 undefined → 首字母兜底。近静态,复用平台的长 TTL;
+// 过期不删(user_cache 语义),值照读,下次同步重写刷新 TTL。读写走批量口(与 platform 同理)。
+export async function readDefiLogos(
+  cache: CacheStore,
+  protocols: readonly string[],
+): Promise<Map<string, string>> {
+  const hits = await cache.getMany(protocols.map(cacheKeys.defiLogo));
+  const out = new Map<string, string>();
+  for (const p of protocols) {
+    const v = hits.get(cacheKeys.defiLogo(p))?.value;
+    if (typeof v === "string") out.set(p, v);
+  }
+  return out;
+}
+
+export function writeDefiLogos(
+  cache: CacheStore,
+  entries: readonly { protocol: string; logo: string }[],
+): Promise<void> {
+  return cache.putMany(
+    entries.map(({ protocol, logo }) => ({
+      key: cacheKeys.defiLogo(protocol),
+      value: logo,
+      ttlMs: PLATFORM_TTL_MS,
     })),
   );
 }

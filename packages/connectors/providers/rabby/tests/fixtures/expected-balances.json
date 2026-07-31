@@ -70,7 +70,8 @@
     "kind": "defi",
     "meta": {
       "protocol": "Aave V3",
-      "positionType": "Lending"
+      "positionType": "Lending",
+      "protocolLogo": "https://static.debank.com/image/project/logo_url/aave3/54df7839ab09493ba7540ab832590255.png"
     }
   },
   {
@@ -84,7 +85,8 @@
     "kind": "defi",
     "meta": {
       "protocol": "Aave V3",
-      "positionType": "Lending"
+      "positionType": "Lending",
+      "protocolLogo": "https://static.debank.com/image/project/logo_url/aave3/54df7839ab09493ba7540ab832590255.png"
     }
   },
   {
@@ -98,7 +100,8 @@
     "kind": "defi",
     "meta": {
       "protocol": "Compound V3",
-      "positionType": "Lending"
+      "positionType": "Lending",
+      "protocolLogo": "https://static.debank.com/image/project/logo_url/compound3/28e2b958e38eb0c49d600633b9ce0969.png"
     }
   },
   {
@@ -112,7 +115,8 @@
     "kind": "defi",
     "meta": {
       "protocol": "Compound V3",
-      "positionType": "Lending"
+      "positionType": "Lending",
+      "protocolLogo": "https://static.debank.com/image/project/logo_url/compound3/28e2b958e38eb0c49d600633b9ce0969.png"
     }
   },
   {
@@ -126,7 +130,8 @@
     "kind": "defi",
     "meta": {
       "protocol": "Compound V3",
-      "positionType": "Lending"
+      "positionType": "Lending",
+      "protocolLogo": "https://static.debank.com/image/project/logo_url/compound3/28e2b958e38eb0c49d600633b9ce0969.png"
     }
   },
   {
@@ -140,7 +145,8 @@
     "kind": "defi",
     "meta": {
       "protocol": "Compound V3",
-      "positionType": "Lending"
+      "positionType": "Lending",
+      "protocolLogo": "https://static.debank.com/image/project/logo_url/compound3/28e2b958e38eb0c49d600633b9ce0969.png"
     }
   },
   {
@@ -154,7 +160,8 @@
     "kind": "defi",
     "meta": {
       "protocol": "Sablier",
-      "positionType": "Vesting"
+      "positionType": "Vesting",
+      "protocolLogo": "https://static.debank.com/image/project/logo_url/matic_sablier/3358adccad199e9f2cde0dfabdd9bd2a.png"
     }
   }
 ]

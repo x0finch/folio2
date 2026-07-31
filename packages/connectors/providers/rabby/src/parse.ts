@@ -103,6 +103,7 @@ export function parseProtocols(
   const out: DefiRow[] = [];
   for (const p of protocols) {
     const protocol = p.name ?? p.id ?? undefined;
+    const protocolLogo = p.logo_url ?? undefined; // 顶层协议图(#126);随 meta 落快照,供 logo 代理解析
     for (const item of p.portfolio_item_list ?? []) {
       const detail = item.detail;
       if (!detail) continue;
@@ -119,7 +120,7 @@ export function parseProtocols(
           out.push({
             ...baseRow(t, chainIds, sign),
             kind: "defi",
-            meta: { protocol, positionType: item.name ?? undefined },
+            meta: { protocol, positionType: item.name ?? undefined, protocolLogo },
           });
         }
       }

@@ -155,6 +155,14 @@ describe("parseProtocols", () => {
     expect(lending?.meta.protocol).toBeTruthy();
   });
 
+  it("meta 带协议顶层 logo(#126:采集 p.logo_url → protocolLogo)", () => {
+    const rows = parseProtocols(protocols, ids);
+    const lending = rows.find((r) => r.symbol === "WBTC");
+    // fixture 首个协议(aave3)顶层带 logo_url → 落到该协议每行的 meta.protocolLogo。
+    expect(lending?.meta.protocolLogo).toContain("static.debank.com");
+    expect(lending?.meta.protocolLogo).toContain("aave3");
+  });
+
   it("认单数的 `token` 形状(老仓库 types.ts 漏了它)", () => {
     const rows = parseProtocols(protocols, ids);
     expect(rows.some((r) => r.meta.positionType === "Vesting")).toBe(true);

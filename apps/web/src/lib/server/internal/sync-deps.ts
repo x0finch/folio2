@@ -17,6 +17,7 @@ import { revalue } from "../../revalue";
 import { isSyncableAccount } from "../../syncable";
 import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
+import { warmDefiLogosForUser } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
 import { oracleFor } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
@@ -43,6 +44,14 @@ export async function warmTokensForUser(userId: string): Promise<void> {
     await warmPlatformsForUser(userId);
   } catch (e) {
     getLogger(["folio", "web", "sync"]).warn("warmPlatforms failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+  // DeFi 协议 logo:URL 就在刚读到的 snapshots 的 meta 里,收集出来落缓存(供 /api/logo/defi O(1) 读)。
+  try {
+    await warmDefiLogosForUser(userId, snapshots);
+  } catch (e) {
+    getLogger(["folio", "web", "sync"]).warn("warmDefiLogos failed", {
       error: e instanceof Error ? e.message : String(e),
     });
   }

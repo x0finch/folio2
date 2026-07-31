@@ -14,6 +14,7 @@ import { defiMeaningfulLegs, groupLegsByRole, protocolDayChange } from "../lib/a
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
+import { defiLogoUrl } from "../lib/logo";
 import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
 import { signedUsd } from "../lib/signed-usd";
 import { AccountName } from "./account-name";
@@ -412,8 +413,12 @@ function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
   return (
     <div className="w-full">
       <div className="flex w-full items-center gap-3">
-        {/* 协议 logo 数据管线未建(follow-up #126),首字母兜底。 */}
-        <LogoAvatar fallback={group.protocol} size="sm" />
+        {/* 协议 logo(#126):有图 → 经 /api/logo/defi 代理;无图 → 首字母兜底。 */}
+        <LogoAvatar
+          src={defiLogoUrl(group.protocol, group.protocolLogo)}
+          fallback={group.protocol}
+          size="sm"
+        />
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium">{group.protocol}</div>
         </div>

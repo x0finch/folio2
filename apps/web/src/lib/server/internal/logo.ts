@@ -23,7 +23,7 @@ const transient = (): Response =>
 // resolveUpstream:cache-only 读出上游 logo URL(缺则 undefined)。kind/id 仅用于 Cache-Tag 命名。
 export async function serveLogo(
   resolveUpstream: () => Promise<string | undefined>,
-  kind: "token" | "platform",
+  kind: "token" | "platform" | "defi",
   id: string,
   // private:该响应按用户收口(见代币 logo 路由),不得进共享/边缘缓存。
   opts?: { private?: boolean },

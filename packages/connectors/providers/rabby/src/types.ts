@@ -37,5 +37,6 @@ interface RabbyProtocolItem {
 export interface RabbyProtocol {
   id?: string;
   name?: string;
+  logo_url?: string; // 协议顶层 logo(与 per-token logo_url 不同层);#126 采集为 meta.protocolLogo
   portfolio_item_list?: RabbyProtocolItem[];
 }

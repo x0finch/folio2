@@ -20,6 +20,7 @@ import { Route as AuthedAccountsRouteImport } from './routes/_authed/accounts'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiLogoTokenIdRouteImport } from './routes/api/logo/token/$id'
 import { Route as ApiLogoPlatformKeyRouteImport } from './routes/api/logo/platform/$key'
+import { Route as ApiLogoDefiProtocolRouteImport } from './routes/api/logo/defi/$protocol'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -75,6 +76,11 @@ const ApiLogoPlatformKeyRoute = ApiLogoPlatformKeyRouteImport.update({
   path: '/api/logo/platform/$key',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiLogoDefiProtocolRoute = ApiLogoDefiProtocolRouteImport.update({
+  id: '/api/logo/defi/$protocol',
+  path: '/api/logo/defi/$protocol',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
@@ -85,6 +91,7 @@ export interface FileRoutesByFullPath {
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/logo/defi/$protocol': typeof ApiLogoDefiProtocolRoute
   '/api/logo/platform/$key': typeof ApiLogoPlatformKeyRoute
   '/api/logo/token/$id': typeof ApiLogoTokenIdRoute
 }
@@ -97,6 +104,7 @@ export interface FileRoutesByTo {
   '/api/import': typeof ApiImportRoute
   '/': typeof AuthedIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/logo/defi/$protocol': typeof ApiLogoDefiProtocolRoute
   '/api/logo/platform/$key': typeof ApiLogoPlatformKeyRoute
   '/api/logo/token/$id': typeof ApiLogoTokenIdRoute
 }
@@ -111,6 +119,7 @@ export interface FileRoutesById {
   '/api/import': typeof ApiImportRoute
   '/_authed/': typeof AuthedIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/logo/defi/$protocol': typeof ApiLogoDefiProtocolRoute
   '/api/logo/platform/$key': typeof ApiLogoPlatformKeyRoute
   '/api/logo/token/$id': typeof ApiLogoTokenIdRoute
 }
@@ -125,6 +134,7 @@ export interface FileRouteTypes {
     | '/api/export'
     | '/api/import'
     | '/api/auth/$'
+    | '/api/logo/defi/$protocol'
     | '/api/logo/platform/$key'
     | '/api/logo/token/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -137,6 +147,7 @@ export interface FileRouteTypes {
     | '/api/import'
     | '/'
     | '/api/auth/$'
+    | '/api/logo/defi/$protocol'
     | '/api/logo/platform/$key'
     | '/api/logo/token/$id'
   id:
@@ -150,6 +161,7 @@ export interface FileRouteTypes {
     | '/api/import'
     | '/_authed/'
     | '/api/auth/$'
+    | '/api/logo/defi/$protocol'
     | '/api/logo/platform/$key'
     | '/api/logo/token/$id'
   fileRoutesById: FileRoutesById
@@ -160,6 +172,7 @@ export interface RootRouteChildren {
   ApiExportRoute: typeof ApiExportRoute
   ApiImportRoute: typeof ApiImportRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiLogoDefiProtocolRoute: typeof ApiLogoDefiProtocolRoute
   ApiLogoPlatformKeyRoute: typeof ApiLogoPlatformKeyRoute
   ApiLogoTokenIdRoute: typeof ApiLogoTokenIdRoute
 }
@@ -243,6 +256,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiLogoPlatformKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/logo/defi/$protocol': {
+      id: '/api/logo/defi/$protocol'
+      path: '/api/logo/defi/$protocol'
+      fullPath: '/api/logo/defi/$protocol'
+      preLoaderRoute: typeof ApiLogoDefiProtocolRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -269,6 +289,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiExportRoute: ApiExportRoute,
   ApiImportRoute: ApiImportRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiLogoDefiProtocolRoute: ApiLogoDefiProtocolRoute,
   ApiLogoPlatformKeyRoute: ApiLogoPlatformKeyRoute,
   ApiLogoTokenIdRoute: ApiLogoTokenIdRoute,
 }

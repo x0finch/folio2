@@ -9,6 +9,7 @@ import type {
   TokenUpstream,
 } from "@folio/oracle-basic";
 import { createCandidateSource } from "./candidates";
+import { createDefiLogos, type DefiLogos } from "./defi-logos";
 import { createFxRates, type FxRates } from "./fx";
 import { createMint, type Mint } from "./mint";
 import { createPlatforms, type Platforms } from "./platforms";
@@ -51,6 +52,8 @@ export interface Oracle {
   readonly mint: Mint;
   readonly fx: FxRates;
   readonly platforms: Platforms;
+  // DeFi 协议 logo 的名址(protocol → 图 URL);同步时写、图片端点 O(1) 读。
+  readonly defiLogos: DefiLogos;
 }
 
 // 显式工厂 —— **这是原语**,不是糖。
@@ -66,6 +69,7 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
     let mint: Mint | undefined;
     let fx: FxRates | undefined;
     let platforms: Platforms | undefined;
+    let defiLogos: DefiLogos | undefined;
 
     // 子服务经 getter 首访即建、建后记忆。调用方常只用其一(logo 端点只碰 tokens),
     // 不该为此把另一套 store 也 new 出来。
@@ -111,6 +115,11 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
           upstream: cfg.createPlatformUpstream(),
         });
         return platforms;
+      },
+      get defiLogos() {
+        // 无上游依赖:URL 由同步时的余额 meta 给,只需一张 per-user 缓存。
+        defiLogos ??= createDefiLogos({ cache: cfg.createCacheStore(userId) });
+        return defiLogos;
       },
     };
   };
