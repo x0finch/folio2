@@ -42,12 +42,17 @@ export async function enrichBalances<T extends BalanceLike>(
   return { rows, pricesStale };
 }
 
-// 持仓价预热(写缓存,best-effort):把这批余额里价 stale/缺失的一次批量回源写回。
+// 持仓预热(写缓存,best-effort):把这批余额里价 / 元信息 stale/缺失的一次批量回源写回。
 // cron(waitUntil)与手动 sync 后调用 —— cron 尤其需要,它没有前端来触发 pricesStale 那条刷价路径。
 //
-// 走新参考层的 `refreshStalePrices`(按 token_id;#202 拔掉旧 `Tokens.warm(AssetRef[])`)。
-// 与 enrich 的 pricesStale gate / 客户端 refreshStalePrices 三门同源:都喂 `refreshableTokenIds`
-// 出来的同一集合(#245:跳过 dust,见 lib/tokens)。
+// **价与 logo/正名一起热**(与客户端 refreshStalePrices server fn 同构):新 mint 的行只有连接器报的
+// 那点信息(BTC 这类连接器根本不报 logo),logo/正名的权威源是上游,唯一写入口是 refreshStaleInfo。
+// 从前这里只热价 → 首屏 pricesStale=false → 客户端那条「价脏才刷、顺带补 logo」的路径不触发 →
+// 新账户 logo 空着干等 ~30min 价过期才补。两者各自失败不拖垮对方;info 的 TTL 长(30d),几乎不发请求。
+//
+// 走新参考层(按 token_id;#202 拔掉旧 `Tokens.warm(AssetRef[])`)。与 enrich 的 pricesStale gate /
+// 客户端 refreshStalePrices 三门同源:都喂 `refreshableTokenIds` 出来的同一集合(#245:跳过 dust)。
 export async function warmHeldPrices(tokens: Tokens, balances: BalanceLike[]): Promise<void> {
-  await tokens.refreshStalePrices(refreshableTokenIds(balances));
+  const ids = refreshableTokenIds(balances);
+  await Promise.all([tokens.refreshStalePrices(ids), tokens.refreshStaleInfo(ids)]);
 }
