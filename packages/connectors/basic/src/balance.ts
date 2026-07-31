@@ -39,6 +39,10 @@ export const BalanceBase = z.object({
 export const DefiMeta = z.object({
   protocol: z.string().optional(),
   positionType: z.string().optional(),
+  // 协议 logo 的上游 URL(provider 随协议报,如 Rabby 的 `p.logo_url`)。仅供展示:随 meta 落进
+  // 快照,`/api/logo/defi` 代理据此在服务端解析出图(客户端零第三方 CDN,ADR 0008 / #126)。
+  // 老快照无此字段 → 协议行退回首字母兜底(零迁移)。
+  protocolLogo: z.string().optional(),
 });
 
 // perp_equity:永续账户权益行(净值载体,value = 账户净值)。

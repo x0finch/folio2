@@ -55,6 +55,7 @@ export interface DefiRow {
 export interface DefiGroup {
   protocol: string;
   rows: DefiRow[];
+  protocolLogo?: string; // 协议 logo 上游 URL(有则行渲染经 /api/logo/defi 代理;#126)
 }
 export interface AccountSections {
   spot: SpotRow[];
@@ -85,6 +86,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
   const perpRows: OverviewBalance[] = [];
   // 保序分组:首次出现的 protocol 顺序即展示顺序。
   const defiByProtocol = new Map<string, DefiRow[]>();
+  const logoByProtocol = new Map<string, string>(); // protocol → logo URL(首个带图的行定)
 
   for (const b of balances) {
     const vk = viewKind(b);
@@ -93,6 +95,9 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
     } else if (vk === "defi") {
       const meta = parseDefiMeta(b.metaJson);
       const protocol = meta.protocol ?? DEFI_FALLBACK_PROTOCOL;
+      if (meta.protocolLogo && !logoByProtocol.has(protocol)) {
+        logoByProtocol.set(protocol, meta.protocolLogo);
+      }
       const row: DefiRow = {
         id: b.id,
         symbol: b.symbol ?? "",
@@ -124,7 +129,11 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
 
   // 分区出口统一丢空仓组($0 毛敞口)——小计 / tab 可见性 / 抽屉 / 总览 merge 都一致,不再各处补丁。
   const defi = dropEmptyDefiGroups(
-    [...defiByProtocol].map(([protocol, rows]) => ({ protocol, rows })),
+    [...defiByProtocol].map(([protocol, rows]) => ({
+      protocol,
+      rows,
+      protocolLogo: logoByProtocol.get(protocol),
+    })),
   );
   const perp = perpRows.length > 0 ? toPerpView(perpRows) : null;
 
@@ -137,14 +146,22 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
 // 抽屉是单账户上下文,直接用该账户的 defi,不经此函数。
 export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] {
   const byProtocol = new Map<string, DefiRow[]>();
+  const logoByProtocol = new Map<string, string>(); // 跨账户:首个带图的组定 logo
   for (const s of sections) {
     for (const g of s.defi) {
+      if (g.protocolLogo && !logoByProtocol.has(g.protocol)) {
+        logoByProtocol.set(g.protocol, g.protocolLogo);
+      }
       const rows = byProtocol.get(g.protocol);
       if (rows) rows.push(...g.rows);
       else byProtocol.set(g.protocol, [...g.rows]);
     }
   }
-  return [...byProtocol].map(([protocol, rows]) => ({ protocol, rows }));
+  return [...byProtocol].map(([protocol, rows]) => ({
+    protocol,
+    rows,
+    protocolLogo: logoByProtocol.get(protocol),
+  }));
 }
 
 // 空仓协议丢弃:整组毛敞口 Σ|usd| < 半分钱 → 视为已清空/dust(如已全额提取/偿还只剩 0 值残腿),
