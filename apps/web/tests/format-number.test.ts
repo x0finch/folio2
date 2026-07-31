@@ -2,10 +2,11 @@ import type { Currency } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import { formatMoney, formatNumber } from "../src/lib/format-number";
 
-const USD: Currency = { code: "USD", kind: "fiat" };
-const EUR: Currency = { code: "EUR", kind: "fiat" };
-const JPY: Currency = { code: "JPY", kind: "fiat" };
-const BTC: Currency = { code: "BTC", kind: "crypto", symbol: "₿" };
+// logo 与格式化无关,这里给空串占位(真实描述符的 logo 在 SUPPORTED_CURRENCIES 里)。
+const USD: Currency = { code: "USD", kind: "fiat", logo: "" };
+const EUR: Currency = { code: "EUR", kind: "fiat", logo: "" };
+const JPY: Currency = { code: "JPY", kind: "fiat", logo: "" };
+const BTC: Currency = { code: "BTC", kind: "crypto", symbol: "₿", logo: "" };
 
 describe("formatNumber — 空值/非法值", () => {
   it("null / undefined / 空串 / NaN / ±Infinity / 非数字串 → '-'", () => {
