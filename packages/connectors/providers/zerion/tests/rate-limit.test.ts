@@ -42,44 +42,28 @@ afterEach(() => {
 });
 
 describe("速率闸", () => {
+  // 断言按**条数**、在受控时钟步进下数,不看 Date.now 分组 —— 后者会被 header 里的异步在时钟推进
+  // 之间切开,偶发 flaky(实测 okx no-gate 那条)。`advanceTimersByTimeAsync(0)` 只冲微任务不推进时钟:
+  // 一个窗口能出去的都出去、被闸住的卡在 setTimeout(>0),count 就是那个窗口的量。
   it("并行的两发各占一个时隙 —— 不因为在 Promise.all 里就一起冲出去", async () => {
-    stubFetch();
-    const at: number[] = [];
-    const t0 = Date.now();
-    const spy = vi.spyOn(globalThis, "fetch");
-    spy.mockImplementation(async (input) => {
-      at.push(Date.now() - t0);
-      const body = String(input).includes("/chains") ? chainsFixture : positionsFixture;
-      return new Response(JSON.stringify(body), { status: 200 });
-    });
-
+    const fetchSpy = stubFetch();
     const run = zerionProvider.fetchBalances(ctx());
+    await vi.advanceTimersByTimeAsync(0);
+    // 链清单 + positions 两发,额度 8 发/窗口 → 两发都在第一个窗口内,t=0 就都出去了。
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
     await vi.runAllTimersAsync();
     await run;
-
-    // 链清单 + positions 两发。额度是 8 发/窗口,所以这两发都在第一个窗口内 —— 不该被拆开。
-    expect(at).toHaveLength(2);
-    expect(Math.max(...at)).toBe(0);
   });
 
   it("超出突发额度之后开始摊开(证明这两发真的走了闸,不是绕过去的)", async () => {
-    stubFetch();
-    const at: number[] = [];
-    const t0 = Date.now();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      at.push(Date.now() - t0);
-      const body = String(input).includes("/chains") ? chainsFixture : positionsFixture;
-      return new Response(JSON.stringify(body), { status: 200 });
-    });
-
+    const fetchSpy = stubFetch();
     // 8 个账户并发:链清单缓存还没建起来时它们各问一次,所以是 8 + 8 = 16 发。
     // 额度是 8 发/窗口 → 只有 8 发能在第一个窗口出去,其余必须落到后面的窗口。
     const runs = Promise.all(Array.from({ length: 8 }, () => zerionProvider.fetchBalances(ctx())));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(8); // 正好一个窗口的量
     await vi.runAllTimersAsync();
     await runs;
-
-    expect(at).toHaveLength(16);
-    expect(at.filter((t) => t === 0)).toHaveLength(8); // 正好一个窗口的量
-    expect(Math.max(...at)).toBeGreaterThan(0); // 剩下的被摊到了后面
+    expect(fetchSpy).toHaveBeenCalledTimes(16); // 剩下 8 发被摊到后面窗口,最终全走
   });
 });

@@ -25,44 +25,39 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// 断言按**条数**、在受控时钟步进下数,不看 Date.now 分组 —— 后者会被 header 里的异步在时钟推进
+// 之间切开,偶发 flaky(实测 okx no-gate 那条)。`advanceTimersByTimeAsync(0)` 只冲微任务不推进时钟:
+// 一个窗口能出去的都出去、被闸住的卡在 setTimeout(>0),count 就是那个窗口的量。
 describe("三条链共享一个队", () => {
-  it("三条链各取一次 → 被摊开,不是各自满速", async () => {
-    const at: number[] = [];
-    const t0 = Date.now();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      at.push(Date.now() - t0);
-      return new Response(JSON.stringify(solanaFixture), { status: 200 });
-    });
+  // 每次新建 Response(body 只能读一次,不能 mockResolvedValue 复用同一个实例)。
+  const stubFetch = () =>
+    vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response(JSON.stringify(solanaFixture), { status: 200 }));
 
-    // 三个**不同的 provider 实例**(实际部署里就是三个 connector 各持一个)。
-    const runs = Promise.all(
+  const runThree = () =>
+    Promise.all(
       ["solana", "sui", "cosmos"].map((chain) =>
         createCoinstatsProvider(chain).fetchBalances(ctx()),
       ),
     );
+
+  it("三条链各取一次 → 被摊开,不是各自满速", async () => {
+    const fetchSpy = stubFetch();
+    const runs = runThree(); // 三个不同 provider 实例(部署里三个 connector 各持一个)
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(2); // 额度 2 发/窗口 → 前两发同窗口
     await vi.runAllTimersAsync();
     await runs;
-
-    // 额度 2 发/窗口 → 前两发同时走,第三发必须等下一个窗口。等到了就说明队是共享的。
-    expect(at).toHaveLength(3);
-    expect(at.filter((t) => t === 0)).toHaveLength(2);
-    expect(Math.max(...at)).toBeGreaterThan(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(3); // 第三发被摊到下一窗口 → 队是共享的
   });
 
   it("反面:如果队没共享,三发就会一起出去 —— 这条钉住不是那样", async () => {
-    const at: number[] = [];
-    const t0 = Date.now();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      at.push(Date.now() - t0);
-      return new Response(JSON.stringify(solanaFixture), { status: 200 });
-    });
-    const runs = Promise.all(
-      ["solana", "sui", "cosmos"].map((chain) =>
-        createCoinstatsProvider(chain).fetchBalances(ctx()),
-      ),
-    );
+    const fetchSpy = stubFetch();
+    const runs = runThree();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).not.toHaveBeenCalledTimes(3); // 共享队 → 窗口 0 只放 2 发,不是 3
     await vi.runAllTimersAsync();
     await runs;
-    expect(at.filter((t) => t === 0)).not.toHaveLength(3);
   });
 });
