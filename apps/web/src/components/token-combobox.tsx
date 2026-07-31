@@ -191,16 +191,12 @@ export function TokenCombobox({
   //      useQuery 的 data 是按 key 的,换一批可见行就把上一批的价丢了。
   //   2. **单请求批量** —— 一整批 stale 票合成一次 /simple/price(useQueries 会拆成 N 个请求)。
   //   3. **每次打开补一次** —— 由 requested 闸表达,不是 staleTime 能覆盖的。
+  // live / requested **跨下拉开合保留**(不随收起清空),整个记账模态会话共用一份:重开下拉时
+  // 已经刷新过、还新鲜(<1h)的价直接复用 → staleTickets 返回空 → 零请求。清空会让每次重开都整份
+  // 重刷 /simple/price,白烧 CGK 额度、跟 /search 抢(用户看到的就是 8848 那种「Search failed」)。
+  // 模态关闭时组件卸载,这份缓存自然随之释放。
   const [live, setLive] = useState<Map<string, LivePrice>>(() => new Map());
   const requested = useRef<Set<string>>(new Set());
-
-  // 收起 → 清空:下次打开重新按最新目录刷一遍(requested 闸也归零)。
-  useEffect(() => {
-    if (!open) {
-      requested.current = new Set();
-      setLive(new Map());
-    }
-  }, [open]);
 
   useEffect(() => {
     // 只在搜索词**落定后**刷(与 /search 同一个防抖闸):否则每个中间按键都发一次 /simple/price,

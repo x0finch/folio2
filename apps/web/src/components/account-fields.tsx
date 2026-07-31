@@ -93,6 +93,22 @@ function ManualFields({
     }
   }
 
+  // 转去自定义 symbol(未收录资产):它没有市价 —— 清掉之前自动填的单价让用户自己填,
+  // 顺带作废还在飞的取价(否则它回来会把单价又填上)、清票与已选项。
+  function enterManual(symbol: string) {
+    priceReqRef.current++;
+    setPriceBusy(false);
+    setPicked(null);
+    setManualMode(true);
+    patch({ symbol, ticket: "", unitPrice: "" });
+  }
+
+  // 转回搜索:清掉自定义 symbol 与单价,回到干净的选币态(重新选中会再自动填价)。
+  function leaveManual() {
+    setManualMode(false);
+    patch({ symbol: "", unitPrice: "" });
+  }
+
   return (
     <>
       <div className="flex flex-col gap-2">
@@ -110,28 +126,18 @@ function ManualFields({
             <button
               type="button"
               className="self-start text-muted-foreground text-xs underline"
-              onClick={() => {
-                setManualMode(false);
-                patch({ symbol: "" });
-              }}
+              onClick={leaveManual}
             >
               {t("searchInstead")}
             </button>
           </>
         ) : (
           <>
-            <TokenCombobox
-              value={picked}
-              onChange={onPick}
-              onManual={(q) => {
-                setManualMode(true);
-                patch({ symbol: q, ticket: "" });
-              }}
-            />
+            <TokenCombobox value={picked} onChange={onPick} onManual={enterManual} />
             <button
               type="button"
               className="self-start text-muted-foreground text-xs underline"
-              onClick={() => setManualMode(true)}
+              onClick={() => enterManual(tok.symbol)}
             >
               {t("enterManually")}
             </button>
