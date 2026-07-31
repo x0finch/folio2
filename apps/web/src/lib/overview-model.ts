@@ -1,4 +1,3 @@
-import { PerpEquityMeta } from "@folio/connectors-basic";
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { Platforms, TokenRecord, Tokens, ValuationMode } from "@folio/oracle";
 import { type OverviewBalance, toAccountSections } from "./account-view";
@@ -9,8 +8,9 @@ import { platformLogoUrl, tokenLogoUrl } from "./logo";
 import { defiTokenId, refreshableTokenIds } from "./tokens";
 
 // 总览读模型(纯 —— 依赖注入,无 cloudflare env,可脱离 server fn 单测)。
-// 持仓区 = 跨账户按 canonical 代币聚合(spot/manual/CEX/perp 权益);DeFi 仓位 + perp 敞口走
-// 每账户次级分区(不进聚合)。总额 = 各账户最新快照 totalUsd 之和。解析/汇率读时 cache-only。
+// 持仓区 = 跨账户按 canonical 代币聚合(**只认现货** spot/manual/CEX);DeFi 仓位、perp 权益 + 敞口
+// 走每账户次级分区(不进聚合)。perp 权益不并入代币聚合(#129:否则它同时落在 Tokens 与 Perps 两个
+// tab,小计双算)。总额 = 各账户最新快照 totalUsd 之和。解析/汇率读时 cache-only。
 
 export interface OverviewDeps {
   tokens: Tokens; // .enrich:token_id → 整行(info + 价,cache-only)
@@ -21,22 +21,9 @@ export interface OverviewDeps {
   mode?: ValuationMode;
 }
 
-// perp 权益行只有 meta 可解析才计入聚合 —— 与 toPerpView 的 safeParse 门一致:
-// 脏/损坏的遗留 perp 行在明细卡与总额两处都排除,避免"总额算它、明细不显"的不一致
-//(承接旧 `perpRole==="equity"` 守卫,守住"单账户脏数据不拖垮总览")。
-export function isPerpEquity(metaJson: string | null): boolean {
-  if (!metaJson) return false;
-  try {
-    return PerpEquityMeta.safeParse(JSON.parse(metaJson)).success;
-  } catch {
-    return false;
-  }
-}
-
 interface Elig {
   account: AccountSafe;
   b: OverviewBalance;
-  margin: boolean;
 }
 
 // 富化结果**按 token_id 查表**取回。以前是「enrich 返回同序数组 + 下标配对」,那是个长期的
@@ -67,19 +54,12 @@ export async function buildOverview(
 ): Promise<OverviewView> {
   const balancesOf = (id: string) => (byAccount.get(id)?.balances ?? []) as OverviewBalance[];
 
-  // 1) 摊平所有(账户 × 持仓),挑出进聚合的 eligible(spot/manual/perp 权益)并备好 AssetRef。
+  // 1) 摊平所有(账户 × 持仓),挑出进聚合的 eligible —— **只认现货**(spot/manual/CEX/UTXO)。
+  // perp 权益、perp 仓位、defi 都不进聚合(#129:perp 权益并入会与 Perps tab 双算),各走次级分区。
   const eligible: Elig[] = [];
   for (const account of accounts) {
     for (const b of balancesOf(account.id)) {
-      const vk = viewKind(b);
-      if (isFungible(vk)) {
-        // 现货 / UTXO(BTC)→ 进跨账户聚合
-        eligible.push({ account, b, margin: false });
-      } else if (vk === "perp_equity" && isPerpEquity(b.metaJson)) {
-        // perp 权益(账户净值载体)→ 进聚合但标 margin;仓位行(perp_position)/ defi 不进。
-        // meta 不可解析(脏/损坏遗留行)则排除,与明细卡一致。
-        eligible.push({ account, b, margin: true });
-      }
+      if (isFungible(viewKind(b))) eligible.push({ account, b });
     }
   }
 
@@ -106,7 +86,7 @@ export async function buildOverview(
   const recordOf = (b: { tokenId?: string | null }): TokenRecord | undefined =>
     b.tokenId ? enriched.get(b.tokenId) : undefined;
   const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
-  const aggInputs: AggInput[] = rows.map(({ account, b, margin, e }) => ({
+  const aggInputs: AggInput[] = rows.map(({ account, b, e }) => ({
     id: b.id, // 无 token_id 的行按它各自成行(见 aggregate.groupKey)
     // 显示名从 Token 取(#243:快照不再存 symbol)。有 token_id 但上游没认出的行,token 仍带建行时
     // 连接器报的 symbol;压根没有 token_id 的行(仅 v2 导入)没有名字 → 空串,靠上面的 id 保持独立。
@@ -117,7 +97,6 @@ export async function buildOverview(
     value: liveValue(b, e?.price?.unitPrice, mode),
     kind: viewKind(b), // 归一到 5-kind(并存期兼容遗留)
     platform: b.platform, // provider 直接报的链 ∪ 场馆(#193)
-    isMargin: margin,
     account: {
       id: account.id,
       label: account.label,
@@ -163,9 +142,9 @@ export async function buildOverview(
     ({ b, e }) => b.tokenId != null && refreshable.has(b.tokenId) && (e?.price?.stale ?? true),
   );
 
-  // 3) 次级分区(每账户 defi 分组 + perp 敞口;perp 权益已进 Holdings → 此处渲染 positions
-  // 与权益)。change24h 按行 id 附回(不按对象引用键——那只在 balancesOf 恰好返回同批对象时
-  // 成立,克隆/规整一步就全落空,code review #9)。
+  // 3) 次级分区(每账户 defi 分组 + perp 权益/敞口)。perp 权益不进 Holdings(#129),只在这里
+  // 由 Perps tab 渲染其权益条与仓位。change24h 按行 id 附回(不按对象引用键——那只在 balancesOf
+  // 恰好返回同批对象时成立,克隆/规整一步就全落空,code review #9)。
   const defiChange = new Map(defiFlat.map((x) => [x.b.id, enriched.get(x.id)?.price?.change24h]));
   // 每账户明细分区前的富化:① 显示名从 Token 取(#243:快照不再存 symbol)② defi 行附上 24h 涨跌。
   const decorate = (bs: OverviewBalance[]): OverviewBalance[] =>

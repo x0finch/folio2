@@ -231,7 +231,7 @@ describe("buildOverview", () => {
     expect(view.defiSubtotal).toBe(10);
   });
 
-  it("合法遗留 perp 权益行计入聚合(margin 持有点)", async () => {
+  it("perp 权益不计入代币聚合(#129),改在 sections 的 Perps tab 展示", async () => {
     const accounts = [account("h", "Hyper", "hyperliquid")];
     const meta = JSON.stringify({
       role: "equity",
@@ -243,15 +243,17 @@ describe("buildOverview", () => {
       ["h", snap("h", 1000, [bal({ kind: "perp", amount: 1000, usdValue: 1000, metaJson: meta })])],
     ]);
     const view = await buildOverview(accounts, byAccount, { tokens, platforms });
-    expect(view.holdings).toHaveLength(1);
-    expect(view.holdings[0].totalValue).toBe(1000);
-    expect(view.holdings[0].sources[0].isMargin).toBe(true);
+    // 代币聚合只认现货 → 权益不在 Holdings、小计里也没有它(避免与 Perps tab 双算)。
+    expect(view.holdings).toHaveLength(0);
+    expect(view.holdingsSubtotal).toBe(0);
+    // 但权益仍在 Perps tab:sections 的 perp.equity 载着账户净值。
+    expect(view.sections[0].perp?.equity?.accountValue).toBe(1000);
   });
 
-  it("脏 metaJson 的遗留 perp 权益行不计入聚合(与明细卡一致,不虚增总额)", async () => {
+  it("脏 metaJson 的遗留 perp 权益行:代币聚合空(权益本就不进聚合,#129)", async () => {
     const accounts = [account("h", "Hyper", "hyperliquid")];
     const byAccount = new Map([
-      // 损坏 metaJson:viewKind→perp_equity,但 meta 不可解析 → 明细卡与聚合两处都排除
+      // 损坏 metaJson:viewKind→perp_equity。#129 后 perp 权益一律不进代币聚合(与是否可解析无关)。
       [
         "h",
         snap("h", 0, [bal({ kind: "perp", amount: 1000, usdValue: 1000, metaJson: "not json" })]),
