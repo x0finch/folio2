@@ -278,6 +278,10 @@ export function TokenCombobox({
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!open) return;
+    // 输入法组合中(中文/日文等)的按键归输入法:此时 Enter 是「上屏候选词」、↑↓ 是「选候选」、
+    // Esc 是「取消组合」——一个都不能被这里当成选币/移高亮/收起。敲完 coin 按 Enter 确认拼音那一下,
+    // 事件的 isComposing 为真,直接放行给输入法。
+    if (e.nativeEvent.isComposing) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActive((i) => Math.min(tokens.length - 1, i + 1));
