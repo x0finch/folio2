@@ -1,4 +1,4 @@
-import { RESOLUTION_TOP_RANK } from "@folio/oracle-basic";
+import { RESOLUTION_TOP_RANK, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import { type CandidateSource, createMint, type TokenCandidate } from "../src";
 import { fakeRefIndexStore, fakeTokenStore } from "./fakes";
@@ -520,6 +520,78 @@ describe("元信息", () => {
       logo: "up.png", // 没被盖
       providerLogo: "arb.png", // 空槽填上了
     });
+  });
+});
+
+// —— 法币身份(ADR 0025)——
+// 法币的 ref = `fiat/issued:<CODE>`,命名者 `fiat` 为 ISO 货币码背书。mint 见它 → 建 / 取一条
+// canonical 法币行(symbol=CODE、内嵌 base64 logo),**绝不**查上游 / 按 symbol 猜(它没有上游价)。
+const USD_LOGO = SUPPORTED_CURRENCIES.find((c) => c.code === "USD")?.logo;
+const CNY_LOGO = SUPPORTED_CURRENCIES.find((c) => c.code === "CNY")?.logo;
+
+describe("法币身份", () => {
+  it("fiat/issued:USD → 建出 symbol=USD、带 CMC logo 的 canonical 行(ref 为空:无上游价)", async () => {
+    const { store, mint } = setup();
+    // seed 里 provider 报的 symbol / 图故意乱给 —— canonical 行由 SUPPORTED_CURRENCIES 定,与它无关。
+    const id = (
+      await mint.of([{ ref: "fiat/issued:USD", seed: seed("usd", "US Dollars", "wrong.png") }])
+    ).get("fiat/issued:USD") as string;
+
+    expect(id).toBeDefined();
+    expect(store.rows.get(id)).toMatchObject({ symbol: "USD", providerLogo: USD_LOGO });
+    expect(store.rows.get(id)?.ref).toBeNull(); // 没有当前源那条 ref → 不会去问 coingecko 价
+    expect([...store.refs.keys()]).toEqual(["fiat/issued:USD"]);
+  });
+
+  it("重复 mint 同一法币 → 复用同一行(靠 fiat/issued:CODE 这条 ref 反查),不新建", async () => {
+    const { store, mint } = setup();
+    const first = (await mint.of([{ ref: "fiat/issued:USD", seed: seed("USD") }])).get(
+      "fiat/issued:USD",
+    );
+    const again = (await mint.of([{ ref: "fiat/issued:USD", seed: seed("USD") }])).get(
+      "fiat/issued:USD",
+    );
+    expect(again).toBe(first);
+    expect(store.rows.size).toBe(1);
+  });
+
+  it("不同法币各自一行", async () => {
+    const { store, mint } = setup();
+    const got = await mint.of([
+      { ref: "fiat/issued:USD", seed: seed("USD") },
+      { ref: "fiat/issued:CNY", seed: seed("CNY") },
+    ]);
+    expect(got.get("fiat/issued:USD")).not.toBe(got.get("fiat/issued:CNY"));
+    expect(store.rows.size).toBe(2);
+    expect(store.rows.get(got.get("fiat/issued:CNY") as string)).toMatchObject({
+      symbol: "CNY",
+      providerLogo: CNY_LOGO,
+    });
+  });
+
+  it("法币**绝不**被 symbol 那一档带跑 —— 哪怕上游有个同 symbol 的币", async () => {
+    // 假装上游有个 symbol=USD 的加密币,且策展表也指向它。canonical 法币不该并进去。
+    const { store, candidates, mint } = setup({
+      overrides: { USD: "some-usd-coin" },
+      candidates: { USD: [{ ref: "src/issued:some-usd-coin", marketCapRank: 1 }] },
+    });
+    const id = (await mint.of([{ ref: "fiat/issued:USD", seed: seed("USD") }])).get(
+      "fiat/issued:USD",
+    );
+    expect(candidates.asked).toEqual([]); // 压根没问判官
+    expect(store.refs.has("src/issued:some-usd-coin")).toBe(false); // 没链上游
+    expect(store.rows.get(id as string)?.ref).toBeNull();
+  });
+
+  it("非白名单的 fiat/issued:XXX → 按未知处理:一条 plain 行、不建 canonical(不乱建)", async () => {
+    const { store, mint } = setup();
+    const id = (await mint.of([{ ref: "fiat/issued:XXX", seed: seed("XXX") }])).get(
+      "fiat/issued:XXX",
+    ) as string;
+    expect(store.rows.get(id)).toMatchObject({ symbol: "XXX" });
+    expect(store.rows.get(id)?.providerLogo).toBeUndefined(); // 没有 canonical 图
+    expect(store.rows.get(id)?.ref).toBeNull();
+    expect([...store.refs.keys()]).toEqual(["fiat/issued:XXX"]);
   });
 });
 

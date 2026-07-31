@@ -5,7 +5,7 @@ import { isManual } from "../manual-connector";
 import { buildOverview } from "../overview-model";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { db } from "./internal/db";
-import { injectManualSnapshots, loadManualHistoryRows } from "./internal/manual";
+import { injectManualSnapshots, loadManualHistoryRows, manualFiatRefs } from "./internal/manual";
 import { oracleFor } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
@@ -24,11 +24,15 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
     await injectManualSnapshots(context.userId, accounts, byAccount);
+    // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
+    //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
+    const fiatRefs = await manualFiatRefs(context.userId, accounts);
     return buildOverview(accounts, byAccount, {
       tokens: oracleFor(context.userId).tokens,
       platforms: oracleFor(context.userId).platforms,
       connectorMeta: connectorPlatformMeta,
       mode: settings.valuationMode,
+      fiatRefs,
     });
   });
 

@@ -6,6 +6,7 @@ import type {
   SnapshotWithBalances,
 } from "@folio/db";
 import { dayBucketOf, tokenTicket } from "@folio/oracle";
+import { FIAT_NAMER } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
@@ -17,7 +18,7 @@ import {
   type HistoricalPriceAt,
   type HistoryToken,
 } from "../../manual-history";
-import { buildManualSnapshot } from "../../manual-snapshot";
+import { buildManualSnapshot, manualUnitPrices } from "../../manual-snapshot";
 import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
 import { NAMER, oracleFor } from "./oracle";
@@ -60,7 +61,9 @@ async function mintHolding(
 ): Promise<string> {
   const ref = manualTokenRef({
     symbol: picked.symbol,
-    ref: picked.ticket ? tokenTicket.decode(picked.ticket, NAMER) : undefined,
+    // 票的命名者可以是当前上游(加密币)或 `fiat`(法币,ADR 0025 / #272)—— 两者都是我们发的,
+    // 都放行;别家命名者仍被挡(#223)。解出的 fiat ref 交给 mint 建 canonical 法币行(#270)。
+    ref: picked.ticket ? tokenTicket.decode(picked.ticket, [NAMER, FIAT_NAMER]) : undefined,
   });
   const symbol = picked.symbol.trim().toUpperCase();
   const ids = await oracleFor(userId).mint.of([{ ref, seed: { symbol } }]);
@@ -144,13 +147,40 @@ export async function injectManualSnapshots(
   // undefined → buildManualSnapshot 回退 `unitPrice`;价在同步的 warmHeldPrices / 前端 refreshStalePrices
   // 里补上,补上后展示即市价。**用户自填价不被市价盖**(#223 / #227):没选币的币其 token 行 `ref`
   // 为空、从不链 CGK,永远回不出市价,自填价恒赢。
-  const enriched = await oracleFor(userId).tokens.enrich(
+  const oracle = oracleFor(userId);
+  const enriched = await oracle.tokens.enrich(
     list.flatMap(({ tokens }) => tokens.map((t) => t.id)),
   );
+  // 法币持仓的展示价走 FX(ADR 0025 / #270 / #272):现算不冻价,取不到汇率照旧回退自填价。
+  // fx 已在 sync-deps warm 过;这里是展示读,按需 resolve(cache-only,零网络)即可。
+  // **法币身份按 tokenId 从 `fiatRefs` 判**,不靠 `CredsToken.ref`(那是 CGK 档、法币恒 null,#272)——
+  // 一次批量取(manualFiatRefs 内部按账户并发),不 N+1。
+  const fxResolve = (code: string) => oracle.fx.resolve(code);
+  const fiatRefs = await manualFiatRefs(userId, accounts);
   for (const { id, tokens } of list) {
-    const prices = tokens.map((t) => enriched.get(t.id)?.price?.unitPrice);
+    const prices = await manualUnitPrices(tokens, enriched, fxResolve, fiatRefs);
     byAccount.set(id, buildManualSnapshot(id, tokens, prices, takenAt));
   }
+}
+
+// 法币身份的 ref 供给(#271):tokenId → 该 token 在 fiat 命名者(`fiat/issued:<CODE>`)下的 ref。
+// 法币目前只来自 manual(链上/CEX 报法币余额不在范围),故只扫活跃 manual 账户;`TokenRecord.ref` 走的是
+// 上游(CGK)那一档、法币恒 null(且 ADR 0021 把它定义成「上游认没认出」),所以身份单独按 FIAT_NAMER 取。
+// 复用既有 `listManualHoldingsByAccount`(换个命名者查),不新增 db 面;判定(fiatCodeOf 白名单)留在 overview。
+export async function manualFiatRefs(
+  userId: string,
+  accounts: AccountSafe[],
+): Promise<Map<string, string>> {
+  const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
+  const out = new Map<string, string>();
+  await Promise.all(
+    manual.map(async (a) => {
+      for (const h of await db.listManualHoldingsByAccount(userId, a.id, FIAT_NAMER)) {
+        if (h.ref) out.set(h.id, h.ref);
+      }
+    }),
+  );
+  return out;
 }
 
 // 预热用:该用户全部 manual 账户的合成余额(供 warmTokens 把其代币现价取进缓存)。manual 已退出 snapshot,

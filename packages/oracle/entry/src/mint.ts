@@ -6,8 +6,13 @@ import type {
   TokenRefHit,
   TokenStore,
 } from "@folio/oracle-basic";
-import { normalizeSymbol } from "@folio/oracle-basic";
-import { tokenRef as buildRef, hasTrustedSymbol, parseTokenRef } from "@folio/oracle-ref";
+import { FIAT_NAMER, fiatSeed, normalizeSymbol } from "@folio/oracle-basic";
+import {
+  tokenRef as buildRef,
+  hasTrustedSymbol,
+  type ParsedTokenRef,
+  parseTokenRef,
+} from "@folio/oracle-ref";
 import { pickByConfidence } from "./confidence";
 
 // symbol 消歧的候选源。候选恒是 warm 集的子集 → 由 cache 从同一个 blob 里筛(见 cache.ts),
@@ -47,12 +52,12 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
   // 地址是权威答案,symbol 只是猜:换序会把假 USDC 并进真 USDC。
   async function upstreamRefOf(
     ref: TokenRef,
+    parsed: ParsedTokenRef,
     seed: ProviderTokenSeed,
   ): Promise<TokenRef | undefined> {
     // **这条 ref 本身就是上游的命名** —— 手记里用户选了币,报的就是 `<上游>/<id>`。
     // 它已经是锚,直接返回:不查映射表(那张表只装链上地址)、更不掉回 symbol 去猜一个
     // 用户已经明说了的答案。老 oracle 有这条短路,重写时漏了。
-    const parsed = parseTokenRef(ref);
     if (parsed.kind === "issued" && parsed.namer === namer) return ref;
 
     // 全局表按地址查到的就是**整条** upstream ref(#228:表给整条,不再回半截让这里拼)。
@@ -84,7 +89,24 @@ export function createMint({ store, refIndex, candidates, namer, overrides }: Mi
     // 已经认出来过(有当前源的 ref 行)→ 什么都不用做,绝大多数行停在这。
     if (hit?.linked) return hit.tokenId;
 
-    const upstreamRef = await upstreamRefOf(ref, seed);
+    const parsed = parseTokenRef(ref);
+
+    // 法币走独立分支:身份自锚,**绝不**查上游 / 按 symbol 猜(法币没有上游价,ADR 0025)。
+    // 必须在 `upstreamRefOf` 之前短路 —— 否则 USD 现金会被 symbol 那档猜进某个叫 USD 的代币。
+    const isFiat = parsed.kind !== "unknown" && parsed.namer === FIAT_NAMER;
+    if (isFiat) {
+      // 同一法币再 mint → 复用既有 canonical 行(靠 `fiat/issued:CODE` 反查)。法币没链上游,
+      // 上面那条 `hit?.linked` 短路截不到、收敛在此。`store.create` 本身也按 ref 幂等(撞主键
+      // onConflictDoNothing + upsert-then-read),所以这行不是正确性必需 —— 只省掉「白建一行再删
+      // 孤行」的 churn,并与下面通用分支同款 `hit → 复用` 保持一致。
+      if (hit) return hit.tokenId;
+      // 白名单内(`SUPPORTED_CURRENCIES` 的 fiat)→ canonical seed(`symbol=CODE` + 内嵌 logo);
+      // 非白名单(含 `fiat/native` 之类畸形)→ 用 provider seed 建一条 plain 行,不乱认、不锚 canonical。
+      const canonical = parsed.kind === "issued" ? fiatSeed(parsed.id) : undefined;
+      return store.create(canonical ?? seed, [ref]);
+    }
+
+    const upstreamRef = await upstreamRefOf(ref, parsed, seed);
 
     // 还是认不出来。
     if (!upstreamRef) {

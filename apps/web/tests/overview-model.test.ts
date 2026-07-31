@@ -265,6 +265,60 @@ describe("buildOverview", () => {
   });
 });
 
+// —— #271:法币身份(isFiat)由注入的 fiatRefs(tokenId → fiat 命名者 ref)经 fiatCodeOf 推出 ——
+// 身份驱动、**不看裸 symbol**:enrich 记录的 ref 是上游那一档(法币恒 null),故身份单独注入。
+describe("buildOverview —— 法币身份 isFiat", () => {
+  it("tokenId 命中白名单 fiat/issued ref → Holding.token.isFiat 置真", async () => {
+    const accounts = [account("m", "现金", "manual")];
+    const byAccount = new Map([
+      [
+        "m",
+        snap("m", 100, [
+          bal({ tokenId: "tk-usd", platform: "manual", amount: 100, usdValue: 100 }),
+        ]),
+      ],
+    ]);
+    const fiatRefs = new Map([["tk-usd", "fiat/issued:USD"]]);
+    const view = await buildOverview(accounts, byAccount, { tokens, platforms, fiatRefs });
+    expect(view.holdings).toHaveLength(1);
+    expect(view.holdings[0].token.isFiat).toBe(true);
+    expect(view.holdings[0].totalValue).toBe(100); // 计入净值/聚合
+  });
+
+  it("非美元法币(EUR)同样置真", async () => {
+    const accounts = [account("m", "现金", "manual")];
+    const byAccount = new Map([
+      [
+        "m",
+        snap("m", 50, [bal({ tokenId: "tk-eur", platform: "manual", amount: 50, usdValue: 55 })]),
+      ],
+    ]);
+    const fiatRefs = new Map([["tk-eur", "fiat/issued:EUR"]]);
+    const view = await buildOverview(accounts, byAccount, { tokens, platforms, fiatRefs });
+    expect(view.holdings[0].token.isFiat).toBe(true);
+  });
+
+  it("ref 非白名单 fiat(如上游 usd 代币)→ 不算法币(以 ref 为准,不撞 symbol)", async () => {
+    const accounts = [account("a1", "W")];
+    const byAccount = new Map([
+      ["a1", snap("a1", 100, [bal({ tokenId: "tk-x", amount: 100, usdValue: 100 })])],
+    ]);
+    // symbol 恰好是 USD,但 fiatRefs 给的是上游命名的普通代币 ref → fiatCodeOf 判非法币。
+    const fiatRefs = new Map([["tk-x", "coingecko/issued:some-usd-token"]]);
+    const view = await buildOverview(accounts, byAccount, { tokens, platforms, fiatRefs });
+    expect(view.holdings[0].token.isFiat).toBe(false);
+  });
+
+  it("无 fiatRefs 注入 → 一律非法币(缺省安全)", async () => {
+    const accounts = [account("a1", "W")];
+    const byAccount = new Map([
+      ["a1", snap("a1", 100, [bal({ tokenId: "tk-usd", amount: 100, usdValue: 100 })])],
+    ]);
+    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    expect(view.holdings[0].token.isFiat).toBe(false);
+  });
+});
+
 // —— H5 #120:sections 的 defi 行读时富化 change24h(协议行 24h 聚合的数据源) ——
 // defi 不进聚合,故单独一批 enrich;按 tokenRef 命中的行带 change24h,未命中 undefined。
 describe("buildOverview —— defi 行 change24h 富化", () => {

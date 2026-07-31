@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
-import { tokenTicket } from "@folio/oracle";
+import { FIAT_NAMER, tokenTicket } from "@folio/oracle";
+import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";
 import { createAccountFor } from "../../src/lib/server/internal/create-account";
@@ -105,6 +106,30 @@ describe("createManualAccount (D1 round-trip)", () => {
 
   it("rejects an empty tokens array (form always sends one; z.array admits [])", async () => {
     await expect(createManualAccount(USER, "M", "[]")).rejects.toThrow();
+  });
+
+  // #272 端到端:选法币 → 票携带 `fiat/issued:USD` → mintHolding 解票(命名者集合含 fiat)→
+  // mint 建 canonical 法币行。身份落在 **fiat 命名者**下(coingecko 那档恒空,法币无上游 ref)。
+  // 把 manual.ts 的 decode 改回只收 NAMER,这条会红(fiat 票掉回 custom、fiat ref 变 null)——
+  // 正是本票要打通的那一跳。
+  it("选中法币 → 票解出 fiat 身份 → 建出 canonical 法币行", async () => {
+    const account = await createManualAccount(
+      USER,
+      "Cash",
+      JSON.stringify([
+        {
+          symbol: "USD",
+          unitPrice: "1",
+          amount: "500",
+          ticket: tokenTicket.encode(tokenRef.issued(FIAT_NAMER, "USD")),
+        },
+      ]),
+    );
+    const [underFiat] = await db.listManualHoldingsByAccount(USER, account.id, FIAT_NAMER);
+    expect(underFiat.symbol).toBe("USD");
+    expect(underFiat.ref).toBe("fiat/issued:USD");
+    // 数量落库;coingecko 命名者那档无 ref(法币不链上游)。
+    expect(await holdings(account.id)).toEqual([{ symbol: "USD", ref: null, amount: 500 }]);
   });
 
   it("没选币 → 那位命名者那条 ref 为空(没认出来),照样落库", async () => {

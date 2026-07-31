@@ -1,7 +1,17 @@
-import { DEFAULT_TOP_N, type TokenRef, tokenTicket, type UpstreamToken } from "@folio/oracle";
+import {
+  DEFAULT_TOP_N,
+  FIAT_NAMER,
+  fiatCodeOf,
+  type TokenRef,
+  tokenTicket,
+  type UpstreamToken,
+} from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
+import { getRequestHeaders } from "@tanstack/react-start/server";
 import { z } from "zod";
+import { buildFiatOptions } from "../fiat-options";
+import { pickLocale, readLocaleCookie } from "../i18n/detect";
 import type { TokenOption } from "../token-option";
 import { NAMER, oracleFor } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
@@ -117,6 +127,34 @@ export const listTokenCatalogue = createServerFn({ method: "GET" })
     return out;
   });
 
+// 选币下拉「法币」组:SUPPORTED_CURRENCIES 的 10 法币。**票在服务端造**(前端拿不透明串,与目录/
+// 已有/搜索一致;前端绝不构造 tokenRef/票 —— 见 token-option.ts 红线)。货币名按请求 locale 本地化。
+// 静态数据、无网络、无 per-user —— 不走边缘缓存、不建行。requireAuth 与其余选币端点一致(只在 authed
+// 加账户模态里调)。构造逻辑在纯函数 `buildFiatOptions`(server-only 消费,故文法不进客户端 bundle)。
+export const listFiatOptions = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(async ({ context }): Promise<TokenOption[]> => {
+    const headers = getRequestHeaders();
+    const locale = pickLocale(
+      readLocaleCookie(headers.get("cookie")),
+      headers.get("accept-language"),
+    );
+    const base = buildFiatOptions(locale);
+    // 法币的「价」= FX 汇率(USD 恒 1),直接填进下拉项 —— 否则价格列显 "—"(法币在代币价格源没有价)。
+    // warm 一次(冷则一把拉全所有支持币种;通常 _authed loader / 切币种时已暖过 → no-op)。
+    // asOf 置当下 → 下拉 SWR(staleTickets)判它新鲜、不会再拿它去 refreshTokenPrices 白刷(那条走代币源)。
+    // 取不到汇率(warm 失败且非 USD)→ 该项不带价,回退 "—"(降级,不阻断)。24h 涨跌法币不给。
+    const fx = oracleFor(context.userId).fx;
+    await fx.warm(base.map((o) => o.symbol));
+    const asOf = Date.now();
+    return Promise.all(
+      base.map(async (o) => {
+        const price = await fx.resolve(o.symbol);
+        return price != null ? { ...o, price, asOf } : o;
+      }),
+    );
+  });
+
 // 选币 autocomplete:按关键词问上游。**只在浏览器本地目录凑不够时才被调到**(见 token-search.ts)——
 // 所以到这儿的词基本都是长尾币,一次 /search 花得值。
 export const listTokens = createServerFn({ method: "GET" })
@@ -137,14 +175,25 @@ export const listTokens = createServerFn({ method: "GET" })
   });
 
 // 选中之后取现价预填单价(用户可改)。**票解不开就当没选** —— 它是从网络上来的。
+// 票可携带当前上游(加密币)或 `fiat`(法币)命名者,两者都放行(见 mintHolding 同款集合)。
 export const getTokenPrice = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ ticket: z.string().min(1) }))
   .handler(async ({ data, context }) => {
-    const ref = tokenTicket.decode(data.ticket, NAMER);
+    const ref = tokenTicket.decode(data.ticket, [NAMER, FIAT_NAMER]);
     if (!ref) {
       tokenLog.debug("tokenPrice: bad ticket");
       return null;
+    }
+    // 法币无上游市价 → 走 FX 现算预填(USD=1,其余当前汇率;ADR 0025)。取不到汇率 → null,
+    // 让用户自己填(别过度设计)。白名单外的 `fiat/issued:XXX` → fiatCodeOf 为空,落回下面通用路。
+    const code = fiatCodeOf(ref);
+    if (code) {
+      const usdPerUnit = await oracleFor(context.userId).fx.resolve(code);
+      tokenLog.debug("tokenPrice: fiat", { found: usdPerUnit != null });
+      return usdPerUnit != null
+        ? { unitPrice: usdPerUnit, change24h: null, asOf: Date.now() }
+        : null;
     }
     const hit = await oracleFor(context.userId).tokens.priceByRef(ref);
     tokenLog.debug("tokenPrice: ok", { found: !!hit });
