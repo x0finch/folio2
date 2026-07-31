@@ -235,6 +235,48 @@ describe("选币分组:已有代币 → Tokens → 法币", () => {
     expect(secs.map((s) => s.items.map((t) => t.symbol))).toEqual([["CAT"], ["COW"], ["COB"]]);
   });
 
+  it("打分档次全序:symbol精确 > name精确 > symbol前缀 > name前缀 > symbol子串 > name子串", () => {
+    const secs = buildTokenSections({
+      owned: [],
+      fiat: [],
+      catalogue: [
+        opt("EGOLD", "Ccc"), // symbol 子串(egold 含 gold,非前缀)—— 档 4
+        opt("XXX", "Gold"), // name 完全 —— 档 1
+        opt("ZZZ", "My Gold"), // name 子串 —— 档 5
+        opt("GOLD", "Aaa"), // symbol 完全 —— 档 0
+        opt("YYY", "Gold Rush"), // name 前缀 —— 档 3
+        opt("GOLDEN", "Bbb"), // symbol 前缀 —— 档 2
+      ],
+      query: "gold",
+      catalogueTopN: 10,
+    });
+    // 中性打分只按匹配质量,乱序入参也排成档次序。
+    expect(items(secs, "catalogue")).toEqual(["GOLD", "XXX", "GOLDEN", "YYY", "EGOLD", "ZZZ"]);
+  });
+
+  it("类型中立:目录里精确命中 压过 已有代币里的子串命中(不偏袒自己的币)", () => {
+    const secs = buildTokenSections({
+      owned: [opt("XETHX", "X")], // symbol 子串 —— 档 4
+      fiat: [],
+      catalogue: [opt("ETH", "Ethereum")], // symbol 完全 —— 档 0
+      query: "eth",
+      catalogueTopN: 5,
+    });
+    expect(keys(secs)).toEqual(["catalogue", "owned"]); // 精确的 ETH(目录)在前,尽管 XETHX 是"你的"
+  });
+
+  it("同档按市值 rank 兜底,无 rank 的靠后(法币不因排在池前而占先)", () => {
+    const secs = buildTokenSections({
+      owned: [],
+      fiat: [opt("USD", "US Dollar")], // symbol 前缀 "u",无 rank
+      catalogue: [{ ...opt("UNI", "Uniswap"), rank: 5 }], // symbol 前缀 "u",有 rank
+      query: "u",
+      catalogueTopN: 5,
+    });
+    // 同为前缀档:有 rank 的 UNI 压过无 rank 的 USD —— 证明 rank 兜底、且法币没被偏袒。
+    expect(keys(secs)).toEqual(["catalogue", "fiat"]);
+  });
+
   it("搜索时上游补的那几条并进 Tokens 组(本地在前)", () => {
     const secs = buildTokenSections({
       owned: [],
