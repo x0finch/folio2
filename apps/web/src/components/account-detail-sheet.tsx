@@ -6,6 +6,7 @@ import {
   cn,
   Drawer,
   Input,
+  MorphingModal,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -29,6 +30,7 @@ import { signedUsd } from "../lib/signed-usd";
 import { ConnectorBadge } from "./connector-badge";
 import { AccountHoldingsCards } from "./holdings-cards";
 import { ManualTokensPanel } from "./manual-tokens-panel";
+import { Portal } from "./portal";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { ValueTrendChart } from "./value-trend-chart";
 
@@ -123,6 +125,8 @@ function DetailBody({
   const [renaming, setRenaming] = useState(false);
   const [labelDraft, setLabelDraft] = useState(account.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // 删除确认走 modal 的落位:桌面居中、手机贴底(同 AddAccountModal)。
+  const isDesktop = useMediaQuery("(min-width: 640px)");
   // ⋯ 菜单走全站统一的 hover popover 行为(关闭态隐 goo 垫底 → ghost 触发器不露 bg-popover 块;
   // 动态 side / 抬 z)。hover 触发,离开即收,不需受控关闭。
   const menuPop = useHoverPopover();
@@ -356,29 +360,40 @@ function DetailBody({
         {lastSynced}
       </p>
 
-      {confirmDelete && (
-        <div className="mt-4 flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
-          <p className="text-destructive text-sm">{t("deleteConfirm")}</p>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setConfirmDelete(false)}
-              disabled={deleteMut.isPending}
-            >
-              {tc("cancel")}
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => deleteMut.mutate()}
-              disabled={deleteMut.isPending}
-            >
-              {deleteMut.isPending ? tc("verifying") : t("deleteConfirmBtn")}
-            </Button>
+      {/* 删除是破坏性操作 → 阻断式 modal 二次确认(取代原侧栏内联块,#165)。**必须 Portal 到 body**:
+          详情侧栏(Drawer 的 aside / BottomSheet 的 drag 面板)带常驻 transform,会成为 fixed 后代的包含块,
+          不 portal 出去 MorphingModal 的 fixed 铺不满视口、还会被侧栏 overflow 裁掉(见 portal.tsx)。
+          MorphingModal 为 fixed z-[80],盖在侧栏(Drawer/BottomSheet 皆 z-50)之上;viewId=null 即关。 */}
+      <Portal>
+        <MorphingModal
+          viewId={confirmDelete ? "delete" : null}
+          onClose={() => setConfirmDelete(false)}
+          placement={isDesktop ? "center" : "bottom"}
+          className="max-w-sm"
+        >
+          <div className="flex flex-col gap-4">
+            <p className="text-foreground text-sm">{t("deleteConfirm")}</p>
+            <div className="flex justify-end gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleteMut.isPending}
+              >
+                {tc("cancel")}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => deleteMut.mutate()}
+                disabled={deleteMut.isPending}
+              >
+                {deleteMut.isPending ? tc("verifying") : t("deleteConfirmBtn")}
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        </MorphingModal>
+      </Portal>
 
       {/* manual 账户:多 token 面板(Tokens tab 已含持仓,故不再叠加上方持仓卡)。
           非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。 */}
