@@ -21,6 +21,8 @@ export {
   TOP_TOKENS_LIMIT,
   WARM_TTL_MS,
 } from "./constants";
+// 法币身份(ADR 0025):`fiat/issued:<CODE>` 的识别与 canonical 建行 seed。
+export { FIAT_NAMER, fiatCodeOf, fiatSeed } from "./fiat";
 // 展示币种 + 汇率(存储恒 USD,换算只在展示层;ADR 0006)。
 export { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "./fx";
 // 平台(链 ∪ 场馆)的名与图。

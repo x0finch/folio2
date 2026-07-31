@@ -1,9 +1,10 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { Tokens } from "@folio/oracle";
+import type { TokenRecord } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import { deriveLiveAccountTotals } from "../src/lib/live-value";
 import type { CredsToken } from "../src/lib/manual-activity";
-import { buildManualSnapshot } from "../src/lib/manual-snapshot";
+import { buildManualSnapshot, manualUnitPrices } from "../src/lib/manual-snapshot";
 
 // 缝③ 纯逻辑:manual 的 creds.tokens(+ 逐 token 现价)→ 合成 SnapshotWithBalances(ADR 0018 做法 1)。
 // 现价烘焙进 usdValue/totalUsd(取不到回退 unitPrice);selfPrice=null 走盯市。身份走 tokenId,
@@ -75,6 +76,119 @@ describe("buildManualSnapshot", () => {
     const snap = buildManualSnapshot("acc-x", [tok({})], [undefined], TS);
     expect(snap.snapshot.accountId).toBe("acc-x");
     expect(snap.snapshot.takenAt).toBe(TS);
+  });
+});
+
+// 缝③ 纯逻辑:每条持仓的展示单价装配(ADR 0025 / #270)。法币走 FX 汇率(现算不冻价),
+// 非法币走 enrich 现价;两支缺值都回退 undefined(→ buildManualSnapshot 用自填价)。身份**以 ref 为准**。
+describe("manualUnitPrices", () => {
+  // 假 enrich 结果:按 tokenId 供价,缺 → 无 price 字段。
+  const enrich = (priceById: Record<string, number>): ReadonlyMap<string, TokenRecord> =>
+    new Map(
+      Object.entries(priceById).map(([id, unitPrice]) => [
+        id,
+        { id, price: { unitPrice, asOf: 0, stale: false } } as unknown as TokenRecord,
+      ]),
+    );
+  // 假 fxResolve:USD 恒 1(与真 FxRates.resolve 同口径);其余按注入表,缺 → undefined。
+  const fakeFx = (rates: Record<string, number> = {}) => {
+    const asked: string[] = [];
+    const resolve = async (code: string): Promise<number | undefined> => {
+      asked.push(code);
+      const c = code.trim().toUpperCase();
+      return c === "USD" ? 1 : rates[c];
+    };
+    return { resolve, asked };
+  };
+
+  const fiat = (over: Partial<CredsToken>): CredsToken =>
+    tok({ id: "tk-USD", symbol: "USD", ref: "fiat/issued:USD", ...over });
+
+  it("法币 USD → 汇率 1(不查 enrich)", async () => {
+    const { resolve } = fakeFx();
+    const prices = await manualUnitPrices([fiat({})], enrich({}), resolve);
+    expect(prices).toEqual([1]);
+  });
+
+  it("非美元法币 → 用注入汇率(不冻价,随汇率)", async () => {
+    const { resolve } = fakeFx({ EUR: 1.1 });
+    const prices = await manualUnitPrices(
+      [fiat({ id: "tk-EUR", symbol: "EUR", ref: "fiat/issued:EUR" })],
+      enrich({}),
+      resolve,
+    );
+    expect(prices).toEqual([1.1]);
+  });
+
+  it("非法币 → enrich 现价(不碰 fx)", async () => {
+    const { resolve, asked } = fakeFx();
+    const prices = await manualUnitPrices(
+      [tok({ id: "tk-BTC", symbol: "BTC", ref: "coingecko/issued:bitcoin" })],
+      enrich({ "tk-BTC": 65000 }),
+      resolve,
+    );
+    expect(prices).toEqual([65000]);
+    expect(asked).toEqual([]); // 非法币不问 fx
+  });
+
+  it("法币汇率缺(缓存冷)→ undefined(回退自填价)", async () => {
+    const { resolve } = fakeFx(); // EUR 不在表里
+    const prices = await manualUnitPrices(
+      [fiat({ id: "tk-EUR", symbol: "EUR", ref: "fiat/issued:EUR" })],
+      enrich({}),
+      resolve,
+    );
+    expect(prices).toEqual([undefined]);
+  });
+
+  it("非法币无现价 → undefined(回退自填价)", async () => {
+    const { resolve } = fakeFx();
+    const prices = await manualUnitPrices(
+      [tok({ id: "tk-X", ref: "coingecko/issued:x" })],
+      enrich({}),
+      resolve,
+    );
+    expect(prices).toEqual([undefined]);
+  });
+
+  it("ref 为空(没选币的自定义币)→ 当非法币走 enrich,不判成法币", async () => {
+    const { resolve, asked } = fakeFx({ USD: 1 });
+    const prices = await manualUnitPrices([tok({ id: "tk-c", ref: null })], enrich({}), resolve);
+    expect(prices).toEqual([undefined]);
+    expect(asked).toEqual([]);
+  });
+
+  it("裸 symbol=USD 但 ref 非法币 → 不当法币(身份以 ref 为准)", async () => {
+    const { resolve, asked } = fakeFx({ USD: 1 });
+    const prices = await manualUnitPrices(
+      [tok({ id: "tk-usdcoin", symbol: "USD", ref: "coingecko/issued:some-usd-token" })],
+      enrich({ "tk-usdcoin": 42 }),
+      resolve,
+    );
+    expect(prices).toEqual([42]); // 走 enrich,不被 fx 短路成 1
+    expect(asked).toEqual([]);
+  });
+
+  it("多条同 code 法币 → 只 resolve 一次(去重)", async () => {
+    const { resolve, asked } = fakeFx({ EUR: 1.1 });
+    const eur = (id: string) => fiat({ id, symbol: "EUR", ref: "fiat/issued:EUR" });
+    const prices = await manualUnitPrices([eur("a"), eur("b")], enrich({}), resolve);
+    expect(prices).toEqual([1.1, 1.1]);
+    expect(asked).toEqual(["EUR"]); // 去重:两条持仓一个 code 只问一次
+  });
+
+  it("混合:法币 + 非法币按序对齐", async () => {
+    const { resolve } = fakeFx({ EUR: 1.1 });
+    const prices = await manualUnitPrices(
+      [
+        fiat({}), // USD → 1
+        tok({ id: "tk-BTC", ref: "coingecko/issued:bitcoin" }), // 现价 65000
+        fiat({ id: "tk-EUR", symbol: "EUR", ref: "fiat/issued:EUR" }), // 1.1
+      ],
+      enrich({ "tk-BTC": 65000 }),
+      resolve,
+    );
+    expect(prices).toEqual([1, 65000, 1.1]);
   });
 });
 

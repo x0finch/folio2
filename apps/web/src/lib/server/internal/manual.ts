@@ -17,7 +17,7 @@ import {
   type HistoricalPriceAt,
   type HistoryToken,
 } from "../../manual-history";
-import { buildManualSnapshot } from "../../manual-snapshot";
+import { buildManualSnapshot, manualUnitPrices } from "../../manual-snapshot";
 import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
 import { NAMER, oracleFor } from "./oracle";
@@ -144,11 +144,15 @@ export async function injectManualSnapshots(
   // undefined → buildManualSnapshot 回退 `unitPrice`;价在同步的 warmHeldPrices / 前端 refreshStalePrices
   // 里补上,补上后展示即市价。**用户自填价不被市价盖**(#223 / #227):没选币的币其 token 行 `ref`
   // 为空、从不链 CGK,永远回不出市价,自填价恒赢。
-  const enriched = await oracleFor(userId).tokens.enrich(
+  const oracle = oracleFor(userId);
+  const enriched = await oracle.tokens.enrich(
     list.flatMap(({ tokens }) => tokens.map((t) => t.id)),
   );
+  // 法币持仓的展示价走 FX(ADR 0025 / #270):现算不冻价,取不到汇率照旧回退自填价。
+  // fx 已在 sync-deps warm 过;这里是展示读,按需 resolve(cache-only,零网络)即可。
+  const fxResolve = (code: string) => oracle.fx.resolve(code);
   for (const { id, tokens } of list) {
-    const prices = tokens.map((t) => enriched.get(t.id)?.price?.unitPrice);
+    const prices = await manualUnitPrices(tokens, enriched, fxResolve);
     byAccount.set(id, buildManualSnapshot(id, tokens, prices, takenAt));
   }
 }

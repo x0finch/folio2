@@ -206,13 +206,17 @@ export function buildSyncDeps(): SyncDeps {
     // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单):据 connectorId 查 manifest →
     // 传 markToMarket 布尔。mode 按 userId 解析(记忆化);缺省 self-first(无 settings 行的用户)。
     // 价从**新参考层**取(#202):`priceOf` 收 token_id,身份由上一步的 mint 给,这里不再解析。
-    revalue: async (userId, connectorId, rows, idByRef) =>
-      revalue(
-        oracleFor(userId).tokens,
+    revalue: async (userId, connectorId, rows, idByRef) => {
+      // 法币持仓的 USD 值现算走 FX(ADR 0025)—— fx 与 tokens 都是这个用户的参考层能力,一并注入。
+      const oracle = oracleFor(userId);
+      return revalue(
+        oracle.tokens,
+        oracle.fx,
         getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
         rows,
         idByRef,
         await modeFor(userId),
-      ),
+      );
+    },
   };
 }
