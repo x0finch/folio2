@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5034e658-f5c4-468f-947d-b1d546262b2f",
+  "id": "34af2ee6-4cc6-4cd7-b594-bdea0950744e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account_groups": {
@@ -162,22 +162,22 @@
     "global_token_ref_index": {
       "name": "global_token_ref_index",
       "columns": {
-        "ref": {
-          "name": "ref",
+        "chain_ref": {
+          "name": "chain_ref",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "namer": {
-          "name": "namer",
+        "upstream": {
+          "name": "upstream",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "local_name": {
-          "name": "local_name",
+        "upstream_local_name": {
+          "name": "upstream_local_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -194,12 +194,12 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "global_token_ref_index_ref_namer_pk": {
+        "global_token_ref_index_chain_ref_upstream_pk": {
           "columns": [
-            "ref",
-            "namer"
+            "chain_ref",
+            "upstream"
           ],
-          "name": "global_token_ref_index_ref_namer_pk"
+          "name": "global_token_ref_index_chain_ref_upstream_pk"
         }
       },
       "uniqueConstraints": {},
@@ -407,13 +407,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "symbol": {
-          "name": "symbol",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "amount": {
           "name": "amount",
           "type": "real",
@@ -442,13 +435,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "token_ref": {
-          "name": "token_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "platform": {
           "name": "platform",
           "type": "text",
@@ -460,7 +446,7 @@
           "name": "token_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "meta_json": {
@@ -620,154 +606,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "token_index": {
-      "name": "token_index",
-      "columns": {
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "token_id": {
-          "name": "token_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cgk_checked_until": {
-          "name": "cgk_checked_until",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "token_index_kind_key_idx": {
-          "name": "token_index_kind_key_idx",
-          "columns": [
-            "kind",
-            "key"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "token_index_token_id_tokens_id_fk": {
-          "name": "token_index_token_id_tokens_id_fk",
-          "tableFrom": "token_index",
-          "tableTo": "tokens",
-          "columnsFrom": [
-            "token_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "token_index_kind_key_token_id_pk": {
-          "columns": [
-            "kind",
-            "key",
-            "token_id"
-          ],
-          "name": "token_index_kind_key_token_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "token_meta": {
-      "name": "token_meta",
-      "columns": {
-        "k": {
-          "name": "k",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "v": {
-          "name": "v",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "token_price_history": {
-      "name": "token_price_history",
-      "columns": {
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "identifier": {
-          "name": "identifier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "day_bucket": {
-          "name": "day_bucket",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "unit_price": {
-          "name": "unit_price",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "token_price_history_source_identifier_day_bucket_pk": {
-          "columns": [
-            "source",
-            "identifier",
-            "day_bucket"
-          ],
-          "name": "token_price_history_source_identifier_day_bucket_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "token_refs": {
       "name": "token_refs",
       "columns": {
@@ -801,13 +639,14 @@
         }
       },
       "indexes": {
-        "token_refs_token_id_namer_idx": {
-          "name": "token_refs_token_id_namer_idx",
+        "token_refs_token_id_namer_uidx": {
+          "name": "token_refs_token_id_namer_uidx",
           "columns": [
+            "user_id",
             "token_id",
             "namer"
           ],
-          "isUnique": false
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -851,67 +690,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "token_vendor_ids": {
-      "name": "token_vendor_ids",
-      "columns": {
-        "token_id": {
-          "name": "token_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "vendor": {
-          "name": "vendor",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "vendor_id": {
-          "name": "vendor_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "token_vendor_ids_token_idx": {
-          "name": "token_vendor_ids_token_idx",
-          "columns": [
-            "token_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "token_vendor_ids_token_id_tokens_id_fk": {
-          "name": "token_vendor_ids_token_id_tokens_id_fk",
-          "tableFrom": "token_vendor_ids",
-          "tableTo": "tokens",
-          "columnsFrom": [
-            "token_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "token_vendor_ids_vendor_vendor_id_pk": {
-          "columns": [
-            "vendor",
-            "vendor_id"
-          ],
-          "name": "token_vendor_ids_vendor_vendor_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "tokens": {
       "name": "tokens",
       "columns": {
@@ -926,7 +704,7 @@
           "name": "user_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "symbol": {

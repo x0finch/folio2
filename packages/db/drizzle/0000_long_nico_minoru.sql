@@ -21,11 +21,11 @@ CREATE TABLE `accounts` (
 --> statement-breakpoint
 CREATE INDEX `accounts_user_id_idx` ON `accounts` (`user_id`);--> statement-breakpoint
 CREATE TABLE `global_token_ref_index` (
-	`ref` text NOT NULL,
-	`namer` text NOT NULL,
-	`local_name` text NOT NULL,
+	`chain_ref` text NOT NULL,
+	`upstream` text NOT NULL,
+	`upstream_local_name` text NOT NULL,
 	`updated_at` integer NOT NULL,
-	PRIMARY KEY(`ref`, `namer`)
+	PRIMARY KEY(`chain_ref`, `upstream`)
 );
 --> statement-breakpoint
 CREATE TABLE `groups` (
@@ -57,14 +57,12 @@ CREATE INDEX `manual_activity_token_id_occurred_at_idx` ON `manual_activity` (`t
 CREATE TABLE `snapshot_balances` (
 	`id` text PRIMARY KEY NOT NULL,
 	`snapshot_id` text NOT NULL,
-	`symbol` text NOT NULL,
 	`amount` real NOT NULL,
 	`usd_value` real NOT NULL,
 	`kind` text NOT NULL,
 	`self_price` real,
-	`token_ref` text,
 	`platform` text,
-	`token_id` text,
+	`token_id` text NOT NULL,
 	`meta_json` text,
 	`note` text,
 	FOREIGN KEY (`snapshot_id`) REFERENCES `snapshots`(`id`) ON UPDATE no action ON DELETE cascade
@@ -89,30 +87,6 @@ CREATE TABLE `token_daily_prices` (
 	PRIMARY KEY(`token_ref`, `day_bucket`)
 );
 --> statement-breakpoint
-CREATE TABLE `token_index` (
-	`kind` text NOT NULL,
-	`key` text NOT NULL,
-	`token_id` text NOT NULL,
-	`cgk_checked_until` integer,
-	`expires_at` integer NOT NULL,
-	PRIMARY KEY(`kind`, `key`, `token_id`),
-	FOREIGN KEY (`token_id`) REFERENCES `tokens`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE INDEX `token_index_kind_key_idx` ON `token_index` (`kind`,`key`);--> statement-breakpoint
-CREATE TABLE `token_meta` (
-	`k` text PRIMARY KEY NOT NULL,
-	`v` integer NOT NULL
-);
---> statement-breakpoint
-CREATE TABLE `token_price_history` (
-	`source` text NOT NULL,
-	`identifier` text NOT NULL,
-	`day_bucket` integer NOT NULL,
-	`unit_price` real NOT NULL,
-	PRIMARY KEY(`source`, `identifier`, `day_bucket`)
-);
---> statement-breakpoint
 CREATE TABLE `token_refs` (
 	`user_id` text NOT NULL,
 	`namer` text NOT NULL,
@@ -123,19 +97,10 @@ CREATE TABLE `token_refs` (
 	FOREIGN KEY (`token_id`) REFERENCES `tokens`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `token_refs_token_id_namer_idx` ON `token_refs` (`token_id`,`namer`);--> statement-breakpoint
-CREATE TABLE `token_vendor_ids` (
-	`token_id` text NOT NULL,
-	`vendor` text NOT NULL,
-	`vendor_id` text NOT NULL,
-	PRIMARY KEY(`vendor`, `vendor_id`),
-	FOREIGN KEY (`token_id`) REFERENCES `tokens`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE INDEX `token_vendor_ids_token_idx` ON `token_vendor_ids` (`token_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `token_refs_token_id_namer_uidx` ON `token_refs` (`user_id`,`token_id`,`namer`);--> statement-breakpoint
 CREATE TABLE `tokens` (
 	`id` text PRIMARY KEY NOT NULL,
-	`user_id` text,
+	`user_id` text NOT NULL,
 	`symbol` text NOT NULL,
 	`name` text NOT NULL,
 	`logo` text,
