@@ -52,6 +52,53 @@ export function needsRemoteSearch(localHits: readonly TokenOption[]): boolean {
   return localHits.length < LOCAL_SEARCH_ENOUGH;
 }
 
+// 下拉的分组(#269)。三档,顺序固定:**已有代币 → 法币 → Tokens(市值目录)**。
+//   · owned    该用户已添加过的币(含手敲的自定义 symbol),一眼可复选。
+//   · fiat     法币现金(本票留空,由后续填充;这里只把它的位置占住)。
+//   · catalogue 市值目录(长尾币仍从这里选)。
+// `key` 是语义标识,组标题的 i18n 由渲染层按它映射(纯层不碰文案)。
+export type TokenSectionKey = "owned" | "fiat" | "catalogue";
+export interface TokenSection {
+  key: TokenSectionKey;
+  items: TokenOption[];
+}
+
+/**
+ * 把三份来源装成有序 section。
+ *
+ * **刻意不做跨组去重** —— 同一个币若既已添加、又在目录里,允许两组各出现一次(有组标题不误导,
+ * 实现也更简单、行为可预期,见 #267 story 16)。渲染层给行的 React key 须带上 section 前缀,
+ * 否则同票撞 key。
+ *
+ * 未搜索:已有代币 / 法币**全给**(用户自己的东西,条数有限),目录取市值前 `catalogueTopN` 条。
+ * 搜索:各组**内部**各自过滤(复用 `searchCatalogue` 的分档),目录再并进上游补的 `remote`
+ * (本地在前,同 `mergeSearchResults`)。空组(过滤后无命中 / 本票的法币)不出现在结果里 ——
+ * 没有条目的组不该渲染出一个空标题。
+ */
+export function buildTokenSections(input: {
+  owned: readonly TokenOption[];
+  fiat: readonly TokenOption[];
+  catalogue: readonly TokenOption[];
+  query: string;
+  catalogueTopN: number;
+  remote?: readonly TokenOption[];
+}): TokenSection[] {
+  const q = input.query.trim();
+  // 自己的两组:搜索时组内过滤(limit 给足条数,别被搜索默认上限截掉自己的币),否则全给。
+  const filterOwn = (list: readonly TokenOption[]) =>
+    q ? searchCatalogue(list, q, Math.max(list.length, 1)) : [...list];
+  const catalogue = q
+    ? mergeSearchResults(searchCatalogue(input.catalogue, q), input.remote ?? [])
+    : input.catalogue.slice(0, input.catalogueTopN);
+
+  const sections: TokenSection[] = [
+    { key: "owned", items: filterOwn(input.owned) },
+    { key: "fiat", items: filterOwn(input.fiat) },
+    { key: "catalogue", items: catalogue },
+  ];
+  return sections.filter((s) => s.items.length > 0);
+}
+
 // 选币下拉的价过期阈值:超过它(或压根没价)就该刷。1h —— 选币这件事对价的新鲜度要求本就不高,
 // 这个窗口足够让默认列的 warm 价大多数时候零请求,只有真旧了或搜索来的无价行才触发。
 export const PRICE_STALE_MS = 60 * 60 * 1000;

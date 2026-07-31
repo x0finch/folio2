@@ -389,6 +389,25 @@ export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): Toke
       }
     },
 
+    // 该用户全部 token 行(选币下拉「已有代币」组,#269)。一条 select 取本用户的行,再喂
+    // `upstreamRefs` 补上当前上游那一档的 ref(没被认出的行 ref 为 null)+ `toInfo` 成 TokenInfo。
+    // 与 readInfos 同法,只是去掉 id 过滤 —— per-user 隔离由 `user_id = ?` 兜住(原则 #6)。
+    async listAll(): Promise<TokenInfo[]> {
+      const rows = await db
+        .select({
+          id: tokens.id,
+          symbol: tokens.symbol,
+          name: tokens.name,
+          logo: tokens.logo,
+          providerLogo: tokens.providerLogo,
+          infoExpiresAt: tokens.infoExpiresAt,
+        })
+        .from(tokens)
+        .where(eq(tokens.userId, userId));
+      const refs = await upstreamRefs(rows.map((r) => r.id));
+      return rows.map((r) => toInfo(r, refs.get(r.id) ?? null));
+    },
+
     // 「本地已认识的同名币」。服务层的 symbol 消歧主路走 warm blob 筛(见 oracle 的 cache.ts),
     // 这里只是另一条路:本用户已有的、且已被上游认出的同 symbol 币。
     async candidatesBySymbol(symbol): Promise<TokenCandidate[]> {

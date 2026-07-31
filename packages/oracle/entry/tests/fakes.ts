@@ -162,6 +162,10 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
       }
       return out;
     },
+
+    async listAll() {
+      return [...rows.values()].map((r) => ({ ...r }));
+    },
   };
   return store;
 }

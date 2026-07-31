@@ -8,14 +8,20 @@ import { useTranslations } from "use-intl";
 import { formatNumber } from "../lib/format-number";
 import { matchSegments } from "../lib/highlight";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
-import { listTokenCatalogue, listTokens, refreshTokenPrices } from "../lib/server/tokens";
+import {
+  listTokenCatalogue,
+  listTokens,
+  listUserTokens,
+  refreshTokenPrices,
+} from "../lib/server/tokens";
 import type { TokenOption } from "../lib/token-option";
 import {
+  buildTokenSections,
   type LivePrice,
-  mergeSearchResults,
   needsRemoteSearch,
   searchCatalogue,
   staleTickets,
+  type TokenSectionKey,
 } from "../lib/token-search";
 
 // manual 选币的内联 Combobox(A4,替代 TokenPicker 的全屏 CommandPalette 浮层):点触发器**就地下推**展开
@@ -31,6 +37,14 @@ import {
 
 // 同 beUI 的 EASE_OUT 动效 token 曲线(@folio/ui 未导出 lib/ease → 本地镜像同一 cubic-bezier)。
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
+
+// 分组标题的 i18n key(#269):纯层只给 section 语义 key,文案在这里映射。
+const SECTION_LABEL: Record<TokenSectionKey, "sectionOwned" | "sectionFiat" | "sectionCatalogue"> =
+  {
+    owned: "sectionOwned",
+    fiat: "sectionFiat",
+    catalogue: "sectionCatalogue",
+  };
 
 // 上游搜索的节流:停顿 250ms 才发,且需 ≥2 字符。本地筛不受这两条约束(它不出网)。
 const SEARCH_DEBOUNCE_MS = 250;
@@ -152,6 +166,15 @@ export function TokenCombobox({
   });
   const catalogue = useMemo(() => catalogueQuery.data ?? [], [catalogueQuery.data]);
 
+  // 「已有代币」组的数据(#269):该用户已添加过的币。同 catalogue 挂载即预取 —— 展开选币前
+  // 就落地。**per-user**,故与目录不同 key、不共享那份边缘缓存。
+  const ownedQuery = useQuery({
+    queryKey: ["user-tokens"],
+    queryFn: () => listUserTokens(),
+    staleTime: CATALOGUE_STALE_MS,
+  });
+  const owned = useMemo(() => ownedQuery.data ?? [], [ownedQuery.data]);
+
   // 本地筛:随每次按键即时重算,不出网。
   const local = useMemo(() => searchCatalogue(catalogue, search), [catalogue, search]);
 
@@ -173,14 +196,31 @@ export function TokenCombobox({
     staleTime: 60_000,
   });
 
-  // 空输入 → 目录前 N 条(默认列);有输入 → 本地在前,上游补的接在后面。
-  const tokens = useMemo(
+  // 分组(#269):已有代币 → 法币(本票空)→ Tokens(目录)。各组内部按 search 过滤,目录再并进
+  // 上游补的那几条。空组不出现。法币组由后续票填,这里恒传空数组占位。
+  const sections = useMemo(
     () =>
-      search
-        ? mergeSearchResults(local, remoteQuery.data ?? [])
-        : catalogue.slice(0, TOP_TOKENS_LIMIT),
-    [search, local, remoteQuery.data, catalogue],
+      buildTokenSections({
+        owned,
+        fiat: [],
+        catalogue,
+        query: search,
+        catalogueTopN: TOP_TOKENS_LIMIT,
+        remote: remoteQuery.data ?? [],
+      }),
+    [owned, catalogue, search, remoteQuery.data],
   );
+
+  // 键盘导航 / 刷价 / 空态判断都按**扁平化后的可见项**走(active 是它的下标)。
+  const flatItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
+  // 渲染用:给每行预先算好扁平下标(data-index),避免在 JSX 里塞计数副作用。
+  const rendered = useMemo(() => {
+    let index = 0;
+    return sections.map((s) => ({
+      key: s.key,
+      rows: s.items.map((token) => ({ token, index: index++ })),
+    }));
+  }, [sections]);
 
   // 展示时的 SWR 刷价(#226):对当前这批行里价过期(1h)/ 缺失的,批量走一次 /simple/price 回填。
   // `live` = 刷来的价(盖过票自带的默认列价);`requested` = 每次打开只补一次的闸(见 staleTickets)。
@@ -202,8 +242,8 @@ export function TokenCombobox({
     // 只在搜索词**落定后**刷(与 /search 同一个防抖闸):否则每个中间按键都发一次 /simple/price,
     // 白烧 CGK 额度还跟 /search 抢,免费档下更容易把 /search 挤到限流(搜不存在的币时尤其明显 ——
     // 本地必然落空、强制打远端)。落定后这批行才稳定,一次批量刷即可。
-    if (!open || !settled || tokens.length === 0) return;
-    const stale = staleTickets(tokens, live, requested.current, Date.now());
+    if (!open || !settled || flatItems.length === 0) return;
+    const stale = staleTickets(flatItems, live, requested.current, Date.now());
     if (stale.length === 0) return;
     for (const tk of stale) requested.current.add(tk); // 先占闸,重渲染不重发
     let cancelled = false;
@@ -228,12 +268,13 @@ export function TokenCombobox({
     return () => {
       cancelled = true;
     };
-  }, [open, settled, tokens, live]);
+  }, [open, settled, flatItems, live]);
   // 转圈只在「手上一条都没有、还在等」时出现:本地有命中就直接显示,上游那趟在后台补。
+  // 已有代币那趟(ownedQuery)是补充项,挂了也不该盖住目录 → 不进 loading/error 门。
   const isLoading =
-    tokens.length === 0 && (catalogueQuery.isLoading || (wantRemote && remoteQuery.isPending));
+    flatItems.length === 0 && (catalogueQuery.isLoading || (wantRemote && remoteQuery.isPending));
   const isError =
-    tokens.length === 0 && (catalogueQuery.isError || (wantRemote && remoteQuery.isError));
+    flatItems.length === 0 && (catalogueQuery.isError || (wantRemote && remoteQuery.isError));
 
   const pick = (token: TokenOption) => {
     // 把下拉里**已经显示的那个价**随选中带出去(live 刷来的优先,否则票自带的)——
@@ -284,13 +325,13 @@ export function TokenCombobox({
     if (e.nativeEvent.isComposing) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive((i) => Math.min(tokens.length - 1, i + 1));
+      setActive((i) => Math.min(flatItems.length - 1, i + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActive((i) => Math.max(0, i - 1));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (tokens[active]) pick(tokens[active]);
+      if (flatItems[active]) pick(flatItems[active]);
       else if (search) {
         onManual(search);
         setOpen(false);
@@ -363,32 +404,41 @@ export function TokenCombobox({
                   <CircleAlertIcon className="size-5" />
                   {t("searchFailed")}
                 </div>
-              ) : tokens.length > 0 ? (
-                tokens.map((token, i) => {
-                  // 生效价:刷来的 live 优先,否则票自带的默认列价(搜索来的行两者皆无 → 显示 —)。
-                  const lp = live.get(token.ticket);
-                  return (
-                    <button
-                      key={token.ticket}
-                      type="button"
-                      data-index={i}
-                      data-active={i === active}
-                      onPointerMove={() => setActive(i)}
-                      onClick={() => pick(token)}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
-                        i === active && "bg-muted",
-                      )}
-                    >
-                      <TokenListRow
-                        token={token}
-                        query={search}
-                        price={lp?.price ?? token.price}
-                        change24h={lp?.change24h ?? token.change24h}
-                      />
-                    </button>
-                  );
-                })
+              ) : flatItems.length > 0 ? (
+                // 分组渲染:每组一个低调组标题 + 若干行。**data-index 走扁平下标**(键盘高亮跨组
+                // 连续),React key 带 section 前缀 —— 两组不去重,同票在两组各出现一次不撞 key。
+                rendered.map((section) => (
+                  <div key={section.key}>
+                    <div className="px-2.5 pt-2 pb-1 font-medium text-muted-foreground text-xs">
+                      {t(SECTION_LABEL[section.key])}
+                    </div>
+                    {section.rows.map(({ token, index }) => {
+                      // 生效价:刷来的 live 优先,否则票自带的默认列价(搜索来的行两者皆无 → 显示 —)。
+                      const lp = live.get(token.ticket);
+                      return (
+                        <button
+                          key={`${section.key}:${token.ticket}`}
+                          type="button"
+                          data-index={index}
+                          data-active={index === active}
+                          onPointerMove={() => setActive(index)}
+                          onClick={() => pick(token)}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
+                            index === active && "bg-muted",
+                          )}
+                        >
+                          <TokenListRow
+                            token={token}
+                            query={search}
+                            price={lp?.price ?? token.price}
+                            change24h={lp?.change24h ?? token.change24h}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))
               ) : isLoading ? (
                 <div className="flex items-center justify-center px-3 py-6 text-muted-foreground">
                   <Loader2Icon className="size-5 animate-spin" aria-label={t("searching")} />

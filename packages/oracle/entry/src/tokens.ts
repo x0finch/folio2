@@ -1,5 +1,6 @@
 import type {
   CacheStore,
+  TokenInfo,
   TokenPrice,
   TokenPriceStore,
   TokenRecord,
@@ -68,6 +69,10 @@ export interface Tokens {
   ): Promise<{ atMs: number; unitPrice: number }[]>;
   // 某时刻的历史价:atMs 所属 UTC 日桶的价;该日无数据 → undefined(调用方降级)。
   priceAt(tokenId: string, atMs: number): Promise<number | undefined>;
+
+  // 选币下拉「已有代币」组(#269):该用户已添加过的全部 token(含自定义 symbol 币)。
+  // 纯读本地行,不出网、不建行。ref 为 null = 上游没认出它(自定义币),调用方据此编「票」。
+  listOwned(): Promise<TokenInfo[]>;
 
   // 选币橱窗:市值 top-N,走 warm blob(冷则预热一次;价旧了也刷 —— 用户在看)。
   topTokens(limit: number): Promise<UpstreamToken[]>;
@@ -263,6 +268,10 @@ export function createTokens({
       const dayStart = dayBucketOf(atMs) * MS_PER_DAY;
       const series = await priceSeries(tokenId, dayStart, atMs);
       return series.at(-1)?.unitPrice;
+    },
+
+    listOwned() {
+      return store.listAll();
     },
 
     async topTokens(limit) {
