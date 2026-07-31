@@ -140,11 +140,12 @@ function PerpAccountBody({ view }: { view: PerpView }) {
 
 // 永续分区(单账户,抽屉用):eyebrow 节头 + 权益条 + 仓位行。
 // (总览 tab 用 PerpPositionsList,场馆子头自带 —— 此处不再有 platform/label 死参。)
-export function PerpPositions({ view }: { view: PerpView }) {
+// hideHeader:抽屉改 tab 后 tab 即标题,节头冗余(同 DefiPositions)。
+export function PerpPositions({ view, hideHeader }: { view: PerpView; hideHeader?: boolean }) {
   const t = useTranslations("Overview");
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeader title={t("perpSectionTitle")} />
+      {!hideHeader && <SectionHeader title={t("perpSectionTitle")} />}
       <PerpAccountBody view={view} />
     </section>
   );
