@@ -74,11 +74,16 @@ export interface PlatformUpstream extends UpstreamIdentity {
 
 // 上游给出的一个币:它自己的命名 + 元信息 +(可能有的)价。
 // 与 `TokenInfo` 的区别:上游结果还没进库,所以没有内部 id、`ref` 必然非空。
+//
+// `marketCapRank` 独立于 `price`:markets 端点两样都给(rank 也在 `price.marketCapRank` 里,
+// 给消歧/候选用),但 `/search` 只给 rank、不给价 —— 那条路要带 rank 就只能挂在这个顶层字段。
+// 展示侧(选币下拉徽标)统一读这里,不管这个币是从哪个端点来的。
 export interface UpstreamToken {
   ref: TokenRef;
   symbol: string;
   name: string;
   logo?: string;
+  marketCapRank?: number;
   price?: TokenPrice;
 }
 

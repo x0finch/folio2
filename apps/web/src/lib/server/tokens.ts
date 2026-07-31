@@ -1,4 +1,4 @@
-import { DEFAULT_TOP_N, tokenTicket, type UpstreamToken } from "@folio/oracle";
+import { DEFAULT_TOP_N, type TokenRef, tokenTicket, type UpstreamToken } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -18,11 +18,18 @@ const tokenLog = getLogger(["folio", "web", "tokens"]);
 // (`/api/logo/token/$id`),而这些币还没有行。ADR 0008 早就把搜索这一档记成已接受的尾巴,
 // 这里只是让默认列跟它一致 —— 而默认列恰好是最无所谓的那一档:市值前 N 名人人都一样,
 // 浏览器去 CoinGecko 取这几张图不泄露任何人持有什么。
+// rank 两个家:markets 端点放在 `price.marketCapRank`(warm 重建的行只有这半),`/search` 无价
+// 放在顶层 `marketCapRank` —— 取任一非空的那个。price/change/asOf 只有 markets 那侧带,搜索来的
+// 行留空,由下拉 SWR 刷价补(见 refreshTokenPrices)。
 const toOption = (t: UpstreamToken): TokenOption => ({
   ticket: tokenTicket.encode(t.ref),
   symbol: t.symbol,
   name: t.name,
   logo: t.logo,
+  rank: t.price?.marketCapRank ?? t.marketCapRank,
+  price: t.price?.unitPrice,
+  change24h: t.price?.change24h,
+  asOf: t.price?.asOf,
 });
 
 // 两个端点的**边缘缓存**(Workers Cache)。这是**一份跨用户共享**的缓存(键里没有 userId),
@@ -144,4 +151,36 @@ export const getTokenPrice = createServerFn({ method: "GET" })
     return hit
       ? { unitPrice: hit.unitPrice, change24h: hit.change24h ?? null, asOf: hit.asOf }
       : null;
+  });
+
+// 选币下拉的 SWR 刷价:一批票 → 现价 + 涨跌(#226)。展示时对价过期/缺失的可见行批量走一次
+// `/simple/price` 回填。**POST 不是 GET**:一批票可到几十条、每条几十字符,塞进 GET 的 query
+// 会把 URL 撑爆(正是 #245 那类 414);而且这是用户触发的实时刷,不该走边缘缓存。
+// **不建行、不写缓存**(pricesByRefs 语义)—— 用户还在划,行只在提交时由 mint 建。
+export const refreshTokenPrices = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(z.object({ tickets: z.array(z.string().min(1)).max(200) }))
+  .handler(async ({ data, context }) => {
+    // 票 → ref(解不开的丢掉),并记 ref→票 好把结果映射回票交回前端。
+    const byRef = new Map<TokenRef, string>();
+    for (const ticket of data.tickets) {
+      const ref = tokenTicket.decode(ticket, NAMER);
+      if (ref) byRef.set(ref, ticket);
+    }
+    if (byRef.size === 0) return [];
+    const priced = await oracleFor(context.userId).tokens.pricesByRefs([...byRef.keys()]);
+    const out: { ticket: string; unitPrice: number; change24h: number | null; asOf: number }[] = [];
+    for (const [ref, price] of priced) {
+      const ticket = byRef.get(ref);
+      if (ticket) {
+        out.push({
+          ticket,
+          unitPrice: price.unitPrice,
+          change24h: price.change24h ?? null,
+          asOf: price.asOf,
+        });
+      }
+    }
+    tokenLog.debug("refreshTokenPrices: ok", { asked: byRef.size, got: out.length });
+    return out;
   });

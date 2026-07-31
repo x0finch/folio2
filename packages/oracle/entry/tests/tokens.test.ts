@@ -399,6 +399,41 @@ describe("选币的取价(按 ref,不建行)", () => {
   });
 });
 
+describe("选币下拉的批量刷价(pricesByRefs,不建行)", () => {
+  const SRC_ETH = "src/issued:ethereum";
+
+  it("一批 ref 现取 —— 库里既不多代币行也不多价缓存", async () => {
+    const { store, prices, upstream, tokens } = setup();
+    upstream.prices.set(SRC_BTC, { unitPrice: 60000, change24h: 1.5, asOf: NOW });
+    upstream.prices.set(SRC_ETH, { unitPrice: 3000, change24h: -2, asOf: NOW });
+
+    const got = await tokens.pricesByRefs([SRC_BTC, SRC_ETH]);
+    expect(got.get(SRC_BTC)).toEqual({ unitPrice: 60000, change24h: 1.5, asOf: NOW });
+    expect(got.get(SRC_ETH)).toEqual({ unitPrice: 3000, change24h: -2, asOf: NOW });
+    expect(store.rows.size).toBe(0);
+    expect(prices.current.size).toBe(0);
+  });
+
+  it("空入参 → 空 Map,不出网", async () => {
+    const { upstream, tokens } = setup();
+    let called = false;
+    upstream.fetchPrices = async () => {
+      called = true;
+      return new Map();
+    };
+    expect((await tokens.pricesByRefs([])).size).toBe(0);
+    expect(called).toBe(false);
+  });
+
+  it("上游抛错 → 空 Map,不抛 —— 刷价失败不该把下拉打断", async () => {
+    const { upstream, tokens } = setup();
+    upstream.fetchPrices = async () => {
+      throw new Error("429");
+    };
+    expect((await tokens.pricesByRefs([SRC_BTC])).size).toBe(0);
+  });
+});
+
 describe("橱窗与候选", () => {
   it("排行榜走 warm(经 SWR 预热一次);候选与它同一份 rows", async () => {
     const { upstream, cache, tokens } = setup();
