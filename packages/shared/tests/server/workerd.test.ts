@@ -51,18 +51,12 @@ describe("运行时承诺", () => {
 
   it("真闸摊开请求 —— 不是在 node 上摊开,是在这里", async () => {
     const gate = defineRateLimit({ key: "wd", limit: 1, interval: INTERVAL });
-    const at: number[] = [];
     const t0 = Date.now();
-    await Promise.all(
-      Array.from({ length: 4 }, () => gate(async () => void at.push(Date.now() - t0))),
-    );
-    at.sort((a, b) => a - b);
-    // **只断言相邻两发的间距**,不断言「第一发在多少毫秒内出去」—— 那是一条绝对延迟断言,
-    // 在全量并行跑时会被机器负载顶穿(实测偶发),而且它也不是这一档要验的东西:
-    // 「第一发不等」在 node 那档用注入时钟确定性地验过了。这里要验的是**真定时器真的会摊开**。
-    for (let i = 1; i < at.length; i++) {
-      expect(at[i] - at[i - 1]).toBeGreaterThan(INTERVAL * 0.6);
-    }
+    await Promise.all(Array.from({ length: 4 }, () => gate(async () => {})));
+    // 4 发过 limit-1/interval-60ms 的闸 → 末发不可能早于 ~3 个 interval(闸放不快过 interval)。
+    // **只设下界(总时长)**:证明真定时器真的把请求摊开了 —— 负载只会让它更慢,顶不穿。
+    // 不断言逐发间距 / 绝对延迟:那两条在负载下会被顶穿(gap 偶发为 0、首发被拖慢,实测过)。
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(INTERVAL * 2);
   });
 
   it("同 key 的两个 defineRateLimit 共享一个队(模块级状态活着)", async () => {
@@ -74,12 +68,30 @@ describe("运行时承诺", () => {
   });
 
   it("不同 key 不互相等", async () => {
-    const t0 = Date.now();
+    // 用注入的 sleep 记「被要求等多久」,不看墙上时钟 —— 绝对上界(<INTERVAL)在负载下会被顶穿
+    // (实测 226 > 60)。两把 key 各自第一发都不该等;互不影响 = 两个 wait 都没被触发。
+    let waitedA = -1;
+    let waitedB = -1;
     await Promise.all([
-      defineRateLimit({ key: "a", limit: 1, interval: 5000 })(async () => {}),
-      defineRateLimit({ key: "b", limit: 1, interval: 5000 })(async () => {}),
+      defineRateLimit({
+        key: "a",
+        limit: 1,
+        interval: 5000,
+        sleep: async (ms) => {
+          waitedA = ms;
+        },
+      })(async () => {}),
+      defineRateLimit({
+        key: "b",
+        limit: 1,
+        interval: 5000,
+        sleep: async (ms) => {
+          waitedB = ms;
+        },
+      })(async () => {}),
     ]);
-    expect(Date.now() - t0).toBeLessThan(INTERVAL);
+    expect(waitedA).toBe(-1); // 第一发有突发额度,不等
+    expect(waitedB).toBe(-1); // 且 a 没让 b 等(不同 key 不共队)
   });
 
   it("withRetry 的等待在这里也真的等(它用的是同一套定时器)", async () => {

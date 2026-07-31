@@ -38,16 +38,18 @@ describe("okx 没有闸", () => {
   it("连发 20 次,全部在同一刻出去 —— 一次等待都没有", async () => {
     const at: number[] = [];
     const t0 = Date.now();
+    // 每次新建 Response(body 只能读一次,不能 mockResolvedValue 复用同一个实例)。
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       at.push(Date.now() - t0);
       return new Response(JSON.stringify({ code: "0", data: [] }), { status: 200 });
     });
 
-    const runs = Promise.all(Array.from({ length: 20 }, () => okxProvider.fetchBalances(ctx())));
-    for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(60_000);
-    await runs;
+    // **不推进时钟**:无闸 → 没有一次 setTimeout 等待,20 发全靠微任务/异步(HMAC)resolve、
+    // 时钟没动 → 全落同一刻。原来那版多推 3×60s,把异步 resolve 落在推进之后的请求切到别的时刻
+    // → 偶发 flaky(实测)。有闸的话这里会卡在 setTimeout 上(假时钟不推就不 resolve)→ 超时报红。
+    await Promise.all(Array.from({ length: 20 }, () => okxProvider.fetchBalances(ctx())));
 
     expect(at).toHaveLength(20);
-    expect(new Set(at).size).toBe(1); // 有闸就会有第二个时刻
+    expect(new Set(at).size).toBe(1);
   });
 });

@@ -103,6 +103,20 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
     tests / environment):哪一项跟 `tests` 差一个数量级,那儿就是问题。1121 个测试真正跑断言只有 5 秒,
     别一看慢就想删用例 —— **先看时间花在哪,再决定砍什么**。
 
+- **别断言墙上时钟(会 flaky)。** 限频 / 重试这类测试**绝不**收集 `Date.now()` 再断言分组
+  (`new Set(at).size === 1`、`Math.max(...at) === 0`、逐发间距 `> X`)—— CI 一负载,请求的异步链
+  (签名 HMAC、header、parse)就在时钟推进之间被切开,同一批落到不同刻,偶发红(实测咬过 okx no-gate、
+  shared workerd 各一次)。改成**确定性**的判法:
+  - **有闸**:假时钟 + 按**条数**断言。`await vi.advanceTimersByTimeAsync(0)` 只冲微任务不推进时钟 →
+    数「这个窗口出去了几发」(= burst);再 `runAllTimersAsync()` 把被闸住的放完 → 数总数。
+    (参考 `providers/{zerion,coinstats}/tests/rate-limit.test.ts`、binance 的 `countOf`。)
+  - **无闸**:假时钟,**直接 `await Promise.all(...)` 不推进时钟** —— 没闸就没有 `setTimeout` 等待,
+    全靠微任务/异步 resolve、时钟没动 → 全落同一刻;有闸的话反而会卡在 `setTimeout` 上超时报红,
+    正好也抓住「谁给它加了闸」。(参考 `providers/{okx,hyperliquid}/tests/no-gate.test.ts`。)
+  - **真要在 workerd 里验真定时器**(`shared/tests/server/workerd.test.ts`,故意用真时钟):只设**下界**
+    (`elapsed >= interval * N` —— 负载只会更慢,顶不穿),绝不设**上界**(`< interval`,一负载就破)、
+    也不断言逐发间距;判「等没等」优先用注入的 `sleep: async (ms) => { waited = ms }` 记毫秒,不看墙钟。
+
 ## Debugging
 
 - **Don't guess — add logs + make a real request.** Add structured logs (`getLogger(["folio", …])`), run the real path, read the actual error/`cause`, then fix the root cause.
