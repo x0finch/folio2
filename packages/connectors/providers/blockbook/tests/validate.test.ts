@@ -1,4 +1,5 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
+import { ProviderError } from "@folio/connectors-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { blockbookProvider } from "../src";
 
@@ -43,11 +44,39 @@ describe("blockbookProvider.validateAccount", () => {
     expect(String(spy.mock.calls[0][0])).toContain("/xpub/");
   });
 
-  it("端点全故障 → false", async () => {
+  // 契约(#240):够不到上游 → 抛 ProviderError(不压成 false),让调用方重试。
+  it("端点全故障(5xx)→ 抛 UPSTREAM_ERROR(retryable)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));
-    expect(await blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR }))).toBe(false);
+    const err = await blockbookProvider
+      .validateAccount(ctx({ addressOrXpub: ADDR }))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("UPSTREAM_ERROR");
+    expect(err.retryable).toBe(true);
   });
 
+  it("429 → 抛 RATE_LIMITED(retryable)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 429 }));
+    const err = await blockbookProvider
+      .validateAccount(ctx({ addressOrXpub: ADDR }))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("RATE_LIMITED");
+  });
+
+  // 服务端永久拒(4xx,如无效 xpub 的 400):客户端标 retryable:false,toProviderError 必须透传 ——
+  // 否则被 ProviderError 按 code(UPSTREAM_ERROR)重算成 true,一个永久 400 被反复重试。
+  it("服务端 400(永久)→ 抛 UPSTREAM_ERROR 且 retryable=false(不被重算)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 400 }));
+    const err = await blockbookProvider
+      .validateAccount(ctx({ addressOrXpub: ADDR }))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("UPSTREAM_ERROR");
+    expect(err.retryable).toBe(false);
+  });
+
+  // 凭据本身不成立:xpub 解析不出来 → INVALID_CREDENTIALS → false(等也没用,不该重试)。
   it("非法扩展公钥(乱串)→ false,造 token 即失败", async () => {
     expect(await blockbookProvider.validateAccount(ctx({ addressOrXpub: "zpubGARBAGE" }))).toBe(
       false,

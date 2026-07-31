@@ -1,5 +1,5 @@
 import type { Balance, BalanceProvider } from "@folio/connectors-basic";
-import { validateCredentials } from "@folio/connectors-basic";
+import { ProviderError, validateCredentials } from "@folio/connectors-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hyperliquidAccountCreds, hyperliquidProvider } from "../src";
 
@@ -26,12 +26,28 @@ describe("hyperliquidProvider.validateAccount", () => {
     expect(await provider.validateAccount(ctx(ADDR))).toBe(true);
   });
 
-  // 地址格式校验已上移到 validateCredentials;validateAccount 直接探活(不再预检地址)。
-  it("returns false on non-ok response or network error", async () => {
+  // 契约(#240):够不到上游 → 抛 ProviderError,不压成 false(hyperliquid 是公开 info 端点、
+  // 仅地址,没有「凭据被拒」这回事 —— 一切失败都是传输类,全抛)。地址格式校验在 validateCredentials。
+  it("5xx → 抛 UPSTREAM_ERROR(retryable)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));
-    expect(await provider.validateAccount(ctx(ADDR))).toBe(false);
+    const err = await provider.validateAccount(ctx(ADDR)).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("UPSTREAM_ERROR");
+    expect(err.retryable).toBe(true);
+  });
+
+  it("429 → 抛 RATE_LIMITED(retryable)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 429 }));
+    const err = await provider.validateAccount(ctx(ADDR)).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("RATE_LIMITED");
+  });
+
+  it("网络炸 → 抛 UPSTREAM_ERROR", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
-    expect(await provider.validateAccount(ctx(ADDR))).toBe(false);
+    const err = await provider.validateAccount(ctx(ADDR)).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("UPSTREAM_ERROR");
   });
 });
 

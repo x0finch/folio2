@@ -26,7 +26,13 @@ export interface BalanceProvider<
   fetchBalances(
     ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>,
   ): Promise<{ balances: B[]; note?: Note[] }>;
-  validateAccount(ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>): Promise<boolean>; // 账户 liveness
+  // 账户 liveness。**语义收窄成一件事:上游对这份凭据说不说 yes。** 失败分两类,别压成同一个 false:
+  //   · 凭据被上游拒(401/403 / 业务码说不对)或凭据本身不成立 → 返回 `false`(等也没用,不该重试)。
+  //   · 够不到上游(429 / 5xx / 网络故障 / 坏响应)→ **抛 `ProviderError`**,retryable 按 code 走
+  //     (与 fetchBalances 同口径)—— 让调用方(validateAccountCreds 的 withRetry)能重试。
+  // catch 里用 `isCredentialRejection(err)` 判前者、其余 rethrow(见 errors.ts)。压成 false 会让瞬时
+  // 429 显示成「凭据错误」、还让上层的重试永远触发不了。
+  validateAccount(ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>): Promise<boolean>;
   validateCreds?(creds: CredsOf<PC>): Promise<boolean>; // provider 自身 creds liveness
 }
 

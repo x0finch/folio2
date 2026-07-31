@@ -1,6 +1,7 @@
 import {
   type BalanceProvider,
   type CredField,
+  isCredentialRejection,
   type PerpEquity,
   type PerpPosition,
   ProviderError,
@@ -162,13 +163,15 @@ export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccount
   },
 
   // 低消耗校验:打一次 clearinghouseState 探活(地址已由 validateCredentials 保证格式)。
-  // 未交易过的地址也返回 200 + 空状态 → 视为可用。任何失败 → false。
+  // 未交易过的地址也返回 200 + 空状态 → 视为可用。凭据被拒 → false;够不到上游 → 抛
+  // ProviderError(公开 info 端点无 auth,实际只会走后者;契约见 connector.ts / errors.ts)。
   async validateAccount(ctx): Promise<boolean> {
     try {
       await infoPost(ctx.account.creds.address);
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      if (isCredentialRejection(err)) return false;
+      throw err;
     }
   },
 };

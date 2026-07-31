@@ -1,3 +1,4 @@
+import { ProviderError } from "@folio/connectors-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { binanceProvider, parseAccountBalances } from "../src";
 import account from "./fixtures/account.json";
@@ -94,16 +95,43 @@ describe("binanceProvider.fetchBalances", () => {
   });
 });
 
+// 契约(#240):凭据被拒 → false;够不到上游 → 抛 ProviderError,让调用方重试。
+// 缺 creds 的守卫不在这里测 —— validateAccount 恒在 validateCredentials(强制 apiKey/secret 非空)
+// 之后调,缺字段进不到这一层。
 describe("binanceProvider.validateAccount", () => {
-  it("false on missing creds without a request; true on 200; false on 401", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
-    expect(await binanceProvider.validateAccount(ctx({ apiKey: "k" }))).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
-
+  it("200 → true", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
     expect(await binanceProvider.validateAccount(ctx())).toBe(true);
+  });
 
+  it("凭据被拒(401 → AUTH_FAILED)→ false,不抛", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
     expect(await binanceProvider.validateAccount(ctx())).toBe(false);
+  });
+
+  // binance 用 HTTP 400 表达错 secret(-1022,签名对不上)/ key 格式非法(-2014)—— 凭据问题,
+  // 不该重试、不该拿错凭据再打上游(#240)。归 AUTH_FAILED → false。
+  it("签名被拒(400)→ false,不抛也不重试", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response('{"code":-1022,"msg":"Signature invalid"}', { status: 400 }));
+    expect(await binanceProvider.validateAccount(ctx())).toBe(false);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("429 → 抛 RATE_LIMITED(retryable),不压成 false", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 429 }));
+    const err = await binanceProvider.validateAccount(ctx()).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("RATE_LIMITED");
+    expect(err.retryable).toBe(true);
+  });
+
+  it("5xx → 抛 UPSTREAM_ERROR(retryable)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 503 }));
+    const err = await binanceProvider.validateAccount(ctx()).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.code).toBe("UPSTREAM_ERROR");
+    expect(err.retryable).toBe(true);
   });
 });

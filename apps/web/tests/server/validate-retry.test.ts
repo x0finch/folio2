@@ -6,19 +6,10 @@ import { validateAccountCreds } from "../../src/lib/server/internal/connector-re
 // (PC 注入要读它)。打桩打在**全局 fetch** 上,测的是真实那条路(表单 → validateAccountCreds
 // → provider → 出网),不是一个假 provider。用 evm connector(默认 provider 是 rabby,不要 key)。
 //
-// ⚠️ **这里的重试目前一次都不会触发,而且这是本文件最重要的事实。**
-//
-// `BalanceProvider.validateAccount` 的签名是 `Promise<boolean>`,而**七个 provider 无一例外**
-// 都写成 `try { return res.ok } catch { return false }` —— 429、5xx、网络故障、凭据不对,
-// 全都压成同一个 `false`。于是 withRetry 收不到任何错误对象,也就无从判断 retryable。
-//
-// 为什么仍然把 withRetry 接上:它在对的那一层,而且是後续那步(让 provider 对「传输故障」抛
-// ProviderError、只对「凭据被拒」返回 false)唯一需要的前提 —— 那一步一落地,这里立刻就活了。
-// 为什么**不**改成「`false` 也重试」:`false` 是歧义的,里面混着「这个 key 就是错的」——
-// 那是最常见的失败,给它多赔一个往返 + 一次等待,还会拿着错凭据再打一次上游(binance 那种
-// 会把重复认证失败当探测)。
-//
-// 下面这几条钉的就是**现状**,不是理想状态。别把它们当 bug 改掉 —— 要改的是 provider 的契约。
+// **契约已落地(#240):** `validateAccount` 现在把两类失败分开 —— 凭据被拒(401/403 → AUTH_FAILED)
+// 返回 `false`;够不到上游(429 / 5xx / 网络故障)抛 retryable 的 `ProviderError`。于是 withRetry
+// 这一层活了:传输故障会重试,凭据被拒不会(等也没用,而且拿着错凭据再打一次上游有害)。
+// 下面这几条钉的是**这个行为**。
 
 const ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
@@ -60,54 +51,38 @@ describe("探活", () => {
   });
 });
 
-describe("现状:provider 把一切压成 false,于是重试触发不了", () => {
-  it("瞬时 429 → 一次就失败(**不是**期望的行为,是待修的契约)", async () => {
-    const spy = scriptedFetch([429, 200]); // 第二发本该成功
+describe("契约落地:传输故障重试,凭据被拒不重试", () => {
+  it("瞬时 429 → 重试一次并成功(rabby 抛 RATE_LIMITED,withRetry 再打一发)", async () => {
+    const spy = scriptedFetch([429, 200]); // 第二发成功
     await expect(
       validateAccountCreds("evm", { address: ADDRESS }, { liveness: true }),
-    ).rejects.toThrow(/could not verify/);
-    expect(spy).toHaveBeenCalledTimes(1); // 没有第二发 —— rabby 把 429 压成了 false
+    ).resolves.toBeUndefined();
+    expect(spy).toHaveBeenCalledTimes(2); // 429 抛错 → 重试 → 200 通过
   });
 
-  it("网络故障 → 同样一次就失败", async () => {
+  it("持续 429 → 重试用尽后失败(抛 ProviderError,不是压成 false)", async () => {
+    const spy = scriptedFetch([429]); // 每发都 429
+    await expect(
+      validateAccountCreds("evm", { address: ADDRESS }, { liveness: true }),
+    ).rejects.toThrow(); // RATE_LIMITED 冒出去(不是 "could not verify")
+    expect(spy).toHaveBeenCalledTimes(2); // VALIDATE_RETRY_ATTEMPTS = 1 + 1 次重试
+  });
+
+  it("网络故障 → 重试用尽后失败", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       throw new Error("network down");
     });
     await expect(
       validateAccountCreds("evm", { address: ADDRESS }, { liveness: true }),
-    ).rejects.toThrow(/could not verify/);
-    expect(spy).toHaveBeenCalledTimes(1);
+    ).rejects.toThrow();
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  it("反面:provider 抛**不可重试**的错误 → 一次都不重试(用户填错了,等也没用)", async () => {
-    // 验收单上这条今天在 app 这一层造不出来(没有 provider 会抛),所以直接验这一层用的那组参数:
-    // 默认判据只认 `retryable === true`,`INVALID_CREDENTIALS` 那种不带这个标记的一次都不重。
-    // 规则层面的覆盖在 packages/ratelimit/tests/retry.test.ts。
-    const { withRetry } = await import("@folio/shared");
-    let calls = 0;
-    const rejected = async () => {
-      calls++;
-      throw Object.assign(new Error("INVALID_CREDENTIALS"), { retryable: false });
-    };
+  it("凭据被拒(403 → AUTH_FAILED)→ 一次就失败,不重试(等也没用)", async () => {
+    const spy = scriptedFetch([403]);
     await expect(
-      withRetry(rejected, { attempts: 2, maxWaitMs: 1500, baseMs: 1, sleep: async () => {} }),
-    ).rejects.toThrow(/INVALID_CREDENTIALS/);
-    expect(calls).toBe(1);
-  });
-
-  it("但只要 provider 肯抛 retryable 错误,这一层立刻就会重试", async () => {
-    // 直接验 withRetry 那一层的接线:manual connector 没有 provider(探活直接放行),所以拿
-    // evm 那条路没法造出「抛错的 provider」——用一个抛 retryable 错的假调用证明参数是对的。
-    const { withRetry } = await import("@folio/shared");
-    let calls = 0;
-    const flaky = async () => {
-      calls++;
-      if (calls === 1) throw Object.assign(new Error("429"), { retryable: true });
-      return true;
-    };
-    await expect(
-      withRetry(flaky, { attempts: 2, maxWaitMs: 1500, baseMs: 1, sleep: async () => {} }),
-    ).resolves.toBe(true);
-    expect(calls).toBe(2);
+      validateAccountCreds("evm", { address: ADDRESS }, { liveness: true }),
+    ).rejects.toThrow(/could not verify/); // provider 返回 false → 明确的凭据错误文案
+    expect(spy).toHaveBeenCalledTimes(1); // false 不触发重试(只有抛 retryable 错才重试)
   });
 });

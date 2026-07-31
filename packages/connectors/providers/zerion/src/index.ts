@@ -2,6 +2,7 @@ import {
   type BalanceProvider,
   type CredField,
   type Defi,
+  isCredentialRejection,
   ProviderError,
   type Spot,
 } from "@folio/connectors-basic";
@@ -288,15 +289,17 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
     return { balances: parsePositions(positions, chainIds) };
   },
 
-  // 低消耗校验:打轻量 portfolio 端点探活(地址已由 validateCredentials 保证格式)。任何失败 → false。
+  // 低消耗校验:打轻量 portfolio 端点探活(地址已由 validateCredentials 保证格式)。
+  // 凭据被拒 → false;够不到上游 → 抛 ProviderError(契约见 connector.ts / errors.ts)。
   async validateAccount(ctx): Promise<boolean> {
     const apiKey = ctx.creds[ZERION_API_KEY];
     if (!apiKey) return false;
     try {
       await request(PORTFOLIO_PATH(ctx.account.creds.address), { context: apiKey });
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      if (isCredentialRejection(err)) return false;
+      throw err;
     }
   },
 

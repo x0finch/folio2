@@ -2,6 +2,7 @@ import {
   type BalanceProvider,
   type CredField,
   hmacSha256,
+  isCredentialRejection,
   ProviderError,
   type Spot,
 } from "@folio/connectors-basic";
@@ -144,15 +145,19 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
     return { balances: parseBalances(body.data?.[0]?.details ?? []) };
   },
 
-  // 校验:签名打 balance,HTTP ok 且 code="0" 即 true(creds 已保证三项非空)。任何失败 → false。
+  // 校验:签名打 balance。走 fetchBalances 同一条判据(assertCodeOk):HTTP 层失败由 request 抛,
+  // 业务码 code!="0" 由 assertCodeOk 分类(凭据类 → AUTH_FAILED,其余 → UPSTREAM_ERROR)。
+  // 凭据被拒 → false;够不到上游 → 抛(契约见 connector.ts / errors.ts)。creds 已保证三项非空。
   async validateAccount(ctx): Promise<boolean> {
     try {
       const body = (await request(BALANCE_PATH, {
         context: ctx.account.creds,
       })) as OkxBalanceResponse;
-      return body.code === "0";
-    } catch {
-      return false;
+      assertCodeOk(body);
+      return true;
+    } catch (err) {
+      if (isCredentialRejection(err)) return false;
+      throw err;
     }
   },
 };

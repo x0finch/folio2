@@ -2,6 +2,7 @@ import {
   type BalanceProvider,
   type CredField,
   type FetchContext,
+  isCredentialRejection,
   ProviderError,
   type Spot,
 } from "@folio/connectors-basic";
@@ -152,15 +153,17 @@ async function fetchCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<
   return parseBalances(json, connectionId);
 }
 
-// 低消耗校验:打一次 wallet/balance 探活(地址已由 validateCredentials 保证非空)。任何失败 → false。
+// 低消耗校验:打一次 wallet/balance 探活(地址已由 validateCredentials 保证非空)。
+// 凭据被拒 → false;够不到上游 → 抛 ProviderError(契约见 connector.ts / errors.ts)。
 async function validateCoinstats(connectionId: string, ctx: CoinstatsCtx): Promise<boolean> {
   const apiKey = ctx.creds[COINSTATS_API_KEY];
   if (!apiKey) return false;
   try {
     await balanceOf(connectionId, ctx.account.creds.address, apiKey);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    if (isCredentialRejection(err)) return false;
+    throw err;
   }
 }
 
