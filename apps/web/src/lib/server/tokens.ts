@@ -10,7 +10,10 @@ import {
 import { tokenRef } from "@folio/oracle-ref";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
+import { getRequestHeaders } from "@tanstack/react-start/server";
 import { z } from "zod";
+import { buildFiatOptions } from "../fiat-options";
+import { pickLocale, readLocaleCookie } from "../i18n/detect";
 import { MANUAL_CONNECTOR_ID } from "../manual-connector";
 import type { TokenOption } from "../token-option";
 import { NAMER, oracleFor } from "./internal/oracle";
@@ -152,6 +155,21 @@ export const listUserTokens = createServerFn({ method: "GET" })
     const out = (await oracleFor(context.userId).tokens.listOwned()).map(ownedOption);
     tokenLog.debug("userTokens: ok", { count: out.length });
     return out;
+  });
+
+// 选币下拉「法币」组:SUPPORTED_CURRENCIES 的 10 法币。**票在服务端造**(前端拿不透明串,与目录/
+// 已有/搜索一致;前端绝不构造 tokenRef/票 —— 见 token-option.ts 红线)。货币名按请求 locale 本地化。
+// 静态数据、无网络、无 per-user —— 不走边缘缓存、不建行。requireAuth 与其余选币端点一致(只在 authed
+// 加账户模态里调)。构造逻辑在纯函数 `buildFiatOptions`(server-only 消费,故文法不进客户端 bundle)。
+export const listFiatOptions = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler((): TokenOption[] => {
+    const headers = getRequestHeaders();
+    const locale = pickLocale(
+      readLocaleCookie(headers.get("cookie")),
+      headers.get("accept-language"),
+    );
+    return buildFiatOptions(locale);
   });
 
 // 选币 autocomplete:按关键词问上游。**只在浏览器本地目录凑不够时才被调到**(见 token-search.ts)——

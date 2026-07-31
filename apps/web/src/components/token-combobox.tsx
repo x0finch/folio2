@@ -4,12 +4,12 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useLocale, useTranslations } from "use-intl";
-import { buildFiatOptions } from "../lib/fiat-options";
+import { useTranslations } from "use-intl";
 import { formatNumber } from "../lib/format-number";
 import { matchSegments } from "../lib/highlight";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
 import {
+  listFiatOptions,
   listTokenCatalogue,
   listTokens,
   listUserTokens,
@@ -151,7 +151,6 @@ export function TokenCombobox({
   onManual: (query: string) => void;
 }) {
   const t = useTranslations("Accounts");
-  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -198,8 +197,14 @@ export function TokenCombobox({
     staleTime: 60_000,
   });
 
-  // 法币组(#272):`SUPPORTED_CURRENCIES` 的 10 种法币,纯本地常量(随 locale 出货币名),无网络。
-  const fiat = useMemo(() => buildFiatOptions(locale), [locale]);
+  // 法币组(#272):SUPPORTED_CURRENCIES 的 10 法币。**票在服务端造**(与目录/已有一致,前端只拿不透明串,
+  // 不构造 tokenRef/票 —— 见 token-option.ts),名字按请求 locale 已本地化。静态数据,挂载即预取。
+  const fiatQuery = useQuery({
+    queryKey: ["fiat-options"],
+    queryFn: () => listFiatOptions(),
+    staleTime: CATALOGUE_STALE_MS,
+  });
+  const fiat = useMemo(() => fiatQuery.data ?? [], [fiatQuery.data]);
 
   // 分组(#269):已有代币 → 法币 → Tokens(目录)。各组内部按 search 过滤,目录再并进
   // 上游补的那几条。空组不出现。

@@ -9,10 +9,11 @@ import type { TokenOption } from "./token-option";
 //   · `symbol = CODE`(USD/EUR…),`logo` 取 `SUPPORTED_CURRENCIES` 的内嵌 base64(单一来源,#268)。
 //   · **不带 `price`** —— 法币没有上游市价;选中后由 getTokenPrice 走 FX 预填(USD=1,其余当前汇率)。
 //
-// **纯客户端常量**(不走 server fn):静态数据、无 per-user、无网络 —— 与读库的 listUserTokens 不同,
-// 为它开一趟往返纯属浪费。`tokenTicket` / 常量都来自 `@folio/oracle-basic`(client-safe,无 provider 图)。
+// **纯函数,只由服务端消费**(`server/tokens.ts` 的 `listFiatOptions`)—— 造票是 oracle 的服务、
+// 归服务端做,前端拿到的是不透明串(与目录/已有/搜索一致;前端绝不构造 tokenRef/票,见 token-option.ts
+// 红线)。放在这里 import `tokenTicket`/`tokenRef` 不进客户端 bundle,只要没有客户端模块 import 它。
 //
-// 货币名走 `Intl.DisplayNames`(平台自带,随 UI locale)—— 不硬编码一张名字表(与 date-time-wheel
+// 货币名走 `Intl.DisplayNames`(平台自带,按传入 locale)—— 不硬编码一张名字表(与 date-time-wheel
 // 用 `Intl.DateTimeFormat` 同口径)。取不到名字(极老运行时)→ 退回 CODE,不至于空着。
 export function buildFiatOptions(locale: string): TokenOption[] {
   const names = new Intl.DisplayNames([locale], { type: "currency" });
