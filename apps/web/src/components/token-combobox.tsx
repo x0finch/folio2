@@ -218,9 +218,11 @@ export function TokenCombobox({
   // 键盘导航 / 刷价 / 空态判断都按**扁平化后的可见项**走(active 是它的下标)。
   const flatItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
   // 渲染用:给每行预先算好扁平下标(data-index),避免在 JSX 里塞计数副作用。
+  // `uid` 带段序号 —— 搜索排序会让同一类型出现在多个 section(相邻切段),裸 key 会撞。
   const rendered = useMemo(() => {
     let index = 0;
-    return sections.map((s) => ({
+    return sections.map((s, si) => ({
+      uid: `${s.key}:${si}`,
       key: s.key,
       rows: s.items.map((token) => ({ token, index: index++ })),
     }));
@@ -409,10 +411,10 @@ export function TokenCombobox({
                   {t("searchFailed")}
                 </div>
               ) : flatItems.length > 0 ? (
-                // 分组渲染:每组一个低调组标题 + 若干行。**data-index 走扁平下标**(键盘高亮跨组
-                // 连续),React key 带 section 前缀 —— 两组不去重,同票在两组各出现一次不撞 key。
+                // 分组渲染:每段一个低调组标题 + 若干行。**data-index 走扁平下标**(键盘高亮跨段
+                // 连续);React key 用带段序号的 uid —— 搜索时同类型可能多段、且两来源不去重,裸 key 会撞。
                 rendered.map((section) => (
-                  <div key={section.key}>
+                  <div key={section.uid}>
                     <div className="px-2.5 pt-2 pb-1 font-medium text-muted-foreground text-xs">
                       {t(SECTION_LABEL[section.key])}
                     </div>
@@ -421,7 +423,7 @@ export function TokenCombobox({
                       const lp = live.get(token.ticket);
                       return (
                         <button
-                          key={`${section.key}:${token.ticket}`}
+                          key={`${section.uid}:${token.ticket}`}
                           type="button"
                           data-index={index}
                           data-active={index === active}

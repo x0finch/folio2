@@ -52,28 +52,59 @@ export function needsRemoteSearch(localHits: readonly TokenOption[]): boolean {
   return localHits.length < LOCAL_SEARCH_ENOUGH;
 }
 
-// 下拉的分组(#269)。三档,顺序固定:**已有代币 → Tokens(市值目录)→ 法币(Cash)**。
-//   · owned    该用户已添加过的币(含手敲的自定义 symbol),一眼可复选,排最上。
-//   · catalogue 市值目录(长尾币仍从这里选)。
-//   · fiat     法币现金,排最下(记现金是相对少见的操作,让位给代币)。
-// `key` 是语义标识,组标题的 i18n 由渲染层按它映射(纯层不碰文案)。
+// 下拉的分组(#269;搜索排序改版)。三种类型:owned(当前账户已添加)/ catalogue(市值目录)/
+// fiat(法币现金)。**浏览**时固定顺序 owned → catalogue → fiat;**搜索**时按相关性全局排序、
+// 再按相邻类型切段(见 buildTokenSections)。`key` 是语义标识,组标题 i18n 由渲染层按它映射。
 export type TokenSectionKey = "owned" | "fiat" | "catalogue";
 export interface TokenSection {
   key: TokenSectionKey;
   items: TokenOption[];
 }
 
+// 搜索排序的**中性打分器**。**类型无关** —— 只看文本匹配质量,不认识 owned/fiat/catalogue、
+// 也不给任何类型加成。档次(小 = 更相关):0 symbol 完全 / 1 name 完全 / 2 symbol 前缀 /
+// 3 name 前缀 / 4 symbol 子串 / 5 name 子串;`null` = 不匹配。`q` 须已 trim + 小写。
+// 精确匹配那一档天然压过前缀 —— 搜 `USD` 时法币 USD(symbol 完全)自然排在 USDC(前缀)之上,
+// 不需要偏袒任何类型。同档再按市值 rank 兜底(小靠前、无 rank 的靠后),仍是类型无关的排序。
+function matchTier(token: TokenOption, q: string): number | null {
+  const sym = token.symbol.toLowerCase();
+  const name = token.name.toLowerCase();
+  if (sym === q) return 0;
+  if (name === q) return 1;
+  if (sym.startsWith(q)) return 2;
+  if (name.startsWith(q)) return 3;
+  if (sym.includes(q)) return 4;
+  if (name.includes(q)) return 5;
+  return null;
+}
+
+// 排好序的扁平列表 → 按**相邻同类型**切段,每段一个 section。**类型只在这一步用到**(纯展示,
+// 不参与排序)。排序若把同类型的项隔开,该类型会出现在多个 section(如 `catalogue … owned …
+// catalogue`)—— 这是「按相邻成组」的自然结果。渲染层的 section React key 须带序号(同 key 可重复)。
+function segmentByKind(
+  items: readonly { token: TokenOption; kind: TokenSectionKey }[],
+): TokenSection[] {
+  const out: TokenSection[] = [];
+  for (const { token, kind } of items) {
+    const last = out.at(-1);
+    if (last?.key === kind) last.items.push(token);
+    else out.push({ key: kind, items: [token] });
+  }
+  return out;
+}
+
 /**
- * 把三份来源装成有序 section。
+ * 选币下拉的分组结果。
  *
- * **刻意不做跨组去重** —— 同一个币若既已添加、又在目录里,允许两组各出现一次(有组标题不误导,
- * 实现也更简单、行为可预期,见 #267 story 16)。渲染层给行的 React key 须带上 section 前缀,
- * 否则同票撞 key。
+ * **浏览(无输入)**:固定顺序 已有代币 → Tokens(目录前 `catalogueTopN`)→ 法币;类型本就连续,
+ * 切段正好三组。
  *
- * 未搜索:已有代币 / 法币**全给**(用户自己的东西,条数有限),目录取市值前 `catalogueTopN` 条。
- * 搜索:各组**内部**各自过滤(复用 `searchCatalogue` 的分档),目录再并进上游补的 `remote`
- * (本地在前,同 `mergeSearchResults`)。空组(过滤后无命中 / 本票的法币)不出现在结果里 ——
- * 没有条目的组不该渲染出一个空标题。
+ * **搜索(有输入)**:三份来源合成一个池 → 中性打分(`matchTier`,类型无关)→ 全局按相关性排序
+ *(精确 > 前缀 > 子串,同档按市值 rank)→ 按相邻类型切段。于是精确命中的项(哪怕是法币)浮到最上,
+ * 分组仍在、但顺序/成员随相关性走。目录先经 `searchCatalogue` 粗筛到 ~20(别把整份目录喂进全局排序)
+ * 再并入上游补的 `remote`。
+ *
+ * **不跨来源去重**(同一个币既已添加又在目录 → 两处各出现一次,见 #267 story 16)。空来源不产段。
  */
 export function buildTokenSections(input: {
   owned: readonly TokenOption[];
@@ -83,20 +114,39 @@ export function buildTokenSections(input: {
   catalogueTopN: number;
   remote?: readonly TokenOption[];
 }): TokenSection[] {
-  const q = input.query.trim();
-  // 自己的两组:搜索时组内过滤(limit 给足条数,别被搜索默认上限截掉自己的币),否则全给。
-  const filterOwn = (list: readonly TokenOption[]) =>
-    q ? searchCatalogue(list, q, Math.max(list.length, 1)) : [...list];
-  const catalogue = q
-    ? mergeSearchResults(searchCatalogue(input.catalogue, q), input.remote ?? [])
-    : input.catalogue.slice(0, input.catalogueTopN);
+  const q = input.query.trim().toLowerCase();
 
-  const sections: TokenSection[] = [
-    { key: "owned", items: filterOwn(input.owned) },
-    { key: "catalogue", items: catalogue },
-    { key: "fiat", items: filterOwn(input.fiat) },
+  // 浏览:固定顺序,类型本就连续 → 切段即 owned / catalogue / fiat 三组(空来源不产段)。
+  if (!q) {
+    return segmentByKind([
+      ...input.owned.map((token) => ({ token, kind: "owned" as const })),
+      ...input.catalogue
+        .slice(0, input.catalogueTopN)
+        .map((token) => ({ token, kind: "catalogue" as const })),
+      ...input.fiat.map((token) => ({ token, kind: "fiat" as const })),
+    ]);
+  }
+
+  // 搜索:合池 → 中性打分 → 全局排序 → 相邻切段。目录先粗筛到 ~20 并入 remote。
+  const catalogue = mergeSearchResults(searchCatalogue(input.catalogue, q), input.remote ?? []);
+  const pool = [
+    ...input.owned.map((token) => ({ token, kind: "owned" as const })),
+    ...input.fiat.map((token) => ({ token, kind: "fiat" as const })),
+    ...catalogue.map((token) => ({ token, kind: "catalogue" as const })),
   ];
-  return sections.filter((s) => s.items.length > 0);
+  const scored: { token: TokenOption; kind: TokenSectionKey; tier: number; order: number }[] = [];
+  pool.forEach((c, order) => {
+    const tier = matchTier(c.token, q);
+    if (tier !== null) scored.push({ token: c.token, kind: c.kind, tier, order });
+  });
+  // 相关性:档次升序 → 市值 rank 升序(无 rank 靠后)→ 入池序(稳定兜底,非类型加成)。
+  scored.sort(
+    (a, b) =>
+      a.tier - b.tier ||
+      (a.token.rank ?? Number.POSITIVE_INFINITY) - (b.token.rank ?? Number.POSITIVE_INFINITY) ||
+      a.order - b.order,
+  );
+  return segmentByKind(scored);
 }
 
 // 选币下拉的价过期阈值:超过它(或压根没价)就该刷。1h —— 选币这件事对价的新鲜度要求本就不高,

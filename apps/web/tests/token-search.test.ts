@@ -194,7 +194,7 @@ describe("选币分组:已有代币 → Tokens → 法币", () => {
     expect(items(secs, "catalogue")).toContain("ETH");
   });
 
-  it("搜索:各组内部各自过滤(复用 searchCatalogue 的分档)", () => {
+  it("搜索:不匹配的来源不产段", () => {
     const secs = buildTokenSections({
       owned: OWNED,
       fiat: [],
@@ -202,9 +202,37 @@ describe("选币分组:已有代币 → Tokens → 法币", () => {
       query: "myc",
       catalogueTopN: 3,
     });
-    // 「myc」只命中已有代币里的自定义币,目录里一条都不沾 → 只剩已有代币组。
+    // 「myc」只命中已有代币里的自定义币,目录里一条都不沾 → 只剩已有代币这一段。
     expect(keys(secs)).toEqual(["owned"]);
     expect(items(secs, "owned")).toEqual(["MYC"]);
+  });
+
+  it("搜索:精确命中浮到最上(哪怕是法币)—— 搜 USD,USD(Cash)在 USDC/USDT 之上", () => {
+    const secs = buildTokenSections({
+      owned: [],
+      fiat: [opt("USD", "US Dollar")],
+      catalogue: [opt("USDC", "USD Coin"), opt("USDT", "Tether")],
+      query: "usd",
+      catalogueTopN: 5,
+    });
+    // USD 是 symbol 完全匹配(档 0),USDC/USDT 只是前缀(档 2)→ 中性打分下 USD 全局最上;
+    // 按相邻类型切段 → 先 fiat(USD)一段,再 catalogue(USDC/USDT)一段。
+    expect(keys(secs)).toEqual(["fiat", "catalogue"]);
+    expect(items(secs, "fiat")).toEqual(["USD"]);
+    expect(items(secs, "catalogue")).toEqual(["USDC", "USDT"]);
+  });
+
+  it("相邻切段:排序把同类型隔开 → 该类型出现在多个 section", () => {
+    // 全为 symbol 前缀命中(同档),按市值 rank 排:CAT(#1,目录)→ COW(#2,已有)→ COB(#3,目录)。
+    const owned = [{ ...opt("COW", "Cow"), rank: 2 }];
+    const catalogue = [
+      { ...opt("CAT", "Cat"), rank: 1 },
+      { ...opt("COB", "Cobra"), rank: 3 },
+    ];
+    const secs = buildTokenSections({ owned, fiat: [], catalogue, query: "c", catalogueTopN: 5 });
+    // 相邻切段 → catalogue 被 owned 夹开、出现两段。
+    expect(keys(secs)).toEqual(["catalogue", "owned", "catalogue"]);
+    expect(secs.map((s) => s.items.map((t) => t.symbol))).toEqual([["CAT"], ["COW"], ["COB"]]);
   });
 
   it("搜索时上游补的那几条并进 Tokens 组(本地在前)", () => {
