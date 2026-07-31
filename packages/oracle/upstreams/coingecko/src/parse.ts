@@ -48,7 +48,9 @@ export function parseMarkets(rows: readonly MarketCoin[]): UpstreamToken[] {
   return out;
 }
 
-// /search → 前 N 条(选币 autocomplete)。无价。
+// /search → 前 N 条(选币 autocomplete)。无价,但**带 rank**:`/search` 也给 `market_cap_rank`,
+// 挂在顶层 `marketCapRank`(这条路没有 price 可放)。选币下拉只拿它当消歧徽标(有没有 / 大概多前),
+// 不参与排序 —— 它与 markets 端点的 rank 系统性对不上(#226),不可比但够消歧。
 export function parseSearch(json: SearchResult): UpstreamToken[] {
   const out: UpstreamToken[] = [];
   for (const c of json?.coins ?? []) {
@@ -58,6 +60,7 @@ export function parseSearch(json: SearchResult): UpstreamToken[] {
       symbol: c.symbol,
       name: c.name ?? c.symbol,
       logo: c.large ?? c.thumb ?? undefined,
+      marketCapRank: c.market_cap_rank ?? undefined,
     });
     if (out.length >= SEARCH_LIMIT) break;
   }

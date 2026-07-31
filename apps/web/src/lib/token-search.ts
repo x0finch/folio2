@@ -52,6 +52,40 @@ export function needsRemoteSearch(localHits: readonly TokenOption[]): boolean {
   return localHits.length < LOCAL_SEARCH_ENOUGH;
 }
 
+// 选币下拉的价过期阈值:超过它(或压根没价)就该刷。1h —— 选币这件事对价的新鲜度要求本就不高,
+// 这个窗口足够让默认列的 warm 价大多数时候零请求,只有真旧了或搜索来的无价行才触发。
+export const PRICE_STALE_MS = 60 * 60 * 1000;
+
+// 一张票的现价(下拉展示 + 刷价回填共用的形状)。
+export interface LivePrice {
+  price: number;
+  change24h?: number;
+  asOf: number;
+}
+
+/**
+ * 展示时挑「该刷价」的票:价缺失或超过 staleMs,且这次会话还没请求过(`requested`)。
+ *
+ * `requested` 是**每次打开下拉只补一次**的闸 —— 补过的票即便上游没回价(它不会进 `live`、
+ * 永远算「缺价」)也不再重发,否则每次 setState 重渲染都会把它再挑出来,刷价请求打成环。
+ * 生效价取 `live`(刷来的)优先、否则票自带的(默认列 warm 价);两者都无 asOf → 缺价 → 该刷。
+ */
+export function staleTickets(
+  tokens: readonly TokenOption[],
+  live: ReadonlyMap<string, LivePrice>,
+  requested: ReadonlySet<string>,
+  now: number,
+  staleMs = PRICE_STALE_MS,
+): string[] {
+  const out: string[] = [];
+  for (const t of tokens) {
+    if (requested.has(t.ticket)) continue;
+    const asOf = live.get(t.ticket)?.asOf ?? t.asOf;
+    if (asOf == null || now - asOf > staleMs) out.push(t.ticket);
+  }
+  return out;
+}
+
 /** 合并上游补的那几条:**本地在前**(它按市值排过档),按票去重,截到上限。 */
 export function mergeSearchResults(
   local: readonly TokenOption[],

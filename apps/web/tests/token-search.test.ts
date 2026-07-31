@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { TokenOption } from "../src/lib/token-option";
 import {
+  type LivePrice,
   LOCAL_SEARCH_ENOUGH,
   mergeSearchResults,
   needsRemoteSearch,
+  PRICE_STALE_MS,
   searchCatalogue,
+  staleTickets,
 } from "../src/lib/token-search";
 
 // 选币搜索的本地那一档:在整份下发的目录里就地筛,只有凑不够才轮到上游。
@@ -117,5 +120,39 @@ describe("合并上游补的那几条", () => {
 
   it("上游没回 / 挂了 → 就给本地那几条", () => {
     expect(mergeSearchResults(local, [])).toEqual(local);
+  });
+});
+
+describe("展示时挑该刷价的票", () => {
+  const NOW = 1_700_000_000_000;
+  const withPrice = (symbol: string, over: Partial<TokenOption> = {}): TokenOption => ({
+    ...opt(symbol, symbol),
+    ...over,
+  });
+  const noLive = new Map<string, LivePrice>();
+  const noReq = new Set<string>();
+
+  it("新鲜的不刷,过期的刷,缺价的刷", () => {
+    const tokens = [
+      withPrice("FRESH", { asOf: NOW - 1000 }), // 1s 前 → 新鲜
+      withPrice("OLD", { asOf: NOW - PRICE_STALE_MS - 1000 }), // 超过阈值 → 刷
+      withPrice("NONE"), // 无 asOf(搜索来的无价行)→ 刷
+    ];
+    expect(staleTickets(tokens, noLive, noReq, NOW)).toEqual([
+      tokens[1]?.ticket,
+      tokens[2]?.ticket,
+    ]);
+  });
+
+  it("刷来的价(live)盖过票自带的旧价 —— 补过就不再算过期", () => {
+    const tk = withPrice("OLD", { asOf: NOW - PRICE_STALE_MS - 1000 });
+    const live = new Map<string, LivePrice>([[tk.ticket, { price: 1, asOf: NOW }]]);
+    expect(staleTickets([tk], live, noReq, NOW)).toEqual([]);
+  });
+
+  it("已请求过的票不再挑 —— 每次打开只补一次,防刷价打成环", () => {
+    // 上游没回价的票不会进 live、永远算缺价;requested 才是那道闸。
+    const tk = withPrice("NORESP"); // 无价、也不在 live 里
+    expect(staleTickets([tk], noLive, new Set([tk.ticket]), NOW)).toEqual([]);
   });
 });

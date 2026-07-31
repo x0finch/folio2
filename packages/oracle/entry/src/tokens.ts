@@ -50,6 +50,9 @@ export interface Tokens {
   // 这一刻还不建行(他可能就把抽屉关了,留一堆没人要的代币行)。行是提交时才由 mint 建的。
   // 取不到(上游不认识 / 网络出错)→ undefined,表单让用户自己填。
   priceByRef(ref: TokenRef): Promise<TokenPrice | undefined>;
+  // 选币下拉的 SWR 刷价:一批 ref 现取(`priceByRef` 的批量版)。同样**不建行、不写缓存** ——
+  // 用户还在下拉里划,行只在提交时由 mint 建。上游失败 → 空 Map,那几行显示无价(不抛)。
+  pricesByRefs(refs: readonly TokenRef[]): Promise<Map<TokenRef, TokenPrice>>;
   // SWR 批量刷价:给定 token 里价 stale/缺失的,一次批量回源写回。返回刷新条数。
   refreshStalePrices(ids: readonly string[]): Promise<number>;
   // 同上,但刷的是 symbol/name/logo,而且是**覆盖**(上游权威,见 TokenStore.putInfo)。
@@ -173,6 +176,17 @@ export function createTokens({
       } catch {
         // 上游失败(限流 / 网络)→ 表单没有预填价,用户手填。与别处同口径:不抛。
         return undefined;
+      }
+    },
+
+    async pricesByRefs(refs) {
+      if (refs.length === 0) return new Map();
+      try {
+        // upstream 已按 IDS_PER_REQUEST 分块(#245),这里整批交给它。
+        return await upstream.fetchPrices(refs);
+      } catch {
+        // 上游失败 → 空 Map,那几行显示无价。与 priceByRef 同口径:不抛。
+        return new Map();
       }
     },
 

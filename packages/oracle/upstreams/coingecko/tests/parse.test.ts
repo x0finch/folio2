@@ -62,6 +62,17 @@ describe("parseSearch / parseSimplePrice / parseContract / parsePriceSeries", ()
     ]);
   });
 
+  it("search:带上 market_cap_rank(选币下拉的消歧徽标);缺则不带", () => {
+    const out = parseSearch({
+      coins: [
+        { id: "usd-coin", symbol: "usdc", name: "USD Coin", large: "l.png", market_cap_rank: 6 },
+        { id: "bridged-usdc", symbol: "usdc", name: "Bridged USDC" }, // 无 rank
+      ],
+    });
+    expect(out[0]?.marketCapRank).toBe(6);
+    expect(out[1]?.marketCapRank).toBeUndefined();
+  });
+
   it("simple/price:按 ref 索引;缺 usd 的条目跳过;有 last_updated_at 则用它(秒→毫秒)", () => {
     const out = parseSimplePrice(
       {
