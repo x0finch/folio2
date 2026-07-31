@@ -73,11 +73,6 @@ export interface TokenStore {
   // 由服务层从 cache 的 warm blob 筛出后交给消歧(见 services/cache.ts);此处只为
   // 「本地已认识的同名币」留一条路,实现可直接查 ref 行。
   candidatesBySymbol(symbol: string): Promise<TokenCandidate[]>;
-
-  // 这个用户已添加过的**全部** Token(选币下拉「已有代币」组用,#269)。返回整份 info(含
-  // 当前上游那一档的 `ref`,没被认出来的行 ref 为 null)。**不门控 info TTL**,与 getByIds 同口径。
-  // 条数量级 = 用户实际持有的币种数(几十到数百),整份返回;调用方按需筛/排。
-  listAll(): Promise<TokenInfo[]>;
 }
 
 // —— per-user:价 facet + 历史日价(短 TTL;「价」是一类,共用同一套 SWR 编排)——

@@ -124,31 +124,6 @@ describe("按用户隔离", () => {
   });
 });
 
-describe("listAll:该用户全部 token(选币「已有代币」组)", () => {
-  it("返回本用户每一行 + symbol/name/logo;认出的带上游 ref,自定义币 ref 为 null", async () => {
-    const store = storeFor(USER_A);
-    await store.create(seed("USDC", "USD Coin"), [USDC_ETH, USDC_UP]); // 认出来的
-    await store.create(seed("MYC", "My Coin"), ["manual/custom:MYC"]); // 自定义 symbol,无上游 ref
-
-    const all = await store.listAll();
-    expect(all).toHaveLength(2);
-    const byS = new Map(all.map((t) => [t.symbol, t]));
-    expect(byS.get("USDC")).toMatchObject({ symbol: "USDC", name: "USD Coin", ref: USDC_UP });
-    expect(byS.get("MYC")).toMatchObject({ symbol: "MYC", name: "My Coin", ref: null });
-  });
-
-  it("按用户隔离:只返回调用者的行", async () => {
-    await storeFor(USER_A).create(seed("USDC"), [USDC_UP]);
-    await storeFor(USER_B).create(seed("ETH"), ["coingecko/issued:ethereum"]);
-    const a = await storeFor(USER_A).listAll();
-    expect(a.map((t) => t.symbol)).toEqual(["USDC"]);
-  });
-
-  it("一个 token 都没有 → 空数组", async () => {
-    expect(await storeFor(USER_A).listAll()).toEqual([]);
-  });
-});
-
 describe("多链归一", () => {
   it("同一个币的第二条链 ref 只加一行,不建新 Token", async () => {
     const store = storeFor(USER_A);

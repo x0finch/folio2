@@ -12,7 +12,6 @@ import {
   listFiatOptions,
   listTokenCatalogue,
   listTokens,
-  listUserTokens,
   refreshTokenPrices,
 } from "../lib/server/tokens";
 import type { TokenOption } from "../lib/token-option";
@@ -145,10 +144,14 @@ export function TokenCombobox({
   value,
   onChange,
   onManual,
+  owned = [],
 }: {
   value: TokenOption | null;
   onChange: (token: TokenOption | null) => void;
   onManual: (query: string) => void;
+  // 「已有代币」组的数据。**只在 manual 账户侧边栏**由父层传入(该侧边栏账户当前已有的币);
+  // 其它出现处(新建账户模态)不传 → 缺省空 → 无该组(#269 语义修正)。
+  owned?: readonly TokenOption[];
 }) {
   const t = useTranslations("Accounts");
   const [open, setOpen] = useState(false);
@@ -166,15 +169,6 @@ export function TokenCombobox({
     staleTime: CATALOGUE_STALE_MS,
   });
   const catalogue = useMemo(() => catalogueQuery.data ?? [], [catalogueQuery.data]);
-
-  // 「已有代币」组的数据(#269):该用户已添加过的币。同 catalogue 挂载即预取 —— 展开选币前
-  // 就落地。**per-user**,故与目录不同 key、不共享那份边缘缓存。
-  const ownedQuery = useQuery({
-    queryKey: ["user-tokens"],
-    queryFn: () => listUserTokens(),
-    staleTime: CATALOGUE_STALE_MS,
-  });
-  const owned = useMemo(() => ownedQuery.data ?? [], [ownedQuery.data]);
 
   // 本地筛:随每次按键即时重算,不出网。
   const local = useMemo(() => searchCatalogue(catalogue, search), [catalogue, search]);
@@ -280,7 +274,7 @@ export function TokenCombobox({
     };
   }, [open, settled, flatItems, live]);
   // 转圈只在「手上一条都没有、还在等」时出现:本地有命中就直接显示,上游那趟在后台补。
-  // 已有代币那趟(ownedQuery)是补充项,挂了也不该盖住目录 → 不进 loading/error 门。
+  // 「已有代币」由父层直接传 prop(不出网)→ 不参与 loading/error 门。
   const isLoading =
     flatItems.length === 0 && (catalogueQuery.isLoading || (wantRemote && remoteQuery.isPending));
   const isError =

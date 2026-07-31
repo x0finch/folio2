@@ -149,6 +149,7 @@ function ActivityForm({
   defaultToken,
   lockToken = false,
   edit,
+  owned,
   onClose,
   onSubmit,
   onEdit,
@@ -156,6 +157,7 @@ function ActivityForm({
   defaultToken: PickedToken | null;
   lockToken?: boolean; // 从 token 行「编辑」进入:锁定该 token,不可改
   edit?: EditActivityInput | null; // 编辑既有活动:预填 + 锁定 token + 单条保存(非批量)
+  owned?: readonly TokenOption[]; // 选币「已有代币」组:该侧边栏账户当前已有的币(#269)
   onClose: () => void;
   onSubmit: (drafts: ActivityDraft[]) => Promise<{ ok: boolean }>;
   onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => Promise<{ ok: boolean }>;
@@ -419,6 +421,7 @@ function ActivityForm({
       ) : (
         <TokenCombobox
           value={picked}
+          owned={owned}
           onChange={onPick}
           onManual={(q) => {
             setManualMode(true);
@@ -640,6 +643,7 @@ export function ManualActivityModal({
   defaultToken,
   lockToken = false,
   edit,
+  owned,
   onClose,
   onSubmit,
   onEdit,
@@ -648,6 +652,7 @@ export function ManualActivityModal({
   defaultToken: PickedToken | null; // 默认选中(最新一笔活动的 token,或 token 行进入时锁定的 token)
   lockToken?: boolean; // token 行「编辑」进入:锁定 token 不可改
   edit?: EditActivityInput | null; // 活动行「编辑」进入:预填既有活动、单条保存
+  owned?: readonly TokenOption[]; // 选币「已有代币」组:该侧边栏账户当前已有的币(#269)
   onClose: () => void;
   onSubmit: (drafts: ActivityDraft[]) => Promise<{ ok: boolean }>;
   onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => Promise<{ ok: boolean }>;
@@ -674,6 +679,7 @@ export function ManualActivityModal({
             defaultToken={defaultToken}
             lockToken={lockToken}
             edit={edit}
+            owned={owned}
             onClose={onClose}
             onSubmit={onSubmit}
             onEdit={onEdit}

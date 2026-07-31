@@ -35,6 +35,7 @@ import {
   updateManualActivity,
 } from "../lib/server/manual-activities";
 import { getManualAccount, removeManualToken } from "../lib/server/manual-tokens";
+import type { TokenOption } from "../lib/token-option";
 import { HoverDetail } from "./hover-detail";
 import { type EditActivityInput, ManualActivityModal } from "./manual-activity-modal";
 import { Portal } from "./portal";
@@ -103,6 +104,21 @@ export function ManualTokensPanel({
     [balances],
   );
   const tokenById = useMemo(() => new Map(tokens.map((tk) => [tk.id, tk])), [tokens]);
+
+  // 选币「已有代币」组(#269):**只列这个侧边栏账户当前已有的币**。只收有 ticket 的(能选中的
+  // 才成 TokenOption)—— 法币由 Fiat 组覆盖、无 ticket 的自定义币走「手动输入」路径。name/logo 取
+  // 实时富化的 balances(缺则回退 symbol);价留空,由下拉 SWR 刷价按需补。
+  const ownedOptions = useMemo<TokenOption[]>(
+    () =>
+      tokens.flatMap((tk) => {
+        if (!tk.ticket) return [];
+        const bal = balBySymbol.get(tk.symbol.toUpperCase());
+        return [
+          { ticket: tk.ticket, symbol: tk.symbol, name: bal?.name ?? tk.symbol, logo: bal?.logo },
+        ];
+      }),
+    [tokens, balBySymbol],
+  );
 
   const pickedTokenOf = (tk: (typeof tokens)[number]): PickedToken => {
     const bal = balBySymbol.get(tk.symbol.toUpperCase());
@@ -384,6 +400,7 @@ export function ManualTokensPanel({
         defaultToken={activity.token}
         lockToken={activity.lock}
         edit={activity.edit}
+        owned={ownedOptions}
         onClose={closeActivity}
         onSubmit={async (drafts) => {
           const res = await createManualActivities({

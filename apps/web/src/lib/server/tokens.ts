@@ -2,19 +2,16 @@ import {
   DEFAULT_TOP_N,
   FIAT_NAMER,
   fiatCodeOf,
-  type TokenInfo,
   type TokenRef,
   tokenTicket,
   type UpstreamToken,
 } from "@folio/oracle";
-import { tokenRef } from "@folio/oracle-ref";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { z } from "zod";
 import { buildFiatOptions } from "../fiat-options";
 import { pickLocale, readLocaleCookie } from "../i18n/detect";
-import { MANUAL_CONNECTOR_ID } from "../manual-connector";
 import type { TokenOption } from "../token-option";
 import { NAMER, oracleFor } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
@@ -127,33 +124,6 @@ export const listTokenCatalogue = createServerFn({ method: "GET" })
       async () => (await oracleFor(context.userId).tokens.topTokens(DEFAULT_TOP_N)).map(toOption),
     );
     tokenLog.debug("catalogue: ok", { count: out.length });
-    return out;
-  });
-
-// 已添加过的 token → 下拉项(#269 选币「已有代币」组)。**票 = 这条 ref 原样编一层**:
-// 上游认出来的行有上游 ref,提交时 mint 解票直接锚回同一条;自定义 symbol 币没有上游 ref
-// (info.ref 为 null),退回它的 `custom:` ref —— 该票 decode 会因命名者不是当前上游而失败,
-// mint 随即按 symbol 回退到同一条自定义币(见 server/internal/manual.ts 的 manualTokenRef)。
-// 两种都给出**唯一非空票**,渲染层要拿它当 React key(见 buildTokenSections 不去重的注释)。
-// logo 取源图、没有则连接器备用图(与展示回退链一致);价留空,由下拉 SWR 刷价按需补。
-const ownedOption = (info: TokenInfo): TokenOption => {
-  const ref = info.ref ?? tokenRef.custom(MANUAL_CONNECTOR_ID, info.symbol);
-  return {
-    ticket: tokenTicket.encode(ref),
-    symbol: info.symbol,
-    name: info.name,
-    logo: info.logo ?? info.providerLogo,
-  };
-};
-
-// 选币下拉「已有代币」组:该用户已添加过的全部 token(含自定义 symbol)。**per-user 数据,
-// 绝不走边缘缓存**(那份跨用户共享,原则 #6)—— 直接读本用户参考层,不出网、不建行。
-export const listUserTokens = createServerFn({ method: "GET" })
-  .middleware([requireAuth])
-  .handler(async ({ context }): Promise<TokenOption[]> => {
-    tokenLog.debug("userTokens: enter");
-    const out = (await oracleFor(context.userId).tokens.listOwned()).map(ownedOption);
-    tokenLog.debug("userTokens: ok", { count: out.length });
     return out;
   });
 
