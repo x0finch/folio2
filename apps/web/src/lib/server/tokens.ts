@@ -1,5 +1,7 @@
 import {
   DEFAULT_TOP_N,
+  FIAT_NAMER,
+  fiatCodeOf,
   type TokenInfo,
   type TokenRef,
   tokenTicket,
@@ -172,14 +174,25 @@ export const listTokens = createServerFn({ method: "GET" })
   });
 
 // 选中之后取现价预填单价(用户可改)。**票解不开就当没选** —— 它是从网络上来的。
+// 票可携带当前上游(加密币)或 `fiat`(法币)命名者,两者都放行(见 mintHolding 同款集合)。
 export const getTokenPrice = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ ticket: z.string().min(1) }))
   .handler(async ({ data, context }) => {
-    const ref = tokenTicket.decode(data.ticket, NAMER);
+    const ref = tokenTicket.decode(data.ticket, [NAMER, FIAT_NAMER]);
     if (!ref) {
       tokenLog.debug("tokenPrice: bad ticket");
       return null;
+    }
+    // 法币无上游市价 → 走 FX 现算预填(USD=1,其余当前汇率;ADR 0025)。取不到汇率 → null,
+    // 让用户自己填(别过度设计)。白名单外的 `fiat/issued:XXX` → fiatCodeOf 为空,落回下面通用路。
+    const code = fiatCodeOf(ref);
+    if (code) {
+      const usdPerUnit = await oracleFor(context.userId).fx.resolve(code);
+      tokenLog.debug("tokenPrice: fiat", { found: usdPerUnit != null });
+      return usdPerUnit != null
+        ? { unitPrice: usdPerUnit, change24h: null, asOf: Date.now() }
+        : null;
     }
     const hit = await oracleFor(context.userId).tokens.priceByRef(ref);
     tokenLog.debug("tokenPrice: ok", { found: !!hit });

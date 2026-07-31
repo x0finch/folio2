@@ -61,7 +61,9 @@ async function mintHolding(
 ): Promise<string> {
   const ref = manualTokenRef({
     symbol: picked.symbol,
-    ref: picked.ticket ? tokenTicket.decode(picked.ticket, NAMER) : undefined,
+    // 票的命名者可以是当前上游(加密币)或 `fiat`(法币,ADR 0025 / #272)—— 两者都是我们发的,
+    // 都放行;别家命名者仍被挡(#223)。解出的 fiat ref 交给 mint 建 canonical 法币行(#270)。
+    ref: picked.ticket ? tokenTicket.decode(picked.ticket, [NAMER, FIAT_NAMER]) : undefined,
   });
   const symbol = picked.symbol.trim().toUpperCase();
   const ids = await oracleFor(userId).mint.of([{ ref, seed: { symbol } }]);

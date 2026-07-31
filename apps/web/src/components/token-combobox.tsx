@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useTranslations } from "use-intl";
+import { useLocale, useTranslations } from "use-intl";
+import { buildFiatOptions } from "../lib/fiat-options";
 import { formatNumber } from "../lib/format-number";
 import { matchSegments } from "../lib/highlight";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
@@ -150,6 +151,7 @@ export function TokenCombobox({
   onManual: (query: string) => void;
 }) {
   const t = useTranslations("Accounts");
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -196,19 +198,22 @@ export function TokenCombobox({
     staleTime: 60_000,
   });
 
-  // 分组(#269):已有代币 → 法币(本票空)→ Tokens(目录)。各组内部按 search 过滤,目录再并进
-  // 上游补的那几条。空组不出现。法币组由后续票填,这里恒传空数组占位。
+  // 法币组(#272):`SUPPORTED_CURRENCIES` 的 10 种法币,纯本地常量(随 locale 出货币名),无网络。
+  const fiat = useMemo(() => buildFiatOptions(locale), [locale]);
+
+  // 分组(#269):已有代币 → 法币 → Tokens(目录)。各组内部按 search 过滤,目录再并进
+  // 上游补的那几条。空组不出现。
   const sections = useMemo(
     () =>
       buildTokenSections({
         owned,
-        fiat: [],
+        fiat,
         catalogue,
         query: search,
         catalogueTopN: TOP_TOKENS_LIMIT,
         remote: remoteQuery.data ?? [],
       }),
-    [owned, catalogue, search, remoteQuery.data],
+    [owned, fiat, catalogue, search, remoteQuery.data],
   );
 
   // 键盘导航 / 刷价 / 空态判断都按**扁平化后的可见项**走(active 是它的下标)。

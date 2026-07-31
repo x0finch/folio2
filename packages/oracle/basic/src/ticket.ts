@@ -47,12 +47,17 @@ export const tokenTicket = {
     return toB64Url(ref);
   },
 
-  // 解不开 / 不是合规 ref / 命名者不是 `namer` → 一律 undefined。**调用方必须处理这一档** ——
+  // 解不开 / 不是合规 ref / 命名者不在 `namer` 之内 → 一律 undefined。**调用方必须处理这一档** ——
   // 票是从网络上来的,当不合规的输入对待,而不是当自己刚编出来的东西。
+  //
+  // `namer` 可给**一组**:我们如今在不止一位命名者下发票 —— 当前上游(coingecko)发加密币的票,
+  // `fiat` 发法币的票(ADR 0025 / #272)。两者都是「我们发出去的那张」,收到时都得放行。传一组
+  // 就是「命名者必须是其中之一」;单个仍照旧收(`string` 分支)。挡的仍是那件事:别家命名者
+  // (`evil/issued:x`)不在集合里 → 不收,否则手编的票会让用户敲的 symbol 重新变成可信线索(#223)。
   //
   // 回的是**规范形**(不是原样回抛):这条 ref 会被直接拿去 mint、落进 `token_refs`,
   // 而表里只能有规范形 —— 否则 `CoinGecko/ISSUED:x` 和 `coingecko/issued:x` 就是两行。
-  decode(ticket: string, namer: string): TokenRef | undefined {
+  decode(ticket: string, namer: string | readonly string[]): TokenRef | undefined {
     if (!ticket || !B64URL.test(ticket)) return undefined;
     let raw: string;
     try {
@@ -63,7 +68,8 @@ export const tokenTicket = {
     const parsed = parseTokenRef(raw);
     if (parsed.kind === "unknown") return undefined;
     // 命名者按规范形比 —— 两边都过 parse/normalize,不拿原串比大小写。
-    if (parsed.namer !== normalizeNamer(namer)) return undefined;
+    const allowed = (typeof namer === "string" ? [namer] : namer).map(normalizeNamer);
+    if (!allowed.includes(parsed.namer)) return undefined;
     return formatTokenRef(parsed);
   },
 };

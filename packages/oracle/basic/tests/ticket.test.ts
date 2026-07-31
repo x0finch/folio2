@@ -101,3 +101,31 @@ describe("命名者对不上 → 不收(#223:issued 是个声明,得验)", () =>
     expect(tokenTicket.decode(old, "someother-source")).toBeUndefined();
   });
 });
+
+// —— 一组命名者:我们如今在不止一位命名者下发票(ADR 0025 / #272:上游发加密币、`fiat` 发法币)——
+// 传一组 = 「命名者必须是其中之一」。这是法币端到端记账的**关键校验点**:mintHolding 用
+// `[coingecko, fiat]` 解票,fiat 票必须能解回 `fiat/issued:<CODE>`,否则提交时掉回 custom、建不出法币行。
+describe("一组命名者(#272:法币票也是我们发的)", () => {
+  const NAMERS = ["coingecko", "fiat"] as const;
+
+  it("法币票在集合里 → 解回 fiat/issued:<CODE>", () => {
+    const t = tokenTicket.encode("fiat/issued:USD");
+    expect(tokenTicket.decode(t, NAMERS)).toBe("fiat/issued:USD");
+    expect(tokenTicket.decode(t, "fiat")).toBe("fiat/issued:USD");
+  });
+
+  it("同一组也照样收当前上游的加密币票", () => {
+    const t = tokenTicket.encode("coingecko/issued:usd-coin");
+    expect(tokenTicket.decode(t, NAMERS)).toBe("coingecko/issued:usd-coin");
+  });
+
+  it("只给 coingecko(旧签名)→ 法币票被拒 —— 正是修复前那条掉回 custom 的路", () => {
+    const t = tokenTicket.encode("fiat/issued:USD");
+    expect(tokenTicket.decode(t, "coingecko")).toBeUndefined();
+  });
+
+  it("不在集合里的别家命名者仍被挡(#223 不因放宽成组而失守)", () => {
+    const forged = tokenTicket.encode("evil/issued:whatever");
+    expect(tokenTicket.decode(forged, NAMERS)).toBeUndefined();
+  });
+});
