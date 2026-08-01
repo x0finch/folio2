@@ -1,6 +1,6 @@
 import { Button, Input } from "@folio/ui";
 import { Fingerprint } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { signIn } from "../lib/auth-client";
 import { useIdleLock } from "../lib/hooks/use-idle-lock";
@@ -27,6 +27,20 @@ function LockOverlay({ userEmail, onUnlock }: { userEmail: string; onUnlock: () 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const supportsPasskey = usePasskeySupport();
+
+  // 锁定期间锁住底层滚动:fixed 遮罩只是视觉盖住,滚轮/触摸会穿透(scroll chaining)到底下的
+  // App。锁 html(文档滚动容器)+ body 双保险;LockOverlay 仅锁定时渲染,挂载即锁、卸载即还原。
+  useEffect(() => {
+    const root = document.documentElement;
+    const prevRoot = root.style.overflow;
+    const prevBody = document.body.style.overflow;
+    root.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      root.style.overflow = prevRoot;
+      document.body.style.overflow = prevBody;
+    };
+  }, []);
 
   async function onPasskey() {
     setError(false);
