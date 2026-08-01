@@ -6,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
   Checkbox,
+  Input,
   Label,
   MorphingModal,
   Separator,
@@ -16,8 +17,8 @@ import {
 } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
-import { Fingerprint, LogOut } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Fingerprint, LogOut, Pencil, Trash2 } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../components/currency-switcher";
 import { useMountedTheme } from "../../hooks/use-theme";
@@ -137,17 +138,37 @@ function AccountCard({ user }: { user: AccountUser }) {
   );
 }
 
-// Passkey 卡(#283):注册入口 —— 用 Face ID / Touch ID / 安全钥匙登录(首因子,与密码并列)。
-// 仅浏览器支持 WebAuthn 时露注册按钮;不支持给一行说明。凭据列表/删除/重命名见片2(#284)。
+// 列表项:仅取渲染需要的字段(listUserPasskeys 返回的 Passkey 还含 publicKey 等,此处用不到)。
+interface PasskeyRow {
+  id: string;
+  name?: string | null;
+  createdAt: string | Date; // fetch 反序列化后可能是 string,渲染时统一 new Date()
+}
+
+// Passkey 卡(#283 注册 + #284 管理):用 Face ID / Touch ID / 安全钥匙登录(首因子,与密码并列)。
+// 仅浏览器支持 WebAuthn 时露入口。列表 / 重命名 / 删除全走 authClient.passkey.*(client 处理 WebAuthn
+// ceremony,非 server fn);删除带二次确认。删光不影响密码登录,故无「至少留一个」下限。见 ADR 0028。
 function PasskeysCard() {
   const t = useTranslations("Settings");
   const tc = useTranslations("Common");
+  const locale = useLocale();
   const [supported, setSupported] = useState(false);
+  const [passkeys, setPasskeys] = useState<PasskeyRow[] | null>(null); // null = 加载中
   const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState<PasskeyRow | null>(null);
+  const [renaming, setRenaming] = useState<PasskeyRow | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const load = useCallback(async () => {
+    const res = await authClient.passkey.listUserPasskeys();
+    setPasskeys(res.data ?? []);
+  }, []);
 
   useEffect(() => {
-    setSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
-  }, []);
+    const ok = typeof window !== "undefined" && !!window.PublicKeyCredential;
+    setSupported(ok);
+    if (ok) load().catch(() => setPasskeys([]));
+  }, [load]);
 
   async function onAdd() {
     setBusy(true);
@@ -158,6 +179,7 @@ function PasskeysCard() {
         return;
       }
       toast.success(t("passkeyAdded"));
+      await load();
     } catch {
       toast.error(t("passkeyAddFailed")); // 用户取消 / 认证器失败等
     } finally {
@@ -165,24 +187,133 @@ function PasskeysCard() {
     }
   }
 
+  async function onRemove() {
+    const pk = removing;
+    setRemoving(null);
+    if (!pk) return;
+    const res = await authClient.passkey.deletePasskey({ id: pk.id });
+    if (res?.error) {
+      toast.error(res.error.message ?? t("passkeyRemoveFailed"));
+      return;
+    }
+    toast.success(t("passkeyRemoved"));
+    await load();
+  }
+
+  function openRename(pk: PasskeyRow) {
+    setRenameValue(pk.name ?? "");
+    setRenaming(pk);
+  }
+
+  async function onRename() {
+    const pk = renaming;
+    setRenaming(null);
+    const name = renameValue.trim();
+    if (!pk || !name || name === pk.name) return;
+    const res = await authClient.passkey.updatePasskey({ id: pk.id, name });
+    if (res?.error) {
+      toast.error(res.error.message ?? t("passkeyRenameFailed"));
+      return;
+    }
+    await load();
+  }
+
+  const fmtDate = (d: string | Date) =>
+    new Date(d).toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>{t("passkeys")}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <p className="text-sm text-muted-foreground">
-          {supported ? t("passkeysHint") : t("passkeyUnsupported")}
-        </p>
-        {supported && (
-          <div className="flex justify-end">
-            <Button variant="outline" disabled={busy} onClick={onAdd}>
-              <Fingerprint className="size-4" />
-              {busy ? tc("verifying") : t("addPasskey")}
-            </Button>
-          </div>
+        {!supported ? (
+          <p className="text-muted-foreground text-sm">{t("passkeyUnsupported")}</p>
+        ) : (
+          <>
+            <p className="text-muted-foreground text-sm">{t("passkeysHint")}</p>
+            {passkeys && passkeys.length > 0 && (
+              <ul className="flex flex-col gap-2">
+                {passkeys.map((pk) => (
+                  <li key={pk.id} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 leading-tight">
+                      <div className="truncate font-medium text-sm">
+                        {pk.name || t("passkeyUnnamed")}
+                      </div>
+                      <div className="text-muted-foreground text-xs">
+                        {t("passkeyAddedOn", { date: fmtDate(pk.createdAt) })}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={t("passkeyRename")}
+                        onClick={() => openRename(pk)}
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={t("removePasskey")}
+                        className="hover:text-destructive"
+                        onClick={() => setRemoving(pk)}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {passkeys?.length === 0 && (
+              <p className="text-muted-foreground text-sm">{t("passkeysEmpty")}</p>
+            )}
+            <div className="flex justify-end">
+              <Button variant="outline" disabled={busy} onClick={onAdd}>
+                <Fingerprint className="size-4" />
+                {busy ? tc("verifying") : t("addPasskey")}
+              </Button>
+            </div>
+          </>
         )}
       </CardContent>
+
+      {/* 删除确认(丢设备要能撤销 → 删后该 passkey 不能再登录)。 */}
+      <MorphingModal viewId={removing ? "passkey-remove" : null} onClose={() => setRemoving(null)}>
+        <div className="text-left">
+          <p className="font-semibold text-base">{t("passkeyRemoveTitle")}</p>
+          <p className="mt-1.5 text-muted-foreground text-sm">
+            {t("passkeyRemoveBody", { name: removing?.name || t("passkeyUnnamed") })}
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setRemoving(null)}>
+              {tc("cancel")}
+            </Button>
+            <Button variant="destructive" onClick={onRemove}>
+              {t("removePasskey")}
+            </Button>
+          </div>
+        </div>
+      </MorphingModal>
+
+      {/* 重命名(认器可能多台,取个能认出的名)。 */}
+      <MorphingModal viewId={renaming ? "passkey-rename" : null} onClose={() => setRenaming(null)}>
+        <div className="text-left">
+          <p className="font-semibold text-base">{t("passkeyRenameTitle")}</p>
+          <div className="mt-3 flex flex-col gap-2">
+            <Label htmlFor="passkey-name">{t("passkeyName")}</Label>
+            <Input id="passkey-name" value={renameValue} onChange={(v) => setRenameValue(v)} />
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setRenaming(null)}>
+              {tc("cancel")}
+            </Button>
+            <Button onClick={onRename}>{tc("save")}</Button>
+          </div>
+        </div>
+      </MorphingModal>
     </Card>
   );
 }

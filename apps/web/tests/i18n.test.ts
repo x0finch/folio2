@@ -90,18 +90,21 @@ describe("messages (via createTranslator)", () => {
     expect(t("Accounts.credSavedSyncing")).toBe("已保存,正在同步…");
   });
 
-  // Passkey 登录 片1(#283,ADR 0028):设置页注册入口 + 登录页 passkey 入口文案,中英双语都产出串。
+  // Passkey 登录(#283 注册/登录 + #284 管理,ADR 0028):设置页管理 + 登录入口文案,中英双语都产出串。
   it("English: new passkey keys resolve", () => {
     const t = createTranslator({ locale: "en", messages: messages.en });
     expect(t("Settings.passkeys")).toBe("Passkeys");
     expect(t("Settings.addPasskey")).toBe("Add passkey");
     expect(t("Settings.passkeyUnsupported")).toBe("This browser doesn't support passkeys.");
+    expect(t("Settings.removePasskey")).toBe("Remove");
+    expect(t("Settings.passkeyAddedOn", { date: "Jan 1" })).toBe("Added Jan 1");
     expect(t("Login.signInWithPasskey")).toBe("Sign in with passkey");
   });
   it("Chinese: new passkey keys resolve", () => {
     const t = createTranslator({ locale: "zh", messages: messages.zh });
     expect(t("Settings.passkeys")).toBe("通行密钥 (Passkey)");
     expect(t("Settings.addPasskey")).toBe("添加 passkey");
+    expect(t("Settings.removePasskey")).toBe("删除");
     expect(t("Login.signInWithPasskey")).toBe("用 passkey 登录");
   });
 });
