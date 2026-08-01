@@ -265,6 +265,10 @@ const en = {
     importMergeBody:
       "Your library already has data. Importing merges the file in — re-importing the same file won't create duplicates, and different files are combined. Continue?",
     importMergeConfirm: "Import",
+    autoLock: "Auto-lock",
+    autoLockDesc: "Blur your holdings after you step away; unlock with a passkey or password.",
+    autoLockAfter: "Idle (minutes)",
+    autoLockNever: "Never",
     appearance: "Appearance",
     theme: "Theme",
     themeLight: "Light",
@@ -600,6 +604,10 @@ const zh: Messages = {
     importMergeBody:
       "你的库里已有数据。导入会把文件合并进来——同一文件再导一遍不会产生重复,不同文件会合并。继续?",
     importMergeConfirm: "导入",
+    autoLock: "自动锁定",
+    autoLockDesc: "离开一会儿就遮住持仓,回来用 passkey 或密码解锁。",
+    autoLockAfter: "闲置(分钟)",
+    autoLockNever: "永不",
     appearance: "外观",
     theme: "主题",
     themeLight: "浅色",

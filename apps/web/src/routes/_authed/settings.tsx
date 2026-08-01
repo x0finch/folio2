@@ -25,6 +25,7 @@ import { EditableName } from "../../components/editable-name";
 import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signOut } from "../../lib/auth-client";
+import { useIdleTimeout } from "../../lib/hooks/use-idle-timeout";
 import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { importData } from "../../lib/import-data";
@@ -71,6 +72,7 @@ function Settings() {
     <div className="flex flex-col gap-6">
       <AccountCard user={user} />
       <PasskeysCard />
+      <AutoLockCard />
       <AppearanceCard />
       <ProviderKeysCard status={status} />
       <ValuationCard mode={valuation.valuationMode} />
@@ -328,6 +330,33 @@ function PasskeysCard() {
 
 // 外观卡:主题(三态 segmented)· 语言(中/EN segmented)· 币种(Select)。
 // segmented = beUI Tabs(pill,仅 list,不挂 panel);中/EN 是语言自称,不本地化。
+// 自动锁定卡(#292，ADR 0029)：闲置多久后遮住持仓。偏好每设备独立(localStorage)、改动即时生效。
+function AutoLockCard() {
+  const t = useTranslations("Settings");
+  const { raw, setRaw } = useIdleTimeout();
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("autoLock")}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <p className="text-muted-foreground text-sm">{t("autoLockDesc")}</p>
+        <SettingRow label={t("autoLockAfter")}>
+          <Tabs value={raw} onValueChange={setRaw} variant="pill">
+            <TabsList className="bg-muted dark:bg-background">
+              <TabsTrigger value="1">1</TabsTrigger>
+              <TabsTrigger value="5">5</TabsTrigger>
+              <TabsTrigger value="15">15</TabsTrigger>
+              <TabsTrigger value="30">30</TabsTrigger>
+              <TabsTrigger value="never">{t("autoLockNever")}</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </SettingRow>
+      </CardContent>
+    </Card>
+  );
+}
+
 function AppearanceCard() {
   const t = useTranslations("Settings");
   const router = useRouter();
