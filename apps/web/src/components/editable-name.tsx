@@ -89,11 +89,12 @@ export function EditableName({
         <button
           type="button"
           onClick={() => onEditingChange(true)}
-          className="relative block max-w-full rounded-md text-left outline-none"
+          className="relative block max-w-full rounded-md text-left outline-none pointer-coarse:pr-5"
         >
           <span className={cn("block truncate", displayClassName)}>{value || placeholder}</span>
+          {/* 铅笔收在 button 内右侧(right-0),配合上面 pointer-coarse:pr-5 留位 → 不伸出、不压后面的 badge。 */}
           <Pencil
-            className="-right-4 -translate-y-1/2 pointer-events-none absolute top-1/2 size-3 text-muted-foreground opacity-0 pointer-coarse:opacity-50"
+            className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-0 size-3 text-muted-foreground opacity-0 pointer-coarse:opacity-50"
             aria-hidden
           />
         </button>
