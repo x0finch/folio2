@@ -33,11 +33,15 @@ export function useIdleTimeout(): {
   useEffect(() => {
     const sync = () => setRawState(readRaw());
     sync(); // 挂载即读实际偏好
+    // storage 事件对所有 key 触发，只在改的是本键(或整表被清，key===null)时才重读。
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === IDLE_TIMEOUT_STORAGE_KEY || e.key === null) sync();
+    };
     window.addEventListener(IDLE_TIMEOUT_EVENT, sync);
-    window.addEventListener("storage", sync);
+    window.addEventListener("storage", onStorage);
     return () => {
       window.removeEventListener(IDLE_TIMEOUT_EVENT, sync);
-      window.removeEventListener("storage", sync);
+      window.removeEventListener("storage", onStorage);
     };
   }, []);
 

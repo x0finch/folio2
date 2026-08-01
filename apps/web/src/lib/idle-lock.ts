@@ -5,8 +5,8 @@
 /** 默认闲置超时：5 分钟。仅本模块内部用(parseIdleTimeout 的回落值)。 */
 const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
-/** 设置页可选的闲置分钟数(pill 顺序，末尾另有「永不」)。仅本模块内部用(校验)。 */
-const IDLE_TIMEOUT_MINUTES = [1, 5, 15, 30] as const;
+/** 可选的闲置分钟数(pill 顺序，末尾另有「永不」)。单一源：设置页 pill 与 parseIdleTimeout 校验共用。 */
+export const IDLE_TIMEOUT_MINUTES = [1, 5, 15, 30] as const;
 
 /** localStorage 存超时偏好的键；值为 "1" | "5" | "15" | "30" | "never"。 */
 export const IDLE_TIMEOUT_STORAGE_KEY = "folio_lock_timeout";

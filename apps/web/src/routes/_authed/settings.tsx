@@ -28,6 +28,7 @@ import { authClient, signOut } from "../../lib/auth-client";
 import { useIdleTimeout } from "../../lib/hooks/use-idle-timeout";
 import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
+import { IDLE_TIMEOUT_MINUTES } from "../../lib/idle-lock";
 import { importData } from "../../lib/import-data";
 import {
   detectDeviceLabel,
@@ -344,10 +345,11 @@ function AutoLockCard() {
         <SettingRow label={t("autoLockAfter")}>
           <Tabs value={raw} onValueChange={setRaw} variant="pill">
             <TabsList className="bg-muted dark:bg-background">
-              <TabsTrigger value="1">1</TabsTrigger>
-              <TabsTrigger value="5">5</TabsTrigger>
-              <TabsTrigger value="15">15</TabsTrigger>
-              <TabsTrigger value="30">30</TabsTrigger>
+              {IDLE_TIMEOUT_MINUTES.map((m) => (
+                <TabsTrigger key={m} value={String(m)}>
+                  {m}
+                </TabsTrigger>
+              ))}
               <TabsTrigger value="never">{t("autoLockNever")}</TabsTrigger>
             </TabsList>
           </Tabs>
