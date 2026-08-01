@@ -6,7 +6,7 @@ import { signIn } from "../lib/auth-client";
 import { useIdleLock } from "../lib/hooks/use-idle-lock";
 import { usePasskeySupport } from "../lib/hooks/use-passkey-support";
 import { DEFAULT_IDLE_TIMEOUT_MS } from "../lib/idle-lock";
-import { Logo } from "./logo";
+import { AuthShell } from "./auth-shell";
 
 // 应用层闲置锁屏(ADR 0029 / #291）。父组件包裹 —— 锁定时遮罩「叠加」在 children 之上，
 // 绝不替换 children(替换会卸载整个 App，解锁后滚动位置 / 展开态 / 半填表单全丢)。
@@ -59,14 +59,15 @@ function LockOverlay({ userEmail, onUnlock }: { userEmail: string; onUnlock: () 
   }
 
   return (
-    // 接管态：盖住一切，无关闭按钮、点外部不关。背景磨砂 blur(不加卡片，参考登录页)。
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 p-6 backdrop-blur-xl">
+    // 接管态：盖住一切，无关闭按钮、点外部不关。复用 AuthShell(左上品牌 / 右上语言主题),
+    // 背景=磨砂 blur 糊住底下 App;fixed 覆盖层定位由 className 传入。
+    <AuthShell
+      className="fixed inset-0 z-50"
+      background={<div className="absolute inset-0 bg-background/60 backdrop-blur-xl" />}
+    >
       <div className="flex w-full max-w-sm flex-col gap-4">
-        <div className="flex items-center gap-2.5">
-          <Logo className="size-7 shrink-0" />
-          <p className="font-medium text-lg">{t("title")}</p>
-        </div>
-        <p className="-mt-3 text-muted-foreground text-sm">{t("subtitle")}</p>
+        <p className="font-medium text-lg">{t("title")}</p>
+        <p className="-mt-2 text-muted-foreground text-sm">{t("subtitle")}</p>
 
         {supportsPasskey ? (
           <Button type="button" className="w-full" disabled={busy} onClick={onPasskey}>
@@ -109,6 +110,6 @@ function LockOverlay({ userEmail, onUnlock }: { userEmail: string; onUnlock: () 
           </Button>
         </form>
       </div>
-    </div>
+    </AuthShell>
   );
 }
