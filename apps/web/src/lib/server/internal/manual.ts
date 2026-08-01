@@ -6,7 +6,7 @@ import type {
   SnapshotWithBalances,
 } from "@folio/db";
 import { dayBucketOf, tokenTicket } from "@folio/oracle";
-import { FIAT_NAMER } from "@folio/oracle-basic";
+import { FIAT_NAMER, fiatCodeOf } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
@@ -288,14 +288,38 @@ export async function loadManualAccountDetail(
 // 喂 buildManualAccountSeries 折出 (takenAt, totalUsd) 阶梯序列。ManualActivity 结构含 HistoryActivity
 // (price 参与 price@T 降级链②,见 manual-history)。
 async function loadHistoryTokens(userId: string, accountId: string): Promise<HistoryToken[]> {
-  return (await loadTokensWithActivities(userId, accountId)).map(({ token, activities }) => ({
-    id: token.id,
-    // 曲线那条链的第 ③ 档(平线兜底)。账本成了唯一来源之后 ② 已经覆盖了它能覆盖的一切,
-    // 这一档只剩「连一笔带价的活动都没有」那种情况 → 没有别的可退,0。
-    unitPrice: 0,
-    recognized: token.ref != null,
-    activities,
-  }));
+  const [perToken, fiatByToken] = await Promise.all([
+    loadTokensWithActivities(userId, accountId),
+    // 法币身份按 FIAT_NAMER 那一档的 ref 取(#271):`token.ref`(coingecko 档)对法币恒 null,
+    // 从它判不出法币。命中白名单(fiatCodeOf)→ tokenId → CODE。
+    accountFiatCodes(userId, accountId),
+  ]);
+  return perToken.map(({ token, activities }) => {
+    const fiatCode = fiatByToken.get(token.id);
+    return {
+      id: token.id,
+      // 曲线那条链的第 ③ 档(平线兜底)。账本成了唯一来源之后 ② 已经覆盖了它能覆盖的一切,
+      // 这一档只剩「连一笔带价的活动都没有」那种情况 → 没有别的可退,0。
+      unitPrice: 0,
+      // 法币恒 recognized(历史价 = 当天汇率,由 buildHistoricalPriceAt 灌进 priceAt);
+      // 非法币仍按「coingecko 那档认没认出」判(ADR 0021 全局约定不动)。
+      recognized: fiatCode != null || token.ref != null,
+      fiatCode,
+      activities,
+    };
+  });
+}
+
+// 某账户内 tokenId → 法币 CODE(白名单命中)。复用 listManualHoldingsByAccount(换 FIAT_NAMER 查),
+// 与 manualFiatRefs 同源、只是按单账户 + 直接给 CODE(fiatCodeOf 白名单过滤)。
+async function accountFiatCodes(userId: string, accountId: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const h of await db.listManualHoldingsByAccount(userId, accountId, FIAT_NAMER)) {
+    if (!h.ref) continue;
+    const code = fiatCodeOf(h.ref);
+    if (code) out.set(h.id, code);
+  }
+  return out;
 }
 
 // 异步 oracle 历史价 → 同步注入闭包(ADR 0019)。按 token 区间一次预取 priceSeries(内部缓存过去日),
@@ -307,16 +331,20 @@ async function buildHistoricalPriceAt(
   now: number,
 ): Promise<HistoricalPriceAt> {
   const byIdentifier = new Map<string, Map<number, number>>();
+  const oracle = oracleFor(userId);
   await Promise.all(
     tokens.map(async (tk) => {
       // 上游没认出来的币不问历史价(问了也没有)。
       if (!tk.recognized || tk.activities.length === 0 || byIdentifier.has(tk.id)) return;
       const from = Math.min(...tk.activities.map((a) => a.occurredAt));
       const daily = new Map<number, number>();
-      // **按 token_id 取**(#203):新参考层的 priceSeries 收内部 id,不再拼厂商 ref。
-      for (const pt of await oracleFor(userId).tokens.priceSeries(tk.id, from, now)) {
-        daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
-      }
+      // 法币:历史价 = **当天汇率**(ADR 0026),从 fx-history 取而不是币价历史(法币无币价)。
+      // 其余:按 token_id 取币价历史(#203,priceSeries 收内部 id)。两条都灌进同一个 priceAt 闭包,
+      // 纯层 tokenPriceAt 的第 ① 档对法币照常生效(它只看 recognized,不认识 fiat)。
+      const series = tk.fiatCode
+        ? await oracle.fx.fiatRateSeries(tk.fiatCode, from, now)
+        : await oracle.tokens.priceSeries(tk.id, from, now);
+      for (const pt of series) daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
       byIdentifier.set(tk.id, daily);
     }),
   );

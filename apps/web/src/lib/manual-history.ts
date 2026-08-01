@@ -30,6 +30,10 @@ export interface HistoryToken {
   // 原来这里是「当前上游对它的叫法」,但本模块从没用过那个字符串本身,只判它空不空 ——
   // 一个字符串字段装一个布尔含义,还逼两处调用方各自去凑一个「叫法」出来(#202b)。
   recognized?: boolean;
+  // 法币身份(ADR 0026 / #274):非空 = 这是白名单法币现金,历史价走**当天汇率**而非币价。
+  // 纯层不认识它 —— 定价仍由注入的 `priceAt` 出(server 侧对法币灌的是 fx),这个字段只在
+  // server 侧的 `buildHistoricalPriceAt` 决定「问汇率还是问币价」。法币恒 `recognized: true`。
+  fiatCode?: string;
   activities: HistoryActivity[];
 }
 
