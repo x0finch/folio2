@@ -68,7 +68,7 @@ check which side you are on, look for `edge cache: hit` in `wrangler tail` — o
 3. (Optional) add an on-chain wallet (EVM needs no key) → Sync.
 4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). The daily cron (`0 0 * * *` UTC) auto-runs; trigger it manually from the dashboard (Workers → folio-web → Triggers / Cron) to see a `cron sweep done` line.
 
-## Updating later
+## Updating later (manual)
 
 ```sh
 cd apps/web
@@ -76,6 +76,34 @@ cd apps/web
 pnpm exec wrangler d1 migrations apply folio --remote
 pnpm run deploy
 ```
+
+## Auto-deploy (CI, on tag)
+
+`.github/workflows/deploy.yml` deploys on a `v*` tag push (e.g. `v1.2.0`). `main` never
+touches production on its own — you tag a release when you want to ship.
+
+**One-time setup:**
+
+1. Create a Cloudflare API token (Dashboard → My Profile → API Tokens → Create Token).
+   Permissions: **Account → Workers Scripts → Edit** and **Account → D1 → Edit**.
+2. Add it as a repo secret named **`CLOUDFLARE_API_TOKEN`** (Settings → Secrets and variables
+   → Actions). That's the only secret CI needs — `account_id` lives in `wrangler.jsonc`, and
+   the Worker's runtime secrets (`SECRETS_KEY`, `BETTER_AUTH_SECRET`, …) are already set on the
+   Worker via `wrangler secret put`; CI never handles them.
+
+**What a tag does:** re-runs the four gates (safety net), then **applies remote D1 migrations,
+then deploys** — in that order, fail-stop. If the migration fails the deploy is skipped, so you
+never end up with new code against an un-migrated schema.
+
+```sh
+git tag v1.2.0 && git push origin v1.2.0   # → CI migrates remote D1, then deploys
+```
+
+> ⚠️ **Remote D1 migrations are irreversible.** Additive migrations (new tables/columns) are
+> safe to auto-apply; a destructive one (dropping a column, etc.) would hit production with no
+> rollback. Review the pending migration before tagging. To gate deploys behind manual approval,
+> add **required reviewers** to the `production` environment (repo Settings → Environments) —
+> the workflow already targets it and will then wait for an approval before migrating/deploying.
 
 ## Notes
 

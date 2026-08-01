@@ -1,0 +1,58 @@
+name: Deploy
+
+# 发版部署:打 v* tag(如 v1.2.0)才触发 —— main 平时不动生产,发版时 tag 一下才上。
+# 需要一个仓库 secret:CLOUDFLARE_API_TOKEN(权限 Workers Scripts:Edit + D1:Edit)。
+# account_id 已在 apps/web/wrangler.jsonc,worker 运行时 secrets(SECRETS_KEY 等)是一次性
+# `wrangler secret put` 设好、存在 Worker 里的,CI 不碰。见 apps/web/DEPLOY.md。
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false # 部署进行中不取消,免得半途中断留下不一致状态
+
+jobs:
+  # 部署前再过一遍四闸(安全网:防 tag 打在没过 CI 的 commit 上)。
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec biome ci
+      - run: pnpm typecheck
+      - run: pnpm knip
+      - run: pnpm build
+      - run: pnpm test:packages
+      - run: pnpm --filter @folio/web test
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    # 部署历史留痕。要加人工审批闸,就在 repo Settings → Environments → production 配 required
+    # reviewers —— workflow 无需改动,届时这里会自动等待 approve。
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # 先迁移 remote D1。这一步失败 → job 停,下面 deploy 不跑 → 不会出现「代码上了但 schema 没迁」。
+      # ⚠️ 破坏性迁移(删列等)自动上生产不可回滚 —— 发版前自查迁移内容(见 DEPLOY.md)。
+      - name: Apply D1 migrations (remote)
+        run: pnpm --filter @folio/web db:migrate:remote
+
+      # vite build + wrangler deploy(account_id 在 wrangler.jsonc,只用 API token 认证)。
+      - name: Build & deploy
+        run: pnpm --filter @folio/web deploy
