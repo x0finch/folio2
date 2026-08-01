@@ -15,10 +15,10 @@ import {
   TabsTrigger,
   toast,
 } from "@folio/ui";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
 import { Fingerprint, LogOut, Trash2 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../components/currency-switcher";
 import { EditableName } from "../../components/editable-name";
@@ -162,21 +162,22 @@ function PasskeysCard() {
   const tc = useTranslations("Common");
   const locale = useLocale();
   const [supported, setSupported] = useState(false);
-  const [passkeys, setPasskeys] = useState<PasskeyRow[] | null>(null); // null = 加载中
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<PasskeyRow | null>(null);
   const [renaming, setRenaming] = useState<PasskeyRow | null>(null);
 
-  const load = useCallback(async () => {
-    const res = await authClient.passkey.listUserPasskeys();
-    setPasskeys(res.data ?? []);
+  // supported 挂载后再设(SSR/hydration 安全:首帧与服务端一致的 false,挂载后才可能变 true,免首帧闪)。
+  useEffect(() => {
+    setSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
   }, []);
 
-  useEffect(() => {
-    const ok = typeof window !== "undefined" && !!window.PublicKeyCredential;
-    setSupported(ok);
-    if (ok) load().catch(() => setPasskeys([]));
-  }, [load]);
+  // 列表用 useQuery(与 account-detail-sheet 一致);supported 为真才拉。data undefined=加载中、[]=空。
+  const passkeysQuery = useQuery<PasskeyRow[]>({
+    queryKey: ["passkeys"],
+    queryFn: async () => (await authClient.passkey.listUserPasskeys()).data ?? [],
+    enabled: supported,
+  });
+  const passkeys = supported ? (passkeysQuery.data ?? null) : null; // null = 加载中
 
   async function onAdd() {
     setBusy(true);
@@ -190,7 +191,7 @@ function PasskeysCard() {
         return;
       }
       toast.success(t("passkeyAdded"));
-      await load();
+      await passkeysQuery.refetch();
     } catch {
       toast.error(t("passkeyAddFailed")); // 用户取消 / 认证器失败等
     } finally {
@@ -208,7 +209,7 @@ function PasskeysCard() {
       return;
     }
     toast.success(t("passkeyRemoved"));
-    await load();
+    await passkeysQuery.refetch();
   }
 
   const fmtDate = (d: string | Date) =>
@@ -269,7 +270,7 @@ function PasskeysCard() {
                                 toast.error(res.error.message ?? t("passkeyRenameFailed"));
                                 throw new Error("rename failed"); // 保持编辑态
                               }
-                              await load();
+                              await passkeysQuery.refetch();
                             }}
                             displayClassName="font-medium text-sm"
                             placeholder={title}
