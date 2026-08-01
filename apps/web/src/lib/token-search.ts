@@ -61,6 +61,24 @@ export interface TokenSection {
   items: TokenOption[];
 }
 
+// manual 账户「已有代币」组(#269)的选项:账本持仓 → 可选中的 TokenOption。
+//
+// **只收有票的**:能被票选回的(链上认出的 / 法币,#272)才成 option;无票的自定义 symbol 没有可
+// 复用的身份、走「手动输入」路径,法币另有 Cash 组兜底。
+// **不看余额** —— 已清仓(amount 0)的旧持仓也留着:账户保留已清仓持仓(与 Tokens 页一致),从这里
+// 一键选回就落回同一条(mint 幂等)、历史不丢;想收窄成「现在还持有」是另一回事,当前刻意不收窄。
+// name/logo 取实时富化的 `meta`(按大写 symbol,缺则回退 symbol);价留空,由下拉 SWR 按需刷。
+export function buildOwnedOptions(
+  holdings: readonly { ticket: string | null; symbol: string }[],
+  meta: ReadonlyMap<string, { name?: string; logo?: string }>,
+): TokenOption[] {
+  return holdings.flatMap((h) => {
+    if (!h.ticket) return [];
+    const m = meta.get(h.symbol.toUpperCase());
+    return [{ ticket: h.ticket, symbol: h.symbol, name: m?.name ?? h.symbol, logo: m?.logo }];
+  });
+}
+
 // 搜索排序的**中性打分器**。**类型无关** —— 只看文本匹配质量,不认识 owned/fiat/catalogue、
 // 也不给任何类型加成。档次(小 = 更相关):0 symbol 完全 / 1 name 完全 / 2 symbol 前缀 /
 // 3 name 前缀 / 4 symbol 子串 / 5 name 子串;`null` = 不匹配。`q` 须已 trim + 小写。
