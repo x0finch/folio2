@@ -1,6 +1,6 @@
 import { Button, cn, Input, Label, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Fingerprint, Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { LocaleSwitcher } from "../components/locale-switcher";
@@ -105,8 +105,49 @@ function AuthPanel() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 仅当浏览器支持 WebAuthn 时才露 passkey 入口;不支持则只留密码(见 ADR 0028)。
+  const [supportsPasskey, setSupportsPasskey] = useState(false);
 
   const isSignup = mode === "signup";
+
+  // 支持检测 + conditional-UI autofill:页面加载即静默发起 passkey autofill(浏览器把已注册的
+  // passkey 填进邮箱框的建议里),用户选中即登录;不支持 conditional UI 的浏览器靠下方显式按钮兜底。
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.PublicKeyCredential) return;
+    setSupportsPasskey(true);
+    const pkc = window.PublicKeyCredential;
+    if (typeof pkc.isConditionalMediationAvailable !== "function") return;
+    let cancelled = false;
+    pkc
+      .isConditionalMediationAvailable()
+      .then((ok) => {
+        if (!ok || cancelled) return;
+        return signIn.passkey({ autoFill: true }).then((res) => {
+          if (!cancelled && res && !res.error) navigate({ to: "/" });
+        });
+      })
+      .catch(() => {}); // autofill 失败/用户取消是常态,静默即可
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
+  async function onPasskey() {
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await signIn.passkey();
+      if (res?.error) {
+        setError(res.error.message ?? t("authFailed"));
+        return;
+      }
+      navigate({ to: "/" });
+    } catch {
+      setError(t("authFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -153,7 +194,15 @@ function AuthPanel() {
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <Label htmlFor="email">{t("email")}</Label>
-          <Input id="email" type="email" required value={email} onChange={(v) => setEmail(v)} />
+          {/* autocomplete 含 webauthn(须为最后一个 token)→ 启用 conditional-UI passkey autofill。 */}
+          <Input
+            id="email"
+            type="email"
+            required
+            autoComplete="username webauthn"
+            value={email}
+            onChange={(v) => setEmail(v)}
+          />
         </div>
 
         {/* Name 在邮箱下方,随 signin/signup 平滑展开/收起(grid-rows 0fr↔1fr),避免高度突变跳动。
@@ -193,6 +242,13 @@ function AuthPanel() {
         <Button type="submit" disabled={busy}>
           {busy ? "…" : isSignup ? t("signUp") : t("signIn")}
         </Button>
+        {/* passkey 显式入口:仅登录态 + 浏览器支持时露(注册态还没账号,无意义)。 */}
+        {!isSignup && supportsPasskey && (
+          <Button type="button" variant="outline" disabled={busy} onClick={onPasskey}>
+            <Fingerprint className="size-4" />
+            {t("signInWithPasskey")}
+          </Button>
+        )}
       </form>
     </div>
   );

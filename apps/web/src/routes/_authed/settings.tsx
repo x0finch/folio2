@@ -12,16 +12,17 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
+  toast,
 } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
-import { LogOut } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import { Fingerprint, LogOut } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../components/currency-switcher";
 import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
-import { signOut } from "../../lib/auth-client";
+import { authClient, signOut } from "../../lib/auth-client";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { importData } from "../../lib/import-data";
 import {
@@ -61,6 +62,7 @@ function Settings() {
   return (
     <div className="flex flex-col gap-6">
       <AccountCard user={user} />
+      <PasskeysCard />
       <AppearanceCard />
       <ProviderKeysCard status={status} />
       <ValuationCard mode={valuation.valuationMode} />
@@ -131,6 +133,56 @@ function AccountCard({ user }: { user: AccountUser }) {
           </div>
         </div>
       </MorphingModal>
+    </Card>
+  );
+}
+
+// Passkey 卡(#283):注册入口 —— 用 Face ID / Touch ID / 安全钥匙登录(首因子,与密码并列)。
+// 仅浏览器支持 WebAuthn 时露注册按钮;不支持给一行说明。凭据列表/删除/重命名见片2(#284)。
+function PasskeysCard() {
+  const t = useTranslations("Settings");
+  const tc = useTranslations("Common");
+  const [supported, setSupported] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
+  }, []);
+
+  async function onAdd() {
+    setBusy(true);
+    try {
+      const res = await authClient.passkey.addPasskey();
+      if (res?.error) {
+        toast.error(res.error.message ?? t("passkeyAddFailed"));
+        return;
+      }
+      toast.success(t("passkeyAdded"));
+    } catch {
+      toast.error(t("passkeyAddFailed")); // 用户取消 / 认证器失败等
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("passkeys")}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <p className="text-sm text-muted-foreground">
+          {supported ? t("passkeysHint") : t("passkeyUnsupported")}
+        </p>
+        {supported && (
+          <div className="flex justify-end">
+            <Button variant="outline" disabled={busy} onClick={onAdd}>
+              <Fingerprint className="size-4" />
+              {busy ? tc("verifying") : t("addPasskey")}
+            </Button>
+          </div>
+        )}
+      </CardContent>
     </Card>
   );
 }

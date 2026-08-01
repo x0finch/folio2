@@ -60,3 +60,22 @@ export const verification = sqliteTable("verification", {
   createdAt: integer("created_at", { mode: "timestamp" }),
   updatedAt: integer("updated_at", { mode: "timestamp" }),
 });
+
+// better-auth `passkey` 插件(@better-auth/passkey)要求的凭据表:一个用户可注册多个 passkey。
+// 字段名(property)须与插件约定一致(publicKey/credentialID/deviceType/backedUp…),SQL 列名 snake_case。
+// 手搓理由同上(`@better-auth/cli` 在本仓 jiti 下失败),字段照插件 schema。见 ADR 0028。
+export const passkey = sqliteTable("passkey", {
+  id: text("id").primaryKey(),
+  name: text("name"), // 用户可命名(可空);插件注册时可带
+  publicKey: text("public_key").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  credentialID: text("credential_id").notNull(),
+  counter: integer("counter").notNull(),
+  deviceType: text("device_type").notNull(),
+  backedUp: integer("backed_up", { mode: "boolean" }).notNull(),
+  transports: text("transports"), // 逗号分隔的传输方式(可空)
+  createdAt: integer("created_at", { mode: "timestamp" }),
+  aaguid: text("aaguid"), // 认证器型号标识(1.6 新增,可空),用于展示友好名
+});

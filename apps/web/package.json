@@ -20,6 +20,7 @@
     "gen:icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
+    "@better-auth/passkey": "^1.6.25",
     "@cloudflare/vite-plugin": "^1.26.0",
     "@folio/connectors": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
@@ -43,7 +44,7 @@
     "@tanstack/react-router-devtools": "latest",
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-start": "latest",
-    "better-auth": "^1.6.21",
+    "better-auth": "^1.6.25",
     "lucide-react": "^0.545.0",
     "motion": "^12.42.2",
     "react": "^19.2.0",

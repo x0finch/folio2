@@ -1,5 +1,5 @@
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { account, session, user, verification } from "./auth-schema";
+import { account, passkey, session, user, verification } from "./auth-schema";
 import { type DbEnv, getDb } from "./client";
 
 // 唯一例外(工程原则 #6):better-auth 需要 Drizzle adapter 接 db。这里在包内部用私有
@@ -7,6 +7,6 @@ import { type DbEnv, getDb } from "./client";
 export function createAuthAdapter(env: DbEnv) {
   return drizzleAdapter(getDb(env), {
     provider: "sqlite", // D1 = SQLite
-    schema: { user, session, account, verification },
+    schema: { user, session, account, verification, passkey },
   });
 }
