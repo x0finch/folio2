@@ -35,7 +35,8 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
   return (
     <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
       {sorted.map((b) => (
-        <div key={b.id} className="rounded-xl px-3 py-2.5">
+        // 行内 note 弹层打开时把整行抬到兄弟行之上(否则被下一行 z-10 内容盖住,同 perp 行)。
+        <div key={b.id} className="rounded-xl px-3 py-2.5 has-[[data-state=open]]:z-20">
           <TokenRowContent
             item={{
               logo: b.logo,
