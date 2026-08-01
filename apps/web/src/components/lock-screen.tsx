@@ -59,14 +59,14 @@ function LockOverlay({ userEmail, onUnlock }: { userEmail: string; onUnlock: () 
   }
 
   return (
-    // 接管态：盖住一切，无关闭按钮、点外部不关。
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-md">
-      <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border border-border bg-card p-6 shadow-lg">
-        <Logo className="size-10" />
-        <div className="flex flex-col items-center gap-1">
-          <p className="font-semibold text-lg">{t("title")}</p>
-          <p className="text-center text-muted-foreground text-sm">{t("subtitle")}</p>
+    // 接管态：盖住一切，无关闭按钮、点外部不关。背景磨砂 blur(不加卡片，参考登录页)。
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 p-6 backdrop-blur-xl">
+      <div className="flex w-full max-w-sm flex-col gap-4">
+        <div className="flex items-center gap-2.5">
+          <Logo className="size-7 shrink-0" />
+          <p className="font-medium text-lg">{t("title")}</p>
         </div>
+        <p className="-mt-3 text-muted-foreground text-sm">{t("subtitle")}</p>
 
         {supportsPasskey ? (
           <Button type="button" className="w-full" disabled={busy} onClick={onPasskey}>
