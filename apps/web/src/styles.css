@@ -21,6 +21,15 @@ body,
   min-height: 100%;
 }
 
+html {
+  /* 移动横竖屏切换时禁止 iOS 自动放大字号(独立窗口里更像原生)。 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
+  /* 去掉点击高亮灰块;禁止整页 overscroll 回弹(装成独立 App 时避免露出浏览器/白边)。 */
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
 }
