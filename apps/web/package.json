@@ -16,16 +16,17 @@
     "db:migrate:remote": "wrangler d1 migrations apply folio --remote",
     "sync:ref:local": "curl -sS \"http://localhost:3000/cdn-cgi/handler/scheduled?cron=0%2023%20*%20*%20*\"",
     "sync:balances:local": "curl -sS \"http://localhost:3000/cdn-cgi/handler/scheduled?cron=0%200%20*%20*%20*\"",
-    "deploy": "pnpm run build && wrangler deploy"
+    "deploy": "pnpm run build && wrangler deploy",
+    "gen:icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.26.0",
     "@folio/connectors": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
     "@folio/db": "workspace:*",
-    "@folio/oracle-ref": "workspace:*",
     "@folio/oracle": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
+    "@folio/oracle-ref": "workspace:*",
     "@folio/oracle-upstream-coingecko": "workspace:*",
     "@folio/shared": "workspace:*",
     "@folio/sync": "workspace:*",
@@ -64,6 +65,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
     "jsdom": "^28.1.0",
+    "sharp": "^0.35.3",
     "typescript": "^7.0.2",
     "vite": "^8.0.0",
     "vitest": "^4.1.5",

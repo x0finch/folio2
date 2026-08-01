@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { IntlProvider } from "use-intl";
 
 import { messages } from "../lib/i18n/messages";
+import { PWA_LINKS, PWA_META } from "../lib/pwa-head";
 import { getLocalePreference } from "../lib/server/preferences";
 import { applyStoredTheme, THEME_INIT_SCRIPT } from "../lib/theme";
 import appCss from "../styles.css?url";
@@ -24,6 +25,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         title: "Folio",
       },
+      ...PWA_META,
     ],
     links: [
       {
@@ -32,6 +34,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { rel: "icon", type: "image/svg+xml", href: "/icon.svg" },
       { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
+      ...PWA_LINKS,
     ],
   }),
   // SSR 首屏即正确语言:根 loader 定 locale(cookie/Accept-Language);切换时 invalidate 重跑。
