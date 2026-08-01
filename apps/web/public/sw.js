@@ -1,0 +1,84 @@
+// 手搓运行时缓存 Service Worker(ADR 0027:可安装的移动外壳,**不做离线优先**)。
+// 策略:
+//   · 导航(文档)→ network-first,失败回退中立的 offline.html(不缓存 SSR 响应 —— 那里带用户数据,
+//     离线显示旧余额比诚实报离线更危险)。
+//   · hashed 静态(script/style/font,Vite 产物不可变)→ cache-first(秒开、可离线启动外壳)。
+//   · 其余(/api、server fn、图片、跨源、非 GET)→ network-only、永不进缓存。
+// 更新:静默 skipWaiting + clients.claim(单用户,不弹「有新版本」)。
+// 纯路由决策 swRoute 导出供单测;vitest(node)里 self 无 skipWaiting → 只导出、不挂事件。
+
+const CACHE = "folio-shell-v1";
+const OFFLINE_URL = "/offline.html";
+
+/**
+ * 按请求特征选缓存策略(纯函数,便于单测)。
+ * @param {{ method: string, mode: string, destination: string, sameOrigin: boolean, pathname: string }} req
+ * @returns {"navigation" | "cache-first" | "network-only"}
+ */
+export function swRoute(req) {
+  if (req.method !== "GET") return "network-only"; // 变更类(server fn / mutation),不缓存
+  if (req.mode === "navigate") return "navigation"; // 文档:network-first + 外壳兜底
+  if (!req.sameOrigin) return "network-only"; // 跨源(如 logo 代理目标)
+  if (req.pathname.startsWith("/api/")) return "network-only"; // 数据 / 鉴权,永不缓存
+  if (req.destination === "script" || req.destination === "style" || req.destination === "font") {
+    return "cache-first"; // hashed 不可变资源
+  }
+  return "network-only"; // 其余默认不缓存(图片 / manifest 等保持新鲜)
+}
+
+// SW 全局特征探测:window / node 都没有 skipWaiting → 只有真在 Service Worker 里才挂事件
+//(node 单测 self 未定义,短路;只导出 swRoute)。
+if (typeof self !== "undefined" && typeof self.skipWaiting === "function") {
+  self.addEventListener("install", (event) => {
+    self.skipWaiting(); // 静默更新:新版直接进 active
+    event.waitUntil(caches.open(CACHE).then((c) => c.add(OFFLINE_URL)));
+  });
+
+  self.addEventListener("activate", (event) => {
+    event.waitUntil(
+      (async () => {
+        // 清掉旧版本缓存桶(改 CACHE 版本号即淘汰)。
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+        await self.clients.claim();
+      })(),
+    );
+  });
+
+  self.addEventListener("fetch", (event) => {
+    const req = event.request;
+    const url = new URL(req.url);
+    const strategy = swRoute({
+      method: req.method,
+      mode: req.mode,
+      destination: req.destination,
+      sameOrigin: url.origin === self.location.origin,
+      pathname: url.pathname,
+    });
+
+    if (strategy === "network-only") return; // 不拦截,走浏览器默认网络路径
+
+    if (strategy === "navigation") {
+      event.respondWith(
+        fetch(req).catch(async () => {
+          // 离线:回退中立 offline.html,不返回带数据的旧 SSR 页。
+          const cache = await caches.open(CACHE);
+          return (await cache.match(OFFLINE_URL)) ?? Response.error();
+        }),
+      );
+      return;
+    }
+
+    // cache-first(hashed 不可变):命中即用,否则取网络并入缓存。
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE);
+        const hit = await cache.match(req);
+        if (hit) return hit;
+        const res = await fetch(req);
+        if (res.ok) cache.put(req, res.clone());
+        return res;
+      })(),
+    );
+  });
+}

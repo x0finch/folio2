@@ -8,6 +8,7 @@ import { IntlProvider } from "use-intl";
 
 import { messages } from "../lib/i18n/messages";
 import { PWA_LINKS, PWA_META, THEME_COLORS, VIEWPORT } from "../lib/pwa-head";
+import { registerServiceWorker } from "../lib/register-sw";
 import { getLocalePreference } from "../lib/server/preferences";
 import { applyStoredTheme, THEME_INIT_SCRIPT } from "../lib/theme";
 import appCss from "../styles.css?url";
@@ -50,6 +51,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   // 且全站再无人恢复(useTheme 仅设置页挂载)→ 此处兜底,让 React 生命周期在每次(重)挂载后自愈。见 lib/theme。
   useEffect(() => {
     applyStoredTheme();
+    // 生产注册 Service Worker(可安装外壳 + 离线兜底);dev 内部直接 return。
+    registerServiceWorker();
   }, []);
   return (
     <html lang={locale} suppressHydrationWarning>
