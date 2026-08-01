@@ -1,4 +1,6 @@
 import { env } from "cloudflare:test";
+import { FIAT_NAMER, tokenTicket } from "@folio/oracle";
+import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../../src/lib/server/internal/db";
 import {
@@ -68,6 +70,25 @@ describe("loadManualAccountDetail", () => {
     });
     const detail = await loadManualAccountDetail(USER, account.id);
     expect(detail).toEqual({ tokens: [], activities: [] });
+  });
+
+  // 法币持仓的票走 **fiat 命名者**(coingecko 那档恒空)—— 不给的话前端拿不到票:预填/再选会掉进
+  // 「手动输入」→ mint 成自定义币而非原法币,还被 ownedOptions 的「有票才收」滤掉(用户报的两个 bug)。
+  it("法币持仓:ticket 走 fiat ref,可解回同一条法币身份", async () => {
+    const eurTicket = tokenTicket.encode(tokenRef.issued(FIAT_NAMER, "EUR"));
+    const account = await createManualAccount(
+      USER,
+      "Cash",
+      JSON.stringify([{ symbol: "EUR", unitPrice: "1.15", amount: "1000", ticket: eurTicket }]),
+    );
+    const detail = await loadManualAccountDetail(USER, account.id);
+
+    expect(detail.tokens).toHaveLength(1);
+    const [eur] = detail.tokens;
+    expect(eur.symbol).toBe("EUR");
+    // 有票(非 null)且解回 fiat/issued:EUR —— 再选它 mint 回同一条(不是 custom)。
+    expect(eur.ticket).not.toBeNull();
+    expect(tokenTicket.decode(eur.ticket ?? "", FIAT_NAMER)).toBe("fiat/issued:EUR");
   });
 });
 

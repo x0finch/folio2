@@ -267,18 +267,28 @@ export async function loadManualAccountDetail(
   userId: string,
   accountId: string,
 ): Promise<ManualAccountDetail> {
-  const perToken = await loadTokensWithActivities(userId, accountId);
+  const [perToken, fiatRefById] = await Promise.all([
+    loadTokensWithActivities(userId, accountId),
+    accountFiatRefs(userId, accountId),
+  ]);
   return {
-    tokens: perToken.map(({ token, activities }) => ({
-      id: token.id,
-      symbol: token.symbol,
-      // 抽屉要的是「这个币现在按多少算」—— 给**解好的**那个价(账本最近一笔),
-      // 而不是某一列的原始值。市场认识它时展示侧仍会用市价覆盖。
-      unitPrice: fallbackUnitPrice(activities),
-      // 票就是那条 ref 原样编一层 —— app 不拼、不拆、不知道命名者是谁(见 ManualHolding.ref)。
-      ticket: token.ref ? tokenTicket.encode(token.ref) : null,
-      amount: deriveAmount(activities),
-    })),
+    tokens: perToken.map(({ token, activities }) => {
+      // 法币在 coingecko 那档无 ref(`token.ref` 恒 null),身份在 fiat 命名者下 → 用那条 ref 编票。
+      // 不然抽屉/侧边栏拿到的法币持仓没有票:再选它会掉进「手动输入 symbol」→ 提交时 mint 成一条
+      // **自定义币**(`manual/custom:EUR`)而非原来的法币,还被 ownedOptions 的「有票才收」滤掉。
+      // 有了 fiat 票,前端把它当选中的法币放回下拉、再选也 mint 回同一条(#272),owned 组也收得进。
+      const ref = token.ref ?? fiatRefById.get(token.id) ?? null;
+      return {
+        id: token.id,
+        symbol: token.symbol,
+        // 抽屉要的是「这个币现在按多少算」—— 给**解好的**那个价(账本最近一笔),
+        // 而不是某一列的原始值。市场认识它时展示侧仍会用市价覆盖。
+        unitPrice: fallbackUnitPrice(activities),
+        // 票就是那条 ref 原样编一层 —— app 不拼、不拆、不知道命名者是谁(见 ManualHolding.ref)。
+        ticket: ref ? tokenTicket.encode(ref) : null,
+        amount: deriveAmount(activities),
+      };
+    }),
     activities: perToken.flatMap(({ activities }) => activities),
   };
 }
@@ -288,14 +298,13 @@ export async function loadManualAccountDetail(
 // 喂 buildManualAccountSeries 折出 (takenAt, totalUsd) 阶梯序列。ManualActivity 结构含 HistoryActivity
 // (price 参与 price@T 降级链②,见 manual-history)。
 async function loadHistoryTokens(userId: string, accountId: string): Promise<HistoryToken[]> {
-  const [perToken, fiatByToken] = await Promise.all([
+  const [perToken, fiatRefById] = await Promise.all([
     loadTokensWithActivities(userId, accountId),
-    // 法币身份按 FIAT_NAMER 那一档的 ref 取(#271):`token.ref`(coingecko 档)对法币恒 null,
-    // 从它判不出法币。命中白名单(fiatCodeOf)→ tokenId → CODE。
-    accountFiatCodes(userId, accountId),
+    accountFiatRefs(userId, accountId),
   ]);
   return perToken.map(({ token, activities }) => {
-    const fiatCode = fiatByToken.get(token.id);
+    const fiatRef = fiatRefById.get(token.id);
+    const fiatCode = fiatRef ? fiatCodeOf(fiatRef) : undefined;
     return {
       id: token.id,
       // 曲线那条链的第 ③ 档(平线兜底)。账本成了唯一来源之后 ② 已经覆盖了它能覆盖的一切,
@@ -310,14 +319,13 @@ async function loadHistoryTokens(userId: string, accountId: string): Promise<His
   });
 }
 
-// 某账户内 tokenId → 法币 CODE(白名单命中)。复用 listManualHoldingsByAccount(换 FIAT_NAMER 查),
-// 与 manualFiatRefs 同源、只是按单账户 + 直接给 CODE(fiatCodeOf 白名单过滤)。
-async function accountFiatCodes(userId: string, accountId: string): Promise<Map<string, string>> {
+// 某账户内 tokenId → 该 token 在 fiat 命名者下的整条 ref(`fiat/issued:<CODE>`,白名单命中的才收)。
+// 法币在 coingecko 那档无 ref(`token.ref` 恒 null),身份只在 FIAT_NAMER 下 —— 换命名者查
+// listManualHoldingsByAccount 拿到它(#271)。历史曲线要它派生 CODE、明细要它编票(见 loadManualAccountDetail)。
+async function accountFiatRefs(userId: string, accountId: string): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   for (const h of await db.listManualHoldingsByAccount(userId, accountId, FIAT_NAMER)) {
-    if (!h.ref) continue;
-    const code = fiatCodeOf(h.ref);
-    if (code) out.set(h.id, code);
+    if (h.ref && fiatCodeOf(h.ref)) out.set(h.id, h.ref);
   }
   return out;
 }
