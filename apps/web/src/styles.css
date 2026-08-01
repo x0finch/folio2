@@ -11,6 +11,18 @@
 /* 显式扫描本应用源码(Tailwind 入口在 @folio/ui,故此处补声明 app 自身的 class 来源)。 */
 @source "./**/*.{ts,tsx}";
 
+/* 自动填充探针:浏览器给 <input> 套上 autofill 样式时,借这个无副作用动画触发一次
+   animationstart —— 登录页据此识别「这是密码管理器自动填的、非手输」,以便自动提交。
+   opacity 1→1 无视觉变化;1ms 时长仅为让 animation 真正启动(0s 不触发事件)。 */
+@keyframes folio-autofill {
+  from {
+    opacity: 1;
+  }
+}
+input:-webkit-autofill {
+  animation: folio-autofill 1ms;
+}
+
 * {
   box-sizing: border-box;
 }

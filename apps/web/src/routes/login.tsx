@@ -1,7 +1,7 @@
 import { Button, cn, Input, Label, MorphingModal, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Fingerprint, Monitor, Moon, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { LocaleSwitcher } from "../components/locale-switcher";
 import { Logo } from "../components/logo";
@@ -187,8 +187,7 @@ function AuthPanel() {
     }
   }
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitEmailAuth() {
     setError(null);
     setBusy(true);
     try {
@@ -208,6 +207,35 @@ function AuthPanel() {
       setBusy(false);
     }
   }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void submitEmailAuth();
+  }
+
+  // 密码管理器把邮箱+密码一起自动填好时,直接登录(免再点按钮)。只认「被 autofill」这一信号 ——
+  // 手输永不触发(否则敲完密码那刻会被强行提交)。仅登录态、只触发一次(密码错→显示报错,不循环重试)。
+  const autoSubmittedRef = useRef(false);
+  const [autofilled, setAutofilled] = useState({ email: false, password: false });
+  function onFieldAutofill(field: "email" | "password") {
+    return (e: React.AnimationEvent) => {
+      // 只认自定义探针动画(styles.css 的 input:-webkit-autofill),别把别处动画误判成填充。
+      if (e.animationName === "folio-autofill") {
+        setAutofilled((prev) => (prev[field] ? prev : { ...prev, [field]: true }));
+      }
+    };
+  }
+  // submitEmailAuth 每次渲染新建、故意不入依赖:effect 随 autofilled/email/password 变化重跑时
+  // 天然拿到最新闭包,autoSubmittedRef 保证只提交一次。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 见上
+  useEffect(() => {
+    if (isSignup || busy || autoSubmittedRef.current) return;
+    if (!autofilled.email || !autofilled.password) return;
+    // 等受控 state 追上 autofill 写进 DOM 的值(onChange 与 animationstart 时序可能错开)。
+    if (!email || password.length < 8) return;
+    autoSubmittedRef.current = true;
+    void submitEmailAuth();
+  }, [autofilled, email, password, isSignup, busy]);
 
   return (
     <div className="w-full max-w-sm">
@@ -240,6 +268,7 @@ function AuthPanel() {
             autoComplete="username webauthn"
             value={email}
             onChange={(v) => setEmail(v)}
+            onAnimationStart={onFieldAutofill("email")}
           />
         </div>
 
@@ -256,6 +285,7 @@ function AuthPanel() {
               <Label htmlFor="name">{t("name")}</Label>
               <Input
                 id="name"
+                autoComplete="name"
                 value={name}
                 placeholder={deriveDefaultName(email)}
                 onChange={(v) => setName(v)}
@@ -267,13 +297,17 @@ function AuthPanel() {
 
         <div className="flex flex-col gap-2">
           <Label htmlFor="password">{t("password")}</Label>
+          {/* 登录=current-password(触发填充),注册=new-password(触发「保存/生成密码」)。
+              没配 passkey 的用户靠这个让密码管理器正确填充+提示保存。 */}
           <Input
             id="password"
             type="password"
             required
             minLength={8}
+            autoComplete={isSignup ? "new-password" : "current-password"}
             value={password}
             onChange={(v) => setPassword(v)}
+            onAnimationStart={onFieldAutofill("password")}
           />
         </div>
         {error && <p className="text-destructive text-sm">{error}</p>}
