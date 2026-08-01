@@ -5,7 +5,6 @@ import {
   Button,
   cn,
   Drawer,
-  Input,
   MorphingModal,
   Popover,
   PopoverContent,
@@ -15,7 +14,7 @@ import {
 } from "@folio/ui";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { AlertTriangle, Archive, MoreVertical, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, MoreVertical, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { accountShare, shareLabel } from "../lib/account-share";
@@ -28,6 +27,7 @@ import { getAccountHistory, removeAccount, updateAccount } from "../lib/server/a
 import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
 import { ConnectorBadge } from "./connector-badge";
+import { EditableName } from "./editable-name";
 import { AccountHoldingsCards } from "./holdings-cards";
 import { ManualTokensPanel } from "./manual-tokens-panel";
 import { Portal } from "./portal";
@@ -123,7 +123,6 @@ function DetailBody({
 
   const archived = account.archivedAt != null;
   const [renaming, setRenaming] = useState(false);
-  const [labelDraft, setLabelDraft] = useState(account.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 删除确认走 modal 的落位:桌面居中、手机贴底(同 AddAccountModal)。
   const isDesktop = useMediaQuery("(min-width: 640px)");
@@ -159,14 +158,6 @@ function DetailBody({
       await refresh();
     },
     onError: () => toast.error(t("syncGenericError")),
-  });
-  const renameMut = useMutation({
-    mutationFn: () => updateAccount({ data: { accountId: account.id, label: labelDraft.trim() } }),
-    onSuccess: async () => {
-      setRenaming(false);
-      await refresh();
-    },
-    onError: () => toast.error(t("actionFailed")),
   });
   const archiveMut = useMutation({
     mutationFn: () => updateAccount({ data: { accountId: account.id, archived: !archived } }),
@@ -208,64 +199,31 @@ function DetailBody({
           </div>
 
           <div className="relative flex flex-col gap-1.5">
-            {/* pr-10 给右上角 ⋯ 让位,名称不钻到按钮下。 */}
-            <div className="flex min-w-0 items-center gap-2 pr-10">
-              {renaming ? (
-                <form
-                  className="flex items-center gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    renameMut.mutate();
-                  }}
-                >
-                  <Input
-                    autoFocus
-                    value={labelDraft}
-                    onChange={(v) => setLabelDraft(v)}
-                    className="h-8"
-                  />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={renameMut.isPending || !labelDraft.trim()}
-                  >
-                    {renameMut.isPending ? tc("verifying") : tc("save")}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setLabelDraft(account.label);
-                      setRenaming(false);
-                    }}
-                  >
-                    {tc("cancel")}
-                  </Button>
-                </form>
-              ) : (
-                // 点名字进入内联重命名;hover 名字:右上角浮出小铅笔角标。
-                <button
-                  type="button"
-                  onClick={() => setRenaming(true)}
-                  className="group relative rounded-md text-left outline-none"
-                >
-                  {/* 名称字号同代币抽屉头部(text-lg semibold)。 */}
-                  <span className="font-semibold text-lg">{account.label}</span>
-                  {/* 铅笔作右上角角标:绝对定位、不占行宽;hover/聚焦才现。 */}
-                  <Pencil
-                    className="pointer-events-none absolute -top-1.5 -right-2 size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-                    aria-hidden
-                  />
-                </button>
-              )}
-              {!renaming && <ConnectorBadge connectorId={account.connectorId} />}
-              {!renaming && archived && (
+            {/* 就地重命名走全站统一的 EditableName;pr-10 给右上角 ⋯ 让位,名称不钻到按钮下。
+                badge 作 children:展示态跟在名字后,编辑态自动隐藏。 */}
+            <EditableName
+              value={account.label}
+              editing={renaming}
+              onEditingChange={setRenaming}
+              onSave={async (name) => {
+                try {
+                  await updateAccount({ data: { accountId: account.id, label: name } });
+                  await refresh();
+                } catch (e) {
+                  toast.error(t("actionFailed"));
+                  throw e; // 保持编辑态,让用户重试
+                }
+              }}
+              displayClassName="font-semibold text-lg"
+              className="pr-10"
+            >
+              <ConnectorBadge connectorId={account.connectorId} />
+              {archived && (
                 <span className="rounded-sm bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
                   {t("archivedBadge")}
                 </span>
               )}
-            </div>
+            </EditableName>
             {/* 市值 + 24h 增量:字号同代币抽屉(值 text-3xl bold、增量 text-sm);缺凭据 → 无增量。 */}
             <div>
               <div className="font-bold text-3xl tabular-nums">{usd(account.totalUsd)}</div>

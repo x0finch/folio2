@@ -6,7 +6,6 @@ import {
   CardHeader,
   CardTitle,
   Checkbox,
-  Input,
   Label,
   MorphingModal,
   Separator,
@@ -18,10 +17,11 @@ import {
 } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
-import { Fingerprint, LogOut, Pencil, Trash2 } from "lucide-react";
+import { Fingerprint, LogOut, Trash2 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../components/currency-switcher";
+import { EditableName } from "../../components/editable-name";
 import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signOut } from "../../lib/auth-client";
@@ -162,7 +162,6 @@ function PasskeysCard() {
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<PasskeyRow | null>(null);
   const [renaming, setRenaming] = useState<PasskeyRow | null>(null);
-  const [renameValue, setRenameValue] = useState("");
 
   const load = useCallback(async () => {
     const res = await authClient.passkey.listUserPasskeys();
@@ -205,24 +204,6 @@ function PasskeysCard() {
     await load();
   }
 
-  function openRename(pk: PasskeyRow) {
-    setRenameValue(pk.name ?? "");
-    setRenaming(pk);
-  }
-
-  async function onRename() {
-    const pk = renaming;
-    setRenaming(null);
-    const name = renameValue.trim();
-    if (!pk || !name || name === pk.name) return;
-    const res = await authClient.passkey.updatePasskey({ id: pk.id, name });
-    if (res?.error) {
-      toast.error(res.error.message ?? t("passkeyRenameFailed"));
-      return;
-    }
-    await load();
-  }
-
   const fmtDate = (d: string | Date) =>
     new Date(d).toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
 
@@ -256,36 +237,49 @@ function PasskeysCard() {
                             ? t("passkeyKindCrossDevice")
                             : null;
                   const addedText = t("passkeyAddedOn", { date: fmtDate(pk.createdAt) });
+                  const isEditing = renaming?.id === pk.id;
                   return (
                     // 外层是 SharedLayoutBg 的「行」(pill 滑到这);内容包一层 flex —— SharedLayoutBg 会把
                     // children 塞进一个非 flex 的 z-10 div,直接用 flex 作用不到(同 app-shell 侧栏)。
                     <div key={pk.id} className="rounded-lg px-2 py-1.5">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0 leading-tight">
-                          <div className="truncate font-medium text-sm">{title}</div>
-                          <div className="text-muted-foreground text-xs">
-                            {kindText ? `${kindText} · ${addedText}` : addedText}
-                          </div>
+                        <div className="min-w-0 flex-1 leading-tight">
+                          {/* 就地重命名(与账户详情头部同一组件)。placeholder 用认证器友好名。 */}
+                          <EditableName
+                            value={pk.name ?? ""}
+                            editing={isEditing}
+                            onEditingChange={(e) => setRenaming(e ? pk : null)}
+                            onSave={async (name) => {
+                              const res = await authClient.passkey.updatePasskey({
+                                id: pk.id,
+                                name,
+                              });
+                              if (res?.error) {
+                                toast.error(res.error.message ?? t("passkeyRenameFailed"));
+                                throw new Error("rename failed"); // 保持编辑态
+                              }
+                              await load();
+                            }}
+                            displayClassName="font-medium text-sm"
+                            placeholder={title}
+                          />
+                          {!isEditing && (
+                            <div className="text-muted-foreground text-xs">
+                              {kindText ? `${kindText} · ${addedText}` : addedText}
+                            </div>
+                          )}
                         </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={t("passkeyRename")}
-                            onClick={() => openRename(pk)}
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
+                        {!isEditing && (
                           <Button
                             variant="ghost"
                             size="icon"
                             aria-label={t("removePasskey")}
-                            className="hover:text-destructive"
+                            className="shrink-0 hover:text-destructive"
                             onClick={() => setRemoving(pk)}
                           >
                             <Trash2 className="size-4" />
                           </Button>
-                        </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -319,23 +313,6 @@ function PasskeysCard() {
             <Button variant="destructive" onClick={onRemove}>
               {t("removePasskey")}
             </Button>
-          </div>
-        </div>
-      </MorphingModal>
-
-      {/* 重命名(认器可能多台,取个能认出的名)。 */}
-      <MorphingModal viewId={renaming ? "passkey-rename" : null} onClose={() => setRenaming(null)}>
-        <div className="text-left">
-          <p className="font-semibold text-base">{t("passkeyRenameTitle")}</p>
-          <div className="mt-3 flex flex-col gap-2">
-            <Label htmlFor="passkey-name">{t("passkeyName")}</Label>
-            <Input id="passkey-name" value={renameValue} onChange={(v) => setRenameValue(v)} />
-          </div>
-          <div className="mt-5 flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setRenaming(null)}>
-              {tc("cancel")}
-            </Button>
-            <Button onClick={onRename}>{tc("save")}</Button>
           </div>
         </div>
       </MorphingModal>
