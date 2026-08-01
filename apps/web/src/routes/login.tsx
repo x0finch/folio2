@@ -1,12 +1,10 @@
 import { Button, cn, Input, Label, MorphingModal, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Fingerprint, Monitor, Moon, Sun } from "lucide-react";
+import { Fingerprint } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { LocaleSwitcher } from "../components/locale-switcher";
-import { Logo } from "../components/logo";
+import { AuthShell } from "../components/auth-shell";
 import { PortfolioHero } from "../components/portfolio-hero";
-import { useMountedTheme } from "../hooks/use-theme";
 import { authClient, signIn, signUp } from "../lib/auth-client";
 import { deriveDefaultName } from "../lib/derive-default-name";
 import type { HoldingLike } from "../lib/hero-stats";
@@ -17,7 +15,6 @@ import {
   isPasskeyPromptDismissed,
   shouldPromptForPasskey,
 } from "../lib/passkey-prompt";
-import type { Theme } from "../lib/theme";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
 
@@ -42,30 +39,13 @@ const DEMO_HOLDINGS: HoldingLike[] = [
 
 // 登录页(L1 #113):主页净值 hero 喂假数据、放大虚化铺满全屏作背景;认证表单透明居中浮于其上。
 function LoginPage() {
+  // 认证外壳(左上品牌 / 右上语言主题 / 居中表单)与锁屏共用;登录背景=虚化 hero。
   return (
-    <div className="relative min-h-screen w-full overflow-hidden">
-      <HeroBackdrop />
-
-      {/* 品牌固定在窗口左上角(复用侧栏的 Logo + folio 字标)。 */}
-      <div className="absolute top-4 left-4 z-20 flex items-center gap-2.5">
-        <Logo className="size-6 shrink-0" />
-        <span className="font-semibold text-lg tracking-tight">folio</span>
-      </div>
-
-      {/* 全局切换固定在窗口右上角。 */}
-      <div className="absolute top-4 right-4 z-20 flex items-center gap-4">
-        <LocaleSwitcher />
-        <ThemeToggle />
-      </div>
-
-      {/* 前景:透明、不套卡片的认证表单,居中。 */}
-      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center p-6">
-        <AuthPanel />
-      </div>
-
+    <AuthShell background={<HeroBackdrop />}>
+      <AuthPanel />
       {/* read-only 信任说明:不套卡片,底部小字。 */}
       <ReadOnlyLine />
-    </div>
+    </AuthShell>
   );
 }
 
@@ -356,25 +336,5 @@ function ReadOnlyLine() {
     <p className="absolute inset-x-0 bottom-5 z-10 px-6 text-center text-muted-foreground text-xs">
       {t("readOnlyHint")}
     </p>
-  );
-}
-
-// 主题切换:单 icon 循环 light → dark → system(icon 反映当前态)。选中态用 useMountedTheme(SSR 安全)。
-const THEME_ORDER: Theme[] = ["light", "dark", "system"];
-const THEME_ICON: Record<Theme, typeof Sun> = { light: Sun, dark: Moon, system: Monitor };
-
-function ThemeToggle() {
-  const { theme, setTheme } = useMountedTheme();
-  const Icon = THEME_ICON[theme];
-  const next = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
-  return (
-    <button
-      type="button"
-      aria-label={`theme: ${theme}`}
-      onClick={() => setTheme(next)}
-      className="text-muted-foreground transition-colors hover:text-foreground"
-    >
-      <Icon className="size-4" />
-    </button>
   );
 }

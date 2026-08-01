@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
+import { LockScreen } from "../components/lock-screen";
 import { CurrencyProvider } from "../lib/hooks/use-prefer-currency";
 import { getCurrencyPreference } from "../lib/server/preferences";
 import { getSession } from "../lib/server/session";
@@ -29,9 +30,12 @@ function AuthedLayout() {
   const { preferCurrency, syncStatus } = Route.useLoaderData();
   return (
     <CurrencyProvider value={preferCurrency}>
-      <AppShell userName={user.name || user.email || ""} syncStatus={syncStatus}>
-        <Outlet />
-      </AppShell>
+      {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时遮罩叠加、不卸载下方 App。 */}
+      <LockScreen userEmail={user.email}>
+        <AppShell userName={user.name || user.email || ""} syncStatus={syncStatus}>
+          <Outlet />
+        </AppShell>
+      </LockScreen>
     </CurrencyProvider>
   );
 }
