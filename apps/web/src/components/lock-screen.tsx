@@ -4,15 +4,16 @@ import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { signIn } from "../lib/auth-client";
 import { useIdleLock } from "../lib/hooks/use-idle-lock";
+import { useIdleTimeout } from "../lib/hooks/use-idle-timeout";
 import { usePasskeySupport } from "../lib/hooks/use-passkey-support";
-import { DEFAULT_IDLE_TIMEOUT_MS } from "../lib/idle-lock";
 import { AuthShell } from "./auth-shell";
 
 // 应用层闲置锁屏(ADR 0029 / #291）。父组件包裹 —— 锁定时遮罩「叠加」在 children 之上，
 // 绝不替换 children(替换会卸载整个 App，解锁后滚动位置 / 展开态 / 半填表单全丢)。
 // 逻辑在 useIdleLock hook；这里只管样子 + 解锁(复用 signIn，会话不销毁，零新 server 接口)。
 export function LockScreen({ userEmail, children }: { userEmail: string; children: ReactNode }) {
-  const { locked, unlock } = useIdleLock(DEFAULT_IDLE_TIMEOUT_MS);
+  const { timeoutMs } = useIdleTimeout();
+  const { locked, unlock } = useIdleLock(timeoutMs);
   return (
     <>
       {children}

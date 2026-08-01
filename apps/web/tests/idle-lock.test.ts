@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldLock } from "../src/lib/idle-lock";
+import { parseIdleTimeout, shouldLock } from "../src/lib/idle-lock";
 
 // 闲置锁判定(ADR 0029 / #291)：到点该不该锁。纯函数是核心测试缝；
 // 活动监听 / 定时器 / localStorage 是薄壳，靠浏览器手测。
@@ -40,5 +40,30 @@ describe("shouldLock", () => {
     expect(shouldLock({ lastActiveAt: active, now: active - 5000, timeoutMs: FIVE_MIN })).toBe(
       false,
     );
+  });
+});
+
+// 超时偏好解析(#292)：localStorage 存的字符串 → 毫秒 / null(永不)。核心测试缝；
+// localStorage 读写 + 跨组件事件是薄壳，靠浏览器手测。
+describe("parseIdleTimeout", () => {
+  it("分钟选项 → 毫秒", () => {
+    expect(parseIdleTimeout("1")).toBe(60_000);
+    expect(parseIdleTimeout("5")).toBe(300_000);
+    expect(parseIdleTimeout("15")).toBe(900_000);
+    expect(parseIdleTimeout("30")).toBe(1_800_000);
+  });
+
+  it("never → null(永不)", () => {
+    expect(parseIdleTimeout("never")).toBeNull();
+  });
+
+  it("缺失(null)→ 默认 5 分钟", () => {
+    expect(parseIdleTimeout(null)).toBe(300_000);
+  });
+
+  it("非法值 → 回落默认 5 分钟", () => {
+    expect(parseIdleTimeout("7")).toBe(300_000);
+    expect(parseIdleTimeout("abc")).toBe(300_000);
+    expect(parseIdleTimeout("")).toBe(300_000);
   });
 });
