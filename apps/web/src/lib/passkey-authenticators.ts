@@ -47,3 +47,33 @@ export function passkeyKind(pk: {
   if (transports.includes("internal")) return "platform"; // 本机生物识别,未同步
   return "unknown";
 }
+
+// 注册 passkey 时用当前浏览器/系统生成默认名(如「Chrome on macOS」)存进 name,供列表识别 —— passkey
+// 自身不带浏览器信息(见 ADR 0028),name 是「添加时这台」的准确快照,用户可随后改名。粗解析 UA 够用;
+// 判定顺序有讲究:Chrome 的 UA 含 "Safari"、Edge 的含 "Chrome",故更具体的排前面。
+export function detectDeviceLabel(ua: string): string {
+  const os = /iPhone|iPad|iPod/.test(ua)
+    ? "iOS"
+    : /Android/.test(ua)
+      ? "Android"
+      : /Mac OS X|Macintosh/.test(ua)
+        ? "macOS"
+        : /Windows/.test(ua)
+          ? "Windows"
+          : /Linux/.test(ua)
+            ? "Linux"
+            : null;
+  const browser = /Edg\//.test(ua)
+    ? "Edge"
+    : /OPR\/|Opera/.test(ua)
+      ? "Opera"
+      : /Firefox\//.test(ua)
+        ? "Firefox"
+        : /Chrome\//.test(ua)
+          ? "Chrome"
+          : /Safari\//.test(ua)
+            ? "Safari"
+            : null;
+  if (browser && os) return `${browser} on ${os}`;
+  return browser ?? os ?? "Passkey"; // 都识别不出时的兜底默认名
+}

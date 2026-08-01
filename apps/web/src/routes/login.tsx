@@ -11,6 +11,7 @@ import { authClient, signIn, signUp } from "../lib/auth-client";
 import { deriveDefaultName } from "../lib/derive-default-name";
 import type { HoldingLike } from "../lib/hero-stats";
 import type { HistoryPoint } from "../lib/history";
+import { detectDeviceLabel } from "../lib/passkey-authenticators";
 import {
   dismissPasskeyPrompt,
   isPasskeyPromptDismissed,
@@ -133,7 +134,10 @@ function AuthPanel() {
   // 引导里「添加」:走注册 ceremony;成败都进主页(引导是加分项,不该卡住登录)。
   async function onAddFromPrompt() {
     setPromptOpen(false);
-    await authClient.passkey.addPasskey().catch(() => null);
+    // 默认名 = 当前浏览器/系统(添加时这台),供设置页列表识别;用户可随后改名。
+    await authClient.passkey
+      .addPasskey({ name: detectDeviceLabel(navigator.userAgent) })
+      .catch(() => null);
     navigate({ to: "/" });
   }
 

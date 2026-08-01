@@ -27,7 +27,11 @@ import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signOut } from "../../lib/auth-client";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { importData } from "../../lib/import-data";
-import { getAuthenticatorName, passkeyKind } from "../../lib/passkey-authenticators";
+import {
+  detectDeviceLabel,
+  getAuthenticatorName,
+  passkeyKind,
+} from "../../lib/passkey-authenticators";
 import {
   getDataStats,
   getProviderKeyStatus,
@@ -177,7 +181,10 @@ function PasskeysCard() {
   async function onAdd() {
     setBusy(true);
     try {
-      const res = await authClient.passkey.addPasskey();
+      // 默认名 = 当前浏览器/系统(添加时这台),供列表识别;用户可随后改名。
+      const res = await authClient.passkey.addPasskey({
+        name: detectDeviceLabel(navigator.userAgent),
+      });
       if (res?.error) {
         toast.error(res.error.message ?? t("passkeyAddFailed"));
         return;
@@ -222,9 +229,10 @@ function PasskeysCard() {
             {passkeys && passkeys.length > 0 && (
               <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-lg bg-muted">
                 {passkeys.map((pk) => {
-                  // 标题:用户命名 → 认证器友好名(aaguid) → 通用「Passkey」。
-                  const title = pk.name || getAuthenticatorName(pk.aaguid) || t("passkeyUnnamed");
-                  // 副标题:类型/同步标(已同步 / 此设备 / 安全钥匙 / 跨设备)+ 添加时间。
+                  // 标题:用户命名/注册时设备名 → 认证器友好名(aaguid) → 通用「Passkey」。
+                  const authName = getAuthenticatorName(pk.aaguid);
+                  const title = pk.name || authName || t("passkeyUnnamed");
+                  // 副标题:认证器名(仅当没被标题用掉,即标题已是 name 时)+ 类型/同步标 + 添加时间。
                   const kind = passkeyKind(pk);
                   const kindText =
                     kind === "synced"
@@ -237,6 +245,9 @@ function PasskeysCard() {
                             ? t("passkeyKindCrossDevice")
                             : null;
                   const addedText = t("passkeyAddedOn", { date: fmtDate(pk.createdAt) });
+                  const meta = [pk.name ? authName : null, kindText, addedText]
+                    .filter(Boolean)
+                    .join(" · ");
                   const isEditing = renaming?.id === pk.id;
                   return (
                     // 外层是 SharedLayoutBg 的「行」(pill 滑到这);内容包一层 flex —— SharedLayoutBg 会把
@@ -264,9 +275,7 @@ function PasskeysCard() {
                             placeholder={title}
                           />
                           {!isEditing && (
-                            <div className="text-muted-foreground text-xs">
-                              {kindText ? `${kindText} · ${addedText}` : addedText}
-                            </div>
+                            <div className="text-muted-foreground text-xs">{meta}</div>
                           )}
                         </div>
                         {!isEditing && (
