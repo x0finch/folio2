@@ -73,6 +73,15 @@ const en = {
     tagline: "Your self-hosted portfolio, one dashboard.",
     readOnlyHint: "Read-only, Folio never holds your keys or signs transactions.",
   },
+  Lock: {
+    title: "Locked",
+    subtitle: "Idle for a while — verify to continue.",
+    unlockWithPasskey: "Unlock with passkey",
+    password: "Password",
+    unlock: "Unlock",
+    or: "or",
+    failed: "Couldn't verify — try again.",
+  },
   Overview: {
     totalValue: "Total value",
     totalNetWorth: "Total net worth",
@@ -404,6 +413,15 @@ const zh: Messages = {
     authFailed: "认证失败",
     tagline: "自托管的组合追踪,一个面板看全。",
     readOnlyHint: "只读,Folio 从不持有私钥、不签名交易。",
+  },
+  Lock: {
+    title: "已锁定",
+    subtitle: "闲置了一会儿 —— 验证一下继续。",
+    unlockWithPasskey: "用 passkey 解锁",
+    password: "密码",
+    unlock: "解锁",
+    or: "或",
+    failed: "验证失败 —— 请重试。",
   },
   Overview: {
     totalValue: "总价值",
