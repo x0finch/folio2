@@ -448,6 +448,28 @@ describe("历史日价按 tokenRef 全局存", () => {
     await prices.putDaily(id, [{ dayBucket: 20180, unitPrice: 2 }]);
     expect(await prices.getDaily(id, [20180])).toEqual(new Map([[20180, 2]]));
   });
+
+  // 按 ref 直读/直写(法币历史汇率,ADR 0026):没有 tokenId→ref 翻译,任何 ref 都能落表 ——
+  // 法币 ref(`fiat/issued:CODE`)在 token_refs 里没行,`putDaily` 会跳过,这条路才能存它。
+  it("getDailyByRef/putDailyByRef:按任意 ref 直存直读,无需 token_refs 里有行", async () => {
+    const prices = createUserTokenPriceStore(env, { userId: USER_A, namer: NAMER });
+    await prices.putDailyByRef("fiat/issued:EUR", [
+      { dayBucket: 20180, unitPrice: 1.08 },
+      { dayBucket: 20181, unitPrice: 1.09 },
+    ]);
+    expect(await prices.getDailyByRef("fiat/issued:EUR", [20180, 20181])).toEqual(
+      new Map([
+        [20180, 1.08],
+        [20181, 1.09],
+      ]),
+    );
+    // 全局键,与用户无关 —— 另一个用户按同一个 ref 直接读到。
+    const other = createUserTokenPriceStore(env, { userId: USER_B, namer: NAMER });
+    expect(await other.getDailyByRef("fiat/issued:EUR", [20180])).toEqual(new Map([[20180, 1.08]]));
+    // 撞 (ref, 日) 是覆盖。
+    await prices.putDailyByRef("fiat/issued:EUR", [{ dayBucket: 20180, unitPrice: 1.1 }]);
+    expect(await prices.getDailyByRef("fiat/issued:EUR", [20180])).toEqual(new Map([[20180, 1.1]]));
+  });
 });
 
 describe("per-user 缓存", () => {

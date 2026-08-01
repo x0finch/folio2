@@ -1,7 +1,9 @@
 import { type CoinGeckoConfig, createCoinGeckoClient } from "@folio/coingecko-client";
 import type { FxUpstream } from "@folio/oracle-basic";
 import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
-import { UPSTREAM_ID } from "./constants";
+import { tokenRef } from "@folio/oracle-ref";
+import { BTC_COIN_ID, UPSTREAM_ID } from "./constants";
+import { parsePriceSeries } from "./parse";
 
 // `FxUpstream` 的 CoinGecko 实现。上游那个端点(`/exchange_rates`)**以 BTC 为基准**报价:
 // 每一项的 value = 1 BTC 值多少该币种。我们要的是「1 单位该币种值多少美元」,于是
@@ -12,6 +14,22 @@ export function createCoinGeckoFxUpstream(config: CoinGeckoConfig = {}): FxUpstr
   const client = createCoinGeckoClient(config);
   return {
     id: UPSTREAM_ID,
+
+    // 法币历史腿的缓存键 —— 与 token adapter 产 BTC ref 同一个串(`coingecko/issued:bitcoin`),
+    // 故与 `tokens.priceSeries` 落的 BTC 历史价共用全局行(ADR 0026 的复用)。
+    btcRef: tokenRef.issued(UPSTREAM_ID, BTC_COIN_ID),
+
+    // 「1 BTC 在给定币种下的历史价」,一区间一次上游调用。反算(相除)在服务层做,这里只出原始腿。
+    // vs_currency 上游要小写(usd / eur);base 恒是 BTC(见 BTC_COIN_ID)。
+    async fetchBtcSeries(code, fromMs, toMs) {
+      const pairs = await client.coinsMarketChartRange({
+        id: BTC_COIN_ID,
+        vsCurrency: code.trim().toLowerCase(),
+        fromSec: Math.floor(fromMs / 1000),
+        toSec: Math.ceil(toMs / 1000),
+      });
+      return parsePriceSeries(pairs);
+    },
 
     async fetchRates() {
       const rates = (await client.exchangeRates()).rates ?? {};

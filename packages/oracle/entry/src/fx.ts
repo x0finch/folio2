@@ -1,5 +1,6 @@
-import type { CacheStore, FxUpstream } from "@folio/oracle-basic";
-import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
+import type { CacheStore, FxUpstream, TokenPriceStore } from "@folio/oracle-basic";
+import { dayBucketOf, FIAT_NAMER, MS_PER_DAY, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { cacheKeys, readFx, readFxFreshness, writeFx } from "./cache";
 
 // 展示币种的汇率服务。**读软过期、写按 TTL** —— 两个动词的判据不同,这是本文件的全部内容。
@@ -12,22 +13,137 @@ export interface FxRates {
   resolve(currency: string): Promise<number | undefined>;
   // 预热(同步之后 / 用户第一次切币种时)。缺省预热全部支持币种。
   warm(currencies?: readonly string[]): Promise<void>;
+
+  // —— 历史日汇率(ADR 0026 / #274)——
+  // 某法币在区间内逐日的 usd_per_unit,口径同 `resolve` 但按**当天**汇率。SWR 照 `priceSeries`:
+  // 命中缓存的过去日直接用、缺的从 BTC 反算并永久落 `token_daily_prices`、今日桶恒现取;上游失败 →
+  // 退回仅缓存不抛。USD 恒 1(不出网)。缓存/派生对齐到 UTC 日桶(`atMs = 日桶 × 一日毫秒`)。
+  fiatRateSeries(
+    code: string,
+    fromMs: number,
+    toMs: number,
+  ): Promise<{ atMs: number; unitPrice: number }[]>;
+  // 某时刻的历史汇率:atMs 所属 UTC 日桶的汇率;该日无数据 → undefined(调用方降级)。
+  fiatRateAt(code: string, atMs: number): Promise<number | undefined>;
 }
 
 export interface FxRatesDeps {
   cache: CacheStore;
   upstream: FxUpstream;
+  // 历史日汇率读写 `token_daily_prices`(按 ref 直存,见 getDailyByRef)。展示币种现价那半用不到它,
+  // 故做成可选:只有历史那两个方法碰它,缺了就当「没有历史能力」(仅缓存、不派生)。
+  prices?: TokenPriceStore;
+  now?: () => number;
 }
 
 const ALL_CODES = SUPPORTED_CURRENCIES.map((c) => c.code);
+
+// 逐日反算法币美元价(纯):usd_per_unit(code)@日 = BTC美元@日 ÷ BTC该币@日。缺任一腿、或
+// BTC该币 ≤ 0(坏值 / 除零)的日**跳过**——宁可那天没历史价、走降级链,也不出一个乱数。导出供纯测。
+export function deriveFiatDaily(
+  btcUsdByDay: ReadonlyMap<number, number>,
+  btcCodeByDay: ReadonlyMap<number, number>,
+  buckets: readonly number[],
+): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const b of buckets) {
+    const usd = btcUsdByDay.get(b);
+    const inCode = btcCodeByDay.get(b);
+    if (usd != null && inCode != null && inCode > 0) out.set(b, usd / inCode);
+  }
+  return out;
+}
 
 // 币种 code 的归一口径,与造缓存键那一处(`cacheKeys.fx`)必须一致。
 // 不归一的话「是不是 USD」这个判断会漏掉 `usd`:它既不短路成 1、又永远不会被写进缓存
 // (写的时候按大写过滤掉了),于是每次预热都白拉一趟上游。
 const norm = (code: string): string => code.trim().toUpperCase();
 
-export function createFxRates({ cache, upstream }: FxRatesDeps): FxRates {
+export function createFxRates({ cache, upstream, prices, now = Date.now }: FxRatesDeps): FxRates {
+  // BTC 美元历史腿:优先读 `token_daily_prices` 的 `coingecko/issued:bitcoin`(BTC 持有者 / 上一轮
+  // 已暖的直接命中),缺的过去日拉一次并落库(顺带暖给 BTC 持有者),今日桶现取不落。返回全桶的
+  // Map(命中什么给什么)。ADR 0026 的「BTC 美元腿优先读缓存、不重取」就在这里。
+  async function btcUsdDaily(
+    store: TokenPriceStore,
+    buckets: readonly number[],
+    todayB: number,
+  ): Promise<Map<number, number>> {
+    const cached = await store.getDailyByRef(upstream.btcRef, buckets);
+    const missingPast = buckets.filter((b) => b < todayB && !cached.has(b));
+    const needsToday = buckets.includes(todayB);
+    if (missingPast.length === 0 && !needsToday) return cached;
+
+    const fromMs = Math.min(...buckets) * MS_PER_DAY;
+    const toMs = Math.max(...buckets) * MS_PER_DAY + (MS_PER_DAY - 1);
+    const fetched = new Map<number, number>();
+    for (const pt of await upstream.fetchBtcSeries("USD", fromMs, toMs)) {
+      if (pt.unitPrice > 0) fetched.set(dayBucketOf(pt.atMs), pt.unitPrice); // 升序 → 当日最后一点胜出
+    }
+    const toPersist = [...fetched.entries()]
+      .filter(([b]) => b < todayB && !cached.has(b))
+      .map(([dayBucket, unitPrice]) => ({ dayBucket, unitPrice }));
+    if (toPersist.length > 0) await store.putDailyByRef(upstream.btcRef, toPersist);
+
+    const out = new Map(cached);
+    for (const [b, v] of fetched) if (!out.has(b)) out.set(b, v);
+    return out;
+  }
+
+  async function fiatRateSeries(code: string, fromMs: number, toMs: number) {
+    if (fromMs > toMs) return [];
+    const CODE = norm(code);
+    const fromB = dayBucketOf(fromMs);
+    const toB = dayBucketOf(toMs);
+    const buckets: number[] = [];
+    for (let b = fromB; b <= toB; b++) buckets.push(b);
+
+    // USD 恒 1 —— 不出网、不查表、不反算它自己。
+    if (CODE === "USD") return buckets.map((b) => ({ atMs: b * MS_PER_DAY, unitPrice: 1 }));
+    // 没接历史 store(现价-only 装配)→ 只能给缓存里已有的,给不了就空。
+    if (!prices) return [];
+
+    const fiatRef = tokenRef.issued(FIAT_NAMER, CODE);
+    const todayB = dayBucketOf(now());
+    const cached = await prices.getDailyByRef(fiatRef, buckets);
+    const missingPast = buckets.filter((b) => b < todayB && !cached.has(b));
+    const needsToday = toB >= todayB;
+
+    const derived = new Map<number, number>();
+    if (missingPast.length > 0 || needsToday) {
+      try {
+        // 两条腿:BTC 美元(优先缓存)+ BTC/该币(现取,不落)。任一腿挂 → 整块降级到仅缓存。
+        const btcCode = new Map<number, number>();
+        for (const pt of await upstream.fetchBtcSeries(CODE, fromMs, toMs)) {
+          if (pt.unitPrice > 0) btcCode.set(dayBucketOf(pt.atMs), pt.unitPrice);
+        }
+        const btcUsd = await btcUsdDaily(prices, buckets, todayB);
+        for (const [b, v] of deriveFiatDaily(btcUsd, btcCode, buckets)) derived.set(b, v);
+      } catch {
+        // 上游失败(限流 / 无历史 / 网络)→ 降级到仅缓存,不抛(曲线不因缺汇率崩)。
+      }
+      const toPersist = [...derived.entries()]
+        .filter(([b]) => b < todayB && !cached.has(b)) // 只落不可变的过去日
+        .map(([dayBucket, unitPrice]) => ({ dayBucket, unitPrice }));
+      if (toPersist.length > 0) await prices.putDailyByRef(fiatRef, toPersist);
+    }
+
+    const out: { atMs: number; unitPrice: number }[] = [];
+    for (const b of buckets) {
+      const rate = cached.get(b) ?? derived.get(b);
+      if (typeof rate === "number") out.push({ atMs: b * MS_PER_DAY, unitPrice: rate });
+    }
+    return out;
+  }
+
   return {
+    fiatRateSeries,
+
+    async fiatRateAt(code, atMs) {
+      const dayStart = dayBucketOf(atMs) * MS_PER_DAY;
+      const series = await fiatRateSeries(code, dayStart, atMs);
+      return series.at(-1)?.unitPrice;
+    },
+
     async resolve(currency) {
       if (norm(currency) === "USD") return 1;
       return readFx(cache, currency);

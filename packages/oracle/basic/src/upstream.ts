@@ -59,6 +59,21 @@ export type TokenUpstream = TokenMetaUpstream & PriceUpstream & TokenRefIndexUps
 export interface FxUpstream extends UpstreamIdentity {
   // 币种 code(大写)→ usdPerUnit。上游不认识的币种不出现在结果里(不是报错)。
   fetchRates(): Promise<Map<string, number>>;
+
+  // —— 历史法币汇率的原料(ADR 0026)——
+  // 法币历史日汇率**从 BTC 反算**(与 `fetchRates` 同源:`/exchange_rates` 本就是 BTC 基):
+  //   usd_per_unit(code)@日 = (1 BTC 值多少美元)@日 ÷ (1 BTC 值多少 code)@日
+  // 反算(相除、落库、复用 BTC 美元腿缓存)在服务层做,这里只出**一条腿的原始历史**:
+  // 「1 BTC 在给定币种下的历史价」,走 market_chart/range(粒度随上游,按日归一在服务层)。
+  //   · code = 某法币 → BTC/该币腿(每次现取)
+  //   · code = "USD"  → BTC/美元腿(= BTC 美元历史价;服务层落 `token_daily_prices` 复用给 BTC 持有者)
+  // USD 恒 1 由服务层短路,不会拿 "USD" 反算它自己。
+  fetchBtcSeries(code: string, fromMs: number, toMs: number): Promise<TokenPricePoint[]>;
+
+  // 该源里 BTC 的 tokenRef —— BTC 美元历史腿在 `token_daily_prices` 的缓存键。
+  // 与 `tokens.priceSeries` 落 BTC 历史价用的是同一批全局行(`coingecko/issued:bitcoin`)→
+  // 服务层按它对称读写,BTC 持有者已暖的那段直接复用、这里补的又顺带暖给他们。
+  readonly btcRef: TokenRef;
 }
 
 // 平台面(链的名与图)。同样独立成端口 —— 它跟代币、跟汇率都不是一件事。

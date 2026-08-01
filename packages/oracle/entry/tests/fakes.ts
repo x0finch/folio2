@@ -170,15 +170,20 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
 export interface FakeTokenPriceStore extends TokenPriceStore {
   readonly current: Map<string, { price: TokenPrice; expiresAt: number }>;
   readonly daily: Map<string, Map<number, number>>;
+  // 按 ref 直存的历史日价(与 `daily` 分开:那个键是 tokenId,这个键是 ref —— 真表里两者
+  // 落的是同一张 token_daily_prices,但假实现按调用路径分桶,断言起来才看得清走了哪条)。
+  readonly dailyByRef: Map<string, Map<number, number>>;
   now: number;
 }
 
 export function fakeTokenPriceStore(): FakeTokenPriceStore {
   const current = new Map<string, { price: TokenPrice; expiresAt: number }>();
   const daily = new Map<string, Map<number, number>>();
+  const dailyByRef = new Map<string, Map<number, number>>();
   const store: FakeTokenPriceStore = {
     current,
     daily,
+    dailyByRef,
     now: NOW0,
 
     async getByIds(ids) {
@@ -213,6 +218,23 @@ export function fakeTokenPriceStore(): FakeTokenPriceStore {
       const byDay = daily.get(tokenId) ?? new Map<number, number>();
       for (const p of prices) byDay.set(p.dayBucket, p.unitPrice);
       daily.set(tokenId, byDay);
+    },
+
+    async getDailyByRef(ref, dayBuckets) {
+      const byDay = dailyByRef.get(ref);
+      const out = new Map<number, number>();
+      if (!byDay) return out;
+      for (const b of dayBuckets) {
+        const v = byDay.get(b);
+        if (v != null) out.set(b, v);
+      }
+      return out;
+    },
+
+    async putDailyByRef(ref, prices) {
+      const byDay = dailyByRef.get(ref) ?? new Map<number, number>();
+      for (const p of prices) byDay.set(p.dayBucket, p.unitPrice);
+      dailyByRef.set(ref, byDay);
     },
   };
   return store;
@@ -386,6 +408,9 @@ export function fakeUpstream(id = "src"): FakeUpstream {
 export interface FakeFxUpstream extends FxUpstream {
   fetches: number;
   rates: Map<string, number>;
+  // code(大写)→ 「1 BTC 值多少 code」的历史观测点。`fetchBtcSeries` 从这里返回并计一次调用。
+  btcSeries: Map<string, TokenPricePoint[]>;
+  btcCalls: string[]; // 每次 fetchBtcSeries 的 code(验「BTC 美元腿命中缓存就不该出网」)
 }
 
 export function fakeFxUpstream(rates: Record<string, number> = {}, id = "src"): FakeFxUpstream {
@@ -393,9 +418,17 @@ export function fakeFxUpstream(rates: Record<string, number> = {}, id = "src"): 
     id,
     fetches: 0,
     rates: new Map(Object.entries(rates)),
+    btcRef: `${id}/issued:bitcoin`,
+    btcSeries: new Map(),
+    btcCalls: [],
     async fetchRates() {
       src.fetches += 1;
       return new Map(src.rates);
+    },
+    async fetchBtcSeries(code, fromMs, toMs) {
+      src.btcCalls.push(code.toUpperCase());
+      const all = src.btcSeries.get(code.toUpperCase()) ?? [];
+      return all.filter((p) => p.atMs >= fromMs && p.atMs <= toMs);
     },
   };
   return src;

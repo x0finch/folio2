@@ -106,6 +106,10 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
         fx ??= createFxRates({
           cache: cfg.createCacheStore(userId),
           upstream: cfg.createFxUpstream(),
+          // 历史日汇率读写 `token_daily_prices`(按 ref 直存)。与 tokens 那半共用同一个价 store 端口 ——
+          // 现价那半跟着代币行(per-user),历史那半是全局键,两者都在这个 store 里(#199)。
+          prices: cfg.createTokenPriceStore(userId),
+          now: cfg.now,
         });
         return fx;
       },
