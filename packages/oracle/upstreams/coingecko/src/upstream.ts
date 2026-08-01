@@ -142,12 +142,14 @@ export function createCoinGeckoUpstream(config: CoinGeckoConfig = {}): TokenUpst
       return out;
     },
 
-    async fetchPriceSeries(ref, fromMs, toMs) {
+    // vsCurrency 缺省 USD;法币历史汇率反算取「BTC 在某法币下的历史价」时传 `<code>`(ADR 0026)。
+    // 上游要小写(usd / eur)。
+    async fetchPriceSeries(ref, fromMs, toMs, vsCurrency = VS_USD) {
       const id = coinIdOf(ref);
       if (!id) return []; // 不是本源命名的 ref → 本源给不出历史价
       const pairs = await client.coinsMarketChartRange({
         id,
-        vsCurrency: VS_USD,
+        vsCurrency: vsCurrency.trim().toLowerCase(),
         fromSec: Math.floor(fromMs / 1000),
         toSec: Math.ceil(toMs / 1000),
       });

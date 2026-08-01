@@ -65,29 +65,9 @@ describe("createCoinGeckoFxUpstream.fetchRates", () => {
   });
 });
 
-// 历史法币汇率的原料腿(ADR 0026):market_chart/range 取「1 BTC 在某币种下的价」。
-// 反算(相除、复用美元腿缓存)在服务层做,这里只验:请求 vs_currency 是给定 code、base 是 BTC、
-// 出的是升序观测点。
-describe("createCoinGeckoFxUpstream.fetchBtcSeries", () => {
-  it("按给定 code(小写)取 BTC 的 market_chart/range,升序观测点", async () => {
-    const spy = mockFetch({
-      prices: [
-        [2000, 92000],
-        [1000, 90000], // 乱序 → parse 排升序
-      ],
-    });
-    const pts = await createCoinGeckoFxUpstream(NO_WAIT).fetchBtcSeries("EUR", 1000, 2000);
-
-    expect(pts).toEqual([
-      { atMs: 1000, unitPrice: 90000 },
-      { atMs: 2000, unitPrice: 92000 },
-    ]);
-    // vs_currency=eur(小写)、走 bitcoin 的 market_chart/range。fetch 收的是 URL 对象。
-    const url = String(spy.mock.calls[0]?.[0] ?? "");
-    expect(url).toContain("/coins/bitcoin/market_chart/range");
-    expect(url).toContain("vs_currency=eur");
-  });
-
+// 汇率的 BTC 反算基(ADR 0026):历史反算取「BTC 在某币种下的价」走的是 PriceUpstream.fetchPriceSeries
+//(见 upstream.test.ts 的 vsCurrency 用例),FxUpstream 只声明这个基、不另立取数方法。
+describe("createCoinGeckoFxUpstream.btcRef", () => {
   it("btcRef = coingecko/issued:bitcoin —— 与代币那面 BTC 历史价同键(可复用)", () => {
     expect(createCoinGeckoFxUpstream(NO_WAIT).btcRef).toBe("coingecko/issued:bitcoin");
   });

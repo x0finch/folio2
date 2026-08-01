@@ -1,4 +1,4 @@
-import type { CacheStore, FxUpstream, TokenPriceStore } from "@folio/oracle-basic";
+import type { CacheStore, FxUpstream, PriceUpstream, TokenPriceStore } from "@folio/oracle-basic";
 import { dayBucketOf, FIAT_NAMER, MS_PER_DAY, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { cacheKeys, readFx, readFxFreshness, writeFx } from "./cache";
@@ -30,9 +30,12 @@ export interface FxRates {
 export interface FxRatesDeps {
   cache: CacheStore;
   upstream: FxUpstream;
-  // 历史日汇率读写 `token_daily_prices`(按 ref 直存,见 getDailyByRef)。展示币种现价那半用不到它,
-  // 故做成可选:只有历史那两个方法碰它,缺了就当「没有历史能力」(仅缓存、不派生)。
+  // 历史日汇率读写 `token_daily_prices`(按 ref 直存,见 getDailyByRef)+ 取 BTC 两条反算腿走
+  // `priceUpstream.fetchPriceSeries(btcRef, …, vsCurrency)`(ADR 0026:复用现成取数口,不另立方法)。
+  // 展示币种现价那半(resolve/warm)用不到它俩,故都做成可选:缺了历史就当「没有历史能力」
+  //(仅回已缓存的、不派生)。BTC 反算是全仓价格骨架的一部分,所以历史那半天然搭在 PriceUpstream 上。
   prices?: TokenPriceStore;
+  priceUpstream?: PriceUpstream;
   now?: () => number;
 }
 
@@ -59,12 +62,20 @@ export function deriveFiatDaily(
 // (写的时候按大写过滤掉了),于是每次预热都白拉一趟上游。
 const norm = (code: string): string => code.trim().toUpperCase();
 
-export function createFxRates({ cache, upstream, prices, now = Date.now }: FxRatesDeps): FxRates {
+export function createFxRates({
+  cache,
+  upstream,
+  prices,
+  priceUpstream,
+  now = Date.now,
+}: FxRatesDeps): FxRates {
   // BTC 美元历史腿:优先读 `token_daily_prices` 的 `coingecko/issued:bitcoin`(BTC 持有者 / 上一轮
   // 已暖的直接命中),缺的过去日拉一次并落库(顺带暖给 BTC 持有者),今日桶现取不落。返回全桶的
   // Map(命中什么给什么)。ADR 0026 的「BTC 美元腿优先读缓存、不重取」就在这里。
+  // 取数走 `fetchPriceSeries(btcRef)`(vsCurrency 缺省 USD)—— 与 `tokens.priceSeries` 同一个口。
   async function btcUsdDaily(
     store: TokenPriceStore,
+    fetch: PriceUpstream,
     buckets: readonly number[],
     todayB: number,
   ): Promise<Map<number, number>> {
@@ -76,7 +87,7 @@ export function createFxRates({ cache, upstream, prices, now = Date.now }: FxRat
     const fromMs = Math.min(...buckets) * MS_PER_DAY;
     const toMs = Math.max(...buckets) * MS_PER_DAY + (MS_PER_DAY - 1);
     const fetched = new Map<number, number>();
-    for (const pt of await upstream.fetchBtcSeries("USD", fromMs, toMs)) {
+    for (const pt of await fetch.fetchPriceSeries(upstream.btcRef, fromMs, toMs)) {
       if (pt.unitPrice > 0) fetched.set(dayBucketOf(pt.atMs), pt.unitPrice); // 升序 → 当日最后一点胜出
     }
     const toPersist = [...fetched.entries()]
@@ -99,8 +110,8 @@ export function createFxRates({ cache, upstream, prices, now = Date.now }: FxRat
 
     // USD 恒 1 —— 不出网、不查表、不反算它自己。
     if (CODE === "USD") return buckets.map((b) => ({ atMs: b * MS_PER_DAY, unitPrice: 1 }));
-    // 没接历史 store(现价-only 装配)→ 只能给缓存里已有的,给不了就空。
-    if (!prices) return [];
+    // 没接历史能力(现价-only 装配:缺 store 或缺取数口)→ 只能给缓存里已有的,给不了就空。
+    if (!prices || !priceUpstream) return [];
 
     const fiatRef = tokenRef.issued(FIAT_NAMER, CODE);
     const todayB = dayBucketOf(now());
@@ -111,12 +122,18 @@ export function createFxRates({ cache, upstream, prices, now = Date.now }: FxRat
     const derived = new Map<number, number>();
     if (missingPast.length > 0 || needsToday) {
       try {
-        // 两条腿:BTC 美元(优先缓存)+ BTC/该币(现取,不落)。任一腿挂 → 整块降级到仅缓存。
+        // 两条腿都走 fetchPriceSeries(btcRef):BTC 美元(优先缓存)+ BTC/该币(vsCurrency=CODE,
+        // 现取不落)。反算 = 前者 ÷ 后者。任一腿挂 → 整块降级到仅缓存。
         const btcCode = new Map<number, number>();
-        for (const pt of await upstream.fetchBtcSeries(CODE, fromMs, toMs)) {
+        for (const pt of await priceUpstream.fetchPriceSeries(
+          upstream.btcRef,
+          fromMs,
+          toMs,
+          CODE,
+        )) {
           if (pt.unitPrice > 0) btcCode.set(dayBucketOf(pt.atMs), pt.unitPrice);
         }
-        const btcUsd = await btcUsdDaily(prices, buckets, todayB);
+        const btcUsd = await btcUsdDaily(prices, priceUpstream, buckets, todayB);
         for (const [b, v] of deriveFiatDaily(btcUsd, btcCode, buckets)) derived.set(b, v);
       } catch {
         // 上游失败(限流 / 无历史 / 网络)→ 降级到仅缓存,不抛(曲线不因缺汇率崩)。

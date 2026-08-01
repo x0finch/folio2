@@ -109,6 +109,9 @@ export function createOracleFor(cfg: OracleConfig): OracleFor {
           // 历史日汇率读写 `token_daily_prices`(按 ref 直存)。与 tokens 那半共用同一个价 store 端口 ——
           // 现价那半跟着代币行(per-user),历史那半是全局键,两者都在这个 store 里(#199)。
           prices: cfg.createTokenPriceStore(userId),
+          // 历史汇率的 BTC 反算两条腿走代币上游的 `fetchPriceSeries`(ADR 0026:复用现成取数口)——
+          // BTC 反算本就是价格骨架的一部分,故历史那半搭在代币 upstream 上,不给 FxUpstream 加取数方法。
+          priceUpstream: cfg.createUpstream(),
           now: cfg.now,
         });
         return fx;

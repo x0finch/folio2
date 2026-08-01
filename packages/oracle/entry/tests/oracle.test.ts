@@ -123,18 +123,19 @@ describe("惰性", () => {
     const { cfg, calls } = countingConfig();
     const oracle = createOracleFor(cfg)("u1");
 
-    // fx 现在也建**价 store** —— 历史日汇率落 `token_daily_prices`(与代币历史价同一张全局表,#199/
-    // ADR 0026)。但仍不建代币 info store(tokenStore)、不建代币上游(upstream);它要的是汇率上游。
+    // fx 现在也建**价 store** + **代币上游**:历史日汇率落 `token_daily_prices`(与代币历史价同一张
+    // 全局表,#199),而 BTC 反算两条腿走代币上游的 `fetchPriceSeries`(ADR 0026:复用现成取数口,
+    // 不给 FxUpstream 加取数方法)。仍不建代币 **info** store(tokenStore)—— 汇率不碰代币身份。
     void oracle.fx;
-    expect(calls).toEqual(["cache:u1", "fxUpstream", "priceStore:u1"]);
+    expect(calls).toEqual(["cache:u1", "fxUpstream", "priceStore:u1", "upstream"]);
     expect(calls).not.toContain("tokenStore:u1");
-    expect(calls).not.toContain("upstream");
 
     void oracle.platforms;
     expect(calls).toEqual([
       "cache:u1",
       "fxUpstream",
       "priceStore:u1",
+      "upstream",
       "cache:u1",
       "platformUpstream",
     ]);
