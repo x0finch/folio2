@@ -142,7 +142,7 @@ export const listFiatOptions = createServerFn({ method: "GET" })
     const base = buildFiatOptions(locale);
     // 法币的「价」= FX 汇率(USD 恒 1),直接填进下拉项 —— 否则价格列显 "—"(法币在代币价格源没有价)。
     // warm 一次(冷则一把拉全所有支持币种;通常 _authed loader / 切币种时已暖过 → no-op)。
-    // asOf 置当下 → 下拉 SWR(staleTickets)判它新鲜、不会再拿它去 refreshTokenPrices 白刷(那条走代币源)。
+    // asOf 置当下 → 下拉 SWR(staleTickets)判它新鲜、不再拿它去 refreshTokenPrices 白刷(价已现填,重取无意义)。
     // 取不到汇率(warm 失败且非 USD)→ 该项不带价,回退 "—"(降级,不阻断)。24h 涨跌法币不给。
     const fx = oracleFor(context.userId).fx;
     await fx.warm(base.map((o) => o.symbol));
@@ -211,25 +211,53 @@ export const refreshTokenPrices = createServerFn({ method: "POST" })
   .validator(z.object({ tickets: z.array(z.string().min(1)).max(200) }))
   .handler(async ({ data, context }) => {
     // 票 → ref(解不开的丢掉),并记 ref→票 好把结果映射回票交回前端。
+    // 票携带当前上游(加密币)或 `fiat`(法币)命名者,两者都放行(同 getTokenPrice / mintHolding)——
+    // 只收 NAMER 的话「已有代币」组里的法币持仓会被丢掉、价格列恒显 "—"(法币无代币市价,得走 FX)。
     const byRef = new Map<TokenRef, string>();
     for (const ticket of data.tickets) {
-      const ref = tokenTicket.decode(ticket, NAMER);
+      const ref = tokenTicket.decode(ticket, [NAMER, FIAT_NAMER]);
       if (ref) byRef.set(ref, ticket);
     }
     if (byRef.size === 0) return [];
-    const priced = await oracleFor(context.userId).tokens.pricesByRefs([...byRef.keys()]);
+
+    // 法币与加密币分流:法币无上游市价 → 走 FX 现算(USD=1,其余当前汇率;ADR 0025,同 getTokenPrice);
+    // 其余走代币价格源(pricesByRefs)。白名单外的 fiat/issued:XXX → fiatCodeOf 空,落回加密币那路。
+    const oracle = oracleFor(context.userId);
+    const fiatByCode = new Map<string, string>(); // code → 票
+    const cryptoRefs: TokenRef[] = [];
+    for (const [ref, ticket] of byRef) {
+      const code = fiatCodeOf(ref);
+      if (code) fiatByCode.set(code, ticket);
+      else cryptoRefs.push(ref);
+    }
+
     const out: { ticket: string; unitPrice: number; change24h: number | null; asOf: number }[] = [];
-    for (const [ref, price] of priced) {
-      const ticket = byRef.get(ref);
-      if (ticket) {
-        out.push({
-          ticket,
-          unitPrice: price.unitPrice,
-          change24h: price.change24h ?? null,
-          asOf: price.asOf,
-        });
+
+    if (cryptoRefs.length > 0) {
+      const priced = await oracle.tokens.pricesByRefs(cryptoRefs);
+      for (const [ref, price] of priced) {
+        const ticket = byRef.get(ref);
+        if (ticket) {
+          out.push({
+            ticket,
+            unitPrice: price.unitPrice,
+            change24h: price.change24h ?? null,
+            asOf: price.asOf,
+          });
+        }
       }
     }
+
+    if (fiatByCode.size > 0) {
+      // warm 一次(冷则一把拉全支持币种;通常已暖 → no-op),再逐个 resolve。取不到 → 不带价(降级)。
+      await oracle.fx.warm([...fiatByCode.keys()]);
+      const asOf = Date.now();
+      for (const [code, ticket] of fiatByCode) {
+        const rate = await oracle.fx.resolve(code);
+        if (rate != null) out.push({ ticket, unitPrice: rate, change24h: null, asOf });
+      }
+    }
+
     tokenLog.debug("refreshTokenPrices: ok", { asked: byRef.size, got: out.length });
     return out;
   });
