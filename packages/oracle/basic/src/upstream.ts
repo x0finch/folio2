@@ -37,7 +37,14 @@ export interface PriceUpstream extends UpstreamIdentity {
   // 未收录的 ref 不出现在结果里(不是报错)。
   fetchTokens(refs: readonly TokenRef[]): Promise<UpstreamToken[]>;
   // 一 ref 一区间**一次**上游调用,升序原始观测点(粒度随上游;按日归一在服务层做)。
-  fetchPriceSeries(ref: TokenRef, fromMs: number, toMs: number): Promise<TokenPricePoint[]>;
+  // `vsCurrency` 缺省 USD(全仓价一律 USD);法币历史汇率从 BTC 反算时(ADR 0026),用它取
+  // 「BTC 在某法币下的历史价」那条腿(`vsCurrency = <code>`)—— 复用这一个取数口,不另立方法。
+  fetchPriceSeries(
+    ref: TokenRef,
+    fromMs: number,
+    toMs: number,
+    vsCurrency?: string,
+  ): Promise<TokenPricePoint[]>;
   // 兜底单查:全局映射里没有的(今天刚上线的币)才走这条。链未收录 / 无此合约 → null。
   fetchByContract(chain: string, contract: string): Promise<UpstreamToken | null>;
 }
@@ -59,6 +66,13 @@ export type TokenUpstream = TokenMetaUpstream & PriceUpstream & TokenRefIndexUps
 export interface FxUpstream extends UpstreamIdentity {
   // 币种 code(大写)→ usdPerUnit。上游不认识的币种不出现在结果里(不是报错)。
   fetchRates(): Promise<Map<string, number>>;
+
+  // 该源里 BTC 的 tokenRef —— 汇率的 **BTC 反算基**(ADR 0026)。`fetchRates` 本就是 BTC 派生
+  // (`/exchange_rates` 以 BTC 为基),历史汇率同源:`usd_per_unit(code)@日 = BTC美元@日 ÷ BTC该币@日`,
+  // 两条腿都用 `PriceUpstream.fetchPriceSeries(btcRef, …, vsCurrency)` 取(不另立取数方法)。
+  // 它也是 `token_daily_prices` 里 BTC 美元历史腿的键(`coingecko/issued:bitcoin`)—— 与
+  // `tokens.priceSeries` 落的 BTC 历史价共用同一批全局行,服务层按它对称读写、复用且顺带暖。
+  readonly btcRef: TokenRef;
 }
 
 // 平台面(链的名与图)。同样独立成端口 —— 它跟代币、跟汇率都不是一件事。

@@ -64,3 +64,11 @@ describe("createCoinGeckoFxUpstream.fetchRates", () => {
     expect(createCoinGeckoFxUpstream(NO_WAIT).id).toBe("coingecko");
   });
 });
+
+// 汇率的 BTC 反算基(ADR 0026):历史反算取「BTC 在某币种下的价」走的是 PriceUpstream.fetchPriceSeries
+//(见 upstream.test.ts 的 vsCurrency 用例),FxUpstream 只声明这个基、不另立取数方法。
+describe("createCoinGeckoFxUpstream.btcRef", () => {
+  it("btcRef = coingecko/issued:bitcoin —— 与代币那面 BTC 历史价同键(可复用)", () => {
+    expect(createCoinGeckoFxUpstream(NO_WAIT).btcRef).toBe("coingecko/issued:bitcoin");
+  });
+});

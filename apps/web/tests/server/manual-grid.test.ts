@@ -1,5 +1,8 @@
 import { env } from "cloudflare:test";
 import { createUserTokenPriceStore } from "@folio/db";
+import { tokenTicket } from "@folio/oracle";
+import { FIAT_NAMER } from "@folio/oracle-basic";
+import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/history";
 import { db } from "../../src/lib/server/internal/db";
@@ -27,6 +30,27 @@ const D0 = B0 * DAY; // 日对齐的开仓时刻 → 日桶数学干净
 const localBtc = { symbol: "BTC", unitPrice: 100 };
 // 有 identifier(选了币)→ ① 走注入的 oracle 历史价。
 const btcRef = { symbol: "BTC", unitPrice: 100, ticket: ticketOf("bitcoin") };
+// 法币现金(ADR 0026):票携带 fiat 身份 → 历史价走「当天汇率」,不走币价。
+const eurCash = {
+  symbol: "EUR",
+  unitPrice: 1.15,
+  ticket: tokenTicket.encode(tokenRef.issued(FIAT_NAMER, "EUR")),
+};
+const usdCash = {
+  symbol: "USD",
+  unitPrice: 1,
+  ticket: tokenTicket.encode(tokenRef.issued(FIAT_NAMER, "USD")),
+};
+// 法币历史日汇率按 `fiat/issued:<CODE>` 直存 token_daily_prices(getDailyByRef;无 tokenId 翻译)。
+async function seedFiatDaily(
+  code: string,
+  rows: { dayBucket: number; unitPrice: number }[],
+): Promise<void> {
+  await createUserTokenPriceStore(env, { userId: USER, namer: NAMER }).putDailyByRef(
+    tokenRef.issued(FIAT_NAMER, code),
+    rows,
+  );
+}
 // #203:历史价按 **token_id** 取(新参考层的 priceSeries 收内部 id),不再按厂商 ref 拼键。
 // 所以要先让持仓落库、拿到 mint 出来的 id,再往那个 id 上种价。
 async function seedDaily(
@@ -95,6 +119,38 @@ describe("loadManualAccountSeries (grid)", () => {
       totalUsd: 2 * 52000,
     });
     expect(series.some((r) => r.totalUsd === 2 * 52000)).toBe(true); // 确用了 B0+1 的历史价
+  });
+
+  // 法币现金端到端(ADR 0026 / #276):各点按**当天汇率**折算,不被账本冻的入账汇率拖平。
+  it("① 非美元法币:历史各点按当天汇率画,不用账本冻价", async () => {
+    const acc = await emptyAccount();
+    // 账本 price=1.15(入账那刻冻的汇率);选了法币 → 历史应走当天汇率 1.2 / 1.1,不用 1.15。
+    await addManualActivities(USER, acc.id, [
+      { token: eurCash, kind: "set", amount: 100, occurredAt: D0, price: 1.15 },
+    ]);
+    // 过去两日的历史日汇率(桶全在过去 → fiatRateSeries 命中缓存、零回源)。
+    await seedFiatDaily("EUR", [
+      { dayBucket: B0, unitPrice: 1.2 },
+      { dayBucket: B0 + 1, unitPrice: 1.1 },
+    ]);
+    const series = await loadManualAccountSeries(USER, acc.id, D0 + DAY);
+    // 首活动 D0(桶 B0 → 1.2)、末点 D0+DAY(桶 B0+1 → 1.1);数量 100。用当天汇率而非账本 1.15。
+    expect(series[0]).toEqual({ accountId: acc.id, takenAt: D0, totalUsd: 100 * 1.2 });
+    expect(series[series.length - 1]).toEqual({
+      accountId: acc.id,
+      takenAt: D0 + DAY,
+      totalUsd: 100 * 1.1,
+    });
+  });
+
+  // USD 现金:汇率恒 1,全程 ×数量,不出网、不需要种任何汇率。
+  it("① 美元现金:全程 ×1,行为不变", async () => {
+    const acc = await emptyAccount();
+    await addManualActivities(USER, acc.id, [
+      { token: usdCash, kind: "set", amount: 500, occurredAt: D0, price: 1 },
+    ]);
+    const series = await loadManualAccountSeries(USER, acc.id, D0 + DAY);
+    expect(series.every((r) => r.totalUsd === 500)).toBe(true);
   });
 
   it("窗口外存量:首活动远早于 now,后续每日点仍携带折出的存量(修 T5 缺口)", async () => {

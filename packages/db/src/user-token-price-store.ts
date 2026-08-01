@@ -125,18 +125,50 @@ export function createUserTokenPriceStore(
       if (prices.length === 0) return;
       const ref = await upstreamRefOf(tokenId);
       if (!ref) return; // 还没认出来的币没有全局键可落
-      await batchWrite(
-        db,
-        prices.map((p) =>
-          db
-            .insert(tokenDailyPrices)
-            .values({ tokenRef: ref, dayBucket: p.dayBucket, unitPrice: p.unitPrice })
-            .onConflictDoUpdate({
-              target: [tokenDailyPrices.tokenRef, tokenDailyPrices.dayBucket],
-              set: { unitPrice: p.unitPrice },
-            }),
-        ),
-      );
+      await writeDaily(ref, prices);
+    },
+
+    // 按 ref 直读/直写(法币历史汇率,ADR 0026):跳过 tokenId→ref 翻译。法币 ref
+    // (`fiat/issued:CODE`)与 BTC 反算腿(`coingecko/issued:bitcoin`)在 per-user `token_refs`
+    // 里未必有行 → 必须按 ref 直接落这张全局表。ref 就是主键的一列,无 user 参与。
+    async getDailyByRef(ref, dayBuckets) {
+      const out = new Map<number, number>();
+      if (dayBuckets.length === 0) return out;
+      for (const part of chunk([...new Set(dayBuckets)])) {
+        if (part.length === 0) continue;
+        const rows = await db
+          .select({ dayBucket: tokenDailyPrices.dayBucket, unitPrice: tokenDailyPrices.unitPrice })
+          .from(tokenDailyPrices)
+          .where(
+            and(eq(tokenDailyPrices.tokenRef, ref), inArray(tokenDailyPrices.dayBucket, part)),
+          );
+        for (const r of rows) out.set(r.dayBucket, r.unitPrice);
+      }
+      return out;
+    },
+
+    async putDailyByRef(ref, prices) {
+      if (prices.length === 0) return;
+      await writeDaily(ref, prices);
     },
   };
+
+  // getDaily/putDailyByRef 共用的写:upsert(撞主键改价)。ref 由调用方给(翻译过 / 直给)。
+  async function writeDaily(
+    ref: string,
+    prices: readonly { dayBucket: number; unitPrice: number }[],
+  ): Promise<void> {
+    await batchWrite(
+      db,
+      prices.map((p) =>
+        db
+          .insert(tokenDailyPrices)
+          .values({ tokenRef: ref, dayBucket: p.dayBucket, unitPrice: p.unitPrice })
+          .onConflictDoUpdate({
+            target: [tokenDailyPrices.tokenRef, tokenDailyPrices.dayBucket],
+            set: { unitPrice: p.unitPrice },
+          }),
+      ),
+    );
+  }
 }

@@ -170,15 +170,20 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
 export interface FakeTokenPriceStore extends TokenPriceStore {
   readonly current: Map<string, { price: TokenPrice; expiresAt: number }>;
   readonly daily: Map<string, Map<number, number>>;
+  // 按 ref 直存的历史日价(与 `daily` 分开:那个键是 tokenId,这个键是 ref —— 真表里两者
+  // 落的是同一张 token_daily_prices,但假实现按调用路径分桶,断言起来才看得清走了哪条)。
+  readonly dailyByRef: Map<string, Map<number, number>>;
   now: number;
 }
 
 export function fakeTokenPriceStore(): FakeTokenPriceStore {
   const current = new Map<string, { price: TokenPrice; expiresAt: number }>();
   const daily = new Map<string, Map<number, number>>();
+  const dailyByRef = new Map<string, Map<number, number>>();
   const store: FakeTokenPriceStore = {
     current,
     daily,
+    dailyByRef,
     now: NOW0,
 
     async getByIds(ids) {
@@ -213,6 +218,23 @@ export function fakeTokenPriceStore(): FakeTokenPriceStore {
       const byDay = daily.get(tokenId) ?? new Map<number, number>();
       for (const p of prices) byDay.set(p.dayBucket, p.unitPrice);
       daily.set(tokenId, byDay);
+    },
+
+    async getDailyByRef(ref, dayBuckets) {
+      const byDay = dailyByRef.get(ref);
+      const out = new Map<number, number>();
+      if (!byDay) return out;
+      for (const b of dayBuckets) {
+        const v = byDay.get(b);
+        if (v != null) out.set(b, v);
+      }
+      return out;
+    },
+
+    async putDailyByRef(ref, prices) {
+      const byDay = dailyByRef.get(ref) ?? new Map<number, number>();
+      for (const p of prices) byDay.set(p.dayBucket, p.unitPrice);
+      dailyByRef.set(ref, byDay);
     },
   };
   return store;
@@ -327,7 +349,10 @@ export interface FakeUpstream extends TokenUpstream {
   markets: UpstreamToken[];
   searchResults: UpstreamToken[];
   prices: Map<TokenRef, TokenPrice>;
-  series: TokenPricePoint[];
+  series: TokenPricePoint[]; // 缺省 vsCurrency(USD)的历史腿
+  // 按 vsCurrency(大写)的历史腿 —— 法币历史反算取「BTC 在某币种下的价」时用(ADR 0026)。
+  // 命中就用它,否则回退 `series`。
+  seriesByVs: Map<string, TokenPricePoint[]>;
   byContract: Map<string, UpstreamToken>;
   refIndex: { rows: TokenRefIndexRow[]; unmatchedPlatforms: string[]; skipped: number };
 }
@@ -340,6 +365,7 @@ export function fakeUpstream(id = "src"): FakeUpstream {
     searchResults: [],
     prices: new Map(),
     series: [],
+    seriesByVs: new Map(),
     byContract: new Map(),
     refIndex: { rows: [], unmatchedPlatforms: [], skipped: 0 },
 
@@ -366,9 +392,11 @@ export function fakeUpstream(id = "src"): FakeUpstream {
       return src.markets.filter((t) => refs.includes(t.ref));
     },
 
-    async fetchPriceSeries(ref, fromMs, toMs) {
-      src.calls.push(`fetchPriceSeries:${ref}:${fromMs}:${toMs}`);
-      return src.series.filter((p) => p.atMs >= fromMs && p.atMs <= toMs);
+    async fetchPriceSeries(ref, fromMs, toMs, vsCurrency = "usd") {
+      const vs = vsCurrency.toUpperCase();
+      src.calls.push(`fetchPriceSeries:${ref}:${vs}`);
+      const all = src.seriesByVs.get(vs) ?? src.series;
+      return all.filter((p) => p.atMs >= fromMs && p.atMs <= toMs);
     },
     async fetchByContract(chain, contract) {
       src.calls.push(`fetchByContract:${chain}:${contract}`);
@@ -393,6 +421,9 @@ export function fakeFxUpstream(rates: Record<string, number> = {}, id = "src"): 
     id,
     fetches: 0,
     rates: new Map(Object.entries(rates)),
+    // 汇率的 BTC 反算基,也是 BTC 美元历史腿的缓存键(ADR 0026)。历史腿的取数走代币 upstream 的
+    // fetchPriceSeries,不在 FxUpstream 上;这里只声明基。
+    btcRef: `${id}/issued:bitcoin`,
     async fetchRates() {
       src.fetches += 1;
       return new Map(src.rates);

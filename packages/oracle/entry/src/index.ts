@@ -30,7 +30,7 @@ export {
 export { type CandidateSourceDeps, createCandidateSource } from "./candidates";
 export { pickByConfidence } from "./confidence";
 export { createDefiLogos, type DefiLogos, type DefiLogosDeps } from "./defi-logos";
-export { createFxRates, type FxRates, type FxRatesDeps } from "./fx";
+export { createFxRates, deriveFiatDaily, type FxRates, type FxRatesDeps } from "./fx";
 export {
   type CandidateSource,
   createMint,

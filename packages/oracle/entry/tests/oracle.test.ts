@@ -119,15 +119,26 @@ describe("惰性", () => {
     expect(calls).not.toContain("refIndex");
   });
 
-  it("只碰 fx / platforms → 不建任何代币 store、也不建代币上游", () => {
+  it("只碰 fx / platforms → 不建代币 info store、也不建代币上游", () => {
     const { cfg, calls } = countingConfig();
     const oracle = createOracleFor(cfg)("u1");
 
+    // fx 现在也建**价 store** + **代币上游**:历史日汇率落 `token_daily_prices`(与代币历史价同一张
+    // 全局表,#199),而 BTC 反算两条腿走代币上游的 `fetchPriceSeries`(ADR 0026:复用现成取数口,
+    // 不给 FxUpstream 加取数方法)。仍不建代币 **info** store(tokenStore)—— 汇率不碰代币身份。
     void oracle.fx;
-    expect(calls).toEqual(["cache:u1", "fxUpstream"]);
+    expect(calls).toEqual(["cache:u1", "fxUpstream", "priceStore:u1", "upstream"]);
+    expect(calls).not.toContain("tokenStore:u1");
 
     void oracle.platforms;
-    expect(calls).toEqual(["cache:u1", "fxUpstream", "cache:u1", "platformUpstream"]);
+    expect(calls).toEqual([
+      "cache:u1",
+      "fxUpstream",
+      "priceStore:u1",
+      "upstream",
+      "cache:u1",
+      "platformUpstream",
+    ]);
   });
 
   it("同一个子服务反复访问只建一次(建后记忆)", () => {

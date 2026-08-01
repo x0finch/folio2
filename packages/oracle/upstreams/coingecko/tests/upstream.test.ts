@@ -269,7 +269,21 @@ describe("不是本源命名的 ref → 不发请求", () => {
     expect(calls[0].path).toContain("/coins/usd-coin/market_chart/range");
     expect(calls[0].query.get("from")).toBe("1"); // floor(1500/1000)
     expect(calls[0].query.get("to")).toBe("3"); // ceil(2500/1000)
+    expect(calls[0].query.get("vs_currency")).toBe("usd"); // 缺省 USD
     expect(got).toHaveLength(1);
+  });
+
+  // 法币历史汇率反算(ADR 0026)用它取「BTC 在某法币下的价」那条腿 —— 同一个取数口,只换 vs_currency。
+  it("历史价:vsCurrency 可换 —— 传 EUR 归一成小写 eur 送上游", async () => {
+    const calls = stubFetch({ "/market_chart/range": { prices: [[1700000000000, 92000]] } });
+    await createCoinGeckoUpstream(NO_WAIT).fetchPriceSeries(
+      "coingecko/issued:bitcoin",
+      1500,
+      2500,
+      "EUR",
+    );
+    expect(calls[0].path).toContain("/coins/bitcoin/market_chart/range");
+    expect(calls[0].query.get("vs_currency")).toBe("eur");
   });
 });
 

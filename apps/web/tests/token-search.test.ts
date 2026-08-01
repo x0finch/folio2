@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TokenOption } from "../src/lib/token-option";
 import {
+  buildOwnedOptions,
   buildTokenSections,
   type LivePrice,
   LOCAL_SEARCH_ENOUGH,
@@ -321,5 +322,44 @@ describe("展示时挑该刷价的票", () => {
     // 上游没回价的票不会进 live、永远算缺价;requested 才是那道闸。
     const tk = withPrice("NORESP"); // 无价、也不在 live 里
     expect(staleTickets([tk], noLive, new Set([tk.ticket]), NOW)).toEqual([]);
+  });
+});
+
+// manual「已有代币」组的选项拼装(#269)。**只收有票的、不看余额**(已清仓的旧持仓也留着);
+// 服务端那半(loadManualAccountDetail 给票 + 清仓仍返回)在 server/manual-t4.test.ts 端到端钉。
+describe("buildOwnedOptions", () => {
+  const meta = new Map([
+    ["BTC", { name: "Bitcoin", logo: "b.png" }],
+    ["EUR", { name: "Euro", logo: "e.png" }],
+  ]);
+
+  it("有票的收成 option;无票的(自定义 symbol)排除", () => {
+    const owned = buildOwnedOptions(
+      [
+        { ticket: "t-btc", symbol: "BTC" },
+        { ticket: "t-eur", symbol: "EUR" }, // 法币也有票 → 收
+        { ticket: null, symbol: "PRIV" }, // 手敲的自定义 → 无票 → 排除
+      ],
+      meta,
+    );
+    expect(owned.map((o) => o.symbol)).toEqual(["BTC", "EUR"]);
+    expect(owned.map((o) => o.ticket)).toEqual(["t-btc", "t-eur"]);
+  });
+
+  it("name/logo 取 meta(按大写 symbol);缺则 name 回退 symbol、logo 空", () => {
+    const owned = buildOwnedOptions(
+      [
+        { ticket: "t-btc", symbol: "btc" }, // 小写也匹配到 meta
+        { ticket: "t-xyz", symbol: "XYZ" }, // meta 里没有
+      ],
+      meta,
+    );
+    expect(owned[0]).toEqual({ ticket: "t-btc", symbol: "btc", name: "Bitcoin", logo: "b.png" });
+    expect(owned[1]).toEqual({ ticket: "t-xyz", symbol: "XYZ", name: "XYZ", logo: undefined });
+  });
+
+  it("不看余额:这一步拿不到 amount —— 是否已清仓在此无从判断,故一律收(留给账本层决定留删)", () => {
+    // 输入形状本身就不含 amount:清仓与否对这一步透明,已清仓的持仓照样成 option。
+    expect(buildOwnedOptions([{ ticket: "t-btc", symbol: "BTC" }], meta)).toHaveLength(1);
   });
 });

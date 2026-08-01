@@ -87,6 +87,17 @@ export interface TokenPriceStore {
     tokenId: string,
     prices: readonly { dayBucket: number; unitPrice: number }[],
   ): Promise<void>;
+
+  // 历史日价的**按 ref 直读**变体(法币历史汇率,ADR 0026)。跳过 `getDaily` 的 tokenId→ref
+  // 翻译,直接拿全局键读写 `token_daily_prices`。为什么必须绕开翻译:法币身份(`fiat/issued:CODE`)
+  // 与 BTC 反算腿(`coingecko/issued:bitcoin`,某些用户没持有它 → 没有那一档 ref 行)在 per-user
+  // `token_refs` 里查不到,`getDaily` 会当「还没认出来」返回空。写、读因此对称地按 ref 直接落表 ——
+  // token_daily_prices 本就是全局键值(#199/ADR 0022 的受控例外),按任意 ref 存取都合法。
+  getDailyByRef(ref: TokenRef, dayBuckets: readonly number[]): Promise<Map<number, number>>;
+  putDailyByRef(
+    ref: TokenRef,
+    prices: readonly { dayBucket: number; unitPrice: number }[],
+  ): Promise<void>;
 }
 
 // —— 全局:`global_token_ref_index`(ADR 0022)——

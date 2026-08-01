@@ -85,6 +85,49 @@ describe("tokenPriceAt 降级链", () => {
   });
 });
 
+// 法币现金(ADR 0026 / #274):历史价 = **当天汇率**,由 server 侧把 fx-history 灌进注入的 priceAt。
+// 纯层不认识 fiat —— 它只走 recognized+priceAt 那条路(第 ① 档),所以「按当天汇率画」在这一层
+// 就是「priceAt 每天给不同的值,曲线跟着走,不被账本冻价拖平」。这几条钉住这个不变量。
+describe("法币现金:历史价走注入的当天汇率(路径①)", () => {
+  // fiatCode 只在 server 决定「问汇率还是问币价」,纯层照旧只看 recognized。
+  const eur: HistoryToken = {
+    id: "eur",
+    unitPrice: 0,
+    recognized: true,
+    fiatCode: "EUR",
+    activities: [act("set", 100, T1, 1.15)], // 账本冻的入账汇率 1.15
+  };
+  // 逐日不同的汇率闭包(server 侧 fiatRateSeries 的替身)。
+  const fxAt = (id: string, t: number) =>
+    id === "eur" ? { [T1]: 1.2, [T2]: 1.1, [T3]: 1.05 }[t] : undefined;
+
+  it("各点用当天汇率,而非账本冻的 1.15", () => {
+    expect(tokenPriceAt(eur, T1, fxAt)).toBe(1.2);
+    expect(tokenPriceAt(eur, T2, fxAt)).toBe(1.1);
+    // 100 单位 → 账户额随汇率变:T1 = 120,T2 = 110(不是恒 115)。
+    expect(accountTotalAt([eur], T1, fxAt)).toBeCloseTo(120, 6);
+    expect(accountTotalAt([eur], T2, fxAt)).toBeCloseTo(110, 6);
+  });
+
+  it("USD 现金:汇率恒 1 → 全程 ×数量,行为不变", () => {
+    const usd: HistoryToken = {
+      id: "usd",
+      unitPrice: 0,
+      recognized: true,
+      fiatCode: "USD",
+      activities: [act("set", 500, T1, 1)],
+    };
+    const one = (_id: string, _t: number) => 1; // USD 恒 1
+    expect(accountTotalAt([usd], T1, one)).toBe(500);
+    expect(accountTotalAt([usd], T3, one)).toBe(500);
+  });
+
+  it("上游缺该日 → priceAt 返 undefined → 降级链落账本价②(不崩)", () => {
+    const miss = (_id: string, _t: number) => undefined;
+    expect(tokenPriceAt(eur, T1, miss)).toBe(1.15); // 落账本冻价
+  });
+});
+
 // 网格采样(ADR 0019,锚定模型):采样时刻 = 首活动锚点 ∪ 其后每个 UTC 日末 ∪ now(并集升序)。
 // 首点恒在首活动、末点恒在 now → 任一有活动账户 ≥2 点(抽屉 series.length≥2 渲染门)。DAY 对齐的
 // occurredAt(T1=1×DAY…是日起点)让日桶数学干净;dayEnd(b)=(b+1)×DAY-1。
