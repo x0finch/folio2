@@ -18,13 +18,14 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
 import { Fingerprint, LogOut, Trash2 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../components/currency-switcher";
 import { EditableName } from "../../components/editable-name";
 import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signOut } from "../../lib/auth-client";
+import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { importData } from "../../lib/import-data";
 import {
@@ -161,15 +162,10 @@ function PasskeysCard() {
   const t = useTranslations("Settings");
   const tc = useTranslations("Common");
   const locale = useLocale();
-  const [supported, setSupported] = useState(false);
+  const supported = usePasskeySupport();
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<PasskeyRow | null>(null);
   const [renaming, setRenaming] = useState<PasskeyRow | null>(null);
-
-  // supported 挂载后再设(SSR/hydration 安全:首帧与服务端一致的 false,挂载后才可能变 true,免首帧闪)。
-  useEffect(() => {
-    setSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
-  }, []);
 
   // 列表用 useQuery(与 account-detail-sheet 一致);supported 为真才拉。data undefined=加载中、[]=空。
   const passkeysQuery = useQuery<PasskeyRow[]>({

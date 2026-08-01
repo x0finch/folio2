@@ -44,12 +44,19 @@ export function useIdleLock(timeoutMs: number | null): { locked: boolean; unlock
   const timeoutRef = useRef(timeoutMs);
   timeoutRef.current = timeoutMs;
 
-  const armTimer = useCallback(() => {
+  // baseTime = 本轮闲置的起算时刻。挂载时传持久化的 lastActiveAt(按「剩余时间」起，
+  // 否则刷新会把计时重置成完整一轮、前台锁得偏晚)；活动 / 解锁时传 now(整轮)。
+  const armTimer = useCallback((baseTime: number) => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     const t = timeoutRef.current;
     if (t === null) return; // 永不
-    timer.current = setTimeout(() => setLocked(true), t);
+    const remaining = t - (Date.now() - baseTime);
+    if (remaining <= 0) {
+      setLocked(true);
+      return;
+    }
+    timer.current = setTimeout(() => setLocked(true), remaining);
   }, []);
 
   const checkExpiry = useCallback(() => {
@@ -65,12 +72,12 @@ export function useIdleLock(timeoutMs: number | null): { locked: boolean; unlock
     writeLastActive(now);
     lastWrite.current = now;
     setLocked(false);
-    armTimer();
+    armTimer(now);
   }, [armTimer]);
 
   useEffect(() => {
     checkExpiry(); // 挂载即比对：处理刷新 / 重开后已超时
-    armTimer();
+    armTimer(readLastActive()); // 按剩余时间起，接续刷新前的闲置进度
 
     const onActivity = () => {
       if (locked) return; // 锁定时活动不刷新(只有 unlock 才解)
@@ -79,7 +86,7 @@ export function useIdleLock(timeoutMs: number | null): { locked: boolean; unlock
         writeLastActive(now);
         lastWrite.current = now;
       }
-      armTimer(); // 每次活动重置定时器
+      armTimer(now); // 每次活动重置定时器(整轮)
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") checkExpiry();

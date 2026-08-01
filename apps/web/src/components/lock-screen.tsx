@@ -1,9 +1,10 @@
 import { Button, Input } from "@folio/ui";
 import { Fingerprint } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
 import { signIn } from "../lib/auth-client";
 import { useIdleLock } from "../lib/hooks/use-idle-lock";
+import { usePasskeySupport } from "../lib/hooks/use-passkey-support";
 import { DEFAULT_IDLE_TIMEOUT_MS } from "../lib/idle-lock";
 import { Logo } from "./logo";
 
@@ -25,16 +26,13 @@ function LockOverlay({ userEmail, onUnlock }: { userEmail: string; onUnlock: () 
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
-  // 支持检测放 useEffect(SSR 安全，避免首帧闪)——同 login 页做法。
-  const [supportsPasskey, setSupportsPasskey] = useState(false);
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.PublicKeyCredential) setSupportsPasskey(true);
-  }, []);
+  const supportsPasskey = usePasskeySupport();
 
   async function onPasskey() {
     setError(false);
     setBusy(true);
     try {
+      // signIn.passkey() 可能返回 undefined(用户取消 ceremony)，故可选链；signIn.email 不会。
       const res = await signIn.passkey();
       if (res?.error) setError(true);
       else onUnlock();
