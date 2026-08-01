@@ -80,8 +80,14 @@ export function useIdleLock(timeoutMs: number | null): { locked: boolean; unlock
     armTimer(readLastActive()); // 按剩余时间起，接续刷新前的闲置进度
 
     const onActivity = () => {
-      if (locked) return; // 锁定时活动不刷新(只有 unlock 才解)
       const now = Date.now();
+      // 已超时先锁、别刷新时间戳：刷新页面时浏览器恢复滚动位置会触发一次 scroll 事件，
+      // 若此刻(locked 尚为 false)直接写 now，会把「早已过期」的时间戳抹掉、绕过锁。
+      if (shouldLock({ lastActiveAt: readLastActive(), now, timeoutMs: timeoutRef.current })) {
+        setLocked(true);
+        return;
+      }
+      if (locked) return; // 锁定时活动不刷新(只有 unlock 才解)
       if (now - lastWrite.current >= ACTIVITY_THROTTLE_MS) {
         writeLastActive(now);
         lastWrite.current = now;
