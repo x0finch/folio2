@@ -341,7 +341,10 @@ function AutoLockCard() {
         <CardTitle>{t("autoLock")}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <p className="text-muted-foreground text-sm">{t("autoLockDesc")}</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-muted-foreground text-sm">{t("autoLockDesc")}</p>
+          <p className="text-foreground/80 text-sm">{t("autoLockUnlock")}</p>
+        </div>
         <SettingRow label={t("autoLockAfter")}>
           <Tabs value={raw} onValueChange={setRaw} variant="pill">
             <TabsList className="bg-muted dark:bg-background">
