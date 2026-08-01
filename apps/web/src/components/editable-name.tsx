@@ -83,7 +83,7 @@ export function EditableName({
 
   return (
     <div className={cn("flex min-w-0 items-center gap-2", className)}>
-      {/* 点名字进入就地编辑;hover/聚焦名字右上角浮出小铅笔角标(绝对定位,不占行宽)。 */}
+      {/* 点名字进入就地编辑。右上角铅笔角标常驻(淡),hover/聚焦加深 —— 移动端无 hover 也能看出可编辑。 */}
       <button
         type="button"
         onClick={() => onEditingChange(true)}
@@ -91,7 +91,7 @@ export function EditableName({
       >
         <span className={cn("block truncate", displayClassName)}>{value || placeholder}</span>
         <Pencil
-          className="pointer-events-none absolute -top-1.5 -right-2 size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+          className="pointer-events-none absolute -top-1.5 -right-2 size-3 text-muted-foreground opacity-50 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
           aria-hidden
         />
       </button>
