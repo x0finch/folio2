@@ -13,6 +13,7 @@ const en = {
     addOne: "Add one",
     cancel: "Cancel",
     edit: "Edit",
+    clickToEdit: "Click to edit",
   },
   Sidebar: {
     selfHosted: "Self-hosted",
@@ -344,6 +345,7 @@ const zh: Messages = {
     addOne: "添加一个",
     cancel: "取消",
     edit: "编辑",
+    clickToEdit: "点击可编辑",
   },
   Sidebar: {
     selfHosted: "自托管",

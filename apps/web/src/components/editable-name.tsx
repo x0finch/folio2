@@ -1,5 +1,4 @@
-import { Button, cn, Input } from "@folio/ui";
-import { Pencil } from "lucide-react";
+import { Button, cn, Input, Tooltip } from "@folio/ui";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 
@@ -83,18 +82,16 @@ export function EditableName({
 
   return (
     <div className={cn("flex min-w-0 items-center gap-2", className)}>
-      {/* 点名字进入就地编辑。右上角铅笔角标常驻(淡),hover/聚焦加深 —— 移动端无 hover 也能看出可编辑。 */}
-      <button
-        type="button"
-        onClick={() => onEditingChange(true)}
-        className="group relative block max-w-full rounded-md text-left outline-none"
-      >
-        <span className={cn("block truncate", displayClassName)}>{value || placeholder}</span>
-        <Pencil
-          className="pointer-events-none absolute -top-1.5 -right-2 size-3 text-muted-foreground opacity-50 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-          aria-hidden
-        />
-      </button>
+      {/* 点名字进入就地编辑;hover 弹 tooltip 提示(移动端无 hover → 直接点即进编辑)。 */}
+      <Tooltip content={tc("clickToEdit")} side="top">
+        <button
+          type="button"
+          onClick={() => onEditingChange(true)}
+          className="block max-w-full rounded-md text-left outline-none"
+        >
+          <span className={cn("block truncate", displayClassName)}>{value || placeholder}</span>
+        </button>
+      </Tooltip>
       {children}
     </div>
   );
