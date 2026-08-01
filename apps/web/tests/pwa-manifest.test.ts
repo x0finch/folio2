@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { PWA_LINKS, PWA_META } from "../src/lib/pwa-head";
+import { PWA_LINKS, PWA_META, THEME_COLORS, VIEWPORT } from "../src/lib/pwa-head";
 
 // 测试缝②③(见 ADR 0027):PWA 只有 manifest 形状 + head 标签能便宜地自动化;
 // installability / 安全区 / 更新流靠 Lighthouse + 真机 + 目视。
@@ -39,11 +39,10 @@ describe("PWA head 元素", () => {
     expect(PWA_LINKS.some((l) => l.rel === "apple-touch-icon")).toBe(true);
   });
 
-  it("theme-color 明暗两套(各带 prefers-color-scheme media)", () => {
-    const themeColors = PWA_META.filter((m) => m.name === "theme-color");
-    expect(themeColors).toHaveLength(2);
-    expect(themeColors.some((m) => m.media?.includes("light"))).toBe(true);
-    expect(themeColors.some((m) => m.media?.includes("dark"))).toBe(true);
+  it("theme-color 明暗两套(各带 prefers-color-scheme media;静态直渲避 TanStack 按 name 去重)", () => {
+    expect(THEME_COLORS).toHaveLength(2);
+    expect(THEME_COLORS.some((m) => m.media.includes("light"))).toBe(true);
+    expect(THEME_COLORS.some((m) => m.media.includes("dark"))).toBe(true);
   });
 
   it("含 apple-mobile-web-app 标签(独立窗口 + 标题)", () => {
@@ -51,5 +50,10 @@ describe("PWA head 元素", () => {
     expect(
       PWA_META.some((m) => m.name === "apple-mobile-web-app-title" && m.content === "Folio"),
     ).toBe(true);
+  });
+
+  it("viewport 含 viewport-fit=cover(安全区地基)", () => {
+    expect(VIEWPORT).toContain("viewport-fit=cover");
+    expect(VIEWPORT).toContain("width=device-width");
   });
 });

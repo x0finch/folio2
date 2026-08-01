@@ -5,6 +5,10 @@
 const THEME_COLOR_LIGHT = "#ffffff";
 const THEME_COLOR_DARK = "#0a0a0a";
 
+// viewport-fit=cover:让布局铺满到刘海/指示条,安全区再靠 env(safe-area-inset-*) 内边距处理
+//(见 app-shell 顶栏/底部导航 + styles.css reset)。
+export const VIEWPORT = "width=device-width, initial-scale=1, viewport-fit=cover";
+
 interface HeadLink {
   rel: string;
   href: string;
@@ -12,7 +16,6 @@ interface HeadLink {
 interface HeadMeta {
   name: string;
   content: string;
-  media?: string;
 }
 
 export const PWA_LINKS: HeadLink[] = [
@@ -21,12 +24,17 @@ export const PWA_LINKS: HeadLink[] = [
 ];
 
 export const PWA_META: HeadMeta[] = [
-  // 浏览器 UI 底色随系统明暗(单个 <meta> 只能一个值,故用 media 拆两条)。
-  { name: "theme-color", media: "(prefers-color-scheme: light)", content: THEME_COLOR_LIGHT },
-  { name: "theme-color", media: "(prefers-color-scheme: dark)", content: THEME_COLOR_DARK },
   // 独立窗口 + iOS 沉浸状态栏(black-translucent 让内容延伸到状态栏下,配安全区内边距成原生观感)。
   { name: "apple-mobile-web-app-capable", content: "yes" },
   { name: "mobile-web-app-capable", content: "yes" },
   { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
   { name: "apple-mobile-web-app-title", content: "Folio" },
+];
+
+// 浏览器 UI 底色随系统明暗(单个 <meta> 只能一个值,故用 media 拆两条)。
+// **不走 head() 的 meta 数组**:TanStack 按 name 去重,两条同名 theme-color 只会留一条;
+// 故在 RootDocument 的 <head> 里作静态 JSX 直渲(React 不按 name 去重),两条都保留。
+export const THEME_COLORS: { media: string; content: string }[] = [
+  { media: "(prefers-color-scheme: light)", content: THEME_COLOR_LIGHT },
+  { media: "(prefers-color-scheme: dark)", content: THEME_COLOR_DARK },
 ];

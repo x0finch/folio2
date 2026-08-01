@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import { IntlProvider } from "use-intl";
 
 import { messages } from "../lib/i18n/messages";
-import { PWA_LINKS, PWA_META } from "../lib/pwa-head";
+import { PWA_LINKS, PWA_META, THEME_COLORS, VIEWPORT } from "../lib/pwa-head";
 import { getLocalePreference } from "../lib/server/preferences";
 import { applyStoredTheme, THEME_INIT_SCRIPT } from "../lib/theme";
 import appCss from "../styles.css?url";
@@ -20,7 +20,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       {
         name: "viewport",
-        content: "width=device-width, initial-scale=1",
+        content: VIEWPORT,
       },
       {
         title: "Folio",
@@ -55,6 +55,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     <html lang={locale} suppressHydrationWarning>
       <head>
         <HeadContent />
+        {/* theme-color 明暗两套:静态直渲(不进 head() 的 meta 数组,避开 TanStack 按 name 去重)。 */}
+        {THEME_COLORS.map((tc) => (
+          <meta key={tc.media} name="theme-color" media={tc.media} content={tc.content} />
+        ))}
         {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/theme)。 */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />

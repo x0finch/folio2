@@ -86,8 +86,10 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* 移动顶栏:只剩品牌 logo(控件全迁 Settings);sticky + 毛玻璃锚点 */}
-        <header className="sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 py-3 backdrop-blur-xl lg:hidden">
+        {/* 移动顶栏:只剩品牌 logo(控件全迁 Settings);sticky + 毛玻璃锚点。
+            顶部内边距叠加 safe-area-inset-top:viewport-fit=cover + 半透状态栏下,内容不被刘海压
+            (毛玻璃底延伸到状态栏下,成沉浸观感;bg/blur 不变、不碰 sticky)。 */}
+        <header className="sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden">
           <Logo className="size-6 shrink-0" />
           <span className="font-semibold text-lg tracking-tight">folio</span>
         </header>
@@ -99,8 +101,8 @@ export function AppShell({
         </main>
       </div>
 
-      {/* 移动底部悬浮 Dock 导航 */}
-      <nav className="-translate-x-1/2 fixed bottom-5 left-1/2 z-40 lg:hidden">
+      {/* 移动底部悬浮 Dock 导航;底部偏移叠加 safe-area-inset-bottom,不被指示条压(定位/居中不变)。 */}
+      <nav className="-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden">
         <Dock>
           {NAVS.map(({ key, to, icon: Icon }) => (
             <DockItem key={key} active={isActive(to)}>
