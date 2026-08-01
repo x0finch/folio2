@@ -93,7 +93,7 @@ export function EditableName({
         >
           <span className={cn("block truncate", displayClassName)}>{value || placeholder}</span>
           <Pencil
-            className="pointer-events-none absolute -top-1.5 -right-2 size-3 text-muted-foreground opacity-0 pointer-coarse:opacity-50"
+            className="-right-4 -translate-y-1/2 pointer-events-none absolute top-1/2 size-3 text-muted-foreground opacity-0 pointer-coarse:opacity-50"
             aria-hidden
           />
         </button>
