@@ -9,21 +9,29 @@ import {
   Label,
   MorphingModal,
   Separator,
+  SharedLayoutBg,
   Tabs,
   TabsList,
   TabsTrigger,
+  toast,
 } from "@folio/ui";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
-import { LogOut } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import { Fingerprint, LogOut, Trash2 } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../components/currency-switcher";
+import { EditableName } from "../../components/editable-name";
 import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
-import { signOut } from "../../lib/auth-client";
+import { authClient, signOut } from "../../lib/auth-client";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { importData } from "../../lib/import-data";
+import {
+  detectDeviceLabel,
+  getAuthenticatorName,
+  passkeyKind,
+} from "../../lib/passkey-authenticators";
 import {
   getDataStats,
   getProviderKeyStatus,
@@ -61,6 +69,7 @@ function Settings() {
   return (
     <div className="flex flex-col gap-6">
       <AccountCard user={user} />
+      <PasskeysCard />
       <AppearanceCard />
       <ProviderKeysCard status={status} />
       <ValuationCard mode={valuation.valuationMode} />
@@ -127,6 +136,192 @@ function AccountCard({ user }: { user: AccountUser }) {
             </Button>
             <Button variant="destructive" onClick={doSignOut}>
               {t("signOut")}
+            </Button>
+          </div>
+        </div>
+      </MorphingModal>
+    </Card>
+  );
+}
+
+// 列表项:仅取渲染需要的字段(listUserPasskeys 返回的 Passkey 还含 publicKey 等,此处用不到)。
+interface PasskeyRow {
+  id: string;
+  name?: string | null;
+  createdAt: string | Date; // fetch 反序列化后可能是 string,渲染时统一 new Date()
+  aaguid?: string | null; // 认证器型号标识 → 友好名
+  backedUp?: boolean | null; // 是否云同步
+  transports?: string | null; // 传输方式(internal/hybrid/usb…)→ 类型判定
+}
+
+// Passkey 卡(#283 注册 + #284 管理):用 Face ID / Touch ID / 安全钥匙登录(首因子,与密码并列)。
+// 仅浏览器支持 WebAuthn 时露入口。列表 / 重命名 / 删除全走 authClient.passkey.*(client 处理 WebAuthn
+// ceremony,非 server fn);删除带二次确认。删光不影响密码登录,故无「至少留一个」下限。见 ADR 0028。
+function PasskeysCard() {
+  const t = useTranslations("Settings");
+  const tc = useTranslations("Common");
+  const locale = useLocale();
+  const [supported, setSupported] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState<PasskeyRow | null>(null);
+  const [renaming, setRenaming] = useState<PasskeyRow | null>(null);
+
+  // supported 挂载后再设(SSR/hydration 安全:首帧与服务端一致的 false,挂载后才可能变 true,免首帧闪)。
+  useEffect(() => {
+    setSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
+  }, []);
+
+  // 列表用 useQuery(与 account-detail-sheet 一致);supported 为真才拉。data undefined=加载中、[]=空。
+  const passkeysQuery = useQuery<PasskeyRow[]>({
+    queryKey: ["passkeys"],
+    queryFn: async () => (await authClient.passkey.listUserPasskeys()).data ?? [],
+    enabled: supported,
+  });
+  const passkeys = supported ? (passkeysQuery.data ?? null) : null; // null = 加载中
+
+  async function onAdd() {
+    setBusy(true);
+    try {
+      // 默认名 = 当前浏览器/系统(添加时这台),供列表识别;用户可随后改名。
+      const res = await authClient.passkey.addPasskey({
+        name: detectDeviceLabel(navigator.userAgent),
+      });
+      if (res?.error) {
+        toast.error(res.error.message ?? t("passkeyAddFailed"));
+        return;
+      }
+      toast.success(t("passkeyAdded"));
+      await passkeysQuery.refetch();
+    } catch {
+      toast.error(t("passkeyAddFailed")); // 用户取消 / 认证器失败等
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRemove() {
+    const pk = removing;
+    setRemoving(null);
+    if (!pk) return;
+    const res = await authClient.passkey.deletePasskey({ id: pk.id });
+    if (res?.error) {
+      toast.error(res.error.message ?? t("passkeyRemoveFailed"));
+      return;
+    }
+    toast.success(t("passkeyRemoved"));
+    await passkeysQuery.refetch();
+  }
+
+  const fmtDate = (d: string | Date) =>
+    new Date(d).toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("passkeys")}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {!supported ? (
+          <p className="text-muted-foreground text-sm">{t("passkeyUnsupported")}</p>
+        ) : (
+          <>
+            <p className="text-muted-foreground text-sm">{t("passkeysHint")}</p>
+            {/* SharedLayoutBg:hover 时 bg-muted pill 滑到当前行(同侧栏导航)。inset=0 让 pill 贴合行宽。 */}
+            {passkeys && passkeys.length > 0 && (
+              <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-lg bg-muted">
+                {passkeys.map((pk) => {
+                  // 标题:用户命名/注册时设备名 → 认证器友好名(aaguid) → 通用「Passkey」。
+                  const authName = getAuthenticatorName(pk.aaguid);
+                  const title = pk.name || authName || t("passkeyUnnamed");
+                  // 副标题:认证器名(仅当没被标题用掉,即标题已是 name 时)+ 类型/同步标 + 添加时间。
+                  const kind = passkeyKind(pk);
+                  const kindText =
+                    kind === "synced"
+                      ? t("passkeyKindSynced")
+                      : kind === "platform"
+                        ? t("passkeyKindPlatform")
+                        : kind === "security-key"
+                          ? t("passkeyKindSecurityKey")
+                          : kind === "cross-device"
+                            ? t("passkeyKindCrossDevice")
+                            : null;
+                  const addedText = t("passkeyAddedOn", { date: fmtDate(pk.createdAt) });
+                  const meta = [pk.name ? authName : null, kindText, addedText]
+                    .filter(Boolean)
+                    .join(" · ");
+                  const isEditing = renaming?.id === pk.id;
+                  return (
+                    // 外层是 SharedLayoutBg 的「行」(pill 滑到这);内容包一层 flex —— SharedLayoutBg 会把
+                    // children 塞进一个非 flex 的 z-10 div,直接用 flex 作用不到(同 app-shell 侧栏)。
+                    <div key={pk.id} className="rounded-lg px-2 py-1.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1 leading-tight">
+                          {/* 就地重命名(与账户详情头部同一组件)。placeholder 用认证器友好名。 */}
+                          <EditableName
+                            value={pk.name ?? ""}
+                            editing={isEditing}
+                            onEditingChange={(e) => setRenaming(e ? pk : null)}
+                            onSave={async (name) => {
+                              const res = await authClient.passkey.updatePasskey({
+                                id: pk.id,
+                                name,
+                              });
+                              if (res?.error) {
+                                toast.error(res.error.message ?? t("passkeyRenameFailed"));
+                                throw new Error("rename failed"); // 保持编辑态
+                              }
+                              await passkeysQuery.refetch();
+                            }}
+                            displayClassName="font-medium text-sm"
+                            placeholder={title}
+                          />
+                          {!isEditing && (
+                            <div className="text-muted-foreground text-xs">{meta}</div>
+                          )}
+                        </div>
+                        {!isEditing && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={t("removePasskey")}
+                            className="shrink-0 hover:text-destructive"
+                            onClick={() => setRemoving(pk)}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </SharedLayoutBg>
+            )}
+            {passkeys?.length === 0 && (
+              <p className="text-muted-foreground text-sm">{t("passkeysEmpty")}</p>
+            )}
+            <div className="flex justify-end">
+              <Button variant="outline" disabled={busy} onClick={onAdd}>
+                <Fingerprint className="size-4" />
+                {busy ? tc("verifying") : t("addPasskey")}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+
+      {/* 删除确认(丢设备要能撤销 → 删后该 passkey 不能再登录)。 */}
+      <MorphingModal viewId={removing ? "passkey-remove" : null} onClose={() => setRemoving(null)}>
+        <div className="text-left">
+          <p className="font-semibold text-base">{t("passkeyRemoveTitle")}</p>
+          <p className="mt-1.5 text-muted-foreground text-sm">
+            {t("passkeyRemoveBody", { name: removing?.name || t("passkeyUnnamed") })}
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setRemoving(null)}>
+              {tc("cancel")}
+            </Button>
+            <Button variant="destructive" onClick={onRemove}>
+              {t("removePasskey")}
             </Button>
           </div>
         </div>
