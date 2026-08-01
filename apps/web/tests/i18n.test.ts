@@ -98,6 +98,8 @@ describe("messages (via createTranslator)", () => {
     expect(t("Settings.passkeyUnsupported")).toBe("This browser doesn't support passkeys.");
     expect(t("Settings.removePasskey")).toBe("Remove");
     expect(t("Settings.passkeyAddedOn", { date: "Jan 1" })).toBe("Added Jan 1");
+    expect(t("Settings.passkeyKindSynced")).toBe("Synced");
+    expect(t("Settings.passkeyKindSecurityKey")).toBe("Security key");
     expect(t("Login.signInWithPasskey")).toBe("Sign in with passkey");
     expect(t("Login.passkeyPromptTitle")).toBe("Sign in faster next time");
     expect(t("Login.passkeyPromptDismiss")).toBe("Don't ask again");
@@ -107,6 +109,8 @@ describe("messages (via createTranslator)", () => {
     expect(t("Settings.passkeys")).toBe("通行密钥 (Passkey)");
     expect(t("Settings.addPasskey")).toBe("添加 passkey");
     expect(t("Settings.removePasskey")).toBe("删除");
+    expect(t("Settings.passkeyKindSynced")).toBe("已同步");
+    expect(t("Settings.passkeyKindSecurityKey")).toBe("安全钥匙");
     expect(t("Login.signInWithPasskey")).toBe("用 passkey 登录");
     expect(t("Login.passkeyPromptTitle")).toBe("下次登录更快");
   });

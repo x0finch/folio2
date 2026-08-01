@@ -26,6 +26,7 @@ import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signOut } from "../../lib/auth-client";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { importData } from "../../lib/import-data";
+import { getAuthenticatorName, passkeyKind } from "../../lib/passkey-authenticators";
 import {
   getDataStats,
   getProviderKeyStatus,
@@ -143,6 +144,9 @@ interface PasskeyRow {
   id: string;
   name?: string | null;
   createdAt: string | Date; // fetch 反序列化后可能是 string,渲染时统一 new Date()
+  aaguid?: string | null; // 认证器型号标识 → 友好名
+  backedUp?: boolean | null; // 是否云同步
+  transports?: string | null; // 传输方式(internal/hybrid/usb…)→ 类型判定
 }
 
 // Passkey 卡(#283 注册 + #284 管理):用 Face ID / Touch ID / 安全钥匙登录(首因子,与密码并列)。
@@ -234,37 +238,52 @@ function PasskeysCard() {
             <p className="text-muted-foreground text-sm">{t("passkeysHint")}</p>
             {passkeys && passkeys.length > 0 && (
               <ul className="flex flex-col gap-2">
-                {passkeys.map((pk) => (
-                  <li key={pk.id} className="flex items-center justify-between gap-3">
-                    <div className="min-w-0 leading-tight">
-                      <div className="truncate font-medium text-sm">
-                        {pk.name || t("passkeyUnnamed")}
+                {passkeys.map((pk) => {
+                  // 标题:用户命名 → 认证器友好名(aaguid) → 通用「Passkey」。
+                  const title = pk.name || getAuthenticatorName(pk.aaguid) || t("passkeyUnnamed");
+                  // 副标题:类型/同步标(已同步 / 此设备 / 安全钥匙 / 跨设备)+ 添加时间。
+                  const kind = passkeyKind(pk);
+                  const kindText =
+                    kind === "synced"
+                      ? t("passkeyKindSynced")
+                      : kind === "platform"
+                        ? t("passkeyKindPlatform")
+                        : kind === "security-key"
+                          ? t("passkeyKindSecurityKey")
+                          : kind === "cross-device"
+                            ? t("passkeyKindCrossDevice")
+                            : null;
+                  const addedText = t("passkeyAddedOn", { date: fmtDate(pk.createdAt) });
+                  return (
+                    <li key={pk.id} className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 leading-tight">
+                        <div className="truncate font-medium text-sm">{title}</div>
+                        <div className="text-muted-foreground text-xs">
+                          {kindText ? `${kindText} · ${addedText}` : addedText}
+                        </div>
                       </div>
-                      <div className="text-muted-foreground text-xs">
-                        {t("passkeyAddedOn", { date: fmtDate(pk.createdAt) })}
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={t("passkeyRename")}
+                          onClick={() => openRename(pk)}
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={t("removePasskey")}
+                          className="hover:text-destructive"
+                          onClick={() => setRemoving(pk)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
                       </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t("passkeyRename")}
-                        onClick={() => openRename(pk)}
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t("removePasskey")}
-                        className="hover:text-destructive"
-                        onClick={() => setRemoving(pk)}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {passkeys?.length === 0 && (
