@@ -1,4 +1,4 @@
-import { Button, cn, Input, Label, Tabs, TabsList, TabsTrigger } from "@folio/ui";
+import { Button, cn, Input, Label, MorphingModal, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Fingerprint, Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -7,10 +7,15 @@ import { LocaleSwitcher } from "../components/locale-switcher";
 import { Logo } from "../components/logo";
 import { PortfolioHero } from "../components/portfolio-hero";
 import { useMountedTheme } from "../hooks/use-theme";
-import { signIn, signUp } from "../lib/auth-client";
+import { authClient, signIn, signUp } from "../lib/auth-client";
 import { deriveDefaultName } from "../lib/derive-default-name";
 import type { HoldingLike } from "../lib/hero-stats";
 import type { HistoryPoint } from "../lib/history";
+import {
+  dismissPasskeyPrompt,
+  isPasskeyPromptDismissed,
+  shouldPromptForPasskey,
+} from "../lib/passkey-prompt";
 import type { Theme } from "../lib/theme";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
@@ -107,8 +112,37 @@ function AuthPanel() {
   const [busy, setBusy] = useState(false);
   // 仅当浏览器支持 WebAuthn 时才露 passkey 入口;不支持则只留密码(见 ADR 0028)。
   const [supportsPasskey, setSupportsPasskey] = useState(false);
+  // 密码登录/注册成功后,若该用户还没 passkey 且本设备没「别再问我」,弹一次引导(#285)。
+  const [promptOpen, setPromptOpen] = useState(false);
 
   const isSignup = mode === "signup";
+
+  // 邮箱认证成功后的落点:够条件则弹 passkey 引导(留在登录页等决定),否则直接进主页。
+  async function afterEmailAuth() {
+    if (supportsPasskey && !isPasskeyPromptDismissed()) {
+      const res = await authClient.passkey.listUserPasskeys().catch(() => null);
+      const passkeyCount = res?.data?.length ?? 0;
+      if (shouldPromptForPasskey({ supported: true, dismissed: false, passkeyCount })) {
+        setPromptOpen(true);
+        return;
+      }
+    }
+    navigate({ to: "/" });
+  }
+
+  // 引导里「添加」:走注册 ceremony;成败都进主页(引导是加分项,不该卡住登录)。
+  async function onAddFromPrompt() {
+    setPromptOpen(false);
+    await authClient.passkey.addPasskey().catch(() => null);
+    navigate({ to: "/" });
+  }
+
+  // 引导里「别再问我」:本设备记下,直接进主页。
+  function onDismissPrompt() {
+    dismissPasskeyPrompt();
+    setPromptOpen(false);
+    navigate({ to: "/" });
+  }
 
   // 支持检测 + conditional-UI autofill:页面加载即静默发起 passkey autofill(浏览器把已注册的
   // passkey 填进邮箱框的建议里),用户选中即登录;不支持 conditional UI 的浏览器靠下方显式按钮兜底。
@@ -162,7 +196,7 @@ function AuthPanel() {
         setError(res.error.message ?? t("authFailed"));
         return;
       }
-      navigate({ to: "/" });
+      await afterEmailAuth();
     } catch {
       // 网络等异常(reject)也要落到错误态,否则 busy 卡死、用户无反馈。
       setError(t("authFailed"));
@@ -250,6 +284,29 @@ function AuthPanel() {
           </Button>
         )}
       </form>
+
+      {/* 登录后引导:关闭(点外)= 本次跳过(不持久),仍进主页。 */}
+      <MorphingModal
+        viewId={promptOpen ? "passkey-prompt" : null}
+        onClose={() => {
+          setPromptOpen(false);
+          navigate({ to: "/" });
+        }}
+      >
+        <div className="text-left">
+          <p className="font-semibold text-base">{t("passkeyPromptTitle")}</p>
+          <p className="mt-1.5 text-muted-foreground text-sm">{t("passkeyPromptBody")}</p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="ghost" onClick={onDismissPrompt}>
+              {t("passkeyPromptDismiss")}
+            </Button>
+            <Button onClick={onAddFromPrompt}>
+              <Fingerprint className="size-4" />
+              {t("passkeyPromptAdd")}
+            </Button>
+          </div>
+        </div>
+      </MorphingModal>
     </div>
   );
 }

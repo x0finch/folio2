@@ -99,6 +99,8 @@ describe("messages (via createTranslator)", () => {
     expect(t("Settings.removePasskey")).toBe("Remove");
     expect(t("Settings.passkeyAddedOn", { date: "Jan 1" })).toBe("Added Jan 1");
     expect(t("Login.signInWithPasskey")).toBe("Sign in with passkey");
+    expect(t("Login.passkeyPromptTitle")).toBe("Sign in faster next time");
+    expect(t("Login.passkeyPromptDismiss")).toBe("Don't ask again");
   });
   it("Chinese: new passkey keys resolve", () => {
     const t = createTranslator({ locale: "zh", messages: messages.zh });
@@ -106,5 +108,6 @@ describe("messages (via createTranslator)", () => {
     expect(t("Settings.addPasskey")).toBe("添加 passkey");
     expect(t("Settings.removePasskey")).toBe("删除");
     expect(t("Login.signInWithPasskey")).toBe("用 passkey 登录");
+    expect(t("Login.passkeyPromptTitle")).toBe("下次登录更快");
   });
 });
