@@ -51,8 +51,10 @@ jobs:
       # 先迁移 remote D1。这一步失败 → job 停,下面 deploy 不跑 → 不会出现「代码上了但 schema 没迁」。
       # ⚠️ 破坏性迁移(删列等)自动上生产不可回滚 —— 发版前自查迁移内容(见 DEPLOY.md)。
       - name: Apply D1 migrations (remote)
-        run: pnpm --filter @folio/web db:migrate:remote
+        run: pnpm --filter @folio/web run db:migrate:remote
 
       # vite build + wrangler deploy(account_id 在 wrangler.jsonc,只用 API token 认证)。
+      # 必须用 `run deploy`:裸 `pnpm deploy` 会撞上 pnpm 内置的 deploy 命令(部署包到目录),
+      # 而不是跑 package.json 的 deploy script。
       - name: Build & deploy
-        run: pnpm --filter @folio/web deploy
+        run: pnpm --filter @folio/web run deploy
