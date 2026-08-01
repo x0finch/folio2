@@ -10,6 +10,7 @@ import {
   Label,
   MorphingModal,
   Separator,
+  SharedLayoutBg,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -236,8 +237,9 @@ function PasskeysCard() {
         ) : (
           <>
             <p className="text-muted-foreground text-sm">{t("passkeysHint")}</p>
+            {/* SharedLayoutBg:hover 时 bg-muted pill 滑到当前行(同侧栏导航)。inset=0 让 pill 贴合行宽。 */}
             {passkeys && passkeys.length > 0 && (
-              <ul className="flex flex-col gap-2">
+              <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-lg bg-muted">
                 {passkeys.map((pk) => {
                   // 标题:用户命名 → 认证器友好名(aaguid) → 通用「Passkey」。
                   const title = pk.name || getAuthenticatorName(pk.aaguid) || t("passkeyUnnamed");
@@ -255,36 +257,40 @@ function PasskeysCard() {
                             : null;
                   const addedText = t("passkeyAddedOn", { date: fmtDate(pk.createdAt) });
                   return (
-                    <li key={pk.id} className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 leading-tight">
-                        <div className="truncate font-medium text-sm">{title}</div>
-                        <div className="text-muted-foreground text-xs">
-                          {kindText ? `${kindText} · ${addedText}` : addedText}
+                    // 外层是 SharedLayoutBg 的「行」(pill 滑到这);内容包一层 flex —— SharedLayoutBg 会把
+                    // children 塞进一个非 flex 的 z-10 div,直接用 flex 作用不到(同 app-shell 侧栏)。
+                    <div key={pk.id} className="rounded-lg px-2 py-1.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 leading-tight">
+                          <div className="truncate font-medium text-sm">{title}</div>
+                          <div className="text-muted-foreground text-xs">
+                            {kindText ? `${kindText} · ${addedText}` : addedText}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={t("passkeyRename")}
+                            onClick={() => openRename(pk)}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={t("removePasskey")}
+                            className="hover:text-destructive"
+                            onClick={() => setRemoving(pk)}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t("passkeyRename")}
-                          onClick={() => openRename(pk)}
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t("removePasskey")}
-                          className="hover:text-destructive"
-                          onClick={() => setRemoving(pk)}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    </li>
+                    </div>
                   );
                 })}
-              </ul>
+              </SharedLayoutBg>
             )}
             {passkeys?.length === 0 && (
               <p className="text-muted-foreground text-sm">{t("passkeysEmpty")}</p>
