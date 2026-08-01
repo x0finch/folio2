@@ -63,7 +63,7 @@ function LockOverlay({ userEmail, onUnlock }: { userEmail: string; onUnlock: () 
     // 背景=磨砂 blur 糊住底下 App;fixed 覆盖层定位由 className 传入。
     <AuthShell
       className="fixed inset-0 z-50"
-      background={<div className="absolute inset-0 bg-background/60 backdrop-blur-xl" />}
+      background={<div className="absolute inset-0 bg-background/50 backdrop-blur-md" />}
     >
       <div className="flex w-full max-w-sm flex-col gap-4">
         <p className="font-medium text-lg">{t("title")}</p>
