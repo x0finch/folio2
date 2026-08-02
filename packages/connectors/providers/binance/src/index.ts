@@ -563,7 +563,7 @@ function walletFailureNote(failed: string[]): Note {
   return {
     title: "Wallets not synced",
     icon: "warning",
-    content: `${failed.join(" / ")} · 检查该钱包的 API 权限(合约需勾 Futures)或稍后重试`,
+    content: `${failed.join(" / ")} — couldn't be read; check the API key's permissions or retry later`,
   };
 }
 
