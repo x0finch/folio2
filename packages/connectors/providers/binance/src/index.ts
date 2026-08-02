@@ -42,7 +42,8 @@ type BinanceRow = Spot | PerpEquity | PerpPosition;
 
 // @folio/connectors-provider-binance —— 首个带 secret 型 account.creds 的 connector(binance)。
 // 每账户密钥(apiKey/secret)走 account.creds(加密入库,取数时由 app 分派桥 openCreds 解密后灌进
-// ctx.account.creds)—— 不是全局 provider key,故 provider 级 creds(PC)为空。
+// ctx.account.creds)—— 不是全局 provider key。provider 级 creds(PC)不装凭据,只声明 base URL 覆盖
+// 的 env key(#264,见 provider.creds)。
 // Binance 余额只给数量(free/locked,无 USD)→ 用公开 /ticker/price 按 asset→USDT 自行估值。
 // HMAC 只读签名。零依赖,用原生 fetch;不碰 SECRETS_KEY/cloudflare:workers(原则 #5)。
 
@@ -415,15 +416,8 @@ const toFailure = ({ kind, where, status, retryAfterMs, cause }: Failure): Error
   return new ProviderError("UPSTREAM_ERROR", `binance upstream error (${status})`);
 };
 
-const publicRequest = createHttpClient({
-  baseUrl: BINANCE_API_BASE,
-  limit: publicLimit,
-  rateLimitedStatuses: [429, 418],
-  toFailure,
-});
-
-// 签名端点 client 工厂 —— 现货(api.binance.com)与合约(fapi.binance.com)是两份不同 host、
-// 同样的签名头 + 失败归类。多钱包骨架的第一处「多 host」:后续币本位(dapi)再加一个即可。
+// 签名端点 client 工厂 —— 现货(api.binance.com)、U 本位(fapi)、币本位(dapi)是三份不同 host、
+// 同样的签名头 + 失败归类。base 现按请求可覆盖(见下 makeClients),不再模块级绑死单例。
 const makeSignedClient = (baseUrl: string) =>
   createHttpClient<string>({
     baseUrl,
@@ -432,9 +426,48 @@ const makeSignedClient = (baseUrl: string) =>
     toFailure,
   });
 
-const signedRequest = makeSignedClient(BINANCE_API_BASE);
-const fapiSignedRequest = makeSignedClient(BINANCE_FUTURES_API_BASE);
-const dapiSignedRequest = makeSignedClient(BINANCE_DELIVERY_API_BASE);
+// —— base URL 覆盖(#264)——
+// 远程(CF Workers)出口 IP 被 Binance 按地区拒时,由 app 层从 env 注入代理 base;不设即原样直连。
+// **connector 不读 env、不知代理存在(原则 #5)**:只把 ctx.creds 里各 host 对应的 base 当**不透明整串**用,
+// 缺省回退默认常量。三个 host 各自独立覆盖 —— env 值里「哪个 host 走哪条代理路径」由部署决定,连接器无感。
+// key 即 env 变量名,由 provider.creds(PC)声明 → app 的 env 注入据此读值灌进 ctx.creds(不进 UI 表单)。
+const BASE_OVERRIDE = {
+  api: { key: "BINANCE_API_BASE", fallback: BINANCE_API_BASE },
+  fapi: { key: "BINANCE_FAPI_BASE", fallback: BINANCE_FUTURES_API_BASE },
+  dapi: { key: "BINANCE_DAPI_BASE", fallback: BINANCE_DELIVERY_API_BASE },
+} as const;
+
+function pickBase(cfg: Record<string, unknown>, o: { key: string; fallback: string }): string {
+  const v = cfg[o.key];
+  return typeof v === "string" && v.trim() ? v.trim() : o.fallback;
+}
+
+// PC 覆盖字段的校验器(仅声明用;PC 不经 validateCredentials,故实际不触发 —— 见 provider.creds 注释)。
+const baseUrlSchema = z.string().trim().url();
+
+interface Clients {
+  publicRequest: ReturnType<typeof createHttpClient>;
+  signedRequest: ReturnType<typeof makeSignedClient>;
+  fapiSignedRequest: ReturnType<typeof makeSignedClient>;
+  dapiSignedRequest: ReturnType<typeof makeSignedClient>;
+}
+
+// 按本次调用的 base 覆盖建四个 client。公开端点闸(publicLimit)是**模块级**、跨调用共享状态
+// (按出口 IP 计额)—— 只换 base、复用同一 limiter,重建 client 壳不重置额度桶。
+function makeClients(cfg: Record<string, unknown>): Clients {
+  const apiBase = pickBase(cfg, BASE_OVERRIDE.api);
+  return {
+    publicRequest: createHttpClient({
+      baseUrl: apiBase,
+      limit: publicLimit,
+      rateLimitedStatuses: [429, 418],
+      toFailure,
+    }),
+    signedRequest: makeSignedClient(apiBase),
+    fapiSignedRequest: makeSignedClient(pickBase(cfg, BASE_OVERRIDE.fapi)),
+    dapiSignedRequest: makeSignedClient(pickBase(cfg, BASE_OVERRIDE.dapi)),
+  };
+}
 
 // 签名拉取 SIGNED 端点。**签名算的是「除 signature 外、按发送顺序拼起来的 query」**,
 // 所以这里先按同样的顺序拼一遍来签,再把 signature 追加到最后 —— URLSearchParams 保持插入序,
@@ -472,6 +505,7 @@ interface Wallet {
   // prices 传 **Promise** 而非值:价表(公开、带闸)与各钱包(签名、无闸)**并发**发起 —— 合约不需要价表、
   // 现货内部 await 它。否则价表的闸会前置阻塞签名端点的并发,限流时拖垮整批同步(rate-limit test)。
   run: (
+    clients: Clients,
     creds: { apiKey: string; secret: string },
     prices: Promise<Record<string, number>>,
   ) => Promise<BinanceRow[]>;
@@ -480,9 +514,9 @@ interface Wallet {
 // 现货钱包:签名 /api/v3/account(立即发,无闸),再 await 价表估值。
 const spotWallet: Wallet = {
   name: "Spot",
-  run: async ({ apiKey, secret }, prices) => {
+  run: async (clients, { apiKey, secret }, prices) => {
     const account = (await signedGet(
-      signedRequest,
+      clients.signedRequest,
       ACCOUNT_PATH,
       { recvWindow: RECV_WINDOW, timestamp: Date.now() },
       apiKey,
@@ -495,9 +529,9 @@ const spotWallet: Wallet = {
 // U 本位合约钱包:签名 fapi /fapi/v2/account(**独立 host**),一发拿权益 + 持仓。合约自带 USD,不用价表。
 const usdmFuturesWallet: Wallet = {
   name: "USDⓈ-M Futures",
-  run: async ({ apiKey, secret }) => {
+  run: async (clients, { apiKey, secret }) => {
     const account = (await signedGet(
-      fapiSignedRequest,
+      clients.fapiSignedRequest,
       USDM_ACCOUNT_PATH,
       { recvWindow: RECV_WINDOW, timestamp: Date.now() },
       apiKey,
@@ -510,9 +544,9 @@ const usdmFuturesWallet: Wallet = {
 // 币本位合约钱包:签名 dapi /dapi/v1/account(**又一个独立 host**);权益折 USD 需价表 → await prices。
 const coinmFuturesWallet: Wallet = {
   name: "COIN-M Futures",
-  run: async ({ apiKey, secret }, prices) => {
+  run: async (clients, { apiKey, secret }, prices) => {
     const account = (await signedGet(
-      dapiSignedRequest,
+      clients.dapiSignedRequest,
       COINM_ACCOUNT_PATH,
       { recvWindow: RECV_WINDOW, timestamp: Date.now() },
       apiKey,
@@ -525,9 +559,9 @@ const coinmFuturesWallet: Wallet = {
 // 资金账户钱包:POST /sapi/v1/asset/get-funding-asset(主 api host),当 spot、ticker 估值 → await prices。
 const fundingWallet: Wallet = {
   name: "Funding",
-  run: async ({ apiKey, secret }, prices) => {
+  run: async (clients, { apiKey, secret }, prices) => {
     const assets = (await signedGet(
-      signedRequest,
+      clients.signedRequest,
       FUNDING_ASSET_PATH,
       { recvWindow: RECV_WINDOW, timestamp: Date.now() },
       apiKey,
@@ -541,6 +575,7 @@ const fundingWallet: Wallet = {
 // 一个 Simple Earn position 端点翻页取全:size=100 循环 current,直到末页(rows<size)或收满 total。
 // 不翻页时首页只给 10 条,持仓多的账户(小额自动申购常见)会静默丢掉靠后的币(#... UNI/USDT 丢失即此)。
 async function fetchEarnRows(
+  client: ReturnType<typeof makeSignedClient>,
   path: string,
   apiKey: string,
   secret: string,
@@ -548,7 +583,7 @@ async function fetchEarnRows(
   const rows: Record<string, unknown>[] = [];
   for (let current = 1; current <= EARN_MAX_PAGES; current++) {
     const page = (await signedGet(
-      signedRequest,
+      client,
       path,
       { current, size: EARN_PAGE_SIZE, recvWindow: RECV_WINDOW, timestamp: Date.now() },
       apiKey,
@@ -565,10 +600,10 @@ async function fetchEarnRows(
 // 理财钱包:活期 + 定期各自翻页取全(主 api host),当 spot、ticker 估值 → await prices。两端点任一失败即该钱包失败。
 const earnWallet: Wallet = {
   name: "Earn",
-  run: async ({ apiKey, secret }, prices) => {
+  run: async (clients, { apiKey, secret }, prices) => {
     const [flexRows, lockedRows] = await Promise.all([
-      fetchEarnRows(EARN_FLEXIBLE_PATH, apiKey, secret),
-      fetchEarnRows(EARN_LOCKED_PATH, apiKey, secret),
+      fetchEarnRows(clients.signedRequest, EARN_FLEXIBLE_PATH, apiKey, secret),
+      fetchEarnRows(clients.signedRequest, EARN_LOCKED_PATH, apiKey, secret),
     ]);
     return parseEarnPositions(
       { rows: flexRows } as EarnFlexible,
@@ -600,21 +635,47 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
   id: PROVIDER_ID,
   label: "Binance",
   // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据,走 account.creds。
-  creds: [],
+  // PC 在此仅作 **env 注入声明**(非真凭据):app 层据这些 key 从 env 读值灌进 ctx.creds,供 base URL
+  // 覆盖(#264)。三个 host 各一个可选覆盖;不进 UI 表单(那只认 account.creds)、不加密/不导出。
+  // 值可能内含代理密钥 → 不可 echo/log(P6.7)。
+  creds: [
+    {
+      key: BASE_OVERRIDE.api.key,
+      type: "public",
+      label: "Spot API base URL",
+      validator: baseUrlSchema,
+    },
+    {
+      key: BASE_OVERRIDE.fapi.key,
+      type: "public",
+      label: "USDⓈ-M API base URL",
+      validator: baseUrlSchema,
+    },
+    {
+      key: BASE_OVERRIDE.dapi.key,
+      type: "public",
+      label: "COIN-M API base URL",
+      validator: baseUrlSchema,
+    },
+  ],
 
   async fetchBalances(ctx): Promise<{ balances: BinanceRow[]; note?: Note[] }> {
     const { apiKey, secret } = ctx.account.creds;
+    // 按 ctx.creds 里的 base 覆盖(#264)建本次调用的 client 组;不设即默认直连。
+    const clients = makeClients(ctx.creds as Record<string, unknown>);
     // 公开免签价表(现货/资金/理财估值共用),带闸(按出口 IP)。启动但**不前置阻塞**钱包并发:合约不需要它,
     // 现货内部 await;价表失败 → 现货那个钱包失败(进 Note),不拖垮不需要它的合约。
     const prices = (async () => {
-      const tickers = (await publicRequest(TICKER_PRICE_PATH)) as TickerPrice[];
+      const tickers = (await clients.publicRequest(TICKER_PRICE_PATH)) as TickerPrice[];
       const map: Record<string, number> = {};
       for (const t of tickers) if (t.symbol) map[t.symbol] = Number(t.price ?? 0);
       return map;
     })();
     void prices.catch(() => {}); // 某钱包在 await 价表前就失败时,价表无人 await → 防 unhandled rejection
     // 各钱包并发,尽力而为(ADR 0030):成功的进 balances,失败的收进账户级 Note。
-    const settled = await Promise.allSettled(WALLETS.map((w) => w.run({ apiKey, secret }, prices)));
+    const settled = await Promise.allSettled(
+      WALLETS.map((w) => w.run(clients, { apiKey, secret }, prices)),
+    );
     const balances: BinanceRow[] = [];
     const failed: string[] = [];
     let firstError: unknown;
@@ -636,6 +697,7 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
   // 凭据被拒(-2014/-2015 等 → AUTH_FAILED)→ false;够不到上游 → 抛(契约见 connector.ts / errors.ts)。
   async validateAccount(ctx): Promise<boolean> {
     const { apiKey, secret } = ctx.account.creds;
+    const { signedRequest } = makeClients(ctx.creds as Record<string, unknown>);
     try {
       await signedGet(
         signedRequest,
