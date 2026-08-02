@@ -13,6 +13,27 @@ import { AuthShell } from "./auth-shell";
 // 逻辑在 useIdleLock hook；这里只管样子 + 解锁(复用 signIn，会话不销毁，零新 server 接口)。
 export function LockScreen({ userEmail, children }: { userEmail: string; children: ReactNode }) {
   const { timeoutMs } = useIdleTimeout();
+  // 永不(timeoutMs===null,含默认)→ 不挂闲置锁:整套活动监听 / 定时器 / 挂载比对都不进树。
+  // 「永不」从「运行时到处判 null」升级为「根本不运行」,结构上消除整类漏判 null 的误锁(ADR 0029)。
+  if (timeoutMs === null) return <>{children}</>;
+  return (
+    <ActiveLockScreen userEmail={userEmail} timeoutMs={timeoutMs}>
+      {children}
+    </ActiveLockScreen>
+  );
+}
+
+// 有具体超时档时才挂:useIdleLock 在此子组件内无条件调用(符合 hooks 规则)。切到「永不」即
+// 卸载本组件、清掉监听与定时器 —— 无需在 hook 里对 null 层层设防。
+function ActiveLockScreen({
+  userEmail,
+  timeoutMs,
+  children,
+}: {
+  userEmail: string;
+  timeoutMs: number;
+  children: ReactNode;
+}) {
   const { locked, unlock } = useIdleLock(timeoutMs);
   return (
     <>

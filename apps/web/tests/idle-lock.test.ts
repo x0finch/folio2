@@ -57,13 +57,13 @@ describe("parseIdleTimeout", () => {
     expect(parseIdleTimeout("never")).toBeNull();
   });
 
-  it("缺失(null)→ 默认 5 分钟", () => {
-    expect(parseIdleTimeout(null)).toBe(300_000);
+  it("缺失(null)→ 默认永不(null)", () => {
+    expect(parseIdleTimeout(null)).toBeNull();
   });
 
-  it("非法值 → 回落默认 5 分钟", () => {
-    expect(parseIdleTimeout("7")).toBe(300_000);
-    expect(parseIdleTimeout("abc")).toBe(300_000);
-    expect(parseIdleTimeout("")).toBe(300_000);
+  it("非法值 → 回落默认永不(null)", () => {
+    expect(parseIdleTimeout("7")).toBeNull();
+    expect(parseIdleTimeout("abc")).toBeNull();
+    expect(parseIdleTimeout("")).toBeNull();
   });
 });
