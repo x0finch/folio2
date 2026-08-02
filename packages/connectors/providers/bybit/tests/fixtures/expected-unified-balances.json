@@ -1,0 +1,27 @@
+[
+  {
+    "symbol": "USD1",
+    "tokenRef": "bybit/issued:USD1",
+    "amount": 80000,
+    "price": 1,
+    "value": 80000,
+    "kind": "spot",
+    "note": { "title": "Locked", "icon": "warning", "content": "80,000 USD1 · 100%" }
+  },
+  {
+    "symbol": "USDT",
+    "tokenRef": "bybit/issued:USDT",
+    "amount": 500,
+    "price": 1,
+    "value": 500,
+    "kind": "spot"
+  },
+  {
+    "symbol": "BTC",
+    "tokenRef": "bybit/issued:BTC",
+    "amount": 0.05,
+    "price": 60000,
+    "value": 3000,
+    "kind": "spot"
+  }
+]
