@@ -66,6 +66,10 @@ _Avoid_: chain(仅指链时才用)、venue(仅指交易所/perp)、network、Con
 可插拔的**账户类型单元** —— 一份 manifest 定义"某类账户怎么建(`account.creds`)+ 想要什么余额(`balance.schema`)+ 用哪些 providers 取数",取代旧的 `accountType`(evm / binance / okx / hyperliquid / bitcoin / solana / sui / cosmos / manual)。**粒度:整个 EVM 是一个** connector(其持仓再散落到多个 Platform)。归 `@folio/connectors` 包。
 _Avoid_: Platform(那是持仓的链∪场馆定位维度,1 connector 可对多 Platform)、accountType(旧称)、plugin
 
+**钱包(Wallet)**:
+一个 CEX 账户**内部的隔离子账户** —— Binance 的现货 / U 本位合约 / 币本位合约 / 资金 / 理财各是一个 Wallet(OKX:统一交易账户 / 资金 / 理财)。一次同步用**同一把 key** 并发拉该账户名下的多个 Wallet(**尽力而为**:某个 Wallet 拉不到不阻断其余,失败收进**账户级 Note**)。**是账本/展示维度,不是聚合维度** —— 主页仍按 `token_id` 把各 Wallet 的同币加总,Wallet 拆分只在账户抽屉的分 Tab(现货 / 合约)里可见,不进 Platform / HoldingSource 键。某 Wallet 的读权限缺失(如没勾 Binance 的 Futures)→ 该账户为**部分授权**:creds 字段仍齐(**≠ needsCredentials**),失败 Wallet 走 Note 提示补权限。
+_Avoid_: sub-account(交易所 API 的 subaccount 是**独立 API 主体**、另一把 key —— 不是这个)、account(那是 Folio 的账户,Wallet 是它的内部隔离)、钱包(泛指链上 EVM 钱包时才用)
+
 ### 分析:分布 / 组成 / 维度
 
 **Dimension(分析维度)**:

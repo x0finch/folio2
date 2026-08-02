@@ -3,6 +3,9 @@ import {
   type CredField,
   hmacSha256,
   isCredentialRejection,
+  type Note,
+  type PerpEquity,
+  type PerpPosition,
   ProviderError,
   type Spot,
 } from "@folio/connectors-basic";
@@ -13,14 +16,22 @@ import {
   ACCOUNT_PATH,
   API_KEY_HEADER,
   BINANCE_API_BASE,
+  BINANCE_FUTURES_API_BASE,
+  MARGIN_ASSET,
   PUBLIC_LIMIT_KEY,
   QUOTE_ASSET,
+  QUOTE_SUFFIXES,
   RECV_WINDOW,
   STABLECOINS,
   TICKER_PRICE_PATH,
   TICKER_RATE_LIMIT_BURST,
   TICKER_RATE_LIMIT_PER_SEC,
+  USDM_ACCOUNT_PATH,
 } from "./constants";
+
+// 本 connector 会吐的 kind 子集:spot(现货/资金/理财)| perp_equity + perp_position(合约)。
+// 判别联合 —— parseFuturesAccount 写错 kind(如 spot)即编译期报错(见 balance.schema 事实源)。
+type BinanceRow = Spot | PerpEquity | PerpPosition;
 
 // @folio/connectors-provider-binance —— 首个带 secret 型 account.creds 的 connector(binance)。
 // 每账户密钥(apiKey/secret)走 account.creds(加密入库,取数时由 app 分派桥 openCreds 解密后灌进
@@ -87,6 +98,83 @@ export function parseAccountBalances(
   return out;
 }
 
+// —— U 本位合约账户(fapi /fapi/v2/account)的最小形状(仅取用到字段)——
+interface FuturesPosition {
+  symbol?: string;
+  positionAmt?: string;
+  entryPrice?: string;
+  unrealizedProfit?: string;
+  leverage?: string;
+  notional?: string;
+  isolated?: boolean;
+  positionInitialMargin?: string;
+}
+interface FuturesAccount {
+  totalMarginBalance?: string; // 账户权益 = 钱包余额 + 未实现盈亏
+  totalPositionInitialMargin?: string;
+  maxWithdrawAmount?: string;
+  positions?: FuturesPosition[];
+}
+
+// 合约 symbol 去计价后缀得标的币名(BTCUSDT → BTC);认不出后缀就原样返回。
+function coinFromSymbol(symbol: string): string {
+  for (const q of QUOTE_SUFFIXES) {
+    if (symbol.endsWith(q) && symbol.length > q.length) return symbol.slice(0, -q.length);
+  }
+  return symbol;
+}
+
+// 纯解析:fapi 账户 → perp_equity(账户权益,唯一带值)+ 每个持仓 perp_position(value:0,不双算)。
+// 照 hyperliquid 口径(P5.1):权益 = totalMarginBalance(钱包余额 + 未实现盈亏);名义/盈亏进 meta。
+// 空账户(无权益、无持仓)→ 空数组(没开合约的用户不冒空行)。强平价不在此响应 → liquidationPx:null
+// (主页对 null 有既有降级,显开仓价);杠杆/名义 V2 account 自带。与 IO 分离,golden test。
+export function parseFuturesAccount(account: FuturesAccount): (PerpEquity | PerpPosition)[] {
+  const positions = (account.positions ?? []).filter((p) => Number(p.positionAmt ?? 0) !== 0);
+  const equity = Number(account.totalMarginBalance ?? 0);
+  // 无权益且无持仓 → 该合约钱包为空,不产任何行。
+  if (!(equity > 0) && positions.length === 0) return [];
+
+  const out: (PerpEquity | PerpPosition)[] = [];
+  out.push({
+    symbol: MARGIN_ASSET,
+    amount: equity,
+    value: equity,
+    kind: "perp_equity",
+    tokenRef: tokenRef.issued(PROVIDER_ID, MARGIN_ASSET),
+    meta: {
+      withdrawable: Number(account.maxWithdrawAmount ?? 0),
+      totalMarginUsed: Number(account.totalPositionInitialMargin ?? 0),
+      totalNtlPos: positions.reduce((s, p) => s + Math.abs(Number(p.notional ?? 0)), 0),
+    },
+  });
+
+  for (const p of positions) {
+    const symbol = p.symbol;
+    if (!symbol) continue;
+    const amt = Number(p.positionAmt ?? 0);
+    const coin = coinFromSymbol(symbol);
+    out.push({
+      symbol: coin,
+      amount: amt,
+      value: 0, // 仓位不计入总额;价值由权益行承载(不双算)
+      kind: "perp_position",
+      tokenRef: tokenRef.issued(PROVIDER_ID, coin),
+      meta: {
+        coin,
+        side: amt >= 0 ? "long" : "short",
+        entryPx: Number(p.entryPrice ?? 0),
+        positionValue: Math.abs(Number(p.notional ?? 0)),
+        unrealizedPnl: Number(p.unrealizedProfit ?? 0),
+        leverage: p.leverage != null ? Number(p.leverage) : undefined,
+        leverageType: p.isolated ? "isolated" : "cross",
+        liquidationPx: null, // 强平价不在 account 响应,后续增量(positionRisk)再补
+        marginUsed: Number(p.positionInitialMargin ?? 0),
+      },
+    });
+  }
+  return out;
+}
+
 // 公开(免签)端点的限频器 —— 按出口 IP 共享,见 constants.ts 里为什么只给它装。
 const publicLimit = defineRateLimit({
   key: PUBLIC_LIMIT_KEY,
@@ -121,17 +209,24 @@ const publicRequest = createHttpClient({
   toFailure,
 });
 
-const signedRequest = createHttpClient<string>({
-  baseUrl: BINANCE_API_BASE,
-  rateLimitedStatuses: [429, 418],
-  headers: (_path, options) => ({ [API_KEY_HEADER]: options?.context ?? "" }),
-  toFailure,
-});
+// 签名端点 client 工厂 —— 现货(api.binance.com)与合约(fapi.binance.com)是两份不同 host、
+// 同样的签名头 + 失败归类。多钱包骨架的第一处「多 host」:后续币本位(dapi)再加一个即可。
+const makeSignedClient = (baseUrl: string) =>
+  createHttpClient<string>({
+    baseUrl,
+    rateLimitedStatuses: [429, 418],
+    headers: (_path, options) => ({ [API_KEY_HEADER]: options?.context ?? "" }),
+    toFailure,
+  });
+
+const signedRequest = makeSignedClient(BINANCE_API_BASE);
+const fapiSignedRequest = makeSignedClient(BINANCE_FUTURES_API_BASE);
 
 // 签名拉取 SIGNED 端点。**签名算的是「除 signature 外、按发送顺序拼起来的 query」**,
 // 所以这里先按同样的顺序拼一遍来签,再把 signature 追加到最后 —— URLSearchParams 保持插入序,
-// 两边一致。
+// 两边一致。client 决定打哪个 host(现货 signedRequest / 合约 fapiSignedRequest)。
 async function signedGet(
+  client: ReturnType<typeof makeSignedClient>,
   path: string,
   params: Record<string, string | number>,
   apiKey: string,
@@ -142,7 +237,7 @@ async function signedGet(
     new URLSearchParams(params as never).toString(),
     "hex",
   );
-  return signedRequest(path, { query: { ...params, signature }, context: apiKey });
+  return client(path, { query: { ...params, signature }, context: apiKey });
 }
 
 // —— 账户级 creds(AC):apiKey/secret。apiKey = 标识符(明文走 header,非认证秘密)→ semi:
@@ -153,35 +248,105 @@ export const binanceAccountCreds = [
   { key: "secret", type: "secret", label: "API Secret", validator: z.string().trim().min(1) },
 ] as const satisfies readonly CredField[];
 
-export const binanceProvider: BalanceProvider<Spot, typeof binanceAccountCreds> = {
-  id: PROVIDER_ID,
-  label: "Binance",
-  // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据,走 account.creds。
-  creds: [],
+// —— 多钱包骨架(ADR 0030)——
+// 一个 Binance 账户 = 多个隔离**钱包**(现货 / 合约 / 资金 / 理财…),同一把 key 并发拉。
+// 尽力而为:某钱包失败不阻断其余,失败收集成一条**账户级 Note** 提示。凭据类失败(AUTH_FAILED,如没勾
+// Futures 的 -2015)与瞬时故障(超时/5xx)都降级为「该钱包失败」,不冒泡成整账户失败。
+interface Wallet {
+  name: string; // 展示名(失败时列进 Note)
+  // prices 传 **Promise** 而非值:价表(公开、带闸)与各钱包(签名、无闸)**并发**发起 —— 合约不需要价表、
+  // 现货内部 await 它。否则价表的闸会前置阻塞签名端点的并发,限流时拖垮整批同步(rate-limit test)。
+  run: (
+    creds: { apiKey: string; secret: string },
+    prices: Promise<Record<string, number>>,
+  ) => Promise<BinanceRow[]>;
+}
 
-  async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
-    const { apiKey, secret } = ctx.account.creds;
+// 现货钱包:签名 /api/v3/account(立即发,无闸),再 await 价表估值。
+const spotWallet: Wallet = {
+  name: "Spot",
+  run: async ({ apiKey, secret }, prices) => {
     const account = (await signedGet(
+      signedRequest,
       ACCOUNT_PATH,
       { recvWindow: RECV_WINDOW, timestamp: Date.now() },
       apiKey,
       secret,
     )) as BinanceAccount;
-    // 公开免签:全市场价 → symbol→price 表。**这一发过闸**(按出口 IP 算的那份额度)。
-    const tickers = (await publicRequest(TICKER_PRICE_PATH)) as TickerPrice[];
-    const prices: Record<string, number> = {};
-    for (const t of tickers) {
-      if (t.symbol) prices[t.symbol] = Number(t.price ?? 0);
-    }
-    return { balances: parseAccountBalances(account, prices) };
+    return parseAccountBalances(account, await prices);
+  },
+};
+
+// U 本位合约钱包:签名 fapi /fapi/v2/account(**独立 host**),一发拿权益 + 持仓。合约自带 USD,不用价表。
+const usdmFuturesWallet: Wallet = {
+  name: "USDⓈ-M Futures",
+  run: async ({ apiKey, secret }) => {
+    const account = (await signedGet(
+      fapiSignedRequest,
+      USDM_ACCOUNT_PATH,
+      { recvWindow: RECV_WINDOW, timestamp: Date.now() },
+      apiKey,
+      secret,
+    )) as FuturesAccount;
+    return parseFuturesAccount(account);
+  },
+};
+
+// 本 provider 当前拉的钱包集 —— 后续片(币本位 / 资金 / 理财)往这里加一项即可。
+const WALLETS: Wallet[] = [spotWallet, usdmFuturesWallet];
+
+// 账户级失败 Note(ADR 0030):列出没同步上的钱包 + 一句提示。
+function walletFailureNote(failed: string[]): Note {
+  return {
+    title: "Wallets not synced",
+    icon: "warning",
+    content: `${failed.join(" / ")} · 检查该钱包的 API 权限(合约需勾 Futures)或稍后重试`,
+  };
+}
+
+export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountCreds> = {
+  id: PROVIDER_ID,
+  label: "Binance",
+  // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据,走 account.creds。
+  creds: [],
+
+  async fetchBalances(ctx): Promise<{ balances: BinanceRow[]; note?: Note[] }> {
+    const { apiKey, secret } = ctx.account.creds;
+    // 公开免签价表(现货/资金/理财估值共用),带闸(按出口 IP)。启动但**不前置阻塞**钱包并发:合约不需要它,
+    // 现货内部 await;价表失败 → 现货那个钱包失败(进 Note),不拖垮不需要它的合约。
+    const prices = (async () => {
+      const tickers = (await publicRequest(TICKER_PRICE_PATH)) as TickerPrice[];
+      const map: Record<string, number> = {};
+      for (const t of tickers) if (t.symbol) map[t.symbol] = Number(t.price ?? 0);
+      return map;
+    })();
+    void prices.catch(() => {}); // 某钱包在 await 价表前就失败时,价表无人 await → 防 unhandled rejection
+    // 各钱包并发,尽力而为(ADR 0030):成功的进 balances,失败的收进账户级 Note。
+    const settled = await Promise.allSettled(WALLETS.map((w) => w.run({ apiKey, secret }, prices)));
+    const balances: BinanceRow[] = [];
+    const failed: string[] = [];
+    let firstError: unknown;
+    settled.forEach((r, i) => {
+      if (r.status === "fulfilled") balances.push(...r.value);
+      else {
+        failed.push(WALLETS[i].name);
+        firstError ??= r.reason;
+      }
+    });
+    // **全军覆没**(无一钱包成功,如 429 限流所有端点)→ 抛,让 sync 重试、别拿空快照覆盖已有余额。
+    // 只有**部分**失败才走尽力而为(收 Note、返回成功的那些)。
+    if (failed.length === WALLETS.length && firstError) throw firstError;
+    return { balances, note: failed.length ? [walletFailureNote(failed)] : undefined };
   },
 
-  // 校验:签名打 /api/v3/account 确认 key + 读权限(creds 已由 validateCredentials 保证非空)。
+  // 校验:签名打现货 /api/v3/account 确认 key + 读权限(creds 已由 validateCredentials 保证非空)。
+  // 只验现货(基础读权限)—— 部分授权(如没勾 Futures)是同步期尽力而为的事,不该卡住加账户。
   // 凭据被拒(-2014/-2015 等 → AUTH_FAILED)→ false;够不到上游 → 抛(契约见 connector.ts / errors.ts)。
   async validateAccount(ctx): Promise<boolean> {
     const { apiKey, secret } = ctx.account.creds;
     try {
       await signedGet(
+        signedRequest,
         ACCOUNT_PATH,
         { recvWindow: RECV_WINDOW, timestamp: Date.now() },
         apiKey,
