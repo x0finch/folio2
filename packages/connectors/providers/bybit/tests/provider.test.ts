@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildPriceHint, bybitProvider, parseFunding, parseUnified } from "../src";
+import { buildPriceHint, bybitProvider, parseEarn, parseFunding, parseUnified } from "../src";
+import earnFlexible from "./fixtures/earn-flexible.json";
+import earnOnchain from "./fixtures/earn-onchain.json";
+import expectedFlexEarn from "./fixtures/expected-flexible-earn.json";
 import expectedFunding from "./fixtures/expected-funding-balances.json";
+import expectedOnchainEarn from "./fixtures/expected-onchain-earn.json";
 import expected from "./fixtures/expected-unified-balances.json";
 import funding from "./fixtures/funding.json";
 import walletBalance from "./fixtures/wallet-balance.json";
@@ -71,12 +75,47 @@ describe("parseFunding (golden: fixture in → fixture out)", () => {
   });
 });
 
+// 赚币(earn)golden:earn-flexible/onchain.json + 统一账户市价提示表 → 期望值。覆盖:amount→amount、
+// 类目标签(Flexible / On-chain)、note.group:"earn"、价复用统一账户市价(BTC)/稳定币(USDT)、
+// 跳过 amount≤0(已赎回残值)。**不标 APY**(Bybit 持仓端点无 APR,ADR 0032)。
+describe("parseEarn (golden: fixture in → fixture out)", () => {
+  const hint = buildPriceHint(walletBalance.result.list[0].coin);
+  it("flexible: amount→amount, 类目 note content='Flexible', group earn;跳过 amount=0", () => {
+    expect(parseEarn(earnFlexible.result.list, "Flexible", hint)).toEqual(expectedFlexEarn);
+  });
+  it("on-chain: 类目 note content='On-chain', group earn", () => {
+    expect(parseEarn(earnOnchain.result.list, "On-chain", hint)).toEqual(expectedOnchainEarn);
+  });
+});
+
 describe("bybitProvider.fetchBalances", () => {
+  // 所有端点的路由 mock;不匹配的返回统一账户 walletBalance。
+  const routeAll = () =>
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("query-account-coins-balance")) return ok(funding);
+      if (u.includes("/v5/earn/position") && u.includes("FlexibleSaving")) return ok(earnFlexible);
+      if (u.includes("/v5/earn/position") && u.includes("OnChain")) return ok(earnOnchain);
+      return ok(walletBalance);
+    });
+
+  it("并发全桶(统一/资金/赚币)→ 合并 spot;赚币按类目标 note.group='earn'", async () => {
+    routeAll();
+    const { balances } = await bybitProvider.fetchBalances(ctx());
+    // 统一 3 + 资金 3 + 赚币 2(Flexible USDT + OnChain BTC)= 8
+    expect(balances).toHaveLength(8);
+    const earn = balances.filter((b) => b.note?.group === "earn");
+    expect(earn.map((b) => b.symbol)).toEqual(["USDT", "BTC"]);
+    expect(earn.map((b) => b.note?.content)).toEqual(["Flexible", "On-chain"]);
+  });
+
   it("signs with X-BAPI headers (hex SIGN) and parses UNIFIED balances", async () => {
-    // 本测聚焦统一账户签名/解析;funding 端点返回空,合并与并发另见专测。
+    // 本测聚焦统一账户签名/解析;funding + earn 端点返回空,合并与并发另见专测。
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-      if (String(url).includes("query-account-coins-balance"))
+      const u = String(url);
+      if (u.includes("query-account-coins-balance"))
         return ok({ retCode: 0, result: { balance: [] } });
+      if (u.includes("/v5/earn/position")) return ok({ retCode: 0, result: { list: [] } });
       return ok(walletBalance);
     });
     const { balances } = await bybitProvider.fetchBalances(ctx());

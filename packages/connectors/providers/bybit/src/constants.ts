@@ -2,6 +2,9 @@
 export const BYBIT_API_BASE = "https://api.bybit.com";
 export const WALLET_BALANCE_PATH = "/v5/account/wallet-balance"; // 统一账户(query accountType=UNIFIED)
 export const FUNDING_BALANCES_PATH = "/v5/asset/transfer/query-account-coins-balance"; // 资金账户(accountType=FUND)
+export const EARN_POSITION_PATH = "/v5/earn/position"; // 赚币持仓(query category=FlexibleSaving | OnChain)
+export const EARN_CATEGORY_FLEXIBLE = "FlexibleSaving";
+export const EARN_CATEGORY_ONCHAIN = "OnChain";
 
 // 签名时效窗口(ms)—— 被签串与头都用它。Bybit 默认/建议 5000。
 export const RECV_WINDOW = "5000";

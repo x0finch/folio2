@@ -1,0 +1,11 @@
+[
+  {
+    "symbol": "USDT",
+    "tokenRef": "bybit/issued:USDT",
+    "amount": 100,
+    "price": 1,
+    "value": 100,
+    "kind": "spot",
+    "note": { "title": "Earn", "icon": "info", "content": "Flexible", "group": "earn" }
+  }
+]

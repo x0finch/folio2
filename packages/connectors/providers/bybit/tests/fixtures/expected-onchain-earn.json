@@ -1,0 +1,11 @@
+[
+  {
+    "symbol": "BTC",
+    "tokenRef": "bybit/issued:BTC",
+    "amount": 0.01,
+    "price": 60000,
+    "value": 600,
+    "kind": "spot",
+    "note": { "title": "Earn", "icon": "info", "content": "On-chain", "group": "earn" }
+  }
+]
