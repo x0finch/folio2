@@ -288,11 +288,14 @@ function reconcileNotes(
   valuation: OkxValuationResponse,
   earnItems: Spot[],
   hint: PriceHint,
+  earnComplete: boolean,
 ): Note[] {
   const out: Note[] = [];
   const details = valuation.data?.[0]?.details;
   const earnBucket = Number(details?.earn ?? 0);
-  if (earnBucket > 0) {
+  // **只在赚币两桶都拉到时**才算 earn 残差。若某个 earn 桶失败,earnItems 是残缺的,残差会把「没拉到」
+  // 误当成「未细分」—— 而失败本身已由 bucketFailureNote 报了,别再叠一条自相矛盾的"未细分 $X"。
+  if (earnComplete && earnBucket > 0) {
     const n = earnResidualNote(earnBucket, earnItems, hint);
     if (n) out.push(n);
   }
@@ -477,15 +480,19 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
     // 逐桶失败(部分)→ 一条账户级 Note(auth 类给权限提示,其余给"下次补上")。
     if (failures.length) notes.push(bucketFailureNote(failures));
     // 对账锚(软,非余额源):四桶对账 → earn 未细分 / classic 整桶漏拉的残差 Note。失败/坏码只是本轮没这些 Note。
+    // earnComplete:两个 earn 桶都拉到,残差才可信(某个失败 → earnItems 残缺,残差不能报)。
     if (valuationR.status === "fulfilled") {
       const valuation = valuationR.value as OkxValuationResponse;
-      if (!codeError(valuation)) notes.push(...reconcileNotes(valuation, earnItems, hint));
+      const earnComplete = savings.failure == null && staking.failure == null;
+      if (!codeError(valuation))
+        notes.push(...reconcileNotes(valuation, earnItems, hint, earnComplete));
     }
-    // perp 兜底(软):检测到合约持仓即挂"浮盈暂未纳入"Note(本轮不解析 perp,ADR 0031 缓做)。
+    // perp 兜底(软):检测到**未平仓**合约持仓即挂"浮盈暂未纳入"Note(本轮不解析 perp,ADR 0031 缓做)。
+    // OKX /positions 可能回 pos=0 的已平仓行 → 只认非零 pos,不对空仓账户虚报(与 binance 过滤 positionAmt 同理)。
     if (positionsR.status === "fulfilled") {
       const positions = positionsR.value as OkxPositionsResponse;
-      if (!codeError(positions) && (positions.data?.length ?? 0) > 0)
-        notes.push(perpFallbackNote());
+      const hasOpenPosition = (positions.data ?? []).some((p) => Number(p.pos ?? 0) !== 0);
+      if (!codeError(positions) && hasOpenPosition) notes.push(perpFallbackNote());
     }
     return { balances, note: notes.length ? notes : undefined };
   },

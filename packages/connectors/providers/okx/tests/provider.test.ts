@@ -171,7 +171,9 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/finance/staking-defi/orders-active"))
         return new Response("", { status: 504 });
       if (u.includes("/api/v5/asset/balances")) return ok(funding);
-      if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
+      // 锚说 earn 桶有 $12k,但赚币两桶都超时没拉到 → **不能**报"未细分",那是没拉到不是没细分。
+      if (u.includes("/asset/asset-valuation"))
+        return ok({ code: "0", data: [{ details: { earn: "12000" } }] });
       if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
@@ -183,6 +185,8 @@ describe("okxProvider.fetchBalances", () => {
     expect(String(failNote?.content)).toContain("Savings");
     expect(String(failNote?.content)).toContain("Staking");
     expect(String(failNote?.content)).toContain("next time"); // 瞬时故障 → "下次补上"文案
+    // earn 桶失败时**不叠**一条自相矛盾的"未细分 $12k"(那笔钱是没拉到,已由失败 Note 报了)。
+    expect(note?.some((n) => n.title === "Earn not itemized")).toBe(false);
   });
 
   it("auth 类失败(50xxx 权限不足)→ 失败 Note 提示查权限", async () => {
@@ -218,6 +222,21 @@ describe("okxProvider.fetchBalances", () => {
     });
     const { note } = await okxProvider.fetchBalances(ctx());
     expect(note?.some((n) => n.title === "Futures positions detected")).toBe(true);
+  });
+
+  it("positions 全是已平仓行(pos=0)→ 不虚报 perp Note", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      // OKX 可能回 pos=0 的已平仓行 —— 不是真持仓,不该触发兜底 Note。
+      if (u.includes("/api/v5/account/positions"))
+        return ok({ code: "0", data: [{ instId: "BTC-USDT-SWAP", pos: "0", upl: "0" }] });
+      if (u.includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
+      if (u.includes("/finance/")) return ok({ code: "0", data: [] });
+      if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { note } = await okxProvider.fetchBalances(ctx());
+    expect(note?.some((n) => n.title === "Futures positions detected")).toBeFalsy();
   });
 
   it("四桶对账:classic 桶 >0(Folio 不拉)→ 挂'经典账户未同步'残差 Note", async () => {
