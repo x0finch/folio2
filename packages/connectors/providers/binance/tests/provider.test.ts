@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { binanceProvider, parseAccountBalances } from "../src";
 import account from "./fixtures/account.json";
 import coinmAccount from "./fixtures/coinm-account.json";
+import earnFlexible from "./fixtures/earn-flexible.json";
+import earnLocked from "./fixtures/earn-locked.json";
 import expected from "./fixtures/expected-balances.json";
 import fundingAssets from "./fixtures/funding-assets.json";
 import futuresAccount from "./fixtures/futures-account.json";
@@ -102,6 +104,10 @@ describe("binanceProvider.fetchBalances", () => {
   it("现货 + U本位 + 币本位全成功 → 合并 spot + perp 行(尽力而为全绿,无 Note)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const u = String(url);
+      if (u.includes("/sapi/v1/simple-earn/flexible/position"))
+        return new Response(JSON.stringify(earnFlexible), { status: 200 });
+      if (u.includes("/sapi/v1/simple-earn/locked/position"))
+        return new Response(JSON.stringify(earnLocked), { status: 200 });
       if (u.includes("/sapi/v1/asset/get-funding-asset"))
         return new Response(JSON.stringify(fundingAssets), { status: 200 });
       if (u.includes("/dapi/v1/account"))
@@ -119,8 +125,8 @@ describe("binanceProvider.fetchBalances", () => {
       );
     });
     const { balances, note } = await binanceProvider.fetchBalances(ctx());
-    // 现货 4 + 资金 2(USDT/BTC,DUST 零余额跳过)
-    expect(balances.filter((b) => b.kind === "spot")).toHaveLength(6);
+    // 现货 4 + 资金 2 + 理财 2(USDT 活期 + BTC 定期)
+    expect(balances.filter((b) => b.kind === "spot")).toHaveLength(8);
     // U本位 + 币本位各一个权益行
     expect(balances.filter((b) => b.kind === "perp_equity")).toHaveLength(2);
     // U本位 2 持仓 + 币本位 2 持仓
