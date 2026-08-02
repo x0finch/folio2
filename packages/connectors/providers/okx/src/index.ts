@@ -253,61 +253,58 @@ interface OkxPositionsResponse {
 const fmtUsd = (n: number): string =>
   `$${Math.round(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
-// earn 桶残差 Note(account 级):拉到的 earn 子项(savings + staking)加总对不上 asset-valuation 的
-// earn 桶,差额挂"未细分"提示,兜住 Folio 不细拉的 earn 子类(定期等)。**只在能可信估值时报**:
-// 任一 earn 子项估不出价(无提示价、非稳定币)时残差不可信(是「拉到了但没估到价」而非「没拉到」)→ 不报,
-// 避免虚报一个吓人的"未细分 $X"。差额 ≤ 阈值也不报。
-export function earnResidualNote(
+// earn 桶残差 → **计进净值的合成聚合行**(用户决策:金额已知就该进净值)。
+// asset-valuation 的 earn 桶给权威美元,减去已细分的 earn 子项(savings+staking)= 未细分额 —— 这是
+// 结构化 / 定期赚币的本金:它有金额(锚给的)、但**拆不开成一个个币**(无公开端点)。造一条不透明聚合行:
+// value=残差 → 进净值(OKX 总额随之对上 asset-valuation);tokenRef 用 **custom:**(无注册表背书 → oracle
+// 不并进真币、保留本值,见 token-ref.ts hasTrustedSymbol),balance 级中性 note 说明它是什么、group:"earn"。
+// **只在可信时产**:earn 两桶都拉到(earnComplete)+ 无估不出价的 earn 项 + 残差 > 阈值。否则残差不可信
+// (「拉到了但没估到价」或「没拉到」),不能拿它污染净值 → 不产。
+export function earnResidualRow(
   earnBucketUsd: number,
   earnItems: Spot[],
   hint: PriceHint,
-): Note | undefined {
+): Spot | undefined {
   let valued = 0;
   let unpriced = 0;
   for (const item of earnItems) {
     if (priceOf(item.symbol, hint) != null) valued += item.value;
     else unpriced++;
   }
-  if (unpriced > 0) return undefined; // 残差不可信 → 不报
+  if (unpriced > 0) return undefined; // 残差不可信 → 不计
   const residual = earnBucketUsd - valued;
   if (!(residual > EARN_RESIDUAL_MIN_USD)) return undefined;
   return {
-    title: "Earn not itemized",
-    icon: "info",
-    content: `About ${fmtUsd(residual)} in Earn couldn't be itemized (fixed-term, structured, or other sub-types with no public endpoint)`,
+    symbol: "EARN",
+    name: "Uncategorized earn",
+    amount: residual, // 无逐币数量 → 以美元额当"数量"(price=1),净值只认 value
+    price: 1,
+    value: residual,
+    selfPrice: 1,
+    kind: "spot",
+    tokenRef: tokenRef.custom(PROVIDER_ID, "EARN-UNCATEGORIZED"),
+    note: {
+      title: "Earn (uncategorized)",
+      icon: "info",
+      content: `${fmtUsd(residual)} of fixed-term / structured earn — value from OKX, no per-coin breakdown available`,
+      group: "earn",
+    },
   };
 }
 
-// —— 四桶对账(asset-valuation)——
-// 具体到本 connector 拉哪些桶:trading / funding / earn(savings+staking)拉了,**classic(经典账户)
-// 不拉**。故对账落到两条可信残差 Note:① earn 残差(见 earnResidualNote,兜住不细拉的 earn 子类);
-// ② classic 桶 —— 我们根本不拉它,valuation 里它 >0 就是**整桶漏拉**,直接暴露。trading / funding 不做
-// 精确逐桶对账:trading 的 cashBal 口径**故意**不含 uPnL(与 valuation 的含 uPnL 差一个浮盈,ADR 容忍),
-// funding 逐币美元多半交 oracle 回填、连接器内估不准 —— 硬比会持续虚报,不做(false 残差比静默更糟)。
-function reconcileNotes(
-  valuation: OkxValuationResponse,
-  earnItems: Spot[],
-  hint: PriceHint,
-  earnComplete: boolean,
-): Note[] {
-  const out: Note[] = [];
-  const details = valuation.data?.[0]?.details;
-  const earnBucket = Number(details?.earn ?? 0);
-  // **只在赚币两桶都拉到时**才算 earn 残差。若某个 earn 桶失败,earnItems 是残缺的,残差会把「没拉到」
-  // 误当成「未细分」—— 而失败本身已由 bucketFailureNote 报了,别再叠一条自相矛盾的"未细分 $X"。
-  if (earnComplete && earnBucket > 0) {
-    const n = earnResidualNote(earnBucket, earnItems, hint);
-    if (n) out.push(n);
-  }
-  const classicBucket = Number(details?.classic ?? 0);
-  if (classicBucket > EARN_RESIDUAL_MIN_USD) {
-    out.push({
-      title: "Classic account not synced",
-      icon: "warning",
-      content: `About ${fmtUsd(classicBucket)} sits in your OKX Classic account, which Folio doesn't sync`,
-    });
-  }
-  return out;
+// —— 四桶对账(asset-valuation)—— classic 桶 Note
+// 本 connector 拉 trading / funding / earn;**classic(经典账户)不拉** → valuation 里它 >0 就是**整桶漏拉**,
+// 挂账户级 Note 暴露(与 earn 残差不同:classic 不像 earn 有权威美元残差可直接计入,且经典账户少见,先只提示)。
+// trading / funding 不做精确逐桶对账:trading 的 cashBal **故意**不含 uPnL(ADR 容忍),funding 逐币美元
+// 多半交 oracle 回填、连接器内估不准 —— 硬比会持续虚报,不做(false 残差比静默更糟)。
+function classicNote(valuation: OkxValuationResponse): Note | undefined {
+  const classicBucket = Number(valuation.data?.[0]?.details?.classic ?? 0);
+  if (!(classicBucket > EARN_RESIDUAL_MIN_USD)) return undefined;
+  return {
+    title: "Classic account not synced",
+    icon: "warning",
+    content: `About ${fmtUsd(classicBucket)} sits in your OKX Classic account, which Folio doesn't sync`,
+  };
 }
 
 // perp 兜底 Note(account 级):检测到合约持仓即挂 —— 本轮不解析浮盈(ADR 0031 perp 缓做),
@@ -479,13 +476,24 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
     const notes: Note[] = [];
     // 逐桶失败(部分)→ 一条账户级 Note(auth 类给权限提示,其余给"下次补上")。
     if (failures.length) notes.push(bucketFailureNote(failures));
-    // 对账锚(软,非余额源):四桶对账 → earn 未细分 / classic 整桶漏拉的残差 Note。失败/坏码只是本轮没这些 Note。
-    // earnComplete:两个 earn 桶都拉到,残差才可信(某个失败 → earnItems 残缺,残差不能报)。
+    // 对账锚(软,非余额源):asset-valuation 四桶对账。失败/坏码只是本轮没这些产出。
     if (valuationR.status === "fulfilled") {
       const valuation = valuationR.value as OkxValuationResponse;
-      const earnComplete = savings.failure == null && staking.failure == null;
-      if (!codeError(valuation))
-        notes.push(...reconcileNotes(valuation, earnItems, hint, earnComplete));
+      if (!codeError(valuation)) {
+        // earn 未细分(结构化/定期)→ 合成聚合行**计进净值**(金额已知)。earnComplete:两个 earn 桶都拉到,
+        // 残差才可信(某个失败 → earnItems 残缺,残差是「没拉到」而非「未细分」,不能计入)。
+        const earnComplete = savings.failure == null && staking.failure == null;
+        if (earnComplete) {
+          const earnBucketUsd = Number(valuation.data?.[0]?.details?.earn ?? 0);
+          if (earnBucketUsd > 0) {
+            const row = earnResidualRow(earnBucketUsd, earnItems, hint);
+            if (row) balances.push(row);
+          }
+        }
+        // classic 整桶漏拉 → 账户级 Note(不像 earn 有可直接计入的残差,先只提示)。
+        const cn = classicNote(valuation);
+        if (cn) notes.push(cn);
+      }
     }
     // perp 兜底(软):检测到**未平仓**合约持仓即挂"浮盈暂未纳入"Note(本轮不解析 perp,ADR 0031 缓做)。
     // OKX /positions 可能回 pos=0 的已平仓行 → 只认非零 pos,不对空仓账户虚报(与 binance 过滤 positionAmt 同理)。

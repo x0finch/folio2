@@ -22,7 +22,8 @@ OKX 与 Binance 的账户模型不同。Binance 是**物理隔离的多钱包**(
 - **有合约持仓时,单看某个保证金币(如 USDT)的数量,Folio(cashBal)会比 OKX App(eq 权益)少一个浮盈**——这是**有意的口径统一**,浮盈在「永续」里、账户总净值仍与 OKX 一致。可在该币行挂 note 消解困惑。
 - **四桶是对账锚**:各端点拉取加总须对得上 `asset-valuation` 的四个数;trading 桶因故意不含 uPnL,对账**容忍一个 uPnL 的偏差**;earn 桶残差进 note。对不上即暴露漏拉。**`asset-valuation` 必须带 `ccy=USD`** —— 该端点**默认按 BTC 计价**,不传就拿到 BTC 数值,与美元口径的余额一比即单位错位、对账形同虚设(真机踩过:earn 锚返回 `6.04`(BTC)、被当美元与拉到的 `$251k` 比,残差恒负 → 该报的缺口不报)。
 - **这轮 schema 保持 `Spot`**,不升判别联合;perp 片落地时再改成 `Spot | PerpEquity | PerpPosition`。不为未实现的东西提前改契约。
-- **结构化 / Pay 无独立标签,且并非「自然覆盖」**:真机验证(账户 333)显示结构化 / 定期赚币的本金**计在 `asset-valuation` 的 earn 桶里,但 `savings/balance` 与 `staking-defi/orders-active` 都拉不到它**(无公开端点)——所以它**不进 Folio 的余额加总**,总净值会短这一截。兜底不是「拉全 earn 就覆盖」,而是**earn 桶残差 Note**:earn 锚 − 拉到的 earn 子项 = 未细分额,挂账户级 Note("未细分 $X,fixed-term / 结构化 / 其他无公开端点子类")明确暴露,不让它悄悄漏。此例残差 ≈ **$131k**(earn 锚 $382k − 拉到 $251k)。若将来要把这笔计进净值,需另找(可能抓不到的)数据源。
+- **结构化 / Pay 无独立标签,且并非「自然覆盖」——其金额已知,故计进净值(合成聚合行)**:真机验证(账户 333)显示结构化 / 定期赚币的本金**计在 `asset-valuation` 的 earn 桶里,但 `savings/balance` 与 `staking-defi/orders-active` 都拉不到逐笔构成**(无公开端点)。关键区分:**金额(USD)拿得到**(= earn 锚 − 已细分 earn 加总,此例 ≈ **$131k**),**拿不到的是「哪个币、几个、什么 APY」**。因此**把这笔残差造成一条不透明聚合行计进净值**(`okx/custom:EARN-UNCATEGORIZED`,`value`=残差;`custom:` 无注册表背书 → oracle 不并进真币、保留本值),带 balance 级中性 note 说明它是「fixed-term / structured earn,无逐币拆分」。效果:Folio 的 OKX 总额 = `asset-valuation` 权威总额、与 OKX App 对上(此例 $266k → **$397k**)。**只在可信时产**:earn 两桶都拉到 + 无估不出价的 earn 项 + 残差 > 阈值(否则残差不可信、不能污染净值)。要把这 $131k **拆成逐币**仍需另找(可能抓不到的)数据源 —— 那是单独的后续工作。
+- **classic 桶仍只挂 Note、不计入**:与 earn 不同,classic(经典账户)Folio 根本不拉、也没有「可直接计入的美元残差」语义那么干净,且经典账户在统一账户用户里少见 → valuation.classic >0 时先挂账户级提示,不合成行。
 - 待实现时对 fixture 最终核实的字段语义:`cashBal` vs `eq`、savings `rate` 的年化/日化、staking 凭证与质押端点的数量对应。
 
 关联:#259(口径 bug)、#295(Binance 多钱包 epic,同模式先例)、[ADR 0030](0030-cex-multi-wallet-best-effort-sync.md)(CEX 多钱包尽力而为 + 账户级 Note)。
