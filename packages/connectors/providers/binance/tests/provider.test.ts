@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { binanceProvider, parseAccountBalances } from "../src";
 import account from "./fixtures/account.json";
 import expected from "./fixtures/expected-balances.json";
+import futuresAccount from "./fixtures/futures-account.json";
 import prices from "./fixtures/prices.json";
 
 // 新 FetchContext 形状:account.creds(AC:apiKey/secret,由分派桥 openCreds 解密后灌入)+ creds(PC:空)。
@@ -45,6 +46,11 @@ describe("binanceProvider.fetchBalances", () => {
   it("signs /api/v3/account (X-MBX-APIKEY + signature) + fetches public prices, then parses", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const u = String(url);
+      // 合约钱包:空账户(此测试聚焦现货签名/估值;合约合并与尽力而为见下方专测)。
+      if (u.includes("/fapi/v2/account"))
+        return new Response(JSON.stringify({ totalMarginBalance: "0", positions: [] }), {
+          status: 200,
+        });
       if (u.includes("/api/v3/account"))
         return new Response(JSON.stringify(account), { status: 200 });
       return new Response(
@@ -65,10 +71,10 @@ describe("binanceProvider.fetchBalances", () => {
       content: "1 ETH · 33%",
     });
 
-    const [acctUrl, init] = spy.mock.calls[0];
-    expect(String(acctUrl)).toContain("/api/v3/account?");
-    expect(String(acctUrl)).toContain("&signature=");
-    expect((init?.headers as Record<string, string>)["X-MBX-APIKEY"]).toBe("k");
+    const acctCall = spy.mock.calls.find((c) => String(c[0]).includes("/api/v3/account?"));
+    expect(acctCall).toBeDefined();
+    expect(String(acctCall?.[0])).toContain("&signature=");
+    expect((acctCall?.[1]?.headers as Record<string, string>)["X-MBX-APIKEY"]).toBe("k");
   });
 
   // 缺 key/secret 的拒绝已上移到分派桥的 validateCredentials(见 @folio/connectors-basic creds.test);
@@ -87,6 +93,49 @@ describe("binanceProvider.fetchBalances", () => {
     await expect(binanceProvider.fetchBalances(ctx())).rejects.toMatchObject({
       code: "AUTH_FAILED",
     });
+  });
+
+  it("现货 + 合约全成功 → 合并 spot + perp 行(尽力而为全绿,无 Note)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/fapi/v2/account"))
+        return new Response(JSON.stringify(futuresAccount), { status: 200 });
+      if (u.includes("/api/v3/account"))
+        return new Response(JSON.stringify(account), { status: 200 });
+      return new Response(
+        JSON.stringify([
+          { symbol: "BTCUSDT", price: "60000" },
+          { symbol: "ETHUSDT", price: "3000" },
+        ]),
+        { status: 200 },
+      );
+    });
+    const { balances, note } = await binanceProvider.fetchBalances(ctx());
+    expect(balances.filter((b) => b.kind === "spot")).toHaveLength(4);
+    expect(balances.filter((b) => b.kind === "perp_equity")).toHaveLength(1);
+    expect(balances.filter((b) => b.kind === "perp_position")).toHaveLength(2);
+    expect(note).toBeUndefined();
+  });
+
+  it("合约端点失败(没勾 Futures → 401)→ 现货照返回 + 账户级 Note(不整账户失败)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/fapi/v2/account")) return new Response("", { status: 401 });
+      if (u.includes("/api/v3/account"))
+        return new Response(JSON.stringify(account), { status: 200 });
+      return new Response(
+        JSON.stringify([
+          { symbol: "BTCUSDT", price: "60000" },
+          { symbol: "ETHUSDT", price: "3000" },
+        ]),
+        { status: 200 },
+      );
+    });
+    const { balances, note } = await binanceProvider.fetchBalances(ctx());
+    expect(balances.filter((b) => b.kind === "spot")).toHaveLength(4);
+    expect(balances.some((b) => b.kind !== "spot")).toBe(false);
+    expect(note?.[0]?.title).toBe("Wallets not synced");
+    expect(String(note?.[0]?.content)).toContain("Futures");
   });
 
   it("serves connectorId binance, no provider-level creds (账户自带密钥)", () => {

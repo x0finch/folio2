@@ -34,3 +34,13 @@ export const TICKER_RATE_LIMIT_PER_SEC = 24 / 60;
 export const TICKER_RATE_LIMIT_BURST = 6;
 // 公开端点闸的 key:**provider 级、按出口 IP**,不是每账户 —— 见上。
 export const PUBLIC_LIMIT_KEY = "binance:public";
+
+// —— U 本位合约(USDⓈ-M Futures)——
+// 合约在**独立 host**(fapi.binance.com),需另一个签名 client(见 index.ts)。V2 account 一发即拿
+// 账户权益 + 各持仓(V2 的 positions 保留 leverage/entryPrice/notional;强平价不在此响应 → 留 null)。
+export const BINANCE_FUTURES_API_BASE = "https://fapi.binance.com";
+export const USDM_ACCOUNT_PATH = "/fapi/v2/account"; // SIGNED,账户权益 + 持仓一发全给
+// U 本位保证金计价资产(账户权益以 USDT 计,天然 USD)。
+export const MARGIN_ASSET = "USDT";
+// 合约 symbol 去尾得标的币名(BTCUSDT → BTC)。按已知计价后缀由长到短剥(先 USDC 再 USDT,避免误剥)。
+export const QUOTE_SUFFIXES: readonly string[] = ["USDT", "USDC", "BUSD", "FDUSD", "TUSD"];
