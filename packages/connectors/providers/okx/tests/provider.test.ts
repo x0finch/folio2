@@ -125,7 +125,7 @@ describe("earnResidualNote", () => {
 });
 
 describe("okxProvider.fetchBalances", () => {
-  // 所有余额源桶(交易/资金/赚币)+ 对账锚(asset-valuation)的路由 mock;不匹配的返回空。
+  // 所有端点的路由 mock;positions 空(无持仓)、不匹配的返回交易账户 balance。
   const routeAll = () =>
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const u = String(url);
@@ -133,6 +133,7 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/finance/savings/balance")) return ok(savings);
       if (u.includes("/finance/staking-defi/orders-active")) return ok(staking);
       if (u.includes("/asset/asset-valuation")) return ok(valuation);
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
       return ok(balance); // /api/v5/account/balance
     });
 
@@ -154,11 +155,84 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/api/v5/asset/balances")) return ok(funding);
       if (u.includes("/finance/savings/balance")) return ok(savings);
       if (u.includes("/finance/staking-defi/orders-active")) return ok(staking);
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
     const { balances, note } = await okxProvider.fetchBalances(ctx());
     expect(balances).toHaveLength(9); // 余额照常
     expect(note).toBeUndefined(); // 锚挂了 → 无残差 Note,但同步整体成功
+  });
+
+  // —— 片 4:尽力而为 + 四桶对账 + perp 兜底 ——
+  it("部分桶失败(赚币超时)→ 其余照返回 + 账户级失败 Note;整次同步成功", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/finance/savings/balance")) return new Response("", { status: 504 });
+      if (u.includes("/finance/staking-defi/orders-active"))
+        return new Response("", { status: 504 });
+      if (u.includes("/api/v5/asset/balances")) return ok(funding);
+      if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { balances, note } = await okxProvider.fetchBalances(ctx());
+    // 交易 4 + 资金 3 成功;赚币两桶失败 → 无 earn 行,但不抛。
+    expect(balances).toHaveLength(7);
+    expect(balances.some((b) => b.note?.group === "earn")).toBe(false);
+    const failNote = note?.find((n) => n.title === "Buckets not synced");
+    expect(String(failNote?.content)).toContain("Savings");
+    expect(String(failNote?.content)).toContain("Staking");
+    expect(String(failNote?.content)).toContain("next time"); // 瞬时故障 → "下次补上"文案
+  });
+
+  it("auth 类失败(50xxx 权限不足)→ 失败 Note 提示查权限", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      // 资金账户返回权限类错误码(HTTP 200 + 50xxx)。
+      if (u.includes("/api/v5/asset/balances")) return ok({ code: "50111", msg: "Invalid Key" });
+      if (u.includes("/finance/")) return ok({ code: "0", data: [] });
+      if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { note } = await okxProvider.fetchBalances(ctx());
+    const failNote = note?.find((n) => n.title === "Buckets not synced");
+    expect(String(failNote?.content)).toContain("Funding");
+    expect(String(failNote?.content)).toContain("permissions");
+  });
+
+  it("四个余额桶全失败(429 限流所有端点)→ 抛,不拿空快照覆盖", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
+    await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
+  });
+
+  it("positions 非空 → 挂'合约浮盈暂未纳入'perp 兜底 Note", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/api/v5/account/positions"))
+        return ok({ code: "0", data: [{ instId: "BTC-USDT-SWAP", pos: "1", upl: "123" }] });
+      if (u.includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
+      if (u.includes("/finance/")) return ok({ code: "0", data: [] });
+      if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { note } = await okxProvider.fetchBalances(ctx());
+    expect(note?.some((n) => n.title === "Futures positions detected")).toBe(true);
+  });
+
+  it("四桶对账:classic 桶 >0(Folio 不拉)→ 挂'经典账户未同步'残差 Note", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/asset/asset-valuation"))
+        return ok({ code: "0", data: [{ details: { classic: "8888", earn: "0" } }] });
+      if (u.includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
+      if (u.includes("/finance/")) return ok({ code: "0", data: [] });
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { note } = await okxProvider.fetchBalances(ctx());
+    const classic = note?.find((n) => n.title === "Classic account not synced");
+    expect(String(classic?.content)).toContain("$8,888");
   });
 
   it("signs with 4 OK-ACCESS headers (base64 SIGN) and parses balances", async () => {
