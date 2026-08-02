@@ -9,3 +9,20 @@ class ResizeObserverStub {
 if (!("ResizeObserver" in globalThis)) {
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub;
 }
+
+// jsdom 无 matchMedia;主题 hook(use-theme)按 prefers-color-scheme 查询 → 最小 stub(恒 false)。
+if (typeof window !== "undefined" && !window.matchMedia) {
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent() {
+        return false;
+      },
+    }) as unknown as MediaQueryList;
+}
