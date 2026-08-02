@@ -12,6 +12,9 @@ import { z } from "zod";
 import {
   AUTH_ERROR_CODES,
   BYBIT_API_BASE,
+  EARN_CATEGORY_FLEXIBLE,
+  EARN_CATEGORY_ONCHAIN,
+  EARN_POSITION_PATH,
   FUNDING_BALANCES_PATH,
   HEADER_KEY,
   HEADER_RECV_WINDOW,
@@ -52,6 +55,19 @@ interface BybitFundingResponse {
   retCode?: number;
   retMsg?: string;
   result?: { balance?: BybitFundingCoin[] };
+}
+
+// 赚币 /v5/earn/position?category=FlexibleSaving|OnChain 的最小形状。每币一行,本金取 `amount`。
+// **Bybit 的赚币持仓端点不带 APR 字段**(只有 amount / totalPnl / yesterdayYield)—— 故 note 只标类目,
+// 不编 APY(把一天的 yesterdayYield 年化太噪、下载整个产品目录太浪费,见 ADR 0032 / probe)。
+interface BybitEarnPosition {
+  coin?: string;
+  amount?: string; // 出借/质押本金 —— 持有量口径
+}
+interface BybitEarnResponse {
+  retCode?: number;
+  retMsg?: string;
+  result?: { list?: BybitEarnPosition[] };
 }
 
 // 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
@@ -142,6 +158,36 @@ export function parseFunding(assets: BybitFundingCoin[], hint: PriceHint): Spot[
   }
   return out;
 }
+
+// 纯解析:赚币持仓 list[] → Spot[]。数量取 `amount`(总本金)、算 spot、进净值;价走提示表(同 funding)。
+// note 标类目(`label`:Flexible / On-chain)+ `group:"earn"`。**不标 APY** —— Bybit 持仓端点无 APR 字段
+// (见 BybitEarnPosition 注释)。跳过空 coin / amount≤0(已赎回只剩残值的持仓)。与 IO 分离,golden test。
+export function parseEarn(positions: BybitEarnPosition[], label: string, hint: PriceHint): Spot[] {
+  const out: Spot[] = [];
+  for (const p of positions ?? []) {
+    const coin = p.coin;
+    if (!coin) continue;
+    const amount = Number(p.amount ?? 0);
+    if (!(amount > 0)) continue;
+    const price = priceOf(coin, hint);
+    out.push({
+      symbol: coin,
+      amount,
+      price,
+      value: price != null ? amount * price : 0,
+      kind: "spot",
+      tokenRef: tokenRef.issued(PROVIDER_ID, coin.trim().toUpperCase()),
+      note: { title: "Earn", icon: "info", content: label, group: "earn" },
+    });
+  }
+  return out;
+}
+
+// 拉的赚币类目 → 展示类目标签。FlexibleSaving = 活期出借、OnChain = 链上赚币。
+const EARN_CATEGORIES = [
+  { category: EARN_CATEGORY_FLEXIBLE, label: "Flexible" },
+  { category: EARN_CATEGORY_ONCHAIN, label: "On-chain" },
+] as const;
 
 // 出网:签名头 + 失败归类走共享的 http 包装(@folio/shared)。**没有限频器** —— 额度按账户自己那把
 // key 算、一次同步端点数固定不并挤,装了拦不到任何东西。
@@ -240,28 +286,38 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
   async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
     const request = makeRequest(pickBybitBase(ctx.creds as Record<string, unknown>));
     const creds = ctx.account.creds;
-    // 各桶用**同一把 key 并发**拉,合并成一份余额(ADR 0032)。本片接入统一账户(UNIFIED)+ 资金账户(FUND)。
-    // 用 allSettled 而非 all:**等齐所有请求**再决定,避免某端点先失败时,并发的兄弟请求(异步签名仍在飞)
-    // 漏到调用结束后才 fetch(fire-and-forget → 泄漏到下轮 / 污染测试 spy)。本片语义仍是「任一端点失败即
-    // 整次失败」(抛第一个错、下轮重试,不拿半份快照覆盖);逐桶「尽力而为」留片 4 把这里的 throw 换成收 Note。
+    // 各桶用**同一把 key 并发**拉,合并成一份余额(ADR 0032)。本片接入统一账户(UNIFIED)+ 资金账户(FUND)
+    // + 赚币(FlexibleSaving + OnChain 两类目)。用 allSettled 而非 all:**等齐所有请求**再决定,避免某端点
+    // 先失败时并发兄弟请求(异步签名仍在飞)漏到调用结束后才 fetch(fire-and-forget)。本片语义仍是「任一端点
+    // 失败即整次失败」(抛第一个错、下轮重试,不拿半份快照覆盖);逐桶「尽力而为」留片 4 把 throw 换成收 Note。
     const settled = await Promise.allSettled([
       request(WALLET_BALANCE_PATH, { context: creds, query: { accountType: "UNIFIED" } }),
       request(FUNDING_BALANCES_PATH, { context: creds, query: { accountType: "FUND" } }),
+      ...EARN_CATEGORIES.map((e) =>
+        request(EARN_POSITION_PATH, { context: creds, query: { category: e.category } }),
+      ),
     ]);
     const firstRejected = settled.find((r) => r.status === "rejected");
     if (firstRejected) throw (firstRejected as PromiseRejectedResult).reason;
-    const [unifiedBody, fundingBody] = settled.map(
-      (r) => (r as PromiseFulfilledResult<unknown>).value,
-    ) as [BybitWalletBalanceResponse, BybitFundingResponse];
+    const bodies = settled.map((r) => (r as PromiseFulfilledResult<unknown>).value);
+    const unifiedBody = bodies[0] as BybitWalletBalanceResponse;
+    const fundingBody = bodies[1] as BybitFundingResponse;
+    const earnBodies = bodies.slice(2) as BybitEarnResponse[];
     // HTTP 200 + retCode!=0 是 Bybit 表达错误的主要方式,包管不到这一层。
-    assertRetCodeOk(unifiedBody);
-    assertRetCodeOk(fundingBody);
+    for (const b of bodies as { retCode?: number; retMsg?: string }[]) assertRetCodeOk(b);
 
     const coins = unifiedBody.result?.list?.[0]?.coin ?? [];
-    // 统一账户市价表复用给资金账户估值(零额外请求,见 buildPriceHint)。
+    // 统一账户市价表复用给资金/赚币估值(零额外请求,见 buildPriceHint)。
     const hint = buildPriceHint(coins);
+    const earn = EARN_CATEGORIES.flatMap((e, i) =>
+      parseEarn(earnBodies[i]?.result?.list ?? [], e.label, hint),
+    );
     return {
-      balances: [...parseUnified(coins), ...parseFunding(fundingBody.result?.balance ?? [], hint)],
+      balances: [
+        ...parseUnified(coins),
+        ...parseFunding(fundingBody.result?.balance ?? [], hint),
+        ...earn,
+      ],
     };
   },
 

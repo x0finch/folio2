@@ -1,0 +1,7 @@
+{
+  "retCode": 0,
+  "retMsg": "",
+  "result": {
+    "list": [{ "coin": "USDT", "amount": "100" }, { "coin": "USDC", "amount": "0" }]
+  }
+}
