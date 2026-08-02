@@ -21,6 +21,8 @@ import {
   COINM_ACCOUNT_PATH,
   EARN_FLEXIBLE_PATH,
   EARN_LOCKED_PATH,
+  EARN_MAX_PAGES,
+  EARN_PAGE_SIZE,
   FUNDING_ASSET_PATH,
   MARGIN_ASSET,
   PUBLIC_LIMIT_KEY,
@@ -536,16 +538,43 @@ const fundingWallet: Wallet = {
   },
 };
 
-// 理财钱包:活期 + 定期两个 GET(主 api host),当 spot、ticker 估值 → await prices。两端点任一失败即该钱包失败。
+// 一个 Simple Earn position 端点翻页取全:size=100 循环 current,直到末页(rows<size)或收满 total。
+// 不翻页时首页只给 10 条,持仓多的账户(小额自动申购常见)会静默丢掉靠后的币(#... UNI/USDT 丢失即此)。
+async function fetchEarnRows(
+  path: string,
+  apiKey: string,
+  secret: string,
+): Promise<Record<string, unknown>[]> {
+  const rows: Record<string, unknown>[] = [];
+  for (let current = 1; current <= EARN_MAX_PAGES; current++) {
+    const page = (await signedGet(
+      signedRequest,
+      path,
+      { current, size: EARN_PAGE_SIZE, recvWindow: RECV_WINDOW, timestamp: Date.now() },
+      apiKey,
+      secret,
+    )) as { rows?: Record<string, unknown>[]; total?: number };
+    const batch = page.rows ?? [];
+    rows.push(...batch);
+    if (batch.length < EARN_PAGE_SIZE) break; // 末页(不足一页)
+    if (Number(page.total ?? 0) > 0 && rows.length >= Number(page.total)) break; // 已收满 total
+  }
+  return rows;
+}
+
+// 理财钱包:活期 + 定期各自翻页取全(主 api host),当 spot、ticker 估值 → await prices。两端点任一失败即该钱包失败。
 const earnWallet: Wallet = {
   name: "Earn",
   run: async ({ apiKey, secret }, prices) => {
-    const params = () => ({ recvWindow: RECV_WINDOW, timestamp: Date.now() });
-    const [flexible, locked] = await Promise.all([
-      signedGet(signedRequest, EARN_FLEXIBLE_PATH, params(), apiKey, secret),
-      signedGet(signedRequest, EARN_LOCKED_PATH, params(), apiKey, secret),
+    const [flexRows, lockedRows] = await Promise.all([
+      fetchEarnRows(EARN_FLEXIBLE_PATH, apiKey, secret),
+      fetchEarnRows(EARN_LOCKED_PATH, apiKey, secret),
     ]);
-    return parseEarnPositions(flexible as EarnFlexible, locked as EarnLocked, await prices);
+    return parseEarnPositions(
+      { rows: flexRows } as EarnFlexible,
+      { rows: lockedRows } as EarnLocked,
+      await prices,
+    );
   },
 };
 

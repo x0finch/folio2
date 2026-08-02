@@ -60,3 +60,7 @@ export const FUNDING_ASSET_PATH = "/sapi/v1/asset/get-funding-asset";
 // 无 USD → 同现货用 ticker 估值,当 spot;APY / 锁定期挂 balance 级 note(info 语气)。
 export const EARN_FLEXIBLE_PATH = "/sapi/v1/simple-earn/flexible/position";
 export const EARN_LOCKED_PATH = "/sapi/v1/simple-earn/locked/position";
+// position 端点分页:size 默认 10、最大 100。持仓多于 10 个(小额自动申购很常见)时首页截断 →
+// 按 size=100 循环翻页取全。EARN_MAX_PAGES 是死循环护栏(100×50=5000 个持仓,远超任何真实账户)。
+export const EARN_PAGE_SIZE = 100;
+export const EARN_MAX_PAGES = 50;
