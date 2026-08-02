@@ -21,6 +21,8 @@ import {
   HEADER_SIGN,
   HEADER_TIMESTAMP,
   OKX_API_BASE,
+  OKX_EARN_LOGO,
+  POSITIONS_PATH,
   SAVINGS_BALANCE_PATH,
   STABLECOINS,
   STAKING_ORDERS_ACTIVE_PATH,
@@ -228,7 +230,7 @@ export function parseStaking(orders: OkxStakingOrder[], hint: PriceHint): Spot[]
 }
 
 // —— 四桶对账锚(asset-valuation)——
-// /asset/asset-valuation 给四桶的**权威美元金额**。本片只用 earn 桶做残差兜底;四桶全量对账留片 4。
+// /asset/asset-valuation 给四桶的**权威美元金额**,作对账锚:漏拉某个桶 → 残差暴露成 Note。
 interface OkxValuationDetails {
   classic?: string;
   earn?: string;
@@ -241,33 +243,111 @@ interface OkxValuationResponse {
   data?: Array<{ totalBal?: string; details?: OkxValuationDetails }>;
 }
 
+// 合约持仓探测 /account/positions —— 本轮不解析 perp,只看非空即挂兜底 Note(见 ADR 0031 perp 缓做)。
+interface OkxPositionsResponse {
+  code?: string;
+  msg?: string;
+  data?: Array<{ instId?: string; pos?: string; upl?: string }>;
+}
+
 // 展示金额格式化($ + 千分位,整数)。account 级 Note 文案用。
 const fmtUsd = (n: number): string =>
   `$${Math.round(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
-// earn 桶残差 Note(account 级):拉到的 earn 子项(savings + staking)加总对不上 asset-valuation 的
-// earn 桶,差额挂"未细分"提示,兜住 Folio 不细拉的 earn 子类(定期等)。**只在能可信估值时报**:
-// 任一 earn 子项估不出价(无提示价、非稳定币)时残差不可信(是「拉到了但没估到价」而非「没拉到」)→ 不报,
-// 避免虚报一个吓人的"未细分 $X"。差额 ≤ 阈值也不报。
-export function earnResidualNote(
+// earn 桶残差 → **计进净值的合成聚合行**(用户决策:金额已知就该进净值)。
+// asset-valuation 的 earn 桶给权威美元,减去已细分的 earn 子项(savings+staking)= 未细分额 —— 这是
+// 结构化 / 定期赚币的本金:它有金额(锚给的)、但**拆不开成一个个币**(无公开端点)。造一条不透明聚合行:
+// value=残差 → 进净值(OKX 总额随之对上 asset-valuation);tokenRef 用 **custom:**(无注册表背书 → oracle
+// 不并进真币、保留本值,见 token-ref.ts hasTrustedSymbol),balance 级中性 note 说明它是什么、group:"earn"。
+// **只在可信时产**:earn 两桶都拉到(earnComplete)+ 无估不出价的 earn 项 + 残差 > 阈值。否则残差不可信
+// (「拉到了但没估到价」或「没拉到」),不能拿它污染净值 → 不产。
+export function earnResidualRow(
   earnBucketUsd: number,
   earnItems: Spot[],
   hint: PriceHint,
-): Note | undefined {
+): Spot | undefined {
   let valued = 0;
   let unpriced = 0;
   for (const item of earnItems) {
     if (priceOf(item.symbol, hint) != null) valued += item.value;
     else unpriced++;
   }
-  if (unpriced > 0) return undefined; // 残差不可信 → 不报
+  if (unpriced > 0) return undefined; // 残差不可信 → 不计
   const residual = earnBucketUsd - valued;
   if (!(residual > EARN_RESIDUAL_MIN_USD)) return undefined;
   return {
-    title: "Earn not itemized",
-    icon: "info",
-    content: `About ${fmtUsd(residual)} in Earn couldn't be itemized (fixed-term or other sub-types)`,
+    // 无逐币构成 → symbol 用 "USD":这行的"数量"就是它的美元估值(price=1),而非某个币的枚数。
+    // name 富化成人话(带 OKX 品牌),logo 用内嵌 OKX 标(经 seed.providerLogo → token,见 sync-deps)。
+    symbol: "USD",
+    name: "OKX Earn (Uncategorized)",
+    logo: OKX_EARN_LOGO,
+    amount: residual, // 美元额当"数量",price=1 → 展示 "131,026.84 USD";净值只认 value。
+    price: 1,
+    value: residual,
+    selfPrice: 1,
+    kind: "spot",
+    tokenRef: tokenRef.custom(PROVIDER_ID, "EARN-UNCATEGORIZED"),
+    note: {
+      title: "Earn (Uncategorized)",
+      icon: "info",
+      content: `${fmtUsd(residual)} of fixed-term / structured earn — value from OKX, no per-coin breakdown available`,
+      group: "earn",
+    },
   };
+}
+
+// —— 四桶对账(asset-valuation)—— classic 桶 Note
+// 本 connector 拉 trading / funding / earn;**classic(经典账户)不拉** → valuation 里它 >0 就是**整桶漏拉**,
+// 挂账户级 Note 暴露(与 earn 残差不同:classic 不像 earn 有权威美元残差可直接计入,且经典账户少见,先只提示)。
+// trading / funding 不做精确逐桶对账:trading 的 cashBal **故意**不含 uPnL(ADR 容忍),funding 逐币美元
+// 多半交 oracle 回填、连接器内估不准 —— 硬比会持续虚报,不做(false 残差比静默更糟)。
+function classicNote(valuation: OkxValuationResponse): Note | undefined {
+  const classicBucket = Number(valuation.data?.[0]?.details?.classic ?? 0);
+  if (!(classicBucket > EARN_RESIDUAL_MIN_USD)) return undefined;
+  return {
+    title: "Classic account not synced",
+    icon: "warning",
+    content: `About ${fmtUsd(classicBucket)} sits in your OKX Classic account, which Folio doesn't sync`,
+  };
+}
+
+// perp 兜底 Note(account 级):检测到合约持仓即挂 —— 本轮不解析浮盈(ADR 0031 perp 缓做),
+// 只提示"暂未纳入",不让浮盈悄悄漏。
+function perpFallbackNote(): Note {
+  return {
+    title: "Futures positions detected",
+    icon: "warning",
+    content: "Futures uPnL isn't included yet — coming when the perp path ships",
+  };
+}
+
+// 账户级失败 Note(ADR 0030):列出没同步上的桶 + 按错因给一句提示。有凭据/权限类失败(auth code
+// 50xxx)→ 提示去交易所查权限;否则(超时/瞬时)→ 下次自动补上。
+function bucketFailureNote(failed: { name: string; auth: boolean }[]): Note {
+  const names = failed.map((f) => f.name).join(" / ");
+  const anyAuth = failed.some((f) => f.auth);
+  const tail = anyAuth ? "check the API key's permissions" : "temporary — it'll sync next time";
+  return { title: "Buckets not synced", icon: "warning", content: `${names} — ${tail}` };
+}
+
+// 逐桶尽力而为(ADR 0030):把一个 settled 结果读成「解析用的 body」或「一条失败记录」。
+// 请求层失败(reject,ProviderError)与业务码失败(HTTP 200 + code!="0")都收成失败,不抛。
+type BucketFailure = { name: string; auth: boolean; error: ProviderError };
+function readBucket(
+  r: PromiseSettledResult<unknown>,
+  name: string,
+): { body?: { code?: string; msg?: string; data?: unknown }; failure?: BucketFailure } {
+  if (r.status === "rejected") {
+    const error =
+      r.reason instanceof ProviderError
+        ? r.reason
+        : new ProviderError("UPSTREAM_ERROR", `okx ${name} failed`);
+    return { failure: { name, auth: error.code === "AUTH_FAILED", error } };
+  }
+  const body = r.value as { code?: string; msg?: string; data?: unknown };
+  const err = codeError(body);
+  if (err) return { failure: { name, auth: err.code === "AUTH_FAILED", error: err } };
+  return { body };
 }
 
 // 出网:签名头 + 失败归类走共享的 http 包装(@folio/shared)。**没有限频器** —— 额度按账户自己
@@ -316,14 +396,18 @@ const makeRequest = (baseUrl: string) =>
   });
 
 // 业务层错误(HTTP 200 + code!="0"):凭据类 code → AUTH_FAILED,其余 → UPSTREAM_ERROR。
-function assertCodeOk(body: { code?: string; msg?: string }): void {
-  if (body.code === "0") return;
+// 返回错误对象(不抛)—— 逐桶尽力而为时需要「拿到错误但不中断」;validateAccount 仍走 assertCodeOk 抛。
+function codeError(body: { code?: string; msg?: string }): ProviderError | undefined {
+  if (body.code === "0") return undefined;
   const code = body.code ?? "unknown";
   const msg = body.msg || "okx error";
-  if (AUTH_ERROR_CODES.has(code)) {
-    throw new ProviderError("AUTH_FAILED", `okx auth failed (code ${code}: ${msg})`);
-  }
-  throw new ProviderError("UPSTREAM_ERROR", `okx error (code ${code}: ${msg})`);
+  return AUTH_ERROR_CODES.has(code)
+    ? new ProviderError("AUTH_FAILED", `okx auth failed (code ${code}: ${msg})`)
+    : new ProviderError("UPSTREAM_ERROR", `okx error (code ${code}: ${msg})`);
+}
+function assertCodeOk(body: { code?: string; msg?: string }): void {
+  const err = codeError(body);
+  if (err) throw err;
 }
 
 // —— 账户级 creds(AC):apiKey(semi)/secret(secret)/passphrase(secret)。apiKey = 标识符
@@ -353,55 +437,74 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
   async fetchBalances(ctx): Promise<{ balances: Spot[]; note?: Note[] }> {
     const request = makeRequest(pickOkxBase(ctx.creds as Record<string, unknown>));
     const creds = ctx.account.creds;
-    // 统一账户各桶用**同一把 key 并发**拉,合并成一份余额(ADR 0031)。本片接入交易账户(trading)+
-    // 资金账户(funding)+ 赚币(savings + staking-defi)+ 对账锚(asset-valuation)。
-    // 用 allSettled 而非 all:**等齐所有请求**再决定,避免某端点先失败时,并发的兄弟请求(异步签名仍在飞)
-    // 漏到调用结束后才 fetch(fire-and-forget → 泄漏到下轮/污染测试 spy)。
-    // **余额源桶(0-3)**语义仍是「任一失败即整次失败」(抛第一个错、下轮重试,不拿半份快照覆盖);逐桶
-    // 「尽力而为」留片 4 把这里的 throw 换成收集 Note。**对账锚(4,asset-valuation)** 非余额源、只喂残差 Note,
-    // 恒软处理:失败/异常只是本轮没那条 Note,绝不阻断同步。
-    const settled = await Promise.allSettled([
-      request(BALANCE_PATH, { context: creds }),
-      request(FUNDING_BALANCES_PATH, { context: creds }),
-      request(SAVINGS_BALANCE_PATH, { context: creds }),
-      request(STAKING_ORDERS_ACTIVE_PATH, { context: creds }),
-      request(ASSET_VALUATION_PATH, { context: creds }),
-    ]);
-    const balanceBuckets = settled.slice(0, 4);
-    const firstRejected = balanceBuckets.find((r) => r.status === "rejected");
-    if (firstRejected) throw (firstRejected as PromiseRejectedResult).reason;
-    const [tradingBody, fundingBody, savingsBody, stakingBody] = balanceBuckets.map(
-      (r) => (r as PromiseFulfilledResult<unknown>).value,
-    ) as [OkxBalanceResponse, OkxFundingResponse, OkxSavingsResponse, OkxStakingResponse];
-    // HTTP 200 + code!="0" 是 OKX 表达错误的主要方式,包管不到这一层。
-    assertCodeOk(tradingBody);
-    assertCodeOk(fundingBody);
-    assertCodeOk(savingsBody);
-    assertCodeOk(stakingBody);
+    // 统一账户各桶用**同一把 key 并发**拉,合并成一份余额(ADR 0031)。端点:交易账户(trading)+ 资金
+    // 账户(funding)+ 赚币(savings + staking-defi)+ 对账锚(asset-valuation)+ 合约持仓探测(positions)。
+    // allSettled**等齐所有请求**再决定,避免某端点先失败时并发兄弟请求(异步签名仍在飞)漏到调用结束后才
+    // fetch(fire-and-forget)。逐桶**尽力而为**(ADR 0030):失败不阻断其余、收成账户级 Note;整次同步整体成功。
+    const [tradingR, fundingR, savingsR, stakingR, valuationR, positionsR] =
+      await Promise.allSettled([
+        request(BALANCE_PATH, { context: creds }),
+        request(FUNDING_BALANCES_PATH, { context: creds }),
+        request(SAVINGS_BALANCE_PATH, { context: creds }),
+        request(STAKING_ORDERS_ACTIVE_PATH, { context: creds }),
+        request(ASSET_VALUATION_PATH, { context: creds }), // 含 ?ccy=USD(见 constants:默认 BTC 计价)
+        request(POSITIONS_PATH, { context: creds }),
+      ]);
 
-    const details = tradingBody.data?.[0]?.details ?? [];
-    // 交易账户市价表复用给资金/赚币估值(零额外请求,见 buildPriceHint)。
+    // 余额源桶(trading/funding/savings/staking)逐桶读:成功且 code 0 → body;否则 → 失败记录(不抛)。
+    const trading = readBucket(tradingR, "Trading");
+    const funding = readBucket(fundingR, "Funding");
+    const savings = readBucket(savingsR, "Savings");
+    const staking = readBucket(stakingR, "Staking");
+    const failures = [trading, funding, savings, staking]
+      .map((b) => b.failure)
+      .filter((f): f is BucketFailure => f != null);
+    // **全军覆没**(四个余额桶无一成功,如 429 限流所有端点)→ 抛第一个错,让 sync 重试、别拿空快照覆盖
+    // 已有余额。只有**部分**失败才走尽力而为(收 Note、返回成功的那些)。
+    if (failures.length === 4) throw failures[0].error;
+
+    const details = (trading.body as OkxBalanceResponse | undefined)?.data?.[0]?.details ?? [];
+    // 交易账户市价表复用给资金/赚币估值(零额外请求,见 buildPriceHint)。trading 失败 → 空表,资金/赚币
+    // 的币交 oracle 兜底(value 0)。
     const hint = buildPriceHint(details);
     const earnItems = [
-      ...parseSavings(savingsBody.data ?? [], hint),
-      ...parseStaking(stakingBody.data ?? [], hint),
+      ...parseSavings((savings.body as OkxSavingsResponse | undefined)?.data ?? [], hint),
+      ...parseStaking((staking.body as OkxStakingResponse | undefined)?.data ?? [], hint),
     ];
     const balances: Spot[] = [
       ...parseBalances(details),
-      ...parseFunding(fundingBody.data ?? [], hint),
+      ...parseFunding((funding.body as OkxFundingResponse | undefined)?.data ?? [], hint),
       ...earnItems,
     ];
 
-    // 对账锚(软):asset-valuation 的 earn 桶 vs 拉到的 earn 子项加总 → 差额挂"未细分"account 级 Note。
     const notes: Note[] = [];
-    const valuation =
-      settled[4].status === "fulfilled" ? (settled[4].value as OkxValuationResponse) : undefined;
-    if (valuation?.code === "0") {
-      const earnBucketUsd = Number(valuation.data?.[0]?.details?.earn ?? 0);
-      if (earnBucketUsd > 0) {
-        const residual = earnResidualNote(earnBucketUsd, earnItems, hint);
-        if (residual) notes.push(residual);
+    // 逐桶失败(部分)→ 一条账户级 Note(auth 类给权限提示,其余给"下次补上")。
+    if (failures.length) notes.push(bucketFailureNote(failures));
+    // 对账锚(软,非余额源):asset-valuation 四桶对账。失败/坏码只是本轮没这些产出。
+    if (valuationR.status === "fulfilled") {
+      const valuation = valuationR.value as OkxValuationResponse;
+      if (!codeError(valuation)) {
+        // earn 未细分(结构化/定期)→ 合成聚合行**计进净值**(金额已知)。earnComplete:两个 earn 桶都拉到,
+        // 残差才可信(某个失败 → earnItems 残缺,残差是「没拉到」而非「未细分」,不能计入)。
+        const earnComplete = savings.failure == null && staking.failure == null;
+        if (earnComplete) {
+          const earnBucketUsd = Number(valuation.data?.[0]?.details?.earn ?? 0);
+          if (earnBucketUsd > 0) {
+            const row = earnResidualRow(earnBucketUsd, earnItems, hint);
+            if (row) balances.push(row);
+          }
+        }
+        // classic 整桶漏拉 → 账户级 Note(不像 earn 有可直接计入的残差,先只提示)。
+        const cn = classicNote(valuation);
+        if (cn) notes.push(cn);
       }
+    }
+    // perp 兜底(软):检测到**未平仓**合约持仓即挂"浮盈暂未纳入"Note(本轮不解析 perp,ADR 0031 缓做)。
+    // OKX /positions 可能回 pos=0 的已平仓行 → 只认非零 pos,不对空仓账户虚报(与 binance 过滤 positionAmt 同理)。
+    if (positionsR.status === "fulfilled") {
+      const positions = positionsR.value as OkxPositionsResponse;
+      const hasOpenPosition = (positions.data ?? []).some((p) => Number(p.pos ?? 0) !== 0);
+      if (!codeError(positions) && hasOpenPosition) notes.push(perpFallbackNote());
     }
     return { balances, note: notes.length ? notes : undefined };
   },

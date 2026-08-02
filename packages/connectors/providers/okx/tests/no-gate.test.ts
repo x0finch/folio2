@@ -49,8 +49,9 @@ describe("okx 没有闸", () => {
     // → 偶发 flaky(实测)。有闸的话这里会卡在 setTimeout 上(假时钟不推就不 resolve)→ 超时报红。
     await Promise.all(Array.from({ length: 20 }, () => okxProvider.fetchBalances(ctx())));
 
-    // 每次 fetchBalances 并发打 5 个端点(交易/资金/活期/staking/对账锚)→ 20×5=100 发,无闸 → 全落同一刻。
-    expect(at).toHaveLength(100);
+    // 每次 fetchBalances 并发打 6 个端点(交易/资金/活期/staking/对账锚/持仓探测)→ 20×6=120 发,
+    // 无闸 → 全落同一刻。
+    expect(at).toHaveLength(120);
     expect(new Set(at).size).toBe(1);
   });
 });

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildPriceHint,
-  earnResidualNote,
+  earnResidualRow,
   okxProvider,
   parseBalances,
   parseFunding,
@@ -98,34 +98,42 @@ describe("parseSavings / parseStaking (golden: fixture in → fixture out)", () 
   });
 });
 
-// earn 残差(account 级 Note):拉到的 earn 子项加总 vs asset-valuation 的 earn 桶。
-describe("earnResidualNote", () => {
+// earn 残差 → 计进净值的合成聚合行:拉到的 earn 子项加总 vs asset-valuation 的 earn 桶。
+describe("earnResidualRow", () => {
   const hint = buildPriceHint(balance.data[0].details);
   const earnItems = [...parseSavings(savings.data, hint), ...parseStaking(staking.data, hint)];
 
-  it("earn 桶 > 拉到的加总 → 挂'未细分 $X' Note", () => {
+  it("earn 桶 > 拉到的加总 → 产一条 value=残差 的合成行(计进净值),带中性 note", () => {
     // earn 桶 12000;拉到 USDT 5000 + ETH 6000 = 11000;残差 1000。
-    const note = earnResidualNote(12000, earnItems, hint);
-    expect(note?.title).toBe("Earn not itemized");
-    expect(String(note?.content)).toContain("$1,000");
+    const row = earnResidualRow(12000, earnItems, hint);
+    expect(row).toMatchObject({
+      kind: "spot",
+      value: 1000,
+      symbol: "USD", // 数字是美元估值 → 单位 USD(非某个币的枚数)
+      name: "OKX Earn (Uncategorized)",
+      tokenRef: "okx/custom:EARN-UNCATEGORIZED",
+    });
+    expect(row?.logo).toMatch(/^data:image\/svg\+xml/); // 内嵌 OKX 标(走 tokenLogoUrl data: 直挂)
+    expect(row?.note?.group).toBe("earn");
+    expect(String(row?.note?.content)).toContain("$1,000");
   });
 
-  it("earn 桶 ≈ 拉到的加总(差额 ≤ 阈值)→ 不挂 Note", () => {
-    expect(earnResidualNote(11000, earnItems, hint)).toBeUndefined();
+  it("earn 桶 ≈ 拉到的加总(差额 ≤ 阈值)→ 不产行", () => {
+    expect(earnResidualRow(11000, earnItems, hint)).toBeUndefined();
   });
 
-  it("有 earn 子项估不出价(残差不可信)→ 不挂 Note(不虚报)", () => {
+  it("有 earn 子项估不出价(残差不可信)→ 不产行(不拿脏数污染净值)", () => {
     // 追加一个无提示价、非稳定币的 earn 项 → unpriced>0 → 抑制。
     const withUnpriced = [
       ...earnItems,
       { symbol: "XYZ", amount: 1, value: 0, kind: "spot", tokenRef: "okx/issued:XYZ" } as const,
     ];
-    expect(earnResidualNote(99999, withUnpriced, hint)).toBeUndefined();
+    expect(earnResidualRow(99999, withUnpriced, hint)).toBeUndefined();
   });
 });
 
 describe("okxProvider.fetchBalances", () => {
-  // 所有余额源桶(交易/资金/赚币)+ 对账锚(asset-valuation)的路由 mock;不匹配的返回空。
+  // 所有端点的路由 mock;positions 空(无持仓)、不匹配的返回交易账户 balance。
   const routeAll = () =>
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const u = String(url);
@@ -133,18 +141,22 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/finance/savings/balance")) return ok(savings);
       if (u.includes("/finance/staking-defi/orders-active")) return ok(staking);
       if (u.includes("/asset/asset-valuation")) return ok(valuation);
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
       return ok(balance); // /api/v5/account/balance
     });
 
-  it("并发全桶(交易/资金/赚币)→ 合并 spot;earn 残差挂 account 级 Note", async () => {
+  it("并发全桶(交易/资金/赚币)→ 合并 spot;earn 残差合成行计进净值", async () => {
     routeAll();
     const { balances, note } = await okxProvider.fetchBalances(ctx());
-    // 交易 4 + 资金 3 + 赚币 2(USDT 活期 + ETH staking)= 9
-    expect(balances).toHaveLength(9);
-    expect(balances.filter((b) => b.note?.group === "earn")).toHaveLength(2);
-    // earn 桶 12000 − 拉到 11000 = 1000 → 未细分 Note
-    expect(note?.[0]?.title).toBe("Earn not itemized");
-    expect(String(note?.[0]?.content)).toContain("$1,000");
+    // 交易 4 + 资金 3 + 赚币 2(USDT 活期 + ETH staking)+ earn 残差合成行 1 = 10
+    expect(balances).toHaveLength(10);
+    // earn 桶 12000 − 拉到 11000 = 1000 → 一条 value=1000 的未细分合成行,计进净值(不是 account note)。
+    const uncategorized = balances.find((b) => b.tokenRef === "okx/custom:EARN-UNCATEGORIZED");
+    expect(uncategorized).toMatchObject({ value: 1000, kind: "spot" });
+    expect(uncategorized?.note?.group).toBe("earn");
+    // earn Tab 现有 3 行(活期 + staking + 未细分合成行);无对账类 account 级 note。
+    expect(balances.filter((b) => b.note?.group === "earn")).toHaveLength(3);
+    expect(note).toBeUndefined();
   });
 
   it("asset-valuation 失败 → 不阻断同步,只是本轮没残差 Note", async () => {
@@ -154,11 +166,112 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/api/v5/asset/balances")) return ok(funding);
       if (u.includes("/finance/savings/balance")) return ok(savings);
       if (u.includes("/finance/staking-defi/orders-active")) return ok(staking);
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
     const { balances, note } = await okxProvider.fetchBalances(ctx());
     expect(balances).toHaveLength(9); // 余额照常
     expect(note).toBeUndefined(); // 锚挂了 → 无残差 Note,但同步整体成功
+  });
+
+  // —— 片 4:尽力而为 + 四桶对账 + perp 兜底 ——
+  it("部分桶失败(赚币超时)→ 其余照返回 + 账户级失败 Note;整次同步成功", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/finance/savings/balance")) return new Response("", { status: 504 });
+      if (u.includes("/finance/staking-defi/orders-active"))
+        return new Response("", { status: 504 });
+      if (u.includes("/api/v5/asset/balances")) return ok(funding);
+      // 锚说 earn 桶有 $12k,但赚币两桶都超时没拉到 → **不能**报"未细分",那是没拉到不是没细分。
+      if (u.includes("/asset/asset-valuation"))
+        return ok({ code: "0", data: [{ details: { earn: "12000" } }] });
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { balances, note } = await okxProvider.fetchBalances(ctx());
+    // 交易 4 + 资金 3 成功;赚币两桶失败 → 无 earn 行,但不抛。
+    expect(balances).toHaveLength(7);
+    expect(balances.some((b) => b.note?.group === "earn")).toBe(false);
+    const failNote = note?.find((n) => n.title === "Buckets not synced");
+    expect(String(failNote?.content)).toContain("Savings");
+    expect(String(failNote?.content)).toContain("Staking");
+    expect(String(failNote?.content)).toContain("next time"); // 瞬时故障 → "下次补上"文案
+    // earn 桶失败时**不产**未细分合成行(那 $12k 是没拉到、不是未细分,凭空计进净值会虚增)。
+    expect(balances.some((b) => b.tokenRef === "okx/custom:EARN-UNCATEGORIZED")).toBe(false);
+  });
+
+  it("auth 类失败(50xxx 权限不足)→ 失败 Note 提示查权限", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      // 资金账户返回权限类错误码(HTTP 200 + 50xxx)。
+      if (u.includes("/api/v5/asset/balances")) return ok({ code: "50111", msg: "Invalid Key" });
+      if (u.includes("/finance/")) return ok({ code: "0", data: [] });
+      if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { note } = await okxProvider.fetchBalances(ctx());
+    const failNote = note?.find((n) => n.title === "Buckets not synced");
+    expect(String(failNote?.content)).toContain("Funding");
+    expect(String(failNote?.content)).toContain("permissions");
+  });
+
+  it("四个余额桶全失败(429 限流所有端点)→ 抛,不拿空快照覆盖", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
+    await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
+  });
+
+  it("positions 非空 → 挂'合约浮盈暂未纳入'perp 兜底 Note", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/api/v5/account/positions"))
+        return ok({ code: "0", data: [{ instId: "BTC-USDT-SWAP", pos: "1", upl: "123" }] });
+      if (u.includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
+      if (u.includes("/finance/")) return ok({ code: "0", data: [] });
+      if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { note } = await okxProvider.fetchBalances(ctx());
+    expect(note?.some((n) => n.title === "Futures positions detected")).toBe(true);
+  });
+
+  it("positions 全是已平仓行(pos=0)→ 不虚报 perp Note", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      // OKX 可能回 pos=0 的已平仓行 —— 不是真持仓,不该触发兜底 Note。
+      if (u.includes("/api/v5/account/positions"))
+        return ok({ code: "0", data: [{ instId: "BTC-USDT-SWAP", pos: "0", upl: "0" }] });
+      if (u.includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
+      if (u.includes("/finance/")) return ok({ code: "0", data: [] });
+      if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { note } = await okxProvider.fetchBalances(ctx());
+    expect(note?.some((n) => n.title === "Futures positions detected")).toBeFalsy();
+  });
+
+  it("四桶对账:classic 桶 >0(Folio 不拉)→ 挂'经典账户未同步'残差 Note", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/asset/asset-valuation"))
+        return ok({ code: "0", data: [{ details: { classic: "8888", earn: "0" } }] });
+      if (u.includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
+      if (u.includes("/finance/")) return ok({ code: "0", data: [] });
+      if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
+    const { note } = await okxProvider.fetchBalances(ctx());
+    const classic = note?.find((n) => n.title === "Classic account not synced");
+    expect(String(classic?.content)).toContain("$8,888");
+  });
+
+  it("asset-valuation 必须带 ccy=USD(该端点默认 BTC 计价,不传就单位错位、对账失效)", async () => {
+    const spy = routeAll();
+    await okxProvider.fetchBalances(ctx());
+    const valUrl = spy.mock.calls
+      .map((c) => String(c[0]))
+      .find((u) => u.includes("asset-valuation"));
+    expect(valUrl).toContain("ccy=USD");
   });
 
   it("signs with 4 OK-ACCESS headers (base64 SIGN) and parses balances", async () => {
