@@ -1,0 +1,12 @@
+{
+  "retCode": 0,
+  "retMsg": "success",
+  "result": {
+    "balance": [
+      { "coin": "USDT", "walletBalance": "100" },
+      { "coin": "BTC", "walletBalance": "0.01" },
+      { "coin": "WLFI", "walletBalance": "660" },
+      { "coin": "ZERO", "walletBalance": "0" }
+    ]
+  }
+}
