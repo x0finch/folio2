@@ -79,11 +79,19 @@ function AccountNoteAccordion({ notes }: { notes: Note[] }) {
 // 持仓分区:tokens(现货)/ perps(永续)/ defi。顺序对齐主页 tab。
 type HoldingTab = "tokens" | "perps" | "defi";
 
-// 数据驱动的 tab 存在性(同主页 Overview):无该类持仓不出 tab。
+// 永续区「有内容」的门槛:有持仓、或账户权益 ≥ 此值。避免「就一行 dust 权益、零持仓」的空合约钱包
+// (如开了合约账户但没用)也占一个 tab。
+const PERP_MIN_USD = 1;
+
+// 数据驱动的 tab 存在性(同主页 Overview):无该类持仓不出 tab;永续还要过 PERP_MIN_USD 门槛。
 function availableHoldingTabs(sections: AccountSections): HoldingTab[] {
+  const perpHasContent =
+    !!sections.perp &&
+    (sections.perp.positions.length > 0 ||
+      (sections.perp.equity?.accountValue ?? 0) >= PERP_MIN_USD);
   return [
     sections.spot.length > 0 && "tokens",
-    sections.perp && "perps",
+    perpHasContent && "perps",
     sections.defi.length > 0 && "defi",
   ].filter(Boolean) as HoldingTab[];
 }

@@ -76,6 +76,10 @@ export function parseAccountBalances(
   for (const b of account.balances ?? []) {
     const asset = b.asset;
     if (!asset) continue;
+    // Binance 现货账户会把**活期理财份额**以 `LD` 前缀混在余额里返回(LDBNB=理财里的 BNB)——那正是
+    // earn wallet 用正确 symbol + APY note 专门拉的东西,这里跳过,否则同一笔理财被算两次(净值双算)。
+    // `LD` 开头**且长度 > 3**:放过 LDO(Lido,3 字母真币)等短币;理财份额恒是 LD+币名(≥4 字母)。
+    if (asset.startsWith("LD") && asset.length > 3) continue;
     const locked = Number(b.locked ?? 0);
     const amount = Number(b.free ?? 0) + locked;
     if (!(amount > 0)) continue;
