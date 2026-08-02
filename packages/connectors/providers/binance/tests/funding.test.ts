@@ -13,7 +13,14 @@ describe("parseFundingAssets (golden)", () => {
 
   it("无价的币 → value 0(price 省略)", () => {
     expect(parseFundingAssets([{ asset: "XYZ", free: "5" }], {})).toEqual([
-      { symbol: "XYZ", amount: 5, value: 0, kind: "spot", tokenRef: "binance/issued:XYZ" },
+      {
+        symbol: "XYZ",
+        amount: 5,
+        value: 0,
+        kind: "spot",
+        tokenRef: "binance/issued:XYZ",
+        note: { title: "Funding", icon: "info", content: "Funding wallet", group: "funding" },
+      },
     ]);
   });
 });

@@ -76,42 +76,83 @@ function AccountNoteAccordion({ notes }: { notes: Note[] }) {
   return <BouncyAccordion items={items} classNames={{ description: "text-foreground" }} />;
 }
 
-// 持仓分区:tokens(现货)/ perps(永续)/ defi。顺序对齐主页 tab。
-type HoldingTab = "tokens" | "perps" | "defi";
+// 持仓分区:tokens(现货)/ funding(资金)/ earn(理财)/ perps(永续)/ defi。前三者都是 spot,按
+// note.group 细分成钱包(CEX 多钱包,ADR 0030「钱包只活抽屉」);链上/单钱包账户 spot 无 group → 全归现货。
+type HoldingTab = "tokens" | "funding" | "earn" | "perps" | "defi";
 
 // 永续区「有内容」的门槛:有持仓、或账户权益 ≥ 此值。避免「就一行 dust 权益、零持仓」的空合约钱包
 // (如开了合约账户但没用)也占一个 tab。
 const PERP_MIN_USD = 1;
 
-// 数据驱动的 tab 存在性(同主页 Overview):无该类持仓不出 tab;永续还要过 PERP_MIN_USD 门槛。
-function availableHoldingTabs(sections: AccountSections): HoldingTab[] {
+// 现货行按 note.group 拆成钱包组。group=funding→资金、earn→理财、其余(含无 note / Locked)→现货。
+// 判据耦合 provider 写的 group 值(binance 的 funding/earn),是钱包展示分组的唯一读点(ADR 0030)。
+interface SpotWalletGroups {
+  spot: SpotRow[];
+  funding: SpotRow[];
+  earn: SpotRow[];
+}
+function toSpotWalletGroups(rows: SpotRow[]): SpotWalletGroups {
+  const groups: SpotWalletGroups = { spot: [], funding: [], earn: [] };
+  for (const r of rows) {
+    const g = r.note?.group;
+    if (g === "funding") groups.funding.push(r);
+    else if (g === "earn") groups.earn.push(r);
+    else groups.spot.push(r);
+  }
+  return groups;
+}
+
+// 数据驱动的 tab 存在性:无该类持仓不出 tab;永续还要过 PERP_MIN_USD 门槛。
+function availableHoldingTabs(sections: AccountSections, spot: SpotWalletGroups): HoldingTab[] {
   const perpHasContent =
     !!sections.perp &&
     (sections.perp.positions.length > 0 ||
       (sections.perp.equity?.accountValue ?? 0) >= PERP_MIN_USD);
   return [
-    sections.spot.length > 0 && "tokens",
+    spot.spot.length > 0 && "tokens",
+    spot.funding.length > 0 && "funding",
+    spot.earn.length > 0 && "earn",
     perpHasContent && "perps",
     sections.defi.length > 0 && "defi",
   ].filter(Boolean) as HoldingTab[];
 }
 
 // 单个分区的内容(tab 内 / 单分区直渲共用)。tab 标签即标题 → 内层一律 hideHeader。
-function HoldingSection({ tab, sections }: { tab: HoldingTab; sections: AccountSections }) {
-  if (tab === "tokens") return <SpotCards rows={sections.spot} />;
+function HoldingSection({
+  tab,
+  sections,
+  spot,
+}: {
+  tab: HoldingTab;
+  sections: AccountSections;
+  spot: SpotWalletGroups;
+}) {
+  if (tab === "tokens") return <SpotCards rows={spot.spot} />;
+  if (tab === "funding") return <SpotCards rows={spot.funding} />;
+  if (tab === "earn") return <SpotCards rows={spot.earn} />;
   // 单账户上下文:不传 accountLabel、DeFi 直接用本账户分组(不经 mergeDefiGroups)。
   if (tab === "defi") return <DefiPositions groups={sections.defi} hideHeader />;
   return sections.perp ? <PerpPositions view={sections.perp} hideHeader /> : null;
 }
 
 // 持仓 tab(≥2 个分区时):pill tab 切换,与主页 Overview 同一 beUI 组件。
-function HoldingTabs({ tabs, sections }: { tabs: HoldingTab[]; sections: AccountSections }) {
+function HoldingTabs({
+  tabs,
+  sections,
+  spot,
+}: {
+  tabs: HoldingTab[];
+  sections: AccountSections;
+  spot: SpotWalletGroups;
+}) {
   const t = useTranslations("Overview");
   const [tab, setTab] = useState<string>(tabs[0]);
   // 选中的 tab 因数据变化消失(loader 重跑)→ clamp 回首个可用(同主页)。
   const activeTab = tabs.includes(tab as HoldingTab) ? tab : tabs[0];
   const label: Record<HoldingTab, string> = {
     tokens: t("tokensTab"),
+    funding: t("fundingTab"),
+    earn: t("earnTab"),
     perps: t("perpsTab"),
     defi: t("defiTab"),
   };
@@ -127,14 +168,14 @@ function HoldingTabs({ tabs, sections }: { tabs: HoldingTab[]; sections: Account
       </TabsList>
       {tabs.map((k) => (
         <TabsContent key={k} value={k}>
-          <HoldingSection tab={k} sections={sections} />
+          <HoldingSection tab={k} sections={sections} spot={spot} />
         </TabsContent>
       ))}
     </Tabs>
   );
 }
 
-// 一个账户的全部持仓:account 级 note 手风琴(顶部)+ 现货 / DeFi / 永续。
+// 一个账户的全部持仓:account 级 note 手风琴(顶部)+ 现货 / 资金 / 理财 / 永续 / DeFi。
 // 多分区 → tab 切换(参考主页);单分区 → 直渲(不出孤零零一个 tab)。
 export function AccountHoldingsCards({
   balances,
@@ -145,7 +186,8 @@ export function AccountHoldingsCards({
 }) {
   const t = useTranslations("Overview");
   const sections = toAccountSections(balances); // defi 空组 / 零值现货已在此出口滤除
-  const tabs = availableHoldingTabs(sections);
+  const spot = toSpotWalletGroups(sections.spot);
+  const tabs = availableHoldingTabs(sections, spot);
   const hasNote = (accountNote?.length ?? 0) > 0;
   // 无可展示分区且无 account 级 note → 文案。区分「真无快照」与「有余额但全为零值/尘埃被滤空」
   // (后者若照旧只判 balances.length 会漏成空白面板,code review #1)。
@@ -160,8 +202,8 @@ export function AccountHoldingsCards({
     <div className="flex flex-col gap-6">
       {/* account 级 note(整钱包:BTC 未确认/收款/派生分布)→ 顶部手风琴。无则不渲染。 */}
       {accountNote && accountNote.length > 0 && <AccountNoteAccordion notes={accountNote} />}
-      {tabs.length === 1 && <HoldingSection tab={tabs[0]} sections={sections} />}
-      {tabs.length > 1 && <HoldingTabs tabs={tabs} sections={sections} />}
+      {tabs.length === 1 && <HoldingSection tab={tabs[0]} sections={sections} spot={spot} />}
+      {tabs.length > 1 && <HoldingTabs tabs={tabs} sections={sections} spot={spot} />}
     </div>
   );
 }

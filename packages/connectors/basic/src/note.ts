@@ -30,6 +30,10 @@ export const Note = z.object({
   title: z.string(),
   icon: NoteIcon.optional(),
   content: z.union([z.string(), z.array(NoteRow)]),
+  // 抽屉按钱包分 tab 的**分组标记**(CEX 多钱包:funding / earn…)。**不渲染**(NoteView/NoteIndicator
+  // 只吃 title/icon/content),仅供账户抽屉读它归 tab —— ADR 0030「钱包只活抽屉」的最轻落地:复用已
+  // 贯通的 note 列(随 note JSON 落库/读回),免 core 表加列 + 迁移。
+  group: z.string().optional(),
 });
 
 export type NoteIcon = z.infer<typeof NoteIcon>;

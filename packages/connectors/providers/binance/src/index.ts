@@ -309,6 +309,8 @@ export function parseFundingAssets(assets: FundingAsset[], prices: Record<string
       value: price != null ? amount * price : 0,
       kind: "spot",
       tokenRef: tokenRef.issued(PROVIDER_ID, asset.trim().toUpperCase()),
+      // 资金钱包标记(抽屉按 note.group 分 tab):group=funding。
+      note: { title: "Funding", icon: "info", content: "Funding wallet", group: "funding" },
     });
   }
   return out;
@@ -369,6 +371,7 @@ export function parseEarnPositions(
       title: "Earn",
       icon: "info",
       content: `Flexible · ${apyPct(r.latestAnnualPercentageRate)} APY`,
+      group: "earn",
     });
   }
   for (const r of locked.rows ?? []) {
@@ -377,6 +380,7 @@ export function parseEarnPositions(
       title: "Earn",
       icon: "info",
       content: `Locked${dd ? ` until ${dd}` : ""} · ${apyPct(r.apy)} APY`,
+      group: "earn",
     });
   }
   return out;
