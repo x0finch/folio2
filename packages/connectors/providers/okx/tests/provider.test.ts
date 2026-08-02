@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { okxProvider, parseBalances } from "../src";
+import { buildPriceHint, okxProvider, parseBalances, parseFunding } from "../src";
 import balance from "./fixtures/balance.json";
 import expected from "./fixtures/expected-balances.json";
+import expectedFunding from "./fixtures/expected-funding-balances.json";
+import funding from "./fixtures/funding.json";
 
 // 新 FetchContext 形状:account.creds(AC:apiKey/secret/passphrase,由分派桥 openCreds 解密后灌入)+ creds(PC:空)。
 type Ctx = Parameters<typeof okxProvider.fetchBalances>[0];
@@ -55,9 +57,29 @@ describe("parseBalances (golden: fixture in → fixture out)", () => {
   });
 });
 
+// 资金账户(funding 桶)golden:funding.json(录制的 /asset/balances 响应)+ 交易账户市价提示表
+// → expected-funding-balances.json。覆盖:bal→amount、稳定币≈1(USDT)、交易账户市价复用(BTC)、
+// 无价的币 value 0 交 oracle(PEPE)、每条带 note.group:"funding"。
+describe("parseFunding (golden: fixture in → fixture out)", () => {
+  it("maps recorded funding assets + price hint to expected-funding-balances", () => {
+    const hint = buildPriceHint(balance.data[0].details);
+    expect(parseFunding(funding.data, hint)).toEqual(expectedFunding);
+  });
+
+  it("每条 funding 余额带不渲染的 note.group='funding'(供抽屉归 Tab)", () => {
+    const hint = buildPriceHint(balance.data[0].details);
+    const rows = parseFunding(funding.data, hint);
+    expect(rows.every((r) => r.note?.group === "funding")).toBe(true);
+  });
+});
+
 describe("okxProvider.fetchBalances", () => {
   it("signs with 4 OK-ACCESS headers (base64 SIGN) and parses balances", async () => {
-    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(balance));
+    // 本测聚焦交易账户签名/解析;funding 端点返回空,合并与并发另见专测。
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
     const { balances } = await okxProvider.fetchBalances(ctx());
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "USDT", "ETH", "OKSOL"]);
     // per-balance note:ETH 有 frozenBal=0.5 → 它自己那笔挂 Frozen note。
@@ -79,17 +101,53 @@ describe("okxProvider.fetchBalances", () => {
   // 缺 key/secret/passphrase 的拒绝已上移到分派桥的 validateCredentials(见 @folio/connectors-basic
   // creds.test);provider 信任已校验的 account.creds,故此处不再测"无请求即拒"。
 
+  it("并发打交易账户 + 资金账户,两端点均被签名调用,合并出一份余额", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes("/api/v5/asset/balances")) return ok(funding);
+      return ok(balance); // /api/v5/account/balance
+    });
+    const { balances } = await okxProvider.fetchBalances(ctx());
+    // 交易账户 4(BTC/USDT/ETH/OKSOL)+ 资金账户 3(USDT/BTC/PEPE)= 7,不同桶同名币各自成行(聚合层按 token_id 合并)。
+    expect(balances.map((b) => b.symbol)).toEqual([
+      "BTC",
+      "USDT",
+      "ETH",
+      "OKSOL",
+      "USDT",
+      "BTC",
+      "PEPE",
+    ]);
+    expect(balances.filter((b) => b.note?.group === "funding")).toHaveLength(3);
+
+    // 两端点都被打,且都带完整签名头(同一把 key)。
+    const paths = spy.mock.calls.map((c) => String(c[0]));
+    expect(paths.some((p) => p.includes("/api/v5/account/balance"))).toBe(true);
+    expect(paths.some((p) => p.includes("/api/v5/asset/balances"))).toBe(true);
+    for (const [, init] of spy.mock.calls) {
+      const h = init?.headers as Record<string, string>;
+      expect(h["OK-ACCESS-KEY"]).toBe("k");
+      expect(h["OK-ACCESS-SIGN"]).toMatch(/^[A-Za-z0-9+/]+=*$/);
+      expect(h["OK-ACCESS-PASSPHRASE"]).toBe("p");
+    }
+  });
+
+  // fetchBalances 现并发打多个端点(每次 fetch 需**独立** Response —— body 只能读一次,共享同一个
+  // Response 对象会「Body already read」),故错误 mock 用 mockImplementation 每调用返回新 Response。
   it("maps HTTP-200 + auth code → AUTH_FAILED (OKX error model)", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(ok({ code: "50113", msg: "Invalid Sign" }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      ok({ code: "50113", msg: "Invalid Sign" }),
+    );
     await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "AUTH_FAILED" });
   });
 
   it("maps HTTP-200 + non-auth code → UPSTREAM_ERROR; 429 → RATE_LIMITED", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(ok({ code: "51000", msg: "param error" }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      ok({ code: "51000", msg: "param error" }),
+    );
     await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({
       code: "UPSTREAM_ERROR",
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 429 }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
     await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
   });
 
@@ -102,11 +160,20 @@ describe("okxProvider.fetchBalances", () => {
   // #264:出口 IP 被地区封时,app 从 env 把代理 base 注入 ctx.creds.OKX_API_BASE。connector 只当不透明整串用。
   // 反查:没有覆盖注入就会打回 www.okx.com。
   it("ctx.creds 设 OKX_API_BASE → 签名请求打覆盖 base,不打默认 www.okx.com", async () => {
-    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(balance));
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
+      return ok(balance);
+    });
     await okxProvider.fetchBalances(ctx(CREDS, { OKX_API_BASE: "https://px.example/s/okx" }));
-    const url = String(spy.mock.calls[0]?.[0]);
-    expect(url).toContain("https://px.example/s/okx/api/v5/account/balance");
-    expect(url).not.toContain("www.okx.com");
+    const urls = spy.mock.calls.map((c) => String(c[0]));
+    // 交易账户 + 资金账户两端点都打覆盖 base,默认 host 一个不留。
+    expect(urls.some((u) => u.startsWith("https://px.example/s/okx/api/v5/account/balance"))).toBe(
+      true,
+    );
+    expect(urls.some((u) => u.startsWith("https://px.example/s/okx/api/v5/asset/balances"))).toBe(
+      true,
+    );
+    expect(urls.some((u) => u.includes("www.okx.com"))).toBe(false);
   });
 });
 

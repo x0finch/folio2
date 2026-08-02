@@ -12,11 +12,13 @@ import { z } from "zod";
 import {
   AUTH_ERROR_CODES,
   BALANCE_PATH,
+  FUNDING_BALANCES_PATH,
   HEADER_KEY,
   HEADER_PASSPHRASE,
   HEADER_SIGN,
   HEADER_TIMESTAMP,
   OKX_API_BASE,
+  STABLECOINS,
 } from "./constants";
 
 // @folio/connectors-provider-okx —— 第二个 CEX connector(okx)。复用 @folio/connectors-basic 的 hmacSha256。
@@ -37,6 +39,17 @@ interface OkxBalanceResponse {
   code?: string;
   msg?: string;
   data?: Array<{ details?: OkxDetail[] }>;
+}
+
+// 资金账户(funding 桶)/asset/balances 的最小形状 —— data 是扁平数组(非 details 包裹)。
+interface OkxFundingAsset {
+  ccy?: string;
+  bal?: string; // 总余额(含冻结)—— 持有量口径
+}
+interface OkxFundingResponse {
+  code?: string;
+  msg?: string;
+  data?: OkxFundingAsset[];
 }
 
 // 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
@@ -81,6 +94,53 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
       };
     }
     out.push(row);
+  }
+  return out;
+}
+
+// —— 币价提示表(price hint)——
+// 其余桶(资金 / 赚币)的端点**不自带美元价**;ADR 0031 弃用额外 ticker 端点。交易账户 details 里
+// 每个币的 eqUsd/eq 就是它的市价(与 uPnL 无关),把它抽成一张 ccy→price 表**零额外请求**复用:
+// 资金/赚币里**也在交易账户出现或是稳定币**的币能立即估值,其余留 value:0 交 oracle 兜底。
+export type PriceHint = Record<string, number>;
+export function buildPriceHint(details: OkxDetail[]): PriceHint {
+  const hint: PriceHint = {};
+  for (const d of details ?? []) {
+    if (!d.ccy) continue;
+    const eq = Number(d.eq ?? 0);
+    const px = eq > 0 ? Number(d.eqUsd ?? 0) / eq : 0;
+    if (px > 0) hint[d.ccy.trim().toUpperCase()] = px;
+  }
+  return hint;
+}
+// 币的美元单价:稳定币≈1,否则查提示表,查不到 → undefined(value 记 0,oracle 回填)。
+function priceOf(symbol: string, hint: PriceHint): number | undefined {
+  const s = symbol.trim().toUpperCase();
+  if (STABLECOINS.has(s)) return 1;
+  return hint[s];
+}
+
+// 纯解析:资金账户 assets[] → Spot[]。数量取 `bal`(含冻结);价走提示表(稳定币≈1,否则交易账户市价,
+// 无 → value 0 由 oracle 兜底)。每条带 `note.group:"funding"`(不渲染,仅供账户抽屉归 Tab,复用
+// Binance 的 Note.group 机制)。跳过空 ccy / bal≤0。与 IO 分离,golden test。
+export function parseFunding(assets: OkxFundingAsset[], hint: PriceHint): Spot[] {
+  const out: Spot[] = [];
+  for (const a of assets ?? []) {
+    const ccy = a.ccy;
+    if (!ccy) continue;
+    const amount = Number(a.bal ?? 0);
+    if (!(amount > 0)) continue;
+    const price = priceOf(ccy, hint);
+    out.push({
+      symbol: ccy,
+      amount,
+      price,
+      value: price != null ? amount * price : 0,
+      kind: "spot",
+      tokenRef: tokenRef.issued(PROVIDER_ID, ccy.trim().toUpperCase()),
+      // 资金钱包标记(抽屉按 note.group 分 Tab):group=funding。与 Binance 一字对齐。
+      note: { title: "Funding", icon: "info", content: "Funding wallet", group: "funding" },
+    });
   }
   return out;
 }
@@ -131,7 +191,7 @@ const makeRequest = (baseUrl: string) =>
   });
 
 // 业务层错误(HTTP 200 + code!="0"):凭据类 code → AUTH_FAILED,其余 → UPSTREAM_ERROR。
-function assertCodeOk(body: OkxBalanceResponse): void {
+function assertCodeOk(body: { code?: string; msg?: string }): void {
   if (body.code === "0") return;
   const code = body.code ?? "unknown";
   const msg = body.msg || "okx error";
@@ -167,11 +227,30 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
 
   async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
     const request = makeRequest(pickOkxBase(ctx.creds as Record<string, unknown>));
-    const body = (await request(BALANCE_PATH, {
-      context: ctx.account.creds,
-    })) as OkxBalanceResponse;
-    assertCodeOk(body); // HTTP 200 + code!="0" 是 OKX 表达错误的主要方式,包管不到这一层
-    return { balances: parseBalances(body.data?.[0]?.details ?? []) };
+    const creds = ctx.account.creds;
+    // 统一账户各桶用**同一把 key 并发**拉,合并成一份余额(ADR 0031)。本片接入交易账户(trading)+
+    // 资金账户(funding)。用 allSettled 而非 all:**等齐所有请求**再决定,避免某端点先失败时,并发的
+    // 兄弟请求(异步签名仍在飞)漏到调用结束后才 fetch(fire-and-forget → 泄漏到下轮/污染测试 spy)。
+    // 本片语义仍是「任一端点失败即整次失败」(抛第一个错、下轮重试,不拿半份快照覆盖);逐桶「尽力而为」
+    // (部分失败降级为账户级 Note)留片 4 把这里的 throw 换成收集 Note。
+    const settled = await Promise.allSettled([
+      request(BALANCE_PATH, { context: creds }),
+      request(FUNDING_BALANCES_PATH, { context: creds }),
+    ]);
+    const firstRejected = settled.find((r) => r.status === "rejected");
+    if (firstRejected) throw (firstRejected as PromiseRejectedResult).reason;
+    const [tradingBody, fundingBody] = settled.map(
+      (r) => (r as PromiseFulfilledResult<unknown>).value,
+    ) as [OkxBalanceResponse, OkxFundingResponse];
+    // HTTP 200 + code!="0" 是 OKX 表达错误的主要方式,包管不到这一层。
+    assertCodeOk(tradingBody);
+    assertCodeOk(fundingBody);
+    const details = tradingBody.data?.[0]?.details ?? [];
+    // 交易账户市价表复用给资金账户估值(零额外请求,见 buildPriceHint)。
+    const hint = buildPriceHint(details);
+    return {
+      balances: [...parseBalances(details), ...parseFunding(fundingBody.data ?? [], hint)],
+    };
   },
 
   // 校验:签名打 balance。走 fetchBalances 同一条判据(assertCodeOk):HTTP 层失败由 request 抛,
