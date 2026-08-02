@@ -289,8 +289,10 @@ describe("okxProvider.fetchBalances", () => {
       content: "0.5 ETH · 25%",
     });
 
-    const [url, init] = spy.mock.calls[0];
-    expect(String(url)).toContain("/api/v5/account/balance");
+    // 并发多端点:哪个请求先 fetch 由异步 HMAC 签名的完成顺序定,calls[0] 不保证是交易账户 → 用 find 定位。
+    const call = spy.mock.calls.find((c) => String(c[0]).includes("/api/v5/account/balance"));
+    const init = call?.[1];
+    expect(String(call?.[0])).toContain("/api/v5/account/balance");
     const h = init?.headers as Record<string, string>;
     expect(h["OK-ACCESS-KEY"]).toBe("k");
     expect(h["OK-ACCESS-PASSPHRASE"]).toBe("p");
