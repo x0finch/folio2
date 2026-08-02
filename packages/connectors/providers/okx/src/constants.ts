@@ -16,6 +16,11 @@ export const STABLECOINS: ReadonlySet<string> = new Set(["USDT", "USDC", "DAI", 
 // earn 桶残差阈值:拉到的 earn 子项加总与 asset-valuation 的 earn 桶差额 > 此值才挂"未细分"account 级 Note。
 export const EARN_RESIDUAL_MIN_USD = 1;
 
+// 未细分赚币合成聚合行的 logo(OKX 品牌 X 形标,quincunx)。内嵌 data-URI:自包含、离线可用、
+// 客户端零第三方 CDN(ADR 0008);走 tokenLogoUrl 的 data: 直挂分支,不经 /api/logo 代理。
+export const OKX_EARN_LOGO =
+  "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiByeD0iNSIgZmlsbD0iIzExMTMxOCIvPjxnIGZpbGw9IiNmZmYiPjxyZWN0IHg9IjQiIHk9IjQiIHdpZHRoPSI0LjYiIGhlaWdodD0iNC42Ii8+PHJlY3QgeD0iMTUuNCIgeT0iNCIgd2lkdGg9IjQuNiIgaGVpZ2h0PSI0LjYiLz48cmVjdCB4PSI5LjciIHk9IjkuNyIgd2lkdGg9IjQuNiIgaGVpZ2h0PSI0LjYiLz48cmVjdCB4PSI0IiB5PSIxNS40IiB3aWR0aD0iNC42IiBoZWlnaHQ9IjQuNiIvPjxyZWN0IHg9IjE1LjQiIHk9IjE1LjQiIHdpZHRoPSI0LjYiIGhlaWdodD0iNC42Ii8+PC9nPjwvc3ZnPg==";
+
 export const HEADER_KEY = "OK-ACCESS-KEY";
 export const HEADER_SIGN = "OK-ACCESS-SIGN";
 export const HEADER_TIMESTAMP = "OK-ACCESS-TIMESTAMP";

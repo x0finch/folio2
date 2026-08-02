@@ -14,6 +14,10 @@ interface LogoSource {
 // 无内部 id(如 live search 结果不在 store)→ 原样返回上游 URL(降级,可能引用第三方 CDN);
 // 都没有 → undefined(客户端 AvatarFallback 首字母,不发请求)。
 export function tokenLogoUrl(e: LogoSource): string | undefined {
+  // 内嵌静态图(data-URI,如 OKX 未细分赚币合成行的品牌标)直挂:无隐私顾虑,且 /api/logo 代理只
+  // fetch http 栅格图、拿 data: 会失败(同 platformLogoUrl 的既有处理)。
+  if (e.providerLogo?.startsWith("data:")) return e.providerLogo;
+  if (e.logo?.startsWith("data:")) return e.logo;
   if (e.id && (e.logo || e.providerLogo)) {
     return `/api/logo/token/${encodeURIComponent(e.id)}`;
   }

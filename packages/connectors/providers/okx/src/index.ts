@@ -21,6 +21,7 @@ import {
   HEADER_SIGN,
   HEADER_TIMESTAMP,
   OKX_API_BASE,
+  OKX_EARN_LOGO,
   POSITIONS_PATH,
   SAVINGS_BALANCE_PATH,
   STABLECOINS,
@@ -275,16 +276,19 @@ export function earnResidualRow(
   const residual = earnBucketUsd - valued;
   if (!(residual > EARN_RESIDUAL_MIN_USD)) return undefined;
   return {
-    symbol: "EARN",
-    name: "Uncategorized earn",
-    amount: residual, // 无逐币数量 → 以美元额当"数量"(price=1),净值只认 value
+    // 无逐币构成 → symbol 用 "USD":这行的"数量"就是它的美元估值(price=1),而非某个币的枚数。
+    // name 富化成人话(带 OKX 品牌),logo 用内嵌 OKX 标(经 seed.providerLogo → token,见 sync-deps)。
+    symbol: "USD",
+    name: "OKX Earn (Uncategorized)",
+    logo: OKX_EARN_LOGO,
+    amount: residual, // 美元额当"数量",price=1 → 展示 "131,026.84 USD";净值只认 value。
     price: 1,
     value: residual,
     selfPrice: 1,
     kind: "spot",
     tokenRef: tokenRef.custom(PROVIDER_ID, "EARN-UNCATEGORIZED"),
     note: {
-      title: "Earn (uncategorized)",
+      title: "Earn (Uncategorized)",
       icon: "info",
       content: `${fmtUsd(residual)} of fixed-term / structured earn — value from OKX, no per-coin breakdown available`,
       group: "earn",

@@ -109,8 +109,11 @@ describe("earnResidualRow", () => {
     expect(row).toMatchObject({
       kind: "spot",
       value: 1000,
+      symbol: "USD", // 数字是美元估值 → 单位 USD(非某个币的枚数)
+      name: "OKX Earn (Uncategorized)",
       tokenRef: "okx/custom:EARN-UNCATEGORIZED",
     });
+    expect(row?.logo).toMatch(/^data:image\/svg\+xml/); // 内嵌 OKX 标(走 tokenLogoUrl data: 直挂)
     expect(row?.note?.group).toBe("earn");
     expect(String(row?.note?.content)).toContain("$1,000");
   });
