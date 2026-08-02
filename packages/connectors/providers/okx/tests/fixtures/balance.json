@@ -4,10 +4,11 @@
   "data": [
     {
       "details": [
-        { "ccy": "BTC", "eq": "0.5", "eqUsd": "30000", "frozenBal": "0" },
-        { "ccy": "USDT", "eq": "1000", "eqUsd": "1000", "frozenBal": "0" },
-        { "ccy": "ETH", "eq": "2", "eqUsd": "6000", "frozenBal": "0.5" },
-        { "ccy": "DUST", "eq": "0", "eqUsd": "0", "frozenBal": "0" }
+        { "ccy": "BTC", "eq": "0.5", "cashBal": "0.5", "eqUsd": "30000", "frozenBal": "0" },
+        { "ccy": "USDT", "eq": "1200", "cashBal": "1000", "eqUsd": "1200", "frozenBal": "0" },
+        { "ccy": "ETH", "eq": "2", "cashBal": "2", "eqUsd": "6000", "frozenBal": "0.5" },
+        { "ccy": "OKSOL", "eq": "10", "cashBal": "10", "eqUsd": "700", "frozenBal": "0" },
+        { "ccy": "DUST", "eq": "0", "cashBal": "0", "eqUsd": "0", "frozenBal": "0" }
       ]
     }
   ]

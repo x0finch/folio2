@@ -27,5 +27,13 @@
       "icon": "warning",
       "content": "0.5 ETH · 25%"
     }
+  },
+  {
+    "symbol": "OKSOL",
+    "tokenRef": "okx/issued:OKSOL",
+    "amount": 10,
+    "price": 70,
+    "value": 700,
+    "kind": "spot"
   }
 ]

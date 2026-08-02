@@ -28,8 +28,9 @@ import {
 
 interface OkxDetail {
   ccy?: string;
-  eq?: string;
-  eqUsd?: string;
+  eq?: string; // 币权益(统一账户里作保证金时含合约 uPnL)—— 只用来折市价,不当持有量
+  eqUsd?: string; // eq 的美元值 —— 与 eq 同比例,eqUsd/eq = 市价(不含 uPnL)
+  cashBal?: string; // 现金余额(不含合约 uPnL)—— 持有量口径,修 #259
   frozenBal?: string; // 冻结余额(原币,挂单/借贷占用)
 }
 interface OkxBalanceResponse {
@@ -45,7 +46,10 @@ const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFrac
 // 场馆命名者 = connectorId(与 manifest 的 `id` 同源,不许两处各写一遍)。
 const PROVIDER_ID = "okx";
 
-// amount=eq、value=eqUsd(OKX 自带)、price=eqUsd/eq;跳过空 ccy / amount≤0;kind:spot。
+// amount=cashBal(现金,不含合约 uPnL —— 修 #259)、price=eqUsd/eq(市价)、value=amount×price;
+// 跳过空 ccy / amount≤0;kind:spot。用 cashBal 而非 eq:统一账户里作合约保证金的币,其 eq 含合约
+// 未实现盈亏,拿 eq 当持有量会把没落袋的浮盈算成现货(合约浮盈本轮走 perp,缓做,见 ADR 0031)。
+// eqUsd 是 eq 的美元值,eqUsd/eq 得市价(与 uPnL 无关),再 × cashBal 得纯现货美元值。
 // 冻结 note(note 重设计,balance 级单个 Note):frozenBal>0 的币,在【它自己那笔 balance】上挂一个
 // `Frozen` 段(icon warning;content 一行内联文案 `${冻结数量} ${币种} · ${占该币总持有的百分比}`,
 // 如 `0.5 ETH · 25%`,原币口径)。无冻结 → 无 note。
@@ -54,14 +58,16 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
   for (const d of details ?? []) {
     const ccy = d.ccy;
     if (!ccy) continue;
-    const amount = Number(d.eq ?? 0);
+    const amount = Number(d.cashBal ?? 0);
     if (!(amount > 0)) continue;
+    const eq = Number(d.eq ?? 0);
+    const price = eq > 0 ? Number(d.eqUsd ?? 0) / eq : 0; // 市价;eq=0 无从折价 → 0(交 oracle 兜底)
     const frozen = Number(d.frozenBal ?? 0);
     const row: Spot = {
       symbol: ccy,
       amount,
-      price: Number(d.eqUsd ?? 0) / amount,
-      value: Number(d.eqUsd ?? 0),
+      price,
+      value: amount * price,
       kind: "spot",
       // 场馆命名:OKX 管这个币叫 `ccy`。symbol 大写归一由本 provider 负责(见 @folio/oracle-ref)。
       tokenRef: tokenRef.issued(PROVIDER_ID, ccy.trim().toUpperCase()),
