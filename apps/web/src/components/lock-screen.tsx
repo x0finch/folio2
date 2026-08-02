@@ -38,7 +38,7 @@ function ActiveLockScreen({
   const { locked, unlock } = useIdleLock(timeoutMs);
   // 锁定 → 用锁屏**替换** children(卸载,不叠加):DOM 里不留内容,删遮罩也看不到底下数据。
   // 解锁重挂,数据从更外层 QueryClient 缓存出,不重拉;丢的只是组件本地态(滚动/展开/半填表单)。
-  return locked ? <LockOverlay userEmail={userEmail} onUnlock={unlock} /> : <>{children}</>;
+  return locked ? <LockOverlay userEmail={userEmail} onUnlock={unlock} /> : children;
 }
 
 function LockOverlay({ userEmail, onUnlock }: { userEmail: string; onUnlock: () => void }) {
