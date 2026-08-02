@@ -1,0 +1,48 @@
+{
+  "assets": [
+    {
+      "asset": "BTC",
+      "marginBalance": "0.25",
+      "maxWithdrawAmount": "0.125",
+      "positionInitialMargin": "0.0625"
+    },
+    {
+      "asset": "ETH",
+      "marginBalance": "1",
+      "maxWithdrawAmount": "0.5",
+      "positionInitialMargin": "0.25"
+    }
+  ],
+  "positions": [
+    {
+      "symbol": "BTCUSD_PERP",
+      "positionAmt": "10",
+      "entryPrice": "58000",
+      "unrealizedProfit": "0.125",
+      "leverage": "20",
+      "notional": "0.25",
+      "isolated": false,
+      "positionInitialMargin": "0.0625"
+    },
+    {
+      "symbol": "ETHUSD_PERP",
+      "positionAmt": "-5",
+      "entryPrice": "3100",
+      "unrealizedProfit": "-0.25",
+      "leverage": "10",
+      "notional": "-0.5",
+      "isolated": true,
+      "positionInitialMargin": "0.25"
+    },
+    {
+      "symbol": "BNBUSD_PERP",
+      "positionAmt": "0",
+      "entryPrice": "0",
+      "unrealizedProfit": "0",
+      "leverage": "5",
+      "notional": "0",
+      "isolated": false,
+      "positionInitialMargin": "0"
+    }
+  ]
+}

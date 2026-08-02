@@ -2,6 +2,7 @@ import { ProviderError } from "@folio/connectors-basic";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { binanceProvider, parseAccountBalances } from "../src";
 import account from "./fixtures/account.json";
+import coinmAccount from "./fixtures/coinm-account.json";
 import expected from "./fixtures/expected-balances.json";
 import futuresAccount from "./fixtures/futures-account.json";
 import prices from "./fixtures/prices.json";
@@ -47,6 +48,8 @@ describe("binanceProvider.fetchBalances", () => {
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const u = String(url);
       // 合约钱包:空账户(此测试聚焦现货签名/估值;合约合并与尽力而为见下方专测)。
+      if (u.includes("/dapi/v1/account"))
+        return new Response(JSON.stringify({ assets: [], positions: [] }), { status: 200 });
       if (u.includes("/fapi/v2/account"))
         return new Response(JSON.stringify({ totalMarginBalance: "0", positions: [] }), {
           status: 200,
@@ -95,9 +98,11 @@ describe("binanceProvider.fetchBalances", () => {
     });
   });
 
-  it("现货 + 合约全成功 → 合并 spot + perp 行(尽力而为全绿,无 Note)", async () => {
+  it("现货 + U本位 + 币本位全成功 → 合并 spot + perp 行(尽力而为全绿,无 Note)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const u = String(url);
+      if (u.includes("/dapi/v1/account"))
+        return new Response(JSON.stringify(coinmAccount), { status: 200 });
       if (u.includes("/fapi/v2/account"))
         return new Response(JSON.stringify(futuresAccount), { status: 200 });
       if (u.includes("/api/v3/account"))
@@ -112,8 +117,10 @@ describe("binanceProvider.fetchBalances", () => {
     });
     const { balances, note } = await binanceProvider.fetchBalances(ctx());
     expect(balances.filter((b) => b.kind === "spot")).toHaveLength(4);
-    expect(balances.filter((b) => b.kind === "perp_equity")).toHaveLength(1);
-    expect(balances.filter((b) => b.kind === "perp_position")).toHaveLength(2);
+    // U本位 + 币本位各一个权益行
+    expect(balances.filter((b) => b.kind === "perp_equity")).toHaveLength(2);
+    // U本位 2 持仓 + 币本位 2 持仓
+    expect(balances.filter((b) => b.kind === "perp_position")).toHaveLength(4);
     expect(note).toBeUndefined();
   });
 
