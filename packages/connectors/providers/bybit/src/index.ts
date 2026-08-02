@@ -3,6 +3,7 @@ import {
   type CredField,
   hmacSha256,
   isCredentialRejection,
+  type Note,
   ProviderError,
   type Spot,
 } from "@folio/connectors-basic";
@@ -43,7 +44,14 @@ interface BybitCoin {
 interface BybitWalletBalanceResponse {
   retCode?: number; // Bybit 的 retCode 是**数字**(0=OK),异于 OKX 的字符串 code
   retMsg?: string;
-  result?: { list?: Array<{ accountType?: string; totalEquity?: string; coin?: BybitCoin[] }> };
+  result?: {
+    list?: Array<{
+      accountType?: string;
+      totalEquity?: string;
+      totalPerpUPL?: string; // 统一账户合约未实现盈亏合计 —— 非零即有浮盈被排除在 walletBalance 外(perp 兜底信号)
+      coin?: BybitCoin[];
+    }>;
+  };
 }
 
 // 资金账户 /v5/asset/transfer/query-account-coins-balance?accountType=FUND 的最小形状。
@@ -261,6 +269,52 @@ function assertRetCodeOk(body: { retCode?: number; retMsg?: string }): void {
   if (err) throw err;
 }
 
+// 展示金额格式化(带符号 + $ + 千分位,2 位小数)。account 级 Note 文案用。
+const fmtSignedUsd = (n: number): string =>
+  `${n < 0 ? "-" : "+"}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+
+// —— 逐桶尽力而为(ADR 0030)——
+// 把一个 settled 结果读成「解析用的 body」或「一条失败记录」。请求层失败(reject,ProviderError)与业务码
+// 失败(HTTP 200 + retCode!=0)都收成失败,不抛。
+type BucketFailure = { name: string; auth: boolean; error: ProviderError };
+function readBucket(
+  r: PromiseSettledResult<unknown>,
+  name: string,
+): { body?: { retCode?: number; retMsg?: string; result?: unknown }; failure?: BucketFailure } {
+  if (r.status === "rejected") {
+    const error =
+      r.reason instanceof ProviderError
+        ? r.reason
+        : new ProviderError("UPSTREAM_ERROR", `bybit ${name} failed`);
+    return { failure: { name, auth: error.code === "AUTH_FAILED", error } };
+  }
+  const body = r.value as { retCode?: number; retMsg?: string; result?: unknown };
+  const err = retCodeError(body);
+  if (err) return { failure: { name, auth: err.code === "AUTH_FAILED", error: err } };
+  return { body };
+}
+
+// 账户级失败 Note(ADR 0030):列出没同步上的桶 + 按错因给一句提示。auth 类失败(权限/签名)→ 提示查权限;
+// 否则(超时/瞬时)→ 下次自动补上。
+function bucketFailureNote(failed: BucketFailure[]): Note {
+  const names = failed.map((f) => f.name).join(" / ");
+  const tail = failed.some((f) => f.auth)
+    ? "check the API key's permissions"
+    : "temporary — it'll sync next time";
+  return { title: "Buckets not synced", icon: "warning", content: `${names} — ${tail}` };
+}
+
+// perp 兜底 Note(account 级):统一账户 totalPerpUPL 非零 → 有合约浮盈被排除在 walletBalance 外
+// (本轮不解析 perp,ADR 0032 缓做)。用 totalPerpUPL(统一账户响应自带,零额外请求)而非 position/list:
+// 它**直接就是被隐藏的那笔浮盈**,正是本 note 的意义;省掉逐 settleCoin 查持仓。
+function perpFallbackNote(uplUsd: number): Note {
+  return {
+    title: "Futures positions detected",
+    icon: "warning",
+    content: `Futures uPnL (${fmtSignedUsd(uplUsd)}) isn't in your balance yet — coming when the perp path ships`,
+  };
+}
+
 // —— 账户级 creds(AC):apiKey(semi)/secret(secret)。**无 passphrase**(异于 OKX)。apiKey = 标识符
 // (明文走 header,非认证秘密)→ semi;secret = 签名秘密 → secret。——
 export const bybitAccountCreds = [
@@ -283,13 +337,14 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
     },
   ],
 
-  async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
+  async fetchBalances(ctx): Promise<{ balances: Spot[]; note?: Note[] }> {
     const request = makeRequest(pickBybitBase(ctx.creds as Record<string, unknown>));
     const creds = ctx.account.creds;
-    // 各桶用**同一把 key 并发**拉,合并成一份余额(ADR 0032)。本片接入统一账户(UNIFIED)+ 资金账户(FUND)
-    // + 赚币(FlexibleSaving + OnChain 两类目)。用 allSettled 而非 all:**等齐所有请求**再决定,避免某端点
-    // 先失败时并发兄弟请求(异步签名仍在飞)漏到调用结束后才 fetch(fire-and-forget)。本片语义仍是「任一端点
-    // 失败即整次失败」(抛第一个错、下轮重试,不拿半份快照覆盖);逐桶「尽力而为」留片 4 把 throw 换成收 Note。
+    // 各桶用**同一把 key 并发**拉,合并成一份余额(ADR 0032)。桶:统一账户(UNIFIED)+ 资金账户(FUND)+
+    // 赚币(FlexibleSaving + OnChain)。allSettled**等齐所有请求**再决定,避免某端点先失败时并发兄弟请求
+    // (异步签名仍在飞)漏到调用结束后才 fetch(fire-and-forget)。逐桶**尽力而为**(ADR 0030):失败不阻断
+    // 其余、收成账户级 Note;整次同步整体成功。**perp 兜底不额外打 position/list**:统一账户响应自带的
+    // totalPerpUPL 非零即有浮盈被排除(见 perpFallbackNote),零额外请求。
     const settled = await Promise.allSettled([
       request(WALLET_BALANCE_PATH, { context: creds, query: { accountType: "UNIFIED" } }),
       request(FUNDING_BALANCES_PATH, { context: creds, query: { accountType: "FUND" } }),
@@ -297,28 +352,44 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
         request(EARN_POSITION_PATH, { context: creds, query: { category: e.category } }),
       ),
     ]);
-    const firstRejected = settled.find((r) => r.status === "rejected");
-    if (firstRejected) throw (firstRejected as PromiseRejectedResult).reason;
-    const bodies = settled.map((r) => (r as PromiseFulfilledResult<unknown>).value);
-    const unifiedBody = bodies[0] as BybitWalletBalanceResponse;
-    const fundingBody = bodies[1] as BybitFundingResponse;
-    const earnBodies = bodies.slice(2) as BybitEarnResponse[];
-    // HTTP 200 + retCode!=0 是 Bybit 表达错误的主要方式,包管不到这一层。
-    for (const b of bodies as { retCode?: number; retMsg?: string }[]) assertRetCodeOk(b);
 
-    const coins = unifiedBody.result?.list?.[0]?.coin ?? [];
-    // 统一账户市价表复用给资金/赚币估值(零额外请求,见 buildPriceHint)。
-    const hint = buildPriceHint(coins);
-    const earn = EARN_CATEGORIES.flatMap((e, i) =>
-      parseEarn(earnBodies[i]?.result?.list ?? [], e.label, hint),
+    const unified = readBucket(settled[0], "Unified");
+    const funding = readBucket(settled[1], "Funding");
+    const earnBuckets = EARN_CATEGORIES.map((e, i) =>
+      readBucket(settled[2 + i], `Earn (${e.label})`),
     );
-    return {
-      balances: [
-        ...parseUnified(coins),
-        ...parseFunding(fundingBody.result?.balance ?? [], hint),
-        ...earn,
-      ],
-    };
+    const buckets = [unified, funding, ...earnBuckets];
+    const failures = buckets.map((b) => b.failure).filter((f): f is BucketFailure => f != null);
+    // **全军覆没**(所有桶无一成功,如 429 限流所有端点)→ 抛第一个错,让 sync 重试、别拿空快照覆盖已有余额。
+    if (failures.length === buckets.length) throw failures[0].error;
+
+    const list = (unified.body as BybitWalletBalanceResponse | undefined)?.result?.list?.[0];
+    const coins = list?.coin ?? [];
+    // 统一账户市价表复用给资金/赚币估值(零额外请求,见 buildPriceHint)。统一账户失败 → 空表,资金/赚币
+    // 的币交 oracle 兜底(value 0)。
+    const hint = buildPriceHint(coins);
+    const balances: Spot[] = [
+      ...parseUnified(coins),
+      ...parseFunding(
+        (funding.body as BybitFundingResponse | undefined)?.result?.balance ?? [],
+        hint,
+      ),
+      ...EARN_CATEGORIES.flatMap((e, i) =>
+        parseEarn(
+          (earnBuckets[i].body as BybitEarnResponse | undefined)?.result?.list ?? [],
+          e.label,
+          hint,
+        ),
+      ),
+    ];
+
+    const notes: Note[] = [];
+    // 逐桶失败(部分)→ 一条账户级 Note(auth 类给权限提示,其余给"下次补上")。
+    if (failures.length) notes.push(bucketFailureNote(failures));
+    // perp 兜底:统一账户 totalPerpUPL 非零 → 有合约浮盈被排除在 walletBalance 外,挂"暂未纳入"Note。
+    const upl = Number(list?.totalPerpUPL ?? 0);
+    if (unified.body && upl !== 0) notes.push(perpFallbackNote(upl));
+    return { balances, note: notes.length ? notes : undefined };
   },
 
   // 校验:签名打统一账户余额确认 key + 读权限(creds 已由 validateCredentials 保证非空)。
