@@ -9,6 +9,6 @@ import type { ConnectorId } from "@folio/connectors";
 export const CONNECTOR_OPTIONS: { group: string; options: ConnectorId[] }[] = [
   { group: "Manual", options: ["manual"] },
   { group: "On-chain", options: ["evm", "bitcoin", "solana", "sui", "cosmos"] },
-  { group: "Exchange", options: ["binance", "okx"] },
+  { group: "Exchange", options: ["binance", "okx", "bybit"] },
   { group: "Perp DEX", options: ["hyperliquid"] },
 ];

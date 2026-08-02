@@ -1,0 +1,42 @@
+{
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "list": [
+      {
+        "accountType": "UNIFIED",
+        "totalEquity": "83500",
+        "coin": [
+          {
+            "coin": "USD1",
+            "walletBalance": "80000",
+            "equity": "80000",
+            "usdValue": "80000",
+            "locked": "80000"
+          },
+          {
+            "coin": "USDT",
+            "walletBalance": "500",
+            "equity": "500",
+            "usdValue": "500",
+            "locked": "0"
+          },
+          {
+            "coin": "BTC",
+            "walletBalance": "0.05",
+            "equity": "0.06",
+            "usdValue": "3000",
+            "locked": "0"
+          },
+          {
+            "coin": "DUST",
+            "walletBalance": "0",
+            "equity": "0",
+            "usdValue": "0",
+            "locked": "0"
+          }
+        ]
+      }
+    ]
+  }
+}
