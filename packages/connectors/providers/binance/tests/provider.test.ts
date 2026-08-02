@@ -10,12 +10,16 @@ import fundingAssets from "./fixtures/funding-assets.json";
 import futuresAccount from "./fixtures/futures-account.json";
 import prices from "./fixtures/prices.json";
 
-// 新 FetchContext 形状:account.creds(AC:apiKey/secret,由分派桥 openCreds 解密后灌入)+ creds(PC:空)。
+// 新 FetchContext 形状:account.creds(AC:apiKey/secret,由分派桥 openCreds 解密后灌入)+ creds(PC:
+// base URL 覆盖,#264,由 app 从 env 注入;默认空 = 直连)。
 type Ctx = Parameters<typeof binanceProvider.fetchBalances>[0];
-function ctx(creds: Record<string, string> = { apiKey: "k", secret: "s" }): Ctx {
+function ctx(
+  creds: Record<string, string> = { apiKey: "k", secret: "s" },
+  providerCreds: Record<string, string> = {},
+): Ctx {
   return {
     account: { id: "a1", label: "Binance", connectorId: "binance", creds },
-    creds: {},
+    creds: providerCreds,
   } as unknown as Ctx;
 }
 
@@ -208,9 +212,54 @@ describe("binanceProvider.fetchBalances", () => {
     expect(String(note?.[0]?.content)).toContain("Futures");
   });
 
-  it("serves connectorId binance, no provider-level creds (账户自带密钥)", () => {
+  it("serves connectorId binance;PC 仅声明三个 base URL 覆盖 key(env 注入用,非账户凭据)", () => {
     expect(binanceProvider.id).toBe("binance");
-    expect(binanceProvider.creds).toEqual([]);
+    expect(binanceProvider.creds.map((f) => f.key)).toEqual([
+      "BINANCE_API_BASE",
+      "BINANCE_FAPI_BASE",
+      "BINANCE_DAPI_BASE",
+    ]);
+    // 全 public(不加密/不导出)、不进 UI 表单(表单只认 account.creds)。
+    expect(binanceProvider.creds.every((f) => f.type === "public")).toBe(true);
+  });
+
+  // #264:出口 IP 被地区封时,app 从 env 把代理 base 注入 ctx.creds。connector 只把它当不透明整串用,
+  // 三个 host 各走各的覆盖 base(独立);不设即默认直连。此测反查:没有覆盖注入就会打回 *.binance.com。
+  it("ctx.creds 三个 base 覆盖 → 现货/U本位/币本位/公开行情各打各自覆盖 base,默认 host 一个不留", async () => {
+    const seen: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      seen.push(u);
+      if (u.includes("/dapi/v1/account"))
+        return new Response(JSON.stringify({ assets: [], positions: [] }), { status: 200 });
+      if (u.includes("/fapi/v2/account"))
+        return new Response(JSON.stringify({ totalMarginBalance: "0", positions: [] }), {
+          status: 200,
+        });
+      if (u.includes("/api/v3/account"))
+        return new Response(JSON.stringify({ balances: [] }), { status: 200 });
+      // funding(数组)+ earn(翻页,数组无 rows → 空)都在 /sapi/ 下,给空数组即可。
+      if (u.includes("/sapi/")) return new Response(JSON.stringify([]), { status: 200 });
+      return new Response(JSON.stringify([]), { status: 200 }); // /api/v3/ticker/price
+    });
+
+    await binanceProvider.fetchBalances(
+      ctx(
+        { apiKey: "k", secret: "s" },
+        {
+          BINANCE_API_BASE: "https://px.example/s/binance",
+          BINANCE_FAPI_BASE: "https://px.example/s/binance-fapi",
+          BINANCE_DAPI_BASE: "https://px.example/s/binance-dapi",
+        },
+      ),
+    );
+
+    const hit = (prefix: string) => seen.some((u) => u.startsWith(prefix));
+    expect(hit("https://px.example/s/binance/api/v3/account")).toBe(true); // 现货签名
+    expect(hit("https://px.example/s/binance/api/v3/ticker/price")).toBe(true); // 公开行情(同 api 覆盖)
+    expect(hit("https://px.example/s/binance-fapi/fapi/v2/account")).toBe(true); // U 本位
+    expect(hit("https://px.example/s/binance-dapi/dapi/v1/account")).toBe(true); // 币本位
+    expect(seen.some((u) => u.includes("binance.com"))).toBe(false); // 默认 host 一个不留
   });
 });
 

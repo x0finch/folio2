@@ -23,7 +23,8 @@ import {
 // 与 binance 的差异:① 签名是 base64(HMAC(timestamp+METHOD+requestPath, secret));② 需 passphrase;
 // ③ 余额自带 eqUsd(无需公开价估值);④ 错误常以 HTTP 200 + code!="0" 返回(含 key/签名错)。
 // 每账户密钥(apiKey/secret/passphrase)走 account.creds(加密入库,取数时由分派桥 openCreds 解密后灌入
-// ctx.account.creds)—— 不是全局 provider key,故 provider 级 creds(PC)为空。原生 fetch,零依赖。
+// ctx.account.creds)—— 不是全局 provider key。provider 级 creds(PC)不装凭据,只声明 base URL 覆盖
+// 的 env key(#264,见 provider.creds)。原生 fetch,零依赖。
 
 interface OkxDetail {
   ccy?: string;
@@ -84,32 +85,44 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
 // prehash = timestamp + 'GET' + requestPath;SIGN = base64(HMAC-SHA256)。
 type OkxCreds = { apiKey: string; secret: string; passphrase: string };
 
-const request = createHttpClient<OkxCreds>({
-  baseUrl: OKX_API_BASE,
-  headers: async (path, options) => {
-    const creds = options?.context;
-    if (!creds) throw new ProviderError("INVALID_CREDENTIALS", "okx: missing credentials");
-    const ts = new Date().toISOString();
-    return {
-      [HEADER_KEY]: creds.apiKey,
-      [HEADER_SIGN]: await hmacSha256(creds.secret, `${ts}GET${path}`, "base64"),
-      [HEADER_TIMESTAMP]: ts,
-      [HEADER_PASSPHRASE]: creds.passphrase,
-      "Content-Type": "application/json",
-    };
-  },
-  // OKX 的 auth 错通常是 200 + code(见下面 assertCodeOk),所以这里只管 HTTP 层。
-  toFailure: ({ kind, where, status, retryAfterMs, cause }) => {
-    if (kind === "network")
-      return new ProviderError("UPSTREAM_ERROR", "okx request failed", { cause });
-    if (kind === "auth") return new ProviderError("AUTH_FAILED", `okx auth failed (${status})`);
-    if (kind === "rate-limited")
-      return new ProviderError("RATE_LIMITED", "okx rate limited", { retryAfterMs });
-    if (kind === "parse")
-      return new ProviderError("PARSE_ERROR", `okx returned invalid JSON (${where})`, { cause });
-    return new ProviderError("UPSTREAM_ERROR", `okx upstream error (${status})`);
-  },
-});
+// —— base URL 覆盖(#264)——
+// 远程(CF Workers)出口 IP 被 OKX 按地区拒时,由 app 层从 env 注入代理 base;不设即原样直连。
+// connector 不读 env、不知代理存在(原则 #5):只把 ctx.creds.OKX_API_BASE 当**不透明整串**用,缺省回退默认。
+// key 由 provider.creds(PC)声明 → app 的 env 注入据此读值灌进 ctx.creds(不进 UI 表单)。
+const OKX_BASE_KEY = "OKX_API_BASE";
+function pickOkxBase(cfg: Record<string, unknown>): string {
+  const v = cfg[OKX_BASE_KEY];
+  return typeof v === "string" && v.trim() ? v.trim() : OKX_API_BASE;
+}
+
+// 请求 client 工厂:base 按请求可覆盖,故不再模块级绑死单例。签名头 / 失败归类不变。
+const makeRequest = (baseUrl: string) =>
+  createHttpClient<OkxCreds>({
+    baseUrl,
+    headers: async (path, options) => {
+      const creds = options?.context;
+      if (!creds) throw new ProviderError("INVALID_CREDENTIALS", "okx: missing credentials");
+      const ts = new Date().toISOString();
+      return {
+        [HEADER_KEY]: creds.apiKey,
+        [HEADER_SIGN]: await hmacSha256(creds.secret, `${ts}GET${path}`, "base64"),
+        [HEADER_TIMESTAMP]: ts,
+        [HEADER_PASSPHRASE]: creds.passphrase,
+        "Content-Type": "application/json",
+      };
+    },
+    // OKX 的 auth 错通常是 200 + code(见下面 assertCodeOk),所以这里只管 HTTP 层。
+    toFailure: ({ kind, where, status, retryAfterMs, cause }) => {
+      if (kind === "network")
+        return new ProviderError("UPSTREAM_ERROR", "okx request failed", { cause });
+      if (kind === "auth") return new ProviderError("AUTH_FAILED", `okx auth failed (${status})`);
+      if (kind === "rate-limited")
+        return new ProviderError("RATE_LIMITED", "okx rate limited", { retryAfterMs });
+      if (kind === "parse")
+        return new ProviderError("PARSE_ERROR", `okx returned invalid JSON (${where})`, { cause });
+      return new ProviderError("UPSTREAM_ERROR", `okx upstream error (${status})`);
+    },
+  });
 
 // 业务层错误(HTTP 200 + code!="0"):凭据类 code → AUTH_FAILED,其余 → UPSTREAM_ERROR。
 function assertCodeOk(body: OkxBalanceResponse): void {
@@ -135,9 +148,19 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
   id: PROVIDER_ID,
   label: "OKX",
   // 无全局 provider key —— 账户自己的 apiKey/secret/passphrase 即凭据,走 account.creds。
-  creds: [],
+  // PC 在此仅作 **env 注入声明**(非真凭据):app 层据此 key 从 env 读值灌进 ctx.creds,供 base URL
+  // 覆盖(#264)。不进 UI 表单(那只认 account.creds)、不加密/不导出;值可能含代理密钥 → 不可 echo/log。
+  creds: [
+    {
+      key: OKX_BASE_KEY,
+      type: "public",
+      label: "API base URL",
+      validator: z.string().trim().url(),
+    },
+  ],
 
   async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
+    const request = makeRequest(pickOkxBase(ctx.creds as Record<string, unknown>));
     const body = (await request(BALANCE_PATH, {
       context: ctx.account.creds,
     })) as OkxBalanceResponse;
@@ -149,6 +172,7 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
   // 业务码 code!="0" 由 assertCodeOk 分类(凭据类 → AUTH_FAILED,其余 → UPSTREAM_ERROR)。
   // 凭据被拒 → false;够不到上游 → 抛(契约见 connector.ts / errors.ts)。creds 已保证三项非空。
   async validateAccount(ctx): Promise<boolean> {
+    const request = makeRequest(pickOkxBase(ctx.creds as Record<string, unknown>));
     try {
       const body = (await request(BALANCE_PATH, {
         context: ctx.account.creds,

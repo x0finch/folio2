@@ -6,10 +6,13 @@ import expected from "./fixtures/expected-balances.json";
 // 新 FetchContext 形状:account.creds(AC:apiKey/secret/passphrase,由分派桥 openCreds 解密后灌入)+ creds(PC:空)。
 type Ctx = Parameters<typeof okxProvider.fetchBalances>[0];
 const CREDS = { apiKey: "k", secret: "s", passphrase: "p" };
-function ctx(creds: Record<string, string> = CREDS): Ctx {
+function ctx(
+  creds: Record<string, string> = CREDS,
+  providerCreds: Record<string, string> = {},
+): Ctx {
   return {
     account: { id: "a1", label: "OKX", connectorId: "okx", creds },
-    creds: {},
+    creds: providerCreds,
   } as unknown as Ctx;
 }
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
@@ -75,9 +78,20 @@ describe("okxProvider.fetchBalances", () => {
     await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
   });
 
-  it("serves connectorId okx, no provider-level creds (账户自带密钥)", () => {
+  it("serves connectorId okx;PC 仅声明 OKX_API_BASE 覆盖 key(env 注入用,非账户凭据)", () => {
     expect(okxProvider.id).toBe("okx");
-    expect(okxProvider.creds).toEqual([]);
+    expect(okxProvider.creds.map((f) => f.key)).toEqual(["OKX_API_BASE"]);
+    expect(okxProvider.creds[0]?.type).toBe("public");
+  });
+
+  // #264:出口 IP 被地区封时,app 从 env 把代理 base 注入 ctx.creds.OKX_API_BASE。connector 只当不透明整串用。
+  // 反查:没有覆盖注入就会打回 www.okx.com。
+  it("ctx.creds 设 OKX_API_BASE → 签名请求打覆盖 base,不打默认 www.okx.com", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(balance));
+    await okxProvider.fetchBalances(ctx(CREDS, { OKX_API_BASE: "https://px.example/s/okx" }));
+    const url = String(spy.mock.calls[0]?.[0]);
+    expect(url).toContain("https://px.example/s/okx/api/v5/account/balance");
+    expect(url).not.toContain("www.okx.com");
   });
 });
 
