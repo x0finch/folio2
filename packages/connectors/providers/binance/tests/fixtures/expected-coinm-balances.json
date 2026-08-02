@@ -1,0 +1,46 @@
+[
+  {
+    "symbol": "USDT",
+    "amount": 18000,
+    "value": 18000,
+    "kind": "perp_equity",
+    "tokenRef": "binance/issued:USDT",
+    "meta": { "withdrawable": 9000, "totalMarginUsed": 4500, "totalNtlPos": 16500 }
+  },
+  {
+    "symbol": "BTC",
+    "amount": 10,
+    "value": 0,
+    "kind": "perp_position",
+    "tokenRef": "binance/issued:BTC",
+    "meta": {
+      "coin": "BTC",
+      "side": "long",
+      "entryPx": 58000,
+      "positionValue": 15000,
+      "unrealizedPnl": 7500,
+      "leverage": 20,
+      "leverageType": "cross",
+      "liquidationPx": null,
+      "marginUsed": 3750
+    }
+  },
+  {
+    "symbol": "ETH",
+    "amount": -5,
+    "value": 0,
+    "kind": "perp_position",
+    "tokenRef": "binance/issued:ETH",
+    "meta": {
+      "coin": "ETH",
+      "side": "short",
+      "entryPx": 3100,
+      "positionValue": 1500,
+      "unrealizedPnl": -750,
+      "leverage": 10,
+      "leverageType": "isolated",
+      "liquidationPx": null,
+      "marginUsed": 750
+    }
+  }
+]

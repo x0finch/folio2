@@ -16,7 +16,9 @@ import {
   ACCOUNT_PATH,
   API_KEY_HEADER,
   BINANCE_API_BASE,
+  BINANCE_DELIVERY_API_BASE,
   BINANCE_FUTURES_API_BASE,
+  COINM_ACCOUNT_PATH,
   MARGIN_ASSET,
   PUBLIC_LIMIT_KEY,
   QUOTE_ASSET,
@@ -175,6 +177,101 @@ export function parseFuturesAccount(account: FuturesAccount): (PerpEquity | Perp
   return out;
 }
 
+// —— 币本位合约账户(dapi /dapi/v1/account)的最小形状 ——
+interface CoinmAsset {
+  asset?: string;
+  marginBalance?: string; // per-asset 权益(币计价)
+  maxWithdrawAmount?: string;
+  positionInitialMargin?: string;
+}
+interface CoinmPosition {
+  symbol?: string;
+  positionAmt?: string; // 张数(cont),非币量
+  entryPrice?: string;
+  unrealizedProfit?: string; // 币计价
+  leverage?: string;
+  notional?: string; // 币计价
+  isolated?: boolean;
+  positionInitialMargin?: string;
+}
+interface CoinmAccount {
+  assets?: CoinmAsset[];
+  positions?: CoinmPosition[];
+}
+
+// 币本位 symbol 去尾得标的币名(BTCUSD_PERP / BTCUSD_251226 → BTC):取 `_` 前段再剥 USD。
+function coinmCoin(symbol: string): string {
+  const base = symbol.split("_")[0];
+  return base.endsWith("USD") && base.length > 3 ? base.slice(0, -3) : base;
+}
+
+// 纯解析:dapi 账户 → perp_equity(折 USD 聚合成**一行**,与 U 本位/hyperliquid 同构)+ 持仓 perp_position。
+// 币本位无单一 USD 总权益 —— 各币 marginBalance / notional / 盈亏都按行情(prices)折 USD 再合。
+// 认不出价的币(prices 无该对)→ 折 0(该币权益暂计 0,下轮有价再算)。**持仓 amount 是张数(cont)**,非币量。
+// 强平价不在此响应 → liquidationPx:null(主页降级显开仓价)。与 IO 分离,golden test。
+export function parseCoinmFuturesAccount(
+  account: CoinmAccount,
+  prices: Record<string, number>,
+): (PerpEquity | PerpPosition)[] {
+  const priceOf = (coin: string) =>
+    STABLECOINS.has(coin) ? 1 : (prices[`${coin}${QUOTE_ASSET}`] ?? 0);
+
+  let equityUsd = 0;
+  let withdrawableUsd = 0;
+  let marginUsedUsd = 0;
+  for (const a of account.assets ?? []) {
+    if (!a.asset) continue;
+    const px = priceOf(a.asset);
+    equityUsd += Number(a.marginBalance ?? 0) * px;
+    withdrawableUsd += Number(a.maxWithdrawAmount ?? 0) * px;
+    marginUsedUsd += Number(a.positionInitialMargin ?? 0) * px;
+  }
+
+  const positions = (account.positions ?? []).filter((p) => Number(p.positionAmt ?? 0) !== 0);
+  if (!(equityUsd > 0) && positions.length === 0) return [];
+
+  const posRows: PerpPosition[] = [];
+  let totalNtlPos = 0;
+  for (const p of positions) {
+    if (!p.symbol) continue;
+    const coin = coinmCoin(p.symbol);
+    const px = priceOf(coin);
+    const notionalUsd = Math.abs(Number(p.notional ?? 0)) * px;
+    totalNtlPos += notionalUsd;
+    const amt = Number(p.positionAmt ?? 0);
+    posRows.push({
+      symbol: coin,
+      amount: amt,
+      value: 0,
+      kind: "perp_position",
+      tokenRef: tokenRef.issued(PROVIDER_ID, coin),
+      meta: {
+        coin,
+        side: amt >= 0 ? "long" : "short",
+        entryPx: Number(p.entryPrice ?? 0),
+        positionValue: notionalUsd,
+        unrealizedPnl: Number(p.unrealizedProfit ?? 0) * px,
+        leverage: p.leverage != null ? Number(p.leverage) : undefined,
+        leverageType: p.isolated ? "isolated" : "cross",
+        liquidationPx: null,
+        marginUsed: Number(p.positionInitialMargin ?? 0) * px,
+      },
+    });
+  }
+
+  return [
+    {
+      symbol: MARGIN_ASSET,
+      amount: equityUsd,
+      value: equityUsd,
+      kind: "perp_equity",
+      tokenRef: tokenRef.issued(PROVIDER_ID, MARGIN_ASSET),
+      meta: { withdrawable: withdrawableUsd, totalMarginUsed: marginUsedUsd, totalNtlPos },
+    },
+    ...posRows,
+  ];
+}
+
 // 公开(免签)端点的限频器 —— 按出口 IP 共享,见 constants.ts 里为什么只给它装。
 const publicLimit = defineRateLimit({
   key: PUBLIC_LIMIT_KEY,
@@ -221,6 +318,7 @@ const makeSignedClient = (baseUrl: string) =>
 
 const signedRequest = makeSignedClient(BINANCE_API_BASE);
 const fapiSignedRequest = makeSignedClient(BINANCE_FUTURES_API_BASE);
+const dapiSignedRequest = makeSignedClient(BINANCE_DELIVERY_API_BASE);
 
 // 签名拉取 SIGNED 端点。**签名算的是「除 signature 外、按发送顺序拼起来的 query」**,
 // 所以这里先按同样的顺序拼一遍来签,再把 signature 追加到最后 —— URLSearchParams 保持插入序,
@@ -292,8 +390,23 @@ const usdmFuturesWallet: Wallet = {
   },
 };
 
-// 本 provider 当前拉的钱包集 —— 后续片(币本位 / 资金 / 理财)往这里加一项即可。
-const WALLETS: Wallet[] = [spotWallet, usdmFuturesWallet];
+// 币本位合约钱包:签名 dapi /dapi/v1/account(**又一个独立 host**);权益折 USD 需价表 → await prices。
+const coinmFuturesWallet: Wallet = {
+  name: "COIN-M Futures",
+  run: async ({ apiKey, secret }, prices) => {
+    const account = (await signedGet(
+      dapiSignedRequest,
+      COINM_ACCOUNT_PATH,
+      { recvWindow: RECV_WINDOW, timestamp: Date.now() },
+      apiKey,
+      secret,
+    )) as CoinmAccount;
+    return parseCoinmFuturesAccount(account, await prices);
+  },
+};
+
+// 本 provider 当前拉的钱包集 —— 后续片(资金 / 理财)往这里加一项即可。
+const WALLETS: Wallet[] = [spotWallet, usdmFuturesWallet, coinmFuturesWallet];
 
 // 账户级失败 Note(ADR 0030):列出没同步上的钱包 + 一句提示。
 function walletFailureNote(failed: string[]): Note {

@@ -44,3 +44,9 @@ export const USDM_ACCOUNT_PATH = "/fapi/v2/account"; // SIGNED,账户权益 + �
 export const MARGIN_ASSET = "USDT";
 // 合约 symbol 去尾得标的币名(BTCUSDT → BTC)。按已知计价后缀由长到短剥(先 USDC 再 USDT,避免误剥)。
 export const QUOTE_SUFFIXES: readonly string[] = ["USDT", "USDC", "BUSD", "FDUSD", "TUSD"];
+
+// —— 币本位合约(COIN-M Futures)——
+// 又一个独立 host(dapi.binance.com)。与 U 本位的关键差异:保证金是**币**(BTC/ETH…)、无单一 USD
+// 总权益 —— 各币 marginBalance / notional / 盈亏都按行情折 USD 再聚合(见 parseCoinmFuturesAccount)。
+export const BINANCE_DELIVERY_API_BASE = "https://dapi.binance.com";
+export const COINM_ACCOUNT_PATH = "/dapi/v1/account"; // SIGNED,per-asset 权益 + 持仓
