@@ -1,0 +1,11 @@
+[
+  {
+    "symbol": "USDT",
+    "tokenRef": "okx/issued:USDT",
+    "amount": 5000,
+    "price": 1,
+    "value": 5000,
+    "kind": "spot",
+    "note": { "title": "Earn", "icon": "info", "content": "Flexible · 3.00% APY", "group": "earn" }
+  }
+]

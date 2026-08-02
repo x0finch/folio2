@@ -3,6 +3,7 @@ import {
   type CredField,
   hmacSha256,
   isCredentialRejection,
+  type Note,
   ProviderError,
   type Spot,
 } from "@folio/connectors-basic";
@@ -10,15 +11,19 @@ import { tokenRef } from "@folio/oracle-ref";
 import { createHttpClient } from "@folio/shared";
 import { z } from "zod";
 import {
+  ASSET_VALUATION_PATH,
   AUTH_ERROR_CODES,
   BALANCE_PATH,
+  EARN_RESIDUAL_MIN_USD,
   FUNDING_BALANCES_PATH,
   HEADER_KEY,
   HEADER_PASSPHRASE,
   HEADER_SIGN,
   HEADER_TIMESTAMP,
   OKX_API_BASE,
+  SAVINGS_BALANCE_PATH,
   STABLECOINS,
+  STAKING_ORDERS_ACTIVE_PATH,
 } from "./constants";
 
 // @folio/connectors-provider-okx —— 第二个 CEX connector(okx)。复用 @folio/connectors-basic 的 hmacSha256。
@@ -145,6 +150,126 @@ export function parseFunding(assets: OkxFundingAsset[], hint: PriceHint): Spot[]
   return out;
 }
 
+// APY 小数 → 百分比串("0.03" → "3.00%")。savings `rate` / staking `apy` 均为年化小数。
+const apyPct = (rate: string | number | undefined): string =>
+  `${(Number(rate ?? 0) * 100).toFixed(2)}%`;
+
+// —— 赚币(earn 桶)——
+// savings(活期出借)/finance/savings/balance:data 扁平数组,每币一行,数量取 `amt`,`rate` 是年化 APY。
+interface OkxSavingsRow {
+  ccy?: string;
+  amt?: string; // 出借本金(持有量口径)
+  rate?: string; // 年化 APY(小数)
+}
+interface OkxSavingsResponse {
+  code?: string;
+  msg?: string;
+  data?: OkxSavingsRow[];
+}
+// staking-defi 活跃订单 /finance/staking-defi/orders-active:每单一行,投入本金在 `investData[].amt`,`apy` 年化。
+interface OkxStakingInvest {
+  ccy?: string;
+  amt?: string;
+}
+interface OkxStakingOrder {
+  ccy?: string;
+  protocol?: string;
+  apy?: string; // 年化 APY(小数)
+  investData?: OkxStakingInvest[];
+}
+interface OkxStakingResponse {
+  code?: string;
+  msg?: string;
+  data?: OkxStakingOrder[];
+}
+
+// earn 行的公共产出:算 spot、数量取总量字段、进净值,标 balance 级 Earn note(APY)+ note.group:"earn"。
+// 价走提示表(同 funding);无价 → value 0 交 oracle。
+function earnRow(ccy: string, amount: number, content: string, hint: PriceHint): Spot {
+  const price = priceOf(ccy, hint);
+  return {
+    symbol: ccy,
+    amount,
+    price,
+    value: price != null ? amount * price : 0,
+    kind: "spot",
+    tokenRef: tokenRef.issued(PROVIDER_ID, ccy.trim().toUpperCase()),
+    note: { title: "Earn", icon: "info", content, group: "earn" },
+  };
+}
+
+// 纯解析:活期出借 rows → Spot[]。数量取 amt,note `Flexible · X% APY`。跳过空 ccy / amt≤0。golden test。
+export function parseSavings(rows: OkxSavingsRow[], hint: PriceHint): Spot[] {
+  const out: Spot[] = [];
+  for (const r of rows ?? []) {
+    const ccy = r.ccy;
+    const amount = Number(r.amt ?? 0);
+    if (!ccy || !(amount > 0)) continue;
+    out.push(earnRow(ccy, amount, `Flexible · ${apyPct(r.rate)} APY`, hint));
+  }
+  return out;
+}
+
+// 纯解析:链上赚币活跃订单 orders → Spot[]。每单 investData 逐条本金成行(数量取 amt),
+// note `<protocol> · X% APY`。跳过空 ccy / amt≤0。链上赚币的币锁在协议里、不在交易账户,故不与
+// trading 双算(质押凭证币 OKSOL/BETH 才在交易账户,那走 trading、本端点不产它们)。golden test。
+export function parseStaking(orders: OkxStakingOrder[], hint: PriceHint): Spot[] {
+  const out: Spot[] = [];
+  for (const o of orders ?? []) {
+    const label = o.protocol?.trim() || "Staking";
+    for (const inv of o.investData ?? []) {
+      const ccy = inv.ccy ?? o.ccy;
+      const amount = Number(inv.amt ?? 0);
+      if (!ccy || !(amount > 0)) continue;
+      out.push(earnRow(ccy, amount, `${label} · ${apyPct(o.apy)} APY`, hint));
+    }
+  }
+  return out;
+}
+
+// —— 四桶对账锚(asset-valuation)——
+// /asset/asset-valuation 给四桶的**权威美元金额**。本片只用 earn 桶做残差兜底;四桶全量对账留片 4。
+interface OkxValuationDetails {
+  classic?: string;
+  earn?: string;
+  funding?: string;
+  trading?: string;
+}
+interface OkxValuationResponse {
+  code?: string;
+  msg?: string;
+  data?: Array<{ totalBal?: string; details?: OkxValuationDetails }>;
+}
+
+// 展示金额格式化($ + 千分位,整数)。account 级 Note 文案用。
+const fmtUsd = (n: number): string =>
+  `$${Math.round(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+// earn 桶残差 Note(account 级):拉到的 earn 子项(savings + staking)加总对不上 asset-valuation 的
+// earn 桶,差额挂"未细分"提示,兜住 Folio 不细拉的 earn 子类(定期等)。**只在能可信估值时报**:
+// 任一 earn 子项估不出价(无提示价、非稳定币)时残差不可信(是「拉到了但没估到价」而非「没拉到」)→ 不报,
+// 避免虚报一个吓人的"未细分 $X"。差额 ≤ 阈值也不报。
+export function earnResidualNote(
+  earnBucketUsd: number,
+  earnItems: Spot[],
+  hint: PriceHint,
+): Note | undefined {
+  let valued = 0;
+  let unpriced = 0;
+  for (const item of earnItems) {
+    if (priceOf(item.symbol, hint) != null) valued += item.value;
+    else unpriced++;
+  }
+  if (unpriced > 0) return undefined; // 残差不可信 → 不报
+  const residual = earnBucketUsd - valued;
+  if (!(residual > EARN_RESIDUAL_MIN_USD)) return undefined;
+  return {
+    title: "Earn not itemized",
+    icon: "info",
+    content: `About ${fmtUsd(residual)} in Earn couldn't be itemized (fixed-term or other sub-types)`,
+  };
+}
+
 // 出网:签名头 + 失败归类走共享的 http 包装(@folio/shared)。**没有限频器** —— 额度按账户自己
 // 那把 key 算、一次同步只发 1 个请求,队永远是空的,装了拦不到任何东西(见 tests/no-gate.test.ts)。
 //
@@ -225,32 +350,60 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
     },
   ],
 
-  async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
+  async fetchBalances(ctx): Promise<{ balances: Spot[]; note?: Note[] }> {
     const request = makeRequest(pickOkxBase(ctx.creds as Record<string, unknown>));
     const creds = ctx.account.creds;
     // 统一账户各桶用**同一把 key 并发**拉,合并成一份余额(ADR 0031)。本片接入交易账户(trading)+
-    // 资金账户(funding)。用 allSettled 而非 all:**等齐所有请求**再决定,避免某端点先失败时,并发的
-    // 兄弟请求(异步签名仍在飞)漏到调用结束后才 fetch(fire-and-forget → 泄漏到下轮/污染测试 spy)。
-    // 本片语义仍是「任一端点失败即整次失败」(抛第一个错、下轮重试,不拿半份快照覆盖);逐桶「尽力而为」
-    // (部分失败降级为账户级 Note)留片 4 把这里的 throw 换成收集 Note。
+    // 资金账户(funding)+ 赚币(savings + staking-defi)+ 对账锚(asset-valuation)。
+    // 用 allSettled 而非 all:**等齐所有请求**再决定,避免某端点先失败时,并发的兄弟请求(异步签名仍在飞)
+    // 漏到调用结束后才 fetch(fire-and-forget → 泄漏到下轮/污染测试 spy)。
+    // **余额源桶(0-3)**语义仍是「任一失败即整次失败」(抛第一个错、下轮重试,不拿半份快照覆盖);逐桶
+    // 「尽力而为」留片 4 把这里的 throw 换成收集 Note。**对账锚(4,asset-valuation)** 非余额源、只喂残差 Note,
+    // 恒软处理:失败/异常只是本轮没那条 Note,绝不阻断同步。
     const settled = await Promise.allSettled([
       request(BALANCE_PATH, { context: creds }),
       request(FUNDING_BALANCES_PATH, { context: creds }),
+      request(SAVINGS_BALANCE_PATH, { context: creds }),
+      request(STAKING_ORDERS_ACTIVE_PATH, { context: creds }),
+      request(ASSET_VALUATION_PATH, { context: creds }),
     ]);
-    const firstRejected = settled.find((r) => r.status === "rejected");
+    const balanceBuckets = settled.slice(0, 4);
+    const firstRejected = balanceBuckets.find((r) => r.status === "rejected");
     if (firstRejected) throw (firstRejected as PromiseRejectedResult).reason;
-    const [tradingBody, fundingBody] = settled.map(
+    const [tradingBody, fundingBody, savingsBody, stakingBody] = balanceBuckets.map(
       (r) => (r as PromiseFulfilledResult<unknown>).value,
-    ) as [OkxBalanceResponse, OkxFundingResponse];
+    ) as [OkxBalanceResponse, OkxFundingResponse, OkxSavingsResponse, OkxStakingResponse];
     // HTTP 200 + code!="0" 是 OKX 表达错误的主要方式,包管不到这一层。
     assertCodeOk(tradingBody);
     assertCodeOk(fundingBody);
+    assertCodeOk(savingsBody);
+    assertCodeOk(stakingBody);
+
     const details = tradingBody.data?.[0]?.details ?? [];
-    // 交易账户市价表复用给资金账户估值(零额外请求,见 buildPriceHint)。
+    // 交易账户市价表复用给资金/赚币估值(零额外请求,见 buildPriceHint)。
     const hint = buildPriceHint(details);
-    return {
-      balances: [...parseBalances(details), ...parseFunding(fundingBody.data ?? [], hint)],
-    };
+    const earnItems = [
+      ...parseSavings(savingsBody.data ?? [], hint),
+      ...parseStaking(stakingBody.data ?? [], hint),
+    ];
+    const balances: Spot[] = [
+      ...parseBalances(details),
+      ...parseFunding(fundingBody.data ?? [], hint),
+      ...earnItems,
+    ];
+
+    // 对账锚(软):asset-valuation 的 earn 桶 vs 拉到的 earn 子项加总 → 差额挂"未细分"account 级 Note。
+    const notes: Note[] = [];
+    const valuation =
+      settled[4].status === "fulfilled" ? (settled[4].value as OkxValuationResponse) : undefined;
+    if (valuation?.code === "0") {
+      const earnBucketUsd = Number(valuation.data?.[0]?.details?.earn ?? 0);
+      if (earnBucketUsd > 0) {
+        const residual = earnResidualNote(earnBucketUsd, earnItems, hint);
+        if (residual) notes.push(residual);
+      }
+    }
+    return { balances, note: notes.length ? notes : undefined };
   },
 
   // 校验:签名打 balance。走 fetchBalances 同一条判据(assertCodeOk):HTTP 层失败由 request 抛,

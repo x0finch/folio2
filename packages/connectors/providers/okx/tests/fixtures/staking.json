@@ -1,0 +1,11 @@
+{
+  "code": "0",
+  "data": [
+    {
+      "ccy": "ETH",
+      "protocol": "OKX ETH Staking",
+      "apy": "0.04",
+      "investData": [{ "ccy": "ETH", "amt": "2" }]
+    }
+  ]
+}
