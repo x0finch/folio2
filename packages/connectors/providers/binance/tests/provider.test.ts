@@ -148,6 +148,45 @@ describe("binanceProvider.fetchBalances", () => {
     expect(note).toBeUndefined();
   });
 
+  it("理财持仓 > 一页(size=100)→ 翻页取全,靠后的 UNI/USDT 不丢", async () => {
+    // 第 1 页返回满 100 条(触发翻页),第 2 页才给 UNI/USDT —— 不翻页就会丢掉它们(#... 的病根)。
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      asset: `A${i}`,
+      totalAmount: "1",
+      latestAnnualPercentageRate: "0.01",
+    }));
+    const page2 = [
+      { asset: "UNI", totalAmount: "5", latestAnnualPercentageRate: "0.02" },
+      { asset: "USDT", totalAmount: "100", latestAnnualPercentageRate: "0.03" },
+    ];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/sapi/v1/simple-earn/flexible/position")) {
+        const rows = u.includes("current=2") ? page2 : page1;
+        return new Response(JSON.stringify({ rows, total: 102 }), { status: 200 });
+      }
+      if (u.includes("/sapi/v1/simple-earn/locked/position"))
+        return new Response(JSON.stringify({ rows: [], total: 0 }), { status: 200 });
+      if (u.includes("/sapi/v1/asset/get-funding-asset"))
+        return new Response(JSON.stringify([]), { status: 200 });
+      if (u.includes("/dapi/v1/account"))
+        return new Response(JSON.stringify({ assets: [], positions: [] }), { status: 200 });
+      if (u.includes("/fapi/v2/account"))
+        return new Response(JSON.stringify({ totalMarginBalance: "0", positions: [] }), {
+          status: 200,
+        });
+      if (u.includes("/api/v3/account"))
+        return new Response(JSON.stringify({ balances: [] }), { status: 200 });
+      return new Response(JSON.stringify([{ symbol: "UNIUSDT", price: "10" }]), { status: 200 });
+    });
+
+    const { balances } = await binanceProvider.fetchBalances(ctx());
+    const earn = balances.filter((b) => b.note?.group === "earn");
+    expect(earn).toHaveLength(102); // 100(第一页)+ 2(第二页)
+    expect(earn.some((b) => b.symbol === "UNI")).toBe(true);
+    expect(earn.some((b) => b.symbol === "USDT")).toBe(true);
+  });
+
   it("合约端点失败(没勾 Futures → 401)→ 现货照返回 + 账户级 Note(不整账户失败)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const u = String(url);
