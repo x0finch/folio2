@@ -2,9 +2,15 @@
 export const OKX_API_BASE = "https://www.okx.com";
 export const BALANCE_PATH = "/api/v5/account/balance"; // 交易账户(trading 桶)余额(自带 eqUsd)
 export const FUNDING_BALANCES_PATH = "/api/v5/asset/balances"; // 资金账户(funding 桶)余额(数量取 bal)
+export const SAVINGS_BALANCE_PATH = "/api/v5/finance/savings/balance"; // 赚币·活期出借(数量取 amt)
+export const STAKING_ORDERS_ACTIVE_PATH = "/api/v5/finance/staking-defi/orders-active"; // 赚币·链上活跃订单
+export const ASSET_VALUATION_PATH = "/api/v5/asset/asset-valuation"; // 四桶权威美元估值(对账锚)
 
 // 稳定币按 1 美元估值兜底(交易账户没这个币、oracle 尚未回填时用)。与 binance 同口径。
 export const STABLECOINS: ReadonlySet<string> = new Set(["USDT", "USDC", "DAI", "TUSD", "FDUSD"]);
+
+// earn 桶残差阈值:拉到的 earn 子项加总与 asset-valuation 的 earn 桶差额 > 此值才挂"未细分"account 级 Note。
+export const EARN_RESIDUAL_MIN_USD = 1;
 
 export const HEADER_KEY = "OK-ACCESS-KEY";
 export const HEADER_SIGN = "OK-ACCESS-SIGN";

@@ -1,0 +1,16 @@
+[
+  {
+    "symbol": "ETH",
+    "tokenRef": "okx/issued:ETH",
+    "amount": 2,
+    "price": 3000,
+    "value": 6000,
+    "kind": "spot",
+    "note": {
+      "title": "Earn",
+      "icon": "info",
+      "content": "OKX ETH Staking · 4.00% APY",
+      "group": "earn"
+    }
+  }
+]

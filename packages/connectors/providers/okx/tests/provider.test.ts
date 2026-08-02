@@ -1,9 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildPriceHint, okxProvider, parseBalances, parseFunding } from "../src";
+import {
+  buildPriceHint,
+  earnResidualNote,
+  okxProvider,
+  parseBalances,
+  parseFunding,
+  parseSavings,
+  parseStaking,
+} from "../src";
 import balance from "./fixtures/balance.json";
 import expected from "./fixtures/expected-balances.json";
 import expectedFunding from "./fixtures/expected-funding-balances.json";
+import expectedSavings from "./fixtures/expected-savings-balances.json";
+import expectedStaking from "./fixtures/expected-staking-balances.json";
 import funding from "./fixtures/funding.json";
+import savings from "./fixtures/savings.json";
+import staking from "./fixtures/staking.json";
+import valuation from "./fixtures/valuation.json";
 
 // 新 FetchContext 形状:account.creds(AC:apiKey/secret/passphrase,由分派桥 openCreds 解密后灌入)+ creds(PC:空)。
 type Ctx = Parameters<typeof okxProvider.fetchBalances>[0];
@@ -73,7 +86,81 @@ describe("parseFunding (golden: fixture in → fixture out)", () => {
   });
 });
 
+// 赚币(earn 桶)golden:savings/staking 响应 + 市价提示表 → 期望值。覆盖:amt→amount、rate/apy→APY note、
+// note.group:"earn"、价复用交易账户市价(ETH)/稳定币(USDT)。
+describe("parseSavings / parseStaking (golden: fixture in → fixture out)", () => {
+  const hint = buildPriceHint(balance.data[0].details);
+  it("savings: amt→amount, rate→'Flexible · X% APY' note, group earn", () => {
+    expect(parseSavings(savings.data, hint)).toEqual(expectedSavings);
+  });
+  it("staking: investData[].amt→amount, protocol+apy note, group earn", () => {
+    expect(parseStaking(staking.data, hint)).toEqual(expectedStaking);
+  });
+});
+
+// earn 残差(account 级 Note):拉到的 earn 子项加总 vs asset-valuation 的 earn 桶。
+describe("earnResidualNote", () => {
+  const hint = buildPriceHint(balance.data[0].details);
+  const earnItems = [...parseSavings(savings.data, hint), ...parseStaking(staking.data, hint)];
+
+  it("earn 桶 > 拉到的加总 → 挂'未细分 $X' Note", () => {
+    // earn 桶 12000;拉到 USDT 5000 + ETH 6000 = 11000;残差 1000。
+    const note = earnResidualNote(12000, earnItems, hint);
+    expect(note?.title).toBe("Earn not itemized");
+    expect(String(note?.content)).toContain("$1,000");
+  });
+
+  it("earn 桶 ≈ 拉到的加总(差额 ≤ 阈值)→ 不挂 Note", () => {
+    expect(earnResidualNote(11000, earnItems, hint)).toBeUndefined();
+  });
+
+  it("有 earn 子项估不出价(残差不可信)→ 不挂 Note(不虚报)", () => {
+    // 追加一个无提示价、非稳定币的 earn 项 → unpriced>0 → 抑制。
+    const withUnpriced = [
+      ...earnItems,
+      { symbol: "XYZ", amount: 1, value: 0, kind: "spot", tokenRef: "okx/issued:XYZ" } as const,
+    ];
+    expect(earnResidualNote(99999, withUnpriced, hint)).toBeUndefined();
+  });
+});
+
 describe("okxProvider.fetchBalances", () => {
+  // 所有余额源桶(交易/资金/赚币)+ 对账锚(asset-valuation)的路由 mock;不匹配的返回空。
+  const routeAll = () =>
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/api/v5/asset/balances")) return ok(funding);
+      if (u.includes("/finance/savings/balance")) return ok(savings);
+      if (u.includes("/finance/staking-defi/orders-active")) return ok(staking);
+      if (u.includes("/asset/asset-valuation")) return ok(valuation);
+      return ok(balance); // /api/v5/account/balance
+    });
+
+  it("并发全桶(交易/资金/赚币)→ 合并 spot;earn 残差挂 account 级 Note", async () => {
+    routeAll();
+    const { balances, note } = await okxProvider.fetchBalances(ctx());
+    // 交易 4 + 资金 3 + 赚币 2(USDT 活期 + ETH staking)= 9
+    expect(balances).toHaveLength(9);
+    expect(balances.filter((b) => b.note?.group === "earn")).toHaveLength(2);
+    // earn 桶 12000 − 拉到 11000 = 1000 → 未细分 Note
+    expect(note?.[0]?.title).toBe("Earn not itemized");
+    expect(String(note?.[0]?.content)).toContain("$1,000");
+  });
+
+  it("asset-valuation 失败 → 不阻断同步,只是本轮没残差 Note", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/asset/asset-valuation")) return new Response("", { status: 500 });
+      if (u.includes("/api/v5/asset/balances")) return ok(funding);
+      if (u.includes("/finance/savings/balance")) return ok(savings);
+      if (u.includes("/finance/staking-defi/orders-active")) return ok(staking);
+      return ok(balance);
+    });
+    const { balances, note } = await okxProvider.fetchBalances(ctx());
+    expect(balances).toHaveLength(9); // 余额照常
+    expect(note).toBeUndefined(); // 锚挂了 → 无残差 Note,但同步整体成功
+  });
+
   it("signs with 4 OK-ACCESS headers (base64 SIGN) and parses balances", async () => {
     // 本测聚焦交易账户签名/解析;funding 端点返回空,合并与并发另见专测。
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
