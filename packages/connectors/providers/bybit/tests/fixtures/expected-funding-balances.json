@@ -1,0 +1,28 @@
+[
+  {
+    "symbol": "USDT",
+    "tokenRef": "bybit/issued:USDT",
+    "amount": 100,
+    "price": 1,
+    "value": 100,
+    "kind": "spot",
+    "note": { "title": "Funding", "icon": "info", "content": "Funding wallet", "group": "funding" }
+  },
+  {
+    "symbol": "BTC",
+    "tokenRef": "bybit/issued:BTC",
+    "amount": 0.01,
+    "price": 60000,
+    "value": 600,
+    "kind": "spot",
+    "note": { "title": "Funding", "icon": "info", "content": "Funding wallet", "group": "funding" }
+  },
+  {
+    "symbol": "WLFI",
+    "tokenRef": "bybit/issued:WLFI",
+    "amount": 660,
+    "value": 0,
+    "kind": "spot",
+    "note": { "title": "Funding", "icon": "info", "content": "Funding wallet", "group": "funding" }
+  }
+]

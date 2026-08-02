@@ -12,12 +12,14 @@ import { z } from "zod";
 import {
   AUTH_ERROR_CODES,
   BYBIT_API_BASE,
+  FUNDING_BALANCES_PATH,
   HEADER_KEY,
   HEADER_RECV_WINDOW,
   HEADER_SIGN,
   HEADER_SIGN_TYPE,
   HEADER_TIMESTAMP,
   RECV_WINDOW,
+  STABLECOINS,
   WALLET_BALANCE_PATH,
 } from "./constants";
 
@@ -39,6 +41,17 @@ interface BybitWalletBalanceResponse {
   retCode?: number; // Bybit 的 retCode 是**数字**(0=OK),异于 OKX 的字符串 code
   retMsg?: string;
   result?: { list?: Array<{ accountType?: string; totalEquity?: string; coin?: BybitCoin[] }> };
+}
+
+// 资金账户 /v5/asset/transfer/query-account-coins-balance?accountType=FUND 的最小形状。
+interface BybitFundingCoin {
+  coin?: string;
+  walletBalance?: string; // 总余额 —— 持有量口径
+}
+interface BybitFundingResponse {
+  retCode?: number;
+  retMsg?: string;
+  result?: { balance?: BybitFundingCoin[] };
 }
 
 // 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
@@ -80,6 +93,52 @@ export function parseUnified(coins: BybitCoin[]): Spot[] {
       };
     }
     out.push(row);
+  }
+  return out;
+}
+
+// —— 币价提示表(price hint)——
+// 资金账户端点**不自带美元价**。统一账户每币的 usdValue/walletBalance 就是它的市价,抽成一张 ccy→price
+// 表**零额外请求**复用:资金账户里**也在统一账户出现或是稳定币**的币能立即估值,其余留 value:0 交 oracle。
+export type PriceHint = Record<string, number>;
+export function buildPriceHint(coins: BybitCoin[]): PriceHint {
+  const hint: PriceHint = {};
+  for (const c of coins ?? []) {
+    if (!c.coin) continue;
+    const amount = Number(c.walletBalance ?? 0);
+    const usd = Number(c.usdValue ?? 0);
+    if (amount > 0 && usd > 0) hint[c.coin.trim().toUpperCase()] = usd / amount;
+  }
+  return hint;
+}
+// 币的美元单价:稳定币≈1,否则查提示表,查不到 → undefined(value 记 0,oracle 回填)。
+function priceOf(symbol: string, hint: PriceHint): number | undefined {
+  const s = symbol.trim().toUpperCase();
+  if (STABLECOINS.has(s)) return 1;
+  return hint[s];
+}
+
+// 纯解析:资金账户 balance[] → Spot[]。数量取 `walletBalance`;价走提示表(稳定币≈1,否则统一账户市价,
+// 无 → value 0 由 oracle 兜底)。每条带 `note.group:"funding"`(不渲染,仅供账户抽屉归 Tab)。
+// 跳过空 coin / walletBalance≤0。与 IO 分离,golden test。
+export function parseFunding(assets: BybitFundingCoin[], hint: PriceHint): Spot[] {
+  const out: Spot[] = [];
+  for (const a of assets ?? []) {
+    const coin = a.coin;
+    if (!coin) continue;
+    const amount = Number(a.walletBalance ?? 0);
+    if (!(amount > 0)) continue;
+    const price = priceOf(coin, hint);
+    out.push({
+      symbol: coin,
+      amount,
+      price,
+      value: price != null ? amount * price : 0,
+      kind: "spot",
+      tokenRef: tokenRef.issued(PROVIDER_ID, coin.trim().toUpperCase()),
+      // 资金钱包标记(抽屉按 note.group 分 Tab):group=funding。与 Binance/OKX 一字对齐。
+      note: { title: "Funding", icon: "info", content: "Funding wallet", group: "funding" },
+    });
   }
   return out;
 }
@@ -180,12 +239,30 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
 
   async fetchBalances(ctx): Promise<{ balances: Spot[] }> {
     const request = makeRequest(pickBybitBase(ctx.creds as Record<string, unknown>));
-    const body = (await request(WALLET_BALANCE_PATH, {
-      context: ctx.account.creds,
-      query: { accountType: "UNIFIED" },
-    })) as BybitWalletBalanceResponse;
-    assertRetCodeOk(body); // HTTP 200 + retCode!=0 是 Bybit 表达错误的主要方式,包管不到这一层
-    return { balances: parseUnified(body.result?.list?.[0]?.coin ?? []) };
+    const creds = ctx.account.creds;
+    // 各桶用**同一把 key 并发**拉,合并成一份余额(ADR 0032)。本片接入统一账户(UNIFIED)+ 资金账户(FUND)。
+    // 用 allSettled 而非 all:**等齐所有请求**再决定,避免某端点先失败时,并发的兄弟请求(异步签名仍在飞)
+    // 漏到调用结束后才 fetch(fire-and-forget → 泄漏到下轮 / 污染测试 spy)。本片语义仍是「任一端点失败即
+    // 整次失败」(抛第一个错、下轮重试,不拿半份快照覆盖);逐桶「尽力而为」留片 4 把这里的 throw 换成收 Note。
+    const settled = await Promise.allSettled([
+      request(WALLET_BALANCE_PATH, { context: creds, query: { accountType: "UNIFIED" } }),
+      request(FUNDING_BALANCES_PATH, { context: creds, query: { accountType: "FUND" } }),
+    ]);
+    const firstRejected = settled.find((r) => r.status === "rejected");
+    if (firstRejected) throw (firstRejected as PromiseRejectedResult).reason;
+    const [unifiedBody, fundingBody] = settled.map(
+      (r) => (r as PromiseFulfilledResult<unknown>).value,
+    ) as [BybitWalletBalanceResponse, BybitFundingResponse];
+    // HTTP 200 + retCode!=0 是 Bybit 表达错误的主要方式,包管不到这一层。
+    assertRetCodeOk(unifiedBody);
+    assertRetCodeOk(fundingBody);
+
+    const coins = unifiedBody.result?.list?.[0]?.coin ?? [];
+    // 统一账户市价表复用给资金账户估值(零额外请求,见 buildPriceHint)。
+    const hint = buildPriceHint(coins);
+    return {
+      balances: [...parseUnified(coins), ...parseFunding(fundingBody.result?.balance ?? [], hint)],
+    };
   },
 
   // 校验:签名打统一账户余额确认 key + 读权限(creds 已由 validateCredentials 保证非空)。

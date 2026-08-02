@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { bybitProvider, parseUnified } from "../src";
+import { buildPriceHint, bybitProvider, parseFunding, parseUnified } from "../src";
+import expectedFunding from "./fixtures/expected-funding-balances.json";
 import expected from "./fixtures/expected-unified-balances.json";
+import funding from "./fixtures/funding.json";
 import walletBalance from "./fixtures/wallet-balance.json";
 
 // FetchContext 形状:account.creds(AC:apiKey/secret,由分派桥 openCreds 解密后灌入)+ creds(PC:
@@ -52,14 +54,38 @@ describe("parseUnified (golden: fixture in → fixture out)", () => {
   });
 });
 
+// 资金账户(FUND)golden:funding.json(录制的 /asset/transfer/query-account-coins-balance 响应)+
+// 统一账户市价提示表 → expected-funding-balances.json。覆盖:walletBalance→amount、稳定币≈1(USDT)、
+// 统一账户市价复用(BTC)、无价的币 value 0 交 oracle(WLFI)、每条带 note.group:"funding"。
+describe("parseFunding (golden: fixture in → fixture out)", () => {
+  it("maps recorded funding assets + price hint to expected-funding-balances", () => {
+    const hint = buildPriceHint(walletBalance.result.list[0].coin);
+    expect(parseFunding(funding.result.balance, hint)).toEqual(expectedFunding);
+  });
+
+  it("每条 funding 余额带不渲染的 note.group='funding'(供抽屉归 Tab)", () => {
+    const hint = buildPriceHint(walletBalance.result.list[0].coin);
+    expect(
+      parseFunding(funding.result.balance, hint).every((r) => r.note?.group === "funding"),
+    ).toBe(true);
+  });
+});
+
 describe("bybitProvider.fetchBalances", () => {
   it("signs with X-BAPI headers (hex SIGN) and parses UNIFIED balances", async () => {
-    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(walletBalance));
+    // 本测聚焦统一账户签名/解析;funding 端点返回空,合并与并发另见专测。
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes("query-account-coins-balance"))
+        return ok({ retCode: 0, result: { balance: [] } });
+      return ok(walletBalance);
+    });
     const { balances } = await bybitProvider.fetchBalances(ctx());
     expect(balances.map((b) => b.symbol)).toEqual(["USD1", "USDT", "BTC"]);
 
-    const [url, init] = spy.mock.calls[0];
-    expect(String(url)).toContain("/v5/account/wallet-balance?accountType=UNIFIED");
+    // 并发多端点:哪个请求先 fetch 由异步 HMAC 签名的完成顺序定,calls[0] 不保证是统一账户 → 用 find 定位。
+    const call = spy.mock.calls.find((c) => String(c[0]).includes("/v5/account/wallet-balance"));
+    const init = call?.[1];
+    expect(String(call?.[0])).toContain("/v5/account/wallet-balance?accountType=UNIFIED");
     const h = init?.headers as Record<string, string>;
     expect(h["X-BAPI-API-KEY"]).toBe("k");
     expect(h["X-BAPI-RECV-WINDOW"]).toBe("5000");
@@ -68,19 +94,43 @@ describe("bybitProvider.fetchBalances", () => {
     expect(h["X-BAPI-SIGN"]).toMatch(/^[a-f0-9]{64}$/); // hex HMAC-SHA256
   });
 
+  it("并发打统一账户 + 资金账户,两端点均被签名调用,合并出一份余额", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes("query-account-coins-balance")) return ok(funding);
+      return ok(walletBalance);
+    });
+    const { balances } = await bybitProvider.fetchBalances(ctx());
+    // 统一账户 3(USD1/USDT/BTC)+ 资金账户 3(USDT/BTC/WLFI)= 6,不同桶同名币各自成行(聚合层按 token_id 合并)。
+    expect(balances.map((b) => b.symbol)).toEqual(["USD1", "USDT", "BTC", "USDT", "BTC", "WLFI"]);
+    expect(balances.filter((b) => b.note?.group === "funding")).toHaveLength(3);
+
+    const paths = spy.mock.calls.map((c) => String(c[0]));
+    expect(paths.some((p) => p.includes("/v5/account/wallet-balance"))).toBe(true);
+    expect(paths.some((p) => p.includes("query-account-coins-balance"))).toBe(true);
+    for (const [, init] of spy.mock.calls) {
+      const h = init?.headers as Record<string, string>;
+      expect(h["X-BAPI-API-KEY"]).toBe("k");
+      expect(h["X-BAPI-SIGN"]).toMatch(/^[a-f0-9]{64}$/);
+    }
+  });
+
+  // fetchBalances 现并发打多个端点(每次 fetch 需**独立** Response —— body 只能读一次,共享同一个
+  // Response 对象会「Body already read」),故错误 mock 用 mockImplementation 每调用返回新 Response。
   it("maps HTTP-200 + auth retCode → AUTH_FAILED (Bybit error model)", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       ok({ retCode: 10003, retMsg: "API key is invalid" }),
     );
     await expect(bybitProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "AUTH_FAILED" });
   });
 
   it("maps HTTP-200 + non-auth retCode → UPSTREAM_ERROR; 429 → RATE_LIMITED", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(ok({ retCode: 10001, retMsg: "param error" }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      ok({ retCode: 10001, retMsg: "param error" }),
+    );
     await expect(bybitProvider.fetchBalances(ctx())).rejects.toMatchObject({
       code: "UPSTREAM_ERROR",
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 429 }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
     await expect(bybitProvider.fetchBalances(ctx())).rejects.toMatchObject({
       code: "RATE_LIMITED",
     });
@@ -94,11 +144,20 @@ describe("bybitProvider.fetchBalances", () => {
 
   // #264:出口 IP 被地区封时,app 从 env 把代理 base 注入 ctx.creds.BYBIT_API_BASE。connector 只当不透明整串用。
   it("ctx.creds 设 BYBIT_API_BASE → 签名请求打覆盖 base,不打默认 api.bybit.com", async () => {
-    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(walletBalance));
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes("query-account-coins-balance"))
+        return ok({ retCode: 0, result: { balance: [] } });
+      return ok(walletBalance);
+    });
     await bybitProvider.fetchBalances(ctx(CREDS, { BYBIT_API_BASE: "https://px.example/s/bybit" }));
-    const url = String(spy.mock.calls[0]?.[0]);
-    expect(url).toContain("https://px.example/s/bybit/v5/account/wallet-balance");
-    expect(url).not.toContain("api.bybit.com");
+    const urls = spy.mock.calls.map((c) => String(c[0]));
+    expect(
+      urls.some((u) => u.startsWith("https://px.example/s/bybit/v5/account/wallet-balance")),
+    ).toBe(true);
+    expect(urls.some((u) => u.startsWith("https://px.example/s/bybit/v5/asset/transfer"))).toBe(
+      true,
+    );
+    expect(urls.some((u) => u.includes("api.bybit.com"))).toBe(false);
   });
 });
 
