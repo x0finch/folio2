@@ -99,7 +99,20 @@ export function toPerpView(balances: PerpBalance[]): PerpView {
     const raw = parseJson(b.metaJson);
     if (vk === "perp_equity") {
       const r = PerpEquityMeta.safeParse(raw);
-      if (r.success) equity = { ...r.data, accountValue: b.usdValue };
+      // 多个权益行(如 Binance 的 U 本位 + 币本位两个合约钱包)→ **累加合并**成一个账户权益视图,
+      // 而非互相覆盖只留最后一个。净值本就各自计入 buildCanonicalHoldings;这里只修「权益条只显一个
+      // 钱包」的展示缺陷。单权益的 provider(hyperliquid)行为不变。
+      if (r.success) {
+        const v = { ...r.data, accountValue: b.usdValue };
+        equity = equity
+          ? {
+              accountValue: equity.accountValue + v.accountValue,
+              withdrawable: equity.withdrawable + v.withdrawable,
+              totalMarginUsed: equity.totalMarginUsed + v.totalMarginUsed,
+              totalNtlPos: equity.totalNtlPos + v.totalNtlPos,
+            }
+          : v;
+      }
     } else if (vk === "perp_position") {
       const r = PerpPositionMeta.safeParse(raw);
       // coin 从 meta 取(#243:不再依赖快照 symbol 列)。PerpPositionView 的 coin 即 meta.coin。

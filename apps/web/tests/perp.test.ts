@@ -92,6 +92,29 @@ describe("toPerpView —— 遗留 kind=perp(靠 meta.role)", () => {
 });
 
 describe("toPerpView —— 新 kind=perp_equity/perp_position(meta 无 role)", () => {
+  it("多个权益行(如 Binance U 本位 + 币本位)→ 累加合并成一个账户权益,不互相覆盖", () => {
+    const view = toPerpView([
+      {
+        kind: "perp_equity",
+        amount: 1000,
+        usdValue: 1000,
+        metaJson: JSON.stringify({ withdrawable: 800, totalMarginUsed: 200, totalNtlPos: 3000 }),
+      },
+      {
+        kind: "perp_equity",
+        amount: 500,
+        usdValue: 500,
+        metaJson: JSON.stringify({ withdrawable: 400, totalMarginUsed: 100, totalNtlPos: 2000 }),
+      },
+    ]);
+    expect(view.equity).toEqual({
+      accountValue: 1500,
+      withdrawable: 1200,
+      totalMarginUsed: 300,
+      totalNtlPos: 5000,
+    });
+  });
+
   it("按 kind 判别拆 equity/positions", () => {
     const view = toPerpView([
       {
