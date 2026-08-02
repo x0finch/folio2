@@ -54,3 +54,9 @@ export const COINM_ACCOUNT_PATH = "/dapi/v1/account"; // SIGNED,per-asset 权益
 // —— 资金账户(Funding)——
 // 在主 api host,但是 **POST**(SIGNED)。返回币种 + 数量(free/locked/freeze),无 USD → 同现货用 ticker 估值。
 export const FUNDING_ASSET_PATH = "/sapi/v1/asset/get-funding-asset";
+
+// —— 理财(Simple Earn)——
+// 活期 + 定期两个 GET(SIGNED,主 api host)。返回币种 + 数量 + APY(活期还带浮动利率、定期带到期日),
+// 无 USD → 同现货用 ticker 估值,当 spot;APY / 锁定期挂 balance 级 note(info 语气)。
+export const EARN_FLEXIBLE_PATH = "/sapi/v1/simple-earn/flexible/position";
+export const EARN_LOCKED_PATH = "/sapi/v1/simple-earn/locked/position";

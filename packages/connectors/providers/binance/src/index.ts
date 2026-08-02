@@ -19,6 +19,8 @@ import {
   BINANCE_DELIVERY_API_BASE,
   BINANCE_FUTURES_API_BASE,
   COINM_ACCOUNT_PATH,
+  EARN_FLEXIBLE_PATH,
+  EARN_LOCKED_PATH,
   FUNDING_ASSET_PATH,
   MARGIN_ASSET,
   PUBLIC_LIMIT_KEY,
@@ -308,6 +310,74 @@ export function parseFundingAssets(assets: FundingAsset[], prices: Record<string
   return out;
 }
 
+// —— 理财(Simple Earn)的最小形状 ——
+interface EarnFlexibleRow {
+  asset?: string;
+  totalAmount?: string;
+  latestAnnualPercentageRate?: string; // 活期浮动 APY(小数,如 "0.05")
+}
+interface EarnLockedRow {
+  asset?: string;
+  amount?: string;
+  apy?: string; // 定期 APY(小数)
+  redeemDate?: number | string; // 到期(ms 时间戳)
+}
+interface EarnFlexible {
+  rows?: EarnFlexibleRow[];
+}
+interface EarnLocked {
+  rows?: EarnLockedRow[];
+}
+
+// APY 小数 → 百分比串("0.05" → "5.00%")。
+const apyPct = (rate: string | number | undefined): string =>
+  `${(Number(rate ?? 0) * 100).toFixed(2)}%`;
+// 到期 ms → MM/DD(UTC,避开时区);非法/缺失 → 空串。
+function mmdd(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const d = new Date(ms);
+  return `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+// 纯解析:活期 + 定期理财 → spot(ticker 估值,同现货)+ balance 级 note(APY / 锁定期,info 语气)。
+// 同一个币活期定期各一行 → 各自成行(聚合层按 token_id 合并);锁定的币照常计入净值。golden test。
+export function parseEarnPositions(
+  flexible: EarnFlexible,
+  locked: EarnLocked,
+  prices: Record<string, number>,
+): Spot[] {
+  const out: Spot[] = [];
+  const add = (asset: string | undefined, amount: number, note: Note) => {
+    if (!asset || !(amount > 0)) return;
+    const price = STABLECOINS.has(asset) ? 1 : (prices[`${asset}${QUOTE_ASSET}`] ?? undefined);
+    out.push({
+      symbol: asset,
+      amount,
+      price,
+      value: price != null ? amount * price : 0,
+      kind: "spot",
+      tokenRef: tokenRef.issued(PROVIDER_ID, asset.trim().toUpperCase()),
+      note,
+    });
+  };
+  for (const r of flexible.rows ?? []) {
+    add(r.asset, Number(r.totalAmount ?? 0), {
+      title: "Earn",
+      icon: "info",
+      content: `Flexible · ${apyPct(r.latestAnnualPercentageRate)} APY`,
+    });
+  }
+  for (const r of locked.rows ?? []) {
+    const dd = r.redeemDate != null ? mmdd(Number(r.redeemDate)) : "";
+    add(r.asset, Number(r.amount ?? 0), {
+      title: "Earn",
+      icon: "info",
+      content: `Locked${dd ? ` until ${dd}` : ""} · ${apyPct(r.apy)} APY`,
+    });
+  }
+  return out;
+}
+
 // 公开(免签)端点的限频器 —— 按出口 IP 共享,见 constants.ts 里为什么只给它装。
 const publicLimit = defineRateLimit({
   key: PUBLIC_LIMIT_KEY,
@@ -458,8 +528,27 @@ const fundingWallet: Wallet = {
   },
 };
 
-// 本 provider 当前拉的钱包集 —— 后续片(理财)往这里加一项即可。
-const WALLETS: Wallet[] = [spotWallet, usdmFuturesWallet, coinmFuturesWallet, fundingWallet];
+// 理财钱包:活期 + 定期两个 GET(主 api host),当 spot、ticker 估值 → await prices。两端点任一失败即该钱包失败。
+const earnWallet: Wallet = {
+  name: "Earn",
+  run: async ({ apiKey, secret }, prices) => {
+    const params = () => ({ recvWindow: RECV_WINDOW, timestamp: Date.now() });
+    const [flexible, locked] = await Promise.all([
+      signedGet(signedRequest, EARN_FLEXIBLE_PATH, params(), apiKey, secret),
+      signedGet(signedRequest, EARN_LOCKED_PATH, params(), apiKey, secret),
+    ]);
+    return parseEarnPositions(flexible as EarnFlexible, locked as EarnLocked, await prices);
+  },
+};
+
+// 本 provider 拉的钱包集 —— Binance 五钱包全接上(现货 / U 本位 / 币本位 / 资金 / 理财)。
+const WALLETS: Wallet[] = [
+  spotWallet,
+  usdmFuturesWallet,
+  coinmFuturesWallet,
+  fundingWallet,
+  earnWallet,
+];
 
 // 账户级失败 Note(ADR 0030):列出没同步上的钱包 + 一句提示。
 function walletFailureNote(failed: string[]): Note {

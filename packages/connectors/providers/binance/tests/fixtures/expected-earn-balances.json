@@ -1,0 +1,20 @@
+[
+  {
+    "symbol": "USDT",
+    "amount": 1000,
+    "price": 1,
+    "value": 1000,
+    "kind": "spot",
+    "tokenRef": "binance/issued:USDT",
+    "note": { "title": "Earn", "icon": "info", "content": "Flexible · 5.00% APY" }
+  },
+  {
+    "symbol": "BTC",
+    "amount": 0.5,
+    "price": 60000,
+    "value": 30000,
+    "kind": "spot",
+    "tokenRef": "binance/issued:BTC",
+    "note": { "title": "Earn", "icon": "info", "content": "Locked until 12/26 · 8.00% APY" }
+  }
+]
