@@ -109,6 +109,71 @@ describe("bybitProvider.fetchBalances", () => {
     expect(earn.map((b) => b.note?.content)).toEqual(["Flexible", "On-chain"]);
   });
 
+  // —— 片 4:尽力而为 + perp 兜底 ——
+  it("部分桶失败(资金账户超时)→ 其余照返回 + 账户级失败 Note;整次同步成功", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("query-account-coins-balance")) return new Response("", { status: 504 });
+      if (u.includes("/v5/earn/position")) return ok({ retCode: 0, result: { list: [] } });
+      return ok(walletBalance);
+    });
+    const { balances, note } = await bybitProvider.fetchBalances(ctx());
+    // 统一账户 3 成功;资金失败 → 无 funding 行,但不抛。
+    expect(balances).toHaveLength(3);
+    expect(balances.some((b) => b.note?.group === "funding")).toBe(false);
+    const failNote = note?.find((n) => n.title === "Buckets not synced");
+    expect(String(failNote?.content)).toContain("Funding");
+    expect(String(failNote?.content)).toContain("next time"); // 瞬时故障 → "下次补上"
+  });
+
+  it("auth 类失败(权限不足)→ 失败 Note 提示查权限", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      // 赚币端点返回权限类错误码(HTTP 200 + 10005 permission denied)。
+      if (u.includes("/v5/earn/position"))
+        return ok({ retCode: 10005, retMsg: "permission denied" });
+      if (u.includes("query-account-coins-balance"))
+        return ok({ retCode: 0, result: { balance: [] } });
+      return ok(walletBalance);
+    });
+    const { note } = await bybitProvider.fetchBalances(ctx());
+    const failNote = note?.find((n) => n.title === "Buckets not synced");
+    expect(String(failNote?.content)).toContain("Earn");
+    expect(String(failNote?.content)).toContain("permissions");
+  });
+
+  it("所有桶失败(429 限流所有端点)→ 抛,不拿空快照覆盖", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
+    await expect(bybitProvider.fetchBalances(ctx())).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+  });
+
+  it("统一账户 totalPerpUPL 非零 → 挂'合约浮盈暂未纳入'perp 兜底 Note", async () => {
+    // walletBalance 变体:account 带 totalPerpUPL(有合约浮盈被排除在 walletBalance 外)。
+    const withUpl = {
+      retCode: 0,
+      result: { list: [{ accountType: "UNIFIED", totalPerpUPL: "123.45", coin: [] }] },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("query-account-coins-balance"))
+        return ok({ retCode: 0, result: { balance: [] } });
+      if (u.includes("/v5/earn/position")) return ok({ retCode: 0, result: { list: [] } });
+      return ok(withUpl);
+    });
+    const { note } = await bybitProvider.fetchBalances(ctx());
+    const perp = note?.find((n) => n.title === "Futures positions detected");
+    expect(String(perp?.content)).toContain("+$123.45");
+  });
+
+  it("无合约浮盈(totalPerpUPL 缺失/0)→ 不挂 perp Note(不虚报)", async () => {
+    // wallet-balance fixture 无 totalPerpUPL → 视为 0 → 不报。
+    routeAll();
+    const { note } = await bybitProvider.fetchBalances(ctx());
+    expect(note?.some((n) => n.title === "Futures positions detected")).toBeFalsy();
+  });
+
   it("signs with X-BAPI headers (hex SIGN) and parses UNIFIED balances", async () => {
     // 本测聚焦统一账户签名/解析;funding + earn 端点返回空,合并与并发另见专测。
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
