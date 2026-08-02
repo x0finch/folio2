@@ -1,0 +1,18 @@
+[
+  {
+    "symbol": "USDT",
+    "amount": 500,
+    "price": 1,
+    "value": 500,
+    "kind": "spot",
+    "tokenRef": "binance/issued:USDT"
+  },
+  {
+    "symbol": "BTC",
+    "amount": 0.25,
+    "price": 60000,
+    "value": 15000,
+    "kind": "spot",
+    "tokenRef": "binance/issued:BTC"
+  }
+]

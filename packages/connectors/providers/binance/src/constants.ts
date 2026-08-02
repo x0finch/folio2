@@ -50,3 +50,7 @@ export const QUOTE_SUFFIXES: readonly string[] = ["USDT", "USDC", "BUSD", "FDUSD
 // 总权益 —— 各币 marginBalance / notional / 盈亏都按行情折 USD 再聚合(见 parseCoinmFuturesAccount)。
 export const BINANCE_DELIVERY_API_BASE = "https://dapi.binance.com";
 export const COINM_ACCOUNT_PATH = "/dapi/v1/account"; // SIGNED,per-asset 权益 + 持仓
+
+// —— 资金账户(Funding)——
+// 在主 api host,但是 **POST**(SIGNED)。返回币种 + 数量(free/locked/freeze),无 USD → 同现货用 ticker 估值。
+export const FUNDING_ASSET_PATH = "/sapi/v1/asset/get-funding-asset";

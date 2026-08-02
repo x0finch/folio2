@@ -1,0 +1,5 @@
+[
+  { "asset": "USDT", "free": "500", "locked": "0", "freeze": "0", "withdrawing": "0" },
+  { "asset": "BTC", "free": "0.25", "locked": "0", "freeze": "0", "withdrawing": "0" },
+  { "asset": "DUST", "free": "0", "locked": "0", "freeze": "0", "withdrawing": "0" }
+]
