@@ -111,5 +111,20 @@ export function useIdleLock(timeoutMs: number | null): { locked: boolean; unlock
     };
   }, [locked, armTimer, checkExpiry]);
 
+  // 超时偏好变了要按新档重起主动定时器。主 effect 只在 locked 翻转时重挂 —— 拿不到新的
+  // timeoutMs,旧定时器会带着旧档到点照锁。首屏(默认档 "5" → localStorage 读到 "never")和
+  // 运行中改档(5 分钟 → 永不)都走这条:切「永不」清掉旧定时器,切具体值按新档重起。
+  // 少了这条,选「永不」却仍在约 5 分钟后被锁,就是漏在这里。timeoutMs 亲自判一次「永不」
+  // (而非只靠 armTimer 内的 ref):既是承重依赖、也防被 lint 当多余依赖删掉。
+  useEffect(() => {
+    if (locked) return;
+    if (timeoutMs === null) {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+      return;
+    }
+    armTimer(readLastActive());
+  }, [timeoutMs, locked, armTimer]);
+
   return { locked, unlock };
 }
