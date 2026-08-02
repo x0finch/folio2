@@ -44,6 +44,20 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
     expect(balances.find((b) => b.symbol === "BTC")?.note).toBeUndefined();
     expect(balances.find((b) => b.symbol === "USDT")?.note).toBeUndefined();
   });
+
+  it("跳过 LD 前缀理财份额(LDBNB,与 earn wallet 重复),但保留 LDO 等短币真币", () => {
+    const rows = parseAccountBalances(
+      {
+        balances: [
+          { asset: "LDBNB", free: "1", locked: "0" },
+          { asset: "LDO", free: "2", locked: "0" },
+          { asset: "BTC", free: "0.5", locked: "0" },
+        ],
+      },
+      { LDOUSDT: 10, BTCUSDT: 60000 },
+    );
+    expect(rows.map((r) => r.symbol)).toEqual(["LDO", "BTC"]);
+  });
 });
 
 describe("binanceProvider.fetchBalances", () => {
