@@ -274,7 +274,7 @@ export function earnResidualNote(
   return {
     title: "Earn not itemized",
     icon: "info",
-    content: `About ${fmtUsd(residual)} in Earn couldn't be itemized (fixed-term or other sub-types)`,
+    content: `About ${fmtUsd(residual)} in Earn couldn't be itemized (fixed-term, structured, or other sub-types with no public endpoint)`,
   };
 }
 
@@ -446,7 +446,7 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
         request(FUNDING_BALANCES_PATH, { context: creds }),
         request(SAVINGS_BALANCE_PATH, { context: creds }),
         request(STAKING_ORDERS_ACTIVE_PATH, { context: creds }),
-        request(ASSET_VALUATION_PATH, { context: creds }),
+        request(ASSET_VALUATION_PATH, { context: creds }), // 含 ?ccy=USD(见 constants:默认 BTC 计价)
         request(POSITIONS_PATH, { context: creds }),
       ]);
 

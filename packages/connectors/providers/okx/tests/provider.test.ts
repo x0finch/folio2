@@ -254,6 +254,13 @@ describe("okxProvider.fetchBalances", () => {
     expect(String(classic?.content)).toContain("$8,888");
   });
 
+  it("asset-valuation 必须带 ccy=USD(该端点默认 BTC 计价,不传就单位错位、对账失效)", async () => {
+    const spy = routeAll();
+    await okxProvider.fetchBalances(ctx());
+    const valUrl = spy.mock.calls.map((c) => String(c[0])).find((u) => u.includes("asset-valuation"));
+    expect(valUrl).toContain("ccy=USD");
+  });
+
   it("signs with 4 OK-ACCESS headers (base64 SIGN) and parses balances", async () => {
     // 本测聚焦交易账户签名/解析;funding 端点返回空,合并与并发另见专测。
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {

@@ -4,7 +4,10 @@ export const BALANCE_PATH = "/api/v5/account/balance"; // 交易账户(trading �
 export const FUNDING_BALANCES_PATH = "/api/v5/asset/balances"; // 资金账户(funding 桶)余额(数量取 bal)
 export const SAVINGS_BALANCE_PATH = "/api/v5/finance/savings/balance"; // 赚币·活期出借(数量取 amt)
 export const STAKING_ORDERS_ACTIVE_PATH = "/api/v5/finance/staking-defi/orders-active"; // 赚币·链上活跃订单
-export const ASSET_VALUATION_PATH = "/api/v5/asset/asset-valuation"; // 四桶权威美元估值(对账锚)
+// 四桶权威估值(对账锚)。**必须带 `ccy=USD`** —— 该端点默认按 **BTC** 计价,不传就拿到 BTC 数值,
+// 与美元口径的余额加总一比就单位错位、对账形同虚设(真机验证过)。OKX 签名覆盖含 query 的 requestPath,
+// 故 query 直接拼进 path 串(见 index.ts fetchBalances,不走 http client 的 query 选项——那不进签名)。
+export const ASSET_VALUATION_PATH = "/api/v5/asset/asset-valuation?ccy=USD";
 export const POSITIONS_PATH = "/api/v5/account/positions"; // 合约持仓探测(perp 兜底 Note 用)
 
 // 稳定币按 1 美元估值兜底(交易账户没这个币、oracle 尚未回填时用)。与 binance 同口径。
