@@ -30,7 +30,7 @@ function AuthedLayout() {
   const { preferCurrency, syncStatus } = Route.useLoaderData();
   return (
     <CurrencyProvider value={preferCurrency}>
-      {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时遮罩叠加、不卸载下方 App。 */}
+      {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
       <LockScreen userEmail={user.email}>
         <AppShell userName={user.name || user.email || ""} syncStatus={syncStatus}>
           <Outlet />

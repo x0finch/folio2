@@ -90,3 +90,66 @@ describe("useIdleTimeout + useIdleLock 组合:永不不误锁", () => {
     expect(result.current.locked).toBe(true);
   });
 });
+
+// 跨标签「锁」同步:任一标签锁 → 共享锁标志 + storage 广播 → 别的标签(含复制网址新开的)也锁。
+// 解锁不同步:各标签自解。用 StorageEvent 模拟「另一个标签」的 localStorage 变更。
+const LOCK_FLAG_KEY = "folio_lock_locked";
+function fireStorage(key: string, newValue: string | null) {
+  window.dispatchEvent(new StorageEvent("storage", { key, newValue }));
+}
+
+describe("useIdleLock 跨标签锁同步", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    localStorage.clear();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("新标签 mount 时锁标志已置(别处已锁)→ 初始即锁", () => {
+    localStorage.setItem(LOCK_FLAG_KEY, "1");
+    const { result } = renderHook(() => useIdleLock(60_000));
+    expect(result.current.locked).toBe(true);
+  });
+
+  it("收到别的标签的锁(storage 事件)→ 本标签也锁", () => {
+    const { result } = renderHook(() => useIdleLock(60_000));
+    expect(result.current.locked).toBe(false);
+    act(() => fireStorage(LOCK_FLAG_KEY, String(Date.now())));
+    expect(result.current.locked).toBe(true);
+  });
+
+  it("本标签到点锁 → 写入共享锁标志(别的标签可见)", () => {
+    const { result } = renderHook(() => useIdleLock(60_000));
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(result.current.locked).toBe(true);
+    expect(localStorage.getItem(LOCK_FLAG_KEY)).not.toBeNull();
+  });
+
+  it("别的标签解锁清标志(storage newValue=null)→ 本标签不跟随解锁", () => {
+    localStorage.setItem(LOCK_FLAG_KEY, "1");
+    const { result } = renderHook(() => useIdleLock(60_000));
+    expect(result.current.locked).toBe(true);
+    act(() => fireStorage(LOCK_FLAG_KEY, null)); // 别的标签解锁
+    expect(result.current.locked).toBe(true); // 解锁不同步:本标签仍锁
+  });
+
+  it("unlock() → 清本地态 + 清共享锁标志", () => {
+    localStorage.setItem(LOCK_FLAG_KEY, "1");
+    const { result } = renderHook(() => useIdleLock(60_000));
+    expect(result.current.locked).toBe(true);
+    act(() => result.current.unlock());
+    expect(result.current.locked).toBe(false);
+    expect(localStorage.getItem(LOCK_FLAG_KEY)).toBeNull();
+  });
+
+  it("别的标签有活动(storage 刷新 lastActive)→ 本标签定时器顺延,不误锁", () => {
+    const { result } = renderHook(() => useIdleLock(60_000));
+    act(() => vi.advanceTimersByTime(30_000));
+    // 别的标签在 30s 处活动 → 广播新的 lastActive → 本标签重排(从此刻起再算一整轮)。
+    act(() => fireStorage(LAST_ACTIVE_KEY, String(Date.now())));
+    act(() => vi.advanceTimersByTime(30_000)); // 原定时器到点(60s),但已顺延
+    expect(result.current.locked).toBe(false);
+    act(() => vi.advanceTimersByTime(30_000)); // 距顺延满 60s
+    expect(result.current.locked).toBe(true);
+  });
+});

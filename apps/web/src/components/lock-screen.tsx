@@ -8,9 +8,10 @@ import { useIdleTimeout } from "../lib/hooks/use-idle-timeout";
 import { usePasskeySupport } from "../lib/hooks/use-passkey-support";
 import { AuthShell } from "./auth-shell";
 
-// 应用层闲置锁屏(ADR 0029 / #291）。父组件包裹 —— 锁定时遮罩「叠加」在 children 之上，
-// 绝不替换 children(替换会卸载整个 App，解锁后滚动位置 / 展开态 / 半填表单全丢)。
-// 逻辑在 useIdleLock hook；这里只管样子 + 解锁(复用 signIn，会话不销毁，零新 server 接口)。
+// 应用层闲置锁屏(ADR 0029 / #291）。父组件包裹 —— 锁定时**卸载 children**(不只是遮罩盖住):
+// DOM 里不留内容,懂开发的人删掉遮罩也看不到底下数据。代价 = 组件本地态(滚动 / 展开 / 半填表单)丢失;
+// 数据本身由更外层 QueryClient 缓存,重挂从缓存出、不重拉。防不住直接打 server fn / 读本机 D1(那层要
+// 服务端锁),此层只封前端 DOM。逻辑在 useIdleLock hook;这里只管样子 + 解锁(复用 signIn,会话不销毁)。
 export function LockScreen({ userEmail, children }: { userEmail: string; children: ReactNode }) {
   const { timeoutMs } = useIdleTimeout();
   // 永不(timeoutMs===null,含默认)→ 不挂闲置锁:整套活动监听 / 定时器 / 挂载比对都不进树。
@@ -35,12 +36,9 @@ function ActiveLockScreen({
   children: ReactNode;
 }) {
   const { locked, unlock } = useIdleLock(timeoutMs);
-  return (
-    <>
-      {children}
-      {locked ? <LockOverlay userEmail={userEmail} onUnlock={unlock} /> : null}
-    </>
-  );
+  // 锁定 → 用锁屏**替换** children(卸载,不叠加):DOM 里不留内容,删遮罩也看不到底下数据。
+  // 解锁重挂,数据从更外层 QueryClient 缓存出,不重拉;丢的只是组件本地态(滚动/展开/半填表单)。
+  return locked ? <LockOverlay userEmail={userEmail} onUnlock={unlock} /> : children;
 }
 
 function LockOverlay({ userEmail, onUnlock }: { userEmail: string; onUnlock: () => void }) {
