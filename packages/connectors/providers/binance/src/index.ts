@@ -19,6 +19,7 @@ import {
   BINANCE_DELIVERY_API_BASE,
   BINANCE_FUTURES_API_BASE,
   COINM_ACCOUNT_PATH,
+  FUNDING_ASSET_PATH,
   MARGIN_ASSET,
   PUBLIC_LIMIT_KEY,
   QUOTE_ASSET,
@@ -272,6 +273,41 @@ export function parseCoinmFuturesAccount(
   ];
 }
 
+// —— 资金账户(Funding)的最小形状 ——
+interface FundingAsset {
+  asset?: string;
+  free?: string;
+  locked?: string;
+  freeze?: string;
+  withdrawing?: string;
+}
+
+// 纯解析:资金账户资产 → spot。free+locked+freeze+withdrawing 合并为持有量,ticker 估值(同现货)。
+// 跳过零余额;无价的币 value 0(price 省略)。与 IO 分离,golden test。
+export function parseFundingAssets(assets: FundingAsset[], prices: Record<string, number>): Spot[] {
+  const out: Spot[] = [];
+  for (const a of assets ?? []) {
+    const asset = a.asset;
+    if (!asset) continue;
+    const amount =
+      Number(a.free ?? 0) +
+      Number(a.locked ?? 0) +
+      Number(a.freeze ?? 0) +
+      Number(a.withdrawing ?? 0);
+    if (!(amount > 0)) continue;
+    const price = STABLECOINS.has(asset) ? 1 : (prices[`${asset}${QUOTE_ASSET}`] ?? undefined);
+    out.push({
+      symbol: asset,
+      amount,
+      price,
+      value: price != null ? amount * price : 0,
+      kind: "spot",
+      tokenRef: tokenRef.issued(PROVIDER_ID, asset.trim().toUpperCase()),
+    });
+  }
+  return out;
+}
+
 // 公开(免签)端点的限频器 —— 按出口 IP 共享,见 constants.ts 里为什么只给它装。
 const publicLimit = defineRateLimit({
   key: PUBLIC_LIMIT_KEY,
@@ -329,13 +365,14 @@ async function signedGet(
   params: Record<string, string | number>,
   apiKey: string,
   secret: string,
+  method: "GET" | "POST" = "GET", // 资金账户是 POST(SIGNED),参数仍走 query
 ): Promise<unknown> {
   const signature = await hmacSha256(
     secret,
     new URLSearchParams(params as never).toString(),
     "hex",
   );
-  return client(path, { query: { ...params, signature }, context: apiKey });
+  return client(path, { query: { ...params, signature }, context: apiKey, init: { method } });
 }
 
 // —— 账户级 creds(AC):apiKey/secret。apiKey = 标识符(明文走 header,非认证秘密)→ semi:
@@ -405,8 +442,24 @@ const coinmFuturesWallet: Wallet = {
   },
 };
 
-// 本 provider 当前拉的钱包集 —— 后续片(资金 / 理财)往这里加一项即可。
-const WALLETS: Wallet[] = [spotWallet, usdmFuturesWallet, coinmFuturesWallet];
+// 资金账户钱包:POST /sapi/v1/asset/get-funding-asset(主 api host),当 spot、ticker 估值 → await prices。
+const fundingWallet: Wallet = {
+  name: "Funding",
+  run: async ({ apiKey, secret }, prices) => {
+    const assets = (await signedGet(
+      signedRequest,
+      FUNDING_ASSET_PATH,
+      { recvWindow: RECV_WINDOW, timestamp: Date.now() },
+      apiKey,
+      secret,
+      "POST",
+    )) as FundingAsset[];
+    return parseFundingAssets(assets, await prices);
+  },
+};
+
+// 本 provider 当前拉的钱包集 —— 后续片(理财)往这里加一项即可。
+const WALLETS: Wallet[] = [spotWallet, usdmFuturesWallet, coinmFuturesWallet, fundingWallet];
 
 // 账户级失败 Note(ADR 0030):列出没同步上的钱包 + 一句提示。
 function walletFailureNote(failed: string[]): Note {
