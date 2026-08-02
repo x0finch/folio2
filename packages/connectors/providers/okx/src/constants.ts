@@ -1,6 +1,10 @@
 // OKX API v5 常量(不硬编码散落,见原则 #8)。
 export const OKX_API_BASE = "https://www.okx.com";
-export const BALANCE_PATH = "/api/v5/account/balance"; // 交易账户余额(自带 eqUsd)
+export const BALANCE_PATH = "/api/v5/account/balance"; // 交易账户(trading 桶)余额(自带 eqUsd)
+export const FUNDING_BALANCES_PATH = "/api/v5/asset/balances"; // 资金账户(funding 桶)余额(数量取 bal)
+
+// 稳定币按 1 美元估值兜底(交易账户没这个币、oracle 尚未回填时用)。与 binance 同口径。
+export const STABLECOINS: ReadonlySet<string> = new Set(["USDT", "USDC", "DAI", "TUSD", "FDUSD"]);
 
 export const HEADER_KEY = "OK-ACCESS-KEY";
 export const HEADER_SIGN = "OK-ACCESS-SIGN";

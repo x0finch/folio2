@@ -1,0 +1,28 @@
+[
+  {
+    "symbol": "USDT",
+    "tokenRef": "okx/issued:USDT",
+    "amount": 94,
+    "price": 1,
+    "value": 94,
+    "kind": "spot",
+    "note": { "title": "Funding", "icon": "info", "content": "Funding wallet", "group": "funding" }
+  },
+  {
+    "symbol": "BTC",
+    "tokenRef": "okx/issued:BTC",
+    "amount": 0.01,
+    "price": 60000,
+    "value": 600,
+    "kind": "spot",
+    "note": { "title": "Funding", "icon": "info", "content": "Funding wallet", "group": "funding" }
+  },
+  {
+    "symbol": "PEPE",
+    "tokenRef": "okx/issued:PEPE",
+    "amount": 1000000,
+    "value": 0,
+    "kind": "spot",
+    "note": { "title": "Funding", "icon": "info", "content": "Funding wallet", "group": "funding" }
+  }
+]
