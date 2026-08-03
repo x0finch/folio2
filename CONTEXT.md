@@ -70,11 +70,25 @@ _Avoid_: Platform(那是持仓的链∪场馆定位维度,1 connector 可对多 
 一个 CEX 账户**内部的隔离子账户** —— Binance 的现货 / U 本位合约 / 币本位合约 / 资金 / 理财各是一个 Wallet(OKX:统一交易账户 / 资金 / 理财)。一次同步用**同一把 key** 并发拉该账户名下的多个 Wallet(**尽力而为**:某个 Wallet 拉不到不阻断其余,失败收进**账户级 Note**)。**是账本/展示维度,不是聚合维度** —— 主页仍按 `token_id` 把各 Wallet 的同币加总,Wallet 拆分只在账户抽屉的分 Tab(现货 / 合约)里可见,不进 Platform / HoldingSource 键。某 Wallet 的读权限缺失(如没勾 Binance 的 Futures)→ 该账户为**部分授权**:creds 字段仍齐(**≠ needsCredentials**),失败 Wallet 走 Note 提示补权限。
 _Avoid_: sub-account(交易所 API 的 subaccount 是**独立 API 主体**、另一把 key —— 不是这个)、account(那是 Folio 的账户,Wallet 是它的内部隔离)、钱包(泛指链上 EVM 钱包时才用)
 
+### 账户分组与视图
+
+**Portfolio(组合)**:
+账户的**硬隔断归属** —— 每个账户恰属一个 Portfolio(1:1),像工作区。全站作用域(总额 / 代币 / 曲线 / Insights)由当前选中的 Portfolio 界定;每 user 恰一个默认 Portfolio(ADR 0033)。
+_Avoid_: group、accountGroups(旧称,已删)、workspace
+
+**Tag(标签)**:
+账户的**软标签** —— 一个账户可挂多个(M:N),做**横切分组**用(如「长线」「链上挖矿」)。归属某个 Portfolio(账户只能打其所在 Portfolio 的 Tag)。是 [Portfolio] 内的再分组,不是硬隔断。
+_Avoid_: group、label(那是账户显示名 `accounts.label`)、category
+
+**自定义 Tab(tab pin)**:
+首页上一个**指向单个 [Connector] 或单个 [Tag] 的固定快捷入口**(pin) —— 名字与颜色借用所指对象,不自存;点它把首页作用域收窄到「当前 [Portfolio] 内、属于该 Connector / 该 Tag 的账户」。每 user 至多固定 3 个。展示用**按小计倒序的 section list**(区别于默认 / Portfolio 视图仍用的现货 / 永续 / DeFi 子 Tab)。
+_Avoid_: saved view(它不是可组合多条件的一等视图,只是薄指针)、filter preset
+
 ### 分析:分布 / 组成 / 维度
 
 **Dimension(分析维度)**:
 组合金额被分组归拢的轴 —— `token`(按代币)/ `platform`(按链∪场馆,即 [Platform])/ `type`(按 [kind] + 稳定币细分)/ `account`(按账户)。同一套维度供 Allocation 与 Composition 复用。
-_Avoid_: category(那易与 CGK 分类混)、group(那是用户自定义的账户分组 accountGroups)
+_Avoid_: category(那易与 CGK 分类混)、group(用户自定义账户分组现由 [Tag] 表达;旧的 accountGroups 已于 #336 删除)
 
 **Allocation(当下分布)**:
 **最新快照**下按某 Dimension 的金额占比拆分(Insights 环形 + 图例)。只回答「此刻各占多少」。**manual 例外**(ADR 0018):manual 账户不写快照,其「此刻」由现造的合成余额注入 overview(ADR 0021 之后由 app 从 `tokens` + `manual_activity` 直接算,不再经 `creds.tokens` 那个物化字段),故仍进 Allocation。
