@@ -29,7 +29,7 @@ const USER_A = "user-a";
 const USER_B = "user-b";
 
 // pool-workers 此版本不隔离每个测试的存储。每个测试前重置:删 user 行(级联清掉其
-// accounts/groups/snapshots/...),再插入干净的 user 行(满足业务表的 userId 外键)。
+// accounts/portfolios/snapshots/...),再插入干净的 user 行(满足业务表的 userId 外键)。
 async function resetUser(userId: string): Promise<void> {
   const db = getDb(env);
   await db.delete(user).where(eq(user.id, userId));

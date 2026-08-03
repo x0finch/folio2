@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { accountsInView } from "../accounts-in-view";
 import { buildPortfolioHistory } from "../history";
 import { deriveLiveAccountTotals } from "../live-value";
 import { isManual } from "../manual-connector";
@@ -15,12 +16,16 @@ import { enrichBalances } from "./internal/token-enrich";
 export const getPortfolioOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
-    const [allAccounts, snapshots, settings] = await Promise.all([
+    const [allAccounts, snapshots, settings, memberships, defaultPf] = await Promise.all([
       db.listAccountsByUser(context.userId),
       db.getLatestSnapshotByUser(context.userId),
       db.getUserSettings(context.userId),
+      db.listPortfolioMembershipsByUser(context.userId),
+      db.ensureDefaultPortfolio(context.userId),
     ]);
-    const accounts = allAccounts.filter((a) => a.archivedAt == null);
+    // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio。片2 尚无选择器 → 选中 = 默认(= 全部活跃账户,
+    // 行为与今天一致);片3 接入选择器后此处换成传入的 selectedPortfolioId。
+    const accounts = accountsInView(allAccounts, memberships, defaultPf.id, defaultPf.id);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
     await injectManualSnapshots(context.userId, accounts, byAccount);
@@ -76,13 +81,17 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
-    const [rows, allAccounts, snapshots, settings] = await Promise.all([
+    const [rows, allAccounts, snapshots, settings, memberships, defaultPf] = await Promise.all([
       db.listSnapshotTotalsByUser(context.userId),
       db.listAccountsByUser(context.userId),
       db.getLatestSnapshotByUser(context.userId),
       db.getUserSettings(context.userId),
+      db.listPortfolioMembershipsByUser(context.userId),
+      db.ensureDefaultPortfolio(context.userId),
     ]);
-    const accounts = allAccounts.filter((a) => a.archivedAt == null);
+    // 曲线当下点的账户集(ADR 0033):活跃 && 归属选中 Portfolio(片2 = 默认 = 全部活跃)。
+    // 过去点仍用 allAccounts(保留归档账户历史贡献);片3 接入选择器时再对过去点按成员集 scope。
+    const accounts = accountsInView(allAccounts, memberships, defaultPf.id, defaultPf.id);
 
     // manual 历史改由账本 compute-on-read 供货(ADR 0018):防御式排除任何遗留 manual snapshot 行(正常为空),
     // 再拼上账本现算的 manual (takenAt, totalUsd) 行 → 同喂 buildPortfolioHistory,不双算、无需特殊合并。

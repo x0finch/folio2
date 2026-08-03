@@ -1,5 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import type { BalanceKind } from "@folio/connectors-basic";
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -43,6 +44,51 @@ export const accounts = sqliteTable(
     archivedAt: integer("archived_at"), // epoch ms | null(默认 null = 活跃)
   },
   (t) => [index("accounts_user_id_idx").on(t.userId)],
+);
+
+// —— Portfolio(命名账户集,ADR 0033)——
+// 每用户 ≥1 个 Portfolio、恰一个 is_default(下方部分唯一索引保证)。总览 / 账户页 / Insights 都按
+// 「当前选中的 Portfolio」聚合;顶层净值 = 选中 Portfolio 的 Σ,默认选中 is_default 那个。
+// 「观察一个账户但不计入净值」= 把它放进一个非默认 Portfolio —— 它就自然不在默认视图里。
+export const portfolios = sqliteTable(
+  "portfolios",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at").notNull(), // epoch ms
+  },
+  (t) => [
+    index("portfolios_user_id_idx").on(t.userId),
+    // 每用户恰一个默认 Portfolio。部分唯一索引是**真正防并发双默认**那道:ensureDefaultPortfolio 的
+    // find-or-create 在单实例下先挡一次,但 Workers 多实例「先查后插」不原子,靠这条唯一约束兜底。
+    uniqueIndex("portfolios_user_default_uidx").on(t.userId).where(sql`${t.isDefault} = 1`),
+  ],
+);
+
+// 账户 ↔ Portfolio 归属:**先锁一对一**(UNIQUE(account_id))。显式归属 —— 每个账户恰一行归属
+// (存量由迁移 backfill,新账户由 db 层 createAccount/importAccount 建账户时一并插)。
+// 「以后升 M:N」= 去掉 account 唯一索引即可,`accounts` 表始终不动、无数据迁移。
+// 删账户 → 归属行经 cascade 清;删 Portfolio → 其归属行经 cascade 清(管理侧先把成员退回默认再删,见 ADR)。
+export const portfolioAccounts = sqliteTable(
+  "portfolio_accounts",
+  {
+    portfolioId: text("portfolio_id")
+      .notNull()
+      .references(() => portfolios.id, { onDelete: "cascade" }),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.portfolioId, t.accountId] }),
+    // 一对一锁 + 反查「某账户归属哪个 Portfolio」的索引二合一。升 M:N 时删这条唯一约束、换成普通索引。
+    uniqueIndex("portfolio_accounts_account_uidx").on(t.accountId),
+  ],
 );
 
 export const snapshots = sqliteTable(
