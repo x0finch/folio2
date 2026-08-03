@@ -5,9 +5,11 @@
 
 ## 现状一句话
 
-Folio 今天是**带统一定价 + 多币种展示 + 分析拆分**的多源组合追踪器:链上 / CEX / perp / manual / **Bitcoin(地址 + xpub)** 余额 → 归一 USD → **canonical 代币聚合** → 展示(24h 涨跌 / 占比 / 单资产 drill-down / 净值曲线),可切法币或 BTC/ETH 计价。DB 现由 **per-user 代币层**(`tokens`,以 `tokens.id` 为唯一贯穿身份,vendor 叫法退到 `token_refs` 边界)、**全局公开参考层**(`global_token_ref_index` 地址→上游叫法、`token_daily_prices` 历史日价)、**per-user 缓存**(`user_cache`,吞掉旧 FX/平台表)、`manual_activity` 与 `snapshot_balances`(逐资产存 `amount`/`usd_value`/`self_price`,身份为必填 `token_id`)组成。
+Folio 今天是**带统一定价 + 多币种展示 + 分析拆分**的多源组合追踪器:链上 / CEX / perp / manual / **Bitcoin(地址 + xpub)** 余额 → 归一 USD → **canonical 代币聚合** → 展示(24h 涨跌 / 占比 / 单资产 drill-down / 净值曲线),可切法币或 BTC/ETH 计价。DB 现由 **per-user 代币层**(`tokens`,以 `tokens.id` 为唯一贯穿身份,vendor 叫法退到 `token_refs` 边界)、**全局公开参考层**(`global_token_ref_index` 地址→上游叫法、`token_daily_prices` 历史日价)、**per-user 缓存**(`user_cache`,吞掉旧 FX/平台表)、`manual_activity`、`snapshot_balances`(逐资产存 `amount`/`usd_value`/`self_price`,身份为必填 `token_id`)与 **`portfolios` + `portfolio_accounts`(命名账户集 + 一对一归属,ADR 0033)** 组成。
 
 > **代币身份 epic 已完工**(#176:tokens 收归 per-user + `tokens.id` 唯一身份 → ADR 0021/0022;含导出/导入 v3 #204)。旧代币层 `token_index`/`token_meta`/`token_groups`/`platforms`/`fx_rates` 已删,业务/展示层零 vendor(CGK 只在 oracle 组合根这一处边缘)。
+
+> **多 Portfolio epic 已完工**(#331:总览 / 账户页 / Insights 按「当前选中的 Portfolio」聚合,顶层净值 = 选中组合 Σ → ADR 0033)。「观察一个账户但不计净值」= 把它归到非默认组合的自然结果(不引入账户特殊状态)。含全局顶部选择器(≥2 才浮现、选中不持久化)、抽屉「移到组合」归属、组合 CRUD 管理(改名 / 设默认 / 删除);账户 ↔ 组合先锁一对一(`UNIQUE(account_id)`),地基已按可平滑升 M:N 铺好。旧的未用 `groups`/`account_groups` 整套已删。竖切片 #332–335 已合入。
 
 **仍缺 Tier-0 最后一环:通用交易流 + 成本/盈亏** —— 还回答不了"我赚亏多少",当前最大缺口。
 
