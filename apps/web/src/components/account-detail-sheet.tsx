@@ -14,7 +14,7 @@ import {
 } from "@folio/ui";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { AlertTriangle, Archive, MoreVertical, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, FolderInput, MoreVertical, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { accountShare, shareLabel } from "../lib/account-share";
@@ -30,6 +30,7 @@ import { ConnectorBadge } from "./connector-badge";
 import { EditableName } from "./editable-name";
 import { AccountHoldingsCards } from "./holdings-cards";
 import { ManualTokensPanel } from "./manual-tokens-panel";
+import { MoveToPortfolio } from "./move-to-portfolio";
 import { Portal } from "./portal";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { ValueTrendChart } from "./value-trend-chart";
@@ -112,6 +113,7 @@ function DetailBody({
 }) {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
+  const tp = useTranslations("Portfolio");
   const format = useFormatter();
   const usd = useDisplayValue();
   const router = useRouter();
@@ -124,6 +126,7 @@ function DetailBody({
   const archived = account.archivedAt != null;
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [moving, setMoving] = useState(false);
   // 删除确认走 modal 的落位:桌面居中、手机贴底(同 AddAccountModal)。
   const isDesktop = useMediaQuery("(min-width: 640px)");
   // ⋯ 菜单走全站统一的 hover popover 行为(关闭态隐 goo 垫底 → ghost 触发器不露 bg-popover 块;
@@ -298,6 +301,10 @@ function DetailBody({
                   <Archive className="size-4 shrink-0" />
                   {archived ? t("unarchive") : t("archive")}
                 </button>
+                <button type="button" className={menuItemClass} onClick={() => setMoving(true)}>
+                  <FolderInput className="size-4 shrink-0" />
+                  {tp("moveTo")}
+                </button>
                 <button
                   type="button"
                   className={cn(menuItemClass, "text-destructive hover:text-destructive")}
@@ -352,6 +359,9 @@ function DetailBody({
           </div>
         </MorphingModal>
       </Portal>
+
+      {/* 移到 Portfolio(ADR 0033):列既有 + 新建一步归属。 */}
+      <MoveToPortfolio accountId={account.id} open={moving} onClose={() => setMoving(false)} />
 
       {/* manual 账户:多 token 面板(Tokens tab 已含持仓,故不再叠加上方持仓卡)。
           非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。 */}

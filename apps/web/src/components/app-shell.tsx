@@ -20,10 +20,14 @@ const NAVS = [
 export function AppShell({
   userName,
   syncStatus,
+  selector,
   children,
 }: {
   userName: string;
   syncStatus: SyncStatusSummary;
+  // 全局 Portfolio 选择器(ADR 0033):住布局层,主页/账户页/Insights 共享;Settings 页不显示。
+  // 组件自身在 <2 个 Portfolio 时不渲染(渐进式显示)。
+  selector?: ReactNode;
   children: ReactNode;
 }) {
   const t = useTranslations("Nav");
@@ -96,7 +100,12 @@ export function AppShell({
 
         {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
         <main className="relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">
-          <PageHeader title={pageTitle} subtitle={pageSub} />
+          {/* Portfolio 选择器 = 标题上方的小 badge(eyebrow);Settings 页不显示。 */}
+          <PageHeader
+            title={pageTitle}
+            subtitle={pageSub}
+            eyebrow={activeNav.key !== "settings" ? selector : null}
+          />
           {children}
         </main>
       </div>

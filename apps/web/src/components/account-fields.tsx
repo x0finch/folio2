@@ -19,6 +19,7 @@ import {
   recommendedScript,
 } from "../lib/bitcoin-scripts";
 import type { InputSpec } from "../lib/creds";
+import { usePortfolio } from "../lib/hooks/use-portfolio";
 import { isManual } from "../lib/manual-connector";
 import { manualTokensJson } from "../lib/manual-tokens";
 import { createAccount } from "../lib/server/accounts";
@@ -33,8 +34,10 @@ async function submitAccount(
   connectorId: ConnectorId,
   label: string,
   values: Record<string, string>,
+  portfolioId: string | undefined,
 ) {
-  return createAccount({ data: { connectorId, label, values } });
+  // portfolioId:新账户落在当前选中的 Portfolio(ADR 0033);缺省(= 看默认)则服务端落默认。
+  return createAccount({ data: { connectorId, label, values, portfolioId } });
 }
 
 // manual 的字段:富控件(TokenCombobox 选币联动 symbol + 票 + autofill 单价 / 数字)。
@@ -306,10 +309,13 @@ export function AccountForm({
 }) {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
+  const { selectedId, defaultId } = usePortfolio();
   const [label, setLabel] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const mutation = useMutation({
-    mutationFn: () => submitAccount(connectorId, label, values),
+    // 落在当前选中的 Portfolio;看默认时不传(服务端本就落默认),省一次多余归属重写。
+    mutationFn: () =>
+      submitAccount(connectorId, label, values, selectedId === defaultId ? undefined : selectedId),
     onSuccess: (account) => onDone(account.id),
   });
 

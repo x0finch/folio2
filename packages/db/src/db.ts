@@ -31,6 +31,8 @@ export function createDb(env: DbEnv) {
     ensureDefaultPortfolio: b(q.ensureDefaultPortfolio),
     listPortfoliosByUser: b(q.listPortfoliosByUser),
     listPortfolioMembershipsByUser: b(q.listPortfolioMembershipsByUser),
+    createPortfolio: b(q.createPortfolio),
+    assignAccountToPortfolio: b(q.assignAccountToPortfolio),
     // —— snapshots ——
     writeSnapshot: b(q.writeSnapshot),
     listSnapshotsByAccount: b(q.listSnapshotsByAccount),

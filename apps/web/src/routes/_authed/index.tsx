@@ -1,4 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@folio/ui";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
@@ -9,6 +10,7 @@ import { OverviewSkeleton } from "../../components/skeletons";
 import { TokenHoldings } from "../../components/token-holdings";
 import { mergeDefiGroups } from "../../lib/account-view";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
+import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { getPortfolioHistory, getPortfolioOverview } from "../../lib/server/portfolio";
 
@@ -22,20 +24,33 @@ export const Route = createFileRoute("/_authed/")({
 });
 
 function Overview() {
-  const {
-    holdings,
-    sections,
-    accountTotals,
-    totalUsd,
-    holdingsSubtotal,
-    defiSubtotal,
-    series,
-    pricesStale,
-  } = Route.useLoaderData();
+  const { selectedId, defaultId } = usePortfolio();
+  const loaderData = Route.useLoaderData(); // SSR 默认视图(选中 = 默认时直接用)
+  const isDefault = selectedId === defaultId;
+  // 选中非默认 Portfolio 时客户端按 selectedId 重拉(默认视图仍走 loader SSR + router.invalidate,
+  // SWR 刷价路径不动)。placeholderData:切换/刷新期间保留上一份数据,不闪空。
+  const scopedQuery = useQuery({
+    queryKey: ["portfolio-overview", selectedId],
+    queryFn: async () => {
+      const [overview, history] = await Promise.all([
+        getPortfolioOverview({ data: { portfolioId: selectedId } }),
+        getPortfolioHistory({ data: { portfolioId: selectedId } }),
+      ]);
+      return { ...overview, series: history.series };
+    },
+    enabled: !isDefault,
+    placeholderData: keepPreviousData,
+  });
+  const data = isDefault ? loaderData : scopedQuery.data;
   const t = useTranslations("Overview");
   const tc = useTranslations("Common");
   const usd = useDisplayValue();
-  useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
+  const [tab, setTab] = useState("tokens");
+  // 默认视图的 pricesStale 走 loader;非默认视图由 react-query staleTime 自行刷新,不额外触发。
+  useStalePriceRefresh(isDefault ? loaderData.pricesStale : undefined);
+  if (!data) return <OverviewSkeleton />; // 切到非默认视图、首次拉取中
+  const { holdings, sections, accountTotals, totalUsd, holdingsSubtotal, defiSubtotal, series } =
+    data;
   const defiGroups = mergeDefiGroups(sections); // 空组已在 toAccountSections 出口滤除
   // 仅权益无持仓的账户也入列(code review #7):权益条可见、权益合计不缺斤短两。
   const perpItems = sections.flatMap((s) =>
@@ -50,7 +65,6 @@ function Overview() {
         ]
       : [],
   );
-  const [tab, setTab] = useState("tokens");
   // 数据驱动的 tab 存在性(H5 评审:永续/DeFi 拆 tab,无数据不展示):若选中的 tab 因数据
   // 变化消失(loader 重跑),受控值会指向已消失的 tab → 面板全空。派生 clamp 回代币。
   const availableTabs = [
