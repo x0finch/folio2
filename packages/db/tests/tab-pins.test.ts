@@ -54,10 +54,32 @@ describe("createTabPin", () => {
     expect(await listTabPinsByUser(env, USER_A)).toHaveLength(2);
   });
 
-  it("tag pin 缺 tagId / connector pin 缺 connectorId → 拒", async () => {
+  it("建 account pin,只 account_id 非空", async () => {
+    await ensureDefaultPortfolio(env, USER_A);
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "binance",
+      label: "B",
+      creds: "x",
+    });
+    const ap = await createTabPin(env, USER_A, { kind: "account", accountId: acc.id });
+    expect(ap.accountId).toBe(acc.id);
+    expect(ap.tagId).toBeNull();
+    expect(ap.connectorId).toBeNull();
+  });
+
+  it("tag pin 缺 tagId / connector pin 缺 connectorId / account pin 缺 accountId → 拒", async () => {
     await ensureDefaultPortfolio(env, USER_A);
     await expect(createTabPin(env, USER_A, { kind: "tag" })).rejects.toThrow();
     await expect(createTabPin(env, USER_A, { kind: "connector" })).rejects.toThrow();
+    await expect(createTabPin(env, USER_A, { kind: "account" })).rejects.toThrow();
+  });
+
+  it("account pin 指向他人账户 → 拒", async () => {
+    await ensureDefaultPortfolio(env, USER_B);
+    const accB = await createAccount(env, USER_B, { connectorId: "okx", label: "x", creds: "y" });
+    await expect(
+      createTabPin(env, USER_A, { kind: "account", accountId: accB.id }),
+    ).rejects.toThrow();
   });
 
   it("tag pin 指向他人 Tag → 拒", async () => {
@@ -88,6 +110,22 @@ describe("cascade / 存活", () => {
     const left = await listTabPinsByUser(env, USER_A);
     expect(left).toHaveLength(1);
     expect(left[0]!.kind).toBe("connector"); // 只剩 connector pin
+  });
+
+  it("删账户 → 其 account pin 经 FK cascade 删除;connector pin 不受影响", async () => {
+    await ensureDefaultPortfolio(env, USER_A);
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "binance",
+      label: "B",
+      creds: "x",
+    });
+    await createTabPin(env, USER_A, { kind: "account", accountId: acc.id });
+    await createTabPin(env, USER_A, { kind: "connector", connectorId: "binance" });
+    expect(await listTabPinsByUser(env, USER_A)).toHaveLength(2);
+    await deleteAccount(env, USER_A, acc.id);
+    const left = await listTabPinsByUser(env, USER_A);
+    expect(left).toHaveLength(1);
+    expect(left[0]!.kind).toBe("connector");
   });
 
   it("connector pin 名下账户被删光 → pin 仍在(无 FK,显示空)", async () => {

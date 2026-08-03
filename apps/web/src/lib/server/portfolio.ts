@@ -19,12 +19,13 @@ import { enrichBalances } from "./internal/token-enrich";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。所有 scope 到「选中 Portfolio」的
 // 读接口共用这个 shape;缺省 {} 让 loader 不带参调用时退回默认视图。
-// pin(ADR 0034):自定义 Tab 激活时额外按 connector/tag 在选中 Portfolio 内再收窄;缺省 = 默认视图(不收窄)。
+// pin(ADR 0034):自定义 Tab 激活时额外按 connector/tag/account 在选中 Portfolio 内再收窄;缺省 = 默认视图(不收窄)。
 const TabPinScope = z
   .object({
-    kind: z.enum(["connector", "tag"]),
+    kind: z.enum(["connector", "tag", "account"]),
     connectorId: z.string().optional(),
     tagId: z.string().optional(),
+    accountId: z.string().optional(),
   })
   .optional();
 const PortfolioScopeInput = z
@@ -38,6 +39,7 @@ function toPin(pin: z.infer<typeof TabPinScope>): TabPin | null {
     return { kind: "connector", connectorId: pin.connectorId };
   }
   if (pin.kind === "tag" && pin.tagId) return { kind: "tag", tagId: pin.tagId };
+  if (pin.kind === "account" && pin.accountId) return { kind: "account", accountId: pin.accountId };
   return null;
 }
 
@@ -147,26 +149,16 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     //  · memberSet = 归属选中的账户(**含已归档**)→ 过去点按它 scope,保留归档成员的历史贡献;
     //  · accounts  = 其中未归档的 → 曲线当下点(live 覆写)只算活跃成员。
     // 把账户移进/移出 Portfolio,这条曲线整条重算(直觉:这钱在这个视图里从来算/不算)。
-    // 自定义 Tab(ADR 0034):曲线同样按 pin 收窄,与总额口径一致(否则总额收窄、曲线不收窄会打架)。
-    const pin = toPin(data.pin);
-    const tagLinks = pin?.kind === "tag" ? await db.listAccountTagsByUser(context.userId) : [];
-    const memberSetBase = accountIdsInView(
+    // 自定义 Tab(ADR 0034 UI 微调):曲线**不按 pin 收窄** —— pin 只过滤该 Tab 的列表内容,
+    // hero 总额/曲线保持选中 Portfolio 口径(用户明确:自定义 Tab 不改 hero)。故此处忽略 data.pin。
+    const memberSet = accountIdsInView(
       allAccounts.map((a) => a.id),
       memberships,
       selectedId,
       defaultId,
     );
-    const memberAccounts = accountsMatchingPin(
-      allAccounts.filter((a) => memberSetBase.has(a.id)),
-      pin,
-      tagLinks,
-    );
-    const memberSet = new Set(memberAccounts.map((a) => a.id));
-    const accounts = accountsMatchingPin(
-      accountsInView(allAccounts, memberships, selectedId, defaultId),
-      pin,
-      tagLinks,
-    );
+    const memberAccounts = allAccounts.filter((a) => memberSet.has(a.id));
+    const accounts = accountsInView(allAccounts, memberships, selectedId, defaultId);
 
     // manual 历史改由账本 compute-on-read 供货(ADR 0018):防御式排除任何遗留 manual snapshot 行(正常为空),
     // 再拼上账本现算的 manual (takenAt, totalUsd) 行 → 同喂 buildPortfolioHistory,不双算、无需特殊合并。

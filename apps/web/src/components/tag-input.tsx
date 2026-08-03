@@ -1,5 +1,5 @@
-import { cn } from "@folio/ui";
-import { Check, CornerDownLeft, SlidersHorizontal, Trash2 } from "lucide-react";
+import { cn, SharedLayoutBg } from "@folio/ui";
+import { Check, CornerDownLeft, ListChecks, Settings2, Trash2, X } from "lucide-react";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 
@@ -81,7 +81,7 @@ export function TagInput({
           }}
           className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground"
         >
-          <SlidersHorizontal className="size-3.5" />
+          {manage ? <ListChecks className="size-3.5" /> : <Settings2 className="size-3.5" />}
           {manage ? t("done") : t("manage")}
         </button>
       </div>
@@ -110,14 +110,6 @@ export function TagInput({
               )}
               style={item.attached ? { border: `1.5px solid ${item.color}` } : undefined}
             >
-              <span
-                className="size-2.5 shrink-0 rounded-full"
-                style={
-                  item.attached
-                    ? { background: item.color }
-                    : { border: `1.5px solid ${item.color}` }
-                }
-              />
               {item.name}
               {item.attached && <Check className="size-3.5" style={{ color: item.color }} />}
             </button>
@@ -178,65 +170,72 @@ function ManageList({
   t: ReturnType<typeof useTranslations<"Tags">>;
   tc: ReturnType<typeof useTranslations<"Common">>;
 }) {
+  // 无卡片、无描边:各行共享 SharedLayoutBg 的 hover 高亮垫底(UI 微调),去掉行首色点。
+  // SharedLayoutBg 会把每个子元素的 children 再套一层 block <div z-10>,故真正的 flex 行放在**内层**一格,
+  // 否则 input 与删除钮会被那层 block 拆成上下两行(实测坑)。
   return (
-    <div className="min-h-24 rounded-xl border border-border p-1">
-      {items.map((item) =>
-        confirmingId === item.id ? (
-          <div
-            key={item.id}
-            className="flex items-center gap-2 border-destructive/60 border-b px-1 py-2 last:border-b-0"
-          >
-            <span className="flex-1 text-foreground text-sm">
-              {t("removeConfirm", { name: item.name, count: item.accountCount })}
-            </span>
-            <button
-              type="button"
-              onClick={() => setConfirmingId(null)}
-              className="rounded-md px-2.5 py-1 text-sm transition-colors hover:bg-muted"
-            >
-              {tc("cancel")}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onDelete(item.id);
-                setConfirmingId(null);
-              }}
-              className="rounded-md px-2.5 py-1 text-destructive text-sm transition-colors hover:bg-destructive/10"
-            >
-              {tc("delete")}
-            </button>
-          </div>
-        ) : (
-          <div
-            key={item.id}
-            className="flex items-center gap-2.5 border-border border-b px-1 py-1.5 last:border-b-0"
-          >
-            <span className="size-2.5 shrink-0 rounded-full" style={{ background: item.color }} />
-            <input
-              key={`${item.id}:${item.name}`}
-              defaultValue={item.name}
-              onBlur={(e) => {
-                const next = e.target.value.trim();
-                if (next && next !== item.name) onRename(item.id, next);
-              }}
-              onKeyDown={(e) => {
-                if (e.nativeEvent.isComposing) return; // 输入法组字中不提交改名
-                if (e.key === "Enter") e.currentTarget.blur();
-              }}
-              className="h-8 flex-1 rounded-md bg-transparent px-2 text-foreground text-sm outline-none focus:bg-muted"
-            />
-            <button
-              type="button"
-              aria-label={`${tc("delete")} ${item.name}`}
-              onClick={() => setConfirmingId(item.id)}
-              className="flex shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-destructive"
-            >
-              <Trash2 className="size-4" />
-            </button>
-          </div>
-        ),
-      )}
-    </div>
+    <SharedLayoutBg className="min-h-24 gap-0.5" inset={8}>
+      {items.map((item) => (
+        <div key={item.id}>
+          {confirmingId === item.id ? (
+            <div className="flex items-center gap-2 px-2 py-2">
+              {/* title / subtitle 两行:标题说删哪个,副标题说影响面 —— 不再挤成一段长句折行。 */}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-foreground text-sm">
+                  {t("removeTitle", { name: item.name })}
+                </div>
+                <div className="text-muted-foreground text-xs">
+                  {t("removeSubtitle", { count: item.accountCount })}
+                </div>
+              </div>
+              {/* 二次确认用图标钮:叉 = 取消,勾 = 确认删除(destructive 色)。 */}
+              <button
+                type="button"
+                aria-label={tc("cancel")}
+                onClick={() => setConfirmingId(null)}
+                className="flex shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+              <button
+                type="button"
+                aria-label={tc("delete")}
+                onClick={() => {
+                  onDelete(item.id);
+                  setConfirmingId(null);
+                }}
+                className="flex shrink-0 rounded-md p-1.5 text-destructive transition-colors hover:bg-destructive/10"
+              >
+                <Check className="size-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5 px-2 py-1">
+              <input
+                key={`${item.id}:${item.name}`}
+                defaultValue={item.name}
+                onBlur={(e) => {
+                  const next = e.target.value.trim();
+                  if (next && next !== item.name) onRename(item.id, next);
+                }}
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing) return; // 输入法组字中不提交改名
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                className="h-8 flex-1 rounded-md bg-transparent px-2 text-foreground text-sm outline-none focus:bg-muted"
+              />
+              <button
+                type="button"
+                aria-label={`${tc("delete")} ${item.name}`}
+                onClick={() => setConfirmingId(item.id)}
+                className="flex shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-destructive"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </SharedLayoutBg>
   );
 }

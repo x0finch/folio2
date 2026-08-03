@@ -105,4 +105,9 @@ describe("accountsMatchingPin", () => {
     const pin: TabPin = { kind: "tag", tagId: "t-none" };
     expect(accountsMatchingPin(accs, pin, tagLinks)).toEqual([]);
   });
+
+  it("account pin → 只留该账户", () => {
+    const pin: TabPin = { kind: "account", accountId: "b" };
+    expect(accountsMatchingPin(accs, pin, tagLinks).map((a) => a.id)).toEqual(["b"]);
+  });
 });

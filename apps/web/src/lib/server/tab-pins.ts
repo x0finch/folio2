@@ -10,11 +10,12 @@ export const listTabPins = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(({ context }) => db.listTabPinsByUser(context.userId));
 
-// pin 目标:connector pin 带 connectorId,tag pin 带 tagId(db 层再校验互斥非空 + tag 归属)。
+// pin 目标:connector pin 带 connectorId,tag pin 带 tagId,account pin 带 accountId(db 层再校验互斥非空 + 归属)。
 const PinTarget = z.object({
-  kind: z.enum(["connector", "tag"]),
+  kind: z.enum(["connector", "tag", "account"]),
   connectorId: z.string().optional(),
   tagId: z.string().optional(),
+  accountId: z.string().optional(),
 });
 
 export const createTabPin = createServerFn({ method: "POST" })
@@ -25,6 +26,7 @@ export const createTabPin = createServerFn({ method: "POST" })
       kind: data.kind,
       connectorId: data.connectorId as ConnectorId | undefined,
       tagId: data.tagId,
+      accountId: data.accountId,
     }),
   );
 
@@ -36,6 +38,7 @@ export const updateTabPinTarget = createServerFn({ method: "POST" })
       kind: data.kind,
       connectorId: data.connectorId as ConnectorId | undefined,
       tagId: data.tagId,
+      accountId: data.accountId,
     });
     return { ok: true as const };
   });

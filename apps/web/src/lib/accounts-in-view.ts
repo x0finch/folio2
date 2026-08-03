@@ -34,8 +34,11 @@ export function accountsInView<A extends { id: string; archivedAt: number | null
   );
 }
 
-// 自定义 Tab(pin,ADR 0034)的过滤目标:指向单个 Connector 或单个 Tag。null = 默认视图(不收窄)。
-export type TabPin = { kind: "connector"; connectorId: string } | { kind: "tag"; tagId: string };
+// 自定义 Tab(pin,ADR 0034)的过滤目标:指向单个 Connector / Tag / Account。null = 默认视图(不收窄)。
+export type TabPin =
+  | { kind: "connector"; connectorId: string }
+  | { kind: "tag"; tagId: string }
+  | { kind: "account"; accountId: string };
 
 // 在**已按 Portfolio 过滤**的账户集上再按 pin 收窄(自定义 Tab)。pin=null → 原样返回(默认视图)。
 // 与 accountsInView 组合使用:accountsMatchingPin(accountsInView(...), pin, tagLinks)——作用域仍是
@@ -48,6 +51,9 @@ export function accountsMatchingPin<A extends { id: string; connectorId: string 
   if (!pin) return accounts;
   if (pin.kind === "connector") {
     return accounts.filter((a) => a.connectorId === pin.connectorId);
+  }
+  if (pin.kind === "account") {
+    return accounts.filter((a) => a.id === pin.accountId);
   }
   const tagged = new Set(tagLinks.filter((l) => l.tagId === pin.tagId).map((l) => l.accountId));
   return accounts.filter((a) => tagged.has(a.id));
