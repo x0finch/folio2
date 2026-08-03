@@ -3,8 +3,8 @@
 
 // v3(#204):不再兼容旧文件。快照的 symbol/tokenRef 两列已删(#243),身份只剩 token_id ——
 // 于是文件必须自带 **Token 行**(其 ref 嵌在里头)与**手记账本**,否则导出一堆指向空气的 token_id。
-// 导入按版本闸只收 v3、旧文件明确报「太旧」。流内顺序:meta → token → account → group →
-// membership → snapshot → activity(单遍导入据此建 old→new 映射,后来的记录引用先到的 id)。
+// 导入按版本闸只收 v3、旧文件明确报「太旧」。流内顺序:meta → token → account →
+// snapshot → activity(单遍导入据此建 old→new 映射,后来的记录引用先到的 id)。
 export const EXPORT_VERSION = 3;
 
 interface TokenIn {
@@ -22,11 +22,6 @@ interface AccountIn {
   platform: string | null;
   label: string;
   archivedAt: number | null;
-}
-interface GroupIn {
-  id: string;
-  name: string;
-  sortOrder: number;
 }
 interface SnapshotIn {
   accountId: string;
@@ -100,13 +95,6 @@ export function accountRecord(account: AccountIn, safeCreds: Record<string, stri
   };
 }
 
-export function groupRecord(g: GroupIn) {
-  return { type: "group" as const, id: g.id, name: g.name, sortOrder: g.sortOrder };
-}
-export function membershipRecord(m: { accountId: string; groupId: string }) {
-  return { type: "membership" as const, accountId: m.accountId, groupId: m.groupId };
-}
-
 export function snapshotRecord(s: SnapshotIn, balances: BalanceIn[]) {
   return {
     type: "snapshot" as const,
@@ -127,7 +115,7 @@ export function snapshotRecord(s: SnapshotIn, balances: BalanceIn[]) {
   };
 }
 
-// 手记活动记录(#204):扁平,同 membership。accountId/tokenId 是导出侧旧 id,导入各自重映射。
+// 手记活动记录(#204):扁平记录。accountId/tokenId 是导出侧旧 id,导入各自重映射。
 // 类型名带 `manual` 前缀 —— 它只装 `manual_activity`,别用泛名以免与将来别的「活动」概念混。
 export function manualActivityRecord(a: ActivityIn) {
   return {

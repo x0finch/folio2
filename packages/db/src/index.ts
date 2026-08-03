@@ -13,7 +13,6 @@ export { createGlobalTokenRefIndexStore } from "./global-token-ref-index-store";
 export type {
   AccountRawCreds,
   CreateAccountInput,
-  CreateGroupInput,
   ExportToken,
   ImportTokenInput,
   ManualActivity,
@@ -22,7 +21,6 @@ export type {
   ManualActivityPatch,
   ManualBatchPlan,
   ManualHolding,
-  Membership,
   SnapshotBalanceHistoryRow,
   SnapshotBalanceInput,
   SnapshotBalanceView,
@@ -33,9 +31,7 @@ export type {
 } from "./queries";
 export type {
   Account,
-  AccountGroup,
   AccountSafe,
-  Group,
   Snapshot,
   SnapshotBalance,
   UserSettings,

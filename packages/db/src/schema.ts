@@ -15,19 +15,6 @@ import { user } from "./auth-schema";
 // 此处再导出,让 drizzle-kit 把它们一并纳入迁移。业务表的 userId 为指向 user.id 的真外键。
 export * from "./auth-schema";
 
-export const groups = sqliteTable(
-  "groups",
-  {
-    id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    sortOrder: integer("sort_order").notNull().default(0),
-  },
-  (t) => [index("groups_user_id_idx").on(t.userId)],
-);
-
 // 业务账户:被追踪的余额来源(钱包 / CEX / 永续 / manual),由 connectorId 决定派哪个 connector/provider。
 // ⚠️ 勿与 auth-schema.ts 的 `account`(better-auth 的登录方式链接表)混淆——只是单复数相近,
 //    语义完全不同:这张是「资产账户」,那张是「认证」。
@@ -56,22 +43,6 @@ export const accounts = sqliteTable(
     archivedAt: integer("archived_at"), // epoch ms | null(默认 null = 活跃)
   },
   (t) => [index("accounts_user_id_idx").on(t.userId)],
-);
-
-export const accountGroups = sqliteTable(
-  "account_groups",
-  {
-    accountId: text("account_id")
-      .notNull()
-      .references(() => accounts.id, { onDelete: "cascade" }),
-    groupId: text("group_id")
-      .notNull()
-      .references(() => groups.id, { onDelete: "cascade" }),
-  },
-  (t) => [
-    primaryKey({ columns: [t.accountId, t.groupId] }),
-    index("account_groups_group_id_idx").on(t.groupId),
-  ],
 );
 
 export const snapshots = sqliteTable(

@@ -3,9 +3,7 @@ import type { ConnectorId } from "@folio/connectors";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   accountRecord,
-  groupRecord,
   manualActivityRecord,
-  membershipRecord,
   metaRecord,
   ndjsonLine,
   snapshotRecord,
@@ -37,7 +35,7 @@ beforeEach(async () => {
   await resetUser(DST);
 });
 
-// 复刻 route 的导出流(#204):meta → token → account → group → membership → snapshot → activity。
+// 复刻 route 的导出流(#204):meta → token → account → snapshot → activity。
 async function exportRecords(userId: string): Promise<unknown[]> {
   const recs: unknown[] = [metaRecord(1_700_000_000_000)];
   for (const t of await db.listTokensForExport(userId)) recs.push(tokenRecord(t));
@@ -45,8 +43,6 @@ async function exportRecords(userId: string): Promise<unknown[]> {
     const raw = await db.getRawCreds(userId, a.id);
     recs.push(accountRecord(a, raw ? JSON.parse(raw) : {}));
   }
-  for (const g of await db.listGroupsByUser(userId)) recs.push(groupRecord(g));
-  for (const m of await db.listMembershipsByUser(userId)) recs.push(membershipRecord(m));
   const page = await db.listSnapshotsPageByUser(userId, 1000, 0);
   const bals = await db.listBalancesForSnapshots(page.map((s) => s.id));
   const bySnap = new Map<string, typeof bals>();
@@ -69,8 +65,6 @@ const dstDeps: ImportDeps = {
   importToken: async (t, refs) => ({ id: await db.importToken(DST, t, refs) }),
   importAccount: (input) =>
     db.importAccount(DST, { ...input, connectorId: input.connectorId as ConnectorId }),
-  importGroup: (input) => db.importGroup(DST, input),
-  addAccountToGroup: (accountId, groupId) => db.addAccountToGroup(DST, accountId, groupId),
   importSnapshot: async (accountId, input) => {
     await db.importSnapshot(DST, accountId, input);
   },
@@ -158,8 +152,6 @@ async function seedSource() {
     occurredAt: 500,
     createdAt: 100,
   });
-  const g = await db.createGroup(SRC, { name: "Group" });
-  await db.addAccountToGroup(SRC, accW.id, g.id);
   return { btc, eth, my };
 }
 
@@ -174,7 +166,7 @@ const normTokens = (
     }))
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
 
-// 把一份导出记录归一成可比较的形状:去掉 exportedAt,把所有 id(token/account/group)换成内容键
+// 把一份导出记录归一成可比较的形状:去掉 exportedAt,把所有 id(token/account)换成内容键
 // (导入侧 id 全新,直接比会不等)。用来验「导入后再导出 ≡ 原导出」这个不动点。
 type Rec = Record<string, unknown>;
 function normalizeExport(records: unknown[]): Rec[] {
@@ -183,11 +175,9 @@ function normalizeExport(records: unknown[]): Rec[] {
   for (const r of recs) {
     if (r.type === "token") key.set(`t:${r.id}`, `token:${String(r.symbol)}`);
     else if (r.type === "account") key.set(`a:${r.id}`, `acct:${String(r.label)}`);
-    else if (r.type === "group") key.set(`g:${r.id}`, `group:${String(r.name)}`);
   }
   const t = (id: unknown) => key.get(`t:${String(id)}`);
   const a = (id: unknown) => key.get(`a:${String(id)}`);
-  const g = (id: unknown) => key.get(`g:${String(id)}`);
   return recs
     .map((r): Rec => {
       if (r.type === "meta") {
@@ -198,9 +188,6 @@ function normalizeExport(records: unknown[]): Rec[] {
       if (r.type === "account")
         // archivedAt 的精确时间戳有意不保真(导入用 now 重归档);只比归档**状态**。
         return { ...r, id: a(r.id), archivedAt: r.archivedAt === undefined ? undefined : true };
-      if (r.type === "group") return { ...r, id: g(r.id) };
-      if (r.type === "membership")
-        return { ...r, accountId: a(r.accountId), groupId: g(r.groupId) };
       if (r.type === "snapshot")
         return {
           ...r,
@@ -227,7 +214,7 @@ describe("export → import v3 往返(空库重建)", () => {
     expect(dst.every((t) => !srcIds.has(t.id))).toBe(true);
   });
 
-  it("账户 + creds(public)+ 分组关系复现", async () => {
+  it("账户 + creds(public)复现", async () => {
     await seedSource();
     await importInto(await exportRecords(SRC));
 
@@ -243,7 +230,6 @@ describe("export → import v3 往返(空库重建)", () => {
     ]);
     const wallet = dstAccts.find((a) => a.label === "Wallet")!;
     expect(JSON.parse((await db.getRawCreds(DST, wallet.id))!)).toEqual({ address: "0xabc" });
-    expect(await db.listMembershipsByUser(DST)).toHaveLength(1);
     // 归档态保真:归档账户导入后仍归档,活跃账户仍活跃(#204 review 修复)。
     expect(dstAccts.find((a) => a.label === "Archived")!.archivedAt).toBeGreaterThan(0);
     expect(wallet.archivedAt).toBeNull();
@@ -339,8 +325,6 @@ describe("export → import v3 往返(空库重建)", () => {
     // 各类实体计数不随导入次数增长(按内容自然键去重)。
     expect(await db.listAccountsByUser(DST)).toHaveLength(3);
     expect(await db.listTokensForExport(DST)).toHaveLength(3);
-    expect(await db.listGroupsByUser(DST)).toHaveLength(1);
-    expect(await db.listMembershipsByUser(DST)).toHaveLength(1);
     expect(await db.listManualActivityByUser(DST)).toHaveLength(1);
     const snapCount = (await db.listSnapshotsPageByUser(DST, 1000, 0)).length;
     expect(snapCount).toBe(2); // evm 账户两份快照,不重复

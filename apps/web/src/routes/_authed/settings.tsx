@@ -568,7 +568,6 @@ function DataCard({ hasData }: { hasData: boolean }) {
             <p className="text-sm text-muted-foreground">
               {ta("imported", {
                 accounts: importMutation.data.imported.accounts,
-                groups: importMutation.data.imported.groups,
                 snapshots: importMutation.data.imported.snapshots,
               })}
             </p>

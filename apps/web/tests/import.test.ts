@@ -32,8 +32,6 @@ function makeDeps() {
       creds: string;
       archivedAt?: number | null;
     }>,
-    groups: [] as Array<{ name: string }>,
-    memberships: [] as Array<{ accountId: string; groupId: string }>,
     snapshots: [] as Array<{ accountId: string; totalUsd: number; balances: unknown[] }>,
     activities: [] as Array<{ accountId: string; tokenId: string; amount: number }>,
   };
@@ -52,13 +50,6 @@ function makeDeps() {
         archivedAt: input.archivedAt,
       });
       return { id: `acc-${++n}` };
-    },
-    importGroup: async (input) => {
-      calls.groups.push({ name: input.name });
-      return { id: `grp-${++n}` };
-    },
-    addAccountToGroup: async (accountId, groupId) => {
-      calls.memberships.push({ accountId, groupId });
     },
     importSnapshot: async (accountId, input) => {
       calls.snapshots.push({ accountId, totalUsd: input.totalUsd, balances: input.balances });
@@ -216,14 +207,15 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
     expect(imp.counts.activities).toBe(1);
   });
 
-  it("remaps account/group ids for memberships;未知 id 跳过", async () => {
+  it("ignores unknown record types (forward-compat)", async () => {
     const { deps, calls } = makeDeps();
     const imp = createImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
     await imp.apply({ type: "account", id: "old-a", connectorId: "manual", label: "M", creds: {} });
+    // 旧文件里可能残留 group/membership 记录 —— 现已无处理器,静默跳过、不炸。
     await imp.apply({ type: "group", id: "old-g", name: "G" });
     await imp.apply({ type: "membership", accountId: "old-a", groupId: "old-g" });
-    await imp.apply({ type: "membership", accountId: "ghost", groupId: "ghost" }); // 跳过
-    expect(calls.memberships).toEqual([{ accountId: "acc-1", groupId: "grp-2" }]);
+    expect(calls.accounts).toHaveLength(1);
+    expect(imp.counts.accounts).toBe(1);
   });
 });

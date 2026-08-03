@@ -27,15 +27,6 @@ export function createDb(env: DbEnv) {
     getRawCreds: b(q.getRawCreds),
     listRawCredsByUser: b(q.listRawCredsByUser),
     listUserIdsWithAccounts: b(q.listUserIdsWithAccounts), // 系统级枚举(无 userId 入参,原则 #6 受控例外)
-    // —— groups ——
-    createGroup: b(q.createGroup),
-    listGroupsByUser: b(q.listGroupsByUser),
-    deleteGroup: b(q.deleteGroup),
-    addAccountToGroup: b(q.addAccountToGroup),
-    removeAccountFromGroup: b(q.removeAccountFromGroup),
-    listGroupsByAccount: b(q.listGroupsByAccount),
-    listAccountsByGroup: b(q.listAccountsByGroup),
-    listMembershipsByUser: b(q.listMembershipsByUser),
     // —— snapshots ——
     writeSnapshot: b(q.writeSnapshot),
     listSnapshotsByAccount: b(q.listSnapshotsByAccount),
@@ -60,7 +51,6 @@ export function createDb(env: DbEnv) {
     listTokensForExport: b(q.listTokensForExport),
     importToken: b(q.importToken),
     importAccount: b(q.importAccount),
-    importGroup: b(q.importGroup),
     importSnapshot: b(q.importSnapshot),
     importManualActivity: b(q.importManualActivity),
     // —— user settings(Phase 3)——

@@ -3,11 +3,11 @@ import { SEMI_PREFIX } from "./creds";
 import { EXPORT_VERSION } from "./export";
 
 // 纯导入逻辑(无 server-only import → 可单测,DB 经 deps 注入)。
-// 单遍处理 NDJSON 记录;导出顺序保证 token→account→group→membership→snapshot→manualActivity,
+// 单遍处理 NDJSON 记录;导出顺序保证 token→account→snapshot→manualActivity,
 // 故引用某 id 的记录出现时,其 id map 已就绪。
 //
 // **合并式导入,幂等**(#204,A 方案):每类实体按**内容自然键** find-or-create(见 db 的 import* op)——
-// token 按 ref、账户按 (connectorId+platform+label+creds)、分组按 (name+sortOrder)、快照按 (account,takenAt)、
+// token 按 ref、账户按 (connectorId+platform+label+creds)、快照按 (account,takenAt)、
 // 手记活动按整条内容。命中既有 → 复用(其新 id 记进映射表),没有 → 建新行。于是:**反复导入同一文件
 // 结果不变(不翻倍),导入不同文件则合并进来**。全程用新 id、按 userId 作用域去重,多用户安全。
 //
@@ -66,8 +66,6 @@ export interface ImportDeps {
     creds: string;
     archivedAt?: number | null;
   }): Promise<{ id: string }>;
-  importGroup(input: { name: string; sortOrder?: number }): Promise<{ id: string }>;
-  addAccountToGroup(accountId: string, groupId: string): Promise<void>;
   importSnapshot(
     accountId: string,
     input: { takenAt: number; totalUsd: number; note?: Note[]; balances: ImportSnapshotBalance[] },
@@ -80,8 +78,6 @@ export interface ImportDeps {
 export interface ImportCounts {
   tokens: number;
   accounts: number;
-  groups: number;
-  memberships: number;
   snapshots: number;
   activities: number;
 }
@@ -110,12 +106,9 @@ const asRefs = (v: unknown): { namer: string; localName: string }[] =>
 export function createImporter(deps: ImportDeps) {
   const tokenMap = new Map<string, string>(); // 导出 token id → 新建 id
   const accountMap = new Map<string, string>();
-  const groupMap = new Map<string, string>();
   const counts: ImportCounts = {
     tokens: 0,
     accounts: 0,
-    groups: 0,
-    memberships: 0,
     snapshots: 0,
     activities: 0,
   };
@@ -174,24 +167,6 @@ export function createImporter(deps: ImportDeps) {
         });
         if (typeof rec.id === "string") accountMap.set(rec.id, created.id);
         counts.accounts++;
-        break;
-      }
-      case "group": {
-        const created = await deps.importGroup({
-          name: String(rec.name ?? ""),
-          sortOrder: typeof rec.sortOrder === "number" ? rec.sortOrder : undefined,
-        });
-        if (typeof rec.id === "string") groupMap.set(rec.id, created.id);
-        counts.groups++;
-        break;
-      }
-      case "membership": {
-        const accountId = accountMap.get(String(rec.accountId));
-        const groupId = groupMap.get(String(rec.groupId));
-        if (accountId && groupId) {
-          await deps.addAccountToGroup(accountId, groupId);
-          counts.memberships++;
-        }
         break;
       }
       case "snapshot": {
