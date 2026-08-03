@@ -317,6 +317,13 @@ export async function assignAccountToPortfolio(
   const db = getDb(env);
   await assertAccountOwned(db, userId, accountId);
   await assertPortfolioOwned(db, userId, portfolioId);
+  // 已在目标 Portfolio → 真 no-op。否则下面的「清空该账户 Tag」会在没真搬家时也误删标签
+  // (重新指到当前 Portfolio 本应无副作用)。
+  const current = await db
+    .select({ portfolioId: portfolioAccounts.portfolioId })
+    .from(portfolioAccounts)
+    .where(eq(portfolioAccounts.accountId, accountId));
+  if (current[0]?.portfolioId === portfolioId) return;
   await db.batch([
     db.delete(portfolioAccounts).where(eq(portfolioAccounts.accountId, accountId)),
     db.insert(portfolioAccounts).values({ portfolioId, accountId }),

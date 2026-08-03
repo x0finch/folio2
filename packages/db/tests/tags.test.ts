@@ -182,6 +182,16 @@ describe("cascade / move 清空", () => {
     expect(await listAccountTagsByUser(env, USER_A)).toHaveLength(0); // 搬家清空
     expect(await listTagsByUser(env, USER_A)).toHaveLength(1); // Tag 本身仍在原 Portfolio
   });
+
+  it("重新指到**当前所在** Portfolio(未真搬家)→ Tag 保留,不误清", async () => {
+    const def = await ensureDefaultPortfolio(env, USER_A);
+    const acc = await makeAccount(USER_A);
+    const tag = await createTag(env, USER_A, { portfolioId: def.id, name: "长线" });
+    await attachTag(env, USER_A, acc.id, tag.id);
+    // 目标 == 当前 → no-op,不该触发「搬家清 Tag」。
+    await assignAccountToPortfolio(env, USER_A, acc.id, def.id);
+    expect(await listAccountTagsByUser(env, USER_A)).toHaveLength(1);
+  });
 });
 
 describe("跨用户隔离", () => {
