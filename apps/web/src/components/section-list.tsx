@@ -14,13 +14,19 @@ export interface OverviewSection {
   content: ReactNode; // 该段的具体渲染(TokenHoldings / PerpPositionsList / DefiPositions)
 }
 
+// 排序键取有限值,否则当 0:防某段小计意外为 NaN 时,`NaN - x` 得 NaN(falsy)悄悄落到 key
+// tiebreak、把该段排到与其数值无关的位置。负小计(如永续负权益)本就比较正确,无需特殊处理。
+const subtotalKey = (n: number): number => (Number.isFinite(n) ? n : 0);
+
 // 纯排序:剔除空段 → 按小计倒序(平手用 key 稳定 tiebreak,避免同值顺序抖动)。
 export function orderSections<T extends { key: string; subtotal: number; count: number }>(
   sections: T[],
 ): T[] {
   return sections
     .filter((s) => s.count > 0)
-    .sort((a, b) => b.subtotal - a.subtotal || a.key.localeCompare(b.key));
+    .sort(
+      (a, b) => subtotalKey(b.subtotal) - subtotalKey(a.subtotal) || a.key.localeCompare(b.key),
+    );
 }
 
 export function SectionList({ sections }: { sections: OverviewSection[] }) {

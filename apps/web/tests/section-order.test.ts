@@ -23,4 +23,15 @@ describe("orderSections", () => {
   it("全空 → 空数组", () => {
     expect(orderSections([s("tokens", 0, 0), s("perps", 0, 0)])).toEqual([]);
   });
+
+  it("负小计(如永续负权益)照数值倒序", () => {
+    const out = orderSections([s("perps", -50, 1), s("tokens", 100, 2), s("defi", -10, 1)]);
+    expect(out.map((x) => x.key)).toEqual(["tokens", "defi", "perps"]); // 100 > -10 > -50
+  });
+
+  it("小计为 NaN → 当 0 处理,排序确定(不落到与数值无关的位置)", () => {
+    const out = orderSections([s("a", Number.NaN, 1), s("b", 5, 1), s("c", -5, 1)]);
+    // NaN 视作 0 → b(5) > a(0) > c(-5)
+    expect(out.map((x) => x.key)).toEqual(["b", "a", "c"]);
+  });
 });
