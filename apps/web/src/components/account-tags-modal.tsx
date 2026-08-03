@@ -60,6 +60,13 @@ export function AccountTagsModal({
       : detachTag({ data: { accountId, tagId } });
     call
       .then(() => router.invalidate())
+      .then(() =>
+        setOptim((m) => {
+          const n = new Map(m);
+          n.delete(tagId); // 服务端真值已回 → 撤下这条乐观覆盖(否则 optim 无限累积、可能盖过真值)
+          return n;
+        }),
+      )
       .catch(() => {
         setOptim((m) => {
           const n = new Map(m);
@@ -70,11 +77,17 @@ export function AccountTagsModal({
       });
   };
 
-  const onCreate = (name: string) => {
-    createTag({ data: { portfolioId, name } })
-      .then((tg) => attachTag({ data: { accountId, tagId: tg.id } }))
-      .then(() => router.invalidate())
-      .catch(fail);
+  const onCreate = async (name: string) => {
+    try {
+      const tg = await createTag({ data: { portfolioId, name } });
+      await attachTag({ data: { accountId, tagId: tg.id } });
+      await router.invalidate();
+    } catch {
+      // createTag 成功但 attachTag 失败会留下「已建未挂」的 Tag —— 仍刷新让它出现在列表里
+      // (用户可手动挂上),不至于既看不到又只得到一句报错。createTag 本身失败时刷新无害。
+      await router.invalidate();
+      fail();
+    }
   };
 
   const onRename = (tagId: string, name: string) => {

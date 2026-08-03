@@ -53,6 +53,8 @@ export function TagInput({
   };
 
   const onInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // 中文输入法组字中,Enter 是「确认候选词」而非提交 —— isComposing 时放行,别误建标签。
+    if (e.nativeEvent.isComposing) return;
     if (e.key === "Enter") {
       e.preventDefault();
       commit();
@@ -219,13 +221,14 @@ function ManageList({
                 if (next && next !== item.name) onRename(item.id, next);
               }}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return; // 输入法组字中不提交改名
                 if (e.key === "Enter") e.currentTarget.blur();
               }}
               className="h-8 flex-1 rounded-md bg-transparent px-2 text-foreground text-sm outline-none focus:bg-muted"
             />
             <button
               type="button"
-              aria-label={`${t("manage")} ${item.name}`}
+              aria-label={`${tc("delete")} ${item.name}`}
               onClick={() => setConfirmingId(item.id)}
               className="flex shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-destructive"
             >
