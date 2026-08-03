@@ -111,7 +111,6 @@ export function TagInput({
               style={item.attached ? { border: `1.5px solid ${item.color}` } : undefined}
             >
               {item.name}
-              {item.attached && <Check className="size-3.5" style={{ color: item.color }} />}
             </button>
           ))}
 
@@ -122,7 +121,6 @@ export function TagInput({
             )}
             style={{ minWidth: "7rem" }}
           >
-            {typing && <span className="size-2.5 shrink-0 rounded-full bg-muted-foreground/50" />}
             <input
               ref={inputRef}
               value={draft}
