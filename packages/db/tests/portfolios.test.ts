@@ -142,13 +142,13 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
 });
 
 describe("createPortfolio / assignAccountToPortfolio", () => {
-  it("createPortfolio 建的是命名非默认 Portfolio(不碰默认唯一索引)", async () => {
-    await ensureDefaultPortfolio(env, USER_A); // 已有默认
+  it("createPortfolio 建的是命名非默认 Portfolio;列表按创建序(不置顶默认)", async () => {
+    const def = await ensureDefaultPortfolio(env, USER_A); // 先建默认
     const watch = await createPortfolio(env, USER_A, { name: "Watch" });
     expect(watch.isDefault).toBe(false);
     const all = await listPortfoliosByUser(env, USER_A);
     expect(all).toHaveLength(2);
-    expect(all[0]!.isDefault).toBe(true); // 默认在前
+    expect(all.map((p) => p.id)).toEqual([def.id, watch.id]); // 创建序:默认先建 → 在前(非因它是默认)
     expect(all.filter((p) => p.isDefault)).toHaveLength(1); // 仍只一个默认
   });
 

@@ -100,8 +100,12 @@ export function AppShell({
 
         {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
         <main className="relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">
-          <PageHeader title={pageTitle} subtitle={pageSub} />
-          {activeNav.key !== "settings" ? selector : null}
+          {/* Portfolio 选择器 = 标题上方的小 badge(eyebrow);Settings 页不显示。 */}
+          <PageHeader
+            title={pageTitle}
+            subtitle={pageSub}
+            eyebrow={activeNav.key !== "settings" ? selector : null}
+          />
           {children}
         </main>
       </div>
