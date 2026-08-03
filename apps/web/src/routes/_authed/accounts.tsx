@@ -9,6 +9,7 @@ import { AddAccountModal, type CompleteTarget } from "../../components/add-accou
 import { ConnectorBadge } from "../../components/connector-badge";
 import { HeaderSync } from "../../components/header-sync";
 import { AccountsSkeleton } from "../../components/skeletons";
+import { TagBadges } from "../../components/tag-badges";
 import { TokenStack } from "../../components/token-stack";
 import { ValueDelta } from "../../components/value-delta";
 import { accountShare, activeAccountsTotal, shareLabel } from "../../lib/account-share";
@@ -21,18 +22,32 @@ import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { isManual } from "../../lib/manual-connector";
 import { listAccounts } from "../../lib/server/accounts";
 import { listAccountHoldings, listPortfolioMemberships } from "../../lib/server/portfolio";
+import { listAccountTags, listTags } from "../../lib/server/tags";
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
     // 合并两源:listAccountHoldings 给活跃账户的市值/上次同步/持仓;listAccounts 给全部账户(含归档)的
     // 凭据态 + archivedAt。归档账户不在 overview.rows(见 portfolio.ts 过滤)→ 其 value/holdings 为空。
     // memberships:按选中 Portfolio 客户端过滤账户列表用(账户页已加载全部账户,过滤在客户端即可)。
-    const [overview, accounts, memberships] = await Promise.all([
+    const [overview, accounts, memberships, allTags, tagLinks] = await Promise.all([
       listAccountHoldings(),
       listAccounts(),
       listPortfolioMemberships(),
+      listTags(),
+      listAccountTags(),
     ]);
     const byId = new Map(overview.rows.map((r) => [r.account.id, r]));
+    const portfolioOf = new Map(memberships.map((m) => [m.accountId, m.portfolioId]));
+    const tagsById = new Map(allTags.map((tg) => [tg.id, tg]));
+    // 每账户已打的 Tag(展示投影:id + 名字)。
+    const tagsOfAccount = new Map<string, { id: string; name: string }[]>();
+    for (const l of tagLinks) {
+      const tg = tagsById.get(l.tagId);
+      if (!tg) continue;
+      const list = tagsOfAccount.get(l.accountId) ?? [];
+      list.push({ id: tg.id, name: tg.name });
+      tagsOfAccount.set(l.accountId, list);
+    }
     const rows: AccountRow[] = accounts.map((a) => {
       const ov = byId.get(a.id);
       return {
@@ -46,9 +61,11 @@ export const Route = createFileRoute("/_authed/accounts")({
         note: ov?.note,
         needsCredentials: a.needsCredentials,
         credsSafe: a.credsSafe,
+        portfolioId: portfolioOf.get(a.id) ?? "",
+        tags: tagsOfAccount.get(a.id) ?? [],
       };
     });
-    return { rows, memberships, pricesStale: overview.pricesStale };
+    return { rows, memberships, allTags, tagLinks, pricesStale: overview.pricesStale };
   },
   pendingComponent: AccountsSkeleton,
   component: Accounts,
@@ -57,7 +74,7 @@ export const Route = createFileRoute("/_authed/accounts")({
 function Accounts() {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const { rows: allRows, memberships, pricesStale } = Route.useLoaderData();
+  const { rows: allRows, memberships, allTags, tagLinks, pricesStale } = Route.useLoaderData();
   const { selectedId: selectedPortfolioId, defaultId } = usePortfolio();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
 
@@ -134,6 +151,8 @@ function Accounts() {
       <AccountDetailSheet
         account={selected}
         total={total}
+        allTags={allTags}
+        tagLinks={tagLinks}
         open={open}
         onOpenChange={setOpen}
         onComplete={startComplete}
@@ -253,6 +272,8 @@ function AccountRowContent({
           connectorId={row.connectorId}
           onComplete={onComplete}
         />
+        {/* Tag 徽章(ADR 0034):行地方窄,最多平铺 2 个,余下折叠 `+N`。 */}
+        {row.tags.length > 0 && <TagBadges tags={row.tags} max={2} />}
         {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),无现货可叠(纯 perp/DeFi 或未同步)的行也不塌矮,
             全列表行高一致。真 logo 的按-kind 填充(perp coin / DeFi 协议)待 #132 解绑后再接。 */}
         {!muted && (

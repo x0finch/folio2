@@ -326,6 +326,18 @@ const en = {
     deleteTitle: "Delete portfolio",
     deleteConfirm: 'Delete "{name}"? Its accounts move back to the default portfolio.',
   },
+  Tags: {
+    title: "Tags",
+    menuAction: "Edit tags",
+    manage: "Manage",
+    done: "Done",
+    addPlaceholder: "Add a tag…",
+    addFirstPlaceholder: "Add your first tag…",
+    hint: "Tap a tag to toggle · type at the end, enter to create",
+    manageHint: "Edit to rename · deleting removes it from all accounts",
+    removeConfirm: '"{name}" will be removed from {count} accounts',
+    actionFailed: "Something went wrong.",
+  },
   // 账户输入的标签/说明,key = ProviderInput.label/desc 的英文源串(en 为同值;zh 给翻译;
   // 缺失时由 IntlProvider 的 getMessageFallback 回退到 key 本身)。
   Inputs: {
@@ -680,6 +692,18 @@ const zh: Messages = {
     deleted: "已删除投资组合。",
     deleteTitle: "删除投资组合",
     deleteConfirm: "删除「{name}」?它的账户会退回默认投资组合。",
+  },
+  Tags: {
+    title: "标签",
+    menuAction: "打标签",
+    manage: "管理",
+    done: "完成",
+    addPlaceholder: "输入新标签…",
+    addFirstPlaceholder: "输入第一个标签…",
+    hint: "点标签打上或取消 · 末尾直接输入,回车即建",
+    manageHint: "改名直接编辑 · 删除会从所有账户移除",
+    removeConfirm: "「{name}」将从 {count} 个账户移除",
+    actionFailed: "操作失败。",
   },
   Inputs: {
     "API Key": "API Key",
