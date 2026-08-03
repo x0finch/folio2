@@ -190,3 +190,47 @@ export const moveAccountToPortfolio = createServerFn({ method: "POST" })
     await db.assignAccountToPortfolio(context.userId, data.accountId, targetId);
     return { portfolioId: targetId };
   });
+
+// 新建命名 Portfolio(选择器/移到弹窗的「新建」页;只建、不归属 —— 建完回列表由用户再选,ADR 0033)。
+export const createPortfolio = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(z.object({ name: z.string().trim().min(1) }))
+  .handler(async ({ data, context }) => {
+    const pf = await db.createPortfolio(context.userId, { name: data.name });
+    return { id: pf.id };
+  });
+
+// 该用户全部 账户→Portfolio 归属(账户页按选中 Portfolio 客户端过滤用 —— 账户页已加载全部账户,
+// 拿归属表在客户端过滤即可、无需按选中重拉)。
+export const listPortfolioMemberships = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(({ context }) => db.listPortfolioMembershipsByUser(context.userId));
+
+const PortfolioIdInput = z.object({ portfolioId: z.string().min(1) });
+
+// 改名(含默认)。
+export const renamePortfolio = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(PortfolioIdInput.extend({ name: z.string().trim().min(1) }))
+  .handler(async ({ data, context }) => {
+    await db.renamePortfolio(context.userId, data.portfolioId, data.name);
+    return { ok: true as const };
+  });
+
+// 设为默认(顶层净值 / 硬刷新的落点随之改)。
+export const setDefaultPortfolio = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(PortfolioIdInput)
+  .handler(async ({ data, context }) => {
+    await db.setDefaultPortfolio(context.userId, data.portfolioId);
+    return { ok: true as const };
+  });
+
+// 删除(默认不可删):成员退回默认后删该行。
+export const deletePortfolio = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(PortfolioIdInput)
+  .handler(async ({ data, context }) => {
+    await db.deletePortfolio(context.userId, data.portfolioId);
+    return { ok: true as const };
+  });

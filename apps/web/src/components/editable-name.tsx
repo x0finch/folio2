@@ -17,6 +17,7 @@ export function EditableName({
   placeholder,
   className,
   children,
+  tooltip = true,
 }: {
   value: string;
   editing: boolean;
@@ -28,6 +29,8 @@ export function EditableName({
   className?: string;
   /** 展示态名字后跟随的内容(如 badge);编辑态自动隐藏。 */
   children?: ReactNode;
+  /** 「点击编辑」tooltip;在 overflow-hidden 容器内(如 SwipeableList 行)会被裁,可关掉。默认开。 */
+  tooltip?: boolean;
 }) {
   const tc = useTranslations("Common");
   const [draft, setDraft] = useState(value);
@@ -81,24 +84,41 @@ export function EditableName({
     );
   }
 
+  // 点名字进入就地编辑。可发现性双轨:桌面(fine 指针)hover 弹 tooltip、藏铅笔;
+  // 移动端(coarse 触屏、看不到 tooltip)常驻淡铅笔提示可编辑。
+  const trigger = (
+    <button
+      type="button"
+      onClick={() => onEditingChange(true)}
+      className={cn(
+        "relative block max-w-full rounded-md text-left outline-none",
+        // 留位给铅笔:tooltip 关时常驻铅笔(同触屏)→ 一直留位;否则仅触屏留位。
+        tooltip ? "pointer-coarse:pr-5" : "pr-5",
+      )}
+    >
+      <span className={cn("block truncate", displayClassName)}>{value || placeholder}</span>
+      {/* 铅笔收在 button 内右侧(right-0),配合上面留位 → 不伸出、不压后面的 badge。
+          tooltip 关(无 hover 提示)→ 常驻淡铅笔当可编辑提示,与触屏端一致。 */}
+      <Pencil
+        className={cn(
+          "-translate-y-1/2 pointer-events-none absolute top-1/2 right-0 size-3 text-muted-foreground",
+          tooltip ? "opacity-0 pointer-coarse:opacity-50" : "opacity-50",
+        )}
+        aria-hidden
+      />
+    </button>
+  );
+
   return (
     <div className={cn("flex min-w-0 items-center gap-2", className)}>
-      {/* 点名字进入就地编辑。可发现性双轨:桌面(fine 指针)hover 弹 tooltip、藏铅笔;
-          移动端(coarse 触屏、看不到 tooltip)常驻淡铅笔提示可编辑。 */}
-      <Tooltip content={tc("clickToEdit")} side="top">
-        <button
-          type="button"
-          onClick={() => onEditingChange(true)}
-          className="relative block max-w-full rounded-md text-left outline-none pointer-coarse:pr-5"
-        >
-          <span className={cn("block truncate", displayClassName)}>{value || placeholder}</span>
-          {/* 铅笔收在 button 内右侧(right-0),配合上面 pointer-coarse:pr-5 留位 → 不伸出、不压后面的 badge。 */}
-          <Pencil
-            className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-0 size-3 text-muted-foreground opacity-0 pointer-coarse:opacity-50"
-            aria-hidden
-          />
-        </button>
-      </Tooltip>
+      {/* tooltip 在 overflow-hidden 容器(如 SwipeableList 行)内会被裁 → 可由父关闭(见 tooltip prop)。 */}
+      {tooltip ? (
+        <Tooltip content={tc("clickToEdit")} side="top">
+          {trigger}
+        </Tooltip>
+      ) : (
+        trigger
+      )}
       {children}
     </div>
   );

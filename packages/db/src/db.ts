@@ -33,6 +33,9 @@ export function createDb(env: DbEnv) {
     listPortfolioMembershipsByUser: b(q.listPortfolioMembershipsByUser),
     createPortfolio: b(q.createPortfolio),
     assignAccountToPortfolio: b(q.assignAccountToPortfolio),
+    renamePortfolio: b(q.renamePortfolio),
+    setDefaultPortfolio: b(q.setDefaultPortfolio),
+    deletePortfolio: b(q.deletePortfolio),
     // —— snapshots ——
     writeSnapshot: b(q.writeSnapshot),
     listSnapshotsByAccount: b(q.listSnapshotsByAccount),

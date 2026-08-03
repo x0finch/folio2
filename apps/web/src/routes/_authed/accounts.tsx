@@ -14,18 +14,24 @@ import { ValueDelta } from "../../components/value-delta";
 import { accountShare, activeAccountsTotal, shareLabel } from "../../lib/account-share";
 import { sortActiveAccounts } from "../../lib/account-sort";
 import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-sync-status";
+import { accountIdsInView } from "../../lib/accounts-in-view";
 import { aggregateDayChange } from "../../lib/day-value-change";
+import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { isManual } from "../../lib/manual-connector";
 import { listAccounts } from "../../lib/server/accounts";
-import { listAccountHoldings } from "../../lib/server/portfolio";
+import { listAccountHoldings, listPortfolioMemberships } from "../../lib/server/portfolio";
 
 export const Route = createFileRoute("/_authed/accounts")({
   loader: async () => {
     // 合并两源:listAccountHoldings 给活跃账户的市值/上次同步/持仓;listAccounts 给全部账户(含归档)的
     // 凭据态 + archivedAt。归档账户不在 overview.rows(见 portfolio.ts 过滤)→ 其 value/holdings 为空。
-    // 凭据字段规格由补录 modal 自取(AddAccountModal specsQuery),此处不再预取。
-    const [overview, accounts] = await Promise.all([listAccountHoldings(), listAccounts()]);
+    // memberships:按选中 Portfolio 客户端过滤账户列表用(账户页已加载全部账户,过滤在客户端即可)。
+    const [overview, accounts, memberships] = await Promise.all([
+      listAccountHoldings(),
+      listAccounts(),
+      listPortfolioMemberships(),
+    ]);
     const byId = new Map(overview.rows.map((r) => [r.account.id, r]));
     const rows: AccountRow[] = accounts.map((a) => {
       const ov = byId.get(a.id);
@@ -42,7 +48,7 @@ export const Route = createFileRoute("/_authed/accounts")({
         credsSafe: a.credsSafe,
       };
     });
-    return { rows, pricesStale: overview.pricesStale };
+    return { rows, memberships, pricesStale: overview.pricesStale };
   },
   pendingComponent: AccountsSkeleton,
   component: Accounts,
@@ -51,8 +57,19 @@ export const Route = createFileRoute("/_authed/accounts")({
 function Accounts() {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const { rows, pricesStale } = Route.useLoaderData();
+  const { rows: allRows, memberships, pricesStale } = Route.useLoaderData();
+  const { selectedId: selectedPortfolioId, defaultId } = usePortfolio();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
+
+  // 账户页 scope 到选中 Portfolio(ADR 0033):只显归属选中的账户(含其归档成员)。归属过滤在客户端
+  // (归档无关的成员集),切 Portfolio 即时重筛、无需重拉。选择器即作用域,账户页不设单独 tab。
+  const memberIds = accountIdsInView(
+    allRows.map((r) => r.id),
+    memberships,
+    selectedPortfolioId,
+    defaultId,
+  );
+  const rows = allRows.filter((r) => memberIds.has(r.id));
 
   // 活跃账户排序:未同步过(新加)置顶 → 其余按市值倒序;归档在末尾独立分区。
   const active = sortActiveAccounts(rows.filter((r) => r.archivedAt == null));

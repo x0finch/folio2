@@ -318,6 +318,65 @@ export async function assignAccountToPortfolio(
   ]);
 }
 
+// 改 Portfolio 名(含默认,因它是真行)。userId 作用域,越权即影响 0 行。
+export async function renamePortfolio(
+  env: DbEnv,
+  userId: string,
+  portfolioId: string,
+  name: string,
+): Promise<void> {
+  await getDb(env)
+    .update(portfolios)
+    .set({ name })
+    .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId)));
+}
+
+// 设为默认:先清掉该用户当前默认(→ 无默认),再把目标置默认(→ 恰一个)。两步一个 batch 原子换,
+// 中途不出现「两个默认」违反部分唯一索引。
+export async function setDefaultPortfolio(
+  env: DbEnv,
+  userId: string,
+  portfolioId: string,
+): Promise<void> {
+  const db = getDb(env);
+  await assertPortfolioOwned(db, userId, portfolioId);
+  await db.batch([
+    db
+      .update(portfolios)
+      .set({ isDefault: false })
+      .where(and(eq(portfolios.userId, userId), eq(portfolios.isDefault, true))),
+    db
+      .update(portfolios)
+      .set({ isDefault: true })
+      .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
+  ]);
+}
+
+// 删 Portfolio:默认不可删(抛)。否则先把成员退回默认 Portfolio,再删该行(成员账户不动、不孤儿)。
+export async function deletePortfolio(
+  env: DbEnv,
+  userId: string,
+  portfolioId: string,
+): Promise<void> {
+  const db = getDb(env);
+  const rows = await db
+    .select({ isDefault: portfolios.isDefault })
+    .from(portfolios)
+    .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId)));
+  const target = rows[0];
+  if (!target) throw new Error(`portfolio not found: ${portfolioId}`);
+  if (target.isDefault) throw new Error("cannot delete the default portfolio");
+  const def = await ensureDefaultPortfolio(env, userId);
+  await db.batch([
+    // 成员退回默认(1:1 不冲突:成员在 target,不在 default → 改指 default 无碰撞)。
+    db
+      .update(portfolioAccounts)
+      .set({ portfolioId: def.id })
+      .where(eq(portfolioAccounts.portfolioId, portfolioId)),
+    db.delete(portfolios).where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
+  ]);
+}
+
 // ---------- 快照 ----------
 
 export interface SnapshotBalanceInput {
