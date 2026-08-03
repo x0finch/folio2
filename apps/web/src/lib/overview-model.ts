@@ -197,7 +197,7 @@ export async function buildOverview(
         (s.perp != null && (s.perp.positions.length > 0 || s.perp.equity != null)),
     );
 
-  // 4) 每账户净值(供 ByGroup 标签分组小计)+ 组合总额(按账户去重)。
+  // 4) 每账户净值 + 组合总额(按账户去重)。
   // 现推(不落库,liveTotals 已在步骤 2 并行求得):按当前 mode + 实时源价重算每账户净值,
   // 替代快照冻结 totalUsd。曲线「当下点」复用同一 deriveLiveAccountTotals → 主页总价 ≡ 曲线当下点(#81)。
   const accountTotals = accounts.map((account) => ({

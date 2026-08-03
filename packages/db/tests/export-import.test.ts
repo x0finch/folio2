@@ -6,12 +6,10 @@ import { getDb } from "../src/client";
 import {
   createAccount,
   importAccount,
-  importGroup,
   importManualActivity,
   importSnapshot,
   importToken,
   listAccountsByUser,
-  listGroupsByUser,
   listManualActivityByAccount,
   listManualActivityByUser,
   listSnapshotsByAccount,
@@ -21,7 +19,7 @@ import {
 import { tokenRefs, tokens } from "../src/schema";
 
 // 导出/导入 v3 的 db 支持(#204):listTokensForExport(带 ref)、listManualActivityByUser(扁平跨账户),
-// 以及 A 方案的 find-or-create 一族(importToken/importAccount/importGroup/importSnapshot/
+// 以及 A 方案的 find-or-create 一族(importToken/importAccount/importSnapshot/
 // importManualActivity)—— 各按内容自然键去重,让反复导入/合并幂等。对着真 D1 跑(约束/唯一索引真生效)。
 
 const USER_A = "u-a";
@@ -168,17 +166,6 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
     expect(b.created).toBe(true);
     expect(await listAccountsByUser(env, USER_A)).toHaveLength(1);
     expect(await listAccountsByUser(env, USER_B)).toHaveLength(1);
-  });
-});
-
-describe("importGroup —— find-or-create(自然键 = name+sortOrder)", () => {
-  it("同名同序 → 复用;name 或 sortOrder 不同 → 新建", async () => {
-    const g1 = await importGroup(env, USER_A, { name: "G", sortOrder: 0 });
-    const g2 = await importGroup(env, USER_A, { name: "G", sortOrder: 0 });
-    expect(g2.id).toBe(g1.id);
-    await importGroup(env, USER_A, { name: "G", sortOrder: 1 }); // sortOrder 不同
-    await importGroup(env, USER_A, { name: "G2", sortOrder: 0 }); // name 不同
-    expect(await listGroupsByUser(env, USER_A)).toHaveLength(3);
   });
 });
 

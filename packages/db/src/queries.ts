@@ -18,9 +18,7 @@ import {
 import { batchWrite } from "./cache-util";
 import { type Db, type DbEnv, getDb } from "./client";
 import {
-  accountGroups,
   accounts,
-  groups,
   manualActivity,
   snapshotBalances,
   snapshots,
@@ -30,7 +28,6 @@ import {
 } from "./schema";
 import type {
   AccountSafe,
-  Group,
   Snapshot,
   SnapshotBalance,
   UserSettings,
@@ -59,14 +56,6 @@ async function assertAccountOwned(db: Db, userId: string, accountId: string): Pr
     .from(accounts)
     .where(and(eq(accounts.id, accountId), eq(accounts.userId, userId)));
   if (!rows[0]) throw new Error(`account not found: ${accountId}`);
-}
-
-async function assertGroupOwned(db: Db, userId: string, groupId: string): Promise<void> {
-  const rows = await db
-    .select({ id: groups.id })
-    .from(groups)
-    .where(and(eq(groups.id, groupId), eq(groups.userId, userId)));
-  if (!rows[0]) throw new Error(`group not found: ${groupId}`);
 }
 
 // ---------- 账户 ----------
@@ -192,110 +181,11 @@ export async function setArchived(
     .where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
 }
 
-/** 删账户:其 accountGroups 配对与 snapshots(及 snapshotBalances)经 ON DELETE CASCADE 级联删除。 */
+/** 删账户:其 snapshots(及 snapshotBalances)经 ON DELETE CASCADE 级联删除。 */
 export async function deleteAccount(env: DbEnv, userId: string, id: string): Promise<void> {
   await getDb(env)
     .delete(accounts)
     .where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
-}
-
-// ---------- 组 ----------
-
-export interface CreateGroupInput {
-  name: string;
-  sortOrder?: number;
-}
-
-export async function createGroup(
-  env: DbEnv,
-  userId: string,
-  input: CreateGroupInput,
-): Promise<Group> {
-  const db = getDb(env);
-  const id = crypto.randomUUID();
-  const sortOrder = input.sortOrder ?? 0;
-  await db.insert(groups).values({ id, userId, name: input.name, sortOrder });
-  return { id, userId, name: input.name, sortOrder };
-}
-
-export function listGroupsByUser(env: DbEnv, userId: string): Promise<Group[]> {
-  return getDb(env).select().from(groups).where(eq(groups.userId, userId));
-}
-
-/** 删组:只删该组及其 accountGroups 配对(账户本身不动)。 */
-export async function deleteGroup(env: DbEnv, userId: string, id: string): Promise<void> {
-  await getDb(env)
-    .delete(groups)
-    .where(and(eq(groups.id, id), eq(groups.userId, userId)));
-}
-
-// ---------- 账户↔组 多对多 ----------
-
-export async function addAccountToGroup(
-  env: DbEnv,
-  userId: string,
-  accountId: string,
-  groupId: string,
-): Promise<void> {
-  const db = getDb(env);
-  await assertAccountOwned(db, userId, accountId);
-  await assertGroupOwned(db, userId, groupId);
-  await db.insert(accountGroups).values({ accountId, groupId }).onConflictDoNothing();
-}
-
-export async function removeAccountFromGroup(
-  env: DbEnv,
-  userId: string,
-  accountId: string,
-  groupId: string,
-): Promise<void> {
-  const db = getDb(env);
-  await assertAccountOwned(db, userId, accountId);
-  await db
-    .delete(accountGroups)
-    .where(and(eq(accountGroups.accountId, accountId), eq(accountGroups.groupId, groupId)));
-}
-
-export async function listGroupsByAccount(
-  env: DbEnv,
-  userId: string,
-  accountId: string,
-): Promise<Group[]> {
-  const db = getDb(env);
-  await assertAccountOwned(db, userId, accountId);
-  return db
-    .select(getTableColumns(groups))
-    .from(groups)
-    .innerJoin(accountGroups, eq(accountGroups.groupId, groups.id))
-    .where(and(eq(accountGroups.accountId, accountId), eq(groups.userId, userId)));
-}
-
-export async function listAccountsByGroup(
-  env: DbEnv,
-  userId: string,
-  groupId: string,
-): Promise<AccountSafe[]> {
-  const db = getDb(env);
-  await assertGroupOwned(db, userId, groupId);
-  return db
-    .select(accountSafeColumns)
-    .from(accounts)
-    .innerJoin(accountGroups, eq(accountGroups.accountId, accounts.id))
-    .where(and(eq(accountGroups.groupId, groupId), eq(accounts.userId, userId)));
-}
-
-// 该用户的全部 账户↔组 关联(总览按组聚合用)。一次查询(account_groups ⨝ accounts 限 user),
-// 避免按账户逐个 listGroupsByAccount 的 N+1。
-export interface Membership {
-  accountId: string;
-  groupId: string;
-}
-export function listMembershipsByUser(env: DbEnv, userId: string): Promise<Membership[]> {
-  return getDb(env)
-    .select({ accountId: accountGroups.accountId, groupId: accountGroups.groupId })
-    .from(accountGroups)
-    .innerJoin(accounts, eq(accounts.id, accountGroups.accountId))
-    .where(eq(accounts.userId, userId));
 }
 
 // ---------- 快照 ----------
@@ -936,27 +826,6 @@ export async function importAccount(
     archivedAt: input.archivedAt ?? null,
   });
   return { id, created: true };
-}
-
-// 分组自然键 = (name, sortOrder)。
-export async function importGroup(
-  env: DbEnv,
-  userId: string,
-  input: CreateGroupInput,
-): Promise<{ id: string }> {
-  const db = getDb(env);
-  const sortOrder = input.sortOrder ?? 0;
-  const existing = await db
-    .select({ id: groups.id })
-    .from(groups)
-    .where(
-      and(eq(groups.userId, userId), eq(groups.name, input.name), eq(groups.sortOrder, sortOrder)),
-    )
-    .limit(1);
-  if (existing[0]) return { id: existing[0].id };
-  const id = crypto.randomUUID();
-  await db.insert(groups).values({ id, userId, name: input.name, sortOrder });
-  return { id };
 }
 
 // 快照自然键 = (accountId, takenAt) —— 一个账户一个时刻一份。已存在则整份跳过(余额不重复写)。

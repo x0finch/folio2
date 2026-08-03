@@ -5,27 +5,19 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { user } from "../src/auth-schema";
 import { getDb } from "../src/client";
 import {
-  addAccountToGroup,
   createAccount,
-  createGroup,
   deleteAccount,
-  deleteGroup,
   getAccountById,
   getLatestSnapshotByUser,
   getRawCreds,
   getUserSettings,
-  listAccountsByGroup,
   listAccountsByUser,
   listBalancesForSnapshots,
-  listGroupsByAccount,
-  listGroupsByUser,
-  listMembershipsByUser,
   listRawCredsByUser,
   listSnapshotsByAccount,
   listSnapshotsPageByUser,
   listSnapshotTotalsByUser,
   listUserIdsWithAccounts,
-  removeAccountFromGroup,
   renameAccount,
   setAccountCredentials,
   setArchived,
@@ -152,83 +144,6 @@ describe("accounts", () => {
         [a2.id, '{"identifier":"0xabc"}'],
       ]),
     );
-  });
-});
-
-describe("groups & many-to-many membership", () => {
-  it("adds/removes membership idempotently and queries both directions", async () => {
-    const acc = await createAccount(env, USER_A, {
-      connectorId: "manual",
-      label: "A",
-      creds: "x",
-    });
-    const g1 = await createGroup(env, USER_A, { name: "G1" });
-    const g2 = await createGroup(env, USER_A, { name: "G2", sortOrder: 1 });
-
-    await addAccountToGroup(env, USER_A, acc.id, g1.id);
-    await addAccountToGroup(env, USER_A, acc.id, g2.id);
-    await addAccountToGroup(env, USER_A, acc.id, g2.id); // idempotent
-
-    expect(await listGroupsByAccount(env, USER_A, acc.id)).toHaveLength(2);
-    expect(await listAccountsByGroup(env, USER_A, g1.id)).toHaveLength(1);
-
-    await removeAccountFromGroup(env, USER_A, acc.id, g1.id);
-    expect(await listGroupsByAccount(env, USER_A, acc.id)).toHaveLength(1);
-  });
-
-  it("deleteGroup removes only the pairings, keeps the account", async () => {
-    const acc = await createAccount(env, USER_A, {
-      connectorId: "manual",
-      label: "A",
-      creds: "x",
-    });
-    const g = await createGroup(env, USER_A, { name: "G" });
-    await addAccountToGroup(env, USER_A, acc.id, g.id);
-
-    await deleteGroup(env, USER_A, g.id);
-    expect(await listGroupsByUser(env, USER_A)).toHaveLength(0);
-    expect(await listAccountsByUser(env, USER_A)).toHaveLength(1);
-  });
-
-  it("lists all memberships for a user in one query, scoped to the user", async () => {
-    const a1 = await createAccount(env, USER_A, {
-      connectorId: "manual",
-      label: "A1",
-      creds: "x",
-    });
-    const a2 = await createAccount(env, USER_A, {
-      connectorId: "manual",
-      label: "A2",
-      creds: "x",
-    });
-    const g1 = await createGroup(env, USER_A, { name: "G1" });
-    const g2 = await createGroup(env, USER_A, { name: "G2" });
-    await addAccountToGroup(env, USER_A, a1.id, g1.id);
-    await addAccountToGroup(env, USER_A, a1.id, g2.id); // a1 在两个组
-    await addAccountToGroup(env, USER_A, a2.id, g1.id);
-    // user B 自有关联,不应混入。
-    const b1 = await createAccount(env, USER_B, {
-      connectorId: "manual",
-      label: "B1",
-      creds: "x",
-    });
-    const gb = await createGroup(env, USER_B, { name: "GB" });
-    await addAccountToGroup(env, USER_B, b1.id, gb.id);
-
-    const ms = await listMembershipsByUser(env, USER_A);
-    expect(ms).toHaveLength(3);
-    expect(
-      ms
-        .filter((m) => m.accountId === a1.id)
-        .map((m) => m.groupId)
-        .sort(),
-    ).toEqual([g1.id, g2.id].sort());
-    expect(ms.find((m) => m.accountId === b1.id)).toBeUndefined();
-  });
-
-  it("returns [] memberships for a user with none", async () => {
-    await createAccount(env, USER_A, { connectorId: "manual", label: "A", creds: "x" });
-    expect(await listMembershipsByUser(env, USER_A)).toEqual([]);
   });
 });
 
@@ -391,14 +306,12 @@ describe("snapshots", () => {
     expect(await getLatestSnapshotByUser(env, USER_A)).toEqual([]);
   });
 
-  it("cascades snapshots and pairings when the account is deleted", async () => {
+  it("cascades snapshots when the account is deleted", async () => {
     const acc = await createAccount(env, USER_A, {
       connectorId: "manual",
       label: "A",
       creds: "x",
     });
-    const g = await createGroup(env, USER_A, { name: "G" });
-    await addAccountToGroup(env, USER_A, acc.id, g.id);
     await writeSnapshot(env, USER_A, acc.id, {
       takenAt: 1,
       totalUsd: 1,
@@ -406,8 +319,7 @@ describe("snapshots", () => {
     });
 
     await deleteAccount(env, USER_A, acc.id);
-    expect(await listGroupsByUser(env, USER_A)).toHaveLength(1); // group kept
-    expect(await listAccountsByGroup(env, USER_A, g.id)).toHaveLength(0); // pairing gone
+    expect(await listAccountsByUser(env, USER_A)).toHaveLength(0); // account gone
     expect(await getLatestSnapshotByUser(env, USER_A)).toHaveLength(0); // snapshots gone
   });
 
@@ -480,11 +392,9 @@ describe("snapshots", () => {
 describe("cross-user isolation", () => {
   it("never leaks another user's data", async () => {
     const a = await createAccount(env, USER_A, { connectorId: "manual", label: "A", creds: "x" });
-    await createGroup(env, USER_A, { name: "GA" });
     await writeSnapshot(env, USER_A, a.id, { takenAt: 1, totalUsd: 1, balances: [] });
 
     expect(await listAccountsByUser(env, USER_B)).toHaveLength(0);
-    expect(await listGroupsByUser(env, USER_B)).toHaveLength(0);
     expect(await getAccountById(env, USER_B, a.id)).toBeNull();
     expect(await getRawCreds(env, USER_B, a.id)).toBeNull();
 
@@ -492,7 +402,6 @@ describe("cross-user isolation", () => {
     await expect(
       writeSnapshot(env, USER_B, a.id, { takenAt: 2, totalUsd: 2, balances: [] }),
     ).rejects.toThrow();
-    await expect(addAccountToGroup(env, USER_B, a.id, "nope")).rejects.toThrow();
   });
 });
 

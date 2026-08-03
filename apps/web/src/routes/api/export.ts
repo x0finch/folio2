@@ -4,9 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { safeView } from "@/lib/creds";
 import {
   accountRecord,
-  groupRecord,
   manualActivityRecord,
-  membershipRecord,
   metaRecord,
   ndjsonLine,
   snapshotRecord,
@@ -55,9 +53,6 @@ export const Route = createFileRoute("/api/export")({
                 const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
                 write(accountRecord(a, safeView(specsByType[a.connectorId] ?? [], stored)));
               }
-
-              for (const g of await db.listGroupsByUser(userId)) write(groupRecord(g));
-              for (const m of await db.listMembershipsByUser(userId)) write(membershipRecord(m));
 
               // 快照:分页拉取,每页取该页余额、流式写出 → 内存恒定,绕开参数上限。
               for (let offset = 0; ; offset += SNAPSHOT_PAGE) {

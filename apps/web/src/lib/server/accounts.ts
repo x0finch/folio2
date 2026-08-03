@@ -104,7 +104,7 @@ export const updateAccount = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-// 删除:不可逆(snapshots/accountGroups/manual_activity 经 ON DELETE CASCADE 级联清)。前端需二次确认。
+// 删除:不可逆(snapshots/manual_activity 经 ON DELETE CASCADE 级联清)。前端需二次确认。
 export const removeAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(AccountIdInput)

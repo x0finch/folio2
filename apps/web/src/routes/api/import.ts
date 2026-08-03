@@ -35,9 +35,6 @@ export const Route = createFileRoute("/api/import")({
           importToken: async (t, refs) => ({ id: await db.importToken(userId, t, refs) }),
           importAccount: async (input) =>
             db.importAccount(userId, { ...input, connectorId: input.connectorId as ConnectorId }),
-          importGroup: async (input) => db.importGroup(userId, input),
-          addAccountToGroup: (accountId, groupId) =>
-            db.addAccountToGroup(userId, accountId, groupId),
           importSnapshot: async (accountId, input) => {
             // 边界透传:db 的 SnapshotBalanceInput.kind 仍是旧 4 值 BalanceKind(#37c 前),
             // 而导入文件的 kind 是 connectors 的 5-kind;运行期只作 text 存储,按契约断言透传(同 @folio/sync)。
