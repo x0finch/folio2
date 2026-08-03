@@ -338,6 +338,17 @@ const en = {
     removeConfirm: '"{name}" will be removed from {count} accounts',
     actionFailed: "Something went wrong.",
   },
+  CustomTabs: {
+    overview: "Overview",
+    add: "Pin a view",
+    byConnector: "By source",
+    byTag: "By tag",
+    noOptions: "Nothing to pin yet",
+    changeTarget: "Change",
+    unpin: "Unpin",
+    empty: "No accounts match this tab yet.",
+    actionFailed: "Something went wrong.",
+  },
   // 账户输入的标签/说明,key = ProviderInput.label/desc 的英文源串(en 为同值;zh 给翻译;
   // 缺失时由 IntlProvider 的 getMessageFallback 回退到 key 本身)。
   Inputs: {
@@ -703,6 +714,17 @@ const zh: Messages = {
     hint: "点标签打上或取消 · 末尾直接输入,回车即建",
     manageHint: "改名直接编辑 · 删除会从所有账户移除",
     removeConfirm: "「{name}」将从 {count} 个账户移除",
+    actionFailed: "操作失败。",
+  },
+  CustomTabs: {
+    overview: "总览",
+    add: "固定视图",
+    byConnector: "按来源",
+    byTag: "按标签",
+    noOptions: "暂无可固定项",
+    changeTarget: "改指向",
+    unpin: "取消固定",
+    empty: "还没有账户匹配这个标签页。",
     actionFailed: "操作失败。",
   },
   Inputs: {

@@ -1,6 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { accountIdsInView, accountsInView } from "../accounts-in-view";
+import {
+  accountIdsInView,
+  accountsInView,
+  accountsMatchingPin,
+  type TabPin,
+} from "../accounts-in-view";
 import { buildPortfolioHistory } from "../history";
 import { deriveLiveAccountTotals } from "../live-value";
 import { isManual } from "../manual-connector";
@@ -14,7 +19,27 @@ import { enrichBalances } from "./internal/token-enrich";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。所有 scope 到「选中 Portfolio」的
 // 读接口共用这个 shape;缺省 {} 让 loader 不带参调用时退回默认视图。
-const PortfolioScopeInput = z.object({ portfolioId: z.string().optional() }).default({});
+// pin(ADR 0034):自定义 Tab 激活时额外按 connector/tag 在选中 Portfolio 内再收窄;缺省 = 默认视图(不收窄)。
+const TabPinScope = z
+  .object({
+    kind: z.enum(["connector", "tag"]),
+    connectorId: z.string().optional(),
+    tagId: z.string().optional(),
+  })
+  .optional();
+const PortfolioScopeInput = z
+  .object({ portfolioId: z.string().optional(), pin: TabPinScope })
+  .default({});
+
+// 入参 pin → accountsInView 用的 TabPin 联合(缺目标 = 视作无 pin,退回不收窄)。
+function toPin(pin: z.infer<typeof TabPinScope>): TabPin | null {
+  if (!pin) return null;
+  if (pin.kind === "connector" && pin.connectorId) {
+    return { kind: "connector", connectorId: pin.connectorId };
+  }
+  if (pin.kind === "tag" && pin.tagId) return { kind: "tag", tagId: pin.tagId };
+  return null;
+}
 
 // 校验传入的 selectedId 属于该用户,否则退回默认(客户端传入不可信 —— 传别人的 id 只会得到空视图,
 // 不泄露任何数据,但显式回退到默认更符合直觉)。返回选中 id + 默认 Portfolio。
@@ -46,7 +71,14 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
       db.listPortfolioMembershipsByUser(context.userId),
     ]);
     // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
-    const accounts = accountsInView(allAccounts, memberships, selectedId, defaultId);
+    // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
+    const pin = toPin(data.pin);
+    const tagLinks = pin?.kind === "tag" ? await db.listAccountTagsByUser(context.userId) : [];
+    const accounts = accountsMatchingPin(
+      accountsInView(allAccounts, memberships, selectedId, defaultId),
+      pin,
+      tagLinks,
+    );
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
     await injectManualSnapshots(context.userId, accounts, byAccount);
@@ -115,14 +147,26 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     //  · memberSet = 归属选中的账户(**含已归档**)→ 过去点按它 scope,保留归档成员的历史贡献;
     //  · accounts  = 其中未归档的 → 曲线当下点(live 覆写)只算活跃成员。
     // 把账户移进/移出 Portfolio,这条曲线整条重算(直觉:这钱在这个视图里从来算/不算)。
-    const memberSet = accountIdsInView(
+    // 自定义 Tab(ADR 0034):曲线同样按 pin 收窄,与总额口径一致(否则总额收窄、曲线不收窄会打架)。
+    const pin = toPin(data.pin);
+    const tagLinks = pin?.kind === "tag" ? await db.listAccountTagsByUser(context.userId) : [];
+    const memberSetBase = accountIdsInView(
       allAccounts.map((a) => a.id),
       memberships,
       selectedId,
       defaultId,
     );
-    const accounts = accountsInView(allAccounts, memberships, selectedId, defaultId);
-    const memberAccounts = allAccounts.filter((a) => memberSet.has(a.id));
+    const memberAccounts = accountsMatchingPin(
+      allAccounts.filter((a) => memberSetBase.has(a.id)),
+      pin,
+      tagLinks,
+    );
+    const memberSet = new Set(memberAccounts.map((a) => a.id));
+    const accounts = accountsMatchingPin(
+      accountsInView(allAccounts, memberships, selectedId, defaultId),
+      pin,
+      tagLinks,
+    );
 
     // manual 历史改由账本 compute-on-read 供货(ADR 0018):防御式排除任何遗留 manual snapshot 行(正常为空),
     // 再拼上账本现算的 manual (takenAt, totalUsd) 行 → 同喂 buildPortfolioHistory,不双算、无需特殊合并。
