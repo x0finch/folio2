@@ -33,8 +33,8 @@ interface PlatformBadge {
   logo?: string;
 }
 
-// eyebrow 节头(仅抽屉用:spot/DeFi/perp 堆叠需分区名;总览 tab 即标题不渲染)。
-function SectionHeader({ title }: { title: string }) {
+// eyebrow 节头(抽屉的 spot/DeFi/perp 堆叠 + 自定义 Tab 的 section list 共用,ADR 0034;总览 tab 即标题不渲染)。
+export function SectionHeader({ title }: { title: string }) {
   return (
     <div className="flex items-center gap-2.5 px-3">
       <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
