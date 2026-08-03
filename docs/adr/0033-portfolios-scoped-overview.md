@@ -26,7 +26,7 @@
 
 - **净值语义变了**:从「全账户(除归档)Σ」变成「选中 Portfolio Σ」。默认选 My + 现有账户全归 My → 对老用户**行为不变**(打开还是看到全部)。把某账户移到 Watch 才开始「从 My 消失」。
 - **一处过滤扩散到所有聚合视图**:因为总额 / 代币 / Perps / DeFi / 构成 / 曲线 / Insights 都源自 `accountsInView`,加一个 `portfolioId` 维度即全线一致;这也是为什么坚持**单一事实源过滤**而非各视图各自判。
-- **迁移(定:seed 真 My 行 + 关联表,不动 accounts)**:新增 `portfolios` 表 + `portfolio_accounts` 关联表(`UNIQUE(account_id)`),**`accounts` 表零改动**。给**每个现有用户** seed 一行 `My Portfolio`(`is_default=1`),并给该用户每个现有账户 backfill 一行 `(My, account)` 归属。id 在 SQL 迁移里用 `lower(hex(randomblob(16)))`(id 列是 TEXT、不强制 UUID 格式)。**新用户 / 新账户**由 app `ensureDefaultPortfolio(userId)` + 建账户时插归属行兜底——迁移管存量、app 管新增,人人有 My、每账户恰一行归属。增量、可自动应用、非破坏。**升 M:N** 时只删 `UNIQUE(account_id)`,accounts 表与既有归属行均不动。
+- **迁移(定:seed 真 My 行 + 关联表,不动 accounts)**:新增 `portfolios` 表 + `portfolio_accounts` 关联表(`UNIQUE(account_id)`),**`accounts` 表零改动**。给**每个现有用户** seed 一行默认 Portfolio(`is_default=1`),**名字 = `<用户名>'s Portfolio`**(取 `user.name`;name 为空时兜底 `My Portfolio`),真行、可改名;并给该用户每个现有账户 backfill 一行归属指向它。id 在 SQL 迁移里用 `lower(hex(randomblob(16)))`(id 列是 TEXT、不强制 UUID 格式)。**新用户 / 新账户**由 app `ensureDefaultPortfolio(userId)` + 建账户时插归属行兜底——迁移管存量、app 管新增,人人有 My、每账户恰一行归属。增量、可自动应用、非破坏。**升 M:N** 时只删 `UNIQUE(account_id)`,accounts 表与既有归属行均不动。
 - **观察 = 放进非默认 Portfolio**,不引入账户的 `is_watch` 特殊类型:少一个概念,「Watch」只是个用户命名的 Portfolio。
 - **分享 / 导出**按选中 Portfolio 的视图走(account-share 现有逻辑顺延到 portfolio 维);细节留 spec。
 - **本轮不做**:多对多 group、「全部(除 Watch)」合并视图、Portfolio 级的目标/预算等——先把「命名账户集 + 选中聚合 + My/Watch」的地基打对。
