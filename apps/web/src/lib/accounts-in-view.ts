@@ -1,4 +1,4 @@
-import type { PortfolioMembership } from "@folio/db";
+import type { AccountTagLink, PortfolioMembership } from "@folio/db";
 
 // 聚合边界的**单一事实源过滤**(ADR 0033)。总额 / 代币 / Perps / DeFi / 构成 / 曲线 / Insights
 // 全部源自这里 —— 加一个 portfolioId 维度即全线一致,数字不自相矛盾。
@@ -32,6 +32,25 @@ export function accountsInView<A extends { id: string; archivedAt: number | null
       a.archivedAt == null &&
       inView(portfolioOf.get(a.id), selectedPortfolioId, defaultPortfolioId),
   );
+}
+
+// 自定义 Tab(pin,ADR 0034)的过滤目标:指向单个 Connector 或单个 Tag。null = 默认视图(不收窄)。
+export type TabPin = { kind: "connector"; connectorId: string } | { kind: "tag"; tagId: string };
+
+// 在**已按 Portfolio 过滤**的账户集上再按 pin 收窄(自定义 Tab)。pin=null → 原样返回(默认视图)。
+// 与 accountsInView 组合使用:accountsMatchingPin(accountsInView(...), pin, tagLinks)——作用域仍是
+// 「当前 Portfolio 内」,pin 只在其内再筛(ADR 0034:pin 不跨 Portfolio)。纯函数,单一事实源。
+export function accountsMatchingPin<A extends { id: string; connectorId: string }>(
+  accounts: A[],
+  pin: TabPin | null,
+  tagLinks: AccountTagLink[],
+): A[] {
+  if (!pin) return accounts;
+  if (pin.kind === "connector") {
+    return accounts.filter((a) => a.connectorId === pin.connectorId);
+  }
+  const tagged = new Set(tagLinks.filter((l) => l.tagId === pin.tagId).map((l) => l.accountId));
+  return accounts.filter((a) => tagged.has(a.id));
 }
 
 // 归属选中 Portfolio 的账户 id 集(**与归档无关**)—— 历史曲线的过去点按它 scope:

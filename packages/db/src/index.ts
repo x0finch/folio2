@@ -29,6 +29,7 @@ export type {
   SnapshotBalanceView,
   SnapshotTotal,
   SnapshotWithBalances,
+  TabPinInput,
   UserSettingsView,
   WriteSnapshotInput,
 } from "./queries";
@@ -37,6 +38,7 @@ export type {
   AccountSafe,
   Snapshot,
   SnapshotBalance,
+  TabPin,
   Tag,
   UserSettings,
   ValuationMode,

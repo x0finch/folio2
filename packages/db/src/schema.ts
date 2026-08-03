@@ -139,6 +139,27 @@ export const accountTags = sqliteTable(
   ],
 );
 
+// 首页自定义 Tab(pin,ADR 0034):指向单个 Connector 或单个 Tag 的薄快捷入口 —— 名字/颜色借用所指
+// 对象,不自存。每 user 至多 3 个(上限在 ops 层校验)。
+// `tag_id` FK→tags cascade:删 Tag → 其 tag 类 pin 自动消失。`connector_id` 存字符串**不设 FK**
+// (Connector 是代码 manifest、非表行);某 Connector 名下账户删光时该 pin 仍在、显示空(ADR 0034)。
+// kind 决定读哪一列;两列互斥非空(connector pin 用 connector_id、tag pin 用 tag_id),不加 DB 约束
+// 强制,由 ops 保证。
+export const tabPins = sqliteTable(
+  "tab_pins",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"connector" | "tag">().notNull(),
+    tagId: text("tag_id").references(() => tags.id, { onDelete: "cascade" }), // tag pin 用;connector pin 为 null
+    connectorId: text("connector_id").$type<ConnectorId>(), // connector pin 用;tag pin 为 null(无 FK)
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [index("tab_pins_user_id_idx").on(t.userId)],
+);
+
 export const snapshots = sqliteTable(
   "snapshots",
   {

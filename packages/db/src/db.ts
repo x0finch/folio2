@@ -45,6 +45,12 @@ export function createDb(env: DbEnv) {
     attachTag: b(q.attachTag),
     detachTag: b(q.detachTag),
     listAccountTagsByUser: b(q.listAccountTagsByUser),
+    // —— 自定义 Tab pin(ADR 0034)——
+    createTabPin: b(q.createTabPin),
+    listTabPinsByUser: b(q.listTabPinsByUser),
+    updateTabPinTarget: b(q.updateTabPinTarget),
+    reorderTabPins: b(q.reorderTabPins),
+    deleteTabPin: b(q.deleteTabPin),
     // —— snapshots ——
     writeSnapshot: b(q.writeSnapshot),
     listSnapshotsByAccount: b(q.listSnapshotsByAccount),
