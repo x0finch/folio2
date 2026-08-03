@@ -8,11 +8,14 @@ import {
   createAccount,
   createPortfolio,
   deleteAccount,
+  deletePortfolio,
   ensureDefaultPortfolio,
   importAccount,
   listAccountsByUser,
   listPortfolioMembershipsByUser,
   listPortfoliosByUser,
+  renamePortfolio,
+  setDefaultPortfolio,
 } from "../src/queries";
 
 // Portfolio 地基(ADR 0033)对着真 D1 跑:唯一约束 / 部分索引 / cascade / batch 都真生效。
@@ -175,6 +178,57 @@ describe("createPortfolio / assignAccountToPortfolio", () => {
     await expect(assignAccountToPortfolio(env, USER_A, accA.id, pfB.id)).rejects.toThrow();
     // B 动 A 的账户 → 拒(账户 owner 断言)。
     await expect(assignAccountToPortfolio(env, USER_B, accA.id, pfB.id)).rejects.toThrow();
+  });
+});
+
+describe("管理:rename / setDefault / delete", () => {
+  it("renamePortfolio 改名(含默认)", async () => {
+    const def = await ensureDefaultPortfolio(env, USER_A);
+    await renamePortfolio(env, USER_A, def.id, "Renamed");
+    const all = await listPortfoliosByUser(env, USER_A);
+    expect(all[0]!.name).toBe("Renamed");
+  });
+
+  it("setDefaultPortfolio 换默认:恰一个默认,旧默认降级", async () => {
+    const old = await ensureDefaultPortfolio(env, USER_A);
+    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
+    await setDefaultPortfolio(env, USER_A, watch.id);
+    const all = await listPortfoliosByUser(env, USER_A);
+    expect(all.filter((p) => p.isDefault)).toHaveLength(1);
+    expect(all.find((p) => p.id === watch.id)!.isDefault).toBe(true);
+    expect(all.find((p) => p.id === old.id)!.isDefault).toBe(false);
+  });
+
+  it("deletePortfolio 拒删默认", async () => {
+    const def = await ensureDefaultPortfolio(env, USER_A);
+    await expect(deletePortfolio(env, USER_A, def.id)).rejects.toThrow();
+  });
+
+  it("deletePortfolio 命名组:成员退回默认后删该行(账户不动)", async () => {
+    const def = await ensureDefaultPortfolio(env, USER_A);
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "manual",
+      label: "A",
+      creds: "x",
+    });
+    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
+    await assignAccountToPortfolio(env, USER_A, acc.id, watch.id);
+
+    await deletePortfolio(env, USER_A, watch.id);
+
+    // 组没了、账户还在、归属退回默认。
+    expect(await listPortfoliosByUser(env, USER_A)).toHaveLength(1);
+    expect(await listAccountsByUser(env, USER_A)).toHaveLength(1);
+    expect(await listPortfolioMembershipsByUser(env, USER_A)).toEqual([
+      { accountId: acc.id, portfolioId: def.id },
+    ]);
+  });
+
+  it("空的命名组也能删(空组持久、只显式删)", async () => {
+    await ensureDefaultPortfolio(env, USER_A);
+    const empty = await createPortfolio(env, USER_A, { name: "Empty" });
+    await deletePortfolio(env, USER_A, empty.id);
+    expect(await listPortfoliosByUser(env, USER_A)).toHaveLength(1);
   });
 });
 

@@ -30,8 +30,8 @@ import { ConnectorBadge } from "./connector-badge";
 import { EditableName } from "./editable-name";
 import { AccountHoldingsCards } from "./holdings-cards";
 import { ManualTokensPanel } from "./manual-tokens-panel";
-import { MoveToPortfolio } from "./move-to-portfolio";
 import { Portal } from "./portal";
+import { PortfolioPickerModal } from "./portfolio-picker-modal";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { ValueTrendChart } from "./value-trend-chart";
 
@@ -361,7 +361,12 @@ function DetailBody({
       </Portal>
 
       {/* 移到 Portfolio(ADR 0033):列既有 + 新建一步归属。 */}
-      <MoveToPortfolio accountId={account.id} open={moving} onClose={() => setMoving(false)} />
+      <PortfolioPickerModal
+        mode="move"
+        accountId={account.id}
+        open={moving}
+        onClose={() => setMoving(false)}
+      />
 
       {/* manual 账户:多 token 面板(Tokens tab 已含持仓,故不再叠加上方持仓卡)。
           非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。 */}
