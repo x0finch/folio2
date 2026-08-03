@@ -1,7 +1,8 @@
-import { cn } from "@folio/ui";
+import { Badge, cn } from "@folio/ui";
 import { tagColor } from "../lib/tag-color";
 
-// Tag 展示徽章(ADR 0034):彩色小标(hash 色描边 + 色点),账户行与详情抽屉共用。
+// Tag 展示徽章(ADR 0034):用 beUI 的 AnimatedBadge(= Badge),hash 色只经 style 注入(border + 色点),
+// 不改 vendored 件内核。改名时标签文字自带 text-roll 动画。账户行与详情抽屉共用。
 // 账户行传 max=2 折叠成 `+N`;抽屉传全部(max 省略 = 不折叠)。颜色只走 --chart-*(tagColor)。
 
 export interface TagBadgeItem {
@@ -26,20 +27,20 @@ export function TagBadges({
       {shown.map((tg) => {
         const color = tagColor(tg.id);
         return (
-          <span
+          <Badge
             key={tg.id}
-            className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-muted-foreground text-xs"
-            style={{ border: `1px solid ${color}` }}
+            size="sm"
+            style={{ borderColor: color }}
+            icon={<span className="size-1.5 rounded-full" style={{ background: color }} />}
           >
-            <span className="size-1.5 shrink-0 rounded-full" style={{ background: color }} />
-            <span className="truncate">{tg.name}</span>
-          </span>
+            {tg.name}
+          </Badge>
         );
       })}
       {overflow > 0 && (
-        <span className="rounded-full bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
+        <Badge size="sm" showIcon={false}>
           +{overflow}
-        </span>
+        </Badge>
       )}
     </span>
   );
