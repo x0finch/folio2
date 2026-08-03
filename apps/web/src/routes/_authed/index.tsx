@@ -246,8 +246,10 @@ function Overview() {
           {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
               选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
           <div className="flex items-center gap-4">
-            {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。 */}
-            <div className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。
+                overflow-x 会连带把 overflow-y 变 auto → 裁掉向下弹的 pin popover;pb-96 + -mb-96 把纵向裁剪框
+                向下撑一块「溢出余量」(布局不变),popover 固定向下开进这块,就不被裁。 */}
+            <div className="-mb-96 min-w-0 flex-1 overflow-x-auto pb-96 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <Tabs value={activeValue} onValueChange={setActive} variant="pill">
                 {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
                     ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。 */}
@@ -375,7 +377,7 @@ function PinTab({
       // 桌面 hover 揭示;触屏 click(自带点外部关闭)。open 恒受控,避开受控/非受控切换。
       trigger={canHover ? "hover" : "click"}
       open={open}
-      side={pop.side}
+      side="bottom"
       align="start"
       panelRadius={12}
       onOpenChange={(next) => {
@@ -435,7 +437,7 @@ function AddPinButton({
     <Popover
       // 桌面 hover 揭示;触屏 click(点开、点外部关)——＋ 只有「开面板」一个动作,首点即开即可。
       trigger={canHover ? "hover" : "click"}
-      side={pop.side}
+      side="bottom"
       align="start"
       panelRadius={12}
       onOpenChange={pop.onOpenChange}
