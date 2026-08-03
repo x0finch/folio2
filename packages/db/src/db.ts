@@ -27,6 +27,10 @@ export function createDb(env: DbEnv) {
     getRawCreds: b(q.getRawCreds),
     listRawCredsByUser: b(q.listRawCredsByUser),
     listUserIdsWithAccounts: b(q.listUserIdsWithAccounts), // 系统级枚举(无 userId 入参,原则 #6 受控例外)
+    // —— portfolios(ADR 0033)——
+    ensureDefaultPortfolio: b(q.ensureDefaultPortfolio),
+    listPortfoliosByUser: b(q.listPortfoliosByUser),
+    listPortfolioMembershipsByUser: b(q.listPortfolioMembershipsByUser),
     // —— snapshots ——
     writeSnapshot: b(q.writeSnapshot),
     listSnapshotsByAccount: b(q.listSnapshotsByAccount),

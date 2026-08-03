@@ -20,14 +20,18 @@ import { type Db, type DbEnv, getDb } from "./client";
 import {
   accounts,
   manualActivity,
+  portfolioAccounts,
+  portfolios,
   snapshotBalances,
   snapshots,
   tokenRefs,
   tokens,
+  user,
   userSettings,
 } from "./schema";
 import type {
   AccountSafe,
+  Portfolio,
   Snapshot,
   SnapshotBalance,
   UserSettings,
@@ -73,18 +77,24 @@ export async function createAccount(
   input: CreateAccountInput,
 ): Promise<AccountSafe> {
   const db = getDb(env);
+  // 不变量(ADR 0033):每个账户恰一行归属。新账户落进用户的默认 Portfolio —— 建账户与建归属
+  // 一个 batch 原子写,杜绝「有账户没归属」的空窗(否则该账户会从 accountsInView 里消失)。
+  const pf = await ensureDefaultPortfolio(env, userId);
   const id = crypto.randomUUID();
   const createdAt = Date.now();
   const platform = input.platform ?? null;
-  await db.insert(accounts).values({
-    id,
-    userId,
-    connectorId: input.connectorId,
-    platform,
-    label: input.label,
-    creds: input.creds,
-    createdAt,
-  });
+  await db.batch([
+    db.insert(accounts).values({
+      id,
+      userId,
+      connectorId: input.connectorId,
+      platform,
+      label: input.label,
+      creds: input.creds,
+      createdAt,
+    }),
+    db.insert(portfolioAccounts).values({ portfolioId: pf.id, accountId: id }),
+  ]);
   return {
     id,
     userId,
@@ -181,11 +191,84 @@ export async function setArchived(
     .where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
 }
 
-/** 删账户:其 snapshots(及 snapshotBalances)经 ON DELETE CASCADE 级联删除。 */
+/** 删账户:其 snapshots / portfolio_accounts / manual_activity 经 ON DELETE CASCADE 级联删除。 */
 export async function deleteAccount(env: DbEnv, userId: string, id: string): Promise<void> {
   await getDb(env)
     .delete(accounts)
     .where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
+}
+
+// ---------- Portfolio(命名账户集,ADR 0033)----------
+
+// 默认 Portfolio 名:`<用户名>'s`,用户名为空兜底 `My Portfolio`。
+// **必须与迁移 0003 的 seed SQL 保持一致**(那里对存量用户 seed 同名规则)。
+const PORTFOLIO_NAME_SUFFIX = "'s";
+const PORTFOLIO_FALLBACK_NAME = "My Portfolio";
+function defaultPortfolioName(userName: string | null | undefined): string {
+  const n = (userName ?? "").trim();
+  return n ? `${n}${PORTFOLIO_NAME_SUFFIX}` : PORTFOLIO_FALLBACK_NAME;
+}
+
+function selectDefaultPortfolio(db: Db, userId: string): Promise<Portfolio | undefined> {
+  return db
+    .select()
+    .from(portfolios)
+    .where(and(eq(portfolios.userId, userId), eq(portfolios.isDefault, true)))
+    .limit(1)
+    .then((rows) => rows[0]);
+}
+
+// 拿该用户的默认 Portfolio,没有就建一个(find-or-create,幂等)。存量用户由迁移 seed、
+// 新用户在此首次落地。名字取自 user.name(见 defaultPortfolioName)。
+// onConflictDoNothing + 事后重查:并发下两个实例都「查不到→插」时,唯一索引让其一失败、两者都拿回同一行。
+export async function ensureDefaultPortfolio(env: DbEnv, userId: string): Promise<Portfolio> {
+  const db = getDb(env);
+  const found = await selectDefaultPortfolio(db, userId);
+  if (found) return found;
+  const named = await db.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1);
+  await db
+    .insert(portfolios)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      name: defaultPortfolioName(named[0]?.name),
+      isDefault: true,
+      sortOrder: 0,
+      createdAt: Date.now(),
+    })
+    .onConflictDoNothing();
+  const after = await selectDefaultPortfolio(db, userId);
+  if (!after) throw new Error(`failed to ensure default portfolio for user ${userId}`);
+  return after;
+}
+
+// 该用户的全部 Portfolio,按**创建时间**稳定排序(不把默认置顶 —— 切换默认时列表不重排;ADR 0033)。
+// id 作最终 tiebreaker,避免同毫秒 createdAt 的顺序不确定。
+export function listPortfoliosByUser(env: DbEnv, userId: string): Promise<Portfolio[]> {
+  return getDb(env)
+    .select()
+    .from(portfolios)
+    .where(eq(portfolios.userId, userId))
+    .orderBy(asc(portfolios.sortOrder), asc(portfolios.createdAt), asc(portfolios.id));
+}
+
+// 该用户全部 账户→Portfolio 归属(accountsInView 的过滤原料)。一次查询(portfolio_accounts ⨝ accounts 限 user)。
+export interface PortfolioMembership {
+  accountId: string;
+  portfolioId: string;
+}
+export function listPortfolioMembershipsByUser(
+  env: DbEnv,
+  userId: string,
+): Promise<PortfolioMembership[]> {
+  return getDb(env)
+    .select({
+      accountId: portfolioAccounts.accountId,
+      portfolioId: portfolioAccounts.portfolioId,
+    })
+    .from(portfolioAccounts)
+    .innerJoin(accounts, eq(accounts.id, portfolioAccounts.accountId))
+    .where(eq(accounts.userId, userId));
 }
 
 // ---------- 快照 ----------
@@ -814,17 +897,22 @@ export async function importAccount(
     }
     return { id: hit.id, created: false };
   }
+  // 新账户:同 createAccount,建账户 + 归属默认 Portfolio 原子写(维持「每账户恰一行归属」不变量)。
+  const pf = await ensureDefaultPortfolio(env, userId);
   const id = crypto.randomUUID();
-  await db.insert(accounts).values({
-    id,
-    userId,
-    connectorId: input.connectorId,
-    platform,
-    label: input.label,
-    creds,
-    createdAt: Date.now(),
-    archivedAt: input.archivedAt ?? null,
-  });
+  await db.batch([
+    db.insert(accounts).values({
+      id,
+      userId,
+      connectorId: input.connectorId,
+      platform,
+      label: input.label,
+      creds,
+      createdAt: Date.now(),
+      archivedAt: input.archivedAt ?? null,
+    }),
+    db.insert(portfolioAccounts).values({ portfolioId: pf.id, accountId: id }),
+  ]);
   return { id, created: true };
 }
 
