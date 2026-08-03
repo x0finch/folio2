@@ -4,7 +4,7 @@ import {
   accountIdsInView,
   accountsInView,
   accountsMatchingPin,
-  type TabPin,
+  toTabPin,
 } from "../accounts-in-view";
 import { buildPortfolioHistory } from "../history";
 import { deriveLiveAccountTotals } from "../live-value";
@@ -17,9 +17,12 @@ import { oracleFor } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
 
-// 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。所有 scope 到「选中 Portfolio」的
-// 读接口共用这个 shape;缺省 {} 让 loader 不带参调用时退回默认视图。
-// pin(ADR 0034):自定义 Tab 激活时额外按 connector/tag/account 在选中 Portfolio 内再收窄;缺省 = 默认视图(不收窄)。
+// 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
+// 仅按选中 Portfolio scope(曲线 / 列表默认口径);不带 pin。
+const PortfolioSelectInput = z.object({ portfolioId: z.string().optional() }).default({});
+
+// overview 入参:在选中 Portfolio 之上再叠一个自定义 Tab 的 pin(ADR 0034)—— 按 connector/tag/account
+// 在选中 Portfolio 内再收窄;缺省 = 默认视图(不收窄)。pin 只收窄 overview 的列表,不进曲线(见 getPortfolioHistory)。
 const TabPinScope = z
   .object({
     kind: z.enum(["connector", "tag", "account"]),
@@ -31,17 +34,6 @@ const TabPinScope = z
 const PortfolioScopeInput = z
   .object({ portfolioId: z.string().optional(), pin: TabPinScope })
   .default({});
-
-// 入参 pin → accountsInView 用的 TabPin 联合(缺目标 = 视作无 pin,退回不收窄)。
-function toPin(pin: z.infer<typeof TabPinScope>): TabPin | null {
-  if (!pin) return null;
-  if (pin.kind === "connector" && pin.connectorId) {
-    return { kind: "connector", connectorId: pin.connectorId };
-  }
-  if (pin.kind === "tag" && pin.tagId) return { kind: "tag", tagId: pin.tagId };
-  if (pin.kind === "account" && pin.accountId) return { kind: "account", accountId: pin.accountId };
-  return null;
-}
 
 // 校验传入的 selectedId 属于该用户,否则退回默认(客户端传入不可信 —— 传别人的 id 只会得到空视图,
 // 不泄露任何数据,但显式回退到默认更符合直觉)。返回选中 id + 默认 Portfolio。
@@ -74,7 +66,7 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
     ]);
     // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
     // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
-    const pin = toPin(data.pin);
+    const pin = toTabPin(data.pin);
     const tagLinks = pin?.kind === "tag" ? await db.listAccountTagsByUser(context.userId) : [];
     const accounts = accountsMatchingPin(
       accountsInView(allAccounts, memberships, selectedId, defaultId),
@@ -135,7 +127,7 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
 // self-first 下盯市行取实时源价)→ 主页总价 ≡ 曲线当下点(#81);更早点仍用冻结 usd_value。
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .validator(PortfolioScopeInput)
+  .validator(PortfolioSelectInput)
   .handler(async ({ data, context }) => {
     const { selectedId, defaultId } = await resolveScope(context.userId, data.portfolioId);
     const [rows, allAccounts, snapshots, settings, memberships] = await Promise.all([
@@ -150,7 +142,7 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     //  · accounts  = 其中未归档的 → 曲线当下点(live 覆写)只算活跃成员。
     // 把账户移进/移出 Portfolio,这条曲线整条重算(直觉:这钱在这个视图里从来算/不算)。
     // 自定义 Tab(ADR 0034 UI 微调):曲线**不按 pin 收窄** —— pin 只过滤该 Tab 的列表内容,
-    // hero 总额/曲线保持选中 Portfolio 口径(用户明确:自定义 Tab 不改 hero)。故此处忽略 data.pin。
+    // hero 总额/曲线保持选中 Portfolio 口径(用户明确:自定义 Tab 不改 hero)。故历史入参不带 pin(PortfolioSelectInput)。
     const memberSet = accountIdsInView(
       allAccounts.map((a) => a.id),
       memberships,

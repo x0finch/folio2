@@ -40,6 +40,30 @@ export type TabPin =
   | { kind: "tag"; tagId: string }
   | { kind: "account"; accountId: string };
 
+// 客户端/入参那份松散的 pin scope(kind + 三个可选 id)→ 规范化成 TabPin 联合。
+// 缺对应 id(或整个缺省)= 视作无 pin(退回不收窄)。与 accountsMatchingPin 同处一模块、同被单测。
+export type TabPinScope =
+  | {
+      kind: "connector" | "tag" | "account";
+      connectorId?: string;
+      tagId?: string;
+      accountId?: string;
+    }
+  | null
+  | undefined;
+
+export function toTabPin(scope: TabPinScope): TabPin | null {
+  if (!scope) return null;
+  if (scope.kind === "connector" && scope.connectorId) {
+    return { kind: "connector", connectorId: scope.connectorId };
+  }
+  if (scope.kind === "tag" && scope.tagId) return { kind: "tag", tagId: scope.tagId };
+  if (scope.kind === "account" && scope.accountId) {
+    return { kind: "account", accountId: scope.accountId };
+  }
+  return null;
+}
+
 // 在**已按 Portfolio 过滤**的账户集上再按 pin 收窄(自定义 Tab)。pin=null → 原样返回(默认视图)。
 // 与 accountsInView 组合使用:accountsMatchingPin(accountsInView(...), pin, tagLinks)——作用域仍是
 // 「当前 Portfolio 内」,pin 只在其内再筛(ADR 0034:pin 不跨 Portfolio)。纯函数,单一事实源。

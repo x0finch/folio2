@@ -17,7 +17,7 @@ import { HeaderSync } from "../../components/header-sync";
 import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { SectionList } from "../../components/section-list";
-import { OverviewSkeleton } from "../../components/skeletons";
+import { ListSkeleton, OverviewSkeleton } from "../../components/skeletons";
 import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-picker";
 import { TokenHoldings } from "../../components/token-holdings";
 import { useConnectorLabels } from "../../hooks/use-connector-labels";
@@ -47,11 +47,12 @@ export const Route = createFileRoute("/_authed/")({
       listTags(),
       listAccounts(),
     ]);
-    // 自定义 Tab 选择器备选:按 Connector = 用户拥有的去重 connectorId;按 Account = 全部账户(id+名);
-    // 按 Tag = 见组件内(按选中 Portfolio 过滤)。
+    // 自定义 Tab 选择器备选:按 Connector = 用户拥有的去重 connectorId。allAccounts 是**全量**账户(id+名),
+    // 只用于 pin 标签解析(pin 是 per-user、跨 Portfolio 显示 → 标签得全量才解得出);picker 的账户选项在组件内
+    // 按选中 Portfolio 收窄(见 accountOptions)。按 Tag = 见组件内(按选中 Portfolio 过滤)。
     const connectorIds = [...new Set(accounts.map((a) => a.connectorId))];
-    const accountOptions = accounts.map((a) => ({ id: a.id, label: a.label }));
-    return { ...overview, series: history.series, pins, tags, connectorIds, accountOptions };
+    const allAccounts = accounts.map((a) => ({ id: a.id, label: a.label }));
+    return { ...overview, series: history.series, pins, tags, connectorIds, allAccounts };
   },
   pendingComponent: OverviewSkeleton,
   component: Overview,
@@ -71,7 +72,7 @@ function Overview() {
   // 单一 tab 状态:"tokens" / "perps" / "defi"(视角)或 pin id(自定义 Tab)。默认 tokens。
   const [active, setActive] = useState("tokens");
 
-  const { pins, tags, connectorIds, accountOptions } = loaderData;
+  const { pins, tags, connectorIds, allAccounts } = loaderData;
   // activePin 只看 loader 的 pins(不依赖 data)→ 可在拉取前定 scope。
   const activePin = pins.find((p) => p.id === active) ?? null;
   const isPinView = activePin != null;
@@ -173,8 +174,15 @@ function Overview() {
   const { holdings, accountTotals, holdingsSubtotal, defiSubtotal } = portfolioData;
   const kind = derive(portfolioData.sections);
 
-  // pin 视图列表用 pin 数据;拉取前退回 Portfolio 口径,避免闪空/跳版。仅喂 pin 的 section list,不进视角 tab。
-  const pinData = (isPinView ? pinQuery.data : undefined) ?? portfolioData;
+  // picker 的「账户」选项 = **选中 Portfolio 内**的账户(accountTotals 已是 in-view 口径)—— 与 tagOptions 同样按
+  // Portfolio 收窄,避免固定到别的 Portfolio 的账户后得到一个永远空的 tab。标签解析仍走全量 allAccounts。
+  const accountOptions = accountTotals.map((r) => ({ id: r.account.id, label: r.account.label }));
+
+  // pin 视图列表用 pin 数据。pinResolved = 拉到的过滤后数据;未拉到(首拉/报错)时**不**退回全量 Portfolio
+  //(那会把未收窄的全部持仓当成命中项误显),而是渲染骨架/错误态。derive 仍喂个非空对象(退回 portfolioData)
+  // 只为下面结构计算不崩,真正渲染由 pinResolved 门控。
+  const pinResolved = isPinView ? pinQuery.data : undefined;
+  const pinData = pinResolved ?? portfolioData;
   const pin = derive(pinData.sections);
 
   // 视角 tab 的存在性 + 当前视角(非 pin 视图时用):选中的视角消失 → clamp 回代币。
@@ -256,7 +264,7 @@ function Overview() {
                       p.kind === "tag"
                         ? tagNameOf(tags, p.tagId)
                         : p.kind === "account"
-                          ? accountNameOf(accountOptions, p.accountId)
+                          ? accountNameOf(allAccounts, p.accountId)
                           : connectorLabel(p.connectorId ?? "")
                     }
                     selected={{
@@ -283,13 +291,22 @@ function Overview() {
               </TabsList>
             </Tabs>
             <span className="text-muted-foreground text-sm tabular-nums">
-              {usd(isPinView ? pinData.totalUsd : viewSubtotal)}
+              {/* pin 视图:过滤后数据到位才显其总额;未到位显 "—",别显未收窄的全量总额。 */}
+              {isPinView ? (pinResolved ? usd(pinData.totalUsd) : "—") : usd(viewSubtotal)}
             </span>
           </div>
 
           {/* 内容:自定义 pin → section list(按小计倒序竖排);视角 → 单类列表。 */}
           {isPinView ? (
-            pinEmpty ? (
+            !pinResolved ? (
+              pinQuery.isError ? (
+                <p className="py-12 text-center text-muted-foreground text-sm">
+                  {tct("actionFailed")}
+                </p>
+              ) : (
+                <ListSkeleton />
+              )
+            ) : pinEmpty ? (
               <p className="py-12 text-center text-muted-foreground text-sm">{tct("empty")}</p>
             ) : (
               <SectionList sections={pinSections} />

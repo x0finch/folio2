@@ -336,7 +336,7 @@ const en = {
     hint: "Tap a tag to toggle · type at the end, enter to create",
     manageHint: "Edit to rename · deleting removes it from all accounts",
     removeTitle: 'Delete "{name}"?',
-    removeSubtitle: "Removed from {count} accounts",
+    removeSubtitle: "Removed from {count, plural, one {# account} other {# accounts}}",
     actionFailed: "Something went wrong.",
   },
   CustomTabs: {
