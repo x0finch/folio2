@@ -43,13 +43,25 @@ const CreateAccountInput = z.object({
   connectorId: z.string().min(1),
   label: z.string().trim().min(1, "label is required"),
   values: z.record(z.string(), z.string().trim()), // 表单原始输入(键 = connector.account.creds 的 key);trim 后落库
+  // 落在当前选中的 Portfolio(ADR 0033);缺省 → 服务端本就落默认 Portfolio。
+  portfolioId: z.string().min(1).optional(),
 });
 export const createAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreateAccountInput)
-  .handler(({ data, context }) =>
-    createAccountFor(context.userId, data.connectorId as ConnectorId, data.label, data.values),
-  );
+  .handler(async ({ data, context }) => {
+    const account = await createAccountFor(
+      context.userId,
+      data.connectorId as ConnectorId,
+      data.label,
+      data.values,
+    );
+    // createAccountFor 已把账户落进默认 Portfolio;若指定了非默认的选中,改归属过去。
+    if (data.portfolioId) {
+      await db.assignAccountToPortfolio(context.userId, account.id, data.portfolioId);
+    }
+    return account;
+  });
 
 // 凭据再水合(P6.6.1):为导入的"缺凭据"账户补录真值。活性校验通过后整张 map 覆盖(占位被真值替换)。
 const ReplaceCredentialsInput = z.object({

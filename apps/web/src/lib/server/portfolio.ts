@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { accountsInView } from "../accounts-in-view";
+import { z } from "zod";
+import { accountIdsInView, accountsInView } from "../accounts-in-view";
 import { buildPortfolioHistory } from "../history";
 import { deriveLiveAccountTotals } from "../live-value";
 import { isManual } from "../manual-connector";
@@ -11,21 +12,41 @@ import { oracleFor } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
 
+// 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。所有 scope 到「选中 Portfolio」的
+// 读接口共用这个 shape;缺省 {} 让 loader 不带参调用时退回默认视图。
+const PortfolioScopeInput = z.object({ portfolioId: z.string().optional() }).default({});
+
+// 校验传入的 selectedId 属于该用户,否则退回默认(客户端传入不可信 —— 传别人的 id 只会得到空视图,
+// 不泄露任何数据,但显式回退到默认更符合直觉)。返回选中 id + 默认 Portfolio。
+async function resolveScope(
+  userId: string,
+  requested: string | undefined,
+): Promise<{ selectedId: string; defaultId: string }> {
+  const [portfolios, defaultPf] = await Promise.all([
+    db.listPortfoliosByUser(userId),
+    db.ensureDefaultPortfolio(userId),
+  ]);
+  const selectedId =
+    requested && portfolios.some((p) => p.id === requested) ? requested : defaultPf.id;
+  return { selectedId, defaultId: defaultPf.id };
+}
+
 // 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做
 // 鉴权 + 加载(accounts / 最新快照)+ 注入依赖(tokens / platforms)+ 调用。
+// scope 到「选中 Portfolio」(ADR 0033):活跃 && 归属选中的账户;缺省选中 = 默认。
 export const getPortfolioOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(async ({ context }) => {
-    const [allAccounts, snapshots, settings, memberships, defaultPf] = await Promise.all([
+  .validator(PortfolioScopeInput)
+  .handler(async ({ data, context }) => {
+    const { selectedId, defaultId } = await resolveScope(context.userId, data.portfolioId);
+    const [allAccounts, snapshots, settings, memberships] = await Promise.all([
       db.listAccountsByUser(context.userId),
       db.getLatestSnapshotByUser(context.userId),
       db.getUserSettings(context.userId),
       db.listPortfolioMembershipsByUser(context.userId),
-      db.ensureDefaultPortfolio(context.userId),
     ]);
-    // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio。片2 尚无选择器 → 选中 = 默认(= 全部活跃账户,
-    // 行为与今天一致);片3 接入选择器后此处换成传入的 selectedPortfolioId。
-    const accounts = accountsInView(allAccounts, memberships, defaultPf.id, defaultPf.id);
+    // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
+    const accounts = accountsInView(allAccounts, memberships, selectedId, defaultId);
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
     await injectManualSnapshots(context.userId, accounts, byAccount);
@@ -80,27 +101,38 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
 // self-first 下盯市行取实时源价)→ 主页总价 ≡ 曲线当下点(#81);更早点仍用冻结 usd_value。
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(async ({ context }) => {
-    const [rows, allAccounts, snapshots, settings, memberships, defaultPf] = await Promise.all([
+  .validator(PortfolioScopeInput)
+  .handler(async ({ data, context }) => {
+    const { selectedId, defaultId } = await resolveScope(context.userId, data.portfolioId);
+    const [rows, allAccounts, snapshots, settings, memberships] = await Promise.all([
       db.listSnapshotTotalsByUser(context.userId),
       db.listAccountsByUser(context.userId),
       db.getLatestSnapshotByUser(context.userId),
       db.getUserSettings(context.userId),
       db.listPortfolioMembershipsByUser(context.userId),
-      db.ensureDefaultPortfolio(context.userId),
     ]);
-    // 曲线当下点的账户集(ADR 0033):活跃 && 归属选中 Portfolio(片2 = 默认 = 全部活跃)。
-    // 过去点仍用 allAccounts(保留归档账户历史贡献);片3 接入选择器时再对过去点按成员集 scope。
-    const accounts = accountsInView(allAccounts, memberships, defaultPf.id, defaultPf.id);
+    // 曲线追溯性地只算选中 Portfolio 的当前成员(ADR 0033):
+    //  · memberSet = 归属选中的账户(**含已归档**)→ 过去点按它 scope,保留归档成员的历史贡献;
+    //  · accounts  = 其中未归档的 → 曲线当下点(live 覆写)只算活跃成员。
+    // 把账户移进/移出 Portfolio,这条曲线整条重算(直觉:这钱在这个视图里从来算/不算)。
+    const memberSet = accountIdsInView(
+      allAccounts.map((a) => a.id),
+      memberships,
+      selectedId,
+      defaultId,
+    );
+    const accounts = accountsInView(allAccounts, memberships, selectedId, defaultId);
+    const memberAccounts = allAccounts.filter((a) => memberSet.has(a.id));
 
     // manual 历史改由账本 compute-on-read 供货(ADR 0018):防御式排除任何遗留 manual snapshot 行(正常为空),
     // 再拼上账本现算的 manual (takenAt, totalUsd) 行 → 同喂 buildPortfolioHistory,不双算、无需特殊合并。
-    // 用 allAccounts(含归档):历史保留归档账户过去贡献(与 synced 快照一致),末点仍由下方 live 覆写(仅活跃)剔出。
     const now = Date.now();
-    const manualIds = new Set(allAccounts.filter((a) => isManual(a.connectorId)).map((a) => a.id));
-    const snapRows = rows.filter((r) => !manualIds.has(r.accountId));
+    const manualIds = new Set(
+      memberAccounts.filter((a) => isManual(a.connectorId)).map((a) => a.id),
+    );
+    const snapRows = rows.filter((r) => !manualIds.has(r.accountId) && memberSet.has(r.accountId));
     // manual 走日网格 compute-on-read(ADR 0019),末点 τ=now → 与下方 live 覆写同刻对齐。
-    const manualRows = await loadManualHistoryRows(context.userId, allAccounts, now);
+    const manualRows = await loadManualHistoryRows(context.userId, memberAccounts, now);
     const series = buildPortfolioHistory([...snapRows, ...manualRows]);
     if (series.length === 0) return { series };
 
@@ -118,4 +150,43 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     for (const v of liveTotals.values()) grand += v;
     series[series.length - 1] = { ...series[series.length - 1], total: grand };
     return { series };
+  });
+
+// —— Portfolio 管理(选择器 + 抽屉「移到 Portfolio」用,ADR 0033)——
+
+// 该用户的全部 Portfolio(选择器数据源)+ 默认 id。ensureDefaultPortfolio 保证至少有默认那行。
+export const listPortfolios = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(async ({ context }) => {
+    const [portfolios, defaultPf] = await Promise.all([
+      db.listPortfoliosByUser(context.userId),
+      db.ensureDefaultPortfolio(context.userId),
+    ]);
+    return {
+      portfolios: portfolios.map((p) => ({ id: p.id, name: p.name, isDefault: p.isDefault })),
+      defaultId: defaultPf.id,
+    };
+  });
+
+// 把账户移到某 Portfolio:传 portfolioId 移到既有,或传 newName 一步「新建命名 Portfolio + 归属」
+// (抽屉「移到 → 新建…」)。至少给其一。返回归属到的 portfolioId(客户端据此可切换选中)。
+const MoveAccountInput = z
+  .object({
+    accountId: z.string().min(1),
+    portfolioId: z.string().min(1).optional(),
+    newName: z.string().trim().min(1).optional(),
+  })
+  .refine((v) => v.portfolioId != null || v.newName != null, {
+    message: "portfolioId or newName required",
+  });
+export const moveAccountToPortfolio = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(MoveAccountInput)
+  .handler(async ({ data, context }) => {
+    const targetId = data.newName
+      ? (await db.createPortfolio(context.userId, { name: data.newName })).id
+      : // biome-ignore lint/style/noNonNullAssertion: refine 保证 portfolioId 或 newName 至少其一
+        data.portfolioId!;
+    await db.assignAccountToPortfolio(context.userId, data.accountId, targetId);
+    return { portfolioId: targetId };
   });

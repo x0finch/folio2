@@ -33,3 +33,17 @@ export function accountsInView<A extends { id: string; archivedAt: number | null
       inView(portfolioOf.get(a.id), selectedPortfolioId, defaultPortfolioId),
   );
 }
+
+// 归属选中 Portfolio 的账户 id 集(**与归档无关**)—— 历史曲线的过去点按它 scope:
+// 曲线追溯性地只算当前成员(含已归档成员的过去贡献),移进/移出 Portfolio 整条曲线重算(ADR 0033)。
+export function accountIdsInView(
+  accountIds: string[],
+  memberships: PortfolioMembership[],
+  selectedPortfolioId: string,
+  defaultPortfolioId: string,
+): Set<string> {
+  const portfolioOf = new Map(memberships.map((m) => [m.accountId, m.portfolioId]));
+  return new Set(
+    accountIds.filter((id) => inView(portfolioOf.get(id), selectedPortfolioId, defaultPortfolioId)),
+  );
+}

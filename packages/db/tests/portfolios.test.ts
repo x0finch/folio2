@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { user } from "../src/auth-schema";
 import { getDb } from "../src/client";
 import {
+  assignAccountToPortfolio,
   createAccount,
+  createPortfolio,
   deleteAccount,
   ensureDefaultPortfolio,
   importAccount,
@@ -136,6 +138,43 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
         .bind("other-pf", acc.id)
         .run(),
     ).rejects.toThrow();
+  });
+});
+
+describe("createPortfolio / assignAccountToPortfolio", () => {
+  it("createPortfolio 建的是命名非默认 Portfolio(不碰默认唯一索引)", async () => {
+    await ensureDefaultPortfolio(env, USER_A); // 已有默认
+    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
+    expect(watch.isDefault).toBe(false);
+    const all = await listPortfoliosByUser(env, USER_A);
+    expect(all).toHaveLength(2);
+    expect(all[0]!.isDefault).toBe(true); // 默认在前
+    expect(all.filter((p) => p.isDefault)).toHaveLength(1); // 仍只一个默认
+  });
+
+  it("assignAccountToPortfolio 一对一改归属(旧行替换,不叠加)", async () => {
+    const acc = await createAccount(env, USER_A, {
+      connectorId: "manual",
+      label: "A",
+      creds: "x",
+    });
+    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
+    await assignAccountToPortfolio(env, USER_A, acc.id, watch.id);
+    const memberships = await listPortfolioMembershipsByUser(env, USER_A);
+    expect(memberships).toEqual([{ accountId: acc.id, portfolioId: watch.id }]); // 仍恰一行,指向 Watch
+  });
+
+  it("assignAccountToPortfolio 拒绝越权(他人账户 / 他人 Portfolio)", async () => {
+    const accA = await createAccount(env, USER_A, {
+      connectorId: "manual",
+      label: "A",
+      creds: "x",
+    });
+    const pfB = await createPortfolio(env, USER_B, { name: "B's" });
+    // A 的账户移到 B 的 Portfolio → 拒。
+    await expect(assignAccountToPortfolio(env, USER_A, accA.id, pfB.id)).rejects.toThrow();
+    // B 动 A 的账户 → 拒(账户 owner 断言)。
+    await expect(assignAccountToPortfolio(env, USER_B, accA.id, pfB.id)).rejects.toThrow();
   });
 });
 

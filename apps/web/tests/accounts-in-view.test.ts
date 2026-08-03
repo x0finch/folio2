@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountsInView } from "../src/lib/accounts-in-view";
+import { accountIdsInView, accountsInView } from "../src/lib/accounts-in-view";
 
 // accountsInView(ADR 0033):活跃 && 归属选中 Portfolio;未归属的账户兜底进默认视图。
 
@@ -46,5 +46,25 @@ describe("accountsInView", () => {
   it("空归属 + 看默认 → 全部活跃账户(片2 的向后兼容前提)", () => {
     const accounts = [acc("a"), acc("b"), acc("c", 999)];
     expect(accountsInView(accounts, [], DEFAULT, DEFAULT).map((a) => a.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("accountIdsInView", () => {
+  const memberships = [
+    { accountId: "a", portfolioId: DEFAULT },
+    { accountId: "b", portfolioId: WATCH },
+    { accountId: "arch", portfolioId: WATCH },
+  ];
+
+  it("与归档无关:归属选中的 id 全收(含已归档成员,供曲线过去点)", () => {
+    // arch 归档与否都在 Watch 成员集里 —— 曲线保留其历史贡献。
+    const set = accountIdsInView(["a", "b", "arch"], memberships, WATCH, DEFAULT);
+    expect([...set].sort()).toEqual(["arch", "b"]);
+  });
+
+  it("未归属 id 兜底进默认成员集,非默认则不兜底", () => {
+    const ids = ["a", "b", "orphan"];
+    expect(accountIdsInView(ids, memberships, DEFAULT, DEFAULT).has("orphan")).toBe(true);
+    expect(accountIdsInView(ids, memberships, WATCH, DEFAULT).has("orphan")).toBe(false);
   });
 });

@@ -271,6 +271,53 @@ export function listPortfolioMembershipsByUser(
     .where(eq(accounts.userId, userId));
 }
 
+async function assertPortfolioOwned(db: Db, userId: string, portfolioId: string): Promise<void> {
+  const rows = await db
+    .select({ id: portfolios.id })
+    .from(portfolios)
+    .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId)));
+  if (!rows[0]) throw new Error(`portfolio not found: ${portfolioId}`);
+}
+
+// 建一个**命名(非默认)** Portfolio(选择器「新建…」/「移到→新建」用)。默认 Portfolio 只由
+// ensureDefaultPortfolio 造,这里永不建默认(is_default=false),故不碰部分唯一索引。
+export async function createPortfolio(
+  env: DbEnv,
+  userId: string,
+  input: { name: string; sortOrder?: number },
+): Promise<Portfolio> {
+  const id = crypto.randomUUID();
+  const createdAt = Date.now();
+  const sortOrder = input.sortOrder ?? 0;
+  const row = {
+    id,
+    userId,
+    name: input.name,
+    isDefault: false,
+    sortOrder,
+    createdAt,
+  };
+  await getDb(env).insert(portfolios).values(row);
+  return row;
+}
+
+// 把账户归属到某 Portfolio(一对一:先删该账户现有归属行,再插新的,一个 batch 原子换)。
+// 两个资源都做 owner 断言,杜绝越权。
+export async function assignAccountToPortfolio(
+  env: DbEnv,
+  userId: string,
+  accountId: string,
+  portfolioId: string,
+): Promise<void> {
+  const db = getDb(env);
+  await assertAccountOwned(db, userId, accountId);
+  await assertPortfolioOwned(db, userId, portfolioId);
+  await db.batch([
+    db.delete(portfolioAccounts).where(eq(portfolioAccounts.accountId, accountId)),
+    db.insert(portfolioAccounts).values({ portfolioId, accountId }),
+  ]);
+}
+
 // ---------- 快照 ----------
 
 export interface SnapshotBalanceInput {
