@@ -1,7 +1,7 @@
-import type { TabPin } from "@folio/db";
-import { Tabs, TabsContent, TabsList, TabsTrigger, toast } from "@folio/ui";
+import { cn, toast } from "@folio/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { HeaderSync } from "../../components/header-sync";
@@ -9,8 +9,7 @@ import { DefiPositions, PerpPositionsList } from "../../components/holdings-sect
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { SectionList } from "../../components/section-list";
 import { OverviewSkeleton } from "../../components/skeletons";
-import type { PinTargetChoice } from "../../components/tab-pin-picker";
-import { TabPinsBar } from "../../components/tab-pins-bar";
+import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-picker";
 import { TokenHoldings } from "../../components/token-holdings";
 import { useConnectorLabels } from "../../hooks/use-connector-labels";
 import { mergeDefiGroups } from "../../lib/account-view";
@@ -26,6 +25,9 @@ import {
   updateTabPinTarget,
 } from "../../lib/server/tab-pins";
 import { listTags } from "../../lib/server/tags";
+import { tagColor } from "../../lib/tag-color";
+
+const MAX_PINS = 3;
 
 export const Route = createFileRoute("/_authed/")({
   loader: async () => {
@@ -36,21 +38,13 @@ export const Route = createFileRoute("/_authed/")({
       listTags(),
       listAccounts(),
     ]);
-    // 自定义 Tab 选择器的备选(ADR 0034):按 Connector = 用户拥有的去重 connectorId;按 Tag = 见下(按选中 Portfolio 过滤)。
+    // 自定义 Tab 选择器备选:按 Connector = 用户拥有的去重 connectorId;按 Tag = 见组件内(按选中 Portfolio 过滤)。
     const connectorIds = [...new Set(accounts.map((a) => a.connectorId))];
     return { ...overview, series: history.series, pins, tags, connectorIds };
   },
   pendingComponent: OverviewSkeleton,
   component: Overview,
 });
-
-// pin(db 行)→ 服务端 scope 入参形状(缺目标由服务端视作无 pin)。
-function pinScopeOf(pin: TabPin | null) {
-  if (!pin) return undefined;
-  return pin.kind === "tag"
-    ? { kind: "tag" as const, tagId: pin.tagId ?? undefined }
-    : { kind: "connector" as const, connectorId: pin.connectorId ?? undefined };
-}
 
 function Overview() {
   const { selectedId, defaultId } = usePortfolio();
@@ -63,18 +57,33 @@ function Overview() {
   const usd = useDisplayValue();
   const connectorLabel = useConnectorLabels();
 
-  const [tab, setTab] = useState("tokens");
-  const [activePinId, setActivePinId] = useState<string | null>(null);
+  // 单一 tab 状态:"tokens" / "perps" / "defi"(视角)或 pin id(自定义 Tab)。默认 tokens。
+  const [active, setActive] = useState("tokens");
+  const [pickerFor, setPickerFor] = useState<
+    { mode: "add" } | { mode: "edit"; pinId: string } | null
+  >(null);
 
   const { pins, tags, connectorIds } = loaderData;
-  const activePin = pins.find((p) => p.id === activePinId) ?? null;
-  const pinScope = pinScopeOf(activePin);
-  const scoped = !isDefault || activePinId != null; // 非默认 Portfolio 或激活了 pin → 客户端按 scope 重拉
+  // activePin 只看 loader 的 pins(不依赖 data)→ 可在拉取前定 scope。
+  const activePin = pins.find((p) => p.id === active) ?? null;
+  const isPinView = activePin != null;
+  const scoped = !isDefault || isPinView; // 非默认 Portfolio 或激活 pin → 按 scope 重拉
+  const pinScope = activePin
+    ? activePin.kind === "tag"
+      ? { kind: "tag" as const, tagId: activePin.tagId ?? undefined }
+      : { kind: "connector" as const, connectorId: activePin.connectorId ?? undefined }
+    : undefined;
 
-  // 选中非默认 Portfolio / 激活 pin 时按 (selectedId, pinId) 重拉;默认视图仍走 loader SSR。
-  // placeholderData:切换期间保留上一份,不闪空。
+  // key 带上 pin 目标:建 pin 即选中时 activePin 由 loader 补齐(晚一拍),目标一到位 key 变化即重拉过滤后的数据
+  //(修此前「建完不过滤」的时序 bug)。placeholderData 保留上一份,不闪空。
   const scopedQuery = useQuery({
-    queryKey: ["portfolio-overview", selectedId, activePinId],
+    queryKey: [
+      "portfolio-overview",
+      selectedId,
+      activePin?.id ?? null,
+      activePin?.connectorId ?? null,
+      activePin?.tagId ?? null,
+    ],
     queryFn: async () => {
       const [overview, history] = await Promise.all([
         getPortfolioOverview({ data: { portfolioId: selectedId, pin: pinScope } }),
@@ -86,7 +95,6 @@ function Overview() {
     placeholderData: keepPreviousData,
   });
   const data = scoped ? scopedQuery.data : loaderData;
-  // 默认视图(无 pin)的 pricesStale 走 loader;scoped 视图由 react-query staleTime 自刷。
   useStalePriceRefresh(scoped ? undefined : loaderData.pricesStale);
 
   // 自定义 Tab 备选:tag 按选中 Portfolio 过滤(账户只匹配同 Portfolio 的 Tag);connector 全量。
@@ -94,23 +102,26 @@ function Overview() {
   const tagOptions = tags
     .filter((tg) => tg.portfolioId === selectedId)
     .map((tg) => ({ id: tg.id, name: tg.name }));
-  const tagNameOf = (id: string) => tags.find((tg) => tg.id === id)?.name ?? "";
 
   const failPin = () => toast.error(tct("actionFailed"));
-  const onAddPin = (choice: PinTargetChoice) => {
-    createTabPin({ data: choice })
-      .then((pin) => {
-        setActivePinId(pin.id); // 固定后即切到它
-        return router.invalidate();
-      })
-      .catch(failPin);
-  };
-  const onEditPin = (pinId: string, choice: PinTargetChoice) => {
-    updateTabPinTarget({ data: { pinId, ...choice } })
-      .then(() => router.invalidate())
-      .catch(failPin);
+  const applyPick = (choice: PinTargetChoice) => {
+    const target = pickerFor;
+    setPickerFor(null);
+    if (target?.mode === "edit") {
+      updateTabPinTarget({ data: { pinId: target.pinId, ...choice } })
+        .then(() => router.invalidate())
+        .catch(failPin);
+    } else {
+      createTabPin({ data: choice })
+        .then((pin) => {
+          setActive(pin.id); // 固定后即切到它
+          return router.invalidate();
+        })
+        .catch(failPin);
+    }
   };
   const onUnpin = (pinId: string) => {
+    if (active === pinId) setActive("tokens"); // 取消当前激活的 → 回代币
     deleteTabPin({ data: { pinId } })
       .then(() => router.invalidate())
       .catch(failPin);
@@ -137,21 +148,20 @@ function Overview() {
     0,
   );
 
-  // 默认视图的视角 tab(现货/永续/DeFi);自定义 Tab 激活时不用它。
-  const availableTabs = [
+  // 视角 tab 的存在性 + 当前视角(非 pin 视图时用):选中的视角消失 → clamp 回代币。
+  const kindTabs = [
     "tokens",
     ...(perpItems.length > 0 ? ["perps"] : []),
     ...(defiGroups.length > 0 ? ["defi"] : []),
   ];
-  const activeTab = availableTabs.includes(tab) ? tab : "tokens";
+  const activeKind = isPinView ? null : kindTabs.includes(active) ? active : "tokens";
   const viewSubtotal =
-    activeTab === "perps"
+    activeKind === "perps"
       ? perpEquitySubtotal
-      : activeTab === "defi"
+      : activeKind === "defi"
         ? defiSubtotal
         : holdingsSubtotal;
 
-  // 自定义 Tab 的 section list 段(按小计倒序,空段剔除,ADR 0034)。
   const pinSections = [
     {
       key: "tokens",
@@ -177,26 +187,15 @@ function Overview() {
   ];
   const pinEmpty = holdings.length === 0 && perpItems.length === 0 && defiGroups.length === 0;
 
+  const tabClass = (on: boolean) =>
+    cn(
+      "flex items-center gap-1.5 rounded-full px-3 py-1 text-sm transition-colors",
+      on ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
+    );
+
   return (
     <div className="flex flex-col gap-6">
       <HeaderSync />
-
-      {/* 自定义 Tab 栏(ADR 0034):有账户才显;[总览] + ≤3 pin + [＋]。 */}
-      {accountTotals.length > 0 && (
-        <TabPinsBar
-          pins={pins}
-          activePinId={activePinId}
-          onSelect={setActivePinId}
-          connectorLabel={connectorLabel}
-          tagName={tagNameOf}
-          connectorOptions={connectorOptions}
-          tagOptions={tagOptions}
-          onAdd={onAddPin}
-          onEdit={onEditPin}
-          onUnpin={onUnpin}
-        />
-      )}
-
       <PortfolioHero series={series} totalUsd={totalUsd} holdings={holdings} />
 
       {accountTotals.length === 0 ? (
@@ -207,50 +206,159 @@ function Overview() {
           </Link>
           .
         </p>
-      ) : activePinId != null ? (
-        // 自定义 Tab:section list(现货/永续/DeFi 按小计倒序竖排),而非视角子 Tab。
-        pinEmpty ? (
-          <p className="py-12 text-center text-muted-foreground text-sm">{tct("empty")}</p>
-        ) : (
-          <SectionList sections={pinSections} />
-        )
       ) : (
-        // 默认 / Portfolio 视图:保留现有的现货/永续/DeFi 子 Tab(零改动)。
-        <Tabs
-          value={activeTab}
-          onValueChange={setTab}
-          variant="pill"
-          className="flex flex-col gap-4"
-        >
-          <div className="flex items-center justify-between gap-4">
-            <TabsList className="bg-transparent p-0">
-              <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
-              {perpItems.length > 0 && <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>}
-              {defiGroups.length > 0 && <TabsTrigger value="defi">{t("defiTab")}</TabsTrigger>}
-            </TabsList>
-            <span className="text-muted-foreground text-sm tabular-nums">{usd(viewSubtotal)}</span>
+        <div className="flex flex-col gap-4">
+          {/* 一排 tab:视角(现货/永续/DeFi)+ 自定义 pin + ＋,共享同一行(ADR 0034)。 */}
+          <div className="relative flex items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setActive("tokens")}
+                className={tabClass(activeKind === "tokens")}
+              >
+                {t("tokensTab")}
+              </button>
+              {perpItems.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setActive("perps")}
+                  className={tabClass(activeKind === "perps")}
+                >
+                  {t("perpsTab")}
+                </button>
+              )}
+              {defiGroups.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setActive("defi")}
+                  className={tabClass(activeKind === "defi")}
+                >
+                  {t("defiTab")}
+                </button>
+              )}
+
+              {pins.map((pin) => (
+                <PinTab
+                  key={pin.id}
+                  active={active === pin.id}
+                  label={
+                    pin.kind === "tag"
+                      ? tagNameOf(tags, pin.tagId)
+                      : connectorLabel(pin.connectorId ?? "")
+                  }
+                  dotColor={pin.kind === "tag" ? tagColor(pin.tagId ?? "") : undefined}
+                  onSelect={() => setActive(pin.id)}
+                  onEditStart={() => setPickerFor({ mode: "edit", pinId: pin.id })}
+                  onUnpin={() => onUnpin(pin.id)}
+                  tabClass={tabClass}
+                />
+              ))}
+
+              {pins.length < MAX_PINS && (
+                <button
+                  type="button"
+                  aria-label={tct("add")}
+                  onClick={() => setPickerFor((p) => (p?.mode === "add" ? null : { mode: "add" }))}
+                  className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <Plus className="size-4" />
+                </button>
+              )}
+            </div>
+            <span className="text-muted-foreground text-sm tabular-nums">
+              {usd(isPinView ? totalUsd : viewSubtotal)}
+            </span>
+
+            {pickerFor && (
+              <div className="absolute top-full left-0 z-20 mt-1">
+                <TabPinPicker
+                  connectorOptions={connectorOptions}
+                  tagOptions={tagOptions}
+                  onPick={applyPick}
+                />
+              </div>
+            )}
           </div>
 
-          <TabsContent value="tokens">
-            {holdings.length === 0 ? (
-              <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
+          {/* 内容:自定义 pin → section list(按小计倒序竖排);视角 → 单类列表。 */}
+          {isPinView ? (
+            pinEmpty ? (
+              <p className="py-12 text-center text-muted-foreground text-sm">{tct("empty")}</p>
             ) : (
-              <TokenHoldings holdings={holdings} />
-            )}
-          </TabsContent>
-
-          {perpItems.length > 0 && (
-            <TabsContent value="perps">
-              <PerpPositionsList items={perpItems} />
-            </TabsContent>
+              <SectionList sections={pinSections} />
+            )
+          ) : activeKind === "perps" ? (
+            <PerpPositionsList items={perpItems} />
+          ) : activeKind === "defi" ? (
+            <DefiPositions groups={defiGroups} hideHeader />
+          ) : holdings.length === 0 ? (
+            <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
+          ) : (
+            <TokenHoldings holdings={holdings} />
           )}
-          {defiGroups.length > 0 && (
-            <TabsContent value="defi">
-              <DefiPositions groups={defiGroups} hideHeader />
-            </TabsContent>
-          )}
-        </Tabs>
+        </div>
       )}
     </div>
+  );
+}
+
+function tagNameOf(tags: { id: string; name: string }[], tagId: string | null): string {
+  return tags.find((tg) => tg.id === tagId)?.name ?? "";
+}
+
+// 单个自定义 pin tab:pill 按钮**点选**切到该 tab;**hover** 冒管理小菜单(改指向 / 取消固定,后者不二次确认)。
+// 手搓的 hover 下拉(onMouseEnter/Leave + 绝对定位),不套 beUI Popover —— 那个会把点击吞掉(点不动 tab),
+// 且宽触发器有 goo/blob 老坑(见 memory)。点选与管理两职责就此解耦。
+function PinTab({
+  active,
+  label,
+  dotColor,
+  onSelect,
+  onEditStart,
+  onUnpin,
+  tabClass,
+}: {
+  active: boolean;
+  label: string;
+  dotColor?: string;
+  onSelect: () => void;
+  onEditStart: () => void;
+  onUnpin: () => void;
+  tabClass: (on: boolean) => string;
+}) {
+  const tct = useTranslations("CustomTabs");
+  const [menuOpen, setMenuOpen] = useState(false);
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: 悬停只揭示管理菜单;选中与菜单项均是可键盘达的 <button>。
+    <span
+      className="relative"
+      onMouseEnter={() => setMenuOpen(true)}
+      onMouseLeave={() => setMenuOpen(false)}
+    >
+      <button type="button" onClick={onSelect} className={tabClass(active)}>
+        {dotColor && (
+          <span className="size-2 shrink-0 rounded-full" style={{ background: dotColor }} />
+        )}
+        {label}
+      </button>
+      {menuOpen && (
+        <div className="absolute top-full left-0 z-30 mt-1 flex w-32 flex-col gap-0.5 rounded-xl border border-border bg-popover p-1 shadow-lg">
+          <button
+            type="button"
+            onClick={onEditStart}
+            className="rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted"
+          >
+            {tct("changeTarget")}
+          </button>
+          <button
+            type="button"
+            onClick={onUnpin}
+            className="rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted"
+          >
+            {tct("unpin")}
+          </button>
+        </div>
+      )}
+    </span>
   );
 }
