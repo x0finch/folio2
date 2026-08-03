@@ -7,6 +7,7 @@ import {
   TabsList,
   TabsTrigger,
   toast,
+  useMediaQuery,
 } from "@folio/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
@@ -244,53 +245,57 @@ function Overview() {
         <div className="flex flex-col gap-4">
           {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
               选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
-          <div className="flex items-center justify-between gap-4">
-            <Tabs value={activeValue} onValueChange={setActive} variant="pill">
-              {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
-                  ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。 */}
-              <TabsList className="flex-wrap bg-transparent p-0">
-                <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
-                {kind.perpItems.length > 0 && (
-                  <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>
-                )}
-                {kind.defiGroups.length > 0 && (
-                  <TabsTrigger value="defi">{t("defiTab")}</TabsTrigger>
-                )}
-                {pins.map((p) => (
-                  <PinTab
-                    key={p.id}
-                    value={p.id}
-                    label={
-                      p.kind === "tag"
-                        ? tagNameOf(tags, p.tagId)
-                        : p.kind === "account"
-                          ? accountNameOf(allAccounts, p.accountId)
-                          : connectorLabel(p.connectorId ?? "")
-                    }
-                    selected={{
-                      kind: p.kind,
-                      connectorId: p.connectorId ?? undefined,
-                      tagId: p.tagId ?? undefined,
-                      accountId: p.accountId ?? undefined,
-                    }}
-                    connectorOptions={connectorOptions}
-                    tagOptions={tagOptions}
-                    accountOptions={accountOptions}
-                    onRepoint={(choice) => repointPin(p.id, choice)}
-                    onUnpin={() => onUnpin(p.id)}
-                  />
-                ))}
-                {pins.length < MAX_PINS && (
-                  <AddPinButton
-                    connectorOptions={connectorOptions}
-                    tagOptions={tagOptions}
-                    accountOptions={accountOptions}
-                    onPick={addPin}
-                  />
-                )}
-              </TabsList>
-            </Tabs>
-            <span className="text-muted-foreground text-sm tabular-nums">
+          <div className="flex items-center gap-4">
+            {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。 */}
+            <div className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <Tabs value={activeValue} onValueChange={setActive} variant="pill">
+                {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
+                    ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。 */}
+                <TabsList className="bg-transparent p-0">
+                  <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
+                  {kind.perpItems.length > 0 && (
+                    <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>
+                  )}
+                  {kind.defiGroups.length > 0 && (
+                    <TabsTrigger value="defi">{t("defiTab")}</TabsTrigger>
+                  )}
+                  {pins.map((p) => (
+                    <PinTab
+                      key={p.id}
+                      value={p.id}
+                      isActive={active === p.id}
+                      label={
+                        p.kind === "tag"
+                          ? tagNameOf(tags, p.tagId)
+                          : p.kind === "account"
+                            ? accountNameOf(allAccounts, p.accountId)
+                            : connectorLabel(p.connectorId ?? "")
+                      }
+                      selected={{
+                        kind: p.kind,
+                        connectorId: p.connectorId ?? undefined,
+                        tagId: p.tagId ?? undefined,
+                        accountId: p.accountId ?? undefined,
+                      }}
+                      connectorOptions={connectorOptions}
+                      tagOptions={tagOptions}
+                      accountOptions={accountOptions}
+                      onRepoint={(choice) => repointPin(p.id, choice)}
+                      onUnpin={() => onUnpin(p.id)}
+                    />
+                  ))}
+                  {pins.length < MAX_PINS && (
+                    <AddPinButton
+                      connectorOptions={connectorOptions}
+                      tagOptions={tagOptions}
+                      accountOptions={accountOptions}
+                      onPick={addPin}
+                    />
+                  )}
+                </TabsList>
+              </Tabs>
+            </div>
+            <span className="shrink-0 text-muted-foreground text-sm tabular-nums">
               {/* pin 视图:过滤后数据到位才显其总额;未到位显 "—",别显未收窄的全量总额。 */}
               {isPinView ? (pinResolved ? usd(pinData.totalUsd) : "—") : usd(viewSubtotal)}
             </span>
@@ -337,12 +342,13 @@ function accountNameOf(
   return accounts.find((a) => a.id === accountId)?.label ?? "";
 }
 
-// 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);外裹 beUI hover
-// Popover —— hover 从药丸下方**流体动效**揭示管理小面板(改指向选择器 / 取消固定)。goo 颈把触发器与面板连成
-// 一体、root 同时含二者,故鼠标可径直移进面板不掉。抬 z / 关闭隐垫底 / 动态方向 取自 useHoverPopover。
+// 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);外裹 beUI Popover
+// 揭示管理小面板(改指向选择器 / 取消固定)。**桌面**用 hover 冒出(goo 颈连触发器与面板,鼠标可径直移进);
+// **触屏**改 click 且门控:点未激活的 tab 只选中、不弹面板,再点已激活的才弹(避免「先弹后选」)。
 function PinTab({
   value,
   label,
+  isActive,
   selected,
   connectorOptions,
   tagOptions,
@@ -352,6 +358,7 @@ function PinTab({
 }: {
   value: string;
   label: string;
+  isActive: boolean;
   selected: PinTargetChoice;
   connectorOptions: { id: string; label: string }[];
   tagOptions: { id: string; name: string }[];
@@ -361,13 +368,22 @@ function PinTab({
 }) {
   const tct = useTranslations("CustomTabs");
   const pop = useHoverPopover();
+  const canHover = useMediaQuery("(hover: hover)");
+  const [open, setOpen] = useState(false);
   return (
     <Popover
-      trigger="hover"
+      // 桌面 hover 揭示;触屏 click(自带点外部关闭)。open 恒受控,避开受控/非受控切换。
+      trigger={canHover ? "hover" : "click"}
+      open={open}
       side={pop.side}
       align="start"
       panelRadius={12}
-      onOpenChange={pop.onOpenChange}
+      onOpenChange={(next) => {
+        // 触屏:点未激活的 tab(此刻 isActive 仍是旧值 false)只选中、不开面板;桌面 hover 照常开合。
+        if (!canHover && next && !isActive) return;
+        setOpen(next);
+        pop.onOpenChange(next); // 同步 useHoverPopover:抬 z / 关闭隐垫底 / 动态定向
+      }}
       className={cn("inline-flex", pop.rootClassName)}
     >
       <PopoverTrigger>
@@ -414,9 +430,11 @@ function AddPinButton({
 }) {
   const tct = useTranslations("CustomTabs");
   const pop = useHoverPopover();
+  const canHover = useMediaQuery("(hover: hover)");
   return (
     <Popover
-      trigger="hover"
+      // 桌面 hover 揭示;触屏 click(点开、点外部关)——＋ 只有「开面板」一个动作,首点即开即可。
+      trigger={canHover ? "hover" : "click"}
       side={pop.side}
       align="start"
       panelRadius={12}
