@@ -12,7 +12,12 @@
 - **聚合边界统一,一处定义** —— 现有过滤集中在 `apps/web/src/lib/server/portfolio.ts` 的三处 `filter(a => a.archivedAt == null)`(喂 `buildOverview` / `buildPortfolioHistory`)。改成 `未归档 && 归属选中 Portfolio`(经 `portfolio_accounts` join),抽成一个 `accountsInView(all, portfolioId)` helper,总额 / 构成 / 曲线共用同一判据,数字不自相矛盾。
 - **与归档正交,三态各管一件事** —— **活跃**:同步 ✓ 可见 ✓ 计入所在 Portfolio;**观察**:同步 ✓ 可见 ✓ 但归到非默认 Portfolio → 不进 My 视图;**归档**:停同步 ✗ 冻结保留、不进任何视图。「在某视图里」= 属于选中 Portfolio **且** 未归档。归档不改,只加 Portfolio 这一维。
 - **历史曲线随「当前成员」追溯** —— 曲线由各账户快照(按账户存,ADR 与现状不变)按 Portfolio 成员聚合;成员旗标在账户上、不在快照上 → 把账户移进/移出 Portfolio,该 Portfolio 的整条曲线**追溯性**重算(直觉:这钱在这个视图里从来算/不算)。**账户自己的曲线始终保留**(在账户详情看),观察账户照常同步 → 它自己的曲线不断。
-- **UI(Phase 1)—— 渐进式显示,不用就看不见** —— **只有一个 Portfolio 时,总览与账户页跟现在完全一样**(总览无切换器、账户页无 tab);**≥2 个才浮现**:总览顶部出现 Portfolio 切换器、账户页出现 tab(`My | Watch | +`,每 tab 下是该 Portfolio 账户 + 小计)。**创建第 2 个的入口 = 账户上的「移到 → 新建 Portfolio…」**——「观察一个账户」这件事本身就是这个动作,一步同时完成创建 + 归属,tab / 切换器随之出现(解掉「≥2 才显示」的先有鸡先有蛋)。管理(改名 / 删 / 排序)挂在 tab 上;**删 Portfolio → 成员账户退回 My,绝不删账户**;My(`is_default`)不可删。新建账户默认落 My,可移动。
+- **UI(Phase 1)—— 一个全局顶部选择器,渐进式显示** —— 主页 / 账户页 / Insights **共享同一个顶部 Portfolio 选择器**(住 `_authed` 布局层),选谁三页都 scope 到谁:主页 = 该 Portfolio 净值 / 代币 / Perps,账户页 = 该 Portfolio 的账户(**不再有单独 tab**),Insights 同源。**账户页不设 portfolio tab**——选择器即作用域。
+  - **选中不持久化**:刷新 / 重开回**默认 Portfolio**(`portfolios.is_default`,每用户恰一个、可改、默认 My);选择器是**临时切换**(会话内经客户端态 / URL 共享给三页,硬刷新回默认)。
+  - **渐进式显示**:只有一个 Portfolio 时,三页都**不显示选择器**(和今天完全一样);**≥2 才浮现**。
+  - **创建第 2 个 = 账户上的「移到 → 新建 Portfolio…」**——「观察一个账户」本身就是这个动作,一步完成创建 + 归属,选择器随之出现(解掉「≥2 才显示」的先有鸡先有蛋)。
+  - **新建账户落在当前选中的 Portfolio**(在 Watch 视图里加即进 Watch)。
+  - **管理挂选择器菜单**:改名 / 删 / **设为默认**;**删非默认 Portfolio → 成员账户退回默认,绝不删账户**;**默认 Portfolio 不可删**(要删先把默认设到别的)。
 
 - **删除既有(未用)的 groups 概念** —— 代码里已有一套用户自定义 `groups` + `account_groups`(M:N,总览显示各组小计、账户页勾选入组),但**实际零使用**(本地 D1 `groups`/`account_groups` 均 0 行)。它是**加法**(每账户都进总额、组只加小计),与本轮的**作用域/减法** portfolio 语义不同,并存会让账户页出现两套「账户集」。故**整套移除**(`groups`/`account_groups` 两表 + `groups.ts`/`groups-view.ts`/db 的 `createGroup`/`listGroupsByUser`/`accountGroups` ops + 总览 ByGroup 区 + 账户页入组 UI),让 **portfolio 成为唯一的「账户集」概念**。注:`source-groups.ts`(按来源/平台分组持仓)是另一回事,保留。
 
