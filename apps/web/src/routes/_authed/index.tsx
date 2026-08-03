@@ -12,7 +12,7 @@ import {
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { HeaderSync } from "../../components/header-sync";
 import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
@@ -72,6 +72,29 @@ function Overview() {
 
   // 单一 tab 状态:"tokens" / "perps" / "defi"(视角)或 pin id(自定义 Tab)。默认 tokens。
   const [active, setActive] = useState("tokens");
+
+  // 横向滚动的 tab 行会连带纵/横裁掉 pin 的 beUI popover(overflow-x:auto ⇒ overflow-y 也 auto)。
+  // 解法:popover 打开时把容器 overflow 临时切成 visible(不裁),用 translateX 保住当前滚动位置;关闭切回。
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const savedScrollLeft = useRef(0);
+  const [pinPanelOpen, setPinPanelOpen] = useState(0); // 打开中的 pin/＋ 面板数(通常 ≤1)
+  const onPanelToggle = useCallback((open: boolean) => {
+    setPinPanelOpen((n) => Math.max(0, n + (open ? 1 : -1)));
+  }, []);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const inner = el?.firstElementChild as HTMLElement | null;
+    if (!el || !inner) return;
+    if (pinPanelOpen > 0) {
+      savedScrollLeft.current = el.scrollLeft;
+      el.style.overflowX = "visible"; // overflow-y 未显式设 → 随之恢复 visible,popover 不被裁
+      inner.style.transform = `translateX(${-savedScrollLeft.current}px)`; // 视觉上保持滚动位置
+    } else {
+      el.style.overflowX = "";
+      inner.style.transform = "";
+      el.scrollLeft = savedScrollLeft.current;
+    }
+  }, [pinPanelOpen]);
 
   const { pins, tags, connectorIds, allAccounts } = loaderData;
   // activePin 只看 loader 的 pins(不依赖 data)→ 可在拉取前定 scope。
@@ -247,9 +270,11 @@ function Overview() {
               选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
           <div className="flex items-center gap-4">
             {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。
-                overflow-x 会连带把 overflow-y 变 auto → 裁掉向下弹的 pin popover;pb-96 + -mb-96 把纵向裁剪框
-                向下撑一块「溢出余量」(布局不变),popover 固定向下开进这块,就不被裁。 */}
-            <div className="-mb-96 min-w-0 flex-1 overflow-x-auto pb-96 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                overflow 在 pin popover 打开时由上面的 effect 临时切成 visible(避免裁 popover),内层 div 承 translateX。 */}
+            <div
+              ref={scrollRef}
+              className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
               <Tabs value={activeValue} onValueChange={setActive} variant="pill">
                 {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
                     ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。 */}
@@ -284,6 +309,7 @@ function Overview() {
                       accountOptions={accountOptions}
                       onRepoint={(choice) => repointPin(p.id, choice)}
                       onUnpin={() => onUnpin(p.id)}
+                      onPanelToggle={onPanelToggle}
                     />
                   ))}
                   {pins.length < MAX_PINS && (
@@ -292,6 +318,7 @@ function Overview() {
                       tagOptions={tagOptions}
                       accountOptions={accountOptions}
                       onPick={addPin}
+                      onPanelToggle={onPanelToggle}
                     />
                   )}
                 </TabsList>
@@ -357,6 +384,7 @@ function PinTab({
   accountOptions,
   onRepoint,
   onUnpin,
+  onPanelToggle,
 }: {
   value: string;
   label: string;
@@ -367,17 +395,24 @@ function PinTab({
   accountOptions: { id: string; label: string }[];
   onRepoint: (choice: PinTargetChoice) => void;
   onUnpin: () => void;
+  onPanelToggle: (open: boolean) => void;
 }) {
   const tct = useTranslations("CustomTabs");
   const pop = useHoverPopover();
   const canHover = useMediaQuery("(hover: hover)");
   const [open, setOpen] = useState(false);
+  // 通知父级面板开合 → 父级临时把滚动容器 overflow 切 visible,免得 popover 被裁。
+  useEffect(() => {
+    if (!open) return;
+    onPanelToggle(true);
+    return () => onPanelToggle(false);
+  }, [open, onPanelToggle]);
   return (
     <Popover
       // 桌面 hover 揭示;触屏 click(自带点外部关闭)。open 恒受控,避开受控/非受控切换。
       trigger={canHover ? "hover" : "click"}
       open={open}
-      side="bottom"
+      side={pop.side}
       align="start"
       panelRadius={12}
       onOpenChange={(next) => {
@@ -424,23 +459,35 @@ function AddPinButton({
   tagOptions,
   accountOptions,
   onPick,
+  onPanelToggle,
 }: {
   connectorOptions: { id: string; label: string }[];
   tagOptions: { id: string; name: string }[];
   accountOptions: { id: string; label: string }[];
   onPick: (choice: PinTargetChoice) => void;
+  onPanelToggle: (open: boolean) => void;
 }) {
   const tct = useTranslations("CustomTabs");
   const pop = useHoverPopover();
   const canHover = useMediaQuery("(hover: hover)");
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    onPanelToggle(true);
+    return () => onPanelToggle(false);
+  }, [open, onPanelToggle]);
   return (
     <Popover
       // 桌面 hover 揭示;触屏 click(点开、点外部关)——＋ 只有「开面板」一个动作,首点即开即可。
       trigger={canHover ? "hover" : "click"}
-      side="bottom"
+      open={open}
+      side={pop.side}
       align="start"
       panelRadius={12}
-      onOpenChange={pop.onOpenChange}
+      onOpenChange={(next) => {
+        setOpen(next);
+        pop.onOpenChange(next);
+      }}
       className={cn("inline-flex", pop.rootClassName)}
     >
       <PopoverTrigger>
