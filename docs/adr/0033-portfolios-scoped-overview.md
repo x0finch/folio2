@@ -12,13 +12,13 @@
 - **聚合边界统一,一处定义** —— 现有过滤集中在 `apps/web/src/lib/server/portfolio.ts` 的三处 `filter(a => a.archivedAt == null)`(喂 `buildOverview` / `buildPortfolioHistory`)。改成 `未归档 && 属于选中 Portfolio`,抽成一个 `accountsInView(all, portfolioId)` helper,总额 / 构成 / 曲线共用同一判据,数字不自相矛盾。
 - **与归档正交,三态各管一件事** —— **活跃**:同步 ✓ 可见 ✓ 计入所在 Portfolio;**观察**:同步 ✓ 可见 ✓ 但归到非默认 Portfolio → 不进 My 视图;**归档**:停同步 ✗ 冻结保留、不进任何视图。「在某视图里」= 属于选中 Portfolio **且** 未归档。归档不改,只加 Portfolio 这一维。
 - **历史曲线随「当前成员」追溯** —— 曲线由各账户快照(按账户存,ADR 与现状不变)按 Portfolio 成员聚合;成员旗标在账户上、不在快照上 → 把账户移进/移出 Portfolio,该 Portfolio 的整条曲线**追溯性**重算(直觉:这钱在这个视图里从来算/不算)。**账户自己的曲线始终保留**(在账户详情看),观察账户照常同步 → 它自己的曲线不断。
-- **UI(Phase 1)** —— 总览顶部一个 **Portfolio 切换器**(默认 My,可切、可 +新建);账户页给每个账户选归属 Portfolio。新建账户默认落 My,可移动。
+- **UI(Phase 1)—— 渐进式显示,不用就看不见** —— **只有一个 Portfolio 时,总览与账户页跟现在完全一样**(总览无切换器、账户页无 tab);**≥2 个才浮现**:总览顶部出现 Portfolio 切换器、账户页出现 tab(`My | Watch | +`,每 tab 下是该 Portfolio 账户 + 小计)。**创建第 2 个的入口 = 账户上的「移到 → 新建 Portfolio…」**——「观察一个账户」这件事本身就是这个动作,一步同时完成创建 + 归属,tab / 切换器随之出现(解掉「≥2 才显示」的先有鸡先有蛋)。管理(改名 / 删 / 排序)挂在 tab 上;**删 Portfolio → 成员账户退回 My,绝不删账户**;My(`is_default`)不可删。新建账户默认落 My,可移动。
 
 ## Consequences
 
 - **净值语义变了**:从「全账户(除归档)Σ」变成「选中 Portfolio Σ」。默认选 My + 现有账户全归 My → 对老用户**行为不变**(打开还是看到全部)。把某账户移到 Watch 才开始「从 My 消失」。
 - **一处过滤扩散到所有聚合视图**:因为总额 / 代币 / Perps / DeFi / 构成 / 曲线 / Insights 都源自 `accountsInView`,加一个 `portfolioId` 维度即全线一致;这也是为什么坚持**单一事实源过滤**而非各视图各自判。
-- **迁移**:新增 `portfolios` 表 + `accounts.portfolio_id`。两种落地取舍(留给 spec 定):① `portfolio_id` **可空、null = 默认 My(虚拟)**——最小迁移(一列 + 一表)、无需为每用户 seed、null 桶即 My;代价是 My 不是真行、改名/排序要特判。② 为每用户 **seed 一行 My + 回填** `portfolio_id`——数据模型更干净(My 是真行、可改名),代价是迁移要在 SQL 里生成 id(`hex(randomblob(16))`)并按 user 回填。均为**增量、可自动应用、非破坏**(不删列不删数据)。倾向 ①(最小),My 改名是 nice-to-have。
+- **迁移(定:seed 真 My 行)**:新增 `portfolios` 表 + `accounts.portfolio_id`,给**每个现有用户** seed 一行 `My Portfolio`(`is_default=1`),把该用户所有账户 `portfolio_id` 回填到它——My 是真行(可改名 / 排序,数据模型干净)。id 在 SQL 迁移里用 `lower(hex(randomblob(16)))`(id 列是 TEXT、不强制 UUID 格式)。**新用户**由 app `ensureDefaultPortfolio(userId)`(建号 / 建账户时)补一行 My——迁移管存量、app 管新增,人人有 My。增量、可自动应用、非破坏(不删列不删数据)。
 - **观察 = 放进非默认 Portfolio**,不引入账户的 `is_watch` 特殊类型:少一个概念,「Watch」只是个用户命名的 Portfolio。
 - **分享 / 导出**按选中 Portfolio 的视图走(account-share 现有逻辑顺延到 portfolio 维);细节留 spec。
 - **本轮不做**:多对多 group、「全部(除 Watch)」合并视图、Portfolio 级的目标/预算等——先把「命名账户集 + 选中聚合 + My/Watch」的地基打对。
