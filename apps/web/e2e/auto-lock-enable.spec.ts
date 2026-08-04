@@ -65,10 +65,11 @@ test.describe("开启闲置锁", () => {
 
   // 用例 6:我清了浏览器数据再拨开开关,它没报错卡住,而是让我验一次,验完就开了。
   //
-  // 这条是本轮最重要的回归测试。同一个认证器上重复注册会被 excludeCredentials 拒掉(better-auth
-  // 服务端硬编码,没有开关),而同一个 iCloud 钥匙串在 Mac 和 iPhone 之间就是**同一个认证器**——
-  // 所以「换设备打开开关」必然撞上它。撞上时退到一次断言,拿回本机实际用掉的那条凭据。
-  test("本机已有凭据但本地记录丢了 → 转验证一次,照样开得起来", async ({ page, addAuth }) => {
+  // 账户里已经有 passkey 了 → **先验证,压根不碰注册**。这条同时钉住顺序:反过来先注册的话,同一个
+  // 认证器会被 excludeCredentials 拒(better-auth 服务端硬编码),而平台通常先弹一次系统窗口、验完
+  // 才说「已经有了」—— 用户白按一次指纹还得再验一遍。同一个 iCloud 钥匙串在 Mac 和 iPhone 之间就是
+  // 同一个认证器,所以这是换设备打开开关的常规路径。
+  test("本地记录丢了 → 先验证、认领回原来那条,不新建凭据", async ({ page, addAuth }) => {
     const authenticator = await addAuth();
     await page.goto("/settings");
 
@@ -88,25 +89,38 @@ test.describe("开启闲置锁", () => {
     });
     await page.reload();
 
+    // 抓请求来证明走的是哪条路:验证发生了,而注册选项压根没请求过。
+    const verified = page.waitForResponse((r) =>
+      r.url().includes("/passkey/verify-authentication"),
+    );
+    const registerOptions: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/passkey/generate-register-options")) registerOptions.push(r.url());
+    });
+
     await page.getByRole("switch", { name: /auto-lock/i }).click();
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    // 认领的应当正是原来那条 —— 而且没有多建一条。
+    await verified;
+    expect(registerOptions).toHaveLength(0); // 没有白跑一次注册
+
+    // 认领的正是原来那条,认证器里也没多出凭据。
     expect((await readLockState(page)).deviceCredential).toBe(firstCred);
     expect(await authenticator.credentials()).toHaveLength(1);
   });
 
-  // 用例 7(「退到验证时用户取消,开关维持关闭」)**这里测不了**,原因同上:要让注册被
-  // excludeCredentials 拒,凭据就必须留在认证器里;而凭据留着的前提下,虚拟认证器没有任何办法把随后
-  // 那次断言变成「当场被拒」—— 只能挂着等超时。移除认证器则连注册都不会被拒,场景就变了。
+  // 「验证也被用户取消,于是开关维持关闭」**这里测不了**:取消是浏览器 UI 的行为,而 CDP 只能描述
+  // 认证器的能力 —— setUserVerified(false) 的语义是「还没按」,ceremony 会挂到 60s 超时而不是当场被拒。
   //
-  // 这个分支由单元测试守着(tests/settings-passkey-lock.test.tsx「验证也被取消 → 不写标记,开关维持
-  // 关闭」),那里能直接让 signIn.passkey 返回 error。两层各测各自够得到的那一半,别装作都覆盖了。
+  // 这个分支由单元测试守着(tests/settings-passkey-lock.test.tsx 里「验证没过、注册也没成 → 不写标记,
+  // 开关维持关闭」),那里能直接让 signIn.passkey 返回 error。两层各测各自够得到的那一半,别装作
+  // 都覆盖了。
 
-  // 用例 4 + 5:关掉再打开不用再按指纹,而且原来选的时长还在。
-  test("关掉再打开:不再跑 ceremony,时长保持原样", async ({ page, addAuth }) => {
+  // 用例 4 + 5:关掉再打开**要重新验一次**(#353 后续决定:开启闲置锁是把「遮住持仓」交给生物识别,
+  // 该由此刻在键盘前的人证明,不能由上次留下的一条 localStorage 记录代劳),而原来选的时长要留着。
+  test("关掉再打开:要重新验一次,但时长保持原样", async ({ page, addAuth }) => {
     const authenticator = await addAuth();
     await page.goto("/settings");
 
@@ -120,14 +134,19 @@ test.describe("开启闲置锁", () => {
 
     await toggle.click(); // 关
     await expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect((await readLockState(page)).deviceCredential).toBeTruthy(); // 凭据留着
+    expect((await readLockState(page)).deviceCredential).toBeTruthy(); // 凭据记录留着
 
-    await toggle.click(); // 再开
+    // 再开:必须真的又验一遍。
+    const verified = page.waitForResponse((r) =>
+      r.url().includes("/passkey/verify-authentication"),
+    );
+    await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await verified;
 
     const state = await readLockState(page);
-    expect(state.timeout).toBe("5"); // 时长没被重置回 15
-    // 全程只建过一条凭据 —— 关开关不该让人再验一次。
+    expect(state.timeout).toBe("5"); // 时长是偏好,没被重置回 15
+    // 验证不是注册 —— 全程只有一条凭据,不会因为反复开关攒出一堆。
     expect(await authenticator.credentials()).toHaveLength(1);
   });
 
