@@ -1,4 +1,4 @@
-import { cn } from "@folio/ui";
+import { cn, LogoAvatar } from "@folio/ui";
 import { useConnectorLabels, useConnectorLogos } from "../hooks/use-connector-labels";
 import type { PinTargetChoice } from "./tab-pin-picker";
 
@@ -6,28 +6,18 @@ import type { PinTargetChoice } from "./tab-pin-picker";
 // connector `logo + 类型名`(binance / zerion…,非账户自定义名)。pin 药丸与选择器三段共用同一份渲染,
 // 两处标记必然一致。`#`/`@` 是纯展示前缀,永不入库。
 //
-// logo 前导位 size-3.5(≈ text-sm 的视高)+ mr-1:与紧贴名字的 `#`/`@` 字符在同一视高上,pill 里不高低不齐。
-const MARK = "mr-1 flex size-3.5 shrink-0 items-center justify-center";
-
-// connector logo;无图(含 manual、目录未到位)回退首字母方块 —— 不留空、不破坏对齐。
+// connector 前导位:全站统一的 LogoAvatar —— 有图显图、无图回退**首字母圆标**(与代币行/来源行同一件,
+// 不另造形状)。缩到 size-3.5(≈ text-sm 的视高)+ mr-1,与紧贴名字的 `#`/`@` 字符同高,pill 里不高低不齐。
 function ConnectorMark({ connectorId }: { connectorId: string }) {
   const logoOf = useConnectorLogos();
   const labelOf = useConnectorLabels();
-  const src = logoOf(connectorId);
-  if (src) {
-    return (
-      <img
-        src={src}
-        alt=""
-        className={cn(MARK, "rounded-sm bg-logo-bg object-contain")}
-        aria-hidden
-      />
-    );
-  }
   return (
-    <span aria-hidden className={cn(MARK, "rounded-sm bg-muted font-medium text-[9px] uppercase")}>
-      {labelOf(connectorId).slice(0, 1)}
-    </span>
+    <LogoAvatar
+      src={logoOf(connectorId)}
+      fallback={labelOf(connectorId)}
+      size="sm"
+      className="mr-1 size-3.5"
+    />
   );
 }
 
