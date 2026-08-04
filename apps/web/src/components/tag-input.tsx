@@ -9,11 +9,16 @@ import { useTranslations } from "use-intl";
 
 interface TagInputItem {
   id: string;
-  name: string;
-  color: string; // var(--chart-N)(tagColor 给);只引 design token
+  name: string; // 纯名字(不含 `#`)—— `#` 只在渲染时贴
   attached: boolean; // 本账户是否已打
   accountCount: number; // 打了这个 Tag 的账户数(删除确认文案用)
+  pending?: boolean; // 新建的乐观占位:样子与常规 chip 一致,但还没有真 id → 不接受点击/改名/删除
 }
+
+// 用户可能顺手把 `#` 也敲进去(界面到处显 `#name`)→ 吞掉前导 `#` 再存,库里永远是纯名字。
+// **先 trim 再剥**,且剥完再 trim:粘进来的 " #cold" 若先剥,`^#+` 压根匹配不上(首字符是空格),
+// `#` 就跟着进库了;"# cold" 则要剥完再 trim 掉中间那个空格。
+const stripHash = (raw: string) => raw.trim().replace(/^#+/, "").trim();
 
 export interface TagInputProps {
   subtitle?: string; // 账户名(标题下方)
@@ -42,10 +47,15 @@ export function TagInput({
   const typing = draft.trim().length > 0;
 
   const commit = () => {
-    const name = draft.trim();
+    const name = stripHash(draft);
     if (!name) return;
     // 输入已存在的名(忽略大小写)= 复用并打上,而非新建;否则新建(调用方会自动打到本账户)。
     const existing = items.find((i) => i.name.toLowerCase() === name.toLowerCase());
+    // 命中的是还在飞的新建占位 → 它本就会被打上,重复提交只会撞唯一索引报错,这里直接吞掉。
+    if (existing?.pending) {
+      setDraft("");
+      return;
+    }
     if (existing) onToggle(existing.id, true);
     else onCreate(name);
     setDraft("");
@@ -103,14 +113,19 @@ export function TagInput({
               key={item.id}
               type="button"
               aria-pressed={item.attached}
+              disabled={item.pending}
               onClick={() => onToggle(item.id, !item.attached)}
+              // max-w-full + 内层 truncate:名字可以很长(用户随便打),chip 不能撑破 flex-wrap 容器 —— 满
+              // 一行就到此为止、超出走省略号。truncate 必须落在内层文字上,挂在这层 flex 容器上不生效。
+              // 名字看全走「管理」页(那里是 input,可完整读写)。
               className={cn(
-                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors",
-                item.attached ? "text-foreground" : "border border-border text-muted-foreground",
+                "flex max-w-full items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors",
+                item.attached
+                  ? "border border-foreground text-foreground"
+                  : "border border-border text-muted-foreground hover:text-foreground",
               )}
-              style={item.attached ? { border: `1.5px solid ${item.color}` } : undefined}
             >
-              {item.name}
+              <span className="truncate">#{item.name}</span>
             </button>
           ))}
 
@@ -121,6 +136,11 @@ export function TagInput({
             )}
             style={{ minWidth: "7rem" }}
           >
+            {/* 固定 `#` 导引:告诉用户「这里输的是标签」,但它不是输入内容 —— 用户打纯文字,
+                多敲的 `#` 在 commit 时被 stripHash 吞掉。 */}
+            <span aria-hidden className="shrink-0 text-muted-foreground text-sm">
+              #
+            </span>
             <input
               ref={inputRef}
               value={draft}
@@ -180,7 +200,7 @@ function ManageList({
               {/* title / subtitle 两行:标题说删哪个,副标题说影响面 —— 不再挤成一段长句折行。 */}
               <div className="min-w-0 flex-1">
                 <div className="truncate text-foreground text-sm">
-                  {t("removeTitle", { name: item.name })}
+                  {t("removeTitle", { name: `#${item.name}` })}
                 </div>
                 <div className="text-muted-foreground text-xs">
                   {t("removeSubtitle", { count: item.accountCount })}
@@ -209,22 +229,28 @@ function ManageList({
             </div>
           ) : (
             <div className="flex items-center gap-2.5 px-2 py-1">
+              {/* 与打标签输入框同款固定 `#` 导引:改名同样只输纯名字,多敲的 `#` 被吞。 */}
+              <span aria-hidden className="pl-2 text-muted-foreground text-sm">
+                #
+              </span>
               <input
                 key={`${item.id}:${item.name}`}
                 defaultValue={item.name}
+                disabled={item.pending} // 占位还没有真 id,改名/删除都无从谈起
                 onBlur={(e) => {
-                  const next = e.target.value.trim();
+                  const next = stripHash(e.target.value);
                   if (next && next !== item.name) onRename(item.id, next);
                 }}
                 onKeyDown={(e) => {
                   if (e.nativeEvent.isComposing) return; // 输入法组字中不提交改名
                   if (e.key === "Enter") e.currentTarget.blur();
                 }}
-                className="h-8 flex-1 rounded-md bg-transparent px-2 text-foreground text-sm outline-none focus:bg-muted"
+                className="-ml-1.5 h-8 flex-1 rounded-md bg-transparent px-1 text-foreground text-sm outline-none focus:bg-muted"
               />
               <button
                 type="button"
                 aria-label={`${tc("delete")} ${item.name}`}
+                disabled={item.pending}
                 onClick={() => setConfirmingId(item.id)}
                 className="flex shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-destructive"
               >

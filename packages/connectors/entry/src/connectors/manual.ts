@@ -1,23 +1,23 @@
 import { type CredField, defineConnector, Spot } from "@folio/connectors-basic";
 import { z } from "zod";
 
-// manual 无外部品牌图 → 内置 NotebookPen 字形(lucide v0.545)作 logo:「手动录入」语义,且不与
-// 账户钱包标记(NameLine)撞。单色描边内联 SVG data-URI —— 落在恒亮 bg-logo-bg 上,故描边用中性深色
-// (这是 logo 图像素材,非组件样式,与各连接器品牌图同类,不受「只用 token」约束)。经 platformLogoUrl
-// 识别 data: 前缀直挂、不进 /api/logo 代理(代理只为外部 fetch 的隐私;内置静态图无隐私且代理拉不了 data:)。
-// viewBox 四周留白(-6..30):24×24 字形缩到画布 ~67%,圆形头像裁切时含描边也不切角。
-// 多行只为可读;编码前 collapse 空白成单空格 → data-URI 无 %0A/缩进噪声(SVG 忽略标签间空白)。
-const NOTEBOOK_PEN_SVG = `
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="-6 -6 36 36"
-       fill="none" stroke="#52525b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/>
-    <path d="M2 6h4"/>
-    <path d="M2 10h4"/>
-    <path d="M2 14h4"/>
-    <path d="M2 18h4"/>
-    <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>
-  </svg>`;
-const MANUAL_LOGO = `data:image/svg+xml,${encodeURIComponent(NOTEBOOK_PEN_SVG.replace(/\s+/g, " ").trim())}`;
+// manual 无外部品牌图 → 内置羽毛笔字形作 logo:「手动录入」语义,且不与账户标记(`@`)撞。
+// 内联 SVG data-URI,经 platformLogoUrl 识别 data: 前缀直挂、不进 /api/logo 代理(代理只为外部 fetch
+// 的隐私;内置静态图无隐私且代理拉不了 data:)。
+//
+// viewBox 不是字形自带的 `0 0 256 256` —— 那份画布里字形既不居中也贴边(实测 getBBox:x 32→240、
+// y 16→232),圆形头像会切到羽尖。改为**绕字形自身包围盒**取景:中心 (136, 124),边长 324 = 216 / 0.667,
+// 沿用前一版 logo 的留白比例(字形占画布 ~67%,四周各留 ~54)。半对角 150 < 内切圆半径 162 → 圆裁不着。
+//
+// fill 写死 #222222,**不用 currentColor**:data-URI 图没有可继承的上下文,currentColor 只能落到 UA
+// 的初始 color —— Chrome 给黑色(看着没问题),但 forced-colors / 高对比度下会翻成浅色,叠在恒亮的
+// bg-logo-bg 上就是一个空白圆。写死颜色即与 UA 无关(这是 logo 图像素材,与各连接器品牌图同类,
+// 不受「只用 token」约束;改 CSS 对它无效)。
+const FEATHER_SVG = `
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="-26 -38 324 324" fill="#222222"><path d="m211.84 134.81l-59.79 60.47a15.75 15.75 0 0 1-11.2 4.68H75.32l-29.66 29.7a8 8 0 0 1-11.32-11.32l22.59-22.58L124.7 128H209a4 4 0 0 1 2.84 6.81m4.86-104.24a64 64 0 0 0-85.9 4.14l-9.6 9.48A4 4 0 0 0 120 47v63l55-55a8 8 0 0 1 11.31 11.31L140.71 112h88.38a4 4 0 0 0 3.56-2.16a64.08 64.08 0 0 0-15.95-79.27M62.83 167.23L104 126.06v-55.3a4 4 0 0 0-6.81-2.84L60.69 104A15.9 15.9 0 0 0 56 115.31v49.09a4 4 0 0 0 6.83 2.83"/></svg>
+`;
+
+const MANUAL_LOGO = `data:image/svg+xml,${encodeURIComponent(FEATHER_SVG.replace(/\s+/g, " ").trim())}`;
 
 // 加账户表单首个持仓的入参形状。**只在创建那一刻用** —— #203 之后它不再落库:
 // 四个值分别去了 `tokens.symbol` / `tokens.self_price` / `token_refs`(选的币)/ `manual_activity`(数量),

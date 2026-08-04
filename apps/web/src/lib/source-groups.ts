@@ -16,9 +16,20 @@ export interface SourceGroup {
   primary: string; // 主行(平台名 / 账户名)
   count: number; // 副维度基数(账户数 / 平台数);=1 时用 single 显具体名
   single: string | null; // count===1 时的具体名(账户名 / 平台名),否则 null
+  // 平台视图副行点名用(#351 ③):组内**按 value 倒序**的前 ACCOUNT_SLOTS 个账户 —— 组件按
+  // collapseToSlots 渲染成 `@a` / `@a @b @c` / `@a @b +n`,不再只报「{n} accounts」计数。
+  // 带满阈值个候选,「恰好 3 个」才全显得出来;超过阈值时组件只用前 2 个,余量由 count 算。
+  // 带 id 而非只带 label:账户名可以重名,渲染要一个稳定唯一的 key。
+  // 账户视图不点名(副维度是平台,已有 avatars 表达),留空数组。
+  topAccounts: { id: string; label: string }[];
   amount: number; // 组内数量之和(组统一单位)
   value: number; // 组内 USD 之和(占比与排序按它)
 }
+
+// 平台行副行的折叠阈值:≤ 这个数时全显,超过则显 max-1 个 + `+N`(见 collapseToSlots)。
+// **携带的候选数必须 = 这个阈值**,否则「恰好等于阈值」那档会拿不满、静默少显一个还不给计数 →
+// 所以两者共用这一个常量,由渲染方 import,不各写一份。
+export const ACCOUNT_SLOTS = 3;
 
 export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[] {
   const m = new Map<
@@ -26,8 +37,8 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
     {
       name: string;
       logo?: string;
-      accounts: Set<string>;
-      lastAccount: string;
+      // 按账户累计组内 value —— 副行点名要「组内最大的两个账户」,光有账户数不够(#351 ③)。
+      accounts: Map<string, { id: string; label: string; value: number }>;
       amount: number;
       value: number;
     }
@@ -38,8 +49,7 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
       g = {
         name: s.platform.name,
         logo: s.platform.logo,
-        accounts: new Set(),
-        lastAccount: s.account.label,
+        accounts: new Map(),
         amount: 0,
         value: 0,
       };
@@ -47,19 +57,25 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
     }
     g.amount += s.amount;
     g.value += s.value;
-    g.accounts.add(s.account.id);
-    g.lastAccount = s.account.label;
+    const a = g.accounts.get(s.account.id);
+    if (a) a.value += s.value;
+    else g.accounts.set(s.account.id, { id: s.account.id, label: s.account.label, value: s.value });
   }
   return [...m.entries()]
-    .map(([key, g]) => ({
-      key,
-      avatars: [{ logo: g.logo, name: g.name }],
-      primary: g.name,
-      count: g.accounts.size,
-      single: g.accounts.size === 1 ? g.lastAccount : null,
-      amount: g.amount,
-      value: g.value,
-    }))
+    .map(([key, g]) => {
+      const byValue = [...g.accounts.values()].sort((a, b) => b.value - a.value);
+      const first = byValue[0];
+      return {
+        key,
+        avatars: [{ logo: g.logo, name: g.name }],
+        primary: g.name,
+        count: byValue.length,
+        single: byValue.length === 1 ? (first?.label ?? null) : null,
+        topAccounts: byValue.slice(0, ACCOUNT_SLOTS).map((a) => ({ id: a.id, label: a.label })),
+        amount: g.amount,
+        value: g.value,
+      };
+    })
     .sort((a, b) => b.value - a.value);
 }
 
@@ -94,6 +110,7 @@ export function groupByAccount(sources: readonly HoldingSource[]): SourceGroup[]
         primary: g.label,
         count: plats.length,
         single: plats.length === 1 ? plats[0][1].name : null,
+        topAccounts: [], // 账户视图副维度是平台,由 avatars 表达,不点名
         amount: g.amount,
         value: g.value,
       };

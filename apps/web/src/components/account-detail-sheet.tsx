@@ -62,7 +62,7 @@ export interface AccountRow {
   tags: AccountTagView[]; // 本账户已打的 Tag(展示用)
 }
 
-// 账户已打的 Tag 的展示投影(id + 名字;颜色由 tagColor(id) 现算,不入行)。
+// 账户已打的 Tag 的展示投影(id + 名字;`#` 前缀只在渲染时贴,不入行)。
 interface AccountTagView {
   id: string;
   name: string;
@@ -271,6 +271,8 @@ function DetailBody({
                   {t("archivedBadge")}
                 </span>
               )}
+              {/* Tag(#351):与 connector 徽章同排,muted 纯展示、**不可点** —— 编辑走 ⋯ 菜单里的「标签」。 */}
+              <TagBadges tags={account.tags} />
             </EditableName>
             {/* 市值 + 24h 增量:字号同代币抽屉(值 text-3xl bold、增量 text-sm);缺凭据 → 无增量。 */}
             <div>
@@ -287,17 +289,6 @@ function DetailBody({
                 </div>
               )}
             </div>
-            {/* Tag 行(ADR 0034):展示本账户全部 Tag;点该行开打标签弹窗(⋯ 菜单同入口)。 */}
-            {account.tags.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setTagsOpen(true)}
-                className="-mx-1 flex rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted"
-                aria-label={tt("menuAction")}
-              >
-                <TagBadges tags={account.tags} />
-              </button>
-            )}
             {/* 缺凭据告警行:⚠ + 可点击"补填凭据以同步"提示(文案即入口 → 开加账户 modal 的补录模式,A3)。 */}
             {account.needsCredentials && (
               <div className="flex items-center gap-1.5 text-warn text-xs">
