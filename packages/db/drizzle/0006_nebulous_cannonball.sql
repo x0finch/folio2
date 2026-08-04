@@ -1,0 +1,1 @@
+ALTER TABLE `tab_pins` ADD `account_id` text REFERENCES accounts(id) ON DELETE cascade;

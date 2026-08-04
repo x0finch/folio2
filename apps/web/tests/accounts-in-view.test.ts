@@ -4,6 +4,7 @@ import {
   accountsInView,
   accountsMatchingPin,
   type TabPin,
+  toTabPin,
 } from "../src/lib/accounts-in-view";
 
 // accountsInView(ADR 0033):活跃 && 归属选中 Portfolio;未归属的账户兜底进默认视图。
@@ -104,5 +105,34 @@ describe("accountsMatchingPin", () => {
   it("tag pin 无匹配 → 空", () => {
     const pin: TabPin = { kind: "tag", tagId: "t-none" };
     expect(accountsMatchingPin(accs, pin, tagLinks)).toEqual([]);
+  });
+
+  it("account pin → 只留该账户", () => {
+    const pin: TabPin = { kind: "account", accountId: "b" };
+    expect(accountsMatchingPin(accs, pin, tagLinks).map((a) => a.id)).toEqual(["b"]);
+  });
+});
+
+describe("toTabPin", () => {
+  it("三种 kind 带对应 id → 规范化成 TabPin", () => {
+    expect(toTabPin({ kind: "connector", connectorId: "binance" })).toEqual({
+      kind: "connector",
+      connectorId: "binance",
+    });
+    expect(toTabPin({ kind: "tag", tagId: "t1" })).toEqual({ kind: "tag", tagId: "t1" });
+    expect(toTabPin({ kind: "account", accountId: "a1" })).toEqual({
+      kind: "account",
+      accountId: "a1",
+    });
+  });
+
+  it("缺省 / 缺对应 id → null(退回不收窄)", () => {
+    expect(toTabPin(undefined)).toBeNull();
+    expect(toTabPin(null)).toBeNull();
+    expect(toTabPin({ kind: "connector" })).toBeNull();
+    expect(toTabPin({ kind: "tag" })).toBeNull();
+    expect(toTabPin({ kind: "account" })).toBeNull();
+    // kind 与 id 错配(account kind 只带 tagId)→ null,不误当 tag
+    expect(toTabPin({ kind: "account", tagId: "t1" })).toBeNull();
   });
 });

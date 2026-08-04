@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, Skeleton } from "@folio/ui";
 // 稳定 key(避免 index key lint):占位行数固定,用字符串数组当 key。
 const ROWS_5 = ["r1", "r2", "r3", "r4", "r5"];
 const ROWS_4 = ["r1", "r2", "r3", "r4"];
+const ROWS_3 = ["r1", "r2", "r3"];
 const CARDS_2 = ["c1", "c2"];
 
 function Row() {
@@ -36,6 +37,17 @@ export function OverviewSkeleton() {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// 短列表骨架(3 行,无 Card):自定义 Tab 首次拉取过滤后内容时占位 —— 避免退回展示未收窄的全量数据。
+export function ListSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      {ROWS_3.map((k) => (
+        <Row key={k} />
+      ))}
     </div>
   );
 }

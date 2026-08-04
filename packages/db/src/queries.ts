@@ -573,26 +573,32 @@ async function assertTabPinOwned(db: Db, userId: string, pinId: string): Promise
 }
 
 export interface TabPinInput {
-  kind: "connector" | "tag";
+  kind: "connector" | "tag" | "account";
   tagId?: string | null;
+  accountId?: string | null;
   connectorId?: ConnectorId | null;
   sortOrder?: number;
 }
 
-// pin 的目标校验:tag pin 必须带一个本人的 tagId;connector pin 必须带 connectorId(无 FK,不校验存在)。
-// 返回规范化后的两列(互斥非空)。
+// pin 的目标校验:tag pin 带本人 tagId;account pin 带本人 accountId;connector pin 带 connectorId
+//(无 FK,不校验存在)。返回规范化后的三列(按 kind 互斥非空)。
 async function resolvePinTarget(
   db: Db,
   userId: string,
-  input: Pick<TabPinInput, "kind" | "tagId" | "connectorId">,
-): Promise<{ tagId: string | null; connectorId: ConnectorId | null }> {
+  input: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
+): Promise<{ tagId: string | null; accountId: string | null; connectorId: ConnectorId | null }> {
   if (input.kind === "tag") {
     if (!input.tagId) throw new Error("tag pin requires tagId");
     await assertTagOwned(db, userId, input.tagId);
-    return { tagId: input.tagId, connectorId: null };
+    return { tagId: input.tagId, accountId: null, connectorId: null };
+  }
+  if (input.kind === "account") {
+    if (!input.accountId) throw new Error("account pin requires accountId");
+    await assertAccountOwned(db, userId, input.accountId);
+    return { tagId: null, accountId: input.accountId, connectorId: null };
   }
   if (!input.connectorId) throw new Error("connector pin requires connectorId");
-  return { tagId: null, connectorId: input.connectorId };
+  return { tagId: null, accountId: null, connectorId: input.connectorId };
 }
 
 // 固定一个自定义 Tab。每 user ≤3(超出抛)。tag pin 校验 Tag 归属本人。
@@ -615,6 +621,7 @@ export async function createTabPin(
     userId,
     kind: input.kind,
     tagId: target.tagId,
+    accountId: target.accountId,
     connectorId: target.connectorId,
     sortOrder: input.sortOrder ?? existing.length,
   };
@@ -636,14 +643,19 @@ export async function updateTabPinTarget(
   env: DbEnv,
   userId: string,
   pinId: string,
-  patch: Pick<TabPinInput, "kind" | "tagId" | "connectorId">,
+  patch: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
 ): Promise<void> {
   const db = getDb(env);
   await assertTabPinOwned(db, userId, pinId);
   const target = await resolvePinTarget(db, userId, patch);
   await db
     .update(tabPins)
-    .set({ kind: patch.kind, tagId: target.tagId, connectorId: target.connectorId })
+    .set({
+      kind: patch.kind,
+      tagId: target.tagId,
+      accountId: target.accountId,
+      connectorId: target.connectorId,
+    })
     .where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId)));
 }
 

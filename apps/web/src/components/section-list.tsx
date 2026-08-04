@@ -34,9 +34,10 @@ export function SectionList({ sections }: { sections: OverviewSection[] }) {
   if (ordered.length === 0) return null;
   return (
     <div className="flex flex-col gap-6">
-      {ordered.map((s) => (
+      {ordered.map((s, i) => (
         <div key={s.key} className="flex flex-col gap-3">
-          <SectionHeader title={s.title} />
+          {/* 首段(最大)省略 eyebrow 节头 —— 它已是默认焦点,再加标题显冗余(ADR 0034 UI 微调)。 */}
+          {i > 0 && <SectionHeader title={s.title} />}
           {s.content}
         </div>
       ))}

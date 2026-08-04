@@ -1,7 +1,7 @@
 import type { Tag } from "@folio/db";
 import { MorphingModal, toast, useMediaQuery } from "@folio/ui";
 import { useRouter } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
 import { attachTag, createTag, deleteTag, detachTag, renameTag } from "../lib/server/tags";
 import { tagColor } from "../lib/tag-color";
@@ -33,8 +33,26 @@ export function AccountTagsModal({
   const t = useTranslations("Tags");
   const router = useRouter();
   const isDesktop = useMediaQuery("(min-width: 640px)");
-  // toggle 的乐观 overlay:tagId → 期望的 attached 值。props 追上后由 items 派生自然覆盖(下次 invalidate)。
+  // toggle 的乐观 overlay:tagId → 期望的 attached 值。即时反馈,后台 server fn + invalidate 落库。
   const [optim, setOptim] = useState<Map<string, boolean>>(new Map());
+
+  // 对账式修剪:等 invalidate 后 attachedTagIds 追上乐观值,才把那条 overlay 撤下(此刻撤 = 无视觉变化)。
+  // 不在 onToggle 成功回调里立刻撤 —— 那会与 loader 数据传播抢跑,先露出旧态再翻回来 = 闪一下。
+  useEffect(() => {
+    setOptim((m) => {
+      if (m.size === 0) return m;
+      const attached = new Set(attachedTagIds);
+      const n = new Map(m);
+      let changed = false;
+      for (const [id, want] of n) {
+        if (attached.has(id) === want) {
+          n.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? n : m;
+    });
+  }, [attachedTagIds]);
 
   const items = useMemo(() => {
     const attached = new Set(attachedTagIds);
@@ -59,18 +77,11 @@ export function AccountTagsModal({
       ? attachTag({ data: { accountId, tagId } })
       : detachTag({ data: { accountId, tagId } });
     call
-      .then(() => router.invalidate())
-      .then(() =>
-        setOptim((m) => {
-          const n = new Map(m);
-          n.delete(tagId); // 服务端真值已回 → 撤下这条乐观覆盖(否则 optim 无限累积、可能盖过真值)
-          return n;
-        }),
-      )
+      .then(() => router.invalidate()) // 撤 overlay 交给上面的对账 effect,别在这清(避免闪烁)
       .catch(() => {
         setOptim((m) => {
           const n = new Map(m);
-          n.delete(tagId); // 回退乐观
+          n.delete(tagId); // 失败 → 立即回退乐观
           return n;
         });
         fail();
