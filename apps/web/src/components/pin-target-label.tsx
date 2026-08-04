@@ -9,9 +9,10 @@ import type { PinTargetChoice } from "./tab-pin-picker";
 // connector 前导位:全站统一的 LogoAvatar —— 有图显图、无图回退**首字母圆标**(与代币行/来源行同一件,
 // 不另造形状)。缩到 size-3.5(≈ text-sm 的视高)+ mr-1,与紧贴名字的 `#`/`@` 字符同高,pill 里不高低不齐。
 //
-// onPrimary:药丸激活时底衬是浅色的 bg-primary,logo 默认那块恒亮白盘就成了「白上叠白」的第二块白 →
-// 整件跟着表面走 —— 盘子与圆底都换成药丸自身的颜色(视觉上消失,但仍是不透明实底,透明 logo 不漏出
-// 底下的 fallback 字母;根也得一起换,否则圆边缘抗锯齿处漏出 bg-muted 暗环),首字母改用药丸前景色。
+// onPrimary:药丸激活时底衬是浅色的 bg-primary,而 logo 可能自己就是浅色(OKX 的图自带白底、
+// manual 是透明线稿)→ 一圈发丝边把它与药丸分开。**只有描边对任意 logo 都成立** —— 改 logo 底盘的
+// 颜色管不了图片自己烧进去的底色(实测:manual 好了,OKX 照旧白叠白)。深色药丸上不需要,logo 自带的
+// 亮底盘已经把它与底面分开了。
 function ConnectorMark({ connectorId, onPrimary }: { connectorId: string; onPrimary?: boolean }) {
   const logoOf = useConnectorLogos();
   const labelOf = useConnectorLabels();
@@ -20,9 +21,7 @@ function ConnectorMark({ connectorId, onPrimary }: { connectorId: string; onPrim
       src={logoOf(connectorId)}
       fallback={labelOf(connectorId)}
       size="sm"
-      className={cn("mr-1 size-3.5", onPrimary && "bg-primary")}
-      plateClassName={onPrimary ? "bg-primary" : undefined}
-      fallbackClassName={onPrimary ? "text-primary-foreground" : undefined}
+      className={cn("mr-1 size-3.5", onPrimary && "ring-1 ring-primary-foreground/40")}
     />
   );
 }

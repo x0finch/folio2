@@ -14,19 +14,12 @@ export function LogoAvatar({
   alt,
   size = "md",
   className,
-  plateClassName,
-  fallbackClassName,
 }: {
   src?: string | null;
   fallback: string;
   alt?: string;
   size?: keyof typeof sizes;
   className?: string;
-  // 图底下那块实底的颜色。默认恒亮白(见下),**放在浅色表面上时传该表面自身的色** —— 否则白盘叠白面
-  // 就成了两块白。必须仍是不透明色,不能传 transparent:实底同时挡住底下的 fallback 字母。
-  // 注意:改这块时连 className 一起把 Avatar 根也改成同色,否则圆边缘抗锯齿处会漏出根的 bg-muted 暗环。
-  plateClassName?: string;
-  fallbackClassName?: string; // 首字母回退的字色;根底色随之改时要一起给,否则字与底撞色
 }) {
   const s = sizes[size];
   return (
@@ -35,11 +28,9 @@ export function LogoAvatar({
       <AvatarImage
         src={src || ""}
         alt={alt ?? ""}
-        className={cn("rounded-full bg-logo-bg object-contain", plateClassName)}
+        className="rounded-full bg-logo-bg object-contain"
       />
-      <AvatarFallback
-        className={cn("bg-transparent font-medium text-muted-foreground", s.fallback, fallbackClassName)}
-      >
+      <AvatarFallback className={cn("font-medium text-muted-foreground", s.fallback)}>
         {fallback?.slice(0, 1).toUpperCase()}
       </AvatarFallback>
     </Avatar>
