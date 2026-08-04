@@ -12,10 +12,11 @@ import {
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { HeaderSync } from "../../components/header-sync";
 import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
+import { Portal } from "../../components/portal";
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { SectionList } from "../../components/section-list";
 import { ListSkeleton, OverviewSkeleton } from "../../components/skeletons";
@@ -24,7 +25,6 @@ import { TokenHoldings } from "../../components/token-holdings";
 import { useConnectorLabels } from "../../hooks/use-connector-labels";
 import { mergeDefiGroups } from "../../lib/account-view";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
-import { useHoverPopover } from "../../lib/hooks/use-hover-popover";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { listAccounts } from "../../lib/server/accounts";
@@ -38,6 +38,20 @@ import {
 import { listTags } from "../../lib/server/tags";
 
 const MAX_PINS = 3;
+const TAB_SCROLL_MARGIN = 16; // 选中 tab 滚进可视区时两侧留的余量(px)
+
+// 把 tab(或 ＋)在横向滚动的 tab 条里滚到完全可见(两侧留余量)。手写而非 scrollIntoView:
+// 后者会连带滚 overflow-hidden 祖先和页面纵向(实测踩坑)。
+function revealTab(el: HTMLElement) {
+  const strip = el.closest(".overflow-x-auto");
+  if (!strip) return;
+  const sr = strip.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  if (er.right + TAB_SCROLL_MARGIN > sr.right)
+    strip.scrollLeft += er.right + TAB_SCROLL_MARGIN - sr.right;
+  else if (er.left - TAB_SCROLL_MARGIN < sr.left)
+    strip.scrollLeft -= sr.left - er.left + TAB_SCROLL_MARGIN;
+}
 
 export const Route = createFileRoute("/_authed/")({
   loader: async () => {
@@ -73,30 +87,26 @@ function Overview() {
   // 单一 tab 状态:"tokens" / "perps" / "defi"(视角)或 pin id(自定义 Tab)。默认 tokens。
   const [active, setActive] = useState("tokens");
 
-  // 横向滚动的 tab 行会连带纵/横裁掉 pin 的 beUI popover(overflow-x:auto ⇒ overflow-y 也 auto)。
-  // 解法:popover 打开时把容器 overflow 临时切成 visible(不裁),用 translateX 保住当前滚动位置;关闭切回。
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const savedScrollLeft = useRef(0);
-  const [pinPanelOpen, setPinPanelOpen] = useState(0); // 打开中的 pin/＋ 面板数(通常 ≤1)
-  const onPanelToggle = useCallback((open: boolean) => {
-    setPinPanelOpen((n) => Math.max(0, n + (open ? 1 : -1)));
-  }, []);
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    const inner = el?.firstElementChild as HTMLElement | null;
-    if (!el || !inner) return;
-    if (pinPanelOpen > 0) {
-      savedScrollLeft.current = el.scrollLeft;
-      el.style.overflowX = "visible"; // overflow-y 未显式设 → 随之恢复 visible,popover 不被裁
-      inner.style.transform = `translateX(${-savedScrollLeft.current}px)`; // 视觉上保持滚动位置
-    } else {
-      el.style.overflowX = "";
-      inner.style.transform = "";
-      el.scrollLeft = savedScrollLeft.current;
-    }
-  }, [pinPanelOpen]);
-
   const { pins, tags, connectorIds, allAccounts } = loaderData;
+
+  // 手机端 tab 条横向滚动:选中在可视区外/半露的 tab 要滚进可视区,两侧留余量(不贴裁剪缘/合计)。
+  // 手写横向校正而非 scrollIntoView:后者会连带滚 overflow-hidden 祖先和页面纵向;且选中 pin 后合计
+  // 宽度变化(「—」→ 金额)会把 strip 压窄、刚滚好的 tab 又被裁掉(实测)→ ResizeObserver 盯住
+  // strip 尺寸,变了就再校正一次。pins.length 也作触发 —— 新建 pin 的 tab 等 loader 刷新才挂上。
+  const stripRef = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖是「何时滚」的信号(选中变化/pin 增删),不是回调里读的值。
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const reveal = () => {
+      const el = strip.querySelector('[aria-selected="true"]');
+      if (el instanceof HTMLElement) revealTab(el);
+    };
+    reveal();
+    const ro = new ResizeObserver(reveal);
+    ro.observe(strip);
+    return () => ro.disconnect();
+  }, [active, pins.length]);
   // activePin 只看 loader 的 pins(不依赖 data)→ 可在拉取前定 scope。
   const activePin = pins.find((p) => p.id === active) ?? null;
   const isPinView = activePin != null;
@@ -270,15 +280,16 @@ function Overview() {
               选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
           <div className="flex items-center gap-4">
             {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。
-                overflow 在 pin popover 打开时由上面的 effect 临时切成 visible(避免裁 popover),内层 div 承 translateX。 */}
+                pin 面板不受此容器裁剪 —— 它整个经 Portal 浮出(见 PinPortalPopover)。 */}
             <div
-              ref={scrollRef}
+              ref={stripRef}
               className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               <Tabs value={activeValue} onValueChange={setActive} variant="pill">
                 {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
-                    ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。 */}
-                <TabsList className="bg-transparent p-0">
+                    ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。
+                    pr-4:滚动区末端留内边距,滚到底时最后一个 tab/＋ 不贴着右侧合计。 */}
+                <TabsList className="bg-transparent p-0 pr-4">
                   <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
                   {kind.perpItems.length > 0 && (
                     <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>
@@ -309,7 +320,6 @@ function Overview() {
                       accountOptions={accountOptions}
                       onRepoint={(choice) => repointPin(p.id, choice)}
                       onUnpin={() => onUnpin(p.id)}
-                      onPanelToggle={onPanelToggle}
                     />
                   ))}
                   {pins.length < MAX_PINS && (
@@ -318,7 +328,6 @@ function Overview() {
                       tagOptions={tagOptions}
                       accountOptions={accountOptions}
                       onPick={addPin}
-                      onPanelToggle={onPanelToggle}
                     />
                   )}
                 </TabsList>
@@ -371,9 +380,169 @@ function accountNameOf(
   return accounts.find((a) => a.id === accountId)?.label ?? "";
 }
 
-// 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);外裹 beUI Popover
-// 揭示管理小面板(改指向选择器 / 取消固定)。**桌面**用 hover 冒出(goo 颈连触发器与面板,鼠标可径直移进);
-// **触屏**改 click 且门控:点未激活的 tab 只选中、不弹面板,再点已激活的才弹(避免「先弹后选」)。
+const PIN_PANEL_W = 240; // w-56 + p-2
+const PIN_PANEL_H = 340; // 面板大致高度,够不够放得下决定朝上还是朝下
+const GOO_COLLAPSE_MS = 400; // beUI goo 收拢 spring 视觉时长 ~0.32s,放完再卸载浮层
+
+// pin/＋ 的管理面板:**整个 beUI Popover 连带渲染进 Portal**(goo 动效原样保留),fixed 覆在触发器位置、
+// z 高于 hero —— 既不被横向滚动容器裁(overflow-x:auto 会连带裁纵向),也不被 hero 盖住,更不会撑出页面
+// 横向滚动条(fixed 不参与文档滚动)。触发器渲染 ghost(真 tab 的视觉拷贝,像素重合)且**必须有真实尺寸**
+//(Popover 根 h-full w-full 撑满 fixed 盒子,否则量出 0×0 → goo 裁剪从零矩形起步,面板被自己裁没)。
+// 关闭态整层不吃指针,点击照常落到底下真正的 tab;打开态点触发器区域由 beUI 自身的 click-toggle 关闭
+//(面板内点击不会误触关闭)。
+function PinPortalPopover({
+  open,
+  rect,
+  ghost,
+  onRequestClose,
+  onMouseEnter,
+  onMouseLeave,
+  children,
+}: {
+  open: boolean;
+  rect: DOMRect | null;
+  ghost: React.ReactNode; // 触发器的视觉拷贝:与底下真 tab 像素重合,让 goo 药丸回到「文字底下」(原生层叠)
+  onRequestClose: () => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+  children: React.ReactNode;
+}) {
+  // 挂载/翻开分两拍走,卸载等收拢放完:
+  // ① beUI Popover **首帧就带 open=true 挂载**会踩内部竞态(量尺寸的 re-render 与开场 spring 抢跑,
+  //    裁剪停在 p=0、面板隐形,实测)→ 先挂载(关)、下一拍再翻开,恒走页面上其它 popover 的健康路径。
+  // ② 关闭后 goo 底色在触发器位置留一块药丸 —— 原生 beUI 里它垫在触发器**底下**,portal 后整层浮在
+  //    tab **上面**,不卸载就永久盖住 tab(实测)→ 收拢动画放完(GOO_COLLAPSE_MS)整个卸载。
+  const [mounted, setMounted] = useState(false);
+  const [openDeferred, setOpenDeferred] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      return;
+    }
+    setOpenDeferred(false);
+    const t = setTimeout(() => setMounted(false), GOO_COLLAPSE_MS);
+    return () => clearTimeout(t);
+  }, [open]);
+  useEffect(() => {
+    if (open && mounted) setOpenDeferred(true);
+  }, [open, mounted]);
+  if (!rect || !mounted) return null;
+  // 横向:右边放得下就左对齐触发器,否则右对齐;竖向:下方放得下就朝下,否则朝上。皆按**视口**算(已 fixed)。
+  const align: "start" | "end" = rect.left + PIN_PANEL_W <= window.innerWidth - 8 ? "start" : "end";
+  const side: "top" | "bottom" =
+    window.innerHeight - rect.bottom > PIN_PANEL_H || rect.top < PIN_PANEL_H ? "bottom" : "top";
+  return (
+    <Portal>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: 纯浮层容器;可交互项在面板内,tab 本身可键盘达。 */}
+      <div
+        style={{
+          position: "fixed",
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          zIndex: 60,
+          pointerEvents: open ? "auto" : "none", // 关闭态不挡底下的 tab 点击
+        }}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+      >
+        <Popover
+          open={openDeferred}
+          trigger="click"
+          side={side}
+          align={align}
+          // 16 = tab 药丸 rounded-full 的半径(高 32 的一半):beUI 的 goo 触发药丸半径取
+          // min(tH/2, panelRadius),给 16 才与 ghost/真 tab 圆角完全重合,不然深色角会露出来。
+          panelRadius={16}
+          onOpenChange={(next) => {
+            if (!next) onRequestClose(); // beUI 的点外部/Esc/点触发器关闭,统一回流到调用方
+          }}
+          // h-full w-full:让根撑满 fixed 盒子 → 触发器量出真实尺寸(0×0 会毁掉 goo 几何)。
+          className="h-full w-full"
+        >
+          <PopoverTrigger>
+            {/* ghost 在 goo 层(z-[-1])之上 —— 复刻原生 beUI 的层叠:药丸在触发器底下,动画全程不遮字。 */}
+            <span className="flex h-full w-full items-center justify-center">{ghost}</span>
+          </PopoverTrigger>
+          <PopoverContent className="p-2">{children}</PopoverContent>
+        </Popover>
+      </div>
+    </Portal>
+  );
+}
+
+// 开合行为(需求 9:桌面/手机一致):gateOpen 不过就**绝不开** —— pin 必须先选中(首点只选中,
+// 再点已选中的才开);＋ 无「选中」一说,首次触发即开。桌面额外有 hover:已选中的 pin 移上去即开、
+// 移开延迟一点再关(便于从 tab 挪进面板);未选中的 hover 不开。滚动/缩放即关,避免 fixed 浮层与触发器脱节。
+function usePinPanel(canHover: boolean, gateOpen: () => boolean) {
+  const anchorRef = useRef<HTMLElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clear = () => {
+    if (timer.current) clearTimeout(timer.current);
+  };
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  const show = () => {
+    clear();
+    const a = anchorRef.current;
+    if (a) revealTab(a); // 半裁的触发器先滚进可视区再量位 —— 否则 fixed 浮层会按未裁坐标悬到合计上
+    const r = a?.getBoundingClientRect();
+    if (r) setRect(r);
+    setOpen(true);
+  };
+  const close = () => {
+    clear();
+    setOpen(false);
+  };
+  const hideSoon = () => {
+    clear();
+    timer.current = setTimeout(() => setOpen(false), 140);
+  };
+  // 浮层是 fixed 的:触发器一移位就与面板脱节 → 关掉。两道过滤,只关「真脱节」:
+  // ① 滚动的容器不包含触发器(= 面板内部滚动,选择器 overflow-y-auto)→ 不关;
+  // ② 触发器量出来没动(show() 里 revealTab 自滚的 scroll 事件是异步到的,不算脱节)→ 不关。
+  // resize 一律关。
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = (e: Event) => {
+      const t = e.target;
+      if (t instanceof Node && anchorRef.current && !t.contains(anchorRef.current)) return;
+      const r = anchorRef.current?.getBoundingClientRect();
+      if (r && rect && Math.abs(r.left - rect.left) < 1 && Math.abs(r.top - rect.top) < 1) return;
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open, rect]);
+  const hoverProps = canHover
+    ? {
+        onMouseEnter: () => {
+          if (gateOpen()) show(); // 未选中的 pin hover 不开(需求 9)
+        },
+        onMouseLeave: hideSoon,
+      }
+    : {};
+  const onClick = () => {
+    if (open) close();
+    else if (gateOpen()) show(); // 首点选中时 isActive 还是旧值 false → 只选中不开;再点才开
+  };
+  return { anchorRef, open, rect, show, close, hideSoon, clear, hoverProps, onClick };
+}
+
+// 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);
+// 管理面板经 PinPortalPopover 浮出(改指向选择器 / 取消固定)。
 function PinTab({
   value,
   label,
@@ -384,7 +553,6 @@ function PinTab({
   accountOptions,
   onRepoint,
   onUnpin,
-  onPanelToggle,
 }: {
   value: string;
   label: string;
@@ -395,48 +563,50 @@ function PinTab({
   accountOptions: { id: string; label: string }[];
   onRepoint: (choice: PinTargetChoice) => void;
   onUnpin: () => void;
-  onPanelToggle: (open: boolean) => void;
 }) {
   const tct = useTranslations("CustomTabs");
-  const pop = useHoverPopover();
   const canHover = useMediaQuery("(hover: hover)");
-  const [open, setOpen] = useState(false);
-  // 通知父级面板开合 → 父级临时把滚动容器 overflow 切 visible,免得 popover 被裁。
-  useEffect(() => {
-    if (!open) return;
-    onPanelToggle(true);
-    return () => onPanelToggle(false);
-  }, [open, onPanelToggle]);
+  // 桌面/触屏一致(需求 9):必须先选中才可开面板 —— 首点选中(此刻 isActive 仍是旧值 false)不开,
+  // 再点已选中的才开;桌面上已选中的 hover 也开。
+  const p = usePinPanel(canHover, () => isActive);
   return (
-    <Popover
-      // 桌面 hover 揭示;触屏 click(自带点外部关闭)。open 恒受控,避开受控/非受控切换。
-      trigger={canHover ? "hover" : "click"}
-      open={open}
-      side={pop.side}
-      align="start"
-      panelRadius={12}
-      onOpenChange={(next) => {
-        // 触屏:点未激活的 tab(此刻 isActive 仍是旧值 false)只选中、不开面板;桌面 hover 照常开合。
-        if (!canHover && next && !isActive) return;
-        setOpen(next);
-        pop.onOpenChange(next); // 同步 useHoverPopover:抬 z / 关闭隐垫底 / 动态定向
-      }}
-      className={cn("inline-flex", pop.rootClassName)}
+    // biome-ignore lint/a11y/noStaticElementInteractions: 内层 TabsTrigger 才是可键盘达的交互元素;此层只承 hover/tap 揭示面板。
+    // biome-ignore lint/a11y/useKeyWithClickEvents: 同上 —— 选中/面板项均可键盘达,此层只是触屏 tap 的包装。
+    <span
+      ref={p.anchorRef as React.RefObject<HTMLSpanElement>}
+      className="inline-flex"
+      onClick={p.onClick}
+      {...p.hoverProps}
     >
-      <PopoverTrigger>
-        {/* span 包 TabsTrigger:承 measure/hover ref(TabsTrigger 非 forwardRef);点选仍走内层 tab 按钮。 */}
-        <span ref={pop.measureRef} className="inline-flex">
-          <TabsTrigger value={value}>{label}</TabsTrigger>
-        </span>
-      </PopoverTrigger>
-      <PopoverContent className="p-2">
+      <TabsTrigger value={value}>{label}</TabsTrigger>
+      <PinPortalPopover
+        open={p.open}
+        rect={p.rect}
+        // 视觉拷贝随 isActive 走:面板只在选中时开(白药丸),但关闭动画期间可能已切走(还原成灰字)。
+        ghost={
+          <span
+            className={cn(
+              "inline-flex h-full w-full items-center justify-center whitespace-nowrap rounded-full font-medium text-sm",
+              isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground",
+            )}
+          >
+            {label}
+          </span>
+        }
+        onRequestClose={p.close}
+        onMouseEnter={canHover ? p.clear : undefined}
+        onMouseLeave={canHover ? p.hideSoon : undefined}
+      >
         <div className="flex w-56 flex-col gap-2">
           <TabPinPicker
             connectorOptions={connectorOptions}
             tagOptions={tagOptions}
             accountOptions={accountOptions}
             selected={selected}
-            onPick={onRepoint}
+            onPick={(choice) => {
+              onRepoint(choice);
+              p.close();
+            }}
           />
           {/* 分割线:把「取消固定」与上面的选择器隔开(独立直线,不挂在带圆角按钮上)。 */}
           <div className="border-border border-t" />
@@ -448,68 +618,60 @@ function PinTab({
             {tct("unpin")}
           </button>
         </div>
-      </PopoverContent>
-    </Popover>
+      </PinPortalPopover>
+    </span>
   );
 }
 
-// ＋固定:ghost 加钮(hover 无边框,A1),外裹 beUI hover Popover —— hover 从加钮下方流体揭示添加选择器。
+// ＋固定:ghost 加钮(hover 无边框,A1);面板同样浮出 —— 桌面 hover、触屏首点即开。
 function AddPinButton({
   connectorOptions,
   tagOptions,
   accountOptions,
   onPick,
-  onPanelToggle,
 }: {
   connectorOptions: { id: string; label: string }[];
   tagOptions: { id: string; name: string }[];
   accountOptions: { id: string; label: string }[];
   onPick: (choice: PinTargetChoice) => void;
-  onPanelToggle: (open: boolean) => void;
 }) {
   const tct = useTranslations("CustomTabs");
-  const pop = useHoverPopover();
   const canHover = useMediaQuery("(hover: hover)");
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    onPanelToggle(true);
-    return () => onPanelToggle(false);
-  }, [open, onPanelToggle]);
+  const p = usePinPanel(canHover, () => true); // ＋ 只有「开面板」一个动作
   return (
-    <Popover
-      // 桌面 hover 揭示;触屏 click(点开、点外部关)——＋ 只有「开面板」一个动作,首点即开即可。
-      trigger={canHover ? "hover" : "click"}
-      open={open}
-      side={pop.side}
-      align="start"
-      panelRadius={12}
-      onOpenChange={(next) => {
-        setOpen(next);
-        pop.onOpenChange(next);
-      }}
-      className={cn("inline-flex", pop.rootClassName)}
+    <span
+      ref={p.anchorRef as React.RefObject<HTMLSpanElement>}
+      className="inline-flex"
+      {...p.hoverProps}
     >
-      <PopoverTrigger>
-        <button
-          ref={pop.measureRef}
-          type="button"
-          aria-label={tct("add")}
-          className="flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <Plus className="size-4" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="p-2">
+      <button
+        type="button"
+        aria-label={tct("add")}
+        onClick={p.onClick}
+        className="flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <Plus className="size-4" />
+      </button>
+      <PinPortalPopover
+        open={p.open}
+        rect={p.rect}
+        ghost={<Plus className="size-4 text-muted-foreground" />}
+        onRequestClose={p.close}
+        onMouseEnter={canHover ? p.clear : undefined}
+        onMouseLeave={canHover ? p.hideSoon : undefined}
+      >
         <div className="w-56">
           <TabPinPicker
             connectorOptions={connectorOptions}
             tagOptions={tagOptions}
             accountOptions={accountOptions}
-            onPick={onPick}
+            onPick={(choice) => {
+              onPick(choice);
+              p.close();
+            }}
           />
         </div>
-      </PopoverContent>
-    </Popover>
+      </PinPortalPopover>
+    </span>
   );
 }
