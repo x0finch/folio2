@@ -107,8 +107,21 @@ function Overview() {
     ro.observe(strip);
     return () => ro.disconnect();
   }, [active, pins.length]);
+  // active 可能短暂指向「还没挂上的 pin」—— 建 pin 后即便 await 了 invalidate,它 resolve 的时刻
+  // 与新数据在组件里可见之间仍有空窗(实测)。渲染用最后一个仍有效的值,新 tab 挂上自动切过去,
+  // 药丸/内容不闪回 Tokens。
+  const isKnownTab = (v: string) =>
+    v === "tokens" || v === "perps" || v === "defi" || pins.some((p) => p.id === v);
+  const lastKnownActive = useRef("tokens");
+  if (isKnownTab(active)) lastKnownActive.current = active;
+  const shownActive = isKnownTab(active)
+    ? active
+    : isKnownTab(lastKnownActive.current)
+      ? lastKnownActive.current
+      : "tokens";
+
   // activePin 只看 loader 的 pins(不依赖 data)→ 可在拉取前定 scope。
-  const activePin = pins.find((p) => p.id === active) ?? null;
+  const activePin = pins.find((p) => p.id === shownActive) ?? null;
   const isPinView = activePin != null;
   const pinScope = activePin
     ? activePin.kind === "tag"
@@ -160,20 +173,16 @@ function Overview() {
   const failPin = () => toast.error(tct("actionFailed"));
   const addPin = (choice: PinTargetChoice) => {
     createTabPin({ data: choice })
-      .then((pin) => {
-        setActive(pin.id); // 固定后即切到它
-        return router.invalidate();
+      .then(async (pin) => {
+        // 先等 loader 刷新、新 tab 挂上再选中 —— 提前选中会让 active 短暂指向不存在的 tab,
+        // 被 clamp 回 tokens,药丸先滑到第一个再滑回来(实测)。
+        await router.invalidate();
+        setActive(pin.id);
       })
       .catch(failPin);
   };
   const repointPin = (pinId: string, choice: PinTargetChoice) => {
     updateTabPinTarget({ data: { pinId, ...choice } })
-      .then(() => router.invalidate())
-      .catch(failPin);
-  };
-  const onUnpin = (pinId: string) => {
-    if (active === pinId) setActive("tokens"); // 取消当前激活的 → 回代币
-    deleteTabPin({ data: { pinId } })
       .then(() => router.invalidate())
       .catch(failPin);
   };
@@ -225,9 +234,20 @@ function Overview() {
     ...(kind.perpItems.length > 0 ? ["perps"] : []),
     ...(kind.defiGroups.length > 0 ? ["defi"] : []),
   ];
-  const activeKind = isPinView ? null : kindTabs.includes(active) ? active : "tokens";
+  const activeKind = isPinView ? null : kindTabs.includes(shownActive) ? shownActive : "tokens";
   // beUI Tabs 的受控值:视角 tab 与自定义 pin 共用**同一个** Tabs(共享滑动药丸);pin 激活时值 = pin id。
-  const activeValue = isPinView ? active : (activeKind ?? "tokens");
+  const activeValue = isPinView ? shownActive : (activeKind ?? "tokens");
+
+  const onUnpin = (pinId: string) => {
+    if (shownActive === pinId) {
+      // 取消当前激活的 → 回**左邻**:前一个 pin,没有则最后一个视角 tab(别一路滑回第一个)。
+      const idx = pins.findIndex((p) => p.id === pinId);
+      setActive(idx > 0 ? pins[idx - 1].id : kindTabs[kindTabs.length - 1]);
+    }
+    deleteTabPin({ data: { pinId } })
+      .then(() => router.invalidate())
+      .catch(failPin);
+  };
   const viewSubtotal =
     activeKind === "perps"
       ? kind.perpEquitySubtotal
@@ -301,7 +321,7 @@ function Overview() {
                     <PinTab
                       key={p.id}
                       value={p.id}
-                      isActive={active === p.id}
+                      isActive={shownActive === p.id}
                       label={
                         p.kind === "tag"
                           ? tagNameOf(tags, p.tagId)
