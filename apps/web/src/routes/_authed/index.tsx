@@ -601,8 +601,9 @@ function PinTab({
       {...p.hoverProps}
     >
       <TabsTrigger value={value}>
-        {/* 类型标记(#351 ②):tag `#名` / account `@名` / connector `logo + 类型名`。 */}
-        <PinTargetLabel target={selected} name={label} />
+        {/* 类型标记(#351 ②):tag `#名` / account `@名` / connector `logo + 类型名`。
+            激活时药丸是浅底 → onPrimary 让 logo 的底盘随之改色,不叠成两块白。 */}
+        <PinTargetLabel target={selected} name={label} onPrimary={isActive} />
       </TabsTrigger>
       <PinPortalPopover
         open={p.open}
@@ -615,7 +616,7 @@ function PinTab({
               isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground",
             )}
           >
-            <PinTargetLabel target={selected} name={label} />
+            <PinTargetLabel target={selected} name={label} onPrimary={isActive} />
           </span>
         }
         onRequestClose={p.close}
