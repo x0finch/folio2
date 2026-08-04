@@ -267,15 +267,8 @@ function AccountRowContent({
             connectorId={row.connectorId}
             className="shrink-0 transition-colors group-hover:bg-background group-focus-visible:bg-background"
           />
-          {row.tags.length > 0 && (
-            <TagBadges
-              tags={row.tags}
-              max={2}
-              className="shrink-0"
-              // 行 hover 时底衬已是 muted pill → tag 自己的圆底改用 background,免糊。
-              hoverClassName="hover:bg-background"
-            />
-          )}
+          {/* max=3:3 个以内全平铺,超过 3 个显 2 个 + `+N`(尾巴自己占一格)。 */}
+          {row.tags.length > 0 && <TagBadges tags={row.tags} max={3} className="shrink-0" />}
         </span>
         <AccountStatusLine
           status={status}

@@ -122,7 +122,6 @@ const en = {
     platformsTab: "Platforms",
     accountsTab: "Accounts",
     nAccounts: "{n} accounts",
-    nMoreAccounts: "and {n} more", // 平台行点名前 2 个账户后的折叠尾巴(#351 ③)
     nSources: "{n} sources",
     rangeAll: "All",
   },
@@ -343,7 +342,7 @@ const en = {
   CustomTabs: {
     overview: "Overview",
     add: "Pin a view",
-    byConnector: "Connectors",
+    byConnector: "Types", // 段名说的是账户类型(binance / zerion…),不是「连接器」这个内部词
     byTag: "Tags",
     byAccount: "Accounts",
     noOptions: "Nothing to pin yet",
@@ -511,7 +510,6 @@ const zh: Messages = {
     platformsTab: "平台",
     accountsTab: "账户",
     nAccounts: "{n} 个账户",
-    nMoreAccounts: "等 {n} 个",
     nSources: "{n} 处",
     rangeAll: "全部",
   },
@@ -724,7 +722,7 @@ const zh: Messages = {
   CustomTabs: {
     overview: "总览",
     add: "固定视图",
-    byConnector: "连接器",
+    byConnector: "类型",
     byTag: "标签",
     byAccount: "账户",
     noOptions: "暂无可固定项",

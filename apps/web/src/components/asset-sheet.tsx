@@ -15,6 +15,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
+import { collapseToSlots } from "../lib/collapse-to-slots";
 import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
@@ -60,22 +61,25 @@ function NameLine({
   );
 }
 
-// 平台行副名:点名组内**按 value 倒序**的前 2 个账户,其余折成 "and n more"(#351 ③)——
-// 比原先的「{n} accounts」计数多说一句「是谁」。每个 `@名` 各自截断,尾巴不被挤掉。
+// 平台行副名:点名组内**按 value 倒序**的账户(#351 ③)—— 比原先的「{n} accounts」计数多说一句「是谁」。
+// 折叠与账户行的 tag 同一条规则(collapseToSlots):3 个以内全显,超过 3 个显 2 个 + `+n`。
+// total 传组内账户总数(topAccounts 只带前几名),每个 `@名` 各自截断、尾巴不被挤掉。
+const ACCOUNT_SLOTS = 3;
+
 function AccountNames({
   accounts,
-  more,
+  total,
 }: {
   accounts: { id: string; label: string }[];
-  more: number;
+  total: number;
 }) {
-  const t = useTranslations("Overview");
+  const { shown, overflow } = collapseToSlots(accounts, ACCOUNT_SLOTS, total);
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-      {accounts.map((a) => (
+      {shown.map((a) => (
         <AccountName key={a.id} name={a.label} className="min-w-0" />
       ))}
-      {more > 0 && <span className="shrink-0">{t("nMoreAccounts", { n: more })}</span>}
+      {overflow > 0 && <span className="shrink-0">+{overflow}</span>}
     </span>
   );
 }
@@ -140,13 +144,13 @@ function SourceView({
       const only = g.single ?? "";
       if (!only || only === g.primary) return null;
       return platformView ? (
-        <AccountNames accounts={g.topAccounts} more={0} />
+        <AccountNames accounts={g.topAccounts} total={g.count} />
       ) : (
         <NameLine text={only} account={false} className="text-muted-foreground text-xs" />
       );
     }
     return platformView ? (
-      <AccountNames accounts={g.topAccounts} more={g.count - g.topAccounts.length} />
+      <AccountNames accounts={g.topAccounts} total={g.count} />
     ) : (
       <NameLine
         text={t(countKey, { n: g.count })}

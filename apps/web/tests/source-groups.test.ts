@@ -68,9 +68,10 @@ describe("groupByPlatform", () => {
     expect(base.single).toBe("im");
   });
 
-  // #351 ③:平台行副名点名「组内最大的两个账户」,故 topNames 得按**账户在组内的 value** 排序,
-  // 不是出现顺序、也不是账户总资产。多出的折成 count − topNames.length。
-  it("topNames 按组内账户 value 倒序取前 2,其余靠 count 折叠", () => {
+  // #351 ③:平台行副名点名「组内最大的几个账户」,故 topAccounts 得按**账户在组内的 value** 排序,
+  // 不是出现顺序、也不是账户总资产。真正的折叠由组件按 count 走 collapseToSlots,这里只保证
+  // 「带够候选 + 顺序正确」。
+  it("topAccounts 按组内账户 value 倒序,带足折叠阈值个候选", () => {
     const many = [
       src({
         platformId: "p",
@@ -108,11 +109,10 @@ describe("groupByPlatform", () => {
     ];
     const [g] = groupByPlatform(many);
     expect(g?.count).toBe(3);
-    expect(g?.topAccounts.map((a) => a.label)).toEqual(["big", "small"]); // 9 > 7 > 5
-    expect((g?.count ?? 0) - (g?.topAccounts.length ?? 0)).toBe(1); // → "and 1 more"
+    expect(g?.topAccounts.map((a) => a.label)).toEqual(["big", "small", "mid"]); // 9 > 7 > 5
   });
 
-  it("单账户组:topNames 就那一个,不折叠", () => {
+  it("单账户组:topAccounts 就那一个", () => {
     const [g] = groupByPlatform([
       src({
         platformId: "p",

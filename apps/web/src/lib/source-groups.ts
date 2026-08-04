@@ -16,8 +16,9 @@ export interface SourceGroup {
   primary: string; // 主行(平台名 / 账户名)
   count: number; // 副维度基数(账户数 / 平台数);=1 时用 single 显具体名
   single: string | null; // count===1 时的具体名(账户名 / 平台名),否则 null
-  // 平台视图副行点名用(#351 ③):组内**按 value 倒序**的前 2 个账户 —— 组件渲染成
-  // `@a` / `@a @b` / `@a @b and n more`(n = count − 2),不再只报「{n} accounts」计数。
+  // 平台视图副行点名用(#351 ③):组内**按 value 倒序**的前几个账户 —— 组件按 collapseToSlots
+  // 渲染成 `@a` / `@a @b @c` / `@a @b +n`,不再只报「{n} accounts」计数。带足 TOP_ACCOUNTS 个候选
+  // (= 折叠阈值),这样「恰好 3 个」也全显得出来;超过阈值时组件只用前 2 个,余量由 count 算。
   // 带 id 而非只带 label:账户名可以重名,渲染要一个稳定唯一的 key。
   // 账户视图不点名(副维度是平台,已有 avatars 表达),留空数组。
   topAccounts: { id: string; label: string }[];
@@ -25,7 +26,8 @@ export interface SourceGroup {
   value: number; // 组内 USD 之和(占比与排序按它)
 }
 
-const TOP_NAMES = 2; // 副行最多点名几个,其余折成 "and n more"
+// 副行携带的候选账户数 = 折叠阈值(见 ACCOUNT_SLOTS):≤ 这个数时全显,故得带满。
+const TOP_NAMES = 3;
 
 export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[] {
   const m = new Map<
@@ -68,6 +70,7 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
         count: byValue.length,
         single: byValue.length === 1 ? (first?.label ?? null) : null,
         topAccounts: byValue.slice(0, TOP_NAMES).map((a) => ({ id: a.id, label: a.label })),
+
         amount: g.amount,
         value: g.value,
       };
