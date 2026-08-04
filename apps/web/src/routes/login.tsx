@@ -9,6 +9,7 @@ import { authClient, signIn, signUp } from "../lib/auth-client";
 import { deriveDefaultName } from "../lib/derive-default-name";
 import type { HoldingLike } from "../lib/hero-stats";
 import type { HistoryPoint } from "../lib/history";
+import { useLockDevice } from "../lib/hooks/use-lock-device";
 import { detectDeviceLabel } from "../lib/passkey-authenticators";
 import {
   dismissPasskeyPrompt,
@@ -95,6 +96,8 @@ function AuthPanel() {
   const [supportsPasskey, setSupportsPasskey] = useState(false);
   // 密码登录/注册成功后,若该用户还没 passkey 且本设备没「别再问我」,弹一次引导(#285)。
   const [promptOpen, setPromptOpen] = useState(false);
+  // 引导里加的 passkey 也要记进「本机凭据」,否则设置页的 auto-lock 会重复注册并被拒(见 onAddFromPrompt)。
+  const { markReady } = useLockDevice();
 
   const isSignup = mode === "signup";
 
@@ -112,12 +115,23 @@ function AuthPanel() {
   }
 
   // 引导里「添加」:走注册 ceremony;成败都进主页(引导是加分项,不该卡住登录)。
+  //
+  // **与设置页 auto-lock 那个入口走同一条路**(#353):限定 platform + 成功后记下 credentialID。
+  // 这里记了,拨开 auto-lock 开关就只是置个标志,不再碰 ceremony;不记的话开关会去重复注册,被
+  // excludeCredentials 拒掉,然后退回「验证一次」多问用户一遍指纹 —— 能走通,但白让人验。
+  // (设置页 Passkeys 卡上那个加号是另一条路:不限 platform、也不记标记,见那里的注释。)
+  //
+  // 只记 id、**不打开闲置锁**:用户在这一步同意的是「加个 passkey 方便登录」,没同意「闲置就锁屏」。
   async function onAddFromPrompt() {
     setPromptOpen(false);
     // 默认名 = 当前浏览器/系统(添加时这台),供设置页列表识别;用户可随后改名。
-    await authClient.passkey
-      .addPasskey({ name: detectDeviceLabel(navigator.userAgent) })
+    const res = await authClient.passkey
+      .addPasskey({
+        name: detectDeviceLabel(navigator.userAgent),
+        authenticatorAttachment: "platform",
+      })
       .catch(() => null);
+    if (res?.data) markReady(res.data.credentialID);
     navigate({ to: "/" });
   }
 

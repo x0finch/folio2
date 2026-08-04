@@ -43,8 +43,14 @@ describe("shouldLock", () => {
   });
 });
 
-// 超时偏好解析(#292)：localStorage 存的字符串 → 毫秒 / null(永不)。核心测试缝；
+// 超时偏好解析(#292)：localStorage 存的字符串 → 毫秒。核心测试缝；
 // localStorage 读写 + 跨组件事件是薄壳，靠浏览器手测。
+//
+// **它只回答「多久」,不回答「要不要锁」**(#353):后者是独立的开关键 IDLE_LOCK_ENABLED_KEY。
+// 所以这里没有 null 出口了 —— 任何认不出的值(含旧版兼作关闭的 "never")都落到默认档,
+// 「不锁」由开关那层表达。
+const DEFAULT_MS = 15 * 60_000;
+
 describe("parseIdleTimeout", () => {
   it("分钟选项 → 毫秒", () => {
     expect(parseIdleTimeout("1")).toBe(60_000);
@@ -53,17 +59,19 @@ describe("parseIdleTimeout", () => {
     expect(parseIdleTimeout("30")).toBe(1_800_000);
   });
 
-  it("never → null(永不)", () => {
-    expect(parseIdleTimeout("never")).toBeNull();
+  // 老用户 localStorage 里可能还留着 "never"。它落到默认档不会让人被误锁 —— 那些用户的开关键
+  // 不存在,LockScreen 第一道门就把锁拦住了,与改版前行为一致。
+  it("旧的 never → 默认档(不再表示「永不」)", () => {
+    expect(parseIdleTimeout("never")).toBe(DEFAULT_MS);
   });
 
-  it("缺失(null)→ 默认永不(null)", () => {
-    expect(parseIdleTimeout(null)).toBeNull();
+  it("缺失(null)→ 默认档", () => {
+    expect(parseIdleTimeout(null)).toBe(DEFAULT_MS);
   });
 
-  it("非法值 → 回落默认永不(null)", () => {
-    expect(parseIdleTimeout("7")).toBeNull();
-    expect(parseIdleTimeout("abc")).toBeNull();
-    expect(parseIdleTimeout("")).toBeNull();
+  it("非法值 → 回落默认档", () => {
+    expect(parseIdleTimeout("7")).toBe(DEFAULT_MS);
+    expect(parseIdleTimeout("abc")).toBe(DEFAULT_MS);
+    expect(parseIdleTimeout("")).toBe(DEFAULT_MS);
   });
 });

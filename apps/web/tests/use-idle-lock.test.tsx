@@ -47,13 +47,14 @@ describe("useIdleLock 定时器随 timeoutMs 改档重置", () => {
   });
 });
 
-// 「永不」端到端不误锁(回归)。默认档 = 永不(#292 后),且 useIdleTimeout 读到「永不」→ timeoutMs=null。
-// 组合两个真实 hook(不注入假 timeoutMs)复现真实读路径:偏好=never + lastActive 陈旧 → 全程不锁;
-// 具体档 + 陈旧 → 照常锁(别把真锁一起修没)。历史上这里漏过一条挂载即比对的误锁(见 git log)。
+// 「关着不误锁」端到端(回归)。#353 之后「不锁」由**独立的开关键**表达,不再是 timeout 的 "never"
+// 档;默认仍是关。组合两个真实 hook(不注入假 timeoutMs)复现 LockScreen 的真实读路径 —— 开关关着
+// 就压根不挂 useIdleLock,这里以传 null 等效表达。历史上这里漏过一条挂载即比对的误锁(见 git log)。
 const LAST_ACTIVE_KEY = "folio_lock_last_active";
 const TIMEOUT_KEY = "folio_lock_timeout";
+const ENABLED_KEY = "folio_lock_enabled";
 
-describe("useIdleTimeout + useIdleLock 组合:永不不误锁", () => {
+describe("useIdleTimeout + useIdleLock 组合:开关关着不误锁", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     localStorage.clear();
@@ -62,28 +63,39 @@ describe("useIdleTimeout + useIdleLock 组合:永不不误锁", () => {
 
   const mountComposed = () =>
     renderHook(() => {
-      const { timeoutMs } = useIdleTimeout();
-      return useIdleLock(timeoutMs);
+      const { timeoutMs, enabled } = useIdleTimeout();
+      return useIdleLock(enabled ? timeoutMs : null);
     });
 
-  it("偏好=永不 + lastActive 陈旧(30 分钟前)→ 全程不锁", () => {
+  it("开关关着 + lastActive 陈旧(30 分钟前)→ 全程不锁", () => {
+    localStorage.setItem(TIMEOUT_KEY, "1"); // 时长偏好留着(关掉不该清它)
+    localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now() - 30 * 60_000));
+    const { result } = mountComposed();
+    expect(result.current.locked).toBe(false);
+    act(() => vi.advanceTimersByTime(60 * 60_000));
+    expect(result.current.locked).toBe(false); // 关着:再久也不锁
+  });
+
+  it("默认(什么都没设)+ lastActive 陈旧 → 不锁(默认关)", () => {
+    localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now() - 30 * 60_000));
+    const { result } = mountComposed();
+    expect(result.current.locked).toBe(false);
+    act(() => vi.advanceTimersByTime(60 * 60_000));
+    expect(result.current.locked).toBe(false);
+  });
+
+  // 老用户 localStorage 里残留的 "never" 现在会解析成默认档 —— 但开关键不存在,所以照旧不锁。
+  it("残留的旧 never 值 + 开关未设 → 仍不锁(兼容)", () => {
     localStorage.setItem(TIMEOUT_KEY, "never");
     localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now() - 30 * 60_000));
     const { result } = mountComposed();
     expect(result.current.locked).toBe(false);
     act(() => vi.advanceTimersByTime(60 * 60_000));
-    expect(result.current.locked).toBe(false); // 永不:再久也不锁
-  });
-
-  it("默认(未设偏好)+ lastActive 陈旧 → 不锁(默认 = 永不)", () => {
-    localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now() - 30 * 60_000));
-    const { result } = mountComposed();
-    expect(result.current.locked).toBe(false);
-    act(() => vi.advanceTimersByTime(60 * 60_000));
     expect(result.current.locked).toBe(false);
   });
 
-  it("偏好=1 分钟 + lastActive 陈旧 → 照常锁(没把真锁一起修没)", () => {
+  it("开关开着 + 1 分钟 + lastActive 陈旧 → 照常锁(没把真锁一起修没)", () => {
+    localStorage.setItem(ENABLED_KEY, "1");
     localStorage.setItem(TIMEOUT_KEY, "1");
     localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now() - 30 * 60_000));
     const { result } = mountComposed();

@@ -63,6 +63,18 @@ function clearLockFlag(): void {
   } catch {}
 }
 
+// 登出路径**必须**调这个,否则重新登录会当场又被锁上、且出不去:
+// ① 锁标志还在 → LockScreen 一挂载 `useState(readLockFlag)` 就是 true;
+// ② 就算标志没了,lastActive 还是登出前那个旧值 → 挂载即 checkExpiry 判过期 → 锁。
+// 于是「锁屏 → 登出 → 登录 → 又是锁屏」成环。两个 key 都清掉:readLastActive 取不到值时
+// 返回 now,新会话从整轮闲置起算。
+export function clearIdleLockState(): void {
+  try {
+    localStorage.removeItem(LOCK_FLAG_KEY);
+    localStorage.removeItem(LAST_ACTIVE_KEY);
+  } catch {}
+}
+
 export function useIdleLock(timeoutMs: number | null): { locked: boolean; unlock: () => void } {
   // 初始态读共享锁标志:复制网址新开的标签,若别处已锁 → 一挂载就是锁的(不闪内容)。
   const [locked, setLocked] = useState(readLockFlag);

@@ -94,7 +94,9 @@ describe("messages (via createTranslator)", () => {
   it("English: new passkey keys resolve", () => {
     const t = createTranslator({ locale: "en", messages: messages.en });
     expect(t("Settings.passkeys")).toBe("Passkeys");
+    // 两个添加入口(#353):列表卡右上角的加号(纯登录用)+ 自动锁定开关(会记本机凭据)。
     expect(t("Settings.addPasskey")).toBe("Add passkey");
+    expect(t("Settings.autoLockEnableFailed")).toBe("Couldn't set up a passkey on this device.");
     expect(t("Settings.passkeyUnsupported")).toBe("This browser doesn't support passkeys.");
     expect(t("Settings.removePasskey")).toBe("Remove");
     expect(t("Settings.passkeyAddedOn", { date: "Jan 1" })).toBe("Added Jan 1");

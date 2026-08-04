@@ -37,7 +37,7 @@ function AuthedLayout() {
       {/* Portfolio 选中态(ADR 0033):住布局层,三页共享;不持久化(硬刷新回默认由布局重挂实现)。 */}
       <PortfolioProvider portfolios={portfolios.portfolios} defaultId={portfolios.defaultId}>
         {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
-        <LockScreen userEmail={user.email}>
+        <LockScreen>
           <AppShell
             userName={user.name || user.email || ""}
             syncStatus={syncStatus}

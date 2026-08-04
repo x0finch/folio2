@@ -30,7 +30,12 @@ function createAuth() {
         rpID: rp.rpID,
         rpName: rp.rpName,
         origin: rp.origin,
-        authenticatorSelection: { residentKey: "preferred", userVerification: "preferred" },
+        // userVerification: "required" —— 每次 ceremony 都必须过本机的生物识别/PIN,平台不许
+        // 缓存跳过。锁屏要的是「此刻在键盘前的还是那个人」这个**在场证明**,插件默认的
+        // "preferred" 允许平台省掉用户验证,那前提就是空的(#353)。
+        // residentKey 保持 preferred:登录页的 conditional-UI(autofill)要可发现凭据,但强制
+        // required 会挡掉一部分认证器,收益不抵。
+        authenticatorSelection: { residentKey: "preferred", userVerification: "required" },
       }),
       tanstackStartCookies(), // 必须放插件数组最后
     ],
