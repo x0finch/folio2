@@ -13,3 +13,13 @@ COINSTATS_API_KEY=replace-with-coinstats-key
 # LOG_PRETTY=true → @logtape/pretty colored output for local dev; unset in prod → JSON Lines for Workers Logs.
 LOG_LEVEL=debug
 LOG_PRETTY=true
+
+# Phone testing over a Cloudflare tunnel — `pnpm dev:tunnel` reads these two (OPTIONAL).
+# Without them the script falls back to a random *.trycloudflare.com hostname, which works but
+# changes every run: passkey rpID is derived from the URL, so the phone has to re-register each time.
+# A named tunnel keeps the hostname fixed, so a passkey registered on the phone stays usable:
+#   cloudflared tunnel login
+#   cloudflared tunnel create folio-local
+#   cloudflared tunnel route dns folio-local folio-local.your-domain
+# TUNNEL_NAME=folio-local
+# TUNNEL_HOSTNAME=https://folio-local.your-domain

@@ -5,13 +5,26 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+// 命名隧道的域名由 dev:tunnel 脚本传进来(见那里的注释)。取不到就返回空数组 —— 平时 `pnpm dev`
+// 根本不需要放通任何额外 host。
+function tunnelHost(): string[] {
+  const raw = process.env.TUNNEL_HOSTNAME;
+  if (!raw) return [];
+  try {
+    return [new URL(raw).host];
+  } catch {
+    return [];
+  }
+}
+
 const config = defineConfig({
   resolve: { tsconfigPaths: true },
-  // 手机上验证要走 `cloudflared tunnel --url http://localhost:3000`,而 vite 的 host 校验(防 DNS
-  // rebinding)默认只放 localhost → 隧道域名会被 "This host is not allowed" 挡掉。只放通
-  // trycloudflare 后缀,dev-only;同时记得把 .dev.vars 的 BETTER_AUTH_URL 换成隧道 URL ——
-  // passkey 的 rpID 从它派生,不换的话手机上所有 WebAuthn ceremony 都会 rpID 不匹配。
-  server: { allowedHosts: [".trycloudflare.com"] },
+  // 手机上验证走隧道(`pnpm dev:tunnel`),而 vite 的 host 校验(防 DNS rebinding)默认只放 localhost
+  // → 隧道域名会被 "This host is not allowed" 挡掉。
+  //
+  // 随机隧道的后缀写死即可;命名隧道用的是各自的私有域名,**不写进仓库** —— 由 dev:tunnel 脚本以
+  // TUNNEL_HOSTNAME 环境变量透进来。都是 dev-only,不影响构建产物。
+  server: { allowedHosts: [".trycloudflare.com", ...tunnelHost()] },
   plugins: [
     devtools(),
     cloudflare({ viteEnvironment: { name: "ssr" } }),
