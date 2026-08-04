@@ -72,6 +72,8 @@ beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
   listUserPasskeys.mockResolvedValue({ data: [] });
+  // registerPasskey 注册成功后会补写设备名 → 不给它一个 thenable 就会在 .catch 上炸。
+  updatePasskey.mockResolvedValue({ data: {} });
   // PasskeysCard 用 usePasskeySupport() 决定露不露入口,而 jsdom 没有 PublicKeyCredential →
   // 不 stub 的话列表整个不渲染,测的就成了「不支持」那条分支。
   vi.stubGlobal("PublicKeyCredential", class {});
@@ -97,6 +99,33 @@ describe("AutoLockCard 开关与启用前置", () => {
     toggle(utils);
     await waitFor(() => expect(addPasskey).toHaveBeenCalled());
     expect(addPasskey.mock.calls[0]?.[0]).toMatchObject({ authenticatorAttachment: "platform" });
+  });
+
+  // better-auth 的 addPasskey({ name }) 把这个 name 同时当成 WebAuthn 的 userName,而那是系统钥匙串
+  // 里显示的**账户名**。传设备名进去,一个人的两个 folio 账号在同一台机器上加了 passkey 后,登录页
+  // 点「用 passkey 登录」时系统列出的两条就都叫「Chrome on macOS」,分不清谁是谁。所以注册时不传,
+  // 事后单独改名。
+  it("注册时不传 name(否则系统钥匙串会把设备名当账户名),事后补写设备名", async () => {
+    addPasskey.mockResolvedValue({ data: row("cred_new", "这台") });
+    const utils = mount(<AutoLockCard />);
+    toggle(utils);
+    await waitFor(() => expect(updatePasskey).toHaveBeenCalled());
+    expect(addPasskey.mock.calls[0]?.[0]).not.toHaveProperty("name");
+    // 改名收的是行主键,而且名字得是设备标签(jsdom 的 UA 里带 Mozilla/5.0 → 至少不为空)。
+    const arg = updatePasskey.mock.calls[0]?.[0];
+    expect(arg?.id).toBe("dbrow_cred_new");
+    expect(typeof arg?.name).toBe("string");
+    expect(arg?.name.length).toBeGreaterThan(0);
+  });
+
+  it("改名失败不算注册失败 —— 凭据已经建好了", async () => {
+    addPasskey.mockResolvedValue({ data: row("cred_new", "这台") });
+    updatePasskey.mockRejectedValue(new Error("network"));
+    const utils = mount(<AutoLockCard />);
+    toggle(utils);
+    await waitFor(() => expect(localStorage.getItem(DEVICE_KEY)).toBe("cred_new"));
+    expect(localStorage.getItem(ENABLED_KEY)).not.toBeNull();
+    expect(toastError).not.toHaveBeenCalled();
   });
 
   it("启用成功 → 存的是 credentialID(不是行主键、也不是布尔),开关置开", async () => {

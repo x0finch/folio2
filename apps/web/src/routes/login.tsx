@@ -10,12 +10,12 @@ import { deriveDefaultName } from "../lib/derive-default-name";
 import type { HoldingLike } from "../lib/hero-stats";
 import type { HistoryPoint } from "../lib/history";
 import { useLockDevice } from "../lib/hooks/use-lock-device";
-import { detectDeviceLabel } from "../lib/passkey-authenticators";
 import {
   dismissPasskeyPrompt,
   isPasskeyPromptDismissed,
   shouldPromptForPasskey,
 } from "../lib/passkey-prompt";
+import { registerPasskey } from "../lib/register-passkey";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
 
@@ -124,13 +124,9 @@ function AuthPanel() {
   // 只记 id、**不打开闲置锁**:用户在这一步同意的是「加个 passkey 方便登录」,没同意「闲置就锁屏」。
   async function onAddFromPrompt() {
     setPromptOpen(false);
-    // 默认名 = 当前浏览器/系统(添加时这台),供设置页列表识别;用户可随后改名。
-    const res = await authClient.passkey
-      .addPasskey({
-        name: detectDeviceLabel(navigator.userAgent),
-        authenticatorAttachment: "platform",
-      })
-      .catch(() => null);
+    // registerPasskey 顺带把设备名写进列表(供设置页识别,用户可随后改名);为什么不在注册时直接
+    // 传 name 见那个函数的注释。
+    const res = await registerPasskey("platform").catch(() => null);
     if (res?.data) markReady(res.data.credentialID);
     navigate({ to: "/" });
   }

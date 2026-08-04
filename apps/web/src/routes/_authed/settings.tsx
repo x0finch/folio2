@@ -35,11 +35,8 @@ import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { IDLE_TIMEOUT_MINUTES } from "../../lib/idle-lock";
 import { importData } from "../../lib/import-data";
-import {
-  detectDeviceLabel,
-  getAuthenticatorName,
-  passkeyKind,
-} from "../../lib/passkey-authenticators";
+import { getAuthenticatorName, passkeyKind } from "../../lib/passkey-authenticators";
+import { registerPasskey } from "../../lib/register-passkey";
 import {
   getDataStats,
   getProviderKeyStatus,
@@ -219,8 +216,7 @@ export function PasskeysCard() {
   async function onAdd() {
     setAdding(true);
     try {
-      const opts = { name: detectDeviceLabel(navigator.userAgent) };
-      let res = await authClient.passkey.addPasskey(opts);
+      let res = await registerPasskey();
       // session 过了新鲜期(见 SESSION_NOT_FRESH)→ 验证一次刷新它,再重试注册。账户里一条 passkey
       // 都没有时验证注定不成(没有可用的凭据可选),那就只能让用户重新登录。
       if (errorCode(res?.error) === SESSION_NOT_FRESH) {
@@ -229,7 +225,7 @@ export function PasskeysCard() {
           toast.error(t("passkeyAddNeedsSignIn"));
           return;
         }
-        res = await authClient.passkey.addPasskey(opts);
+        res = await registerPasskey();
       }
       if (res?.error) {
         toast.error(res.error.message ?? t("passkeyAddFailed"));
@@ -459,7 +455,7 @@ export function AutoLockCard() {
   //
   // ① 先试注册。authenticatorAttachment: "platform" 是关键 —— 不加的话系统会给「用其他设备」的
   //    二维码,别人在旁边扫一下就能让注册通过,而新凭据落在**他的**钥匙串里,这台设备照样解不开。
-  //    name 用 detectDeviceLabel:passkey 自身不带浏览器信息,这是「添加时这台」的快照(ADR 0028)。
+  //    设备名由 registerPasskey 事后补写(为什么不在注册时传见那个函数)。
   // ② 注册被拒(本机钥匙串里已有这个账户的凭据,excludeCredentials 拦下)→ 改成验证一次。
   //    这个错误本身就是证词「本机确实有一条可用凭据」,而 assertion 回的 id 就是这台设备实际用掉的
   //    那条 —— 比列数据库行去猜准。同一个 iCloud 下 Mac 与 iPhone 共享钥匙串,所以这条不是边角
@@ -468,10 +464,7 @@ export function AutoLockCard() {
   async function ensureDeviceCredential() {
     setBusy(true);
     try {
-      const res = await authClient.passkey.addPasskey({
-        name: detectDeviceLabel(navigator.userAgent),
-        authenticatorAttachment: "platform",
-      });
+      const res = await registerPasskey("platform");
       const err = res?.error;
       if (!err && res?.data) {
         await claim(res.data.credentialID);
