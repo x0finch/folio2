@@ -77,6 +77,37 @@ test.describe("锁屏", () => {
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toBeVisible();
   });
 
+  // 用例 5:我正在填东西,锁屏了,回来输入是空的。
+  //
+  // 这是**有意的**代价,不是 bug:锁定时 children 是卸载而不是遮罩盖住,所以 DOM 里不留内容(删掉
+  // 遮罩底下也看不到数据),换来的是组件本地态全丢 —— 半填的表单、滚动位置、展开状态。数据本身在
+  // 更外层的 QueryClient 缓存里,重挂从缓存出、不重拉。见 ADR 0029 与 lock-screen.tsx 的注释。
+  test("锁屏会卸载页面 → 半填的输入回来是空的,DOM 里也不留内容", async ({ page }) => {
+    await page.goto("/settings");
+    // 拿 passkey 那行的就地重命名当「用户正在输入」的样本 —— beforeEach 开锁时刚建了一条,它的名字是
+    // 设备标签(Chrome on …),点一下进编辑态。
+    await page
+      .getByRole("button", { name: /chrome|chromium/i })
+      .first()
+      .click();
+    // 用 role 定位而不是 input[type=text]:@folio/ui 的 Input 不显式设 type,属性选择器匹配不到。
+    const input = page.getByRole("textbox").first();
+    await input.fill("半填的内容");
+    await expect(input).toHaveValue("半填的内容");
+
+    await travelPastIdle(page, 15);
+    await page.reload();
+    await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
+    // 锁着的时候底下内容压根不在 DOM 里 —— 遮罩不是「盖住」,是替换。
+    await expect(page.getByRole("switch", { name: /auto-lock/i })).toHaveCount(0);
+
+    await page.getByRole("button", { name: /unlock with passkey/i }).click();
+    await expect(page.getByRole("switch", { name: /auto-lock/i })).toBeVisible();
+    // 输入框回到未编辑态,刚才敲的内容没有留下。
+    await expect(page.getByRole("textbox")).toHaveCount(0);
+    await expect(page.getByText("半填的内容")).toHaveCount(0);
+  });
+
   // 用例 12:指纹认不过去时,我能从锁屏登出。
   test("指纹认不过去 → 仍能从锁屏登出", async ({ page }) => {
     await page.goto("/");
@@ -142,5 +173,19 @@ test.describe("锁屏", () => {
     await page.reload();
 
     await expect(page.getByRole("button", { name: /unlock with passkey/i })).toHaveCount(0);
+  });
+
+  // 承上:既然那种状态下不锁,设置页就**不能显示成开着** —— 那是最糟的一种,用户以为持仓被遮着,
+  // 其实完全没有。开关显示的是「真的在锁」(开关键 + 有凭据记录),并给一句话说明怎么恢复。
+  test("开关键还在但凭据记录没了 → 开关显示关闭,并说明当前没在锁", async ({ page }) => {
+    await page.goto("/settings");
+    await setLockState(page, { enabled: true, deviceCredential: null });
+    await page.reload();
+
+    await expect(page.getByRole("switch", { name: /auto-lock/i })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    await expect(page.getByText(/not locking right now/i)).toBeVisible();
   });
 });

@@ -265,6 +265,9 @@ const en = {
     autoLockAfter: "Idle",
     autoLockEnabled: "Auto-lock is on for this device.",
     autoLockEnableFailed: "Couldn't set up a passkey on this device.",
+    autoLockNoBiometrics:
+      "This device has no fingerprint or face unlock, so there's nothing to unlock with.",
+    autoLockNeedsReverify: "Not locking right now — turn it on again to verify this device.",
     appearance: "Appearance",
     theme: "Theme",
     themeLight: "Light",
@@ -646,6 +649,8 @@ const zh: Messages = {
     autoLockAfter: "闲置",
     autoLockEnabled: "这台设备的自动锁定已开启。",
     autoLockEnableFailed: "没能在这台设备上建立 passkey。",
+    autoLockNoBiometrics: "这台设备没有指纹或面容解锁,没有可用来解锁的方式。",
+    autoLockNeedsReverify: "当前并未锁定 —— 重新打开开关即可验证这台设备。",
     appearance: "外观",
     theme: "主题",
     themeLight: "浅色",

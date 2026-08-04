@@ -32,6 +32,7 @@ import { clearIdleLockState } from "../../lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "../../lib/hooks/use-idle-timeout";
 import { useLockDevice } from "../../lib/hooks/use-lock-device";
 import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
+import { usePlatformAuthenticator } from "../../lib/hooks/use-platform-authenticator";
 import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { IDLE_TIMEOUT_MINUTES } from "../../lib/idle-lock";
 import { importData } from "../../lib/import-data";
@@ -158,9 +159,6 @@ function AccountCard({ user }: { user: AccountUser }) {
 function errorCode(err: unknown): string | undefined {
   return err && typeof err === "object" && "code" in err ? String(err.code) : undefined;
 }
-
-/** 浏览器按 excludeCredentials 拒掉了重复注册 —— 这个认证器上已经有这个账户的凭据。 */
-const PREVIOUSLY_REGISTERED = "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED";
 
 /**
  * 注册 passkey 要求 session「新鲜」(better-auth 默认 freshAge = 1 天),而我们的 session 活 7 天
@@ -412,7 +410,8 @@ export function PasskeysCard() {
 export function AutoLockCard() {
   const t = useTranslations("Settings");
   const { raw, setRaw, enabled, setEnabled } = useIdleTimeout();
-  const { credentialId, ready, markReady, clearReady } = useLockDevice();
+  const { credentialId, markReady, clearReady } = useLockDevice();
+  const platformAuthenticator = usePlatformAuthenticator();
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
 
@@ -439,62 +438,66 @@ export function AutoLockCard() {
     }
   }, [credentialId, rows, listQuery.isFetching, clearReady, setEnabled]);
 
-  // 开关拨动:
-  // ① 关 → 只移除开关键,时长与本机凭据记录都留着(所以再打开无须重新验证)。
-  // ② 开且本机已有凭据 → 直接开,不走任何 WebAuthn。
-  // ③ 开且本机没有凭据 → 当场做一次 ceremony 证明本机可解锁(见 ensureDeviceCredential)。
-  //    不再弹二次确认:系统自己的指纹/面容弹窗已经把「要验一下」说清楚了,再套一层纯属多余一步。
+  // 开关拨动。关 → 只移除开关键,时长与本机凭据记录都留着(重新打开时时长还是原来那个档)。
+  // 开 → **每次都当场证明一遍在场**,不看本地有没有记录、不设捷径(见 ensureDeviceCredential)。
+  // 不弹自家的二次确认:系统的指纹/面容弹窗已经把「要验一下」说清楚了,再套一层纯属多余一步。
   function onToggle(next: boolean) {
     if (!next) {
       setEnabled(false);
       return;
     }
-    if (ready) {
-      setEnabled(true);
-      return;
-    }
     void ensureDeviceCredential();
   }
 
-  // 启用前置(#353):证明**这台设备**上有一条能解锁的凭据,拿到它的 credentialID 才算就绪。
-  // 判据见 lib/idle-lock.ts 的 LOCK_DEVICE_PASSKEY_KEY。一次 ceremony,两条出口:
+  // 启用前置(#353):证明**此刻在这台设备上的人**能解锁,并拿到那条凭据的 credentialID。
+  // 判据见 lib/idle-lock.ts 的 LOCK_DEVICE_PASSKEY_KEY。
   //
-  // ① 先试注册。authenticatorAttachment: "platform" 是关键 —— 不加的话系统会给「用其他设备」的
-  //    二维码,别人在旁边扫一下就能让注册通过,而新凭据落在**他的**钥匙串里,这台设备照样解不开。
-  //    设备名由 registerPasskey 事后补写(为什么不在注册时传见那个函数)。
-  // ② 注册被拒(本机钥匙串里已有这个账户的凭据,excludeCredentials 拦下)→ 改成验证一次。
-  //    这个错误本身就是证词「本机确实有一条可用凭据」,而 assertion 回的 id 就是这台设备实际用掉的
-  //    那条 —— 比列数据库行去猜准。同一个 iCloud 下 Mac 与 iPhone 共享钥匙串,所以这条不是边角
-  //    情况,而是换设备打开开关的**常规**路径。
+  // **先验证,验证不成才注册** —— 顺序是这样定的:
+  //
+  // ① 账户里已经有 passkey → 先验证。这台设备的钥匙串里如果确实有一条,一次系统弹窗就够,而且
+  //    assertion 回的 id 必然是这台设备**实际用掉**的那条,比从数据库列表里猜准。
+  //    反过来先注册的话:同一个钥匙串上重复注册会被 excludeCredentials 拒(better-auth 服务端硬编码),
+  //    而平台通常是**先弹一次系统窗口、验完才告诉你「已经有了」**,于是用户白按一次指纹、再被要求验
+  //    第二次。同一个 iCloud 下 Mac 与 iPhone 共享钥匙串,这不是边角情况,而是常规路径。
   //    returnWebAuthnResponse 是唯一能拿到 credentialID 的口子(verify-authentication 只回 session)。
+  //    已登录时 better-auth 把 allowCredentials 限定成当前用户的凭据,所以这次验证不可能验成别的
+  //    账户;副作用是服务端重建一次 session(同一用户,cookie 换新),与解锁时同款。
+  //
+  // ② 账户里没有 passkey,或者验证没过(可能这台设备的钥匙串里根本没有 —— 账户的凭据都在别人
+  //    设备上)→ 注册一条本机的。`authenticatorAttachment: "platform"` 是关键:不加的话系统会给
+  //    「用其他设备」的二维码,别人在旁边扫一下就能让注册通过,而新凭据落在**他的**钥匙串里,
+  //    这台设备照样解不开。设备名由 registerPasskey 事后补写(为什么不在注册时传见那个函数)。
+  //
+  // **每次开启都跑一遍**,哪怕本地已有凭据记录:开启闲置锁是把「遮住持仓」这件事交给生物识别,
+  // 该由此刻在键盘前的人证明自己,而不是由一条上次留下的 localStorage 记录代劳。
   async function ensureDeviceCredential() {
     setBusy(true);
     try {
+      const rows = (await authClient.passkey.listUserPasskeys().catch(() => null))?.data ?? [];
+      if (rows.length > 0) {
+        // 返回是联合类型:失败那支根本没有 webauthn 字段 → 先 in 窄化再取。
+        const asserted = await signIn.passkey({ returnWebAuthnResponse: true });
+        const usedId =
+          asserted && "webauthn" in asserted ? asserted.webauthn?.response.id : undefined;
+        if (usedId && !asserted?.error) {
+          await claim(usedId);
+          return;
+        }
+        // 验证没过 → 不在这里收手,往下试注册:账户有 passkey 不等于**这台**设备有。
+      }
       const res = await registerPasskey("platform");
-      const err = res?.error;
-      if (!err && res?.data) {
+      if (res?.data) {
         await claim(res.data.credentialID);
         return;
       }
-      // 两种失败都由「验证一次」接手,处理完全相同:
-      // PREVIOUSLY_REGISTERED — 本机钥匙串里已有,注册进不去,但正好证明有;
-      // SESSION_NOT_FRESH — 注册连 ceremony 都没跑到就被 403,验证既能刷新 session 又能拿到 id。
-      const code = errorCode(err);
-      if (code !== PREVIOUSLY_REGISTERED && code !== SESSION_NOT_FRESH) {
-        toast.error(err?.message ?? t("autoLockEnableFailed"));
-        return; // 注册没成、也不是这两种 → 开关不动,维持关闭
-      }
-      // 已登录时 better-auth 会把 allowCredentials 限定成当前用户的凭据,所以这次验证不可能验成
-      // 别的账户;副作用是服务端会重建一次 session(同一用户,cookie 换新),与解锁时同款。
-      // 返回是联合类型:失败那支根本没有 webauthn 字段 → 先 in 窄化再取。
-      const asserted = await signIn.passkey({ returnWebAuthnResponse: true });
-      const usedId =
-        asserted && "webauthn" in asserted ? asserted.webauthn?.response.id : undefined;
-      if (!usedId || asserted?.error) {
-        toast.error(t("autoLockEnableFailed")); // 用户取消了验证
-        return;
-      }
-      await claim(usedId);
+      // 注册要求 session 新鲜,而验证不要求 —— 所以走到这里还撞上 not-fresh,只可能是账户压根
+      // 没有 passkey(上面那一支没进)且登录已超过一天。这种只能让用户重新登录,再试也没用。
+      const code = errorCode(res?.error);
+      toast.error(
+        code === SESSION_NOT_FRESH
+          ? t("passkeyAddNeedsSignIn")
+          : (res?.error?.message ?? t("autoLockEnableFailed")),
+      );
     } catch {
       toast.error(t("autoLockEnableFailed")); // 用户取消 ceremony / 本机没有可用的生物识别
     } finally {
@@ -516,6 +519,12 @@ export function AutoLockCard() {
     toast.success(t("autoLockEnabled"));
   }
 
+  // **开关显示的是「真的在锁」,不只是那个开关键。** 两个键是分开的:`enabled`(用户想不想)和
+  // 本机凭据记录(有没有解锁手段)。LockScreen 需要两者都在才真上锁,所以只看 enabled 会出现最糟的
+  // 一种状态 —— 开关看着是开的,实际什么都不锁,用户以为自己受保护。自纠 effect 救不了它:自纠的前提
+  // 是「有凭据记录才去比对」,记录为空时压根不跑。
+  const locking = enabled && credentialId != null;
+
   return (
     <Card>
       {/* 开关在右上角(标题同行)。开=启用闲置锁;下面的时长只在开着时可调。 */}
@@ -523,9 +532,11 @@ export function AutoLockCard() {
         <div className="flex items-center justify-between gap-3">
           <CardTitle>{t("autoLock")}</CardTitle>
           <Switch
-            checked={enabled}
+            checked={locking}
             onCheckedChange={onToggle}
-            disabled={busy}
+            // 这台机器没有指纹/面容时禁掉:留着的话点下去只会弹出系统的「用其他设备」界面然后毫无
+            // 反应(ceremony 挂着不返回,连失败提示都没有)。null = 还在问,先不禁免得闪。
+            disabled={busy || platformAuthenticator === false}
             ariaLabel={t("autoLock")}
           />
         </div>
@@ -536,12 +547,21 @@ export function AutoLockCard() {
               「用 passkey 或密码解锁」,提亮为的是强调解锁方式;密码那半在 #353 删掉后没这个必要了。 */}
           <p className="text-muted-foreground text-sm">{t("autoLockDesc")}</p>
           <p className="text-muted-foreground text-sm">{t("autoLockUnlock")}</p>
+          {/* 开不了的时候必须说清为什么,否则就是「点了没反应」。 */}
+          {platformAuthenticator === false && (
+            <p className="text-muted-foreground text-sm">{t("autoLockNoBiometrics")}</p>
+          )}
+          {/* 开关键还在、凭据记录没了(清过站点数据 / storage 写入失败):此刻并没有在锁,得说一声,
+              否则用户以为持仓还被遮着。再拨一次开关就会重新验证并恢复。 */}
+          {enabled && credentialId == null && platformAuthenticator !== false && (
+            <p className="text-muted-foreground text-sm">{t("autoLockNeedsReverify")}</p>
+          )}
         </div>
-        {/* 关着时时长行照样在,只是整行变灰且点不动 —— 让「这里有个设置,但要先打开」看得见。
+        {/* 没在锁的时候时长行照样在,只是整行变灰且点不动 —— 让「这里有个设置,但要先打开」看得见。
             灰化包在外层 wrapper(pointer-events-none + opacity + aria-disabled),不动 beUI Tabs 内核。 */}
         <div
-          className={cn(!enabled && "pointer-events-none opacity-50")}
-          aria-disabled={!enabled || undefined}
+          className={cn(!locking && "pointer-events-none opacity-50")}
+          aria-disabled={!locking || undefined}
         >
           <SettingRow label={t("autoLockAfter")}>
             <Tabs value={raw} onValueChange={setRaw} variant="pill">

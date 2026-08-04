@@ -35,20 +35,17 @@ test.describe("开启闲置锁", () => {
     await expect(page.getByText(/turn on auto-lock\?/i)).toHaveCount(0);
   });
 
-  // 用例 2:验证过不去时,开关弹回关闭,什么都没变。
+  // 用例 2:这台机器没有指纹/面容时,开关**直接禁用并说明原因**,而不是让人点了没反应。
   //
-  // 用「认证器根本不支持用户验证」来制造失败,而不是 setUserVerified(false):后者在 CDP 里表达的是
-  // 「用户还没按」——ceremony 会挂着等到 60s 超时,不是当场被拒。虚拟认证器**没有**「用户点了取消」
-  // 这个原语(取消是浏览器 UI 的行为,CDP 只能描述认证器的能力),所以这里换成能忠实表达的那一种。
+  // 为什么必须禁用:这种情况下浏览器**不返回失败** —— 它停在系统那层等一个够格的认证器(真机上就是
+  // 「用其他设备」的二维码界面),ceremony 一直挂着,于是我们的错误提示永远不出现。用户按了开关、
+  // 关掉系统弹窗,什么都没发生也没有任何解释。所以改成上游拦住:进页面就问一次
+  // isUserVerifyingPlatformAuthenticatorAvailable,没有就禁用 + 写清为什么。
   //
-  // 这条是唯一能证明 `userVerification: "required"` 在**注册**环节真被强制的测试:没有 UV 能力的
-  // 认证器进不来,凭据压根建不出来。(解锁那一环的 required 强制不了 —— better-auth 的认证 options
-  // 硬编码 "preferred",服务端 verify 又写着 requireUserVerification: false,见 ADR 0029 的后续修正。)
-  //
-  // **不断言错误提示**:实测这种情况下浏览器不会返回失败,而是停在系统那层等一个够用的认证器
-  // (真实世界里就是「用其他设备」那个二维码界面),ceremony 一直挂着,所以我们的 toast 永远不出现。
-  // 能断言的是结果:凭据没建出来、开关没开、本地什么都没写。
-  test("认证器不支持用户验证 → 凭据建不出来,锁开不起来", async ({ page, addAuth }) => {
+  // 用「认证器不支持用户验证」造这个状态,而不是 setUserVerified(false):后者在 CDP 里表达的是
+  // 「用户还没按」,ceremony 会挂到 60s 超时。虚拟认证器**没有**「用户点了取消」这个原语(取消是
+  // 浏览器 UI 的行为,CDP 只能描述认证器的能力)。
+  test("这台机器没有生物识别 → 开关禁用并说明原因", async ({ page, addAuth }) => {
     const authenticator = await addAuth({
       hasUserVerification: false,
       isUserVerified: false,
@@ -56,11 +53,10 @@ test.describe("开启闲置锁", () => {
     await page.goto("/settings");
 
     const toggle = page.getByRole("switch", { name: /auto-lock/i });
-    await toggle.click();
-    // 给 ceremony 一点时间去「成功」——它不该成功。
-    await page.waitForTimeout(2_000);
+    await expect(toggle).toBeDisabled();
+    await expect(page.getByText(/no fingerprint or face unlock/i)).toBeVisible();
 
-    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    // 禁用不是摆设:凭据没建出来,本地也什么都没写。
     expect(await authenticator.credentials()).toHaveLength(0);
     const state = await readLockState(page);
     expect(state.enabled).toBeNull();

@@ -40,23 +40,17 @@ test.describe("Passkeys 卡", () => {
     expect(await key.credentials()).toHaveLength(1);
   });
 
-  // 反过来:闲置锁那条限定 platform,USB 钥匙不该被它收下 —— 凭据不在本机钥匙串里就解不开锁。
-  //
-  // 不断言错误提示:满足不了 authenticatorAttachment 时浏览器停在系统那层继续等一个够格的认证器
-  // (真机上就是「用其他设备」界面),ceremony 挂着不返回,所以 toast 不会出现。断言结果就够。
-  test("闲置锁开关不收 USB 钥匙(限定了本机认证器)", async ({ page, addAuth }) => {
+  // 反过来:只插着 USB 钥匙时,闲置锁那个开关**直接是禁用的** —— 它限定本机认证器,而 USB 钥匙
+  // 满足不了(凭据不在本机钥匙串里就解不开锁)。这也是同一件事的另一面:能力检测在上游就拦住了,
+  // 不会让人点下去然后停在系统的「用其他设备」界面上毫无反应。
+  test("只有 USB 钥匙时闲置锁开关是禁用的", async ({ page, addAuth }) => {
     const key = await addAuth({ transport: "usb", hasResidentKey: false });
     await page.goto("/settings");
 
-    await page.getByRole("switch", { name: autoLockToggle }).click();
-    await page.waitForTimeout(2_000);
-
+    await expect(page.getByRole("switch", { name: autoLockToggle })).toBeDisabled();
+    await expect(page.getByText(/no fingerprint or face unlock/i)).toBeVisible();
     expect(await key.credentials()).toHaveLength(0);
     expect((await readLockState(page)).enabled).toBeNull();
-    await expect(page.getByRole("switch", { name: autoLockToggle })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
   });
 
   // 用例 15:列表里能看出哪条是我这台机器的。

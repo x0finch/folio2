@@ -76,7 +76,18 @@ beforeEach(() => {
   updatePasskey.mockResolvedValue({ data: {} });
   // PasskeysCard 用 usePasskeySupport() 决定露不露入口,而 jsdom 没有 PublicKeyCredential →
   // 不 stub 的话列表整个不渲染,测的就成了「不支持」那条分支。
-  vi.stubGlobal("PublicKeyCredential", class {});
+  //
+  // 静态方法也得给:AutoLockCard 用 isUserVerifyingPlatformAuthenticatorAvailable() 判断这台机器有没有
+  // 指纹/面容,查不出来就按「没有」处理并**禁用开关** —— 少了它下面每条点开关的测试都会点在一个
+  // disabled 的按钮上。
+  vi.stubGlobal(
+    "PublicKeyCredential",
+    class {
+      static isUserVerifyingPlatformAuthenticatorAvailable() {
+        return Promise.resolve(true);
+      }
+    },
+  );
 });
 
 // 拨开关即走 ceremony —— 不再有二次确认弹窗(系统自己的指纹弹窗已经把「要验一下」说清楚了)。
@@ -91,14 +102,17 @@ describe("AutoLockCard 开关与启用前置", () => {
     expect(gate?.className).toContain("pointer-events-none");
   });
 
-  // 这条是整套方案的安全关键:不限定 platform,系统就会给「用其他设备」的二维码,别人扫一下
-  // 就能让注册通过,而新凭据落在**他的**钥匙串里 —— 这台设备照样解不开锁。
-  it("首次拨开 → 直接注册,且必须限定本机认证器(authenticatorAttachment: platform)", async () => {
+  // 账户里一条 passkey 都没有 → 没什么可验的,直接注册。
+  //
+  // 不限定 platform 是整套方案的安全漏洞:系统会给「用其他设备」的二维码,别人扫一下就能让注册通过,
+  // 而新凭据落在**他的**钥匙串里 —— 这台设备照样解不开锁。
+  it("账户没有 passkey → 直接注册,且必须限定本机认证器(platform)", async () => {
     addPasskey.mockResolvedValue({ data: row("cred_new", "这台") });
     const utils = mount(<AutoLockCard />);
     toggle(utils);
     await waitFor(() => expect(addPasskey).toHaveBeenCalled());
     expect(addPasskey.mock.calls[0]?.[0]).toMatchObject({ authenticatorAttachment: "platform" });
+    expect(signInPasskey).not.toHaveBeenCalled(); // 没凭据可验,别白弹一次窗
   });
 
   // better-auth 的 addPasskey({ name }) 把这个 name 同时当成 WebAuthn 的 userName,而那是系统钥匙串
@@ -136,41 +150,49 @@ describe("AutoLockCard 开关与启用前置", () => {
     expect(localStorage.getItem(ENABLED_KEY)).not.toBeNull();
   });
 
-  it("启用失败(用户取消 ceremony / 本机没有生物识别)→ 不写标记,开关维持关闭", async () => {
+  it("注册失败(用户取消 / 本机没有生物识别)→ 不写标记,开关维持关闭", async () => {
     addPasskey.mockResolvedValue({ error: { message: "cancelled" } });
     const utils = mount(<AutoLockCard />);
     toggle(utils);
     await waitFor(() => expect(addPasskey).toHaveBeenCalled());
     expect(localStorage.getItem(DEVICE_KEY)).toBeNull();
     expect(localStorage.getItem(ENABLED_KEY)).toBeNull();
-    expect(signInPasskey).not.toHaveBeenCalled(); // 不是「已存在」就别去验证
   });
 
-  // 本机钥匙串里已有这个账户的凭据 → excludeCredentials 让重复注册被浏览器拒。同一个 iCloud 下
-  // Mac 与 iPhone 共享钥匙串,所以这是换设备打开开关的**常规**路径,不是边角情况。
-  // 拒绝本身就是证词「本机有一条可用凭据」,而 assertion 回的 id 就是这台设备实际用掉的那条。
-  const PREVIOUSLY = {
-    error: { code: "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED", message: "already" },
-  };
+  // 账户已有 passkey → **先验证,不先注册**。先注册的话同一个钥匙串会被 excludeCredentials 拒,而
+  // 平台通常先弹一次系统窗口、验完才说「已经有了」—— 用户白按一次指纹,然后还得再验一次。
+  const ASSERTED = { data: {}, webauthn: { response: { id: "cred_used" } } };
 
-  it("撞上「已注册过」→ 转验证一次,记下实际用掉的那条凭据", async () => {
-    addPasskey.mockResolvedValue(PREVIOUSLY);
-    signInPasskey.mockResolvedValue({
-      data: {},
-      webauthn: { response: { id: "cred_used" } },
-    });
+  it("账户已有 passkey → 先验证,压根不碰注册", async () => {
+    listUserPasskeys.mockResolvedValue({ data: [row("cred_used", "这台")] });
+    signInPasskey.mockResolvedValue(ASSERTED);
     const utils = mount(<AutoLockCard />);
     toggle(utils);
     await waitFor(() => expect(localStorage.getItem(DEVICE_KEY)).toBe("cred_used"));
     expect(localStorage.getItem(ENABLED_KEY)).not.toBeNull();
+    expect(addPasskey).not.toHaveBeenCalled();
     expect(toastError).not.toHaveBeenCalled();
     // returnWebAuthnResponse 是唯一能拿到 credentialID 的口子 —— 少了它 usedId 永远是 undefined。
     expect(signInPasskey.mock.calls[0]?.[0]).toMatchObject({ returnWebAuthnResponse: true });
   });
 
-  it("验证也被取消 → 不写标记,开关维持关闭", async () => {
-    addPasskey.mockResolvedValue(PREVIOUSLY);
+  // 「账户有 passkey」不等于「**这台**设备有」:两个不同 iCloud 的人可以登同一个账号,凭据在对方的
+  // 钥匙串里。所以验证过不去时不收手,退到注册给这台机器建一条。
+  it("账户有 passkey 但验证没过 → 退到注册,给这台设备建一条", async () => {
+    listUserPasskeys.mockResolvedValue({ data: [row("cred_elsewhere", "别人的设备")] });
+    signInPasskey.mockResolvedValue({ data: null, error: { message: "no credential here" } });
+    addPasskey.mockResolvedValue({ data: row("cred_new", "这台") });
+    const utils = mount(<AutoLockCard />);
+    toggle(utils);
+    await waitFor(() => expect(localStorage.getItem(DEVICE_KEY)).toBe("cred_new"));
+    expect(localStorage.getItem(ENABLED_KEY)).not.toBeNull();
+    expect(addPasskey.mock.calls[0]?.[0]).toMatchObject({ authenticatorAttachment: "platform" });
+  });
+
+  it("验证没过、注册也没成 → 不写标记,开关维持关闭", async () => {
+    listUserPasskeys.mockResolvedValue({ data: [row("cred_elsewhere", "别人的设备")] });
     signInPasskey.mockResolvedValue({ data: null, error: { message: "cancelled" } });
+    addPasskey.mockResolvedValue({ error: { message: "cancelled too" } });
     const utils = mount(<AutoLockCard />);
     toggle(utils);
     await waitFor(() => expect(toastError).toHaveBeenCalled());
@@ -178,30 +200,46 @@ describe("AutoLockCard 开关与启用前置", () => {
     expect(localStorage.getItem(ENABLED_KEY)).toBeNull();
   });
 
-  // 登录满一天后注册一律 403(better-auth freshAge 默认 1 天,而我们的 session 活 7 天)——
-  // 注册连 ceremony 都没跑到就被拒,所以走验证:既刷新了 session,又拿到了本机那条的 id。
-  it("session 过了新鲜期 → 同样转验证一次,不把用户堵在报错上", async () => {
+  // 注册要求 session「新鲜」(better-auth freshAge 默认 1 天,而我们的 session 活 7 天),验证不要求。
+  // 所以走到「注册被 403」只可能是账户压根没有 passkey 且登录已超过一天 —— 再试也没用,只能重登。
+  it("账户没有 passkey 且 session 过了新鲜期 → 让用户重新登录", async () => {
     addPasskey.mockResolvedValue({
       error: { code: "SESSION_NOT_FRESH", message: "Session is not fresh" },
     });
-    signInPasskey.mockResolvedValue({ data: {}, webauthn: { response: { id: "cred_used" } } });
     const utils = mount(<AutoLockCard />);
     toggle(utils);
-    await waitFor(() => expect(localStorage.getItem(DEVICE_KEY)).toBe("cred_used"));
-    expect(localStorage.getItem(ENABLED_KEY)).not.toBeNull();
-    expect(toastError).not.toHaveBeenCalled();
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError.mock.calls[0]?.[0]).toMatch(/sign in again/i);
+    expect(localStorage.getItem(ENABLED_KEY)).toBeNull();
   });
 
-  // 关掉再打开不该重新验证 —— 凭据还在这台设备的钥匙串里,没有理由再按一次指纹。
-  it("已有本机凭据时拨开 → 直接开,不碰任何 ceremony", async () => {
+  // **每次开启都要重验**,哪怕本地已经有凭据记录 —— 开启闲置锁是把「遮住持仓」交给生物识别,
+  // 该由此刻在键盘前的人证明,不能由上次留下的一条 localStorage 记录代劳。
+  it("本地已有凭据记录也要重验 —— 不给捷径", async () => {
     localStorage.setItem(DEVICE_KEY, "cred_local");
     listUserPasskeys.mockResolvedValue({ data: [row("cred_local", "这台")] });
+    // assertion 回的 id 必须跟列表里那条对上 —— 真实情况下必然如此(服务端是按 credentialID 找到行
+    // 才验得过的)。对不上的话自纠 effect 会当场判定「这条不存在」把开关又关掉。
+    signInPasskey.mockResolvedValue({ data: {}, webauthn: { response: { id: "cred_local" } } });
     const utils = mount(<AutoLockCard />);
     await waitFor(() => expect(listUserPasskeys).toHaveBeenCalled());
     toggle(utils);
+    // 等结果落地,不能只等「验证被调用了」—— claim 里还要先 await 刷新列表才写开关键。
     await waitFor(() => expect(localStorage.getItem(ENABLED_KEY)).not.toBeNull());
-    expect(addPasskey).not.toHaveBeenCalled();
-    expect(signInPasskey).not.toHaveBeenCalled();
+    expect(signInPasskey).toHaveBeenCalled();
+  });
+
+  it("重验没过 → 开关不开,原来那条凭据记录不动", async () => {
+    localStorage.setItem(DEVICE_KEY, "cred_local");
+    listUserPasskeys.mockResolvedValue({ data: [row("cred_local", "这台")] });
+    signInPasskey.mockResolvedValue({ data: null, error: { message: "cancelled" } });
+    addPasskey.mockResolvedValue({ error: { message: "already" } });
+    const utils = mount(<AutoLockCard />);
+    await waitFor(() => expect(listUserPasskeys).toHaveBeenCalled());
+    toggle(utils);
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(localStorage.getItem(ENABLED_KEY)).toBeNull();
+    expect(localStorage.getItem(DEVICE_KEY)).toBe("cred_local"); // 记录归记录,别顺手清掉
   });
 
   it("关掉 → 只清开关,本机凭据与时长都留着", async () => {
