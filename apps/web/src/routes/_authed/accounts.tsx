@@ -259,12 +259,23 @@ function AccountRowContent({
       )}
     >
       <span className="relative flex min-w-0 flex-col gap-1.5">
+        {/* 第一行:账户名 + connector 徽章 + Tag(#351:tag 从独立一行挪到这里)。地方不够时**账户名先截断**
+            (min-w-0 + truncate 只挂它),connector/tag 保持完整;tag 仍最多平铺 2 个、余下折 `+N`。 */}
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-medium">{row.label}</span>
+          <span className="min-w-0 truncate font-medium">{row.label}</span>
           <ConnectorBadge
             connectorId={row.connectorId}
-            className="transition-colors group-hover:bg-background group-focus-visible:bg-background"
+            className="shrink-0 transition-colors group-hover:bg-background group-focus-visible:bg-background"
           />
+          {row.tags.length > 0 && (
+            <TagBadges
+              tags={row.tags}
+              max={2}
+              className="shrink-0"
+              // 行 hover 时底衬已是 muted pill → tag 自己的圆底改用 background,免糊。
+              hoverClassName="hover:bg-background"
+            />
+          )}
         </span>
         <AccountStatusLine
           status={status}
@@ -272,8 +283,6 @@ function AccountRowContent({
           connectorId={row.connectorId}
           onComplete={onComplete}
         />
-        {/* Tag 徽章(ADR 0034):行地方窄,最多平铺 2 个,余下折叠 `+N`。 */}
-        {row.tags.length > 0 && <TagBadges tags={row.tags} max={2} />}
         {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),无现货可叠(纯 perp/DeFi 或未同步)的行也不塌矮,
             全列表行高一致。真 logo 的按-kind 填充(perp coin / DeFi 协议)待 #132 解绑后再接。 */}
         {!muted && (

@@ -4,7 +4,6 @@ import { useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
 import { attachTag, createTag, deleteTag, detachTag, renameTag } from "../lib/server/tags";
-import { tagColor } from "../lib/tag-color";
 import { Portal } from "./portal";
 import { TagInput } from "./tag-input";
 
@@ -63,7 +62,6 @@ export function AccountTagsModal({
     return portfolioTags.map((tg) => ({
       id: tg.id,
       name: tg.name,
-      color: tagColor(tg.id),
       attached: attached.has(tg.id),
       accountCount: tagAccountCounts[tg.id] ?? (attached.has(tg.id) ? 1 : 0),
     }));
