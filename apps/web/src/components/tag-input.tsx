@@ -115,14 +115,17 @@ export function TagInput({
               aria-pressed={item.attached}
               disabled={item.pending}
               onClick={() => onToggle(item.id, !item.attached)}
+              // max-w-full + 内层 truncate:名字可以很长(用户随便打),chip 不能撑破 flex-wrap 容器 —— 满
+              // 一行就到此为止、超出走省略号。truncate 必须落在内层文字上,挂在这层 flex 容器上不生效。
+              // 名字看全走「管理」页(那里是 input,可完整读写)。
               className={cn(
-                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors",
+                "flex max-w-full items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors",
                 item.attached
                   ? "border border-foreground text-foreground"
                   : "border border-border text-muted-foreground hover:text-foreground",
               )}
             >
-              #{item.name}
+              <span className="truncate">#{item.name}</span>
             </button>
           ))}
 
