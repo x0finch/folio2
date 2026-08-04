@@ -29,11 +29,18 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `pnpm dev --port ${PORT}`,
+    // **CI 跑构建产物,本地跑 dev server**。
+    //
+    // dev server 是按需编译的:2 核 runner 上每条测试第一次碰到某个路由都要现编,实测 24 条跑了
+    // 9.6 分钟,而且大量 ceremony 直接撞穿超时 —— 13 条挂,全都挂在「开关拨不开」,不是断言写错。
+    // preview 跑的是 build 好的 worker,同样的请求几毫秒就回来。
+    //
+    // 端口两边都用 3000:passkey 的 origin 校验带端口(rpID 只取 host,但 expectedOrigin 是完整
+    // origin),换端口就得同步改 .dev.vars 的 BETTER_AUTH_URL,少一个变量少一处踩。
+    command: process.env.CI ? `pnpm preview --port ${PORT}` : `pnpm dev --port ${PORT}`,
     url: `${BASE_URL}/login`,
     // 本地复用已经开着的 dev server(常态);CI 里必须由 Playwright 自己拉起来。
     reuseExistingServer: !process.env.CI,
-    // 冷启动要编译整个 app,15s 不够。
     timeout: 120_000,
     stdout: "pipe",
     stderr: "pipe",

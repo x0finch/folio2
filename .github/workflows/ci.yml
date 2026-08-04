@@ -114,6 +114,12 @@ jobs:
       # to exist before the first request.
       - run: pnpm --filter @folio/web db:migrate:local
 
+      # playwright.config.ts serves the built worker via `vite preview` when CI is set, so the build
+      # has to exist first. This is not a nicety: on the first attempt the suite ran against `vite
+      # dev` and took 9.6 minutes, with 13 tests failing purely because on-demand compilation pushed
+      # every ceremony past its timeout. Against the build it's ~30s.
+      - run: pnpm --filter @folio/web build
+
       - run: pnpm --filter @folio/web test:e2e
 
       # Traces are retain-on-failure, so this only has content when something broke.
