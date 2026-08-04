@@ -3,7 +3,7 @@ import { expect, type Page } from "@playwright/test";
 // 闲置锁的全部状态都在这几个 localStorage 键上(单一源见 src/lib/idle-lock.ts 与
 // hooks/use-idle-lock.ts)。测试直接读写它们,而不是每条都先从 UI 把开关点一遍 —— 「怎么开起来的」
 // 本身是另外几条测试的主题,混进来只会让失败原因变糊。
-const KEYS = {
+export const KEYS = {
   timeout: "folio_lock_timeout",
   enabled: "folio_lock_enabled",
   deviceCredential: "folio_lock_device_passkey",
@@ -96,4 +96,26 @@ export async function travelPastIdle(page: Page, minutes: number) {
 /** 关掉登录后那个「加个 passkey 吧」的引导,免得它挡住后续断言。 */
 export async function dismissPasskeyPrompt(page: Page) {
   await page.evaluate((keys) => localStorage.setItem(keys.promptDismissed, "1"), KEYS);
+}
+
+/**
+ * 从零到「锁已开启」:建用户 → 关掉引导 → 拨开开关跑完真 ceremony。
+ *
+ * 调用方得先自己 addAuth() —— 认证器是什么类型(平台 / USB / 无生物识别)常常就是测试的题目本身,
+ * 不能塞进来替它决定。
+ */
+export async function enableLock(page: Page) {
+  await signUpAndLogin(page);
+  await dismissPasskeyPrompt(page);
+  await page.goto("/settings");
+  const toggle = page.getByRole("switch", { name: /auto-lock/i });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+}
+
+/** 把页面推进锁屏态(改「最后活跃」+ 重载触发比对),并等锁屏真的出现。 */
+export async function lockNow(page: Page, timeoutMinutes = 15) {
+  await travelPastIdle(page, timeoutMinutes);
+  await page.reload();
+  await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
 }
