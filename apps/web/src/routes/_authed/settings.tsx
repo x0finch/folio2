@@ -427,11 +427,17 @@ export function AutoLockCard() {
   const rows = listQuery.data;
   useEffect(() => {
     if (credentialId == null || !rows) return;
+    // **正在拉取时绝不判**。这一行是 E2E 抓出来的(#354):刚注册完 markReady,这个 query 才第一次
+    // enabled,而 PasskeysCard 用的是同一个 queryKey —— 缓存里已经躺着注册**之前**那份列表(不含新
+    // 凭据)。于是 effect 立刻拿旧数据判定「标记指向的凭据不存在」,把刚建好的凭据当场清掉:开关
+    // 弹回关闭、localStorage 空空,而认证器里明明多了一条。单元测试没抓到是因为它只挂一张卡,
+    // 缓存里没有那份旧数据,rows 直接从 undefined 变成新列表。
+    if (listQuery.isFetching) return;
     if (!rows.some((r) => r.credentialID === credentialId)) {
       clearReady();
       setEnabled(false); // 关开关,不动时长 —— 用户重新启用时还是原来那个档
     }
-  }, [credentialId, rows, clearReady, setEnabled]);
+  }, [credentialId, rows, listQuery.isFetching, clearReady, setEnabled]);
 
   // 开关拨动:
   // ① 关 → 只移除开关键,时长与本机凭据记录都留着(所以再打开无须重新验证)。
@@ -496,12 +502,17 @@ export function AutoLockCard() {
     }
   }
 
-  // 认下这台设备的凭据并开锁。下面那张 passkeys 卡是独立的 useQuery —— 不失效它,这次真注册出来的
-  // 凭据不会出现在列表里,看着像没生效。两张卡不合并(职责不同),但这条数据得连上。
+  // 认下这台设备的凭据并开锁。
+  //
+  // **先刷列表、再写标记**,顺序要紧:下面那张 passkeys 卡用同一个 queryKey,缓存里此刻还是注册
+  // 之前那份(不含新凭据)。反过来先 markReady 的话,上面那个自纠 effect 会拿旧列表判定「这条不
+  // 存在」,当场把刚建好的凭据清掉 —— E2E 实测到的(#354),effect 那里也加了一道 isFetching 保护。
+  // invalidateQueries 会等 active query 重新拉完,所以这一 await 之后缓存里已经有新凭据了。
+  // (顺带也修了「注册成功但下面列表不显示」这个观感问题:两张卡不合并,但数据得连上。)
   async function claim(credId: string) {
+    await queryClient.invalidateQueries({ queryKey: ["passkeys"] });
     markReady(credId);
     setEnabled(true);
-    await queryClient.invalidateQueries({ queryKey: ["passkeys"] });
     toast.success(t("autoLockEnabled"));
   }
 
