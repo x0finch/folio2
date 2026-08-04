@@ -44,9 +44,7 @@ export function PinTargetLabel({
   const text = target.kind === "connector" ? labelOf(target.connectorId ?? "") : (name ?? "");
   return (
     <span className={cn("flex min-w-0 items-center", className)}>
-      {target.kind === "connector" && (
-        <ConnectorMark connectorId={target.connectorId ?? ""} />
-      )}
+      {target.kind === "connector" && <ConnectorMark connectorId={target.connectorId ?? ""} />}
       {/* `#`/`@` 紧贴名字(同 TagBadges 的 `#name`),logo 才用 gap 隔开 —— 符号是名字的一部分,图不是。 */}
       <span className="min-w-0 truncate">
         {target.kind === "tag" ? "#" : target.kind === "account" ? "@" : ""}

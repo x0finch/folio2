@@ -16,9 +16,15 @@ export interface SourceGroup {
   primary: string; // 主行(平台名 / 账户名)
   count: number; // 副维度基数(账户数 / 平台数);=1 时用 single 显具体名
   single: string | null; // count===1 时的具体名(账户名 / 平台名),否则 null
+  // 平台视图副行点名用(#351 ③):组内**按 value 倒序**的前 2 个账户名 —— 组件渲染成
+  // `@a` / `@a @b` / `@a @b and n more`(n = count − 2),不再只报「{n} accounts」计数。
+  // 账户视图不点名(副维度是平台,已有 avatars 表达),留空数组。
+  topNames: string[];
   amount: number; // 组内数量之和(组统一单位)
   value: number; // 组内 USD 之和(占比与排序按它)
 }
+
+const TOP_NAMES = 2; // 副行最多点名几个,其余折成 "and n more"
 
 export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[] {
   const m = new Map<
@@ -26,8 +32,8 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
     {
       name: string;
       logo?: string;
-      accounts: Set<string>;
-      lastAccount: string;
+      // 按账户累计组内 value —— 副行点名要「组内最大的两个账户」,光有账户数不够(#351 ③)。
+      accounts: Map<string, { label: string; value: number }>;
       amount: number;
       value: number;
     }
@@ -38,8 +44,7 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
       g = {
         name: s.platform.name,
         logo: s.platform.logo,
-        accounts: new Set(),
-        lastAccount: s.account.label,
+        accounts: new Map(),
         amount: 0,
         value: 0,
       };
@@ -47,19 +52,25 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
     }
     g.amount += s.amount;
     g.value += s.value;
-    g.accounts.add(s.account.id);
-    g.lastAccount = s.account.label;
+    const a = g.accounts.get(s.account.id);
+    if (a) a.value += s.value;
+    else g.accounts.set(s.account.id, { label: s.account.label, value: s.value });
   }
   return [...m.entries()]
-    .map(([key, g]) => ({
-      key,
-      avatars: [{ logo: g.logo, name: g.name }],
-      primary: g.name,
-      count: g.accounts.size,
-      single: g.accounts.size === 1 ? g.lastAccount : null,
-      amount: g.amount,
-      value: g.value,
-    }))
+    .map(([key, g]) => {
+      const byValue = [...g.accounts.values()].sort((a, b) => b.value - a.value);
+      const first = byValue[0];
+      return {
+        key,
+        avatars: [{ logo: g.logo, name: g.name }],
+        primary: g.name,
+        count: byValue.length,
+        single: byValue.length === 1 ? (first?.label ?? null) : null,
+        topNames: byValue.slice(0, TOP_NAMES).map((a) => a.label),
+        amount: g.amount,
+        value: g.value,
+      };
+    })
     .sort((a, b) => b.value - a.value);
 }
 
@@ -94,6 +105,7 @@ export function groupByAccount(sources: readonly HoldingSource[]): SourceGroup[]
         primary: g.label,
         count: plats.length,
         single: plats.length === 1 ? plats[0][1].name : null,
+        topNames: [], // 账户视图副维度是平台,由 avatars 表达,不点名
         amount: g.amount,
         value: g.value,
       };

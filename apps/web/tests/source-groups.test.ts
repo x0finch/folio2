@@ -67,6 +67,65 @@ describe("groupByPlatform", () => {
     expect(base.count).toBe(1);
     expect(base.single).toBe("im");
   });
+
+  // #351 ③:平台行副名点名「组内最大的两个账户」,故 topNames 得按**账户在组内的 value** 排序,
+  // 不是出现顺序、也不是账户总资产。多出的折成 count − topNames.length。
+  it("topNames 按组内账户 value 倒序取前 2,其余靠 count 折叠", () => {
+    const many = [
+      src({
+        platformId: "p",
+        platformName: "P",
+        accountId: "a",
+        accountLabel: "small",
+        amount: 1,
+        value: 1,
+      }),
+      src({
+        platformId: "p",
+        platformName: "P",
+        accountId: "b",
+        accountLabel: "big",
+        amount: 9,
+        value: 9,
+      }),
+      src({
+        platformId: "p",
+        platformName: "P",
+        accountId: "c",
+        accountLabel: "mid",
+        amount: 5,
+        value: 5,
+      }),
+      // 同一账户在同平台的第二笔:应累加到 a 上(1 + 6 = 7 → 越过 mid,升到第二)
+      src({
+        platformId: "p",
+        platformName: "P",
+        accountId: "a",
+        accountLabel: "small",
+        amount: 6,
+        value: 6,
+      }),
+    ];
+    const [g] = groupByPlatform(many);
+    expect(g?.count).toBe(3);
+    expect(g?.topNames).toEqual(["big", "small"]); // 9 > 7 > 5
+    expect((g?.count ?? 0) - (g?.topNames.length ?? 0)).toBe(1); // → "and 1 more"
+  });
+
+  it("单账户组:topNames 就那一个,不折叠", () => {
+    const [g] = groupByPlatform([
+      src({
+        platformId: "p",
+        platformName: "P",
+        accountId: "a",
+        accountLabel: "solo",
+        amount: 1,
+        value: 1,
+      }),
+    ]);
+    expect(g?.topNames).toEqual(["solo"]);
+    expect(g?.count).toBe(1);
+  });
 });
 
 describe("groupByAccount", () => {

@@ -122,6 +122,7 @@ const en = {
     platformsTab: "Platforms",
     accountsTab: "Accounts",
     nAccounts: "{n} accounts",
+    nMoreAccounts: "and {n} more", // 平台行点名前 2 个账户后的折叠尾巴(#351 ③)
     nSources: "{n} sources",
     rangeAll: "All",
   },
@@ -510,6 +511,7 @@ const zh: Messages = {
     platformsTab: "平台",
     accountsTab: "账户",
     nAccounts: "{n} 个账户",
+    nMoreAccounts: "等 {n} 个",
     nSources: "{n} 处",
     rangeAll: "全部",
   },

@@ -12,7 +12,7 @@ import {
 } from "@folio/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { dayValueChange } from "../lib/day-value-change";
@@ -41,8 +41,8 @@ function GroupAvatar({ group }: { group: SourceGroup }) {
   return <AvatarStack items={group.avatars} size="md" />;
 }
 
-// 账户名统一走 <AccountName>(WalletIcon 前置,H5 评审统一组件):全站「带钱包图标的 = 账户」,
-// 与平台名(有 logo 头像 + 公认名)区分。平台名不加。account slot 由视图决定:平台视图账户在副行、账户视图在主行。
+// 账户名统一走 <AccountName>(`@名` 前置,#351 ③):全站「一个符号 = 一种身份」,与平台名(有 logo
+// 头像 + 公认名)区分。平台名不加。account slot 由视图决定:平台视图账户在副行、账户视图在主行。
 function NameLine({
   text,
   account,
@@ -60,6 +60,20 @@ function NameLine({
   );
 }
 
+// 平台行副名:点名组内**按 value 倒序**的前 2 个账户,其余折成 "and n more"(#351 ③)——
+// 比原先的「{n} accounts」计数多说一句「是谁」。每个 `@名` 各自截断,尾巴不被挤掉。
+function AccountNames({ names, more }: { names: string[]; more: number }) {
+  const t = useTranslations("Overview");
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
+      {names.map((n, i) => (
+        <AccountName key={`${n}:${i}`} name={n} className="min-w-0" />
+      ))}
+      {more > 0 && <span className="shrink-0">{t("nMoreAccounts", { n: more })}</span>}
+    </span>
+  );
+}
+
 // 来源组行:左 = 头像 + 主名 / 副名;右 = 数量 + symbol(上)· 占比(下,= 组 value / 总 value)。
 // accountSlot 标出哪格是账户(带图标);副名与主名【严格相等】(区分大小写)才省略副行 ——
 // 用户可能特意把账户命名为小写 "binance"(≠ 平台 "Binance"),这属不同名字,靠钱包图标区分、照常显示。
@@ -71,14 +85,13 @@ function GroupRow({
   accountSlot,
 }: {
   group: SourceGroup;
-  secondary: string;
+  secondary: ReactNode; // null = 省略副行(与主名重复时)
   symbol: string;
   totalValue: number;
   accountSlot: "primary" | "secondary";
 }) {
   const pct = totalValue > 0 ? (group.value / totalValue) * 100 : 0;
   const share = pct >= 10 ? pct.toFixed(0) : pct.toFixed(1);
-  const showSecondary = secondary.length > 0 && secondary !== group.primary;
   return (
     <div className="flex items-center gap-3 rounded-xl px-3 py-2.5">
       <GroupAvatar group={group} />
@@ -88,13 +101,7 @@ function GroupRow({
           account={accountSlot === "primary"}
           className="font-medium text-sm"
         />
-        {showSecondary && (
-          <NameLine
-            text={secondary}
-            account={accountSlot === "secondary"}
-            className="text-muted-foreground text-xs"
-          />
-        )}
+        {secondary}
       </span>
       <span className="shrink-0 text-right">
         <span className="block text-sm tabular-nums">
@@ -119,17 +126,40 @@ function SourceView({
   totalValue: number;
 }) {
   const t = useTranslations("Overview");
+  const platformView = countKey === "nAccounts"; // 副维度是账户 → 副行点名;账户视图副维度是平台,仍报计数
+  // 副名与主名【严格相等】(区分大小写)才省略副行 —— 用户可能特意把账户命名为小写 "binance"
+  //(≠ 平台 "Binance"),那属不同名字,靠 `@` 区分、照常显示。
+  const secondaryFor = (g: SourceGroup) => {
+    if (g.count === 1) {
+      const only = g.single ?? "";
+      if (!only || only === g.primary) return null;
+      return platformView ? (
+        <AccountNames names={[only]} more={0} />
+      ) : (
+        <NameLine text={only} account={false} className="text-muted-foreground text-xs" />
+      );
+    }
+    return platformView ? (
+      <AccountNames names={g.topNames} more={g.count - g.topNames.length} />
+    ) : (
+      <NameLine
+        text={t(countKey, { n: g.count })}
+        account={false}
+        className="text-muted-foreground text-xs"
+      />
+    );
+  };
   return (
     <SharedLayoutBg inset={0} pillClassName="rounded-xl">
       {groups.map((g) => (
         <div key={g.key}>
           <GroupRow
             group={g}
-            secondary={g.count === 1 ? (g.single ?? "") : t(countKey, { n: g.count })}
+            secondary={secondaryFor(g)}
             symbol={symbol}
             totalValue={totalValue}
             // 平台视图(countKey=nAccounts)账户在副行;账户视图(nSources)账户在主行。
-            accountSlot={countKey === "nAccounts" ? "secondary" : "primary"}
+            accountSlot={platformView ? "secondary" : "primary"}
           />
         </div>
       ))}
