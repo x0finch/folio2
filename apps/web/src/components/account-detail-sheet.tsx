@@ -1,5 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import type { Note } from "@folio/connectors-basic";
+import type { AccountTagLink, Tag } from "@folio/db";
 import {
   BottomSheet,
   Button,
@@ -14,8 +15,16 @@ import {
 } from "@folio/ui";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { AlertTriangle, Archive, FolderInput, MoreVertical, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import {
+  AlertTriangle,
+  Archive,
+  FolderInput,
+  MoreVertical,
+  RefreshCw,
+  Tag as TagIcon,
+  Trash2,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { accountShare, shareLabel } from "../lib/account-share";
 import type { OverviewBalance } from "../lib/account-view";
@@ -26,6 +35,7 @@ import { isManual } from "../lib/manual-connector";
 import { getAccountHistory, removeAccount, updateAccount } from "../lib/server/accounts";
 import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
+import { AccountTagsModal } from "./account-tags-modal";
 import { ConnectorBadge } from "./connector-badge";
 import { EditableName } from "./editable-name";
 import { AccountHoldingsCards } from "./holdings-cards";
@@ -33,6 +43,7 @@ import { ManualTokensPanel } from "./manual-tokens-panel";
 import { Portal } from "./portal";
 import { PortfolioPickerModal } from "./portfolio-picker-modal";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
+import { TagBadges } from "./tag-badges";
 import { ValueTrendChart } from "./value-trend-chart";
 
 // 账户页列表行的合并形状(listAccountHoldings ∪ listAccounts,见 accounts.tsx loader)。
@@ -47,6 +58,14 @@ export interface AccountRow {
   note?: Note[]; // account 级展示 note(Note[],整钱包;BTC 未确认/收款/派生分布)
   needsCredentials: boolean;
   credsSafe: Record<string, string>;
+  portfolioId: string; // 账户所在 Portfolio(打标签弹窗按它取可选 Tag,ADR 0034)
+  tags: AccountTagView[]; // 本账户已打的 Tag(展示用)
+}
+
+// 账户已打的 Tag 的展示投影(id + 名字;颜色由 tagColor(id) 现算,不入行)。
+interface AccountTagView {
+  id: string;
+  name: string;
 }
 
 // 账户详情抽屉(A2):桌面右滑 Drawer、移动 BottomSheet 承载同一份 <DetailBody>(照 asset-sheet 模式)。
@@ -54,12 +73,16 @@ export interface AccountRow {
 export function AccountDetailSheet({
   account,
   total,
+  allTags,
+  tagLinks,
   open,
   onOpenChange,
   onComplete,
 }: {
   account: AccountRow | null;
   total: number; // 活跃账户总计 —— 抽屉头占比分母(见 accounts.tsx)
+  allTags: Tag[]; // 全部 Tag 定义(打标签弹窗按账户 Portfolio 过滤)
+  tagLinks: AccountTagLink[]; // 全部 账户→Tag 关联(算已打 + 每 Tag 账户数)
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onComplete: (account: AccountRow) => void; // 补录:打开加账户 modal 的补录模式(A3)
@@ -71,6 +94,8 @@ export function AccountDetailSheet({
       key={account.id}
       account={account}
       total={total}
+      allTags={allTags}
+      tagLinks={tagLinks}
       onClose={() => onOpenChange(false)}
       onComplete={() => onComplete(account)}
     />
@@ -103,17 +128,22 @@ const menuItemClass =
 function DetailBody({
   account,
   total,
+  allTags,
+  tagLinks,
   onClose,
   onComplete,
 }: {
   account: AccountRow;
   total: number;
+  allTags: Tag[];
+  tagLinks: AccountTagLink[];
   onClose: () => void;
   onComplete: () => void;
 }) {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
   const tp = useTranslations("Portfolio");
+  const tt = useTranslations("Tags");
   const format = useFormatter();
   const usd = useDisplayValue();
   const router = useRouter();
@@ -127,6 +157,21 @@ function DetailBody({
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  // 打标签弹窗的数据(ADR 0034):账户所在 Portfolio 的全部 Tag + 本账户已打 id + 每 Tag 账户数。
+  const portfolioTags = useMemo(
+    () => allTags.filter((tg) => tg.portfolioId === account.portfolioId),
+    [allTags, account.portfolioId],
+  );
+  const attachedTagIds = useMemo(
+    () => tagLinks.filter((l) => l.accountId === account.id).map((l) => l.tagId),
+    [tagLinks, account.id],
+  );
+  const tagAccountCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const l of tagLinks) counts[l.tagId] = (counts[l.tagId] ?? 0) + 1;
+    return counts;
+  }, [tagLinks]);
   // 删除确认走 modal 的落位:桌面居中、手机贴底(同 AddAccountModal)。
   const isDesktop = useMediaQuery("(min-width: 640px)");
   // ⋯ 菜单走全站统一的 hover popover 行为(关闭态隐 goo 垫底 → ghost 触发器不露 bg-popover 块;
@@ -242,6 +287,17 @@ function DetailBody({
                 </div>
               )}
             </div>
+            {/* Tag 行(ADR 0034):展示本账户全部 Tag;点该行开打标签弹窗(⋯ 菜单同入口)。 */}
+            {account.tags.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setTagsOpen(true)}
+                className="-mx-1 flex rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted"
+                aria-label={tt("menuAction")}
+              >
+                <TagBadges tags={account.tags} />
+              </button>
+            )}
             {/* 缺凭据告警行:⚠ + 可点击"补填凭据以同步"提示(文案即入口 → 开加账户 modal 的补录模式,A3)。 */}
             {account.needsCredentials && (
               <div className="flex items-center gap-1.5 text-warn text-xs">
@@ -300,6 +356,10 @@ function DetailBody({
                 >
                   <Archive className="size-4 shrink-0" />
                   {archived ? t("unarchive") : t("archive")}
+                </button>
+                <button type="button" className={menuItemClass} onClick={() => setTagsOpen(true)}>
+                  <TagIcon className="size-4 shrink-0" />
+                  {tt("menuAction")}
                 </button>
                 <button type="button" className={menuItemClass} onClick={() => setMoving(true)}>
                   <FolderInput className="size-4 shrink-0" />
@@ -366,6 +426,18 @@ function DetailBody({
         accountId={account.id}
         open={moving}
         onClose={() => setMoving(false)}
+      />
+
+      {/* 打标签(ADR 0034):账户所在 Portfolio 的 Tag,点即生效 + 内联管理。 */}
+      <AccountTagsModal
+        accountId={account.id}
+        accountLabel={account.label}
+        portfolioId={account.portfolioId}
+        portfolioTags={portfolioTags}
+        attachedTagIds={attachedTagIds}
+        tagAccountCounts={tagAccountCounts}
+        open={tagsOpen}
+        onClose={() => setTagsOpen(false)}
       />
 
       {/* manual 账户:多 token 面板(Tokens tab 已含持仓,故不再叠加上方持仓卡)。
