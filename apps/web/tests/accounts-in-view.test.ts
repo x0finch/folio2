@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { accountIdsInView, accountsInView } from "../src/lib/accounts-in-view";
+import {
+  accountIdsInView,
+  accountsInView,
+  accountsMatchingPin,
+  type TabPin,
+} from "../src/lib/accounts-in-view";
 
 // accountsInView(ADR 0033):活跃 && 归属选中 Portfolio;未归属的账户兜底进默认视图。
 
@@ -66,5 +71,38 @@ describe("accountIdsInView", () => {
     const ids = ["a", "b", "orphan"];
     expect(accountIdsInView(ids, memberships, DEFAULT, DEFAULT).has("orphan")).toBe(true);
     expect(accountIdsInView(ids, memberships, WATCH, DEFAULT).has("orphan")).toBe(false);
+  });
+});
+
+// 自定义 Tab pin 过滤(ADR 0034):在已按 Portfolio 过滤的集上再收窄。
+describe("accountsMatchingPin", () => {
+  const accs = [
+    { id: "a", connectorId: "binance" },
+    { id: "b", connectorId: "okx" },
+    { id: "c", connectorId: "binance" },
+  ];
+  const tagLinks = [
+    { accountId: "a", tagId: "t-long" },
+    { accountId: "c", tagId: "t-long" },
+    { accountId: "b", tagId: "t-farm" },
+  ];
+
+  it("pin=null → 原样返回(默认视图不收窄)", () => {
+    expect(accountsMatchingPin(accs, null, tagLinks)).toEqual(accs);
+  });
+
+  it("connector pin → 只留该 Connector 的账户", () => {
+    const pin: TabPin = { kind: "connector", connectorId: "binance" };
+    expect(accountsMatchingPin(accs, pin, tagLinks).map((a) => a.id)).toEqual(["a", "c"]);
+  });
+
+  it("tag pin → 只留打了该 Tag 的账户", () => {
+    const pin: TabPin = { kind: "tag", tagId: "t-long" };
+    expect(accountsMatchingPin(accs, pin, tagLinks).map((a) => a.id)).toEqual(["a", "c"]);
+  });
+
+  it("tag pin 无匹配 → 空", () => {
+    const pin: TabPin = { kind: "tag", tagId: "t-none" };
+    expect(accountsMatchingPin(accs, pin, tagLinks)).toEqual([]);
   });
 });

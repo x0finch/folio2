@@ -4,6 +4,7 @@ import type {
   portfolios,
   snapshotBalances,
   snapshots,
+  tabPins,
   tags,
   userSettings,
 } from "./schema";
@@ -15,6 +16,8 @@ export type AccountSafe = Omit<Account, "creds">;
 export type Portfolio = InferSelectModel<typeof portfolios>;
 
 export type Tag = InferSelectModel<typeof tags>;
+
+export type TabPin = InferSelectModel<typeof tabPins>;
 
 export type Snapshot = InferSelectModel<typeof snapshots>;
 export type SnapshotBalance = InferSelectModel<typeof snapshotBalances>;
