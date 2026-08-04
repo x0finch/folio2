@@ -1,6 +1,7 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
 import { Check } from "lucide-react";
 import { useTranslations } from "use-intl";
+import { PinTargetLabel } from "./pin-target-label";
 
 // 自定义 Tab 的添加/改指向选择器(ADR 0034):**裸内容**,面板 chrome 由承载它的 beUI hover Popover 提供
 //(＋按钮 / pin 药丸 hover 弹出)。分三段 —— Tag / Connector / Account。选中即回调 onPick;空显空态。
@@ -18,11 +19,13 @@ const rowClass = "rounded-md px-2 py-1.5 text-left text-sm";
 
 function PickerSection({
   header,
+  kind,
   options,
   activeId,
   onPick,
 }: {
   header: string;
+  kind: PinTargetChoice["kind"];
   options: { id: string; label: string }[];
   activeId?: string;
   onPick: (id: string) => void;
@@ -35,7 +38,12 @@ function PickerSection({
         {options.map((o) => (
           <button key={o.id} type="button" onClick={() => onPick(o.id)} className={rowClass}>
             <span className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate">{o.label}</span>
+              {/* 前导标记与 pin 药丸同一份渲染(PinTargetLabel)→ 选择器里看到什么,固定后药丸就是什么。 */}
+              <PinTargetLabel
+                target={targetOf(kind, o.id)}
+                name={o.label}
+                className="min-w-0 flex-1"
+              />
               <Check
                 className={cn("size-4 shrink-0", activeId === o.id ? "opacity-100" : "opacity-0")}
               />
@@ -45,6 +53,13 @@ function PickerSection({
       </SharedLayoutBg>
     </div>
   );
+}
+
+// (kind, id) → PinTargetChoice。选项行渲染标记与 onPick 回调用的是同一个形状。
+function targetOf(kind: PinTargetChoice["kind"], id: string): PinTargetChoice {
+  if (kind === "tag") return { kind, tagId: id };
+  if (kind === "account") return { kind, accountId: id };
+  return { kind, connectorId: id };
 }
 
 export function TabPinPicker({
@@ -69,18 +84,21 @@ export function TabPinPicker({
       {empty && <div className="px-1 py-2 text-muted-foreground text-sm">{t("noOptions")}</div>}
       <PickerSection
         header={t("byTag")}
+        kind="tag"
         options={tagOptions.map((tg) => ({ id: tg.id, label: tg.name }))}
         activeId={selected?.kind === "tag" ? selected.tagId : undefined}
         onPick={(id) => onPick({ kind: "tag", tagId: id })}
       />
       <PickerSection
         header={t("byConnector")}
+        kind="connector"
         options={connectorOptions}
         activeId={selected?.kind === "connector" ? selected.connectorId : undefined}
         onPick={(id) => onPick({ kind: "connector", connectorId: id })}
       />
       <PickerSection
         header={t("byAccount")}
+        kind="account"
         options={accountOptions}
         activeId={selected?.kind === "account" ? selected.accountId : undefined}
         onPick={(id) => onPick({ kind: "account", accountId: id })}

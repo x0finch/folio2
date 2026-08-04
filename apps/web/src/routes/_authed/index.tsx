@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { HeaderSync } from "../../components/header-sync";
 import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
+import { PinTargetLabel } from "../../components/pin-target-label";
 import { Portal } from "../../components/portal";
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { SectionList } from "../../components/section-list";
@@ -322,12 +323,13 @@ function Overview() {
                       key={p.id}
                       value={p.id}
                       isActive={shownActive === p.id}
+                      // connector 的展示名由 PinTargetLabel 走 registry 取(类型名),这里只喂 tag/account 的名字。
                       label={
                         p.kind === "tag"
                           ? tagNameOf(tags, p.tagId)
                           : p.kind === "account"
                             ? accountNameOf(allAccounts, p.accountId)
-                            : connectorLabel(p.connectorId ?? "")
+                            : ""
                       }
                       selected={{
                         kind: p.kind,
@@ -598,7 +600,10 @@ function PinTab({
       onClick={p.onClick}
       {...p.hoverProps}
     >
-      <TabsTrigger value={value}>{label}</TabsTrigger>
+      <TabsTrigger value={value}>
+        {/* 类型标记(#351 ②):tag `#名` / account `@名` / connector `logo + 类型名`。 */}
+        <PinTargetLabel target={selected} name={label} />
+      </TabsTrigger>
       <PinPortalPopover
         open={p.open}
         rect={p.rect}
@@ -606,11 +611,11 @@ function PinTab({
         ghost={
           <span
             className={cn(
-              "inline-flex h-full w-full items-center justify-center whitespace-nowrap rounded-full font-medium text-sm",
+              "inline-flex h-full w-full items-center justify-center whitespace-nowrap rounded-full px-3.5 font-medium text-sm",
               isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground",
             )}
           >
-            {label}
+            <PinTargetLabel target={selected} name={label} />
           </span>
         }
         onRequestClose={p.close}
