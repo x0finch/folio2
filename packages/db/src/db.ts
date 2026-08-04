@@ -36,6 +36,15 @@ export function createDb(env: DbEnv) {
     renamePortfolio: b(q.renamePortfolio),
     setDefaultPortfolio: b(q.setDefaultPortfolio),
     deletePortfolio: b(q.deletePortfolio),
+    // —— Tag(Portfolio 内软标签,ADR 0034)——
+    createTag: b(q.createTag),
+    listTagsByUser: b(q.listTagsByUser),
+    listTagsByPortfolio: b(q.listTagsByPortfolio),
+    renameTag: b(q.renameTag),
+    deleteTag: b(q.deleteTag),
+    attachTag: b(q.attachTag),
+    detachTag: b(q.detachTag),
+    listAccountTagsByUser: b(q.listAccountTagsByUser),
     // —— snapshots ——
     writeSnapshot: b(q.writeSnapshot),
     listSnapshotsByAccount: b(q.listSnapshotsByAccount),

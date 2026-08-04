@@ -91,6 +91,54 @@ export const portfolioAccounts = sqliteTable(
   ],
 );
 
+// —— Tag(Portfolio 内软标签,ADR 0034)——
+// 账户的软标签:一账户可挂多个(M:N,见 account_tags),做 Portfolio 内的横切分组用。
+// **归属某个 Portfolio**(`portfolio_id`)—— 账户只能打其所在 Portfolio 的 Tag;是 Portfolio 内的
+// 再分组,不是硬隔断(硬隔断是 Portfolio 自己)。删 Portfolio → 其 Tag 经 cascade 清。
+// 与 Portfolio 是两回事,别混:Portfolio 选中即视图(减法),Tag 只是给账户贴的标签(横切)。
+export const tags = sqliteTable(
+  "tags",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    portfolioId: text("portfolio_id")
+      .notNull()
+      .references(() => portfolios.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at").notNull(), // epoch ms
+  },
+  (t) => [
+    index("tags_user_id_idx").on(t.userId),
+    index("tags_portfolio_id_idx").on(t.portfolioId),
+    // 同 Portfolio 内 Tag 名唯一,**忽略大小写**(表达式索引 lower(name);首尾空格由 ops 层 trim 后落库)。
+    // 这是真正防并发重名的那道 —— ops 的先查后插在单实例下先挡一次,Workers 多实例靠这条兜底。
+    uniqueIndex("tags_user_portfolio_name_uidx").on(t.userId, t.portfolioId, sql`lower(${t.name})`),
+  ],
+);
+
+// 账户 ↔ Tag(M:N,ADR 0034)。与 portfolio_accounts 唯一的差异:**不加** UNIQUE(account_id) ——
+// 一个账户可挂多个 Tag。删 Tag → 其关联行经 cascade 清;删账户 → 同理。
+// account_id 上单独一条索引:给「清空某账户全部 Tag」(账户 move Portfolio 时,见 assignAccountToPortfolio)
+// 与「某账户有哪些 Tag」的反查走。
+export const accountTags = sqliteTable(
+  "account_tags",
+  {
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tagId, t.accountId] }),
+    index("account_tags_account_id_idx").on(t.accountId),
+  ],
+);
+
 export const snapshots = sqliteTable(
   "snapshots",
   {

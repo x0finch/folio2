@@ -12,7 +12,9 @@ export { createDb, type Db } from "./db";
 export { createGlobalTokenRefIndexStore } from "./global-token-ref-index-store";
 export type {
   AccountRawCreds,
+  AccountTagLink,
   CreateAccountInput,
+  CreateTagInput,
   ExportToken,
   ImportTokenInput,
   ManualActivity,
@@ -35,6 +37,7 @@ export type {
   AccountSafe,
   Snapshot,
   SnapshotBalance,
+  Tag,
   UserSettings,
   ValuationMode,
 } from "./schema-types";
