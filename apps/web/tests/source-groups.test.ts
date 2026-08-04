@@ -108,8 +108,8 @@ describe("groupByPlatform", () => {
     ];
     const [g] = groupByPlatform(many);
     expect(g?.count).toBe(3);
-    expect(g?.topNames).toEqual(["big", "small"]); // 9 > 7 > 5
-    expect((g?.count ?? 0) - (g?.topNames.length ?? 0)).toBe(1); // → "and 1 more"
+    expect(g?.topAccounts.map((a) => a.label)).toEqual(["big", "small"]); // 9 > 7 > 5
+    expect((g?.count ?? 0) - (g?.topAccounts.length ?? 0)).toBe(1); // → "and 1 more"
   });
 
   it("单账户组:topNames 就那一个,不折叠", () => {
@@ -123,7 +123,7 @@ describe("groupByPlatform", () => {
         value: 1,
       }),
     ]);
-    expect(g?.topNames).toEqual(["solo"]);
+    expect(g?.topAccounts.map((a) => a.label)).toEqual(["solo"]);
     expect(g?.count).toBe(1);
   });
 });

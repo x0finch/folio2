@@ -62,12 +62,18 @@ function NameLine({
 
 // 平台行副名:点名组内**按 value 倒序**的前 2 个账户,其余折成 "and n more"(#351 ③)——
 // 比原先的「{n} accounts」计数多说一句「是谁」。每个 `@名` 各自截断,尾巴不被挤掉。
-function AccountNames({ names, more }: { names: string[]; more: number }) {
+function AccountNames({
+  accounts,
+  more,
+}: {
+  accounts: { id: string; label: string }[];
+  more: number;
+}) {
   const t = useTranslations("Overview");
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-      {names.map((n, i) => (
-        <AccountName key={`${n}:${i}`} name={n} className="min-w-0" />
+      {accounts.map((a) => (
+        <AccountName key={a.id} name={a.label} className="min-w-0" />
       ))}
       {more > 0 && <span className="shrink-0">{t("nMoreAccounts", { n: more })}</span>}
     </span>
@@ -134,13 +140,13 @@ function SourceView({
       const only = g.single ?? "";
       if (!only || only === g.primary) return null;
       return platformView ? (
-        <AccountNames names={[only]} more={0} />
+        <AccountNames accounts={g.topAccounts} more={0} />
       ) : (
         <NameLine text={only} account={false} className="text-muted-foreground text-xs" />
       );
     }
     return platformView ? (
-      <AccountNames names={g.topNames} more={g.count - g.topNames.length} />
+      <AccountNames accounts={g.topAccounts} more={g.count - g.topAccounts.length} />
     ) : (
       <NameLine
         text={t(countKey, { n: g.count })}
