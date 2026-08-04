@@ -16,7 +16,9 @@ interface TagInputItem {
 }
 
 // 用户可能顺手把 `#` 也敲进去(界面到处显 `#name`)→ 吞掉前导 `#` 再存,库里永远是纯名字。
-const stripHash = (raw: string) => raw.replace(/^#+/, "").trim();
+// **先 trim 再剥**,且剥完再 trim:粘进来的 " #cold" 若先剥,`^#+` 压根匹配不上(首字符是空格),
+// `#` 就跟着进库了;"# cold" 则要剥完再 trim 掉中间那个空格。
+const stripHash = (raw: string) => raw.trim().replace(/^#+/, "").trim();
 
 export interface TagInputProps {
   subtitle?: string; // 账户名(标题下方)

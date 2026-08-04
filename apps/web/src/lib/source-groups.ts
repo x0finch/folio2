@@ -16,9 +16,9 @@ export interface SourceGroup {
   primary: string; // 主行(平台名 / 账户名)
   count: number; // 副维度基数(账户数 / 平台数);=1 时用 single 显具体名
   single: string | null; // count===1 时的具体名(账户名 / 平台名),否则 null
-  // 平台视图副行点名用(#351 ③):组内**按 value 倒序**的前几个账户 —— 组件按 collapseToSlots
-  // 渲染成 `@a` / `@a @b @c` / `@a @b +n`,不再只报「{n} accounts」计数。带足 TOP_ACCOUNTS 个候选
-  // (= 折叠阈值),这样「恰好 3 个」也全显得出来;超过阈值时组件只用前 2 个,余量由 count 算。
+  // 平台视图副行点名用(#351 ③):组内**按 value 倒序**的前 ACCOUNT_SLOTS 个账户 —— 组件按
+  // collapseToSlots 渲染成 `@a` / `@a @b @c` / `@a @b +n`,不再只报「{n} accounts」计数。
+  // 带满阈值个候选,「恰好 3 个」才全显得出来;超过阈值时组件只用前 2 个,余量由 count 算。
   // 带 id 而非只带 label:账户名可以重名,渲染要一个稳定唯一的 key。
   // 账户视图不点名(副维度是平台,已有 avatars 表达),留空数组。
   topAccounts: { id: string; label: string }[];
@@ -26,8 +26,10 @@ export interface SourceGroup {
   value: number; // 组内 USD 之和(占比与排序按它)
 }
 
-// 副行携带的候选账户数 = 折叠阈值(见 ACCOUNT_SLOTS):≤ 这个数时全显,故得带满。
-const TOP_NAMES = 3;
+// 平台行副行的折叠阈值:≤ 这个数时全显,超过则显 max-1 个 + `+N`(见 collapseToSlots)。
+// **携带的候选数必须 = 这个阈值**,否则「恰好等于阈值」那档会拿不满、静默少显一个还不给计数 →
+// 所以两者共用这一个常量,由渲染方 import,不各写一份。
+export const ACCOUNT_SLOTS = 3;
 
 export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[] {
   const m = new Map<
@@ -69,8 +71,7 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
         primary: g.name,
         count: byValue.length,
         single: byValue.length === 1 ? (first?.label ?? null) : null,
-        topAccounts: byValue.slice(0, TOP_NAMES).map((a) => ({ id: a.id, label: a.label })),
-
+        topAccounts: byValue.slice(0, ACCOUNT_SLOTS).map((a) => ({ id: a.id, label: a.label })),
         amount: g.amount,
         value: g.value,
       };

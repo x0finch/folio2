@@ -38,6 +38,22 @@ describe("TagInput 的 # 前缀", () => {
     expect(onCreate).toHaveBeenCalledWith("longterm");
   });
 
+  // 粘贴常带前后空格。若先剥 `#` 再 trim,`^#+` 对 " #cold" 压根匹配不上 → `#` 跟着进库。
+  it("带空格也剥得掉:前导空格、`#` 与名字之间的空格都不留", () => {
+    for (const [typed, stored] of [
+      [" #cold", "cold"],
+      ["#  cold ", "cold"],
+      ["  ## cold  ", "cold"],
+    ] as const) {
+      const { container, onCreate } = renderInput();
+      const input = container.querySelector("input");
+      if (!input) throw new Error("no input");
+      fireEvent.change(input, { target: { value: typed } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(onCreate).toHaveBeenCalledWith(stored);
+    }
+  });
+
   it("输入带 # 时命中同名既有 Tag → 打上而非新建", () => {
     const { container, onCreate, onToggle } = renderInput({ items: [item("longterm")] });
     const input = container.querySelector("input");

@@ -27,7 +27,14 @@ export function TagBadges({
   const { shown, overflow } = collapseToSlots(tags, max);
   return (
     <span
-      className={cn("flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs", className)}
+      // 换行只给**不折叠**的那份(抽屉传全部 tag):挤在一行会把每个名字截成省略号,得能换行。
+      // 折叠的那份(账户行传 max)反过来必须单行 —— 换行会让行高随 tag 数变,列表参差不齐;
+      // 它靠 `+N` 控制个数、靠每个 tag 的 truncate 控制长度。
+      className={cn(
+        "flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs",
+        max == null && "flex-wrap",
+        className,
+      )}
     >
       {shown.map((tg) => (
         <span key={tg.id} className="min-w-0 truncate">

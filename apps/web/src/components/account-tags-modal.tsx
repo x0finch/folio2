@@ -132,8 +132,11 @@ export function AccountTagsModal({
 
   const onCreate = async (name: string) => {
     setPending((n) => [...n, name]); // 即时反馈:先摆上已选中的 chip
+    // 拿到真 id 才写得进 optim,但失败时得撤 —— 记在这儿,catch 里按它回滚。
+    let createdId: string | null = null;
     try {
       const tg = await createTag({ data: { portfolioId, name } });
+      createdId = tg.id;
       // 真 id 到手即写乐观挂载 —— 占位撤下时由它接力,避免 attachedTagIds 晚一拍导致 chip 闪成未选中。
       setOptim((m) => new Map(m).set(tg.id, true));
       await attachTag({ data: { accountId, tagId: tg.id } });
@@ -146,6 +149,16 @@ export function AccountTagsModal({
         const i = n.indexOf(name);
         return i < 0 ? n : [...n.slice(0, i), ...n.slice(i + 1)];
       });
+      // **乐观挂载也得撤**:attach 失败时 attachedTagIds 永远不会追上 true,对账 effect 撤不掉它,
+      // chip 会一直显示「已打上」—— 那正好挡住上面那条「用户可手动挂上」的退路。
+      const failedId = createdId; // 闭包里收窄:TS 不信 let 在回调执行时仍非空
+      if (failedId) {
+        setOptim((m) => {
+          const n = new Map(m);
+          n.delete(failedId);
+          return n;
+        });
+      }
       await router.invalidate();
       fail();
     }

@@ -21,7 +21,12 @@ import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { getHoldingHistory } from "../lib/server/holdings";
 import { signedUsd } from "../lib/signed-usd";
-import { groupByAccount, groupByPlatform, type SourceGroup } from "../lib/source-groups";
+import {
+  ACCOUNT_SLOTS,
+  groupByAccount,
+  groupByPlatform,
+  type SourceGroup,
+} from "../lib/source-groups";
 import { AccountName } from "./account-name";
 import { AvatarStack } from "./avatar-stack";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
@@ -63,9 +68,9 @@ function NameLine({
 
 // 平台行副名:点名组内**按 value 倒序**的账户(#351 ③)—— 比原先的「{n} accounts」计数多说一句「是谁」。
 // 折叠与账户行的 tag 同一条规则(collapseToSlots):3 个以内全显,超过 3 个显 2 个 + `+n`。
+// 阈值直接用 source-groups 导出的 ACCOUNT_SLOTS —— 它同时决定 topAccounts 带几个候选,两边必须一致
+// (各写一份的话,阈值一改就会在「恰好等于阈值」那档静默少显一个)。
 // total 传组内账户总数(topAccounts 只带前几名),每个 `@名` 各自截断、尾巴不被挤掉。
-const ACCOUNT_SLOTS = 3;
-
 function AccountNames({
   accounts,
   total,
