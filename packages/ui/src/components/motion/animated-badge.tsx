@@ -1,7 +1,15 @@
 "use client";
 // beui.dev/components/motion/animated-badge — @/ 别名已改写为 @folio/ui/*。
 
-import { AlertTriangle, Check, Circle, Info, LoaderCircle, X, type LucideIcon } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Circle,
+  Info,
+  LoaderCircle,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import {
   AnimatePresence,
   motion,
@@ -13,10 +21,20 @@ import type { ReactNode } from "react";
 import { EASE_OUT } from "@folio/ui/lib/ease";
 import { cn } from "@folio/ui/lib/utils";
 
-export type AnimatedBadgeStatus = "neutral" | "info" | "success" | "warning" | "danger" | "loading";
+export type AnimatedBadgeStatus =
+  | "neutral"
+  | "info"
+  | "success"
+  | "warning"
+  | "danger"
+  | "loading";
+
 export type AnimatedBadgeSize = "sm" | "md";
 
-export interface AnimatedBadgeProps extends Omit<HTMLMotionProps<"span">, "children"> {
+export interface AnimatedBadgeProps extends Omit<
+  HTMLMotionProps<"span">,
+  "children"
+> {
   status?: AnimatedBadgeStatus;
   size?: AnimatedBadgeSize;
   children?: ReactNode;
@@ -55,7 +73,13 @@ const ICONS: Record<AnimatedBadgeStatus, LucideIcon> = {
 };
 
 const ICON_ROLL_VARIANTS: Variants = {
-  initial: { opacity: 0.72, y: "80%", scale: 0.92, rotate: -8, filter: "blur(6px)" },
+  initial: {
+    opacity: 0.72,
+    y: "80%",
+    scale: 0.92,
+    rotate: -8,
+    filter: "blur(6px)",
+  },
   animate: {
     opacity: 1,
     y: "0%",
@@ -92,7 +116,12 @@ const TEXT_ROLL_VARIANTS: Variants = {
       filter: { duration: 0.42, ease: EASE_OUT },
     },
   },
-  exit: { opacity: 0.5, y: "-85%", filter: "blur(6px)", transition: { duration: 0.2, ease: EASE_OUT } },
+  exit: {
+    opacity: 0.5,
+    y: "-85%",
+    filter: "blur(6px)",
+    transition: { duration: 0.2, ease: EASE_OUT },
+  },
 };
 
 export function AnimatedBadge({
@@ -110,7 +139,9 @@ export function AnimatedBadge({
   const Icon = ICONS[status];
   const resolvedContentKey =
     contentKey ??
-    (typeof children === "string" || typeof children === "number" ? children : status);
+    (typeof children === "string" || typeof children === "number"
+      ? children
+      : status);
 
   return (
     <motion.span
@@ -130,7 +161,7 @@ export function AnimatedBadge({
           aria-hidden
           className="absolute inset-0 rounded-full bg-current opacity-10"
           animate={{ scale: [0.94, 1.08, 0.94], opacity: [0.08, 0.16, 0.08] }}
-          transition={{ duration: 1.6, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
         />
       ) : null}
       {showIcon ? (
@@ -149,7 +180,7 @@ export function AnimatedBadge({
               {status === "loading" && !reduce && !icon ? (
                 <motion.span
                   animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                   className="inline-flex"
                 >
                   <Icon className={ICON_CLASS[size]} />

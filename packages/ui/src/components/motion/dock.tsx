@@ -6,7 +6,10 @@ import { createContext, useContext, useId, useMemo, type ReactNode } from "react
 import { SPRING_LAYOUT } from "@folio/ui/lib/ease";
 import { cn } from "@folio/ui/lib/utils";
 
-type DockContextValue = { size: number; pillLayoutId: string };
+type DockContextValue = {
+  size: number;
+  pillLayoutId: string;
+};
 
 const DockContext = createContext<DockContextValue | null>(null);
 
@@ -19,7 +22,11 @@ export interface DockProps {
 
 export function Dock({ children, size = 44, className }: DockProps) {
   const pillLayoutId = useId();
-  const ctx = useMemo<DockContextValue>(() => ({ size, pillLayoutId }), [size, pillLayoutId]);
+  const ctx = useMemo<DockContextValue>(
+    () => ({ size, pillLayoutId }),
+    [size, pillLayoutId],
+  );
+
   return (
     <DockContext.Provider value={ctx}>
       <div
@@ -37,13 +44,19 @@ export function Dock({ children, size = 44, className }: DockProps) {
 export interface DockItemProps {
   children: ReactNode;
   className?: string;
-  /** When set, renders as a <button>. Omit when children carry their own link/button. */
+  /** When set, the item renders as a <button>. Omit when children carry their own link or button. */
   onClick?: () => void;
   active?: boolean;
   "aria-label"?: string;
 }
 
-export function DockItem({ children, className, onClick, active, ...rest }: DockItemProps) {
+export function DockItem({
+  children,
+  className,
+  onClick,
+  active,
+  ...rest
+}: DockItemProps) {
   const dock = useContext(DockContext);
   const reduce = useReducedMotion();
   const size = dock?.size ?? 44;
@@ -53,7 +66,7 @@ export function DockItem({ children, className, onClick, active, ...rest }: Dock
     <motion.span
       layoutId={pillLayoutId}
       transition={reduce ? { duration: 0 } : SPRING_LAYOUT}
-      className="absolute inset-0.5 -z-10 rounded-xl bg-primary/10"
+      className="absolute inset-0.5 -z-10 rounded-xl bg-primary/5"
     />
   ) : null;
   const sharedStyle = { width: size, height: size };
@@ -82,6 +95,7 @@ export function DockItem({ children, className, onClick, active, ...rest }: Dock
     );
   }
 
+  // Children carry their own link or button (and its accessible name).
   return (
     <div style={sharedStyle} className={sharedClass}>
       {pill}
@@ -91,5 +105,10 @@ export function DockItem({ children, className, onClick, active, ...rest }: Dock
 }
 
 export function DockSeparator({ className }: { className?: string }) {
-  return <span aria-hidden className={cn("mx-1 h-6 w-px self-center bg-border", className)} />;
+  return (
+    <span
+      aria-hidden
+      className={cn("mx-1 h-6 w-px self-center bg-border", className)}
+    />
+  );
 }

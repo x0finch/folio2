@@ -1,6 +1,8 @@
 "use client";
 // beui.dev/components/motion/button — fork:新增 `destructive` 变体 + `buttonVariants` 辅助(供
 // 非按钮元素如导出链接复用样式)。@/ 别名已改写为 @folio/ui/*。
+// **有 fork 就不能直接 `shadcn add` 覆盖**(会把上面两样冲掉)。所以上游后来的改动是手抄进来的:
+// ripple 的 id 提到 updater 外、初始 scale 0 → 0.05。下次同步照此逐条抄。
 
 import { AnimatePresence, motion, useReducedMotion, type HTMLMotionProps } from "motion/react";
 import { forwardRef, type PointerEvent, type ReactNode, useCallback, useRef, useState } from "react";
@@ -63,9 +65,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       if (ripple && !reduce) {
         const rect = event.currentTarget.getBoundingClientRect();
         const size = Math.max(rect.width, rect.height) * 2;
+        // id 在 updater 外取:updater 在 StrictMode 下会跑两遍,放里面会白烧一个 id。
+        const id = nextId.current++;
         setRipples((prev) => [
           ...prev,
-          { id: nextId.current++, x: event.clientX - rect.left, y: event.clientY - rect.top, size },
+          { id, x: event.clientX - rect.left, y: event.clientY - rect.top, size },
         ]);
       }
       onPointerDown?.(event);
@@ -92,7 +96,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
                 key={r.id}
                 className="absolute rounded-full bg-current"
                 style={{ left: r.x, top: r.y, width: r.size, height: r.size, x: "-50%", y: "-50%" }}
-                initial={{ scale: 0, opacity: 0.3 }}
+                initial={{ scale: 0.05, opacity: 0.3 }}
                 animate={{ scale: 1, opacity: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 1.6, ease: EASE_OUT }}

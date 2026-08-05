@@ -15,7 +15,7 @@
     "utils": "@folio/ui/lib/utils",
     "ui": "@folio/ui/components",
     "lib": "@folio/ui/lib",
-    "hooks": "@folio/ui/hooks"
+    "hooks": "@folio/ui/lib/hooks"
   },
   "registries": {
     "@beui": "https://beui.dev/r/{name}.json"

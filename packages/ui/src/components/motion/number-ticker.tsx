@@ -8,16 +8,23 @@ import { cn } from "@folio/ui/lib/utils";
 
 export interface NumberTickerProps {
   value: number;
+  /** Digits to pad to (left). */
   pad?: number;
+  /** Per-digit roll duration in seconds. */
   duration?: number;
+  /** Stagger between digits. */
   stagger?: number;
+  /** Render only after the element enters the viewport. */
   startOnView?: boolean;
   prefix?: string;
   suffix?: string;
+  /** Add a small blur during digit rolls. */
   blur?: boolean;
   className?: string;
   digitClassName?: string;
+  /** Insert locale group separators (commas). Server-component safe. */
   locale?: boolean;
+  /** Custom formatter. Client-only — server components must use `locale` instead. */
   format?: (value: number) => string;
 }
 
@@ -48,16 +55,26 @@ export function NumberTicker({
 
   const text = useMemo(() => {
     const rounded = Math.round(value);
-    const formatted = format ? format(rounded) : locale ? rounded.toLocaleString() : rounded.toString();
+    const formatted = format
+      ? format(rounded)
+      : locale
+        ? rounded.toLocaleString()
+        : rounded.toString();
     return pad ? formatted.padStart(pad, "0") : formatted;
   }, [value, pad, format, locale]);
-
   const glyphs = useMemo(() => {
     const chars = text.split("");
+    // Key by place value (position from the right): a changing digit keeps its
+    // identity and rolls to the new value instead of remounting and replaying
+    // from 0. Growing numbers add glyphs on the left without re-keying the
+    // ones, tens, hundreds already on screen.
     return chars.map((char, i) => ({ char, id: `g-${chars.length - 1 - i}` }));
   }, [text]);
   const readableText = `${prefix ?? ""}${text}${suffix ?? ""}`;
 
+  // Stagger is an entrance flourish. Once the reveal has played, value
+  // changes roll every digit immediately — a per-digit delay on live updates
+  // reads as lag.
   const [entered, setEntered] = useState(false);
   useEffect(() => {
     if (!armed || entered) return;
@@ -67,7 +84,10 @@ export function NumberTicker({
   }, [armed, entered, duration, stagger, glyphs.length]);
 
   return (
-    <span ref={containerRef} className={cn("inline-flex items-center tabular-nums", className)}>
+    <span
+      ref={containerRef}
+      className={cn("inline-flex items-center tabular-nums", className)}
+    >
       <span className="sr-only">{readableText}</span>
       <span aria-hidden="true" className="inline-flex items-center">
         {prefix ? <span>{prefix}</span> : null}
@@ -115,13 +135,21 @@ function Digit({
   const columnRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
-    if (reduce || !blur || !columnRef.current || !Number.isFinite(digit)) return;
+    if (reduce || !blur || !columnRef.current || !Number.isFinite(digit)) {
+      return;
+    }
+
     const node = columnRef.current;
     const controls = animate(
       node,
       { filter: ["blur(10px)", "blur(0px)"] },
-      { duration: Math.min(duration * 0.75, 0.32), delay, ease: EASE_OUT },
+      {
+        duration: Math.min(duration * 0.75, 0.32),
+        delay,
+        ease: EASE_OUT,
+      },
     );
+
     return () => {
       controls.stop();
       node.style.filter = "blur(0px)";
@@ -137,11 +165,18 @@ function Digit({
         ref={columnRef}
         initial={{ y: 0 }}
         animate={{ y: `-${digit * DIGIT_HEIGHT_EM}em` }}
-        transition={reduce ? { duration: 0 } : { duration, delay, ease: EASE_OUT }}
+        transition={
+          reduce
+            ? { duration: 0 }
+            : { duration, delay, ease: EASE_OUT }
+        }
         className="absolute inset-x-0 top-0 flex flex-col items-center will-change-[transform,filter]"
       >
         {DIGITS.map((n) => (
-          <span key={n} className="flex h-[1.1em] items-center justify-center leading-none">
+          <span
+            key={n}
+            className="flex h-[1.1em] items-center justify-center leading-none"
+          >
             {n}
           </span>
         ))}

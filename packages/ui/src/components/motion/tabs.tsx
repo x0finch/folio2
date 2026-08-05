@@ -1,8 +1,16 @@
 "use client";
-// beui.dev/components/motion/tabs — beUI 动效层。@/ 别名已按本仓改写为 @folio/ui/*。
+// beui.dev/components/motion/tabs — @/ 别名已改写为 @folio/ui/*。
 
 import { motion, MotionConfig, useReducedMotion, type Transition } from "motion/react";
-import { createContext, useContext, useId, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useId,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { EASE_OUT } from "@folio/ui/lib/ease";
 import { cn } from "@folio/ui/lib/utils";
 
@@ -52,13 +60,20 @@ export function Tabs({
   const reduce = useReducedMotion();
   const controlled = value !== undefined;
   const current = controlled ? value : internal;
-  const setValue = (v: string) => {
-    if (!controlled) setInternal(v);
-    onValueChange?.(v);
-  };
+  const setValue = useCallback(
+    (v: string) => {
+      if (!controlled) setInternal(v);
+      onValueChange?.(v);
+    },
+    [controlled, onValueChange],
+  );
+  const contextValue = useMemo(
+    () => ({ value: current, setValue, layoutId, variant }),
+    [current, layoutId, setValue, variant],
+  );
   return (
     <MotionConfig transition={reduce ? { duration: 0 } : transition}>
-      <TabsCtx.Provider value={{ value: current, setValue, layoutId, variant }}>
+      <TabsCtx.Provider value={contextValue}>
         {/* layoutRoot: the indicator's layoutId measures in page coordinates, so
             inside fixed/scrolled containers it would replay scroll offsets as
             movement. The pill only ever travels within the list, so scoping
@@ -115,17 +130,18 @@ export function TabsTrigger({
       >
         {children}
         {active ? (
-          <motion.span
-            layoutId={layoutId}
-            className={cn("absolute -bottom-px left-0 right-0 h-0.5 bg-foreground", indicatorClassName)}
-          />
+        <motion.span
+          layoutId={layoutId}
+          className={cn(
+            "absolute -bottom-px left-0 right-0 h-px bg-primary",
+            indicatorClassName,
+          )}
+        />
         ) : null}
       </button>
     );
   }
 
-  // Pill + Segment use the same trick: a max-contrast pill slides via layoutId,
-  // text uses `mix-blend-exclusion` so it inverts dynamically against the moving bg.
   const radius = variant === "pill" ? "rounded-full" : "rounded-md";
 
   return (
@@ -134,7 +150,11 @@ export function TabsTrigger({
         <motion.span
           layoutId={layoutId}
           style={{ borderRadius: variant === "pill" ? 9999 : 8 }}
-          className={cn("absolute inset-0 bg-primary", radius, indicatorClassName)}
+          className={cn(
+            "absolute inset-0 bg-primary",
+            radius,
+            indicatorClassName,
+          )}
         />
       ) : null}
       <button
@@ -143,8 +163,11 @@ export function TabsTrigger({
         aria-selected={active}
         onClick={() => setValue(value)}
         className={cn(
-          "relative z-10 inline-flex items-center justify-center whitespace-nowrap bg-transparent px-3.5 py-1.5 text-sm font-medium transition-colors outline-none",
-          active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+          "relative z-10 inline-flex items-center justify-center whitespace-nowrap bg-transparent px-3.5 py-1.5 text-sm font-medium outline-none",
+          "transition-colors",
+          active
+            ? "text-primary-foreground"
+            : "text-muted-foreground hover:text-foreground",
           radius,
           className,
         )}
@@ -155,20 +178,13 @@ export function TabsTrigger({
   );
 }
 
-export function TabsContent({
-  value,
-  children,
-  className,
-}: {
-  value: string;
-  children: ReactNode;
-  className?: string;
-}) {
+export function TabsContent({ value, children, className }: { value: string; children: ReactNode; className?: string }) {
   const { value: current } = useTabs();
   const reduce = useReducedMotion();
   const active = current === value;
-  // Inactive panels stay mounted but hidden, so their content is present in the
-  // server-rendered HTML for crawlers and assistive tech.
+  // Inactive panels stay mounted but hidden, so their content (e.g. source
+  // code) is present in the server-rendered HTML for crawlers and assistive
+  // tech, instead of being dropped from the DOM.
   if (!active) {
     return (
       <div hidden className={className}>
