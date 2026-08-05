@@ -203,8 +203,11 @@ test.describe("锁屏", () => {
     // "element was detached"。重新进一次登录页并等到它活了,拿一个干净的挂载。
     await gotoHydrated(page, "/login");
     await page.getByLabel(/email/i).fill(email);
+    // 回车提交,不点那个按钮:登录页 hydration 后 usePasskeySupport 翻真、多出一个 passkey 按钮,
+    // 表单随之变高 —— 「Sign in」按钮会先 not stable 再被换掉(detached),点它是在追一个动靶。
+    // 输入框本身不动,回车是同一个提交动作。
     await page.getByLabel(/password/i).fill("e2e-password-1234");
-    await page.getByRole("button", { name: /^sign in$/i }).click();
+    await page.getByLabel(/password/i).press("Enter");
 
     await expect(page).toHaveURL(/^[^?]*\/(\?.*)?$/);
     await expect(page.getByRole("button", { name: /unlock with passkey/i })).toHaveCount(0);

@@ -80,15 +80,34 @@ test.describe("绕过锁屏的尝试", () => {
 
   // ↓↓↓ 以下是「固化取舍」,断言的是现状。改动这些断言等于改动威胁模型,应当先改 ADR 0029。 ↓↓↓
 
-  test("手动清掉「已锁」标记能绕过 —— ADR 0029 明确接受的代价", async ({ page }) => {
+  // 这条原来写的是「清掉『已锁』标记就绕过了」,**断言的是一件假的事**:只清那个标记不够,重载后
+  // 挂载时还会拿「最后活跃」时间戳比一次,陈旧就重新锁上。它当初能过是因为断言偶尔抢在 hydration
+  // 之前采到了服务端渲染的那一帧 —— CI 上被 flaky 闸门抓出来才发现。拆成两条,各说一件真事。
+  test("只清「已锁」标记不够 → 重载后挂载比对会重新锁上", async ({ page }) => {
     await page.goto("/settings");
     await lockNow(page);
 
     await page.evaluate((keys) => localStorage.removeItem(keys.locked), KEYS);
     await page.reload();
 
+    // 跨标签用的那个共享标记只是其中一半;真正判「该不该锁」的是时间戳。
+    await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
+  });
+
+  test("把闲置锁的本地状态清干净能绕过 —— ADR 0029 明确接受的代价", async ({ page }) => {
+    await page.goto("/settings");
+    await lockNow(page);
+
+    // 会绕的人不会只删一个键。两个都清掉 = 「刚刚才活跃过、也没人锁着」。
+    await page.evaluate((keys) => {
+      localStorage.removeItem(keys.locked);
+      localStorage.removeItem(keys.lastActive);
+    }, KEYS);
+    await page.reload();
+
     // 绕过了。锁只封前端 DOM,这条路要堵得做服务端锁 —— 见 ADR 0029 的 Considered Options。
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /unlock with passkey/i })).toHaveCount(0);
   });
 
   test("把「最后活跃」改到未来 → 不会锁(时钟回拨保守不锁)", async ({ page }) => {
