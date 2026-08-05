@@ -7,8 +7,8 @@ import { DetailRow } from "./detail-row";
 
 // 强平风险环(H5 #120,概念稿定稿:温度计→血条→环):~20px SVG 圆环把「距强平多远」
 // 压缩成 占比(安全余量 clamp 到满环)+ 三态色:安全 --pos、警告 --warn、危险 --neg,无发光。
-// 明细(余量%/开仓/标记/强平)走 beUI Popover(hover / 键盘 focus)渐进披露;
-// 动态方向这类调用侧行为取自 useHoverPopover(与 NoteIndicator 共用)。
+// 明细(余量%/开仓/标记/强平)走 beUI Popover(hover / 键盘 focus)渐进披露;抬 z、隐垫底、
+// 动态方向等调用侧行为统一取自 useHoverPopover(与 NoteIndicator 共用)。
 // risk 由父级算好传入(父级本就用它决定渲染与否,不重复推导)。
 
 const R = 8; // viewBox 24 内的环半径
@@ -63,7 +63,12 @@ export function LiqRing({ risk, position }: { risk: LiqRisk; position: PerpPosit
   const usd = useDisplayValue();
   const pop = useHoverPopover();
   return (
-    <Popover trigger="hover" side={pop.side} onOpenChange={pop.onOpenChange} className="shrink-0">
+    <Popover
+      trigger="hover"
+      side={pop.side}
+      onOpenChange={pop.onOpenChange}
+      className={cn("shrink-0", pop.rootClassName)}
+    >
       <PopoverTrigger>
         {/* 可聚焦 button:键盘 Tab → focus 即开(hover 模式对 focus 同样生效)。 */}
         <button

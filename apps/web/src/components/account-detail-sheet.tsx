@@ -313,6 +313,7 @@ function DetailBody({
             align="end"
             panelRadius={12}
             onOpenChange={menuPop.onOpenChange}
+            className={menuPop.rootClassName}
           >
             <PopoverTrigger>
               <button

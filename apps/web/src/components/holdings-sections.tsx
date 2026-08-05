@@ -283,7 +283,7 @@ function displayWeights(segs: RoleSeg[]): number[] {
 
 // 构成条(H5 #120 定稿,C 方案):协议名下一条 4px 细条,按角色分段(段宽 = 毛敞口占比),
 // 角色名排条上方、按段宽对齐,写不下则整条隐藏(opacity:0 占位留白,与色段保持对齐)。整块是
-// hover 触发器 → 弹按角色分组的全量明细(方向自适应取自 useHoverPopover,与风险环/笔记同款)。
+// hover 触发器 → 弹按角色分组的全量明细(方向自适应 / 抬 z / 隐垫底取自 useHoverPopover,与风险环/笔记同款)。
 function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
   const usd = useDisplayValue();
   const pop = useHoverPopover();
@@ -319,10 +319,11 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
         side={pop.side}
         align="start"
         onOpenChange={pop.onOpenChange}
-        className="w-full"
+        className={cn("w-full", pop.rootClassName)}
       >
         {/* 透明 hover 捕获层:把「角色名 + 条 + 条下方一小条」连成一整片 hover 区 —— 否则 root in-flow 盒
-            只有 4px 的条,鼠标稍移到条下方就出判定区而关闭。absolute → 不影响 root 盒(锚点仍在条)。 */}
+            只有 4px 的条,鼠标稍移到条下方就出判定区而关闭。absolute → 不影响 root 盒(锚点仍在条);
+            **不带 aria-hidden**(否则会被 useHoverPopover 关闭态的 [&>[aria-hidden]]:hidden 隐藏,就捕获不到 hover)。 */}
         <div className="absolute inset-x-0 -top-4 -bottom-3.5" />
         {/* 角色名:绝对定位在条正上方,但仍是 Popover root 的 DOM 子级 —— hover 区照样覆盖它(beUI 的
             mouseenter 挂在 root 上,按 DOM 子树触发、不看几何盒);因不占 root in-flow 盒,root 顶 = 条顶,

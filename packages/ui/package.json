@@ -9,7 +9,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./globals.css": "./src/styles/globals.css",
-    "./components/motion/popover-position": "./src/components/motion/popover-position.ts",
     "./components/*": "./src/components/*.tsx",
     "./lib/*": "./src/lib/*.ts"
   },

@@ -1,12 +1,20 @@
 "use client";
-// beui.dev/components/motion/popover — @/ 别名已改写为 @folio/ui/*。
+// beui.dev/components/motion/popover
+//
+// **这个件停在旧版,别跟着上游升**(2026-08 试过一次,退了)。上游把面板 portal 到 body,并用一个
+// SVG `<mask>` 把触发器那块从 goo 垫底层里挖掉。问题是 **WebKit 不认从 CSS `mask` 引 SVG 的
+// `<mask>` 元素**(Chrome 认),于是在 iOS Safari 上 mask 整个失效:旧版那层是 `z-[-1]` 藏在触发器
+// 背后,失效也看不出来;portal 之后它盖在所有东西之上,就变成一个圆角矩形正面糊住触发器。
+// beUI 官网自己的 demo 在手机上同样糊 —— 是上游的 bug,不是我们接错。
+// 想升之前先在真 iOS 上验这一条。调用侧那两条 workaround(抬 z / 关闭态隐垫底)也因此留着,
+// 见 apps/web/src/lib/hooks/use-hover-popover.ts。
 
 import {
   animate,
-  type MotionValue,
   useMotionValue,
   useMotionValueEvent,
   useReducedMotion,
+  type MotionValue,
 } from "motion/react";
 import {
   cloneElement,
@@ -24,28 +32,18 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
-import { usePopoverPortalPosition } from "@folio/ui/components/motion/popover-position";
 import { cn } from "@folio/ui/lib/utils";
 
 type Side = "top" | "bottom";
 type Align = "start" | "center" | "end";
 type TriggerMode = "click" | "hover";
 
-// This morph needs less bounce than layout motion: too much overshoot makes
-// the liquid neck balloon past the final panel edges.
-const GOO_OPEN_SPRING = {
+const GOO_SPRING = {
   type: "spring",
-  visualDuration: 0.3,
-  bounce: 0.15,
-} as const;
-const GOO_CLOSE_SPRING = {
-  type: "spring",
-  visualDuration: 0.21,
-  bounce: 0.15,
+  visualDuration: 0.32,
+  bounce: 0.28,
 } as const;
 const HOVER_CLOSE_DELAY = 120;
-const CIRCLE_KAPPA = 0.5523;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -96,20 +94,7 @@ function buildGeo(
   };
 }
 
-function rectAtProgress(geo: Geo, progress: number): Rect {
-  const trigger = geo.trigger;
-  const panel = geo.panel;
-
-  return {
-    x: lerp(trigger.x, panel.x, progress),
-    y: lerp(trigger.y, panel.y, progress),
-    w: lerp(trigger.w, panel.w, progress),
-    h: lerp(trigger.h, panel.h, progress),
-    r: lerp(trigger.r, panel.r, progress),
-  };
-}
-
-function insetFor(rect: Rect, layerW: number, layerH: number) {
+function insetFor(rect: Rect, layerW: number, layerH: number): string {
   const top = rect.y;
   const right = layerW - (rect.x + rect.w);
   const bottom = layerH - (rect.y + rect.h);
@@ -117,34 +102,17 @@ function insetFor(rect: Rect, layerW: number, layerH: number) {
   return `inset(${top}px ${right}px ${bottom}px ${left}px round ${rect.r}px)`;
 }
 
-function roundedRectShape(rect: Rect) {
-  const radius = Math.max(0, Math.min(rect.r, rect.w / 2, rect.h / 2));
-  const control = radius * CIRCLE_KAPPA;
-  const x1 = rect.x;
-  const y1 = rect.y;
-  const x2 = rect.x + rect.w;
-  const y2 = rect.y + rect.h;
-  const px = (value: number) => `${value.toFixed(3)}px`;
-
-  return (
-    `shape(from ${px(x1 + radius)} ${px(y1)}, ` +
-    `line to ${px(x2 - radius)} ${px(y1)}, ` +
-    `curve to ${px(x2)} ${px(y1 + radius)} with ${px(x2 - radius + control)} ${px(y1)} / ${px(x2)} ${px(y1 + radius - control)}, ` +
-    `line to ${px(x2)} ${px(y2 - radius)}, ` +
-    `curve to ${px(x2 - radius)} ${px(y2)} with ${px(x2)} ${px(y2 - radius + control)} / ${px(x2 - radius + control)} ${px(y2)}, ` +
-    `line to ${px(x1 + radius)} ${px(y2)}, ` +
-    `curve to ${px(x1)} ${px(y2 - radius)} with ${px(x1 + radius - control)} ${px(y2)} / ${px(x1)} ${px(y2 - radius + control)}, ` +
-    `line to ${px(x1)} ${px(y1 + radius)}, ` +
-    `curve to ${px(x1 + radius)} ${px(y1)} with ${px(x1)} ${px(y1 + radius - control)} / ${px(x1 + radius - control)} ${px(y1)}, ` +
-    "close)"
-  );
-}
-
-function clipForProgress(geo: Geo, progress: number, supportsShape: boolean) {
-  const rect = rectAtProgress(geo, progress);
-  return supportsShape
-    ? roundedRectShape(rect)
-    : insetFor(rect, geo.layerW, geo.layerH);
+function insetForProgress(geo: Geo, p: number): string {
+  const t = geo.trigger;
+  const pn = geo.panel;
+  const rect: Rect = {
+    x: lerp(t.x, pn.x, p),
+    y: lerp(t.y, pn.y, p),
+    w: lerp(t.w, pn.w, p),
+    h: lerp(t.h, pn.h, p),
+    r: lerp(t.r, pn.r, p),
+  };
+  return insetFor(rect, geo.layerW, geo.layerH);
 }
 
 interface PopoverContextValue {
@@ -164,7 +132,6 @@ interface PopoverContextValue {
   contentId: string;
   progress: MotionValue<number>;
   triggerRef: React.MutableRefObject<HTMLElement | null>;
-  contentRef: React.MutableRefObject<HTMLDivElement | null>;
 }
 
 const PopoverContext = createContext<PopoverContextValue | null>(null);
@@ -215,7 +182,6 @@ export function Popover({
   const contentId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progress = useMotionValue(defaultOpen ? 1 : 0);
 
@@ -256,11 +222,7 @@ export function Popover({
     const animation = animate(
       progress,
       open ? 1 : 0,
-      reduce
-        ? { duration: 0 }
-        : open
-          ? GOO_OPEN_SPRING
-          : GOO_CLOSE_SPRING,
+      reduce ? { duration: 0 } : GOO_SPRING,
     );
     return () => animation.stop();
   }, [open, progress, reduce]);
@@ -268,14 +230,9 @@ export function Popover({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    // The panel is portalled, so both trees participate in outside detection.
+    // Trigger and panel share rootRef, so moving between them isn't "outside".
     const onPointer = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (
-        rootRef.current &&
-        !rootRef.current.contains(target) &&
-        !contentRef.current?.contains(target)
-      )
+      if (rootRef.current && !rootRef.current.contains(e.target as Node))
         setOpen(false);
     };
     window.addEventListener("keydown", onKey);
@@ -304,7 +261,6 @@ export function Popover({
       contentId,
       progress,
       triggerRef,
-      contentRef,
     }),
     [
       open,
@@ -409,7 +365,6 @@ export interface PopoverContentProps {
 
 export function PopoverContent({ children, className }: PopoverContentProps) {
   const ctx = usePopoverContext("PopoverContent");
-  const [portalReady, setPortalReady] = useState(false);
   const {
     side,
     align,
@@ -421,59 +376,69 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
     contentId,
     progress,
     triggerRef,
-    contentRef,
     open,
     triggerMode,
     openHover,
     scheduleClose,
   } = ctx;
 
-  const measureRef = contentRef;
+  const measureRef = useRef<HTMLDivElement>(null);
   const blobRef = useRef<HTMLDivElement>(null);
   const clipRef = useRef<HTMLDivElement>(null);
   const geoRef = useRef<Geo | null>(null);
-  const supportsShapeRef = useRef(false);
-  const layout = usePopoverPortalPosition(
-    triggerRef,
-    measureRef,
-    portalReady,
-  );
 
-  useEffect(() => setPortalReady(true), []);
+  const [sizes, setSizes] = useState({ tW: 0, tH: 0, cW: 0, cH: 0 });
+
+  useLayoutEffect(() => {
+    const triggerNode = triggerRef.current;
+    const contentNode = measureRef.current;
+    if (!contentNode) return;
+
+    const measure = () => {
+      const tW = triggerNode?.offsetWidth ?? 0;
+      const tH = triggerNode?.offsetHeight ?? 0;
+      const cW = contentNode.offsetWidth;
+      const cH = contentNode.offsetHeight;
+      setSizes((prev) =>
+        prev.tW === tW && prev.tH === tH && prev.cW === cW && prev.cH === cH
+          ? prev
+          : { tW, tH, cW, cH },
+      );
+    };
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(contentNode);
+    if (triggerNode) observer.observe(triggerNode);
+    return () => observer.disconnect();
+  }, [triggerRef]);
 
   const geo = useMemo(
     () =>
       buildGeo(
-        layout?.trigger.width ?? 0,
-        layout?.trigger.height ?? 0,
-        layout?.content.width ?? 0,
-        layout?.content.height ?? 0,
+        sizes.tW,
+        sizes.tH,
+        sizes.cW,
+        sizes.cH,
         side,
         align,
         gap,
         panelRadius,
       ),
-    [layout, side, align, gap, panelRadius],
+    [sizes, side, align, gap, panelRadius],
   );
+  geoRef.current = geo;
 
   // Morph the same clip on the goo body and the content, so the whole popover
   // oozes as one and the text reveals with it.
   const render = useCallback((g: Geo | null, p: number) => {
     if (!g || g.layerW === 0) return;
-    const clip = clipForProgress(g, p, supportsShapeRef.current);
+    const clip = insetForProgress(g, p);
     if (blobRef.current) blobRef.current.style.clipPath = clip;
     if (clipRef.current) clipRef.current.style.clipPath = clip;
   }, []);
 
   useLayoutEffect(() => {
-    supportsShapeRef.current =
-      typeof CSS !== "undefined" &&
-      typeof CSS.supports === "function" &&
-      CSS.supports(
-        "clip-path",
-        "shape(from 0px 0px, line to 1px 1px, close)",
-      );
-    geoRef.current = geo;
     render(geo, progress.get());
   }, [geo, progress, render]);
 
@@ -483,27 +448,18 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
     triggerMode === "hover"
       ? { onMouseEnter: openHover, onMouseLeave: scheduleClose }
       : {};
-  const maskId = `${gooId}-trigger-cutout`;
 
-  // Match the server and first client render, then attach the portal after
-  // hydration. This preserves SSR without regenerating the page on the client.
-  if (!portalReady) return null;
-
-  return createPortal(
-    <div
-      data-popover-portal=""
-      className="pointer-events-none fixed left-0 top-0 z-[9999] isolate size-0"
-      style={{
-        visibility: layout ? "visible" : "hidden",
-        transform: `translate3d(${layout?.trigger.left ?? 0}px, ${layout?.trigger.top ?? 0}px, 0)`,
-      }}
-    >
+  return (
+    <>
       {/* Goo filter: blur, sharpen the alpha back into solid shapes, then lay
-          the crisp original on top so blobs merge with liquid edges. The mask
-          removes the real trigger area so this top-layer copy never covers its
-          label or focus ring. */}
-      <svg aria-hidden width="0" height="0" className="absolute">
-        <title>Popover visual effects</title>
+          the crisp original on top so blobs merge with liquid edges. */}
+      <svg
+        aria-hidden
+        width="0"
+        height="0"
+        className="pointer-events-none absolute"
+      >
+        <title>Popover goo filter</title>
         <defs>
           <filter id={gooId} x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur
@@ -519,29 +475,10 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
             />
             <feComposite in="SourceGraphic" in2="goo" operator="atop" />
           </filter>
-          <mask
-            id={maskId}
-            maskUnits="userSpaceOnUse"
-            maskContentUnits="userSpaceOnUse"
-            x={0}
-            y={0}
-            width={geo.layerW}
-            height={geo.layerH}
-          >
-            <rect width={geo.layerW} height={geo.layerH} fill="white" />
-            <rect
-              x={geo.trigger.x}
-              y={geo.trigger.y}
-              width={geo.trigger.w}
-              height={geo.trigger.h}
-              rx={geo.trigger.r}
-              fill="black"
-            />
-          </mask>
         </defs>
       </svg>
 
-      {/* Goo body: static trigger pill + morphing blob. */}
+      {/* Goo body: static trigger pill + morphing blob, behind the trigger. */}
       <div
         aria-hidden
         className="pointer-events-none absolute z-[-1]"
@@ -551,8 +488,6 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
           width: geo.layerW,
           height: geo.layerH,
           filter: reduce ? undefined : `url(#${gooId})`,
-          mask: `url(#${maskId})`,
-          WebkitMask: `url(#${maskId})`,
         }}
       >
         <div
@@ -568,14 +503,12 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
         <div
           ref={blobRef}
           className="absolute inset-0 bg-popover"
-          style={{
-            clipPath: clipForProgress(geo, progress.get(), false),
-          }}
+          style={{ clipPath: insetForProgress(geo, progress.get()) }}
         />
       </div>
 
-      {/* Content is clipped by the same morph. The portal wrapper stays
-          pointer-transparent; only the fully open panel accepts interaction. */}
+      {/* Content, clipped by the same morph. pointer-events-none so it never
+          shadows the trigger; the open panel re-enables its own. */}
       <div
         className="pointer-events-none absolute z-10"
         style={{
@@ -590,7 +523,7 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
           inert={!open}
           className="absolute inset-0"
           style={{
-            clipPath: clipForProgress(geo, progress.get(), false),
+            clipPath: insetForProgress(geo, progress.get()),
             pointerEvents: open ? "auto" : "none",
           }}
         >
@@ -614,7 +547,6 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
           </div>
         </div>
       </div>
-    </div>,
-    document.body,
+    </>
   );
 }
