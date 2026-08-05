@@ -20,12 +20,15 @@ import { AuthShell } from "./auth-shell";
 // **在场证明**,证明「此刻在键盘前的还是那个人」,被密码管理器代持的密码证明不了后者。
 export function LockScreen({ children }: { children: ReactNode }) {
   const { timeoutMs, enabled } = useIdleTimeout();
-  const { ready } = useLockDevice();
-  // 两道门,任一不过就纯透传 children(不挂 useIdleLock:整套活动监听 / 定时器 / 挂载比对都不进树):
-  // ① 开关关着(默认)—— 「不锁」从「运行时到处判 null」升级为「根本不运行」,结构上消除整类
-  //    漏判的误锁(ADR 0029)。开关独立于时长,见 idle-lock.ts 的 IDLE_LOCK_ENABLED_KEY。
-  // ② 本设备未就绪 —— 没有本机可用的 passkey 就没有解锁手段,锁上等于把人关在门外(#353)。
-  if (!enabled || !ready) return <>{children}</>;
+  // 只看开关键这一道门,不过就纯透传 children(不挂 useIdleLock:整套活动监听 / 定时器 / 挂载比对
+  // 都不进树)。「不锁」从「运行时到处判 null」升级为「根本不运行」,结构上消除整类漏判的误锁
+  // (ADR 0029)。开关独立于时长,见 idle-lock.ts 的 IDLE_LOCK_ENABLED_KEY。
+  //
+  // **曾经还有第二道门:本机没有 passkey 记录就放行。已经取消。** 那条的理由是「宁可不锁也不能把人
+  // 关在门外」,但它把判断做反了:锁是用户明确开的,而「本机记录没了」最常见的成因恰恰是清站点数据 ——
+  // 也就是浏览器里最像「有人在动这台机器」的时刻,那时放行等于把持仓直接摊开。而「关在门外」本来
+  // 就不成立:锁屏上一直有登出,登出重登就进来了(只读看板,登出没有破坏性)。所以宁可锁着。
+  if (!enabled) return <>{children}</>;
   return <ActiveLockScreen timeoutMs={timeoutMs}>{children}</ActiveLockScreen>;
 }
 
@@ -44,6 +47,11 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  // 本机没有凭据记录时先说一句,别让人对着「解锁」按钮反复按。
+  //
+  // 按钮**照留**:记录没了不等于钥匙串里没有 —— 清站点数据只清 localStorage,平台上那条 passkey
+  // 还在,解锁走的是系统的凭据选择、不看这个标记,所以按下去大概率还是能进。真进不去才走登出。
+  const { ready } = useLockDevice();
 
   // 锁定期间锁住底层滚动:fixed 遮罩只是视觉盖住,滚轮/触摸会穿透(scroll chaining)到底下的
   // App。锁 html(文档滚动容器)+ body 双保险;LockOverlay 仅锁定时渲染,挂载即锁、卸载即还原。
@@ -99,6 +107,7 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
       <div className="flex w-full max-w-sm flex-col gap-4">
         <p className="font-medium text-lg">{t("title")}</p>
         <p className="-mt-2 text-muted-foreground text-sm">{t("subtitle")}</p>
+        {!ready && <p className="-mt-2 text-muted-foreground text-sm">{t("noDeviceCredential")}</p>}
 
         <Button type="button" className="w-full" disabled={busy} onClick={onPasskey}>
           <Fingerprint className="size-4" />

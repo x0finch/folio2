@@ -14,3 +14,8 @@ dist/
 skills-lock.json
 
 .scratch/
+# Playwright(E2E)—— 报告与失败时的 trace,不入库
+test-results/
+playwright-report/
+blob-report/
+.playwright/
