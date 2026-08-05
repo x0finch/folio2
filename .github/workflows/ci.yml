@@ -9,32 +9,32 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Two jobs, split to balance wall clock — read this before "tidying" it.
+# Two jobs: everything that needs no browser, and e2e. Read this before splitting
+# the first one again — it used to be split, and the reason has expired.
 #
 # Everything here is CPU-bound compilation on a 2-core runner, so spreading it
-# over machines is the only lever on wall clock. Actions bills each job rounded
-# UP to the whole minute, so that lever costs money. Measured on this repo:
+# over machines is the only lever on wall clock, and Actions bills each job
+# rounded UP to the whole minute, so that lever costs money. Back when these were
+# the only two jobs, buying the extra minute was worth it:
 #
 #   one job                                   145–159s  →  3 billed minutes
-#   checks | test  (39s | 125s, unbalanced)        125s  →  4 billed minutes
-#   the split below (~75s | ~90s, balanced)        ~90s  →  4 billed minutes
+#   checks | web-tests, balanced (~75s | ~90s)    ~90s  →  4 billed minutes
 #
-# We're paying the 4th minute deliberately; given that, the split has to be
-# balanced or the money buys nothing. Hence the odd-looking grouping: the
-# library-package tests run in `checks`, NOT because they belong with lint, but
-# because `checks` was idle at 39s while `test` ran 125s alone. Moving them
-# evens the two sides out and takes ~35s off the wall clock for free.
+# Then e2e arrived and it is the long pole, so whether the rest finishes in 90s or
+# 150s changes the wall clock a PR actually waits by nothing — the extra minute
+# bought nothing, and a duplicate checkout+install came with it. Merged back.
 #
-# So the grouping tracks DURATION, not topic. If a step's cost changes,
-# re-balance rather than re-sorting by what things "are".
+# Measured after merging, on the same run:
 #
-# Coverage is unchanged by the split: 663 (library packages, root vitest
-# `test.projects` runner) + 363 + 95 (apps/web jsdom + workers-pool) = 1121,
-# the same total `pnpm test` runs in one go.
+#   checks (merged)  2m31s      e2e  2m36s      wall clock 2m36s
 #
-# `apps/web`'s tests are the one indivisible chunk left (~63s), so they set the
-# floor. To go below it, attack the tests themselves: almost all of that time
-# is transpile + environment startup, not assertions — all 1121 run in ~5s.
+# **The margin is thin** — 5 seconds — because caching the Chromium download took
+# e2e from ~3m50s down to ~2m36s. So the condition to revisit is close: if e2e
+# gets any faster, or this job any slower, splitting this one in two starts buying
+# wall clock again (at the cost of a billed minute, since Actions rounds each job
+# up). Re-measure before deciding; don't split on the grounds that it "looks big".
+#
+# Step order is cheapest-first, so a red PR fails as early as it can.
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -51,33 +51,21 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Cheapest first, so a red PR fails as early as it can.
       - run: pnpm exec biome ci
       - run: pnpm typecheck
       - run: pnpm knip
       - run: pnpm build
+      # Two runners, not one: `test:packages` is the root vitest `test.projects`
+      # runner over the library packages; apps/web has its own jsdom suite plus a
+      # D1 workers-pool suite (see its package.json). Together they are the same
+      # total `pnpm test` runs locally.
       - run: pnpm test:packages
-
-  web-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      # jsdom suite, then the D1 workers-pool suite (see apps/web package.json).
       - run: pnpm --filter @folio/web test
 
-  # Third job, and it earns its own minute: it needs a browser download (~95 MB) and a real dev
-  # server, neither of which the other two want. Runs the WebAuthn ceremonies that mocks structurally
-  # cannot cover — see apps/web/playwright.config.ts and #354.
+  # Stays its own job, and earns its own minute: it needs a browser and a real server, neither of
+  # which the job above wants, and it is the only one that can't run on a 2-core box in under a
+  # minute anyway. Runs the WebAuthn ceremonies that mocks structurally cannot cover — see
+  # apps/web/playwright.config.ts and #354.
   e2e:
     runs-on: ubuntu-latest
     steps:
