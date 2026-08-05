@@ -25,3 +25,21 @@ Folio 主要在移动端使用,要 PWA 化:能「添加到主屏幕」、独立�
 - **图标产线**:一次性脚本从 `icon.svg` 出 192 / 512 / **maskable-512(留 ~15% 安全边)** / **apple-touch-180(实底,iOS 不吃透明)**,替掉 TanStack 默认图。扩展/换品牌图 = 重跑脚本。
 - **安全区**:viewport 加 `viewport-fit=cover`,给移动顶栏补 `safe-area-inset-top`、底部导航补 `safe-area-inset-bottom`;改动会碰 `app-shell.tsx` 等有 sticky/定位的骨架,**改完必须目视核 sticky 未坏**(原则见既有「加安全区别弄坏定位」)。
 - **明确不做**(单独立项):Web Push(iOS 需 16.4+ 且要后端 + 权限 UX)、激进离线数据缓存、全站移动响应式重构。
+
+## 后续修正:cache-first 必须自己验证「URL 真的带哈希」
+
+上面第二条把策略写成「hashed 静态 → cache-first」,实现却只看了 `request.destination`
+(`script`/`style`/`font`),**没有验证 URL 是否真的不可变** —— 于是任何同源的静态资源 URL 都被永久
+钉死:命中即返回、永不回网络、也没有任何版本号能淘汰它。
+
+**为什么这不是纸上问题**:SW 只在 PROD 注册,但一旦某个域名上跑过一次 preview/prod 构建,SW 就
+长驻该 origin。之后在**同一个域名**跑 dev(`dev:tunnel` 做手机验证就是这个流程),它照样拦
+`/src/styles.css` 这类不带哈希、内容天天变的 URL,把上一轮的样式一直发下去。症状是
+「改了样式手机上不生效,私密标签页却正常」—— 而且看起来极像浏览器渲染 bug:一次真实排查里,
+输入框的 `pl-3.5` 是新加的类名,旧 CSS 里没有,于是 padding 算成 0、光标贴在边框上,
+连着推翻了三个错误假设才回到缓存这一层。
+
+**改成**:`staticDest && pathname.startsWith("/assets/")` 才 cache-first —— Vite 的产物全在
+`/assets/` 下且文件名带内容哈希,改一个字节就是新 URL;其余一律 network-only。缓存桶名同时
+`v1 → v2`,让 `activate` 把先前存进去的没哈希条目清掉。回归测试见
+`apps/web/tests/sw-route.test.ts`(「不在 /assets/ 下 → network-only」那条)。

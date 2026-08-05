@@ -23,6 +23,19 @@ input:-webkit-autofill {
   animation: folio-autofill 1ms;
 }
 
+/* 颜色要抢回来:Chrome/Safari 给自动填充过的 input 刷一层自己的浅色底,而且 `background` 改不动
+   (UA 样式优先级更高)—— 深色主题下就是白底,配上浅色的 caret-color = 白光标画在白底上,看不见。
+   绕法是内阴影铺满把底盖掉,文字用 -webkit-text-fill-color(同理 color 改不动),光标色再写一次。
+   :hover/:focus 也带上,因为浏览器会在这些态重新刷它那层底。
+   **动画不写进这一组**:那是「被自动填充」的探针(见上),多挂 :hover/:focus 会让它在悬停时重放。 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--background) inset;
+  -webkit-text-fill-color: var(--foreground);
+  caret-color: var(--foreground);
+}
+
 * {
   box-sizing: border-box;
 }

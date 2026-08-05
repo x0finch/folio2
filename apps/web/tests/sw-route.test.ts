@@ -21,12 +21,31 @@ describe("swRoute", () => {
     expect(swRoute({ ...base, pathname: "/api/accounts" })).toBe("network-only");
   });
 
-  it("hashed script / style / font → cache-first", () => {
-    expect(swRoute({ ...base, destination: "script", pathname: "/assets/app.abc123.js" })).toBe(
+  it("/assets/ 下的 script / style / font(带内容哈希)→ cache-first", () => {
+    expect(swRoute({ ...base, destination: "script", pathname: "/assets/app-abc12345.js" })).toBe(
       "cache-first",
     );
-    expect(swRoute({ ...base, destination: "style" })).toBe("cache-first");
-    expect(swRoute({ ...base, destination: "font" })).toBe("cache-first");
+    expect(
+      swRoute({ ...base, destination: "style", pathname: "/assets/styles-abc12345.css" }),
+    ).toBe("cache-first");
+    expect(
+      swRoute({ ...base, destination: "font", pathname: "/assets/geist-abc12345.woff2" }),
+    ).toBe("cache-first");
+  });
+
+  // 这条是回归测试:曾经只看 destination、不看路径,于是没哈希的 URL 被永久钉死 ——
+  // 在跑过 preview 的域名上再跑 dev,SW 会一直发上一轮的 `/src/styles.css`(改样式不生效,
+  // 私密标签页却正常)。没哈希 = 内容会变 = 不能 cache-first。
+  it("不在 /assets/ 下的 script / style / font → network-only(URL 没哈希,内容会变)", () => {
+    expect(swRoute({ ...base, destination: "style", pathname: "/src/styles.css" })).toBe(
+      "network-only",
+    );
+    expect(swRoute({ ...base, destination: "script", pathname: "/src/client.tsx" })).toBe(
+      "network-only",
+    );
+    expect(swRoute({ ...base, destination: "font", pathname: "/fonts/geist.woff2" })).toBe(
+      "network-only",
+    );
   });
 
   it("非 GET(server fn / mutation)→ network-only", () => {
