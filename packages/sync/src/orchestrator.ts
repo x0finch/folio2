@@ -1,7 +1,15 @@
 import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { Duration, Effect, Schedule } from "effect";
-import { depError, FetchBalancesError, messageOf, toFetchBalancesError } from "./errors";
+
+import {
+  depError,
+  FetchBalancesError,
+  messageOf,
+  type SyncDepError,
+  toFetchBalancesError,
+} from "./errors";
+
 import { platformOf } from "./platform";
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
@@ -106,15 +114,55 @@ const retryPolicy = Schedule.exponential(Duration.millis(RETRY_BASE_MS)).pipe(
   Schedule.intersect(Schedule.recurs(RETRY_MAX_ATTEMPTS - 1)),
 );
 
+// —— 一轮单账户同步的上下文 ——
+// deps / userId / account / log / 安全日志字段这几样在下面每个步骤里都要用,拆成散参数会让每个
+// 函数签名带 5~6 个参数、且总是同一组(Data Clump)。打包成一个对象,各步骤只收它。
+interface SyncCtx {
+  readonly deps: SyncDeps;
+  readonly userId: string;
+  readonly account: AccountSafe;
+  readonly log: SyncLogger;
+  // 安全字段(红线:绝不打 creds/secret/地址);userId 显式带,覆盖 cron 路径(无请求级 withContext)。
+  readonly fields: Record<string, unknown>;
+}
+
+function ctxOf(deps: SyncDeps, userId: string, account: AccountSafe): SyncCtx {
+  return {
+    deps,
+    userId,
+    account,
+    log: deps.log ?? noopLogger,
+    fields: { userId, accountId: account.id, connectorId: account.connectorId },
+  };
+}
+
+// best-effort 一步:失败记一条 warning 并回落到 fallback,**不中断整条链**。
+// 认币与重估各用一次 —— 它们是**两个独立的降级点**(一个失败不影响另一个是否执行),
+// 共用这个形状只是消除重复,不是把两处降级合并成一处。
+function bestEffort<A>(
+  effect: Effect.Effect<A, { readonly message: string }>,
+  fallback: A,
+  ctx: SyncCtx,
+  message: string,
+): Effect.Effect<A> {
+  return effect.pipe(
+    Effect.catchAll((e) =>
+      Effect.sync(() => {
+        ctx.log.warning(message, { ...ctx.fields, error: e.message });
+        return fallback;
+      }),
+    ),
+  );
+}
+
 // 取余额的单次尝试(带超时)。
 function fetchOnce(
-  deps: SyncDeps,
-  account: AccountSafe,
+  ctx: SyncCtx,
   stored: Record<string, string>,
 ): Effect.Effect<FetchOutcome, FetchBalancesError> {
   // 注入的取数是个 Promise;抛出来的 provider 错误经桥转成 FetchBalancesError。
   return Effect.tryPromise({
-    try: () => deps.fetchBalances(account, stored),
+    try: () => ctx.deps.fetchBalances(ctx.account, stored),
     catch: toFetchBalancesError,
   }).pipe(
     // 超时也产出 FetchBalancesError(retryable),这样重试策略只认识一种错误。
@@ -135,11 +183,8 @@ function fetchOnce(
 
 // 取余额 + 退避重试。
 function fetchWithRetry(
-  deps: SyncDeps,
-  account: AccountSafe,
+  ctx: SyncCtx,
   stored: Record<string, string>,
-  log: SyncLogger,
-  logCtx: Record<string, unknown>,
 ): Effect.Effect<FetchOutcome, FetchBalancesError> {
   let attempt = 0;
   const logged = retryPolicy.pipe(
@@ -148,8 +193,8 @@ function fetchWithRetry(
     Schedule.tapOutput(([err]: readonly [FetchBalancesError, number]) =>
       Effect.sync(() => {
         attempt += 1;
-        log.warning("provider call retrying", {
-          ...logCtx,
+        ctx.log.warning("provider call retrying", {
+          ...ctx.fields,
           attempt,
           code: err.code,
           retryAfterMs: err.retryAfterMs,
@@ -157,7 +202,84 @@ function fetchWithRetry(
       }),
     ),
   );
-  return fetchOnce(deps, account, stored).pipe(Effect.retry(logged));
+  return fetchOnce(ctx, stored).pipe(Effect.retry(logged));
+}
+
+// 认币(ADR 0021 / #200):**先于 revalue**,一轮同步只跑一次。见 SyncDeps.mint 的注释。
+// best-effort:失败当空 map —— 快照照落(新列留空)、价退回 provider 自带。
+function mintIds(ctx: SyncCtx, balances: Balance[]): Effect.Effect<ReadonlyMap<string, string>> {
+  const mint = ctx.deps.mint;
+  if (!mint) return Effect.succeed(EMPTY_IDS);
+  return bestEffort(
+    Effect.tryPromise({
+      try: () => mint(ctx.userId, balances),
+      catch: (e) => depError("mint", e),
+    }),
+    EMPTY_IDS,
+    ctx,
+    "mint failed; writing snapshot without token_id",
+  );
+}
+
+// 重估(P7.4.2):manual 用市场价改 usdValue。best-effort —— 失败保留 provider 原值。
+// 返回 null = 没重估(未注入或失败)。**用 null 而不是回落成入参**:调用方据此决定要不要重算
+// totalUsd —— 只有真重估过才重算,否则保留 provider 报的那个数(它未必等于各行之和)。
+function revalued(
+  ctx: SyncCtx,
+  balances: Balance[],
+  idByRef: ReadonlyMap<string, string>,
+): Effect.Effect<Balance[] | null> {
+  const revalue = ctx.deps.revalue;
+  if (!revalue) return Effect.succeed(null);
+  return bestEffort<Balance[] | null>(
+    Effect.tryPromise({
+      try: () => revalue(ctx.userId, ctx.account.connectorId, balances, idByRef),
+      catch: (e) => depError("revalue", e),
+    }),
+    null,
+    ctx,
+    "revalue failed; keeping provider values",
+  );
+}
+
+function writeSnapshot(
+  ctx: SyncCtx,
+  outcome: Extract<FetchOutcome, { status: "ok" }>,
+  balances: Balance[],
+  totalUsd: number,
+  idByRef: ReadonlyMap<string, string>,
+): Effect.Effect<string, SyncDepError> {
+  return Effect.tryPromise({
+    try: () =>
+      ctx.deps.writeSnapshot(ctx.userId, ctx.account.id, {
+        takenAt: Date.now(),
+        totalUsd,
+        // account 级 note(Note[],整钱包)落 snapshots.note;revalue 不动它。
+        note: outcome.note,
+        // 边界映射:Balance 契约用 value,快照层沿用 usdValue(不动表结构)。其余字段透传;
+        // token 元信息(name/logo/tokenRef)不落快照,参考层是其 home(见 canonical 计划)。
+        // kind 透传:db 的 SnapshotBalanceInput.kind 与 connectors Balance 同为 4-kind 联合
+        //(spot/defi/perp_equity/perp_position,#37c 起 db 直取 @folio/connectors-basic;utxo 已并回 spot,ADR 0010),直接透传。
+        // balance 级 note(单个 Note,note 重设计)随各 balance 落 snapshot_balances.note;revalue 不动 note。
+        // meta 仅 defi/perp 有(spot 零 typed meta)→ 用 `in` 收窄后取。
+        balances: balances.map((b) => ({
+          amount: b.amount,
+          usdValue: b.value,
+          kind: b.kind,
+          // 平台(链 ∪ 场馆)在这里算一次、落库(#193):写路径是唯一还认识 tokenRef 的地方,
+          // 读端从此只读这一列。规则见 platformOf。
+          platform: platformOf(b.tokenRef, ctx.account.connectorId),
+          // provider 自带单价(估值原料,Phase 3):revalue 捕获,随快照落 self_price。
+          selfPrice: b.selfPrice,
+          // 认定冻进快照:用的就是 revalue 定价时那一份答案(同一轮只 mint 一次)。symbol / tokenRef
+          // 不再落快照 —— 显示名住 Token 那一行,读端按 token_id 取(#243)。
+          tokenId: b.tokenRef ? idByRef.get(b.tokenRef) : undefined,
+          meta: "meta" in b ? b.meta : undefined,
+          note: b.note,
+        })),
+      }),
+    catch: (e) => depError("writeSnapshot", e),
+  });
 }
 
 // 单账户同步的 **Effect 内核**(ADR 0035)。错误通道是 never —— 失败已在内部收敛成 ok:false。
@@ -169,9 +291,7 @@ export function syncAccountEffect(
   account: AccountSafe,
   rawCreds: string | null, // 由 syncUser 批量预取分发(见 listRawCreds)
 ): Effect.Effect<AccountSyncResult> {
-  const log = deps.log ?? noopLogger;
-  // 安全字段(红线:绝不打 creds/secret/地址);userId 显式带,覆盖 cron 路径(无请求级 withContext)。
-  const ctxFields = { userId, accountId: account.id, connectorId: account.connectorId };
+  const ctx = ctxOf(deps, userId, account);
   return Effect.gen(function* () {
     // 坏 JSON 也算这个账户的失败(与迁移前一致:原先由最外层 try/catch 收)。
     const stored = yield* Effect.try({
@@ -180,107 +300,39 @@ export function syncAccountEffect(
     });
     // 取余额(解密/校验/ctx/provider 调用全在注入的 fetchBalances 内)。仅取数部分重试(写快照不重试);
     // 每次尝试加超时(挂住的 provider → 超时 → 按 retryable 重试),避免内联 triggerSync 被拖住。
-    const outcome = yield* fetchWithRetry(deps, account, stored, log, ctxFields);
+    const outcome = yield* fetchWithRetry(ctx, stored);
     // 缺凭据态(导入待补录)→ 跳过,不算失败,补录后下次纳入(见 P6.6.1)。
     // **仍是正常返回值、不进错误通道** —— 它不是出事了,是这轮没事干(见 ADR 0035)。
     if (outcome.status === "needs-credentials") {
-      log.warning("account sync skipped: needs credentials", ctxFields);
+      ctx.log.warning("account sync skipped: needs credentials", ctx.fields);
       return { accountId: account.id, ok: false, skipped: true } satisfies AccountSyncResult;
     }
-    // 取余额之后的几步(认币 / 重估 / 写快照)本步先整体包着复用原有逻辑,
-    // **下一步(#365)拆成原生 Effect** —— 本步只动重试与超时,便于逐片验证行为等价。
-    return yield* Effect.tryPromise({
-      try: () => finishAccountSync(deps, userId, account, outcome, log, ctxFields),
-      catch: (e) => depError("writeSnapshot", e),
-    });
+    // 认币 → 重估 → 写快照。前两步 best-effort(各自独立降级),写快照失败才算整个账户失败。
+    const idByRef = yield* mintIds(ctx, outcome.balances);
+    const revaluedRows = yield* revalued(ctx, outcome.balances, idByRef);
+    const balances = revaluedRows ?? outcome.balances;
+    // 只有真重估过才重算 totalUsd;否则保留 provider 报的那个数。
+    const totalUsd = revaluedRows
+      ? revaluedRows.reduce((sum, b) => sum + b.value, 0)
+      : outcome.totalUsd;
+    const snapshotId = yield* writeSnapshot(ctx, outcome, balances, totalUsd, idByRef);
+    ctx.log.info("account synced", { ...ctx.fields, totalUsd, balances: balances.length });
+    return { accountId: account.id, ok: true, snapshotId, totalUsd } satisfies AccountSyncResult;
   }).pipe(
     // 整体隔离:失败收成 ok:false,绝不抛(不阻断其他账户)。
     Effect.catchAll((err) =>
       Effect.sync((): AccountSyncResult => {
-        const error = err.message;
-        log.error("account sync failed", {
-          ...ctxFields,
+        ctx.log.error("account sync failed", {
+          ...ctx.fields,
           code: err._tag === "FetchBalancesError" ? err.code : undefined,
-          error,
+          error: err.message,
         });
-        return { accountId: account.id, ok: false, error };
+        return { accountId: account.id, ok: false, error: err.message };
       }),
     ),
   );
 }
 
-// 取余额之后的三步(认币 → 重估 → 写快照)。**临时形态**:本步保持原有 async 实现,
-// 下一步(#365)整体拆成原生 Effect。抛错由调用方收敛成 ok:false,与迁移前一致。
-async function finishAccountSync(
-  deps: SyncDeps,
-  userId: string,
-  account: AccountSafe,
-  outcome: Extract<FetchOutcome, { status: "ok" }>,
-  log: SyncLogger,
-  ctxFields: Record<string, unknown>,
-): Promise<AccountSyncResult> {
-  {
-    let { balances, totalUsd } = outcome;
-
-    // 认币(ADR 0021 / #200):**先于 revalue**,一轮同步只跑一次。见 SyncDeps.mint 的注释。
-    // best-effort:失败当空 map —— 快照照落(新列留空)、价退回 provider 自带。
-    let idByRef: ReadonlyMap<string, string> = EMPTY_IDS;
-    if (deps.mint) {
-      try {
-        idByRef = await deps.mint(userId, balances);
-      } catch (e) {
-        log.warning("mint failed; writing snapshot without token_id", {
-          ...ctxFields,
-          error: e instanceof Error ? e.message : String(e),
-        });
-      }
-    }
-
-    // 重估(P7.4.2):manual 用市场价改 usdValue,再重算 totalUsd。best-effort —— 失败保留 provider 原值。
-    if (deps.revalue) {
-      try {
-        balances = await deps.revalue(userId, account.connectorId, balances, idByRef);
-        totalUsd = balances.reduce((sum, b) => sum + b.value, 0);
-      } catch (e) {
-        log.warning("revalue failed; keeping provider values", {
-          ...ctxFields,
-          error: e instanceof Error ? e.message : String(e),
-        });
-      }
-    }
-    const snapshotId = await deps.writeSnapshot(userId, account.id, {
-      takenAt: Date.now(),
-      totalUsd,
-      // account 级 note(Note[],整钱包)落 snapshots.note;revalue 不动它。
-      note: outcome.note,
-      // 边界映射:Balance 契约用 value,快照层沿用 usdValue(不动表结构)。其余字段透传;
-      // token 元信息(name/logo/tokenRef)不落快照,参考层是其 home(见 canonical 计划)。
-      // kind 透传:db 的 SnapshotBalanceInput.kind 与 connectors Balance 同为 4-kind 联合
-      //(spot/defi/perp_equity/perp_position,#37c 起 db 直取 @folio/connectors-basic;utxo 已并回 spot,ADR 0010),直接透传。
-      // balance 级 note(单个 Note,note 重设计)随各 balance 落 snapshot_balances.note;revalue 不动 note。
-      // meta 仅 defi/perp 有(spot 零 typed meta)→ 用 `in` 收窄后取。
-      balances: balances.map((b) => ({
-        amount: b.amount,
-        usdValue: b.value,
-        kind: b.kind,
-        // 平台(链 ∪ 场馆)在这里算一次、落库(#193):写路径是唯一还认识 tokenRef 的地方,
-        // 读端从此只读这一列。规则见 platformOf。
-        platform: platformOf(b.tokenRef, account.connectorId),
-        // provider 自带单价(估值原料,Phase 3):revalue 捕获,随快照落 self_price。
-        selfPrice: b.selfPrice,
-        // 认定冻进快照:用的就是 revalue 定价时那一份答案(同一轮只 mint 一次)。symbol / tokenRef
-        // 不再落快照 —— 显示名住 Token 那一行,读端按 token_id 取(#243)。
-        tokenId: b.tokenRef ? idByRef.get(b.tokenRef) : undefined,
-        meta: "meta" in b ? b.meta : undefined,
-        note: b.note,
-      })),
-    });
-    log.info("account synced", { ...ctxFields, totalUsd, balances: balances.length });
-    return { accountId: account.id, ok: true, snapshotId, totalUsd };
-  }
-}
-
-// Promise 壳(见 syncAccountEffect 的注释:下一步删壳、内核转正)。
 export function syncAccount(
   deps: SyncDeps,
   userId: string,
