@@ -20,6 +20,14 @@ export class FetchBalancesError extends Data.TaggedError("FetchBalancesError")<{
 }> {}
 
 // —— 其余五个依赖 ——
+//
+// 这五个形状一模一样(message + cause),只有 tag 不同 —— **为什么不用工厂造?**
+// 试过两种(普通泛型 `<T extends string>` 与 `<const T extends string>`),都不行:
+// 包一层函数之后 `_tag` 会宽化成 `string`,`Effect.catchTag("MintError", …)` 当场不认识,
+// 而「按 tag 区分是哪一步挂了」正是分成六个类型的全部意义。`Data.TaggedError` 就是要直接调。
+//
+// 所以能省重复的唯一办法是**少定义几个类型**(比如合成一个带 `step` 字段的 SyncDepError),
+// 那是另一个取舍:调用方从此只能靠字段而不是类型来分辨。当前选择是保留六个。
 export class ListAccountsError extends Data.TaggedError("ListAccountsError")<{
   readonly message: string;
   readonly cause?: unknown;

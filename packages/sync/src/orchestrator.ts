@@ -85,50 +85,42 @@ export interface SyncResult {
   results: AccountSyncResult[];
 }
 
-// 对可重试的 provider 失败(429/5xx/网络/超时)退避重试;优先采用服务端 Retry-After,否则指数退避+抖动。
-//
-// **算子顺序有讲究**(踩过,记下来):
-//   · `whileInput` 必须在 `passthrough` 之前 —— 它负责把 schedule 的输入类型钉成 FetchBalancesError。
-//     反过来写运行时正确,但类型会塌成 unknown,后面的 modifyDelay 就拿不到 retryAfterMs 了。
-//   · `passthrough` 把 schedule 的输出换成输入(错误本身),这样 `modifyDelay` 才看得到 Retry-After。
-//   · 抖动用 `addDelay`(加性,+0~baseMs)而不是 `Schedule.jittered`(乘性,0.8~1.2 倍)——
-//     迁移前就是加性的,换成乘性会让退避可能**短于**基数,这是行为改变。
-//
-// **clamp 语义**:Retry-After 比 RETRY_MAX_MS 大时夹到上限继续等,不放弃。这条路是**后台同步**,
-// 没人在等,多等 5s 换一次成功是划算的;用户在等的路径(CoinGecko 写路径、加账户探活)另有一套,
-// 仍走 @folio/shared 的 withRetry(它还在服务所有 provider 的 HTTP 层,见 ADR 0035 的过渡态说明)。
-//
-// **抖动不是可选的**:多个调用者同时撞 429 是常态(6 路并发的账户同步、别的 isolate 里的别的用户)。
-// 都按同一个 Retry-After 醒来会精确地再撞一次。
+// 取余额失败后的退避重试策略。**后台同步**用,没人在等 —— 所以宁可多等也不轻易放弃。
 const retryPolicy = Schedule.exponential(Duration.millis(RETRY_BASE_MS)).pipe(
+  // 只重试可重试的。**必须排在 passthrough 前**:它负责把输入类型钉成 FetchBalancesError,
+  // 反过来写运行时正确但类型会塌成 unknown,下面就拿不到 retryAfterMs 了。
   Schedule.whileInput((e: FetchBalancesError) => e.retryable),
+  // 把输出换成输入(错误本身),下一行才看得见 Retry-After。
   Schedule.passthrough,
+  // 上游说了等多久就听它的,没说才用指数值;两者都夹在单次上限内 —— 夹住而不是放弃(clamp)。
   Schedule.modifyDelay((err, computed) =>
     Duration.min(
       Duration.millis(RETRY_MAX_MS),
       err.retryAfterMs !== undefined ? Duration.millis(err.retryAfterMs) : computed,
     ),
   ),
+  // 抖动,防止 6 路并发同时撞 429 后又踩着同一个点一起醒来。
+  // 用加性(+0~200ms)不是 Effect 自带的 jittered(乘性 0.8~1.2 倍)—— 后者会让退避短于基数,是行为改变。
   Schedule.addDelay(() => Duration.millis(Math.random() * RETRY_BASE_MS)),
+  // 封顶重试 2 次(总尝试 3 次)。
   Schedule.intersect(Schedule.recurs(RETRY_MAX_ATTEMPTS - 1)),
 );
 
-// 取余额一次尝试:超时 → 产出 retryable 的 FetchBalancesError。
-//
-// 用 `timeoutFail` 而不是 `Effect.timeout`:后者往错误通道加一个 TimeoutException,而重试策略只认
-// FetchBalancesError —— 类型当场对不上(编译期就拦下)。迁移前这里是手写的 Promise.race + 手动包成
-// 「retryable 的 ProviderError」,包装和重试判据是两处独立代码,改一处不会让另一处报错。
-//
-// 注:仅「停止等待」,不真正 abort 底层 fetch(CF 上 dangling fetch 随 isolate 回收)。
+// 取余额的单次尝试(带超时)。
 function fetchOnce(
   deps: SyncDeps,
   account: AccountSafe,
   stored: Record<string, string>,
 ): Effect.Effect<FetchOutcome, FetchBalancesError> {
+  // 注入的取数是个 Promise;抛出来的 provider 错误经桥转成 FetchBalancesError。
   return Effect.tryPromise({
     try: () => deps.fetchBalances(account, stored),
     catch: toFetchBalancesError,
   }).pipe(
+    // 超时也产出 FetchBalancesError(retryable),这样重试策略只认识一种错误。
+    // 用 timeoutFail 不用 Effect.timeout —— 后者会往错误通道塞一个 TimeoutException,
+    // 和只认 FetchBalancesError 的策略类型对不上,编译期就红。
+    // 注:只是停止等待,不真 abort 底层 fetch(CF 上 dangling fetch 随 isolate 回收)。
     Effect.timeoutFail({
       duration: Duration.millis(FETCH_TIMEOUT_MS),
       onTimeout: () =>
@@ -141,8 +133,7 @@ function fetchOnce(
   );
 }
 
-// 取余额 + 退避重试。重试日志挂在 schedule 的 tapOutput 上 —— 它只在 schedule **决定再来一次**时
-// 触发,所以「不可重试」和「重试用尽」都不会多记一条,与迁移前的 onRetry 时机一致。
+// 取余额 + 退避重试。
 function fetchWithRetry(
   deps: SyncDeps,
   account: AccountSafe,
@@ -152,6 +143,8 @@ function fetchWithRetry(
 ): Effect.Effect<FetchOutcome, FetchBalancesError> {
   let attempt = 0;
   const logged = retryPolicy.pipe(
+    // 日志挂在 schedule 上而不是 tapError 上:它只在**决定再来一次**时触发,
+    // 所以「不可重试」和「重试用尽」都不会多记一条 —— 与迁移前 onRetry 的时机一致。
     Schedule.tapOutput(([err]: readonly [FetchBalancesError, number]) =>
       Effect.sync(() => {
         attempt += 1;
@@ -167,12 +160,9 @@ function fetchWithRetry(
   return fetchOnce(deps, account, stored).pipe(Effect.retry(logged));
 }
 
-// 单账户同步的 **Effect 内核**(Effect 迁移第 1 步,ADR 0035)。失败已在内部收敛成 ok:false,
-// 所以错误通道是 never —— 隔离语义没变,只是从 try/catch 换成 `Effect.catchAll`。
-//
-// 为什么内核也导出:假时钟(TestClock)与可控随机都要 Effect 上下文,而 Promise 壳在包内部就把上下文
-// runPromise 掉了,外面挂不上 —— 退避曲线这类时序断言只能在内核上做。**下一步出口也改成 Effect 时,
-// 内核就转正成正式出口、壳子删掉**,所以这不是为测试开的临时缝。
+// 单账户同步的 **Effect 内核**(ADR 0035)。错误通道是 never —— 失败已在内部收敛成 ok:false。
+// 内核也导出是因为假时钟要 Effect 上下文,而 Promise 壳在包内部就把它 runPromise 掉了。
+// 下一步出口改成 Effect 时,内核转正、壳删掉 —— 不是为测试开的临时缝。
 export function syncAccountEffect(
   deps: SyncDeps,
   userId: string,
@@ -304,6 +294,7 @@ export function syncAccount(
 // 并发调度本步仍走手写 runPool(下一步 #366 换成 Effect 的并发原语)。
 export function syncUserEffect(deps: SyncDeps, userId: string): Effect.Effect<SyncResult> {
   return Effect.gen(function* () {
+    // 账户与凭据各一次批量读(消 N+1),两次互不依赖 → 并发取。
     const [accounts, rawList] = yield* Effect.all(
       [
         Effect.promise(() => deps.listAccounts(userId)),
