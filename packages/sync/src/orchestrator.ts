@@ -1,6 +1,7 @@
-import { type Balance, type Note, ProviderError } from "@folio/connectors-basic";
+import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
-import { withRetry } from "@folio/shared";
+import { Duration, Effect, Schedule } from "effect";
+import { FetchBalancesError, messageOf, toFetchBalancesError, WriteSnapshotError } from "./errors";
 import { platformOf } from "./platform";
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
@@ -17,8 +18,6 @@ const RETRY_BASE_MS = 200; // 指数退避基数
 const RETRY_MAX_MS = 5000; // 单次退避上限(也用于 Retry-After 夹紧)
 const SYNC_CONCURRENCY = 6; // 每用户账户取数的并发上限(CF subrequest / provider 限流留余量)
 const FETCH_TIMEOUT_MS = 20_000; // 单次取数(单次尝试)超时上限
-
-const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // 注入式 logger(最小接口,结构兼容 LogTape 的 Logger)。app 注入 getLogger(["folio","sync"]);
 // 测试注入 no-op/捕获式 → 不耦合 LogTape、不污染输出。userId 由 syncAccount 显式带字段(cron 路径无请求上下文)。
@@ -49,7 +48,6 @@ export interface SyncDeps {
   // 取余额(领域意图):app 注入 balances.fetchBalances —— 解密/校验/ctx 拼装/provider 调用全在其内。
   // 缺凭据返回 needs-credentials(跳过,不算失败);上游失败抛 ProviderError(本层据 retryable 重试)。
   fetchBalances: (account: AccountSafe, stored: Record<string, string>) => Promise<FetchOutcome>;
-  sleep?: (ms: number) => Promise<void>; // 默认 setTimeout;测试注入即时/捕获版做确定性重试测试
   log?: SyncLogger; // 默认 no-op;app 注入 LogTape logger(见 buildSyncDeps)
   // 认币(ADR 0021 / #200):一批 tokenRef → 各自的代币行 id。**跑在 revalue 之前、一轮同步只跑一次。**
   //
@@ -87,102 +85,151 @@ export interface SyncResult {
   results: AccountSyncResult[];
 }
 
-// 对可重试的 ProviderError(429/5xx/网络)退避重试;优先采用服务端 Retry-After,否则指数退避+抖动。
-// 不可重试错误 / 重试用尽 → 抛出(由 syncAccount 外层收为 ok:false)。logCtx = {accountId,type} 入每条重试日志。
+// 对可重试的 provider 失败(429/5xx/网络/超时)退避重试;优先采用服务端 Retry-After,否则指数退避+抖动。
 //
-// 循环本体在 @folio/shared(那儿有它的完整测试;CoinGecko client 和加账户探活用的是同一个)。
-// 这里传两个**刻意保持迁移前行为**的参数:
-//   · isRetryable 仍要求 instanceof ProviderError —— 包的默认判据是鸭子类型(只看 `.retryable`),
-//     对本层收窄回来,免得别处冒上来的、恰好带 `retryable: true` 的对象也被重试
-//   · exceedsMaxWait: "clamp" —— Retry-After 比 RETRY_MAX_MS 大时夹到上限继续等,不放弃。
-//     这条路是**后台同步**,没人在等,多等 5s 换一次成功是划算的;用户在等的路径(CoinGecko
-//     写路径、加账户探活)用的是默认的 "throw"
-async function withRetryLogged<T>(
-  fn: () => Promise<T>,
-  sleep: (ms: number) => Promise<void>,
+// **算子顺序有讲究**(踩过,记下来):
+//   · `whileInput` 必须在 `passthrough` 之前 —— 它负责把 schedule 的输入类型钉成 FetchBalancesError。
+//     反过来写运行时正确,但类型会塌成 unknown,后面的 modifyDelay 就拿不到 retryAfterMs 了。
+//   · `passthrough` 把 schedule 的输出换成输入(错误本身),这样 `modifyDelay` 才看得到 Retry-After。
+//   · 抖动用 `addDelay`(加性,+0~baseMs)而不是 `Schedule.jittered`(乘性,0.8~1.2 倍)——
+//     迁移前就是加性的,换成乘性会让退避可能**短于**基数,这是行为改变。
+//
+// **clamp 语义**:Retry-After 比 RETRY_MAX_MS 大时夹到上限继续等,不放弃。这条路是**后台同步**,
+// 没人在等,多等 5s 换一次成功是划算的;用户在等的路径(CoinGecko 写路径、加账户探活)另有一套,
+// 仍走 @folio/shared 的 withRetry(它还在服务所有 provider 的 HTTP 层,见 ADR 0035 的过渡态说明)。
+//
+// **抖动不是可选的**:多个调用者同时撞 429 是常态(6 路并发的账户同步、别的 isolate 里的别的用户)。
+// 都按同一个 Retry-After 醒来会精确地再撞一次。
+const retryPolicy = Schedule.exponential(Duration.millis(RETRY_BASE_MS)).pipe(
+  Schedule.whileInput((e: FetchBalancesError) => e.retryable),
+  Schedule.passthrough,
+  Schedule.modifyDelay((err, computed) =>
+    Duration.min(
+      Duration.millis(RETRY_MAX_MS),
+      err.retryAfterMs !== undefined ? Duration.millis(err.retryAfterMs) : computed,
+    ),
+  ),
+  Schedule.addDelay(() => Duration.millis(Math.random() * RETRY_BASE_MS)),
+  Schedule.intersect(Schedule.recurs(RETRY_MAX_ATTEMPTS - 1)),
+);
+
+// 取余额一次尝试:超时 → 产出 retryable 的 FetchBalancesError。
+//
+// 用 `timeoutFail` 而不是 `Effect.timeout`:后者往错误通道加一个 TimeoutException,而重试策略只认
+// FetchBalancesError —— 类型当场对不上(编译期就拦下)。迁移前这里是手写的 Promise.race + 手动包成
+// 「retryable 的 ProviderError」,包装和重试判据是两处独立代码,改一处不会让另一处报错。
+//
+// 注:仅「停止等待」,不真正 abort 底层 fetch(CF 上 dangling fetch 随 isolate 回收)。
+function fetchOnce(
+  deps: SyncDeps,
+  account: AccountSafe,
+  stored: Record<string, string>,
+): Effect.Effect<FetchOutcome, FetchBalancesError> {
+  return Effect.tryPromise({
+    try: () => deps.fetchBalances(account, stored),
+    catch: toFetchBalancesError,
+  }).pipe(
+    Effect.timeoutFail({
+      duration: Duration.millis(FETCH_TIMEOUT_MS),
+      onTimeout: () =>
+        new FetchBalancesError({
+          message: "provider fetch timed out",
+          code: "UPSTREAM_ERROR",
+          retryable: true,
+        }),
+    }),
+  );
+}
+
+// 取余额 + 退避重试。重试日志挂在 schedule 的 tapOutput 上 —— 它只在 schedule **决定再来一次**时
+// 触发,所以「不可重试」和「重试用尽」都不会多记一条,与迁移前的 onRetry 时机一致。
+function fetchWithRetry(
+  deps: SyncDeps,
+  account: AccountSafe,
+  stored: Record<string, string>,
   log: SyncLogger,
   logCtx: Record<string, unknown>,
-): Promise<T> {
-  return withRetry(fn, {
-    attempts: RETRY_MAX_ATTEMPTS,
-    maxWaitMs: RETRY_MAX_MS,
-    baseMs: RETRY_BASE_MS,
-    exceedsMaxWait: "clamp",
-    sleep,
-    isRetryable: (err) => err instanceof ProviderError && err.retryable,
-    onRetry: ({ attempt, error }) => {
-      log.warning("provider call retrying", {
-        ...logCtx,
-        attempt,
-        code: error instanceof ProviderError ? error.code : undefined,
-        retryAfterMs: error instanceof ProviderError ? error.retryAfterMs : undefined,
-      });
-    },
-  });
+): Effect.Effect<FetchOutcome, FetchBalancesError> {
+  let attempt = 0;
+  const logged = retryPolicy.pipe(
+    Schedule.tapOutput(([err]: readonly [FetchBalancesError, number]) =>
+      Effect.sync(() => {
+        attempt += 1;
+        log.warning("provider call retrying", {
+          ...logCtx,
+          attempt,
+          code: err.code,
+          retryAfterMs: err.retryAfterMs,
+        });
+      }),
+    ),
+  );
+  return fetchOnce(deps, account, stored).pipe(Effect.retry(logged));
 }
 
-// 有界并发:N 个在飞、逐个补位,结果按输入序返回。fn 不抛(syncAccount 已吞错)→ 无需处理 reject。
-async function runPool<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (true) {
-      const i = next++;
-      if (i >= items.length) return;
-      results[i] = await fn(items[i], i);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
-
-// 单次取数超时:超时抛 retryable ProviderError(→ withRetry 重试)。用真 setTimeout 计时(独立于退避 sleep,
-// 故注入即时 sleep 的测试不受影响);p 先决出即 clearTimeout,既避免悬空 rejection 又不留 dangling 定时器。
-// 注:仅"停止等待",不真正 abort 底层 fetch(CF 上 dangling fetch 随 isolate 回收)。
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(
-          new ProviderError("UPSTREAM_ERROR", "provider fetch timed out", { retryable: true }),
-        ),
-      ms,
-    );
-  });
-  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
-}
-
-// 单账户同步,整段 try/catch:失败返回 ok:false,绝不抛(隔离,不阻断其他账户)。
-export async function syncAccount(
+// 单账户同步的 **Effect 内核**(Effect 迁移第 1 步,ADR 0035)。失败已在内部收敛成 ok:false,
+// 所以错误通道是 never —— 隔离语义没变,只是从 try/catch 换成 `Effect.catchAll`。
+//
+// 为什么内核也导出:假时钟(TestClock)与可控随机都要 Effect 上下文,而 Promise 壳在包内部就把上下文
+// runPromise 掉了,外面挂不上 —— 退避曲线这类时序断言只能在内核上做。**下一步出口也改成 Effect 时,
+// 内核就转正成正式出口、壳子删掉**,所以这不是为测试开的临时缝。
+export function syncAccountEffect(
   deps: SyncDeps,
   userId: string,
   account: AccountSafe,
   rawCreds: string | null, // 由 syncUser 批量预取分发(见 listRawCreds)
-): Promise<AccountSyncResult> {
+): Effect.Effect<AccountSyncResult> {
   const log = deps.log ?? noopLogger;
-  const sleep = deps.sleep ?? defaultSleep;
   // 安全字段(红线:绝不打 creds/secret/地址);userId 显式带,覆盖 cron 路径(无请求级 withContext)。
   const ctxFields = { userId, accountId: account.id, connectorId: account.connectorId };
-  try {
-    const stored: Record<string, string> = rawCreds ? JSON.parse(rawCreds) : {};
+  return Effect.gen(function* () {
+    // 坏 JSON 也算这个账户的失败(与迁移前一致:原先由最外层 try/catch 收)。
+    const stored = yield* Effect.try({
+      try: (): Record<string, string> => (rawCreds ? JSON.parse(rawCreds) : {}),
+      catch: (e) => new FetchBalancesError({ message: messageOf(e), retryable: false, cause: e }),
+    });
     // 取余额(解密/校验/ctx/provider 调用全在注入的 fetchBalances 内)。仅取数部分重试(写快照不重试);
     // 每次尝试加超时(挂住的 provider → 超时 → 按 retryable 重试),避免内联 triggerSync 被拖住。
-    const outcome = await withRetryLogged(
-      () => withTimeout(deps.fetchBalances(account, stored), FETCH_TIMEOUT_MS),
-      sleep,
-      log,
-      ctxFields,
-    );
+    const outcome = yield* fetchWithRetry(deps, account, stored, log, ctxFields);
     // 缺凭据态(导入待补录)→ 跳过,不算失败,补录后下次纳入(见 P6.6.1)。
+    // **仍是正常返回值、不进错误通道** —— 它不是出事了,是这轮没事干(见 ADR 0035)。
     if (outcome.status === "needs-credentials") {
       log.warning("account sync skipped: needs credentials", ctxFields);
-      return { accountId: account.id, ok: false, skipped: true };
+      return { accountId: account.id, ok: false, skipped: true } satisfies AccountSyncResult;
     }
+    // 取余额之后的几步(认币 / 重估 / 写快照)本步先整体包着复用原有逻辑,
+    // **下一步(#365)拆成原生 Effect** —— 本步只动重试与超时,便于逐片验证行为等价。
+    return yield* Effect.tryPromise({
+      try: () => finishAccountSync(deps, userId, account, outcome, log, ctxFields),
+      catch: (e) => new WriteSnapshotError({ message: messageOf(e), cause: e }),
+    });
+  }).pipe(
+    // 整体隔离:失败收成 ok:false,绝不抛(不阻断其他账户)。
+    Effect.catchAll((err) =>
+      Effect.sync((): AccountSyncResult => {
+        const error = err.message;
+        log.error("account sync failed", {
+          ...ctxFields,
+          code: err._tag === "FetchBalancesError" ? err.code : undefined,
+          error,
+        });
+        return { accountId: account.id, ok: false, error };
+      }),
+    ),
+  );
+}
+
+// 取余额之后的三步(认币 → 重估 → 写快照)。**临时形态**:本步保持原有 async 实现,
+// 下一步(#365)整体拆成原生 Effect。抛错由调用方收敛成 ok:false,与迁移前一致。
+async function finishAccountSync(
+  deps: SyncDeps,
+  userId: string,
+  account: AccountSafe,
+  outcome: Extract<FetchOutcome, { status: "ok" }>,
+  log: SyncLogger,
+  ctxFields: Record<string, unknown>,
+): Promise<AccountSyncResult> {
+  {
     let { balances, totalUsd } = outcome;
 
     // 认币(ADR 0021 / #200):**先于 revalue**,一轮同步只跑一次。见 SyncDeps.mint 的注释。
@@ -240,28 +287,45 @@ export async function syncAccount(
     });
     log.info("account synced", { ...ctxFields, totalUsd, balances: balances.length });
     return { accountId: account.id, ok: true, snapshotId, totalUsd };
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    log.error("account sync failed", {
-      ...ctxFields,
-      code: err instanceof ProviderError ? err.code : undefined,
-      error,
-    });
-    return { accountId: account.id, ok: false, error };
   }
 }
 
+// Promise 壳(见 syncAccountEffect 的注释:下一步删壳、内核转正)。
+export function syncAccount(
+  deps: SyncDeps,
+  userId: string,
+  account: AccountSafe,
+  rawCreds: string | null,
+): Promise<AccountSyncResult> {
+  return Effect.runPromise(syncAccountEffect(deps, userId, account, rawCreds));
+}
+
 // 同步该用户全部账户,逐账户隔离、有界并发汇总。account/creds 各一次批量读(消 N+1),再分发。
-export async function syncUser(deps: SyncDeps, userId: string): Promise<SyncResult> {
-  const [accounts, rawList] = await Promise.all([
-    deps.listAccounts(userId),
-    deps.listRawCreds(userId),
-  ]);
-  const credsById = new Map(rawList.map((r) => [r.id, r.creds]));
-  const results = await runPool(accounts, SYNC_CONCURRENCY, (account) =>
-    syncAccount(deps, userId, account, credsById.get(account.id) ?? null),
-  );
-  return { results };
+// 并发调度本步仍走手写 runPool(下一步 #366 换成 Effect 的并发原语)。
+export function syncUserEffect(deps: SyncDeps, userId: string): Effect.Effect<SyncResult> {
+  return Effect.gen(function* () {
+    const [accounts, rawList] = yield* Effect.all(
+      [
+        Effect.promise(() => deps.listAccounts(userId)),
+        Effect.promise(() => deps.listRawCreds(userId)),
+      ],
+      { concurrency: 2 },
+    );
+    const credsById = new Map(rawList.map((r) => [r.id, r.creds]));
+    // 有界并发。**必须留在同一个 Effect 里** —— 中间夹一层 runPromise 会切断上下文,
+    // 假时钟就推不动各账户内部的退避了(测试挂不上)。这也是手写 runPool 一并换掉的原因。
+    const results = yield* Effect.forEach(
+      accounts,
+      (account) => syncAccountEffect(deps, userId, account, credsById.get(account.id) ?? null),
+      { concurrency: SYNC_CONCURRENCY },
+    );
+    return { results };
+  });
+}
+
+// Promise 壳。
+export function syncUser(deps: SyncDeps, userId: string): Promise<SyncResult> {
+  return Effect.runPromise(syncUserEffect(deps, userId));
 }
 
 export interface SweepResult {

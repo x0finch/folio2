@@ -593,9 +593,9 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../oracle/ref
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../shared
+      effect:
+        specifier: ^3.22.1
+        version: 3.22.1
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20260626.1
@@ -3438,6 +3438,9 @@ packages:
       sqlite3:
         optional: true
 
+  effect@3.22.1:
+    resolution: {integrity: sha512-TNoXushmPOBAjJlthF5d2QwnX2xBPEtcNJr5XKNKbRLbDvBcOYkXlYDfvGfSA0zriwLFuCll5MDtNMAdZL17PQ==}
+
   electron-to-chromium@1.5.379:
     resolution: {integrity: sha512-v/qV5aV5EUA2pGilzUCq5/eyOloZAqDZBu9UMBIzgPpLlprjSR6zswsWBTv0KpqxLGUAZEwhO95ZCt7srymNVA==}
 
@@ -3499,6 +3502,10 @@ packages:
 
   exsolve@1.1.0:
     resolution: {integrity: sha512-D+42+T12DdIlJM3uepa55qGiL3sYdLBOxIl2ifQCzCHz4c7eiolaHsi3BIqEr7JxBzxv2pYZQX9kw16ziMcEmw==}
+
+  fast-check@3.23.2:
+    resolution: {integrity: sha512-h5+1OzzfCC3Ef7VbtKdcv7zsstUQwUDlYpUTvjeUsJAssPgLn7QzbboPtL5ro04Mq0rPOsMzl7q5hIbRs2wD1A==}
+    engines: {node: '>=8.0.0'}
 
   fd-package-json@2.0.0:
     resolution: {integrity: sha512-jKmm9YtsNXN789RS/0mSzOC1NUq9mkVd65vbSSVsKdjGvYXBuE4oWe2QOEoFeRmJg+lPuZxpmrfFclNhoRMneQ==}
@@ -3963,6 +3970,9 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  pure-rand@6.1.0:
+    resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
 
   pvtsutils@1.3.6:
     resolution: {integrity: sha512-PLgQXQ6H2FWCaeRak8vvk1GW462lMxB5s3Jm673N82zI4vqtVUPuZdffdZbPDFRoU8kAhItWFtPCWiPpp4/EDg==}
@@ -6722,6 +6732,11 @@ snapshots:
       kysely: 0.29.2
       pg: 8.22.0
 
+  effect@3.22.1:
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      fast-check: 3.23.2
+
   electron-to-chromium@1.5.379: {}
 
   emoji-regex@8.0.0: {}
@@ -6841,6 +6856,10 @@ snapshots:
   expect-type@1.4.0: {}
 
   exsolve@1.1.0: {}
+
+  fast-check@3.23.2:
+    dependencies:
+      pure-rand: 6.1.0
 
   fd-package-json@2.0.0:
     dependencies:
@@ -7378,6 +7397,8 @@ snapshots:
     optional: true
 
   punycode@2.3.1: {}
+
+  pure-rand@6.1.0: {}
 
   pvtsutils@1.3.6:
     dependencies:
