@@ -18,8 +18,16 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
+  // 重试**留着**,但重试过了不算过:CI 里多一步读下面这份 json,`stats.flaky > 0` 就把 job 判红。
+  //
+  // 为什么两个都要:光有重试的话,「第一次挂、第二次过」会报绿,只在摘要里留一行 `1 flaky` —— 没人
+  // 会点开看,于是「这条测试其实不稳」悄悄没了。而直接把 retries 设 0 又丢掉了重试给的那个信息:
+  // 一条测试到底是**必挂**还是**偶挂**,重试一次就能分辨,而这两种的排查方向完全不同。
+  // 所以:照样重试(拿到诊断信息),但照样判红(不许藏)。
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  reporter: process.env.CI
+    ? [["github"], ["json", { outputFile: "playwright-report/results.json" }]]
+    : "list",
   // 默认 5s 不够:dev server 是按需编译的,某条测试第一次碰到某个路由 / server fn 时那一下明显慢,
   // 而 better-auth 在 D1 上还有写锁排队(CLAUDE.md 里那条)。实测连着跑时偶发 5-8s。
   // 单跑过、连跑挂的 flaky 基本都是这个,不是断言写错。

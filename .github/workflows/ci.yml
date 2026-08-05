@@ -131,6 +131,27 @@ jobs:
 
       - run: pnpm --filter @folio/web test:e2e
 
+      # A test that fails then passes on retry is reported as green, with one line of `1 flaky` in a
+      # summary nobody opens — so "this test isn't stable" quietly disappears. It happened twice
+      # while building this suite, both times a real race in the tests. Retries stay (they tell you
+      # whether a test fails always or only sometimes, which points at different causes), but a
+      # retried pass still turns the job red so someone has to look. The trace upload below fires on
+      # failure, so the diagnosis is attached either way.
+      - name: Flaky counts as failure
+        if: always()
+        working-directory: apps/web
+        run: |
+          # Explicit ifs, not `[ x ] && exit 0`: the default shell is `bash -e`, so a failing test
+          # in an && list exits the step right there — before the names below get printed.
+          report=playwright-report/results.json
+          if [ ! -f "$report" ]; then exit 0; fi
+          flaky=$(jq -r '.stats.flaky // 0' "$report")
+          if [ "$flaky" -eq 0 ]; then exit 0; fi
+          jq -r '.. | objects | select(.tests? and any(.tests[]?; .status? == "flaky"))
+                 | "::error::flaky: \(.title)"' "$report" || true
+          echo "::error::$flaky test(s) only passed on retry — fix the race, don't re-run."
+          exit 1
+
       # Traces are retain-on-failure, so this only has content when something broke.
       - uses: actions/upload-artifact@v5
         if: failure()
