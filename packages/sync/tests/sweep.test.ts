@@ -71,3 +71,34 @@ describe("syncAllUsers (cron sweep)", () => {
     expect(res).toEqual({ users: 0, ok: 0, failed: 0, skipped: 0 });
   });
 });
+
+// sweep 串行是**有意的**(cron 一次调用有 CPU / subrequest 预算,几十个用户并发会顶穿 ——
+// 见 apps/web server.ts 里两个 trigger 拆开的理由)。Effect 化时 `Effect.forEach` 默认就是串行,
+// 但「默认串行」不是保证 —— 谁哪天顺手加个 `{ concurrency: ... }` 就悄悄变了。这条钉住它。
+describe("syncAllUsers — 串行", () => {
+  it("逐用户串行,不重叠", async () => {
+    const events: string[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const users = ["u1", "u2", "u3"];
+    const deps: SyncDeps = {
+      listAccounts: async (userId) => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        events.push(`start:${userId}`);
+        // 让出事件循环:真并发的话别的用户会在这个缝里挤进来。
+        await new Promise((r) => setTimeout(r, 1));
+        inFlight--;
+        events.push(`end:${userId}`);
+        return [manual(`a-${userId}`, userId)];
+      },
+      listRawCreds: async () => [],
+      writeSnapshot: async () => "snap",
+      fetchBalances: async () => ({ status: "ok", balances: [], totalUsd: 0 }),
+    };
+    const res = await syncAllUsers(deps, users);
+    expect(res.users).toBe(3);
+    expect(maxInFlight).toBe(1);
+    expect(events).toEqual(["start:u1", "end:u1", "start:u2", "end:u2", "start:u3", "end:u3"]);
+  });
+});
