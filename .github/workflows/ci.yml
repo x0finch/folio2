@@ -20,13 +20,19 @@ concurrency:
 #   one job                                   145–159s  →  3 billed minutes
 #   checks | web-tests, balanced (~75s | ~90s)    ~90s  →  4 billed minutes
 #
-# Then e2e arrived and it runs ~4 minutes. It is now the long pole, so whether
-# the rest finishes in 90s or 150s changes the wall clock a PR actually waits by
-# exactly nothing — the extra minute bought us nothing and a duplicate
-# checkout+install on top. Merged back.
+# Then e2e arrived and it is the long pole, so whether the rest finishes in 90s or
+# 150s changes the wall clock a PR actually waits by nothing — the extra minute
+# bought nothing, and a duplicate checkout+install came with it. Merged back.
 #
-# The condition to revisit is specific: **if e2e ever becomes shorter than this
-# job**, splitting is worth money again. Until then, keep it as one.
+# Measured after merging, on the same run:
+#
+#   checks (merged)  2m31s      e2e  2m36s      wall clock 2m36s
+#
+# **The margin is thin** — 5 seconds — because caching the Chromium download took
+# e2e from ~3m50s down to ~2m36s. So the condition to revisit is close: if e2e
+# gets any faster, or this job any slower, splitting this one in two starts buying
+# wall clock again (at the cost of a billed minute, since Actions rounds each job
+# up). Re-measure before deciding; don't split on the grounds that it "looks big".
 #
 # Step order is cheapest-first, so a red PR fails as early as it can.
 jobs:
