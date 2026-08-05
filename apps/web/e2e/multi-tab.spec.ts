@@ -85,7 +85,7 @@ test.describe("多个标签页", () => {
     await other.close();
   });
 
-  test("一个标签开着锁,另一个标签把那条凭据删了 → 不留「开着但没凭据」的状态", async ({
+  test("一个标签开着锁,另一个标签把那条凭据删了 → 标记两边都清,锁两边都还在", async ({
     page,
     addAuth,
   }) => {
@@ -108,15 +108,17 @@ test.describe("多个标签页", () => {
     await other.locator("button.bg-destructive").click();
     await expect(other.getByText(/passkey removed/i)).toBeVisible();
 
-    // 删除那一侧立刻清标记 + 关开关(同一 context 共享 storage,所以第一个标签也看得到)。
+    // 删除那一侧立刻清标记(同一 context 共享 storage,所以第一个标签也看得到)。
     await expect.poll(async () => (await readLockState(other)).deviceCredential).toBeNull();
 
-    // 第一个标签重新进设置页:不该显示成「锁开着」—— 它已经没有解锁手段了。
+    // 第一个标签重新进设置页:锁**照旧开着** —— 删一条凭据不代表用户要撤掉锁,而且解锁看的是
+    // 系统钥匙串而不是这个标记。同时给出「怎么重新登记」那句提示。
     await page.reload();
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toHaveAttribute(
       "aria-checked",
-      "false",
+      "true",
     );
+    await expect(page.getByText(/no passkey is registered for this device/i)).toBeVisible();
     await other.close();
   });
 });

@@ -9,7 +9,7 @@ function read(): string | null {
   try {
     return localStorage.getItem(LOCK_DEVICE_PASSKEY_KEY);
   } catch {
-    return null; // 隐私模式 / storage 不可用 → 视作未就绪,即不启用闲置锁
+    return null; // 隐私模式 / storage 不可用 → 读不到就当没有,只影响显示,不影响锁不锁
   }
 }
 
@@ -17,8 +17,9 @@ function read(): string | null {
 // LOCK_DEVICE_PASSKEY_KEY)。存 WebAuthn credentialID 不存布尔,好处见那里。
 // SSR 安全:render 期恒 null,挂载后才可能有值 —— 首帧与服务端一致,避免闪。
 //
-// 未就绪时 LockScreen 直接透传 children(等同「永不」):**宁可不锁,也不要把人关在门外** ——
-// 锁上了却没有可用的 passkey,用户只剩登出一条路。
+// **这个标记不决定锁不锁。** 它只回答「这台设备登记的是哪一条凭据」,用途是:列表上标「这台设备」、
+// 锁屏上提示一句、设置页告诉用户需不需要重新登记。锁不锁只看开关键(见 lock-screen.tsx:没登记也照锁,
+// 出路是登出重登)。所以读不到、过期、指错行,都只是显示不准,不会把人关在门外也不会漏锁。
 export function useLockDevice(): {
   credentialId: string | null;
   ready: boolean;

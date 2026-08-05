@@ -27,9 +27,9 @@ const withIntl = (node: ReactNode) => (
   </IntlProvider>
 );
 
-// 闲置锁要过**两道门**(#353):① 开关开着(独立的键,不再是 timeout 的 "never" 档);
-// ② 这台设备已就绪(注册过本机 platform passkey,记的是那条凭据的 id)。
-// 缺任一都纯透传 children。想让锁真的落下,两个都得置。
+// 闲置锁只看一道门:开关键(独立的键,不再是 timeout 的 "never" 档)。本机凭据记录**不参与**判断 ——
+// 没有记录也照锁,出路是锁屏上的登出(#353 的修正,见 lock-screen.tsx)。
+// armDevice 只影响显示(列表 badge / 锁屏那句提示),不影响锁不锁。
 const armDevice = () => localStorage.setItem("folio_lock_device_passkey", "pk_local");
 const armSwitch = () => localStorage.setItem("folio_lock_enabled", "1");
 
@@ -78,26 +78,25 @@ describe("LockScreen 第一道门:开关关着不挂闲置机制", () => {
   });
 });
 
-// 第二道门(#353):这台设备没有本机可用的 passkey → 根本不启用闲置锁。
-// **宁可不锁,也不要把人关在门外** —— 锁上了却没有解锁手段,用户只剩登出一条路。
-describe("LockScreen 第二道门:本设备未就绪不挂锁", () => {
+// 本机没有凭据记录时**照锁**。曾经这里是第二道门(记录为空就放行),已取消:记录为空最常见的成因是
+// 清站点数据,而那正是最像「有人在动这台机器」的时刻,那时放行等于把持仓摊开。出路是锁屏上的登出。
+describe("LockScreen 没有本机凭据记录也照锁", () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
-  it("开关开着但设备未就绪 → 透传 children,不注册活动监听", () => {
+  it("开关开着但没有凭据记录 → 照样挂 useIdleLock,注册活动监听", () => {
     localStorage.setItem("folio_lock_timeout", "5");
-    armSwitch(); // 只过第一道门
+    armSwitch(); // 故意不 armDevice()
     const spy = vi.spyOn(window, "addEventListener");
-    const { getByText } = render(
+    render(
       <LockScreen>
         <span>hi</span>
       </LockScreen>,
     );
-    expect(getByText("hi")).toBeTruthy();
-    expect(spy.mock.calls.map((c) => c[0])).not.toContain("mousemove");
+    expect(spy.mock.calls.map((c) => c[0])).toContain("mousemove");
   });
 
-  it("设备未就绪时,连别处已置的锁标志也不生效(内容照常可见)", () => {
+  it("没有凭据记录时,别处已置的锁标志照样生效 —— 内容不在 DOM", () => {
     localStorage.setItem("folio_lock_timeout", "1");
     armSwitch();
     localStorage.setItem("folio_lock_locked", "1"); // 别的标签锁了
@@ -108,7 +107,39 @@ describe("LockScreen 第二道门:本设备未就绪不挂锁", () => {
         </LockScreen>,
       ),
     );
-    expect(queryByText("secret-content")).not.toBeNull();
+    expect(queryByText("secret-content")).toBeNull();
+  });
+
+  // 别让人对着解锁按钮反复按 —— 但按钮**留着**:记录没了不等于钥匙串里没有(清站点数据只清
+  // localStorage),解锁走系统的凭据选择、不看这个标记。
+  it("没有凭据记录时锁屏多一句说明,解锁按钮照旧在", () => {
+    localStorage.setItem("folio_lock_timeout", "1");
+    armSwitch();
+    localStorage.setItem("folio_lock_locked", "1");
+    const { getByText, getByRole } = render(
+      withIntl(
+        <LockScreen>
+          <span>secret-content</span>
+        </LockScreen>,
+      ),
+    );
+    expect(getByText(/No passkey is registered for this device/)).toBeTruthy();
+    expect(getByRole("button", { name: /unlock with passkey/i })).toBeTruthy();
+  });
+
+  it("有凭据记录时不出那句说明", () => {
+    localStorage.setItem("folio_lock_timeout", "1");
+    armSwitch();
+    armDevice();
+    localStorage.setItem("folio_lock_locked", "1");
+    const { queryByText } = render(
+      withIntl(
+        <LockScreen>
+          <span>secret-content</span>
+        </LockScreen>,
+      ),
+    );
+    expect(queryByText(/No passkey is registered for this device/)).toBeNull();
   });
 });
 

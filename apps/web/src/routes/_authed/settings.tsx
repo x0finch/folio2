@@ -198,7 +198,6 @@ export function PasskeysCard() {
   const [adding, setAdding] = useState(false);
   // 本机那条凭据的 credentialID:列表靠它标「这台设备」,删除时靠它精确判断要不要连带关锁(见 onRemove)。
   const { credentialId: deviceCredentialId, clearReady } = useLockDevice();
-  const { setEnabled: setIdleEnabled } = useIdleTimeout();
 
   // 列表用 useQuery(与 account-detail-sheet 一致);supported 为真才拉。data undefined=加载中、[]=空。
   const passkeysQuery = useQuery<PasskeyRow[]>({
@@ -249,17 +248,14 @@ export function PasskeysCard() {
     }
     toast.success(t("passkeyRemoved"));
     await passkeysQuery.refetch();
-    // 删掉的正是本机那条 → 这台设备再没有解锁手段,连带关掉闲置锁(#353)。否则锁还开着却解不开,
-    // 用户只剩登出一条路。
+    // 删掉的正是本机那条 → 清掉本机标记(#353)。**锁不跟着关**:锁是用户明确开的,删一条凭据不代表
+    // 他要撤掉锁;真解不开也有登出这条路,登出重登即可。设置页那句提示会告诉他怎么恢复。
     //
     // 因为存的是 id 而不是布尔,这里能**精确**判断。早先用布尔时只能退而求「删光了才关」,那会漏掉
     // 「账户还剩别的设备的凭据、但本机那条被删了」这种情况;而「删任何一条都清标记」又会把人卡死 ——
     // better-auth 注册带 excludeCredentials,同一认证器重复注册会被浏览器拒掉,于是删了条无关的旧
     // 凭据就再也开不了锁。精确判断两头都避开了。
-    if (pk.credentialID === deviceCredentialId) {
-      clearReady();
-      setIdleEnabled(false); // 关开关,不动时长 —— 重新启用时还是原来那个档
-    }
+    if (pk.credentialID === deviceCredentialId) clearReady();
   }
 
   const fmtDate = (d: string | Date) =>
@@ -416,8 +412,12 @@ export function AutoLockCard() {
   const [busy, setBusy] = useState(false);
 
   // 陈旧标记自纠(#353):本机那条凭据可能在**别的设备**上被删掉 —— 那边的删除动作管不到这里的
-  // localStorage,于是本机标记还在、锁还开着,却已经没有凭据可解。进设置页时比对一次:存的
-  // credentialID 不在账户列表里 → 清标记 + 关开关。查询与 PasskeysCard 同 key,共享缓存不多发请求。
+  // localStorage,于是本机标记还在,指着一条已经不存在的凭据。进设置页时比对一次,不在账户列表里
+  // 就清掉标记。查询与 PasskeysCard 同 key,共享缓存不多发请求。
+  //
+  // **只清标记,不关锁。** 早先这里连带 setEnabled(false):凭据没了就自动放行。那是把判断做反了 ——
+  // 锁是用户明确开的,系统无权替他撤;而且解锁看的是系统钥匙串里有没有可用凭据,不是这个标记,
+  // 标记过期不等于解不开。真解不开也不算被关在门外:锁屏上有登出,登出重登即可。
   const listQuery = useQuery<PasskeyRow[]>({
     queryKey: ["passkeys"],
     queryFn: async () => (await authClient.passkey.listUserPasskeys()).data ?? [],
@@ -432,11 +432,8 @@ export function AutoLockCard() {
     // 弹回关闭、localStorage 空空,而认证器里明明多了一条。单元测试没抓到是因为它只挂一张卡,
     // 缓存里没有那份旧数据,rows 直接从 undefined 变成新列表。
     if (listQuery.isFetching) return;
-    if (!rows.some((r) => r.credentialID === credentialId)) {
-      clearReady();
-      setEnabled(false); // 关开关,不动时长 —— 用户重新启用时还是原来那个档
-    }
-  }, [credentialId, rows, listQuery.isFetching, clearReady, setEnabled]);
+    if (!rows.some((r) => r.credentialID === credentialId)) clearReady();
+  }, [credentialId, rows, listQuery.isFetching, clearReady]);
 
   // 开关拨动。关 → 只移除开关键,时长与本机凭据记录都留着(重新打开时时长还是原来那个档)。
   // 开 → **每次都当场证明一遍在场**,不看本地有没有记录、不设捷径(见 ensureDeviceCredential)。
@@ -519,11 +516,8 @@ export function AutoLockCard() {
     toast.success(t("autoLockEnabled"));
   }
 
-  // **开关显示的是「真的在锁」,不只是那个开关键。** 两个键是分开的:`enabled`(用户想不想)和
-  // 本机凭据记录(有没有解锁手段)。LockScreen 需要两者都在才真上锁,所以只看 enabled 会出现最糟的
-  // 一种状态 —— 开关看着是开的,实际什么都不锁,用户以为自己受保护。自纠 effect 救不了它:自纠的前提
-  // 是「有凭据记录才去比对」,记录为空时压根不跑。
-  const locking = enabled && credentialId != null;
+  // 开关就是开关键本身。曾经这里写 `enabled && credentialId != null` —— 那时 LockScreen 要两者都在
+  // 才上锁,开关得说实话。现在没有第二道门了:开关键在,就是真在锁,所以两者同一件事。
 
   return (
     <Card>
@@ -532,7 +526,7 @@ export function AutoLockCard() {
         <div className="flex items-center justify-between gap-3">
           <CardTitle>{t("autoLock")}</CardTitle>
           <Switch
-            checked={locking}
+            checked={enabled}
             onCheckedChange={onToggle}
             // 这台机器没有指纹/面容时禁掉:留着的话点下去只会弹出系统的「用其他设备」界面然后毫无
             // 反应(ceremony 挂着不返回,连失败提示都没有)。null = 还在问,先不禁免得闪。
@@ -551,17 +545,17 @@ export function AutoLockCard() {
           {platformAuthenticator === false && (
             <p className="text-muted-foreground text-sm">{t("autoLockNoBiometrics")}</p>
           )}
-          {/* 开关键还在、凭据记录没了(清过站点数据 / storage 写入失败):此刻并没有在锁,得说一声,
-              否则用户以为持仓还被遮着。再拨一次开关就会重新验证并恢复。 */}
+          {/* 开关键还在、凭据记录没了(清过站点数据 / 在别处删了那条凭据):**锁照旧生效**,只是这台
+              设备上没有登记在册的解锁凭据了。得说一声怎么办 —— 再拨一次开关就会重新验证并绑定。 */}
           {enabled && credentialId == null && platformAuthenticator !== false && (
-            <p className="text-muted-foreground text-sm">{t("autoLockNeedsReverify")}</p>
+            <p className="text-muted-foreground text-sm">{t("autoLockNoDeviceCredential")}</p>
           )}
         </div>
         {/* 没在锁的时候时长行照样在,只是整行变灰且点不动 —— 让「这里有个设置,但要先打开」看得见。
             灰化包在外层 wrapper(pointer-events-none + opacity + aria-disabled),不动 beUI Tabs 内核。 */}
         <div
-          className={cn(!locking && "pointer-events-none opacity-50")}
-          aria-disabled={!locking || undefined}
+          className={cn(!enabled && "pointer-events-none opacity-50")}
+          aria-disabled={!enabled || undefined}
         >
           <SettingRow label={t("autoLockAfter")}>
             <Tabs value={raw} onValueChange={setRaw} variant="pill">

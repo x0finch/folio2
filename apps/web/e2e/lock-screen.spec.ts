@@ -164,28 +164,60 @@ test.describe("锁屏", () => {
     await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
   });
 
-  // 反面兜底:没有本机凭据时**绝不上锁**。宁可不锁,也不要把人关在门外 —— 锁上了却没有解锁手段,
-  // 用户只剩登出一条路。
-  test("本机没有凭据 → 就算开关开着也不上锁", async ({ page }) => {
+  // 本机凭据记录没了(清过站点数据 / 在别的设备上删了那条)→ **照锁**。曾经这里是「绝不上锁」,
+  // 理由是别把人关在门外;但记录为空最常见的成因恰恰是清站点数据,那正是最像「有人在动这台机器」的
+  // 时刻,放行等于把持仓摊开。而门一直是开着的:锁屏上有登出。
+  test("本机没有凭据记录 → 照样上锁,并留着登出这条路", async ({ page }) => {
     await page.goto("/");
     await setLockState(page, { enabled: true, deviceCredential: null });
     await travelPastIdle(page, 15);
     await page.reload();
 
+    await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible();
+    // 别让人对着解锁按钮反复按 —— 先说清这台设备没登记凭据。
+    await expect(page.getByText(/no passkey is registered for this device/i)).toBeVisible();
+  });
+
+  // 关键:上一条锁住之后真的出得去。登出 → 用邮箱密码登回来 → 进得去内容页,不是「锁屏 → 登出 →
+  // 又锁屏」成环(clearIdleLockState 的作用,见 use-idle-lock.ts)。
+  test("没有凭据被锁住 → 登出再用密码登回来,能进去", async ({ page }) => {
+    const email = await page.evaluate(async () => {
+      const res = await fetch("/api/auth/get-session", { credentials: "include" });
+      return ((await res.json()) as { user?: { email?: string } } | null)?.user?.email ?? "";
+    });
+    expect(email).toBeTruthy();
+
+    await page.goto("/");
+    await setLockState(page, { enabled: true, deviceCredential: null });
+    await travelPastIdle(page, 15);
+    await page.reload();
+    await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
+
+    await page.getByRole("button", { name: /sign out/i }).click();
+    await expect(page).toHaveURL(/\/login/);
+    // 锁屏的登出是客户端跳转(signOut → navigate),落地后表单还会再重挂一次 —— 直接填会撞上
+    // "element was detached"。reload 一下拿一个干净的挂载,不影响这条要验的东西。
+    await page.reload();
+    await page.getByLabel(/email/i).fill(email);
+    await page.getByLabel(/password/i).fill("e2e-password-1234");
+    await page.getByRole("button", { name: /^sign in$/i }).click();
+
+    await expect(page).toHaveURL(/^[^?]*\/(\?.*)?$/);
     await expect(page.getByRole("button", { name: /unlock with passkey/i })).toHaveCount(0);
   });
 
-  // 承上:既然那种状态下不锁,设置页就**不能显示成开着** —— 那是最糟的一种,用户以为持仓被遮着,
-  // 其实完全没有。开关显示的是「真的在锁」(开关键 + 有凭据记录),并给一句话说明怎么恢复。
-  test("开关键还在但凭据记录没了 → 开关显示关闭,并说明当前没在锁", async ({ page }) => {
+  // 开关显示的是开关键本身 —— 它就是「真的在锁」。曾经这里显示关闭 + 「当前并未锁定」,那是
+  // 「没凭据就放行」时代的说法;现在要说的是「怎么把凭据重新登记上」。
+  test("开关键还在但凭据记录没了 → 开关仍显示开启,并提示重新登记", async ({ page }) => {
     await page.goto("/settings");
     await setLockState(page, { enabled: true, deviceCredential: null });
     await page.reload();
 
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toHaveAttribute(
       "aria-checked",
-      "false",
+      "true",
     );
-    await expect(page.getByText(/not locking right now/i)).toBeVisible();
+    await expect(page.getByText(/no passkey is registered for this device/i)).toBeVisible();
   });
 });

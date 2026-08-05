@@ -256,15 +256,29 @@ describe("AutoLockCard 开关与启用前置", () => {
     expect(deletePasskey).not.toHaveBeenCalled(); // 关开关不删凭据
   });
 
-  // 本机那条可能在**别的设备**上被删掉 —— 那边的删除动作管不到这里的 localStorage。
-  // 于是标记还在、锁还开着,却已经没有凭据可解。进设置页时比对一次即自纠。
-  it("存的凭据已不在账户列表里 → 清标记并关掉开关", async () => {
+  // 本机那条可能在**别的设备**上被删掉 —— 那边的删除动作管不到这里的 localStorage,标记就成了空指针。
+  // 进设置页时比对一次即自纠。**只清标记,锁不跟着关**:锁是用户明确开的,系统无权替他撤。
+  it("存的凭据已不在账户列表里 → 清标记,但锁保持开着", async () => {
     localStorage.setItem(DEVICE_KEY, "cred_gone");
     localStorage.setItem(ENABLED_KEY, "1");
     listUserPasskeys.mockResolvedValue({ data: [row("cred_other", "别的设备")] });
     mount(<AutoLockCard />);
     await waitFor(() => expect(localStorage.getItem(DEVICE_KEY)).toBeNull());
-    expect(localStorage.getItem(ENABLED_KEY)).toBeNull();
+    expect(localStorage.getItem(ENABLED_KEY)).not.toBeNull();
+  });
+
+  // 没有凭据记录时开关照样显示开着(它就是在锁),并给一句「怎么重新登记」。
+  // 早先这里显示的是关闭 + 「当前并未锁定」,那是 fail-open 时代的说法。
+  it("开关键在、凭据记录没了 → 开关仍显示开启,并提示重新登记", async () => {
+    localStorage.setItem(ENABLED_KEY, "1");
+    listUserPasskeys.mockResolvedValue({ data: [] });
+    const utils = mount(<AutoLockCard />);
+    await waitFor(() =>
+      expect(utils.getByRole("switch", { name: /auto-lock/i }).getAttribute("aria-checked")).toBe(
+        "true",
+      ),
+    );
+    expect(utils.getByText(/No passkey is registered for this device/)).toBeTruthy();
   });
 
   it("存的凭据还在列表里 → 保持就绪,不误清", async () => {
@@ -365,7 +379,7 @@ describe("PasskeysCard 与闲置锁的联动", () => {
     expect(getAllByText(/this device/i)).toHaveLength(1);
   });
 
-  it("删掉的正是本机那条 → 清标记 + 关掉开关(时长不动)", async () => {
+  it("删掉的正是本机那条 → 清标记,锁与时长都不动", async () => {
     localStorage.setItem(DEVICE_KEY, "cred_local");
     localStorage.setItem(ENABLED_KEY, "1");
     localStorage.setItem(TIMEOUT_KEY, "15");
@@ -377,12 +391,13 @@ describe("PasskeysCard 与闲置锁的联动", () => {
     // 删除接口收的是行主键,不是 credentialID。
     await waitFor(() => expect(deletePasskey).toHaveBeenCalledWith({ id: "dbrow_cred_local" }));
     await waitFor(() => expect(localStorage.getItem(DEVICE_KEY)).toBeNull());
-    expect(localStorage.getItem(ENABLED_KEY)).toBeNull();
+    // 锁不跟着关:删一条凭据不代表用户要撤掉锁。真解不开也有锁屏上的登出。
+    expect(localStorage.getItem(ENABLED_KEY)).not.toBeNull();
     expect(localStorage.getItem(TIMEOUT_KEY)).toBe("15"); // 时长是偏好,不该被清
   });
 
-  // 反面同样重要:删条无关的凭据不该把锁关掉。早先用布尔标记时做不到这种区分,只能退而用
-  // 「删光了才关」;而「删任何一条都清」会让人白验一次(重复注册被拒 → 又要走验证)。
+  // 反面同样重要:删条无关的凭据不该动本机标记。早先用布尔标记时做不到这种区分,只能退而用
+  // 「删光了才算」;而「删任何一条都清」会让人白验一次(重复注册被拒 → 又要走验证)。
   it("删掉的是别的凭据 → 标记与开关都不动", async () => {
     localStorage.setItem(DEVICE_KEY, "cred_local");
     localStorage.setItem(ENABLED_KEY, "1");

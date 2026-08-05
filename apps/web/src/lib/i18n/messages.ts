@@ -79,6 +79,8 @@ const en = {
     subtitle: "Idle for a while — verify to continue.",
     unlockWithPasskey: "Unlock with passkey",
     failed: "Couldn't verify — try again.",
+    noDeviceCredential:
+      "No passkey is registered for this device. If unlocking fails, sign out and sign back in.",
   },
   Overview: {
     totalValue: "Total value",
@@ -267,7 +269,8 @@ const en = {
     autoLockEnableFailed: "Couldn't set up a passkey on this device.",
     autoLockNoBiometrics:
       "This device has no fingerprint or face unlock, so there's nothing to unlock with.",
-    autoLockNeedsReverify: "Not locking right now — turn it on again to verify this device.",
+    autoLockNoDeviceCredential:
+      "No passkey is registered for this device — still locking. Turn it off and on again to register one.",
     appearance: "Appearance",
     theme: "Theme",
     themeLight: "Light",
@@ -470,6 +473,7 @@ const zh: Messages = {
     subtitle: "闲置了一会儿 —— 验证一下继续。",
     unlockWithPasskey: "用 passkey 解锁",
     failed: "验证失败 —— 请重试。",
+    noDeviceCredential: "这台设备没有登记在册的 passkey。解不开就登出,重新登录即可。",
   },
   Overview: {
     totalValue: "总价值",
@@ -650,7 +654,8 @@ const zh: Messages = {
     autoLockEnabled: "这台设备的自动锁定已开启。",
     autoLockEnableFailed: "没能在这台设备上建立 passkey。",
     autoLockNoBiometrics: "这台设备没有指纹或面容解锁,没有可用来解锁的方式。",
-    autoLockNeedsReverify: "当前并未锁定 —— 重新打开开关即可验证这台设备。",
+    autoLockNoDeviceCredential:
+      "这台设备没有登记在册的 passkey —— 锁照旧生效。重新拨一次开关即可登记。",
     appearance: "外观",
     theme: "主题",
     themeLight: "浅色",

@@ -62,8 +62,9 @@ test.describe("Passkeys 卡", () => {
     await expect(page.getByRole("button", { name: /^remove$/i })).toHaveCount(2);
   });
 
-  // 用例 16:我删掉这台机器那条,锁自动关了 —— 不然我再也解不开。
-  test("删掉本机那条 → 连带关掉闲置锁,时长不动", async ({ page, addAuth }) => {
+  // 用例 16:我删掉这台机器那条,标记被清掉,但锁还开着 —— 锁是我自己开的,系统不替我撤;
+  // 真解不开也有锁屏上的登出。
+  test("删掉本机那条 → 清标记并提示重新登记,锁与时长都不动", async ({ page, addAuth }) => {
     await addAuth();
     await page.goto("/settings");
     await page.getByRole("switch", { name: autoLockToggle }).click();
@@ -76,13 +77,14 @@ test.describe("Passkeys 卡", () => {
 
     await removeRowWithBadge(page);
 
+    await expect.poll(async () => (await readLockState(page)).deviceCredential).toBeNull();
     await expect(page.getByRole("switch", { name: autoLockToggle })).toHaveAttribute(
       "aria-checked",
-      "false",
+      "true",
     );
+    await expect(page.getByText(/no passkey is registered for this device/i)).toBeVisible();
     const state = await readLockState(page);
-    expect(state.deviceCredential).toBeNull();
-    expect(state.enabled).toBeNull();
+    expect(state.enabled).not.toBeNull(); // 锁不跟着关
     expect(state.timeout).toBe("5"); // 时长是偏好,不该被连带清掉
   });
 
@@ -103,8 +105,8 @@ test.describe("Passkeys 卡", () => {
     expect((await readLockState(page)).deviceCredential).toBe(before.deviceCredential);
   });
 
-  // 用例 18:我在另一台设备上删了这台的凭据,回来一进设置页,锁自己关掉了。
-  test("存的凭据在服务端已不存在 → 进设置页即自纠(清标记 + 关开关)", async ({ page, addAuth }) => {
+  // 用例 18:我在另一台设备上删了这台的凭据,回来一进设置页,标记被清掉 —— 但锁还开着。
+  test("存的凭据在服务端已不存在 → 进设置页清掉标记,锁不跟着关", async ({ page, addAuth }) => {
     await addAuth();
     await page.goto("/settings");
     await page.getByRole("switch", { name: autoLockToggle }).click();
@@ -120,13 +122,13 @@ test.describe("Passkeys 卡", () => {
     );
     await page.reload();
 
-    // 先等自纠真的落地。**不能反过来先断言开关是 false** —— 挂载首帧 useIdleTimeout 还没读到
-    // localStorage(SSR 安全,首帧恒关),那个 false 是初始态而不是自纠的结果,断言会抢在自纠之前
-    // 通过、然后下一行读到还没被清的标记。
+    // 先等自纠真的落地,再看开关 —— 顺序要紧:挂载首帧 useIdleTimeout 还没读到 localStorage
+    // (SSR 安全,首帧恒关),此时的 false 是初始态,先断言开关会读到一个还没结论的值。
     await expect.poll(async () => (await readLockState(page)).deviceCredential).toBeNull();
+    // **锁保持开着**:凭据记录过期不代表用户要撤掉锁,而且解锁看的是系统钥匙串、不是这个标记。
     await expect(page.getByRole("switch", { name: autoLockToggle })).toHaveAttribute(
       "aria-checked",
-      "false",
+      "true",
     );
   });
 
