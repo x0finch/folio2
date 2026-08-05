@@ -176,9 +176,6 @@ export function SyncStatus({
   const t = useTranslations("Sync");
   const { busy, sync } = useAccountSync(summary.accounts);
   const [modalOpen, setModalOpen] = useState(false);
-  // 桌面 hover popover 打开态抬 z-50(beUI Popover root 是 isolate 层叠上下文,否则被 hero 数值层盖住);
-  // 闭合时隐藏 goo 背板(aria-hidden 首子元素),免透明状态段透出 bg-popover 块(同 useHoverPopover 的手法)。
-  const [popoverOpen, setPopoverOpen] = useState(false);
 
   const attention = busy || summary.failed.length > 0;
   const { dot } = tone(attention);
@@ -197,8 +194,6 @@ export function SyncStatus({
       // 18 = h-9 触发器半高:goo 影子 pill 半径 = min(triggerH/2, panelRadius),须 ≥18 才与 rounded-full 触发器
       // 齐圆,否则更方的影子 pill 四角探出成多余阴影。
       panelRadius={18}
-      onOpenChange={setPopoverOpen}
-      className={cn(popoverOpen ? "z-50" : "[&>[aria-hidden]]:hidden")}
     >
       <PopoverTrigger>
         <StatusSegment

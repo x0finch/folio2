@@ -38,7 +38,6 @@ export function PortfolioSelector() {
         align="start"
         panelRadius={12}
         onOpenChange={pop.onOpenChange}
-        className={pop.rootClassName}
       >
         <PopoverTrigger>
           {/* 小 badge(AnimatedBadge)作 eyebrow;无上下箭头。button 承载 hover/measure ref
