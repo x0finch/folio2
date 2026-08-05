@@ -1,12 +1,18 @@
 "use client";
 // beui.dev/components/motion/input — @/ 别名已改写为 @folio/ui/*。
-// 注意:onChange 回调传的是「值(string)」而非事件。
+// 注意:onChange 回调传的是「值(string)」而非事件;外层 className 落在最外的 wrapper,
+// 要改输入框本身(高度之类)走 classNames={{ field: … }}。
 
-import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
 import {
+  AnimatePresence,
+  animate,
+  motion,
+  useReducedMotion,
+} from "motion/react";
+import {
+  forwardRef,
   useEffect,
   useId,
-  useLayoutEffect,
   useRef,
   useState,
   type InputHTMLAttributes,
@@ -14,13 +20,21 @@ import {
 } from "react";
 import { cn } from "@folio/ui/lib/utils";
 
-const CARET_SPRING = { type: "spring", stiffness: 700, damping: 40, mass: 0.5 } as const;
+export type InputClassNames = {
+  root?: string;
+  label?: string;
+  field?: string;
+  input?: string;
+  leftIcon?: string;
+  rightIcon?: string;
+  successIcon?: string;
+  errorMessage?: string;
+};
 
-const EDGE_PAD = 14;
-const ICON_PAD = 40;
-
-export interface InputProps
-  extends Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "defaultValue" | "onChange"> {
+export interface InputProps extends Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  "value" | "defaultValue" | "onChange"
+> {
   label?: string;
   value?: string;
   defaultValue?: string;
@@ -31,24 +45,30 @@ export interface InputProps
   leftIcon?: ReactNode;
   rightIcon?: ReactNode;
   className?: string;
+  classNames?: InputClassNames;
 }
 
-export function Input({
-  label,
-  value: valueProp,
-  defaultValue,
-  onChange,
-  error,
-  success,
-  leftIcon,
-  rightIcon,
-  className,
-  disabled,
-  id: idProp,
-  type,
-  ...rest
-}: InputProps) {
-  const customCaret = type !== "password";
+export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
+  {
+    label,
+    value: valueProp,
+    defaultValue,
+    onChange,
+    onFocus,
+    onBlur,
+    error,
+    success,
+    leftIcon,
+    rightIcon,
+    className,
+    classNames,
+    disabled,
+    id: idProp,
+    type,
+    ...rest
+  },
+  ref,
+) {
   const reactId = useId();
   const id = idProp ?? reactId;
   const reduce = useReducedMotion();
@@ -58,33 +78,23 @@ export function Input({
   const value = controlled ? (valueProp ?? "") : internal;
 
   const [focused, setFocused] = useState(false);
-  const [caretIndex, setCaretIndex] = useState<number | null>(null);
-  const [caretX, setCaretX] = useState(0);
-  const [scrollLeft, setScrollLeft] = useState(0);
 
   const fieldRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const mirrorRef = useRef<HTMLSpanElement>(null);
 
   const hasError = Boolean(error);
   const errorMessage = typeof error === "string" ? error : null;
-  const index = caretIndex ?? value.length;
 
+  // Right edge shows the success check, otherwise the caller's right icon.
   const rightSlot = success ? null : rightIcon;
-  const leftPad = leftIcon ? ICON_PAD : EDGE_PAD;
-  const rightPad = rightSlot || success ? ICON_PAD : EDGE_PAD;
 
-  useLayoutEffect(() => {
-    if (mirrorRef.current) {
-      mirrorRef.current.textContent = value.slice(0, index);
-      setCaretX(mirrorRef.current.offsetWidth);
-    }
-    if (inputRef.current) setScrollLeft(inputRef.current.scrollLeft);
-  }, [value, index]);
-
+  // Shake the field when an error appears.
   useEffect(() => {
     if (!fieldRef.current || reduce || !hasError) return;
-    animate(fieldRef.current, { x: [0, -6, 6, -4, 4, -2, 0] }, { duration: 0.45 });
+    animate(
+      fieldRef.current,
+      { x: [0, -6, 6, -4, 4, -2, 0] },
+      { duration: 0.45 },
+    );
   }, [hasError, reduce]);
 
   const handleChange = (next: string) => {
@@ -93,95 +103,88 @@ export function Input({
   };
 
   return (
-    <div className={cn("flex flex-col gap-1.5", className)}>
+    <div
+      className={cn("flex flex-col gap-1.5", className, classNames?.root)}
+    >
       {label ? (
-        <label htmlFor={id} className="px-1 text-sm font-medium text-foreground">
+        <label
+          htmlFor={id}
+          className={cn(
+            "px-1 text-sm font-medium text-foreground",
+            classNames?.label,
+          )}
+        >
           {label}
         </label>
       ) : null}
 
       <div
         ref={fieldRef}
-        data-state={hasError ? "error" : success ? "success" : focused ? "focused" : "idle"}
+        data-state={
+          hasError
+            ? "error"
+            : success
+              ? "success"
+              : focused
+                ? "focused"
+                : "idle"
+        }
         className={cn(
           "relative h-11 overflow-hidden rounded-full border transition-colors duration-200",
           "border-border",
           focused && !hasError && "border-foreground/40 ring-2 ring-ring/40",
           hasError && "border-destructive ring-2 ring-destructive/25",
           disabled && "opacity-60",
+          classNames?.field,
         )}
       >
         {leftIcon ? (
-          <span className="pointer-events-none absolute left-3 top-1/2 flex -translate-y-1/2 items-center text-muted-foreground [&_svg]:h-4 [&_svg]:w-4">
+          <span
+            className={cn(
+              "pointer-events-none absolute left-3 top-1/2 flex -translate-y-1/2 items-center text-muted-foreground [&_svg]:h-4 [&_svg]:w-4",
+              classNames?.leftIcon,
+            )}
+          >
             {leftIcon}
           </span>
         ) : null}
 
         <input
-          ref={inputRef}
+          ref={ref}
           id={id}
           type={type}
           value={value}
           disabled={disabled}
           aria-invalid={hasError || undefined}
           aria-describedby={errorMessage ? `${id}-error` : undefined}
-          style={{ paddingLeft: leftPad, paddingRight: rightPad }}
-          onChange={(e) => {
-            handleChange(e.target.value);
-            setCaretIndex(e.target.selectionStart);
-          }}
-          onFocus={(e) => {
-            setFocused(true);
-            setCaretIndex(e.target.selectionStart);
-          }}
-          onBlur={() => setFocused(false)}
-          onSelect={(e) => setCaretIndex(e.currentTarget.selectionStart)}
-          onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
-          className={cn(
-            "peer h-full w-full bg-transparent text-base leading-6 text-foreground outline-none",
-            customCaret ? "caret-transparent" : "caret-foreground",
-            "placeholder:text-muted-foreground/60",
-            disabled && "cursor-not-allowed",
-          )}
           {...rest}
+          onChange={(e) => handleChange(e.target.value)}
+          onFocus={(event) => {
+            setFocused(true);
+            onFocus?.(event);
+          }}
+          onBlur={(event) => {
+            setFocused(false);
+            onBlur?.(event);
+          }}
+          className={cn(
+            "peer h-full w-full bg-transparent text-base leading-6 text-foreground caret-foreground outline-none",
+            "placeholder:text-muted-foreground/60",
+            leftIcon ? "pl-10" : "pl-3.5",
+            rightSlot || success ? "pr-10" : "pr-3.5",
+            disabled && "cursor-not-allowed",
+            classNames?.input,
+          )}
         />
-
-        {customCaret ? (
-          <>
-            <span
-              ref={mirrorRef}
-              aria-hidden
-              style={{ left: leftPad }}
-              className="pointer-events-none invisible absolute top-1/2 -translate-y-1/2 whitespace-pre text-base leading-6"
-            />
-            <motion.span
-              aria-hidden
-              initial={false}
-              style={{ left: leftPad }}
-              animate={{
-                x: caretX - scrollLeft,
-                opacity: focused && !disabled ? [1, 1, 0, 0] : 0,
-              }}
-              transition={{
-                x: reduce ? { duration: 0 } : CARET_SPRING,
-                opacity: focused
-                  ? { duration: 1, repeat: Number.POSITIVE_INFINITY, times: [0, 0.5, 0.5, 1], ease: "linear" }
-                  : { duration: 0.1 },
-              }}
-              className={cn(
-                "pointer-events-none absolute top-1/2 h-5 w-px -translate-y-1/2 rounded-full bg-foreground",
-                hasError && "bg-destructive",
-                success && "bg-(--color-success)",
-              )}
-            />
-          </>
-        ) : null}
 
         {success ? (
           <motion.svg
             viewBox="0 0 24 24"
             fill="none"
-            className="absolute right-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-(--color-success)"
+            className={cn(
+              "absolute right-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-(--color-success)",
+              classNames?.successIcon,
+            )}
           >
             <motion.path
               d="M5 12.5l4.5 4.5L19 7.5"
@@ -195,7 +198,12 @@ export function Input({
             />
           </motion.svg>
         ) : rightSlot ? (
-          <span className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center text-muted-foreground [&_svg]:h-4 [&_svg]:w-4">
+          <span
+            className={cn(
+              "absolute right-0 top-0 flex h-full items-center text-muted-foreground [&_button]:grid [&_button]:size-11 [&_button]:place-items-center [&_svg]:h-4 [&_svg]:w-4",
+              classNames?.rightIcon,
+            )}
+          >
             {rightSlot}
           </span>
         ) : null}
@@ -206,11 +214,22 @@ export function Input({
           <motion.p
             id={`${id}-error`}
             role="alert"
-            initial={reduce ? { opacity: 0 } : { opacity: 0, y: -4, filter: "blur(4px)" }}
+            initial={
+              reduce
+                ? { opacity: 0 }
+                : { opacity: 0, y: -4, filter: "blur(4px)" }
+            }
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4, filter: "blur(4px)" }}
+            exit={
+              reduce
+                ? { opacity: 0 }
+                : { opacity: 0, y: -4, filter: "blur(4px)" }
+            }
             transition={{ duration: 0.2 }}
-            className="px-1 text-xs text-destructive"
+            className={cn(
+              "px-1 text-xs text-destructive",
+              classNames?.errorMessage,
+            )}
           >
             {errorMessage}
           </motion.p>
@@ -218,4 +237,4 @@ export function Input({
       </AnimatePresence>
     </div>
   );
-}
+});

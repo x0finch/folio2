@@ -1,5 +1,5 @@
 "use client";
-// beui.dev/components/motion/animated-toast-stack — beUI 动效层。@/ 别名已改写为 @folio/ui/*。
+// beui.dev/components/motion/animated-toast-stack — @/ 别名已改写为 @folio/ui/*。
 
 import {
   AlertCircle,
@@ -10,8 +10,21 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion, type Transition } from "motion/react";
-import { memo, useEffect, useState, type ReactNode } from "react";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  type Transition,
+} from "motion/react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { EASE_OUT } from "@folio/ui/lib/ease";
 import { cn } from "@folio/ui/lib/utils";
@@ -42,6 +55,10 @@ export type AnimatedToast = {
   createdAt?: number;
 };
 
+export type ToastInput = Omit<AnimatedToast, "id" | "createdAt"> & {
+  id?: string;
+};
+
 export type ToastClassNames = {
   root?: string;
   item?: string;
@@ -68,6 +85,12 @@ export interface AnimatedToastStackProps {
   classNames?: ToastClassNames;
   icons?: Partial<Record<ToastStatus, ReactNode>>;
   renderToast?: (toast: AnimatedToast) => ReactNode;
+}
+
+export interface UseAnimatedToastStackOptions {
+  initialToasts?: ToastInput[];
+  defaultDuration?: number;
+  limit?: number;
 }
 
 const STACK_SPRING: Transition = {
@@ -107,6 +130,131 @@ const POSITION_CLASS: Record<ToastPosition, string> = {
   "bottom-right": "bottom-6 right-4",
 };
 
+let idSeed = 0;
+
+function createToast(input: ToastInput, defaultDuration: number): AnimatedToast {
+  return {
+    duration: defaultDuration,
+    dismissible: true,
+    ...input,
+    id: input.id ?? `toast-${Date.now()}-${idSeed++}`,
+    createdAt: Date.now(),
+  };
+}
+
+export function useAnimatedToastStack({
+  initialToasts = [],
+  defaultDuration = 4200,
+  limit,
+}: UseAnimatedToastStackOptions = {}) {
+  const toastTimers = useRef<Map<string, { timer: number; signature: string }>>(new Map());
+  const [toasts, setToasts] = useState<AnimatedToast[]>(() =>
+    initialToasts.map((toast) => createToast(toast, defaultDuration)),
+  );
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
+
+  const clearToasts = useCallback(() => {
+    setToasts([]);
+  }, []);
+
+  const showToast = useCallback(
+    (input: ToastInput) => {
+      const toast = createToast(input, defaultDuration);
+      setToasts((current) => {
+        const next = [...current, toast];
+        return typeof limit === "number" ? next.slice(-limit) : next;
+      });
+      return toast.id;
+    },
+    [defaultDuration, limit],
+  );
+
+  const updateToast = useCallback((id: string, patch: Partial<ToastInput>) => {
+    setToasts((current) =>
+      current.map((toast) =>
+        toast.id === id
+          ? {
+              ...toast,
+              ...patch,
+              id,
+              createdAt: patch.duration === undefined ? toast.createdAt : Date.now(),
+            }
+          : toast,
+      ),
+    );
+  }, []);
+
+  useEffect(() => {
+    const activeIds = new Set(toasts.map((toast) => toast.id));
+
+    toastTimers.current.forEach((entry, id) => {
+      if (!activeIds.has(id)) {
+        window.clearTimeout(entry.timer);
+        toastTimers.current.delete(id);
+      }
+    });
+
+    toasts.forEach((toast) => {
+      const duration = toast.duration ?? defaultDuration;
+      const existing = toastTimers.current.get(toast.id);
+
+      if (duration <= 0) {
+        if (existing) {
+          window.clearTimeout(existing.timer);
+          toastTimers.current.delete(toast.id);
+        }
+        return;
+      }
+
+      const createdAt = toast.createdAt ?? Date.now();
+      const signature = `${createdAt}:${duration}`;
+
+      if (existing?.signature === signature) {
+        return;
+      }
+
+      if (existing) {
+        window.clearTimeout(existing.timer);
+      }
+
+      const elapsed = Date.now() - createdAt;
+      const remaining = Math.max(duration - elapsed, 0);
+      const timer = window.setTimeout(() => {
+        toastTimers.current.delete(toast.id);
+        dismissToast(toast.id);
+      }, remaining);
+
+      toastTimers.current.set(toast.id, { timer, signature });
+    });
+  }, [defaultDuration, dismissToast, toasts]);
+
+  useEffect(() => {
+    const timers = toastTimers.current;
+
+    return () => {
+      timers.forEach((entry) => {
+        window.clearTimeout(entry.timer);
+      });
+      timers.clear();
+    };
+  }, []);
+
+  return useMemo(
+    () => ({
+      toasts,
+      showToast,
+      updateToast,
+      dismissToast,
+      clearToasts,
+      setToasts,
+    }),
+    [clearToasts, dismissToast, showToast, toasts, updateToast],
+  );
+}
+
 export function AnimatedToastStack({
   toasts,
   onDismiss,
@@ -121,15 +269,15 @@ export function AnimatedToastStack({
   icons,
   renderToast,
 }: AnimatedToastStackProps) {
-  const [mounted, setMounted] = useState(false);
+  const [portalTarget, setPortalTarget] = useState<Element | null>(null);
   const visibleToasts = toasts.slice(-maxVisible);
   const isBottom = position.startsWith("bottom");
   const resolvedPlacement = placement ?? (fixed ? "fixed" : "static");
   const shouldPortal = portal ?? resolvedPlacement === "fixed";
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    setPortalTarget(shouldPortal ? (portalRoot ?? document.body) : null);
+  }, [portalRoot, shouldPortal]);
 
   const stack = (
     <ol
@@ -161,12 +309,12 @@ export function AnimatedToastStack({
     </ol>
   );
 
-  if (shouldPortal && !mounted) {
+  if (shouldPortal && !portalTarget) {
     return null;
   }
 
-  if (shouldPortal) {
-    return createPortal(stack, portalRoot ?? document.body);
+  if (shouldPortal && portalTarget) {
+    return createPortal(stack, portalTarget);
   }
 
   return stack;
@@ -196,8 +344,16 @@ const ToastItem = memo(function ToastItem({
   return (
     <motion.li
       layout
-      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 22, scale: 0.96, filter: "blur(10px)" }}
-      animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+      initial={
+        reduce
+          ? { opacity: 0 }
+          : { opacity: 0, y: 22, scale: 0.96, filter: "blur(10px)" }
+      }
+      animate={
+        reduce
+          ? { opacity: 1 }
+          : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }
+      }
       exit={
         reduce
           ? { opacity: 0 }
@@ -243,9 +399,21 @@ const ToastItem = memo(function ToastItem({
               <AnimatePresence mode="popLayout" initial={false}>
                 <motion.span
                   key={status}
-                  initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.8, filter: "blur(6px)" }}
-                  animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
-                  exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.9, filter: "blur(6px)" }}
+                  initial={
+                    reduce
+                      ? { opacity: 0 }
+                      : { opacity: 0, y: 8, scale: 0.8, filter: "blur(6px)" }
+                  }
+                  animate={
+                    reduce
+                      ? { opacity: 1 }
+                      : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }
+                  }
+                  exit={
+                    reduce
+                      ? { opacity: 0 }
+                      : { opacity: 0, y: -8, scale: 0.9, filter: "blur(6px)" }
+                  }
                   transition={CONTENT_TRANSITION}
                   className="inline-flex"
                 >
@@ -262,9 +430,21 @@ const ToastItem = memo(function ToastItem({
               <AnimatePresence mode="popLayout" initial={false}>
                 <motion.div
                   key={`${toast.id}-${status}-${String(toast.title)}`}
-                  initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8, filter: "blur(6px)" }}
-                  animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
-                  exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8, filter: "blur(6px)" }}
+                  initial={
+                    reduce
+                      ? { opacity: 0 }
+                      : { opacity: 0, y: 8, filter: "blur(6px)" }
+                  }
+                  animate={
+                    reduce
+                      ? { opacity: 1 }
+                      : { opacity: 1, y: 0, filter: "blur(0px)" }
+                  }
+                  exit={
+                    reduce
+                      ? { opacity: 0 }
+                      : { opacity: 0, y: -8, filter: "blur(6px)" }
+                  }
                   transition={CONTENT_TRANSITION}
                 >
                   <p
@@ -317,6 +497,7 @@ const ToastItem = memo(function ToastItem({
             ) : null}
           </div>
         )}
+
       </div>
     </motion.li>
   );

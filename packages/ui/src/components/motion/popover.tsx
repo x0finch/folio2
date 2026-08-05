@@ -1,5 +1,13 @@
 "use client";
 // beui.dev/components/motion/popover
+//
+// **这个件停在旧版,别跟着上游升**(2026-08 试过一次,退了)。上游把面板 portal 到 body,并用一个
+// SVG `<mask>` 把触发器那块从 goo 垫底层里挖掉。问题是 **WebKit 不认从 CSS `mask` 引 SVG 的
+// `<mask>` 元素**(Chrome 认),于是在 iOS Safari 上 mask 整个失效:旧版那层是 `z-[-1]` 藏在触发器
+// 背后,失效也看不出来;portal 之后它盖在所有东西之上,就变成一个圆角矩形正面糊住触发器。
+// beUI 官网自己的 demo 在手机上同样糊 —— 是上游的 bug,不是我们接错。
+// 想升之前先在真 iOS 上验这一条。调用侧那两条 workaround(抬 z / 关闭态隐垫底)也因此留着,
+// 见 apps/web/src/lib/hooks/use-hover-popover.ts。
 
 import {
   animate,

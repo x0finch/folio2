@@ -72,7 +72,7 @@ export function EditableName({
           value={draft}
           placeholder={placeholder}
           onChange={setDraft}
-          className="h-8"
+          classNames={{ field: "h-8" }}
         />
         <Button type="submit" size="sm" disabled={pending || !draft.trim()}>
           {pending ? tc("verifying") : tc("save")}

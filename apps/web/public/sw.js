@@ -7,8 +7,15 @@
 // 更新:静默 skipWaiting + clients.claim(单用户,不弹「有新版本」)。
 // 纯路由决策 swRoute 导出供单测;vitest(node)里 self 无 skipWaiting → 只导出、不挂事件。
 
-const CACHE = "folio-shell-v1";
+// v2:v1 里存过没哈希的 URL(见 swRoute 里那条注释),换桶名让 activate 顺手清掉。
+const CACHE = "folio-shell-v2";
 const OFFLINE_URL = "/offline.html";
+
+/**
+ * 「改一个字节就换 URL」的产物前缀。Vite 把 js/css/字体都输出到 /assets/,文件名带内容哈希,
+ * 所以只有它们配得上 cache-first —— 缓存一条永不过期的记录,而它本来也永远不会变。
+ */
+const IMMUTABLE_PREFIX = "/assets/";
 
 /**
  * 按请求特征选缓存策略(纯函数,便于单测)。
@@ -20,8 +27,16 @@ export function swRoute(req) {
   if (req.mode === "navigate") return "navigation"; // 文档:network-first + 外壳兜底
   if (!req.sameOrigin) return "network-only"; // 跨源(如 logo 代理目标)
   if (req.pathname.startsWith("/api/")) return "network-only"; // 数据 / 鉴权,永不缓存
-  if (req.destination === "script" || req.destination === "style" || req.destination === "font") {
-    return "cache-first"; // hashed 不可变资源
+  // **必须同时满足「是静态资源」和「URL 带哈希」**。早先只看 destination,注释写着「hashed 不可变
+  // 资源」但代码没验证过这一点 —— 于是任何同源的 script/style/font URL 都被永久钉死:命中即返回、
+  // 永不回网络、也没有版本号能淘汰它。真踩过:SW 只在 PROD 注册,可一旦某个域名上跑过一次
+  // preview/prod 构建,SW 就长驻;之后在同一域名跑 dev(`dev:tunnel` 的日常),它照样拦
+  // `/src/styles.css` 这种不带哈希、内容天天变的 URL,把上一轮的 CSS 一直发下去。表现是
+  // 「改了样式手机上不生效,私密标签页却正常」,能查半天。
+  const staticDest =
+    req.destination === "script" || req.destination === "style" || req.destination === "font";
+  if (staticDest && req.pathname.startsWith(IMMUTABLE_PREFIX)) {
+    return "cache-first";
   }
   return "network-only"; // 其余默认不缓存(图片 / manifest 等保持新鲜)
 }

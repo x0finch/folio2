@@ -1,5 +1,5 @@
 "use client";
-// beui.dev/components/motion/morphing-modal
+// beui.dev/components/motion/morphing-modal — @/ 别名已改写为 @folio/ui/*。
 
 import {
   AnimatePresence,
@@ -44,6 +44,7 @@ export function MorphingModal({
   return (
     <div
       aria-hidden={!open}
+      inert={!open}
       className={cn(
         "fixed inset-0 z-[80]",
         open ? "pointer-events-auto" : "pointer-events-none",

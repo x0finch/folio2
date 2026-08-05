@@ -1,5 +1,5 @@
 "use client";
-// beui.dev/components/blocks/swipeable-list
+// beui.dev/components/blocks/swipeable-list — @/ 别名已改写为 @folio/ui/*。
 
 import {
   animate,
@@ -408,6 +408,7 @@ function SwipeableListRow({
     >
       <div
         aria-hidden={!openSide}
+        inert={!openSide}
         className={cn(
           "absolute inset-0 z-0 flex overflow-hidden rounded-2xl",
           classNames?.rail,
