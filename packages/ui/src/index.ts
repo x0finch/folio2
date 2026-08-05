@@ -66,6 +66,7 @@ export {
   type SwipeableListValue,
   type SwipeSide,
 } from "./components/motion/swipeable-list";
+export { Switch, type SwitchProps } from "./components/motion/switch";
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
 export { Toaster, toast } from "./components/motion/toast";
 export { Tooltip } from "./components/motion/tooltip";

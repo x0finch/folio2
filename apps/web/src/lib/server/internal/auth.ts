@@ -8,8 +8,10 @@ import { derivePasskeyRp } from "../../passkey-rp";
 // 密码哈希:better-auth 1.6 + nodejs_compat 默认走原生 node:crypto scrypt(坑 ① 已默认修复)。
 function createAuth() {
   // WebAuthn RP 从 BETTER_AUTH_URL 派生(rpID=host、origin=完整 origin);challenge 走插件默认 cookie,
-  // 不加 KV。residentKey/userVerification 用 "preferred":尽量 discoverable(conditional-UI autofill 需要)
-  // + 尽量生物识别,但都不强制以最大化浏览器/认证器兼容。见 ADR 0028。
+  // 不加 KV。见 ADR 0028。改隧道域名做手机验证时这里会跟着变 —— 也就意味着 localhost 上注册的
+  // 凭据在隧道域名下不可用(rpID 不匹配),反之亦然。
+  // authenticatorSelection 的取值理由见下面 passkey() 那处(#353 把 userVerification 从
+  // "preferred" 改成了 "required",residentKey 仍是 "preferred")。
   const rp = derivePasskeyRp(env.BETTER_AUTH_URL);
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
@@ -30,7 +32,12 @@ function createAuth() {
         rpID: rp.rpID,
         rpName: rp.rpName,
         origin: rp.origin,
-        authenticatorSelection: { residentKey: "preferred", userVerification: "preferred" },
+        // userVerification: "required" —— 每次 ceremony 都必须过本机的生物识别/PIN,平台不许
+        // 缓存跳过。锁屏要的是「此刻在键盘前的还是那个人」这个**在场证明**,插件默认的
+        // "preferred" 允许平台省掉用户验证,那前提就是空的(#353)。
+        // residentKey 保持 preferred:登录页的 conditional-UI(autofill)要可发现凭据,但强制
+        // required 会挡掉一部分认证器,收益不抵。
+        authenticatorSelection: { residentKey: "preferred", userVerification: "required" },
       }),
       tanstackStartCookies(), // 必须放插件数组最后
     ],
