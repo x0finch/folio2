@@ -344,13 +344,26 @@ export function syncAccount(
 
 // 同步该用户全部账户,逐账户隔离、有界并发汇总。account/creds 各一次批量读(消 N+1),再分发。
 // 并发调度本步仍走手写 runPool(下一步 #366 换成 Effect 的并发原语)。
-export function syncUserEffect(deps: SyncDeps, userId: string): Effect.Effect<SyncResult> {
+// 单用户同步的 **Effect 内核**:批量读账户与凭据(各一次,消 N+1)→ 有界并发逐账户同步。
+//
+// 错误通道带 SyncDepError(step 为 listAccounts / listRawCreds)—— 这两步失败时**整个用户这一轮
+// 没法开始**,与迁移前一致地向上抛(不像逐账户失败那样被隔离成 ok:false)。
+export function syncUserEffect(
+  deps: SyncDeps,
+  userId: string,
+): Effect.Effect<SyncResult, SyncDepError> {
   return Effect.gen(function* () {
     // 账户与凭据各一次批量读(消 N+1),两次互不依赖 → 并发取。
     const [accounts, rawList] = yield* Effect.all(
       [
-        Effect.promise(() => deps.listAccounts(userId)),
-        Effect.promise(() => deps.listRawCreds(userId)),
+        Effect.tryPromise({
+          try: () => deps.listAccounts(userId),
+          catch: (e) => depError("listAccounts", e),
+        }),
+        Effect.tryPromise({
+          try: () => deps.listRawCreds(userId),
+          catch: (e) => depError("listRawCreds", e),
+        }),
       ],
       { concurrency: 2 },
     );
@@ -366,7 +379,7 @@ export function syncUserEffect(deps: SyncDeps, userId: string): Effect.Effect<Sy
   });
 }
 
-// Promise 壳。
+// Promise 壳(下一步 —— 出口改成 Effect —— 删掉)。
 export function syncUser(deps: SyncDeps, userId: string): Promise<SyncResult> {
   return Effect.runPromise(syncUserEffect(deps, userId));
 }
@@ -378,30 +391,45 @@ export interface SweepResult {
   skipped: number; // 缺凭据跳过数(待补录,见 P6.6)
 }
 
-// 定时同步全量 sweep(P6.3):逐用户调 syncUser,逐用户 try/catch 隔离(一个用户炸不影响其余;
-// syncUser 内部已逐账户隔离)。失败经注入 logger 记构化日志(每账户失败已在 syncAccount 记,这里只兜底用户级抛错)。
-export async function syncAllUsers(deps: SyncDeps, userIds: string[]): Promise<SweepResult> {
+// 定时同步全量 sweep(P6.3)的 **Effect 内核**:逐用户同步、逐用户隔离(一个用户炸不影响其余;
+// syncUserEffect 内部已逐账户隔离)。失败经注入 logger 记结构化日志(每账户失败已在 syncAccount 记,
+// 这里只兜底用户级失败)。
+//
+// **串行不是遗漏,是有意的**:cron 一次调用有 CPU / subrequest 预算,几十个用户并发跑会顶穿
+// (见 apps/web server.ts 里两个 trigger 拆开的理由)。sweep 后的 warmTokensForUser 同样串行。
+// 所以这里是 `Effect.forEach` 的默认串行语义,**别顺手加 concurrency**。
+export function syncAllUsersEffect(deps: SyncDeps, userIds: string[]): Effect.Effect<SweepResult> {
   const log = deps.log ?? noopLogger;
-  let ok = 0;
-  let failed = 0;
-  let skipped = 0;
-  for (const userId of userIds) {
-    try {
-      const { results } = await syncUser(deps, userId);
-      for (const r of results) {
-        if (r.ok) ok++;
-        else if (r.skipped)
-          skipped++; // 缺凭据:不算失败
-        else failed++; // 具体错误已在 syncAccount 以 error 级记录
-      }
-    } catch (err) {
-      // syncUser 理论上不抛(整体兜底),此处仅防御:整个用户失败也不中断 sweep。
-      failed++;
-      log.error("user sweep threw", {
-        userId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-  return { users: userIds.length, ok, failed, skipped };
+  return Effect.gen(function* () {
+    let ok = 0;
+    let failed = 0;
+    let skipped = 0;
+    yield* Effect.forEach(userIds, (userId) =>
+      syncUserEffect(deps, userId).pipe(
+        Effect.flatMap(({ results }) =>
+          Effect.sync(() => {
+            for (const r of results) {
+              if (r.ok) ok++;
+              else if (r.skipped)
+                skipped++; // 缺凭据:不算失败
+              else failed++; // 具体错误已在 syncAccount 以 error 级记录
+            }
+          }),
+        ),
+        // 用户级失败(取账户 / 取凭据挂了)不中断 sweep,计一个 failed 继续下一个。
+        Effect.catchAll((err) =>
+          Effect.sync(() => {
+            failed++;
+            log.error("user sweep threw", { userId, error: err.message });
+          }),
+        ),
+      ),
+    );
+    return { users: userIds.length, ok, failed, skipped };
+  });
+}
+
+// Promise 壳(下一步 —— 出口改成 Effect —— 删掉)。
+export function syncAllUsers(deps: SyncDeps, userIds: string[]): Promise<SweepResult> {
+  return Effect.runPromise(syncAllUsersEffect(deps, userIds));
 }

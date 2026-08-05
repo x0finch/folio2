@@ -17,6 +17,7 @@ export {
   syncAccount,
   syncAccountEffect,
   syncAllUsers,
+  syncAllUsersEffect,
   syncUser,
   syncUserEffect,
 } from "./orchestrator";

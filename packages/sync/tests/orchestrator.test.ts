@@ -1,7 +1,7 @@
 import { type Balance, ProviderError } from "@folio/connectors-basic";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { Duration, Effect, Fiber, TestClock, TestContext } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   type FetchOutcome,
   type SyncDeps,
@@ -207,7 +207,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
 
   // 跑一段用了假时钟的 Effect:fork → 推进 → join。推进量给足(覆盖所有退避),
   // 不逐段推进的用例用它;要精确卡时间点的自己 fork。
-  const runWithClock = <A>(effect: Effect.Effect<A>, advanceMs = 100_000): Promise<A> =>
+  const runWithClock = <A, E>(effect: Effect.Effect<A, E>, advanceMs = 100_000): Promise<A> =>
     Effect.gen(function* () {
       const fiber = yield* Effect.fork(effect);
       yield* TestClock.adjust(Duration.millis(advanceMs));
