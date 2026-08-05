@@ -2,7 +2,8 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     "apps/web": {
-      "ignoreDependencies": ["cloudflare", "tailwindcss", "@tailwindcss/typography"]
+      "ignoreDependencies": ["cloudflare", "tailwindcss", "@tailwindcss/typography"],
+      "ignoreBinaries": ["cloudflared"]
     },
     "packages/ui": {
       "ignoreDependencies": ["tailwindcss"]
