@@ -1,7 +1,7 @@
 import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { Duration, Effect, Schedule } from "effect";
-import { FetchBalancesError, messageOf, toFetchBalancesError, WriteSnapshotError } from "./errors";
+import { depError, FetchBalancesError, messageOf, toFetchBalancesError } from "./errors";
 import { platformOf } from "./platform";
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。
@@ -191,7 +191,7 @@ export function syncAccountEffect(
     // **下一步(#365)拆成原生 Effect** —— 本步只动重试与超时,便于逐片验证行为等价。
     return yield* Effect.tryPromise({
       try: () => finishAccountSync(deps, userId, account, outcome, log, ctxFields),
-      catch: (e) => new WriteSnapshotError({ message: messageOf(e), cause: e }),
+      catch: (e) => depError("writeSnapshot", e),
     });
   }).pipe(
     // 整体隔离:失败收成 ok:false,绝不抛(不阻断其他账户)。

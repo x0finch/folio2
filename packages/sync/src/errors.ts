@@ -19,39 +19,27 @@ export class FetchBalancesError extends Data.TaggedError("FetchBalancesError")<{
   readonly cause?: unknown;
 }> {}
 
-// —— 其余五个依赖 ——
+// —— 其余五个依赖:合成一个,用 step 区分 ——
 //
-// 这五个形状一模一样(message + cause),只有 tag 不同 —— **为什么不用工厂造?**
-// 试过两种(普通泛型 `<T extends string>` 与 `<const T extends string>`),都不行:
-// 包一层函数之后 `_tag` 会宽化成 `string`,`Effect.catchTag("MintError", …)` 当场不认识,
-// 而「按 tag 区分是哪一步挂了」正是分成六个类型的全部意义。`Data.TaggedError` 就是要直接调。
+// 为什么 fetchBalances 单独一个类型、这五个合成一个:**只有取余额的失败会驱动决策**
+//(重不重试、等多久),所以它值得把 code / retryable / retryAfterMs 摆到类型上。
+// 其余五步的失败处理完全一样 —— 记一笔,然后要么降级要么算这个账户失败;调用方不需要
+// 在类型层面分辨它们,一个 step 字段够了。
 //
-// 所以能省重复的唯一办法是**少定义几个类型**(比如合成一个带 `step` 字段的 SyncDepError),
-// 那是另一个取舍:调用方从此只能靠字段而不是类型来分辨。当前选择是保留六个。
-export class ListAccountsError extends Data.TaggedError("ListAccountsError")<{
+// (顺带记一笔:这五个本来是五个独立 TaggedError。想用工厂消除重复行不通 —— 包一层函数
+// 之后 `_tag` 会宽化成 string,`Effect.catchTag` 当场失效。要么抄五遍,要么就是现在这样。)
+export type SyncDepStep = "listAccounts" | "listRawCreds" | "writeSnapshot" | "mint" | "revalue";
+
+export class SyncDepError extends Data.TaggedError("SyncDepError")<{
+  readonly step: SyncDepStep;
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
-export class ListRawCredsError extends Data.TaggedError("ListRawCredsError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
-export class WriteSnapshotError extends Data.TaggedError("WriteSnapshotError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
-export class MintError extends Data.TaggedError("MintError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
-export class RevalueError extends Data.TaggedError("RevalueError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+// 从任意抛出物造一个 —— 五个调用点形状一样,收口在这。
+export function depError(step: SyncDepStep, cause: unknown): SyncDepError {
+  return new SyncDepError({ step, message: messageOf(cause), cause });
+}
 
 export function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
