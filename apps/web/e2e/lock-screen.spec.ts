@@ -1,5 +1,6 @@
 import {
   dismissPasskeyPrompt,
+  gotoHydrated,
   readLockState,
   setLockState,
   signUpAndLogin,
@@ -19,7 +20,7 @@ test.describe("锁屏", () => {
     await signUpAndLogin(page);
     await dismissPasskeyPrompt(page);
     authenticator = await addAuth();
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
     await page.getByRole("switch", { name: /auto-lock/i }).click();
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toHaveAttribute(
       "aria-checked",
@@ -146,7 +147,9 @@ test.describe("锁屏", () => {
 
   // 用例 23:我改成 1 分钟,闲置一分钟就锁。
   test("时长选 1 分钟 → 过 1 分钟就锁(不到就不锁)", async ({ page }) => {
-    await page.goto("/settings");
+    // 时长 pill 是服务端就渲染出来的,所以这一下必须等 hydration —— 否则点击被吞,下面那个 poll
+    // 只会一直等到超时(它不会替你重新点)。
+    await gotoHydrated(page, "/settings");
     await page.getByRole("tab", { name: "1", exact: true }).click();
     await expect.poll(async () => (await readLockState(page)).timeout).toBe("1");
 
@@ -197,8 +200,8 @@ test.describe("锁屏", () => {
     await page.getByRole("button", { name: /sign out/i }).click();
     await expect(page).toHaveURL(/\/login/);
     // 锁屏的登出是客户端跳转(signOut → navigate),落地后表单还会再重挂一次 —— 直接填会撞上
-    // "element was detached"。reload 一下拿一个干净的挂载,不影响这条要验的东西。
-    await page.reload();
+    // "element was detached"。重新进一次登录页并等到它活了,拿一个干净的挂载。
+    await gotoHydrated(page, "/login");
     await page.getByLabel(/email/i).fill(email);
     await page.getByLabel(/password/i).fill("e2e-password-1234");
     await page.getByRole("button", { name: /^sign in$/i }).click();

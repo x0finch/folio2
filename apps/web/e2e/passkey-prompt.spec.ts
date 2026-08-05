@@ -16,7 +16,18 @@ test.describe("passkey 引导", () => {
   async function signUpThroughForm(page: import("@playwright/test").Page) {
     const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
     await page.goto("/login");
-    await page.getByRole("tab", { name: /sign up/i }).click();
+    // 切 tab 这下会被 hydration 吞掉:点击落在 React 挂上 handler 之前就没了(不报错、不生效),于是
+    // 留在 Sign in 上 —— 两个 tab 都有 email/password 字段,所以后面照样填得进去,直到找不着「Sign up」
+    // 按钮才炸,报错位置离真正的原因隔了三行。CI 上就这么挂过一次。
+    //
+    // 这里**不能**像设置页那样等一个「只有客户端才会发的请求」当探针:登录页那个请求是 passkey 的
+    // conditional-UI autofill,而这组里有一条测试故意把 PublicKeyCredential 拿掉 —— 那条路下探针
+    // 永远不来。改成重试点击直到 tab 真的切过去:点 tab 是幂等的,重复点没有副作用。
+    // (这不是等固定时长:条件一满足立刻往下走。)
+    await expect(async () => {
+      await page.getByRole("tab", { name: /sign up/i }).click();
+      await expect(page.getByRole("button", { name: /^sign up$/i })).toBeVisible({ timeout: 500 });
+    }).toPass();
     await page.getByLabel(/email/i).fill(`e2e-${suffix}@folio.test`);
     await page.getByLabel(/password/i).fill("e2e-password-1234");
     await page.getByRole("button", { name: /^sign up$/i }).click();

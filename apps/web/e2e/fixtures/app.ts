@@ -19,6 +19,28 @@ export interface TestUser {
 }
 
 /**
+ * 导航到某页,并等到客户端**真的活了**再返回。
+ *
+ * 为什么需要:CI 跑的是构建产物,页面画得极快 —— `goto` 返回时 DOM 已经在了,但 React 可能还没挂上
+ * handler。这时候的点击会被**静静吞掉**(不报错、不生效),测试要到几行之后的断言才炸,报错位置离
+ * 真正的原因隔着好几步。CI 上实测偶发,约 1/40,两条不同的测试都中过。
+ *
+ * 等法是「等该出现的东西」而不是等一段时长:每页都有一个**只可能由客户端发出**的请求,收到它就证明
+ * 那棵树已经在跑了。登录页是 passkey 的 conditional-UI autofill(见 login.tsx),设置页是 passkeys
+ * 列表。不用 `networkidle`:那要额外等 500ms 静默,乘上几十次导航,纯亏。
+ */
+const HYDRATION_PROBE = {
+  "/login": "passkey/generate-authenticate-options",
+  "/settings": "passkey/list-user-passkeys",
+} as const;
+
+export async function gotoHydrated(page: Page, path: keyof typeof HYDRATION_PROBE) {
+  const probe = page.waitForResponse((r) => r.url().includes(HYDRATION_PROBE[path]));
+  await page.goto(path);
+  await probe;
+}
+
+/**
  * 造一个测试用户并登录(better-auth 配了 autoSignIn,注册即拿到会话 cookie)。
  *
  * 走 HTTP 而不是 UI:登录表单本身有自己的测试,这里只是要一个「已登录」的起点。email 每次随机,
@@ -107,7 +129,8 @@ export async function dismissPasskeyPrompt(page: Page) {
 export async function enableLock(page: Page) {
   await signUpAndLogin(page);
   await dismissPasskeyPrompt(page);
-  await page.goto("/settings");
+  // 这里必须等 hydration:下一行的点击要是被吞掉,整条测试从起点就是假的(见 gotoHydrated)。
+  await gotoHydrated(page, "/settings");
   const toggle = page.getByRole("switch", { name: /auto-lock/i });
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");

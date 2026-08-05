@@ -1,4 +1,4 @@
-import { dismissPasskeyPrompt, readLockState, signUpAndLogin } from "./fixtures/app";
+import { dismissPasskeyPrompt, gotoHydrated, readLockState, signUpAndLogin } from "./fixtures/app";
 import { type AddAuth, expect, test } from "./fixtures/test";
 
 const autoLockToggle = /auto-lock/i;
@@ -45,7 +45,7 @@ test.describe("Passkeys 卡", () => {
   // 不会让人点下去然后停在系统的「用其他设备」界面上毫无反应。
   test("只有 USB 钥匙时闲置锁开关是禁用的", async ({ page, addAuth }) => {
     const key = await addAuth({ transport: "usb", hasResidentKey: false });
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
 
     await expect(page.getByRole("switch", { name: autoLockToggle })).toBeDisabled();
     await expect(page.getByText(/no fingerprint or face unlock/i)).toBeVisible();
@@ -66,7 +66,7 @@ test.describe("Passkeys 卡", () => {
   // 真解不开也有锁屏上的登出。
   test("删掉本机那条 → 清标记并提示重新登记,锁与时长都不动", async ({ page, addAuth }) => {
     await addAuth();
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
     await page.getByRole("switch", { name: autoLockToggle }).click();
     await expect(page.getByRole("switch", { name: autoLockToggle })).toHaveAttribute(
       "aria-checked",
@@ -108,7 +108,7 @@ test.describe("Passkeys 卡", () => {
   // 用例 18:我在另一台设备上删了这台的凭据,回来一进设置页,标记被清掉 —— 但锁还开着。
   test("存的凭据在服务端已不存在 → 进设置页清掉标记,锁不跟着关", async ({ page, addAuth }) => {
     await addAuth();
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
     await page.getByRole("switch", { name: autoLockToggle }).click();
     await expect(page.getByRole("switch", { name: autoLockToggle })).toHaveAttribute(
       "aria-checked",
@@ -180,7 +180,7 @@ async function confirmRemoval(page: import("@playwright/test").Page) {
  */
 async function addTwoRows(page: import("@playwright/test").Page, addAuth: AddAuth) {
   await addAuth();
-  await page.goto("/settings");
+  await gotoHydrated(page, "/settings");
 
   await page.getByRole("switch", { name: autoLockToggle }).click();
   await expect(page.getByRole("switch", { name: autoLockToggle })).toHaveAttribute(

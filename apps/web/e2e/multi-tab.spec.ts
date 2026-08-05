@@ -1,4 +1,11 @@
-import { dismissPasskeyPrompt, enableLock, KEYS, lockNow, readLockState } from "./fixtures/app";
+import {
+  dismissPasskeyPrompt,
+  enableLock,
+  gotoHydrated,
+  KEYS,
+  lockNow,
+  readLockState,
+} from "./fixtures/app";
 import { expect, test } from "./fixtures/test";
 
 // 同一个人开着好几个标签 —— 这块之前一条测试都没有,而它正是「换个标签就绕过了」最可能藏身的地方。
@@ -11,7 +18,7 @@ test.describe("多个标签页", () => {
     await enableLock(page);
 
     const other = await page.context().newPage();
-    await other.goto("/settings");
+    await gotoHydrated(other, "/settings");
     await expect(other.getByRole("switch", { name: /auto-lock/i })).toBeVisible();
 
     // 第一个标签闲置到锁上。
@@ -71,17 +78,24 @@ test.describe("多个标签页", () => {
 
     const other = await page.context().newPage();
     await other.goto("/settings");
-    // 另一个标签此刻也是锁屏(上一条测过),从它的锁屏登出。
+    // 另一个标签此刻也是锁屏(上一条测过)。**先等锁屏真的出现**再点登出:设置页自己也有一个同名的
+    // 登出按钮(账户卡里那个),服务端就渲染出来了 —— 不等的话可能点在那一个上,而它要弹二次确认。
+    await expect(other.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
     await other.getByRole("button", { name: /sign out/i }).click();
     await expect(other).toHaveURL(/\/login/);
 
     // 第一个标签:会话没了。它可能还显示着锁屏,但**必须能走掉** —— 点登出要落到登录页,
     // 而不是卡在一个既解不开(没会话)又退不出的界面上。
+    // 两条路都算通过:路由守卫发现没会话就直接送去登录页,或者它还停在锁屏、那就得能从锁屏走掉。
+    // 用 toPass 是因为不知道会走哪条,而不是为了等一段时间 —— 条件一满足立刻返回。
     await page.reload();
-    if ((await page.getByRole("button", { name: /unlock with passkey/i }).count()) > 0) {
-      await page.getByRole("button", { name: /sign out/i }).click();
-    }
-    await expect(page).toHaveURL(/\/login/);
+    await expect(async () => {
+      if (!page.url().includes("/login")) {
+        const signOut = page.getByRole("button", { name: /sign out/i });
+        if (await signOut.count()) await signOut.first().click();
+      }
+      expect(page.url()).toMatch(/\/login/);
+    }).toPass();
     await other.close();
   });
 
@@ -131,7 +145,7 @@ test.describe("手快、网慢", () => {
     const { signUpAndLogin } = await import("./fixtures/app");
     await signUpAndLogin(page);
     await dismissPasskeyPrompt(page);
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
 
     const toggle = page.getByRole("switch", { name: /auto-lock/i });
     // 两下之间不给任何等待:第二下要么被 disabled 挡住,要么落在 busy 置上之前那个窗口里。
@@ -172,11 +186,20 @@ test.describe("手快、网慢", () => {
     await expect(toggle).toHaveAttribute("aria-checked", "false");
 
     await page.route("**/passkey/list-user-passkeys", (route) => route.abort("failed"));
+    // 等两件**确定会发生的事**,而不是等一个拍脑袋的时长:
+    // ① 列表拉不动 → 代码退到注册 → `generate-register-options` 必然发出。
+    //    (别等 `verify-registration`:这台认证器上已经有一条凭据了,服务端下发的 excludeCredentials
+    //    会让浏览器当场拒掉,压根走不到 verify —— 我一开始就等错了这个,15 秒超时。)
+    // ② 收尾时 finally 里 setBusy(false),开关从 ceremony 期间的 disabled 变回可用 = 流程真跑完了。
+    const registerStarted = page.waitForResponse((r) =>
+      r.url().includes("passkey/generate-register-options"),
+    );
     await toggle.click();
+    await registerStarted;
+    await expect(toggle).toBeEnabled();
 
     // 列表拉不动时:要么老老实实没开(报错),要么开了 —— 但**不能**出现「开关开着却没有凭据记录」
     // 这种自相矛盾的状态,那正是「显示受保护实际没有」的来源。
-    await page.waitForTimeout(2_000);
     const after = await readLockState(page);
     const switchOn = await toggle.getAttribute("aria-checked");
     if (switchOn === "true") {
@@ -204,11 +227,17 @@ test.describe("本地记录被改坏 / 存不进去", () => {
         throw new DOMException("QuotaExceededError");
       };
     });
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
 
     const toggle = page.getByRole("switch", { name: /auto-lock/i });
+    // 同上:等注册真的开始 + 等 busy 清掉,不等固定时长。写不进 localStorage 不影响 ceremony 本身,
+    // 所以这两个信号照样会到。
+    const registerStarted = page.waitForResponse((r) =>
+      r.url().includes("passkey/generate-register-options"),
+    );
     await toggle.click();
-    await page.waitForTimeout(2_000);
+    await registerStarted;
+    await expect(toggle).toBeEnabled();
 
     // 关键是别把页面搞崩、也别显示成「已开启」——写不进去就等于下次打开还得重来,那就别谎报。
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toBeVisible();

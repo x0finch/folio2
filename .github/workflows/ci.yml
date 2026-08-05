@@ -92,6 +92,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Chromium is ~130MB and every run was re-downloading it. Keyed on the lockfile, so a
+      # Playwright bump invalidates it. The install step below stays unconditional on purpose: with
+      # a warm cache it just prints "already installed" and costs a second, and that beats a cache
+      # hit that turns out to be missing the browser and failing the whole job.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
       # Browser only — `--with-deps` also apt-installs system libs, and ubuntu-latest already has
       # what headless chromium needs.
       - run: pnpm --filter @folio/web exec playwright install chromium

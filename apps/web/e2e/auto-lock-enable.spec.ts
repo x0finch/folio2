@@ -1,4 +1,4 @@
-import { dismissPasskeyPrompt, readLockState, signUpAndLogin } from "./fixtures/app";
+import { dismissPasskeyPrompt, gotoHydrated, readLockState, signUpAndLogin } from "./fixtures/app";
 import { expect, test } from "./fixtures/test";
 
 // 「开启闲置锁」这条路(#353)。单元测试能验「调用参数对不对」,验不了「浏览器会不会真的建出凭据」
@@ -12,7 +12,7 @@ test.describe("开启闲置锁", () => {
   // 用例 1:我从没设过锁,拨开开关,按一下指纹,锁就开了。
   test("拨开开关 → 走一次真 ceremony → 锁开启,凭据落在本机认证器里", async ({ page, addAuth }) => {
     const authenticator = await addAuth();
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
 
     const toggle = page.getByRole("switch", { name: /auto-lock/i });
     await expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -30,7 +30,7 @@ test.describe("开启闲置锁", () => {
   // 用例 3:拨开开关不会先弹一个「确定要开吗」的确认框。
   test("拨开开关不弹自家的确认框 —— 系统的指纹提示已经说清楚了", async ({ page, addAuth }) => {
     await addAuth();
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
     await page.getByRole("switch", { name: /auto-lock/i }).click();
     await expect(page.getByText(/turn on auto-lock\?/i)).toHaveCount(0);
   });
@@ -50,7 +50,7 @@ test.describe("开启闲置锁", () => {
       hasUserVerification: false,
       isUserVerified: false,
     });
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
 
     const toggle = page.getByRole("switch", { name: /auto-lock/i });
     await expect(toggle).toBeDisabled();
@@ -71,7 +71,7 @@ test.describe("开启闲置锁", () => {
   // 同一个认证器,所以这是换设备打开开关的常规路径。
   test("本地记录丢了 → 先验证、认领回原来那条,不新建凭据", async ({ page, addAuth }) => {
     const authenticator = await addAuth();
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
 
     // 先正常开一次,让认证器里有一条凭据。
     await page.getByRole("switch", { name: /auto-lock/i }).click();
@@ -122,7 +122,7 @@ test.describe("开启闲置锁", () => {
   // 该由此刻在键盘前的人证明,不能由上次留下的一条 localStorage 记录代劳),而原来选的时长要留着。
   test("关掉再打开:要重新验一次,但时长保持原样", async ({ page, addAuth }) => {
     const authenticator = await addAuth();
-    await page.goto("/settings");
+    await gotoHydrated(page, "/settings");
 
     const toggle = page.getByRole("switch", { name: /auto-lock/i });
     await toggle.click();

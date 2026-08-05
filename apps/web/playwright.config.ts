@@ -10,8 +10,11 @@ const BASE_URL = `http://localhost:${PORT}`;
 // 兼容不是这套测试的题目 —— 题目是「passkey 这条路本身通不通」。
 export default defineConfig({
   testDir: "./e2e",
-  // dev server 是单实例、底下是一个 SQLite(D1),并行写会互相踩(见 CLAUDE.md 里 better-auth 的
-  // 写锁那条)。这几条测试总共几秒,不值得为并行去拆库。
+  // 串行跑,**这是量过的**:单个 server + 单个 SQLite(D1),并行只是互相抢(见 CLAUDE.md 里
+  // better-auth 的写锁那条)。`--workers=4 --fully-parallel` 实测 1.0 分钟且挂 3 条,串行 52 秒全过 ——
+  // 并行在这儿是负收益,别再试了。
+  //
+  // 时间构成也量过了:51 条各约 1 秒,没有哪条特别慢,所以没有「优化掉某条」这种空间。
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
