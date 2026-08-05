@@ -29,8 +29,20 @@ test.describe("passkey 引导", () => {
       await expect(page.getByRole("button", { name: /^sign up$/i })).toBeVisible({ timeout: 500 });
     }).toPass();
     await page.getByLabel(/email/i).fill(`e2e-${suffix}@folio.test`);
+    // 回车提交,不点那个按钮 —— 理由同下面 signInThroughForm。
     await page.getByLabel(/password/i).fill("e2e-password-1234");
-    await page.getByRole("button", { name: /^sign up$/i }).click();
+    await page.getByLabel(/password/i).press("Enter");
+  }
+
+  /**
+   * 用密码登录。**回车提交,不点「Sign in」按钮**:登录页 hydration 之后 usePasskeySupport 翻真、
+   * 多出一个 passkey 按钮,表单随之变高 —— 那个按钮会先 not stable 再被换掉(detached),点它是在追
+   * 一个动靶。CI 上就是这么挂的(#358 那轮)。输入框本身不动,回车是同一个提交动作。
+   */
+  async function signInThroughForm(page: import("@playwright/test").Page, email: string) {
+    await page.getByLabel(/email/i).fill(email);
+    await page.getByLabel(/password/i).fill("e2e-password-1234");
+    await page.getByLabel(/password/i).press("Enter");
   }
 
   test("首次注册且设备支持 → 弹引导", async ({ page, addAuth }) => {
@@ -68,9 +80,7 @@ test.describe("passkey 引导", () => {
     await page.evaluate(() => localStorage.removeItem("folio_passkey_prompt_dismissed"));
     await signOutFromSettings(page);
 
-    await page.getByLabel(/email/i).fill(email);
-    await page.getByLabel(/password/i).fill("e2e-password-1234");
-    await page.getByRole("button", { name: /^sign in$/i }).click();
+    await signInThroughForm(page, email);
 
     await expect(page).toHaveURL(/^[^?]*\/(\?.*)?$/);
     await expect(page.getByText(/sign in faster next time/i)).toHaveCount(0);
