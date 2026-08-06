@@ -1,5 +1,4 @@
 import {
-  type HttpFailure,
   makeRateLimit,
   makeRequester,
   type RateLimitScope,
@@ -20,8 +19,8 @@ import {
   RABBY_API_BASE,
   RATE_LIMIT_KEY,
   TOTAL_BALANCE_PATH,
+  UPSTREAM,
 } from "./constants";
-import { classify } from "./errors";
 import { currentSigner } from "./signer";
 import type { RabbyChain, RabbyProtocol, RabbyToken } from "./types";
 
@@ -91,11 +90,10 @@ export function make(config: RabbyConfig = {}): Effect.Effect<RabbyClientApi, ne
 
     const request: Requester = makeRequester({
       baseUrl,
+      upstream: UPSTREAM,
       limit,
       headers: signedHeaders,
     });
-
-    const toUpstream = Effect.mapError((e: HttpFailure | SigningFailure) => classify(e));
 
     const chainsCache = staleTolerantCache<Record<string, number>>({
       key: `rabby:chains:${baseUrl}`,
@@ -104,27 +102,23 @@ export function make(config: RabbyConfig = {}): Effect.Effect<RabbyClientApi, ne
       isEmpty: (map) => Object.keys(map).length === 0,
       onEmpty: () =>
         new UpstreamUnavailableError({
-          upstream: "rabby",
+          upstream: UPSTREAM,
           where: CHAIN_LIST_PATH,
           cause: "chain list contained no usable chainIds",
         }),
     });
 
     return {
-      tokens: (address) =>
-        request<RabbyToken[]>(CACHE_TOKEN_LIST_PATH, { query: { id: address } }).pipe(toUpstream),
+      tokens: (address) => request<RabbyToken[]>(CACHE_TOKEN_LIST_PATH, { query: { id: address } }),
 
       protocols: (address) =>
-        request<RabbyProtocol[]>(COMPLEX_PROTOCOL_LIST_PATH, { query: { id: address } }).pipe(
-          toUpstream,
-        ),
+        request<RabbyProtocol[]>(COMPLEX_PROTOCOL_LIST_PATH, { query: { id: address } }),
 
       chainIds: chainsCache.get(
-        request<RabbyChain[]>(CHAIN_LIST_PATH).pipe(toUpstream, Effect.map(parseChainIds)),
+        request<RabbyChain[]>(CHAIN_LIST_PATH).pipe(Effect.map(parseChainIds)),
       ),
 
-      totalBalance: (address) =>
-        request(TOTAL_BALANCE_PATH, { query: { id: address } }).pipe(toUpstream),
+      totalBalance: (address) => request(TOTAL_BALANCE_PATH, { query: { id: address } }),
     };
   });
 }

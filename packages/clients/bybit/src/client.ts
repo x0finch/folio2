@@ -1,8 +1,8 @@
 import {
-  type HttpFailure,
   hmacSha256,
   makeRequester,
   type Requester,
+  type RequestOptions,
   SigningFailure,
   type UpstreamError,
 } from "@folio/client-core";
@@ -22,11 +22,10 @@ import {
   SIGN_TYPE_HMAC,
   WALLET_BALANCE_PATH,
 } from "./constants";
-import { classify, retCodeError } from "./errors";
+import { retCodeError, UPSTREAM } from "./errors";
 import type {
   BybitCreds,
   BybitEarnResponse,
-  BybitEnvelope,
   BybitFundingResponse,
   BybitWalletBalanceResponse,
 } from "./types";
@@ -75,12 +74,7 @@ export function make(config: BybitConfig = {}): BybitClientApi {
   // 空值处理)都会让签名对不上,而 Bybit 只回一句 retCode 10004,查起来很痛。
   const signedHeaders = (
     _path: string,
-    options:
-      | {
-          readonly query?: Record<string, string | number | undefined>;
-          readonly context?: BybitCreds;
-        }
-      | undefined,
+    options: RequestOptions<BybitCreds> | undefined,
   ): Effect.Effect<HeadersInit, SigningFailure> =>
     Effect.gen(function* () {
       const creds = options?.context;
@@ -107,28 +101,18 @@ export function make(config: BybitConfig = {}): BybitClientApi {
       };
     });
 
+  // **`checkBody` 是这家上游的要点**:业务错误是 HTTP 200 + retCode ≠ 0。交给 requester 之后
+  // 每个端点自动都查 —— 少查一个的后果是签名错被当成功、`result` 为空,最后表现成
+  // 「这个账户余额是 0」,静默丢数据。
   const request: Requester<BybitCreds> = makeRequester<BybitCreds>({
     baseUrl: config.apiBase ?? BYBIT_API_BASE,
+    upstream: UPSTREAM,
     headers: signedHeaders,
+    checkBody: retCodeError,
   });
 
-  // 一发 GET:HTTP 层归类 → **再查 retCode**。
-  //
-  // 两层都要:HTTP 那层管「没连上 / 429 / 5xx」,retCode 那层管「连上了但 Bybit 说不行」。
-  // 少查 retCode 的话,一个 200 + retCode 10004(签名错)会被当成功、`result` 为空,
-  // 最后表现成「这个账户余额是 0」—— 静默丢数据,比报错难查得多。
-  const get = <A extends BybitEnvelope>(
-    path: string,
-    query: Record<string, string>,
-    creds: BybitCreds,
-  ): Effect.Effect<A, UpstreamError> =>
-    request<A>(path, { query, context: creds }).pipe(
-      Effect.mapError((e: HttpFailure | SigningFailure) => classify(e)),
-      Effect.flatMap((body) => {
-        const err = retCodeError(body, path);
-        return err ? Effect.fail(err) : Effect.succeed(body);
-      }),
-    );
+  const get = <A>(path: string, query: Record<string, string>, creds: BybitCreds) =>
+    request<A>(path, { query, context: creds });
 
   return {
     walletBalance: (creds) =>

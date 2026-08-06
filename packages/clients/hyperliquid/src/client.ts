@@ -1,12 +1,6 @@
-import {
-  type HttpFailure,
-  makeRequester,
-  type SigningFailure,
-  type UpstreamError,
-} from "@folio/client-core";
+import { makeRequester, type UpstreamError } from "@folio/client-core";
 import { Context, Effect, Layer } from "effect";
-import { CLEARINGHOUSE_TYPE, HYPERLIQUID_API_BASE, INFO_PATH } from "./constants";
-import { classify } from "./errors";
+import { CLEARINGHOUSE_TYPE, HYPERLIQUID_API_BASE, INFO_PATH, UPSTREAM } from "./constants";
 import type { ClearinghouseState } from "./types";
 
 export interface HyperliquidConfig {
@@ -42,6 +36,7 @@ export class HyperliquidClient extends Context.Tag("clients/Hyperliquid")<
 export function make(config: HyperliquidConfig = {}): HyperliquidClientApi {
   const request = makeRequester({
     baseUrl: config.apiBase ?? HYPERLIQUID_API_BASE,
+    upstream: UPSTREAM,
     // 固定的头也走 `headers` 而不是塞进每次调用的 `init` —— 它是这个上游的属性,不是某一发的属性。
     // `content-type` 必须是 application/json,少了它 hyperliquid 回 422。
     headers: () =>
@@ -55,6 +50,6 @@ export function make(config: HyperliquidConfig = {}): HyperliquidClientApi {
           method: "POST",
           body: JSON.stringify({ type: CLEARINGHOUSE_TYPE, user: address }),
         },
-      }).pipe(Effect.mapError((e: HttpFailure | SigningFailure) => classify(e))),
+      }),
   };
 }

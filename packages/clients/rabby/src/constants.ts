@@ -3,6 +3,9 @@
 // **只有请求层要的那些在这里。** 老 provider 的 `DUST_USD`(展示过滤)、`EVM_ADDRESS_RE`
 // (accountCreds 校验)属于适配层,不进 client(ADR 0036)。
 
+// 这是谁 —— 进每个错误的 `upstream` 字段。
+export const UPSTREAM = "rabby";
+
 export const RABBY_API_BASE = "https://api.rabby.io";
 export const CHAIN_LIST_PATH = "/v1/chain/list";
 export const CACHE_TOKEN_LIST_PATH = "/v1/user/cache_token_list";

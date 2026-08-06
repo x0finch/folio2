@@ -1,5 +1,4 @@
 import {
-  type HttpFailure,
   hmacSha256,
   makeRequester,
   type Requester,
@@ -22,11 +21,10 @@ import {
   STAKING_ORDERS_ACTIVE_PATH,
   VALUATION_CCY,
 } from "./constants";
-import { classify, codeError } from "./errors";
+import { codeError, UPSTREAM } from "./errors";
 import type {
   OkxBalanceResponse,
   OkxCreds,
-  OkxEnvelope,
   OkxFundingResponse,
   OkxPositionsResponse,
   OkxSavingsResponse,
@@ -102,24 +100,18 @@ export function make(config: OkxConfig = {}): OkxClientApi {
       };
     });
 
+  // **`checkBody` 是这家上游的要点**:业务错误是 HTTP 200 + code ≠ "0"(字符串)。交给 requester
+  // 之后**六个端点自动都查** —— 少查一个的后果是签名错被当成功、`data` 为空,最后表现成
+  // 「这个账户余额是 0」,静默丢数据。以前这是一个手写的 `get()` 包装。
   const request: Requester<OkxCreds> = makeRequester<OkxCreds>({
     baseUrl: config.apiBase ?? OKX_API_BASE,
+    upstream: UPSTREAM,
     headers: signedHeaders,
+    checkBody: codeError,
   });
 
-  // 一发 GET:HTTP 层归类 → **再查 code**。两层都要,理由见 errors.ts。
-  const get = <A extends OkxEnvelope>(
-    path: string,
-    creds: OkxCreds,
-    query?: Record<string, string>,
-  ): Effect.Effect<A, UpstreamError> =>
-    request<A>(path, { query, context: creds }).pipe(
-      Effect.mapError((e: HttpFailure | SigningFailure) => classify(e)),
-      Effect.flatMap((body) => {
-        const err = codeError(body, path);
-        return err ? Effect.fail(err) : Effect.succeed(body);
-      }),
-    );
+  const get = <A>(path: string, creds: OkxCreds, query?: Record<string, string>) =>
+    request<A>(path, { query, context: creds });
 
   return {
     balance: (creds) => get<OkxBalanceResponse>(BALANCE_PATH, creds),

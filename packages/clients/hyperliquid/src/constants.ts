@@ -3,6 +3,9 @@
 // **只有请求层要的那些在这里。** 老 provider 包的 constants.ts 里还有 `EVM_ADDRESS_RE` ——
 // 那是 `accountCreds` 的校验规则,属于适配层,不进 client(ADR 0036)。
 
+// 这是谁 —— 进每个错误的 `upstream` 字段。
+export const UPSTREAM = "hyperliquid";
+
 export const HYPERLIQUID_API_BASE = "https://api.hyperliquid.xyz";
 // 所有只读查询走同一个 info 端点(POST + JSON body 指定 type)。
 export const INFO_PATH = "/info";

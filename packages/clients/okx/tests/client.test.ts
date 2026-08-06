@@ -195,6 +195,12 @@ describe("业务码(HTTP 200 + code)", () => {
   });
 });
 
+it("上游回一个裸 null → parse,不是崩", async () => {
+  // `null` 是合法的 200 JSON。直接读它的字段会抛 TypeError —— 那是 defect,不进错误通道。
+  const { fn } = stub(() => json(null));
+  expect((await failing(fn, (c) => c.balance(CREDS)))._tag).toBe("UpstreamParseError");
+});
+
 describe("HTTP 层错误归类", () => {
   const failWith = (init: ResponseInit) => {
     const { fn } = stub(() => json({ code: "0" }, init));

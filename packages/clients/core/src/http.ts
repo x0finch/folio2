@@ -1,6 +1,7 @@
 import { Clock, Effect, type RateLimiter } from "effect";
 import { HttpFailure, type SigningFailure } from "./errors";
 import { currentFetch } from "./fetcher";
+import { type ClassifyOptions, classifyFailure, type UpstreamError } from "./upstream-error";
 
 // 一个薄的 fetch 包装:**限频 → 出网 → 归类失败**。
 //
@@ -41,25 +42,39 @@ export interface RequestOptions<Ctx = undefined> {
   readonly context?: Ctx;
 }
 
-export interface HttpConfig<Ctx = undefined, HeaderError = SigningFailure> {
+export interface HttpConfig<Ctx = undefined> {
   // **必填**:所有真实调用点都有基址,而少了它 `new URL("/path")` 会当场炸 —— 与其留一个
   // 「忘了传就报 Invalid URL」的失败模式,不如在类型上要求它。
   readonly baseUrl: string;
+  // 这是谁。进每个错误的 `upstream` 字段 —— 类型合并之后「是谁失败的」只能靠数据带。
+  readonly upstream: string;
   // 每次请求的头。**是函数而不是对象** —— 签名类的头(rabby 的 wasm 签名、binance 的 HMAC)
   // 要按路径和参数算,而且可能失败。它的错误进错误通道,**不被归类成传输故障**:
   // 归错了会退化成「三次退避全白打」,还把真正的原因盖掉。
-  //
-  // 错误类型是**参数**(默认 `SigningFailure`)—— 不是所有签名头都失败成同一个东西
-  // (rabby 走 wasm),写死会逼后来者要么硬套要么改这里。
   readonly headers?: (
     path: string,
     options: RequestOptions<Ctx> | undefined,
-  ) => Effect.Effect<HeadersInit, HeaderError>;
+  ) => Effect.Effect<HeadersInit, SigningFailure>;
   readonly limit?: RateLimiter.RateLimiter; // 不传 = 不限频(判据见 RateLimitOptions.key 的注释:队里没人挤就别装)
   readonly rateLimitedStatuses?: readonly number[]; // 默认 [429]
+  // 上游特有的**传输层**归类差异。返回 undefined 就走默认规则。
+  // 例:binance 用 HTTP 400 表达「这份签名请求被拒」,那是凭据问题而不是上游的锅。
+  readonly classifyOverride?: ClassifyOptions["override"];
+  // 上游特有的**业务层**错误:HTTP 200,但 body 里说不行。
+  //
+  // 为什么是这一层的事:CEX 普遍这么干(bybit 的数字 `retCode`、okx 的字符串 `code`),而
+  // **不查它的后果是静默丢数据** —— 签名错会被当成功、`result` 为空,最后表现成「这个账户
+  // 余额是 0」。放在这里,「一发请求算不算成功」就只有一个答案,不必每个 client 各写一个
+  // `get()` 包装去 flatMap 一遍(那是两份同构代码,也是漏掉一个端点的机会)。
+  readonly checkBody?: (body: unknown, where: string) => UpstreamError | undefined;
 }
 
 // 发一个请求,回解析好的 JSON(`notFoundAsNull` 且 404 时回 null)。
+//
+// **错误就是 `UpstreamError`,不是传输层的中间态。** `HttpFailure` / `SigningFailure` 是归类
+// **过程**用的,没有任何一个 client 想要它们:七家各自 `Effect.mapError(classify)` 一遍,
+// 是同一句样板抄七份,还把「这个请求会失败成什么」的答案推迟了一层。归类是这个包的活,
+// 那就在这里做完。
 //
 // **`A` 是调用方声明的期望形状,包内不校验** —— 一次 `as A`,就在下面那个 `Effect.map` 里。
 // 为什么是泛型而不是 `unknown`:返回 `unknown` 的话每个端点方法都要在自己那行写一次
@@ -69,15 +84,17 @@ export interface HttpConfig<Ctx = undefined, HeaderError = SigningFailure> {
 // **校验本身是另一件事**:上游给的形状对不对,现在没人查。ADR 0035 把 `Effect.Schema` 的评估
 // 推到 connectors 那一步(#362 第 3 站),到那时这里改成收一个 schema、返回 `Effect<A, ... | ParseError>`
 // 是增量改动 —— 调用点已经在声明期望类型了,只是从断言变成校验。
-export type Requester<Ctx = undefined, HeaderError = SigningFailure> = <A = unknown>(
+export type Requester<Ctx = undefined> = <A = unknown>(
   path: string,
   options?: RequestOptions<Ctx>,
-) => Effect.Effect<A, HttpFailure | HeaderError>;
+) => Effect.Effect<A, UpstreamError>;
 
-export function makeRequester<Ctx = undefined, HeaderError = SigningFailure>(
-  config: HttpConfig<Ctx, HeaderError>,
-): Requester<Ctx, HeaderError> {
+export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Requester<Ctx> {
   const rateLimited = new Set(config.rateLimitedStatuses ?? DEFAULT_RATE_LIMITED);
+  const classify = classifyFailure({
+    upstream: config.upstream,
+    override: config.classifyOverride,
+  });
 
   return <A>(path: string, options?: RequestOptions<Ctx>) => {
     const once = Effect.gen(function* () {
@@ -117,14 +134,29 @@ export function makeRequester<Ctx = undefined, HeaderError = SigningFailure>(
         return yield* new HttpFailure({ kind: "upstream", where, status: res.status });
       }
 
-      return yield* Effect.tryPromise({
+      const body = yield* Effect.tryPromise({
         try: () => res.json(),
         catch: (cause) => new HttpFailure({ kind: "parse", where, cause }),
       });
+
+      // HTTP 200 但 body 里说不行(CEX 常见:bybit 的 retCode、okx 的 code)。
+      //
+      // **只在这条路上跑**,不在整个 effect 的成功通道上:上面那个 `notFoundAsNull` 的 `null`
+      // 是「没有这个东西」的正常答案,不是一份 body —— 把它喂给 `checkBody` 会让读 `body.retCode`
+      // 的实现当场 TypeError。`where` 也用 `pathname` 而不是入参 `path`:后者可能带 query
+      // (有些上游的路径常量自带 `?ccy=USD`),而 query 里有地址和签名(原则 #5 红线)。
+      const rejected = config.checkBody?.(body, where);
+      if (rejected) return yield* Effect.fail(rejected);
+      return body;
     });
 
     const gated = config.limit ? config.limit(once) : once;
-    // 全包唯一一处形状断言 —— 见 `Requester` 的注释。
-    return Effect.map(gated, (value) => value as A);
+    // 归类在这里做完 —— 出口就是最终错误面。`checkBody` 吐的已经是最终错误,原样放行。
+    return gated.pipe(
+      Effect.mapError((e) =>
+        e._tag === "HttpFailure" || e._tag === "SigningFailure" ? classify(e) : e,
+      ),
+      Effect.map((body) => body as A),
+    );
   };
 }

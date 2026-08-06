@@ -1,11 +1,10 @@
 import {
-  type HttpFailure,
   hmacSha256,
   makeRateLimit,
   makeRequester,
   type RateLimitScope,
   type Requester,
-  type SigningFailure,
+  UpstreamAuthError,
   type UpstreamError,
 } from "@folio/client-core";
 import { Clock, Context, Duration, Effect, Layer, type Scope } from "effect";
@@ -29,7 +28,7 @@ import {
   TICKER_RATE_LIMIT_PER_SEC,
   USDM_ACCOUNT_PATH,
 } from "./constants";
-import { classify } from "./errors";
+import { classifyOverride, UPSTREAM } from "./errors";
 import type {
   BinanceCreds,
   CoinmAccount,
@@ -102,6 +101,8 @@ export function make(
     // 公开端点:免签、带闸。
     const publicRequester = makeRequester({
       baseUrl: config.apiBase ?? BINANCE_API_BASE,
+      upstream: UPSTREAM,
+      classifyOverride,
       limit: publicLimit,
       rateLimitedStatuses: RATE_LIMITED_STATUSES,
     });
@@ -111,6 +112,8 @@ export function make(
     const signedRequester = (baseUrl: string): Requester<string> =>
       makeRequester<string>({
         baseUrl,
+        upstream: UPSTREAM,
+        classifyOverride,
         headers: (_path, options) => Effect.succeed({ [API_KEY_HEADER]: options?.context ?? "" }),
         rateLimitedStatuses: RATE_LIMITED_STATUSES,
       });
@@ -147,7 +150,18 @@ export function make(
           context: creds.apiKey,
           init: { method },
         });
-      }).pipe(Effect.mapError((e: HttpFailure | SigningFailure) => classify(e)));
+      }).pipe(
+        // **只有 binance 需要这一句**:它的签名要进 **query**(不是头),所以 `hmacSha256` 是在这里
+        // 直接调的,没走 `headers()` —— 而 requester 只归类它自己见过的失败。okx / bybit 的签名在
+        // 头里,归类早就在包内做完了。
+        //
+        // 签不出来归「凭据问题」:secret 非法才会走到这,重试是白赔往返。
+        Effect.catchTag("SigningFailure", (e) =>
+          Effect.fail(
+            new UpstreamAuthError({ upstream: UPSTREAM, where: e.where, cause: e.cause }),
+          ),
+        ),
+      );
 
     // 一个 position 端点翻页取全:size=100 循环 current,直到末页(rows<size)或收满 total。
     // 不翻页时首页只给 10 条,持仓多的账户(小额自动申购常见)会静默丢掉靠后的币。
@@ -182,7 +196,6 @@ export function make(
           }
           return map;
         }),
-        Effect.mapError((e: HttpFailure | SigningFailure) => classify(e)),
       ),
 
       spotAccount: (creds) => signedGet<SpotAccount>(spot, ACCOUNT_PATH, {}, creds),

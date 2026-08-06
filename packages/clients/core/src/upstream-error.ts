@@ -1,5 +1,5 @@
 import { Data, Match } from "effect";
-import { type HttpFailure, SigningFailure } from "./errors";
+import type { HttpFailure, SigningFailure } from "./errors";
 
 // **所有 client 共用的对外错误面。**
 //
@@ -62,7 +62,10 @@ export const classifyFailure =
     const { upstream, override } = options;
     // 签不出来。**不是传输故障** —— 归到网络类会让它吃满退避全白打,还把真正的原因盖掉
     // (rabby 的 wasm 签名、binance 的 HMAC 都可能在这里失败)。
-    if (failure instanceof SigningFailure) {
+    //
+    // 判 `_tag` 不判 `instanceof`:两边都是 tagged error,而 `instanceof` 还额外要求两个类
+    // 来自同一个模块实例 —— 那是包管理器的事,不该是这段代码正确性的前提。
+    if (failure._tag === "SigningFailure") {
       return new UpstreamAuthError({ upstream, where: failure.where, cause: failure.cause });
     }
 

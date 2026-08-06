@@ -1,10 +1,8 @@
 import {
-  type HttpFailure,
   makeRateLimit,
   makeRequester,
   type RateLimitScope,
   type Requester,
-  type SigningFailure,
   type UpstreamError,
 } from "@folio/client-core";
 import { Context, Duration, Effect, Layer, type Scope } from "effect";
@@ -17,9 +15,9 @@ import {
   RATE_LIMIT_BURST,
   RATE_LIMIT_KEY,
   RATE_LIMIT_PER_SEC,
+  UPSTREAM,
   ZERION_API_BASE,
 } from "./constants";
-import { classify } from "./errors";
 import type { ZerionChainsResponse, ZerionPositionsResponse } from "./types";
 
 export interface ZerionConfig {
@@ -75,6 +73,7 @@ export function make(
     // 头是每请求算的(apiKey 从 `context` 来)。
     const request: Requester<string> = makeRequester<string>({
       baseUrl,
+      upstream: UPSTREAM,
       limit,
       headers: (_path, options) =>
         Effect.succeed({
@@ -82,8 +81,6 @@ export function make(
           accept: "application/json",
         }),
     });
-
-    const toUpstream = Effect.mapError((e: HttpFailure | SigningFailure) => classify(e));
 
     // 缓存按 baseUrl 分桶、住在模块级(见 client-core 的 stale-cache:Scope 会被每请求重置)。
     const chainsCache = chainsCacheFor(baseUrl);
@@ -93,18 +90,16 @@ export function make(
         request<ZerionPositionsResponse>(positionsPath(address), {
           query: POSITIONS_QUERY,
           context: apiKey,
-        }).pipe(toUpstream),
+        }),
 
       chainIds: (apiKey) =>
         chainsCache.get(
           request<ZerionChainsResponse>(CHAINS_PATH, { context: apiKey }).pipe(
-            toUpstream,
             Effect.map(parseChainIds),
           ),
         ),
 
-      portfolio: ({ address, apiKey }) =>
-        request(portfolioPath(address), { context: apiKey }).pipe(toUpstream),
+      portfolio: ({ address, apiKey }) => request(portfolioPath(address), { context: apiKey }),
     };
   });
 }

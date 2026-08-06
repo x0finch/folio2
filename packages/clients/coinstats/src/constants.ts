@@ -4,6 +4,9 @@
 // 「env 变量名 / ctx.creds 的键名」—— 那两个身份属于适配层,不进 client(ADR 0036):
 // client 收的是 key 的**值**,不知道它从哪个 env 变量来。这里只留它作为**限频 key** 的那个身份。
 
+// 这是谁 —— 进每个错误的 `upstream` 字段。
+export const UPSTREAM = "coinstats";
+
 export const COINSTATS_API_BASE = "https://openapiv1.coinstats.app";
 export const BALANCE_PATH = "/wallet/balance";
 // 只需 API key、不需地址的端点 —— 用来实测 key 本身是否有效。

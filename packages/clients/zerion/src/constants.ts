@@ -4,6 +4,9 @@
 // `DEBT_POSITION_TYPES`(负债腿取负的解析规则)属于适配层,不进 client(ADR 0036)。
 // `ZERION_API_KEY` 那个「env 变量名」的身份也归适配层 —— client 收 key 的**值**。
 
+// 这是谁 —— 进每个错误的 `upstream` 字段。
+export const UPSTREAM = "zerion";
+
 export const ZERION_API_BASE = "https://api.zerion.io";
 // 全量仓位(代币 + DeFi,跨所有 EVM 链一次返回)。
 export const positionsPath = (address: string) => `/v1/wallets/${address}/positions/`;

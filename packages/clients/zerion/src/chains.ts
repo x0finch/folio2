@@ -1,5 +1,5 @@
 import { staleTolerantCache, UpstreamUnavailableError } from "@folio/client-core";
-import { CHAINS_CACHE_TTL_MS, CHAINS_PATH } from "./constants";
+import { CHAINS_CACHE_TTL_MS, CHAINS_PATH, UPSTREAM } from "./constants";
 
 // 链清单 → slug→数字 chainId(external_id hex → 十进制)。
 //
@@ -28,7 +28,7 @@ export const chainsCacheFor = (baseUrl: string) =>
     isEmpty: (map) => Object.keys(map).length === 0,
     onEmpty: () =>
       new UpstreamUnavailableError({
-        upstream: "zerion",
+        upstream: UPSTREAM,
         where: CHAINS_PATH,
         cause: "chains response contained no usable chainIds",
       }),

@@ -1,10 +1,8 @@
 import {
-  type HttpFailure,
   makeRateLimit,
   makeRequester,
   type RateLimitScope,
   type Requester,
-  type SigningFailure,
   type UpstreamError,
 } from "@folio/client-core";
 import { Context, Duration, Effect, Layer, type Scope } from "effect";
@@ -16,8 +14,8 @@ import {
   RATE_LIMIT_BURST,
   RATE_LIMIT_KEY,
   RATE_LIMIT_PER_SEC,
+  UPSTREAM,
 } from "./constants";
-import { classify } from "./errors";
 import type { CoinstatsCoin } from "./types";
 
 export interface CoinstatsConfig {
@@ -70,21 +68,20 @@ export function make(
     // 头是每请求算的(apiKey 从 `context` 来)—— 所以 `headers` 是函数而不是对象。
     const request: Requester<string> = makeRequester<string>({
       baseUrl: config.apiBase ?? COINSTATS_API_BASE,
+      upstream: UPSTREAM,
       limit,
       headers: (_path, options) =>
         Effect.succeed({ [API_KEY_HEADER]: options?.context ?? "", accept: "application/json" }),
     });
-
-    const toUpstream = Effect.mapError((e: HttpFailure | SigningFailure) => classify(e));
 
     return {
       balance: ({ connectionId, address, apiKey }) =>
         request<CoinstatsCoin[]>(BALANCE_PATH, {
           query: { address, connectionId },
           context: apiKey,
-        }).pipe(toUpstream),
+        }),
 
-      blockchains: (apiKey) => request(BLOCKCHAINS_PATH, { context: apiKey }).pipe(toUpstream),
+      blockchains: (apiKey) => request(BLOCKCHAINS_PATH, { context: apiKey }),
     };
   });
 }
