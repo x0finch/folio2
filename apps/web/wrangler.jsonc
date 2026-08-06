@@ -31,5 +31,17 @@
 
   // 可观测性(P6.7):开启 Workers Logs —— 自动摄取 console.* / LogTape 的 console sink 输出,
   // JSON 自动抽成可索引字段(Dashboard Query Builder + wrangler tail)。单用户 → 全量采样。
-  "observability": { "enabled": true, "head_sampling_rate": 1 }
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "env": {
+    "test": {
+      "vars": { "LOG_LEVEL": "warning" },
+      "cache": { "enabled": true },
+      "d1_databases": [
+        { "binding": "DB", "database_name": "folio",
+          "database_id": "8f62b220-d84e-43e6-b07e-ecb3edb655cb",
+          "migrations_dir": "../../packages/db/drizzle" }
+      ],
+      "observability": { "enabled": true, "head_sampling_rate": 1 }
+    }
+  }
 }
