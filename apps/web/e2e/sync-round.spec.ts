@@ -1,11 +1,17 @@
+import { SYNC_CONCURRENCY } from "@folio/sync";
 import { expect, test } from "@playwright/test";
 import { dismissPasskeyPrompt, signUpAndLogin } from "./fixtures/app";
 import {
   accountIdByLabel,
   addBinanceAccount,
+  blockPostCreateSync,
   clickSyncPill,
   setUpstream,
+  snapshotCount,
+  unblockPostCreateSync,
+  upstream,
   waitForSnapshot,
+  waitForSnapshots,
   waitForUpstreamHit,
 } from "./fixtures/sync";
 
@@ -24,6 +30,10 @@ const holds = (amount: number) => (s: { balances: { amount: number }[] }) =>
   s.balances.some((b) => b.amount === amount);
 
 test.describe("同步一轮", () => {
+  // 默认 30 秒对这组不够:每条都要注册用户、从 UI 加账户(每次创建还 await 一次真实上游的缓存预热)、
+  // 再等一轮同步落库。给整组放宽,而不是让个别条目在拥堵时随机撞穿。
+  test.describe.configure({ timeout: 120_000 });
+
   test("点同步 → 全部账户出快照,报「已同步 N 个」", async ({ page, request }) => {
     await setUpstream(request, { delayMs: 0, spotBtc: "1.50000000" });
     await signUpAndLogin(page);
@@ -98,6 +108,85 @@ test.describe("同步一轮", () => {
       snapshot.takenAt,
       `快照 takenAt=${snapshot.takenAt} 不晚于关页时刻 ${closedAt} —— 那它就是关之前写的,证不到东西`,
     ).toBeGreaterThan(closedAt);
+  });
+
+  // 上面那条证的是「已经起跑的那一轮不会被掐断」。这条更进一步:**关页之后还会继续领新活。**
+  //
+  // 账户数刻意取 SYNC_CONCURRENCY + 2 —— 一轮同步最多同时拉 6 个账户,所以关页那一刻排在后面的两个
+  // **连一个上游请求都还没发出去**。它们事后照样出快照,说明服务端不是「把手上的做完就算」,而是
+  // 真的把整条流拉到底。这一条单测替代不了:它要的是「没人读了,生产端还在往前推」这个性质在真
+  // 断连下成立(队列无界 + 推动式,读的那头没了不回压 —— 见 lib/sync-ndjson.ts)。
+  //
+  // 从 @folio/sync 引常量而不是写死 6:并发上限改了,这条测试跟着改,不会悄悄退化成「8 个全并发」
+  // (那就什么都没测到了)。
+  const ACCOUNT_COUNT = SYNC_CONCURRENCY + 2;
+  test(`关标签页时还有账户没轮到(${ACCOUNT_COUNT} 个 > 并发 ${SYNC_CONCURRENCY})→ 它们也跑完`, async ({
+    page,
+    context,
+    request,
+  }) => {
+    // 八个账户要一个个从 UI 加进去,这条注定是本文件最慢的一条。
+    test.setTimeout(180_000);
+    await setUpstream(request, { delayMs: 0, spotBtc: "7.00000000", hits: 0 });
+    await signUpAndLogin(page);
+    await dismissPasskeyPrompt(page);
+    await page.goto("/accounts");
+
+    // 造账户阶段屏蔽创建后的那次后台同步(见 blockPostCreateSync:它慢、会互相堵)。屏蔽之后这八个
+    // 账户在被测那一轮之前**一张快照都没有** —— 断言更干净,不必再想办法排除干扰。
+    await blockPostCreateSync(page);
+    const labels = Array.from({ length: ACCOUNT_COUNT }, (_, i) => `Spot ${i + 1}`);
+    for (const label of labels) await addBinanceAccount(page, label);
+    await unblockPostCreateSync(page);
+
+    const ids: string[] = [];
+    for (const label of labels) ids.push(await accountIdByLabel(page, label));
+    expect(
+      await snapshotCount(page),
+      "这八个账户此刻本该一张快照都没有(创建后的后台同步已屏蔽)",
+    ).toBe(0);
+
+    // 上游拖慢:慢到能在中途关标签页,也慢到排在并发窗口之后的两个账户还没轮到。
+    await setUpstream(request, { delayMs: 3_000, hits: 0 });
+
+    await page.reload();
+    await clickSyncPill(page);
+    await waitForUpstreamHit(request);
+
+    const hitsAtClose = (await upstream(request)).hits;
+    const closedAt = Date.now();
+    await page.close();
+
+    const reader = await context.newPage();
+    await reader.goto("/accounts");
+    const snapshots = await waitForSnapshots(
+      reader,
+      ids,
+      holds(7),
+      `${ACCOUNT_COUNT} 个账户没全部跑完 —— 关页之后服务端就不再领新活了`,
+      90_000,
+    );
+
+    for (const [i, snapshot] of snapshots.entries()) {
+      expect(
+        snapshot.takenAt,
+        `${labels[i]} 的快照 takenAt=${snapshot.takenAt} 不晚于关页时刻 ${closedAt}`,
+      ).toBeGreaterThan(closedAt);
+    }
+
+    // 「关页之后才发起的请求」这件事,直接问假上游要数。
+    const finalHits = (await upstream(request)).hits;
+    expect(
+      hitsAtClose,
+      "关页之后一个新请求都没发出去 —— 那就没有『继续领新活』这回事",
+    ).toBeLessThan(finalHits);
+    // 每个账户一轮打固定几个端点 → 关页那一刻「动过手的账户数」不该超过并发上限,
+    // 也就是至少还有两个连一次都没打。这一步失败通常意味着并发上限变了,本条测试要重新配数。
+    const perAccount = finalHits / ACCOUNT_COUNT;
+    expect(
+      hitsAtClose / perAccount,
+      `关页时已有 ${hitsAtClose / perAccount} 个账户动过上游,超过并发上限 ${SYNC_CONCURRENCY} —— 说明没有「还没轮到」的账户,这条测不到东西了`,
+    ).toBeLessThanOrEqual(SYNC_CONCURRENCY);
   });
 });
 

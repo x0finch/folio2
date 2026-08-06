@@ -35,7 +35,7 @@ export async function setUpstream(
   return res.json();
 }
 
-async function upstream(request: APIRequestContext): Promise<UpstreamState> {
+export async function upstream(request: APIRequestContext): Promise<UpstreamState> {
   return (await request.get(`${FAKE_BINANCE_URL}/__control`)).json();
 }
 
@@ -65,6 +65,12 @@ export async function addBinanceAccount(page: Page, label: string) {
   // 名字暂时是小写 id 的那一瞬。
   const grid = page.getByRole("button", { name: /Binance$/i });
   const scrim = page.getByRole("button", { name: "Close modal" });
+
+  // 上一次的 modal 得先彻底退场。它是带退场动画的 MorphingModal:遮罩还挂着的那几百毫秒里,
+  // 下面的循环会以为「已经开着了」而不去点开,然后在等一个不存在的网格 —— 连着加八个账户时
+  // 这一下真的会撞上(第一版就是加到第五个开始挂)。
+  await expect(scrim).toHaveCount(0, { timeout: 10_000 });
+
   await expect(async () => {
     if ((await scrim.count()) === 0) {
       await page.getByRole("button", { name: "Add account" }).click();
@@ -77,19 +83,62 @@ export async function addBinanceAccount(page: Page, label: string) {
   await page.locator("#add-apiKey").fill("e2e-fake-api-key");
   await page.locator("#add-secret").fill("e2e-fake-api-secret");
 
-  // 表单里的提交钮和页头那个「添加账户」同名,按 form 收窄。
   const form = page.locator("form").filter({ has: page.locator("#add-label") });
-  await form.getByRole("button", { name: "Add account" }).click();
+  const failure = form.locator("p.text-destructive"); // AccountForm 的 mutation.isError 那行红字
+
+  // **回车提交,不点那个按钮。** modal 的遮罩是一个覆盖全屏的「关闭」按钮,而网格→表单是个 morph
+  // 动画:点击的命中测试通过之后、真正的鼠标事件落下之前,布局还在动,那一下会被遮罩接走 ——
+  // 表现是 modal 关了、账户没建、连报错都没有(连着加八个时稳定复现,第 5 到第 8 个之间某一个中招)。
+  // 回车走的是表单的 onSubmit,不经过坐标命中,而且它本身也是真实的用户动作。
+  await page.locator("#add-secret").press("Enter");
 
   // 创建会**真的**打一次假 server 校验凭据(validateAccount)—— 所以这一步顺带证明了 worker 确实
-  // 指着假 server。指错了的话表单里会留一行红字,而表现出来只是「账户行没出现」,把线索写进消息里。
+  // 指着假 server。
   //
-  // 认**账户行那个按钮**(名字以标签开头),不认「页面上任何一处这个标签」:同步面板的「未同步」
-  // 清单里也写着同一个标签(刚建的账户当然还没同步过),裸文本匹配会命中两个元素。
-  await expect(
-    page.getByRole("button", { name: new RegExp(`^${label}\\b`) }),
-    "账户没建出来。表单里若有红字 binance auth failed,说明 app 没指向假 server —— 起服务要带 CLOUDFLARE_ENV=test(见 playwright.config.ts)",
-  ).toBeVisible({ timeout: 20_000 });
+  // 认**含这个标签的那个按钮**(账户行),不认「页面上任何一处这个标签」:同步面板的「未同步」
+  // 清单里也写着同一个标签,裸文本匹配会命中两个元素(那清单不在按钮里,所以按按钮筛就干净了)。
+  //
+  // 不按可读名匹配:行的可读名是一长串拼接(标签 + Binance + 上次同步 + 金额 + 涨跌),
+  // 账户一多它的开头就不一定是标签,`^标签` 会莫名匹配不上(实测第七个账户开始中招)。
+  // 「这个按钮里有这段文字」是稳的。
+  //
+  // 同时盯那行红字:被拒时直接把上游给的理由抛出来。不然失败只表现成「账户行没出现」,
+  // 真正的原因(比如没指向假 server → binance auth failed)藏在一行没人看的字里。
+  const row = page.getByRole("button").filter({ has: page.getByText(label, { exact: true }) });
+  await expect(async () => {
+    // 先 count() 再取文字。**别直接 textContent()**:匹配不到元素时它会一直等到 actionTimeout
+    // (本仓配的是 15 秒)才抛,而「没有红字」恰恰是常态 —— 于是每加一个账户白烧 15 秒,
+    // 八个账户那条一路涨到两分多钟。count() 是立刻返回的。
+    const rejected = (await failure.count()) > 0 ? await failure.first().textContent() : null;
+    expect(
+      rejected,
+      `加账户被拒:${rejected} —— 若是 binance auth failed,说明 app 没指向假 server,起服务要带 CLOUDFLARE_ENV=test(见 playwright.config.ts)`,
+    ).toBeNull();
+    await expect(row).toHaveCount(1, { timeout: 1_000 });
+  }).toPass({ timeout: 25_000 });
+}
+
+/**
+ * 屏蔽「创建账户之后那次后台同步」——只在一次性造很多账户时用。
+ *
+ * 为什么要屏蔽:`add-account-modal` 的 handleDone 会 `void syncAccount(...)`,而那个 server fn 是
+ * **await 完 `warmTokensForUser` 才返回**的 —— 预热要打真实的价格 / 汇率 / logo 上游。连着造八个账户
+ * 时这些请求堆在一起把 worker 堵住,后一个账户的创建从两秒涨到十几秒(实测)。造账户不是被测对象,
+ * 没必要为它付这个钱;而且屏蔽之后这些账户在被测那一轮之前**一张快照都没有**,断言反而更干净。
+ *
+ * 按请求体分辨而不是按 URL:server fn 的地址带编译期散列,认不出是哪一个。而 `syncAccount` 的入参
+ * 只有 accountId,`createAccount` 带的是 connectorId/label/values —— 这就够分了。
+ */
+export async function blockPostCreateSync(page: Page) {
+  await page.route("**/_serverFn/**", async (route) => {
+    const body = route.request().postData() ?? "";
+    if (body.includes("accountId") && !body.includes("connectorId")) return route.abort();
+    return route.fallback();
+  });
+}
+
+export async function unblockPostCreateSync(page: Page) {
+  await page.unroute("**/_serverFn/**");
 }
 
 /**
@@ -163,6 +212,11 @@ async function exportData(page: Page): Promise<Exported> {
   };
 }
 
+/** 这个用户当前落库的快照总数。 */
+export async function snapshotCount(page: Page): Promise<number> {
+  return (await exportData(page)).snapshots.length;
+}
+
 export async function accountIdByLabel(page: Page, label: string): Promise<string> {
   const { accounts } = await exportData(page);
   const hit = accounts.find((a) => a.label === label);
@@ -171,28 +225,45 @@ export async function accountIdByLabel(page: Page, label: string): Promise<strin
 }
 
 /**
- * 轮到某个账户出现一张满足条件的快照,返回它。
+ * 轮到**每个**给定账户都出现一张满足条件的快照,按入参顺序返回它们。
  *
- * 用 `expect.poll` 而不是等一段时长:条件一满足立刻返回;不满足时把该账户当前所有快照打进报错,
- * 「一张都没有」和「有但数量不对」看一眼就分得清。
+ * 用 `expect.poll` 而不是等一段时长:条件一满足立刻返回;不满足时把还差哪些账户打进报错,
+ * 「一个都没有」「差最后两个」看一眼就分得清 —— 而后者正是并发那条测试要区分的失败形态。
+ *
+ * 一轮只读一次导出(不是每个账户读一次):八个账户就是八倍请求,而它们的答案本来就在同一份导出里。
  */
+export async function waitForSnapshots(
+  page: Page,
+  accountIds: string[],
+  predicate: (s: ExportedSnapshot) => boolean,
+  message: string,
+  timeout = 25_000,
+): Promise<ExportedSnapshot[]> {
+  let matches: (ExportedSnapshot | undefined)[] = [];
+  await expect
+    .poll(
+      async () => {
+        const { snapshots } = await exportData(page);
+        matches = accountIds.map((id) => snapshots.find((s) => s.accountId === id && predicate(s)));
+        const missing = accountIds.filter((_, i) => !matches[i]);
+        return missing.length === 0 ? "matched" : `still missing ${missing.length}: ${missing}`;
+      },
+      { message, timeout },
+    )
+    .toBe("matched");
+  const found = matches.filter((s): s is ExportedSnapshot => s !== undefined);
+  if (found.length !== accountIds.length) throw new Error(message);
+  return found;
+}
+
+/** 单个账户的版本(上面那条的常用形态)。 */
 export async function waitForSnapshot(
   page: Page,
   accountId: string,
   predicate: (s: ExportedSnapshot) => boolean,
   message: string,
 ): Promise<ExportedSnapshot> {
-  let match: ExportedSnapshot | null = null;
-  await expect
-    .poll(
-      async () => {
-        const mine = (await exportData(page)).snapshots.filter((s) => s.accountId === accountId);
-        match = mine.find(predicate) ?? null;
-        return match ? "matched" : `no match among ${JSON.stringify(mine)}`;
-      },
-      { message, timeout: 25_000 },
-    )
-    .toBe("matched");
-  if (!match) throw new Error(message);
-  return match;
+  const [snapshot] = await waitForSnapshots(page, [accountId], predicate, message);
+  if (!snapshot) throw new Error(message);
+  return snapshot;
 }

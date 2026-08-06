@@ -37,9 +37,15 @@
   // 选中某个 Cloudflare environment 时才去找 `.dev.vars.<env>`,而那份文件把 Binance 指向本地假
   // server。由 `CLOUDFLARE_ENV=test` 选中(见 playwright.config.ts 的 webServer)。
   //
-  // 顶层配置在 env 里**不继承**,所以绑定要原样重列一遍。D1 用**同一个 database_id**:Miniflare
-  // 按 id 定位本地那个 SQLite 文件,换个 id 会静默拿到一个全新的空库(连 user 表都没有,每个请求都
-  // 死在 Failed to get session)—— CLAUDE.md 记着这条,是踩过的。
+  // 顶层配置在 env 里**不继承**,所以绑定要原样重列一遍。
+  //
+  // D1 **刻意换了一个 database_id**,于是 e2e 跑在自己的本地库上。Miniflare 按 id 定位本地那个
+  // SQLite 文件(CLAUDE.md 记着这条),所以换 id 就等于换库。理由是隔离:e2e 每轮都注册用户、造账户、
+  // 写快照,没道理堆进开发用的那个库里,也没道理让测试有机会碰到开发数据。
+  // (顺便说清:这**不是**为了性能。本地那个库堆到 10MB 之后量过一遍,整套 e2e 的耗时没有变化。)
+  // 代价是这个库也要迁移一次:`pnpm db:migrate:e2e`(CI 里那一步同样跑它)。
+  // 这个 id 只是本地文件名的 key,**在 Cloudflare 上并不存在** —— 它永远只配 `--local` 用,
+  // 别拿 `--env test` 去 deploy 或 `--remote` 迁移。
   "env": {
     "test": {
       "vars": { "LOG_LEVEL": "warning" },
@@ -47,8 +53,8 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "folio",
-          "database_id": "8f62b220-d84e-43e6-b07e-ecb3edb655cb",
+          "database_name": "folio-e2e",
+          "database_id": "e2e00000-0000-4000-8000-000000000372",
           "migrations_dir": "../../packages/db/drizzle"
         }
       ],

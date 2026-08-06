@@ -102,8 +102,11 @@ jobs:
       # moment a test added an account.
 
       # Fresh runner → empty local D1. The tests sign up their own users, so the auth tables have
-      # to exist before the first request.
-      - run: pnpm --filter @folio/web db:migrate:local
+      # to exist before the first request. This targets wrangler's `test` env, which points at its
+      # own local database (see apps/web/wrangler.jsonc): e2e signs up users and writes snapshots
+      # every run, and none of that belongs in whatever database a developer runs `pnpm dev`
+      # against. On a fresh runner it makes no difference; locally it keeps the two apart.
+      - run: pnpm --filter @folio/web db:migrate:e2e
 
       # playwright.config.ts serves the built worker via `vite preview` when CI is set, so the build
       # has to exist first. This is not a nicety: on the first attempt the suite ran against `vite
