@@ -10,9 +10,10 @@
 
 import type { AccountSafe } from "@folio/db";
 import { Effect } from "effect";
-import { syncAccount as accountEffect } from "./account";
+// 别名只加 `Effect` 后缀,不改词根 —— 壳和内核同名同序,一眼对得上谁包了谁。
+import { syncAccount as syncAccountEffect } from "./account";
 import { layerFromDeps } from "./services";
-import { syncAllUsers as allUsersEffect, syncUser as userEffect } from "./sweep";
+import { syncAllUsers as syncAllUsersEffect, syncUser as syncUserEffect } from "./sweep";
 import type { AccountSyncResult, SweepResult, SyncDeps, SyncResult } from "./types";
 
 export { FetchBalancesError, SyncDepError, type SyncDepStep } from "./errors";
@@ -34,11 +35,11 @@ export const syncAccount = (
   rawCreds: string | null,
 ): Promise<AccountSyncResult> =>
   Effect.runPromise(
-    accountEffect(userId, account, rawCreds).pipe(Effect.provide(layerFromDeps(deps))),
+    syncAccountEffect(userId, account, rawCreds).pipe(Effect.provide(layerFromDeps(deps))),
   );
 
 export const syncUser = (deps: SyncDeps, userId: string): Promise<SyncResult> =>
-  Effect.runPromise(userEffect(userId).pipe(Effect.provide(layerFromDeps(deps))));
+  Effect.runPromise(syncUserEffect(userId).pipe(Effect.provide(layerFromDeps(deps))));
 
 export const syncAllUsers = (deps: SyncDeps, userIds: string[]): Promise<SweepResult> =>
-  Effect.runPromise(allUsersEffect(userIds).pipe(Effect.provide(layerFromDeps(deps))));
+  Effect.runPromise(syncAllUsersEffect(userIds).pipe(Effect.provide(layerFromDeps(deps))));
