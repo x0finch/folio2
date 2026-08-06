@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
+import { Route as ApiSyncRouteImport } from './routes/api/sync'
 import { Route as ApiImportRouteImport } from './routes/api/import'
 import { Route as ApiExportRouteImport } from './routes/api/export'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
@@ -35,6 +36,11 @@ const AuthedIndexRoute = AuthedIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AuthedRoute,
+} as any)
+const ApiSyncRoute = ApiSyncRouteImport.update({
+  id: '/api/sync',
+  path: '/api/sync',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiImportRoute = ApiImportRouteImport.update({
   id: '/api/import',
@@ -90,6 +96,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthedSettingsRoute
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
+  '/api/sync': typeof ApiSyncRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/logo/defi/$protocol': typeof ApiLogoDefiProtocolRoute
   '/api/logo/platform/$key': typeof ApiLogoPlatformKeyRoute
@@ -102,6 +109,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthedSettingsRoute
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
+  '/api/sync': typeof ApiSyncRoute
   '/': typeof AuthedIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/logo/defi/$protocol': typeof ApiLogoDefiProtocolRoute
@@ -117,6 +125,7 @@ export interface FileRoutesById {
   '/_authed/settings': typeof AuthedSettingsRoute
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
+  '/api/sync': typeof ApiSyncRoute
   '/_authed/': typeof AuthedIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/logo/defi/$protocol': typeof ApiLogoDefiProtocolRoute
@@ -133,6 +142,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/api/export'
     | '/api/import'
+    | '/api/sync'
     | '/api/auth/$'
     | '/api/logo/defi/$protocol'
     | '/api/logo/platform/$key'
@@ -145,6 +155,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/api/export'
     | '/api/import'
+    | '/api/sync'
     | '/'
     | '/api/auth/$'
     | '/api/logo/defi/$protocol'
@@ -159,6 +170,7 @@ export interface FileRouteTypes {
     | '/_authed/settings'
     | '/api/export'
     | '/api/import'
+    | '/api/sync'
     | '/_authed/'
     | '/api/auth/$'
     | '/api/logo/defi/$protocol'
@@ -171,6 +183,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   ApiExportRoute: typeof ApiExportRoute
   ApiImportRoute: typeof ApiImportRoute
+  ApiSyncRoute: typeof ApiSyncRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiLogoDefiProtocolRoute: typeof ApiLogoDefiProtocolRoute
   ApiLogoPlatformKeyRoute: typeof ApiLogoPlatformKeyRoute
@@ -199,6 +212,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof AuthedIndexRouteImport
       parentRoute: typeof AuthedRoute
+    }
+    '/api/sync': {
+      id: '/api/sync'
+      path: '/api/sync'
+      fullPath: '/api/sync'
+      preLoaderRoute: typeof ApiSyncRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/import': {
       id: '/api/import'
@@ -288,6 +308,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   ApiExportRoute: ApiExportRoute,
   ApiImportRoute: ApiImportRoute,
+  ApiSyncRoute: ApiSyncRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiLogoDefiProtocolRoute: ApiLogoDefiProtocolRoute,
   ApiLogoPlatformKeyRoute: ApiLogoPlatformKeyRoute,

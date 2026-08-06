@@ -13,7 +13,7 @@ import { buildSyncDeps, warmTokensForUser } from "./internal/sync-deps";
 const syncLog = getLogger(["folio", "web", "sync"]);
 
 // 编排装配在 ./sync-deps(server-only)—— 本文件不引 cloudflare:workers,故这些 server fn 可安全被客户端 import。
-// 全量同步由客户端逐账户编排(见 lib/sync-orchestrator),故此处不再有 triggerSync;只留单账户同步 + 状态。
+// 全量同步走 /api/sync 流式端点(服务端 waitUntil 兜底);这里只留单账户同步(账户抽屉「单独同步」)+ 状态。
 
 // 只同步单个账户(详情侧栏「单独同步」):取该账户 + 其 raw creds → syncAccountCore 隔离写快照。
 // 归档账户理论上侧栏会禁用此项;即便调用,syncAccountCore 仍按现有逻辑处理(缺凭据→skipped)。
