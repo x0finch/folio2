@@ -1,38 +1,28 @@
 import type { Balance } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import { Effect } from "effect";
-import { FetchBalancesError, messageOf } from "./errors";
+import { FetchBalancesError, messageOf, type SyncDepError } from "./errors";
 import { platformOf } from "./platform";
 import { fetchBalancesWithRetry } from "./retry";
-import { Snapshots, SyncLog, type SyncServices, Tokens } from "./services";
-import type { AccountSyncResult, OkOutcome, SyncLogger } from "./types";
+import { Snapshots, type SyncServices, Tokens } from "./services";
+import type { AccountSyncResult, OkOutcome } from "./types";
 
 // 单账户同步:取余额 → 认币 → 重估 → 写快照。
 // 错误通道是 never —— 一个账户炸了收成 ok:false,绝不阻断其他账户。
-
-// 安全字段(红线:绝不打 creds/secret/地址)。userId 显式带 —— cron 路径没有请求级上下文。
-const fieldsOf = (userId: string, account: AccountSafe) => ({
-  userId,
-  accountId: account.id,
-  connectorId: account.connectorId,
-});
+//
+// 日志字段在最外层 annotate 一次(见 syncAccount 末尾),本文件其余地方只写「这条日志额外带什么」。
 
 // 一步 best-effort:失败记一条 warning 并回落,不中断整条链。
 // 认币与重估各用一次 —— 它们是**两个独立的降级点**(一个失败不影响另一个是否执行),
 // 共用这个形状只是消除重复,不是把两处降级合并成一处。
 const bestEffort = <A>(
-  effect: Effect.Effect<A, { readonly message: string }, SyncServices>,
+  effect: Effect.Effect<A, SyncDepError, SyncServices>,
   fallback: A,
-  log: SyncLogger,
-  fields: Record<string, unknown>,
   message: string,
 ): Effect.Effect<A, never, SyncServices> =>
   effect.pipe(
     Effect.catchAll((e) =>
-      Effect.sync(() => {
-        log.warning(message, { ...fields, error: e.message });
-        return fallback;
-      }),
+      Effect.logWarning(message).pipe(Effect.annotateLogs("error", e.message), Effect.as(fallback)),
     ),
   );
 
@@ -63,13 +53,7 @@ const toSnapshotRows = (
   }));
 
 // 取余额之后的三步。抽出来是因为「缺凭据」那条路根本不走到这 —— 早退在上面。
-const finish = (
-  userId: string,
-  account: AccountSafe,
-  outcome: OkOutcome,
-  log: SyncLogger,
-  fields: Record<string, unknown>,
-) =>
+const finish = (userId: string, account: AccountSafe, outcome: OkOutcome) =>
   Effect.gen(function* () {
     const tokens = yield* Tokens;
     const snapshots = yield* Snapshots;
@@ -77,16 +61,12 @@ const finish = (
     const idByRef = yield* bestEffort(
       tokens.mint(userId, outcome.balances),
       new Map<string, string>() as ReadonlyMap<string, string>,
-      log,
-      fields,
       "mint failed; writing snapshot without token_id",
     );
     // 重估(P7.4.2):manual 用市场价改 usdValue。null = 没重估(未注入或失败)。
     const revalued = yield* bestEffort<Balance[] | null>(
       tokens.revalue(userId, account.connectorId, outcome.balances, idByRef),
       null,
-      log,
-      fields,
       "revalue failed; keeping provider values",
     );
     const balances = revalued ?? outcome.balances;
@@ -99,7 +79,9 @@ const finish = (
       note: outcome.note,
       balances: toSnapshotRows(balances, account.connectorId, idByRef),
     });
-    log.info("account synced", { ...fields, totalUsd, balances: balances.length });
+    yield* Effect.logInfo("account synced").pipe(
+      Effect.annotateLogs({ totalUsd, balances: balances.length }),
+    );
     return { accountId: account.id, ok: true, snapshotId, totalUsd } satisfies AccountSyncResult;
   });
 
@@ -109,33 +91,39 @@ export const syncAccount = (
   rawCreds: string | null, // 由 syncUser 批量预取分发(见 Accounts.rawCreds)
 ): Effect.Effect<AccountSyncResult, never, SyncServices> =>
   Effect.gen(function* () {
-    const log = yield* SyncLog;
-    const fields = fieldsOf(userId, account);
-    return yield* Effect.gen(function* () {
-      // 坏 JSON 也算这个账户的失败。
-      const stored = yield* Effect.try({
-        try: (): Record<string, string> => (rawCreds ? JSON.parse(rawCreds) : {}),
-        catch: (e) => new FetchBalancesError({ message: messageOf(e), retryable: false, cause: e }),
-      });
-      const outcome = yield* fetchBalancesWithRetry(account, stored, fields);
-      // 缺凭据(导入待补录)→ 跳过,不算失败,补录后下次纳入(见 P6.6.1)。
-      // **是正常返回值、不进错误通道** —— 它不是出事了,是这轮没事干。
-      if (outcome.status === "needs-credentials") {
-        log.warning("account sync skipped: needs credentials", fields);
-        return { accountId: account.id, ok: false, skipped: true } satisfies AccountSyncResult;
-      }
-      return yield* finish(userId, account, outcome, log, fields);
-    }).pipe(
-      // 隔离:失败收成 ok:false,绝不抛。
-      Effect.catchAll((err) =>
-        Effect.sync((): AccountSyncResult => {
-          log.error("account sync failed", {
-            ...fields,
-            code: err._tag === "FetchBalancesError" ? err.code : undefined,
-            error: err.message,
-          });
-          return { accountId: account.id, ok: false, error: err.message };
+    // 坏 JSON 也算这个账户的失败。
+    const stored = yield* Effect.try({
+      try: (): Record<string, string> => (rawCreds ? JSON.parse(rawCreds) : {}),
+      catch: (e) => new FetchBalancesError({ message: messageOf(e), retryable: false, cause: e }),
+    });
+    const outcome = yield* fetchBalancesWithRetry(account, stored);
+    // 缺凭据(导入待补录)→ 跳过,不算失败,补录后下次纳入(见 P6.6.1)。
+    // **是正常返回值、不进错误通道** —— 它不是出事了,是这轮没事干。
+    if (outcome.status === "needs-credentials") {
+      yield* Effect.logWarning("account sync skipped: needs credentials");
+      return { accountId: account.id, ok: false, skipped: true } satisfies AccountSyncResult;
+    }
+    return yield* finish(userId, account, outcome);
+  }).pipe(
+    // 隔离:失败收成 ok:false,绝不抛。
+    Effect.catchAll((err) =>
+      Effect.logError("account sync failed").pipe(
+        Effect.annotateLogs({
+          code: err._tag === "FetchBalancesError" ? err.code : undefined,
+          error: err.message,
         }),
+        Effect.as({
+          accountId: account.id,
+          ok: false,
+          error: err.message,
+        } satisfies AccountSyncResult),
       ),
-    );
-  });
+    ),
+    // 安全字段(红线:绝不打 creds/secret/地址),标注一次管这个账户全程 —— 含 retry.ts 里
+    // 隔着 Schedule 的那条重试警告。userId 显式带 —— cron 路径没有请求级上下文。
+    Effect.annotateLogs({
+      userId,
+      accountId: account.id,
+      connectorId: account.connectorId,
+    }),
+  );

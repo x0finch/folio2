@@ -2,7 +2,7 @@ import type { AccountSafe } from "@folio/db";
 import { Duration, Effect, Schedule } from "effect";
 import { FETCH_TIMEOUT_MS, RETRY_BASE_MS, RETRY_MAX_ATTEMPTS, RETRY_MAX_MS } from "./constants";
 import { FetchBalancesError } from "./errors";
-import { Balances, SyncLog } from "./services";
+import { Balances } from "./services";
 import type { FetchOutcome } from "./types";
 
 // 取余额失败后的退避重试。**后台同步**用,没人在等 —— 所以宁可多等也不轻易放弃。
@@ -25,14 +25,34 @@ const retryPolicy = Schedule.exponential(Duration.millis(RETRY_BASE_MS)).pipe(
   Schedule.addDelay(() => Duration.millis(Math.random() * RETRY_BASE_MS)),
   // 封顶重试 2 次(总尝试 3 次)。
   Schedule.intersect(Schedule.recurs(RETRY_MAX_ATTEMPTS - 1)),
+  // 重试日志。输出元组第二位就是 `recurs` 数到的已重试次数(0 起),+1 即 attempt —— 不必自己在
+  // 外面攒一个可变计数器。省掉它之后策略才能是个模块级常量(以前得在函数里现拼,只为闭包住它)。
+  // 账户上下文字段不在这里拼:syncAccount 已经 annotate 过,隔着 Schedule 也照样带下来。
+  //
+  // **谓词必须在这里重判一遍**,虽然看着和上面的 whileInput / recurs 重复:Schedule 决定「到此
+  // 为止」时**照样会把这一次的输出发出来**,tapOutput 分不出这是「再来一次」还是「就此放弃」。
+  // 不重判的话,不可重试的错误会记一条「retrying」(其实没重试)、重试用尽会多记第 3 条。
+  // 两个条件正是迁移前 `withRetry` 的退出判据(`!isRetryable || attempt >= attempts` 就 throw,
+  // 不回调 onRetry),照抄它才叫时机一致。tests 两条分别钉住这两种情形的条数。
+  Schedule.tapOutput(([err, recurrence]: readonly [FetchBalancesError, number]) =>
+    err.retryable && recurrence < RETRY_MAX_ATTEMPTS - 1
+      ? Effect.logWarning("provider call retrying").pipe(
+          Effect.annotateLogs({
+            attempt: recurrence + 1,
+            code: err.code,
+            retryAfterMs: err.retryAfterMs,
+          }),
+        )
+      : Effect.void,
+  ),
 );
 
 // 取一次余额,带超时。
-const once = (account: AccountSafe, stored: Record<string, string>) =>
-  Effect.gen(function* () {
-    const balances = yield* Balances;
-    return yield* balances.fetch(account, stored);
-  }).pipe(
+const once = (
+  account: AccountSafe,
+  stored: Record<string, string>,
+): Effect.Effect<FetchOutcome, FetchBalancesError, Balances> =>
+  Effect.flatMap(Balances, (balances) => balances.fetch(account, stored)).pipe(
     // 超时也产出 FetchBalancesError(retryable),这样重试策略只认识一种错误。
     // 用 timeoutFail 不用 Effect.timeout —— 后者会往错误通道塞一个 TimeoutException,
     // 和只认 FetchBalancesError 的策略类型对不上,编译期就红。
@@ -52,25 +72,5 @@ const once = (account: AccountSafe, stored: Record<string, string>) =>
 export const fetchBalancesWithRetry = (
   account: AccountSafe,
   stored: Record<string, string>,
-  logFields: Record<string, unknown>,
-): Effect.Effect<FetchOutcome, FetchBalancesError, Balances | SyncLog> =>
-  Effect.gen(function* () {
-    const log = yield* SyncLog;
-    let attempt = 0;
-    const logged = retryPolicy.pipe(
-      // 日志挂在 schedule 上而不是 tapError 上:它只在**决定再来一次**时触发,
-      // 所以「不可重试」和「重试用尽」都不会多记一条。
-      Schedule.tapOutput(([err]: readonly [FetchBalancesError, number]) =>
-        Effect.sync(() => {
-          attempt += 1;
-          log.warning("provider call retrying", {
-            ...logFields,
-            attempt,
-            code: err.code,
-            retryAfterMs: err.retryAfterMs,
-          });
-        }),
-      ),
-    );
-    return yield* once(account, stored).pipe(Effect.retry(logged));
-  });
+): Effect.Effect<FetchOutcome, FetchBalancesError, Balances> =>
+  Effect.retry(once(account, stored), retryPolicy);

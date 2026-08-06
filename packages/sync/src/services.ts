@@ -1,6 +1,6 @@
 import type { Balance } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, HashMap, Layer, Logger, LogLevel } from "effect";
 import {
   depError,
   type FetchBalancesError,
@@ -14,6 +14,8 @@ import type { FetchOutcome, SyncDeps, SyncLogger } from "./types";
 //
 // 每个能力的错误类型也写在这:只有取余额会驱动决策(重不重试、等多久),所以它单独一个错误类型;
 // 其余都是 SyncDepError。
+//
+// 日志**不在这份名单里** —— 它是一个 Logger 层(见下方 forwardTo),不是要从上下文取的服务。
 
 export class Accounts extends Context.Tag("sync/Accounts")<
   Accounts,
@@ -64,19 +66,46 @@ export class Tokens extends Context.Tag("sync/Tokens")<
   }
 >() {}
 
-export class SyncLog extends Context.Tag("sync/Log")<SyncLog, SyncLogger>() {}
-
-export type SyncServices = Accounts | Balances | Snapshots | Tokens | SyncLog;
+export type SyncServices = Accounts | Balances | Snapshots | Tokens;
 
 // 没注入 mint 时的空答案。共享一个不可变实例 —— 每账户新建一个空 Map 没有意义。
 const EMPTY_IDS: ReadonlyMap<string, string> = new Map();
 
-const noopLogger: SyncLogger = {
-  debug() {},
-  info() {},
-  warning() {},
-  error() {},
-};
+// —— 日志:一个 Logger 层,不是一个服务 ——
+//
+// 业务代码只写 `Effect.logWarning("...")`,上下文字段(userId / accountId / connectorId)由
+// `Effect.annotateLogs` 在**账户那一层标注一次**,此后该账户内所有日志自动都带上 ——
+// 包括退避重试那条,它隔着 Schedule 也照样拿得到。手传 `log` 与 `fields` 的写法就此消失。
+//
+// 门限设 All:级别过滤是注入方(LogTape)的事,本层不替它筛 —— 与迁移前直调 `log.*` 一致。
+// 不设的话 Effect 默认从 Info 起,`debug` 会在到达 LogTape 之前就被吃掉。
+const forwardTo = (log: SyncLogger): Layer.Layer<never> =>
+  Layer.merge(
+    Logger.replace(
+      Logger.defaultLogger,
+      Logger.make(({ annotations, logLevel, message }) => {
+        const text = Array.isArray(message) ? message.map(String).join(" ") : String(message);
+        const props = Object.fromEntries(HashMap.toEntries(annotations));
+        switch (logLevel._tag) {
+          case "Fatal":
+          case "Error":
+            return log.error(text, props);
+          case "Warning":
+            return log.warning(text, props);
+          case "Debug":
+          case "Trace":
+            return log.debug(text, props);
+          default:
+            return log.info(text, props);
+        }
+      }),
+    ),
+    Logger.minimumLogLevel(LogLevel.All),
+  );
+
+// 没注入 logger:装一个哑的,而不是任由 Effect 默认 logger 往控制台打
+//(迁移前的默认就是 no-op,测试不注入 log 时也指望这个)。
+const silent: Layer.Layer<never> = Logger.replace(Logger.defaultLogger, Logger.none);
 
 // **新旧世界唯一的接缝**:把公开的 `SyncDeps`(Promise 形状)翻译成上面这组服务。
 //
@@ -129,5 +158,5 @@ export const layerFromDeps = (deps: SyncDeps): Layer.Layer<SyncServices> =>
             })
         : () => Effect.succeed(null),
     }),
-    Layer.succeed(SyncLog, deps.log ?? noopLogger),
+    deps.log ? forwardTo(deps.log) : silent,
   );

@@ -304,6 +304,48 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     expect(results[0].ok).toBe(false);
     expect(calls()).toBe(1);
   });
+
+  // attempt 由 schedule 自己数(recurs 的输出 + 1),不再靠外面一个可变计数器 —— 这条钉住那个换算。
+  // 顺带钉住:账户上下文字段是在 syncAccount 那层标注一次的,**隔着 Schedule 也照样带下来**
+  // (重试日志自己没拼过 userId/accountId)。
+  it("重试日志:attempt 从 1 递增,且带着账户上下文字段", async () => {
+    const { log, entries } = capturingLogger();
+    const { fetchBalances } = flaky(
+      () => new ProviderError("UPSTREAM_ERROR", "5xx", { retryAfterMs: 300 }),
+      2,
+    );
+    const { deps } = makeDeps([account({ id: "a7", connectorId: "okx" })], { log, fetchBalances });
+    await runWithClock(syncUserEffect(deps, "u1"));
+    const retries = entries.filter((e) => e.msg === "provider call retrying");
+    expect(retries.map((e) => e.props?.attempt)).toEqual([1, 2]);
+    expect(retries[0]?.level).toBe("warning");
+    expect(retries[0]?.props).toMatchObject({
+      userId: "u1",
+      accountId: "a7",
+      connectorId: "okx",
+      code: "UPSTREAM_ERROR",
+      retryAfterMs: 300,
+    });
+  });
+
+  // 重试用尽 / 不可重试都不该多记一条 —— 日志挂在 schedule 的 tapOutput 上就是为了这个。
+  it("重试用尽记 2 条(不是 3 条);不可重试记 0 条", async () => {
+    const exhausted = capturingLogger();
+    const { deps: d1 } = makeDeps([account()], {
+      log: exhausted.log,
+      fetchBalances: flaky(() => new ProviderError("UPSTREAM_ERROR", "5xx"), 99).fetchBalances,
+    });
+    await runWithClock(syncUserEffect(d1, "u1"));
+    expect(exhausted.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(2);
+
+    const fatal = capturingLogger();
+    const { deps: d2 } = makeDeps([account()], {
+      log: fatal.log,
+      fetchBalances: flaky(() => new ProviderError("AUTH_FAILED", "bad key"), 99).fetchBalances,
+    });
+    await runWithClock(syncUserEffect(d2, "u1"));
+    expect(fatal.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(0);
+  });
 });
 
 describe("syncUser — 有界并发", () => {

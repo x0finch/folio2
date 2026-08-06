@@ -17,8 +17,9 @@ export type OkOutcome = Extract<FetchOutcome, { status: "ok" }>;
 // 注入式 logger(最小接口,结构兼容 LogTape 的 Logger)。app 注入 getLogger(["folio","sync"]);
 // 测试注入 no-op/捕获式 → 不耦合 LogTape、不污染输出。
 //
-// 为什么还是注入而不是 Effect 自带的日志:转发器只能在跑 Effect 那一刻挂上,而现在出口还是
-// Promise 壳、上下文在包内部就被消化掉了,app 够不着那个点。等出口也改成 Effect 再换(ADR 0035)。
+// **这是公开契约,不是内部写法**:包内业务代码一律用 Effect 自带的日志,`services.ts` 把它转发到
+// 这里注入的实现(见 forwardTo)。于是「这条日志带哪些上下文字段」是标注出来的、自动往下渗透的,
+// 不必逐层手传 —— 而 app 侧仍然只需要交一个 LogTape logger,什么都不用懂。
 export interface SyncLogger {
   debug(message: string, properties?: Record<string, unknown>): void;
   info(message: string, properties?: Record<string, unknown>): void;
