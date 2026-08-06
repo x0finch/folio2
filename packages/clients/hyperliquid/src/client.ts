@@ -1,4 +1,4 @@
-import { makeRequester, type UpstreamError } from "@folio/client-core";
+import { makeRequester, type Outbound, type UpstreamError } from "@folio/client-core";
 import { Context, Effect, Layer } from "effect";
 import { CLEARINGHOUSE_TYPE, HYPERLIQUID_API_BASE, INFO_PATH, UPSTREAM } from "./constants";
 import type { ClearinghouseState } from "./types";
@@ -24,7 +24,7 @@ export interface HyperliquidClientApi {
   // 永续账户状态:保证金汇总 + 各仓位。地址是 EVM 地址,每次调用传 —— 一个 client 服务多个账户。
   readonly clearinghouseState: (
     address: string,
-  ) => Effect.Effect<ClearinghouseState, UpstreamError>;
+  ) => Effect.Effect<ClearinghouseState, UpstreamError, Outbound>;
 }
 
 export class HyperliquidClient extends Context.Tag("clients/Hyperliquid")<
@@ -32,7 +32,7 @@ export class HyperliquidClient extends Context.Tag("clients/Hyperliquid")<
   HyperliquidClientApi
 >() {
   static readonly layer = (config: HyperliquidConfig = {}): Layer.Layer<HyperliquidClient> =>
-    Layer.succeed(HyperliquidClient, make(config));
+    Layer.sync(HyperliquidClient, () => make(config));
 }
 
 // **不是 Effect**,与 binance 不同 —— 那边要 `yield* makeRateLimit`(闸的构造要 `Scope`),
@@ -50,10 +50,8 @@ export function make(config: HyperliquidConfig = {}): HyperliquidClientApi {
   return {
     clearinghouseState: (address) =>
       request<ClearinghouseState>(INFO_PATH, {
-        init: {
-          method: "POST",
-          body: JSON.stringify({ type: CLEARINGHOUSE_TYPE, user: address }),
-        },
+        method: "POST",
+        body: JSON.stringify({ type: CLEARINGHOUSE_TYPE, user: address }),
       }),
   };
 }

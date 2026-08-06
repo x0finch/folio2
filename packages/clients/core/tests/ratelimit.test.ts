@@ -1,7 +1,9 @@
 import {
+  Cause,
   Clock,
   Duration,
   Effect,
+  Exit,
   Fiber,
   Layer,
   Option,
@@ -271,5 +273,32 @@ describe("scope: isolated —— 冷启并发(真实场景:新 isolate 同时同
     // 一发都不许早于别人已经占到的 5000。
     expect(Math.min(...seen)).toBeGreaterThanOrEqual(5000);
     expect(new Set(seen).size).toBe(5);
+  });
+});
+
+describe("这一档不支持什么,要说出来", () => {
+  it('`algorithm: "fixed-window"` 在 isolated 档**构造时就炸**,不是静默忽略', async () => {
+    // 这一档顶着官方 `RateLimiter` 的类型,而那个类型允许传 `algorithm` —— 于是「类型说支持、
+    // 运行时悄悄不管」就成了最难查的那种坑(复审第 4 条)。GCRA 是 token-bucket 的连续时间版,
+    // 一个游标表达不了 fixed-window,那就在构造时说清楚。
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        make({ key: "fw-test", limit: 2, interval: "1 seconds", algorithm: "fixed-window" }),
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    // 是 defect(配错了,不是运行时故障)—— 错误消息要说清「换哪一档」,不然读到的人还得去翻源码。
+    const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "";
+    expect(message).toContain("token-bucket");
+    expect(message).toContain("memory scope");
+  });
+
+  it("token-bucket(和不传)照常能建", async () => {
+    for (const algorithm of ["token-bucket", undefined] as const) {
+      const gate = await Effect.runPromise(
+        Effect.scoped(make({ key: `tb-${algorithm}`, limit: 2, interval: "1 seconds", algorithm })),
+      );
+      expect(typeof gate).toBe("function");
+    }
   });
 });

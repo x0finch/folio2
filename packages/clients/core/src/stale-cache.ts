@@ -16,11 +16,20 @@ import type { UpstreamError } from "./upstream-error";
 //
 // **分桶不提供 reset** —— 桶的身份是 `upstream + name + scope` 三段(见下),测试给自己一个
 // scope 即天然隔离。少一个全局可变开关,也少一条「忘了 reset 就串味」的路。
-const buckets = new Map<string, StaleTolerantCache<never>>();
+//
+// 桶存成 `unknown`,**只在出口断言一次** —— 存的时候再断言一次(`as unknown as` 来回转)是白费:
+// 桶的类型参数由 key 决定,而 key 是运行时的字符串,类型系统本来就管不着这件事,转两次不会
+// 让它更安全,只会让「这里有个断言」出现两遍。
+const buckets = new Map<string, unknown>();
 
 export interface StaleTolerantCache<A> {
   // 拿值。`fetch` 是「真去拉一发」的 effect —— 由 client 提供(它才知道怎么带凭据、走哪个闸)。
-  readonly get: (fetch: Effect.Effect<A, UpstreamError>) => Effect.Effect<A, UpstreamError>;
+  //
+  // `R` 透传:拉那一发需要什么能力(现在是出网),缓存不消费也不规定,原样写回出口 ——
+  // 缓存不该对「怎么拉」有意见。
+  readonly get: <R>(
+    fetch: Effect.Effect<A, UpstreamError, R>,
+  ) => Effect.Effect<A, UpstreamError, R>;
 }
 
 export interface StaleTolerantCacheOptions<A> {
@@ -45,9 +54,9 @@ export function staleTolerantCache<A>(
 ): StaleTolerantCache<A> {
   const key = `${options.upstream}:${options.name}:${options.scope}`;
   const found = buckets.get(key);
-  if (found) return found as unknown as StaleTolerantCache<A>;
+  if (found) return found as StaleTolerantCache<A>;
   const created = makeCache(options);
-  buckets.set(key, created as unknown as StaleTolerantCache<never>);
+  buckets.set(key, created);
   return created;
 }
 

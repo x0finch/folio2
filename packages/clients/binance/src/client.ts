@@ -2,6 +2,7 @@ import {
   hmacSha256,
   makeRateLimit,
   makeRequester,
+  type Outbound,
   type Requester,
   UpstreamAuthError,
   type UpstreamError,
@@ -27,7 +28,7 @@ import {
   TICKER_RATE_LIMIT_PER_SEC,
   USDM_ACCOUNT_PATH,
 } from "./constants";
-import { classifyOverride, UPSTREAM } from "./errors";
+import { rejectedSignatureIsAuth, UPSTREAM } from "./errors";
 import type {
   BinanceCreds,
   CoinmAccount,
@@ -61,14 +62,26 @@ export interface BinanceClientApi {
   //
   // 吐 `Record` 而不是 `TickerPrice[]`:这是这个端点的自然用法(拿来查表),而把数组翻成表不是业务
   // 翻译、不涉及任何 folio 概念 —— 留给调用方就是每个调用方重复同一个 for 循环。
-  readonly tickerPrices: Effect.Effect<Record<string, number>, UpstreamError>;
-  readonly spotAccount: (creds: BinanceCreds) => Effect.Effect<SpotAccount, UpstreamError>;
-  readonly usdmAccount: (creds: BinanceCreds) => Effect.Effect<FuturesAccount, UpstreamError>;
-  readonly coinmAccount: (creds: BinanceCreds) => Effect.Effect<CoinmAccount, UpstreamError>;
-  readonly fundingAssets: (creds: BinanceCreds) => Effect.Effect<FundingAsset[], UpstreamError>;
+  readonly tickerPrices: Effect.Effect<Record<string, number>, UpstreamError, Outbound>;
+  readonly spotAccount: (
+    creds: BinanceCreds,
+  ) => Effect.Effect<SpotAccount, UpstreamError, Outbound>;
+  readonly usdmAccount: (
+    creds: BinanceCreds,
+  ) => Effect.Effect<FuturesAccount, UpstreamError, Outbound>;
+  readonly coinmAccount: (
+    creds: BinanceCreds,
+  ) => Effect.Effect<CoinmAccount, UpstreamError, Outbound>;
+  readonly fundingAssets: (
+    creds: BinanceCreds,
+  ) => Effect.Effect<FundingAsset[], UpstreamError, Outbound>;
   // 理财两个端点**内部翻页取全**,出口就是全部行 —— 翻页是上游分页机制的细节,不该漏给调用方。
-  readonly earnFlexible: (creds: BinanceCreds) => Effect.Effect<EarnFlexibleRow[], UpstreamError>;
-  readonly earnLocked: (creds: BinanceCreds) => Effect.Effect<EarnLockedRow[], UpstreamError>;
+  readonly earnFlexible: (
+    creds: BinanceCreds,
+  ) => Effect.Effect<EarnFlexibleRow[], UpstreamError, Outbound>;
+  readonly earnLocked: (
+    creds: BinanceCreds,
+  ) => Effect.Effect<EarnLockedRow[], UpstreamError, Outbound>;
 }
 
 export class BinanceClient extends Context.Tag("clients/Binance")<
@@ -96,7 +109,6 @@ export function make(
     const publicRequester = makeRequester({
       baseUrl: config.apiBase ?? BINANCE_API_BASE,
       upstream: UPSTREAM,
-      classifyOverride,
       limit: publicLimit,
       rateLimitedStatuses: RATE_LIMITED_STATUSES,
     });
@@ -107,7 +119,6 @@ export function make(
       makeRequester<string>({
         baseUrl,
         upstream: UPSTREAM,
-        classifyOverride,
         headers: (_path, options) => Effect.succeed({ [API_KEY_HEADER]: options?.context ?? "" }),
         rateLimitedStatuses: RATE_LIMITED_STATUSES,
       });
@@ -130,7 +141,7 @@ export function make(
       params: Record<string, string | number>,
       creds: BinanceCreds,
       method: "GET" | "POST" = "GET", // 资金账户是 POST(SIGNED),参数仍走 query
-    ): Effect.Effect<A, UpstreamError> =>
+    ): Effect.Effect<A, UpstreamError, Outbound> =>
       Effect.gen(function* () {
         const timestamp = yield* Clock.currentTimeMillis;
         const signable = { ...params, recvWindow: RECV_WINDOW, timestamp };
@@ -142,7 +153,7 @@ export function make(
         return yield* requester<A>(path, {
           query: { ...signable, signature },
           context: creds.apiKey,
-          init: { method },
+          method,
         });
       }).pipe(
         // **只有 binance 需要这一句**:它的签名要进 **query**(不是头),所以 `hmacSha256` 是在这里
@@ -155,6 +166,8 @@ export function make(
             new UpstreamAuthError({ upstream: UPSTREAM, where: e.where, cause: e.cause }),
           ),
         ),
+        // binance 用 HTTP 400 表达「这份签名请求被拒」—— 默认规则会当成上游的锅去重试它。
+        rejectedSignatureIsAuth,
       );
 
     // 一个 position 端点翻页取全:size=100 循环 current,直到末页(rows<size)或收满 total。
@@ -162,7 +175,7 @@ export function make(
     const earnRows = <Row>(
       path: string,
       creds: BinanceCreds,
-    ): Effect.Effect<Row[], UpstreamError> =>
+    ): Effect.Effect<Row[], UpstreamError, Outbound> =>
       Effect.gen(function* () {
         const rows: Row[] = [];
         for (let current = 1; current <= EARN_MAX_PAGES; current++) {
@@ -183,6 +196,8 @@ export function make(
 
     return {
       tickerPrices: publicRequester<TickerPrice[] | null>(TICKER_PRICE_PATH).pipe(
+        // 公开端点也走这一句 —— 与迁移前一致(那时 `classifyOverride` 挂在两个 requester 上)。
+        rejectedSignatureIsAuth,
         Effect.map((raw) => {
           const map: Record<string, number> = {};
           for (const t of raw ?? []) {

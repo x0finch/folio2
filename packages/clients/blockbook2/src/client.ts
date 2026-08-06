@@ -1,5 +1,6 @@
 import {
   makeRequester,
+  type Outbound,
   type Requester,
   type UpstreamError,
   UpstreamUnavailableError,
@@ -31,9 +32,12 @@ export interface XpubQuery {
 // 这家上游没有凭据这回事(公共节点),所以方法不收 creds。
 export interface BlockbookClientApi {
   // xpub / descriptor 的余额 + 逐地址(**服务端派生**,取代逐地址 gap 扫描)。
-  readonly xpub: (token: string, query?: XpubQuery) => Effect.Effect<XpubResponse, UpstreamError>;
+  readonly xpub: (
+    token: string,
+    query?: XpubQuery,
+  ) => Effect.Effect<XpubResponse, UpstreamError, Outbound>;
   // 单地址余额。
-  readonly address: (address: string) => Effect.Effect<AddressResponse, UpstreamError>;
+  readonly address: (address: string) => Effect.Effect<AddressResponse, UpstreamError, Outbound>;
 }
 
 export class BlockbookClient extends Context.Tag("clients/Blockbook")<
@@ -41,7 +45,7 @@ export class BlockbookClient extends Context.Tag("clients/Blockbook")<
   BlockbookClientApi
 >() {
   static readonly layer = (config: BlockbookConfig = {}): Layer.Layer<BlockbookClient> =>
-    Layer.succeed(BlockbookClient, make(config));
+    Layer.sync(BlockbookClient, () => make(config));
 }
 
 // 轮询起点,**模块级** —— 分散负载,不让每一轮同步都从 btc2 开始。
@@ -92,7 +96,7 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
     query: Record<string, string> | undefined,
     from: number,
     left: number,
-  ): Effect.Effect<A, UpstreamError> =>
+  ): Effect.Effect<A, UpstreamError, Outbound> =>
     Effect.suspend(() => {
       const at = requesters[from % requesters.length];
       return at<A>(path, { query }).pipe(
@@ -107,7 +111,7 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
   const request = <A>(
     path: string,
     query?: Record<string, string>,
-  ): Effect.Effect<A, UpstreamError> =>
+  ): Effect.Effect<A, UpstreamError, Outbound> =>
     Effect.suspend(() => {
       if (requesters.length === 0) {
         return Effect.fail(

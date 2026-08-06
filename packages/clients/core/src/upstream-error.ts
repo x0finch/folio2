@@ -47,19 +47,20 @@ export type UpstreamError =
 
 export interface ClassifyOptions {
   readonly upstream: string;
-  // 上游特有的重分类。**先于默认规则跑,返回 undefined 就走默认** —— 每个 client 需要写的
-  // 只有这一点点差异(binance 是 400 → 凭据问题),不是整套错误类型。
-  readonly override?: (failure: HttpFailure) => UpstreamError | undefined;
 }
 
 // 传输层的归类结果 → 对外错误面。
 //
 // 分派走 `Match` 的 `_tag` / 穷尽检查:传输层将来加一种 `HttpFailureKind` 时这里会当场编译红,
 // 而 if 链只会悄悄落到最后那个「其余算上游的锅」。
+// **上游特有的归类差异不在这里,在调用点。** binance 用 HTTP 400 表达「这份签名请求被拒」,
+// 那一条由 binance 自己在出口 `Effect.catchTag("UpstreamUnavailableError", …)` 改判 —— 一家一行,
+// 看得见。以前它是 `ClassifyOptions.override` 一个配置回调,和被删掉的 `toFailure` 同一个毛病:
+// 把流水线上的一步藏进配置对象里。
 export const classifyFailure =
   (options: ClassifyOptions) =>
   (failure: HttpFailure | SigningFailure): UpstreamError => {
-    const { upstream, override } = options;
+    const { upstream } = options;
     // 签不出来。**不是传输故障** —— 归到网络类会让它吃满退避全白打,还把真正的原因盖掉
     // (rabby 的 wasm 签名、binance 的 HMAC 都可能在这里失败)。
     //
@@ -68,9 +69,6 @@ export const classifyFailure =
     if (failure._tag === "SigningFailure") {
       return new UpstreamAuthError({ upstream, where: failure.where, cause: failure.cause });
     }
-
-    const special = override?.(failure);
-    if (special) return special;
 
     const { where, status, retryAfterMs, cause } = failure;
     const base = { upstream, where, status, cause };

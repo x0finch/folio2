@@ -25,14 +25,26 @@
 //
 // 名字:`shared` 比 `client-core` 好。等第 3 站删掉老包,那时只有 `clients/*` 引本包,改名成本近零。
 //
-// **不引入 `@effect/platform`**:它的 `HttpClient` 能替掉这里的出网那一层,但我们的需求很薄
-// (GET/POST JSON + 五种归类 + Retry-After),而它的 retry / 中间件用 `Effect.retry` + `Schedule`
-// 已经有了。ADR 0035 把 Effect 定为「一次性门票」,再加一张票过不了原则 #9 的「复杂度值不值」那关。
+// **出网走 `@effect/platform` 的 `HttpClient`**(推翻了本文件早先「不引入」的判断)。当时的理由是
+// 「需求很薄,再加一张票过不了原则 #9」——薄这一点判错了:手搓那版的 `Effect.tryPromise` 收不到
+// `AbortSignal`,上层超时之后请求还在飞、额度照扣,而这是自己包 fetch 修不掉的(signal 得由发请求
+// 的那一层持有)。官方客户端内建 AbortController、内建中断即 abort,还顺带把「加一层」从
+// 「往配置对象上挂第 N 个回调」变成 `pipe`。体积实测 +33 KB gzip(它那三个服务端依赖被完全摇掉)。
+//
+// **但它的内建 tracing 必须关掉** —— 默认会把完整 URL、query 和全部请求头写进 span,而我们的 query
+// 里有 HMAC 签名和钱包地址、六个凭据头不在它的默认脱敏名单里。span 我们自己加,只写白名单属性。
+// 理由和证据见 `http-client.ts`。
 
 export { hmacSha256 } from "./crypto";
 export { HttpFailure, type HttpFailureKind, SigningFailure } from "./errors";
-export { Fetcher } from "./fetcher";
-export { type HttpConfig, makeRequester, type Requester, type RequestOptions } from "./http";
+export {
+  type HttpConfig,
+  makeRequester,
+  type Outbound,
+  type Requester,
+  type RequestOptions,
+} from "./http";
+export { FolioHttpClient } from "./http-client";
 export {
   make as makeRateLimit,
   type RateLimitOptions,

@@ -1,6 +1,7 @@
 import {
   hmacSha256,
   makeRequester,
+  type Outbound,
   type Requester,
   type RequestOptions,
   SigningFailure,
@@ -46,23 +47,23 @@ export interface BybitClientApi {
   // 统一账户(UTA)。每币自带 `usdValue` —— 估值零额外请求。
   readonly walletBalance: (
     creds: BybitCreds,
-  ) => Effect.Effect<BybitWalletBalanceResponse, UpstreamError>;
+  ) => Effect.Effect<BybitWalletBalanceResponse, UpstreamError, Outbound>;
   // 资金账户。
   readonly fundingBalances: (
     creds: BybitCreds,
-  ) => Effect.Effect<BybitFundingResponse, UpstreamError>;
+  ) => Effect.Effect<BybitFundingResponse, UpstreamError, Outbound>;
   // 赚币持仓。`category` 是 Bybit 的类目名(FlexibleSaving / OnChain)—— 拉哪几个类目、
   // 各自的展示标签叫什么,是适配层的事。
   readonly earnPositions: (
     creds: BybitCreds,
     category: string,
-  ) => Effect.Effect<BybitEarnResponse, UpstreamError>;
+  ) => Effect.Effect<BybitEarnResponse, UpstreamError, Outbound>;
 }
 
 export class BybitClient extends Context.Tag("clients/Bybit")<BybitClient, BybitClientApi>() {
   // base 可能每账户不同(代理覆盖是 per-account 的)→ Layer 吃 config,由适配层在那一刻 provide。
   static readonly layer = (config: BybitConfig = {}): Layer.Layer<BybitClient> =>
-    Layer.succeed(BybitClient, make(config));
+    Layer.sync(BybitClient, () => make(config));
 }
 
 // **不是 Effect**:没有闸,构造就是纯的(同 hyperliquid)。别为形状统一而假装需要 Scope。
@@ -101,18 +102,24 @@ export function make(config: BybitConfig = {}): BybitClientApi {
       };
     });
 
-  // **`checkBody` 是这家上游的要点**:业务错误是 HTTP 200 + retCode ≠ 0。交给 requester 之后
-  // 每个端点自动都查 —— 少查一个的后果是签名错被当成功、`result` 为空,最后表现成
-  // 「这个账户余额是 0」,静默丢数据。
   const request: Requester<BybitCreds> = makeRequester<BybitCreds>({
     baseUrl: config.apiBase ?? BYBIT_API_BASE,
     upstream: UPSTREAM,
     headers: signedHeaders,
-    checkBody: retCodeError,
   });
 
+  // **业务错误是 HTTP 200 + retCode ≠ 0,这是这家上游的要点** —— 不查的后果是签名错被当成功、
+  // `result` 为空,最后表现成「这个账户余额是 0」,静默丢数据。
+  //
+  // 查它的位置是**这个唯一的 `get()`**:所有端点都从这里出去,所以漏不掉;而它是看得见的一步,
+  // 不是 core 配置对象上的一个回调字段(那种写法让「一发请求算不算成功」的答案藏在别的包里)。
   const get = <A>(path: string, query: Record<string, string>, creds: BybitCreds) =>
-    request<A>(path, { query, context: creds });
+    request<A>(path, { query, context: creds }).pipe(
+      Effect.flatMap((body) => {
+        const rejected = retCodeError(body, path);
+        return rejected ? Effect.fail(rejected) : Effect.succeed(body);
+      }),
+    );
 
   return {
     walletBalance: (creds) =>

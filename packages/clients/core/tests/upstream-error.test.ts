@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { HttpFailure, SigningFailure } from "../src/errors";
-import { classifyFailure, UpstreamAuthError } from "../src/upstream-error";
+import { classifyFailure } from "../src/upstream-error";
 
-// 默认归类规则。**所有 client 共用这一份** —— 每家上游只写自己跟它不一样的那点(`override`)。
+// 默认归类规则。**所有 client 共用这一份** —— 上游特有的差异在各自包的出口 `catchTag` 里,
+// 不在这个函数的参数上(见下面那条用例)。
 const classify = classifyFailure({ upstream: "acme" });
 
 const http = (fields: Partial<ConstructorParameters<typeof HttpFailure>[0]> = {}) =>
@@ -36,16 +37,11 @@ describe("classifyFailure", () => {
     expect(classify(new SigningFailure({ where: "/v1/t" })).upstream).toBe("acme");
   });
 
-  it("override 先于默认规则跑,返回 undefined 就走默认", () => {
-    // binance 就是这么把「400 = 签名请求被拒」表达出来的 —— 一条,不是一整套错误类型。
-    const withOverride = classifyFailure({
-      upstream: "acme",
-      override: (f) =>
-        f.status === 400 ? new UpstreamAuthError({ upstream: "acme", where: f.where }) : undefined,
-    });
-    expect(withOverride(http({ status: 400 }))._tag).toBe("UpstreamAuthError");
-    // 没命中 override 的照默认走。
-    expect(withOverride(http({ status: 503 }))._tag).toBe("UpstreamUnavailableError");
+  it("上游特有的差异**不在这里** —— 400 照默认规则归「够不到上游」", () => {
+    // binance 要把 400 读成「签名请求被拒」,那一条由它自己在出口 `catchTag` 改判(它的测试钉住)。
+    // 以前这里收一个 `override` 回调,和被删掉的 `toFailure` 同一个毛病:把流水线上的一步
+    // 藏进配置对象里。归类函数只管**默认规则**,保持一个上游一份判断、看得见。
+    expect(classify(http({ status: 400 }))._tag).toBe("UpstreamUnavailableError");
   });
 
   it("失败信息只带 pathname,不带 query(原则 #5 红线)", () => {

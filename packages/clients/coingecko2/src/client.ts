@@ -1,6 +1,7 @@
 import {
   makeRateLimit,
   makeRequester,
+  type Outbound,
   type Requester,
   type RequestOptions,
   type UpstreamError,
@@ -70,25 +71,29 @@ export interface CoinsMarketChartRangeParams {
 // **不自带重试**(与另外七个 client 一致):重试由调用方 `Effect.retry(策略)` 加在外面。
 // 老那版把重试收进传输层,于是这个仓库对「怎么重试」有过三份答案。
 export interface CoinGeckoClientApi {
-  readonly assetPlatforms: Effect.Effect<AssetPlatform[], UpstreamError>;
-  readonly coinsList: Effect.Effect<CoinListItem[], UpstreamError>;
-  readonly coinsMarkets: (params: CoinsMarketsParams) => Effect.Effect<MarketCoin[], UpstreamError>;
-  readonly simplePrice: (params: SimplePriceParams) => Effect.Effect<SimplePriceMap, UpstreamError>;
+  readonly assetPlatforms: Effect.Effect<AssetPlatform[], UpstreamError, Outbound>;
+  readonly coinsList: Effect.Effect<CoinListItem[], UpstreamError, Outbound>;
+  readonly coinsMarkets: (
+    params: CoinsMarketsParams,
+  ) => Effect.Effect<MarketCoin[], UpstreamError, Outbound>;
+  readonly simplePrice: (
+    params: SimplePriceParams,
+  ) => Effect.Effect<SimplePriceMap, UpstreamError, Outbound>;
   // 历史日价序列。出口就是 `prices` 那一列 —— 上游把它包在一个对象里,那层包装没有信息。
   readonly coinsMarketChartRange: (
     params: CoinsMarketChartRangeParams,
-  ) => Effect.Effect<[number, number][], UpstreamError>;
-  readonly search: (query: string) => Effect.Effect<SearchResult, UpstreamError>;
+  ) => Effect.Effect<[number, number][], UpstreamError, Outbound>;
+  readonly search: (query: string) => Effect.Effect<SearchResult, UpstreamError, Outbound>;
   // 按合约查币。**查不到是正常答案**(不是每个合约都在 CGK 的库里)→ null,不是失败。
   readonly coinContract: (
     platform: string,
     address: string,
-  ) => Effect.Effect<CoinContract | null, UpstreamError>;
-  readonly exchange: (id: string) => Effect.Effect<Exchange | null, UpstreamError>;
+  ) => Effect.Effect<CoinContract | null, UpstreamError, Outbound>;
+  readonly exchange: (id: string) => Effect.Effect<Exchange | null, UpstreamError, Outbound>;
   readonly derivativesExchange: (
     id: string,
-  ) => Effect.Effect<DerivativesExchange | null, UpstreamError>;
-  readonly exchangeRates: Effect.Effect<ExchangeRates, UpstreamError>;
+  ) => Effect.Effect<DerivativesExchange | null, UpstreamError, Outbound>;
+  readonly exchangeRates: Effect.Effect<ExchangeRates, UpstreamError, Outbound>;
 }
 
 export class CoinGeckoClient extends Context.Tag("clients/CoinGecko")<

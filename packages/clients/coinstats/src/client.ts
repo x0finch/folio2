@@ -1,6 +1,7 @@
 import {
   makeRateLimit,
   makeRequester,
+  type Outbound,
   type Requester,
   type UpstreamError,
 } from "@folio/client-core";
@@ -37,11 +38,11 @@ export interface CoinstatsClientApi {
     readonly connectionId: string;
     readonly address: string;
     readonly apiKey: string;
-  }) => Effect.Effect<CoinstatsCoin[], UpstreamError>;
+  }) => Effect.Effect<CoinstatsCoin[], UpstreamError, Outbound>;
 
   // 支持的链列表。**只需 key、不需地址** —— 用来实测 key 本身有没有效,而不是只检查它非空。
   // 返回值没人看(调用方只关心成没成),所以类型是 `unknown`:声明一个假的形状不如说实话。
-  readonly blockchains: (apiKey: string) => Effect.Effect<unknown, UpstreamError>;
+  readonly blockchains: (apiKey: string) => Effect.Effect<unknown, UpstreamError, Outbound>;
 }
 
 export class CoinstatsClient extends Context.Tag("clients/Coinstats")<

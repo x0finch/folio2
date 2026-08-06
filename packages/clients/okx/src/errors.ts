@@ -14,7 +14,9 @@ export const UPSTREAM = "okx";
 //
 // 不查它的话,一个 200 + code 50113 会被当成功、`data` 为空,最后表现成「这个账户余额是 0」——
 // 静默丢数据。
-// 形状是 `HttpConfig.checkBody` 要的那个 —— 交给 requester,于是**每个端点自动都查**。
+// **由 client 那唯一一个 `get()` 在 `Effect.flatMap` 里调**(以前是 core 的 `checkBody` 配置回调)。
+// 六个端点都经过那个 `get()`,所以「漏掉一个端点」这条风险仍然不存在,而这一步现在是
+// 看得见的代码,不是藏在配置对象里的回调。
 export function codeError(body: unknown, where: string): UpstreamError | undefined {
   // **先确认它是个对象。** 上游回一个裸 `null`(合法的 200 JSON)时,直接读 `.code` 会抛
   // TypeError —— 那是 defect,不进错误通道,排查起来毫无线索。读不懂的形状就是 parse 失败。

@@ -1,6 +1,7 @@
 import {
   hmacSha256,
   makeRequester,
+  type Outbound,
   type Requester,
   type RequestOptions,
   SigningFailure,
@@ -45,23 +46,33 @@ export interface OkxConfig {
 // **不带闸**(见 constants.ts),**不自带重试**。
 export interface OkxClientApi {
   // 交易账户。每币自带 `eqUsd` —— 估值零额外请求(而且 eqUsd/eq 还能当别的桶的价格提示)。
-  readonly balance: (creds: OkxCreds) => Effect.Effect<OkxBalanceResponse, UpstreamError>;
+  readonly balance: (creds: OkxCreds) => Effect.Effect<OkxBalanceResponse, UpstreamError, Outbound>;
   // 资金账户。
-  readonly fundingBalances: (creds: OkxCreds) => Effect.Effect<OkxFundingResponse, UpstreamError>;
+  readonly fundingBalances: (
+    creds: OkxCreds,
+  ) => Effect.Effect<OkxFundingResponse, UpstreamError, Outbound>;
   // 赚币·活期出借。
-  readonly savingsBalance: (creds: OkxCreds) => Effect.Effect<OkxSavingsResponse, UpstreamError>;
+  readonly savingsBalance: (
+    creds: OkxCreds,
+  ) => Effect.Effect<OkxSavingsResponse, UpstreamError, Outbound>;
   // 赚币·链上活跃订单。
-  readonly stakingOrders: (creds: OkxCreds) => Effect.Effect<OkxStakingResponse, UpstreamError>;
+  readonly stakingOrders: (
+    creds: OkxCreds,
+  ) => Effect.Effect<OkxStakingResponse, UpstreamError, Outbound>;
   // 各桶的权威美元额(trading / funding / earn / classic)。
-  readonly assetValuation: (creds: OkxCreds) => Effect.Effect<OkxValuationResponse, UpstreamError>;
+  readonly assetValuation: (
+    creds: OkxCreds,
+  ) => Effect.Effect<OkxValuationResponse, UpstreamError, Outbound>;
   // 合约持仓。
-  readonly positions: (creds: OkxCreds) => Effect.Effect<OkxPositionsResponse, UpstreamError>;
+  readonly positions: (
+    creds: OkxCreds,
+  ) => Effect.Effect<OkxPositionsResponse, UpstreamError, Outbound>;
 }
 
 export class OkxClient extends Context.Tag("clients/Okx")<OkxClient, OkxClientApi>() {
   // base 可能每账户不同(代理覆盖是 per-account 的)→ Layer 吃 config。
   static readonly layer = (config: OkxConfig = {}): Layer.Layer<OkxClient> =>
-    Layer.succeed(OkxClient, make(config));
+    Layer.sync(OkxClient, () => make(config));
 }
 
 // **不是 Effect**:没有闸,构造就是纯的(同 hyperliquid / bybit)。
@@ -100,18 +111,24 @@ export function make(config: OkxConfig = {}): OkxClientApi {
       };
     });
 
-  // **`checkBody` 是这家上游的要点**:业务错误是 HTTP 200 + code ≠ "0"(字符串)。交给 requester
-  // 之后**六个端点自动都查** —— 少查一个的后果是签名错被当成功、`data` 为空,最后表现成
-  // 「这个账户余额是 0」,静默丢数据。以前这是一个手写的 `get()` 包装。
   const request: Requester<OkxCreds> = makeRequester<OkxCreds>({
     baseUrl: config.apiBase ?? OKX_API_BASE,
     upstream: UPSTREAM,
     headers: signedHeaders,
-    checkBody: codeError,
   });
 
+  // **业务错误是 HTTP 200 + code ≠ "0"(字符串),这是这家上游的要点** —— 不查的后果是签名错被
+  // 当成功、`data` 为空,最后表现成「这个账户余额是 0」,静默丢数据。
+  //
+  // 查它的位置是**这个唯一的 `get()`**:六个端点都从这里出去,所以漏不掉;而它是看得见的一步,
+  // 不是 core 配置对象上的一个回调字段(那种写法让「一发请求算不算成功」的答案藏在别的包里)。
   const get = <A>(path: string, creds: OkxCreds, query?: Record<string, string>) =>
-    request<A>(path, { query, context: creds });
+    request<A>(path, { query, context: creds }).pipe(
+      Effect.flatMap((body) => {
+        const rejected = codeError(body, path);
+        return rejected ? Effect.fail(rejected) : Effect.succeed(body);
+      }),
+    );
 
   return {
     balance: (creds) => get<OkxBalanceResponse>(BALANCE_PATH, creds),

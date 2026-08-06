@@ -1,6 +1,7 @@
 import {
   makeRateLimit,
   makeRequester,
+  type Outbound,
   type Requester,
   type UpstreamError,
 } from "@folio/client-core";
@@ -35,17 +36,19 @@ export interface ZerionClientApi {
   readonly positions: (params: {
     readonly address: string;
     readonly apiKey: string;
-  }) => Effect.Effect<ZerionPositionsResponse, UpstreamError>;
+  }) => Effect.Effect<ZerionPositionsResponse, UpstreamError, Outbound>;
 
   // slug → 数字 chainId。**带 24h 缓存**(见 chains-cache.ts):链清单近静态,每轮都拉是白费。
   // 刷新失败时回落到旧映射 —— chainId 不可变,旧的仍然正确。
-  readonly chainIds: (apiKey: string) => Effect.Effect<Record<string, number>, UpstreamError>;
+  readonly chainIds: (
+    apiKey: string,
+  ) => Effect.Effect<Record<string, number>, UpstreamError, Outbound>;
 
   // 轻量聚合。探活用 —— 负载远小于 positions。
   readonly portfolio: (params: {
     readonly address: string;
     readonly apiKey: string;
-  }) => Effect.Effect<unknown, UpstreamError>;
+  }) => Effect.Effect<unknown, UpstreamError, Outbound>;
 }
 
 export class ZerionClient extends Context.Tag("clients/Zerion")<ZerionClient, ZerionClientApi>() {

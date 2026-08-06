@@ -1,6 +1,7 @@
 import {
   makeRateLimit,
   makeRequester,
+  type Outbound,
   type Requester,
   type RequestOptions,
   type SigningFailure,
@@ -36,13 +37,13 @@ export interface RabbyConfig {
 // **不要任何 API key**(这是它取代 zerion 的主要收益),代价是请求必须签名 —— 见 sign.ts。
 export interface RabbyClientApi {
   // 钱包代币,**只收地址、一次回全链**。注意上游没有 usd_value 字段,价值要 amount × price 自己算。
-  readonly tokens: (address: string) => Effect.Effect<RabbyToken[], UpstreamError>;
+  readonly tokens: (address: string) => Effect.Effect<RabbyToken[], UpstreamError, Outbound>;
   // DeFi 仓位,同样一次回全链。
-  readonly protocols: (address: string) => Effect.Effect<RabbyProtocol[], UpstreamError>;
+  readonly protocols: (address: string) => Effect.Effect<RabbyProtocol[], UpstreamError, Outbound>;
   // slug → 数字 chainId(`community_id` 就是规范 EVM chainId)。**带 24h 缓存**。
-  readonly chainIds: Effect.Effect<Record<string, number>, UpstreamError>;
+  readonly chainIds: Effect.Effect<Record<string, number>, UpstreamError, Outbound>;
   // 最轻的端点。探活用。
-  readonly totalBalance: (address: string) => Effect.Effect<unknown, UpstreamError>;
+  readonly totalBalance: (address: string) => Effect.Effect<unknown, UpstreamError, Outbound>;
 }
 
 export class RabbyClient extends Context.Tag("clients/Rabby")<RabbyClient, RabbyClientApi>() {

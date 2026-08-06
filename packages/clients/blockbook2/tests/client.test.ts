@@ -1,33 +1,29 @@
-import { Fetcher, type UpstreamError } from "@folio/client-core";
+import type { Outbound, UpstreamError } from "@folio/client-core";
+import {
+  type HttpStub,
+  httpStub,
+  jsonResponse as json,
+  runClient,
+} from "@folio/client-core/testing";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { type BlockbookClientApi, type BlockbookConfig, make } from "../src/client";
+import {
+  BlockbookClient,
+  type BlockbookClientApi,
+  type BlockbookConfig,
+  make,
+} from "../src/client";
 import { BLOCKBOOK_BASES, USER_AGENT } from "../src/constants";
 
 const XPUB =
   "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
 const ADDR = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
 
-const json = (body: unknown, init?: ResponseInit) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-    ...init,
-  });
-
-interface Seen {
-  url: URL;
-  init?: RequestInit;
-}
-
+// 假出网:记下每一发。顶替的是 **`HttpClient` 服务**而不是 `globalThis.fetch` ——
+// 请求层底下是官方客户端,在那一层顶替才测得到真实路径(签名头、method、body 都经过它)。
 function stub(reply: (url: URL, nth: number) => Response | Promise<Response>) {
-  const calls: Seen[] = [];
-  const fn = ((input: URL | RequestInfo, init?: RequestInit) => {
-    const url = input instanceof URL ? input : new URL(String(input));
-    calls.push({ url, init });
-    return Promise.resolve(reply(url, calls.length - 1));
-  }) as typeof globalThis.fetch;
-  return { fn, calls };
+  const s = httpStub((request, nth) => reply(request.url, nth));
+  return { fn: s, calls: s.calls };
 }
 
 const XPUB_BODY = {
@@ -41,14 +37,14 @@ const ADDR_BODY = { address: ADDR, balance: "500", unconfirmedBalance: "0" };
 
 // 构造是纯的(没有闸就没有 Scope)。
 const withClient = <A, E>(
-  fn: typeof globalThis.fetch,
-  use: (client: BlockbookClientApi) => Effect.Effect<A, E, Fetcher>,
+  fn: HttpStub,
+  use: (client: BlockbookClientApi) => Effect.Effect<A, E, Outbound>,
   config: BlockbookConfig = {},
-): Promise<A> => Effect.runPromise(Effect.provideService(use(make(config)), Fetcher, fn));
+): Promise<A> => runClient(fn, use(make(config)));
 
 const failing = (
-  fn: typeof globalThis.fetch,
-  use: (c: BlockbookClientApi) => Effect.Effect<unknown, UpstreamError, Fetcher>,
+  fn: HttpStub,
+  use: (c: BlockbookClientApi) => Effect.Effect<unknown, UpstreamError, Outbound>,
   config: BlockbookConfig = {},
 ): Promise<UpstreamError> => withClient(fn, (c) => Effect.flip(use(c)), config);
 
@@ -61,9 +57,9 @@ describe("请求形状", () => {
     const { fn, calls } = stub(() => json(XPUB_BODY));
     await withClient(fn, (c) => c.xpub(XPUB), { bases: basesOf(1) });
 
-    expect(calls[0].url.pathname).toBe(`/api/v2/xpub/${XPUB}`);
-    expect(calls[0].url.searchParams.get("details")).toBe("tokenBalances");
-    expect(calls[0].url.searchParams.get("tokens")).toBe("used");
+    expect(calls[0].request.url.pathname).toBe(`/api/v2/xpub/${XPUB}`);
+    expect(calls[0].request.url.searchParams.get("details")).toBe("tokenBalances");
+    expect(calls[0].request.url.searchParams.get("tokens")).toBe("used");
   });
 
   it("xpub 的 query 可覆盖", async () => {
@@ -71,28 +67,28 @@ describe("请求形状", () => {
     await withClient(fn, (c) => c.xpub(XPUB, { details: "basic", tokens: "derived" }), {
       bases: basesOf(1),
     });
-    expect(calls[0].url.searchParams.get("details")).toBe("basic");
-    expect(calls[0].url.searchParams.get("tokens")).toBe("derived");
+    expect(calls[0].request.url.searchParams.get("details")).toBe("basic");
+    expect(calls[0].request.url.searchParams.get("tokens")).toBe("derived");
   });
 
   it("descriptor 的括号被编码掉", async () => {
     // `tr(xpub…)` 这种 descriptor 直接进 path 会让某些节点解析出错。
     const { fn, calls } = stub(() => json(XPUB_BODY));
     await withClient(fn, (c) => c.xpub(`tr(${XPUB})`), { bases: basesOf(1) });
-    expect(calls[0].url.href).toContain("%28");
-    expect(calls[0].url.href).toContain("%29");
+    expect(calls[0].request.url.href).toContain("%28");
+    expect(calls[0].request.url.href).toContain("%29");
   });
 
   it("address:单地址", async () => {
     const { fn, calls } = stub(() => json(ADDR_BODY));
     await withClient(fn, (c) => c.address(ADDR), { bases: basesOf(1) });
-    expect(calls[0].url.pathname).toBe(`/api/v2/address/${ADDR}`);
+    expect(calls[0].request.url.pathname).toBe(`/api/v2/address/${ADDR}`);
   });
 
   it("**必须带 User-Agent**(Workers 的 fetch 默认不带,WAF 会 403)", async () => {
     const { fn, calls } = stub(() => json(XPUB_BODY));
     await withClient(fn, (c) => c.xpub(XPUB), { bases: basesOf(1) });
-    expect((calls[0].init?.headers as Record<string, string>)["user-agent"]).toBe(USER_AGENT);
+    expect(calls[0].request.headers["user-agent"]).toBe(USER_AGENT);
   });
 
   it("UA 刻意中性 —— 不带项目名、不带仓库地址", () => {
@@ -113,7 +109,7 @@ describe("请求形状", () => {
   it("不传 bases 就用内置的四个公共节点", async () => {
     const { fn, calls } = stub(() => json(XPUB_BODY));
     await withClient(fn, (c) => c.xpub(XPUB));
-    expect(BLOCKBOOK_BASES).toContain(`${calls[0].url.origin}/api/v2`);
+    expect(BLOCKBOOK_BASES).toContain(`${calls[0].request.url.origin}/api/v2`);
   });
 });
 
@@ -126,7 +122,7 @@ describe("多端点:换节点就是这家上游的「重试」", () => {
     expect(res).toEqual(XPUB_BODY);
     expect(calls).toHaveLength(2);
     // 换的是**下一个**节点,不是重打同一个。
-    expect(calls[0].url.origin).not.toBe(calls[1].url.origin);
+    expect(calls[0].request.url.origin).not.toBe(calls[1].request.url.origin);
   });
 
   it("5xx 与网络失败也换", async () => {
@@ -211,5 +207,22 @@ describe("错误归类", () => {
     // 但 Blockbook 的 URL 形状就是 /xpub/{token},xpub 一定在 pathname 里。
     // 它在本仓分类是 public(明文落库),所以可接受 —— 这条钉住的是「知道它在这儿」。
     expect(err.where).toContain("/xpub/");
+  });
+});
+
+// **走 Tag / Layer 那一条路。** 生产只走它,而在这之前**九个包的测试一条都没走过** ——
+// 全部直接调 `make`,于是「`layer()` 装出来的东西和 `make` 是不是同一个」从来没人验证。
+// 这是复审点出来的真空档(#12)。
+describe("装配:Tag 路径", () => {
+  it("`BlockbookClient.layer(...)` 装出来的就是 `make` 那个 client", async () => {
+    const { fn, calls } = stub(() => json(XPUB_BODY));
+    const out = await runClient(
+      fn,
+      Effect.flatMap(BlockbookClient, (client) => client.xpub(XPUB)).pipe(
+        Effect.provide(BlockbookClient.layer()),
+      ),
+    );
+    expect(out).toBeDefined();
+    expect(calls).toHaveLength(1);
   });
 });

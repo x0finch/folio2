@@ -14,8 +14,9 @@ export const UPSTREAM = "bybit";
 // 适配层不该知道 10004 是签名错、33004 是 key 过期。
 //
 // 凭据/签名/权限类的 retCode → 凭据问题(重试没用);其余 → 上游的锅(重试有用)。
-// 形状是 `HttpConfig.checkBody` 要的那个 —— 交给 requester,于是**每个端点自动都查**,
-// 不必各写一个 `get()` 包装(那是漏掉一个端点的机会)。
+// **由 client 那唯一一个 `get()` 在 `Effect.flatMap` 里调**(以前是 core 的 `checkBody` 配置回调)。
+// 每个端点都经过那个 `get()`,所以「漏掉一个端点」这条风险仍然不存在,而这一步现在是
+// 看得见的代码,不是藏在配置对象里的回调。
 export function retCodeError(body: unknown, where: string): UpstreamError | undefined {
   // **先确认它是个对象。** 上游回一个裸 `null`(合法的 200 JSON)时,直接读 `.retCode` 会抛
   // TypeError —— 那是 defect,不进错误通道,排查起来毫无线索。读不懂的形状就是 parse 失败。

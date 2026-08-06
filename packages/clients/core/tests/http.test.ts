@@ -1,85 +1,75 @@
-import { Effect } from "effect";
+import { HttpClient, HttpClientResponse } from "@effect/platform";
+import { Effect, Exit, Fiber, Layer, Tracer } from "effect";
 import { describe, expect, it } from "vitest";
 import { SigningFailure } from "../src/errors";
-import { Fetcher } from "../src/fetcher";
 import { makeRequester } from "../src/http";
-import { UpstreamAuthError } from "../src/upstream-error";
+import { httpStub, jsonResponse as json, runClient } from "../src/testing";
 
 const BASE = "https://up.example.com";
 const UPSTREAM = "acme";
 
-const json = (body: unknown, init?: ResponseInit) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-    ...init,
-  });
+const run = <A, E>(
+  reply: Parameters<typeof httpStub>[0],
+  use: (calls: ReturnType<typeof httpStub>["calls"]) => Effect.Effect<A, E, HttpClient.HttpClient>,
+) => {
+  const stub = httpStub(reply);
+  return runClient(stub, use(stub.calls));
+};
 
-// 记下最后一次 fetch 到的 URL,给「query 拼对了吗」这类断言用。
-function stubFetch(reply: (url: URL, init?: RequestInit) => Response | Promise<Response>) {
-  const seen: { url?: URL; init?: RequestInit } = {};
-  const fn = ((input: URL | RequestInfo, init?: RequestInit) => {
-    const url = input instanceof URL ? input : new URL(String(input));
-    seen.url = url;
-    seen.init = init;
-    return Promise.resolve(reply(url, init));
-  }) as typeof globalThis.fetch;
-  return { fn, seen };
-}
+const req = (extra?: Partial<Parameters<typeof makeRequester>[0]>) =>
+  makeRequester({ baseUrl: BASE, upstream: UPSTREAM, ...extra });
 
-// 出网替换走**可选服务**,不是构造器参数 —— 与 `SlotCacheOverride` 同一套。
-const run = <A, E>(fetch: typeof globalThis.fetch, eff: Effect.Effect<A, E, Fetcher>) =>
-  Effect.runPromise(Effect.provideService(eff, Fetcher, fetch));
-
-const runFail = <A, E>(
-  fetch: typeof globalThis.fetch,
-  eff: Effect.Effect<A, E, Fetcher>,
-): Promise<E> => run(fetch, Effect.flip(eff));
+const failing = <A, E>(
+  reply: Parameters<typeof httpStub>[0],
+  eff: Effect.Effect<A, E, HttpClient.HttpClient>,
+): Promise<E> => run(reply, () => Effect.flip(eff));
 
 describe("makeRequester", () => {
   it("2xx → 解析好的 JSON", async () => {
-    const { fn } = stubFetch(() => json({ ok: 1 }));
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    expect(await run(fn, req("/v1/thing"))).toEqual({ ok: 1 });
+    expect(
+      await run(
+        () => json({ ok: 1 }),
+        () => req()("/v1/thing"),
+      ),
+    ).toEqual({ ok: 1 });
   });
 
   it("query 拼上,undefined 的键不参与", async () => {
-    const { fn, seen } = stubFetch(() => json({}));
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    await run(fn, req("/v1/t", { query: { a: 1, b: "x", c: undefined } }));
-    expect(seen.url?.searchParams.get("a")).toBe("1");
-    expect(seen.url?.searchParams.get("b")).toBe("x");
-    expect(seen.url?.searchParams.has("c")).toBe(false);
+    const stub = httpStub(() => json({}));
+    await runClient(stub, req()("/v1/t", { query: { a: 1, b: "x", c: undefined } }));
+    const { url } = stub.calls[0].request;
+    expect(url.searchParams.get("a")).toBe("1");
+    expect(url.searchParams.get("b")).toBe("x");
+    expect(url.searchParams.has("c")).toBe(false);
   });
 
-  it("fetch 抛 → network", async () => {
-    const { fn } = stubFetch(() => {
+  it("出不去 → 够不到上游", async () => {
+    const err = await failing(() => {
       throw new Error("dns");
-    });
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    const err = await runFail(fn, req("/v1/t"));
+    }, req()("/v1/t"));
     // 出口就是最终错误面 —— 不再是 `HttpFailure` 那个中间态。
     expect(err._tag).toBe("UpstreamUnavailableError");
     expect(err.upstream).toBe(UPSTREAM);
   });
 
-  it("429 → rate-limited,Retry-After 秒数解析成毫秒", async () => {
-    const { fn } = stubFetch(() => json({}, { status: 429, headers: { "retry-after": "3" } }));
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    const err = await runFail(fn, req("/v1/t"));
+  it("429 → 限流,Retry-After 秒数解析成毫秒", async () => {
+    const err = await failing(
+      () => json({}, { status: 429, headers: { "retry-after": "3" } }),
+      req()("/v1/t"),
+    );
     expect(err._tag).toBe("UpstreamRateLimitError");
     expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(3000);
   });
 
   it("Retry-After 是 HTTP-date 也认", async () => {
-    const at = new Date(Date.now() + 5000).toUTCString();
-    const { fn } = stubFetch(() => json({}, { status: 429, headers: { "retry-after": at } }));
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    const err = await runFail(fn, req("/v1/t"));
-    // 秒级精度 + TestClock 未介入 → 给个宽窗口,别断言精确值。
-    const ms = err._tag === "UpstreamRateLimitError" ? err.retryAfterMs : undefined;
-    expect(ms).toBeGreaterThan(3000);
-    expect(ms).toBeLessThanOrEqual(5000);
+    // 跑在 `TestClock` 上(now = 0),所以这里能断言**精确值**而不是一个窗口 ——
+    // 时序测试不该赌墙钟。HTTP-date 是秒级精度,5000ms 正好整秒,来回不丢精度。
+    const at = new Date(5000).toUTCString();
+    const err = await failing(
+      () => json({}, { status: 429, headers: { "retry-after": at } }),
+      req()("/v1/t"),
+    );
+    expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(5000);
   });
 
   it("Retry-After 缺失 / 无效 → undefined", async () => {
@@ -89,201 +79,229 @@ describe("makeRequester", () => {
       { "retry-after": "0" },
     ];
     for (const headers of cases) {
-      const { fn } = stubFetch(() => json({}, { status: 429, headers }));
-      const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-      const err = await runFail(fn, req("/v1/t"));
+      const err = await failing(() => json({}, { status: 429, headers }), req()("/v1/t"));
       expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBeUndefined();
     }
   });
 
   it("rateLimitedStatuses 可加(binance 要认 418)", async () => {
-    const { fn } = stubFetch(() => json({}, { status: 418 }));
-    const req = makeRequester({
-      baseUrl: BASE,
-      upstream: UPSTREAM,
-      rateLimitedStatuses: [429, 418],
-    });
-    expect((await runFail(fn, req("/v1/t")))._tag).toBe("UpstreamRateLimitError");
+    const err = await failing(
+      () => json({}, { status: 418 }),
+      req({ rateLimitedStatuses: [429, 418] })("/v1/t"),
+    );
+    expect(err._tag).toBe("UpstreamRateLimitError");
   });
 
-  it("401 / 403 → auth", async () => {
+  it("401 / 403 → 凭据问题", async () => {
     for (const status of [401, 403]) {
-      const { fn } = stubFetch(() => json({}, { status }));
-      const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-      const err = await runFail(fn, req("/v1/t"));
+      const err = await failing(() => json({}, { status }), req()("/v1/t"));
       expect(err._tag).toBe("UpstreamAuthError");
       expect(err.status).toBe(status);
     }
   });
 
-  it("其余非 2xx → upstream", async () => {
-    const { fn } = stubFetch(() => json({}, { status: 503 }));
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    expect((await runFail(fn, req("/v1/t")))._tag).toBe("UpstreamUnavailableError");
-  });
-
-  it("404 + notFoundAsNull → null(不是故障)", async () => {
-    const { fn } = stubFetch(() => json({}, { status: 404 }));
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    expect(await run(fn, req("/v1/t", { notFoundAsNull: true }))).toBeNull();
-    // 不开这个开关时 404 仍是 upstream。
-    expect((await runFail(fn, req("/v1/t")))._tag).toBe("UpstreamUnavailableError");
-  });
-
-  it("回来的不是 JSON → parse", async () => {
-    const { fn } = stubFetch(() => new Response("<html>", { status: 200 }));
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    expect((await runFail(fn, req("/v1/t")))._tag).toBe("UpstreamParseError");
-  });
-
-  it("失败信息只带 pathname,不带 query(原则 #5 红线)", async () => {
-    const { fn } = stubFetch(() => json({}, { status: 503 }));
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    const err = await runFail(
-      fn,
-      req("/v1/t", { query: { address: "0xdeadbeef", signature: "s3cr3t" } }),
+  it("其余非 2xx → 够不到上游", async () => {
+    expect((await failing(() => json({}, { status: 503 }), req()("/v1/t")))._tag).toBe(
+      "UpstreamUnavailableError",
     );
-    expect(err.where).toBe("/v1/t");
-    expect(JSON.stringify(err)).not.toContain("0xdeadbeef");
-    expect(JSON.stringify(err)).not.toContain("s3cr3t");
   });
 
-  it("头算不出来 → SigningFailure,不被归类成传输故障", async () => {
-    // 归错了会退化成「三次退避全白打」,还把真正的原因盖掉(rabby 的 wasm 签名靠这条)。
-    const { fn } = stubFetch(() => json({}));
-    const req = makeRequester({
-      baseUrl: BASE,
-      upstream: UPSTREAM,
-      headers: () => Effect.fail(new SigningFailure({ where: "sig" })),
-    });
-    // 签不出来仍然走「凭据问题」而不是传输故障 —— 归类在包里做完,出口只有一种错误面。
-    const err = await runFail(fn, req("/v1/t"));
-    expect(err._tag).toBe("UpstreamAuthError");
+  it("404 + notFoundAsNull → null(不是故障),且**返回类型自己带上 null**", async () => {
+    const reply = () => json({}, { status: 404 });
+    // 类型层面钉住:开了开关的重载返回 `A | null`,不靠调用方在类型参数里手写 `| null`。
+    const out: { id: string } | null = await run(reply, () =>
+      req()<{ id: string }>("/v1/t", { notFoundAsNull: true }),
+    );
+    expect(out).toBeNull();
+    // 不开这个开关时 404 仍是故障。
+    expect((await failing(reply, req()("/v1/t")))._tag).toBe("UpstreamUnavailableError");
+  });
+
+  it("回来的不是 JSON → 读不动", async () => {
+    expect(
+      (await failing(() => new Response("<html>", { status: 200 }), req()("/v1/t")))._tag,
+    ).toBe("UpstreamParseError");
+  });
+
+  it("POST + body 发得出去", async () => {
+    const stub = httpStub(() => json({}));
+    await runClient(stub, req()("/v1/t", { method: "POST", body: '{"type":"x"}' }));
+    expect(stub.calls[0].request.method).toBe("POST");
+    expect(stub.calls[0].request.body).toBe('{"type":"x"}');
+    // body 带上 content-type,少了它 hyperliquid 回 422。
+    expect(stub.calls[0].request.headers["content-type"]).toContain("application/json");
   });
 
   it("头进得去,context 递给 headers()", async () => {
-    const { fn, seen } = stubFetch(() => json({}));
-    const req = makeRequester<string>({
+    const stub = httpStub(() => json({}));
+    const request = makeRequester<string>({
       baseUrl: BASE,
       upstream: UPSTREAM,
       headers: (_path, options) => Effect.succeed({ "x-key": options?.context ?? "" }),
     });
-    await run(fn, req("/v1/t", { context: "abc" }));
-    expect((seen.init?.headers as Record<string, string>)["x-key"]).toBe("abc");
+    await runClient(stub, request("/v1/t", { context: "abc" }));
+    expect(stub.calls[0].request.headers["x-key"]).toBe("abc");
   });
 
-  it("没配 headers() 时,调用方放在 init.headers 里的头不被抹掉", async () => {
-    // 以前这里写死 `{ ...init, headers }`,headers 为 undefined 时把 init 里的头覆盖没了 ——
-    // 静默丢头,发出去才发现上游回 422(hyperliquid 的 POST /info 就吃这个)。
-    const { fn, seen } = stubFetch(() => json({}));
-    const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-    await run(fn, req("/v1/t", { init: { headers: { "content-type": "application/json" } } }));
-    expect((seen.init?.headers as Record<string, string>)["content-type"]).toBe("application/json");
-  });
-
-  it("配了 headers() 时它压过 init.headers(上游的头比单发的更权威)", async () => {
-    const { fn, seen } = stubFetch(() => json({}));
-    const req = makeRequester({
-      baseUrl: BASE,
-      upstream: UPSTREAM,
-      headers: () => Effect.succeed({ "x-from": "config" }),
-    });
-    await run(fn, req("/v1/t", { init: { headers: { "x-from": "init" } } }));
-    expect((seen.init?.headers as Record<string, string>)["x-from"]).toBe("config");
-  });
-
-  it("checkBody:HTTP 200 但 body 里说不行 → 失败", async () => {
-    // CEX 常见形状(bybit 的 retCode、okx 的 code)。放在这一层,「一发请求算不算成功」
-    // 就只有一个答案,不必每个 client 各写一个包装去 flatMap 一遍。
-    const { fn } = stubFetch(() => json({ retCode: 10004, retMsg: "sign check error" }));
-    const req = makeRequester({
-      baseUrl: BASE,
-      upstream: UPSTREAM,
-      checkBody: (body, where) =>
-        (body as { retCode?: number }).retCode === 0
-          ? undefined
-          : new UpstreamAuthError({ upstream: UPSTREAM, where, cause: "bad code" }),
-    });
-    const err = await runFail(fn, req("/v1/t"));
+  it("头算不出来 → 归「凭据问题」,不被归类成传输故障", async () => {
+    // 归错了会退化成「三次退避全白打」,还把真正的原因盖掉(rabby 的 wasm 签名靠这条)。
+    const err = await failing(
+      () => json({}),
+      req({ headers: () => Effect.fail(new SigningFailure({ where: "sig" })) })("/v1/t"),
+    );
     expect(err._tag).toBe("UpstreamAuthError");
-    // where 是 pathname,不是入参 path —— 后者可能带 query(原则 #5 红线)。
-    expect(err.where).toBe("/v1/t");
-  });
-
-  it("checkBody 不跑在 notFoundAsNull 的 null 上", async () => {
-    // 那个 null 是「没有这个东西」的正常答案,不是一份 body。喂给读 `body.retCode` 的实现
-    // 会当场 TypeError —— 而且是 defect(不进错误通道),排查起来毫无线索。
-    const { fn } = stubFetch(() => json({}, { status: 404 }));
-    let calls = 0;
-    const req = makeRequester({
-      baseUrl: BASE,
-      upstream: UPSTREAM,
-      checkBody: (body) => {
-        calls++;
-        // 真实实现就长这样 —— body 是 null 的话这一行就炸。
-        return (body as { retCode?: number }).retCode === 0 ? undefined : undefined;
-      },
-    });
-    expect(await run(fn, req("/v1/t", { notFoundAsNull: true }))).toBeNull();
-    expect(calls).toBe(0);
-  });
-
-  it("classifyOverride:上游特有的传输层归类差异压过默认规则", async () => {
-    // binance 用 HTTP 400 表达「这份签名请求被拒」—— 默认规则会当成上游的锅去重试它。
-    const { fn } = stubFetch(() => json({}, { status: 400 }));
-    const req = makeRequester({
-      baseUrl: BASE,
-      upstream: UPSTREAM,
-      classifyOverride: (f) =>
-        f.status === 400
-          ? new UpstreamAuthError({ upstream: UPSTREAM, where: f.where, status: f.status })
-          : undefined,
-    });
-    expect((await runFail(fn, req("/v1/t")))._tag).toBe("UpstreamAuthError");
-
-    // 没命中 override 的照默认走。
-    const { fn: down } = stubFetch(() => json({}, { status: 503 }));
-    expect((await runFail(down, req("/v1/t")))._tag).toBe("UpstreamUnavailableError");
   });
 
   it("闸装上时每一发都过闸", async () => {
     let passes = 0;
-    const { fn } = stubFetch(() => json({}));
-    const req = makeRequester({
-      baseUrl: BASE,
-      upstream: UPSTREAM,
-      limit: Object.assign(
-        <A, E, R>(task: Effect.Effect<A, E, R>) => {
-          passes++;
-          return task;
-        },
-        {
-          forKey:
-            () =>
-            <A, E, R>(t: Effect.Effect<A, E, R>) =>
-              t,
-        },
-      ),
-    });
-    await run(fn, Effect.all([req("/a"), req("/b")]));
+    const limit = Object.assign(
+      <A, E, R>(task: Effect.Effect<A, E, R>) => {
+        passes++;
+        return task;
+      },
+      {
+        forKey:
+          () =>
+          <A, E, R>(t: Effect.Effect<A, E, R>) =>
+            t,
+      },
+    );
+    const request = req({ limit });
+    await run(
+      () => json({}),
+      () => Effect.all([request("/a"), request("/b")]),
+    );
     expect(passes).toBe(2);
   });
+});
 
-  it("不 provide Fetcher → 回退到全局 fetch,且 this 没丢", async () => {
-    // 这条钉的是 `globalThis.fetch.bind(globalThis)`:在 CF Workers 上把 fetch 存进变量再调
-    // 会丢 this,出网静默失败。以前只有一行注释说这事,没有测试。
-    const original = globalThis.fetch;
-    let sawThis: unknown = "never-called";
-    globalThis.fetch = function (this: unknown) {
-      sawThis = this;
-      return Promise.resolve(json({ ok: 1 }));
-    } as typeof globalThis.fetch;
-    try {
-      const req = makeRequester({ baseUrl: BASE, upstream: UPSTREAM });
-      expect(await Effect.runPromise(req("/v1/t"))).toEqual({ ok: 1 });
-      expect(sawThis).toBe(globalThis);
-    } finally {
-      globalThis.fetch = original;
-    }
+// —— 原则 #5 的红线。**这一组是换用官方 `HttpClient` 的验收条件** ——
+//
+// 官方客户端默认会把完整 URL、query 和全部请求头写进它内建的 span,而它的默认脱敏名单
+// (`["authorization","cookie","set-cookie","x-api-key"]`)不含我们六个上游的 key 头。
+// `http-client.ts` 把内建 tracing 整个关掉、自己加一个只写白名单属性的 span —— 下面钉住这件事。
+describe("红线:什么能被记下来", () => {
+  // 记下所有 span 的名字和属性。
+  const captureSpans = () => {
+    const spans: { name: string; attributes: Map<string, unknown> }[] = [];
+    const tracer = Tracer.make({
+      span: (name, parent, context, links, startTime, kind) => {
+        const attributes = new Map<string, unknown>();
+        spans.push({ name, attributes });
+        const span: Tracer.Span = {
+          _tag: "Span",
+          name,
+          spanId: `span-${spans.length}`,
+          traceId: "trace",
+          parent,
+          context,
+          links,
+          status: { _tag: "Started", startTime },
+          attributes,
+          sampled: true,
+          kind,
+          end: () => {},
+          attribute: (key, value) => {
+            attributes.set(key, value);
+          },
+          event: () => {},
+          addLinks: () => {},
+        };
+        return span;
+      },
+      context: (f) => f(),
+    });
+    return { spans, layer: Layer.setTracer(tracer) };
+  };
+
+  const SECRET_QUERY = { address: "0xdeadbeef", signature: "s3cr3t-signature" };
+
+  it("失败信息只带 pathname,不带 query", async () => {
+    const err = await failing(
+      () => json({}, { status: 503 }),
+      req()("/v1/t", { query: SECRET_QUERY }),
+    );
+    expect(err.where).toBe("/v1/t");
+    expect(JSON.stringify(err)).not.toContain("0xdeadbeef");
+    expect(JSON.stringify(err)).not.toContain("s3cr3t-signature");
+  });
+
+  it("**span 里没有 query、没有完整 URL、没有任何请求头**", async () => {
+    const { spans, layer } = captureSpans();
+    const stub = httpStub(() => json({ ok: 1 }));
+    const request = makeRequester({
+      baseUrl: BASE,
+      upstream: UPSTREAM,
+      headers: () => Effect.succeed({ "x-mbx-apikey": "s3cr3t-key" }),
+    });
+
+    await request("/v1/t", { query: SECRET_QUERY }).pipe(
+      Effect.provide(layer),
+      Effect.provide(stub.layer),
+      Effect.runPromise,
+    );
+
+    expect(spans.length).toBeGreaterThan(0);
+    const dumped = JSON.stringify(spans.map((s) => [s.name, [...s.attributes]]));
+    expect(dumped).not.toContain("s3cr3t-signature"); // query 里的签名
+    expect(dumped).not.toContain("0xdeadbeef"); // query 里的地址
+    expect(dumped).not.toContain("s3cr3t-key"); // 凭据头
+    expect(dumped).not.toContain("x-mbx-apikey"); // 连头的**名字**都不该出现
+
+    // 该有的还是有:白名单那三个属性。
+    const ours = spans.find((s) => s.name === "http.client.request");
+    expect(ours).toBeDefined();
+    expect(ours?.attributes.get("folio.upstream")).toBe(UPSTREAM);
+    expect(ours?.attributes.get("url.path")).toBe("/v1/t");
+    expect(ours?.attributes.get("http.request.method")).toBe("GET");
+  });
+
+  it("**出站请求不带 traceparent** —— 不把内部 trace id 发给上游", async () => {
+    const { layer } = captureSpans();
+    const stub = httpStub(() => json({}));
+    await req()("/v1/t").pipe(Effect.provide(layer), Effect.provide(stub.layer), Effect.runPromise);
+    expect(Object.keys(stub.calls[0].request.headers)).not.toContain("traceparent");
+    expect(Object.keys(stub.calls[0].request.headers)).not.toContain("b3");
+  });
+});
+
+// 手搓 `Effect.tryPromise` 收不到 signal —— 上层超时后请求还在飞,上游的额度照扣。
+// 这是换用官方客户端的直接理由之一。
+describe("中断能真的 abort 底层请求", () => {
+  it("effect 被中断 → fetch 的 AbortSignal 被拉起", async () => {
+    let signal: AbortSignal | undefined;
+    const client = HttpClient.make((_request, _url, s) => {
+      signal = s;
+      // 永远不回 —— 只有中断能结束它。
+      return Effect.never;
+    });
+
+    const exit = await Effect.gen(function* () {
+      const fiber = yield* Effect.fork(req()("/v1/slow"));
+      // 让请求真的发出去(stub 记下 signal)再中断。
+      yield* Effect.yieldNow();
+      yield* Effect.yieldNow();
+      return yield* Fiber.interrupt(fiber);
+    }).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.runPromise);
+
+    expect(Exit.isInterrupted(exit)).toBe(true);
+    expect(signal).toBeDefined();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("正常跑完不会误 abort", async () => {
+    let signal: AbortSignal | undefined;
+    const client = HttpClient.make((request, _url, s) => {
+      signal = s;
+      return Effect.succeed(HttpClientResponse.fromWeb(request, json({ ok: 1 })));
+    });
+
+    const out = await req()("/v1/t").pipe(
+      Effect.provideService(HttpClient.HttpClient, client),
+      Effect.runPromise,
+    );
+
+    expect(out).toEqual({ ok: 1 });
+    expect(signal?.aborted).toBe(false);
   });
 });

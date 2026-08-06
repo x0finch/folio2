@@ -41,7 +41,8 @@ export interface RateLimitOptions extends RateLimiter.RateLimiter.Options {
 }
 
 // 换档用的**可选服务** —— `Effect.serviceOption` 读它,所以 **`R` 通道不受污染**,
-// 与 `Fetcher` / `SlotCacheOverride` / `RabbySigner` 同一套。
+// 与 `SlotCacheOverride` / `RabbySigner` 同一套(出网那条以前也是这么办的,
+// 换成官方 `HttpClient` 之后它本来就是个服务,不必我们再定义一个)。
 //
 // 为什么不是每个 client 的 config 上一个 `rateLimitScope` 字段:那是构造器注入,而它**只为测试
 // 存在**(生产从不传)。四个 client 各写一遍 `config.rateLimitScope ?? "isolated"` 的后果是
@@ -83,16 +84,25 @@ export function make(
 // **目标是削峰,不是严格限频** —— 严格那档在 Workers 上只有 Durable Object 能做(见 #17),
 // 而我们不需要:漏出去的那几发由 429 + 重试兜底。
 //
-// **两处能力差,写清楚免得踩**:
-//   · `algorithm` 被忽略 —— GCRA 就是 token-bucket 的连续时间版(令牌按固定速率恢复);fixed-window
-//     用一个游标表达不了。要 fixed-window 只能用 `memory` 档
-//   · `RateLimiter.withCost` 不生效 —— 官方靠一个没导出的 internal `FiberRef` 传权重,这一档读不到。
-//     自造一个平行的 FiberRef 会让「该用哪个 withCost」变成必须记住的陷阱,不如没有。目前仓里没有
-//     分权重的上游(所有端点等价一发);真要用时应该连同官方档一起想清楚再补
+// **两处能力差。一处能当场炸,就当场炸;另一处炸不了,只能写在这**:
+//   · `algorithm: "fixed-window"` —— **构造时直接 die**。GCRA 是 token-bucket 的连续时间版
+//     (令牌按固定速率恢复),fixed-window 用一个游标表达不了。这一档顶着官方 `RateLimiter` 的
+//     类型,而类型说能传 —— 那就必须在运行时说不能,否则就是「类型说支持、运行时静默忽略」,
+//     最难查的那一类。要 fixed-window 只能用 `memory` 档
+//   · `RateLimiter.withCost` 不生效 —— 官方靠一个**没导出的 internal `FiberRef`** 传权重,
+//     这一档读不到,**无解**(自造一个平行 FiberRef 只会让「该用哪个 withCost」变成必须记住的
+//     陷阱)。所以它不能像上面那条一样在构造时拦 —— 权重是调用时才传的,这里看不见。
+//     目前仓里没有分权重的上游(所有端点等价一发);真要用时得连同官方档一起重想
 const isolated = (
   options: RateLimitOptions,
 ): Effect.Effect<RateLimiter.RateLimiter, never, Scope.Scope> =>
   Effect.sync(() => {
+    if (options.algorithm === "fixed-window") {
+      throw new Error(
+        `rate limit "${options.key}": the isolated scope only implements token-bucket (GCRA); ` +
+          `fixed-window needs the memory scope`,
+      );
+    }
     const spacing = Duration.toMillis(Duration.decode(options.interval)) / options.limit;
     const burst = (options.limit - 1) * spacing;
     // 游标按 key 取,**跨 `make` 调用共享** —— 这一档的状态刻意不在 `Scope` 里:CF Workers 上每个

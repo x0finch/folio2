@@ -1,7 +1,13 @@
-import { Fetcher, type UpstreamError } from "@folio/client-core";
-import { Effect, TestContext } from "effect";
+import type { Outbound, UpstreamError } from "@folio/client-core";
+import {
+  type HttpStub,
+  httpStub,
+  jsonResponse as json,
+  runClient,
+} from "@folio/client-core/testing";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { make, type OkxClientApi, type OkxConfig } from "../src/client";
+import { make, OkxClient, type OkxClientApi, type OkxConfig } from "../src/client";
 import {
   HEADER_KEY,
   HEADER_PASSPHRASE,
@@ -31,46 +37,26 @@ async function hmacB64(secret: string, message: string): Promise<string> {
   return btoa(String.fromCharCode(...sig));
 }
 
-const json = (body: unknown, init?: ResponseInit) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-    ...init,
-  });
-
-interface Seen {
-  url: URL;
-  init?: RequestInit;
-}
-
+// 假出网:记下每一发。顶替的是 **`HttpClient` 服务**而不是 `globalThis.fetch` ——
+// 请求层底下是官方客户端,在那一层顶替才测得到真实路径(签名头、method、body 都经过它)。
 function stub(reply: (url: URL) => Response | Promise<Response>) {
-  const calls: Seen[] = [];
-  const fn = ((input: URL | RequestInfo, init?: RequestInit) => {
-    const url = input instanceof URL ? input : new URL(String(input));
-    calls.push({ url, init });
-    return Promise.resolve(reply(url));
-  }) as typeof globalThis.fetch;
-  return { fn, calls };
+  const s = httpStub((request) => reply(request.url));
+  return { fn: s, calls: s.calls };
 }
 
 // 构造是纯的(没有闸)。TestClock 下时钟从 0 起 → 时间戳是 1970-01-01T00:00:00.000Z,签名串确定。
 const withClient = <A, E>(
-  fn: typeof globalThis.fetch,
-  use: (client: OkxClientApi) => Effect.Effect<A, E, Fetcher>,
+  fn: HttpStub,
+  use: (client: OkxClientApi) => Effect.Effect<A, E, Outbound>,
   config: OkxConfig = {},
-): Promise<A> =>
-  use(make(config)).pipe(
-    Effect.provideService(Fetcher, fn),
-    Effect.provide(TestContext.TestContext),
-    Effect.runPromise,
-  );
+): Promise<A> => runClient(fn, use(make(config)));
 
 const failing = (
-  fn: typeof globalThis.fetch,
-  use: (c: OkxClientApi) => Effect.Effect<unknown, UpstreamError, Fetcher>,
+  fn: HttpStub,
+  use: (c: OkxClientApi) => Effect.Effect<unknown, UpstreamError, Outbound>,
 ): Promise<UpstreamError> => withClient(fn, (c) => Effect.flip(use(c)));
 
-const headersOf = (seen: Seen) => seen.init?.headers as Record<string, string>;
+const headersOf = (seen: { request: { headers: Record<string, string> } }) => seen.request.headers;
 const EPOCH_ISO = "1970-01-01T00:00:00.000Z";
 
 describe("签名", () => {
@@ -92,7 +78,7 @@ describe("签名", () => {
     const { fn, calls } = stub(() => json(valuationFixture));
     await withClient(fn, (c) => c.assetValuation(CREDS));
 
-    expect(calls[0].url.searchParams.get("ccy")).toBe("USD");
+    expect(calls[0].request.url.searchParams.get("ccy")).toBe("USD");
     expect(headersOf(calls[0])[HEADER_SIGN]).toBe(
       await hmacB64(CREDS.secret, `${EPOCH_ISO}GET/api/v5/asset/asset-valuation?ccy=USD`),
     );
@@ -109,14 +95,14 @@ describe("签名", () => {
   it("secret 与 passphrase 不进 query", async () => {
     const { fn, calls } = stub(() => json(balanceFixture));
     await withClient(fn, (c) => c.balance(CREDS));
-    expect(calls[0].url.href).not.toContain(CREDS.secret);
-    expect(calls[0].url.href).not.toContain(CREDS.passphrase);
+    expect(calls[0].request.url.href).not.toContain(CREDS.secret);
+    expect(calls[0].request.url.href).not.toContain(CREDS.passphrase);
   });
 });
 
 describe("端点打对路径", () => {
   const paths: Array<
-    [string, (c: OkxClientApi) => Effect.Effect<unknown, UpstreamError, Fetcher>]
+    [string, (c: OkxClientApi) => Effect.Effect<unknown, UpstreamError, Outbound>]
   > = [
     ["/api/v5/account/balance", (c) => c.balance(CREDS)],
     ["/api/v5/asset/balances", (c) => c.fundingBalances(CREDS)],
@@ -130,15 +116,15 @@ describe("端点打对路径", () => {
     it(path, async () => {
       const { fn, calls } = stub(() => json({ code: "0", data: [] }));
       await withClient(fn, call);
-      expect(calls[0].url.origin).toBe(OKX_API_BASE);
-      expect(calls[0].url.pathname).toBe(path);
+      expect(calls[0].request.url.origin).toBe(OKX_API_BASE);
+      expect(calls[0].request.url.pathname).toBe(path);
     });
   }
 
   it("apiBase 可覆盖,且当不透明整串用(代理 #264)", async () => {
     const { fn, calls } = stub(() => json(balanceFixture));
     await withClient(fn, (c) => c.balance(CREDS), { apiBase: "http://localhost:3099/okx-proxy" });
-    expect(calls[0].url.href).toContain("/okx-proxy/api/v5/account/balance");
+    expect(calls[0].request.url.href).toContain("/okx-proxy/api/v5/account/balance");
   });
 
   it("原样吐上游形状,不做任何翻译", async () => {
@@ -181,7 +167,7 @@ describe("业务码(HTTP 200 + code)", () => {
 
   it("六个端点都查 code", async () => {
     const fn = withCode("50113");
-    const calls: Array<(c: OkxClientApi) => Effect.Effect<unknown, UpstreamError, Fetcher>> = [
+    const calls: Array<(c: OkxClientApi) => Effect.Effect<unknown, UpstreamError, Outbound>> = [
       (c) => c.balance(CREDS),
       (c) => c.fundingBalances(CREDS),
       (c) => c.savingsBalance(CREDS),
@@ -235,5 +221,22 @@ describe("HTTP 层错误归类", () => {
     const dump = JSON.stringify(err);
     expect(dump).not.toContain(CREDS.secret);
     expect(dump).not.toContain(CREDS.passphrase);
+  });
+});
+
+// **走 Tag / Layer 那一条路。** 生产只走它,而在这之前**九个包的测试一条都没走过** ——
+// 全部直接调 `make`,于是「`layer()` 装出来的东西和 `make` 是不是同一个」从来没人验证。
+// 这是复审点出来的真空档(#12)。
+describe("装配:Tag 路径", () => {
+  it("`OkxClient.layer(...)` 装出来的就是 `make` 那个 client", async () => {
+    const { fn, calls } = stub(() => json(balanceFixture));
+    const out = await runClient(
+      fn,
+      Effect.flatMap(OkxClient, (client) => client.balance(CREDS)).pipe(
+        Effect.provide(OkxClient.layer()),
+      ),
+    );
+    expect(out).toBeDefined();
+    expect(calls).toHaveLength(1);
   });
 });

@@ -1,7 +1,13 @@
-import { Fetcher, type UpstreamError } from "@folio/client-core";
-import { Effect, TestContext } from "effect";
+import type { Outbound, UpstreamError } from "@folio/client-core";
+import {
+  type HttpStub,
+  httpStub,
+  jsonResponse as json,
+  runClient,
+} from "@folio/client-core/testing";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { type BybitClientApi, type BybitConfig, make } from "../src/client";
+import { BybitClient, type BybitClientApi, type BybitConfig, make } from "../src/client";
 import {
   BYBIT_API_BASE,
   EARN_CATEGORY_FLEXIBLE,
@@ -34,47 +40,27 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const json = (body: unknown, init?: ResponseInit) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-    ...init,
-  });
-
-interface Seen {
-  url: URL;
-  init?: RequestInit;
-}
-
+// 假出网:记下每一发。顶替的是 **`HttpClient` 服务**而不是 `globalThis.fetch` ——
+// 请求层底下是官方客户端,在那一层顶替才测得到真实路径(签名头、method、body 都经过它)。
 function stub(reply: (url: URL) => Response | Promise<Response>) {
-  const calls: Seen[] = [];
-  const fn = ((input: URL | RequestInfo, init?: RequestInit) => {
-    const url = input instanceof URL ? input : new URL(String(input));
-    calls.push({ url, init });
-    return Promise.resolve(reply(url));
-  }) as typeof globalThis.fetch;
-  return { fn, calls };
+  const s = httpStub((request) => reply(request.url));
+  return { fn: s, calls: s.calls };
 }
 
 // 构造是纯的(没有闸就没有 Scope)。TestClock 下 `Clock.currentTimeMillis` 从 0 起 ——
 // 于是签名串确定,可以拿参考实现对。
 const withClient = <A, E>(
-  fn: typeof globalThis.fetch,
-  use: (client: BybitClientApi) => Effect.Effect<A, E, Fetcher>,
+  fn: HttpStub,
+  use: (client: BybitClientApi) => Effect.Effect<A, E, Outbound>,
   config: BybitConfig = {},
-): Promise<A> =>
-  use(make(config)).pipe(
-    Effect.provideService(Fetcher, fn),
-    Effect.provide(TestContext.TestContext),
-    Effect.runPromise,
-  );
+): Promise<A> => runClient(fn, use(make(config)));
 
 const failing = (
-  fn: typeof globalThis.fetch,
-  use: (c: BybitClientApi) => Effect.Effect<unknown, UpstreamError, Fetcher>,
+  fn: HttpStub,
+  use: (c: BybitClientApi) => Effect.Effect<unknown, UpstreamError, Outbound>,
 ): Promise<UpstreamError> => withClient(fn, (c) => Effect.flip(use(c)));
 
-const headersOf = (seen: Seen) => seen.init?.headers as Record<string, string>;
+const headersOf = (seen: { request: { headers: Record<string, string> } }) => seen.request.headers;
 
 describe("签名", () => {
   it("签的是 timestamp + apiKey + recvWindow + queryString,且与发出去的 query 一字不差", async () => {
@@ -83,7 +69,7 @@ describe("签名", () => {
 
     const h = headersOf(calls[0]);
     // 实际发出去的 query —— 被签串必须用**它**,不是某个另行拼的版本。
-    const sentQuery = calls[0].url.searchParams.toString();
+    const sentQuery = calls[0].request.url.searchParams.toString();
     expect(sentQuery).toBe("accountType=UNIFIED");
     // TestClock 下 timestamp 是 0。
     expect(h[HEADER_TIMESTAMP]).toBe("0");
@@ -105,7 +91,7 @@ describe("签名", () => {
   it("secret 不进 query、不进头", async () => {
     const { fn, calls } = stub(() => json(walletFixture));
     await withClient(fn, (c) => c.walletBalance(CREDS));
-    expect(calls[0].url.href).not.toContain(CREDS.secret);
+    expect(calls[0].request.url.href).not.toContain(CREDS.secret);
     expect(JSON.stringify(headersOf(calls[0]))).not.toContain(CREDS.secret);
   });
 });
@@ -114,23 +100,23 @@ describe("端点打对路径 / query", () => {
   it("统一账户:accountType=UNIFIED", async () => {
     const { fn, calls } = stub(() => json(walletFixture));
     await withClient(fn, (c) => c.walletBalance(CREDS));
-    expect(calls[0].url.origin).toBe(BYBIT_API_BASE);
-    expect(calls[0].url.pathname).toBe("/v5/account/wallet-balance");
-    expect(calls[0].url.searchParams.get("accountType")).toBe("UNIFIED");
+    expect(calls[0].request.url.origin).toBe(BYBIT_API_BASE);
+    expect(calls[0].request.url.pathname).toBe("/v5/account/wallet-balance");
+    expect(calls[0].request.url.searchParams.get("accountType")).toBe("UNIFIED");
   });
 
   it("资金账户:accountType=FUND", async () => {
     const { fn, calls } = stub(() => json(fundingFixture));
     await withClient(fn, (c) => c.fundingBalances(CREDS));
-    expect(calls[0].url.pathname).toBe("/v5/asset/transfer/query-account-coins-balance");
-    expect(calls[0].url.searchParams.get("accountType")).toBe("FUND");
+    expect(calls[0].request.url.pathname).toBe("/v5/asset/transfer/query-account-coins-balance");
+    expect(calls[0].request.url.searchParams.get("accountType")).toBe("FUND");
   });
 
   it("赚币:category 由调用方给(拉哪几个类目是适配层的事)", async () => {
     const { fn, calls } = stub(() => json(earnFixture));
     await withClient(fn, (c) => c.earnPositions(CREDS, EARN_CATEGORY_FLEXIBLE));
-    expect(calls[0].url.pathname).toBe("/v5/earn/position");
-    expect(calls[0].url.searchParams.get("category")).toBe("FlexibleSaving");
+    expect(calls[0].request.url.pathname).toBe("/v5/earn/position");
+    expect(calls[0].request.url.searchParams.get("category")).toBe("FlexibleSaving");
   });
 
   it("apiBase 可覆盖,且当不透明整串用(代理 #264)", async () => {
@@ -138,7 +124,7 @@ describe("端点打对路径 / query", () => {
     await withClient(fn, (c) => c.walletBalance(CREDS), {
       apiBase: "http://localhost:3099/bybit-proxy",
     });
-    expect(calls[0].url.href).toContain("/bybit-proxy/v5/account/wallet-balance");
+    expect(calls[0].request.url.href).toContain("/bybit-proxy/v5/account/wallet-balance");
   });
 
   it("原样吐上游形状,不做任何翻译", async () => {
@@ -231,5 +217,22 @@ describe("HTTP 层错误归类", () => {
     const dump = JSON.stringify(err);
     expect(dump).not.toContain(CREDS.secret);
     expect(dump).not.toContain(CREDS.apiKey);
+  });
+});
+
+// **走 Tag / Layer 那一条路。** 生产只走它,而在这之前**九个包的测试一条都没走过** ——
+// 全部直接调 `make`,于是「`layer()` 装出来的东西和 `make` 是不是同一个」从来没人验证。
+// 这是复审点出来的真空档(#12)。
+describe("装配:Tag 路径", () => {
+  it("`BybitClient.layer(...)` 装出来的就是 `make` 那个 client", async () => {
+    const { fn, calls } = stub(() => json(walletFixture));
+    const out = await runClient(
+      fn,
+      Effect.flatMap(BybitClient, (client) => client.walletBalance(CREDS)).pipe(
+        Effect.provide(BybitClient.layer()),
+      ),
+    );
+    expect(out).toBeDefined();
+    expect(calls).toHaveLength(1);
   });
 });
