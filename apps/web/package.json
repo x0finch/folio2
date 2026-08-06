@@ -6,7 +6,9 @@
     "#/*": "./src/*"
   },
   "scripts": {
+    "predev": "node scripts/kill-stale-dev.mjs",
     "dev": "vite dev --port 3000",
+    "predev:tunnel": "node scripts/kill-stale-dev.mjs",
     "dev:tunnel": "node scripts/dev-tunnel.mjs",
     "generate-routes": "tsr generate",
     "build": "vite build",
