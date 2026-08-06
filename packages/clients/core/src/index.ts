@@ -33,7 +33,12 @@ export { hmacSha256 } from "./crypto";
 export { HttpFailure, type HttpFailureKind, SigningFailure } from "./errors";
 export { Fetcher } from "./fetcher";
 export { type HttpConfig, makeRequester, type Requester, type RequestOptions } from "./http";
-export { make as makeRateLimit, type RateLimitOptions, type RateLimitScope } from "./ratelimit";
+export {
+  make as makeRateLimit,
+  type RateLimitOptions,
+  type RateLimitScope,
+  RateLimitScopeOverride,
+} from "./ratelimit";
 export { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "./slot-cursor";
 export {
   type StaleTolerantCache,

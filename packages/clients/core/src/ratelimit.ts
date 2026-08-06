@@ -1,17 +1,17 @@
-import { Clock, Duration, Effect, RateLimiter, type Scope } from "effect";
+import { Clock, Context, Duration, Effect, Option, RateLimiter, type Scope } from "effect";
 import { cursorFor } from "./slot-cursor";
 
 // 出站请求的速率闸。**出口就是 Effect 官方的 `RateLimiter`** —— 同一个类型、同一套构造契约
 // (`Effect<RateLimiter, never, Scope>`),所以 `RateLimiter.withCost` / `Function.compose` 叠多档
 // 这些组合子直接可用,我们不自造平行宇宙。
 //
-// 唯一多出来的是 `scope`,它决定额度桶**存在哪**:
+// 唯一多出来的是**档位**,它决定额度桶**存在哪**:
 //
-//   · `memory`(默认)—— **直接委托官方实现**,一行。进程内、状态绑在 `Scope` 上,官方的
-//     token-bucket / fixed-window 两种算法都能用。测试和单进程场景用这档
-//   · `isolated`     —— 额度跨 CF Workers 的 isolate 共享。官方那套(semaphore + 后台 refill fiber)
+//   · `isolated`(默认)—— 额度跨 CF Workers 的 isolate 共享。官方那套(semaphore + 后台 refill fiber)
 //     的状态是内存里的信号量,跨不了 isolate;而 CF 什么时候开新 isolate 我们控制不了,每个新
 //     isolate 从满额开始就等于没限。所以这一档自己实现,见下
+//   · `memory`       —— **直接委托官方实现**,一行。进程内、状态绑在 `Scope` 上,官方的
+//     token-bucket / fixed-window 两种算法都能用。测试和单进程场景用这档
 //
 // **为什么 `isolated` 只能自己写**:跨 isolate 共享的载体是 Cache API,它只能存一个值、没有原子
 // 读改写。能塞进「一个数」的限频算法是 GCRA(时隙游标),不是信号量 —— 算法选择是被载体逼出来的,
@@ -35,19 +35,42 @@ export interface RateLimitOptions extends RateLimiter.RateLimiter.Options {
   //
   // `memory` 档用不到它(桶在 scope 里,天然隔离),但仍然必填 —— 同一个闸切档时不该改调用点。
   readonly key: string;
-  readonly scope?: RateLimitScope; // 默认 memory
+  // **显式选档,给「我就是要测这一档」用**(本包测两档算法本身时)。日常不传:
+  // 生产就是 `isolated`,测试要换档 provide 下面那个服务 —— 见那里的说明。
+  readonly scope?: RateLimitScope;
 }
 
-// 与官方 `RateLimiter.make` 同签名(多一个 `scope` / `key`),所以两者可以互换、可以 compose。
+// 换档用的**可选服务** —— `Effect.serviceOption` 读它,所以 **`R` 通道不受污染**,
+// 与 `Fetcher` / `SlotCacheOverride` / `RabbySigner` 同一套。
+//
+// 为什么不是每个 client 的 config 上一个 `rateLimitScope` 字段:那是构造器注入,而它**只为测试
+// 存在**(生产从不传)。四个 client 各写一遍 `config.rateLimitScope ?? "isolated"` 的后果是
+// **默认值有五个地方定义**,而且和本模块自己的默认值打过架(这里曾经默认 `memory`,四个调用点
+// 又各自覆盖回 `isolated`——真正的默认藏在调用点里,读这个文件是看不出来的)。
+//
+// 现在只有一个默认:不 provide 就是 `isolated`,也就是生产的样子。
+export class RateLimitScopeOverride extends Context.Tag("client-core/RateLimitScopeOverride")<
+  RateLimitScopeOverride,
+  RateLimitScope
+>() {}
+
+// **默认 `isolated`,也就是生产的样子。** 进程内那档只在测试和单进程场景成立,而 CF Workers 上
+// 每个请求一次 `runPromise`、随时会开新 isolate —— 桶只活在进程内就等于没限。默认值该是
+// 「不配也安全」的那个,不是「跑得最顺」的那个。
+const scopeFor = (explicit?: RateLimitScope): Effect.Effect<RateLimitScope> =>
+  explicit !== undefined
+    ? Effect.succeed(explicit)
+    : Effect.map(Effect.serviceOption(RateLimitScopeOverride), (o) =>
+        Option.isSome(o) ? o.value : "isolated",
+      );
+
+// 与官方 `RateLimiter.make` 同签名(多一个 `key`),所以两者可以互换、可以 compose。
 export function make(
   options: RateLimitOptions,
 ): Effect.Effect<RateLimiter.RateLimiter, never, Scope.Scope> {
-  switch (options.scope ?? "memory") {
-    case "memory":
-      return RateLimiter.make(options);
-    case "isolated":
-      return isolated(options);
-  }
+  return Effect.flatMap(scopeFor(options.scope), (scope) =>
+    scope === "memory" ? RateLimiter.make(options) : isolated(options),
+  );
 }
 
 // —— isolated:GCRA(时隙游标),状态一个数,所以能跨 isolate ——

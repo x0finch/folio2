@@ -1,7 +1,6 @@
 import {
   makeRateLimit,
   makeRequester,
-  type RateLimitScope,
   type Requester,
   type UpstreamError,
 } from "@folio/client-core";
@@ -22,8 +21,6 @@ import type { ZerionChainsResponse, ZerionPositionsResponse } from "./types";
 
 export interface ZerionConfig {
   readonly apiBase?: string;
-  // 额度桶存在哪。**生产必须是 `isolated`**(默认):额度按 API key 算、全部署共用一把。
-  readonly rateLimitScope?: RateLimitScope;
 }
 
 // Zerion API 的请求层。**方法按上游端点组织,吐的是上游形状(DTO)** ——
@@ -67,7 +64,6 @@ export function make(
       key: RATE_LIMIT_KEY,
       limit: RATE_LIMIT_BURST,
       interval: Duration.millis((RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000),
-      scope: config.rateLimitScope ?? "isolated",
     });
 
     // 头是每请求算的(apiKey 从 `context` 来)。

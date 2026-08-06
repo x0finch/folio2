@@ -50,18 +50,23 @@ const nTimes = (n: number) => (gate: RateLimiter.RateLimiter) =>
   Effect.all(Array.from({ length: n }, (_, i) => gate(Effect.succeed(i))));
 
 describe("scope: memory —— 委托给官方实现", () => {
+  // **显式选档。** 默认是 `isolated`(生产的样子),而这几条测的是 memory 档的行为本身 ——
+  // 不写死的话它们会跟着默认值漂,曾经就是这样:默认从 memory 改成 isolated 时,下面
+  // 「桶绑在 scope 上」那条立刻挂了(isolated 的游标刻意跨 make 共享)。
   it("前 limit 发满额突发", async () => {
-    expect(await settledAfter({ limit: 5, interval: "1 seconds" }, 0, nTimes(5))).toBe(true);
+    expect(
+      await settledAfter({ limit: 5, interval: "1 seconds", scope: "memory" }, 0, nTimes(5)),
+    ).toBe(true);
   });
 
   it("第 limit+1 发等一个令牌(官方 token-bucket:interval/limit)", async () => {
-    const opts = { limit: 5, interval: "1 seconds" } as const;
+    const opts = { limit: 5, interval: "1 seconds", scope: "memory" } as const;
     expect(await settledAfter(opts, 199, nTimes(6))).toBe(false);
     expect(await settledAfter(opts, 200, nTimes(6))).toBe(true);
   });
 
   it("桶绑在 scope 上 —— 每次 make 一份,天然隔离(同 key 也不串)", async () => {
-    const opts = { key: "fixed", limit: 1, interval: "1 seconds" } as const;
+    const opts = { key: "fixed", limit: 1, interval: "1 seconds", scope: "memory" } as const;
     // 同一个 key 连做两次,第二次仍是满额:memory 档不跨 make 共享。
     expect(await settledAfter(opts, 0, nTimes(1))).toBe(true);
     expect(await settledAfter(opts, 0, nTimes(1))).toBe(true);

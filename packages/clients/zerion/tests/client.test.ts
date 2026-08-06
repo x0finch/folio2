@@ -1,4 +1,4 @@
-import { Fetcher, type UpstreamError } from "@folio/client-core";
+import { Fetcher, RateLimitScopeOverride, type UpstreamError } from "@folio/client-core";
 import { Duration, Effect, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import { make, type ZerionClientApi, type ZerionConfig } from "../src/client";
@@ -42,11 +42,12 @@ const withClient = <A, E>(
   over: Partial<ZerionConfig> = {},
 ): Promise<A> =>
   Effect.gen(function* () {
-    const client = yield* make({ rateLimitScope: "memory", apiBase: freshBase(), ...over });
+    const client = yield* make({ apiBase: freshBase(), ...over });
     return yield* use(client);
   }).pipe(
     Effect.scoped,
     Effect.provideService(Fetcher, fn),
+    Effect.provideService(RateLimitScopeOverride, "memory"),
     Effect.provide(TestContext.TestContext),
     Effect.runPromise,
   );
@@ -133,13 +134,14 @@ describe("chainIds", () => {
     const base = freshBase();
     const { fn, calls } = bothEndpoints();
     await Effect.gen(function* () {
-      const client = yield* make({ rateLimitScope: "memory", apiBase: base });
+      const client = yield* make({ apiBase: base });
       yield* client.chainIds(KEY);
       yield* TestClock.adjust(Duration.millis(CHAINS_CACHE_TTL_MS + 1));
       yield* client.chainIds(KEY);
     }).pipe(
       Effect.scoped,
       Effect.provideService(Fetcher, fn),
+      Effect.provideService(RateLimitScopeOverride, "memory"),
       Effect.provide(TestContext.TestContext),
       Effect.runPromise,
     );
@@ -152,7 +154,7 @@ describe("chainIds", () => {
     const { fn } = stub(() => (dead ? json({}, { status: 503 }) : json(chainsFixture)));
 
     const map = await Effect.gen(function* () {
-      const client = yield* make({ rateLimitScope: "memory", apiBase: base });
+      const client = yield* make({ apiBase: base });
       yield* client.chainIds(KEY);
       dead = true;
       yield* TestClock.adjust(Duration.millis(CHAINS_CACHE_TTL_MS + 1));
@@ -160,6 +162,7 @@ describe("chainIds", () => {
     }).pipe(
       Effect.scoped,
       Effect.provideService(Fetcher, fn),
+      Effect.provideService(RateLimitScopeOverride, "memory"),
       Effect.provide(TestContext.TestContext),
       Effect.runPromise,
     );

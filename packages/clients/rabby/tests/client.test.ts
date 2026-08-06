@@ -1,4 +1,9 @@
-import { Fetcher, SigningFailure, type UpstreamError } from "@folio/client-core";
+import {
+  Fetcher,
+  RateLimitScopeOverride,
+  SigningFailure,
+  type UpstreamError,
+} from "@folio/client-core";
 import { Duration, Effect, Fiber, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import { make, parseChainIds, type RabbyClientApi, type RabbyConfig } from "../src/client";
@@ -61,12 +66,13 @@ const withClient = <A, E>(
   sign: SignRequest = fakeSigner().sign,
 ): Promise<A> =>
   Effect.gen(function* () {
-    const client = yield* make({ rateLimitScope: "memory", apiBase: freshBase(), ...over });
+    const client = yield* make({ apiBase: freshBase(), ...over });
     return yield* use(client);
   }).pipe(
     Effect.scoped,
     Effect.provideService(Fetcher, fn),
     Effect.provideService(RabbySigner, sign),
+    Effect.provideService(RateLimitScopeOverride, "memory"),
     Effect.provide(TestContext.TestContext),
     Effect.runPromise,
   );
@@ -128,12 +134,13 @@ describe("签名", () => {
     const { fn } = byPath();
     const boom: SignRequest = (_m, path) => Effect.fail(new SigningFailure({ where: path }));
     const err = await Effect.gen(function* () {
-      const client = yield* make({ rateLimitScope: "memory", apiBase: freshBase() });
+      const client = yield* make({ apiBase: freshBase() });
       return yield* Effect.flip(client.tokens(ADDR));
     }).pipe(
       Effect.scoped,
       Effect.provideService(Fetcher, fn),
       Effect.provideService(RabbySigner, boom),
+      Effect.provideService(RateLimitScopeOverride, "memory"),
       Effect.provide(TestContext.TestContext),
       Effect.runPromise,
     );
@@ -200,7 +207,7 @@ describe("chainIds", () => {
     let dead = false;
     const { fn } = stub(() => (dead ? json({}, { status: 503 }) : json(chainListFixture)));
     const map = await Effect.gen(function* () {
-      const client = yield* make({ rateLimitScope: "memory", apiBase: base });
+      const client = yield* make({ apiBase: base });
       yield* client.chainIds;
       dead = true;
       yield* TestClock.adjust(Duration.millis(CHAINS_CACHE_TTL_MS + 1));
@@ -209,6 +216,7 @@ describe("chainIds", () => {
       Effect.scoped,
       Effect.provideService(Fetcher, fn),
       Effect.provideService(RabbySigner, fakeSigner().sign),
+      Effect.provideService(RateLimitScopeOverride, "memory"),
       Effect.provide(TestContext.TestContext),
       Effect.runPromise,
     );
@@ -229,7 +237,7 @@ describe("限频:limit=1,不许突发", () => {
   const settledAfter = (ms: number, use: (c: RabbyClientApi) => Effect.Effect<unknown>) =>
     Effect.gen(function* () {
       const { fn } = byPath();
-      const client = yield* make({ rateLimitScope: "memory", apiBase: freshBase() });
+      const client = yield* make({ apiBase: freshBase() });
       const fiber = yield* Effect.fork(
         use(client).pipe(
           Effect.provideService(Fetcher, fn),
@@ -239,7 +247,12 @@ describe("限频:limit=1,不许突发", () => {
       yield* TestClock.adjust(Duration.millis(ms));
       yield* Effect.repeatN(Effect.yieldNow(), 50);
       return Option.isSome(yield* Fiber.poll(fiber));
-    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(RateLimitScopeOverride, "memory"),
+      Effect.provide(TestContext.TestContext),
+      Effect.runPromise,
+    );
 
   it("第二发就要等(不许突发)", async () => {
     const two = (c: RabbyClientApi) =>

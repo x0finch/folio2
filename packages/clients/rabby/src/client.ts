@@ -1,7 +1,6 @@
 import {
   makeRateLimit,
   makeRequester,
-  type RateLimitScope,
   type Requester,
   type RequestOptions,
   type SigningFailure,
@@ -26,9 +25,6 @@ import type { RabbyChain, RabbyProtocol, RabbyToken } from "./types";
 
 export interface RabbyConfig {
   readonly apiBase?: string;
-  // 额度桶存在哪。**生产必须是 `isolated`**(默认):额度跟签名走、所有账户共用一份,
-  // 而 CF Workers 随时会开新 isolate —— 桶只活在进程内就等于没限。
-  readonly rateLimitScope?: RateLimitScope;
 }
 
 // Rabby(实为 DeBank 后端)的请求层。**方法按上游端点组织,吐的是上游形状(DTO)** ——
@@ -72,7 +68,6 @@ export function make(config: RabbyConfig = {}): Effect.Effect<RabbyClientApi, ne
       key: RATE_LIMIT_KEY,
       limit: 1,
       interval: Duration.millis(1000 / MAX_REQUESTS_PER_SECOND),
-      scope: config.rateLimitScope ?? "isolated",
     });
 
     // 签名头。`params` 必须与真正发出去的 query 完全一致 —— 签的就是它(上游按 key 排序后哈希)。

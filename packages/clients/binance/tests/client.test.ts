@@ -1,4 +1,4 @@
-import { Fetcher, type UpstreamError } from "@folio/client-core";
+import { Fetcher, RateLimitScopeOverride, type UpstreamError } from "@folio/client-core";
 import { Duration, Effect, Fiber, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import { type BinanceClientApi, type BinanceConfig, make } from "../src/client";
@@ -70,11 +70,13 @@ const withClient = <A, E>(
   over: Partial<BinanceConfig> = {},
 ): Promise<A> =>
   Effect.gen(function* () {
-    const client = yield* make({ rateLimitScope: "memory", ...over });
+    const client = yield* make({ ...over });
     return yield* use(client);
   }).pipe(
     Effect.scoped,
-    Effect.provideService(Fetcher, fn), // 出网替换是**服务**,不是 config 上的字段
+    // 出网与闸的档位都是**服务**,不是 config 上的字段。
+    Effect.provideService(Fetcher, fn),
+    Effect.provideService(RateLimitScopeOverride, "memory"),
     Effect.provide(TestContext.TestContext),
     Effect.runPromise,
   );
@@ -282,7 +284,7 @@ describe("限频:哪些端点过闸", () => {
   const settledAfter = (ms: number, use: (c: BinanceClientApi) => Effect.Effect<unknown>) =>
     Effect.gen(function* () {
       const { fn } = stub(() => json(tickerFixture));
-      const client = yield* make({ rateLimitScope: "memory" });
+      const client = yield* make({});
       const fiber = yield* Effect.fork(use(client).pipe(Effect.provideService(Fetcher, fn)));
       yield* TestClock.adjust(Duration.millis(ms));
       // 假 fetch 是 `Promise.resolve`,**不归 TestClock 管** —— 推完虚拟时钟不等于它已经跑完。
@@ -290,7 +292,12 @@ describe("限频:哪些端点过闸", () => {
       // 被闸拦住的那一侧在等虚拟时钟,让多少轮都不会完成,所以两侧都仍然准。
       yield* Effect.repeatN(Effect.yieldNow(), 50);
       return Option.isSome(yield* Fiber.poll(fiber));
-    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(RateLimitScopeOverride, "memory"),
+      Effect.provide(TestContext.TestContext),
+      Effect.runPromise,
+    );
 
   const nTimes =
     (n: number, one: (c: BinanceClientApi) => Effect.Effect<unknown>) => (c: BinanceClientApi) =>
@@ -310,12 +317,17 @@ describe("限频:哪些端点过闸", () => {
     // 改成跑到底再问虚拟时钟走了多远:走了 0ms 就是一发都没等过,与调度快慢无关。
     const elapsed = await Effect.gen(function* () {
       const { fn } = stub(() => json(accountFixture));
-      const client = yield* make({ rateLimitScope: "memory" });
+      const client = yield* make({});
       yield* nTimes(10, (c) => Effect.orDie(c.spotAccount(CREDS)))(client).pipe(
         Effect.provideService(Fetcher, fn),
       );
       return yield* TestClock.currentTimeMillis;
-    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(RateLimitScopeOverride, "memory"),
+      Effect.provide(TestContext.TestContext),
+      Effect.runPromise,
+    );
 
     expect(elapsed).toBe(0);
   });

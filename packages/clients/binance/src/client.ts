@@ -2,7 +2,6 @@ import {
   hmacSha256,
   makeRateLimit,
   makeRequester,
-  type RateLimitScope,
   type Requester,
   UpstreamAuthError,
   type UpstreamError,
@@ -47,10 +46,6 @@ export interface BinanceConfig {
   readonly apiBase?: string;
   readonly fapiBase?: string;
   readonly dapiBase?: string;
-  // 公开端点那个闸的额度桶存在哪。**生产必须是 `isolated`**(默认):额度按出口 IP 算,所有账户
-  // 所有用户共花一份,而 CF Workers 随时会开新 isolate —— 桶只活在进程内就等于没限。
-  // 测试传 `memory`,那档是 Effect 官方实现、桶绑在 `Scope` 上,每次 `make` 一份、天然隔离。
-  readonly rateLimitScope?: RateLimitScope;
 }
 
 // Binance REST 的请求层。**方法按上游端点组织,吐的是上游形状(DTO)** —— 不带任何 folio 语义:
@@ -95,7 +90,6 @@ export function make(
       key: PUBLIC_LIMIT_KEY,
       limit: TICKER_RATE_LIMIT_BURST,
       interval: Duration.millis((TICKER_RATE_LIMIT_BURST / TICKER_RATE_LIMIT_PER_SEC) * 1000),
-      scope: config.rateLimitScope ?? "isolated",
     });
 
     // 公开端点:免签、带闸。

@@ -1,4 +1,4 @@
-import { Fetcher, type UpstreamError } from "@folio/client-core";
+import { Fetcher, RateLimitScopeOverride, type UpstreamError } from "@folio/client-core";
 import { Duration, Effect, Fiber, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import { type CoinstatsClientApi, type CoinstatsConfig, make } from "../src/client";
@@ -41,11 +41,12 @@ const withClient = <A, E>(
   over: Partial<CoinstatsConfig> = {},
 ): Promise<A> =>
   Effect.gen(function* () {
-    const client = yield* make({ rateLimitScope: "memory", ...over });
+    const client = yield* make({ ...over });
     return yield* use(client);
   }).pipe(
     Effect.scoped,
     Effect.provideService(Fetcher, fn),
+    Effect.provideService(RateLimitScopeOverride, "memory"),
     Effect.provide(TestContext.TestContext),
     Effect.runPromise,
   );
@@ -121,14 +122,19 @@ describe("限频:两个端点都过闸", () => {
   const settledAfter = (ms: number, use: (c: CoinstatsClientApi) => Effect.Effect<unknown>) =>
     Effect.gen(function* () {
       const { fn } = stub(() => json(solanaFixture));
-      const client = yield* make({ rateLimitScope: "memory" });
+      const client = yield* make({});
       const fiber = yield* Effect.fork(use(client).pipe(Effect.provideService(Fetcher, fn)));
       yield* TestClock.adjust(Duration.millis(ms));
       // 假 fetch 是 `Promise.resolve`,不归 TestClock 管 —— 让出几轮微任务把它跑干净。
       // 被闸拦住的那一侧在等虚拟时钟,让多少轮都不会完成,所以两侧都仍然准。
       yield* Effect.repeatN(Effect.yieldNow(), 50);
       return Option.isSome(yield* Fiber.poll(fiber));
-    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(RateLimitScopeOverride, "memory"),
+      Effect.provide(TestContext.TestContext),
+      Effect.runPromise,
+    );
 
   const threeBalances = (c: CoinstatsClientApi) =>
     Effect.all(
