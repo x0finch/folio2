@@ -26,7 +26,8 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 
 1. **Contract-first** — define types & the `BalanceProvider` interface before implementations. Every provider implements the same interface.
 2. **Test-first** — each provider adapter gets tests against recorded fixtures before its implementation. Parsing logic must have golden tests.
-3. **Modular** — each provider is an independent package (`@folio/provider-*`, own package.json), interdependency-free, composed via the shared interface. UI lives in `@folio/ui`.
+3. **Modular** — 按「跟谁说话 / 怎么翻译」切包,不按 provider 切(**ADR 0036 改**,迁移进行中):**请求层**各上游一个独立 client 包(`packages/clients/<x>`,如 `@folio/blockbook-client` —— SDK 式出口 `createXxxClient(config)`,传输层内部化);**适配层**(`parse*` 纯函数 / `BalanceProvider` 实现 / `accountCreds`)全部落 `@folio/connectors-entry`,provider **不再是包边界**。契约基座 `@folio/connectors-basic` 独立不动,所有 provider 仍实现同一接口。UI lives in `@folio/ui`。
+   - **迁移期**:`packages/connectors/providers/*` 尚未搬完的上游仍是老形状(混装请求 + 适配)。**别照它新建包** —— 新上游直接按上面的形状来。进度见 #376。
 4. **Tests beside src** — each package's tests go in `tests/` (sibling of `src/`); provider API fixtures in `tests/fixtures/`.
 5. **Secrets never leave / never echoed** — APIs never return credential values; only a safe projection (`safeView`: public whole, semi masked, secret dropped) + `needsCredentials`. Per-account creds are one `creds` map, encrypted **per field by `type`** — only `secret` fields AES-GCM-encrypted (Web Crypto, `SECRETS_KEY` from env); `public`/`semi` plaintext (P6.6.1). **creds shaping lives in the app** (`apps/web/src/lib/creds.ts`: seal/open/safeView/isComplete/categorize), driven by `@folio/balances`'s `credentialSpecs()` field `type`s + Web Crypto — `@folio/balances` only does provider-facing work (`validateCredentials`/`fetchBalances`) and never sees `SECRETS_KEY`.
 6. **`@folio/db` exposes only wrapped ops** — no Drizzle instance / schema handle exported; only userId-scoped domain functions. All data access funnels through here. **两张表是受控例外**(#199,ADR 0022):`global_token_ref_index`(链上地址 → 上游的叫法)与 `token_daily_prices`(历史日价)不带 `user_id` —— 它们装的**一条用户数据都没有**,是上游的公开知识、可整表重建、删空只是下一轮慢一点,与搜索结果跨用户共用同理。判据就是这个:**表里有没有「谁的」这回事**。有 → 必须 userId-scoped,没有例外。
@@ -38,12 +39,12 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 12. **Small commits, English messages — never `git commit` without explicit approval** ("提交"/"commit" authorizes it; "执行"/"go" does NOT).
 
 ## Package conventions (monorepo)
-- **Packages are created on-demand by the phase that needs them** — not pre-stubbed. P1.2 creates `packages/core`, P1.4 `packages/db`, P1.5 `packages/ui`, each provider when built. The workspace globs in `pnpm-workspace.yaml` already cover `packages/*`, `packages/providers/*`, `apps/*`, so new packages need no config change.
+- **Packages are created on-demand by the phase that needs them** — not pre-stubbed. P1.2 creates `packages/core`, P1.4 `packages/db`, P1.5 `packages/ui`, each provider when built. The workspace globs in `pnpm-workspace.yaml` already cover `packages/*`, `packages/clients/*`, `packages/connectors/*`, `packages/oracle/*`(+ `upstreams/*`), `apps/*`, so new packages need no config change.(`packages/connectors/providers/*` 这条随 ADR 0036 退场。)
 - **Internal-packages pattern**: each `@folio/*` package.json sets `"exports": { ".": "./src/index.ts" }` pointing at source — **no build step** for internal libs (Vite/Vitest transpile TS directly). Consumers depend via `"@folio/<x>": "workspace:*"`.
 - **No TS project references** (overkill here); each package `tsconfig.json` just extends `../../tsconfig.base.json`.
 - **Each package ships its own minimal `vitest.config.ts`** + a `test: "vitest run"` script. This keeps `vitest` from inheriting the root `projects` config when run inside a package, and lets the root runner (`pnpm test:packages`) discover the package. The root `vitest.config.ts` (`test.projects`) is the canonical all-package runner.
 - **A provider serving multiple account types**: keep `BalanceProvider.accountType` singular; use a factory to emit one provider object per type (shared impl), export `providers: BalanceProvider[]`, and let `@folio/sync` flatten them into `buildRegistry` (方案 A).
-- Package prefix `@folio/*`. Providers published as `@folio/provider-<name>`.
+- Package prefix `@folio/*`。上游客户端叫 `@folio/<upstream>-client`(`packages/clients/<upstream>`);`@folio/connectors-provider-<name>` 是**待退场的老形状**,别新建(ADR 0036)。
 
 ## Git & PR 工作流
 - **功能开发走技能链**:think → grill-with-docs → ADR(难回退的决策)→ to-spec → to-tickets → 开分支 → implement(内驱 tdd)→ code-review。路由见 `/ask-matt`。
