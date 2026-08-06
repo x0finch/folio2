@@ -1,0 +1,185 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// —— 替身 ——
+// toast:记账,并把 id 回给调用方,这样能断言「同一条 toast 被就地改写」而不是叠了好几条。
+const toasts: { level: string; text: string; id?: string }[] = [];
+let nextToastId = 0;
+const toast = {
+  loading: (text: string, o?: { id?: string }) => {
+    const id = o?.id ?? `t${++nextToastId}`;
+    toasts.push({ level: "loading", text, id });
+    return id;
+  },
+  success: (text: string, o?: { id?: string }) => {
+    toasts.push({ level: "success", text, id: o?.id });
+    return o?.id ?? "";
+  },
+  error: (text: string, o?: { id?: string }) => {
+    toasts.push({ level: "error", text, id: o?.id });
+    return o?.id ?? "";
+  },
+};
+vi.mock("@folio/ui", () => ({ toast }));
+
+const invalidate = vi.fn(async () => {});
+vi.mock("@tanstack/react-router", () => ({ useRouter: () => ({ invalidate }) }));
+
+// 只要 key + 参数能看出来就够,不引真的 i18n。
+vi.mock("use-intl", () => ({
+  useTranslations: () => (key: string, params?: Record<string, unknown>) =>
+    `${key}(${JSON.stringify(params ?? {})})`,
+}));
+
+const { useAccountSync } = await import("../src/lib/hooks/use-account-sync");
+
+// NDJSON 响应体:每个对象一行。分片位置故意不落在行边界上 —— 解析器该自己攒 buffer。
+function ndjsonResponse(lines: unknown[], { ok = true }: { ok?: boolean } = {}): Response {
+  const text = lines.map((l) => `${JSON.stringify(l)}\n`).join("");
+  const bytes = new TextEncoder().encode(text);
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const mid = Math.floor(bytes.length / 2);
+      controller.enqueue(bytes.slice(0, mid));
+      controller.enqueue(bytes.slice(mid));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: ok ? 200 : 500 });
+}
+
+const wrapper = ({ children }: { children: ReactNode }) => {
+  // retry: false —— mutation 失败就是失败,别让默认重试把「失败该弹 error」这条测糊了。
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+};
+
+const ACCOUNTS = [
+  { id: "a1", label: "Binance" },
+  { id: "a2", label: "Ledger" },
+];
+
+const setup = (accounts = ACCOUNTS) => renderHook(() => useAccountSync(accounts), { wrapper });
+
+describe("useAccountSync", () => {
+  beforeEach(() => {
+    toasts.length = 0;
+    nextToastId = 0;
+    invalidate.mockClear();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("全部成功 → success,进度 toast 一路复用同一个 id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ndjsonResponse([
+          { accountId: "a1", ok: true },
+          { accountId: "a2", ok: true },
+        ]),
+      ),
+    );
+    const { result } = setup();
+    expect(result.current.busy).toBe(false);
+
+    result.current.sync();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+
+    const ids = new Set(toasts.map((t) => t.id));
+    expect(ids.size).toBe(1); // 一条 toast 被反复改写,不是叠了四条
+    expect(toasts.at(-1)?.level).toBe("success");
+    expect(toasts.at(-1)?.text).toContain("synced");
+    // 中间至少有一次进度更新带上了刚完成那个账户的展示名(服务端只回 accountId)。
+    expect(toasts.some((t) => t.level === "loading" && t.text.includes("Binance"))).toBe(true);
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it("有账户失败 → error,详情里是展示名不是 id;缺凭据(skipped)不算失败", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ndjsonResponse([
+          { accountId: "a1", ok: false, error: "bad key" },
+          { accountId: "a2", ok: false, skipped: true },
+        ]),
+      ),
+    );
+    const { result } = setup();
+    result.current.sync();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+
+    const last = toasts.at(-1);
+    expect(last?.level).toBe("error");
+    expect(last?.text).toContain("Binance: bad key");
+    expect(last?.text).not.toContain("Ledger"); // skipped 不进失败清单
+    expect(last?.text).toContain('"count":1'); // 1 个失败,不是 2
+  });
+
+  it("用户级失败({ fatal })→ error,且照样 invalidate(服务端可能还在跑)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ndjsonResponse([{ fatal: "listAccounts blew up" }])),
+    );
+    const { result } = setup();
+    result.current.sync();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+
+    expect(toasts.at(-1)?.level).toBe("error");
+    expect(toasts.at(-1)?.text).toContain("listAccounts blew up");
+    // 关键:失败路径也要 invalidate —— 部分账户的快照可能已经落库了。
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it("请求本身挂了 → error 就地改写那条 loading,不另起一条", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    const { result } = setup();
+    result.current.sync();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+
+    expect(new Set(toasts.map((t) => t.id)).size).toBe(1);
+    expect(toasts.at(-1)?.level).toBe("error");
+    expect(toasts.at(-1)?.text).toContain("network down");
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it("没有账户 → disabled,点了也不发请求", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = setup([]);
+    expect(result.current.disabled).toBe(true);
+    result.current.sync();
+    await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
+    expect(toasts).toHaveLength(0);
+  });
+
+  it("在飞期间 busy 为 true,且重复点不会再发一次", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const fetchMock = vi.fn(async () => {
+      await gate;
+      return ndjsonResponse([{ accountId: "a1", ok: true }]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = setup();
+    result.current.sync();
+    await waitFor(() => expect(result.current.busy).toBe(true));
+
+    result.current.sync(); // 在飞时再点
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    release?.();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+  });
+});
