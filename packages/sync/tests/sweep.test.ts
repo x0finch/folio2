@@ -1,6 +1,7 @@
 import type { AccountSafe } from "@folio/db";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
-import { type SyncDeps, syncAllUsers } from "../src";
+import { type SyncDeps, syncAllUsers, syncUserStream } from "../src";
 
 // manual 账户(成功路径);failing 账户(fetchBalances 抛 → syncAccount 捕获 → ok:false)。
 function manual(id: string, userId: string): AccountSafe {
@@ -100,5 +101,54 @@ describe("syncAllUsers — 串行", () => {
     expect(res.users).toBe(3);
     expect(maxInFlight).toBe(1);
     expect(events).toEqual(["start:u1", "end:u1", "start:u2", "end:u2", "start:u3", "end:u3"]);
+  });
+});
+
+// 流式产出:主页「立即同步」要边跑边显示进度,所以 syncUserStream 逐账户吐结果而不是攒到最后。
+describe("syncUserStream — 逐账户产出", () => {
+  it("先完成先报:慢账户不挡住后完成的快账户", async () => {
+    const seen: string[] = [];
+    const delays: Record<string, number> = { slow: 40, fast: 1 };
+    const deps: SyncDeps = {
+      listAccounts: async () => [manual("slow", "u1"), manual("fast", "u1")],
+      listRawCreds: async () => [],
+      writeSnapshot: async () => "snap",
+      fetchBalances: async (a) => {
+        await new Promise((r) => setTimeout(r, delays[a.id] ?? 0));
+        return { status: "ok", balances: [], totalUsd: 0 };
+      },
+    };
+    await Effect.runPromise(
+      syncUserStream(deps, "u1").pipe(
+        Stream.runForEach((r) => Effect.sync(() => void seen.push(r.accountId))),
+      ),
+    );
+    // 账户列表里 slow 在前,但它慢 —— 保序的话 fast 得等它,流就没意义了。
+    expect(seen).toEqual(["fast", "slow"]);
+  });
+
+  it("逐个产出而非一次性给完:第一个结果先于最后一个账户完成就到手", async () => {
+    let firstSeenWhileRunning = false;
+    let done = 0;
+    const deps: SyncDeps = {
+      listAccounts: async () => [manual("a1", "u1"), manual("a2", "u1"), manual("a3", "u1")],
+      listRawCreds: async () => [],
+      writeSnapshot: async () => "snap",
+      fetchBalances: async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        done++;
+        return { status: "ok", balances: [], totalUsd: 0 };
+      },
+    };
+    await Effect.runPromise(
+      syncUserStream(deps, "u1").pipe(
+        Stream.runForEach(() =>
+          Effect.sync(() => {
+            if (done < 3) firstSeenWhileRunning = true;
+          }),
+        ),
+      ),
+    );
+    expect(firstSeenWhileRunning).toBe(true);
   });
 });
