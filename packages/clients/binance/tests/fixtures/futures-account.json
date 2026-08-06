@@ -1,0 +1,37 @@
+{
+  "totalMarginBalance": "12500.50",
+  "totalPositionInitialMargin": "2000.00",
+  "maxWithdrawAmount": "8000.00",
+  "positions": [
+    {
+      "symbol": "BTCUSDT",
+      "positionAmt": "0.5",
+      "entryPrice": "60000",
+      "unrealizedProfit": "500.50",
+      "leverage": "10",
+      "notional": "31000",
+      "isolated": false,
+      "positionInitialMargin": "3100"
+    },
+    {
+      "symbol": "ETHUSDT",
+      "positionAmt": "-2.0",
+      "entryPrice": "3200",
+      "unrealizedProfit": "-100",
+      "leverage": "5",
+      "notional": "-6000",
+      "isolated": true,
+      "positionInitialMargin": "1200"
+    },
+    {
+      "symbol": "BNBUSDT",
+      "positionAmt": "0",
+      "entryPrice": "0",
+      "unrealizedProfit": "0",
+      "leverage": "20",
+      "notional": "0",
+      "isolated": false,
+      "positionInitialMargin": "0"
+    }
+  ]
+}
