@@ -1,9 +1,9 @@
 // @folio/sync —— 同步编排。取账户 → 取余额(重试/超时)→ 认币 → 重估 → 写快照。
 //
-// **两套出口并存**(Effect 迁移中,ADR 0035):
-//   · `syncXxx`      —— Promise 壳,当前的正式出口,app 侧零改动
-//   · `syncXxxEffect` —— Effect 版,给需要 Effect 上下文的场合(眼下是时序测试:假时钟挂不到壳上)
-// 下一步出口改成 Effect 时,壳删掉、Effect 版转正。
+// 出口是 Promise(Effect 迁移中,ADR 0035):内部全是 Effect,这里 runPromise 一下,app 侧零改动。
+// **Effect 版不对外导出** —— 包内模块(`./account` / `./sweep`)本来就是 Effect,包内的测试直接
+// import 它们、自己 provide 服务即可,没必要为此把公开面翻一倍。下一步出口改成 Effect 时,
+// 这里从「包一层壳」变成「直接 re-export」。
 //
 // 内部组织:`types` 公开类型 / `services` 能力与 Layer / `retry` 退避策略 /
 // `account` 单账户 / `sweep` 单用户与全量。业务代码从上下文取能力,不透传 deps。
@@ -27,32 +27,18 @@ export type {
   SyncResult,
 } from "./types";
 
-// Effect 版:依赖已由 deps 满足(内部 provide),所以 R = never —— 可直接组合、可挂假时钟。
-export const syncAccountEffect = (
-  deps: SyncDeps,
-  userId: string,
-  account: AccountSafe,
-  rawCreds: string | null,
-): Effect.Effect<AccountSyncResult> =>
-  accountEffect(userId, account, rawCreds).pipe(Effect.provide(layerFromDeps(deps)));
-
-export const syncUserEffect = (deps: SyncDeps, userId: string) =>
-  userEffect(userId).pipe(Effect.provide(layerFromDeps(deps)));
-
-export const syncAllUsersEffect = (deps: SyncDeps, userIds: readonly string[]) =>
-  allUsersEffect(userIds).pipe(Effect.provide(layerFromDeps(deps)));
-
-// Promise 壳。
 export const syncAccount = (
   deps: SyncDeps,
   userId: string,
   account: AccountSafe,
   rawCreds: string | null,
 ): Promise<AccountSyncResult> =>
-  Effect.runPromise(syncAccountEffect(deps, userId, account, rawCreds));
+  Effect.runPromise(
+    accountEffect(userId, account, rawCreds).pipe(Effect.provide(layerFromDeps(deps))),
+  );
 
 export const syncUser = (deps: SyncDeps, userId: string): Promise<SyncResult> =>
-  Effect.runPromise(syncUserEffect(deps, userId));
+  Effect.runPromise(userEffect(userId).pipe(Effect.provide(layerFromDeps(deps))));
 
 export const syncAllUsers = (deps: SyncDeps, userIds: string[]): Promise<SweepResult> =>
-  Effect.runPromise(syncAllUsersEffect(deps, userIds));
+  Effect.runPromise(allUsersEffect(userIds).pipe(Effect.provide(layerFromDeps(deps))));

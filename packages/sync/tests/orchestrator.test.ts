@@ -2,13 +2,14 @@ import { type Balance, ProviderError } from "@folio/connectors-basic";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { Duration, Effect, Fiber, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
-import {
-  type FetchOutcome,
-  type SyncDeps,
-  type SyncLogger,
-  syncUser,
-  syncUserEffect,
-} from "../src";
+import { type FetchOutcome, type SyncDeps, type SyncLogger, syncUser } from "../src";
+// Effect 版不对外导出(公开出口只有 Promise 那套)—— 包内测试直接摸内部模块、自己 provide 服务。
+import { layerFromDeps } from "../src/services";
+import { syncUser as syncUserEffectRaw } from "../src/sweep";
+
+// 把注入式 deps 变成服务,拿到一个可挂假时钟的 Effect。
+const syncUserEffect = (deps: SyncDeps, userId: string) =>
+  syncUserEffectRaw(userId).pipe(Effect.provide(layerFromDeps(deps)));
 
 // 编排层测试:provider 机制(解密/校验/取数/全局 key 收窄)已内化进注入的 fetchBalances,
 // 这里只测 sync 自己的编排 —— 重试 / 跳过(needs-credentials)/ 重估 / 失败隔离 / 日志 / 写快照。
@@ -187,9 +188,9 @@ describe("结构化日志(级别 + 安全字段)", () => {
   });
 });
 
-// 退避重试测在 **Effect 版内核** 上(`syncUserEffect`),不是 Promise 壳 —— 假时钟(`TestClock`)与
-// 可控随机(抖动)都要 Effect 上下文,而壳子在包内部就把上下文 runPromise 掉了,外面挂不上。
-// 内核下一步(出口也改成 Effect)会转正成正式出口,所以这不是为测试开的临时缝。
+// 退避重试测在 **Effect 版** 上而不是 Promise 壳 —— 假时钟(`TestClock`)与可控随机(抖动)都要
+// Effect 上下文,而壳子在包内部就把上下文 runPromise 掉了,外面挂不上。
+// Effect 版住在 `../src/sweep`,是包内模块;下一步出口改成 Effect 时它就是正式出口。
 //
 // 套路:fork 起来 → 推进假时钟 → join。真实时钟下这几条会各等好几秒;假时钟下瞬间跑完,
 // 且能**精确**断言退避了多久(推进 199ms 不该有第二次调用,推到 200ms 才有)。
