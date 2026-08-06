@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 import { type FetchOutcome, type SyncDeps, type SyncLogger, syncUser } from "../src";
 // Effect 版不对外导出(公开出口只有 Promise 那套)—— 包内测试直接摸内部模块、自己 provide 服务。
 import { layerFromDeps } from "../src/services";
-import { syncUser as syncUserEffectRaw } from "../src/sweep";
+import { syncUserEffect } from "../src/sweep";
 
 // 把注入式 deps 变成服务,拿到一个可挂假时钟的 Effect。
-const syncUserEffect = (deps: SyncDeps, userId: string) =>
-  syncUserEffectRaw(userId).pipe(Effect.provide(layerFromDeps(deps)));
+const syncUserWithDeps = (deps: SyncDeps, userId: string) =>
+  syncUserEffect(userId).pipe(Effect.provide(layerFromDeps(deps)));
 
 // 编排层测试:provider 机制(解密/校验/取数/全局 key 收窄)已内化进注入的 fetchBalances,
 // 这里只测 sync 自己的编排 —— 重试 / 跳过(needs-credentials)/ 重估 / 失败隔离 / 日志 / 写快照。
@@ -221,7 +221,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       1,
     );
     const { deps } = makeDeps([account()], { fetchBalances });
-    const { results } = await runWithClock(syncUserEffect(deps, "u1"));
+    const { results } = await runWithClock(syncUserWithDeps(deps, "u1"));
     expect(results[0].ok).toBe(true);
     expect(calls()).toBe(2);
   });
@@ -233,7 +233,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     );
     const { deps } = makeDeps([account()], { fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserEffect(deps, "u1"));
+      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
       // 指数退避的第一档是 200ms;若没采用 Retry-After,这时早该重试了。
       yield* TestClock.adjust(Duration.millis(1233));
       expect(calls()).toBe(1);
@@ -256,7 +256,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     );
     const { deps } = makeDeps([account()], { fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserEffect(deps, "u1"));
+      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
       yield* TestClock.adjust(Duration.millis(199));
       expect(calls()).toBe(1); // 第一档最早 200ms,未到
       yield* TestClock.adjust(Duration.millis(201)); // → t=400,第 2 次最晚也该发生了
@@ -277,7 +277,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     );
     const { deps } = makeDeps([account()], { fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserEffect(deps, "u1"));
+      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
       yield* TestClock.adjust(Duration.millis(4999));
       expect(calls()).toBe(1);
       yield* TestClock.adjust(Duration.millis(1201)); // 5s 上限 + 抖动上限 200ms
@@ -290,7 +290,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
   it("重试用尽 → ok:false(隔离),不写快照", async () => {
     const { fetchBalances, calls } = flaky(() => new ProviderError("UPSTREAM_ERROR", "5xx"), 99);
     const { deps, writes } = makeDeps([account()], { fetchBalances });
-    const { results } = await runWithClock(syncUserEffect(deps, "u1"));
+    const { results } = await runWithClock(syncUserWithDeps(deps, "u1"));
     expect(results[0]).toMatchObject({ ok: false });
     expect(results[0].error).toContain("5xx");
     expect(calls()).toBe(3); // RETRY_MAX_ATTEMPTS
@@ -300,7 +300,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
   it("不可重试错误(AUTH_FAILED)不重试", async () => {
     const { fetchBalances, calls } = flaky(() => new ProviderError("AUTH_FAILED", "bad key"), 99);
     const { deps } = makeDeps([account()], { fetchBalances });
-    const { results } = await runWithClock(syncUserEffect(deps, "u1"));
+    const { results } = await runWithClock(syncUserWithDeps(deps, "u1"));
     expect(results[0].ok).toBe(false);
     expect(calls()).toBe(1);
   });
@@ -315,7 +315,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       2,
     );
     const { deps } = makeDeps([account({ id: "a7", connectorId: "okx" })], { log, fetchBalances });
-    await runWithClock(syncUserEffect(deps, "u1"));
+    await runWithClock(syncUserWithDeps(deps, "u1"));
     const retries = entries.filter((e) => e.msg === "provider call retrying");
     expect(retries.map((e) => e.props?.attempt)).toEqual([1, 2]);
     expect(retries[0]?.level).toBe("warning");
@@ -335,7 +335,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       log: exhausted.log,
       fetchBalances: flaky(() => new ProviderError("UPSTREAM_ERROR", "5xx"), 99).fetchBalances,
     });
-    await runWithClock(syncUserEffect(d1, "u1"));
+    await runWithClock(syncUserWithDeps(d1, "u1"));
     expect(exhausted.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(2);
 
     const fatal = capturingLogger();
@@ -343,7 +343,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       log: fatal.log,
       fetchBalances: flaky(() => new ProviderError("AUTH_FAILED", "bad key"), 99).fetchBalances,
     });
-    await runWithClock(syncUserEffect(d2, "u1"));
+    await runWithClock(syncUserWithDeps(d2, "u1"));
     expect(fatal.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(0);
   });
 });
@@ -380,7 +380,7 @@ describe("syncUser(Effect 内核)— 取数超时", () => {
       },
     });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserEffect(deps, "u1"));
+      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
       // 3 次尝试 × 20s 超时 + 两次退避,推够即可。
       yield* TestClock.adjust(Duration.millis(100_000));
       const { results } = yield* Fiber.join(fiber);
@@ -400,7 +400,7 @@ describe("syncUser(Effect 内核)— 取数超时", () => {
       },
     });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserEffect(deps, "u1"));
+      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
       yield* TestClock.adjust(Duration.millis(19_900));
       expect(calls).toBe(1); // FETCH_TIMEOUT_MS 未到
       // 20s 超时 + 第一档退避 200 + 抖动上限 200 → 第 2 次最晚在 20_400,推到 20_500 留余量。

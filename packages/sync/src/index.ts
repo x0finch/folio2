@@ -5,15 +5,17 @@
 // import 它们、自己 provide 服务即可,没必要为此把公开面翻一倍。下一步出口改成 Effect 时,
 // 这里从「包一层壳」变成「直接 re-export」。
 //
+// 内核带 `Effect` 后缀、壳不带,后缀写在**定义**上而不是 import 时现起别名 —— 于是全包只有
+// 一套名字,`syncUserEffect` 走到哪都叫这个,读的人不用回头查它在别处叫什么。
+//
 // 内部组织:`types` 公开类型 / `services` 能力与 Layer / `retry` 退避策略 /
 // `account` 单账户 / `sweep` 单用户与全量。业务代码从上下文取能力,不透传 deps。
 
 import type { AccountSafe } from "@folio/db";
 import { Effect } from "effect";
-// 别名只加 `Effect` 后缀,不改词根 —— 壳和内核同名同序,一眼对得上谁包了谁。
-import { syncAccount as syncAccountEffect } from "./account";
+import { syncAccountEffect } from "./account";
 import { layerFromDeps } from "./services";
-import { syncAllUsers as syncAllUsersEffect, syncUser as syncUserEffect } from "./sweep";
+import { syncAllUsersEffect, syncUserEffect } from "./sweep";
 import type { AccountSyncResult, SweepResult, SyncDeps, SyncResult } from "./types";
 
 export { FetchBalancesError, SyncDepError, type SyncDepStep } from "./errors";

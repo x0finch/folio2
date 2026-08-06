@@ -27,7 +27,7 @@ const retryPolicy = Schedule.exponential(Duration.millis(RETRY_BASE_MS)).pipe(
   Schedule.intersect(Schedule.recurs(RETRY_MAX_ATTEMPTS - 1)),
   // 重试日志。输出元组第二位就是 `recurs` 数到的已重试次数(0 起),+1 即 attempt —— 不必自己在
   // 外面攒一个可变计数器。省掉它之后策略才能是个模块级常量(以前得在函数里现拼,只为闭包住它)。
-  // 账户上下文字段不在这里拼:syncAccount 已经 annotate 过,隔着 Schedule 也照样带下来。
+  // 账户上下文字段不在这里拼:syncAccountEffect 已经 annotate 过,隔着 Schedule 也照样带下来。
   //
   // **谓词必须在这里重判一遍**,虽然看着和上面的 whileInput / recurs 重复:Schedule 决定「到此
   // 为止」时**照样会把这一次的输出发出来**,tapOutput 分不出这是「再来一次」还是「就此放弃」。

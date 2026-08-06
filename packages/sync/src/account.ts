@@ -10,7 +10,7 @@ import type { AccountSyncResult, OkOutcome } from "./types";
 // 单账户同步:取余额 → 认币 → 重估 → 写快照。
 // 错误通道是 never —— 一个账户炸了收成 ok:false,绝不阻断其他账户。
 //
-// 日志字段在最外层 annotate 一次(见 syncAccount 末尾),本文件其余地方只写「这条日志额外带什么」。
+// 日志字段在最外层 annotate 一次(见 syncAccountEffect 末尾),本文件其余地方只写「这条日志额外带什么」。
 
 // 一步 best-effort:失败记一条 warning 并回落,不中断整条链。
 // 认币与重估各用一次 —— 它们是**两个独立的降级点**(一个失败不影响另一个是否执行),
@@ -85,10 +85,10 @@ const finish = (userId: string, account: AccountSafe, outcome: OkOutcome) =>
     return { accountId: account.id, ok: true, snapshotId, totalUsd } satisfies AccountSyncResult;
   });
 
-export const syncAccount = (
+export const syncAccountEffect = (
   userId: string,
   account: AccountSafe,
-  rawCreds: string | null, // 由 syncUser 批量预取分发(见 Accounts.rawCreds)
+  rawCreds: string | null, // 由 syncUserEffect 批量预取分发(见 Accounts.rawCreds)
 ): Effect.Effect<AccountSyncResult, never, SyncServices> =>
   Effect.gen(function* () {
     // 坏 JSON 也算这个账户的失败。

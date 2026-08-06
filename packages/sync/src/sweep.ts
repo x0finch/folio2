@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { syncAccount } from "./account";
+import { syncAccountEffect } from "./account";
 import { SYNC_CONCURRENCY } from "./constants";
 import type { SyncDepError } from "./errors";
 import { Accounts, type SyncServices } from "./services";
@@ -9,7 +9,9 @@ import type { AccountSyncResult, SweepResult, SyncResult } from "./types";
 //
 // 错误通道带 SyncDepError(step 为 listAccounts / listRawCreds)—— 这两步失败意味着**整个用户
 // 这一轮没法开始**,所以向上抛,不像逐账户失败那样被隔离成 ok:false。
-export const syncUser = (userId: string): Effect.Effect<SyncResult, SyncDepError, SyncServices> =>
+export const syncUserEffect = (
+  userId: string,
+): Effect.Effect<SyncResult, SyncDepError, SyncServices> =>
   Effect.gen(function* () {
     const accountsSvc = yield* Accounts;
     // 两次读互不依赖 → 并发取。
@@ -22,7 +24,7 @@ export const syncUser = (userId: string): Effect.Effect<SyncResult, SyncDepError
     // 假时钟就推不动各账户内部的退避(时序测试挂不上)。
     const results = yield* Effect.forEach(
       accounts,
-      (account) => syncAccount(userId, account, credsById.get(account.id) ?? null),
+      (account) => syncAccountEffect(userId, account, credsById.get(account.id) ?? null),
       { concurrency: SYNC_CONCURRENCY },
     );
     return { results };
@@ -41,22 +43,22 @@ const tallyOf = (results: readonly AccountSyncResult[]): Tally =>
       ok: t.ok + (r.ok ? 1 : 0),
       // 缺凭据:不算失败。
       skipped: t.skipped + (!r.ok && r.skipped ? 1 : 0),
-      // 具体错误已在 syncAccount 以 error 级记录。
+      // 具体错误已在 syncAccountEffect 以 error 级记录。
       failed: t.failed + (!r.ok && !r.skipped ? 1 : 0),
     }),
     NO_ACCOUNTS,
   );
 
-// 定时全量 sweep(P6.3):逐用户同步、逐用户隔离(一个用户炸不影响其余;syncUser 内部已逐账户隔离)。
+// 定时全量 sweep(P6.3):逐用户同步、逐用户隔离(一个用户炸不影响其余;syncUserEffect 内部已逐账户隔离)。
 //
 // **串行不是遗漏,是有意的**:cron 一次调用有 CPU / subrequest 预算,几十个用户并发会顶穿
 // (见 apps/web server.ts 里两个 trigger 拆开的理由)。所以用 Effect.forEach 的默认串行语义,
 // **别顺手加 concurrency** —— tests/sweep.test.ts 有一条专门钉这个。
-export const syncAllUsers = (
+export const syncAllUsersEffect = (
   userIds: readonly string[],
 ): Effect.Effect<SweepResult, never, SyncServices> =>
   Effect.forEach(userIds, (userId) =>
-    syncUser(userId).pipe(
+    syncUserEffect(userId).pipe(
       Effect.map(({ results }) => tallyOf(results)),
       // 用户级失败不中断 sweep,记一笔继续下一个。
       Effect.catchAll((err) =>
