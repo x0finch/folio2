@@ -22,7 +22,9 @@ export function parseChainIds(res: {
 // TTL / 陈旧回落 / 并发只拉一发 三条都在 `staleTolerantCache` 里(rabby 用的是同一个)。
 export const chainsCacheFor = (baseUrl: string) =>
   staleTolerantCache<Record<string, number>>({
-    key: `zerion:chains:${baseUrl}`,
+    upstream: UPSTREAM,
+    name: "chains",
+    scope: baseUrl,
     ttlMs: CHAINS_CACHE_TTL_MS,
     // 200 + 空列表存进去会让整整一天都产不出规范标识 —— 当没拉到。
     isEmpty: (map) => Object.keys(map).length === 0,

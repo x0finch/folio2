@@ -18,6 +18,8 @@ import {
 import type { CoinstatsCoin } from "./types";
 
 export interface CoinstatsConfig {
+  // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
+  // 留这个口子是为了七个 client 形状一致,不是因为已经有人要用。
   readonly apiBase?: string;
 }
 

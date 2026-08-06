@@ -14,8 +14,8 @@ import type { UpstreamError } from "./upstream-error";
 // `runPromise`、Layer memoisation 是 per-run 的,放 scope 就等于每请求重置,缓存直接失效。
 // isolate 能活几分钟到几小时,模块级才真的省下那一发。
 //
-// **按 key 分桶,不提供 reset** —— 测试用自己的 key(通常拼上 baseUrl)即天然隔离。
-// 少一个全局可变开关,也少一条「忘了 reset 就串味」的路。
+// **分桶不提供 reset** —— 桶的身份是 `upstream + name + scope` 三段(见下),测试给自己一个
+// scope 即天然隔离。少一个全局可变开关,也少一条「忘了 reset 就串味」的路。
 const buckets = new Map<string, StaleTolerantCache<never>>();
 
 export interface StaleTolerantCache<A> {
@@ -24,8 +24,14 @@ export interface StaleTolerantCache<A> {
 }
 
 export interface StaleTolerantCacheOptions<A> {
-  // 分桶用。**要能区分不同上游、不同 base** —— 例如 `zerion:chains:https://api.zerion.io`。
-  readonly key: string;
+  // —— 桶的身份,**三段分开给,不收一个拼好的串** ——
+  //
+  // 拼串那种写法(`key: \`zerion:chains:${baseUrl}\`)靠每个调用方记得带对前缀,而写重了的后果是
+  // **一家上游的缓存被另一家读走**,跨包才撞、类型系统管不着、单包测试也测不出来。分成三段之后
+  // 撞桶要三段全同,而 `upstream` 是每个包的常量。
+  readonly upstream: string; // "zerion" / "rabby"
+  readonly name: string; // 缓存的是什么,如 "chains"
+  readonly scope: string; // 同一个上游内还要再分的维度,通常是 baseUrl(测试靠它天然隔离)
   readonly ttlMs: number;
   // 「这次拉回来的等于没拉到」。默认永远为 false(拿到就算数)。链清单用它排掉 200 + 空列表:
   // 那种响应存进去会让整整一天的取数都产不出规范标识。
@@ -37,10 +43,11 @@ export interface StaleTolerantCacheOptions<A> {
 export function staleTolerantCache<A>(
   options: StaleTolerantCacheOptions<A>,
 ): StaleTolerantCache<A> {
-  const found = buckets.get(options.key);
+  const key = `${options.upstream}:${options.name}:${options.scope}`;
+  const found = buckets.get(key);
   if (found) return found as unknown as StaleTolerantCache<A>;
   const created = makeCache(options);
-  buckets.set(options.key, created as unknown as StaleTolerantCache<never>);
+  buckets.set(key, created as unknown as StaleTolerantCache<never>);
   return created;
 }
 

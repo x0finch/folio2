@@ -20,6 +20,8 @@ import {
 import type { ZerionChainsResponse, ZerionPositionsResponse } from "./types";
 
 export interface ZerionConfig {
+  // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
+  // 但链映射缓存按它分桶,测试靠它天然隔离。
   readonly apiBase?: string;
 }
 

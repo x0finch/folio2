@@ -4,7 +4,11 @@ import { CLEARINGHOUSE_TYPE, HYPERLIQUID_API_BASE, INFO_PATH, UPSTREAM } from ".
 import type { ClearinghouseState } from "./types";
 
 export interface HyperliquidConfig {
-  // 基址,**当不透明整串用**(与 binance 同理:部署方可注入代理)。不传就直连官方。
+  // 基址,**当不透明整串用**。不传就直连官方。
+  //
+  // **这家没有 #264 那个需求** —— 代理覆盖是给被按地区拒的交易所用的(binance / bybit / okx),
+  // hyperliquid 老代码里是硬编码的。留这个口子是为了七个 client 形状一致(以及测试拿它做隔离),
+  // 不是因为已经有人要用。真需要时它已经在了。
   readonly apiBase?: string;
 }
 
