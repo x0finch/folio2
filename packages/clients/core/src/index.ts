@@ -22,17 +22,6 @@
 
 export { hmacSha256 } from "./crypto";
 export { HttpFailure, type HttpFailureKind, SigningFailure } from "./errors";
-export {
-  type HttpConfig,
-  makeRequester,
-  type Requester,
-  type RequestOptions,
-} from "./http";
-export { defineRateLimit, type RateLimiter, type RateLimitOptions } from "./ratelimit";
-export {
-  CacheSlotStore,
-  MemorySlotStore,
-  resetSlotStoresForTests,
-  type SlotStore,
-  type StoreChoice,
-} from "./slot-store";
+export { type HttpConfig, makeRequester, type Requester, type RequestOptions } from "./http";
+export { make as makeRateLimit, type RateLimitOptions, type RateLimitScope } from "./ratelimit";
+export { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "./slot-cursor";

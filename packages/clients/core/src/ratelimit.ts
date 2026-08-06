@@ -1,27 +1,30 @@
-import { Clock, Duration, Effect } from "effect";
-import { resolveStore, type StoreChoice } from "./slot-store";
+import { Clock, Duration, Effect, RateLimiter, type Scope } from "effect";
+import { cursorFor } from "./slot-cursor";
 
-// 出站请求的速率闸。**目标是削峰,不是严格限频** —— 严格那档在 Workers 上只有 Durable Object 能做
-// (见 #17),而我们不需要:漏出去的那几发由 429 + 重试兜底。
+// 出站请求的速率闸。**出口就是 Effect 官方的 `RateLimiter`** —— 同一个类型、同一套构造契约
+// (`Effect<RateLimiter, never, Scope>`),所以 `RateLimiter.withCost` / `Function.compose` 叠多档
+// 这些组合子直接可用,我们不自造平行宇宙。
 //
-// 算的东西只有一个数:**时隙游标**(tat, theoretical arrival time)。
-//   · 本次拿到的时隙 = 推之前的游标(不早于 now);放行时刻 = 它 - 突发额度
-//   · 每放行一发,游标往后推一个间距
-//   · 游标不早于 now —— 闲置过后它落在过去,突发额度自动补满(不惩罚闲置)
+// 唯一多出来的是 `scope`,它决定额度桶**存在哪**:
 //
-// 游标存哪由 `store` 决定,见 slot-store.ts(那里也写了为什么不用 Effect 自带的 `RateLimiter`)。
+//   · `memory`(默认)—— **直接委托官方实现**,一行。进程内、状态绑在 `Scope` 上,官方的
+//     token-bucket / fixed-window 两种算法都能用。测试和单进程场景用这档
+//   · `isolated`     —— 额度跨 CF Workers 的 isolate 共享。官方那套(semaphore + 后台 refill fiber)
+//     的状态是内存里的信号量,跨不了 isolate;而 CF 什么时候开新 isolate 我们控制不了,每个新
+//     isolate 从满额开始就等于没限。所以这一档自己实现,见下
 //
-// **相对迁移前那版少了三个参数**:`clock` / `sleep` 由 Effect 的 `Clock` 服务接管(测试 provide
-// `TestContext` 即可确定性推进),而全局的 `bypassRateLimitsForTests` 开关也不再需要 —— 它存在的
-// 唯一理由是集成测试里闸按墙钟真等,`TestClock` 下等待瞬间完成,没有可绕的东西。少一个全局可变
-// 状态,也少一条「忘了 reset 就串味」的路。
+// **为什么 `isolated` 只能自己写**:跨 isolate 共享的载体是 Cache API,它只能存一个值、没有原子
+// 读改写。能塞进「一个数」的限频算法是 GCRA(时隙游标),不是信号量 —— 算法选择是被载体逼出来的,
+// 不是偏好。
 
-export interface RateLimitOptions {
+export type RateLimitScope = "memory" | "isolated";
+
+export interface RateLimitOptions extends RateLimiter.RateLimiter.Options {
   // 闸的 key = **上游拿来计量的那个东西**。三种常见情形都只是往这里填不同的字符串:
   //   · 全局共享一把 API key → 填 **key 的名字**(如 `COINGECKO_API_KEY`)。绝不填 key 的值 ——
   //     它会进日志、进 Map 的键、进缓存的 URL
   //   · 按出口 IP 算(免签的公开端点几乎都是)→ 填一个 provider 级的常量,如 `binance:public`
-  //   · 每账户自带一把 key → 填 provider 名,调用时用 `limit.forKey(accountId)` 分队
+  //   · 每账户自带一把 key → 填 provider 名 + 账户 id
   //
   // 前两种是「一份额度、很多调用者」,第三种是「很多份额度、各自一个调用者」—— 上游数的都是
   // API key,区别只在我们手里有几把。
@@ -29,49 +32,56 @@ export interface RateLimitOptions {
   // **装闸之前先过这一问:这份额度有几个调用者在挤?** 每账户自带 key、一次同步只发一两发的
   // 上游(binance 的签名端点、okx),队永远是空的 —— 闸拦不到任何东西,还会把两个互不相干的
   // 账户排成一队白等。那种地方别装。这条判断类型系统帮不上,只能靠 review。
+  //
+  // `memory` 档用不到它(桶在 scope 里,天然隔离),但仍然必填 —— 同一个闸切档时不该改调用点。
   readonly key: string;
-  readonly limit: number; // 每 interval 允许几发
-  readonly interval: number; // 窗口毫秒
-  readonly store?: StoreChoice; // 默认 "cache";测试传 "memory" 或自己的实现
+  readonly scope?: RateLimitScope; // 默认 memory
 }
 
-// 闸:**调用方把它放模块顶层**,每个请求的 Effect 进它。
-// 请求写在参数里而不是「先 acquire 再自己发」——想绕过它得刻意不调,不会写漏。
+// 与官方 `RateLimiter.make` 同签名(多一个 `scope` / `key`),所以两者可以互换、可以 compose。
+export function make(
+  options: RateLimitOptions,
+): Effect.Effect<RateLimiter.RateLimiter, never, Scope.Scope> {
+  switch (options.scope ?? "memory") {
+    case "memory":
+      return RateLimiter.make(options);
+    case "isolated":
+      return isolated(options);
+  }
+}
+
+// —— isolated:GCRA(时隙游标),状态一个数,所以能跨 isolate ——
 //
-// 形状与 Effect 自带的 `RateLimiter` 一致(`<A,E,R>(task) => Effect<A,E,R>`),所以能被
-// `Function.compose` 串起来叠多档配额,和自带那个可以混用。
-export interface RateLimiter {
-  <A, E, R>(task: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>;
-  // 同一档配额下按子键分队(每账户自带一把 key 的情形)。
-  readonly forKey: (
-    subKey: string,
-  ) => <A, E, R>(task: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
-}
+// 算的东西只有一个数:**时隙游标**(tat, theoretical arrival time)。
+//   · 本次拿到的时隙 = 推之前的游标(不早于 now);放行时刻 = 它 - 突发额度
+//   · 每放行一发,游标往后推一个间距 × cost
+//   · 游标不早于 now —— 闲置过后它落在过去,突发额度自动补满(不惩罚闲置)
+//
+// **目标是削峰,不是严格限频** —— 严格那档在 Workers 上只有 Durable Object 能做(见 #17),
+// 而我们不需要:漏出去的那几发由 429 + 重试兜底。
+//
+// **两处能力差,写清楚免得踩**:
+//   · `algorithm` 被忽略 —— GCRA 就是 token-bucket 的连续时间版(令牌按固定速率恢复);fixed-window
+//     用一个游标表达不了。要 fixed-window 只能用 `memory` 档
+//   · `RateLimiter.withCost` 不生效 —— 官方靠一个没导出的 internal `FiberRef` 传权重,这一档读不到。
+//     自造一个平行的 FiberRef 会让「该用哪个 withCost」变成必须记住的陷阱,不如没有。目前仓里没有
+//     分权重的上游(所有端点等价一发);真要用时应该连同官方档一起想清楚再补
+const isolated = (
+  options: RateLimitOptions,
+): Effect.Effect<RateLimiter.RateLimiter, never, Scope.Scope> =>
+  Effect.sync(() => {
+    const spacing = Duration.toMillis(Duration.decode(options.interval)) / options.limit;
+    const burst = (options.limit - 1) * spacing;
+    // 游标按 key 取,**跨 `make` 调用共享** —— 这一档的状态刻意不在 `Scope` 里:CF Workers 上每个
+    // 请求一次 `runPromise`、Layer memoisation 是 per-run 的,状态放 scope 就等于每请求重置。
+    const cursor = cursorFor(options.key);
 
-export function defineRateLimit(opts: RateLimitOptions): RateLimiter {
-  if (!Number.isInteger(opts.limit) || opts.limit < 1) {
-    throw new Error(`ratelimit: limit must be an integer >= 1 (${opts.key})`);
-  }
-  if (!Number.isFinite(opts.interval) || opts.interval <= 0) {
-    throw new Error(`ratelimit: interval must be a positive finite number (${opts.key})`);
-  }
-
-  const store = resolveStore(opts.store);
-  const spacing = opts.interval / opts.limit;
-  const burst = (opts.limit - 1) * spacing;
-
-  const gate =
-    (subKey: string | undefined) =>
-    <A, E, R>(task: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    return <A, E, R>(task: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
       Effect.gen(function* () {
-        const key = subKey === undefined ? opts.key : `${opts.key}:${subKey}`;
         const now = yield* Clock.currentTimeMillis;
-        const tat = yield* store.advance(key, spacing, now);
+        const tat = yield* cursor.advance(spacing, now);
         const waitMs = tat - burst - now;
         if (waitMs > 0) yield* Effect.sleep(Duration.millis(waitMs));
         return yield* task;
       });
-
-  const limiter = gate(undefined) as RateLimiter;
-  return Object.assign(limiter, { forKey: (subKey: string) => gate(subKey) });
-}
+  });

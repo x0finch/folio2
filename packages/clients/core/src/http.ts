@@ -1,6 +1,5 @@
-import { Clock, Effect } from "effect";
+import { Clock, Effect, type RateLimiter } from "effect";
 import { HttpFailure, type SigningFailure } from "./errors";
-import type { RateLimiter } from "./ratelimit";
 
 // 一个薄的 fetch 包装:**限频 → 出网 → 归类失败**。
 //
@@ -52,7 +51,7 @@ export interface HttpConfig<Ctx = undefined> {
     path: string,
     options: RequestOptions<Ctx> | undefined,
   ) => Effect.Effect<HeadersInit, SigningFailure>;
-  readonly limit?: RateLimiter; // 不传 = 不限频(判据见 RateLimitOptions.key 的注释:队里没人挤就别装)
+  readonly limit?: RateLimiter.RateLimiter; // 不传 = 不限频(判据见 RateLimitOptions.key 的注释:队里没人挤就别装)
   readonly rateLimitedStatuses?: readonly number[]; // 默认 [429]
   // 仅测试注入。生产不传 —— 用全局 fetch,且**必须 bind**:在 CF Workers 上把 fetch 存进变量再调
   // 会丢 this,出网静默失败。

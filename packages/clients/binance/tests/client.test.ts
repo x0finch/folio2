@@ -1,7 +1,6 @@
-import { defineRateLimit, MemorySlotStore } from "@folio/client-core";
 import { Duration, Effect, Fiber, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
-import { make } from "../src/client";
+import { type BinanceClientApi, type BinanceConfig, make } from "../src/client";
 import {
   BINANCE_API_BASE,
   BINANCE_DELIVERY_API_BASE,
@@ -59,24 +58,33 @@ function stub(reply: (url: URL) => Response | Promise<Response>) {
   return { fn, calls };
 }
 
-// 闸单独给一份新 store —— 生产那个是模块级跨调用共享的,测试之间不能串。
-const testGate = () =>
-  defineRateLimit({ key: "t", limit: 6, interval: 15_000, store: new MemorySlotStore() });
+// client 的构造本身是 Effect(闸要 Scope),所以每个 case 在一个 scope 里建了用、用完就扔。
+//
+// **闸一律用 `memory` 档** —— 那是 Effect 官方实现,桶绑在 scope 上、每次 make 一份,天然隔离。
+// 生产走 `isolated`(跨 isolate 共享游标),它的算法行为在 `@folio/client-core` 的测试里验;
+// 这里只验**结构**:哪些端点过闸、哪些刻意不过。
+//
+// TestClock 下 `Clock.currentTimeMillis` 从 0 起 —— 于是签名串是确定的,可以拿参考实现对。
+const withClient = <A, E>(
+  fn: typeof globalThis.fetch,
+  use: (client: BinanceClientApi) => Effect.Effect<A, E>,
+  over: Partial<BinanceConfig> = {},
+): Promise<A> =>
+  Effect.gen(function* () {
+    const client = yield* make({ fetch: fn, rateLimitScope: "memory", ...over });
+    return yield* use(client);
+  }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
 
-const clientWith = (fn: typeof globalThis.fetch, over: Record<string, unknown> = {}) =>
-  make({ fetch: fn, rateLimit: testGate(), ...over });
-
-// TestClock 下 `Clock.currentTimeMillis` 从 0 起 —— 于是签名串是确定的,可以拿 node:crypto 对。
-const run = <A>(eff: Effect.Effect<A, BinanceError>): Promise<A> =>
-  Effect.runPromise(eff.pipe(Effect.provide(TestContext.TestContext)));
-
-const runFail = (eff: Effect.Effect<unknown, BinanceError>): Promise<BinanceError> =>
-  Effect.runPromise(Effect.flip(eff).pipe(Effect.provide(TestContext.TestContext)));
+// 拿失败:同上,但翻到成功通道。
+const failing = (
+  fn: typeof globalThis.fetch,
+  use: (client: BinanceClientApi) => Effect.Effect<unknown, BinanceError>,
+): Promise<BinanceError> => withClient(fn, (c) => Effect.flip(use(c)));
 
 describe("签名", () => {
   it("签的是「除 signature 外、按发送顺序拼起来的 query」,signature 追加在最后", async () => {
     const { fn, calls } = stub(() => json(accountFixture));
-    await run(clientWith(fn).spotAccount(CREDS));
+    await withClient(fn, (c) => c.spotAccount(CREDS));
 
     const sent = calls[0].url.searchParams;
     const signature = sent.get("signature");
@@ -99,7 +107,7 @@ describe("签名", () => {
 
   it("apiKey 走 header 而不是 query(它是标识符,不是签名材料)", async () => {
     const { fn, calls } = stub(() => json(accountFixture));
-    await run(clientWith(fn).spotAccount(CREDS));
+    await withClient(fn, (c) => c.spotAccount(CREDS));
     expect((calls[0].init?.headers as Record<string, string>)["X-MBX-APIKEY"]).toBe(CREDS.apiKey);
     expect(calls[0].url.searchParams.has("apiKey")).toBe(false);
     expect(calls[0].url.searchParams.has("secret")).toBe(false);
@@ -111,10 +119,9 @@ describe("端点打对 host / 路径 / method", () => {
     const { fn, calls } = stub((url) =>
       json(url.pathname.includes("dapi") ? coinmFixture : futuresFixture),
     );
-    const c = clientWith(fn);
-    await run(c.spotAccount(CREDS));
-    await run(c.usdmAccount(CREDS));
-    await run(c.coinmAccount(CREDS));
+    await withClient(fn, (c) =>
+      Effect.all([c.spotAccount(CREDS), c.usdmAccount(CREDS), c.coinmAccount(CREDS)]),
+    );
     expect(calls[0].url.origin).toBe(BINANCE_API_BASE);
     expect(calls[0].url.pathname).toBe("/api/v3/account");
     expect(calls[1].url.origin).toBe(BINANCE_FUTURES_API_BASE);
@@ -125,7 +132,7 @@ describe("端点打对 host / 路径 / method", () => {
 
   it("资金账户是 POST(参数仍走 query)", async () => {
     const { fn, calls } = stub(() => json(fundingFixture));
-    await run(clientWith(fn).fundingAssets(CREDS));
+    await withClient(fn, (c) => c.fundingAssets(CREDS));
     expect(calls[0].init?.method).toBe("POST");
     expect(calls[0].url.pathname).toBe("/sapi/v1/asset/get-funding-asset");
     expect(calls[0].url.searchParams.has("signature")).toBe(true);
@@ -133,13 +140,11 @@ describe("端点打对 host / 路径 / method", () => {
 
   it("三个 base 可各自覆盖,且当不透明整串用(代理 #264)", async () => {
     const { fn, calls } = stub(() => json(futuresFixture));
-    const c = clientWith(fn, {
+    await withClient(fn, (c) => Effect.all([c.spotAccount(CREDS), c.usdmAccount(CREDS)]), {
       apiBase: "http://localhost:3099",
       fapiBase: "http://localhost:3098/fapi-proxy",
       dapiBase: "http://localhost:3097",
     });
-    await run(c.spotAccount(CREDS));
-    await run(c.usdmAccount(CREDS));
     expect(calls[0].url.origin).toBe("http://localhost:3099");
     // 覆盖串里带路径前缀也照用 —— client 不解析它。
     expect(calls[1].url.href).toContain("/fapi-proxy/fapi/v2/account");
@@ -149,7 +154,7 @@ describe("端点打对 host / 路径 / method", () => {
 describe("tickerPrices", () => {
   it("数组翻成 symbol → price 的表", async () => {
     const { fn } = stub(() => json(tickerFixture));
-    const table = await run(clientWith(fn).tickerPrices);
+    const table = await withClient(fn, (c) => c.tickerPrices);
     // 上游给的是字符串价 —— 表里要是数字。
     expect(table.BTCUSDT).toBe(60000);
     expect(table.ETHUSDT).toBe(3000);
@@ -158,7 +163,7 @@ describe("tickerPrices", () => {
 
   it("免签:不带 signature、不带 apiKey 头", async () => {
     const { fn, calls } = stub(() => json(tickerFixture));
-    await run(clientWith(fn).tickerPrices);
+    await withClient(fn, (c) => c.tickerPrices);
     expect(calls[0].url.searchParams.has("signature")).toBe(false);
     expect(calls[0].init?.headers).toBeUndefined();
   });
@@ -170,7 +175,7 @@ describe("翻页(理财)", () => {
 
   it("末页(不足一页)即停", async () => {
     const { fn, calls } = stub(() => json({ rows: rowsOf(3) }));
-    const rows = await run(clientWith(fn).earnFlexible(CREDS));
+    const rows = await withClient(fn, (c) => c.earnFlexible(CREDS));
     expect(rows).toHaveLength(3);
     expect(calls).toHaveLength(1);
   });
@@ -181,7 +186,7 @@ describe("翻页(理财)", () => {
       page++;
       return json({ rows: page === 1 ? rowsOf(EARN_PAGE_SIZE) : rowsOf(7) });
     });
-    const rows = await run(clientWith(fn).earnFlexible(CREDS));
+    const rows = await withClient(fn, (c) => c.earnFlexible(CREDS));
     expect(rows).toHaveLength(EARN_PAGE_SIZE + 7);
     expect(calls).toHaveLength(2);
     expect(calls[0].url.searchParams.get("current")).toBe("1");
@@ -191,7 +196,7 @@ describe("翻页(理财)", () => {
 
   it("收满 total 即停(哪怕这一页是满的)", async () => {
     const { fn, calls } = stub(() => json({ rows: rowsOf(EARN_PAGE_SIZE), total: EARN_PAGE_SIZE }));
-    const rows = await run(clientWith(fn).earnFlexible(CREDS));
+    const rows = await withClient(fn, (c) => c.earnFlexible(CREDS));
     expect(rows).toHaveLength(EARN_PAGE_SIZE);
     expect(calls).toHaveLength(1);
   });
@@ -199,16 +204,14 @@ describe("翻页(理财)", () => {
   it("页数上限护栏兜住不肯结束的上游", async () => {
     // 每页都满、total 撒谎说 0 —— 没有护栏就是死循环。
     const { fn, calls } = stub(() => json({ rows: rowsOf(EARN_PAGE_SIZE), total: 0 }));
-    const rows = await run(clientWith(fn).earnFlexible(CREDS));
+    const rows = await withClient(fn, (c) => c.earnFlexible(CREDS));
     expect(calls).toHaveLength(50); // EARN_MAX_PAGES
     expect(rows).toHaveLength(50 * EARN_PAGE_SIZE);
   });
 
   it("活期与定期各打自己的端点", async () => {
     const { fn, calls } = stub(() => json({ rows: [] }));
-    const c = clientWith(fn);
-    await run(c.earnFlexible(CREDS));
-    await run(c.earnLocked(CREDS));
+    await withClient(fn, (c) => Effect.all([c.earnFlexible(CREDS), c.earnLocked(CREDS)]));
     expect(calls[0].url.pathname).toBe("/sapi/v1/simple-earn/flexible/position");
     expect(calls[1].url.pathname).toBe("/sapi/v1/simple-earn/locked/position");
   });
@@ -217,7 +220,7 @@ describe("翻页(理财)", () => {
 describe("错误归类", () => {
   const failWith = (init: ResponseInit) => {
     const { fn } = stub(() => json({ code: -1022, msg: "signature invalid" }, init));
-    return runFail(clientWith(fn).spotAccount(CREDS));
+    return failing(fn, (c) => c.spotAccount(CREDS));
   };
 
   it("400 → 凭据问题且不可重试(binance 用 400 表达签名请求被拒)", async () => {
@@ -250,7 +253,7 @@ describe("错误归类", () => {
 
   it("读不成 JSON → parse,不可重试", async () => {
     const { fn } = stub(() => new Response("<html>", { status: 200 }));
-    const err = await runFail(clientWith(fn).spotAccount(CREDS));
+    const err = await failing(fn, (c) => c.spotAccount(CREDS));
     expect(err._tag).toBe("BinanceParseError");
     expect(isRetryable(err)).toBe(false);
   });
@@ -259,7 +262,7 @@ describe("错误归类", () => {
     const { fn } = stub(() => {
       throw new Error("dns");
     });
-    const err = await runFail(clientWith(fn).spotAccount(CREDS));
+    const err = await failing(fn, (c) => c.spotAccount(CREDS));
     expect(err._tag).toBe("BinanceUpstreamError");
     expect(isRetryable(err)).toBe(true);
   });
@@ -273,35 +276,34 @@ describe("错误归类", () => {
   });
 });
 
-describe("限频", () => {
-  it("公开端点带闸:超出突发的那一发要等", async () => {
-    // 闸 6 发 / 15s → 间距 2500ms,突发 12500ms。第 7 发落在下一个间距上。
-    const seven = () => {
+describe("限频:哪些端点过闸", () => {
+  // **这里验的是结构,不是算法。** 闸本身(GCRA / 跨 isolate 游标)的行为在 `@folio/client-core`
+  // 的测试里;这两条只回答「公开端点过闸了吗、签名端点是不是刻意没过」。
+  //
+  // 用 `memory` 档 = Effect 官方 token-bucket:limit 6 / 15s → 每 2500ms 补一个令牌,
+  // 前 6 发满额突发、第 7 发等一个令牌。
+  const settledAfter = (ms: number, use: (c: BinanceClientApi) => Effect.Effect<unknown>) =>
+    Effect.gen(function* () {
       const { fn } = stub(() => json(tickerFixture));
-      const c = make({ fetch: fn, rateLimit: testGate() });
-      return Effect.all(Array.from({ length: 7 }, () => c.tickerPrices));
-    };
-    const settled = (ms: number) =>
-      Effect.gen(function* () {
-        const fiber = yield* Effect.fork(seven());
-        yield* TestClock.adjust(Duration.millis(ms));
-        return Option.isSome(yield* Fiber.poll(fiber));
-      }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+      const client = yield* make({ fetch: fn, rateLimitScope: "memory" });
+      const fiber = yield* Effect.fork(use(client));
+      yield* TestClock.adjust(Duration.millis(ms));
+      return Option.isSome(yield* Fiber.poll(fiber));
+    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
 
-    expect(await settled(2499)).toBe(false);
-    expect(await settled(2500)).toBe(true);
+  const nTimes =
+    (n: number, one: (c: BinanceClientApi) => Effect.Effect<unknown>) => (c: BinanceClientApi) =>
+      Effect.all(Array.from({ length: n }, () => one(c)));
+
+  it("公开价表过闸:超出突发的那一发要等", async () => {
+    const seven = nTimes(7, (c) => Effect.orDie(c.tickerPrices));
+    expect(await settledAfter(2499, seven)).toBe(false);
+    expect(await settledAfter(2500, seven)).toBe(true);
   });
 
-  it("签名端点不带闸:连发多少都不等", async () => {
+  it("签名端点不过闸:连发多少都不等", async () => {
     // 每账户一发、不并发 —— 装闸拦不到东西,还会把互不相干的账户排成一队白等。
-    const { fn } = stub(() => json(accountFixture));
-    const c = clientWith(fn);
-    const ten = Effect.all(Array.from({ length: 10 }, () => c.spotAccount(CREDS)));
-    const done = await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(ten);
-      yield* TestClock.adjust(Duration.zero);
-      return Option.isSome(yield* Fiber.poll(fiber));
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
-    expect(done).toBe(true);
+    const ten = nTimes(10, (c) => Effect.orDie(c.spotAccount(CREDS)));
+    expect(await settledAfter(0, ten)).toBe(true);
   });
 });
