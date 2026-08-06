@@ -93,29 +93,30 @@ jobs:
       # what headless chromium needs.
       - run: pnpm --filter @folio/web exec playwright install chromium
 
-      # The dev server reads .dev.vars (gitignored, holds real secrets locally). CI needs its own
-      # throwaway one: any 32-byte SECRETS_KEY works because nothing here decrypts pre-existing
-      # rows, and BETTER_AUTH_URL must match the origin Playwright drives — passkey rpID is derived
-      # from it, so a mismatch fails every ceremony with no useful error.
-      - name: Write dev vars
-        working-directory: apps/web
-        run: |
-          cat > .dev.vars <<'EOF'
-          BETTER_AUTH_SECRET=ci-e2e-not-a-real-secret-000000000
-          BETTER_AUTH_URL=http://localhost:3000
-          SECRETS_KEY=0123456789abcdef0123456789abcdef
-          LOG_LEVEL=warning
-          EOF
+      # No step writes .dev.vars here on purpose. The suite runs with CLOUDFLARE_ENV=test (see
+      # playwright.config.ts), and when .dev.vars.<env> exists the Cloudflare plugin loads *only*
+      # that file — so the committed apps/web/.dev.vars.test is the whole environment, on CI and
+      # locally alike. One place to look, and the values are the same ones a developer runs against.
+      # It replaced a hand-written heredoc whose SECRETS_KEY was not actually valid (24 bytes after
+      # base64-decoding, not 32) — harmless while nothing encrypted anything, and a landmine the
+      # moment a test added an account.
 
       # Fresh runner → empty local D1. The tests sign up their own users, so the auth tables have
-      # to exist before the first request.
-      - run: pnpm --filter @folio/web db:migrate:local
+      # to exist before the first request. This targets wrangler's `test` env, which points at its
+      # own local database (see apps/web/wrangler.jsonc): e2e signs up users and writes snapshots
+      # every run, and none of that belongs in whatever database a developer runs `pnpm dev`
+      # against. On a fresh runner it makes no difference; locally it keeps the two apart.
+      - run: pnpm --filter @folio/web db:migrate:e2e
 
       # playwright.config.ts serves the built worker via `vite preview` when CI is set, so the build
       # has to exist first. This is not a nicety: on the first attempt the suite ran against `vite
       # dev` and took 9.6 minutes, with 13 tests failing purely because on-demand compilation pushed
       # every ceremony past its timeout. Against the build it's ~30s.
-      - run: pnpm --filter @folio/web build
+      #
+      # CLOUDFLARE_ENV here, not just on the preview command: the plugin bakes the selected
+      # .dev.vars.<env> into dist/server/.dev.vars at *build* time (generateBundle), and that baked
+      # file is what preview reads. Build without it and preview comes up with no secrets at all.
+      - run: CLOUDFLARE_ENV=test pnpm --filter @folio/web build
 
       - run: pnpm --filter @folio/web test:e2e
 

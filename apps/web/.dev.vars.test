@@ -1,0 +1,20 @@
+# e2e 专用的 worker 环境变量。**故意入库** —— 每个值都是假的,测试每轮自建用户、从不碰真上游。
+#
+# 怎么生效:启动命令带 `CLOUDFLARE_ENV=test`(见 playwright.config.ts 的 webServer)→
+# @cloudflare/vite-plugin 选 wrangler.jsonc 的 `env.test` 段,并**只**加载本文件。
+# 官方文档写明:存在 `.dev.vars.<env>` 时 `.dev.vars` 完全不加载 —— 所以日常开发不受影响,
+# 真凭据也不会被 e2e 读到。
+#
+# BETTER_AUTH_URL 必须与 Playwright 驱动的 origin 一致:passkey 的 rpID 从它派生,不一致则每次
+# ceremony 都失败,且没有有用的报错。
+BETTER_AUTH_SECRET=e2e-fake-auth-secret-000000000000
+BETTER_AUTH_URL=http://localhost:3000
+# 必须是 **32 字节的 base64**(见 connectors/basic/src/crypto.ts 的 importKey)—— 少一个字节就
+# CryptoError,而加账户要用它加密 API secret。这串解出来正好是 "e2e-fake-secrets-key-32-bytes!!!"。
+SECRETS_KEY=ZTJlLWZha2Utc2VjcmV0cy1rZXktMzItYnl0ZXMhISE=
+LOG_LEVEL=warning
+# 把 Binance 的三个 host 全指向本地假 server(见 e2e/fixtures/binance-server.mjs)。
+# 这是生产也在用的 provider-creds 覆盖开关(#264),不是测试专用分支。
+BINANCE_API_BASE=http://localhost:3099
+BINANCE_FAPI_BASE=http://localhost:3099
+BINANCE_DAPI_BASE=http://localhost:3099
