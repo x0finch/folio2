@@ -31,5 +31,28 @@
 
   // 可观测性(P6.7):开启 Workers Logs —— 自动摄取 console.* / LogTape 的 console sink 输出,
   // JSON 自动抽成可索引字段(Dashboard Query Builder + wrangler tail)。单用户 → 全量采样。
-  "observability": { "enabled": true, "head_sampling_rate": 1 }
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  // e2e 专用环境(#372)。**它存在的唯一理由**是让 `.dev.vars.test` 生效 —— Cloudflare 插件只在
+  // 选中某个 Cloudflare environment 时才去找 `.dev.vars.<env>`,而那份文件把 Binance 指向本地假
+  // server。由 `CLOUDFLARE_ENV=test` 选中(见 playwright.config.ts 的 webServer)。
+  //
+  // 顶层配置在 env 里**不继承**,所以绑定要原样重列一遍。D1 用**同一个 database_id**:Miniflare
+  // 按 id 定位本地那个 SQLite 文件,换个 id 会静默拿到一个全新的空库(连 user 表都没有,每个请求都
+  // 死在 Failed to get session)—— CLAUDE.md 记着这条,是踩过的。
+  "env": {
+    "test": {
+      "vars": { "LOG_LEVEL": "warning" },
+      "cache": { "enabled": true },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "folio",
+          "database_id": "8f62b220-d84e-43e6-b07e-ecb3edb655cb",
+          "migrations_dir": "../../packages/db/drizzle"
+        }
+      ],
+      "observability": { "enabled": true, "head_sampling_rate": 1 }
+    }
+  }
 }
