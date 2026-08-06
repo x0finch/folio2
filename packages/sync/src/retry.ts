@@ -2,7 +2,7 @@ import type { AccountSafe } from "@folio/db";
 import { Duration, Effect, Schedule } from "effect";
 import { FETCH_TIMEOUT_MS, RETRY_BASE_MS, RETRY_MAX_ATTEMPTS, RETRY_MAX_MS } from "./constants";
 import { FetchBalancesError } from "./errors";
-import { Balances } from "./services";
+import { BalanceSource } from "./services";
 import type { FetchOutcome } from "./types";
 
 // 取余额失败后的退避重试。**后台同步**用,没人在等 —— 所以宁可多等也不轻易放弃。
@@ -51,8 +51,8 @@ const retryPolicy = Schedule.exponential(Duration.millis(RETRY_BASE_MS)).pipe(
 const once = (
   account: AccountSafe,
   stored: Record<string, string>,
-): Effect.Effect<FetchOutcome, FetchBalancesError, Balances> =>
-  Effect.flatMap(Balances, (balances) => balances.fetch(account, stored)).pipe(
+): Effect.Effect<FetchOutcome, FetchBalancesError, BalanceSource> =>
+  Effect.flatMap(BalanceSource, (source) => source.fetch(account, stored)).pipe(
     // 超时也产出 FetchBalancesError(retryable),这样重试策略只认识一种错误。
     // 用 timeoutFail 不用 Effect.timeout —— 后者会往错误通道塞一个 TimeoutException,
     // 和只认 FetchBalancesError 的策略类型对不上,编译期就红。
@@ -72,5 +72,5 @@ const once = (
 export const fetchBalancesWithRetry = (
   account: AccountSafe,
   stored: Record<string, string>,
-): Effect.Effect<FetchOutcome, FetchBalancesError, Balances> =>
+): Effect.Effect<FetchOutcome, FetchBalancesError, BalanceSource> =>
   Effect.retry(once(account, stored), retryPolicy);

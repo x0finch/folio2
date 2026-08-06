@@ -15,18 +15,23 @@ import type { FetchOutcome, SyncDeps, SyncLogger } from "./types";
 // 每个能力的错误类型也写在这:只有取余额会驱动决策(重不重试、等多久),所以它单独一个错误类型;
 // 其余都是 SyncDepError。
 //
+// **命名:单数 + 角色后缀,不用复数集合名。** `BalanceSource` 而不是 `Balances` —— 后者摆在这个
+// 仓里看着就是 `Balance[]`(`@folio/connectors-basic` 真有 `Balance` 这个类型)。Effect 官方也是
+// 这个路子:`FileSystem` 不叫 `Files`、`SqlClient` 不叫 `Queries`、`Logger` 不叫 `Logs`。
+// 后缀选仓里已有的领域词 —— 参考层叫 oracle,所以是 `TokenOracle`。
+//
 // 日志**不在这份名单里** —— 它是一个 Logger 层(见下方 forwardTo),不是要从上下文取的服务。
 
-export class Accounts extends Context.Tag("sync/Accounts")<
-  Accounts,
+export class AccountStore extends Context.Tag("sync/AccountStore")<
+  AccountStore,
   {
     readonly list: (userId: string) => Effect.Effect<readonly AccountSafe[], SyncDepError>;
     readonly rawCreds: (userId: string) => Effect.Effect<readonly AccountRawCreds[], SyncDepError>;
   }
 >() {}
 
-export class Balances extends Context.Tag("sync/Balances")<
-  Balances,
+export class BalanceSource extends Context.Tag("sync/BalanceSource")<
+  BalanceSource,
   {
     readonly fetch: (
       account: AccountSafe,
@@ -35,8 +40,8 @@ export class Balances extends Context.Tag("sync/Balances")<
   }
 >() {}
 
-export class Snapshots extends Context.Tag("sync/Snapshots")<
-  Snapshots,
+export class SnapshotStore extends Context.Tag("sync/SnapshotStore")<
+  SnapshotStore,
   {
     readonly write: (
       userId: string,
@@ -48,8 +53,8 @@ export class Snapshots extends Context.Tag("sync/Snapshots")<
 
 // 认币与重估合成一个能力:它们都是「参考层帮我把这批余额认清楚 / 定好价」,
 // 而且顺序上绑死(mint 先、revalue 拿它的答案)。
-export class Tokens extends Context.Tag("sync/Tokens")<
-  Tokens,
+export class TokenOracle extends Context.Tag("sync/TokenOracle")<
+  TokenOracle,
   {
     readonly mint: (
       userId: string,
@@ -66,7 +71,7 @@ export class Tokens extends Context.Tag("sync/Tokens")<
   }
 >() {}
 
-export type SyncServices = Accounts | Balances | Snapshots | Tokens;
+export type SyncServices = AccountStore | BalanceSource | SnapshotStore | TokenOracle;
 
 // 没注入 mint 时的空答案。共享一个不可变实例 —— 每账户新建一个空 Map 没有意义。
 const EMPTY_IDS: ReadonlyMap<string, string> = new Map();
@@ -115,7 +120,7 @@ const silent: Layer.Layer<never> = Logger.replace(Logger.defaultLogger, Logger.n
 // 下一步(出口也改成 Effect)这个函数删掉,调用方直接提供服务层。
 export const layerFromDeps = (deps: SyncDeps): Layer.Layer<SyncServices> =>
   Layer.mergeAll(
-    Layer.succeed(Accounts, {
+    Layer.succeed(AccountStore, {
       list: (userId) =>
         Effect.tryPromise({
           try: () => deps.listAccounts(userId),
@@ -127,21 +132,21 @@ export const layerFromDeps = (deps: SyncDeps): Layer.Layer<SyncServices> =>
           catch: (e) => depError("listRawCreds", e),
         }),
     }),
-    Layer.succeed(Balances, {
+    Layer.succeed(BalanceSource, {
       fetch: (account, stored) =>
         Effect.tryPromise({
           try: () => deps.fetchBalances(account, stored),
           catch: toFetchBalancesError,
         }),
     }),
-    Layer.succeed(Snapshots, {
+    Layer.succeed(SnapshotStore, {
       write: (userId, accountId, input) =>
         Effect.tryPromise({
           try: () => deps.writeSnapshot(userId, accountId, input),
           catch: (e) => depError("writeSnapshot", e),
         }),
     }),
-    Layer.succeed(Tokens, {
+    Layer.succeed(TokenOracle, {
       mint: deps.mint
         ? (userId, balances) =>
             Effect.tryPromise({

@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { syncAccountEffect } from "./account";
 import { SYNC_CONCURRENCY } from "./constants";
 import type { SyncDepError } from "./errors";
-import { Accounts, type SyncServices } from "./services";
+import { AccountStore, type SyncServices } from "./services";
 import type { AccountSyncResult, SweepResult, SyncResult } from "./types";
 
 // 一个用户的一轮同步:批量读账户与凭据(各一次,消 N+1)→ 有界并发逐账户同步。
@@ -13,12 +13,11 @@ export const syncUserEffect = (
   userId: string,
 ): Effect.Effect<SyncResult, SyncDepError, SyncServices> =>
   Effect.gen(function* () {
-    const accountsSvc = yield* Accounts;
+    const store = yield* AccountStore;
     // 两次读互不依赖 → 并发取。
-    const [accounts, rawList] = yield* Effect.all(
-      [accountsSvc.list(userId), accountsSvc.rawCreds(userId)],
-      { concurrency: 2 },
-    );
+    const [accounts, rawList] = yield* Effect.all([store.list(userId), store.rawCreds(userId)], {
+      concurrency: 2,
+    });
     const credsById = new Map(rawList.map((r) => [r.id, r.creds]));
     // 有界并发。**整条链留在同一个 Effect 里** —— 中间夹一层 runPromise 会切断上下文,
     // 假时钟就推不动各账户内部的退避(时序测试挂不上)。

@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { FetchBalancesError, messageOf, type SyncDepError } from "./errors";
 import { platformOf } from "./platform";
 import { fetchBalancesWithRetry } from "./retry";
-import { Snapshots, type SyncServices, Tokens } from "./services";
+import { SnapshotStore, type SyncServices, TokenOracle } from "./services";
 import type { AccountSyncResult, OkOutcome } from "./types";
 
 // 单账户同步:取余额 → 认币 → 重估 → 写快照。
@@ -55,24 +55,24 @@ const toSnapshotRows = (
 // 取余额之后的三步。抽出来是因为「缺凭据」那条路根本不走到这 —— 早退在上面。
 const finish = (userId: string, account: AccountSafe, outcome: OkOutcome) =>
   Effect.gen(function* () {
-    const tokens = yield* Tokens;
-    const snapshots = yield* Snapshots;
+    const oracle = yield* TokenOracle;
+    const snapshotStore = yield* SnapshotStore;
     // 认币先跑,一轮只跑一次,答案同时喂给重估定价和写快照落列(ADR 0021 / #200)。
     const idByRef = yield* bestEffort(
-      tokens.mint(userId, outcome.balances),
+      oracle.mint(userId, outcome.balances),
       new Map<string, string>() as ReadonlyMap<string, string>,
       "mint failed; writing snapshot without token_id",
     );
     // 重估(P7.4.2):manual 用市场价改 usdValue。null = 没重估(未注入或失败)。
     const revalued = yield* bestEffort<Balance[] | null>(
-      tokens.revalue(userId, account.connectorId, outcome.balances, idByRef),
+      oracle.revalue(userId, account.connectorId, outcome.balances, idByRef),
       null,
       "revalue failed; keeping provider values",
     );
     const balances = revalued ?? outcome.balances;
     // 只有真重估过才重算 totalUsd;否则保留 provider 报的那个数(它未必等于各行之和)。
     const totalUsd = revalued ? revalued.reduce((sum, b) => sum + b.value, 0) : outcome.totalUsd;
-    const snapshotId = yield* snapshots.write(userId, account.id, {
+    const snapshotId = yield* snapshotStore.write(userId, account.id, {
       takenAt: Date.now(),
       totalUsd,
       // account 级 note(Note[],整钱包)落 snapshots.note;重估不动它。
@@ -88,7 +88,7 @@ const finish = (userId: string, account: AccountSafe, outcome: OkOutcome) =>
 export const syncAccountEffect = (
   userId: string,
   account: AccountSafe,
-  rawCreds: string | null, // 由 syncUserEffect 批量预取分发(见 Accounts.rawCreds)
+  rawCreds: string | null, // 由 syncUserEffect 批量预取分发(见 AccountStore.rawCreds)
 ): Effect.Effect<AccountSyncResult, never, SyncServices> =>
   Effect.gen(function* () {
     // 坏 JSON 也算这个账户的失败。
