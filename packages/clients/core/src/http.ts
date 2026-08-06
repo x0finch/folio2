@@ -1,5 +1,6 @@
 import { Clock, Effect, type RateLimiter } from "effect";
 import { HttpFailure, type SigningFailure } from "./errors";
+import { currentFetch } from "./fetcher";
 
 // 一个薄的 fetch 包装:**限频 → 出网 → 归类失败**。
 //
@@ -40,35 +41,45 @@ export interface RequestOptions<Ctx = undefined> {
   readonly context?: Ctx;
 }
 
-export interface HttpConfig<Ctx = undefined> {
+export interface HttpConfig<Ctx = undefined, HeaderError = SigningFailure> {
   // **必填**:所有真实调用点都有基址,而少了它 `new URL("/path")` 会当场炸 —— 与其留一个
   // 「忘了传就报 Invalid URL」的失败模式,不如在类型上要求它。
   readonly baseUrl: string;
   // 每次请求的头。**是函数而不是对象** —— 签名类的头(rabby 的 wasm 签名、binance 的 HMAC)
-  // 要按路径和参数算,而且可能失败。它的错误进错误通道(`SigningFailure`),**不被归类成传输故障**:
+  // 要按路径和参数算,而且可能失败。它的错误进错误通道,**不被归类成传输故障**:
   // 归错了会退化成「三次退避全白打」,还把真正的原因盖掉。
+  //
+  // 错误类型是**参数**(默认 `SigningFailure`)—— 不是所有签名头都失败成同一个东西
+  // (rabby 走 wasm),写死会逼后来者要么硬套要么改这里。
   readonly headers?: (
     path: string,
     options: RequestOptions<Ctx> | undefined,
-  ) => Effect.Effect<HeadersInit, SigningFailure>;
+  ) => Effect.Effect<HeadersInit, HeaderError>;
   readonly limit?: RateLimiter.RateLimiter; // 不传 = 不限频(判据见 RateLimitOptions.key 的注释:队里没人挤就别装)
   readonly rateLimitedStatuses?: readonly number[]; // 默认 [429]
-  // 仅测试注入。生产不传 —— 用全局 fetch,且**必须 bind**:在 CF Workers 上把 fetch 存进变量再调
-  // 会丢 this,出网静默失败。
-  readonly fetch?: typeof globalThis.fetch;
 }
 
 // 发一个请求,回解析好的 JSON(`notFoundAsNull` 且 404 时回 null)。
-export type Requester<Ctx = undefined> = (
+//
+// **`A` 是调用方声明的期望形状,包内不校验** —— 一次 `as A`,就在下面那个 `Effect.map` 里。
+// 为什么是泛型而不是 `unknown`:返回 `unknown` 的话每个端点方法都要在自己那行写一次
+// `as Effect.Effect<Foo, E>`,强转散在 N 个调用点、还顺手把错误类型也一起断言掉了。收成一个
+// 类型参数之后,调用点写的是 `get<SpotAccount>(path)` —— 一眼看出这是断言,而错误类型仍由包保证。
+//
+// **校验本身是另一件事**:上游给的形状对不对,现在没人查。ADR 0035 把 `Effect.Schema` 的评估
+// 推到 connectors 那一步(#362 第 3 站),到那时这里改成收一个 schema、返回 `Effect<A, ... | ParseError>`
+// 是增量改动 —— 调用点已经在声明期望类型了,只是从断言变成校验。
+export type Requester<Ctx = undefined, HeaderError = SigningFailure> = <A = unknown>(
   path: string,
   options?: RequestOptions<Ctx>,
-) => Effect.Effect<unknown, HttpFailure | SigningFailure>;
+) => Effect.Effect<A, HttpFailure | HeaderError>;
 
-export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Requester<Ctx> {
+export function makeRequester<Ctx = undefined, HeaderError = SigningFailure>(
+  config: HttpConfig<Ctx, HeaderError>,
+): Requester<Ctx, HeaderError> {
   const rateLimited = new Set(config.rateLimitedStatuses ?? DEFAULT_RATE_LIMITED);
-  const doFetch = config.fetch ?? globalThis.fetch.bind(globalThis);
 
-  return (path, options) => {
+  return <A>(path: string, options?: RequestOptions<Ctx>) => {
     const once = Effect.gen(function* () {
       const url = new URL(`${config.baseUrl}${path}`);
       for (const [k, v] of Object.entries(options?.query ?? {})) {
@@ -78,6 +89,7 @@ export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Request
       // 错误消息和日志(原则 #5 的红线)。
       const where = url.pathname;
 
+      const doFetch = yield* currentFetch;
       const headers = config.headers ? yield* config.headers(path, options) : undefined;
 
       const res = yield* Effect.tryPromise({
@@ -109,6 +121,8 @@ export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Request
       });
     });
 
-    return config.limit ? config.limit(once) : once;
+    const gated = config.limit ? config.limit(once) : once;
+    // 全包唯一一处形状断言 —— 见 `Requester` 的注释。
+    return Effect.map(gated, (value) => value as A);
   };
 }

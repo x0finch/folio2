@@ -6,6 +6,7 @@ import {
   type RateLimitScope,
   type Requester,
   type SigningFailure,
+  type UpstreamError,
 } from "@folio/client-core";
 import { Clock, Context, Duration, Effect, Layer, type Scope } from "effect";
 import {
@@ -28,7 +29,7 @@ import {
   TICKER_RATE_LIMIT_PER_SEC,
   USDM_ACCOUNT_PATH,
 } from "./constants";
-import { type BinanceError, fromTransportFailure } from "./errors";
+import { classify } from "./errors";
 import type {
   BinanceCreds,
   CoinmAccount,
@@ -47,8 +48,6 @@ export interface BinanceConfig {
   readonly apiBase?: string;
   readonly fapiBase?: string;
   readonly dapiBase?: string;
-  // 仅测试注入。
-  readonly fetch?: typeof globalThis.fetch;
   // 公开端点那个闸的额度桶存在哪。**生产必须是 `isolated`**(默认):额度按出口 IP 算,所有账户
   // 所有用户共花一份,而 CF Workers 随时会开新 isolate —— 桶只活在进程内就等于没限。
   // 测试传 `memory`,那档是 Effect 官方实现、桶绑在 `Scope` 上,每次 `make` 一份、天然隔离。
@@ -68,14 +67,14 @@ export interface BinanceClientApi {
   //
   // 吐 `Record` 而不是 `TickerPrice[]`:这是这个端点的自然用法(拿来查表),而把数组翻成表不是业务
   // 翻译、不涉及任何 folio 概念 —— 留给调用方就是每个调用方重复同一个 for 循环。
-  readonly tickerPrices: Effect.Effect<Record<string, number>, BinanceError>;
-  readonly spotAccount: (creds: BinanceCreds) => Effect.Effect<SpotAccount, BinanceError>;
-  readonly usdmAccount: (creds: BinanceCreds) => Effect.Effect<FuturesAccount, BinanceError>;
-  readonly coinmAccount: (creds: BinanceCreds) => Effect.Effect<CoinmAccount, BinanceError>;
-  readonly fundingAssets: (creds: BinanceCreds) => Effect.Effect<FundingAsset[], BinanceError>;
+  readonly tickerPrices: Effect.Effect<Record<string, number>, UpstreamError>;
+  readonly spotAccount: (creds: BinanceCreds) => Effect.Effect<SpotAccount, UpstreamError>;
+  readonly usdmAccount: (creds: BinanceCreds) => Effect.Effect<FuturesAccount, UpstreamError>;
+  readonly coinmAccount: (creds: BinanceCreds) => Effect.Effect<CoinmAccount, UpstreamError>;
+  readonly fundingAssets: (creds: BinanceCreds) => Effect.Effect<FundingAsset[], UpstreamError>;
   // 理财两个端点**内部翻页取全**,出口就是全部行 —— 翻页是上游分页机制的细节,不该漏给调用方。
-  readonly earnFlexible: (creds: BinanceCreds) => Effect.Effect<EarnFlexibleRow[], BinanceError>;
-  readonly earnLocked: (creds: BinanceCreds) => Effect.Effect<EarnLockedRow[], BinanceError>;
+  readonly earnFlexible: (creds: BinanceCreds) => Effect.Effect<EarnFlexibleRow[], UpstreamError>;
+  readonly earnLocked: (creds: BinanceCreds) => Effect.Effect<EarnLockedRow[], UpstreamError>;
 }
 
 export class BinanceClient extends Context.Tag("clients/Binance")<
@@ -100,16 +99,11 @@ export function make(
       scope: config.rateLimitScope ?? "isolated",
     });
 
-    const shared = {
-      rateLimitedStatuses: RATE_LIMITED_STATUSES,
-      fetch: config.fetch,
-    } as const;
-
     // 公开端点:免签、带闸。
     const publicRequester = makeRequester({
       baseUrl: config.apiBase ?? BINANCE_API_BASE,
       limit: publicLimit,
-      ...shared,
+      rateLimitedStatuses: RATE_LIMITED_STATUSES,
     });
 
     // 签名端点:三个 host 同样的签名头 + 归类,**刻意不带闸**(每账户一发、不并发,闸拦不到东西,
@@ -118,7 +112,7 @@ export function make(
       makeRequester<string>({
         baseUrl,
         headers: (_path, options) => Effect.succeed({ [API_KEY_HEADER]: options?.context ?? "" }),
-        ...shared,
+        rateLimitedStatuses: RATE_LIMITED_STATUSES,
       });
 
     const spot = signedRequester(config.apiBase ?? BINANCE_API_BASE);
@@ -133,13 +127,13 @@ export function make(
     //
     // `timestamp` 走 Effect 的 `Clock` 而不是 `Date.now()`:测试里能用 `TestClock` 钉住,
     // 断言签名串是确定的。
-    const signedGet = (
+    const signedGet = <A>(
       requester: Requester<string>,
       path: string,
       params: Record<string, string | number>,
       creds: BinanceCreds,
       method: "GET" | "POST" = "GET", // 资金账户是 POST(SIGNED),参数仍走 query
-    ): Effect.Effect<unknown, BinanceError> =>
+    ): Effect.Effect<A, UpstreamError> =>
       Effect.gen(function* () {
         const timestamp = yield* Clock.currentTimeMillis;
         const signable = { ...params, recvWindow: RECV_WINDOW, timestamp };
@@ -148,25 +142,28 @@ export function make(
           new URLSearchParams(signable as never).toString(),
           "hex",
         );
-        return yield* requester(path, {
+        return yield* requester<A>(path, {
           query: { ...signable, signature },
           context: creds.apiKey,
           init: { method },
         });
-      }).pipe(Effect.mapError((e: HttpFailure | SigningFailure) => fromTransportFailure(e)));
+      }).pipe(Effect.mapError((e: HttpFailure | SigningFailure) => classify(e)));
 
     // 一个 position 端点翻页取全:size=100 循环 current,直到末页(rows<size)或收满 total。
     // 不翻页时首页只给 10 条,持仓多的账户(小额自动申购常见)会静默丢掉靠后的币。
-    const earnRows = <Row>(path: string, creds: BinanceCreds): Effect.Effect<Row[], BinanceError> =>
+    const earnRows = <Row>(
+      path: string,
+      creds: BinanceCreds,
+    ): Effect.Effect<Row[], UpstreamError> =>
       Effect.gen(function* () {
         const rows: Row[] = [];
         for (let current = 1; current <= EARN_MAX_PAGES; current++) {
-          const page = (yield* signedGet(
+          const page = yield* signedGet<EarnPage<Row>>(
             spot,
             path,
             { current, size: EARN_PAGE_SIZE },
             creds,
-          )) as EarnPage<Row>;
+          );
           const batch = page.rows ?? [];
           rows.push(...batch);
           if (batch.length < EARN_PAGE_SIZE) break; // 末页(不足一页)
@@ -177,34 +174,25 @@ export function make(
       });
 
     return {
-      tickerPrices: publicRequester(TICKER_PRICE_PATH).pipe(
+      tickerPrices: publicRequester<TickerPrice[] | null>(TICKER_PRICE_PATH).pipe(
         Effect.map((raw) => {
           const map: Record<string, number> = {};
-          for (const t of (raw as TickerPrice[] | null) ?? []) {
+          for (const t of raw ?? []) {
             if (t.symbol) map[t.symbol] = Number(t.price ?? 0);
           }
           return map;
         }),
-        Effect.mapError((e: HttpFailure | SigningFailure) => fromTransportFailure(e)),
+        Effect.mapError((e: HttpFailure | SigningFailure) => classify(e)),
       ),
 
-      spotAccount: (creds) =>
-        signedGet(spot, ACCOUNT_PATH, {}, creds) as Effect.Effect<SpotAccount, BinanceError>,
+      spotAccount: (creds) => signedGet<SpotAccount>(spot, ACCOUNT_PATH, {}, creds),
 
-      usdmAccount: (creds) =>
-        signedGet(fapi, USDM_ACCOUNT_PATH, {}, creds) as Effect.Effect<
-          FuturesAccount,
-          BinanceError
-        >,
+      usdmAccount: (creds) => signedGet<FuturesAccount>(fapi, USDM_ACCOUNT_PATH, {}, creds),
 
-      coinmAccount: (creds) =>
-        signedGet(dapi, COINM_ACCOUNT_PATH, {}, creds) as Effect.Effect<CoinmAccount, BinanceError>,
+      coinmAccount: (creds) => signedGet<CoinmAccount>(dapi, COINM_ACCOUNT_PATH, {}, creds),
 
       fundingAssets: (creds) =>
-        signedGet(spot, FUNDING_ASSET_PATH, {}, creds, "POST") as Effect.Effect<
-          FundingAsset[],
-          BinanceError
-        >,
+        signedGet<FundingAsset[]>(spot, FUNDING_ASSET_PATH, {}, creds, "POST"),
 
       earnFlexible: (creds) => earnRows<EarnFlexibleRow>(EARN_FLEXIBLE_PATH, creds),
       earnLocked: (creds) => earnRows<EarnLockedRow>(EARN_LOCKED_PATH, creds),

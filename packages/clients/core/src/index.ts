@@ -1,4 +1,13 @@
-// @folio/client-core —— 上游 client 共用的 Effect 传输层:限频 → 出网 → 归类失败,加 HMAC。
+// @folio/client-core —— 上游 client 共用的 Effect 传输层:限频 → 出网 → 归类失败,加 HMAC,
+// 外加**所有 client 共用的错误面**(四类 `Upstream*Error`)。
+//
+// 错误面为什么在这:那四类的划分依据是「消费者要区分什么」,而消费者(适配层)对七个上游是同一个 ——
+// 各定一套就是 7 套同构错误类 + 适配层 7 份几乎一样的映射。上游之间真正的差别(binance 用 400
+// 表达签名被拒)由 `classifyFailure` 的 `override` 吃掉,一家一条。
+//
+// **重试策略不在这。** 重试归 `@folio/sync`(`src/retry.ts`,已是 Effect `Schedule`):它包的是
+// 「取一次余额」整件事、含超时,而不是「打一个 HTTP 请求」——两层各退避 3 次就是 9 次。
+// client 这一层只负责把错误分对类,让上面那份策略读得懂。
 //
 // 为什么共享(ADR 0036):`packages/clients/*` 下 7 个 client 全要发请求、4 个要限频,各写一份就是
 // 七份几乎一样的 `ensureOk`。
@@ -22,6 +31,16 @@
 
 export { hmacSha256 } from "./crypto";
 export { HttpFailure, type HttpFailureKind, SigningFailure } from "./errors";
+export { Fetcher } from "./fetcher";
 export { type HttpConfig, makeRequester, type Requester, type RequestOptions } from "./http";
 export { make as makeRateLimit, type RateLimitOptions, type RateLimitScope } from "./ratelimit";
 export { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "./slot-cursor";
+export {
+  type ClassifyOptions,
+  classifyFailure,
+  UpstreamAuthError,
+  type UpstreamError,
+  UpstreamParseError,
+  UpstreamRateLimitError,
+  UpstreamUnavailableError,
+} from "./upstream-error";

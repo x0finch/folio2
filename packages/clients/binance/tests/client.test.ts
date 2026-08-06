@@ -1,3 +1,4 @@
+import { Fetcher, type UpstreamError } from "@folio/client-core";
 import { Duration, Effect, Fiber, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import { type BinanceClientApi, type BinanceConfig, make } from "../src/client";
@@ -7,8 +8,6 @@ import {
   BINANCE_FUTURES_API_BASE,
   EARN_PAGE_SIZE,
 } from "../src/constants";
-import type { BinanceError } from "../src/errors";
-import { isRetryable } from "../src/errors";
 import accountFixture from "./fixtures/account.json" with { type: "json" };
 import coinmFixture from "./fixtures/coinm-account.json" with { type: "json" };
 import fundingFixture from "./fixtures/funding-assets.json" with { type: "json" };
@@ -71,15 +70,20 @@ const withClient = <A, E>(
   over: Partial<BinanceConfig> = {},
 ): Promise<A> =>
   Effect.gen(function* () {
-    const client = yield* make({ fetch: fn, rateLimitScope: "memory", ...over });
+    const client = yield* make({ rateLimitScope: "memory", ...over });
     return yield* use(client);
-  }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+  }).pipe(
+    Effect.scoped,
+    Effect.provideService(Fetcher, fn), // 出网替换是**服务**,不是 config 上的字段
+    Effect.provide(TestContext.TestContext),
+    Effect.runPromise,
+  );
 
 // 拿失败:同上,但翻到成功通道。
 const failing = (
   fn: typeof globalThis.fetch,
-  use: (client: BinanceClientApi) => Effect.Effect<unknown, BinanceError>,
-): Promise<BinanceError> => withClient(fn, (c) => Effect.flip(use(c)));
+  use: (client: BinanceClientApi) => Effect.Effect<unknown, UpstreamError>,
+): Promise<UpstreamError> => withClient(fn, (c) => Effect.flip(use(c)));
 
 describe("签名", () => {
   it("签的是「除 signature 外、按发送顺序拼起来的 query」,signature 追加在最后", async () => {
@@ -223,48 +227,41 @@ describe("错误归类", () => {
     return failing(fn, (c) => c.spotAccount(CREDS));
   };
 
-  it("400 → 凭据问题且不可重试(binance 用 400 表达签名请求被拒)", async () => {
-    const err = await failWith({ status: 400 });
-    expect(err._tag).toBe("BinanceAuthError");
-    // 重试没用,还会拿错凭据再打一次 —— binance 把重复认证失败当探测行为(#240)。
-    expect(isRetryable(err)).toBe(false);
+  // **这条是 binance 唯一的归类差异**(它的 `override`):默认规则会把 400 归成「上游的锅」而去
+  // 重试它 —— 重试没用,还会拿错凭据再打一次,binance 把重复认证失败当探测行为(#240)。
+  // 其余几条验的是默认规则在这条链路上确实通了;规则本身在 `@folio/client-core` 的测试里。
+  it("400 → 凭据问题(binance 用 400 表达签名请求被拒)", async () => {
+    expect((await failWith({ status: 400 }))._tag).toBe("UpstreamAuthError");
   });
 
   it("401 / 403 → 凭据问题", async () => {
     for (const status of [401, 403]) {
-      expect((await failWith({ status }))._tag).toBe("BinanceAuthError");
+      expect((await failWith({ status }))._tag).toBe("UpstreamAuthError");
     }
   });
 
   it("429 与 418 同类,且带上 Retry-After", async () => {
     for (const status of [429, 418]) {
       const err = await failWith({ status, headers: { "retry-after": "7" } });
-      expect(err._tag).toBe("BinanceRateLimitError");
-      expect(isRetryable(err)).toBe(true);
-      expect(err._tag === "BinanceRateLimitError" && err.retryAfterMs).toBe(7000);
+      expect(err._tag).toBe("UpstreamRateLimitError");
+      expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(7000);
     }
   });
 
-  it("5xx → upstream,可重试", async () => {
-    const err = await failWith({ status: 503 });
-    expect(err._tag).toBe("BinanceUpstreamError");
-    expect(isRetryable(err)).toBe(true);
+  it("5xx → 够不到上游", async () => {
+    expect((await failWith({ status: 503 }))._tag).toBe("UpstreamUnavailableError");
   });
 
-  it("读不成 JSON → parse,不可重试", async () => {
+  it("读不成 JSON → parse", async () => {
     const { fn } = stub(() => new Response("<html>", { status: 200 }));
-    const err = await failing(fn, (c) => c.spotAccount(CREDS));
-    expect(err._tag).toBe("BinanceParseError");
-    expect(isRetryable(err)).toBe(false);
+    expect((await failing(fn, (c) => c.spotAccount(CREDS)))._tag).toBe("UpstreamParseError");
   });
 
-  it("出不去 → upstream,可重试", async () => {
+  it("出不去 → 够不到上游", async () => {
     const { fn } = stub(() => {
       throw new Error("dns");
     });
-    const err = await failing(fn, (c) => c.spotAccount(CREDS));
-    expect(err._tag).toBe("BinanceUpstreamError");
-    expect(isRetryable(err)).toBe(true);
+    expect((await failing(fn, (c) => c.spotAccount(CREDS)))._tag).toBe("UpstreamUnavailableError");
   });
 
   it("失败信息不带 query(签名/凭据在里面,原则 #5 红线)", async () => {
@@ -285,9 +282,13 @@ describe("限频:哪些端点过闸", () => {
   const settledAfter = (ms: number, use: (c: BinanceClientApi) => Effect.Effect<unknown>) =>
     Effect.gen(function* () {
       const { fn } = stub(() => json(tickerFixture));
-      const client = yield* make({ fetch: fn, rateLimitScope: "memory" });
-      const fiber = yield* Effect.fork(use(client));
+      const client = yield* make({ rateLimitScope: "memory" });
+      const fiber = yield* Effect.fork(use(client).pipe(Effect.provideService(Fetcher, fn)));
       yield* TestClock.adjust(Duration.millis(ms));
+      // 假 fetch 是 `Promise.resolve`,**不归 TestClock 管** —— 推完虚拟时钟不等于它已经跑完。
+      // 只 adjust 就 poll 的话「没被闸拦住」那一侧是靠运气过的。让出几轮微任务把它跑干净;
+      // 被闸拦住的那一侧在等虚拟时钟,让多少轮都不会完成,所以两侧都仍然准。
+      yield* Effect.repeatN(Effect.yieldNow(), 50);
       return Option.isSome(yield* Fiber.poll(fiber));
     }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
 
@@ -303,7 +304,19 @@ describe("限频:哪些端点过闸", () => {
 
   it("签名端点不过闸:连发多少都不等", async () => {
     // 每账户一发、不并发 —— 装闸拦不到东西,还会把互不相干的账户排成一队白等。
-    const ten = nTimes(10, (c) => Effect.orDie(c.spotAccount(CREDS)));
-    expect(await settledAfter(0, ten)).toBe(true);
+    //
+    // **这条不能照上面 fork + poll 那套写**:签名端点链路里有 `crypto.subtle`,在 Node 上走线程池 ——
+    // 那是**宏任务**,`yieldNow` 只让微任务,推不动它,于是 poll 到的「还没完成」是假的(全量跑时挂过)。
+    // 改成跑到底再问虚拟时钟走了多远:走了 0ms 就是一发都没等过,与调度快慢无关。
+    const elapsed = await Effect.gen(function* () {
+      const { fn } = stub(() => json(accountFixture));
+      const client = yield* make({ rateLimitScope: "memory" });
+      yield* nTimes(10, (c) => Effect.orDie(c.spotAccount(CREDS)))(client).pipe(
+        Effect.provideService(Fetcher, fn),
+      );
+      return yield* TestClock.currentTimeMillis;
+    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+
+    expect(elapsed).toBe(0);
   });
 });

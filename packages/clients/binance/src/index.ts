@@ -13,14 +13,6 @@ export {
   BINANCE_DELIVERY_API_BASE,
   BINANCE_FUTURES_API_BASE,
 } from "./constants";
-export {
-  BinanceAuthError,
-  type BinanceError,
-  BinanceParseError,
-  BinanceRateLimitError,
-  BinanceUpstreamError,
-  isRetryable,
-} from "./errors";
 export type {
   BinanceCreds,
   CoinmAccount,
