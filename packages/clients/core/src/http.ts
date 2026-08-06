@@ -93,7 +93,9 @@ export function makeRequester<Ctx = undefined, HeaderError = SigningFailure>(
       const headers = config.headers ? yield* config.headers(path, options) : undefined;
 
       const res = yield* Effect.tryPromise({
-        try: () => doFetch(url, { ...options?.init, headers }),
+        // **没配 `headers()` 时不能写 `headers: undefined`** —— 那会把调用方放在 `init.headers`
+        // 里的头静默抹掉。配了就以 `headers()` 为准(它是「这个上游的头」,比单发的更权威)。
+        try: () => doFetch(url, headers ? { ...options?.init, headers } : options?.init),
         catch: (cause) => new HttpFailure({ kind: "network", where, cause }),
       });
 

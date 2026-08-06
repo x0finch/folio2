@@ -1,0 +1,21 @@
+[
+  {
+    "coinId": "sui",
+    "amount": 40,
+    "contractAddress": null,
+    "chain": "sui",
+    "name": "Sui",
+    "symbol": "SUI",
+    "price": 3.5,
+    "connectionId": "sui-wallet"
+  },
+  {
+    "coinId": "xsui",
+    "amount": 10,
+    "contractAddress": "0xSUITESTTOKEN00000000000000000000000000AB",
+    "name": "X Sui Token",
+    "symbol": "XSUI",
+    "price": 2.0,
+    "connectionId": "sui-wallet"
+  }
+]

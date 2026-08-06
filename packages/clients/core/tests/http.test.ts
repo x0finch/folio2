@@ -162,6 +162,25 @@ describe("makeRequester", () => {
     expect((seen.init?.headers as Record<string, string>)["x-key"]).toBe("abc");
   });
 
+  it("没配 headers() 时,调用方放在 init.headers 里的头不被抹掉", async () => {
+    // 以前这里写死 `{ ...init, headers }`,headers 为 undefined 时把 init 里的头覆盖没了 ——
+    // 静默丢头,发出去才发现上游回 422(hyperliquid 的 POST /info 就吃这个)。
+    const { fn, seen } = stubFetch(() => json({}));
+    const req = makeRequester({ baseUrl: BASE });
+    await run(fn, req("/v1/t", { init: { headers: { "content-type": "application/json" } } }));
+    expect((seen.init?.headers as Record<string, string>)["content-type"]).toBe("application/json");
+  });
+
+  it("配了 headers() 时它压过 init.headers(上游的头比单发的更权威)", async () => {
+    const { fn, seen } = stubFetch(() => json({}));
+    const req = makeRequester({
+      baseUrl: BASE,
+      headers: () => Effect.succeed({ "x-from": "config" }),
+    });
+    await run(fn, req("/v1/t", { init: { headers: { "x-from": "init" } } }));
+    expect((seen.init?.headers as Record<string, string>)["x-from"]).toBe("config");
+  });
+
   it("闸装上时每一发都过闸", async () => {
     let passes = 0;
     const { fn } = stubFetch(() => json({}));
