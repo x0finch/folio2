@@ -1,7 +1,7 @@
 import type { Balance, Note } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 
-// 本包与外界的**公开契约**:注入什么、吐出什么。实现分散在 services / account / sweep,
+// 本包与外界的公开类型:注入什么、吐出什么。实现分散在 services / account / sweep,
 // 但类型全在这一处 —— 想知道「用这个包要准备什么」看这个文件就够。
 
 // 取余额结果:缺凭据(导入待补录)→ needs-credentials(跳过、不算失败);否则 ok{balances,totalUsd}。

@@ -1,9 +1,9 @@
 import { Effect } from "effect";
 import { syncAccount } from "./account";
 import { SYNC_CONCURRENCY } from "./constants";
-import type { SweepResult, SyncResult } from "./contract";
 import type { SyncDepError } from "./errors";
 import { Accounts, SyncLog, type SyncServices } from "./services";
+import type { SweepResult, SyncResult } from "./types";
 
 // 一个用户的一轮同步:批量读账户与凭据(各一次,消 N+1)→ 有界并发逐账户同步。
 //

@@ -1,9 +1,9 @@
 import type { AccountSafe } from "@folio/db";
 import { Duration, Effect, Schedule } from "effect";
 import { FETCH_TIMEOUT_MS, RETRY_BASE_MS, RETRY_MAX_ATTEMPTS, RETRY_MAX_MS } from "./constants";
-import type { FetchOutcome } from "./contract";
 import { FetchBalancesError } from "./errors";
 import { Balances, SyncLog } from "./services";
+import type { FetchOutcome } from "./types";
 
 // 取余额失败后的退避重试。**后台同步**用,没人在等 —— 所以宁可多等也不轻易放弃。
 // 策略是个值:能单独读懂、单独改、单独测,不散在调用点的参数里。

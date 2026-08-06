@@ -5,16 +5,19 @@
 //   · `syncXxxEffect` —— Effect 版,给需要 Effect 上下文的场合(眼下是时序测试:假时钟挂不到壳上)
 // 下一步出口改成 Effect 时,壳删掉、Effect 版转正。
 //
-// 内部组织:`contract` 公开契约 / `services` 能力与 Layer / `retry` 退避策略 /
+// 内部组织:`types` 公开类型 / `services` 能力与 Layer / `retry` 退避策略 /
 // `account` 单账户 / `sweep` 单用户与全量。业务代码从上下文取能力,不透传 deps。
 
 import type { AccountSafe } from "@folio/db";
 import { Effect } from "effect";
 import { syncAccount as accountEffect } from "./account";
-import type { AccountSyncResult, SweepResult, SyncDeps, SyncResult } from "./contract";
 import { layerFromDeps } from "./services";
 import { syncAllUsers as allUsersEffect, syncUser as userEffect } from "./sweep";
+import type { AccountSyncResult, SweepResult, SyncDeps, SyncResult } from "./types";
 
+export { FetchBalancesError, SyncDepError, type SyncDepStep } from "./errors";
+// 平台推导:写快照时用;app 侧采集 provider 元信息时也用同一条,免得两处口径分叉。
+export { platformOf } from "./platform";
 export type {
   AccountSyncResult,
   FetchOutcome,
@@ -22,10 +25,7 @@ export type {
   SyncDeps,
   SyncLogger,
   SyncResult,
-} from "./contract";
-export { FetchBalancesError, SyncDepError, type SyncDepStep } from "./errors";
-// 平台推导:写快照时用;app 侧采集 provider 元信息时也用同一条,免得两处口径分叉。
-export { platformOf } from "./platform";
+} from "./types";
 
 // Effect 版:依赖已由 deps 满足(内部 provide),所以 R = never —— 可直接组合、可挂假时钟。
 export const syncAccountEffect = (

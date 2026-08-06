@@ -1,11 +1,11 @@
 import type { Balance } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import { Effect } from "effect";
-import type { AccountSyncResult, OkOutcome, SyncLogger } from "./contract";
 import { FetchBalancesError, messageOf } from "./errors";
 import { platformOf } from "./platform";
 import { fetchBalancesWithRetry } from "./retry";
 import { Snapshots, SyncLog, type SyncServices, Tokens } from "./services";
+import type { AccountSyncResult, OkOutcome, SyncLogger } from "./types";
 
 // 单账户同步:取余额 → 认币 → 重估 → 写快照。
 // 错误通道是 never —— 一个账户炸了收成 ok:false,绝不阻断其他账户。

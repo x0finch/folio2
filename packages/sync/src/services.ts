@@ -1,13 +1,13 @@
 import type { Balance } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { Context, Effect, Layer } from "effect";
-import type { FetchOutcome, SyncDeps, SyncLogger } from "./contract";
 import {
   depError,
   type FetchBalancesError,
   type SyncDepError,
   toFetchBalancesError,
 } from "./errors";
+import type { FetchOutcome, SyncDeps, SyncLogger } from "./types";
 
 // 编排要用的**能力**,一个一个具名。业务代码从上下文取能力,不再一层层透传 deps / account /
 // stored 这些「材料」—— 谁需要什么,签名上看得见。
