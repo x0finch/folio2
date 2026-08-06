@@ -67,6 +67,31 @@ describe("ndjsonRound", () => {
     expect(await readLines(body)).toHaveLength(1);
   });
 
+  // 顺序上更要紧的一条:**「看」不等收尾**。afterRound 是预热缓存那类与本轮结果无关的活,
+  // 让响应流等它 = 结果早就全送到了,前端还停在「同步中」。#372 的 e2e 里量到过这个:
+  // toast 停在「Syncing 2/2」,而成功 toast 迟迟不出,因为预热在打一圈拿不到的上游。
+  it("afterRound 还没跑完,响应流就已经收工(「看」不等收尾)", async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let warmed = false;
+    const { body, run } = await ndjsonRound(Stream.fromIterable([{ accountId: "a1", ok: true }]), {
+      afterRound: async () => {
+        await held;
+        warmed = true;
+      },
+    });
+
+    // 读到 EOF 了(readLines 要读满整条流),而 afterRound 还被卡着。
+    expect(await readLines(body)).toHaveLength(1);
+    expect(warmed).toBe(false);
+
+    release();
+    await run;
+    expect(warmed).toBe(true);
+  });
+
   it("一轮之后队列关闭 → 响应流自然结束(不悬着)", async () => {
     const { body, run } = await ndjsonRound(Stream.empty);
     await run;

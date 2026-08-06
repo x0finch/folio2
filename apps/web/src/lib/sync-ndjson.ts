@@ -53,11 +53,16 @@ export const ndjsonRound = <A>(
               Effect.tap(() => Effect.sync(() => onFatal?.(e.message))),
             ),
           ),
+          // 收尾:排一个哨兵进队列 → 响应流读到它就自然结束。
+          //
+          // **哨兵排在 afterRound 之前**,这个顺序是有代价换来的:反过来的话,「看」的那一半要等
+          // 一件与它无关的事 —— 预热缓存 —— 做完才收工。e2e 里量到过:两个账户的结果早就全部
+          // 送达(toast 停在「Syncing 2/2」),而成功 toast 迟迟不出,因为 warmTokensForUser 在打
+          // 一圈拿不到的上游。结果都出去了就该让前端收工;剩下的收尾归 waitUntil,与连接无关。
+          Effect.ensuring(Queue.offer(queue, END)),
           Effect.tap(() =>
             afterRound ? Effect.promise(() => afterRound().catch(() => {})) : Effect.void,
           ),
-          // 收尾:排一个哨兵进队列 → 响应流读到它就自然结束。
-          Effect.ensuring(Queue.offer(queue, END)),
           Effect.asVoid,
         ),
       );
