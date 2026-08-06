@@ -1,4 +1,5 @@
 import {
+  Clock,
   Duration,
   Effect,
   Fiber,
@@ -178,5 +179,92 @@ describe("scope: isolated —— 跨 isolate 共享游标", () => {
     };
     const o = { limit: 1, interval: "125 millis", scope: "isolated", key: freshKey() } as const;
     expect(await settledAfter(o, 0, nTimes(1), broken)).toBe(true);
+  });
+});
+
+describe("scope: isolated —— 并发", () => {
+  // 抢时隙那一步的原子性是这个实现的核心断言(slot-cursor.ts 写着「并发 fiber 各拿一个不同的
+  // 游标」),而上面所有 case 用的 `Effect.all` **默认是顺序执行**(concurrency 1)—— 验不到它。
+  // 这一组显式开并发。
+
+  // 每发记下它真正被放行的时刻。
+  const stamped = (seen: number[]) => (gate: RateLimiter.RateLimiter) =>
+    Effect.all(
+      Array.from({ length: 5 }, () =>
+        gate(Effect.flatMap(Clock.currentTimeMillis, (t) => Effect.sync(() => seen.push(t)))),
+      ),
+      { concurrency: "unbounded" },
+    );
+
+  it("5 个 fiber 并发抢 —— 各拿一个不同的时隙,间距不塌", async () => {
+    const seen: number[] = [];
+    const key = freshKey();
+    await Effect.gen(function* () {
+      const gate = yield* make({ key, limit: 1, interval: "125 millis", scope: "isolated" });
+      const fiber = yield* Effect.fork(stamped(seen)(gate));
+      yield* TestClock.adjust(Duration.millis(1000));
+      yield* Fiber.join(fiber);
+    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+
+    // limit=1 → 间距 125ms、突发 0。5 发应落在 0 / 125 / 250 / 375 / 500。
+    expect([...seen].sort((a, b) => a - b)).toEqual([0, 125, 250, 375, 500]);
+    // 关键:没有两发撞在同一个时隙上(撞了就是闸漏了)。
+    expect(new Set(seen).size).toBe(5);
+  });
+
+  it("带突发额度时:前 limit 发同时放行,其余排开", async () => {
+    const seen: number[] = [];
+    const key = freshKey();
+    await Effect.gen(function* () {
+      const gate = yield* make({ key, limit: 3, interval: "300 millis", scope: "isolated" });
+      const fiber = yield* Effect.fork(stamped(seen)(gate));
+      yield* TestClock.adjust(Duration.millis(1000));
+      yield* Fiber.join(fiber);
+    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+
+    // 间距 100ms、突发 200ms → 前 3 发在 0,之后每 100ms 一发。
+    expect([...seen].sort((a, b) => a - b)).toEqual([0, 0, 0, 100, 200]);
+  });
+});
+
+describe("scope: isolated —— 冷启并发(真实场景:新 isolate 同时同步多个账户)", () => {
+  it("首发就并发时,seed 读回的共享进度对所有 fiber 都生效", async () => {
+    // seed 是**异步**的(要读 Cache API,中间会让出)。若它对并发者不形成屏障,先跑到「抢」那一步
+    // 的 fiber 会拿着还没被 seed 抬起来的游标 —— 于是新 isolate 一冷启就漏一批出去,而这正是
+    // 装 `isolated` 档要防的那件事。
+    const key = `${freshKey()}-cold`;
+    const store = new Map<string, string>();
+    // 别的 isolate 已经把游标推到 5 秒后。
+    store.set(SLOT_URL_PREFIX + encodeURIComponent(key), "5000");
+    const cache: SlotCache = {
+      match: async (u) => (store.has(u) ? new Response(store.get(u)) : undefined),
+      put: async (u, r) => {
+        store.set(u, await r.text());
+      },
+    };
+
+    const seen: number[] = [];
+    await Effect.gen(function* () {
+      const gate = yield* make({ key, limit: 1, interval: "125 millis", scope: "isolated" });
+      const fiber = yield* Effect.fork(
+        Effect.all(
+          Array.from({ length: 5 }, () =>
+            gate(Effect.flatMap(Clock.currentTimeMillis, (t) => Effect.sync(() => seen.push(t)))),
+          ),
+          { concurrency: "unbounded" },
+        ),
+      );
+      yield* TestClock.adjust(Duration.millis(10_000));
+      yield* Fiber.join(fiber);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.succeed(SlotCacheOverride, cache)),
+      Effect.provide(TestContext.TestContext),
+      Effect.runPromise,
+    );
+
+    // 一发都不许早于别人已经占到的 5000。
+    expect(Math.min(...seen)).toBeGreaterThanOrEqual(5000);
+    expect(new Set(seen).size).toBe(5);
   });
 });

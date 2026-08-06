@@ -6,9 +6,16 @@ import { Context, Effect, Option } from "effect";
 // 一个数能存进去,信号量不能 —— 这就是 `isolated` 档用 GCRA 而不是官方那套 semaphore 的原因
 // (见 ratelimit.ts)。
 //
-// **抢时隙的原子性由本地那份兜住**:`advance` 里读写 `tat` 在同一个 `Effect.sync` 块内,中间没有
-// 让出点,所以并发 fiber 各拿一个不同的游标。跨 isolate 的原子性做不到(两个 isolate 会读到同一个
-// 游标),也不要求 —— 目标是削峰,漏出去的那几发由 429 + 重试兜。
+// **同一 isolate 内抢时隙靠一个 permits=1 的信号量串行化**,不是靠「读写在同一个同步块里」。
+// 后者只保住 `tat` 那一瞬,而它前面的 `seed`(首次要读 Cache API)是**异步**的:不加锁时先跑到抢
+// 那一步的 fiber 会拿着还没被 seed 抬起来的游标 —— 新 isolate 一冷启就漏一批出去,正是这一档要防
+// 的那件事。**这条有测试钉住**(「首发就并发时,seed 读回的共享进度对所有 fiber 都生效」);
+// 迁移前那版 `CacheSlotStore` 是同样的结构、同样的缺陷,只是从没测过并发。
+//
+// 锁只圈住「算时隙」——「等到时隙」在闸那一层、锁外面,所以排队的 fiber 不会互相阻塞。
+//
+// 跨 isolate 的原子性做不到(两个 isolate 会读到同一个游标),也不要求 —— 目标是削峰,漏出去的
+// 那几发由 429 + 重试兜。
 
 // Cache API 的最小形状。
 export interface SlotCache {
@@ -50,6 +57,8 @@ export function cursorFor(key: string): SlotCursor {
 
 function makeCursor(key: string): SlotCursor {
   const url = URL_PREFIX + encodeURIComponent(key);
+  // 见文件头:抢时隙整段串行,不只是读写 tat 那一瞬。
+  const lock = Effect.unsafeMakeSemaphore(1);
   let tat = Number.NEGATIVE_INFINITY;
   let seeded = false;
   // "unknown" 还没探过写进没进去;"dead" 别再试(不在 Workers 上,或写不生效)。
@@ -124,16 +133,14 @@ function makeCursor(key: string): SlotCursor {
 
   return {
     advance: (spacingMs, now) =>
-      Effect.gen(function* () {
-        yield* seed();
-        // 抢:读和写在同一个同步块里,中间没有让出点 —— 并发 fiber 各拿一个不同的游标。
-        const mine = yield* Effect.sync(() => {
-          const slot = Math.max(tat, now);
-          tat = slot + spacingMs;
-          return slot;
-        });
-        yield* publish(mine + spacingMs, spacingMs, now);
-        return mine;
-      }),
+      lock.withPermits(1)(
+        Effect.gen(function* () {
+          yield* seed(); // 异步(首次读 Cache API)—— 正因如此整段才要在锁内
+          const mine = Math.max(tat, now);
+          tat = mine + spacingMs;
+          yield* publish(mine + spacingMs, spacingMs, now);
+          return mine;
+        }),
+      ),
   };
 }
