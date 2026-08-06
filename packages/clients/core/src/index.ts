@@ -36,6 +36,11 @@ export { type HttpConfig, makeRequester, type Requester, type RequestOptions } f
 export { make as makeRateLimit, type RateLimitOptions, type RateLimitScope } from "./ratelimit";
 export { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "./slot-cursor";
 export {
+  type StaleTolerantCache,
+  type StaleTolerantCacheOptions,
+  staleTolerantCache,
+} from "./stale-cache";
+export {
   type ClassifyOptions,
   classifyFailure,
   UpstreamAuthError,

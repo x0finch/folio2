@@ -8,7 +8,7 @@ import {
   type UpstreamError,
 } from "@folio/client-core";
 import { Context, Duration, Effect, Layer, type Scope } from "effect";
-import { cacheFor, parseChainIds } from "./chains-cache";
+import { chainsCacheFor, parseChainIds } from "./chains";
 import {
   CHAINS_PATH,
   POSITIONS_QUERY,
@@ -85,8 +85,8 @@ export function make(
 
     const toUpstream = Effect.mapError((e: HttpFailure | SigningFailure) => classify(e));
 
-    // 缓存按 baseUrl 分桶、住在模块级(见 chains-cache.ts:Scope 会被每请求重置)。
-    const chainsCache = cacheFor(baseUrl);
+    // 缓存按 baseUrl 分桶、住在模块级(见 client-core 的 stale-cache:Scope 会被每请求重置)。
+    const chainsCache = chainsCacheFor(baseUrl);
 
     return {
       positions: ({ address, apiKey }) =>

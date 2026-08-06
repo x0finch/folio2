@@ -1,0 +1,9 @@
+{
+  "code": "0",
+  "data": [
+    {
+      "totalBal": "42694",
+      "details": { "classic": "0", "earn": "12000", "funding": "694", "trading": "30000" }
+    }
+  ]
+}
