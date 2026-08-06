@@ -1,5 +1,5 @@
 import { Chunk, Effect, Stream } from "effect";
-import { syncAccountEffect } from "./account";
+import { syncAccount } from "./account";
 import { SYNC_CONCURRENCY } from "./constants";
 import type { SyncDepError } from "./errors";
 import { AccountStore, type SyncServices } from "./services";
@@ -15,10 +15,7 @@ import type { AccountSyncResult, SweepResult, SyncResult } from "./types";
 //
 // 错误通道带 SyncDepError(step 为 listAccounts / listRawCreds)—— 这两步失败意味着**整个用户
 // 这一轮没法开始**,所以向上抛,不像逐账户失败那样被隔离成 ok:false。
-//
-// 名字带 `Effect` 后缀的口径同兄弟几个:**指「依赖还没接上」那一版**(R 里还有 SyncServices),
-// 不是说它返回 Effect —— 它返回 Stream。接上依赖的那一版在 index.ts,叫 `syncUserStream`。
-export const syncUserStreamEffect = (
+export const syncUserStream = (
   userId: string,
 ): Stream.Stream<AccountSyncResult, SyncDepError, SyncServices> =>
   Stream.unwrap(
@@ -33,7 +30,7 @@ export const syncUserStreamEffect = (
       // 假时钟就推不动各账户内部的退避(时序测试挂不上)。
       return Stream.fromIterable(accounts).pipe(
         Stream.mapEffect(
-          (account) => syncAccountEffect(userId, account, credsById.get(account.id) ?? null),
+          (account) => syncAccount(userId, account, credsById.get(account.id) ?? null),
           { concurrency: SYNC_CONCURRENCY, unordered: true },
         ),
       );
@@ -41,10 +38,8 @@ export const syncUserStreamEffect = (
   );
 
 // 同上,但等全部跑完再给一份完整结果。给不需要进度的调用方(以及测试)。
-export const syncUserEffect = (
-  userId: string,
-): Effect.Effect<SyncResult, SyncDepError, SyncServices> =>
-  syncUserStreamEffect(userId).pipe(
+export const syncUser = (userId: string): Effect.Effect<SyncResult, SyncDepError, SyncServices> =>
+  syncUserStream(userId).pipe(
     Stream.runCollect,
     Effect.map((chunk) => ({ results: Chunk.toArray(chunk) })),
   );
@@ -61,7 +56,7 @@ const addResult = (t: Tally, r: AccountSyncResult): Tally => ({
   ok: t.ok + (r.ok ? 1 : 0),
   // 缺凭据:不算失败。
   skipped: t.skipped + (!r.ok && r.skipped ? 1 : 0),
-  // 具体错误已在 syncAccountEffect 以 error 级记录。
+  // 具体错误已在 syncAccount 以 error 级记录。
   failed: t.failed + (!r.ok && !r.skipped ? 1 : 0),
 });
 
@@ -72,12 +67,12 @@ const addResult = (t: Tally, r: AccountSyncResult): Tally => ({
 // **别顺手加 concurrency** —— tests/sweep.test.ts 有一条专门钉这个。
 //
 // 消费的是流而不是收集好的数组:cron 只要计数,没必要把几十个用户的逐账户结果全攒在内存里。
-export const syncAllUsersEffect = (
+export const syncAllUsers = (
   userIds: readonly string[],
 ): Effect.Effect<SweepResult, never, SyncServices> =>
   Effect.forEach(userIds, (userId) =>
     // 折叠流:一条结果进来就并进小计,不留数组。
-    Stream.runFold(syncUserStreamEffect(userId), NO_ACCOUNTS, addResult).pipe(
+    Stream.runFold(syncUserStream(userId), NO_ACCOUNTS, addResult).pipe(
       // 用户级失败不中断 sweep,记一笔继续下一个。
       Effect.catchAll((err) =>
         Effect.logError("user sweep threw").pipe(
