@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 import { type FetchOutcome, type SyncDeps, type SyncLogger, syncUser } from "../src";
 // Effect 版不对外导出(公开出口只有 Promise 那套)—— 包内测试直接摸内部模块、自己 provide 服务。
 import { layerFromDeps } from "../src/services";
-import { syncUserEffect } from "../src/sweep";
+import * as Sweep from "../src/sweep";
 
 // 把注入式 deps 变成服务,拿到一个可挂假时钟的 Effect。
 const syncUserWithDeps = (deps: SyncDeps, userId: string) =>
-  syncUserEffect(userId).pipe(Effect.provide(layerFromDeps(deps)));
+  Sweep.syncUser(userId).pipe(Effect.provide(layerFromDeps(deps)));
 
 // 编排层测试:provider 机制(解密/校验/取数/全局 key 收窄)已内化进注入的 fetchBalances,
 // 这里只测 sync 自己的编排 —— 重试 / 跳过(needs-credentials)/ 重估 / 失败隔离 / 日志 / 写快照。
