@@ -2,13 +2,11 @@
 // query builder(原则 #6)。
 //
 // 包内两半,各有自己的薄壳:
-//   · queries/ —— 接口 db 自己定的那半,统一走门面 `createDb(env)`(见 db.ts)
+//   · queries/ —— 接口 db 自己定的那半,统一走门面 `createDb(env)`(见 queries/facade.ts)
 //   · stores/  —— 接口 `@folio/oracle-basic` 定的那半(四个参考层端口),出口是 Layer
-// 非 userId 作用域的全局 infra(better-auth adapter)不进门面,单独出。
+// 非 userId 作用域的 better-auth adapter 不进门面,单独出(它和 `getDb` 一起住 connect.ts)。
 
-export { createAuthAdapter } from "./auth-adapter"; // 不泄露 db 句柄/schema
-export type { DbEnv } from "./connect";
-export { createDb, type Db } from "./db";
+export { createAuthAdapter, type DbEnv } from "./connect"; // adapter 不泄露 db 句柄/schema
 export type {
   AccountRawCreds,
   AccountTagLink,
@@ -32,6 +30,7 @@ export type {
   UserSettingsView,
   WriteSnapshotInput,
 } from "./queries";
+export { createDb, type Db } from "./queries/facade";
 export type {
   Account,
   AccountSafe,

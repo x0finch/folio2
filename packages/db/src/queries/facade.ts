@@ -1,12 +1,12 @@
-import type { DbEnv } from "./connect";
-import * as q from "./queries";
+import type { DbEnv } from "../connect";
+import * as q from ".";
 
-// @folio/db 的对外门面:createDb(env) 绑定 env,返回一个方法对象,调用方不再逐次穿 env。
+// `queries/` 这半的对外面:createDb(env) 绑定 env,返回一个方法对象,调用方不再逐次穿 env。
 // 每个方法 = `queries/` 里现有的函数去掉首个 env 参数(userId 及其余入参、返回类型、归属校验语义全不变)。
 // 仍恪守原则 #6:只暴露包装 ops,绝不外泄 getDb / drizzle 实例 / schema。
 // bind() 把 (env, ...rest) 的函数柯里成 (...rest),类型经推断保留 —— 方法仍逐个显式列出,不做 Proxy/循环魔法。
-// createAuthAdapter 与新参考层的 store 是非 userId 作用域的全局 infra(better-auth / 全局参考数据),
-// 不进本 facade,由 index 独立导出。
+// createAuthAdapter 与参考层那四个 store 是非 userId 作用域的东西(better-auth / 参考数据),
+// 不进本门面 —— 前者在 ../connect.ts,后者在 ../stores/。
 const bindEnv =
   (env: DbEnv) =>
   <A extends unknown[], R>(fn: (env: DbEnv, ...args: A) => R) =>
