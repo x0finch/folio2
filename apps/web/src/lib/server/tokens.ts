@@ -1,13 +1,21 @@
-import { DEFAULT_TOP_N, FIAT_NAMER, tokenTicket, type UpstreamToken } from "@folio/oracle";
+import {
+  DEFAULT_TOP_N,
+  FIAT_NAMER,
+  FxRateResolver,
+  TokenReader,
+  tokenTicket,
+  type UpstreamToken,
+} from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
+import { Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { buildFiatOptions } from "../fiat-options";
 import { pickLocale, readLocaleCookie } from "../i18n/detect";
 import type { TokenOption } from "../token-option";
 import { priceTickets } from "../token-pricing";
-import { NAMER, oracleFor } from "./internal/oracle";
+import { NAMER, runOracle } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
@@ -115,7 +123,13 @@ export const listTokenCatalogue = createServerFn({ method: "GET" })
       "token-catalogue",
       CATALOGUE_CACHE_TTL_S,
       // 已按市值排好序 —— **顺序即排名**,不额外发一列 rank 给浏览器。
-      async () => (await oracleFor(context.userId).tokens.topTokens(DEFAULT_TOP_N)).map(toOption),
+      async () =>
+        (
+          await runOracle(
+            context.userId,
+            Effect.flatMap(TokenReader, (t) => t.topTokens(DEFAULT_TOP_N)),
+          )
+        ).map(toOption),
     );
     tokenLog.debug("catalogue: ok", { count: out.length });
     return out;
@@ -138,13 +152,17 @@ export const listFiatOptions = createServerFn({ method: "GET" })
     // warm 一次(冷则一把拉全所有支持币种;通常 _authed loader / 切币种时已暖过 → no-op)。
     // asOf 置当下 → 下拉 SWR(staleTickets)判它新鲜、不再拿它去 refreshTokenPrices 白刷(价已现填,重取无意义)。
     // 取不到汇率(warm 失败且非 USD)→ 该项不带价,回退 "—"(降级,不阻断)。24h 涨跌法币不给。
-    const fx = oracleFor(context.userId).fx;
-    await fx.warm(base.map((o) => o.symbol));
-    const asOf = Date.now();
-    return Promise.all(
-      base.map(async (o) => {
-        const price = await fx.resolve(o.symbol);
-        return price != null ? { ...o, price, asOf } : o;
+    return runOracle(
+      context.userId,
+      Effect.gen(function* () {
+        const fx = yield* FxRateResolver;
+        yield* fx.warm(base.map((o) => o.symbol));
+        const asOf = yield* Clock.currentTimeMillis;
+        return yield* Effect.forEach(base, (o) =>
+          Effect.map(fx.resolve(o.symbol), (price) =>
+            Option.isSome(price) ? { ...o, price: price.value, asOf } : o,
+          ),
+        );
       }),
     );
   });
@@ -162,7 +180,13 @@ export const listTokens = createServerFn({ method: "GET" })
     const out = await edgeCached(
       `token-search?q=${encodeURIComponent(q)}`,
       SEARCH_CACHE_TTL_S,
-      async () => (await oracleFor(context.userId).tokens.search(q)).map(toOption),
+      async () =>
+        (
+          await runOracle(
+            context.userId,
+            Effect.flatMap(TokenReader, (t) => t.search(q)),
+          )
+        ).map(toOption),
     );
     tokenLog.debug("searchTokens: ok", { query: q, count: out.length });
     return out;
@@ -176,13 +200,10 @@ export const getTokenPrice = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     // 与批量刷价同一段分流(priceTickets):法币走 FX、其余走代币源。这里一次只一张票,取首条 → 无价回 null,
     // 让用户自己填(别过度设计)。**不 warm** —— 预填这一下靠 loader / listFiatOptions 已暖的缓存,别再拉一趟。
-    const oracle = oracleFor(context.userId);
-    const [priced] = await priceTickets([data.ticket], {
-      namers: [NAMER, FIAT_NAMER],
-      resolveFiat: (code) => oracle.fx.resolve(code),
-      priceCrypto: (refs) => oracle.tokens.pricesByRefs(refs),
-      now: Date.now,
-    });
+    const [priced] = await runOracle(
+      context.userId,
+      priceTickets([data.ticket], { namers: [NAMER, FIAT_NAMER] }),
+    );
     tokenLog.debug("tokenPrice: ok", { found: priced != null });
     return priced
       ? { unitPrice: priced.unitPrice, change24h: priced.change24h, asOf: priced.asOf }
@@ -200,14 +221,11 @@ export const refreshTokenPrices = createServerFn({ method: "POST" })
     // 票携带当前上游(加密币)或 `fiat`(法币)命名者,两者都放行(同 getTokenPrice / mintHolding)——
     // 只收 NAMER 的话「已有代币」组里的法币持仓会被丢掉、价格列恒显 "—"(法币无代币市价,得走 FX)。
     // 分流(法币走 FX / 其余走代币源)在纯函数 priceTickets 里,两个选币端点共用、可单测。
-    const oracle = oracleFor(context.userId);
-    const out = await priceTickets(data.tickets, {
-      namers: [NAMER, FIAT_NAMER],
-      resolveFiat: (code) => oracle.fx.resolve(code),
-      warmFiat: (codes) => oracle.fx.warm(codes), // 冷则一把拉全支持币种;通常已暖 → no-op
-      priceCrypto: (refs) => oracle.tokens.pricesByRefs(refs),
-      now: Date.now,
-    });
+    const out = await runOracle(
+      context.userId,
+      // `warmFiat` 开着:冷则一把拉全支持币种;通常已暖 → no-op。
+      priceTickets(data.tickets, { namers: [NAMER, FIAT_NAMER], warmFiat: true }),
+    );
     tokenLog.debug("refreshTokenPrices: ok", { asked: data.tickets.length, got: out.length });
     return out;
   });

@@ -1,4 +1,5 @@
-import type { Tokens } from "@folio/oracle";
+import { TokenReader } from "@folio/oracle";
+import { Effect } from "effect";
 import {
   type BalanceLike,
   displayTokenId,
@@ -15,32 +16,32 @@ import {
 // 后者是个长期的 locality 隐患(克隆或过滤一步就全错位)。
 //
 // 上游还没认出来的币也出 name/providerLogo(不再是裸 symbol + 首字母)。
-export async function enrichBalances<T extends BalanceLike>(
-  tokens: Tokens,
+export const enrichBalances = <T extends BalanceLike>(
   balances: T[],
-): Promise<{ rows: (T & TokenEnrichment)[]; pricesStale: boolean }> {
-  // defi 行也做展示富化(H5 #120:抽屉协议行的 24h 聚合);估值现推路径不受影响
-  // (那里仍只走 fungibleTokenId 的同质门)。
-  const enriched = await tokens.enrich(displayTokenIds(balances));
-  // 刷价集合(#245:跳过 dust)。pricesStale 必须只在**这个集合内**判脏,否则被跳过的 dust 被标脏
-  // 却永远刷不到 → pricesStale 清不掉、客户端每次进页空转刷新(即下面「三门同源」那条坑)。
-  const refreshable = new Set(refreshableTokenIds(balances));
-  let pricesStale = false;
-  const rows = balances.map((b) => {
-    const id = displayTokenId(b);
-    if (!id) return b; // 没有身份的行不参与富化,也不算 stale(刷了也没用)
-    const e = enriched.get(id);
-    // stale = 过期**或压根没有价**。新层刚 mint 出的行正是「有身份、无价」,必须让客户端来刷一次,
-    // 否则首屏永远没价而且没人去取(pricesStale 与 refreshStalePrices 必须同门,code review #2)。
-    //
-    // **但只算「刷得出来且值得刷」的行**:① `ref` 空 = 上游还没认出它(手记里自己敲名字的币恒是
-    // 这样),刷价那侧本就跳过;② 不在 refreshable 里 = dust,刷价那侧也跳过(#245)。两种都标脏
-    // 只会换来每次进页白发一次请求、而且永远清不掉。与上面「没有身份的行不算 stale」同一条理由。
-    if (refreshable.has(id) && e?.ref && e.price?.stale !== false) pricesStale = true;
-    return e ? { ...b, ...toEnrichment(e) } : b;
+): Effect.Effect<{ rows: (T & TokenEnrichment)[]; pricesStale: boolean }, never, TokenReader> =>
+  Effect.gen(function* () {
+    // defi 行也做展示富化(H5 #120:抽屉协议行的 24h 聚合);估值现推路径不受影响
+    // (那里仍只走 fungibleTokenId 的同质门)。
+    const enriched = yield* Effect.flatMap(TokenReader, (t) => t.enrich(displayTokenIds(balances)));
+    // 刷价集合(#245:跳过 dust)。pricesStale 必须只在**这个集合内**判脏,否则被跳过的 dust 被标脏
+    // 却永远刷不到 → pricesStale 清不掉、客户端每次进页空转刷新(即下面「三门同源」那条坑)。
+    const refreshable = new Set(refreshableTokenIds(balances));
+    let pricesStale = false;
+    const rows = balances.map((b) => {
+      const id = displayTokenId(b);
+      if (!id) return b; // 没有身份的行不参与富化,也不算 stale(刷了也没用)
+      const e = enriched.get(id);
+      // stale = 过期**或压根没有价**。新层刚 mint 出的行正是「有身份、无价」,必须让客户端来刷一次,
+      // 否则首屏永远没价而且没人去取(pricesStale 与 refreshStalePrices 必须同门,code review #2)。
+      //
+      // **但只算「刷得出来且值得刷」的行**:① `ref` 空 = 上游还没认出它(手记里自己敲名字的币恒是
+      // 这样),刷价那侧本就跳过;② 不在 refreshable 里 = dust,刷价那侧也跳过(#245)。两种都标脏
+      // 只会换来每次进页白发一次请求、而且永远清不掉。与上面「没有身份的行不算 stale」同一条理由。
+      if (refreshable.has(id) && e?.ref && e.price?.stale !== false) pricesStale = true;
+      return e ? { ...b, ...toEnrichment(e) } : b;
+    });
+    return { rows, pricesStale };
   });
-  return { rows, pricesStale };
-}
 
 // 持仓预热(写缓存,best-effort):把这批余额里价 / 元信息 stale/缺失的一次批量回源写回。
 // cron(waitUntil)与手动 sync 后调用 —— cron 尤其需要,它没有前端来触发 pricesStale 那条刷价路径。
@@ -52,7 +53,12 @@ export async function enrichBalances<T extends BalanceLike>(
 //
 // 走新参考层(按 token_id;#202 拔掉旧 `Tokens.warm(AssetRef[])`)。与 enrich 的 pricesStale gate /
 // 客户端 refreshStalePrices 三门同源:都喂 `refreshableTokenIds` 出来的同一集合(#245:跳过 dust)。
-export async function warmHeldPrices(tokens: Tokens, balances: BalanceLike[]): Promise<void> {
-  const ids = refreshableTokenIds(balances);
-  await Promise.all([tokens.refreshStalePrices(ids), tokens.refreshStaleInfo(ids)]);
-}
+export const warmHeldPrices = (balances: BalanceLike[]): Effect.Effect<void, never, TokenReader> =>
+  Effect.flatMap(TokenReader, (tokens) => {
+    const ids = refreshableTokenIds(balances);
+    // 两个方法各自在内部降级(挂了记一行、回 0),所以这里不必再各套一层 catch。
+    return Effect.all([tokens.refreshStalePrices(ids), tokens.refreshStaleInfo(ids)], {
+      concurrency: 2,
+      discard: true,
+    });
+  });

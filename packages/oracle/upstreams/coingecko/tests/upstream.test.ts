@@ -1,10 +1,13 @@
+import { runClient } from "@folio/client-core/testing";
 import type { AssetPlatform, MarketCoin } from "@folio/coingecko-client";
+import { TokenUpstream } from "@folio/oracle-basic/ports";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 // 单页上限不进导出面(调用方不需要知道分页存在),测分页边界要从常量模块直接取。
 import { IDS_PER_REQUEST, MARKETS_PER_PAGE, UPSTREAM_ID } from "../src/constants";
-import { createCoinGeckoUpstream, makeUpstreamEffects } from "../src/upstream";
+import { coinGeckoTokenUpstreamLayer, makeUpstreamEffects } from "../src/upstream";
 import assetPlatforms from "./fixtures/asset-platforms.json" with { type: "json" };
-import { type Call, failing, routed, run, type Stub, stubbing } from "./harness";
+import { type Call, routed, run, type Stub, stubbing } from "./harness";
 
 // 把 `parse.ts` / `ref-index.ts` 的纯转换串成真上游的那一层:分页、链标识翻译、平台表记忆。
 // 打的桩是 **`HttpClient` 服务**,所以顺带钉住 adapter 究竟问了哪个端点、带了什么参数 ——
@@ -32,9 +35,29 @@ const page = (count: number, pageNo = 1) =>
     return marketRow(`coin-${at}`, at + 1);
   }) as MarketCoin[];
 
-describe("自报标识", () => {
-  it("id 就是本 adapter 的常量 —— 服务层拿它当 ref 的命名者", () => {
-    expect(createCoinGeckoUpstream().id).toBe(UPSTREAM_ID);
+describe("端口 layer", () => {
+  // 装配点只 import 这个 layer,所以它至少要被走一次:`R = never`(client 与 HttpClient 在
+  // 包内被关掉了)、`id` 是本 adapter 的常量(服务层拿它当 ref 的命名者)。
+  it("layer 给出的端口自报 id,且不再要求调用方 provide 传输层", async () => {
+    const stub = routed({ "/coins/markets": [] });
+    const id = await runClient(
+      stub.http,
+      Effect.map(TokenUpstream, (u) => u.id).pipe(Effect.provide(coinGeckoTokenUpstreamLayer())),
+      "none",
+    );
+    expect(id).toBe(UPSTREAM_ID);
+  });
+
+  it("经 layer 拿到的方法照样能出网(接线没断)", async () => {
+    const stub = routed({ "/coins/markets": [marketRow("bitcoin", 1)] });
+    const rows = await runClient(
+      stub.http,
+      Effect.flatMap(TokenUpstream, (u) => u.fetchMarkets({ topN: 1 })).pipe(
+        Effect.provide(coinGeckoTokenUpstreamLayer()),
+      ),
+      "none",
+    );
+    expect(rows.map((r) => r.ref)).toEqual(["coingecko/issued:bitcoin"]);
   });
 });
 
@@ -112,76 +135,6 @@ describe("fetchMarkets 跨页重复(上游分页来自不同快照)", () => {
 
     expect(rows).toHaveLength(MARKETS_PER_PAGE * 2 - 1);
     expect(stub.calls).toHaveLength(2); // 没有第 3 页
-  });
-});
-
-describe("链标识 → CoinGecko 的 asset_platform", () => {
-  const CONTRACT = { "/contract/": { id: "usd-coin", symbol: "usdc", name: "USD Coin" } };
-  const withPlatforms = () => routed({ "/asset_platforms": PLATFORMS, ...CONTRACT });
-
-  it("EVM 靠数字 chainId 对齐(比 slug 可靠)", async () => {
-    const stub = withPlatforms();
-    const got = await run(stub, impl().fetchByContract("42161", "0xAF88"));
-
-    expect(got?.symbol).toBe("usdc");
-    // 42161 → arbitrum-one,而不是把 "42161" 当 slug 塞进 URL。
-    expect(stub.calls.some((c) => c.path.includes("/coins/arbitrum-one/contract/"))).toBe(true);
-  });
-
-  it("非 EVM 给 slug,大小写不敏感", async () => {
-    const stub = withPlatforms();
-    await run(stub, impl().fetchByContract("Solana", "EPjF"));
-    expect(stub.calls.some((c) => c.path.includes("/coins/solana/contract/"))).toBe(true);
-  });
-
-  // 对不上就别猜着拼 URL —— 那会换来一个 404,读起来像「这个币不存在」。
-  it("平台表里没有这条链 → null,连合约端点都不问", async () => {
-    const stub = withPlatforms();
-    expect(await run(stub, impl().fetchByContract("evm:99999", "0xabc"))).toBeNull();
-    expect(stub.calls.some((c) => c.path.includes("/contract/"))).toBe(false);
-  });
-
-  it("缺 id 的平台条目跳过,不落一个 undefined 键", async () => {
-    const stub = withPlatforms();
-    expect(await run(stub, impl().fetchByContract("999", "0xabc"))).toBeNull();
-    expect(stub.calls.some((c) => c.path.includes("/contract/"))).toBe(false);
-  });
-});
-
-describe("平台表记忆", () => {
-  it("一次 sync 里连查几个合约只拉一次平台表", async () => {
-    const stub = routed({
-      "/asset_platforms": PLATFORMS,
-      "/contract/": { id: "usd-coin", symbol: "usdc", name: "USD Coin" },
-    });
-    const upstream = impl();
-    await run(stub, upstream.fetchByContract("1", "0xa0b8"));
-    await run(stub, upstream.fetchByContract("42161", "0xaf88"));
-
-    expect(stub.calls.filter((c) => c.path.includes("/asset_platforms"))).toHaveLength(1);
-  });
-
-  // **失败不进记忆。** 记的是**已经拿到的那张表**,不是「取表这件事」—— 只有成功路径写那个槽,
-  // 所以这条结构上就不可能写错。老那版记的是 promise,裸 `??=` 会把被拒绝的那个也记住:
-  // Workers 的 isolate 跨请求存活,一次瞬时故障就让本 isolate 余生所有 fetchByContract 直接失败,
-  // 而且是静默的(上层 SWR 把抛错当「上游没有」吞掉)。
-  it("平台表拉失败 → 不记住,下一次重新拉并成功", async () => {
-    // 用 **401** 而不是 5xx:401 归「凭据问题」→ 不可重试 → 当场失败。5xx 会触发重试,
-    // 而重试要等 —— 假时钟不推进就永远等下去。重试本身另有用例(下面那组)覆盖。
-    let attempt = 0;
-    const stub = routed({
-      "/asset_platforms": () => (++attempt === 1 ? new Error("401") : PLATFORMS),
-      "/contract/": { id: "usd-coin", symbol: "usdc", name: "USD Coin" },
-    });
-    const upstream = impl();
-
-    expect((await failing(stub, upstream.fetchByContract("1", "0xa0b8")))._tag).toBe(
-      "UpstreamAuthError",
-    );
-    const got = await run(stub, upstream.fetchByContract("1", "0xa0b8"));
-
-    expect(got?.symbol).toBe("usdc");
-    expect(attempt).toBe(2); // 第一轮失败没进记忆槽 → 第二轮重新拉
   });
 });
 

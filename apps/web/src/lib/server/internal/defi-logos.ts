@@ -1,5 +1,7 @@
 import { DefiMeta } from "@folio/connectors-basic";
-import { oracleFor } from "./oracle";
+import { DefiLogoResolver } from "@folio/oracle";
+import { Effect } from "effect";
+import { runOracle } from "./oracle";
 
 // DeFi 协议 logo 的同步预热(#126)。协议→图 URL 采集时就随余额 meta 落进了快照,这里把它收集出来、
 // 写进 per-user 缓存(`defi-logo:<协议>`)—— 图片端点 `/api/logo/defi` 由此 O(1) 读,不再取全部
@@ -34,5 +36,8 @@ export async function warmDefiLogosForUser(
   userId: string,
   snapshots: readonly SnapshotLike[],
 ): Promise<void> {
-  await oracleFor(userId).defiLogos.warm(collectDefiLogos(snapshots));
+  await runOracle(
+    userId,
+    Effect.flatMap(DefiLogoResolver, (d) => d.warm(collectDefiLogos(snapshots))),
+  );
 }

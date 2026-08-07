@@ -1,7 +1,9 @@
 import { RESOLUTION_TOP_RANK, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { type CandidateSource, createMint, type TokenCandidate } from "../src";
-import { fakeRefIndexStore, fakeTokenStore } from "./fakes";
+import { type MintInput, type TokenCandidate, TokenMinter } from "../src";
+import type { CandidateSource } from "../src/candidates";
+import { harness } from "./fakes";
 
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const USDC_ARB = "evm:42161/contract:0xaf88d065e77c8cc2239327c5edb3a432268e5831";
@@ -24,29 +26,31 @@ const candidatesOf = (map: Record<string, TokenCandidate[]>): RecordingCandidate
   const asked: string[] = [];
   return {
     asked,
-    async bySymbol(symbol) {
-      asked.push(symbol);
-      return map[symbol] ?? [];
-    },
+    bySymbol: (symbol) =>
+      Effect.sync(() => {
+        asked.push(symbol);
+        return map[symbol] ?? [];
+      }),
   };
 };
 
+// mint 走 Tag → Layer(生产那条路);`mint.of` 只是这一层之上的一个 Promise 小把手,
+// 好让这一整组用例保持原样的 async/await 读法 —— 它不是第二条构造路。
 function setup(opts?: {
   index?: Record<string, string>;
   candidates?: Record<string, TokenCandidate[]>;
   overrides?: Record<string, string>;
 }) {
-  const store = fakeTokenStore();
-  const refIndex = fakeRefIndexStore(opts?.index);
   const candidates = candidatesOf(opts?.candidates ?? {});
-  const mint = createMint({
-    store,
-    refIndex,
-    candidates,
-    namer: "src",
+  const h = harness({
+    refIndexSeed: opts?.index,
     overrides: opts?.overrides,
+    candidates,
   });
-  return { store, refIndex, candidates, mint };
+  const mint = {
+    of: (inputs: readonly MintInput[]) => h.run(Effect.flatMap(TokenMinter, (m) => m.of(inputs))),
+  };
+  return { h, store: h.store, refIndex: h.refIndex, candidates, mint };
 }
 
 describe("三条路径", () => {
@@ -300,7 +304,9 @@ describe("上游与交易所改名时间不一致", () => {
     expect(ids.get(POL_CEX_OLD)).toBe(id);
     expect(ctx.store.rows.size).toBe(1);
     // 假装 refreshStaleInfo 刷过了:那时上游还叫 MATIC。
-    await ctx.store.putInfo([{ tokenId: id, symbol: "MATIC", name: "Matic Network" }], 0);
+    await ctx.h.run(
+      ctx.store.putInfo([{ tokenId: id, symbol: "MATIC", name: "Matic Network" }], 0),
+    );
     expect(ctx.store.rows.get(id)?.infoStale).toBe(false);
     return { ...ctx, id };
   }

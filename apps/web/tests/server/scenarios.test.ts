@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import type { SnapshotWithBalances } from "@folio/db";
 import { createGlobalTokenRefIndexStore, createUserCacheStore } from "@folio/db";
+import { TokenReader } from "@folio/oracle";
 import { syncAccount } from "@folio/sync";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +14,7 @@ import {
   createToken,
   injectManualSnapshots,
 } from "../../src/lib/server/internal/manual";
-import { NAMER, oracleFor } from "../../src/lib/server/internal/oracle";
+import { NAMER, runOracle } from "../../src/lib/server/internal/oracle";
 import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
 import { ticketOf } from "./ticket";
 
@@ -73,13 +74,15 @@ async function overview() {
     snapshots.map((s) => [s.snapshot.accountId, s]),
   );
   await injectManualSnapshots(USER, accounts, byAccount);
-  const o = oracleFor(USER);
-  return buildOverview(accounts, byAccount, {
-    tokens: o.tokens,
-    platforms: o.platforms,
-    connectorMeta: connectorPlatformMeta,
-    mode: settings.valuationMode,
-  });
+  // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与 server fn 逐字同款:
+  // 一次 `runOracle` 供上 `TokenReader` / `PlatformResolver`。
+  return runOracle(
+    USER,
+    buildOverview(accounts, byAccount, {
+      connectorMeta: connectorPlatformMeta,
+      mode: settings.valuationMode,
+    }),
+  );
 }
 
 const holdingOf = (view: Awaited<ReturnType<typeof overview>>, symbol: string) =>
@@ -146,9 +149,12 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
       headers: { "content-type": "application/json" },
     });
   });
-  const tokens = oracleFor(USER).tokens;
-  await tokens.refreshStalePrices([tokenId]);
-  await tokens.refreshStaleInfo([tokenId]);
+  await runOracle(
+    USER,
+    Effect.flatMap(TokenReader, (tokens) =>
+      Effect.andThen(tokens.refreshStalePrices([tokenId]), tokens.refreshStaleInfo([tokenId])),
+    ),
+  );
   // 刷完把桩换回「出网就抛」—— 后面的展示断言仍然要求零外呼。
   outbound = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {

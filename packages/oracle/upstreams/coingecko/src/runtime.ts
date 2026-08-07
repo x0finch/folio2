@@ -1,29 +1,14 @@
-import {
-  FolioHttpClient,
-  isRetryable,
-  type Outbound,
-  retryAfterOf,
-  type UpstreamError,
-} from "@folio/client-core";
-import {
-  CoinGeckoClient,
-  type CoinGeckoClientApi,
-  type CoinGeckoConfig,
-} from "@folio/coingecko-client";
-import { Duration, Effect, Layer, Schedule } from "effect";
-import { RETRY_ATTEMPTS, RETRY_BASE_MS, RETRY_MAX_WAIT_MS, UPSTREAM_ID } from "./constants";
+import { isRetryable, type Outbound, retryAfterOf, type UpstreamError } from "@folio/client-core";
+import { CoinGeckoClient, type CoinGeckoClientApi } from "@folio/coingecko-client";
+import { Duration, Effect, Schedule } from "effect";
+import { RETRY_ATTEMPTS, RETRY_BASE_MS, RETRY_MAX_WAIT_MS } from "./constants";
 
-// —— 本包的 Effect ↔ Promise 边界 ——
+// 本包共用的两件事:**一发请求的重试策略**,和**怎么拿到 client 说话**。
 //
-// `TokenUpstream` / `FxUpstream` / `PlatformUpstream` 三个端口是 **Promise 形状**(`@folio/oracle-basic`),
-// 而 client 是 Effect 形状。边界必须落在某处,落这里:
-//
-//   · **不往上推**(把三个端口改成 Effect)—— 那是 oracle 服务层整体迁移,是 epic #362 的下一站,
-//     不是本片。端口一改,`@folio/oracle` 的 SWR 编排、缓存、mint 决策全要跟着动
-//   · **不往下推**(让 client 出口转 Promise)—— 那等于白用:外层的超时和中断管不到里面,
-//     而且它是九个 client 的共同形状,为一个消费者破例会传染
-//
-// 与 `@folio/sync` 同一个办法:包内全 Effect,公开出口是 Promise,`runPromise` 只有一处。
+// 以前这里还有第三件 —— `runnerFor`(Effect → Promise 的边界)。它没了:三个端口
+// (`TokenUpstream` / `FxUpstream` / `PlatformUpstream`)从 #362 第 4 站起本身就是 Effect 形状,
+// 所以「跑」这件事归调用方,`runPromise` 只剩 apps/web 的入口一处。连带删掉的 `toError`
+// (tagged error → `Error`)也搬到了那一处 —— FiberFailure 该在哪儿翻译成日志,那儿才知道。
 
 // 请求级的重试。**挂在单发请求上,不是整个方法上** —— `fetchMarkets` 翻四页,第三页失败该重打
 // 第三页,不是从第一页重来。老那版把重试放在传输层里,天然就是这个粒度;换成显式的之后
@@ -64,31 +49,3 @@ export const withClient = <A>(
   use: (client: CoinGeckoClientApi) => Effect.Effect<A, UpstreamError, Outbound>,
 ): Effect.Effect<A, UpstreamError, CoinGeckoClient | Outbound> =>
   Effect.flatMap(CoinGeckoClient, use);
-
-// 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
-// 而 `Data.TaggedError` 的这四类没有 `message` 字段,于是上层日志里只剩一个空消息 + 一坨 Cause。
-//
-// 消息里只有 tag、pathname 和状态码 —— `where` 本来就刻意不带 query(原则 #5 红线),
-// 这里也不额外拼任何东西上去。
-const toError = (error: UpstreamError): Error =>
-  new Error(
-    `${UPSTREAM_ID} ${error._tag} on ${error.where}${error.status !== undefined ? ` (${error.status})` : ""}`,
-    { cause: error },
-  );
-
-// 跑一个用了 client 的 effect,吐 Promise。**每次调用建一次层** —— 闸的状态不在层里
-// (`isolated` 档的游标是模块级、按 key 存的),所以重建不会让额度凭空回满。
-export const runnerFor = (
-  config: CoinGeckoConfig,
-): (<A>(effect: Effect.Effect<A, UpstreamError, CoinGeckoClient | Outbound>) => Promise<A>) => {
-  const layer = Layer.mergeAll(CoinGeckoClient.layer(config), FolioHttpClient);
-  return <A>(effect: Effect.Effect<A, UpstreamError, CoinGeckoClient | Outbound>): Promise<A> =>
-    Effect.runPromise(Effect.either(Effect.provide(effect, layer))).then((result) => {
-      // **`throw`,不是 `Promise.reject(...)`**:后者在回调里现造一个已拒绝的 promise,
-      // 而它被外层收养要等下一个微任务 —— workerd 在那之前就已经报了一次 unhandledrejection。
-      // 结果是 apps/web 的 workers 测试里,每个「上游挂了但被吞掉」的用例都多一条未处理拒绝
-      // (代码是对的,报告是脏的)。`throw` 直接拒绝外层,中间不存在第二个 promise。
-      if (result._tag === "Left") throw toError(result.left);
-      return result.right;
-    });
-};

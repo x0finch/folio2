@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   cgkRef,
   coinIdOf,
-  parseContract,
   parseMarkets,
   parsePriceSeries,
   parseSearch,
@@ -54,7 +53,7 @@ describe("parseMarkets", () => {
   });
 });
 
-describe("parseSearch / parseSimplePrice / parseContract / parsePriceSeries", () => {
+describe("parseSearch / parseSimplePrice / parsePriceSeries", () => {
   it("search:name 缺则回退 symbol;取 large 优先", () => {
     const out = parseSearch({ coins: [{ id: "bitcoin", symbol: "btc", large: "l.png" }] });
     expect(out).toEqual([
@@ -87,14 +86,6 @@ describe("parseSearch / parseSimplePrice / parseContract / parsePriceSeries", ()
       asOf: 1_700_000_000_000,
     });
     expect(out.has(`${UPSTREAM_ID}/issued:broken`)).toBe(false);
-  });
-
-  it("contract:无 id → null;无价 → 只出元信息", () => {
-    expect(parseContract(null)).toBeNull();
-    expect(parseContract({ symbol: "x" })).toBeNull();
-    const out = parseContract({ id: "usd-coin", symbol: "usdc", image: { small: "s.png" } });
-    expect(out).toMatchObject({ ref: `${UPSTREAM_ID}/issued:usd-coin`, logo: "s.png" });
-    expect(out?.price).toBeUndefined();
   });
 
   it("price series:剔非数、按时间升序", () => {

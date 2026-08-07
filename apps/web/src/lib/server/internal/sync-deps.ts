@@ -14,7 +14,7 @@ import {
   type ProviderNeeds,
 } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
-import type { ValuationMode } from "@folio/oracle";
+import { FxRateResolver, TokenMinter, TokenReader, type ValuationMode } from "@folio/oracle";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
@@ -26,7 +26,7 @@ import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
 import { warmDefiLogosForUser } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
-import { oracleFor } from "./oracle";
+import { runOracle } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
 import { warmHeldPrices } from "./token-enrich";
 
@@ -44,7 +44,7 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   // manual 已退出快照(ADR 0018)→ 预热额外从 manual 的 creds 收集合成余额,否则纯 manual 用户的币暖不到实时价。
   // 与 refreshStalePrices 经同一 userDisplayBalances 收口(三门同源)。
   const manualBalances = await manualBalancesForWarm(userId, accounts);
-  await warmHeldPrices(oracleFor(userId).tokens, userDisplayBalances(snapshots, manualBalances));
+  await runOracle(userId, warmHeldPrices(userDisplayBalances(snapshots, manualBalances)));
   // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。两者都按用户 ——
   // 汇率与平台名图跟代币目录同住一张 per-user 缓存(#202b)。
   try {
@@ -62,25 +62,21 @@ export async function warmTokensForUser(userId: string): Promise<void> {
       error: e instanceof Error ? e.message : String(e),
     });
   }
-  try {
-    await oracleFor(userId).fx.warm();
-  } catch (e) {
-    getLogger(["folio", "web", "sync"]).warn("warmFx failed", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
+  // 汇率:`warm` 现在自己降级(上游挂了记一行、什么都不写),所以这里不再包一层 catch ——
+  // 那层 catch 连自己的 bug 一起吞,而参考层已经把「上游的锅」与「我们的锅」分开了。
+  await runOracle(
+    userId,
+    Effect.flatMap(FxRateResolver, (fx) => fx.warm()),
+  );
   // 新参考层的目录(市值前 N 名):**唯一主动让它跟上的那条路**(#216)。
   // 写路径(mint)按设计永不刷 —— 它只要「哪个币叫 POL」,不该为此让用户等;选币下拉只在
   // 用户打开时才刷 —— 从不开下拉的用户目录会冻住,此后新进前 1000 的币永远认不出来。
   // 内部按一周的 TTL 门控,所以绝大多数同步在这里零请求。放这里正因为这是 best-effort 的位置。
-  try {
-    const rows = await oracleFor(userId).tokens.refreshCatalogue();
-    getLogger(["folio", "web", "sync"]).debug("catalogue warmed", { rows });
-  } catch (e) {
-    getLogger(["folio", "web", "sync"]).warn("refreshCatalogue failed", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
+  const rows = await runOracle(
+    userId,
+    Effect.flatMap(TokenReader, (t) => t.refreshCatalogue()),
+  );
+  getLogger(["folio", "web", "sync"]).debug("catalogue warmed", { rows });
 }
 
 // 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。
@@ -211,7 +207,10 @@ export function buildSyncDeps(): SyncDeps {
         b.tokenRef ? [{ ref: b.tokenRef, seed: seeds.of(b.tokenRef, b.symbol) }] : [],
       );
       if (refs.length === 0) return new Map();
-      return oracleFor(userId).mint.of(refs);
+      return runOracle(
+        userId,
+        Effect.flatMap(TokenMinter, (m) => m.of(refs)),
+      );
     },
     // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);
     // SECRETS_KEY 只在本层(app)见。connectorId 直接即 connector 的 id;无 manifest 视为数据错误
@@ -232,17 +231,16 @@ export function buildSyncDeps(): SyncDeps {
     // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单):据 connectorId 查 manifest →
     // 传 markToMarket 布尔。mode 按 userId 解析(记忆化);缺省 self-first(无 settings 行的用户)。
     // 价从**新参考层**取(#202):`priceOf` 收 token_id,身份由上一步的 mint 给,这里不再解析。
-    revalue: async (userId, connectorId, rows, idByRef) => {
-      // 法币持仓的 USD 值现算走 FX(ADR 0025)—— fx 与 tokens 都是这个用户的参考层能力,一并注入。
-      const oracle = oracleFor(userId);
-      return revalue(
-        oracle.tokens,
-        oracle.fx,
-        getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
-        rows,
-        idByRef,
-        await modeFor(userId),
-      );
-    },
+    revalue: async (userId, connectorId, rows, idByRef) =>
+      // 取价与法币汇率(ADR 0025)两样能力都在 `R` 通道上,一次 `runOracle` 全供上。
+      runOracle(
+        userId,
+        revalue(
+          getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
+          rows,
+          idByRef,
+          await modeFor(userId),
+        ),
+      ),
   };
 }

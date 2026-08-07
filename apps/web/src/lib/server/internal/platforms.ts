@@ -1,6 +1,8 @@
+import { PlatformResolver } from "@folio/oracle";
+import { Effect } from "effect";
 import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
-import { oracleFor } from "./oracle";
+import { runOracle } from "./oracle";
 
 // 平台元数据(链 ∪ 场馆的 name+logo)。**按用户**(#202b):与汇率、代币目录同住一张
 // per-user 缓存(`platform:<键>` 键)。读走 resolve(cache-only、一次批量读、零网络),
@@ -20,5 +22,8 @@ export async function warmPlatformsForUser(userId: string): Promise<void> {
     }
   }
   if (keys.size === 0) return;
-  await oracleFor(userId).platforms.warm([...keys]);
+  await runOracle(
+    userId,
+    Effect.flatMap(PlatformResolver, (p) => p.warm([...keys])),
+  );
 }

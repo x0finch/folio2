@@ -1,11 +1,12 @@
 import { type Outbound, type UpstreamError, UpstreamParseError } from "@folio/client-core";
 import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client";
-import type { FxUpstream } from "@folio/oracle-basic";
 import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
+import { FxUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { BTC_COIN_ID, UPSTREAM_ID } from "./constants";
-import { req, runnerFor, withClient } from "./runtime";
+import { closeOver, transport } from "./layer";
+import { req, withClient } from "./runtime";
 
 const EXCHANGE_RATES_PATH = "/exchange_rates";
 
@@ -47,9 +48,9 @@ export const fetchRatesEffect: Effect.Effect<
   }),
 );
 
-export function createCoinGeckoFxUpstream(config: CoinGeckoConfig = {}): FxUpstream {
-  const run = runnerFor(config);
-  return {
+const make = Effect.map(
+  closeOver,
+  (close): FxUpstream => ({
     id: UPSTREAM_ID,
 
     // 汇率的 BTC 反算基,也是 BTC 美元历史腿的缓存键 —— 与 token adapter 产 BTC ref 同一个串
@@ -57,6 +58,9 @@ export function createCoinGeckoFxUpstream(config: CoinGeckoConfig = {}): FxUpstr
     // 两条历史腿都走 `PriceUpstream.fetchPriceSeries(btcRef, …, vsCurrency)`,本 adapter 不另立取数方法。
     btcRef: tokenRef.issued(UPSTREAM_ID, BTC_COIN_ID),
 
-    fetchRates: () => run(fetchRatesEffect),
-  };
-}
+    fetchRates: () => close(fetchRatesEffect),
+  }),
+);
+
+export const coinGeckoFxUpstreamLayer = (config: CoinGeckoConfig = {}): Layer.Layer<FxUpstream> =>
+  Layer.provide(Layer.effect(FxUpstream, make), transport(config));

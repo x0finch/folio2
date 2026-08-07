@@ -1,6 +1,8 @@
+import { TokenReader } from "@folio/oracle";
 import { createFileRoute } from "@tanstack/react-router";
+import { Effect, Option } from "effect";
 import { serveLogo } from "@/lib/server/internal/logo";
-import { oracleFor } from "@/lib/server/internal/oracle";
+import { runOracle } from "@/lib/server/internal/oracle";
 import { userIdOf } from "@/lib/server/internal/route-auth";
 
 // 代币 logo 代理:内部代币行 id → 经该用户的参考层拿上游图 → 透传 + 缓存头。见 ADR 0008 / PRD #18。
@@ -18,7 +20,15 @@ export const Route = createFileRoute("/api/logo/token/$id")({
       GET: async ({ params, request }: { params: { id: string }; request: Request }) => {
         const userId = await userIdOf(request);
         return serveLogo(
-          async () => (userId ? oracleFor(userId).tokens.logoUrlById(params.id) : undefined),
+          async () =>
+            userId
+              ? Option.getOrUndefined(
+                  await runOracle(
+                    userId,
+                    Effect.flatMap(TokenReader, (t) => t.logoUrlById(params.id)),
+                  ),
+                )
+              : undefined,
           "token",
           params.id,
           { private: true },

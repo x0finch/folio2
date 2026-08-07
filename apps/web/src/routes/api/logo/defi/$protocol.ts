@@ -1,6 +1,8 @@
+import { DefiLogoResolver } from "@folio/oracle";
 import { createFileRoute } from "@tanstack/react-router";
+import { Effect, Option } from "effect";
 import { serveLogo } from "@/lib/server/internal/logo";
-import { oracleFor } from "@/lib/server/internal/oracle";
+import { runOracle } from "@/lib/server/internal/oracle";
 import { userIdOf } from "@/lib/server/internal/route-auth";
 
 // DeFi 协议 logo 代理:协议名(路由段,含空格等已 URL 编码)→ 该用户缓存里那条协议图 URL(同步时
@@ -15,7 +17,15 @@ export const Route = createFileRoute("/api/logo/defi/$protocol")({
       GET: async ({ params, request }: { params: { protocol: string }; request: Request }) => {
         const userId = await userIdOf(request);
         return serveLogo(
-          async () => (userId ? oracleFor(userId).defiLogos.resolve(params.protocol) : undefined),
+          async () =>
+            userId
+              ? Option.getOrUndefined(
+                  await runOracle(
+                    userId,
+                    Effect.flatMap(DefiLogoResolver, (d) => d.resolve(params.protocol)),
+                  ),
+                )
+              : undefined,
           "defi",
           params.protocol,
           { private: true },

@@ -524,6 +524,9 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
+      effect:
+        specifier: 'catalog:'
+        version: 3.22.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -536,9 +539,15 @@ importers:
 
   packages/oracle/basic:
     dependencies:
+      '@folio/client-core':
+        specifier: workspace:*
+        version: link:../../clients/core
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../ref
+      effect:
+        specifier: 'catalog:'
+        version: 3.22.1
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -549,12 +558,18 @@ importers:
 
   packages/oracle/entry:
     dependencies:
+      '@folio/client-core':
+        specifier: workspace:*
+        version: link:../../clients/core
       '@folio/oracle-basic':
         specifier: workspace:*
         version: link:../basic
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../ref
+      effect:
+        specifier: 'catalog:'
+        version: 3.22.1
     devDependencies:
       typescript:
         specifier: 'catalog:'

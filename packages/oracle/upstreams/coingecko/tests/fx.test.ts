@@ -1,5 +1,8 @@
+import { runClient } from "@folio/client-core/testing";
+import { FxUpstream } from "@folio/oracle-basic/ports";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { createCoinGeckoFxUpstream, fetchRatesEffect } from "../src/fx";
+import { coinGeckoFxUpstreamLayer, fetchRatesEffect } from "../src/fx";
 import { failing, run, stubbing } from "./harness";
 
 // 上游那个端点以 **BTC** 为基准:value = 1 BTC 值多少该币种。
@@ -52,15 +55,25 @@ describe("fetchRates", () => {
     expect(err.cause).toBe("missing/invalid usd rate");
   });
 
-  it("id 自报为当前上游 —— 与代币那面同一个命名者", () => {
-    expect(createCoinGeckoFxUpstream().id).toBe("coingecko");
+  it("id 自报为当前上游 —— 与代币那面同一个命名者", async () => {
+    const id = await runClient(
+      stubbing(() => ({})).http,
+      Effect.map(FxUpstream, (u) => u.id).pipe(Effect.provide(coinGeckoFxUpstreamLayer())),
+      "none",
+    );
+    expect(id).toBe("coingecko");
   });
 });
 
 // 汇率的 BTC 反算基(ADR 0026):历史反算取「BTC 在某币种下的价」走的是 PriceUpstream.fetchPriceSeries
 //(见 upstream.test.ts 的 vsCurrency 用例),FxUpstream 只声明这个基、不另立取数方法。
 describe("btcRef", () => {
-  it("btcRef = coingecko/issued:bitcoin —— 与代币那面 BTC 历史价同键(可复用)", () => {
-    expect(createCoinGeckoFxUpstream().btcRef).toBe("coingecko/issued:bitcoin");
+  it("btcRef = coingecko/issued:bitcoin —— 与代币那面 BTC 历史价同键(可复用)", async () => {
+    const ref = await runClient(
+      stubbing(() => ({})).http,
+      Effect.map(FxUpstream, (u) => u.btcRef).pipe(Effect.provide(coinGeckoFxUpstreamLayer())),
+      "none",
+    );
+    expect(ref).toBe("coingecko/issued:bitcoin");
   });
 });

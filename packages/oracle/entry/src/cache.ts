@@ -2,9 +2,7 @@ import type {
   CacheEntry,
   CacheStore,
   TokenCandidate,
-  TokenInfo,
   TokenMetaUpstream,
-  TokenPrice,
 } from "@folio/oracle-basic";
 import {
   FX_TTL_MS,
@@ -14,6 +12,7 @@ import {
   PRICE_TTL_MS,
   WARM_TTL_MS,
 } from "@folio/oracle-basic";
+import { Clock, Effect, Option, Schema } from "effect";
 import { swr } from "./refresh";
 
 // 参考层的四样缓存,一张 per-user 的 KV 表,**四种键**:
@@ -27,6 +26,9 @@ import { swr } from "./refresh";
 //
 // symbol 消歧的候选**不单独存** —— 候选恒是 warm 集的子集,从同一个 blob 里筛就行。
 // 整张表删空功能不坏,只是下一次访问要回一趟上游。
+//
+// 本文件的函数**收已解析好的服务对象**(`cache` / `upstream`),不从 context 取 —— 于是它们的
+// `R` 是 `never`,服务的方法签名不会把自己的依赖漏给调用方。从 Tag 取服务只发生在 Layer 那一层。
 
 export const cacheKeys = {
   warm: "warm",
@@ -35,24 +37,51 @@ export const cacheKeys = {
   defiLogo: (protocol: string) => `defi-logo:${protocol}`,
 } as const;
 
-// warm blob:一次整份写、一次整份读。行的形状沿用现有 `putWarm` 的 `{ info, price }` 对。
-export interface WarmBlob {
-  asOf: number;
-  rows: { info: WarmInfo; price: TokenPrice }[];
-}
+// —— 缓存里存的形状,用 Schema 声明并**解码**,不是 `as` 断言 ——
+//
+// 这些 blob 是我们自己写进 D1 的,所以「形状不对」不是上游变了,而是**我们上一个版本写的旧形状**
+// (或者手动改过库)。老代码为此手写了两处形状检查(`!Array.isArray(value.rows)`、
+// `typeof entry.name === "string" || entry.name === null`),第三处(fx 的 number)靠 typeof —— 三种写法。
+// 用 Schema 之后判据只有一处,而且**解不动就当 miss**:回源重写一份新形状,自愈。
+// 断言的话旧形状会一路流到展示层,变成「某几行没有名字」这种查不出来的怪事。
+const TokenPriceShape = Schema.Struct({
+  unitPrice: Schema.Number,
+  change24h: Schema.optional(Schema.Number),
+  marketCapRank: Schema.optional(Schema.Number),
+  asOf: Schema.Number,
+});
 
 // warm 里的 info 还没进库 → 没有内部 id、`ref` 必然非空(与 `UpstreamToken` 同源)。
 // 也没有 `infoStale`:那是「库里那行该回源刷了吗」,而这份**就是**刚从上游拿的。
-export type WarmInfo = Omit<TokenInfo, "id" | "ref" | "providerLogo" | "infoStale"> & {
-  ref: string;
-};
+const WarmInfoShape = Schema.Struct({
+  ref: Schema.String,
+  symbol: Schema.String,
+  name: Schema.String,
+  logo: Schema.optional(Schema.String),
+});
+
+// warm blob:一次整份写、一次整份读。行的形状沿用现有 `putWarm` 的 `{ info, price }` 对。
+const WarmBlobShape = Schema.Struct({
+  asOf: Schema.Number,
+  rows: Schema.Array(Schema.Struct({ info: WarmInfoShape, price: TokenPriceShape })),
+});
+
+export type WarmBlob = Schema.Schema.Type<typeof WarmBlobShape>;
+export type WarmRow = WarmBlob["rows"][number];
+
+const decodeWarm = Schema.decodeUnknownOption(WarmBlobShape);
 
 // 平台缓存里存的一条。**`name: null` = 否定缓存** —— 问过上游、它的链表里没有这个键。
 // 与「这条压根没有」必须分开:后者会让每一次预热都为了这一个键重拉整张链表。
-export interface PlatformEntry {
-  name: string | null;
-  logo?: string;
-}
+const PlatformEntryShape = Schema.Struct({
+  name: Schema.NullOr(Schema.String),
+  logo: Schema.optional(Schema.String),
+});
+export type PlatformEntry = Schema.Schema.Type<typeof PlatformEntryShape>;
+const decodePlatform = Schema.decodeUnknownOption(PlatformEntryShape);
+
+const decodeNumber = Schema.decodeUnknownOption(Schema.Number);
+const decodeString = Schema.decodeUnknownOption(Schema.String);
 
 // —— warm ——
 //
@@ -71,37 +100,41 @@ export interface PlatformEntry {
 //   refreshCatalogue 同步后的后台预热    目录超过 WARM_TTL_MS(一周)就刷 ← 唯一主动跟进的那条
 //
 // 没有第三条的话,不打开选币下拉的用户目录会冻在第一次同步那一刻,此后新进前 1000 的币永远
-// 认不出来。三条都不看 `hit.stale`(store 过期不删),判据一律落在 blob 的 `asOf` 上。
-
-async function warmBlob(
+// 认不出来。三条都不看缓存条目的 `stale`(store 过期不删),判据一律落在 blob 的 `asOf` 上。
+const warmBlob = (
   cache: CacheStore,
   upstream: TokenMetaUpstream,
   topN: number,
-  now: number,
-  isStale: (blob: WarmBlob) => boolean,
-): Promise<WarmBlob["rows"]> {
-  const blob = await swr<WarmBlob>({
-    read: async () => {
-      const hit = await cache.get(cacheKeys.warm);
-      const value = hit?.value as WarmBlob | undefined;
-      if (!value || !Array.isArray(value.rows)) return undefined; // 没有 → 回源(躲不掉)
-      return { value, stale: isStale(value) };
-    },
-    fetch: async () => {
-      const tokens = await upstream.fetchMarkets({ topN });
-      return {
+  isStale: (blob: WarmBlob, now: number) => boolean,
+): Effect.Effect<readonly WarmRow[]> =>
+  Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+
+    const read = Effect.map(cache.get(cacheKeys.warm), (hit) =>
+      // 没有 / 解不动 → 回源(躲不掉)
+      Option.flatMap(hit, (entry) =>
+        Option.map(decodeWarm(entry.value), (value) => ({ value, stale: isStale(value, now) })),
+      ),
+    );
+
+    const fetch = Effect.map(upstream.fetchMarkets({ topN }), (tokens) =>
+      Option.some<WarmBlob>({
         asOf: now,
         rows: tokens.map((t) => ({
           info: { symbol: t.symbol, name: t.name, logo: t.logo, ref: t.ref },
           price: t.price ?? { unitPrice: 0, asOf: now },
         })),
-      };
-    },
-    // **一次整份写**,不是逐行 upsert —— 前 N 名是一个快照,逐行写会写出半新半旧的榜。
-    write: (value) => cache.put(cacheKeys.warm, value, WARM_TTL_MS),
+      }),
+    );
+
+    const blob = yield* read.pipe(
+      swr("cache.warm", fetch, (value) =>
+        // **一次整份写**,不是逐行 upsert —— 前 N 名是一个快照,逐行写会写出半新半旧的榜。
+        cache.put(cacheKeys.warm, value, WARM_TTL_MS),
+      ),
+    );
+    return dedupeByRef(Option.match(blob, { onNone: () => [], onSome: (b) => b.rows }));
   });
-  return dedupeByRef(blob?.rows ?? []);
-}
 
 // 目录是一个**集合**:一个币一行。在**读**这一侧兜住,而不只是在上游那侧去重,有两个理由:
 //   · 已经存进缓存的脏目录得治 —— 这份 blob 一周才刷一次,不然修完还要脏一周
@@ -110,9 +143,9 @@ async function warmBlob(
 // 重复不是假想:上游的分页来自不同快照,同一个币会在两页各出现一次(见 coingecko adapter 的注释)。
 // 后果都是静默的 —— 按 symbol 认币时它会跟**自己**比排名、永远碾压不了「次席」,于是那个币
 // 认不出来;选币列表那边则是同一个 key 出现两次,React 卸载了却摘不干净 DOM,留下僵尸行。
-function dedupeByRef(rows: WarmBlob["rows"]): WarmBlob["rows"] {
+function dedupeByRef(rows: readonly WarmRow[]): readonly WarmRow[] {
   const seen = new Set<string>();
-  const out: WarmBlob["rows"] = [];
+  const out: WarmRow[] = [];
   for (const r of rows) {
     if (seen.has(r.info.ref)) continue; // 先出现的胜出(它排得更靠前)
     seen.add(r.info.ref);
@@ -131,14 +164,11 @@ function dedupeByRef(rows: WarmBlob["rows"]): WarmBlob["rows"] {
  * 代价:某个币新进前 1000,要等下一次橱窗刷新(或预热)之后才认得出来。可接受 —— 它本来
  * 也得先爬进前 1000。
  */
-export function warmCatalogue(
+export const warmCatalogue = (
   cache: CacheStore,
   upstream: TokenMetaUpstream,
   topN: number,
-  now: number,
-): Promise<WarmBlob["rows"]> {
-  return warmBlob(cache, upstream, topN, now, () => false);
-}
+): Effect.Effect<readonly WarmRow[]> => warmBlob(cache, upstream, topN, () => false);
 
 /**
  * 预热读者(同步之后在后台跑)。**目录旧了就整份刷一次** —— 这是唯一一条「主动让目录跟上」的路。
@@ -149,36 +179,32 @@ export function warmCatalogue(
  *
  * 跑在同步后的 best-effort 预热里(`waitUntil`,吞错),所以这 4 次请求不在任何人的关键路径上。
  */
-export function refreshCatalogue(
+export const refreshCatalogue = (
   cache: CacheStore,
   upstream: TokenMetaUpstream,
   topN: number,
-  now: number,
-): Promise<WarmBlob["rows"]> {
-  return warmBlob(cache, upstream, topN, now, (blob) => now - blob.asOf > WARM_TTL_MS);
-}
+): Effect.Effect<readonly WarmRow[]> =>
+  warmBlob(cache, upstream, topN, (blob, now) => now - blob.asOf > WARM_TTL_MS);
 
 /**
  * 橱窗读者(选币下拉的默认列)。**价旧了就刷** —— 用户正看着这些数字,而且是他自己点开的,
  * 这一趟网络他等得起。判据是 blob 的 `asOf`,与缓存条目的过期戳无关。
  */
-export function warmMarkets(
+export const warmMarkets = (
   cache: CacheStore,
   upstream: TokenMetaUpstream,
   topN: number,
-  now: number,
-): Promise<WarmBlob["rows"]> {
-  return warmBlob(cache, upstream, topN, now, (blob) => now - blob.asOf > PRICE_TTL_MS);
-}
+): Effect.Effect<readonly WarmRow[]> =>
+  warmBlob(cache, upstream, topN, (blob, now) => now - blob.asOf > PRICE_TTL_MS);
 
 // 市值升序取前 limit(无 rank 者垫底)。
-export function topByRank(rows: WarmBlob["rows"], limit: number): WarmBlob["rows"] {
-  const rank = (r: WarmBlob["rows"][number]) => r.price.marketCapRank ?? Number.POSITIVE_INFINITY;
+export function topByRank(rows: readonly WarmRow[], limit: number): readonly WarmRow[] {
+  const rank = (r: WarmRow) => r.price.marketCapRank ?? Number.POSITIVE_INFINITY;
   return [...rows].sort((a, b) => rank(a) - rank(b)).slice(0, limit);
 }
 
 // 按 symbol 筛候选。**与排行榜同一份 rows** —— 候选不额外存一份。
-export function candidatesBySymbol(rows: WarmBlob["rows"], symbol: string): TokenCandidate[] {
+export function candidatesBySymbol(rows: readonly WarmRow[], symbol: string): TokenCandidate[] {
   const want = normalizeSymbol(symbol);
   const out: TokenCandidate[] = [];
   for (const r of rows) {
@@ -193,86 +219,84 @@ export function candidatesBySymbol(rows: WarmBlob["rows"], symbol: string): Toke
 // 全部链;逐键往返会把 1 次 D1 变成 N 次。TTL 各键自带:汇率慢变但不静态(6h),
 // 链和场馆的名与图近乎静态(30d),而「问过、上游没有」只记 1d(新链随时可能被收录)。
 
-export async function readFx(cache: CacheStore, currency: string): Promise<number | undefined> {
-  const hit = await cache.get(cacheKeys.fx(currency));
-  return typeof hit?.value === "number" ? hit.value : undefined;
-}
+export const readFx = (cache: CacheStore, currency: string): Effect.Effect<Option.Option<number>> =>
+  Effect.map(cache.get(cacheKeys.fx(currency)), (hit) =>
+    Option.flatMap(hit, (entry) => decodeNumber(entry.value)),
+  );
 
 // 一批币种的新鲜度(预热用):miss 的键不出现,命中的带 stale。
-export function readFxFreshness(
+export const readFxFreshness = (
   cache: CacheStore,
   currencies: readonly string[],
-): Promise<Map<string, CacheEntry>> {
-  return cache.getMany(currencies.map((c) => cacheKeys.fx(c)));
-}
+): Effect.Effect<Map<string, CacheEntry>> => cache.getMany(currencies.map((c) => cacheKeys.fx(c)));
 
 // 一次批量写回。上游那个端点一把全给,所以这里恒是「十来个键一个批次」。
-export function writeFx(
+export const writeFx = (
   cache: CacheStore,
   rates: readonly { currency: string; usdPerUnit: number }[],
-): Promise<void> {
-  return cache.putMany(
+): Effect.Effect<void> =>
+  cache.putMany(
     rates.map((r) => ({ key: cacheKeys.fx(r.currency), value: r.usdPerUnit, ttlMs: FX_TTL_MS })),
   );
-}
 
 // 读一批平台缓存。**返回 `{name: null}` 与「键不在结果里」是两件事**:前者是「问过、上游没有」,
 // 后者是「没问过」。`stale` 一并给出来 —— 预热据它决定要不要重拉,展示则一律用旧的。
-export async function readPlatforms(
+export const readPlatforms = (
   cache: CacheStore,
   keys: readonly string[],
-): Promise<Map<string, { entry: PlatformEntry; stale: boolean }>> {
-  const hits = await cache.getMany(keys.map(cacheKeys.platform));
-  const out = new Map<string, { entry: PlatformEntry; stale: boolean }>();
-  for (const key of keys) {
-    const hit = hits.get(cacheKeys.platform(key));
-    const entry = hit?.value as PlatformEntry | undefined;
-    if (!entry || !(typeof entry.name === "string" || entry.name === null)) continue;
-    out.set(key, { entry, stale: hit?.stale ?? true });
-  }
-  return out;
-}
+): Effect.Effect<Map<string, { entry: PlatformEntry; stale: boolean }>> =>
+  Effect.map(cache.getMany(keys.map(cacheKeys.platform)), (hits) => {
+    const out = new Map<string, { entry: PlatformEntry; stale: boolean }>();
+    for (const key of keys) {
+      const hit = hits.get(cacheKeys.platform(key));
+      if (!hit) continue;
+      const entry = decodePlatform(hit.value);
+      if (Option.isNone(entry)) continue;
+      out.set(key, { entry: entry.value, stale: hit.stale });
+    }
+    return out;
+  });
 
 // 一次批量写。命中写长 TTL(名与图近静态),否定写短 TTL(新链随时可能被收录)。
-export function writePlatforms(
+export const writePlatforms = (
   cache: CacheStore,
   entries: readonly { key: string; entry: PlatformEntry }[],
-): Promise<void> {
-  return cache.putMany(
+): Effect.Effect<void> =>
+  cache.putMany(
     entries.map(({ key, entry }) => ({
       key: cacheKeys.platform(key),
       value: entry,
       ttlMs: entry.name === null ? PLATFORM_NEG_TTL_MS : PLATFORM_TTL_MS,
     })),
   );
-}
 
 // —— DeFi 协议 logo ——
 // protocol → 上游图 URL。与 platform 不同:URL 由同步时的余额 meta 直接给(无上游拉取),
-// 因此**无否定缓存** —— 没图就不写,读得 undefined → 首字母兜底。近静态,复用平台的长 TTL;
+// 因此**无否定缓存** —— 没图就不写,读得 none → 首字母兜底。近静态,复用平台的长 TTL;
 // 过期不删(user_cache 语义),值照读,下次同步重写刷新 TTL。读写走批量口(与 platform 同理)。
-export async function readDefiLogos(
+export const readDefiLogos = (
   cache: CacheStore,
   protocols: readonly string[],
-): Promise<Map<string, string>> {
-  const hits = await cache.getMany(protocols.map(cacheKeys.defiLogo));
-  const out = new Map<string, string>();
-  for (const p of protocols) {
-    const v = hits.get(cacheKeys.defiLogo(p))?.value;
-    if (typeof v === "string") out.set(p, v);
-  }
-  return out;
-}
+): Effect.Effect<Map<string, string>> =>
+  Effect.map(cache.getMany(protocols.map(cacheKeys.defiLogo)), (hits) => {
+    const out = new Map<string, string>();
+    for (const p of protocols) {
+      const hit = hits.get(cacheKeys.defiLogo(p));
+      if (!hit) continue;
+      const logo = decodeString(hit.value);
+      if (Option.isSome(logo)) out.set(p, logo.value);
+    }
+    return out;
+  });
 
-export function writeDefiLogos(
+export const writeDefiLogos = (
   cache: CacheStore,
   entries: readonly { protocol: string; logo: string }[],
-): Promise<void> {
-  return cache.putMany(
+): Effect.Effect<void> =>
+  cache.putMany(
     entries.map(({ protocol, logo }) => ({
       key: cacheKeys.defiLogo(protocol),
       value: logo,
       ttlMs: PLATFORM_TTL_MS,
     })),
   );
-}
