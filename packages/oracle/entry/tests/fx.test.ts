@@ -2,7 +2,7 @@ import { FX_TTL_MS, MS_PER_DAY, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "@foli
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { FxService } from "../src";
-import { deriveFiatDaily, fxKey, readFx, writeFx } from "../src/services/fx";
+import { btcUsdDaily, deriveFiatDaily, fxKey, readFx, writeFx } from "../src/services/fx";
 import { harness, now0, upstreamDown } from "./fakes";
 
 // 汇率服务的三个方法,两种判据:
@@ -414,5 +414,78 @@ describe("rateSeries —— 历史日汇率", () => {
   it("from > to → 空", async () => {
     const h = setup();
     expect(await h.run(withFx((fx) => fx.rateSeries("EUR", day(-1), day(-2))))).toEqual([]);
+  });
+});
+
+// —— BTC 美元腿(ADR 0026 的「优先读缓存、不重取」)——
+// **直接打这个函数**:它收已解析好的端口、`R` 是 `never`(与 `readFx` / `writeFx` / `warmBlob`
+// 同款)。以前它闭包在 layer 的 `make` 里,这条规则只能透过 `rateSeries` 绕一圈验 ——
+// 摆两条腿、跑完整条反算、最后数请求次数,而那一路上任何一步坏了都会让这条断言变绿。
+describe("BTC 美元腿:优先读缓存,不重取", () => {
+  const leg = (h: ReturnType<typeof setup>, buckets: readonly number[]) =>
+    h.run(btcUsdDaily(h.prices, h.upstream, BTC_REF, buckets, TODAY));
+
+  it("全都命中缓存 → 零请求", async () => {
+    const h = setup();
+    await h.run(
+      h.prices.putDailyByRef(BTC_REF, [
+        { dayBucket: TODAY - 2, unitPrice: 120000 },
+        { dayBucket: TODAY - 1, unitPrice: 100000 },
+      ]),
+    );
+
+    expect(await leg(h, [TODAY - 2, TODAY - 1])).toEqual(
+      new Map([
+        [TODAY - 2, 120000],
+        [TODAY - 1, 100000],
+      ]),
+    );
+    expect(h.upstream.calls).toEqual([]);
+  });
+
+  it("缺过去日 → 取一次并落库(顺带暖给 BTC 持有者)", async () => {
+    const h = setup();
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY - 2]: 120000, [TODAY - 1]: 100000 }));
+
+    expect(await leg(h, [TODAY - 2, TODAY - 1])).toEqual(
+      new Map([
+        [TODAY - 2, 120000],
+        [TODAY - 1, 100000],
+      ]),
+    );
+    expect(h.upstream.calls).toEqual([legCall("USD")]); // 一次,不是逐日
+    // 落库了 → 下一轮(以及任何 BTC 持有者的历史曲线)直接命中。
+    expect(h.prices.dailyByRef.get(BTC_REF)).toEqual(
+      new Map([
+        [TODAY - 2, 120000],
+        [TODAY - 1, 100000],
+      ]),
+    );
+  });
+
+  it("**今日桶恒取**,哪怕过去日全都命中 —— 但今日不落库(可变)", async () => {
+    const h = setup();
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY]: 99000 }));
+    await h.run(h.prices.putDailyByRef(BTC_REF, [{ dayBucket: TODAY - 1, unitPrice: 100000 }]));
+
+    expect(await leg(h, [TODAY - 1, TODAY])).toEqual(
+      new Map([
+        [TODAY - 1, 100000],
+        [TODAY, 99000],
+      ]),
+    );
+    expect(h.upstream.calls).toEqual([legCall("USD")]); // 为今日那一桶出的网
+    // 今日不进库 —— 明天它成了过去日,会重取一次定值。
+    expect(h.prices.dailyByRef.get(BTC_REF)).toEqual(new Map([[TODAY - 1, 100000]]));
+  });
+
+  it("缓存里的值胜出 —— 同一天上游又给了个不同的数也不覆盖", async () => {
+    const h = setup();
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY - 1]: 111111, [TODAY]: 99000 }));
+    await h.run(h.prices.putDailyByRef(BTC_REF, [{ dayBucket: TODAY - 1, unitPrice: 100000 }]));
+
+    // 过去日不可变:落过库的那天以库里为准(上游这次给的 111111 丢掉)。
+    expect((await leg(h, [TODAY - 1, TODAY])).get(TODAY - 1)).toBe(100000);
+    expect(h.prices.dailyByRef.get(BTC_REF)?.get(TODAY - 1)).toBe(100000);
   });
 });

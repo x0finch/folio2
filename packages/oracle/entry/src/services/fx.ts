@@ -1,5 +1,5 @@
 import type { UpstreamError } from "@folio/client-core";
-import type { CacheEntry, TokenPricePoint } from "@folio/oracle-basic";
+import type { CacheEntry, TokenPricePoint, TokenRef } from "@folio/oracle-basic";
 import {
   dayBucketOf,
   FIAT_NAMER,
@@ -88,6 +88,41 @@ export const writeFx = (
     rates.map((r) => ({ key: fxKey(r.currency), value: r.usdPerUnit, ttlMs: FX_TTL_MS })),
   );
 
+// BTC 美元历史腿:优先读 `token_daily_prices` 的 `coingecko/issued:bitcoin`(BTC 持有者 / 上一轮
+// 已暖的直接命中),缺的过去日拉一次并落库(顺带暖给 BTC 持有者),今日桶现取不落。返回全桶的
+// Map(命中什么给什么)。ADR 0026 的「BTC 美元腿优先读缓存、不重取」就在这里。
+//
+// **收已解析好的服务对象**(与本文件其余几个辅助件、以及 `./warm` 同款),所以它的 `R` 是
+// `never`、能被直接喂假端口打 —— 那条「不重取」的规则因此有自己的用例,不必绕整条反算去数请求。
+export const btcUsdDaily = (
+  prices: TokenPriceStore,
+  upstream: TokenUpstream,
+  btcRef: TokenRef,
+  buckets: readonly number[],
+  todayB: number,
+): Effect.Effect<Map<number, number>, UpstreamError> =>
+  Effect.gen(function* () {
+    const cached = yield* prices.getDailyByRef(btcRef, buckets);
+    const missingPast = buckets.filter((b) => b < todayB && !cached.has(b));
+    const needsToday = buckets.includes(todayB);
+    if (missingPast.length === 0 && !needsToday) return cached;
+
+    const fromMs = Math.min(...buckets) * MS_PER_DAY;
+    const toMs = Math.max(...buckets) * MS_PER_DAY + (MS_PER_DAY - 1);
+    const fetched = new Map<number, number>();
+    for (const pt of yield* upstream.fetchPriceSeries(btcRef, fromMs, toMs)) {
+      if (pt.unitPrice > 0) fetched.set(dayBucketOf(pt.atMs), pt.unitPrice); // 升序 → 当日最后一点胜出
+    }
+    const toPersist = [...fetched.entries()]
+      .filter(([b]) => b < todayB && !cached.has(b))
+      .map(([dayBucket, unitPrice]) => ({ dayBucket, unitPrice }));
+    if (toPersist.length > 0) yield* prices.putDailyByRef(btcRef, toPersist);
+
+    const out = new Map(cached);
+    for (const [b, v] of fetched) if (!out.has(b)) out.set(b, v);
+    return out;
+  });
+
 // 逐日反算法币美元价(纯):usd_per_unit(code)@日 = BTC美元@日 ÷ BTC该币@日。缺任一腿、或
 // BTC该币 ≤ 0(坏值 / 除零)的日**跳过**——宁可那天没历史价、走降级链,也不出一个乱数。导出供纯测。
 export function deriveFiatDaily(
@@ -116,35 +151,6 @@ const make = Effect.gen(function* () {
   // 从 `FxUpstream` 只要 `btcRef` 一个字段 —— 那是 fx 与代币两个世界的桥(BTC 反算的基),
   // 留在 `FxUpstream` 上是对的,不为了消掉这条依赖去挪它。
   const { btcRef } = upstream;
-
-  // BTC 美元历史腿:优先读 `token_daily_prices` 的 `coingecko/issued:bitcoin`(BTC 持有者 / 上一轮
-  // 已暖的直接命中),缺的过去日拉一次并落库(顺带暖给 BTC 持有者),今日桶现取不落。返回全桶的
-  // Map(命中什么给什么)。ADR 0026 的「BTC 美元腿优先读缓存、不重取」就在这里。
-  const btcUsdDaily = (
-    buckets: readonly number[],
-    todayB: number,
-  ): Effect.Effect<Map<number, number>, UpstreamError> =>
-    Effect.gen(function* () {
-      const cached = yield* prices.getDailyByRef(btcRef, buckets);
-      const missingPast = buckets.filter((b) => b < todayB && !cached.has(b));
-      const needsToday = buckets.includes(todayB);
-      if (missingPast.length === 0 && !needsToday) return cached;
-
-      const fromMs = Math.min(...buckets) * MS_PER_DAY;
-      const toMs = Math.max(...buckets) * MS_PER_DAY + (MS_PER_DAY - 1);
-      const fetched = new Map<number, number>();
-      for (const pt of yield* priceUpstream.fetchPriceSeries(btcRef, fromMs, toMs)) {
-        if (pt.unitPrice > 0) fetched.set(dayBucketOf(pt.atMs), pt.unitPrice); // 升序 → 当日最后一点胜出
-      }
-      const toPersist = [...fetched.entries()]
-        .filter(([b]) => b < todayB && !cached.has(b))
-        .map(([dayBucket, unitPrice]) => ({ dayBucket, unitPrice }));
-      if (toPersist.length > 0) yield* prices.putDailyByRef(btcRef, toPersist);
-
-      const out = new Map(cached);
-      for (const [b, v] of fetched) if (!out.has(b)) out.set(b, v);
-      return out;
-    });
 
   const service: FxService = {
     resolve: (currency) =>
@@ -206,7 +212,7 @@ const make = Effect.gen(function* () {
             const [series, btcUsd] = yield* Effect.all(
               [
                 priceUpstream.fetchPriceSeries(btcRef, fromMs, toMs, CODE),
-                btcUsdDaily(buckets, todayB),
+                btcUsdDaily(prices, priceUpstream, btcRef, buckets, todayB),
               ],
               { concurrency: 2 },
             );
