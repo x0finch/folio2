@@ -18,7 +18,9 @@ import { Effect, Match } from "effect";
 //
 // 放 entry 不放 basic:basic 是契约层、被客户端代码引用,不该对 `@folio/client-core` 做值导入
 // (它会把整个 HTTP 层拖进客户端 bundle)。翻译是**适配**,适配层就是它的家。
-const fromUpstreamError: (error: UpstreamError) => ConnectorError =
+// **导出**给需要在翻译前看一眼 `status` 的适配层用(目前只有 bitcoin:它要把永久 4xx 判成
+// 「重试改变不了」)。多数适配层用下面的 `asConnector` 就够。
+export const fromUpstreamError: (error: UpstreamError) => ConnectorError =
   Match.type<UpstreamError>().pipe(
     Match.tag(
       "UpstreamAuthError",

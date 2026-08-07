@@ -1,8 +1,5 @@
 import { defineConnector, Spot } from "@folio/connectors-basic";
-import {
-  coinstatsAccountCreds,
-  createCoinstatsProvider,
-} from "@folio/connectors-provider-coinstats";
+import { coinstatsAccountCreds, createCoinstatsProvider } from "./coinstats/provider";
 
 // solana connector manifest —— 组装契约(基座)+ provider(coinstats,connectionId "solana")。
 // coinstats 一个 provider 包服务 solana/sui/cosmos 三个 connector:AC 声明与工厂共享,

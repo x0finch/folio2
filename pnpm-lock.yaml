@@ -53,9 +53,6 @@ importers:
       '@folio/oracle-upstream-coingecko':
         specifier: workspace:*
         version: link:../../packages/oracle/upstreams/coingecko
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       '@folio/sync':
         specifier: workspace:*
         version: link:../../packages/sync
@@ -132,6 +129,9 @@ importers:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.16.20
         version: 0.16.20(@cloudflare/workers-types@4.20260626.1)(@vitest/runner@4.1.9)(@vitest/snapshot@4.1.9)(vitest@4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))
+      '@folio/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@playwright/test':
         specifier: ^1.62.1
         version: 1.62.1
@@ -220,19 +220,6 @@ importers:
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@1.8.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/blockbook:
-    dependencies:
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../shared
-    devDependencies:
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/clients/blockbook2:
     dependencies:
       '@folio/client-core':
         specifier: workspace:*
@@ -419,245 +406,43 @@ importers:
       '@folio/binance-client':
         specifier: workspace:*
         version: link:../../clients/binance
+      '@folio/bitcoin-derive':
+        specifier: workspace:*
+        version: link:../../clients/bitcoin-derive
+      '@folio/blockbook-client':
+        specifier: workspace:*
+        version: link:../../clients/blockbook
+      '@folio/bybit-client':
+        specifier: workspace:*
+        version: link:../../clients/bybit
       '@folio/client-core':
         specifier: workspace:*
         version: link:../../clients/core
+      '@folio/coinstats-client':
+        specifier: workspace:*
+        version: link:../../clients/coinstats
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../basic
-      '@folio/connectors-provider-blockbook':
+      '@folio/hyperliquid-client':
         specifier: workspace:*
-        version: link:../providers/blockbook
-      '@folio/connectors-provider-bybit':
+        version: link:../../clients/hyperliquid
+      '@folio/okx-client':
         specifier: workspace:*
-        version: link:../providers/bybit
-      '@folio/connectors-provider-coinstats':
-        specifier: workspace:*
-        version: link:../providers/coinstats
-      '@folio/connectors-provider-hyperliquid':
-        specifier: workspace:*
-        version: link:../providers/hyperliquid
-      '@folio/connectors-provider-okx':
-        specifier: workspace:*
-        version: link:../providers/okx
-      '@folio/connectors-provider-rabby':
-        specifier: workspace:*
-        version: link:../providers/rabby
-      '@folio/connectors-provider-zerion':
-        specifier: workspace:*
-        version: link:../providers/zerion
+        version: link:../../clients/okx
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../oracle/ref
+      '@folio/rabby-client':
+        specifier: workspace:*
+        version: link:../../clients/rabby
+      '@folio/zerion-client':
+        specifier: workspace:*
+        version: link:../../clients/zerion
       zod:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
-      effect:
-        specifier: ^3.22.1
-        version: 3.22.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/connectors/providers/blockbook:
-    dependencies:
-      '@folio/bitcoin-derive':
-        specifier: workspace:*
-        version: link:../../../clients/bitcoin-derive
-      '@folio/blockbook-client':
-        specifier: workspace:*
-        version: link:../../../clients/blockbook
-      '@folio/connectors-basic':
-        specifier: workspace:*
-        version: link:../../basic
-      '@folio/oracle-ref':
-        specifier: workspace:*
-        version: link:../../../oracle/ref
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-    devDependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../../clients/core
-      effect:
-        specifier: ^3.22.1
-        version: 3.22.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/connectors/providers/bybit:
-    dependencies:
-      '@folio/connectors-basic':
-        specifier: workspace:*
-        version: link:../../basic
-      '@folio/oracle-ref':
-        specifier: workspace:*
-        version: link:../../../oracle/ref
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-    devDependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../../clients/core
-      effect:
-        specifier: ^3.22.1
-        version: 3.22.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/connectors/providers/coinstats:
-    dependencies:
-      '@folio/connectors-basic':
-        specifier: workspace:*
-        version: link:../../basic
-      '@folio/oracle-ref':
-        specifier: workspace:*
-        version: link:../../../oracle/ref
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-    devDependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../../clients/core
-      effect:
-        specifier: ^3.22.1
-        version: 3.22.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/connectors/providers/hyperliquid:
-    dependencies:
-      '@folio/connectors-basic':
-        specifier: workspace:*
-        version: link:../../basic
-      '@folio/oracle-ref':
-        specifier: workspace:*
-        version: link:../../../oracle/ref
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-    devDependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../../clients/core
-      effect:
-        specifier: ^3.22.1
-        version: 3.22.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/connectors/providers/okx:
-    dependencies:
-      '@folio/connectors-basic':
-        specifier: workspace:*
-        version: link:../../basic
-      '@folio/oracle-ref':
-        specifier: workspace:*
-        version: link:../../../oracle/ref
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-    devDependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../../clients/core
-      effect:
-        specifier: ^3.22.1
-        version: 3.22.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/connectors/providers/rabby:
-    dependencies:
-      '@folio/connectors-basic':
-        specifier: workspace:*
-        version: link:../../basic
-      '@folio/oracle-ref':
-        specifier: workspace:*
-        version: link:../../../oracle/ref
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-    devDependencies:
-      '@cloudflare/vitest-pool-workers':
-        specifier: ^0.16.20
-        version: 0.16.20(@cloudflare/workers-types@4.20260626.1)(@vitest/runner@4.1.9)(@vitest/snapshot@4.1.9)(vitest@4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../../clients/core
-      effect:
-        specifier: ^3.22.1
-        version: 3.22.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-      wrangler:
-        specifier: ^4.105.0
-        version: 4.105.0(@cloudflare/workers-types@4.20260626.1)
-
-  packages/connectors/providers/zerion:
-    dependencies:
-      '@folio/connectors-basic':
-        specifier: workspace:*
-        version: link:../../basic
-      '@folio/oracle-ref':
-        specifier: workspace:*
-        version: link:../../../oracle/ref
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-    devDependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../../clients/core
       effect:
         specifier: ^3.22.1
         version: 3.22.1
