@@ -5,7 +5,7 @@ import {
   type Requester,
   type UpstreamError,
 } from "@folio/client-core";
-import { Context, Duration, Effect, Layer, type Scope } from "effect";
+import { Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import {
   API_KEY_HEADER,
   BALANCE_PATH,
@@ -16,7 +16,7 @@ import {
   RATE_LIMIT_PER_SEC,
   UPSTREAM,
 } from "./constants";
-import type { CoinstatsCoin } from "./types";
+import { CoinstatsCoin } from "./types";
 
 export interface CoinstatsConfig {
   // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
@@ -38,7 +38,7 @@ export interface CoinstatsClientApi {
     readonly connectionId: string;
     readonly address: string;
     readonly apiKey: string;
-  }) => Effect.Effect<CoinstatsCoin[], UpstreamError, Outbound>;
+  }) => Effect.Effect<readonly CoinstatsCoin[], UpstreamError, Outbound>;
 
   // 支持的链列表。**只需 key、不需地址** —— 用来实测 key 本身有没有效,而不是只检查它非空。
   // 返回值没人看(调用方只关心成没成),所以类型是 `unknown`:声明一个假的形状不如说实话。
@@ -75,12 +75,14 @@ export function make(
 
     return {
       balance: ({ connectionId, address, apiKey }) =>
-        request<CoinstatsCoin[]>(BALANCE_PATH, {
+        request(BALANCE_PATH, Schema.Array(CoinstatsCoin), {
           query: { address, connectionId },
           headers: keyed(apiKey),
         }),
 
-      blockchains: (apiKey) => request(BLOCKCHAINS_PATH, { headers: keyed(apiKey) }),
+      // 只用来探活「这把 key 通不通」,回什么形状不关心 —— 所以不声明形状。
+      blockchains: (apiKey) =>
+        request(BLOCKCHAINS_PATH, Schema.Unknown, { headers: keyed(apiKey) }),
     };
   });
 }

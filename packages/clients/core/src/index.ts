@@ -51,6 +51,7 @@ export {
   type RateLimitScope,
   RateLimitScopeOverride,
 } from "./ratelimit";
+export { maybe } from "./schema";
 export { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "./slot-cursor";
 export {
   type StaleTolerantCache,

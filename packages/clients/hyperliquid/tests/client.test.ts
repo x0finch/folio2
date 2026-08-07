@@ -58,12 +58,20 @@ describe("clearinghouseState", () => {
     expect(calls[0].request.headers["content-type"]).toBe("application/json");
   });
 
-  it("原样吐上游形状,不做任何翻译", async () => {
+  it("值不翻译,但只吐声明过的字段 —— 上游多给的丢掉", async () => {
     // client 的出口就是 DTO —— 数字仍是字符串,parse 归适配层(ADR 0036)。
     const { fn } = stub(() => json(stateFixture));
     const state = await withClient(fn, (c) => c.clearinghouseState(ADDR));
-    expect(state).toEqual(stateFixture);
+
+    // 声明过的字段一个字没动。
+    expect(state.marginSummary).toEqual(stateFixture.marginSummary);
     expect(typeof state.marginSummary?.accountValue).toBe("string");
+    expect(state.assetPositions?.[0].position).toEqual(stateFixture.assetPositions[0].position);
+
+    // **没声明的丢掉**(schema 的默认行为)。夹具里 `assetPositions[].type` 就是这么一个字段 ——
+    // 我们从来没读过它,所以它也不该跟着 DTO 出去。
+    expect("type" in stateFixture.assetPositions[0]).toBe(true);
+    expect("type" in state.assetPositions![0]).toBe(false);
   });
 
   it("地址每次调用传,一个 client 服务多个账户", async () => {

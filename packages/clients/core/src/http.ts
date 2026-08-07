@@ -1,6 +1,6 @@
 import type { HttpClientError } from "@effect/platform";
 import { HttpClient, HttpClientRequest } from "@effect/platform";
-import { Clock, Effect, type RateLimiter } from "effect";
+import { Clock, Effect, ParseResult, type RateLimiter, Schema } from "effect";
 import { HttpFailure, type SigningFailure } from "./errors";
 import { disableBuiltInTracing } from "./http-client";
 import { classifyFailure, type UpstreamError } from "./upstream-error";
@@ -124,35 +124,55 @@ const summarize = (error: HttpClientError.HttpClientError): string => {
   return detail ? `RequestError/${error.reason}: ${detail}` : `RequestError/${error.reason}`;
 };
 
-// 发一个请求,回解析好的 JSON(`notFoundAsNull` 且 404 时回 null)。
+// schema 校验不过 → 一句能进日志的话。**只说「哪一处、哪一类不对」,不带实际值。**
+//
+// `ParseError` 自带的格式化器会把**实际值拼进消息**(`Expected string, actual "0x…"`),
+// 而那是上游响应的正文 —— 与 `summarize` 里那条同一个判断:正文不跟着错误到处走。
+// 路径 + 类别足够定位(「第 3 行的 id 类型不对」),值去看那一发的响应。
+const whyInvalid = (error: ParseResult.ParseError): string => {
+  const issues = ParseResult.ArrayFormatter.formatErrorSync(error);
+  const first = issues[0];
+  const at = first && first.path.length > 0 ? first.path.join(".") : "(root)";
+  const more = issues.length > 1 ? ` (+${issues.length - 1} more)` : "";
+  return `schema: ${at} ${first?._tag ?? "Invalid"}${more}`;
+};
+
+// 发一个请求,回**校验过**的 JSON(`notFoundAsNull` 且 404 时回 null)。
 //
 // **错误就是 `UpstreamError`,不是传输层的中间态。** 七家各自 `Effect.mapError(classify)` 一遍
 // 是同一句样板抄七份,还把「这个请求会失败成什么」的答案推迟了一层。归类是这个包的活。
 //
-// **`A` 是调用方声明的期望形状,包内不校验** —— 一次 `as A`。为什么是泛型而不是 `unknown`:
-// 返回 `unknown` 的话每个端点方法都要在自己那行写一次 `as Effect.Effect<Foo, E>`,强转散在 N 个
-// 调用点、还顺手把错误类型也一起断言掉了。收成一个类型参数之后,调用点写的是 `get<SpotAccount>(path)`
-// —— 一眼看出这是断言,而错误类型仍由包保证。
+// **schema 必填,不是可选的。** 以前这里是一个调用方声明的类型参数 + 包内一次 `as A` ——
+// 也就是「返回类型是调用方说了算」,而运行时一个字段都没查。上游改个形状就是**静默故障**:
+// 字段没了 → `undefined` → 解析器要么产一行垃圾要么整批消失,错误通道里什么都没有。
+//
+// 现在形状由 schema 说了算,返回类型从它推出来,`as A` 整个消失。校验不过 → `UpstreamParseError`
+// (不可重试:再拉一次还是同一份坏形状)。
+//
+// **验的是「我们真读的那些字段」,不是全字段严格校验** —— 各 client 的 `types.ts` 就是那份声明,
+// 逐字来自真实响应;上游多给的字段照旧放行(`Schema.Struct` 默认忽略多余键)。严格校验会让
+// 上游加一个字段就整批炸,那是把一种静默故障换成一种噪音故障。
 //
 // **`notFoundAsNull` 进类型**:开了它返回的就是 `Effect<A | null>`,不靠调用方自己记得在类型参数
 // 里写 `| null`(以前靠记,而 coingecko 那边已经在手写了 —— 代价已经在付)。
-//
-// **校验本身是另一件事**:上游给的形状对不对,现在没人查。ADR 0035 把 `Effect.Schema` 的评估
-// 推到 connectors 那一步(#362 第 3 站),到那时这里改成收一个 schema 是增量改动 ——
-// `HttpClientResponse.schemaBodyJson` 的失败往同一个 `UpstreamParseError` 通道塞,签名不用动。
 export interface Requester {
-  <A = unknown>(
+  <A, I>(
     path: string,
+    schema: Schema.Schema<A, I>,
     options: RequestOptions & { readonly notFoundAsNull: true },
   ): Effect.Effect<A | null, UpstreamError, Outbound>;
-  <A = unknown>(path: string, options?: RequestOptions): Effect.Effect<A, UpstreamError, Outbound>;
+  <A, I>(
+    path: string,
+    schema: Schema.Schema<A, I>,
+    options?: RequestOptions,
+  ): Effect.Effect<A, UpstreamError, Outbound>;
 }
 
 export function makeRequester(config: HttpConfig): Requester {
   const rateLimited = new Set(config.rateLimitedStatuses ?? DEFAULT_RATE_LIMITED);
   const classify = classifyFailure({ upstream: config.upstream });
 
-  return (<A>(path: string, options?: RequestOptions) => {
+  return (<A, I>(path: string, schema: Schema.Schema<A, I>, options?: RequestOptions) => {
     const url = new URL(`${config.baseUrl}${path}`);
     for (const [k, v] of Object.entries(options?.query ?? {})) {
       if (v !== undefined) url.searchParams.set(k, String(v));
@@ -195,10 +215,15 @@ export function makeRequester(config: HttpConfig): Requester {
         return yield* new HttpFailure({ kind: "upstream", where, status: res.status });
       }
 
-      return yield* res.json.pipe(
+      const body = yield* res.json.pipe(
         // 同样只留摘要 —— `res.json` 失败给的也是 `ResponseError`,身上挂着完整 request。
         Effect.mapError(
           (error) => new HttpFailure({ kind: "parse", where, cause: summarize(error) }),
+        ),
+      );
+      return yield* Schema.decodeUnknown(schema)(body).pipe(
+        Effect.mapError(
+          (error) => new HttpFailure({ kind: "parse", where, cause: whyInvalid(error) }),
         ),
       );
     }).pipe(

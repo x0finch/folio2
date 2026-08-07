@@ -109,7 +109,7 @@ export function parseContract(json: CoinContract | null): UpstreamToken | null {
 }
 
 // market_chart/range 的 [msTimestamp, price] 对 → 升序观测点。
-export function parsePriceSeries(pairs: readonly [number, number][]): TokenPricePoint[] {
+export function parsePriceSeries(pairs: readonly (readonly [number, number])[]): TokenPricePoint[] {
   return pairs
     .filter(([atMs, unitPrice]) => Number.isFinite(atMs) && Number.isFinite(unitPrice))
     .map(([atMs, unitPrice]) => ({ atMs, unitPrice }))

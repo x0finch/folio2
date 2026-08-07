@@ -6,7 +6,7 @@ import {
   type SigningFailure,
   type UpstreamError,
 } from "@folio/client-core";
-import { Clock, Context, Effect, Layer } from "effect";
+import { Clock, Context, Effect, Layer, type Schema } from "effect";
 import {
   ASSET_VALUATION_PATH,
   BALANCE_PATH,
@@ -22,9 +22,10 @@ import {
   VALUATION_CCY,
 } from "./constants";
 import { codeError, UPSTREAM } from "./errors";
-import type {
+import {
   OkxBalanceResponse,
-  OkxCreds,
+  type OkxCreds,
+  type OkxEnvelope,
   OkxFundingResponse,
   OkxPositionsResponse,
   OkxSavingsResponse,
@@ -117,8 +118,13 @@ export function make(config: OkxConfig = {}): OkxClientApi {
   //
   // 查它的位置是**这个唯一的 `get()`**:六个端点都从这里出去,所以漏不掉;而它是看得见的一步,
   // 不是 core 配置对象上的一个回调字段(那种写法让「一发请求算不算成功」的答案藏在别的包里)。
-  const get = <A>(path: string, creds: OkxCreds, query?: Record<string, string>) =>
-    request<A>(path, { query, headers: signedHeaders(path, creds, query) }).pipe(
+  const get = <A extends OkxEnvelope, I>(
+    path: string,
+    schema: Schema.Schema<A, I>,
+    creds: OkxCreds,
+    query?: Record<string, string>,
+  ) =>
+    request(path, schema, { query, headers: signedHeaders(path, creds, query) }).pipe(
       Effect.flatMap((body) => {
         const rejected = codeError(body, path);
         return rejected ? Effect.fail(rejected) : Effect.succeed(body);
@@ -126,12 +132,12 @@ export function make(config: OkxConfig = {}): OkxClientApi {
     );
 
   return {
-    balance: (creds) => get<OkxBalanceResponse>(BALANCE_PATH, creds),
-    fundingBalances: (creds) => get<OkxFundingResponse>(FUNDING_BALANCES_PATH, creds),
-    savingsBalance: (creds) => get<OkxSavingsResponse>(SAVINGS_BALANCE_PATH, creds),
-    stakingOrders: (creds) => get<OkxStakingResponse>(STAKING_ORDERS_ACTIVE_PATH, creds),
+    balance: (creds) => get(BALANCE_PATH, OkxBalanceResponse, creds),
+    fundingBalances: (creds) => get(FUNDING_BALANCES_PATH, OkxFundingResponse, creds),
+    savingsBalance: (creds) => get(SAVINGS_BALANCE_PATH, OkxSavingsResponse, creds),
+    stakingOrders: (creds) => get(STAKING_ORDERS_ACTIVE_PATH, OkxStakingResponse, creds),
     assetValuation: (creds) =>
-      get<OkxValuationResponse>(ASSET_VALUATION_PATH, creds, { ccy: VALUATION_CCY }),
-    positions: (creds) => get<OkxPositionsResponse>(POSITIONS_PATH, creds),
+      get(ASSET_VALUATION_PATH, OkxValuationResponse, creds, { ccy: VALUATION_CCY }),
+    positions: (creds) => get(POSITIONS_PATH, OkxPositionsResponse, creds),
   };
 }

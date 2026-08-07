@@ -34,7 +34,7 @@ const failing = (
 
 describe("validateAccount", () => {
   it("地址:打 /address/,200 → true", async () => {
-    const stub = httpStub(() => json({ address: ADDR, balance: "0" }));
+    const stub = httpStub(() => json({ address: ADDR, balance: "0", unconfirmedBalance: "0" }));
     expect(await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })))).toBe(
       true,
     );
@@ -42,7 +42,7 @@ describe("validateAccount", () => {
   });
 
   it("xpub:打 /xpub/ 且只要 basic(探活不需要各地址明细)", async () => {
-    const stub = httpStub(() => json({ address: ZPUB84, balance: "0" }));
+    const stub = httpStub(() => json({ address: ZPUB84, balance: "0", unconfirmedBalance: "0" }));
     expect(await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: ZPUB84 })))).toBe(
       true,
     );

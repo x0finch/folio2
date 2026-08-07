@@ -14,7 +14,7 @@ function chainTokenRef(chain: string, contract: string | undefined): string {
 // 跳过无 symbol;合约行产代币标识(无数字 chainId → 兜底格式);现货行不产 meta(新 schema 无 meta 字段)。
 export type Row = Spot;
 
-export function parseBalances(coins: CoinstatsCoin[], fallbackChain: string): Row[] {
+export function parseBalances(coins: readonly CoinstatsCoin[], fallbackChain: string): Row[] {
   const out: Row[] = [];
   for (const c of coins ?? []) {
     const symbol = c.symbol?.trim();

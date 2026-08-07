@@ -29,6 +29,10 @@ function upstream(routes: Record<string, () => Response>): HttpStub {
     if (path.includes("/dapi/v1/account")) return json({ assets: [], positions: [] });
     if (path.includes("/fapi/v2/account")) return json({ totalMarginBalance: "0", positions: [] });
     if (path.includes("/api/v3/account")) return json({ balances: [] });
+    // **理财端点回的是翻页信封,不是数组** —— 以前这里一律回 `[]`,而 client 那时不校验形状,
+    // 于是 `page.rows ?? []` 悄悄兜住了。换成 schema 之后它当场变成 parse 失败,
+    // 也就把这个桩一直在撒的谎揪了出来。
+    if (path.includes("/simple-earn/")) return json({ rows: [], total: 0 });
     if (path.includes("/sapi/")) return json([]);
     return json(tickerBody); // /api/v3/ticker/price
   });

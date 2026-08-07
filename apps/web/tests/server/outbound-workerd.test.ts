@@ -1,5 +1,5 @@
 import { FolioHttpClient, makeRequester } from "@folio/client-core";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 // 【在真的 workerd 里发一发】—— 这个文件只钉一件事:**换成 `@effect/platform` 的 `HttpClient`
@@ -33,7 +33,9 @@ describe("出网在 workerd 里", () => {
     const request = makeRequester({ baseUrl: "https://up.example.com", upstream: "probe" });
 
     const out = await Effect.runPromise(
-      request<{ ok: number }>("/v1/thing").pipe(Effect.provide(FolioHttpClient)),
+      request("/v1/thing", Schema.Struct({ ok: Schema.Number })).pipe(
+        Effect.provide(FolioHttpClient),
+      ),
     );
 
     expect(out).toEqual({ ok: 1 });
@@ -46,7 +48,7 @@ describe("出网在 workerd 里", () => {
     const request = makeRequester({ baseUrl: "https://up.example.com", upstream: "probe" });
 
     const err = await Effect.runPromise(
-      Effect.flip(request("/v1/thing").pipe(Effect.provide(FolioHttpClient))),
+      Effect.flip(request("/v1/thing", Schema.Unknown).pipe(Effect.provide(FolioHttpClient))),
     );
 
     expect(err._tag).toBe("UpstreamUnavailableError");

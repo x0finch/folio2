@@ -5,7 +5,7 @@ import {
   type Requester,
   type UpstreamError,
 } from "@folio/client-core";
-import { Context, Duration, Effect, Layer, type Scope } from "effect";
+import { Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import { chainsCacheFor, parseChainIds } from "./chains";
 import {
   CHAINS_PATH,
@@ -18,7 +18,7 @@ import {
   UPSTREAM,
   ZERION_API_BASE,
 } from "./constants";
-import type { ZerionChainsResponse, ZerionPositionsResponse } from "./types";
+import { ZerionChainsResponse, ZerionPositionsResponse } from "./types";
 
 export interface ZerionConfig {
   // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
@@ -82,20 +82,21 @@ export function make(
 
     return {
       positions: ({ address, apiKey }) =>
-        request<ZerionPositionsResponse>(positionsPath(address), {
+        request(positionsPath(address), ZerionPositionsResponse, {
           query: POSITIONS_QUERY,
           headers: keyed(apiKey),
         }),
 
       chainIds: (apiKey) =>
         chainsCache.get(
-          request<ZerionChainsResponse>(CHAINS_PATH, { headers: keyed(apiKey) }).pipe(
+          request(CHAINS_PATH, ZerionChainsResponse, { headers: keyed(apiKey) }).pipe(
             Effect.map(parseChainIds),
           ),
         ),
 
       portfolio: ({ address, apiKey }) =>
-        request(portfolioPath(address), { headers: keyed(apiKey) }),
+        // 只用来探活「这把 key + 这个地址通不通」,回什么形状不关心。
+        request(portfolioPath(address), Schema.Unknown, { headers: keyed(apiKey) }),
     };
   });
 }

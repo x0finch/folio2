@@ -76,7 +76,7 @@ export function toBtcBalances(confirmedSats: number, pendingSats: number): Spot[
 export function buildXpubMeta(
   ext: string,
   script: ScriptType,
-  tokens: XpubToken[],
+  tokens: readonly XpubToken[],
 ): { addresses: BtcAddress[]; receive: BtcReceive } {
   const addresses: BtcAddress[] = [];
   let lastExternal: { index: number; address: string } | null = null;

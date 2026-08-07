@@ -65,14 +65,18 @@ describe("balance", () => {
     expect(calls[0].request.url.searchParams.has("apiKey")).toBe(false);
   });
 
-  it("原样吐上游形状,不做任何翻译", async () => {
+  it("值不翻译,但只吐声明过的字段", async () => {
     const { fn } = stub(() => json(solanaFixture));
     const coins = await withClient(fn, (c) =>
       c.balance({ connectionId: "solana", address: ADDR, apiKey: KEY }),
     );
     // 上游直接吐数组(不是 { data: [...] })。parse 归适配层(ADR 0036)。
-    expect(coins).toEqual(solanaFixture);
     expect(Array.isArray(coins)).toBe(true);
+    expect(coins).toHaveLength(solanaFixture.length);
+    // 声明过的字段一个字没动;夹具里没声明的(如 imgUrl / coinId)不跟着出去 —— 这是 schema 的
+    // 默认行为,也是想要的:DTO 就是「我们读的那些字段」。
+    expect(coins[0].symbol).toBe(solanaFixture[0].symbol);
+    expect(coins[0].amount).toBe(solanaFixture[0].amount);
   });
 
   it("connectionId 与 apiKey 都是每次传:一个 client 服务多条链、多个账户", async () => {

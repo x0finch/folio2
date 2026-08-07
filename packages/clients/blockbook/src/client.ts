@@ -5,7 +5,7 @@ import {
   type UpstreamError,
   UpstreamUnavailableError,
 } from "@folio/client-core";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, type Schema } from "effect";
 import {
   BLOCKBOOK_BASES,
   DEFAULT_XPUB_DETAILS,
@@ -13,7 +13,7 @@ import {
   UPSTREAM,
   USER_AGENT,
 } from "./constants";
-import type { AddressResponse, XpubResponse } from "./types";
+import { AddressResponse, XpubResponse } from "./types";
 
 export interface BlockbookConfig {
   // 覆盖端点列表(测试 / 自托管节点);缺省用内置的 btc2–btc5。
@@ -91,25 +91,27 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
   //
   // 用递归而不是 `Effect.firstSuccessOf`:后者对**任何**失败都继续试,而这里的要点恰恰是
   // 「有些错误要立刻停」(无效 xpub 换四个节点得到四个一样的 4xx)。
-  const tryBases = <A>(
+  const tryBases = <A, I>(
     path: string,
+    schema: Schema.Schema<A, I>,
     query: Record<string, string> | undefined,
     from: number,
     left: number,
   ): Effect.Effect<A, UpstreamError, Outbound> =>
     Effect.suspend(() => {
       const at = requesters[from % requesters.length];
-      return at<A>(path, { query }).pipe(
+      return at(path, schema, { query }).pipe(
         Effect.catchAll((error) =>
           left > 1 && shouldTryNextBase(error)
-            ? tryBases<A>(path, query, from + 1, left - 1)
+            ? tryBases(path, schema, query, from + 1, left - 1)
             : Effect.fail(error),
         ),
       );
     });
 
-  const request = <A>(
+  const request = <A, I>(
     path: string,
+    schema: Schema.Schema<A, I>,
     query?: Record<string, string>,
   ): Effect.Effect<A, UpstreamError, Outbound> =>
     Effect.suspend(() => {
@@ -123,7 +125,7 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
         );
       }
       // 起点每次前进一格 —— 四个节点轮流当第一个。
-      return tryBases<A>(path, query, cursor++, requesters.length);
+      return tryBases(path, schema, query, cursor++, requesters.length);
     });
 
   // `encodeURIComponent` 不编码括号,但 descriptor(如 `tr(xpub…)`)的括号在 path 里更稳妥地编码掉。
@@ -138,11 +140,11 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
   // 所以这是可接受的;但它毕竟是**整个钱包的观察密钥**,别再往日志里多抄一份。
   return {
     xpub: (token, query) =>
-      request<XpubResponse>(`/xpub/${encodePath(token)}`, {
+      request(`/xpub/${encodePath(token)}`, XpubResponse, {
         details: query?.details ?? DEFAULT_XPUB_DETAILS,
         tokens: query?.tokens ?? DEFAULT_XPUB_TOKENS,
       }),
 
-    address: (address) => request<AddressResponse>(`/address/${encodePath(address)}`),
+    address: (address) => request(`/address/${encodePath(address)}`, AddressResponse),
   };
 }

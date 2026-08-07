@@ -81,10 +81,19 @@ describe("positions", () => {
     expect(calls[0].request.url.searchParams.get("currency")).toBe("usd");
   });
 
-  it("原样吐上游形状,不做任何翻译", async () => {
+  it("值不翻译,但只吐声明过的字段", async () => {
     const { fn } = bothEndpoints();
     const res = await withClient(fn, (c) => c.positions({ address: ADDR, apiKey: KEY }));
-    expect(res).toEqual(positionsFixture);
+
+    expect(res.data).toHaveLength(positionsFixture.data.length);
+    // 声明过的字段一个字没动。
+    const first = res.data?.[0].attributes;
+    const fixture = positionsFixture.data[0].attributes;
+    expect(first?.quantity?.float).toBe(fixture.quantity.float);
+    expect(first?.fungible_info?.symbol).toBe(fixture.fungible_info.symbol);
+    // 没声明的丢掉(schema 的默认行为)—— DTO 就是「我们读的那些字段」。
+    expect("id" in positionsFixture.data[0]).toBe(true);
+    expect("id" in res.data![0]).toBe(false);
   });
 });
 

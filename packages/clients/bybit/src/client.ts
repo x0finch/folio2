@@ -6,7 +6,7 @@ import {
   type SigningFailure,
   type UpstreamError,
 } from "@folio/client-core";
-import { Clock, Context, Effect, Layer } from "effect";
+import { Clock, Context, Effect, Layer, type Schema } from "effect";
 import {
   ACCOUNT_TYPE_FUND,
   ACCOUNT_TYPE_UNIFIED,
@@ -23,9 +23,10 @@ import {
   WALLET_BALANCE_PATH,
 } from "./constants";
 import { retCodeError, UPSTREAM } from "./errors";
-import type {
-  BybitCreds,
+import {
+  type BybitCreds,
   BybitEarnResponse,
+  type BybitEnvelope,
   BybitFundingResponse,
   BybitWalletBalanceResponse,
 } from "./types";
@@ -107,8 +108,13 @@ export function make(config: BybitConfig = {}): BybitClientApi {
   //
   // 查它的位置是**这个唯一的 `get()`**:所有端点都从这里出去,所以漏不掉;而它是看得见的一步,
   // 不是 core 配置对象上的一个回调字段(那种写法让「一发请求算不算成功」的答案藏在别的包里)。
-  const get = <A>(path: string, query: Record<string, string>, creds: BybitCreds) =>
-    request<A>(path, { query, headers: signedHeaders(creds, query) }).pipe(
+  const get = <A extends BybitEnvelope, I>(
+    path: string,
+    schema: Schema.Schema<A, I>,
+    query: Record<string, string>,
+    creds: BybitCreds,
+  ) =>
+    request(path, schema, { query, headers: signedHeaders(creds, query) }).pipe(
       Effect.flatMap((body) => {
         const rejected = retCodeError(body, path);
         return rejected ? Effect.fail(rejected) : Effect.succeed(body);
@@ -117,16 +123,17 @@ export function make(config: BybitConfig = {}): BybitClientApi {
 
   return {
     walletBalance: (creds) =>
-      get<BybitWalletBalanceResponse>(
+      get(
         WALLET_BALANCE_PATH,
+        BybitWalletBalanceResponse,
         { accountType: ACCOUNT_TYPE_UNIFIED },
         creds,
       ),
 
     fundingBalances: (creds) =>
-      get<BybitFundingResponse>(FUNDING_BALANCES_PATH, { accountType: ACCOUNT_TYPE_FUND }, creds),
+      get(FUNDING_BALANCES_PATH, BybitFundingResponse, { accountType: ACCOUNT_TYPE_FUND }, creds),
 
     earnPositions: (creds, category) =>
-      get<BybitEarnResponse>(EARN_POSITION_PATH, { category }, creds),
+      get(EARN_POSITION_PATH, BybitEarnResponse, { category }, creds),
   };
 }

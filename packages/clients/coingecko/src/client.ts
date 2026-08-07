@@ -3,11 +3,9 @@ import {
   makeRequester,
   type Outbound,
   type Requester,
-  type RequestOptions,
   type UpstreamError,
-  UpstreamParseError,
 } from "@folio/client-core";
-import { Context, Duration, Effect, Layer, type Scope } from "effect";
+import { Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import {
   CG_BASE_FREE,
   CG_BASE_PRO,
@@ -22,14 +20,13 @@ import {
   UPSTREAM,
   USER_AGENT,
 } from "./constants";
-import type {
+import {
   AssetPlatform,
   CoinContract,
   CoinListItem,
   DerivativesExchange,
   Exchange,
   ExchangeRates,
-  MarketChartRange,
   MarketCoin,
   SearchResult,
   SimplePriceMap,
@@ -71,18 +68,18 @@ export interface CoinsMarketChartRangeParams {
 // **不自带重试**(与另外七个 client 一致):重试由调用方 `Effect.retry(策略)` 加在外面。
 // 老那版把重试收进传输层,于是这个仓库对「怎么重试」有过三份答案。
 export interface CoinGeckoClientApi {
-  readonly assetPlatforms: Effect.Effect<AssetPlatform[], UpstreamError, Outbound>;
-  readonly coinsList: Effect.Effect<CoinListItem[], UpstreamError, Outbound>;
+  readonly assetPlatforms: Effect.Effect<readonly AssetPlatform[], UpstreamError, Outbound>;
+  readonly coinsList: Effect.Effect<readonly CoinListItem[], UpstreamError, Outbound>;
   readonly coinsMarkets: (
     params: CoinsMarketsParams,
-  ) => Effect.Effect<MarketCoin[], UpstreamError, Outbound>;
+  ) => Effect.Effect<readonly MarketCoin[], UpstreamError, Outbound>;
   readonly simplePrice: (
     params: SimplePriceParams,
   ) => Effect.Effect<SimplePriceMap, UpstreamError, Outbound>;
   // 历史日价序列。出口就是 `prices` 那一列 —— 上游把它包在一个对象里,那层包装没有信息。
   readonly coinsMarketChartRange: (
     params: CoinsMarketChartRangeParams,
-  ) => Effect.Effect<[number, number][], UpstreamError, Outbound>;
+  ) => Effect.Effect<readonly (readonly [number, number])[], UpstreamError, Outbound>;
   readonly search: (query: string) => Effect.Effect<SearchResult, UpstreamError, Outbound>;
   // 按合约查币。**查不到是正常答案**(不是每个合约都在 CGK 的库里)→ null,不是失败。
   readonly coinContract: (
@@ -141,42 +138,18 @@ export function make(
       headers: () => Effect.succeed(headers),
     });
 
-    const parseFailed = (where: string, expected: string) =>
-      new UpstreamParseError({ upstream: UPSTREAM, where, cause: `expected ${expected}` });
-
-    // 顶层形状守卫。**留在 client 而不是交给调用方**:「这个端点回的是不是一个数组」是
-    // 「读懂上游怎么说话」,不是业务判断;而且没有它,返回类型就是在撒谎。
-    //
-    // 这不是完整校验(字段一个没查)—— 完整校验是 `Effect.Schema` 那一步的事(ADR 0035 推迟到
-    // connectors)。这里只挡住最常见、最难查的那一种:上游改了形状或回了个错误页,
-    // 而下游拿着它当数组遍历。
-    const expectArray = <T>(path: string, options?: RequestOptions) =>
-      request<unknown>(path, options).pipe(
-        Effect.flatMap((json) =>
-          Array.isArray(json)
-            ? Effect.succeed(json as T[])
-            : Effect.fail(parseFailed(path, "array")),
-        ),
-      );
-
-    const expectObject = <T>(path: string, options?: RequestOptions) =>
-      request<unknown>(path, options).pipe(
-        Effect.flatMap((json) =>
-          typeof json === "object" && json !== null
-            ? Effect.succeed(json as T)
-            : Effect.fail(parseFailed(path, "object")),
-        ),
-      );
-
+    // **顶层形状守卫没了** —— 以前这里有一对 `expectArray` / `expectObject`,手工挡住「上游回了个
+    // 错误页而下游拿着它当数组遍历」。那是 schema 的一个特例,而 schema 连字段类型一起管,
+    // 所以这两个函数连同它们的 `parseFailed` 一起删掉。
     return {
-      assetPlatforms: expectArray<AssetPlatform>("/asset_platforms"),
+      assetPlatforms: request("/asset_platforms", Schema.Array(AssetPlatform)),
 
-      coinsList: expectArray<CoinListItem>("/coins/list", {
+      coinsList: request("/coins/list", Schema.Array(CoinListItem), {
         query: { include_platform: "true" },
       }),
 
       coinsMarkets: (params) =>
-        expectArray<MarketCoin>("/coins/markets", {
+        request("/coins/markets", Schema.Array(MarketCoin), {
           query: {
             vs_currency: params.vsCurrency,
             ids: params.ids?.join(","),
@@ -188,7 +161,7 @@ export function make(
         }),
 
       simplePrice: (params) =>
-        expectObject<SimplePriceMap>("/simple/price", {
+        request("/simple/price", SimplePriceMap, {
           query: {
             ids: params.ids.join(","),
             vs_currencies: params.vsCurrencies.join(","),
@@ -198,35 +171,31 @@ export function make(
           },
         }),
 
+      // 出口就是 `prices` 那一列 —— 上游把它包在一个对象里,那层包装没有信息。
+      // **`prices` 缺失现在是校验失败**(以前是手写的 `parseFailed`),同一个错误通道。
       coinsMarketChartRange: (params) =>
-        request<unknown>(`/coins/${params.id}/market_chart/range`, {
-          query: { vs_currency: params.vsCurrency, from: params.fromSec, to: params.toSec },
-        }).pipe(
-          Effect.flatMap((json) => {
-            const prices = (json as MarketChartRange | null)?.prices;
-            return Array.isArray(prices)
-              ? Effect.succeed(prices as [number, number][])
-              : Effect.fail(parseFailed("/coins/market_chart/range", "{ prices: [] }"));
-          }),
-        ),
+        request(
+          `/coins/${params.id}/market_chart/range`,
+          Schema.Struct({ prices: Schema.Array(Schema.Tuple(Schema.Number, Schema.Number)) }),
+          { query: { vs_currency: params.vsCurrency, from: params.fromSec, to: params.toSec } },
+        ).pipe(Effect.map((res) => res.prices)),
 
-      search: (query) => request<SearchResult>("/search", { query: { query } }),
+      search: (query) => request("/search", SearchResult, { query: { query } }),
 
       coinContract: (platform, address) =>
-        request<CoinContract | null>(
+        request(
           `/coins/${platform}/contract/${address.toLowerCase()}`,
+          CoinContract,
           // 查不到 → null。不是每个合约都在 CGK 的库里,那是正常答案不是故障。
           { notFoundAsNull: true },
         ),
 
-      exchange: (id) => request<Exchange | null>(`/exchanges/${id}`, { notFoundAsNull: true }),
+      exchange: (id) => request(`/exchanges/${id}`, Exchange, { notFoundAsNull: true }),
 
       derivativesExchange: (id) =>
-        request<DerivativesExchange | null>(`/derivatives/exchanges/${id}`, {
-          notFoundAsNull: true,
-        }),
+        request(`/derivatives/exchanges/${id}`, DerivativesExchange, { notFoundAsNull: true }),
 
-      exchangeRates: expectObject<ExchangeRates>("/exchange_rates"),
+      exchangeRates: request("/exchange_rates", ExchangeRates),
     };
   });
 }

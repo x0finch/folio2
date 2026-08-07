@@ -1,9 +1,13 @@
 import { HttpClient, HttpClientResponse } from "@effect/platform";
-import { Effect, Exit, Fiber, Layer, Tracer } from "effect";
+import { Effect, Exit, Fiber, Layer, Schema, Tracer } from "effect";
 import { describe, expect, it } from "vitest";
 import { SigningFailure } from "../src/errors";
 import { makeRequester } from "../src/http";
 import { httpStub, jsonResponse as json, runClient } from "../src/testing";
+
+// 这个文件测的是传输层,不是形状校验 —— 所以一律用「什么都行」的 schema。
+// 校验本身另有用例(见文件末尾)。
+const ANY = Schema.Unknown;
 
 const BASE = "https://up.example.com";
 const UPSTREAM = "acme";
@@ -29,14 +33,14 @@ describe("makeRequester", () => {
     expect(
       await run(
         () => json({ ok: 1 }),
-        () => req()("/v1/thing"),
+        () => req()("/v1/thing", ANY),
       ),
     ).toEqual({ ok: 1 });
   });
 
   it("query 拼上,undefined 的键不参与", async () => {
     const stub = httpStub(() => json({}));
-    await runClient(stub, req()("/v1/t", { query: { a: 1, b: "x", c: undefined } }));
+    await runClient(stub, req()("/v1/t", ANY, { query: { a: 1, b: "x", c: undefined } }));
     const { url } = stub.calls[0].request;
     expect(url.searchParams.get("a")).toBe("1");
     expect(url.searchParams.get("b")).toBe("x");
@@ -44,9 +48,12 @@ describe("makeRequester", () => {
   });
 
   it("出不去 → 够不到上游", async () => {
-    const err = await failing(() => {
-      throw new Error("dns");
-    }, req()("/v1/t"));
+    const err = await failing(
+      () => {
+        throw new Error("dns");
+      },
+      req()("/v1/t", ANY),
+    );
     // 出口就是最终错误面 —— 不再是 `HttpFailure` 那个中间态。
     expect(err._tag).toBe("UpstreamUnavailableError");
     expect(err.upstream).toBe(UPSTREAM);
@@ -55,7 +62,7 @@ describe("makeRequester", () => {
   it("429 → 限流,Retry-After 秒数解析成毫秒", async () => {
     const err = await failing(
       () => json({}, { status: 429, headers: { "retry-after": "3" } }),
-      req()("/v1/t"),
+      req()("/v1/t", ANY),
     );
     expect(err._tag).toBe("UpstreamRateLimitError");
     expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(3000);
@@ -67,7 +74,7 @@ describe("makeRequester", () => {
     const at = new Date(5000).toUTCString();
     const err = await failing(
       () => json({}, { status: 429, headers: { "retry-after": at } }),
-      req()("/v1/t"),
+      req()("/v1/t", ANY),
     );
     expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(5000);
   });
@@ -79,7 +86,7 @@ describe("makeRequester", () => {
       { "retry-after": "0" },
     ];
     for (const headers of cases) {
-      const err = await failing(() => json({}, { status: 429, headers }), req()("/v1/t"));
+      const err = await failing(() => json({}, { status: 429, headers }), req()("/v1/t", ANY));
       expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBeUndefined();
     }
   });
@@ -87,21 +94,21 @@ describe("makeRequester", () => {
   it("rateLimitedStatuses 可加(binance 要认 418)", async () => {
     const err = await failing(
       () => json({}, { status: 418 }),
-      req({ rateLimitedStatuses: [429, 418] })("/v1/t"),
+      req({ rateLimitedStatuses: [429, 418] })("/v1/t", ANY),
     );
     expect(err._tag).toBe("UpstreamRateLimitError");
   });
 
   it("401 / 403 → 凭据问题", async () => {
     for (const status of [401, 403]) {
-      const err = await failing(() => json({}, { status }), req()("/v1/t"));
+      const err = await failing(() => json({}, { status }), req()("/v1/t", ANY));
       expect(err._tag).toBe("UpstreamAuthError");
       expect(err.status).toBe(status);
     }
   });
 
   it("其余非 2xx → 够不到上游", async () => {
-    expect((await failing(() => json({}, { status: 503 }), req()("/v1/t")))._tag).toBe(
+    expect((await failing(() => json({}, { status: 503 }), req()("/v1/t", ANY)))._tag).toBe(
       "UpstreamUnavailableError",
     );
   });
@@ -109,23 +116,23 @@ describe("makeRequester", () => {
   it("404 + notFoundAsNull → null(不是故障),且**返回类型自己带上 null**", async () => {
     const reply = () => json({}, { status: 404 });
     // 类型层面钉住:开了开关的重载返回 `A | null`,不靠调用方在类型参数里手写 `| null`。
-    const out: { id: string } | null = await run(reply, () =>
-      req()<{ id: string }>("/v1/t", { notFoundAsNull: true }),
+    const out: { readonly id: string } | null = await run(reply, () =>
+      req()("/v1/t", Schema.Struct({ id: Schema.String }), { notFoundAsNull: true }),
     );
     expect(out).toBeNull();
     // 不开这个开关时 404 仍是故障。
-    expect((await failing(reply, req()("/v1/t")))._tag).toBe("UpstreamUnavailableError");
+    expect((await failing(reply, req()("/v1/t", ANY)))._tag).toBe("UpstreamUnavailableError");
   });
 
   it("回来的不是 JSON → 读不动", async () => {
     expect(
-      (await failing(() => new Response("<html>", { status: 200 }), req()("/v1/t")))._tag,
+      (await failing(() => new Response("<html>", { status: 200 }), req()("/v1/t", ANY)))._tag,
     ).toBe("UpstreamParseError");
   });
 
   it("POST + body 发得出去", async () => {
     const stub = httpStub(() => json({}));
-    await runClient(stub, req()("/v1/t", { method: "POST", body: '{"type":"x"}' }));
+    await runClient(stub, req()("/v1/t", ANY, { method: "POST", body: '{"type":"x"}' }));
     expect(stub.calls[0].request.method).toBe("POST");
     expect(stub.calls[0].request.body).toBe('{"type":"x"}');
     // body 带上 content-type,少了它 hyperliquid 回 422。
@@ -140,7 +147,7 @@ describe("makeRequester", () => {
       headers: (path, options) =>
         Effect.succeed({ "x-signed": `${path}?${options?.query?.a ?? ""}` }),
     });
-    await runClient(stub, request("/v1/t", { query: { a: "1" } }));
+    await runClient(stub, request("/v1/t", ANY, { query: { a: "1" } }));
     expect(stub.calls[0].request.headers["x-signed"]).toBe("/v1/t?1");
   });
 
@@ -151,7 +158,10 @@ describe("makeRequester", () => {
       upstream: UPSTREAM,
       headers: () => Effect.succeed({ "x-key": "client-level" }),
     });
-    await runClient(stub, request("/v1/t", { headers: Effect.succeed({ "x-key": "per-call" }) }));
+    await runClient(
+      stub,
+      request("/v1/t", ANY, { headers: Effect.succeed({ "x-key": "per-call" }) }),
+    );
     expect(stub.calls[0].request.headers["x-key"]).toBe("per-call");
   });
 
@@ -159,7 +169,7 @@ describe("makeRequester", () => {
     // 归错了会退化成「三次退避全白打」,还把真正的原因盖掉(rabby 的 wasm 签名靠这条)。
     const err = await failing(
       () => json({}),
-      req({ headers: () => Effect.fail(new SigningFailure({ where: "sig" })) })("/v1/t"),
+      req({ headers: () => Effect.fail(new SigningFailure({ where: "sig" })) })("/v1/t", ANY),
     );
     expect(err._tag).toBe("UpstreamAuthError");
   });
@@ -181,9 +191,62 @@ describe("makeRequester", () => {
     const request = req({ limit });
     await run(
       () => json({}),
-      () => Effect.all([request("/a"), request("/b")]),
+      () => Effect.all([request("/a", ANY), request("/b", ANY)]),
     );
     expect(passes).toBe(2);
+  });
+});
+
+// —— 形状校验。**这是 `as A` 的替代品** ——
+// 以前返回类型是调用方声明的、运行时一个字段都不查,上游改形状就是静默故障。
+describe("形状校验", () => {
+  const Row = Schema.Struct({ id: Schema.String, rank: Schema.optional(Schema.Number) });
+
+  it("形状对 → 原样通过", async () => {
+    const got = await run(
+      () => json([{ id: "a", rank: 1 }]),
+      () => req()("/v1/t", Schema.Array(Row)),
+    );
+    expect(got).toEqual([{ id: "a", rank: 1 }]);
+  });
+
+  it("**上游多给的字段放行**(只是不出现在结果里)—— 严格校验会让上游加个字段就整批炸", async () => {
+    const got = await run(
+      () => json([{ id: "a", brandNewField: 42 }]),
+      () => req()("/v1/t", Schema.Array(Row)),
+    );
+    expect(got).toEqual([{ id: "a" }]);
+  });
+
+  it("类型变了 → 读不动(不可重试:再拉一次还是同一份坏形状)", async () => {
+    // 上游把 id 从字符串改成数字 —— 以前这一发会照常「成功」,拿着数字当字符串用下去。
+    const err = await failing(() => json([{ id: 123 }]), req()("/v1/t", Schema.Array(Row)));
+    expect(err._tag).toBe("UpstreamParseError");
+  });
+
+  it("整个信封变了(该是数组却给了对象)→ 同样读不动", async () => {
+    const err = await failing(() => json({ id: "a" }), req()("/v1/t", Schema.Array(Row)));
+    expect(err._tag).toBe("UpstreamParseError");
+  });
+
+  it("**cause 只说哪一处、哪一类,不带实际值**", async () => {
+    // 与 `summarize` 那条同一个判断:实际值是上游响应的正文,不跟着错误到处走。
+    // `ParseError` 自带的格式化器恰恰会把它拼进消息 —— 所以这里不能直接用它。
+    const err = await failing(
+      () => json([{ id: "ok" }, { id: "0xdeadbeef-secret-ish" }, { id: 1 }]),
+      req()("/v1/t", Schema.Array(Schema.Struct({ id: Schema.String }))),
+    );
+    expect(String(err.cause)).toContain("2.id"); // 第 3 行的 id
+    expect(String(err.cause)).not.toContain("0xdeadbeef");
+    expect(JSON.stringify(err)).not.toContain("0xdeadbeef");
+  });
+
+  it("`notFoundAsNull` 与校验并存:404 → null,不进校验", async () => {
+    const got = await run(
+      () => json({}, { status: 404 }),
+      () => req()("/v1/t", Row, { notFoundAsNull: true }),
+    );
+    expect(got).toBeNull();
   });
 });
 
@@ -243,7 +306,7 @@ describe("红线:什么能被记下来", () => {
   it("失败信息只带 pathname,不带 query", async () => {
     const err = await failing(
       () => json({}, { status: 503 }),
-      req()("/v1/t", { query: SECRET_QUERY }),
+      req()("/v1/t", ANY, { query: SECRET_QUERY }),
     );
     expect(err.where).toBe("/v1/t");
     clean(err);
@@ -257,7 +320,7 @@ describe("红线:什么能被记下来", () => {
       () => {
         throw new Error("getaddrinfo ENOTFOUND up.example.com");
       },
-      req({ headers: () => Effect.succeed(SECRET_HEADERS) })("/v1/t", { query: SECRET_QUERY }),
+      req({ headers: () => Effect.succeed(SECRET_HEADERS) })("/v1/t", ANY, { query: SECRET_QUERY }),
     );
     clean(err);
     // 该留的还留着:是哪一类、为什么 —— 排障要的就是这一句。
@@ -268,7 +331,7 @@ describe("红线:什么能被记下来", () => {
   it("**读不动**(响应不是 JSON)→ 同样干净,而且不带响应正文", async () => {
     const err = await failing(
       () => new Response("<html>upstream is down</html>", { status: 200 }),
-      req({ headers: () => Effect.succeed(SECRET_HEADERS) })("/v1/t", { query: SECRET_QUERY }),
+      req({ headers: () => Effect.succeed(SECRET_HEADERS) })("/v1/t", ANY, { query: SECRET_QUERY }),
     );
     clean(err);
     expect(err._tag).toBe("UpstreamParseError");
@@ -286,7 +349,7 @@ describe("红线:什么能被记下来", () => {
       headers: () => Effect.succeed({ "x-mbx-apikey": "s3cr3t-key" }),
     });
 
-    await request("/v1/t", { query: SECRET_QUERY }).pipe(
+    await request("/v1/t", ANY, { query: SECRET_QUERY }).pipe(
       Effect.provide(layer),
       Effect.provide(stub.layer),
       Effect.runPromise,
@@ -310,7 +373,11 @@ describe("红线:什么能被记下来", () => {
   it("**出站请求不带 traceparent** —— 不把内部 trace id 发给上游", async () => {
     const { layer } = captureSpans();
     const stub = httpStub(() => json({}));
-    await req()("/v1/t").pipe(Effect.provide(layer), Effect.provide(stub.layer), Effect.runPromise);
+    await req()("/v1/t", ANY).pipe(
+      Effect.provide(layer),
+      Effect.provide(stub.layer),
+      Effect.runPromise,
+    );
     expect(Object.keys(stub.calls[0].request.headers)).not.toContain("traceparent");
     expect(Object.keys(stub.calls[0].request.headers)).not.toContain("b3");
   });
@@ -328,7 +395,7 @@ describe("中断能真的 abort 底层请求", () => {
     });
 
     const exit = await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(req()("/v1/slow"));
+      const fiber = yield* Effect.fork(req()("/v1/slow", ANY));
       // 让请求真的发出去(stub 记下 signal)再中断。
       yield* Effect.yieldNow();
       yield* Effect.yieldNow();
@@ -347,7 +414,7 @@ describe("中断能真的 abort 底层请求", () => {
       return Effect.succeed(HttpClientResponse.fromWeb(request, json({ ok: 1 })));
     });
 
-    const out = await req()("/v1/t").pipe(
+    const out = await req()("/v1/t", ANY).pipe(
       Effect.provideService(HttpClient.HttpClient, client),
       Effect.runPromise,
     );

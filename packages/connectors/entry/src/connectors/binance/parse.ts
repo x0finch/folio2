@@ -24,7 +24,7 @@ interface BinanceBalance {
   locked?: string;
 }
 interface BinanceAccount {
-  balances?: BinanceBalance[];
+  balances?: readonly BinanceBalance[];
 }
 
 // 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
@@ -91,7 +91,7 @@ interface FuturesAccount {
   totalMarginBalance?: string; // 账户权益 = 钱包余额 + 未实现盈亏
   totalPositionInitialMargin?: string;
   maxWithdrawAmount?: string;
-  positions?: FuturesPosition[];
+  positions?: readonly FuturesPosition[];
 }
 
 // 合约 symbol 去计价后缀得标的币名(BTCUSDT → BTC);认不出后缀就原样返回。
@@ -171,8 +171,8 @@ interface CoinmPosition {
   positionInitialMargin?: string;
 }
 interface CoinmAccount {
-  assets?: CoinmAsset[];
-  positions?: CoinmPosition[];
+  assets?: readonly CoinmAsset[];
+  positions?: readonly CoinmPosition[];
 }
 
 // 币本位 symbol 去尾得标的币名(BTCUSD_PERP / BTCUSD_251226 → BTC):取 `_` 前段再剥 USD。
@@ -259,7 +259,10 @@ interface FundingAsset {
 
 // 纯解析:资金账户资产 → spot。free+locked+freeze+withdrawing 合并为持有量,ticker 估值(同现货)。
 // 跳过零余额;无价的币 value 0(price 省略)。与 IO 分离,golden test。
-export function parseFundingAssets(assets: FundingAsset[], prices: Record<string, number>): Spot[] {
+export function parseFundingAssets(
+  assets: readonly FundingAsset[],
+  prices: Record<string, number>,
+): Spot[] {
   const out: Spot[] = [];
   for (const a of assets ?? []) {
     const asset = a.asset;
@@ -298,10 +301,10 @@ interface EarnLockedRow {
   redeemDate?: number | string; // 到期(ms 时间戳)
 }
 interface EarnFlexible {
-  rows?: EarnFlexibleRow[];
+  rows?: readonly EarnFlexibleRow[];
 }
 interface EarnLocked {
-  rows?: EarnLockedRow[];
+  rows?: readonly EarnLockedRow[];
 }
 
 // APY 小数 → 百分比串("0.05" → "5.00%")。
