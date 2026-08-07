@@ -4,8 +4,7 @@ import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { Effect, Layer, Option } from "effect";
 import { globalTokenRefIndex } from "../schema";
-import { chunk } from "../stores/chunk";
-import { Database } from "./service";
+import { chunk, Database } from "./service";
 
 // `GlobalTokenRefIndexStore` 的 D1 实现(ADR 0022,#199)。
 //
@@ -52,6 +51,10 @@ const make = Effect.gen(function* () {
         }
         if (canonical.size === 0) return out;
 
+        // **`forEach` 遍的是「块」,不是「键」** —— 不是每个 ref 查一次。一条 D1 语句只放得下
+        // 约 100 个绑定参数,所以 `WHERE chain_ref IN (…)` 得切成每块 ≤90 个键、一块一条语句
+        // (见 ./service.ts 末尾)。sync 一轮问几百个 ref,那就是几条语句,不是几百条。
+        // 顺序跑:与迁移前逐字一致,要并发得先量一次真实批量。
         const parts = chunk([...canonical.keys()]).filter((p) => p.length > 0);
         const batches = yield* Effect.forEach(parts, (part) =>
           database.query((db) =>

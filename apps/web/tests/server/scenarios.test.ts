@@ -17,7 +17,7 @@ import {
 } from "../../src/lib/server/internal/manual";
 import { NAMER, runOracle } from "../../src/lib/server/internal/oracle";
 import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
-import { withDbService } from "./db-effect";
+import { withStore } from "./db-effect";
 import { ticketOf } from "./ticket";
 
 // **按用户情景走一遍,每个情景查三处:入库 / 库里的数据对不对 / 屏幕上是什么。**
@@ -401,11 +401,11 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
 
   async function syncOnchain(): Promise<string> {
     // 全局映射表收录了这个合约 → mint 按**地址**认出来(不靠 symbol)。
-    await withDbService(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, (s) =>
+    await withStore(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, (s) =>
       s.putAll([{ chainRef: USDC_ETH, upstreamRef: USDC_UPSTREAM }], Date.now()),
     );
     // warm 集给 symbol 那一档留个本地候选,免得它想回源(本情景不该出网)。
-    await withDbService(CacheStore, userCacheStoreLayer({ userId: USER }), (s) =>
+    await withStore(CacheStore, userCacheStoreLayer({ userId: USER }), (s) =>
       s.put(
         "warm",
         {

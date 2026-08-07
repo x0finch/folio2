@@ -4,8 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
 import type { Drizzle } from "../connect";
 import { userCache } from "../schema";
-import { chunk } from "../stores/chunk";
-import { Database } from "./service";
+import { chunk, Database } from "./service";
 
 // `CacheStore` 的 D1 实现(#199)。per-user 的 KV,只三种键(`warm` / `fx:<币种>` / `platform:<键>`,
 // 键的形状归 oracle 的 cache.ts,本文件不解释键;`defi-logo:<协议>` 那种是 app 自己的一片)。
@@ -16,7 +15,7 @@ import { Database } from "./service";
 //
 // **批量那两个是主路径**:展示一次要这个用户的全部平台键、预热一次写十来个币种的汇率。
 // 逐键往返会把 1 次 D1 变成 N 次,而读那 N 次就落在总览的关键路径上。
-// 分块见 ./chunk(`IN` 列表受 D1 绑定参数上限约束;这里每块还要多带一个 user_id)。
+// 分块见 ./service.ts 末尾(`IN` 列表受 D1 绑定参数上限约束;这里每块还要多带一个 user_id)。
 //
 // 留 userId 的理由:per-user 缓存只装这个用户实际碰到的(他选的币种、他有持仓的那几条链),
 // 全局一份就得装所有人的并集。#202 起它取代 fx_rates + platforms 两张全局表。

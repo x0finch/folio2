@@ -12,8 +12,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
 import type { Drizzle } from "../connect";
 import { snapshotBalances, tokenRefs, tokens } from "../schema";
-import { chunk } from "../stores/chunk";
-import { Database } from "./service";
+import { chunk, Database } from "./service";
 
 // `TokenStore` 的 D1 实现(ADR 0021 / 0023,#199)。**每个用户一份** —— userId 由 layer 吃掉,
 // 下面所有方法签名里都没有它,拿错用户在编译期就发生不了。

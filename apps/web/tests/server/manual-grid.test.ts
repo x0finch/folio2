@@ -16,7 +16,7 @@ import {
   loadManualHistoryRows,
 } from "../../src/lib/server/internal/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle";
-import { withDbService } from "./db-effect";
+import { withStore } from "./db-effect";
 import { ticketOf } from "./ticket";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。
@@ -48,10 +48,8 @@ async function seedFiatDaily(
   code: string,
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
-  await withDbService(
-    TokenPriceStore,
-    userTokenPriceStoreLayer({ userId: USER, namer: NAMER }),
-    (s) => s.putDailyByRef(tokenRef.issued(FIAT_NAMER, code), rows),
+  await withStore(TokenPriceStore, userTokenPriceStoreLayer({ userId: USER, namer: NAMER }), (s) =>
+    s.putDailyByRef(tokenRef.issued(FIAT_NAMER, code), rows),
   );
 }
 // #203:历史价按 **token_id** 取(新参考层的 priceSeries 收内部 id),不再按厂商 ref 拼键。
@@ -61,10 +59,8 @@ async function seedDaily(
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
   const [h] = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
-  await withDbService(
-    TokenPriceStore,
-    userTokenPriceStoreLayer({ userId: USER, namer: NAMER }),
-    (s) => s.putDaily(h.id, rows),
+  await withStore(TokenPriceStore, userTokenPriceStoreLayer({ userId: USER, namer: NAMER }), (s) =>
+    s.putDaily(h.id, rows),
   );
 }
 
