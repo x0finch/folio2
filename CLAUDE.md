@@ -20,6 +20,7 @@
 - better-auth (Drizzle adapter) for auth
 - pnpm workspace monorepo; TypeScript strict
 - Vitest (test-first); Wrangler for deploy
+- **Effect**(3.x)作异步编排层,逐包迁移中(ADR 0035);出网走 `@effect/platform` 的 `HttpClient`。Effect 相关的约定 —— 服务 vs config 字段、错误面怎么划、CF Workers 上状态活在哪、TestClock 的边界 —— 见 **[CODING.md 的 Effect 一节](CODING.md#effect)**,**写 Effect 代码前先读它**
 
 ## Core principles (non-negotiable)
 Architecture & security principles (1–6) live here; coding-style principles (7–12) are kept as numbered anchors — full text in **[CODING.md](CODING.md)**.
