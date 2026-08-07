@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBalances } from "../src";
+import { parseBalances } from "../../../src/connectors/coinstats/parse";
 import cosmosFixture from "./fixtures/cosmos.json";
 import cosmosExpected from "./fixtures/expected-cosmos.json";
 import solanaExpected from "./fixtures/expected-solana.json";

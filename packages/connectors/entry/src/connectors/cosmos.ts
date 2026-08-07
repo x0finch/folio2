@@ -1,8 +1,5 @@
 import { defineConnector, Spot } from "@folio/connectors-basic";
-import {
-  coinstatsAccountCreds,
-  createCoinstatsProvider,
-} from "@folio/connectors-provider-coinstats";
+import { coinstatsAccountCreds, createCoinstatsProvider } from "./coinstats/provider";
 
 // cosmos connector manifest —— 组装契约(基座)+ provider(coinstats,connectionId "cosmos")。
 // logo:固定的 CoinGecko ATOM 图 —— 客户端展示时仍经 folio logo 代理(ADR 0008)。

@@ -1,8 +1,5 @@
 import { defineConnector, Spot } from "@folio/connectors-basic";
-import {
-  coinstatsAccountCreds,
-  createCoinstatsProvider,
-} from "@folio/connectors-provider-coinstats";
+import { coinstatsAccountCreds, createCoinstatsProvider } from "./coinstats/provider";
 
 // sui connector manifest —— 组装契约(基座)+ provider(coinstats)。
 // ⚠️ connectionId 是 "sui-wallet" 而非 "sui"(经 CoinStats /wallet/blockchains 实测确认;behavior-preserving)。
