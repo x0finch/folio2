@@ -1,4 +1,5 @@
-import type { ConnectorError } from "@folio/connectors-basic";
+import { noOutbound } from "@folio/client-core/testing";
+import type { ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +10,8 @@ import positionsFixture from "./fixtures/positions.json";
 // 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
 // `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
 // 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
-const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const run = <A>(effect: Effect.Effect<A, ConnectorError, ProviderNeeds>): Promise<A> =>
+  Effect.runPromise(Effect.provide(effect, noOutbound));
 
 // 一次 fetchBalances 发 2 个请求,而且是 `Promise.all` **并行**的 —— 本文件钉的就是「并行的那两发
 // 也各占一个时隙」。要是哪天有人以为「反正在 Promise.all 里」就绕开闸,6 个账户就是瞬时 12 发,

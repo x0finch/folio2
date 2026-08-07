@@ -1,5 +1,6 @@
+import { noOutbound } from "@folio/client-core/testing";
 import type { Balance, BalanceProvider, ConnectorError } from "@folio/connectors-basic";
-import { validateCredentials } from "@folio/connectors-basic";
+import { type ProviderNeeds, validateCredentials } from "@folio/connectors-basic";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { evmAccountCreds, resetChainIdsCacheForTests, zerionProvider } from "../src";
@@ -7,7 +8,8 @@ import { evmAccountCreds, resetChainIdsCacheForTests, zerionProvider } from "../
 // 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
 // `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
 // 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
-const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const run = <A>(effect: Effect.Effect<A, ConnectorError, ProviderNeeds>): Promise<A> =>
+  Effect.runPromise(Effect.provide(effect, noOutbound));
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEarnPositions } from "../src";
+import { parseEarnPositions } from "../../../src/connectors/binance/parse";
 import flexible from "./fixtures/earn-flexible.json";
 import locked from "./fixtures/earn-locked.json";
 import expected from "./fixtures/expected-earn-balances.json";

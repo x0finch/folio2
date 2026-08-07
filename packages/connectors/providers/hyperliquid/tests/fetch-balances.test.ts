@@ -1,4 +1,10 @@
-import type { Balance, BalanceProvider, ConnectorError } from "@folio/connectors-basic";
+import { noOutbound } from "@folio/client-core/testing";
+import type {
+  Balance,
+  BalanceProvider,
+  ConnectorError,
+  ProviderNeeds,
+} from "@folio/connectors-basic";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hyperliquidProvider, parseClearinghouseState } from "../src";
@@ -8,9 +14,11 @@ import expected from "./fixtures/expected-balances.json";
 // 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
 // `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
 // 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
-const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
-const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
-  Effect.runPromise(Effect.flip(effect));
+const run = <A>(effect: Effect.Effect<A, ConnectorError, ProviderNeeds>): Promise<A> =>
+  Effect.runPromise(Effect.provide(effect, noOutbound));
+const failing = (
+  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
+): Promise<ConnectorError> => Effect.runPromise(Effect.provide(Effect.flip(effect), noOutbound));
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 

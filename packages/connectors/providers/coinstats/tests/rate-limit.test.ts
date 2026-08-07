@@ -1,3 +1,4 @@
+import { noOutbound } from "@folio/client-core/testing";
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,7 +43,9 @@ describe("三条链共享一个队", () => {
   const runThree = () =>
     Promise.all(
       ["solana", "sui", "cosmos"].map((chain) =>
-        Effect.runPromise(createCoinstatsProvider(chain).fetchBalances(ctx())),
+        Effect.runPromise(
+          Effect.provide(createCoinstatsProvider(chain).fetchBalances(ctx()), noOutbound),
+        ),
       ),
     );
 

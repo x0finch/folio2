@@ -28,6 +28,7 @@
   "dependencies": {
     "@better-auth/passkey": "^1.6.25",
     "@cloudflare/vite-plugin": "^1.26.0",
+    "@folio/client-core": "workspace:*",
     "@folio/connectors": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
     "@folio/db": "workspace:*",

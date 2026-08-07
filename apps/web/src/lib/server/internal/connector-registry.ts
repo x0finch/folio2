@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { FolioHttpClient } from "@folio/client-core";
 import {
   type ConnectorId,
   registry as connectorRegistry,
@@ -136,7 +137,9 @@ export async function validateAccountCreds(
   // 同一个 `isRetryable` —— 两处重试对「什么值得再打一发」必须给同一个答案,所以那个函数住在
   // 契约包里而不是各自抄一遍。
   const alive = await Effect.runPromise(
-    provider.validateAccount(ctx).pipe(Effect.retry(validateRetryPolicy)),
+    provider
+      .validateAccount(ctx)
+      .pipe(Effect.retry(validateRetryPolicy), Effect.provide(FolioHttpClient)),
   );
   if (!alive) {
     throw new Error("could not verify these credentials — please check them and try again");

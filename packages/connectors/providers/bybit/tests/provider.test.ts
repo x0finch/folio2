@@ -1,4 +1,5 @@
-import type { ConnectorError } from "@folio/connectors-basic";
+import { noOutbound } from "@folio/client-core/testing";
+import type { ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildPriceHint, bybitProvider, parseEarn, parseFunding, parseUnified } from "../src";
@@ -14,9 +15,11 @@ import walletBalance from "./fixtures/wallet-balance.json";
 // 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
 // `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
 // 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
-const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
-const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
-  Effect.runPromise(Effect.flip(effect));
+const run = <A>(effect: Effect.Effect<A, ConnectorError, ProviderNeeds>): Promise<A> =>
+  Effect.runPromise(Effect.provide(effect, noOutbound));
+const failing = (
+  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
+): Promise<ConnectorError> => Effect.runPromise(Effect.provide(Effect.flip(effect), noOutbound));
 
 // FetchContext 形状:account.creds(AC:apiKey/secret,由分派桥 openCreds 解密后灌入)+ creds(PC:
 // base URL 覆盖,#264,由 app 从 env 注入;默认空 = 直连)。Bybit 无 passphrase(异于 OKX)。

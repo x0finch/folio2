@@ -1,4 +1,4 @@
-import type { Balance, ConnectorError, Note } from "@folio/connectors-basic";
+import type { Balance, ConnectorError, Note, ProviderNeeds } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 import type { Effect } from "effect";
 
@@ -48,7 +48,7 @@ export interface SyncDeps {
   fetchBalances: (
     account: AccountSafe,
     stored: Record<string, string>,
-  ) => Effect.Effect<FetchOutcome, ConnectorError>;
+  ) => Effect.Effect<FetchOutcome, ConnectorError, ProviderNeeds>;
   log?: SyncLogger; // 默认 no-op;app 注入 LogTape logger(见 buildSyncDeps)
   // 认币(ADR 0021 / #200):一批 tokenRef → 各自的代币行 id。**跑在 revalue 之前、一轮同步只跑一次。**
   //
