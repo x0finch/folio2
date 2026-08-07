@@ -5,7 +5,7 @@ import type {
   ManualHolding,
   SnapshotWithBalances,
 } from "@folio/db";
-import { dayBucketOf, FiatHistory, TokenMinter, TokenReader, tokenTicket } from "@folio/oracle";
+import { dayBucketOf, FxHistory, TokenMinter, TokenReader, tokenTicket } from "@folio/oracle";
 import { FIAT_NAMER, fiatCodeOf } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
@@ -363,8 +363,8 @@ async function buildHistoricalPriceAt(
           // 其余:按 token_id 取币价历史(#203,priceSeries 收内部 id)。两条都灌进同一个 priceAt 闭包,
           // 纯层 tokenPriceAt 的第 ① 档对法币照常生效(它只看 recognized,不认识 fiat)。
           const series = tk.fiatCode
-            ? yield* Effect.flatMap(FiatHistory, (fx) =>
-                fx.fiatRateSeries(tk.fiatCode as string, from, now),
+            ? yield* Effect.flatMap(FxHistory, (fx) =>
+                fx.rateSeries(tk.fiatCode as string, from, now),
               )
             : yield* Effect.flatMap(TokenReader, (t) => t.priceSeries(tk.id, from, now));
           for (const pt of series) daily.set(dayBucketOf(pt.atMs), pt.unitPrice);

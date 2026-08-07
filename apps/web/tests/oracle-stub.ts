@@ -1,5 +1,5 @@
 import {
-  FiatHistory,
+  FxHistory,
   FxRateResolver,
   PlatformResolver,
   TokenMinter,
@@ -36,8 +36,8 @@ const emptyFx: FxRateResolver = {
 
 // 历史日汇率是**另一个服务**(#390 的 review 第 5 条把 fx 拆两半)—— 只碰现汇率的测试
 // 因此不用再喂历史那半的假数据。
-const emptyFiatHistory: FiatHistory = {
-  fiatRateSeries: () => Effect.succeed([]),
+const emptyFxHistory: FxHistory = {
+  rateSeries: () => Effect.succeed([]),
 };
 
 const emptyPlatforms: PlatformResolver = {
@@ -52,7 +52,7 @@ const emptyMinter: TokenMinter = {
 export interface OracleStub {
   reader?: Partial<TokenReader>;
   fx?: Partial<FxRateResolver>;
-  fiatHistory?: Partial<FiatHistory>;
+  fxHistory?: Partial<FxHistory>;
   platforms?: Partial<PlatformResolver>;
   minter?: Partial<TokenMinter>;
 }
@@ -61,7 +61,7 @@ const oracleStubLayer = (stub: OracleStub = {}) =>
   Layer.mergeAll(
     Layer.succeed(TokenReader, { ...emptyReader, ...stub.reader }),
     Layer.succeed(FxRateResolver, { ...emptyFx, ...stub.fx }),
-    Layer.succeed(FiatHistory, { ...emptyFiatHistory, ...stub.fiatHistory }),
+    Layer.succeed(FxHistory, { ...emptyFxHistory, ...stub.fxHistory }),
     Layer.succeed(PlatformResolver, { ...emptyPlatforms, ...stub.platforms }),
     Layer.succeed(TokenMinter, { ...emptyMinter, ...stub.minter }),
   );
@@ -72,7 +72,7 @@ export const runWithOracle = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    TokenReader | FxRateResolver | FiatHistory | PlatformResolver | TokenMinter
+    TokenReader | FxRateResolver | FxHistory | PlatformResolver | TokenMinter
   >,
 ): Promise<A> => Effect.runPromise(Effect.provide(effect, oracleStubLayer(stub)));
 
@@ -84,7 +84,7 @@ export const runWithOracleAt = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    TokenReader | FxRateResolver | FiatHistory | PlatformResolver | TokenMinter
+    TokenReader | FxRateResolver | FxHistory | PlatformResolver | TokenMinter
   >,
 ): Promise<A> =>
   Effect.runPromise(

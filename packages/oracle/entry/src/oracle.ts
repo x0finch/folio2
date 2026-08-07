@@ -11,8 +11,8 @@ import {
 } from "@folio/oracle-basic/ports";
 import { Clock, Context, Effect, Layer, type Option } from "effect";
 import { candidateSourceLayer } from "./candidates";
-import { type FiatHistory, fiatHistoryLayer } from "./fiat-history";
 import { type FxRateResolver, fxRateResolverLayer } from "./fx";
+import { type FxHistory, fxHistoryLayer } from "./fx-history";
 import { type TokenMinter, tokenMinterLayer } from "./mint";
 import { type PlatformResolver, platformResolverLayer } from "./platforms";
 import { type TokenReader, tokenReaderLayer } from "./tokens";
@@ -34,7 +34,7 @@ import { type TokenReader, tokenReaderLayer } from "./tokens";
 //   · `TokenReader`       读路径 —— 富化 / 现价 / 历史价 / 橱窗 / 搜索
 //   · `TokenMinter`       写路径 —— tokenRef → token_id,写快照之前必须先过这一步
 //   · `FxRateResolver`    展示币种**现**汇率 —— 与代币无关的一小块,只共用同一张 per-user 缓存
-//   · `FiatHistory`       法币的**历史**日汇率 —— BTC 反算,落 `token_daily_prices`,不碰 user_cache
+//   · `FxHistory`       法币的**历史**日汇率 —— BTC 反算,落 `token_daily_prices`,不碰 user_cache
 //   · `PlatformResolver`  链 ∪ 场馆的名与图
 //
 // **`DefiLogoResolver` 不在这儿了**(移回 app):DeFi 协议图来自用户自己同步下来的余额 meta,
@@ -47,7 +47,7 @@ export type OracleServices =
   | TokenReader
   | TokenMinter
   | FxRateResolver
-  | FiatHistory
+  | FxHistory
   | PlatformResolver;
 
 // 五个服务要的全部端口。app 侧提供这些,就拿到整个参考层。
@@ -67,7 +67,7 @@ export const oracleLayer: Layer.Layer<OracleServices, never, OraclePorts> = Laye
   tokenReaderLayer,
   Layer.provide(tokenMinterLayer, candidateSourceLayer),
   fxRateResolverLayer,
-  fiatHistoryLayer,
+  fxHistoryLayer,
   platformResolverLayer,
 );
 

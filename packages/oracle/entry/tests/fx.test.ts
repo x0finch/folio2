@@ -6,7 +6,7 @@ import { harness, upstreamDown } from "./fakes";
 
 // 现汇率服务:**读软过期、写按 TTL**。两个动词判据不同,下面每一条都在钉这件事。
 //
-// 历史日汇率是**另一个服务**(`FiatHistory`,见 fiat-history.test.ts)—— 那半靠 BTC 反算、
+// 历史日汇率是**另一个服务**(`FxHistory`,见 fx-history.test.ts)—— 那半靠 BTC 反算、
 // 落 `token_daily_prices`,与这两个动词不共用一行逻辑。拆开之后这一组只碰缓存与汇率上游两个假件。
 
 const setup = (rates: Record<string, number> = {}) => harness({ rates });

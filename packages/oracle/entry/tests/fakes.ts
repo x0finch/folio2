@@ -32,8 +32,8 @@ import type {
 } from "../src";
 import { oracleLayer, refIndexWarmerLayer } from "../src";
 import { CandidateSource, candidateSourceLayer } from "../src/candidates";
-import { fiatHistoryLayer } from "../src/fiat-history";
 import { fxRateResolverLayer } from "../src/fx";
+import { fxHistoryLayer } from "../src/fx-history";
 import { tokenMinterLayer } from "../src/mint";
 import { platformResolverLayer } from "../src/platforms";
 import { tokenReaderLayer } from "../src/tokens";
@@ -599,7 +599,7 @@ export function harness(opts: HarnessOpts = {}): Harness {
         tokenReaderLayer,
         Layer.provide(tokenMinterLayer, Layer.succeed(CandidateSource, opts.candidates)),
         fxRateResolverLayer,
-        fiatHistoryLayer,
+        fxHistoryLayer,
         platformResolverLayer,
         Layer.succeed(CandidateSource, opts.candidates),
       )

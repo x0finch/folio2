@@ -20,8 +20,8 @@
 // 契约与数据经门面透出,调用方一个 import 面(同现有做法)。**只透 `.` 那一半** ——
 // `./ports` 的 Tag 是运行时值,由装配点自己去那个入口取,不从这里漏进客户端 bundle。
 export * from "@folio/oracle-basic";
-export { FiatHistory } from "./fiat-history";
 export { FxRateResolver } from "./fx";
+export { FxHistory } from "./fx-history";
 export { type MintInput, TokenMinter } from "./mint";
 export {
   type OraclePorts,

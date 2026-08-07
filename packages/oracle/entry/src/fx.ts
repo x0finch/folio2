@@ -10,7 +10,7 @@ import { degradeTo } from "./degrade";
 // 认证区拿不到数字。所以有多旧都给,新鲜度由 `warm` 负责往上追。
 // `warm`(写)才看过期:任一目标币种缺失或过期 → 一次拉全 → 逐个写回。
 //
-// **历史日汇率不在这儿**(`./fiat-history` 的 `FiatHistory`):那半靠 BTC 反算,依赖价 store 与
+// **历史日汇率不在这儿**(`./fx-history` 的 `FxHistory`):那半靠 BTC 反算,依赖价 store 与
 // 代币上游,与这两个动词一行逻辑都不共用。合住的时候本服务的 `R` 有四个服务,其中两个纯粹是
 // 历史那半拖进来的 —— 现在缩回两个,而「测 resolve 读缓存」也只要 provide 两个假服务。
 export interface FxRateResolver {

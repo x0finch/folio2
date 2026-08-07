@@ -1,7 +1,7 @@
 import { Duration, Effect, Layer, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  FiatHistory,
+  FxHistory,
   FxRateResolver,
   oracleLayer,
   PlatformResolver,
@@ -41,7 +41,7 @@ describe("oracleLayer —— 一次装配拿到五个服务", () => {
         expect(yield* Effect.map(TokenReader, (t) => typeof t.enrich)).toBe("function");
         expect(yield* Effect.map(TokenMinter, (m) => typeof m.of)).toBe("function");
         expect(yield* Effect.map(FxRateResolver, (f) => typeof f.resolve)).toBe("function");
-        expect(yield* Effect.map(FiatHistory, (f) => typeof f.fiatRateSeries)).toBe("function");
+        expect(yield* Effect.map(FxHistory, (f) => typeof f.rateSeries)).toBe("function");
         expect(yield* Effect.map(PlatformResolver, (p) => typeof p.resolve)).toBe("function");
       }),
     );
