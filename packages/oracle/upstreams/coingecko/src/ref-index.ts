@@ -1,4 +1,4 @@
-import type { AssetPlatform, CoinListItem } from "@folio/coingecko-client";
+import type { AssetPlatform, CoinListItem } from "@folio/coingecko-client2";
 import type { RefIndexFetch } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { NON_EVM_PLATFORMS } from "./constants";

@@ -536,19 +536,22 @@ importers:
 
   packages/oracle/upstreams/coingecko:
     dependencies:
-      '@folio/coingecko-client':
+      '@folio/client-core':
         specifier: workspace:*
-        version: link:../../../clients/coingecko
+        version: link:../../../clients/core
+      '@folio/coingecko-client2':
+        specifier: workspace:*
+        version: link:../../../clients/coingecko2
       '@folio/oracle-basic':
         specifier: workspace:*
         version: link:../../basic
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../ref
+      effect:
+        specifier: ^3.22.1
+        version: 3.22.1
     devDependencies:
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
