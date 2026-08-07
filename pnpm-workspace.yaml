@@ -5,3 +5,33 @@ packages:
   - "packages/oracle/*"
   - "packages/oracle/upstreams/*"
   - "apps/*"
+
+# 版本收口。**判据:被两个及以上包依赖的,版本只许在这里写一次**;各包写 `catalog:`。
+# 只有一个消费者的依赖不进来 —— 那种情况 catalog 只是多一层间接,没有可漂的余地。
+#
+# 为什么要这个:收口前 22 个包各写一遍 `typescript`、22 个各写一遍 `vitest`,其中 5 处已经漂了
+# (vitest ^4.1.5/^4.1.9、wrangler ^4.70.0/^4.105.0、@types/node、@types/react、@types/react-dom)。
+# 今天还没出事 —— 这些都是兼容的 caret,pnpm 已经各自收敛到同一个版本(见 lockfile)。
+# 收口修的是**下一次**:任何一处 major/minor 前进,就会变成 22 个包跑两个版本的测试基础设施,
+# 而这类漂移的症状(某个包的测试行为跟别处不一样)几乎没人会往版本上想。
+#
+# 唯一被排除在外的重复项:`packages/ui` 的 peerDependency `react: ^19.0.0`。它**故意**比
+# devDependency 的范围宽 —— peer 说的是「我能配合谁」,不是「我装哪个」,收进来会把它收窄。
+catalog:
+  "@cloudflare/vitest-pool-workers": ^0.16.20
+  "@cloudflare/workers-types": ^4.20260626.1
+  "@effect/platform": ^0.97.1
+  "@types/node": ^22.20.0
+  "@types/react": ^19.2.17
+  "@types/react-dom": ^19.2.3
+  better-auth: ^1.6.25
+  effect: ^3.22.1
+  lucide-react: ^0.545.0
+  motion: ^12.42.2
+  react: ^19.2.0
+  react-dom: ^19.2.7
+  recharts: 3.8.0
+  typescript: ^7.0.2
+  vitest: ^4.1.9
+  wrangler: ^4.105.0
+  zod: ^4.0.0

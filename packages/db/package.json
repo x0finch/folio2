@@ -17,16 +17,16 @@
     "@folio/connectors-basic": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
-    "better-auth": "^1.6.25",
+    "better-auth": "catalog:",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.16.20",
-    "@cloudflare/workers-types": "^4.20260626.1",
-    "@types/node": "^22.20.0",
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
     "drizzle-kit": "^0.31.10",
-    "typescript": "^7.0.2",
-    "vitest": "^4.1.9",
-    "wrangler": "^4.105.0"
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
   }
 }

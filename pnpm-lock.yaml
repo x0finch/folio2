@@ -4,6 +4,60 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@cloudflare/vitest-pool-workers':
+      specifier: ^0.16.20
+      version: 0.16.20
+    '@cloudflare/workers-types':
+      specifier: ^4.20260626.1
+      version: 4.20260626.1
+    '@effect/platform':
+      specifier: ^0.97.1
+      version: 0.97.1
+    '@types/node':
+      specifier: ^22.20.0
+      version: 22.20.0
+    '@types/react':
+      specifier: ^19.2.17
+      version: 19.2.17
+    '@types/react-dom':
+      specifier: ^19.2.3
+      version: 19.2.3
+    better-auth:
+      specifier: ^1.6.25
+      version: 1.6.25
+    effect:
+      specifier: ^3.22.1
+      version: 3.22.1
+    lucide-react:
+      specifier: ^0.545.0
+      version: 0.545.0
+    motion:
+      specifier: ^12.42.2
+      version: 12.42.2
+    react:
+      specifier: ^19.2.0
+      version: 19.2.7
+    react-dom:
+      specifier: ^19.2.7
+      version: 19.2.7
+    recharts:
+      specifier: 3.8.0
+      version: 3.8.0
+    typescript:
+      specifier: ^7.0.2
+      version: 7.0.2
+    vitest:
+      specifier: ^4.1.9
+      version: 4.1.9
+    wrangler:
+      specifier: ^4.105.0
+      version: 4.105.0
+    zod:
+      specifier: ^4.0.0
+      version: 4.4.3
+
 importers:
 
   .:
@@ -15,10 +69,10 @@ importers:
         specifier: ^6.29.0
         version: 6.29.0
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   apps/web:
@@ -96,25 +150,25 @@ importers:
         specifier: latest
         version: 1.168.26(esbuild@0.28.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
       better-auth:
-        specifier: ^1.6.25
+        specifier: 'catalog:'
         version: 1.6.25(@cloudflare/workers-types@4.20260626.1)(@prisma/client@5.22.0)(@tanstack/react-start@1.168.26(esbuild@0.28.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260626.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.11.1)(kysely@0.29.2)(pg@8.22.0))(pg@8.22.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(solid-js@1.9.13)(vitest@4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
       lucide-react:
-        specifier: ^0.545.0
+        specifier: 'catalog:'
         version: 0.545.0(react@19.2.7)
       motion:
-        specifier: ^12.42.2
+        specifier: 'catalog:'
         version: 12.42.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react:
-        specifier: ^19.2.0
+        specifier: 'catalog:'
         version: 19.2.7
       react-dom:
-        specifier: ^19.2.0
+        specifier: 'catalog:'
         version: 19.2.7(react@19.2.7)
       recharts:
-        specifier: 3.8.0
+        specifier: 'catalog:'
         version: 3.8.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@17.0.2)(react@19.2.7)(redux@5.0.1)
       tailwindcss:
         specifier: ^4.1.18
@@ -123,11 +177,11 @@ importers:
         specifier: ^4.13.0
         version: 4.13.0(react@19.2.7)
       zod:
-        specifier: ^4.0.0
+        specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
       '@cloudflare/vitest-pool-workers':
-        specifier: ^0.16.20
+        specifier: 'catalog:'
         version: 0.16.20(@cloudflare/workers-types@4.20260626.1)(@vitest/runner@4.1.9)(@vitest/snapshot@4.1.9)(vitest@4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))
       '@playwright/test':
         specifier: ^1.62.1
@@ -148,13 +202,13 @@ importers:
         specifier: ^16.3.0
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@types/node':
-        specifier: ^22.10.2
+        specifier: 'catalog:'
         version: 22.20.0
       '@types/react':
-        specifier: ^19.2.0
+        specifier: 'catalog:'
         version: 19.2.17
       '@types/react-dom':
-        specifier: ^19.2.0
+        specifier: 'catalog:'
         version: 19.2.3(@types/react@19.2.17)
       '@vitejs/plugin-react':
         specifier: ^6.0.1
@@ -166,16 +220,16 @@ importers:
         specifier: ^0.35.3
         version: 0.35.3(@types/node@22.20.0)
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vite:
         specifier: ^8.0.0
         version: 8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
       wrangler:
-        specifier: ^4.70.0
+        specifier: 'catalog:'
         version: 4.105.0(@cloudflare/workers-types@4.20260626.1)
 
   packages/clients/binance:
@@ -184,14 +238,14 @@ importers:
         specifier: workspace:*
         version: link:../core
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/bitcoin-derive:
@@ -210,10 +264,10 @@ importers:
         version: 1.8.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@1.8.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/blockbook:
@@ -222,14 +276,14 @@ importers:
         specifier: workspace:*
         version: link:../core
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/bybit:
@@ -238,14 +292,14 @@ importers:
         specifier: workspace:*
         version: link:../core
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/coingecko:
@@ -254,14 +308,14 @@ importers:
         specifier: workspace:*
         version: link:../core
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/coinstats:
@@ -270,30 +324,30 @@ importers:
         specifier: workspace:*
         version: link:../core
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/core:
     dependencies:
       '@effect/platform':
-        specifier: ^0.97.1
+        specifier: 'catalog:'
         version: 0.97.1(effect@3.22.1)
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/hyperliquid:
@@ -302,14 +356,14 @@ importers:
         specifier: workspace:*
         version: link:../core
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/okx:
@@ -318,14 +372,14 @@ importers:
         specifier: workspace:*
         version: link:../core
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/rabby:
@@ -334,14 +388,14 @@ importers:
         specifier: workspace:*
         version: link:../core
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/clients/zerion:
@@ -350,14 +404,14 @@ importers:
         specifier: workspace:*
         version: link:../core
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/connectors/basic:
@@ -369,20 +423,20 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
       zod:
-        specifier: ^4.0.0
+        specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
       '@effect/platform':
-        specifier: ^0.97.1
+        specifier: 'catalog:'
         version: 0.97.1(effect@3.22.1)
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/connectors/entry:
@@ -424,17 +478,17 @@ importers:
         specifier: workspace:*
         version: link:../../clients/zerion
       zod:
-        specifier: ^4.0.0
+        specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/db:
@@ -452,32 +506,32 @@ importers:
         specifier: workspace:*
         version: link:../oracle/ref
       better-auth:
-        specifier: ^1.6.25
+        specifier: 'catalog:'
         version: 1.6.25(@cloudflare/workers-types@4.20260626.1)(@prisma/client@5.22.0)(@tanstack/react-start@1.168.26(esbuild@0.28.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260626.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.11.1)(kysely@0.29.2)(pg@8.22.0))(pg@8.22.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(solid-js@1.9.13)(vitest@4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260626.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.11.1)(kysely@0.29.2)(pg@8.22.0)
     devDependencies:
       '@cloudflare/vitest-pool-workers':
-        specifier: ^0.16.20
+        specifier: 'catalog:'
         version: 0.16.20(@cloudflare/workers-types@4.20260626.1)(@vitest/runner@4.1.9)(@vitest/snapshot@4.1.9)(vitest@4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))
       '@cloudflare/workers-types':
-        specifier: ^4.20260626.1
+        specifier: 'catalog:'
         version: 4.20260626.1
       '@types/node':
-        specifier: ^22.20.0
+        specifier: 'catalog:'
         version: 22.20.0
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.9
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
       wrangler:
-        specifier: ^4.105.0
+        specifier: 'catalog:'
         version: 4.105.0(@cloudflare/workers-types@4.20260626.1)
 
   packages/oracle/basic:
@@ -487,10 +541,10 @@ importers:
         version: link:../ref
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/oracle/entry:
@@ -503,19 +557,19 @@ importers:
         version: link:../ref
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/oracle/ref:
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/oracle/upstreams/coingecko:
@@ -533,14 +587,14 @@ importers:
         specifier: workspace:*
         version: link:../../ref
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/sync:
@@ -558,17 +612,17 @@ importers:
         specifier: workspace:*
         version: link:../oracle/ref
       effect:
-        specifier: ^3.22.1
+        specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
       '@cloudflare/workers-types':
-        specifier: ^4.20260626.1
+        specifier: 'catalog:'
         version: 4.20260626.1
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.5
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/ui:
@@ -580,13 +634,13 @@ importers:
         specifier: ^2.1.1
         version: 2.1.1
       lucide-react:
-        specifier: ^0.545.0
+        specifier: 'catalog:'
         version: 0.545.0(react@19.2.7)
       motion:
-        specifier: ^12.42.2
+        specifier: 'catalog:'
         version: 12.42.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       recharts:
-        specifier: 3.8.0
+        specifier: 'catalog:'
         version: 3.8.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@17.0.2)(react@19.2.7)(redux@5.0.1)
       tailwind-merge:
         specifier: ^3.6.0
@@ -596,22 +650,22 @@ importers:
         version: 1.4.0
     devDependencies:
       '@types/react':
-        specifier: ^19.2.17
+        specifier: 'catalog:'
         version: 19.2.17
       '@types/react-dom':
-        specifier: ^19.2.3
+        specifier: 'catalog:'
         version: 19.2.3(@types/react@19.2.17)
       react:
-        specifier: ^19.2.0
+        specifier: 'catalog:'
         version: 19.2.7
       react-dom:
-        specifier: ^19.2.7
+        specifier: 'catalog:'
         version: 19.2.7(react@19.2.7)
       typescript:
-        specifier: ^7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
-        specifier: ^4.1.9
+        specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
 packages:
@@ -5330,7 +5384,7 @@ snapshots:
 
   '@img/sharp-wasm32@0.34.5':
     dependencies:
-      '@emnapi/runtime': 1.11.1
+      '@emnapi/runtime': 1.11.2
     optional: true
 
   '@img/sharp-wasm32@0.35.3':
@@ -7828,7 +7882,7 @@ snapshots:
   unplugin@3.2.0(esbuild@0.28.1)(rolldown@1.1.3)(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)):
     dependencies:
       '@jridgewell/remapping': 2.3.5
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       webpack-virtual-modules: 0.6.2
     optionalDependencies:
       esbuild: 0.28.1
@@ -7905,7 +7959,7 @@ snapshots:
       magic-string: 0.30.21
       obug: 2.1.3
       pathe: 2.0.3
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       std-env: 4.1.0
       tinybench: 2.9.0
       tinyexec: 1.2.4
@@ -7933,7 +7987,7 @@ snapshots:
       magic-string: 0.30.21
       obug: 2.1.3
       pathe: 2.0.3
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       std-env: 4.1.0
       tinybench: 2.9.0
       tinyexec: 1.2.4

@@ -14,12 +14,12 @@
   "dependencies": {
     "@folio/client-core": "workspace:*",
     "@standard-schema/spec": "^1.1.0",
-    "effect": "^3.22.1",
-    "zod": "^4.0.0"
+    "effect": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "@effect/platform": "^0.97.1",
-    "typescript": "^7.0.2",
-    "vitest": "^4.1.5"
+    "@effect/platform": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

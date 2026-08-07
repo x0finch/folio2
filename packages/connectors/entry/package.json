@@ -24,11 +24,11 @@
     "@folio/oracle-ref": "workspace:*",
     "@folio/rabby-client": "workspace:*",
     "@folio/zerion-client": "workspace:*",
-    "zod": "^4.0.0"
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "effect": "^3.22.1",
-    "typescript": "^7.0.2",
-    "vitest": "^4.1.5"
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
