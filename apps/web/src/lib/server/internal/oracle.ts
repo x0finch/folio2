@@ -25,8 +25,8 @@ import {
   coinGeckoTokenUpstreamLayer,
   UPSTREAM_ID,
 } from "@folio/oracle-upstream-coingecko";
-import { getLogger } from "@logtape/logtape";
-import { Effect, HashMap, Layer, Logger, LogLevel } from "effect";
+import { Effect, Layer } from "effect";
+import { logTapeLogger } from "./effect-log";
 import {
   cacheStorePort,
   refIndexStorePort,
@@ -84,22 +84,6 @@ const portsFor = (userId: string) =>
     ),
   );
 
-// —— Effect 的日志 → LogTape ——
-// epic #362 里那句「日志换 Effect 的日志系统 + 一个转发器接回 LogTape,但只有当调用方自己持有
-// Effect 并 runPromise 时才挂得上」的那个边界,这一站推出去了:参考层里的降级与告警走
-// `Effect.logWarning`,落到哪由这个 layer 决定。
-const logTape = Logger.replace(
-  Logger.defaultLogger,
-  Logger.make(({ logLevel, message, annotations }) => {
-    const log = getLogger(["folio", "oracle"]);
-    const text = Array.isArray(message) ? message.map(String).join(" ") : String(message);
-    const props = Object.fromEntries(HashMap.entries(annotations));
-    if (LogLevel.greaterThanEqual(logLevel, LogLevel.Error)) log.error(text, props);
-    else if (LogLevel.greaterThanEqual(logLevel, LogLevel.Warning)) log.warn(text, props);
-    else log.info(text, props);
-  }),
-);
-
 // 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
 // 而 `Data.TaggedError` 的那四类没有 `message` 字段,于是上层日志里只剩一个空消息 + 一坨 Cause。
 // 消息里只有 tag、pathname 和状态码 —— `where` 本来就刻意不带 query(原则 #5 红线)。
@@ -126,7 +110,7 @@ export const runOracle = <A>(
   Effect.runPromise(
     effect.pipe(
       Effect.provide(Layer.provide(oracleLayer, Layer.merge(portsFor(userId), upstreams()))),
-      Effect.provide(logTape),
+      Effect.provide(logTapeLogger),
       Effect.mapError(toError),
     ),
   );
@@ -151,7 +135,7 @@ export const runOracleWarm = <A>(
           ),
         ),
       ),
-      Effect.provide(logTape),
+      Effect.provide(logTapeLogger),
       Effect.mapError(toError),
     ),
   );
