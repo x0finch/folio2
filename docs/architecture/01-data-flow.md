@@ -91,7 +91,7 @@ mint 失败是 best-effort:快照照落、新列留空、下次同步补上。�
 - 凭据解密:`apps/web/src/lib/creds.ts` `openCreds`(仅此处,用完即弃)
 - provider 取数契约:`packages/connectors/basic/src/provider.ts` `BalanceProvider.fetchBalances`
 - 认币决策树:`packages/oracle/entry/src/mint.ts` `createMint`
-- 落库(封装 op):`packages/db/src/queries.ts` `writeSnapshot`(userId-scoped)
+- 落库(封装 op):`packages/db/src/queries/snapshots.ts` `writeSnapshot`(userId-scoped)
 
 ---
 

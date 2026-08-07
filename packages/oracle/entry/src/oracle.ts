@@ -21,7 +21,7 @@ import { type TokenReader, tokenReaderLayer } from "./tokens";
 // 回调,正是 CODING.md 反复改掉的那个模式:能替换的东西该是**服务**(Layer),不是配置字段。
 // 换掉它同时解决了三件事:
 //   · 惰性(以前用 getter + `??=` 手写)由 Layer memoisation 免费给,而且**成本本来就没那么大** ——
-//     `packages/db/src/client.ts` 自己写着「drizzle(env.DB) 很轻,每次创建即可」,四个 store 全建
+//     `packages/db/src/connect.ts` 自己写着「drizzle(env.DB) 很轻,每次创建即可」,四个 store 全建
 //     是常数级开销;当初那句「一拼 config 就把所有 store new 出来」担心的是不存在的代价
 //   · `namer` / `overrides` 不再由装配点从 adapter 搬到服务层 —— adapter 的 layer 直接给 `Namer`
 //   · `now?: () => number` 五个字段全删,时间走 `Clock`(测试 `TestClock`)

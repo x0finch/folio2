@@ -58,7 +58,7 @@ const upstreams = () =>
 // 以前这里还有一层 30 行的 `Effect.promise` 适配(`oracle-ports.ts`),因为 db 那边是 Promise 形状;
 // 现在四个 store 自己就是 Effect,那个文件删了,`env` 也只在 `databaseLayer(env)` 一处被读。
 //
-// 惰性到「只建被用到的那一个」这件事**不做**:`packages/db/src/client.ts` 自己写着
+// 惰性到「只建被用到的那一个」这件事**不做**:`packages/db/src/connect.ts` 自己写着
 // 「drizzle(env.DB) 很轻,每次创建即可」,而现在四个 store 共用同一个 `Database`——
 // 建它们只是几个闭包。迁移前那套 getter + `??=` 的手写惰性,省下的是不存在的代价。
 const portsFor = (userId: string) =>

@@ -63,7 +63,7 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 - **「一个 config 对象装七个工厂回调」就是没写完的 Layer。** oracle 那一站删掉的 `createOracleFor({
   createTokenStore(userId), createUpstream(), …, overrides, now })` 是这个模式的极端形态:七个回调 +
   一份手写的惰性(getter + `??=`)+ 一个只有测试传的 `now`。换成 Layer 之后惰性归 Layer memoisation,
-  而当初担心的构造成本经实测是不存在的(`packages/db/src/client.ts` 自己写着「drizzle(env.DB) 很轻」)。
+  而当初担心的构造成本经实测是不存在的(`packages/db/src/connect.ts` 自己写着「drizzle(env.DB) 很轻」)。
   **判据同上:生产只传一个值的字段,不该是字段** —— `namer` / `overrides` 是 adapter 的知识,
   就该由 adapter 的 layer 给(`Namer`),不该经装配点转手。
 - **服务的方法签名里不许出现自己的依赖。** 服务对外的 `R` 恒是 `never`:实现面(`R` 里带着

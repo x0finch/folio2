@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { type Db, type DbEnv, getDb } from "./client";
+import { type DbEnv, type Drizzle, getDb } from "../connect";
 
 // **D1 这一层的服务面 —— 全包唯一一处 Promise → Effect 的桥。**
 //
@@ -19,18 +19,18 @@ import { type Db, type DbEnv, getDb } from "./client";
 // 整个请求 500。所以它走 defect(`Effect.promise` 的拒绝),一路冒到 `runPromise`。
 // `E` 里只放有人会处理的东西(CODING.md「错误」一节),而这里没有。
 export interface Database {
-  readonly query: <A>(build: (db: Db) => PromiseLike<A>) => Effect.Effect<A>;
+  readonly query: <A>(build: (db: Drizzle) => PromiseLike<A>) => Effect.Effect<A>;
   // 一批语句。**同样收一个 builder** —— 语句得拿 `db` 才造得出来,而调用方不该为了造语句先
   // 从服务里把 `db` 掏出来(掏出来它就又能绕过这一层了)。drizzle 的 batch 要求非空
   // `[Stmt, ...Stmt[]]`;空 → no-op。
-  readonly batch: (build: (db: Db) => readonly Stmt[]) => Effect.Effect<void>;
+  readonly batch: (build: (db: Drizzle) => readonly Stmt[]) => Effect.Effect<void>;
 }
 
-type Stmt = Parameters<Db["batch"]>[0][number]; // drizzle BatchItem
+type Stmt = Parameters<Drizzle["batch"]>[0][number]; // drizzle BatchItem
 
 export const Database = Context.GenericTag<Database>("db/Database");
 
-const make = (db: Db): Database => ({
+const make = (db: Drizzle): Database => ({
   query: (build) => Effect.promise(() => build(db)),
   batch: (build) =>
     Effect.suspend(() => {

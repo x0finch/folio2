@@ -2,8 +2,7 @@ import { env } from "cloudflare:test";
 import { TokenStore } from "@folio/oracle-basic/ports";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 // 包内测试白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
 import {
   createAccount,
@@ -13,7 +12,8 @@ import {
   removeManualActivity,
 } from "../src/queries";
 import { manualActivity } from "../src/schema";
-import { userTokenStoreLayer } from "../src/user-token-store";
+import { user } from "../src/schema/auth";
+import { userTokenStoreLayer } from "../src/stores/token";
 import { promisified } from "./effect";
 
 const USER_A = "user-a";

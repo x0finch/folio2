@@ -2,8 +2,7 @@ import { env } from "cloudflare:test";
 import { TokenStore } from "@folio/oracle-basic/ports";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 // 包内白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
 import {
   createAccount,
@@ -15,7 +14,8 @@ import {
   setManualHoldingDef,
 } from "../src/queries";
 import { manualActivity, tokens as tokensTable } from "../src/schema";
-import { userTokenStoreLayer } from "../src/user-token-store";
+import { user } from "../src/schema/auth";
+import { userTokenStoreLayer } from "../src/stores/token";
 import { promisified } from "./effect";
 
 // #203 起手记的币**就是 `tokens` 里的一行** —— 没有 manual_token 那张表了。

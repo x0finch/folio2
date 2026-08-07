@@ -1,6 +1,6 @@
 import { formatTokenRef, type TokenRef } from "@folio/oracle-ref";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { type DbEnv, getDb } from "../client";
+import { type DbEnv, getDb } from "../connect";
 import { manualActivity, tokenRefs, tokens } from "../schema";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 

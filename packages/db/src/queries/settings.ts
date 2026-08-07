@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
-import { type DbEnv, getDb } from "../client";
+import { type DbEnv, getDb } from "../connect";
 import { userSettings } from "../schema";
-import type { UserSettings, ValuationMode } from "../schema-types";
+import type { UserSettings, ValuationMode } from "../schema/types";
 
 // 用户设置(Phase 3,#82)。
 

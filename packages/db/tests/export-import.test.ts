@@ -1,8 +1,7 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 import {
   createAccount,
   importAccount,
@@ -17,6 +16,7 @@ import {
   recordManualActivity,
 } from "../src/queries";
 import { tokenRefs, tokens } from "../src/schema";
+import { user } from "../src/schema/auth";
 
 // 导出/导入 v3 的 db 支持(#204):listTokensForExport(带 ref)、listManualActivityByUser(扁平跨账户),
 // 以及 A 方案的 find-or-create 一族(importToken/importAccount/importSnapshot/

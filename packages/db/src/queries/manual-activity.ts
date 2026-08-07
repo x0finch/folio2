@@ -1,5 +1,5 @@
 import { and, asc, eq, getTableColumns, type InferSelectModel, inArray } from "drizzle-orm";
-import { type Db, type DbEnv, getDb } from "../client";
+import { type DbEnv, type Drizzle, getDb } from "../connect";
 import { accounts, manualActivity, tokens } from "../schema";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 
@@ -107,7 +107,7 @@ export async function removeManualActivity(
 // 活动 → {tokenId, accountId}(经 activity ⨝ account ⨝ user 归属校验;活动可能无 tokenId 的遗留行 → 抛)。
 // 编辑活动前用它定位所属 token(取时间线校验)+ 账户(重跑物化)。
 async function assertActivityOwned(
-  db: Db,
+  db: Drizzle,
   userId: string,
   activityId: string,
 ): Promise<{ tokenId: string; accountId: string }> {

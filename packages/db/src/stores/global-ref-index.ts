@@ -3,9 +3,9 @@ import { GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { Effect, Layer, Option } from "effect";
-import { chunk } from "./cache-util";
-import { Database } from "./database";
-import { globalTokenRefIndex } from "./schema";
+import { globalTokenRefIndex } from "../schema";
+import { chunk } from "../stores/chunk";
+import { Database } from "./service";
 
 // `GlobalTokenRefIndexStore` 的 D1 实现(ADR 0022,#199)。
 //
@@ -69,7 +69,7 @@ const make = Effect.gen(function* () {
               ),
           ),
         );
-        // 值 = 整条 upstream ref:两列 (upstream, upstream_local_name) 经文法拼回(与 user-token-store
+        // 值 = 整条 upstream ref:两列 (upstream, upstream_local_name) 经文法拼回(与 ./token
         // 同构;#228:调用方拿整条直接用,不再自己拼 issued: 那段)。键用调用方原样给的串回填。
         for (const rows of batches) {
           for (const r of rows) {
@@ -83,7 +83,7 @@ const make = Effect.gen(function* () {
       }),
 
     // 整份刷新。**不删行**:下架币的旧映射留着无害,`updated_at` 用来看哪些行这轮没被刷到。
-    // 落表时把整条 `upstreamRef` 拆成 (upstream, upstream_local_name) 两列 —— 与 user-token-store 同构。
+    // 落表时把整条 `upstreamRef` 拆成 (upstream, upstream_local_name) 两列 —— 与 ./token 同构。
     // 读不懂的 upstreamRef(理论上不会,adapter 恒产规范形)直接跳过。两级分批见上面的常量。
     putAll: (rows: readonly TokenRefIndexRow[], updatedAt) =>
       Effect.suspend(() => {

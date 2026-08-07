@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import type { Db } from "../client";
+import type { Drizzle } from "../connect";
 import { accounts, portfolios, tags, tokens } from "../schema";
 
 // 归属校验 —— 这半数据访问的越权防线,四个领域共用。
@@ -7,7 +7,11 @@ import { accounts, portfolios, tags, tokens } from "../schema";
 // 每个都是同一句话:这东西属不属于这个 userId?不属于就抛。单独放一处是因为它们跨领域被用 ——
 // 账户那道被 portfolio / tag / tab pin / 快照 / 手记五处调,token 那道被手记与导入两处调。
 
-export async function assertAccountOwned(db: Db, userId: string, accountId: string): Promise<void> {
+export async function assertAccountOwned(
+  db: Drizzle,
+  userId: string,
+  accountId: string,
+): Promise<void> {
   const rows = await db
     .select({ id: accounts.id })
     .from(accounts)
@@ -16,7 +20,7 @@ export async function assertAccountOwned(db: Db, userId: string, accountId: stri
 }
 
 export async function assertPortfolioOwned(
-  db: Db,
+  db: Drizzle,
   userId: string,
   portfolioId: string,
 ): Promise<void> {
@@ -28,7 +32,7 @@ export async function assertPortfolioOwned(
 }
 
 export async function assertTagOwned(
-  db: Db,
+  db: Drizzle,
   userId: string,
   tagId: string,
 ): Promise<{ portfolioId: string }> {
@@ -42,7 +46,11 @@ export async function assertTagOwned(
 }
 
 // 该 token 归属本人即通过,否则抛。`tokens` 直接带 user_id,不必再绕 account。
-export async function assertTokenOwned(db: Db, userId: string, tokenId: string): Promise<void> {
+export async function assertTokenOwned(
+  db: Drizzle,
+  userId: string,
+  tokenId: string,
+): Promise<void> {
   const rows = await db
     .select({ id: tokens.id })
     .from(tokens)

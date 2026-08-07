@@ -1,8 +1,7 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 import {
   assignAccountToPortfolio,
   createAccount,
@@ -17,6 +16,7 @@ import {
   renamePortfolio,
   setDefaultPortfolio,
 } from "../src/queries";
+import { user } from "../src/schema/auth";
 
 // Portfolio 地基(ADR 0033)对着真 D1 跑:唯一约束 / 部分索引 / cascade / batch 都真生效。
 // 不隔离每测存储 → beforeEach 重置用户(级联清 portfolios/portfolio_accounts)。

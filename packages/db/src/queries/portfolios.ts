@@ -1,7 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
-import { type Db, type DbEnv, getDb } from "../client";
+import { type DbEnv, type Drizzle, getDb } from "../connect";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
-import type { Portfolio } from "../schema-types";
+import type { Portfolio } from "../schema/types";
 import { assertAccountOwned, assertPortfolioOwned } from "./ownership";
 
 // Portfolio —— 命名账户集(ADR 0033)。每个账户恰属一个,新用户首次落地建默认那个。
@@ -15,7 +15,7 @@ function defaultPortfolioName(userName: string | null | undefined): string {
   return n ? `${n}${PORTFOLIO_NAME_SUFFIX}` : PORTFOLIO_FALLBACK_NAME;
 }
 
-function selectDefaultPortfolio(db: Db, userId: string): Promise<Portfolio | undefined> {
+function selectDefaultPortfolio(db: Drizzle, userId: string): Promise<Portfolio | undefined> {
   return db
     .select()
     .from(portfolios)

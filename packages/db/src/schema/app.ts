@@ -10,14 +10,13 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { user } from "./auth-schema";
+import { user } from "./auth";
 
-// 身份表(user/session/account/verification)定义在 ./auth-schema(better-auth,P2.1)。
+// 身份表(user/session/account/verification)定义在 ./auth(better-auth,P2.1)。
 // 此处再导出,让 drizzle-kit 把它们一并纳入迁移。业务表的 userId 为指向 user.id 的真外键。
-export * from "./auth-schema";
 
 // 业务账户:被追踪的余额来源(钱包 / CEX / 永续 / manual),由 connectorId 决定派哪个 connector/provider。
-// ⚠️ 勿与 auth-schema.ts 的 `account`(better-auth 的登录方式链接表)混淆——只是单复数相近,
+// ⚠️ 勿与 ./auth 的 `account`(better-auth 的登录方式链接表)混淆——只是单复数相近,
 //    语义完全不同:这张是「资产账户」,那张是「认证」。
 export const accounts = sqliteTable(
   "accounts",

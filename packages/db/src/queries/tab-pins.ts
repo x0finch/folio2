@@ -1,8 +1,8 @@
 import type { ConnectorId } from "@folio/connectors";
 import { and, asc, eq } from "drizzle-orm";
-import { type Db, type DbEnv, getDb } from "../client";
+import { type DbEnv, type Drizzle, getDb } from "../connect";
 import { tabPins } from "../schema";
-import type { TabPin } from "../schema-types";
+import type { TabPin } from "../schema/types";
 import { batchWrite } from "./batch";
 import { assertAccountOwned, assertTagOwned } from "./ownership";
 
@@ -11,7 +11,7 @@ import { assertAccountOwned, assertTagOwned } from "./ownership";
 // 每 user 至多固定 3 个自定义 Tab(域规则,co-located 同 BALANCE_INSERT_CHUNK 的做法)。
 const MAX_TAB_PINS_PER_USER = 3;
 
-async function assertTabPinOwned(db: Db, userId: string, pinId: string): Promise<void> {
+async function assertTabPinOwned(db: Drizzle, userId: string, pinId: string): Promise<void> {
   const rows = await db
     .select({ id: tabPins.id })
     .from(tabPins)
@@ -30,7 +30,7 @@ export interface TabPinInput {
 // pin 的目标校验:tag pin 带本人 tagId;account pin 带本人 accountId;connector pin 带 connectorId
 //(无 FK,不校验存在)。返回规范化后的三列(按 kind 互斥非空)。
 async function resolvePinTarget(
-  db: Db,
+  db: Drizzle,
   userId: string,
   input: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
 ): Promise<{ tagId: string | null; accountId: string | null; connectorId: ConnectorId | null }> {

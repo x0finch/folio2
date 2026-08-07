@@ -1,8 +1,8 @@
 import { type BalanceKind, Note } from "@folio/connectors-basic";
 import { and, asc, desc, eq, getTableColumns, gte, inArray, max } from "drizzle-orm";
-import { type DbEnv, getDb } from "../client";
+import { type DbEnv, getDb } from "../connect";
 import { accounts, snapshotBalances, snapshots } from "../schema";
-import type { Snapshot, SnapshotBalance } from "../schema-types";
+import type { Snapshot, SnapshotBalance } from "../schema/types";
 import { assertAccountOwned } from "./ownership";
 
 // 快照 —— 一次同步落下的余额切片,以及总额 / 历史 / 分页那几条读路。

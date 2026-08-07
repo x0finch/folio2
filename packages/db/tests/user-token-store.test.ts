@@ -5,8 +5,7 @@ import { eq } from "drizzle-orm";
 import { Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { userCacheStoreLayer, userTokenPriceStoreLayer, userTokenStoreLayer } from "../src";
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 import {
   accounts,
   globalTokenRefIndex,
@@ -16,6 +15,7 @@ import {
   tokenRefs,
   tokens,
 } from "../src/schema";
+import { user } from "../src/schema/auth";
 import { NOW, promisified } from "./effect";
 
 // 新参考层三个 per-user store 的真 D1 测试(#199)。

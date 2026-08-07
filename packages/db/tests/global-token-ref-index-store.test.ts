@@ -4,7 +4,7 @@ import { tokenRef } from "@folio/oracle-ref";
 import { Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { globalTokenRefIndexStoreLayer } from "../src";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 import { globalTokenRefIndex } from "../src/schema";
 import { promisified } from "./effect";
 

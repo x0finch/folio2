@@ -3,16 +3,16 @@ import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
-import { chunk } from "./cache-util";
-import { Database } from "./database";
-import { tokenDailyPrices, tokenRefs, tokens } from "./schema";
+import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
+import { chunk } from "../stores/chunk";
+import { Database } from "./service";
 
 // `TokenPriceStore` 的 D1 实现(ADR 0021/0023,#199)。**每个用户一份** —— userId 由 layer 吃掉。
 //
 // 两半:**现价**在代币行自己那几列上(per-user,过期不删、读出带 stale);**历史日价**在
 // `token_daily_prices`(全局键 = tokenRef,过去日不可变 → 永久存、无 TTL,#199/ADR 0022 的受控例外)。
 //
-// **时间走 `Clock`**(以前是 `opts.now`);`env` 不再出现在签名里(见 database.ts)。
+// **时间走 `Clock`**(以前是 `opts.now`);`env` 不再出现在签名里(见 ./service.ts)。
 
 export interface UserTokenPriceStoreOpts {
   userId: string;

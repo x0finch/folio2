@@ -1,13 +1,13 @@
 import { and, asc, eq, sql } from "drizzle-orm";
-import { type Db, type DbEnv, getDb } from "../client";
+import { type DbEnv, type Drizzle, getDb } from "../connect";
 import { accounts, accountTags, portfolioAccounts, tags } from "../schema";
-import type { Tag } from "../schema-types";
+import type { Tag } from "../schema/types";
 import { assertAccountOwned, assertPortfolioOwned, assertTagOwned } from "./ownership";
 
 // Tag —— Portfolio 内的软标签(ADR 0034)。一个账户可挂多个,但只能挂同 Portfolio 的 tag。
 
 // 某账户当前归属的 Portfolio(1:1,恰一行;无行 = 账户不存在 / 越权,返回 undefined)。
-async function accountPortfolioId(db: Db, accountId: string): Promise<string | undefined> {
+async function accountPortfolioId(db: Drizzle, accountId: string): Promise<string | undefined> {
   const rows = await db
     .select({ portfolioId: portfolioAccounts.portfolioId })
     .from(portfolioAccounts)
@@ -18,7 +18,7 @@ async function accountPortfolioId(db: Db, accountId: string): Promise<string | u
 // 同 Portfolio 内名字空闲校验(忽略大小写;可排除自身 id 供改名用)。DB 表达式唯一索引兜底并发,
 // 这里给出更友好的报错并先挡单实例的重复。
 async function assertTagNameFree(
-  db: Db,
+  db: Drizzle,
   userId: string,
   portfolioId: string,
   name: string,

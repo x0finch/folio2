@@ -1,8 +1,7 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 import {
   assignAccountToPortfolio,
   attachTag,
@@ -18,6 +17,7 @@ import {
   listTagsByUser,
   renameTag,
 } from "../src/queries";
+import { user } from "../src/schema/auth";
 
 // Tag 数据地基(ADR 0034)对着真 D1 跑:表达式唯一索引 / cascade / 同 batch 清 tag 都真生效。
 // 不隔离每测存储 → beforeEach 重置用户(级联清 portfolios/tags/account_tags)。

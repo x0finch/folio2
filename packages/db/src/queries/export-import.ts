@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull, or } from "drizzle-orm";
-import { type DbEnv, getDb } from "../client";
+import { type DbEnv, getDb } from "../connect";
 import {
   accounts,
   manualActivity,

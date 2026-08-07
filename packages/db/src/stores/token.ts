@@ -10,21 +10,21 @@ import { TokenStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
-import { chunk } from "./cache-util";
-import type { Db } from "./client";
-import { Database } from "./database";
-import { snapshotBalances, tokenRefs, tokens } from "./schema";
+import type { Drizzle } from "../connect";
+import { snapshotBalances, tokenRefs, tokens } from "../schema";
+import { chunk } from "../stores/chunk";
+import { Database } from "./service";
 
 // `TokenStore` 的 D1 实现(ADR 0021 / 0023,#199)。**每个用户一份** —— userId 由 layer 吃掉,
 // 下面所有方法签名里都没有它,拿错用户在编译期就发生不了。
 //
 // 落两张表:`tokens`(info facet,含 user_id)+ `token_refs`(该用户对各命名者叫法的映射)。
-// 价 facet 在 `user-token-price-store`(同一行的另外几列 + 另一张日价表)。
+// 价 facet 在 `./token-price`(同一行的另外几列 + 另一张日价表)。
 //
 // `namer` = 当前上游的 id。它只用来回答一件事:「这个 Token 被上游认出来了吗」——
 // 即有没有一条 namer 那一档的 ref 行(`TokenInfo.ref`)。本 store 不知道那是哪家。
 //
-// **出网口只有 `Database` 一个服务**(见 database.ts):`env` 不在签名里,`Effect.promise` 不在
+// **出网口只有 `Database` 一个服务**(见 ./service.ts):`env` 不在签名里,`Effect.promise` 不在
 // 这个文件里,时间走 `Clock`(以前是 `opts.now` —— 只有测试会传的字段)。
 
 export interface UserTokenStoreOpts {
@@ -128,7 +128,7 @@ const make = ({ userId, namer }: UserTokenStoreOpts) =>
       });
 
     // info 标成「该刷」= 把过期时刻推到过去。`putInfo` 的反面,不带值。
-    const expireInfoStmt = (db: Db, tokenId: string) =>
+    const expireInfoStmt = (db: Drizzle, tokenId: string) =>
       db
         .update(tokens)
         .set({ infoExpiresAt: 0 })

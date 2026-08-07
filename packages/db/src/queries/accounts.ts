@@ -1,8 +1,8 @@
 import type { ConnectorId } from "@folio/connectors";
 import { and, eq } from "drizzle-orm";
-import { type DbEnv, getDb } from "../client";
+import { type DbEnv, getDb } from "../connect";
 import { accounts, portfolioAccounts } from "../schema";
-import type { AccountSafe } from "../schema-types";
+import type { AccountSafe } from "../schema/types";
 import { ensureDefaultPortfolio } from "./portfolios";
 
 // 账户:建 / 列 / 改名 / 归档 / 删,外加 creds 的原样存取(db 不解释 creds 的内容)。

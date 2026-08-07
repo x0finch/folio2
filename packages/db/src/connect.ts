@@ -12,4 +12,6 @@ export function getDb(env: DbEnv) {
   return drizzle(env.DB);
 }
 
-export type Db = ReturnType<typeof getDb>;
+// drizzle 句柄的类型。**不叫 `Db`** —— 那个名字归门面(`db.ts` 的 `createDb` 返回值),
+// 两个都叫 Db 的时候读代码得先猜是哪个。
+export type Drizzle = ReturnType<typeof getDb>;
