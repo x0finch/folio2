@@ -1,3 +1,4 @@
+import { HttpClient } from "@effect/platform";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -61,11 +62,19 @@ describe("defineConnector", () => {
 
   it("account.creds 经 const 泛型 → ctx.account.creds.address 有编译期类型", async () => {
     const p = evmLike.balance.providers[0];
+    // 这个假 provider 不出网,但契约的 `R` 说「可能要出网」—— provide 一个空的顶上即可。
     const out = await Effect.runPromise(
-      p.fetchBalances({
-        account: { id: "a", label: "l", connectorId: "evm-like", creds: { address: "0xabc" } },
-        creds: {},
-      }),
+      p
+        .fetchBalances({
+          account: { id: "a", label: "l", connectorId: "evm-like", creds: { address: "0xabc" } },
+          creds: {},
+        })
+        .pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make(() => Effect.never),
+          ),
+        ),
     );
     expect(out.balances[0]).toMatchObject({ kind: "spot", symbol: "0xabc" });
     // 仅供展示的 note(单个 Note)挂在该 balance 上(per-balance)。

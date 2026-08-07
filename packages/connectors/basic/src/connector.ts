@@ -1,3 +1,4 @@
+import type { Outbound } from "@folio/client-core";
 import type { Effect } from "effect";
 import type { z } from "zod";
 import type { Balance } from "./balance";
@@ -10,6 +11,15 @@ import type { Note } from "./note";
 
 // provider 取数/校验拿到的上下文:两组 creds 都类型化 —— 账户级 AC 从 connector.account.creds 下来,
 // provider 级 PC 是本 provider 自身配置(scope-A 恒空)。
+// provider 干活需要的能力:**出网**。写进 `R` 通道而不是让每个 provider 自己 provide 一个 ——
+// 后者的话测试就换不掉它了(provider 内部 provide 的东西,外面盖不住)。装配那头(`apps/web`)
+// 提供 `FolioHttpClient`,测试提供一个假的,provider 只声明「我需要」。
+//
+// `import type` —— 类型在编译期就没了,`@folio/connectors-basic` 仍然是那个能安全进客户端包的契约层
+// (它被 `apps/web/src/lib/*` 引用)。**别在本包里对 `@folio/client-core` 做值导入**,那会把整个
+// HTTP 层拖进客户端 bundle。
+export type ProviderNeeds = Outbound;
+
 export interface FetchContext<AC = Record<string, unknown>, PC = Record<string, unknown>> {
   readonly account: { id: string; label: string; connectorId: string; creds: AC };
   readonly creds: PC;
@@ -30,7 +40,7 @@ export interface BalanceProvider<
   // 外层的超时和中断管不到里面,`TestClock` 也驱动不了(sync 迁移时实测过)。
   fetchBalances(
     ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>,
-  ): Effect.Effect<{ balances: B[]; note?: Note[] }, ConnectorError>;
+  ): Effect.Effect<{ balances: B[]; note?: Note[] }, ConnectorError, ProviderNeeds>;
   // 账户 liveness。**语义收窄成一件事:上游对这份凭据说不说 yes。** 两类失败别压成同一个 false:
   //   · 凭据被上游拒(401/403 / 业务码说不对)或凭据本身不成立 → 成功返回 `false`
   //     (等也没用,不该重试)。
@@ -42,7 +52,7 @@ export interface BalanceProvider<
   //  9 个 provider 的内部,而本片刻意只动契约形状;B2 各片接线时顺手改。)
   validateAccount(
     ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>,
-  ): Effect.Effect<boolean, ConnectorError>;
+  ): Effect.Effect<boolean, ConnectorError, ProviderNeeds>;
 }
 
 // 估值语义:provider 的 value 权不权威。authoritative(默认)= 场馆/链上自带权威 USD 估值,

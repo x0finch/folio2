@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseFuturesAccount } from "../src";
+import { parseFuturesAccount } from "../../../src/connectors/binance/parse";
 import expected from "./fixtures/expected-futures-balances.json";
 import account from "./fixtures/futures-account.json";
 

@@ -1,4 +1,5 @@
-import type { Balance, ConnectorError } from "@folio/connectors-basic";
+import { FolioHttpClient } from "@folio/client-core";
+import type { Balance, ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { Context, Effect, HashMap, Layer, Logger, LogLevel } from "effect";
 import { depError, type SyncDepError } from "./errors";
@@ -31,7 +32,7 @@ export class BalanceSource extends Context.Tag("sync/BalanceSource")<
     readonly fetch: (
       account: AccountSafe,
       stored: Record<string, string>,
-    ) => Effect.Effect<FetchOutcome, ConnectorError>;
+    ) => Effect.Effect<FetchOutcome, ConnectorError, ProviderNeeds>;
   }
 >() {}
 
@@ -66,7 +67,15 @@ export class TokenOracle extends Context.Tag("sync/TokenOracle")<
   }
 >() {}
 
-export type SyncServices = AccountStore | BalanceSource | SnapshotStore | TokenOracle;
+// 编排跑起来需要的全部能力。**`ProviderNeeds`(出网)也在里面** —— provider 现在自己发请求,
+// 而它声明「我需要出网」而不是自己 provide 一个:后者的话测试就换不掉它了。
+// 装配那头(`apps/web`)提供 `FolioHttpClient`,测试提供一个假的。
+export type SyncServices =
+  | AccountStore
+  | BalanceSource
+  | SnapshotStore
+  | TokenOracle
+  | ProviderNeeds;
 
 // 没注入 mint 时的空答案。共享一个不可变实例 —— 每账户新建一个空 Map 没有意义。
 const EMPTY_IDS: ReadonlyMap<string, string> = new Map();
@@ -115,6 +124,11 @@ const silent: Layer.Layer<never> = Logger.replace(Logger.defaultLogger, Logger.n
 // 下一步(出口也改成 Effect)这个函数删掉,调用方直接提供服务层。
 export const layerFromDeps = (deps: SyncDeps): Layer.Layer<SyncServices> =>
   Layer.mergeAll(
+    // 出网。**在这里补上而不是让调用方给** —— 本包的公开出口仍是 Promise 形状(内部 `runPromise`),
+    // 所以这一层必须是完整的。provider 声明「我要出网」,这里满足它。
+    // 测试不受影响:它们注入的 `fetchBalances` 压根不出网,而 provider 自己的测试在 entry 那边
+    // provide 一个假 `HttpClient`。
+    FolioHttpClient,
     Layer.succeed(AccountStore, {
       list: (userId) =>
         Effect.tryPromise({

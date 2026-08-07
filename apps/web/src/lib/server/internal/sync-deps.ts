@@ -11,6 +11,7 @@ import {
   type ConnectorError,
   ConnectorFailure,
   fromProviderError,
+  type ProviderNeeds,
 } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import type { ValuationMode } from "@folio/oracle";
@@ -95,7 +96,7 @@ const fetchViaConnector = (
   account: AccountSafe,
   stored: Record<string, string>,
   seeds: SeedCollector,
-): Effect.Effect<FetchOutcome, ConnectorError> =>
+): Effect.Effect<FetchOutcome, ConnectorError, ProviderNeeds> =>
   Effect.gen(function* () {
     const specs = manifest.account.creds as unknown as InputSpec[]; // {key,type} 结构 = InputSpec
     if (!isComplete(specs, stored)) return { status: "needs-credentials" } satisfies FetchOutcome;

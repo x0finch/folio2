@@ -2,6 +2,7 @@ import {
   type ConnectorError,
   ConnectorUnavailableError,
   isRetryable,
+  type ProviderNeeds,
   retryAfterOf,
 } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
@@ -63,7 +64,7 @@ const retryPolicy = Schedule.exponential(Duration.millis(RETRY_BASE_MS)).pipe(
 const once = (
   account: AccountSafe,
   stored: Record<string, string>,
-): Effect.Effect<FetchOutcome, ConnectorError, BalanceSource> =>
+): Effect.Effect<FetchOutcome, ConnectorError, BalanceSource | ProviderNeeds> =>
   Effect.flatMap(BalanceSource, (source) => source.fetch(account, stored)).pipe(
     // 超时归「够不到上游」—— 语义正好(等太久 = 这一轮拿不到)且可重试,策略仍然只认识一种错误。
     // 用 timeoutFail 不用 Effect.timeout —— 后者会往错误通道塞一个 TimeoutException,
@@ -78,5 +79,5 @@ const once = (
 export const fetchBalancesWithRetry = (
   account: AccountSafe,
   stored: Record<string, string>,
-): Effect.Effect<FetchOutcome, ConnectorError, BalanceSource> =>
+): Effect.Effect<FetchOutcome, ConnectorError, BalanceSource | ProviderNeeds> =>
   Effect.retry(once(account, stored), retryPolicy);

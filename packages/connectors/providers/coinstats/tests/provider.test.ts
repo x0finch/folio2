@@ -1,5 +1,6 @@
+import { noOutbound } from "@folio/client-core/testing";
 import type { Balance, BalanceProvider, ConnectorError } from "@folio/connectors-basic";
-import { validateCredentials } from "@folio/connectors-basic";
+import { type ProviderNeeds, validateCredentials } from "@folio/connectors-basic";
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,9 +10,11 @@ import solanaFixture from "./fixtures/solana.json";
 // 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
 // `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
 // 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
-const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
-const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
-  Effect.runPromise(Effect.flip(effect));
+const run = <A>(effect: Effect.Effect<A, ConnectorError, ProviderNeeds>): Promise<A> =>
+  Effect.runPromise(Effect.provide(effect, noOutbound));
+const failing = (
+  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
+): Promise<ConnectorError> => Effect.runPromise(Effect.provide(Effect.flip(effect), noOutbound));
 
 // 速率闸是进程内状态。桶要清(免得用例间互相排队),**冷却尤其要清** —— 撞过 429 的用例会给后面
 // 的用例留下「冷却中」,于是本该 401 的断言拿到 RATE_LIMITED。sleep 换即时,不真等

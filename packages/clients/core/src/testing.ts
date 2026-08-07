@@ -107,3 +107,17 @@ export const runClient = <A, E>(
     Effect.provide(testLayer(stub)),
     Effect.runPromise,
   );
+
+// 「这段代码不该经出网服务发请求」。**被调到就 die**,不是悄悄回一个空响应 ——
+// 后者会让「本该走服务、结果没走」这类接线错误静默通过。
+//
+// 谁用:还没迁到 `@folio/client-core` 的 provider —— 它们内部直接调全局 `fetch`(测试打桩打在那儿),
+// 但契约的 `R` 已经写着「可能要出网」,得有人填上这个位置。填一个会炸的,填得诚实。
+export const noOutbound: Layer.Layer<HttpClient.HttpClient> = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make(() =>
+    Effect.die(
+      new Error("noOutbound: this code path is not supposed to use the HttpClient service"),
+    ),
+  ),
+);

@@ -1,5 +1,10 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
-import { type ConnectorError, validateCredentials } from "@folio/connectors-basic";
+import { noOutbound } from "@folio/client-core/testing";
+import {
+  type ConnectorError,
+  type ProviderNeeds,
+  validateCredentials,
+} from "@folio/connectors-basic";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bitcoinAccountCreds, blockbookProvider } from "../src";
@@ -9,9 +14,11 @@ import xpubFixture from "./fixtures/xpub.json";
 // 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
 // `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
 // 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
-const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
-const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
-  Effect.runPromise(Effect.flip(effect));
+const run = <A>(effect: Effect.Effect<A, ConnectorError, ProviderNeeds>): Promise<A> =>
+  Effect.runPromise(Effect.provide(effect, noOutbound));
+const failing = (
+  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
+): Promise<ConnectorError> => Effect.runPromise(Effect.provide(Effect.flip(effect), noOutbound));
 
 // provider 只整合:取数走 @folio/blockbook-client(Trezor Blockbook)。这里按 URL(/xpub/ vs /address/)
 // 打桩 fetch,断言整合后的 spot 行 + account 级 Note。派生正确性在 @folio/bitcoin-derive 的离线向量测里。
