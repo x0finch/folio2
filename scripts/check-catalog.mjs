@@ -26,9 +26,12 @@ function readCatalog() {
   if (start < 0) throw new Error("pnpm-workspace.yaml 里没有 `catalog:` 块");
   const names = new Set();
   for (const line of lines.slice(start + 1)) {
-    if (line.trim() === "" || line.startsWith("#")) continue;
+    // 注释判断要在 trim 之后 —— 块内的注释总是缩进的,`line.startsWith("#")` 只认得顶格那种,
+    // 于是 `  # 测试基础设施` 会被当成一个叫「# 测试基础设施」的依赖收进来。
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
     if (!line.startsWith("  ")) break; // 缩进结束 = 块结束
-    const name = line.trim().split(":")[0];
+    const name = trimmed.split(":")[0];
     names.add(name.replace(/^["']|["']$/g, ""));
   }
   return names;
