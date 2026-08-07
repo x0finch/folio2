@@ -17,7 +17,9 @@ import { cursorFor } from "./slot-cursor";
 // 读改写。能塞进「一个数」的限频算法是 GCRA(时隙游标),不是信号量 —— 算法选择是被载体逼出来的,
 // 不是偏好。
 
-export type RateLimitScope = "memory" | "isolated";
+//   · `none`         —— **直接放行,不是闸**。给「这个文件测的不是限频」的测试用:上游 adapter
+//     的测试要连着打十几发,而闸真等的话它们会从 1 秒涨到几十秒。生产永远不该走到这一档
+export type RateLimitScope = "memory" | "isolated" | "none";
 
 export interface RateLimitOptions extends RateLimiter.RateLimiter.Options {
   // 闸的 key = **上游拿来计量的那个东西**。三种常见情形都只是往这里填不同的字符串:
@@ -55,6 +57,19 @@ export class RateLimitScopeOverride extends Context.Tag("client-core/RateLimitSc
   RateLimitScope
 >() {}
 
+// **进程级的兜底档,只给测试用**(setter 只从 `@folio/client-core/testing` 导出 —— 见那里)。
+//
+// 上面那个服务能覆盖绝大多数情形,唯独覆盖不了**跑应用真实接线的测试**:那条路上的
+// `Effect.runPromise` 在被测代码内部(如 oracle 的 CoinGecko adapter),测试手里没有能 provide
+// 服务的位置。以前这件事由 `@folio/shared` 的 `bypassRateLimitsForTests()` 全局开关办 ——
+// 这是那个开关唯一没被服务化吃掉的用途,所以它以更小的面目留了下来:
+// 不是「所有闸一律放行」的布尔,而是「不选档时算哪一档」的默认值。
+let scopeDefaultForTests: RateLimitScope | undefined;
+
+export const setScopeDefaultForTests = (scope: RateLimitScope | undefined): void => {
+  scopeDefaultForTests = scope;
+};
+
 // **默认 `isolated`,也就是生产的样子。** 进程内那档只在测试和单进程场景成立,而 CF Workers 上
 // 每个请求一次 `runPromise`、随时会开新 isolate —— 桶只活在进程内就等于没限。默认值该是
 // 「不配也安全」的那个,不是「跑得最顺」的那个。
@@ -62,17 +77,23 @@ const scopeFor = (explicit?: RateLimitScope): Effect.Effect<RateLimitScope> =>
   explicit !== undefined
     ? Effect.succeed(explicit)
     : Effect.map(Effect.serviceOption(RateLimitScopeOverride), (o) =>
-        Option.isSome(o) ? o.value : "isolated",
+        Option.isSome(o) ? o.value : (scopeDefaultForTests ?? "isolated"),
       );
 
 // 与官方 `RateLimiter.make` 同签名(多一个 `key`),所以两者可以互换、可以 compose。
 export function make(
   options: RateLimitOptions,
 ): Effect.Effect<RateLimiter.RateLimiter, never, Scope.Scope> {
-  return Effect.flatMap(scopeFor(options.scope), (scope) =>
-    scope === "memory" ? RateLimiter.make(options) : isolated(options),
-  );
+  return Effect.flatMap(scopeFor(options.scope), (scope) => {
+    if (scope === "memory") return RateLimiter.make(options);
+    if (scope === "none") return Effect.succeed(passthrough);
+    return isolated(options);
+  });
 }
+
+// 不排队、不等待,原样跑。**顶着 `RateLimiter` 的类型**,所以调用点看不出自己没被限 ——
+// 这正是要的:选档是装配那头的事,client 里那句 `limit(request)` 一个字都不用改。
+const passthrough: RateLimiter.RateLimiter = <A, E, R>(task: Effect.Effect<A, E, R>) => task;
 
 // —— isolated:GCRA(时隙游标),状态一个数,所以能跨 isolate ——
 //
