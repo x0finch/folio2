@@ -42,7 +42,8 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 ## Effect
 
 迁移进行中(ADR 0035:`sync` → `connectors` → `shared` → `clients` → `oracle` → `db`,前端明确不碰)。
-下面是 `@folio/sync`、`packages/clients/*`、`@folio/oracle` 三站踩出来的,**每条都对应一次返工**。
+下面是 `@folio/sync`、`packages/clients/*`、`@folio/oracle`、`@folio/db` 四站踩出来的,
+**每条都对应一次返工**。
 
 ### 依赖与替换点
 
@@ -74,6 +75,16 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
   `tokenTicket`)。并进主入口就等于把 `effect` 挂在前端 bundle 的可达图上(+75 KB gzip),
   摇不摇得掉全看打包器 —— 所以 Tag 走 `@folio/oracle-basic/ports`(只有服务端会碰)。
   同理:客户端组件别从 entry 包 value-import 常量(`TOP_TOKENS_LIMIT` 那一处已改成从 basic 取)。
+- **包一个 promise 库时,桥只留一处。** drizzle / fetch 这类库的边界必须有 `Effect.promise`,
+  问题只是它出现几次。`@folio/db` 那一站的答案是一个 `Database` 服务(`query(build)` /
+  `batch(build)`),四个 store 里一个 `Effect.promise` 都没有 —— 撒在几十个方法体里的话,
+  将来想加一个 span、一行慢查询日志、或者换个客户端就要改几十处。
+  **收 builder 而不是收造好的语句**:语句得拿库的句柄才造得出来,而让调用方先把句柄掏出来
+  就等于又能绕过这一层(原则 #6 在包内的形状)。
+- **迁一个包之前先问「谁在消费」。** 有 Effect 消费者的那一半迁了会**删东西**(oracle 那一站
+  删掉了一份推导出来的镜像类型 + 70 行适配层);没有消费者的那一半迁了只会把 `await` 改成
+  `yield*`,那就是 epic 里说的「包层壳」,而判据写在那儿:**收益小的包可以永远不迁**。
+  两种形状暂时共存不是罪 —— 底下是同一个连接,只有出口形状不同。
 - **端口的 Tag 与 interface 同名**(`Context.GenericTag`,`@effect/platform` 的 `FileSystem` /
   `HttpClient` 同款):契约名本身就是全仓的词表,不值得为了挂一个 `static layer` 把它们改名成 `*Api`。
   `packages/clients/*` 那边的 `class XxxClient extends Context.Tag(...)<XxxClient, XxxClientApi>()`
