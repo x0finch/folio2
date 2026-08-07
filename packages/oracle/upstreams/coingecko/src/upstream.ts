@@ -1,5 +1,5 @@
 import type { Outbound, UpstreamError } from "@folio/client-core";
-import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client2";
+import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client";
 import type {
   RefIndexFetch,
   TokenPrice,

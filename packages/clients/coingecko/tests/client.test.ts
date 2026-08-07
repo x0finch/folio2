@@ -1,239 +1,258 @@
-import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Outbound, UpstreamError } from "@folio/client-core";
 import {
+  type HttpStub,
+  httpStub,
+  jsonResponse as json,
+  runClient,
+} from "@folio/client-core/testing";
+import { Duration, Effect, Fiber, Option, TestClock } from "effect";
+import { describe, expect, it } from "vitest";
+import {
+  CoinGeckoClient,
+  type CoinGeckoClientApi,
   type CoinGeckoConfig,
-  type CoinGeckoError,
-  createCoinGeckoClient,
-  HEADER_DEMO,
-  HEADER_PRO,
-  USER_AGENT,
-} from "../src/index";
+  make,
+} from "../src/client";
+import { CG_BASE_FREE, CG_BASE_PRO, HEADER_DEMO, HEADER_PRO, USER_AGENT } from "../src/constants";
 
-// 每个用例都从干净的闸和冷却标记出发,且 sleep 即时 —— 否则限速闸会让这套测试**真的等**
-// (无 key 档是 10 次/分钟,一发就是 6 秒),而上一个用例写下的冷却还会漏给下一个。
-// 建客户端一律走这个工厂,别直接 createCoinGeckoClient。
-const newClient = (config: CoinGeckoConfig = {}) =>
-  createCoinGeckoClient({ ...config, sleep: async () => {} });
-
-// 限速闸旁路:这个文件测的不是限频。闸的行为在 @folio/shared 的单测里用假时钟验过,
-// 这里让它直接放行 —— 否则每个用例都要按窗口真等。
-bypassRateLimitsForTests(true);
-
-beforeEach(() => resetRateLimitsForTests());
-
-function mockFetch(res: Partial<Response> & { json?: () => Promise<unknown> }) {
-  return vi.spyOn(globalThis, "fetch").mockResolvedValue(res as Response);
+// 假出网:记下每一发。顶替的是 **`HttpClient` 服务**而不是 `globalThis.fetch` ——
+// 请求层底下是官方客户端,在那一层顶替才测得到真实路径(签名头、method、body 都经过它)。
+function stub(reply: (url: URL) => Response | Promise<Response>) {
+  const s = httpStub((request) => reply(request.url));
+  return { fn: s, calls: s.calls };
 }
-function ok(body: unknown): Partial<Response> {
-  return { ok: true, status: 200, json: async () => body, headers: new Headers() };
-}
-async function grabErr(p: Promise<unknown>): Promise<CoinGeckoError> {
-  try {
-    await p;
-    throw new Error("expected to throw");
-  } catch (e) {
-    return e as CoinGeckoError;
-  }
-}
-const urlOf = (f: ReturnType<typeof mockFetch>): URL => f.mock.calls[0][0] as URL;
-const initOf = (f: ReturnType<typeof mockFetch>): RequestInit => f.mock.calls[0][1] as RequestInit;
-afterEach(() => vi.restoreAllMocks());
 
-describe("createCoinGeckoClient · 传输(头/基址,以 assetPlatforms 为例)", () => {
-  it("注入 User-Agent 头(CF WAF 修复)", async () => {
-    const f = mockFetch(ok([]));
-    await newClient().assetPlatforms();
-    expect((initOf(f).headers as Record<string, string>)["user-agent"]).toBe(USER_AGENT);
+const withClient = <A, E>(
+  fn: HttpStub,
+  use: (client: CoinGeckoClientApi) => Effect.Effect<A, E, Outbound>,
+  config: CoinGeckoConfig = {},
+): Promise<A> =>
+  // `runClient` 装的是「假出网 + `memory` 档限频 + TestClock」——**九个包共用一份**
+  // (以前是九份手抄的,有几份漏了限频档,于是偷偷跑在了模块级共享游标的那一档上)。
+  runClient(
+    fn,
+    Effect.gen(function* () {
+      const client = yield* make(config);
+      return yield* use(client);
+    }),
+  );
+
+const failing = (
+  fn: HttpStub,
+  use: (c: CoinGeckoClientApi) => Effect.Effect<unknown, UpstreamError, Outbound>,
+  config: CoinGeckoConfig = {},
+): Promise<UpstreamError> => withClient(fn, (c) => Effect.flip(use(c)), config);
+
+describe("档位:key 决定 base、头和额度", () => {
+  it("没 key → 免费 base,不带 key 头", async () => {
+    const { fn, calls } = stub(() => json([]));
+    await withClient(fn, (c) => c.assetPlatforms);
+    expect(`${calls[0].request.url.origin}/api/v3`).toBe(CG_BASE_FREE);
+    const h = calls[0].request.headers;
+    expect(h[HEADER_DEMO]).toBeUndefined();
+    expect(h[HEADER_PRO]).toBeUndefined();
   });
 
-  it("demo key → demo 头 + free 基址", async () => {
-    const f = mockFetch(ok([]));
-    await newClient({ apiKey: "k" }).assetPlatforms();
-    expect(urlOf(f).toString()).toContain("api.coingecko.com/api/v3");
-    expect(initOf(f).headers).toMatchObject({ [HEADER_DEMO]: "k" });
+  it("有 key → demo 头", async () => {
+    const { fn, calls } = stub(() => json([]));
+    await withClient(fn, (c) => c.assetPlatforms, { apiKey: "k1" });
+    expect(calls[0].request.headers[HEADER_DEMO]).toBe("k1");
   });
 
-  it("pro key → pro 头 + pro 基址", async () => {
-    const f = mockFetch(ok([]));
-    await newClient({ apiKey: "k", pro: true }).assetPlatforms();
-    expect(urlOf(f).toString()).toContain("pro-api.coingecko.com");
-    expect(initOf(f).headers).toMatchObject({ [HEADER_PRO]: "k" });
-  });
-});
-
-describe("createCoinGeckoClient · 方法(URL/参数拼装 + 返回)", () => {
-  it("assetPlatforms → GET /asset_platforms,返回数组", async () => {
-    const body = [{ id: "ethereum", chain_identifier: 1 }];
-    const f = mockFetch(ok(body));
-    expect(await newClient().assetPlatforms()).toEqual(body);
-    expect(urlOf(f).pathname).toBe("/api/v3/asset_platforms");
+  it("pro → pro base + pro 头", async () => {
+    const { fn, calls } = stub(() => json([]));
+    await withClient(fn, (c) => c.assetPlatforms, { apiKey: "k1", pro: true });
+    expect(`${calls[0].request.url.origin}/api/v3`).toBe(CG_BASE_PRO);
+    const h = calls[0].request.headers;
+    expect(h[HEADER_PRO]).toBe("k1");
+    expect(h[HEADER_DEMO]).toBeUndefined();
   });
 
-  it("coinsMarkets → /coins/markets 带全部参数(跳过 undefined)", async () => {
-    const f = mockFetch(ok([]));
-    await newClient().coinsMarkets({
-      vsCurrency: "usd",
-      order: "market_cap_desc",
-      perPage: 250,
-      page: 2,
-      priceChangePercentage: "24h,7d",
-    });
-    const u = urlOf(f);
-    expect(u.pathname).toBe("/api/v3/coins/markets");
-    expect(u.searchParams.get("vs_currency")).toBe("usd");
-    expect(u.searchParams.get("per_page")).toBe("250");
-    expect(u.searchParams.get("page")).toBe("2");
-    expect(u.searchParams.get("price_change_percentage")).toBe("24h,7d");
+  it("**必须带 User-Agent**(CGK 的 WAF 对无 UA 请求返 403,Workers 默认不带)", async () => {
+    const { fn, calls } = stub(() => json([]));
+    await withClient(fn, (c) => c.assetPlatforms);
+    expect(calls[0].request.headers["user-agent"]).toBe(USER_AGENT);
   });
 
-  it("simplePrice → ids/vs_currencies join,bool → 'true'", async () => {
-    const f = mockFetch(ok({ bitcoin: { usd: 1 } }));
-    await newClient().simplePrice({
-      ids: ["bitcoin", "ethereum"],
-      vsCurrencies: ["usd"],
-      include24hrChange: true,
-      includeLastUpdatedAt: true,
-    });
-    const u = urlOf(f);
-    expect(u.searchParams.get("ids")).toBe("bitcoin,ethereum");
-    expect(u.searchParams.get("vs_currencies")).toBe("usd");
-    expect(u.searchParams.get("include_24hr_change")).toBe("true");
-    expect(u.searchParams.get("include_last_updated_at")).toBe("true");
-  });
-
-  it("simplePrice → 未开的 bool 不出现在 query", async () => {
-    const f = mockFetch(ok({}));
-    await newClient().simplePrice({ ids: ["btc"], vsCurrencies: ["usd"] });
-    expect(urlOf(f).searchParams.has("include_24hr_change")).toBe(false);
-  });
-
-  it("coinsMarketChartRange → /coins/{id}/market_chart/range 带 vs_currency/from/to;返回 prices 对(ms)", async () => {
-    // CGK 返回的 prices 时间戳是**毫秒**(from/to 查询参数是秒)—— client 原样透传。
-    const body = {
-      prices: [
-        [1_600_000_000_000, 60000],
-        [1_600_086_400_000, 65000],
-      ],
-      market_caps: [[1_600_000_000_000, 1e12]],
-      total_volumes: [[1_600_000_000_000, 3e10]],
-    };
-    const f = mockFetch(ok(body));
-    const out = await newClient().coinsMarketChartRange({
-      id: "bitcoin",
-      vsCurrency: "usd",
-      fromSec: 1_600_000_000,
-      toSec: 1_600_086_400,
-    });
-    expect(out).toEqual([
-      [1_600_000_000_000, 60000],
-      [1_600_086_400_000, 65000],
-    ]);
-    const u = urlOf(f);
-    expect(u.pathname).toBe("/api/v3/coins/bitcoin/market_chart/range");
-    expect(u.searchParams.get("vs_currency")).toBe("usd");
-    expect(u.searchParams.get("from")).toBe("1600000000");
-    expect(u.searchParams.get("to")).toBe("1600086400");
-  });
-
-  it("search → /search?query=", async () => {
-    const f = mockFetch(ok({ coins: [] }));
-    await newClient().search("btc");
-    expect(urlOf(f).pathname).toBe("/api/v3/search");
-    expect(urlOf(f).searchParams.get("query")).toBe("btc");
-  });
-
-  it("coinContract → path 含 platform + 小写 address;命中返回对象", async () => {
-    const body = { id: "usd-coin" };
-    const f = mockFetch(ok(body));
-    expect(await newClient().coinContract("ethereum", "0xABCdef")).toEqual(body);
-    expect(urlOf(f).pathname).toBe("/api/v3/coins/ethereum/contract/0xabcdef");
-  });
-
-  it("exchange / derivativesExchange → 对应 path", async () => {
-    const f1 = mockFetch(ok({ name: "Binance" }));
-    await newClient().exchange("binance");
-    expect(urlOf(f1).pathname).toBe("/api/v3/exchanges/binance");
-    vi.restoreAllMocks();
-    const f2 = mockFetch(ok({ name: "Hyperliquid" }));
-    await newClient().derivativesExchange("hyperliquid");
-    expect(urlOf(f2).pathname).toBe("/api/v3/derivatives/exchanges/hyperliquid");
-  });
-
-  it("exchangeRates → GET /exchange_rates,返回 { rates }", async () => {
-    const body = { rates: { usd: { value: 100000, type: "fiat" }, eur: { value: 92000 } } };
-    const f = mockFetch(ok(body));
-    expect(await newClient().exchangeRates()).toEqual(body);
-    expect(urlOf(f).pathname).toBe("/api/v3/exchange_rates");
+  it("baseUrl 可覆盖", async () => {
+    const { fn, calls } = stub(() => json([]));
+    await withClient(fn, (c) => c.assetPlatforms, { baseUrl: "http://localhost:3099/cg" });
+    expect(calls[0].request.url.href).toContain("/cg/asset_platforms");
   });
 });
 
-describe("createCoinGeckoClient · 404 → null(仅可空方法)", () => {
-  it("coinContract / exchange / derivativesExchange 404 → null", async () => {
-    mockFetch({ ok: false, status: 404, headers: new Headers() });
-    expect(await newClient().coinContract("ethereum", "0x0")).toBeNull();
-    mockFetch({ ok: false, status: 404, headers: new Headers() });
-    expect(await newClient().exchange("nope")).toBeNull();
-    mockFetch({ ok: false, status: 404, headers: new Headers() });
-    expect(await newClient().derivativesExchange("nope")).toBeNull();
+describe("端点", () => {
+  it("coinsList 带 include_platform", async () => {
+    const { fn, calls } = stub(() => json([{ id: "bitcoin" }]));
+    const rows = await withClient(fn, (c) => c.coinsList);
+    expect(calls[0].request.url.pathname).toBe("/api/v3/coins/list");
+    expect(calls[0].request.url.searchParams.get("include_platform")).toBe("true");
+    expect(rows).toEqual([{ id: "bitcoin" }]);
+  });
+
+  it("coinsMarkets:数组参数拼成逗号串,undefined 的键不参与", async () => {
+    const { fn, calls } = stub(() => json([]));
+    await withClient(fn, (c) => c.coinsMarkets({ vsCurrency: "usd", ids: ["btc", "eth"] }));
+    expect(calls[0].request.url.searchParams.get("vs_currency")).toBe("usd");
+    expect(calls[0].request.url.searchParams.get("ids")).toBe("btc,eth");
+    // 没传的那些不该出现在 URL 里。
+    expect(calls[0].request.url.searchParams.has("order")).toBe(false);
+    expect(calls[0].request.url.searchParams.has("page")).toBe(false);
+  });
+
+  it("simplePrice:布尔开关**不传就是不传**,不是 false", async () => {
+    // 传 "false" 与不传对 CGK 不是一回事。
+    const { fn, calls } = stub(() => json({ bitcoin: { usd: 1 } }));
+    await withClient(fn, (c) => c.simplePrice({ ids: ["bitcoin"], vsCurrencies: ["usd"] }));
+    expect(calls[0].request.url.searchParams.has("include_24hr_change")).toBe(false);
+
+    const { fn: on, calls: onCalls } = stub(() => json({ bitcoin: { usd: 1 } }));
+    await withClient(on, (c) =>
+      c.simplePrice({ ids: ["bitcoin"], vsCurrencies: ["usd"], include24hrChange: true }),
+    );
+    expect(onCalls[0].request.url.searchParams.get("include_24hr_change")).toBe("true");
+  });
+
+  it("coinsMarketChartRange:出口就是 prices 那一列", async () => {
+    // 上游把它包在一个对象里,那层包装没有信息。
+    const { fn, calls } = stub(() =>
+      json({ prices: [[1, 2]], market_caps: [], total_volumes: [] }),
+    );
+    const prices = await withClient(fn, (c) =>
+      c.coinsMarketChartRange({ id: "bitcoin", vsCurrency: "usd", fromSec: 1, toSec: 2 }),
+    );
+    expect(prices).toEqual([[1, 2]]);
+    expect(calls[0].request.url.pathname).toBe("/api/v3/coins/bitcoin/market_chart/range");
+  });
+
+  it("coinContract:地址小写化,查不到 → null(不是失败)", async () => {
+    const { fn, calls } = stub(() => json({}, { status: 404 }));
+    const out = await withClient(fn, (c) => c.coinContract("ethereum", "0xAbCdEf"));
+    expect(out).toBeNull();
+    expect(calls[0].request.url.pathname).toBe("/api/v3/coins/ethereum/contract/0xabcdef");
+  });
+
+  it("exchange / derivativesExchange 查不到也 → null", async () => {
+    const { fn } = stub(() => json({}, { status: 404 }));
+    expect(await withClient(fn, (c) => c.exchange("nope"))).toBeNull();
+    expect(await withClient(fn, (c) => c.derivativesExchange("nope"))).toBeNull();
   });
 });
 
-describe("createCoinGeckoClient · 错误映射(以 assetPlatforms 触发)", () => {
-  it("429 → RATE_LIMITED,带 retryAfterMs", async () => {
-    mockFetch({ ok: false, status: 429, headers: new Headers({ "retry-after": "30" }) });
-    const err = await grabErr(newClient().assetPlatforms());
-    expect(err.code).toBe("RATE_LIMITED");
-    expect(err.retryable).toBe(true);
-    expect(err.retryAfterMs).toBe(30000);
+describe("顶层形状守卫", () => {
+  // 没有它,返回类型就是在撒谎:下游拿着一个错误页当数组遍历。
+  // 这不是完整校验(字段一个没查)—— 那是 `Effect.Schema` 那一步的事。
+  it("列表端点回的不是数组 → parse", async () => {
+    const { fn } = stub(() => json({ error: "rate limited" }));
+    const err = await failing(fn, (c) => c.coinsList);
+    expect(err._tag).toBe("UpstreamParseError");
+    expect(err.where).toBe("/coins/list");
   });
 
-  it("5xx → UPSTREAM_ERROR retryable;网络异常 → 同", async () => {
-    mockFetch({ ok: false, status: 502, headers: new Headers() });
-    const a = await grabErr(newClient().assetPlatforms());
-    expect(a.code).toBe("UPSTREAM_ERROR");
-    expect(a.retryable).toBe(true);
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("boom"));
-    const b = await grabErr(newClient().assetPlatforms());
-    expect(b.code).toBe("UPSTREAM_ERROR");
-    expect(b.retryable).toBe(true);
+  it("对象端点回的不是对象 → parse", async () => {
+    const { fn } = stub(() => json("nope"));
+    expect((await failing(fn, (c) => c.exchangeRates))._tag).toBe("UpstreamParseError");
   });
 
-  it("404 无 notFoundAsNull(列表端点)→ UPSTREAM_ERROR", async () => {
-    mockFetch({ ok: false, status: 404, headers: new Headers() });
-    expect((await grabErr(newClient().assetPlatforms())).code).toBe("UPSTREAM_ERROR");
+  it("market_chart/range 少了 prices → parse", async () => {
+    const { fn } = stub(() => json({ market_caps: [] }));
+    const err = await failing(fn, (c) =>
+      c.coinsMarketChartRange({ id: "bitcoin", vsCurrency: "usd", fromSec: 1, toSec: 2 }),
+    );
+    expect(err._tag).toBe("UpstreamParseError");
+  });
+});
+
+describe("限频", () => {
+  // **CGK 最需要闸**:一把 key 全部署共用,所有用户的每次调用都花同一份额度。
+  //
+  // 官方 token-bucket 每 `interval / limit` 补一个令牌。
+  // keyless 档 10 次/分钟、容量 2 → interval 12s → 每 **6** 秒补一个,前 2 发满额突发、第 3 发等 6 秒。
+  const settledAfter = (ms: number, config: CoinGeckoConfig = {}) =>
+    runClient(
+      stub(() => json([])).fn,
+      Effect.gen(function* () {
+        const client = yield* make(config);
+        const fiber = yield* Effect.fork(
+          Effect.all([
+            Effect.orDie(client.assetPlatforms),
+            Effect.orDie(client.assetPlatforms),
+            Effect.orDie(client.assetPlatforms),
+          ]),
+        );
+        yield* TestClock.adjust(Duration.millis(ms));
+        // 假出网是 `Promise.resolve`,不归 TestClock 管 —— 让出几轮微任务把它跑干净。
+        yield* Effect.repeatN(Effect.yieldNow(), 50);
+        return Option.isSome(yield* Fiber.poll(fiber));
+      }),
+    );
+
+  it("超出突发的那一发要等", async () => {
+    expect(await settledAfter(5_999)).toBe(false);
+    expect(await settledAfter(6_000)).toBe(true);
   });
 
-  it("坏 JSON → PARSE_ERROR", async () => {
-    mockFetch({
-      ok: true,
-      status: 200,
-      headers: new Headers(),
-      json: async () => {
-        throw new Error("bad");
-      },
+  it("有 key 的档位额度大得多(80/分钟 → 第 3 发只等 750ms,不是 6 秒)", async () => {
+    expect(await settledAfter(749, { apiKey: "k1" })).toBe(false);
+    expect(await settledAfter(750, { apiKey: "k1" })).toBe(true);
+  });
+});
+
+describe("错误归类", () => {
+  const failWith = (init: ResponseInit) => {
+    const { fn } = stub(() => json({ status: { error_message: "nope" } }, init));
+    return failing(fn, (c) => c.assetPlatforms);
+  };
+
+  it("429 → 限流,带上 Retry-After", async () => {
+    const err = await failWith({ status: 429, headers: { "retry-after": "9" } });
+    expect(err._tag).toBe("UpstreamRateLimitError");
+    expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(9000);
+  });
+
+  it("401 / 403 → 凭据问题", async () => {
+    // **与老版不同**:老版把它们归成 UPSTREAM_ERROR(理由是 CGK 没有独立的「凭据被拒」语义)。
+    // 共享归类叫它凭据问题 —— 更准,而且实际重试行为不变(老版按 status>=500 判可重试,
+    // 401/403 本来也不重试)。
+    for (const status of [401, 403]) {
+      expect((await failWith({ status }))._tag).toBe("UpstreamAuthError");
+    }
+  });
+
+  it("5xx / 出不去 → 够不到上游", async () => {
+    expect((await failWith({ status: 503 }))._tag).toBe("UpstreamUnavailableError");
+    const { fn } = stub(() => {
+      throw new Error("dns");
     });
-    expect((await grabErr(newClient().assetPlatforms())).code).toBe("PARSE_ERROR");
+    expect((await failing(fn, (c) => c.assetPlatforms))._tag).toBe("UpstreamUnavailableError");
   });
 
-  it("列表端点非数组 / simplePrice 非对象 → PARSE_ERROR", async () => {
-    mockFetch(ok({ not: "array" }));
-    expect((await grabErr(newClient().assetPlatforms())).code).toBe("PARSE_ERROR");
-    mockFetch(ok(null));
-    expect(
-      (await grabErr(newClient().simplePrice({ ids: ["x"], vsCurrencies: ["usd"] }))).code,
-    ).toBe("PARSE_ERROR");
+  it("失败信息带 upstream、只带 pathname", async () => {
+    const err = await failWith({ status: 503 });
+    expect(err.upstream).toBe("coingecko");
+    expect(err.where).toBe("/api/v3/asset_platforms");
   });
 
-  it("coinsMarketChartRange 非对象 / 缺 prices 数组 → PARSE_ERROR", async () => {
-    const params = { id: "bitcoin", vsCurrency: "usd", fromSec: 1, toSec: 2 };
-    mockFetch(ok(null));
-    expect((await grabErr(newClient().coinsMarketChartRange(params))).code).toBe("PARSE_ERROR");
-    mockFetch(ok({ market_caps: [] })); // 缺 prices
-    expect((await grabErr(newClient().coinsMarketChartRange(params))).code).toBe("PARSE_ERROR");
-    mockFetch(ok({ prices: "nope" })); // prices 非数组
-    expect((await grabErr(newClient().coinsMarketChartRange(params))).code).toBe("PARSE_ERROR");
+  it("key 不进 URL(它走头)", async () => {
+    const { fn, calls } = stub(() => json([]));
+    await withClient(fn, (c) => c.assetPlatforms, { apiKey: "s3cr3t-key" });
+    expect(calls[0].request.url.href).not.toContain("s3cr3t-key");
   });
 });
 
-// `parseRetryAfter` 已随 http.ts 一起删掉 —— 解析 Retry-After 现在是 @folio/shared 的活,
-// 那三种形态(纯秒数 / HTTP-date / 垃圾值)在它的 tests/http.test.ts 里覆盖。
+// **走 Tag / Layer 那一条路。** 生产只走它,而在这之前**九个包的测试一条都没走过** ——
+// 全部直接调 `make`,于是「`layer()` 装出来的东西和 `make` 是不是同一个」从来没人验证。
+// 这是复审点出来的真空档(#12)。
+describe("装配:Tag 路径", () => {
+  it("`CoinGeckoClient.layer(...)` 装出来的就是 `make` 那个 client", async () => {
+    const { fn, calls } = stub(() => json([]));
+    const out = await runClient(
+      fn,
+      Effect.flatMap(CoinGeckoClient, (client) => client.assetPlatforms).pipe(
+        Effect.provide(CoinGeckoClient.layer()),
+      ),
+    );
+    expect(out).toBeDefined();
+    expect(calls).toHaveLength(1);
+  });
+});

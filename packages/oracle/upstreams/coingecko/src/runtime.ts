@@ -2,7 +2,7 @@ import {
   CoinGeckoClient,
   type CoinGeckoClientApi,
   type CoinGeckoConfig,
-} from "@folio/coingecko-client2";
+} from "@folio/coingecko-client";
 import {
   FolioHttpClient,
   isRetryable,

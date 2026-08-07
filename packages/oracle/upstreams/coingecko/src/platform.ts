@@ -1,5 +1,5 @@
 import type { Outbound, UpstreamError } from "@folio/client-core";
-import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client2";
+import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client";
 import type { PlatformMeta, PlatformUpstream } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { EVM_NAMER_PREFIX, UPSTREAM_ID } from "./constants";

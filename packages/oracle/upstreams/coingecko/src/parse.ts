@@ -3,7 +3,7 @@ import type {
   MarketCoin,
   SearchResult,
   SimplePriceMap,
-} from "@folio/coingecko-client2";
+} from "@folio/coingecko-client";
 import type { TokenPrice, TokenPricePoint, TokenRef, UpstreamToken } from "@folio/oracle-basic";
 import { parseTokenRef, tokenRef } from "@folio/oracle-ref";
 import { SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";

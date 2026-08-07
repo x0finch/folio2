@@ -1,4 +1,4 @@
-import type { AssetPlatform, MarketCoin } from "@folio/coingecko-client2";
+import type { AssetPlatform, MarketCoin } from "@folio/coingecko-client";
 import { describe, expect, it } from "vitest";
 // 单页上限不进导出面(调用方不需要知道分页存在),测分页边界要从常量模块直接取。
 import { IDS_PER_REQUEST, MARKETS_PER_PAGE, UPSTREAM_ID } from "../src/constants";

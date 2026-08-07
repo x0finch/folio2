@@ -1,3 +1,9 @@
+// CoinGecko API 常量(不硬编码散落,见原则 #8)。
+//
+// **重试的那三个常量不在这里** —— 这一版的 client **不自带重试**,与另外七个一致:重试由调用方
+// `Effect.retry(策略)` 加在外面。它们跟着策略搬去了唯一的调用方
+// (`@folio/oracle-upstream-coingecko` 的 constants.ts / runtime.ts)。见 index.ts 的说明。
+
 // —— 传输 ——
 export const CG_BASE_FREE = "https://api.coingecko.com/api/v3";
 export const CG_BASE_PRO = "https://pro-api.coingecko.com/api/v3";
@@ -43,11 +49,11 @@ export const CG_BURST = 2;
 // —— 重试 ——
 // **1 次重试就够**:目的是躲瞬时抖动,不是硬扛持续限流。配额真耗尽时 Retry-After 会给到几十秒,
 // 那种情况按下面的上限直接失败,交给 SWR 顶旧数据。
-export const CG_RETRY_ATTEMPTS = 2; // 总尝试次数(1 + 1 重试)
-export const CG_RETRY_BASE_MS = 250; // 退避基数,同时是抖动幅度
 
 // 单次等待上限。**为什么是 2 秒**:这条路可能挂在用户的写路径上(mint 冷启动那一次用户在等),
 // 而 CGK 免费档的 Retry-After 能给到 60s —— 等下去等于把请求挂死。Workers 上等待烧的是
 // wall-clock 不是 CPU,但仍受请求总时长约束,所以上限要按「用户还愿意等多久」定,不是按 CPU 定。
 // 超过它就不等了,直接抛(错误上仍带着 retryAfterMs,调用方自己决定降级还是报错)。
-export const CG_RETRY_MAX_WAIT_MS = 2000;
+
+// 这是谁 —— 进每个错误的 `upstream` 字段。
+export const UPSTREAM = "coingecko";

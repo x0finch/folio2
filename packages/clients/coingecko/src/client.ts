@@ -1,10 +1,13 @@
-// SDK 式 CoinGecko 客户端:一个 endpoint 一个带类型方法。传输层是共享的 `createHttpClient`
-// (@folio/shared:限频 + 重试 + 失败归类),所以这里只剩「哪个端点收什么参数、回什么形状」。
-//
-// 两处 CF Workers 修复留在这儿(它们是 CGK 特有的,不是通用行为):
-//   ① 注入 User-Agent —— CGK 的 Cloudflare WAF 对无 UA 请求返 403(Workers fetch 默认不带 UA)。
-//   ② 直接用全局 `fetch`(包装器内部就是这么做的,不存成方法/this,避免 illegal invocation)。
-import { createHttpClient, defineRateLimit, type Fetcher } from "@folio/shared";
+import {
+  makeRateLimit,
+  makeRequester,
+  type Outbound,
+  type Requester,
+  type RequestOptions,
+  type UpstreamError,
+  UpstreamParseError,
+} from "@folio/client-core";
+import { Context, Duration, Effect, Layer, type Scope } from "effect";
 import {
   CG_BASE_FREE,
   CG_BASE_PRO,
@@ -14,17 +17,14 @@ import {
   CG_CALLS_PER_MIN_PRO,
   CG_LIMIT_KEY,
   CG_LIMIT_KEY_KEYLESS,
-  CG_RETRY_ATTEMPTS,
-  CG_RETRY_BASE_MS,
-  CG_RETRY_MAX_WAIT_MS,
   HEADER_DEMO,
   HEADER_PRO,
+  UPSTREAM,
   USER_AGENT,
 } from "./constants";
 import type {
   AssetPlatform,
   CoinContract,
-  CoinGeckoConfig,
   CoinListItem,
   DerivativesExchange,
   Exchange,
@@ -35,219 +35,198 @@ import type {
   SimplePriceMap,
 } from "./types";
 
+export interface CoinGeckoConfig {
+  // 有 key 就带上,并按档位选 base 与额度。**没有 key 也能跑**(keyless 档,按出口 IP 计额)。
+  readonly apiKey?: string;
+  readonly pro?: boolean;
+  readonly baseUrl?: string;
+}
+
 export interface CoinsMarketsParams {
-  vsCurrency: string;
-  // 指名要哪些币。给了它就不是「按市值翻页」而是「按 id 点查一批」——同一个端点两种用法,
-  // 差别只在这个参数。点查要用它而不是 `/simple/price`:后者只回价,不回 name/symbol/image。
-  ids?: string[];
-  order?: string;
-  perPage?: number;
-  page?: number;
-  priceChangePercentage?: string; // 逗号分隔窗口,如 "24h,7d,30d"
+  readonly vsCurrency: string;
+  readonly ids?: readonly string[];
+  readonly order?: string;
+  readonly perPage?: number;
+  readonly page?: number;
+  readonly priceChangePercentage?: string;
 }
 
 export interface SimplePriceParams {
-  ids: string[];
-  vsCurrencies: string[];
-  include24hrChange?: boolean;
-  includeLastUpdatedAt?: boolean;
+  readonly ids: readonly string[];
+  readonly vsCurrencies: readonly string[];
+  readonly include24hrChange?: boolean;
+  readonly includeLastUpdatedAt?: boolean;
 }
 
 export interface CoinsMarketChartRangeParams {
-  id: string;
-  vsCurrency: string;
-  fromSec: number; // UNIX 秒(查询参数)
-  toSec: number; // UNIX 秒(查询参数)
+  readonly id: string;
+  readonly vsCurrency: string;
+  readonly fromSec: number;
+  readonly toSec: number;
 }
 
-export interface CoinGeckoClient {
-  /** GET /asset_platforms */
-  assetPlatforms(): Promise<AssetPlatform[]>;
-  /** GET /coins/list?include_platform=true(整份币目录 + 各链合约地址;几 MB,只在 cron 里拉) */
-  coinsList(): Promise<CoinListItem[]>;
-  /** GET /coins/markets(按市值页取) */
-  coinsMarkets(params: CoinsMarketsParams): Promise<MarketCoin[]>;
-  /** GET /simple/price(按 coin id 批量取价) */
-  simplePrice(params: SimplePriceParams): Promise<SimplePriceMap>;
-  /** GET /coins/{id}/market_chart/range(一 coin 一区间历史价);返回 prices 对 [msTimestamp, price] */
-  coinsMarketChartRange(params: CoinsMarketChartRangeParams): Promise<[number, number][]>;
-  /** GET /search(选币 autocomplete) */
-  search(query: string): Promise<SearchResult>;
-  /** GET /coins/{platform}/contract/{addr};404 → null */
-  coinContract(platform: string, address: string): Promise<CoinContract | null>;
-  /** GET /exchanges/{id}(CEX);404 → null */
-  exchange(id: string): Promise<Exchange | null>;
-  /** GET /derivatives/exchanges/{id}(perp);404 → null */
-  derivativesExchange(id: string): Promise<DerivativesExchange | null>;
-  /** GET /exchange_rates(以 BTC 为基准的全币种汇率) */
-  exchangeRates(): Promise<ExchangeRates>;
+// CoinGecko v3 的请求层。**一个端点一个带类型的方法,吐上游形状(DTO)** ——
+// 认币、估值 policy、ref 索引那些全在 oracle 那边(ADR 0036)。
+//
+// **不自带重试**(与另外七个 client 一致):重试由调用方 `Effect.retry(策略)` 加在外面。
+// 老那版把重试收进传输层,于是这个仓库对「怎么重试」有过三份答案。
+export interface CoinGeckoClientApi {
+  readonly assetPlatforms: Effect.Effect<AssetPlatform[], UpstreamError, Outbound>;
+  readonly coinsList: Effect.Effect<CoinListItem[], UpstreamError, Outbound>;
+  readonly coinsMarkets: (
+    params: CoinsMarketsParams,
+  ) => Effect.Effect<MarketCoin[], UpstreamError, Outbound>;
+  readonly simplePrice: (
+    params: SimplePriceParams,
+  ) => Effect.Effect<SimplePriceMap, UpstreamError, Outbound>;
+  // 历史日价序列。出口就是 `prices` 那一列 —— 上游把它包在一个对象里,那层包装没有信息。
+  readonly coinsMarketChartRange: (
+    params: CoinsMarketChartRangeParams,
+  ) => Effect.Effect<[number, number][], UpstreamError, Outbound>;
+  readonly search: (query: string) => Effect.Effect<SearchResult, UpstreamError, Outbound>;
+  // 按合约查币。**查不到是正常答案**(不是每个合约都在 CGK 的库里)→ null,不是失败。
+  readonly coinContract: (
+    platform: string,
+    address: string,
+  ) => Effect.Effect<CoinContract | null, UpstreamError, Outbound>;
+  readonly exchange: (id: string) => Effect.Effect<Exchange | null, UpstreamError, Outbound>;
+  readonly derivativesExchange: (
+    id: string,
+  ) => Effect.Effect<DerivativesExchange | null, UpstreamError, Outbound>;
+  readonly exchangeRates: Effect.Effect<ExchangeRates, UpstreamError, Outbound>;
 }
 
-// —— 错误 ——
-// 传输层的失败归类由 @folio/shared 做,这里只负责「变成 CGK 自己的错误类型」——
-// 调用方(oracle / oracle)只认识它。字段名与仓库里另外三个错误类一致,于是 withRetry 认得。
-export type CoinGeckoErrorCode = "RATE_LIMITED" | "UPSTREAM_ERROR" | "PARSE_ERROR";
-
-export class CoinGeckoError extends Error {
-  readonly code: CoinGeckoErrorCode;
-  readonly retryable: boolean;
-  readonly retryAfterMs?: number;
-
-  constructor(
-    code: CoinGeckoErrorCode,
-    message: string,
-    opts?: { retryable?: boolean; retryAfterMs?: number; cause?: unknown },
-  ) {
-    super(message, opts?.cause !== undefined ? { cause: opts.cause } : undefined);
-    this.name = "CoinGeckoError";
-    this.code = code;
-    this.retryable = opts?.retryable ?? code === "RATE_LIMITED";
-    this.retryAfterMs = opts?.retryAfterMs;
-  }
+export class CoinGeckoClient extends Context.Tag("clients/CoinGecko")<
+  CoinGeckoClient,
+  CoinGeckoClientApi
+>() {
+  static readonly layer = (config: CoinGeckoConfig = {}): Layer.Layer<CoinGeckoClient> =>
+    Layer.scoped(CoinGeckoClient, make(config));
 }
 
-// —— 传输装配 ——
-// 为什么 CGK 最需要闸:一把 key 全部署共用,所有用户的每次调用都花同一份额度(目录预热 4 页、
-// 建 ref 索引时 Promise.all 两发、搜索、按需取价、历史序列)。跟「每账户各花自己的」正好相反。
-function transportFor(config: CoinGeckoConfig): Fetcher {
-  const callsPerMin = config.pro
-    ? CG_CALLS_PER_MIN_PRO
-    : config.apiKey
-      ? CG_CALLS_PER_MIN_DEMO
-      : CG_CALLS_PER_MIN_KEYLESS;
+export function make(
+  config: CoinGeckoConfig = {},
+): Effect.Effect<CoinGeckoClientApi, never, Scope.Scope> {
+  return Effect.gen(function* () {
+    const callsPerMin = config.pro
+      ? CG_CALLS_PER_MIN_PRO
+      : config.apiKey
+        ? CG_CALLS_PER_MIN_DEMO
+        : CG_CALLS_PER_MIN_KEYLESS;
 
-  const headers: Record<string, string> = { accept: "application/json", "user-agent": USER_AGENT };
-  if (config.apiKey) headers[config.pro ? HEADER_PRO : HEADER_DEMO] = config.apiKey;
-
-  return createHttpClient({
-    baseUrl: config.baseUrl ?? (config.pro ? CG_BASE_PRO : CG_BASE_FREE),
-    headers: () => headers,
-    limit: defineRateLimit({
+    // **为什么 CGK 最需要闸**:一把 key 全部署共用,所有用户的每次调用都花同一份额度
+    // (目录预热 4 页、建 ref 索引时并发两发、搜索、按需取价、历史序列)。跟「每账户各花自己的」
+    // 正好相反。
+    //
+    // **闸的 key 随有没有 key 而变** —— 有 key 是按 key 计额,没 key 是按出口 IP 计额,
+    // 那是**两份不同的额度**,不该排在同一个队里。
+    const limit = yield* makeRateLimit({
       key: config.apiKey ? CG_LIMIT_KEY : CG_LIMIT_KEY_KEYLESS,
       limit: CG_BURST,
       // 每 interval 放 CG_BURST 发 —— 换算成上游那个「每分钟多少次」的口径。
-      interval: (CG_BURST / (callsPerMin / 60)) * 1000,
-      sleep: config.sleep,
-    }),
-    retry: {
-      attempts: CG_RETRY_ATTEMPTS,
-      maxWaitMs: CG_RETRY_MAX_WAIT_MS,
-      baseMs: CG_RETRY_BASE_MS,
-      sleep: config.sleep,
-      // exceedsMaxWait 用默认的 "throw":这条路可能挂在用户的写路径上(见 constants.ts)。
-    },
-    toFailure: ({ kind, where, status, retryAfterMs, cause }) => {
-      if (kind === "network")
-        return new CoinGeckoError("UPSTREAM_ERROR", `coingecko network error: ${where}`, {
-          retryable: true,
-          cause,
-        });
-      if (kind === "rate-limited")
-        return new CoinGeckoError("RATE_LIMITED", `coingecko rate limited: ${where}`, {
-          retryAfterMs,
-        });
-      if (kind === "parse")
-        return new CoinGeckoError("PARSE_ERROR", `coingecko bad json: ${where}`, { cause });
-      // auth 也归 UPSTREAM_ERROR:CGK 没有「凭据被拒」这条独立语义,401/403 就是 key 不对或超配额。
-      return new CoinGeckoError("UPSTREAM_ERROR", `coingecko ${status} on ${where}`, {
-        retryable: (status ?? 0) >= 500,
-      });
-    },
+      interval: Duration.millis((CG_BURST / (callsPerMin / 60)) * 1000),
+    });
+
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      // UA 必须发:Workers 的 fetch 默认不带,而 CGK 的 Cloudflare WAF 对无 UA 请求返 403。
+      "user-agent": USER_AGENT,
+    };
+    if (config.apiKey) headers[config.pro ? HEADER_PRO : HEADER_DEMO] = config.apiKey;
+
+    const request: Requester = makeRequester({
+      baseUrl: config.baseUrl ?? (config.pro ? CG_BASE_PRO : CG_BASE_FREE),
+      upstream: UPSTREAM,
+      limit,
+      headers: () => Effect.succeed(headers),
+    });
+
+    const parseFailed = (where: string, expected: string) =>
+      new UpstreamParseError({ upstream: UPSTREAM, where, cause: `expected ${expected}` });
+
+    // 顶层形状守卫。**留在 client 而不是交给调用方**:「这个端点回的是不是一个数组」是
+    // 「读懂上游怎么说话」,不是业务判断;而且没有它,返回类型就是在撒谎。
+    //
+    // 这不是完整校验(字段一个没查)—— 完整校验是 `Effect.Schema` 那一步的事(ADR 0035 推迟到
+    // connectors)。这里只挡住最常见、最难查的那一种:上游改了形状或回了个错误页,
+    // 而下游拿着它当数组遍历。
+    const expectArray = <T>(path: string, options?: RequestOptions) =>
+      request<unknown>(path, options).pipe(
+        Effect.flatMap((json) =>
+          Array.isArray(json)
+            ? Effect.succeed(json as T[])
+            : Effect.fail(parseFailed(path, "array")),
+        ),
+      );
+
+    const expectObject = <T>(path: string, options?: RequestOptions) =>
+      request<unknown>(path, options).pipe(
+        Effect.flatMap((json) =>
+          typeof json === "object" && json !== null
+            ? Effect.succeed(json as T)
+            : Effect.fail(parseFailed(path, "object")),
+        ),
+      );
+
+    return {
+      assetPlatforms: expectArray<AssetPlatform>("/asset_platforms"),
+
+      coinsList: expectArray<CoinListItem>("/coins/list", {
+        query: { include_platform: "true" },
+      }),
+
+      coinsMarkets: (params) =>
+        expectArray<MarketCoin>("/coins/markets", {
+          query: {
+            vs_currency: params.vsCurrency,
+            ids: params.ids?.join(","),
+            order: params.order,
+            per_page: params.perPage,
+            page: params.page,
+            price_change_percentage: params.priceChangePercentage,
+          },
+        }),
+
+      simplePrice: (params) =>
+        expectObject<SimplePriceMap>("/simple/price", {
+          query: {
+            ids: params.ids.join(","),
+            vs_currencies: params.vsCurrencies.join(","),
+            // **`undefined` 的键不参与** —— 传 "false" 与不传对 CGK 不是一回事。
+            include_24hr_change: params.include24hrChange ? "true" : undefined,
+            include_last_updated_at: params.includeLastUpdatedAt ? "true" : undefined,
+          },
+        }),
+
+      coinsMarketChartRange: (params) =>
+        request<unknown>(`/coins/${params.id}/market_chart/range`, {
+          query: { vs_currency: params.vsCurrency, from: params.fromSec, to: params.toSec },
+        }).pipe(
+          Effect.flatMap((json) => {
+            const prices = (json as MarketChartRange | null)?.prices;
+            return Array.isArray(prices)
+              ? Effect.succeed(prices as [number, number][])
+              : Effect.fail(parseFailed("/coins/market_chart/range", "{ prices: [] }"));
+          }),
+        ),
+
+      search: (query) => request<SearchResult>("/search", { query: { query } }),
+
+      coinContract: (platform, address) =>
+        request<CoinContract | null>(
+          `/coins/${platform}/contract/${address.toLowerCase()}`,
+          // 查不到 → null。不是每个合约都在 CGK 的库里,那是正常答案不是故障。
+          { notFoundAsNull: true },
+        ),
+
+      exchange: (id) => request<Exchange | null>(`/exchanges/${id}`, { notFoundAsNull: true }),
+
+      derivativesExchange: (id) =>
+        request<DerivativesExchange | null>(`/derivatives/exchanges/${id}`, {
+          notFoundAsNull: true,
+        }),
+
+      exchangeRates: expectObject<ExchangeRates>("/exchange_rates"),
+    };
   });
-}
-
-export function createCoinGeckoClient(config: CoinGeckoConfig = {}): CoinGeckoClient {
-  const request = transportFor(config);
-
-  // 列表端点:顶层守卫为数组,让 DTO 返回类型诚实(非数组 → PARSE_ERROR)。
-  const asArray = <T>(json: unknown, ctx: string): T[] => {
-    if (!Array.isArray(json)) throw new CoinGeckoError("PARSE_ERROR", `${ctx}: expected array`);
-    return json as T[];
-  };
-
-  return {
-    async assetPlatforms() {
-      return asArray<AssetPlatform>(await request("/asset_platforms"), "asset_platforms");
-    },
-
-    async coinsList() {
-      const json = await request("/coins/list", { query: { include_platform: "true" } });
-      return asArray<CoinListItem>(json, "coins/list");
-    },
-
-    async coinsMarkets(params) {
-      const json = await request("/coins/markets", {
-        query: {
-          vs_currency: params.vsCurrency,
-          ids: params.ids?.join(","),
-          order: params.order,
-          per_page: params.perPage,
-          page: params.page,
-          price_change_percentage: params.priceChangePercentage,
-        },
-      });
-      return asArray<MarketCoin>(json, "coins/markets");
-    },
-
-    async simplePrice(params) {
-      const json = await request("/simple/price", {
-        query: {
-          ids: params.ids.join(","),
-          vs_currencies: params.vsCurrencies.join(","),
-          include_24hr_change: params.include24hrChange ? "true" : undefined,
-          include_last_updated_at: params.includeLastUpdatedAt ? "true" : undefined,
-        },
-      });
-      if (typeof json !== "object" || json === null) {
-        throw new CoinGeckoError("PARSE_ERROR", "simple/price: expected object");
-      }
-      return json as SimplePriceMap;
-    },
-
-    async coinsMarketChartRange(params) {
-      const json = await request(`/coins/${params.id}/market_chart/range`, {
-        query: { vs_currency: params.vsCurrency, from: params.fromSec, to: params.toSec },
-      });
-      if (
-        typeof json !== "object" ||
-        json === null ||
-        !Array.isArray((json as MarketChartRange).prices)
-      ) {
-        throw new CoinGeckoError(
-          "PARSE_ERROR",
-          "coins/market_chart/range: expected { prices: [] }",
-        );
-      }
-      return (json as MarketChartRange).prices as [number, number][];
-    },
-
-    async search(query) {
-      return (await request("/search", { query: { query } })) as SearchResult;
-    },
-
-    async coinContract(platform, address) {
-      const json = await request(`/coins/${platform}/contract/${address.toLowerCase()}`, {
-        notFoundAsNull: true,
-      });
-      return json === null ? null : (json as CoinContract);
-    },
-
-    async exchange(id) {
-      const json = await request(`/exchanges/${id}`, { notFoundAsNull: true });
-      return json === null ? null : (json as Exchange);
-    },
-
-    async derivativesExchange(id) {
-      const json = await request(`/derivatives/exchanges/${id}`, { notFoundAsNull: true });
-      return json === null ? null : (json as DerivativesExchange);
-    },
-
-    async exchangeRates() {
-      const json = await request("/exchange_rates");
-      if (typeof json !== "object" || json === null) {
-        throw new CoinGeckoError("PARSE_ERROR", "exchange_rates: expected object");
-      }
-      return json as ExchangeRates;
-    },
-  };
 }

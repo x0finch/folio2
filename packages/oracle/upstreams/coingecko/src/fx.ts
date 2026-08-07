@@ -1,5 +1,5 @@
 import { type Outbound, type UpstreamError, UpstreamParseError } from "@folio/client-core";
-import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client2";
+import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client";
 import type { FxUpstream } from "@folio/oracle-basic";
 import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";

@@ -1,6 +1,6 @@
 import type { Outbound, UpstreamError } from "@folio/client-core";
 import { type HttpStub, httpStub, jsonResponse, runClient } from "@folio/client-core/testing";
-import { CoinGeckoClient, type CoinGeckoConfig } from "@folio/coingecko-client2";
+import { CoinGeckoClient, type CoinGeckoConfig } from "@folio/coingecko-client";
 import { Duration, Effect, Fiber, TestClock } from "effect";
 
 // 三个 adapter 的测试共用的装配。**打桩打在 `HttpClient` 服务上**(不是 `globalThis.fetch`)——

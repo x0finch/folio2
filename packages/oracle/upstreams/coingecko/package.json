@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@folio/client-core": "workspace:*",
-    "@folio/coingecko-client2": "workspace:*",
+    "@folio/coingecko-client": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
     "effect": "^3.22.1"
