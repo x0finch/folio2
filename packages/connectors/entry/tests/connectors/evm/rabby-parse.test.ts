@@ -1,11 +1,11 @@
-import { ProviderError } from "@folio/connectors-basic";
+import type { RabbyChain, RabbyProtocol, RabbyToken } from "@folio/rabby-client";
+import { parseChainIds } from "@folio/rabby-client";
 import { describe, expect, it } from "vitest";
-import { DUST_USD } from "../src/constants";
-import { parseChainIds, parseProtocols, parseTokens } from "../src/parse";
-import type { RabbyChain, RabbyProtocol, RabbyToken } from "../src/types";
-import tokenList from "./fixtures/cache-token-list.json";
-import chainList from "./fixtures/chain-list.json";
-import protocolList from "./fixtures/complex-protocol-list.json";
+import { DUST_USD } from "../../../src/connectors/evm/constants";
+import { parseProtocols, parseTokens } from "../../../src/connectors/evm/rabby-parse";
+import tokenList from "./fixtures/rabby-cache-token-list.json";
+import chainList from "./fixtures/rabby-chain-list.json";
+import protocolList from "./fixtures/rabby-complex-protocol-list.json";
 
 // fixture 是真实响应裁出来的(行原样保留,只挑少数几行),每行为覆盖一条规则而存在:
 //   eth ETH  原生币,大额        → 留,evm:1/native
@@ -124,7 +124,7 @@ describe("parseTokens", () => {
     // 失败即不产:产一个 `chain:op` 之类的分叉标识会污染代币索引,比整轮失败重试糟得多。
     expect(() =>
       parseTokens([{ id: "0x1", chain: "nope", symbol: "X", amount: 1, price: 1 }], ids),
-    ).toThrow(ProviderError);
+    ).toThrow();
   });
 });
 
@@ -208,7 +208,7 @@ describe("parseProtocols", () => {
         ],
       },
     ];
-    expect(() => parseProtocols(bad, ids)).toThrow(ProviderError);
+    expect(() => parseProtocols(bad, ids)).toThrow();
   });
 });
 

@@ -1,24 +1,19 @@
-import { type Defi, ProviderError, type Spot } from "@folio/connectors-basic";
+import { ConnectorUnavailableError, type Defi, type Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import type { RabbyProtocol, RabbyToken } from "@folio/rabby-client";
 import type { z } from "zod";
 import { DUST_USD } from "./constants";
-import type { RabbyChain, RabbyProtocol, RabbyToken } from "./types";
 
-// Rabby 响应 → Balance 行。**纯函数,与 IO 分离** —— fixture golden test 靠这一点(原则 #2)。
+// 【rabby 的适配层:上游形状 → folio 的 `Balance`】——**纯函数,一个都不出网**(ADR 0036)。
+// 逐字搬自 `packages/connectors/provider-rabby/src/parse.ts`,fixtures 一字节没动。
+//
+// `parseChainIds` 与那份 24h 缓存**不在这里** —— 随 `chainIds` 端点一起进了 `@folio/rabby-client`。
 
 type SpotRow = z.infer<typeof Spot>;
 type DefiRow = z.infer<typeof Defi>;
 
-// slug → 数字 chainId。上游的 `community_id` 就是规范 EVM chainId(抽查 15 条全中),
-// 所以 tokenRef 与 Zerion 时代逐字节一致 —— **存量快照/代币行/ref 索引不需要迁移**。
-export function parseChainIds(chains: readonly RabbyChain[]): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const c of chains) {
-    if (!c.id || typeof c.community_id !== "number" || !Number.isFinite(c.community_id)) continue;
-    out[c.id] = c.community_id;
-  }
-  return out;
-}
+// 本 connector 会吐的 kind 子集:spot(代币)| defi(协议仓位)。
+export type Row = SpotRow | DefiRow;
 
 // 某条持仓的规范代币标识。**恒产出或抛错**,绝不退化成 `chain:<slug>` 兜底形 ——
 // 分叉的标识会污染代币索引,比整轮同步失败重试糟得多(「失败即不产」,沿用 Zerion 那条)。
@@ -29,10 +24,9 @@ function refOf(token: RabbyToken, chainIds: Record<string, number>): string {
   const chain = token.chain;
   const chainId = chain ? chainIds[chain] : undefined;
   if (chainId === undefined) {
-    throw new ProviderError(
-      "UPSTREAM_ERROR",
-      `rabby: no chainId for chain '${chain ?? "?"}' (${token.symbol ?? "?"})`,
-    );
+    throw new ConnectorUnavailableError({
+      message: `rabby: no chainId for chain '${chain ?? "?"}' (${token.symbol ?? "?"})`,
+    });
   }
   const namer = `evm:${chainId}`;
   const id = token.id ?? "";

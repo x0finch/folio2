@@ -434,12 +434,6 @@ importers:
       '@folio/connectors-provider-blockbook':
         specifier: workspace:*
         version: link:../providers/blockbook
-      '@folio/connectors-provider-rabby':
-        specifier: workspace:*
-        version: link:../providers/rabby
-      '@folio/connectors-provider-zerion':
-        specifier: workspace:*
-        version: link:../providers/zerion
       '@folio/hyperliquid-client':
         specifier: workspace:*
         version: link:../../clients/hyperliquid
@@ -449,6 +443,12 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../oracle/ref
+      '@folio/rabby-client':
+        specifier: workspace:*
+        version: link:../../clients/rabby
+      '@folio/zerion-client':
+        specifier: workspace:*
+        version: link:../../clients/zerion
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -477,34 +477,6 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../../oracle/ref
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-    devDependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../../clients/core
-      effect:
-        specifier: ^3.22.1
-        version: 3.22.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.5
-        version: 4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/connectors/providers/coinstats:
-    dependencies:
-      '@folio/connectors-basic':
-        specifier: workspace:*
-        version: link:../../basic
-      '@folio/oracle-ref':
-        specifier: workspace:*
-        version: link:../../../oracle/ref
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../../shared
       zod:
         specifier: ^4.0.0
         version: 4.4.3

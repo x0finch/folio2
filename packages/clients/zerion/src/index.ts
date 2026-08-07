@@ -8,6 +8,10 @@
 //
 // 这家上游的两个特点都在这里兑现:**HTTP Basic 认证**(key 作 username、密码空),
 // 以及 **slug→chainId 映射的 24h 缓存**(链清单近静态,不缓存就是每轮白拉一发还占额度)。
+
+// 导出给适配层的 golden 测试用:那些 fixture 是「链清单原样」,要先翻成 slug→chainId 才喂得进
+// `parsePositions`。与 `@folio/rabby-client` 同一处理(它也导出自己那份)。
+export { parseChainIds } from "./chains";
 export { make, ZerionClient, type ZerionClientApi, type ZerionConfig } from "./client";
 export { POSITIONS_QUERY, ZERION_API_BASE } from "./constants";
 export type {
