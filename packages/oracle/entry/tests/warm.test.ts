@@ -2,10 +2,10 @@ import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import type { UpstreamToken } from "../src";
 import { PRICE_TTL_MS, WARM_TTL_MS } from "../src";
-import { candidatesBySymbol, warmCatalogue } from "../src/candidates";
-import { pickByConfidence } from "../src/confidence";
-import { refreshWarmCatalogue, topByRank, warmMarkets } from "../src/tokens";
-import { WARM_KEY } from "../src/warm";
+import { pickByConfidence } from "../src/internal/confidence";
+import { WARM_KEY } from "../src/internal/warm";
+import { candidatesBySymbol, warmCatalogue } from "../src/services/candidates";
+import { refreshWarmCatalogue, topByRank, warmMarkets } from "../src/services/tokens";
 import { harness, now0, upstreamDown } from "./fakes";
 
 // 测的是 warm blob 这一件事:一张 per-user 缓存表上的 `warm` 键,**三个读者共用一份**。

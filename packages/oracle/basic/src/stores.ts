@@ -83,7 +83,7 @@ export interface TokenStore {
   putInfo(rows: readonly TokenInfoWrite[], ttlMs: number): Effect.Effect<void>;
 
   // 符号消歧候选:按 symbol 找当前上游认识的币。**不是**从这里生的数据 —— warm 集的子集,
-  // 由服务层从 cache 的 warm blob 筛出后交给消歧(见 entry/warm.ts);此处只为
+  // 由服务层从 cache 的 warm blob 筛出后交给消歧(见 entry 的 internal/warm.ts);此处只为
   // 「本地已认识的同名币」留一条路,实现可直接查 ref 行。
   candidatesBySymbol(symbol: string): Effect.Effect<TokenCandidate[]>;
 }
@@ -127,7 +127,8 @@ export interface GlobalTokenRefIndexStore {
 }
 
 // —— per-user KV 缓存 ——
-// 只三种键,各由用它的那个模块自己造(entry 的 `warm.ts` / `fx.ts` / `platforms.ts`):
+// 只三种键,各由用它的那个模块自己造(entry 的 `internal/warm.ts` / `services/fx.ts` /
+// `services/platforms.ts`):
 // `warm`(市值前 N 名,整份一个 blob)/ `fx:<币种>`(展示币种汇率)/ `platform:<键>`(链与场馆的名与图)。
 // 整张删空功能不坏,只是慢一点。它留着 userId 的理由:per-user 缓存只装这个用户实际碰到的
 // (他选的那个币种、他有持仓的那几条链),全局表得装所有人的并集。

@@ -31,12 +31,12 @@ import type {
   UpstreamToken,
 } from "../src";
 import { oracleLayer, refIndexWarmerLayer } from "../src";
-import { CandidateSource, candidateSourceLayer } from "../src/candidates";
-import { fxRateResolverLayer } from "../src/fx";
-import { fxHistoryLayer } from "../src/fx-history";
-import { tokenMinterLayer } from "../src/mint";
-import { platformResolverLayer } from "../src/platforms";
-import { tokenReaderLayer } from "../src/tokens";
+import { CandidateSource, candidateSourceLayer } from "../src/services/candidates";
+import { fxRateResolverLayer } from "../src/services/fx";
+import { fxHistoryLayer } from "../src/services/fx-history";
+import { tokenMinterLayer } from "../src/services/mint";
+import { platformResolverLayer } from "../src/services/platforms";
+import { tokenReaderLayer } from "../src/services/tokens";
 
 // 内存假实现 + **一份共用的测试装配**(下面的 `harness`)—— 各片的测试都注这一套。
 //

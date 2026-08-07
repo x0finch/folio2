@@ -1,7 +1,7 @@
 import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS, PlatformResolver } from "../src";
-import { platformKey, readPlatforms, writePlatforms } from "../src/platforms";
+import { platformKey, readPlatforms, writePlatforms } from "../src/services/platforms";
 import { harness, now0, upstreamDown } from "./fakes";
 
 const CHAINS = [

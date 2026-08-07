@@ -1,7 +1,7 @@
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { FX_TTL_MS, FxRateResolver, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "../src";
-import { fxKey, readFx, writeFx } from "../src/fx";
+import { fxKey, readFx, writeFx } from "../src/services/fx";
 import { harness, upstreamDown } from "./fakes";
 
 // 现汇率服务:**读软过期、写按 TTL**。两个动词判据不同,下面每一条都在钉这件事。

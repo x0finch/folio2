@@ -2,7 +2,7 @@ import type { TokenCandidate, TokenMetaUpstream } from "@folio/oracle-basic";
 import { DEFAULT_TOP_N, normalizeSymbol } from "@folio/oracle-basic";
 import { CacheStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Context, Effect, Layer } from "effect";
-import { type WarmRow, warmBlob } from "./warm";
+import { type WarmRow, warmBlob } from "../internal/warm";
 
 // mint 的 symbol 那一档要问的候选源(#216)。**独立一个服务,不挂在 `TokenReader` 上。**
 //

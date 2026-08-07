@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { FxHistory, MS_PER_DAY } from "../src";
-import { deriveFiatDaily } from "../src/fx-history";
+import { deriveFiatDaily } from "../src/services/fx-history";
 import { harness, now0, upstreamDown } from "./fakes";
 
 // 法币的**历史**日汇率(ADR 0026 / #274)—— 与现汇率(`FxRateResolver`)是两个服务。

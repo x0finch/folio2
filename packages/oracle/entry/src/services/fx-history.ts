@@ -4,7 +4,7 @@ import { dayBucketOf, FIAT_NAMER, MS_PER_DAY } from "@folio/oracle-basic";
 import { FxUpstream, TokenPriceStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { Clock, Context, Effect, Layer } from "effect";
-import { degradeTo } from "./degrade";
+import { degradeTo } from "../internal/degrade";
 
 // 历史日汇率(ADR 0026 / #274)。**与「现在的汇率」(`FxRateResolver`)是两件事**,所以是两个服务:
 // 两半不共用缓存键、不共用上游、不共用一行逻辑,而合住一个文件时 `FxRateResolver` 的 `R` 被撑到

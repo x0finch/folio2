@@ -2,7 +2,7 @@ import type { PlatformMeta } from "@folio/oracle-basic";
 import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
 import { CacheStore, PlatformUpstream } from "@folio/oracle-basic/ports";
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import { degradeTo } from "./degrade";
+import { degradeTo } from "../internal/degrade";
 
 // 平台的名与图。与汇率同款两个动词、同款判据:`resolve` 读(零网络、软过期),`warm` 写(过期才拉)。
 //

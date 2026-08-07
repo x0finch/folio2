@@ -2,7 +2,7 @@ import type { CacheEntry } from "@folio/oracle-basic";
 import { FX_TTL_MS, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { CacheStore, FxUpstream } from "@folio/oracle-basic/ports";
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import { degradeTo } from "./degrade";
+import { degradeTo } from "../internal/degrade";
 
 // 展示币种的**现汇率**服务。**读软过期、写按 TTL** —— 两个动词的判据不同,这是本文件的全部内容。
 //

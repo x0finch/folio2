@@ -19,9 +19,9 @@ import {
 } from "@folio/oracle-basic";
 import { CacheStore, TokenPriceStore, TokenStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Context, Effect, Layer, Option } from "effect";
-import { degradeTo, logDegraded } from "./degrade";
-import { swr } from "./refresh";
-import { type WarmRow, warmBlob } from "./warm";
+import { degradeTo, logDegraded } from "../internal/degrade";
+import { swr } from "../internal/refresh";
+import { type WarmRow, warmBlob } from "../internal/warm";
 
 // 读路径。**没有「解析」这一步** —— 拿 token_id 直接取名字、图、现价、涨跌、市值排名。
 // 「这是哪个币」在写路径(mint)就定死并冻进了快照,读的时候不再从 tokenRef 反推。

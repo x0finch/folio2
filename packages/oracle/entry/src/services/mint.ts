@@ -8,8 +8,8 @@ import {
   parseTokenRef,
 } from "@folio/oracle-ref";
 import { Context, Effect, Layer, Option } from "effect";
+import { pickByConfidence } from "../internal/confidence";
 import { CandidateSource } from "./candidates";
-import { pickByConfidence } from "./confidence";
 
 // 写路径要的那一步:拿一条 tokenRef 换出一个 `token_id`。
 //

@@ -2,7 +2,7 @@ import { RESOLUTION_TOP_RANK, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { type MintInput, type TokenCandidate, TokenMinter } from "../src";
-import type { CandidateSource } from "../src/candidates";
+import type { CandidateSource } from "../src/services/candidates";
 import { harness } from "./fakes";
 
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
