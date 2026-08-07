@@ -13,10 +13,10 @@
   },
   "dependencies": {
     "@folio/binance-client": "workspace:*",
+    "@folio/bybit-client": "workspace:*",
     "@folio/client-core": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
     "@folio/connectors-provider-blockbook": "workspace:*",
-    "@folio/connectors-provider-bybit": "workspace:*",
     "@folio/connectors-provider-coinstats": "workspace:*",
     "@folio/connectors-provider-rabby": "workspace:*",
     "@folio/connectors-provider-zerion": "workspace:*",

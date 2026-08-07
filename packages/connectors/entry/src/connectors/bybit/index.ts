@@ -1,5 +1,5 @@
 import { defineConnector, Spot } from "@folio/connectors-basic";
-import { bybitAccountCreds, bybitProvider } from "@folio/connectors-provider-bybit";
+import { bybitAccountCreds, bybitProvider } from "./provider";
 
 // bybit connector manifest —— 组装契约(基座)+ provider(bybit)。secret 型 account.creds:
 // apiKey/secret 由 app 分派桥加密入库、取数时 openCreds 解密后灌进 ctx.account.creds。**无 passphrase**
