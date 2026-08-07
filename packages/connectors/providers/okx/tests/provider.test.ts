@@ -1,3 +1,5 @@
+import type { ConnectorError } from "@folio/connectors-basic";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildPriceHint,
@@ -17,6 +19,13 @@ import funding from "./fixtures/funding.json";
 import savings from "./fixtures/savings.json";
 import staking from "./fixtures/staking.json";
 import valuation from "./fixtures/valuation.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
+  Effect.runPromise(Effect.flip(effect));
 
 // 新 FetchContext 形状:account.creds(AC:apiKey/secret/passphrase,由分派桥 openCreds 解密后灌入)+ creds(PC:空)。
 type Ctx = Parameters<typeof okxProvider.fetchBalances>[0];
@@ -147,7 +156,7 @@ describe("okxProvider.fetchBalances", () => {
 
   it("并发全桶(交易/资金/赚币)→ 合并 spot;earn 残差合成行计进净值", async () => {
     routeAll();
-    const { balances, note } = await okxProvider.fetchBalances(ctx());
+    const { balances, note } = await run(okxProvider.fetchBalances(ctx()));
     // 交易 4 + 资金 3 + 赚币 2(USDT 活期 + ETH staking)+ earn 残差合成行 1 = 10
     expect(balances).toHaveLength(10);
     // earn 桶 12000 − 拉到 11000 = 1000 → 一条 value=1000 的未细分合成行,计进净值(不是 account note)。
@@ -169,7 +178,7 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
-    const { balances, note } = await okxProvider.fetchBalances(ctx());
+    const { balances, note } = await run(okxProvider.fetchBalances(ctx()));
     expect(balances).toHaveLength(9); // 余额照常
     expect(note).toBeUndefined(); // 锚挂了 → 无残差 Note,但同步整体成功
   });
@@ -188,7 +197,7 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
-    const { balances, note } = await okxProvider.fetchBalances(ctx());
+    const { balances, note } = await run(okxProvider.fetchBalances(ctx()));
     // 交易 4 + 资金 3 成功;赚币两桶失败 → 无 earn 行,但不抛。
     expect(balances).toHaveLength(7);
     expect(balances.some((b) => b.note?.group === "earn")).toBe(false);
@@ -210,7 +219,7 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
-    const { note } = await okxProvider.fetchBalances(ctx());
+    const { note } = await run(okxProvider.fetchBalances(ctx()));
     const failNote = note?.find((n) => n.title === "Buckets not synced");
     expect(String(failNote?.content)).toContain("Funding");
     expect(String(failNote?.content)).toContain("permissions");
@@ -218,7 +227,9 @@ describe("okxProvider.fetchBalances", () => {
 
   it("四个余额桶全失败(429 限流所有端点)→ 抛,不拿空快照覆盖", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
-    await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
+    expect(await failing(okxProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorRateLimitError",
+    });
   });
 
   it("positions 非空 → 挂'合约浮盈暂未纳入'perp 兜底 Note", async () => {
@@ -231,7 +242,7 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
-    const { note } = await okxProvider.fetchBalances(ctx());
+    const { note } = await run(okxProvider.fetchBalances(ctx()));
     expect(note?.some((n) => n.title === "Futures positions detected")).toBe(true);
   });
 
@@ -246,7 +257,7 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/asset/asset-valuation")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
-    const { note } = await okxProvider.fetchBalances(ctx());
+    const { note } = await run(okxProvider.fetchBalances(ctx()));
     expect(note?.some((n) => n.title === "Futures positions detected")).toBeFalsy();
   });
 
@@ -260,14 +271,14 @@ describe("okxProvider.fetchBalances", () => {
       if (u.includes("/api/v5/account/positions")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
-    const { note } = await okxProvider.fetchBalances(ctx());
+    const { note } = await run(okxProvider.fetchBalances(ctx()));
     const classic = note?.find((n) => n.title === "Classic account not synced");
     expect(String(classic?.content)).toContain("$8,888");
   });
 
   it("asset-valuation 必须带 ccy=USD(该端点默认 BTC 计价,不传就单位错位、对账失效)", async () => {
     const spy = routeAll();
-    await okxProvider.fetchBalances(ctx());
+    await run(okxProvider.fetchBalances(ctx()));
     const valUrl = spy.mock.calls
       .map((c) => String(c[0]))
       .find((u) => u.includes("asset-valuation"));
@@ -280,7 +291,7 @@ describe("okxProvider.fetchBalances", () => {
       if (String(url).includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
-    const { balances } = await okxProvider.fetchBalances(ctx());
+    const { balances } = await run(okxProvider.fetchBalances(ctx()));
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "USDT", "ETH", "OKSOL"]);
     // per-balance note:ETH 有 frozenBal=0.5 → 它自己那笔挂 Frozen note。
     expect(balances.find((b) => b.symbol === "ETH")?.note).toEqual({
@@ -308,7 +319,7 @@ describe("okxProvider.fetchBalances", () => {
       if (String(url).includes("/api/v5/asset/balances")) return ok(funding);
       return ok(balance); // /api/v5/account/balance
     });
-    const { balances } = await okxProvider.fetchBalances(ctx());
+    const { balances } = await run(okxProvider.fetchBalances(ctx()));
     // 交易账户 4(BTC/USDT/ETH/OKSOL)+ 资金账户 3(USDT/BTC/PEPE)= 7,不同桶同名币各自成行(聚合层按 token_id 合并)。
     expect(balances.map((b) => b.symbol)).toEqual([
       "BTC",
@@ -339,18 +350,22 @@ describe("okxProvider.fetchBalances", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       ok({ code: "50113", msg: "Invalid Sign" }),
     );
-    await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "AUTH_FAILED" });
+    expect(await failing(okxProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorAuthError",
+    });
   });
 
   it("maps HTTP-200 + non-auth code → UPSTREAM_ERROR; 429 → RATE_LIMITED", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       ok({ code: "51000", msg: "param error" }),
     );
-    await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "UPSTREAM_ERROR",
+    expect(await failing(okxProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorUnavailableError",
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
-    await expect(okxProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "RATE_LIMITED" });
+    expect(await failing(okxProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorRateLimitError",
+    });
   });
 
   it("serves connectorId okx;PC 仅声明 OKX_API_BASE 覆盖 key(env 注入用,非账户凭据)", () => {
@@ -366,7 +381,7 @@ describe("okxProvider.fetchBalances", () => {
       if (String(url).includes("/api/v5/asset/balances")) return ok({ code: "0", data: [] });
       return ok(balance);
     });
-    await okxProvider.fetchBalances(ctx(CREDS, { OKX_API_BASE: "https://px.example/s/okx" }));
+    await run(okxProvider.fetchBalances(ctx(CREDS, { OKX_API_BASE: "https://px.example/s/okx" })));
     const urls = spy.mock.calls.map((c) => String(c[0]));
     // 交易账户 + 资金账户两端点都打覆盖 base,默认 host 一个不留。
     expect(urls.some((u) => u.startsWith("https://px.example/s/okx/api/v5/account/balance"))).toBe(
@@ -382,9 +397,9 @@ describe("okxProvider.fetchBalances", () => {
 describe("okxProvider.validateAccount", () => {
   it("true on code 0; false on auth code (creds pre-validated upstream)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(balance));
-    expect(await okxProvider.validateAccount(ctx())).toBe(true);
+    expect(await run(okxProvider.validateAccount(ctx()))).toBe(true);
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(ok({ code: "50111", msg: "Invalid Key" }));
-    expect(await okxProvider.validateAccount(ctx())).toBe(false);
+    expect(await run(okxProvider.validateAccount(ctx()))).toBe(false);
   });
 });

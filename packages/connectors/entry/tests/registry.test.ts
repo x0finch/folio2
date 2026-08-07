@@ -1,4 +1,5 @@
 import { type CredField, Defi, defineConnector, Spot } from "@folio/connectors-basic";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildRegistry, getConnector, registry, selectProvider } from "../src/registry";
@@ -20,26 +21,27 @@ const evmLike = defineConnector({
         id: "demo",
         label: "Demo",
         creds: [],
-        fetchBalances: async (ctx) => ({
-          balances: [
-            {
-              kind: "spot",
-              symbol: ctx.account.creds.address,
-              tokenRef: `evm:1/${ctx.account.creds.address}`,
-              amount: 1,
-              value: 1,
-            },
-            {
-              kind: "defi",
-              symbol: "x",
-              tokenRef: "evm:1/0xdef",
-              amount: 1,
-              value: 1,
-              meta: { protocol: "demo" },
-            },
-          ],
-        }),
-        validateAccount: async () => true,
+        fetchBalances: (ctx) =>
+          Effect.succeed({
+            balances: [
+              {
+                kind: "spot",
+                symbol: ctx.account.creds.address,
+                tokenRef: `evm:1/${ctx.account.creds.address}`,
+                amount: 1,
+                value: 1,
+              },
+              {
+                kind: "defi",
+                symbol: "x",
+                tokenRef: "evm:1/0xdef",
+                amount: 1,
+                value: 1,
+                meta: { protocol: "demo" },
+              },
+            ],
+          }),
+        validateAccount: () => Effect.succeed(true),
       },
     ],
   },

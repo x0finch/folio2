@@ -1,4 +1,11 @@
-import { type Balance, ProviderError } from "@folio/connectors-basic";
+import {
+  type Balance,
+  ConnectorAuthError,
+  type ConnectorError,
+  ConnectorFailure,
+  ConnectorRateLimitError,
+  ConnectorUnavailableError,
+} from "@folio/connectors-basic";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { Duration, Effect, Fiber, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
@@ -65,7 +72,7 @@ function makeDeps(
       writes.push({ accountId, input });
       return `snap-${accountId}`;
     },
-    fetchBalances: async () => ok([]),
+    fetchBalances: () => Effect.succeed(ok([])),
     ...over,
   };
   return { deps, writes };
@@ -74,7 +81,7 @@ function makeDeps(
 describe("syncUser — 取余额 → 写快照", () => {
   it("ok outcome → 写出快照,totalUsd = 各行之和", async () => {
     const { deps, writes } = makeDeps([account()], {
-      fetchBalances: async () => ok([bal("BTC", 32000)]),
+      fetchBalances: () => Effect.succeed(ok([bal("BTC", 32000)])),
     });
     const { results } = await syncUser(deps, "u1");
     expect(results[0]).toMatchObject({
@@ -93,12 +100,13 @@ describe("syncUser — 取余额 → 写快照", () => {
     const withNote: Balance = { ...bal("BTC", 1), note };
     const accountNote = [{ title: "Unconfirmed", icon: "warning" as const, content: "pending" }];
     const { deps, writes } = makeDeps([account()], {
-      fetchBalances: async () => ({
-        status: "ok",
-        balances: [withNote, bal("ETH", 2)],
-        totalUsd: 3,
-        note: accountNote,
-      }),
+      fetchBalances: () =>
+        Effect.succeed({
+          status: "ok" as const,
+          balances: [withNote, bal("ETH", 2)],
+          totalUsd: 3,
+          note: accountNote,
+        }),
     });
     await syncUser(deps, "u1");
     // 带 note 的行透传单个 note;无 note 的行 note=undefined。
@@ -110,7 +118,7 @@ describe("syncUser — 取余额 → 写快照", () => {
 
   it("revalue 钩子(P7.4.2):写快照前改 value 并重算 totalUsd", async () => {
     const { deps, writes } = makeDeps([account()], {
-      fetchBalances: async () => ok([bal("BTC", 32000)]),
+      fetchBalances: () => Effect.succeed(ok([bal("BTC", 32000)])),
       revalue: async (_userId, _type, balances) =>
         balances.map((b) => ({ ...b, value: b.value * 2 })),
     });
@@ -121,7 +129,7 @@ describe("syncUser — 取余额 → 写快照", () => {
 
   it("revalue 抛错 → best-effort 保留原值,账户仍 ok", async () => {
     const { deps, writes } = makeDeps([account()], {
-      fetchBalances: async () => ok([bal("BTC", 32000)]),
+      fetchBalances: () => Effect.succeed(ok([bal("BTC", 32000)])),
       revalue: async () => {
         throw new Error("price down");
       },
@@ -135,7 +143,7 @@ describe("syncUser — 取余额 → 写快照", () => {
 describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
   it("needs-credentials → ok:false skipped:true,不写快照", async () => {
     const { deps, writes } = makeDeps([account({ id: "n" })], {
-      fetchBalances: async () => ({ status: "needs-credentials" }),
+      fetchBalances: () => Effect.succeed({ status: "needs-credentials" } as const),
     });
     const { results } = await syncUser(deps, "u1");
     expect(results[0]).toMatchObject({ accountId: "n", ok: false, skipped: true });
@@ -146,10 +154,10 @@ describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
     const good = account({ id: "good" });
     const bad = account({ id: "bad" });
     const { deps, writes } = makeDeps([good, bad], {
-      fetchBalances: async (acc) => {
-        if (acc.id === "bad") throw new Error("boom");
-        return ok([bal("BTC", 1)]);
-      },
+      fetchBalances: (acc) =>
+        acc.id === "bad"
+          ? Effect.fail(new ConnectorFailure({ message: "boom" }))
+          : Effect.succeed(ok([bal("BTC", 1)])),
     });
     const { results } = await syncUser(deps, "u1");
     const byId = Object.fromEntries(results.map((r) => [r.accountId, r]));
@@ -168,10 +176,10 @@ describe("结构化日志(级别 + 安全字段)", () => {
       [account({ id: "g" }), account({ id: "n" }), account({ id: "f", connectorId: "okx" })],
       {
         log,
-        fetchBalances: async (acc) => {
-          if (acc.id === "n") return { status: "needs-credentials" };
-          if (acc.id === "f") throw new ProviderError("AUTH_FAILED", "bad key");
-          return ok([bal("BTC", 1)]);
+        fetchBalances: (acc) => {
+          if (acc.id === "n") return Effect.succeed({ status: "needs-credentials" } as const);
+          if (acc.id === "f") return Effect.fail(new ConnectorAuthError({ message: "bad key" }));
+          return Effect.succeed(ok([bal("BTC", 1)]));
         },
       },
     );
@@ -183,7 +191,7 @@ describe("结构化日志(级别 + 安全字段)", () => {
     expect(byMsg("account sync failed")?.level).toBe("error");
     expect(byMsg("account sync failed")?.props).toMatchObject({
       accountId: "f",
-      code: "AUTH_FAILED",
+      reason: "ConnectorAuthError",
     });
   });
 });
@@ -196,12 +204,12 @@ describe("结构化日志(级别 + 安全字段)", () => {
 // 且能**精确**断言退避了多久(推进 199ms 不该有第二次调用,推到 200ms 才有)。
 describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
   // 前 failTimes 次抛错、之后成功的取余额 stub。
-  function flaky(makeErr: () => unknown, failTimes: number) {
+  function flaky(makeErr: () => ConnectorError, failTimes: number) {
     let calls = 0;
-    const fetchBalances = async (): Promise<FetchOutcome> => {
+    // 失败走**错误通道**,不是抛异常 —— 契约的出口已经是 Effect。
+    const fetchBalances = (): Effect.Effect<FetchOutcome, ConnectorError> => {
       calls++;
-      if (calls <= failTimes) throw makeErr();
-      return ok([]);
+      return calls <= failTimes ? Effect.fail(makeErr()) : Effect.succeed(ok([]));
     };
     return { fetchBalances, calls: () => calls };
   }
@@ -217,7 +225,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
 
   it("重试可重试错误并成功;采用 Retry-After(retryAfterMs)", async () => {
     const { fetchBalances, calls } = flaky(
-      () => new ProviderError("RATE_LIMITED", "rate limited", { retryAfterMs: 1234 }),
+      () => new ConnectorRateLimitError({ message: "rate limited", retryAfterMs: 1234 }),
       1,
     );
     const { deps } = makeDeps([account()], { fetchBalances });
@@ -228,7 +236,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
 
   it("采用 Retry-After 而非自己的指数退避:1233ms 时还没重试,1234ms 后才重试", async () => {
     const { fetchBalances, calls } = flaky(
-      () => new ProviderError("RATE_LIMITED", "rate limited", { retryAfterMs: 1234 }),
+      () => new ConnectorRateLimitError({ message: "rate limited", retryAfterMs: 1234 }),
       1,
     );
     const { deps } = makeDeps([account()], { fetchBalances });
@@ -251,7 +259,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     //   第 3 次调用 ∈ [600, 1000]  (第 2 次时刻 + 第二档 400 + 抖动 0~200)
     // 「第 3 次不早于 600」正是「第二档翻倍到 400」的证据 —— 若第二档仍是 200,它最早会在 400 出现。
     const { fetchBalances, calls } = flaky(
-      () => new ProviderError("UPSTREAM_ERROR", "5xx"), // 无 Retry-After → 走指数退避
+      () => new ConnectorUnavailableError({ message: "5xx" }), // 无 Retry-After → 走指数退避
       2,
     );
     const { deps } = makeDeps([account()], { fetchBalances });
@@ -272,7 +280,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
   it("Retry-After 超过单次上限 → 夹到上限继续等,不放弃(clamp 语义)", async () => {
     // 后台同步没人在等:上游说等 60s、我们上限 5s → 夹到 5s 再打,而不是直接失败。
     const { fetchBalances, calls } = flaky(
-      () => new ProviderError("RATE_LIMITED", "slow down", { retryAfterMs: 60_000 }),
+      () => new ConnectorRateLimitError({ message: "slow down", retryAfterMs: 60_000 }),
       1,
     );
     const { deps } = makeDeps([account()], { fetchBalances });
@@ -288,7 +296,10 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
   });
 
   it("重试用尽 → ok:false(隔离),不写快照", async () => {
-    const { fetchBalances, calls } = flaky(() => new ProviderError("UPSTREAM_ERROR", "5xx"), 99);
+    const { fetchBalances, calls } = flaky(
+      () => new ConnectorUnavailableError({ message: "5xx" }),
+      99,
+    );
     const { deps, writes } = makeDeps([account()], { fetchBalances });
     const { results } = await runWithClock(syncUserWithDeps(deps, "u1"));
     expect(results[0]).toMatchObject({ ok: false });
@@ -298,7 +309,10 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
   });
 
   it("不可重试错误(AUTH_FAILED)不重试", async () => {
-    const { fetchBalances, calls } = flaky(() => new ProviderError("AUTH_FAILED", "bad key"), 99);
+    const { fetchBalances, calls } = flaky(
+      () => new ConnectorAuthError({ message: "bad key" }),
+      99,
+    );
     const { deps } = makeDeps([account()], { fetchBalances });
     const { results } = await runWithClock(syncUserWithDeps(deps, "u1"));
     expect(results[0].ok).toBe(false);
@@ -311,7 +325,8 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
   it("重试日志:attempt 从 1 递增,且带着账户上下文字段", async () => {
     const { log, entries } = capturingLogger();
     const { fetchBalances } = flaky(
-      () => new ProviderError("UPSTREAM_ERROR", "5xx", { retryAfterMs: 300 }),
+      // `retryAfterMs` 只有限流那一类才有 —— 类型上就限定了,不会再有「给不该有的错误塞建议等待」。
+      () => new ConnectorRateLimitError({ message: "5xx", retryAfterMs: 300 }),
       2,
     );
     const { deps } = makeDeps([account({ id: "a7", connectorId: "okx" })], { log, fetchBalances });
@@ -323,7 +338,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       userId: "u1",
       accountId: "a7",
       connectorId: "okx",
-      code: "UPSTREAM_ERROR",
+      reason: "ConnectorRateLimitError",
       retryAfterMs: 300,
     });
   });
@@ -333,7 +348,8 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     const exhausted = capturingLogger();
     const { deps: d1 } = makeDeps([account()], {
       log: exhausted.log,
-      fetchBalances: flaky(() => new ProviderError("UPSTREAM_ERROR", "5xx"), 99).fetchBalances,
+      fetchBalances: flaky(() => new ConnectorUnavailableError({ message: "5xx" }), 99)
+        .fetchBalances,
     });
     await runWithClock(syncUserWithDeps(d1, "u1"));
     expect(exhausted.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(2);
@@ -341,7 +357,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     const fatal = capturingLogger();
     const { deps: d2 } = makeDeps([account()], {
       log: fatal.log,
-      fetchBalances: flaky(() => new ProviderError("AUTH_FAILED", "bad key"), 99).fetchBalances,
+      fetchBalances: flaky(() => new ConnectorAuthError({ message: "bad key" }), 99).fetchBalances,
     });
     await runWithClock(syncUserWithDeps(d2, "u1"));
     expect(fatal.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(0);
@@ -354,13 +370,14 @@ describe("syncUser — 有界并发", () => {
     let maxInFlight = 0;
     const accounts = Array.from({ length: 10 }, (_, i) => account({ id: `a${i}` }));
     const { deps, writes } = makeDeps(accounts, {
-      fetchBalances: async () => {
-        inFlight++;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        await new Promise((r) => setTimeout(r, 5)); // 制造重叠窗口
-        inFlight--;
-        return ok([]);
-      },
+      fetchBalances: () =>
+        Effect.promise(async () => {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise((r) => setTimeout(r, 5)); // 制造重叠窗口
+          inFlight--;
+          return ok([]);
+        }),
     });
     const { results } = await syncUser(deps, "u1");
     expect(results).toHaveLength(10);
@@ -376,7 +393,7 @@ describe("syncUser(Effect 内核)— 取数超时", () => {
     const { deps, writes } = makeDeps([account()], {
       fetchBalances: () => {
         calls++;
-        return new Promise<never>(() => {}); // 永不 resolve
+        return Effect.never; // 永不 resolve —— 只有超时能结束它
       },
     });
     await Effect.gen(function* () {
@@ -396,7 +413,7 @@ describe("syncUser(Effect 内核)— 取数超时", () => {
     const { deps } = makeDeps([account()], {
       fetchBalances: () => {
         calls++;
-        return new Promise<never>(() => {});
+        return Effect.never;
       },
     });
     await Effect.gen(function* () {
@@ -423,7 +440,7 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
   it("mint 先于 revalue,且 revalue 拿到的就是 mint 的答案", async () => {
     const order: string[] = [];
     const { deps, writes } = makeDeps([account()], {
-      fetchBalances: async () => ok([bal("BTC", 100)]),
+      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100)])),
       mint: async (_userId, balances) => {
         order.push("mint");
         return new Map(balances.map((b) => [b.tokenRef as string, `tk_${b.symbol}`]));
@@ -445,7 +462,7 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
   it("一轮同步只 mint 一次(写快照不再自己认一遍)", async () => {
     let calls = 0;
     const { deps } = makeDeps([account()], {
-      fetchBalances: async () => ok([bal("BTC", 100), bal("ETH", 50)]),
+      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100), bal("ETH", 50)])),
       mint: async (_userId, balances) => {
         calls++;
         return new Map(balances.map((b) => [b.tokenRef as string, `tk_${b.symbol}`]));
@@ -461,7 +478,7 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
     const { log, entries } = capturingLogger();
     const { deps, writes } = makeDeps([account()], {
       log,
-      fetchBalances: async () => ok([bal("BTC", 100)]),
+      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100)])),
       mint: async () => {
         throw new Error("d1 down");
       },
@@ -480,7 +497,7 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
 
   it("没注入 mint(旧装配 / 测试)→ 整条路照跑,token_id 留空", async () => {
     const { deps, writes } = makeDeps([account()], {
-      fetchBalances: async () => ok([bal("BTC", 100)]),
+      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100)])),
     });
     await syncUser(deps, "u1");
     expect(writes[0].input.balances[0].tokenId).toBeUndefined();
@@ -488,7 +505,7 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
 
   it("认不出来的那条 ref 不进 map → 它的 token_id 留空,别的行不受影响", async () => {
     const { deps, writes } = makeDeps([account()], {
-      fetchBalances: async () => ok([bal("BTC", 100), bal("SCAM", 5)]),
+      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100), bal("SCAM", 5)])),
       mint: async () => new Map([["binance/issued:BTC", "tk_BTC"]]),
     });
 

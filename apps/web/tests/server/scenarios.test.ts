@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import type { SnapshotWithBalances } from "@folio/db";
 import { createGlobalTokenRefIndexStore, createUserCacheStore } from "@folio/db";
 import { syncAccount } from "@folio/sync";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildOverview } from "../../src/lib/overview-model";
 import { connectorPlatformMeta } from "../../src/lib/server/internal/connector-platform";
@@ -416,11 +417,12 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
     const res = await syncAccount(
       {
         ...buildSyncDeps(),
-        fetchBalances: async () => ({
-          status: "ok" as const,
-          balances: [onchainBalance] as never,
-          totalUsd: 5,
-        }),
+        fetchBalances: () =>
+          Effect.succeed({
+            status: "ok" as const,
+            balances: [onchainBalance] as never,
+            totalUsd: 5,
+          }),
       },
       USER,
       (await db.listAccountsByUser(USER)).find((a) => a.id === account.id) as never,

@@ -24,7 +24,7 @@ import type { AccountSyncResult, SweepResult, SyncDeps, SyncResult } from "./typ
 
 // 平台推导:写快照时用;app 侧采集 provider 元信息时也用同一条,免得两处口径分叉。
 export { SYNC_CONCURRENCY } from "./constants";
-export { FetchBalancesError, SyncDepError, type SyncDepStep } from "./errors";
+export { SyncDepError, type SyncDepStep } from "./errors";
 export { platformOf } from "./platform";
 export type {
   AccountSyncResult,

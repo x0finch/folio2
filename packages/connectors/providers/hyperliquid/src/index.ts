@@ -1,10 +1,10 @@
 import {
-  type BalanceProvider,
   type CredField,
   isCredentialRejection,
   type PerpEquity,
   type PerpPosition,
   ProviderError,
+  promiseProvider,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { createHttpClient } from "@folio/shared";
@@ -151,7 +151,7 @@ export const hyperliquidAccountCreds = [
   },
 ] as const satisfies readonly CredField[];
 
-export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccountCreds> = {
+export const hyperliquidProvider = promiseProvider<Row, typeof hyperliquidAccountCreds>({
   id: PROVIDER_ID,
   label: "Hyperliquid",
   // 只读地址即查,无全局/provider key/签名 → PC 空。
@@ -174,4 +174,4 @@ export const hyperliquidProvider: BalanceProvider<Row, typeof hyperliquidAccount
       throw err;
     }
   },
-};
+});

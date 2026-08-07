@@ -1,5 +1,6 @@
-import type { Balance, Note } from "@folio/connectors-basic";
+import type { Balance, ConnectorError, Note } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
+import type { Effect } from "effect";
 
 // 本包与外界的公开类型:注入什么、吐出什么。实现分散在 services / account / sweep,
 // 但类型全在这一处 —— 想知道「用这个包要准备什么」看这个文件就够。
@@ -40,7 +41,14 @@ export interface SyncDeps {
   writeSnapshot: (userId: string, accountId: string, input: WriteSnapshotInput) => Promise<string>;
   // 取余额(领域意图):app 注入 connectors 的取数 —— 解密/校验/ctx 拼装/provider 调用全在其内。
   // 缺凭据返回 needs-credentials(跳过,不算失败);上游失败抛 ProviderError(本层据 retryable 重试)。
-  fetchBalances: (account: AccountSafe, stored: Record<string, string>) => Promise<FetchOutcome>;
+  // **这一个是 Effect,其余五个仍是 Promise。** 不是不一致 —— 取余额是唯一会驱动决策的那步
+  // (重不重试、等多久),而那些决策必须发生在同一个 Effect 里:中途转一次 Promise 就切断了
+  // context,外层的超时和中断管不到 provider 内部(sync 迁移时实测过)。其余五步是一次性的
+  // 数据库调用,包一层 `tryPromise` 不丢任何东西。
+  fetchBalances: (
+    account: AccountSafe,
+    stored: Record<string, string>,
+  ) => Effect.Effect<FetchOutcome, ConnectorError>;
   log?: SyncLogger; // 默认 no-op;app 注入 LogTape logger(见 buildSyncDeps)
   // 认币(ADR 0021 / #200):一批 tokenRef → 各自的代币行 id。**跑在 revalue 之前、一轮同步只跑一次。**
   //

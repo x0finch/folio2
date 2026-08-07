@@ -4,6 +4,7 @@ import {
   type FetchContext,
   isCredentialRejection,
   ProviderError,
+  promiseProvider,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
@@ -12,7 +13,6 @@ import { z } from "zod";
 import {
   API_KEY_HEADER,
   BALANCE_PATH,
-  BLOCKCHAINS_PATH,
   COINSTATS_API_BASE,
   COINSTATS_API_KEY,
   RATE_LIMIT_BURST,
@@ -167,29 +167,16 @@ async function validateCoinstats(connectionId: string, ctx: CoinstatsCtx): Promi
   }
 }
 
-// provider 自身 creds(COINSTATS_API_KEY)liveness:用 key 实测打 /wallet/blockchains
-//(只需 key、不需地址)—— 真正验证 key 有效,而非仅存在性检查。任何失败 → false。
-async function validateApiKey(apiKey: string): Promise<boolean> {
-  if (!apiKey) return false;
-  try {
-    await request(BLOCKCHAINS_PATH, { context: apiKey });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // 工厂:为一条链绑定其 connectionId,产出一个 BalanceProvider(共享上面实现)。
 // 三份 connector manifest(solana/sui/cosmos)各调一次 → 一个 provider 包服务多个 connector。
 export function createCoinstatsProvider(
   connectionId: string,
 ): BalanceProvider<Row, typeof coinstatsAccountCreds, typeof providerCreds> {
-  return {
+  return promiseProvider<Row, typeof coinstatsAccountCreds, typeof providerCreds>({
     id: "coinstats",
     label: "CoinStats",
     creds: providerCreds,
     fetchBalances: async (ctx) => ({ balances: await fetchCoinstats(connectionId, ctx) }),
     validateAccount: (ctx) => validateCoinstats(connectionId, ctx),
-    validateCreds: (creds) => validateApiKey(creds[COINSTATS_API_KEY]),
-  };
+  });
 }

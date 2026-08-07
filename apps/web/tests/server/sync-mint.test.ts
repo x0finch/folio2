@@ -1,10 +1,12 @@
 import { env } from "cloudflare:test";
+import { ConnectorFailure } from "@folio/connectors-basic";
 import {
   createGlobalTokenRefIndexStore,
   createUserCacheStore,
   createUserTokenStore,
 } from "@folio/db";
 import { syncAccount } from "@folio/sync";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../src/lib/server/internal/db";
 import { buildSyncDeps, warmTokensForUser } from "../../src/lib/server/internal/sync-deps";
@@ -108,11 +110,12 @@ async function syncWith(
   const res = await syncAccount(
     {
       ...deps,
-      fetchBalances: async () => ({
-        status: "ok" as const,
-        balances: balances as never,
-        totalUsd: balances.reduce((s, b) => s + b.value, 0),
-      }),
+      fetchBalances: () =>
+        Effect.succeed({
+          status: "ok" as const,
+          balances: balances as never,
+          totalUsd: balances.reduce((s, b) => s + b.value, 0),
+        }),
     },
     USER,
     account,
@@ -292,9 +295,8 @@ describe("每账户独立落库的性质保住", () => {
     const badRes = await syncAccount(
       {
         ...deps,
-        fetchBalances: async () => {
-          throw new Error("provider down");
-        },
+        // 取数失败:错误通道上给一个 `ConnectorError`,不再是抛异常。
+        fetchBalances: () => Effect.fail(new ConnectorFailure({ message: "provider down" })),
       },
       USER,
       of(bad),

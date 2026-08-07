@@ -1,10 +1,10 @@
 import {
-  type BalanceProvider,
   type CredField,
   hmacSha256,
   isCredentialRejection,
   type Note,
   ProviderError,
+  promiseProvider,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
@@ -419,7 +419,7 @@ export const okxAccountCreds = [
   { key: "passphrase", type: "secret", label: "Passphrase", validator: z.string().trim().min(1) },
 ] as const satisfies readonly CredField[];
 
-export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
+export const okxProvider = promiseProvider<Spot, typeof okxAccountCreds>({
   id: PROVIDER_ID,
   label: "OKX",
   // 无全局 provider key —— 账户自己的 apiKey/secret/passphrase 即凭据,走 account.creds。
@@ -525,4 +525,4 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
       throw err;
     }
   },
-};
+});

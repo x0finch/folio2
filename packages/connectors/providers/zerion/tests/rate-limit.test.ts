@@ -1,8 +1,15 @@
+import type { ConnectorError } from "@folio/connectors-basic";
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetChainIdsCacheForTests, zerionProvider } from "../src";
 import chainsFixture from "./fixtures/chains.json";
 import positionsFixture from "./fixtures/positions.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
 
 // 一次 fetchBalances 发 2 个请求,而且是 `Promise.all` **并行**的 —— 本文件钉的就是「并行的那两发
 // 也各占一个时隙」。要是哪天有人以为「反正在 Promise.all 里」就绕开闸,6 个账户就是瞬时 12 发,
@@ -47,19 +54,21 @@ describe("速率闸", () => {
   // 一个窗口能出去的都出去、被闸住的卡在 setTimeout(>0),count 就是那个窗口的量。
   it("并行的两发各占一个时隙 —— 不因为在 Promise.all 里就一起冲出去", async () => {
     const fetchSpy = stubFetch();
-    const run = zerionProvider.fetchBalances(ctx());
+    const pending = run(zerionProvider.fetchBalances(ctx()));
     await vi.advanceTimersByTimeAsync(0);
     // 链清单 + positions 两发,额度 8 发/窗口 → 两发都在第一个窗口内,t=0 就都出去了。
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     await vi.runAllTimersAsync();
-    await run;
+    await pending;
   });
 
   it("超出突发额度之后开始摊开(证明这两发真的走了闸,不是绕过去的)", async () => {
     const fetchSpy = stubFetch();
     // 8 个账户并发:链清单缓存还没建起来时它们各问一次,所以是 8 + 8 = 16 发。
     // 额度是 8 发/窗口 → 只有 8 发能在第一个窗口出去,其余必须落到后面的窗口。
-    const runs = Promise.all(Array.from({ length: 8 }, () => zerionProvider.fetchBalances(ctx())));
+    const runs = Promise.all(
+      Array.from({ length: 8 }, () => run(zerionProvider.fetchBalances(ctx()))),
+    );
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchSpy).toHaveBeenCalledTimes(8); // 正好一个窗口的量
     await vi.runAllTimersAsync();

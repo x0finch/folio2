@@ -1,3 +1,5 @@
+import type { ConnectorError } from "@folio/connectors-basic";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildPriceHint, bybitProvider, parseEarn, parseFunding, parseUnified } from "../src";
 import earnFlexible from "./fixtures/earn-flexible.json";
@@ -8,6 +10,13 @@ import expectedOnchainEarn from "./fixtures/expected-onchain-earn.json";
 import expected from "./fixtures/expected-unified-balances.json";
 import funding from "./fixtures/funding.json";
 import walletBalance from "./fixtures/wallet-balance.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
+  Effect.runPromise(Effect.flip(effect));
 
 // FetchContext 形状:account.creds(AC:apiKey/secret,由分派桥 openCreds 解密后灌入)+ creds(PC:
 // base URL 覆盖,#264,由 app 从 env 注入;默认空 = 直连)。Bybit 无 passphrase(异于 OKX)。
@@ -101,7 +110,7 @@ describe("bybitProvider.fetchBalances", () => {
 
   it("并发全桶(统一/资金/赚币)→ 合并 spot;赚币按类目标 note.group='earn'", async () => {
     routeAll();
-    const { balances } = await bybitProvider.fetchBalances(ctx());
+    const { balances } = await run(bybitProvider.fetchBalances(ctx()));
     // 统一 3 + 资金 3 + 赚币 2(Flexible USDT + OnChain BTC)= 8
     expect(balances).toHaveLength(8);
     const earn = balances.filter((b) => b.note?.group === "earn");
@@ -117,7 +126,7 @@ describe("bybitProvider.fetchBalances", () => {
       if (u.includes("/v5/earn/position")) return ok({ retCode: 0, result: { list: [] } });
       return ok(walletBalance);
     });
-    const { balances, note } = await bybitProvider.fetchBalances(ctx());
+    const { balances, note } = await run(bybitProvider.fetchBalances(ctx()));
     // 统一账户 3 成功;资金失败 → 无 funding 行,但不抛。
     expect(balances).toHaveLength(3);
     expect(balances.some((b) => b.note?.group === "funding")).toBe(false);
@@ -136,7 +145,7 @@ describe("bybitProvider.fetchBalances", () => {
         return ok({ retCode: 0, result: { balance: [] } });
       return ok(walletBalance);
     });
-    const { note } = await bybitProvider.fetchBalances(ctx());
+    const { note } = await run(bybitProvider.fetchBalances(ctx()));
     const failNote = note?.find((n) => n.title === "Buckets not synced");
     expect(String(failNote?.content)).toContain("Earn");
     expect(String(failNote?.content)).toContain("permissions");
@@ -144,8 +153,8 @@ describe("bybitProvider.fetchBalances", () => {
 
   it("所有桶失败(429 限流所有端点)→ 抛,不拿空快照覆盖", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
-    await expect(bybitProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "RATE_LIMITED",
+    expect(await failing(bybitProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorRateLimitError",
     });
   });
 
@@ -162,7 +171,7 @@ describe("bybitProvider.fetchBalances", () => {
       if (u.includes("/v5/earn/position")) return ok({ retCode: 0, result: { list: [] } });
       return ok(withUpl);
     });
-    const { note } = await bybitProvider.fetchBalances(ctx());
+    const { note } = await run(bybitProvider.fetchBalances(ctx()));
     const perp = note?.find((n) => n.title === "Futures positions detected");
     expect(String(perp?.content)).toContain("+$123.45");
   });
@@ -170,7 +179,7 @@ describe("bybitProvider.fetchBalances", () => {
   it("无合约浮盈(totalPerpUPL 缺失/0)→ 不挂 perp Note(不虚报)", async () => {
     // wallet-balance fixture 无 totalPerpUPL → 视为 0 → 不报。
     routeAll();
-    const { note } = await bybitProvider.fetchBalances(ctx());
+    const { note } = await run(bybitProvider.fetchBalances(ctx()));
     expect(note?.some((n) => n.title === "Futures positions detected")).toBeFalsy();
   });
 
@@ -183,7 +192,7 @@ describe("bybitProvider.fetchBalances", () => {
       if (u.includes("/v5/earn/position")) return ok({ retCode: 0, result: { list: [] } });
       return ok(walletBalance);
     });
-    const { balances } = await bybitProvider.fetchBalances(ctx());
+    const { balances } = await run(bybitProvider.fetchBalances(ctx()));
     expect(balances.map((b) => b.symbol)).toEqual(["USD1", "USDT", "BTC"]);
 
     // 并发多端点:哪个请求先 fetch 由异步 HMAC 签名的完成顺序定,calls[0] 不保证是统一账户 → 用 find 定位。
@@ -203,7 +212,7 @@ describe("bybitProvider.fetchBalances", () => {
       if (String(url).includes("query-account-coins-balance")) return ok(funding);
       return ok(walletBalance);
     });
-    const { balances } = await bybitProvider.fetchBalances(ctx());
+    const { balances } = await run(bybitProvider.fetchBalances(ctx()));
     // 统一账户 3(USD1/USDT/BTC)+ 资金账户 3(USDT/BTC/WLFI)= 6,不同桶同名币各自成行(聚合层按 token_id 合并)。
     expect(balances.map((b) => b.symbol)).toEqual(["USD1", "USDT", "BTC", "USDT", "BTC", "WLFI"]);
     expect(balances.filter((b) => b.note?.group === "funding")).toHaveLength(3);
@@ -224,19 +233,21 @@ describe("bybitProvider.fetchBalances", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       ok({ retCode: 10003, retMsg: "API key is invalid" }),
     );
-    await expect(bybitProvider.fetchBalances(ctx())).rejects.toMatchObject({ code: "AUTH_FAILED" });
+    expect(await failing(bybitProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorAuthError",
+    });
   });
 
   it("maps HTTP-200 + non-auth retCode → UPSTREAM_ERROR; 429 → RATE_LIMITED", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       ok({ retCode: 10001, retMsg: "param error" }),
     );
-    await expect(bybitProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "UPSTREAM_ERROR",
+    expect(await failing(bybitProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorUnavailableError",
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
-    await expect(bybitProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "RATE_LIMITED",
+    expect(await failing(bybitProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorRateLimitError",
     });
   });
 
@@ -253,7 +264,9 @@ describe("bybitProvider.fetchBalances", () => {
         return ok({ retCode: 0, result: { balance: [] } });
       return ok(walletBalance);
     });
-    await bybitProvider.fetchBalances(ctx(CREDS, { BYBIT_API_BASE: "https://px.example/s/bybit" }));
+    await run(
+      bybitProvider.fetchBalances(ctx(CREDS, { BYBIT_API_BASE: "https://px.example/s/bybit" })),
+    );
     const urls = spy.mock.calls.map((c) => String(c[0]));
     expect(
       urls.some((u) => u.startsWith("https://px.example/s/bybit/v5/account/wallet-balance")),
@@ -269,11 +282,11 @@ describe("bybitProvider.fetchBalances", () => {
 describe("bybitProvider.validateAccount", () => {
   it("true on retCode 0; false on auth retCode (creds pre-validated upstream)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(ok(walletBalance));
-    expect(await bybitProvider.validateAccount(ctx())).toBe(true);
+    expect(await run(bybitProvider.validateAccount(ctx()))).toBe(true);
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       ok({ retCode: 10003, retMsg: "API key is invalid" }),
     );
-    expect(await bybitProvider.validateAccount(ctx())).toBe(false);
+    expect(await run(bybitProvider.validateAccount(ctx()))).toBe(false);
   });
 });

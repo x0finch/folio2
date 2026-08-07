@@ -1,7 +1,18 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
-import { ProviderError } from "@folio/connectors-basic";
+import { type ConnectorError, isRetryable } from "@folio/connectors-basic";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { blockbookProvider } from "../src";
+
+// 契约的出口是 Effect(ADR 0035)。`failing` 拿**错误值本身** —— 不用 `.rejects`,
+// 因为 `runPromise` 抛的是包了一层的 `FiberFailure`,断言看不见里面的 `_tag`。
+const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
+  Effect.runPromise(Effect.flip(effect));
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
 
 const ADDR = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
 const ZPUB84 =
@@ -30,7 +41,7 @@ describe("blockbookProvider.validateAccount", () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ address: ADDR, balance: "0" }), { status: 200 }),
       );
-    expect(await blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR }))).toBe(true);
+    expect(await run(blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })))).toBe(true);
     expect(String(spy.mock.calls[0][0])).toContain("/address/");
   });
 
@@ -40,46 +51,38 @@ describe("blockbookProvider.validateAccount", () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ address: ZPUB84, balance: "0" }), { status: 200 }),
       );
-    expect(await blockbookProvider.validateAccount(ctx({ addressOrXpub: ZPUB84 }))).toBe(true);
+    expect(await run(blockbookProvider.validateAccount(ctx({ addressOrXpub: ZPUB84 })))).toBe(true);
     expect(String(spy.mock.calls[0][0])).toContain("/xpub/");
   });
 
   // 契约(#240):够不到上游 → 抛 ProviderError(不压成 false),让调用方重试。
   it("端点全故障(5xx)→ 抛 UPSTREAM_ERROR(retryable)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));
-    const err = await blockbookProvider
-      .validateAccount(ctx({ addressOrXpub: ADDR }))
-      .catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("UPSTREAM_ERROR");
-    expect(err.retryable).toBe(true);
+    const err = await failing(blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })));
+    expect(err._tag).toBe("ConnectorUnavailableError");
+    expect(isRetryable(err)).toBe(true);
   });
 
   it("429 → 抛 RATE_LIMITED(retryable)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 429 }));
-    const err = await blockbookProvider
-      .validateAccount(ctx({ addressOrXpub: ADDR }))
-      .catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("RATE_LIMITED");
+    const err = await failing(blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })));
+    expect(err._tag).toBe("ConnectorRateLimitError");
   });
 
-  // 服务端永久拒(4xx,如无效 xpub 的 400):客户端标 retryable:false,toProviderError 必须透传 ——
-  // 否则被 ProviderError 按 code(UPSTREAM_ERROR)重算成 true,一个永久 400 被反复重试。
-  it("服务端 400(永久)→ 抛 UPSTREAM_ERROR 且 retryable=false(不被重算)", async () => {
+  // 服务端永久拒(4xx,如无效 xpub 的 400):客户端标 `retryable: false`,这一路必须透传到底 ——
+  // 只按 code(UPSTREAM_ERROR)推断的话会被判成可重试,一个必然失败的 400 被反复打。
+  // **这条钉的就是 `fromProviderError` 里「显式 retryable 压过 code」那一句**(第一版漏了,它当场红)。
+  it("服务端 400(永久)→ 归「重试改变不了」那一类,不是「够不到上游」", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 400 }));
-    const err = await blockbookProvider
-      .validateAccount(ctx({ addressOrXpub: ADDR }))
-      .catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("UPSTREAM_ERROR");
-    expect(err.retryable).toBe(false);
+    const err = await failing(blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })));
+    expect(err._tag).toBe("ConnectorFailure");
+    expect(isRetryable(err)).toBe(false);
   });
 
   // 凭据本身不成立:xpub 解析不出来 → INVALID_CREDENTIALS → false(等也没用,不该重试)。
   it("非法扩展公钥(乱串)→ false,造 token 即失败", async () => {
-    expect(await blockbookProvider.validateAccount(ctx({ addressOrXpub: "zpubGARBAGE" }))).toBe(
-      false,
-    );
+    expect(
+      await run(blockbookProvider.validateAccount(ctx({ addressOrXpub: "zpubGARBAGE" }))),
+    ).toBe(false);
   });
 });

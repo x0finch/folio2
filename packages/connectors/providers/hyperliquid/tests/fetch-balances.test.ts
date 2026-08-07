@@ -1,8 +1,16 @@
-import type { Balance, BalanceProvider } from "@folio/connectors-basic";
+import type { Balance, BalanceProvider, ConnectorError } from "@folio/connectors-basic";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hyperliquidProvider, parseClearinghouseState } from "../src";
 import fixture from "./fixtures/clearinghouse-state.json";
 import expected from "./fixtures/expected-balances.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
+  Effect.runPromise(Effect.flip(effect));
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
@@ -61,7 +69,7 @@ describe("hyperliquidProvider.fetchBalances", () => {
     const spy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(JSON.stringify(fixture), { status: 200 }));
-    const { balances } = await provider.fetchBalances(ctx());
+    const { balances } = await run(provider.fetchBalances(ctx()));
     expect(balances).toHaveLength(3);
     const [url, init] = spy.mock.calls[0];
     expect(String(url)).toContain("/info");
@@ -76,21 +84,19 @@ describe("hyperliquidProvider.fetchBalances", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("", { status: 429, headers: { "retry-after": "3" } }),
     );
-    await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "RATE_LIMITED",
-      retryable: true,
-      retryAfterMs: 3000,
+    expect(await failing(provider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorRateLimitError",
     });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));
-    await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "UPSTREAM_ERROR",
+    expect(await failing(provider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorUnavailableError",
     });
   });
 
   it("throws PARSE_ERROR on invalid JSON", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("not json", { status: 200 }));
-    await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "PARSE_ERROR",
+    expect(await failing(provider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorFailure",
     });
   });
 

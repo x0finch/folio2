@@ -1,9 +1,9 @@
 import {
-  type BalanceProvider,
   type CredField,
   type Defi,
   isCredentialRejection,
   ProviderError,
+  promiseProvider,
   type Spot,
 } from "@folio/connectors-basic";
 import { createHttpClient, defineRateLimit } from "@folio/shared";
@@ -146,7 +146,7 @@ async function getChainIds(): Promise<Record<string, number>> {
   }
 }
 
-export const rabbyProvider: BalanceProvider<Row, typeof accountCreds, typeof providerCreds> = {
+export const rabbyProvider = promiseProvider<Row, typeof accountCreds, typeof providerCreds>({
   id: PROVIDER_ID,
   label: "Rabby",
   creds: providerCreds,
@@ -176,4 +176,4 @@ export const rabbyProvider: BalanceProvider<Row, typeof accountCreds, typeof pro
   },
 
   // 没有 validateCreds —— PC 为空,没有「provider 自身凭据」这回事。
-};
+});

@@ -1,5 +1,7 @@
+import type { Effect } from "effect";
 import type { z } from "zod";
 import type { Balance } from "./balance";
+import type { ConnectorError } from "./connector-error";
 import type { CredField, CredsOf } from "./creds";
 import type { Note } from "./note";
 
@@ -23,17 +25,24 @@ export interface BalanceProvider<
   readonly creds: PC; // 实例化本 provider 要的 key(空 = 开箱即用)
   readonly defaultEnabled?: boolean;
   // 返回该 connector 的 balances(B 子集;balance 级单个 note 挂在各 balance 上)+ 顶层可选 account 级 note(Note[],整钱包)。
+  //
+  // **出口是 `Effect` 不是 `Promise`**(ADR 0035):中途转一次 Promise 会切断 context ——
+  // 外层的超时和中断管不到里面,`TestClock` 也驱动不了(sync 迁移时实测过)。
   fetchBalances(
     ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>,
-  ): Promise<{ balances: B[]; note?: Note[] }>;
-  // 账户 liveness。**语义收窄成一件事:上游对这份凭据说不说 yes。** 失败分两类,别压成同一个 false:
-  //   · 凭据被上游拒(401/403 / 业务码说不对)或凭据本身不成立 → 返回 `false`(等也没用,不该重试)。
-  //   · 够不到上游(429 / 5xx / 网络故障 / 坏响应)→ **抛 `ProviderError`**,retryable 按 code 走
-  //     (与 fetchBalances 同口径)—— 让调用方(validateAccountCreds 的 withRetry)能重试。
-  // catch 里用 `isCredentialRejection(err)` 判前者、其余 rethrow(见 errors.ts)。压成 false 会让瞬时
-  // 429 显示成「凭据错误」、还让上层的重试永远触发不了。
-  validateAccount(ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>): Promise<boolean>;
-  validateCreds?(creds: CredsOf<PC>): Promise<boolean>; // provider 自身 creds liveness
+  ): Effect.Effect<{ balances: B[]; note?: Note[] }, ConnectorError>;
+  // 账户 liveness。**语义收窄成一件事:上游对这份凭据说不说 yes。** 两类失败别压成同一个 false:
+  //   · 凭据被上游拒(401/403 / 业务码说不对)或凭据本身不成立 → 成功返回 `false`
+  //     (等也没用,不该重试)。
+  //   · 够不到上游(429 / 5xx / 网络故障 / 坏响应)→ **走错误通道**,调用方据 `_tag` 决定重试
+  //     (与 fetchBalances 同口径)。
+  // 压成 false 会让瞬时 429 显示成「凭据错误」、还让上层的重试永远触发不了。
+  //
+  // (`false` 也可以并进错误通道 —— `ConnectorAuthError` 本来就是那个意思。没并是因为那要改
+  //  9 个 provider 的内部,而本片刻意只动契约形状;B2 各片接线时顺手改。)
+  validateAccount(
+    ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>,
+  ): Effect.Effect<boolean, ConnectorError>;
 }
 
 // 估值语义:provider 的 value 权不权威。authoritative(默认)= 场馆/链上自带权威 USD 估值,

@@ -1,7 +1,8 @@
 import type { Balance } from "@folio/connectors-basic";
+import { ConnectorFailure } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import { Effect } from "effect";
-import { FetchBalancesError, messageOf, type SyncDepError } from "./errors";
+import { messageOf, type SyncDepError } from "./errors";
 import { platformOf } from "./platform";
 import { fetchBalancesWithRetry } from "./retry";
 import { SnapshotStore, type SyncServices, TokenOracle } from "./services";
@@ -94,7 +95,8 @@ export const syncAccount = (
     // 坏 JSON 也算这个账户的失败。
     const stored = yield* Effect.try({
       try: (): Record<string, string> => (rawCreds ? JSON.parse(rawCreds) : {}),
-      catch: (e) => new FetchBalancesError({ message: messageOf(e), retryable: false, cause: e }),
+      // 坏 JSON 不是上游的锅,重试也变不好 —— 归「重试改变不了的那类」。
+      catch: (e) => new ConnectorFailure({ message: messageOf(e), cause: e }),
     });
     const outcome = yield* fetchBalancesWithRetry(account, stored);
     // 缺凭据(导入待补录)→ 跳过,不算失败,补录后下次纳入(见 P6.6.1)。
@@ -109,7 +111,8 @@ export const syncAccount = (
     Effect.catchAll((err) =>
       Effect.logError("account sync failed").pipe(
         Effect.annotateLogs({
-          code: err._tag === "FetchBalancesError" ? err.code : undefined,
+          // 每一类失败都有 `_tag`,不必再分「这个类型有没有 code 字段」。
+          reason: err._tag,
           error: err.message,
         }),
         Effect.as({

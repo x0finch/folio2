@@ -1,5 +1,4 @@
 import {
-  type BalanceProvider,
   type CredField,
   hmacSha256,
   isCredentialRejection,
@@ -7,6 +6,7 @@ import {
   type PerpEquity,
   type PerpPosition,
   ProviderError,
+  promiseProvider,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
@@ -631,7 +631,7 @@ function walletFailureNote(failed: string[]): Note {
   };
 }
 
-export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountCreds> = {
+export const binanceProvider = promiseProvider<BinanceRow, typeof binanceAccountCreds>({
   id: PROVIDER_ID,
   label: "Binance",
   // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据,走 account.creds。
@@ -712,4 +712,4 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
       throw err;
     }
   },
-};
+});

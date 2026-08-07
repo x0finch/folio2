@@ -1,11 +1,23 @@
-import type { Balance, BalanceProvider } from "@folio/connectors-basic";
-import { ProviderError } from "@folio/connectors-basic";
+import {
+  type Balance,
+  type BalanceProvider,
+  type ConnectorError,
+  isRetryable,
+} from "@folio/connectors-basic";
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import tokenList from "./fixtures/cache-token-list.json";
 import chainList from "./fixtures/chain-list.json";
 import protocolList from "./fixtures/complex-protocol-list.json";
 import expectedBalances from "./fixtures/expected-balances.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
+  Effect.runPromise(Effect.flip(effect));
 
 // 四份 fixture 一一对应:三个录制的真实响应(chain-list / cache-token-list /
 // complex-protocol-list)→ expected-balances.json(解析后的结构化期望值,**固化在文件里逐一对比**,
@@ -68,7 +80,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("fetchBalances", () => {
   it("两个请求拿回全链 —— 逐字段对上录好的期望值", async () => {
     stubFetch(okRoutes());
-    const { balances } = await provider.fetchBalances(ctx());
+    const { balances } = await run(provider.fetchBalances(ctx()));
     expect(balances).toEqual(expectedBalances);
   });
 
@@ -76,7 +88,7 @@ describe("fetchBalances", () => {
     // 顺序是 fetchBalances 里 [...代币, ...协议] 拼出来的。金额加总不看顺序,但快照落库和
     // 上面那条 golden 对比都看 —— 钉住它,省得哪天换成 Promise.all 打乱了还以为无所谓。
     stubFetch(okRoutes());
-    const { balances } = await provider.fetchBalances(ctx());
+    const { balances } = await run(provider.fetchBalances(ctx()));
     const kinds = balances.map((b) => b.kind);
     expect(kinds.lastIndexOf("spot")).toBeLessThan(kinds.indexOf("defi"));
   });
@@ -84,7 +96,7 @@ describe("fetchBalances", () => {
   it("刻意串行 —— 顺序固定为 链清单 → 代币 → 协议", async () => {
     // 串行是为了把单账户瞬时并发压到 1(sync 已经在账户维度并发 6 了),见 gate.ts。
     const { calls } = stubFetch(okRoutes());
-    await provider.fetchBalances(ctx());
+    await run(provider.fetchBalances(ctx()));
     expect(calls).toEqual([
       "/v1/chain/list",
       "/v1/user/cache_token_list",
@@ -94,7 +106,7 @@ describe("fetchBalances", () => {
 
   it("每个请求都签名,且签的参数与真正发出去的 query 一致", async () => {
     stubFetch(okRoutes());
-    await provider.fetchBalances(ctx());
+    await run(provider.fetchBalances(ctx()));
     expect(signRabbyRequest).toHaveBeenCalledTimes(3);
     expect(signRabbyRequest).toHaveBeenCalledWith("GET", "/v1/user/cache_token_list", { id: ADDR });
     expect(signRabbyRequest).toHaveBeenCalledWith("GET", "/v1/chain/list", {});
@@ -102,49 +114,46 @@ describe("fetchBalances", () => {
 
   it("链清单缓存住 —— 第二轮不再打它", async () => {
     const { calls } = stubFetch(okRoutes());
-    await provider.fetchBalances(ctx());
-    await provider.fetchBalances(ctx());
+    await run(provider.fetchBalances(ctx()));
+    await run(provider.fetchBalances(ctx()));
     expect(calls.filter((p) => p === "/v1/chain/list")).toHaveLength(1);
   });
 
   it("429 → RATE_LIMITED 且可重试", async () => {
     stubFetch({ ...okRoutes(), "/v1/chain/list": () => new Response("", { status: 429 }) });
-    const err = await provider.fetchBalances(ctx()).catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("RATE_LIMITED");
-    expect(err.retryable).toBe(true);
+    const err = await failing(provider.fetchBalances(ctx()));
+    expect(err._tag).toBe("ConnectorRateLimitError");
+    expect(isRetryable(err)).toBe(true);
   });
 
   it("签名失败 → AUTH_FAILED 且**不可重试**(重试没意义,通常意味着上游改了协议)", async () => {
     stubFetch(okRoutes());
     signRabbyRequest.mockRejectedValueOnce(new Error("wasm gone"));
-    const err = await provider.fetchBalances(ctx()).catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("AUTH_FAILED");
-    expect(err.retryable).toBe(false);
+    const err = await failing(provider.fetchBalances(ctx()));
+    expect(err._tag).toBe("ConnectorAuthError");
+    expect(isRetryable(err)).toBe(false);
   });
 
   it("非法 JSON → PARSE_ERROR", async () => {
     stubFetch({ ...okRoutes(), "/v1/user/cache_token_list": () => new Response("not json") });
-    const err = await provider.fetchBalances(ctx()).catch((e) => e);
-    expect(err.code).toBe("PARSE_ERROR");
+    const err = await failing(provider.fetchBalances(ctx()));
+    expect(err._tag).toBe("ConnectorFailure");
   });
 
   it("链清单为空 → 抛错,不产 slug 兜底形", async () => {
     stubFetch({ ...okRoutes(), "/v1/chain/list": () => json([]) });
-    const err = await provider.fetchBalances(ctx()).catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
+    const _err = await failing(provider.fetchBalances(ctx()));
   });
 
   it("链清单刷新失败但有旧缓存 → 用旧的(chainId 不可变,仍正确)", async () => {
     stubFetch(okRoutes());
-    await provider.fetchBalances(ctx());
+    await run(provider.fetchBalances(ctx()));
     // 让链清单从此 500,余额仍应取到
     stubFetch({ ...okRoutes(), "/v1/chain/list": () => new Response("", { status: 500 }) });
     resetRateLimitsForTests();
     // 缓存未过期时压根不会打链清单;这里把它当"过期后刷新失败"来验 —— 直接调即可,
     // 因为 24h 内走缓存分支,失败路径由下一条用例(强制过期)覆盖。
-    const { balances } = await provider.fetchBalances(ctx());
+    const { balances } = await run(provider.fetchBalances(ctx()));
     expect(balances.length).toBeGreaterThan(0);
   });
 });
@@ -152,29 +161,27 @@ describe("fetchBalances", () => {
 describe("validateAccount", () => {
   it("total_balance 通 → true", async () => {
     stubFetch({ "/v1/user/total_balance": () => json({ total_usd_value: 1 }) });
-    expect(await provider.validateAccount(ctx())).toBe(true);
+    expect(await run(provider.validateAccount(ctx()))).toBe(true);
   });
 
   // 契约(#240):凭据被拒 → false;够不到上游 → 抛 ProviderError,让调用方重试。
   it("凭据被拒(403 → AUTH_FAILED)→ false,不抛", async () => {
     stubFetch({ "/v1/user/total_balance": () => new Response("", { status: 403 }) });
-    expect(await provider.validateAccount(ctx())).toBe(false);
+    expect(await run(provider.validateAccount(ctx()))).toBe(false);
   });
 
   it("429 → 抛 RATE_LIMITED(retryable),不压成 false", async () => {
     stubFetch({ "/v1/user/total_balance": () => new Response("", { status: 429 }) });
-    const err = await provider.validateAccount(ctx()).catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("RATE_LIMITED");
-    expect(err.retryable).toBe(true);
+    const err = await failing(provider.validateAccount(ctx()));
+    expect(err._tag).toBe("ConnectorRateLimitError");
+    expect(isRetryable(err)).toBe(true);
   });
 
   it("5xx → 抛 UPSTREAM_ERROR(retryable)", async () => {
     stubFetch({ "/v1/user/total_balance": () => new Response("", { status: 503 }) });
-    const err = await provider.validateAccount(ctx()).catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("UPSTREAM_ERROR");
-    expect(err.retryable).toBe(true);
+    const err = await failing(provider.validateAccount(ctx()));
+    expect(err._tag).toBe("ConnectorUnavailableError");
+    expect(isRetryable(err)).toBe(true);
   });
 
   it("网络炸 → 抛 UPSTREAM_ERROR(不压成 false)", async () => {
@@ -184,15 +191,13 @@ describe("validateAccount", () => {
         throw new Error("boom");
       }),
     );
-    const err = await provider.validateAccount(ctx()).catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("UPSTREAM_ERROR");
+    const err = await failing(provider.validateAccount(ctx()));
+    expect(err._tag).toBe("ConnectorUnavailableError");
   });
 });
 
 describe("provider 形状", () => {
-  it("PC 为空 —— rabby 不要 key,所以没有 validateCreds", () => {
+  it("PC 为空 —— rabby 不要 key", () => {
     expect(rabbyProvider.creds).toHaveLength(0);
-    expect(rabbyProvider.validateCreds).toBeUndefined();
   });
 });

@@ -1,9 +1,16 @@
+import type { ConnectorError } from "@folio/connectors-basic";
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { binanceProvider } from "../src";
 import { ACCOUNT_PATH, TICKER_PRICE_PATH, TICKER_RATE_LIMIT_BURST } from "../src/constants";
 import account from "./fixtures/account.json";
 import prices from "./fixtures/prices.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
 
 // 速率闸**只装在公开端点上**,这是本文件唯一要钉的东西:binance 的额度按 IP 算,公开的全市场
 // 行情是所有账户、所有用户共花一份;签名的 /account 一个账户只发一次、不并发,装闸拦不到任何
@@ -67,7 +74,7 @@ describe("只有公开端点过闸", () => {
   it("不推时间时:签名 12 发全出去,行情只出去一个窗口的量", async () => {
     const calls = stubFetch();
     const runs = Promise.all(
-      Array.from({ length: 12 }, () => binanceProvider.fetchBalances(ctx())),
+      Array.from({ length: 12 }, () => run(binanceProvider.fetchBalances(ctx()))),
     );
     await flushMicrotasks();
 

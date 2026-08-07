@@ -1,12 +1,7 @@
-import type { Balance } from "@folio/connectors-basic";
+import type { Balance, ConnectorError } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
 import { Context, Effect, HashMap, Layer, Logger, LogLevel } from "effect";
-import {
-  depError,
-  type FetchBalancesError,
-  type SyncDepError,
-  toFetchBalancesError,
-} from "./errors";
+import { depError, type SyncDepError } from "./errors";
 import type { FetchOutcome, SyncDeps, SyncLogger } from "./types";
 
 // 编排要用的**能力**,一个一个具名。业务代码从上下文取能力,不再一层层透传 deps / account /
@@ -36,7 +31,7 @@ export class BalanceSource extends Context.Tag("sync/BalanceSource")<
     readonly fetch: (
       account: AccountSafe,
       stored: Record<string, string>,
-    ) => Effect.Effect<FetchOutcome, FetchBalancesError>;
+    ) => Effect.Effect<FetchOutcome, ConnectorError>;
   }
 >() {}
 
@@ -133,11 +128,10 @@ export const layerFromDeps = (deps: SyncDeps): Layer.Layer<SyncServices> =>
         }),
     }),
     Layer.succeed(BalanceSource, {
-      fetch: (account, stored) =>
-        Effect.tryPromise({
-          try: () => deps.fetchBalances(account, stored),
-          catch: toFetchBalancesError,
-        }),
+      // **没有 `Effect.tryPromise`** —— provider 契约的出口已经是 Effect,注入进来的就是 Effect,
+      // 原样转发。以前这里要包一层,顺带把 `ProviderError` 翻译成本包自己的错误类型;
+      // 那两件事随契约改造一起没了。
+      fetch: (account, stored) => deps.fetchBalances(account, stored),
     }),
     Layer.succeed(SnapshotStore, {
       write: (userId, accountId, input) =>

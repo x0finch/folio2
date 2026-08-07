@@ -1,7 +1,13 @@
-import type { Balance, BalanceProvider } from "@folio/connectors-basic";
+import type { Balance, BalanceProvider, ConnectorError } from "@folio/connectors-basic";
 import { validateCredentials } from "@folio/connectors-basic";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { evmAccountCreds, resetChainIdsCacheForTests, zerionProvider } from "../src";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
@@ -27,7 +33,7 @@ describe("zerion provider.validateAccount", () => {
   // 地址格式由 validateCredentials 预校验;validateAccount 只对 provider key 缺失自查(不发请求)。
   it("returns false when the provider key is missing, WITHOUT a request", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    expect(await provider.validateAccount(ctx(ADDR, {}))).toBe(false);
+    expect(await run(provider.validateAccount(ctx(ADDR, {})))).toBe(false);
     expect(spy).not.toHaveBeenCalled();
   });
 
@@ -35,32 +41,13 @@ describe("zerion provider.validateAccount", () => {
     const spy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(JSON.stringify({ data: {} }), { status: 200 }));
-    expect(await provider.validateAccount(ctx(ADDR, { ZERION_API_KEY: "k" }))).toBe(true);
+    expect(await run(provider.validateAccount(ctx(ADDR, { ZERION_API_KEY: "k" })))).toBe(true);
     expect(String(spy.mock.calls[0][0])).toContain(`/v1/wallets/${ADDR}/portfolio`);
   });
 
   it("returns false on 401/403", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    expect(await provider.validateAccount(ctx(ADDR, { ZERION_API_KEY: "k" }))).toBe(false);
-  });
-});
-
-describe("zerion provider.validateCreds — 实测打 /v1/chains/(只需 key)", () => {
-  it("key 缺失/空 → false,且不发请求", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
-    expect(await provider.validateCreds?.({ ZERION_API_KEY: "" })).toBe(false);
-    expect(await provider.validateCreds?.({})).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
-  });
-
-  it("打 /v1/chains/:200 → true;401 → false", async () => {
-    const spy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-    expect(await provider.validateCreds?.({ ZERION_API_KEY: "k" })).toBe(true);
-    expect(String(spy.mock.calls[0][0])).toContain("/v1/chains/");
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    expect(await provider.validateCreds?.({ ZERION_API_KEY: "k" })).toBe(false);
+    expect(await run(provider.validateAccount(ctx(ADDR, { ZERION_API_KEY: "k" })))).toBe(false);
   });
 });
 

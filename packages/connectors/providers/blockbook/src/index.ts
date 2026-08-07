@@ -14,12 +14,12 @@ import {
   type XpubToken,
 } from "@folio/blockbook-client";
 import {
-  type BalanceProvider,
   type CredField,
   isCredentialRejection,
   type Note,
   type NoteRow,
   ProviderError,
+  promiseProvider,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
@@ -244,11 +244,11 @@ export const bitcoinAccountCreds = [
 // —— provider 级 creds(PC):空 —— Blockbook 公共实例免 key,开箱即用。
 const providerCreds = [] as const satisfies readonly CredField[];
 
-export const blockbookProvider: BalanceProvider<
+export const blockbookProvider = promiseProvider<
   Spot,
   typeof bitcoinAccountCreds,
   typeof providerCreds
-> = {
+>({
   id: "blockbook",
   label: "Blockbook",
   creds: providerCreds,
@@ -289,4 +289,4 @@ export const blockbookProvider: BalanceProvider<
       throw pe;
     }
   },
-};
+});

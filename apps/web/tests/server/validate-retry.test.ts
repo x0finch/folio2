@@ -6,10 +6,12 @@ import { validateAccountCreds } from "../../src/lib/server/internal/connector-re
 // (PC 注入要读它)。打桩打在**全局 fetch** 上,测的是真实那条路(表单 → validateAccountCreds
 // → provider → 出网),不是一个假 provider。用 evm connector(默认 provider 是 rabby,不要 key)。
 //
-// **契约已落地(#240):** `validateAccount` 现在把两类失败分开 —— 凭据被拒(401/403 → AUTH_FAILED)
-// 返回 `false`;够不到上游(429 / 5xx / 网络故障)抛 retryable 的 `ProviderError`。于是 withRetry
-// 这一层活了:传输故障会重试,凭据被拒不会(等也没用,而且拿着错凭据再打一次上游有害)。
-// 下面这几条钉的是**这个行为**。
+// **契约已落地(#240):** `validateAccount` 把两类失败分开 —— 凭据被拒(401/403)成功返回 `false`;
+// 够不到上游(429 / 5xx / 网络故障)走**错误通道**。于是重试这一层活了:传输故障会重试,
+// 凭据被拒不会(等也没用,而且拿着错凭据再打一次上游有害)。下面这几条钉的是**这个行为**。
+//
+// 重试实现已从 `@folio/shared` 的手搓 `withRetry` 换成 Effect 的 `Schedule`(#377),
+// **这几条断言一个字没改** —— 那正是「换实现不换行为」的证据。
 
 const ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
@@ -52,7 +54,7 @@ describe("探活", () => {
 });
 
 describe("契约落地:传输故障重试,凭据被拒不重试", () => {
-  it("瞬时 429 → 重试一次并成功(rabby 抛 RATE_LIMITED,withRetry 再打一发)", async () => {
+  it("瞬时 429 → 重试一次并成功(rabby 报 RATE_LIMITED,重试再打一发)", async () => {
     const spy = scriptedFetch([429, 200]); // 第二发成功
     await expect(
       validateAccountCreds("evm", { address: ADDRESS }, { liveness: true }),
@@ -60,11 +62,11 @@ describe("契约落地:传输故障重试,凭据被拒不重试", () => {
     expect(spy).toHaveBeenCalledTimes(2); // 429 抛错 → 重试 → 200 通过
   });
 
-  it("持续 429 → 重试用尽后失败(抛 ProviderError,不是压成 false)", async () => {
+  it("持续 429 → 重试用尽后失败(错误冒出去,不是压成 false)", async () => {
     const spy = scriptedFetch([429]); // 每发都 429
     await expect(
       validateAccountCreds("evm", { address: ADDRESS }, { liveness: true }),
-    ).rejects.toThrow(); // RATE_LIMITED 冒出去(不是 "could not verify")
+    ).rejects.toThrow(); // 限流错误冒出去(不是 "could not verify")
     expect(spy).toHaveBeenCalledTimes(2); // VALIDATE_RETRY_ATTEMPTS = 1 + 1 次重试
   });
 
@@ -84,5 +86,24 @@ describe("契约落地:传输故障重试,凭据被拒不重试", () => {
       validateAccountCreds("evm", { address: ADDRESS }, { liveness: true }),
     ).rejects.toThrow(/could not verify/); // provider 返回 false → 明确的凭据错误文案
     expect(spy).toHaveBeenCalledTimes(1); // false 不触发重试(只有抛 retryable 错才重试)
+  });
+
+  // **上游说要等的比我们肯等的久 → 一次就放弃,不重试。**
+  //
+  // 用户正盯着表单:夹到 1.5 秒再打大概率还是 429,白赔一次往返,不如立刻把错误交给表单。
+  // 这条与**后台同步**那份策略刻意相反(那边没人等,所以夹住继续等)。
+  //
+  // 它是手搓 `withRetry` 的 `exceedsMaxWait: "throw"`,换成 `Schedule` 时差点丢掉 ——
+  // 第一版写成了 clamp,四闸全绿也测不出来,因为**当时没有任何用例钉它**。补上。
+  it("Retry-After 超过我们肯等的上限 → 一次就放弃(不夹到上限再打)", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        async () => new Response("", { status: 429, headers: { "retry-after": "60" } }),
+      );
+    await expect(
+      validateAccountCreds("evm", { address: ADDRESS }, { liveness: true }),
+    ).rejects.toThrow();
+    expect(spy).toHaveBeenCalledTimes(1); // 没有第二发
   });
 });
