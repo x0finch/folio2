@@ -1,5 +1,4 @@
-import { resetRateLimitsForTests } from "@folio/shared";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { validateAccountCreds } from "../../src/lib/server/internal/connector-registry";
 
 // 添加账户的探活。走 workers-pool 是因为 connector-registry 引 `cloudflare:workers` 的 env
@@ -15,7 +14,6 @@ import { validateAccountCreds } from "../../src/lib/server/internal/connector-re
 
 const ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
-beforeEach(() => resetRateLimitsForTests());
 afterEach(() => vi.restoreAllMocks());
 
 // 按次序应答:第 n 次出网返回 statuses[n-1](用尽后重复最后一个)。每次都新建 Response

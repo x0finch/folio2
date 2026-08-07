@@ -78,6 +78,3 @@ export function parseClearinghouseState(state: ClearinghouseState): Row[] {
 
   return out;
 }
-
-// 出网走共享的 http 包装(@folio/shared)。**没有限频器** —— 见 constants.ts 末尾那笔账:
-// 1200 权重/分钟 ÷ 每次权重 2 ≈ 600 次/分钟,而我们峰值 6 发,队永远是空的。

@@ -36,7 +36,6 @@
     "@folio/oracle-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/oracle-upstream-coingecko": "workspace:*",
-    "@folio/shared": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/ui": "workspace:*",
     "@fontsource-variable/geist": "^5.2.9",
@@ -64,6 +63,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.20",
+    "@folio/shared": "workspace:*",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/typography": "^0.5.16",
     "@tanstack/devtools-vite": "latest",

@@ -53,9 +53,6 @@ importers:
       '@folio/oracle-upstream-coingecko':
         specifier: workspace:*
         version: link:../../packages/oracle/upstreams/coingecko
-      '@folio/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       '@folio/sync':
         specifier: workspace:*
         version: link:../../packages/sync
@@ -132,6 +129,9 @@ importers:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.16.20
         version: 0.16.20(@cloudflare/workers-types@4.20260626.1)(@vitest/runner@4.1.9)(@vitest/snapshot@4.1.9)(vitest@4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))
+      '@folio/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@playwright/test':
         specifier: ^1.62.1
         version: 1.62.1
