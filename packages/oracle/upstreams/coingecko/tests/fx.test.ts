@@ -1,25 +1,6 @@
-import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCoinGeckoFxUpstream } from "../src";
-
-// 限速闸:每个用例从干净状态出发,且 sleep 即时 —— 否则无 key 档(10 次/分钟)会让这套测试
-// **真的等**,而上一个用例撞出来的冷却还会漏给下一个。生产不传 sleep(用 setTimeout)。
-const NO_WAIT = { sleep: async () => {} };
-// 限速闸旁路:这个文件测的不是限频。闸的行为在 @folio/shared 的单测里用假时钟验过,
-// 这里让它直接放行 —— 否则每个用例都要按窗口真等。
-bypassRateLimitsForTests(true);
-
-beforeEach(() => resetRateLimitsForTests());
-
-function mockFetch(body: unknown) {
-  return vi.spyOn(globalThis, "fetch").mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: async () => body,
-    headers: new Headers(),
-  } as Response);
-}
-afterEach(() => vi.restoreAllMocks());
+import { describe, expect, it } from "vitest";
+import { createCoinGeckoFxUpstream, fetchRatesEffect } from "../src/fx";
+import { failing, run, stubbing } from "./harness";
 
 // 上游那个端点以 **BTC** 为基准:value = 1 BTC 值多少该币种。
 // 我们要的是 usdPerUnit(X) = usd.value / X.value(BTC 约掉)。
@@ -32,10 +13,12 @@ const RATES = {
   },
 };
 
-describe("createCoinGeckoFxUpstream.fetchRates", () => {
+describe("fetchRates", () => {
   it("反算 usdPerUnit:USD=1、EUR=usd/eur、ETH=usd/eth、BTC=usd/btc", async () => {
-    mockFetch(RATES);
-    const rates = await createCoinGeckoFxUpstream(NO_WAIT).fetchRates();
+    const rates = await run(
+      stubbing(() => RATES),
+      fetchRatesEffect,
+    );
 
     expect(rates.get("USD")).toBe(1);
     expect(rates.get("EUR")).toBeCloseTo(100000 / 92000, 6);
@@ -44,31 +27,40 @@ describe("createCoinGeckoFxUpstream.fetchRates", () => {
   });
 
   it("上游没收录的币种不出现(不是报错)", async () => {
-    mockFetch(RATES);
-    const rates = await createCoinGeckoFxUpstream(NO_WAIT).fetchRates();
+    const rates = await run(
+      stubbing(() => RATES),
+      fetchRatesEffect,
+    );
     expect(rates.has("KRW")).toBe(false); // 这份响应里没有 krw
   });
 
   it("只出白名单里的币种 —— 上游多给的不进结果", async () => {
-    mockFetch({ rates: { ...RATES.rates, xag: { value: 3000, type: "commodity" } } });
-    const rates = await createCoinGeckoFxUpstream(NO_WAIT).fetchRates();
+    const rates = await run(
+      stubbing(() => ({ rates: { ...RATES.rates, xag: { value: 3000, type: "commodity" } } })),
+      fetchRatesEffect,
+    );
     expect(rates.has("XAG")).toBe(false);
   });
 
-  it("基准(usd)缺失 → 抛:这不是「某个币种没有」,是响应坏了", async () => {
-    mockFetch({ rates: { eur: { value: 1 } } });
-    await expect(createCoinGeckoFxUpstream(NO_WAIT).fetchRates()).rejects.toThrow(/usd rate/);
+  it("基准(usd)缺失 → 失败:这不是「某个币种没有」,是响应坏了", async () => {
+    // 归 parse 那一类,所以**不可重试** —— 再拉一次还是同一份坏形状。
+    const err = await failing(
+      stubbing(() => ({ rates: { eur: { value: 1 } } })),
+      fetchRatesEffect,
+    );
+    expect(err._tag).toBe("UpstreamParseError");
+    expect(err.cause).toBe("missing/invalid usd rate");
   });
 
-  it("id 自报为当前上游 —— 与代币那面同一个命名者", async () => {
-    expect(createCoinGeckoFxUpstream(NO_WAIT).id).toBe("coingecko");
+  it("id 自报为当前上游 —— 与代币那面同一个命名者", () => {
+    expect(createCoinGeckoFxUpstream().id).toBe("coingecko");
   });
 });
 
 // 汇率的 BTC 反算基(ADR 0026):历史反算取「BTC 在某币种下的价」走的是 PriceUpstream.fetchPriceSeries
 //(见 upstream.test.ts 的 vsCurrency 用例),FxUpstream 只声明这个基、不另立取数方法。
-describe("createCoinGeckoFxUpstream.btcRef", () => {
+describe("btcRef", () => {
   it("btcRef = coingecko/issued:bitcoin —— 与代币那面 BTC 历史价同键(可复用)", () => {
-    expect(createCoinGeckoFxUpstream(NO_WAIT).btcRef).toBe("coingecko/issued:bitcoin");
+    expect(createCoinGeckoFxUpstream().btcRef).toBe("coingecko/issued:bitcoin");
   });
 });

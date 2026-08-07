@@ -45,6 +45,23 @@ export type UpstreamError =
   | UpstreamUnavailableError
   | UpstreamParseError;
 
+// 「这个错误值不值得再打一发」。**判据是 `_tag`,住在错误面自己这个文件里** —— 加一个 tag 会让
+// 这里当场编译红(`Match.exhaustive`),而散在各调用点的 if 链只会悄悄漏掉新那一类。
+//
+// 与 `@folio/connectors-basic` 的同名函数是**两套错误各自的答案**,不是重复:那边判的是
+// `ConnectorError`(适配层翻译之后的),这边判的是 client 直接吐出来的四类。
+// 消费者是谁决定用哪个 —— 适配层用那边的,直接拿 client 说话的(如 oracle 的 CoinGecko adapter)用这边的。
+export const isRetryable: (error: UpstreamError) => boolean = Match.type<UpstreamError>().pipe(
+  Match.tag("UpstreamRateLimitError", "UpstreamUnavailableError", () => true),
+  // 凭据不对 / 上游变了形状 —— 再打一发还是同一个答案。
+  Match.tag("UpstreamAuthError", "UpstreamParseError", () => false),
+  Match.exhaustive,
+);
+
+// 上游建议的等待时长(只有被限流那一类给得出)。重试策略优先采用它。
+export const retryAfterOf = (error: UpstreamError): number | undefined =>
+  error._tag === "UpstreamRateLimitError" ? error.retryAfterMs : undefined;
+
 export interface ClassifyOptions {
   readonly upstream: string;
 }

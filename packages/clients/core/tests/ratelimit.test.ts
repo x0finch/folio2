@@ -13,7 +13,12 @@ import {
   TestContext,
 } from "effect";
 import { describe, expect, it } from "vitest";
-import { make, type RateLimitOptions } from "../src/ratelimit";
+import {
+  make,
+  type RateLimitOptions,
+  RateLimitScopeOverride,
+  setScopeDefaultForTests,
+} from "../src/ratelimit";
 import { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "../src/slot-cursor";
 
 // 时序断言全部走 `TestClock` —— **不断言墙钟**(CODING.md)。
@@ -299,6 +304,73 @@ describe("这一档不支持什么,要说出来", () => {
         Effect.scoped(make({ key: `tb-${algorithm}`, limit: 2, interval: "1 seconds", algorithm })),
       );
       expect(typeof gate).toBe("function");
+    }
+  });
+});
+
+describe("none 档:直接放行", () => {
+  // 给「这个文件测的不是限频」的测试用 —— 上游 adapter 的翻页 / 分块一个用例就要打十几发,
+  // 而 `memory` 档在突发额度用完后会停下来等,`TestClock` 又不会自己走 → 测试挂死。
+  it("超过额度也不等,一个 TestClock 时刻内全部跑完", async () => {
+    const done = await Effect.gen(function* () {
+      const gate = yield* make({ key: freshKey(), limit: 1, interval: "1 minutes" });
+      const at: number[] = [];
+      // 额度是「每分钟 1 发」,而这里连打 5 发一次都不推进时钟。
+      for (let i = 0; i < 5; i++) at.push(yield* gate(Clock.currentTimeMillis));
+      return at;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.succeed(RateLimitScopeOverride, "none" as const)),
+      Effect.provide(TestContext.TestContext),
+      Effect.runPromise,
+    );
+    expect(done).toHaveLength(5);
+    expect(new Set(done).size).toBe(1); // 一发都没等
+  });
+
+  it("进程级默认档也能选到它 —— 没有 provide 位置的测试靠这个", async () => {
+    setScopeDefaultForTests("none");
+    try {
+      const gate = await Effect.runPromise(
+        Effect.scoped(make({ key: freshKey(), limit: 1, interval: "1 minutes" })),
+      );
+      // 不传 scope、也不 provide 服务,拿到的仍是放行档。
+      const at = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const first = yield* gate(Clock.currentTimeMillis);
+            const second = yield* gate(Clock.currentTimeMillis);
+            return [first, second];
+          }),
+          TestContext.TestContext,
+        ),
+      );
+      expect(at[0]).toBe(at[1]);
+    } finally {
+      setScopeDefaultForTests(undefined);
+    }
+  });
+
+  it("服务优先于进程级默认 —— 两者都在时听 provide 的那个", async () => {
+    setScopeDefaultForTests("none");
+    try {
+      const key = freshKey();
+      const started = await Effect.runPromise(
+        Effect.gen(function* () {
+          const gate = yield* make({ key, limit: 1, interval: "1 minutes" });
+          const fiber = yield* Effect.fork(Effect.all([gate(Effect.void), gate(Effect.void)]));
+          yield* TestClock.adjust(Duration.millis(0));
+          return Option.isNone(yield* Fiber.poll(fiber));
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(Layer.succeed(RateLimitScopeOverride, "isolated" as const)),
+          Effect.provide(TestContext.TestContext),
+        ),
+      );
+      // 真被拦住了 → 说明听的是服务给的 `isolated`,不是进程级的 `none`。
+      expect(started).toBe(true);
+    } finally {
+      setScopeDefaultForTests(undefined);
     }
   });
 });

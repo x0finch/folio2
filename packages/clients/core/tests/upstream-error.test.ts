@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { HttpFailure, SigningFailure } from "../src/errors";
-import { classifyFailure } from "../src/upstream-error";
+import {
+  classifyFailure,
+  isRetryable,
+  retryAfterOf,
+  UpstreamAuthError,
+  UpstreamParseError,
+  UpstreamRateLimitError,
+  UpstreamUnavailableError,
+} from "../src/upstream-error";
 
 // 默认归类规则。**所有 client 共用这一份** —— 上游特有的差异在各自包的出口 `catchTag` 里,
 // 不在这个函数的参数上(见下面那条用例)。
@@ -48,5 +56,25 @@ describe("classifyFailure", () => {
     // `HttpFailure.where` 就只是 pathname,这里钉的是归类过程没把别的东西塞进来。
     const err = classify(http({ where: "/v1/t", cause: new Error("boom") }));
     expect(err.where).toBe("/v1/t");
+  });
+});
+
+describe("值不值得再打一发", () => {
+  const of = (upstream = "acme", where = "/v1/t") => ({ upstream, where });
+
+  it("被限流 / 够不到上游 → 重试有用", () => {
+    expect(isRetryable(new UpstreamRateLimitError(of()))).toBe(true);
+    expect(isRetryable(new UpstreamUnavailableError(of()))).toBe(true);
+  });
+
+  it("凭据不对 / 形状读不动 → 再打一发还是同一个答案", () => {
+    expect(isRetryable(new UpstreamAuthError(of()))).toBe(false);
+    expect(isRetryable(new UpstreamParseError(of()))).toBe(false);
+  });
+
+  it("Retry-After 只有被限流那一类给得出", () => {
+    expect(retryAfterOf(new UpstreamRateLimitError({ ...of(), retryAfterMs: 1500 }))).toBe(1500);
+    expect(retryAfterOf(new UpstreamRateLimitError(of()))).toBeUndefined();
+    expect(retryAfterOf(new UpstreamUnavailableError(of()))).toBeUndefined();
   });
 });

@@ -60,6 +60,8 @@ export {
 export {
   type ClassifyOptions,
   classifyFailure,
+  isRetryable,
+  retryAfterOf,
   UpstreamAuthError,
   type UpstreamError,
   UpstreamParseError,

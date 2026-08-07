@@ -40,7 +40,7 @@ export interface MarketChartRange {
 }
 
 // GET /search 的一个 coin
-export interface SearchCoin {
+interface SearchCoin {
   id?: string;
   symbol?: string;
   name?: string;
@@ -78,7 +78,7 @@ export interface DerivativesExchange {
 
 // GET /exchange_rates → { rates: { <code>: { name, unit, value, type } } }
 // value = 每 1 BTC 值多少该币种;type 区分 fiat / crypto。
-export interface ExchangeRateEntry {
+interface ExchangeRateEntry {
   name?: string;
   unit?: string;
   value?: number;
@@ -86,12 +86,4 @@ export interface ExchangeRateEntry {
 }
 export interface ExchangeRates {
   rates?: Record<string, ExchangeRateEntry>;
-}
-
-export interface CoinGeckoConfig {
-  apiKey?: string;
-  pro?: boolean; // pro key → pro 基址 + pro 头;否则 demo 头 + free 基址
-  baseUrl?: string; // 覆盖基址(测试/自托管代理)
-  // 限速闸和重试的等待实现。生产不传(用 setTimeout);**测试注入即时版** —— 否则闸会让测试真等。
-  sleep?: (ms: number) => Promise<void>;
 }
