@@ -39,6 +39,14 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 - **快回退降嵌套(guard clause)。** 前置判定(缺凭据 / 分派选路 / 校验失败 / 找不到目标)一律 early-return 或提前抛,不把主逻辑塞进 `if (ok) { … }` 的深层嵌套。**分派型函数只做"选路 + return"**(如 sync 注入的 `fetchBalances`:`if (connector) return fetchViaConnector(…); return fetchViaBalances(…)`),各分支实现抽成独立命名函数;一个函数里与其主职责无关的前置工作,提到独立函数。
 - **Server-only deps (`cloudflare:workers`, node built-ins) belong only in code that gets stripped from the client.** A module imported client-side (e.g. one exporting a `createServerFn`) may reference `cloudflare:workers` *only inside the server-fn handler* (the compiler strips it). A **plain exported function** in that same module referencing the env can't be tree-shaken out → breaks the client build (`Rolldown failed to resolve "cloudflare:workers"`). Fix: move such functions into a separate server-only module the client never imports; the client-facing module references them only from within the stripped handler.
 
+- **`apps/web/src/lib` 分三层,判据是「客户端能不能用它」,不是「它碰不碰 env」**(#179 立的规矩,这里补上判据):
+  - `lib/*.ts` —— 客户端**真的可以** import 的纯件(格式化、纯推导、视图形状)。
+  - `lib/server/*.ts` —— `createServerFn` 本身,资源面。
+  - `lib/server/internal/*.ts` —— 只有服务端能跑的实现层:env/单例装配、领域核心、warmer、route helper,**以及任何 `import { Effect }` 的东西**。
+  判据要按「能不能」而不是「碰不碰 env」,是因为按后者判会把一批 DI 写法的纯模块留在 `lib/` 顶层 —— 它们不碰 env,却要 oracle 服务,客户端一辈子供不上。留在那儿只有打包时的摇树在拦,而摇树是优化不是保证。
+
+- **一个包只要导出 `Context.GenericTag`,它的主入口就是服务端入口** —— 不要在同一个入口再转发客户端要的契约。客户端为了拿契约 import 它,`effect` 就跟进 bundle(+75 KB gzip),而且这事只在有人第一次那么写的时候才发生,平时看不出来。`@folio/oracle-basic` 用 `./ports` 子入口分开;`@folio/oracle` 整包只有服务端碰,所以它干脆不转发 basic。
+
 ## Effect
 
 迁移进行中(ADR 0035:`sync` → `connectors` → `shared` → `clients` → `oracle` → `db`,前端明确不碰)。

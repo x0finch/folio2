@@ -1,4 +1,4 @@
-import { FIAT_NAMER, tokenTicket } from "@folio/oracle";
+import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import { buildFiatOptions } from "../src/lib/fiat-options";
 

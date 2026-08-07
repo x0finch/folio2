@@ -1,19 +1,13 @@
 import type { UpstreamError } from "@folio/client-core";
 import { UpstreamUnavailableError } from "@folio/client-core";
-import * as Ports from "@folio/oracle-basic/ports";
-import { parseTokenRef } from "@folio/oracle-ref";
-import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
 import type {
   CacheEntry,
   CacheStore,
   FxUpstream,
   GlobalTokenRefIndexStore,
-  OraclePorts,
-  OracleServices,
   PlatformMeta,
   PlatformUpstream,
   ProviderTokenSeed,
-  RefIndexWarmer,
   TokenCandidate,
   TokenInfo,
   TokenInfoPatch,
@@ -29,14 +23,18 @@ import type {
   TokenStore,
   TokenUpstream,
   UpstreamToken,
-} from "../src";
+} from "@folio/oracle-basic";
+import * as Ports from "@folio/oracle-basic/ports";
+import { parseTokenRef } from "@folio/oracle-ref";
+import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
+import type { OraclePorts, OracleServices, RefIndexWarmer } from "../src";
 import { oracleLayer, refIndexWarmerLayer } from "../src";
-import { CandidateSource, candidateSourceLayer } from "../src/candidates";
-import { fiatHistoryLayer } from "../src/fiat-history";
-import { fxRateResolverLayer } from "../src/fx";
-import { tokenMinterLayer } from "../src/mint";
-import { platformResolverLayer } from "../src/platforms";
-import { tokenReaderLayer } from "../src/tokens";
+import { CandidateSource, candidateSourceLayer } from "../src/services/candidates";
+import { fxRateResolverLayer } from "../src/services/fx";
+import { fxHistoryLayer } from "../src/services/fx-history";
+import { tokenMinterLayer } from "../src/services/mint";
+import { platformResolverLayer } from "../src/services/platforms";
+import { tokenReaderLayer } from "../src/services/tokens";
 
 // 内存假实现 + **一份共用的测试装配**(下面的 `harness`)—— 各片的测试都注这一套。
 //
@@ -599,7 +597,7 @@ export function harness(opts: HarnessOpts = {}): Harness {
         tokenReaderLayer,
         Layer.provide(tokenMinterLayer, Layer.succeed(CandidateSource, opts.candidates)),
         fxRateResolverLayer,
-        fiatHistoryLayer,
+        fxHistoryLayer,
         platformResolverLayer,
         Layer.succeed(CandidateSource, opts.candidates),
       )

@@ -4,7 +4,7 @@ import { dayBucketOf, FIAT_NAMER, MS_PER_DAY } from "@folio/oracle-basic";
 import { FxUpstream, TokenPriceStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { Clock, Context, Effect, Layer } from "effect";
-import { degradeTo } from "./degrade";
+import { degradeTo } from "../internal/degrade";
 
 // 历史日汇率(ADR 0026 / #274)。**与「现在的汇率」(`FxRateResolver`)是两件事**,所以是两个服务:
 // 两半不共用缓存键、不共用上游、不共用一行逻辑,而合住一个文件时 `FxRateResolver` 的 `R` 被撑到
@@ -13,19 +13,21 @@ import { degradeTo } from "./degrade";
 // 这半**不碰 `CacheStore`**:它的持久化落 `token_daily_prices`(全局键、过去日不可变),
 // 不进 per-user 的 `user_cache`。从 `FxUpstream` 只要 `btcRef` 一个字段 —— 那是 fx 与代币两个
 // 世界的桥(BTC 反算的基),留在 `FxUpstream` 上是对的,不为了消掉这条依赖去挪它。
-export interface FiatHistory {
+//
+// **`fx` 与 `fiat` 在本仓是两个词,不是一件事的两种写法**,所以这个文件里两个都出现:
+//   `fx`   汇率本身 —— `FxUpstream` / `FX_TTL_MS` / `fx:<币种>` 键 / 本服务与 `FxRateResolver`
+//   `fiat` 把法币当成一种「币」的那套 —— `FIAT_NAMER` / `fiat/issued:<CODE>` / `fiatSeed`
+// 服务名按**它给什么**取(历史汇率 → `FxHistory`),存储那侧按**它存成什么**取(法币 token 行 →
+// `FIAT_NAMER`)。这个文件叫过 `fiat-history.ts`,那是拿实现的词命名领域的东西,并排看就露馅。
+export interface FxHistory {
   // 某法币在区间内逐日的 usd_per_unit,口径同 `FxRateResolver.resolve` 但按**当天**汇率。
   // SWR 照 `priceSeries`:命中缓存的过去日直接用、缺的从 BTC 反算并永久落 `token_daily_prices`、
   // 今日桶恒现取;上游失败 → 退回仅缓存。USD 恒 1(不出网)。
   // 缓存/派生对齐到 UTC 日桶(`atMs = 日桶 × 一日毫秒`)。
-  fiatRateSeries(
-    code: string,
-    fromMs: number,
-    toMs: number,
-  ): Effect.Effect<readonly TokenPricePoint[]>;
+  rateSeries(code: string, fromMs: number, toMs: number): Effect.Effect<readonly TokenPricePoint[]>;
 }
 
-export const FiatHistory = Context.GenericTag<FiatHistory>("oracle/FiatHistory");
+export const FxHistory = Context.GenericTag<FxHistory>("oracle/FxHistory");
 
 // 逐日反算法币美元价(纯):usd_per_unit(code)@日 = BTC美元@日 ÷ BTC该币@日。缺任一腿、或
 // BTC该币 ≤ 0(坏值 / 除零)的日**跳过**——宁可那天没历史价、走降级链,也不出一个乱数。导出供纯测。
@@ -83,8 +85,8 @@ const make = Effect.gen(function* () {
       return out;
     });
 
-  const history: FiatHistory = {
-    fiatRateSeries: (code, fromMs, toMs) =>
+  const history: FxHistory = {
+    rateSeries: (code, fromMs, toMs) =>
       Effect.gen(function* () {
         if (fromMs > toMs) return [];
         const CODE = norm(code);
@@ -124,7 +126,7 @@ const make = Effect.gen(function* () {
           });
 
           for (const [b, v] of yield* legs.pipe(
-            degradeTo("fiatHistory.fiatRateSeries", new Map<number, number>()),
+            degradeTo("fxHistory.rateSeries", new Map<number, number>()),
           )) {
             derived.set(b, v);
           }
@@ -147,8 +149,8 @@ const make = Effect.gen(function* () {
   return history;
 });
 
-export const fiatHistoryLayer: Layer.Layer<
-  FiatHistory,
+export const fxHistoryLayer: Layer.Layer<
+  FxHistory,
   never,
   TokenPriceStore | TokenUpstream | FxUpstream
-> = Layer.effect(FiatHistory, make);
+> = Layer.effect(FxHistory, make);

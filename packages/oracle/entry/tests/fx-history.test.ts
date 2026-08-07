@@ -1,7 +1,8 @@
+import { MS_PER_DAY } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { FiatHistory, MS_PER_DAY } from "../src";
-import { deriveFiatDaily } from "../src/fiat-history";
+import { FxHistory } from "../src";
+import { deriveFiatDaily } from "../src/services/fx-history";
 import { harness, now0, upstreamDown } from "./fakes";
 
 // 法币的**历史**日汇率(ADR 0026 / #274)—— 与现汇率(`FxRateResolver`)是两个服务。
@@ -9,8 +10,8 @@ import { harness, now0, upstreamDown } from "./fakes";
 // 这一组一个 `CacheStore` 都不碰(历史那半落 `token_daily_prices`,不进 user_cache)。
 
 const setup = () => harness();
-const withHistory = <A, E>(f: (h: FiatHistory) => Effect.Effect<A, E>) =>
-  Effect.flatMap(FiatHistory, f);
+const withHistory = <A, E>(f: (h: FxHistory) => Effect.Effect<A, E>) =>
+  Effect.flatMap(FxHistory, f);
 
 // SWR 照 priceSeries:缓存命中直用 / 缺的从 BTC 反算并落库 / 今日现取 / 上游挂了降级不抛。
 const NOW = now0;
@@ -61,10 +62,10 @@ describe("反算(纯)—— deriveFiatDaily", () => {
   });
 });
 
-describe("fiatRateSeries —— 历史日汇率", () => {
+describe("rateSeries —— 历史日汇率", () => {
   it("USD 恒 1:逐日给 1,一次都不出网、不碰表", async () => {
     const h = setup();
-    expect(await h.run(withHistory((fx) => fx.fiatRateSeries("USD", day(-2), day(0))))).toEqual([
+    expect(await h.run(withHistory((fx) => fx.rateSeries("USD", day(-2), day(0))))).toEqual([
       { atMs: day(-2), unitPrice: 1 },
       { atMs: day(-1), unitPrice: 1 },
       { atMs: day(0), unitPrice: 1 },
@@ -77,12 +78,12 @@ describe("fiatRateSeries —— 历史日汇率", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FiatHistory;
+        const fx = yield* FxHistory;
         yield* h.prices.putDailyByRef(FIAT_EUR, [
           { dayBucket: TODAY - 2, unitPrice: 1.2 },
           { dayBucket: TODAY - 1, unitPrice: 1.1 },
         ]);
-        expect(yield* fx.fiatRateSeries("EUR", day(-2), day(-1))).toEqual([
+        expect(yield* fx.rateSeries("EUR", day(-2), day(-1))).toEqual([
           { atMs: day(-2), unitPrice: 1.2 },
           { atMs: day(-1), unitPrice: 1.1 },
         ]);
@@ -99,8 +100,8 @@ describe("fiatRateSeries —— 历史日汇率", () => {
 
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FiatHistory;
-        expect(yield* fx.fiatRateSeries("EUR", day(-2), day(-1))).toEqual([
+        const fx = yield* FxHistory;
+        expect(yield* fx.rateSeries("EUR", day(-2), day(-1))).toEqual([
           { atMs: day(-2), unitPrice: 1.2 },
           { atMs: day(-1), unitPrice: 1 },
         ]);
@@ -120,13 +121,13 @@ describe("fiatRateSeries —— 历史日汇率", () => {
     h.upstream.seriesByVs.set("EUR", btcLeg({ [TODAY - 2]: 100000, [TODAY - 1]: 100000 }));
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FiatHistory;
+        const fx = yield* FxHistory;
         // BTC 美元历史已在全局表(BTC 持有者暖过 / 上一轮落的)。
         yield* h.prices.putDailyByRef(BTC_REF, [
           { dayBucket: TODAY - 2, unitPrice: 120000 },
           { dayBucket: TODAY - 1, unitPrice: 100000 },
         ]);
-        yield* fx.fiatRateSeries("EUR", day(-2), day(-1));
+        yield* fx.rateSeries("EUR", day(-2), day(-1));
         expect(h.upstream.calls).toEqual([legCall("EUR")]); // 美元腿命中缓存不出网
       }),
     );
@@ -139,8 +140,8 @@ describe("fiatRateSeries —— 历史日汇率", () => {
 
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FiatHistory;
-        expect(yield* fx.fiatRateSeries("EUR", day(0), day(0))).toEqual([
+        const fx = yield* FxHistory;
+        expect(yield* fx.rateSeries("EUR", day(0), day(0))).toEqual([
           { atMs: day(0), unitPrice: 1 },
         ]);
         // 今日不落 —— 明天再看这一天已是过去日、会重取一次定值。
@@ -154,21 +155,19 @@ describe("fiatRateSeries —— 历史日汇率", () => {
     h.upstream.fail = upstreamDown();
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FiatHistory;
+        const fx = yield* FxHistory;
         yield* h.prices.putDailyByRef(FIAT_EUR, [{ dayBucket: TODAY - 2, unitPrice: 1.15 }]);
         // 请求 [-2, -1]:-2 命中缓存、-1 缺且反算失败 → 只回 -2,不抛。
-        expect(yield* fx.fiatRateSeries("EUR", day(-2), day(-1))).toEqual([
+        expect(yield* fx.rateSeries("EUR", day(-2), day(-1))).toEqual([
           { atMs: day(-2), unitPrice: 1.15 },
         ]);
       }),
     );
-    expect(h.logs.some((l) => l.annotations.at === "fiatHistory.fiatRateSeries")).toBe(true);
+    expect(h.logs.some((l) => l.annotations.at === "fxHistory.rateSeries")).toBe(true);
   });
 
   it("from > to → 空", async () => {
     const h = setup();
-    expect(await h.run(withHistory((fx) => fx.fiatRateSeries("EUR", day(-1), day(-2))))).toEqual(
-      [],
-    );
+    expect(await h.run(withHistory((fx) => fx.rateSeries("EUR", day(-1), day(-2))))).toEqual([]);
   });
 });

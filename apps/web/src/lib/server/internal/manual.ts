@@ -5,8 +5,8 @@ import type {
   ManualHolding,
   SnapshotWithBalances,
 } from "@folio/db";
-import { dayBucketOf, FiatHistory, TokenMinter, TokenReader, tokenTicket } from "@folio/oracle";
-import { FIAT_NAMER, fiatCodeOf } from "@folio/oracle-basic";
+import { FxHistory, TokenMinter, TokenReader } from "@folio/oracle";
+import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
 import type { SnapshotTotalRow } from "../../history";
@@ -19,9 +19,9 @@ import {
   type HistoricalPriceAt,
   type HistoryToken,
 } from "../../manual-history";
-import { buildManualSnapshot, manualUnitPrices } from "../../manual-snapshot";
 import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
+import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";
 import { NAMER, runOracle } from "./oracle";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
@@ -363,8 +363,8 @@ async function buildHistoricalPriceAt(
           // 其余:按 token_id 取币价历史(#203,priceSeries 收内部 id)。两条都灌进同一个 priceAt 闭包,
           // 纯层 tokenPriceAt 的第 ① 档对法币照常生效(它只看 recognized,不认识 fiat)。
           const series = tk.fiatCode
-            ? yield* Effect.flatMap(FiatHistory, (fx) =>
-                fx.fiatRateSeries(tk.fiatCode as string, from, now),
+            ? yield* Effect.flatMap(FxHistory, (fx) =>
+                fx.rateSeries(tk.fiatCode as string, from, now),
               )
             : yield* Effect.flatMap(TokenReader, (t) => t.priceSeries(tk.id, from, now));
           for (const pt of series) daily.set(dayBucketOf(pt.atMs), pt.unitPrice);

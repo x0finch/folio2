@@ -1,11 +1,5 @@
-import {
-  DEFAULT_TOP_N,
-  FIAT_NAMER,
-  FxRateResolver,
-  TokenReader,
-  tokenTicket,
-  type UpstreamToken,
-} from "@folio/oracle";
+import { FxRateResolver, TokenReader } from "@folio/oracle";
+import { DEFAULT_TOP_N, FIAT_NAMER, tokenTicket, type UpstreamToken } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
@@ -14,9 +8,9 @@ import { z } from "zod";
 import { buildFiatOptions } from "../fiat-options";
 import { pickLocale, readLocaleCookie } from "../i18n/detect";
 import type { TokenOption } from "../token-option";
-import { priceTickets } from "../token-pricing";
 import { NAMER, runOracle } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
+import { priceTickets } from "./internal/token-pricing";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
 

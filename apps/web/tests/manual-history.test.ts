@@ -97,7 +97,7 @@ describe("法币现金:历史价走注入的当天汇率(路径①)", () => {
     fiatCode: "EUR",
     activities: [act("set", 100, T1, 1.15)], // 账本冻的入账汇率 1.15
   };
-  // 逐日不同的汇率闭包(server 侧 fiatRateSeries 的替身)。
+  // 逐日不同的汇率闭包(server 侧 rateSeries 的替身)。
   const fxAt = (id: string, t: number) =>
     id === "eur" ? { [T1]: 1.2, [T2]: 1.1, [T3]: 1.05 }[t] : undefined;
 

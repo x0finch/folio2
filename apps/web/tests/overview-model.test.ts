@@ -1,9 +1,9 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { TokenRecord } from "@folio/oracle";
+import type { TokenRecord } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/account-view";
-import { buildOverview } from "../src/lib/overview-model";
+import { buildOverview } from "../src/lib/server/internal/overview-model";
 import { type OracleStub, runWithOracle } from "./oracle-stub";
 
 // 纯 buildOverview 可脱离 server fn 测(依赖注入)—— 这是 #3 抽读模型的收益。

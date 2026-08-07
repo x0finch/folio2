@@ -6,7 +6,6 @@ import { CacheStore, GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports"
 import { syncAccount } from "@folio/sync";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildOverview } from "../../src/lib/overview-model";
 import { connectorPlatformMeta } from "../../src/lib/server/internal/connector-platform";
 import { db } from "../../src/lib/server/internal/db";
 import {
@@ -16,6 +15,7 @@ import {
   injectManualSnapshots,
 } from "../../src/lib/server/internal/manual";
 import { NAMER, runOracle } from "../../src/lib/server/internal/oracle";
+import { buildOverview } from "../../src/lib/server/internal/overview-model";
 import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
 import { withStore } from "./db-effect";
 import { ticketOf } from "./ticket";

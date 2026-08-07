@@ -5,7 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/server/internal/auth";
 import { resolveAuth } from "@/lib/server/internal/auth-session";
 import { buildSyncDeps, warmTokensForUser } from "@/lib/server/internal/sync-deps";
-import { ndjsonRound } from "@/lib/sync-ndjson";
+import { ndjsonRound } from "@/lib/server/internal/sync-ndjson";
 
 // POST /api/sync —— 同步当前用户的全部账户,**逐账户以 NDJSON 流回进度**。
 //

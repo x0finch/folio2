@@ -1,8 +1,8 @@
 import type { PlatformMeta } from "@folio/oracle-basic";
+import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
 import { CacheStore, PlatformUpstream } from "@folio/oracle-basic/ports";
-import { Context, Effect, Layer, Option } from "effect";
-import { readPlatforms, writePlatforms } from "./cache";
-import { degradeTo } from "./degrade";
+import { Context, Effect, Layer, Option, Schema } from "effect";
+import { degradeTo } from "../internal/degrade";
 
 // 平台的名与图。与汇率同款两个动词、同款判据:`resolve` 读(零网络、软过期),`warm` 写(过期才拉)。
 //
@@ -29,6 +29,52 @@ function fallbackName(key: string): string {
   const slug = key.slice(key.indexOf(":") + 1);
   return cap(slug || key);
 }
+
+// —— 缓存那一侧:键、形状、两个读写口 ——
+// 平台住 per-user 缓存表的 `platform:<键>` 键上(另两种键见 warm.ts / fx.ts)。
+
+export const platformKey = (key: string): string => `platform:${key}`;
+
+// **`name: null` = 否定缓存** —— 问过上游、它的链表里没有这个键。与「这条压根没有」必须分开:
+// 后者会让每一次预热都为了这一个键重拉整张链表。
+// 形状走 Schema **解码**不是 `as` 断言:解不动(旧形状 / 手改过库)当 miss,回源重写一份,自愈。
+const PlatformEntryShape = Schema.Struct({
+  name: Schema.NullOr(Schema.String),
+  logo: Schema.optional(Schema.String),
+});
+export type PlatformEntry = Schema.Schema.Type<typeof PlatformEntryShape>;
+const decodePlatform = Schema.decodeUnknownOption(PlatformEntryShape);
+
+// 读一批。**返回 `{name: null}` 与「键不在结果里」是两件事**:前者是「问过、上游没有」,
+// 后者是「没问过」。`stale` 一并给出来 —— 预热据它决定要不要重拉,展示则一律用旧的。
+export const readPlatforms = (
+  cache: CacheStore,
+  keys: readonly string[],
+): Effect.Effect<Map<string, { entry: PlatformEntry; stale: boolean }>> =>
+  Effect.map(cache.getMany(keys.map(platformKey)), (hits) => {
+    const out = new Map<string, { entry: PlatformEntry; stale: boolean }>();
+    for (const key of keys) {
+      const hit = hits.get(platformKey(key));
+      if (!hit) continue;
+      const entry = decodePlatform(hit.value);
+      if (Option.isNone(entry)) continue;
+      out.set(key, { entry: entry.value, stale: hit.stale });
+    }
+    return out;
+  });
+
+// 一次批量写。命中写长 TTL(名与图近静态),否定写短 TTL(新链随时可能被收录)。
+export const writePlatforms = (
+  cache: CacheStore,
+  entries: readonly { key: string; entry: PlatformEntry }[],
+): Effect.Effect<void> =>
+  cache.putMany(
+    entries.map(({ key, entry }) => ({
+      key: platformKey(key),
+      value: entry,
+      ttlMs: entry.name === null ? PLATFORM_NEG_TTL_MS : PLATFORM_TTL_MS,
+    })),
+  );
 
 const make = Effect.gen(function* () {
   const cache = yield* CacheStore;

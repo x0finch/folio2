@@ -1,7 +1,7 @@
+import type { TokenCandidate } from "@folio/oracle-basic";
 import { RESOLUTION_DOMINANCE, RESOLUTION_TOP_RANK } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
-import type { TokenCandidate } from "../src";
-import { pickByConfidence } from "../src/confidence";
+import { pickByConfidence } from "../src/internal/confidence";
 
 // symbol 那一档的判官:同一个 symbol 有多个候选时,认不认、认哪个。
 //
