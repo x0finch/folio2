@@ -46,7 +46,7 @@ const toOption = (t: UpstreamToken): TokenOption => ({
 
 // 两个端点的**边缘缓存**(Workers Cache)。这是**一份跨用户共享**的缓存(键里没有 userId),
 // 能这么做是因为两份数据一个字都与用户无关:目录是上游的市值前 N 名(`fetchMarkets` 不带任何
-// 用户参数),搜索是按关键词问上游 —— 都不读持仓、不写库,`oracleFor(userId)` 只是门面的形状。
+// 用户参数),搜索是按关键词问上游 —— 都不读持仓、不写库,`runOracle(userId, …)` 只是装配的形状。
 // 各人的目录在 D1 里仍是 per-user 各存一份(原则 #6),边缘这份命中谁的取决于谁先来,
 // 差别最多是一个刷新周期的新旧。注意 Workers Cache 是**按机房**的,不是全球一份。
 //

@@ -144,7 +144,7 @@ export async function injectManualSnapshots(
   if (list.length === 0) return;
 
   // 全部账户**一次批量**取现价(cache-only,零网络,与其余展示富化同门 —— #202 拔掉旧
-  // `oracle.tokens.enrich(AssetRef[])`,改按 token_id 走新参考层 enrich)。手记已并入 tokens(#203),
+  // 旧参考层的 `tokens.enrich(AssetRef[])`,改按 token_id 走新参考层 enrich)。手记已并入 tokens(#203),
   // 每条手记持仓就是这个用户 `tokens` 里的一行,带自己的 token_id。
   //
   // **缓存冷 → 回退用户自填价**:enrich 是 cache-only,新 mint 的行「有身份、无价」→ prices 为

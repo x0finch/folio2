@@ -46,8 +46,8 @@ import { tokenReaderLayer } from "../src/tokens";
 // 注意假实现里也**没有任何数据源的名字** —— `fakeUpstream()` 的 id 是参数,默认 `"src"`。
 // 服务层的测试因此连「上游是谁」都不知道,这正是 ADR 0023 要的。
 //
-// **时间不再是假实现上的一个 `now` 字段**:全部走 `Clock`,测试用 `TestClock` 推
-// (`harness.advance(ms)`)。以前每个假实现各带一个可变的 `now`,测试要记得两处都改。
+// **时间不再是假实现上的一个 `now` 字段**:全部走 `Clock`,用例内部要推时间就
+// `yield* TestClock.adjust(…)`。以前每个假实现各带一个可变的 `now`,测试要记得两处都改。
 //
 // **只有一条构造路**:所有测试都经 `harness.run` → Tag → Layer,也就是**生产走的那条**。
 // PR #379 的复审里那条「两条构造路,其中一条零测试」在这里不成立。
