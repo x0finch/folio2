@@ -151,9 +151,7 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
   });
   await runOracle(
     USER,
-    Effect.flatMap(TokenReader, (tokens) =>
-      Effect.andThen(tokens.refreshStalePrices([tokenId]), tokens.refreshStaleInfo([tokenId])),
-    ),
+    Effect.flatMap(TokenReader, (tokens) => tokens.refreshStale([tokenId])),
   );
   // 刷完把桩换回「出网就抛」—— 后面的展示断言仍然要求零外呼。
   outbound = [];

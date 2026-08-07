@@ -31,16 +31,12 @@ export const refreshStalePrices = createServerFn({ method: "POST" })
     // 而链上合约里的 symbol 可能过时(MATIC→POL)→ 同一个币在链上侧与交易所侧显示成两个名字。
     // 挂在这条路上而不是另开一个端点:同一批 id、同一个「该刷了」的时机,只是 TTL 一长一短
     // (30d / 30min),所以绝大多数调用里它一条都不刷、零请求。
-    // 各自失败不拖垮对方 —— 两个方法内部各自降级到 0 并记一行(见 `TokenReader`),
-    // 所以这里不再逐个补 `.catch(() => 0)`(那是每个调用点都得记得的事)。
-    const [refreshed, infoRefreshed] = await runOracle(
+    // 一个方法两半的账:同一批 id 的 store 读只发一次,价与 info 两条分支并发。
+    // 各自失败不拖垮对方(内部 `Effect.either` + 记一行),`degraded` 带回来只为进日志。
+    const report = await runOracle(
       context.userId,
-      Effect.flatMap(TokenReader, (tokens) =>
-        Effect.all([tokens.refreshStalePrices(ids), tokens.refreshStaleInfo(ids)], {
-          concurrency: 2,
-        }),
-      ),
+      Effect.flatMap(TokenReader, (tokens) => tokens.refreshStale(ids)),
     );
-    priceLog.info("stale prices refreshed", { refreshed, infoRefreshed });
-    return { refreshed };
+    priceLog.info("stale prices refreshed", { ...report });
+    return { refreshed: report.prices };
   });

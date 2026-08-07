@@ -24,7 +24,7 @@ import { revalue } from "../../revalue";
 import { isSyncableAccount } from "../../syncable";
 import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
-import { warmDefiLogosForUser } from "./defi-logos";
+import { recordDefiLogosForUser } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
 import { runOracle } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
@@ -37,6 +37,7 @@ import { warmHeldPrices } from "./token-enrich";
 // 同步后预热代币缓存:取该用户最新快照的全部余额 → warm(top-N + 逐 spot/manual 行懒解析)。
 // best-effort(warmTokens 内部吞错),让下次总览能 cache-only 富化出价/logo/涨跌。cron 与手动 sync 共用。
 export async function warmTokensForUser(userId: string): Promise<void> {
+  const syncLog = getLogger(["folio", "web", "sync"]);
   const [snapshots, accounts] = await Promise.all([
     db.getLatestSnapshotByUser(userId),
     db.listAccountsByUser(userId),
@@ -44,21 +45,29 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   // manual 已退出快照(ADR 0018)→ 预热额外从 manual 的 creds 收集合成余额,否则纯 manual 用户的币暖不到实时价。
   // 与 refreshStalePrices 经同一 userDisplayBalances 收口(三门同源)。
   const manualBalances = await manualBalancesForWarm(userId, accounts);
-  await runOracle(userId, warmHeldPrices(userDisplayBalances(snapshots, manualBalances)));
+  const report = await runOracle(
+    userId,
+    warmHeldPrices(userDisplayBalances(snapshots, manualBalances)),
+  );
+  // **暖不上价要喊一声。** 参考层已经按类型接住了上游那一档并记了一行,但那条日志在
+  // 「oracle」类目下、看起来像一次普通降级;这里再记一条同步类目的 warn —— 「这一轮的持仓价
+  // 没暖上」是同步的结果,连着几天都这样该有人发现(#375 第 3 步要的抓手)。
+  if (report.degraded) syncLog.warn("held prices partially warmed", { ...report });
+  else syncLog.debug("held prices warmed", { ...report });
   // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。两者都按用户 ——
   // 汇率与平台名图跟代币目录同住一张 per-user 缓存(#202b)。
   try {
     await warmPlatformsForUser(userId);
   } catch (e) {
-    getLogger(["folio", "web", "sync"]).warn("warmPlatforms failed", {
+    syncLog.warn("warmPlatforms failed", {
       error: e instanceof Error ? e.message : String(e),
     });
   }
   // DeFi 协议 logo:URL 就在刚读到的 snapshots 的 meta 里,收集出来落缓存(供 /api/logo/defi O(1) 读)。
   try {
-    await warmDefiLogosForUser(userId, snapshots);
+    await recordDefiLogosForUser(userId, snapshots);
   } catch (e) {
-    getLogger(["folio", "web", "sync"]).warn("warmDefiLogos failed", {
+    syncLog.warn("recordDefiLogos failed", {
       error: e instanceof Error ? e.message : String(e),
     });
   }
@@ -76,7 +85,7 @@ export async function warmTokensForUser(userId: string): Promise<void> {
     userId,
     Effect.flatMap(TokenReader, (t) => t.refreshCatalogue()),
   );
-  getLogger(["folio", "web", "sync"]).debug("catalogue warmed", { rows });
+  syncLog.debug("catalogue warmed", { rows });
 }
 
 // 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。

@@ -32,7 +32,7 @@ import type {
 } from "../src";
 import { oracleLayer, refIndexWarmerLayer } from "../src";
 import { CandidateSource, candidateSourceLayer } from "../src/candidates";
-import { defiLogoResolverLayer } from "../src/defi-logos";
+import { fiatHistoryLayer } from "../src/fiat-history";
 import { fxRateResolverLayer } from "../src/fx";
 import { tokenMinterLayer } from "../src/mint";
 import { platformResolverLayer } from "../src/platforms";
@@ -599,8 +599,8 @@ export function harness(opts: HarnessOpts = {}): Harness {
         tokenReaderLayer,
         Layer.provide(tokenMinterLayer, Layer.succeed(CandidateSource, opts.candidates)),
         fxRateResolverLayer,
+        fiatHistoryLayer,
         platformResolverLayer,
-        defiLogoResolverLayer,
         Layer.succeed(CandidateSource, opts.candidates),
       )
     : Layer.merge(oracleLayer, candidateSourceLayer);

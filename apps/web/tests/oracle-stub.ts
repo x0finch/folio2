@@ -1,5 +1,5 @@
 import {
-  DefiLogoResolver,
+  FiatHistory,
   FxRateResolver,
   PlatformResolver,
   TokenMinter,
@@ -21,8 +21,7 @@ const emptyReader: TokenReader = {
   priceOf: () => Effect.succeed(Option.none()),
   priceByRef: () => Effect.succeed(Option.none()),
   pricesByRefs: () => Effect.succeed(new Map()),
-  refreshStalePrices: () => Effect.succeed(0),
-  refreshStaleInfo: () => Effect.succeed(0),
+  refreshStale: () => Effect.succeed({ prices: 0, infos: 0, degraded: false }),
   priceSeries: () => Effect.succeed([]),
   priceAt: () => Effect.succeed(Option.none()),
   topTokens: () => Effect.succeed([]),
@@ -33,17 +32,16 @@ const emptyReader: TokenReader = {
 const emptyFx: FxRateResolver = {
   resolve: () => Effect.succeed(Option.none()),
   warm: () => Effect.void,
+};
+
+// 历史日汇率是**另一个服务**(#390 的 review 第 5 条把 fx 拆两半)—— 只碰现汇率的测试
+// 因此不用再喂历史那半的假数据。
+const emptyFiatHistory: FiatHistory = {
   fiatRateSeries: () => Effect.succeed([]),
-  fiatRateAt: () => Effect.succeed(Option.none()),
 };
 
 const emptyPlatforms: PlatformResolver = {
   resolve: (keys) => Effect.succeed(new Map([...keys].map((key) => [key, { key, name: key }]))),
-  warm: () => Effect.void,
-};
-
-const emptyDefiLogos: DefiLogoResolver = {
-  resolve: () => Effect.succeed(Option.none()),
   warm: () => Effect.void,
 };
 
@@ -54,8 +52,8 @@ const emptyMinter: TokenMinter = {
 export interface OracleStub {
   reader?: Partial<TokenReader>;
   fx?: Partial<FxRateResolver>;
+  fiatHistory?: Partial<FiatHistory>;
   platforms?: Partial<PlatformResolver>;
-  defiLogos?: Partial<DefiLogoResolver>;
   minter?: Partial<TokenMinter>;
 }
 
@@ -63,8 +61,8 @@ const oracleStubLayer = (stub: OracleStub = {}) =>
   Layer.mergeAll(
     Layer.succeed(TokenReader, { ...emptyReader, ...stub.reader }),
     Layer.succeed(FxRateResolver, { ...emptyFx, ...stub.fx }),
+    Layer.succeed(FiatHistory, { ...emptyFiatHistory, ...stub.fiatHistory }),
     Layer.succeed(PlatformResolver, { ...emptyPlatforms, ...stub.platforms }),
-    Layer.succeed(DefiLogoResolver, { ...emptyDefiLogos, ...stub.defiLogos }),
     Layer.succeed(TokenMinter, { ...emptyMinter, ...stub.minter }),
   );
 
@@ -74,7 +72,7 @@ export const runWithOracle = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    TokenReader | FxRateResolver | PlatformResolver | DefiLogoResolver | TokenMinter
+    TokenReader | FxRateResolver | FiatHistory | PlatformResolver | TokenMinter
   >,
 ): Promise<A> => Effect.runPromise(Effect.provide(effect, oracleStubLayer(stub)));
 
@@ -86,7 +84,7 @@ export const runWithOracleAt = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    TokenReader | FxRateResolver | PlatformResolver | DefiLogoResolver | TokenMinter
+    TokenReader | FxRateResolver | FiatHistory | PlatformResolver | TokenMinter
   >,
 ): Promise<A> =>
   Effect.runPromise(

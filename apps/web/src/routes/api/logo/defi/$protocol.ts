@@ -1,6 +1,6 @@
-import { DefiLogoResolver } from "@folio/oracle";
 import { createFileRoute } from "@tanstack/react-router";
-import { Effect, Option } from "effect";
+import { Option } from "effect";
+import { readDefiLogo } from "@/lib/server/internal/defi-logo-store";
 import { serveLogo } from "@/lib/server/internal/logo";
 import { runOracle } from "@/lib/server/internal/oracle";
 import { userIdOf } from "@/lib/server/internal/route-auth";
@@ -19,12 +19,7 @@ export const Route = createFileRoute("/api/logo/defi/$protocol")({
         return serveLogo(
           async () =>
             userId
-              ? Option.getOrUndefined(
-                  await runOracle(
-                    userId,
-                    Effect.flatMap(DefiLogoResolver, (d) => d.resolve(params.protocol)),
-                  ),
-                )
+              ? Option.getOrUndefined(await runOracle(userId, readDefiLogo(params.protocol)))
               : undefined,
           "defi",
           params.protocol,

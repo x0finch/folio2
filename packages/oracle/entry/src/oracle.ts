@@ -11,7 +11,7 @@ import {
 } from "@folio/oracle-basic/ports";
 import { Clock, Context, Effect, Layer, type Option } from "effect";
 import { candidateSourceLayer } from "./candidates";
-import { type DefiLogoResolver, defiLogoResolverLayer } from "./defi-logos";
+import { type FiatHistory, fiatHistoryLayer } from "./fiat-history";
 import { type FxRateResolver, fxRateResolverLayer } from "./fx";
 import { type TokenMinter, tokenMinterLayer } from "./mint";
 import { type PlatformResolver, platformResolverLayer } from "./platforms";
@@ -33,9 +33,13 @@ import { type TokenReader, tokenReaderLayer } from "./tokens";
 // 一个用户的参考层由五个服务组成,按**领域**分(ADR 0012 的口径),不按能力切碎:
 //   · `TokenReader`       读路径 —— 富化 / 现价 / 历史价 / 橱窗 / 搜索
 //   · `TokenMinter`       写路径 —— tokenRef → token_id,写快照之前必须先过这一步
-//   · `FxRateResolver`    展示币种汇率 —— 与代币无关的一小块,只共用同一张 per-user 缓存
-//   · `PlatformResolver`  链 ∪ 场馆的名与图 —— 同上
-//   · `DefiLogoResolver`  DeFi 协议 logo 的名址 —— 同步时写、图片端点 O(1) 读
+//   · `FxRateResolver`    展示币种**现**汇率 —— 与代币无关的一小块,只共用同一张 per-user 缓存
+//   · `FiatHistory`       法币的**历史**日汇率 —— BTC 反算,落 `token_daily_prices`,不碰 user_cache
+//   · `PlatformResolver`  链 ∪ 场馆的名与图
+//
+// **`DefiLogoResolver` 不在这儿了**(移回 app):DeFi 协议图来自用户自己同步下来的余额 meta,
+// 没有上游、不出网 —— 它的 `R` 里一个上游都没有,那本身就是「它不属于参考层」的类型级写法。
+// 现在它是 app 的 `defi-logo-store.ts`,同样落 `defi-logo:<协议>` 那个键。
 //
 // 「info 数据 vs 价格数据」的分离落在**端口**上(`TokenStore` / `TokenPriceStore`),
 // 不在服务上再切一遍(ADR 0023)。
@@ -43,8 +47,8 @@ export type OracleServices =
   | TokenReader
   | TokenMinter
   | FxRateResolver
-  | PlatformResolver
-  | DefiLogoResolver;
+  | FiatHistory
+  | PlatformResolver;
 
 // 五个服务要的全部端口。app 侧提供这些,就拿到整个参考层。
 export type OraclePorts =
@@ -63,8 +67,8 @@ export const oracleLayer: Layer.Layer<OracleServices, never, OraclePorts> = Laye
   tokenReaderLayer,
   Layer.provide(tokenMinterLayer, candidateSourceLayer),
   fxRateResolverLayer,
+  fiatHistoryLayer,
   platformResolverLayer,
-  defiLogoResolverLayer,
 );
 
 // —— 全局维护任务 ——

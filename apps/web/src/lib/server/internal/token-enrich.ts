@@ -1,4 +1,4 @@
-import { TokenReader } from "@folio/oracle";
+import { type RefreshStaleReport, TokenReader } from "@folio/oracle";
 import { Effect } from "effect";
 import {
   type BalanceLike,
@@ -46,19 +46,17 @@ export const enrichBalances = <T extends BalanceLike>(
 // 持仓预热(写缓存,best-effort):把这批余额里价 / 元信息 stale/缺失的一次批量回源写回。
 // cron(waitUntil)与手动 sync 后调用 —— cron 尤其需要,它没有前端来触发 pricesStale 那条刷价路径。
 //
+// **一个方法拿回两半的账**(`{ prices, infos, degraded }`):同一批 id 的两次 store 读因此只发一次,
+// 而 `degraded` 让调用方分得清「没什么要刷」与「上游挂了」—— 后者该有人喊一声(#375)。
+//
 // **价与 logo/正名一起热**(与客户端 refreshStalePrices server fn 同构):新 mint 的行只有连接器报的
-// 那点信息(BTC 这类连接器根本不报 logo),logo/正名的权威源是上游,唯一写入口是 refreshStaleInfo。
+// 那点信息(BTC 这类连接器根本不报 logo),logo/正名的权威源是上游,唯一写入口是 `refreshStale` 的 info 那半。
 // 从前这里只热价 → 首屏 pricesStale=false → 客户端那条「价脏才刷、顺带补 logo」的路径不触发 →
 // 新账户 logo 空着干等 ~30min 价过期才补。两者各自失败不拖垮对方;info 的 TTL 长(30d),几乎不发请求。
 //
 // 走新参考层(按 token_id;#202 拔掉旧 `Tokens.warm(AssetRef[])`)。与 enrich 的 pricesStale gate /
 // 客户端 refreshStalePrices 三门同源:都喂 `refreshableTokenIds` 出来的同一集合(#245:跳过 dust)。
-export const warmHeldPrices = (balances: BalanceLike[]): Effect.Effect<void, never, TokenReader> =>
-  Effect.flatMap(TokenReader, (tokens) => {
-    const ids = refreshableTokenIds(balances);
-    // 两个方法各自在内部降级(挂了记一行、回 0),所以这里不必再各套一层 catch。
-    return Effect.all([tokens.refreshStalePrices(ids), tokens.refreshStaleInfo(ids)], {
-      concurrency: 2,
-      discard: true,
-    });
-  });
+export const warmHeldPrices = (
+  balances: BalanceLike[],
+): Effect.Effect<RefreshStaleReport, never, TokenReader> =>
+  Effect.flatMap(TokenReader, (tokens) => tokens.refreshStale(refreshableTokenIds(balances)));

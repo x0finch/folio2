@@ -157,10 +157,13 @@ describe("批量刷 stale 价", () => {
         h.upstream.prices.set("src/issued:ethereum", { unitPrice: 3000, asOf: NOW });
         h.upstream.prices.set("src/issued:tether", { unitPrice: 1, asOf: NOW });
 
-        expect(yield* tokens.refreshStalePrices(["fresh", "stale", "nopricexyz", "unknown"])).toBe(
-          2,
-        );
-        expect(h.upstream.calls).toEqual(["fetchPrices:src/issued:ethereum,src/issued:tether"]);
+        expect(
+          (yield* tokens.refreshStale(["fresh", "stale", "nopricexyz", "unknown"])).prices,
+        ).toBe(2);
+        // 只断言价那半问了什么 —— 两半现在同一个方法里跑,info 那半的调用不属于这条用例。
+        expect(h.upstream.calls.filter((c) => c.startsWith("fetchPrices"))).toEqual([
+          "fetchPrices:src/issued:ethereum,src/issued:tether",
+        ]);
       }),
     );
   });
@@ -171,20 +174,56 @@ describe("批量刷 stale 价", () => {
       Effect.gen(function* () {
         const tokens = yield* TokenReader;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
-        expect(yield* tokens.refreshStalePrices(["tk_1"])).toBe(0);
-        expect(yield* tokens.refreshStalePrices([])).toBe(0);
+        expect((yield* tokens.refreshStale(["tk_1"])).prices).toBe(0);
+        expect(yield* tokens.refreshStale([])).toEqual({ prices: 0, infos: 0, degraded: false });
         expect(h.upstream.calls).toEqual([]);
       }),
     );
   });
 
-  // 迁移前这个方法**往外抛**,而它的孪生兄弟 `refreshStaleInfo` 内部吞 —— 于是每个调用点都得
-  // 记得给刷价补一个 `.catch(() => 0)`。现在两个同一个口径:记一行、回 0。
-  it("上游挂了 → 回 0、不抛(与刷 info 同口径)", async () => {
+  // 迁移前刷价**往外抛**、刷 info 内部吞 —— 于是每个调用点都得记得给前者补 `.catch(() => 0)`。
+  // 现在是一个方法、一个口径:记一行、回 0,**而且把「挂了」写进返回值**(`degraded`)——
+  // 「没什么要刷」与「上游挂了」对调用方是两件事(#375 要的抓手)。
+  it("上游挂了 → 回 0 且 degraded、不抛", async () => {
     const h = setup([info({ id: "tk_1" })]);
     h.upstream.fail = upstreamDown();
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStalePrices(["tk_1"])))).toBe(0);
+    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])))).toEqual({
+      prices: 0,
+      infos: 0,
+      degraded: true,
+    });
     expect(h.prices.current.size).toBe(0);
+  });
+
+  it("没什么要刷 → degraded 是 false(与「挂了」分得开)", async () => {
+    const h = setup([info({ id: "tk_1" })]);
+    await h.run(
+      Effect.gen(function* () {
+        const tokens = yield* TokenReader;
+        yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
+        // info 也已刷过(`info()` 默认 infoStale: false)→ 两半都没有目标。
+        expect(yield* tokens.refreshStale(["tk_1"])).toEqual({
+          prices: 0,
+          infos: 0,
+          degraded: false,
+        });
+        expect(h.upstream.calls).toEqual([]);
+      }),
+    );
+  });
+
+  // 同一批 id **只读一次 store**:迁移前是两个方法各读一遍(而且调用点成对并发,连
+  // 「第二次碰巧命中」都不存在)。这条断言就是那次合并的收据。
+  it("价与 info 共用那两次读 —— store 读一次、价 store 读一次", async () => {
+    const h = setup([info({ id: "tk_1", infoStale: true })]);
+    let storeReads = 0;
+    const realGetByIds = h.store.getByIds;
+    h.store.getByIds = (ids) => {
+      storeReads += 1;
+      return realGetByIds(ids);
+    };
+    await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])));
+    expect(storeReads).toBe(1);
   });
 });
 
@@ -206,12 +245,17 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     await h.run(
       Effect.gen(function* () {
         const tokens = yield* TokenReader;
-        expect(yield* tokens.refreshStaleInfo(["fresh", "stale", "unknown"])).toBe(1);
-        expect(h.upstream.calls).toEqual(["fetchTokens:src/issued:ethereum"]);
+        expect((yield* tokens.refreshStale(["fresh", "stale", "unknown"])).infos).toBe(1);
+        // 同上:只看 info 那半问了什么。
+        expect(h.upstream.calls.filter((c) => c.startsWith("fetchTokens"))).toEqual([
+          "fetchTokens:src/issued:ethereum",
+        ]);
         // 刷过之后不再 stale → 下一次零调用(否则每次访问都白刷一趟上游)。
         expect(h.store.rows.get("stale")?.infoStale).toBe(false);
-        expect(yield* tokens.refreshStaleInfo(["fresh", "stale", "unknown"])).toBe(0);
-        expect(h.upstream.calls).toEqual(["fetchTokens:src/issued:ethereum"]);
+        expect((yield* tokens.refreshStale(["fresh", "stale", "unknown"])).infos).toBe(0);
+        expect(h.upstream.calls.filter((c) => c.startsWith("fetchTokens"))).toEqual([
+          "fetchTokens:src/issued:ethereum",
+        ]);
       }),
     );
   });
@@ -228,7 +272,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
       { ref: "src/issued:usd-coin", symbol: "usdc", name: "USDC", logo: "usdc.png" },
     ];
 
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStaleInfo(["t1"])))).toBe(1);
+    expect((await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["t1"])))).infos).toBe(1);
     expect(h.store.rows.get("t1")?.symbol).toBe("USDC");
     expect(h.store.rows.get("t1")?.name).toBe("USDC");
     expect(h.store.rows.get("t1")?.logo).toBe("usdc.png");
@@ -255,7 +299,9 @@ describe("批量刷 stale 元信息(覆盖)", () => {
       },
     ];
 
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStaleInfo(["tk_pol"])))).toBe(1);
+    expect(
+      (await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_pol"])))).infos,
+    ).toBe(1);
     const row = h.store.rows.get("tk_pol");
     expect(row?.symbol).toBe("POL"); // 覆盖,不是填空槽
     expect(row?.name).toBe("POL (ex-MATIC)");
@@ -268,7 +314,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     const h = setup([info({ id: "tk_1", symbol: "OLD", logo: "old.png", infoStale: true })]);
     h.upstream.markets = [{ ref: SRC_BTC, symbol: "BTC", name: "Bitcoin" }];
 
-    await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStaleInfo(["tk_1"])));
+    await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])));
     expect(h.store.rows.get("tk_1")).toMatchObject({ symbol: "BTC", logo: "old.png" });
   });
 
@@ -276,7 +322,9 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     const h = setup([info({ id: "tk_1", symbol: "OLD", infoStale: true })]);
     h.upstream.fail = upstreamDown();
 
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStaleInfo(["tk_1"])))).toBe(0);
+    expect((await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])))).infos).toBe(
+      0,
+    );
     expect(h.store.rows.get("tk_1")).toMatchObject({ symbol: "OLD", infoStale: true });
   });
 
@@ -285,7 +333,9 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     h.upstream.fetchTokens = () =>
       Effect.succeed([{ ref: "src/issued:somebody-else", symbol: "ELSE", name: "Else" }]);
 
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStaleInfo(["tk_1"])))).toBe(0);
+    expect((await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])))).infos).toBe(
+      0,
+    );
     expect(h.store.rows.get("tk_1")?.symbol).toBe("OLD");
   });
 
@@ -294,9 +344,10 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     await h.run(
       Effect.gen(function* () {
         const tokens = yield* TokenReader;
-        expect(yield* tokens.refreshStaleInfo(["tk_1"])).toBe(0);
-        expect(yield* tokens.refreshStaleInfo([])).toBe(0);
-        expect(h.upstream.calls).toEqual([]);
+        expect((yield* tokens.refreshStale(["tk_1"])).infos).toBe(0);
+        expect((yield* tokens.refreshStale([])).infos).toBe(0);
+        // info 那半没有目标 → 一次 `fetchTokens` 都不该发(价那半另有自己的用例)。
+        expect(h.upstream.calls.filter((c) => c.startsWith("fetchTokens"))).toEqual([]);
       }),
     );
   });
@@ -309,7 +360,9 @@ describe("边角", () => {
     h.upstream.prices.set(SRC_BTC, { unitPrice: 60000, asOf: NOW });
     h.upstream.prices.set("src/issued:stranger", { unitPrice: 1, asOf: NOW });
 
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStalePrices(["tk_1"])))).toBe(1);
+    expect((await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])))).prices).toBe(
+      1,
+    );
     expect([...h.prices.current.keys()]).toEqual(["tk_1"]);
   });
 
@@ -593,12 +646,12 @@ describe("降级要留痕", () => {
   it("上游挂了 → 有一条 warning,带 tag / pathname / 状态码,而且不带 query", async () => {
     const h = setup([info({ id: "tk_1" })]);
     h.upstream.fail = upstreamDown();
-    await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStalePrices(["tk_1"])));
+    await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])));
 
     const warn = h.logs.find((l) => l.level === "WARN");
     expect(warn?.message).toContain("upstream fetch failed");
     expect(warn?.annotations).toMatchObject({
-      at: "tokens.refreshStalePrices",
+      at: "tokens.refreshStale.prices",
       error: "UpstreamUnavailableError",
       where: "/fake",
       status: 503,

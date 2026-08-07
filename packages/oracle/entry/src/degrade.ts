@@ -15,7 +15,10 @@ export const degradeTo =
 
 // 只记 tag / pathname / 状态码。**`where` 刻意不带 query**(client-core 的契约),所以这一行
 // 不可能出现 API key、签名或钱包地址(原则 #5 红线)。
-const logDegraded = (at: string, error: UpstreamError): Effect.Effect<void> =>
+//
+// 单独导出是因为有一处不能用 `degradeTo`:预热那条路除了记一行,还要把「挂了」带回给调用方
+// (`RefreshStaleReport.degraded`),所以它自己 `Effect.either` 之后调这个。
+export const logDegraded = (at: string, error: UpstreamError): Effect.Effect<void> =>
   Effect.logWarning("oracle: upstream fetch failed, serving local data").pipe(
     Effect.annotateLogs({
       at,

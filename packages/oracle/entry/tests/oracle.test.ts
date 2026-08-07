@@ -1,7 +1,7 @@
 import { Duration, Effect, Layer, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  DefiLogoResolver,
+  FiatHistory,
   FxRateResolver,
   oracleLayer,
   PlatformResolver,
@@ -24,6 +24,9 @@ import {
 //   ③ **写路径不为目录新鲜度出网**(#216)—— mint 与候选源各自的单测都看不见「装配时把哪个
 //      实现接了进去」,而洞恰恰在那一行
 //
+// **`DefiLogoResolver` 不在这一层了**(移回 app):它的 `R` 里一个上游都没有,那本身就是
+// 「不属于参考层」的类型级写法;现在是 app 的 `defi-logo-store.ts`,测试在 apps/web 那边。
+//
 // **「每个用户一份」的保证换了地方**:以前是 `createOracleFor(cfg)(userId)` 那个显式工厂,
 // 现在是 app 侧按 userId 现建的三个 per-user store layer(`oracleLayerFor(userId)`)。
 // 服务的方法签名里依旧一个 user 参数都没有 —— 拿错用户在编译期就发生不了,而这一层压根不知道
@@ -38,8 +41,8 @@ describe("oracleLayer —— 一次装配拿到五个服务", () => {
         expect(yield* Effect.map(TokenReader, (t) => typeof t.enrich)).toBe("function");
         expect(yield* Effect.map(TokenMinter, (m) => typeof m.of)).toBe("function");
         expect(yield* Effect.map(FxRateResolver, (f) => typeof f.resolve)).toBe("function");
+        expect(yield* Effect.map(FiatHistory, (f) => typeof f.fiatRateSeries)).toBe("function");
         expect(yield* Effect.map(PlatformResolver, (p) => typeof p.resolve)).toBe("function");
-        expect(yield* Effect.map(DefiLogoResolver, (d) => typeof d.resolve)).toBe("function");
       }),
     );
   });
