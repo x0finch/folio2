@@ -5,7 +5,7 @@ import {
   type Requester,
   type UpstreamError,
 } from "@folio/client-core";
-import { Context, Duration, Effect, Layer, type Scope } from "effect";
+import { Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import {
   API_KEY_HEADER,
   BALANCE_PATH,
@@ -16,7 +16,7 @@ import {
   RATE_LIMIT_PER_SEC,
   UPSTREAM,
 } from "./constants";
-import type { CoinstatsCoin } from "./types";
+import { CoinstatsCoin } from "./types";
 
 export interface CoinstatsConfig {
   // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
@@ -38,7 +38,7 @@ export interface CoinstatsClientApi {
     readonly connectionId: string;
     readonly address: string;
     readonly apiKey: string;
-  }) => Effect.Effect<CoinstatsCoin[], UpstreamError, Outbound>;
+  }) => Effect.Effect<readonly CoinstatsCoin[], UpstreamError, Outbound>;
 
   // 支持的链列表。**只需 key、不需地址** —— 用来实测 key 本身有没有效,而不是只检查它非空。
   // 返回值没人看(调用方只关心成没成),所以类型是 `unknown`:声明一个假的形状不如说实话。
@@ -63,23 +63,26 @@ export function make(
       interval: Duration.millis((RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000),
     });
 
-    // 头是每请求算的(apiKey 从 `context` 来)—— 所以 `headers` 是函数而不是对象。
-    const request: Requester<string> = makeRequester<string>({
+    const request: Requester = makeRequester({
       baseUrl: config.apiBase ?? COINSTATS_API_BASE,
       upstream: UPSTREAM,
       limit,
-      headers: (_path, options) =>
-        Effect.succeed({ [API_KEY_HEADER]: options?.context ?? "", accept: "application/json" }),
     });
+
+    // 头是每请求算的 —— key 来自调用方给的凭据,不是模块级常量,所以随每一发传进去。
+    const keyed = (apiKey: string) =>
+      Effect.succeed({ [API_KEY_HEADER]: apiKey, accept: "application/json" });
 
     return {
       balance: ({ connectionId, address, apiKey }) =>
-        request<CoinstatsCoin[]>(BALANCE_PATH, {
+        request(BALANCE_PATH, Schema.Array(CoinstatsCoin), {
           query: { address, connectionId },
-          context: apiKey,
+          headers: keyed(apiKey),
         }),
 
-      blockchains: (apiKey) => request(BLOCKCHAINS_PATH, { context: apiKey }),
+      // 只用来探活「这把 key 通不通」,回什么形状不关心 —— 所以不声明形状。
+      blockchains: (apiKey) =>
+        request(BLOCKCHAINS_PATH, Schema.Unknown, { headers: keyed(apiKey) }),
     };
   });
 }

@@ -1,13 +1,12 @@
 import { staleTolerantCache, UpstreamUnavailableError } from "@folio/client-core";
 import { CHAINS_CACHE_TTL_MS, CHAINS_PATH, UPSTREAM } from "./constants";
+import type { ZerionChainsResponse } from "./types";
 
 // 链清单 → slug→数字 chainId(external_id hex → 十进制)。
 //
 // **这个转换留在 client**,虽然它长得像 parse:它把上游的两种表示(hex 串)统一成一个数,
 // 是「读懂上游怎么说话」,不涉及任何 folio 概念。适配层拿到的就该是能直接用的 chainId。
-export function parseChainIds(res: {
-  data?: { id?: string; attributes?: { external_id?: string } }[];
-}): Record<string, number> {
+export function parseChainIds(res: ZerionChainsResponse): Record<string, number> {
   const out: Record<string, number> = {};
   for (const c of res.data ?? []) {
     const hex = c.attributes?.external_id;

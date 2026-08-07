@@ -36,7 +36,7 @@
 // 理由和证据见 `http-client.ts`。
 
 export { hmacSha256 } from "./crypto";
-export { HttpFailure, type HttpFailureKind, SigningFailure } from "./errors";
+export { HttpFailure, type HttpFailureKind, SigningFailure, summaryOf } from "./errors";
 export {
   type HttpConfig,
   makeRequester,
@@ -51,6 +51,7 @@ export {
   type RateLimitScope,
   RateLimitScopeOverride,
 } from "./ratelimit";
+export { maybe } from "./schema";
 export { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "./slot-cursor";
 export {
   type StaleTolerantCache,

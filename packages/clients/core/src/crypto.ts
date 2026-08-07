@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SigningFailure } from "./errors";
+import { SigningFailure, summaryOf } from "./errors";
 
 // HMAC-SHA256 签名。**这是从 `@folio/connectors-basic` 复制过来的一份,不是搬过去的**:
 // 那个包是 connector 的契约基座(`BalanceProvider` / `Balance` / creds 加解密),client 层不许依赖它
@@ -43,6 +43,6 @@ export function hmacSha256(
       return encoding === "hex" ? bytesToHex(sig) : bytesToBase64(sig);
     },
     // **不带 cause 里的 secret**:cause 是 WebCrypto 抛的错,不含密钥;`where` 也只说「签名」。
-    catch: (cause) => new SigningFailure({ where: "hmac-sha256", cause }),
+    catch: (cause) => new SigningFailure({ where: "hmac-sha256", cause: summaryOf(cause) }),
   });
 }

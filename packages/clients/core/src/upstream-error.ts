@@ -20,7 +20,9 @@ interface Common {
   readonly upstream: string; // "binance" / "okx" / …
   readonly where: string; // 出事的 pathname。**刻意不带 query**(原则 #5 红线)
   readonly status?: number;
-  readonly cause?: unknown;
+  // **一句摘要,不是错误对象**(同 `HttpFailure.cause`,理由见那里)。类型钉成 `string`,
+  // 所以「顺手把上游库的错误对象透传下来」是编译错误 —— 而那正是签名和 API key 泄出去的路径。
+  readonly cause?: string;
 }
 
 // 凭据问题 —— 重试没用,换凭据才行。

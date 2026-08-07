@@ -1,7 +1,7 @@
 import { makeRequester, type Outbound, type UpstreamError } from "@folio/client-core";
 import { Context, Effect, Layer } from "effect";
 import { CLEARINGHOUSE_TYPE, HYPERLIQUID_API_BASE, INFO_PATH, UPSTREAM } from "./constants";
-import type { ClearinghouseState } from "./types";
+import { ClearinghouseState } from "./types";
 
 export interface HyperliquidConfig {
   // 基址,**当不透明整串用**。不传就直连官方。
@@ -49,7 +49,7 @@ export function make(config: HyperliquidConfig = {}): HyperliquidClientApi {
 
   return {
     clearinghouseState: (address) =>
-      request<ClearinghouseState>(INFO_PATH, {
+      request(INFO_PATH, ClearinghouseState, {
         method: "POST",
         body: JSON.stringify({ type: CLEARINGHOUSE_TYPE, user: address }),
       }),

@@ -9,7 +9,7 @@ import {
   type UpstreamError,
   UpstreamUnavailableError,
 } from "@folio/client-core";
-import { Context, Duration, Effect, Layer, type Scope } from "effect";
+import { Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import {
   CACHE_TOKEN_LIST_PATH,
   CHAIN_LIST_PATH,
@@ -22,7 +22,7 @@ import {
   UPSTREAM,
 } from "./constants";
 import { currentSigner } from "./signer";
-import type { RabbyChain, RabbyProtocol, RabbyToken } from "./types";
+import { RabbyChain, RabbyProtocol, RabbyToken } from "./types";
 
 export interface RabbyConfig {
   // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
@@ -37,9 +37,13 @@ export interface RabbyConfig {
 // **不要任何 API key**(这是它取代 zerion 的主要收益),代价是请求必须签名 —— 见 sign.ts。
 export interface RabbyClientApi {
   // 钱包代币,**只收地址、一次回全链**。注意上游没有 usd_value 字段,价值要 amount × price 自己算。
-  readonly tokens: (address: string) => Effect.Effect<RabbyToken[], UpstreamError, Outbound>;
+  readonly tokens: (
+    address: string,
+  ) => Effect.Effect<readonly RabbyToken[], UpstreamError, Outbound>;
   // DeFi 仓位,同样一次回全链。
-  readonly protocols: (address: string) => Effect.Effect<RabbyProtocol[], UpstreamError, Outbound>;
+  readonly protocols: (
+    address: string,
+  ) => Effect.Effect<readonly RabbyProtocol[], UpstreamError, Outbound>;
   // slug → 数字 chainId(`community_id` 就是规范 EVM chainId)。**带 24h 缓存**。
   readonly chainIds: Effect.Effect<Record<string, number>, UpstreamError, Outbound>;
   // 最轻的端点。探活用。
@@ -53,7 +57,7 @@ export class RabbyClient extends Context.Tag("clients/Rabby")<RabbyClient, Rabby
 
 // `community_id` 就是规范 EVM chainId(抽查 15 条全中:eth=1 bsc=56 arb=42161 …)。
 // **这个转换留在 client** —— 它是「读懂上游怎么说话」,不涉及任何 folio 概念。
-export function parseChainIds(chains: RabbyChain[]): Record<string, number> {
+export function parseChainIds(chains: readonly RabbyChain[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const c of chains ?? []) {
     if (!c.id || typeof c.community_id !== "number") continue;
@@ -78,7 +82,7 @@ export function make(config: RabbyConfig = {}): Effect.Effect<RabbyClientApi, ne
     // 不像 bybit / okx 要自己重建一遍 query 串。
     const signedHeaders = (
       path: string,
-      options: RequestOptions<undefined> | undefined,
+      options: RequestOptions | undefined,
     ): Effect.Effect<HeadersInit, SigningFailure> =>
       Effect.gen(function* () {
         const sign = yield* currentSigner;
@@ -109,16 +113,21 @@ export function make(config: RabbyConfig = {}): Effect.Effect<RabbyClientApi, ne
     });
 
     return {
-      tokens: (address) => request<RabbyToken[]>(CACHE_TOKEN_LIST_PATH, { query: { id: address } }),
+      tokens: (address) =>
+        request(CACHE_TOKEN_LIST_PATH, Schema.Array(RabbyToken), { query: { id: address } }),
 
       protocols: (address) =>
-        request<RabbyProtocol[]>(COMPLEX_PROTOCOL_LIST_PATH, { query: { id: address } }),
+        request(COMPLEX_PROTOCOL_LIST_PATH, Schema.Array(RabbyProtocol), {
+          query: { id: address },
+        }),
 
       chainIds: chainsCache.get(
-        request<RabbyChain[]>(CHAIN_LIST_PATH).pipe(Effect.map(parseChainIds)),
+        request(CHAIN_LIST_PATH, Schema.Array(RabbyChain)).pipe(Effect.map(parseChainIds)),
       ),
 
-      totalBalance: (address) => request(TOTAL_BALANCE_PATH, { query: { id: address } }),
+      totalBalance: (
+        address, // 只用来探活「这个地址通不通」,回什么形状不关心 —— 所以不声明形状。
+      ) => request(TOTAL_BALANCE_PATH, Schema.Unknown, { query: { id: address } }),
     };
   });
 }

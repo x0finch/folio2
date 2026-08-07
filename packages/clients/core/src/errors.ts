@@ -23,12 +23,22 @@ export class HttpFailure extends Data.TaggedError("HttpFailure")<{
   readonly where: string;
   readonly status?: number;
   readonly retryAfterMs?: number; // 上游 Retry-After 头解析出来的(秒数或 HTTP-date 都认)
-  readonly cause?: unknown;
+  // **一句摘要,不是那个错误对象。类型就是 `string`,所以透传一个对象是编译错误。**
+  //
+  // 为什么要在类型上拦:官方的 `RequestError` / `ResponseError` 身上挂着完整 `request` ——
+  // query 里的 HMAC 签名、headers 里的 API key 全在。原样塞进 `cause` 就等于让凭据跟着一个
+  // **专门拿来进日志的对象**到处走(原则 #5 红线)。约定拦不住,类型能。
+  readonly cause?: string;
 }> {}
 
 // 签名 / 摘要算不出来。**不是传输故障** —— 归到网络类会让它吃三次退避全白打,还把真正的原因盖掉
 // (rabby 的 wasm 签名、binance 的 HMAC 都可能在这里失败)。调用方通常映射成「凭据问题」。
 export class SigningFailure extends Data.TaggedError("SigningFailure")<{
   readonly where: string;
-  readonly cause?: unknown;
+  readonly cause?: string; // 同上:一句摘要。签名器抛出来的东西不透传
 }> {}
+
+// 抛出来的东西 → 一句能进日志的话。给上面两个类的 `cause` 用。
+// **只取 message** —— 异常对象上可能挂着任意东西(官方 HTTP 错误挂的就是完整 request)。
+export const summaryOf = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);

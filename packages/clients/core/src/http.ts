@@ -1,6 +1,6 @@
 import type { HttpClientError } from "@effect/platform";
 import { HttpClient, HttpClientRequest } from "@effect/platform";
-import { Clock, Effect, type RateLimiter } from "effect";
+import { Clock, Effect, ParseResult, type RateLimiter, Schema } from "effect";
 import { HttpFailure, type SigningFailure } from "./errors";
 import { disableBuiltInTracing } from "./http-client";
 import { classifyFailure, type UpstreamError } from "./upstream-error";
@@ -40,7 +40,7 @@ function parseRetryAfter(header: string | undefined, now: number): number | unde
 
 const DEFAULT_RATE_LIMITED = [429];
 
-export interface RequestOptions<Ctx = undefined> {
+export interface RequestOptions {
   readonly query?: Record<string, string | number | undefined>; // undefined 的键不参与
   readonly method?: "GET" | "POST";
   // POST 的 body(已经序列化好的字符串)。**显式两个字段,不再收一个 `RequestInit`** ——
@@ -49,24 +49,28 @@ export interface RequestOptions<Ctx = undefined> {
   readonly body?: string;
   // 404 当成「没有这个东西」而不是故障 → 返回 null。只对「按 id 查一个东西」的端点开。
   readonly notFoundAsNull?: boolean;
-  // 传给 `headers()` 的**每请求上下文**。**包不看它的内容**,只负责递过去。
-  // 为什么需要:有些上游的凭据是每请求现取的(zerion / coinstats 的 key 来自 ctx.creds,
-  // 不是模块级常量),而 `headers()` 是在包里被调用的,拿不到调用点的闭包。
-  readonly context?: Ctx;
+  // 这一发的头,**覆盖** `HttpConfig.headers`。给「凭据是每请求现取的」那五家用
+  // (binance / okx / bybit / zerion / coinstats:key 来自 `ctx.creds`,不是模块级常量)。
+  //
+  // **以前这里是一个 `context?: Ctx`**,由包递给 `config.headers(path, options)`,于是
+  // `Ctx` 要穿过 `Requester` / `RequestOptions` / `HttpConfig` 三层类型,而签名器读的是
+  // `options?.context`(类型上可选,实际必填 —— 两家为此各写了一句「缺凭据」的运行时检查)。
+  // 现在头在**调用点**算好:那里 path、query、凭据都在手上,不必绕一圈递进来再取出去。
+  readonly headers?: Effect.Effect<HeadersInit, SigningFailure>;
 }
 
-export interface HttpConfig<Ctx = undefined> {
+export interface HttpConfig {
   // **必填**:所有真实调用点都有基址,而少了它 `new URL("/path")` 会当场炸 —— 与其留一个
   // 「忘了传就报 Invalid URL」的失败模式,不如在类型上要求它。
   readonly baseUrl: string;
   // 这是谁。进每个错误的 `upstream` 字段和 span 的属性 —— 类型合并之后「是谁失败的」只能靠数据带。
   readonly upstream: string;
-  // 每次请求的头。**是函数而不是对象** —— 签名类的头(rabby 的 wasm 签名、binance 的 HMAC)
-  // 要按路径和参数算,而且可能失败。它的错误进错误通道,**不被归类成传输故障**:
-  // 归错了会退化成「三次退避全白打」,还把真正的原因盖掉。
+  // 每次请求的头。**是函数而不是对象** —— 签名类的头(rabby 的 wasm 签名)要按路径和参数算,
+  // 而且可能失败。它的错误进错误通道,**不被归类成传输故障**:归错了会退化成「三次退避全白打」,
+  // 还把真正的原因盖掉。**这一份是 client 级的**;凭据每请求不同的走 `RequestOptions.headers`。
   readonly headers?: (
     path: string,
-    options: RequestOptions<Ctx> | undefined,
+    options: RequestOptions | undefined,
   ) => Effect.Effect<HeadersInit, SigningFailure>;
   readonly limit?: RateLimiter.RateLimiter; // 不传 = 不限频(判据见 RateLimitOptions.key 的注释:队里没人挤就别装)
   readonly rateLimitedStatuses?: readonly number[]; // 默认 [429]
@@ -87,45 +91,88 @@ export type Outbound = HttpClient.HttpClient;
 //
 // **`where` 由调用点给,不从 error 里抠** —— error 带的是完整 URL,而 `where` 进日志和错误消息,
 // 必须只有 pathname(原则 #5 红线)。
+//
+// **`cause` 同理:进去的是一句摘要,不是那个错误对象。** 官方的 `RequestError` / `ResponseError`
+// 上挂着 `request`,而它序列化出来是这样的:
+//
+//   {"cause":{"request":{"url":"…","urlParams":[["signature","s3cr3t"]],
+//    "headers":{"x-mbx-apikey":"s3cr3t-key"}},"reason":"Transport"}}
+//
+// 也就是**签名和凭据头整个跟着错误走**。`where` 和 span 都守住了,漏的是错误对象自己。
 const transportFailure =
   (where: string) =>
   (error: HttpClientError.HttpClientError): HttpFailure =>
     error._tag === "ResponseError" && error.reason === "Decode"
-      ? new HttpFailure({ kind: "parse", where, cause: error })
-      : new HttpFailure({ kind: "network", where, cause: error });
+      ? new HttpFailure({ kind: "parse", where, cause: summarize(error) })
+      : new HttpFailure({ kind: "network", where, cause: summarize(error) });
 
-// 发一个请求,回解析好的 JSON(`notFoundAsNull` 且 404 时回 null)。
+// 出网失败 → 一句能进日志的摘要。**只由本函数拼,绝不透传上游库给的对象。**
+//
+// 两边给的详细程度不同,理由不同:
+//   · **没出去**(`RequestError`)—— 带上内层 message。内层是 fetch 抛的东西(DNS / 连不上 /
+//     超时),message 里最多有主机名或 IP,而主机名本来就不是秘密(每个错误都带着 `upstream`)。
+//     而「为什么没出去」是排障时唯一有用的那句
+//   · **读不动**(`ResponseError`)—— **不带内层 message**,给状态码。JSON 解析失败的 message 会把
+//     响应正文的一截拼进去(`Unexpected token '<', "<html>…"`),而正文是上游的数据(余额、地址)。
+//     它不是凭据,但也没有理由跟着一个到处传的错误对象走
+const summarize = (error: HttpClientError.HttpClientError): string => {
+  if (error._tag === "ResponseError") {
+    return `ResponseError/${error.reason} ${error.response.status}`;
+  }
+  const inner = error.cause;
+  const detail = inner instanceof Error ? inner.message : undefined;
+  return detail ? `RequestError/${error.reason}: ${detail}` : `RequestError/${error.reason}`;
+};
+
+// schema 校验不过 → 一句能进日志的话。**只说「哪一处、哪一类不对」,不带实际值。**
+//
+// `ParseError` 自带的格式化器会把**实际值拼进消息**(`Expected string, actual "0x…"`),
+// 而那是上游响应的正文 —— 与 `summarize` 里那条同一个判断:正文不跟着错误到处走。
+// 路径 + 类别足够定位(「第 3 行的 id 类型不对」),值去看那一发的响应。
+const whyInvalid = (error: ParseResult.ParseError): string => {
+  const issues = ParseResult.ArrayFormatter.formatErrorSync(error);
+  const first = issues[0];
+  const at = first && first.path.length > 0 ? first.path.join(".") : "(root)";
+  const more = issues.length > 1 ? ` (+${issues.length - 1} more)` : "";
+  return `schema: ${at} ${first?._tag ?? "Invalid"}${more}`;
+};
+
+// 发一个请求,回**校验过**的 JSON(`notFoundAsNull` 且 404 时回 null)。
 //
 // **错误就是 `UpstreamError`,不是传输层的中间态。** 七家各自 `Effect.mapError(classify)` 一遍
 // 是同一句样板抄七份,还把「这个请求会失败成什么」的答案推迟了一层。归类是这个包的活。
 //
-// **`A` 是调用方声明的期望形状,包内不校验** —— 一次 `as A`。为什么是泛型而不是 `unknown`:
-// 返回 `unknown` 的话每个端点方法都要在自己那行写一次 `as Effect.Effect<Foo, E>`,强转散在 N 个
-// 调用点、还顺手把错误类型也一起断言掉了。收成一个类型参数之后,调用点写的是 `get<SpotAccount>(path)`
-// —— 一眼看出这是断言,而错误类型仍由包保证。
+// **schema 必填,不是可选的。** 以前这里是一个调用方声明的类型参数 + 包内一次 `as A` ——
+// 也就是「返回类型是调用方说了算」,而运行时一个字段都没查。上游改个形状就是**静默故障**:
+// 字段没了 → `undefined` → 解析器要么产一行垃圾要么整批消失,错误通道里什么都没有。
+//
+// 现在形状由 schema 说了算,返回类型从它推出来,`as A` 整个消失。校验不过 → `UpstreamParseError`
+// (不可重试:再拉一次还是同一份坏形状)。
+//
+// **验的是「我们真读的那些字段」,不是全字段严格校验** —— 各 client 的 `types.ts` 就是那份声明,
+// 逐字来自真实响应;上游多给的字段照旧放行(`Schema.Struct` 默认忽略多余键)。严格校验会让
+// 上游加一个字段就整批炸,那是把一种静默故障换成一种噪音故障。
 //
 // **`notFoundAsNull` 进类型**:开了它返回的就是 `Effect<A | null>`,不靠调用方自己记得在类型参数
 // 里写 `| null`(以前靠记,而 coingecko 那边已经在手写了 —— 代价已经在付)。
-//
-// **校验本身是另一件事**:上游给的形状对不对,现在没人查。ADR 0035 把 `Effect.Schema` 的评估
-// 推到 connectors 那一步(#362 第 3 站),到那时这里改成收一个 schema 是增量改动 ——
-// `HttpClientResponse.schemaBodyJson` 的失败往同一个 `UpstreamParseError` 通道塞,签名不用动。
-export interface Requester<Ctx = undefined> {
-  <A = unknown>(
+export interface Requester {
+  <A, I>(
     path: string,
-    options: RequestOptions<Ctx> & { readonly notFoundAsNull: true },
+    schema: Schema.Schema<A, I>,
+    options: RequestOptions & { readonly notFoundAsNull: true },
   ): Effect.Effect<A | null, UpstreamError, Outbound>;
-  <A = unknown>(
+  <A, I>(
     path: string,
-    options?: RequestOptions<Ctx>,
+    schema: Schema.Schema<A, I>,
+    options?: RequestOptions,
   ): Effect.Effect<A, UpstreamError, Outbound>;
 }
 
-export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Requester<Ctx> {
+export function makeRequester(config: HttpConfig): Requester {
   const rateLimited = new Set(config.rateLimitedStatuses ?? DEFAULT_RATE_LIMITED);
   const classify = classifyFailure({ upstream: config.upstream });
 
-  return (<A>(path: string, options?: RequestOptions<Ctx>) => {
+  return (<A, I>(path: string, schema: Schema.Schema<A, I>, options?: RequestOptions) => {
     const url = new URL(`${config.baseUrl}${path}`);
     for (const [k, v] of Object.entries(options?.query ?? {})) {
       if (v !== undefined) url.searchParams.set(k, String(v));
@@ -137,7 +184,9 @@ export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Request
 
     const once = Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
-      const headers = config.headers ? yield* config.headers(path, options) : undefined;
+      // 每请求的头**覆盖** client 级那份 —— 两者都想设同一个 key 头时,近的那个说了算。
+      const headerSource = options?.headers ?? config.headers?.(path, options);
+      const headers = headerSource ? yield* headerSource : undefined;
 
       const request = HttpClientRequest.make(method)(url).pipe(
         headers ? HttpClientRequest.setHeaders(headers) : (r) => r,
@@ -166,8 +215,16 @@ export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Request
         return yield* new HttpFailure({ kind: "upstream", where, status: res.status });
       }
 
-      return yield* res.json.pipe(
-        Effect.mapError((cause) => new HttpFailure({ kind: "parse", where, cause })),
+      const body = yield* res.json.pipe(
+        // 同样只留摘要 —— `res.json` 失败给的也是 `ResponseError`,身上挂着完整 request。
+        Effect.mapError(
+          (error) => new HttpFailure({ kind: "parse", where, cause: summarize(error) }),
+        ),
+      );
+      return yield* Schema.decodeUnknown(schema)(body).pipe(
+        Effect.mapError(
+          (error) => new HttpFailure({ kind: "parse", where, cause: whyInvalid(error) }),
+        ),
       );
     }).pipe(
       // **官方内建的那个 span 在这里被关掉,换成下面我们自己的。**
@@ -199,5 +256,5 @@ export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Request
       Effect.mapError(classify),
       Effect.map((body) => body as A),
     );
-  }) as Requester<Ctx>;
+  }) as Requester;
 }

@@ -146,7 +146,7 @@ describe("顶层形状守卫", () => {
     const { fn } = stub(() => json({ error: "rate limited" }));
     const err = await failing(fn, (c) => c.coinsList);
     expect(err._tag).toBe("UpstreamParseError");
-    expect(err.where).toBe("/coins/list");
+    expect(err.where).toBe("/api/v3/coins/list");
   });
 
   it("对象端点回的不是对象 → parse", async () => {

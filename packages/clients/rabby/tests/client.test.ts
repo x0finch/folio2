@@ -132,14 +132,24 @@ describe("端点", () => {
     const rows = await withClient(fn, (c) => c.tokens(ADDR), { apiBase: RABBY_API_BASE });
     expect(calls[0].request.url.origin).toBe(RABBY_API_BASE);
     expect(calls[0].request.url.pathname).toBe("/v1/user/cache_token_list");
-    expect(rows).toEqual(tokensFixture);
+    // 值不翻译,但只吐声明过的字段(schema 的默认行为)—— DTO 就是「我们读的那些字段」,
+    // 夹具里的 `asset` / `cex_ids` 之类从来没读过,所以也不跟着出去。
+    expect(rows).toHaveLength(tokensFixture.length);
+    expect(rows[0].symbol).toBe(tokensFixture[0].symbol);
+    expect(rows[0].amount).toBe(tokensFixture[0].amount);
+    expect("cex_ids" in rows[0]).toBe(false);
   });
 
   it("protocols:同样一次回全链", async () => {
     const { fn, calls } = byPath();
     const rows = await withClient(fn, (c) => c.protocols(ADDR));
     expect(calls[0].request.url.pathname).toBe("/v1/user/complex_protocol_list");
-    expect(rows).toEqual(protocolsFixture);
+    expect(rows).toHaveLength(protocolsFixture.length);
+    expect(rows[0].id).toBe(protocolsFixture[0].id);
+    expect(rows[0].portfolio_item_list).toHaveLength(
+      protocolsFixture[0].portfolio_item_list.length,
+    );
+    expect("has_supported_portfolio" in rows[0]).toBe(false);
   });
 
   it("totalBalance:最轻的端点,探活用", async () => {

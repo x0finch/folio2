@@ -7,7 +7,7 @@ import {
   UpstreamAuthError,
   type UpstreamError,
 } from "@folio/client-core";
-import { Clock, Context, Duration, Effect, Layer, type Scope } from "effect";
+import { Clock, Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import {
   ACCOUNT_PATH,
   API_KEY_HEADER,
@@ -29,8 +29,8 @@ import {
   USDM_ACCOUNT_PATH,
 } from "./constants";
 import { rejectedSignatureIsAuth, UPSTREAM } from "./errors";
-import type {
-  BinanceCreds,
+import {
+  type BinanceCreds,
   CoinmAccount,
   EarnFlexibleRow,
   EarnLockedRow,
@@ -74,7 +74,7 @@ export interface BinanceClientApi {
   ) => Effect.Effect<CoinmAccount, UpstreamError, Outbound>;
   readonly fundingAssets: (
     creds: BinanceCreds,
-  ) => Effect.Effect<FundingAsset[], UpstreamError, Outbound>;
+  ) => Effect.Effect<readonly FundingAsset[], UpstreamError, Outbound>;
   // 理财两个端点**内部翻页取全**,出口就是全部行 —— 翻页是上游分页机制的细节,不该漏给调用方。
   readonly earnFlexible: (
     creds: BinanceCreds,
@@ -113,13 +113,12 @@ export function make(
       rateLimitedStatuses: RATE_LIMITED_STATUSES,
     });
 
-    // 签名端点:三个 host 同样的签名头 + 归类,**刻意不带闸**(每账户一发、不并发,闸拦不到东西,
-    // 还会把两个互不相干的账户排成一队白等)。`context` 走 apiKey —— 头是每请求算的。
-    const signedRequester = (baseUrl: string): Requester<string> =>
-      makeRequester<string>({
+    // 签名端点:三个 host 同样的归类,**刻意不带闸**(每账户一发、不并发,闸拦不到东西,
+    // 还会把两个互不相干的账户排成一队白等)。key 头随每一发传(见 signedGet)。
+    const signedRequester = (baseUrl: string): Requester =>
+      makeRequester({
         baseUrl,
         upstream: UPSTREAM,
-        headers: (_path, options) => Effect.succeed({ [API_KEY_HEADER]: options?.context ?? "" }),
         rateLimitedStatuses: RATE_LIMITED_STATUSES,
       });
 
@@ -135,9 +134,10 @@ export function make(
     //
     // `timestamp` 走 Effect 的 `Clock` 而不是 `Date.now()`:测试里能用 `TestClock` 钉住,
     // 断言签名串是确定的。
-    const signedGet = <A>(
-      requester: Requester<string>,
+    const signedGet = <A, I>(
+      requester: Requester,
       path: string,
+      schema: Schema.Schema<A, I>,
       params: Record<string, string | number>,
       creds: BinanceCreds,
       method: "GET" | "POST" = "GET", // 资金账户是 POST(SIGNED),参数仍走 query
@@ -150,9 +150,9 @@ export function make(
           new URLSearchParams(signable as never).toString(),
           "hex",
         );
-        return yield* requester<A>(path, {
+        return yield* requester(path, schema, {
           query: { ...signable, signature },
-          context: creds.apiKey,
+          headers: Effect.succeed({ [API_KEY_HEADER]: creds.apiKey }),
           method,
         });
       }).pipe(
@@ -172,16 +172,19 @@ export function make(
 
     // 一个 position 端点翻页取全:size=100 循环 current,直到末页(rows<size)或收满 total。
     // 不翻页时首页只给 10 条,持仓多的账户(小额自动申购常见)会静默丢掉靠后的币。
-    const earnRows = <Row>(
+    const earnRows = <Row, I>(
       path: string,
+      row: Schema.Schema<Row, I>,
       creds: BinanceCreds,
     ): Effect.Effect<Row[], UpstreamError, Outbound> =>
       Effect.gen(function* () {
+        const page$ = EarnPage(row);
         const rows: Row[] = [];
         for (let current = 1; current <= EARN_MAX_PAGES; current++) {
-          const page = yield* signedGet<EarnPage<Row>>(
+          const page = yield* signedGet(
             spot,
             path,
+            page$,
             { current, size: EARN_PAGE_SIZE },
             creds,
           );
@@ -195,7 +198,10 @@ export function make(
       });
 
     return {
-      tickerPrices: publicRequester<TickerPrice[] | null>(TICKER_PRICE_PATH).pipe(
+      tickerPrices: publicRequester(
+        TICKER_PRICE_PATH,
+        Schema.NullOr(Schema.Array(TickerPrice)),
+      ).pipe(
         // 公开端点也走这一句 —— 与迁移前一致(那时 `classifyOverride` 挂在两个 requester 上)。
         rejectedSignatureIsAuth,
         Effect.map((raw) => {
@@ -207,17 +213,17 @@ export function make(
         }),
       ),
 
-      spotAccount: (creds) => signedGet<SpotAccount>(spot, ACCOUNT_PATH, {}, creds),
+      spotAccount: (creds) => signedGet(spot, ACCOUNT_PATH, SpotAccount, {}, creds),
 
-      usdmAccount: (creds) => signedGet<FuturesAccount>(fapi, USDM_ACCOUNT_PATH, {}, creds),
+      usdmAccount: (creds) => signedGet(fapi, USDM_ACCOUNT_PATH, FuturesAccount, {}, creds),
 
-      coinmAccount: (creds) => signedGet<CoinmAccount>(dapi, COINM_ACCOUNT_PATH, {}, creds),
+      coinmAccount: (creds) => signedGet(dapi, COINM_ACCOUNT_PATH, CoinmAccount, {}, creds),
 
       fundingAssets: (creds) =>
-        signedGet<FundingAsset[]>(spot, FUNDING_ASSET_PATH, {}, creds, "POST"),
+        signedGet(spot, FUNDING_ASSET_PATH, Schema.Array(FundingAsset), {}, creds, "POST"),
 
-      earnFlexible: (creds) => earnRows<EarnFlexibleRow>(EARN_FLEXIBLE_PATH, creds),
-      earnLocked: (creds) => earnRows<EarnLockedRow>(EARN_LOCKED_PATH, creds),
+      earnFlexible: (creds) => earnRows(EARN_FLEXIBLE_PATH, EarnFlexibleRow, creds),
+      earnLocked: (creds) => earnRows(EARN_LOCKED_PATH, EarnLockedRow, creds),
     };
   });
 }

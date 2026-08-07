@@ -5,7 +5,7 @@ import {
   type Requester,
   type UpstreamError,
 } from "@folio/client-core";
-import { Context, Duration, Effect, Layer, type Scope } from "effect";
+import { Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import { chainsCacheFor, parseChainIds } from "./chains";
 import {
   CHAINS_PATH,
@@ -18,7 +18,7 @@ import {
   UPSTREAM,
   ZERION_API_BASE,
 } from "./constants";
-import type { ZerionChainsResponse, ZerionPositionsResponse } from "./types";
+import { ZerionChainsResponse, ZerionPositionsResponse } from "./types";
 
 export interface ZerionConfig {
   // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
@@ -71,36 +71,32 @@ export function make(
       interval: Duration.millis((RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000),
     });
 
-    // 头是每请求算的(apiKey 从 `context` 来)。
-    const request: Requester<string> = makeRequester<string>({
-      baseUrl,
-      upstream: UPSTREAM,
-      limit,
-      headers: (_path, options) =>
-        Effect.succeed({
-          Authorization: basicAuth(options?.context ?? ""),
-          accept: "application/json",
-        }),
-    });
+    const request: Requester = makeRequester({ baseUrl, upstream: UPSTREAM, limit });
+
+    // 头是每请求算的 —— key 来自调用方给的凭据,不是模块级常量,所以随每一发传进去。
+    const keyed = (apiKey: string) =>
+      Effect.succeed({ Authorization: basicAuth(apiKey), accept: "application/json" });
 
     // 缓存按 baseUrl 分桶、住在模块级(见 client-core 的 stale-cache:Scope 会被每请求重置)。
     const chainsCache = chainsCacheFor(baseUrl);
 
     return {
       positions: ({ address, apiKey }) =>
-        request<ZerionPositionsResponse>(positionsPath(address), {
+        request(positionsPath(address), ZerionPositionsResponse, {
           query: POSITIONS_QUERY,
-          context: apiKey,
+          headers: keyed(apiKey),
         }),
 
       chainIds: (apiKey) =>
         chainsCache.get(
-          request<ZerionChainsResponse>(CHAINS_PATH, { context: apiKey }).pipe(
+          request(CHAINS_PATH, ZerionChainsResponse, { headers: keyed(apiKey) }).pipe(
             Effect.map(parseChainIds),
           ),
         ),
 
-      portfolio: ({ address, apiKey }) => request(portfolioPath(address), { context: apiKey }),
+      portfolio: ({ address, apiKey }) =>
+        // 只用来探活「这把 key + 这个地址通不通」,回什么形状不关心。
+        request(portfolioPath(address), Schema.Unknown, { headers: keyed(apiKey) }),
     };
   });
 }

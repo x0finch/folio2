@@ -1,5 +1,5 @@
 /// <reference path="./vendor.d.ts" />
-import { SigningFailure } from "@folio/client-core";
+import { SigningFailure, summaryOf } from "@folio/client-core";
 import { Effect } from "effect";
 import RABBY_WASM from "../vendor/rabby_sign.wasm";
 import type { RabbySignature } from "../vendor/sign-patched.cjs";
@@ -89,6 +89,6 @@ export function signRabbyRequest(
         "X-Version": RABBY_CLIENT_VERSION,
       };
     },
-    catch: (cause) => new SigningFailure({ where: path, cause }),
+    catch: (cause) => new SigningFailure({ where: path, cause: summaryOf(cause) }),
   });
 }
