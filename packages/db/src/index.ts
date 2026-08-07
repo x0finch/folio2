@@ -11,7 +11,11 @@ export type { DbEnv } from "./client";
 // **它们出口是 Layer,不是工厂**(#362 第 5 站):参考层的端口是 Effect 服务,所以「怎么变成
 // 那个端口」归实现方,装配点只挑「哪个用户」。四个 layer 共用一个 `Database`(D1 的服务面),
 // 而 `env` 只在 `databaseLayer(env)` 那一处被读。
-export { Database, databaseLayer } from "./database";
+// **只出 layer,不出 Tag 的值**:`Database.query((db) => …)` 的回调参数就是 drizzle 句柄,
+// Tag 一旦出包,包外 `yield* Database` 就能绕过全部包装层拼任意查询 —— 那正是原则 #6 禁的事。
+// 装配点(`Layer.provide(storeLayer, databaseLayer(env))`)不需要 Tag 的值,类型位置够用。
+export type { Database } from "./database";
+export { databaseLayer } from "./database";
 export { createDb, type Db } from "./db";
 export { globalTokenRefIndexStoreLayer } from "./global-token-ref-index-store";
 export type {
