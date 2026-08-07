@@ -132,15 +132,27 @@ describe("makeRequester", () => {
     expect(stub.calls[0].request.headers["content-type"]).toContain("application/json");
   });
 
-  it("头进得去,context 递给 headers()", async () => {
+  it("client 级的头:每一发都算一次,拿得到 path 和 query(rabby 的签名靠这个)", async () => {
     const stub = httpStub(() => json({}));
-    const request = makeRequester<string>({
+    const request = makeRequester({
       baseUrl: BASE,
       upstream: UPSTREAM,
-      headers: (_path, options) => Effect.succeed({ "x-key": options?.context ?? "" }),
+      headers: (path, options) =>
+        Effect.succeed({ "x-signed": `${path}?${options?.query?.a ?? ""}` }),
     });
-    await runClient(stub, request("/v1/t", { context: "abc" }));
-    expect(stub.calls[0].request.headers["x-key"]).toBe("abc");
+    await runClient(stub, request("/v1/t", { query: { a: "1" } }));
+    expect(stub.calls[0].request.headers["x-signed"]).toBe("/v1/t?1");
+  });
+
+  it("每请求的头**覆盖** client 级那份 —— 凭据每请求不同的五家走这条", async () => {
+    const stub = httpStub(() => json({}));
+    const request = makeRequester({
+      baseUrl: BASE,
+      upstream: UPSTREAM,
+      headers: () => Effect.succeed({ "x-key": "client-level" }),
+    });
+    await runClient(stub, request("/v1/t", { headers: Effect.succeed({ "x-key": "per-call" }) }));
+    expect(stub.calls[0].request.headers["x-key"]).toBe("per-call");
   });
 
   it("头算不出来 → 归「凭据问题」,不被归类成传输故障", async () => {

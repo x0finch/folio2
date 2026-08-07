@@ -71,17 +71,11 @@ export function make(
       interval: Duration.millis((RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000),
     });
 
-    // 头是每请求算的(apiKey 从 `context` 来)。
-    const request: Requester<string> = makeRequester<string>({
-      baseUrl,
-      upstream: UPSTREAM,
-      limit,
-      headers: (_path, options) =>
-        Effect.succeed({
-          Authorization: basicAuth(options?.context ?? ""),
-          accept: "application/json",
-        }),
-    });
+    const request: Requester = makeRequester({ baseUrl, upstream: UPSTREAM, limit });
+
+    // 头是每请求算的 —— key 来自调用方给的凭据,不是模块级常量,所以随每一发传进去。
+    const keyed = (apiKey: string) =>
+      Effect.succeed({ Authorization: basicAuth(apiKey), accept: "application/json" });
 
     // 缓存按 baseUrl 分桶、住在模块级(见 client-core 的 stale-cache:Scope 会被每请求重置)。
     const chainsCache = chainsCacheFor(baseUrl);
@@ -90,17 +84,18 @@ export function make(
       positions: ({ address, apiKey }) =>
         request<ZerionPositionsResponse>(positionsPath(address), {
           query: POSITIONS_QUERY,
-          context: apiKey,
+          headers: keyed(apiKey),
         }),
 
       chainIds: (apiKey) =>
         chainsCache.get(
-          request<ZerionChainsResponse>(CHAINS_PATH, { context: apiKey }).pipe(
+          request<ZerionChainsResponse>(CHAINS_PATH, { headers: keyed(apiKey) }).pipe(
             Effect.map(parseChainIds),
           ),
         ),
 
-      portfolio: ({ address, apiKey }) => request(portfolioPath(address), { context: apiKey }),
+      portfolio: ({ address, apiKey }) =>
+        request(portfolioPath(address), { headers: keyed(apiKey) }),
     };
   });
 }

@@ -40,7 +40,7 @@ function parseRetryAfter(header: string | undefined, now: number): number | unde
 
 const DEFAULT_RATE_LIMITED = [429];
 
-export interface RequestOptions<Ctx = undefined> {
+export interface RequestOptions {
   readonly query?: Record<string, string | number | undefined>; // undefined 的键不参与
   readonly method?: "GET" | "POST";
   // POST 的 body(已经序列化好的字符串)。**显式两个字段,不再收一个 `RequestInit`** ——
@@ -49,24 +49,28 @@ export interface RequestOptions<Ctx = undefined> {
   readonly body?: string;
   // 404 当成「没有这个东西」而不是故障 → 返回 null。只对「按 id 查一个东西」的端点开。
   readonly notFoundAsNull?: boolean;
-  // 传给 `headers()` 的**每请求上下文**。**包不看它的内容**,只负责递过去。
-  // 为什么需要:有些上游的凭据是每请求现取的(zerion / coinstats 的 key 来自 ctx.creds,
-  // 不是模块级常量),而 `headers()` 是在包里被调用的,拿不到调用点的闭包。
-  readonly context?: Ctx;
+  // 这一发的头,**覆盖** `HttpConfig.headers`。给「凭据是每请求现取的」那五家用
+  // (binance / okx / bybit / zerion / coinstats:key 来自 `ctx.creds`,不是模块级常量)。
+  //
+  // **以前这里是一个 `context?: Ctx`**,由包递给 `config.headers(path, options)`,于是
+  // `Ctx` 要穿过 `Requester` / `RequestOptions` / `HttpConfig` 三层类型,而签名器读的是
+  // `options?.context`(类型上可选,实际必填 —— 两家为此各写了一句「缺凭据」的运行时检查)。
+  // 现在头在**调用点**算好:那里 path、query、凭据都在手上,不必绕一圈递进来再取出去。
+  readonly headers?: Effect.Effect<HeadersInit, SigningFailure>;
 }
 
-export interface HttpConfig<Ctx = undefined> {
+export interface HttpConfig {
   // **必填**:所有真实调用点都有基址,而少了它 `new URL("/path")` 会当场炸 —— 与其留一个
   // 「忘了传就报 Invalid URL」的失败模式,不如在类型上要求它。
   readonly baseUrl: string;
   // 这是谁。进每个错误的 `upstream` 字段和 span 的属性 —— 类型合并之后「是谁失败的」只能靠数据带。
   readonly upstream: string;
-  // 每次请求的头。**是函数而不是对象** —— 签名类的头(rabby 的 wasm 签名、binance 的 HMAC)
-  // 要按路径和参数算,而且可能失败。它的错误进错误通道,**不被归类成传输故障**:
-  // 归错了会退化成「三次退避全白打」,还把真正的原因盖掉。
+  // 每次请求的头。**是函数而不是对象** —— 签名类的头(rabby 的 wasm 签名)要按路径和参数算,
+  // 而且可能失败。它的错误进错误通道,**不被归类成传输故障**:归错了会退化成「三次退避全白打」,
+  // 还把真正的原因盖掉。**这一份是 client 级的**;凭据每请求不同的走 `RequestOptions.headers`。
   readonly headers?: (
     path: string,
-    options: RequestOptions<Ctx> | undefined,
+    options: RequestOptions | undefined,
   ) => Effect.Effect<HeadersInit, SigningFailure>;
   readonly limit?: RateLimiter.RateLimiter; // 不传 = 不限频(判据见 RateLimitOptions.key 的注释:队里没人挤就别装)
   readonly rateLimitedStatuses?: readonly number[]; // 默认 [429]
@@ -136,22 +140,19 @@ const summarize = (error: HttpClientError.HttpClientError): string => {
 // **校验本身是另一件事**:上游给的形状对不对,现在没人查。ADR 0035 把 `Effect.Schema` 的评估
 // 推到 connectors 那一步(#362 第 3 站),到那时这里改成收一个 schema 是增量改动 ——
 // `HttpClientResponse.schemaBodyJson` 的失败往同一个 `UpstreamParseError` 通道塞,签名不用动。
-export interface Requester<Ctx = undefined> {
+export interface Requester {
   <A = unknown>(
     path: string,
-    options: RequestOptions<Ctx> & { readonly notFoundAsNull: true },
+    options: RequestOptions & { readonly notFoundAsNull: true },
   ): Effect.Effect<A | null, UpstreamError, Outbound>;
-  <A = unknown>(
-    path: string,
-    options?: RequestOptions<Ctx>,
-  ): Effect.Effect<A, UpstreamError, Outbound>;
+  <A = unknown>(path: string, options?: RequestOptions): Effect.Effect<A, UpstreamError, Outbound>;
 }
 
-export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Requester<Ctx> {
+export function makeRequester(config: HttpConfig): Requester {
   const rateLimited = new Set(config.rateLimitedStatuses ?? DEFAULT_RATE_LIMITED);
   const classify = classifyFailure({ upstream: config.upstream });
 
-  return (<A>(path: string, options?: RequestOptions<Ctx>) => {
+  return (<A>(path: string, options?: RequestOptions) => {
     const url = new URL(`${config.baseUrl}${path}`);
     for (const [k, v] of Object.entries(options?.query ?? {})) {
       if (v !== undefined) url.searchParams.set(k, String(v));
@@ -163,7 +164,9 @@ export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Request
 
     const once = Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
-      const headers = config.headers ? yield* config.headers(path, options) : undefined;
+      // 每请求的头**覆盖** client 级那份 —— 两者都想设同一个 key 头时,近的那个说了算。
+      const headerSource = options?.headers ?? config.headers?.(path, options);
+      const headers = headerSource ? yield* headerSource : undefined;
 
       const request = HttpClientRequest.make(method)(url).pipe(
         headers ? HttpClientRequest.setHeaders(headers) : (r) => r,
@@ -228,5 +231,5 @@ export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Request
       Effect.mapError(classify),
       Effect.map((body) => body as A),
     );
-  }) as Requester<Ctx>;
+  }) as Requester;
 }

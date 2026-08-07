@@ -78,7 +78,7 @@ export function make(config: RabbyConfig = {}): Effect.Effect<RabbyClientApi, ne
     // 不像 bybit / okx 要自己重建一遍 query 串。
     const signedHeaders = (
       path: string,
-      options: RequestOptions<undefined> | undefined,
+      options: RequestOptions | undefined,
     ): Effect.Effect<HeadersInit, SigningFailure> =>
       Effect.gen(function* () {
         const sign = yield* currentSigner;

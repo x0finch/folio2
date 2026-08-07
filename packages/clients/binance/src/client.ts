@@ -113,13 +113,12 @@ export function make(
       rateLimitedStatuses: RATE_LIMITED_STATUSES,
     });
 
-    // 签名端点:三个 host 同样的签名头 + 归类,**刻意不带闸**(每账户一发、不并发,闸拦不到东西,
-    // 还会把两个互不相干的账户排成一队白等)。`context` 走 apiKey —— 头是每请求算的。
-    const signedRequester = (baseUrl: string): Requester<string> =>
-      makeRequester<string>({
+    // 签名端点:三个 host 同样的归类,**刻意不带闸**(每账户一发、不并发,闸拦不到东西,
+    // 还会把两个互不相干的账户排成一队白等)。key 头随每一发传(见 signedGet)。
+    const signedRequester = (baseUrl: string): Requester =>
+      makeRequester({
         baseUrl,
         upstream: UPSTREAM,
-        headers: (_path, options) => Effect.succeed({ [API_KEY_HEADER]: options?.context ?? "" }),
         rateLimitedStatuses: RATE_LIMITED_STATUSES,
       });
 
@@ -136,7 +135,7 @@ export function make(
     // `timestamp` 走 Effect 的 `Clock` 而不是 `Date.now()`:测试里能用 `TestClock` 钉住,
     // 断言签名串是确定的。
     const signedGet = <A>(
-      requester: Requester<string>,
+      requester: Requester,
       path: string,
       params: Record<string, string | number>,
       creds: BinanceCreds,
@@ -152,7 +151,7 @@ export function make(
         );
         return yield* requester<A>(path, {
           query: { ...signable, signature },
-          context: creds.apiKey,
+          headers: Effect.succeed({ [API_KEY_HEADER]: creds.apiKey }),
           method,
         });
       }).pipe(

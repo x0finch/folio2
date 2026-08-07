@@ -3,8 +3,7 @@ import {
   makeRequester,
   type Outbound,
   type Requester,
-  type RequestOptions,
-  SigningFailure,
+  type SigningFailure,
   type UpstreamError,
 } from "@folio/client-core";
 import { Clock, Context, Effect, Layer } from "effect";
@@ -74,16 +73,12 @@ export function make(config: BybitConfig = {}): BybitClientApi {
   // 构造方式(`URLSearchParams.set`,跳过 undefined)重建它。两边任何一点出入(顺序、编码、
   // 空值处理)都会让签名对不上,而 Bybit 只回一句 retCode 10004,查起来很痛。
   const signedHeaders = (
-    _path: string,
-    options: RequestOptions<BybitCreds> | undefined,
+    creds: BybitCreds,
+    query: Record<string, string>,
   ): Effect.Effect<HeadersInit, SigningFailure> =>
     Effect.gen(function* () {
-      const creds = options?.context;
-      if (!creds) {
-        return yield* new SigningFailure({ where: _path, cause: "bybit: missing credentials" });
-      }
       const qs = new URLSearchParams();
-      for (const [k, v] of Object.entries(options?.query ?? {})) {
+      for (const [k, v] of Object.entries(query)) {
         if (v !== undefined) qs.set(k, String(v));
       }
       // 走 Effect 的 `Clock` 而不是 `Date.now()`:测试里能用 `TestClock` 钉住,断言签名串确定。
@@ -102,10 +97,9 @@ export function make(config: BybitConfig = {}): BybitClientApi {
       };
     });
 
-  const request: Requester<BybitCreds> = makeRequester<BybitCreds>({
+  const request: Requester = makeRequester({
     baseUrl: config.apiBase ?? BYBIT_API_BASE,
     upstream: UPSTREAM,
-    headers: signedHeaders,
   });
 
   // **业务错误是 HTTP 200 + retCode ≠ 0,这是这家上游的要点** —— 不查的后果是签名错被当成功、
@@ -114,7 +108,7 @@ export function make(config: BybitConfig = {}): BybitClientApi {
   // 查它的位置是**这个唯一的 `get()`**:所有端点都从这里出去,所以漏不掉;而它是看得见的一步,
   // 不是 core 配置对象上的一个回调字段(那种写法让「一发请求算不算成功」的答案藏在别的包里)。
   const get = <A>(path: string, query: Record<string, string>, creds: BybitCreds) =>
-    request<A>(path, { query, context: creds }).pipe(
+    request<A>(path, { query, headers: signedHeaders(creds, query) }).pipe(
       Effect.flatMap((body) => {
         const rejected = retCodeError(body, path);
         return rejected ? Effect.fail(rejected) : Effect.succeed(body);

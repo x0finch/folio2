@@ -63,23 +63,24 @@ export function make(
       interval: Duration.millis((RATE_LIMIT_BURST / RATE_LIMIT_PER_SEC) * 1000),
     });
 
-    // 头是每请求算的(apiKey 从 `context` 来)—— 所以 `headers` 是函数而不是对象。
-    const request: Requester<string> = makeRequester<string>({
+    const request: Requester = makeRequester({
       baseUrl: config.apiBase ?? COINSTATS_API_BASE,
       upstream: UPSTREAM,
       limit,
-      headers: (_path, options) =>
-        Effect.succeed({ [API_KEY_HEADER]: options?.context ?? "", accept: "application/json" }),
     });
+
+    // 头是每请求算的 —— key 来自调用方给的凭据,不是模块级常量,所以随每一发传进去。
+    const keyed = (apiKey: string) =>
+      Effect.succeed({ [API_KEY_HEADER]: apiKey, accept: "application/json" });
 
     return {
       balance: ({ connectionId, address, apiKey }) =>
         request<CoinstatsCoin[]>(BALANCE_PATH, {
           query: { address, connectionId },
-          context: apiKey,
+          headers: keyed(apiKey),
         }),
 
-      blockchains: (apiKey) => request(BLOCKCHAINS_PATH, { context: apiKey }),
+      blockchains: (apiKey) => request(BLOCKCHAINS_PATH, { headers: keyed(apiKey) }),
     };
   });
 }
