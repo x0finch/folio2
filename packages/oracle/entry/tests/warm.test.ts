@@ -1,24 +1,19 @@
-import { Duration, Effect, Option, TestClock } from "effect";
+import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import type { UpstreamToken } from "../src";
-import { PLATFORM_TTL_MS, PRICE_TTL_MS, WARM_TTL_MS } from "../src";
-import {
-  cacheKeys,
-  candidatesBySymbol,
-  readFx,
-  readPlatforms,
-  refreshCatalogue,
-  topByRank,
-  warmCatalogue,
-  warmMarkets,
-  writeFx,
-  writePlatforms,
-} from "../src/cache";
+import { PRICE_TTL_MS, WARM_TTL_MS } from "../src";
+import { candidatesBySymbol, warmCatalogue } from "../src/candidates";
 import { pickByConfidence } from "../src/confidence";
+import { refreshWarmCatalogue, topByRank, warmMarkets } from "../src/tokens";
+import { WARM_KEY } from "../src/warm";
 import { harness, now0, upstreamDown } from "./fakes";
 
-// 这一组测的是**包内件**(缓存键 / 三个 warm 读者 / 读写助手),所以直接 import `../src/cache`
-// 并把假端口当参数传进去 —— 它们的 `R` 是 `never`,这正是「服务的依赖不外泄」的那个设计。
+// 测的是 warm blob 这一件事:一张 per-user 缓存表上的 `warm` 键,**三个读者共用一份**。
+// 直接 import `../src/*` 并把假端口当参数传进去 —— 这些函数的 `R` 是 `never`,
+// 这正是「服务的依赖不外泄」的那个设计。
+//
+// 三个读者住在用它们的文件里(`warmMarkets` / `refreshWarmCatalogue` 在 tokens,
+// `warmCatalogue` 在 candidates),但判据是一组对照关系,所以一起测。
 
 const coin = (id: string, symbol: string, rank?: number): UpstreamToken => ({
   ref: `src/issued:${id}`,
@@ -32,79 +27,6 @@ const setup = (markets: UpstreamToken[] = []) => {
   h.upstream.markets = markets;
   return h;
 };
-
-describe("三种键", () => {
-  it("只有 warm / fx:<币种> / platform:<键> 三种", async () => {
-    const h = setup([coin("bitcoin", "BTC", 1)]);
-    await h.run(
-      Effect.gen(function* () {
-        yield* warmMarkets(h.cache, h.upstream, 10);
-        yield* writeFx(h.cache, [{ currency: "eur", usdPerUnit: 1.08 }]);
-        yield* writePlatforms(h.cache, [
-          { key: "evm:1", entry: { name: "Ethereum", logo: "e.png" } },
-        ]);
-      }),
-    );
-
-    expect([...h.cache.entries.keys()].sort()).toEqual(["fx:EUR", "platform:evm:1", "warm"]);
-    expect(cacheKeys.fx(" eur ")).toBe("fx:EUR"); // 键归一在造键那一处
-  });
-
-  it("读回:汇率是数、平台是 {name, logo};miss 的键不出现", async () => {
-    const h = setup();
-    await h.run(
-      Effect.gen(function* () {
-        yield* writeFx(h.cache, [{ currency: "EUR", usdPerUnit: 1.08 }]);
-        yield* writePlatforms(h.cache, [
-          { key: "bitcoin", entry: { name: "Bitcoin" } },
-          // 否定缓存(`name: null`)与「没这条」是两件事 —— 读得出来,只是没有名字。
-          { key: "nochain", entry: { name: null } },
-        ]);
-
-        expect(yield* readFx(h.cache, "eur")).toEqual(Option.some(1.08));
-        expect(yield* readFx(h.cache, "JPY")).toEqual(Option.none());
-
-        const hits = yield* readPlatforms(h.cache, ["bitcoin", "nochain", "nope"]);
-        expect(hits.get("bitcoin")?.entry).toEqual({ name: "Bitcoin" });
-        expect(hits.get("nochain")?.entry).toEqual({ name: null });
-        expect(hits.has("nope")).toBe(false);
-      }),
-    );
-  });
-
-  it("批量读一次往返、批量写一个批次 —— 逐键往返会把总览的 1 次 D1 变成 N 次", async () => {
-    const h = setup();
-    await h.run(
-      Effect.gen(function* () {
-        yield* writeFx(h.cache, [
-          { currency: "EUR", usdPerUnit: 1.08 },
-          { currency: "JPY", usdPerUnit: 0.0067 },
-          { currency: "GBP", usdPerUnit: 1.27 },
-        ]);
-        expect(h.cache.writes).toBe(1); // 三个币种,一个批次
-
-        const before = h.cache.reads;
-        yield* readPlatforms(h.cache, ["evm:1", "solana", "bitcoin"]);
-        expect(h.cache.reads - before).toBe(1); // 三个键,一次读
-      }),
-    );
-  });
-
-  it("TTL:warm 按**目录**的寿命盖戳,不再按价(#216)", async () => {
-    const h = setup();
-    await h.run(
-      Effect.gen(function* () {
-        yield* warmMarkets(h.cache, h.upstream, 10);
-        yield* writePlatforms(h.cache, [{ key: "evm:1", entry: { name: "Ethereum" } }]);
-      }),
-    );
-
-    expect(h.cache.entries.get("warm")?.expiresAt).toBe(now0 + WARM_TTL_MS);
-    expect(h.cache.entries.get("platform:evm:1")?.expiresAt).toBe(now0 + PLATFORM_TTL_MS);
-    // 目录与「链/场馆的名与图」同一量级(都近静态),都远长于价。
-    expect(WARM_TTL_MS).toBeGreaterThan(PRICE_TTL_MS * 10);
-  });
-});
 
 describe("warm 走 SWR,一次整份写", () => {
   it("三个币一次写;没过期就不拉上游", async () => {
@@ -123,6 +45,15 @@ describe("warm 走 SWR,一次整份写", () => {
         expect(h.upstream.calls).toEqual(["fetchMarkets:50"]); // 只拉过一次
       }),
     );
+  });
+
+  it("TTL 按**目录**的寿命盖戳,不按价(#216)", async () => {
+    const h = setup([coin("bitcoin", "BTC", 1)]);
+    await h.run(warmMarkets(h.cache, h.upstream, 10));
+
+    expect(h.cache.entries.get(WARM_KEY)?.expiresAt).toBe(now0 + WARM_TTL_MS);
+    // 目录与「链/场馆的名与图」同一量级(都近静态),都远长于价。
+    expect(WARM_TTL_MS).toBeGreaterThan(PRICE_TTL_MS * 10);
   });
 
   it("橱窗:**价**旧了才重拉 —— 判据是 blob 的 asOf,不是缓存条目的过期戳", async () => {
@@ -206,9 +137,9 @@ describe("后台预热:目录旧了才刷", () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
-        yield* refreshCatalogue(h.cache, h.upstream, 50);
+        yield* refreshWarmCatalogue(h.cache, h.upstream, 50);
         yield* TestClock.adjust(Duration.millis(WARM_TTL_MS - 1));
-        yield* refreshCatalogue(h.cache, h.upstream, 50);
+        yield* refreshWarmCatalogue(h.cache, h.upstream, 50);
         expect(h.upstream.calls).toHaveLength(1);
       }),
     );
@@ -218,10 +149,10 @@ describe("后台预热:目录旧了才刷", () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
-        yield* refreshCatalogue(h.cache, h.upstream, 50);
+        yield* refreshWarmCatalogue(h.cache, h.upstream, 50);
         yield* TestClock.adjust(Duration.millis(WARM_TTL_MS + 1));
         h.upstream.markets = [coin("bitcoin", "BTC", 1), coin("newcoin", "NEW", 900)];
-        expect(yield* refreshCatalogue(h.cache, h.upstream, 50)).toHaveLength(2);
+        expect(yield* refreshWarmCatalogue(h.cache, h.upstream, 50)).toHaveLength(2);
         expect(h.upstream.calls).toHaveLength(2);
       }),
     );
@@ -235,7 +166,7 @@ describe("后台预热:目录旧了才刷", () => {
 
         yield* TestClock.adjust(Duration.millis(WARM_TTL_MS + 1));
         h.upstream.markets = [coin("bitcoin", "BTC", 1), coin("newcoin", "NEW", 900)];
-        yield* refreshCatalogue(h.cache, h.upstream, 50); // 后台预热
+        yield* refreshWarmCatalogue(h.cache, h.upstream, 50); // 后台预热
 
         const rows = yield* warmCatalogue(h.cache, h.upstream, 50);
         expect(candidatesBySymbol(rows, "NEW")).toEqual([
@@ -249,10 +180,10 @@ describe("后台预热:目录旧了才刷", () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
-        yield* refreshCatalogue(h.cache, h.upstream, 50);
+        yield* refreshWarmCatalogue(h.cache, h.upstream, 50);
         yield* TestClock.adjust(Duration.millis(WARM_TTL_MS + 1));
         h.upstream.fail = upstreamDown();
-        expect(yield* refreshCatalogue(h.cache, h.upstream, 50)).toHaveLength(1);
+        expect(yield* refreshWarmCatalogue(h.cache, h.upstream, 50)).toHaveLength(1);
       }),
     );
   });
@@ -315,7 +246,7 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     };
     await h.run(
       Effect.gen(function* () {
-        yield* h.cache.put(cacheKeys.warm, { asOf: now0, rows: [row, row] }, WARM_TTL_MS);
+        yield* h.cache.put(WARM_KEY, { asOf: now0, rows: [row, row] }, WARM_TTL_MS);
         const rows = yield* warmMarkets(h.cache, h.upstream, 50);
         expect(rows).toHaveLength(1);
         expect(h.upstream.calls).toEqual([]); // 治脏数据不该换来一次回源
@@ -341,7 +272,7 @@ describe("旧形状 / 坏形状 = miss,自愈", () => {
       Effect.gen(function* () {
         // 少了 `price.asOf` —— 老代码的 `Array.isArray(rows)` 检查放它过关。
         yield* h.cache.put(
-          cacheKeys.warm,
+          WARM_KEY,
           {
             asOf: now0,
             rows: [{ info: { ref: "src/issued:x", symbol: "X", name: "X" }, price: {} }],
@@ -351,19 +282,6 @@ describe("旧形状 / 坏形状 = miss,自愈", () => {
         const rows = yield* warmCatalogue(h.cache, h.upstream, 50);
         expect(rows.map((r) => r.info.ref)).toEqual(["src/issued:bitcoin"]);
         expect(h.upstream.calls).toHaveLength(1);
-      }),
-    );
-  });
-
-  it("平台条目形状不对 / 汇率不是数 → 当没有,不把坏值端上屏", async () => {
-    const h = setup();
-    await h.run(
-      Effect.gen(function* () {
-        yield* h.cache.put(cacheKeys.platform("evm:1"), { nome: "Ethereum" }, PLATFORM_TTL_MS);
-        yield* h.cache.put(cacheKeys.fx("EUR"), "1.08", PLATFORM_TTL_MS);
-
-        expect((yield* readPlatforms(h.cache, ["evm:1"])).has("evm:1")).toBe(false);
-        expect(yield* readFx(h.cache, "EUR")).toEqual(Option.none());
       }),
     );
   });
@@ -377,7 +295,6 @@ describe("整张清空", () => {
         yield* warmMarkets(h.cache, h.upstream, 50);
 
         h.cache.entries.clear();
-        expect(yield* readFx(h.cache, "EUR")).toEqual(Option.none());
         expect(yield* warmMarkets(h.cache, h.upstream, 50)).toHaveLength(1);
         expect(h.upstream.calls).toHaveLength(2);
       }),

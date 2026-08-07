@@ -3,7 +3,7 @@
 // 链上持仓的命名者是它所在的链,场馆持仓的命名者是场馆本身(见 `@folio/sync` 的 `platformOf`)。
 //
 // 本层只有「一个平台叫什么、图长什么样」这一件事。**没有 `PlatformRow`、没有否定缓存的形状** ——
-// 那是缓存的事,归 entry(见 entry/cache.ts 的 `PlatformEntry`)。
+// 那是缓存的事,归 entry(见 entry/platforms.ts 的 `PlatformEntry`)。
 export interface PlatformMeta {
   key: string;
   name: string;

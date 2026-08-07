@@ -1,5 +1,6 @@
 import type { UpstreamError } from "@folio/client-core";
 import type {
+  TokenMetaUpstream,
   TokenPrice,
   TokenPricePoint,
   TokenRecord,
@@ -14,12 +15,13 @@ import {
   MS_PER_DAY,
   normalizeSymbol,
   PRICE_TTL_MS,
+  WARM_TTL_MS,
 } from "@folio/oracle-basic";
 import { CacheStore, TokenPriceStore, TokenStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Context, Effect, Layer, Option } from "effect";
-import { refreshCatalogue as refreshWarmCatalogue, topByRank, warmMarkets } from "./cache";
 import { degradeTo, logDegraded } from "./degrade";
 import { swr } from "./refresh";
+import { type WarmRow, warmBlob } from "./warm";
 
 // 读路径。**没有「解析」这一步** —— 拿 token_id 直接取名字、图、现价、涨跌、市值排名。
 // 「这是哪个币」在写路径(mint)就定死并冻进了快照,读的时候不再从 tokenRef 反推。
@@ -95,6 +97,41 @@ export interface TokenReader {
 }
 
 export const TokenReader = Context.GenericTag<TokenReader>("oracle/TokenReader");
+
+// —— warm blob 的两个读者(第三个是候选源,在 ./candidates)——
+// 三条判据为什么不同、为什么都落在 blob 自己的 `asOf` 上,见 ./warm 的开头。
+
+/**
+ * 橱窗读者(选币下拉的默认列)。**价旧了就刷** —— 用户正看着这些数字,而且是他自己点开的,
+ * 这一趟网络他等得起。
+ */
+export const warmMarkets = (
+  cache: CacheStore,
+  upstream: TokenMetaUpstream,
+  topN: number,
+): Effect.Effect<readonly WarmRow[]> =>
+  warmBlob(cache, upstream, topN, (blob, now) => now - blob.asOf > PRICE_TTL_MS);
+
+/**
+ * 预热读者(同步之后在后台跑)。**目录旧了就整份刷一次** —— 这是唯一一条「主动让目录跟上」的路。
+ *
+ * 为什么不能指望另外两个:候选源按设计永不刷(它在写路径上),橱窗只在用户打开选币下拉时才跑
+ * —— 从不开下拉的用户,候选集会冻在第一次同步那一刻,此后新进前 1000 的币永远认不出来。
+ *
+ * 跑在同步后的 best-effort 预热里(`waitUntil`,吞错),所以这 4 次请求不在任何人的关键路径上。
+ */
+export const refreshWarmCatalogue = (
+  cache: CacheStore,
+  upstream: TokenMetaUpstream,
+  topN: number,
+): Effect.Effect<readonly WarmRow[]> =>
+  warmBlob(cache, upstream, topN, (blob, now) => now - blob.asOf > WARM_TTL_MS);
+
+// 市值升序取前 limit(无 rank 者垫底)。
+export function topByRank(rows: readonly WarmRow[], limit: number): readonly WarmRow[] {
+  const rank = (r: WarmRow) => r.price.marketCapRank ?? Number.POSITIVE_INFINITY;
+  return [...rows].sort((a, b) => rank(a) - rank(b)).slice(0, limit);
+}
 
 // **`now` 那个 config 字段没了** —— 时间从 `Clock` 取,测试用 `TestClock` 推。
 // 判据是 CODING.md 那条:只有测试会传的字段,就不该是字段(它当初有 5 个默认值散在各处)。

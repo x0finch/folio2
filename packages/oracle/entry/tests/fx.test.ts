@@ -1,6 +1,7 @@
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { FX_TTL_MS, FxRateResolver, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "../src";
+import { fxKey, readFx, writeFx } from "../src/fx";
 import { harness, upstreamDown } from "./fakes";
 
 // 现汇率服务:**读软过期、写按 TTL**。两个动词判据不同,下面每一条都在钉这件事。
@@ -202,5 +203,52 @@ describe("warm —— 写", () => {
 describe("TTL 的量级", () => {
   it("汇率的 TTL 数量级上属于慢变数据,不与长尾币价同档", () => {
     expect(FX_TTL_MS).toBeGreaterThan(PRICE_TTL_MS * 4);
+  });
+});
+
+// —— 缓存那一侧(键 / 形状 / 批量)——
+// 这几条直接打 `../src/fx` 里的读写口,把假端口当参数传进去:它们的 `R` 是 `never`。
+describe("缓存:键、形状、批量", () => {
+  it("键是 `fx:<大写币种>`,归一在造键那一处", async () => {
+    const h = setup();
+    await h.run(writeFx(h.cache, [{ currency: " eur ", usdPerUnit: 1.08 }]));
+
+    expect([...h.cache.entries.keys()]).toEqual(["fx:EUR"]);
+    expect(fxKey(" eur ")).toBe("fx:EUR");
+  });
+
+  it("读回是数;miss → none", async () => {
+    const h = setup();
+    await h.run(
+      Effect.gen(function* () {
+        yield* writeFx(h.cache, [{ currency: "EUR", usdPerUnit: 1.08 }]);
+        expect(yield* readFx(h.cache, "eur")).toEqual(Option.some(1.08));
+        expect(yield* readFx(h.cache, "JPY")).toEqual(Option.none());
+      }),
+    );
+  });
+
+  it("批量写一个批次 —— 逐键往返会把 1 次 D1 变成 N 次", async () => {
+    const h = setup();
+    await h.run(
+      writeFx(h.cache, [
+        { currency: "EUR", usdPerUnit: 1.08 },
+        { currency: "JPY", usdPerUnit: 0.0067 },
+        { currency: "GBP", usdPerUnit: 1.27 },
+      ]),
+    );
+    expect(h.cache.writes).toBe(1); // 三个币种,一个批次
+  });
+
+  // 缓存里躺着的可能是**上一个版本写的形状**(或者手动改过库)。走 Schema 解码,
+  // 解不动就当没有 → 回源重写一份,自愈;`as number` 的话坏值会一路端上屏。
+  it("不是数(旧形状 / 手改过库)→ 当没有,不把坏值端上屏", async () => {
+    const h = setup();
+    await h.run(
+      Effect.gen(function* () {
+        yield* h.cache.put(fxKey("EUR"), "1.08", FX_TTL_MS);
+        expect(yield* readFx(h.cache, "EUR")).toEqual(Option.none());
+      }),
+    );
   });
 });

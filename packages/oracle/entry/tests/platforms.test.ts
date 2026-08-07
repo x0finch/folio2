@@ -1,6 +1,7 @@
 import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS, PlatformResolver } from "../src";
+import { platformKey, readPlatforms, writePlatforms } from "../src/platforms";
 import { harness, now0, upstreamDown } from "./fakes";
 
 const CHAINS = [
@@ -193,5 +194,62 @@ describe("warm —— 写", () => {
     h.platformUpstream.fail = undefined;
     await h.run(Effect.flatMap(PlatformResolver, (p) => p.warm(["evm:1"])));
     expect(h.cache.entries.get("platform:evm:1")).toMatchObject({ value: { name: "Ethereum" } });
+  });
+});
+
+// —— 缓存那一侧(键 / 形状 / 批量)——
+// 这几条直接打 `../src/platforms` 里的读写口,把假端口当参数传进去:它们的 `R` 是 `never`。
+describe("缓存:键、形状、批量", () => {
+  it("键是 `platform:<键>`,TTL 命中长、否定短", async () => {
+    const h = setup();
+    await h.run(
+      writePlatforms(h.cache, [
+        { key: "evm:1", entry: { name: "Ethereum", logo: "e.png" } },
+        { key: "nochain", entry: { name: null } },
+      ]),
+    );
+
+    expect([...h.cache.entries.keys()].sort()).toEqual(["platform:evm:1", "platform:nochain"]);
+    expect(h.cache.entries.get("platform:evm:1")?.expiresAt).toBe(now0 + PLATFORM_TTL_MS);
+    expect(h.cache.entries.get("platform:nochain")?.expiresAt).toBe(now0 + PLATFORM_NEG_TTL_MS);
+    expect(h.cache.writes).toBe(1); // 两个键,一个批次
+  });
+
+  it("读回 `{name, logo}`;**否定缓存与「没这条」是两件事**;miss 的键不出现", async () => {
+    const h = setup();
+    await h.run(
+      Effect.gen(function* () {
+        yield* writePlatforms(h.cache, [
+          { key: "bitcoin", entry: { name: "Bitcoin" } },
+          // 问过、上游没有 —— 读得出来,只是没有名字。与「压根没问过」分开,
+          // 否则每一次预热都要为这一个键重拉整张链表。
+          { key: "nochain", entry: { name: null } },
+        ]);
+
+        const hits = yield* readPlatforms(h.cache, ["bitcoin", "nochain", "nope"]);
+        expect(hits.get("bitcoin")?.entry).toEqual({ name: "Bitcoin" });
+        expect(hits.get("nochain")?.entry).toEqual({ name: null });
+        expect(hits.has("nope")).toBe(false);
+      }),
+    );
+  });
+
+  it("批量读一次往返 —— 逐键点查会把总览的 1 次 D1 变成 N 次", async () => {
+    const h = setup();
+    const before = h.cache.reads;
+    await h.run(readPlatforms(h.cache, ["evm:1", "solana", "bitcoin"]));
+    expect(h.cache.reads - before).toBe(1); // 三个键,一次读
+  });
+
+  // 缓存里躺着的可能是**上一个版本写的形状**(或者手动改过库)。走 Schema 解码,
+  // 解不动就当没有 → 回源重写一份,自愈;`as` 断言的话旧形状会一路流到展示层。
+  it("形状不对 → 当没有,不把坏值端上屏", async () => {
+    const h = setup();
+    await h.run(
+      Effect.gen(function* () {
+        yield* h.cache.put(platformKey("evm:1"), { nome: "Ethereum" }, PLATFORM_TTL_MS);
+        expect((yield* readPlatforms(h.cache, ["evm:1"])).has("evm:1")).toBe(false);
+      }),
+    );
   });
 });

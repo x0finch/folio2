@@ -1,8 +1,8 @@
-import type { TokenCandidate } from "@folio/oracle-basic";
-import { DEFAULT_TOP_N } from "@folio/oracle-basic";
+import type { TokenCandidate, TokenMetaUpstream } from "@folio/oracle-basic";
+import { DEFAULT_TOP_N, normalizeSymbol } from "@folio/oracle-basic";
 import { CacheStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Context, Effect, Layer } from "effect";
-import { candidatesBySymbol, warmCatalogue } from "./cache";
+import { type WarmRow, warmBlob } from "./warm";
 
 // mint 的 symbol 那一档要问的候选源(#216)。**独立一个服务,不挂在 `TokenReader` 上。**
 //
@@ -21,6 +21,36 @@ export interface CandidateSource {
 }
 
 export const CandidateSource = Context.GenericTag<CandidateSource>("oracle/CandidateSource");
+
+// —— warm blob 的第三个读者(另两个在 ./tokens)——
+// 三条判据为什么不同、为什么都落在 blob 自己的 `asOf` 上,见 ./warm 的开头。
+
+/**
+ * 目录读者。**有就用,多旧都用;只有完全没有时才回源一次。**
+ *
+ * 它问的是「哪个币叫 POL」—— 这个答案几乎不变,不值得让写路径为它出网。而完全没有时躲不掉:
+ * 候选集为空意味着所有按 symbol 认的币(交易所持仓、没选币的手记)全都认不出来,新用户
+ * 第一次同步会集体没有价。因为 `user_cache` 过期不删,这一取一辈子只会发生一次。
+ *
+ * 代价:某个币新进前 1000,要等下一次橱窗刷新(或预热)之后才认得出来。可接受 —— 它本来
+ * 也得先爬进前 1000。
+ */
+export const warmCatalogue = (
+  cache: CacheStore,
+  upstream: TokenMetaUpstream,
+  topN: number,
+): Effect.Effect<readonly WarmRow[]> => warmBlob(cache, upstream, topN, () => false);
+
+// 按 symbol 筛候选。**与排行榜同一份 rows** —— 候选不额外存一份。
+export function candidatesBySymbol(rows: readonly WarmRow[], symbol: string): TokenCandidate[] {
+  const want = normalizeSymbol(symbol);
+  const out: TokenCandidate[] = [];
+  for (const r of rows) {
+    if (normalizeSymbol(r.info.symbol) !== want) continue;
+    out.push({ ref: r.info.ref, marketCapRank: r.price.marketCapRank });
+  }
+  return out;
+}
 
 export const candidateSourceLayer: Layer.Layer<CandidateSource, never, CacheStore | TokenUpstream> =
   Layer.effect(
