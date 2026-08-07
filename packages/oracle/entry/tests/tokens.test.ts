@@ -1,7 +1,7 @@
 import { dayBucketOf, MS_PER_DAY, PRICE_TTL_MS, type TokenInfo } from "@folio/oracle-basic";
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { TokenReader } from "../src";
+import { TokenService } from "../src";
 import { harness, now0, upstreamDown } from "./fakes";
 
 const NOW = now0; // 落在某个 UTC 日的中段
@@ -26,7 +26,7 @@ describe("富化 —— 两个 store 各读自己那半,服务层合成整行", 
     ]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.put(
           [{ tokenId: "tk_1", unitPrice: 60000, marketCapRank: 1, asOf: NOW }],
           PRICE_TTL_MS,
@@ -47,12 +47,12 @@ describe("富化 —— 两个 store 各读自己那半,服务层合成整行", 
 
   it("空输入不查库", async () => {
     const h = setup();
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.enrich([])))).toEqual(new Map());
+    expect(await h.run(Effect.flatMap(TokenService, (t) => t.enrich([])))).toEqual(new Map());
   });
 
   it("「上游认没认出来」就看 ref 空不空,不存额外状态", async () => {
     const h = setup([info({ id: "tk_1" }), info({ id: "tk_2", ref: null, symbol: "WAT" })]);
-    const got = await h.run(Effect.flatMap(TokenReader, (t) => t.enrich(["tk_1", "tk_2"])));
+    const got = await h.run(Effect.flatMap(TokenService, (t) => t.enrich(["tk_1", "tk_2"])));
 
     expect(got.get("tk_1")?.ref).toBe(SRC_BTC);
     expect(got.get("tk_2")?.ref).toBeNull();
@@ -69,7 +69,7 @@ describe("富化 —— 两个 store 各读自己那半,服务层合成整行", 
     ]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         expect(yield* tokens.logoUrlById("tk_1")).toEqual(Option.some("up.png"));
         expect(yield* tokens.logoUrlById("tk_2")).toEqual(Option.some("p.png"));
         expect(yield* tokens.logoUrlById("tk_3")).toEqual(Option.none());
@@ -84,7 +84,7 @@ describe("取价 —— 走同一个 SWR 编排", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: NOW }], PRICE_TTL_MS);
         expect(yield* tokens.priceOf("tk_1")).toEqual(
           Option.some(expect.objectContaining({ unitPrice: 60000, stale: false })),
@@ -98,7 +98,7 @@ describe("取价 —— 走同一个 SWR 编排", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: 0 }], PRICE_TTL_MS);
         yield* TestClock.adjust(Duration.millis(PRICE_TTL_MS + 1));
         h.upstream.prices.set(SRC_BTC, { unitPrice: 61000, asOf: NOW });
@@ -116,7 +116,7 @@ describe("取价 —— 走同一个 SWR 编排", () => {
     const h = setup([info({ id: "tk_1", ref: null })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 42, asOf: 0 }], 0);
         expect(Option.getOrThrow(yield* tokens.priceOf("tk_1"))).toMatchObject({
           unitPrice: 42,
@@ -131,7 +131,7 @@ describe("取价 —— 走同一个 SWR 编排", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: 0 }], 0);
         expect(Option.getOrThrow(yield* tokens.priceOf("tk_1"))).toMatchObject({
           unitPrice: 60000,
@@ -152,7 +152,7 @@ describe("批量刷 stale 价", () => {
     ]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "fresh", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
         yield* h.prices.put([{ tokenId: "stale", unitPrice: 1, asOf: 0 }], 0);
         h.upstream.prices.set("src/issued:ethereum", { unitPrice: 3000, asOf: NOW });
@@ -173,7 +173,7 @@ describe("批量刷 stale 价", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
         expect((yield* tokens.refreshStale(["tk_1"])).prices).toBe(0);
         expect(yield* tokens.refreshStale([])).toEqual({ prices: 0, infos: 0, degraded: false });
@@ -188,7 +188,7 @@ describe("批量刷 stale 价", () => {
   it("上游挂了 → 回 0 且 degraded、不抛", async () => {
     const h = setup([info({ id: "tk_1" })]);
     h.upstream.fail = upstreamDown();
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])))).toEqual({
+    expect(await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_1"])))).toEqual({
       prices: 0,
       infos: 0,
       degraded: true,
@@ -200,7 +200,7 @@ describe("批量刷 stale 价", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
         // info 也已刷过(`info()` 默认 infoStale: false)→ 两半都没有目标。
         expect(yield* tokens.refreshStale(["tk_1"])).toEqual({
@@ -223,7 +223,7 @@ describe("批量刷 stale 价", () => {
       storeReads += 1;
       return realGetByIds(ids);
     };
-    await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])));
+    await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_1"])));
     expect(storeReads).toBe(1);
   });
 });
@@ -245,7 +245,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     ];
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         expect((yield* tokens.refreshStale(["fresh", "stale", "unknown"])).infos).toBe(1);
         // 同上:只看 info 那半问了什么。
         expect(h.upstream.calls.filter((c) => c.startsWith("fetchTokens"))).toEqual([
@@ -273,7 +273,9 @@ describe("批量刷 stale 元信息(覆盖)", () => {
       { ref: "src/issued:usd-coin", symbol: "usdc", name: "USDC", logo: "usdc.png" },
     ];
 
-    expect((await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["t1"])))).infos).toBe(1);
+    expect((await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["t1"])))).infos).toBe(
+      1,
+    );
     expect(h.store.rows.get("t1")?.symbol).toBe("USDC");
     expect(h.store.rows.get("t1")?.name).toBe("USDC");
     expect(h.store.rows.get("t1")?.logo).toBe("usdc.png");
@@ -301,7 +303,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     ];
 
     expect(
-      (await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_pol"])))).infos,
+      (await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_pol"])))).infos,
     ).toBe(1);
     const row = h.store.rows.get("tk_pol");
     expect(row?.symbol).toBe("POL"); // 覆盖,不是填空槽
@@ -315,7 +317,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     const h = setup([info({ id: "tk_1", symbol: "OLD", logo: "old.png", infoStale: true })]);
     h.upstream.markets = [{ ref: SRC_BTC, symbol: "BTC", name: "Bitcoin" }];
 
-    await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])));
+    await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_1"])));
     expect(h.store.rows.get("tk_1")).toMatchObject({ symbol: "BTC", logo: "old.png" });
   });
 
@@ -323,7 +325,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     const h = setup([info({ id: "tk_1", symbol: "OLD", infoStale: true })]);
     h.upstream.fail = upstreamDown();
 
-    expect((await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])))).infos).toBe(
+    expect((await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_1"])))).infos).toBe(
       0,
     );
     expect(h.store.rows.get("tk_1")).toMatchObject({ symbol: "OLD", infoStale: true });
@@ -334,7 +336,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     h.upstream.fetchTokens = () =>
       Effect.succeed([{ ref: "src/issued:somebody-else", symbol: "ELSE", name: "Else" }]);
 
-    expect((await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])))).infos).toBe(
+    expect((await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_1"])))).infos).toBe(
       0,
     );
     expect(h.store.rows.get("tk_1")?.symbol).toBe("OLD");
@@ -344,7 +346,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         expect((yield* tokens.refreshStale(["tk_1"])).infos).toBe(0);
         expect((yield* tokens.refreshStale([])).infos).toBe(0);
         // info 那半没有目标 → 一次 `fetchTokens` 都不该发(价那半另有自己的用例)。
@@ -361,9 +363,9 @@ describe("边角", () => {
     h.upstream.prices.set(SRC_BTC, { unitPrice: 60000, asOf: NOW });
     h.upstream.prices.set("src/issued:stranger", { unitPrice: 1, asOf: NOW });
 
-    expect((await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])))).prices).toBe(
-      1,
-    );
+    expect(
+      (await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_1"])))).prices,
+    ).toBe(1);
     expect([...h.prices.current.keys()]).toEqual(["tk_1"]);
   });
 
@@ -371,7 +373,7 @@ describe("边角", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_gone", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
         const got = yield* tokens.enrich(["tk_1", "tk_gone"]);
         expect([...got.keys()]).toEqual(["tk_1"]);
@@ -391,7 +393,7 @@ describe("历史日价(按 token_id)", () => {
     ];
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.putDaily("tk_1", [{ dayBucket: TODAY - 3, unitPrice: 100 }]);
 
         expect(yield* tokens.priceSeries("tk_1", day(-3), day(-1))).toEqual([
@@ -414,7 +416,7 @@ describe("历史日价(按 token_id)", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.putDaily("tk_1", [
           { dayBucket: TODAY - 2, unitPrice: 1 },
           { dayBucket: TODAY - 1, unitPrice: 2 },
@@ -430,7 +432,7 @@ describe("历史日价(按 token_id)", () => {
     h.upstream.series = [{ atMs: NOW, unitPrice: 999 }];
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         expect(yield* tokens.priceSeries("tk_1", day(0), NOW)).toEqual([
           { atMs: day(0), unitPrice: 999 },
         ]);
@@ -446,7 +448,7 @@ describe("历史日价(按 token_id)", () => {
     h.upstream.fail = upstreamDown();
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.putDaily("tk_1", [{ dayBucket: TODAY - 2, unitPrice: 7 }]);
         expect(yield* tokens.priceSeries("tk_1", day(-2), day(-1))).toEqual([
           { atMs: day(-2), unitPrice: 7 },
@@ -459,7 +461,7 @@ describe("历史日价(按 token_id)", () => {
     const h = setup([info({ id: "unknown", ref: null }), info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         expect(yield* tokens.priceSeries("unknown", day(-2), day(-1))).toEqual([]);
         expect(yield* tokens.priceSeries("tk_1", day(-1), day(-2))).toEqual([]);
         expect(h.upstream.calls).toEqual([]);
@@ -471,7 +473,7 @@ describe("历史日价(按 token_id)", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.putDaily("tk_1", [{ dayBucket: TODAY - 5, unitPrice: 42 }]);
         expect(yield* tokens.priceAt("tk_1", day(-5) + 3_600_000)).toEqual(Option.some(42));
         expect(yield* tokens.priceAt("tk_1", day(-6))).toEqual(Option.none());
@@ -488,7 +490,7 @@ describe("历史日价(按 token_id)", () => {
     const firstDayOf2024 = Date.UTC(2024, 0, 1, 1, 0, 0);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.putDaily("tk_1", [
           { dayBucket: dayBucketOf(lastDayOf2023), unitPrice: 100 },
           { dayBucket: dayBucketOf(firstDayOf2024), unitPrice: 200 },
@@ -506,7 +508,7 @@ describe("历史日价(按 token_id)", () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* h.prices.putDaily("tk_1", [{ dayBucket: TODAY - 3, unitPrice: 7 }]);
         // 当日零点整(桶起点)也算当日。
         expect(yield* tokens.priceAt("tk_1", day(-3))).toEqual(Option.some(7));
@@ -522,7 +524,7 @@ describe("选币的取价(按 ref,不建行)", () => {
     const h = setup();
     h.upstream.prices.set(SRC_BTC, { unitPrice: 60000, change24h: 1.5, asOf: NOW });
 
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.priceByRef(SRC_BTC)))).toEqual(
+    expect(await h.run(Effect.flatMap(TokenService, (t) => t.priceByRef(SRC_BTC)))).toEqual(
       Option.some({ unitPrice: 60000, change24h: 1.5, asOf: NOW }),
     );
     // 这一刻用户只是在下拉里点了一下,还没提交 —— 什么都不该落库。
@@ -533,14 +535,14 @@ describe("选币的取价(按 ref,不建行)", () => {
   it("上游不认识这条 ref → none(表单让用户自己填)", async () => {
     const h = setup();
     expect(
-      await h.run(Effect.flatMap(TokenReader, (t) => t.priceByRef("src/issued:nope"))),
+      await h.run(Effect.flatMap(TokenService, (t) => t.priceByRef("src/issued:nope"))),
     ).toEqual(Option.none());
   });
 
   it("上游挂了 → none,不抛 —— 取不到价不该把选币流程打断", async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.priceByRef(SRC_BTC)))).toEqual(
+    expect(await h.run(Effect.flatMap(TokenService, (t) => t.priceByRef(SRC_BTC)))).toEqual(
       Option.none(),
     );
   });
@@ -554,7 +556,9 @@ describe("选币下拉的批量刷价(pricesByRefs,不建行)", () => {
     h.upstream.prices.set(SRC_BTC, { unitPrice: 60000, change24h: 1.5, asOf: NOW });
     h.upstream.prices.set(SRC_ETH, { unitPrice: 3000, change24h: -2, asOf: NOW });
 
-    const got = await h.run(Effect.flatMap(TokenReader, (t) => t.pricesByRefs([SRC_BTC, SRC_ETH])));
+    const got = await h.run(
+      Effect.flatMap(TokenService, (t) => t.pricesByRefs([SRC_BTC, SRC_ETH])),
+    );
     expect(got.get(SRC_BTC)).toEqual({ unitPrice: 60000, change24h: 1.5, asOf: NOW });
     expect(got.get(SRC_ETH)).toEqual({ unitPrice: 3000, change24h: -2, asOf: NOW });
     expect(h.store.rows.size).toBe(0);
@@ -563,7 +567,7 @@ describe("选币下拉的批量刷价(pricesByRefs,不建行)", () => {
 
   it("空入参 → 空 Map,不出网", async () => {
     const h = setup();
-    const got = await h.run(Effect.flatMap(TokenReader, (t) => t.pricesByRefs([])));
+    const got = await h.run(Effect.flatMap(TokenService, (t) => t.pricesByRefs([])));
     expect(got.size).toBe(0);
     expect(h.upstream.calls).toEqual([]);
   });
@@ -571,7 +575,7 @@ describe("选币下拉的批量刷价(pricesByRefs,不建行)", () => {
   it("上游挂了 → 空 Map,不抛 —— 刷价失败不该把下拉打断", async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
-    const got = await h.run(Effect.flatMap(TokenReader, (t) => t.pricesByRefs([SRC_BTC])));
+    const got = await h.run(Effect.flatMap(TokenService, (t) => t.pricesByRefs([SRC_BTC])));
     expect(got.size).toBe(0);
   });
 });
@@ -597,7 +601,7 @@ describe("橱窗与候选", () => {
     h.upstream.markets = markets;
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         expect((yield* tokens.topTokens(1)).map((t) => t.ref)).toEqual([SRC_BTC]);
         expect(h.upstream.calls).toEqual(["fetchMarkets:1000"]);
         // 第二次从 blob 出,不再预热 —— 缓存里始终只有一个键。
@@ -614,7 +618,7 @@ describe("橱窗与候选", () => {
   it("要的比有的多 → 给全部,不补空位", async () => {
     const h = setup();
     h.upstream.markets = [markets[0]];
-    const got = await h.run(Effect.flatMap(TokenReader, (t) => t.topTokens(50)));
+    const got = await h.run(Effect.flatMap(TokenService, (t) => t.topTokens(50)));
     expect(got.map((t) => t.ref)).toEqual([SRC_BTC]);
     expect(got.every((t) => t !== undefined)).toBe(true);
   });
@@ -622,13 +626,13 @@ describe("橱窗与候选", () => {
   it("预热失败不抛,返回空让调用方降级", async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.topTokens(10)))).toEqual([]);
+    expect(await h.run(Effect.flatMap(TokenService, (t) => t.topTokens(10)))).toEqual([]);
   });
 
   it("搜索恒回源(结果与用户无关)", async () => {
     const h = setup();
     h.upstream.searchResults = [{ ref: SRC_BTC, symbol: "BTC", name: "Bitcoin" }];
-    expect(await h.run(Effect.flatMap(TokenReader, (t) => t.search("bit")))).toHaveLength(1);
+    expect(await h.run(Effect.flatMap(TokenService, (t) => t.search("bit")))).toHaveLength(1);
     expect(h.upstream.calls).toEqual(["searchTokens:bit"]);
   });
 
@@ -637,7 +641,7 @@ describe("橱窗与候选", () => {
   it("搜索失败 → 错误交给调用方,不当成「没搜到」", async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
-    const result = await h.run(Effect.either(Effect.flatMap(TokenReader, (t) => t.search("bit"))));
+    const result = await h.run(Effect.either(Effect.flatMap(TokenService, (t) => t.search("bit"))));
     expect(result._tag).toBe("Left");
   });
 });
@@ -647,7 +651,7 @@ describe("降级要留痕", () => {
   it("上游挂了 → 有一条 warning,带 tag / pathname / 状态码,而且不带 query", async () => {
     const h = setup([info({ id: "tk_1" })]);
     h.upstream.fail = upstreamDown();
-    await h.run(Effect.flatMap(TokenReader, (t) => t.refreshStale(["tk_1"])));
+    await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_1"])));
 
     const warn = h.logs.find((l) => l.level === "WARN");
     expect(warn?.message).toContain("upstream fetch failed");

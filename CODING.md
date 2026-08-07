@@ -96,8 +96,16 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 - **端口的 Tag 与 interface 同名**(`Context.GenericTag`,`@effect/platform` 的 `FileSystem` /
   `HttpClient` 同款):契约名本身就是全仓的词表,不值得为了挂一个 `static layer` 把它们改名成 `*Api`。
   `packages/clients/*` 那边的 `class XxxClient extends Context.Tag(...)<XxxClient, XxxClientApi>()`
-  是「一个包一个 SDK 出口」的形状,两者各自成立。**服务名单数 + 角色后缀**(`TokenReader` /
-  `FxRateResolver`),不用复数集合名(`Tokens` / `FxRates`)。
+  是「一个包一个 SDK 出口」的形状,两者各自成立。
+- **服务名:单数 + 角色后缀**,不用复数集合名(`Tokens` / `FxRates` 读起来像数据类型)。
+  后缀按这个优先级挑:**精确角色后缀(`Store` / `Upstream` / `Source` / `Client`)> 裸能力名
+  (`Clock` / `Logger` 那款)> `Service`**。
+  - **`Resolver` 不要用** —— Effect 里 `RequestResolver` 是核心概念(`Effect.request` 的批量/
+    去重机制),普通服务叫 `XxxResolver` 会让读的人先猜错一轮。参考层的 `PlatformResolver`
+    因此改名 `PlatformService`。
+  - `Service` 是**兜底档**,只在前两档都不成立时用:动词面太杂(读+写+暖+搜)的领域门面没有
+    不撒谎的精确后缀,而裸名(`Token` / `Platform`)会撞仓里已有的数据词。参考层的三个门面
+    (`TokenService` / `FxService` / `PlatformService`)就是这一档;端口层占的是第一档,不动。
 
 ### 错误
 

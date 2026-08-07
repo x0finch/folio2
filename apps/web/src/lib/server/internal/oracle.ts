@@ -7,13 +7,8 @@ import {
   userTokenPriceStoreLayer,
   userTokenStoreLayer,
 } from "@folio/db";
-import {
-  type OraclePorts,
-  type OracleServices,
-  oracleLayer,
-  type RefIndexWarmer,
-  refIndexWarmerLayer,
-} from "@folio/oracle";
+import { type OraclePorts, type OracleServices, oracleLayer } from "@folio/oracle";
+import type { GlobalTokenRefIndexStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import {
   coinGeckoFxUpstreamLayer,
   coinGeckoNamerLayer,
@@ -109,19 +104,20 @@ export const runOracle = <A>(
 /**
  * 全局维护任务(刷 `global_token_ref_index`)。**不带 userId** —— 这张表跟任何用户无关
  * (ADR 0022),所以 per-user 的那三张 store 压根不建。
+ *
+ * `R` 上是**两个端口**而不是一个服务:`warmRefIndex` / `refIndexRefreshedAt` 没有 Tag
+ * (见 `@folio/oracle` 的 `ref-index.ts` —— 那个 Tag 从来没有被换过,只是仪式),
+ * 于是这里少一层 `Layer.provide(refIndexWarmerLayer, …)` 嵌套,直接把端口喂进去。
  */
 export const runOracleWarm = <A>(
-  effect: Effect.Effect<A, UpstreamError, RefIndexWarmer>,
+  effect: Effect.Effect<A, UpstreamError, GlobalTokenRefIndexStore | TokenUpstream>,
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(
-        Layer.provide(
-          refIndexWarmerLayer,
-          Layer.merge(
-            Layer.provide(globalTokenRefIndexStoreLayer, databaseLayer(env)),
-            coinGeckoTokenUpstreamLayer(cgConfig()),
-          ),
+        Layer.merge(
+          Layer.provide(globalTokenRefIndexStoreLayer, databaseLayer(env)),
+          coinGeckoTokenUpstreamLayer(cgConfig()),
         ),
       ),
       Effect.provide(logTapeLogger),

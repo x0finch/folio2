@@ -4,21 +4,22 @@ import { CacheStore, PlatformUpstream } from "@folio/oracle-basic/ports";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { degradeTo } from "../internal/degrade";
 
-// 平台的名与图。与汇率同款两个动词、同款判据:`resolve` 读(零网络、软过期),`warm` 写(过期才拉)。
+// 平台(链 ∪ 场馆)的名与图。与汇率同款两个动词、同款判据:`resolve` 读(零网络、软过期),
+// `warm` 写(过期才拉)。
 //
 // **「一个平台显示成什么」整个归本模块所有**(ADR 0005/0006 的收口):没缓存、上游没收录、
 // 缓存过期 —— 三种情况调用方都不需要区分,`resolve` 一律给一个能上屏的名字。
 //
 // 读写都走缓存的**批量**那两个口:一个用户的链就那么几条,但展示时每条都要,逐键点查等于
 // 把总览的一次 D1 往返变成 N 次(见 `CacheStore` 的注释)。
-export interface PlatformResolver {
+export interface PlatformService {
   // 每个 key 都给一份展示。命中真名就用真名,否则按 key 推一个兜底名。**不出网、一次读。**
   resolve(keys: readonly string[]): Effect.Effect<Map<string, PlatformMeta>>;
   // 同步后预热:这些 key 里有缺的或过期的 → 拉一次整张链表 → **一个批次写回这几个 key**。
   warm(keys: readonly string[]): Effect.Effect<void>;
 }
 
-export const PlatformResolver = Context.GenericTag<PlatformResolver>("oracle/PlatformResolver");
+export const PlatformService = Context.GenericTag<PlatformService>("oracle/PlatformService");
 
 const cap = (s: string): string => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
@@ -80,7 +81,7 @@ const make = Effect.gen(function* () {
   const cache = yield* CacheStore;
   const upstream = yield* PlatformUpstream;
 
-  const resolver: PlatformResolver = {
+  const service: PlatformService = {
     resolve: (keys) =>
       Effect.gen(function* () {
         const unique = [...new Set(keys)];
@@ -140,11 +141,11 @@ const make = Effect.gen(function* () {
       }),
   };
 
-  return resolver;
+  return service;
 });
 
-export const platformResolverLayer: Layer.Layer<
-  PlatformResolver,
+export const platformServiceLayer: Layer.Layer<
+  PlatformService,
   never,
   CacheStore | PlatformUpstream
-> = Layer.effect(PlatformResolver, make);
+> = Layer.effect(PlatformService, make);

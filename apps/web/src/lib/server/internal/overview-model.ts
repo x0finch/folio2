@@ -1,5 +1,5 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import { PlatformResolver, TokenReader } from "@folio/oracle";
+import { PlatformService, TokenService } from "@folio/oracle";
 import { fiatCodeOf, type TokenRecord, type ValuationMode } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { type OverviewBalance, toAccountSections } from "../../account-view";
@@ -16,7 +16,7 @@ import { deriveLiveAccountTotals, liveValue } from "./live-value";
 
 export interface OverviewDeps {
   // 代币富化(`enrich`)与平台展示(`resolve`)不在这里 —— 它们是 `R` 通道上的
-  // `TokenReader` / `PlatformResolver`,由调用方一次 `runOracle` 供上。
+  // `TokenService` / `PlatformService`,由调用方一次 `runOracle` 供上。
   // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platforms。
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
   // 估值模式(Phase 3,#81):读时现推 value 用。缺省 self-first(= 旧行为);per-user 设置接入见 P3-3。
@@ -58,7 +58,7 @@ export const buildOverview = (
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
   { connectorMeta, mode = "self-first", fiatRefs }: OverviewDeps,
-): Effect.Effect<OverviewView, never, TokenReader | PlatformResolver> =>
+): Effect.Effect<OverviewView, never, TokenService | PlatformService> =>
   Effect.gen(function* () {
     const balancesOf = (id: string) => (byAccount.get(id)?.balances ?? []) as OverviewBalance[];
     // 法币身份:该 token 有 fiat 命名者的 ref、且经 fiatCodeOf 落在白名单内 → 是法币(身份驱动,不看 symbol)。
@@ -92,7 +92,7 @@ export const buildOverview = (
         ...defiFlat.map((x) => x.id),
       ]),
     ];
-    const tokens = yield* TokenReader;
+    const tokens = yield* TokenService;
     const [enriched, liveTotals] = yield* Effect.all(
       [tokens.enrich(idsToEnrich), deriveLiveAccountTotals(accounts, byAccount, mode)],
       { concurrency: 2 },
@@ -131,7 +131,7 @@ export const buildOverview = (
     // 场馆键(manual/exchange:/perp:)走连接器自带 name+logo,不进 platforms.resolve;只把链键送去查(#52)。
     const platformIds = [...new Set(holdings.flatMap((h) => h.sources.map((s) => s.platform.id)))];
     const chainIds = platformIds.filter((id) => !connectorMeta?.(id));
-    const platformMeta = yield* Effect.flatMap(PlatformResolver, (p) => p.resolve(chainIds));
+    const platformMeta = yield* Effect.flatMap(PlatformService, (p) => p.resolve(chainIds));
     for (const h of holdings) {
       for (const s of h.sources) {
         const cm = connectorMeta?.(s.platform.id);

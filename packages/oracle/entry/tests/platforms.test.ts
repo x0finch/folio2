@@ -1,7 +1,7 @@
 import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
 import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { PlatformResolver } from "../src";
+import { PlatformService } from "../src";
 import { platformKey, readPlatforms, writePlatforms } from "../src/services/platforms";
 import { harness, now0, upstreamDown } from "./fakes";
 
@@ -18,7 +18,7 @@ describe("resolve —— 读", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const p = yield* PlatformResolver;
+        const p = yield* PlatformService;
         yield* p.warm(["evm:1"]);
 
         const m = yield* p.resolve(["evm:1", "solana", "manual", "evm:999"]);
@@ -36,7 +36,7 @@ describe("resolve —— 读", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const p = yield* PlatformResolver;
+        const p = yield* PlatformService;
         yield* p.warm(["nosuchchain"]); // 上游链表里没有 → 写否定缓存
         expect((yield* p.resolve(["nosuchchain"])).get("nosuchchain")).toEqual({
           key: "nosuchchain",
@@ -50,7 +50,7 @@ describe("resolve —— 读", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const p = yield* PlatformResolver;
+        const p = yield* PlatformService;
         yield* p.warm(["evm:1"]);
 
         yield* TestClock.adjust(Duration.millis(PLATFORM_TTL_MS * 2));
@@ -64,7 +64,7 @@ describe("resolve —— 读", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const p = yield* PlatformResolver;
+        const p = yield* PlatformService;
         yield* p.warm(["evm:1", "solana"]);
         const before = h.cache.reads;
 
@@ -78,7 +78,7 @@ describe("resolve —— 读", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const p = yield* PlatformResolver;
+        const p = yield* PlatformService;
         const before = h.cache.reads;
         expect(yield* p.resolve([])).toEqual(new Map());
         expect(h.cache.reads).toBe(before);
@@ -92,7 +92,7 @@ describe("warm —— 写", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const p = yield* PlatformResolver;
+        const p = yield* PlatformService;
         yield* p.warm(["evm:1", "solana"]);
         expect(h.platformUpstream.fetches).toBe(1);
 
@@ -104,15 +104,13 @@ describe("warm —— 写", () => {
 
   it("**只写被问到的那几个键**,不是整张两百行的表", async () => {
     const h = setup();
-    await h.run(Effect.flatMap(PlatformResolver, (p) => p.warm(["evm:1"])));
+    await h.run(Effect.flatMap(PlatformService, (p) => p.warm(["evm:1"])));
     expect([...h.cache.entries.keys()]).toEqual(["platform:evm:1"]); // 上游给了三条,只写这一条
   });
 
   it("**一个批次写回**,不是逐键往返", async () => {
     const h = setup();
-    await h.run(
-      Effect.flatMap(PlatformResolver, (p) => p.warm(["evm:1", "solana", "nosuchchain"])),
-    );
+    await h.run(Effect.flatMap(PlatformService, (p) => p.warm(["evm:1", "solana", "nosuchchain"])));
     expect(h.cache.writes).toBe(1); // 三个键(含一条否定)一个批次
     expect([...h.cache.entries.keys()].sort()).toEqual([
       "platform:evm:1",
@@ -125,7 +123,7 @@ describe("warm —— 写", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const p = yield* PlatformResolver;
+        const p = yield* PlatformService;
         yield* p.warm(["nosuchchain"]);
         expect(h.cache.entries.get("platform:nosuchchain")).toMatchObject({
           value: { name: null },
@@ -143,7 +141,7 @@ describe("warm —— 写", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const p = yield* PlatformResolver;
+        const p = yield* PlatformService;
         yield* p.warm(["evm:1", "nosuchchain"]);
 
         expect(PLATFORM_NEG_TTL_MS).toBeLessThan(PLATFORM_TTL_MS);
@@ -160,7 +158,7 @@ describe("warm —— 写", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const p = yield* PlatformResolver;
+        const p = yield* PlatformService;
         yield* p.warm(["evm:1"]);
 
         yield* TestClock.adjust(Duration.millis(PLATFORM_TTL_MS + 1));
@@ -179,7 +177,7 @@ describe("warm —— 写", () => {
 
   it("空输入 → 一次都不出网", async () => {
     const h = setup();
-    await h.run(Effect.flatMap(PlatformResolver, (p) => p.warm([])));
+    await h.run(Effect.flatMap(PlatformService, (p) => p.warm([])));
     expect(h.platformUpstream.fetches).toBe(0);
   });
 
@@ -188,12 +186,12 @@ describe("warm —— 写", () => {
   it("上游挂了 → 什么都不写(**不是**写一堆否定缓存),下一轮照旧重试", async () => {
     const h = setup();
     h.platformUpstream.fail = upstreamDown();
-    await h.run(Effect.flatMap(PlatformResolver, (p) => p.warm(["evm:1", "solana"])));
+    await h.run(Effect.flatMap(PlatformService, (p) => p.warm(["evm:1", "solana"])));
     expect(h.cache.entries.size).toBe(0);
     expect(h.cache.writes).toBe(0);
 
     h.platformUpstream.fail = undefined;
-    await h.run(Effect.flatMap(PlatformResolver, (p) => p.warm(["evm:1"])));
+    await h.run(Effect.flatMap(PlatformService, (p) => p.warm(["evm:1"])));
     expect(h.cache.entries.get("platform:evm:1")).toMatchObject({ value: { name: "Ethereum" } });
   });
 });

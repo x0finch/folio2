@@ -1,4 +1,4 @@
-import { FxRateResolver, TokenReader } from "@folio/oracle";
+import { FxService, TokenService } from "@folio/oracle";
 import { DEFAULT_TOP_N, FIAT_NAMER, tokenTicket, type UpstreamToken } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
@@ -121,7 +121,7 @@ export const listTokenCatalogue = createServerFn({ method: "GET" })
         (
           await runOracle(
             context.userId,
-            Effect.flatMap(TokenReader, (t) => t.topTokens(DEFAULT_TOP_N)),
+            Effect.flatMap(TokenService, (t) => t.topTokens(DEFAULT_TOP_N)),
           )
         ).map(toOption),
     );
@@ -149,7 +149,7 @@ export const listFiatOptions = createServerFn({ method: "GET" })
     return runOracle(
       context.userId,
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(base.map((o) => o.symbol));
         const asOf = yield* Clock.currentTimeMillis;
         return yield* Effect.forEach(base, (o) =>
@@ -178,7 +178,7 @@ export const listTokens = createServerFn({ method: "GET" })
         (
           await runOracle(
             context.userId,
-            Effect.flatMap(TokenReader, (t) => t.search(q)),
+            Effect.flatMap(TokenService, (t) => t.search(q)),
           )
         ).map(toOption),
     );

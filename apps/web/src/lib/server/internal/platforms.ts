@@ -1,4 +1,4 @@
-import { PlatformResolver } from "@folio/oracle";
+import { PlatformService } from "@folio/oracle";
 import { Effect } from "effect";
 import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
@@ -24,6 +24,6 @@ export async function warmPlatformsForUser(userId: string): Promise<void> {
   if (keys.size === 0) return;
   await runOracle(
     userId,
-    Effect.flatMap(PlatformResolver, (p) => p.warm([...keys])),
+    Effect.flatMap(PlatformService, (p) => p.warm([...keys])),
   );
 }

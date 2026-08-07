@@ -14,7 +14,7 @@ import {
   type ProviderNeeds,
 } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
-import { FxRateResolver, TokenMinter, TokenReader } from "@folio/oracle";
+import { FxService, TokenService } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
@@ -76,7 +76,7 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   // 那层 catch 连自己的 bug 一起吞,而参考层已经把「上游的锅」与「我们的锅」分开了。
   await runOracle(
     userId,
-    Effect.flatMap(FxRateResolver, (fx) => fx.warm()),
+    Effect.flatMap(FxService, (fx) => fx.warm()),
   );
   // 新参考层的目录(市值前 N 名):**唯一主动让它跟上的那条路**(#216)。
   // 写路径(mint)按设计永不刷 —— 它只要「哪个币叫 POL」,不该为此让用户等;选币下拉只在
@@ -84,7 +84,7 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   // 内部按一周的 TTL 门控,所以绝大多数同步在这里零请求。放这里正因为这是 best-effort 的位置。
   const rows = await runOracle(
     userId,
-    Effect.flatMap(TokenReader, (t) => t.refreshCatalogue()),
+    Effect.flatMap(TokenService, (t) => t.refreshCatalogue()),
   );
   syncLog.debug("catalogue warmed", { rows });
 }
@@ -219,7 +219,7 @@ export function buildSyncDeps(): SyncDeps {
       if (refs.length === 0) return new Map();
       return runOracle(
         userId,
-        Effect.flatMap(TokenMinter, (m) => m.of(refs)),
+        Effect.flatMap(TokenService, (t) => t.mint(refs)),
       );
     },
     // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);

@@ -5,8 +5,8 @@ import {
 } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { type MintInput, TokenMinter } from "../src";
-import type { CandidateSource } from "../src/services/candidates";
+import { type MintInput, TokenService } from "../src";
+import type { CandidateSource } from "../src/internal/candidates";
 import { harness } from "./fakes";
 
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
@@ -20,7 +20,7 @@ const seed = (symbol: string, name?: string, providerLogo?: string) => ({
   providerLogo,
 });
 
-// 候选源:mint 的 symbol 那一档。真实现从 warm rows 里筛(见 cache.ts),这里直接给。
+// 候选源:mint 的 symbol 那一档。真实现从 warm rows 里筛(见 internal/candidates.ts),这里直接给。
 // **记调用次数** —— 「有没有走到 symbol 这一档」本身就是断言对象:#210 的闸在合约上会提前返回,
 // 不记次数的话,一条本想验证判官的用例会因为压根没走到判官而绿掉(空转)。
 interface RecordingCandidates extends CandidateSource {
@@ -38,8 +38,9 @@ const candidatesOf = (map: Record<string, TokenCandidate[]>): RecordingCandidate
   };
 };
 
-// mint 走 Tag → Layer(生产那条路);`mint.of` 只是这一层之上的一个 Promise 小把手,
-// 好让这一整组用例保持原样的 async/await 读法 —— 它不是第二条构造路。
+// mint 走 Tag → Layer(生产那条路):它是 `TokenService.mint`,而顶掉候选源靠换 `CandidateSource`
+// 那一个 layer —— 仍然是同一条构造路。`mint.of` 只是这一层之上的一个 Promise 小把手,
+// 好让这一整组用例保持原样的 async/await 读法(所以这个局部名字留着,不跟着服务改)。
 function setup(opts?: {
   index?: Record<string, string>;
   candidates?: Record<string, TokenCandidate[]>;
@@ -52,7 +53,8 @@ function setup(opts?: {
     candidates,
   });
   const mint = {
-    of: (inputs: readonly MintInput[]) => h.run(Effect.flatMap(TokenMinter, (m) => m.of(inputs))),
+    of: (inputs: readonly MintInput[]) =>
+      h.run(Effect.flatMap(TokenService, (t) => t.mint(inputs))),
   };
   return { h, store: h.store, refIndex: h.refIndex, candidates, mint };
 }

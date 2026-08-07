@@ -17,14 +17,32 @@ import {
   PRICE_TTL_MS,
   WARM_TTL_MS,
 } from "@folio/oracle-basic";
-import { CacheStore, TokenPriceStore, TokenStore, TokenUpstream } from "@folio/oracle-basic/ports";
+import {
+  CacheStore,
+  GlobalTokenRefIndexStore,
+  Namer,
+  TokenPriceStore,
+  TokenStore,
+  TokenUpstream,
+} from "@folio/oracle-basic/ports";
 import { Clock, Context, Effect, Layer, Option } from "effect";
+import { CandidateSource } from "../internal/candidates";
 import { degradeTo, logDegraded } from "../internal/degrade";
+import { type MintInput, mintOf } from "../internal/mint";
 import { swr } from "../internal/refresh";
 import { type WarmRow, warmBlob } from "../internal/warm";
 
-// 读路径。**没有「解析」这一步** —— 拿 token_id 直接取名字、图、现价、涨跌、市值排名。
-// 「这是哪个币」在写路径(mint)就定死并冻进了快照,读的时候不再从 tokenRef 反推。
+// 代币这个领域的门面 —— **读与写在同一个服务上**。
+//
+// 以前是两个(`TokenReader` / `TokenMinter`),按「读路径 / 写路径」分。那条线名不副实:
+// 「读」那半自己就在写(`refreshStale` 覆盖写 info 与价、`priceSeries` 往
+// `token_daily_prices` 落过去日、`refreshCatalogue` 整份重写 warm blob)。真正的那条线
+// 不在读写之间,而在**「这是哪个币」何时定死** —— `mint` 在写快照之前把身份定死并冻进去,
+// 其余方法一律拿 token_id 直接取数、不再从 tokenRef 反推(ADR 0021)。这条线是**语义**,
+// 由 `mint` 这个方法名与它的位置表达,不需要再切一个 Tag 来表达。
+//
+// mint 那半的实现整块在 `../internal/mint`,连同它那条「不许 import 任何上游」的红线;
+// 本文件只放接口、Tag 与装配。
 //
 // 「上游认没认出来」不是一种状态:看 `TokenInfo.ref` 空不空(ADR 0021),行上没有孤儿标记、
 // 没有复查时刻,也没有带数据源名字的字段。
@@ -44,7 +62,14 @@ export interface RefreshStaleReport {
   degraded: boolean;
 }
 
-export interface TokenReader {
+export interface TokenService {
+  // —— 写:tokenRef → token_id ——
+  // 一批 (ref, provider 报的元信息) → 各自的 token_id。输入里重复的 ref 只处理一次。
+  // **全程不碰网络**,写快照之前必须先过这一步(快照行的 token_id 必填)。实现与那条保证
+  // 的确切形式见 `../internal/mint`。
+  mint(inputs: readonly MintInput[]): Effect.Effect<Map<TokenRef, string>>;
+
+  // —— 读 ——
   // 富化:按内部 id 批量读整行(info + 价合并)。输入**不再需要** symbol 或 tokenRef。
   enrich(ids: readonly string[]): Effect.Effect<Map<string, TokenRecord>>;
   // 按主键读一行的上游图 URL(logo 代理端点用):源给的优先,没有就用连接器自带那张。
@@ -96,9 +121,11 @@ export interface TokenReader {
   refreshCatalogue(): Effect.Effect<number>;
 }
 
-export const TokenReader = Context.GenericTag<TokenReader>("oracle/TokenReader");
+export const TokenService = Context.GenericTag<TokenService>("oracle/TokenService");
 
-// —— warm blob 的两个读者(第三个是候选源,在 ./candidates)——
+export type { MintInput };
+
+// —— warm blob 的两个读者(第三个是候选源,在 ../internal/candidates)——
 // 三条判据为什么不同、为什么都落在 blob 自己的 `asOf` 上,见 ./warm 的开头。
 
 /**
@@ -141,8 +168,15 @@ const make = Effect.gen(function* () {
   const cache = yield* CacheStore;
   const upstream = yield* TokenUpstream;
 
+  // mint 那半的四个依赖。**这里是它们唯一一次与上游同处一个作用域** —— 再往下就交给
+  // `mintOf`,而它的 `MintDeps` 里一个上游都没有(`../internal/mint` 的红线)。
+  const refIndex = yield* GlobalTokenRefIndexStore;
+  const candidates = yield* CandidateSource;
+  const namer = yield* Namer;
+  const mint = mintOf({ store, refIndex, candidates, namer });
+
   // 橱窗读者:价旧了就刷(用户点开下拉、正看着这些数字)。**候选源不走这条** ——
-  // 它在写路径上,判据不同,见 ./candidates(#216)。
+  // 它在写路径上,判据不同,见 ../internal/candidates(#216)。
   const rows = warmMarkets(cache, upstream, DEFAULT_TOP_N);
 
   const priceSeries = (
@@ -243,7 +277,8 @@ const make = Effect.gen(function* () {
       return { written: writes.length, degraded: false };
     });
 
-  const reader: TokenReader = {
+  const service: TokenService = {
+    mint,
     priceSeries,
 
     enrich: (ids) =>
@@ -363,11 +398,20 @@ const make = Effect.gen(function* () {
       Effect.map(refreshWarmCatalogue(cache, upstream, DEFAULT_TOP_N), (all) => all.length),
   };
 
-  return reader;
+  return service;
 });
 
-export const tokenReaderLayer: Layer.Layer<
-  TokenReader,
+// `CandidateSource` 留在这条 `R` 上,由 `../layer` 在装配时喂进来并**吃掉** —— 于是装配点
+// 的 `R` 里看不到它(它是包内 Tag,从不出包),而顶掉它仍然只需换一个 layer,不必另开一条
+// 构造路(见 `../internal/candidates` 里那段「注入缝」)。
+export const tokenServiceLayer: Layer.Layer<
+  TokenService,
   never,
-  TokenStore | TokenPriceStore | CacheStore | TokenUpstream
-> = Layer.effect(TokenReader, make);
+  | TokenStore
+  | TokenPriceStore
+  | CacheStore
+  | TokenUpstream
+  | GlobalTokenRefIndexStore
+  | Namer
+  | CandidateSource
+> = Layer.effect(TokenService, make);

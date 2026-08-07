@@ -24,7 +24,7 @@ flowchart LR
     O --> F["provider.fetchBalances<br/>openCreds 解密"]
     F --> N["归一 Balance<br/>带 tokenRef(必填)"]
     N --> RV["revalue<br/>定 value + 捕获 selfPrice"]
-    RV --> M["mint.of<br/>tokenRef → token_id(纯本地)"]
+    RV --> M["TokenService.mint<br/>tokenRef → token_id(纯本地)"]
     M --> S["写 D1 快照<br/>行带 token_id"]
     F -.失败.-> E["报错 · 不落库"]
     M -.失败.-> M2["token_id 留空<br/>快照照落,下次补"]
@@ -69,7 +69,8 @@ function evmTokenRef(chainId: number, contract: string | undefined): string { /*
 
 ```ts
 // apps/web/src/lib/server/internal/sync-deps.ts —— buildSyncDeps().writeSnapshot
-const idByRef = await oracleFor(userId).mint.of(refs);   // 纯本地,一次批量点查
+// 纯本地,一次批量点查。`runOracle(userId, …)` 按 userId 现建 per-user 的 store layer。
+const idByRef = await runOracle(userId, Effect.flatMap(TokenService, (t) => t.mint(refs)));
 return db.writeSnapshot(userId, accountId, {
   ...input,
   balances: rows.map((b) => ({ ...b, tokenId: b.tokenRef ? idByRef.get(b.tokenRef) : undefined })),
@@ -90,7 +91,7 @@ mint 失败是 best-effort:快照照落、新列留空、下次同步补上。�
 - 逐账户隔离与重试:`packages/sync/src/orchestrator.ts` `syncAccount`
 - 凭据解密:`apps/web/src/lib/creds.ts` `openCreds`(仅此处,用完即弃)
 - provider 取数契约:`packages/connectors/basic/src/provider.ts` `BalanceProvider.fetchBalances`
-- 认币决策树:`packages/oracle/entry/src/services/mint.ts` `createMint`
+- 认币决策树:`packages/oracle/entry/src/internal/mint.ts` `mintOf`(`TokenService.mint` 的实现)
 - 落库(封装 op):`packages/db/src/queries/snapshots.ts` `writeSnapshot`(userId-scoped)
 
 ---

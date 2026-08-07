@@ -1,4 +1,4 @@
-import { TokenReader } from "@folio/oracle";
+import { TokenService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
@@ -35,7 +35,7 @@ export const refreshStalePrices = createServerFn({ method: "POST" })
     // 各自失败不拖垮对方(内部 `Effect.either` + 记一行),`degraded` 带回来只为进日志。
     const report = await runOracle(
       context.userId,
-      Effect.flatMap(TokenReader, (tokens) => tokens.refreshStale(ids)),
+      Effect.flatMap(TokenService, (tokens) => tokens.refreshStale(ids)),
     );
     priceLog.info("stale prices refreshed", { ...report });
     return { refreshed: report.prices };

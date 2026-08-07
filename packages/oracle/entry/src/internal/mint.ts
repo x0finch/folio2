@@ -1,42 +1,57 @@
 import type { ProviderTokenSeed, TokenRef, TokenRefHit } from "@folio/oracle-basic";
 import { FIAT_NAMER, fiatSeed, normalizeSymbol } from "@folio/oracle-basic";
-import { GlobalTokenRefIndexStore, Namer, TokenStore } from "@folio/oracle-basic/ports";
+import type { GlobalTokenRefIndexStore, Namer, TokenStore } from "@folio/oracle-basic/ports";
 import {
   tokenRef as buildRef,
   hasTrustedSymbol,
   type ParsedTokenRef,
   parseTokenRef,
 } from "@folio/oracle-ref";
-import { Context, Effect, Layer, Option } from "effect";
-import { pickByConfidence } from "../internal/confidence";
-import { CandidateSource } from "./candidates";
+import { Effect, Option } from "effect";
+import type { CandidateSource } from "./candidates";
+import { pickByConfidence } from "./confidence";
 
-// 写路径要的那一步:拿一条 tokenRef 换出一个 `token_id`。
+// 写路径要的那一步:拿一条 tokenRef 换出一个 `token_id`。**`TokenService` 的一个方法**
+// (`mint`),实现整块住在这里 —— 服务那个文件只放接口、Tag 与装配。
 //
-// **全程不碰网络** —— 这不是约定而是**类型事实**,而且现在在 `R` 通道上一眼看得见:
-// 这个 layer 要的是 `TokenStore | GlobalTokenRefIndexStore | CandidateSource | Namer`,
-// 里面没有 `TokenUpstream`。查的是本地 ref 行,miss 才查本地全局映射,再 miss 才按 symbol 猜
-// (那一档问 `CandidateSource`,它读的是缓存目录 —— 唯一那条冷启动出网路径收在它自己的 layer 里)。
-// 写快照之前必须先过这里(快照行的 token_id 必填),所以它必须是本地的、快的。
-export interface TokenMinter {
-  // 一批 (ref, provider 报的元信息) → 各自的 token_id。输入里重复的 ref 只处理一次。
-  of(inputs: readonly MintInput[]): Effect.Effect<Map<TokenRef, string>>;
-}
-
+// **全程不碰网络。** 这条保证的形式变了,得说清楚:以前 mint 是自己的服务,
+// `tokenMinterLayer` 的 `R` 里没有 `TokenUpstream`,于是「不出网」是**装配层的类型事实**。
+// 现在读写合成一个 `TokenService`,那个 layer 的 `R` 里必然有 `TokenUpstream`(读路径要它),
+// 所以保证降级为**本文件的签名 + 一条红线**:
+//
+//   · `MintDeps` 里**没有任何 `*Upstream`**,而 `mintOf` 只吃 `MintDeps` —— 出网所需的东西
+//     压根不在这个函数的作用域里(不是注释,是参数类型)
+//   · **红线:本文件不许 import 任何 `*Upstream` 端口。** 往 `MintDeps` 上加一个上游字段,
+//     或者从 context 里 `yield* TokenUpstream`,都等于把这条保证作废 —— 加之前先想清楚
+//     「写快照之前必须先过这里」意味着什么:它在用户等着的同步路径上,一次串行的上游往返
+//     会把整批持仓的写入卡在那儿。
+//
+// 查的是本地 ref 行,miss 才查本地全局映射,再 miss 才按 symbol 猜(那一档问 `CandidateSource`,
+// 它读的是缓存目录 —— 唯一那条冷启动出网路径收在**它自己的 layer** 里,仍然是类型事实)。
 export interface MintInput {
   ref: TokenRef;
   seed: ProviderTokenSeed;
 }
 
-export const TokenMinter = Context.GenericTag<TokenMinter>("oracle/TokenMinter");
-
-const make = Effect.gen(function* () {
-  const store = yield* TokenStore;
-  const refIndex = yield* GlobalTokenRefIndexStore;
-  const candidates = yield* CandidateSource;
+// mint 那半要的全部东西。**一个上游都没有** —— 见上面的红线。
+export interface MintDeps {
+  readonly store: TokenStore;
+  readonly refIndex: GlobalTokenRefIndexStore;
+  readonly candidates: CandidateSource;
   // 当前源的标识 —— 它同时是 ref 的 namer 与全局映射表的 `namer` 列;`overrides` 是它那张
   // symbol → 上游 id 的策展小表(见 `Namer`)。
-  const { id: namer, overrides } = yield* Namer;
+  readonly namer: Namer;
+}
+
+// 一批 (ref, provider 报的元信息) → 各自的 token_id。输入里重复的 ref 只处理一次。
+//
+// 本函数**收已解析好的服务对象**,不从 context 取 —— 与 `./warm` 同款,于是它的 `R` 是 `never`,
+// `TokenService.mint` 的签名不会把 mint 的依赖漏给调用方。从 Tag 取服务只发生在 Layer 那一层。
+export function mintOf(
+  deps: MintDeps,
+): (inputs: readonly MintInput[]) => Effect.Effect<Map<TokenRef, string>> {
+  const { store, refIndex, candidates } = deps;
+  const { id: namer, overrides } = deps.namer;
 
   // 这条 ref 在当前上游那里叫什么 —— **地址优先于 symbol**。
   // 地址是权威答案,symbol 只是猜:换序会把假 USDC 并进真 USDC。
@@ -143,34 +158,24 @@ const make = Effect.gen(function* () {
       return hit.tokenId;
     });
 
-  const minter: TokenMinter = {
-    of: (inputs) =>
-      Effect.gen(function* () {
-        const out = new Map<TokenRef, string>();
-        if (inputs.length === 0) return out;
+  return (inputs) =>
+    Effect.gen(function* () {
+      const out = new Map<TokenRef, string>();
+      if (inputs.length === 0) return out;
 
-        // 同一批里重复的 ref 只处理一次(一个钱包同一个币多笔持仓很常见)。
-        const byRef = new Map<TokenRef, ProviderTokenSeed>();
-        for (const i of inputs) if (!byRef.has(i.ref)) byRef.set(i.ref, i.seed);
+      // 同一批里重复的 ref 只处理一次(一个钱包同一个币多笔持仓很常见)。
+      const byRef = new Map<TokenRef, ProviderTokenSeed>();
+      for (const i of inputs) if (!byRef.has(i.ref)) byRef.set(i.ref, i.seed);
 
-        // 第一步:一次批量点查本地 ref 行。绝大多数同步全部停在这里 —— 纯本地。
-        const hits = yield* store.findByRefs([...byRef.keys()]);
+      // 第一步:一次批量点查本地 ref 行。绝大多数同步全部停在这里 —— 纯本地。
+      const hits = yield* store.findByRefs([...byRef.keys()]);
 
-        // 逐条走决策树。**顺序跑,而且这次是写在代码里的**(以前是一串 `await`,并发度靠读的人
-        // 自己看出来)。账户是并发跑的,同一条 ref 可能被同时 mint,靠 store 的 upsert-then-read
-        // 幂等收敛(见 `TokenStore.create`),不靠「先统一 mint 再并发写」。
-        for (const [ref, seed] of byRef) {
-          out.set(ref, yield* mintOne(ref, seed, hits.get(ref)));
-        }
-        return out;
-      }),
-  };
-
-  return minter;
-});
-
-export const tokenMinterLayer: Layer.Layer<
-  TokenMinter,
-  never,
-  TokenStore | GlobalTokenRefIndexStore | CandidateSource | Namer
-> = Layer.effect(TokenMinter, make);
+      // 逐条走决策树。**顺序跑,而且这次是写在代码里的**(以前是一串 `await`,并发度靠读的人
+      // 自己看出来)。账户是并发跑的,同一条 ref 可能被同时 mint,靠 store 的 upsert-then-read
+      // 幂等收敛(见 `TokenStore.create`),不靠「先统一 mint 再并发写」。
+      for (const [ref, seed] of byRef) {
+        out.set(ref, yield* mintOne(ref, seed, hits.get(ref)));
+      }
+      return out;
+    });
+}

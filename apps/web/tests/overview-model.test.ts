@@ -40,7 +40,7 @@ const record = (id: string): TokenRecord => ({
   logo: "u.png",
   infoStale: false,
 });
-const reader = {
+const tokens = {
   enrich: (ids: readonly string[]) => Effect.succeed(new Map(ids.map((id) => [id, record(id)]))),
 };
 
@@ -59,7 +59,7 @@ const platforms = {
 };
 
 // 这一组的默认桩:富化按 token_id 查表、平台按 key 造名。用例只在需要时换掉其中一个。
-const stub: OracleStub = { reader, platforms };
+const stub: OracleStub = { tokens, platforms };
 
 describe("buildOverview", () => {
   it("跨账户聚合成一个 Holding + 平台装饰 + 总额", async () => {
@@ -134,7 +134,7 @@ describe("buildOverview", () => {
     expect(
       (
         await runWithOracle(
-          { ...stub, reader: withPrice(false) },
+          { ...stub, tokens: withPrice(false) },
           buildOverview(accounts, one({}), {}),
         )
       ).pricesStale,
@@ -142,7 +142,7 @@ describe("buildOverview", () => {
     expect(
       (
         await runWithOracle(
-          { ...stub, reader: withPrice(true) },
+          { ...stub, tokens: withPrice(true) },
           buildOverview(accounts, one({}), {}),
         )
       ).pricesStale,
@@ -151,7 +151,7 @@ describe("buildOverview", () => {
     expect(
       (
         await runWithOracle(
-          { ...stub, reader: withPrice(false) },
+          { ...stub, tokens: withPrice(false) },
           buildOverview(accounts, one({ tokenId: null }), {}),
         )
       ).pricesStale,
@@ -173,11 +173,11 @@ describe("buildOverview", () => {
     const dust = new Map([["a1", snap("a1", 0, [bal({ usdValue: 0.0001 })])]]);
 
     expect(
-      (await runWithOracle({ ...stub, reader: noPrice }, buildOverview(accounts, real, {})))
+      (await runWithOracle({ ...stub, tokens: noPrice }, buildOverview(accounts, real, {})))
         .pricesStale,
     ).toBe(true);
     expect(
-      (await runWithOracle({ ...stub, reader: noPrice }, buildOverview(accounts, dust, {})))
+      (await runWithOracle({ ...stub, tokens: noPrice }, buildOverview(accounts, dust, {})))
         .pricesStale,
     ).toBe(false);
   });
@@ -377,7 +377,7 @@ describe("buildOverview —— defi 行 change24h 富化", () => {
       ],
     ]);
     const view = await runWithOracle(
-      { ...stub, reader: defiTokens },
+      { ...stub, tokens: defiTokens },
       buildOverview(accounts, byAccount, {}),
     );
     // 按协议组定位(#243:展示 symbol 现从 Token 取,不再是余额那份 stETH/LP)。

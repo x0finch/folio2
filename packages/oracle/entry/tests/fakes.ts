@@ -27,14 +27,12 @@ import type {
 import * as Ports from "@folio/oracle-basic/ports";
 import { parseTokenRef } from "@folio/oracle-ref";
 import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
-import type { OraclePorts, OracleServices, RefIndexWarmer } from "../src";
-import { oracleLayer, refIndexWarmerLayer } from "../src";
-import { CandidateSource, candidateSourceLayer } from "../src/services/candidates";
-import { fxRateResolverLayer } from "../src/services/fx";
-import { fxHistoryLayer } from "../src/services/fx-history";
-import { tokenMinterLayer } from "../src/services/mint";
-import { platformResolverLayer } from "../src/services/platforms";
-import { tokenReaderLayer } from "../src/services/tokens";
+import type { OraclePorts, OracleServices } from "../src";
+import { oracleLayer } from "../src";
+import { CandidateSource, candidateSourceLayer } from "../src/internal/candidates";
+import { fxServiceLayer } from "../src/services/fx";
+import { platformServiceLayer } from "../src/services/platforms";
+import { tokenServiceLayer } from "../src/services/tokens";
 
 // 内存假实现 + **一份共用的测试装配**(下面的 `harness`)—— 各片的测试都注这一套。
 //
@@ -512,10 +510,12 @@ function fakePlatformUpstream(chains: PlatformMeta[] = [], id = "src"): FakePlat
 // 于是偷偷跑在共享游标那一档上、跨用例串味)。所以这里只有一个入口:
 //
 //   const h = harness();
-//   const price = await h.run(Effect.flatMap(TokenReader, (r) => r.priceOf("tk_1")));
+//   const price = await h.run(Effect.flatMap(TokenService, (t) => t.priceOf("tk_1")));
 //
-// `run` 里做了三件事:provide 全部端口的假实现 + 五个真服务 + `TestContext`(虚拟时钟),
+// `run` 里做了三件事:provide 全部端口的假实现 + 三个真服务 + `TestContext`(虚拟时钟),
 // 并把时钟拨到 `now0`(固定基准,日桶算得出确定的值)。
+// cron 那两件(`warmRefIndex` / `refIndexRefreshedAt`)不是服务,直接吃端口 —— 端口被
+// `provideMerge` 透出来了,所以它们在 `run` 里照样能跑,不必再装一个 layer。
 // 日志也被收下来 —— **降级必须留痕**是这次迁移的一条设计(以前 6 处 `catch {}` 一行痕迹都没有),
 // 而「留痕」只有能断言才算数。
 interface LogEntry {
@@ -536,7 +536,7 @@ export interface Harness {
   readonly logs: LogEntry[];
   // 跑一个用了参考层的 effect。**测试与生产走同一条构造路**(Tag → Layer)。
   run<A, E>(
-    effect: Effect.Effect<A, E, OraclePorts | OracleServices | RefIndexWarmer | CandidateSource>,
+    effect: Effect.Effect<A, E, OraclePorts | OracleServices | CandidateSource>,
   ): Promise<A>;
 }
 
@@ -587,22 +587,20 @@ export function harness(opts: HarnessOpts = {}): Harness {
   );
   // `provideMerge` 而不是 `provide`:端口也一并透出去,于是用例既能拿服务、也能直接拿假端口
   // (`readPlatforms(h.cache, …)` 那类内部件的单测就是直接用假端口的)。
-  // `candidateSourceLayer` 也透出来:它在 `oracleLayer` 里已被 mint 吃掉(装配点看不到它),
-  // 但它自己有一组测试(「写路径到底会不会出网」),那组要能直接拿到这个服务。
+  // `candidateSourceLayer` 也透出来:它在 `oracleLayer` 里已被 `TokenService` 吃掉(装配点看不到
+  // 它),但它自己有一组测试(「写路径到底会不会出网」),那组要能直接拿到这个服务。
   // 默认就用生产那个 `oracleLayer`(整体装配也因此被每个用例覆盖到)。只有当用例要顶掉候选源时
-  // 才手工拼一遍五个服务 —— `oracleLayer` 已经把 `CandidateSource` 吃进去了(那是设计:装配点
+  // 才手工拼一遍三个服务 —— `oracleLayer` 已经把 `CandidateSource` 吃进去了(那是设计:装配点
   // 不该看见它),从外面 merge 一个同 Tag 的 layer 谁赢是含糊的,所以这一档明写。
   const services = opts.candidates
     ? Layer.mergeAll(
-        tokenReaderLayer,
-        Layer.provide(tokenMinterLayer, Layer.succeed(CandidateSource, opts.candidates)),
-        fxRateResolverLayer,
-        fxHistoryLayer,
-        platformResolverLayer,
+        Layer.provide(tokenServiceLayer, Layer.succeed(CandidateSource, opts.candidates)),
+        fxServiceLayer,
+        platformServiceLayer,
         Layer.succeed(CandidateSource, opts.candidates),
       )
     : Layer.merge(oracleLayer, candidateSourceLayer);
-  const everything = Layer.provideMerge(Layer.merge(services, refIndexWarmerLayer), ports);
+  const everything = Layer.provideMerge(services, ports);
 
   return {
     store,

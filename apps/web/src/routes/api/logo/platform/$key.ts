@@ -1,4 +1,4 @@
-import { PlatformResolver } from "@folio/oracle";
+import { PlatformService } from "@folio/oracle";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { connectorPlatformMeta } from "@/lib/server/internal/connector-platform";
@@ -33,7 +33,7 @@ export const Route = createFileRoute("/api/logo/platform/$key")({
               ? (
                   await runOracle(
                     userId,
-                    Effect.flatMap(PlatformResolver, (p) => p.resolve([params.key])),
+                    Effect.flatMap(PlatformService, (p) => p.resolve([params.key])),
                   )
                 ).get(params.key)?.logo
               : undefined,
