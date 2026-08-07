@@ -15,7 +15,10 @@ const RATES = {
 
 describe("fetchRates", () => {
   it("反算 usdPerUnit:USD=1、EUR=usd/eur、ETH=usd/eth、BTC=usd/btc", async () => {
-    const rates = await run(stubbing(() => RATES), fetchRatesEffect);
+    const rates = await run(
+      stubbing(() => RATES),
+      fetchRatesEffect,
+    );
 
     expect(rates.get("USD")).toBe(1);
     expect(rates.get("EUR")).toBeCloseTo(100000 / 92000, 6);
@@ -24,7 +27,10 @@ describe("fetchRates", () => {
   });
 
   it("上游没收录的币种不出现(不是报错)", async () => {
-    const rates = await run(stubbing(() => RATES), fetchRatesEffect);
+    const rates = await run(
+      stubbing(() => RATES),
+      fetchRatesEffect,
+    );
     expect(rates.has("KRW")).toBe(false); // 这份响应里没有 krw
   });
 

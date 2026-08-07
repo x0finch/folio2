@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { MARKETS_PER_PAGE, RETRY_MAX_WAIT_MS } from "../src/constants";
 import { makeUpstreamEffects } from "../src/upstream";
-import { type Stub, run, runDriven, stubbing } from "./harness";
+import { run, runDriven, type Stub, stubbing } from "./harness";
 
 // 重试**搬家到了这里**:老那版收在 `@folio/coingecko-client` 的传输层里,Effect 版的 client
 // 一律不自带重试(它是九个 client 的共同形状)。所以策略现在是本包的东西,得由本包钉住。
@@ -32,10 +32,7 @@ describe("哪些错误会再打一发", () => {
 
   it("重试次数封顶 —— 一直 5xx 就放弃,总共两发", async () => {
     const stub = failingFirst(99, 503);
-    const err = await runDriven(
-      stub,
-      Effect.flip(makeUpstreamEffects().fetchMarkets({ topN: 1 })),
-    );
+    const err = await runDriven(stub, Effect.flip(makeUpstreamEffects().fetchMarkets({ topN: 1 })));
     expect(err._tag).toBe("UpstreamUnavailableError");
     expect(stub.calls).toHaveLength(2);
   });
@@ -60,10 +57,7 @@ describe("Retry-After:听上游的,但有个肯等的上限", () => {
   // 不如当场失败,让 SWR 顶旧数据。
   it("上游说的等待超过上限 → **直接放弃**,不夹到上限继续等", async () => {
     const stub = rateLimited(RETRY_MAX_WAIT_MS / 1000 + 58, 99); // 60 秒,远超上限
-    const err = await runDriven(
-      stub,
-      Effect.flip(makeUpstreamEffects().fetchMarkets({ topN: 1 })),
-    );
+    const err = await runDriven(stub, Effect.flip(makeUpstreamEffects().fetchMarkets({ topN: 1 })));
     expect(err._tag).toBe("UpstreamRateLimitError");
     expect(stub.calls).toHaveLength(1);
   });

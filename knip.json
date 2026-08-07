@@ -14,9 +14,6 @@
     },
     "packages/clients/rabby": {
       "entry": ["vendor/regenerate.mjs"]
-    },
-    "packages/shared": {
-      "ignoreDependencies": ["wrangler"]
     }
   }
 }

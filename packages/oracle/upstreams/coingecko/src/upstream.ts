@@ -59,28 +59,31 @@ export function makeUpstreamEffects() {
   // 错误通道抹平成 `unknown` —— 不划算。
   let platforms: Map<string, string> | undefined;
 
-  const platformMap: Effect.Effect<Map<string, string>, UpstreamError, Needs> = Effect.suspend(() =>
-    platforms !== undefined
-      ? Effect.succeed(platforms)
-      : withClient((client) => req(client.assetPlatforms)).pipe(
-          Effect.map((list) => {
-            const m = new Map<string, string>();
-            for (const p of list) {
-              if (!p?.id) continue;
-              m.set(p.id.toLowerCase(), p.id);
-              if (p.chain_identifier != null) m.set(String(p.chain_identifier), p.id);
-            }
-            return m;
-          }),
-          Effect.tap((m) =>
-            Effect.sync(() => {
-              platforms = m;
+  const platformMap: Effect.Effect<Map<string, string>, UpstreamError, Needs> = Effect.suspend(
+    () =>
+      platforms !== undefined
+        ? Effect.succeed(platforms)
+        : withClient((client) => req(client.assetPlatforms)).pipe(
+            Effect.map((list) => {
+              const m = new Map<string, string>();
+              for (const p of list) {
+                if (!p?.id) continue;
+                m.set(p.id.toLowerCase(), p.id);
+                if (p.chain_identifier != null) m.set(String(p.chain_identifier), p.id);
+              }
+              return m;
             }),
+            Effect.tap((m) =>
+              Effect.sync(() => {
+                platforms = m;
+              }),
+            ),
           ),
-        ),
   );
 
-  const chainToPlatform = (chain: string): Effect.Effect<string | undefined, UpstreamError, Needs> =>
+  const chainToPlatform = (
+    chain: string,
+  ): Effect.Effect<string | undefined, UpstreamError, Needs> =>
     Effect.map(platformMap, (map) =>
       map.get(
         chain.startsWith(EVM_NAMER_PREFIX)
@@ -107,7 +110,11 @@ export function makeUpstreamEffects() {
     //
     // **保持顺序翻页,不要改成并发**:并发发出去闸也是一个个放行,快不起来,只是把突发额度
     // 更快地抽干、让前台(搜索、选币下拉)等得更久。
-    fetchMarkets: ({ topN }: { topN: number }): Effect.Effect<UpstreamToken[], UpstreamError, Needs> =>
+    fetchMarkets: ({
+      topN,
+    }: {
+      topN: number;
+    }): Effect.Effect<UpstreamToken[], UpstreamError, Needs> =>
       withClient((client) =>
         Effect.gen(function* () {
           const pages = Math.max(1, Math.ceil(topN / MARKETS_PER_PAGE));
@@ -166,7 +173,9 @@ export function makeUpstreamEffects() {
     // 按 id 点查一批整行。走 `/coins/markets?ids=…` 而不是 `/simple/price`:后者只回价,
     // 而这里要的正是 name/symbol/image。同一个端点、同一个解析器,只是不翻页。
     // 同样**必须分块**(#245):每批 ≤ IDS_PER_REQUEST ≤ MARKETS_PER_PAGE,故一批一页装得下。
-    fetchTokens: (refs: readonly TokenRef[]): Effect.Effect<UpstreamToken[], UpstreamError, Needs> =>
+    fetchTokens: (
+      refs: readonly TokenRef[],
+    ): Effect.Effect<UpstreamToken[], UpstreamError, Needs> =>
       withClient((client) =>
         Effect.gen(function* () {
           const ids = refs.map(coinIdOf).filter((id): id is string => id != null);

@@ -1,15 +1,15 @@
 import {
-  CoinGeckoClient,
-  type CoinGeckoClientApi,
-  type CoinGeckoConfig,
-} from "@folio/coingecko-client";
-import {
   FolioHttpClient,
   isRetryable,
   type Outbound,
   retryAfterOf,
   type UpstreamError,
 } from "@folio/client-core";
+import {
+  CoinGeckoClient,
+  type CoinGeckoClientApi,
+  type CoinGeckoConfig,
+} from "@folio/coingecko-client";
 import { Duration, Effect, Layer, Schedule } from "effect";
 import { RETRY_ATTEMPTS, RETRY_BASE_MS, RETRY_MAX_WAIT_MS, UPSTREAM_ID } from "./constants";
 
@@ -83,7 +83,12 @@ export const runnerFor = (
 ): (<A>(effect: Effect.Effect<A, UpstreamError, CoinGeckoClient | Outbound>) => Promise<A>) => {
   const layer = Layer.mergeAll(CoinGeckoClient.layer(config), FolioHttpClient);
   return <A>(effect: Effect.Effect<A, UpstreamError, CoinGeckoClient | Outbound>): Promise<A> =>
-    Effect.runPromise(Effect.either(Effect.provide(effect, layer))).then((result) =>
-      result._tag === "Left" ? Promise.reject(toError(result.left)) : result.right,
-    );
+    Effect.runPromise(Effect.either(Effect.provide(effect, layer))).then((result) => {
+      // **`throw`,不是 `Promise.reject(...)`**:后者在回调里现造一个已拒绝的 promise,
+      // 而它被外层收养要等下一个微任务 —— workerd 在那之前就已经报了一次 unhandledrejection。
+      // 结果是 apps/web 的 workers 测试里,每个「上游挂了但被吞掉」的用例都多一条未处理拒绝
+      // (代码是对的,报告是脏的)。`throw` 直接拒绝外层,中间不存在第二个 promise。
+      if (result._tag === "Left") throw toError(result.left);
+      return result.right;
+    });
 };

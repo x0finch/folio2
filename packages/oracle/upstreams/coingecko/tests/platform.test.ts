@@ -14,7 +14,14 @@ const ASSET_PLATFORMS = [
 ];
 
 const chains = async () =>
-  new Map((await run(stubbing(() => ASSET_PLATFORMS), fetchChainsEffect)).map((r) => [r.key, r]));
+  new Map(
+    (
+      await run(
+        stubbing(() => ASSET_PLATFORMS),
+        fetchChainsEffect,
+      )
+    ).map((r) => [r.key, r]),
+  );
 
 describe("fetchChains", () => {
   it("一条链产短形 slug;有数字 chainId 再产 evm:<id>,两条同名同图", async () => {
