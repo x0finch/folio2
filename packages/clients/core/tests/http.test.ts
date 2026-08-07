@@ -216,14 +216,53 @@ describe("红线:什么能被记下来", () => {
 
   const SECRET_QUERY = { address: "0xdeadbeef", signature: "s3cr3t-signature" };
 
+  const SECRET_HEADERS = { "x-mbx-apikey": "s3cr3t-key" };
+
+  // 序列化整个错误对象来查 —— 断言某个字段干净是不够的:泄的那次正是从**没人看的 `cause`**
+  // 里出去的,而 `where` 一直是对的。
+  const clean = (err: unknown) => {
+    const dumped = JSON.stringify(err);
+    expect(dumped).not.toContain("0xdeadbeef"); // query 里的地址
+    expect(dumped).not.toContain("s3cr3t-signature"); // query 里的签名
+    expect(dumped).not.toContain("s3cr3t-key"); // 凭据头的值
+    expect(dumped).not.toContain("x-mbx-apikey"); // 连头的名字都不该出现
+  };
+
   it("失败信息只带 pathname,不带 query", async () => {
     const err = await failing(
       () => json({}, { status: 503 }),
       req()("/v1/t", { query: SECRET_QUERY }),
     );
     expect(err.where).toBe("/v1/t");
-    expect(JSON.stringify(err)).not.toContain("0xdeadbeef");
-    expect(JSON.stringify(err)).not.toContain("s3cr3t-signature");
+    clean(err);
+  });
+
+  // **这条和下一条是补的**:上面那条打的是 503,而 503 走的分支压根不带 `cause`。
+  // 带 `cause` 的只有「没出去」和「读不动」两条,而官方那两个错误对象身上挂着完整 `request`
+  // (URL + query + 全部请求头)—— 原样透传就等于让签名和 API key 跟着错误到处走。
+  it("**没出去**(网络失败)→ cause 里没有 query、没有凭据头", async () => {
+    const err = await failing(
+      () => {
+        throw new Error("getaddrinfo ENOTFOUND up.example.com");
+      },
+      req({ headers: () => Effect.succeed(SECRET_HEADERS) })("/v1/t", { query: SECRET_QUERY }),
+    );
+    clean(err);
+    // 该留的还留着:是哪一类、为什么 —— 排障要的就是这一句。
+    expect(String(err.cause)).toContain("RequestError");
+    expect(String(err.cause)).toContain("ENOTFOUND");
+  });
+
+  it("**读不动**(响应不是 JSON)→ 同样干净,而且不带响应正文", async () => {
+    const err = await failing(
+      () => new Response("<html>upstream is down</html>", { status: 200 }),
+      req({ headers: () => Effect.succeed(SECRET_HEADERS) })("/v1/t", { query: SECRET_QUERY }),
+    );
+    clean(err);
+    expect(err._tag).toBe("UpstreamParseError");
+    // 正文不跟着走:JSON 解析错误的 message 会把正文的一截拼进去。它不是凭据,
+    // 但也没有理由挂在一个到处传的错误对象上。
+    expect(JSON.stringify(err)).not.toContain("upstream is down");
   });
 
   it("**span 里没有 query、没有完整 URL、没有任何请求头**", async () => {

@@ -36,7 +36,7 @@
 // 理由和证据见 `http-client.ts`。
 
 export { hmacSha256 } from "./crypto";
-export { HttpFailure, type HttpFailureKind, SigningFailure } from "./errors";
+export { HttpFailure, type HttpFailureKind, SigningFailure, summaryOf } from "./errors";
 export {
   type HttpConfig,
   makeRequester,

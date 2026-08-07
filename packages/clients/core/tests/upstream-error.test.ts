@@ -54,7 +54,7 @@ describe("classifyFailure", () => {
 
   it("失败信息只带 pathname,不带 query(原则 #5 红线)", () => {
     // `HttpFailure.where` 就只是 pathname,这里钉的是归类过程没把别的东西塞进来。
-    const err = classify(http({ where: "/v1/t", cause: new Error("boom") }));
+    const err = classify(http({ where: "/v1/t", cause: "boom" }));
     expect(err.where).toBe("/v1/t");
   });
 });

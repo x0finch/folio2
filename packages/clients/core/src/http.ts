@@ -87,12 +87,38 @@ export type Outbound = HttpClient.HttpClient;
 //
 // **`where` 由调用点给,不从 error 里抠** —— error 带的是完整 URL,而 `where` 进日志和错误消息,
 // 必须只有 pathname(原则 #5 红线)。
+//
+// **`cause` 同理:进去的是一句摘要,不是那个错误对象。** 官方的 `RequestError` / `ResponseError`
+// 上挂着 `request`,而它序列化出来是这样的:
+//
+//   {"cause":{"request":{"url":"…","urlParams":[["signature","s3cr3t"]],
+//    "headers":{"x-mbx-apikey":"s3cr3t-key"}},"reason":"Transport"}}
+//
+// 也就是**签名和凭据头整个跟着错误走**。`where` 和 span 都守住了,漏的是错误对象自己。
 const transportFailure =
   (where: string) =>
   (error: HttpClientError.HttpClientError): HttpFailure =>
     error._tag === "ResponseError" && error.reason === "Decode"
-      ? new HttpFailure({ kind: "parse", where, cause: error })
-      : new HttpFailure({ kind: "network", where, cause: error });
+      ? new HttpFailure({ kind: "parse", where, cause: summarize(error) })
+      : new HttpFailure({ kind: "network", where, cause: summarize(error) });
+
+// 出网失败 → 一句能进日志的摘要。**只由本函数拼,绝不透传上游库给的对象。**
+//
+// 两边给的详细程度不同,理由不同:
+//   · **没出去**(`RequestError`)—— 带上内层 message。内层是 fetch 抛的东西(DNS / 连不上 /
+//     超时),message 里最多有主机名或 IP,而主机名本来就不是秘密(每个错误都带着 `upstream`)。
+//     而「为什么没出去」是排障时唯一有用的那句
+//   · **读不动**(`ResponseError`)—— **不带内层 message**,给状态码。JSON 解析失败的 message 会把
+//     响应正文的一截拼进去(`Unexpected token '<', "<html>…"`),而正文是上游的数据(余额、地址)。
+//     它不是凭据,但也没有理由跟着一个到处传的错误对象走
+const summarize = (error: HttpClientError.HttpClientError): string => {
+  if (error._tag === "ResponseError") {
+    return `ResponseError/${error.reason} ${error.response.status}`;
+  }
+  const inner = error.cause;
+  const detail = inner instanceof Error ? inner.message : undefined;
+  return detail ? `RequestError/${error.reason}: ${detail}` : `RequestError/${error.reason}`;
+};
 
 // 发一个请求,回解析好的 JSON(`notFoundAsNull` 且 404 时回 null)。
 //
@@ -167,7 +193,10 @@ export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Request
       }
 
       return yield* res.json.pipe(
-        Effect.mapError((cause) => new HttpFailure({ kind: "parse", where, cause })),
+        // 同样只留摘要 —— `res.json` 失败给的也是 `ResponseError`,身上挂着完整 request。
+        Effect.mapError(
+          (error) => new HttpFailure({ kind: "parse", where, cause: summarize(error) }),
+        ),
       );
     }).pipe(
       // **官方内建的那个 span 在这里被关掉,换成下面我们自己的。**
