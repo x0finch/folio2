@@ -1,4 +1,5 @@
-import { FxRateResolver, fiatCodeOf, TokenReader, type TokenRef, tokenTicket } from "@folio/oracle";
+import { FxRateResolver, TokenReader } from "@folio/oracle";
+import { fiatCodeOf, type TokenRef, tokenTicket } from "@folio/oracle-basic";
 import { Clock, Effect, Option } from "effect";
 
 // 选币的「一批票 → 价」分流(#202b 三个选币 server fn 里那段的共同芯)。**两条路**:

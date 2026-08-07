@@ -2,8 +2,8 @@ import type { SnapshotWithBalances } from "@folio/db";
 import { FxRateResolver } from "@folio/oracle";
 import { fiatCodeOf, type TokenRecord } from "@folio/oracle-basic";
 import { Effect, Option } from "effect";
-import type { CredsToken } from "./manual-activity";
-import { MANUAL_CONNECTOR_ID } from "./manual-connector";
+import type { CredsToken } from "../../manual-activity";
+import { MANUAL_CONNECTOR_ID } from "../../manual-connector";
 
 // 每条 manual 持仓的**展示单价**(USD/单位),与 `tokens` 按序对齐,喂给 `buildManualSnapshot`。
 // 缝③ 纯逻辑(无 server/db import → 可单测):server 只负责喂 enrich 结果 + fx 的 resolve + 法币身份映射。

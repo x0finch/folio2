@@ -1,4 +1,4 @@
-import type { CacheEntry } from "@folio/oracle";
+import type { CacheEntry } from "@folio/oracle-basic";
 import { CacheStore } from "@folio/oracle-basic/ports";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";

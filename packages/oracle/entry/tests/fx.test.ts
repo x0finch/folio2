@@ -1,6 +1,7 @@
+import { FX_TTL_MS, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { FX_TTL_MS, FxRateResolver, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "../src";
+import { FxRateResolver } from "../src";
 import { fxKey, readFx, writeFx } from "../src/services/fx";
 import { harness, upstreamDown } from "./fakes";
 

@@ -1,6 +1,7 @@
+import { MS_PER_DAY } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { FxHistory, MS_PER_DAY } from "../src";
+import { FxHistory } from "../src";
 import { deriveFiatDaily } from "../src/services/fx-history";
 import { harness, now0, upstreamDown } from "./fakes";
 

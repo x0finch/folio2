@@ -18,9 +18,14 @@
 // 每个服务名同时是**类型**和**Tag**(`Context.GenericTag`,与 `@effect/platform` 的
 // `FileSystem` / `HttpClient` 同款),所以一行 `export { TokenReader }` 两个含义都带出去。
 
-// 契约与数据经门面透出,调用方一个 import 面(同现有做法)。**只透 `.` 那一半** ——
-// `./ports` 的 Tag 是运行时值,由装配点自己去那个入口取,不从这里漏进客户端 bundle。
-export * from "@folio/oracle-basic";
+// **本包整个只有服务端会碰,所以它不转发 `@folio/oracle-basic`。**
+//
+// 以前这里有一句 `export * from "@folio/oracle-basic"`,图的是「调用方一个 import 面」。
+// 代价是这个入口同时供着**契约**(客户端组件真的要 `tokenTicket` / `valuate` /
+// `SUPPORTED_CURRENCIES`)和**六个 Tag**(`Context.GenericTag(...)`,运行时值)——
+// 一个组件为了拿契约 import 了本包,`effect` 就跟进客户端 bundle(+75 KB gzip)。
+// 今天没进,只是碰巧没人这么写;`@folio/oracle-basic` 为同一个理由早就把 Tag 拆去了 `./ports`。
+// 去掉这句之后,客户端要契约只有一条路(`@folio/oracle-basic`),而那条路上没有 `effect`。
 export { type OraclePorts, type OracleServices, oracleLayer } from "./layer";
 export { FxRateResolver } from "./services/fx";
 export { FxHistory } from "./services/fx-history";

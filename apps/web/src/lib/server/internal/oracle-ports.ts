@@ -9,7 +9,7 @@ import type {
   GlobalTokenRefIndexStore,
   TokenPriceStore,
   TokenStore,
-} from "@folio/oracle";
+} from "@folio/oracle-basic";
 import { Effect, Option } from "effect";
 
 // **Promise ↔ Effect 的缝,全仓只有这一处。**

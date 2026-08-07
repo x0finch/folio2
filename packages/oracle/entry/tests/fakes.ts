@@ -1,19 +1,13 @@
 import type { UpstreamError } from "@folio/client-core";
 import { UpstreamUnavailableError } from "@folio/client-core";
-import * as Ports from "@folio/oracle-basic/ports";
-import { parseTokenRef } from "@folio/oracle-ref";
-import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
 import type {
   CacheEntry,
   CacheStore,
   FxUpstream,
   GlobalTokenRefIndexStore,
-  OraclePorts,
-  OracleServices,
   PlatformMeta,
   PlatformUpstream,
   ProviderTokenSeed,
-  RefIndexWarmer,
   TokenCandidate,
   TokenInfo,
   TokenInfoPatch,
@@ -29,7 +23,11 @@ import type {
   TokenStore,
   TokenUpstream,
   UpstreamToken,
-} from "../src";
+} from "@folio/oracle-basic";
+import * as Ports from "@folio/oracle-basic/ports";
+import { parseTokenRef } from "@folio/oracle-ref";
+import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
+import type { OraclePorts, OracleServices, RefIndexWarmer } from "../src";
 import { oracleLayer, refIndexWarmerLayer } from "../src";
 import { CandidateSource, candidateSourceLayer } from "../src/services/candidates";
 import { fxRateResolverLayer } from "../src/services/fx";

@@ -1,8 +1,8 @@
-import { type TokenRef, tokenTicket } from "@folio/oracle";
+import { type TokenRef, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
-import { priceTickets, type TickerPrice } from "../src/lib/token-pricing";
+import { priceTickets, type TickerPrice } from "../src/lib/server/internal/token-pricing";
 import { type OracleStub, runWithOracleAt } from "./oracle-stub";
 
 // 选币「一批票 → 价」分流(refreshTokenPrices / getTokenPrice 共用的芯):法币走 FX、其余走代币源。

@@ -1,4 +1,4 @@
-import type { TokenRecord } from "@folio/oracle";
+import type { TokenRecord } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import { ZERO_DISPLAY_USD } from "../src/lib/account-view";
 import {

@@ -8,13 +8,13 @@ import {
   toTabPin,
 } from "../accounts-in-view";
 import { buildPortfolioHistory } from "../history";
-import { deriveLiveAccountTotals } from "../live-value";
 import { isManual } from "../manual-connector";
-import { buildOverview } from "../overview-model";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { db } from "./internal/db";
+import { deriveLiveAccountTotals } from "./internal/live-value";
 import { injectManualSnapshots, loadManualHistoryRows, manualFiatRefs } from "./internal/manual";
 import { runOracle } from "./internal/oracle";
+import { buildOverview } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
 

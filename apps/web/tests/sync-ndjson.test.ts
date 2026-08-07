@@ -1,6 +1,6 @@
 import { Effect, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { ndjsonRound } from "../src/lib/sync-ndjson";
+import { ndjsonRound } from "../src/lib/server/internal/sync-ndjson";
 
 // /api/sync 的核心那一手:「跑」与「看」拆开(见 src/lib/sync-ndjson.ts)。
 // 路由 handler 本身只剩鉴权 + 接依赖 + waitUntil,逻辑全在这个纯模块里,所以这里测得到。

@@ -1,6 +1,7 @@
+import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
 import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS, PlatformResolver } from "../src";
+import { PlatformResolver } from "../src";
 import { platformKey, readPlatforms, writePlatforms } from "../src/services/platforms";
 import { harness, now0, upstreamDown } from "./fakes";
 

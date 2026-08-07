@@ -122,7 +122,7 @@ D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两
 
 ## ⑥ 富化 —— 按 id 查出名字 / 图 / 价
 
-📍 **地点**:`apps/web/src/lib/overview-model.ts` → `tokens.enrich(ids)`(cache-only)
+📍 **地点**:`apps/web/src/lib/server/internal/overview-model.ts` → `tokens.enrich(ids)`(cache-only)
 
 🔧 **做了什么**:用 ④ 缓存的结果(零网络)按 `token_id` 查出整行:`name` / `logo` /
 `unitPrice` / `change24h` / `marketCapRank`。返回的是 **`Map<token_id, TokenRecord>`**,调用方查表 ——
@@ -132,7 +132,7 @@ D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两
 
 ## ⑦ 组装 `AggInput`
 
-📍 **地点**:`apps/web/src/lib/overview-model.ts`
+📍 **地点**:`apps/web/src/lib/server/internal/overview-model.ts`
 
 ```jsonc
 { symbol:"USDC", amount:100, value:100, kind:"spot",
@@ -210,8 +210,8 @@ Holding {
 | ③ 入库 | `apps/web/src/lib/server/sync.ts` → `packages/db/src/queries.ts` `writeSnapshot` |
 | ④ 预热 | `apps/web/src/lib/server/internal/sync-deps.ts` `warmTokensForUser` |
 | ⑤ 读出 | `apps/web/src/lib/server/portfolio.ts` → `packages/db/src/queries.ts` `getLatestSnapshotByUser` |
-| ⑥ 富化 | `apps/web/src/lib/overview-model.ts` · `packages/oracle/entry/src/services/tokens.ts` `enrich` |
-| ⑦ 组装 | `apps/web/src/lib/overview-model.ts` |
+| ⑥ 富化 | `apps/web/src/lib/server/internal/overview-model.ts` · `packages/oracle/entry/src/services/tokens.ts` `enrich` |
+| ⑦ 组装 | `apps/web/src/lib/server/internal/overview-model.ts` |
 | ⑧ 聚合 | `apps/web/src/lib/aggregate.ts` `buildCanonicalHoldings`(分组键 `groupKey` / 门槛 `isEligible`) |
 | ⑨ 渲染 | `apps/web/src/routes/_authed/index.tsx` · `components/token-holdings.tsx` · `components/asset-sheet.tsx` |
 

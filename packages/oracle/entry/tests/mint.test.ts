@@ -1,7 +1,11 @@
-import { RESOLUTION_TOP_RANK, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
+import {
+  RESOLUTION_TOP_RANK,
+  SUPPORTED_CURRENCIES,
+  type TokenCandidate,
+} from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { type MintInput, type TokenCandidate, TokenMinter } from "../src";
+import { type MintInput, TokenMinter } from "../src";
 import type { CandidateSource } from "../src/services/candidates";
 import { harness } from "./fakes";
 

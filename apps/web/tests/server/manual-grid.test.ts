@@ -1,7 +1,6 @@
 import { env } from "cloudflare:test";
 import { createUserTokenPriceStore } from "@folio/db";
-import { tokenTicket } from "@folio/oracle";
-import { FIAT_NAMER } from "@folio/oracle-basic";
+import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/history";

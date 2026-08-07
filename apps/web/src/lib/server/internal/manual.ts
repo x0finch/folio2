@@ -5,8 +5,8 @@ import type {
   ManualHolding,
   SnapshotWithBalances,
 } from "@folio/db";
-import { dayBucketOf, FxHistory, TokenMinter, TokenReader, tokenTicket } from "@folio/oracle";
-import { FIAT_NAMER, fiatCodeOf } from "@folio/oracle-basic";
+import { FxHistory, TokenMinter, TokenReader } from "@folio/oracle";
+import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
 import type { SnapshotTotalRow } from "../../history";
@@ -19,9 +19,9 @@ import {
   type HistoricalPriceAt,
   type HistoryToken,
 } from "../../manual-history";
-import { buildManualSnapshot, manualUnitPrices } from "../../manual-snapshot";
 import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
+import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";
 import { NAMER, runOracle } from "./oracle";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。

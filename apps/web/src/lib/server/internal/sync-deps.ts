@@ -14,13 +14,13 @@ import {
   type ProviderNeeds,
 } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
-import { FxRateResolver, TokenMinter, TokenReader, type ValuationMode } from "@folio/oracle";
+import { FxRateResolver, TokenMinter, TokenReader } from "@folio/oracle";
+import type { ValuationMode } from "@folio/oracle-basic";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
-import { revalue } from "../../revalue";
 import { isSyncableAccount } from "../../syncable";
 import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
@@ -28,6 +28,7 @@ import { recordDefiLogosForUser } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
 import { runOracle } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
+import { revalue } from "./revalue";
 import { warmHeldPrices } from "./token-enrich";
 
 // server-only 编排装配(引 cloudflare:workers)。独立于 sync.ts —— triggerSync(server fn,被客户端 import)

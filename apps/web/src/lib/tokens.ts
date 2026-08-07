@@ -1,4 +1,4 @@
-import type { TokenRecord } from "@folio/oracle";
+import type { TokenRecord } from "@folio/oracle-basic";
 import { ZERO_DISPLAY_USD } from "./account-view";
 import { isFungible, viewKind } from "./balance-kind";
 import { tokenLogoUrl } from "./logo";
