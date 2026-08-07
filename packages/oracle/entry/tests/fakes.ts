@@ -29,10 +29,10 @@ import { parseTokenRef } from "@folio/oracle-ref";
 import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
 import type { OraclePorts, OracleServices } from "../src";
 import { oracleLayer } from "../src";
-import { CandidateSource, candidateSourceLayer } from "../src/internal/candidates";
 import { fxServiceLayer } from "../src/services/fx";
 import { platformServiceLayer } from "../src/services/platforms";
 import { tokenServiceLayer } from "../src/services/tokens";
+import { CandidateSource, candidateSourceLayer } from "../src/services/tokens/candidates";
 
 // 内存假实现 + **一份共用的测试装配**(下面的 `harness`)—— 各片的测试都注这一套。
 //

@@ -6,7 +6,7 @@ import {
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { type MintInput, TokenService } from "../src";
-import type { CandidateSource } from "../src/internal/candidates";
+import type { CandidateSource } from "../src/services/tokens/candidates";
 import { harness } from "./fakes";
 
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
@@ -20,7 +20,7 @@ const seed = (symbol: string, name?: string, providerLogo?: string) => ({
   providerLogo,
 });
 
-// 候选源:mint 的 symbol 那一档。真实现从 warm rows 里筛(见 internal/candidates.ts),这里直接给。
+// 候选源:mint 的 symbol 那一档。真实现从 warm rows 里筛(见 src/services/tokens/candidates.ts),这里直接给。
 // **记调用次数** —— 「有没有走到 symbol 这一档」本身就是断言对象:#210 的闸在合约上会提前返回,
 // 不记次数的话,一条本想验证判官的用例会因为压根没走到判官而绿掉(空转)。
 interface RecordingCandidates extends CandidateSource {
@@ -151,7 +151,7 @@ describe("事后认出来 → 合并", () => {
 
 // 上游还不认识的新币,同时从链上和交易所进来。**两条 ref 失败的原因不同,后来被认出来的路径也不同**:
 //   · 链上合约 → 靠全局映射表,cron 刷到就认出来
-//   · 交易所代号 → 只能靠 symbol,而候选恒是 **warm(市值前 N 名)** 的子集(见 cache.ts)
+//   · 交易所代号 → 只能靠 symbol,而候选恒是 **warm(市值前 N 名)** 的子集(见 src/services/tokens/warm.ts)
 // 于是有一段中间状态:「上游收录了」并不等于「两行会并成一行」——那要等它进榜。
 // 上面那组合并用例两边都是合约形,盖不到这条分岔,所以单开一组。
 const XXA_ETH = "evm:1/contract:0xa0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0";

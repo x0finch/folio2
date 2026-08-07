@@ -11,16 +11,18 @@ import { Effect, Option } from "effect";
 import type { CandidateSource } from "./candidates";
 import { pickByConfidence } from "./confidence";
 
-// 写路径要的那一步:拿一条 tokenRef 换出一个 `token_id`。**`TokenService` 的一个方法**
-// (`mint`),实现整块住在这里 —— 服务那个文件只放接口、Tag 与装配。
+// 写路径:拿一条 tokenRef 换出一个 `token_id`。**`TokenService` 的一个方法**(`mint`)。
 //
-// **全程不碰网络。** 这条保证的形式变了,得说清楚:以前 mint 是自己的服务,
-// `tokenMinterLayer` 的 `R` 里没有 `TokenUpstream`,于是「不出网」是**装配层的类型事实**。
-// 现在读写合成一个 `TokenService`,那个 layer 的 `R` 里必然有 `TokenUpstream`(读路径要它),
-// 所以保证降级为**本文件的签名 + 一条红线**:
+// 这一片与其余五片的分界是全服务最有分量的那条线:**「这是哪个币」在这里定死、冻进快照**,
+// 此后读的那几片一律拿 token_id 直接取数,不再从 tokenRef 反推(ADR 0021)。
 //
-//   · `MintDeps` 里**没有任何 `*Upstream`**,而 `mintOf` 只吃 `MintDeps` —— 出网所需的东西
-//     压根不在这个函数的作用域里(不是注释,是参数类型)
+// **全程不碰网络。** 这条保证的形式要说清楚:以前 mint 是自己的服务,`tokenMinterLayer` 的
+// `R` 里没有 `TokenUpstream`,于是「不出网」是**装配层的类型事实**。读写合成一个 `TokenService`
+// 之后,那个 layer 的 `R` 里必然有 `TokenUpstream`(读的几片要它),所以保证降级为
+// **本文件的签名 + 一条红线**:
+//
+//   · `MintDeps` 里**没有任何 `*Upstream`**,而 `makeMinting` 只吃 `MintDeps` —— 出网所需的
+//     东西压根不在这个作用域里(不是注释,是参数类型)
 //   · **红线:本文件不许 import 任何 `*Upstream` 端口。** 往 `MintDeps` 上加一个上游字段,
 //     或者从 context 里 `yield* TokenUpstream`,都等于把这条保证作废 —— 加之前先想清楚
 //     「写快照之前必须先过这里」意味着什么:它在用户等着的同步路径上,一次串行的上游往返
@@ -28,6 +30,11 @@ import { pickByConfidence } from "./confidence";
 //
 // 查的是本地 ref 行,miss 才查本地全局映射,再 miss 才按 symbol 猜(那一档问 `CandidateSource`,
 // 它读的是缓存目录 —— 唯一那条冷启动出网路径收在**它自己的 layer** 里,仍然是类型事实)。
+export interface TokenMinting {
+  // 一批 (ref, provider 报的元信息) → 各自的 token_id。输入里重复的 ref 只处理一次。
+  mint(inputs: readonly MintInput[]): Effect.Effect<Map<TokenRef, string>>;
+}
+
 export interface MintInput {
   ref: TokenRef;
   seed: ProviderTokenSeed;
@@ -43,13 +50,10 @@ export interface MintDeps {
   readonly namer: Namer;
 }
 
-// 一批 (ref, provider 报的元信息) → 各自的 token_id。输入里重复的 ref 只处理一次。
-//
-// 本函数**收已解析好的服务对象**,不从 context 取 —— 与 `./warm` 同款,于是它的 `R` 是 `never`,
-// `TokenService.mint` 的签名不会把 mint 的依赖漏给调用方。从 Tag 取服务只发生在 Layer 那一层。
-export function mintOf(
-  deps: MintDeps,
-): (inputs: readonly MintInput[]) => Effect.Effect<Map<TokenRef, string>> {
+// **收已解析好的服务对象**,不从 context 取 —— 与本文件夹其余几片、以及 `./warm` 同款,
+// 于是 `mint` 的 `R` 是 `never`:服务的方法签名不会把 mint 的依赖漏给调用方。
+// 从 Tag 取服务只发生在 `./index` 那一层。
+export function makeMinting(deps: MintDeps): TokenMinting {
   const { store, refIndex, candidates } = deps;
   const { id: namer, overrides } = deps.namer;
 
@@ -158,24 +162,26 @@ export function mintOf(
       return hit.tokenId;
     });
 
-  return (inputs) =>
-    Effect.gen(function* () {
-      const out = new Map<TokenRef, string>();
-      if (inputs.length === 0) return out;
+  return {
+    mint: (inputs) =>
+      Effect.gen(function* () {
+        const out = new Map<TokenRef, string>();
+        if (inputs.length === 0) return out;
 
-      // 同一批里重复的 ref 只处理一次(一个钱包同一个币多笔持仓很常见)。
-      const byRef = new Map<TokenRef, ProviderTokenSeed>();
-      for (const i of inputs) if (!byRef.has(i.ref)) byRef.set(i.ref, i.seed);
+        // 同一批里重复的 ref 只处理一次(一个钱包同一个币多笔持仓很常见)。
+        const byRef = new Map<TokenRef, ProviderTokenSeed>();
+        for (const i of inputs) if (!byRef.has(i.ref)) byRef.set(i.ref, i.seed);
 
-      // 第一步:一次批量点查本地 ref 行。绝大多数同步全部停在这里 —— 纯本地。
-      const hits = yield* store.findByRefs([...byRef.keys()]);
+        // 第一步:一次批量点查本地 ref 行。绝大多数同步全部停在这里 —— 纯本地。
+        const hits = yield* store.findByRefs([...byRef.keys()]);
 
-      // 逐条走决策树。**顺序跑,而且这次是写在代码里的**(以前是一串 `await`,并发度靠读的人
-      // 自己看出来)。账户是并发跑的,同一条 ref 可能被同时 mint,靠 store 的 upsert-then-read
-      // 幂等收敛(见 `TokenStore.create`),不靠「先统一 mint 再并发写」。
-      for (const [ref, seed] of byRef) {
-        out.set(ref, yield* mintOne(ref, seed, hits.get(ref)));
-      }
-      return out;
-    });
+        // 逐条走决策树。**顺序跑,而且这次是写在代码里的**(以前是一串 `await`,并发度靠读的人
+        // 自己看出来)。账户是并发跑的,同一条 ref 可能被同时 mint,靠 store 的 upsert-then-read
+        // 幂等收敛(见 `TokenStore.create`),不靠「先统一 mint 再并发写」。
+        for (const [ref, seed] of byRef) {
+          out.set(ref, yield* mintOne(ref, seed, hits.get(ref)));
+        }
+        return out;
+      }),
+  };
 }
