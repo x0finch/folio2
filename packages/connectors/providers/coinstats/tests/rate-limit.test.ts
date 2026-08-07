@@ -1,4 +1,5 @@
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCoinstatsProvider } from "../src";
 import { COINSTATS_API_KEY } from "../src/constants";
@@ -35,10 +36,13 @@ describe("三条链共享一个队", () => {
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => new Response(JSON.stringify(solanaFixture), { status: 200 }));
 
+  // 三个不同的 provider 实例(部署里三个 connector 各持一个)。**每条链各自 `runPromise`,
+  // 不是包成一个 `Effect.all`** —— 要测的正是「三个互不相干的调用者挤同一份额度」,
+  // 合成一个 effect 会把它们变成同一个 fiber 里的顺序执行,那就测不到闸了。
   const runThree = () =>
     Promise.all(
       ["solana", "sui", "cosmos"].map((chain) =>
-        createCoinstatsProvider(chain).fetchBalances(ctx()),
+        Effect.runPromise(createCoinstatsProvider(chain).fetchBalances(ctx())),
       ),
     );
 

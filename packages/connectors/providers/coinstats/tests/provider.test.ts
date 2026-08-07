@@ -1,9 +1,17 @@
-import type { Balance, BalanceProvider } from "@folio/connectors-basic";
+import type { Balance, BalanceProvider, ConnectorError } from "@folio/connectors-basic";
 import { validateCredentials } from "@folio/connectors-basic";
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coinstatsAccountCreds, createCoinstatsProvider } from "../src";
 import solanaFixture from "./fixtures/solana.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
+  Effect.runPromise(Effect.flip(effect));
 
 // 速率闸是进程内状态。桶要清(免得用例间互相排队),**冷却尤其要清** —— 撞过 429 的用例会给后面
 // 的用例留下「冷却中」,于是本该 401 的断言拿到 RATE_LIMITED。sleep 换即时,不真等
@@ -43,7 +51,7 @@ describe("coinstats factory (一个 provider 包 → 多个 connector)", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("[]", { status: 200 }));
     const sui: BalanceProvider<Balance> = createCoinstatsProvider("sui-wallet");
-    await sui.fetchBalances(ctx({ address: SUI }));
+    await run(sui.fetchBalances(ctx({ address: SUI })));
     expect(String(spy.mock.calls[0][0])).toContain("connectionId=sui-wallet");
   });
 });
@@ -55,7 +63,7 @@ describe("coinstats fetchBalances", () => {
     const spy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(JSON.stringify(solanaFixture), { status: 200 }));
-    const { balances } = await provider.fetchBalances(ctx());
+    const { balances } = await run(provider.fetchBalances(ctx()));
     expect(balances).toHaveLength(4); // solana fixture 5 条,1 条无 symbol 被跳过
     expect((spy.mock.calls[0][1]?.headers as Record<string, string>)["X-API-KEY"]).toBe("k");
   });
@@ -63,21 +71,22 @@ describe("coinstats fetchBalances", () => {
   // 地址由 validateCredentials 预校验;provider 只对 provider key 缺失自查(不发请求)。
   it("throws INVALID_CREDENTIALS when the provider key is missing (no request)", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    await expect(provider.fetchBalances(ctx({ creds: {} }))).rejects.toMatchObject({
-      code: "INVALID_CREDENTIALS",
+    expect(await failing(provider.fetchBalances(ctx({ creds: {} })))).toMatchObject({
+      _tag: "ConnectorAuthError",
     });
     expect(spy).not.toHaveBeenCalled();
   });
 
   it("maps 429 → RATE_LIMITED and 401 → AUTH_FAILED", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 429 }));
-    await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "RATE_LIMITED",
-      retryable: true,
+    expect(await failing(provider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorRateLimitError",
     });
     resetRateLimitsForTests(); // 上一句那个 429 写下了冷却,不清掉这里会拿到 RATE_LIMITED
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({ code: "AUTH_FAILED" });
+    expect(await failing(provider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorAuthError",
+    });
   });
 });
 
@@ -86,37 +95,15 @@ describe("coinstats validateAccount", () => {
 
   it("false when the provider key is missing, without a request", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    expect(await provider.validateAccount(ctx({ creds: {} }))).toBe(false);
+    expect(await run(provider.validateAccount(ctx({ creds: {} })))).toBe(false);
     expect(spy).not.toHaveBeenCalled();
   });
 
   it("true on 200, false on 401", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]", { status: 200 }));
-    expect(await provider.validateAccount(ctx())).toBe(true);
+    expect(await run(provider.validateAccount(ctx()))).toBe(true);
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    expect(await provider.validateAccount(ctx())).toBe(false);
-  });
-});
-
-describe("coinstats provider.validateCreds — 实测打 /wallet/blockchains(只需 key)", () => {
-  const provider: BalanceProvider<Balance> = createCoinstatsProvider("solana");
-
-  it("key 缺失/空 → false,且不发请求", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
-    expect(await provider.validateCreds?.({ COINSTATS_API_KEY: "" })).toBe(false);
-    expect(await provider.validateCreds?.({})).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
-  });
-
-  it("打 /wallet/blockchains:200 → true(带 X-API-KEY);401 → false", async () => {
-    const spy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response("[]", { status: 200 }));
-    expect(await provider.validateCreds?.({ COINSTATS_API_KEY: "k" })).toBe(true);
-    expect(String(spy.mock.calls[0][0])).toContain("/wallet/blockchains");
-    expect((spy.mock.calls[0][1]?.headers as Record<string, string>)["X-API-KEY"]).toBe("k");
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    expect(await provider.validateCreds?.({ COINSTATS_API_KEY: "k" })).toBe(false);
+    expect(await run(provider.validateAccount(ctx()))).toBe(false);
   });
 });
 

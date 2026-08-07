@@ -1,9 +1,9 @@
 import {
-  type BalanceProvider,
   type CredField,
   type Defi,
   isCredentialRejection,
   ProviderError,
+  promiseProvider,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
@@ -264,7 +264,7 @@ async function getPositions(address: string, apiKey: string): Promise<ZerionPosi
   })) as ZerionPositionsResponse;
 }
 
-export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof providerCreds> = {
+export const zerionProvider = promiseProvider<Row, typeof evmAccountCreds, typeof providerCreds>({
   id: "zerion",
   label: "Zerion",
   creds: providerCreds,
@@ -302,17 +302,4 @@ export const zerionProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof
       throw err;
     }
   },
-
-  // provider 自身 creds liveness:用 key 实测打 /v1/chains/(只需 key、不需地址)—— 不抛就算通,
-  // 真正验证 key 有效而非仅存在性检查。key 缺失则直接 false 不发请求。
-  async validateCreds(creds): Promise<boolean> {
-    const apiKey = creds[ZERION_API_KEY];
-    if (!apiKey) return false;
-    try {
-      await request(CHAINS_PATH, { context: apiKey });
-      return true;
-    } catch {
-      return false;
-    }
-  },
-};
+});

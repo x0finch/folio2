@@ -5,7 +5,9 @@
 // (密钥由调用方传入,不读 env),脱敏塑形(seal/open/safeView)归 app lib/creds.ts。
 export * from "./balance";
 export * from "./connector";
+export * from "./connector-error";
 export * from "./creds";
 export * from "./crypto";
 export * from "./errors";
 export * from "./note";
+export * from "./promise-provider";

@@ -1,10 +1,18 @@
-import type { Balance, BalanceProvider } from "@folio/connectors-basic";
+import type { Balance, BalanceProvider, ConnectorError } from "@folio/connectors-basic";
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseChainIds, parsePositions, resetChainIdsCacheForTests, zerionProvider } from "../src";
 import chainsFixture from "./fixtures/chains.json";
 import expectedBalances from "./fixtures/expected-balances.json";
 import positionsFixture from "./fixtures/positions.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
+  Effect.runPromise(Effect.flip(effect));
 
 // fetchBalances 依赖两个 API:positions(持仓)+ /v1/chains/(slug→数字 chainId,evm:<id> 命名者用)。
 // 三份 fixture 一一对应:positions.json / chains.json(录制的两个真实响应)→ expected-balances.json
@@ -99,10 +107,10 @@ describe("parsePositions (golden: fixtures in → fixture out)", () => {
   });
 });
 
-describe("zerion provider.fetchBalances(双 API)", () => {
+describe("zerion run(provider.fetchBalances(双 API))", () => {
   it("并行取 positions + chains,输出与 expected-balances 完全一致", async () => {
     const spy = mockZerionApis();
-    const { balances } = await provider.fetchBalances(ctx());
+    const { balances } = await run(provider.fetchBalances(ctx()));
     expect(balances).toEqual(expectedBalances);
     // 两个端点都请求了,且 Basic auth 一致
     const urls = spy.mock.calls.map((c) => String(c[0]));
@@ -117,26 +125,26 @@ describe("zerion provider.fetchBalances(双 API)", () => {
 
   it("chains 端点失败(500)且无缓存 → fetchBalances 硬失败(不写含分叉标识的快照)", async () => {
     mockZerionApis({ chains: () => new Response("", { status: 500 }) });
-    await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "UPSTREAM_ERROR",
+    expect(await failing(provider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorUnavailableError",
     });
   });
 
   it("chains 映射有进程内缓存:第二次 fetchBalances 不再请求 /v1/chains/", async () => {
     const spy = mockZerionApis();
-    await provider.fetchBalances(ctx());
+    await run(provider.fetchBalances(ctx()));
     const chainCalls = () =>
       spy.mock.calls.filter((c) => String(c[0]).includes("/v1/chains/")).length;
     expect(chainCalls()).toBe(1);
-    await provider.fetchBalances(ctx());
+    await run(provider.fetchBalances(ctx()));
     expect(chainCalls()).toBe(1); // 仍是 1:走缓存
   });
 
   // provider key 由 app 分派桥从 env 注入;缺失 → INVALID_CREDENTIALS,不发请求。
   it("throws INVALID_CREDENTIALS when the provider key is missing (no request)", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    await expect(provider.fetchBalances(ctx({ creds: {} }))).rejects.toMatchObject({
-      code: "INVALID_CREDENTIALS",
+    expect(await failing(provider.fetchBalances(ctx({ creds: {} })))).toMatchObject({
+      _tag: "ConnectorAuthError",
     });
     expect(spy).not.toHaveBeenCalled();
   });
@@ -145,17 +153,15 @@ describe("zerion provider.fetchBalances(双 API)", () => {
     mockZerionApis({
       positions: () => new Response("", { status: 429, headers: { "retry-after": "3" } }),
     });
-    await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "RATE_LIMITED",
-      retryable: true,
-      retryAfterMs: 3000,
+    expect(await failing(provider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorRateLimitError",
     });
     vi.restoreAllMocks();
     resetChainIdsCacheForTests();
     resetRateLimitsForTests(); // 上一半那个 429 写下了冷却,不清掉这一半会拿到 RATE_LIMITED
     mockZerionApis({ positions: () => new Response("", { status: 401 }) });
-    await expect(provider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "AUTH_FAILED",
+    expect(await failing(provider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorAuthError",
     });
   });
 

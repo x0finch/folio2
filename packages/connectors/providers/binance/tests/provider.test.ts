@@ -1,4 +1,5 @@
-import { ProviderError } from "@folio/connectors-basic";
+import { type ConnectorError, isRetryable } from "@folio/connectors-basic";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { binanceProvider, parseAccountBalances } from "../src";
 import account from "./fixtures/account.json";
@@ -9,6 +10,13 @@ import expected from "./fixtures/expected-balances.json";
 import fundingAssets from "./fixtures/funding-assets.json";
 import futuresAccount from "./fixtures/futures-account.json";
 import prices from "./fixtures/prices.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
+  Effect.runPromise(Effect.flip(effect));
 
 // 新 FetchContext 形状:account.creds(AC:apiKey/secret,由分派桥 openCreds 解密后灌入)+ creds(PC:
 // base URL 覆盖,#264,由 app 从 env 注入;默认空 = 直连)。
@@ -86,7 +94,7 @@ describe("binanceProvider.fetchBalances", () => {
       );
     });
 
-    const { balances } = await binanceProvider.fetchBalances(ctx());
+    const { balances } = await run(binanceProvider.fetchBalances(ctx()));
     expect(balances.map((b) => b.symbol)).toEqual(["BTC", "ETH", "USDT", "NOPRICE"]);
     // per-balance note:ETH 有 locked=1 → 它自己那笔挂 Locked note。
     expect(balances.find((b) => b.symbol === "ETH")?.note).toEqual({
@@ -108,14 +116,12 @@ describe("binanceProvider.fetchBalances", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("", { status: 429, headers: { "retry-after": "2" } }),
     );
-    await expect(binanceProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "RATE_LIMITED",
-      retryable: true,
-      retryAfterMs: 2000,
+    expect(await failing(binanceProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorRateLimitError",
     });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    await expect(binanceProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "AUTH_FAILED",
+    expect(await failing(binanceProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorAuthError",
     });
   });
 
@@ -142,7 +148,7 @@ describe("binanceProvider.fetchBalances", () => {
         { status: 200 },
       );
     });
-    const { balances, note } = await binanceProvider.fetchBalances(ctx());
+    const { balances, note } = await run(binanceProvider.fetchBalances(ctx()));
     // 现货 4 + 资金 2 + 理财 2(USDT 活期 + BTC 定期)
     expect(balances.filter((b) => b.kind === "spot")).toHaveLength(8);
     // U本位 + 币本位各一个权益行
@@ -184,7 +190,7 @@ describe("binanceProvider.fetchBalances", () => {
       return new Response(JSON.stringify([{ symbol: "UNIUSDT", price: "10" }]), { status: 200 });
     });
 
-    const { balances } = await binanceProvider.fetchBalances(ctx());
+    const { balances } = await run(binanceProvider.fetchBalances(ctx()));
     const earn = balances.filter((b) => b.note?.group === "earn");
     expect(earn).toHaveLength(102); // 100(第一页)+ 2(第二页)
     expect(earn.some((b) => b.symbol === "UNI")).toBe(true);
@@ -205,7 +211,7 @@ describe("binanceProvider.fetchBalances", () => {
         { status: 200 },
       );
     });
-    const { balances, note } = await binanceProvider.fetchBalances(ctx());
+    const { balances, note } = await run(binanceProvider.fetchBalances(ctx()));
     expect(balances.filter((b) => b.kind === "spot")).toHaveLength(4);
     expect(balances.some((b) => b.kind !== "spot")).toBe(false);
     expect(note?.[0]?.title).toBe("Wallets not synced");
@@ -243,14 +249,16 @@ describe("binanceProvider.fetchBalances", () => {
       return new Response(JSON.stringify([]), { status: 200 }); // /api/v3/ticker/price
     });
 
-    await binanceProvider.fetchBalances(
-      ctx(
-        { apiKey: "k", secret: "s" },
-        {
-          BINANCE_API_BASE: "https://px.example/s/binance",
-          BINANCE_FAPI_BASE: "https://px.example/s/binance-fapi",
-          BINANCE_DAPI_BASE: "https://px.example/s/binance-dapi",
-        },
+    await run(
+      binanceProvider.fetchBalances(
+        ctx(
+          { apiKey: "k", secret: "s" },
+          {
+            BINANCE_API_BASE: "https://px.example/s/binance",
+            BINANCE_FAPI_BASE: "https://px.example/s/binance-fapi",
+            BINANCE_DAPI_BASE: "https://px.example/s/binance-dapi",
+          },
+        ),
       ),
     );
 
@@ -269,12 +277,12 @@ describe("binanceProvider.fetchBalances", () => {
 describe("binanceProvider.validateAccount", () => {
   it("200 → true", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
-    expect(await binanceProvider.validateAccount(ctx())).toBe(true);
+    expect(await run(binanceProvider.validateAccount(ctx()))).toBe(true);
   });
 
   it("凭据被拒(401 → AUTH_FAILED)→ false,不抛", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
-    expect(await binanceProvider.validateAccount(ctx())).toBe(false);
+    expect(await run(binanceProvider.validateAccount(ctx()))).toBe(false);
   });
 
   // binance 用 HTTP 400 表达错 secret(-1022,签名对不上)/ key 格式非法(-2014)—— 凭据问题,
@@ -283,23 +291,21 @@ describe("binanceProvider.validateAccount", () => {
     const spy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response('{"code":-1022,"msg":"Signature invalid"}', { status: 400 }));
-    expect(await binanceProvider.validateAccount(ctx())).toBe(false);
+    expect(await run(binanceProvider.validateAccount(ctx()))).toBe(false);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("429 → 抛 RATE_LIMITED(retryable),不压成 false", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 429 }));
-    const err = await binanceProvider.validateAccount(ctx()).catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("RATE_LIMITED");
-    expect(err.retryable).toBe(true);
+    const err = await failing(binanceProvider.validateAccount(ctx()));
+    expect(err._tag).toBe("ConnectorRateLimitError");
+    expect(isRetryable(err)).toBe(true);
   });
 
   it("5xx → 抛 UPSTREAM_ERROR(retryable)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 503 }));
-    const err = await binanceProvider.validateAccount(ctx()).catch((e) => e);
-    expect(err).toBeInstanceOf(ProviderError);
-    expect(err.code).toBe("UPSTREAM_ERROR");
-    expect(err.retryable).toBe(true);
+    const err = await failing(binanceProvider.validateAccount(ctx()));
+    expect(err._tag).toBe("ConnectorUnavailableError");
+    expect(isRetryable(err)).toBe(true);
   });
 });

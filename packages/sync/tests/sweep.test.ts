@@ -1,3 +1,4 @@
+import { ConnectorFailure } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -33,11 +34,15 @@ function makeDeps(accountsByUser: Record<string, AccountSafe[]>): SyncDeps {
     listAccounts: async (userId) => accountsByUser[userId] ?? [],
     listRawCreds: async () => [],
     writeSnapshot: async (_u, accountId) => `snap-${accountId}`,
-    // manual → ok;其余 → 抛(模拟 balances.fetchBalances 内取数失败)。
-    fetchBalances: async (account) => {
-      if (account.connectorId === "manual") return { status: "ok", balances: [], totalUsd: 0 };
-      throw new Error(`fetch failed for connectorId: ${account.connectorId}`);
-    },
+    // manual → ok;其余 → 失败(模拟取数失败)。
+    fetchBalances: (account) =>
+      account.connectorId === "manual"
+        ? Effect.succeed({ status: "ok", balances: [], totalUsd: 0 } as const)
+        : Effect.fail(
+            new ConnectorFailure({
+              message: `fetch failed for connectorId: ${account.connectorId}`,
+            }),
+          ),
   };
 }
 
@@ -95,7 +100,7 @@ describe("syncAllUsers — 串行", () => {
       },
       listRawCreds: async () => [],
       writeSnapshot: async () => "snap",
-      fetchBalances: async () => ({ status: "ok", balances: [], totalUsd: 0 }),
+      fetchBalances: () => Effect.succeed({ status: "ok", balances: [], totalUsd: 0 } as const),
     };
     const res = await syncAllUsers(deps, users);
     expect(res.users).toBe(3);
@@ -113,10 +118,11 @@ describe("syncUserStream — 逐账户产出", () => {
       listAccounts: async () => [manual("slow", "u1"), manual("fast", "u1")],
       listRawCreds: async () => [],
       writeSnapshot: async () => "snap",
-      fetchBalances: async (a) => {
-        await new Promise((r) => setTimeout(r, delays[a.id] ?? 0));
-        return { status: "ok", balances: [], totalUsd: 0 };
-      },
+      fetchBalances: (a) =>
+        Effect.promise(async () => {
+          await new Promise((r) => setTimeout(r, delays[a.id] ?? 0));
+          return { status: "ok", balances: [], totalUsd: 0 } as const;
+        }),
     };
     await Effect.runPromise(
       syncUserStream(deps, "u1").pipe(
@@ -134,11 +140,12 @@ describe("syncUserStream — 逐账户产出", () => {
       listAccounts: async () => [manual("a1", "u1"), manual("a2", "u1"), manual("a3", "u1")],
       listRawCreds: async () => [],
       writeSnapshot: async () => "snap",
-      fetchBalances: async () => {
-        await new Promise((r) => setTimeout(r, 5));
-        done++;
-        return { status: "ok", balances: [], totalUsd: 0 };
-      },
+      fetchBalances: () =>
+        Effect.promise(async () => {
+          await new Promise((r) => setTimeout(r, 5));
+          done++;
+          return { status: "ok", balances: [], totalUsd: 0 } as const;
+        }),
     };
     await Effect.runPromise(
       syncUserStream(deps, "u1").pipe(

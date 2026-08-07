@@ -1,6 +1,13 @@
+import type { ConnectorError } from "@folio/connectors-basic";
 import { bypassRateLimitsForTests, resetRateLimitsForTests } from "@folio/shared";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { okxProvider } from "../src";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
 
 // okx **刻意没有速率闸**,这个文件就是钉住这件事的 —— 不然下一个人看到别的 provider 都有闸,
 // 会顺手补一个上来。
@@ -47,7 +54,7 @@ describe("okx 没有闸", () => {
     // **不推进时钟**:无闸 → 没有一次 setTimeout 等待,20 发全靠微任务/异步(HMAC)resolve、
     // 时钟没动 → 全落同一刻。原来那版多推 3×60s,把异步 resolve 落在推进之后的请求切到别的时刻
     // → 偶发 flaky(实测)。有闸的话这里会卡在 setTimeout 上(假时钟不推就不 resolve)→ 超时报红。
-    await Promise.all(Array.from({ length: 20 }, () => okxProvider.fetchBalances(ctx())));
+    await Promise.all(Array.from({ length: 20 }, () => run(okxProvider.fetchBalances(ctx()))));
 
     // 每次 fetchBalances 并发打 6 个端点(交易/资金/活期/staking/对账锚/持仓探测)→ 20×6=120 发,
     // 无闸 → 全落同一刻。

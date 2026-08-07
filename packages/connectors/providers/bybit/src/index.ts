@@ -1,10 +1,10 @@
 import {
-  type BalanceProvider,
   type CredField,
   hmacSha256,
   isCredentialRejection,
   type Note,
   ProviderError,
+  promiseProvider,
   type Spot,
 } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
@@ -322,7 +322,7 @@ export const bybitAccountCreds = [
   { key: "secret", type: "secret", label: "API Secret", validator: z.string().trim().min(1) },
 ] as const satisfies readonly CredField[];
 
-export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
+export const bybitProvider = promiseProvider<Spot, typeof bybitAccountCreds>({
   id: PROVIDER_ID,
   label: "Bybit",
   // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据,走 account.creds。
@@ -408,4 +408,4 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
       throw err;
     }
   },
-};
+});

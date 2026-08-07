@@ -1,9 +1,17 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
-import { validateCredentials } from "@folio/connectors-basic";
+import { type ConnectorError, validateCredentials } from "@folio/connectors-basic";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bitcoinAccountCreds, blockbookProvider } from "../src";
 import addressFixture from "./fixtures/address.json";
 import xpubFixture from "./fixtures/xpub.json";
+
+// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
+// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
+// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+const run = <A>(effect: Effect.Effect<A, ConnectorError>): Promise<A> => Effect.runPromise(effect);
+const failing = (effect: Effect.Effect<unknown, ConnectorError>): Promise<ConnectorError> =>
+  Effect.runPromise(Effect.flip(effect));
 
 // provider 只整合:取数走 @folio/blockbook-client(Trezor Blockbook)。这里按 URL(/xpub/ vs /address/)
 // 打桩 fetch,断言整合后的 spot 行 + account 级 Note。派生正确性在 @folio/bitcoin-derive 的离线向量测里。
@@ -48,8 +56,8 @@ afterEach(() => vi.restoreAllMocks());
 describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () => {
   it("录制响应 → 预期 spot 行(已确认→amount;value=0;kind=spot;明细走 note)", async () => {
     mockBlockbook({ address: addressFixture.response });
-    const { balances, note } = await blockbookProvider.fetchBalances(
-      ctx({ addressOrXpub: addressFixture.request.addressOrXpub }),
+    const { balances, note } = await run(
+      blockbookProvider.fetchBalances(ctx({ addressOrXpub: addressFixture.request.addressOrXpub })),
     );
     expect(balances).toEqual(addressFixture.expected);
     // account 级 note:未确认 500000 sats → 一个 Unconfirmed section(仅 pending 行)。
@@ -64,7 +72,7 @@ describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () 
 
   it("零余额零未确认 → 空(无 balance、故 note 为空)", async () => {
     mockBlockbook({ address: { address: ADDR, balance: "0", unconfirmedBalance: "0" } });
-    const { balances, note } = await blockbookProvider.fetchBalances(ctx());
+    const { balances, note } = await run(blockbookProvider.fetchBalances(ctx()));
     expect(balances).toEqual([]);
     expect(note).toEqual([]);
   });
@@ -73,8 +81,8 @@ describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () 
 describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbook 服务端派生)", () => {
   it("录制 xpub 响应 → 预期 spot 行(分布仅非零 + receive/change;收款指引 lastUsed + 本地派生 next)", async () => {
     mockBlockbook({ xpub: xpubFixture.response });
-    const { balances, note } = await blockbookProvider.fetchBalances(
-      ctx({ addressOrXpub: xpubFixture.request.addressOrXpub }),
+    const { balances, note } = await run(
+      blockbookProvider.fetchBalances(ctx({ addressOrXpub: xpubFixture.request.addressOrXpub })),
     );
     expect(balances).toEqual(xpubFixture.expected);
     // account 级 note:无未确认 → 无 Unconfirmed;Receive addresses(lastUsed + 本地派生 next)+
@@ -117,7 +125,7 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
         ],
       },
     });
-    const { note } = await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 }));
+    const { note } = await run(blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 })));
     // 展示细节现全在 account 级 note(balance 已并回 spot、无 meta):
     // 分布只含非零(0/0);lastUsed 取最大已用下标 0/1,next 从 0/2 起。
     const sections = note ?? [];
@@ -131,7 +139,9 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
 
   it("请求打到 /xpub/ 且带 zpub token(zpub 前缀权威,scriptType 被忽略)", async () => {
     const spy = mockBlockbook({ xpub: xpubFixture.response });
-    await blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84, scriptType: "legacy" }));
+    await run(
+      blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84, scriptType: "legacy" })),
+    );
     const url = String(spy.mock.calls[0][0]);
     expect(url).toContain("/xpub/");
     expect(url).toContain(ZPUB84); // 仍以 zpub 查询,未被 scriptType=legacy 改写
@@ -141,13 +151,13 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
 describe("blockbookProvider.fetchBalances — 错误映射", () => {
   it("429 → RATE_LIMITED;500(全端点)→ UPSTREAM_ERROR", async () => {
     mockBlockbook({ status: 429 });
-    await expect(blockbookProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "RATE_LIMITED",
+    expect(await failing(blockbookProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorRateLimitError",
     });
     vi.restoreAllMocks();
     mockBlockbook({ status: 500 });
-    await expect(blockbookProvider.fetchBalances(ctx())).rejects.toMatchObject({
-      code: "UPSTREAM_ERROR",
+    expect(await failing(blockbookProvider.fetchBalances(ctx()))).toMatchObject({
+      _tag: "ConnectorUnavailableError",
     });
   });
 

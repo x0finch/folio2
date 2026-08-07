@@ -6,11 +6,17 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
-import type { Balance, Note } from "@folio/connectors-basic";
+import {
+  type Balance,
+  type ConnectorError,
+  ConnectorFailure,
+  fromProviderError,
+} from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import type { ValuationMode } from "@folio/oracle";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
+import { Effect } from "effect";
 import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
 import { revalue } from "../../revalue";
@@ -78,43 +84,58 @@ export async function warmTokensForUser(userId: string): Promise<void> {
 
 // 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。
 // #37d 起 account.connectorId 直接即 connector 的 id。
-async function fetchViaConnector(
+//
+// **出口是 Effect,不是 Promise。** 中间转一次就切断 context —— sync 那边的超时和中断就管不到
+// provider 内部了(ADR 0035 迁移时实测过)。前置那几步(解密、校验)本身还是 Promise,
+// 各自包一层 `tryPromise` 进来;它们的失败经 `fromProviderError` 归到「重试改变不了」那一类,
+// 与迁移前一致(那时是非 `ProviderError` → `retryable: false`)。
+const fetchViaConnector = (
   cid: string,
   manifest: ConnectorManifest,
   account: AccountSafe,
   stored: Record<string, string>,
   seeds: SeedCollector,
-): Promise<FetchOutcome> {
-  const specs = manifest.account.creds as unknown as InputSpec[]; // {key,type} 结构 = InputSpec
-  if (!isComplete(specs, stored)) return { status: "needs-credentials" };
-  const plain = await openCreds(specs, stored, env.SECRETS_KEY);
-  // 取数前再跑一次 account.creds 校验闸:脏/畸形 identifier 快速失败
-  //(CredentialValidationError 非 ProviderError → 非重试、隔离),不退化成"打坏地址 → 4xx → 白重试"。
-  const validated = await validateCredentials(manifest.account.creds, plain);
-  const provider = selectProvider(manifest);
-  if (!provider) throw new Error(`no provider for connector ${cid}`);
-  // PC 注入:从 env 按 provider 声明的 creds key 取默认值(最小权限:只注入声明的 key)。
-  const providerCreds: Record<string, string> = {};
-  for (const f of provider.creds) {
-    const v = (env as unknown as Record<string, string | undefined>)[f.key];
-    if (v != null) providerCreds[f.key] = v;
-  }
-  const ctx = {
-    account: { id: account.id, label: account.label, connectorId: cid, creds: validated },
-    creds: providerCreds,
-  };
-  // provider 抛的 @folio/connectors-basic ProviderError 直接向上传播 —— sync 的 withRetry 直接 instanceof 该类。
-  // provider.fetchBalances 返回 { balances, note? }(note 重设计):balance 级单个 note 挂各 balance(随 balances
-  // 透传 → snapshot_balances.note);顶层 note 为 account 级 Note[](整钱包)→ 透传 outcome.note → snapshots.note。
-  const { balances: rows, note } = (await provider.fetchBalances(ctx)) as unknown as {
-    balances: Balance[];
-    note?: Note[];
-  };
-  const totalUsd = rows.reduce((s, b) => s + b.value, 0);
-  // provider 报的名字/图经 seeds 收给 mint 建行(新参考层);旧的 noteProviderAssets 双写已在 #202 拔掉。
-  seeds.collect(rows);
-  return { status: "ok", balances: rows, totalUsd, note };
-}
+): Effect.Effect<FetchOutcome, ConnectorError> =>
+  Effect.gen(function* () {
+    const specs = manifest.account.creds as unknown as InputSpec[]; // {key,type} 结构 = InputSpec
+    if (!isComplete(specs, stored)) return { status: "needs-credentials" } satisfies FetchOutcome;
+    const plain = yield* Effect.tryPromise({
+      try: () => openCreds(specs, stored, env.SECRETS_KEY),
+      catch: fromProviderError,
+    });
+    // 取数前再跑一次 account.creds 校验闸:脏/畸形 identifier 快速失败(归「重试改变不了」那类、
+    // 隔离),不退化成"打坏地址 → 4xx → 白重试"。
+    const validated = yield* Effect.tryPromise({
+      try: () => validateCredentials(manifest.account.creds, plain),
+      catch: fromProviderError,
+    });
+    const provider = selectProvider(manifest);
+    if (!provider) {
+      return yield* new ConnectorFailure({ message: `no provider for connector ${cid}` });
+    }
+    // PC 注入:从 env 按 provider 声明的 creds key 取默认值(最小权限:只注入声明的 key)。
+    const providerCreds: Record<string, string> = {};
+    for (const f of provider.creds) {
+      const v = (env as unknown as Record<string, string | undefined>)[f.key];
+      if (v != null) providerCreds[f.key] = v;
+    }
+    const ctx = {
+      account: { id: account.id, label: account.label, connectorId: cid, creds: validated },
+      creds: providerCreds,
+    };
+    // provider.fetchBalances 返回 { balances, note? }(note 重设计):balance 级单个 note 挂各 balance
+    //(随 balances 透传 → snapshot_balances.note);顶层 note 为 account 级 Note[](整钱包)
+    // → 透传 outcome.note → snapshots.note。
+    //
+    // **以前这里有个 `as unknown as`**,而它正好把「provider 的出口变成 Effect 了」这件事从类型上
+    // 遮住了 —— 改契约那一刻全仓只有 provider 自己的测试报错,这一行照样编译通过、运行期
+    // 会把一个 Effect 对象当成结果解构。强转就是这么吃掉真错误的,所以拆了。
+    const { balances: rows, note } = yield* provider.fetchBalances(ctx);
+    const totalUsd = rows.reduce((sum, b) => sum + b.value, 0);
+    // provider 报的名字/图经 seeds 收给 mint 建行(新参考层);旧的 noteProviderAssets 双写已在 #202 拔掉。
+    seeds.collect(rows);
+    return { status: "ok", balances: rows, totalUsd, note } satisfies FetchOutcome;
+  });
 
 // provider 报的元信息(名字 / 图)在编排里会被丢掉 —— 快照只落 symbol/amount/value/kind 那几样,
 // `SnapshotBalanceInput` 里没有 name/logo。但 mint 建代币行时要用它们(不然新币只剩 symbol、没图)。
@@ -194,10 +215,14 @@ export function buildSyncDeps(): SyncDeps {
     // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);
     // SECRETS_KEY 只在本层(app)见。connectorId 直接即 connector 的 id;无 manifest 视为数据错误
     //(由 syncAccount 逐账户隔离,不阻断其余)。
-    fetchBalances: async (account, stored) => {
+    fetchBalances: (account, stored) => {
       const cid = account.connectorId;
       const manifest = getConnector(connectorRegistry, cid);
-      if (!manifest) throw new Error(`no connector for connectorId ${cid}`);
+      if (!manifest) {
+        return Effect.fail(
+          new ConnectorFailure({ message: `no connector for connectorId ${cid}` }),
+        );
+      }
       return fetchViaConnector(cid, manifest, account, stored, seeds);
     },
     // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
