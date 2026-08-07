@@ -1,7 +1,8 @@
 import { env } from "cloudflare:test";
 import type { SnapshotWithBalances } from "@folio/db";
-import { createGlobalTokenRefIndexStore, createUserCacheStore } from "@folio/db";
+import { globalTokenRefIndexStoreLayer, userCacheStoreLayer } from "@folio/db";
 import { TokenReader } from "@folio/oracle";
+import { CacheStore, GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { syncAccount } from "@folio/sync";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +17,7 @@ import {
 } from "../../src/lib/server/internal/manual";
 import { NAMER, runOracle } from "../../src/lib/server/internal/oracle";
 import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
+import { withDbService } from "./db-effect";
 import { ticketOf } from "./ticket";
 
 // **按用户情景走一遍,每个情景查三处:入库 / 库里的数据对不对 / 屏幕上是什么。**
@@ -399,23 +401,24 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
 
   async function syncOnchain(): Promise<string> {
     // 全局映射表收录了这个合约 → mint 按**地址**认出来(不靠 symbol)。
-    await createGlobalTokenRefIndexStore(env).putAll(
-      [{ chainRef: USDC_ETH, upstreamRef: USDC_UPSTREAM }],
-      Date.now(),
+    await withDbService(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, (s) =>
+      s.putAll([{ chainRef: USDC_ETH, upstreamRef: USDC_UPSTREAM }], Date.now()),
     );
     // warm 集给 symbol 那一档留个本地候选,免得它想回源(本情景不该出网)。
-    await createUserCacheStore(env, { userId: USER }).put(
-      "warm",
-      {
-        asOf: Date.now(),
-        rows: [
-          {
-            info: { ref: USDC_UPSTREAM, symbol: "USDC", name: "USDC" },
-            price: { unitPrice: MARKET_PRICE, marketCapRank: 5, asOf: Date.now() },
-          },
-        ],
-      },
-      60 * 60 * 1000,
+    await withDbService(CacheStore, userCacheStoreLayer({ userId: USER }), (s) =>
+      s.put(
+        "warm",
+        {
+          asOf: Date.now(),
+          rows: [
+            {
+              info: { ref: USDC_UPSTREAM, symbol: "USDC", name: "USDC" },
+              price: { unitPrice: MARKET_PRICE, marketCapRank: 5, asOf: Date.now() },
+            },
+          ],
+        },
+        60 * 60 * 1000,
+      ),
     );
     const account = await db.createAccount(USER, { connectorId: "evm", label: "w", creds: null });
     const res = await syncAccount(

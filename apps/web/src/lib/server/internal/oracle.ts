@@ -1,10 +1,11 @@
 import { env } from "cloudflare:workers";
 import type { UpstreamError } from "@folio/client-core";
 import {
-  createGlobalTokenRefIndexStore,
-  createUserCacheStore,
-  createUserTokenPriceStore,
-  createUserTokenStore,
+  databaseLayer,
+  globalTokenRefIndexStoreLayer,
+  userCacheStoreLayer,
+  userTokenPriceStoreLayer,
+  userTokenStoreLayer,
 } from "@folio/db";
 import {
   type OraclePorts,
@@ -14,12 +15,6 @@ import {
   refIndexWarmerLayer,
 } from "@folio/oracle";
 import {
-  CacheStore,
-  GlobalTokenRefIndexStore,
-  TokenPriceStore,
-  TokenStore,
-} from "@folio/oracle-basic/ports";
-import {
   coinGeckoFxUpstreamLayer,
   coinGeckoNamerLayer,
   coinGeckoPlatformUpstreamLayer,
@@ -28,12 +23,6 @@ import {
 } from "@folio/oracle-upstream-coingecko";
 import { Effect, Layer } from "effect";
 import { logTapeLogger } from "./effect-log";
-import {
-  cacheStorePort,
-  refIndexStorePort,
-  tokenPriceStorePort,
-  tokenStorePort,
-} from "./oracle-ports";
 
 // 参考层的装配点(ADR 0023,#199/#200)。**这是全仓唯一同时认识两边的文件** ——
 // 一边是 D1 store,一边是 CoinGecko adapter;`@folio/oracle` 自己两边都不认识。
@@ -65,24 +54,22 @@ const upstreams = () =>
     coinGeckoNamerLayer,
   );
 
-// per-user 的四张 store。**`Layer.sync` 而不是 `Layer.succeed`** —— env 与 `getDb` 要到 layer
-// 真被建的那一刻才碰(模块加载期一次都不碰:Workers 的启动 CPU 限制)。
+// per-user 的三张 store + 那张全局表,都由 `@folio/db` 直接给 Layer(#362 第 5 站)——
+// 以前这里还有一层 30 行的 `Effect.promise` 适配(`oracle-ports.ts`),因为 db 那边是 Promise 形状;
+// 现在四个 store 自己就是 Effect,那个文件删了,`env` 也只在 `databaseLayer(env)` 一处被读。
 //
-// 惰性到「只建被用到的那一个」这件事**不再做了**:`packages/db/src/client.ts` 自己写着
-// 「drizzle(env.DB) 很轻,每次创建即可」,四个 store 全建是常数级开销 —— 迁移前那套
-// getter + `??=` 的手写惰性,省下的是不存在的代价,换来的是七个配置回调。
+// 惰性到「只建被用到的那一个」这件事**不做**:`packages/db/src/client.ts` 自己写着
+// 「drizzle(env.DB) 很轻,每次创建即可」,而现在四个 store 共用同一个 `Database`——
+// 建它们只是几个闭包。迁移前那套 getter + `??=` 的手写惰性,省下的是不存在的代价。
 const portsFor = (userId: string) =>
-  Layer.mergeAll(
-    Layer.sync(TokenStore, () =>
-      tokenStorePort(createUserTokenStore(env, { userId, namer: UPSTREAM_ID })),
+  Layer.provide(
+    Layer.mergeAll(
+      userTokenStoreLayer({ userId, namer: UPSTREAM_ID }),
+      userTokenPriceStoreLayer({ userId, namer: UPSTREAM_ID }),
+      userCacheStoreLayer({ userId }),
+      globalTokenRefIndexStoreLayer,
     ),
-    Layer.sync(TokenPriceStore, () =>
-      tokenPriceStorePort(createUserTokenPriceStore(env, { userId, namer: UPSTREAM_ID })),
-    ),
-    Layer.sync(CacheStore, () => cacheStorePort(createUserCacheStore(env, { userId }))),
-    Layer.sync(GlobalTokenRefIndexStore, () =>
-      refIndexStorePort(createGlobalTokenRefIndexStore(env)),
-    ),
+    databaseLayer(env),
   );
 
 // 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
@@ -132,9 +119,7 @@ export const runOracleWarm = <A>(
         Layer.provide(
           refIndexWarmerLayer,
           Layer.merge(
-            Layer.sync(GlobalTokenRefIndexStore, () =>
-              refIndexStorePort(createGlobalTokenRefIndexStore(env)),
-            ),
+            Layer.provide(globalTokenRefIndexStoreLayer, databaseLayer(env)),
             coinGeckoTokenUpstreamLayer(cgConfig()),
           ),
         ),

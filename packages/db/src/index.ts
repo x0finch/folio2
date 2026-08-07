@@ -5,11 +5,15 @@
 
 export { createAuthAdapter } from "./auth"; // 不泄露 db 实例/schema
 export type { DbEnv } from "./client";
+// 新参考层的 store(ADR 0021/0022/0023,#199)。#202 起是唯一一套。名字带作用域
+// (user / global):旧 store 只说「什么表」不说「谁的数据」,那正是当初改掉的事。
+//
+// **它们出口是 Layer,不是工厂**(#362 第 5 站):参考层的端口是 Effect 服务,所以「怎么变成
+// 那个端口」归实现方,装配点只挑「哪个用户」。四个 layer 共用一个 `Database`(D1 的服务面),
+// 而 `env` 只在 `databaseLayer(env)` 那一处被读。
+export { Database, databaseLayer } from "./database";
 export { createDb, type Db } from "./db";
-// 新参考层的 store(ADR 0021/0022/0023,#199)。#202 起是唯一一套 —— 旧的全局 token-store /
-// price-history-store 已删。名字带作用域(user / global):旧 store 只说「什么表」不说「谁的数据」,
-// 那正是这次改掉的事。
-export { createGlobalTokenRefIndexStore } from "./global-token-ref-index-store";
+export { globalTokenRefIndexStoreLayer } from "./global-token-ref-index-store";
 export type {
   AccountRawCreds,
   AccountTagLink,
@@ -43,9 +47,9 @@ export type {
   UserSettings,
   ValuationMode,
 } from "./schema-types";
-export { createUserCacheStore, type UserCacheStoreOpts } from "./user-cache-store";
+export { type UserCacheStoreOpts, userCacheStoreLayer } from "./user-cache-store";
 export {
-  createUserTokenPriceStore,
   type UserTokenPriceStoreOpts,
+  userTokenPriceStoreLayer,
 } from "./user-token-price-store";
-export { createUserTokenStore, type UserTokenStoreOpts } from "./user-token-store";
+export { type UserTokenStoreOpts, userTokenStoreLayer } from "./user-token-store";

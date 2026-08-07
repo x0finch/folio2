@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { TokenStore } from "@folio/oracle-basic/ports";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { user } from "../src/auth-schema";
@@ -12,7 +13,8 @@ import {
   removeManualActivity,
 } from "../src/queries";
 import { manualActivity } from "../src/schema";
-import { createUserTokenStore } from "../src/user-token-store";
+import { userTokenStoreLayer } from "../src/user-token-store";
+import { promisified } from "./effect";
 
 const USER_A = "user-a";
 const USER_B = "user-b";
@@ -38,10 +40,10 @@ beforeEach(async () => {
 // 活动挂 (账户, token)。#203 起 token 就是 `tokens` 里的一行(生产路径是 mint;这里直接用 store)。
 async function manualAccount(userId: string) {
   const acc = await createAccount(env, userId, { connectorId: "manual", label: "M", creds: "{}" });
-  const tokenId = await createUserTokenStore(env, { userId, namer: "coingecko" }).create(
-    { symbol: "BTC" },
-    [],
-  );
+  const tokenId = await promisified(
+    TokenStore,
+    userTokenStoreLayer({ userId, namer: "coingecko" }),
+  ).create({ symbol: "BTC" }, []);
   return { id: acc.id, tokenId };
 }
 

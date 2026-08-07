@@ -1,7 +1,8 @@
 import { env } from "cloudflare:test";
-import { createUserTokenPriceStore } from "@folio/db";
+import { userTokenPriceStoreLayer } from "@folio/db";
 import { tokenTicket } from "@folio/oracle";
 import { FIAT_NAMER } from "@folio/oracle-basic";
+import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/history";
@@ -15,6 +16,7 @@ import {
   loadManualHistoryRows,
 } from "../../src/lib/server/internal/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle";
+import { withDbService } from "./db-effect";
 import { ticketOf } from "./ticket";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。
@@ -46,9 +48,10 @@ async function seedFiatDaily(
   code: string,
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
-  await createUserTokenPriceStore(env, { userId: USER, namer: NAMER }).putDailyByRef(
-    tokenRef.issued(FIAT_NAMER, code),
-    rows,
+  await withDbService(
+    TokenPriceStore,
+    userTokenPriceStoreLayer({ userId: USER, namer: NAMER }),
+    (s) => s.putDailyByRef(tokenRef.issued(FIAT_NAMER, code), rows),
   );
 }
 // #203:历史价按 **token_id** 取(新参考层的 priceSeries 收内部 id),不再按厂商 ref 拼键。
@@ -58,7 +61,11 @@ async function seedDaily(
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
   const [h] = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
-  await createUserTokenPriceStore(env, { userId: USER, namer: NAMER }).putDaily(h.id, rows);
+  await withDbService(
+    TokenPriceStore,
+    userTokenPriceStoreLayer({ userId: USER, namer: NAMER }),
+    (s) => s.putDaily(h.id, rows),
+  );
 }
 
 async function resetUser(): Promise<void> {
