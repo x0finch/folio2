@@ -13,11 +13,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@effect/platform": "^0.97.1",
-    "effect": "^3.22.1"
+    "@effect/platform": "catalog:",
+    "effect": "catalog:"
   },
   "devDependencies": {
-    "typescript": "^7.0.2",
-    "vitest": "^4.1.5"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
