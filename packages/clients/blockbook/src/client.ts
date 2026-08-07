@@ -1,144 +1,148 @@
-import { createHttpClient, type Failure, type Fetcher } from "@folio/shared";
+import {
+  makeRequester,
+  type Outbound,
+  type Requester,
+  type UpstreamError,
+  UpstreamUnavailableError,
+} from "@folio/client-core";
+import { Context, Effect, Layer } from "effect";
+import {
+  BLOCKBOOK_BASES,
+  DEFAULT_XPUB_DETAILS,
+  DEFAULT_XPUB_TOKENS,
+  UPSTREAM,
+  USER_AGENT,
+} from "./constants";
 import type { AddressResponse, XpubResponse } from "./types";
 
-// @folio/blockbook-client —— SDK 式 Trezor Blockbook v2 只读客户端。零依赖,原生 fetch。
-// xpub 走服务端派生(一次调用拿余额 + 逐地址),取代逐地址 gap 扫描。
-// CF Workers:注入 User-Agent + 用全局 fetch(不存 this)。
-// 多端点(btc2–btc5)轮询 + 失败回退:某端点限流/故障 → 自动换下一个,无需 env 配置。
-
-export const BLOCKBOOK_BASES = [
-  "https://btc2.trezor.io/api/v2",
-  "https://btc3.trezor.io/api/v2",
-  "https://btc4.trezor.io/api/v2",
-  "https://btc5.trezor.io/api/v2",
-];
-// **刻意中性:不带项目名、不带仓库地址。**
-// 这些请求打的是第三方(Trezor 的公共节点、CoinGecko),而请求内容本身就是敏感的 ——
-// blockbook 那条带着 **xpub**(整个钱包的观察密钥)。UA 里写上「这是某某项目、作者在这个
-// GitHub」等于把「谁在看这个地址」和一个具体的人绑在一起,而且让所有自托管实例可被归成一类。
-//
-// **不能直接不发**:CGK 的 Cloudflare WAF 对无 UA 请求返 403(Workers 的 fetch 默认不带 UA),
-// 这是仓库里记着的坑。所以给一个最常见、什么都不说的值 —— 它是「未指明客户端」的事实标准,
-// 过 WAF 没问题,而且因为太常见反而不构成指纹。
-export const USER_AGENT = "Mozilla/5.0";
-
-export type BlockbookErrorCode = "RATE_LIMITED" | "AUTH_FAILED" | "UPSTREAM_ERROR" | "PARSE_ERROR";
-
-export class BlockbookError extends Error {
-  readonly code: BlockbookErrorCode;
-  readonly retryable: boolean;
-  readonly retryAfterMs?: number;
-
-  constructor(
-    code: BlockbookErrorCode,
-    message: string,
-    opts?: { retryable?: boolean; retryAfterMs?: number; cause?: unknown },
-  ) {
-    super(message, opts?.cause !== undefined ? { cause: opts.cause } : undefined);
-    this.name = "BlockbookError";
-    this.code = code;
-    this.retryable = opts?.retryable ?? (code === "RATE_LIMITED" || code === "UPSTREAM_ERROR");
-    this.retryAfterMs = opts?.retryAfterMs;
-  }
-}
-
-// 失败归类由 @folio/shared 的 http 包装做,这里只负责变成 blockbook 自己的错误类型。
-// `retryable` 决定的是**要不要换下一个端点**(见 request 的循环),不是要不要退避重试。
-function toFailure({ kind, where, status, retryAfterMs, cause }: Failure): BlockbookError {
-  if (kind === "network")
-    return new BlockbookError("UPSTREAM_ERROR", "blockbook request failed", { cause });
-  if (kind === "auth")
-    return new BlockbookError("AUTH_FAILED", `blockbook auth failed (${status})`);
-  if (kind === "rate-limited")
-    return new BlockbookError("RATE_LIMITED", "blockbook rate limited", { retryAfterMs });
-  if (kind === "parse")
-    return new BlockbookError("PARSE_ERROR", `blockbook returned invalid JSON (${where})`, {
-      cause,
-    });
-  if ((status ?? 0) >= 500)
-    return new BlockbookError("UPSTREAM_ERROR", `blockbook upstream error (${status})`);
-  // 4xx(非 401/403/429):如无效 xpub → 不可重试,别浪费其它端点。
-  return new BlockbookError("UPSTREAM_ERROR", `blockbook error (${status})`, { retryable: false });
-}
-
-// 一个 base 一个 client,**懒建 + 模块级缓存**。
-// 不 eager 建全部:一次调用通常只碰一个端点(换端点只在出错时才发生),而
-// `createBlockbookClient()` 是**每个账户每轮同步都调一次**的 —— eager 的话每次白建 4 个。
-// 缓存放模块级而不是函数内,否则每次调用还是重建。key 带上 userAgent,因为它可配。
-const clients = new Map<string, Fetcher>();
-
-function clientFor(base: string, userAgent: string): Fetcher {
-  const key = `${userAgent}\n${base}`;
-  let client = clients.get(key);
-  if (!client) {
-    client = createHttpClient({
-      baseUrl: base,
-      headers: () => ({ "user-agent": userAgent, accept: "application/json" }),
-      toFailure,
-      // **不传 retry** —— 这个 client 的「重试」就是换下一个端点(见 request)。两个都开的话
-      // 每个端点先自己退避几次再换下一个,延迟直接乘起来。
-    });
-    clients.set(key, client);
-  }
-  return client;
-}
-
 export interface BlockbookConfig {
-  bases?: string[]; // 覆盖端点列表(测试/自托管);缺省用内置 btc2–btc5
-  userAgent?: string;
+  // 覆盖端点列表(测试 / 自托管节点);缺省用内置的 btc2–btc5。
+  readonly bases?: readonly string[];
+  readonly userAgent?: string;
 }
 
 export interface XpubQuery {
-  details?: "basic" | "tokens" | "tokenBalances";
-  tokens?: "nonzero" | "used" | "derived";
+  readonly details?: "basic" | "tokens" | "tokenBalances";
+  readonly tokens?: "nonzero" | "used" | "derived";
 }
 
-export interface BlockbookClient {
-  /** xpub/descriptor 的余额 + 逐地址(服务端派生)。默认 tokenBalances + used。 */
-  getXpub(token: string, query?: XpubQuery): Promise<XpubResponse>;
-  /** 单地址余额。 */
-  getAddress(address: string): Promise<AddressResponse>;
+// Trezor Blockbook v2 的请求层(只读)。**方法按上游端点组织,吐的是上游形状(DTO)** ——
+// satoshi 串转数字、UTXO 汇总、`tokenRef` 命名全在适配层(ADR 0036)。
+//
+// 这家上游没有凭据这回事(公共节点),所以方法不收 creds。
+export interface BlockbookClientApi {
+  // xpub / descriptor 的余额 + 逐地址(**服务端派生**,取代逐地址 gap 扫描)。
+  readonly xpub: (
+    token: string,
+    query?: XpubQuery,
+  ) => Effect.Effect<XpubResponse, UpstreamError, Outbound>;
+  // 单地址余额。
+  readonly address: (address: string) => Effect.Effect<AddressResponse, UpstreamError, Outbound>;
 }
 
-// 轮询起点(分散负载),模块级 round-robin。
+export class BlockbookClient extends Context.Tag("clients/Blockbook")<
+  BlockbookClient,
+  BlockbookClientApi
+>() {
+  static readonly layer = (config: BlockbookConfig = {}): Layer.Layer<BlockbookClient> =>
+    Layer.sync(BlockbookClient, () => make(config));
+}
+
+// 轮询起点,**模块级** —— 分散负载,不让每一轮同步都从 btc2 开始。
+// 刻意不在 `Scope` 里:CF Workers 上每个请求一次 `runPromise`,放 scope 就等于每次都从 0 开始
+// (与时隙游标同一个理由)。
 let cursor = 0;
 
-export function createBlockbookClient(config: BlockbookConfig = {}): BlockbookClient {
-  const bases = config.bases && config.bases.length > 0 ? config.bases : BLOCKBOOK_BASES;
+// 「这个错误该不该换下一个节点」。
+//
+// **判据是 blockbook 自己的,不是通用的可重试性** —— 问的是「是这个节点不行,还是你的请求不行」:
+//   · 被这个节点限流 / 够不到这个节点(网络、5xx)→ **换**,下一个节点大概率好使
+//   · 无效的 xpub(4xx)→ **不换**,换四个节点得到同样的 4xx,白赔三次往返
+//   · 凭据被拒、响应读不懂 → 不换,同理
+//
+// 所以不能直接拿「这个错误可不可重试」当判据:`UpstreamUnavailableError` 涵盖了网络失败、5xx
+// **和** 4xx,而后者恰恰是不该换的那一类 —— 靠 `status` 分开。
+const shouldTryNextBase = (error: UpstreamError): boolean => {
+  if (error._tag === "UpstreamRateLimitError") return true;
+  if (error._tag !== "UpstreamUnavailableError") return false;
+  // 没有 status = 压根没出去(网络失败)→ 换。有 status 就只有 5xx 才换。
+  return error.status === undefined || error.status >= 500;
+};
+
+export function make(config: BlockbookConfig = {}): BlockbookClientApi {
+  const bases = config.bases?.length ? config.bases : BLOCKBOOK_BASES;
   const userAgent = config.userAgent ?? USER_AGENT;
 
-  // 依次尝试端点:可重试错误(限流/5xx/网络)→ 换下一个;不可重试(如 4xx 无效 xpub)→ 立抛。
-  // **这个循环就是 blockbook 的「重试」** —— 它是「换哪个端点」的策略,不是「一个请求怎么发」,
-  // 所以留在这儿而不是塞进共享包装(混在一起,读代码的人第一个问题就会是「谁先发生」)。
-  async function request<T>(path: string): Promise<T> {
-    const start = cursor++ % bases.length;
-    let lastErr: BlockbookError | undefined;
-    for (let i = 0; i < bases.length; i++) {
-      try {
-        return (await clientFor(bases[(start + i) % bases.length], userAgent)(path)) as T;
-      } catch (err) {
-        const e = err as BlockbookError;
-        if (!e.retryable) throw e;
-        lastErr = e;
-      }
-    }
-    throw lastErr ?? new BlockbookError("UPSTREAM_ERROR", "all blockbook endpoints failed");
-  }
+  // 一个 base 一个 requester,**建一次**(`make` 每轮同步每账户调一次,不该每次重建四个)。
+  const requesters: Requester[] = bases.map((baseUrl) =>
+    makeRequester({
+      baseUrl,
+      upstream: UPSTREAM,
+      // UA 必须发,见 constants.ts。
+      headers: () => Effect.succeed({ "user-agent": userAgent, accept: "application/json" }),
+    }),
+  );
 
-  // encodeURIComponent 不编码括号,但 descriptor(如 tr(xpub…))的括号在 path 里更稳妥地编码掉。
+  // **依次试各个节点,直到成功或遇到「换了也没用」的错误。**
+  //
+  // 这就是 blockbook 的「重试」,而它是**换哪个节点**的策略,不是「一个请求怎么发」——
+  // 所以留在这儿,不塞给 `Effect.retry`。两个都开的话每个节点先自己退避几次再换下一个,
+  // 延迟直接乘起来。
+  //
+  // 用递归而不是 `Effect.firstSuccessOf`:后者对**任何**失败都继续试,而这里的要点恰恰是
+  // 「有些错误要立刻停」(无效 xpub 换四个节点得到四个一样的 4xx)。
+  const tryBases = <A>(
+    path: string,
+    query: Record<string, string> | undefined,
+    from: number,
+    left: number,
+  ): Effect.Effect<A, UpstreamError, Outbound> =>
+    Effect.suspend(() => {
+      const at = requesters[from % requesters.length];
+      return at<A>(path, { query }).pipe(
+        Effect.catchAll((error) =>
+          left > 1 && shouldTryNextBase(error)
+            ? tryBases<A>(path, query, from + 1, left - 1)
+            : Effect.fail(error),
+        ),
+      );
+    });
+
+  const request = <A>(
+    path: string,
+    query?: Record<string, string>,
+  ): Effect.Effect<A, UpstreamError, Outbound> =>
+    Effect.suspend(() => {
+      if (requesters.length === 0) {
+        return Effect.fail(
+          new UpstreamUnavailableError({
+            upstream: UPSTREAM,
+            where: path,
+            cause: "no blockbook endpoints configured",
+          }),
+        );
+      }
+      // 起点每次前进一格 —— 四个节点轮流当第一个。
+      return tryBases<A>(path, query, cursor++, requesters.length);
+    });
+
+  // `encodeURIComponent` 不编码括号,但 descriptor(如 `tr(xpub…)`)的括号在 path 里更稳妥地编码掉。
   const encodePath = (s: string): string =>
     encodeURIComponent(s).replace(/\(/g, "%28").replace(/\)/g, "%29");
 
+  // **`details` / `tokens` 走 query,不焊进 path 串** —— 那是 `makeRequester` 该拼的部分,
+  // 自己拼就得自己管编码,而且失败信息里的 `where` 会连 query 一起带上(原则 #5)。
+  //
+  // ⚠️ **但 xpub 本身在 pathname 里**,所以它一定会进 `where` —— Blockbook 的 URL 形状就是
+  // `/xpub/{token}`,躲不掉。xpub 在本仓的分类是 `public`(明文落库、可导出重建),不是 secret,
+  // 所以这是可接受的;但它毕竟是**整个钱包的观察密钥**,别再往日志里多抄一份。
   return {
-    getXpub(token, query) {
-      const details = query?.details ?? "tokenBalances";
-      const tokens = query?.tokens ?? "used";
-      return request<XpubResponse>(
-        `/xpub/${encodePath(token)}?details=${details}&tokens=${tokens}`,
-      );
-    },
-    getAddress(address) {
-      return request<AddressResponse>(`/address/${encodePath(address)}`);
-    },
+    xpub: (token, query) =>
+      request<XpubResponse>(`/xpub/${encodePath(token)}`, {
+        details: query?.details ?? DEFAULT_XPUB_DETAILS,
+        tokens: query?.tokens ?? DEFAULT_XPUB_TOKENS,
+      }),
+
+    address: (address) => request<AddressResponse>(`/address/${encodePath(address)}`),
   };
 }

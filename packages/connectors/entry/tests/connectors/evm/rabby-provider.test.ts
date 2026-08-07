@@ -85,7 +85,7 @@ describe("fetchBalances", () => {
 
   it("链映射缓存 24h → **下一个账户只花两发**,不再问一次链清单", async () => {
     const stub = upstream();
-    await run(stub, rabbyProvider.fetchBalances(ctx("0x" + "1".repeat(40))));
+    await run(stub, rabbyProvider.fetchBalances(ctx(`0x${"1".repeat(40)}`)));
 
     const paths = stub.calls.map((c) => c.request.url.pathname);
     expect(paths).toHaveLength(2);

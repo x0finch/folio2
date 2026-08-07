@@ -1,4 +1,3 @@
-import { ConnectorUnavailableError } from "@folio/connectors-basic";
 import { parseChainIds } from "@folio/zerion-client";
 import { describe, expect, it } from "vitest";
 import { parsePositions } from "../../../src/connectors/evm/zerion-parse";

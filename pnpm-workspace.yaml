@@ -2,7 +2,6 @@ packages:
   - "packages/*"
   - "packages/clients/*"
   - "packages/connectors/*"
-  - "packages/connectors/providers/*"
   - "packages/oracle/*"
   - "packages/oracle/upstreams/*"
   - "apps/*"

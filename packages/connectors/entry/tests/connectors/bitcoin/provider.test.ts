@@ -1,24 +1,23 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
-import { noOutbound } from "@folio/client-core/testing";
+import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
 import {
   type ConnectorError,
   type ProviderNeeds,
   validateCredentials,
 } from "@folio/connectors-basic";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { bitcoinAccountCreds, blockbookProvider } from "../src";
+import { describe, expect, it } from "vitest";
+import { bitcoinAccountCreds, blockbookProvider } from "../../../src/connectors/bitcoin/provider";
 import addressFixture from "./fixtures/address.json";
 import xpubFixture from "./fixtures/xpub.json";
 
-// 契约的出口是 Effect(ADR 0035)。把它接回 vitest 的 async 断言:
-// `run` 拿成功值;`failing` 拿**错误值本身** —— 不用 `.rejects`,因为 `runPromise` 抛的是包了
-// 一层的 `FiberFailure`,`toMatchObject` 看不见里面的 `_tag`。
+// 打桩打在 `HttpClient` 服务上,不再是 `globalThis.fetch` —— 那才是生产走的路。
+let stub: HttpStub;
 const run = <A>(effect: Effect.Effect<A, ConnectorError, ProviderNeeds>): Promise<A> =>
-  Effect.runPromise(Effect.provide(effect, noOutbound));
+  runClient(stub, effect);
 const failing = (
   effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
-): Promise<ConnectorError> => Effect.runPromise(Effect.provide(Effect.flip(effect), noOutbound));
+): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
 
 // provider 只整合:取数走 @folio/blockbook-client(Trezor Blockbook)。这里按 URL(/xpub/ vs /address/)
 // 打桩 fetch,断言整合后的 spot 行 + account 级 Note。派生正确性在 @folio/bitcoin-derive 的离线向量测里。
@@ -45,17 +44,18 @@ function ctx(input: { addressOrXpub: string; scriptType?: ScriptType } = { addre
   };
 }
 
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-// 按 URL 分流的 fetch mock。
+// 按 pathname 分流。**每个用例自己建一个桩** —— 这家 client 是四节点轮换,而轮询起点是模块级的
+// (刻意:不让每轮同步都从同一个节点开始),所以断言「打了哪个 host」会跨用例漂;这里只按路径分。
 function mockBlockbook(opts: { xpub?: unknown; address?: unknown; status?: number }) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-    if (opts.status && opts.status >= 400) return new Response("", { status: opts.status });
-    return String(url).includes("/xpub/") ? json(opts.xpub) : json(opts.address);
+  stub = httpStub((request) => {
+    if (opts.status && opts.status >= 400) return json({}, opts.status);
+    return request.url.pathname.includes("/xpub/") ? json(opts.xpub) : json(opts.address);
   });
+  return stub;
 }
-
-afterEach(() => vi.restoreAllMocks());
 
 // account 级 note(note 重设计,Note[] 整钱包):BTC 展示明细已从 per-balance 提到 fetchBalances 顶层
 // note(整钱包一份)。balances 本身不再带 note;golden 直接比对 out.balances,note 单独断言。
@@ -145,11 +145,11 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
   });
 
   it("请求打到 /xpub/ 且带 zpub token(zpub 前缀权威,scriptType 被忽略)", async () => {
-    const spy = mockBlockbook({ xpub: xpubFixture.response });
+    const _spy = mockBlockbook({ xpub: xpubFixture.response });
     await run(
       blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84, scriptType: "legacy" })),
     );
-    const url = String(spy.mock.calls[0][0]);
+    const url = String(stub.calls[0].request.url.href);
     expect(url).toContain("/xpub/");
     expect(url).toContain(ZPUB84); // 仍以 zpub 查询,未被 scriptType=legacy 改写
   });
@@ -161,7 +161,6 @@ describe("blockbookProvider.fetchBalances — 错误映射", () => {
     expect(await failing(blockbookProvider.fetchBalances(ctx()))).toMatchObject({
       _tag: "ConnectorRateLimitError",
     });
-    vi.restoreAllMocks();
     mockBlockbook({ status: 500 });
     expect(await failing(blockbookProvider.fetchBalances(ctx()))).toMatchObject({
       _tag: "ConnectorUnavailableError",
