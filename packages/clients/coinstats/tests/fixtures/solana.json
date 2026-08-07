@@ -1,0 +1,52 @@
+[
+  {
+    "coinId": "solana",
+    "amount": 12.5,
+    "contractAddress": null,
+    "chain": "solana",
+    "name": "Solana",
+    "symbol": "SOL",
+    "price": 150.0,
+    "connectionId": "solana"
+  },
+  {
+    "coinId": "usd-coin_solana",
+    "amount": 500,
+    "contractAddress": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "chain": "solana",
+    "name": "USD Coin",
+    "symbol": "USDC",
+    "price": 1.0,
+    "connectionId": "solana"
+  },
+  {
+    "coinId": "ct_solana",
+    "amount": 1010,
+    "contractAddress": "6fUwECXzRQeh2wYuTg3xeQHGt4wSbiUbsdd1PYw3pump",
+    "chain": "solana",
+    "name": "Crypto Twitter",
+    "symbol": "CT",
+    "price": 1e-5,
+    "connectionId": "solana"
+  },
+  {
+    "coinId": "unpriced_solana",
+    "amount": 100,
+    "contractAddress": "Unpriced11111111111111111111111111111111111",
+    "chain": "solana",
+    "name": "Unpriced Token",
+    "symbol": "UNP",
+    "price": null,
+    "connectionId": "solana"
+  },
+  {
+    "coinId": "nosymbol_solana",
+    "amount": 7,
+    "contractAddress": "NoSymbol1111111111111111111111111111111111",
+    "chain": "solana",
+    "name": "No Symbol",
+    "symbol": "",
+    "price": 2.0,
+    "connectionId": "solana"
+  }
+]

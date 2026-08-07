@@ -15,7 +15,10 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 
 - **Functional factories, not classes.** Stateful implementations are closures: `createXxx(config): Interface` — the closure holds state and returns an object of methods (like `createTokenStore` / `createCoinGeckoSource` / `defineProvider`). No `class` / `this`.
 - **Stateless logic → top-level functions with explicit deps.** Pull pure IO/logic out as module-level functions that take their dependencies as parameters (`request(http, path)`), not hidden behind `this`/closures — easier to test and reuse.
-- **Outbound HTTP: call global `fetch` directly.** `await fetch(url, { headers })` (same as every provider). Never stash fetch on an object / inject a `fetchImpl` seam and call it as a method — that drops the global `this` and throws `Illegal invocation` on CF Workers (and then needs a `bind` patch). Mock it in tests with `vi.spyOn(globalThis, "fetch")` + `afterEach(() => vi.restoreAllMocks())`. Generally: when a dependency is a runtime global (fetch / crypto / clock), mock the global in tests instead of adding an injection param to production code.
+- **Outbound HTTP — 两套规矩,按包分**:
+  - **Effect 包**(`packages/clients/*`、`sync`,以及后续迁过去的):走 `@effect/platform` 的 `HttpClient`,见下面的 [Effect](#effect) 一节。**别在 Effect 包里直接调全局 `fetch`** —— 那样拿不到 `AbortSignal`,上层超时之后请求还在飞。
+  - **尚未迁移的包**:`await fetch(url, { headers })` 直接调全局。Never stash fetch on an object / inject a `fetchImpl` seam and call it as a method — that drops the global `this` and throws `Illegal invocation` on CF Workers (and then needs a `bind` patch). Mock it in tests with `vi.spyOn(globalThis, "fetch")` + `afterEach(() => vi.restoreAllMocks())`.
+  - 两边共同的那条判断仍然成立:**运行时全局(fetch / crypto / clock)不该在生产签名上开一个只为测试存在的注入参数**。区别只在「换成什么」——非 Effect 包换成 mock 全局,Effect 包换成一个**服务**(`R` 通道,不是 config 字段)。
 - **Facades expose intent, not primitives.** A package's public interface offers domain-intent methods (`priceOf` / `enrich` / `warm`), not its internal collaborators (`.store` / `.provider`). Orchestration — cache→fetch→write, single-flight, TTL gating, ref construction — lives *inside* the instance; callers express *what* they want, never *how*. Smell: app code doing `store.getX` → `provider.fetchX` → `store.putX`, or building the module's own value objects by hand. Corollary: let callers pass raw identity (`AssetRef.coinId`) and construct the internal ref (`TokenRef`) for them — don't leak the constructor.
 - **Bind ambient env once, at a single call site.** A factory like `createDb(env)` / `createTokens(env)` should be invoked in exactly one server-only module; everything else imports the ready instance (`import { db }` → `db.xxx`), never re-calls the factory. The single binding point is a `Proxy` that builds the facade per access from the `cloudflare:workers` env — deferring the env read to call time (request/scheduled), not module load.
 - **客户端打包的代码只从"契约/basic"包引类型与 schema,绝不从"entry/门面"包引。** entry 包(如 `@folio/connectors`)经其 registry `import` 全部 provider 实现;任何被客户端组件引用的文件(`apps/web/src/lib/*`、组件)只要 **value-import** 它,就会把整张 provider 依赖图打进 client bundle —— 轻则体积膨胀,重则某 provider 的 server-only dep(`cloudflare:workers` 等)直接破坏 client build。契约(`Balance` / `CredField` / 各 `*Meta` schema)一律从 `@folio/connectors-basic` 取;registry / provider / manifest 只在 server 侧(sync)用。同理适用于其它 basic/entry 分层的包。
@@ -34,6 +37,82 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 
 - **快回退降嵌套(guard clause)。** 前置判定(缺凭据 / 分派选路 / 校验失败 / 找不到目标)一律 early-return 或提前抛,不把主逻辑塞进 `if (ok) { … }` 的深层嵌套。**分派型函数只做"选路 + return"**(如 sync 注入的 `fetchBalances`:`if (connector) return fetchViaConnector(…); return fetchViaBalances(…)`),各分支实现抽成独立命名函数;一个函数里与其主职责无关的前置工作,提到独立函数。
 - **Server-only deps (`cloudflare:workers`, node built-ins) belong only in code that gets stripped from the client.** A module imported client-side (e.g. one exporting a `createServerFn`) may reference `cloudflare:workers` *only inside the server-fn handler* (the compiler strips it). A **plain exported function** in that same module referencing the env can't be tree-shaken out → breaks the client build (`Rolldown failed to resolve "cloudflare:workers"`). Fix: move such functions into a separate server-only module the client never imports; the client-facing module references them only from within the stripped handler.
+
+## Effect
+
+迁移进行中(ADR 0035:`sync` → `connectors` → `shared` → `clients` → `oracle` → `db`,前端明确不碰)。
+下面是 `@folio/sync` 和 `packages/clients/*` 两站踩出来的,**每条都对应一次返工**。
+
+### 依赖与替换点
+
+- **能替换的东西一律是服务,不是 config 字段。** 出网、缓存后端、签名器、限频档位 —— 都用
+  `Effect.serviceOption` 读的**可选服务**,`R` 通道不受污染(不 provide 也能跑),生产走默认、
+  测试 provide 一个假的。
+  **判据是「生产会不会传它」**:只有测试传的字段,就不该是字段。
+  代价是实打实的 —— `rateLimitScope` 当初是 config 字段,四个 client 各写一遍
+  `config.rateLimitScope ?? "isolated"`,于是**默认值有五个地方定义**,而且跟模块自己的默认值打过架:
+  真正的默认藏在调用点里,读那个模块是看不出来的。
+- **别在 config 对象上挂回调。** 一个回调字段就是一步流水线在伪装成配置 —— 它让「这件事会失败成什么」
+  离开类型、让读的人必须先知道有这么个钩子。本仓三个回调(`toFailure` / `checkBody` /
+  `classifyOverride`)先后都改成了调用点上看得见的 `pipe` 一步。
+  **例外是真正的效应式依赖**(算签名头:会失败、要 IO)——那不是配置,是依赖,留着。
+- **别为了形状统一假装需要 `Scope`。** 没有闸就没有 scope,`make` 就返回纯值而不是 Effect
+  (hyperliquid 就是)。`Layer.succeed(tag, make(config))` 对纯值是**立即求值** —— 那种情形用 `Layer.sync`。
+
+### 错误
+
+- **错误类型按「消费者要区分什么」划分,不按上游/模块划分。** 七个上游共用四类 tagged error
+  (凭据 / 限流 / 够不到 / 读不动),因为消费者(适配层)对七家是同一个,它要做的判断永远是这四个。
+  各定一套的代价是 7 套同构错误类 + 7 份几乎一样的下游映射。
+  上游之间的真实差别是**怎么归类**,不是**分成哪几类** —— 那部分一家一行,写在那家自己的包里。
+- **判 `_tag`,不判 `instanceof`。** 后者额外要求两个类来自同一个模块实例 —— 那是包管理器的事,
+  不该是正确性的前提。
+- **重试属于「一次完整业务操作」那一层,不属于「一个 HTTP 请求」。** 本仓的重试在 `@folio/sync`:
+  它包的是「取一次余额」含超时。两层各退避 3 次就是 9 次。请求层只负责把错误分对类。
+  推论:**闸(限频)必须在重试的内层** —— `Effect.retry` 重跑整个 effect,闸在里面,语义自动正确,
+  不需要包替调用方保证。
+
+### CF Workers 上的状态
+
+- **模块级可变状态在这里是刻意的,不是偷懒。** 每个请求一次 `runPromise`,而 **Layer memoisation 是
+  per-run 的** —— 状态放 `Scope` 或 Layer 里就等于每请求重置。跨请求要活的东西(限频游标、
+  近静态数据的缓存)只能在模块级。
+- **同理:官方那些「状态绑 Scope」的组合子在这里会静默失效。** `RateLimiter`(semaphore + 后台
+  refill fiber)、`Cache` / `cachedWithTTL` —— 类型上能用,运行时每请求一份新的,等于没有。
+  用之前先问:**它的状态活在哪?**
+- 反过来,这也意味着「改成每 isolate 一个 `ManagedRuntime`」这条路**要先验证**:Workers 有
+  「不能替另一个请求做 I/O」的限制,跨请求存活的 fiber / timer 可能直接抛。
+
+### 用官方的东西之前,先读它默认记了什么
+
+**采用一个库就是采用它的默认值。** `@effect/platform` 的 `HttpClient` 内建 span 默认把**完整 URL、
+query 和全部请求头**写进属性,而它的默认脱敏名单(`["authorization","cookie","set-cookie","x-api-key"]`)
+不含本仓六个凭据头;它还默认往出站请求注入 `traceparent`。我们的 query 里有 HMAC 签名和钱包地址 ——
+直接用就是原则 #5 的红线。
+
+- **安全属性写在「用的地方」,不写在装配处。** 第一版把加固写在生产 layer 上,红线测试当场打回:
+  任何自己 provide 一个客户端的调用点(每个测试都是)拿回的都是没加固的。
+  **安全属性不能靠「记得用对那个 layer」保证。**
+- **记什么走白名单,不走黑名单。** 上游将来加一个新属性,黑名单要跟着改,白名单不用。
+- **红线要有测试钉住**,而且是断言「**没有**什么」:span 里没有 query、没有头名、出站没有 `traceparent`。
+
+### 测试
+
+- **时序测试用 `TestClock`,断言精确值。** 有了虚拟时钟就不必再赌墙钟,也不必设宽窗口 ——
+  上面 [Tests](#tests) 那条「别断言墙上时钟」在 Effect 包里的答法就是它。
+- **但 `TestClock` 管不到 Effect 调度器之外的东西**:假 fetch 的 `Promise.resolve`(微任务)、
+  Node 上 `crypto.subtle`(线程池,是**宏任务**)。前者 `Effect.repeatN(Effect.yieldNow(), n)` 能冲掉,
+  后者冲不掉 —— 涉及它的用例别写 fork + poll,改成**跑到底再问虚拟时钟走了多远**
+  (走了 0ms 就是一发都没等过,与调度快慢无关)。
+- **`TestContext.TestContext` 的 `Random` 不是确定的**(实测四次:437.9 / 139.8 / 386.4 / 280.9)。
+  别在注释里说它是。
+- **测试装配收成一份共用工具,别每包手抄。** 抄九遍的东西每份都会慢慢长歪 —— 本仓实测:
+  有几个包漏了 provide 限频档,于是一直偷偷跑在模块级共享游标的那一档上,跨用例串味。
+- **Tag / Layer 那条路要单独有测试。** 生产只走它,而「测试全走 `make`」时它可以长期零覆盖
+  (本仓 12 个测试文件里一次都没走过)。
+- **`@effect/vitest` 现在装不了**(2026-08):稳定版 `0.30.0` peer 是 `vitest ^3.2.0`(本仓 4.x),
+  支持 vitest 4 的 `4.0.0-beta.x` 要求 `effect ^4.0.0-beta`(本仓 3.22)。硬装能跑(验过),
+  但要写一条「忽略 peer 冲突」并一直挂着。**别再重新评估,除非 Effect 4 稳定了。**
 
 ## UI
 

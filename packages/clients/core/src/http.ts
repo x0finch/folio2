@@ -1,0 +1,203 @@
+import type { HttpClientError } from "@effect/platform";
+import { HttpClient, HttpClientRequest } from "@effect/platform";
+import { Clock, Effect, type RateLimiter } from "effect";
+import { HttpFailure, type SigningFailure } from "./errors";
+import { disableBuiltInTracing } from "./http-client";
+import { classifyFailure, type UpstreamError } from "./upstream-error";
+
+// 一个薄的 HTTP 层:**限频 → 出网 → 归类失败**,底下是官方 `HttpClient`(见 `http-client.ts`)。
+//
+// 相对迁移前 `@folio/shared` 那版少了两样,都是刻意的:
+//
+// **不收 `retry` 选项。** 重试由调用方 `Effect.retry(策略)` 加在外面。老版把重试收进来是因为
+// 「闸必须在重试里面,否则退避完立刻插队」这条语义只能由包自己保证;而 `Effect.retry` 重跑的是
+// **整个 effect**,闸就在里面,每次重试自然重新排队 —— 语义自动正确,不需要包替调用方管。换来的是
+// ADR 0035 想要的那件事:重试策略成为**可组合的值**,谁调谁决定,而不是每个 client 各写一份 opts。
+//
+// **不收 `toFailure` 回调。** 出口就是最终错误面 `UpstreamError`,不是传输层的中间态:
+// `HttpFailure` / `SigningFailure` 是归类**过程**用的,没有任何一个 client 想要它们。
+//
+// **也不再收 `checkBody` / `classifyOverride` 两个回调。** 它们和被删掉的 `toFailure` 是同一个
+// 模式 —— 配置对象上挂回调,等于把流水线的一步藏进配置里。现在:
+//   · 「HTTP 200 但 body 说不行」(bybit 的 retCode、okx 的 code)由 client 自己在它那个**唯一的**
+//     内部 `get()` 上 `Effect.flatMap` 一步 —— 每个端点都经过它,漏不掉,而且这一步是看得见的代码
+//   · 上游特有的归类差异(binance 的 400 → 凭据问题)由 client 在出口 `Effect.catchTag` 一步
+// 剩下的 `headers` 留着,但它不是配置回调:它是**真正的效应式依赖**(rabby 的 wasm 签名、
+// binance 的 HMAC 会失败),形状就是官方 `mapRequestEffect` 那个形状。
+
+// Retry-After:纯秒数 或 HTTP-date → 毫秒;缺失/无效 → undefined。
+// **不导出** —— 调用方拿到的是 `UpstreamRateLimitError.retryAfterMs`,不需要自己解析头
+// (迁移前仓库里有三份重复实现,正是因为每家都自己解一遍)。官方 `HttpClient` 不管这个头。
+function parseRetryAfter(header: string | undefined, now: number): number | undefined {
+  if (!header) return undefined;
+  const secs = Number(header);
+  if (Number.isFinite(secs)) return secs > 0 ? secs * 1000 : undefined;
+  const at = Date.parse(header);
+  if (Number.isNaN(at)) return undefined;
+  const delta = at - now;
+  return delta > 0 ? delta : undefined;
+}
+
+const DEFAULT_RATE_LIMITED = [429];
+
+export interface RequestOptions<Ctx = undefined> {
+  readonly query?: Record<string, string | number | undefined>; // undefined 的键不参与
+  readonly method?: "GET" | "POST";
+  // POST 的 body(已经序列化好的字符串)。**显式两个字段,不再收一个 `RequestInit`** ——
+  // 后者能塞 headers,而它会和 `headers()` 算出来的头打架(以前那版就有过「写 undefined 把
+  // 调用方的头静默抹掉」的 bug)。
+  readonly body?: string;
+  // 404 当成「没有这个东西」而不是故障 → 返回 null。只对「按 id 查一个东西」的端点开。
+  readonly notFoundAsNull?: boolean;
+  // 传给 `headers()` 的**每请求上下文**。**包不看它的内容**,只负责递过去。
+  // 为什么需要:有些上游的凭据是每请求现取的(zerion / coinstats 的 key 来自 ctx.creds,
+  // 不是模块级常量),而 `headers()` 是在包里被调用的,拿不到调用点的闭包。
+  readonly context?: Ctx;
+}
+
+export interface HttpConfig<Ctx = undefined> {
+  // **必填**:所有真实调用点都有基址,而少了它 `new URL("/path")` 会当场炸 —— 与其留一个
+  // 「忘了传就报 Invalid URL」的失败模式,不如在类型上要求它。
+  readonly baseUrl: string;
+  // 这是谁。进每个错误的 `upstream` 字段和 span 的属性 —— 类型合并之后「是谁失败的」只能靠数据带。
+  readonly upstream: string;
+  // 每次请求的头。**是函数而不是对象** —— 签名类的头(rabby 的 wasm 签名、binance 的 HMAC)
+  // 要按路径和参数算,而且可能失败。它的错误进错误通道,**不被归类成传输故障**:
+  // 归错了会退化成「三次退避全白打」,还把真正的原因盖掉。
+  readonly headers?: (
+    path: string,
+    options: RequestOptions<Ctx> | undefined,
+  ) => Effect.Effect<HeadersInit, SigningFailure>;
+  readonly limit?: RateLimiter.RateLimiter; // 不传 = 不限频(判据见 RateLimitOptions.key 的注释:队里没人挤就别装)
+  readonly rateLimitedStatuses?: readonly number[]; // 默认 [429]
+}
+
+// 出网服务 —— 每个 client 的方法签名里都会出现它(`R` 通道:「这个 effect 要有人给它出网的能力」)。
+//
+// **从本包再导出一次,而不是让九个包各自 `import` `@effect/platform`**:那样九份签名会写死
+// 「底下是哪个 HTTP 库」,换一次库要改九个包。现在它们只认 `@folio/client-core` 的契约 ——
+// 装配那头 provide 的是本包的 `FolioHttpClient`,两边都不必知道底下是谁。
+export type Outbound = HttpClient.HttpClient;
+
+// 传输层的失败 → 归类中间态。
+//
+// 官方把出网失败分成 `RequestError`(压根没发出去)和 `ResponseError`(发出去了但读不动),
+// 而它的 `reason` 分不出我们要的那四类(「凭据被拒」和「上游 5xx」在它眼里都只是 StatusCode)——
+// 状态码那部分我们自己看,这里只吃「没出去」和「读不动」两种。
+//
+// **`where` 由调用点给,不从 error 里抠** —— error 带的是完整 URL,而 `where` 进日志和错误消息,
+// 必须只有 pathname(原则 #5 红线)。
+const transportFailure =
+  (where: string) =>
+  (error: HttpClientError.HttpClientError): HttpFailure =>
+    error._tag === "ResponseError" && error.reason === "Decode"
+      ? new HttpFailure({ kind: "parse", where, cause: error })
+      : new HttpFailure({ kind: "network", where, cause: error });
+
+// 发一个请求,回解析好的 JSON(`notFoundAsNull` 且 404 时回 null)。
+//
+// **错误就是 `UpstreamError`,不是传输层的中间态。** 七家各自 `Effect.mapError(classify)` 一遍
+// 是同一句样板抄七份,还把「这个请求会失败成什么」的答案推迟了一层。归类是这个包的活。
+//
+// **`A` 是调用方声明的期望形状,包内不校验** —— 一次 `as A`。为什么是泛型而不是 `unknown`:
+// 返回 `unknown` 的话每个端点方法都要在自己那行写一次 `as Effect.Effect<Foo, E>`,强转散在 N 个
+// 调用点、还顺手把错误类型也一起断言掉了。收成一个类型参数之后,调用点写的是 `get<SpotAccount>(path)`
+// —— 一眼看出这是断言,而错误类型仍由包保证。
+//
+// **`notFoundAsNull` 进类型**:开了它返回的就是 `Effect<A | null>`,不靠调用方自己记得在类型参数
+// 里写 `| null`(以前靠记,而 coingecko 那边已经在手写了 —— 代价已经在付)。
+//
+// **校验本身是另一件事**:上游给的形状对不对,现在没人查。ADR 0035 把 `Effect.Schema` 的评估
+// 推到 connectors 那一步(#362 第 3 站),到那时这里改成收一个 schema 是增量改动 ——
+// `HttpClientResponse.schemaBodyJson` 的失败往同一个 `UpstreamParseError` 通道塞,签名不用动。
+export interface Requester<Ctx = undefined> {
+  <A = unknown>(
+    path: string,
+    options: RequestOptions<Ctx> & { readonly notFoundAsNull: true },
+  ): Effect.Effect<A | null, UpstreamError, Outbound>;
+  <A = unknown>(
+    path: string,
+    options?: RequestOptions<Ctx>,
+  ): Effect.Effect<A, UpstreamError, Outbound>;
+}
+
+export function makeRequester<Ctx = undefined>(config: HttpConfig<Ctx>): Requester<Ctx> {
+  const rateLimited = new Set(config.rateLimitedStatuses ?? DEFAULT_RATE_LIMITED);
+  const classify = classifyFailure({ upstream: config.upstream });
+
+  return (<A>(path: string, options?: RequestOptions<Ctx>) => {
+    const url = new URL(`${config.baseUrl}${path}`);
+    for (const [k, v] of Object.entries(options?.query ?? {})) {
+      if (v !== undefined) url.searchParams.set(k, String(v));
+    }
+    // **失败信息和 span 里只带 pathname,不带 query。** query 里有地址、签名这类东西,
+    // 而这两个都会被人读到(原则 #5 的红线)。
+    const where = url.pathname;
+    const method = options?.method ?? "GET";
+
+    const once = Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient;
+      const headers = config.headers ? yield* config.headers(path, options) : undefined;
+
+      const request = HttpClientRequest.make(method)(url).pipe(
+        headers ? HttpClientRequest.setHeaders(headers) : (r) => r,
+        options?.body === undefined
+          ? (r) => r
+          : HttpClientRequest.bodyText(options.body, "application/json"),
+      );
+
+      const res = yield* client.execute(request).pipe(Effect.mapError(transportFailure(where)));
+
+      if (res.status < 200 || res.status >= 300) {
+        if (rateLimited.has(res.status)) {
+          const now = yield* Clock.currentTimeMillis;
+          return yield* new HttpFailure({
+            kind: "rate-limited",
+            where,
+            status: res.status,
+            retryAfterMs: parseRetryAfter(res.headers["retry-after"], now),
+          });
+        }
+        if (res.status === 401 || res.status === 403) {
+          return yield* new HttpFailure({ kind: "auth", where, status: res.status });
+        }
+        // 「这个东西不存在」对某些端点是正常答案,不是故障(比如按合约查币)。
+        if (res.status === 404 && options?.notFoundAsNull) return null;
+        return yield* new HttpFailure({ kind: "upstream", where, status: res.status });
+      }
+
+      return yield* res.json.pipe(
+        Effect.mapError((cause) => new HttpFailure({ kind: "parse", where, cause })),
+      );
+    }).pipe(
+      // **官方内建的那个 span 在这里被关掉,换成下面我们自己的。**
+      //
+      // 关它的理由是原则 #5:它默认把完整 URL、query 和**全部请求头**写进属性,而我们的 query 里有
+      // HMAC 签名和钱包地址、六个凭据头不在它的默认脱敏名单里(证据见 `http-client.ts`)。
+      //
+      // **关在这一层而不是只关在生产 layer 上**:后者只要有人 provide 了别的 `HttpClient` 就失效
+      // (红线测试当场抓到过这件事)。这里是一个 `FiberRef` 的局部赋值,覆盖这个 effect 里发出的
+      // 每一发,不管客户端是谁给的 —— 绕不过去,也不必每请求包一层客户端。
+      disableBuiltInTracing,
+      // 我们自己的 span:**属性是白名单**(上游是谁、什么方法、哪条路径)。
+      // 白名单而不是黑名单 —— 上游将来加一个新属性,黑名单要跟着改,白名单不用。
+      Effect.withSpan("http.client.request", {
+        kind: "client",
+        attributes: {
+          "folio.upstream": config.upstream,
+          "http.request.method": method,
+          "url.path": where,
+        },
+      }),
+    );
+
+    const gated: Effect.Effect<unknown, HttpFailure | SigningFailure, Outbound> = config.limit
+      ? config.limit(once)
+      : once;
+    // 归类在这里做完 —— 出口就是最终错误面。
+    return gated.pipe(
+      Effect.mapError(classify),
+      Effect.map((body) => body as A),
+    );
+  }) as Requester<Ctx>;
+}
