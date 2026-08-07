@@ -13,7 +13,8 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check",
     "lint:fix": "biome check --write",
-    "knip": "knip"
+    "knip": "knip",
+    "check:catalog": "node scripts/check-catalog.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",

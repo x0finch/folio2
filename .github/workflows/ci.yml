@@ -54,6 +54,9 @@ jobs:
       - run: pnpm exec biome ci
       - run: pnpm typecheck
       - run: pnpm knip
+      # catalog 是约定,pnpm 不强制 —— 这一步是它的执行者(#370)。放在 knip 后面同一个理由:
+      # 便宜、只读 package.json,让「版本又开始各写一遍」在 review 之前就红。
+      - run: pnpm check:catalog
       - run: pnpm build
       # Two runners, not one: `test:packages` is the root vitest `test.projects`
       # runner over the library packages; apps/web has its own jsdom suite plus a
