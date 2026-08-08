@@ -9,15 +9,18 @@ import {
   importManualActivity,
   importSnapshot,
   importToken,
-  listManualActivityByAccount,
-  listManualActivityByUser,
-  listSnapshotsByAccount,
   listTokensForExport,
-  recordManualActivity,
+  ManualStore,
+  manualStoreLayer,
+  SnapshotStore,
+  snapshotStoreLayer,
 } from "../src/queries";
 import { tokenRefs, tokens } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
+
+const manualOf = forUser(ManualStore, manualStoreLayer);
+const snapshotsOf = forUser(SnapshotStore, snapshotStoreLayer);
 
 const accounts = forUser(AccountStore, accountStoreLayer);
 
@@ -189,10 +192,10 @@ describe("importSnapshot —— find-or-create(自然键 = account+takenAt)", ()
     const b = await importSnapshot(env, USER_A, acc.id, snap);
     expect(a.created).toBe(true);
     expect(b.created).toBe(false);
-    expect(await listSnapshotsByAccount(env, USER_A, acc.id)).toHaveLength(1);
+    expect(await snapshotsOf(USER_A).listByAccount(acc.id)).toHaveLength(1);
     // 不同 takenAt → 新快照
     await importSnapshot(env, USER_A, acc.id, { ...snap, takenAt: 2000 });
-    expect(await listSnapshotsByAccount(env, USER_A, acc.id)).toHaveLength(2);
+    expect(await snapshotsOf(USER_A).listByAccount(acc.id)).toHaveLength(2);
   });
 });
 
@@ -209,10 +212,10 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
     const b = await importManualActivity(env, USER_A, acc.id, tk, act);
     expect(a.created).toBe(true);
     expect(b.created).toBe(false);
-    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(1);
+    expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(1);
     // amount 不同 → 新增一条
     await importManualActivity(env, USER_A, acc.id, tk, { ...act, amount: 2 });
-    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(2);
+    expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
   });
 
   it("price/fee/memo 的 null 与有值区分正确(isNull 分支)", async () => {
@@ -228,7 +231,7 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
     expect(dup.created).toBe(false); // null 内容也能命中
     const withPrice = await importManualActivity(env, USER_A, acc.id, tk, { ...base, price: 1 });
     expect(withPrice.created).toBe(true); // null vs 有值 → 不同
-    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(2);
+    expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
   });
 
   it("两笔除 createdAt 外全同 → 是不同事件,都保留(createdAt 进键,防折叠丢量)", async () => {
@@ -243,11 +246,11 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
     const b = await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 9 });
     expect(a.created).toBe(true);
     expect(b.created).toBe(true); // createdAt 不同 → 不折叠
-    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(2);
+    expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
     // 再导同两条 → 都命中、不新增(幂等)。
     await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 5 });
     await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 9 });
-    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(2);
+    expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
   });
 });
 
@@ -259,14 +262,14 @@ describe("listManualActivityByUser", () => {
       creds: "{}",
     });
     const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
-    await recordManualActivity(env, USER_A, acc.id, tk, {
+    await manualOf(USER_A).recordActivity(acc.id, tk, {
       kind: "add",
       amount: 1,
       price: 60000,
       occurredAt: 1000,
       createdAt: 5,
     });
-    await recordManualActivity(env, USER_A, acc.id, tk, {
+    await manualOf(USER_A).recordActivity(acc.id, tk, {
       kind: "add",
       amount: 2,
       price: 61000,
@@ -274,9 +277,9 @@ describe("listManualActivityByUser", () => {
       createdAt: 6,
     });
 
-    const out = await listManualActivityByUser(env, USER_A);
+    const out = await manualOf(USER_A).listAllActivity();
     expect(out.map((a) => a.amount)).toEqual([1, 2]); // 升序
     expect(out[0]).toMatchObject({ accountId: acc.id, tokenId: tk, createdAt: 5 }); // createdAt 保留
-    expect(await listManualActivityByUser(env, USER_B)).toEqual([]);
+    expect(await manualOf(USER_B).listAllActivity()).toEqual([]);
   });
 });
