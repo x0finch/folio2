@@ -1,15 +1,12 @@
-// @folio/db —— 暴露门面 createDb(env)(带 userId 的包装操作,见 db.ts)+ 类型。
-// 绝不导出 getDb / drizzle 实例 / schema / query builder。
-// 非 userId 作用域的全局 infra 独立导出(不进 createDb):
-//   · createAuthAdapter —— better-auth Drizzle adapter
+// @folio/db 的出口。包外只能看见这里写出来的东西 —— 绝不出 getDb / drizzle 句柄 / schema /
+// query builder(原则 #6)。
+//
+// 包内两半,各有自己的薄壳:
+//   · queries/ —— 接口 db 自己定的那半,统一走门面 `createDb(env)`(见 queries/facade.ts)
+//   · stores/  —— 接口 `@folio/oracle-basic` 定的那半(四个参考层端口),出口是 Layer
+// 非 userId 作用域的 better-auth adapter 不进门面,单独出(它和 `getDb` 一起住 connect.ts)。
 
-export { createAuthAdapter } from "./auth"; // 不泄露 db 实例/schema
-export type { DbEnv } from "./client";
-export { createDb, type Db } from "./db";
-// 新参考层的 store(ADR 0021/0022/0023,#199)。#202 起是唯一一套 —— 旧的全局 token-store /
-// price-history-store 已删。名字带作用域(user / global):旧 store 只说「什么表」不说「谁的数据」,
-// 那正是这次改掉的事。
-export { createGlobalTokenRefIndexStore } from "./global-token-ref-index-store";
+export { createAuthAdapter, type DbEnv } from "./connect"; // adapter 不泄露 db 句柄/schema
 export type {
   AccountRawCreds,
   AccountTagLink,
@@ -33,6 +30,7 @@ export type {
   UserSettingsView,
   WriteSnapshotInput,
 } from "./queries";
+export { createDb, type Db } from "./queries/facade";
 export type {
   Account,
   AccountSafe,
@@ -42,10 +40,17 @@ export type {
   Tag,
   UserSettings,
   ValuationMode,
-} from "./schema-types";
-export { createUserCacheStore, type UserCacheStoreOpts } from "./user-cache-store";
+} from "./schema/types";
+// `Database` **只出类型不出值**:它的 `query((db) => …)` 回调参数就是 drizzle 句柄,Tag 一旦
+// 出包,包外 `yield* Database` 就能绕过全部包装层拼任意查询。装配点只需要 `databaseLayer`。
 export {
-  createUserTokenPriceStore,
+  type Database,
+  databaseLayer,
+  globalTokenRefIndexStoreLayer,
+  type UserCacheStoreOpts,
   type UserTokenPriceStoreOpts,
-} from "./user-token-price-store";
-export { createUserTokenStore, type UserTokenStoreOpts } from "./user-token-store";
+  type UserTokenStoreOpts,
+  userCacheStoreLayer,
+  userTokenPriceStoreLayer,
+  userTokenStoreLayer,
+} from "./stores";

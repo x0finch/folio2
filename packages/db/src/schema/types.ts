@@ -7,7 +7,7 @@ import type {
   tabPins,
   tags,
   userSettings,
-} from "./schema";
+} from "./app";
 
 export type Account = InferSelectModel<typeof accounts>;
 // 对外安全形状:绝不含 creds(内含 secret 密文 + 不裸给前端;前端拿的是 safeView 投影)。

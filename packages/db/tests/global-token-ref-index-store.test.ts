@@ -1,9 +1,12 @@
 import { env } from "cloudflare:test";
+import { GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
+import { Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createGlobalTokenRefIndexStore } from "../src";
-import { getDb } from "../src/client";
+import { globalTokenRefIndexStoreLayer } from "../src";
+import { getDb } from "../src/connect";
 import { globalTokenRefIndex } from "../src/schema";
+import { promisified } from "./effect";
 
 // `global_token_ref_index` 的真 D1 测试(ADR 0022,#199 / #228)。
 // 这张表**没有 userId** —— 里面一条用户数据都没有,全是上游的公开知识(原则 #6 的受控例外)。
@@ -22,7 +25,8 @@ beforeEach(async () => {
   await getDb(env).delete(globalTokenRefIndex);
 });
 
-const store = () => createGlobalTokenRefIndexStore(env);
+// 生产那条路(layer → Tag);`promisified` 只是让用例照旧 `await s.xxx(…)`。
+const store = () => promisified(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer);
 
 describe("整份灌 + 正查", () => {
   it("灌进去,按 (upstream, chainRef) 点查得回**整条** upstream ref;miss 的键不出现", async () => {
@@ -153,7 +157,7 @@ describe("分批写", () => {
       cgk("new-22"),
       cgk("new-44"),
     ]);
-    expect(await s.refreshedAt(CGK)).toBe(2000); // updated_at 也走 excluded
+    expect(await s.refreshedAt(CGK)).toEqual(Option.some(2000)); // updated_at 也走 excluded
   });
 
   // 正查也要分块(每块 ≤90 个键 + 1 个固定绑定)。
@@ -179,15 +183,15 @@ describe("分批写", () => {
 describe("刷新时刻", () => {
   it("从未刷过 → null;刷过 → 该上游行里最大的 updated_at", async () => {
     const s = store();
-    expect(await s.refreshedAt(CGK)).toBeNull();
+    expect(await s.refreshedAt(CGK)).toEqual(Option.none());
 
     await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin") }], 1000);
-    expect(await s.refreshedAt(CGK)).toBe(1000);
+    expect(await s.refreshedAt(CGK)).toEqual(Option.some(1000));
     // 另一家还是没刷过。
-    expect(await s.refreshedAt(CMC)).toBeNull();
+    expect(await s.refreshedAt(CMC)).toEqual(Option.none());
 
     await s.putAll([{ chainRef: USDC_SOL, upstreamRef: cgk("usd-coin") }], 5000);
-    expect(await s.refreshedAt(CGK)).toBe(5000);
+    expect(await s.refreshedAt(CGK)).toEqual(Option.some(5000));
   });
 
   // 不删行:下架币的旧映射留着无害,updated_at 用来看哪些行这轮没被刷到。

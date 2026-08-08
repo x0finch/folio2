@@ -1,15 +1,13 @@
 import { env } from "cloudflare:test";
 import { ConnectorFailure } from "@folio/connectors-basic";
-import {
-  createGlobalTokenRefIndexStore,
-  createUserCacheStore,
-  createUserTokenStore,
-} from "@folio/db";
+import { globalTokenRefIndexStoreLayer, userCacheStoreLayer, userTokenStoreLayer } from "@folio/db";
+import { CacheStore, GlobalTokenRefIndexStore, TokenStore } from "@folio/oracle-basic/ports";
 import { syncAccount } from "@folio/sync";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../src/lib/server/internal/db";
 import { buildSyncDeps, warmTokensForUser } from "../../src/lib/server/internal/sync-deps";
+import { withStore } from "./db-effect";
 
 // 写路径切到 mint 的端到端测试(#200):喂 provider 余额 → 落库 → 快照行带正确的 token_id。
 //
@@ -56,24 +54,35 @@ async function seedWarm(
   rows: { id: string; symbol: string; rank: number }[],
   asOf = Date.now(),
 ): Promise<void> {
-  await createUserCacheStore(env, { userId: USER }).put(
-    "warm",
-    {
-      asOf,
-      rows: rows.map((r) => ({
-        info: { ref: `${NAMER}/issued:${r.id}`, symbol: r.symbol, name: r.symbol },
-        price: { unitPrice: 1, marketCapRank: r.rank, asOf: Date.now() },
-      })),
-    },
-    60 * 60 * 1000,
+  await withStore(CacheStore, userCacheStoreLayer({ userId: USER }), (s) =>
+    s.put(
+      "warm",
+      {
+        asOf,
+        rows: rows.map((r) => ({
+          info: { ref: `${NAMER}/issued:${r.id}`, symbol: r.symbol, name: r.symbol },
+          price: { unitPrice: 1, marketCapRank: r.rank, asOf: Date.now() },
+        })),
+      },
+      60 * 60 * 1000,
+    ),
   );
 }
 
+// 那个 Token 被上游认出来了没 —— 读 `token_refs` 里当前命名者那一行(端口回 `Option`,
+// 用例只关心里面那一行,所以在这儿摘掉包装)。
+const tokenInfo = (tokenId: string) =>
+  withStore(TokenStore, userTokenStoreLayer({ userId: USER, namer: NAMER }), (s) =>
+    Effect.map(s.getById(tokenId), Option.getOrUndefined),
+  );
+
 async function seedRefIndex(rows: { ref: string; localName: string }[]): Promise<void> {
   // chainRef → 整条 upstream ref(#228:表存整条,不是裸 id)。
-  await createGlobalTokenRefIndexStore(env).putAll(
-    rows.map((r) => ({ chainRef: r.ref, upstreamRef: `${NAMER}/issued:${r.localName}` })),
-    Date.now(),
+  await withStore(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, (s) =>
+    s.putAll(
+      rows.map((r) => ({ chainRef: r.ref, upstreamRef: `${NAMER}/issued:${r.localName}` })),
+      Date.now(),
+    ),
   );
 }
 
@@ -147,8 +156,8 @@ describe("落库后快照行带 token_id", () => {
     expect(rows[0].tokenId).toBeTruthy();
 
     // 那个 Token 确实被上游认出来了(有 coingecko 那一档的 ref 行)。
-    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:usd-coin");
+    const info = await tokenInfo(rows[0].tokenId as string);
+    expect(info?.ref).toBe("coingecko/issued:usd-coin");
   });
 
   it("映射表没有的合约 → 也建行、快照照写,只是上游没认出来", async () => {
@@ -157,8 +166,8 @@ describe("落库后快照行带 token_id", () => {
 
     const rows = await balancesOf(snapshotId);
     expect(rows[0].tokenId).toBeTruthy(); // 认不出来也有 token_id,快照不卡在上游上
-    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBeNull();
+    const info = await tokenInfo(rows[0].tokenId as string);
+    expect(info?.ref).toBeNull();
   });
 
   it("多链的同一个币 → 一个 Token + 多条 ref", async () => {
@@ -186,8 +195,7 @@ describe("落库后快照行带 token_id", () => {
     const snapshotId = await syncWith([bal("evm:1/native", "ETH")], accountId);
 
     const rows = await balancesOf(snapshotId);
-    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:ethereum");
+    expect((await tokenInfo(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:ethereum");
   });
 
   // 合约的 symbol 是部署者随手填的 —— 地址查不到就该老实认不出来(#210 的闸)。
@@ -217,8 +225,8 @@ describe("落库后快照行带 token_id", () => {
     const rows = await balancesOf(snapshotId);
     expect(rows[0].tokenId).toBeTruthy();
 
-    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:usd-coin");
+    const info = await tokenInfo(rows[0].tokenId as string);
+    expect(info?.ref).toBe("coingecko/issued:usd-coin");
     // 只有一条 ref 行 —— 去重生效(不然主键就撞了)。
     const { results } = await env.DB.prepare(
       "SELECT count(*) as n FROM token_refs WHERE user_id = ? AND token_id = ?",
@@ -339,8 +347,7 @@ describe("provider 报的元信息进代币行", () => {
     // 所以这里没有 seed —— 正好验「没有 seed 时退回 symbol 一项」这条兜底。
     const snapshotId = await syncWith([bal("evm:1/contract:0xnoseed", "FOO")], accountId, deps);
     const rows = await balancesOf(snapshotId);
-    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    const info = await store.getById(rows[0].tokenId as string);
+    const info = await tokenInfo(rows[0].tokenId as string);
     // 没有 seed 时退回 symbol 一项 —— 名字等于 symbol,不是空。
     expect(info).toMatchObject({ symbol: "FOO", name: "FOO" });
   });
@@ -360,10 +367,7 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     const snapshotId = await syncWith([bal("binance/issued:LINK", "LINK")], accountId);
 
     const rows = await balancesOf(snapshotId);
-    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBe(
-      "coingecko/issued:chainlink",
-    );
+    expect((await tokenInfo(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:chainlink");
     expect(outbound).toEqual([]); // ← 本条的重点
   });
 
@@ -374,9 +378,8 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     const snapshotId = await syncWith([bal("binance/issued:ZZZ", "ZZZ")], accountId);
 
     const rows = await balancesOf(snapshotId);
-    const store = createUserTokenStore(env, { userId: USER, namer: NAMER });
     expect(rows[0].tokenId).toBeTruthy(); // 有身份
-    expect((await store.getById(rows[0].tokenId as string))?.ref).toBeNull(); // 但上游没认出
+    expect((await tokenInfo(rows[0].tokenId as string))?.ref).toBeNull(); // 但上游没认出
     expect(outbound).toEqual([]); // 认不出来也不去问上游
   });
 });
@@ -385,8 +388,10 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
 // `warmTokensForUser` 里还有旧参考层的预热也在打 `/coins/markets`,按 URL 数数分不清是谁打的。
 describe("同步后的预热把目录刷上(#216)", () => {
   const blobAsOf = async (): Promise<number | undefined> => {
-    const hit = await createUserCacheStore(env, { userId: USER }).get("warm");
-    return (hit?.value as { asOf: number } | undefined)?.asOf;
+    const hit = await withStore(CacheStore, userCacheStoreLayer({ userId: USER }), (s) =>
+      s.get("warm"),
+    );
+    return (Option.getOrUndefined(hit)?.value as { asOf: number } | undefined)?.asOf;
   };
 
   const marketsCalls = () => outbound.filter((u) => u.includes("/coins/markets")).length;

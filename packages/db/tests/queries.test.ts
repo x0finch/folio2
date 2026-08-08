@@ -1,9 +1,7 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-// 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 import {
   createAccount,
   deleteAccount,
@@ -24,6 +22,8 @@ import {
   updateUserSettings,
   writeSnapshot,
 } from "../src/queries"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
+// 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
+import { user } from "../src/schema/auth";
 
 const USER_A = "user-a";
 const USER_B = "user-b";

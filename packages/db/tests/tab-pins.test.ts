@@ -1,8 +1,7 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 import {
   createAccount,
   createPortfolio,
@@ -16,6 +15,7 @@ import {
   reorderTabPins,
   updateTabPinTarget,
 } from "../src/queries";
+import { user } from "../src/schema/auth";
 
 // 自定义 Tab pin 地基(ADR 0034)对着真 D1 跑:≤3 上限 / tag pin FK cascade / connector pin 无 FK 存活 /
 // owner 断言都真生效。不隔离每测存储 → beforeEach 重置用户。

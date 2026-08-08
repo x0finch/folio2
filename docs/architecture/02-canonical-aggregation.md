@@ -207,9 +207,9 @@ Holding {
 |---|---|
 | ① 产生 | `packages/connectors/providers/zerion/src/index.ts`(文法 `packages/oracle/ref/src/token-ref.ts`) |
 | ② 认币 | `packages/oracle/entry/src/services/mint.ts` · 编排 `apps/web/src/lib/server/internal/sync-deps.ts` |
-| ③ 入库 | `apps/web/src/lib/server/sync.ts` → `packages/db/src/queries.ts` `writeSnapshot` |
+| ③ 入库 | `apps/web/src/lib/server/sync.ts` → `packages/db/src/queries/snapshots.ts` `writeSnapshot` |
 | ④ 预热 | `apps/web/src/lib/server/internal/sync-deps.ts` `warmTokensForUser` |
-| ⑤ 读出 | `apps/web/src/lib/server/portfolio.ts` → `packages/db/src/queries.ts` `getLatestSnapshotByUser` |
+| ⑤ 读出 | `apps/web/src/lib/server/portfolio.ts` → `packages/db/src/queries/snapshots.ts` `getLatestSnapshotByUser` |
 | ⑥ 富化 | `apps/web/src/lib/server/internal/overview-model.ts` · `packages/oracle/entry/src/services/tokens.ts` `enrich` |
 | ⑦ 组装 | `apps/web/src/lib/server/internal/overview-model.ts` |
 | ⑧ 聚合 | `apps/web/src/lib/aggregate.ts` `buildCanonicalHoldings`(分组键 `groupKey` / 门槛 `isEligible`) |

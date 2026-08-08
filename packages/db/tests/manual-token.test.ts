@@ -1,8 +1,8 @@
 import { env } from "cloudflare:test";
+import { TokenStore } from "@folio/oracle-basic/ports";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { user } from "../src/auth-schema";
-import { getDb } from "../src/client";
+import { getDb } from "../src/connect";
 // 包内白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
 import {
   createAccount,
@@ -14,7 +14,9 @@ import {
   setManualHoldingDef,
 } from "../src/queries";
 import { manualActivity, tokens as tokensTable } from "../src/schema";
-import { createUserTokenStore } from "../src/user-token-store";
+import { user } from "../src/schema/auth";
+import { userTokenStoreLayer } from "../src/stores/token";
+import { promisified } from "./effect";
 
 // #203 起手记的币**就是 `tokens` 里的一行** —— 没有 manual_token 那张表了。
 // 于是「这个账户持有哪些币」由它账本里出现过的 token 决定,而不是另存一份账户↔币的关系。
@@ -49,7 +51,7 @@ async function manualAccount(userId: string) {
 // 建一个该用户的代币行(生产路径是 mint;这里直接用 store,本文件不测认币)。
 // `coinId` 给了就顺带挂上那条 ref —— 持仓的 `ref` 就是从 `token_refs` 里当前命名者那行读出来的。
 async function mintToken(userId: string, symbol: string, coinId?: string): Promise<string> {
-  const store = createUserTokenStore(env, { userId, namer: NAMER });
+  const store = promisified(TokenStore, userTokenStoreLayer({ userId, namer: NAMER }));
   return store.create({ symbol }, coinId ? [`${NAMER}/issued:${coinId}`] : []);
 }
 
@@ -59,7 +61,7 @@ async function mintTokenWithRef(
   symbol: string,
   localName: string,
 ): Promise<string> {
-  const store = createUserTokenStore(env, { userId, namer: NAMER });
+  const store = promisified(TokenStore, userTokenStoreLayer({ userId, namer: NAMER }));
   return store.create({ symbol }, [`${NAMER}/${localName}`]);
 }
 
