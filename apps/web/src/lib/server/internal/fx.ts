@@ -1,6 +1,6 @@
 import { FxService } from "@folio/oracle";
 import { Effect, Option } from "effect";
-import { runOracle } from "./oracle";
+import { runRequest } from "./oracle";
 
 // 展示币种的汇率:1 单位该币种值多少美元。**唯一的读入口**,`preferences.ts` 那个 server fn
 // 只负责读 cookie、定币种、把结果套成 `PreferCurrency`。
@@ -17,7 +17,7 @@ import { runOracle } from "./oracle";
 // 所以这里不再需要一个把什么都吞掉的 `try/catch`(那个连自己的 bug 一起吞)。
 export function displayRate(userId: string, code: string): Promise<number | undefined> {
   if (code === "USD") return Promise.resolve(1);
-  return runOracle(
+  return runRequest(
     userId,
     Effect.gen(function* () {
       const fx = yield* FxService;

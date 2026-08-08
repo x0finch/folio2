@@ -1,8 +1,10 @@
+import { SnapshotStore } from "@folio/db";
 import { createServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
 import { z } from "zod";
 import { isFungible, viewKind } from "../balance-kind";
 import { buildTokenValueHistory, type TokenHistRow } from "../token-history";
-import { db } from "./internal/db";
+import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 
 // 单币持仓价值历史(H6 片2):某持仓(按 Holding key = token_id)的价值随时间。
@@ -15,7 +17,13 @@ export const getHoldingHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(z.object({ key: z.string().min(1), since: z.number().int().nonnegative().optional() }))
   .handler(async ({ data, context }) => {
-    const rows = await db.listSnapshotBalancesByUser(context.userId, data.since);
+    // 一次 db 读,所以这里的「一次装配」谈不上省了几次边界 —— 它是**为了让门面能被删掉**
+    // (#394 T8):`db.` 那层过渡门面每次调用各建一次 layer + 各跑一次 runPromise,方向与
+    // 「一次请求一次装配」相反,而它只活到最后一个调用点搬走为止。
+    const rows = await runRequest(
+      context.userId,
+      Effect.flatMap(SnapshotStore, (s) => s.listBalanceHistory(data.since)),
+    );
     // eligibility 与 overview-model 同口径:**只认现货**(perp 权益不进聚合 → 也不进单币历史,#129)。
     const eligible = rows.filter((r) => isFungible(viewKind(r)));
     const histRows: TokenHistRow[] = eligible.map((r) => ({

@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { connectorPlatformMeta } from "@/lib/server/internal/connector-platform";
 import { serveLogo } from "@/lib/server/internal/logo";
-import { runOracle } from "@/lib/server/internal/oracle";
+import { runRequest } from "@/lib/server/internal/oracle";
 import { userIdOf } from "@/lib/server/internal/route-auth";
 
 // 平台 logo 代理:platform key(如 evm:1,含 `:` → URL 编码为一段)→ 上游图 → 透传 + 缓存头。
@@ -31,7 +31,7 @@ export const Route = createFileRoute("/api/logo/platform/$key")({
           async () =>
             userId
               ? (
-                  await runOracle(
+                  await runRequest(
                     userId,
                     Effect.flatMap(PlatformService, (p) => p.resolve([params.key])),
                   )

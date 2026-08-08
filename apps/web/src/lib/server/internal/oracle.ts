@@ -48,8 +48,8 @@ import { logTapeLogger } from "./effect-log";
 // 少掉的东西:七个 `createXxx(userId)` 字段、`overrides` 的转手(adapter 的 layer 自己给
 // `Namer`)、`onWarn` 回调(改 Effect 日志 + 下面那个转发器)、`now`(改 `Clock`)。
 //
-// **`runPromise` 只在这里出现**:调用方拿到的是「装配」(`withOracle`/`withOracleWarm`)与
-// 「跑」(`runAtEdge`)两半,或者两者合一的 `runOracle`。以前是每个方法调用各自 await 一个
+// **`runPromise` 只在这里出现**:调用方拿到的是「装配」(`withRequest`/`withOracleWarm`)与
+// 「跑」(`runAtEdge`)两半,或者两者合一的 `runRequest`。以前是每个方法调用各自 await 一个
 // Promise,层与层之间没有共同的上下文;现在一次请求一次装配,超时与中断能一路传到最底层那发 fetch。
 // cron 更进一步:整趟(sweep + 逐用户预热)拼成一个 effect,只在 `waitUntil` 那儿跑一次。
 
@@ -115,23 +115,6 @@ const toError = (error: UpstreamError): Error =>
   );
 
 /**
- * 给一个 effect 装上参考层,**但不跑它**。
- *
- * 有了它,调用方才能把「多个用户的多步预热」先拼成**一个** effect,再在最边缘跑一次 —— 这正是
- * Effect 官方那句「把大部分逻辑写成 Effect,`run*` 尽量放在程序的边缘」。中间每步各 `runPromise`
- * 一次,层与层之间就没有共同的上下文:超时、中断、日志的 fiber 上下文全在每个边界上断一次。
- *
- * 参考层装的是**用户私有**数据(他认识哪些币、他的币叫什么名),拿错用户就是数据泄露 ——
- * 所以 userId 是必填参数,而服务的方法签名里一个 user 参数都没有:拿错在编译期就发生不了。
- * cron 没有 auth 上下文,得逐用户各装一次,那正是本签名想让它显而易见的事。
- */
-export const withOracle = <A>(
-  userId: string,
-  effect: Effect.Effect<A, UpstreamError, OracleServices | OraclePorts>,
-): Effect.Effect<A, Error> =>
-  effect.pipe(Effect.provide(oracleFor(userId)), Effect.mapError(toError));
-
-/**
  * 全局维护任务(刷 `global_token_ref_index`)的装配。**不带 userId** —— 这张表跟任何用户无关
  * (ADR 0022),所以 per-user 的那三张 store 压根不建;只装 `GlobalRefIndexService` + 它要的
  * 两个端口。
@@ -193,12 +176,21 @@ export type DbStores =
   | TransferStore;
 
 /**
- * **一次请求一次装配** —— 参考层 + app 数据两边一起装。
+ * **一次请求一次装配** —— 参考层 + app 数据两边一起装,**但不跑**。
  *
  * 这是 #394 要达成的形状:一个 server fn 里连着读账户、问价、读快照、写活动,走的是同一份
  * context;以前是每问一次各 `runPromise` 一次(一个总览请求切两次 Effect 边界、建两套 store)。
  * Effect 官方那句「`run*` 尽量放在程序的边缘」在 server fn 这条路上就是这个形状:
  * 边缘是 handler 本身,再往里一次都不切。
+ *
+ * 参考层装的是**用户私有**数据(他认识哪些币、他的币叫什么名),db 那半更是 —— 拿错用户就是
+ * 数据泄露。所以 userId 是必填参数,而两边服务的方法签名里一个 user 参数都没有:拿错在编译期
+ * 就发生不了(ADR 0037)。cron 没有 auth 上下文,得逐用户各装一次,那正是本签名想让它显而易见的事。
+ *
+ * **只有这一条装配路**(T5 把原来的 `withOracle` 并了进来):以前「只要参考层」与「两边都要」
+ * 各有一条,同一个文件里两种写法并存,而选哪条得先知道这段代码碰没碰 db —— 那是读完才看得出来
+ * 的事,类型帮不上忙。合成一条之后多建的是几个闭包(`connect.ts` 自己写着「drizzle(env.DB) 很轻」),
+ * 换掉的是一个每次都要现想的选择。
  */
 export const withRequest = <A>(
   userId: string,
@@ -217,9 +209,9 @@ export const withRequest = <A>(
 
 /**
  * 一步式:装配 + 立刻跑。server fn / route handler 那种「一次请求就问一次」的路径用它 ——
- * 请求本身就是边缘,没有可拼的下一步。要把多步拼成一个再跑的(cron),用 `withOracle` + `runAtEdge`。
+ * 请求本身就是边缘,没有可拼的下一步。要把多步拼成一个再跑的(cron),用 `withRequest` + `runAtEdge`。
  */
-export const runOracle = <A>(
+export const runRequest = <A>(
   userId: string,
-  effect: Effect.Effect<A, UpstreamError, OracleServices | OraclePorts>,
-): Promise<A> => runAtEdge(withOracle(userId, effect));
+  effect: Effect.Effect<A, UpstreamError, OracleServices | OraclePorts | DbStores>,
+): Promise<A> => runAtEdge(withRequest(userId, effect));

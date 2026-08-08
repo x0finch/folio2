@@ -16,7 +16,7 @@ import { deriveLiveAccountTotals, liveValue } from "./live-value";
 
 export interface OverviewDeps {
   // 代币富化(`enrich`)与平台展示(`resolve`)不在这里 —— 它们是 `R` 通道上的
-  // `TokenService` / `PlatformService`,由调用方一次 `runOracle` 供上。
+  // `TokenService` / `PlatformService`,由调用方一次 `runRequest` 供上。
   // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platforms。
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
   // 估值模式(Phase 3,#81):读时现推 value 用。缺省 self-first(= 旧行为);per-user 设置接入见 P3-3。

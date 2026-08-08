@@ -25,7 +25,7 @@ export function liveValue(
 }
 
 // 按账户现推净值:对每账户最新快照的**全部**余额取 cache-only 源价(一次批量 enrich),liveValue 求和。
-// 代币能力不再当参数传,而是 `R` 通道上的 `TokenService` —— 调用方(server fn)一次 `runOracle` 全供上。
+// 代币能力不再当参数传,而是 `R` 通道上的 `TokenService` —— 调用方(server fn)一次 `runRequest` 全供上。
 // self-first(默认)下 enrich-not-reprice 行 value≡冻结、盯市行取实时源价 → 与主页总价同源同算。
 // 主页(buildOverview)与资产曲线当下点(history)共用本函数,保证「主页总价 ≡ 曲线当下点」。
 export const deriveLiveAccountTotals = (
