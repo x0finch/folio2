@@ -54,26 +54,26 @@ const toSnapshotRows = (
   }));
 
 // 取余额之后的三步。抽出来是因为「缺凭据」那条路根本不走到这 —— 早退在上面。
-const finish = (userId: string, account: AccountSafe, outcome: OkOutcome) =>
+const finish = (account: AccountSafe, outcome: OkOutcome) =>
   Effect.gen(function* () {
     const oracle = yield* TokenOracle;
     const snapshotStore = yield* SnapshotStore;
     // 认币先跑,一轮只跑一次,答案同时喂给重估定价和写快照落列(ADR 0021 / #200)。
     const idByRef = yield* bestEffort(
-      oracle.mint(userId, outcome.balances),
+      oracle.mint(outcome.balances),
       new Map<string, string>() as ReadonlyMap<string, string>,
       "mint failed; writing snapshot without token_id",
     );
     // 重估(P7.4.2):manual 用市场价改 usdValue。null = 没重估(未注入或失败)。
     const revalued = yield* bestEffort<Balance[] | null>(
-      oracle.revalue(userId, account.connectorId, outcome.balances, idByRef),
+      oracle.revalue(account.connectorId, outcome.balances, idByRef),
       null,
       "revalue failed; keeping provider values",
     );
     const balances = revalued ?? outcome.balances;
     // 只有真重估过才重算 totalUsd;否则保留 provider 报的那个数(它未必等于各行之和)。
     const totalUsd = revalued ? revalued.reduce((sum, b) => sum + b.value, 0) : outcome.totalUsd;
-    const snapshotId = yield* snapshotStore.write(userId, account.id, {
+    const snapshotId = yield* snapshotStore.write(account.id, {
       takenAt: Date.now(),
       totalUsd,
       // account 级 note(Note[],整钱包)落 snapshots.note;重估不动它。
@@ -86,6 +86,8 @@ const finish = (userId: string, account: AccountSafe, outcome: OkOutcome) =>
     return { accountId: account.id, ok: true, snapshotId, totalUsd } satisfies AccountSyncResult;
   });
 
+// **`userId` 只用来标日志**(#403 片 1):数据访问那半已经由装配层按用户吃掉了,所以它不再往
+// 下传给任何服务 —— 只在下面 `annotateLogs` 那一处用一次。
 export const syncAccount = (
   userId: string,
   account: AccountSafe,
@@ -105,7 +107,7 @@ export const syncAccount = (
       yield* Effect.logWarning("account sync skipped: needs credentials");
       return { accountId: account.id, ok: false, skipped: true } satisfies AccountSyncResult;
     }
-    return yield* finish(userId, account, outcome);
+    return yield* finish(account, outcome);
   }).pipe(
     // 隔离:失败收成 ok:false,绝不抛。
     Effect.catchAll((err) =>

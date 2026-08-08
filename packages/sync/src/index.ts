@@ -18,7 +18,7 @@ import type { AccountSafe } from "@folio/db";
 import { Effect, Stream } from "effect";
 import * as Account from "./account";
 import type { SyncDepError } from "./errors";
-import { layerFromDeps } from "./services";
+import { layerFromDeps, type SyncServices } from "./services";
 import * as Sweep from "./sweep";
 import type { AccountSyncResult, SweepResult, SyncDeps, SyncResult } from "./types";
 
@@ -35,18 +35,24 @@ export type {
   SyncResult,
 } from "./types";
 
+// **一个用户 = 一次装配**(#403 片 1)。`layerFromDeps` 现在收 userId,所以每条出口都在这里
+// 按用户把服务建起来 —— 包内业务代码从此看不见 userId(日志上下文那一处除外)。
+const forUser = <A, E>(
+  deps: SyncDeps,
+  userId: string,
+  effect: Effect.Effect<A, E, SyncServices>,
+): Effect.Effect<A, E> => effect.pipe(Effect.provide(layerFromDeps(deps, userId)));
+
 export const syncAccount = (
   deps: SyncDeps,
   userId: string,
   account: AccountSafe,
   rawCreds: string | null,
 ): Promise<AccountSyncResult> =>
-  Effect.runPromise(
-    Account.syncAccount(userId, account, rawCreds).pipe(Effect.provide(layerFromDeps(deps))),
-  );
+  Effect.runPromise(forUser(deps, userId, Account.syncAccount(userId, account, rawCreds)));
 
 export const syncUser = (deps: SyncDeps, userId: string): Promise<SyncResult> =>
-  Effect.runPromise(Sweep.syncUser(userId).pipe(Effect.provide(layerFromDeps(deps))));
+  Effect.runPromise(forUser(deps, userId, Sweep.syncUser(userId)));
 
 // 逐账户产出的流,给要边跑边显示进度的调用方(主页「立即同步」)。
 // 先完成先报,不保序 —— 按 accountId 认,别按下标。
@@ -54,7 +60,20 @@ export const syncUserStream = (
   deps: SyncDeps,
   userId: string,
 ): Stream.Stream<AccountSyncResult, SyncDepError> =>
-  Sweep.syncUserStream(userId).pipe(Stream.provideLayer(layerFromDeps(deps)));
+  Sweep.syncUserStream(userId).pipe(Stream.provideLayer(layerFromDeps(deps, userId)));
 
+// 全量 sweep:**逐用户各装一次**,再把小计加起来。
+//
+// 循环在这一层而不是在 `sweep.ts` 里,是服务变成 per-user 之后的必然:一份服务服务不了多个用户
+// (见 services.ts 那段判据)。包只交出「一个用户的小计」与「小计怎么加」,谁做装配谁跑循环 ——
+// 片 3 之后这个循环会搬到 `apps/web`,与那边已有的 `warmAllUsers` 形状一致。
+//
+// **串行不是遗漏,是有意的**:cron 一次调用有 CPU / subrequest 预算,几十个用户并发会顶穿
+// (见 apps/web server.ts 里两个 trigger 拆开的理由)。用 `Effect.forEach` 的默认串行语义,
+// **别顺手加 concurrency** —— tests/sweep.test.ts 有一条专门钉这个。
 export const syncAllUsers = (deps: SyncDeps, userIds: string[]): Promise<SweepResult> =>
-  Effect.runPromise(Sweep.syncAllUsers(userIds).pipe(Effect.provide(layerFromDeps(deps))));
+  Effect.runPromise(
+    Effect.forEach(userIds, (userId) => forUser(deps, userId, Sweep.userTally(userId))).pipe(
+      Effect.map((tallies) => Sweep.sumTallies(userIds.length, tallies)),
+    ),
+  );

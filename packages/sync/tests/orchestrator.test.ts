@@ -15,8 +15,9 @@ import { layerFromDeps } from "../src/services";
 import * as Sweep from "../src/sweep";
 
 // 把注入式 deps 变成服务,拿到一个可挂假时钟的 Effect。
+// `layerFromDeps` 现在收 userId(#403 片 1):服务按用户建,签名里不再有 user 参数。
 const syncUserWithDeps = (deps: SyncDeps, userId: string) =>
-  Sweep.syncUser(userId).pipe(Effect.provide(layerFromDeps(deps)));
+  Sweep.syncUser(userId).pipe(Effect.provide(layerFromDeps(deps, userId)));
 
 // 编排层测试:provider 机制(解密/校验/取数/全局 key 收窄)已内化进注入的 fetchBalances,
 // 这里只测 sync 自己的编排 —— 重试 / 跳过(needs-credentials)/ 重估 / 失败隔离 / 日志 / 写快照。
