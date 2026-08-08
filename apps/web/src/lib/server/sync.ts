@@ -1,5 +1,5 @@
 import { AccountStore, SnapshotStore } from "@folio/db";
-import { syncAccount as syncAccountCore } from "@folio/sync";
+import { Account as SyncKernel } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
@@ -10,7 +10,7 @@ import { type SyncStatusSummary, summarizeSync } from "../sync-status";
 import { credentialSpecs } from "./internal/connector-registry";
 import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
-import { buildSyncDeps, warmTokens } from "./internal/sync-deps";
+import { syncServicesLayer, warmTokens } from "./internal/sync-deps";
 
 const syncLog = getLogger(["folio", "web", "sync"]);
 
@@ -24,10 +24,10 @@ const syncLog = getLogger(["folio", "web", "sync"]);
 // 两次 `db.`(各自建一次 layer、各跑一次 runPromise)+ 一次 `warmTokensForUser`(再建一套),
 // 而预热本身内部还要再读一遍账户与快照。
 //
-// **`syncAccountCore` 仍是 Promise**,所以中间必然有一道 `tryPromise` —— `@folio/sync` 的公开出口
-// 是 Promise 形状(它内部是 Effect,`index.ts` 那层壳把依赖接上再 `runPromise`)。把它的 Effect
-// 内核直接接出来是可行的,但 `SyncDeps` 的每个方法都收 userId(cron 用一份 deps 扫全部用户),
-// 与 db 现在 per-user 装配的形状对不上 —— 那是它自己的一票,不在这里顺手做(见 PR 说明)。
+// **同步内核也在这一个 effect 里**(#403 片 2):`@folio/sync` 的 Effect 内核直接接出来,
+// `SyncServices` 由 `syncServicesLayer` 供上,而它要的 db / 参考层服务就是外面这次
+// `runRequest(userId, …)` 已经装好的那些。以前这里是 `Effect.promise(() => syncAccountCore(…))`——
+// 一道 Promise 边界,而且内核里的 mint / revalue 各自还要再装一次参考层。
 export const syncAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(z.object({ accountId: z.string().min(1) }))
@@ -46,8 +46,8 @@ export const syncAccount = createServerFn({ method: "POST" })
           return { accountId: account.id, ok: false, skipped: true };
         }
         const rawCreds = yield* accounts.getRawCreds(data.accountId);
-        const result = yield* Effect.promise(() =>
-          syncAccountCore(buildSyncDeps(), userId, account, rawCreds),
+        const result = yield* SyncKernel.syncAccount(userId, account, rawCreds).pipe(
+          Effect.provide(syncServicesLayer),
         );
         syncLog.info("single account sync", {
           accountId: account.id,

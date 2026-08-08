@@ -93,7 +93,10 @@ const EMPTY_IDS: ReadonlyMap<string, string> = new Map();
 //
 // 门限设 All:级别过滤是注入方(LogTape)的事,本层不替它筛 —— 与迁移前直调 `log.*` 一致。
 // 不设的话 Effect 默认从 Info 起,`debug` 会在到达 LogTape 之前就被吃掉。
-const forwardTo = (log: SyncLogger): Layer.Layer<never> =>
+// **导出**(#403 片 2):调用方直接提供服务、不再经 `SyncDeps` 之后,这一层得由它自己接上 ——
+// 否则 sync 的日志会落进调用方那个 runtime 的默认 logger 里。`apps/web` 的那个把类目写死成
+// `["folio","oracle"]`、也没设最低级别,接错的后果是**类目串味 + debug 全被吞掉**,而且是静默的。
+export const syncLoggerLayer = (log: SyncLogger): Layer.Layer<never> =>
   Layer.merge(
     Logger.replace(
       Logger.defaultLogger,
@@ -180,5 +183,5 @@ export const layerFromDeps = (deps: SyncDeps, userId: string): Layer.Layer<SyncS
             })
         : () => Effect.succeed(null),
     }),
-    deps.log ? forwardTo(deps.log) : silent,
+    deps.log ? syncLoggerLayer(deps.log) : silent,
   );

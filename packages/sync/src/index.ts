@@ -23,9 +23,25 @@ import * as Sweep from "./sweep";
 import type { AccountSyncResult, SweepResult, SyncDeps, SyncResult } from "./types";
 
 // 平台推导:写快照时用;app 侧采集 provider 元信息时也用同一条,免得两处口径分叉。
+// —— Effect 内核(#403 片 2)——
+// 调用方自己提供 `SyncServices` 时用这两个命名空间:`Account.syncAccount` / `Sweep.syncUserStream`
+// / `Sweep.userTally` / `Sweep.sumTallies`。**内核不加后缀**(见文件头那段),同名冲突用命名空间
+// 化掉 —— 这也正是本包内部一直在用的写法。
+// 下面那几个 Promise 出口是**过渡形状**,片 3 删。
+export * as Account from "./account";
 export { SYNC_CONCURRENCY } from "./constants";
-export { SyncDepError, type SyncDepStep } from "./errors";
+export { depError, SyncDepError, type SyncDepStep } from "./errors";
 export { platformOf } from "./platform";
+// 服务的 Tag 与集合类型:调用方要自己建这一层就得拿得到它们。
+export {
+  AccountStore,
+  BalanceSource,
+  SnapshotStore,
+  type SyncServices,
+  syncLoggerLayer,
+  TokenOracle,
+} from "./services";
+export * as Sweep from "./sweep";
 export type {
   AccountSyncResult,
   FetchOutcome,

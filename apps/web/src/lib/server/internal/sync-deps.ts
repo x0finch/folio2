@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import type { UpstreamError } from "@folio/client-core";
+import { FolioHttpClient, type UpstreamError } from "@folio/client-core";
 import {
   type ConnectorManifest,
   registry as connectorRegistry,
@@ -14,12 +14,28 @@ import {
   fromProviderError,
   type ProviderNeeds,
 } from "@folio/connectors-basic";
-import { type AccountSafe, AccountStore, SettingsStore, SnapshotStore } from "@folio/db";
+import {
+  type AccountSafe,
+  AccountStore,
+  SettingsStore,
+  SnapshotStore,
+  type WriteSnapshotInput,
+} from "@folio/db";
 import { FxService, type OraclePorts, type OracleServices, TokenService } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
-import type { FetchOutcome, SyncDeps } from "@folio/sync";
+import {
+  BalanceSource,
+  depError,
+  type FetchOutcome,
+  AccountStore as SyncAccountStore,
+  type SyncDeps,
+  type SyncServices,
+  SnapshotStore as SyncSnapshotStore,
+  syncLoggerLayer,
+  TokenOracle,
+} from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Layer } from "effect";
 import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
 import { isSyncableAccount } from "../../syncable";
@@ -218,6 +234,121 @@ function createSeedCollector(): SeedCollector {
     },
   };
 }
+
+// —— `SyncServices` 的 app 侧实现(#403 片 2)——
+//
+// 与下面那个 `buildSyncDeps` **同一套零件、不同接线**:取数(`fetchViaConnector`)、seed 收集、
+// 重估(`revalue`)三样逻辑都只有一份,这里只是把它们接到 Tag 上而不是接到 Promise 字段上。
+// 过渡期两条接线并存(expand),片 3 删掉 Promise 那条。
+//
+// **一次装配 = 一个用户的一轮同步。** 四个能力的方法签名里没有 userId —— 它由外面那次
+// `withRequest(userId, …)` 供上的 db / 参考层服务吃掉了(ADR 0037)。
+//
+// `seeds` 与估值模式都建在**这一层**:它们的存活范围恰好是「一轮同步」,与 layer 的生命周期同长。
+// 以前 `buildSyncDeps` 得按 userId 分桶缓存估值模式(一份 deps 跨多用户),现在一个用户一层,
+// 读一次存进闭包就够 —— 那个 Map 连同它的分桶逻辑一起没了。
+export const syncServicesLayer: Layer.Layer<
+  SyncServices,
+  never,
+  DbStores | OracleServices | OraclePorts
+> = Layer.unwrapEffect(
+  Effect.sync(() => {
+    // 一轮 sync 共一份 seed 收集器:取余额那头收,写快照那头取(见 SeedCollector 的定义)。
+    // 建在 `unwrapEffect` 里而不是各子 layer 里 —— 两个能力要共用同一份,而 `Layer.mergeAll`
+    // 的成员之间传不了值。
+    const seeds = createSeedCollector();
+    return Layer.mergeAll(
+      // 出网:provider 声明「我要出网」,这里满足它。
+      FolioHttpClient,
+      // sync 自己的日志类目。**必须显式接**:不接的话这些日志会落进 `runAtEdge` 提供的那个
+      // 转发器,类目串成 `["folio","oracle"]`、debug 还会被默认级别吞掉(见 syncLoggerLayer)。
+      syncLoggerLayer(getLogger(["folio", "sync"])),
+      Layer.effect(
+        SyncAccountStore,
+        Effect.map(AccountStore, (accounts) => ({
+          // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,
+          // 不写快照)→ 一并过滤。编排只见活跃的可同步账户(判别走纯 isSyncableAccount)。
+          list: () => Effect.map(accounts.list(), (rows) => rows.filter(isSyncableAccount)),
+          // 批量取全用户 creds(消 syncAccount 的 N+1)
+          rawCreds: () => accounts.listRawCreds(),
+        })),
+      ),
+      Layer.effect(
+        SyncSnapshotStore,
+        Effect.map(SnapshotStore, (snapshots) => ({
+          write: (accountId: string, input: WriteSnapshotInput) =>
+            snapshots.write(accountId, input),
+        })),
+      ),
+      Layer.succeed(BalanceSource, {
+        // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/
+        // 取数在其内);SECRETS_KEY 只在本层(app)见。无 manifest 视为数据错误(由 syncAccount
+        // 逐账户隔离,不阻断其余)。
+        fetch: (account, stored) => {
+          const cid = account.connectorId;
+          const manifest = getConnector(connectorRegistry, cid);
+          if (!manifest) {
+            return Effect.fail(
+              new ConnectorFailure({ message: `no connector for connectorId ${cid}` }),
+            );
+          }
+          return fetchViaConnector(cid, manifest, account, stored, seeds);
+        },
+      }),
+      Layer.effect(
+        TokenOracle,
+        Effect.gen(function* () {
+          const settings = yield* SettingsStore;
+          // 参考层那几个服务已经在外面那次 `withRequest` 里装好了 —— 抓住 context,别让它们
+          // 漏进本服务的 `R`(CODING.md:服务对外的 `R` 恒是 `never`)。
+          const oracle = yield* Effect.context<OracleServices | OraclePorts>();
+          // 估值模式一轮读一次,**惰性**:纯链上的一轮同步压根不重估,不该为此白发一次 D1 查询。
+          // 以前得按 userId 分桶缓存(一份 deps 跨多用户),现在一个用户一层,一个闭包变量就够。
+          let mode: ValuationMode | undefined;
+          const modeOnce = Effect.suspend(() =>
+            mode !== undefined
+              ? Effect.succeed(mode)
+              : Effect.map(settings.get(), (row) => {
+                  mode = row.valuationMode;
+                  return row.valuationMode;
+                }),
+          );
+          return {
+            // 认币:每笔余额的 tokenRef 换成 token_id,认定就此冻进快照(ADR 0021 / #200)。
+            // 上游失败归 `SyncDepError` —— 编排把 mint / revalue 各当一个 best-effort 降级点
+            // (见 account.ts 的 bestEffort),**不能让它变成 defect**,否则整个账户这轮就没了。
+            mint: (rows) => {
+              const refs = rows.flatMap((b) =>
+                b.tokenRef ? [{ ref: b.tokenRef, seed: seeds.of(b.tokenRef, b.symbol) }] : [],
+              );
+              if (refs.length === 0) {
+                return Effect.succeed(new Map<string, string>() as ReadonlyMap<string, string>);
+              }
+              return Effect.flatMap(TokenService, (t) => t.mint(refs)).pipe(
+                Effect.provide(oracle),
+                Effect.mapError((e) => depError("mint", e)),
+              );
+            },
+            // 写快照前重估(oracle 多源 Phase 3):按 mode 定 value + 非盯市类型捕获 selfPrice。
+            // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单)。
+            revalue: (connectorId, rows, idByRef) =>
+              Effect.flatMap(modeOnce, (valuation) =>
+                revalue(
+                  getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
+                  rows,
+                  idByRef,
+                  valuation,
+                ),
+              ).pipe(
+                Effect.provide(oracle),
+                Effect.mapError((e) => depError("revalue", e)),
+              ),
+          };
+        }),
+      ),
+    );
+  }),
+);
 
 // 装配编排器的注入式依赖。真正的 DI 缝是这里返回的 SyncDeps(syncUser 只认注入的 deps);
 // triggerSync(手动)与 cron(scheduled)共用。
