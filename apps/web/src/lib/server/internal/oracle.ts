@@ -31,9 +31,10 @@ import { logTapeLogger } from "./effect-log";
 // 少掉的东西:七个 `createXxx(userId)` 字段、`overrides` 的转手(adapter 的 layer 自己给
 // `Namer`)、`onWarn` 回调(改 Effect 日志 + 下面那个转发器)、`now`(改 `Clock`)。
 //
-// **`runPromise` 只在这里出现**:server fn / route handler / cron 各自写一个 effect,交给
-// `runOracle` 跑。以前是每个方法调用各自 await 一个 Promise,层与层之间没有共同的上下文;
-// 现在一次请求一次装配,超时与中断能一路传到最底层那发 fetch。
+// **`runPromise` 只在这里出现**:调用方拿到的是「装配」(`withOracle`/`withOracleWarm`)与
+// 「跑」(`runAtEdge`)两半,或者两者合一的 `runOracle`。以前是每个方法调用各自 await 一个
+// Promise,层与层之间没有共同的上下文;现在一次请求一次装配,超时与中断能一路传到最底层那发 fetch。
+// cron 更进一步:整趟(sweep + 逐用户预热)拼成一个 effect,只在 `waitUntil` 那儿跑一次。
 
 // CoinGecko client 的公共配置(三个上游共用一份)。限速层的报告不在这里 —— 见 log.ts 的
 // setLimitLogger:那件事是运行时的属性,设一次管所有闸,不该逐个上游透传。
@@ -97,37 +98,49 @@ const toError = (error: UpstreamError): Error =>
   );
 
 /**
- * 跑一个用了参考层的 effect。**一次请求一次装配** —— 一个 server fn 里连着问代币、汇率、平台,
- * 走的是同一份 context(以前是三次各自 new 一套 store)。
+ * 给一个 effect 装上参考层,**但不跑它**。
  *
- * 参考层现在装的是**用户私有**数据(他认识哪些币、他的币叫什么名),拿错用户就是数据泄露 ——
- * 所以 userId 是这个函数的必填参数,而服务的方法签名里一个 user 参数都没有:拿错在编译期
- * 就发生不了。cron 没有 auth 上下文,得逐用户自己调一次,那正是本签名想让它显而易见的事。
+ * 有了它,调用方才能把「多个用户的多步预热」先拼成**一个** effect,再在最边缘跑一次 —— 这正是
+ * Effect 官方那句「把大部分逻辑写成 Effect,`run*` 尽量放在程序的边缘」。中间每步各 `runPromise`
+ * 一次,层与层之间就没有共同的上下文:超时、中断、日志的 fiber 上下文全在每个边界上断一次。
+ *
+ * 参考层装的是**用户私有**数据(他认识哪些币、他的币叫什么名),拿错用户就是数据泄露 ——
+ * 所以 userId 是必填参数,而服务的方法签名里一个 user 参数都没有:拿错在编译期就发生不了。
+ * cron 没有 auth 上下文,得逐用户各装一次,那正是本签名想让它显而易见的事。
+ */
+export const withOracle = <A>(
+  userId: string,
+  effect: Effect.Effect<A, UpstreamError, OracleServices | OraclePorts>,
+): Effect.Effect<A, Error> =>
+  effect.pipe(Effect.provide(oracleFor(userId)), Effect.mapError(toError));
+
+/**
+ * 全局维护任务(刷 `global_token_ref_index`)的装配。**不带 userId** —— 这张表跟任何用户无关
+ * (ADR 0022),所以 per-user 的那三张 store 压根不建;只装 `GlobalRefIndexService` + 它要的
+ * 两个端口。
+ */
+export const withOracleWarm = <A>(
+  effect: Effect.Effect<A, UpstreamError, GlobalRefIndexService>,
+): Effect.Effect<A, Error> =>
+  effect.pipe(
+    Effect.provide(Layer.provide(globalRefIndexServiceLayer, warmPorts())),
+    Effect.mapError(toError),
+  );
+
+/**
+ * 边缘:跑一个**已经装配好**的 effect,只补日志层。cron 一次调用只经这里一次。
+ *
+ * `runPromise` 仍然只在本文件出现 —— 上面那两个 `with*` 负责装配,这里负责跑,调用方两者
+ * 各取所需,但都不会自己拿到 `Effect.runPromise`。
+ */
+export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
+  Effect.runPromise(effect.pipe(Effect.provide(logTapeLogger)));
+
+/**
+ * 一步式:装配 + 立刻跑。server fn / route handler 那种「一次请求就问一次」的路径用它 ——
+ * 请求本身就是边缘,没有可拼的下一步。要把多步拼成一个再跑的(cron),用 `withOracle` + `runAtEdge`。
  */
 export const runOracle = <A>(
   userId: string,
   effect: Effect.Effect<A, UpstreamError, OracleServices | OraclePorts>,
-): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(
-      Effect.provide(oracleFor(userId)),
-      Effect.provide(logTapeLogger),
-      Effect.mapError(toError),
-    ),
-  );
-
-/**
- * 全局维护任务(刷 `global_token_ref_index`)。**不带 userId** —— 这张表跟任何用户无关
- * (ADR 0022),所以 per-user 的那三张 store 压根不建;只装 `GlobalRefIndexService` + 它要的
- * 两个端口。
- */
-export const runOracleWarm = <A>(
-  effect: Effect.Effect<A, UpstreamError, GlobalRefIndexService>,
-): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(
-      Effect.provide(Layer.provide(globalRefIndexServiceLayer, warmPorts())),
-      Effect.provide(logTapeLogger),
-      Effect.mapError(toError),
-    ),
-  );
+): Promise<A> => runAtEdge(withOracle(userId, effect));

@@ -2,7 +2,6 @@ import { PlatformService } from "@folio/oracle";
 import { Effect } from "effect";
 import { connectorPlatformMeta } from "./connector-platform";
 import { db } from "./db";
-import { runOracle } from "./oracle";
 
 // 平台元数据(链 ∪ 场馆的 name+logo)。**按用户**(#202b):与汇率、代币目录同住一张
 // per-user 缓存(`platform:<键>` 键)。读走 resolve(cache-only、一次批量读、零网络),
@@ -13,17 +12,17 @@ import { runOracle } from "./oracle";
 // 「哪些要查 CoinGecko」用与读路径装饰同一条判据(见 overview-model):键认得出连接器的
 // (binance/okx/hyperliquid/manual,以及 slug 与连接器同名的 bitcoin/solana…)其 name+logo
 // 由 manifest 自带,不查 CoinGecko(#52);余下的才是要预热的链键。
-export async function warmPlatformsForUser(userId: string): Promise<void> {
-  const snapshots = await db.getLatestSnapshotByUser(userId);
-  const keys = new Set<string>();
-  for (const s of snapshots) {
-    for (const b of s.balances) {
-      if (b.platform && !connectorPlatformMeta(b.platform)) keys.add(b.platform);
+// **出口是 Effect,不是 Promise**:唯一的调用方(预热)现在把自己整段拼成一个 effect 再交给边缘跑,
+// 中间转一次 Promise 就多切一次上下文。要读的快照包一层 `Effect.promise` 进来。
+export const warmPlatforms = (userId: string): Effect.Effect<void, never, PlatformService> =>
+  Effect.gen(function* () {
+    const snapshots = yield* Effect.promise(() => db.getLatestSnapshotByUser(userId));
+    const keys = new Set<string>();
+    for (const s of snapshots) {
+      for (const b of s.balances) {
+        if (b.platform && !connectorPlatformMeta(b.platform)) keys.add(b.platform);
+      }
     }
-  }
-  if (keys.size === 0) return;
-  await runOracle(
-    userId,
-    Effect.flatMap(PlatformService, (p) => p.warm([...keys])),
-  );
-}
+    if (keys.size === 0) return;
+    yield* Effect.flatMap(PlatformService, (p) => p.warm([...keys]));
+  });

@@ -18,16 +18,16 @@ import { FxService, TokenService } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
 import { isSyncableAccount } from "../../syncable";
 import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
-import { recordDefiLogosForUser } from "./defi-logos";
+import { recordDefiLogosOf } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
-import { runOracle } from "./oracle";
-import { warmPlatformsForUser } from "./platforms";
+import { runAtEdge, runOracle, withOracle } from "./oracle";
+import { warmPlatforms } from "./platforms";
 import { revalue } from "./revalue";
 import { warmHeldPrices } from "./token-enrich";
 
@@ -37,57 +37,89 @@ import { warmHeldPrices } from "./token-enrich";
 
 // 同步后预热代币缓存:取该用户最新快照的全部余额 → warm(top-N + 逐 spot/manual 行懒解析)。
 // best-effort(warmTokens 内部吞错),让下次总览能 cache-only 富化出价/logo/涨跌。cron 与手动 sync 共用。
-export async function warmTokensForUser(userId: string): Promise<void> {
-  const syncLog = getLogger(["folio", "web", "sync"]);
-  const [snapshots, accounts] = await Promise.all([
-    db.getLatestSnapshotByUser(userId),
-    db.listAccountsByUser(userId),
-  ]);
-  // manual 已退出快照(ADR 0018)→ 预热额外从 manual 的 creds 收集合成余额,否则纯 manual 用户的币暖不到实时价。
-  // 与 refreshStalePrices 经同一 userDisplayBalances 收口(三门同源)。
-  const manualBalances = await manualBalancesForWarm(userId, accounts);
-  const report = await runOracle(
+//
+// **整段是一个 effect,装配一次。** 以前这里 await 了四次 `runOracle`,即一趟预热建四套 store、
+// 跑四个互不相干的 fiber;现在四步共一份 context(`withOracle` 在出口装一次)。Effect 官方那句
+// 「`run*` 尽量放在程序的边缘」说的就是这个 —— 边界越靠外,能一路传下去的东西(中断、超时、
+// 日志上下文)越多。
+const warmTokens = (userId: string): Effect.Effect<void, Error> =>
+  withOracle(
     userId,
-    warmHeldPrices(userDisplayBalances(snapshots, manualBalances)),
+    Effect.gen(function* () {
+      const syncLog = getLogger(["folio", "web", "sync"]);
+      const [snapshots, accounts] = yield* Effect.promise(() =>
+        Promise.all([db.getLatestSnapshotByUser(userId), db.listAccountsByUser(userId)]),
+      );
+      // manual 已退出快照(ADR 0018)→ 预热额外从 manual 的 creds 收集合成余额,否则纯 manual 用户的币暖不到实时价。
+      // 与 refreshStalePrices 经同一 userDisplayBalances 收口(三门同源)。
+      const manualBalances = yield* Effect.promise(() => manualBalancesForWarm(userId, accounts));
+      const report = yield* warmHeldPrices(userDisplayBalances(snapshots, manualBalances));
+      // **暖不上价要喊一声。** 参考层已经按类型接住了上游那一档并记了一行,但那条日志在
+      // 「oracle」类目下、看起来像一次普通降级;这里再记一条同步类目的 warn —— 「这一轮的持仓价
+      // 没暖上」是同步的结果,连着几天都这样该有人发现(#375 第 3 步要的抓手)。
+      if (report.degraded) syncLog.warn("held prices partially warmed", { ...report });
+      else syncLog.debug("held prices warmed", { ...report });
+      // 平台元数据 + DeFi 协议图各自兜住(一个失败不拖垮另一个,也不拖垮下面的汇率与目录)。
+      // 两者的错误通道都是 `never`,所以这里兜的是 **defect** —— 自家 bug 或 db 抛的东西。
+      // `catchAllCause` 而不是 `catchAll`:后者只接类型化失败,接不住 defect(见 warmAllUsers 的注释)。
+      yield* warmPlatforms(userId).pipe(
+        Effect.catchAllCause((cause) =>
+          Effect.sync(() => syncLog.warn("warmPlatforms failed", { error: Cause.pretty(cause) })),
+        ),
+      );
+      // DeFi 协议 logo:URL 就在刚读到的 snapshots 的 meta 里,收集出来落缓存(供 /api/logo/defi O(1) 读)。
+      yield* recordDefiLogosOf(snapshots).pipe(
+        Effect.catchAllCause((cause) =>
+          Effect.sync(() => syncLog.warn("recordDefiLogos failed", { error: Cause.pretty(cause) })),
+        ),
+      );
+      // 汇率:`warm` 现在自己降级(上游挂了记一行、什么都不写),所以这里不再包一层 catch ——
+      // 那层 catch 连自己的 bug 一起吞,而参考层已经把「上游的锅」与「我们的锅」分开了。
+      yield* Effect.flatMap(FxService, (fx) => fx.warm());
+      // 新参考层的目录(市值前 N 名):**唯一主动让它跟上的那条路**(#216)。
+      // 写路径(mint)按设计永不刷 —— 它只要「哪个币叫 POL」,不该为此让用户等;选币下拉只在
+      // 用户打开时才刷 —— 从不开下拉的用户目录会冻住,此后新进前 1000 的币永远认不出来。
+      // 内部按一周的 TTL 门控,所以绝大多数同步在这里零请求。放这里正因为这是 best-effort 的位置。
+      const rows = yield* Effect.flatMap(TokenService, (t) => t.refreshCatalogue());
+      syncLog.debug("catalogue warmed", { rows });
+    }),
   );
-  // **暖不上价要喊一声。** 参考层已经按类型接住了上游那一档并记了一行,但那条日志在
-  // 「oracle」类目下、看起来像一次普通降级;这里再记一条同步类目的 warn —— 「这一轮的持仓价
-  // 没暖上」是同步的结果,连着几天都这样该有人发现(#375 第 3 步要的抓手)。
-  if (report.degraded) syncLog.warn("held prices partially warmed", { ...report });
-  else syncLog.debug("held prices warmed", { ...report });
-  // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。两者都按用户 ——
-  // 汇率与平台名图跟代币目录同住一张 per-user 缓存(#202b)。
-  try {
-    await warmPlatformsForUser(userId);
-  } catch (e) {
-    syncLog.warn("warmPlatforms failed", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
-  // DeFi 协议 logo:URL 就在刚读到的 snapshots 的 meta 里,收集出来落缓存(供 /api/logo/defi O(1) 读)。
-  try {
-    await recordDefiLogosForUser(userId, snapshots);
-  } catch (e) {
-    syncLog.warn("recordDefiLogos failed", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
-  // 汇率:`warm` 现在自己降级(上游挂了记一行、什么都不写),所以这里不再包一层 catch ——
-  // 那层 catch 连自己的 bug 一起吞,而参考层已经把「上游的锅」与「我们的锅」分开了。
-  await runOracle(
-    userId,
-    Effect.flatMap(FxService, (fx) => fx.warm()),
-  );
-  // 新参考层的目录(市值前 N 名):**唯一主动让它跟上的那条路**(#216)。
-  // 写路径(mint)按设计永不刷 —— 它只要「哪个币叫 POL」,不该为此让用户等;选币下拉只在
-  // 用户打开时才刷 —— 从不开下拉的用户目录会冻住,此后新进前 1000 的币永远认不出来。
-  // 内部按一周的 TTL 门控,所以绝大多数同步在这里零请求。放这里正因为这是 best-effort 的位置。
-  const rows = await runOracle(
-    userId,
-    Effect.flatMap(TokenService, (t) => t.refreshCatalogue()),
-  );
-  syncLog.debug("catalogue warmed", { rows });
-}
+
+// 手动同步(server fn / ndjson 流)的边缘出口:那条路一次就预热一个用户,请求本身即边缘,
+// 没有可拼的下一步。cron 不走这里 —— 它把 N 个用户拼进自己那一个 effect(见 `warmAllUsers`)。
+export const warmTokensForUser = (userId: string): Promise<void> => runAtEdge(warmTokens(userId));
+
+// sweep 收尾用:逐用户预热,**各自兜住**(#375 第 2 步 · 纵深防御)。预热是尽力而为(供次日总览
+// cache-only 富化),一个用户失败绝不该让后面的用户排不上队,更不该把整次 cron 拖成异常收尾。
+//
+// **为什么不是 `Effect.partition`。** 官方给的错误累积算子(`partition` / `validateAll`)内部都是
+// `Effect.either`,只累积**类型化失败**;defect(我们自己代码抛的 TypeError、db 抛的东西)照样
+// 炸穿整个 effect —— 那正是 #375 要兜的那一类。`Effect.exit` 收的是整个 `Cause`,两类都进来,
+// 才等价于原来那圈 try/catch。
+//
+// 串行(默认 concurrency)是有意的:与原来的 for-await 一致,且 cron 一次调用的子请求数有限。
+// 每条失败只记 `error`(不带 userId),与本文件其余 best-effort 一致(P6.7);「哪个用户」的
+// 可观测性交给返回的计数 + 调用方一条汇总日志。
+// `warmOne` 可注入,只为单测能让指定用户失败;生产路径用默认的 `warmTokens`。
+export const warmAllUsers = (
+  userIds: readonly string[],
+  warmOne: (userId: string) => Effect.Effect<void, Error> = warmTokens,
+): Effect.Effect<{ warmed: number; failed: number }> =>
+  Effect.gen(function* () {
+    const syncLog = getLogger(["folio", "web", "sync"]);
+    const exits = yield* Effect.forEach(userIds, (userId) => Effect.exit(warmOne(userId)));
+    let warmed = 0;
+    let failed = 0;
+    for (const exit of exits) {
+      if (Exit.isSuccess(exit)) {
+        warmed++;
+      } else {
+        failed++;
+        syncLog.warn("warmTokens failed, user skipped", { error: Cause.pretty(exit.cause) });
+      }
+    }
+    return { warmed, failed };
+  });
 
 // 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。
 // #37d 起 account.connectorId 直接即 connector 的 id。
