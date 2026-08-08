@@ -1,9 +1,4 @@
-import type {
-  CoinContract,
-  MarketCoin,
-  SearchResult,
-  SimplePriceMap,
-} from "@folio/coingecko-client";
+import type { MarketCoin, SearchResult, SimplePriceMap } from "@folio/coingecko-client";
 import type { TokenPrice, TokenPricePoint, TokenRef, UpstreamToken } from "@folio/oracle-basic";
 import { parseTokenRef, tokenRef } from "@folio/oracle-ref";
 import { SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";
@@ -84,28 +79,6 @@ export function parseSimplePrice(
     });
   }
   return out;
-}
-
-// /coins/{platform}/contract/{addr} → UpstreamToken(兜底单查)。
-export function parseContract(json: CoinContract | null): UpstreamToken | null {
-  if (!json?.id || !json.symbol) return null;
-  const md = json.market_data;
-  const unitPrice = md?.current_price?.[VS_USD];
-  return {
-    ref: cgkRef(json.id),
-    symbol: json.symbol,
-    name: json.name ?? json.symbol,
-    logo: json.image?.large ?? json.image?.small ?? json.image?.thumb ?? undefined,
-    price:
-      typeof unitPrice === "number"
-        ? {
-            unitPrice,
-            change24h: md?.price_change_percentage_24h ?? undefined,
-            marketCapRank: json.market_cap_rank ?? undefined,
-            asOf: Date.parse(json.last_updated ?? "") || Date.now(),
-          }
-        : undefined,
-  };
 }
 
 // market_chart/range 的 [msTimestamp, price] 对 → 升序观测点。

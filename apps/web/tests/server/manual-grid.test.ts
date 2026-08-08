@@ -1,7 +1,6 @@
 import { env } from "cloudflare:test";
 import { createUserTokenPriceStore } from "@folio/db";
-import { tokenTicket } from "@folio/oracle";
-import { FIAT_NAMER } from "@folio/oracle-basic";
+import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/history";
@@ -128,7 +127,7 @@ describe("loadManualAccountSeries (grid)", () => {
     await addManualActivities(USER, acc.id, [
       { token: eurCash, kind: "set", amount: 100, occurredAt: D0, price: 1.15 },
     ]);
-    // 过去两日的历史日汇率(桶全在过去 → fiatRateSeries 命中缓存、零回源)。
+    // 过去两日的历史日汇率(桶全在过去 → rateSeries 命中缓存、零回源)。
     await seedFiatDaily("EUR", [
       { dayBucket: B0, unitPrice: 1.2 },
       { dayBucket: B0 + 1, unitPrice: 1.1 },

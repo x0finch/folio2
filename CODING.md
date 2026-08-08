@@ -39,10 +39,18 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 - **快回退降嵌套(guard clause)。** 前置判定(缺凭据 / 分派选路 / 校验失败 / 找不到目标)一律 early-return 或提前抛,不把主逻辑塞进 `if (ok) { … }` 的深层嵌套。**分派型函数只做"选路 + return"**(如 sync 注入的 `fetchBalances`:`if (connector) return fetchViaConnector(…); return fetchViaBalances(…)`),各分支实现抽成独立命名函数;一个函数里与其主职责无关的前置工作,提到独立函数。
 - **Server-only deps (`cloudflare:workers`, node built-ins) belong only in code that gets stripped from the client.** A module imported client-side (e.g. one exporting a `createServerFn`) may reference `cloudflare:workers` *only inside the server-fn handler* (the compiler strips it). A **plain exported function** in that same module referencing the env can't be tree-shaken out → breaks the client build (`Rolldown failed to resolve "cloudflare:workers"`). Fix: move such functions into a separate server-only module the client never imports; the client-facing module references them only from within the stripped handler.
 
+- **`apps/web/src/lib` 分三层,判据是「客户端能不能用它」,不是「它碰不碰 env」**(#179 立的规矩,这里补上判据):
+  - `lib/*.ts` —— 客户端**真的可以** import 的纯件(格式化、纯推导、视图形状)。
+  - `lib/server/*.ts` —— `createServerFn` 本身,资源面。
+  - `lib/server/internal/*.ts` —— 只有服务端能跑的实现层:env/单例装配、领域核心、warmer、route helper,**以及任何 `import { Effect }` 的东西**。
+  判据要按「能不能」而不是「碰不碰 env」,是因为按后者判会把一批 DI 写法的纯模块留在 `lib/` 顶层 —— 它们不碰 env,却要 oracle 服务,客户端一辈子供不上。留在那儿只有打包时的摇树在拦,而摇树是优化不是保证。
+
+- **一个包只要导出 `Context.GenericTag`,它的主入口就是服务端入口** —— 不要在同一个入口再转发客户端要的契约。客户端为了拿契约 import 它,`effect` 就跟进 bundle(+75 KB gzip),而且这事只在有人第一次那么写的时候才发生,平时看不出来。`@folio/oracle-basic` 用 `./ports` 子入口分开;`@folio/oracle` 整包只有服务端碰,所以它干脆不转发 basic。
+
 ## Effect
 
 迁移进行中(ADR 0035:`sync` → `connectors` → `shared` → `clients` → `oracle` → `db`,前端明确不碰)。
-下面是 `@folio/sync` 和 `packages/clients/*` 两站踩出来的,**每条都对应一次返工**。
+下面是 `@folio/sync`、`packages/clients/*`、`@folio/oracle` 三站踩出来的,**每条都对应一次返工**。
 
 ### 依赖与替换点
 
@@ -59,6 +67,26 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
   **例外是真正的效应式依赖**(算签名头:会失败、要 IO)——那不是配置,是依赖,留着。
 - **别为了形状统一假装需要 `Scope`。** 没有闸就没有 scope,`make` 就返回纯值而不是 Effect
   (hyperliquid 就是)。`Layer.succeed(tag, make(config))` 对纯值是**立即求值** —— 那种情形用 `Layer.sync`。
+- **「一个 config 对象装七个工厂回调」就是没写完的 Layer。** oracle 那一站删掉的 `createOracleFor({
+  createTokenStore(userId), createUpstream(), …, overrides, now })` 是这个模式的极端形态:七个回调 +
+  一份手写的惰性(getter + `??=`)+ 一个只有测试传的 `now`。换成 Layer 之后惰性归 Layer memoisation,
+  而当初担心的构造成本经实测是不存在的(`packages/db/src/client.ts` 自己写着「drizzle(env.DB) 很轻」)。
+  **判据同上:生产只传一个值的字段,不该是字段** —— `namer` / `overrides` 是 adapter 的知识,
+  就该由 adapter 的 layer 给(`Namer`),不该经装配点转手。
+- **服务的方法签名里不许出现自己的依赖。** 服务对外的 `R` 恒是 `never`:实现面(`R` 里带着
+  client / HttpClient / store)在**建服务那一刻**把 context 抓住(`Effect.context` + `Effect.provide`),
+  或者干脆把已解析好的服务对象当参数传给内部函数。漏出去一次,调用方的 `R` 就长出一条
+  `Outbound`,再往上传染到每个 server fn。
+- **契约包里的 Tag 单开一个入口。** `Context.GenericTag(...)` 是**运行时值**,而契约包的主入口
+  常被客户端组件 value-import(`@folio/oracle-basic` 的 `SUPPORTED_CURRENCIES` / `valuate` /
+  `tokenTicket`)。并进主入口就等于把 `effect` 挂在前端 bundle 的可达图上(+75 KB gzip),
+  摇不摇得掉全看打包器 —— 所以 Tag 走 `@folio/oracle-basic/ports`(只有服务端会碰)。
+  同理:客户端组件别从 entry 包 value-import 常量(`TOP_TOKENS_LIMIT` 那一处已改成从 basic 取)。
+- **端口的 Tag 与 interface 同名**(`Context.GenericTag`,`@effect/platform` 的 `FileSystem` /
+  `HttpClient` 同款):契约名本身就是全仓的词表,不值得为了挂一个 `static layer` 把它们改名成 `*Api`。
+  `packages/clients/*` 那边的 `class XxxClient extends Context.Tag(...)<XxxClient, XxxClientApi>()`
+  是「一个包一个 SDK 出口」的形状,两者各自成立。**服务名单数 + 角色后缀**(`TokenReader` /
+  `FxRateResolver`),不用复数集合名(`Tokens` / `FxRates`)。
 
 ### 错误
 
@@ -68,6 +96,15 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
   上游之间的真实差别是**怎么归类**,不是**分成哪几类** —— 那部分一家一行,写在那家自己的包里。
 - **判 `_tag`,不判 `instanceof`。** 后者额外要求两个类来自同一个模块实例 —— 那是包管理器的事,
   不该是正确性的前提。
+- **`E` 里只放有人会处理的东西,其余走 defect。** 参考层的 store 端口(D1)错误通道是 `never`:
+  今天没有一个调用点 catch 它,行为是整个请求 500,做成 typed error 只会迫使每个调用点写一遍
+  `catchAll` 再扔回去。出网那一侧相反 —— 它**有人处理**(降级到本地旧值),所以 `E` 是那四类
+  `UpstreamError`。
+- **降级要按类型接,而且要留痕。** `try { … } catch { /* 降级 */ }` 有两个毛病:连自己的 bug
+  一起吞(parse 写错了抛 TypeError,和一次 429 长得一样),以及一行痕迹都不留(上游整晚限流,
+  日志里什么都没有)。改成 `catchAll`(只接 typed 的上游错误)+ 一条 `logWarning`。
+  **降级到 `Option.none()` 而不是空集合**,当「上游说它没有」与「上游挂了」的后续动作不同时:
+  platform 预热那处给空表会把「链不存在」写成否定缓存记一天。
 - **重试属于「一次完整业务操作」那一层,不属于「一个 HTTP 请求」。** 本仓的重试在 `@folio/sync`:
   它包的是「取一次余额」含超时。两层各退避 3 次就是 9 次。请求层只负责把错误分对类。
   推论:**闸(限频)必须在重试的内层** —— `Effect.retry` 重跑整个 effect,闸在里面,语义自动正确,
@@ -110,7 +147,10 @@ query 和全部请求头**写进属性,而它的默认脱敏名单(`["authorizat
 - **测试装配收成一份共用工具,别每包手抄。** 抄九遍的东西每份都会慢慢长歪 —— 本仓实测:
   有几个包漏了 provide 限频档,于是一直偷偷跑在模块级共享游标的那一档上,跨用例串味。
 - **Tag / Layer 那条路要单独有测试。** 生产只走它,而「测试全走 `make`」时它可以长期零覆盖
-  (本仓 12 个测试文件里一次都没走过)。
+  (`packages/clients/*` 的 12 个测试文件里一次都没走过)。
+  **更省事的办法是别留第二条路**:oracle 那一站的 `make*` 压根不导出,共用 harness 把假端口
+  provide 成 layer,于是每个用例走的都是生产那条 Tag → Layer 的路(见
+  `packages/oracle/entry/tests/fakes.ts`)。
 - **`@effect/vitest` 现在装不了**(2026-08):稳定版 `0.30.0` peer 是 `vitest ^3.2.0`(本仓 4.x),
   支持 vitest 4 的 `4.0.0-beta.x` 要求 `effect ^4.0.0-beta`(本仓 3.22)。硬装能跑(验过),
   但要写一条「忽略 peer 冲突」并一直挂着。**别再重新评估,除非 Effect 4 稳定了。**

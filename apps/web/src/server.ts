@@ -1,10 +1,12 @@
+import { RefIndexWarmer } from "@folio/oracle";
 import { syncAllUsers } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
+import { Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/internal/cache-headers";
 import { db } from "./lib/server/internal/db";
 import { configureLogging } from "./lib/server/internal/log";
-import { oracleWarm } from "./lib/server/internal/oracle";
+import { runOracleWarm } from "./lib/server/internal/oracle";
 import { buildSyncDeps, warmTokensForUser } from "./lib/server/internal/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
@@ -22,9 +24,14 @@ const REF_INDEX_CRON = "0 23 * * *";
 // 与用户无关,所以不枚举用户。失败会上抛到外层统一记 error —— 刷表挂了必须可见,
 // 否则新币会一直认不出来而没有任何迹象。
 async function refreshRefIndex(cron: string): Promise<void> {
-  const before = await oracleWarm.refIndexRefreshedAt();
-  cronLog.info("ref index refresh start", { cron, lastRefreshedAt: before });
-  const result = await oracleWarm.warmRefIndex(Date.now());
+  const before = await runOracleWarm(
+    Effect.flatMap(RefIndexWarmer, (w) => w.refIndexRefreshedAt()),
+  );
+  cronLog.info("ref index refresh start", {
+    cron,
+    lastRefreshedAt: Option.getOrNull(before),
+  });
+  const result = await runOracleWarm(Effect.flatMap(RefIndexWarmer, (w) => w.warmRefIndex()));
   cronLog.info("ref index refresh done", {
     cron,
     rows: result.rows,

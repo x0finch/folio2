@@ -12,8 +12,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@folio/client-core": "workspace:*",
+    "@folio/oracle-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
-    "@folio/oracle-basic": "workspace:*"
+    "effect": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",

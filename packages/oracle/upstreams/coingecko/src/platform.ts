@@ -1,9 +1,11 @@
 import type { Outbound, UpstreamError } from "@folio/client-core";
 import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client";
-import type { PlatformMeta, PlatformUpstream } from "@folio/oracle-basic";
-import { Effect } from "effect";
+import type { PlatformMeta } from "@folio/oracle-basic";
+import { PlatformUpstream } from "@folio/oracle-basic/ports";
+import { Effect, Layer } from "effect";
 import { EVM_NAMER_PREFIX, UPSTREAM_ID } from "./constants";
-import { req, runnerFor, withClient } from "./runtime";
+import { closeOver, transport } from "./layer";
+import { req, withClient } from "./runtime";
 
 // `PlatformUpstream` 的 CoinGecko 实现:一次 `/asset_platforms` 拿整张链表。
 //
@@ -31,10 +33,15 @@ export const fetchChainsEffect: Effect.Effect<
   }),
 );
 
-export function createCoinGeckoPlatformUpstream(config: CoinGeckoConfig = {}): PlatformUpstream {
-  const run = runnerFor(config);
-  return {
+const make = Effect.map(
+  closeOver,
+  (close): PlatformUpstream => ({
     id: UPSTREAM_ID,
-    fetchChains: () => run(fetchChainsEffect),
-  };
-}
+    fetchChains: () => close(fetchChainsEffect),
+  }),
+);
+
+export const coinGeckoPlatformUpstreamLayer = (
+  config: CoinGeckoConfig = {},
+): Layer.Layer<PlatformUpstream> =>
+  Layer.provide(Layer.effect(PlatformUpstream, make), transport(config));

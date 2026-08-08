@@ -1,31 +1,19 @@
-import type { Outbound, UpstreamError } from "@folio/client-core";
-import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client";
+import type { UpstreamError } from "@folio/client-core";
+import type { CoinGeckoConfig } from "@folio/coingecko-client";
 import type {
   RefIndexFetch,
   TokenPrice,
   TokenPricePoint,
   TokenRef,
-  TokenUpstream,
   UpstreamToken,
 } from "@folio/oracle-basic";
-import { Clock, Effect } from "effect";
-import {
-  EVM_NAMER_PREFIX,
-  IDS_PER_REQUEST,
-  MARKETS_PER_PAGE,
-  UPSTREAM_ID,
-  VS_USD,
-} from "./constants";
-import {
-  coinIdOf,
-  parseContract,
-  parseMarkets,
-  parsePriceSeries,
-  parseSearch,
-  parseSimplePrice,
-} from "./parse";
+import { TokenUpstream } from "@folio/oracle-basic/ports";
+import { Clock, Effect, Layer } from "effect";
+import { IDS_PER_REQUEST, MARKETS_PER_PAGE, UPSTREAM_ID, VS_USD } from "./constants";
+import { closeOver, type Needs, transport } from "./layer";
+import { coinIdOf, parseMarkets, parsePriceSeries, parseSearch, parseSimplePrice } from "./parse";
 import { toRefIndexRows } from "./ref-index";
-import { req, runnerFor, withClient } from "./runtime";
+import { req, withClient } from "./runtime";
 
 export type { CoinGeckoConfig };
 
@@ -36,62 +24,16 @@ function chunk<T>(arr: readonly T[], size: number): T[][] {
   return out;
 }
 
-type Needs = CoinGeckoClient | Outbound;
-
-// `TokenUpstream` 三面的 CoinGecko 实现,**Effect 形状**。下面的 `createCoinGeckoUpstream`
-// 把它包成端口要的 Promise 形状(边界为什么落在这一层,见 runtime.ts)。
+// `TokenUpstream` 三面的 CoinGecko 实现,**实现面**(`R` 里带着 client 与 `HttpClient`)。
+// 下面的 layer 把它收成端口形状(`R = never`,见 layer.ts 那两条)。
 //
-// 单独导出是为了测试:测这一层就不必经 `runPromise`,于是假出网、假时钟、限频档都能 provide
+// 单独导出是为了测试:测这一层不必经任何包装,假出网、假时钟、限频档都能 provide
 // (以前那些测试靠一个全局的「限频旁路」开关,那是 `@folio/shared` 留下的最后一个全局可变状态)。
 //
-// 通用层只说「我们的 chain 标识」(`evm:<chainId>` / `<slug>`);翻成 CoinGecko 的 asset_platform
-// 是本文件的活:EVM 拿数字 chainId 去查平台表(比 slug 更可靠地命中),非 EVM 直接给 slug。
+// **`fetchByContract` 连带那张平台表记忆一起删了**(#362 第 4 站):它是「全局映射表里没有的币
+// 走单查兜底」那条设计,但**一个调用方都没有** —— 端口上挂着、实现写着、还带一个模块级的
+// 可变 memo 和一段解释它为什么难写对的注释。真要这条兜底,重新加一个有调用方的版本比养着它便宜。
 export function makeUpstreamEffects() {
-  // 平台表进程内记一次:一次 sync 里可能连着单查几个合约,没必要每次重拉。
-  //
-  // **失败不进记忆** —— 记的是**已经拿到的那张表**,不是「取表这件事」。老那版记的是 promise,
-  // 于是裸 `??=` 会把被拒绝的那个也记住:Workers 的 isolate 跨请求存活,一次瞬时 429 就让本
-  // isolate 余生所有 fetchByContract 直接失败,而且是静默的(上层 SWR 把抛错当「上游没有」吞掉)。
-  // 老那版靠一句 `.catch(() => { 清槽 })` 补,这一版结构上就不可能写错:只有成功路径写这个槽。
-  //
-  // 代价说清楚:**并发的两次调用不再合并成一发**(老那版记 promise 时会)。真并发时多打一次
-  // `/asset_platforms`,而闸本来就把它们排成队。换回去要在这里存 Promise,那会把类型化的
-  // 错误通道抹平成 `unknown` —— 不划算。
-  let platforms: Map<string, string> | undefined;
-
-  const platformMap: Effect.Effect<Map<string, string>, UpstreamError, Needs> = Effect.suspend(
-    () =>
-      platforms !== undefined
-        ? Effect.succeed(platforms)
-        : withClient((client) => req(client.assetPlatforms)).pipe(
-            Effect.map((list) => {
-              const m = new Map<string, string>();
-              for (const p of list) {
-                if (!p?.id) continue;
-                m.set(p.id.toLowerCase(), p.id);
-                if (p.chain_identifier != null) m.set(String(p.chain_identifier), p.id);
-              }
-              return m;
-            }),
-            Effect.tap((m) =>
-              Effect.sync(() => {
-                platforms = m;
-              }),
-            ),
-          ),
-  );
-
-  const chainToPlatform = (
-    chain: string,
-  ): Effect.Effect<string | undefined, UpstreamError, Needs> =>
-    Effect.map(platformMap, (map) =>
-      map.get(
-        chain.startsWith(EVM_NAMER_PREFIX)
-          ? chain.slice(EVM_NAMER_PREFIX.length)
-          : chain.toLowerCase(),
-      ),
-    );
-
   return {
     // **翻页要去重 —— 同一个币会在两页里各出现一次。**
     //
@@ -222,18 +164,6 @@ export function makeUpstreamEffects() {
         );
       }),
 
-    fetchByContract: (
-      chain: string,
-      contract: string,
-    ): Effect.Effect<UpstreamToken | null, UpstreamError, Needs> =>
-      Effect.gen(function* () {
-        const platform = yield* chainToPlatform(chain);
-        if (!platform) return null; // 这条链 CoinGecko 没收录
-        return yield* withClient((client) =>
-          Effect.map(req(client.coinContract(platform, contract)), parseContract),
-        );
-      }),
-
     // 两个端点各一次:整份币目录(含各链合约地址)+ 平台表(拿 chain_identifier)。
     fetchRefIndex: (): Effect.Effect<RefIndexFetch, UpstreamError, Needs> =>
       withClient((client) =>
@@ -245,19 +175,23 @@ export function makeUpstreamEffects() {
   };
 }
 
-// 端口要的 Promise 形状。**这里只有接线,没有逻辑** —— 逻辑全在上面那个 Effect 面。
-export function createCoinGeckoUpstream(config: CoinGeckoConfig = {}): TokenUpstream {
-  const run = runnerFor(config);
+// 端口。**这里只有接线,没有逻辑** —— 逻辑全在上面那个实现面,这一层只是把每个方法的
+// `R`(client + HttpClient)在装配时关掉。
+const make = Effect.map(closeOver, (close): TokenUpstream => {
   const impl = makeUpstreamEffects();
   return {
     id: UPSTREAM_ID,
-    fetchMarkets: (opts) => run(impl.fetchMarkets(opts)),
-    searchTokens: (query) => run(impl.searchTokens(query)),
-    fetchPrices: (refs) => run(impl.fetchPrices(refs)),
-    fetchTokens: (refs) => run(impl.fetchTokens(refs)),
+    fetchMarkets: (opts) => close(impl.fetchMarkets(opts)),
+    searchTokens: (query) => close(impl.searchTokens(query)),
+    fetchPrices: (refs) => close(impl.fetchPrices(refs)),
+    fetchTokens: (refs) => close(impl.fetchTokens(refs)),
     fetchPriceSeries: (ref, fromMs, toMs, vsCurrency) =>
-      run(impl.fetchPriceSeries(ref, fromMs, toMs, vsCurrency)),
-    fetchByContract: (chain, contract) => run(impl.fetchByContract(chain, contract)),
-    fetchRefIndex: () => run(impl.fetchRefIndex()),
+      close(impl.fetchPriceSeries(ref, fromMs, toMs, vsCurrency)),
+    fetchRefIndex: () => close(impl.fetchRefIndex()),
   };
-}
+});
+
+export const coinGeckoTokenUpstreamLayer = (
+  config: CoinGeckoConfig = {},
+): Layer.Layer<TokenUpstream> =>
+  Layer.provide(Layer.effect(TokenUpstream, make), transport(config));

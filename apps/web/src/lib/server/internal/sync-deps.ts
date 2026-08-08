@@ -14,20 +14,21 @@ import {
   type ProviderNeeds,
 } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
-import type { ValuationMode } from "@folio/oracle";
+import { FxRateResolver, TokenMinter, TokenReader } from "@folio/oracle";
+import type { ValuationMode } from "@folio/oracle-basic";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
-import { revalue } from "../../revalue";
 import { isSyncableAccount } from "../../syncable";
 import { userDisplayBalances } from "../../user-balances";
 import { db } from "./db";
-import { warmDefiLogosForUser } from "./defi-logos";
+import { recordDefiLogosForUser } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
-import { oracleFor } from "./oracle";
+import { runOracle } from "./oracle";
 import { warmPlatformsForUser } from "./platforms";
+import { revalue } from "./revalue";
 import { warmHeldPrices } from "./token-enrich";
 
 // server-only 编排装配(引 cloudflare:workers)。独立于 sync.ts —— triggerSync(server fn,被客户端 import)
@@ -37,6 +38,7 @@ import { warmHeldPrices } from "./token-enrich";
 // 同步后预热代币缓存:取该用户最新快照的全部余额 → warm(top-N + 逐 spot/manual 行懒解析)。
 // best-effort(warmTokens 内部吞错),让下次总览能 cache-only 富化出价/logo/涨跌。cron 与手动 sync 共用。
 export async function warmTokensForUser(userId: string): Promise<void> {
+  const syncLog = getLogger(["folio", "web", "sync"]);
   const [snapshots, accounts] = await Promise.all([
     db.getLatestSnapshotByUser(userId),
     db.listAccountsByUser(userId),
@@ -44,43 +46,47 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   // manual 已退出快照(ADR 0018)→ 预热额外从 manual 的 creds 收集合成余额,否则纯 manual 用户的币暖不到实时价。
   // 与 refreshStalePrices 经同一 userDisplayBalances 收口(三门同源)。
   const manualBalances = await manualBalancesForWarm(userId, accounts);
-  await warmHeldPrices(oracleFor(userId).tokens, userDisplayBalances(snapshots, manualBalances));
+  const report = await runOracle(
+    userId,
+    warmHeldPrices(userDisplayBalances(snapshots, manualBalances)),
+  );
+  // **暖不上价要喊一声。** 参考层已经按类型接住了上游那一档并记了一行,但那条日志在
+  // 「oracle」类目下、看起来像一次普通降级;这里再记一条同步类目的 warn —— 「这一轮的持仓价
+  // 没暖上」是同步的结果,连着几天都这样该有人发现(#375 第 3 步要的抓手)。
+  if (report.degraded) syncLog.warn("held prices partially warmed", { ...report });
+  else syncLog.debug("held prices warmed", { ...report });
   // 平台元数据 + FX 汇率一并预热(各自失败不拖垮价格预热)。两者都按用户 ——
   // 汇率与平台名图跟代币目录同住一张 per-user 缓存(#202b)。
   try {
     await warmPlatformsForUser(userId);
   } catch (e) {
-    getLogger(["folio", "web", "sync"]).warn("warmPlatforms failed", {
+    syncLog.warn("warmPlatforms failed", {
       error: e instanceof Error ? e.message : String(e),
     });
   }
   // DeFi 协议 logo:URL 就在刚读到的 snapshots 的 meta 里,收集出来落缓存(供 /api/logo/defi O(1) 读)。
   try {
-    await warmDefiLogosForUser(userId, snapshots);
+    await recordDefiLogosForUser(userId, snapshots);
   } catch (e) {
-    getLogger(["folio", "web", "sync"]).warn("warmDefiLogos failed", {
+    syncLog.warn("recordDefiLogos failed", {
       error: e instanceof Error ? e.message : String(e),
     });
   }
-  try {
-    await oracleFor(userId).fx.warm();
-  } catch (e) {
-    getLogger(["folio", "web", "sync"]).warn("warmFx failed", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
+  // 汇率:`warm` 现在自己降级(上游挂了记一行、什么都不写),所以这里不再包一层 catch ——
+  // 那层 catch 连自己的 bug 一起吞,而参考层已经把「上游的锅」与「我们的锅」分开了。
+  await runOracle(
+    userId,
+    Effect.flatMap(FxRateResolver, (fx) => fx.warm()),
+  );
   // 新参考层的目录(市值前 N 名):**唯一主动让它跟上的那条路**(#216)。
   // 写路径(mint)按设计永不刷 —— 它只要「哪个币叫 POL」,不该为此让用户等;选币下拉只在
   // 用户打开时才刷 —— 从不开下拉的用户目录会冻住,此后新进前 1000 的币永远认不出来。
   // 内部按一周的 TTL 门控,所以绝大多数同步在这里零请求。放这里正因为这是 best-effort 的位置。
-  try {
-    const rows = await oracleFor(userId).tokens.refreshCatalogue();
-    getLogger(["folio", "web", "sync"]).debug("catalogue warmed", { rows });
-  } catch (e) {
-    getLogger(["folio", "web", "sync"]).warn("refreshCatalogue failed", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
+  const rows = await runOracle(
+    userId,
+    Effect.flatMap(TokenReader, (t) => t.refreshCatalogue()),
+  );
+  syncLog.debug("catalogue warmed", { rows });
 }
 
 // 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。
@@ -211,7 +217,10 @@ export function buildSyncDeps(): SyncDeps {
         b.tokenRef ? [{ ref: b.tokenRef, seed: seeds.of(b.tokenRef, b.symbol) }] : [],
       );
       if (refs.length === 0) return new Map();
-      return oracleFor(userId).mint.of(refs);
+      return runOracle(
+        userId,
+        Effect.flatMap(TokenMinter, (m) => m.of(refs)),
+      );
     },
     // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);
     // SECRETS_KEY 只在本层(app)见。connectorId 直接即 connector 的 id;无 manifest 视为数据错误
@@ -232,17 +241,16 @@ export function buildSyncDeps(): SyncDeps {
     // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单):据 connectorId 查 manifest →
     // 传 markToMarket 布尔。mode 按 userId 解析(记忆化);缺省 self-first(无 settings 行的用户)。
     // 价从**新参考层**取(#202):`priceOf` 收 token_id,身份由上一步的 mint 给,这里不再解析。
-    revalue: async (userId, connectorId, rows, idByRef) => {
-      // 法币持仓的 USD 值现算走 FX(ADR 0025)—— fx 与 tokens 都是这个用户的参考层能力,一并注入。
-      const oracle = oracleFor(userId);
-      return revalue(
-        oracle.tokens,
-        oracle.fx,
-        getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
-        rows,
-        idByRef,
-        await modeFor(userId),
-      );
-    },
+    revalue: async (userId, connectorId, rows, idByRef) =>
+      // 取价与法币汇率(ADR 0025)两样能力都在 `R` 通道上,一次 `runOracle` 全供上。
+      runOracle(
+        userId,
+        revalue(
+          getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
+          rows,
+          idByRef,
+          await modeFor(userId),
+        ),
+      ),
   };
 }

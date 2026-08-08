@@ -1,8 +1,10 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { Tokens } from "@folio/oracle";
+import type { TokenRecord } from "@folio/oracle-basic";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/account-view";
-import { deriveLiveAccountTotals, liveValue } from "../src/lib/live-value";
+import { deriveLiveAccountTotals, liveValue } from "../src/lib/server/internal/live-value";
+import { runWithOracle } from "./oracle-stub";
 
 const bal = (over: Partial<OverviewBalance>): OverviewBalance => {
   const symbol = over.symbol ?? "BTC";
@@ -62,9 +64,9 @@ describe("deriveLiveAccountTotals", () => {
   // 假 tokens:BTC 现价 65000、USDC 1;其余无价(undefined)。按 symbol 供源价(cache-only)。
   // 按 token_id 供价(#201):测试里 id 直接用 `tk-<SYMBOL>`。
   const priceById: Record<string, number> = { "tk-BTC": 65000, "tk-USDC": 1 };
-  const tokens = {
-    async enrich(ids: readonly string[]) {
-      return new Map(
+  const enrichStub = (ids: readonly string[]) =>
+    Effect.succeed(
+      new Map(
         ids.map((id) => [
           id,
           {
@@ -72,15 +74,15 @@ describe("deriveLiveAccountTotals", () => {
             ref: "coingecko/issued:x",
             symbol: id.replace("tk-", ""),
             name: id,
+            infoStale: false,
             price:
               priceById[id] === undefined
                 ? undefined
                 : { unitPrice: priceById[id], asOf: 0, stale: false },
-          },
+          } as TokenRecord,
         ]),
-      );
-    },
-  } as unknown as Tokens;
+      ),
+    );
 
   it("self-first:enrich-not-reprice ≡ 冻结,盯市取实时源价", async () => {
     const accounts = [account("cex"), account("wallet")];
@@ -93,7 +95,10 @@ describe("deriveLiveAccountTotals", () => {
         snap("wallet", [bal({ symbol: "BTC", amount: 0.5, usdValue: 30000, selfPrice: null })]),
       ],
     ]);
-    const totals = await deriveLiveAccountTotals(accounts, byAccount, tokens, "self-first");
+    const totals = await runWithOracle(
+      { reader: { enrich: enrichStub } },
+      deriveLiveAccountTotals(accounts, byAccount, "self-first"),
+    );
     expect(totals.get("cex")).toBe(120000);
     expect(totals.get("wallet")).toBe(32500);
     const grand = [...totals.values()].reduce((s, v) => s + v, 0);
@@ -111,7 +116,10 @@ describe("deriveLiveAccountTotals", () => {
         ]),
       ],
     ]);
-    const totals = await deriveLiveAccountTotals(accounts, byAccount, tokens, "self-first");
+    const totals = await runWithOracle(
+      { reader: { enrich: enrichStub } },
+      deriveLiveAccountTotals(accounts, byAccount, "self-first"),
+    );
     expect(totals.get("defi")).toBe(50);
   });
 });

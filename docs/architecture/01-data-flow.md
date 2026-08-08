@@ -90,7 +90,7 @@ mint 失败是 best-effort:快照照落、新列留空、下次同步补上。�
 - 逐账户隔离与重试:`packages/sync/src/orchestrator.ts` `syncAccount`
 - 凭据解密:`apps/web/src/lib/creds.ts` `openCreds`(仅此处,用完即弃)
 - provider 取数契约:`packages/connectors/basic/src/provider.ts` `BalanceProvider.fetchBalances`
-- 认币决策树:`packages/oracle/entry/src/mint.ts` `createMint`
+- 认币决策树:`packages/oracle/entry/src/services/mint.ts` `createMint`
 - 落库(封装 op):`packages/db/src/queries.ts` `writeSnapshot`(userId-scoped)
 
 ---
@@ -118,7 +118,7 @@ flowchart LR
 余额行自己带着 `token_id`,所以富化只是**按主键查表**:
 
 ```ts
-// apps/web/src/lib/overview-model.ts
+// apps/web/src/lib/server/internal/overview-model.ts
 const enriched = await tokens.enrich(idsToEnrich);   // Map<token_id, TokenRecord>
 const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
 ```
@@ -133,10 +133,10 @@ const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
 ### 代码指向
 
 - 读入口:`apps/web/src/lib/server/portfolio.ts` `getPortfolioOverview` / `listAccountHoldings`
-- 读模型(纯,可脱离 server fn 单测):`apps/web/src/lib/overview-model.ts` `buildOverview`
+- 读模型(纯,可脱离 server fn 单测):`apps/web/src/lib/server/internal/overview-model.ts` `buildOverview`
 - 聚合纯函数:`apps/web/src/lib/aggregate.ts` `buildCanonicalHoldings`(详见 [02](./02-canonical-aggregation.md))
 - 富化助手:`apps/web/src/lib/server/internal/token-enrich.ts` `enrichBalances`
-- 现推净值:`apps/web/src/lib/live-value.ts` `deriveLiveAccountTotals`(主页总价 ≡ 曲线当下点)
+- 现推净值:`apps/web/src/lib/server/internal/live-value.ts` `deriveLiveAccountTotals`(主页总价 ≡ 曲线当下点)
 - 派生:`apps/web/src/lib/allocation.ts`(饼图)· `apps/web/src/lib/day-change.ts`(头部价值差)
 - 渲染:`apps/web/src/routes/_authed/index.tsx`(总览)· `apps/web/src/components/token-holdings.tsx`
 

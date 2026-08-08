@@ -83,7 +83,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - Global provider keys (`ZERION_API_KEY`, etc.) → CF Secret/env. Per-account creds → D1 as one `creds` map (physical column `enc_credentials`), encrypted **per field by `type`**: `secret` fields AES-GCM with `SECRETS_KEY`, `public`/`semi` plaintext (P6.6.1/P6.6.2; seal/open/safeView/isComplete now in `apps/web/src/lib/creds.ts`, driven by `@folio/balances` `credentialSpecs()` + Web Crypto).
 - Read-only tracking, **no signing** → no private-key field in any `provider.inputs`; on-chain accounts store address/xpub only (`public`).
 - Decrypt (`openCreds`) only inside server functions / sync at fetch time, discard immediately, never log (P6.7 red line: log only accountId/type/code/counts).
-- **数据一律按用户隔离**,`@folio/db` 的每个 op 都收 userId(原则 #6)。**两张表除外**:`global_token_ref_index` 与 `token_daily_prices` —— 它们只装上游的公开知识,泄露面为零,所以不隔离也不是风险。判据是「表里有没有『谁的』这回事」,不是「这张表大不大 / 共用起来省不省」。参考层其余部分(代币行、ref 行、per-user 缓存)**全部** per-user,`oracleFor(userId)` 在工厂那一层就把 userId 吃掉,拿错用户在编译期就发生不了。
+- **数据一律按用户隔离**,`@folio/db` 的每个 op 都收 userId(原则 #6)。**两张表除外**:`global_token_ref_index` 与 `token_daily_prices` —— 它们只装上游的公开知识,泄露面为零,所以不隔离也不是风险。判据是「表里有没有『谁的』这回事」,不是「这张表大不大 / 共用起来省不省」。参考层其余部分(代币行、ref 行、per-user 缓存)**全部** per-user,userId 在装配那一层就被吃掉(`runOracle(userId, …)` 按 userId 现建 per-user 的 store layer),服务的方法签名里一个 user 参数都没有 —— 拿错用户在编译期就发生不了。
 - better-auth CF gotchas (apply in P2.1): native `node:crypto` scrypt hash override; single module-level auth instance; `ctx.waitUntil` for background tasks; secondaryStorage TTL ≥ 60s; disable cookieCache; no auth calls at module load.
 
 ---

@@ -1,7 +1,9 @@
 import type { SnapshotWithBalances } from "@folio/db";
+import { FxRateResolver } from "@folio/oracle";
 import { fiatCodeOf, type TokenRecord } from "@folio/oracle-basic";
-import type { CredsToken } from "./manual-activity";
-import { MANUAL_CONNECTOR_ID } from "./manual-connector";
+import { Effect, Option } from "effect";
+import type { CredsToken } from "../../manual-activity";
+import { MANUAL_CONNECTOR_ID } from "../../manual-connector";
 
 // 每条 manual 持仓的**展示单价**(USD/单位),与 `tokens` 按序对齐,喂给 `buildManualSnapshot`。
 // 缝③ 纯逻辑(无 server/db import → 可单测):server 只负责喂 enrich 结果 + fx 的 resolve + 法币身份映射。
@@ -18,31 +20,32 @@ import { MANUAL_CONNECTOR_ID } from "./manual-connector";
 // #270 的法币分支从不触发,展示价一路回退自填价。法币身份得单独按 `fiat` 命名者取(见 `manualFiatRefs`),
 // 经 `fiatRefs`(tokenId → `fiat/issued:<CODE>`)注入进来。
 //
-// `fxResolve` 由编排层注入(`oracleFor(userId).fx.resolve`),纯逻辑不 new 门面。唯一法币 code 各解
-// 一次(`resolve` 是 cache-only、便宜,去重只为省重复 await)。
-export async function manualUnitPrices(
+// 汇率能力在 `R` 通道上(`FxRateResolver`),不再由调用方传一个 `fxResolve` 回调进来。
+// **出现过的法币 code 先各解一次**,再逐项查表 —— 迁移前那版是「往 Map 里存 Promise」去重,
+// 换成先解一遍之后连去重的机制都不需要了(`resolve` 是 cache-only、便宜)。
+export const manualUnitPrices = (
   tokens: readonly CredsToken[],
   enriched: ReadonlyMap<string, TokenRecord>,
-  fxResolve: (code: string) => Promise<number | undefined>,
   fiatRefs: ReadonlyMap<string, string>,
-): Promise<(number | undefined)[]> {
-  const fxByCode = new Map<string, Promise<number | undefined>>();
-  return Promise.all(
-    tokens.map((t) => {
+): Effect.Effect<(number | undefined)[], never, FxRateResolver> =>
+  Effect.gen(function* () {
+    const fx = yield* FxRateResolver;
+    const codeOf = (t: CredsToken): string | undefined => {
       const fiatRef = fiatRefs.get(t.id);
-      const fiatCode = fiatRef ? fiatCodeOf(fiatRef) : undefined;
-      if (fiatCode) {
-        let p = fxByCode.get(fiatCode);
-        if (!p) {
-          p = fxResolve(fiatCode);
-          fxByCode.set(fiatCode, p);
-        }
-        return p;
-      }
-      return Promise.resolve(enriched.get(t.id)?.price?.unitPrice);
-    }),
-  );
-}
+      return fiatRef ? fiatCodeOf(fiatRef) : undefined;
+    };
+
+    const rates = new Map<string, number>();
+    for (const code of new Set(tokens.flatMap((t) => (codeOf(t) ? [codeOf(t) as string] : [])))) {
+      const rate = yield* fx.resolve(code);
+      if (Option.isSome(rate)) rates.set(code, rate.value);
+    }
+
+    return tokens.map((t) => {
+      const code = codeOf(t);
+      return code ? rates.get(code) : enriched.get(t.id)?.price?.unitPrice;
+    });
+  });
 
 // 纯逻辑(缝③,无 server/db import → 可单测)。manual 账户的 creds.tokens(物化投影,= provider 输出)
 // → 一份合成 `SnapshotWithBalances`(ADR 0018 做法 1)。manual 不写快照,其「当下」持仓/净值读时现造后

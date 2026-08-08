@@ -1,4 +1,4 @@
-import { tokenTicket } from "@folio/oracle";
+import { tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { NAMER } from "../../src/lib/server/internal/oracle";
 

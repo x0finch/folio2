@@ -1,6 +1,7 @@
 import type { TokenPriceStore, TokenPriceWrite, TokenRecordPrice } from "@folio/oracle-basic";
 import { formatTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray } from "drizzle-orm";
+import type { AsPromise } from "./async-port";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
 import { tokenDailyPrices, tokenRefs, tokens } from "./schema";
@@ -25,7 +26,7 @@ export interface UserTokenPriceStoreOpts {
 export function createUserTokenPriceStore(
   env: DbEnv,
   opts: UserTokenPriceStoreOpts,
-): TokenPriceStore {
+): AsPromise<TokenPriceStore> {
   const db = getDb(env);
   const { userId, namer } = opts;
   const now = opts.now ?? (() => Date.now());

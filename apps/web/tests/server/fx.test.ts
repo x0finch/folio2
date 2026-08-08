@@ -8,15 +8,22 @@ import { displayRate } from "../../src/lib/server/internal/fx";
 // 上游一律打桩:既记账(断言看的是「出了几次网」)又能按用例换返回值。
 
 const USER = "user-fx";
+const OTHER = "user-fx-other";
 
-async function resetUser(): Promise<void> {
-  await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run(); // cascade → user_cache
+async function insertUser(id: string): Promise<void> {
   const now = Date.now();
   await env.DB.prepare(
     "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
   )
-    .bind(USER, USER, `${USER}@example.com`, 0, now, now)
+    .bind(id, id, `${id}@example.com`, 0, now, now)
     .run();
+}
+
+async function resetUser(): Promise<void> {
+  for (const id of [USER, OTHER]) {
+    await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(id).run(); // cascade → user_cache
+  }
+  await insertUser(USER);
 }
 
 // 上游那个端点以 BTC 为基准:value = 1 BTC 值多少该币种。
@@ -84,12 +91,19 @@ describe("冷缓存 —— 「第一次切币种」那一档", () => {
     expect(Number(row?.v)).toBeCloseTo(100000 / 92000, 6);
   });
 
-  it("按用户隔离:另一个用户问同一个币种,拿不到别人预热的那份", async () => {
+  // **隔离的证据是「它得自己出一趟网」**,不是「它拿不到」。
+  //
+  // 这条用例原来是拿一个**不存在的 user** 去问的:写缓存撞外键 → D1 抛 → `displayRate` 那个
+  // 包住一切的 `try/catch` 吞掉 → `undefined`。也就是说它断言的其实是「D1 报错会被吞」。
+  // #362 第 4 站把那个 catch-all 拆了(store 的失败是 defect,一路冒到 `runPromise` —— 与迁移前
+  // 「没人 catch 它」的实际行为一致,只是不再被这一层顺手吞掉),于是这条用例得回到它本来的意思:
+  // 两个**都存在**的用户各有一份缓存,后来的那个蹭不到前一个的。
+  it("按用户隔离:另一个用户问同一个币种,得自己出一趟网", async () => {
+    await insertUser(OTHER);
     await displayRate(USER, "EUR");
     outbound = [];
 
-    // 没有 user 行 → 写缓存会撞外键 → 整段异常 → 吞掉给 undefined(而不是把页面弄崩)。
-    expect(await displayRate("user-fx-other", "EUR")).toBeUndefined();
+    expect(await displayRate(OTHER, "EUR")).toBeCloseTo(100000 / 92000, 6);
     expect(outbound).toHaveLength(1); // 它自己出网了一趟,没蹭到别人的缓存
   });
 });

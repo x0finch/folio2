@@ -1,8 +1,10 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import type { Platforms, TokenRecord, Tokens } from "@folio/oracle";
+import type { TokenRecord } from "@folio/oracle-basic";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/account-view";
-import { buildOverview } from "../src/lib/overview-model";
+import { buildOverview } from "../src/lib/server/internal/overview-model";
+import { type OracleStub, runWithOracle } from "./oracle-stub";
 
 // 纯 buildOverview 可脱离 server fn 测(依赖注入)—— 这是 #3 抽读模型的收益。
 // 用假 tokens/platforms + 最小 fixture,覆盖:eligible 过滤 → enrich 附回 → 聚合 → 平台装饰 → 总额。
@@ -38,24 +40,26 @@ const record = (id: string): TokenRecord => ({
   logo: "u.png",
   infoStale: false,
 });
-const tokens = {
-  async enrich(ids: readonly string[]) {
-    return new Map(ids.map((id) => [id, record(id)]));
-  },
-} as unknown as Tokens;
+const reader = {
+  enrich: (ids: readonly string[]) => Effect.succeed(new Map(ids.map((id) => [id, record(id)]))),
+};
 
 // 假 platforms:每个 key 回 "NAME:<key>";manual 无上游图(真实 resolve 对未收录/未 warm 的 key
 // 不带 logo)。验证读路径装饰覆写占位名,并把有图的平台 logo 改写成代理 URL、无图的置 undefined。
 const platforms = {
-  async resolve(keys: string[]) {
-    return new Map(
-      keys.map((k) => [
-        k,
-        { key: k, name: `NAME:${k}`, logo: k === "manual" ? undefined : `https://cgk/${k}.png` },
-      ]),
-    );
-  },
-} as unknown as Platforms;
+  resolve: (keys: readonly string[]) =>
+    Effect.succeed(
+      new Map(
+        keys.map((k) => [
+          k,
+          { key: k, name: `NAME:${k}`, logo: k === "manual" ? undefined : `https://cgk/${k}.png` },
+        ]),
+      ),
+    ),
+};
+
+// 这一组的默认桩:富化按 token_id 查表、平台按 key 造名。用例只在需要时换掉其中一个。
+const stub: OracleStub = { reader, platforms };
 
 describe("buildOverview", () => {
   it("跨账户聚合成一个 Holding + 平台装饰 + 总额", async () => {
@@ -85,7 +89,7 @@ describe("buildOverview", () => {
       ],
     ]);
 
-    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, {}));
 
     // 两笔 USDC(不同账户/平台)并成一条 Holding。
     expect(view.holdings).toHaveLength(1);
@@ -118,28 +122,38 @@ describe("buildOverview", () => {
     const accounts = [account("a1", "W")];
     const one = (over: Partial<OverviewBalance>) =>
       new Map([["a1", snap("a1", 100, [bal({ amount: 100, usdValue: 100, ...over })])]]);
-    const withPrice = (stale: boolean) =>
-      ({
-        async enrich(ids: readonly string[]) {
-          return new Map(
+    const withPrice = (stale: boolean) => ({
+      enrich: (ids: readonly string[]) =>
+        Effect.succeed(
+          new Map(
             ids.map((id) => [id, { ...record(id), price: { unitPrice: 1, asOf: 0, stale } }]),
-          );
-        },
-      }) as unknown as Tokens;
+          ),
+        ),
+    });
 
     expect(
-      (await buildOverview(accounts, one({}), { tokens: withPrice(false), platforms })).pricesStale,
+      (
+        await runWithOracle(
+          { ...stub, reader: withPrice(false) },
+          buildOverview(accounts, one({}), {}),
+        )
+      ).pricesStale,
     ).toBe(false);
     expect(
-      (await buildOverview(accounts, one({}), { tokens: withPrice(true), platforms })).pricesStale,
+      (
+        await runWithOracle(
+          { ...stub, reader: withPrice(true) },
+          buildOverview(accounts, one({}), {}),
+        )
+      ).pricesStale,
     ).toBe(true);
     // 没有身份的行不算 stale —— 刷了也没用(它压根没有可查的键)。
     expect(
       (
-        await buildOverview(accounts, one({ tokenId: null }), {
-          tokens: withPrice(false),
-          platforms,
-        })
+        await runWithOracle(
+          { ...stub, reader: withPrice(false) },
+          buildOverview(accounts, one({ tokenId: null }), {}),
+        )
       ).pricesStale,
     ).toBe(false);
   });
@@ -150,21 +164,22 @@ describe("buildOverview", () => {
     const accounts = [account("a1", "W")];
     // 无价的 fake tokens(record 不带 price → stale=true 的口径)。
     const noPrice = {
-      async enrich(ids: readonly string[]) {
-        return new Map(ids.map((id) => [id, record(id)]));
-      },
-    } as unknown as Tokens;
+      enrich: (ids: readonly string[]) =>
+        Effect.succeed(new Map(ids.map((id) => [id, record(id)]))),
+    };
 
     // 真持仓(值够)无价 → 该刷;dust(值几乎 0)无价 → 不该刷。
     const real = new Map([["a1", snap("a1", 100, [bal({ usdValue: 100 })])]]);
     const dust = new Map([["a1", snap("a1", 0, [bal({ usdValue: 0.0001 })])]]);
 
-    expect((await buildOverview(accounts, real, { tokens: noPrice, platforms })).pricesStale).toBe(
-      true,
-    );
-    expect((await buildOverview(accounts, dust, { tokens: noPrice, platforms })).pricesStale).toBe(
-      false,
-    );
+    expect(
+      (await runWithOracle({ ...stub, reader: noPrice }, buildOverview(accounts, real, {})))
+        .pricesStale,
+    ).toBe(true);
+    expect(
+      (await runWithOracle({ ...stub, reader: noPrice }, buildOverview(accounts, dust, {})))
+        .pricesStale,
+    ).toBe(false);
   });
 
   it("场馆键(= connectorId)走 connectorMeta 装饰,不进 platforms.resolve(#52)", async () => {
@@ -177,21 +192,21 @@ describe("buildOverview", () => {
     // 记录 platforms.resolve 实际被问了哪些 key —— 断言场馆键被排除(无多余 CoinGecko 往返)。
     const asked: string[] = [];
     const recordingPlatforms = {
-      async resolve(keys: string[]) {
-        asked.push(...keys);
-        return new Map(
-          keys.map((k) => [k, { key: k, name: `NAME:${k}`, logo: `https://cgk/${k}.png` }]),
-        );
-      },
-    } as unknown as Platforms;
+      resolve: (keys: readonly string[]) =>
+        Effect.sync(() => {
+          asked.push(...keys);
+          return new Map(
+            keys.map((k) => [k, { key: k, name: `NAME:${k}`, logo: `https://cgk/${k}.png` }]),
+          );
+        }),
+    };
     const connectorMeta = (key: string) =>
       key === "binance" ? { name: "Binance", logo: "https://cgk/markets/binance.jpg" } : null;
 
-    const view = await buildOverview(accounts, byAccount, {
-      tokens,
-      platforms: recordingPlatforms,
-      connectorMeta,
-    });
+    const view = await runWithOracle(
+      { ...stub, platforms: recordingPlatforms },
+      buildOverview(accounts, byAccount, { connectorMeta }),
+    );
 
     const src = view.holdings[0].sources[0];
     expect(src.platform.id).toBe("binance");
@@ -223,7 +238,7 @@ describe("buildOverview", () => {
       ],
     ]);
 
-    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, {}));
 
     expect(view.holdings).toHaveLength(1); // 只 spot USDC
     expect(view.holdings[0].totalValue).toBe(100);
@@ -242,7 +257,7 @@ describe("buildOverview", () => {
     const byAccount = new Map([
       ["h", snap("h", 1000, [bal({ kind: "perp", amount: 1000, usdValue: 1000, metaJson: meta })])],
     ]);
-    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, {}));
     // 代币聚合只认现货 → 权益不在 Holdings、小计里也没有它(避免与 Perps tab 双算)。
     expect(view.holdings).toHaveLength(0);
     expect(view.holdingsSubtotal).toBe(0);
@@ -259,7 +274,7 @@ describe("buildOverview", () => {
         snap("h", 0, [bal({ kind: "perp", amount: 1000, usdValue: 1000, metaJson: "not json" })]),
       ],
     ]);
-    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, {}));
     expect(view.holdings).toHaveLength(0);
     expect(view.holdingsSubtotal).toBe(0);
   });
@@ -279,7 +294,7 @@ describe("buildOverview —— 法币身份 isFiat", () => {
       ],
     ]);
     const fiatRefs = new Map([["tk-usd", "fiat/issued:USD"]]);
-    const view = await buildOverview(accounts, byAccount, { tokens, platforms, fiatRefs });
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { fiatRefs }));
     expect(view.holdings).toHaveLength(1);
     expect(view.holdings[0].token.isFiat).toBe(true);
     expect(view.holdings[0].totalValue).toBe(100); // 计入净值/聚合
@@ -294,7 +309,7 @@ describe("buildOverview —— 法币身份 isFiat", () => {
       ],
     ]);
     const fiatRefs = new Map([["tk-eur", "fiat/issued:EUR"]]);
-    const view = await buildOverview(accounts, byAccount, { tokens, platforms, fiatRefs });
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { fiatRefs }));
     expect(view.holdings[0].token.isFiat).toBe(true);
   });
 
@@ -305,7 +320,7 @@ describe("buildOverview —— 法币身份 isFiat", () => {
     ]);
     // symbol 恰好是 USD,但 fiatRefs 给的是上游命名的普通代币 ref → fiatCodeOf 判非法币。
     const fiatRefs = new Map([["tk-x", "coingecko/issued:some-usd-token"]]);
-    const view = await buildOverview(accounts, byAccount, { tokens, platforms, fiatRefs });
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { fiatRefs }));
     expect(view.holdings[0].token.isFiat).toBe(false);
   });
 
@@ -314,7 +329,7 @@ describe("buildOverview —— 法币身份 isFiat", () => {
     const byAccount = new Map([
       ["a1", snap("a1", 100, [bal({ tokenId: "tk-usd", amount: 100, usdValue: 100 })])],
     ]);
-    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, {}));
     expect(view.holdings[0].token.isFiat).toBe(false);
   });
 });
@@ -325,17 +340,18 @@ describe("buildOverview —— defi 行 change24h 富化", () => {
   it("defi 行经 enrich 附回 change24h 进 sections", async () => {
     // 只有 tk-staked 有价 → 只有那一行拿到 change24h;另一行(LP 份额)没有身份,不该被瞎猜。
     const defiTokens = {
-      async enrich(ids: readonly string[]) {
-        return new Map(
-          ids
-            .filter((id) => id === "tk-staked")
-            .map((id) => [
-              id,
-              { ...record(id), price: { unitPrice: 1, change24h: 2.5, asOf: 0, stale: false } },
-            ]),
-        );
-      },
-    } as unknown as Tokens;
+      enrich: (ids: readonly string[]) =>
+        Effect.succeed(
+          new Map(
+            ids
+              .filter((id) => id === "tk-staked")
+              .map((id) => [
+                id,
+                { ...record(id), price: { unitPrice: 1, change24h: 2.5, asOf: 0, stale: false } },
+              ]),
+          ),
+        ),
+    };
     const accounts = [account("w", "Wallet")];
     const byAccount = new Map([
       [
@@ -360,7 +376,10 @@ describe("buildOverview —— defi 行 change24h 富化", () => {
         ]),
       ],
     ]);
-    const view = await buildOverview(accounts, byAccount, { tokens: defiTokens, platforms });
+    const view = await runWithOracle(
+      { ...stub, reader: defiTokens },
+      buildOverview(accounts, byAccount, {}),
+    );
     // 按协议组定位(#243:展示 symbol 现从 Token 取,不再是余额那份 stETH/LP)。
     const defi = view.sections[0].defi;
     expect(defi.find((g) => g.protocol === "Lido")?.rows[0].change24h).toBe(2.5);
@@ -392,12 +411,15 @@ describe("buildOverview —— sections.account.platform", () => {
     ]);
     const connectorMeta = (key: string) =>
       key === "hyperliquid" ? { key, name: "Hyperliquid", logo: "https://x/hl.png" } : null;
-    const withMeta = await buildOverview(accounts, byAccount, { tokens, platforms, connectorMeta });
+    const withMeta = await runWithOracle(
+      stub,
+      buildOverview(accounts, byAccount, { connectorMeta }),
+    );
     expect(withMeta.sections[0].account.platform).toEqual({
       name: "Hyperliquid",
       logo: `/api/logo/platform/${encodeURIComponent("hyperliquid")}`,
     });
-    const noMeta = await buildOverview(accounts, byAccount, { tokens, platforms });
+    const noMeta = await runWithOracle(stub, buildOverview(accounts, byAccount, {}));
     expect(noMeta.sections[0].account.platform).toBeUndefined();
   });
 });
@@ -415,7 +437,7 @@ describe("buildOverview —— equity-only perp 账户不被过滤", () => {
         ]),
       ],
     ]);
-    const view = await buildOverview(accounts, byAccount, { tokens, platforms });
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, {}));
     expect(view.sections).toHaveLength(1);
     expect(view.sections[0].perp?.equity?.accountValue).toBe(1000);
     expect(view.sections[0].perp?.positions).toEqual([]);

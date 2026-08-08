@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
 import { z } from "zod";
 import {
   accountIdsInView,
@@ -7,13 +8,13 @@ import {
   toTabPin,
 } from "../accounts-in-view";
 import { buildPortfolioHistory } from "../history";
-import { deriveLiveAccountTotals } from "../live-value";
 import { isManual } from "../manual-connector";
-import { buildOverview } from "../overview-model";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { db } from "./internal/db";
+import { deriveLiveAccountTotals } from "./internal/live-value";
 import { injectManualSnapshots, loadManualHistoryRows, manualFiatRefs } from "./internal/manual";
-import { oracleFor } from "./internal/oracle";
+import { runOracle } from "./internal/oracle";
+import { buildOverview } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
 
@@ -79,13 +80,14 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
     // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
     //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
     const fiatRefs = await manualFiatRefs(context.userId, accounts);
-    return buildOverview(accounts, byAccount, {
-      tokens: oracleFor(context.userId).tokens,
-      platforms: oracleFor(context.userId).platforms,
-      connectorMeta: connectorPlatformMeta,
-      mode: settings.valuationMode,
-      fiatRefs,
-    });
+    return runOracle(
+      context.userId,
+      buildOverview(accounts, byAccount, {
+        connectorMeta: connectorPlatformMeta,
+        mode: settings.valuationMode,
+        fiatRefs,
+      }),
+    );
   });
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个活跃账户 + 其最新快照的富化持仓。
@@ -101,23 +103,27 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     // manual 不写快照(ADR 0018):注入合成当下项,manual 账户行的市值/持仓由 creds 现造。
     await injectManualSnapshots(context.userId, accounts, byAccount);
-    const tokens = oracleFor(context.userId).tokens;
-    const rows = await Promise.all(
-      accounts.map(async (account) => {
-        const latest = byAccount.get(account.id);
-        const enriched = await enrichBalances(tokens, latest?.balances ?? []);
-        return {
-          account: { id: account.id, label: account.label },
-          totalUsd: latest?.snapshot.totalUsd ?? 0,
-          takenAt: latest?.snapshot.takenAt ?? null,
-          // note 重设计(两级):① balance 级单个 note 随各 balance 透传(db 已把 snapshot_balances.note
-          // safeParse 成 Note),现货行副行渲染 <NoteBadge>;② account 级 note(Note[],整钱包,BTC 未确认/
-          // 收款/派生分布)是每账户一份,db 已 safeParse 成 Note[],这里随 row.note 带出 → 持仓区手风琴。
-          note: latest?.note,
-          balances: enriched.rows,
-          pricesStale: enriched.pricesStale,
-        };
-      }),
+    // 一次装配、逐账户富化。**逐账户串行**(以前是 `Promise.all` 的隐式全并发)——
+    // 每个账户一次批量读,账户数是个位数,而 D1 并不因为同时发十条而更快。
+    const rows = await runOracle(
+      context.userId,
+      Effect.forEach(accounts, (account) =>
+        Effect.gen(function* () {
+          const latest = byAccount.get(account.id);
+          const enriched = yield* enrichBalances(latest?.balances ?? []);
+          return {
+            account: { id: account.id, label: account.label },
+            totalUsd: latest?.snapshot.totalUsd ?? 0,
+            takenAt: latest?.snapshot.takenAt ?? null,
+            // note 重设计(两级):① balance 级单个 note 随各 balance 透传(db 已把 snapshot_balances.note
+            // safeParse 成 Note),现货行副行渲染 <NoteBadge>;② account 级 note(Note[],整钱包,BTC 未确认/
+            // 收款/派生分布)是每账户一份,db 已 safeParse 成 Note[],这里随 row.note 带出 → 持仓区手风琴。
+            note: latest?.note,
+            balances: enriched.rows,
+            pricesStale: enriched.pricesStale,
+          };
+        }),
+      ),
     );
     return { rows, pricesStale: rows.some((r) => r.pricesStale) };
   });
@@ -168,11 +174,9 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     // manual 不写快照(ADR 0018):当下点的 manual 净值由 creds 现造注入(过去点仍来自真实快照 totals)。
     await injectManualSnapshots(context.userId, accounts, byAccount);
-    const liveTotals = await deriveLiveAccountTotals(
-      accounts,
-      byAccount,
-      oracleFor(context.userId).tokens,
-      settings.valuationMode,
+    const liveTotals = await runOracle(
+      context.userId,
+      deriveLiveAccountTotals(accounts, byAccount, settings.valuationMode),
     );
     let grand = 0;
     for (const v of liveTotals.values()) grand += v;

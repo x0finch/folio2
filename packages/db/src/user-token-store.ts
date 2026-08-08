@@ -9,6 +9,7 @@ import type {
 } from "@folio/oracle-basic";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
+import type { AsPromise } from "./async-port";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
 import { snapshotBalances, tokenRefs, tokens } from "./schema";
@@ -46,7 +47,7 @@ const partsOf = (ref: string): { namer: string; localName: string } | undefined 
   return parsed.kind === "unknown" ? undefined : parsed;
 };
 
-export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): TokenStore {
+export function createUserTokenStore(env: DbEnv, opts: UserTokenStoreOpts): AsPromise<TokenStore> {
   const db = getDb(env);
   const { userId, namer } = opts;
   const now = opts.now ?? (() => Date.now());

@@ -5,9 +5,10 @@ import type {
   ManualHolding,
   SnapshotWithBalances,
 } from "@folio/db";
-import { dayBucketOf, tokenTicket } from "@folio/oracle";
-import { FIAT_NAMER, fiatCodeOf } from "@folio/oracle-basic";
+import { FxHistory, TokenMinter, TokenReader } from "@folio/oracle";
+import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { Effect } from "effect";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
 import { deriveAmount, fallbackUnitPrice, projectToken } from "../../manual-activity";
@@ -18,10 +19,10 @@ import {
   type HistoricalPriceAt,
   type HistoryToken,
 } from "../../manual-history";
-import { buildManualSnapshot, manualUnitPrices } from "../../manual-snapshot";
 import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
-import { NAMER, oracleFor } from "./oracle";
+import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";
+import { NAMER, runOracle } from "./oracle";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;
@@ -66,7 +67,10 @@ async function mintHolding(
     ref: picked.ticket ? tokenTicket.decode(picked.ticket, [NAMER, FIAT_NAMER]) : undefined,
   });
   const symbol = picked.symbol.trim().toUpperCase();
-  const ids = await oracleFor(userId).mint.of([{ ref, seed: { symbol } }]);
+  const ids = await runOracle(
+    userId,
+    Effect.flatMap(TokenMinter, (m) => m.of([{ ref, seed: { symbol } }])),
+  );
   const id = ids.get(ref);
   if (!id) throw new Error(`mint produced no token for ${ref}`);
   return id;
@@ -140,27 +144,33 @@ export async function injectManualSnapshots(
   if (list.length === 0) return;
 
   // 全部账户**一次批量**取现价(cache-only,零网络,与其余展示富化同门 —— #202 拔掉旧
-  // `oracle.tokens.enrich(AssetRef[])`,改按 token_id 走新参考层 enrich)。手记已并入 tokens(#203),
+  // 旧参考层的 `tokens.enrich(AssetRef[])`,改按 token_id 走新参考层 enrich)。手记已并入 tokens(#203),
   // 每条手记持仓就是这个用户 `tokens` 里的一行,带自己的 token_id。
   //
   // **缓存冷 → 回退用户自填价**:enrich 是 cache-only,新 mint 的行「有身份、无价」→ prices 为
   // undefined → buildManualSnapshot 回退 `unitPrice`;价在同步的 warmHeldPrices / 前端 refreshStalePrices
   // 里补上,补上后展示即市价。**用户自填价不被市价盖**(#223 / #227):没选币的币其 token 行 `ref`
   // 为空、从不链 CGK,永远回不出市价,自填价恒赢。
-  const oracle = oracleFor(userId);
-  const enriched = await oracle.tokens.enrich(
-    list.flatMap(({ tokens }) => tokens.map((t) => t.id)),
-  );
   // 法币持仓的展示价走 FX(ADR 0025 / #270 / #272):现算不冻价,取不到汇率照旧回退自填价。
   // fx 已在 sync-deps warm 过;这里是展示读,按需 resolve(cache-only,零网络)即可。
   // **法币身份按 tokenId 从 `fiatRefs` 判**,不靠 `CredsToken.ref`(那是 CGK 档、法币恒 null,#272)——
   // 一次批量取(manualFiatRefs 内部按账户并发),不 N+1。
-  const fxResolve = (code: string) => oracle.fx.resolve(code);
   const fiatRefs = await manualFiatRefs(userId, accounts);
-  for (const { id, tokens } of list) {
-    const prices = await manualUnitPrices(tokens, enriched, fxResolve, fiatRefs);
-    byAccount.set(id, buildManualSnapshot(id, tokens, prices, takenAt));
-  }
+  const snapshots = await runOracle(
+    userId,
+    Effect.gen(function* () {
+      const enriched = yield* Effect.flatMap(TokenReader, (t) =>
+        t.enrich(list.flatMap(({ tokens }) => tokens.map((tk) => tk.id))),
+      );
+      return yield* Effect.forEach(list, ({ id, tokens }) =>
+        Effect.map(manualUnitPrices(tokens, enriched, fiatRefs), (prices) => ({
+          id,
+          snapshot: buildManualSnapshot(id, tokens, prices, takenAt),
+        })),
+      );
+    }),
+  );
+  for (const { id, snapshot } of snapshots) byAccount.set(id, snapshot);
 }
 
 // 法币身份的 ref 供给(#271):tokenId → 该 token 在 fiat 命名者(`fiat/issued:<CODE>`)下的 ref。
@@ -339,22 +349,31 @@ async function buildHistoricalPriceAt(
   now: number,
 ): Promise<HistoricalPriceAt> {
   const byIdentifier = new Map<string, Map<number, number>>();
-  const oracle = oracleFor(userId);
-  await Promise.all(
-    tokens.map(async (tk) => {
-      // 上游没认出来的币不问历史价(问了也没有)。
-      if (!tk.recognized || tk.activities.length === 0 || byIdentifier.has(tk.id)) return;
-      const from = Math.min(...tk.activities.map((a) => a.occurredAt));
-      const daily = new Map<number, number>();
-      // 法币:历史价 = **当天汇率**(ADR 0026),从 fx-history 取而不是币价历史(法币无币价)。
-      // 其余:按 token_id 取币价历史(#203,priceSeries 收内部 id)。两条都灌进同一个 priceAt 闭包,
-      // 纯层 tokenPriceAt 的第 ① 档对法币照常生效(它只看 recognized,不认识 fiat)。
-      const series = tk.fiatCode
-        ? await oracle.fx.fiatRateSeries(tk.fiatCode, from, now)
-        : await oracle.tokens.priceSeries(tk.id, from, now);
-      for (const pt of series) daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
-      byIdentifier.set(tk.id, daily);
-    }),
+  await runOracle(
+    userId,
+    Effect.forEach(
+      tokens,
+      (tk) =>
+        Effect.gen(function* () {
+          // 上游没认出来的币不问历史价(问了也没有)。
+          if (!tk.recognized || tk.activities.length === 0 || byIdentifier.has(tk.id)) return;
+          const from = Math.min(...tk.activities.map((a) => a.occurredAt));
+          const daily = new Map<number, number>();
+          // 法币:历史价 = **当天汇率**(ADR 0026),从 fx-history 取而不是币价历史(法币无币价)。
+          // 其余:按 token_id 取币价历史(#203,priceSeries 收内部 id)。两条都灌进同一个 priceAt 闭包,
+          // 纯层 tokenPriceAt 的第 ① 档对法币照常生效(它只看 recognized,不认识 fiat)。
+          const series = tk.fiatCode
+            ? yield* Effect.flatMap(FxHistory, (fx) =>
+                fx.rateSeries(tk.fiatCode as string, from, now),
+              )
+            : yield* Effect.flatMap(TokenReader, (t) => t.priceSeries(tk.id, from, now));
+          for (const pt of series) daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
+          byIdentifier.set(tk.id, daily);
+        }),
+      // 每个币一次取数,**顺序跑**(迁移前是 `Promise.all` 的隐式全并发)—— 一个 manual 账户
+      // 的币数是个位数,而它们共用同一把限频额度,并发只会把突发额度更快抽干。
+      { concurrency: 1, discard: true },
+    ),
   );
   return (tokenId, t) => byIdentifier.get(tokenId)?.get(dayBucketOf(t));
 }

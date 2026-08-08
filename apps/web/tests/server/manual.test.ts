@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { FIAT_NAMER, tokenTicket } from "@folio/oracle";
+import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";

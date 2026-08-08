@@ -1,6 +1,7 @@
 import type { GlobalTokenRefIndexStore, TokenRef, TokenRefIndexRow } from "@folio/oracle-basic";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
+import type { AsPromise } from "./async-port";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
 import { globalTokenRefIndex } from "./schema";
@@ -32,7 +33,7 @@ const STATEMENTS_PER_BATCH = 50;
 
 // 不收 `now`(另外三个 store 都收):本 store 没有一处需要「现在几点」——
 // `putAll` 的时刻由调用方给(契约如此,cron 记的是那一轮的时刻),读侧无 TTL 门控。
-export function createGlobalTokenRefIndexStore(env: DbEnv): GlobalTokenRefIndexStore {
+export function createGlobalTokenRefIndexStore(env: DbEnv): AsPromise<GlobalTokenRefIndexStore> {
   const db = getDb(env);
 
   return {

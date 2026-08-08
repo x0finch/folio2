@@ -1,5 +1,6 @@
 import type { CacheEntry, CacheStore, CacheWrite } from "@folio/oracle-basic";
 import { and, eq, inArray } from "drizzle-orm";
+import type { AsPromise } from "./async-port";
 import { batchWrite, chunk } from "./cache-util";
 import { type DbEnv, getDb } from "./client";
 import { userCache } from "./schema";
@@ -22,7 +23,7 @@ export interface UserCacheStoreOpts {
   now?: () => number;
 }
 
-export function createUserCacheStore(env: DbEnv, opts: UserCacheStoreOpts): CacheStore {
+export function createUserCacheStore(env: DbEnv, opts: UserCacheStoreOpts): AsPromise<CacheStore> {
   const db = getDb(env);
   const { userId } = opts;
   const now = opts.now ?? (() => Date.now());
