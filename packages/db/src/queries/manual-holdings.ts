@@ -1,10 +1,15 @@
 import { formatTokenRef, type TokenRef } from "@folio/oracle-ref";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { type DbEnv, getDb } from "../connect";
+import { Effect } from "effect";
 import { manualActivity, tokenRefs, tokens } from "../schema";
+import type { Database } from "../stores/service";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 
 // 手记持仓 —— 「这个手记账户持有哪些币」,由账本折叠出来(ADR 0017;#203 起并入 tokens)。
+//
+// **这半没有自己的 Tag。** 持仓与账本是同一个领域的两面(持仓正是账本折叠出来的),按能力
+// 切成两个服务会重蹈 #392 拆掉的那种分法。所以这里只出「绑好 database + userId 之后的那几个
+// 方法」,由 `manual-activity.ts` 的 `ManualStore` 合成一个服务。
 //
 // **手记的币就是这个用户 `tokens` 里的一行**(#203):身份 / 名字 / 图 / 上游 ref 在 `tokens` +
 // `token_refs`,用户声明的单价在 `tokens.self_price`,数量由 `manual_activity` 折叠。
@@ -27,78 +32,71 @@ export interface ManualHolding {
   ref: TokenRef | null;
 }
 
-// 某手记账户的持仓定义。`namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传
-// (同 createUserTokenStore),db 层不预设任何厂商。
-// 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
-export async function listManualHoldingsByAccount(
-  env: DbEnv,
-  userId: string,
-  accountId: string,
-  namer: string,
-): Promise<ManualHolding[]> {
-  const db = getDb(env);
-  await assertAccountOwned(db, userId, accountId);
-  const rows = await db
-    .select({
-      id: tokens.id,
-      symbol: tokens.symbol,
-      localName: tokenRefs.localName,
-      since: sql<number>`min(${manualActivity.occurredAt})`,
-    })
-    .from(manualActivity)
-    .innerJoin(tokens, eq(manualActivity.tokenId, tokens.id))
-    .leftJoin(
-      tokenRefs,
-      and(
-        eq(tokenRefs.tokenId, tokens.id),
-        eq(tokenRefs.userId, userId),
-        eq(tokenRefs.namer, namer),
-      ),
-    )
-    .where(and(eq(manualActivity.accountId, accountId), eq(tokens.userId, userId)))
-    .groupBy(tokens.id, tokens.symbol, tokens.selfPrice, tokenRefs.localName)
-    .orderBy(asc(sql`min(${manualActivity.occurredAt})`));
-  return rows.map((r) => ({
-    id: r.id,
-    symbol: r.symbol,
-    // 两列 → 整条串,拼法归文法(`token_refs` 按两列存正是为了这个,见 ADR 0022)。
-    ref: r.localName === null ? null : formatTokenRef({ namer, localName: r.localName }),
-  }));
-}
+// 持仓这半的方法(绑好 `database` 与 userId 之后)。
+export const holdingOps = (database: Database, userId: string) => ({
+  // `namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传(同 userTokenStoreLayer),db 层不预设任何厂商。
+  // 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
+  listHoldings: (accountId: string, namer: string): Effect.Effect<ManualHolding[]> =>
+    Effect.gen(function* () {
+      yield* database.query((db) => assertAccountOwned(db, userId, accountId));
+      const rows = yield* database.query((db) =>
+        db
+          .select({
+            id: tokens.id,
+            symbol: tokens.symbol,
+            localName: tokenRefs.localName,
+            since: sql<number>`min(${manualActivity.occurredAt})`,
+          })
+          .from(manualActivity)
+          .innerJoin(tokens, eq(manualActivity.tokenId, tokens.id))
+          .leftJoin(
+            tokenRefs,
+            and(
+              eq(tokenRefs.tokenId, tokens.id),
+              eq(tokenRefs.userId, userId),
+              eq(tokenRefs.namer, namer),
+            ),
+          )
+          .where(and(eq(manualActivity.accountId, accountId), eq(tokens.userId, userId)))
+          .groupBy(tokens.id, tokens.symbol, tokens.selfPrice, tokenRefs.localName)
+          .orderBy(asc(sql`min(${manualActivity.occurredAt})`)),
+      );
+      return rows.map((r) => ({
+        id: r.id,
+        symbol: r.symbol,
+        // 两列 → 整条串,拼法归文法(`token_refs` 按两列存正是为了这个,见 ADR 0022)。
+        ref: r.localName === null ? null : formatTokenRef({ namer, localName: r.localName }),
+      }));
+    }),
 
-// 用户对某个币的声明:symbol(他自己的叫法)+ 单价。**只动这两列** —— 名字 / 图 / 上游 ref
-// 归参考层,手记不覆盖它们。
-export async function setManualHoldingDef(
-  env: DbEnv,
-  userId: string,
-  tokenId: string,
-  // **只改 symbol。** 单价不在这里 —— 「这个币值多少」只有账本一个来源(每笔活动的 price),
+  // 用户对某个币的声明:symbol(他自己的叫法)。**只动这一列** —— 名字 / 图 / 上游 ref
+  // 归参考层,手记不覆盖它们。
+  // 单价不在这里 —— 「这个币值多少」只有账本一个来源(每笔活动的 price),
   // 而 `tokens.self_price` 从此没有写者(迁移 0016 把存量搬进账本并清空了它)。
-  input: { symbol?: string },
-): Promise<void> {
-  const db = getDb(env);
-  await assertTokenOwned(db, userId, tokenId);
-  const set: Record<string, unknown> = {};
-  if (input.symbol !== undefined) set.symbol = input.symbol;
-  if (Object.keys(set).length === 0) return;
-  await db
-    .update(tokens)
-    .set(set)
-    .where(and(eq(tokens.id, tokenId), eq(tokens.userId, userId)));
-}
+  setHoldingDef: (tokenId: string, input: { symbol?: string }): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      yield* database.query((db) => assertTokenOwned(db, userId, tokenId));
+      const set: Record<string, unknown> = {};
+      if (input.symbol !== undefined) set.symbol = input.symbol;
+      if (Object.keys(set).length === 0) return;
+      yield* database.query((db) =>
+        db
+          .update(tokens)
+          .set(set)
+          .where(and(eq(tokens.id, tokenId), eq(tokens.userId, userId))),
+      );
+    }),
 
-// 该账户不再持有这个币:删它对该币的全部活动。**`tokens` 那行不删** —— 参考层数据,
-// 别的账户可能还在用,而且它带着上游 ref / 历史日价,删了就得重新认一遍。
-export async function detachManualHolding(
-  env: DbEnv,
-  userId: string,
-  accountId: string,
-  tokenId: string,
-): Promise<void> {
-  const db = getDb(env);
-  await assertAccountOwned(db, userId, accountId);
-  await assertTokenOwned(db, userId, tokenId);
-  await db
-    .delete(manualActivity)
-    .where(and(eq(manualActivity.accountId, accountId), eq(manualActivity.tokenId, tokenId)));
-}
+  // 该账户不再持有这个币:删它对该币的全部活动。**`tokens` 那行不删** —— 参考层数据,
+  // 别的账户可能还在用,而且它带着上游 ref / 历史日价,删了就得重新认一遍。
+  detachHolding: (accountId: string, tokenId: string): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      yield* database.query((db) => assertAccountOwned(db, userId, accountId));
+      yield* database.query((db) => assertTokenOwned(db, userId, tokenId));
+      yield* database.query((db) =>
+        db
+          .delete(manualActivity)
+          .where(and(eq(manualActivity.accountId, accountId), eq(manualActivity.tokenId, tokenId))),
+      );
+    }),
+});
