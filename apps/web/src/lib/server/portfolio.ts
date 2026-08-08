@@ -1,3 +1,4 @@
+import { AccountStore, PortfolioStore, SettingsStore, SnapshotStore, TagStore } from "@folio/db";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
@@ -12,8 +13,13 @@ import { isManual } from "../manual-connector";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { db } from "./internal/db";
 import { deriveLiveAccountTotals } from "./internal/live-value";
-import { injectManualSnapshots, loadManualHistoryRows, manualFiatRefs } from "./internal/manual";
-import { runOracle } from "./internal/oracle";
+import {
+  injectManualSnapshots,
+  injectManualSnapshotsE,
+  loadManualHistoryRows,
+  manualFiatRefsE,
+} from "./internal/manual";
+import { runAtEdge, runOracle, withRequest } from "./internal/oracle";
 import { buildOverview } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
@@ -51,44 +57,75 @@ async function resolveScope(
   return { selectedId, defaultId: defaultPf.id };
 }
 
+// 同一件事的 Effect 版(#394 T4)。
+const resolveScopeE = (
+  requested: string | undefined,
+): Effect.Effect<{ selectedId: string; defaultId: string }, never, PortfolioStore> =>
+  Effect.gen(function* () {
+    const store = yield* PortfolioStore;
+    const [portfolios, defaultPf] = yield* Effect.all([store.list(), store.ensureDefault()], {
+      concurrency: 2,
+    });
+    const selectedId =
+      requested && portfolios.some((p) => p.id === requested) ? requested : defaultPf.id;
+    return { selectedId, defaultId: defaultPf.id };
+  });
+
 // 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做
 // 鉴权 + 加载(accounts / 最新快照)+ 注入依赖(tokens / platforms)+ 调用。
 // scope 到「选中 Portfolio」(ADR 0033):活跃 && 归属选中的账户;缺省选中 = 默认。
 export const getPortfolioOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
-  .handler(async ({ data, context }) => {
-    const { selectedId, defaultId } = await resolveScope(context.userId, data.portfolioId);
-    const [allAccounts, snapshots, settings, memberships] = await Promise.all([
-      db.listAccountsByUser(context.userId),
-      db.getLatestSnapshotByUser(context.userId),
-      db.getUserSettings(context.userId),
-      db.listPortfolioMembershipsByUser(context.userId),
-    ]);
-    // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
-    // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
-    const pin = toTabPin(data.pin);
-    const tagLinks = pin?.kind === "tag" ? await db.listAccountTagsByUser(context.userId) : [];
-    const accounts = accountsMatchingPin(
-      accountsInView(allAccounts, memberships, selectedId, defaultId),
-      pin,
-      tagLinks,
-    );
-    const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-    // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
-    await injectManualSnapshots(context.userId, accounts, byAccount);
-    // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
-    //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
-    const fiatRefs = await manualFiatRefs(context.userId, accounts);
-    return runOracle(
-      context.userId,
-      buildOverview(accounts, byAccount, {
-        connectorMeta: connectorPlatformMeta,
-        mode: settings.valuationMode,
-        fiatRefs,
-      }),
-    );
-  });
+  // **整条链一个 effect,一次装配**(#394 T4)。以前这里切两次 Effect 边界、建两套 store:
+  // `injectManualSnapshots` 内部 `runOracle` 一次,末尾 `buildOverview` 又一次。现在读账户、
+  // 读快照、读设置、读归属、注入手记、问价走的是同一份 context —— Effect 官方那句
+  // 「`run*` 尽量放在程序的边缘」,在 server fn 这条路上边缘就是 handler 本身。
+  .handler(({ data, context }) =>
+    runAtEdge(
+      withRequest(
+        context.userId,
+        Effect.gen(function* () {
+          const accountStore = yield* AccountStore;
+          const portfolioStore = yield* PortfolioStore;
+          const snapshotStore = yield* SnapshotStore;
+          const settingsStore = yield* SettingsStore;
+          const tagStore = yield* TagStore;
+
+          const { selectedId, defaultId } = yield* resolveScopeE(data.portfolioId);
+          const [allAccounts, snapshots, settings, memberships] = yield* Effect.all(
+            [
+              accountStore.list(),
+              snapshotStore.latest(),
+              settingsStore.get(),
+              portfolioStore.listMemberships(),
+            ],
+            { concurrency: 4 },
+          );
+          // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
+          // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
+          const pin = toTabPin(data.pin);
+          const tagLinks = pin?.kind === "tag" ? yield* tagStore.listAccountLinks() : [];
+          const accounts = accountsMatchingPin(
+            accountsInView(allAccounts, memberships, selectedId, defaultId),
+            pin,
+            tagLinks,
+          );
+          const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+          // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
+          yield* injectManualSnapshotsE(accounts, byAccount);
+          // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
+          //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
+          const fiatRefs = yield* manualFiatRefsE(accounts);
+          return yield* buildOverview(accounts, byAccount, {
+            connectorMeta: connectorPlatformMeta,
+            mode: settings.valuationMode,
+            fiatRefs,
+          });
+        }),
+      ),
+    ),
+  );
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个活跃账户 + 其最新快照的富化持仓。
 // 与 getPortfolioOverview(按代币聚合)分开 —— 账户页是"按账户"的 home,需要每账户明细。

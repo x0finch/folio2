@@ -30,7 +30,22 @@ export type {
   UserSettingsView,
   WriteSnapshotInput,
 } from "./queries";
+// per-user 的领域服务(ADR 0037)。**Tag + layer 都出** —— 与 `Database` 不同:那个的 `query`
+// 回调参数就是 drizzle 句柄,出包等于把包装层作废;这些服务的方法本来就是包装过的 op,
+// 出包正是让 app 能把一次请求的全部数据访问装进同一个 context(#394 T4 起)。
+export {
+  AccountStore,
+  accountStoreLayer,
+  listUserIdsWithAccounts,
+} from "./queries/accounts";
+export { TransferStore, transferStoreLayer } from "./queries/export-import";
 export { createDb, type Db } from "./queries/facade";
+export { ManualStore, manualStoreLayer } from "./queries/manual-activity";
+export { PortfolioStore, portfolioStoreLayer } from "./queries/portfolios";
+export { SettingsStore, settingsStoreLayer } from "./queries/settings";
+export { SnapshotStore, snapshotStoreLayer } from "./queries/snapshots";
+export { TabPinStore, tabPinStoreLayer } from "./queries/tab-pins";
+export { TagStore, tagStoreLayer } from "./queries/tags";
 export type {
   Account,
   AccountSafe,

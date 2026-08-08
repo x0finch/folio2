@@ -1,9 +1,10 @@
-import type {
-  AccountSafe,
-  ManualActivity,
-  ManualActivityPatch,
-  ManualHolding,
-  SnapshotWithBalances,
+import {
+  type AccountSafe,
+  type ManualActivity,
+  type ManualActivityPatch,
+  type ManualHolding,
+  ManualStore,
+  type SnapshotWithBalances,
 } from "@folio/db";
 import { FxService, TokenService } from "@folio/oracle";
 import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-basic";
@@ -130,6 +131,61 @@ async function manualTokensByAccount(
   );
 }
 
+// 上面三个的 Effect 版(#394 T4)。**总览那条链从头到尾一个 effect** —— 以前它中途 `runOracle`
+// 一次(这里)、末尾 `runOracle` 一次(buildOverview),一次请求切两次边界、建两套 store。
+const manualTokensByAccountE = (
+  accounts: AccountSafe[],
+): Effect.Effect<{ id: string; tokens: CredsToken[] }[], never, ManualStore> => {
+  const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
+  if (manual.length === 0) return Effect.succeed([]);
+  return Effect.forEach(
+    manual,
+    (a) =>
+      Effect.map(loadTokensWithActivitiesE(a.id), (rows) => ({
+        id: a.id,
+        tokens: rows.map(({ token, activities }) => projectToken(token, activities)),
+      })),
+    { concurrency: "unbounded" },
+  );
+};
+
+// 见下面 Promise 版的长注释 —— 判定与口径逐字相同,只是形状是 Effect。
+export const manualFiatRefsE = (
+  accounts: AccountSafe[],
+): Effect.Effect<Map<string, string>, never, ManualStore> =>
+  Effect.gen(function* () {
+    const store = yield* ManualStore;
+    const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
+    const out = new Map<string, string>();
+    const perAccount = yield* Effect.forEach(manual, (a) => store.listHoldings(a.id, FIAT_NAMER), {
+      concurrency: "unbounded",
+    });
+    for (const holdings of perAccount) {
+      for (const h of holdings) if (h.ref) out.set(h.id, h.ref);
+    }
+    return out;
+  });
+
+/** `injectManualSnapshots` 的 Effect 版:注入逻辑逐字相同,只是不再自己 `runOracle`。 */
+export const injectManualSnapshotsE = (
+  accounts: AccountSafe[],
+  byAccount: Map<string, SnapshotWithBalances>,
+  takenAt: number = Date.now(),
+): Effect.Effect<void, never, ManualStore | TokenService | FxService> =>
+  Effect.gen(function* () {
+    const list = yield* manualTokensByAccountE(accounts);
+    if (list.length === 0) return;
+    const fiatRefs = yield* manualFiatRefsE(accounts);
+    const enriched = yield* Effect.flatMap(TokenService, (t) =>
+      t.enrich(list.flatMap(({ tokens }) => tokens.map((tk) => tk.id))),
+    );
+    yield* Effect.forEach(list, ({ id, tokens }) =>
+      Effect.map(manualUnitPrices(tokens, enriched, fiatRefs), (prices) => {
+        byAccount.set(id, buildManualSnapshot(id, tokens, prices, takenAt));
+      }),
+    );
+  });
+
 // manual 退出 snapshot 后(ADR 0018 做法 1),其「当下」合成余额注入 `byAccount` —— overview/history 三处消费点
 // 拼好 byAccount 后各调一次。value = amount × 现价(cache-only enrich 取,与 deriveLiveAccountTotals 同门盯市;
 // 取不到回退 unitPrice,见 buildManualSnapshot)。归档 manual 不在传入的 accounts 里 → 不注入。takenAt 仅占位
@@ -177,7 +233,8 @@ export async function injectManualSnapshots(
 // 法币目前只来自 manual(链上/CEX 报法币余额不在范围),故只扫活跃 manual 账户;`TokenRecord.ref` 走的是
 // 上游(CGK)那一档、法币恒 null(且 ADR 0021 把它定义成「上游认没认出」),所以身份单独按 FIAT_NAMER 取。
 // 复用既有 `listManualHoldingsByAccount`(换个命名者查),不新增 db 面;判定(fiatCodeOf 白名单)留在 overview。
-export async function manualFiatRefs(
+// 只剩本文件的 Promise 版注入在用了(Effect 版走 manualFiatRefsE)→ 不再 export。
+async function manualFiatRefs(
   userId: string,
   accounts: AccountSafe[],
 ): Promise<Map<string, string>> {
@@ -235,6 +292,27 @@ async function loadTokensWithActivities(
     db.listManualHoldingsByAccount(userId, accountId, NAMER),
     db.listManualActivityByAccount(userId, accountId),
   ]);
+  return foldActivitiesByToken(tokens, activities);
+}
+
+// 同一件事的 Effect 版(#394 T4:总览那条链一次装配,中途不再切回 Promise)。
+const loadTokensWithActivitiesE = (
+  accountId: string,
+): Effect.Effect<{ token: ManualHolding; activities: ManualActivity[] }[], never, ManualStore> =>
+  Effect.gen(function* () {
+    const store = yield* ManualStore;
+    const [tokens, activities] = yield* Effect.all(
+      [store.listHoldings(accountId, NAMER), store.listActivityByAccount(accountId)],
+      { concurrency: 2 },
+    );
+    return foldActivitiesByToken(tokens, activities);
+  });
+
+// 两条路共用的纯折叠:活动按 tokenId 归到各自的持仓下。
+function foldActivitiesByToken(
+  tokens: ManualHolding[],
+  activities: ManualActivity[],
+): { token: ManualHolding; activities: ManualActivity[] }[] {
   const byToken = new Map<string, ManualActivity[]>();
   for (const a of activities) {
     if (a.tokenId == null) continue;
