@@ -19,9 +19,7 @@ export const withStore = <I, S, A>(
   use: (service: S) => Effect.Effect<A>,
 ): Promise<A> => runWith(layer, Effect.flatMap(port, use));
 
-// 被测代码本身就是个还没接依赖的 effect(`manualBalancesForWarm(accounts)` 那种)时用这个:
-// 只补它缺的那层 store + 真 D1,然后在测试的边缘跑一次。
-export const runWith = <I, A>(
+const runWith = <I, A>(
   layer: Layer.Layer<I, never, Database>,
   effect: Effect.Effect<A, never, I>,
 ): Promise<A> =>

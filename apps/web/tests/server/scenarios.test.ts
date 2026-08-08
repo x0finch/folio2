@@ -8,16 +8,16 @@ import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectorPlatformMeta } from "../../src/lib/server/internal/connector-platform";
 import { db } from "../../src/lib/server/internal/db";
+import { NAMER, runRequest } from "../../src/lib/server/internal/oracle";
+import { buildOverview } from "../../src/lib/server/internal/overview-model";
+import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
+import { withStore } from "./db-effect";
 import {
   addManualActivities,
   createManualAccount,
   createToken,
   injectManualSnapshots,
-} from "../../src/lib/server/internal/manual";
-import { NAMER, runRequest } from "../../src/lib/server/internal/oracle";
-import { buildOverview } from "../../src/lib/server/internal/overview-model";
-import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
-import { withStore } from "./db-effect";
+} from "./manual-fns";
 import { ticketOf } from "./ticket";
 
 // **按用户情景走一遍,每个情景查三处:入库 / 库里的数据对不对 / 屏幕上是什么。**

@@ -6,6 +6,8 @@ import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/history";
 import { db } from "../../src/lib/server/internal/db";
+import { NAMER } from "../../src/lib/server/internal/oracle";
+import { withStore } from "./db-effect";
 import {
   addManualActivities,
   deleteManualActivity,
@@ -13,9 +15,7 @@ import {
   loadManualAccountLiveTotal,
   loadManualAccountSeries,
   loadManualHistoryRows,
-} from "../../src/lib/server/internal/manual";
-import { NAMER } from "../../src/lib/server/internal/oracle";
-import { withStore } from "./db-effect";
+} from "./manual-fns";
 import { ticketOf } from "./ticket";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。

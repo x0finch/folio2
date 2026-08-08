@@ -1,13 +1,8 @@
 import { env } from "cloudflare:test";
-import { manualStoreLayer, type SnapshotWithBalances } from "@folio/db";
+import type { SnapshotWithBalances } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../../src/lib/server/internal/db";
-import {
-  createManualAccount,
-  injectManualSnapshots,
-  manualBalancesForWarm,
-} from "../../src/lib/server/internal/manual";
-import { runWith } from "./db-effect";
+import { createManualAccount, injectManualSnapshots, manualBalancesForWarm } from "./manual-fns";
 import { ticketOf } from "./ticket";
 
 // T2(ADR 0018)服务端集成:manual 退出 snapshot、当下值由 creds 现造。真实 D1(Miniflare)。
@@ -182,7 +177,7 @@ describe("manualBalancesForWarm", () => {
     await db.setArchived(USER, archived.id, true);
 
     const accounts = await db.listAccountsByUser(USER); // 含归档
-    const balances = await runWith(manualStoreLayer(USER), manualBalancesForWarm(accounts));
+    const balances = await manualBalancesForWarm(USER, accounts);
     // 只应含活跃账户的币(BTC),不含归档账户的币(ETH)。身份走 token_id(#243:无 symbol/tokenRef)。
     expect(balances).toHaveLength(1);
     expect(await coingeckoRefOf(balances[0].tokenId)).toBe("issued:bitcoin");

@@ -38,7 +38,7 @@ import {
   coinGeckoTokenUpstreamLayer,
   UPSTREAM_ID,
 } from "@folio/oracle-upstream-coingecko";
-import { Effect, Layer } from "effect";
+import { type Context, Effect, Layer } from "effect";
 import { logTapeLogger } from "./effect-log";
 
 // 参考层的装配点(ADR 0023,#199/#200)。**这是全仓唯一同时认识两边的文件** ——
@@ -106,13 +106,20 @@ const oracleFor = (userId: string, database: Layer.Layer<Database> = databaseLay
 // 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
 // 而 `Data.TaggedError` 的那四类没有 `message` 字段,于是上层日志里只剩一个空消息 + 一坨 Cause。
 // 消息里只有 tag、pathname 和状态码 —— `where` 本来就刻意不带 query(原则 #5 红线)。
-const toError = (error: UpstreamError): Error =>
-  new Error(
-    `${error.upstream} ${error._tag} on ${error.where}${
-      error.status !== undefined ? ` (${error.status})` : ""
-    }`,
-    { cause: error },
-  );
+const toError = (error: UpstreamError | Error): Error =>
+  isUpstream(error)
+    ? new Error(
+        `${error.upstream} ${error._tag} on ${error.where}${
+          error.status !== undefined ? ` (${error.status})` : ""
+        }`,
+        { cause: error },
+      )
+    : error;
+
+// **不能用 `instanceof Error` 区分** —— `Data.TaggedError` 造出来的类自己就 extends Error,
+// 两边都是 true。按 `upstream` 这个字段判:四类上游错误都有它,普通 `Error` 没有。
+// (判 `_tag` 那条约定说的是「同类之间怎么分」;这里分的是「是不是这一类」。)
+const isUpstream = (error: UpstreamError | Error): error is UpstreamError => "upstream" in error;
 
 /**
  * 全局维护任务(刷 `global_token_ref_index`)的装配。**不带 userId** —— 这张表跟任何用户无关
@@ -192,9 +199,9 @@ export type DbStores =
  * 的事,类型帮不上忙。合成一条之后多建的是几个闭包(`connect.ts` 自己写着「drizzle(env.DB) 很轻」),
  * 换掉的是一个每次都要现想的选择。
  */
-export const withRequest = <A>(
+export const withRequest = <A, E extends UpstreamError | Error>(
   userId: string,
-  effect: Effect.Effect<A, UpstreamError, OracleServices | OraclePorts | DbStores>,
+  effect: Effect.Effect<A, E, OracleServices | OraclePorts | DbStores>,
 ): Effect.Effect<A, Error> => {
   // **一次 provide,不是两次。** 两半各 provide 一次的话,同一个 `database` 引用也会被建两遍
   // (memoisation 的作用域是一次构建),于是一个请求握着两个 drizzle 句柄 —— 今天只是浪费,
@@ -211,7 +218,20 @@ export const withRequest = <A>(
  * 一步式:装配 + 立刻跑。server fn / route handler 那种「一次请求就问一次」的路径用它 ——
  * 请求本身就是边缘,没有可拼的下一步。要把多步拼成一个再跑的(cron),用 `withRequest` + `runAtEdge`。
  */
-export const runRequest = <A>(
+export const runRequest = <A, E extends UpstreamError | Error>(
   userId: string,
-  effect: Effect.Effect<A, UpstreamError, OracleServices | OraclePorts | DbStores>,
+  effect: Effect.Effect<A, E, OracleServices | OraclePorts | DbStores>,
 ): Promise<A> => runAtEdge(withRequest(userId, effect));
+
+/**
+ * 「一次 store 调用就完事」的 server fn 用它 —— `runRequest(u, Effect.flatMap(Tag, f))` 的短写。
+ *
+ * 不是第二条路(底下就是 `runRequest`),只是**二十多个 CRUD 薄壳**里那句 `Effect.flatMap` 的
+ * 噪音收成一处:`runStore(userId, TagStore, (s) => s.list())` 与它替掉的 `db.listTagsByUser(userId)`
+ * 一样长,而这一句里 userId 只出现在装配那一处 —— 那正是 ADR 0037 要的。
+ */
+export const runStore = <I extends DbStores, S, A>(
+  userId: string,
+  tag: Context.Tag<I, S>,
+  use: (service: S) => Effect.Effect<A>,
+): Promise<A> => runRequest(userId, Effect.flatMap(tag, use));

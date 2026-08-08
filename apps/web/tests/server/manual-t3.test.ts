@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";
 import { db } from "../../src/lib/server/internal/db";
+import { NAMER } from "../../src/lib/server/internal/oracle";
 import {
   addManualActivities,
   createManualAccount,
@@ -10,8 +11,7 @@ import {
   deleteToken,
   editManualActivity,
   updateToken,
-} from "../../src/lib/server/internal/manual";
-import { NAMER } from "../../src/lib/server/internal/oracle";
+} from "./manual-fns";
 import { ticketOf } from "./ticket";
 
 // T3(#155)服务端写路径集成:持仓 CRUD + 批量活动(原子)+ 删/改活动,全落库。真实 D1(Miniflare)。
