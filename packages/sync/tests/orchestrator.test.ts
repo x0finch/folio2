@@ -7,17 +7,19 @@ import {
   ConnectorUnavailableError,
 } from "@folio/connectors-basic";
 import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
-import { Duration, Effect, Fiber, TestClock, TestContext } from "effect";
+import { Duration, Effect, Fiber, type Layer, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
-import { type FetchOutcome, type SyncDeps, type SyncLogger, syncUser } from "../src";
+import { depError, type FetchOutcome, Sweep, type SyncLogger, type SyncServices } from "../src";
 // Effect 版不对外导出(公开出口只有 Promise 那套)—— 包内测试直接摸内部模块、自己 provide 服务。
-import { layerFromDeps } from "../src/services";
-import * as Sweep from "../src/sweep";
+import { type FakeOptions, fakeServices } from "./fakes";
 
-// 把注入式 deps 变成服务,拿到一个可挂假时钟的 Effect。
-// `layerFromDeps` 现在收 userId(#403 片 1):服务按用户建,签名里不再有 user 参数。
-const syncUserWithDeps = (deps: SyncDeps, userId: string) =>
-  Sweep.syncUser(userId).pipe(Effect.provide(layerFromDeps(deps, userId)));
+// 假装配 → 可挂假时钟的 Effect。**测试直接提供 layer**(#403 片 3):`SyncDeps` 与它那层翻译
+// 一起删了,假的和真的从此都经同一条 `Tag → Layer`。
+const syncWith = (layer: Layer.Layer<SyncServices>, userId: string) =>
+  Sweep.syncUser(userId).pipe(Effect.provide(layer));
+
+const runSync = (layer: Layer.Layer<SyncServices>, userId: string) =>
+  Effect.runPromise(syncWith(layer, userId));
 
 // 编排层测试:provider 机制(解密/校验/取数/全局 key 收窄)已内化进注入的 fetchBalances,
 // 这里只测 sync 自己的编排 —— 重试 / 跳过(needs-credentials)/ 重估 / 失败隔离 / 日志 / 写快照。
@@ -61,30 +63,15 @@ const ok = (balances: Balance[]): FetchOutcome => ({
   totalUsd: balances.reduce((s, b) => s + b.value, 0),
 });
 
-function makeDeps(
-  accounts: AccountSafe[],
-  over: Partial<SyncDeps> = {},
-): { deps: SyncDeps; writes: Array<{ accountId: string; input: WriteSnapshotInput }> } {
-  const writes: Array<{ accountId: string; input: WriteSnapshotInput }> = [];
-  const deps: SyncDeps = {
-    listAccounts: async () => accounts,
-    listRawCreds: async () => [], // 取余额一律 stub,creds 内容无关
-    writeSnapshot: async (_userId, accountId, input) => {
-      writes.push({ accountId, input });
-      return `snap-${accountId}`;
-    },
-    fetchBalances: () => Effect.succeed(ok([])),
-    ...over,
-  };
-  return { deps, writes };
-}
+const makeServices = (accounts: AccountSafe[], over: Omit<FakeOptions, "accounts"> = {}) =>
+  fakeServices({ accounts, ...over });
 
 describe("syncUser — 取余额 → 写快照", () => {
   it("ok outcome → 写出快照,totalUsd = 各行之和", async () => {
-    const { deps, writes } = makeDeps([account()], {
-      fetchBalances: () => Effect.succeed(ok([bal("BTC", 32000)])),
+    const { layer, writes } = makeServices([account()], {
+      fetch: () => Effect.succeed(ok([bal("BTC", 32000)])),
     });
-    const { results } = await syncUser(deps, "u1");
+    const { results } = await runSync(layer, "u1");
     expect(results[0]).toMatchObject({
       accountId: "a1",
       ok: true,
@@ -100,8 +87,8 @@ describe("syncUser — 取余额 → 写快照", () => {
     const note = { title: "Locked", icon: "warning" as const, content: "held" };
     const withNote: Balance = { ...bal("BTC", 1), note };
     const accountNote = [{ title: "Unconfirmed", icon: "warning" as const, content: "pending" }];
-    const { deps, writes } = makeDeps([account()], {
-      fetchBalances: () =>
+    const { layer, writes } = makeServices([account()], {
+      fetch: () =>
         Effect.succeed({
           status: "ok" as const,
           balances: [withNote, bal("ETH", 2)],
@@ -109,7 +96,7 @@ describe("syncUser — 取余额 → 写快照", () => {
           note: accountNote,
         }),
     });
-    await syncUser(deps, "u1");
+    await runSync(layer, "u1");
     // 带 note 的行透传单个 note;无 note 的行 note=undefined。
     expect(writes[0].input.balances[0]?.note).toEqual(note);
     expect(writes[0].input.balances[1]?.note).toBeUndefined();
@@ -118,24 +105,22 @@ describe("syncUser — 取余额 → 写快照", () => {
   });
 
   it("revalue 钩子(P7.4.2):写快照前改 value 并重算 totalUsd", async () => {
-    const { deps, writes } = makeDeps([account()], {
-      fetchBalances: () => Effect.succeed(ok([bal("BTC", 32000)])),
-      revalue: async (_userId, _type, balances) =>
-        balances.map((b) => ({ ...b, value: b.value * 2 })),
+    const { layer, writes } = makeServices([account()], {
+      fetch: () => Effect.succeed(ok([bal("BTC", 32000)])),
+      revalue: (_connectorId, balances) =>
+        Effect.succeed(balances.map((b) => ({ ...b, value: b.value * 2 }))),
     });
-    const { results } = await syncUser(deps, "u1");
+    const { results } = await runSync(layer, "u1");
     expect(results[0]).toMatchObject({ ok: true, totalUsd: 64000 });
     expect(writes[0].input.totalUsd).toBe(64000);
   });
 
   it("revalue 抛错 → best-effort 保留原值,账户仍 ok", async () => {
-    const { deps, writes } = makeDeps([account()], {
-      fetchBalances: () => Effect.succeed(ok([bal("BTC", 32000)])),
-      revalue: async () => {
-        throw new Error("price down");
-      },
+    const { layer, writes } = makeServices([account()], {
+      fetch: () => Effect.succeed(ok([bal("BTC", 32000)])),
+      revalue: () => Effect.fail(depError("revalue", new Error("price down"))),
     });
-    const { results } = await syncUser(deps, "u1");
+    const { results } = await runSync(layer, "u1");
     expect(results[0]).toMatchObject({ ok: true, totalUsd: 32000 });
     expect(writes[0].input.totalUsd).toBe(32000);
   });
@@ -143,10 +128,10 @@ describe("syncUser — 取余额 → 写快照", () => {
 
 describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
   it("needs-credentials → ok:false skipped:true,不写快照", async () => {
-    const { deps, writes } = makeDeps([account({ id: "n" })], {
-      fetchBalances: () => Effect.succeed({ status: "needs-credentials" } as const),
+    const { layer, writes } = makeServices([account({ id: "n" })], {
+      fetch: () => Effect.succeed({ status: "needs-credentials" } as const),
     });
-    const { results } = await syncUser(deps, "u1");
+    const { results } = await runSync(layer, "u1");
     expect(results[0]).toMatchObject({ accountId: "n", ok: false, skipped: true });
     expect(writes).toHaveLength(0);
   });
@@ -154,13 +139,13 @@ describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
   it("坏账户 ok:false 不阻断好账户;syncUser 不抛;只为好账户写快照", async () => {
     const good = account({ id: "good" });
     const bad = account({ id: "bad" });
-    const { deps, writes } = makeDeps([good, bad], {
-      fetchBalances: (acc) =>
+    const { layer, writes } = makeServices([good, bad], {
+      fetch: (acc) =>
         acc.id === "bad"
           ? Effect.fail(new ConnectorFailure({ message: "boom" }))
           : Effect.succeed(ok([bal("BTC", 1)])),
     });
-    const { results } = await syncUser(deps, "u1");
+    const { results } = await runSync(layer, "u1");
     const byId = Object.fromEntries(results.map((r) => [r.accountId, r]));
     expect(byId.good.ok).toBe(true);
     expect(byId.bad).toMatchObject({ ok: false });
@@ -173,18 +158,18 @@ describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
 describe("结构化日志(级别 + 安全字段)", () => {
   it("成功→info、缺凭据→warning、失败→error;字段只含安全键", async () => {
     const { log, entries } = capturingLogger();
-    const { deps } = makeDeps(
+    const { layer } = makeServices(
       [account({ id: "g" }), account({ id: "n" }), account({ id: "f", connectorId: "okx" })],
       {
         log,
-        fetchBalances: (acc) => {
+        fetch: (acc) => {
           if (acc.id === "n") return Effect.succeed({ status: "needs-credentials" } as const);
           if (acc.id === "f") return Effect.fail(new ConnectorAuthError({ message: "bad key" }));
           return Effect.succeed(ok([bal("BTC", 1)]));
         },
       },
     );
-    await syncUser(deps, "u1");
+    await runSync(layer, "u1");
     const byMsg = (m: string) => entries.find((e) => e.msg === m);
     expect(byMsg("account synced")?.level).toBe("info");
     expect(byMsg("account synced")?.props).toMatchObject({ accountId: "g", connectorId: "manual" });
@@ -229,8 +214,8 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       () => new ConnectorRateLimitError({ message: "rate limited", retryAfterMs: 1234 }),
       1,
     );
-    const { deps } = makeDeps([account()], { fetchBalances });
-    const { results } = await runWithClock(syncUserWithDeps(deps, "u1"));
+    const { layer } = makeServices([account()], { fetch: fetchBalances });
+    const { results } = await runWithClock(syncWith(layer, "u1"));
     expect(results[0].ok).toBe(true);
     expect(calls()).toBe(2);
   });
@@ -240,9 +225,9 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       () => new ConnectorRateLimitError({ message: "rate limited", retryAfterMs: 1234 }),
       1,
     );
-    const { deps } = makeDeps([account()], { fetchBalances });
+    const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
+      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
       // 指数退避的第一档是 200ms;若没采用 Retry-After,这时早该重试了。
       yield* TestClock.adjust(Duration.millis(1233));
       expect(calls()).toBe(1);
@@ -263,9 +248,9 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       () => new ConnectorUnavailableError({ message: "5xx" }), // 无 Retry-After → 走指数退避
       2,
     );
-    const { deps } = makeDeps([account()], { fetchBalances });
+    const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
+      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(199));
       expect(calls()).toBe(1); // 第一档最早 200ms,未到
       yield* TestClock.adjust(Duration.millis(201)); // → t=400,第 2 次最晚也该发生了
@@ -284,9 +269,9 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       () => new ConnectorRateLimitError({ message: "slow down", retryAfterMs: 60_000 }),
       1,
     );
-    const { deps } = makeDeps([account()], { fetchBalances });
+    const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
+      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(4999));
       expect(calls()).toBe(1);
       yield* TestClock.adjust(Duration.millis(1201)); // 5s 上限 + 抖动上限 200ms
@@ -301,8 +286,8 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       () => new ConnectorUnavailableError({ message: "5xx" }),
       99,
     );
-    const { deps, writes } = makeDeps([account()], { fetchBalances });
-    const { results } = await runWithClock(syncUserWithDeps(deps, "u1"));
+    const { layer, writes } = makeServices([account()], { fetch: fetchBalances });
+    const { results } = await runWithClock(syncWith(layer, "u1"));
     expect(results[0]).toMatchObject({ ok: false });
     expect(results[0].error).toContain("5xx");
     expect(calls()).toBe(3); // RETRY_MAX_ATTEMPTS
@@ -314,8 +299,8 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       () => new ConnectorAuthError({ message: "bad key" }),
       99,
     );
-    const { deps } = makeDeps([account()], { fetchBalances });
-    const { results } = await runWithClock(syncUserWithDeps(deps, "u1"));
+    const { layer } = makeServices([account()], { fetch: fetchBalances });
+    const { results } = await runWithClock(syncWith(layer, "u1"));
     expect(results[0].ok).toBe(false);
     expect(calls()).toBe(1);
   });
@@ -330,8 +315,11 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       () => new ConnectorRateLimitError({ message: "5xx", retryAfterMs: 300 }),
       2,
     );
-    const { deps } = makeDeps([account({ id: "a7", connectorId: "okx" })], { log, fetchBalances });
-    await runWithClock(syncUserWithDeps(deps, "u1"));
+    const { layer } = makeServices([account({ id: "a7", connectorId: "okx" })], {
+      log,
+      fetch: fetchBalances,
+    });
+    await runWithClock(syncWith(layer, "u1"));
     const retries = entries.filter((e) => e.msg === "provider call retrying");
     expect(retries.map((e) => e.props?.attempt)).toEqual([1, 2]);
     expect(retries[0]?.level).toBe("warning");
@@ -347,20 +335,19 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
   // 重试用尽 / 不可重试都不该多记一条 —— 日志挂在 schedule 的 tapOutput 上就是为了这个。
   it("重试用尽记 2 条(不是 3 条);不可重试记 0 条", async () => {
     const exhausted = capturingLogger();
-    const { deps: d1 } = makeDeps([account()], {
+    const { layer: l1 } = makeServices([account()], {
       log: exhausted.log,
-      fetchBalances: flaky(() => new ConnectorUnavailableError({ message: "5xx" }), 99)
-        .fetchBalances,
+      fetch: flaky(() => new ConnectorUnavailableError({ message: "5xx" }), 99).fetchBalances,
     });
-    await runWithClock(syncUserWithDeps(d1, "u1"));
+    await runWithClock(syncWith(l1, "u1"));
     expect(exhausted.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(2);
 
     const fatal = capturingLogger();
-    const { deps: d2 } = makeDeps([account()], {
+    const { layer: l2 } = makeServices([account()], {
       log: fatal.log,
-      fetchBalances: flaky(() => new ConnectorAuthError({ message: "bad key" }), 99).fetchBalances,
+      fetch: flaky(() => new ConnectorAuthError({ message: "bad key" }), 99).fetchBalances,
     });
-    await runWithClock(syncUserWithDeps(d2, "u1"));
+    await runWithClock(syncWith(l2, "u1"));
     expect(fatal.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(0);
   });
 });
@@ -370,8 +357,8 @@ describe("syncUser — 有界并发", () => {
     let inFlight = 0;
     let maxInFlight = 0;
     const accounts = Array.from({ length: 10 }, (_, i) => account({ id: `a${i}` }));
-    const { deps, writes } = makeDeps(accounts, {
-      fetchBalances: () =>
+    const { layer, writes } = makeServices(accounts, {
+      fetch: () =>
         Effect.promise(async () => {
           inFlight++;
           maxInFlight = Math.max(maxInFlight, inFlight);
@@ -380,7 +367,7 @@ describe("syncUser — 有界并发", () => {
           return ok([]);
         }),
     });
-    const { results } = await syncUser(deps, "u1");
+    const { results } = await runSync(layer, "u1");
     expect(results).toHaveLength(10);
     expect(results.every((r) => r.ok)).toBe(true);
     expect(writes).toHaveLength(10);
@@ -391,14 +378,14 @@ describe("syncUser — 有界并发", () => {
 describe("syncUser(Effect 内核)— 取数超时", () => {
   it("provider 挂住(永不 resolve)→ 超时按 retryable 重试 → 用尽后 ok:false", async () => {
     let calls = 0;
-    const { deps, writes } = makeDeps([account()], {
-      fetchBalances: () => {
+    const { layer, writes } = makeServices([account()], {
+      fetch: () => {
         calls++;
         return Effect.never; // 永不 resolve —— 只有超时能结束它
       },
     });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
+      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
       // 3 次尝试 × 20s 超时 + 两次退避,推够即可。
       yield* TestClock.adjust(Duration.millis(100_000));
       const { results } = yield* Fiber.join(fiber);
@@ -411,14 +398,14 @@ describe("syncUser(Effect 内核)— 取数超时", () => {
 
   it("每次尝试各自计时:19.9s 时还没超时,20s 后才判超时并重试", async () => {
     let calls = 0;
-    const { deps } = makeDeps([account()], {
-      fetchBalances: () => {
+    const { layer } = makeServices([account()], {
+      fetch: () => {
         calls++;
         return Effect.never;
       },
     });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncUserWithDeps(deps, "u1"));
+      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(19_900));
       expect(calls).toBe(1); // FETCH_TIMEOUT_MS 未到
       // 20s 超时 + 第一档退避 200 + 抖动上限 200 → 第 2 次最晚在 20_400,推到 20_500 留余量。
@@ -440,21 +427,23 @@ describe("syncUser(Effect 内核)— 取数超时", () => {
 describe("syncAccount — mint 与 revalue 的顺序", () => {
   it("mint 先于 revalue,且 revalue 拿到的就是 mint 的答案", async () => {
     const order: string[] = [];
-    const { deps, writes } = makeDeps([account()], {
-      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100)])),
-      mint: async (_userId, balances) => {
-        order.push("mint");
-        return new Map(balances.map((b) => [b.tokenRef as string, `tk_${b.symbol}`]));
-      },
-      revalue: async (_userId, _cid, balances, idByRef) => {
-        order.push("revalue");
-        // 拿到的正是上一步的产物 —— 自己不解析身份。
-        expect(idByRef.get("binance/issued:BTC")).toBe("tk_BTC");
-        return balances;
-      },
+    const { layer, writes } = makeServices([account()], {
+      fetch: () => Effect.succeed(ok([bal("BTC", 100)])),
+      mint: (balances) =>
+        Effect.sync(() => {
+          order.push("mint");
+          return new Map(balances.map((b) => [b.tokenRef as string, `tk_${b.symbol}`]));
+        }),
+      revalue: (_connectorId, balances, idByRef) =>
+        Effect.sync(() => {
+          order.push("revalue");
+          // 拿到的正是上一步的产物 —— 自己不解析身份。
+          expect(idByRef.get("binance/issued:BTC")).toBe("tk_BTC");
+          return balances;
+        }),
     });
 
-    await syncUser(deps, "u1");
+    await runSync(layer, "u1");
     expect(order).toEqual(["mint", "revalue"]);
     // 同一份答案也落进了快照列。
     expect(writes[0].input.balances[0].tokenId).toBe("tk_BTC");
@@ -462,34 +451,34 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
 
   it("一轮同步只 mint 一次(写快照不再自己认一遍)", async () => {
     let calls = 0;
-    const { deps } = makeDeps([account()], {
-      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100), bal("ETH", 50)])),
-      mint: async (_userId, balances) => {
-        calls++;
-        return new Map(balances.map((b) => [b.tokenRef as string, `tk_${b.symbol}`]));
-      },
+    const { layer } = makeServices([account()], {
+      fetch: () => Effect.succeed(ok([bal("BTC", 100), bal("ETH", 50)])),
+      mint: (balances) =>
+        Effect.sync(() => {
+          calls++;
+          return new Map(balances.map((b) => [b.tokenRef as string, `tk_${b.symbol}`]));
+        }),
     });
 
-    await syncUser(deps, "u1");
+    await runSync(layer, "u1");
     expect(calls).toBe(1); // 两笔持仓、一次批量点查
   });
 
   // best-effort:认币故障不该让一轮同步丢数据。
   it("mint 抛错 → 快照照落(token_id 留空)、价退回 provider 自带、记一条 warning", async () => {
     const { log, entries } = capturingLogger();
-    const { deps, writes } = makeDeps([account()], {
+    const { layer, writes } = makeServices([account()], {
       log,
-      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100)])),
-      mint: async () => {
-        throw new Error("d1 down");
-      },
-      revalue: async (_userId, _cid, balances, idByRef) => {
-        expect(idByRef.size).toBe(0); // 空 map,不是 undefined —— revalue 不用判空
-        return balances;
-      },
+      fetch: () => Effect.succeed(ok([bal("BTC", 100)])),
+      mint: () => Effect.fail(depError("mint", new Error("d1 down"))),
+      revalue: (_connectorId, balances, idByRef) =>
+        Effect.sync(() => {
+          expect(idByRef.size).toBe(0); // 空 map,不是 undefined —— revalue 不用判空
+          return balances;
+        }),
     });
 
-    await syncUser(deps, "u1");
+    await runSync(layer, "u1");
     expect(writes).toHaveLength(1);
     expect(writes[0].input.balances[0].tokenId).toBeUndefined();
     expect(writes[0].input.totalUsd).toBe(100); // 金额没丢
@@ -497,20 +486,20 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
   });
 
   it("没注入 mint(旧装配 / 测试)→ 整条路照跑,token_id 留空", async () => {
-    const { deps, writes } = makeDeps([account()], {
-      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100)])),
+    const { layer, writes } = makeServices([account()], {
+      fetch: () => Effect.succeed(ok([bal("BTC", 100)])),
     });
-    await syncUser(deps, "u1");
+    await runSync(layer, "u1");
     expect(writes[0].input.balances[0].tokenId).toBeUndefined();
   });
 
   it("认不出来的那条 ref 不进 map → 它的 token_id 留空,别的行不受影响", async () => {
-    const { deps, writes } = makeDeps([account()], {
-      fetchBalances: () => Effect.succeed(ok([bal("BTC", 100), bal("SCAM", 5)])),
-      mint: async () => new Map([["binance/issued:BTC", "tk_BTC"]]),
+    const { layer, writes } = makeServices([account()], {
+      fetch: () => Effect.succeed(ok([bal("BTC", 100), bal("SCAM", 5)])),
+      mint: () => Effect.succeed(new Map([["binance/issued:BTC", "tk_BTC"]])),
     });
 
-    await syncUser(deps, "u1");
+    await runSync(layer, "u1");
     // symbol 不再落快照(#243);按 usdValue 区分两行(BTC=100 / SCAM=5)。
     const rows = writes[0].input.balances;
     expect(rows.find((r) => r.usdValue === 100)?.tokenId).toBe("tk_BTC");

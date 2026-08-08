@@ -24,25 +24,27 @@ import {
 import { FxService, type OraclePorts, type OracleServices, TokenService } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
 import {
+  type AccountSyncResult,
   BalanceSource,
   depError,
   type FetchOutcome,
+  Sweep,
+  type SweepResult,
   AccountStore as SyncAccountStore,
   type SyncDepError,
-  type SyncDeps,
   type SyncServices,
   SnapshotStore as SyncSnapshotStore,
   TokenOracle,
 } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
-import { Cause, Effect, Exit, Layer } from "effect";
+import { Cause, Effect, Exit, Layer, Stream } from "effect";
 import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
 import { isSyncableAccount } from "../../syncable";
 import { userDisplayBalances } from "../../user-balances";
 import { recordDefiLogosOf } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
-import { type DbStores, runAtEdge, runDbStore, runRequest, withRequest } from "./oracle";
+import { type DbStores, requestLayer, runAtEdge, withRequest } from "./oracle";
 import { warmPlatforms } from "./platforms";
 import { revalue } from "./revalue";
 import { warmHeldPrices } from "./token-enrich";
@@ -206,7 +208,7 @@ const fetchViaConnector = (
 // `SnapshotBalanceInput` 里没有 name/logo。但 mint 建代币行时要用它们(不然新币只剩 symbol、没图)。
 //
 // 所以在**取到余额那一刻**顺手收一份 seed(与 totalUsd 同一处、同一批数据),
-// 写快照那一步按 tokenRef 取回。存活范围 = 一个 `SyncDeps` 实例 = 一轮 sync,不跨请求。
+// 写快照那一步按 tokenRef 取回。存活范围 = 一次 `syncServicesLayer` 装配 = 一轮 sync,不跨请求。
 // 这样 `@folio/sync` 与 `Balance` 契约都不用动 —— 平台字段那次的教训:派生出来的东西不该让
 // provider 再报一遍(#193)。
 interface SeedCollector {
@@ -237,28 +239,23 @@ function createSeedCollector(): SeedCollector {
 
 // —— `SyncServices` 的 app 侧实现(#403 片 2)——
 //
-// 与下面那个 `buildSyncDeps` **同一套零件、不同接线**:取数(`fetchViaConnector`)、seed 收集、
-// 重估(`revalue`)三样逻辑都只有一份,这里只是把它们接到 Tag 上而不是接到 Promise 字段上。
-// 过渡期两条接线并存(expand),片 3 删掉 Promise 那条。
+// **一次装配 = 一个用户的一轮同步。** 四个能力的方法签名里没有 userId —— 它由外面那次
+// `withRequest(userId, …)` 供上的 db / 参考层服务吃掉了(ADR 0037)。
 //
+// `seeds` 与估值模式都建在**这一层**:它们的存活范围恰好是「一轮同步」,与 layer 的生命周期同长。
+// 以前那个 Promise 形状的 deps 得按 userId 分桶缓存估值模式(一份 deps 跨多用户),现在一个用户一层,
+// 读一次存进闭包就够 —— 那个 Map 连同它的分桶逻辑一起没了。
 // db 与参考层的错误通道都是 `never`(ADR:D1 挂了走 defect),而编排靠**类型化**的 `SyncDepError`
 // 做隔离 —— `account.ts` 的 `bestEffort`(认币/重估降级)、`syncAccount` 末尾的 `catchAll`
 // (逐账户隔离)、`Sweep.userTally` 的 `catchAll`(逐用户隔离),三处都只接类型化失败。
 //
 // 以前这道翻译是**免费**的:每个 dep 都经一次 `runPromise` 边界,defect 变成 promise rejection,
 // 再被 `tryPromise({ catch: depError })` 收成类型化失败。边界一拿掉,它就得显式补上。
-// 不补的话:一次 `mint` 的 D1 抖动会穿过全部三层隔离,把「记一行 warning、快照照落」变成 500。
 const asDep =
   (step: Parameters<typeof depError>[0]) =>
   <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E | SyncDepError> =>
     effect.pipe(Effect.catchAllDefect((cause) => Effect.fail(depError(step, cause))));
 
-// **一次装配 = 一个用户的一轮同步。** 四个能力的方法签名里没有 userId —— 它由外面那次
-// `withRequest(userId, …)` 供上的 db / 参考层服务吃掉了(ADR 0037)。
-//
-// `seeds` 与估值模式都建在**这一层**:它们的存活范围恰好是「一轮同步」,与 layer 的生命周期同长。
-// 以前 `buildSyncDeps` 得按 userId 分桶缓存估值模式(一份 deps 跨多用户),现在一个用户一层,
-// 读一次存进闭包就够 —— 那个 Map 连同它的分桶逻辑一起没了。
 export const syncServicesLayer: Layer.Layer<
   SyncServices,
   never,
@@ -338,6 +335,7 @@ export const syncServicesLayer: Layer.Layer<
               }
               return Effect.flatMap(TokenService, (t) => t.mint(refs)).pipe(
                 Effect.provide(oracle),
+                Effect.mapError((e) => depError("mint", e)),
                 asDep("mint"),
               );
             },
@@ -351,7 +349,11 @@ export const syncServicesLayer: Layer.Layer<
                   idByRef,
                   valuation,
                 ),
-              ).pipe(Effect.provide(oracle), asDep("revalue")),
+              ).pipe(
+                Effect.provide(oracle),
+                Effect.mapError((e) => depError("revalue", e)),
+                asDep("revalue"),
+              ),
           };
         }),
       ),
@@ -359,98 +361,32 @@ export const syncServicesLayer: Layer.Layer<
   }),
 );
 
-// 装配编排器的注入式依赖。真正的 DI 缝是这里返回的 SyncDeps(syncUser 只认注入的 deps);
-// triggerSync(手动)与 cron(scheduled)共用。
-export function buildSyncDeps(): SyncDeps {
-  // 一轮 sync 共一份 seed 收集器:fetchBalances 那头收,writeSnapshot 那头取(见其定义)。
-  const seeds = createSeedCollector();
-  // per-user 估值模式:按 userId 记忆化一次读(revalue 逐账户调,避免 N 次 settings 读)。
-  // 同一 deps 跨多用户(cron sweep)也正确 —— 按 userId 分桶缓存。
-  const modeByUser = new Map<string, Promise<ValuationMode>>();
-  const modeFor = (userId: string): Promise<ValuationMode> => {
-    let p = modeByUser.get(userId);
-    if (!p) {
-      p = runDbStore(
-        userId,
-        Effect.flatMap(SettingsStore, (s) => s.get()),
-      ).then((s) => s.valuationMode);
-      modeByUser.set(userId, p);
-    }
-    return p;
-  };
-  return {
-    // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,不写快照)→ 一并过滤。
-    // syncUser 只见活跃的可同步账户(判别走纯 isSyncableAccount)。
-    listAccounts: async (userId) =>
-      (
-        await runDbStore(
-          userId,
-          Effect.flatMap(AccountStore, (s) => s.list()),
-        )
-      ).filter(isSyncableAccount),
-    // 批量取全用户 creds(消 syncAccount 的 N+1)
-    listRawCreds: (userId) =>
-      runDbStore(
-        userId,
-        Effect.flatMap(AccountStore, (s) => s.listRawCreds()),
-      ),
-    writeSnapshot: (userId, accountId, input) =>
-      runDbStore(
-        userId,
-        Effect.flatMap(SnapshotStore, (s) => s.write(accountId, input)),
-      ),
-    // 认币:每笔余额的 tokenRef 换成 token_id,认定就此冻进快照(ADR 0021 / #200)。
-    //
-    // **编排在这里、执行在 `@folio/sync` 的 mint 那一步**(#202):它跑在 revalue 之前,一轮同步只跑
-    // 一次,答案同时喂给「按币问价」和「落 token_id」两个消费者。#200 当初把它塞在 writeSnapshot 里,
-    // 那时 revalue 还在用旧参考层的读时解析;新层的 `priceOf` 收 token_id,再留在写快照那头就得
-    // 认两遍(而且中间有别的账户在并发建行,两次结果可能不一致)。
-    //
-    // D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两次独立的批。mint 成了而写快照失败
-    // 只留下没人引用的 Token 行,无害,下次复用。
-    //
-    // 不加 barrier:账户是并发跑的,同一条 ref 会被同时 mint,靠 store 的 upsert-then-read 幂等收敛
-    // (见 createUserTokenStore.create)。搞「先统一 mint 再并发写」会牺牲「每账户独立落库、
-    // 一个失败不影响其他」这条性质。
-    mint: async (userId, rows) => {
-      const refs = rows.flatMap((b) =>
-        b.tokenRef ? [{ ref: b.tokenRef, seed: seeds.of(b.tokenRef, b.symbol) }] : [],
-      );
-      if (refs.length === 0) return new Map();
-      return runRequest(
-        userId,
-        Effect.flatMap(TokenService, (t) => t.mint(refs)),
-      );
-    },
-    // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/取数在其内);
-    // SECRETS_KEY 只在本层(app)见。connectorId 直接即 connector 的 id;无 manifest 视为数据错误
-    //(由 syncAccount 逐账户隔离,不阻断其余)。
-    fetchBalances: (account, stored) => {
-      const cid = account.connectorId;
-      const manifest = getConnector(connectorRegistry, cid);
-      if (!manifest) {
-        return Effect.fail(
-          new ConnectorFailure({ message: `no connector for connectorId ${cid}` }),
-        );
-      }
-      return fetchViaConnector(cid, manifest, account, stored, seeds);
-    },
-    // 结构化日志:sync 的每账户结果/重试经此 logger 记(userId 显式带;请求路径还会经 withContext 带 ALS 上下文)。
-    log: getLogger(["folio", "sync"]),
-    // 写快照前重估(oracle 多源 Phase 3):按 mode 定 value + 非盯市类型捕获 selfPrice(原料)。
-    // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单):据 connectorId 查 manifest →
-    // 传 markToMarket 布尔。mode 按 userId 解析(记忆化);缺省 self-first(无 settings 行的用户)。
-    // 价从**新参考层**取(#202):`priceOf` 收 token_id,身份由上一步的 mint 给,这里不再解析。
-    revalue: async (userId, connectorId, rows, idByRef) =>
-      // 取价与法币汇率(ADR 0025)两样能力都在 `R` 通道上,一次 `runRequest` 全供上。
-      runRequest(
-        userId,
-        revalue(
-          getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
-          rows,
-          idByRef,
-          await modeFor(userId),
-        ),
-      ),
-  };
-}
+// 一个用户的一轮同步,**装配好了但还没跑**。流式端点与 cron 各取所需。
+const syncFor = (userId: string) => Layer.provide(syncServicesLayer, requestLayer(userId));
+
+// `/api/sync` 的流:逐账户产出结果,交给 ndjson 那半。装配在这里做完,所以流的 `R` 是 `never`
+// —— `Stream.provideLayer` 之后调用方拿到的是一条能直接消费的流。
+export const syncStreamFor = (userId: string): Stream.Stream<AccountSyncResult, SyncDepError> =>
+  Sweep.syncUserStream(userId).pipe(Stream.provideLayer(syncFor(userId)));
+
+// cron 的全量 sweep:**逐用户各装一次**,再把小计加起来。
+//
+// 这个循环以前住在 `@folio/sync` 的壳里。服务变成 per-user 之后它就不该在包里了 ——
+// 一份服务服务不了多个用户,「逐用户装配 + 累加」属于做装配的这一方。搬过来之后它与紧挨着的
+// `warmAllUsers` 形状一模一样,cron 的两步收尾读起来是同一件事。
+//
+// **串行不是遗漏,是有意的**:cron 一次调用有 CPU / subrequest 预算,几十个用户并发会顶穿
+// (见 server.ts 里两个 trigger 拆开的理由)。用 `Effect.forEach` 的默认串行语义,
+// **别顺手加 concurrency**。
+//
+// `tallyOne` 可注入,只为单测能观察到「一个跑完才起下一个」—— 与紧邻的 `warmAllUsers` 同款理由。
+// 这个钩子是必要的:循环从 `@folio/sync` 搬过来之后,包里那条串行用例钉的是它自己那份复刻,
+// **在这里加并发它照样绿**。钉子得跟着被钉的东西走。
+export const syncAllUsers = (
+  userIds: readonly string[],
+  tallyOne: (userId: string) => Effect.Effect<Sweep.Tally> = (userId) =>
+    Sweep.userTally(userId).pipe(Effect.provide(syncFor(userId))),
+): Effect.Effect<SweepResult, never> =>
+  Effect.forEach(userIds, tallyOne).pipe(
+    Effect.map((tallies) => Sweep.sumTallies(userIds.length, tallies)),
+  );

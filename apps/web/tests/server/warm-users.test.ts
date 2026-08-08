@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { warmAllUsers } from "../../src/lib/server/internal/sync-deps";
+import { syncAllUsers, warmAllUsers } from "../../src/lib/server/internal/sync-deps";
 
 // #375 第 2 步 · 纵深防御:sweep 收尾逐用户预热,一个用户失败不该拖垮其余、也不该把整次 cron
 // 拖成异常收尾。`warmAllUsers` 收一个可注入的 `warmOne` 正是为了在这里让指定用户失败 ——
@@ -56,5 +56,33 @@ describe("warmAllUsers", () => {
     const report = await Effect.runPromise(warmAllUsers([], warmOne));
     expect(warmOne).not.toHaveBeenCalled();
     expect(report).toEqual({ warmed: 0, failed: 0 });
+  });
+});
+
+// cron 的 sweep 与预热是同一个形状:逐用户、串行、各自兜住。串行是**有意的**(cron 一次调用有
+// CPU / subrequest 预算),而这条约束原先由 `@folio/sync` 的一条用例钉着 —— 循环搬到 app 之后,
+// 那条钉的就成了包里自己那份复刻:**在这里加 concurrency 它照样绿**。所以钉子跟过来。
+describe("syncAllUsers", () => {
+  it("逐用户串行,不重叠", async () => {
+    const events: string[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const tallyOne = (userId: string) =>
+      Effect.promise(async () => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        events.push(`start:${userId}`);
+        // 让出事件循环:真并发的话别的用户会在这个缝里挤进来。
+        await new Promise((r) => setTimeout(r, 1));
+        inFlight--;
+        events.push(`end:${userId}`);
+        return { ok: 1, failed: 0, skipped: 0 };
+      });
+
+    const result = await Effect.runPromise(syncAllUsers(["u1", "u2", "u3"], tallyOne));
+
+    expect(maxInFlight).toBe(1);
+    expect(events).toEqual(["start:u1", "end:u1", "start:u2", "end:u2", "start:u3", "end:u3"]);
+    expect(result).toEqual({ users: 3, ok: 3, failed: 0, skipped: 0 });
   });
 });

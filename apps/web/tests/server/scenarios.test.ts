@@ -3,13 +3,11 @@ import type { SnapshotWithBalances } from "@folio/db";
 import { globalTokenRefIndexStoreLayer, userCacheStoreLayer } from "@folio/db";
 import { TokenService } from "@folio/oracle";
 import { CacheStore, GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
-import { syncAccount } from "@folio/sync";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectorPlatformMeta } from "../../src/lib/server/internal/connector-platform";
 import { NAMER, runRequest } from "../../src/lib/server/internal/oracle";
 import { buildOverview } from "../../src/lib/server/internal/overview-model";
-import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
 import { dbFor, withStore } from "./db-effect";
 import {
   addManualActivities,
@@ -17,6 +15,7 @@ import {
   createToken,
   injectManualSnapshots,
 } from "./manual-fns";
+import { syncOne } from "./sync-fns";
 import { ticketOf } from "./ticket";
 
 // **按用户情景走一遍,每个情景查三处:入库 / 库里的数据对不对 / 屏幕上是什么。**
@@ -424,20 +423,10 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
       label: "w",
       creds: null,
     });
-    const res = await syncAccount(
-      {
-        ...buildSyncDeps(),
-        fetchBalances: () =>
-          Effect.succeed({
-            status: "ok" as const,
-            balances: [onchainBalance] as never,
-            totalUsd: 5,
-          }),
-      },
-      USER,
-      (await dbFor(USER).accounts.list()).find((a) => a.id === account.id) as never,
-      null,
-    );
+    const res = await syncOne(USER, {
+      account: (await dbFor(USER).accounts.list()).find((a) => a.id === account.id) as never,
+      balances: [onchainBalance as never],
+    });
     if (!res.ok || !res.snapshotId) throw new Error(`sync failed: ${res.error ?? "no snapshot"}`);
     return res.snapshotId;
   }

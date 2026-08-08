@@ -202,19 +202,28 @@ export type DbStores =
  * 的事,类型帮不上忙。合成一条之后多建的是几个闭包(`connect.ts` 自己写着「drizzle(env.DB) 很轻」),
  * 换掉的是一个每次都要现想的选择。
  */
-export const withRequest = <A, E extends UpstreamError | Error>(
+/**
+ * 一次请求要的**全部服务**,作为一个 Layer。
+ *
+ * `withRequest` 是它加上错误映射的便利包装;**流**那条路(`/api/sync` 把同步的流交给
+ * `Stream.provideLayer`)拿不到 effect 形状的包装,只能要 layer 本身。
+ */
+export const requestLayer = (
   userId: string,
-  effect: Effect.Effect<A, E, OracleServices | OraclePorts | DbStores>,
-): Effect.Effect<A, Error> => {
+): Layer.Layer<OracleServices | OraclePorts | DbStores> => {
   // **一次 provide,不是两次。** 两半各 provide 一次的话,同一个 `database` 引用也会被建两遍
   // (memoisation 的作用域是一次构建),于是一个请求握着两个 drizzle 句柄 —— 今天只是浪费,
   // 但 `Database` 一旦长出状态(span、慢查询计数,`stores/service.ts` 已记着要加),
   // 那就是悄悄劈成两半的状态。
   const database = databaseLayer(env);
-  return effect.pipe(
-    Effect.provide(Layer.merge(dbStoresFor(userId, database), oracleFor(userId, database))),
-    Effect.mapError(toError),
-  );
+  return Layer.merge(dbStoresFor(userId, database), oracleFor(userId, database));
+};
+
+export const withRequest = <A, E extends UpstreamError | Error>(
+  userId: string,
+  effect: Effect.Effect<A, E, OracleServices | OraclePorts | DbStores>,
+): Effect.Effect<A, Error> => {
+  return effect.pipe(Effect.provide(requestLayer(userId)), Effect.mapError(toError));
 };
 
 /**
@@ -238,22 +247,6 @@ export const runStore = <I extends DbStores, S, A>(
   tag: Context.Tag<I, S>,
   use: (service: S) => Effect.Effect<A>,
 ): Promise<A> => runRequest(userId, Effect.flatMap(tag, use));
-
-/**
- * **只装 db 那半**,不带参考层。
- *
- * 存在的唯一理由是 `@folio/sync` 的 `SyncDeps`:它的每个方法各收一个 userId(cron 用**一份** deps
- * 扫全部用户),与 db 现在 per-user 装配的形状对不上 —— 所以那一处只能逐次装。
- * 门面删掉之后这笔开销从「藏在 `db.xxx()` 后面」变成了**写在调用点上**,这是它该在的地方:
- * 真要收掉,得让 sync 的服务也变成 per-user,那是它自己的一票(见 #394 的说明)。
- */
-export const runDbStore = <A>(
-  userId: string,
-  effect: Effect.Effect<A, never, DbStores>,
-): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(Effect.provide(dbStoresFor(userId)), Effect.provide(logTapeLogger)),
-  );
 
 /** 系统级(无 userId)的 db 查询 —— cron 枚举用户那一条。原则 #6 的受控例外。 */
 export const withDatabase = <A>(effect: Effect.Effect<A, never, Database>): Effect.Effect<A> =>
