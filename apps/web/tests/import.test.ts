@@ -1,6 +1,24 @@
+import { Cause, Effect, Exit } from "effect";
 import { describe, expect, it } from "vitest";
 import { EXPORT_VERSION } from "../src/lib/export";
 import { createImporter, type ImportDeps, ImportError, parseImportLine } from "../src/lib/import";
+
+// `apply` 现在是 Effect(#394 T7:整条导入一个 effect)。用例测的是**单遍重映射的逻辑** ——
+// 哪些记录建了什么、id 怎么对上、版本闸拦不拦 —— 跟时序无关,所以照 CODING.md 那条判据保持
+// Promise 形状,只在这里跑一次。
+//
+// `Cause.squash` 是关键:`runPromise` 会把失败裹成 `FiberFailure`,而用例断言的是
+// `rejects.toThrow(ImportError)` —— 裹住之后那个断言就变成永远不成立的空断言了。
+const promisedImporter = (deps: ImportDeps) => {
+  const imp = createImporter(deps);
+  return {
+    counts: imp.counts,
+    apply: async (rec: Record<string, unknown>): Promise<void> => {
+      const exit = await Effect.runPromiseExit(imp.apply(rec));
+      if (Exit.isFailure(exit)) throw Cause.squash(exit.cause);
+    },
+  };
+};
 
 // 按 connectorId 分类输入字段(模拟 provider account.creds:CEX apiKey=semi + secret/passphrase=secret;
 // 链上/perp address=public、bitcoin addressOrXpub=public)。
@@ -38,25 +56,29 @@ function makeDeps() {
   let n = 0;
   const deps: ImportDeps = {
     categorize,
-    importToken: async (t, refs) => {
-      calls.tokens.push({ symbol: t.symbol, refs });
-      return { id: `tk-${++n}` };
-    },
-    importAccount: async (input) => {
-      calls.accounts.push({
-        connectorId: input.connectorId,
-        label: input.label,
-        creds: input.creds,
-        archivedAt: input.archivedAt,
-      });
-      return { id: `acc-${++n}` };
-    },
-    importSnapshot: async (accountId, input) => {
-      calls.snapshots.push({ accountId, totalUsd: input.totalUsd, balances: input.balances });
-    },
-    importManualActivity: async (accountId, tokenId, input) => {
-      calls.activities.push({ accountId, tokenId, amount: input.amount });
-    },
+    importToken: (t, refs) =>
+      Effect.sync(() => {
+        calls.tokens.push({ symbol: t.symbol, refs });
+        return { id: `tk-${++n}` };
+      }),
+    importAccount: (input) =>
+      Effect.sync(() => {
+        calls.accounts.push({
+          connectorId: input.connectorId,
+          label: input.label,
+          creds: input.creds,
+          archivedAt: input.archivedAt,
+        });
+        return { id: `acc-${++n}` };
+      }),
+    importSnapshot: (accountId, input) =>
+      Effect.sync(() => {
+        calls.snapshots.push({ accountId, totalUsd: input.totalUsd, balances: input.balances });
+      }),
+    importManualActivity: (accountId, tokenId, input) =>
+      Effect.sync(() => {
+        calls.activities.push({ accountId, tokenId, amount: input.amount });
+      }),
   };
   return { deps, calls };
 }
@@ -73,7 +95,7 @@ describe("parseImportLine", () => {
 describe("createImporter —— 版本闸", () => {
   it("缺 meta 头 → 报错", async () => {
     const { deps } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await expect(imp.apply({ type: "account", connectorId: "manual" })).rejects.toThrow(
       ImportError,
     );
@@ -81,13 +103,13 @@ describe("createImporter —— 版本闸", () => {
 
   it("旧版本文件(v2)→ 明确报「太旧」,不崩", async () => {
     const { deps } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await expect(imp.apply({ type: "meta", version: 2 })).rejects.toThrow(/太旧|v2/);
   });
 
   it("未来版本 → 也拒绝", async () => {
     const { deps } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await expect(imp.apply({ type: "meta", version: 999 })).rejects.toThrow(ImportError);
   });
 });
@@ -95,7 +117,7 @@ describe("createImporter —— 版本闸", () => {
 describe("createImporter —— creds 重建", () => {
   it("CEX semi field → stored as semi_<key> placeholder(masked,待补录)", async () => {
     const { deps, calls } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
     await imp.apply({
       type: "account",
@@ -109,7 +131,7 @@ describe("createImporter —— creds 重建", () => {
 
   it("onchain public field → stored whole(可重建)", async () => {
     const { deps, calls } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
     await imp.apply({
       type: "account",
@@ -124,7 +146,7 @@ describe("createImporter —— creds 重建", () => {
 
   it("带 archivedAt 的账户 → 归档态透传给 importAccount(恢复归档)", async () => {
     const { deps, calls } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
     await imp.apply({
       type: "account",
@@ -141,7 +163,7 @@ describe("createImporter —— creds 重建", () => {
 describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () => {
   it("token 记录 → importToken(带 ref),建 tokenMap", async () => {
     const { deps, calls } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
     await imp.apply({
       type: "token",
@@ -159,7 +181,7 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
 
   it("快照余额的 token_id 经 tokenMap 重映射;映射不到的行丢弃", async () => {
     const { deps, calls } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
     await imp.apply({ type: "token", id: "old-tk", symbol: "BTC", name: "Bitcoin", refs: [] });
     await imp.apply({ type: "account", id: "old-a", connectorId: "evm", label: "W", creds: {} });
@@ -181,7 +203,7 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
 
   it("活动记录 → recordManualActivity(accountId/tokenId 各自重映射);未知 id 跳过", async () => {
     const { deps, calls } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
     await imp.apply({ type: "token", id: "old-tk", symbol: "BTC", name: "Bitcoin", refs: [] });
     await imp.apply({ type: "account", id: "old-a", connectorId: "manual", label: "M", creds: {} });
@@ -209,7 +231,7 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
 
   it("ignores unknown record types (forward-compat)", async () => {
     const { deps, calls } = makeDeps();
-    const imp = createImporter(deps);
+    const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
     await imp.apply({ type: "account", id: "old-a", connectorId: "manual", label: "M", creds: {} });
     // 旧文件里可能残留 group/membership 记录 —— 现已无处理器,静默跳过、不炸。

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import type { ConnectorId } from "@folio/connectors";
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   accountRecord,
@@ -65,15 +66,22 @@ const dstDeps: ImportDeps = {
     connectorId === "evm"
       ? { publicKeys: ["address"], semiKeys: [], secretKeys: [] }
       : { publicKeys: [], semiKeys: [], secretKeys: [] },
-  importToken: async (t, refs) => ({ id: await db.importToken(DST, t, refs) }),
+  // deps 现在收 Effect(#394 T7),而夹具手上只有门面那套 Promise —— `Effect.promise` 包一层即可:
+  // 这里是**测试的边缘**,不是生产路径上的中途转换。
+  importToken: (t, refs) =>
+    Effect.promise(async () => ({ id: await db.importToken(DST, t, refs) })),
   importAccount: (input) =>
-    db.importAccount(DST, { ...input, connectorId: input.connectorId as ConnectorId }),
-  importSnapshot: async (accountId, input) => {
-    await db.importSnapshot(DST, accountId, input);
-  },
-  importManualActivity: async (accountId, tokenId, input) => {
-    await db.importManualActivity(DST, accountId, tokenId, input);
-  },
+    Effect.promise(() =>
+      db.importAccount(DST, { ...input, connectorId: input.connectorId as ConnectorId }),
+    ),
+  importSnapshot: (accountId, input) =>
+    Effect.promise(async () => {
+      await db.importSnapshot(DST, accountId, input);
+    }),
+  importManualActivity: (accountId, tokenId, input) =>
+    Effect.promise(async () => {
+      await db.importManualActivity(DST, accountId, tokenId, input);
+    }),
 };
 
 async function importInto(records: unknown[]): Promise<void> {
@@ -81,7 +89,7 @@ async function importInto(records: unknown[]): Promise<void> {
   const imp = createImporter(dstDeps);
   for (const line of text.split("\n")) {
     const rec = parseImportLine(line);
-    if (rec) await imp.apply(rec);
+    if (rec) await Effect.runPromise(imp.apply(rec));
   }
 }
 
