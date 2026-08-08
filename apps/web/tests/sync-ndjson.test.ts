@@ -13,6 +13,11 @@ const readLines = async (body: ReadableStream<Uint8Array>): Promise<string[]> =>
   return text.split("\n").filter((l) => l.length > 0);
 };
 
+// `ndjsonRound` 现在返回 Effect(#394 T5:建队列本来就是个 effect,由调用方在自己的边缘跑)。
+// 测试的边缘就在每个用例这一行。
+const round = <A>(...args: Parameters<typeof ndjsonRound<A>>) =>
+  Effect.runPromise(ndjsonRound(...args));
+
 const fail = (message: string) => Stream.fail({ message });
 
 describe("ndjsonRound", () => {
@@ -21,14 +26,14 @@ describe("ndjsonRound", () => {
       { accountId: "a1", ok: true },
       { accountId: "a2", ok: false, error: "boom" },
     ];
-    const { body, run } = await ndjsonRound(Stream.fromIterable(results));
+    const { body, run } = await round(Stream.fromIterable(results));
     await run;
     expect((await readLines(body)).map((l) => JSON.parse(l))).toEqual(results);
   });
 
   it("用户级失败 → 末行是 { fatal },并记一笔", async () => {
     const onFatal = vi.fn();
-    const { body, run } = await ndjsonRound(
+    const { body, run } = await round(
       Stream.fromIterable([{ accountId: "a1", ok: true }]).pipe(
         Stream.concat(fail("listAccounts blew up")),
       ),
@@ -44,14 +49,14 @@ describe("ndjsonRound", () => {
   // 队列是无界的,所以它不该被卡住 —— 卡住的话这条会超时,而不是断言失败。
   it("没人读也跑完,之后再读仍拿到全部行", async () => {
     const results = Array.from({ length: 20 }, (_, i) => ({ accountId: `a${i}`, ok: true }));
-    const { body, run } = await ndjsonRound(Stream.fromIterable(results));
+    const { body, run } = await round(Stream.fromIterable(results));
     await run; // 此刻响应流一个字节都还没被读过
     expect(await readLines(body)).toHaveLength(20);
   });
 
   it("afterRound 在一轮之后跑;它抛错不影响已产出的结果(best-effort)", async () => {
     const order: string[] = [];
-    const { body, run } = await ndjsonRound(
+    const { body, run } = await round(
       Stream.fromIterable([{ accountId: "a1", ok: true }]).pipe(
         Stream.tap(() => Effect.sync(() => order.push("result"))),
       ),
@@ -76,7 +81,7 @@ describe("ndjsonRound", () => {
       release = resolve;
     });
     let warmed = false;
-    const { body, run } = await ndjsonRound(Stream.fromIterable([{ accountId: "a1", ok: true }]), {
+    const { body, run } = await round(Stream.fromIterable([{ accountId: "a1", ok: true }]), {
       afterRound: async () => {
         await held;
         warmed = true;
@@ -93,7 +98,7 @@ describe("ndjsonRound", () => {
   });
 
   it("一轮之后队列关闭 → 响应流自然结束(不悬着)", async () => {
-    const { body, run } = await ndjsonRound(Stream.empty);
+    const { body, run } = await round(Stream.empty);
     await run;
     expect(await readLines(body)).toEqual([]); // 读得到 EOF,不是卡住
   });

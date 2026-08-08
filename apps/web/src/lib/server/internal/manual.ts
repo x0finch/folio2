@@ -23,7 +23,7 @@ import {
 import type { BalanceLike } from "../../tokens";
 import { db } from "./db";
 import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";
-import { NAMER, runOracle } from "./oracle";
+import { NAMER, runRequest } from "./oracle";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;
@@ -68,7 +68,7 @@ async function mintHolding(
     ref: picked.ticket ? tokenTicket.decode(picked.ticket, [NAMER, FIAT_NAMER]) : undefined,
   });
   const symbol = picked.symbol.trim().toUpperCase();
-  const ids = await runOracle(
+  const ids = await runRequest(
     userId,
     Effect.flatMap(TokenService, (t) => t.mint([{ ref, seed: { symbol } }])),
   );
@@ -131,8 +131,8 @@ async function manualTokensByAccount(
   );
 }
 
-// 上面三个的 Effect 版(#394 T4)。**总览那条链从头到尾一个 effect** —— 以前它中途 `runOracle`
-// 一次(这里)、末尾 `runOracle` 一次(buildOverview),一次请求切两次边界、建两套 store。
+// 上面三个的 Effect 版(#394 T4)。**总览那条链从头到尾一个 effect** —— 以前它中途 `runRequest`
+// 一次(这里)、末尾 `runRequest` 一次(buildOverview),一次请求切两次边界、建两套 store。
 const manualTokensByAccountE = (
   accounts: AccountSafe[],
 ): Effect.Effect<{ id: string; tokens: CredsToken[] }[], never, ManualStore> => {
@@ -166,7 +166,7 @@ export const manualFiatRefsE = (
     return out;
   });
 
-/** `injectManualSnapshots` 的 Effect 版:注入逻辑逐字相同,只是不再自己 `runOracle`。 */
+/** `injectManualSnapshots` 的 Effect 版:注入逻辑逐字相同,只是不再自己 `runRequest`。 */
 export const injectManualSnapshotsE = (
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
@@ -212,7 +212,7 @@ export async function injectManualSnapshots(
   // **法币身份按 tokenId 从 `fiatRefs` 判**,不靠 `CredsToken.ref`(那是 CGK 档、法币恒 null,#272)——
   // 一次批量取(manualFiatRefs 内部按账户并发),不 N+1。
   const fiatRefs = await manualFiatRefs(userId, accounts);
-  const snapshots = await runOracle(
+  const snapshots = await runRequest(
     userId,
     Effect.gen(function* () {
       const enriched = yield* Effect.flatMap(TokenService, (t) =>
@@ -252,13 +252,12 @@ async function manualFiatRefs(
 
 // 预热用:该用户全部 manual 账户的合成余额(供 warmTokens 把其代币现价取进缓存)。manual 已退出 snapshot,
 // 故预热不能只从快照收集币 —— 否则纯 manual 用户的币永远暖不到、拿不到实时价(ADR 0018 T2 实施细化)。
-export async function manualBalancesForWarm(
-  userId: string,
+export const manualBalancesForWarm = (
   accounts: AccountSafe[],
-): Promise<BalanceLike[]> {
-  const list = await manualTokensByAccount(userId, accounts);
-  return list.flatMap(({ id, tokens }) => buildManualSnapshot(id, tokens, [], 0).balances);
-}
+): Effect.Effect<BalanceLike[], never, ManualStore> =>
+  Effect.map(manualTokensByAccountE(accounts), (list) =>
+    list.flatMap(({ id, tokens }) => buildManualSnapshot(id, tokens, [], 0).balances),
+  );
 
 // —— T3 写路径(#155):token CRUD + 批量活动(原子)+ 删/改活动 ——
 // server fn(manual-mutations.ts)只做 auth 薄壳后调这些纯 async(可在 workers-pool 集成测,不引 createServerFn)。
@@ -427,7 +426,7 @@ async function buildHistoricalPriceAt(
   now: number,
 ): Promise<HistoricalPriceAt> {
   const byIdentifier = new Map<string, Map<number, number>>();
-  await runOracle(
+  await runRequest(
     userId,
     Effect.forEach(
       tokens,

@@ -19,7 +19,7 @@ import {
   loadManualHistoryRows,
   manualFiatRefsE,
 } from "./internal/manual";
-import { runAtEdge, runOracle, withRequest } from "./internal/oracle";
+import { runAtEdge, runRequest, withRequest } from "./internal/oracle";
 import { buildOverview } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
 import { enrichBalances } from "./internal/token-enrich";
@@ -78,7 +78,7 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
   // **整条链一个 effect,一次装配**(#394 T4)。以前这里切两次 Effect 边界、建两套 store:
-  // `injectManualSnapshots` 内部 `runOracle` 一次,末尾 `buildOverview` 又一次。现在读账户、
+  // `injectManualSnapshots` 内部 `runRequest` 一次,末尾 `buildOverview` 又一次。现在读账户、
   // 读快照、读设置、读归属、注入手记、问价走的是同一份 context —— Effect 官方那句
   // 「`run*` 尽量放在程序的边缘」,在 server fn 这条路上边缘就是 handler 本身。
   .handler(({ data, context }) =>
@@ -142,7 +142,7 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
     await injectManualSnapshots(context.userId, accounts, byAccount);
     // 一次装配、逐账户富化。**逐账户串行**(以前是 `Promise.all` 的隐式全并发)——
     // 每个账户一次批量读,账户数是个位数,而 D1 并不因为同时发十条而更快。
-    const rows = await runOracle(
+    const rows = await runRequest(
       context.userId,
       Effect.forEach(accounts, (account) =>
         Effect.gen(function* () {
@@ -211,7 +211,7 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     // manual 不写快照(ADR 0018):当下点的 manual 净值由 creds 现造注入(过去点仍来自真实快照 totals)。
     await injectManualSnapshots(context.userId, accounts, byAccount);
-    const liveTotals = await runOracle(
+    const liveTotals = await runRequest(
       context.userId,
       deriveLiveAccountTotals(accounts, byAccount, settings.valuationMode),
     );

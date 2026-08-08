@@ -19,7 +19,7 @@ import { Effect, Option } from "effect";
 // **法币分支**(ADR 0025):某笔持仓身份是 `fiat/issued:<CODE>` 时,USD 值 = 数量 × FX 汇率
 // (`usd_per_unit`,USD 恒 1),**每次现算、不冻 selfPrice** —— 与 manual mark-to-market 一致:
 // 汇率变则非美元法币的 USD 显示值随之变。取价与汇率两样能力都在 `R` 通道上(`TokenService` /
-// `FxService`),由调用方一次 `runOracle` 供上 —— 这个函数自己不建任何门面。
+// `FxService`),由调用方一次 `runRequest` 供上 —— 这个函数自己不建任何门面。
 // 汇率缺失(非美元且缓存冷)→ 保留 provider 原值(best-effort,不抛)。
 //
 // **并发度按原样保留成 `unbounded`**:迁移前是 `Promise.all`,也就是「全都一起上」。

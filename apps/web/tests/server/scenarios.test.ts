@@ -14,7 +14,7 @@ import {
   createToken,
   injectManualSnapshots,
 } from "../../src/lib/server/internal/manual";
-import { NAMER, runOracle } from "../../src/lib/server/internal/oracle";
+import { NAMER, runRequest } from "../../src/lib/server/internal/oracle";
 import { buildOverview } from "../../src/lib/server/internal/overview-model";
 import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
 import { withStore } from "./db-effect";
@@ -77,8 +77,8 @@ async function overview() {
   );
   await injectManualSnapshots(USER, accounts, byAccount);
   // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与 server fn 逐字同款:
-  // 一次 `runOracle` 供上 `TokenService` / `PlatformService`。
-  return runOracle(
+  // 一次 `runRequest` 供上 `TokenService` / `PlatformService`。
+  return runRequest(
     USER,
     buildOverview(accounts, byAccount, {
       connectorMeta: connectorPlatformMeta,
@@ -151,7 +151,7 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
       headers: { "content-type": "application/json" },
     });
   });
-  await runOracle(
+  await runRequest(
     USER,
     Effect.flatMap(TokenService, (tokens) => tokens.refreshStale([tokenId])),
   );
