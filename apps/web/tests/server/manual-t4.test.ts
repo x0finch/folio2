@@ -3,13 +3,13 @@ import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../../src/lib/server/internal/db";
+import { buildOwnedOptions } from "../../src/lib/token-search";
 import {
   addManualActivities,
   createManualAccount,
   editManualActivity,
   loadManualAccountDetail,
-} from "../../src/lib/server/internal/manual";
-import { buildOwnedOptions } from "../../src/lib/token-search";
+} from "./manual-fns";
 import { ticketOf } from "./ticket";
 
 // T4(#156)服务端支撑:抽屉读路径 loadManualAccountDetail(token 定义 + 折叠 amount + 全部活动)+ fee 落库 round-trip。

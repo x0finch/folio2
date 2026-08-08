@@ -3,10 +3,9 @@ import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";
-import { createAccountFor } from "../../src/lib/server/internal/create-account";
 import { db } from "../../src/lib/server/internal/db";
-import { createManualAccount } from "../../src/lib/server/internal/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle";
+import { createAccountFor, createManualAccount } from "./manual-fns";
 import { ticketOf } from "./ticket";
 
 // manual 创建往返的真实 D1 集成测试(jsdom 单测覆盖不到的服务端编排)。

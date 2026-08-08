@@ -1,14 +1,16 @@
 import type { ConnectorId } from "@folio/connectors";
+import { AccountStore, PortfolioStore, SnapshotStore } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
 import { z } from "zod";
 import { isComplete, safeView } from "../creds";
 import { buildAccountValueHistory } from "../history";
 import { MANUAL_CONNECTOR_ID } from "../manual-connector";
 import { credentialSpecs, validateAccountCreds } from "./internal/connector-registry";
 import { createAccountFor, raw2sealed } from "./internal/create-account";
-import { db } from "./internal/db";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "./internal/manual";
+import { runRequest, runStore } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 connectorId/accountId 等安全字段(红线:不打 creds)。
@@ -19,10 +21,9 @@ const log = getLogger(["folio", "web", "accounts"]);
 export const listAccounts = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => {
-    const [accounts, rawList] = await Promise.all([
-      db.listAccountsByUser(context.userId),
-      db.listRawCredsByUser(context.userId),
-    ]);
+    const [accounts, rawList] = await runStore(context.userId, AccountStore, (s) =>
+      Effect.all([s.list(), s.listRawCreds()], { concurrency: 2 }),
+    );
     const rawById = new Map(rawList.map((r) => [r.id, r.creds]));
     const specsByType = credentialSpecs();
     return accounts.map((a) => {
@@ -50,17 +51,23 @@ export const createAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreateAccountInput)
   .handler(async ({ data, context }) => {
-    const account = await createAccountFor(
+    return runRequest(
       context.userId,
-      data.connectorId as ConnectorId,
-      data.label,
-      data.values,
+      Effect.gen(function* () {
+        const account = yield* createAccountFor(
+          data.connectorId as ConnectorId,
+          data.label,
+          data.values,
+        );
+        // createAccountFor 已把账户落进默认 Portfolio;若指定了非默认的选中,改归属过去。
+        if (data.portfolioId) {
+          yield* Effect.flatMap(PortfolioStore, (s) =>
+            s.assignAccount(account.id, data.portfolioId as string),
+          );
+        }
+        return account;
+      }),
     );
-    // createAccountFor 已把账户落进默认 Portfolio;若指定了非默认的选中,改归属过去。
-    if (data.portfolioId) {
-      await db.assignAccountToPortfolio(context.userId, account.id, data.portfolioId);
-    }
-    return account;
   });
 
 // 凭据再水合(P6.6.1):为导入的"缺凭据"账户补录真值。活性校验通过后整张 map 覆盖(占位被真值替换)。
@@ -72,17 +79,15 @@ export const replaceAccountCredentials = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(ReplaceCredentialsInput)
   .handler(async ({ data, context }) => {
-    const account = await db.getAccountById(context.userId, data.accountId);
+    const account = await runStore(context.userId, AccountStore, (s) => s.getById(data.accountId));
     if (!account) throw new Error("account not found");
+    // 校验(含活性探活)不碰 db,留在边缘 —— 它失败时的那条消息要原样给到表单上。
     await validateAccountCreds(account.connectorId, data.creds, {
       liveness: true,
       label: account.label,
     });
-    await db.setAccountCredentials(
-      context.userId,
-      account.id,
-      await raw2sealed(account.connectorId, data.creds),
-    );
+    const sealed = await raw2sealed(account.connectorId, data.creds);
+    await runStore(context.userId, AccountStore, (s) => s.setCredentials(account.id, sealed));
     log.info("credentials provided", { connectorId: account.connectorId, accountId: account.id });
     return { ok: true as const };
   });
@@ -102,12 +107,12 @@ export const updateAccount = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
-    if (data.label !== undefined) {
-      await db.renameAccount(context.userId, data.accountId, data.label);
-    }
-    if (data.archived !== undefined) {
-      await db.setArchived(context.userId, data.accountId, data.archived);
-    }
+    await runStore(context.userId, AccountStore, (s) =>
+      Effect.gen(function* () {
+        if (data.label !== undefined) yield* s.rename(data.accountId, data.label);
+        if (data.archived !== undefined) yield* s.setArchived(data.accountId, data.archived);
+      }),
+    );
     log.info("account updated", {
       accountId: data.accountId,
       renamed: data.label !== undefined,
@@ -121,7 +126,7 @@ export const removeAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(AccountIdInput)
   .handler(async ({ data, context }) => {
-    await db.deleteAccount(context.userId, data.accountId);
+    await runStore(context.userId, AccountStore, (s) => s.remove(data.accountId));
     log.info("account deleted", { accountId: data.accountId });
     return { ok: true as const };
   });
@@ -144,14 +149,21 @@ export const getAccountHistory = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     if (data.connectorId === MANUAL_CONNECTOR_ID) {
       // 日网格 compute-on-read(ADR 0019):同一 now 喂网格(末点 τ=now)与 live 末点 → 端点同刻,replace 分支命中。
+      // **账本序列与实时末点一次装配**:两者本来就要对齐同一个 now,分两次跑还各建一套 store。
       const now = Date.now();
-      const rows = await loadManualAccountSeries(context.userId, data.accountId, now);
+      const { rows, liveTotal } = await runRequest(
+        context.userId,
+        Effect.gen(function* () {
+          const rows = yield* loadManualAccountSeries(data.accountId, now);
+          const liveTotal = yield* loadManualAccountLiveTotal(data.accountId);
+          return { rows, liveTotal };
+        }),
+      );
       const series = buildAccountValueHistory(
         rows.map((r) => ({ takenAt: r.takenAt, totalUsd: r.totalUsd })),
         data.since,
       );
       // 末点接实时盯市(与抽屉头同源):有账本点才补,空账户不凭空造点(与快照路径空态一致)。
-      const liveTotal = await loadManualAccountLiveTotal(context.userId, data.accountId);
       if (liveTotal != null && series.length > 0) {
         const last = series[series.length - 1];
         if (last.t >= now) series[series.length - 1] = { t: last.t, total: liveTotal };
@@ -159,6 +171,8 @@ export const getAccountHistory = createServerFn({ method: "GET" })
       }
       return { series };
     }
-    const snapshots = await db.listSnapshotsByAccount(context.userId, data.accountId);
+    const snapshots = await runStore(context.userId, SnapshotStore, (s) =>
+      s.listByAccount(data.accountId),
+    );
     return { series: buildAccountValueHistory(snapshots, data.since) };
   });
