@@ -1,8 +1,24 @@
 import { env } from "cloudflare:workers";
 import type { UpstreamError } from "@folio/client-core";
 import {
+  type AccountStore,
+  accountStoreLayer,
   databaseLayer,
   globalTokenRefIndexStoreLayer,
+  type ManualStore,
+  manualStoreLayer,
+  type PortfolioStore,
+  portfolioStoreLayer,
+  type SettingsStore,
+  type SnapshotStore,
+  settingsStoreLayer,
+  snapshotStoreLayer,
+  type TabPinStore,
+  type TagStore,
+  type TransferStore,
+  tabPinStoreLayer,
+  tagStoreLayer,
+  transferStoreLayer,
   userCacheStoreLayer,
   userTokenPriceStoreLayer,
   userTokenStoreLayer,
@@ -135,6 +151,58 @@ export const withOracleWarm = <A>(
  */
 export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.provide(logTapeLogger)));
+
+// —— 应用数据那半的 per-user 服务(ADR 0037,#394 T4)——
+//
+// 参考层的四张 store 在上面 `portsFor`;这里是 db 的八个领域服务。**同一个 `databaseLayer(env)`**
+// 喂给两边 —— 一次请求一个 drizzle 句柄,不是每个 store 一个。
+//
+// `TransferStore` 的 layer 还要另外两个 store(导快照/导活动调它们的写口),所以先合出 base
+// 再把它 provide 上去。
+const dbStoresFor = (userId: string) => {
+  const base = Layer.mergeAll(
+    accountStoreLayer(userId),
+    portfolioStoreLayer(userId),
+    settingsStoreLayer(userId),
+    snapshotStoreLayer(userId),
+    manualStoreLayer(userId),
+    tagStoreLayer(userId),
+    tabPinStoreLayer(userId),
+  );
+  return Layer.provide(
+    Layer.merge(base, Layer.provide(transferStoreLayer(userId), base)),
+    databaseLayer(env),
+  );
+};
+
+/** app 数据那半的全部服务 —— server fn 的 `R` 里出现的就是这些。 */
+export type DbStores =
+  | AccountStore
+  | PortfolioStore
+  | SettingsStore
+  | SnapshotStore
+  | ManualStore
+  | TagStore
+  | TabPinStore
+  | TransferStore;
+
+/**
+ * **一次请求一次装配** —— 参考层 + app 数据两边一起装。
+ *
+ * 这是 #394 要达成的形状:一个 server fn 里连着读账户、问价、读快照、写活动,走的是同一份
+ * context;以前是每问一次各 `runPromise` 一次(一个总览请求切两次 Effect 边界、建两套 store)。
+ * Effect 官方那句「`run*` 尽量放在程序的边缘」在 server fn 这条路上就是这个形状:
+ * 边缘是 handler 本身,再往里一次都不切。
+ */
+export const withRequest = <A>(
+  userId: string,
+  effect: Effect.Effect<A, UpstreamError, OracleServices | OraclePorts | DbStores>,
+): Effect.Effect<A, Error> =>
+  effect.pipe(
+    Effect.provide(dbStoresFor(userId)),
+    Effect.provide(oracleFor(userId)),
+    Effect.mapError(toError),
+  );
 
 /**
  * 一步式:装配 + 立刻跑。server fn / route handler 那种「一次请求就问一次」的路径用它 ——
