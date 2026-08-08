@@ -12,11 +12,7 @@ import { buildPortfolioHistory } from "../history";
 import { isManual } from "../manual-connector";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { deriveLiveAccountTotals } from "./internal/live-value";
-import {
-  injectManualSnapshots,
-  loadManualHistoryRows,
-  manualFiatRefs,
-} from "./internal/manual";
+import { injectManualSnapshots, loadManualHistoryRows, manualFiatRefs } from "./internal/manual";
 import { runAtEdge, runRequest, runStore, withRequest } from "./internal/oracle";
 import { buildOverview } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
