@@ -2,8 +2,8 @@ import { env } from "cloudflare:test";
 import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
-import { db } from "../../src/lib/server/internal/db";
 import { buildOwnedOptions } from "../../src/lib/token-search";
+import { dbFor } from "./db-effect";
 import {
   addManualActivities,
   createManualAccount,
@@ -64,7 +64,7 @@ describe("loadManualAccountDetail", () => {
   });
 
   it("空账户(无 token)→ 空 detail", async () => {
-    const account = await db.createAccount(USER, {
+    const account = await dbFor(USER).accounts.create({
       connectorId: "manual",
       label: "empty",
       creds: JSON.stringify({ tokens: "[]" }),

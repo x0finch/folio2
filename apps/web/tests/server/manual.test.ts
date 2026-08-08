@@ -3,8 +3,8 @@ import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";
-import { db } from "../../src/lib/server/internal/db";
 import { NAMER } from "../../src/lib/server/internal/oracle";
+import { dbFor } from "./db-effect";
 import { createAccountFor, createManualAccount } from "./manual-fns";
 import { ticketOf } from "./ticket";
 
@@ -26,19 +26,19 @@ beforeEach(resetUser);
 
 // 该账户的持仓(定义 + 账本折叠出的数量)。#203 起这是唯一事实源 —— 没有 creds.tokens 那个投影了。
 async function holdings(accountId: string) {
-  const rows = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
+  const rows = await dbFor(USER).manual.listHoldings(accountId, NAMER);
   return Promise.all(
     rows.map(async (r) => ({
       symbol: r.symbol,
       ref: r.ref,
-      amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
+      amount: deriveAmount(await dbFor(USER).manual.listActivityByToken(accountId, r.id)),
     })),
   );
 }
 
 // 账户的 creds 里**不该**再有持仓数据(物化那一步删了)。
 async function credsOf(accountId: string): Promise<Record<string, unknown>> {
-  const raw = await db.getRawCreds(USER, accountId);
+  const raw = await dbFor(USER).accounts.getRawCreds(accountId);
   return JSON.parse(raw ?? "{}");
 }
 
@@ -61,7 +61,7 @@ describe("createManualAccount (D1 round-trip)", () => {
       "M",
       JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", ticket: ticketOf("bitcoin") }]),
     );
-    const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    const [h] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     expect(h.ref).toBe(`${NAMER}/issued:bitcoin`); // 哪怕 symbol 敲成了 XBT
   });
 
@@ -72,7 +72,7 @@ describe("createManualAccount (D1 round-trip)", () => {
       "M",
       JSON.stringify([{ symbol: "XBT", unitPrice: "1", amount: "1", ticket: "!!!not-base64!!!" }]),
     );
-    const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    const [h] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     expect(h.ref).toBeNull(); // 没有上游命名 → 自己一行,用他填的单价估值
   });
 
@@ -89,7 +89,7 @@ describe("createManualAccount (D1 round-trip)", () => {
       "M",
       JSON.stringify([{ symbol: "BTC", unitPrice: "1", amount: "1", ticket: forged }]),
     );
-    const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    const [h] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     expect(h.ref).toBeNull();
   });
 
@@ -124,7 +124,7 @@ describe("createManualAccount (D1 round-trip)", () => {
         },
       ]),
     );
-    const [underFiat] = await db.listManualHoldingsByAccount(USER, account.id, FIAT_NAMER);
+    const [underFiat] = await dbFor(USER).manual.listHoldings(account.id, FIAT_NAMER);
     expect(underFiat.symbol).toBe("USD");
     expect(underFiat.ref).toBe("fiat/issued:USD");
     // 数量落库;coingecko 命名者那档无 ref(法币不链上游)。
@@ -177,8 +177,8 @@ describe("数量随账本即时变化(无物化)", () => {
       "M",
       JSON.stringify([{ symbol: "BTC", unitPrice: "60000", amount: "1" }]),
     );
-    const [h] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
-    await db.recordManualActivity(USER, account.id, h.id, {
+    const [h] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
+    await dbFor(USER).manual.recordActivity(account.id, h.id, {
       kind: "add",
       amount: 0.5,
       occurredAt: Date.now() + 1,

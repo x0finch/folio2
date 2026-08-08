@@ -1,12 +1,12 @@
+import { listUserIdsWithAccounts } from "@folio/db";
 import { GlobalRefIndexService } from "@folio/oracle";
 import { syncAllUsers } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/internal/cache-headers";
-import { db } from "./lib/server/internal/db";
 import { configureLogging } from "./lib/server/internal/log";
-import { runAtEdge, withOracleWarm } from "./lib/server/internal/oracle";
+import { runAtEdge, withDatabase, withOracleWarm } from "./lib/server/internal/oracle";
 import { buildSyncDeps, warmAllUsers } from "./lib/server/internal/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
@@ -47,7 +47,7 @@ const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
 // sweep 本身不兜 —— 它失败了就该上抛、就该可见。
 const sweepAllUsers = (cron: string): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
-    const userIds = yield* Effect.promise(() => db.listUserIdsWithAccounts());
+    const userIds = yield* withDatabase(listUserIdsWithAccounts);
     cronLog.info("cron sweep start", { cron, users: userIds.length });
     const result = yield* Effect.tryPromise({
       try: () => syncAllUsers(buildSyncDeps(), userIds),

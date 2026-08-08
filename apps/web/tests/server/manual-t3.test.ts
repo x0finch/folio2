@@ -1,8 +1,8 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deriveAmount } from "../../src/lib/manual-activity";
-import { db } from "../../src/lib/server/internal/db";
 import { NAMER } from "../../src/lib/server/internal/oracle";
+import { dbFor } from "./db-effect";
 import {
   addManualActivities,
   createManualAccount,
@@ -38,12 +38,12 @@ beforeEach(resetUser);
 // 某 manual 账户已物化的 creds.tokens(投影)。
 // 该账户的持仓:定义 + 账本折叠出的数量(compute-on-read;#203 之后没有 creds.tokens 那个投影了)。
 async function readTokens(accountId: string) {
-  const rows = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
+  const rows = await dbFor(USER).manual.listHoldings(accountId, NAMER);
   return Promise.all(
     rows.map(async (r) => ({
       id: r.id,
       symbol: r.symbol,
-      amount: deriveAmount(await db.listManualActivityByToken(USER, accountId, r.id)),
+      amount: deriveAmount(await dbFor(USER).manual.listActivityByToken(accountId, r.id)),
       ref: r.ref,
     })),
   );
@@ -83,7 +83,7 @@ describe("createToken", () => {
 describe("updateToken", () => {
   it("改单价/标识即时反映;改目标 amount → 追加 set 对齐,derived === 新值", async () => {
     const account = await seedAccount();
-    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     await updateToken(USER, {
       accountId: account.id,
       tokenId: btc.id,
@@ -95,7 +95,7 @@ describe("updateToken", () => {
     expect(tokens[0].amount).toBe(3);
     // 应追加了一条对齐 set(原开仓 set + 对齐 set = 2 条),**而改的价落在那一笔上** ——
     // 价只有账本一个来源,所以「改单价」这件事必须在账本里有落点。
-    const activities = await db.listManualActivityByToken(USER, account.id, btc.id);
+    const activities = await dbFor(USER).manual.listActivityByToken(account.id, btc.id);
     const sets = activities.filter((a) => a.kind === "set");
     expect(sets).toHaveLength(2);
     expect(sets.at(-1)?.price).toBe(65000);
@@ -103,7 +103,7 @@ describe("updateToken", () => {
 
   it("目标 amount 不变 → 不追加活动", async () => {
     const account = await seedAccount();
-    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     await updateToken(USER, {
       accountId: account.id,
       tokenId: btc.id,
@@ -111,7 +111,7 @@ describe("updateToken", () => {
       unitPrice: 61000,
       amount: 1, // 不变
     });
-    expect(await db.listManualActivityByToken(USER, account.id, btc.id)).toHaveLength(1);
+    expect(await dbFor(USER).manual.listActivityByToken(account.id, btc.id)).toHaveLength(1);
   });
 });
 
@@ -124,7 +124,7 @@ describe("deleteToken", () => {
       unitPrice: 3000,
       amount: 2,
     });
-    const eth = (await db.listManualHoldingsByAccount(USER, account.id, NAMER)).find(
+    const eth = (await dbFor(USER).manual.listHoldings(account.id, NAMER)).find(
       (t) => t.symbol === "ETH",
     );
     if (!eth) throw new Error("eth missing");
@@ -189,9 +189,9 @@ describe("addManualActivities", () => {
     expect(res.symbol).toBe("DOGE");
     // 原子:BTC 未变、DOGE 未建。
     expect(await readTokens(account.id)).toEqual(before);
-    expect(
-      (await db.listManualHoldingsByAccount(USER, account.id, NAMER)).map((t) => t.symbol),
-    ).toEqual(["BTC"]);
+    expect((await dbFor(USER).manual.listHoldings(account.id, NAMER)).map((t) => t.symbol)).toEqual(
+      ["BTC"],
+    );
   });
 });
 
@@ -207,7 +207,7 @@ describe("deleteManualActivity", () => {
       },
     ]);
     expect((await readTokens(account.id))[0].amount).toBe(3); // 1 + 2
-    const added = (await db.listManualActivityByAccount(USER, account.id)).find(
+    const added = (await dbFor(USER).manual.listActivityByAccount(account.id)).find(
       (a) => a.kind === "add",
     );
     if (!added) throw new Error("add activity missing");
@@ -219,7 +219,7 @@ describe("deleteManualActivity", () => {
 describe("editManualActivity", () => {
   it("改活动致超支 → {ok:false},不写", async () => {
     const account = await seedAccount();
-    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     // 加一条 reduce 1(合法:1-1=0）。
     await addManualActivities(USER, account.id, [
       {
@@ -229,7 +229,7 @@ describe("editManualActivity", () => {
         occurredAt: LATER + 6,
       },
     ]);
-    const reduce = (await db.listManualActivityByToken(USER, account.id, btc.id)).find(
+    const reduce = (await dbFor(USER).manual.listActivityByToken(account.id, btc.id)).find(
       (a) => a.kind === "reduce",
     );
     if (!reduce) throw new Error("reduce missing");
@@ -237,7 +237,7 @@ describe("editManualActivity", () => {
     const res = await editManualActivity(USER, reduce.id, { amount: 5 });
     expect(res.ok).toBe(false);
     // 未写:活动仍是 1，amount 仍 0。
-    const still = (await db.listManualActivityByToken(USER, account.id, btc.id)).find(
+    const still = (await dbFor(USER).manual.listActivityByToken(account.id, btc.id)).find(
       (a) => a.id === reduce.id,
     );
     expect(still?.amount).toBe(1);
@@ -246,8 +246,8 @@ describe("editManualActivity", () => {
 
   it("合法改动 → 写入并重折叠", async () => {
     const account = await seedAccount();
-    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
-    const set = (await db.listManualActivityByToken(USER, account.id, btc.id))[0];
+    const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
+    const set = (await dbFor(USER).manual.listActivityByToken(account.id, btc.id))[0];
     const res = await editManualActivity(USER, set.id, { amount: 4 });
     expect(res.ok).toBe(true);
     expect((await readTokens(account.id))[0].amount).toBe(4);
@@ -255,7 +255,7 @@ describe("editManualActivity", () => {
 
   it("空 patch → 不抛(drizzle 空 set 会抛),幂等 {ok:true}", async () => {
     const account = await seedAccount();
-    const set = (await db.listManualActivityByAccount(USER, account.id))[0];
+    const set = (await dbFor(USER).manual.listActivityByAccount(account.id))[0];
     const res = await editManualActivity(USER, set.id, {});
     expect(res.ok).toBe(true);
     expect((await readTokens(account.id))[0].amount).toBe(1);
@@ -279,7 +279,7 @@ describe("越权防御(跨用户 / 跨账户)", () => {
   it("跨用户改持仓 → 抛(token 归属校验)", async () => {
     await ensureOther();
     const account = await seedAccount(); // USER 拥有
-    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     await expect(
       updateToken(OTHER, {
         accountId: account.id,
@@ -294,7 +294,7 @@ describe("越权防御(跨用户 / 跨账户)", () => {
   it("跨用户清空持仓 → 抛", async () => {
     await ensureOther();
     const account = await seedAccount();
-    const [btc] = await db.listManualHoldingsByAccount(USER, account.id, NAMER);
+    const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     await expect(deleteToken(OTHER, account.id, btc.id)).rejects.toThrow();
   });
 
@@ -318,7 +318,7 @@ describe("越权防御(跨用户 / 跨账户)", () => {
   it("跨用户编辑他人活动 → 抛(getManualActivityOwner)", async () => {
     await ensureOther();
     const account = await seedAccount();
-    const set = (await db.listManualActivityByAccount(USER, account.id))[0];
+    const set = (await dbFor(USER).manual.listActivityByAccount(account.id))[0];
     await expect(editManualActivity(OTHER, set.id, { amount: 2 })).rejects.toThrow();
   });
 
@@ -331,9 +331,9 @@ describe("越权防御(跨用户 / 跨账户)", () => {
       "B",
       JSON.stringify([{ symbol: "ETH", unitPrice: "1", amount: "1" }]),
     );
-    const [btcTok] = await db.listManualHoldingsByAccount(USER, a.id, NAMER);
+    const [btcTok] = await dbFor(USER).manual.listHoldings(a.id, NAMER);
 
-    await db.commitManualBatch(USER, {
+    await dbFor(USER).manual.commitBatch({
       accountId: b.id,
       declare: [],
       activities: [{ tokenId: btcTok.id, kind: "add", amount: 1, occurredAt: LATER + 1 }],
@@ -347,14 +347,14 @@ describe("越权防御(跨用户 / 跨账户)", () => {
   it("commitManualBatch 拒绝引用别人的 tokenId(纵深防御)", async () => {
     await ensureOther();
     const a = await seedAccount(); // USER 的
-    const [btcTok] = await db.listManualHoldingsByAccount(USER, a.id, NAMER);
+    const [btcTok] = await dbFor(USER).manual.listHoldings(a.id, NAMER);
     const other = await createManualAccount(
       OTHER,
       "O",
       JSON.stringify([{ symbol: "ETH", unitPrice: "1", amount: "1" }]),
     );
     await expect(
-      db.commitManualBatch(OTHER, {
+      dbFor(OTHER).manual.commitBatch({
         accountId: other.id,
         declare: [],
         activities: [{ tokenId: btcTok.id, kind: "add", amount: 1, occurredAt: LATER + 1 }],

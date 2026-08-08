@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import type { SnapshotWithBalances } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
-import { db } from "../../src/lib/server/internal/db";
+import { dbFor } from "./db-effect";
 import { createManualAccount, injectManualSnapshots, manualBalancesForWarm } from "./manual-fns";
 import { ticketOf } from "./ticket";
 
@@ -50,7 +50,7 @@ async function coingeckoRefOf(tokenId: string | null | undefined): Promise<strin
 
 // 直接写一行快照 + 一条余额(绕过 sync,单测 purge 谓词用)。
 async function seedSnapshot(accountId: string): Promise<void> {
-  await db.writeSnapshot(USER, accountId, {
+  await dbFor(USER).snapshots.write(accountId, {
     takenAt: Date.now(),
     totalUsd: 100,
     balances: [{ tokenId: "tk-btc", amount: 1, usdValue: 100, kind: "spot" }],
@@ -66,7 +66,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
         { symbol: "BTC", unitPrice: "64000", ticket: ticketOf("bitcoin"), amount: "0.5" },
       ]),
     );
-    const accounts = await db.listAccountsByUser(USER);
+    const accounts = await dbFor(USER).accounts.list();
     const byAccount = new Map<string, SnapshotWithBalances>();
     await injectManualSnapshots(USER, accounts, byAccount, 1_700_000_000_000);
 
@@ -115,7 +115,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
       "My USDC",
       JSON.stringify([{ symbol: "USDC", unitPrice: "777", amount: "10" }]),
     );
-    const accounts = await db.listAccountsByUser(USER);
+    const accounts = await dbFor(USER).accounts.list();
     const byAccount = new Map<string, SnapshotWithBalances>();
     await injectManualSnapshots(USER, accounts, byAccount, 1_700_000_000_000);
 
@@ -135,7 +135,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
       ]),
     );
     await warmUserPrice("usd-coin", 1); // mint 之后灌价(新层价 facet 在 per-user token 行上)
-    const accounts = await db.listAccountsByUser(USER);
+    const accounts = await dbFor(USER).accounts.list();
     const byAccount = new Map<string, SnapshotWithBalances>();
     await injectManualSnapshots(USER, accounts, byAccount, 1_700_000_000_000);
 
@@ -145,12 +145,12 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
   });
 
   it("非 manual 账户不注入", async () => {
-    const btc = await db.createAccount(USER, {
+    const btc = await dbFor(USER).accounts.create({
       connectorId: "bitcoin",
       label: "BTC wallet",
       creds: null,
     });
-    const accounts = await db.listAccountsByUser(USER);
+    const accounts = await dbFor(USER).accounts.list();
     const byAccount = new Map<string, SnapshotWithBalances>();
     await injectManualSnapshots(USER, accounts, byAccount);
     expect(byAccount.has(btc.id)).toBe(false);
@@ -174,9 +174,9 @@ describe("manualBalancesForWarm", () => {
         { symbol: "ETH", unitPrice: "3000", ticket: ticketOf("ethereum"), amount: "2" },
       ]),
     );
-    await db.setArchived(USER, archived.id, true);
+    await dbFor(USER).accounts.setArchived(archived.id, true);
 
-    const accounts = await db.listAccountsByUser(USER); // 含归档
+    const accounts = await dbFor(USER).accounts.list(); // 含归档
     const balances = await manualBalancesForWarm(USER, accounts);
     // 只应含活跃账户的币(BTC),不含归档账户的币(ETH)。身份走 token_id(#243:无 symbol/tokenRef)。
     expect(balances).toHaveLength(1);
@@ -191,7 +191,7 @@ describe("purge 迁移谓词:删 manual 快照,留其余(级联删余额)", () =
       "M",
       JSON.stringify([{ symbol: "ETH", unitPrice: "3000", amount: "1" }]),
     );
-    const btc = await db.createAccount(USER, {
+    const btc = await dbFor(USER).accounts.create({
       connectorId: "bitcoin",
       label: "BTC wallet",
       creds: null,

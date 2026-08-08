@@ -14,7 +14,7 @@ import {
   fromProviderError,
   type ProviderNeeds,
 } from "@folio/connectors-basic";
-import { type AccountSafe, AccountStore, SnapshotStore } from "@folio/db";
+import { type AccountSafe, AccountStore, SettingsStore, SnapshotStore } from "@folio/db";
 import { FxService, type OraclePorts, type OracleServices, TokenService } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
 import type { FetchOutcome, SyncDeps } from "@folio/sync";
@@ -24,10 +24,9 @@ import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
 import { isSyncableAccount } from "../../syncable";
 import { userDisplayBalances } from "../../user-balances";
-import { db } from "./db";
 import { recordDefiLogosOf } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
-import { type DbStores, runAtEdge, runRequest, withRequest } from "./oracle";
+import { type DbStores, runAtEdge, runDbStore, runRequest, withRequest } from "./oracle";
 import { warmPlatforms } from "./platforms";
 import { revalue } from "./revalue";
 import { warmHeldPrices } from "./token-enrich";
@@ -231,7 +230,10 @@ export function buildSyncDeps(): SyncDeps {
   const modeFor = (userId: string): Promise<ValuationMode> => {
     let p = modeByUser.get(userId);
     if (!p) {
-      p = db.getUserSettings(userId).then((s) => s.valuationMode);
+      p = runDbStore(
+        userId,
+        Effect.flatMap(SettingsStore, (s) => s.get()),
+      ).then((s) => s.valuationMode);
       modeByUser.set(userId, p);
     }
     return p;
@@ -239,9 +241,24 @@ export function buildSyncDeps(): SyncDeps {
   return {
     // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,不写快照)→ 一并过滤。
     // syncUser 只见活跃的可同步账户(判别走纯 isSyncableAccount)。
-    listAccounts: async (userId) => (await db.listAccountsByUser(userId)).filter(isSyncableAccount),
-    listRawCreds: (userId) => db.listRawCredsByUser(userId), // 批量取全用户 creds(消 syncAccount 的 N+1)
-    writeSnapshot: (userId, accountId, input) => db.writeSnapshot(userId, accountId, input),
+    listAccounts: async (userId) =>
+      (
+        await runDbStore(
+          userId,
+          Effect.flatMap(AccountStore, (s) => s.list()),
+        )
+      ).filter(isSyncableAccount),
+    // 批量取全用户 creds(消 syncAccount 的 N+1)
+    listRawCreds: (userId) =>
+      runDbStore(
+        userId,
+        Effect.flatMap(AccountStore, (s) => s.listRawCreds()),
+      ),
+    writeSnapshot: (userId, accountId, input) =>
+      runDbStore(
+        userId,
+        Effect.flatMap(SnapshotStore, (s) => s.write(accountId, input)),
+      ),
     // 认币:每笔余额的 tokenRef 换成 token_id,认定就此冻进快照(ADR 0021 / #200)。
     //
     // **编排在这里、执行在 `@folio/sync` 的 mint 那一步**(#202):它跑在 revalue 之前,一轮同步只跑

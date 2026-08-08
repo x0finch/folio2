@@ -2,9 +2,13 @@
 // query builder(原则 #6)。
 //
 // 包内两半,各有自己的薄壳:
-//   · queries/ —— 接口 db 自己定的那半,统一走门面 `createDb(env)`(见 queries/facade.ts)
-//   · stores/  —— 接口 `@folio/oracle-basic` 定的那半(四个参考层端口),出口是 Layer
-// 非 userId 作用域的 better-auth adapter 不进门面,单独出(它和 `getDb` 一起住 connect.ts)。
+//   · queries/ —— 接口 db 自己定的那半:**per-user 的 Effect 服务**(ADR 0037),Tag + layer 都出
+//   · stores/  —— 接口 `@folio/oracle-basic` 定的那半(四个参考层端口),出口也是 Layer
+// 非 userId 作用域的 better-auth adapter 单独出(它和 `getDb` 一起住 connect.ts)。
+//
+// **过渡期那层 `createDb(env)` 门面已经删掉**(#394 T8)。它在 T1 那阵存在是为了让 app 的九十多处
+// 调用点能一片一片搬,而不是一个几千行的单体 PR;搬完最后一处的同一天它就该消失 —— 留着的话
+// 「一次请求一次装配」旁边永远并排站着一条「每次调用各装一次」的路。
 
 export { createAuthAdapter, type DbEnv } from "./connect"; // adapter 不泄露 db 句柄/schema
 export type {
@@ -39,7 +43,6 @@ export {
   listUserIdsWithAccounts,
 } from "./queries/accounts";
 export { TransferStore, transferStoreLayer } from "./queries/export-import";
-export { createDb, type Db } from "./queries/facade";
 export { ManualStore, manualStoreLayer } from "./queries/manual-activity";
 export { PortfolioStore, portfolioStoreLayer } from "./queries/portfolios";
 export { SettingsStore, settingsStoreLayer } from "./queries/settings";

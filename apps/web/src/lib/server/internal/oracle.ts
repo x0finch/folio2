@@ -155,7 +155,10 @@ export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
 //
 // `TransferStore` 的 layer 还要另外两个 store(导快照/导活动调它们的写口),所以先合出 base
 // 再把它 provide 上去。
-const dbStoresFor = (userId: string, database: Layer.Layer<Database> = databaseLayer(env)) => {
+const dbStoresFor = (
+  userId: string,
+  database: Layer.Layer<Database> = databaseLayer(env),
+): Layer.Layer<DbStores> => {
   const base = Layer.mergeAll(
     accountStoreLayer(userId),
     portfolioStoreLayer(userId),
@@ -235,3 +238,23 @@ export const runStore = <I extends DbStores, S, A>(
   tag: Context.Tag<I, S>,
   use: (service: S) => Effect.Effect<A>,
 ): Promise<A> => runRequest(userId, Effect.flatMap(tag, use));
+
+/**
+ * **只装 db 那半**,不带参考层。
+ *
+ * 存在的唯一理由是 `@folio/sync` 的 `SyncDeps`:它的每个方法各收一个 userId(cron 用**一份** deps
+ * 扫全部用户),与 db 现在 per-user 装配的形状对不上 —— 所以那一处只能逐次装。
+ * 门面删掉之后这笔开销从「藏在 `db.xxx()` 后面」变成了**写在调用点上**,这是它该在的地方:
+ * 真要收掉,得让 sync 的服务也变成 per-user,那是它自己的一票(见 #394 的说明)。
+ */
+export const runDbStore = <A>(
+  userId: string,
+  effect: Effect.Effect<A, never, DbStores>,
+): Promise<A> =>
+  Effect.runPromise(
+    effect.pipe(Effect.provide(dbStoresFor(userId)), Effect.provide(logTapeLogger)),
+  );
+
+/** 系统级(无 userId)的 db 查询 —— cron 枚举用户那一条。原则 #6 的受控例外。 */
+export const withDatabase = <A>(effect: Effect.Effect<A, never, Database>): Effect.Effect<A> =>
+  Effect.provide(effect, databaseLayer(env));
