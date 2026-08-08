@@ -215,4 +215,3 @@ const make = (userId: string) =>
 
 export const portfolioStoreLayer = (userId: string): Layer.Layer<PortfolioStore, never, Database> =>
   Layer.effect(PortfolioStore, make(userId));
-
