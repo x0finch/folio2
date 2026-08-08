@@ -1,12 +1,15 @@
 import type { ConnectorId } from "@folio/connectors";
 import { and, asc, eq } from "drizzle-orm";
-import { type DbEnv, type Drizzle, getDb } from "../connect";
+import { Context, Effect, Layer } from "effect";
+import type { Drizzle } from "../connect";
 import { tabPins } from "../schema";
 import type { TabPin } from "../schema/types";
-import { batchWrite } from "./batch";
+import { Database } from "../stores/service";
 import { assertAccountOwned, assertTagOwned } from "./ownership";
 
 // 自定义 Tab(pin,ADR 0034):把某个 tag / 账户 / connector 钉成导航上的一栏。
+//
+// **服务的方法签名里没有 userId**(ADR 0037):由 `tabPinStoreLayer(userId)` 在装配那一刻吃掉。
 
 // 每 user 至多固定 3 个自定义 Tab(域规则,co-located 同 BALANCE_INSERT_CHUNK 的做法)。
 const MAX_TAB_PINS_PER_USER = 3;
@@ -48,85 +51,101 @@ async function resolvePinTarget(
   return { tagId: null, accountId: null, connectorId: input.connectorId };
 }
 
-// 固定一个自定义 Tab。每 user ≤3(超出抛)。tag pin 校验 Tag 归属本人。
-export async function createTabPin(
-  env: DbEnv,
-  userId: string,
-  input: TabPinInput,
-): Promise<TabPin> {
-  const db = getDb(env);
-  const existing = await db
-    .select({ id: tabPins.id })
-    .from(tabPins)
-    .where(eq(tabPins.userId, userId));
-  if (existing.length >= MAX_TAB_PINS_PER_USER) {
-    throw new Error(`cannot pin more than ${MAX_TAB_PINS_PER_USER} custom tabs`);
-  }
-  const target = await resolvePinTarget(db, userId, input);
-  const row = {
-    id: crypto.randomUUID(),
-    userId,
-    kind: input.kind,
-    tagId: target.tagId,
-    accountId: target.accountId,
-    connectorId: target.connectorId,
-    sortOrder: input.sortOrder ?? existing.length,
-  };
-  await db.insert(tabPins).values(row);
-  return row;
+export interface TabPinStore {
+  /** 固定一个自定义 Tab。每 user ≤3(超出抛)。tag pin 校验 Tag 归属本人。 */
+  readonly create: (input: TabPinInput) => Effect.Effect<TabPin>;
+  /** 全部 pin,按 sortOrder 稳定排序(id 作 tiebreaker)。 */
+  readonly list: () => Effect.Effect<TabPin[]>;
+  /** 改一个 pin 指向的目标(hover「改指向」用):换 connector/tag。owner 断言 + 目标校验。 */
+  readonly updateTarget: (
+    pinId: string,
+    patch: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
+  ) => Effect.Effect<void>;
+  /** 重排 pin(按给定 id 顺序写 sortOrder)。不在列表里的 pin 不动;空列表 no-op。 */
+  readonly reorder: (orderedIds: string[]) => Effect.Effect<void>;
+  /** 取消固定(删 pin)。不碰任何数据(纯删指针),故调用侧无需二次确认(ADR 0034)。 */
+  readonly remove: (pinId: string) => Effect.Effect<void>;
 }
 
-// 该用户全部 pin,按 sortOrder 稳定排序(id 作 tiebreaker)。
-export function listTabPinsByUser(env: DbEnv, userId: string): Promise<TabPin[]> {
-  return getDb(env)
-    .select()
-    .from(tabPins)
-    .where(eq(tabPins.userId, userId))
-    .orderBy(asc(tabPins.sortOrder), asc(tabPins.id));
-}
+export const TabPinStore = Context.GenericTag<TabPinStore>("db/TabPinStore");
 
-// 改一个 pin 指向的目标(hover「改指向」用):换 connector/tag。owner 断言 + 目标校验。
-export async function updateTabPinTarget(
-  env: DbEnv,
-  userId: string,
-  pinId: string,
-  patch: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
-): Promise<void> {
-  const db = getDb(env);
-  await assertTabPinOwned(db, userId, pinId);
-  const target = await resolvePinTarget(db, userId, patch);
-  await db
-    .update(tabPins)
-    .set({
-      kind: patch.kind,
-      tagId: target.tagId,
-      accountId: target.accountId,
-      connectorId: target.connectorId,
-    })
-    .where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId)));
-}
+const make = (userId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database;
 
-// 重排 pin(按给定 id 顺序写 sortOrder)。不在列表里的 pin 不动;空列表 no-op。
-export async function reorderTabPins(
-  env: DbEnv,
-  userId: string,
-  orderedIds: string[],
-): Promise<void> {
-  const db = getDb(env);
-  await batchWrite(
-    db,
-    orderedIds.map((id, i) =>
-      db
-        .update(tabPins)
-        .set({ sortOrder: i })
-        .where(and(eq(tabPins.id, id), eq(tabPins.userId, userId))),
-    ),
-  );
-}
+    const store: TabPinStore = {
+      create: (input) =>
+        Effect.gen(function* () {
+          const existing = yield* database.query((db) =>
+            db.select({ id: tabPins.id }).from(tabPins).where(eq(tabPins.userId, userId)),
+          );
+          if (existing.length >= MAX_TAB_PINS_PER_USER) {
+            return yield* Effect.die(
+              new Error(`cannot pin more than ${MAX_TAB_PINS_PER_USER} custom tabs`),
+            );
+          }
+          const target = yield* database.query((db) => resolvePinTarget(db, userId, input));
+          const row = {
+            id: crypto.randomUUID(),
+            userId,
+            kind: input.kind,
+            tagId: target.tagId,
+            accountId: target.accountId,
+            connectorId: target.connectorId,
+            sortOrder: input.sortOrder ?? existing.length,
+          };
+          yield* database.query((db) => db.insert(tabPins).values(row));
+          return row;
+        }),
 
-// 取消固定(删 pin)。不碰任何数据(纯删指针),故调用侧无需二次确认(ADR 0034)。
-export async function deleteTabPin(env: DbEnv, userId: string, pinId: string): Promise<void> {
-  await getDb(env)
-    .delete(tabPins)
-    .where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId)));
-}
+      list: () =>
+        database.query((db) =>
+          db
+            .select()
+            .from(tabPins)
+            .where(eq(tabPins.userId, userId))
+            .orderBy(asc(tabPins.sortOrder), asc(tabPins.id)),
+        ),
+
+      updateTarget: (pinId, patch) =>
+        Effect.gen(function* () {
+          yield* database.query((db) => assertTabPinOwned(db, userId, pinId));
+          const target = yield* database.query((db) => resolvePinTarget(db, userId, patch));
+          yield* database.query((db) =>
+            db
+              .update(tabPins)
+              .set({
+                kind: patch.kind,
+                tagId: target.tagId,
+                accountId: target.accountId,
+                connectorId: target.connectorId,
+              })
+              .where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId))),
+          );
+        }),
+
+      // 空列表 → `Database.batch` 自己是 no-op(见 stores/service.ts),不必再包一层
+      // ——`batchWrite` 那个包装因此在本片退场。
+      reorder: (orderedIds) =>
+        database.batch((db) =>
+          orderedIds.map((id, i) =>
+            db
+              .update(tabPins)
+              .set({ sortOrder: i })
+              .where(and(eq(tabPins.id, id), eq(tabPins.userId, userId))),
+          ),
+        ),
+
+      remove: (pinId) =>
+        Effect.asVoid(
+          database.query((db) =>
+            db.delete(tabPins).where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId))),
+          ),
+        ),
+    };
+
+    return store;
+  });
+
+export const tabPinStoreLayer = (userId: string): Layer.Layer<TabPinStore, never, Database> =>
+  Layer.effect(TabPinStore, make(userId));
