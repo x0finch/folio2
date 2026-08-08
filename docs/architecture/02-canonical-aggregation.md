@@ -50,7 +50,7 @@ flowchart TD
 
 ## ② 认币(mint)—— 在落库之前定下「它是哪个币」
 
-📍 **地点**:`packages/oracle/entry/src/services/mint.ts`,由 app 编排在写快照之前
+📍 **地点**:`packages/oracle/entry/src/tokens/mint.ts`,由 app 编排在写快照之前
 (`apps/web/src/lib/server/internal/sync-deps.ts`)
 
 🔧 **做了什么**:一批 `tokenRef` 换出各自的 `token_id`。**全程不碰网络** —— 类型上没给它
@@ -206,11 +206,11 @@ Holding {
 | 站 | 地点 |
 |---|---|
 | ① 产生 | `packages/connectors/providers/zerion/src/index.ts`(文法 `packages/oracle/ref/src/token-ref.ts`) |
-| ② 认币 | `packages/oracle/entry/src/services/mint.ts` · 编排 `apps/web/src/lib/server/internal/sync-deps.ts` |
+| ② 认币 | `packages/oracle/entry/src/tokens/mint.ts` · 编排 `apps/web/src/lib/server/internal/sync-deps.ts` |
 | ③ 入库 | `apps/web/src/lib/server/sync.ts` → `packages/db/src/queries/snapshots.ts` `writeSnapshot` |
 | ④ 预热 | `apps/web/src/lib/server/internal/sync-deps.ts` `warmTokensForUser` |
 | ⑤ 读出 | `apps/web/src/lib/server/portfolio.ts` → `packages/db/src/queries/snapshots.ts` `getLatestSnapshotByUser` |
-| ⑥ 富化 | `apps/web/src/lib/server/internal/overview-model.ts` · `packages/oracle/entry/src/services/tokens.ts` `enrich` |
+| ⑥ 富化 | `apps/web/src/lib/server/internal/overview-model.ts` · `packages/oracle/entry/src/tokens/price.ts` `enrich` |
 | ⑦ 组装 | `apps/web/src/lib/server/internal/overview-model.ts` |
 | ⑧ 聚合 | `apps/web/src/lib/aggregate.ts` `buildCanonicalHoldings`(分组键 `groupKey` / 门槛 `isEligible`) |
 | ⑨ 渲染 | `apps/web/src/routes/_authed/index.tsx` · `components/token-holdings.tsx` · `components/asset-sheet.tsx` |

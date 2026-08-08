@@ -1,16 +1,14 @@
 import { Duration, Effect, Layer, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  FxHistory,
-  FxRateResolver,
+  FxService,
+  GlobalRefIndexService,
   oracleLayer,
-  PlatformResolver,
-  RefIndexWarmer,
-  TokenMinter,
-  TokenReader,
+  PlatformService,
+  TokenService,
 } from "../src";
 import {
-  fakeRefIndexStore,
+  fakeGlobalRefIndexStore,
   fakeTokenPriceStore,
   fakeTokenStore,
   harness,
@@ -32,17 +30,19 @@ import {
 // 服务的方法签名里依旧一个 user 参数都没有 —— 拿错用户在编译期就发生不了,而这一层压根不知道
 // 有 userId 这回事(所以这里也测不了它;真正的隔离由 `@folio/db` 那几个 store 自己的测试盯)。
 
-describe("oracleLayer —— 一次装配拿到五个服务", () => {
-  it("五个服务都在,而且只要那八个端口就能起来(`CandidateSource` 不外露)", async () => {
+describe("oracleLayer —— 一次装配拿到三个服务", () => {
+  it("三个服务都在,而且只要那八个端口就能起来(`CandidateSource` 不外露)", async () => {
     const h = harness({ rates: { EUR: 1.09 }, chains: [{ key: "evm:1", name: "Ethereum" }] });
     await h.run(
       Effect.gen(function* () {
-        // 五个都能从 context 里拿出来,而 provide 进去的只有端口(见 fakes 的 `ports`)。
-        expect(yield* Effect.map(TokenReader, (t) => typeof t.enrich)).toBe("function");
-        expect(yield* Effect.map(TokenMinter, (m) => typeof m.of)).toBe("function");
-        expect(yield* Effect.map(FxRateResolver, (f) => typeof f.resolve)).toBe("function");
-        expect(yield* Effect.map(FxHistory, (f) => typeof f.rateSeries)).toBe("function");
-        expect(yield* Effect.map(PlatformResolver, (p) => typeof p.resolve)).toBe("function");
+        // 三个都能从 context 里拿出来,而 provide 进去的只有端口(见 fakes 的 `ports`)。
+        // **合并没有让能力消失**:读、写、现汇率、历史汇率、平台五样仍然一个不少,
+        // 只是分别落在三个服务的方法上 —— 这一条把「方法还在」也钉住。
+        expect(yield* Effect.map(TokenService, (t) => typeof t.enrich)).toBe("function");
+        expect(yield* Effect.map(TokenService, (t) => typeof t.mint)).toBe("function");
+        expect(yield* Effect.map(FxService, (f) => typeof f.resolve)).toBe("function");
+        expect(yield* Effect.map(FxService, (f) => typeof f.rateSeries)).toBe("function");
+        expect(yield* Effect.map(PlatformService, (p) => typeof p.resolve)).toBe("function");
       }),
     );
   });
@@ -60,8 +60,8 @@ describe("oracleLayer —— 一次装配拿到五个服务", () => {
       },
     ];
     const ids = await h.run(
-      Effect.flatMap(TokenMinter, (m) =>
-        m.of([{ ref: "binance/issued:BTC", seed: { symbol: "BTC" } }]),
+      Effect.flatMap(TokenService, (t) =>
+        t.mint([{ ref: "binance/issued:BTC", seed: { symbol: "BTC" } }]),
       ),
     );
     expect(h.store.refs.get("src/issued:bitcoin")).toBe(ids.get("binance/issued:BTC"));
@@ -70,7 +70,7 @@ describe("oracleLayer —— 一次装配拿到五个服务", () => {
   it("`oracleLayer` 是纯装配 —— 建它本身不碰任何端口", async () => {
     const h = harness();
     await h.run(Effect.void);
-    // build 五个服务只是把端口从 context 里取出来存进闭包:一次读、一次写都不该发生。
+    // build 三个服务只是把端口从 context 里取出来存进闭包:一次读、一次写都不该发生。
     expect(h.cache.reads + h.cache.writes).toBe(0);
     expect(h.upstream.calls).toEqual([]);
     expect(h.store.rows.size).toBe(0);
@@ -127,7 +127,7 @@ describe("契约往返(内存假实现)", () => {
   });
 
   it("全局映射:按 (upstream, chainRef) 点查回整条 upstream ref;miss 的键不出现", async () => {
-    const store = fakeRefIndexStore();
+    const store = fakeGlobalRefIndexStore();
     expect(await run(store.refreshedAt("src"))).toEqual(Option.none());
 
     await run(
@@ -146,9 +146,11 @@ describe("契约往返(内存假实现)", () => {
 });
 
 describe("全局维护任务不挂 per-user 门面", () => {
-  it("RefIndexWarmer 不要 userId、也不要 per-user store:拉 → 一次整份灌 → 记得刷新时刻", async () => {
+  // `GlobalRefIndexService` 不进 `oracleLayer`:它的依赖只有两个全局端口,cron 单独 provide
+  // 那个 layer 就能跑 —— 不必先假造一个用户、也不必建 per-user 的三张 store。
+  it("刷全局映射表不要 userId、也不要 per-user store:拉 → 一次整份灌 → 记得刷新时刻", async () => {
     const h = harness();
-    h.upstream.refIndex = {
+    h.upstream.globalRefIndex = {
       rows: [
         { chainRef: "evm:1/contract:0xa0b8", upstreamRef: "src/issued:usd-coin" },
         { chainRef: "solana/contract:EPjF", upstreamRef: "src/issued:usd-coin" },
@@ -159,14 +161,14 @@ describe("全局维护任务不挂 per-user 门面", () => {
 
     await h.run(
       Effect.gen(function* () {
-        const warm = yield* RefIndexWarmer;
-        expect(yield* warm.refIndexRefreshedAt()).toEqual(Option.none());
+        const svc = yield* GlobalRefIndexService;
+        expect(yield* svc.refreshedAt()).toEqual(Option.none());
 
-        const summary = yield* warm.warmRefIndex();
+        const summary = yield* svc.warm();
         expect(summary).toEqual({ rows: 2, unmatchedPlatforms: [], skipped: 7 });
-        expect(h.refIndex.writes).toBe(1); // 一次整份写
+        expect(h.globalRefIndex.writes).toBe(1); // 一次整份写
         // 时刻取自 `Clock`(不再由调用方传一个 `now` 进来)。
-        expect(yield* warm.refIndexRefreshedAt()).toEqual(Option.some(now0));
+        expect(yield* svc.refreshedAt()).toEqual(Option.some(now0));
       }),
     );
   });
@@ -175,15 +177,15 @@ describe("全局维护任务不挂 per-user 门面", () => {
   // 落到哪由 cron 提供的 Logger layer 决定 —— 少一个配置字段,而且任何调用点都能记。
   it("失配落一条 warning(带 namer 与链名);没有失配就不吵", async () => {
     const h = harness();
-    h.upstream.refIndex = { rows: [], unmatchedPlatforms: ["sui"], skipped: 0 };
-    await h.run(Effect.flatMap(RefIndexWarmer, (w) => w.warmRefIndex()));
+    h.upstream.globalRefIndex = { rows: [], unmatchedPlatforms: ["sui"], skipped: 0 };
+    await h.run(Effect.flatMap(GlobalRefIndexService, (s) => s.warm()));
 
     const warns = h.logs.filter((l) => l.level === "WARN");
     expect(warns).toHaveLength(1);
     expect(warns[0]?.annotations).toEqual({ namer: "src", platforms: ["sui"] });
 
-    h.upstream.refIndex = { rows: [], unmatchedPlatforms: [], skipped: 0 };
-    await h.run(Effect.flatMap(RefIndexWarmer, (w) => w.warmRefIndex()));
+    h.upstream.globalRefIndex = { rows: [], unmatchedPlatforms: [], skipped: 0 };
+    await h.run(Effect.flatMap(GlobalRefIndexService, (s) => s.warm()));
     expect(h.logs.filter((l) => l.level === "WARN")).toHaveLength(1);
   });
 
@@ -192,10 +194,10 @@ describe("全局维护任务不挂 per-user 门面", () => {
     const h = harness();
     h.upstream.fail = upstreamDown();
     const result = await h.run(
-      Effect.either(Effect.flatMap(RefIndexWarmer, (w) => w.warmRefIndex())),
+      Effect.either(Effect.flatMap(GlobalRefIndexService, (s) => s.warm())),
     );
     expect(result._tag).toBe("Left");
-    expect(h.refIndex.writes).toBe(0);
+    expect(h.globalRefIndex.writes).toBe(0);
   });
 });
 
@@ -215,13 +217,13 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     await h.run(
       Effect.gen(function* () {
         // 先让橱窗把 blob 建起来(用户打开过一次选币下拉)。
-        yield* Effect.flatMap(TokenReader, (t) => t.topTokens(10));
+        yield* Effect.flatMap(TokenService, (t) => t.topTokens(10));
         const after = h.upstream.calls.length;
 
         // 时钟推过价的 TTL:橱窗会认为该刷了,mint 不该。
         yield* TestClock.adjust(Duration.millis(24 * 60 * 60 * 1000));
-        const ids = yield* Effect.flatMap(TokenMinter, (m) =>
-          m.of([{ ref: "binance/issued:POL", seed: { symbol: "POL" } }]),
+        const ids = yield* Effect.flatMap(TokenService, (t) =>
+          t.mint([{ ref: "binance/issued:POL", seed: { symbol: "POL" } }]),
         );
 
         expect(ids.get("binance/issued:POL")).toBeDefined(); // 认出来了(用的是旧目录)
@@ -235,7 +237,7 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     h.upstream.markets = [POL];
     await h.run(
       Effect.gen(function* () {
-        const tokens = yield* TokenReader;
+        const tokens = yield* TokenService;
         yield* tokens.topTokens(10);
         const after = h.upstream.calls.length;
 
@@ -250,8 +252,8 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     const h = harness();
     h.upstream.markets = [POL];
     const ids = await h.run(
-      Effect.flatMap(TokenMinter, (m) =>
-        m.of([{ ref: "binance/issued:POL", seed: { symbol: "POL" } }]),
+      Effect.flatMap(TokenService, (t) =>
+        t.mint([{ ref: "binance/issued:POL", seed: { symbol: "POL" } }]),
       ),
     );
     expect(ids.get("binance/issued:POL")).toBeDefined();

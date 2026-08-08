@@ -1,4 +1,4 @@
-import { TokenReader } from "@folio/oracle";
+import { TokenService } from "@folio/oracle";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect, Option } from "effect";
 import { serveLogo } from "@/lib/server/internal/logo";
@@ -25,7 +25,7 @@ export const Route = createFileRoute("/api/logo/token/$id")({
               ? Option.getOrUndefined(
                   await runOracle(
                     userId,
-                    Effect.flatMap(TokenReader, (t) => t.logoUrlById(params.id)),
+                    Effect.flatMap(TokenService, (t) => t.logoUrlById(params.id)),
                   ),
                 )
               : undefined,

@@ -323,7 +323,7 @@ describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
   // 净值是实时的:inject 那一步烘焙过一次,现推按 token_id 又能取到同一个价。
   it("烘焙进的现价即最终净值(0.5×65000)", async () => {
     const totals = await runWithOracle(
-      { reader: readerWithBtc },
+      { tokens: readerWithBtc },
       deriveLiveAccountTotals([account()], byAccount(65000), "self-first"),
     );
     expect(totals.get("m1")).toBe(32500);
@@ -333,7 +333,7 @@ describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
   // 这一条正是自定义币的形状:它永远拿不到源价,所以永远用他填的那个数。
   it("inject 时也没取到价 → 回退 token 自填单价(0.5×30000)", async () => {
     const totals = await runWithOracle(
-      { reader: readerNoPrice },
+      { tokens: readerNoPrice },
       deriveLiveAccountTotals([account()], byAccount(), "self-first"),
     );
     expect(totals.get("m1")).toBe(15000);

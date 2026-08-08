@@ -1,21 +1,20 @@
-import {
-  FxHistory,
-  FxRateResolver,
-  PlatformResolver,
-  TokenMinter,
-  TokenReader,
-} from "@folio/oracle";
+import { FxService, PlatformService, TokenService } from "@folio/oracle";
 import { Effect, Layer, Option, TestClock, TestContext } from "effect";
 
 // **app 侧服务端逻辑的一份共用测试装配。**
 //
-// 参考层从 #362 第 4 站起是 Effect 服务(`TokenReader` / `FxRateResolver` / …),所以
-// 「注一个假 tokens 进去」变成了「provide 一个假 layer」。抄一遍 `Effect.provide(...)` 尾巴
+// 参考层从 #362 第 4 站起是 Effect 服务(`TokenService` / `FxService` / `PlatformService`),
+// 所以「注一个假 tokens 进去」变成了「provide 一个假 layer」。抄一遍 `Effect.provide(...)` 尾巴
 // 的事只做一次(CODING.md:测试装配收成一份共用工具,抄九遍的东西每份都会慢慢长歪)。
+//
+// **三个桩,不是五个** —— 参考层的服务从五个收成三个(读写合成 `TokenService`、现汇率与历史
+// 汇率合成 `FxService`)。能力一个没少,只是不必再为「只用得到现汇率」的用例喂一份历史汇率的
+// 空桩:那两半现在是同一个 `emptyFx` 的两个字段。
 //
 // 各方法的缺省实现是**空**(空 Map / `none` / 0):用例只写它关心的那几个,别的动了就该红。
 
-const emptyReader: TokenReader = {
+const emptyTokens: TokenService = {
+  mint: () => Effect.succeed(new Map()),
   enrich: () => Effect.succeed(new Map()),
   logoUrlById: () => Effect.succeed(Option.none()),
   priceOf: () => Effect.succeed(Option.none()),
@@ -29,51 +28,34 @@ const emptyReader: TokenReader = {
   refreshCatalogue: () => Effect.succeed(0),
 };
 
-const emptyFx: FxRateResolver = {
+const emptyFx: FxService = {
   resolve: () => Effect.succeed(Option.none()),
   warm: () => Effect.void,
-};
-
-// 历史日汇率是**另一个服务**(#390 的 review 第 5 条把 fx 拆两半)—— 只碰现汇率的测试
-// 因此不用再喂历史那半的假数据。
-const emptyFxHistory: FxHistory = {
   rateSeries: () => Effect.succeed([]),
 };
 
-const emptyPlatforms: PlatformResolver = {
+const emptyPlatforms: PlatformService = {
   resolve: (keys) => Effect.succeed(new Map([...keys].map((key) => [key, { key, name: key }]))),
   warm: () => Effect.void,
 };
 
-const emptyMinter: TokenMinter = {
-  of: () => Effect.succeed(new Map()),
-};
-
 export interface OracleStub {
-  reader?: Partial<TokenReader>;
-  fx?: Partial<FxRateResolver>;
-  fxHistory?: Partial<FxHistory>;
-  platforms?: Partial<PlatformResolver>;
-  minter?: Partial<TokenMinter>;
+  tokens?: Partial<TokenService>;
+  fx?: Partial<FxService>;
+  platforms?: Partial<PlatformService>;
 }
 
 const oracleStubLayer = (stub: OracleStub = {}) =>
   Layer.mergeAll(
-    Layer.succeed(TokenReader, { ...emptyReader, ...stub.reader }),
-    Layer.succeed(FxRateResolver, { ...emptyFx, ...stub.fx }),
-    Layer.succeed(FxHistory, { ...emptyFxHistory, ...stub.fxHistory }),
-    Layer.succeed(PlatformResolver, { ...emptyPlatforms, ...stub.platforms }),
-    Layer.succeed(TokenMinter, { ...emptyMinter, ...stub.minter }),
+    Layer.succeed(TokenService, { ...emptyTokens, ...stub.tokens }),
+    Layer.succeed(FxService, { ...emptyFx, ...stub.fx }),
+    Layer.succeed(PlatformService, { ...emptyPlatforms, ...stub.platforms }),
   );
 
-// 跑一个用了参考层的 effect,拿 Promise —— 用例照旧 `await`。
+// 跑一个用了参考层的 effect —— 拿 Promise,用例照旧 `await`。
 export const runWithOracle = <A, E>(
   stub: OracleStub,
-  effect: Effect.Effect<
-    A,
-    E,
-    TokenReader | FxRateResolver | FxHistory | PlatformResolver | TokenMinter
-  >,
+  effect: Effect.Effect<A, E, TokenService | FxService | PlatformService>,
 ): Promise<A> => Effect.runPromise(Effect.provide(effect, oracleStubLayer(stub)));
 
 // 同上,但把时钟钉在一个固定时刻 —— 用到 `Clock`(如 `priceTickets` 的 `asOf`)的用例走这个,
@@ -81,11 +63,7 @@ export const runWithOracle = <A, E>(
 export const runWithOracleAt = <A, E>(
   nowMs: number,
   stub: OracleStub,
-  effect: Effect.Effect<
-    A,
-    E,
-    TokenReader | FxRateResolver | FxHistory | PlatformResolver | TokenMinter
-  >,
+  effect: Effect.Effect<A, E, TokenService | FxService | PlatformService>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(

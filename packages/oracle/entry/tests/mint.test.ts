@@ -5,8 +5,8 @@ import {
 } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { type MintInput, TokenMinter } from "../src";
-import type { CandidateSource } from "../src/services/candidates";
+import { type MintInput, TokenService } from "../src";
+import type { CandidateSource } from "../src/tokens/candidates";
 import { harness } from "./fakes";
 
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
@@ -20,7 +20,7 @@ const seed = (symbol: string, name?: string, providerLogo?: string) => ({
   providerLogo,
 });
 
-// 候选源:mint 的 symbol 那一档。真实现从 warm rows 里筛(见 cache.ts),这里直接给。
+// 候选源:mint 的 symbol 那一档。真实现从 warm rows 里筛(见 src/tokens/candidates.ts),这里直接给。
 // **记调用次数** —— 「有没有走到 symbol 这一档」本身就是断言对象:#210 的闸在合约上会提前返回,
 // 不记次数的话,一条本想验证判官的用例会因为压根没走到判官而绿掉(空转)。
 interface RecordingCandidates extends CandidateSource {
@@ -38,8 +38,9 @@ const candidatesOf = (map: Record<string, TokenCandidate[]>): RecordingCandidate
   };
 };
 
-// mint 走 Tag → Layer(生产那条路);`mint.of` 只是这一层之上的一个 Promise 小把手,
-// 好让这一整组用例保持原样的 async/await 读法 —— 它不是第二条构造路。
+// mint 走 Tag → Layer(生产那条路):它是 `TokenService.mint`,而顶掉候选源靠换 `CandidateSource`
+// 那一个 layer —— 仍然是同一条构造路。`mint.of` 只是这一层之上的一个 Promise 小把手,
+// 好让这一整组用例保持原样的 async/await 读法(所以这个局部名字留着,不跟着服务改)。
 function setup(opts?: {
   index?: Record<string, string>;
   candidates?: Record<string, TokenCandidate[]>;
@@ -47,24 +48,25 @@ function setup(opts?: {
 }) {
   const candidates = candidatesOf(opts?.candidates ?? {});
   const h = harness({
-    refIndexSeed: opts?.index,
+    globalRefIndexSeed: opts?.index,
     overrides: opts?.overrides,
     candidates,
   });
   const mint = {
-    of: (inputs: readonly MintInput[]) => h.run(Effect.flatMap(TokenMinter, (m) => m.of(inputs))),
+    of: (inputs: readonly MintInput[]) =>
+      h.run(Effect.flatMap(TokenService, (t) => t.mint(inputs))),
   };
-  return { h, store: h.store, refIndex: h.refIndex, candidates, mint };
+  return { h, store: h.store, globalRefIndex: h.globalRefIndex, candidates, mint };
 }
 
 describe("三条路径", () => {
   it("① 命中本地 ref 行 —— 纯本地一次点查,不碰全局映射", async () => {
-    const { store, refIndex, mint } = setup({ index: { [USDC_ETH]: SRC_USDC } });
+    const { store, globalRefIndex, mint } = setup({ index: { [USDC_ETH]: SRC_USDC } });
     const id = (await mint.of([{ ref: USDC_ETH, seed: seed("USDC") }])).get(USDC_ETH);
 
-    const before = refIndex.lookups;
+    const before = globalRefIndex.lookups;
     expect((await mint.of([{ ref: USDC_ETH, seed: seed("USDC") }])).get(USDC_ETH)).toBe(id);
-    expect(refIndex.lookups).toBe(before); // 第二次一次都没查
+    expect(globalRefIndex.lookups).toBe(before); // 第二次一次都没查
     expect(store.rows.size).toBe(1);
   });
 
@@ -111,7 +113,7 @@ describe("多链归一", () => {
 
 describe("事后认出来 → 合并", () => {
   it("ref 改指、历史快照 token_id 改指、旧行删除", async () => {
-    const { store, refIndex, mint } = setup({ index: { [USDC_ETH]: SRC_USDC } });
+    const { store, globalRefIndex, mint } = setup({ index: { [USDC_ETH]: SRC_USDC } });
     const good = (await mint.of([{ ref: USDC_ETH, seed: seed("USDC") }])).get(USDC_ETH);
     const orphan = (
       await mint.of([{ ref: USDC_ARB, seed: seed("USDC", "USD Coin", "arb.png") }])
@@ -123,7 +125,7 @@ describe("事后认出来 → 合并", () => {
     store.snapshotTokenIds.push(orphan as string, orphan as string, good as string);
 
     // 第二轮:cron 刷完表,本地认出来了。
-    refIndex.set("src", USDC_ARB, SRC_USDC);
+    globalRefIndex.set("src", USDC_ARB, SRC_USDC);
     expect((await mint.of([{ ref: USDC_ARB, seed: seed("USDC") }])).get(USDC_ARB)).toBe(good);
 
     expect(store.rows.size).toBe(1);
@@ -136,10 +138,10 @@ describe("事后认出来 → 合并", () => {
   });
 
   it("没人占着那个币 → 就地补上本源那条 ref,行不动", async () => {
-    const { store, refIndex, mint } = setup();
+    const { store, globalRefIndex, mint } = setup();
     const id = (await mint.of([{ ref: USDC_ARB, seed: seed("USDC") }])).get(USDC_ARB);
 
-    refIndex.set("src", USDC_ARB, SRC_USDC);
+    globalRefIndex.set("src", USDC_ARB, SRC_USDC);
     expect((await mint.of([{ ref: USDC_ARB, seed: seed("USDC") }])).get(USDC_ARB)).toBe(id);
     expect(store.rows.size).toBe(1);
     expect(store.refs.get(SRC_USDC)).toBe(id);
@@ -149,7 +151,7 @@ describe("事后认出来 → 合并", () => {
 
 // 上游还不认识的新币,同时从链上和交易所进来。**两条 ref 失败的原因不同,后来被认出来的路径也不同**:
 //   · 链上合约 → 靠全局映射表,cron 刷到就认出来
-//   · 交易所代号 → 只能靠 symbol,而候选恒是 **warm(市值前 N 名)** 的子集(见 cache.ts)
+//   · 交易所代号 → 只能靠 symbol,而候选恒是 **warm(市值前 N 名)** 的子集(见 src/tokens/warm.ts)
 // 于是有一段中间状态:「上游收录了」并不等于「两行会并成一行」——那要等它进榜。
 // 上面那组合并用例两边都是合约形,盖不到这条分岔,所以单开一组。
 const XXA_ETH = "evm:1/contract:0xa0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0";
@@ -187,8 +189,8 @@ describe("新币:链上 + 交易所,上游后来才收录", () => {
   });
 
   it("上游收录了合约但还没进榜 → 只有链上那行认出来,**仍是两行**", async () => {
-    const { store, refIndex, mint, onchain, cex } = await firstRound();
-    refIndex.set("src", XXA_ETH, SRC_XXA); // cron 刷到了这个合约
+    const { store, globalRefIndex, mint, onchain, cex } = await firstRound();
+    globalRefIndex.set("src", XXA_ETH, SRC_XXA); // cron 刷到了这个合约
 
     const ids = await mint.of(bothRefs);
     // 链上那行就地补上本源那条 ref:行不动、历史不动,从此有价有图。
@@ -202,8 +204,8 @@ describe("新币:链上 + 交易所,上游后来才收录", () => {
 
   it("再进了市值 100 名 → 两行合并成一行(**单候选那一档,不看排名**)", async () => {
     const warm: Record<string, TokenCandidate[]> = {};
-    const { store, refIndex, mint, onchain, cex } = await firstRound(warm);
-    refIndex.set("src", XXA_ETH, SRC_XXA);
+    const { store, globalRefIndex, mint, onchain, cex } = await firstRound(warm);
+    globalRefIndex.set("src", XXA_ETH, SRC_XXA);
     // 头两轮写下的历史快照行分别指着两个 id。
     store.snapshotTokenIds.push(onchain, cex);
 
@@ -225,8 +227,8 @@ describe("新币:链上 + 交易所,上游后来才收录", () => {
 
   it("同名的第二个币也进了榜 → 100 名碾压不了它 → 交易所那行留在原地", async () => {
     const warm: Record<string, TokenCandidate[]> = {};
-    const { store, refIndex, mint, onchain, cex } = await firstRound(warm);
-    refIndex.set("src", XXA_ETH, SRC_XXA);
+    const { store, globalRefIndex, mint, onchain, cex } = await firstRound(warm);
+    globalRefIndex.set("src", XXA_ETH, SRC_XXA);
     // 两个候选:100 名 vs 300 名。300 / 100 = 3 倍 < 碾压线 → 判「没把握」。
     warm.XXA = [
       { ref: SRC_XXA, marketCapRank: 100 },
@@ -671,14 +673,14 @@ describe("各来源的 ref 都落到对的 token", () => {
 
   it("手记选了币:ref 本身就是锚 —— 不查映射表、不掉回 symbol", async () => {
     // 故意把 warm 与覆盖表都指到**别的**币上:如果它掉回 symbol 就会认错。
-    const { store, refIndex, mint } = setup({
+    const { store, globalRefIndex, mint } = setup({
       overrides: { USDC: "wrong-coin" },
       candidates: { USDC: [{ ref: "src/issued:wrong-coin", marketCapRank: 1 }] },
     });
-    const before = refIndex.lookups;
+    const before = globalRefIndex.lookups;
 
     const id = (await mint.of([{ ref: SRC_USDC, seed: seed("USDC") }])).get(SRC_USDC);
-    expect(refIndex.lookups).toBe(before); // 没查映射表
+    expect(globalRefIndex.lookups).toBe(before); // 没查映射表
     expect(store.refs.get(SRC_USDC)).toBe(id);
     expect(store.refs.has("src/issued:wrong-coin")).toBe(false); // 没被 symbol 那档带跑
     // 只有一条 ref —— 去重生效(ref 与锚同串;不去重会撞 (namer, localName) 主键)

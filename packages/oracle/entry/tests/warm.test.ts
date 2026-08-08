@@ -2,10 +2,10 @@ import type { UpstreamToken } from "@folio/oracle-basic";
 import { PRICE_TTL_MS, WARM_TTL_MS } from "@folio/oracle-basic";
 import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { pickByConfidence } from "../src/internal/confidence";
-import { WARM_KEY } from "../src/internal/warm";
-import { candidatesBySymbol, warmCatalogue } from "../src/services/candidates";
-import { refreshWarmCatalogue, topByRank, warmMarkets } from "../src/services/tokens";
+import { candidatesBySymbol, warmCatalogue } from "../src/tokens/candidates";
+import { refreshWarmCatalogue, topByRank, warmMarkets } from "../src/tokens/catalogue";
+import { pickByConfidence } from "../src/tokens/mint";
+import { WARM_KEY } from "../src/tokens/warm";
 import { harness, now0, upstreamDown } from "./fakes";
 
 // 测的是 warm blob 这一件事:一张 per-user 缓存表上的 `warm` 键,**三个读者共用一份**。

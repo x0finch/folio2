@@ -1,26 +1,42 @@
-import type { ProviderTokenSeed, TokenRef, TokenRefHit } from "@folio/oracle-basic";
-import { FIAT_NAMER, fiatSeed, normalizeSymbol } from "@folio/oracle-basic";
-import { GlobalTokenRefIndexStore, Namer, TokenStore } from "@folio/oracle-basic/ports";
+import type { ProviderTokenSeed, TokenCandidate, TokenRef, TokenRefHit } from "@folio/oracle-basic";
+import {
+  FIAT_NAMER,
+  fiatSeed,
+  normalizeSymbol,
+  RESOLUTION_DOMINANCE,
+  RESOLUTION_TOP_RANK,
+} from "@folio/oracle-basic";
+import type { GlobalTokenRefIndexStore, Namer, TokenStore } from "@folio/oracle-basic/ports";
 import {
   tokenRef as buildRef,
   hasTrustedSymbol,
   type ParsedTokenRef,
   parseTokenRef,
 } from "@folio/oracle-ref";
-import { Context, Effect, Layer, Option } from "effect";
-import { pickByConfidence } from "../internal/confidence";
-import { CandidateSource } from "./candidates";
-
-// 写路径要的那一步:拿一条 tokenRef 换出一个 `token_id`。
+import { Effect, Option } from "effect";
+import type { CandidateSource } from "./candidates";
+// 写路径:拿一条 tokenRef 换出一个 `token_id`。**`TokenService` 的一个方法**(`mint`)。
 //
-// **全程不碰网络** —— 这不是约定而是**类型事实**,而且现在在 `R` 通道上一眼看得见:
-// 这个 layer 要的是 `TokenStore | GlobalTokenRefIndexStore | CandidateSource | Namer`,
-// 里面没有 `TokenUpstream`。查的是本地 ref 行,miss 才查本地全局映射,再 miss 才按 symbol 猜
-// (那一档问 `CandidateSource`,它读的是缓存目录 —— 唯一那条冷启动出网路径收在它自己的 layer 里)。
-// 写快照之前必须先过这里(快照行的 token_id 必填),所以它必须是本地的、快的。
-export interface TokenMinter {
+// 这一片与其余五片的分界是全服务最有分量的那条线:**「这是哪个币」在这里定死、冻进快照**,
+// 此后读的那几片一律拿 token_id 直接取数,不再从 tokenRef 反推(ADR 0021)。
+//
+// **全程不碰网络。** 这条保证的形式要说清楚:以前 mint 是自己的服务,`tokenMinterLayer` 的
+// `R` 里没有 `TokenUpstream`,于是「不出网」是**装配层的类型事实**。读写合成一个 `TokenService`
+// 之后,那个 layer 的 `R` 里必然有 `TokenUpstream`(读的几片要它),所以保证降级为
+// **本文件的签名 + 一条红线**:
+//
+//   · `MintDeps` 里**没有任何 `*Upstream`**,而 `makeMinting` 只吃 `MintDeps` —— 出网所需的
+//     东西压根不在这个作用域里(不是注释,是参数类型)
+//   · **红线:本文件不许 import 任何 `*Upstream` 端口。** 往 `MintDeps` 上加一个上游字段,
+//     或者从 context 里 `yield* TokenUpstream`,都等于把这条保证作废 —— 加之前先想清楚
+//     「写快照之前必须先过这里」意味着什么:它在用户等着的同步路径上,一次串行的上游往返
+//     会把整批持仓的写入卡在那儿。
+//
+// 查的是本地 ref 行,miss 才查本地全局映射,再 miss 才按 symbol 猜(那一档问 `CandidateSource`,
+// 它读的是缓存目录 —— 唯一那条冷启动出网路径收在**它自己的 layer** 里,仍然是类型事实)。
+export interface TokenMinting {
   // 一批 (ref, provider 报的元信息) → 各自的 token_id。输入里重复的 ref 只处理一次。
-  of(inputs: readonly MintInput[]): Effect.Effect<Map<TokenRef, string>>;
+  mint(inputs: readonly MintInput[]): Effect.Effect<Map<TokenRef, string>>;
 }
 
 export interface MintInput {
@@ -28,15 +44,49 @@ export interface MintInput {
   seed: ProviderTokenSeed;
 }
 
-export const TokenMinter = Context.GenericTag<TokenMinter>("oracle/TokenMinter");
-
-const make = Effect.gen(function* () {
-  const store = yield* TokenStore;
-  const refIndex = yield* GlobalTokenRefIndexStore;
-  const candidates = yield* CandidateSource;
+// mint 那半要的全部东西。**一个上游都没有** —— 见上面的红线。
+export interface MintDeps {
+  readonly store: TokenStore;
+  readonly globalRefIndex: GlobalTokenRefIndexStore;
+  readonly candidates: CandidateSource;
   // 当前源的标识 —— 它同时是 ref 的 namer 与全局映射表的 `namer` 列;`overrides` 是它那张
   // symbol → 上游 id 的策展小表(见 `Namer`)。
-  const { id: namer, overrides } = yield* Namer;
+  readonly namer: Namer;
+}
+
+// 按市值排名消歧:**门控** —— top-N 之内 / 只有一个候选 / 碾压次席 → 有把握;否则没把握 →
+// 调用方降级(各自独立成行、不链上游)。没把握时宁可两行也不能并错 —— 并错会把假 USDC 的金额
+// 算进真 USDC。只给本文件的 symbol 那一档用,所以住在这儿而不是另开一个文件。
+export function pickByConfidence(candidates: readonly TokenCandidate[]): TokenRef | undefined {
+  if (candidates.length === 0) return undefined;
+
+  const rank = (c: TokenCandidate): number => c.marketCapRank ?? Number.POSITIVE_INFINITY;
+  const sorted = [...candidates].sort((a, b) => rank(a) - rank(b));
+  const best = sorted[0];
+  if (sorted.length === 1) return best.ref;
+
+  const bestRank = rank(best);
+  const runnerRank = rank(sorted[1]);
+
+  if (bestRank <= RESOLUTION_TOP_RANK) return best.ref;
+  // 最佳有 rank、其余都没有 → 无歧义
+  if (!Number.isFinite(runnerRank) && Number.isFinite(bestRank)) return best.ref;
+  if (
+    Number.isFinite(runnerRank) &&
+    bestRank > 0 &&
+    runnerRank / bestRank >= RESOLUTION_DOMINANCE
+  ) {
+    return best.ref;
+  }
+  return undefined;
+}
+
+// **收已解析好的服务对象**,不从 context 取 —— 与本文件夹其余几片、以及 `./warm` 同款,
+// 于是 `mint` 的 `R` 是 `never`:服务的方法签名不会把 mint 的依赖漏给调用方。
+// 从 Tag 取服务只发生在 `./index` 那一层。
+export function makeMinting(deps: MintDeps): TokenMinting {
+  const { store, globalRefIndex, candidates } = deps;
+  const { id: namer, overrides } = deps.namer;
 
   // 这条 ref 在当前上游那里叫什么 —— **地址优先于 symbol**。
   // 地址是权威答案,symbol 只是猜:换序会把假 USDC 并进真 USDC。
@@ -52,7 +102,7 @@ const make = Effect.gen(function* () {
       if (parsed.kind === "issued" && parsed.namer === namer) return Option.some(ref);
 
       // 全局表按地址查到的就是**整条** upstream ref(#228:表给整条,不再回半截让这里拼)。
-      const found = yield* refIndex.lookup(namer, [ref]);
+      const found = yield* globalRefIndex.lookup(namer, [ref]);
       const upstreamRef = Option.fromNullable(found.get(ref));
       if (Option.isSome(upstreamRef)) return upstreamRef;
 
@@ -143,8 +193,8 @@ const make = Effect.gen(function* () {
       return hit.tokenId;
     });
 
-  const minter: TokenMinter = {
-    of: (inputs) =>
+  return {
+    mint: (inputs) =>
       Effect.gen(function* () {
         const out = new Map<TokenRef, string>();
         if (inputs.length === 0) return out;
@@ -165,12 +215,4 @@ const make = Effect.gen(function* () {
         return out;
       }),
   };
-
-  return minter;
-});
-
-export const tokenMinterLayer: Layer.Layer<
-  TokenMinter,
-  never,
-  TokenStore | GlobalTokenRefIndexStore | CandidateSource | Namer
-> = Layer.effect(TokenMinter, make);
+}

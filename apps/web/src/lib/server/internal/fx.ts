@@ -1,4 +1,4 @@
-import { FxRateResolver } from "@folio/oracle";
+import { FxService } from "@folio/oracle";
 import { Effect, Option } from "effect";
 import { runOracle } from "./oracle";
 
@@ -20,7 +20,7 @@ export function displayRate(userId: string, code: string): Promise<number | unde
   return runOracle(
     userId,
     Effect.gen(function* () {
-      const fx = yield* FxRateResolver;
+      const fx = yield* FxService;
       const cached = yield* fx.resolve(code);
       if (Option.isSome(cached)) return cached.value;
       yield* fx.warm([code]); // 冷缓存 → 拉一次(上游那个端点一把全给,顺手把其余币种也写上)

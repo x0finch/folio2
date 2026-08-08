@@ -1,4 +1,4 @@
-import { type RefreshStaleReport, TokenReader } from "@folio/oracle";
+import { type RefreshStaleReport, TokenService } from "@folio/oracle";
 import { Effect } from "effect";
 import {
   type BalanceLike,
@@ -18,11 +18,13 @@ import {
 // 上游还没认出来的币也出 name/providerLogo(不再是裸 symbol + 首字母)。
 export const enrichBalances = <T extends BalanceLike>(
   balances: T[],
-): Effect.Effect<{ rows: (T & TokenEnrichment)[]; pricesStale: boolean }, never, TokenReader> =>
+): Effect.Effect<{ rows: (T & TokenEnrichment)[]; pricesStale: boolean }, never, TokenService> =>
   Effect.gen(function* () {
     // defi 行也做展示富化(H5 #120:抽屉协议行的 24h 聚合);估值现推路径不受影响
     // (那里仍只走 fungibleTokenId 的同质门)。
-    const enriched = yield* Effect.flatMap(TokenReader, (t) => t.enrich(displayTokenIds(balances)));
+    const enriched = yield* Effect.flatMap(TokenService, (t) =>
+      t.enrich(displayTokenIds(balances)),
+    );
     // 刷价集合(#245:跳过 dust)。pricesStale 必须只在**这个集合内**判脏,否则被跳过的 dust 被标脏
     // 却永远刷不到 → pricesStale 清不掉、客户端每次进页空转刷新(即下面「三门同源」那条坑)。
     const refreshable = new Set(refreshableTokenIds(balances));
@@ -58,5 +60,5 @@ export const enrichBalances = <T extends BalanceLike>(
 // 客户端 refreshStalePrices 三门同源:都喂 `refreshableTokenIds` 出来的同一集合(#245:跳过 dust)。
 export const warmHeldPrices = (
   balances: BalanceLike[],
-): Effect.Effect<RefreshStaleReport, never, TokenReader> =>
-  Effect.flatMap(TokenReader, (tokens) => tokens.refreshStale(refreshableTokenIds(balances)));
+): Effect.Effect<RefreshStaleReport, never, TokenService> =>
+  Effect.flatMap(TokenService, (tokens) => tokens.refreshStale(refreshableTokenIds(balances)));

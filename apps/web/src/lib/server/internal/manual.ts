@@ -5,7 +5,7 @@ import type {
   ManualHolding,
   SnapshotWithBalances,
 } from "@folio/db";
-import { FxHistory, TokenMinter, TokenReader } from "@folio/oracle";
+import { FxService, TokenService } from "@folio/oracle";
 import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
@@ -69,7 +69,7 @@ async function mintHolding(
   const symbol = picked.symbol.trim().toUpperCase();
   const ids = await runOracle(
     userId,
-    Effect.flatMap(TokenMinter, (m) => m.of([{ ref, seed: { symbol } }])),
+    Effect.flatMap(TokenService, (t) => t.mint([{ ref, seed: { symbol } }])),
   );
   const id = ids.get(ref);
   if (!id) throw new Error(`mint produced no token for ${ref}`);
@@ -159,7 +159,7 @@ export async function injectManualSnapshots(
   const snapshots = await runOracle(
     userId,
     Effect.gen(function* () {
-      const enriched = yield* Effect.flatMap(TokenReader, (t) =>
+      const enriched = yield* Effect.flatMap(TokenService, (t) =>
         t.enrich(list.flatMap(({ tokens }) => tokens.map((tk) => tk.id))),
       );
       return yield* Effect.forEach(list, ({ id, tokens }) =>
@@ -363,10 +363,10 @@ async function buildHistoricalPriceAt(
           // 其余:按 token_id 取币价历史(#203,priceSeries 收内部 id)。两条都灌进同一个 priceAt 闭包,
           // 纯层 tokenPriceAt 的第 ① 档对法币照常生效(它只看 recognized,不认识 fiat)。
           const series = tk.fiatCode
-            ? yield* Effect.flatMap(FxHistory, (fx) =>
+            ? yield* Effect.flatMap(FxService, (fx) =>
                 fx.rateSeries(tk.fiatCode as string, from, now),
               )
-            : yield* Effect.flatMap(TokenReader, (t) => t.priceSeries(tk.id, from, now));
+            : yield* Effect.flatMap(TokenService, (t) => t.priceSeries(tk.id, from, now));
           for (const pt of series) daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
           byIdentifier.set(tk.id, daily);
         }),

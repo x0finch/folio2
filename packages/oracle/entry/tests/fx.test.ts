@@ -1,18 +1,20 @@
-import { FX_TTL_MS, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
+import { FX_TTL_MS, MS_PER_DAY, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { FxRateResolver } from "../src";
-import { fxKey, readFx, writeFx } from "../src/services/fx";
-import { harness, upstreamDown } from "./fakes";
+import { FxService } from "../src";
+import { btcUsdDaily, deriveFiatDaily, fxKey, readFx, writeFx } from "../src/fx";
+import { harness, now0, upstreamDown } from "./fakes";
 
-// 现汇率服务:**读软过期、写按 TTL**。两个动词判据不同,下面每一条都在钉这件事。
+// 汇率服务的三个方法,两种判据:
+//   `resolve` / `warm`  **现**汇率 —— 读软过期、写按 TTL(前两组)
+//   `rateSeries`        **历史**日汇率 —— SWR + BTC 反算(后两组,ADR 0026 / #274)
 //
-// 历史日汇率是**另一个服务**(`FxHistory`,见 fx-history.test.ts)—— 那半靠 BTC 反算、
-// 落 `token_daily_prices`,与这两个动词不共用一行逻辑。拆开之后这一组只碰缓存与汇率上游两个假件。
+// 两半合成一个服务(以前是 `FxRateResolver` / `FxHistory`,见 `../src/fx` 的开头),
+// 但**持久化仍然是两处**,这一组的分组就是照着这件事切的:现汇率只碰 `user_cache`,
+// 历史日汇率一个 `CacheStore` 都不碰(它落全局的 `token_daily_prices`)。
 
 const setup = (rates: Record<string, number> = {}) => harness({ rates });
-const withFx = <A, E>(f: (fx: FxRateResolver) => Effect.Effect<A, E>) =>
-  Effect.flatMap(FxRateResolver, f);
+const withFx = <A, E>(f: (fx: FxService) => Effect.Effect<A, E>) => Effect.flatMap(FxService, f);
 
 describe("resolve —— 读", () => {
   it("USD 恒 1,而且不查缓存", async () => {
@@ -25,7 +27,7 @@ describe("resolve —— 读", () => {
     const h = setup({ EUR: 1.09 });
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(["EUR"]);
         expect(yield* fx.resolve("EUR")).toEqual(Option.some(1.09));
 
@@ -44,7 +46,7 @@ describe("resolve —— 读", () => {
     const h = setup({ EUR: 1.09 });
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(["EUR"]);
         expect(yield* fx.resolve("eur")).toEqual(Option.some(1.09));
         expect(yield* fx.resolve(" Eur ")).toEqual(Option.some(1.09));
@@ -56,7 +58,7 @@ describe("resolve —— 读", () => {
     const h = setup();
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         expect(yield* fx.resolve("usd")).toEqual(Option.some(1));
         expect(yield* fx.resolve(" Usd ")).toEqual(Option.some(1));
       }),
@@ -70,7 +72,7 @@ describe("warm —— 写", () => {
     const h = setup({ USD: 1, EUR: 1.09 });
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(["USD", "EUR"]);
         expect(h.fxUpstream.fetches).toBe(1);
         expect(yield* fx.resolve("EUR")).toEqual(Option.some(1.09));
@@ -85,7 +87,7 @@ describe("warm —— 写", () => {
     const h = setup({ EUR: 1.09 });
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(["EUR"]);
         yield* TestClock.adjust(Duration.millis(FX_TTL_MS + 1));
         yield* fx.warm(["EUR"]);
@@ -104,7 +106,7 @@ describe("warm —— 写", () => {
     const h = setup({ USD: 1, EUR: 1.09 });
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(["USD", "EUR"]);
         yield* fx.warm(["USD", "EUR"]);
         yield* fx.warm(["USD", "EUR"]);
@@ -118,7 +120,7 @@ describe("warm —— 写", () => {
     const h = setup({ USD: 1, EUR: 1.09, JPY: 0.0067 });
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(["EUR"]); // 只点名要 EUR
         expect(yield* fx.resolve("JPY")).toEqual(Option.some(0.0067));
       }),
@@ -136,7 +138,7 @@ describe("warm —— 写", () => {
     const h = setup({ EUR: 1.09, JPY: 0.0067 });
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(["EUR", "JPY"]);
         const before = h.cache.reads;
 
@@ -157,7 +159,7 @@ describe("warm —— 写", () => {
     const h = setup({ EUR: 1.09 });
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(["EUR", "KRW"]);
         expect(yield* fx.resolve("KRW")).toEqual(Option.none());
       }),
@@ -168,7 +170,7 @@ describe("warm —— 写", () => {
     const h = setup({ USD: 1, EUR: 1.09 });
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* fx.warm(["usd"]); // 归一成 USD → 无目标
         expect(h.fxUpstream.fetches).toBe(0);
 
@@ -189,7 +191,7 @@ describe("warm —— 写", () => {
 
     await h.run(
       Effect.gen(function* () {
-        const fx = yield* FxRateResolver;
+        const fx = yield* FxService;
         yield* TestClock.adjust(Duration.millis(FX_TTL_MS + 1));
         yield* fx.warm(["EUR"]);
         expect(yield* fx.resolve("EUR")).toEqual(Option.some(1.09)); // 旧值还在
@@ -251,5 +253,239 @@ describe("缓存:键、形状、批量", () => {
         expect(yield* readFx(h.cache, "EUR")).toEqual(Option.none());
       }),
     );
+  });
+});
+
+// —— 历史日汇率(`rateSeries`)——
+// SWR 照 priceSeries:缓存命中直用 / 缺的从 BTC 反算并落库 / 今日现取 / 上游挂了降级不抛。
+// **这一段一个 `CacheStore` 都不碰** —— 它落 `token_daily_prices`,不进 user_cache。
+const NOW = now0;
+const TODAY = Math.floor(NOW / MS_PER_DAY);
+const day = (offset: number): number => (TODAY + offset) * MS_PER_DAY;
+const FIAT_EUR = "fiat/issued:EUR";
+// 两个 fake 默认 id 都是 "src" → btcRef 与代币 upstream 的 ref 命名空间对齐(反算腿走它取数)。
+const BTC_REF = "src/issued:bitcoin";
+// 代币 upstream 记的取数调用形:`fetchPriceSeries:<ref>:<VS 大写>`(见 fakeUpstream)。
+const legCall = (vs: string) => `fetchPriceSeries:${BTC_REF}:${vs}`;
+
+// 一条 BTC 腿的历史点(atMs 落在日桶起点 → 与请求区间边界对齐)。
+const btcLeg = (perDay: Record<number, number>) =>
+  Object.entries(perDay).map(([b, unitPrice]) => ({ atMs: Number(b) * MS_PER_DAY, unitPrice }));
+
+describe("反算(纯)—— deriveFiatDaily", () => {
+  it("usd_per_unit = BTC美元 ÷ BTC该币,逐日", () => {
+    const usd = new Map([
+      [TODAY - 2, 120000],
+      [TODAY - 1, 100000],
+    ]);
+    const eur = new Map([
+      [TODAY - 2, 100000],
+      [TODAY - 1, 100000],
+    ]);
+    expect(deriveFiatDaily(usd, eur, [TODAY - 2, TODAY - 1])).toEqual(
+      new Map([
+        [TODAY - 2, 1.2],
+        [TODAY - 1, 1],
+      ]),
+    );
+  });
+
+  it("缺任一腿、或 BTC该币 ≤ 0 的日跳过(不出乱数)", () => {
+    const usd = new Map([
+      [TODAY - 2, 120000],
+      [TODAY - 1, 100000],
+      [TODAY, 100000],
+    ]);
+    const eur = new Map([
+      [TODAY - 2, 0], // 除零 → 跳过
+      [TODAY - 1, 100000],
+      // TODAY 缺该币腿 → 跳过
+    ]);
+    expect(deriveFiatDaily(usd, eur, [TODAY - 2, TODAY - 1, TODAY])).toEqual(
+      new Map([[TODAY - 1, 1]]),
+    );
+  });
+});
+
+describe("rateSeries —— 历史日汇率", () => {
+  it("USD 恒 1:逐日给 1,一次都不出网、不碰表", async () => {
+    const h = setup();
+    expect(await h.run(withFx((fx) => fx.rateSeries("USD", day(-2), day(0))))).toEqual([
+      { atMs: day(-2), unitPrice: 1 },
+      { atMs: day(-1), unitPrice: 1 },
+      { atMs: day(0), unitPrice: 1 },
+    ]);
+    expect(h.upstream.calls).toEqual([]);
+    expect(h.prices.dailyByRef.size).toBe(0);
+  });
+
+  it("命中缓存的过去日直接用 —— 不反算、不出网", async () => {
+    const h = setup();
+    await h.run(
+      Effect.gen(function* () {
+        const fx = yield* FxService;
+        yield* h.prices.putDailyByRef(FIAT_EUR, [
+          { dayBucket: TODAY - 2, unitPrice: 1.2 },
+          { dayBucket: TODAY - 1, unitPrice: 1.1 },
+        ]);
+        expect(yield* fx.rateSeries("EUR", day(-2), day(-1))).toEqual([
+          { atMs: day(-2), unitPrice: 1.2 },
+          { atMs: day(-1), unitPrice: 1.1 },
+        ]);
+        expect(h.upstream.calls).toEqual([]); // 全缓存命中,零腿
+      }),
+    );
+  });
+
+  it("缺的过去日:从 BTC 两腿反算,并永久落 token_daily_prices", async () => {
+    const h = setup();
+    // 两条腿都从代币 upstream 的 fetchPriceSeries 取(vsCurrency 分 USD / EUR)。
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY - 2]: 120000, [TODAY - 1]: 100000 }));
+    h.upstream.seriesByVs.set("EUR", btcLeg({ [TODAY - 2]: 100000, [TODAY - 1]: 100000 }));
+
+    await h.run(
+      Effect.gen(function* () {
+        const fx = yield* FxService;
+        expect(yield* fx.rateSeries("EUR", day(-2), day(-1))).toEqual([
+          { atMs: day(-2), unitPrice: 1.2 },
+          { atMs: day(-1), unitPrice: 1 },
+        ]);
+        // 过去日不可变 → 落库,下次直接命中。
+        expect(yield* h.prices.getDailyByRef(FIAT_EUR, [TODAY - 2, TODAY - 1])).toEqual(
+          new Map([
+            [TODAY - 2, 1.2],
+            [TODAY - 1, 1],
+          ]),
+        );
+      }),
+    );
+  });
+
+  it("BTC 美元腿优先读现有缓存 —— 有就不重取,只取该币腿", async () => {
+    const h = setup();
+    h.upstream.seriesByVs.set("EUR", btcLeg({ [TODAY - 2]: 100000, [TODAY - 1]: 100000 }));
+    await h.run(
+      Effect.gen(function* () {
+        const fx = yield* FxService;
+        // BTC 美元历史已在全局表(BTC 持有者暖过 / 上一轮落的)。
+        yield* h.prices.putDailyByRef(BTC_REF, [
+          { dayBucket: TODAY - 2, unitPrice: 120000 },
+          { dayBucket: TODAY - 1, unitPrice: 100000 },
+        ]);
+        yield* fx.rateSeries("EUR", day(-2), day(-1));
+        expect(h.upstream.calls).toEqual([legCall("EUR")]); // 美元腿命中缓存不出网
+      }),
+    );
+  });
+
+  it("今日桶恒现取、不落库(可变)", async () => {
+    const h = setup();
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY]: 100000 }));
+    h.upstream.seriesByVs.set("EUR", btcLeg({ [TODAY]: 100000 }));
+
+    await h.run(
+      Effect.gen(function* () {
+        const fx = yield* FxService;
+        expect(yield* fx.rateSeries("EUR", day(0), day(0))).toEqual([
+          { atMs: day(0), unitPrice: 1 },
+        ]);
+        // 今日不落 —— 明天再看这一天已是过去日、会重取一次定值。
+        expect(yield* h.prices.getDailyByRef(FIAT_EUR, [TODAY])).toEqual(new Map());
+      }),
+    );
+  });
+
+  it("上游挂了 → 降级到仅缓存,不抛", async () => {
+    const h = setup();
+    h.upstream.fail = upstreamDown();
+    await h.run(
+      Effect.gen(function* () {
+        const fx = yield* FxService;
+        yield* h.prices.putDailyByRef(FIAT_EUR, [{ dayBucket: TODAY - 2, unitPrice: 1.15 }]);
+        // 请求 [-2, -1]:-2 命中缓存、-1 缺且反算失败 → 只回 -2,不抛。
+        expect(yield* fx.rateSeries("EUR", day(-2), day(-1))).toEqual([
+          { atMs: day(-2), unitPrice: 1.15 },
+        ]);
+      }),
+    );
+    expect(h.logs.some((l) => l.annotations.at === "fx.rateSeries")).toBe(true);
+  });
+
+  it("from > to → 空", async () => {
+    const h = setup();
+    expect(await h.run(withFx((fx) => fx.rateSeries("EUR", day(-1), day(-2))))).toEqual([]);
+  });
+});
+
+// —— BTC 美元腿(ADR 0026 的「优先读缓存、不重取」)——
+// **直接打这个函数**:它收已解析好的端口、`R` 是 `never`(与 `readFx` / `writeFx` / `warmBlob`
+// 同款)。以前它闭包在 layer 的 `make` 里,这条规则只能透过 `rateSeries` 绕一圈验 ——
+// 摆两条腿、跑完整条反算、最后数请求次数,而那一路上任何一步坏了都会让这条断言变绿。
+describe("BTC 美元腿:优先读缓存,不重取", () => {
+  const leg = (h: ReturnType<typeof setup>, buckets: readonly number[]) =>
+    h.run(btcUsdDaily(h.prices, h.upstream, BTC_REF, buckets, TODAY));
+
+  it("全都命中缓存 → 零请求", async () => {
+    const h = setup();
+    await h.run(
+      h.prices.putDailyByRef(BTC_REF, [
+        { dayBucket: TODAY - 2, unitPrice: 120000 },
+        { dayBucket: TODAY - 1, unitPrice: 100000 },
+      ]),
+    );
+
+    expect(await leg(h, [TODAY - 2, TODAY - 1])).toEqual(
+      new Map([
+        [TODAY - 2, 120000],
+        [TODAY - 1, 100000],
+      ]),
+    );
+    expect(h.upstream.calls).toEqual([]);
+  });
+
+  it("缺过去日 → 取一次并落库(顺带暖给 BTC 持有者)", async () => {
+    const h = setup();
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY - 2]: 120000, [TODAY - 1]: 100000 }));
+
+    expect(await leg(h, [TODAY - 2, TODAY - 1])).toEqual(
+      new Map([
+        [TODAY - 2, 120000],
+        [TODAY - 1, 100000],
+      ]),
+    );
+    expect(h.upstream.calls).toEqual([legCall("USD")]); // 一次,不是逐日
+    // 落库了 → 下一轮(以及任何 BTC 持有者的历史曲线)直接命中。
+    expect(h.prices.dailyByRef.get(BTC_REF)).toEqual(
+      new Map([
+        [TODAY - 2, 120000],
+        [TODAY - 1, 100000],
+      ]),
+    );
+  });
+
+  it("**今日桶恒取**,哪怕过去日全都命中 —— 但今日不落库(可变)", async () => {
+    const h = setup();
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY]: 99000 }));
+    await h.run(h.prices.putDailyByRef(BTC_REF, [{ dayBucket: TODAY - 1, unitPrice: 100000 }]));
+
+    expect(await leg(h, [TODAY - 1, TODAY])).toEqual(
+      new Map([
+        [TODAY - 1, 100000],
+        [TODAY, 99000],
+      ]),
+    );
+    expect(h.upstream.calls).toEqual([legCall("USD")]); // 为今日那一桶出的网
+    // 今日不进库 —— 明天它成了过去日,会重取一次定值。
+    expect(h.prices.dailyByRef.get(BTC_REF)).toEqual(new Map([[TODAY - 1, 100000]]));
+  });
+
+  it("缓存里的值胜出 —— 同一天上游又给了个不同的数也不覆盖", async () => {
+    const h = setup();
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY - 1]: 111111, [TODAY]: 99000 }));
+    await h.run(h.prices.putDailyByRef(BTC_REF, [{ dayBucket: TODAY - 1, unitPrice: 100000 }]));
+
+    // 过去日不可变:落过库的那天以库里为准(上游这次给的 111111 丢掉)。
+    expect((await leg(h, [TODAY - 1, TODAY])).get(TODAY - 1)).toBe(100000);
+    expect(h.prices.dailyByRef.get(BTC_REF)?.get(TODAY - 1)).toBe(100000);
   });
 });

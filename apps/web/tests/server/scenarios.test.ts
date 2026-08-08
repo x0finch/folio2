@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import type { SnapshotWithBalances } from "@folio/db";
 import { globalTokenRefIndexStoreLayer, userCacheStoreLayer } from "@folio/db";
-import { TokenReader } from "@folio/oracle";
+import { TokenService } from "@folio/oracle";
 import { CacheStore, GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { syncAccount } from "@folio/sync";
 import { Effect } from "effect";
@@ -77,7 +77,7 @@ async function overview() {
   );
   await injectManualSnapshots(USER, accounts, byAccount);
   // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与 server fn 逐字同款:
-  // 一次 `runOracle` 供上 `TokenReader` / `PlatformResolver`。
+  // 一次 `runOracle` 供上 `TokenService` / `PlatformService`。
   return runOracle(
     USER,
     buildOverview(accounts, byAccount, {
@@ -153,7 +153,7 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
   });
   await runOracle(
     USER,
-    Effect.flatMap(TokenReader, (tokens) => tokens.refreshStale([tokenId])),
+    Effect.flatMap(TokenService, (tokens) => tokens.refreshStale([tokenId])),
   );
   // 刷完把桩换回「出网就抛」—— 后面的展示断言仍然要求零外呼。
   outbound = [];

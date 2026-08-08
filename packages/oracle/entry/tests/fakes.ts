@@ -27,14 +27,12 @@ import type {
 import * as Ports from "@folio/oracle-basic/ports";
 import { parseTokenRef } from "@folio/oracle-ref";
 import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
-import type { OraclePorts, OracleServices, RefIndexWarmer } from "../src";
-import { oracleLayer, refIndexWarmerLayer } from "../src";
-import { CandidateSource, candidateSourceLayer } from "../src/services/candidates";
-import { fxRateResolverLayer } from "../src/services/fx";
-import { fxHistoryLayer } from "../src/services/fx-history";
-import { tokenMinterLayer } from "../src/services/mint";
-import { platformResolverLayer } from "../src/services/platforms";
-import { tokenReaderLayer } from "../src/services/tokens";
+import type { GlobalRefIndexService, OraclePorts, OracleServices } from "../src";
+import { globalRefIndexServiceLayer, oracleLayer } from "../src";
+import { fxServiceLayer } from "../src/fx";
+import { platformServiceLayer } from "../src/platforms";
+import { tokenServiceLayer } from "../src/tokens";
+import { CandidateSource, candidateSourceLayer } from "../src/tokens/candidates";
 
 // 内存假实现 + **一份共用的测试装配**(下面的 `harness`)—— 各片的测试都注这一套。
 //
@@ -269,7 +267,7 @@ export function fakeTokenPriceStore(): FakeTokenPriceStore {
 }
 
 // —— 全局映射表 ——
-export interface FakeRefIndexStore extends GlobalTokenRefIndexStore {
+export interface FakeGlobalRefIndexStore extends GlobalTokenRefIndexStore {
   // 测试用它直接塞一条映射(模拟 cron 刷完表)。**不暴露内部键格式** ——
   // 让测试自己拼键的话,键格式一改测试就静默失配(踩过一次)。
   // chainRef → 整条 upstreamRef(#228:值是整条,不是裸 id)。
@@ -280,17 +278,17 @@ export interface FakeRefIndexStore extends GlobalTokenRefIndexStore {
 
 const idxKey = (upstream: string, chainRef: string) => `${upstream} ${chainRef}`;
 
-export function fakeRefIndexStore(
+export function fakeGlobalRefIndexStore(
   seed: Record<string, TokenRef> = {}, // chainRef → 整条 upstreamRef
   upstream = "src",
-): FakeRefIndexStore {
+): FakeGlobalRefIndexStore {
   const map = new Map<string, TokenRef>();
   for (const [chainRef, upstreamRef] of Object.entries(seed)) {
     map.set(idxKey(upstream, chainRef), upstreamRef);
   }
   const refreshedAt = new Map<string, number>();
 
-  const store: FakeRefIndexStore = {
+  const store: FakeGlobalRefIndexStore = {
     set(u, chainRef, upstreamRef) {
       map.set(idxKey(u, chainRef), upstreamRef);
     },
@@ -392,7 +390,7 @@ interface FakeUpstream extends TokenUpstream {
   // 按 vsCurrency(大写)的历史腿 —— 法币历史反算取「BTC 在某币种下的价」时用(ADR 0026)。
   // 命中就用它,否则回退 `series`。
   seriesByVs: Map<string, TokenPricePoint[]>;
-  refIndex: { rows: TokenRefIndexRow[]; unmatchedPlatforms: string[]; skipped: number };
+  globalRefIndex: { rows: TokenRefIndexRow[]; unmatchedPlatforms: string[]; skipped: number };
   fail: UpstreamError | undefined;
 }
 
@@ -408,7 +406,7 @@ function fakeUpstream(id = "src"): FakeUpstream {
     prices: new Map(),
     series: [],
     seriesByVs: new Map(),
-    refIndex: { rows: [], unmatchedPlatforms: [], skipped: 0 },
+    globalRefIndex: { rows: [], unmatchedPlatforms: [], skipped: 0 },
     fail: undefined,
 
     fetchMarkets: ({ topN }) => gate(src, `fetchMarkets:${topN}`, () => src.markets.slice(0, topN)),
@@ -439,7 +437,7 @@ function fakeUpstream(id = "src"): FakeUpstream {
       });
     },
 
-    fetchRefIndex: () => gate(src, "fetchRefIndex", () => src.refIndex),
+    fetchRefIndex: () => gate(src, "fetchRefIndex", () => src.globalRefIndex),
   };
   return src;
 }
@@ -512,10 +510,11 @@ function fakePlatformUpstream(chains: PlatformMeta[] = [], id = "src"): FakePlat
 // 于是偷偷跑在共享游标那一档上、跨用例串味)。所以这里只有一个入口:
 //
 //   const h = harness();
-//   const price = await h.run(Effect.flatMap(TokenReader, (r) => r.priceOf("tk_1")));
+//   const price = await h.run(Effect.flatMap(TokenService, (t) => t.priceOf("tk_1")));
 //
-// `run` 里做了三件事:provide 全部端口的假实现 + 五个真服务 + `TestContext`(虚拟时钟),
-// 并把时钟拨到 `now0`(固定基准,日桶算得出确定的值)。
+// `run` 里做了三件事:provide 全部端口的假实现 + 四个真服务(三个 per-user + 全局维护) +
+// `TestContext`(虚拟时钟),并把时钟拨到 `now0`(固定基准,日桶算得出确定的值)。
+// `GlobalRefIndexService` 不进 `oracleLayer`,但 cron 用例也走这个 harness,所以这里一并装上。
 // 日志也被收下来 —— **降级必须留痕**是这次迁移的一条设计(以前 6 处 `catch {}` 一行痕迹都没有),
 // 而「留痕」只有能断言才算数。
 interface LogEntry {
@@ -528,7 +527,7 @@ export interface Harness {
   readonly store: FakeTokenStore;
   readonly prices: FakeTokenPriceStore;
   readonly cache: FakeCacheStore;
-  readonly refIndex: FakeRefIndexStore;
+  readonly globalRefIndex: FakeGlobalRefIndexStore;
   readonly upstream: FakeUpstream;
   readonly fxUpstream: FakeFxUpstream;
   readonly platformUpstream: FakePlatformUpstream;
@@ -536,14 +535,18 @@ export interface Harness {
   readonly logs: LogEntry[];
   // 跑一个用了参考层的 effect。**测试与生产走同一条构造路**(Tag → Layer)。
   run<A, E>(
-    effect: Effect.Effect<A, E, OraclePorts | OracleServices | RefIndexWarmer | CandidateSource>,
+    effect: Effect.Effect<
+      A,
+      E,
+      OraclePorts | OracleServices | GlobalRefIndexService | CandidateSource
+    >,
   ): Promise<A>;
 }
 
 export interface HarnessOpts {
   seedRows?: TokenInfo[];
   namer?: string;
-  refIndexSeed?: Record<string, TokenRef>;
+  globalRefIndexSeed?: Record<string, TokenRef>;
   rates?: Record<string, number>;
   chains?: PlatformMeta[];
   // symbol → 上游 id 的策展小表(`Namer.overrides`)。
@@ -558,7 +561,7 @@ export function harness(opts: HarnessOpts = {}): Harness {
   const store = fakeTokenStore(opts.seedRows, namer);
   const prices = fakeTokenPriceStore();
   const cache = fakeCacheStore();
-  const refIndex = fakeRefIndexStore(opts.refIndexSeed, namer);
+  const globalRefIndex = fakeGlobalRefIndexStore(opts.globalRefIndexSeed, namer);
   const upstream = fakeUpstream(namer);
   const fxUpstream = fakeFxUpstream(opts.rates, namer);
   const platformUpstream = fakePlatformUpstream(opts.chains, namer);
@@ -579,7 +582,7 @@ export function harness(opts: HarnessOpts = {}): Harness {
     Layer.succeed(Ports.TokenStore, store),
     Layer.succeed(Ports.TokenPriceStore, prices),
     Layer.succeed(Ports.CacheStore, cache),
-    Layer.succeed(Ports.GlobalTokenRefIndexStore, refIndex),
+    Layer.succeed(Ports.GlobalTokenRefIndexStore, globalRefIndex),
     Layer.succeed(Ports.TokenUpstream, upstream),
     Layer.succeed(Ports.FxUpstream, fxUpstream),
     Layer.succeed(Ports.PlatformUpstream, platformUpstream),
@@ -587,28 +590,27 @@ export function harness(opts: HarnessOpts = {}): Harness {
   );
   // `provideMerge` 而不是 `provide`:端口也一并透出去,于是用例既能拿服务、也能直接拿假端口
   // (`readPlatforms(h.cache, …)` 那类内部件的单测就是直接用假端口的)。
-  // `candidateSourceLayer` 也透出来:它在 `oracleLayer` 里已被 mint 吃掉(装配点看不到它),
-  // 但它自己有一组测试(「写路径到底会不会出网」),那组要能直接拿到这个服务。
+  // `candidateSourceLayer` 也透出来:它在 `oracleLayer` 里已被 `TokenService` 吃掉(装配点看不到
+  // 它),但它自己有一组测试(「写路径到底会不会出网」),那组要能直接拿到这个服务。
   // 默认就用生产那个 `oracleLayer`(整体装配也因此被每个用例覆盖到)。只有当用例要顶掉候选源时
-  // 才手工拼一遍五个服务 —— `oracleLayer` 已经把 `CandidateSource` 吃进去了(那是设计:装配点
+  // 才手工拼一遍三个服务 —— `oracleLayer` 已经把 `CandidateSource` 吃进去了(那是设计:装配点
   // 不该看见它),从外面 merge 一个同 Tag 的 layer 谁赢是含糊的,所以这一档明写。
   const services = opts.candidates
     ? Layer.mergeAll(
-        tokenReaderLayer,
-        Layer.provide(tokenMinterLayer, Layer.succeed(CandidateSource, opts.candidates)),
-        fxRateResolverLayer,
-        fxHistoryLayer,
-        platformResolverLayer,
+        Layer.provide(tokenServiceLayer, Layer.succeed(CandidateSource, opts.candidates)),
+        fxServiceLayer,
+        platformServiceLayer,
+        globalRefIndexServiceLayer,
         Layer.succeed(CandidateSource, opts.candidates),
       )
-    : Layer.merge(oracleLayer, candidateSourceLayer);
-  const everything = Layer.provideMerge(Layer.merge(services, refIndexWarmerLayer), ports);
+    : Layer.mergeAll(oracleLayer, candidateSourceLayer, globalRefIndexServiceLayer);
+  const everything = Layer.provideMerge(services, ports);
 
   return {
     store,
     prices,
     cache,
-    refIndex,
+    globalRefIndex,
     upstream,
     fxUpstream,
     platformUpstream,

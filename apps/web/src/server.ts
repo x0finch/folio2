@@ -1,4 +1,4 @@
-import { RefIndexWarmer } from "@folio/oracle";
+import { GlobalRefIndexService } from "@folio/oracle";
 import { syncAllUsers } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
@@ -18,26 +18,29 @@ const webLog = getLogger(["folio", "web"]);
 
 // 刷全局映射表那个 trigger 的表达式(与 wrangler.jsonc 的 triggers.crons 第一条一致)。
 // 硬编码在这里是 Workers 的形状使然:分支只能靠 controller.cron 的字符串比对。
-const REF_INDEX_CRON = "0 23 * * *";
+const GLOBAL_REF_INDEX_CRON = "0 23 * * *";
 
 // 刷 `global_token_ref_index`:拉整份币目录 → 转换(在 adapter 里)→ 一次整份灌(分批写)。
 // 与用户无关,所以不枚举用户。失败会上抛到外层统一记 error —— 刷表挂了必须可见,
 // 否则新币会一直认不出来而没有任何迹象。
-async function refreshRefIndex(cron: string): Promise<void> {
-  const before = await runOracleWarm(
-    Effect.flatMap(RefIndexWarmer, (w) => w.refIndexRefreshedAt()),
+async function refreshGlobalRefIndex(cron: string): Promise<void> {
+  await runOracleWarm(
+    Effect.gen(function* () {
+      const svc = yield* GlobalRefIndexService;
+      const before = yield* svc.refreshedAt();
+      cronLog.info("global ref index refresh start", {
+        cron,
+        lastRefreshedAt: Option.getOrNull(before),
+      });
+      const result = yield* svc.warm();
+      cronLog.info("global ref index refresh done", {
+        cron,
+        rows: result.rows,
+        skipped: result.skipped,
+        unmatchedPlatforms: result.unmatchedPlatforms.length,
+      });
+    }),
   );
-  cronLog.info("ref index refresh start", {
-    cron,
-    lastRefreshedAt: Option.getOrNull(before),
-  });
-  const result = await runOracleWarm(Effect.flatMap(RefIndexWarmer, (w) => w.warmRefIndex()));
-  cronLog.info("ref index refresh done", {
-    cron,
-    rows: result.rows,
-    skipped: result.skipped,
-    unmatchedPlatforms: result.unmatchedPlatforms.length,
-  });
 }
 
 const serverEntry = createServerEntry({
@@ -65,7 +68,7 @@ export default {
   ...serverEntry,
 
   // 两个定时任务共一个 scheduled(),按 controller.cron 分支(见 wrangler.jsonc 的 triggers):
-  //   · REF_INDEX_CRON(23:00)—— 刷全局代币映射表
+  //   · GLOBAL_REF_INDEX_CRON(23:00)—— 刷全局代币映射表
   //   · 其余(00:00)—— 全量 sync sweep
   // 拆两个 trigger 而不是挤一次:拉几 MB JSON + 写几万行是重活,与 sweep 挤一次调用有超预算风险。
   // waitUntil 保证跑完才结束本次调用。env/ctx 由运行时传入;env 不单独取用
@@ -75,8 +78,8 @@ export default {
       (async () => {
         await configureLogging();
         try {
-          if (controller.cron === REF_INDEX_CRON) {
-            await refreshRefIndex(controller.cron);
+          if (controller.cron === GLOBAL_REF_INDEX_CRON) {
+            await refreshGlobalRefIndex(controller.cron);
             return;
           }
           const userIds = await db.listUserIdsWithAccounts();

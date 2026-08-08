@@ -96,7 +96,7 @@ describe("deriveLiveAccountTotals", () => {
       ],
     ]);
     const totals = await runWithOracle(
-      { reader: { enrich: enrichStub } },
+      { tokens: { enrich: enrichStub } },
       deriveLiveAccountTotals(accounts, byAccount, "self-first"),
     );
     expect(totals.get("cex")).toBe(120000);
@@ -117,7 +117,7 @@ describe("deriveLiveAccountTotals", () => {
       ],
     ]);
     const totals = await runWithOracle(
-      { reader: { enrich: enrichStub } },
+      { tokens: { enrich: enrichStub } },
       deriveLiveAccountTotals(accounts, byAccount, "self-first"),
     );
     expect(totals.get("defi")).toBe(50);
