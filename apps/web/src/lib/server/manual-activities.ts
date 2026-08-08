@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { addManualActivities, deleteManualActivity, editManualActivity } from "./internal/manual";
+import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 
 // manual 活动账本资源(账户级)。薄壳:auth + 校验入参 + 调 ./manual 纯 async(决策/物化都在那层)。
@@ -29,7 +30,9 @@ const CreateActivitiesInput = z.object({
 export const createManualActivities = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreateActivitiesInput)
-  .handler(({ data, context }) => addManualActivities(context.userId, data.accountId, data.drafts));
+  .handler(({ data, context }) =>
+    runRequest(context.userId, addManualActivities(data.accountId, data.drafts)),
+  );
 
 const RemoveActivityInput = z.object({
   accountId: z.string().min(1),
@@ -39,7 +42,7 @@ export const removeManualActivity = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(RemoveActivityInput)
   .handler(async ({ data, context }) => {
-    await deleteManualActivity(context.userId, data.accountId, data.activityId);
+    await runRequest(context.userId, deleteManualActivity(data.accountId, data.activityId));
     return { ok: true as const };
   });
 
@@ -57,4 +60,6 @@ const UpdateActivityInput = z.object({
 export const updateManualActivity = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(UpdateActivityInput)
-  .handler(({ data, context }) => editManualActivity(context.userId, data.activityId, data.patch));
+  .handler(({ data, context }) =>
+    runRequest(context.userId, editManualActivity(data.activityId, data.patch)),
+  );

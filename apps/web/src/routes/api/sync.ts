@@ -4,6 +4,7 @@ import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/server/internal/auth";
 import { resolveAuth } from "@/lib/server/internal/auth-session";
+import { runAtEdge } from "@/lib/server/internal/oracle";
 import { buildSyncDeps, warmTokensForUser } from "@/lib/server/internal/sync-deps";
 import { ndjsonRound } from "@/lib/server/internal/sync-ndjson";
 
@@ -37,11 +38,13 @@ export const Route = createFileRoute("/api/sync")({
           return err instanceof Response ? err : new Response("Unauthorized", { status: 401 });
         }
 
-        const { body, run } = await ndjsonRound(syncUserStream(buildSyncDeps(), userId), {
-          // 同步完预热代币缓存(best-effort),让下次总览能 cache-only 富化新价。
-          afterRound: () => warmTokensForUser(userId),
-          onFatal: (error) => log.error("sync stream failed", { userId, error }),
-        });
+        const { body, run } = await runAtEdge(
+          ndjsonRound(syncUserStream(buildSyncDeps(), userId), {
+            // 同步完预热代币缓存(best-effort),让下次总览能 cache-only 富化新价。
+            afterRound: () => warmTokensForUser(userId),
+            onFatal: (error) => log.error("sync stream failed", { userId, error }),
+          }),
+        );
         waitUntil(run);
 
         return new Response(body, {

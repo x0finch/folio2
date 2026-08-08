@@ -5,7 +5,8 @@ import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/history";
-import { db } from "../../src/lib/server/internal/db";
+import { NAMER } from "../../src/lib/server/internal/oracle";
+import { dbFor, withStore } from "./db-effect";
 import {
   addManualActivities,
   deleteManualActivity,
@@ -13,9 +14,7 @@ import {
   loadManualAccountLiveTotal,
   loadManualAccountSeries,
   loadManualHistoryRows,
-} from "../../src/lib/server/internal/manual";
-import { NAMER } from "../../src/lib/server/internal/oracle";
-import { withStore } from "./db-effect";
+} from "./manual-fns";
 import { ticketOf } from "./ticket";
 
 // Phase B(#171,ADR 0019)服务端集成:manual 价值历史在**规则日网格**上 compute-on-read。真实 D1(Miniflare)。
@@ -57,7 +56,7 @@ async function seedDaily(
   accountId: string,
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
-  const [h] = await db.listManualHoldingsByAccount(USER, accountId, NAMER);
+  const [h] = await dbFor(USER).manual.listHoldings(accountId, NAMER);
   await withStore(TokenPriceStore, userTokenPriceStoreLayer({ userId: USER, namer: NAMER }), (s) =>
     s.putDaily(h.id, rows),
   );
@@ -76,7 +75,7 @@ async function resetUser(): Promise<void> {
 beforeEach(resetUser);
 
 async function emptyAccount(label = "M") {
-  return db.createAccount(USER, {
+  return dbFor(USER).accounts.create({
     connectorId: "manual",
     label,
     creds: JSON.stringify({ tokens: "[]" }),
@@ -214,7 +213,7 @@ describe("loadManualAccountSeries (grid)", () => {
       { token: localBtc, kind: "add", amount: 1, occurredAt: D0, price: 40000 },
       { token: localBtc, kind: "add", amount: 2, occurredAt: D0 + DAY, price: 50000 },
     ]);
-    const acts = await db.listManualActivityByAccount(USER, acc.id);
+    const acts = await dbFor(USER).manual.listActivityByAccount(acc.id);
     const later = acts.find((a) => a.occurredAt === D0 + DAY);
     if (!later) throw new Error("later activity missing");
     await deleteManualActivity(USER, acc.id, later.id);
@@ -233,7 +232,7 @@ describe("loadManualAccountSeries (grid)", () => {
     await addManualActivities(USER, acc.id, [
       { token: localBtc, kind: "add", amount: 1, occurredAt: D0, price: 40000 },
     ]);
-    const act = (await db.listManualActivityByAccount(USER, acc.id))[0];
+    const act = (await dbFor(USER).manual.listActivityByAccount(acc.id))[0];
     const res = await editManualActivity(USER, act.id, { amount: 3 });
     expect(res.ok).toBe(true);
     expect(await loadManualAccountSeries(USER, acc.id, D0)).toEqual([
@@ -251,7 +250,7 @@ describe("loadManualAccountSeries (grid)", () => {
       { token: localBtc, kind: "add", amount: 1, occurredAt: D0 + 3 * DAY, price: 62000 },
     ]);
     // 删掉开仓 set10 → 账本回溯超卖:add1 / reduce2 / add1(delete 不重校验超卖)。
-    const setAct = (await db.listManualActivityByAccount(USER, acc.id)).find(
+    const setAct = (await dbFor(USER).manual.listActivityByAccount(acc.id)).find(
       (x) => x.occurredAt === D0,
     );
     if (!setAct) throw new Error("set activity missing");
@@ -287,7 +286,7 @@ describe("loadManualHistoryRows (grid)", () => {
       },
     ]);
     // now = D0 → 每账户单点。
-    const rows = await loadManualHistoryRows(USER, await db.listAccountsByUser(USER), D0);
+    const rows = await loadManualHistoryRows(USER, await dbFor(USER).accounts.list(), D0);
     expect(rows).toEqual(
       expect.arrayContaining([
         { accountId: a.id, takenAt: D0, totalUsd: 60000 },
@@ -306,8 +305,8 @@ describe("loadManualHistoryRows (grid)", () => {
     await addManualActivities(USER, archived.id, [
       { token: localBtc, kind: "add", amount: 5, occurredAt: D0, price: 60000 },
     ]);
-    await db.setArchived(USER, archived.id, true);
-    const rows = await loadManualHistoryRows(USER, await db.listAccountsByUser(USER), D0);
+    await dbFor(USER).accounts.setArchived(archived.id, true);
+    const rows = await loadManualHistoryRows(USER, await dbFor(USER).accounts.list(), D0);
     expect(rows).toEqual(
       expect.arrayContaining([
         { accountId: a.id, takenAt: D0, totalUsd: 60000 },
@@ -339,8 +338,7 @@ describe("loadManualAccountLiveTotal", () => {
       { token: localBtc, kind: "add", amount: 1, occurredAt: D0, price: 60000 },
     ]);
     // 手动把物化投影弄成过期(amount 0),模拟「删更早活动后 creds 携带旧值 / 折叠语义修正前写入」的 stale 态。
-    await db.setAccountCredentials(
-      USER,
+    await dbFor(USER).accounts.setCredentials(
       acc.id,
       JSON.stringify({ tokens: JSON.stringify([{ symbol: "BTC", unitPrice: 100, amount: 0 }]) }),
     );

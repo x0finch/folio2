@@ -26,6 +26,13 @@ export interface NdjsonRound {
   run: Promise<void>;
 }
 
+// **出口是 Effect,不是 Promise**(#394 T5):建队列这件事本来就是个 effect,而调用方(路由 handler)
+// 现在有自己的边缘 —— 它把鉴权之后的整段拼成一个 effect 再跑一次。以前这里自己 `runPromise`,
+// 于是同一个请求里多切一道边界,只为把一个同步就能建好的队列取出来。
+//
+// **`run` 仍是 Promise,而且仍由本模块 `runPromise`。** 它不是「中途转了一次」——
+// `waitUntil` 收的就是 Promise,而这个后台任务与响应那半**是两个程序**:响应流结束之后它照跑。
+// 一个程序一个边缘,这里恰好有两个。
 export const ndjsonRound = <A>(
   results: Stream.Stream<A, { readonly message: string }>,
   opts: {
@@ -34,45 +41,42 @@ export const ndjsonRound = <A>(
     // 用户级失败(整轮没跑起来)时记一笔 —— 日志由调用方给,本模块不认识 logger。
     onFatal?: (message: string) => void;
   } = {},
-): Promise<NdjsonRound> =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const queue = yield* Queue.unbounded<Option.Option<string>>();
-      const afterRound = opts.afterRound;
-      const onFatal = opts.onFatal;
-      const line = (value: unknown) =>
-        Queue.offer(queue, Option.some(`${JSON.stringify(value)}\n`));
+): Effect.Effect<NdjsonRound> =>
+  Effect.gen(function* () {
+    const queue = yield* Queue.unbounded<Option.Option<string>>();
+    const afterRound = opts.afterRound;
+    const onFatal = opts.onFatal;
+    const line = (value: unknown) => Queue.offer(queue, Option.some(`${JSON.stringify(value)}\n`));
 
-      // 不 await —— 调用方拿到这个 Promise 交给 waitUntil。
-      const run = Effect.runPromise(
-        results.pipe(
-          Stream.runForEach(line),
-          // 用户级失败也要让前端看见,别让流静默地空着结束。
-          Effect.catchAll((e) =>
-            line({ fatal: e.message }).pipe(
-              Effect.tap(() => Effect.sync(() => onFatal?.(e.message))),
-            ),
+    // 不 await —— 调用方拿到这个 Promise 交给 waitUntil。
+    const run = Effect.runPromise(
+      results.pipe(
+        Stream.runForEach(line),
+        // 用户级失败也要让前端看见,别让流静默地空着结束。
+        Effect.catchAll((e) =>
+          line({ fatal: e.message }).pipe(
+            Effect.tap(() => Effect.sync(() => onFatal?.(e.message))),
           ),
-          // 收尾:排一个哨兵进队列 → 响应流读到它就自然结束。
-          //
-          // **哨兵排在 afterRound 之前**,这个顺序是有代价换来的:反过来的话,「看」的那一半要等
-          // 一件与它无关的事 —— 预热缓存 —— 做完才收工。e2e 里量到过:两个账户的结果早就全部
-          // 送达(toast 停在「Syncing 2/2」),而成功 toast 迟迟不出,因为 warmTokensForUser 在打
-          // 一圈拿不到的上游。结果都出去了就该让前端收工;剩下的收尾归 waitUntil,与连接无关。
-          Effect.ensuring(Queue.offer(queue, END)),
-          Effect.tap(() =>
-            afterRound ? Effect.promise(() => afterRound().catch(() => {})) : Effect.void,
-          ),
-          Effect.asVoid,
         ),
-      );
+        // 收尾:排一个哨兵进队列 → 响应流读到它就自然结束。
+        //
+        // **哨兵排在 afterRound 之前**,这个顺序是有代价换来的:反过来的话,「看」的那一半要等
+        // 一件与它无关的事 —— 预热缓存 —— 做完才收工。e2e 里量到过:两个账户的结果早就全部
+        // 送达(toast 停在「Syncing 2/2」),而成功 toast 迟迟不出,因为 warmTokensForUser 在打
+        // 一圈拿不到的上游。结果都出去了就该让前端收工;剩下的收尾归 waitUntil,与连接无关。
+        Effect.ensuring(Queue.offer(queue, END)),
+        Effect.tap(() =>
+          afterRound ? Effect.promise(() => afterRound().catch(() => {})) : Effect.void,
+        ),
+        Effect.asVoid,
+      ),
+    );
 
-      // `toReadableStream` 写成 data-first:放进 pipe 里(data-last)时它的元素类型参数无从推断,
-      // 会塌成 `ReadableStream<unknown>`。
-      const bytes = Stream.fromQueue(queue, { shutdown: false }).pipe(
-        Stream.takeWhile(Option.isSome),
-        Stream.map((some) => encoder.encode(some.value)),
-      );
-      return { body: Stream.toReadableStream(bytes), run };
-    }),
-  );
+    // `toReadableStream` 写成 data-first:放进 pipe 里(data-last)时它的元素类型参数无从推断,
+    // 会塌成 `ReadableStream<unknown>`。
+    const bytes = Stream.fromQueue(queue, { shutdown: false }).pipe(
+      Stream.takeWhile(Option.isSome),
+      Stream.map((some) => encoder.encode(some.value)),
+    );
+    return { body: Stream.toReadableStream(bytes), run };
+  });

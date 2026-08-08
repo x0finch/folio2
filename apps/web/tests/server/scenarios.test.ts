@@ -7,17 +7,16 @@ import { syncAccount } from "@folio/sync";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectorPlatformMeta } from "../../src/lib/server/internal/connector-platform";
-import { db } from "../../src/lib/server/internal/db";
+import { NAMER, runRequest } from "../../src/lib/server/internal/oracle";
+import { buildOverview } from "../../src/lib/server/internal/overview-model";
+import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
+import { dbFor, withStore } from "./db-effect";
 import {
   addManualActivities,
   createManualAccount,
   createToken,
   injectManualSnapshots,
-} from "../../src/lib/server/internal/manual";
-import { NAMER, runOracle } from "../../src/lib/server/internal/oracle";
-import { buildOverview } from "../../src/lib/server/internal/overview-model";
-import { buildSyncDeps } from "../../src/lib/server/internal/sync-deps";
-import { withStore } from "./db-effect";
+} from "./manual-fns";
 import { ticketOf } from "./ticket";
 
 // **按用户情景走一遍,每个情景查三处:入库 / 库里的数据对不对 / 屏幕上是什么。**
@@ -67,9 +66,9 @@ afterEach(() => vi.restoreAllMocks());
 // 注入手记合成项 → buildOverview)。**不复刻业务逻辑**,所以顺序或依赖一改,这里会跟着红。
 async function overview() {
   const [allAccounts, snapshots, settings] = await Promise.all([
-    db.listAccountsByUser(USER),
-    db.getLatestSnapshotByUser(USER),
-    db.getUserSettings(USER),
+    dbFor(USER).accounts.list(),
+    dbFor(USER).snapshots.latest(),
+    dbFor(USER).settings.get(),
   ]);
   const accounts = allAccounts.filter((a) => a.archivedAt == null);
   const byAccount = new Map<string, SnapshotWithBalances>(
@@ -77,8 +76,8 @@ async function overview() {
   );
   await injectManualSnapshots(USER, accounts, byAccount);
   // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与 server fn 逐字同款:
-  // 一次 `runOracle` 供上 `TokenService` / `PlatformService`。
-  return runOracle(
+  // 一次 `runRequest` 供上 `TokenService` / `PlatformService`。
+  return runRequest(
     USER,
     buildOverview(accounts, byAccount, {
       connectorMeta: connectorPlatformMeta,
@@ -151,7 +150,7 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
       headers: { "content-type": "application/json" },
     });
   });
-  await runOracle(
+  await runRequest(
     USER,
     Effect.flatMap(TokenService, (tokens) => tokens.refreshStale([tokenId])),
   );
@@ -420,7 +419,11 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
         60 * 60 * 1000,
       ),
     );
-    const account = await db.createAccount(USER, { connectorId: "evm", label: "w", creds: null });
+    const account = await dbFor(USER).accounts.create({
+      connectorId: "evm",
+      label: "w",
+      creds: null,
+    });
     const res = await syncAccount(
       {
         ...buildSyncDeps(),
@@ -432,7 +435,7 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
           }),
       },
       USER,
-      (await db.listAccountsByUser(USER)).find((a) => a.id === account.id) as never,
+      (await dbFor(USER).accounts.list()).find((a) => a.id === account.id) as never,
       null,
     );
     if (!res.ok || !res.snapshotId) throw new Error(`sync failed: ${res.error ?? "no snapshot"}`);

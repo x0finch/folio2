@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
+import { AccountStore, SettingsStore } from "@folio/db";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { db } from "./internal/db";
+import { runStore } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 
 // 全局 provider key 是否已配置(只回布尔,绝不回值)。自托管者据此自检 env。
@@ -17,19 +18,19 @@ export const getProviderKeyStatus = createServerFn({ method: "GET" })
 export const getDataStats = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(async ({ context }) => ({
-    hasData: (await db.listAccountsByUser(context.userId)).length > 0,
+    hasData: (await runStore(context.userId, AccountStore, (s) => s.list())).length > 0,
   }));
 
 // per-user 估值设置(Phase 3,#82)。读带缺省(无行 → coingecko / self-first)。
 export const getValuationSettings = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(({ context }) => db.getUserSettings(context.userId));
+  .handler(({ context }) => runStore(context.userId, SettingsStore, (s) => s.get()));
 
 // 切换估值模式:source-first = 统一采用市场源价、重算当前视图(历史冻结、无需重 sync)。
 export const updateValuationSettings = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(z.object({ mode: z.enum(["self-first", "source-first"]) }))
   .handler(async ({ context, data }) => {
-    await db.updateUserSettings(context.userId, { valuationMode: data.mode });
+    await runStore(context.userId, SettingsStore, (s) => s.update({ valuationMode: data.mode }));
     return { ok: true };
   });

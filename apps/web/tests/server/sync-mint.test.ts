@@ -5,9 +5,8 @@ import { CacheStore, GlobalTokenRefIndexStore, TokenStore } from "@folio/oracle-
 import { syncAccount } from "@folio/sync";
 import { Effect, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { db } from "../../src/lib/server/internal/db";
 import { buildSyncDeps, warmTokensForUser } from "../../src/lib/server/internal/sync-deps";
-import { withStore } from "./db-effect";
+import { dbFor, withStore } from "./db-effect";
 
 // 写路径切到 mint 的端到端测试(#200):喂 provider 余额 → 落库 → 快照行带正确的 token_id。
 //
@@ -87,7 +86,7 @@ async function seedRefIndex(rows: { ref: string; localName: string }[]): Promise
 }
 
 async function makeAccount(label = "w"): Promise<string> {
-  const account = await db.createAccount(USER, {
+  const account = await dbFor(USER).accounts.create({
     connectorId: "evm",
     label,
     creds: null,
@@ -113,7 +112,7 @@ async function syncWith(
   accountId: string,
   deps = buildSyncDeps(),
 ): Promise<string> {
-  const accounts = await db.listAccountsByUser(USER);
+  const accounts = await dbFor(USER).accounts.list();
   const account = accounts.find((a) => a.id === accountId);
   if (!account) throw new Error(`no such account ${accountId}`);
   const res = await syncAccount(
@@ -296,7 +295,7 @@ describe("每账户独立落库的性质保住", () => {
     const bad = await makeAccount("bad");
     const good = await makeAccount("good");
     const deps = buildSyncDeps();
-    const accounts = await db.listAccountsByUser(USER);
+    const accounts = await dbFor(USER).accounts.list();
     const of = (id: string) => accounts.find((a) => a.id === id) as never;
 
     // 坏账户:取数直接抛 → syncAccount 收成 ok:false,不落库、不向上抛。
