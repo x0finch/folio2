@@ -3,27 +3,24 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 import {
-  createAccount,
-  deleteAccount,
-  getAccountById,
+  AccountStore,
+  accountStoreLayer,
   getLatestSnapshotByUser,
-  getRawCreds,
-  getUserSettings,
-  listAccountsByUser,
   listBalancesForSnapshots,
-  listRawCredsByUser,
   listSnapshotsByAccount,
   listSnapshotsPageByUser,
   listSnapshotTotalsByUser,
   listUserIdsWithAccounts,
-  renameAccount,
-  setAccountCredentials,
-  setArchived,
-  updateUserSettings,
+  SettingsStore,
+  settingsStoreLayer,
   writeSnapshot,
-} from "../src/queries"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
+} from "../src/queries";
 // 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
 import { user } from "../src/schema/auth";
+import { forUser, runDb } from "./effect"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
+
+const accounts = forUser(AccountStore, accountStoreLayer);
+const settings = forUser(SettingsStore, settingsStoreLayer);
 
 const USER_A = "user-a";
 const USER_B = "user-b";
@@ -50,7 +47,7 @@ beforeEach(async () => {
 
 describe("accounts", () => {
   it("creates, lists, gets, and deletes an account (safe shape, no ciphertext)", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "Cash",
       creds: "cipher",
@@ -58,86 +55,86 @@ describe("accounts", () => {
     expect(acc.id).toBeTruthy();
     expect(Object.keys(acc)).not.toContain("encCredentials");
 
-    const list = await listAccountsByUser(env, USER_A);
+    const list = await accounts(USER_A).list();
     expect(list).toHaveLength(1);
     expect(list[0]!.label).toBe("Cash");
 
-    const got = await getAccountById(env, USER_A, acc.id);
+    const got = await accounts(USER_A).getById(acc.id);
     expect(got?.connectorId).toBe("manual");
     expect(Object.keys(got!)).not.toContain("encCredentials");
 
-    await deleteAccount(env, USER_A, acc.id);
-    expect(await listAccountsByUser(env, USER_A)).toHaveLength(0);
+    await accounts(USER_A).remove(acc.id);
+    expect(await accounts(USER_A).list()).toHaveLength(0);
   });
 
   it("returns the opaque creds map only via the internal getter", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "binance",
       label: "Binance",
       creds: '{"apiKey":"K","secret":"<enc>"}',
     });
-    expect(await getRawCreds(env, USER_A, acc.id)).toBe('{"apiKey":"K","secret":"<enc>"}');
+    expect(await accounts(USER_A).getRawCreds(acc.id)).toBe('{"apiKey":"K","secret":"<enc>"}');
   });
 
   it("listUserIdsWithAccounts returns distinct user ids that own accounts (cron sweep)", async () => {
-    expect(await listUserIdsWithAccounts(env)).toEqual([]); // 无账户
-    await createAccount(env, USER_A, { connectorId: "manual", label: "A1", creds: "x" });
-    await createAccount(env, USER_A, { connectorId: "manual", label: "A2", creds: "x" }); // 同用户两账户 → 去重
-    await createAccount(env, USER_B, { connectorId: "manual", label: "B1", creds: "x" });
-    const ids = await listUserIdsWithAccounts(env);
+    expect(await runDb(listUserIdsWithAccounts)).toEqual([]); // 无账户
+    await accounts(USER_A).create({ connectorId: "manual", label: "A1", creds: "x" });
+    await accounts(USER_A).create({ connectorId: "manual", label: "A2", creds: "x" }); // 同用户两账户 → 去重
+    await accounts(USER_B).create({ connectorId: "manual", label: "B1", creds: "x" });
+    const ids = await runDb(listUserIdsWithAccounts);
     expect([...ids].sort()).toEqual([USER_A, USER_B].sort());
   });
 
   it("round-trips the creds map (incl. semi_ placeholder) and rehydrates via setAccountCredentials", async () => {
     // 导入的缺凭据 CEX:creds 只含 semi 打码占位(无真 apiKey/secret)。
     const imported = JSON.stringify({ semi_apiKey: "ABCD…5678" });
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "okx",
       label: "Imported OKX",
       creds: imported,
     });
-    expect(await getRawCreds(env, USER_A, acc.id)).toBe(imported);
+    expect(await accounts(USER_A).getRawCreds(acc.id)).toBe(imported);
     // creds 不进安全形状(含 secret 密文)。
-    const got = await getAccountById(env, USER_A, acc.id);
+    const got = await accounts(USER_A).getById(acc.id);
     expect(Object.keys(got!)).not.toContain("creds");
 
     // 补录:整张 map 覆盖。
     const sealed = JSON.stringify({ apiKey: "REAL", secret: "<enc>", passphrase: "<enc>" });
-    await setAccountCredentials(env, USER_A, acc.id, sealed);
-    expect(await getRawCreds(env, USER_A, acc.id)).toBe(sealed);
+    await accounts(USER_A).setCredentials(acc.id, sealed);
+    expect(await accounts(USER_A).getRawCreds(acc.id)).toBe(sealed);
   });
 
   it("renameAccount changes the label (user-scoped)", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "Old",
       creds: "x",
     });
-    await renameAccount(env, USER_A, acc.id, "New");
-    expect((await getAccountById(env, USER_A, acc.id))?.label).toBe("New");
+    await accounts(USER_A).rename(acc.id, "New");
+    expect((await accounts(USER_A).getById(acc.id))?.label).toBe("New");
     // 越权:另一用户改不动。
-    await renameAccount(env, USER_B, acc.id, "Hacked");
-    expect((await getAccountById(env, USER_A, acc.id))?.label).toBe("New");
+    await accounts(USER_B).rename(acc.id, "Hacked");
+    expect((await accounts(USER_A).getById(acc.id))?.label).toBe("New");
   });
 
   it("setArchived toggles archivedAt (reversible, user-scoped)", async () => {
-    const acc = await createAccount(env, USER_A, { connectorId: "manual", label: "M", creds: "x" });
-    expect((await getAccountById(env, USER_A, acc.id))?.archivedAt).toBeNull();
-    await setArchived(env, USER_A, acc.id, true);
-    expect((await getAccountById(env, USER_A, acc.id))?.archivedAt).toBeGreaterThan(0);
-    await setArchived(env, USER_A, acc.id, false);
-    expect((await getAccountById(env, USER_A, acc.id))?.archivedAt).toBeNull();
+    const acc = await accounts(USER_A).create({ connectorId: "manual", label: "M", creds: "x" });
+    expect((await accounts(USER_A).getById(acc.id))?.archivedAt).toBeNull();
+    await accounts(USER_A).setArchived(acc.id, true);
+    expect((await accounts(USER_A).getById(acc.id))?.archivedAt).toBeGreaterThan(0);
+    await accounts(USER_A).setArchived(acc.id, false);
+    expect((await accounts(USER_A).getById(acc.id))?.archivedAt).toBeNull();
   });
 
   it("listRawCredsByUser returns each account's raw creds (user-scoped; for safeView 富化)", async () => {
-    const a1 = await createAccount(env, USER_A, { connectorId: "manual", label: "M", creds: "{}" });
-    const a2 = await createAccount(env, USER_A, {
+    const a1 = await accounts(USER_A).create({ connectorId: "manual", label: "M", creds: "{}" });
+    const a2 = await accounts(USER_A).create({
       connectorId: "evm",
       label: "W",
       creds: '{"identifier":"0xabc"}',
     });
-    await createAccount(env, USER_B, { connectorId: "manual", label: "B", creds: "{}" });
-    const rows = await listRawCredsByUser(env, USER_A);
+    await accounts(USER_B).create({ connectorId: "manual", label: "B", creds: "{}" });
+    const rows = await accounts(USER_A).listRawCreds();
     expect(new Map(rows.map((r) => [r.id, r.creds]))).toEqual(
       new Map([
         [a1.id, "{}"],
@@ -149,7 +146,7 @@ describe("accounts", () => {
 
 describe("snapshots", () => {
   it("writes snapshot + balances atomically and reads them back", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
@@ -195,7 +192,7 @@ describe("snapshots", () => {
   });
 
   it("persists per-balance note (single Note) + account-level note (Note[]) and safeParses back (note 重设计)", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "bitcoin",
       label: "BTC",
       creds: "x",
@@ -234,7 +231,7 @@ describe("snapshots", () => {
   });
 
   it("writes many balances by chunking under D1's bound-parameter limit", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "evm",
       label: "Big wallet",
       creds: "x",
@@ -255,18 +252,18 @@ describe("snapshots", () => {
   });
 
   it("returns only the latest snapshot per account, with its balances", async () => {
-    const a1 = await createAccount(env, USER_A, {
+    const a1 = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A1",
       creds: "x",
     });
-    const a2 = await createAccount(env, USER_A, {
+    const a2 = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A2",
       creds: "x",
     });
     // 一个没有快照的账户:不应出现在结果里。
-    await createAccount(env, USER_A, { connectorId: "manual", label: "A3", creds: "x" });
+    await accounts(USER_A).create({ connectorId: "manual", label: "A3", creds: "x" });
 
     // a1:先旧后新两份快照 → 应只回最新那份(takenAt 2000),余额是 NEW 不是 OLD。
     await writeSnapshot(env, USER_A, a1.id, {
@@ -302,12 +299,12 @@ describe("snapshots", () => {
   });
 
   it("returns [] for a user with no snapshots", async () => {
-    await createAccount(env, USER_A, { connectorId: "manual", label: "A", creds: "x" });
+    await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
     expect(await getLatestSnapshotByUser(env, USER_A)).toEqual([]);
   });
 
   it("cascades snapshots when the account is deleted", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
@@ -318,23 +315,23 @@ describe("snapshots", () => {
       balances: [{ tokenId: "tk-x", amount: 1, usdValue: 1, kind: "spot", platform: "binance" }],
     });
 
-    await deleteAccount(env, USER_A, acc.id);
-    expect(await listAccountsByUser(env, USER_A)).toHaveLength(0); // account gone
+    await accounts(USER_A).remove(acc.id);
+    expect(await accounts(USER_A).list()).toHaveLength(0); // account gone
     expect(await getLatestSnapshotByUser(env, USER_A)).toHaveLength(0); // snapshots gone
   });
 
   it("lists all snapshot totals for a user, ascending by takenAt, scoped to the user", async () => {
-    const a1 = await createAccount(env, USER_A, {
+    const a1 = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A1",
       creds: "x",
     });
-    const a2 = await createAccount(env, USER_A, {
+    const a2 = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A2",
       creds: "x",
     });
-    const b1 = await createAccount(env, USER_B, {
+    const b1 = await accounts(USER_B).create({
       connectorId: "manual",
       label: "B1",
       creds: "x",
@@ -352,13 +349,13 @@ describe("snapshots", () => {
   });
 
   it("returns [] of totals for a user with no snapshots", async () => {
-    await createAccount(env, USER_A, { connectorId: "manual", label: "A", creds: "x" });
+    await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
     expect(await listSnapshotTotalsByUser(env, USER_A)).toEqual([]);
   });
 
   it("paginates snapshots (asc takenAt) and fetches balances by id (export)", async () => {
-    const a = await createAccount(env, USER_A, { connectorId: "manual", label: "A", creds: "x" });
-    const b1 = await createAccount(env, USER_B, {
+    const a = await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
+    const b1 = await accounts(USER_B).create({
       connectorId: "manual",
       label: "B",
       creds: "x",
@@ -391,12 +388,12 @@ describe("snapshots", () => {
 
 describe("cross-user isolation", () => {
   it("never leaks another user's data", async () => {
-    const a = await createAccount(env, USER_A, { connectorId: "manual", label: "A", creds: "x" });
+    const a = await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
     await writeSnapshot(env, USER_A, a.id, { takenAt: 1, totalUsd: 1, balances: [] });
 
-    expect(await listAccountsByUser(env, USER_B)).toHaveLength(0);
-    expect(await getAccountById(env, USER_B, a.id)).toBeNull();
-    expect(await getRawCreds(env, USER_B, a.id)).toBeNull();
+    expect(await accounts(USER_B).list()).toHaveLength(0);
+    expect(await accounts(USER_B).getById(a.id)).toBeNull();
+    expect(await accounts(USER_B).getRawCreds(a.id)).toBeNull();
 
     await expect(listSnapshotsByAccount(env, USER_B, a.id)).rejects.toThrow();
     await expect(
@@ -407,20 +404,20 @@ describe("cross-user isolation", () => {
 
 describe("user settings", () => {
   it("读带缺省:无行 → self-first", async () => {
-    expect(await getUserSettings(env, USER_A)).toEqual({
+    expect(await settings(USER_A).get()).toEqual({
       valuationMode: "self-first",
     });
   });
 
   it("upsert 覆盖 valuationMode;读回一致", async () => {
-    await updateUserSettings(env, USER_A, { valuationMode: "source-first" });
-    expect(await getUserSettings(env, USER_A)).toEqual({
+    await settings(USER_A).update({ valuationMode: "source-first" });
+    expect(await settings(USER_A).get()).toEqual({
       valuationMode: "source-first",
     });
   });
 
   it("按 userId 隔离", async () => {
-    await updateUserSettings(env, USER_A, { valuationMode: "source-first" });
-    expect((await getUserSettings(env, USER_B)).valuationMode).toBe("self-first");
+    await settings(USER_A).update({ valuationMode: "source-first" });
+    expect((await settings(USER_B).get()).valuationMode).toBe("self-first");
   });
 });

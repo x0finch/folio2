@@ -5,8 +5,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 // 包内测试白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
 import {
-  createAccount,
-  deleteAccount,
+  AccountStore,
+  accountStoreLayer,
   listManualActivityByAccount,
   recordManualActivity,
   removeManualActivity,
@@ -14,7 +14,9 @@ import {
 import { manualActivity } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { userTokenStoreLayer } from "../src/stores/token";
-import { promisified } from "./effect";
+import { forUser, promisified } from "./effect";
+
+const accounts = forUser(AccountStore, accountStoreLayer);
 
 const USER_A = "user-a";
 const USER_B = "user-b";
@@ -39,7 +41,7 @@ beforeEach(async () => {
 
 // 活动挂 (账户, token)。#203 起 token 就是 `tokens` 里的一行(生产路径是 mint;这里直接用 store)。
 async function manualAccount(userId: string) {
-  const acc = await createAccount(env, userId, { connectorId: "manual", label: "M", creds: "{}" });
+  const acc = await accounts(userId).create({ connectorId: "manual", label: "M", creds: "{}" });
   const tokenId = await promisified(
     TokenStore,
     userTokenStoreLayer({ userId, namer: "coingecko" }),
@@ -107,7 +109,7 @@ describe("manual_activity ops", () => {
       amount: 10,
       occurredAt: 1,
     });
-    await deleteAccount(env, USER_A, acc.id);
+    await accounts(USER_A).remove(acc.id);
     // 账户已删 → 直接查表确认活动被级联清(经 userId 路径已查不到账户)。
     const rows = await getDb(env).select().from(manualActivity);
     expect(rows.filter((r) => r.accountId === acc.id)).toEqual([]);

@@ -11,7 +11,8 @@ import { type Database, databaseLayer } from "../src/stores/service";
 // (CODING.md「别断言墙上时钟」)。
 export const NOW = 1000;
 
-const runDb = <A>(effect: Effect.Effect<A, never, Database>, nowMs = NOW): Promise<A> =>
+// 跑一个只依赖 `Database` 的 effect(不带 userId 的系统级查询用,如 `listUserIdsWithAccounts`)。
+export const runDb = <A>(effect: Effect.Effect<A, never, Database>, nowMs = NOW): Promise<A> =>
   Effect.runPromise(
     Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(
       Effect.provide(databaseLayer(env)),
@@ -29,6 +30,19 @@ type Promisified<S> = {
     ? (...args: A) => Promise<R>
     : S[K];
 };
+
+// per-user 服务的把手(#394 ADR 0037):userId 现在由 layer 吃掉,所以每个用户各建一份。
+// 用法:`const accounts = forUser(AccountStore, accountStoreLayer)` 之后 `accounts(USER_A).create(…)`。
+//
+// 测试**保持 Promise 形状**是有判据的(CODING.md / #391):这些用例测的是「数据落库对不对」——
+// 真 D1、主键冲突、跨用户隔离,跟时序无关。测编排行为的那种才翻 Effect + TestClock。
+export const forUser =
+  <I, S extends object>(
+    tag: Context.Tag<I, S>,
+    layerOf: (userId: string) => Layer.Layer<I, never, Database>,
+  ) =>
+  (userId: string, nowMs = NOW): Promisified<S> =>
+    promisified(tag, layerOf(userId), nowMs);
 
 export const promisified = <I, S extends object>(
   tag: Context.Tag<I, S>,

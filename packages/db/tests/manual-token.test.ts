@@ -5,8 +5,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 // 包内白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
 import {
-  createAccount,
-  deleteAccount,
+  AccountStore,
+  accountStoreLayer,
   detachManualHolding,
   listManualActivityByToken,
   listManualHoldingsByAccount,
@@ -16,7 +16,9 @@ import {
 import { manualActivity, tokens as tokensTable } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { userTokenStoreLayer } from "../src/stores/token";
-import { promisified } from "./effect";
+import { forUser, promisified } from "./effect";
+
+const accounts = forUser(AccountStore, accountStoreLayer);
 
 // #203 起手记的币**就是 `tokens` 里的一行** —— 没有 manual_token 那张表了。
 // 于是「这个账户持有哪些币」由它账本里出现过的 token 决定,而不是另存一份账户↔币的关系。
@@ -45,7 +47,7 @@ beforeEach(async () => {
 });
 
 async function manualAccount(userId: string) {
-  return createAccount(env, userId, { connectorId: "manual", label: "M", creds: "{}" });
+  return accounts(userId).create({ connectorId: "manual", label: "M", creds: "{}" });
 }
 
 // 建一个该用户的代币行(生产路径是 mint;这里直接用 store,本文件不测认币)。
@@ -227,7 +229,7 @@ describe("归属:两道闸各自都得挡住", () => {
     const btc = await mintToken(USER_A, "BTC");
     await recordManualActivity(env, USER_A, acc.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
 
-    await deleteAccount(env, USER_A, acc.id);
+    await accounts(USER_A).remove(acc.id);
 
     const acts = await getDb(env).select().from(manualActivity);
     expect(acts.filter((r) => r.accountId === acc.id)).toEqual([]);

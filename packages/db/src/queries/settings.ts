@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
-import { type DbEnv, getDb } from "../connect";
+import { Context, Effect, Layer } from "effect";
 import { userSettings } from "../schema";
 import type { UserSettings, ValuationMode } from "../schema/types";
+import { Database } from "../stores/service";
 
 // 用户设置(Phase 3,#82)。
 
@@ -13,32 +14,53 @@ export interface UserSettingsView {
   valuationMode: ValuationMode;
 }
 
-// 读带缺省:无行返默认(不为每个用户强制建行)。
-export async function getUserSettings(env: DbEnv, userId: string): Promise<UserSettingsView> {
-  const rows = await getDb(env).select().from(userSettings).where(eq(userSettings.userId, userId));
-  const r = rows[0] as UserSettings | undefined;
-  return {
-    valuationMode: r?.valuationMode ?? DEFAULT_VALUATION_MODE,
-  };
+export interface SettingsStore {
+  /** 读带缺省:无行返默认(不为每个用户强制建行)。 */
+  readonly get: () => Effect.Effect<UserSettingsView>;
+  /** upsert:只覆盖给定字段(缺省字段首次建行用默认值,后续保持原值)。 */
+  readonly update: (patch: { valuationMode?: ValuationMode }) => Effect.Effect<void>;
 }
 
-// upsert:只覆盖给定字段(缺省字段首次建行用默认值,后续保持原值)。
-export async function updateUserSettings(
-  env: DbEnv,
-  userId: string,
-  patch: { valuationMode?: ValuationMode },
-): Promise<void> {
-  const now = Date.now();
-  const set: Partial<{ valuationMode: ValuationMode; updatedAt: number }> = {
-    updatedAt: now,
-  };
-  if (patch.valuationMode !== undefined) set.valuationMode = patch.valuationMode;
-  await getDb(env)
-    .insert(userSettings)
-    .values({
-      userId,
-      valuationMode: patch.valuationMode ?? DEFAULT_VALUATION_MODE,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({ target: userSettings.userId, set });
-}
+export const SettingsStore = Context.GenericTag<SettingsStore>("db/SettingsStore");
+
+const make = (userId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database;
+
+    const store: SettingsStore = {
+      get: () =>
+        Effect.map(
+          database.query((db) =>
+            db.select().from(userSettings).where(eq(userSettings.userId, userId)),
+          ),
+          (rows) => {
+            const r = rows[0] as UserSettings | undefined;
+            return { valuationMode: r?.valuationMode ?? DEFAULT_VALUATION_MODE };
+          },
+        ),
+
+      update: (patch) =>
+        Effect.gen(function* () {
+          const now = Date.now();
+          const set: Partial<{ valuationMode: ValuationMode; updatedAt: number }> = {
+            updatedAt: now,
+          };
+          if (patch.valuationMode !== undefined) set.valuationMode = patch.valuationMode;
+          yield* database.query((db) =>
+            db
+              .insert(userSettings)
+              .values({
+                userId,
+                valuationMode: patch.valuationMode ?? DEFAULT_VALUATION_MODE,
+                updatedAt: now,
+              })
+              .onConflictDoUpdate({ target: userSettings.userId, set }),
+          );
+        }),
+    };
+
+    return store;
+  });
+
+export const settingsStoreLayer = (userId: string): Layer.Layer<SettingsStore, never, Database> =>
+  Layer.effect(SettingsStore, make(userId));
