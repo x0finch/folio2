@@ -38,7 +38,6 @@ export {
   BalanceSource,
   SnapshotStore,
   type SyncServices,
-  syncLoggerLayer,
   TokenOracle,
 } from "./services";
 export * as Sweep from "./sweep";

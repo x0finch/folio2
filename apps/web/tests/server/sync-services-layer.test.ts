@@ -1,7 +1,8 @@
 import { env } from "cloudflare:test";
 import type { Balance } from "@folio/connectors-basic";
+import { AccountStore as DbAccountStore } from "@folio/db";
 import { Account, BalanceSource, AccountStore as SyncAccountStore } from "@folio/sync";
-import { Effect, Layer } from "effect";
+import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runRequest } from "../../src/lib/server/internal/oracle";
 import { syncServicesLayer } from "../../src/lib/server/internal/sync-deps";
@@ -81,6 +82,32 @@ describe("syncServicesLayer 的接线", () => {
     // 认币经真参考层跑过了:快照行带上了身份(认不认得出上游是另一回事,这里只要有 token_id)。
     const balances = await dbFor(USER).snapshots.balancesFor([rows[0].id]);
     expect(balances[0].tokenId).toBeTruthy();
+  });
+
+  // **db 的失败必须是类型化的 `SyncDepError`,不能是 defect。**
+  //
+  // db / 参考层的错误通道都是 `never`(ADR:D1 挂了走 defect),而编排的三层隔离
+  // (`bestEffort` 降级、逐账户 `catchAll`、逐用户 `catchAll`)都只接类型化失败。以前这道翻译
+  // 是免费的 —— 每个 dep 都经一次 `runPromise` 边界。边界拿掉之后它得显式补上,不补的话一次
+  // mint 的 D1 抖动会穿过三层隔离变成 500,而且是静默的。
+  it("db 挂了 → 类型化失败,不是 defect(隔离才接得住)", async () => {
+    const exit = await runRequest(
+      USER,
+      Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(
+        Effect.provide(syncServicesLayer),
+        // 打一个会 die 的 db store 进去(真 D1 挂不了,所以直接换掉那一层)。
+        Effect.provide(
+          Layer.succeed(DbAccountStore, {
+            list: () => Effect.die(new Error("d1 down")),
+          } as never),
+        ),
+        Effect.exit,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    const failure = Exit.isFailure(exit) ? Cause.failureOption(exit.cause) : Option.none();
+    expect(Option.isSome(failure)).toBe(true);
+    expect((Option.getOrThrow(failure) as { _tag: string })._tag).toBe("SyncDepError");
   });
 
   // 归档账户不产生新快照;manual 不是同步源(ADR 0018)。两条都由这一层的 `list()` 过滤,

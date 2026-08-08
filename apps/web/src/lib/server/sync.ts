@@ -8,6 +8,7 @@ import { isComplete } from "../creds";
 import { isManual } from "../manual-connector";
 import { type SyncStatusSummary, summarizeSync } from "../sync-status";
 import { credentialSpecs } from "./internal/connector-registry";
+import { logCategory } from "./internal/effect-log";
 import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 import { syncServicesLayer, warmTokens } from "./internal/sync-deps";
@@ -46,8 +47,12 @@ export const syncAccount = createServerFn({ method: "POST" })
           return { accountId: account.id, ok: false, skipped: true };
         }
         const rawCreds = yield* accounts.getRawCreds(data.accountId);
+        // `logCategory("sync")`:内核的日志落 `folio.sync`,不跟着请求这一半走 `folio.oracle`。
+        // **不能靠再叠一层 `Logger.replace`** —— 那不会顶掉外层那个,只会两个都在、每条写两遍
+        // (#403 片 2 实测)。类目跟着日志走,转发器只有一个。
         const result = yield* SyncKernel.syncAccount(userId, account, rawCreds).pipe(
           Effect.provide(syncServicesLayer),
+          logCategory("sync"),
         );
         syncLog.info("single account sync", {
           accountId: account.id,

@@ -28,10 +28,10 @@ import {
   depError,
   type FetchOutcome,
   AccountStore as SyncAccountStore,
+  type SyncDepError,
   type SyncDeps,
   type SyncServices,
   SnapshotStore as SyncSnapshotStore,
-  syncLoggerLayer,
   TokenOracle,
 } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
@@ -241,6 +241,18 @@ function createSeedCollector(): SeedCollector {
 // 重估(`revalue`)三样逻辑都只有一份,这里只是把它们接到 Tag 上而不是接到 Promise 字段上。
 // 过渡期两条接线并存(expand),片 3 删掉 Promise 那条。
 //
+// db 与参考层的错误通道都是 `never`(ADR:D1 挂了走 defect),而编排靠**类型化**的 `SyncDepError`
+// 做隔离 —— `account.ts` 的 `bestEffort`(认币/重估降级)、`syncAccount` 末尾的 `catchAll`
+// (逐账户隔离)、`Sweep.userTally` 的 `catchAll`(逐用户隔离),三处都只接类型化失败。
+//
+// 以前这道翻译是**免费**的:每个 dep 都经一次 `runPromise` 边界,defect 变成 promise rejection,
+// 再被 `tryPromise({ catch: depError })` 收成类型化失败。边界一拿掉,它就得显式补上。
+// 不补的话:一次 `mint` 的 D1 抖动会穿过全部三层隔离,把「记一行 warning、快照照落」变成 500。
+const asDep =
+  (step: Parameters<typeof depError>[0]) =>
+  <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E | SyncDepError> =>
+    effect.pipe(Effect.catchAllDefect((cause) => Effect.fail(depError(step, cause))));
+
 // **一次装配 = 一个用户的一轮同步。** 四个能力的方法签名里没有 userId —— 它由外面那次
 // `withRequest(userId, …)` 供上的 db / 参考层服务吃掉了(ADR 0037)。
 //
@@ -260,24 +272,24 @@ export const syncServicesLayer: Layer.Layer<
     return Layer.mergeAll(
       // 出网:provider 声明「我要出网」,这里满足它。
       FolioHttpClient,
-      // sync 自己的日志类目。**必须显式接**:不接的话这些日志会落进 `runAtEdge` 提供的那个
-      // 转发器,类目串成 `["folio","oracle"]`、debug 还会被默认级别吞掉(见 syncLoggerLayer)。
-      syncLoggerLayer(getLogger(["folio", "sync"])),
       Layer.effect(
         SyncAccountStore,
         Effect.map(AccountStore, (accounts) => ({
           // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,
           // 不写快照)→ 一并过滤。编排只见活跃的可同步账户(判别走纯 isSyncableAccount)。
-          list: () => Effect.map(accounts.list(), (rows) => rows.filter(isSyncableAccount)),
+          list: () =>
+            Effect.map(accounts.list(), (rows) => rows.filter(isSyncableAccount)).pipe(
+              asDep("listAccounts"),
+            ),
           // 批量取全用户 creds(消 syncAccount 的 N+1)
-          rawCreds: () => accounts.listRawCreds(),
+          rawCreds: () => accounts.listRawCreds().pipe(asDep("listRawCreds")),
         })),
       ),
       Layer.effect(
         SyncSnapshotStore,
         Effect.map(SnapshotStore, (snapshots) => ({
           write: (accountId: string, input: WriteSnapshotInput) =>
-            snapshots.write(accountId, input),
+            snapshots.write(accountId, input).pipe(asDep("writeSnapshot")),
         })),
       ),
       Layer.succeed(BalanceSource, {
@@ -326,7 +338,7 @@ export const syncServicesLayer: Layer.Layer<
               }
               return Effect.flatMap(TokenService, (t) => t.mint(refs)).pipe(
                 Effect.provide(oracle),
-                Effect.mapError((e) => depError("mint", e)),
+                asDep("mint"),
               );
             },
             // 写快照前重估(oracle 多源 Phase 3):按 mode 定 value + 非盯市类型捕获 selfPrice。
@@ -339,10 +351,7 @@ export const syncServicesLayer: Layer.Layer<
                   idByRef,
                   valuation,
                 ),
-              ).pipe(
-                Effect.provide(oracle),
-                Effect.mapError((e) => depError("revalue", e)),
-              ),
+              ).pipe(Effect.provide(oracle), asDep("revalue")),
           };
         }),
       ),
