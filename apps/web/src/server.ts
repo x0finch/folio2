@@ -6,8 +6,8 @@ import { Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/internal/cache-headers";
 import { db } from "./lib/server/internal/db";
 import { configureLogging } from "./lib/server/internal/log";
-import { runOracleWarm } from "./lib/server/internal/oracle";
-import { buildSyncDeps, warmTokensForUsers } from "./lib/server/internal/sync-deps";
+import { runAtEdge, withOracleWarm } from "./lib/server/internal/oracle";
+import { buildSyncDeps, warmAllUsers } from "./lib/server/internal/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
 // 再补一个 CF scheduled() 处理器跑定时同步(cron 只触发 scheduled,不触发 fetch)。
@@ -23,8 +23,8 @@ const GLOBAL_REF_INDEX_CRON = "0 23 * * *";
 // 刷 `global_token_ref_index`:拉整份币目录 → 转换(在 adapter 里)→ 一次整份灌(分批写)。
 // 与用户无关,所以不枚举用户。失败会上抛到外层统一记 error —— 刷表挂了必须可见,
 // 否则新币会一直认不出来而没有任何迹象。
-async function refreshGlobalRefIndex(cron: string): Promise<void> {
-  await runOracleWarm(
+const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
+  withOracleWarm(
     Effect.gen(function* () {
       const svc = yield* GlobalRefIndexService;
       const before = yield* svc.refreshedAt();
@@ -41,7 +41,29 @@ async function refreshGlobalRefIndex(cron: string): Promise<void> {
       });
     }),
   );
-}
+
+// 全量 sweep:同步每个用户 → 逐用户预热代币缓存。
+// 预热那步**逐用户各自兜住**:一个用户失败不拖累其余、也不让这次 cron 以异常收尾(#375)。
+// sweep 本身不兜 —— 它失败了就该上抛、就该可见。
+const sweepAllUsers = (cron: string): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    const userIds = yield* Effect.promise(() => db.listUserIdsWithAccounts());
+    cronLog.info("cron sweep start", { cron, users: userIds.length });
+    const result = yield* Effect.tryPromise({
+      try: () => syncAllUsers(buildSyncDeps(), userIds),
+      catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+    });
+    cronLog.info("cron sweep done", {
+      cron,
+      users: result.users,
+      ok: result.ok,
+      failed: result.failed,
+      skipped: result.skipped,
+    });
+    // sweep 后预热每用户代币缓存(best-effort),供次日总览 cache-only 富化。
+    const warm = yield* warmAllUsers(userIds);
+    cronLog.info("cron warm done", { cron, ...warm });
+  });
 
 const serverEntry = createServerEntry({
   fetch: async (request) => {
@@ -78,24 +100,13 @@ export default {
       (async () => {
         await configureLogging();
         try {
-          if (controller.cron === GLOBAL_REF_INDEX_CRON) {
-            await refreshGlobalRefIndex(controller.cron);
-            return;
-          }
-          const userIds = await db.listUserIdsWithAccounts();
-          cronLog.info("cron sweep start", { cron: controller.cron, users: userIds.length });
-          const result = await syncAllUsers(buildSyncDeps(), userIds);
-          cronLog.info("cron sweep done", {
-            cron: controller.cron,
-            users: result.users,
-            ok: result.ok,
-            failed: result.failed,
-            skipped: result.skipped,
-          });
-          // sweep 后预热每用户代币缓存(best-effort),供次日总览 cache-only 富化。
-          // 逐用户各自兜住:一个用户预热失败不拖累其余、也不让这次 cron 以异常收尾(#375)。
-          const warm = await warmTokensForUsers(userIds);
-          cronLog.info("cron warm done", { cron: controller.cron, ...warm });
+          // **整趟一个 effect,只跑一次。** 两个分支各自是一个 effect(内部已装好各自要的那层),
+          // 边缘只在这里 —— 官方那句「`run*` 尽量放在程序的边缘」在 cron 这条路上就是这个形状。
+          await runAtEdge(
+            controller.cron === GLOBAL_REF_INDEX_CRON
+              ? refreshGlobalRefIndex(controller.cron)
+              : sweepAllUsers(controller.cron),
+          );
         } catch (err) {
           // waitUntil 里的抛错会变成静默的 unhandled rejection —— 集中打日志再上抛,cron 失败才可见。
           cronLog.error("cron threw", {
