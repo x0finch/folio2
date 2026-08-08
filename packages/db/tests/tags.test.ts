@@ -3,21 +3,25 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 import {
-  assignAccountToPortfolio,
+  AccountStore,
+  accountStoreLayer,
   attachTag,
-  createAccount,
-  createPortfolio,
   createTag,
-  deleteAccount,
   deleteTag,
   detachTag,
   ensureDefaultPortfolio,
   listAccountTagsByUser,
   listTagsByPortfolio,
   listTagsByUser,
+  PortfolioStore,
+  portfolioStoreLayer,
   renameTag,
 } from "../src/queries";
 import { user } from "../src/schema/auth";
+import { forUser } from "./effect";
+
+const accounts = forUser(AccountStore, accountStoreLayer);
+const portfolios = forUser(PortfolioStore, portfolioStoreLayer);
 
 // Tag 数据地基(ADR 0034)对着真 D1 跑:表达式唯一索引 / cascade / 同 batch 清 tag 都真生效。
 // 不隔离每测存储 → beforeEach 重置用户(级联清 portfolios/tags/account_tags)。
@@ -39,7 +43,7 @@ async function resetUser(userId: string, name = userId): Promise<void> {
 }
 
 async function makeAccount(userId: string, label = "A") {
-  return createAccount(env, userId, { connectorId: "manual", label, creds: "x" });
+  return accounts(userId).create({ connectorId: "manual", label, creds: "x" });
 }
 
 beforeEach(async () => {
@@ -63,7 +67,7 @@ describe("createTag / list", () => {
   });
 
   it("在他人 Portfolio 建 Tag → 拒(assertPortfolioOwned)", async () => {
-    const pfB = await createPortfolio(env, USER_B, { name: "B's" });
+    const pfB = await portfolios(USER_B).create({ name: "B's" });
     await expect(createTag(env, USER_A, { portfolioId: pfB.id, name: "x" })).rejects.toThrow();
   });
 });
@@ -83,7 +87,7 @@ describe("同 Portfolio 内名字唯一(忽略大小写/空格)", () => {
 
   it("跨 Portfolio 同名 → 允许", async () => {
     const def = await ensureDefaultPortfolio(env, USER_A);
-    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
+    const watch = await portfolios(USER_A).create({ name: "Watch" });
     await createTag(env, USER_A, { portfolioId: def.id, name: "长线" });
     await createTag(env, USER_A, { portfolioId: watch.id, name: "长线" });
     expect(await listTagsByUser(env, USER_A)).toHaveLength(2);
@@ -137,7 +141,7 @@ describe("attach / detach", () => {
   it("attach 一个与账户不同 Portfolio 的 Tag → 拒", async () => {
     await ensureDefaultPortfolio(env, USER_A);
     const acc = await makeAccount(USER_A); // 落默认 Portfolio
-    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
+    const watch = await portfolios(USER_A).create({ name: "Watch" });
     const tag = await createTag(env, USER_A, { portfolioId: watch.id, name: "长线" });
     await expect(attachTag(env, USER_A, acc.id, tag.id)).rejects.toThrow();
   });
@@ -167,7 +171,7 @@ describe("cascade / move 清空", () => {
     const acc = await makeAccount(USER_A);
     const tag = await createTag(env, USER_A, { portfolioId: pf.id, name: "长线" });
     await attachTag(env, USER_A, acc.id, tag.id);
-    await deleteAccount(env, USER_A, acc.id);
+    await accounts(USER_A).remove(acc.id);
     expect(await listAccountTagsByUser(env, USER_A)).toHaveLength(0);
     expect(await listTagsByUser(env, USER_A)).toHaveLength(1); // Tag 本身还在
   });
@@ -177,8 +181,8 @@ describe("cascade / move 清空", () => {
     const acc = await makeAccount(USER_A);
     const tag = await createTag(env, USER_A, { portfolioId: def.id, name: "长线" });
     await attachTag(env, USER_A, acc.id, tag.id);
-    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
-    await assignAccountToPortfolio(env, USER_A, acc.id, watch.id);
+    const watch = await portfolios(USER_A).create({ name: "Watch" });
+    await portfolios(USER_A).assignAccount(acc.id, watch.id);
     expect(await listAccountTagsByUser(env, USER_A)).toHaveLength(0); // 搬家清空
     expect(await listTagsByUser(env, USER_A)).toHaveLength(1); // Tag 本身仍在原 Portfolio
   });
@@ -189,7 +193,7 @@ describe("cascade / move 清空", () => {
     const tag = await createTag(env, USER_A, { portfolioId: def.id, name: "长线" });
     await attachTag(env, USER_A, acc.id, tag.id);
     // 目标 == 当前 → no-op,不该触发「搬家清 Tag」。
-    await assignAccountToPortfolio(env, USER_A, acc.id, def.id);
+    await portfolios(USER_A).assignAccount(acc.id, def.id);
     expect(await listAccountTagsByUser(env, USER_A)).toHaveLength(1);
   });
 });

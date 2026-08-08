@@ -3,12 +3,12 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 import {
-  createAccount,
+  AccountStore,
+  accountStoreLayer,
   importAccount,
   importManualActivity,
   importSnapshot,
   importToken,
-  listAccountsByUser,
   listManualActivityByAccount,
   listManualActivityByUser,
   listSnapshotsByAccount,
@@ -17,6 +17,9 @@ import {
 } from "../src/queries";
 import { tokenRefs, tokens } from "../src/schema";
 import { user } from "../src/schema/auth";
+import { forUser } from "./effect";
+
+const accounts = forUser(AccountStore, accountStoreLayer);
 
 // 导出/导入 v3 的 db 支持(#204):listTokensForExport(带 ref)、listManualActivityByUser(扁平跨账户),
 // 以及 A 方案的 find-or-create 一族(importToken/importAccount/importSnapshot/
@@ -126,7 +129,7 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
     expect(a.created).toBe(true);
     expect(b.created).toBe(false);
     expect(b.id).toBe(a.id);
-    expect(await listAccountsByUser(env, USER_A)).toHaveLength(1);
+    expect(await accounts(USER_A).list()).toHaveLength(1);
   });
 
   it("任一自然键字段不同 → 视为新账户", async () => {
@@ -138,7 +141,7 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
       label: "W2",
       creds: JSON.stringify({ address: "0x1" }),
     }); // label 不同
-    expect(await listAccountsByUser(env, USER_A)).toHaveLength(3);
+    expect(await accounts(USER_A).list()).toHaveLength(3);
   });
 
   it("命中既有、文件说归档而现有未归档 → 对齐成归档", async () => {
@@ -150,7 +153,7 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
     };
     await importAccount(env, USER_A, input);
     await importAccount(env, USER_A, { ...input, archivedAt: 1700000000000 });
-    const acc = (await listAccountsByUser(env, USER_A))[0]!;
+    const acc = (await accounts(USER_A).list())[0]!;
     expect(acc.archivedAt).toBe(1700000000000);
   });
 
@@ -164,14 +167,14 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
     await importAccount(env, USER_A, input);
     const b = await importAccount(env, USER_B, input);
     expect(b.created).toBe(true);
-    expect(await listAccountsByUser(env, USER_A)).toHaveLength(1);
-    expect(await listAccountsByUser(env, USER_B)).toHaveLength(1);
+    expect(await accounts(USER_A).list()).toHaveLength(1);
+    expect(await accounts(USER_B).list()).toHaveLength(1);
   });
 });
 
 describe("importSnapshot —— find-or-create(自然键 = account+takenAt)", () => {
   it("同 (账户,takenAt) 再导 → 整份跳过,不重复写", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "evm",
       label: "W",
       creds: "{}",
@@ -195,7 +198,7 @@ describe("importSnapshot —— find-or-create(自然键 = account+takenAt)", ()
 
 describe("importManualActivity —— find-or-create(自然键 = 整条内容)", () => {
   it("同内容再导 → 跳过(不折叠翻倍);任一字段不同 → 新增", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "M",
       creds: "{}",
@@ -213,7 +216,7 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
   });
 
   it("price/fee/memo 的 null 与有值区分正确(isNull 分支)", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "M",
       creds: "{}",
@@ -229,7 +232,7 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
   });
 
   it("两笔除 createdAt 外全同 → 是不同事件,都保留(createdAt 进键,防折叠丢量)", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "M",
       creds: "{}",
@@ -250,7 +253,7 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
 
 describe("listManualActivityByUser", () => {
   it("跨账户扁平返回、按 occurred→created 升序、createdAt 保留、按用户隔离", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "M",
       creds: "{}",

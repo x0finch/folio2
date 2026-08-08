@@ -3,20 +3,18 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 import {
-  assignAccountToPortfolio,
-  createAccount,
-  createPortfolio,
-  deleteAccount,
-  deletePortfolio,
+  AccountStore,
+  accountStoreLayer,
   ensureDefaultPortfolio,
   importAccount,
-  listAccountsByUser,
-  listPortfolioMembershipsByUser,
-  listPortfoliosByUser,
-  renamePortfolio,
-  setDefaultPortfolio,
+  PortfolioStore,
+  portfolioStoreLayer,
 } from "../src/queries";
 import { user } from "../src/schema/auth";
+import { forUser } from "./effect";
+
+const accounts = forUser(AccountStore, accountStoreLayer);
+const portfolios = forUser(PortfolioStore, portfolioStoreLayer);
 
 // Portfolio 地基(ADR 0033)对着真 D1 跑:唯一约束 / 部分索引 / cascade / batch 都真生效。
 // 不隔离每测存储 → beforeEach 重置用户(级联清 portfolios/portfolio_accounts)。
@@ -48,7 +46,7 @@ describe("ensureDefaultPortfolio", () => {
     const p2 = await ensureDefaultPortfolio(env, USER_A);
     expect(p2.id).toBe(p1.id);
     expect(p1.isDefault).toBe(true);
-    expect(await listPortfoliosByUser(env, USER_A)).toHaveLength(1);
+    expect(await portfolios(USER_A).list()).toHaveLength(1);
   });
 
   it("名字 = `<用户名>'s`", async () => {
@@ -79,13 +77,13 @@ describe("ensureDefaultPortfolio", () => {
 
 describe("account ↔ portfolio 归属(每账户恰一行)", () => {
   it("createAccount 把新账户落进默认 Portfolio", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
     });
     const pf = await ensureDefaultPortfolio(env, USER_A);
-    const memberships = await listPortfolioMembershipsByUser(env, USER_A);
+    const memberships = await portfolios(USER_A).listMemberships();
     expect(memberships).toEqual([{ accountId: acc.id, portfolioId: pf.id }]);
   });
 
@@ -97,7 +95,7 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
     });
     expect(created).toBe(true);
     const pf = await ensureDefaultPortfolio(env, USER_A);
-    expect(await listPortfolioMembershipsByUser(env, USER_A)).toEqual([
+    expect(await portfolios(USER_A).listMemberships()).toEqual([
       { accountId: id, portfolioId: pf.id },
     ]);
   });
@@ -114,23 +112,23 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
       creds: "x",
     });
     expect(second.id).toBe(first.id);
-    expect(await listPortfolioMembershipsByUser(env, USER_A)).toHaveLength(1);
+    expect(await portfolios(USER_A).listMemberships()).toHaveLength(1);
   });
 
   it("删账户 → 归属行经 cascade 清", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
     });
-    expect(await listPortfolioMembershipsByUser(env, USER_A)).toHaveLength(1);
-    await deleteAccount(env, USER_A, acc.id);
-    expect(await listPortfolioMembershipsByUser(env, USER_A)).toHaveLength(0);
-    expect(await listAccountsByUser(env, USER_A)).toHaveLength(0);
+    expect(await portfolios(USER_A).listMemberships()).toHaveLength(1);
+    await accounts(USER_A).remove(acc.id);
+    expect(await portfolios(USER_A).listMemberships()).toHaveLength(0);
+    expect(await accounts(USER_A).list()).toHaveLength(0);
   });
 
   it("一对一锁:一个账户不能归属两个 Portfolio", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
@@ -147,53 +145,53 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
 describe("createPortfolio / assignAccountToPortfolio", () => {
   it("createPortfolio 建的是命名非默认 Portfolio;列表按创建序(不置顶默认)", async () => {
     const def = await ensureDefaultPortfolio(env, USER_A); // 先建默认
-    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
+    const watch = await portfolios(USER_A).create({ name: "Watch" });
     expect(watch.isDefault).toBe(false);
-    const all = await listPortfoliosByUser(env, USER_A);
+    const all = await portfolios(USER_A).list();
     expect(all).toHaveLength(2);
     expect(all.map((p) => p.id)).toEqual([def.id, watch.id]); // 创建序:默认先建 → 在前(非因它是默认)
     expect(all.filter((p) => p.isDefault)).toHaveLength(1); // 仍只一个默认
   });
 
   it("assignAccountToPortfolio 一对一改归属(旧行替换,不叠加)", async () => {
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
     });
-    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
-    await assignAccountToPortfolio(env, USER_A, acc.id, watch.id);
-    const memberships = await listPortfolioMembershipsByUser(env, USER_A);
+    const watch = await portfolios(USER_A).create({ name: "Watch" });
+    await portfolios(USER_A).assignAccount(acc.id, watch.id);
+    const memberships = await portfolios(USER_A).listMemberships();
     expect(memberships).toEqual([{ accountId: acc.id, portfolioId: watch.id }]); // 仍恰一行,指向 Watch
   });
 
   it("assignAccountToPortfolio 拒绝越权(他人账户 / 他人 Portfolio)", async () => {
-    const accA = await createAccount(env, USER_A, {
+    const accA = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
     });
-    const pfB = await createPortfolio(env, USER_B, { name: "B's" });
+    const pfB = await portfolios(USER_B).create({ name: "B's" });
     // A 的账户移到 B 的 Portfolio → 拒。
-    await expect(assignAccountToPortfolio(env, USER_A, accA.id, pfB.id)).rejects.toThrow();
+    await expect(portfolios(USER_A).assignAccount(accA.id, pfB.id)).rejects.toThrow();
     // B 动 A 的账户 → 拒(账户 owner 断言)。
-    await expect(assignAccountToPortfolio(env, USER_B, accA.id, pfB.id)).rejects.toThrow();
+    await expect(portfolios(USER_B).assignAccount(accA.id, pfB.id)).rejects.toThrow();
   });
 });
 
 describe("管理:rename / setDefault / delete", () => {
   it("renamePortfolio 改名(含默认)", async () => {
     const def = await ensureDefaultPortfolio(env, USER_A);
-    await renamePortfolio(env, USER_A, def.id, "Renamed");
-    const all = await listPortfoliosByUser(env, USER_A);
+    await portfolios(USER_A).rename(def.id, "Renamed");
+    const all = await portfolios(USER_A).list();
     expect(all[0]!.name).toBe("Renamed");
   });
 
   it("setDefaultPortfolio 换默认:恰一个默认,旧默认降级", async () => {
     const old = await ensureDefaultPortfolio(env, USER_A);
-    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
-    await setDefaultPortfolio(env, USER_A, watch.id);
-    const all = await listPortfoliosByUser(env, USER_A);
+    const watch = await portfolios(USER_A).create({ name: "Watch" });
+    await portfolios(USER_A).setDefault(watch.id);
+    const all = await portfolios(USER_A).list();
     expect(all.filter((p) => p.isDefault)).toHaveLength(1);
     expect(all.find((p) => p.id === watch.id)!.isDefault).toBe(true);
     expect(all.find((p) => p.id === old.id)!.isDefault).toBe(false);
@@ -201,34 +199,34 @@ describe("管理:rename / setDefault / delete", () => {
 
   it("deletePortfolio 拒删默认", async () => {
     const def = await ensureDefaultPortfolio(env, USER_A);
-    await expect(deletePortfolio(env, USER_A, def.id)).rejects.toThrow();
+    await expect(portfolios(USER_A).remove(def.id)).rejects.toThrow();
   });
 
   it("deletePortfolio 命名组:成员退回默认后删该行(账户不动)", async () => {
     const def = await ensureDefaultPortfolio(env, USER_A);
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
     });
-    const watch = await createPortfolio(env, USER_A, { name: "Watch" });
-    await assignAccountToPortfolio(env, USER_A, acc.id, watch.id);
+    const watch = await portfolios(USER_A).create({ name: "Watch" });
+    await portfolios(USER_A).assignAccount(acc.id, watch.id);
 
-    await deletePortfolio(env, USER_A, watch.id);
+    await portfolios(USER_A).remove(watch.id);
 
     // 组没了、账户还在、归属退回默认。
-    expect(await listPortfoliosByUser(env, USER_A)).toHaveLength(1);
-    expect(await listAccountsByUser(env, USER_A)).toHaveLength(1);
-    expect(await listPortfolioMembershipsByUser(env, USER_A)).toEqual([
+    expect(await portfolios(USER_A).list()).toHaveLength(1);
+    expect(await accounts(USER_A).list()).toHaveLength(1);
+    expect(await portfolios(USER_A).listMemberships()).toEqual([
       { accountId: acc.id, portfolioId: def.id },
     ]);
   });
 
   it("空的命名组也能删(空组持久、只显式删)", async () => {
     await ensureDefaultPortfolio(env, USER_A);
-    const empty = await createPortfolio(env, USER_A, { name: "Empty" });
-    await deletePortfolio(env, USER_A, empty.id);
-    expect(await listPortfoliosByUser(env, USER_A)).toHaveLength(1);
+    const empty = await portfolios(USER_A).create({ name: "Empty" });
+    await portfolios(USER_A).remove(empty.id);
+    expect(await portfolios(USER_A).list()).toHaveLength(1);
   });
 });
 
@@ -236,19 +234,19 @@ describe("listPortfolios / memberships 跨用户隔离", () => {
   it("listPortfoliosByUser 只返回本人的", async () => {
     await ensureDefaultPortfolio(env, USER_A);
     await ensureDefaultPortfolio(env, USER_B);
-    const a = await listPortfoliosByUser(env, USER_A);
+    const a = await portfolios(USER_A).list();
     expect(a).toHaveLength(1);
     expect(a[0]!.isDefault).toBe(true);
-    expect(await listPortfoliosByUser(env, USER_B)).toHaveLength(1);
+    expect(await portfolios(USER_B).list()).toHaveLength(1);
   });
 
   it("memberships 不泄露他人账户归属", async () => {
-    await createAccount(env, USER_A, { connectorId: "manual", label: "A", creds: "x" });
-    await createAccount(env, USER_B, { connectorId: "manual", label: "B", creds: "x" });
-    expect(await listPortfolioMembershipsByUser(env, USER_A)).toHaveLength(1);
-    expect(await listPortfolioMembershipsByUser(env, USER_B)).toHaveLength(1);
-    const aAccts = new Set((await listAccountsByUser(env, USER_A)).map((x) => x.id));
-    for (const m of await listPortfolioMembershipsByUser(env, USER_A)) {
+    await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
+    await accounts(USER_B).create({ connectorId: "manual", label: "B", creds: "x" });
+    expect(await portfolios(USER_A).listMemberships()).toHaveLength(1);
+    expect(await portfolios(USER_B).listMemberships()).toHaveLength(1);
+    const aAccts = new Set((await accounts(USER_A).list()).map((x) => x.id));
+    for (const m of await portfolios(USER_A).listMemberships()) {
       expect(aAccts.has(m.accountId)).toBe(true);
     }
   });

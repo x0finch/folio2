@@ -3,19 +3,24 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 import {
-  createAccount,
-  createPortfolio,
+  AccountStore,
+  accountStoreLayer,
   createTabPin,
   createTag,
-  deleteAccount,
   deleteTabPin,
   deleteTag,
   ensureDefaultPortfolio,
   listTabPinsByUser,
+  PortfolioStore,
+  portfolioStoreLayer,
   reorderTabPins,
   updateTabPinTarget,
 } from "../src/queries";
 import { user } from "../src/schema/auth";
+import { forUser } from "./effect";
+
+const accounts = forUser(AccountStore, accountStoreLayer);
+const portfolios = forUser(PortfolioStore, portfolioStoreLayer);
 
 // 自定义 Tab pin 地基(ADR 0034)对着真 D1 跑:≤3 上限 / tag pin FK cascade / connector pin 无 FK 存活 /
 // owner 断言都真生效。不隔离每测存储 → beforeEach 重置用户。
@@ -56,7 +61,7 @@ describe("createTabPin", () => {
 
   it("建 account pin,只 account_id 非空", async () => {
     await ensureDefaultPortfolio(env, USER_A);
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "binance",
       label: "B",
       creds: "x",
@@ -76,14 +81,14 @@ describe("createTabPin", () => {
 
   it("account pin 指向他人账户 → 拒", async () => {
     await ensureDefaultPortfolio(env, USER_B);
-    const accB = await createAccount(env, USER_B, { connectorId: "okx", label: "x", creds: "y" });
+    const accB = await accounts(USER_B).create({ connectorId: "okx", label: "x", creds: "y" });
     await expect(
       createTabPin(env, USER_A, { kind: "account", accountId: accB.id }),
     ).rejects.toThrow();
   });
 
   it("tag pin 指向他人 Tag → 拒", async () => {
-    const pfB = await createPortfolio(env, USER_B, { name: "B's" });
+    const pfB = await portfolios(USER_B).create({ name: "B's" });
     const tagB = await createTag(env, USER_B, { portfolioId: pfB.id, name: "x" });
     await expect(createTabPin(env, USER_A, { kind: "tag", tagId: tagB.id })).rejects.toThrow();
   });
@@ -114,7 +119,7 @@ describe("cascade / 存活", () => {
 
   it("删账户 → 其 account pin 经 FK cascade 删除;connector pin 不受影响", async () => {
     await ensureDefaultPortfolio(env, USER_A);
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "binance",
       label: "B",
       creds: "x",
@@ -122,7 +127,7 @@ describe("cascade / 存活", () => {
     await createTabPin(env, USER_A, { kind: "account", accountId: acc.id });
     await createTabPin(env, USER_A, { kind: "connector", connectorId: "binance" });
     expect(await listTabPinsByUser(env, USER_A)).toHaveLength(2);
-    await deleteAccount(env, USER_A, acc.id);
+    await accounts(USER_A).remove(acc.id);
     const left = await listTabPinsByUser(env, USER_A);
     expect(left).toHaveLength(1);
     expect(left[0]!.kind).toBe("connector");
@@ -130,13 +135,13 @@ describe("cascade / 存活", () => {
 
   it("connector pin 名下账户被删光 → pin 仍在(无 FK,显示空)", async () => {
     await ensureDefaultPortfolio(env, USER_A);
-    const acc = await createAccount(env, USER_A, {
+    const acc = await accounts(USER_A).create({
       connectorId: "binance",
       label: "B",
       creds: "x",
     });
     await createTabPin(env, USER_A, { kind: "connector", connectorId: "binance" });
-    await deleteAccount(env, USER_A, acc.id);
+    await accounts(USER_A).remove(acc.id);
     expect(await listTabPinsByUser(env, USER_A)).toHaveLength(1); // pin 存活
   });
 });
