@@ -2,8 +2,8 @@ import type { TokenPrice, TokenRecordPrice, TokenRef } from "@folio/oracle-basic
 import { PRICE_TTL_MS } from "@folio/oracle-basic";
 import type { TokenPriceStore, TokenStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect, Option } from "effect";
-import { degradeTo } from "../../internal/degrade";
-import { swr } from "../../internal/refresh";
+import { degradeTo } from "./degrade";
+import { swr } from "./refresh";
 
 // 现价。三个方法**按「有没有内部 id」分成两档**,这是本片的全部内容:
 //

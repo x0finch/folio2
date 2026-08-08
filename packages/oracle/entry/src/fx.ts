@@ -10,7 +10,7 @@ import {
 import { CacheStore, FxUpstream, TokenPriceStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
-import { degradeTo } from "../internal/degrade";
+import { degradeTo } from "./tokens/degrade";
 
 // 汇率这个领域的门面 —— **现在的汇率与历史的汇率在同一个服务上**。
 //

@@ -2,14 +2,14 @@ import { FX_TTL_MS, MS_PER_DAY, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "@foli
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { FxService } from "../src";
-import { btcUsdDaily, deriveFiatDaily, fxKey, readFx, writeFx } from "../src/services/fx";
+import { btcUsdDaily, deriveFiatDaily, fxKey, readFx, writeFx } from "../src/fx";
 import { harness, now0, upstreamDown } from "./fakes";
 
 // 汇率服务的三个方法,两种判据:
 //   `resolve` / `warm`  **现**汇率 —— 读软过期、写按 TTL(前两组)
 //   `rateSeries`        **历史**日汇率 —— SWR + BTC 反算(后两组,ADR 0026 / #274)
 //
-// 两半合成一个服务(以前是 `FxRateResolver` / `FxHistory`,见 `../src/services/fx` 的开头),
+// 两半合成一个服务(以前是 `FxRateResolver` / `FxHistory`,见 `../src/fx` 的开头),
 // 但**持久化仍然是两处**,这一组的分组就是照着这件事切的:现汇率只碰 `user_cache`,
 // 历史日汇率一个 `CacheStore` 都不碰(它落全局的 `token_daily_prices`)。
 

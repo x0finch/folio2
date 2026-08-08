@@ -23,7 +23,7 @@ export interface CandidateSource {
 
 export const CandidateSource = Context.GenericTag<CandidateSource>("oracle/CandidateSource");
 
-// —— warm blob 的第三个读者(另两个在 ../services/tokens)——
+// —— warm blob 的第三个读者(另两个在 ./catalogue)——
 // 三条判据为什么不同、为什么都落在 blob 自己的 `asOf` 上,见 ./warm 的开头。
 
 /**

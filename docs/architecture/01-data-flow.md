@@ -91,7 +91,7 @@ mint 失败是 best-effort:快照照落、新列留空、下次同步补上。�
 - 逐账户隔离与重试:`packages/sync/src/orchestrator.ts` `syncAccount`
 - 凭据解密:`apps/web/src/lib/creds.ts` `openCreds`(仅此处,用完即弃)
 - provider 取数契约:`packages/connectors/basic/src/provider.ts` `BalanceProvider.fetchBalances`
-- 认币决策树:`packages/oracle/entry/src/services/tokens/mint.ts`(`TokenService.mint` 的实现)
+- 认币决策树:`packages/oracle/entry/src/tokens/mint.ts`(`TokenService.mint` 的实现)
 - 落库(封装 op):`packages/db/src/queries/snapshots.ts` `writeSnapshot`(userId-scoped)
 
 ---

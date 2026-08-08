@@ -32,12 +32,18 @@ import { makeStaleRefresh, type RefreshStaleReport, type TokenStaleRefresh } fro
 //   `./stale`      写   唯一覆盖写既有行的地方(价 + 元信息各一条上游端点)
 //   `./catalogue`  读   世上有哪些币(公开目录,与用户无关)—— 一个 store 都不碰
 //
-// 另三件是这一片专属的内部件,不属于任何方法但只被这里用:`./warm`(那份 blob 本身)、
-// `./candidates`(mint 的 symbol 那一档,包内 Tag)、`./confidence`(它的判官)。
-// 它们本来在 `../../internal/`,但那个目录的意思是「本包共用」,而这三件只有代币用得上 ——
-// 留在那儿会让读的人以为 fx / platforms 也在用。**`internal/` 现在只剩真正三家共用的两件**:
-// `degrade`(降级 + 记一行)与 `refresh`(SWR 组合子 —— 它今天只有代币在用,但它领域中立,
-// 是「读本地 → 判 stale → 回源 → 写回」的通用编排,ADR 0023 就是这么定位它的)。
+// 另外五件不是方法,是这个文件夹里的零件,**都不从这个 index 出去**:
+//   `./warm`        市值前 N 的那份 blob(三个读者共用一份,判据各不同 —— 见它的开头)
+//   `./candidates`  mint 的 symbol 那一档要问的候选源(包内 Tag,`../oracle` 装配时吃掉)
+//   `./confidence`  它的判官(同名多候选时认不认、认哪个)
+//   `./degrade`     上游挂了记一行、给旧值
+//   `./refresh`     SWR 组合子(读本地 → 判 stale → 回源 → 写回,ADR 0023)
+//
+// 前三件只有代币用得上,住这里名正言顺。**后两件领域中立,住这里是将就** ——
+// `../fx` 与 `../platforms` 也在用 `./degrade`,于是它们得从代币这个文件夹里 import 一个
+// 跟代币无关的东西。这么放是因为它俩曾经独占一个 `internal/` 目录,而那个目录装着六件东西、
+// 其中四件只有代币在用,读的人会以为六件都是共用的 —— 两害相权。
+// **哪天第三个领域也要 SWR(或者 degrade 的用法开始分化),就该把这两件提回一个共用位置。**
 //
 // **接口用 `extends` 拼**而不是在这里重抄一遍 12 个签名:每个方法的文档跟着它的实现走,
 // 改实现的人一定看得见它,而抄一遍的那份迟早与实现对不上。
@@ -81,7 +87,7 @@ const make = Effect.gen(function* () {
   } satisfies TokenService;
 });
 
-// `CandidateSource` 留在这条 `R` 上,由 `../../layer` 在装配时喂进来并**吃掉** —— 于是装配点
+// `CandidateSource` 留在这条 `R` 上,由 `../oracle` 在装配时喂进来并**吃掉** —— 于是装配点
 // 的 `R` 里看不到它(它是包内 Tag,从不出包),而顶掉它仍然只需换一个 layer,不必另开一条
 // 构造路(见 `./candidates` 里那段「注入缝」)。
 export const tokenServiceLayer: Layer.Layer<

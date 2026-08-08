@@ -1,7 +1,7 @@
 import type { CacheStore, TokenMetaUpstream } from "@folio/oracle-basic";
 import { WARM_TTL_MS } from "@folio/oracle-basic";
 import { Clock, Effect, Option, Schema } from "effect";
-import { swr } from "../../internal/refresh";
+import { swr } from "./refresh";
 
 // 市值前 N 名,**整份一个 JSON blob**,住 per-user 缓存表的 `warm` 键上。
 //

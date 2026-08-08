@@ -9,10 +9,10 @@ import type {
   TokenUpstream,
 } from "@folio/oracle-basic/ports";
 import { Layer } from "effect";
-import { type FxService, fxServiceLayer } from "./services/fx";
-import { type PlatformService, platformServiceLayer } from "./services/platforms";
-import { type TokenService, tokenServiceLayer } from "./services/tokens";
-import { candidateSourceLayer } from "./services/tokens/candidates";
+import { type FxService, fxServiceLayer } from "./fx";
+import { type PlatformService, platformServiceLayer } from "./platforms";
+import { type TokenService, tokenServiceLayer } from "./tokens";
+import { candidateSourceLayer } from "./tokens/candidates";
 
 // 装配。**`createOracleFor(cfg)` 没了** —— 那个 config 对象上挂着 7 个 `createXxx(userId)` 工厂
 // 回调,正是 CODING.md 反复改掉的那个模式:能替换的东西该是**服务**(Layer),不是配置字段。

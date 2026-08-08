@@ -1,7 +1,7 @@
 import { DEFAULT_TOP_N, PRICE_TTL_MS, type UpstreamToken } from "@folio/oracle-basic";
 import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { CandidateSource } from "../src/services/tokens/candidates";
+import { CandidateSource } from "../src/tokens/candidates";
 import { harness, upstreamDown } from "./fakes";
 
 // mint 的 symbol 那一档要问的候选源(#216)。它**在写路径上** —— 同步、以及手记录入那个

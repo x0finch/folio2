@@ -2,7 +2,7 @@ import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
 import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { PlatformService } from "../src";
-import { platformKey, readPlatforms, writePlatforms } from "../src/services/platforms";
+import { platformKey, readPlatforms, writePlatforms } from "../src/platforms";
 import { harness, now0, upstreamDown } from "./fakes";
 
 const CHAINS = [

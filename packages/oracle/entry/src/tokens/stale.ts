@@ -1,7 +1,7 @@
 import { INFO_TTL_MS, normalizeSymbol, PRICE_TTL_MS } from "@folio/oracle-basic";
 import type { TokenPriceStore, TokenStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
-import { logDegraded } from "../../internal/degrade";
+import { logDegraded } from "./degrade";
 
 // 后台刷新 —— **本片是唯一一处覆盖写既有行的地方**(价与元信息各一条上游端点)。
 //
