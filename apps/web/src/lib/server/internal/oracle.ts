@@ -3,6 +3,7 @@ import type { UpstreamError } from "@folio/client-core";
 import {
   type AccountStore,
   accountStoreLayer,
+  type Database,
   databaseLayer,
   globalTokenRefIndexStoreLayer,
   type ManualStore,
@@ -78,7 +79,7 @@ const upstreams = () =>
 // 惰性到「只建被用到的那一个」这件事**不做**:`packages/db/src/connect.ts` 自己写着
 // 「drizzle(env.DB) 很轻,每次创建即可」,而现在四个 store 共用同一个 `Database`——
 // 建它们只是几个闭包。迁移前那套 getter + `??=` 的手写惰性,省下的是不存在的代价。
-const portsFor = (userId: string) =>
+const portsFor = (userId: string, database: Layer.Layer<Database>) =>
   Layer.provide(
     Layer.mergeAll(
       userTokenStoreLayer({ userId, namer: UPSTREAM_ID }),
@@ -86,7 +87,7 @@ const portsFor = (userId: string) =>
       userCacheStoreLayer({ userId }),
       globalTokenRefIndexStoreLayer,
     ),
-    databaseLayer(env),
+    database,
   );
 
 // cron 刷全局映射表只要这两个端口 —— 没有 userId,也不建 per-user 那三张。
@@ -99,8 +100,8 @@ const warmPorts = () =>
 // `provideMerge` 而不是 `provide`:端口也透出去。app 自己有一小片直接用 `CacheStore`
 // (DeFi 协议图 —— 没有上游、不属于参考层,见 `defi-logo-store.ts`),而这些端口本来就是
 // 这个文件建的,没必要为了用它们再包一个服务。
-const oracleFor = (userId: string) =>
-  Layer.provideMerge(oracleLayer, Layer.merge(portsFor(userId), upstreams()));
+const oracleFor = (userId: string, database: Layer.Layer<Database> = databaseLayer(env)) =>
+  Layer.provideMerge(oracleLayer, Layer.merge(portsFor(userId, database), upstreams()));
 
 // 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
 // 而 `Data.TaggedError` 的那四类没有 `message` 字段,于是上层日志里只剩一个空消息 + 一坨 Cause。
@@ -154,12 +155,17 @@ export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
 
 // —— 应用数据那半的 per-user 服务(ADR 0037,#394 T4)——
 //
-// 参考层的四张 store 在上面 `portsFor`;这里是 db 的八个领域服务。**同一个 `databaseLayer(env)`**
-// 喂给两边 —— 一次请求一个 drizzle 句柄,不是每个 store 一个。
+// 参考层的四张 store 在上面 `portsFor`;这里是 db 的八个领域服务。**两边共用同一份
+// `Database`** —— 一次请求一个 drizzle 句柄,不是每个 store 一个,也不是每半边一个。
+//
+// 「共用」有两个条件,缺一不可:
+//   ① 两边收到的是**同一个 layer 引用**(所以 `database` 是参数,不是各自现建)
+//   ② 它们在**同一次 `Effect.provide`** 里被建起来 —— Layer memoisation 的作用域是一次构建,
+//      分两次 provide 就是两份,哪怕引用相同。见下面 `withRequest`。
 //
 // `TransferStore` 的 layer 还要另外两个 store(导快照/导活动调它们的写口),所以先合出 base
 // 再把它 provide 上去。
-const dbStoresFor = (userId: string) => {
+const dbStoresFor = (userId: string, database: Layer.Layer<Database> = databaseLayer(env)) => {
   const base = Layer.mergeAll(
     accountStoreLayer(userId),
     portfolioStoreLayer(userId),
@@ -171,7 +177,7 @@ const dbStoresFor = (userId: string) => {
   );
   return Layer.provide(
     Layer.merge(base, Layer.provide(transferStoreLayer(userId), base)),
-    databaseLayer(env),
+    database,
   );
 };
 
@@ -197,12 +203,17 @@ export type DbStores =
 export const withRequest = <A>(
   userId: string,
   effect: Effect.Effect<A, UpstreamError, OracleServices | OraclePorts | DbStores>,
-): Effect.Effect<A, Error> =>
-  effect.pipe(
-    Effect.provide(dbStoresFor(userId)),
-    Effect.provide(oracleFor(userId)),
+): Effect.Effect<A, Error> => {
+  // **一次 provide,不是两次。** 两半各 provide 一次的话,同一个 `database` 引用也会被建两遍
+  // (memoisation 的作用域是一次构建),于是一个请求握着两个 drizzle 句柄 —— 今天只是浪费,
+  // 但 `Database` 一旦长出状态(span、慢查询计数,`stores/service.ts` 已记着要加),
+  // 那就是悄悄劈成两半的状态。
+  const database = databaseLayer(env);
+  return effect.pipe(
+    Effect.provide(Layer.merge(dbStoresFor(userId, database), oracleFor(userId, database))),
     Effect.mapError(toError),
   );
+};
 
 /**
  * 一步式:装配 + 立刻跑。server fn / route handler 那种「一次请求就问一次」的路径用它 ——
