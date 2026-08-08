@@ -1,17 +1,27 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
+import { Layer } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 import {
   AccountStore,
   accountStoreLayer,
-  ensureDefaultPortfolio,
-  importAccount,
+  manualStoreLayer,
   PortfolioStore,
   portfolioStoreLayer,
+  snapshotStoreLayer,
+  TransferStore,
+  transferStoreLayer,
 } from "../src/queries";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
+
+const transferOf = forUser(TransferStore, (uid: string) =>
+  Layer.provide(
+    transferStoreLayer(uid),
+    Layer.merge(snapshotStoreLayer(uid), manualStoreLayer(uid)),
+  ),
+);
 
 const accounts = forUser(AccountStore, accountStoreLayer);
 const portfolios = forUser(PortfolioStore, portfolioStoreLayer);
@@ -42,8 +52,8 @@ beforeEach(async () => {
 
 describe("ensureDefaultPortfolio", () => {
   it("find-or-create:同用户反复调 → 同一行(幂等)", async () => {
-    const p1 = await ensureDefaultPortfolio(env, USER_A);
-    const p2 = await ensureDefaultPortfolio(env, USER_A);
+    const p1 = await portfolios(USER_A).ensureDefault();
+    const p2 = await portfolios(USER_A).ensureDefault();
     expect(p2.id).toBe(p1.id);
     expect(p1.isDefault).toBe(true);
     expect(await portfolios(USER_A).list()).toHaveLength(1);
@@ -51,18 +61,18 @@ describe("ensureDefaultPortfolio", () => {
 
   it("名字 = `<用户名>'s`", async () => {
     await resetUser(USER_A, "Alice");
-    const p = await ensureDefaultPortfolio(env, USER_A);
+    const p = await portfolios(USER_A).ensureDefault();
     expect(p.name).toBe("Alice's");
   });
 
   it("用户名为空 → 兜底 `My Portfolio`", async () => {
     await resetUser(USER_A, "");
-    const p = await ensureDefaultPortfolio(env, USER_A);
+    const p = await portfolios(USER_A).ensureDefault();
     expect(p.name).toBe("My Portfolio");
   });
 
   it("部分唯一索引:一个用户只能有一个默认 Portfolio", async () => {
-    const p = await ensureDefaultPortfolio(env, USER_A);
+    const p = await portfolios(USER_A).ensureDefault();
     // 手动插第二个默认 → 撞 portfolios_user_default_uidx。
     await expect(
       env.DB.prepare(
@@ -82,31 +92,31 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
       label: "A",
       creds: "x",
     });
-    const pf = await ensureDefaultPortfolio(env, USER_A);
+    const pf = await portfolios(USER_A).ensureDefault();
     const memberships = await portfolios(USER_A).listMemberships();
     expect(memberships).toEqual([{ accountId: acc.id, portfolioId: pf.id }]);
   });
 
   it("importAccount(新建分支)也归属默认 Portfolio", async () => {
-    const { id, created } = await importAccount(env, USER_A, {
+    const { id, created } = await transferOf(USER_A).importAccount({
       connectorId: "manual",
       label: "Imported",
       creds: "x",
     });
     expect(created).toBe(true);
-    const pf = await ensureDefaultPortfolio(env, USER_A);
+    const pf = await portfolios(USER_A).ensureDefault();
     expect(await portfolios(USER_A).listMemberships()).toEqual([
       { accountId: id, portfolioId: pf.id },
     ]);
   });
 
   it("importAccount(命中既有)不重复插归属", async () => {
-    const first = await importAccount(env, USER_A, {
+    const first = await transferOf(USER_A).importAccount({
       connectorId: "manual",
       label: "Dup",
       creds: "x",
     });
-    const second = await importAccount(env, USER_A, {
+    const second = await transferOf(USER_A).importAccount({
       connectorId: "manual",
       label: "Dup",
       creds: "x",
@@ -144,7 +154,7 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
 
 describe("createPortfolio / assignAccountToPortfolio", () => {
   it("createPortfolio 建的是命名非默认 Portfolio;列表按创建序(不置顶默认)", async () => {
-    const def = await ensureDefaultPortfolio(env, USER_A); // 先建默认
+    const def = await portfolios(USER_A).ensureDefault(); // 先建默认
     const watch = await portfolios(USER_A).create({ name: "Watch" });
     expect(watch.isDefault).toBe(false);
     const all = await portfolios(USER_A).list();
@@ -181,14 +191,14 @@ describe("createPortfolio / assignAccountToPortfolio", () => {
 
 describe("管理:rename / setDefault / delete", () => {
   it("renamePortfolio 改名(含默认)", async () => {
-    const def = await ensureDefaultPortfolio(env, USER_A);
+    const def = await portfolios(USER_A).ensureDefault();
     await portfolios(USER_A).rename(def.id, "Renamed");
     const all = await portfolios(USER_A).list();
     expect(all[0]!.name).toBe("Renamed");
   });
 
   it("setDefaultPortfolio 换默认:恰一个默认,旧默认降级", async () => {
-    const old = await ensureDefaultPortfolio(env, USER_A);
+    const old = await portfolios(USER_A).ensureDefault();
     const watch = await portfolios(USER_A).create({ name: "Watch" });
     await portfolios(USER_A).setDefault(watch.id);
     const all = await portfolios(USER_A).list();
@@ -198,12 +208,12 @@ describe("管理:rename / setDefault / delete", () => {
   });
 
   it("deletePortfolio 拒删默认", async () => {
-    const def = await ensureDefaultPortfolio(env, USER_A);
+    const def = await portfolios(USER_A).ensureDefault();
     await expect(portfolios(USER_A).remove(def.id)).rejects.toThrow();
   });
 
   it("deletePortfolio 命名组:成员退回默认后删该行(账户不动)", async () => {
-    const def = await ensureDefaultPortfolio(env, USER_A);
+    const def = await portfolios(USER_A).ensureDefault();
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
@@ -223,7 +233,7 @@ describe("管理:rename / setDefault / delete", () => {
   });
 
   it("空的命名组也能删(空组持久、只显式删)", async () => {
-    await ensureDefaultPortfolio(env, USER_A);
+    await portfolios(USER_A).ensureDefault();
     const empty = await portfolios(USER_A).create({ name: "Empty" });
     await portfolios(USER_A).remove(empty.id);
     expect(await portfolios(USER_A).list()).toHaveLength(1);
@@ -232,8 +242,8 @@ describe("管理:rename / setDefault / delete", () => {
 
 describe("listPortfolios / memberships 跨用户隔离", () => {
   it("listPortfoliosByUser 只返回本人的", async () => {
-    await ensureDefaultPortfolio(env, USER_A);
-    await ensureDefaultPortfolio(env, USER_B);
+    await portfolios(USER_A).ensureDefault();
+    await portfolios(USER_B).ensureDefault();
     const a = await portfolios(USER_A).list();
     expect(a).toHaveLength(1);
     expect(a[0]!.isDefault).toBe(true);

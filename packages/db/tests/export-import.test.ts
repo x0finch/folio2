@@ -1,23 +1,28 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
+import { Layer } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 import {
   AccountStore,
   accountStoreLayer,
-  importAccount,
-  importManualActivity,
-  importSnapshot,
-  importToken,
-  listTokensForExport,
   ManualStore,
   manualStoreLayer,
   SnapshotStore,
   snapshotStoreLayer,
+  TransferStore,
+  transferStoreLayer,
 } from "../src/queries";
 import { tokenRefs, tokens } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
+
+const transferOf = forUser(TransferStore, (uid: string) =>
+  Layer.provide(
+    transferStoreLayer(uid),
+    Layer.merge(snapshotStoreLayer(uid), manualStoreLayer(uid)),
+  ),
+);
 
 const manualOf = forUser(ManualStore, manualStoreLayer);
 const snapshotsOf = forUser(SnapshotStore, snapshotStoreLayer);
@@ -56,14 +61,12 @@ const refKey = (r: { namer: string; localName: string }) => `${r.namer}/${r.loca
 
 describe("listTokensForExport", () => {
   it("导出 Token,ref 嵌在里头;空用户 → []", async () => {
-    expect(await listTokensForExport(env, USER_A)).toEqual([]);
-    const id = await importToken(
-      env,
-      USER_A,
+    expect(await transferOf(USER_A).listTokensForExport()).toEqual([]);
+    const id = await transferOf(USER_A).importToken(
       { symbol: "USDC", name: "USD Coin", logo: "u.png", providerLogo: "p.png", marketCapRank: 7 },
       [USDC_CGK, USDC_ETH],
     );
-    const out = await listTokensForExport(env, USER_A);
+    const out = await transferOf(USER_A).listTokensForExport();
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({
       id,
@@ -79,14 +82,16 @@ describe("listTokensForExport", () => {
   });
 
   it("按用户隔离", async () => {
-    await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
-    expect(await listTokensForExport(env, USER_B)).toEqual([]);
+    await transferOf(USER_A).importToken({ symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    expect(await transferOf(USER_B).listTokensForExport()).toEqual([]);
   });
 });
 
 describe("importToken —— find-or-create", () => {
   it("空库 → 新建一行,返回新 id", async () => {
-    const id = await importToken(env, USER_A, { symbol: "USDC", name: "USD Coin" }, [USDC_CGK]);
+    const id = await transferOf(USER_A).importToken({ symbol: "USDC", name: "USD Coin" }, [
+      USDC_CGK,
+    ]);
     expect(id).toBeTruthy();
     const rows = await getDb(env).select().from(tokens).where(eq(tokens.userId, USER_A));
     expect(rows).toHaveLength(1);
@@ -94,15 +99,21 @@ describe("importToken —— find-or-create", () => {
   });
 
   it("ref 已存在 → 复用那行,不新建(空库重映射的对面情形)", async () => {
-    const id1 = await importToken(env, USER_A, { symbol: "USDC", name: "USD Coin" }, [USDC_CGK]);
-    const id2 = await importToken(env, USER_A, { symbol: "USDCdup", name: "dup" }, [USDC_CGK]);
+    const id1 = await transferOf(USER_A).importToken({ symbol: "USDC", name: "USD Coin" }, [
+      USDC_CGK,
+    ]);
+    const id2 = await transferOf(USER_A).importToken({ symbol: "USDCdup", name: "dup" }, [
+      USDC_CGK,
+    ]);
     expect(id2).toBe(id1);
     expect(await getDb(env).select().from(tokens).where(eq(tokens.userId, USER_A))).toHaveLength(1);
   });
 
   it("复用时把缺的 ref 补挂到已有 Token", async () => {
-    const id1 = await importToken(env, USER_A, { symbol: "USDC", name: "USD Coin" }, [USDC_CGK]);
-    const id2 = await importToken(env, USER_A, { symbol: "USDC", name: "USD Coin" }, [
+    const id1 = await transferOf(USER_A).importToken({ symbol: "USDC", name: "USD Coin" }, [
+      USDC_CGK,
+    ]);
+    const id2 = await transferOf(USER_A).importToken({ symbol: "USDC", name: "USD Coin" }, [
       USDC_CGK,
       USDC_ETH,
     ]);
@@ -112,7 +123,7 @@ describe("importToken —— find-or-create", () => {
   });
 
   it("无 ref 的 Token(理论边界)→ 照样建行", async () => {
-    const id = await importToken(env, USER_A, { symbol: "FOO", name: "Foo" }, []);
+    const id = await transferOf(USER_A).importToken({ symbol: "FOO", name: "Foo" }, []);
     expect((await getDb(env).select().from(tokens).where(eq(tokens.id, id)))[0]!.symbol).toBe(
       "FOO",
     );
@@ -127,8 +138,8 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
       label: "W",
       creds: JSON.stringify({ address: "0xabc" }),
     };
-    const a = await importAccount(env, USER_A, input);
-    const b = await importAccount(env, USER_A, input);
+    const a = await transferOf(USER_A).importAccount(input);
+    const b = await transferOf(USER_A).importAccount(input);
     expect(a.created).toBe(true);
     expect(b.created).toBe(false);
     expect(b.id).toBe(a.id);
@@ -137,9 +148,9 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
 
   it("任一自然键字段不同 → 视为新账户", async () => {
     const base = { connectorId: "evm" as const, platform: "evm:1", label: "W" };
-    await importAccount(env, USER_A, { ...base, creds: JSON.stringify({ address: "0x1" }) });
-    await importAccount(env, USER_A, { ...base, creds: JSON.stringify({ address: "0x2" }) }); // creds 不同
-    await importAccount(env, USER_A, {
+    await transferOf(USER_A).importAccount({ ...base, creds: JSON.stringify({ address: "0x1" }) });
+    await transferOf(USER_A).importAccount({ ...base, creds: JSON.stringify({ address: "0x2" }) }); // creds 不同
+    await transferOf(USER_A).importAccount({
       ...base,
       label: "W2",
       creds: JSON.stringify({ address: "0x1" }),
@@ -154,8 +165,8 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
       label: "W",
       creds: JSON.stringify({ address: "0xabc" }),
     };
-    await importAccount(env, USER_A, input);
-    await importAccount(env, USER_A, { ...input, archivedAt: 1700000000000 });
+    await transferOf(USER_A).importAccount(input);
+    await transferOf(USER_A).importAccount({ ...input, archivedAt: 1700000000000 });
     const acc = (await accounts(USER_A).list())[0]!;
     expect(acc.archivedAt).toBe(1700000000000);
   });
@@ -167,8 +178,8 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
       label: "W",
       creds: JSON.stringify({ address: "0xabc" }),
     };
-    await importAccount(env, USER_A, input);
-    const b = await importAccount(env, USER_B, input);
+    await transferOf(USER_A).importAccount(input);
+    const b = await transferOf(USER_B).importAccount(input);
     expect(b.created).toBe(true);
     expect(await accounts(USER_A).list()).toHaveLength(1);
     expect(await accounts(USER_B).list()).toHaveLength(1);
@@ -182,19 +193,19 @@ describe("importSnapshot —— find-or-create(自然键 = account+takenAt)", ()
       label: "W",
       creds: "{}",
     });
-    const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    const tk = await transferOf(USER_A).importToken({ symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
     const snap = {
       takenAt: 1000,
       totalUsd: 100,
       balances: [{ tokenId: tk, amount: 1, usdValue: 100, kind: "spot" as const }],
     };
-    const a = await importSnapshot(env, USER_A, acc.id, snap);
-    const b = await importSnapshot(env, USER_A, acc.id, snap);
+    const a = await transferOf(USER_A).importSnapshot(acc.id, snap);
+    const b = await transferOf(USER_A).importSnapshot(acc.id, snap);
     expect(a.created).toBe(true);
     expect(b.created).toBe(false);
     expect(await snapshotsOf(USER_A).listByAccount(acc.id)).toHaveLength(1);
     // 不同 takenAt → 新快照
-    await importSnapshot(env, USER_A, acc.id, { ...snap, takenAt: 2000 });
+    await transferOf(USER_A).importSnapshot(acc.id, { ...snap, takenAt: 2000 });
     expect(await snapshotsOf(USER_A).listByAccount(acc.id)).toHaveLength(2);
   });
 });
@@ -206,15 +217,15 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
       label: "M",
       creds: "{}",
     });
-    const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    const tk = await transferOf(USER_A).importToken({ symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
     const act = { kind: "add" as const, amount: 1, price: 60000, occurredAt: 1000, createdAt: 5 };
-    const a = await importManualActivity(env, USER_A, acc.id, tk, act);
-    const b = await importManualActivity(env, USER_A, acc.id, tk, act);
+    const a = await transferOf(USER_A).importManualActivity(acc.id, tk, act);
+    const b = await transferOf(USER_A).importManualActivity(acc.id, tk, act);
     expect(a.created).toBe(true);
     expect(b.created).toBe(false);
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(1);
     // amount 不同 → 新增一条
-    await importManualActivity(env, USER_A, acc.id, tk, { ...act, amount: 2 });
+    await transferOf(USER_A).importManualActivity(acc.id, tk, { ...act, amount: 2 });
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
   });
 
@@ -224,12 +235,15 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
       label: "M",
       creds: "{}",
     });
-    const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    const tk = await transferOf(USER_A).importToken({ symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
     const base = { kind: "add" as const, amount: 1, occurredAt: 1000 };
-    await importManualActivity(env, USER_A, acc.id, tk, base); // price/fee/memo 全 null
-    const dup = await importManualActivity(env, USER_A, acc.id, tk, base);
+    await transferOf(USER_A).importManualActivity(acc.id, tk, base); // price/fee/memo 全 null
+    const dup = await transferOf(USER_A).importManualActivity(acc.id, tk, base);
     expect(dup.created).toBe(false); // null 内容也能命中
-    const withPrice = await importManualActivity(env, USER_A, acc.id, tk, { ...base, price: 1 });
+    const withPrice = await transferOf(USER_A).importManualActivity(acc.id, tk, {
+      ...base,
+      price: 1,
+    });
     expect(withPrice.created).toBe(true); // null vs 有值 → 不同
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
   });
@@ -240,16 +254,16 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
       label: "M",
       creds: "{}",
     });
-    const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    const tk = await transferOf(USER_A).importToken({ symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
     const base = { kind: "add" as const, amount: 1, price: 60000, occurredAt: 1000 };
-    const a = await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 5 });
-    const b = await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 9 });
+    const a = await transferOf(USER_A).importManualActivity(acc.id, tk, { ...base, createdAt: 5 });
+    const b = await transferOf(USER_A).importManualActivity(acc.id, tk, { ...base, createdAt: 9 });
     expect(a.created).toBe(true);
     expect(b.created).toBe(true); // createdAt 不同 → 不折叠
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
     // 再导同两条 → 都命中、不新增(幂等)。
-    await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 5 });
-    await importManualActivity(env, USER_A, acc.id, tk, { ...base, createdAt: 9 });
+    await transferOf(USER_A).importManualActivity(acc.id, tk, { ...base, createdAt: 5 });
+    await transferOf(USER_A).importManualActivity(acc.id, tk, { ...base, createdAt: 9 });
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
   });
 });
@@ -261,7 +275,7 @@ describe("listManualActivityByUser", () => {
       label: "M",
       creds: "{}",
     });
-    const tk = await importToken(env, USER_A, { symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
+    const tk = await transferOf(USER_A).importToken({ symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
     await manualOf(USER_A).recordActivity(acc.id, tk, {
       kind: "add",
       amount: 1,
