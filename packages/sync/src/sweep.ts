@@ -22,7 +22,7 @@ export const syncUserStream = (
     Effect.gen(function* () {
       const store = yield* AccountStore;
       // 两次读互不依赖 → 并发取。都拿到了才知道要同步哪些账户,所以这段在流开始之前。
-      const [accounts, rawList] = yield* Effect.all([store.list(userId), store.rawCreds(userId)], {
+      const [accounts, rawList] = yield* Effect.all([store.list(), store.rawCreds()], {
         concurrency: 2,
       });
       const credsById = new Map(rawList.map((r) => [r.id, r.creds]));
@@ -46,7 +46,7 @@ export const syncUser = (userId: string): Effect.Effect<SyncResult, SyncDepError
 
 // 一个用户这一轮的账户计数。**逐条折进去**,不在遍历里改外面的计数器 —— 也正好配流:
 // cron 只要计数,没必要把几十个用户的逐账户结果全攒在内存里。
-type Tally = { readonly ok: number; readonly failed: number; readonly skipped: number };
+export type Tally = { readonly ok: number; readonly failed: number; readonly skipped: number };
 
 const NO_ACCOUNTS: Tally = { ok: 0, failed: 0, skipped: 0 };
 // 用户级失败(取账户 / 取凭据挂了):整个用户这轮没开始,计一个 failed。
@@ -60,37 +60,35 @@ const addResult = (t: Tally, r: AccountSyncResult): Tally => ({
   failed: t.failed + (!r.ok && !r.skipped ? 1 : 0),
 });
 
-// 定时全量 sweep(P6.3):逐用户同步、逐用户隔离(一个用户炸不影响其余;单账户失败在更里面已隔离)。
+// **一个用户**这一轮的小计。定时 sweep 按用户逐个跑这个(P6.3)。
 //
-// **串行不是遗漏,是有意的**:cron 一次调用有 CPU / subrequest 预算,几十个用户并发会顶穿
-// (见 apps/web server.ts 里两个 trigger 拆开的理由)。所以用 Effect.forEach 的默认串行语义,
-// **别顺手加 concurrency** —— tests/sweep.test.ts 有一条专门钉这个。
+// 用户级失败(取账户 / 取凭据挂了)在这里被兜住、记一笔 —— 一个用户炸不影响其余;
+// 单账户失败在更里面(`syncAccount`)已经隔离过一层。
 //
 // 消费的是流而不是收集好的数组:cron 只要计数,没必要把几十个用户的逐账户结果全攒在内存里。
-export const syncAllUsers = (
-  userIds: readonly string[],
-): Effect.Effect<SweepResult, never, SyncServices> =>
-  Effect.forEach(userIds, (userId) =>
-    // 折叠流:一条结果进来就并进小计,不留数组。
-    Stream.runFold(syncUserStream(userId), NO_ACCOUNTS, addResult).pipe(
-      // 用户级失败不中断 sweep,记一笔继续下一个。
-      Effect.catchAll((err) =>
-        Effect.logError("user sweep threw").pipe(
-          Effect.annotateLogs({ userId, error: err.message }),
-          Effect.as(USER_FAILED),
-        ),
+//
+// **「所有用户」那一层不在这个包里**(#403 片 1):服务是按用户装配的(见 services.ts),
+// 一份服务服务不了多个用户,所以「逐用户装配 + 累加」天然属于**做装配的那一方**。
+// 本包只交出「给我一个已装配好的用户,我给你这个用户的小计」。
+export const userTally = (userId: string): Effect.Effect<Tally, never, SyncServices> =>
+  Stream.runFold(syncUserStream(userId), NO_ACCOUNTS, addResult).pipe(
+    Effect.catchAll((err) =>
+      Effect.logError("user sweep threw").pipe(
+        Effect.annotateLogs({ userId, error: err.message }),
+        Effect.as(USER_FAILED),
       ),
     ),
-  ).pipe(
-    Effect.map((tallies) =>
-      tallies.reduce<SweepResult>(
-        (acc, t) => ({
-          users: acc.users,
-          ok: acc.ok + t.ok,
-          failed: acc.failed + t.failed,
-          skipped: acc.skipped + t.skipped,
-        }),
-        { users: userIds.length, ...NO_ACCOUNTS },
-      ),
-    ),
+  );
+
+// 逐用户的小计加成一份。纯函数 —— 累加规则跟「怎么装配」无关,所以留在包里,
+// 装配那一方(壳,以及片 3 之后的 apps/web)只管把 tallies 递进来。
+export const sumTallies = (users: number, tallies: readonly Tally[]): SweepResult =>
+  tallies.reduce<SweepResult>(
+    (acc, t) => ({
+      users: acc.users,
+      ok: acc.ok + t.ok,
+      failed: acc.failed + t.failed,
+      skipped: acc.skipped + t.skipped,
+    }),
+    { users, ...NO_ACCOUNTS },
   );

@@ -17,12 +17,20 @@ import type { FetchOutcome, SyncDeps, SyncLogger } from "./types";
 // 后缀选仓里已有的领域词 —— 参考层叫 oracle,所以是 `TokenOracle`。
 //
 // 日志**不在这份名单里** —— 它是一个 Logger 层(见下方 forwardTo),不是要从上下文取的服务。
+//
+// **方法签名里没有 userId**(ADR 0037,#403 片 1)。这些能力是**按用户建的** —— `layerFromDeps`
+// 在装配那一刻把 userId 吃掉,于是「拿错用户」在编译期就发生不了,与 `@folio/db` 的 store、
+// 参考层的 store 是同一个形状。
+//
+// **但内核入口仍然收 userId**(`syncAccount(userId, …)` / `syncUserStream(userId)`),那不是漏改:
+// 它在那儿只有一个用途 —— **日志上下文**。cron 没有请求级的 ALS 上下文,userId 得显式带进去
+// (P6.7)。授权面和可观测面是两个理由,所以两种处理:前者进装配,后者留签名。
 
 export class AccountStore extends Context.Tag("sync/AccountStore")<
   AccountStore,
   {
-    readonly list: (userId: string) => Effect.Effect<readonly AccountSafe[], SyncDepError>;
-    readonly rawCreds: (userId: string) => Effect.Effect<readonly AccountRawCreds[], SyncDepError>;
+    readonly list: () => Effect.Effect<readonly AccountSafe[], SyncDepError>;
+    readonly rawCreds: () => Effect.Effect<readonly AccountRawCreds[], SyncDepError>;
   }
 >() {}
 
@@ -40,7 +48,6 @@ export class SnapshotStore extends Context.Tag("sync/SnapshotStore")<
   SnapshotStore,
   {
     readonly write: (
-      userId: string,
       accountId: string,
       input: WriteSnapshotInput,
     ) => Effect.Effect<string, SyncDepError>;
@@ -53,13 +60,11 @@ export class TokenOracle extends Context.Tag("sync/TokenOracle")<
   TokenOracle,
   {
     readonly mint: (
-      userId: string,
       balances: Balance[],
     ) => Effect.Effect<ReadonlyMap<string, string>, SyncDepError>;
     // null = 没重估。调用方据此决定要不要重算 totalUsd —— 只有真重估过才重算,
     // 否则保留 provider 报的那个数(它未必等于各行之和)。
     readonly revalue: (
-      userId: string,
       connectorId: string,
       balances: Balance[],
       idByRef: ReadonlyMap<string, string>,
@@ -121,8 +126,12 @@ const silent: Layer.Layer<never> = Logger.replace(Logger.defaultLogger, Logger.n
 // 两处「可选依赖」在这里就地补齐 —— mint / revalue 没注入就给个恒等实现,于是业务代码里
 // 不再有 `if (deps.mint)` 这种分支:能力永远在,只是有时什么也不做。
 //
+// **收 userId**(#403 片 1):公开的 `SyncDeps` 仍是「每个方法各带一个 userId」的旧形状 ——
+// 那是下一片要拆的东西。在这之前,由这一层把 userId 吃掉,于是包内业务代码已经看不见它了。
+// 一份 deps 服务多个用户(cron)照旧成立:每个用户各建一层。
+//
 // 下一步(出口也改成 Effect)这个函数删掉,调用方直接提供服务层。
-export const layerFromDeps = (deps: SyncDeps): Layer.Layer<SyncServices> =>
+export const layerFromDeps = (deps: SyncDeps, userId: string): Layer.Layer<SyncServices> =>
   Layer.mergeAll(
     // 出网。**在这里补上而不是让调用方给** —— 本包的公开出口仍是 Promise 形状(内部 `runPromise`),
     // 所以这一层必须是完整的。provider 声明「我要出网」,这里满足它。
@@ -130,12 +139,12 @@ export const layerFromDeps = (deps: SyncDeps): Layer.Layer<SyncServices> =>
     // provide 一个假 `HttpClient`。
     FolioHttpClient,
     Layer.succeed(AccountStore, {
-      list: (userId) =>
+      list: () =>
         Effect.tryPromise({
           try: () => deps.listAccounts(userId),
           catch: (e) => depError("listAccounts", e),
         }),
-      rawCreds: (userId) =>
+      rawCreds: () =>
         Effect.tryPromise({
           try: () => deps.listRawCreds(userId),
           catch: (e) => depError("listRawCreds", e),
@@ -148,7 +157,7 @@ export const layerFromDeps = (deps: SyncDeps): Layer.Layer<SyncServices> =>
       fetch: (account, stored) => deps.fetchBalances(account, stored),
     }),
     Layer.succeed(SnapshotStore, {
-      write: (userId, accountId, input) =>
+      write: (accountId, input) =>
         Effect.tryPromise({
           try: () => deps.writeSnapshot(userId, accountId, input),
           catch: (e) => depError("writeSnapshot", e),
@@ -156,14 +165,14 @@ export const layerFromDeps = (deps: SyncDeps): Layer.Layer<SyncServices> =>
     }),
     Layer.succeed(TokenOracle, {
       mint: deps.mint
-        ? (userId, balances) =>
+        ? (balances) =>
             Effect.tryPromise({
               try: () => deps.mint?.(userId, balances) ?? Promise.resolve(EMPTY_IDS),
               catch: (e) => depError("mint", e),
             })
         : () => Effect.succeed(EMPTY_IDS),
       revalue: deps.revalue
-        ? (userId, connectorId, balances, idByRef) =>
+        ? (connectorId, balances, idByRef) =>
             Effect.tryPromise({
               try: () =>
                 deps.revalue?.(userId, connectorId, balances, idByRef) ?? Promise.resolve(null),
