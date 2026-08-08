@@ -14,7 +14,7 @@ const manualOf = forUser(ManualStore, manualStoreLayer);
 
 const accounts = forUser(AccountStore, accountStoreLayer);
 
-// #203 起手记的币**就是 `tokens` 里的一行** —— 没有 manualOftoken 那张表了。
+// #203 起手记的币**就是 `tokens` 里的一行** —— 没有 manual_token 那张表了。
 // 于是「这个账户持有哪些币」由它账本里出现过的 token 决定,而不是另存一份账户↔币的关系。
 // 本文件因此测的是这条推导 + 两道归属闸,而不是一张关系表的 CRUD。
 
@@ -116,7 +116,7 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     expect(await manualOf(USER_A).listHoldings(acc.id, NAMER)).toEqual([]);
   });
 
-  // 同一个币被两个手记账户持有 —— 旧模型下这是两条 manualOftoken 行,现在是一行 tokens + 两份账本。
+  // 同一个币被两个手记账户持有 —— 旧模型下这是两条 manual_token 行,现在是一行 tokens + 两份账本。
   it("两个账户持同一个币:各自的数量互不干扰,共用一条代币行", async () => {
     const a1 = await manualAccount(USER_A);
     const a2 = await manualAccount(USER_A);
