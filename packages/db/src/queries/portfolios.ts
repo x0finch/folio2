@@ -1,9 +1,8 @@
 import { and, asc, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import type { DbEnv } from "../connect";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
 import type { Portfolio } from "../schema/types";
-import { Database, databaseLayer } from "../stores/service";
+import { Database } from "../stores/service";
 import { assertAccountOwned, assertPortfolioOwned } from "./ownership";
 
 // Portfolio —— 命名账户集(ADR 0033)。每个账户恰属一个,新用户首次落地建默认那个。
@@ -216,12 +215,3 @@ const make = (userId: string) =>
 
 export const portfolioStoreLayer = (userId: string): Layer.Layer<PortfolioStore, never, Database> =>
   Layer.effect(PortfolioStore, make(userId));
-
-// **过渡期兼容出口**(#394 ADR 0037):还没迁的领域(`export-import.ts`)与三个测试文件直接调它,
-// 签名与迁移前逐字一致。T3 把导出导入迁完之后,这个连同它的调用点一起删。
-export const ensureDefaultPortfolio = (env: DbEnv, userId: string): Promise<Portfolio> =>
-  Effect.runPromise(
-    Effect.flatMap(Database, (database) => ensureDefault(database, userId)).pipe(
-      Effect.provide(databaseLayer(env)),
-    ),
-  );
