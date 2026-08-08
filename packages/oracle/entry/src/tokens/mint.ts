@@ -1,5 +1,11 @@
-import type { ProviderTokenSeed, TokenRef, TokenRefHit } from "@folio/oracle-basic";
-import { FIAT_NAMER, fiatSeed, normalizeSymbol } from "@folio/oracle-basic";
+import type { ProviderTokenSeed, TokenCandidate, TokenRef, TokenRefHit } from "@folio/oracle-basic";
+import {
+  FIAT_NAMER,
+  fiatSeed,
+  normalizeSymbol,
+  RESOLUTION_DOMINANCE,
+  RESOLUTION_TOP_RANK,
+} from "@folio/oracle-basic";
 import type { GlobalTokenRefIndexStore, Namer, TokenStore } from "@folio/oracle-basic/ports";
 import {
   tokenRef as buildRef,
@@ -9,8 +15,6 @@ import {
 } from "@folio/oracle-ref";
 import { Effect, Option } from "effect";
 import type { CandidateSource } from "./candidates";
-import { pickByConfidence } from "./confidence";
-
 // 写路径:拿一条 tokenRef 换出一个 `token_id`。**`TokenService` 的一个方法**(`mint`)。
 //
 // 这一片与其余五片的分界是全服务最有分量的那条线:**「这是哪个币」在这里定死、冻进快照**,
@@ -43,18 +47,45 @@ export interface MintInput {
 // mint 那半要的全部东西。**一个上游都没有** —— 见上面的红线。
 export interface MintDeps {
   readonly store: TokenStore;
-  readonly refIndex: GlobalTokenRefIndexStore;
+  readonly globalRefIndex: GlobalTokenRefIndexStore;
   readonly candidates: CandidateSource;
   // 当前源的标识 —— 它同时是 ref 的 namer 与全局映射表的 `namer` 列;`overrides` 是它那张
   // symbol → 上游 id 的策展小表(见 `Namer`)。
   readonly namer: Namer;
 }
 
+// 按市值排名消歧:**门控** —— top-N 之内 / 只有一个候选 / 碾压次席 → 有把握;否则没把握 →
+// 调用方降级(各自独立成行、不链上游)。没把握时宁可两行也不能并错 —— 并错会把假 USDC 的金额
+// 算进真 USDC。只给本文件的 symbol 那一档用,所以住在这儿而不是另开一个文件。
+export function pickByConfidence(candidates: readonly TokenCandidate[]): TokenRef | undefined {
+  if (candidates.length === 0) return undefined;
+
+  const rank = (c: TokenCandidate): number => c.marketCapRank ?? Number.POSITIVE_INFINITY;
+  const sorted = [...candidates].sort((a, b) => rank(a) - rank(b));
+  const best = sorted[0];
+  if (sorted.length === 1) return best.ref;
+
+  const bestRank = rank(best);
+  const runnerRank = rank(sorted[1]);
+
+  if (bestRank <= RESOLUTION_TOP_RANK) return best.ref;
+  // 最佳有 rank、其余都没有 → 无歧义
+  if (!Number.isFinite(runnerRank) && Number.isFinite(bestRank)) return best.ref;
+  if (
+    Number.isFinite(runnerRank) &&
+    bestRank > 0 &&
+    runnerRank / bestRank >= RESOLUTION_DOMINANCE
+  ) {
+    return best.ref;
+  }
+  return undefined;
+}
+
 // **收已解析好的服务对象**,不从 context 取 —— 与本文件夹其余几片、以及 `./warm` 同款,
 // 于是 `mint` 的 `R` 是 `never`:服务的方法签名不会把 mint 的依赖漏给调用方。
 // 从 Tag 取服务只发生在 `./index` 那一层。
 export function makeMinting(deps: MintDeps): TokenMinting {
-  const { store, refIndex, candidates } = deps;
+  const { store, globalRefIndex, candidates } = deps;
   const { id: namer, overrides } = deps.namer;
 
   // 这条 ref 在当前上游那里叫什么 —— **地址优先于 symbol**。
@@ -71,7 +102,7 @@ export function makeMinting(deps: MintDeps): TokenMinting {
       if (parsed.kind === "issued" && parsed.namer === namer) return Option.some(ref);
 
       // 全局表按地址查到的就是**整条** upstream ref(#228:表给整条,不再回半截让这里拼)。
-      const found = yield* refIndex.lookup(namer, [ref]);
+      const found = yield* globalRefIndex.lookup(namer, [ref]);
       const upstreamRef = Option.fromNullable(found.get(ref));
       if (Option.isSome(upstreamRef)) return upstreamRef;
 

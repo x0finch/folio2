@@ -1,7 +1,7 @@
 import { UpstreamRateLimitError } from "@folio/client-core";
 import { Effect, Option } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { swr } from "../src/tokens/refresh";
+import { swr } from "../src/tokens/swr";
 
 // SWR 编排是全层唯一知道「读本地 → 判 stale → 回源 → 写回」的地方(ADR 0023)。
 // 它的语义在这里测一次,价 / 历史价 / warm 三处就不用各测一遍。

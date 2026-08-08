@@ -1,12 +1,17 @@
-import type { TokenPrice, TokenRecordPrice, TokenRef } from "@folio/oracle-basic";
+import type { TokenPrice, TokenRecord, TokenRecordPrice, TokenRef } from "@folio/oracle-basic";
 import { PRICE_TTL_MS } from "@folio/oracle-basic";
 import type { TokenPriceStore, TokenStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect, Option } from "effect";
-import { degradeTo } from "./degrade";
-import { swr } from "./refresh";
+import { degradeTo, swr } from "./swr";
 
-// 现价。三个方法**按「有没有内部 id」分成两档**,这是本片的全部内容:
+// 读 —— **现价 + 整行富化**。两半都拿内部 id(或选币时的 ref)直接取数,不从 tokenRef 反推
+// (ADR 0021:身份在 `./mint` 定死)。
 //
+// —— 整行(`enrich` / `logoUrlById`)—— **零网络**,不回源、不判新鲜度。
+// 读到 stale 的价照样原样给出去(`TokenRecord.price.stale` 带着这个事实)。要刷新是
+// `./stale` 的活,由调用方在合适的时机单独调 —— 富化一屏持仓不该顺手触发一串上游请求。
+//
+// —— 现价 —— 三个方法**按「有没有内部 id」分成两档**:
 //   `priceOf`                    收 token_id  → 走 SWR,**会写回**价 store
 //   `priceByRef` / `pricesByRefs` 收 tokenRef  → 现取,**不建行、不写缓存**
 //
@@ -16,6 +21,14 @@ import { swr } from "./refresh";
 //
 // **现价有两个家**,这是明知接受的:持仓币的价在价 store(估值用,要能按 token 点查),
 // 选币列表的价在 warm blob 里(橱窗用,见 `./catalogue`),两边可能差几分钟。
+
+export interface TokenReading {
+  // 富化:按内部 id 批量读整行(info + 价合并)。输入**不再需要** symbol 或 tokenRef。
+  enrich(ids: readonly string[]): Effect.Effect<Map<string, TokenRecord>>;
+  // 按主键读一行的上游图 URL(logo 代理端点用):源给的优先,没有就用连接器自带那张。
+  logoUrlById(id: string): Effect.Effect<Option.Option<string>>;
+}
+
 export interface TokenPricing {
   // 取单价:新鲜 → 直接回;stale/miss → 回源 → 写回。长尾币按需取价走这条。
   priceOf(tokenId: string): Effect.Effect<Option.Option<TokenRecordPrice>>;
@@ -26,6 +39,26 @@ export interface TokenPricing {
   // 用户还在下拉里划。上游失败 → 空 Map,那几行显示无价。
   pricesByRefs(refs: readonly TokenRef[]): Effect.Effect<Map<TokenRef, TokenPrice>>;
 }
+
+export const makeReading = (store: TokenStore, prices: TokenPriceStore): TokenReading => ({
+  enrich: (ids) =>
+    Effect.gen(function* () {
+      if (ids.length === 0) return new Map<string, TokenRecord>();
+      // 两个 store 各读自己那半,服务层合成整行 —— 这正是切开端口的用处。
+      // 并发度写出来(以前是 `Promise.all` 的隐式「全都一起上」)。
+      const [infos, priced] = yield* Effect.all([store.getByIds(ids), prices.getByIds(ids)], {
+        concurrency: 2,
+      });
+      const out = new Map<string, TokenRecord>();
+      for (const [id, info] of infos) out.set(id, { ...info, price: priced.get(id) });
+      return out;
+    }),
+
+  logoUrlById: (id) =>
+    Effect.map(store.getById(id), (info) =>
+      Option.flatMap(info, (i) => Option.fromNullable(i.logo ?? i.providerLogo)),
+    ),
+});
 
 export const makePricing = (
   store: TokenStore,

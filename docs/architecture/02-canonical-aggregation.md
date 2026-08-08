@@ -210,7 +210,7 @@ Holding {
 | ③ 入库 | `apps/web/src/lib/server/sync.ts` → `packages/db/src/queries/snapshots.ts` `writeSnapshot` |
 | ④ 预热 | `apps/web/src/lib/server/internal/sync-deps.ts` `warmTokensForUser` |
 | ⑤ 读出 | `apps/web/src/lib/server/portfolio.ts` → `packages/db/src/queries/snapshots.ts` `getLatestSnapshotByUser` |
-| ⑥ 富化 | `apps/web/src/lib/server/internal/overview-model.ts` · `packages/oracle/entry/src/tokens/read.ts` `enrich` |
+| ⑥ 富化 | `apps/web/src/lib/server/internal/overview-model.ts` · `packages/oracle/entry/src/tokens/price.ts` `enrich` |
 | ⑦ 组装 | `apps/web/src/lib/server/internal/overview-model.ts` |
 | ⑧ 聚合 | `apps/web/src/lib/aggregate.ts` `buildCanonicalHoldings`(分组键 `groupKey` / 门槛 `isEligible`) |
 | ⑨ 渲染 | `apps/web/src/routes/_authed/index.tsx` · `components/token-holdings.tsx` · `components/asset-sheet.tsx` |

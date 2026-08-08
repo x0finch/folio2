@@ -39,8 +39,8 @@ import { candidateSourceLayer } from "./tokens/candidates";
 //     现价与历史价全都成立,而那边从来没人提议拆。
 // 判据统一之后服务数从 5 落到 3。**能力没有减少,方法一个没删** —— 只是不再每样能力一个 Tag。
 //
-// **`warmRefIndex` / `refIndexRefreshedAt` 不在这里**(`./ref-index`):刷全局映射表跟 userId
-// 无关,cron 自己 provide 那两个端口就能跑,而且它们连 Tag 都不需要(见那个文件的开头)。
+// **`GlobalRefIndexService` 不在这里**(`./global-ref-index`):刷全局映射表跟 userId 无关,
+// cron 单独 provide 那个 layer + 两个端口就能跑,不必先建 per-user 的三张 store。
 //
 // **`DefiLogoResolver` 不在这儿了**(移回 app):DeFi 协议图来自用户自己同步下来的余额 meta,
 // 没有上游、不出网 —— 它的 `R` 里一个上游都没有,那本身就是「它不属于参考层」的类型级写法。

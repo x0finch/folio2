@@ -2,7 +2,7 @@ import type { TokenPricePoint } from "@folio/oracle-basic";
 import { dayBucketOf, MS_PER_DAY } from "@folio/oracle-basic";
 import type { TokenPriceStore, TokenStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Effect, Option } from "effect";
-import { degradeTo } from "./degrade";
+import { degradeTo } from "./swr";
 
 // 历史日价(#148 / ADR 0019)。与 `./price` 的现价分开成一片,因为**判据不同**:
 // 过去日不可变(落库一次,永久命中),今日桶可变(恒现取、绝不落库)。同一段代码里两种

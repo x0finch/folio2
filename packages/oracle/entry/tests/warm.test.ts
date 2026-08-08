@@ -4,7 +4,7 @@ import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { candidatesBySymbol, warmCatalogue } from "../src/tokens/candidates";
 import { refreshWarmCatalogue, topByRank, warmMarkets } from "../src/tokens/catalogue";
-import { pickByConfidence } from "../src/tokens/confidence";
+import { pickByConfidence } from "../src/tokens/mint";
 import { WARM_KEY } from "../src/tokens/warm";
 import { harness, now0, upstreamDown } from "./fakes";
 

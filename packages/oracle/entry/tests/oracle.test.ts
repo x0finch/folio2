@@ -2,14 +2,13 @@ import { Duration, Effect, Layer, Option, TestClock, TestContext } from "effect"
 import { describe, expect, it } from "vitest";
 import {
   FxService,
+  GlobalRefIndexService,
   oracleLayer,
   PlatformService,
-  refIndexRefreshedAt,
   TokenService,
-  warmRefIndex,
 } from "../src";
 import {
-  fakeRefIndexStore,
+  fakeGlobalRefIndexStore,
   fakeTokenPriceStore,
   fakeTokenStore,
   harness,
@@ -128,7 +127,7 @@ describe("契约往返(内存假实现)", () => {
   });
 
   it("全局映射:按 (upstream, chainRef) 点查回整条 upstream ref;miss 的键不出现", async () => {
-    const store = fakeRefIndexStore();
+    const store = fakeGlobalRefIndexStore();
     expect(await run(store.refreshedAt("src"))).toEqual(Option.none());
 
     await run(
@@ -147,11 +146,11 @@ describe("契约往返(内存假实现)", () => {
 });
 
 describe("全局维护任务不挂 per-user 门面", () => {
-  // 这两件**不是服务**(没有 Tag):它们的依赖写在 `R` 上(`GlobalTokenRefIndexStore | TokenUpstream`),
-  // cron 直接 provide 那两个端口就能跑 —— 不必先假造一个用户、也不必建 per-user 的三张 store。
+  // `GlobalRefIndexService` 不进 `oracleLayer`:它的依赖只有两个全局端口,cron 单独 provide
+  // 那个 layer 就能跑 —— 不必先假造一个用户、也不必建 per-user 的三张 store。
   it("刷全局映射表不要 userId、也不要 per-user store:拉 → 一次整份灌 → 记得刷新时刻", async () => {
     const h = harness();
-    h.upstream.refIndex = {
+    h.upstream.globalRefIndex = {
       rows: [
         { chainRef: "evm:1/contract:0xa0b8", upstreamRef: "src/issued:usd-coin" },
         { chainRef: "solana/contract:EPjF", upstreamRef: "src/issued:usd-coin" },
@@ -162,13 +161,14 @@ describe("全局维护任务不挂 per-user 门面", () => {
 
     await h.run(
       Effect.gen(function* () {
-        expect(yield* refIndexRefreshedAt()).toEqual(Option.none());
+        const svc = yield* GlobalRefIndexService;
+        expect(yield* svc.refreshedAt()).toEqual(Option.none());
 
-        const summary = yield* warmRefIndex();
+        const summary = yield* svc.warm();
         expect(summary).toEqual({ rows: 2, unmatchedPlatforms: [], skipped: 7 });
-        expect(h.refIndex.writes).toBe(1); // 一次整份写
+        expect(h.globalRefIndex.writes).toBe(1); // 一次整份写
         // 时刻取自 `Clock`(不再由调用方传一个 `now` 进来)。
-        expect(yield* refIndexRefreshedAt()).toEqual(Option.some(now0));
+        expect(yield* svc.refreshedAt()).toEqual(Option.some(now0));
       }),
     );
   });
@@ -177,15 +177,15 @@ describe("全局维护任务不挂 per-user 门面", () => {
   // 落到哪由 cron 提供的 Logger layer 决定 —— 少一个配置字段,而且任何调用点都能记。
   it("失配落一条 warning(带 namer 与链名);没有失配就不吵", async () => {
     const h = harness();
-    h.upstream.refIndex = { rows: [], unmatchedPlatforms: ["sui"], skipped: 0 };
-    await h.run(warmRefIndex());
+    h.upstream.globalRefIndex = { rows: [], unmatchedPlatforms: ["sui"], skipped: 0 };
+    await h.run(Effect.flatMap(GlobalRefIndexService, (s) => s.warm()));
 
     const warns = h.logs.filter((l) => l.level === "WARN");
     expect(warns).toHaveLength(1);
     expect(warns[0]?.annotations).toEqual({ namer: "src", platforms: ["sui"] });
 
-    h.upstream.refIndex = { rows: [], unmatchedPlatforms: [], skipped: 0 };
-    await h.run(warmRefIndex());
+    h.upstream.globalRefIndex = { rows: [], unmatchedPlatforms: [], skipped: 0 };
+    await h.run(Effect.flatMap(GlobalRefIndexService, (s) => s.warm()));
     expect(h.logs.filter((l) => l.level === "WARN")).toHaveLength(1);
   });
 
@@ -193,9 +193,11 @@ describe("全局维护任务不挂 per-user 门面", () => {
   it("上游挂了 → 错误交给 cron,不降级", async () => {
     const h = harness();
     h.upstream.fail = upstreamDown();
-    const result = await h.run(Effect.either(warmRefIndex()));
+    const result = await h.run(
+      Effect.either(Effect.flatMap(GlobalRefIndexService, (s) => s.warm())),
+    );
     expect(result._tag).toBe("Left");
-    expect(h.refIndex.writes).toBe(0);
+    expect(h.globalRefIndex.writes).toBe(0);
   });
 });
 

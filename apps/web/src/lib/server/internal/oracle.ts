@@ -7,8 +7,13 @@ import {
   userTokenPriceStoreLayer,
   userTokenStoreLayer,
 } from "@folio/db";
-import { type OraclePorts, type OracleServices, oracleLayer } from "@folio/oracle";
-import type { GlobalTokenRefIndexStore, TokenUpstream } from "@folio/oracle-basic/ports";
+import {
+  type GlobalRefIndexService,
+  globalRefIndexServiceLayer,
+  type OraclePorts,
+  type OracleServices,
+  oracleLayer,
+} from "@folio/oracle";
 import {
   coinGeckoFxUpstreamLayer,
   coinGeckoNamerLayer,
@@ -67,6 +72,19 @@ const portsFor = (userId: string) =>
     databaseLayer(env),
   );
 
+// cron 刷全局映射表只要这两个端口 —— 没有 userId,也不建 per-user 那三张。
+const warmPorts = () =>
+  Layer.merge(
+    Layer.provide(globalTokenRefIndexStoreLayer, databaseLayer(env)),
+    coinGeckoTokenUpstreamLayer(cgConfig()),
+  );
+
+// `provideMerge` 而不是 `provide`:端口也透出去。app 自己有一小片直接用 `CacheStore`
+// (DeFi 协议图 —— 没有上游、不属于参考层,见 `defi-logo-store.ts`),而这些端口本来就是
+// 这个文件建的,没必要为了用它们再包一个服务。
+const oracleFor = (userId: string) =>
+  Layer.provideMerge(oracleLayer, Layer.merge(portsFor(userId), upstreams()));
+
 // 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
 // 而 `Data.TaggedError` 的那四类没有 `message` 字段,于是上层日志里只剩一个空消息 + 一坨 Cause。
 // 消息里只有 tag、pathname 和状态码 —— `where` 本来就刻意不带 query(原则 #5 红线)。
@@ -92,10 +110,7 @@ export const runOracle = <A>(
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
-      // `provideMerge` 而不是 `provide`:端口也透出去。app 自己有一小片直接用 `CacheStore`
-      // (DeFi 协议图 —— 没有上游、不属于参考层,见 `defi-logo-store.ts`),而这些端口本来就是
-      // 这个文件建的,没必要为了用它们再包一个服务。
-      Effect.provide(Layer.provideMerge(oracleLayer, Layer.merge(portsFor(userId), upstreams()))),
+      Effect.provide(oracleFor(userId)),
       Effect.provide(logTapeLogger),
       Effect.mapError(toError),
     ),
@@ -103,23 +118,15 @@ export const runOracle = <A>(
 
 /**
  * 全局维护任务(刷 `global_token_ref_index`)。**不带 userId** —— 这张表跟任何用户无关
- * (ADR 0022),所以 per-user 的那三张 store 压根不建。
- *
- * `R` 上是**两个端口**而不是一个服务:`warmRefIndex` / `refIndexRefreshedAt` 没有 Tag
- * (见 `@folio/oracle` 的 `ref-index.ts` —— 那个 Tag 从来没有被换过,只是仪式),
- * 于是这里少一层 `Layer.provide(refIndexWarmerLayer, …)` 嵌套,直接把端口喂进去。
+ * (ADR 0022),所以 per-user 的那三张 store 压根不建;只装 `GlobalRefIndexService` + 它要的
+ * 两个端口。
  */
 export const runOracleWarm = <A>(
-  effect: Effect.Effect<A, UpstreamError, GlobalTokenRefIndexStore | TokenUpstream>,
+  effect: Effect.Effect<A, UpstreamError, GlobalRefIndexService>,
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
-      Effect.provide(
-        Layer.merge(
-          Layer.provide(globalTokenRefIndexStoreLayer, databaseLayer(env)),
-          coinGeckoTokenUpstreamLayer(cgConfig()),
-        ),
-      ),
+      Effect.provide(Layer.provide(globalRefIndexServiceLayer, warmPorts())),
       Effect.provide(logTapeLogger),
       Effect.mapError(toError),
     ),
