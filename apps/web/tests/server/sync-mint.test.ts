@@ -1,12 +1,12 @@
 import { env } from "cloudflare:test";
-import { ConnectorFailure } from "@folio/connectors-basic";
+import { type Balance, ConnectorFailure } from "@folio/connectors-basic";
 import { globalTokenRefIndexStoreLayer, userCacheStoreLayer, userTokenStoreLayer } from "@folio/db";
 import { CacheStore, GlobalTokenRefIndexStore, TokenStore } from "@folio/oracle-basic/ports";
-import { syncAccount } from "@folio/sync";
 import { Effect, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildSyncDeps, warmTokensForUser } from "../../src/lib/server/internal/sync-deps";
+import { warmTokensForUser } from "../../src/lib/server/internal/sync-deps";
 import { dbFor, withStore } from "./db-effect";
+import { syncOne, syncRound } from "./sync-fns";
 
 // 写路径切到 mint 的端到端测试(#200):喂 provider 余额 → 落库 → 快照行带正确的 token_id。
 //
@@ -95,40 +95,24 @@ async function makeAccount(label = "w"): Promise<string> {
 }
 
 // provider 报的一笔余额(`Balance` 形状 —— 这是编排器收到的东西)。
-const bal = (tokenRef: string, symbol: string, over: Record<string, unknown> = {}) => ({
-  symbol,
-  amount: 1,
-  value: 100,
-  kind: "spot" as const,
-  tokenRef,
-  ...over,
-});
+const bal = (tokenRef: string, symbol: string, over: Record<string, unknown> = {}): Balance =>
+  ({
+    symbol,
+    amount: 1,
+    value: 100,
+    kind: "spot" as const,
+    tokenRef,
+    ...over,
+  }) as Balance;
 
-// **走真编排器**(#202 之后 mint 是 `SyncDeps` 上独立的一步,跑在 revalue 之前)。
+// **走真编排器**(#202 之后 mint 是编排里独立的一步,跑在 revalue 之前)。
 // 只把取数那一步打桩,mint / revalue / 写快照全用真实现 —— 顺序与 best-effort 语义因此都被覆盖,
 // 不必在测试里复刻编排逻辑(复刻的话,编排顺序一改测试还是绿的,那就白测了)。
-async function syncWith(
-  balances: ReturnType<typeof bal>[],
-  accountId: string,
-  deps = buildSyncDeps(),
-): Promise<string> {
+async function syncWith(balances: Balance[], accountId: string): Promise<string> {
   const accounts = await dbFor(USER).accounts.list();
   const account = accounts.find((a) => a.id === accountId);
   if (!account) throw new Error(`no such account ${accountId}`);
-  const res = await syncAccount(
-    {
-      ...deps,
-      fetchBalances: () =>
-        Effect.succeed({
-          status: "ok" as const,
-          balances: balances as never,
-          totalUsd: balances.reduce((s, b) => s + b.value, 0),
-        }),
-    },
-    USER,
-    account,
-    null,
-  );
+  const res = await syncOne(USER, { account, balances });
   if (!res.ok || !res.snapshotId) throw new Error(`sync failed: ${res.error ?? "no snapshot"}`);
   return res.snapshotId;
 }
@@ -294,26 +278,19 @@ describe("每账户独立落库的性质保住", () => {
     await seedRefIndex([{ ref: USDC_ETH, localName: "usd-coin" }]);
     const bad = await makeAccount("bad");
     const good = await makeAccount("good");
-    const deps = buildSyncDeps();
     const accounts = await dbFor(USER).accounts.list();
     const of = (id: string) => accounts.find((a) => a.id === id) as never;
 
-    // 坏账户:取数直接抛 → syncAccount 收成 ok:false,不落库、不向上抛。
-    const badRes = await syncAccount(
-      {
-        ...deps,
-        // 取数失败:错误通道上给一个 `ConnectorError`,不再是抛异常。
-        fetchBalances: () => Effect.fail(new ConnectorFailure({ message: "provider down" })),
-      },
-      USER,
-      of(bad),
-      null,
-    );
+    // **同一轮**里两个账户:坏的取数直接失败(错误通道上给一个 `ConnectorError`)→ syncAccount
+    // 收成 ok:false、不落库、不向上抛;好的照样落库、照样带 token_id。
+    // 「共用一份 deps」在片 3 之后的形状就是「共用一次装配」—— seed 收集器与估值模式活在这一轮里。
+    const [badRes, goodRes] = await syncRound(USER, [
+      { account: of(bad), fail: new ConnectorFailure({ message: "provider down" }) },
+      { account: of(good), balances: [bal(USDC_ETH, "USDC")] },
+    ]);
     expect(badRes.ok).toBe(false);
-
-    // 同一份 deps 继续服务另一个账户,照样落库、照样带 token_id。
-    const snapshotId = await syncWith([bal(USDC_ETH, "USDC")], good, deps);
-    expect((await balancesOf(snapshotId))[0].tokenId).toBeTruthy();
+    expect(goodRes.snapshotId).toBeTruthy();
+    expect((await balancesOf(goodRes.snapshotId as string))[0].tokenId).toBeTruthy();
   });
 
   // 账户并发跑,同一条 ref 会被同时 mint。靠 store 的 upsert-then-read 幂等收敛,不加 barrier。
@@ -321,11 +298,11 @@ describe("每账户独立落库的性质保住", () => {
     await seedRefIndex([{ ref: USDC_ETH, localName: "usd-coin" }]);
     const a = await makeAccount("a");
     const b = await makeAccount("b");
-    const deps = buildSyncDeps();
 
+    // 各起一轮、同时跑 —— 这正是两个请求同时进来时的样子(片 3 之后一轮 = 一次装配)。
     const [s1, s2] = await Promise.all([
-      syncWith([bal(USDC_ETH, "USDC")], a, deps),
-      syncWith([bal(USDC_ETH, "USDC")], b, deps),
+      syncWith([bal(USDC_ETH, "USDC")], a),
+      syncWith([bal(USDC_ETH, "USDC")], b),
     ]);
 
     const [r1, r2] = [await balancesOf(s1), await balancesOf(s2)];
@@ -341,10 +318,9 @@ describe("provider 报的元信息进代币行", () => {
   // 名字与图在编排里会被丢掉(快照不落它们),所以是在取到余额那一刻收的 seed。
   it("建行用 provider 报的 name / logo(图落备用槽)", async () => {
     const accountId = await makeAccount();
-    const deps = buildSyncDeps();
-    // seed 是在 `fetchViaConnector` 里收的;本测试把 `fetchBalances` 整个打了桩、绕开了它,
+    // seed 是在 `fetchViaConnector` 里收的;本测试把取余额那一层整个换掉、绕开了它,
     // 所以这里没有 seed —— 正好验「没有 seed 时退回 symbol 一项」这条兜底。
-    const snapshotId = await syncWith([bal("evm:1/contract:0xnoseed", "FOO")], accountId, deps);
+    const snapshotId = await syncWith([bal("evm:1/contract:0xnoseed", "FOO")], accountId);
     const rows = await balancesOf(snapshotId);
     const info = await tokenInfo(rows[0].tokenId as string);
     // 没有 seed 时退回 symbol 一项 —— 名字等于 symbol,不是空。

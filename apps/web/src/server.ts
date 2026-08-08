@@ -1,13 +1,12 @@
 import { listUserIdsWithAccounts } from "@folio/db";
 import { GlobalRefIndexService } from "@folio/oracle";
-import { syncAllUsers } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/internal/cache-headers";
 import { configureLogging } from "./lib/server/internal/log";
 import { runAtEdge, withDatabase, withOracleWarm } from "./lib/server/internal/oracle";
-import { buildSyncDeps, warmAllUsers } from "./lib/server/internal/sync-deps";
+import { syncAllUsers, warmAllUsers } from "./lib/server/internal/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
 // 再补一个 CF scheduled() 处理器跑定时同步(cron 只触发 scheduled,不触发 fetch)。
@@ -49,10 +48,7 @@ const sweepAllUsers = (cron: string): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
     const userIds = yield* withDatabase(listUserIdsWithAccounts);
     cronLog.info("cron sweep start", { cron, users: userIds.length });
-    const result = yield* Effect.tryPromise({
-      try: () => syncAllUsers(buildSyncDeps(), userIds),
-      catch: (e) => (e instanceof Error ? e : new Error(String(e))),
-    });
+    const result = yield* syncAllUsers(userIds);
     cronLog.info("cron sweep done", {
       cron,
       users: result.users,
@@ -94,7 +90,7 @@ export default {
   //   · 其余(00:00)—— 全量 sync sweep
   // 拆两个 trigger 而不是挤一次:拉几 MB JSON + 写几万行是重活,与 sweep 挤一次调用有超预算风险。
   // waitUntil 保证跑完才结束本次调用。env/ctx 由运行时传入;env 不单独取用
-  // (configureLogging / db / buildSyncDeps / oracleWarm 都走 cloudflare:workers 全局)。
+  // (configureLogging / syncAllUsers / warmAllUsers / oracleWarm 都走 cloudflare:workers 全局)。
   async scheduled(controller: ScheduledController, _env: Cloudflare.Env, ctx: ExecutionContext) {
     ctx.waitUntil(
       (async () => {

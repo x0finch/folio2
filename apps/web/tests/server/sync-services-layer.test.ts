@@ -10,10 +10,10 @@ import { dbFor } from "./db-effect";
 
 // `syncServicesLayer` —— app 侧对 `@folio/sync` 那四个能力的接线(#403 片 2)。
 //
-// 为什么单独有这个文件:`sync-mint.test.ts` 走的是包里那条 **Promise** 出口
-// (`syncAccount(deps, …)` + `buildSyncDeps()`),它一行都碰不到这一层。而这一层正是这一片新加的
-// 东西 —— 四个 Tag 的接线、seed 收集器的共享、估值模式的惰性读、错误往 `SyncDepError` 的归类。
-// 没有它,新机器就是零覆盖上线。
+// 为什么单独有这个文件:别处的用例测的是**编排**(mint 认得对不对、重试退避、失败隔离),
+// 它们把「取余额」以外的东西当背景。而这一层本身才是 app 这边的活儿 —— 四个 Tag 的接线、
+// seed 收集器的共享、估值模式的惰性读、**db 的 defect 往 `SyncDepError` 的翻译**。
+// 最后那条尤其要钉:少了它,一个用户的 D1 抖动会掀掉整轮 cron,而那是静默的。
 //
 // 走**真 D1**(Miniflare)与**真参考层**,只把「取余额」那一个能力换成假的 —— 那是唯一会出网的
 // 一步,其余都要如实跑,否则测的就不是接线了。
@@ -86,11 +86,12 @@ describe("syncServicesLayer 的接线", () => {
 
   // **db 的失败必须是类型化的 `SyncDepError`,不能是 defect。**
   //
-  // db / 参考层的错误通道都是 `never`(ADR:D1 挂了走 defect),而编排的三层隔离
-  // (`bestEffort` 降级、逐账户 `catchAll`、逐用户 `catchAll`)都只接类型化失败。以前这道翻译
-  // 是免费的 —— 每个 dep 都经一次 `runPromise` 边界。边界拿掉之后它得显式补上,不补的话一次
-  // mint 的 D1 抖动会穿过三层隔离变成 500,而且是静默的。
-  it("db 挂了 → 类型化失败,不是 defect(隔离才接得住)", async () => {
+  // db store 的错误通道是 `never`(ADR:D1 挂了走 defect),而编排的隔离全靠类型化失败:
+  // `Sweep.userTally` 的 `catchAll` 与 `account.ts` 的 `bestEffort` 都只接那一种。少了这道翻译,
+  // 一个用户的 D1 抖动会以 defect 掀掉整轮 cron —— #375 兜的正是这件事。
+  //
+  // 这条以前由包里那层 deps→服务的翻译保证(`tryPromise({ catch: depError })`);那层拆掉之后归这一层。
+  it("db 挂了 → 类型化失败,不是 defect(cron 才隔离得住)", async () => {
     const exit = await runRequest(
       USER,
       Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(
@@ -105,6 +106,7 @@ describe("syncServicesLayer 的接线", () => {
       ),
     );
     expect(Exit.isFailure(exit)).toBe(true);
+    // 关键是**失败**而不是**defect**:`catchAll` 接得住的那一种。
     const failure = Exit.isFailure(exit) ? Cause.failureOption(exit.cause) : Option.none();
     expect(Option.isSome(failure)).toBe(true);
     expect((Option.getOrThrow(failure) as { _tag: string })._tag).toBe("SyncDepError");

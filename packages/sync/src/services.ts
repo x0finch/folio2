@@ -1,9 +1,8 @@
-import { FolioHttpClient } from "@folio/client-core";
 import type { Balance, ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
-import { Context, Effect, HashMap, Layer, Logger, LogLevel } from "effect";
-import { depError, type SyncDepError } from "./errors";
-import type { FetchOutcome, SyncDeps, SyncLogger } from "./types";
+import { Context, type Effect, HashMap, Layer, Logger, LogLevel } from "effect";
+import type { SyncDepError } from "./errors";
+import type { FetchOutcome, SyncLogger } from "./types";
 
 // 编排要用的**能力**,一个一个具名。业务代码从上下文取能力,不再一层层透传 deps / account /
 // stored 这些「材料」—— 谁需要什么,签名上看得见。
@@ -16,11 +15,11 @@ import type { FetchOutcome, SyncDeps, SyncLogger } from "./types";
 // 这个路子:`FileSystem` 不叫 `Files`、`SqlClient` 不叫 `Queries`、`Logger` 不叫 `Logs`。
 // 后缀选仓里已有的领域词 —— 参考层叫 oracle,所以是 `TokenOracle`。
 //
-// 日志**不在这份名单里** —— 它是一个 Logger 层(见下方 forwardTo),不是要从上下文取的服务。
+// 日志**不在这份名单里** —— 它是一个 Logger 层(见下方 syncLoggerLayer),不是要从上下文取的服务。
 //
-// **方法签名里没有 userId**(ADR 0037,#403 片 1)。这些能力是**按用户建的** —— `layerFromDeps`
-// 在装配那一刻把 userId 吃掉,于是「拿错用户」在编译期就发生不了,与 `@folio/db` 的 store、
-// 参考层的 store 是同一个形状。
+// **方法签名里没有 userId**(ADR 0037,#403)。这些能力是**按用户建的** —— 装配方(`apps/web` 的
+// `syncServicesLayer`)在建这一层那一刻就把 userId 吃掉,于是「拿错用户」在编译期就发生不了,
+// 与 `@folio/db` 的 store、参考层的 store 是同一个形状。
 //
 // **但内核入口仍然收 userId**(`syncAccount(userId, …)` / `syncUserStream(userId)`),那不是漏改:
 // 它在那儿只有一个用途 —— **日志上下文**。cron 没有请求级的 ALS 上下文,userId 得显式带进去
@@ -82,9 +81,6 @@ export type SyncServices =
   | TokenOracle
   | ProviderNeeds;
 
-// 没注入 mint 时的空答案。共享一个不可变实例 —— 每账户新建一个空 Map 没有意义。
-const EMPTY_IDS: ReadonlyMap<string, string> = new Map();
-
 // —— 日志:一个 Logger 层,不是一个服务 ——
 //
 // 业务代码只写 `Effect.logWarning("...")`,上下文字段(userId / accountId / connectorId)由
@@ -93,11 +89,13 @@ const EMPTY_IDS: ReadonlyMap<string, string> = new Map();
 //
 // 门限设 All:级别过滤是注入方(LogTape)的事,本层不替它筛 —— 与迁移前直调 `log.*` 一致。
 // 不设的话 Effect 默认从 Info 起,`debug` 会在到达 LogTape 之前就被吃掉。
-// 注入式 logger 的转发层。**只给还在用 `SyncDeps` 的那条 Promise 出口用** —— 调用方自己提供
-// 服务时不该再叠一层:`Logger.replace` 是「remove(default) + add」,外层已经换过 default 的话
-// 内层那次 remove 是空操作,两个转发器同时在,每条日志写两遍(#403 片 2 实测)。
-// 那条路上的类目改由日志自己带(见 apps/web 的 `logCategory`)。
-const syncLoggerLayer = (log: SyncLogger): Layer.Layer<never> =>
+// 注入式 logger 的转发层。**生产不用它了**(#403 片 3:Promise 出口没了,类目改由日志自己带,
+// 见 apps/web 的 `logCategory`)—— 留着是给测试:用例要断言「哪条日志、什么级别、带哪些字段」,
+// 得有个地方把 Effect 的日志接出来。
+//
+// 别在生产那边叠这么一层:`Logger.replace` 是「remove(default) + add」,外层已经换过 default 的话
+// 内层那次 remove 是空操作,两个转发器同时在,每条日志写两遍(#403 片 2 实测过)。
+export const syncLoggerLayer = (log: SyncLogger): Layer.Layer<never> =>
   Layer.merge(
     Logger.replace(
       Logger.defaultLogger,
@@ -119,70 +117,4 @@ const syncLoggerLayer = (log: SyncLogger): Layer.Layer<never> =>
       }),
     ),
     Logger.minimumLogLevel(LogLevel.All),
-  );
-
-// 没注入 logger:装一个哑的,而不是任由 Effect 默认 logger 往控制台打
-//(迁移前的默认就是 no-op,测试不注入 log 时也指望这个)。
-const silent: Layer.Layer<never> = Logger.replace(Logger.defaultLogger, Logger.none);
-
-// **新旧世界唯一的接缝**:把公开的 `SyncDeps`(Promise 形状)翻译成上面这组服务。
-//
-// 两处「可选依赖」在这里就地补齐 —— mint / revalue 没注入就给个恒等实现,于是业务代码里
-// 不再有 `if (deps.mint)` 这种分支:能力永远在,只是有时什么也不做。
-//
-// **收 userId**(#403 片 1):公开的 `SyncDeps` 仍是「每个方法各带一个 userId」的旧形状 ——
-// 那是下一片要拆的东西。在这之前,由这一层把 userId 吃掉,于是包内业务代码已经看不见它了。
-// 一份 deps 服务多个用户(cron)照旧成立:每个用户各建一层。
-//
-// 下一步(出口也改成 Effect)这个函数删掉,调用方直接提供服务层。
-export const layerFromDeps = (deps: SyncDeps, userId: string): Layer.Layer<SyncServices> =>
-  Layer.mergeAll(
-    // 出网。**在这里补上而不是让调用方给** —— 本包的公开出口仍是 Promise 形状(内部 `runPromise`),
-    // 所以这一层必须是完整的。provider 声明「我要出网」,这里满足它。
-    // 测试不受影响:它们注入的 `fetchBalances` 压根不出网,而 provider 自己的测试在 entry 那边
-    // provide 一个假 `HttpClient`。
-    FolioHttpClient,
-    Layer.succeed(AccountStore, {
-      list: () =>
-        Effect.tryPromise({
-          try: () => deps.listAccounts(userId),
-          catch: (e) => depError("listAccounts", e),
-        }),
-      rawCreds: () =>
-        Effect.tryPromise({
-          try: () => deps.listRawCreds(userId),
-          catch: (e) => depError("listRawCreds", e),
-        }),
-    }),
-    Layer.succeed(BalanceSource, {
-      // **没有 `Effect.tryPromise`** —— provider 契约的出口已经是 Effect,注入进来的就是 Effect,
-      // 原样转发。以前这里要包一层,顺带把 `ProviderError` 翻译成本包自己的错误类型;
-      // 那两件事随契约改造一起没了。
-      fetch: (account, stored) => deps.fetchBalances(account, stored),
-    }),
-    Layer.succeed(SnapshotStore, {
-      write: (accountId, input) =>
-        Effect.tryPromise({
-          try: () => deps.writeSnapshot(userId, accountId, input),
-          catch: (e) => depError("writeSnapshot", e),
-        }),
-    }),
-    Layer.succeed(TokenOracle, {
-      mint: deps.mint
-        ? (balances) =>
-            Effect.tryPromise({
-              try: () => deps.mint?.(userId, balances) ?? Promise.resolve(EMPTY_IDS),
-              catch: (e) => depError("mint", e),
-            })
-        : () => Effect.succeed(EMPTY_IDS),
-      revalue: deps.revalue
-        ? (connectorId, balances, idByRef) =>
-            Effect.tryPromise({
-              try: () =>
-                deps.revalue?.(userId, connectorId, balances, idByRef) ?? Promise.resolve(null),
-              catch: (e) => depError("revalue", e),
-            })
-        : () => Effect.succeed(null),
-    }),
-    deps.log ? syncLoggerLayer(deps.log) : silent,
   );
