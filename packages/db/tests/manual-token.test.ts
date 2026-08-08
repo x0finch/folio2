@@ -4,19 +4,13 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 // 包内白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
-import {
-  AccountStore,
-  accountStoreLayer,
-  detachManualHolding,
-  listManualActivityByToken,
-  listManualHoldingsByAccount,
-  recordManualActivity,
-  setManualHoldingDef,
-} from "../src/queries";
+import { AccountStore, accountStoreLayer, ManualStore, manualStoreLayer } from "../src/queries";
 import { manualActivity, tokens as tokensTable } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { userTokenStoreLayer } from "../src/stores/token";
 import { forUser, promisified } from "./effect";
+
+const manualOf = forUser(ManualStore, manualStoreLayer);
 
 const accounts = forUser(AccountStore, accountStoreLayer);
 
@@ -72,21 +66,21 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     const acc = await manualAccount(USER_A);
     const btc = await mintToken(USER_A, "BTC", "bitcoin");
     const eth = await mintToken(USER_A, "ETH");
-    await setManualHoldingDef(env, USER_A, btc, { symbol: "BTC" });
-    await setManualHoldingDef(env, USER_A, eth, { symbol: "ETH" });
+    await manualOf(USER_A).setHoldingDef(btc, { symbol: "BTC" });
+    await manualOf(USER_A).setHoldingDef(eth, { symbol: "ETH" });
     // BTC 先开仓 → 序在前(按「什么时候开始持有它」排)。
-    await recordManualActivity(env, USER_A, acc.id, btc, {
+    await manualOf(USER_A).recordActivity(acc.id, btc, {
       kind: "set",
       amount: 1,
       occurredAt: 100,
     });
-    await recordManualActivity(env, USER_A, acc.id, eth, {
+    await manualOf(USER_A).recordActivity(acc.id, eth, {
       kind: "set",
       amount: 2,
       occurredAt: 200,
     });
 
-    const rows = await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER);
+    const rows = await manualOf(USER_A).listHoldings(acc.id, NAMER);
     // **整条 ref,不是右半边。** 只回 `bitcoin` 的话,每个调用方都得把 `<命名者>/issued:` 补回去,
     // 而补它就得知道当前上游是谁 —— 那件事就此漏出 db(#227 评审)。
     expect(rows.map((r) => [r.symbol, r.ref])).toEqual([
@@ -102,14 +96,14 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     const onchain = await mintTokenWithRef(USER_A, "SCAM", "contract:0xdead");
     const typed = await mintTokenWithRef(USER_A, "MYCOIN", "custom:MYCOIN");
     for (const [i, id] of [onchain, typed].entries()) {
-      await recordManualActivity(env, USER_A, acc.id, id, {
+      await manualOf(USER_A).recordActivity(acc.id, id, {
         kind: "set",
         amount: 1,
         occurredAt: 100 + i,
       });
     }
 
-    const rows = await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER);
+    const rows = await manualOf(USER_A).listHoldings(acc.id, NAMER);
     expect(rows.map((r) => [r.symbol, r.ref])).toEqual([
       ["SCAM", `${NAMER}/contract:0xdead`],
       ["MYCOIN", `${NAMER}/custom:MYCOIN`],
@@ -119,7 +113,7 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
   it("没有活动的币不算这个账户的持仓", async () => {
     const acc = await manualAccount(USER_A);
     await mintToken(USER_A, "BTC", "bitcoin"); // 代币行在,但这个账户没碰过它
-    expect(await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER)).toEqual([]);
+    expect(await manualOf(USER_A).listHoldings(acc.id, NAMER)).toEqual([]);
   });
 
   // 同一个币被两个手记账户持有 —— 旧模型下这是两条 manual_token 行,现在是一行 tokens + 两份账本。
@@ -127,35 +121,35 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     const a1 = await manualAccount(USER_A);
     const a2 = await manualAccount(USER_A);
     const btc = await mintToken(USER_A, "BTC", "bitcoin");
-    await recordManualActivity(env, USER_A, a1.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
-    await recordManualActivity(env, USER_A, a2.id, btc, { kind: "set", amount: 5, occurredAt: 1 });
+    await manualOf(USER_A).recordActivity(a1.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
+    await manualOf(USER_A).recordActivity(a2.id, btc, { kind: "set", amount: 5, occurredAt: 1 });
 
     // 各自只看见自己那一份账本 —— 按 token 取活动**必须带 accountId**,否则数量会串。
-    expect((await listManualActivityByToken(env, USER_A, a1.id, btc)).map((r) => r.amount)).toEqual(
-      [1],
-    );
-    expect((await listManualActivityByToken(env, USER_A, a2.id, btc)).map((r) => r.amount)).toEqual(
-      [5],
-    );
+    expect((await manualOf(USER_A).listActivityByToken(a1.id, btc)).map((r) => r.amount)).toEqual([
+      1,
+    ]);
+    expect((await manualOf(USER_A).listActivityByToken(a2.id, btc)).map((r) => r.amount)).toEqual([
+      5,
+    ]);
     // 两边都认得这个币,而且是同一行。
-    expect((await listManualHoldingsByAccount(env, USER_A, a1.id, NAMER))[0].id).toBe(btc);
-    expect((await listManualHoldingsByAccount(env, USER_A, a2.id, NAMER))[0].id).toBe(btc);
+    expect((await manualOf(USER_A).listHoldings(a1.id, NAMER))[0].id).toBe(btc);
+    expect((await manualOf(USER_A).listHoldings(a2.id, NAMER))[0].id).toBe(btc);
   });
 
   it("按 token 取活动:按 occurred_at 升序,且带上 (账户, token) 两个键", async () => {
     const acc = await manualAccount(USER_A);
     const btc = await mintToken(USER_A, "BTC");
-    await recordManualActivity(env, USER_A, acc.id, btc, {
+    await manualOf(USER_A).recordActivity(acc.id, btc, {
       kind: "add",
       amount: 5,
       occurredAt: 200,
     });
-    await recordManualActivity(env, USER_A, acc.id, btc, {
+    await manualOf(USER_A).recordActivity(acc.id, btc, {
       kind: "set",
       amount: 10,
       occurredAt: 100,
     });
-    const rows = await listManualActivityByToken(env, USER_A, acc.id, btc);
+    const rows = await manualOf(USER_A).listActivityByToken(acc.id, btc);
     expect(rows.map((r) => [r.kind, r.amount])).toEqual([
       ["set", 10],
       ["add", 5],
@@ -168,10 +162,10 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
   it("改声明只动 symbol —— 名字 / 图 / 上游 ref 归参考层,手记不覆盖", async () => {
     const acc = await manualAccount(USER_A);
     const foo = await mintToken(USER_A, "FOO", "foo-token");
-    await recordManualActivity(env, USER_A, acc.id, foo, { kind: "set", amount: 1, occurredAt: 1 });
-    await setManualHoldingDef(env, USER_A, foo, { symbol: "FOO" });
+    await manualOf(USER_A).recordActivity(acc.id, foo, { kind: "set", amount: 1, occurredAt: 1 });
+    await manualOf(USER_A).setHoldingDef(foo, { symbol: "FOO" });
 
-    const [row] = await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER);
+    const [row] = await manualOf(USER_A).listHoldings(acc.id, NAMER);
     expect([row.symbol, row.ref]).toEqual(["FOO", `${NAMER}/issued:foo-token`]); // ref 没被动
   });
 
@@ -181,13 +175,13 @@ describe("手记持仓(= tokens 行 + 账本)", () => {
     const a1 = await manualAccount(USER_A);
     const a2 = await manualAccount(USER_A);
     const btc = await mintToken(USER_A, "BTC", "bitcoin");
-    await recordManualActivity(env, USER_A, a1.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
-    await recordManualActivity(env, USER_A, a2.id, btc, { kind: "set", amount: 5, occurredAt: 1 });
+    await manualOf(USER_A).recordActivity(a1.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
+    await manualOf(USER_A).recordActivity(a2.id, btc, { kind: "set", amount: 5, occurredAt: 1 });
 
-    await detachManualHolding(env, USER_A, a1.id, btc);
+    await manualOf(USER_A).detachHolding(a1.id, btc);
 
-    expect(await listManualHoldingsByAccount(env, USER_A, a1.id, NAMER)).toEqual([]);
-    expect(await listManualHoldingsByAccount(env, USER_A, a2.id, NAMER)).toHaveLength(1);
+    expect(await manualOf(USER_A).listHoldings(a1.id, NAMER)).toEqual([]);
+    expect(await manualOf(USER_A).listHoldings(a2.id, NAMER)).toHaveLength(1);
     const rows = await getDb(env).select().from(tokensTable).where(eq(tokensTable.id, btc));
     expect(rows).toHaveLength(1); // 代币行还在
   });
@@ -200,34 +194,34 @@ describe("归属:两道闸各自都得挡住", () => {
     const accB = await manualAccount(USER_B);
     // B 用自己的账户 + A 的 tokenId:账户那道闸过得去,token 那道必须挡住。
     await expect(
-      recordManualActivity(env, USER_B, accB.id, btc, { kind: "set", amount: 1, occurredAt: 1 }),
+      manualOf(USER_B).recordActivity(accB.id, btc, { kind: "set", amount: 1, occurredAt: 1 }),
     ).rejects.toThrow();
-    expect(await listManualActivityByToken(env, USER_A, acc.id, btc)).toEqual([]);
+    expect(await manualOf(USER_A).listActivityByToken(acc.id, btc)).toEqual([]);
   });
 
   it("拿别人的账户记活动 → 抛", async () => {
     const acc = await manualAccount(USER_A);
     const tokenB = await mintToken(USER_B, "BTC");
     await expect(
-      recordManualActivity(env, USER_B, acc.id, tokenB, { kind: "set", amount: 1, occurredAt: 1 }),
+      manualOf(USER_B).recordActivity(acc.id, tokenB, { kind: "set", amount: 1, occurredAt: 1 }),
     ).rejects.toThrow();
   });
 
   it("别人读不到、改不了、清不掉", async () => {
     const acc = await manualAccount(USER_A);
     const btc = await mintToken(USER_A, "BTC");
-    await recordManualActivity(env, USER_A, acc.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
+    await manualOf(USER_A).recordActivity(acc.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
 
-    await expect(listManualHoldingsByAccount(env, USER_B, acc.id, NAMER)).rejects.toThrow();
-    await expect(setManualHoldingDef(env, USER_B, btc, { symbol: "X" })).rejects.toThrow();
-    await expect(detachManualHolding(env, USER_B, acc.id, btc)).rejects.toThrow();
-    expect(await listManualHoldingsByAccount(env, USER_A, acc.id, NAMER)).toHaveLength(1);
+    await expect(manualOf(USER_B).listHoldings(acc.id, NAMER)).rejects.toThrow();
+    await expect(manualOf(USER_B).setHoldingDef(btc, { symbol: "X" })).rejects.toThrow();
+    await expect(manualOf(USER_B).detachHolding(acc.id, btc)).rejects.toThrow();
+    expect(await manualOf(USER_A).listHoldings(acc.id, NAMER)).toHaveLength(1);
   });
 
   it("删账户 → 它的账本级联清(代币行不动,那是参考层)", async () => {
     const acc = await manualAccount(USER_A);
     const btc = await mintToken(USER_A, "BTC");
-    await recordManualActivity(env, USER_A, acc.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
+    await manualOf(USER_A).recordActivity(acc.id, btc, { kind: "set", amount: 1, occurredAt: 1 });
 
     await accounts(USER_A).remove(acc.id);
 

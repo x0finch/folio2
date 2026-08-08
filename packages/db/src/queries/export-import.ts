@@ -1,4 +1,5 @@
 import { and, asc, eq, isNull, or } from "drizzle-orm";
+import { type Context, Effect, Layer } from "effect";
 import { type DbEnv, getDb } from "../connect";
 import {
   accounts,
@@ -8,12 +9,26 @@ import {
   tokenRefs,
   tokens,
 } from "../schema";
+import { type Database, databaseLayer } from "../stores/service";
 import type { CreateAccountInput } from "./accounts";
 import { batchWrite } from "./batch";
-import { type ManualActivityInput, recordManualActivity } from "./manual-activity";
+import { type ManualActivityInput, ManualStore, manualStoreLayer } from "./manual-activity";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 import { ensureDefaultPortfolio } from "./portfolios";
-import { type WriteSnapshotInput, writeSnapshot } from "./snapshots";
+import { SnapshotStore, snapshotStoreLayer, type WriteSnapshotInput } from "./snapshots";
+
+// **过渡桥**(#394 T2→T3):快照与手记活动已经是 per-user 服务了,而本模块还没迁(T3)。
+// 这两处因此要自己装一次 layer 再跑 —— 与门面 `viaStore` 同形。T3 把本模块迁完即删。
+const runFor = <I, S, A>(
+  env: DbEnv,
+  userId: string,
+  tag: Context.Tag<I, S>,
+  layerOf: (userId: string) => Layer.Layer<I, never, Database>,
+  f: (store: S) => Effect.Effect<A>,
+): Promise<A> =>
+  Effect.runPromise(
+    Effect.flatMap(tag, f).pipe(Effect.provide(Layer.provide(layerOf(userId), databaseLayer(env)))),
+  );
 
 // 导出 / 导入 v3(#204):Token 行 + 它的 ref 随文件走。
 // 导出一个用户的 Token(ref 嵌在里头)。**价 facet 与 TTL 不导** —— 市场数据可重取;
@@ -201,7 +216,7 @@ export async function importSnapshot(
     .where(and(eq(snapshots.accountId, accountId), eq(snapshots.takenAt, input.takenAt)))
     .limit(1);
   if (existing[0]) return { created: false };
-  await writeSnapshot(env, userId, accountId, input);
+  await runFor(env, userId, SnapshotStore, snapshotStoreLayer, (s) => s.write(accountId, input));
   return { created: true };
 }
 
@@ -240,6 +255,8 @@ export async function importManualActivity(
     )
     .limit(1);
   if (existing[0]) return { created: false };
-  await recordManualActivity(env, userId, accountId, tokenId, input);
+  await runFor(env, userId, ManualStore, manualStoreLayer, (s) =>
+    s.recordActivity(accountId, tokenId, input),
+  );
   return { created: true };
 }

@@ -4,17 +4,13 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 // 包内测试白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
-import {
-  AccountStore,
-  accountStoreLayer,
-  listManualActivityByAccount,
-  recordManualActivity,
-  removeManualActivity,
-} from "../src/queries";
+import { AccountStore, accountStoreLayer, ManualStore, manualStoreLayer } from "../src/queries";
 import { manualActivity } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { userTokenStoreLayer } from "../src/stores/token";
 import { forUser, promisified } from "./effect";
+
+const manualOf = forUser(ManualStore, manualStoreLayer);
 
 const accounts = forUser(AccountStore, accountStoreLayer);
 
@@ -52,17 +48,17 @@ async function manualAccount(userId: string) {
 describe("manual_activity ops", () => {
   it("record + list (ordered by occurred_at)", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
+    await manualOf(USER_A).recordActivity(acc.id, acc.tokenId, {
       kind: "set",
       amount: 10,
       occurredAt: 100,
     });
-    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
+    await manualOf(USER_A).recordActivity(acc.id, acc.tokenId, {
       kind: "add",
       amount: 5,
       occurredAt: 200,
     });
-    const rows = await listManualActivityByAccount(env, USER_A, acc.id);
+    const rows = await manualOf(USER_A).listActivityByAccount(acc.id);
     expect(rows.map((r) => [r.kind, r.amount])).toEqual([
       ["set", 10],
       ["add", 5],
@@ -71,40 +67,40 @@ describe("manual_activity ops", () => {
 
   it("remove by id", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
+    await manualOf(USER_A).recordActivity(acc.id, acc.tokenId, {
       kind: "set",
       amount: 10,
       occurredAt: 1,
     });
-    const [row] = await listManualActivityByAccount(env, USER_A, acc.id);
-    await removeManualActivity(env, USER_A, acc.id, row.id);
-    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toEqual([]);
+    const [row] = await manualOf(USER_A).listActivityByAccount(acc.id);
+    await manualOf(USER_A).removeActivity(acc.id, row.id);
+    expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toEqual([]);
   });
 
   it("scoped by owner: other user can't record / list / remove", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
+    await manualOf(USER_A).recordActivity(acc.id, acc.tokenId, {
       kind: "set",
       amount: 10,
       occurredAt: 1,
     });
     // B 记录到 A 的 token → 抛(assertTokenOwned:不属本人)
     await expect(
-      recordManualActivity(env, USER_B, acc.id, acc.tokenId, {
+      manualOf(USER_B).recordActivity(acc.id, acc.tokenId, {
         kind: "add",
         amount: 1,
         occurredAt: 2,
       }),
     ).rejects.toThrow();
     // B 列 A 的账户 → 空(join 限 userId)
-    expect(await listManualActivityByAccount(env, USER_B, acc.id)).toEqual([]);
+    expect(await manualOf(USER_B).listActivityByAccount(acc.id)).toEqual([]);
     // A 仍只有 1 条
-    expect(await listManualActivityByAccount(env, USER_A, acc.id)).toHaveLength(1);
+    expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(1);
   });
 
   it("cascade: deleting the account removes its activity", async () => {
     const acc = await manualAccount(USER_A);
-    await recordManualActivity(env, USER_A, acc.id, acc.tokenId, {
+    await manualOf(USER_A).recordActivity(acc.id, acc.tokenId, {
       kind: "set",
       amount: 10,
       occurredAt: 1,

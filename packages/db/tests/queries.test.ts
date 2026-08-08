@@ -5,19 +5,17 @@ import { getDb } from "../src/connect";
 import {
   AccountStore,
   accountStoreLayer,
-  getLatestSnapshotByUser,
-  listBalancesForSnapshots,
-  listSnapshotsByAccount,
-  listSnapshotsPageByUser,
-  listSnapshotTotalsByUser,
   listUserIdsWithAccounts,
   SettingsStore,
+  SnapshotStore,
   settingsStoreLayer,
-  writeSnapshot,
+  snapshotStoreLayer,
 } from "../src/queries";
 // 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
 import { user } from "../src/schema/auth";
 import { forUser, runDb } from "./effect"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
+
+const snapshotsOf = forUser(SnapshotStore, snapshotStoreLayer);
 
 const accounts = forUser(AccountStore, accountStoreLayer);
 const settings = forUser(SettingsStore, settingsStoreLayer);
@@ -151,7 +149,7 @@ describe("snapshots", () => {
       label: "A",
       creds: "x",
     });
-    const id = await writeSnapshot(env, USER_A, acc.id, {
+    const id = await snapshotsOf(USER_A).write(acc.id, {
       takenAt: 1000,
       totalUsd: 150,
       // symbol 不再落快照(#243);行按 token_id 区分。
@@ -176,11 +174,11 @@ describe("snapshots", () => {
     });
     expect(id).toBeTruthy();
 
-    const snaps = await listSnapshotsByAccount(env, USER_A, acc.id);
+    const snaps = await snapshotsOf(USER_A).listByAccount(acc.id);
     expect(snaps).toHaveLength(1);
     expect(snaps[0]!.totalUsd).toBe(150);
 
-    const latest = await getLatestSnapshotByUser(env, USER_A);
+    const latest = await snapshotsOf(USER_A).latest();
     expect(latest).toHaveLength(1);
     expect(latest[0]!.balances).toHaveLength(2);
     expect(latest[0]!.balances.find((b) => b.tokenId === "tk-eth")!.metaJson).toContain("note");
@@ -212,7 +210,7 @@ describe("snapshots", () => {
       },
       { title: "Note", content: "all available" },
     ];
-    await writeSnapshot(env, USER_A, acc.id, {
+    await snapshotsOf(USER_A).write(acc.id, {
       takenAt: 1000,
       totalUsd: 0,
       note: accountNote,
@@ -221,7 +219,7 @@ describe("snapshots", () => {
         { tokenId: "tk-eth", amount: 1, usdValue: 0, kind: "spot", platform: "binance" }, // 无 note 的行
       ],
     });
-    const latest = await getLatestSnapshotByUser(env, USER_A);
+    const latest = await snapshotsOf(USER_A).latest();
     expect(latest).toHaveLength(1);
     // balance 级 note 挂在该 balance 上(per-balance),safeParse 回单个 Note;无 note 的行为 undefined。
     expect(latest[0]!.balances.find((b) => b.tokenId === "tk-btc")!.note).toEqual(note);
@@ -244,9 +242,9 @@ describe("snapshots", () => {
       kind: "spot" as const,
       platform: "binance",
     }));
-    await writeSnapshot(env, USER_A, acc.id, { takenAt: 1, totalUsd: 100, balances });
+    await snapshotsOf(USER_A).write(acc.id, { takenAt: 1, totalUsd: 100, balances });
 
-    const latest = await getLatestSnapshotByUser(env, USER_A);
+    const latest = await snapshotsOf(USER_A).latest();
     expect(latest).toHaveLength(1);
     expect(latest[0]!.balances).toHaveLength(60); // 全部分块写入、无丢失
   });
@@ -266,24 +264,24 @@ describe("snapshots", () => {
     await accounts(USER_A).create({ connectorId: "manual", label: "A3", creds: "x" });
 
     // a1:先旧后新两份快照 → 应只回最新那份(takenAt 2000),余额是 NEW 不是 OLD。
-    await writeSnapshot(env, USER_A, a1.id, {
+    await snapshotsOf(USER_A).write(a1.id, {
       takenAt: 1000,
       totalUsd: 10,
       balances: [{ tokenId: "tk-old", amount: 1, usdValue: 10, kind: "spot", platform: "binance" }],
     });
-    await writeSnapshot(env, USER_A, a1.id, {
+    await snapshotsOf(USER_A).write(a1.id, {
       takenAt: 2000,
       totalUsd: 20,
       balances: [{ tokenId: "tk-new", amount: 2, usdValue: 20, kind: "spot", platform: "binance" }],
     });
     // a2:单份快照。
-    await writeSnapshot(env, USER_A, a2.id, {
+    await snapshotsOf(USER_A).write(a2.id, {
       takenAt: 1500,
       totalUsd: 5,
       balances: [{ tokenId: "tk-atom", amount: 5, usdValue: 5, kind: "spot", platform: "binance" }],
     });
 
-    const latest = await getLatestSnapshotByUser(env, USER_A);
+    const latest = await snapshotsOf(USER_A).latest();
     expect(latest).toHaveLength(2); // a3 无快照 → 不计
 
     const byAcc = new Map(latest.map((r) => [r.snapshot.accountId, r]));
@@ -300,7 +298,7 @@ describe("snapshots", () => {
 
   it("returns [] for a user with no snapshots", async () => {
     await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
-    expect(await getLatestSnapshotByUser(env, USER_A)).toEqual([]);
+    expect(await snapshotsOf(USER_A).latest()).toEqual([]);
   });
 
   it("cascades snapshots when the account is deleted", async () => {
@@ -309,7 +307,7 @@ describe("snapshots", () => {
       label: "A",
       creds: "x",
     });
-    await writeSnapshot(env, USER_A, acc.id, {
+    await snapshotsOf(USER_A).write(acc.id, {
       takenAt: 1,
       totalUsd: 1,
       balances: [{ tokenId: "tk-x", amount: 1, usdValue: 1, kind: "spot", platform: "binance" }],
@@ -317,7 +315,7 @@ describe("snapshots", () => {
 
     await accounts(USER_A).remove(acc.id);
     expect(await accounts(USER_A).list()).toHaveLength(0); // account gone
-    expect(await getLatestSnapshotByUser(env, USER_A)).toHaveLength(0); // snapshots gone
+    expect(await snapshotsOf(USER_A).latest()).toHaveLength(0); // snapshots gone
   });
 
   it("lists all snapshot totals for a user, ascending by takenAt, scoped to the user", async () => {
@@ -337,12 +335,12 @@ describe("snapshots", () => {
       creds: "x",
     });
     // 跨账户、错时写入(乱序),验证升序返回。
-    await writeSnapshot(env, USER_A, a1.id, { takenAt: 2000, totalUsd: 20, balances: [] });
-    await writeSnapshot(env, USER_A, a1.id, { takenAt: 1000, totalUsd: 10, balances: [] });
-    await writeSnapshot(env, USER_A, a2.id, { takenAt: 1500, totalUsd: 5, balances: [] });
-    await writeSnapshot(env, USER_B, b1.id, { takenAt: 1200, totalUsd: 999, balances: [] });
+    await snapshotsOf(USER_A).write(a1.id, { takenAt: 2000, totalUsd: 20, balances: [] });
+    await snapshotsOf(USER_A).write(a1.id, { takenAt: 1000, totalUsd: 10, balances: [] });
+    await snapshotsOf(USER_A).write(a2.id, { takenAt: 1500, totalUsd: 5, balances: [] });
+    await snapshotsOf(USER_B).write(b1.id, { takenAt: 1200, totalUsd: 999, balances: [] });
 
-    const totals = await listSnapshotTotalsByUser(env, USER_A);
+    const totals = await snapshotsOf(USER_A).listTotals();
     expect(totals.map((t) => t.takenAt)).toEqual([1000, 1500, 2000]); // 升序、不含 user B
     expect(totals.map((t) => t.totalUsd)).toEqual([10, 5, 20]);
     expect(totals.find((t) => t.accountId === b1.id)).toBeUndefined();
@@ -350,7 +348,7 @@ describe("snapshots", () => {
 
   it("returns [] of totals for a user with no snapshots", async () => {
     await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
-    expect(await listSnapshotTotalsByUser(env, USER_A)).toEqual([]);
+    expect(await snapshotsOf(USER_A).listTotals()).toEqual([]);
   });
 
   it("paginates snapshots (asc takenAt) and fetches balances by id (export)", async () => {
@@ -361,7 +359,7 @@ describe("snapshots", () => {
       creds: "x",
     });
     for (const t of [3000, 1000, 2000]) {
-      await writeSnapshot(env, USER_A, a.id, {
+      await snapshotsOf(USER_A).write(a.id, {
         takenAt: t,
         totalUsd: t,
         balances: [
@@ -369,35 +367,32 @@ describe("snapshots", () => {
         ],
       });
     }
-    await writeSnapshot(env, USER_B, b1.id, { takenAt: 9, totalUsd: 9, balances: [] });
+    await snapshotsOf(USER_B).write(b1.id, { takenAt: 9, totalUsd: 9, balances: [] });
 
-    const page1 = await listSnapshotsPageByUser(env, USER_A, 2, 0);
-    const page2 = await listSnapshotsPageByUser(env, USER_A, 2, 2);
+    const page1 = await snapshotsOf(USER_A).listPage(2, 0);
+    const page2 = await snapshotsOf(USER_A).listPage(2, 2);
     expect(page1.map((s) => s.takenAt)).toEqual([1000, 2000]); // asc, user A only
     expect(page2.map((s) => s.takenAt)).toEqual([3000]);
     expect(page2[0]!.accountId).toBe(a.id); // 不含 user B
 
-    const bal = await listBalancesForSnapshots(
-      env,
-      page1.map((s) => s.id),
-    );
+    const bal = await snapshotsOf(USER_A).balancesFor(page1.map((s) => s.id));
     expect(bal).toHaveLength(2);
-    expect(await listBalancesForSnapshots(env, [])).toEqual([]);
+    expect(await snapshotsOf(USER_A).balancesFor([])).toEqual([]);
   });
 });
 
 describe("cross-user isolation", () => {
   it("never leaks another user's data", async () => {
     const a = await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
-    await writeSnapshot(env, USER_A, a.id, { takenAt: 1, totalUsd: 1, balances: [] });
+    await snapshotsOf(USER_A).write(a.id, { takenAt: 1, totalUsd: 1, balances: [] });
 
     expect(await accounts(USER_B).list()).toHaveLength(0);
     expect(await accounts(USER_B).getById(a.id)).toBeNull();
     expect(await accounts(USER_B).getRawCreds(a.id)).toBeNull();
 
-    await expect(listSnapshotsByAccount(env, USER_B, a.id)).rejects.toThrow();
+    await expect(snapshotsOf(USER_B).listByAccount(a.id)).rejects.toThrow();
     await expect(
-      writeSnapshot(env, USER_B, a.id, { takenAt: 2, totalUsd: 2, balances: [] }),
+      snapshotsOf(USER_B).write(a.id, { takenAt: 2, totalUsd: 2, balances: [] }),
     ).rejects.toThrow();
   });
 });

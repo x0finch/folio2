@@ -46,6 +46,8 @@ export function createDb(env: DbEnv) {
   const account = viaStore(env, q.AccountStore, q.accountStoreLayer);
   const portfolio = viaStore(env, q.PortfolioStore, q.portfolioStoreLayer);
   const settings = viaStore(env, q.SettingsStore, q.settingsStoreLayer);
+  const snapshot = viaStore(env, q.SnapshotStore, q.snapshotStoreLayer);
+  const manual = viaStore(env, q.ManualStore, q.manualStoreLayer);
   return {
     // —— accounts(已迁,#394 T1)——
     createAccount: (userId: string, input: q.CreateAccountInput) =>
@@ -98,26 +100,45 @@ export function createDb(env: DbEnv) {
     updateTabPinTarget: b(q.updateTabPinTarget),
     reorderTabPins: b(q.reorderTabPins),
     deleteTabPin: b(q.deleteTabPin),
-    // —— snapshots —— 待迁(T2)
-    writeSnapshot: b(q.writeSnapshot),
-    listSnapshotsByAccount: b(q.listSnapshotsByAccount),
-    listSnapshotTotalsByUser: b(q.listSnapshotTotalsByUser),
-    listSnapshotBalancesByUser: b(q.listSnapshotBalancesByUser),
-    getLatestSnapshotByUser: b(q.getLatestSnapshotByUser),
-    listSnapshotsPageByUser: b(q.listSnapshotsPageByUser),
-    listBalancesForSnapshots: b(q.listBalancesForSnapshots),
-    // —— manual 持仓 + activity(ADR 0017;#203 起持仓就是 tokens 行)—— 待迁(T2)
-    listManualHoldingsByAccount: b(q.listManualHoldingsByAccount),
-    setManualHoldingDef: b(q.setManualHoldingDef),
-    detachManualHolding: b(q.detachManualHolding),
-    recordManualActivity: b(q.recordManualActivity),
-    listManualActivityByAccount: b(q.listManualActivityByAccount),
-    listManualActivityByUser: b(q.listManualActivityByUser),
-    listManualActivityByToken: b(q.listManualActivityByToken),
-    removeManualActivity: b(q.removeManualActivity),
-    getManualActivityOwner: b(q.getManualActivityOwner),
-    updateManualActivity: b(q.updateManualActivity),
-    commitManualBatch: b(q.commitManualBatch),
+    // —— snapshots(已迁,#394 T2)——
+    writeSnapshot: (userId: string, accountId: string, input: q.WriteSnapshotInput) =>
+      snapshot(userId, (s) => s.write(accountId, input)),
+    listSnapshotsByAccount: (userId: string, accountId: string) =>
+      snapshot(userId, (s) => s.listByAccount(accountId)),
+    listSnapshotTotalsByUser: (userId: string) => snapshot(userId, (s) => s.listTotals()),
+    listSnapshotBalancesByUser: (userId: string, since?: number) =>
+      snapshot(userId, (s) => s.listBalanceHistory(since)),
+    getLatestSnapshotByUser: (userId: string) => snapshot(userId, (s) => s.latest()),
+    listSnapshotsPageByUser: (userId: string, limit: number, offset: number) =>
+      snapshot(userId, (s) => s.listPage(limit, offset)),
+    listBalancesForSnapshots: (userId: string, snapshotIds: string[]) =>
+      snapshot(userId, (s) => s.balancesFor(snapshotIds)),
+    // —— manual 持仓 + activity(已迁,#394 T2;ADR 0017,#203 起持仓就是 tokens 行)——
+    listManualHoldingsByAccount: (userId: string, accountId: string, namer: string) =>
+      manual(userId, (s) => s.listHoldings(accountId, namer)),
+    setManualHoldingDef: (userId: string, tokenId: string, input: { symbol?: string }) =>
+      manual(userId, (s) => s.setHoldingDef(tokenId, input)),
+    detachManualHolding: (userId: string, accountId: string, tokenId: string) =>
+      manual(userId, (s) => s.detachHolding(accountId, tokenId)),
+    recordManualActivity: (
+      userId: string,
+      accountId: string,
+      tokenId: string,
+      input: q.ManualActivityInput,
+    ) => manual(userId, (s) => s.recordActivity(accountId, tokenId, input)),
+    listManualActivityByAccount: (userId: string, accountId: string) =>
+      manual(userId, (s) => s.listActivityByAccount(accountId)),
+    listManualActivityByUser: (userId: string) => manual(userId, (s) => s.listAllActivity()),
+    listManualActivityByToken: (userId: string, accountId: string, tokenId: string) =>
+      manual(userId, (s) => s.listActivityByToken(accountId, tokenId)),
+    removeManualActivity: (userId: string, accountId: string, id: string) =>
+      manual(userId, (s) => s.removeActivity(accountId, id)),
+    getManualActivityOwner: (userId: string, activityId: string) =>
+      manual(userId, (s) => s.activityOwner(activityId)),
+    updateManualActivity: (userId: string, activityId: string, patch: q.ManualActivityPatch) =>
+      manual(userId, (s) => s.updateActivity(activityId, patch)),
+    commitManualBatch: (userId: string, plan: q.ManualBatchPlan) =>
+      manual(userId, (s) => s.commitBatch(plan)),
     // —— 导出/导入 v3(#204)—— 待迁(T3)
     listTokensForExport: b(q.listTokensForExport),
     importToken: b(q.importToken),

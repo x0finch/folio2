@@ -44,7 +44,10 @@ async function exportRecords(userId: string): Promise<unknown[]> {
     recs.push(accountRecord(a, raw ? JSON.parse(raw) : {}));
   }
   const page = await db.listSnapshotsPageByUser(userId, 1000, 0);
-  const bals = await db.listBalancesForSnapshots(page.map((s) => s.id));
+  const bals = await db.listBalancesForSnapshots(
+    userId,
+    page.map((s) => s.id),
+  );
   const bySnap = new Map<string, typeof bals>();
   for (const b of bals) {
     const arr = bySnap.get(b.snapshotId);

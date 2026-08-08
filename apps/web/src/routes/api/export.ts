@@ -58,7 +58,10 @@ export const Route = createFileRoute("/api/export")({
               for (let offset = 0; ; offset += SNAPSHOT_PAGE) {
                 const page = await db.listSnapshotsPageByUser(userId, SNAPSHOT_PAGE, offset);
                 if (page.length === 0) break;
-                const pageBalances = await db.listBalancesForSnapshots(page.map((s) => s.id));
+                const pageBalances = await db.listBalancesForSnapshots(
+                  userId,
+                  page.map((s) => s.id),
+                );
                 const bySnapshot = new Map<string, SnapshotBalance[]>();
                 for (const b of pageBalances) {
                   const arr = bySnapshot.get(b.snapshotId);
