@@ -89,6 +89,34 @@ export async function warmTokensForUser(userId: string): Promise<void> {
   syncLog.debug("catalogue warmed", { rows });
 }
 
+// sweep 收尾用:逐用户预热,**各自兜住**(#375 第 2 步 · 纵深防御)。预热是尽力而为(供次日总览
+// cache-only 富化),一个用户失败绝不该让后面的用户排不上队,更不该把整次 cron 拖成异常收尾。
+// 上游限流那档参考层已在 `warmTokensForUser` 内部降级、不抛;这里兜的是它仍会抛的**非上游**错误
+// (读快照 / 合成 manual 余额等)—— 不替代内层降级,是它之外的最后一层。
+// 每条失败只记 `error`(不带 userId),与本文件其余 best-effort 的 catch 一致(P6.7);
+// 「哪个用户」的可观测性交给返回的计数 + 调用方一条汇总日志。
+// `warmOne` 可注入,只为单测能让指定用户失败;生产路径用默认的 `warmTokensForUser`。
+export async function warmTokensForUsers(
+  userIds: readonly string[],
+  warmOne: (userId: string) => Promise<void> = warmTokensForUser,
+): Promise<{ warmed: number; failed: number }> {
+  const syncLog = getLogger(["folio", "web", "sync"]);
+  let warmed = 0;
+  let failed = 0;
+  for (const userId of userIds) {
+    try {
+      await warmOne(userId);
+      warmed++;
+    } catch (e) {
+      failed++;
+      syncLog.warn("warmTokensForUser failed, user skipped", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return { warmed, failed };
+}
+
 // 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。
 // #37d 起 account.connectorId 直接即 connector 的 id。
 //

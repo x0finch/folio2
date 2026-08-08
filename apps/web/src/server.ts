@@ -7,7 +7,7 @@ import { withDefaultNoStore } from "./lib/server/internal/cache-headers";
 import { db } from "./lib/server/internal/db";
 import { configureLogging } from "./lib/server/internal/log";
 import { runOracleWarm } from "./lib/server/internal/oracle";
-import { buildSyncDeps, warmTokensForUser } from "./lib/server/internal/sync-deps";
+import { buildSyncDeps, warmTokensForUsers } from "./lib/server/internal/sync-deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
 // 再补一个 CF scheduled() 处理器跑定时同步(cron 只触发 scheduled,不触发 fetch)。
@@ -93,7 +93,9 @@ export default {
             skipped: result.skipped,
           });
           // sweep 后预热每用户代币缓存(best-effort),供次日总览 cache-only 富化。
-          for (const userId of userIds) await warmTokensForUser(userId);
+          // 逐用户各自兜住:一个用户预热失败不拖累其余、也不让这次 cron 以异常收尾(#375)。
+          const warm = await warmTokensForUsers(userIds);
+          cronLog.info("cron warm done", { cron: controller.cron, ...warm });
         } catch (err) {
           // waitUntil 里的抛错会变成静默的 unhandled rejection —— 集中打日志再上抛,cron 失败才可见。
           cronLog.error("cron threw", {
