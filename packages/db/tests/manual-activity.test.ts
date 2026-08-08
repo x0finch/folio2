@@ -45,7 +45,7 @@ async function manualAccount(userId: string) {
   return { id: acc.id, tokenId };
 }
 
-describe("manualOfactivity ops", () => {
+describe("manual_activity ops", () => {
   it("record + list (ordered by occurred_at)", async () => {
     const acc = await manualAccount(USER_A);
     await manualOf(USER_A).recordActivity(acc.id, acc.tokenId, {
