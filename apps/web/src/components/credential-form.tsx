@@ -1,5 +1,6 @@
 import { maskCredential } from "@folio/connectors-basic";
 import { Button } from "@folio/ui";
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { InputSpec } from "../lib/creds";
@@ -26,9 +27,13 @@ export function CredentialForm({
   const tc = useTranslations("Common");
   const fields = incompleteSpecs(specs);
   const [values, setValues] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [confirmMismatch, setConfirmMismatch] = useState(false);
+  // 提交态与失败信息都由 mutation 持有 —— 手搓的 busy/error 各存一份,连点两次就发两个请求,
+  // 而后回来的那次还会把先回来的错误覆盖掉。这里只有一个 pending,按钮直接接它。
+  const save = useMutation({
+    mutationFn: () => replaceAccountCredentials({ data: { accountId, creds: values } }),
+    onSuccess: onDone,
+  });
 
   // 与打码片段对不上的 semi 字段(首尾比对)。空 = 一致或无片段。
   function mismatchedSemiKeys(): string[] {
@@ -44,24 +49,20 @@ export function CredentialForm({
     setConfirmMismatch(false);
   }
 
-  async function onSubmit(e: React.FormEvent) {
+  function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    // 不一致且未确认 → 先拦下、提醒,等用户主动确认。
+    // 不一致且未确认 → 先拦下、提醒,等用户主动确认。走这条路要顺手 reset:
+    // 否则上一次失败的红字会一直挂在「请确认」旁边,像是这次也失败了。
     if (mismatchedSemiKeys().length > 0 && !confirmMismatch) {
+      save.reset();
       setConfirmMismatch(true);
       return;
     }
-    setBusy(true);
-    try {
-      await replaceAccountCredentials({ data: { accountId, creds: values } });
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
+    save.mutate();
   }
+
+  // 校验失败的原因要原样给用户看(哪个字段不对是上游给的),不能压成一句通用错误。
+  const error = save.error?.message ?? null;
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
@@ -74,8 +75,8 @@ export function CredentialForm({
       />
       {confirmMismatch && <p className="text-destructive text-sm">{ta("credMismatch")}</p>}
       {error && <p className="text-destructive text-sm">{error}</p>}
-      <Button type="submit" size="sm" disabled={busy} className="self-end">
-        {busy ? tc("verifying") : confirmMismatch ? tc("saveAnyway") : tc("save")}
+      <Button type="submit" size="sm" disabled={save.isPending} className="self-end">
+        {save.isPending ? tc("verifying") : confirmMismatch ? tc("saveAnyway") : tc("save")}
       </Button>
     </form>
   );
