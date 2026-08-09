@@ -30,7 +30,7 @@ import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { accountListQuery } from "../../lib/queries/accounts";
-import type { PinScopeKey } from "../../lib/queries/keys";
+import { type PinScopeKey, portfolioKeys } from "../../lib/queries/keys";
 import {
   type PortfolioOverview,
   portfolioHistoryQuery,
@@ -59,8 +59,8 @@ function revealTab(el: HTMLElement) {
 }
 
 export const Route = createFileRoute("/_authed/")({
-  // 组合域的读取已迁 react-query(ADR 0038):loader 只**预取**,不再返回这些数据 ——
-  // 组件按选中的组合 id 从缓存读。标签与账户两项还没迁(#413 / #415),仍由 loader 直返。
+  // 本页的读取**已全部迁到 react-query**(ADR 0038):loader 只**预取**、不返回任何数据,
+  // 组件按选中的组合 id 从缓存读(本文件已无 `useLoaderData`)。
   loader: async ({ context: { queryClient } }) => {
     // 与「选中哪个组合」无关的三件事先发出去,不等下面那个 await。
     const unscoped = Promise.all([
@@ -175,6 +175,11 @@ function Overview() {
         ? { kind: "account", accountId: activePin.accountId ?? undefined }
         : { kind: "connector", connectorId: activePin.connectorId ?? undefined }
     : undefined;
+  // 「这一格在看什么」——两个 QueryBoundary 的复位依据。用的就是那两个子组件实际读的 queryKey:
+  // 改 pin 目标时 pin 的 id 不变、但这个字符串会变,于是失败态跟着复位(见 components/query-boundary)。
+  const pinBoundaryKey = pinScope
+    ? JSON.stringify(portfolioKeys.overview(selectedId, pinScope))
+    : "";
 
   // hero(总额 + 曲线)始终是「选中 Portfolio」口径,**不受 pin 影响**(ADR 0034 UI 微调:自定义 Tab 不改 hero)。
   // 默认与非默认走**同一个查询工厂**,只是 portfolioId 不同 —— 以前默认那份来自 loader、非默认那份是另一个
@@ -324,7 +329,7 @@ function Overview() {
                   只能靠「不在 pin 视图时这个组件压根不挂」来表达(ADR 0038)。总额与列表是两个子组件、
                   同一个 queryKey,react-query 自然合成一次请求。 */}
               {isPinView && pinScope ? (
-                <QueryBoundary key={activePin.id} pending="—" failed="—">
+                <QueryBoundary key={activePin.id} resetKey={pinBoundaryKey} pending="—" failed="—">
                   <PinTotal portfolioId={selectedId} pin={pinScope} />
                 </QueryBoundary>
               ) : (
@@ -337,6 +342,7 @@ function Overview() {
           {isPinView && pinScope ? (
             <QueryBoundary
               key={activePin.id}
+              resetKey={pinBoundaryKey}
               pending={<ListSkeleton />}
               failed={
                 <p className="py-12 text-center text-muted-foreground text-sm">

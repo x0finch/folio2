@@ -53,7 +53,9 @@ export function useAccountSync(accounts: { id: string; label: string }[]) {
             }),
             { id: toastId.current },
           );
-          // 这一行到达 = 这个账户的快照已经落库(服务端先写再报)→ 现在刷得到它。
+          // 这一行到达 = 这个账户**已经处理完**了 —— 成功的那些快照已落库(服务端先写再报),
+          // 失败与缺凭据(skipped)的那些没写。所以这一下不保证「有新数据」,只保证「可以去看了」;
+          // 多刷一次是幂等的,而漏刷会让先跑完的账户干等整轮结束。
           refresh.current?.bump();
         },
       });

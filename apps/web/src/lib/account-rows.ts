@@ -1,3 +1,4 @@
+import type { AccountTagLink, PortfolioMembership } from "@folio/db";
 import type { AccountRow } from "../components/account-detail-sheet";
 import type { AccountHoldings, AccountListItem } from "./queries/accounts";
 
@@ -10,19 +11,12 @@ import type { AccountHoldings, AccountListItem } from "./queries/accounts";
 // 从路由 loader 里搬出来的(#413)。搬的原因是四个来源现在各自是一条 react-query 查询、各自的
 // 到达时刻不同,拼装得跟着数据走而不是跟着 loader 走;顺带这段纯逻辑也就能单测了。
 
-export interface TagRef {
+// 归属与标签关联的形状**从 `@folio/db` 拿**,别在这儿再定义一份同名的:仓里已经有
+// `PortfolioMembership` / `AccountTagLink`(隔壁 `accounts-in-view.ts` 用的就是它们),
+// 两个同名不同处的类型迟早会漂移。Tag 只取渲染要的三个字段,所以这里保留一个窄形状。
+interface TagRef {
   id: string;
   name: string;
-  portfolioId: string;
-}
-
-export interface TagLink {
-  accountId: string;
-  tagId: string;
-}
-
-export interface PortfolioMembership {
-  accountId: string;
   portfolioId: string;
 }
 
@@ -31,7 +25,7 @@ export function buildAccountRows(sources: {
   holdings: AccountHoldings;
   memberships: readonly PortfolioMembership[];
   allTags: readonly TagRef[];
-  tagLinks: readonly TagLink[];
+  tagLinks: readonly AccountTagLink[];
 }): AccountRow[] {
   const byId = new Map(sources.holdings.rows.map((r) => [r.account.id, r]));
   const portfolioOf = new Map(sources.memberships.map((m) => [m.accountId, m.portfolioId]));

@@ -30,7 +30,6 @@ import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signIn, signOut } from "../../lib/auth-client";
 import { clearIdleLockState } from "../../lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "../../lib/hooks/use-idle-timeout";
-
 import { useLockDevice } from "../../lib/hooks/use-lock-device";
 import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
 import { usePlatformAuthenticator } from "../../lib/hooks/use-platform-authenticator";

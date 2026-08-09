@@ -100,7 +100,7 @@ export const connectorKeys = {
   /** 整个连接器域的前缀。**部署内静态** —— 没有任何写操作会碰它,所以刷新映射表里也没有它。 */
   all: ["connectors"] as const,
   /** connectorId → { label, logo } 的展示目录。 */
-  catalog: () => [...connectorKeys.all, "catalog"] as const,
+  catalogue: () => [...connectorKeys.all, "catalogue"] as const,
   /** 各 connector 的凭据字段规格(加账户表单按它渲染)。 */
   credentialSpecs: () => [...connectorKeys.all, "credential-specs"] as const,
 };
