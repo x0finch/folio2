@@ -62,7 +62,9 @@ export function CredentialForm({
   }
 
   // 校验失败的原因要原样给用户看(哪个字段不对是上游给的),不能压成一句通用错误。
-  const error = save.error?.message ?? null;
+  // `save.error` 类型上是 Error,运行时未必 —— server fn / 中间层有可能以别的东西 reject。
+  // 只取 `.message` 的话那种情况下红字整条不渲染:请求失败了,画面上却一个字都没有。
+  const error = save.error == null ? null : save.error.message || String(save.error);
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">

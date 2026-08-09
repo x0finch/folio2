@@ -115,8 +115,10 @@ describe("补录凭据表单", () => {
     replaceAccountCredentials.mockResolvedValue(undefined);
     fill("0000totally-different0000");
     fireEvent.click(submit());
-    expect(replaceAccountCredentials).toHaveBeenCalledTimes(1); // 仍是第一轮那次
     await waitFor(() => expect(text()).toContain(messages.en.Accounts.credMismatch));
+    // 断言放在 await 之后:`mutationFn` 要等一个微任务才跑,紧贴 click 的同步断言
+    // 就算拦截逻辑坏了也照样读到 1 —— 那种断言不可能失败,等于没写。
+    expect(replaceAccountCredentials).toHaveBeenCalledTimes(1); // 仍是第一轮那次
     expect(text()).not.toContain("boom");
 
     // 再点一次 = 用户确认 → 这次才真发。
