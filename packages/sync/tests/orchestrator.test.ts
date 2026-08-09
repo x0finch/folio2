@@ -6,7 +6,7 @@ import {
   ConnectorRateLimitError,
   ConnectorUnavailableError,
 } from "@folio/connectors-basic";
-import type { AccountSafe, WriteSnapshotInput } from "@folio/db";
+import type { AccountSafe } from "@folio/db";
 import { Duration, Effect, Fiber, type Layer, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import { depError, type FetchOutcome, Sweep, type SyncLogger, type SyncServices } from "../src";

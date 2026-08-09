@@ -11,8 +11,8 @@
     "test": "pnpm -r test",
     "test:packages": "vitest run",
     "typecheck": "pnpm -r typecheck",
-    "lint": "biome check",
-    "lint:fix": "biome check --write",
+    "lint": "biome check --error-on-warnings",
+    "lint:fix": "biome check --write --error-on-warnings",
     "knip": "knip",
     "check:catalog": "node scripts/check-catalog.mjs"
   },

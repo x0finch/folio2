@@ -82,6 +82,9 @@ beforeEach(() => {
   // disabled 的按钮上。
   vi.stubGlobal(
     "PublicKeyCredential",
+    // 替身必须是类:真身 `PublicKeyCredential` 是构造器,换成对象字面量语义就变了。
+    // 规则想拦的是「拿 class 当命名空间」,不是仿造平台全局。
+    // biome-ignore lint/complexity/noStaticOnlyClass: 仿造的是平台构造器,见上
     class {
       static isUserVerifyingPlatformAuthenticatorAvailable() {
         return Promise.resolve(true);

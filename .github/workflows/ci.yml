@@ -51,7 +51,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm exec biome ci
+      # --error-on-warnings:warning 也算红。少了它,`biome ci` 只拦 error,warning 会一路
+      # 堆到没人看(#427 那次堆了 13 条)。本地 `pnpm lint` 带同一个开关,两边判定一致。
+      - run: pnpm exec biome ci --error-on-warnings
       - run: pnpm typecheck
       - run: pnpm knip
       # catalog 是约定,pnpm 不强制 —— 这一步是它的执行者(#370)。放在 knip 后面同一个理由:

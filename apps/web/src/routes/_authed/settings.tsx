@@ -28,6 +28,7 @@ import { EditableName } from "../../components/editable-name";
 import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signIn, signOut } from "../../lib/auth-client";
+import { writePreferenceCookie } from "../../lib/cookies";
 import { clearIdleLockState } from "../../lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "../../lib/hooks/use-idle-timeout";
 import { useLockDevice } from "../../lib/hooks/use-lock-device";
@@ -587,7 +588,7 @@ function AppearanceCard() {
 
   function setLocale(next: string) {
     if (next === locale) return;
-    document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000`;
+    writePreferenceCookie(LOCALE_COOKIE, next);
     void invalidateFor(queryClient, "preference.locale");
   }
 

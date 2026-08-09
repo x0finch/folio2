@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale } from "use-intl";
+import { writePreferenceCookie } from "../lib/cookies";
 import { LOCALE_COOKIE } from "../lib/i18n/detect";
 import type { Locale } from "../lib/i18n/messages";
 import { invalidateFor } from "../lib/queries/refresh";
@@ -16,7 +17,7 @@ export function LocaleSwitcher() {
   const locale = useLocale();
   function set(next: Locale) {
     if (next === locale) return;
-    document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000`;
+    writePreferenceCookie(LOCALE_COOKIE, next);
     void invalidateFor(queryClient, "preference.locale");
   }
   return (
