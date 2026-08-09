@@ -20,7 +20,6 @@ import { type ReactNode, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { OverviewBalance } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
-import { useLegacyRefresh } from "../lib/hooks/use-legacy-refresh";
 import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
 import {
   accountTotalAt,
@@ -30,7 +29,7 @@ import {
 } from "../lib/manual-history";
 import type { PickedToken } from "../lib/manual-types";
 import { manualAccountQuery } from "../lib/queries/accounts";
-import { accountKeys } from "../lib/queries/keys";
+import { invalidateFor } from "../lib/queries/refresh";
 import {
   createManualActivities,
   removeManualActivity,
@@ -86,14 +85,11 @@ export function ManualTokensPanel({
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
   const format = useFormatter();
-  // 手记资产还没迁(#414)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
-  const legacyRefresh = useLegacyRefresh();
   const queryClient = useQueryClient();
 
   const dateFmt = useLocalDateFormat(LIST_DATE_FMT);
   const dateTimeFmt = useLocalDateFormat(DETAIL_DATETIME_FMT);
 
-  const detailKey = accountKeys.manualDetail(accountId);
   const detailQuery = useQuery(manualAccountQuery(accountId));
   const tokens = useMemo(() => detailQuery.data?.tokens ?? [], [detailQuery.data]);
   const activities = useMemo(() => detailQuery.data?.activities ?? [], [detailQuery.data]);
@@ -179,10 +175,9 @@ export function ManualTokensPanel({
   }>({ open: false, token: null, lock: false, edit: null });
   const [confirm, setConfirm] = useState<{ title: string; onConfirm: () => void } | null>(null);
 
-  // 写后刷新:失效明细查询(抽屉列表)+ 整页刷新(首页净值/账户行同源)。
-  const refresh = async () => {
-    await Promise.all([queryClient.invalidateQueries({ queryKey: detailKey }), legacyRefresh()]);
-  };
+  // 写后刷新:一句就够。手记明细那条查询住在账户域前缀之下,`account.write` 顺带盖住它 ——
+  // 以前要「明细 + 整页」两句,是因为整页那句根本碰不到 react-query 缓存。
+  const refresh = () => invalidateFor(queryClient, "account.write");
 
   const removeTokenMut = useMutation({
     mutationFn: (tokenId: string) => removeManualToken({ data: { accountId, tokenId } }),

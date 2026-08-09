@@ -1,11 +1,11 @@
 import type { ConnectorId } from "@folio/connectors";
 import { MorphingModal, toast, useMediaQuery } from "@folio/ui";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, X } from "lucide-react";
 import { cloneElement, type ReactElement, type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { useConnectorLabels } from "../hooks/use-connector-labels";
-import { useLegacyRefresh } from "../lib/hooks/use-legacy-refresh";
+import { invalidateFor } from "../lib/queries/refresh";
 import { getConnectorCredentialSpecs } from "../lib/server/connectors";
 import { syncAccount } from "../lib/server/sync";
 import { AccountForm } from "./account-fields";
@@ -88,8 +88,10 @@ export function AddAccountModal({
   onCompleteClose?: () => void; // 清除补录目标(关闭补录视图)
 } = {}) {
   const t = useTranslations("Accounts");
-  // 账户域还没迁(#414)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
-  const refresh = useLegacyRefresh();
+  const queryClient = useQueryClient();
+  // 加账户 / 补录凭据同时改账户域与组合域 —— 映射表那一条已经把两个前缀都列上了。
+  const refresh = () => invalidateFor(queryClient, "account.write");
+  const refreshAfterSync = () => invalidateFor(queryClient, "account.sync");
   const labelOf = useConnectorLabels();
   const isDesktop = useMediaQuery("(min-width: 640px)");
   const [internalOpen, setInternalOpen] = useState(false);
@@ -130,7 +132,7 @@ export function AddAccountModal({
     setOpen(false);
     void refresh();
     void syncAccount({ data: { accountId: newId } })
-      .then(() => refresh())
+      .then(() => refreshAfterSync())
       .catch(() => {});
   };
 
@@ -143,7 +145,7 @@ export function AddAccountModal({
     onCompleteClose?.();
     void refresh();
     void syncAccount({ data: { accountId } })
-      .then(() => refresh())
+      .then(() => refreshAfterSync())
       .catch(() => {});
   };
 

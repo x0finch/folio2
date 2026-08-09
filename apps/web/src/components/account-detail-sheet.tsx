@@ -13,7 +13,7 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
@@ -30,9 +30,9 @@ import type { OverviewBalance } from "../lib/account-view";
 import { aggregateDayChange } from "../lib/day-value-change";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
-import { useLegacyRefresh } from "../lib/hooks/use-legacy-refresh";
 import { isManual } from "../lib/manual-connector";
 import { accountHistoryQuery } from "../lib/queries/accounts";
+import { invalidateFor } from "../lib/queries/refresh";
 import { removeAccount, updateAccount } from "../lib/server/accounts";
 import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
@@ -147,8 +147,9 @@ function DetailBody({
   const tt = useTranslations("Tags");
   const format = useFormatter();
   const usd = useDisplayValue();
-  // 账户域还没迁(#414)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
-  const refresh = useLegacyRefresh();
+  const queryClient = useQueryClient();
+  // 改名 / 归档 / 删除同时改账户域与组合域(总额、走势)—— 映射表那一条两个前缀都列了。
+  const refresh = () => invalidateFor(queryClient, "account.write");
 
   // 头部 24h 增量与账户行同源(缺凭据 → 不显增量);占比 = 本账户市值 / 活跃账户总计。
   const dayChange = account.needsCredentials ? null : aggregateDayChange(account.balances);
@@ -199,7 +200,7 @@ function DetailBody({
     onSuccess: async (r) => {
       if (r.ok) toast.success(t("synced", { count: 1 }));
       else if (!r.skipped) toast.error(r.error ?? t("syncGenericError"));
-      await refresh();
+      await invalidateFor(queryClient, "account.sync");
     },
     onError: () => toast.error(t("syncGenericError")),
   });
