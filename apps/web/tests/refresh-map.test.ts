@@ -52,6 +52,32 @@ describe("刷新映射表", () => {
     ]);
   });
 
+  // 跨域那条:加一个账户不只是账户列表多一行,首页总额 / 走势 / 按代币的聚合全跟着变。
+  // 只刷账户域会让总览停在旧数字,而且不报错 —— 所以这条单独钉住。
+  it("account.write 同时刷账户域与组合域", async () => {
+    seed(accountKeys.list());
+    seed(accountKeys.holdings());
+    seed(accountKeys.manualDetail("a1"));
+    seed(portfolioKeys.overview("pf-1"));
+
+    await invalidateFor(queryClient, "account.write");
+
+    expect(
+      [
+        accountKeys.list(),
+        accountKeys.holdings(),
+        accountKeys.manualDetail("a1"),
+        portfolioKeys.overview("pf-1"),
+      ].map(isInvalidated),
+    ).toEqual([true, true, true, true]);
+  });
+
+  it("sync.round 也刷账户域(账户行的市值与上次同步跟着变)", async () => {
+    seed(accountKeys.holdings());
+    await invalidateFor(queryClient, "sync.round");
+    expect(isInvalidated(accountKeys.holdings())).toBe(true);
+  });
+
   it("portfolio.write 刷整个组合域(清单、归属、总览一起)", async () => {
     const keys = [
       portfolioKeys.list(),

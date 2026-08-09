@@ -15,11 +15,24 @@ export const REFRESH_MAP = {
    * 一轮同步跑完。**失败也算**:同步本身可能仍在服务端跑(waitUntil),
    * 而且部分账户的快照可能已经落库了。
    *
-   * 一轮同步改的是余额 → 组合域(总额、持仓、走势)跟着变,所以两个前缀都要刷。
+   * 一轮同步改的是余额 → 组合域(总额、持仓、走势)与账户域(账户行的市值、上次同步)都跟着变,
+   * 所以三个前缀都要刷。
    * **这一条顺带修掉一个既有 bug**:整页刷新只重跑 loader,而 loader 只预取「默认组合」那份 ——
    * 停在非默认组合、或停在自定义 Tab 上时,同步跑完画面根本不动。前缀刷新盖住整个域,三种视图一起更新。
    */
-  "sync.round": [syncKeys.all, portfolioKeys.all],
+  "sync.round": [syncKeys.all, portfolioKeys.all, accountKeys.all],
+
+  /** 抽屉里的「单独同步」。改的东西和一轮同步一样,只是范围小 —— 前缀是同一批。 */
+  "account.sync": [syncKeys.all, portfolioKeys.all, accountKeys.all],
+
+  /**
+   * 账户与手记资产的增删改:新建 / 更新 / 归档 / 删除账户、替换凭据,以及手记代币与手记活动的增删改。
+   *
+   * **必须同时列出组合域的前缀。** 加一个账户不只是账户列表多一行 —— 首页总额、走势、按代币的聚合
+   * 全都跟着变。只刷账户域会让总览停在旧数字,而且**不报错**。手记明细那条查询在账户域前缀之下,
+   * 一并被盖住,不用单列。
+   */
+  "account.write": [accountKeys.all, portfolioKeys.all],
 
   /** 新建 / 改名 / 删除组合、设默认组合、把账户移到别的组合 —— 清单、归属、两边的总览与走势都可能变。 */
   "portfolio.write": [portfolioKeys.all],
@@ -38,8 +51,9 @@ export const REFRESH_MAP = {
    * 与 `staleTime` 设成多少无关)。于是还没迁的写路径(打标签、改估值设置、过期价格自动刷新)
    * 对已迁的域会静默失效:不报错,只是数字不动。
    *
-   * 这条把**所有已迁的域**补刷一遍。某个域的写路径迁完时,它的前缀从这里挪走;
-   * 全部迁完这条就空了,随 hook 一起删。
+   * 这条把**所有已迁的域**补刷一遍 —— 是「已迁」,不是「写路径没迁」:改估值设置、刷过期价格
+   * 这些还没迁的写操作会改到余额,账户域与组合域都得跟着动。所以只要这个 hook 还有调用点,
+   * 三个前缀就都留着;最后一个调用点没了(#416),这条连同 hook 一起删。
    */
   "legacy.whole-page": [syncKeys.all, portfolioKeys.all, accountKeys.all],
 } satisfies Record<string, readonly QueryKey[]>;
