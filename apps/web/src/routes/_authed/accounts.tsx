@@ -20,19 +20,22 @@ import { aggregateDayChange } from "../../lib/day-value-change";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { isManual } from "../../lib/manual-connector";
+import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
 import { listAccounts } from "../../lib/server/accounts";
-import { listAccountHoldings, listPortfolioMemberships } from "../../lib/server/portfolio";
+import { listAccountHoldings } from "../../lib/server/portfolio";
 import { listAccountTags, listTags } from "../../lib/server/tags";
 
 export const Route = createFileRoute("/_authed/accounts")({
-  loader: async () => {
+  loader: async ({ context: { queryClient } }) => {
     // 合并两源:listAccountHoldings 给活跃账户的市值/上次同步/持仓;listAccounts 给全部账户(含归档)的
     // 凭据态 + archivedAt。归档账户不在 overview.rows(见 portfolio.ts 过滤)→ 其 value/holdings 为空。
     // memberships:按选中 Portfolio 客户端过滤账户列表用(账户页已加载全部账户,过滤在客户端即可)。
+    // 归属已迁 react-query(#411),这里顺手也进缓存 —— 组合选择器的「移到」一层读的是同一个 key。
+    // 账户那几项还没迁(#413),仍直接调。
     const [overview, accounts, memberships, allTags, tagLinks] = await Promise.all([
       listAccountHoldings(),
       listAccounts(),
-      listPortfolioMemberships(),
+      queryClient.ensureQueryData(portfolioMembershipsQuery()),
       listTags(),
       listAccountTags(),
     ]);

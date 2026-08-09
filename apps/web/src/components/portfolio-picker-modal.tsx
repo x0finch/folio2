@@ -17,10 +17,10 @@ import { Check, Pin, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { type PortfolioSummary, usePortfolio } from "../lib/hooks/use-portfolio";
+import { portfolioMembershipsQuery } from "../lib/queries/portfolio";
 import {
   createPortfolio,
   deletePortfolio,
-  listPortfolioMemberships,
   moveAccountToPortfolio,
   renamePortfolio,
   setDefaultPortfolio,
@@ -204,10 +204,8 @@ function MoveList({
   const [createHover, setCreateHover] = useState(false);
 
   // 查账户当前所属 Portfolio(绿勾)。组件仅在 move 一层挂载时存在 → 无需额外 enabled 门。
-  const membersQuery = useQuery({
-    queryKey: ["portfolio-memberships"],
-    queryFn: () => listPortfolioMemberships(),
-  });
+  // key 走组合域的分层 key(#411):账户页 loader 预取的就是这一份,两边合成同一条缓存。
+  const membersQuery = useQuery(portfolioMembershipsQuery());
   const currentPortfolioId = accountId
     ? membersQuery.data?.find((m) => m.accountId === accountId)?.portfolioId
     : undefined;

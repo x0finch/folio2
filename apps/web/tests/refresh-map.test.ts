@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it } from "vitest";
-import { syncKeys } from "../src/lib/queries/keys";
+import { portfolioKeys, syncKeys } from "../src/lib/queries/keys";
 import { invalidateFor, REFRESH_MAP } from "../src/lib/queries/refresh";
 
 // 刷新映射表的钉子。**这里钉的不是「表里写了什么」**(那是把代码抄一遍),而是
@@ -35,10 +35,27 @@ describe("刷新映射表", () => {
     expect(isInvalidated(untouched)).toBe(false);
   });
 
+  // 既有 bug 的钉子(#411):整页刷新只重跑 loader,而 loader 只预取默认组合那一份 ——
+  // 停在非默认组合、或停在自定义 Tab 上时,同步跑完画面不动。前缀刷新必须把三种视图一起盖住。
+  it("sync.round 盖住默认 / 非默认 / 自定义 Tab 三种总览视图", async () => {
+    const def = portfolioKeys.overview("pf-default");
+    const other = portfolioKeys.overview("pf-other");
+    const pinned = portfolioKeys.overview("pf-other", { kind: "tag", tagId: "tg1" });
+    for (const k of [def, other, pinned]) seed(k);
+
+    await invalidateFor(queryClient, "sync.round");
+
+    expect([isInvalidated(def), isInvalidated(other), isInvalidated(pinned)]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+  });
+
   // 结构性的一条:表里每条前缀都得是**某个域前缀**下的东西,而不是随手写的字符串数组。
   // 域前缀集合随各片迁移增长,这条会跟着自动覆盖新加的条目。
   it("表里每条前缀都落在已知的域前缀上", () => {
-    const domains: readonly (readonly string[])[] = [syncKeys.all];
+    const domains: readonly (readonly string[])[] = [syncKeys.all, portfolioKeys.all];
     for (const [event, prefixes] of Object.entries(REFRESH_MAP)) {
       expect(prefixes.length, `${event} 至少要刷一个前缀`).toBeGreaterThan(0);
       for (const prefix of prefixes) {

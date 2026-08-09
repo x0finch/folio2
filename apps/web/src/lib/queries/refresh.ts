@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { syncKeys } from "./keys";
+import { portfolioKeys, syncKeys } from "./keys";
 
 // 刷新映射表:**一个写操作的语义 → 它改动了哪些 key 前缀**。
 //
@@ -14,8 +14,12 @@ export const REFRESH_MAP = {
   /**
    * 一轮同步跑完。**失败也算**:同步本身可能仍在服务端跑(waitUntil),
    * 而且部分账户的快照可能已经落库了。
+   *
+   * 一轮同步改的是余额 → 组合域(总额、持仓、走势)跟着变,所以两个前缀都要刷。
+   * **这一条顺带修掉一个既有 bug**:整页刷新只重跑 loader,而 loader 只预取「默认组合」那份 ——
+   * 停在非默认组合、或停在自定义 Tab 上时,同步跑完画面根本不动。前缀刷新盖住整个域,三种视图一起更新。
    */
-  "sync.round": [syncKeys.all],
+  "sync.round": [syncKeys.all, portfolioKeys.all],
 } satisfies Record<string, readonly QueryKey[]>;
 
 export type RefreshEvent = keyof typeof REFRESH_MAP;
