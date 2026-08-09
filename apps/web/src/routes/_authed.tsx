@@ -1,37 +1,43 @@
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { LockScreen } from "../components/lock-screen";
 import { PortfolioSelector } from "../components/portfolio-selector";
 import { PortfolioProvider } from "../lib/hooks/use-portfolio";
 import { CurrencyProvider } from "../lib/hooks/use-prefer-currency";
+import { syncStatusQuery } from "../lib/queries/sync";
 import { listPortfolios } from "../lib/server/portfolio";
 import { getCurrencyPreference } from "../lib/server/preferences";
 import { getSession } from "../lib/server/session";
-import { getSyncStatus } from "../lib/server/sync";
 
 // 受保护布局:无 session 则重定向到 /login(仅 UX;数据安全靠各 authedServerFn)。
-// loader 定展示币种 + 汇率(cookie + FX cache-only)+ 全局同步状态(PageHeader 同步面板)
+// loader 定展示币种 + 汇率(cookie + FX cache-only),并**预取**全局同步状态
 // → CurrencyProvider + AppShell 下发给整个认证区。
+//
+// 同步状态不再由 loader 返回,而是 `ensureQueryData` 预取 + 组件 `useSuspenseQuery` 读(ADR 0038)。
+// loader 里 await 的东西没有 key 可指,只能整页刷;进了缓存才刷得动一个前缀。首屏不变:
+// 预取没 resolve 时路由 pending 照常生效,SSR 把缓存 dehydrate 下去,客户端直接 hydrate。
 export const Route = createFileRoute("/_authed")({
   beforeLoad: async () => {
     const current = await getSession();
     if (!current) throw redirect({ to: "/login" });
     return { user: current.user };
   },
-  loader: async () => {
-    const [preferCurrency, syncStatus, portfolios] = await Promise.all([
+  loader: async ({ context }) => {
+    const [preferCurrency, portfolios] = await Promise.all([
       getCurrencyPreference(),
-      getSyncStatus(),
       listPortfolios(),
+      context.queryClient.ensureQueryData(syncStatusQuery()),
     ]);
-    return { preferCurrency, syncStatus, portfolios };
+    return { preferCurrency, portfolios };
   },
   component: AuthedLayout,
 });
 
 function AuthedLayout() {
   const { user } = Route.useRouteContext();
-  const { preferCurrency, syncStatus, portfolios } = Route.useLoaderData();
+  const { preferCurrency, portfolios } = Route.useLoaderData();
+  const { data: syncStatus } = useSuspenseQuery(syncStatusQuery());
   return (
     <CurrencyProvider value={preferCurrency}>
       {/* Portfolio 选中态(ADR 0033):住布局层,三页共享;不持久化(硬刷新回默认由布局重挂实现)。 */}
