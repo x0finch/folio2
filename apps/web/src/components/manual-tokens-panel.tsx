@@ -27,7 +27,7 @@ import {
   type HistoryToken,
   isReduceOversold,
 } from "../lib/manual-history";
-import type { PickedToken } from "../lib/manual-types";
+import type { ActivityDraft, PickedToken } from "../lib/manual-types";
 import { manualAccountQuery } from "../lib/queries/accounts";
 import { invalidateFor } from "../lib/queries/refresh";
 import {
@@ -39,7 +39,12 @@ import { removeManualToken } from "../lib/server/manual-tokens";
 import type { TokenOption } from "../lib/token-option";
 import { buildOwnedOptions } from "../lib/token-search";
 import { HoverDetail } from "./hover-detail";
-import { type EditActivityInput, ManualActivityModal } from "./manual-activity-modal";
+import {
+  type ActivityPatch,
+  type EditActivityInput,
+  ManualActivityModal,
+  type SubmitResult,
+} from "./manual-activity-modal";
 import { Portal } from "./portal";
 import { TokenRowContent } from "./token-row";
 
@@ -175,6 +180,8 @@ export function ManualTokensPanel({
   }>({ open: false, token: null, lock: false, edit: null });
   const [confirm, setConfirm] = useState<{ title: string; onConfirm: () => void } | null>(null);
 
+  const closeActivity = () => setActivity((s) => ({ ...s, open: false }));
+
   // 写后刷新:一句就够。手记明细那条查询住在账户域前缀之下,`account.write` 顺带盖住它 ——
   // 以前要「明细 + 整页」两句,是因为整页那句根本碰不到 react-query 缓存。
   const refresh = () => invalidateFor(queryClient, "account.write");
@@ -190,20 +197,89 @@ export function ManualTokensPanel({
     onError: () => toast.error(ta("actionFailed")),
   });
 
+  // 活动的新增 / 编辑。这两条与上面两条删除不同的地方:**它们有一种「服务端好好地拒绝了你」**——
+  // 卖超时返回 `{ ok: false }`,不是抛错。所以 onSuccess 里还要再分一次岔:
+  // 只有 `ok` 才刷新 + 关窗,`ok === false` 保持弹窗开着,让用户就地改数字。
+  //
+  // 失败提示走弹窗内部(`submitResult`)而不是 toast —— 用户此刻眼睛在弹窗上,
+  // 而 toast 在 modal 之下,报了也白报。上面两条删除没有弹窗,所以照旧 toast。
+  const addActivitiesMut = useMutation({
+    mutationFn: (drafts: ActivityDraft[]) =>
+      createManualActivities({
+        data: {
+          accountId,
+          drafts: drafts.map((d) => ({
+            token: {
+              symbol: d.token.symbol,
+              unitPrice: d.token.unitPrice,
+              ticket: d.token.ticket ?? null,
+            },
+            kind: d.kind,
+            amount: d.amount,
+            occurredAt: d.occurredAt,
+            price: d.price ?? null,
+            fee: d.fee ?? null,
+            memo: d.memo ?? null,
+          })),
+        },
+      }),
+    onSuccess: async (res) => {
+      if (!res.ok) return; // 卖超:弹窗留着报原因
+      await refresh();
+      closeActivity();
+      setTab("activity");
+    },
+  });
+  const editActivityMut = useMutation({
+    mutationFn: ({ activityId, patch }: { activityId: string; patch: ActivityPatch }) =>
+      updateManualActivity({
+        data: {
+          activityId,
+          patch: {
+            kind: patch.kind,
+            amount: patch.amount,
+            occurredAt: patch.occurredAt,
+            price: patch.price ?? null,
+            fee: patch.fee ?? null,
+            memo: patch.memo ?? null,
+          },
+        },
+      }),
+    onSuccess: async (res) => {
+      if (!res.ok) return;
+      await refresh();
+      closeActivity();
+    },
+  });
+  const activityPending = addActivitiesMut.isPending || editActivityMut.isPending;
+  const activitySubmitResult: SubmitResult =
+    addActivitiesMut.isError || editActivityMut.isError
+      ? "failed"
+      : addActivitiesMut.data?.ok === false || editActivityMut.data?.ok === false
+        ? "over"
+        : null;
+
   // 默认选中最新一笔活动的 token(供 plus 预选)。
   const latest = merged[0];
   const latestTokenRow = latest?.tokenId ? tokenById.get(latest.tokenId) : undefined;
   const latestToken = latestTokenRow ? pickedTokenOf(latestTokenRow) : null;
 
-  const openPlus = () => setActivity({ open: true, token: latestToken, lock: false, edit: null });
+  // 每次开弹窗都把两条 mutation 的结果清掉。mutation 的状态活在组件上、不随弹窗卸载而消失,
+  // 不清的话上一轮的「卖超」红字会原样出现在下一次打开的空表单里。
+  const openActivity = (next: Omit<typeof activity, "open">) => {
+    addActivitiesMut.reset();
+    editActivityMut.reset();
+    setActivity({ ...next, open: true });
+  };
+
+  const openPlus = () => openActivity({ token: latestToken, lock: false, edit: null });
   const openTokenEdit = (tk: (typeof tokens)[number]) =>
-    setActivity({ open: true, token: pickedTokenOf(tk), lock: true, edit: null });
+    openActivity({ token: pickedTokenOf(tk), lock: true, edit: null });
   // 活动行「编辑」:锁定该 token,预填这笔活动的全部字段(kind/数量/单价/手续费/日期/备注)。
   const openActivityEdit = (a: ActivityRow) => {
     const tk = a.tokenId ? tokenById.get(a.tokenId) : undefined;
     const token = tk ? pickedTokenOf(tk) : { symbol: a.symbol, logo: a.logo, unitPrice: 0 };
-    setActivity({
-      open: true,
+    openActivity({
       token,
       lock: true,
       edit: {
@@ -219,7 +295,6 @@ export function ManualTokensPanel({
       },
     });
   };
-  const closeActivity = () => setActivity((s) => ({ ...s, open: false }));
 
   const tokenItems: SwipeableListItem[] = tokens.map((tk) => {
     const bal = balBySymbol.get(tk.symbol.toUpperCase());
@@ -386,52 +461,10 @@ export function ManualTokensPanel({
         edit={activity.edit}
         owned={ownedOptions}
         onClose={closeActivity}
-        onSubmit={async (drafts) => {
-          const res = await createManualActivities({
-            data: {
-              accountId,
-              drafts: drafts.map((d) => ({
-                token: {
-                  symbol: d.token.symbol,
-                  unitPrice: d.token.unitPrice,
-                  ticket: d.token.ticket ?? null,
-                },
-                kind: d.kind,
-                amount: d.amount,
-                occurredAt: d.occurredAt,
-                price: d.price ?? null,
-                fee: d.fee ?? null,
-                memo: d.memo ?? null,
-              })),
-            },
-          });
-          if (res.ok) {
-            await refresh();
-            setActivity((s) => ({ ...s, open: false }));
-            setTab("activity");
-          }
-          return { ok: res.ok };
-        }}
-        onEdit={async (_tokenId, activityId, patch) => {
-          const res = await updateManualActivity({
-            data: {
-              activityId,
-              patch: {
-                kind: patch.kind,
-                amount: patch.amount,
-                occurredAt: patch.occurredAt,
-                price: patch.price ?? null,
-                fee: patch.fee ?? null,
-                memo: patch.memo ?? null,
-              },
-            },
-          });
-          if (res.ok) {
-            await refresh();
-            setActivity((s) => ({ ...s, open: false }));
-          }
-          return { ok: res.ok };
-        }}
+        onSubmit={(drafts) => addActivitiesMut.mutate(drafts)}
+        onEdit={(_tokenId, activityId, patch) => editActivityMut.mutate({ activityId, patch })}
+        pending={activityPending}
+        submitResult={activitySubmitResult}
       />
 
       <ConfirmModal
