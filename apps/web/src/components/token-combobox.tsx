@@ -229,6 +229,8 @@ export function TokenCombobox({
     // 只在搜索词**落定后**刷(与 /search 同一个防抖闸):否则每个中间按键都发一次 /simple/price,
     // 白烧 CGK 额度还跟 /search 抢,免费档下更容易把 /search 挤到限流(搜不存在的币时尤其明显 ——
     // 本地必然落空、强制打远端)。落定后这批行才稳定,一次批量刷即可。
+    // (同样**有意不走 `useMutation`**:它是 effect 驱动的后台批量刷价,没有用户发起的动作,
+    //  而且取消语义绑在 effect 的 cleanup 上(`cancelled` 闭包标志)—— mutation 表达不了这个。)
     if (!open || !settled || flatItems.length === 0) return;
     const stale = staleTickets(flatItems, live, requested.current, Date.now());
     if (stale.length === 0) return;

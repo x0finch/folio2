@@ -10,7 +10,7 @@ import {
   StatefulButton,
 } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import {
   BTC_SCRIPT_OPTIONS,
@@ -20,10 +20,10 @@ import {
 } from "../lib/bitcoin-scripts";
 import type { InputSpec } from "../lib/creds";
 import { usePortfolio } from "../lib/hooks/use-portfolio";
+import { useTokenPrice } from "../lib/hooks/use-token-price";
 import { isManual } from "../lib/manual-connector";
 import { manualTokensJson } from "../lib/manual-tokens";
 import { createAccount } from "../lib/server/accounts";
-import { getTokenPrice } from "../lib/server/tokens";
 import type { TokenOption } from "../lib/token-option";
 import { TokenCombobox } from "./token-combobox";
 
@@ -52,8 +52,9 @@ function ManualFields({
   const t = useTranslations("Accounts");
   const [picked, setPicked] = useState<TokenOption | null>(null);
   const [manualMode, setManualMode] = useState(false);
-  const [priceBusy, setPriceBusy] = useState(false);
-  const priceReqRef = useRef(0);
+  // 取价 + 竞态守卫 + busy 都来自这一份共享 hook(#428 片 5)。
+  // 这里以前自己抄了一遍同样的 `reqRef` 守卫,与 use-token-price.ts 各存一份 —— 现在只有一份。
+  const { fetchPrice, cancel: cancelPriceFetch, busy: priceBusy } = useTokenPrice();
   // 首 token 的本地标量;经 effect 序列化进 values.tokens(不在 setState updater 里做副作用)。
   const [tok, setTok] = useState({ symbol: "", amount: "", unitPrice: "", ticket: "" });
   const patch = (p: Partial<typeof tok>) => setTok((prev) => ({ ...prev, ...p }));
@@ -67,40 +68,27 @@ function ManualFields({
   // 票原样搬运 —— 组件不解释它,提交时随 `tokens` JSON 一起交回服务端。
   async function onPick(token: TokenOption | null) {
     setPicked(token);
-    // 每次选中都作废上一次还在飞的取价(否则它回来会盖掉这次的填值)。
-    const reqId = ++priceReqRef.current;
     if (!token) {
+      cancelPriceFetch(); // 作废还在飞的取价,否则它回来会往空掉的框里填数
       patch({ symbol: "", ticket: "", unitPrice: "" });
-      setPriceBusy(false);
       return;
     }
     const { ticket } = token;
     patch({ symbol: token.symbol.toUpperCase(), ticket });
     // 下拉里已经显示了价(SWR 刷来的 / 默认列自带的)→ 直接用它回填,零延迟、就是用户点的那个数。
     if (token.price != null) {
+      cancelPriceFetch();
       patch({ unitPrice: String(token.price) });
-      setPriceBusy(false);
       return;
     }
     // 没有显示价(那行本来就是 `—`,比如刷价失败)→ 才回源现取一次兜底。
-    setPriceBusy(true);
-    try {
-      const p = await getTokenPrice({ data: { ticket } });
-      if (priceReqRef.current === reqId && p?.unitPrice != null) {
-        patch({ unitPrice: String(p.unitPrice) });
-      }
-    } catch {
-      // 取价失败不阻断:手填单价即可
-    } finally {
-      if (priceReqRef.current === reqId) setPriceBusy(false);
-    }
+    await fetchPrice(ticket, (unitPrice) => patch({ unitPrice: String(unitPrice) }));
   }
 
   // 转去自定义 symbol(未收录资产):它没有市价 —— 清掉之前自动填的单价让用户自己填,
   // 顺带作废还在飞的取价(否则它回来会把单价又填上)、清票与已选项。
   function enterManual(symbol: string) {
-    priceReqRef.current++;
-    setPriceBusy(false);
+    cancelPriceFetch();
     setPicked(null);
     setManualMode(true);
     patch({ symbol, ticket: "", unitPrice: "" });
