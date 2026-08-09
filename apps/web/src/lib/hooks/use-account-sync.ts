@@ -1,6 +1,5 @@
 import { toast } from "@folio/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
 import { useRef } from "react";
 import { useTranslations } from "use-intl";
 import { invalidateFor } from "../queries/refresh";
@@ -19,7 +18,6 @@ import { readSyncStream } from "../sync-stream";
 // (不再手写 try/finally),和仓里其余写操作(manual token 增删等)同一套。
 export function useAccountSync(accounts: { id: string; label: string }[]) {
   const t = useTranslations("Accounts");
-  const router = useRouter();
   const queryClient = useQueryClient();
   // 这一轮的 toast 句柄与展示名表。放 ref 不放 state:它们是命令式的 UI 把手,变了不该触发渲染,
   // 而且 `mutationFn` 与 onSuccess/onError 都要用同一份 —— onMutate 的返回值只到得了后者。
@@ -75,13 +73,7 @@ export function useAccountSync(accounts: { id: string; label: string }[]) {
         { id: toastId.current },
       ),
     // 成功失败都刷新:**同步本身可能仍在服务端跑**(waitUntil),让下次读取拿到已经落库的部分。
-    //
-    // 两句并存是**过渡态**(ADR 0038):定向那句刷已经迁进 react-query 的同步域;整页那句还留着,
-    // 因为其余域(组合、账户、标签……)仍然只能靠它。#416 把剩下的域迁完之后整页那句就删掉。
-    onSettled: () => {
-      invalidateFor(queryClient, "sync.round");
-      return router.invalidate();
-    },
+    onSettled: () => invalidateFor(queryClient, "sync.round"),
   });
 
   const disabled = mutation.isPending || accounts.length === 0;

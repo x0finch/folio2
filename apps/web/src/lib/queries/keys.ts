@@ -75,3 +75,43 @@ export const tagKeys = {
   /** 账户 → 标签的关联。整份返回,展示富化在客户端按 accountId 组装。 */
   accountLinks: () => [...tagKeys.all, "account-links"] as const,
 };
+
+export const settingsKeys = {
+  /** 整个设置域的前缀。 */
+  all: ["settings"] as const,
+  /** 全局 provider key 的配置状态(哪些环境变量给了)。 */
+  providerKeys: () => [...settingsKeys.all, "provider-keys"] as const,
+  /** 估值口径(self-first / source-first)。 */
+  valuation: () => [...settingsKeys.all, "valuation"] as const,
+  /** 数据统计(账户 / 快照 / 代币行数)。 */
+  dataStats: () => [...settingsKeys.all, "data-stats"] as const,
+};
+
+export const preferenceKeys = {
+  /** 整个偏好域的前缀(展示币种、界面语言)。 */
+  all: ["preferences"] as const,
+  /** 展示币种 + 当前汇率。 */
+  currency: () => [...preferenceKeys.all, "currency"] as const,
+  /** 界面语言。 */
+  locale: () => [...preferenceKeys.all, "locale"] as const,
+};
+
+export const connectorKeys = {
+  /** 整个连接器域的前缀。**部署内静态** —— 没有任何写操作会碰它,所以刷新映射表里也没有它。 */
+  all: ["connectors"] as const,
+  /** connectorId → { label, logo } 的展示目录。 */
+  catalog: () => [...connectorKeys.all, "catalog"] as const,
+  /** 各 connector 的凭据字段规格(加账户表单按它渲染)。 */
+  credentialSpecs: () => [...connectorKeys.all, "credential-specs"] as const,
+};
+
+export const tokenKeys = {
+  /** 整个代币域的前缀。 */
+  all: ["tokens"] as const,
+  /** 代币目录(选币下拉的本地筛底料)。 */
+  catalogue: () => [...tokenKeys.all, "catalogue"] as const,
+  /** 法币选项(名字按请求 locale 本地化 → 切语言要刷)。 */
+  fiatOptions: () => [...tokenKeys.all, "fiat-options"] as const,
+  /** 上游代币搜索(本地目录凑不够时才问)。 */
+  search: (query: string) => [...tokenKeys.all, "search", query] as const,
+};

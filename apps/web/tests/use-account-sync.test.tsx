@@ -24,9 +24,6 @@ const toast = {
 };
 vi.mock("@folio/ui", () => ({ toast }));
 
-const invalidate = vi.fn(async () => {});
-vi.mock("@tanstack/react-router", () => ({ useRouter: () => ({ invalidate }) }));
-
 // 只要 key + 参数能看出来就够,不引真的 i18n。
 vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
@@ -70,7 +67,6 @@ describe("useAccountSync", () => {
   beforeEach(() => {
     toasts.length = 0;
     nextToastId = 0;
-    invalidate.mockClear();
     // retry: false —— mutation 失败就是失败,别让默认重试把「失败该弹 error」这条测糊了。
     client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
   });
@@ -100,7 +96,6 @@ describe("useAccountSync", () => {
     expect(toasts.at(-1)?.text).toContain("synced");
     // 中间至少有一次进度更新带上了刚完成那个账户的展示名(服务端只回 accountId)。
     expect(toasts.some((t) => t.level === "loading" && t.text.includes("Binance"))).toBe(true);
-    expect(invalidate).toHaveBeenCalledTimes(1);
   });
 
   it("有账户失败 → error,详情里是展示名不是 id;缺凭据(skipped)不算失败", async () => {
@@ -124,19 +119,22 @@ describe("useAccountSync", () => {
     expect(last?.text).toContain('"count":1'); // 1 个失败,不是 2
   });
 
-  it("用户级失败({ fatal })→ error,且照样 invalidate(服务端可能还在跑)", async () => {
+  it("用户级失败({ fatal })→ error,且照样刷新(服务端可能还在跑)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ndjsonResponse([{ fatal: "listAccounts blew up" }])),
     );
+    client.setQueryData([...syncKeys.status()], { total: 1 });
     const { result } = setup();
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
     expect(toasts.at(-1)?.level).toBe("error");
     expect(toasts.at(-1)?.text).toContain("listAccounts blew up");
-    // 关键:失败路径也要 invalidate —— 部分账户的快照可能已经落库了。
-    expect(invalidate).toHaveBeenCalledTimes(1);
+    // 关键:失败路径也要刷新 —— 部分账户的快照可能已经落库了。
+    await waitFor(() =>
+      expect(client.getQueryState([...syncKeys.status()])?.isInvalidated).toBe(true),
+    );
   });
 
   it("请求本身挂了 → error 就地改写那条 loading,不另起一条", async () => {
@@ -153,7 +151,6 @@ describe("useAccountSync", () => {
     expect(new Set(toasts.map((t) => t.id)).size).toBe(1);
     expect(toasts.at(-1)?.level).toBe("error");
     expect(toasts.at(-1)?.text).toContain("network down");
-    expect(invalidate).toHaveBeenCalledTimes(1);
   });
 
   it("没有账户 → disabled,点了也不发请求", async () => {
@@ -166,7 +163,7 @@ describe("useAccountSync", () => {
     expect(toasts).toHaveLength(0);
   });
 
-  it("一轮结束后同步状态被定向刷新(不只是整页刷新)", async () => {
+  it("一轮结束后同步状态被定向刷新", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ndjsonResponse([{ accountId: "a1", ok: true }])),
@@ -178,7 +175,6 @@ describe("useAccountSync", () => {
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
-    // 整页刷新碰不到 react-query 缓存 —— 所以这条不能靠上面那个 invalidate mock 来断言。
     await waitFor(() =>
       expect(client.getQueryState([...syncKeys.status()])?.isInvalidated).toBe(true),
     );

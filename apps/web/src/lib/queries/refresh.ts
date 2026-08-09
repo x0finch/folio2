@@ -1,5 +1,13 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { accountKeys, portfolioKeys, syncKeys, tagKeys } from "./keys";
+import {
+  accountKeys,
+  portfolioKeys,
+  preferenceKeys,
+  settingsKeys,
+  syncKeys,
+  tagKeys,
+  tokenKeys,
+} from "./keys";
 
 // 刷新映射表:**一个写操作的语义 → 它改动了哪些 key 前缀**。
 //
@@ -51,19 +59,35 @@ export const REFRESH_MAP = {
    */
   "portfolio.pin.write": [portfolioKeys.pins()],
 
+  /** 切展示币种:写完 cookie 刷这一条,汇率与格式跟着换。总览数据是 USD 计价的,不受影响。 */
+  "preference.currency": [preferenceKeys.currency()],
+
   /**
-   * **过渡期专用,#416 连同 `useLegacyRefresh` 一起删掉。**
-   *
-   * 一个域的读一旦搬进 `ensureQueryData`,整页 `router.invalidate()` 就**再也刷不动它** ——
-   * `ensureQueryData` 只要缓存里有数据就原样返回,压根不看 stale(react-query 源码如此,
-   * 与 `staleTime` 设成多少无关)。于是还没迁的写路径(改估值设置、导入导出清理、过期价格自动刷新)
-   * 对已迁的域会静默失效:不报错,只是数字不动。
-   *
-   * 这条把**所有已迁的域**补刷一遍 —— 是「已迁」,不是「写路径没迁」:改估值设置、清理数据
-   * 这些还没迁的写操作能改到余额甚至删掉标签,四个域都得跟着动。所以只要这个 hook 还有调用点,
-   * 前缀就都留着;最后一个调用点没了(#416),这条连同 hook 一起删。
+   * 切界面语言。**连代币域一起刷**:法币选项的名字是按请求 locale 在服务端本地化的,
+   * 不刷的话切完语言那几行还是旧语种。
    */
-  "legacy.whole-page": [syncKeys.all, portfolioKeys.all, accountKeys.all, tagKeys.all],
+  "preference.locale": [preferenceKeys.locale(), tokenKeys.all],
+
+  /**
+   * 改估值口径(self-first / source-first)。它是**读时重估**,所以历史不用重算,
+   * 但总览、走势、账户持仓的现值全部按新口径重来。
+   */
+  "settings.valuation": [settingsKeys.all, portfolioKeys.all, accountKeys.all],
+
+  /**
+   * 导入 / 清理数据。这是唯一一条**什么都可能变**的写:账户、快照、标签、组合全在里面,
+   * 所以老老实实把每个域都列上 —— 这里省一个前缀就是一处「导完了某一块画面不动」。
+   */
+  "settings.data": [
+    settingsKeys.all,
+    syncKeys.all,
+    portfolioKeys.all,
+    accountKeys.all,
+    tagKeys.all,
+  ],
+
+  /** 过期价格后台刷完(SWR 的第二拍):金额跟着变,口径没变。 */
+  "prices.refreshed": [portfolioKeys.all, accountKeys.all],
 } satisfies Record<string, readonly QueryKey[]>;
 
 export type RefreshEvent = keyof typeof REFRESH_MAP;

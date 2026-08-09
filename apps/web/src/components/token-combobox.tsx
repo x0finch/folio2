@@ -8,12 +8,8 @@ import { useTranslations } from "use-intl";
 import { formatNumber } from "../lib/format-number";
 import { matchSegments } from "../lib/highlight";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
-import {
-  listFiatOptions,
-  listTokenCatalogue,
-  listTokens,
-  refreshTokenPrices,
-} from "../lib/server/tokens";
+import { fiatOptionsQuery, tokenCatalogueQuery, tokenSearchQuery } from "../lib/queries/tokens";
+import { refreshTokenPrices } from "../lib/server/tokens";
 import type { TokenOption } from "../lib/token-option";
 import {
   buildTokenSections,
@@ -50,7 +46,6 @@ const SECTION_LABEL: Record<TokenSectionKey, "sectionOwned" | "sectionFiat" | "s
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_LEN = 2;
 // 目录多久算旧。它本身是市值前 1000 的快照,分钟级的变化对选币毫无意义。
-const CATALOGUE_STALE_MS = 10 * 60 * 1000;
 
 function Highlighted({ text, query }: { text: string; query: string }) {
   return (
@@ -163,11 +158,7 @@ export function TokenCombobox({
 
   // 目录:**挂载即预取**(不等下拉展开)—— 组件出现的时刻就是模态框打开的时刻,用户还要点一下
   // 才会展开选币,那段时间足够这 35KB 落地。
-  const catalogueQuery = useQuery({
-    queryKey: ["token-catalogue"],
-    queryFn: () => listTokenCatalogue(),
-    staleTime: CATALOGUE_STALE_MS,
-  });
+  const catalogueQuery = useQuery(tokenCatalogueQuery());
   const catalogue = useMemo(() => catalogueQuery.data ?? [], [catalogueQuery.data]);
 
   // 本地筛:随每次按键即时重算,不出网。
@@ -184,20 +175,11 @@ export function TokenCombobox({
     !catalogueQuery.isLoading &&
     search.length >= MIN_SEARCH_LEN &&
     needsRemoteSearch(local);
-  const remoteQuery = useQuery({
-    queryKey: ["token-search", search],
-    queryFn: () => listTokens({ data: { query: search } }),
-    enabled: open && wantRemote,
-    staleTime: 60_000,
-  });
+  const remoteQuery = useQuery({ ...tokenSearchQuery(search), enabled: open && wantRemote });
 
   // 法币组(#272):SUPPORTED_CURRENCIES 的 10 法币。**票在服务端造**(与目录/已有一致,前端只拿不透明串,
   // 不构造 tokenRef/票 —— 见 token-option.ts),名字按请求 locale 已本地化。静态数据,挂载即预取。
-  const fiatQuery = useQuery({
-    queryKey: ["fiat-options"],
-    queryFn: () => listFiatOptions(),
-    staleTime: CATALOGUE_STALE_MS,
-  });
+  const fiatQuery = useQuery(fiatOptionsQuery());
   const fiat = useMemo(() => fiatQuery.data ?? [], [fiatQuery.data]);
 
   // 分组(#269):已有代币 → Tokens(目录)→ 法币(Cash)。各组内部按 search 过滤,目录再并进

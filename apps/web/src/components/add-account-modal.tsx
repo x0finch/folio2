@@ -5,8 +5,8 @@ import { ArrowLeft, X } from "lucide-react";
 import { cloneElement, type ReactElement, type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { useConnectorLabels } from "../hooks/use-connector-labels";
+import { connectorCredentialSpecsQuery } from "../lib/queries/connectors";
 import { invalidateFor } from "../lib/queries/refresh";
-import { getConnectorCredentialSpecs } from "../lib/server/connectors";
 import { syncAccount } from "../lib/server/sync";
 import { AccountForm } from "./account-fields";
 import { ConnectorGrid } from "./connector-grid";
@@ -110,12 +110,7 @@ export function AddAccountModal({
     }
   }, [open]);
   // 字段规格部署内静态 → 长 staleTime,几乎只取一次;仅打开时取,避免账户页挂载即请求(#107 review)。
-  const specsQuery = useQuery({
-    queryKey: ["credentialSpecs"],
-    queryFn: () => getConnectorCredentialSpecs(),
-    enabled: open,
-    staleTime: 60 * 60_000,
-  });
+  const specsQuery = useQuery({ ...connectorCredentialSpecsQuery(), enabled: open });
 
   const openModal = () => setOpen(true); // 重置由上面的 open effect 负责
   const close = () => setOpen(false);

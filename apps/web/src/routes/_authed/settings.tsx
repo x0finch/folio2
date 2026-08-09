@@ -18,7 +18,7 @@ import {
   TabsTrigger,
   toast,
 } from "@folio/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { LogOut, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -30,7 +30,7 @@ import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signIn, signOut } from "../../lib/auth-client";
 import { clearIdleLockState } from "../../lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "../../lib/hooks/use-idle-timeout";
-import { useLegacyRefresh } from "../../lib/hooks/use-legacy-refresh";
+
 import { useLockDevice } from "../../lib/hooks/use-lock-device";
 import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
 import { usePlatformAuthenticator } from "../../lib/hooks/use-platform-authenticator";
@@ -38,25 +38,26 @@ import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { IDLE_TIMEOUT_MINUTES } from "../../lib/idle-lock";
 import { importData } from "../../lib/import-data";
 import { getAuthenticatorName, passkeyKind } from "../../lib/passkey-authenticators";
-import { registerPasskey } from "../../lib/register-passkey";
+import { invalidateFor } from "../../lib/queries/refresh";
 import {
-  getDataStats,
-  getProviderKeyStatus,
-  getValuationSettings,
-  updateValuationSettings,
-} from "../../lib/server/settings";
+  dataStatsQuery,
+  providerKeyStatusQuery,
+  valuationSettingsQuery,
+} from "../../lib/queries/settings";
+import { registerPasskey } from "../../lib/register-passkey";
+import { updateValuationSettings } from "../../lib/server/settings";
 import type { Theme } from "../../lib/theme";
 
 const authedApi = getRouteApi("/_authed");
 
 export const Route = createFileRoute("/_authed/settings")({
-  loader: async () => {
-    const [status, valuation, dataStats] = await Promise.all([
-      getProviderKeyStatus(),
-      getValuationSettings(),
-      getDataStats(),
+  // 设置域的读取已迁 react-query(ADR 0038):loader 只预取,组件从缓存读。
+  loader: async ({ context: { queryClient } }) => {
+    await Promise.all([
+      queryClient.ensureQueryData(providerKeyStatusQuery()),
+      queryClient.ensureQueryData(valuationSettingsQuery()),
+      queryClient.ensureQueryData(dataStatsQuery()),
     ]);
-    return { status, valuation, dataStats };
   },
   component: Settings,
 });
@@ -71,7 +72,9 @@ const PROVIDER_KEYS = [
 // 设置页(S1,#112):外观 / 账户 / 币种 / 登出全集中于此(外壳退回纯导航 + 身份)。
 // 卡片顺序(grill):账户 → 外观 → Provider key → 估值 → 数据。
 function Settings() {
-  const { status, valuation, dataStats } = Route.useLoaderData();
+  const { data: status } = useSuspenseQuery(providerKeyStatusQuery());
+  const { data: valuation } = useSuspenseQuery(valuationSettingsQuery());
+  const { data: dataStats } = useSuspenseQuery(dataStatsQuery());
   const { user } = authedApi.useRouteContext();
   return (
     <div className="flex flex-col gap-6">
@@ -577,8 +580,7 @@ export function AutoLockCard() {
 
 function AppearanceCard() {
   const t = useTranslations("Settings");
-  // 设置域还没迁(#416)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
-  const refresh = useLegacyRefresh();
+  const queryClient = useQueryClient();
   const locale = useLocale();
   // 选中态用 useMountedTheme(SSR 安全):挂载前按 "system" 渲染避免 hydration mismatch + pill 硬跳,
   // 挂载后借 layoutId 平滑滑到位。语言走 cookie/SSR 一致,无需此处理。
@@ -587,7 +589,7 @@ function AppearanceCard() {
   function setLocale(next: string) {
     if (next === locale) return;
     document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000`;
-    refresh();
+    void invalidateFor(queryClient, "preference.locale");
   }
 
   return (
@@ -650,8 +652,7 @@ function ProviderKeysCard({ status }: { status: Record<string, boolean> }) {
 // 估值模式(Phase 3,#82):勾选 = source-first(统一采用市场源价);不勾 = self-first(默认)。
 // 切换即写 user_settings + invalidate → 主页/图表现推立即改(历史冻结,无需重 sync)。
 function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
-  // 设置域还没迁(#416)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
-  const refresh = useLegacyRefresh();
+  const queryClient = useQueryClient();
   const t = useTranslations("Settings");
   const [sourceFirst, setSourceFirst] = useState(mode === "source-first");
   const [busy, setBusy] = useState(false);
@@ -661,7 +662,8 @@ function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
     setBusy(true);
     try {
       await updateValuationSettings({ data: { mode: checked ? "source-first" : "self-first" } });
-      await refresh(); // 刷新总览/图表读路径
+      // 读时重估:历史不用重算,但总览 / 走势 / 账户持仓的现值全部按新口径重来。
+      await invalidateFor(queryClient, "settings.valuation");
     } catch {
       setSourceFirst(!checked); // 回滚
     } finally {
@@ -693,8 +695,7 @@ function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
 // 数据卡(合一):导出段 + 分隔线 + 导入段。复用现有 /api/export、/api/import 路由。
 // 导入文案沿用 Accounts 命名空间的 import* 键(与账户页导入同源)。
 function DataCard({ hasData }: { hasData: boolean }) {
-  // 设置域还没迁(#416)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
-  const refresh = useLegacyRefresh();
+  const queryClient = useQueryClient();
   const t = useTranslations("Settings");
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
@@ -712,7 +713,8 @@ function DataCard({ hasData }: { hasData: boolean }) {
   // 传输层抽在 lib/import-data(与仓里其它 mutation 一样调具名函数,不把 fetch 铺在组件里)。
   const importMutation = useMutation({
     mutationFn: importData,
-    onSuccess: () => refresh(), // 刷新列表读路径
+    // 导入什么都可能变(账户 / 快照 / 标签 / 组合),所以刷的是最宽的那一条。
+    onSuccess: () => invalidateFor(queryClient, "settings.data"),
     onSettled: clearInput, // 成败都清:让同一个文件能再选一次
   });
 
