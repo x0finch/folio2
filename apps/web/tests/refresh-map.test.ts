@@ -52,6 +52,32 @@ describe("刷新映射表", () => {
     ]);
   });
 
+  it("portfolio.write 刷整个组合域(清单、归属、总览一起)", async () => {
+    const keys = [
+      portfolioKeys.list(),
+      portfolioKeys.memberships(),
+      portfolioKeys.overview("pf-1"),
+      portfolioKeys.history("pf-1"),
+    ];
+    for (const k of keys) seed(k);
+
+    await invalidateFor(queryClient, "portfolio.write");
+
+    expect(keys.map(isInvalidated)).toEqual([true, true, true, true]);
+  });
+
+  // 刻意的窄口径:增删一个自定义 Tab 不改任何余额,把昂贵的总览连带拉一遍是白花钱。
+  // 这条钉住那个决定 —— 有人把它并进 `portfolio.write` 时会红。
+  it("portfolio.pin.write 只刷 Tab 清单,不碰总览", async () => {
+    seed(portfolioKeys.pins());
+    seed(portfolioKeys.overview("pf-1"));
+
+    await invalidateFor(queryClient, "portfolio.pin.write");
+
+    expect(isInvalidated(portfolioKeys.pins())).toBe(true);
+    expect(isInvalidated(portfolioKeys.overview("pf-1"))).toBe(false);
+  });
+
   // 结构性的一条:表里每条前缀都得是**某个域前缀**下的东西,而不是随手写的字符串数组。
   // 域前缀集合随各片迁移增长,这条会跟着自动覆盖新加的条目。
   it("表里每条前缀都落在已知的域前缀上", () => {

@@ -1,5 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import { cn, SharedLayoutBg } from "@folio/ui";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
 import { useState } from "react";
@@ -30,7 +31,8 @@ export const Route = createFileRoute("/_authed/accounts")({
     // 合并两源:listAccountHoldings 给活跃账户的市值/上次同步/持仓;listAccounts 给全部账户(含归档)的
     // 凭据态 + archivedAt。归档账户不在 overview.rows(见 portfolio.ts 过滤)→ 其 value/holdings 为空。
     // memberships:按选中 Portfolio 客户端过滤账户列表用(账户页已加载全部账户,过滤在客户端即可)。
-    // 归属已迁 react-query(#411),这里顺手也进缓存 —— 组合选择器的「移到」一层读的是同一个 key。
+    // 归属已迁 react-query(#411 / #412):**loader 只预取,组件从缓存读** —— 移动账户改成定向刷新
+    // 之后,这一页要跟着变就只能从缓存读(loader 直返的那份没人会去重跑它)。
     // 账户那几项还没迁(#413),仍直接调。
     const [overview, accounts, memberships, allTags, tagLinks] = await Promise.all([
       listAccountHoldings(),
@@ -68,7 +70,7 @@ export const Route = createFileRoute("/_authed/accounts")({
         tags: tagsOfAccount.get(a.id) ?? [],
       };
     });
-    return { rows, memberships, allTags, tagLinks, pricesStale: overview.pricesStale };
+    return { rows, allTags, tagLinks, pricesStale: overview.pricesStale };
   },
   pendingComponent: AccountsSkeleton,
   component: Accounts,
@@ -77,7 +79,8 @@ export const Route = createFileRoute("/_authed/accounts")({
 function Accounts() {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const { rows: allRows, memberships, allTags, tagLinks, pricesStale } = Route.useLoaderData();
+  const { rows: allRows, allTags, tagLinks, pricesStale } = Route.useLoaderData();
+  const { data: memberships } = useSuspenseQuery(portfolioMembershipsQuery());
   const { selectedId: selectedPortfolioId, defaultId } = usePortfolio();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
 

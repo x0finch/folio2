@@ -1,11 +1,11 @@
 import type { ConnectorId } from "@folio/connectors";
 import { MorphingModal, toast, useMediaQuery } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
 import { ArrowLeft, X } from "lucide-react";
 import { cloneElement, type ReactElement, type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { useConnectorLabels } from "../hooks/use-connector-labels";
+import { useLegacyRefresh } from "../lib/hooks/use-legacy-refresh";
 import { getConnectorCredentialSpecs } from "../lib/server/connectors";
 import { syncAccount } from "../lib/server/sync";
 import { AccountForm } from "./account-fields";
@@ -88,7 +88,8 @@ export function AddAccountModal({
   onCompleteClose?: () => void; // 清除补录目标(关闭补录视图)
 } = {}) {
   const t = useTranslations("Accounts");
-  const router = useRouter();
+  // 账户域还没迁(#414)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
+  const refresh = useLegacyRefresh();
   const labelOf = useConnectorLabels();
   const isDesktop = useMediaQuery("(min-width: 640px)");
   const [internalOpen, setInternalOpen] = useState(false);
@@ -127,9 +128,9 @@ export function AddAccountModal({
   // 创建成功:关闭 + 即时出现(此刻空值),再后台同步新账户 → 完成二次 invalidate 填充;失败静默(创建流已校验)。
   const handleDone = (newId: string) => {
     setOpen(false);
-    router.invalidate();
+    void refresh();
     void syncAccount({ data: { accountId: newId } })
-      .then(() => router.invalidate())
+      .then(() => refresh())
       .catch(() => {});
   };
 
@@ -140,9 +141,9 @@ export function AddAccountModal({
     const { accountId } = completeFor;
     toast.success(t("credSavedSyncing"));
     onCompleteClose?.();
-    router.invalidate();
+    void refresh();
     void syncAccount({ data: { accountId } })
-      .then(() => router.invalidate())
+      .then(() => refresh())
       .catch(() => {});
   };
 

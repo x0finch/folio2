@@ -15,12 +15,12 @@ import {
   useMediaQuery,
 } from "@folio/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
 import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { OverviewBalance } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
+import { useLegacyRefresh } from "../lib/hooks/use-legacy-refresh";
 import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
 import {
   accountTotalAt,
@@ -84,7 +84,8 @@ export function ManualTokensPanel({
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
   const format = useFormatter();
-  const router = useRouter();
+  // 手记资产还没迁(#414)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
+  const legacyRefresh = useLegacyRefresh();
   const queryClient = useQueryClient();
 
   const dateFmt = useLocalDateFormat(LIST_DATE_FMT);
@@ -180,12 +181,9 @@ export function ManualTokensPanel({
   }>({ open: false, token: null, lock: false, edit: null });
   const [confirm, setConfirm] = useState<{ title: string; onConfirm: () => void } | null>(null);
 
-  // 写后刷新:失效明细查询(抽屉列表)+ router(首页净值/账户行同源)。
+  // 写后刷新:失效明细查询(抽屉列表)+ 整页刷新(首页净值/账户行同源)。
   const refresh = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: detailKey }),
-      router.invalidate(),
-    ]);
+    await Promise.all([queryClient.invalidateQueries({ queryKey: detailKey }), legacyRefresh()]);
   };
 
   const removeTokenMut = useMutation({
