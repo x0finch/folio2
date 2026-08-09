@@ -318,7 +318,7 @@ function Overview() {
                       accountOptions={accountOptions}
                       onRepoint={(choice) => repointPinMut.mutate({ pinId: p.id, choice })}
                       onUnpin={() => onUnpin(p.id)}
-                      unpinning={unpinMut.isPending}
+                      unpinning={unpinMut.isPending && unpinMut.variables === p.id}
                     />
                   ))}
                   {pins.length < MAX_PINS && (
@@ -621,7 +621,9 @@ function PinTab({
   accountOptions: { id: string; label: string }[];
   onRepoint: (choice: PinTargetChoice) => void;
   onUnpin: () => void;
-  /** 删除在飞 —— 禁掉「取消固定」,免得连点两次发两个 delete。 */
+  /** **这一个 pin** 的删除在飞 —— 禁掉它的「取消固定」,免得连点两次发两个 delete。
+   *  必须按 pin 收窄(`variables === value`):`unpinMut` 是整页共用的一条,直接传 `isPending`
+   *  会把**所有** pin 的这颗钮一起禁掉,而其中只有一个真的在删。 */
   unpinning: boolean;
 }) {
   const tct = useTranslations("CustomTabs");
@@ -700,8 +702,13 @@ function AddPinButton({
   tagOptions: { id: string; name: string }[];
   accountOptions: { id: string; label: string }[];
   onPick: (choice: PinTargetChoice) => void;
-  /** 建 pin 在飞 —— 禁掉 ＋。`pins.length < MAX_PINS` 这道闸是拿**刷新前**的清单算的,
-   *  不禁的话连着加两个就能越过上限,而越过之后没有任何东西会把它纠回来。 */
+  /** 建 pin 在飞 —— 禁掉 ＋。`pins.length < MAX_PINS` 这道闸是拿**刷新前**的清单算的,所以在飞
+   *  期间 ＋ 还在,不禁的话手快能再挑一个。**真正兜住上限的是数据库那道**
+   *  (`packages/db/src/queries/tab-pins.ts` 的 `MAX_TAB_PINS_PER_USER`,超了直接拒),这里挡的
+   *  只是「让用户白挑一次、再吃一个报错」。
+   *
+   *  `disabled` 就够,不用再去 gate `usePinPanel`:hover 开面板的监听虽然挂在外层 `<span>` 上,
+   *  但 Chrome 不会从 disabled 的表单控件派发鼠标事件,那个 mouseover 压根到不了 React(实测)。 */
   adding: boolean;
 }) {
   const tct = useTranslations("CustomTabs");
