@@ -1,9 +1,10 @@
 import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { LogoAvatar, Select, SelectContent, SelectItem, SelectTrigger } from "@folio/ui";
-import { useRouter } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { CURRENCY_COOKIE } from "../lib/currency";
 import { usePreferCurrency } from "../lib/hooks/use-prefer-currency";
+import { invalidateFor } from "../lib/queries/refresh";
 
 // 一项/触发器共用的行内容:logo + 本地化标签(如 "USD 美元" / "USD Dollar",crypto 附符号)。
 // logo 是 base64 data URI,内嵌在 SUPPORTED_CURRENCIES(法币 CMC / crypto CoinGecko)。
@@ -26,18 +27,18 @@ function CurrencyRow({
   );
 }
 
-// 切展示币种:写 cookie(SSR 下次可读)+ router.invalidate() 重跑 _authed loader → 换汇率/格式。
+// 切展示币种:写 cookie(SSR 下次可读)+ 定向刷新偏好域 → 换汇率/格式。总览数据是 USD 计价的,不受影响。
 // beUI motion Select。触发器**自渲染选中项**(不是 SelectValue)—— SelectValue 只吃字符串 label,
 // 塞不下 logo;SelectTrigger 的 children 由消费侧给,故直接摆一个 CurrencyRow。不改 registry 件(ADR 0004)。
 export function CurrencySwitcher() {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const t = useTranslations("Currency");
   const { currency } = usePreferCurrency();
 
   function set(next: string) {
     if (next === currency.code) return;
     document.cookie = `${CURRENCY_COOKIE}=${next}; path=/; max-age=31536000`;
-    router.invalidate();
+    void invalidateFor(queryClient, "preference.currency");
   }
 
   return (

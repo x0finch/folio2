@@ -1,6 +1,7 @@
 import { Toaster } from "@folio/ui";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import type { QueryClient } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createRootRouteWithContext, HeadContent, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { useEffect } from "react";
@@ -8,8 +9,8 @@ import { IntlProvider } from "use-intl";
 
 import { messages } from "../lib/i18n/messages";
 import { PWA_LINKS, PWA_META, THEME_COLORS, VIEWPORT } from "../lib/pwa-head";
+import { localePreferenceQuery } from "../lib/queries/preferences";
 import { registerServiceWorker } from "../lib/register-sw";
-import { getLocalePreference } from "../lib/server/preferences";
 import { applyStoredTheme, THEME_INIT_SCRIPT } from "../lib/theme";
 import appCss from "../styles.css?url";
 
@@ -38,15 +39,21 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       ...PWA_LINKS,
     ],
   }),
-  // SSR 首屏即正确语言:根 loader 定 locale(cookie/Accept-Language);切换时 invalidate 重跑。
-  // now 也在此定(服务端时刻,序列化给客户端):作为 IntlProvider 的全局 now,relativeTime 才有基准
-  //(否则 use-intl 抛 ENVIRONMENT_FALLBACK),且 SSR/客户端一致不产生 hydration 抖动。
-  loader: async () => ({ locale: await getLocalePreference(), now: Date.now() }),
+  // SSR 首屏即正确语言:loader **预取** locale(cookie/Accept-Language),组件从缓存读,
+  // 切换时定向刷新那一条 key(ADR 0038)。
+  // now 仍由 loader 直接返回(服务端时刻,序列化给客户端):它不是一次「读」,没有可刷新的语义 ——
+  // 作为 IntlProvider 的全局 now,relativeTime 才有基准(否则 use-intl 抛 ENVIRONMENT_FALLBACK),
+  // 且 SSR/客户端一致不产生 hydration 抖动。
+  loader: async ({ context }) => {
+    await context.queryClient.ensureQueryData(localePreferenceQuery());
+    return { now: Date.now() };
+  },
   shellComponent: RootDocument,
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  const { locale, now } = Route.useLoaderData();
+  const { now } = Route.useLoaderData();
+  const { data: locale } = useSuspenseQuery(localePreferenceQuery());
   // 挂载后重放主题:<head> 脚本负责首帧无闪,但 hydration recovery / 重渲染可能把它设的 .dark 冲掉
   // 且全站再无人恢复(useTheme 仅设置页挂载)→ 此处兜底,让 React 生命周期在每次(重)挂载后自愈。见 lib/theme。
   useEffect(() => {

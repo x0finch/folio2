@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { IntlProvider } from "use-intl";
@@ -21,10 +22,13 @@ vi.mock("@tanstack/react-router", async (orig) => ({
 }));
 
 // 锁定态会渲染锁屏 UI(useTranslations)→ 需要 IntlProvider。未锁的用例走 children、无需它。
+// QueryClientProvider 同理:锁屏上的语言切换器要 queryClient 才能发定向刷新(#416)。
 const withIntl = (node: ReactNode) => (
-  <IntlProvider locale="en" messages={messages.en}>
-    {node}
-  </IntlProvider>
+  <QueryClientProvider client={new QueryClient()}>
+    <IntlProvider locale="en" messages={messages.en}>
+      {node}
+    </IntlProvider>
+  </QueryClientProvider>
 );
 
 // 闲置锁只看一道门:开关键(独立的键,不再是 timeout 的 "never" 档)。本机凭据记录**不参与**判断 ——

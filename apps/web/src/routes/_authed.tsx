@@ -6,8 +6,8 @@ import { PortfolioSelector } from "../components/portfolio-selector";
 import { PortfolioProvider } from "../lib/hooks/use-portfolio";
 import { CurrencyProvider } from "../lib/hooks/use-prefer-currency";
 import { portfolioListQuery } from "../lib/queries/portfolio";
+import { currencyPreferenceQuery } from "../lib/queries/preferences";
 import { syncStatusQuery } from "../lib/queries/sync";
-import { getCurrencyPreference } from "../lib/server/preferences";
 import { getSession } from "../lib/server/session";
 
 // 受保护布局:无 session 则重定向到 /login(仅 UX;数据安全靠各 authedServerFn)。
@@ -24,19 +24,18 @@ export const Route = createFileRoute("/_authed")({
     return { user: current.user };
   },
   loader: async ({ context }) => {
-    const [preferCurrency] = await Promise.all([
-      getCurrencyPreference(),
+    await Promise.all([
+      context.queryClient.ensureQueryData(currencyPreferenceQuery()),
       context.queryClient.ensureQueryData(syncStatusQuery()),
       context.queryClient.ensureQueryData(portfolioListQuery()),
     ]);
-    return { preferCurrency };
   },
   component: AuthedLayout,
 });
 
 function AuthedLayout() {
   const { user } = Route.useRouteContext();
-  const { preferCurrency } = Route.useLoaderData();
+  const { data: preferCurrency } = useSuspenseQuery(currencyPreferenceQuery());
   const { data: syncStatus } = useSuspenseQuery(syncStatusQuery());
   const { data: portfolios } = useSuspenseQuery(portfolioListQuery());
   return (
