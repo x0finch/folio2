@@ -1,11 +1,10 @@
 import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { LogoAvatar, Select, SelectContent, SelectItem, SelectTrigger } from "@folio/ui";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { writePreferenceCookie } from "../lib/cookies";
-import { CURRENCY_COOKIE } from "../lib/currency";
 import { usePreferCurrency } from "../lib/hooks/use-prefer-currency";
 import { invalidateFor } from "../lib/queries/refresh";
+import { setCurrencyPreference } from "../lib/server/preferences";
 
 // 一项/触发器共用的行内容:logo + 本地化标签(如 "USD 美元" / "USD Dollar",crypto 附符号)。
 // logo 是 base64 data URI,内嵌在 SUPPORTED_CURRENCIES(法币 CMC / crypto CoinGecko)。
@@ -36,10 +35,15 @@ export function CurrencySwitcher() {
   const t = useTranslations("Currency");
   const { currency } = usePreferCurrency();
 
+  // cookie 由服务端写(见 lib/server/preferences.ts):客户端设不上 HttpOnly/SameSite/Secure。
+  const setCurrency = useMutation({
+    mutationFn: (code: string) => setCurrencyPreference({ data: { code } }),
+    onSuccess: () => invalidateFor(queryClient, "preference.currency"),
+  });
+
   function set(next: string) {
     if (next === currency.code) return;
-    writePreferenceCookie(CURRENCY_COOKIE, next);
-    void invalidateFor(queryClient, "preference.currency");
+    setCurrency.mutate(next);
   }
 
   return (

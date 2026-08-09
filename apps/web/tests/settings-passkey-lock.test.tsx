@@ -28,6 +28,12 @@ vi.mock("../src/lib/server/settings", () => ({
   updateValuationSettings: vi.fn(),
 }));
 vi.mock("../src/lib/import-data", () => ({ importData: vi.fn() }));
+vi.mock("../src/lib/server/preferences", () => ({
+  getCurrencyPreference: vi.fn(),
+  getLocalePreference: vi.fn(),
+  setCurrencyPreference: vi.fn(),
+  setLocalePreference: vi.fn(),
+}));
 vi.mock("../src/lib/auth-client", () => ({
   authClient: { passkey: { addPasskey, deletePasskey, listUserPasskeys, updatePasskey } },
   signOut: vi.fn(),
