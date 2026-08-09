@@ -24,21 +24,19 @@ import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { isManual } from "../../lib/manual-connector";
 import { accountHoldingsQuery, accountListQuery } from "../../lib/queries/accounts";
 import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
-import { listAccountTags, listTags } from "../../lib/server/tags";
+import { accountTagLinksQuery, tagListQuery } from "../../lib/queries/tags";
 
 export const Route = createFileRoute("/_authed/accounts")({
   // 账户域的读取已迁 react-query(#413):loader 只**预取**,拼行的活挪进组件 —— 四个来源现在
   // 各自是一条查询、各自的到达时刻不同,拼装得跟着数据走而不是跟着 loader 走。
-  // 标签那两项还没迁(#415),仍由 loader 直返。
   loader: async ({ context: { queryClient } }) => {
-    const [, , , allTags, tagLinks] = await Promise.all([
+    await Promise.all([
       queryClient.ensureQueryData(accountHoldingsQuery()),
       queryClient.ensureQueryData(accountListQuery()),
       queryClient.ensureQueryData(portfolioMembershipsQuery()),
-      listTags(),
-      listAccountTags(),
+      queryClient.ensureQueryData(tagListQuery()),
+      queryClient.ensureQueryData(accountTagLinksQuery()),
     ]);
-    return { allTags, tagLinks };
   },
   pendingComponent: AccountsSkeleton,
   component: Accounts,
@@ -47,7 +45,8 @@ export const Route = createFileRoute("/_authed/accounts")({
 function Accounts() {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const { allTags, tagLinks } = Route.useLoaderData();
+  const { data: allTags } = useSuspenseQuery(tagListQuery());
+  const { data: tagLinks } = useSuspenseQuery(accountTagLinksQuery());
   const { data: accounts } = useSuspenseQuery(accountListQuery());
   const { data: holdings } = useSuspenseQuery(accountHoldingsQuery());
   const { data: memberships } = useSuspenseQuery(portfolioMembershipsQuery());

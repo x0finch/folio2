@@ -66,3 +66,12 @@ export const accountKeys = {
   /** 手记账户明细(代币 + 活动账本)。 */
   manualDetail: (accountId: string) => [...accountKeys.all, "manual-detail", accountId] as const,
 };
+
+export const tagKeys = {
+  /** 整个标签域的前缀。 */
+  all: ["tags"] as const,
+  /** 标签定义(per-Portfolio)。 */
+  list: () => [...tagKeys.all, "list"] as const,
+  /** 账户 → 标签的关联。整份返回,展示富化在客户端按 accountId 组装。 */
+  accountLinks: () => [...tagKeys.all, "account-links"] as const,
+};
