@@ -32,7 +32,8 @@ import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
 import { useLegacyRefresh } from "../lib/hooks/use-legacy-refresh";
 import { isManual } from "../lib/manual-connector";
-import { getAccountHistory, removeAccount, updateAccount } from "../lib/server/accounts";
+import { accountHistoryQuery } from "../lib/queries/accounts";
+import { removeAccount, updateAccount } from "../lib/server/accounts";
 import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
 import { AccountTagsModal } from "./account-tags-modal";
@@ -182,18 +183,13 @@ function DetailBody({
   // 非-manual 取最新快照冻结总额;manual 走账本 compute-on-read、由服务端补一个实时盯市末点(ADR 0018 / T5)。
   const [range, setRange] = useState<Range>("30d");
   const historyQuery = useQuery({
-    queryKey: ["account-history", account.id, range],
-    queryFn: () =>
-      getAccountHistory({
-        // connectorId 传给服务端做读路径分流(manual→账本 / 其余→快照),省一次账户反查。
-        data: {
-          accountId: account.id,
-          since: rangeSince(range, Date.now()),
-          connectorId: account.connectorId,
-        },
-      }),
+    ...accountHistoryQuery({
+      accountId: account.id,
+      range,
+      since: rangeSince(range, Date.now()),
+      connectorId: account.connectorId,
+    }),
     placeholderData: keepPreviousData,
-    staleTime: 60_000,
   });
   const series = historyQuery.data?.series ?? [];
 

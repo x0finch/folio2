@@ -29,12 +29,14 @@ import {
   isReduceOversold,
 } from "../lib/manual-history";
 import type { PickedToken } from "../lib/manual-types";
+import { manualAccountQuery } from "../lib/queries/accounts";
+import { accountKeys } from "../lib/queries/keys";
 import {
   createManualActivities,
   removeManualActivity,
   updateManualActivity,
 } from "../lib/server/manual-activities";
-import { getManualAccount, removeManualToken } from "../lib/server/manual-tokens";
+import { removeManualToken } from "../lib/server/manual-tokens";
 import type { TokenOption } from "../lib/token-option";
 import { buildOwnedOptions } from "../lib/token-search";
 import { HoverDetail } from "./hover-detail";
@@ -91,12 +93,8 @@ export function ManualTokensPanel({
   const dateFmt = useLocalDateFormat(LIST_DATE_FMT);
   const dateTimeFmt = useLocalDateFormat(DETAIL_DATETIME_FMT);
 
-  const detailKey = ["manual-account-detail", accountId] as const;
-  const detailQuery = useQuery({
-    queryKey: detailKey,
-    queryFn: () => getManualAccount({ data: { accountId } }),
-    staleTime: 30_000,
-  });
+  const detailKey = accountKeys.manualDetail(accountId);
+  const detailQuery = useQuery(manualAccountQuery(accountId));
   const tokens = useMemo(() => detailQuery.data?.tokens ?? [], [detailQuery.data]);
   const activities = useMemo(() => detailQuery.data?.activities ?? [], [detailQuery.data]);
 

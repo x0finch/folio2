@@ -12,7 +12,7 @@ import {
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { HeaderSync } from "../../components/header-sync";
 import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
@@ -29,6 +29,7 @@ import { mergeDefiGroups } from "../../lib/account-view";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
+import { accountListQuery } from "../../lib/queries/accounts";
 import type { PinScopeKey } from "../../lib/queries/keys";
 import {
   type PortfolioOverview,
@@ -38,7 +39,6 @@ import {
   tabPinsQuery,
 } from "../../lib/queries/portfolio";
 import { invalidateFor } from "../../lib/queries/refresh";
-import { listAccounts } from "../../lib/server/accounts";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../lib/server/tab-pins";
 import { listTags } from "../../lib/server/tags";
 
@@ -65,23 +65,18 @@ export const Route = createFileRoute("/_authed/")({
     // 与「选中哪个组合」无关的三件事先发出去,不等下面那个 await。
     const unscoped = Promise.all([
       queryClient.ensureQueryData(tabPinsQuery()),
+      queryClient.ensureQueryData(accountListQuery()),
       listTags(),
-      listAccounts(),
     ]);
     // 首屏口径 = 默认组合。**必须拿到真实的 defaultId**:组件是按 selectedId 读缓存的,
     // 预取时用「缺省 = 服务端自己定默认」的空参数,key 就与组件那份对不上,首屏等于白拉一遍。
     const { defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
-    const [[, tags, accounts]] = await Promise.all([
+    const [[, , tags]] = await Promise.all([
       unscoped,
       queryClient.ensureQueryData(portfolioOverviewQuery(defaultId)),
       queryClient.ensureQueryData(portfolioHistoryQuery(defaultId)),
     ]);
-    // 自定义 Tab 选择器备选:按 Connector = 用户拥有的去重 connectorId。allAccounts 是**全量**账户(id+名),
-    // 只用于 pin 标签解析(pin 是 per-user、跨 Portfolio 显示 → 标签得全量才解得出);picker 的账户选项在组件内
-    // 按选中 Portfolio 收窄(见 accountOptions)。按 Tag = 见组件内(按选中 Portfolio 过滤)。
-    const connectorIds = [...new Set(accounts.map((a) => a.connectorId))];
-    const allAccounts = accounts.map((a) => ({ id: a.id, label: a.label }));
-    return { tags, connectorIds, allAccounts };
+    return { tags };
   },
   pendingComponent: OverviewSkeleton,
   component: Overview,
@@ -125,8 +120,20 @@ function Overview() {
   // 不包就闪骨架。切组合那一半包在 usePortfolio 的 select 里。
   const selectTab = (v: string) => startTransition(() => setActive(v));
 
-  const { tags, connectorIds, allAccounts } = Route.useLoaderData();
+  const { tags } = Route.useLoaderData();
   const { data: pins } = useSuspenseQuery(tabPinsQuery());
+  // 自定义 Tab 选择器备选:按 Connector = 用户拥有的去重 connectorId。allAccounts 是**全量**账户(id+名),
+  // 只用于 pin 标签解析(pin 是 per-user、跨 Portfolio 显示 → 标签得全量才解得出);picker 的账户选项在下面
+  // 按选中 Portfolio 收窄(见 accountOptions)。按 Tag = 再往下(按选中 Portfolio 过滤)。
+  const { data: allAccountRows } = useSuspenseQuery(accountListQuery());
+  const connectorIds = useMemo(
+    () => [...new Set(allAccountRows.map((a) => a.connectorId))],
+    [allAccountRows],
+  );
+  const allAccounts = useMemo(
+    () => allAccountRows.map((a) => ({ id: a.id, label: a.label })),
+    [allAccountRows],
+  );
 
   // 手机端 tab 条横向滚动:选中在可视区外/半露的 tab 要滚进可视区,两侧留余量(不贴裁剪缘/合计)。
   // 手写横向校正而非 scrollIntoView:后者会连带滚 overflow-hidden 祖先和页面纵向;且选中 pin 后合计
