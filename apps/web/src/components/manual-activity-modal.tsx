@@ -49,6 +49,11 @@ export interface EditActivityInput {
   memo?: string;
 }
 
+// 上一次提交的结果,由父级(持有 mutation 的那一层)给。
+// **两种失败要分开**:`over` 是服务端照常返回的业务性拒绝(卖超,改个数字再来);
+// `failed` 是这次写压根没成(网络断了 / server fn 抛了)。糊成一句「操作失败」会让前者变得不可行动。
+export type SubmitResult = "over" | "failed" | null;
+
 // 编辑保存的 patch(store 保留 id/createdAt)。
 export interface ActivityPatch {
   kind: Kind;
@@ -153,14 +158,20 @@ function ActivityForm({
   onClose,
   onSubmit,
   onEdit,
+  pending,
+  submitResult,
 }: {
   defaultToken: PickedToken | null;
   lockToken?: boolean; // 从 token 行「编辑」进入:锁定该 token,不可改
   edit?: EditActivityInput | null; // 编辑既有活动:预填 + 锁定 token + 单条保存(非批量)
   owned?: readonly TokenOption[]; // 选币「已有代币」组:该侧边栏账户当前已有的币(#269)
   onClose: () => void;
-  onSubmit: (drafts: ActivityDraft[]) => Promise<{ ok: boolean }>;
-  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => Promise<{ ok: boolean }>;
+  onSubmit: (drafts: ActivityDraft[]) => void;
+  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => void;
+  /** 写在飞 —— 禁提交/保存钮。这一份由父的 mutation 持有,表单不再自己数。 */
+  pending: boolean;
+  /** 上一次提交的结果:`over` = 卖超 / `failed` = 写失败 / null = 没有可报的。 */
+  submitResult: SubmitResult;
 }) {
   const t = useTranslations("Activity");
   const tc = useTranslations("Common");
@@ -210,7 +221,6 @@ function ActivityForm({
   const [manualMode, setManualMode] = useState(Boolean(lockedToken && !lockedToken.ticket));
   // 单开编辑器:日期 / 时间 / 手续费 / 备注 互斥,点开一个在预览卡外展开,点外部或失焦收起(日期与时间也不同时开)。
   const [openEditor, setOpenEditor] = useState<"date" | "time" | "fee" | "memo" | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   // 用户是否手改过 price → 是则市价异步回填不再覆写(ref 避免闭包读旧值)。编辑态预填价格,视作已定。
@@ -288,42 +298,37 @@ function ActivityForm({
     ];
   };
 
-  // 提交/保存改走服务端(T4)→ 异步。busy 期间禁用按钮防重复提交;超支(res.ok=false)在 modal 内报错。
-  // 成功由父级 invalidate + 关闭 modal;本组件随之卸载,finally 的 setBusy 是无害 no-op(React 18)。
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
+  // 提交/保存是**发起**,不是等待:交给父级的 mutation,在飞与结果都由 `pending` / `submitResult` 回来。
+  // 以前这里 `await onSubmit(...)` 又只有 try/finally —— 父级那句裸 await 一旦抛(网络断了、
+  // server fn 500),异常穿过 finally 逃出 submit(),变成一条没人接的 unhandled rejection:
+  // 按钮恢复可点,但**画面上什么都不会说**。现在写失败会走 `submitResult === "failed"` 报出来。
+  const submit = () => {
     const drafts = toDrafts();
-    if (drafts.length === 0 || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await onSubmit(drafts);
-      if (!res.ok) setError(t("reduceTooMuch"));
-    } finally {
-      setBusy(false);
-    }
+    if (drafts.length === 0 || pending) return;
+    onSubmit(drafts);
   };
 
-  // 编辑态保存:把当前草稿转成 patch,交回父级更新该笔(保留 id/createdAt),超支则报错。
-  const saveEdit = async () => {
-    if (!edit || !onEdit || !draftValid(draft) || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await onEdit(edit.tokenId, edit.activityId, {
-        kind: draft.kind,
-        amount: Number(draft.amount),
-        occurredAt: draft.occurredAt,
-        memo: draft.memo.trim() || undefined,
-        price: numOrUndef(draft.price),
-        fee: draft.kind === "set" ? undefined : numOrUndef(draft.fee),
-      });
-      if (!res.ok) setError(t("reduceTooMuch"));
-    } finally {
-      setBusy(false);
-    }
+  // 编辑态保存:把当前草稿转成 patch,交回父级更新该笔(保留 id/createdAt)。
+  const saveEdit = () => {
+    if (!edit || !onEdit || !draftValid(draft) || pending) return;
+    onEdit(edit.tokenId, edit.activityId, {
+      kind: draft.kind,
+      amount: Number(draft.amount),
+      occurredAt: draft.occurredAt,
+      memo: draft.memo.trim() || undefined,
+      price: numOrUndef(draft.price),
+      fee: draft.kind === "set" ? undefined : numOrUndef(draft.fee),
+    });
   };
+
+  // 卖超与写失败是两回事:前者是服务端**照常返回**的业务性拒绝(数字不对,改了再来),
+  // 后者是这次写压根没成。文案分开,别都糊成一句「操作失败」。
+  const error =
+    submitResult === "over"
+      ? t("reduceTooMuch")
+      : submitResult === "failed"
+        ? ta("actionFailed")
+        : null;
 
   const requestClose = () => {
     if (dirty) setClosing(true);
@@ -613,7 +618,7 @@ function ActivityForm({
               type="button"
               className="flex-1"
               onClick={saveEdit}
-              disabled={!draftValid(draft) || busy}
+              disabled={!draftValid(draft) || pending}
             >
               {tc("save")}
             </Button>
@@ -627,7 +632,7 @@ function ActivityForm({
               type="button"
               className="flex-1"
               onClick={submit}
-              disabled={!draftValid(draft) || busy}
+              disabled={!draftValid(draft) || pending}
             >
               {t("submit")}
             </Button>
@@ -647,6 +652,8 @@ export function ManualActivityModal({
   onClose,
   onSubmit,
   onEdit,
+  pending,
+  submitResult,
 }: {
   open: boolean;
   defaultToken: PickedToken | null; // 默认选中(最新一笔活动的 token,或 token 行进入时锁定的 token)
@@ -654,8 +661,10 @@ export function ManualActivityModal({
   edit?: EditActivityInput | null; // 活动行「编辑」进入:预填既有活动、单条保存
   owned?: readonly TokenOption[]; // 选币「已有代币」组:该侧边栏账户当前已有的币(#269)
   onClose: () => void;
-  onSubmit: (drafts: ActivityDraft[]) => Promise<{ ok: boolean }>;
-  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => Promise<{ ok: boolean }>;
+  onSubmit: (drafts: ActivityDraft[]) => void;
+  onEdit?: (tokenId: string, activityId: string, patch: ActivityPatch) => void;
+  pending: boolean;
+  submitResult: SubmitResult;
 }) {
   const isDesktop = useMediaQuery("(min-width: 640px)");
   return (
@@ -683,6 +692,8 @@ export function ManualActivityModal({
             onClose={onClose}
             onSubmit={onSubmit}
             onEdit={onEdit}
+            pending={pending}
+            submitResult={submitResult}
           />
         )}
       </MorphingModal>

@@ -10,6 +10,22 @@ if (!("ResizeObserver" in globalThis)) {
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub;
 }
 
+// jsdom 同样没有 IntersectionObserver;motion/react 的 whileInView 与 TokenCombobox 的懒加载都用它。
+// 恒不相交的空 stub 就够:测试关心的是渲染与交互,不是「滚进视口了没」。
+class IntersectionObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+  takeRecords(): [] {
+    return [];
+  }
+}
+
+if (!("IntersectionObserver" in globalThis)) {
+  (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver =
+    IntersectionObserverStub;
+}
+
 // jsdom 无 matchMedia;主题 hook(use-theme)按 prefers-color-scheme 查询 → 最小 stub(恒 false)。
 if (typeof window !== "undefined" && !window.matchMedia) {
   window.matchMedia = (query: string) =>
