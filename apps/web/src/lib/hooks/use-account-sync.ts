@@ -3,10 +3,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { useTranslations } from "use-intl";
 import { invalidateFor } from "../queries/refresh";
+import { createRefreshThrottle, type RefreshThrottle } from "../refresh-throttle";
 import { readSyncStream } from "../sync-stream";
 
 // 账户同步的共享逻辑(PageHeader SyncStatus 复用):**一个请求**打到 /api/sync,服务端逐账户回结果,
-// 这里边收边更新 toast 进度,完成后 invalidate。
+// 这里边收边更新 toast 进度,**并且每完成一个账户就刷一次面板**(#417)。
 //
 // 以前是浏览器逐个调 syncAccount(并发 3)—— N 次往返,而且用户得一直停在页面上,关标签同步就断在半路。
 // 现在服务端用 waitUntil 兜住整轮(见 routes/api/sync.ts),这条流只是观察窗:
@@ -23,11 +24,17 @@ export function useAccountSync(accounts: { id: string; label: string }[]) {
   // 而且 `mutationFn` 与 onSuccess/onError 都要用同一份 —— onMutate 的返回值只到得了后者。
   const toastId = useRef<ReturnType<typeof toast.loading> | undefined>(undefined);
   const labels = useRef<Map<string, string>>(new Map());
+  // 这一轮的刷新节流器。**每轮一个**:它内部有「这一轮刷过没有 / 已收工」的状态,
+  // 跨轮复用会让第二轮的第一个账户被上一轮的窗口压住。策略与理由见 lib/refresh-throttle。
+  const refresh = useRef<RefreshThrottle | null>(null);
 
   const mutation = useMutation({
     onMutate: () => {
       // 服务端只回 accountId,展示名在这边。
       labels.current = new Map(accounts.map((a) => [a.id, a.label]));
+      refresh.current = createRefreshThrottle(() => {
+        void invalidateFor(queryClient, "sync.round");
+      });
       toastId.current = toast.loading(
         t("syncingProgress", { done: 0, total: accounts.length, current: "…" }),
       );
@@ -37,7 +44,7 @@ export function useAccountSync(accounts: { id: string; label: string }[]) {
       return readSyncStream(response, {
         total: accounts.length,
         labelOf: (accountId) => labels.current.get(accountId) ?? accountId,
-        onProgress: (p) =>
+        onProgress: (p) => {
           toast.loading(
             t("syncingProgress", {
               done: p.done,
@@ -45,7 +52,10 @@ export function useAccountSync(accounts: { id: string; label: string }[]) {
               current: p.lastLabel ?? "…",
             }),
             { id: toastId.current },
-          ),
+          );
+          // 这一行到达 = 这个账户的快照已经落库(服务端先写再报)→ 现在刷得到它。
+          refresh.current?.bump();
+        },
       });
     },
     onSuccess: (final) => {
@@ -72,8 +82,10 @@ export function useAccountSync(accounts: { id: string; label: string }[]) {
         }),
         { id: toastId.current },
       ),
-    // 成功失败都刷新:**同步本身可能仍在服务端跑**(waitUntil),让下次读取拿到已经落库的部分。
-    onSettled: () => invalidateFor(queryClient, "sync.round"),
+    // 成功失败都收工:取消挂起的尾随并保证最后一个账户的结果落地。
+    // 一个 bump 都没来过(整轮没跑起来)时它也会刷一次 —— **同步本身可能仍在服务端跑**(waitUntil),
+    // 部分快照可能已经落库了。
+    onSettled: () => refresh.current?.flush(),
   });
 
   const disabled = mutation.isPending || accounts.length === 0;

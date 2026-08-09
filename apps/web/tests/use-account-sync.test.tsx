@@ -63,12 +63,24 @@ const ACCOUNTS = [
 
 const setup = (accounts = ACCOUNTS) => renderHook(() => useAccountSync(accounts), { wrapper });
 
+// 数「刷了几次」而不是「invalidateQueries 被调了几次」:一次刷新会按映射表里的前缀数发好几条,
+// 只认同步域那一条就等于一次刷新。
+let refreshes: number;
+const countRefreshes = () => {
+  const original = client.invalidateQueries.bind(client);
+  vi.spyOn(client, "invalidateQueries").mockImplementation((filters, options) => {
+    if (Array.isArray(filters?.queryKey) && filters.queryKey[0] === "sync") refreshes += 1;
+    return original(filters, options);
+  });
+};
+
 describe("useAccountSync", () => {
   beforeEach(() => {
     toasts.length = 0;
     nextToastId = 0;
     // retry: false —— mutation 失败就是失败,别让默认重试把「失败该弹 error」这条测糊了。
     client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    refreshes = 0;
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -175,6 +187,51 @@ describe("useAccountSync", () => {
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
+    await waitFor(() =>
+      expect(client.getQueryState([...syncKeys.status()])?.isInvalidated).toBe(true),
+    );
+  });
+
+  it("三个账户依次到达 → 第一个到达后立刻刷过一次,总次数少于三次", async () => {
+    // 逐账户增量的两句承诺:先完成的先出现(所以第一个到达就得有一次刷新),
+    // 又不能变成刷新风暴(所以扎堆到达的三个不该刷三次)。
+    countRefreshes();
+    let push: ((line: unknown) => void) | undefined;
+    let close: (() => void) | undefined;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (line) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+        close = () => controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status: 200 })),
+    );
+
+    client.setQueryData([...syncKeys.status()], { total: 3 });
+
+    const { result } = setup([
+      { id: "a1", label: "Binance" },
+      { id: "a2", label: "Ledger" },
+      { id: "a3", label: "OKX" },
+    ]);
+    result.current.sync();
+
+    await waitFor(() => expect(push).toBeDefined());
+    push?.({ accountId: "a1", ok: true });
+    // 关键:**还没等整轮跑完**就已经刷过一次了。以前这里是 0。
+    await waitFor(() => expect(refreshes).toBeGreaterThanOrEqual(1));
+
+    push?.({ accountId: "a2", ok: true });
+    push?.({ accountId: "a3", ok: true });
+    close?.();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+
+    expect(refreshes).toBeGreaterThanOrEqual(1);
+    expect(refreshes).toBeLessThan(3); // 三个账户,不是三次刷新
+    // 最后一个账户的结果一定落地:收工那一下要么是尾随、要么已经由 leading 覆盖。
     await waitFor(() =>
       expect(client.getQueryState([...syncKeys.status()])?.isInvalidated).toBe(true),
     );
