@@ -217,6 +217,14 @@ function DetailBody({
     },
     onError: () => toast.error(t("actionFailed")),
   });
+  // 改名走 mutateAsync:EditableName 靠 onSave 抛不抛来决定保不保住编辑态,
+  // 而 mutateAsync 失败时会 reject —— 失败仍停在输入框里,用户接着改就行。
+  // (mutate 不会 reject,换成它的话失败会静悄悄退出编辑,刚打的字就没了。)
+  const renameMut = useMutation({
+    mutationFn: (label: string) => updateAccount({ data: { accountId: account.id, label } }),
+    onSuccess: refresh,
+    onError: () => toast.error(t("actionFailed")),
+  });
 
   // manual 不同步(ADR 0018):当下值实时由 creds 现造 → 显「实时」而非同步时间。
   const lastSynced = isManual(account.connectorId)
@@ -251,13 +259,7 @@ function DetailBody({
               editing={renaming}
               onEditingChange={setRenaming}
               onSave={async (name) => {
-                try {
-                  await updateAccount({ data: { accountId: account.id, label: name } });
-                  await refresh();
-                } catch (e) {
-                  toast.error(t("actionFailed"));
-                  throw e; // 保持编辑态,让用户重试
-                }
+                await renameMut.mutateAsync(name);
               }}
               displayClassName="font-semibold text-lg"
               className="pr-10"
