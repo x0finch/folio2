@@ -2,6 +2,7 @@ import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { LogoAvatar, Select, SelectContent, SelectItem, SelectTrigger } from "@folio/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
+import { writePreferenceCookie } from "../lib/cookies";
 import { CURRENCY_COOKIE } from "../lib/currency";
 import { usePreferCurrency } from "../lib/hooks/use-prefer-currency";
 import { invalidateFor } from "../lib/queries/refresh";
@@ -37,7 +38,7 @@ export function CurrencySwitcher() {
 
   function set(next: string) {
     if (next === currency.code) return;
-    document.cookie = `${CURRENCY_COOKIE}=${next}; path=/; max-age=31536000`;
+    writePreferenceCookie(CURRENCY_COOKIE, next);
     void invalidateFor(queryClient, "preference.currency");
   }
 
