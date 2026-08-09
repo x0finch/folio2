@@ -45,7 +45,10 @@ export const getLocalePreference = createServerFn({ method: "GET" }).handler(():
 // `readLocaleCookie` 的调用点全在 `lib/server/` 下),前端要用值是走 `preferenceKeys` 那两条查询。
 // 既然没人读,就该关掉脚本访问 —— 它顺带把「客户端偷偷写一下」这条路也堵死,与上面那条自洽。
 //
-// **不鉴权**:它写的是浏览器级展示偏好,不碰任何账户数据;而且登录页的语言切换器本来就在未登录时用。
+// **鉴权按调用点分,不按「它敏不敏感」分**:语言切换器在登录页就要能用,所以 `setLocalePreference`
+// 必须是公开的;而币种切换器只出现在认证区,读侧的 `getCurrencyPreference` 也带着 `requireAuth`,
+// 那写侧就没理由敞着 —— 敞着等于凭空多一个无凭据就能改别人显示状态的跨站 POST 目标。
+//
 // 一年:偏好没有「过期」这回事,续期靠用户下次再切;比 session 长得多,又不是永不过期。
 const PREFERENCE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
@@ -65,6 +68,7 @@ function writePreferenceCookie(name: string, value: string): void {
 // 代价是这一次切换会多一个请求(写一次 + 读一次),换来的是失效语义仍然只有一个出处。
 
 export const setCurrencyPreference = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
   .validator(z.object({ code: z.string() }))
   .handler(({ data }) => {
     // 落库前先过一遍 SUPPORTED:cookie 是用户可改的输入,别把垃圾写进去让读侧天天兜底。
