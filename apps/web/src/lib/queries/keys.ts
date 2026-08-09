@@ -15,3 +15,34 @@ export const syncKeys = {
   /** 全局同步状态摘要(页头同步面板 + 「立即同步」的账户集)。 */
   status: () => [...syncKeys.all, "status"] as const,
 };
+
+// 自定义 Tab 的目标(ADR 0034)。进 key 是因为**同一个总览查询按 pin 收窄之后是另一份数据** ——
+// 不进 key 就会两个 tab 共用一份缓存,切过去看到的是上一个 tab 的内容。
+export interface PinScopeKey {
+  kind: "connector" | "tag" | "account";
+  connectorId?: string;
+  tagId?: string;
+  accountId?: string;
+}
+
+export const portfolioKeys = {
+  /** 整个组合域的前缀。 */
+  all: ["portfolio"] as const,
+  /** 组合清单 + 默认组合 id。 */
+  list: () => [...portfolioKeys.all, "list"] as const,
+  /** 账户 → 所属组合。 */
+  memberships: () => [...portfolioKeys.all, "memberships"] as const,
+  /**
+   * 自定义 Tab 清单。**单独一层,不跟 overview 混**:增删一个 Tab 不该让昂贵的总览重拉一遍,
+   * 而映射表要指得动「只刷 Tab 清单」就得有这么一个前缀。
+   */
+  pins: () => [...portfolioKeys.all, "pins"] as const,
+  /**
+   * 组合总览。**portfolioId 必须是真实 id,不能用「缺省 = 默认」的 undefined** ——
+   * loader 预取的那份与组件按 selectedId 读的那份,key 对不上就等于首屏白拉一遍。
+   */
+  overview: (portfolioId: string, pin?: PinScopeKey) =>
+    [...portfolioKeys.all, "overview", portfolioId, pin ?? null] as const,
+  /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
+  history: (portfolioId: string) => [...portfolioKeys.all, "history", portfolioId] as const,
+};

@@ -5,8 +5,8 @@ import { LockScreen } from "../components/lock-screen";
 import { PortfolioSelector } from "../components/portfolio-selector";
 import { PortfolioProvider } from "../lib/hooks/use-portfolio";
 import { CurrencyProvider } from "../lib/hooks/use-prefer-currency";
+import { portfolioListQuery } from "../lib/queries/portfolio";
 import { syncStatusQuery } from "../lib/queries/sync";
-import { listPortfolios } from "../lib/server/portfolio";
 import { getCurrencyPreference } from "../lib/server/preferences";
 import { getSession } from "../lib/server/session";
 
@@ -24,20 +24,21 @@ export const Route = createFileRoute("/_authed")({
     return { user: current.user };
   },
   loader: async ({ context }) => {
-    const [preferCurrency, portfolios] = await Promise.all([
+    const [preferCurrency] = await Promise.all([
       getCurrencyPreference(),
-      listPortfolios(),
       context.queryClient.ensureQueryData(syncStatusQuery()),
+      context.queryClient.ensureQueryData(portfolioListQuery()),
     ]);
-    return { preferCurrency, portfolios };
+    return { preferCurrency };
   },
   component: AuthedLayout,
 });
 
 function AuthedLayout() {
   const { user } = Route.useRouteContext();
-  const { preferCurrency, portfolios } = Route.useLoaderData();
+  const { preferCurrency } = Route.useLoaderData();
   const { data: syncStatus } = useSuspenseQuery(syncStatusQuery());
+  const { data: portfolios } = useSuspenseQuery(portfolioListQuery());
   return (
     <CurrencyProvider value={preferCurrency}>
       {/* Portfolio 选中态(ADR 0033):住布局层,三页共享;不持久化(硬刷新回默认由布局重挂实现)。 */}
