@@ -39,8 +39,8 @@ import {
   tabPinsQuery,
 } from "../../lib/queries/portfolio";
 import { invalidateFor } from "../../lib/queries/refresh";
+import { tagListQuery } from "../../lib/queries/tags";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../lib/server/tab-pins";
-import { listTags } from "../../lib/server/tags";
 
 const MAX_PINS = 3;
 const TAB_SCROLL_MARGIN = 16; // 选中 tab 滚进可视区时两侧留的余量(px)
@@ -66,17 +66,16 @@ export const Route = createFileRoute("/_authed/")({
     const unscoped = Promise.all([
       queryClient.ensureQueryData(tabPinsQuery()),
       queryClient.ensureQueryData(accountListQuery()),
-      listTags(),
+      queryClient.ensureQueryData(tagListQuery()),
     ]);
     // 首屏口径 = 默认组合。**必须拿到真实的 defaultId**:组件是按 selectedId 读缓存的,
     // 预取时用「缺省 = 服务端自己定默认」的空参数,key 就与组件那份对不上,首屏等于白拉一遍。
     const { defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
-    const [[, , tags]] = await Promise.all([
+    await Promise.all([
       unscoped,
       queryClient.ensureQueryData(portfolioOverviewQuery(defaultId)),
       queryClient.ensureQueryData(portfolioHistoryQuery(defaultId)),
     ]);
-    return { tags };
   },
   pendingComponent: OverviewSkeleton,
   component: Overview,
@@ -120,7 +119,7 @@ function Overview() {
   // 不包就闪骨架。切组合那一半包在 usePortfolio 的 select 里。
   const selectTab = (v: string) => startTransition(() => setActive(v));
 
-  const { tags } = Route.useLoaderData();
+  const { data: tags } = useSuspenseQuery(tagListQuery());
   const { data: pins } = useSuspenseQuery(tabPinsQuery());
   // 自定义 Tab 选择器备选:按 Connector = 用户拥有的去重 connectorId。allAccounts 是**全量**账户(id+名),
   // 只用于 pin 标签解析(pin 是 per-user、跨 Portfolio 显示 → 标签得全量才解得出);picker 的账户选项在下面

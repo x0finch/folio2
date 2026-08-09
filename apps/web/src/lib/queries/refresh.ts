@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { accountKeys, portfolioKeys, syncKeys } from "./keys";
+import { accountKeys, portfolioKeys, syncKeys, tagKeys } from "./keys";
 
 // 刷新映射表:**一个写操作的语义 → 它改动了哪些 key 前缀**。
 //
@@ -34,6 +34,14 @@ export const REFRESH_MAP = {
    */
   "account.write": [accountKeys.all, portfolioKeys.all],
 
+  /**
+   * 标签的新建 / 改名 / 删除,以及给账户打标签 / 摘标签。
+   *
+   * **要连组合域一起刷。** 按标签固定的自定义 Tab 是靠标签关联收窄的 —— 摘掉一个标签,
+   * 那个 Tab 里就该少一个账户的持仓;只刷标签域会让那个视图停在旧内容。
+   */
+  "tag.write": [tagKeys.all, portfolioKeys.all],
+
   /** 新建 / 改名 / 删除组合、设默认组合、把账户移到别的组合 —— 清单、归属、两边的总览与走势都可能变。 */
   "portfolio.write": [portfolioKeys.all],
 
@@ -48,14 +56,14 @@ export const REFRESH_MAP = {
    *
    * 一个域的读一旦搬进 `ensureQueryData`,整页 `router.invalidate()` 就**再也刷不动它** ——
    * `ensureQueryData` 只要缓存里有数据就原样返回,压根不看 stale(react-query 源码如此,
-   * 与 `staleTime` 设成多少无关)。于是还没迁的写路径(打标签、改估值设置、过期价格自动刷新)
+   * 与 `staleTime` 设成多少无关)。于是还没迁的写路径(改估值设置、导入导出清理、过期价格自动刷新)
    * 对已迁的域会静默失效:不报错,只是数字不动。
    *
-   * 这条把**所有已迁的域**补刷一遍 —— 是「已迁」,不是「写路径没迁」:改估值设置、刷过期价格
-   * 这些还没迁的写操作会改到余额,账户域与组合域都得跟着动。所以只要这个 hook 还有调用点,
-   * 三个前缀就都留着;最后一个调用点没了(#416),这条连同 hook 一起删。
+   * 这条把**所有已迁的域**补刷一遍 —— 是「已迁」,不是「写路径没迁」:改估值设置、清理数据
+   * 这些还没迁的写操作能改到余额甚至删掉标签,四个域都得跟着动。所以只要这个 hook 还有调用点,
+   * 前缀就都留着;最后一个调用点没了(#416),这条连同 hook 一起删。
    */
-  "legacy.whole-page": [syncKeys.all, portfolioKeys.all, accountKeys.all],
+  "legacy.whole-page": [syncKeys.all, portfolioKeys.all, accountKeys.all, tagKeys.all],
 } satisfies Record<string, readonly QueryKey[]>;
 
 export type RefreshEvent = keyof typeof REFRESH_MAP;

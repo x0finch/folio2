@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it } from "vitest";
-import { accountKeys, portfolioKeys, syncKeys } from "../src/lib/queries/keys";
+import { accountKeys, portfolioKeys, syncKeys, tagKeys } from "../src/lib/queries/keys";
 import { invalidateFor, REFRESH_MAP } from "../src/lib/queries/refresh";
 
 // 刷新映射表的钉子。**这里钉的不是「表里写了什么」**(那是把代码抄一遍),而是
@@ -26,7 +26,7 @@ describe("刷新映射表", () => {
   it("sync.round 刷到同步状态,不误伤别的域", async () => {
     seed(syncKeys.status());
     // 还没迁的域(仍走整页刷新)不该被这条语义碰到 —— 误伤的代价是白打一趟服务器。
-    const untouched = ["tags", "list"] as const;
+    const untouched = ["settings", "valuation"] as const;
     seed(untouched);
 
     await invalidateFor(queryClient, "sync.round");
@@ -76,6 +76,23 @@ describe("刷新映射表", () => {
     seed(accountKeys.holdings());
     await invalidateFor(queryClient, "sync.round");
     expect(isInvalidated(accountKeys.holdings())).toBe(true);
+  });
+
+  // 按标签固定的自定义 Tab 是靠标签关联收窄的 —— 摘一个标签,那个 Tab 里就该少一个账户的持仓。
+  it("tag.write 同时刷标签域与组合域", async () => {
+    seed(tagKeys.list());
+    seed(tagKeys.accountLinks());
+    seed(portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }));
+
+    await invalidateFor(queryClient, "tag.write");
+
+    expect(
+      [
+        tagKeys.list(),
+        tagKeys.accountLinks(),
+        portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }),
+      ].map(isInvalidated),
+    ).toEqual([true, true, true]);
   });
 
   it("portfolio.write 刷整个组合域(清单、归属、总览一起)", async () => {
@@ -128,6 +145,7 @@ describe("刷新映射表", () => {
       syncKeys.all,
       portfolioKeys.all,
       accountKeys.all,
+      tagKeys.all,
     ];
     for (const [event, prefixes] of Object.entries(REFRESH_MAP)) {
       expect(prefixes.length, `${event} 至少要刷一个前缀`).toBeGreaterThan(0);

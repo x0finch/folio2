@@ -1,15 +1,16 @@
 import type { Tag } from "@folio/db";
 import { MorphingModal, toast, useMediaQuery } from "@folio/ui";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
-import { useLegacyRefresh } from "../lib/hooks/use-legacy-refresh";
+import { invalidateFor } from "../lib/queries/refresh";
 import { attachTag, createTag, deleteTag, detachTag, renameTag } from "../lib/server/tags";
 import { Portal } from "./portal";
 import { TagInput } from "./tag-input";
 
 // 「打标签」弹窗(ADR 0034):MorphingModal + Portal(同删除确认那套,必须 Portal 出抽屉的 transform 包含块)。
-// 交付「点即生效」:attach/detach 用本地 optimistic overlay 即时反馈,后台发 server fn + 刷新同步
-// 账户行徽章;create/rename/delete 走 server + invalidate(低频,round-trip 可接受)。纯展示交互在 TagInput。
+// 交付「点即生效」:attach/detach 用本地 optimistic overlay 即时反馈,后台发 server fn + 定向刷新同步
+// 账户行徽章;create/rename/delete 走 server + 定向刷新(低频,round-trip 可接受)。纯展示交互在 TagInput。
 export function AccountTagsModal({
   accountId,
   accountLabel,
@@ -30,8 +31,10 @@ export function AccountTagsModal({
   onClose: () => void;
 }) {
   const t = useTranslations("Tags");
-  // 标签域还没迁(#415)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
-  const refresh = useLegacyRefresh();
+  const queryClient = useQueryClient();
+  // 定向刷新。**它 resolve 的时刻仍然晚于「真实数据到位」** —— `invalidateQueries` 等的是
+  // 挂载中那些查询重拉完,所以下面那套「等真值追上乐观值再撤 overlay」的对账原样成立。
+  const refresh = () => invalidateFor(queryClient, "tag.write");
   const isDesktop = useMediaQuery("(min-width: 640px)");
   // toggle 的乐观 overlay:tagId → 期望的 attached 值。即时反馈,后台 server fn + invalidate 落库。
   const [optim, setOptim] = useState<Map<string, boolean>>(new Map());
@@ -41,9 +44,14 @@ export function AccountTagsModal({
   // 删除的乐观隐藏:确认即从列表撤下,不等 delete + invalidate。失败则放回去。
   const [removing, setRemoving] = useState<Set<string>>(new Set());
 
-  // 本组件的数据来自**路由 loader**(listTags),不在 React Query 缓存里 → 没有 setQueryData 可改、
-  // 也没有 cache snapshot 可回滚。三处乐观(挂载 / 新建 / 删除)都是同一形状的本地 overlay:
-  // 先改本地 → 发 server fn → refresh() → 等 loader 数据追上再撤 overlay(撤早了会闪)。
+  // 三处乐观(挂载 / 新建 / 删除)都是同一形状的**本地 overlay**:先改本地 → 发 server fn →
+  // refresh() → 等真实数据追上再撤 overlay(撤早了会闪)。
+  //
+  // **迁进 react-query 之后没有改成 `setQueryData` 直改缓存**,虽然现在技术上做得到了。理由:
+  // 本组件收到的是**已经拼装过的投影**(`portfolioTags` / `attachedTagIds` 由账户页拼好传下来),
+  // 直改缓存要反向去改两条原始查询、再指望拼装结果如愿变化;而本地 overlay 只描述「这一格现在
+  // 应该长什么样」,与拼装无关。乐观更新的形状是被「点即生效不能闪」这条需求逼出来的,不是
+  // 因为当时没有缓存可改 —— 换成缓存写法并不会更简单,只会把闪烁的可能面铺得更宽。
 
   // 对账式修剪:等 invalidate 后 attachedTagIds 追上乐观值,才把那条 overlay 撤下(此刻撤 = 无视觉变化)。
   // 不在 onToggle 成功回调里立刻撤 —— 那会与 loader 数据传播抢跑,先露出旧态再翻回来 = 闪一下。
