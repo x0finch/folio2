@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { portfolioKeys, syncKeys } from "./keys";
+import { accountKeys, portfolioKeys, syncKeys } from "./keys";
 
 // 刷新映射表:**一个写操作的语义 → 它改动了哪些 key 前缀**。
 //
@@ -33,12 +33,15 @@ export const REFRESH_MAP = {
   /**
    * **过渡期专用,#416 连同 `useLegacyRefresh` 一起删掉。**
    *
-   * 还没迁的域仍靠整页 `router.invalidate()` 刷新,而那条路只在数据 stale 时才真拉 ——
-   * 已经开了 `staleTime` 的域于是对它**静默失效**(改了账户,总览停在旧数字,不报错)。
-   * 这条把「已开缓存的域」补刷一遍,让整页刷新在过渡期继续管用。
-   * 某个域的写路径迁完时,它的前缀从这里挪走;全部迁完这条就空了,随 hook 一起删。
+   * 一个域的读一旦搬进 `ensureQueryData`,整页 `router.invalidate()` 就**再也刷不动它** ——
+   * `ensureQueryData` 只要缓存里有数据就原样返回,压根不看 stale(react-query 源码如此,
+   * 与 `staleTime` 设成多少无关)。于是还没迁的写路径(打标签、改估值设置、过期价格自动刷新)
+   * 对已迁的域会静默失效:不报错,只是数字不动。
+   *
+   * 这条把**所有已迁的域**补刷一遍。某个域的写路径迁完时,它的前缀从这里挪走;
+   * 全部迁完这条就空了,随 hook 一起删。
    */
-  "legacy.whole-page": [portfolioKeys.all],
+  "legacy.whole-page": [syncKeys.all, portfolioKeys.all, accountKeys.all],
 } satisfies Record<string, readonly QueryKey[]>;
 
 export type RefreshEvent = keyof typeof REFRESH_MAP;
