@@ -3,7 +3,7 @@ import { cn, SharedLayoutBg } from "@folio/ui";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
 import { AddAccountModal, type CompleteTarget } from "../../components/add-account-modal";
@@ -13,6 +13,7 @@ import { AccountsSkeleton } from "../../components/skeletons";
 import { TagBadges } from "../../components/tag-badges";
 import { TokenStack } from "../../components/token-stack";
 import { ValueDelta } from "../../components/value-delta";
+import { buildAccountRows } from "../../lib/account-rows";
 import { accountShare, activeAccountsTotal, shareLabel } from "../../lib/account-share";
 import { sortActiveAccounts } from "../../lib/account-sort";
 import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-sync-status";
@@ -21,56 +22,23 @@ import { aggregateDayChange } from "../../lib/day-value-change";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { isManual } from "../../lib/manual-connector";
+import { accountHoldingsQuery, accountListQuery } from "../../lib/queries/accounts";
 import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
-import { listAccounts } from "../../lib/server/accounts";
-import { listAccountHoldings } from "../../lib/server/portfolio";
 import { listAccountTags, listTags } from "../../lib/server/tags";
 
 export const Route = createFileRoute("/_authed/accounts")({
+  // 账户域的读取已迁 react-query(#413):loader 只**预取**,拼行的活挪进组件 —— 四个来源现在
+  // 各自是一条查询、各自的到达时刻不同,拼装得跟着数据走而不是跟着 loader 走。
+  // 标签那两项还没迁(#415),仍由 loader 直返。
   loader: async ({ context: { queryClient } }) => {
-    // 合并两源:listAccountHoldings 给活跃账户的市值/上次同步/持仓;listAccounts 给全部账户(含归档)的
-    // 凭据态 + archivedAt。归档账户不在 overview.rows(见 portfolio.ts 过滤)→ 其 value/holdings 为空。
-    // memberships:按选中 Portfolio 客户端过滤账户列表用(账户页已加载全部账户,过滤在客户端即可)。
-    // 归属已迁 react-query(#411 / #412):**loader 只预取,组件从缓存读** —— 移动账户改成定向刷新
-    // 之后,这一页要跟着变就只能从缓存读(loader 直返的那份没人会去重跑它)。
-    // 账户那几项还没迁(#413),仍直接调。
-    const [overview, accounts, memberships, allTags, tagLinks] = await Promise.all([
-      listAccountHoldings(),
-      listAccounts(),
+    const [, , , allTags, tagLinks] = await Promise.all([
+      queryClient.ensureQueryData(accountHoldingsQuery()),
+      queryClient.ensureQueryData(accountListQuery()),
       queryClient.ensureQueryData(portfolioMembershipsQuery()),
       listTags(),
       listAccountTags(),
     ]);
-    const byId = new Map(overview.rows.map((r) => [r.account.id, r]));
-    const portfolioOf = new Map(memberships.map((m) => [m.accountId, m.portfolioId]));
-    const tagsById = new Map(allTags.map((tg) => [tg.id, tg]));
-    // 每账户已打的 Tag(展示投影:id + 名字)。
-    const tagsOfAccount = new Map<string, { id: string; name: string }[]>();
-    for (const l of tagLinks) {
-      const tg = tagsById.get(l.tagId);
-      if (!tg) continue;
-      const list = tagsOfAccount.get(l.accountId) ?? [];
-      list.push({ id: tg.id, name: tg.name });
-      tagsOfAccount.set(l.accountId, list);
-    }
-    const rows: AccountRow[] = accounts.map((a) => {
-      const ov = byId.get(a.id);
-      return {
-        id: a.id,
-        label: a.label,
-        connectorId: a.connectorId,
-        archivedAt: a.archivedAt,
-        totalUsd: ov?.totalUsd ?? 0,
-        takenAt: ov?.takenAt ?? null,
-        balances: ov?.balances ?? [],
-        note: ov?.note,
-        needsCredentials: a.needsCredentials,
-        credsSafe: a.credsSafe,
-        portfolioId: portfolioOf.get(a.id) ?? "",
-        tags: tagsOfAccount.get(a.id) ?? [],
-      };
-    });
-    return { rows, allTags, tagLinks, pricesStale: overview.pricesStale };
+    return { allTags, tagLinks };
   },
   pendingComponent: AccountsSkeleton,
   component: Accounts,
@@ -79,8 +47,15 @@ export const Route = createFileRoute("/_authed/accounts")({
 function Accounts() {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const { rows: allRows, allTags, tagLinks, pricesStale } = Route.useLoaderData();
+  const { allTags, tagLinks } = Route.useLoaderData();
+  const { data: accounts } = useSuspenseQuery(accountListQuery());
+  const { data: holdings } = useSuspenseQuery(accountHoldingsQuery());
   const { data: memberships } = useSuspenseQuery(portfolioMembershipsQuery());
+  const allRows = useMemo(
+    () => buildAccountRows({ accounts, holdings, memberships, allTags, tagLinks }),
+    [accounts, holdings, memberships, allTags, tagLinks],
+  );
+  const pricesStale = holdings.pricesStale;
   const { selectedId: selectedPortfolioId, defaultId } = usePortfolio();
   useStalePriceRefresh(pricesStale); // SWR:先展示旧价,后台刷新后 invalidate 二次展示
 

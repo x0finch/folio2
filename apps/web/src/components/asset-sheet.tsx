@@ -19,7 +19,7 @@ import { collapseToSlots } from "../lib/collapse-to-slots";
 import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { getHoldingHistory } from "../lib/server/holdings";
+import { holdingHistoryQuery } from "../lib/queries/accounts";
 import { signedUsd } from "../lib/signed-usd";
 import {
   ACCOUNT_SLOTS,
@@ -194,10 +194,8 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
   const [range, setRange] = useState<Range>("30d");
   const since = rangeSince(range, Date.now());
   const historyQuery = useQuery({
-    queryKey: ["token-history", holding.key, range],
-    queryFn: () => getHoldingHistory({ data: { key: holding.key, since } }),
+    ...holdingHistoryQuery({ holdingKey: holding.key, range, since }),
     placeholderData: keepPreviousData,
-    staleTime: 60_000,
   });
   const series = historyQuery.data?.series ?? [];
 

@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it } from "vitest";
-import { portfolioKeys, syncKeys } from "../src/lib/queries/keys";
+import { accountKeys, portfolioKeys, syncKeys } from "../src/lib/queries/keys";
 import { invalidateFor, REFRESH_MAP } from "../src/lib/queries/refresh";
 
 // 刷新映射表的钉子。**这里钉的不是「表里写了什么」**(那是把代码抄一遍),而是
@@ -26,7 +26,7 @@ describe("刷新映射表", () => {
   it("sync.round 刷到同步状态,不误伤别的域", async () => {
     seed(syncKeys.status());
     // 还没迁的域(仍走整页刷新)不该被这条语义碰到 —— 误伤的代价是白打一趟服务器。
-    const untouched = ["accounts", "list"] as const;
+    const untouched = ["tags", "list"] as const;
     seed(untouched);
 
     await invalidateFor(queryClient, "sync.round");
@@ -78,10 +78,31 @@ describe("刷新映射表", () => {
     expect(isInvalidated(portfolioKeys.overview("pf-1"))).toBe(false);
   });
 
+  // **过渡期最要命的一条。** 一个域的读一旦搬进 `ensureQueryData`,整页 `router.invalidate()`
+  // 就再也刷不动它(缓存里有数据就原样返回,不看 stale)。所以只要还有写路径没迁,
+  // `legacy.whole-page` 就必须罩住**每一个已迁的域** —— 漏一个的表现是「改了东西画面不变」,
+  // 不报错。这条最初就是被漏掉的:账户的读迁完、写还没迁那一片,加账户之后账户行不出现,
+  // 由 e2e 抓出来。
+  it("legacy.whole-page 罩住映射表里出现过的每一个域", () => {
+    const mentioned = new Set(
+      Object.entries(REFRESH_MAP)
+        .filter(([event]) => event !== "legacy.whole-page")
+        .flatMap(([, prefixes]) => prefixes.map((p) => String(p[0]))),
+    );
+    const covered = new Set(REFRESH_MAP["legacy.whole-page"].map((p) => String(p[0])));
+    for (const domain of mentioned) {
+      expect(covered.has(domain), `已迁的域 "${domain}" 不在 legacy.whole-page 里`).toBe(true);
+    }
+  });
+
   // 结构性的一条:表里每条前缀都得是**某个域前缀**下的东西,而不是随手写的字符串数组。
   // 域前缀集合随各片迁移增长,这条会跟着自动覆盖新加的条目。
   it("表里每条前缀都落在已知的域前缀上", () => {
-    const domains: readonly (readonly string[])[] = [syncKeys.all, portfolioKeys.all];
+    const domains: readonly (readonly string[])[] = [
+      syncKeys.all,
+      portfolioKeys.all,
+      accountKeys.all,
+    ];
     for (const [event, prefixes] of Object.entries(REFRESH_MAP)) {
       expect(prefixes.length, `${event} 至少要刷一个前缀`).toBeGreaterThan(0);
       for (const prefix of prefixes) {
