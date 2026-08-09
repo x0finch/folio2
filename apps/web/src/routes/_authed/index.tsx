@@ -9,7 +9,7 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
@@ -194,22 +194,25 @@ function Overview() {
     .filter((tg) => tg.portfolioId === selectedId)
     .map((tg) => ({ id: tg.id, name: tg.name }));
 
+  // 自定义 Tab 的三处写。三个都只做「刷 Tab 清单 + 失败弹一句」,所以 onSuccess/onError 长得像;
+  // 分成三个 mutation 而不是一个,是为了各自有独立的 isPending —— 见 ＋ 钮与「取消固定」的 disabled。
   const failPin = () => toast.error(tct("actionFailed"));
-  const addPin = (choice: PinTargetChoice) => {
-    createTabPin({ data: choice })
-      .then(async (pin) => {
-        // 先等 Tab 清单刷新、新 tab 挂上再选中 —— 提前选中会让 active 短暂指向不存在的 tab,
-        // 被 clamp 回 tokens,药丸先滑到第一个再滑回来(实测)。
-        await invalidateFor(queryClient, "portfolio.pin.write");
-        selectTab(pin.id);
-      })
-      .catch(failPin);
-  };
-  const repointPin = (pinId: string, choice: PinTargetChoice) => {
-    updateTabPinTarget({ data: { pinId, ...choice } })
-      .then(() => invalidateFor(queryClient, "portfolio.pin.write"))
-      .catch(failPin);
-  };
+  const addPinMut = useMutation({
+    mutationFn: (choice: PinTargetChoice) => createTabPin({ data: choice }),
+    onSuccess: async (pin) => {
+      // 先等 Tab 清单刷新、新 tab 挂上再选中 —— 提前选中会让 active 短暂指向不存在的 tab,
+      // 被 clamp 回 tokens,药丸先滑到第一个再滑回来(实测)。
+      await invalidateFor(queryClient, "portfolio.pin.write");
+      selectTab(pin.id);
+    },
+    onError: failPin,
+  });
+  const repointPinMut = useMutation({
+    mutationFn: ({ pinId, choice }: { pinId: string; choice: PinTargetChoice }) =>
+      updateTabPinTarget({ data: { pinId, ...choice } }),
+    onSuccess: () => invalidateFor(queryClient, "portfolio.pin.write"),
+    onError: failPin,
+  });
 
   const { totalUsd: heroTotal } = portfolioData;
   const series = history.series;
@@ -233,15 +236,20 @@ function Overview() {
   // beUI Tabs 的受控值:视角 tab 与自定义 pin 共用**同一个** Tabs(共享滑动药丸);pin 激活时值 = pin id。
   const activeValue = isPinView ? shownActive : (activeKind ?? "tokens");
 
+  // 删 pin 定义在这里(不和上面两个挨着):它要先按 kindTabs / pins 算「回到哪个左邻」,
+  // 而 kindTabs 依赖上面那段 portfolioData 的推导 —— 挪上去就得把那一段也搬上去。
+  const unpinMut = useMutation({
+    mutationFn: (pinId: string) => deleteTabPin({ data: { pinId } }),
+    onSuccess: () => invalidateFor(queryClient, "portfolio.pin.write"),
+    onError: failPin,
+  });
   const onUnpin = (pinId: string) => {
     if (shownActive === pinId) {
       // 取消当前激活的 → 回**左邻**:前一个 pin,没有则最后一个视角 tab(别一路滑回第一个)。
       const idx = pins.findIndex((p) => p.id === pinId);
       selectTab(idx > 0 ? pins[idx - 1].id : kindTabs[kindTabs.length - 1]);
     }
-    deleteTabPin({ data: { pinId } })
-      .then(() => invalidateFor(queryClient, "portfolio.pin.write"))
-      .catch(failPin);
+    unpinMut.mutate(pinId);
   };
   const viewSubtotal =
     activeKind === "perps"
@@ -308,8 +316,9 @@ function Overview() {
                       connectorOptions={connectorOptions}
                       tagOptions={tagOptions}
                       accountOptions={accountOptions}
-                      onRepoint={(choice) => repointPin(p.id, choice)}
+                      onRepoint={(choice) => repointPinMut.mutate({ pinId: p.id, choice })}
                       onUnpin={() => onUnpin(p.id)}
+                      unpinning={unpinMut.isPending}
                     />
                   ))}
                   {pins.length < MAX_PINS && (
@@ -317,7 +326,8 @@ function Overview() {
                       connectorOptions={connectorOptions}
                       tagOptions={tagOptions}
                       accountOptions={accountOptions}
-                      onPick={addPin}
+                      onPick={(choice) => addPinMut.mutate(choice)}
+                      adding={addPinMut.isPending}
                     />
                   )}
                 </TabsList>
@@ -600,6 +610,7 @@ function PinTab({
   accountOptions,
   onRepoint,
   onUnpin,
+  unpinning,
 }: {
   value: string;
   label: string;
@@ -610,6 +621,8 @@ function PinTab({
   accountOptions: { id: string; label: string }[];
   onRepoint: (choice: PinTargetChoice) => void;
   onUnpin: () => void;
+  /** 删除在飞 —— 禁掉「取消固定」,免得连点两次发两个 delete。 */
+  unpinning: boolean;
 }) {
   const tct = useTranslations("CustomTabs");
   const canHover = useMediaQuery("(hover: hover)");
@@ -664,7 +677,8 @@ function PinTab({
           <button
             type="button"
             onClick={onUnpin}
-            className="rounded-md px-2 py-1.5 text-left text-destructive text-sm transition-colors hover:bg-destructive/10"
+            disabled={unpinning}
+            className="rounded-md px-2 py-1.5 text-left text-destructive text-sm transition-colors hover:bg-destructive/10 disabled:opacity-50"
           >
             {tct("unpin")}
           </button>
@@ -680,11 +694,15 @@ function AddPinButton({
   tagOptions,
   accountOptions,
   onPick,
+  adding,
 }: {
   connectorOptions: { id: string; label: string }[];
   tagOptions: { id: string; name: string }[];
   accountOptions: { id: string; label: string }[];
   onPick: (choice: PinTargetChoice) => void;
+  /** 建 pin 在飞 —— 禁掉 ＋。`pins.length < MAX_PINS` 这道闸是拿**刷新前**的清单算的,
+   *  不禁的话连着加两个就能越过上限,而越过之后没有任何东西会把它纠回来。 */
+  adding: boolean;
 }) {
   const tct = useTranslations("CustomTabs");
   const canHover = useMediaQuery("(hover: hover)");
@@ -699,7 +717,8 @@ function AddPinButton({
         type="button"
         aria-label={tct("add")}
         onClick={p.onClick}
-        className="flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground"
+        disabled={adding}
+        className="flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
       >
         <Plus className="size-4" />
       </button>
