@@ -1,8 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequestHeaders } from "@tanstack/react-start/server";
-import { readCurrencyCookie, resolveCurrency } from "../currency";
+import { getRequestHeaders, getRequestUrl, setCookie } from "@tanstack/react-start/server";
+import { z } from "zod";
+import { CURRENCY_COOKIE, readCurrencyCookie, resolveCurrency } from "../currency";
 import type { PreferCurrency } from "../hooks/use-prefer-currency";
-import { pickLocale, readLocaleCookie } from "../i18n/detect";
+import { LOCALE_COOKIE, pickLocale, readLocaleCookie } from "../i18n/detect";
 import type { Locale } from "../i18n/messages";
 import { displayRate } from "./internal/fx";
 import { requireAuth } from "./internal/require-auth";
@@ -33,3 +34,50 @@ export const getLocalePreference = createServerFn({ method: "GET" }).handler(():
   const headers = getRequestHeaders();
   return pickLocale(readLocaleCookie(headers.get("cookie")), headers.get("accept-language"));
 });
+
+// ─── 写 ───────────────────────────────────────────────────────────────────────
+//
+// **偏好 cookie 在服务端写,客户端不碰 `document.cookie`。** 以前三个切换器各自
+// `document.cookie = ...`,那样只设得上 `Path` 和 `Max-Age` —— `HttpOnly` 从定义上就设不了,
+// `SameSite` / `Secure` 也一个都没写。搬到这里之后三样都能设,而且只有一处能设。
+//
+// **`HttpOnly` 在这里是白拿的**:这两个 cookie 没有任何客户端读者(`readCurrencyCookie` /
+// `readLocaleCookie` 的调用点全在 `lib/server/` 下),前端要用值是走 `preferenceKeys` 那两条查询。
+// 既然没人读,就该关掉脚本访问 —— 它顺带把「客户端偷偷写一下」这条路也堵死,与上面那条自洽。
+//
+// **鉴权按调用点分,不按「它敏不敏感」分**:语言切换器在登录页就要能用,所以 `setLocalePreference`
+// 必须是公开的;而币种切换器只出现在认证区,读侧的 `getCurrencyPreference` 也带着 `requireAuth`,
+// 那写侧就没理由敞着 —— 敞着等于凭空多一个无凭据就能改别人显示状态的跨站 POST 目标。
+//
+// 一年:偏好没有「过期」这回事,续期靠用户下次再切;比 session 长得多,又不是永不过期。
+const PREFERENCE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+function writePreferenceCookie(name: string, value: string): void {
+  setCookie(name, value, {
+    path: "/",
+    maxAge: PREFERENCE_COOKIE_MAX_AGE_SECONDS,
+    httpOnly: true,
+    // Lax 而不是 Strict:从外链跳进来时偏好该保住,而这两个值没有任何 CSRF 价值。
+    sameSite: "lax",
+    // 按请求协议判断,不能写死 —— 本地 dev 是 http://localhost,硬加 Secure 会让 cookie 根本设不上。
+    secure: getRequestUrl().protocol === "https:",
+  });
+}
+
+// 写完不回传新值:调用点照旧走 `invalidateFor`,由那张映射表决定刷哪些读(ADR 0038)。
+// 代价是这一次切换会多一个请求(写一次 + 读一次),换来的是失效语义仍然只有一个出处。
+
+export const setCurrencyPreference = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(z.object({ code: z.string() }))
+  .handler(({ data }) => {
+    // 落库前先过一遍 SUPPORTED:cookie 是用户可改的输入,别把垃圾写进去让读侧天天兜底。
+    writePreferenceCookie(CURRENCY_COOKIE, resolveCurrency(data.code).code);
+  });
+
+export const setLocalePreference = createServerFn({ method: "POST" })
+  .validator(z.object({ locale: z.string() }))
+  .handler(({ data }) => {
+    // 同上:`pickLocale` 认不出来就落默认,写进去的一定是合法 locale。
+    writePreferenceCookie(LOCALE_COOKIE, pickLocale(data.locale, null));
+  });

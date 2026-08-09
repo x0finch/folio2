@@ -28,13 +28,11 @@ import { EditableName } from "../../components/editable-name";
 import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signIn, signOut } from "../../lib/auth-client";
-import { writePreferenceCookie } from "../../lib/cookies";
 import { clearIdleLockState } from "../../lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "../../lib/hooks/use-idle-timeout";
 import { useLockDevice } from "../../lib/hooks/use-lock-device";
 import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
 import { usePlatformAuthenticator } from "../../lib/hooks/use-platform-authenticator";
-import { LOCALE_COOKIE } from "../../lib/i18n/detect";
 import { IDLE_TIMEOUT_MINUTES } from "../../lib/idle-lock";
 import { importData } from "../../lib/import-data";
 import { getAuthenticatorName, passkeyKind } from "../../lib/passkey-authenticators";
@@ -45,6 +43,7 @@ import {
   valuationSettingsQuery,
 } from "../../lib/queries/settings";
 import { registerPasskey } from "../../lib/register-passkey";
+import { setLocalePreference } from "../../lib/server/preferences";
 import { updateValuationSettings } from "../../lib/server/settings";
 import type { Theme } from "../../lib/theme";
 
@@ -586,10 +585,14 @@ function AppearanceCard() {
   // 挂载后借 layoutId 平滑滑到位。语言走 cookie/SSR 一致,无需此处理。
   const { theme: themeValue, setTheme } = useMountedTheme();
 
+  const localeMut = useMutation({
+    mutationFn: (next: string) => setLocalePreference({ data: { locale: next } }),
+    onSuccess: () => invalidateFor(queryClient, "preference.locale"),
+  });
+
   function setLocale(next: string) {
     if (next === locale) return;
-    writePreferenceCookie(LOCALE_COOKIE, next);
-    void invalidateFor(queryClient, "preference.locale");
+    localeMut.mutate(next);
   }
 
   return (

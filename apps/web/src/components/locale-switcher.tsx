@@ -1,9 +1,8 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocale } from "use-intl";
-import { writePreferenceCookie } from "../lib/cookies";
-import { LOCALE_COOKIE } from "../lib/i18n/detect";
 import type { Locale } from "../lib/i18n/messages";
 import { invalidateFor } from "../lib/queries/refresh";
+import { setLocalePreference } from "../lib/server/preferences";
 
 const OPTIONS: { value: Locale; label: string }[] = [
   { value: "en", label: "EN" },
@@ -15,10 +14,14 @@ const OPTIONS: { value: Locale; label: string }[] = [
 export function LocaleSwitcher() {
   const queryClient = useQueryClient();
   const locale = useLocale();
+  const setLocale = useMutation({
+    mutationFn: (next: Locale) => setLocalePreference({ data: { locale: next } }),
+    onSuccess: () => invalidateFor(queryClient, "preference.locale"),
+  });
+
   function set(next: Locale) {
     if (next === locale) return;
-    writePreferenceCookie(LOCALE_COOKIE, next);
-    void invalidateFor(queryClient, "preference.locale");
+    setLocale.mutate(next);
   }
   return (
     <div className="flex gap-2 text-sm">
