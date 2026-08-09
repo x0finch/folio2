@@ -34,6 +34,7 @@ vi.mock("use-intl", () => ({
 }));
 
 const { useAccountSync } = await import("../src/lib/hooks/use-account-sync");
+const { syncKeys } = await import("../src/lib/queries/keys");
 
 // NDJSON 响应体:每个对象一行。分片位置故意不落在行边界上 —— 解析器该自己攒 buffer。
 function ndjsonResponse(lines: unknown[], { ok = true }: { ok?: boolean } = {}): Response {
@@ -50,11 +51,13 @@ function ndjsonResponse(lines: unknown[], { ok = true }: { ok?: boolean } = {}):
   return new Response(body, { status: ok ? 200 : 500 });
 }
 
-const wrapper = ({ children }: { children: ReactNode }) => {
-  // retry: false —— mutation 失败就是失败,别让默认重试把「失败该弹 error」这条测糊了。
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-};
+// 每个用例一个新的 client。**提到模块级**是为了让用例能回头看缓存里发生了什么
+//(定向刷新有没有刷到同步状态)—— 藏在 wrapper 闭包里就够不着了。
+let client: QueryClient;
+
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={client}>{children}</QueryClientProvider>
+);
 
 const ACCOUNTS = [
   { id: "a1", label: "Binance" },
@@ -68,6 +71,8 @@ describe("useAccountSync", () => {
     toasts.length = 0;
     nextToastId = 0;
     invalidate.mockClear();
+    // retry: false —— mutation 失败就是失败,别让默认重试把「失败该弹 error」这条测糊了。
+    client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -159,6 +164,24 @@ describe("useAccountSync", () => {
     result.current.sync();
     await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
     expect(toasts).toHaveLength(0);
+  });
+
+  it("一轮结束后同步状态被定向刷新(不只是整页刷新)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ndjsonResponse([{ accountId: "a1", ok: true }])),
+    );
+    // 缓存里先有一份「已经拿到过」的同步状态,才谈得上它有没有被标记为旧。
+    client.setQueryData([...syncKeys.status()], { total: 1 });
+    const { result } = setup();
+
+    result.current.sync();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+
+    // 整页刷新碰不到 react-query 缓存 —— 所以这条不能靠上面那个 invalidate mock 来断言。
+    await waitFor(() =>
+      expect(client.getQueryState([...syncKeys.status()])?.isInvalidated).toBe(true),
+    );
   });
 
   it("在飞期间 busy 为 true,且重复点不会再发一次", async () => {

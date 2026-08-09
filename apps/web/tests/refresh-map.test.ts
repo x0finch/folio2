@@ -1,0 +1,50 @@
+import { QueryClient } from "@tanstack/react-query";
+import { beforeEach, describe, expect, it } from "vitest";
+import { syncKeys } from "../src/lib/queries/keys";
+import { invalidateFor, REFRESH_MAP } from "../src/lib/queries/refresh";
+
+// 刷新映射表的钉子。**这里钉的不是「表里写了什么」**(那是把代码抄一遍),而是
+// 「表里那条前缀,真的能匹配上各查询实际在用的 key 吗」—— 定向刷新唯一会静默失败的地方。
+// 前缀写错一个字(`["sync"]` 写成 `["syncs"]`),运行时不报错,只表现为「同步完了面板不动」。
+
+// 真的 QueryClient,不是 mock:匹配规则(前缀匹配、部分匹配)是 react-query 的行为,
+// mock 掉就等于把要验的东西自己实现了一遍。
+let queryClient: QueryClient;
+
+// 往缓存里塞一条已成功的查询 —— invalidateQueries 的作用是把它标记为「旧」。
+const seed = (queryKey: readonly unknown[]) =>
+  queryClient.setQueryData([...queryKey], { seeded: true });
+
+const isInvalidated = (queryKey: readonly unknown[]) =>
+  queryClient.getQueryState([...queryKey])?.isInvalidated === true;
+
+describe("刷新映射表", () => {
+  beforeEach(() => {
+    queryClient = new QueryClient();
+  });
+
+  it("sync.round 刷到同步状态,不误伤别的域", async () => {
+    seed(syncKeys.status());
+    // 还没迁的域(仍走整页刷新)不该被这条语义碰到 —— 误伤的代价是白打一趟服务器。
+    const untouched = ["accounts", "list"] as const;
+    seed(untouched);
+
+    await invalidateFor(queryClient, "sync.round");
+
+    expect(isInvalidated(syncKeys.status())).toBe(true);
+    expect(isInvalidated(untouched)).toBe(false);
+  });
+
+  // 结构性的一条:表里每条前缀都得是**某个域前缀**下的东西,而不是随手写的字符串数组。
+  // 域前缀集合随各片迁移增长,这条会跟着自动覆盖新加的条目。
+  it("表里每条前缀都落在已知的域前缀上", () => {
+    const domains: readonly (readonly string[])[] = [syncKeys.all];
+    for (const [event, prefixes] of Object.entries(REFRESH_MAP)) {
+      expect(prefixes.length, `${event} 至少要刷一个前缀`).toBeGreaterThan(0);
+      for (const prefix of prefixes) {
+        const matched = domains.some((d) => d.every((seg, i) => prefix[i] === seg));
+        expect(matched, `${event} 的前缀 ${JSON.stringify(prefix)} 不属于任何已知域`).toBe(true);
+      }
+    }
+  });
+});
