@@ -25,6 +25,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../components/currency-switcher";
 import { EditableName } from "../../components/editable-name";
+import { IconButton } from "../../components/icon-button";
 import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signIn, signOut } from "../../lib/auth-client";
@@ -272,18 +273,9 @@ export function PasskeysCard() {
         <div className="flex items-center justify-between gap-3">
           <CardTitle>{t("passkeys")}</CardTitle>
           {supported && (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t("addPasskey")}
-              disabled={adding}
-              onClick={onAdd}
-              // 圆底:覆盖 size=icon 的 rounded-lg。hover 底也要覆盖 —— ghost 默认 bg-primary/5
-              // 在暗色主题下肉眼几乎看不出来;用行 pill 同一个 token,视觉重量才对得上。
-              className="rounded-full hover:bg-muted"
-            >
+            <IconButton aria-label={t("addPasskey")} disabled={adding} onClick={onAdd}>
               <Plus className="size-4" />
-            </Button>
+            </IconButton>
           )}
         </div>
       </CardHeader>
@@ -357,9 +349,7 @@ export function PasskeysCard() {
                           )}
                         </div>
                         {!isEditing && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
+                          <IconButton
                             aria-label={t("removePasskey")}
                             // 行本身已有 SharedLayoutBg 的 hover pill,图标再来一块底就是底叠底 →
                             // 只留变红。
@@ -367,7 +357,7 @@ export function PasskeysCard() {
                             onClick={() => setRemoving(pk)}
                           >
                             <Trash2 className="size-4" />
-                          </Button>
+                          </IconButton>
                         )}
                       </div>
                     </div>

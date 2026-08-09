@@ -11,6 +11,7 @@ import { syncAccount } from "../lib/server/sync";
 import { AccountForm } from "./account-fields";
 import { ConnectorGrid } from "./connector-grid";
 import { CredentialForm } from "./credential-form";
+import { IconButton } from "./icon-button";
 
 // 补录目标(A3):缺凭据账户点补录 icon 时传入,modal 直接进补录视图(跳过网格,锁定 connector)。
 export interface CompleteTarget {
@@ -42,24 +43,19 @@ function ModalHeader({
     <div className="mb-4 flex flex-col gap-1">
       <div className="flex items-center gap-2">
         {onBack && (
-          <button
-            type="button"
+          <IconButton
+            size="sm"
             onClick={onBack}
             aria-label={t("backToConnectors")}
-            className="-ml-1 flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="-ml-1"
           >
             <ArrowLeft className="size-4" />
-          </button>
+          </IconButton>
         )}
         <h2 className="flex-1 font-semibold text-lg">{title}</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={tc("close")}
-          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
+        <IconButton size="sm" onClick={onClose} aria-label={tc("close")}>
           <X className="size-4" />
-        </button>
+        </IconButton>
       </div>
       <p className="text-muted-foreground text-sm">{subtitle}</p>
     </div>
