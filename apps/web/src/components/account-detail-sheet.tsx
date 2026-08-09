@@ -14,7 +14,6 @@ import {
   useMediaQuery,
 } from "@folio/ui";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
 import {
   AlertTriangle,
   Archive,
@@ -31,6 +30,7 @@ import type { OverviewBalance } from "../lib/account-view";
 import { aggregateDayChange } from "../lib/day-value-change";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
+import { useLegacyRefresh } from "../lib/hooks/use-legacy-refresh";
 import { isManual } from "../lib/manual-connector";
 import { getAccountHistory, removeAccount, updateAccount } from "../lib/server/accounts";
 import { syncAccount } from "../lib/server/sync";
@@ -146,8 +146,8 @@ function DetailBody({
   const tt = useTranslations("Tags");
   const format = useFormatter();
   const usd = useDisplayValue();
-  const router = useRouter();
-  const refresh = () => router.invalidate();
+  // 账户域还没迁(#414)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
+  const refresh = useLegacyRefresh();
 
   // 头部 24h 增量与账户行同源(缺凭据 → 不显增量);占比 = 本账户市值 / 活跃账户总计。
   const dayChange = account.needsCredentials ? null : aggregateDayChange(account.balances);

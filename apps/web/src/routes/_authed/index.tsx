@@ -9,8 +9,8 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { startTransition, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
@@ -37,6 +37,7 @@ import {
   portfolioOverviewQuery,
   tabPinsQuery,
 } from "../../lib/queries/portfolio";
+import { invalidateFor } from "../../lib/queries/refresh";
 import { listAccounts } from "../../lib/server/accounts";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../lib/server/tab-pins";
 import { listTags } from "../../lib/server/tags";
@@ -111,7 +112,7 @@ function derive(secs: PortfolioOverview["sections"]) {
 
 function Overview() {
   const { selectedId } = usePortfolio();
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const t = useTranslations("Overview");
   const tc = useTranslations("Common");
   const tct = useTranslations("CustomTabs");
@@ -186,16 +187,16 @@ function Overview() {
   const addPin = (choice: PinTargetChoice) => {
     createTabPin({ data: choice })
       .then(async (pin) => {
-        // 先等 loader 刷新、新 tab 挂上再选中 —— 提前选中会让 active 短暂指向不存在的 tab,
+        // 先等 Tab 清单刷新、新 tab 挂上再选中 —— 提前选中会让 active 短暂指向不存在的 tab,
         // 被 clamp 回 tokens,药丸先滑到第一个再滑回来(实测)。
-        await router.invalidate();
+        await invalidateFor(queryClient, "portfolio.pin.write");
         selectTab(pin.id);
       })
       .catch(failPin);
   };
   const repointPin = (pinId: string, choice: PinTargetChoice) => {
     updateTabPinTarget({ data: { pinId, ...choice } })
-      .then(() => router.invalidate())
+      .then(() => invalidateFor(queryClient, "portfolio.pin.write"))
       .catch(failPin);
   };
 
@@ -228,7 +229,7 @@ function Overview() {
       selectTab(idx > 0 ? pins[idx - 1].id : kindTabs[kindTabs.length - 1]);
     }
     deleteTabPin({ data: { pinId } })
-      .then(() => router.invalidate())
+      .then(() => invalidateFor(queryClient, "portfolio.pin.write"))
       .catch(failPin);
   };
   const viewSubtotal =

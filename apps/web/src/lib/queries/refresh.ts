@@ -20,6 +20,25 @@ export const REFRESH_MAP = {
    * 停在非默认组合、或停在自定义 Tab 上时,同步跑完画面根本不动。前缀刷新盖住整个域,三种视图一起更新。
    */
   "sync.round": [syncKeys.all, portfolioKeys.all],
+
+  /** 新建 / 改名 / 删除组合、设默认组合、把账户移到别的组合 —— 清单、归属、两边的总览与走势都可能变。 */
+  "portfolio.write": [portfolioKeys.all],
+
+  /**
+   * 自定义 Tab 的新建 / 改目标 / 删除。**只刷 Tab 清单,不刷总览** ——
+   * 增删一个 Tab 不改任何余额,连带把昂贵的总览拉一遍是白花钱。
+   */
+  "portfolio.pin.write": [portfolioKeys.pins()],
+
+  /**
+   * **过渡期专用,#416 连同 `useLegacyRefresh` 一起删掉。**
+   *
+   * 还没迁的域仍靠整页 `router.invalidate()` 刷新,而那条路只在数据 stale 时才真拉 ——
+   * 已经开了 `staleTime` 的域于是对它**静默失效**(改了账户,总览停在旧数字,不报错)。
+   * 这条把「已开缓存的域」补刷一遍,让整页刷新在过渡期继续管用。
+   * 某个域的写路径迁完时,它的前缀从这里挪走;全部迁完这条就空了,随 hook 一起删。
+   */
+  "legacy.whole-page": [portfolioKeys.all],
 } satisfies Record<string, readonly QueryKey[]>;
 
 export type RefreshEvent = keyof typeof REFRESH_MAP;

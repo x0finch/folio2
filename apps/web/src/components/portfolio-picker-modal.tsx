@@ -11,13 +11,13 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Pin, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { type PortfolioSummary, usePortfolio } from "../lib/hooks/use-portfolio";
 import { portfolioMembershipsQuery } from "../lib/queries/portfolio";
+import { invalidateFor } from "../lib/queries/refresh";
 import {
   createPortfolio,
   deletePortfolio,
@@ -118,10 +118,11 @@ function ManageList({
 }) {
   const t = useTranslations("Portfolio");
   const tc = useTranslations("Common");
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const { portfolios } = usePortfolio();
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const invalidate = () => router.invalidate();
+  // 定向刷新替掉整页刷新(#412):改名 / 设默认改的是组合清单与归属,刷组合域这一个前缀就够。
+  const invalidate = () => invalidateFor(queryClient, "portfolio.write");
 
   const renameMut = useMutation({
     mutationFn: (v: { portfolioId: string; name: string }) => renamePortfolio({ data: v }),
@@ -199,7 +200,7 @@ function MoveList({
   onCreate: () => void;
 }) {
   const t = useTranslations("Portfolio");
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const { portfolios } = usePortfolio();
   const [createHover, setCreateHover] = useState(false);
 
@@ -215,7 +216,8 @@ function MoveList({
       moveAccountToPortfolio({ data: { accountId: accountId ?? "", portfolioId } }),
     onSuccess: async () => {
       onClose();
-      await router.invalidate();
+      // 移动账户会同时改两个组合的总额、走势与归属 —— 一句域前缀全盖住。
+      await invalidateFor(queryClient, "portfolio.write");
       toast.success(t("moved"));
     },
     onError: () => toast.error(t("moveFailed")),
@@ -279,7 +281,7 @@ function MoveList({
 function CreatePage({ onDone }: { onDone: () => void }) {
   const t = useTranslations("Portfolio");
   const tc = useTranslations("Common");
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [newName, setNewName] = useState("");
   const trimmed = newName.trim();
 
@@ -287,7 +289,7 @@ function CreatePage({ onDone }: { onDone: () => void }) {
     mutationFn: (name: string) => createPortfolio({ data: { name } }),
     onSuccess: async () => {
       onDone();
-      await router.invalidate();
+      await invalidateFor(queryClient, "portfolio.write");
     },
     onError: () => toast.error(t("manageFailed")),
   });
@@ -327,14 +329,15 @@ function CreatePage({ onDone }: { onDone: () => void }) {
 function DeletePage({ portfolio, onDone }: { portfolio: PortfolioSummary; onDone: () => void }) {
   const t = useTranslations("Portfolio");
   const tc = useTranslations("Common");
-  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const deleteMut = useMutation({
     mutationFn: (portfolioId: string) => deletePortfolio({ data: { portfolioId } }),
     onSuccess: async () => {
       onDone();
       toast.success(t("deleted"));
-      await router.invalidate();
+      // 删组合会把它的账户退回默认组合 → 默认视图的总额也变,所以刷整个域而不只是清单。
+      await invalidateFor(queryClient, "portfolio.write");
     },
     onError: () => toast.error(t("manageFailed")),
   });

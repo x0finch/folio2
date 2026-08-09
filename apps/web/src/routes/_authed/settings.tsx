@@ -19,7 +19,7 @@ import {
   toast,
 } from "@folio/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, getRouteApi, useNavigate, useRouter } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { LogOut, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
@@ -30,6 +30,7 @@ import { type AccountUser, accountIdentity } from "../../lib/account-identity";
 import { authClient, signIn, signOut } from "../../lib/auth-client";
 import { clearIdleLockState } from "../../lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "../../lib/hooks/use-idle-timeout";
+import { useLegacyRefresh } from "../../lib/hooks/use-legacy-refresh";
 import { useLockDevice } from "../../lib/hooks/use-lock-device";
 import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
 import { usePlatformAuthenticator } from "../../lib/hooks/use-platform-authenticator";
@@ -576,7 +577,8 @@ export function AutoLockCard() {
 
 function AppearanceCard() {
   const t = useTranslations("Settings");
-  const router = useRouter();
+  // 设置域还没迁(#416)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
+  const refresh = useLegacyRefresh();
   const locale = useLocale();
   // 选中态用 useMountedTheme(SSR 安全):挂载前按 "system" 渲染避免 hydration mismatch + pill 硬跳,
   // 挂载后借 layoutId 平滑滑到位。语言走 cookie/SSR 一致,无需此处理。
@@ -585,7 +587,7 @@ function AppearanceCard() {
   function setLocale(next: string) {
     if (next === locale) return;
     document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000`;
-    router.invalidate();
+    refresh();
   }
 
   return (
@@ -648,7 +650,8 @@ function ProviderKeysCard({ status }: { status: Record<string, boolean> }) {
 // 估值模式(Phase 3,#82):勾选 = source-first(统一采用市场源价);不勾 = self-first(默认)。
 // 切换即写 user_settings + invalidate → 主页/图表现推立即改(历史冻结,无需重 sync)。
 function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
-  const router = useRouter();
+  // 设置域还没迁(#416)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
+  const refresh = useLegacyRefresh();
   const t = useTranslations("Settings");
   const [sourceFirst, setSourceFirst] = useState(mode === "source-first");
   const [busy, setBusy] = useState(false);
@@ -658,7 +661,7 @@ function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
     setBusy(true);
     try {
       await updateValuationSettings({ data: { mode: checked ? "source-first" : "self-first" } });
-      await router.invalidate(); // 刷新总览/图表读路径
+      await refresh(); // 刷新总览/图表读路径
     } catch {
       setSourceFirst(!checked); // 回滚
     } finally {
@@ -690,7 +693,8 @@ function ValuationCard({ mode }: { mode: "self-first" | "source-first" }) {
 // 数据卡(合一):导出段 + 分隔线 + 导入段。复用现有 /api/export、/api/import 路由。
 // 导入文案沿用 Accounts 命名空间的 import* 键(与账户页导入同源)。
 function DataCard({ hasData }: { hasData: boolean }) {
-  const router = useRouter();
+  // 设置域还没迁(#416)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
+  const refresh = useLegacyRefresh();
   const t = useTranslations("Settings");
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
@@ -708,7 +712,7 @@ function DataCard({ hasData }: { hasData: boolean }) {
   // 传输层抽在 lib/import-data(与仓里其它 mutation 一样调具名函数,不把 fetch 铺在组件里)。
   const importMutation = useMutation({
     mutationFn: importData,
-    onSuccess: () => router.invalidate(), // 刷新列表读路径
+    onSuccess: () => refresh(), // 刷新列表读路径
     onSettled: clearInput, // 成败都清:让同一个文件能再选一次
   });
 

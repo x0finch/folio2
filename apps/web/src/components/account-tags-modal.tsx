@@ -1,14 +1,14 @@
 import type { Tag } from "@folio/db";
 import { MorphingModal, toast, useMediaQuery } from "@folio/ui";
-import { useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
+import { useLegacyRefresh } from "../lib/hooks/use-legacy-refresh";
 import { attachTag, createTag, deleteTag, detachTag, renameTag } from "../lib/server/tags";
 import { Portal } from "./portal";
 import { TagInput } from "./tag-input";
 
 // 「打标签」弹窗(ADR 0034):MorphingModal + Portal(同删除确认那套,必须 Portal 出抽屉的 transform 包含块)。
-// 交付「点即生效」:attach/detach 用本地 optimistic overlay 即时反馈,后台发 server fn + router.invalidate 同步
+// 交付「点即生效」:attach/detach 用本地 optimistic overlay 即时反馈,后台发 server fn + 刷新同步
 // 账户行徽章;create/rename/delete 走 server + invalidate(低频,round-trip 可接受)。纯展示交互在 TagInput。
 export function AccountTagsModal({
   accountId,
@@ -30,7 +30,8 @@ export function AccountTagsModal({
   onClose: () => void;
 }) {
   const t = useTranslations("Tags");
-  const router = useRouter();
+  // 标签域还没迁(#415)→ 仍走整页刷新,但要带上「补刷已开缓存的域」那一半,见 useLegacyRefresh。
+  const refresh = useLegacyRefresh();
   const isDesktop = useMediaQuery("(min-width: 640px)");
   // toggle 的乐观 overlay:tagId → 期望的 attached 值。即时反馈,后台 server fn + invalidate 落库。
   const [optim, setOptim] = useState<Map<string, boolean>>(new Map());
@@ -42,7 +43,7 @@ export function AccountTagsModal({
 
   // 本组件的数据来自**路由 loader**(listTags),不在 React Query 缓存里 → 没有 setQueryData 可改、
   // 也没有 cache snapshot 可回滚。三处乐观(挂载 / 新建 / 删除)都是同一形状的本地 overlay:
-  // 先改本地 → 发 server fn → router.invalidate() → 等 loader 数据追上再撤 overlay(撤早了会闪)。
+  // 先改本地 → 发 server fn → refresh() → 等 loader 数据追上再撤 overlay(撤早了会闪)。
 
   // 对账式修剪:等 invalidate 后 attachedTagIds 追上乐观值,才把那条 overlay 撤下(此刻撤 = 无视觉变化)。
   // 不在 onToggle 成功回调里立刻撤 —— 那会与 loader 数据传播抢跑,先露出旧态再翻回来 = 闪一下。
@@ -119,7 +120,7 @@ export function AccountTagsModal({
       ? attachTag({ data: { accountId, tagId } })
       : detachTag({ data: { accountId, tagId } });
     call
-      .then(() => router.invalidate()) // 撤 overlay 交给上面的对账 effect,别在这清(避免闪烁)
+      .then(() => refresh()) // 撤 overlay 交给上面的对账 effect,别在这清(避免闪烁)
       .catch(() => {
         setOptim((m) => {
           const n = new Map(m);
@@ -140,7 +141,7 @@ export function AccountTagsModal({
       // 真 id 到手即写乐观挂载 —— 占位撤下时由它接力,避免 attachedTagIds 晚一拍导致 chip 闪成未选中。
       setOptim((m) => new Map(m).set(tg.id, true));
       await attachTag({ data: { accountId, tagId: tg.id } });
-      await router.invalidate();
+      await refresh();
     } catch {
       // createTag 成功但 attachTag 失败会留下「已建未挂」的 Tag —— 仍刷新让它出现在列表里
       // (用户可手动挂上),不至于既看不到又只得到一句报错。createTag 本身失败时刷新无害。
@@ -159,21 +160,21 @@ export function AccountTagsModal({
           return n;
         });
       }
-      await router.invalidate();
+      await refresh();
       fail();
     }
   };
 
   const onRename = (tagId: string, name: string) => {
     renameTag({ data: { tagId, name } })
-      .then(() => router.invalidate())
+      .then(() => refresh())
       .catch(fail);
   };
 
   const onDelete = (tagId: string) => {
     setRemoving((s) => new Set(s).add(tagId)); // 即时消失
     deleteTag({ data: { tagId } })
-      .then(() => router.invalidate()) // 撤 overlay 交给对账 effect(真行没了才撤,避免闪回)
+      .then(() => refresh()) // 撤 overlay 交给对账 effect(真行没了才撤,避免闪回)
       .catch(() => {
         setRemoving((s) => {
           const n = new Set(s);
