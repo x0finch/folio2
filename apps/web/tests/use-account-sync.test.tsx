@@ -192,9 +192,14 @@ describe("useAccountSync", () => {
     );
   });
 
-  it("三个账户依次到达 → 第一个到达后立刻刷过一次,总次数少于三次", async () => {
-    // 逐账户增量的两句承诺:先完成的先出现(所以第一个到达就得有一次刷新),
-    // 又不能变成刷新风暴(所以扎堆到达的三个不该刷三次)。
+  it("第一个账户到达就刷过一次 —— 不等整轮跑完", async () => {
+    // 这里只钉「先完成的先出现」这一句:第一个账户的结果一到,leading 就同步触发了一次刷新。
+    //
+    // **另一句承诺(扎堆到达不许变成刷新风暴)不在这里测。** 它的正确性取决于 400ms 窗口,
+    // 而这个文件跑的是真实时钟:一旦 CI 负载让下面几个 push 之间隔了 400ms 以上,
+    // 后面的账户就各自变成新的 leading,断言随机变红 —— 那是在测机器有多快,不是在测代码。
+    // 窗口行为已经在 refresh-throttle.test.ts 里用假时钟逐条钉死(连发合并、跨窗口分批、
+    // flush 不重复补),这里再断言一次次数只会引入不确定性。CODING.md:别断言墙钟。
     countRefreshes();
     let push: ((line: unknown) => void) | undefined;
     let close: (() => void) | undefined;
@@ -229,8 +234,6 @@ describe("useAccountSync", () => {
     close?.();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
-    expect(refreshes).toBeGreaterThanOrEqual(1);
-    expect(refreshes).toBeLessThan(3); // 三个账户,不是三次刷新
     // 最后一个账户的结果一定落地:收工那一下要么是尾随、要么已经由 leading 覆盖。
     await waitFor(() =>
       expect(client.getQueryState([...syncKeys.status()])?.isInvalidated).toBe(true),

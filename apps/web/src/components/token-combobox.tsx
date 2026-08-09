@@ -45,7 +45,6 @@ const SECTION_LABEL: Record<TokenSectionKey, "sectionOwned" | "sectionFiat" | "s
 // 上游搜索的节流:停顿 250ms 才发,且需 ≥2 字符。本地筛不受这两条约束(它不出网)。
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_LEN = 2;
-// 目录多久算旧。它本身是市值前 1000 的快照,分钟级的变化对选币毫无意义。
 
 function Highlighted({ text, query }: { text: string; query: string }) {
   return (

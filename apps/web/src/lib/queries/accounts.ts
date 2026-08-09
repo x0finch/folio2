@@ -11,8 +11,10 @@ import { accountKeys } from "./keys";
 //
 // **列表与持仓的 `staleTime` 在 #414 打开**:账户与手记资产的写路径已经全部改成定向刷新。
 //
-// 三条历史/明细查询**保留各自原有的 `staleTime`**:它们本来就是 react-query 查询、本来就带缓存,
-// 这一片只是把 key 收进分层约定,不改它们的时效行为(改了就是趁迁移夹带,评审时也看不出来为什么)。
+// 三条历史/明细查询的时效**数值**与迁移前一致,但档位走 `STALE_TIME`(不就地写数字):
+// 历史曲线归 `history`(按天聚合,只有最右一个点会动),手记明细归 `live`(和账户行同性质,
+// 由 `account.write` 刷)。就地写数字会让 `STALE_TIME` 这张表被绕过 —— 它存在的意义就是
+// 「多久算旧」按数据自身性质分档,而不是各查询各写一个数。
 
 export const accountListQuery = () =>
   queryOptions({
@@ -49,7 +51,7 @@ export const accountHistoryQuery = (args: {
       getAccountHistory({
         data: { accountId: args.accountId, since: args.since, connectorId: args.connectorId },
       }),
-    staleTime: 60_000,
+    staleTime: STALE_TIME.history,
   });
 
 export const holdingHistoryQuery = (args: {
@@ -60,12 +62,12 @@ export const holdingHistoryQuery = (args: {
   queryOptions({
     queryKey: accountKeys.holdingHistory(args.holdingKey, args.range),
     queryFn: () => getHoldingHistory({ data: { key: args.holdingKey, since: args.since } }),
-    staleTime: 60_000,
+    staleTime: STALE_TIME.history,
   });
 
 export const manualAccountQuery = (accountId: string) =>
   queryOptions({
     queryKey: accountKeys.manualDetail(accountId),
     queryFn: () => getManualAccount({ data: { accountId } }),
-    staleTime: 30_000,
+    staleTime: STALE_TIME.live,
   });
