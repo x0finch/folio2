@@ -21,6 +21,7 @@ import { useTokenPrice } from "../lib/hooks/use-token-price";
 import type { ActivityDraft, PickedToken } from "../lib/manual-types";
 import type { TokenOption } from "../lib/token-option";
 import { DateTimeWheel } from "./date-time-wheel";
+import { IconButton } from "./icon-button";
 import { Portal } from "./portal";
 import { TokenCombobox } from "./token-combobox";
 
@@ -355,14 +356,9 @@ function ActivityForm({
         <h2 className="font-semibold text-base">
           {editing ? t("editActivityTitle") : t("addActivityTitle")}
         </h2>
-        <button
-          type="button"
-          onClick={requestClose}
-          aria-label={tc("close")}
-          className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
+        <IconButton onClick={requestClose} aria-label={tc("close")}>
           <X className="size-4" />
-        </button>
+        </IconButton>
       </div>
 
       {/* type:顶部平铺 segment tab(中性 bg-muted 指示器,把 primary 留给主 CTA) */}

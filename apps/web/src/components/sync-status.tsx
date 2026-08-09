@@ -4,6 +4,7 @@ import { forwardRef, type ReactNode, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { useAccountSync } from "../lib/hooks/use-account-sync";
 import type { SyncStatusSummary } from "../lib/sync-status";
+import { IconButton } from "./icon-button";
 
 // 共享同步状态入口(PageHeader actions):桌面 hover Popover、移动 tap MorphingModal,
 // 包裹同一份 <SyncPanel> 内容(状态徽章 + ok/总数 + 上次更新 + 失败来源 + 独立同步按钮)。
@@ -152,15 +153,16 @@ function SyncPanel({ summary, busy, attention, onSync }: PanelProps) {
         <span className="text-muted-foreground text-xs">
           {busy ? t("hintSyncing") : t("hintResync")}
         </span>
-        <button
-          type="button"
+        <IconButton
+          size="sm"
+          variant="outline"
           onClick={onSync}
           disabled={busy || summary.accounts.length === 0}
           aria-label={t("status")}
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border text-foreground transition-colors hover:bg-muted disabled:opacity-50 [&_svg]:size-3.5"
+          className="shrink-0 text-foreground [&_svg]:size-3.5"
         >
           <RefreshCw className={busy ? "animate-spin" : ""} />
-        </button>
+        </IconButton>
       </div>
     </div>
   );

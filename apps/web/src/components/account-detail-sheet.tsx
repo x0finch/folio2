@@ -40,6 +40,7 @@ import { AccountTagsModal } from "./account-tags-modal";
 import { ConnectorBadge } from "./connector-badge";
 import { EditableName } from "./editable-name";
 import { AccountHoldingsCards } from "./holdings-cards";
+import { IconButton } from "./icon-button";
 import { ManualTokensPanel } from "./manual-tokens-panel";
 import { Portal } from "./portal";
 import { PortfolioPickerModal } from "./portfolio-picker-modal";
@@ -315,14 +316,9 @@ function DetailBody({
             className={menuPop.rootClassName}
           >
             <PopoverTrigger>
-              <button
-                ref={menuPop.measureRef}
-                type="button"
-                aria-label={t("moreActions")}
-                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
+              <IconButton ref={menuPop.measureRef} aria-label={t("moreActions")}>
                 <MoreVertical className="size-4" />
-              </button>
+              </IconButton>
             </PopoverTrigger>
             <PopoverContent>
               <div className="flex w-40 flex-col gap-0.5">
