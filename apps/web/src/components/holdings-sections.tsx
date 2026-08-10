@@ -422,8 +422,8 @@ function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium">{group.protocol}</div>
         </div>
-        {/* 右:协议净小计 + 24h 聚合增量(整协议缺 change24h → 只显小计)。 */}
-        <ValueDelta value={subtotal} delta={change?.delta} pct={change?.pct} />
+        {/* 右:协议净小计 + 24h 聚合增量。整协议一行都算不出 → `—`(不是留白:协议行本来就该有这个数)。 */}
+        <ValueDelta value={subtotal} delta={change?.delta ?? null} pct={change?.pct} />
       </div>
       <CompositionBar segs={segs} label={group.protocol} />
     </div>

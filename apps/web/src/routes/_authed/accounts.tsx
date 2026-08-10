@@ -249,7 +249,9 @@ function AccountRowContent({
   const archived = row.archivedAt != null;
   // 归档 = 封存:市值冻在那一刻,旁边的 24h 涨跌幅却是富化带来的**实时行情** —— 一个数停着、
   // 一个数在动,说的不是同一件事。缺凭据不显增量是同一个道理(不再同步,没有新鲜变化可言)。
-  const dayChange = row.needsCredentials || archived ? null : aggregateDayChange(row.balances);
+  // 这两种是「不该有这个数」(→ 整行省略);而**该有却算不出**是另一回事(→ `—`),见 ValueDelta 的三态。
+  const hasDayChange = !(row.needsCredentials || archived);
+  const dayChange = hasDayChange ? aggregateDayChange(row.balances) : undefined;
   // 占比的分母是活跃账户总计,归档不在里面 —— 显示了就是「不属于这个总数、却给了个百分比」,
   // 各行加起来还会超过 100%。
   const sharePct = accountShare(row.totalUsd, total) * 100;
@@ -299,7 +301,11 @@ function AccountRowContent({
             {shareLabel(sharePct)}%
           </span>
         )}
-        <ValueDelta value={row.totalUsd} delta={dayChange?.delta} pct={dayChange?.pct} />
+        <ValueDelta
+          value={row.totalUsd}
+          delta={hasDayChange ? (dayChange?.delta ?? null) : undefined}
+          pct={dayChange?.pct}
+        />
       </div>
     </div>
   );
