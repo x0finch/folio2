@@ -132,9 +132,17 @@ export const updateAccount = createServerFn({ method: "POST" })
         if (data.archived === true) {
           // 取的是**还没打标记**的那一行 —— 封存那条路按「未归档」过滤,顺序反了会一无所获。
           const account = yield* accounts.getById(data.accountId);
-          if (account) sealed = yield* sealManualAccount(account);
+          // **已经归档的不再动它**(review 补):对已归档账户再发一次 `archived: true`,封存那步会
+          // 被「未归档」这道过滤挡掉、什么都不落,而 `setArchived` 却会把 `archivedAt` 重写成当刻 ——
+          // 结果是封存时刻往前跳、数据还停在旧那张:曲线的截断点、抽屉曲线的窗口锚都跟着挪,
+          // 而它们描述的那份数据一点没变。UI 那颗按钮是切换、触发不到这条,但 server fn 收得下。
+          if (account?.archivedAt == null) {
+            if (account) sealed = yield* sealManualAccount(account);
+            yield* accounts.setArchived(data.accountId, true);
+          }
+        } else if (data.archived === false) {
+          yield* accounts.setArchived(data.accountId, false);
         }
-        if (data.archived !== undefined) yield* accounts.setArchived(data.accountId, data.archived);
         return sealed;
       }),
     );
