@@ -102,6 +102,10 @@ _Avoid_: Composition(那是随时间的)、breakdown(泛指)
 组合净值**随时间**按某 Dimension 的堆叠拆分(Insights 堆叠面积图)。历史各点用 `snapshot_balances` 冻结值分桶,**最新点**用 overview 的逐-balance 实时值分桶(∴ Σ 桶 = hero 实时总额)。与 Allocation 的分野:Allocation 是「此刻切一刀」,Composition 是「结构随时间演变」。**manual 例外**(ADR 0018):manual 不写快照,故只进**最新点**(经 overview 注入),**历史各点缺席** manual,直到 T5(compute-on-read 从账本重算历史)补全。
 _Avoid_: trend(那专指总净值单线)、history(泛指)
 
+**24h 盈亏(24h Gain)**(ADR 0040):
+每一行右侧、以及 hero 那行小字上的增量数字 —— **过去 24 小时里因为价格涨跌赚了多少**,买卖与充提一律剔除(把钱搬进来不叫赚钱)。窗口是**滚动 24 小时**,不是自然日。算法是**时间加权分段**(TWR):每次同步的快照是一个切口,段内数量不变、只算价格带来的变化,各段合起来;切口越密越准。**金额与百分比是两套计算**——金额 = 各段价值变动之和(券商报表的 investment gain/loss),百分比 = 各段收益率**连乘**,不是「金额 ÷ 期初」;你动过手的那天两者除不通,这是对的。**全站一个口径**:各行相加 = hero 那个数。**两个已知缺口**:DeFi 与永续没有「数量」可依,只能拿两张照片的价值相减(你加减仓那天会虚高/虚低);manual 反过来更准 —— 有账本,按每笔活动切段。
+_Avoid_: P&L(金融里通常指不剔除资金进出的实际损益,与此不同;英文用 24h Gain)、「今日盈亏」(暗示自然日)、净值差(那是曲线的口径,含充提)、change24h(那是上游给的市场涨跌幅,只是原料且已不再直接显示)
+
 **Stablecoin(稳定币)**:
 驱动 `type` 维的 Stablecoin 桶与 hero 稳定币占比的 [Token] 判别;判定 **kind 先行**(DeFi/Perp 头寸内的稳定币不入此桶)。**目标**是经 CoinGecko 分类(`category=stablecoins`)判定并落库(ADR 0016);**当前实现是 `hero-stats.ts` 里一份临时固定 symbol 清单**(#102 未落地,`tokens` 上还没有那一列)。
 _Avoid_: stable(缩写,正式词用 Stablecoin)
