@@ -155,7 +155,8 @@ function DetailBody({
   // 改名 / 归档 / 删除同时改账户域与组合域(总额、走势)—— 映射表那一条两个前缀都列了。
   const refresh = () => invalidateFor(queryClient, "account.write");
 
-  const archived = account.archivedAt != null;
+  const sealedAt = account.archivedAt;
+  const archived = sealedAt != null;
   // 头部 24h 增量与账户行同源;占比 = 本账户市值 / 活跃账户总计。
   // **归档行两个都不显**(ADR 0039):市值冻在封存那一刻,而 24h 涨跌幅是富化带来的实时行情 ——
   // 一个停着一个在动,说的不是同一件事;占比的分母是活跃账户总计,归档不在里面,显示了会让
@@ -237,16 +238,15 @@ function DetailBody({
   // **先判归档,再判是不是 manual**(ADR 0039):归档 = 封存,数据停在那一刻,所以显示的是
   // **静态日期**而不是相对时间 —— 相对时间会一天天长下去,看着像同步坏了。manual 那一支原本
   // 无条件显示「实时」,封存之后它显然不是,所以归档必须判在前面。
-  const lastSynced = archived
-    ? t("sealedAt", {
-        when:
-          account.takenAt != null ? format.dateTime(new Date(account.takenAt), SEALED_DATE) : "—",
-      })
-    : isManual(account.connectorId)
-      ? t("liveValue")
-      : account.takenAt
-        ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
-        : t("neverSynced");
+  const lastSynced =
+    sealedAt != null
+      ? // 日期取归档时刻而不是最后一次同步的时刻 —— 见账户页那一处的同款注释。
+        t("sealedAt", { when: format.dateTime(new Date(sealedAt), SEALED_DATE) })
+      : isManual(account.connectorId)
+        ? t("liveValue")
+        : account.takenAt
+          ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
+          : t("neverSynced");
 
   return (
     <>

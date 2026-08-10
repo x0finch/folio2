@@ -185,9 +185,10 @@ function AccountStatusLine({
         // 归档 = 封存(ADR 0039):**先判归档,再判是不是 manual**。
         // 时间是静态日期,不是相对时间 —— 归档账户的时间戳永远不动,相对时间会一天天长下去。
         // manual 归档账户尤其要走这条:它那一支原本无条件显示「实时」,而封存之后它显然不是。
-        t("sealedAt", {
-          when: takenAt != null ? format.dateTime(new Date(takenAt), SEALED_DATE) : "—",
-        })
+        // **日期取 `archivedAt`,不是 `takenAt`。** 后者是最后一次同步的时刻 —— 一个 1 月同步、
+        // 3 月才归档的账户会被写成「封存于 1 月」,而它其实是 3 月封的。数据有多旧另说,
+        // 这句话说的是「什么时候封的」。
+        t("sealedAt", { when: format.dateTime(new Date(archivedAt), SEALED_DATE) })
       ) : needsCreds && onComplete ? (
         // biome-ignore lint/a11y/useSemanticElements: 行本身是 <button>,不能再嵌套 <button>(无效 HTML),故用 role=button span
         <span
@@ -239,14 +240,18 @@ function AccountRowContent({
 }: {
   row: AccountRow;
   total: number;
+  /** 归档行:**只调暗,不抽内容**。原来它顺手把市值与持仓叠标一起隐了 —— 而「归档后仍看得见
+   *  归档前的持仓」正是 #437 要的东西,藏起来等于这件事只在抽屉里成立。 */
   muted?: boolean;
   onComplete?: () => void; // 活跃缺凭据行:行内补录按钮(归档行不传)
 }) {
   const status = accountSyncStatus(row, Date.now());
+  const archived = row.archivedAt != null;
   // 归档 = 封存:市值冻在那一刻,旁边的 24h 涨跌幅却是富化带来的**实时行情** —— 一个数停着、
   // 一个数在动,说的不是同一件事。缺凭据不显增量是同一个道理(不再同步,没有新鲜变化可言)。
-  const dayChange =
-    row.needsCredentials || row.archivedAt != null ? null : aggregateDayChange(row.balances);
+  const dayChange = row.needsCredentials || archived ? null : aggregateDayChange(row.balances);
+  // 占比的分母是活跃账户总计,归档不在里面 —— 显示了就是「不属于这个总数、却给了个百分比」,
+  // 各行加起来还会超过 100%。
   const sharePct = accountShare(row.totalUsd, total) * 100;
   return (
     // padding + overflow-hidden 放这层(填满整行):占比大字只被行外框裁,不在内容盒内被切。
@@ -279,27 +284,23 @@ function AccountRowContent({
         />
         {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),无现货可叠(纯 perp/DeFi 或未同步)的行也不塌矮,
             全列表行高一致。真 logo 的按-kind 填充(perp coin / DeFi 协议)待 #132 解绑后再接。 */}
-        {!muted && (
-          <span className="flex min-h-6 items-center">
-            <TokenStack balances={row.balances} />
+        <span className="flex min-h-6 items-center">
+          <TokenStack balances={row.balances} />
+        </span>
+      </span>
+      <div className="relative shrink-0">
+        {/* hover 底衬:超大占比数字倾斜、占满行高,锚在价值左缘(right-full)再右移一个 % 宽度 —— 只有末尾 %
+              掖进价值下、前面数字全露出;-z-10 垫在名称/价值之下,中性淡色、仅 hover 浮现、不可点、不参与朗读。 */}
+        {!archived && sharePct > 0 && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 right-full -z-10 -translate-y-1/2 translate-x-14 -rotate-12 whitespace-nowrap font-bold text-8xl text-background/50 leading-none tracking-tighter opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+          >
+            {shareLabel(sharePct)}%
           </span>
         )}
-      </span>
-      {!muted && (
-        <div className="relative shrink-0">
-          {/* hover 底衬:超大占比数字倾斜、占满行高,锚在价值左缘(right-full)再右移一个 % 宽度 —— 只有末尾 %
-              掖进价值下、前面数字全露出;-z-10 垫在名称/价值之下,中性淡色、仅 hover 浮现、不可点、不参与朗读。 */}
-          {sharePct > 0 && (
-            <span
-              aria-hidden
-              className="pointer-events-none absolute top-1/2 right-full -z-10 -translate-y-1/2 translate-x-14 -rotate-12 whitespace-nowrap font-bold text-8xl text-background/50 leading-none tracking-tighter opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-            >
-              {shareLabel(sharePct)}%
-            </span>
-          )}
-          <ValueDelta value={row.totalUsd} delta={dayChange?.delta} pct={dayChange?.pct} />
-        </div>
-      )}
+        <ValueDelta value={row.totalUsd} delta={dayChange?.delta} pct={dayChange?.pct} />
+      </div>
     </div>
   );
 }
