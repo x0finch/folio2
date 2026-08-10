@@ -23,7 +23,8 @@ function RowContent({ h }: { h: Holding }) {
         amount: h.totalAmount,
         value: h.totalValue,
         // 主页这条路已接 24h 盈亏(ADR 0040)—— server 算好的分段结果,不再由 change24h 倒推。
-        gain24h: h.gain24h ?? null,
+        // 主页这条路的 holding 恒带这个字段(overview 里逐行赋值,算不出是 null),原样透传。
+        gain24h: h.gain24h,
       }}
       sources={h.sources.map((s) => ({
         logo: s.platform.logo,
