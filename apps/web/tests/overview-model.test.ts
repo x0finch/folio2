@@ -534,3 +534,101 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0040)", () => {
     expect(view.gain24h).toBeNull();
   });
 });
+
+describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0040 的已知妥协)", () => {
+  const NOW = 1_700_000_000_000;
+  const FROM = NOW - GAIN_WINDOW_MS;
+  const lidoMeta = JSON.stringify({ protocol: "Lido", positionType: "staked" });
+  const accounts = [account("w", "Wallet")];
+  const byAccount = new Map([
+    [
+      "w",
+      snap("w", 110, [
+        bal({ kind: "defi", amount: 1, usdValue: 110, tokenId: "tk-staked", metaJson: lidoMeta }),
+      ]),
+    ],
+  ]);
+  const defiHist = (usdValue: number, meta = lidoMeta) => ({
+    accountId: "w",
+    takenAt: FROM,
+    tokenId: "tk-staked",
+    amount: 1,
+    usdValue,
+    kind: "defi",
+    metaJson: meta,
+  });
+
+  it("拿两张照片的价值相减 —— 没有「几个币」可依,只能这样", async () => {
+    const view = await runWithOracle(
+      stub,
+      buildOverview(accounts, byAccount, { now: NOW, gainHistory: [defiHist(100)] }),
+    );
+    expect(view.sections[0].defi[0].gain24h?.amount).toBeCloseTo(10, 6);
+  });
+
+  it("百分比分母是**总敞口**,不是净值 —— 对冲仓才不会给出荒唐的数", async () => {
+    // 存 100 万 / 借 99 万:净值只剩 1 万。拿净值当分母,涨 1 万会算成 +100%。
+    const hedged = new Map([
+      [
+        "w",
+        snap("w", 20_000, [
+          bal({ kind: "defi", amount: 1, usdValue: 1_010_000, tokenId: "sup", metaJson: lidoMeta }),
+          bal({ kind: "defi", amount: 1, usdValue: -990_000, tokenId: "bor", metaJson: lidoMeta }),
+        ]),
+      ],
+    ]);
+    const view = await runWithOracle(
+      stub,
+      buildOverview(accounts, hedged, {
+        now: NOW,
+        gainHistory: [
+          { ...defiHist(1_000_000), tokenId: "sup" },
+          { ...defiHist(-990_000), tokenId: "bor" },
+        ],
+      }),
+    );
+    const gain = view.sections[0].defi[0];
+    expect(gain.gain24h?.amount).toBeCloseTo(10_000, 6);
+    // 总敞口 199 万 → 约 +0.50%;净值当分母会给出 +100%
+    expect(gain.gain24h?.pct).toBeCloseTo(0.5, 2);
+    expect(gain.gain24h?.pct).not.toBeCloseTo(100, 0);
+  });
+
+  it("没有历史 → null,由界面渲染 `—`", async () => {
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { now: NOW }));
+    expect(view.sections[0].defi[0].gain24h).toBeNull();
+  });
+});
+
+describe("buildOverview —— DeFi 盈亏的分母要带着走", () => {
+  // 总览的 DeFi tab 跨账户合并协议组时,要用 Σ金额 ÷ Σ总敞口 重算百分比。分母没带过去的话,
+  // 合并后的百分比会恒为 null —— 而单账户视图里它是对的,所以这个洞只在合并那一侧才看得见。
+  it("gain24h 带 grossBasis(合并那一侧要用)", async () => {
+    const NOW = 1_700_000_000_000;
+    const meta = JSON.stringify({ protocol: "Lido", positionType: "staked" });
+    const view = await runWithOracle(
+      stub,
+      buildOverview(
+        [account("w", "Wallet")],
+        new Map([
+          ["w", snap("w", 110, [bal({ kind: "defi", amount: 1, usdValue: 110, metaJson: meta })])],
+        ]),
+        {
+          now: NOW,
+          gainHistory: [
+            {
+              accountId: "w",
+              takenAt: NOW - GAIN_WINDOW_MS,
+              tokenId: "usdc",
+              amount: 1,
+              usdValue: 100,
+              kind: "defi",
+              metaJson: meta,
+            },
+          ],
+        },
+      ),
+    );
+    expect(view.sections[0].defi[0].gain24h?.grossBasis).toBeCloseTo(100, 6);
+  });
+});

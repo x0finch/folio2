@@ -56,6 +56,14 @@ export interface DefiGroup {
   protocol: string;
   rows: DefiRow[];
   protocolLogo?: string; // 协议 logo 上游 URL(有则行渲染经 /api/logo/defi 代理;#126)
+  // 24h 盈亏(ADR 0040):由 server 读路径按快照历史算好后附上。**这一类是已知妥协** ——
+  // DeFi 仓位没有「几个币」可依,只有一个总价值,所以拿两张照片的价值相减;你往里加钱那天会
+  // 虚高、提出来那天会虚低。`null` = 算不出;`undefined` = 这条路没接(账户抽屉那边)。
+  //
+  // `grossBasis` = 百分比的分母(该协议在窗口起点的**总敞口**:各腿取绝对值再累加)。带着它是为了
+  // 跨账户合并时还能算出正确的百分比 —— 净值当分母会在对冲仓上给出荒唐的数,而从 pct 反推分母
+  // 在 pct 为 0 时又推不出来。
+  gain24h?: { amount: number; pct: number | null; grossBasis?: number } | null;
 }
 export interface AccountSections {
   spot: SpotRow[];
@@ -63,7 +71,7 @@ export interface AccountSections {
   perp: PerpView | null; // 无永续行 → null
 }
 
-function parseDefiMeta(metaJson: string | null): DefiMetaT {
+export function parseDefiMeta(metaJson: string | null): DefiMetaT {
   if (!metaJson) return {};
   try {
     const r = DefiMeta.safeParse(JSON.parse(metaJson));
@@ -73,7 +81,7 @@ function parseDefiMeta(metaJson: string | null): DefiMetaT {
   }
 }
 
-const DEFI_FALLBACK_PROTOCOL = "Other";
+export const DEFI_FALLBACK_PROTOCOL = "Other";
 
 // 「尘埃」阈值(美元):持仓价值绝对值低于此即视为噪音而非持仓 —— 现货表 / 叠标**不展示**,
 // 刷价/刷图那侧也**不去 CGK 刷**(见 tokens.ts `refreshableTokenIds`,#245:一条线「不展示的就不刷」)。
@@ -147,6 +155,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
 export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] {
   const byProtocol = new Map<string, DefiRow[]>();
   const logoByProtocol = new Map<string, string>(); // 跨账户:首个带图的组定 logo
+  const gainByProtocol = new Map<string, { amount: number; grossBasis: number }>();
   for (const s of sections) {
     for (const g of s.defi) {
       if (g.protocolLogo && !logoByProtocol.has(g.protocol)) {
@@ -155,13 +164,32 @@ export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] 
       const rows = byProtocol.get(g.protocol);
       if (rows) rows.push(...g.rows);
       else byProtocol.set(g.protocol, [...g.rows]);
+      // 盈亏跨账户合并:金额直接相加;百分比**重算**(Σ金额 ÷ Σ总敞口),不是各账户百分比取平均。
+      // 有一个账户算得出就算 —— 与「有基准的线才参与」同一个态度。
+      if (g.gain24h) {
+        const prev = gainByProtocol.get(g.protocol) ?? { amount: 0, grossBasis: 0 };
+        gainByProtocol.set(g.protocol, {
+          amount: prev.amount + g.gain24h.amount,
+          grossBasis: prev.grossBasis + (g.gain24h.grossBasis ?? 0),
+        });
+      }
     }
   }
-  return [...byProtocol].map(([protocol, rows]) => ({
-    protocol,
-    rows,
-    protocolLogo: logoByProtocol.get(protocol),
-  }));
+  return [...byProtocol].map(([protocol, rows]) => {
+    const g = gainByProtocol.get(protocol);
+    return {
+      protocol,
+      rows,
+      protocolLogo: logoByProtocol.get(protocol),
+      gain24h: g
+        ? {
+            amount: g.amount,
+            pct: g.grossBasis > 0 ? (g.amount / g.grossBasis) * 100 : null,
+            grossBasis: g.grossBasis,
+          }
+        : null,
+    };
+  });
 }
 
 // 空仓协议丢弃:整组毛敞口 Σ|usd| < 半分钱 → 视为已清空/dust(如已全额提取/偿还只剩 0 值残腿),

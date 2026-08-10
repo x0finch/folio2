@@ -10,7 +10,7 @@ import {
 import { useEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import type { DefiGroup, DefiRow } from "../lib/account-view";
-import { defiMeaningfulLegs, groupLegsByRole, protocolDayChange } from "../lib/account-view";
+import { defiMeaningfulLegs, groupLegsByRole } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
@@ -408,7 +408,9 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
 // hover 触发器只在构成条上(不再是整行左簇)—— 扫列表不再连炸弹层(H5 定稿)。
 function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
   const subtotal = group.rows.reduce((s, r) => s + r.usdValue, 0);
-  const change = protocolDayChange(group.rows);
+  // 24h 盈亏(ADR 0040):server 算好的。DeFi 这类没有「几个币」可依,只能拿两张照片的价值相减 ——
+  // 已知妥协,你动仓那天不准。百分比的分母是**总敞口**(不是净值),对冲仓才不会给出荒唐的数。
+  const change = group.gain24h;
   const segs = toRoleSegs(group.rows);
   return (
     <div className="w-full">
@@ -423,7 +425,7 @@ function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
           <div className="truncate font-medium">{group.protocol}</div>
         </div>
         {/* 右:协议净小计 + 24h 聚合增量。整协议一行都算不出 → `—`(不是留白:协议行本来就该有这个数)。 */}
-        <ValueDelta value={subtotal} delta={change?.delta ?? null} pct={change?.pct} />
+        <ValueDelta value={subtotal} delta={change?.amount ?? null} pct={change?.pct} />
       </div>
       <CompositionBar segs={segs} label={group.protocol} />
     </div>

@@ -1,6 +1,13 @@
 import { AccountStore, SnapshotStore } from "@folio/db";
 import { Effect } from "effect";
-import { injectManualSnapshots } from "./manual";
+import {
+  buildGainLines,
+  computeGain24h,
+  GAIN_BASIS_TOLERANCE_MS,
+  GAIN_WINDOW_MS,
+  type GainCurrentRow,
+} from "../../gain-24h";
+import { injectManualSnapshots, loadManualGainHistory } from "./manual";
 import { enrichBalances } from "./token-enrich";
 
 // 按账户视图的取数(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓。
@@ -13,12 +20,19 @@ import { enrichBalances } from "./token-enrich";
 export const loadAccountHoldings = () =>
   Effect.gen(function* () {
     // **整条链一个 effect,一次装配**(#394 T6):读账户 + 快照 → 注入 manual 合成项 → 逐账户富化。
-    const [allAccounts, snapshots] = yield* Effect.all(
+    // 「当下」取一次,整条链共用(分段末点 / 容差判定 / 取历史的下界都按同一刻算)。
+    const now = Date.now();
+    const [allAccounts, snapshots, gainHistory] = yield* Effect.all(
       [
         Effect.flatMap(AccountStore, (s) => s.list()),
         Effect.flatMap(SnapshotStore, (s) => s.latest()),
+        // 24h 盈亏的原料(ADR 0040):窗口起点再往前留一个容差,否则基准快照恰好落在窗口外时
+        // 整条线判「算不出」—— 而它明明就在库里。
+        Effect.flatMap(SnapshotStore, (s) =>
+          s.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
+        ),
       ],
-      { concurrency: 2 },
+      { concurrency: 3 },
     );
     // **归档账户也在里面**(ADR 0039):归档 = 封存,账户页要显示封存那一刻的持仓,而不是一具空壳。
     // 「计入总额」与「展示持仓」是两件事 —— 按代币聚合的那条路径仍然只算活跃账户。
@@ -47,8 +61,37 @@ export const loadAccountHoldings = () =>
         };
       }),
     );
+    // 账户行的 24h 盈亏(ADR 0040):**线按账户攒**,而不是按币 —— 同一个装配、换个分组键。
+    // manual 不写快照,原料另走账本(#447 第 3 片)。
+    const manualGain = yield* loadManualGainHistory(active, now, now - GAIN_WINDOW_MS);
+    const current: GainCurrentRow[] = rows.flatMap((r) =>
+      r.balances.map((b) => ({
+        accountId: r.account.id,
+        tokenId: b.tokenId ?? null,
+        amount: b.amount,
+        value: b.usdValue,
+      })),
+    );
+    const gainLines = buildGainLines(
+      [...gainHistory, ...manualGain],
+      current,
+      now,
+      (r) => r.accountId,
+    );
+    const gainByAccount = new Map(
+      rows.map((r) => [
+        r.account.id,
+        // **归档账户不给这个数**(ADR 0039):市值冻在封存那一刻,「今天涨了多少」对一个停住的
+        // 数字无从谈起。那不是「算不出」,是这个位置压根不该有 —— 界面据此整行省略,而不是画 `—`。
+        r.archivedAt != null ? undefined : computeGain24h(gainLines.get(r.account.id) ?? [], now),
+      ]),
+    );
+
     // **刷价信号只按活跃账户算。** 富化会把行内代币记进「价格过期」集合,客户端据此发一次批量刷价。
     // 归档行纳进来之后不收窄的话:只有归档账户还持有的币会让每次进页白发一次请求 —— 而且刷完也不改
     // 它的显示值(封存值取自快照,不现推)。既浪费,又和「停更」是反的。
-    return { rows, pricesStale: rows.some((r) => r.archivedAt == null && r.pricesStale) };
+    return {
+      rows: rows.map((r) => ({ ...r, gain24h: gainByAccount.get(r.account.id) })),
+      pricesStale: rows.some((r) => r.archivedAt == null && r.pricesStale),
+    };
   });

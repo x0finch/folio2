@@ -18,7 +18,6 @@ import { accountShare, activeAccountsTotal, shareLabel } from "../../lib/account
 import { sortActiveAccounts } from "../../lib/account-sort";
 import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-sync-status";
 import { accountIdsInView } from "../../lib/accounts-in-view";
-import { aggregateDayChange } from "../../lib/day-value-change";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { isManual } from "../../lib/manual-connector";
@@ -247,11 +246,12 @@ function AccountRowContent({
 }) {
   const status = accountSyncStatus(row, Date.now());
   const archived = row.archivedAt != null;
-  // 归档 = 封存:市值冻在那一刻,旁边的 24h 涨跌幅却是富化带来的**实时行情** —— 一个数停着、
-  // 一个数在动,说的不是同一件事。缺凭据不显增量是同一个道理(不再同步,没有新鲜变化可言)。
-  // 这两种是「不该有这个数」(→ 整行省略);而**该有却算不出**是另一回事(→ `—`),见 ValueDelta 的三态。
-  const hasDayChange = !(row.needsCredentials || archived);
-  const dayChange = hasDayChange ? aggregateDayChange(row.balances) : undefined;
+  // 24h 盈亏(ADR 0040)由 server 算好 —— 以前是在这里拿市场涨跌幅逐行倒推再加起来。
+  // 归档 = 封存:市值冻在那一刻,「今天涨了多少」对一个停住的数字无从谈起(server 那侧已给 undefined)。
+  // 缺凭据同理:不再同步,没有新鲜变化可言。这两种是「不该有这个数」→ 整行省略;
+  // 而**该有却算不出**是另一回事 → `—`,见 ValueDelta 的三态。
+  const hasDayChange = !(row.needsCredentials || archived) && row.gain24h !== undefined;
+  const dayChange = hasDayChange ? row.gain24h : undefined;
   // 占比的分母是活跃账户总计,归档不在里面 —— 显示了就是「不属于这个总数、却给了个百分比」,
   // 各行加起来还会超过 100%。
   const sharePct = accountShare(row.totalUsd, total) * 100;
@@ -303,7 +303,7 @@ function AccountRowContent({
         )}
         <ValueDelta
           value={row.totalUsd}
-          delta={hasDayChange ? (dayChange?.delta ?? null) : undefined}
+          delta={hasDayChange ? (dayChange?.amount ?? null) : undefined}
           pct={dayChange?.pct}
         />
       </div>
