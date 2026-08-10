@@ -41,6 +41,82 @@ describe("buildPortfolioHistory", () => {
     expect(series.map((p) => p.total)).toEqual([10, 20]);
   });
 
+  // 归档 = 封存(ADR 0039):账户在归档那一刻之后不再贡献,之前的点原样保留。
+  //
+  // 这组测的是阶梯重建那个「最后一个值一直保持下去」的性质在归档面前的行为 —— 不截断的话,
+  // 归档账户冻住的值会跟着曲线走到今天,而当下点(实时覆写)只算活跃账户,两边就对不上。
+  describe("归档成员的贡献止于归档时刻", () => {
+    it("归档之后的点不再含它,归档之前的点不变", () => {
+      const series = buildPortfolioHistory(
+        [
+          { accountId: "a1", takenAt: 1000, totalUsd: 10 },
+          { accountId: "a2", takenAt: 1000, totalUsd: 5 },
+          { accountId: "a1", takenAt: 3000, totalUsd: 20 },
+        ],
+        new Map([["a2", 2000]]),
+      );
+      expect(series).toEqual([
+        { t: 1000, total: 15 }, // 归档前:两个都算
+        { t: 3000, total: 20 }, // 归档后:a2 的 5 不再被保持下去
+      ]);
+    });
+
+    it("恰好落在归档时刻的点已经不算它", () => {
+      const series = buildPortfolioHistory(
+        [
+          { accountId: "a1", takenAt: 1000, totalUsd: 10 },
+          { accountId: "a2", takenAt: 1000, totalUsd: 5 },
+          { accountId: "a1", takenAt: 2000, totalUsd: 10 },
+        ],
+        new Map([["a2", 2000]]),
+      );
+      expect(series[1]).toEqual({ t: 2000, total: 10 });
+    });
+
+    // 归档账户自己那条快照落在归档之前 → 它在自己的时刻仍然算数,只是之后不再被保持。
+    it("归档账户在归档前的自有快照照常成点", () => {
+      const series = buildPortfolioHistory(
+        [
+          { accountId: "a1", takenAt: 1000, totalUsd: 10 },
+          { accountId: "a2", takenAt: 1500, totalUsd: 5 },
+          { accountId: "a1", takenAt: 3000, totalUsd: 10 },
+        ],
+        new Map([["a2", 2000]]),
+      );
+      expect(series).toEqual([
+        { t: 1000, total: 10 },
+        { t: 1500, total: 15 },
+        { t: 3000, total: 10 },
+      ]);
+    });
+
+    it("不传归档表 = 旧行为,一个字节都不变", () => {
+      const rows = [
+        { accountId: "a1", takenAt: 1000, totalUsd: 10 },
+        { accountId: "a2", takenAt: 1500, totalUsd: 5 },
+        { accountId: "a1", takenAt: 2000, totalUsd: 20 },
+      ];
+      expect(buildPortfolioHistory(rows)).toEqual(buildPortfolioHistory(rows, new Map()));
+    });
+
+    it("全员归档之后是 0,不是把最后的值挂在那儿", () => {
+      const series = buildPortfolioHistory(
+        [
+          { accountId: "a1", takenAt: 1000, totalUsd: 10 },
+          { accountId: "a2", takenAt: 2000, totalUsd: 5 },
+        ],
+        new Map([
+          ["a1", 1500],
+          ["a2", 2000],
+        ]),
+      );
+      expect(series).toEqual([
+        { t: 1000, total: 10 },
+        { t: 2000, total: 0 },
+      ]);
+    });
+  });
+
   it("handles a single account and empty input", () => {
     expect(buildPortfolioHistory([{ accountId: "a", takenAt: 5, totalUsd: 3 }])).toEqual([
       { t: 5, total: 3 },
