@@ -35,14 +35,15 @@ export interface HoldingLike {
   // (aggregate → overview-model)填好。稳定口径把所有法币都算稳定(现金类、非加密波动)。
   token: { symbol: string; isFiat?: boolean };
   totalValue: number;
-  change24h?: number;
+  // 24h 盈亏(ADR 0040),由 server 按快照历史 / 账本分段算好。null = 算不出。
+  gain24h?: { amount: number; pct: number | null } | null;
 }
 
 export interface HeroMetrics {
-  /** 24h 涨幅最高的持仓(仅计有 change24h 的行);无则 null。 */
-  best: { symbol: string; change24h: number } | null;
-  /** 24h 跌幅最深(change24h 最低)的持仓;无则 null。 */
-  worst: { symbol: string; change24h: number } | null;
+  /** 今天**赚得最多**的持仓(按 24h 盈亏金额);无可算的行则 null。 */
+  best: { symbol: string; amount: number } | null;
+  /** 今天**赚得最少 / 亏得最多**的持仓;无可算的行则 null。 */
+  worst: { symbol: string; amount: number } | null;
   /** 稳定币市值 / 组合总额(0..1);总额 ≤ 0 时 null。 */
   stableShare: number | null;
 }
@@ -57,11 +58,14 @@ export function deriveHeroMetrics(
   for (const h of holdings) {
     // 稳定 = 法币(身份驱动,USD 与非 USD 法币皆是)‖ 稳定币 symbol 表(#102 临时清单)。
     if (h.token.isFiat || isStablecoin(h.token.symbol)) stableSum += h.totalValue;
-    if (h.change24h == null) continue;
-    const entry = { symbol: h.token.symbol, change24h: h.change24h };
+    // **按盈亏金额取,不按涨跌幅**(ADR 0040)。以前这里只看涨跌幅、完全不看持有多少,于是这两个
+    // 格子永远被小仓位的暴涨币占据 —— 持有 500 块的币涨 30%,就把最大的仓位顶掉了。它回答的是
+    // 「哪个币涨得最多」,而人想知道的是「今天谁让我赚得最多」。
+    if (h.gain24h == null) continue; // 算不出的行不参与择取
+    const entry = { symbol: h.token.symbol, amount: h.gain24h.amount };
     // 严格大于/小于 → 并列时保留先出现者(与设计的排序取首一致)。
-    if (best == null || entry.change24h > best.change24h) best = entry;
-    if (worst == null || entry.change24h < worst.change24h) worst = entry;
+    if (best == null || entry.amount > best.amount) best = entry;
+    if (worst == null || entry.amount < worst.amount) worst = entry;
   }
   return {
     best,

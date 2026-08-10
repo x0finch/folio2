@@ -1,7 +1,8 @@
 import { type ChartConfig, ChartContainer, cn, NumberTicker } from "@folio/ui";
 import { Area, AreaChart, YAxis } from "recharts";
 import { useTranslations } from "use-intl";
-import { computeDayChange } from "../lib/day-change";
+import { NO_VALUE } from "../lib/delta-display";
+import type { Gain } from "../lib/gain-24h";
 import { deriveHeroMetrics, type HoldingLike } from "../lib/hero-stats";
 import { downsampleSeries, type HistoryPoint } from "../lib/history";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
@@ -27,11 +28,15 @@ const fmtPct = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}%
 export function PortfolioHero({
   series,
   totalUsd,
+  gain24h,
   holdings,
   contentClassName,
 }: {
   series: HistoryPoint[];
   totalUsd: number;
+  // 组合层 24h 盈亏(ADR 0040),由 server 算好 —— **不在这里从曲线上量**。
+  // 曲线画的是净值(含充提),这个数剔除了充提,两者本来就不该是同一个;`null` = 算不出。
+  gain24h: Gain | null;
   holdings: readonly HoldingLike[];
   // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
   contentClassName?: string;
@@ -48,12 +53,14 @@ export function PortfolioHero({
   );
   const hasHistory = chartSeries.length >= 2;
 
-  // 24h 净值变化:绝对差(day-change.ts)+ 由基准反推百分比(基准 ≤ 0 时只显示绝对额,不连带隐藏)。
-  const dayAbs = computeDayChange(series, totalUsd, series.at(-1)?.t ?? 0);
-  const baseline = dayAbs == null ? null : totalUsd - dayAbs;
-  const dayPct =
-    dayAbs != null && baseline != null && baseline > 0 ? (dayAbs / baseline) * 100 : null;
-  // 方向:正/负/持平(0 → 中性,不当作上涨)。
+  // 24h 盈亏(ADR 0040):server 按快照历史 / 账本分段算好 —— 以前这里是「现在总额 − 约 24 小时前
+  // 总额」,那是净值差:你充值 10 万,它就显示赚了 10 万。现在剔除了充提与买卖。
+  //
+  // **这个数与脚下那条曲线不再对得上,那是预期的。** 曲线画的是净值,充值那天它会跳一格而这个数
+  // 不动。两个要求没法同时满足(金额要是真赚的钱 / 要剔除资金进出),摊开解释见 #446。
+  const dayAbs = gain24h?.amount ?? null;
+  const dayPct = gain24h?.pct ?? null;
+  // 方向:正/负/持平(0 → 中性,不当作上涨);算不出也走中性。
   const dir = dayAbs == null ? 0 : dayAbs > 0 ? 1 : dayAbs < 0 ? -1 : 0;
   const toneClass =
     dir > 0
@@ -127,34 +134,50 @@ export function PortfolioHero({
               </span>
             )}
           </div>
-          {dayAbs != null && (
-            <span
-              className={cn(
-                "inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 font-mono font-semibold text-xs",
-                toneClass,
-              )}
-            >
-              {arrow ? `${arrow} ` : ""}
-              {dayPct != null ? `${fmtPct(dayPct)} · ` : ""}
-              {signedUsd(usd, dayAbs)}
-            </span>
-          )}
+          {/* 算不出(缺 24 小时前的基准)→ `—`,不是留白也不是 0:留白读作「还没加载出来」,
+              0 是在断言「今天没涨没跌」。与全站三态口径一致(见 lib/delta-display)。 */}
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 font-mono font-semibold text-xs",
+              toneClass,
+            )}
+          >
+            {dayAbs == null ? (
+              NO_VALUE
+            ) : (
+              <>
+                {arrow ? `${arrow} ` : ""}
+                {dayPct != null ? `${fmtPct(dayPct)} · ` : ""}
+                {signedUsd(usd, dayAbs)}
+              </>
+            )}
+          </span>
         </div>
 
         <div className="mt-6 flex flex-wrap gap-8">
+          {/* 「今天赚 / 亏最多的那个仓」—— 按盈亏**金额**取,不按涨跌幅(ADR 0040)。以前只看涨跌幅、
+              不看持有多少,于是这两格永远被小仓位的暴涨币占据。金额走 usd() → 跟随展示币种。 */}
           <Stat
             label={t("bestToday")}
-            value={metrics.best ? `${metrics.best.symbol} ${fmtPct(metrics.best.change24h)}` : "—"}
+            value={
+              metrics.best
+                ? `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
+                : NO_VALUE
+            }
           />
           <Stat
             label={t("worstToday")}
             value={
-              metrics.worst ? `${metrics.worst.symbol} ${fmtPct(metrics.worst.change24h)}` : "—"
+              metrics.worst
+                ? `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`
+                : NO_VALUE
             }
           />
           <Stat
             label={t("stableShare")}
-            value={metrics.stableShare == null ? "—" : `${Math.round(metrics.stableShare * 100)}%`}
+            value={
+              metrics.stableShare == null ? NO_VALUE : `${Math.round(metrics.stableShare * 100)}%`
+            }
           />
         </div>
       </div>

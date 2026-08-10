@@ -8,6 +8,7 @@ import { isFungible, viewKind } from "../../balance-kind";
 import {
   buildGainLines,
   computeGain24h,
+  type Gain,
   type GainCurrentRow,
   type GainHistoryRow,
 } from "../../gain-24h";
@@ -62,6 +63,9 @@ export interface OverviewView {
     takenAt: number | null;
   }[];
   totalUsd: number;
+  // 组合层 24h 盈亏(ADR 0040)。金额恒等于各 holding 金额之和;百分比是**统一时间轴上的连乘**,
+  // 不是各行百分比的任何一种平均 —— 收益率加不起来。null = 一条线都算不出。
+  gain24h: Gain | null;
   holdingsSubtotal: number;
   defiSubtotal: number;
   pricesStale: boolean;
@@ -155,6 +159,10 @@ export const buildOverview = (
       // holding.key ≡ aggregate.groupKey ≡ token_id(无 token_id 的旧行各自成行,查不到线 → null)。
       h.gain24h = computeGain24h(gainLines.get(h.key) ?? [], now);
     }
+    // 组合层:**同一个函数、喂全部线**。不是把各行的结果再加一遍 —— 金额那样确实等价,但百分比
+    // 不行(收益率加不起来,得在统一时间轴上连乘)。一个函数两用,「各行相加 = 首页那个数」于是
+    // 是结构上成立的,不靠两边碰对。
+    const portfolioGain = computeGain24h([...gainLines.values()].flat(), now);
 
     // 读路径装饰:每个 platform key 都给一份展示(命中真名+logo,否则兜底名),cache-only 零网络。
     // 场馆键(manual/exchange:/perp:)走连接器自带 name+logo,不进 platforms.resolve;只把链键送去查(#52)。
@@ -244,6 +252,7 @@ export const buildOverview = (
       sections,
       accountTotals,
       totalUsd,
+      gain24h: portfolioGain,
       holdingsSubtotal,
       defiSubtotal,
       pricesStale,
