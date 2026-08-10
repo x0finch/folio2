@@ -10,13 +10,13 @@ import {
 } from "../accounts-in-view";
 import { buildPortfolioHistory } from "../history";
 import { isManual } from "../manual-connector";
+import { loadAccountHoldings } from "./internal/account-holdings";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { deriveLiveAccountTotals } from "./internal/live-value";
 import { injectManualSnapshots, loadManualHistoryRows, manualFiatRefs } from "./internal/manual";
 import { runAtEdge, runRequest, runStore, withRequest } from "./internal/oracle";
 import { buildOverview } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
-import { enrichBalances } from "./internal/token-enrich";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
 // 仅按选中 Portfolio scope(曲线 / 列表默认口径);不带 pin。
@@ -107,50 +107,11 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
     ),
   );
 
-// 按账户视图(账户页浏览器 + 详情侧栏用):每个活跃账户 + 其最新快照的富化持仓。
-// 与 getPortfolioOverview(按代币聚合)分开 —— 账户页是"按账户"的 home,需要每账户明细。
+// 按账户视图(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓,**含已归档账户**(ADR 0039)。
+// 取数整条抽去了 `internal/account-holdings.ts` —— 这里只留 auth 薄壳,那边才测得到(workers 池要驱动真 D1)。
 export const listAccountHoldings = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(async ({ context }) => {
-    // **整条链一个 effect,一次装配**(#394 T6):读账户 + 快照 → 注入 manual 合成项 → 逐账户富化。
-    // 以前前两步各自经门面各装一次、注入那步自己再装一次,一个请求切三次边界。
-    const rows = await runRequest(
-      context.userId,
-      Effect.gen(function* () {
-        const [allAccounts, snapshots] = yield* Effect.all(
-          [
-            Effect.flatMap(AccountStore, (s) => s.list()),
-            Effect.flatMap(SnapshotStore, (s) => s.latest()),
-          ],
-          { concurrency: 2 },
-        );
-        const accounts = allAccounts.filter((a) => a.archivedAt == null);
-        const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-        // manual 不写快照(ADR 0018):注入合成当下项,manual 账户行的市值/持仓由 creds 现造。
-        yield* injectManualSnapshots(accounts, byAccount);
-        // **逐账户串行**(以前是 `Promise.all` 的隐式全并发)—— 每个账户一次批量读,
-        // 账户数是个位数,而 D1 并不因为同时发十条而更快。
-        return yield* Effect.forEach(accounts, (account) =>
-          Effect.gen(function* () {
-            const latest = byAccount.get(account.id);
-            const enriched = yield* enrichBalances(latest?.balances ?? []);
-            return {
-              account: { id: account.id, label: account.label },
-              totalUsd: latest?.snapshot.totalUsd ?? 0,
-              takenAt: latest?.snapshot.takenAt ?? null,
-              // note 重设计(两级):① balance 级单个 note 随各 balance 透传(db 已把 snapshot_balances.note
-              // safeParse 成 Note),现货行副行渲染 <NoteBadge>;② account 级 note(Note[],整钱包,BTC 未确认/
-              // 收款/派生分布)是每账户一份,db 已 safeParse 成 Note[],这里随 row.note 带出 → 持仓区手风琴。
-              note: latest?.note,
-              balances: enriched.rows,
-              pricesStale: enriched.pricesStale,
-            };
-          }),
-        );
-      }),
-    );
-    return { rows, pricesStale: rows.some((r) => r.pricesStale) };
-  });
+  .handler(({ context }) => runRequest(context.userId, loadAccountHoldings()));
 
 // 组合净值历史:全部快照总额 → 阶梯式重建为时间序列(纯函数,可序列化输出)。
 // 「当下点」(最新点)不用快照冻结总额,而是与主页同款**现推实时总价**(deriveLiveAccountTotals,

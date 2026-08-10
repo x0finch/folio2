@@ -28,13 +28,31 @@ const build = (over: Partial<Parameters<typeof buildAccountRows>[0]> = {}) =>
   });
 
 describe("buildAccountRows", () => {
-  it("归档账户不在持仓那一源里 → 市值/上次同步/持仓退成空,而不是消失", () => {
-    // 归档账户被 listAccountHoldings 过滤掉(见 portfolio.ts),但列表里**仍要有这一行**。
+  it("持仓那一源里没有这个账户 → 市值/上次同步/持仓退成空,而不是整行消失", () => {
+    // 退化路径:没有任何快照的账户(刚加、还没同步过)。
+    // **归档账户不再走这条** —— 归档 = 封存(ADR 0039),它在持仓那一源里有封存值,见下一条。
     const [row] = build({ accounts: [account({ archivedAt: 1700000000000 })] });
     expect(row.totalUsd).toBe(0);
     expect(row.takenAt).toBeNull();
     expect(row.balances).toEqual([]);
     expect(row.archivedAt).toBe(1700000000000);
+  });
+
+  it("归档账户在持仓那一源里有封存值 → 照常取用,不因为归档就抹成 0", () => {
+    const [row] = build({
+      accounts: [account({ archivedAt: 1700000000000 })],
+      holdings: {
+        rows: [
+          { account: { id: "a1" }, totalUsd: 999, takenAt: 1690000000000, balances: [{ x: 1 }] },
+        ],
+        pricesStale: false,
+        // biome-ignore lint/suspicious/noExplicitAny: 测试替身
+      } as any,
+    });
+    expect(row.archivedAt).toBe(1700000000000);
+    expect(row.totalUsd).toBe(999);
+    expect(row.takenAt).toBe(1690000000000);
+    expect(row.balances).toHaveLength(1);
   });
 
   it("持仓那一源有这个账户 → 市值与上次同步取它的", () => {
