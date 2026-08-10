@@ -421,7 +421,14 @@ export const loadManualHistoryRows = (
   Effect.map(
     Effect.forEach(
       accounts.filter((a) => isManual(a.connectorId)),
-      (a) => loadManualAccountSeries(a.id, now),
+      // **归档账户的网格只画到封存那一刻**(ADR 0039)。它归档前的历史照常保留 —— 所以是截断 τ,
+      // 不是把这个账户整个剔掉(剔掉会把它归档前的贡献一起抹了,与「归档看的是过去」相反)。
+      // 不截断的话:一年前归档的手记账户,每次开首页都要为它从账本重建 365 个日格点(还带历史价查询),
+      // 而这些点在求和时全被排除 —— 白算一遍,还往曲线里插一批「什么都没发生」的时间点。
+      // `Math.min`:只**截短**,不延长 —— 调用方给的 `now` 是这条曲线的右端,
+      // 归档时刻晚于它(比如刚归档、而调用方在算一段历史)时不该把网格往后拉。
+      (a) =>
+        loadManualAccountSeries(a.id, a.archivedAt == null ? now : Math.min(a.archivedAt, now)),
       { concurrency: "unbounded" },
     ),
     (perAccount) => perAccount.flat(),

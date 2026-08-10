@@ -296,6 +296,35 @@ describe("loadManualHistoryRows (grid)", () => {
     expect(rows).toHaveLength(2);
   });
 
+  // review 补:归档账户的网格**只画到封存那一刻**,不再一路算到调用方给的 now。
+  // 不截断的话,一年前归档的手记账户每次开首页都要重建一年份的日格点(还带历史价查询),
+  // 而这些点在求和时全被排除 —— 白算,还往曲线里插一批「什么都没发生」的时间点。
+  it("归档账户的网格截到封存那一刻,不跟着 now 一路长", async () => {
+    const a = await emptyAccount("A");
+    const archived = await emptyAccount("Z");
+    await addManualActivities(USER, a.id, [
+      { token: localBtc, kind: "add", amount: 1, occurredAt: D0, price: 60000 },
+    ]);
+    await addManualActivities(USER, archived.id, [
+      { token: localBtc, kind: "add", amount: 5, occurredAt: D0, price: 60000 },
+    ]);
+    await dbFor(USER).accounts.setArchived(archived.id, true);
+    // 把封存时刻拨到 D0(与活动同日),而调用方要的是 D0 之后三天的曲线。
+    await env.DB.prepare("UPDATE accounts SET archived_at = ? WHERE id = ?")
+      .bind(D0, archived.id)
+      .run();
+    const rows = await loadManualHistoryRows(
+      USER,
+      await dbFor(USER).accounts.list(),
+      D0 + 3 * 86_400_000,
+    );
+    // 活跃账户画到第 4 天(D0..D0+3);归档账户只在 D0 有一点。
+    const forArchived = rows.filter((r) => r.accountId === archived.id);
+    expect(forArchived).toHaveLength(1);
+    expect(forArchived[0].takenAt).toBe(D0);
+    expect(rows.filter((r) => r.accountId === a.id).length).toBeGreaterThan(1);
+  });
+
   it("含归档 manual 账户:历史保留其过去贡献", async () => {
     const a = await emptyAccount("A");
     const archived = await emptyAccount("Z");
