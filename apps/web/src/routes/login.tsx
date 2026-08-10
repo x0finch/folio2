@@ -29,13 +29,15 @@ const DEMO_SERIES: HistoryPoint[] = Array.from({ length: 28 }, (_, i) => ({
   // 线性上扬 + 末段(约后 8 点)加速拉高 → 末点明显最高,呈"突破上涨"形。
   total: 150_000 + i * 3_600 + Math.max(0, i - 19) ** 2 * 900 + Math.sin(i * 0.9) * 3_500,
 }));
-// 显示净值起点须高于 DEMO_SERIES 末值(约 $302k),否则 hero 的 24h 变化算成负 → 红色 pill。
 const DEMO_START_TOTAL = 312_450.42;
+// 24h 盈亏改口径之后(ADR 0040),hero 那个 pill 的数由 server 算好后传进来,不再从曲线上量 ——
+// 所以演示数据也直接给一个正的盈亏,而不是靠「起点高于末值」间接凑出颜色。
+const DEMO_GAIN = { amount: 4_820.15, pct: 1.57 };
 const DEMO_HOLDINGS: HoldingLike[] = [
-  { token: { symbol: "BTC" }, totalValue: 112_400, change24h: 2.1 },
-  { token: { symbol: "ETH" }, totalValue: 61_250, change24h: 3.4 },
-  { token: { symbol: "SOL" }, totalValue: 20_000, change24h: -1.2 },
-  { token: { symbol: "USDC" }, totalValue: 40_000, change24h: 0 },
+  { token: { symbol: "BTC" }, totalValue: 112_400, gain24h: { amount: 2_310, pct: 2.1 } },
+  { token: { symbol: "ETH" }, totalValue: 61_250, gain24h: { amount: 2_012, pct: 3.4 } },
+  { token: { symbol: "SOL" }, totalValue: 20_000, gain24h: { amount: -243, pct: -1.2 } },
+  { token: { symbol: "USDC" }, totalValue: 40_000, gain24h: { amount: 0, pct: 0 } },
 ];
 
 // 登录页(L1 #113):主页净值 hero 喂假数据、放大虚化铺满全屏作背景;认证表单透明居中浮于其上。
@@ -75,6 +77,7 @@ function HeroBackdrop() {
         <PortfolioHero
           series={DEMO_SERIES}
           totalUsd={total}
+          gain24h={DEMO_GAIN}
           holdings={DEMO_HOLDINGS}
           contentClassName="px-8"
         />

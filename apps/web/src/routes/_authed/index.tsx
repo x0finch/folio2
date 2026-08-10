@@ -261,7 +261,12 @@ function Overview() {
   return (
     <div className="flex flex-col gap-6">
       <HeaderSync />
-      <PortfolioHero series={series} totalUsd={heroTotal} holdings={portfolioData.holdings} />
+      <PortfolioHero
+        series={series}
+        totalUsd={heroTotal}
+        gain24h={portfolioData.gain24h ?? null}
+        holdings={portfolioData.holdings}
+      />
 
       {accountTotals.length === 0 ? (
         <p className="text-muted-foreground">

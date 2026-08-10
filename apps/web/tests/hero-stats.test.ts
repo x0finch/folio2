@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { deriveHeroMetrics, type HoldingLike, isStablecoin } from "../src/lib/hero-stats";
 
-const h = (symbol: string, totalValue: number, change24h?: number): HoldingLike => ({
+// gain:该持仓今天赚 / 亏的**金额**(ADR 0040)。省略 → 算不出,不参与 best/worst 择取。
+const h = (symbol: string, totalValue: number, gain?: number, pct?: number): HoldingLike => ({
   token: { symbol },
   totalValue,
-  ...(change24h === undefined ? {} : { change24h }),
+  ...(gain === undefined ? {} : { gain24h: { amount: gain, pct: pct ?? null } }),
 });
 
 // 法币行:身份驱动(isFiat),symbol 只是展示 —— 稳定判定不看它。
@@ -27,25 +28,40 @@ describe("isStablecoin", () => {
 });
 
 describe("deriveHeroMetrics", () => {
-  it("picks best (highest 24h) and worst (lowest 24h)", () => {
+  it("按赚 / 亏的金额取,不按涨跌幅", () => {
     const m = deriveHeroMetrics([h("BTC", 100, 3.2), h("ETH", 50, -1.5), h("SOL", 20, 8.1)], 170);
-    expect(m.best).toEqual({ symbol: "SOL", change24h: 8.1 });
-    expect(m.worst).toEqual({ symbol: "ETH", change24h: -1.5 });
+    expect(m.best).toEqual({ symbol: "SOL", amount: 8.1 });
+    expect(m.worst).toEqual({ symbol: "ETH", amount: -1.5 });
   });
 
-  it("ignores holdings without a 24h change for best/worst", () => {
+  it("持有 500 块涨 30% 的小币,不会顶掉持有 10 万涨 2% 的大仓位", () => {
+    // 这正是改口径要修的那个症状:以前只看涨跌幅、完全不看你持有多少,于是这两格永远被小币刷屏。
+    const shitcoin = h("SHIT", 500, 150, 30); // 500 块涨 30% → 赚 150
+    const btc = h("BTC", 100_000, 2_000, 2); // 10 万涨 2% → 赚 2,000
+    const m = deriveHeroMetrics([shitcoin, btc], 100_500);
+    expect(m.best?.symbol).toBe("BTC");
+    // 而按涨跌幅取的话,best 会是那个 500 块的币
+    expect(m.best?.symbol).not.toBe("SHIT");
+  });
+
+  it("算不出盈亏的行不参与择取", () => {
     const m = deriveHeroMetrics([h("BTC", 100), h("ETH", 50, -2)], 150);
-    expect(m.best).toEqual({ symbol: "ETH", change24h: -2 });
-    expect(m.worst).toEqual({ symbol: "ETH", change24h: -2 });
+    expect(m.best).toEqual({ symbol: "ETH", amount: -2 });
+    expect(m.worst).toEqual({ symbol: "ETH", amount: -2 });
   });
 
-  it("returns null best/worst when no holding has a 24h change", () => {
+  it("一行都算不出 → best/worst 皆 null(界面渲染 `—`)", () => {
     const m = deriveHeroMetrics([h("BTC", 100), h("USDC", 50)], 150);
     expect(m.best).toBeNull();
     expect(m.worst).toBeNull();
   });
 
-  it("keeps the first holding on a tie", () => {
+  it("盈亏为 0 的行仍然参与 —— 那是一条真实结论,不是缺数据", () => {
+    const m = deriveHeroMetrics([h("BTC", 100, 0)], 100);
+    expect(m.best).toEqual({ symbol: "BTC", amount: 0 });
+  });
+
+  it("并列时保留先出现者", () => {
     const m = deriveHeroMetrics([h("AAA", 10, 5), h("BBB", 10, 5)], 20);
     expect(m.best?.symbol).toBe("AAA");
     expect(m.worst?.symbol).toBe("AAA");

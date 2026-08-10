@@ -503,5 +503,34 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0040)", () => {
     );
     const sum = view.holdings.reduce((s, h) => s + (h.gain24h?.amount ?? 0), 0);
     expect(sum).toBeCloseTo(12, 6); // +10(USDC)+2(ETH)
+    // **这条是第 4 片的验收核心**:hero 那个数就是各行之和,而这是现在做不到的事。
+    expect(view.gain24h?.amount).toBeCloseTo(sum, 6);
+  });
+
+  it("组合百分比是统一时间轴上的连乘,不是各行百分比取平均", async () => {
+    const two = [account("a1", "Arb"), account("a2", "Cold", "manual")];
+    const snaps = new Map([
+      ["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])],
+      ["a2", snap("a2", 62, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 62 })])],
+    ]);
+    const view = await runWithOracle(
+      stub,
+      buildOverview(two, snaps, {
+        now: NOW,
+        gainHistory: [
+          { accountId: "a1", takenAt: FROM, tokenId: "usdc", amount: 1, usdValue: 100 },
+          { accountId: "a2", takenAt: FROM, tokenId: "eth", amount: 2, usdValue: 60 },
+        ],
+      }),
+    );
+    // 各行:+10%(100→110)与 +3.33%(60→62);组合基数 160 → 12/160 = 7.5%,不是两者的平均 6.67%
+    const avg = view.holdings.reduce((s, h) => s + (h.gain24h?.pct ?? 0), 0) / view.holdings.length;
+    expect(view.gain24h?.pct).toBeCloseTo(7.5, 4);
+    expect(view.gain24h?.pct).not.toBeCloseTo(avg, 2);
+  });
+
+  it("一条线都算不出 → 组合层也是 null,由 hero 渲染 `—`", async () => {
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { now: NOW }));
+    expect(view.gain24h).toBeNull();
   });
 });
