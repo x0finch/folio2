@@ -1,6 +1,5 @@
 import { LogoAvatar } from "@folio/ui";
 import type { ReactNode } from "react";
-import { dayValueChange } from "../lib/day-value-change";
 import { formatNumber } from "../lib/format-number";
 import { AvatarStack } from "./avatar-stack";
 import { ValueDelta } from "./value-delta";
@@ -15,10 +14,7 @@ export interface TokenRowItem {
   symbol: string;
   amount?: number | null;
   value: number;
-  change24h?: number;
-  // 24h 盈亏(ADR 0040),由 server 按快照历史分段算好。`null` = 算不出 → `—`。
-  // **`undefined` = 这条路还没接上盈亏**,回落到旧的市场涨跌幅倒推 —— 账户抽屉的现货区暂时如此
-  // (#447 第 5 片接)。过渡期的两条路都得能显示,不然抽屉里那一列会先空掉。
+  // 24h 盈亏(ADR 0040),由 server 按快照历史 / 账本分段算好。`null` = 算不出 → `—`。
   gain24h?: { amount: number; pct: number | null } | null;
 }
 
@@ -33,11 +29,10 @@ export function TokenRowContent({
   // 行内附加物(如账户抽屉的 balance 级 note 指示器);无则省略。
   aside?: ReactNode;
 }) {
-  const wired = item.gain24h !== undefined;
-  const dayValue = wired
-    ? (item.gain24h?.amount ?? null)
-    : dayValueChange(item.value, item.change24h);
-  const dayPct = wired ? (item.gain24h?.pct ?? null) : item.change24h;
+  // 24h 盈亏(ADR 0040)由 server 算好 —— 过渡期那条「没接上就回落到市场涨跌幅倒推」的路已经拆了,
+  // 主页与账户抽屉两条路都接上了(#447 第 2 / 5 片)。`null` = 算不出 → `—`。
+  const dayValue = item.gain24h?.amount ?? null;
+  const dayPct = item.gain24h?.pct ?? null;
   return (
     <div className="flex w-full items-center gap-3">
       <LogoAvatar src={item.logo} fallback={item.symbol} size="md" />

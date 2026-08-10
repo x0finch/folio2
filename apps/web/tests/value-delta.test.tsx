@@ -102,3 +102,23 @@ describe("永续那条路不受波及", () => {
     expect(line?.textContent).toContain("1.50%");
   });
 });
+
+describe("归档账户的三态不能在传参处被抹平", () => {
+  // `?? null` 是这条链上最容易犯的错:server 给归档行的是 `undefined`(封存了,不该有这个数),
+  // 一个 `?? null` 就把它压成「算不出」、画出 `—`。两者在界面上是两种意思,不能互相顶替。
+  it("undefined 与 null 渲染出的东西不同", () => {
+    const omitted = renderDelta({ delta: undefined });
+    const unknown = renderDelta({ delta: null });
+    expect(deltaLine(omitted.container)).toBeNull();
+    expect(deltaLine(unknown.container)?.textContent).toBe(NO_VALUE);
+  });
+
+  it("`?? null` 会把整行省略变成一个 `—` —— 这就是那个 bug 的形状", () => {
+    // 模拟传参处那个 `b.gain24h ?? null`:server 给的是 undefined,落到组件手里成了 null。
+    const fromServer: number | null | undefined = undefined;
+    const flattened = renderDelta({ delta: fromServer ?? null });
+    expect(deltaLine(flattened.container)?.textContent).toBe(NO_VALUE);
+    // 而原样透传应该是整行省略
+    expect(deltaLine(renderDelta({ delta: fromServer }).container)).toBeNull();
+  });
+});

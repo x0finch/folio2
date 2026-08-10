@@ -49,6 +49,9 @@ export function buildAccountRows(sources: {
       totalUsd: ov?.totalUsd ?? 0,
       takenAt: ov?.takenAt ?? null,
       balances: ov?.balances ?? [],
+      // 24h 盈亏(ADR 0040)。**三态原样透传,别 `?? null`** —— server 给归档账户的就是 `undefined`
+      // (封存了,这个位置不该有这个数),压成 `null` 会让界面画出一个 `—`。
+      gain24h: ov?.gain24h,
       note: ov?.note,
       needsCredentials: a.needsCredentials,
       credsSafe: a.credsSafe,

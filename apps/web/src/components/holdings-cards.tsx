@@ -44,7 +44,9 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
               symbol: b.symbol.toUpperCase(),
               amount: b.amount,
               value: b.usdValue,
-              change24h: b.change24h,
+              // **不写 `?? null`** —— 归档账户的现货行拿到的是 `undefined`(封存了,这个位置不该有
+              // 这个数),`?? null` 会把它压成「算不出」而画出 `—`。三态得原样透传(见 lib/delta-display)。
+              gain24h: b.gain24h,
             }}
             aside={b.note ? <NoteIndicator note={b.note} formatNumber={fmtNote} /> : undefined}
           />
