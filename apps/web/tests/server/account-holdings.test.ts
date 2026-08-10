@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAccountHoldings } from "../../src/lib/server/internal/account-holdings";
 import { runRequest } from "../../src/lib/server/internal/oracle";
 import { dbFor } from "./db-effect";
+import { addManualActivities } from "./manual-fns";
 
 // 归档 = 封存(ADR 0039):账户页的按账户明细**要包含归档账户**,显示的是封存那一刻的数。
 //
@@ -270,3 +271,50 @@ async function withHistoryAccount(label: string, address: string) {
   }
   return acc;
 }
+
+describe("manual 账户的抽屉现货行", () => {
+  // 浏览器实测发现:抽屉头显示 −$1,524.85,而它下面唯一那行 BTC 却是 `—` —— 同一个账户同一个币,
+  // 两个数打架。账户级和逐币级用的是同一份原料、同一个装配,不该有一个算得出、另一个算不出。
+  const DAY = 24 * 60 * 60 * 1000;
+  const localBtc = { symbol: "BTC", unitPrice: 100 };
+
+  it("账户头算得出时,它下面那行也算得出 —— 两者同源", async () => {
+    const acc = await dbFor(USER).accounts.create({
+      connectorId: "manual",
+      label: "M1",
+      creds: JSON.stringify({ tokens: "[]" }),
+    });
+    await addManualActivities(USER, acc.id, [
+      { token: localBtc, kind: "add", amount: 2, occurredAt: Date.now() - 3 * DAY, price: 100 },
+    ]);
+
+    const { of } = await rowsByLabel();
+    const row = of("M1");
+    expect(row?.gain24h).not.toBeUndefined();
+    expect(row?.gain24h).not.toBeNull(); // 账户头算得出
+    expect(row?.balances).toHaveLength(1);
+    // 这一条就是浏览器里看到的那个矛盾
+    expect(row?.balances[0].gain24h).not.toBeNull();
+  });
+
+  it("两个 manual 账户持有同一个币(共用 token_id)—— 各自的行互不串", async () => {
+    const mk = async (label: string) => {
+      const a = await dbFor(USER).accounts.create({
+        connectorId: "manual",
+        label,
+        creds: JSON.stringify({ tokens: "[]" }),
+      });
+      await addManualActivities(USER, a.id, [
+        { token: localBtc, kind: "add", amount: 2, occurredAt: Date.now() - 3 * DAY, price: 100 },
+      ]);
+      return a;
+    };
+    await mk("MA");
+    await mk("MB");
+
+    const { of } = await rowsByLabel();
+    for (const label of ["MA", "MB"]) {
+      expect(of(label)?.balances[0]?.gain24h, label).not.toBeNull();
+    }
+  });
+});
