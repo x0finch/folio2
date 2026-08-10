@@ -37,6 +37,9 @@ export const injectManualSnapshots = (
   takenAt?: number,
 ) => runRequest(userId, M.injectManualSnapshots(accounts, byAccount, takenAt));
 
+export const sealManualAccount = (userId: string, account: AccountSafe, takenAt?: number) =>
+  runRequest(userId, M.sealManualAccount(account, takenAt));
+
 export const manualBalancesForWarm = (userId: string, accounts: AccountSafe[]) =>
   runRequest(userId, M.manualBalancesForWarm(accounts));
 
