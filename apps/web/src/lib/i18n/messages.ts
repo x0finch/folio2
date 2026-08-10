@@ -143,6 +143,9 @@ const en = {
     archive: "Archive",
     unarchive: "Unarchive",
     archivedBadge: "Archived",
+    // 归档 = 封存(ADR 0039):数据停在归档那一刻,所以这里是**静态日期**,不是相对时间。
+    // 用相对时间的话它会一天天长下去(「3 个月前同步」),看着像同步坏了。
+    sealedAt: "Sealed {when}",
     archivedSection: "Archived ({count})",
     deleteConfirm:
       "Delete this account? This can't be undone — its snapshots and history are removed too.",
@@ -536,6 +539,7 @@ const zh: Messages = {
     archive: "归档",
     unarchive: "取消归档",
     archivedBadge: "已归档",
+    sealedAt: "封存于 {when}",
     archivedSection: "已归档({count})",
     deleteConfirm: "删除此账户?不可撤销 —— 其快照与历史将一并删除。",
     deleteConfirmBtn: "确认删除",
