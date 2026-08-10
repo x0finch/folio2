@@ -5,6 +5,7 @@ import {
   type ManualActivityPatch,
   type ManualHolding,
   ManualStore,
+  SnapshotStore,
   type SnapshotWithBalances,
 } from "@folio/db";
 import { FxService, TokenService } from "@folio/oracle";
@@ -185,6 +186,45 @@ export const injectManualSnapshots = (
         byAccount.set(id, buildManualSnapshot(id, tokens, prices, takenAt));
       }),
     );
+  });
+
+// 归档 = 封存(ADR 0039):**manual 账户从不写快照**(ADR 0018),持仓是每次读的时候从账本现算的,
+// 所以库里根本不存在一张可以拿来展示的照片 —— 归档之后它就是一具空壳。这里在归档那一刻按账本算一次、
+// 落一张**真的**快照下来,之后它和链上账户走同一条读路径。
+//
+// **复用注入那条路**,不另写一套:它已经把「账本 → 合成余额 → 现价 / 取不到回退自填价」整条做完了,
+// 再抄一遍就等于给「manual 此刻值多少」开第二个答案。
+//
+// 传进来的账户必须**还没被打上归档标记** —— 注入那条路按 `archivedAt == null` 过滤(见
+// `manualTokensByAccount`),打完标记再来这里会一无所获。调用点的顺序因此不是风格问题,见 accounts.ts。
+//
+// 返回是否真的落了一张:非 manual 账户不落(它们本来就有快照,再补一张没有新信息)。
+export const sealManualAccount = (
+  account: AccountSafe,
+  takenAt: number = Date.now(),
+): Effect.Effect<boolean, never, ManualStore | SnapshotStore | TokenService | FxService> =>
+  Effect.gen(function* () {
+    if (!isManual(account.connectorId)) return false;
+    const byAccount = new Map<string, SnapshotWithBalances>();
+    yield* injectManualSnapshots([account], byAccount, takenAt);
+    const built = byAccount.get(account.id);
+    // 一个持仓都没有的 manual 账户:注入那条路会跳过它(空 tokens)。此时不落空快照 ——
+    // 空快照与「从没同步过」在读端长得一样,却多一行没有内容的历史。
+    if (!built) return false;
+    yield* Effect.flatMap(SnapshotStore, (s) =>
+      s.write(account.id, {
+        takenAt,
+        totalUsd: built.snapshot.totalUsd,
+        balances: built.balances.map((b) => ({
+          amount: b.amount,
+          usdValue: b.usdValue,
+          kind: b.kind,
+          platform: b.platform ?? undefined,
+          tokenId: b.tokenId ?? undefined,
+        })),
+      }),
+    );
+    return true;
   });
 
 // 预热用:该用户全部 manual 账户的合成余额(供 warmTokens 把其代币现价取进缓存)。manual 已退出 snapshot,
