@@ -82,7 +82,16 @@ export function buildManualSnapshot(
   });
   const totalUsd = balances.reduce((sum, b) => sum + b.usdValue, 0);
   return {
-    snapshot: { id: `manual:${accountId}`, accountId, takenAt, totalUsd, note: null },
+    // manual 从不写快照(ADR 0018),这是现造的合成项 —— 两个 note 列都空:它没有账户级 note,
+    // 也就没有指向去重表的指针(#456)。
+    snapshot: {
+      id: `manual:${accountId}`,
+      accountId,
+      takenAt,
+      totalUsd,
+      note: null,
+      noteHash: null,
+    },
     balances,
   };
 }

@@ -1,7 +1,7 @@
 import { type BalanceKind, Note } from "@folio/connectors-basic";
 import { and, asc, desc, eq, getTableColumns, gte, inArray, max } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import { accounts, snapshotBalances, snapshots } from "../schema";
+import { accounts, snapshotBalances, snapshotNotes, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
 import { Database } from "../stores/service";
 import { assertAccountOwned } from "./ownership";
@@ -13,6 +13,8 @@ import { assertAccountOwned } from "./ownership";
 // D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 现在每行 10 列 → 每块 8 行(80 个,限内)。
 // **加列必须回来改这个数**:列数 × 块行数不得超 100,否则 "too many SQL variables",只在持仓多的账户上炸。
 const BALANCE_INSERT_CHUNK = 8;
+// 一次按 hash 取 note 的分块大小。D1 的绑定参数上限是 100,留出余量给 userId 那个条件。
+const NOTE_HASH_CHUNK = 90;
 
 export interface SnapshotBalanceInput {
   amount: number;
@@ -109,14 +111,53 @@ export interface SnapshotStore {
 
 export const SnapshotStore = Context.GenericTag<SnapshotStore>("db/SnapshotStore");
 
+// 内容 → SHA-256 hex。去重键就是内容本身,所以写入天然幂等 —— 不需要额外的自增 id,
+// 也不需要「先查有没有」那一次往返。
+const sha256Hex = async (text: string): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+
 const make = (userId: string) =>
   Effect.gen(function* () {
     const database = yield* Database;
+
+    // **去重是存储细节,不该泄漏到契约**(#456)。所有读路径都经这里把 `note_hash` 换回内容,
+    // 于是调用方看到的 `note` 恒是「可以 safeParse 的那段 JSON」,不用关心它存在哪、怎么存的。
+    //
+    // 两种来源都认:`note_hash` 非空 → 查去重表;否则用 `note` 列原值(#456 之前写下的存量行)。
+    // 存量不回填 —— 去重键是内容的 SHA-256,而 SQLite 没有内置哈希函数,迁移 SQL 里算不出来;
+    // 为把已经占掉的空间抠回来专门跑一趟应用层脚本,不划算。
+    const hydrateNotes = <T extends { note: string | null; noteHash: string | null }>(
+      rows: T[],
+    ): Effect.Effect<T[]> =>
+      Effect.gen(function* () {
+        const hashes = [...new Set(rows.flatMap((r) => (r.noteHash ? [r.noteHash] : [])))];
+        if (hashes.length === 0) return rows;
+        // 去重之后不同内容的份数很少(那正是去重的意义),但仍按 D1 的绑定参数上限分块 ——
+        // 一页快照全都带着**互不相同**的 note 是可能的,只是罕见。
+        const byHash = new Map<string, string>();
+        for (let i = 0; i < hashes.length; i += NOTE_HASH_CHUNK) {
+          const chunk = hashes.slice(i, i + NOTE_HASH_CHUNK);
+          const found = yield* database.query((db) =>
+            db
+              .select()
+              .from(snapshotNotes)
+              .where(and(eq(snapshotNotes.userId, userId), inArray(snapshotNotes.hash, chunk))),
+          );
+          for (const n of found) byHash.set(n.hash, n.json);
+        }
+        return rows.map((r) => (r.noteHash ? { ...r, note: byHash.get(r.noteHash) ?? r.note } : r));
+      });
 
     const store: SnapshotStore = {
       write: (accountId, input) =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
+          // account 级 note 按**内容**去重(#456):同一份内容在一个用户下只存一行,快照指过去。
+          // 它基本不变却每次同步整份重写 —— 实测带 note 的行 2225 字节、不带的 88,差 25 倍。
+          const noteJson = input.note && input.note.length > 0 ? JSON.stringify(input.note) : null;
+          const noteHash = noteJson ? yield* Effect.promise(() => sha256Hex(noteJson)) : null;
           const snapshotId = crypto.randomUUID();
           const balanceRows = input.balances.map((b) => ({
             id: crypto.randomUUID(),
@@ -150,9 +191,19 @@ const make = (userId: string) =>
                 accountId,
                 takenAt: input.takenAt,
                 totalUsd: input.totalUsd,
-                // account 级 note(Note[] 整钱包)→ JSON;空则 null。
-                note: input.note && input.note.length > 0 ? JSON.stringify(input.note) : null,
+                // **新写的快照不再把 note 塞进这一列**(#456),只留指针 —— 内容进去重表。
+                note: null,
+                noteHash,
               }),
+              // 同内容已经在了就什么都不做 —— 去重键就是内容本身,写入天然幂等。
+              ...(noteJson && noteHash
+                ? [
+                    db
+                      .insert(snapshotNotes)
+                      .values({ userId, hash: noteHash, json: noteJson })
+                      .onConflictDoNothing(),
+                  ]
+                : []),
               ...balanceInserts,
             ];
           });
@@ -162,13 +213,14 @@ const make = (userId: string) =>
       listByAccount: (accountId) =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-          return yield* database.query((db) =>
+          const rows = yield* database.query((db) =>
             db
               .select()
               .from(snapshots)
               .where(eq(snapshots.accountId, accountId))
               .orderBy(desc(snapshots.takenAt)),
           );
+          return yield* hydrateNotes(rows);
         }),
 
       // 只取这三列、不取 balances(比 `latest` 轻);组合净值时间序列在纯函数里
@@ -248,7 +300,7 @@ const make = (userId: string) =>
             const cur = byAccount.get(s.accountId);
             if (!cur || s.id > cur.id) byAccount.set(s.accountId, s);
           }
-          const snaps = [...byAccount.values()];
+          const snaps = yield* hydrateNotes([...byAccount.values()]);
           if (snaps.length === 0) return [];
 
           // ② 取这些快照的全部余额(1 查询)。
@@ -284,16 +336,20 @@ const make = (userId: string) =>
       // 配合 `balancesFor` 一页页流式读出,内存恒定;每页配 inArray(≤ 页大小)取余额,
       // 避开 D1 100 绑定参数上限。
       listPage: (limit, offset) =>
-        database.query((db) =>
-          db
-            .select(getTableColumns(snapshots))
-            .from(snapshots)
-            .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
-            .where(eq(accounts.userId, userId))
-            .orderBy(asc(snapshots.takenAt), asc(snapshots.id))
-            .limit(limit)
-            .offset(offset),
-        ),
+        Effect.gen(function* () {
+          const rows = yield* database.query((db) =>
+            db
+              .select(getTableColumns(snapshots))
+              .from(snapshots)
+              .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+              .where(eq(accounts.userId, userId))
+              .orderBy(asc(snapshots.takenAt), asc(snapshots.id))
+              .limit(limit)
+              .offset(offset),
+          );
+          // 导出要拿到 note 的**内容**,不是指针 —— 导出文件里不该出现只有本库能解开的 hash。
+          return yield* hydrateNotes(rows);
+        }),
 
       // 导出(#204)按 token_id 走(v3),不再需要 symbol,故这里不再 join tokens。
       balancesFor: (snapshotIds) =>

@@ -171,13 +171,41 @@ export const snapshots = sqliteTable(
     totalUsd: real("total_usd").notNull(),
     // account 级展示 note(note 重设计):JSON.stringify(Note[]),可空。整钱包一份(BTC 未确认/收款/派生分布);
     // 读时 safeParse 回 Note[](见 getLatestSnapshotByUser)。纯展示,无共享逻辑读它。
+    //
+    // **本列只剩存量在用**(#456)。它的内容基本不变,却每次同步整份重写一遍 —— 实测带 note 的行
+    // 2225 字节、不带的 88 字节,差 25 倍。同步提到每小时之后(#446)一个 BTC xpub 账户每年就有
+    // 约 37 MB 在存同一份东西。新写的快照改存 `note_hash`,内容进 `snapshot_notes` 按内容去重。
+    //
+    // **存量不回填**:去重键是内容的 SHA-256,而 SQLite 没有内置哈希函数 —— 迁移 SQL 里算不出来。
+    // 回填要跑一趟应用层脚本,而收益只是把已经占掉的空间抠回来。所以读路径两边都认:
+    // `note_hash` 非空 → 查 `snapshot_notes`;否则读本列。旧行原样留着,不动就不会错。
     note: text("note"),
+    // 新写快照的 account 级 note:指向 `snapshot_notes.hash`(同内容多张快照共用一行)。
+    noteHash: text("note_hash"),
   },
   (t) => [
     index("snapshots_account_id_idx").on(t.accountId),
     // greatest-n-per-group:取每账户最新快照(getLatestSnapshotByUser)走这条复合索引。
     index("snapshots_account_id_taken_at_idx").on(t.accountId, t.takenAt),
   ],
+);
+
+// account 级展示 note 的**去重存储**(#456)。同一份内容在同一用户下只存一行,多张快照按 hash 指过来。
+//
+// **按 userId scoped**(原则 #6):note 里装的是这个用户的钱包细节(派生地址、未确认笔数),
+// 不是可整表重建的公开知识 —— 与 `global_token_ref_index` 那种受控例外不是一回事。
+// 主键 (user_id, hash):同内容跨用户各存一份,泄露面为零。
+export const snapshotNotes = sqliteTable(
+  "snapshot_notes",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // 内容的 SHA-256(hex)。内容本身就是键 —— 不需要额外的自增 id,写入天然幂等。
+    hash: text("hash").notNull(),
+    json: text("json").notNull(), // JSON.stringify(Note[])
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.hash] })],
 );
 
 export const snapshotBalances = sqliteTable(
