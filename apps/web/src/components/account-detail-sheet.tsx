@@ -27,7 +27,6 @@ import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { accountShare, shareLabel } from "../lib/account-share";
 import type { OverviewBalance } from "../lib/account-view";
-import { aggregateDayChange } from "../lib/day-value-change";
 import { deltaTone, NO_VALUE } from "../lib/delta-display";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
@@ -58,6 +57,9 @@ export interface AccountRow {
   totalUsd: number;
   takenAt: number | null;
   balances: OverviewBalance[]; // 各持仓自带 balance 级 note(note 重设计)
+  // 24h 盈亏(ADR 0040),server 按快照历史 / 账本分段算好。`undefined` = 这个位置不该有(归档行);
+  // `null` = 该有但算不出。账户行与抽屉头共用同一个数,不再各算各的。
+  gain24h?: { amount: number; pct: number | null } | null;
   note?: Note[]; // account 级展示 note(Note[],整钱包;BTC 未确认/收款/派生分布)
   needsCredentials: boolean;
   credsSafe: Record<string, string>;
@@ -164,8 +166,9 @@ function DetailBody({
   // 各行的百分比加起来超过 100%。缺凭据不显增量是同一个道理。
   // 这两种是「**不该有**这个数」→ 整块省略;而「该有却**算不出**」是另一回事 → `—`。三态口径见
   // lib/delta-display,与行内 <ValueDelta> 共用 —— 这里字号不同(大字),故手搓而非复用组件。
-  const hasDayChange = !(account.needsCredentials || archived);
-  const dayChange = hasDayChange ? aggregateDayChange(account.balances) : undefined;
+  // 数由 server 算好(ADR 0040),与账户行同源 —— 抽屉头和列表行显示同一个数,不再各算各的。
+  const hasDayChange = !(account.needsCredentials || archived) && account.gain24h !== undefined;
+  const dayChange = hasDayChange ? account.gain24h : undefined;
   const sharePct = accountShare(account.totalUsd, total) * 100;
 
   const [renaming, setRenaming] = useState(false);
@@ -299,13 +302,13 @@ function DetailBody({
               <div className="font-bold text-3xl tabular-nums">{usd(account.totalUsd)}</div>
               {hasDayChange && (
                 <div
-                  className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange?.delta ?? null))}
+                  className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange?.amount ?? null))}
                 >
                   {dayChange == null ? (
                     NO_VALUE
                   ) : (
                     <>
-                      {signedUsd(usd, dayChange.delta)}
+                      {signedUsd(usd, dayChange.amount)}
                       {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
                     </>
                   )}

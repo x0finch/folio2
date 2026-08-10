@@ -1,6 +1,7 @@
 import {
   Badge,
   BottomSheet,
+  cn,
   Drawer,
   LogoAvatar,
   SharedLayoutBg,
@@ -16,7 +17,7 @@ import { type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { collapseToSlots } from "../lib/collapse-to-slots";
-import { dayValueChange } from "../lib/day-value-change";
+import { deltaTone, NO_VALUE } from "../lib/delta-display";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { holdingHistoryQuery } from "../lib/queries/accounts";
@@ -185,8 +186,10 @@ function SourceView({
 function AssetSheetContent({ holding }: { holding: Holding }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
-  const { token, totalValue, totalAmount, change24h, sources } = holding;
-  const dayValue = dayValueChange(totalValue, change24h);
+  const { token, totalValue, totalAmount, sources } = holding;
+  // 24h 盈亏(ADR 0040)—— server 算好的,与主页那一行同一个数。以前是 change24h 倒推的。
+  const dayValue = holding.gain24h?.amount ?? null;
+  const dayPct = holding.gain24h?.pct ?? null;
   const platformGroups = groupByPlatform(sources);
   const accountGroups = groupByAccount(sources);
 
@@ -241,14 +244,18 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
 
           <div>
             <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
-            {dayValue != null && (
-              // 24h 增值 + %:共用一个前置符号(同源同号)、同色,与代币行/hero 一致。
-              <div
-                className={`mt-1 text-sm tabular-nums ${dayValue > 0 ? "text-pos" : "text-neg"}`}
-              >
-                {signedUsd(usd, dayValue)} {Math.abs(change24h ?? 0).toFixed(2)}%
-              </div>
-            )}
+            {/* 24h 盈亏 + %:共用一个前置符号、同色,与代币行/hero 一致。
+                算不出 → `—`(全站三态口径,见 lib/delta-display)。 */}
+            <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayValue))}>
+              {dayValue == null ? (
+                NO_VALUE
+              ) : (
+                <>
+                  {signedUsd(usd, dayValue)}
+                  {dayPct != null ? ` ${Math.abs(dayPct).toFixed(2)}%` : ""}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>

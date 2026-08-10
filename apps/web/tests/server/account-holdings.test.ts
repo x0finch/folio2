@@ -129,3 +129,71 @@ describe("按账户明细与归档", () => {
     expect(view.pricesStale).toBe(true);
   });
 });
+
+describe("账户行的 24h 盈亏(ADR 0040)", () => {
+  // 与代币行同一套装配,只是**线按账户攒**而不是按币。这组打真 D1 是因为跨了账户、快照历史、
+  // 富化三层 —— 尤其「归档账户拿到的是 undefined(不该有)而不是 null(算不出)」这个区分,
+  // 只有走完整条链才看得出来。
+  const DAY = 24 * 60 * 60 * 1000;
+
+  const withHistory = async (label: string, address: string, then: number, nowValue: number) => {
+    const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
+      { namer: "coingecko", localName: `issued:${address}` },
+    ]);
+    const acc = await dbFor(USER).accounts.create({
+      connectorId: "evm",
+      platform: "evm:1",
+      label,
+      creds: JSON.stringify({ address }),
+    });
+    // 24 小时前那张(基准)
+    await dbFor(USER).snapshots.write(acc.id, {
+      takenAt: Date.now() - DAY,
+      totalUsd: then,
+      balances: [{ amount: 1, usdValue: then, kind: "spot", platform: "evm:1", tokenId: btc }],
+    });
+    // 最新那张(当下)
+    await dbFor(USER).snapshots.write(acc.id, {
+      takenAt: Date.now(),
+      totalUsd: nowValue,
+      balances: [{ amount: 1, usdValue: nowValue, kind: "spot", platform: "evm:1", tokenId: btc }],
+    });
+    return acc;
+  };
+
+  it("有基准 → 行上带真实盈亏", async () => {
+    await withHistory("Live", "0xa", 100, 110);
+    const { of } = await rowsByLabel();
+    expect(of("Live")?.gain24h?.amount).toBeCloseTo(10, 4);
+  });
+
+  it("归档账户拿到 undefined —— 「不该有这个数」,不是「算不出」", async () => {
+    const acc = await withHistory("Sealed", "0xb", 100, 110);
+    await dbFor(USER).accounts.setArchived(acc.id, true);
+    const { of } = await rowsByLabel();
+    const row = of("Sealed");
+    expect(row).toBeDefined(); // 归档账户仍在列表里(ADR 0039)
+    expect(row?.gain24h).toBeUndefined();
+    expect(row?.gain24h).not.toBeNull();
+  });
+
+  it("没有窗口内的基准 → null(界面渲染 `—`)", async () => {
+    const btc = await dbFor(USER).transfer.importToken({ symbol: "ETH", name: "Ether" }, [
+      { namer: "coingecko", localName: "issued:ethereum" },
+    ]);
+    const acc = await evmAccount("Fresh", "0xc");
+    await dbFor(USER).snapshots.write(acc.id, {
+      takenAt: Date.now(),
+      totalUsd: 50,
+      balances: [{ amount: 1, usdValue: 50, kind: "spot", platform: "evm:1", tokenId: btc }],
+    });
+    const { of } = await rowsByLabel();
+    expect(of("Fresh")?.gain24h).toBeNull();
+  });
+
+  it("整条路径不出网", async () => {
+    await withHistory("Quiet", "0xd", 100, 110);
+    await rowsByLabel();
+    expect(outbound).toEqual([]);
+  });
+});

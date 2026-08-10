@@ -2,7 +2,12 @@ import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import { PlatformService, TokenService } from "@folio/oracle";
 import { fiatCodeOf, type TokenRecord, type ValuationMode } from "@folio/oracle-basic";
 import { Effect } from "effect";
-import { type OverviewBalance, toAccountSections } from "../../account-view";
+import {
+  DEFI_FALLBACK_PROTOCOL,
+  type OverviewBalance,
+  parseDefiMeta,
+  toAccountSections,
+} from "../../account-view";
 import { type AggInput, buildCanonicalHoldings } from "../../aggregate";
 import { isFungible, viewKind } from "../../balance-kind";
 import {
@@ -206,6 +211,46 @@ export const buildOverview = (
         ...(defiChange.has(b.id) ? { change24h: defiChange.get(b.id) } : {}),
       }));
 
+    // —— DeFi 协议行的 24h 盈亏(ADR 0040 的已知妥协)——
+    //
+    // 这类行没有「几个币」可依,只有一个总价值:两次照片之间价值变了,分不清是市场涨的还是你自己
+    // 往里加了钱。所以把每个 (账户 × 协议) 当成**一条数量恒为 1 的线**喂进去 —— 算法于是自动退化
+    // 成两张照片的价值相减,不需要第二套逻辑。代价写在明处:你动仓那天这个数不准。
+    const defiHistory = (gainHistory ?? []).filter((r) => r.kind === "defi");
+    const defiKey = (accountId: string, protocol: string) => `${accountId}|${protocol}`;
+    // 先把腿聚合掉:同一 (账户, 协议, 时刻) 只留一行、数量恒 1、价值取净小计。
+    const defiSlots = new Map<string, { row: GainHistoryRow; gross: number }>();
+    for (const r of defiHistory) {
+      const protocol = parseDefiMeta(r.metaJson ?? null).protocol ?? DEFI_FALLBACK_PROTOCOL;
+      const k = `${defiKey(r.accountId, protocol)}|${r.takenAt}`;
+      const slot = defiSlots.get(k);
+      if (slot) {
+        slot.row.usdValue += r.usdValue;
+        slot.gross += Math.abs(r.usdValue);
+      } else {
+        defiSlots.set(k, {
+          row: {
+            accountId: r.accountId,
+            takenAt: r.takenAt,
+            tokenId: protocol, // 分组键的位置放协议名(见 buildGainLines 的 groupOf 注释)
+            amount: 1,
+            usdValue: r.usdValue,
+          },
+          gross: Math.abs(r.usdValue),
+        });
+      }
+    }
+    // 百分比的分母:该协议在**最早那个观测时刻**的总敞口(各腿取绝对值再累加)。
+    // **不能用净值**(ADR 0040 明写):存 100 万、借 99 万的对冲仓净值只剩 1 万,拿它当分母会算出
+    // 荒唐的百分比。这条约束早于本次改动(见旧 `aggregateDayChange` 的 grossPrev 注释),
+    // 删旧函数时最容易连着一起丢掉。
+    const defiGross = new Map<string, { t: number; gross: number }>();
+    for (const { row, gross } of defiSlots.values()) {
+      const k = defiKey(row.accountId, row.tokenId as string);
+      const prev = defiGross.get(k);
+      if (!prev || row.takenAt < prev.t) defiGross.set(k, { t: row.takenAt, gross });
+    }
+
     let defiSubtotal = 0;
     const sections = accounts
       .map((account) => {
@@ -236,6 +281,41 @@ export const buildOverview = (
           s.defi.length > 0 ||
           (s.perp != null && (s.perp.positions.length > 0 || s.perp.equity != null)),
       );
+
+    // 分组结束之后才知道每个账户有哪些协议、当下小计多少 —— 所以 DeFi 的盈亏在这里收尾。
+    const defiCurrent: GainCurrentRow[] = sections.flatMap((s) =>
+      s.defi.map((g) => ({
+        accountId: s.account.id,
+        tokenId: g.protocol,
+        amount: 1,
+        value: g.rows.reduce((sum, r) => sum + r.usdValue, 0),
+      })),
+    );
+    const defiLines = buildGainLines(
+      [...defiSlots.values()].map((x) => x.row),
+      defiCurrent,
+      now,
+      (r) => defiKey(r.accountId, r.tokenId),
+    );
+    for (const s of sections) {
+      for (const g of s.defi) {
+        const k = defiKey(s.account.id, g.protocol);
+        const gain = computeGain24h(defiLines.get(k) ?? [], now);
+        const gross = defiGross.get(k)?.gross ?? 0;
+        // **金额用分段算,百分比换成总敞口分母** —— 见上面 defiGross 的注释。连乘对这类行本来
+        // 也没有意义:它没有「数量固定的段」这回事,整条线就是两张照片相减。
+        g.gain24h =
+          gain == null
+            ? null
+            : {
+                amount: gain.amount,
+                pct: gross > 0 ? (gain.amount / gross) * 100 : null,
+                // 分母**带着走**:总览的 DeFi tab 会跨账户合并协议组,那时要用 Σ金额 ÷ Σ总敞口
+                // 重算百分比。从 pct 反推分母在 pct 为 0 时推不出来,所以只能原样带过去。
+                grossBasis: gross,
+              };
+      }
+    }
 
     // 4) 每账户净值 + 组合总额(按账户去重)。
     // 现推(不落库,liveTotals 已在步骤 2 并行求得):按当前 mode + 实时源价重算每账户净值,
