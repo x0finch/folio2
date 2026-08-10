@@ -14,7 +14,12 @@ import { isManual } from "../manual-connector";
 import { loadAccountHoldings } from "./internal/account-holdings";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { deriveLiveAccountTotals } from "./internal/live-value";
-import { injectManualSnapshots, loadManualHistoryRows, manualFiatRefs } from "./internal/manual";
+import {
+  injectManualSnapshots,
+  loadManualGainHistory,
+  loadManualHistoryRows,
+  manualFiatRefs,
+} from "./internal/manual";
 import { runAtEdge, runRequest, runStore, withRequest } from "./internal/oracle";
 import { buildOverview } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
@@ -107,11 +112,15 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
           // 盈亏只按视图内的账户算 —— 历史是全量读的(一次查询比按账户分批便宜),这里收窄到
           // 当前 Portfolio / Tab 的账户,否则一个不在视图里的账户会把它的涨跌算进这一屏。
           const inView = new Set(accounts.map((a) => a.id));
+          // manual 从不写快照(ADR 0018)→ 它的原料不在上面那次查询里,按账本另算(#447 第 3 片)。
+          // 窗口起点直接产点(账本能算任意时刻),所以这里传的是 `now - GAIN_WINDOW_MS` 本身,
+          // 而不是上面那个带容差的下界 —— 容差是给稀疏快照留的,账本不需要。
+          const manualGain = yield* loadManualGainHistory(accounts, now, now - GAIN_WINDOW_MS);
           return yield* buildOverview(accounts, byAccount, {
             connectorMeta: connectorPlatformMeta,
             mode: settings.valuationMode,
             fiatRefs,
-            gainHistory: gainHistory.filter((r) => inView.has(r.accountId)),
+            gainHistory: [...gainHistory.filter((r) => inView.has(r.accountId)), ...manualGain],
             now,
           });
         }),
