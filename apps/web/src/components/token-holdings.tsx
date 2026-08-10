@@ -23,6 +23,8 @@ function RowContent({ h }: { h: Holding }) {
         amount: h.totalAmount,
         value: h.totalValue,
         change24h: h.change24h,
+        // 主页这条路已接 24h 盈亏(ADR 0040)—— server 算好的分段结果,不再由 change24h 倒推。
+        gain24h: h.gain24h ?? null,
       }}
       sources={h.sources.map((s) => ({
         logo: s.platform.logo,

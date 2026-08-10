@@ -1,3 +1,5 @@
+import type { Gain } from "./gain-24h";
+
 // symbol 归一(与 tokens 层同口径:trim + 大写)—— 只用在还没有 token_id 的行上(见 groupKey)。
 const norm = (s: string): string => s.trim().toUpperCase();
 
@@ -60,6 +62,10 @@ export interface Holding {
   totalValue: number;
   totalAmount?: number; // 各 source 数量之和(组统一单位,跨链/多源亦可汇总)
   change24h?: number; // 仅单一 Token 组(%,每币 CGK 涨跌)
+  // 24h 盈亏(ADR 0040):由 server 读路径(buildOverview)按快照历史分段算好后附上,**不在这里算** ——
+  // 聚合只负责归并,盈亏要的原料(历史)不在它手上。`null` = 算不出(缺基准),`undefined` = 这条路
+  // 没接盈亏(账户抽屉那条路暂时如此,见 #447 第 5 片)。
+  gain24h?: Gain | null;
   sources: HoldingSource[];
 }
 

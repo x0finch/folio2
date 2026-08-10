@@ -16,6 +16,10 @@ export interface TokenRowItem {
   amount?: number | null;
   value: number;
   change24h?: number;
+  // 24h 盈亏(ADR 0040),由 server 按快照历史分段算好。`null` = 算不出 → `—`。
+  // **`undefined` = 这条路还没接上盈亏**,回落到旧的市场涨跌幅倒推 —— 账户抽屉的现货区暂时如此
+  // (#447 第 5 片接)。过渡期的两条路都得能显示,不然抽屉里那一列会先空掉。
+  gain24h?: { amount: number; pct: number | null } | null;
 }
 
 export function TokenRowContent({
@@ -29,7 +33,11 @@ export function TokenRowContent({
   // 行内附加物(如账户抽屉的 balance 级 note 指示器);无则省略。
   aside?: ReactNode;
 }) {
-  const dayValue = dayValueChange(item.value, item.change24h);
+  const wired = item.gain24h !== undefined;
+  const dayValue = wired
+    ? (item.gain24h?.amount ?? null)
+    : dayValueChange(item.value, item.change24h);
+  const dayPct = wired ? (item.gain24h?.pct ?? null) : item.change24h;
   return (
     <div className="flex w-full items-center gap-3">
       <LogoAvatar src={item.logo} fallback={item.symbol} size="md" />
@@ -46,7 +54,7 @@ export function TokenRowContent({
           </span>
         )}
       </div>
-      <ValueDelta value={item.value} delta={dayValue} pct={item.change24h} />
+      <ValueDelta value={item.value} delta={dayValue} pct={dayPct} />
     </div>
   );
 }
