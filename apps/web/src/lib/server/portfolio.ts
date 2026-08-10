@@ -8,6 +8,7 @@ import {
   accountsMatchingPin,
   toTabPin,
 } from "../accounts-in-view";
+import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "../gain-24h";
 import { buildPortfolioHistory } from "../history";
 import { isManual } from "../manual-connector";
 import { loadAccountHoldings } from "./internal/account-holdings";
@@ -73,14 +74,20 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
           const tagStore = yield* TagStore;
 
           const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
-          const [allAccounts, snapshots, settings, memberships] = yield* Effect.all(
+          // 「当下」取一次,整条链共用 —— 分段的末点、容差判定、取历史的下界都按同一刻算,
+          // 各自现取 `Date.now()` 会在毫秒级上错开(测试里更是直接不可复现)。
+          const now = Date.now();
+          const [allAccounts, snapshots, settings, memberships, gainHistory] = yield* Effect.all(
             [
               accountStore.list(),
               snapshotStore.latest(),
               settingsStore.get(),
               portfolioStore.listMemberships(),
+              // 24h 盈亏的原料(ADR 0040):窗口起点还要往前留一个容差,否则基准快照恰好落在
+              // 窗口外时整条线判「算不出」—— 而它明明就在那儿。
+              snapshotStore.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
             ],
-            { concurrency: 4 },
+            { concurrency: 5 },
           );
           // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
           // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
@@ -97,10 +104,15 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
           // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
           //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
           const fiatRefs = yield* manualFiatRefs(accounts);
+          // 盈亏只按视图内的账户算 —— 历史是全量读的(一次查询比按账户分批便宜),这里收窄到
+          // 当前 Portfolio / Tab 的账户,否则一个不在视图里的账户会把它的涨跌算进这一屏。
+          const inView = new Set(accounts.map((a) => a.id));
           return yield* buildOverview(accounts, byAccount, {
             connectorMeta: connectorPlatformMeta,
             mode: settings.valuationMode,
             fiatRefs,
+            gainHistory: gainHistory.filter((r) => inView.has(r.accountId)),
+            now,
           });
         }),
       ),

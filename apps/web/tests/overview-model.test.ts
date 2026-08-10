@@ -3,6 +3,7 @@ import type { TokenRecord } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/account-view";
+import { GAIN_WINDOW_MS } from "../src/lib/gain-24h";
 import { buildOverview } from "../src/lib/server/internal/overview-model";
 import { type OracleStub, runWithOracle } from "./oracle-stub";
 
@@ -441,5 +442,66 @@ describe("buildOverview —— equity-only perp 账户不被过滤", () => {
     expect(view.sections).toHaveLength(1);
     expect(view.sections[0].perp?.equity?.accountValue).toBe(1000);
     expect(view.sections[0].perp?.positions).toEqual([]);
+  });
+});
+
+describe("buildOverview —— 24h 盈亏接线(ADR 0040)", () => {
+  const NOW = 1_700_000_000_000;
+  const FROM = NOW - GAIN_WINDOW_MS;
+  const accounts = [account("a1", "Arb")];
+  // 当下:1 个 USDC,现推市值 110(默认桩不给价 → liveValue 退回冻结的 usdValue,所以直接写 110)。
+  const byAccount = new Map([["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])]]);
+
+  it("有历史 → 行上带真实盈亏,而不是市场涨跌幅倒推的数", async () => {
+    const view = await runWithOracle(
+      stub,
+      buildOverview(accounts, byAccount, {
+        now: NOW,
+        gainHistory: [
+          { accountId: "a1", takenAt: FROM, tokenId: "usdc", amount: 1, usdValue: 100 },
+        ],
+      }),
+    );
+    expect(view.holdings[0].gain24h?.amount).toBeCloseTo(10, 6);
+    expect(view.holdings[0].gain24h?.pct).toBeCloseTo(10, 6);
+  });
+
+  it("当天新建的仓 —— 账户那时有快照但没这个币 → 盈亏 0,不是一整天的涨幅", async () => {
+    const view = await runWithOracle(
+      stub,
+      buildOverview(accounts, byAccount, {
+        now: NOW,
+        // 那一刻账户里是另一个币 → USDC 的基准点是 (FROM, 0, 0)
+        gainHistory: [
+          { accountId: "a1", takenAt: FROM, tokenId: "eth", amount: 1, usdValue: 3000 },
+        ],
+      }),
+    );
+    expect(view.holdings.find((h) => h.key === "usdc")?.gain24h?.amount).toBe(0);
+  });
+
+  it("没有历史(缺基准)→ null,由界面渲染 `—`,不是 0", async () => {
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { now: NOW }));
+    expect(view.holdings[0].gain24h).toBeNull();
+  });
+
+  it("各行金额相加 = 把所有线一起算 —— 「加得起来」是结构上成立的", async () => {
+    const two = [account("a1", "Arb"), account("a2", "Cold", "manual")];
+    const snaps = new Map([
+      ["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])],
+      ["a2", snap("a2", 62, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 62 })])],
+    ]);
+    const view = await runWithOracle(
+      stub,
+      buildOverview(two, snaps, {
+        now: NOW,
+        gainHistory: [
+          { accountId: "a1", takenAt: FROM, tokenId: "usdc", amount: 1, usdValue: 100 },
+          { accountId: "a2", takenAt: FROM, tokenId: "eth", amount: 2, usdValue: 60 },
+        ],
+      }),
+    );
+    const sum = view.holdings.reduce((s, h) => s + (h.gain24h?.amount ?? 0), 0);
+    expect(sum).toBeCloseTo(12, 6); // +10(USDC)+2(ETH)
   });
 });

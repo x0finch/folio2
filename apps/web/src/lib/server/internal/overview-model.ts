@@ -5,6 +5,12 @@ import { Effect } from "effect";
 import { type OverviewBalance, toAccountSections } from "../../account-view";
 import { type AggInput, buildCanonicalHoldings } from "../../aggregate";
 import { isFungible, viewKind } from "../../balance-kind";
+import {
+  buildGainLines,
+  computeGain24h,
+  type GainCurrentRow,
+  type GainHistoryRow,
+} from "../../gain-24h";
 import { platformLogoUrl, tokenLogoUrl } from "../../logo";
 import { defiTokenId, refreshableTokenIds } from "../../tokens";
 import { deriveLiveAccountTotals, liveValue } from "./live-value";
@@ -26,6 +32,13 @@ export interface OverviewDeps {
   // 把 `ref` 空不空定义成「上游认没认出」,法币借它会被刷价/取价路径误当已收录。故身份单独注入,overview
   // 经 `fiatCodeOf` 判定(白名单校验、**不看裸 symbol**,防 "USD" 撞普通币)。缺省空 → 无法币。
   fiatRefs?: ReadonlyMap<string, string>;
+  // 24h 盈亏的原料(ADR 0040):窗口内的余额历史,由调用方按
+  // `now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS` 取好传进来。**读 D1 不在这里** —— 这个模块
+  // 是纯的(依赖注入、可脱离 server fn 单测),多挂一条 store 依赖会把它拽回 Effect 环境里去。
+  // 缺省 → 各行 `gain24h` 恒 null(界面渲染 `—`),既有测试无需改。
+  gainHistory?: readonly GainHistoryRow[];
+  // 「当下」那一刻。测试注入固定值;生产传 `Date.now()`。分段的末点与容差判定都按它算。
+  now?: number;
 }
 
 interface Elig {
@@ -57,7 +70,7 @@ export interface OverviewView {
 export const buildOverview = (
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
-  { connectorMeta, mode = "self-first", fiatRefs }: OverviewDeps,
+  { connectorMeta, mode = "self-first", fiatRefs, gainHistory, now = Date.now() }: OverviewDeps,
 ): Effect.Effect<OverviewView, never, TokenService | PlatformService> =>
   Effect.gen(function* () {
     const balancesOf = (id: string) => (byAccount.get(id)?.balances ?? []) as OverviewBalance[];
@@ -126,6 +139,22 @@ export const buildOverview = (
       marketCapRank: e?.price?.marketCapRank, // 详情头部 meta:市值排名
     }));
     const holdings = buildCanonicalHoldings(aggInputs);
+
+    // 24h 盈亏(ADR 0040)。**当下点用现推后的 value**(`aggInputs` 里那个,即首屏显示的市值)——
+    // 不用最新快照的冻结值:一天只同步一次时,最后一张快照就是今天零点那张,拿它当末点等于说
+    // 「今天一分钱没动」。同一个 `computeGain24h` 既算单行也算组合(#447 第 4 片),所以
+    // 「各行相加 = 首页那个数」是结构上成立的,不靠两边各算一遍碰对。
+    const currentRows: GainCurrentRow[] = aggInputs.map((r) => ({
+      accountId: r.account.id,
+      tokenId: r.tokenId ?? null,
+      amount: r.amount,
+      value: r.value,
+    }));
+    const gainLines = buildGainLines(gainHistory ?? [], currentRows, now);
+    for (const h of holdings) {
+      // holding.key ≡ aggregate.groupKey ≡ token_id(无 token_id 的旧行各自成行,查不到线 → null)。
+      h.gain24h = computeGain24h(gainLines.get(h.key) ?? [], now);
+    }
 
     // 读路径装饰:每个 platform key 都给一份展示(命中真名+logo,否则兜底名),cache-only 零网络。
     // 场馆键(manual/exchange:/perp:)走连接器自带 name+logo,不进 platforms.resolve;只把链键送去查(#52)。
