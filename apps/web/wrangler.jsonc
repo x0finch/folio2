@@ -23,11 +23,23 @@
   ],
 
   // 两个定时任务,**刻意拆成两个 trigger**(ADR 0022 / #199):
-  //   · 23:00 —— 刷全局代币映射表(拉几 MB JSON + 写几万行,重活)
-  //   · 00:00 —— 全量 sync sweep
-  // 挤一次调用有超预算风险,而且刷表卡住会拖到 sync 跑不完;拆开则各自一份 CPU / 时间预算,
-  // 且刷表先跑完、sync 当天就能用上新数据。src/server.ts 的 scheduled() 按 controller.cron 分支。
-  "triggers": { "crons": ["0 23 * * *", "0 0 * * *"] },
+  //   · 每天 23:00 整 —— 刷全局代币映射表(拉几 MB JSON + 写几万行,重活)
+  //   · 每小时 30 分 —— 全量 sync sweep(#446)
+  // 挤一次调用有超预算风险,而且刷表卡住会拖到 sync 跑不完;拆开则各自一份 CPU / 时间预算。
+  // src/server.ts 的 scheduled() 按 controller.cron 分支。
+  //
+  // **sweep 落在半点而不是整点**,两个理由:
+  //   ① 整点的话每天 23:00 会与刷表同时触发 —— Workers 会各起一次 scheduled 调用,两个重活并发,
+  //      正是拆成两个 trigger 想避开的事;
+  //   ② 半点让 23:30 那次 sweep 落在刷表之后,当天就能用上新映射 —— 原来「刷表先跑完、sync 用上
+  //      新数据」的意图,在提频之后靠这半小时错位继续成立。
+  // 这两条约束由 tests/cron-triggers.test.ts 锁着。
+  //
+  // **为什么提到每小时**(#446):24h 盈亏按快照分段算(ADR 0040),每次同步就是一个切口,
+  // 切口越密越准。一天一张照片 = 没得切,分段法永远退化成「按 24 小时前的数量算」。
+  // 存储代价按单账户量过(见 #446 的评估):每账户每年 ≈ 1.5 MB + 3.1 MB × 持币数,
+  // 带 account 级 note 的账户另加约 37 MB —— note 每次同步原样重存,去重是 #456。
+  "triggers": { "crons": ["0 23 * * *", "30 * * * *"] },
 
   // 可观测性(P6.7):开启 Workers Logs —— 自动摄取 console.* / LogTape 的 console sink 输出,
   // JSON 自动抽成可索引字段(Dashboard Query Builder + wrangler tail)。单用户 → 全量采样。
