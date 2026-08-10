@@ -44,7 +44,7 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
               symbol: b.symbol.toUpperCase(),
               amount: b.amount,
               value: b.usdValue,
-              change24h: b.change24h,
+              gain24h: b.gain24h ?? null,
             }}
             aside={b.note ? <NoteIndicator note={b.note} formatNumber={fmtNote} /> : undefined}
           />

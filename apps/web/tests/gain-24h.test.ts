@@ -265,3 +265,29 @@ describe("从快照历史装配持仓线", () => {
     expect(computeGain24h(lines.get(BTC) ?? [], NOW)?.amount).toBeCloseTo(10_000, 6);
   });
 });
+
+describe("同一账户同一个币分散在多条链 —— 抽屉里那几行加起来仍是这个币的总盈亏", () => {
+  // 抽屉的现货区按 balance 行渲染(多链 = 多行),而线是按 (账户 × 币) 的一条。整体金额按各行
+  // 市值占比摊回去,于是逐行显示与「这个币一共赚了多少」对得上,不会重复计数。
+  it("按市值占比摊分之后总和不变", () => {
+    const A = "acct";
+    const USDC = "tok-usdc";
+    const lines = buildGainLines(
+      [
+        { accountId: A, takenAt: FROM, tokenId: USDC, amount: 60, usdValue: 60 },
+        { accountId: A, takenAt: FROM, tokenId: USDC, amount: 40, usdValue: 40 },
+      ],
+      [
+        { accountId: A, tokenId: USDC, amount: 60, value: 66 },
+        { accountId: A, tokenId: USDC, amount: 40, value: 44 },
+      ],
+      NOW,
+    );
+    const total = computeGain24h(lines.get(USDC) ?? [], NOW);
+    expect(total?.amount).toBeCloseTo(10, 6);
+    // 摊分:66/110 与 44/110
+    const split = [66, 44].map((v) => (total?.amount ?? 0) * (v / 110));
+    expect(split[0] + split[1]).toBeCloseTo(total?.amount ?? 0, 6);
+    expect(split[0]).toBeCloseTo(6, 6);
+  });
+});

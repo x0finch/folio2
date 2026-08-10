@@ -188,7 +188,7 @@ describe("toAccountSections", () => {
 
 // —— H5 #120:DeFi 行 change24h 透传 + 跨账户协议合并 + 协议级 24h 聚合 ——
 
-import { mergeDefiGroups, protocolDayChange } from "../src/lib/account-view";
+import { type DefiRow, defiMeaningfulLegs, mergeDefiGroups } from "../src/lib/account-view";
 
 describe("DefiRow change24h 透传(富化字段,缺则 undefined)", () => {
   it("带 change24h 的 defi 行透传到 DefiRow", () => {
@@ -224,47 +224,6 @@ describe("mergeDefiGroups —— 跨账户按协议保序合并", () => {
     expect(mergeDefiGroups([{ defi: [] }])).toEqual([]);
   });
 });
-
-describe("protocolDayChange —— 协议级 24h 增值聚合", () => {
-  const row = (usdValue: number, change24h?: number, id = "r") => ({
-    id,
-    symbol: "X",
-    amount: 1,
-    usdValue,
-    change24h,
-  });
-  it("多行聚合:delta = Σ 单行增值,pct 相对总敞口前值(缺 change24h 的行按现值计入分母)", () => {
-    // 10100 涨 1% → 增值 100(前值 10000);负债 -5000 涨 0%(缺)→ 不计 delta,但计分母
-    const c = protocolDayChange([row(10100, 1, "a"), row(-5000, undefined, "b")]);
-    expect(c?.delta).toBeCloseTo(100);
-    expect(c?.pct).toBeCloseTo((100 / 15000) * 100, 3); // ≈0.667%,分母 = 10000 + |−5000|
-  });
-  it("负债行(负值)升值 → 负贡献(债变贵)", () => {
-    // -20400 涨 2% → 前值 -20000,增值 -400;pct 相对 |前值|
-    const c = protocolDayChange([row(-20400, 2)]);
-    expect(c?.delta).toBeCloseTo(-400);
-    expect(c?.pct).toBeCloseTo(-2);
-  });
-  it("对冲仓(存≈借,净值近零)不产生荒谬百分比(分母是总敞口非净值)", () => {
-    // 存 10100(+1% → +100)、借 -5050(+1% → -50):净前值仅 ~$50,若按净值分母 pct 会爆表
-    const c = protocolDayChange([row(10100, 1, "a"), row(-5050, 1, "b")]);
-    expect(c?.delta).toBeCloseTo(50);
-    expect(Math.abs(c?.pct ?? 0)).toBeLessThan(1); // 50 / 15000 ≈ 0.33%
-  });
-  it("部分富化不夸大:分母含未富化大头寸", () => {
-    // $100,000 无 change24h + $1,010(+1% → +10):% 相对全协议敞口而非小行
-    const c = protocolDayChange([row(100000, undefined, "a"), row(1010, 1, "b")]);
-    expect(c?.delta).toBeCloseTo(10);
-    expect(c?.pct).toBeCloseTo((10 / 101000) * 100, 3); // ≈0.0099%
-  });
-  it("全行缺 change24h → null(UI 只显小计)", () => {
-    expect(protocolDayChange([row(100), row(-50)])).toBeNull();
-  });
-});
-
-// —— H5 评审:协议有值腿(丢空腿、按值降序) ——
-
-import { type DefiRow, defiMeaningfulLegs } from "../src/lib/account-view";
 
 describe("defiMeaningfulLegs", () => {
   const r = (id: string, usdValue: number, symbol = "X"): DefiRow => ({

@@ -242,7 +242,7 @@ export const buildOverview = (
     }
     // 百分比的分母:该协议在**最早那个观测时刻**的总敞口(各腿取绝对值再累加)。
     // **不能用净值**(ADR 0040 明写):存 100 万、借 99 万的对冲仓净值只剩 1 万,拿它当分母会算出
-    // 荒唐的百分比。这条约束早于本次改动(见旧 `aggregateDayChange` 的 grossPrev 注释),
+    // 荒唐的百分比。这条约束早于本次改动(旧的 `aggregateDayChange` 里那个 grossPrev 就是干这个的),
     // 删旧函数时最容易连着一起丢掉。
     const defiGross = new Map<string, { t: number; gross: number }>();
     for (const { row, gross } of defiSlots.values()) {

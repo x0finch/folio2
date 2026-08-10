@@ -1,6 +1,5 @@
 import { DefiMeta, type DefiMeta as DefiMetaT, type Note } from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
-import { aggregateDayChange } from "./day-value-change";
 import { type PerpView, toPerpView } from "./perp";
 
 // 纯逻辑(无 server-only import → 可单测)。把一个账户的余额行按 kind 拆成展示分区:
@@ -31,6 +30,8 @@ export interface OverviewBalance {
   logo?: string;
   unitPrice?: number;
   change24h?: number;
+  // 24h 盈亏(ADR 0040),server 读路径按快照历史 / 账本算好后附上。抽屉的现货行按它显示。
+  gain24h?: { amount: number; pct: number | null } | null;
 }
 
 export interface SpotRow {
@@ -42,6 +43,7 @@ export interface SpotRow {
   logo?: string;
   unitPrice?: number;
   change24h?: number;
+  gain24h?: { amount: number; pct: number | null } | null;
   note?: Note; // balance 级展示 note(有则该行标题右侧渲染 <NoteIndicator>)
 }
 export interface DefiRow {
@@ -130,6 +132,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
         logo: b.logo,
         unitPrice: b.unitPrice,
         change24h: b.change24h,
+        gain24h: b.gain24h,
         note: b.note,
       });
     }
@@ -202,16 +205,6 @@ export function dropEmptyDefiGroups(groups: DefiGroup[]): DefiGroup[] {
   return groups.filter(
     (g) => g.rows.reduce((s, r) => s + Math.abs(r.usdValue), 0) >= DEFI_GROUP_DUST_USD,
   );
-}
-
-// 协议行的 24h 增值聚合:逐行 dayValueChange(负债行负值 → 升值为负贡献,方向天然正确)。
-// pct 分母 = 协议**总敞口**前值(全量行的 |前值| 之和,缺 change24h 的行按现值计):
-// 用净值当分母会在 对冲仓(存≈借,净值近零)与 部分富化(分母只剩小行)时产生荒谬百分比
-// (code review #3)。整协议无一行带 change24h → null(UI 只显小计,不显增量)。
-export function protocolDayChange(
-  rows: Pick<DefiRow, "usdValue" | "change24h">[],
-): { delta: number; pct: number | null } | null {
-  return aggregateDayChange(rows);
 }
 
 // 协议有值腿(H5 评审:头寸摘要别拼出几十条 0 值空仓/奖励腿 → 噪音看不懂)。按 |美元值| 降序,

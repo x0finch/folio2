@@ -197,3 +197,76 @@ describe("账户行的 24h 盈亏(ADR 0040)", () => {
     expect(outbound).toEqual([]);
   });
 });
+
+describe("抽屉现货行的逐币盈亏(ADR 0040)", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("同一个币散在多条链 —— 各行加起来等于这个币的总盈亏,不是每行都认领全部", async () => {
+    const usdc = await dbFor(USER).transfer.importToken({ symbol: "USDC", name: "USD Coin" }, [
+      { namer: "coingecko", localName: "issued:usd-coin" },
+    ]);
+    const acc = await dbFor(USER).accounts.create({
+      connectorId: "evm",
+      platform: "evm:1",
+      label: "Multi",
+      creds: JSON.stringify({ address: "0xmulti" }),
+    });
+    // **数量固定,只有市值变** —— 数量也跟着变的话这就成了「加仓」,按剔除资金进出的口径
+    // 盈亏正是 0(算法没错,是夹具会写错的地方)。
+    const legs = (a: number, b: number) => [
+      { amount: 60, usdValue: a, kind: "spot" as const, platform: "evm:1", tokenId: usdc },
+      { amount: 40, usdValue: b, kind: "spot" as const, platform: "evm:8453", tokenId: usdc },
+    ];
+    await dbFor(USER).snapshots.write(acc.id, {
+      takenAt: Date.now() - DAY,
+      totalUsd: 100,
+      balances: legs(60, 40),
+    });
+    await dbFor(USER).snapshots.write(acc.id, {
+      takenAt: Date.now(),
+      totalUsd: 110,
+      balances: legs(66, 44),
+    });
+
+    const { of } = await rowsByLabel();
+    const rows = of("Multi")?.balances ?? [];
+    expect(rows).toHaveLength(2);
+    const amounts = rows.map((b) => b.gain24h?.amount ?? 0);
+    // 该币一共赚了 10;两行按 66/110 与 44/110 摊分 → 6 与 4
+    expect(amounts.reduce((s, x) => s + x, 0)).toBeCloseTo(10, 4);
+    expect(Math.max(...amounts)).toBeCloseTo(6, 4);
+    // 每行都认领全部的话,两行都会是 10、加起来 20
+    expect(Math.max(...amounts)).not.toBeCloseTo(10, 2);
+  });
+
+  it("归档账户的现货行不带这个数", async () => {
+    const acc = await withHistoryAccount("Sealed2", "0xz");
+    await dbFor(USER).accounts.setArchived(acc.id, true);
+    const { of } = await rowsByLabel();
+    expect(of("Sealed2")?.balances[0]?.gain24h).toBeUndefined();
+  });
+});
+
+async function withHistoryAccount(label: string, address: string) {
+  const DAY = 24 * 60 * 60 * 1000;
+  const tok = await dbFor(USER).transfer.importToken({ symbol: "SOL", name: "Solana" }, [
+    { namer: "coingecko", localName: `issued:${address}` },
+  ]);
+  const acc = await dbFor(USER).accounts.create({
+    connectorId: "evm",
+    platform: "evm:1",
+    label,
+    creds: JSON.stringify({ address }),
+  });
+  for (const [t, v] of [
+    [Date.now() - DAY, 100],
+    [Date.now(), 110],
+  ] as const) {
+    await dbFor(USER).snapshots.write(acc.id, {
+      takenAt: t,
+      totalUsd: v,
+      balances: [{ amount: 1, usdValue: v, kind: "spot", platform: "evm:1", tokenId: tok }],
+    });
+  }
+  return acc;
+}
