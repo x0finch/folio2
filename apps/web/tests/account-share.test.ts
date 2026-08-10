@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { accountShare, activeAccountsTotal, shareLabel } from "../src/lib/account-share";
 
+// 归档 = 封存(ADR 0039)之后,归档行**有**市值了 —— 而分母仍然只能是活跃账户。
+// 这条以前是靠「归档行的市值恒为 0」侥幸成立的,那个前提已经没了,所以显式钉一条。
+describe("activeAccountsTotal 与归档", () => {
+  it("归档账户有市值也不进分母", () => {
+    expect(
+      activeAccountsTotal([
+        { totalUsd: 60, archivedAt: null },
+        { totalUsd: 40, archivedAt: null },
+        { totalUsd: 999, archivedAt: 1700000000000 },
+      ]),
+    ).toBe(100);
+  });
+
+  it("全部归档 → 分母 0 → 占比 0(不除零、不出负)", () => {
+    const total = activeAccountsTotal([
+      { totalUsd: 999, archivedAt: 1 },
+      { totalUsd: 111, archivedAt: 2 },
+    ]);
+    expect(total).toBe(0);
+    expect(accountShare(999, total)).toBe(0);
+  });
+});
+
 describe("accountShare", () => {
   it("占比 = 账户市值 / 总计", () => {
     expect(accountShare(25, 100)).toBeCloseTo(0.25, 6);
