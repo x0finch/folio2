@@ -196,7 +196,10 @@ function DetailBody({
     ...accountHistoryQuery({
       accountId: account.id,
       range,
-      since: rangeSince(range, Date.now()),
+      // **归档账户的窗口从封存那一刻往回算**(ADR 0039)。用「现在」当锚点的话,一年前归档的账户
+      // 在默认 30 天窗口下一个数据点都没有,图整个不渲染 —— 一个冻住的账户,「最近 30 天」本来
+      // 就没有意义。锚在封存时刻之后,30D 读作「封存前 30 天」,窗口切换照常能用。
+      since: rangeSince(range, account.archivedAt ?? Date.now()),
       connectorId: account.connectorId,
     }),
     placeholderData: keepPreviousData,

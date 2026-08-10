@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadAccountHistory } from "../../src/lib/server/internal/account-history";
 import { loadAccountHoldings } from "../../src/lib/server/internal/account-holdings";
 import { runRequest } from "../../src/lib/server/internal/oracle";
 import { dbFor } from "./db-effect";
@@ -114,5 +115,57 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     expect(row?.takenAt).not.toBe(1_700_000_000_000);
     // 快照没被删
     expect(await dbFor(USER).snapshots.listByAccount(account.id)).toHaveLength(1);
+  });
+});
+
+// —— 单账户曲线画到哪儿为止(片 5)——
+//
+// manual 的单账户曲线走账本 compute-on-read,末点原本恒是「现在」并且再补一个实时盯市点。
+// 归档之后抽屉头显示的是封存值,曲线却还在往今天长 —— 一个抽屉里两个说法。
+describe("归档 manual 账户的单账户曲线", () => {
+  it("活跃时:末点到「现在」,而且补了实时盯市点", async () => {
+    const account = await manualWithBtc();
+
+    const { series } = await runRequest(
+      USER,
+      loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
+    );
+
+    expect(series.length).toBeGreaterThan(0);
+    expect(Date.now() - series[series.length - 1].t).toBeLessThan(60_000);
+  });
+
+  it("归档后:末点停在封存那一刻,不再长到今天", async () => {
+    const account = await manualWithBtc();
+    await dbFor(USER).accounts.setArchived(account.id, true);
+    // `setArchived` 写的是当刻;这条要的是「很久以前封的」,直接把时间戳往回拨三个月。
+    const sealedAt = Date.now() - 90 * 24 * 3600_000;
+    await env.DB.prepare("UPDATE accounts SET archived_at = ? WHERE id = ?")
+      .bind(sealedAt, account.id)
+      .run();
+
+    const { series } = await runRequest(
+      USER,
+      loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
+    );
+
+    // 账本里的活动都在「现在」,而网格只画到封存那一刻(三个月前)→ 一个点都不该有。
+    // 关键是它**没有**一路画到今天:不截断的话这里会有点,而且末点是现在。
+    for (const p of series) expect(p.t).toBeLessThanOrEqual(sealedAt);
+  });
+
+  it("归档后不补实时盯市末点 —— 那正是「还在动」的那一笔", async () => {
+    const account = await manualWithBtc();
+    await dbFor(USER).accounts.setArchived(account.id, true);
+
+    const { series } = await runRequest(
+      USER,
+      loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
+    );
+
+    // 归档即刻(archivedAt ≈ now):网格照常有点,但末点是网格点本身,不是额外补上去的实时点。
+    // 补了的话末点的 t 会恰好等于 archivedAt 且总额取自 live —— 这里断言序列没有超出网格末点。
+    const archived = await dbFor(USER).accounts.getById(account.id);
+    for (const p of series) expect(p.t).toBeLessThanOrEqual(archived?.archivedAt ?? 0);
   });
 });

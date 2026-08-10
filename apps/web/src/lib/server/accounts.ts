@@ -1,19 +1,14 @@
 import type { ConnectorId } from "@folio/connectors";
-import { AccountStore, PortfolioStore, SnapshotStore } from "@folio/db";
+import { AccountStore, PortfolioStore } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
 import { isComplete, safeView } from "../creds";
-import { buildAccountValueHistory } from "../history";
-import { MANUAL_CONNECTOR_ID } from "../manual-connector";
+import { loadAccountHistory } from "./internal/account-history";
 import { credentialSpecs, validateAccountCreds } from "./internal/connector-registry";
 import { createAccountFor, raw2sealed } from "./internal/create-account";
-import {
-  loadManualAccountLiveTotal,
-  loadManualAccountSeries,
-  sealManualAccount,
-} from "./internal/manual";
+import { sealManualAccount } from "./internal/manual";
 import { runRequest, runStore } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 
@@ -180,33 +175,4 @@ export const getAccountHistory = createServerFn({ method: "GET" })
       connectorId: z.string().optional(),
     }),
   )
-  .handler(async ({ data, context }) => {
-    if (data.connectorId === MANUAL_CONNECTOR_ID) {
-      // 日网格 compute-on-read(ADR 0019):同一 now 喂网格(末点 τ=now)与 live 末点 → 端点同刻,replace 分支命中。
-      // **账本序列与实时末点一次装配**:两者本来就要对齐同一个 now,分两次跑还各建一套 store。
-      const now = Date.now();
-      const { rows, liveTotal } = await runRequest(
-        context.userId,
-        Effect.gen(function* () {
-          const rows = yield* loadManualAccountSeries(data.accountId, now);
-          const liveTotal = yield* loadManualAccountLiveTotal(data.accountId);
-          return { rows, liveTotal };
-        }),
-      );
-      const series = buildAccountValueHistory(
-        rows.map((r) => ({ takenAt: r.takenAt, totalUsd: r.totalUsd })),
-        data.since,
-      );
-      // 末点接实时盯市(与抽屉头同源):有账本点才补,空账户不凭空造点(与快照路径空态一致)。
-      if (liveTotal != null && series.length > 0) {
-        const last = series[series.length - 1];
-        if (last.t >= now) series[series.length - 1] = { t: last.t, total: liveTotal };
-        else series.push({ t: now, total: liveTotal });
-      }
-      return { series };
-    }
-    const snapshots = await runStore(context.userId, SnapshotStore, (s) =>
-      s.listByAccount(data.accountId),
-    );
-    return { series: buildAccountValueHistory(snapshots, data.since) };
-  });
+  .handler(({ data, context }) => runRequest(context.userId, loadAccountHistory(data)));
