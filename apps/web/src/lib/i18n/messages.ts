@@ -85,6 +85,7 @@ const en = {
   Overview: {
     totalValue: "Total value",
     totalNetWorth: "Total net worth",
+    trendNeedsSecondSync: "One more sync and the trend shows up",
     gainExplainTitle: "24h gain",
     gainExplainWhat: "Price movement only — buys, sells and transfers don't count.",
     gainExplainChanged: "you changed this position here",
@@ -489,6 +490,7 @@ const zh: Messages = {
   Overview: {
     totalValue: "总价值",
     totalNetWorth: "总净值",
+    trendNeedsSecondSync: "再同步一次就有走势了",
     gainExplainTitle: "24h 盈亏",
     gainExplainWhat: "只算价格涨跌 —— 买入卖出、充值提现都不计入。",
     gainExplainChanged: "你在这儿动过仓",

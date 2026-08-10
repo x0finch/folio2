@@ -48,6 +48,7 @@ import { Portal } from "./portal";
 import { PortfolioPickerModal } from "./portfolio-picker-modal";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { TagBadges } from "./tag-badges";
+import { TrendEmpty } from "./trend-empty";
 import { ValueTrendChart } from "./value-trend-chart";
 
 // 账户页列表行的合并形状(listAccountHoldings ∪ listAccounts,见 accounts.tsx loader)。
@@ -266,10 +267,13 @@ function DetailBody({
       <div className="relative">
         <div className="relative min-h-44">
           {/* chart 单独一层裁溢出;名称层浮其上不受裁 → 左上角铅笔角标不被 overflow-hidden 切掉。 */}
-          {series.length >= 2 && (
+          {series.length >= 2 ? (
             <div className="absolute inset-0 overflow-hidden">
               <ValueTrendChart series={series} topMargin={56} fillOpacity={0.14} />
             </div>
+          ) : (
+            // 一个点连不成线(#444)。新建账户第一次同步后必然如此 —— 说清楚,别留一片空白。
+            <TrendEmpty loading={historyQuery.isPending} />
           )}
 
           {/* 窗口切换:右下角独占一带(与 asset-sheet 一致)。 */}
