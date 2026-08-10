@@ -291,3 +291,54 @@ describe("同一账户同一个币分散在多条链 —— 抽屉里那几行�
     expect(split[0]).toBeCloseTo(6, 6);
   });
 });
+
+describe("摊开给用户看的分段(#445)", () => {
+  it("没动过手 → 只有一段,而且它的除法自己就对得上", () => {
+    const held = line(p(FROM, 1, 100_000), p(FROM + 6 * HOUR, 1, 105_000), p(NOW, 1, 110_000));
+    const gain = computeGain24h([held], NOW);
+    // 中间那个观测点不是「你动过手」,合并掉 —— 逐段列出来只是价格在慢慢爬,没有信息量。
+    expect(gain?.segments).toHaveLength(1);
+    expect(gain?.segments[0].gain).toBeCloseTo(10_000, 6);
+    // 一段的时候金额 ÷ 期初 == 百分比,除得通
+    expect((gain?.segments[0].gain ?? 0) / (gain?.segments[0].openValue ?? 1)).toBeCloseTo(
+      (gain?.pct ?? 0) / 100,
+      6,
+    );
+  });
+
+  it("买卖过 → 在你动手那一刻切开,而且正是除不通的那种情形", () => {
+    const noon = FROM + 12 * HOUR;
+    const btc = line(p(FROM, 1, 100_000), p(noon, 2, 210_000), p(NOW, 2, 220_000));
+    const gain = computeGain24h([btc], NOW);
+    expect(gain?.segments).toHaveLength(2);
+    expect(gain?.segments[0].openedByChange).toBe(false);
+    expect(gain?.segments[1].openedByChange).toBe(true); // 中午那一刻数量变了
+    expect(gain?.segments[0].gain).toBeCloseTo(5_000, 6);
+    expect(gain?.segments[1].gain).toBeCloseTo(10_000, 6);
+    // 各段收益率 +5.00% 与 +4.76%:连乘得 10%,直接相加是 9.76% —— 弹层要展示的正是这个差别
+    expect(gain?.segments[0].pct).toBeCloseTo(5, 4);
+    expect(gain?.segments[1].pct).toBeCloseTo((10_000 / 210_000) * 100, 4);
+  });
+
+  it("各段金额之和 = 总金额", () => {
+    const noon = FROM + 12 * HOUR;
+    const btc = line(p(FROM, 1, 100_000), p(noon, 2, 210_000), p(NOW, 2, 220_000));
+    const gain = computeGain24h([btc], NOW);
+    const sum = (gain?.segments ?? []).reduce((s, x) => s + x.gain, 0);
+    expect(sum).toBeCloseTo(gain?.amount ?? 0, 6);
+  });
+
+  it("合并段的百分比是重算的,不是把各段百分比加起来", () => {
+    // 三个连续的、没动过手的观测点 → 合成一段。把 +5% 与 +2.86% 与 +1.85% 直接相加会偏,
+    // 而正确答案是 (110000−100000)/100000 = 10%。
+    const held = line(
+      p(FROM, 1, 100_000),
+      p(FROM + 6 * HOUR, 1, 105_000),
+      p(FROM + 12 * HOUR, 1, 108_000),
+      p(NOW, 1, 110_000),
+    );
+    const gain = computeGain24h([held], NOW);
+    expect(gain?.segments).toHaveLength(1);
+    expect(gain?.segments[0].pct).toBeCloseTo(10, 6);
+  });
+});
