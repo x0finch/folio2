@@ -80,6 +80,10 @@ _Avoid_: group、accountGroups(旧称,已删)、workspace
 账户的**软标签** —— 一个账户可挂多个(M:N),做**横切分组**用(如「长线」「链上挖矿」)。归属某个 Portfolio(账户只能打其所在 Portfolio 的 Tag)。是 [Portfolio] 内的再分组,不是硬隔断。
 _Avoid_: group、label(那是账户显示名 `accounts.label`)、category
 
+**Archived(归档)**:
+账户的**封存**态 —— 不再同步,展示的是封存那一刻的最后一张照片,且不计入**任何** [Portfolio] 的净值。与「移到非默认 [Portfolio]」的分野:归档看的是过去(数据冻住),分组看的是现在(数据继续活着,只是不进主视图)。
+_Avoid_: 软删除 / soft delete(归档账户在账户页仍可见)、disabled、inactive
+
 **自定义 Tab(tab pin)**:
 首页上一个**指向单个 [Connector] 或单个 [Tag] 的固定快捷入口**(pin) —— 名字与颜色借用所指对象,不自存;点它把首页作用域收窄到「当前 [Portfolio] 内、属于该 Connector / 该 Tag 的账户」。每 user 至多固定 3 个。展示用**按小计倒序的 section list**(区别于默认 / Portfolio 视图仍用的现货 / 永续 / DeFi 子 Tab)。
 _Avoid_: saved view(它不是可组合多条件的一等视图,只是薄指针)、filter preset
