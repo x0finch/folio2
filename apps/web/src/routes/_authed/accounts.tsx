@@ -141,22 +141,30 @@ function Accounts() {
   );
 }
 
+// 封存日期的格式:与手记活动弹窗那处的日期同款(2 位年 + 月 + 日),不带时分 ——
+// 归档是「哪一天封的」这个粒度,精确到秒没有意义。
+const SEALED_DATE = { year: "2-digit", month: "short", day: "numeric" } as const;
+
 // 状态行(名称下方一条纯文本,按态染色):缺凭据 / 陈旧 → --warn 警示色 + 前置 ⚠;新鲜 / 从未同步 → muted。
 // 缺凭据 → 显可点击的"补填凭据以同步"提示(文案即入口,点开补录 modal);陈旧显"同步于 {when}"。派生走 accountSyncStatus。
 function AccountStatusLine({
   status,
   takenAt,
   connectorId,
+  archivedAt,
   onComplete,
 }: {
   status: AccountSyncStatus;
   takenAt: number | null;
   connectorId: ConnectorId;
+  archivedAt: number | null;
   onComplete?: () => void; // 缺凭据时:点提示文案开补录 modal(A3),不冒泡到行的打开详情
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
-  const warn = status === "needsCreds" || status === "stale";
+  const archived = archivedAt != null;
+  // 归档行永远不警示:它按设计就是停更的,再画个⚠说「同步陈旧」是在报一个不存在的故障。
+  const warn = !archived && (status === "needsCreds" || status === "stale");
   const needsCreds = status === "needsCreds";
   return (
     <span
@@ -173,7 +181,15 @@ function AccountStatusLine({
       )}
       {/* 缺凭据 + 可补录 → 可点击提示文案(文案本身即入口);行是 <button>,故用 role=button span +
           stopPropagation 避免按钮套按钮 / 误触打开详情。归档(无 onComplete)→ 纯文案。 */}
-      {needsCreds && onComplete ? (
+      {archived ? (
+        // 归档 = 封存(ADR 0039):**先判归档,再判是不是 manual**。
+        // 时间是静态日期,不是相对时间 —— 归档账户的时间戳永远不动,相对时间会一天天长下去。
+        // manual 归档账户尤其要走这条:它那一支原本无条件显示「实时」,而封存之后它显然不是。
+        // **日期取 `archivedAt`,不是 `takenAt`。** 后者是最后一次同步的时刻 —— 一个 1 月同步、
+        // 3 月才归档的账户会被写成「封存于 1 月」,而它其实是 3 月封的。数据有多旧另说,
+        // 这句话说的是「什么时候封的」。
+        t("sealedAt", { when: format.dateTime(new Date(archivedAt), SEALED_DATE) })
+      ) : needsCreds && onComplete ? (
         // biome-ignore lint/a11y/useSemanticElements: 行本身是 <button>,不能再嵌套 <button>(无效 HTML),故用 role=button span
         <span
           role="button"
@@ -224,11 +240,18 @@ function AccountRowContent({
 }: {
   row: AccountRow;
   total: number;
+  /** 归档行:**只调暗,不抽内容**。原来它顺手把市值与持仓叠标一起隐了 —— 而「归档后仍看得见
+   *  归档前的持仓」正是 #437 要的东西,藏起来等于这件事只在抽屉里成立。 */
   muted?: boolean;
   onComplete?: () => void; // 活跃缺凭据行:行内补录按钮(归档行不传)
 }) {
   const status = accountSyncStatus(row, Date.now());
-  const dayChange = row.needsCredentials ? null : aggregateDayChange(row.balances);
+  const archived = row.archivedAt != null;
+  // 归档 = 封存:市值冻在那一刻,旁边的 24h 涨跌幅却是富化带来的**实时行情** —— 一个数停着、
+  // 一个数在动,说的不是同一件事。缺凭据不显增量是同一个道理(不再同步,没有新鲜变化可言)。
+  const dayChange = row.needsCredentials || archived ? null : aggregateDayChange(row.balances);
+  // 占比的分母是活跃账户总计,归档不在里面 —— 显示了就是「不属于这个总数、却给了个百分比」,
+  // 各行加起来还会超过 100%。
   const sharePct = accountShare(row.totalUsd, total) * 100;
   return (
     // padding + overflow-hidden 放这层(填满整行):占比大字只被行外框裁,不在内容盒内被切。
@@ -256,31 +279,28 @@ function AccountRowContent({
           status={status}
           takenAt={row.takenAt}
           connectorId={row.connectorId}
+          archivedAt={row.archivedAt}
           onComplete={onComplete}
         />
         {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),无现货可叠(纯 perp/DeFi 或未同步)的行也不塌矮,
             全列表行高一致。真 logo 的按-kind 填充(perp coin / DeFi 协议)待 #132 解绑后再接。 */}
-        {!muted && (
-          <span className="flex min-h-6 items-center">
-            <TokenStack balances={row.balances} />
+        <span className="flex min-h-6 items-center">
+          <TokenStack balances={row.balances} />
+        </span>
+      </span>
+      <div className="relative shrink-0">
+        {/* hover 底衬:超大占比数字倾斜、占满行高,锚在价值左缘(right-full)再右移一个 % 宽度 —— 只有末尾 %
+              掖进价值下、前面数字全露出;-z-10 垫在名称/价值之下,中性淡色、仅 hover 浮现、不可点、不参与朗读。 */}
+        {!archived && sharePct > 0 && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 right-full -z-10 -translate-y-1/2 translate-x-14 -rotate-12 whitespace-nowrap font-bold text-8xl text-background/50 leading-none tracking-tighter opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+          >
+            {shareLabel(sharePct)}%
           </span>
         )}
-      </span>
-      {!muted && (
-        <div className="relative shrink-0">
-          {/* hover 底衬:超大占比数字倾斜、占满行高,锚在价值左缘(right-full)再右移一个 % 宽度 —— 只有末尾 %
-              掖进价值下、前面数字全露出;-z-10 垫在名称/价值之下,中性淡色、仅 hover 浮现、不可点、不参与朗读。 */}
-          {sharePct > 0 && (
-            <span
-              aria-hidden
-              className="pointer-events-none absolute top-1/2 right-full -z-10 -translate-y-1/2 translate-x-14 -rotate-12 whitespace-nowrap font-bold text-8xl text-background/50 leading-none tracking-tighter opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-            >
-              {shareLabel(sharePct)}%
-            </span>
-          )}
-          <ValueDelta value={row.totalUsd} delta={dayChange?.delta} pct={dayChange?.pct} />
-        </div>
-      )}
+        <ValueDelta value={row.totalUsd} delta={dayChange?.delta} pct={dayChange?.pct} />
+      </div>
     </div>
   );
 }

@@ -124,6 +124,9 @@ export function AccountDetailSheet({
   );
 }
 
+// 封存日期的格式:与账户页那一行同款(2 位年 + 月 + 日),不带时分 —— 归档是「哪一天封的」这个粒度。
+const SEALED_DATE = { year: "2-digit", month: "short", day: "numeric" } as const;
+
 const menuItemClass =
   "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted disabled:opacity-50";
 
@@ -152,11 +155,16 @@ function DetailBody({
   // 改名 / 归档 / 删除同时改账户域与组合域(总额、走势)—— 映射表那一条两个前缀都列了。
   const refresh = () => invalidateFor(queryClient, "account.write");
 
-  // 头部 24h 增量与账户行同源(缺凭据 → 不显增量);占比 = 本账户市值 / 活跃账户总计。
-  const dayChange = account.needsCredentials ? null : aggregateDayChange(account.balances);
+  const sealedAt = account.archivedAt;
+  const archived = sealedAt != null;
+  // 头部 24h 增量与账户行同源;占比 = 本账户市值 / 活跃账户总计。
+  // **归档行两个都不显**(ADR 0039):市值冻在封存那一刻,而 24h 涨跌幅是富化带来的实时行情 ——
+  // 一个停着一个在动,说的不是同一件事;占比的分母是活跃账户总计,归档不在里面,显示了会让
+  // 各行的百分比加起来超过 100%。缺凭据不显增量是同一个道理。
+  const dayChange =
+    account.needsCredentials || archived ? null : aggregateDayChange(account.balances);
   const sharePct = accountShare(account.totalUsd, total) * 100;
 
-  const archived = account.archivedAt != null;
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -227,12 +235,18 @@ function DetailBody({
     onError: () => toast.error(t("actionFailed")),
   });
 
-  // manual 不同步(ADR 0018):当下值实时由 creds 现造 → 显「实时」而非同步时间。
-  const lastSynced = isManual(account.connectorId)
-    ? t("liveValue")
-    : account.takenAt
-      ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
-      : t("neverSynced");
+  // **先判归档,再判是不是 manual**(ADR 0039):归档 = 封存,数据停在那一刻,所以显示的是
+  // **静态日期**而不是相对时间 —— 相对时间会一天天长下去,看着像同步坏了。manual 那一支原本
+  // 无条件显示「实时」,封存之后它显然不是,所以归档必须判在前面。
+  const lastSynced =
+    sealedAt != null
+      ? // 日期取归档时刻而不是最后一次同步的时刻 —— 见账户页那一处的同款注释。
+        t("sealedAt", { when: format.dateTime(new Date(sealedAt), SEALED_DATE) })
+      : isManual(account.connectorId)
+        ? t("liveValue")
+        : account.takenAt
+          ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
+          : t("neverSynced");
 
   return (
     <>
