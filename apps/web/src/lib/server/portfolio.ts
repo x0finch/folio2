@@ -201,7 +201,14 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
         );
         // manual 走日网格 compute-on-read(ADR 0019),末点 τ=now → 与下方 live 覆写同刻对齐。
         const manualRows = yield* loadManualHistoryRows(memberAccounts, now);
-        const series = buildPortfolioHistory([...snapRows, ...manualRows]);
+        // 归档成员的历史贡献保留到归档那一刻为止(ADR 0039)—— 不传这张表的话,它冻住的值会
+        // 一路保持到今天,而下面的当下点只算活跃账户,曲线就会「一路平着、到头凭空掉一截」。
+        const archivedAt = new Map(
+          memberAccounts.flatMap((a) =>
+            a.archivedAt == null ? [] : [[a.id, a.archivedAt] as const],
+          ),
+        );
+        const series = buildPortfolioHistory([...snapRows, ...manualRows], archivedAt);
         if (series.length === 0) return { series };
 
         // 当下点 = 与主页同源同算的实时总价(活跃账户,与 getPortfolioOverview 一致的账户集 + 同一 mode)。
