@@ -12,6 +12,7 @@ import { FxService, TokenService } from "@folio/oracle";
 import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
+import type { GainHistoryRow } from "../../gain-24h";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
 import { deriveAmount, fallbackUnitPrice, projectToken } from "../../manual-activity";
@@ -21,6 +22,8 @@ import {
   buildManualAccountSeries,
   type HistoricalPriceAt,
   type HistoryToken,
+  tokenPriceAt,
+  tokenQuantityAt,
 } from "../../manual-history";
 import type { BalanceLike } from "../../tokens";
 import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";
@@ -584,4 +587,64 @@ export const editManualActivity = (
     }
     yield* store.updateActivity(activityId, patch);
     return { ok: true };
+  });
+
+// manual 账户的 24h 盈亏原料(ADR 0040 / #447 第 3 片)。
+//
+// **manual 从不写快照(ADR 0018)**,所以上一片里它的线只有一个当下点 → 一律「算不出」。但它手上
+// 的东西比快照更好:账本记着每笔什么时候买的、多少钱买的。所以不迁就快照网格,**按活动时刻切段**。
+//
+// 由此 manual 账户比同步账户准。那本来就合理 —— 你实实在在多告诉了系统一些东西;这不是两套方法,
+// 是同一个方法喂了更好的数据,与「同步越勤越准」是同一个道理。
+//
+// 两处必须这样做的地方:
+//
+// ① **窗口起点那一刻直接产点**,时刻就是 `since` 本身。账本能算任意时刻的值,没有「快照落在哪儿」
+//    这回事 —— 于是容差判定必然通过,manual 账户只要有账本就永远算得出。
+//
+// ② **每个币在账户的每个观测时刻都产一行,哪怕它那一刻没有活动。** 装配层(`buildGainLines`)对
+//    「某时刻缺这个币的行」的解读是「数量归零」—— 那条规则是为快照写的(快照是全量的),对账本
+//    这种稀疏点恰好反过来:没有活动只表示没动过。少产一行,持仓就会在别的币交易的那一刻被清零。
+export const loadManualGainHistory = (
+  accounts: AccountSafe[],
+  now: number,
+  since: number,
+): Effect.Effect<GainHistoryRow[], never, ManualStore | TokenService | FxService> =>
+  Effect.gen(function* () {
+    // 归档账户不参与(ADR 0039:封存之后不再产生 24h 盈亏)。
+    const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
+    const out: GainHistoryRow[] = [];
+    yield* Effect.forEach(
+      manual,
+      (account) =>
+        Effect.gen(function* () {
+          const tokens = yield* loadHistoryTokens(account.id);
+          if (tokens.length === 0) return;
+          const priceAt = yield* buildHistoricalPriceAt(tokens, now);
+          // 观测时刻取**账户级**并集(见上面 ②):窗口起点 + 窗口内每一笔活动的时刻。
+          const times = new Set<number>([since]);
+          for (const tk of tokens) {
+            for (const a of tk.activities) {
+              if (a.occurredAt > since && a.occurredAt < now) times.add(a.occurredAt);
+            }
+          }
+          const sorted = [...times].sort((a, b) => a - b);
+          for (const tk of tokens) {
+            for (const t of sorted) {
+              const amount = tokenQuantityAt(tk, t);
+              out.push({
+                accountId: account.id,
+                takenAt: t,
+                tokenId: tk.id,
+                amount,
+                // 价走 ADR 0019 的降级链:oracle 历史价 → 账本里最近一条记了价的活动 → unitPrice。
+                usdValue: amount * tokenPriceAt(tk, t, priceAt),
+              });
+            }
+          }
+        }),
+      // 每账户一次取数,顺序跑 —— 与 loadManualHistoryRows 同一个理由(共用限频额度)。
+      { concurrency: 1, discard: true },
+    );
+    return out;
   });
