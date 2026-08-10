@@ -318,3 +318,89 @@ describe("manual 账户的抽屉现货行", () => {
     }
   });
 });
+
+describe("复刻真实数据的形状:manual 与同步账户混在一起", () => {
+  // 浏览器实测里那个矛盾(抽屉头有数、其下现货行 `—`)在前面两条简化用例上复现不出来。
+  // 真实环境比它们多三样东西,这里一次全给上:
+  //   ① 一堆**带快照**的同步账户,而且其中一个持有同一个币(用户级 token_id,ADR 0021 → 同一个 id)
+  //   ② 那些快照的时刻**都落在容差之外**(29.9h / 17.5h),于是同步账户一律算不出
+  //   ③ manual 账户的账本活动也在窗口之外(128h 前),只能靠窗口起点那个合成基准点
+  const DAY = 24 * 60 * 60 * 1000;
+  const HOUR = 3600_000;
+  const localBtc = { symbol: "BTC", unitPrice: 63921 };
+
+  it("同步账户全 `—`,manual 账户头与其现货行**同时**算得出", async () => {
+    const now = Date.now();
+    // ① 同步账户:两张快照,29.9h 与 17.5h —— 都不在 22–26h 内
+    const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
+      { namer: "coingecko", localName: "issued:bitcoin" },
+    ]);
+    const synced = await evmAccount("Synced", "0xsynced");
+    for (const [t, v] of [
+      [now - 29.9 * HOUR, 900_000],
+      [now - 17.5 * HOUR, 958_000],
+    ] as const) {
+      await dbFor(USER).snapshots.write(synced.id, {
+        takenAt: t,
+        totalUsd: v,
+        balances: [{ amount: 14, usdValue: v, kind: "spot", platform: "evm:1", tokenId: btc }],
+      });
+    }
+
+    // ② 两个 manual 账户,活动都在 128 小时前,持有同一个币
+    const manuals: string[] = [];
+    for (const label of ["xxx", "a"]) {
+      const m = await dbFor(USER).accounts.create({
+        connectorId: "manual",
+        label,
+        creds: JSON.stringify({ tokens: "[]" }),
+      });
+      await addManualActivities(USER, m.id, [
+        { token: localBtc, kind: "add", amount: 2, occurredAt: now - 128 * HOUR, price: 63921 },
+      ]);
+      manuals.push(label);
+    }
+
+    const { of } = await rowsByLabel();
+
+    // 同步账户:基准落在容差外 → 算不出(这部分是 #455 记的口径问题,不是 bug)
+    expect(of("Synced")?.gain24h).toBeNull();
+
+    for (const label of manuals) {
+      const row = of(label);
+      // 抽屉头这个数
+      expect(row?.gain24h, `${label} 账户头`).not.toBeNull();
+      expect(row?.gain24h, `${label} 账户头`).not.toBeUndefined();
+      // 它下面那一行 —— 浏览器里就是这里显示的 `—`
+      expect(row?.balances, `${label} 有持仓行`).toHaveLength(1);
+      expect(row?.balances[0]?.gain24h, `${label} 现货行`).not.toBeNull();
+      expect(row?.balances[0]?.gain24h, `${label} 现货行`).not.toBeUndefined();
+    }
+  });
+
+  it("manual 与同步账户持有同一个 token_id —— 两边的线不串", async () => {
+    const now = Date.now();
+    const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
+      { namer: "coingecko", localName: "issued:bitcoin" },
+    ]);
+    const synced = await evmAccount("S2", "0xs2");
+    await dbFor(USER).snapshots.write(synced.id, {
+      takenAt: now - DAY,
+      totalUsd: 100,
+      balances: [{ amount: 1, usdValue: 100, kind: "spot", platform: "evm:1", tokenId: btc }],
+    });
+    const m = await dbFor(USER).accounts.create({
+      connectorId: "manual",
+      label: "M9",
+      creds: JSON.stringify({ tokens: "[]" }),
+    });
+    await addManualActivities(USER, m.id, [
+      { token: localBtc, kind: "add", amount: 2, occurredAt: now - 128 * HOUR, price: 63921 },
+    ]);
+
+    const { of } = await rowsByLabel();
+    // 同步账户那条有真基准(正好 24h)→ 算得出;manual 那条走账本 → 也算得出。互不影响。
+    expect(of("S2")?.balances[0]?.gain24h).not.toBeNull();
+    expect(of("M9")?.balances[0]?.gain24h).not.toBeNull();
+  });
+});
