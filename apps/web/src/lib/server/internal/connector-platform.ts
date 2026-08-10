@@ -12,7 +12,8 @@ export function connectorPlatformMeta(
   // 非 EVM 链的 slug 往往就是同名连接器 id(bitcoin、solana):这类原生链 CoinGecko asset_platforms 常无图,
   // 而连接器 manifest 自带图 → 按 slug 认连接器、借它的 name+logo,免得回退成首字母。
   // 不匹配(evm:* / 未知 slug)→ null,照走 platforms.resolve 逐链查。
-  // 注:这是 Platform 借 Connector 图的务实兜底(跨概念),chain/platform 命名复核见 issue #122。
+  // 注:这是 Platform 借 Connector 图的务实兜底 —— 两个概念粒度不同(1 connector 可对多 platform),
+  // 这里刻意跨了一次,为的是让原生链有图。
   // 链键迁短形后,原先剥 `chain:` 前缀那一步不再需要(ADR 0020)。
   const manifest = getConnector(registry, key);
   if (!manifest) return null;
