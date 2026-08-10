@@ -7,6 +7,7 @@ import { deriveHeroMetrics, type HoldingLike } from "../lib/hero-stats";
 import { downsampleSeries, type HistoryPoint } from "../lib/history";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { signedUsd } from "../lib/signed-usd";
+import { GainExplainer } from "./gain-explainer";
 import { Stat } from "./stat";
 import { ValueTrendChart } from "./value-trend-chart";
 
@@ -57,7 +58,7 @@ export function PortfolioHero({
   // 总额」,那是净值差:你充值 10 万,它就显示赚了 10 万。现在剔除了充提与买卖。
   //
   // **这个数与脚下那条曲线不再对得上,那是预期的。** 曲线画的是净值,充值那天它会跳一格而这个数
-  // 不动。两个要求没法同时满足(金额要是真赚的钱 / 要剔除资金进出),摊开解释见 #446。
+  // 不动。两个要求没法同时满足(金额要是真赚的钱 / 要剔除资金进出),摊开解释见 #445。
   const dayAbs = gain24h?.amount ?? null;
   const dayPct = gain24h?.pct ?? null;
   // 方向:正/负/持平(0 → 中性,不当作上涨);算不出也走中性。
@@ -69,6 +70,10 @@ export function PortfolioHero({
         ? "bg-neg-bg text-neg"
         : "bg-muted text-muted-foreground";
   const arrow = dir > 0 ? "▲" : dir < 0 ? "▼" : null;
+  const pillClass = cn(
+    "inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 font-mono font-semibold text-xs",
+    toneClass,
+  );
 
   const metrics = deriveHeroMetrics(holdings, totalUsd);
   const spanDays = hasHistory
@@ -136,22 +141,19 @@ export function PortfolioHero({
           </div>
           {/* 算不出(缺 24 小时前的基准)→ `—`,不是留白也不是 0:留白读作「还没加载出来」,
               0 是在断言「今天没涨没跌」。与全站三态口径一致(见 lib/delta-display)。 */}
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 font-mono font-semibold text-xs",
-              toneClass,
-            )}
-          >
-            {dayAbs == null ? (
-              NO_VALUE
-            ) : (
-              <>
+          {gain24h == null ? (
+            <span className={pillClass}>{NO_VALUE}</span>
+          ) : (
+            // 摊开算式(#445):金额与百分比来自两套计算,你动过仓的那天它们除不通 —— 与其让人
+            // 纳闷,不如 hover(手机上点一下)给出各段。这里的 pill 不在可点击行内,包成按钮无冲突。
+            <GainExplainer gain={gain24h}>
+              <span className={pillClass}>
                 {arrow ? `${arrow} ` : ""}
                 {dayPct != null ? `${fmtPct(dayPct)} · ` : ""}
-                {signedUsd(usd, dayAbs)}
-              </>
-            )}
-          </span>
+                {signedUsd(usd, dayAbs ?? 0)}
+              </span>
+            </GainExplainer>
+          )}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-8">

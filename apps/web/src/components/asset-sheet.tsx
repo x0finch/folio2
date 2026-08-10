@@ -30,6 +30,7 @@ import {
 } from "../lib/source-groups";
 import { AccountName } from "./account-name";
 import { AvatarStack } from "./avatar-stack";
+import { GainExplainer } from "./gain-explainer";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { ValueTrendChart } from "./value-trend-chart";
 
@@ -246,16 +247,16 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
             <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
             {/* 24h 盈亏 + %:共用一个前置符号、同色,与代币行/hero 一致。
                 算不出 → `—`(全站三态口径,见 lib/delta-display)。 */}
-            <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayValue))}>
-              {dayValue == null ? (
-                NO_VALUE
-              ) : (
-                <>
-                  {signedUsd(usd, dayValue)}
+            {holding.gain24h == null ? (
+              <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
+            ) : (
+              <GainExplainer gain={holding.gain24h} className="block text-left">
+                <span className={cn("mt-1 block text-sm tabular-nums", deltaTone(dayValue))}>
+                  {signedUsd(usd, dayValue ?? 0)}
                   {dayPct != null ? ` ${Math.abs(dayPct).toFixed(2)}%` : ""}
-                </>
-              )}
-            </div>
+                </span>
+              </GainExplainer>
+            )}
           </div>
         </div>
       </div>

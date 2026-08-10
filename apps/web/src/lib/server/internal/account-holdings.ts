@@ -114,7 +114,19 @@ export const loadAccountHoldings = () =>
           // 于是逐行显示加起来仍等于这个币真正赚的;百分比是整条线的(同币同段的收益率本就一样)。
           const total = tokenTotals.get(k) ?? 0;
           const share = total === 0 ? 0 : b.usdValue / total;
-          return { ...b, gain24h: { amount: gain.amount * share, pct: gain.pct } };
+          // 段也跟着摊:金额按占比缩,百分比不动(同一个币同一段的收益率与它分在几条链无关)。
+          return {
+            ...b,
+            gain24h: {
+              amount: gain.amount * share,
+              pct: gain.pct,
+              segments: gain.segments.map((seg) => ({
+                ...seg,
+                openValue: seg.openValue * share,
+                gain: seg.gain * share,
+              })),
+            },
+          };
         }),
       })),
       pricesStale: rows.some((r) => r.archivedAt == null && r.pricesStale),

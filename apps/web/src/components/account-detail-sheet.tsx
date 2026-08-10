@@ -28,6 +28,7 @@ import { useFormatter, useTranslations } from "use-intl";
 import { accountShare, shareLabel } from "../lib/account-share";
 import type { OverviewBalance } from "../lib/account-view";
 import { deltaTone, NO_VALUE } from "../lib/delta-display";
+import type { Gain } from "../lib/gain-24h";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
 import { isManual } from "../lib/manual-connector";
@@ -39,6 +40,7 @@ import { signedUsd } from "../lib/signed-usd";
 import { AccountTagsModal } from "./account-tags-modal";
 import { ConnectorBadge } from "./connector-badge";
 import { EditableName } from "./editable-name";
+import { GainExplainer } from "./gain-explainer";
 import { AccountHoldingsCards } from "./holdings-cards";
 import { IconButton } from "./icon-button";
 import { ManualTokensPanel } from "./manual-tokens-panel";
@@ -59,7 +61,7 @@ export interface AccountRow {
   balances: OverviewBalance[]; // 各持仓自带 balance 级 note(note 重设计)
   // 24h 盈亏(ADR 0040),server 按快照历史 / 账本分段算好。`undefined` = 这个位置不该有(归档行);
   // `null` = 该有但算不出。账户行与抽屉头共用同一个数,不再各算各的。
-  gain24h?: { amount: number; pct: number | null } | null;
+  gain24h?: Gain | null;
   note?: Note[]; // account 级展示 note(Note[],整钱包;BTC 未确认/收款/派生分布)
   needsCredentials: boolean;
   credsSafe: Record<string, string>;
@@ -300,20 +302,19 @@ function DetailBody({
             {/* 市值 + 24h 增量:字号同代币抽屉(值 text-3xl bold、增量 text-sm);缺凭据 → 无增量。 */}
             <div>
               <div className="font-bold text-3xl tabular-nums">{usd(account.totalUsd)}</div>
-              {hasDayChange && (
-                <div
-                  className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange?.amount ?? null))}
-                >
-                  {dayChange == null ? (
-                    NO_VALUE
-                  ) : (
-                    <>
+              {hasDayChange &&
+                (dayChange == null ? (
+                  <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
+                ) : (
+                  <GainExplainer gain={dayChange} className="block text-left">
+                    <span
+                      className={cn("mt-1 block text-sm tabular-nums", deltaTone(dayChange.amount))}
+                    >
                       {signedUsd(usd, dayChange.amount)}
                       {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
-                    </>
-                  )}
-                </div>
-              )}
+                    </span>
+                  </GainExplainer>
+                ))}
             </div>
             {/* 缺凭据告警行:⚠ + 可点击"补填凭据以同步"提示(文案即入口 → 开加账户 modal 的补录模式,A3)。 */}
             {account.needsCredentials && (
