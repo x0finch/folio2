@@ -85,6 +85,7 @@ const en = {
   Overview: {
     totalValue: "Total value",
     totalNetWorth: "Total net worth",
+    trendNeedsSecondSync: "The trend will appear once it's ready",
     gainExplainTitle: "24h gain",
     gainExplainWhat: "Price movement only — buys, sells and transfers don't count.",
     gainExplainChanged: "you changed this position here",
@@ -97,7 +98,6 @@ const en = {
     worstToday: "Worst today",
     stableShare: "Stablecoin",
     portfolioValue: "Portfolio value",
-    notEnoughHistory: "Not enough history yet — sync a few times to see the trend.",
     noSnapshot: "No snapshot yet — sync from the Accounts page.",
     onlyDustHoldings: "Only zero-value holdings.",
     entry: "Entry",
@@ -489,6 +489,7 @@ const zh: Messages = {
   Overview: {
     totalValue: "总价值",
     totalNetWorth: "总净值",
+    trendNeedsSecondSync: "还需要更多数据才能画出趋势图",
     gainExplainTitle: "24h 盈亏",
     gainExplainWhat: "只算价格涨跌 —— 买入卖出、充值提现都不计入。",
     gainExplainChanged: "你在这儿动过仓",
@@ -501,7 +502,6 @@ const zh: Messages = {
     worstToday: "今日最差",
     stableShare: "稳定币占比",
     portfolioValue: "组合净值",
-    notEnoughHistory: "历史数据不足 —— 多同步几次即可看到走势。",
     noSnapshot: "暂无快照 —— 去账户页同步。",
     onlyDustHoldings: "仅零值持仓。",
     entry: "开仓价",

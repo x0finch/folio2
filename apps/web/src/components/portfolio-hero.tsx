@@ -1,5 +1,4 @@
-import { type ChartConfig, ChartContainer, cn, NumberTicker } from "@folio/ui";
-import { Area, AreaChart, YAxis } from "recharts";
+import { cn, NumberTicker } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import { NO_VALUE } from "../lib/delta-display";
 import type { Gain } from "../lib/gain-24h";
@@ -9,18 +8,11 @@ import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { signedUsd } from "../lib/signed-usd";
 import { GainExplainer } from "./gain-explainer";
 import { Stat } from "./stat";
-import { ValueTrendChart } from "./value-trend-chart";
+import { TrendPanel } from "./trend-panel";
 
 const DAY_MS = 86_400_000;
 // hero 趋势最多展示最近 30 天;更长跨度 + 区间切换属于 Insights(不改共享的 getPortfolioHistory)。
 const HERO_WINDOW_DAYS = 30;
-
-// 历史不足(<2 点)时的演示趋势:曲折上扬(有涨有跌但净向上,末点最高),纯背景装饰 ——
-// 实线平滑曲线(type=natural,非折线)、不吃指针、无 hover/tooltip。值仅用于形状(轴全隐藏)。
-const DEMO_TREND = [
-  0.12, 0.16, 0.13, 0.2, 0.17, 0.24, 0.28, 0.23, 0.31, 0.27, 0.35, 0.41, 0.37, 0.45, 0.52, 0.48,
-  0.55, 0.51, 0.6, 0.67, 0.63, 0.72, 0.82, 0.92,
-].map((total, t) => ({ t, total }));
 
 const fmtPct = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}%`;
 
@@ -53,6 +45,12 @@ export function PortfolioHero({
     series.filter((p) => p.t >= lastT - HERO_WINDOW_DAYS * DAY_MS),
   );
   const hasHistory = chartSeries.length >= 2;
+  // 「还什么都没有」—— 只有这一种情况留那条装饰线(见下面 JSX 里的分支)。
+  //
+  // **判据是「有没有东西」,不是「有没有钱」。** 一开始写的是 `totalUsd > 0`,那样净值为**负**
+  // 会掉进装饰线那支:perp 亏穿时屏幕上是「净值 −$X」配一条平滑上扬的绿线,比 0 那种更糟。
+  // 而持有价值恰好为 0 的灰尘仓位也仍然是「有仓位」—— 那时该说明原因,不该画背景纹样。
+  const nothingYet = holdings.length === 0 && totalUsd === 0;
 
   // 24h 盈亏(ADR 0040):server 按快照历史 / 账本分段算好 —— 以前这里是「现在总额 − 约 24 小时前
   // 总额」,那是净值差:你充值 10 万,它就显示赚了 10 万。现在剔除了充提与买卖。
@@ -86,42 +84,11 @@ export function PortfolioHero({
   const dot = totalStr.lastIndexOf(".");
   const fracPart = dot >= 0 ? totalStr.slice(dot + 1) : null;
 
-  const demoConfig = {
-    total: { label: t("portfolioValue"), color: "var(--pos)" },
-  } satisfies ChartConfig;
-
   return (
     <div className="relative min-h-60 overflow-hidden pt-1">
-      {hasHistory ? (
-        // 上留白把折线压到下半区(topMargin=92);共用 ValueTrendChart(--pos/--neg + tooltip + 各边留白给圆点)。
-        <ValueTrendChart series={chartSeries} topMargin={92} />
-      ) : (
-        // 演示趋势:纯背景装饰,不吃指针、无 tooltip;实线、曲折上扬。
-        <ChartContainer
-          config={demoConfig}
-          className="pointer-events-none absolute inset-0 h-full w-full"
-        >
-          <AreaChart data={DEMO_TREND} margin={{ top: 92, right: 8, bottom: 8, left: 8 }}>
-            <defs>
-              <linearGradient id="hero-fill-demo" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--color-total)" stopOpacity={0.12} />
-                <stop offset="100%" stopColor="var(--color-total)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <YAxis hide domain={["dataMin", "dataMax"]} />
-            <Area
-              dataKey="total"
-              type="natural"
-              stroke="var(--color-total)"
-              strokeWidth={2}
-              strokeOpacity={0.45}
-              fill="url(#hero-fill-demo)"
-              dot={false}
-              isAnimationActive={false}
-            />
-          </AreaChart>
-        </ChartContainer>
-      )}
+      {/* 四态(点数不够 / 还在取数 / 什么都还没有 / 真有数据)全在 TrendPanel 里判。
+          hero 的上留白更大(topMargin=92,把折线压到下半区),填充也比抽屉略重 → 覆盖这两个默认值。 */}
+      <TrendPanel series={chartSeries} topMargin={92} fillOpacity={0.16} decorate={nothingYet} />
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>
