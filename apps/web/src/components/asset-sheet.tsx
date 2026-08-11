@@ -32,8 +32,7 @@ import { AccountName } from "./account-name";
 import { AvatarStack } from "./avatar-stack";
 import { GainExplainer } from "./gain-explainer";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
-import { TrendEmpty } from "./trend-empty";
-import { ValueTrendChart } from "./value-trend-chart";
+import { TrendPanel } from "./trend-panel";
 
 // 资产 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
 // 头部背景 = 单币【持仓价值】历史(片 2):折线随涨跌走 --pos/--neg,内容浮其上;可切 7d/30d/1y/全部。
@@ -210,12 +209,7 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
           窗口切换叠右下角、独占头部底部一带,与右侧价格徽标错开(name 行用满宽)。
           预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
       <div className="relative min-h-44 overflow-hidden">
-        {series.length >= 2 ? (
-          <ValueTrendChart series={series} topMargin={56} fillOpacity={0.14} />
-        ) : (
-          // 一个点连不成线(#444)。新建账户第一次同步后必然如此 —— 说清楚,别留一片空白。
-          <TrendEmpty loading={historyQuery.isPending} />
-        )}
+        <TrendPanel series={series} loading={historyQuery.isPending} />
         {/* 窗口切换(可交互,独立于 pointer-events-none 内容层):右下角独占一带,避开价格徽标。 */}
         <div className="absolute right-0 bottom-0 z-10">
           <RangeTabs value={range} onChange={setRange} />

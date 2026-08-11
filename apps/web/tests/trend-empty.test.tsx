@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { cleanup, render, screen } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,19 +29,5 @@ describe("<TrendEmpty>", () => {
   });
 });
 
-describe("两个抽屉都接上了空态", () => {
-  // 这两处的门槛(`>= 2`)本来各写各的,漏掉一处就是一半的抽屉仍然留白 —— 而那正是 #444 的形状。
-  const COMPONENTS = join(import.meta.dirname, "../src/components");
-  const files = ["asset-sheet.tsx", "account-detail-sheet.tsx"];
-
-  it.each(files)("%s 在点不够时渲染 <TrendEmpty>", (file) => {
-    const text = readFileSync(join(COMPONENTS, file), "utf8");
-    expect(text, `${file} 没接空态`).toContain("<TrendEmpty");
-    // 还得是**三元的否定分支**,不能是 `&&` —— `&&` 只会在够两点时渲染图,空的那一半仍然留白。
-    expect(text).toMatch(/series\.length >= 2 \?/);
-  });
-
-  it("自测:`&&` 那种写法抓得到", () => {
-    expect("{series.length >= 2 && (").not.toMatch(/series\.length >= 2 \?/);
-  });
-});
+// 「每个调用点都接上了空态」那组源码扫描测试**删掉了**:门槛现在只在 TrendPanel 里写一次,
+// 一处代码不需要拿正则去盯一致性。四态的行为测试见 trend-panel.test.tsx。
