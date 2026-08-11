@@ -1,14 +1,24 @@
 import { env } from "cloudflare:test";
 import type { Note } from "@folio/connectors-basic";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { dbFor } from "./db-effect";
+import { getDb } from "../src/connect";
+import { AccountStore, accountStoreLayer, SnapshotStore, snapshotStoreLayer } from "../src/queries";
+import { user } from "../src/schema/auth";
+import { forUser } from "./effect";
 
 // 展示 note 的保留期(#456):cron 每天剪掉窗口外的 note,**只剪 note,不剪 meta**,
-// 且每账户最新那张永不剪。
+// 且每账户最新那张永不剪。理由见 `SnapshotStore.pruneNotes` 的文档注释。
 //
-// **为什么这组非真 D1 不可**:要验的是「库里到底还剩什么」—— 而剪掉之后读路径拿到的是 null,
+// **为什么这组非真 D1 不可**:要验的是「库里到底还剩什么」—— 剪掉之后读路径拿到的是 null,
 // 跟「本来就没有 note」长得一模一样。只有直接去数行数才分得清「真剪了」和「白改一场」。
+//
+// 编排那一层(逐用户、窗口怎么算)在 `apps/web/tests/server/prune-notes-all-users.test.ts`。
+const snapshotsOf = forUser(SnapshotStore, snapshotStoreLayer);
+const accountsOf = forUser(AccountStore, accountStoreLayer);
+
 const USER = "user-prune";
+const OTHER = "user-prune-other";
 const DAY = 86_400_000;
 const NOW = 1_800_000_000_000;
 const WINDOW = 7 * DAY;
@@ -16,29 +26,33 @@ const WINDOW = 7 * DAY;
 const note = (title: string): Note[] => [{ title, content: [{ label: "n", value: 1 }] }];
 const balanceNote = (title: string): Note => ({ title, content: [{ label: "n", value: 1 }] });
 
+// pool-workers 此版本不隔离每个测试的存储 —— 删 user 行(级联清掉 accounts/snapshots/...)再插回。
+async function resetUser(userId: string): Promise<void> {
+  const db = getDb(env);
+  await db.delete(user).where(eq(user.id, userId));
+  await db.insert(user).values({
+    id: userId,
+    name: userId,
+    email: `${userId}@example.com`,
+    emailVerified: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+}
+
 beforeEach(async () => {
-  await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run();
-  const now = Date.now();
-  await env.DB.prepare(
-    "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-  )
-    .bind(USER, USER, `${USER}@example.com`, 0, now, now)
-    .run();
+  await resetUser(USER);
+  await resetUser(OTHER);
 });
 
-const account = async (label: string) => {
-  const id = `acc-${label}`;
-  await env.DB.prepare(
-    "INSERT INTO accounts (id, user_id, connector_id, label, created_at) VALUES (?, ?, ?, ?, ?)",
-  )
-    .bind(id, USER, "bitcoin", label, Date.now())
-    .run();
-  return id;
-};
+const account = (label: string, userId = USER) =>
+  accountsOf(userId)
+    .create({ connectorId: "bitcoin", label, creds: null })
+    .then((a) => a.id);
 
 /** 写一张带 note 的快照(可选带一条余额,余额自己也有 note + meta)。 */
-const snap = (accountId: string, takenAt: number, withBalance = false) =>
-  dbFor(USER).snapshots.write(accountId, {
+const snap = (accountId: string, takenAt: number, withBalance = false, userId = USER) =>
+  snapshotsOf(userId).write(accountId, {
     takenAt,
     totalUsd: 1,
     note: note(`n@${takenAt}`),
@@ -59,14 +73,14 @@ const snap = (accountId: string, takenAt: number, withBalance = false) =>
 const count = async (sql: string): Promise<number> =>
   (await env.DB.prepare(sql).first<{ n: number }>())?.n ?? 0;
 
-const notedSnapshots = () =>
-  count("SELECT COUNT(*) AS n FROM snapshots WHERE note IS NOT NULL");
+const notedSnapshots = () => count("SELECT COUNT(*) AS n FROM snapshots WHERE note IS NOT NULL");
 const notedBalances = () =>
   count("SELECT COUNT(*) AS n FROM snapshot_balances WHERE note IS NOT NULL");
 const metaRows = () =>
   count("SELECT COUNT(*) AS n FROM snapshot_balances WHERE meta_json IS NOT NULL");
 
-const prune = (olderThan = NOW - WINDOW) => dbFor(USER).snapshots.pruneNotes(olderThan);
+const prune = (olderThan = NOW - WINDOW, userId = USER) =>
+  snapshotsOf(userId).pruneNotes(olderThan);
 
 describe("按保留期剪 note", () => {
   it("窗口外的剪掉,窗口内的留着", async () => {
@@ -154,32 +168,10 @@ describe("按保留期剪 note", () => {
   });
 
   it("不跨用户 —— 别人的 note 一个都不许碰", async () => {
-    const other = "user-prune-other";
-    await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(other).run();
-    const t = Date.now();
-    await env.DB.prepare(
-      "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-    )
-      .bind(other, other, `${other}@example.com`, 0, t, t)
-      .run();
-    await env.DB.prepare(
-      "INSERT INTO accounts (id, user_id, connector_id, label, created_at) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("acc-other", other, "bitcoin", "other", t)
-      .run();
-    // 另一个用户:两张都很旧,本该被剪掉一张 —— 但这次剪的是 USER
-    await dbFor(other).snapshots.write("acc-other", {
-      takenAt: NOW - 60 * DAY,
-      totalUsd: 1,
-      note: note("theirs-old"),
-      balances: [],
-    });
-    await dbFor(other).snapshots.write("acc-other", {
-      takenAt: NOW - 50 * DAY,
-      totalUsd: 1,
-      note: note("theirs-new"),
-      balances: [],
-    });
+    // 另一个用户:两张都很旧,单看时间本该被剪掉一张 —— 但这次剪的是 USER。
+    const theirs = await account("theirs", OTHER);
+    await snap(theirs, NOW - 60 * DAY, false, OTHER);
+    await snap(theirs, NOW - 50 * DAY, false, OTHER);
 
     const mine = await account("mine");
     await snap(mine, NOW - 30 * DAY);
@@ -199,7 +191,7 @@ describe("剪完之后读路径的行为", () => {
     await snap(acc, NOW);
 
     await prune();
-    const [row] = await dbFor(USER).snapshots.latest();
+    const [row] = await snapshotsOf(USER).latest();
     expect(row.note?.[0]?.title).toBe(`n@${NOW}`);
   });
 
@@ -209,7 +201,7 @@ describe("剪完之后读路径的行为", () => {
     await snap(acc, NOW);
 
     await prune();
-    const page = await dbFor(USER).snapshots.listPage(10, 0);
+    const page = await snapshotsOf(USER).listPage(10, 0);
     expect(page).toHaveLength(2); // 快照本身一张都没删
     expect(page.filter((s) => s.note != null)).toHaveLength(1);
   });

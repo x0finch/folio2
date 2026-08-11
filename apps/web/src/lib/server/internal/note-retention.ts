@@ -21,17 +21,20 @@ import { withRequest } from "./oracle";
 // 上下文。再长只是多占空间(note 的历史价值接近零:它装的是「当时有几笔未确认」「收款地址是哪些」
 // 这类**上游此刻状态**,不是财务数据);再短也只省零头。
 //
-// **只剪 note,不剪 `meta_json`** —— 判据是词汇表那条现成的分野:note 是「仅供展示、无共享逻辑
-// 读」,meta 是「共享逻辑会结构化读」的 typed 层(24h 盈亏从它取 DeFi 协议名、`balance-kind` 从老
-// perp 行取 role 判 kind)。剪 meta 会让历史**算错**,不只是少显示点东西。
+// **只剪 note,不剪 `meta_json`**,以及**每账户最新那张永不剪** —— 这两条的理由在
+// `SnapshotStore.pruneNotes` 的文档注释里(那是执行它们的地方),不在这儿重抄一遍。
 const NOTE_RETENTION_DAYS = 7;
 const DAY_MS = 86_400_000;
 
 /** 一个用户的清理,**装配好了但还没跑**(cron 把 N 个用户拼进自己那一个 effect)。 */
-const pruneNotesFor = (userId: string, olderThan: number): Effect.Effect<
-  { snapshots: number; balances: number },
-  Error
-> => withRequest(userId, Effect.flatMap(SnapshotStore, (s) => s.pruneNotes(olderThan)));
+const pruneNotesFor = (
+  userId: string,
+  olderThan: number,
+): Effect.Effect<{ snapshots: number; balances: number }, Error> =>
+  withRequest(
+    userId,
+    Effect.flatMap(SnapshotStore, (s) => s.pruneNotes(olderThan)),
+  );
 
 /**
  * 逐用户剪掉保留期外的展示 note,**各自兜住**(与 `warmAllUsers` 同一形状):一个用户失败不该让

@@ -1,5 +1,18 @@
 import { type BalanceKind, Note } from "@folio/connectors-basic";
-import { and, asc, desc, eq, getTableColumns, gte, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  gte,
+  inArray,
+  isNotNull,
+  lt,
+  max,
+  sql,
+} from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import type { Drizzle } from "../connect";
 import { accounts, snapshotBalances, snapshots } from "../schema";
@@ -340,16 +353,36 @@ const make = (userId: string) =>
               .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
               .where(and(eq(accounts.userId, userId), lt(snapshots.takenAt, olderThan), notLatest));
 
-          // 两条各自 `returning` 数行数 —— D1 的 `meta.changes` 拿不到(drizzle 不透出),
-          // 而这个数要进 cron 日志:清了多少是唯一能看出它在干活的信号。
-          const prunedSnapshots = yield* database.query((db) =>
+          // 先数再改,**不用 `UPDATE … RETURNING`**:那个数要进 cron 日志(清了多少是唯一能看出它
+          // 在干活的信号),而 RETURNING 会把每一条被改的行都物化出来 —— 部署后第一趟要清掉窗口外
+          // 的全部存量,一个同步了一年的账户就是几千张快照、几万条余额行,全塞进一个 Worker 的内存
+          // 只为取个 `.length`。COUNT 多两次往返但恒定内存,而这是每天一次的维护动作,不赶时间。
+          //
+          // 计数与改动之间不是原子的(D1 无交互式事务)—— 并发写会让日志里的数差一两条。日志容得下,
+          // 而两条 UPDATE 各自幂等(`note IS NOT NULL` 门着),重跑不会重复扣。
+          const [snapCount] = yield* database.query((db) =>
+            db
+              .select({ n: count() })
+              .from(snapshots)
+              .where(and(isNotNull(snapshots.note), inArray(snapshots.id, stale(db)))),
+          );
+          const [balCount] = yield* database.query((db) =>
+            db
+              .select({ n: count() })
+              .from(snapshotBalances)
+              .where(
+                and(
+                  isNotNull(snapshotBalances.note),
+                  inArray(snapshotBalances.snapshotId, stale(db)),
+                ),
+              ),
+          );
+
+          yield* database.batch((db) => [
             db
               .update(snapshots)
               .set({ note: null })
-              .where(and(isNotNull(snapshots.note), inArray(snapshots.id, stale(db))))
-              .returning({ id: snapshots.id }),
-          );
-          const prunedBalances = yield* database.query((db) =>
+              .where(and(isNotNull(snapshots.note), inArray(snapshots.id, stale(db)))),
             db
               .update(snapshotBalances)
               .set({ note: null })
@@ -358,10 +391,9 @@ const make = (userId: string) =>
                   isNotNull(snapshotBalances.note),
                   inArray(snapshotBalances.snapshotId, stale(db)),
                 ),
-              )
-              .returning({ id: snapshotBalances.id }),
-          );
-          return { snapshots: prunedSnapshots.length, balances: prunedBalances.length };
+              ),
+          ]);
+          return { snapshots: snapCount?.n ?? 0, balances: balCount?.n ?? 0 };
         }),
     };
 
