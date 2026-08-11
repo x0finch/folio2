@@ -9,6 +9,7 @@ import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { signedUsd } from "../lib/signed-usd";
 import { GainExplainer } from "./gain-explainer";
 import { Stat } from "./stat";
+import { TrendEmpty } from "./trend-empty";
 import { ValueTrendChart } from "./value-trend-chart";
 
 const DAY_MS = 86_400_000;
@@ -53,6 +54,12 @@ export function PortfolioHero({
     series.filter((p) => p.t >= lastT - HERO_WINDOW_DAYS * DAY_MS),
   );
   const hasHistory = chartSeries.length >= 2;
+  // 「还什么都没有」—— 只有这一种情况留那条装饰线(见下面 JSX 里的分支)。
+  //
+  // **判据是「有没有东西」,不是「有没有钱」。** 一开始写的是 `totalUsd > 0`,那样净值为**负**
+  // 会掉进装饰线那支:perp 亏穿时屏幕上是「净值 −$X」配一条平滑上扬的绿线,比 0 那种更糟。
+  // 而持有价值恰好为 0 的灰尘仓位也仍然是「有仓位」—— 那时该说明原因,不该画背景纹样。
+  const nothingYet = holdings.length === 0 && totalUsd === 0;
 
   // 24h 盈亏(ADR 0040):server 按快照历史 / 账本分段算好 —— 以前这里是「现在总额 − 约 24 小时前
   // 总额」,那是净值差:你充值 10 万,它就显示赚了 10 万。现在剔除了充提与买卖。
@@ -95,8 +102,8 @@ export function PortfolioHero({
       {hasHistory ? (
         // 上留白把折线压到下半区(topMargin=92);共用 ValueTrendChart(--pos/--neg + tooltip + 各边留白给圆点)。
         <ValueTrendChart series={chartSeries} topMargin={92} />
-      ) : (
-        // 演示趋势:纯背景装饰,不吃指针、无 tooltip;实线、曲折上扬。
+      ) : nothingYet ? (
+        // 空组合(还没加任何账户)才留装饰:此时没有任何数字可被它矛盾,它只是个背景纹样。
         <ChartContainer
           config={demoConfig}
           className="pointer-events-none absolute inset-0 h-full w-full"
@@ -121,6 +128,11 @@ export function PortfolioHero({
             />
           </AreaChart>
         </ChartContainer>
+      ) : (
+        // **手上有东西,但只有一个观测点** → 说明原因,别画那条编出来的线(#444)。
+        // 那条装饰线是平滑上扬的,而它正上方的 pill 完全可能写着 ▼ −1.55% —— 同一屏自相矛盾,
+        // 且它看上去与真实折线一模一样(实测确认:肉眼分不出),等于拿假数据充当行情。
+        <TrendEmpty loading={false} />
       )}
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
