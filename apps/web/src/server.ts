@@ -5,6 +5,7 @@ import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/internal/cache-headers";
 import { configureLogging } from "./lib/server/internal/log";
+import { pruneNotesAllUsers } from "./lib/server/internal/note-retention";
 import { runAtEdge, withDatabase, withOracleWarm } from "./lib/server/internal/oracle";
 import { syncAllUsers, warmAllUsers } from "./lib/server/internal/sync-deps";
 
@@ -40,6 +41,20 @@ const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
       });
     }),
   );
+
+// 每天那趟顺带剪掉保留期外的展示 note(#456)。
+//
+// **搭在这个 trigger 上而不是新开一个**:它要的就是「每天一次」,而另一个 trigger 是每小时
+// (#446 起)—— 挂那儿会一天跑 24 遍同一件事。搭车的代价是它排在刷表之后,所以刷表挂了这趟就不剪;
+// 那没关系,note 多留一天没有任何后果,而反过来(剪 note 的 bug 挡住刷表)会让新币一直认不出来。
+//
+// 它自己**永不上抛**(逐用户兜住、失败进计数),所以放在刷表后面不会改变这趟 cron 的失败语义。
+const pruneNotes = (cron: string): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    const userIds = yield* withDatabase(listUserIdsWithAccounts);
+    const pruned = yield* pruneNotesAllUsers(userIds);
+    cronLog.info("prune notes done", { cron, ...pruned });
+  });
 
 // 全量 sweep:同步每个用户 → 逐用户预热代币缓存。
 // 预热那步**逐用户各自兜住**:一个用户失败不拖累其余、也不让这次 cron 以异常收尾(#375)。
@@ -86,8 +101,8 @@ export default {
   ...serverEntry,
 
   // 两个定时任务共一个 scheduled(),按 controller.cron 分支(见 wrangler.jsonc 的 triggers):
-  //   · GLOBAL_REF_INDEX_CRON(23:00)—— 刷全局代币映射表
-  //   · 其余(00:00)—— 全量 sync sweep
+  //   · GLOBAL_REF_INDEX_CRON(每天 23:00)—— 刷全局代币映射表,再剪过期 note(#456)
+  //   · 其余(每小时 :30,#446)—— 全量 sync sweep
   // 拆两个 trigger 而不是挤一次:拉几 MB JSON + 写几万行是重活,与 sweep 挤一次调用有超预算风险。
   // waitUntil 保证跑完才结束本次调用。env/ctx 由运行时传入;env 不单独取用
   // (configureLogging / syncAllUsers / warmAllUsers / oracleWarm 都走 cloudflare:workers 全局)。
@@ -100,7 +115,10 @@ export default {
           // 边缘只在这里 —— 官方那句「`run*` 尽量放在程序的边缘」在 cron 这条路上就是这个形状。
           await runAtEdge(
             controller.cron === GLOBAL_REF_INDEX_CRON
-              ? refreshGlobalRefIndex(controller.cron)
+              ? Effect.zipRight(
+                  refreshGlobalRefIndex(controller.cron),
+                  pruneNotes(controller.cron),
+                )
               : sweepAllUsers(controller.cron),
           );
         } catch (err) {

@@ -1,6 +1,7 @@
 import { type BalanceKind, Note } from "@folio/connectors-basic";
-import { and, asc, desc, eq, getTableColumns, gte, inArray, max } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
+import type { Drizzle } from "../connect";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
 import { Database } from "../stores/service";
@@ -105,6 +106,21 @@ export interface SnapshotStore {
    * 靠调用方口头保证更清楚。
    */
   readonly balancesFor: (snapshotIds: string[]) => Effect.Effect<SnapshotBalance[]>;
+  /**
+   * 清掉过旧快照上的展示 note(#456),返回清掉的行数。`olderThan` 是 epoch ms 的下界。
+   *
+   * **为什么只清 note、不清 `meta_json`**:词汇表那条分野就是判据 —— note 是「仅供展示、无共享
+   * 逻辑读」,而 meta 是「共享逻辑会结构化读」的 typed 层(24h 盈亏从它取 DeFi 协议名、
+   * `balance-kind` 从老 perp 行取 role 判 kind)。清 meta 会让历史算错,不只是少显示点东西。
+   *
+   * **每账户最新那张永不清**:界面读的就是它(`latest()`)。窗口通常盖不到最新快照,但停了同步的
+   * 账户(已归档 / 凭据失效)会整个落在窗口外 —— 那时按时间清会把它唯一那份 note 也清掉,抽屉里
+   * 就空了。判据写成「存在更新的同账户快照」,不是「取每账户 max(taken_at) 再排除」。
+   */
+  readonly pruneNotes: (olderThan: number) => Effect.Effect<{
+    snapshots: number;
+    balances: number;
+  }>;
 }
 
 export const SnapshotStore = Context.GenericTag<SnapshotStore>("db/SnapshotStore");
@@ -305,6 +321,48 @@ const make = (userId: string) =>
                 .from(snapshotBalances)
                 .where(inArray(snapshotBalances.snapshotId, snapshotIds)),
             ),
+
+      pruneNotes: (olderThan) =>
+        Effect.gen(function* () {
+          // 「不是本账户最新那张」= 存在同账户、更晚的快照。写成 EXISTS 而不是「先取每账户
+          // max(taken_at) 再排除」:后者要么多一趟查询,要么在 UPDATE 里嵌一个 GROUP BY 子查询,
+          // 而这条 EXISTS 直接走 (account_id, taken_at) 那条复合索引。
+          const notLatest = sql`exists (
+            select 1 from ${snapshots} newer
+            where newer.account_id = ${snapshots.accountId}
+              and newer.taken_at > ${snapshots.takenAt}
+          )`;
+          // 待清的快照:本用户的、够旧的、且不是各账户最新那张。
+          const stale = (db: Drizzle) =>
+            db
+              .select({ id: snapshots.id })
+              .from(snapshots)
+              .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+              .where(and(eq(accounts.userId, userId), lt(snapshots.takenAt, olderThan), notLatest));
+
+          // 两条各自 `returning` 数行数 —— D1 的 `meta.changes` 拿不到(drizzle 不透出),
+          // 而这个数要进 cron 日志:清了多少是唯一能看出它在干活的信号。
+          const prunedSnapshots = yield* database.query((db) =>
+            db
+              .update(snapshots)
+              .set({ note: null })
+              .where(and(isNotNull(snapshots.note), inArray(snapshots.id, stale(db))))
+              .returning({ id: snapshots.id }),
+          );
+          const prunedBalances = yield* database.query((db) =>
+            db
+              .update(snapshotBalances)
+              .set({ note: null })
+              .where(
+                and(
+                  isNotNull(snapshotBalances.note),
+                  inArray(snapshotBalances.snapshotId, stale(db)),
+                ),
+              )
+              .returning({ id: snapshotBalances.id }),
+          );
+          return { snapshots: prunedSnapshots.length, balances: prunedBalances.length };
+        }),
     };
 
     return store;
