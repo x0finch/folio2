@@ -22,7 +22,7 @@ function renderEmpty(loading: boolean) {
 describe("<TrendEmpty>", () => {
   it("点不够时说清楚,而不是留白", () => {
     renderEmpty(false);
-    expect(screen.getByText(/one more sync/i)).toBeTruthy();
+    expect(screen.getByText(/once it's ready/i)).toBeTruthy();
   });
 
   it("**还在取数时什么都不显示** —— 否则会闪一下这句话再被图盖掉", () => {

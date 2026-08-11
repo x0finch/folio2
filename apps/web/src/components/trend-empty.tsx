@@ -13,9 +13,12 @@ import { useTranslations } from "use-intl";
 export function TrendEmpty({ loading }: { loading: boolean }) {
   const t = useTranslations("Overview");
   if (loading) return null;
+  // 贴**底部左侧**,不居中:这块容器是「图 + 数字浮层」共用的,正中央正是大号金额所在 ——
+  // 居中会把这句话压在金额上(浏览器实测,代币抽屉里「One more sync…」直接穿过 $1,326,637.92)。
+  // 折线本来画在下半区,把话放在折线该在的地方最自然;右下角留给区间切换(RangeTabs),故靠左。
   return (
-    <div className="absolute inset-0 flex items-center justify-center px-6">
-      <p className="text-center text-muted-foreground text-xs">{t("trendNeedsSecondSync")}</p>
+    <div className="absolute inset-0 flex items-end pb-2">
+      <p className="text-muted-foreground text-xs">{t("trendNeedsSecondSync")}</p>
     </div>
   );
 }
