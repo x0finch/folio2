@@ -19,6 +19,8 @@ const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 
 // 桶粒度阶梯(升序):最细 1 小时、最粗 7 天。降采样时挑"能把点数压到 ≤ maxPoints 的最细桶"。
+// **写侧按同一个钟点折叠**(#461,`SnapshotStore.write` 的 `collapseSameHour`),桶宽就是取的
+// 这里的最细一档 —— 改动 `HOUR_MS` 这一档要连着那边一起看。
 const BUCKET_LADDER = [
   HOUR_MS,
   2 * HOUR_MS,
