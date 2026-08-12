@@ -20,6 +20,19 @@ const SRC = join(import.meta.dirname, "../src");
 
 const BANNED = [".invalidate(", "useRouter("] as const;
 
+// **一处按文件放行 `useRouter(`**:滚动记忆(片1 / ADR 0042)要订阅 `onRendered`,而且必须排在
+// router 自己那条订阅之后才不会被它的归零盖掉 —— `useRouterState` 给的是状态,给不了订阅口,
+// 所以这一处非拿实例不可。放行只放 `useRouter(` 这一个词:这个文件写 `.invalidate(` 照旧判红,
+// 别的文件写 `useRouter(` 也照旧判红,守卫原本要抓的那条路(从 useRouter 里摸出 invalidate)没松。
+const ROUTER_INSTANCE_ALLOWED = new Set(["lib/hooks/use-app-scroll-memory.ts"]);
+
+function violations(relativePath: string, code: string): string[] {
+  return BANNED.filter((needle) => {
+    if (!code.includes(needle)) return false;
+    return !(needle === "useRouter(" && ROUTER_INSTANCE_ALLOWED.has(relativePath));
+  });
+}
+
 // 剥注释。`//` 只在**不是紧跟在冒号后面**时才当行注释起点 —— 否则 `"https://…"` 里的那两个斜杠
 // 会把整行后半截当成注释吃掉,真有违规反而被藏起来。
 function stripComments(source: string): string {
@@ -37,11 +50,19 @@ function* walk(dir: string): Generator<string> {
 describe("整页刷新已退场", () => {
   it("apps/web/src 里既没有 router.invalidate,也没人再去拿 router 实例", () => {
     const offenders = [...walk(SRC)].flatMap((f) => {
-      const code = stripComments(readFileSync(f, "utf8"));
-      const hits = BANNED.filter((needle) => code.includes(needle));
-      return hits.length > 0 ? [`${f.slice(SRC.length + 1)} → ${hits.join(", ")}`] : [];
+      const rel = f.slice(SRC.length + 1);
+      const hits = violations(rel, stripComments(readFileSync(f, "utf8")));
+      return hits.length > 0 ? [`${rel} → ${hits.join(", ")}`] : [];
     });
     expect(offenders).toEqual([]);
+  });
+
+  // 放行是**按文件 + 按词**的,别退化成「这个文件随便写」。
+  it("放行的那一处仍然不许写 invalidate,别的文件也仍然不许拿 router 实例", () => {
+    const [allowed] = ROUTER_INSTANCE_ALLOWED;
+    expect(violations(allowed, "const r = useRouter();")).toEqual([]);
+    expect(violations(allowed, "const r = useRouter(); r.invalidate();")).toEqual([".invalidate("]);
+    expect(violations("components/whatever.tsx", "const r = useRouter();")).toEqual(["useRouter("]);
   });
 
   // 守卫本身的守卫:上面那条只有在**真能抓到**违规时才有意义。剥注释的正则写错一次
