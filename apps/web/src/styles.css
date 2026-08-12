@@ -47,8 +47,10 @@ input:-webkit-autofill:focus {
 
    没写在 @layer 里是故意的:Tailwind 的 utilities 都在 cascade layer 中,无层 CSS 一律胜出
    (不必跟 `bottom-6` 比特异性)。
-   位置压在顶栏那条毛玻璃上,与 iOS 通知横幅同款;`env(safe-area-inset-top)` 保证不压刘海。 */
-@media (width < 64rem) {
+   位置压在顶栏那条毛玻璃上,与 iOS 通知横幅同款;`env(safe-area-inset-top)` 保证不压刘海。
+   断点走 `theme(--breakpoint-lg)` 而不是写死 64rem:外壳的手机形态(顶栏/Dock 的 `lg:hidden`)
+   就是这条线,写死两处就会在改断点那天静默错开。 */
+@media (width < theme(--breakpoint-lg)) {
   body > ol[aria-live="polite"] {
     top: calc(env(safe-area-inset-top) + 0.75rem);
     bottom: auto;
