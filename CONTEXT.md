@@ -36,6 +36,9 @@ _Avoid_: holding(那是聚合后的)
 
 **Holding**:
 首屏的一个聚合行 —— 一个 **Token** 的总额 + 其各持有点明细。归并只按 `tokens.id` 一条(ADR 0002 的四级键在 ADR 0021 塌成一级),绝不按裸 symbol。
+
+**holding 是保留词,别再提「去 holding 化」**(#159 已撤销)。它是金融领域的通用说法,一个词装得下 spot / perp / defi 各类;而候选替代词都更差:`position` 在本仓已被永续占了实义(`perp_position` 是四个 kind 之一),`asset` 太泛。当初想抹掉它,是因为 manual 那边把「用户自定义的币」也叫 holding —— 同一个词指了两样东西。那半已经改成 **Token**(#153 / #158,`manual_token` 表并进 `tokens`),歧义没了,剩下的只是词本身。
+库那层「某个手记账户持有哪些币」仍叫 holding(`ManualHolding` / `manual-holdings.ts` 那约 30 处):它是**单账户**的持仓,严格说落在 HoldingSource 那一档而不是这里的聚合行 —— 名字比含义宽一档,**有意留着**,不值得为此改名。
 _Avoid_: CanonicalHolding, position, TokenGroup(展示分组已作废)
 
 **HoldingSource**:
