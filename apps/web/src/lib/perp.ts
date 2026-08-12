@@ -133,5 +133,18 @@ export function toPerpView(balances: PerpBalance[]): PerpView {
     }
   }
 
+  // **仓位按名义敞口降序**(#133 收尾)。以前不排 —— 于是列表是上游给的顺序,而那个顺序没有任何
+  // 含义(Hyperliquid 给的就是 BTC / ETH / SOL / AVAX… 这么一串),看上去就是「乱的」。
+  //
+  // **为什么按名义敞口而不是占用保证金**:仓位行右侧显示的那个数**就是**名义敞口
+  // (`<ValueDelta value={p.positionValue}>`)。排序键必须是屏幕上那个数,否则用户扫一眼
+  // 看到的是一串没排序的金额 —— 那比不排更糟。同一条规则在别处已经成立:DeFi 的腿按显示的
+  // `|usdValue|` 排、永续账户块按显示的权益排。
+  // (占用保证金更能代表「押了多少钱」,但它不在这行上显示;真要按它排,得先把它显示出来。)
+  //
+  // 排在这里而不是各渲染点:侧边栏与主页永续 tab 是同一个 `PerpView` 的两个消费者,
+  // 排一次两边就一致 —— 而账户行那排叠标用的是同一个口径(`|positionValue|`)。
+  positions.sort((a, b) => Math.abs(b.positionValue) - Math.abs(a.positionValue));
+
   return { equity, positions };
 }
