@@ -31,6 +31,7 @@ import { deltaTone, NO_VALUE } from "../lib/delta-display";
 import type { Gain } from "../lib/gain-24h";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
+import { useScrollLock } from "../lib/hooks/use-scroll-lock";
 import { isManual } from "../lib/manual-connector";
 import { accountHistoryQuery } from "../lib/queries/accounts";
 import { invalidateFor } from "../lib/queries/refresh";
@@ -95,6 +96,9 @@ export function AccountDetailSheet({
   onComplete: (account: AccountRow) => void; // 补录:打开加账户 modal 的补录模式(A3)
 }) {
   const isDesktop = useMediaQuery("(min-width: 640px)");
+  // 打开时锁住背后那个滚动容器(ADR 0042)。两个壳自己锁的是 body 的 overflow ——
+  // 手机上滚动已经在容器里,那行什么也不锁;桌面这个 hook 反过来是空操作,由 Drawer 锁 body。
+  useScrollLock(open);
   // key={account.id} 重挂 → 切账户自动清空 rename/confirm/range 等本地态。
   const body = account && (
     <DetailBody

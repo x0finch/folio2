@@ -3,6 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
+import { APP_SCROLL_ID } from "../lib/hooks/use-scroll-lock";
 import type { SyncStatusSummary } from "../lib/sync-status";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
@@ -44,7 +45,10 @@ export function AppShell({
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
 
   return (
-    <div className="min-h-svh lg:flex">
+    // 手机:外壳固定一屏高、内容在下面那个框里滚(ADR 0042)—— 顶栏因此是真正不动的一条,
+    // 而不是靠 sticky 跟着滚。桌面**故意**还滚整页(侧滑 Drawer 锁背景靠的是 body 的 overflow),
+    // 所以 lg 上把高度与 overflow 全还回去。两种模型并存是有意的,不是没改完。
+    <div className="flex h-svh flex-col overflow-hidden lg:h-auto lg:min-h-svh lg:flex-row lg:overflow-visible">
       {/* 桌面常驻左侧栏 */}
       <aside className="hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto">
         <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-5">
@@ -89,17 +93,27 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* 移动顶栏:只剩品牌 logo(控件全迁 Settings);sticky + 毛玻璃锚点。
-            顶部内边距叠加 safe-area-inset-top:viewport-fit=cover + 半透状态栏下,内容不被刘海压
-            (毛玻璃底延伸到状态栏下,成沉浸观感;bg/blur 不变、不碰 sticky)。 */}
-        <header className="sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* 移动顶栏:只剩品牌 logo(控件全迁 Settings)。**在滚动区外面**,所以不再需要 sticky ——
+            它就是不动的一条(ADR 0042)。顶部内边距叠加 safe-area-inset-top:viewport-fit=cover +
+            半透状态栏下,内容不被刘海压(毛玻璃底延伸到状态栏下,成沉浸观感)。 */}
+        <header className="z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden">
           <Logo className="size-6 shrink-0" />
           <span className="font-semibold text-lg tracking-tight">folio</span>
         </header>
 
-        {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
-        <main className="relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">
+        {/* 手机端的滚动容器(ADR 0042)。三件事挂在这一个元素上:
+            ① `data-scroll-restoration-id` —— router 按它存/取滚动位置(切页回来还在原处)。
+               没这个属性它会退化成一条按 DOM 位置算出来的 CSS 路径选择器,渲染结构一变就失配。
+               `useScrollLock` 也用同一个属性找容器,一个属性两用。
+            ② `overscroll-contain` —— 容器内滚到头不把回弹传给整页(body 上的
+               `overscroll-behavior: none` 照旧留着,它挡的是整页那一层)。
+            ③ lg 上 overflow 还回 visible → 桌面滚整页,`useScrollLock` 在那儿自动成空操作。
+            relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
+        <main
+          data-scroll-restoration-id={APP_SCROLL_ID}
+          className="relative mx-auto w-full max-w-5xl flex-1 overflow-y-auto overscroll-contain px-4 pt-6 pb-28 lg:overflow-visible lg:px-8 lg:pb-10"
+        >
           {/* Portfolio 选择器 = 标题上方的小 badge(eyebrow);Settings 页不显示。 */}
           <PageHeader
             title={pageTitle}

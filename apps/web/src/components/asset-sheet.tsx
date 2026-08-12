@@ -20,6 +20,7 @@ import { collapseToSlots } from "../lib/collapse-to-slots";
 import { deltaTone, NO_VALUE } from "../lib/delta-display";
 import { formatNumber } from "../lib/format-number";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
+import { useScrollLock } from "../lib/hooks/use-scroll-lock";
 import { holdingHistoryQuery } from "../lib/queries/accounts";
 import { signedUsd } from "../lib/signed-usd";
 import {
@@ -297,6 +298,9 @@ export function AssetSheet({
 }) {
   // 桌面右滑 Drawer;移动(< sm)用 BottomSheet。两壳复用同一份内容组件。
   const isDesktop = useMediaQuery("(min-width: 640px)");
+  // 打开时锁住背后那个滚动容器(ADR 0042)。两个壳自己锁的是 body 的 overflow ——
+  // 手机上滚动已经在容器里,那行什么也不锁;桌面这个 hook 反过来是空操作,由 Drawer 锁 body。
+  useScrollLock(open);
 
   if (isDesktop) {
     return (
