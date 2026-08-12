@@ -90,6 +90,19 @@ export function liqRisk(p: PerpPositionView): LiqRisk | null {
   return { distance, fill, state, mark, liquidationPx: p.liquidationPx };
 }
 
+// 单个永续仓位行的 typed meta(账户行叠标用,#133):要的是币名 + **名义敞口**。
+//
+// **名义值只在 meta 里,行的 `usdValue` 恒为 0** —— 永续仓位不贡献净值(净值由权益行承载,
+// ADR 0010 / #129),所以拿 `usdValue` 去排序或过滤会让每个仓位都变成 $0、被尘埃阈值全部滤掉。
+// (第一版就是这么写的,单测因为 fixture 自己编了个 usdValue 而全绿。)
+//
+// **不复用 `toPerpView`**:那个是「一个账户的全部永续行 → 分区视图」,而叠标是一行一行看过去的
+// (它同时还要看现货与 defi 行),为它先把行按账户攒起来只是为了再拆开。
+export function perpPositionMetaOf(metaJson: string | null): PerpPositionMetaT | undefined {
+  const r = PerpPositionMeta.safeParse(parseJson(metaJson));
+  return r.success ? r.data : undefined;
+}
+
 export function toPerpView(balances: PerpBalance[]): PerpView {
   let equity: PerpEquityView | null = null;
   const positions: PerpPositionView[] = [];

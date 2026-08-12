@@ -41,11 +41,24 @@ export function defiTokenId(b: BalanceLike): string | null {
   return b.tokenId ?? null;
 }
 
-// **展示富化的统一门**(同质 ∪ defi)。enrich / refreshStalePrices / warm 三处必须同门:
+// 永续仓位的**展示用**身份(#133):账户行的叠标要显示标的币的图标(在交易 BTC / ETH / …)。
+// 与 defi 那道门同理,独立于 fungibleTokenId —— 永续仓位的价值走 typed meta,进了估值门会被重估。
+//
+// 权益行(`perp_equity`)有意不在内:它是抵押物,不是「持有什么」,叠标不显示它。
+export function perpTokenId(b: BalanceLike): string | null {
+  if (viewKind(b) !== "perp_position") return null;
+  return b.tokenId ?? null;
+}
+
+// **展示富化的统一门**(同质 ∪ defi ∪ 永续仓位)。enrich / refreshStalePrices / warm 三处必须同门:
 // enrich 标了 stale 而 refresh 够不到的行会让 pricesStale 永远清不掉、客户端每次加载空转一次刷新
 // (code review #2)。估值现推(liveValue)不走此门,仍只认 fungibleTokenId 的同质行。
+//
+// **三门同源是靠这一个函数保证的,别在调用点各自加门**:`refreshableTokenIds` 也是按它筛的,
+// 所以这里放进来一类,富化 / 刷价 / 预热三处同时放进来 —— 而永续的图正是靠「刷」那一半取回来的
+// (连接器不报 logo,logo/正名的权威源是上游,见 token-enrich 的 `warmHeldPrices` 注释)。
 export function displayTokenId(b: BalanceLike): string | null {
-  return fungibleTokenId(b) ?? defiTokenId(b);
+  return fungibleTokenId(b) ?? defiTokenId(b) ?? perpTokenId(b);
 }
 
 // 一批余额行 → 去重后的 token_id 列表(喂 enrich 展示 —— 要**全量**,dust 也得出名字/图)。

@@ -6,12 +6,12 @@ import { AlertTriangle, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
+import { AccountStack } from "../../components/account-stack";
 import { AddAccountModal, type CompleteTarget } from "../../components/add-account-modal";
 import { ConnectorBadge } from "../../components/connector-badge";
 import { HeaderSync } from "../../components/header-sync";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { TagBadges } from "../../components/tag-badges";
-import { TokenStack } from "../../components/token-stack";
 import { ValueDelta } from "../../components/value-delta";
 import { buildAccountRows } from "../../lib/account-rows";
 import { accountShare, activeAccountsTotal, shareLabel } from "../../lib/account-share";
@@ -284,10 +284,10 @@ function AccountRowContent({
           archivedAt={row.archivedAt}
           onComplete={onComplete}
         />
-        {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),无现货可叠(纯 perp/DeFi 或未同步)的行也不塌矮,
-            全列表行高一致。真 logo 的按-kind 填充(perp coin / DeFi 协议)待 #132 解绑后再接。 */}
+        {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),什么都没有的行(从未同步)也不塌矮,
+            全列表行高一致。三类持仓都进这一排(现货币 / 永续标的 / DeFi 协议,#133)。 */}
         <span className="flex min-h-6 items-center">
-          <TokenStack balances={row.balances} />
+          <AccountStack balances={row.balances} />
         </span>
       </span>
       <div className="relative shrink-0">
