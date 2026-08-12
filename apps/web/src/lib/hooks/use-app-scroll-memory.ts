@@ -24,25 +24,33 @@ import { appScroller } from "../app-scroll";
 // `subscribers` 是个 `Set`、按插入序 `forEach`,而 router 自己那条在建 router 时
 // (`RouterCore` 里的 `setupScrollRestoration`)就订阅了,我们这条在组件 effect 里订阅,必然更晚。
 
-// 纯机制:容器 + 一个「路由渲染完了」的订阅口 + 当前 pathname。React 那点壳在下面。
+// 位置的键 = pathname + 查询串。**查询串必须进键**:router 那边的归零是无条件的,只改查询串
+// 的导航(片 5 要把页内 tab 用 `replace` 放进 URL)照样会把容器清零 —— 键里不带查询串的话,
+// 这一层会因为「pathname 没变」提前返回、不还原,用户每切一次页内 tab 就被弹回顶部;
+// 而且两个 tab 还会共用同一个记忆槽、互相覆盖。
+export function locationKey(location: { pathname: string; searchStr: string }): string {
+  return location.pathname + location.searchStr;
+}
+
+// 纯机制:容器 + 一个「路由渲染完了」的订阅口 + 当前位置的键。React 那点壳在下面。
 // 记忆挂在这次调用的闭包里(不是模块级)—— 锁屏会把整个 App 卸掉再装回来,那时该重新开始。
 export function trackAppScroll(
   el: HTMLElement,
-  subscribe: (onRendered: (pathname: string) => void) => () => void,
-  initialPathname: string,
+  subscribe: (onRendered: (key: string) => void) => () => void,
+  initialKey: string,
 ): () => void {
   const remembered = new Map<string, number>();
-  let current = initialPathname;
+  let current = initialKey;
 
   const onScroll = () => {
     remembered.set(current, el.scrollTop);
   };
   el.addEventListener("scroll", onScroll, { passive: true });
 
-  const unsubscribe = subscribe((pathname) => {
-    if (pathname === current) return; // loader 重跑 / replace:不是换页,别把人弹回顶部
-    current = pathname;
-    el.scrollTop = remembered.get(pathname) ?? 0;
+  const unsubscribe = subscribe((key) => {
+    if (key === current) return; // loader 重跑、原地重渲染:不是换位置,别把人弹回顶部
+    current = key;
+    el.scrollTop = remembered.get(key) ?? 0;
   });
 
   return () => {
@@ -58,8 +66,8 @@ export function useAppScrollMemory(): void {
     if (!el) return;
     return trackAppScroll(
       el,
-      (onRendered) => router.subscribe("onRendered", (e) => onRendered(e.toLocation.pathname)),
-      router.state.location.pathname,
+      (onRendered) => router.subscribe("onRendered", (e) => onRendered(locationKey(e.toLocation))),
+      locationKey(router.state.location),
     );
   }, [router]);
 }

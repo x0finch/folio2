@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { APP_SCROLL_ID, APP_SCROLL_SELECTOR } from "../src/lib/app-scroll";
-import { trackAppScroll } from "../src/lib/hooks/use-app-scroll-memory";
+import { locationKey, trackAppScroll } from "../src/lib/hooks/use-app-scroll-memory";
 
 // 每个 tab 记住自己滚到哪了(见 use-app-scroll-memory 顶部那段:router 对内滚容器
 // 做的是「把上一页的位置带到下一页」,不是「按 key 各记各的」,所以这层由 app 自己管)。
@@ -37,6 +37,25 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+// 键怎么取,是这层唯一容易错的地方。片 5 会把页内 tab 用 `replace` 放进 URL —— 那时
+// pathname 一直不变,只有查询串在变。键里不带查询串的话:切 tab 被判成「没换位置」→ 不还原,
+// 而 router 那边的归零是**无条件**的,于是每切一次都被弹回顶部;两个 tab 还共用同一个记忆槽。
+describe("locationKey", () => {
+  it("查询串进键 —— 同 pathname 不同查询串是两个位置", () => {
+    const home = { pathname: "/", searchStr: "" };
+    const tokens = { pathname: "/", searchStr: "?tab=tokens" };
+    const perps = { pathname: "/", searchStr: "?tab=perps" };
+    expect(locationKey(tokens)).not.toBe(locationKey(perps));
+    expect(locationKey(home)).not.toBe(locationKey(tokens));
+  });
+
+  it("同一个位置取到同一个键(loader 重跑时要判得出「没换位置」)", () => {
+    expect(locationKey({ pathname: "/accounts", searchStr: "?q=a" })).toBe(
+      locationKey({ pathname: "/accounts", searchStr: "?q=a" }),
+    );
+  });
+});
+
 describe("trackAppScroll", () => {
   it("切走再切回来 → 回到原处;第一次进某个 tab → 顶部", () => {
     const el = mountScroller();
@@ -58,7 +77,30 @@ describe("trackAppScroll", () => {
     stop();
   });
 
-  it("同一个 pathname 再触发一次(loader 重跑 / replace)→ 停在原处,不回顶", () => {
+  it("不同的键各记各的,来回切都停在自己那份位置", () => {
+    const el = mountScroller();
+    const routes = fakeRoutes();
+    const stop = trackAppScroll(el, routes.subscribe, "/?tab=tokens");
+
+    scrollTo(el, 600);
+    // 切页内 tab:router 已经把容器清零了,这一层要把该 tab 的位置放回去(首访 → 0)。
+    el.scrollTop = 0;
+    routes.navigateTo("/?tab=perps");
+    expect(el.scrollTop).toBe(0);
+
+    scrollTo(el, 120);
+    el.scrollTop = 0;
+    routes.navigateTo("/?tab=tokens");
+    expect(el.scrollTop).toBe(600);
+
+    el.scrollTop = 0;
+    routes.navigateTo("/?tab=perps");
+    expect(el.scrollTop).toBe(120);
+
+    stop();
+  });
+
+  it("同一个位置再触发一次(loader 重跑)→ 停在原处,不回顶", () => {
     const el = mountScroller();
     const routes = fakeRoutes();
     const stop = trackAppScroll(el, routes.subscribe, "/");
