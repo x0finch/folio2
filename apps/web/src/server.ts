@@ -2,9 +2,10 @@ import { listUserIdsWithAccounts } from "@folio/db";
 import { GlobalRefIndexService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
-import { Effect, Option } from "effect";
+import { Cause, Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/internal/cache-headers";
 import { configureLogging } from "./lib/server/internal/log";
+import { pruneNotesAllUsers } from "./lib/server/internal/note-retention";
 import { runAtEdge, withDatabase, withOracleWarm } from "./lib/server/internal/oracle";
 import { syncAllUsers, warmAllUsers } from "./lib/server/internal/sync-deps";
 
@@ -39,6 +40,31 @@ const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
         unmatchedPlatforms: result.unmatchedPlatforms.length,
       });
     }),
+  );
+
+// 每天那趟顺带剪掉保留期外的展示 note(#456)。
+//
+// **搭在这个 trigger 上而不是新开一个**:它要的就是「每天一次」,而另一个 trigger 是每小时
+// (#446 起)—— 挂那儿会一天跑 24 遍同一件事。
+//
+// **排在刷表之前,而且整趟自己兜住。** 排在后面的话,一个**持续**失败的刷表(上游改了格式、
+// 配额用光)会把剪 note 永久停掉,而不只是推迟一天 —— 那时存储会一直长而没有任何迹象。
+// 自己兜住则保证反方向也不会发生:剪 note 出问题不会挡住刷表(新币认不出来是更重的后果),
+// 也不会把整趟 cron 拖成异常收尾。两个方向都不再互相牵连。
+//
+// 兜的是 `Cause` 不是类型化失败:`listUserIdsWithAccounts` 那步抛的是 defect(db 挂了),
+// `catchAll` 接不住(同 warmAllUsers 的注释)。
+const pruneNotesSweep = (cron: string): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const userIds = yield* withDatabase(listUserIdsWithAccounts);
+    const pruned = yield* pruneNotesAllUsers(userIds);
+    cronLog.info("prune notes done", { cron, ...pruned });
+  }).pipe(
+    Effect.catchAllCause((cause) =>
+      Effect.sync(() =>
+        cronLog.warn("prune notes sweep failed", { cron, error: Cause.pretty(cause) }),
+      ),
+    ),
   );
 
 // 全量 sweep:同步每个用户 → 逐用户预热代币缓存。
@@ -86,8 +112,8 @@ export default {
   ...serverEntry,
 
   // 两个定时任务共一个 scheduled(),按 controller.cron 分支(见 wrangler.jsonc 的 triggers):
-  //   · GLOBAL_REF_INDEX_CRON(23:00)—— 刷全局代币映射表
-  //   · 其余(00:00)—— 全量 sync sweep
+  //   · GLOBAL_REF_INDEX_CRON(每天 23:00)—— 先剪过期 note(#456),再刷全局代币映射表
+  //   · 其余(每小时 :30,#446)—— 全量 sync sweep
   // 拆两个 trigger 而不是挤一次:拉几 MB JSON + 写几万行是重活,与 sweep 挤一次调用有超预算风险。
   // waitUntil 保证跑完才结束本次调用。env/ctx 由运行时传入;env 不单独取用
   // (configureLogging / syncAllUsers / warmAllUsers / oracleWarm 都走 cloudflare:workers 全局)。
@@ -100,7 +126,10 @@ export default {
           // 边缘只在这里 —— 官方那句「`run*` 尽量放在程序的边缘」在 cron 这条路上就是这个形状。
           await runAtEdge(
             controller.cron === GLOBAL_REF_INDEX_CRON
-              ? refreshGlobalRefIndex(controller.cron)
+              ? Effect.zipRight(
+                  pruneNotesSweep(controller.cron),
+                  refreshGlobalRefIndex(controller.cron),
+                )
               : sweepAllUsers(controller.cron),
           );
         } catch (err) {

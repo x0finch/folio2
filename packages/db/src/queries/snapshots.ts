@@ -1,6 +1,20 @@
 import { type BalanceKind, Note } from "@folio/connectors-basic";
-import { and, asc, desc, eq, getTableColumns, gte, inArray, max } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  gte,
+  inArray,
+  isNotNull,
+  lt,
+  max,
+  sql,
+} from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
+import type { Drizzle } from "../connect";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
 import { Database } from "../stores/service";
@@ -105,6 +119,21 @@ export interface SnapshotStore {
    * 靠调用方口头保证更清楚。
    */
   readonly balancesFor: (snapshotIds: string[]) => Effect.Effect<SnapshotBalance[]>;
+  /**
+   * 清掉过旧快照上的展示 note(#456),返回清掉的行数。`olderThan` 是 epoch ms 的下界。
+   *
+   * **为什么只清 note、不清 `meta_json`**:词汇表那条分野就是判据 —— note 是「仅供展示、无共享
+   * 逻辑读」,而 meta 是「共享逻辑会结构化读」的 typed 层(24h 盈亏从它取 DeFi 协议名、
+   * `balance-kind` 从老 perp 行取 role 判 kind)。清 meta 会让历史算错,不只是少显示点东西。
+   *
+   * **每账户最新那张永不清**:界面读的就是它(`latest()`)。窗口通常盖不到最新快照,但停了同步的
+   * 账户(已归档 / 凭据失效)会整个落在窗口外 —— 那时按时间清会把它唯一那份 note 也清掉,抽屉里
+   * 就空了。判据写成「存在更新的同账户快照」,不是「取每账户 max(taken_at) 再排除」。
+   */
+  readonly pruneNotes: (olderThan: number) => Effect.Effect<{
+    snapshots: number;
+    balances: number;
+  }>;
 }
 
 export const SnapshotStore = Context.GenericTag<SnapshotStore>("db/SnapshotStore");
@@ -305,6 +334,67 @@ const make = (userId: string) =>
                 .from(snapshotBalances)
                 .where(inArray(snapshotBalances.snapshotId, snapshotIds)),
             ),
+
+      pruneNotes: (olderThan) =>
+        Effect.gen(function* () {
+          // 「不是本账户最新那张」= 存在同账户、更晚的快照。写成 EXISTS 而不是「先取每账户
+          // max(taken_at) 再排除」:后者要么多一趟查询,要么在 UPDATE 里嵌一个 GROUP BY 子查询,
+          // 而这条 EXISTS 直接走 (account_id, taken_at) 那条复合索引。
+          const notLatest = sql`exists (
+            select 1 from ${snapshots} newer
+            where newer.account_id = ${snapshots.accountId}
+              and newer.taken_at > ${snapshots.takenAt}
+          )`;
+          // 待清的快照:本用户的、够旧的、且不是各账户最新那张。
+          const stale = (db: Drizzle) =>
+            db
+              .select({ id: snapshots.id })
+              .from(snapshots)
+              .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+              .where(and(eq(accounts.userId, userId), lt(snapshots.takenAt, olderThan), notLatest));
+
+          // 先数再改,**不用 `UPDATE … RETURNING`**:那个数要进 cron 日志(清了多少是唯一能看出它
+          // 在干活的信号),而 RETURNING 会把每一条被改的行都物化出来 —— 部署后第一趟要清掉窗口外
+          // 的全部存量,一个同步了一年的账户就是几千张快照、几万条余额行,全塞进一个 Worker 的内存
+          // 只为取个 `.length`。COUNT 多两次往返但恒定内存,而这是每天一次的维护动作,不赶时间。
+          //
+          // 计数与改动之间不是原子的(D1 无交互式事务)—— 并发写会让日志里的数差一两条。日志容得下,
+          // 而两条 UPDATE 各自幂等(`note IS NOT NULL` 门着),重跑不会重复扣。
+          const [snapCount] = yield* database.query((db) =>
+            db
+              .select({ n: count() })
+              .from(snapshots)
+              .where(and(isNotNull(snapshots.note), inArray(snapshots.id, stale(db)))),
+          );
+          const [balCount] = yield* database.query((db) =>
+            db
+              .select({ n: count() })
+              .from(snapshotBalances)
+              .where(
+                and(
+                  isNotNull(snapshotBalances.note),
+                  inArray(snapshotBalances.snapshotId, stale(db)),
+                ),
+              ),
+          );
+
+          yield* database.batch((db) => [
+            db
+              .update(snapshots)
+              .set({ note: null })
+              .where(and(isNotNull(snapshots.note), inArray(snapshots.id, stale(db)))),
+            db
+              .update(snapshotBalances)
+              .set({ note: null })
+              .where(
+                and(
+                  isNotNull(snapshotBalances.note),
+                  inArray(snapshotBalances.snapshotId, stale(db)),
+                ),
+              ),
+          ]);
+          return { snapshots: snapCount?.n ?? 0, balances: balCount?.n ?? 0 };
+        }),
     };
 
     return store;
