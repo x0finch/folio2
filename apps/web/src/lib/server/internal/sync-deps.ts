@@ -285,8 +285,14 @@ export const syncServicesLayer: Layer.Layer<
       Layer.effect(
         SyncSnapshotStore,
         Effect.map(SnapshotStore, (snapshots) => ({
+          // **同步落的快照按钟点折叠**(#461):同账户、同一个钟点里已有的那份被这次覆盖。
+          // 同步写的是「此刻的状态」,而读侧的趋势图本来就只画每个钟点的最后一个点 —— 同钟点里
+          // 更早的那些份存了也看不到。开关默认是关的(默认追加),导入那条路要的正是默认值:
+          // 它恢复的是历史事实,不能折叠。判据与理由见 `SnapshotStore.write` 的文档注释。
           write: (accountId: string, input: WriteSnapshotInput) =>
-            snapshots.write(accountId, input).pipe(asDep("writeSnapshot")),
+            snapshots
+              .write(accountId, input, { collapseSameHour: true })
+              .pipe(asDep("writeSnapshot")),
         })),
       ),
       Layer.succeed(BalanceSource, {

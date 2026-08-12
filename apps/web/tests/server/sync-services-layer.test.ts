@@ -84,6 +84,41 @@ describe("syncServicesLayer 的接线", () => {
     expect(balances[0].tokenId).toBeTruthy();
   });
 
+  // 折叠开关(#461)是**这一层**接上去的:`SnapshotStore.write` 默认追加,同步这条路显式开。
+  // 这条钉的就是那一行有没有传 —— 折叠算得对不对由 packages/db 的 `snapshot-hour-collapse` 那组管。
+  //
+  // 时钟必须钉死:`syncAccount` 取的是 `Date.now()`(不走 Effect 的 Clock),赌墙钟的话两次同步
+  // 恰好跨过整点就会红一次(CODING.md「别断言墙上时钟」)。
+  it("同一钟点内同步两次 → 只留最后一份快照", async () => {
+    const account = await dbFor(USER).accounts.create({
+      connectorId: "evm",
+      label: "W",
+      creds: null,
+    });
+    const hour = Math.floor(1_800_000_000_000 / 3_600_000) * 3_600_000;
+    const now = vi.spyOn(Date, "now");
+
+    const sync = (at: number, value: number) => {
+      now.mockReturnValue(at);
+      return runRequest(
+        USER,
+        Account.syncAccount(USER, account, null).pipe(
+          Effect.provide(
+            fakeBalances([{ symbol: "USDC", amount: 2, value, kind: "spot", tokenRef: USDC_ETH }]),
+          ),
+          Effect.provide(syncServicesLayer),
+        ),
+      );
+    };
+
+    await sync(hour + 5 * 60_000, 50);
+    await sync(hour + 35 * 60_000, 80);
+
+    const rows = await dbFor(USER).snapshots.listByAccount(account.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].totalUsd).toBe(80);
+  });
+
   // **db 的失败必须是类型化的 `SyncDepError`,不能是 defect。**
   //
   // db store 的错误通道是 `never`(ADR:D1 挂了走 defect),而编排的隔离全靠类型化失败:

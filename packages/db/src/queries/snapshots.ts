@@ -28,6 +28,11 @@ import { assertAccountOwned } from "./ownership";
 // **加列必须回来改这个数**:列数 × 块行数不得超 100,否则 "too many SQL variables",只在持仓多的账户上炸。
 const BALANCE_INSERT_CHUNK = 8;
 
+// 折叠的桶宽(#461)。**必须与读侧最细的桶一致** —— `apps/web/src/lib/history.ts` 的
+// `BUCKET_LADDER[0]` 就是它,而折叠的全部理由就是「读侧本来就只画每个钟点的最后一个点」。
+// 按**绝对钟点**切(`floor(t / HOUR)`),和读侧同一种切法,不是「距上一张一小时内」。
+const HOUR_MS = 3_600_000;
+
 export interface SnapshotBalanceInput {
   amount: number;
   usdValue: number;
@@ -100,8 +105,30 @@ export interface SnapshotBalanceHistoryRow {
 }
 
 export interface SnapshotStore {
-  /** 一次原子写 snapshot + balances(D1 用 db.batch,无交互式事务)。返回 snapshotId。 */
-  readonly write: (accountId: string, input: WriteSnapshotInput) => Effect.Effect<string>;
+  /**
+   * 一次原子写 snapshot + balances(D1 用 db.batch,无交互式事务)。返回 snapshotId。
+   *
+   * `collapseSameHour`(#461):同账户、同一个**钟点**里已经有快照 → 连它的余额行一起删掉再写,
+   * 一个钟点只留最后一份。默认 **false = 照旧追加**。
+   *
+   * **为什么要有这件事**:写入侧对同步频率没有任何限制(手点 20 次就落 20 份 + 20 × 持币数 行),
+   * 而读侧的 `downsampleSeries` 最细的桶就是一小时、每桶只取最后一个点 —— 同钟点内那些份在趋势图上
+   * **一份都看不到**。存了却画不出来。这条给「目前没有上限的事」加上上限:每账户每小时至多一份。
+   * 自动同步已经是每小时一次(#446),对它是空操作。
+   *
+   * **为什么默认关**:这个开关的判据是「这次写的是**此刻的状态**(可以被同钟点更晚的一次取代),
+   * 还是**一份历史事实**(必须原样留着)」。同步是前者;**导入是后者** —— 而导入
+   * (`TransferStore.importSnapshot`)正是转手调的这个方法。默认开就意味着「恢复自己的备份」会
+   * 静默丢掉同一小时里的历史快照。两种默认里,忘了开只是少省点空间,忘了关是丢数据。
+   *
+   * **代价不是零**:24h 盈亏(ADR 0040)不走降采样,它按每个观测点切段做 TWR —— 折叠会让切段变粗。
+   * 小时级仍足够分辨充提与行情,再粗就会动到基准查找的 ±2h 容差(#455)。所以桶宽只到一小时。
+   */
+  readonly write: (
+    accountId: string,
+    input: WriteSnapshotInput,
+    opts?: { collapseSameHour?: boolean },
+  ) => Effect.Effect<string>;
   readonly listByAccount: (accountId: string) => Effect.Effect<Snapshot[]>;
   /** 历史曲线数据源:全部快照的 (accountId, takenAt, totalUsd),按 takenAt 升序。 */
   readonly listTotals: () => Effect.Effect<SnapshotTotal[]>;
@@ -143,7 +170,7 @@ const make = (userId: string) =>
     const database = yield* Database;
 
     const store: SnapshotStore = {
-      write: (accountId, input) =>
+      write: (accountId, input, opts) =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           const snapshotId = crypto.randomUUID();
@@ -166,6 +193,7 @@ const make = (userId: string) =>
           // 整批原子写(D1 无交互式事务):snapshot + 各分块余额。空余额则只写 snapshot。
           // D1 限制每条 SQL 最多 100 个绑定参数 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行(见其定义)。
           // 一次性大 INSERT 会触发 "too many SQL variables"(地址持仓多时,如链上钱包几十上百条)。
+          const hourStart = Math.floor(input.takenAt / HOUR_MS) * HOUR_MS;
           yield* database.batch((db) => {
             const balanceInserts = [];
             for (let i = 0; i < balanceRows.length; i += BALANCE_INSERT_CHUNK) {
@@ -174,6 +202,25 @@ const make = (userId: string) =>
               );
             }
             return [
+              // 折叠(#461):删旧那份**排在插新那份之前**,而且必须在同一个 batch 里。
+              //   · 顺序反了 → 把刚插进去的那张一起删掉(它的 takenAt 也落在这个钟点里)。
+              //   · 拆成两次调用 → 中间失败就留下「删了没写」的空洞,那个钟点整段没了。
+              // batch 是一个按序执行的事务(CLAUDE.md 的 D1 一节),所以这一删一插是原子的;并发的
+              // 两次同步也因此各自是完整事务,后到的那次删掉先到的,不会两份并存。
+              // 余额行由 `snapshot_balances.snapshot_id` 的 ON DELETE CASCADE 一起走(D1 运行时真的执行)。
+              ...(opts?.collapseSameHour
+                ? [
+                    db
+                      .delete(snapshots)
+                      .where(
+                        and(
+                          eq(snapshots.accountId, accountId),
+                          gte(snapshots.takenAt, hourStart),
+                          lt(snapshots.takenAt, hourStart + HOUR_MS),
+                        ),
+                      ),
+                  ]
+                : []),
               db.insert(snapshots).values({
                 id: snapshotId,
                 accountId,
