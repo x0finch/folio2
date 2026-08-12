@@ -1,26 +1,23 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  APP_SCROLL_ID,
-  SCROLL_RESTORATION_ID_ATTR,
-  useScrollLock,
-} from "../src/lib/hooks/use-scroll-lock";
+import { APP_SCROLL_ID, APP_SCROLL_SELECTOR } from "../src/lib/app-scroll";
+import { useScrollLock } from "../src/lib/hooks/use-scroll-lock";
 
 // 锁的是**那个容器**,不是 body(ADR 0042)。手机上滚动已经挪进容器,锁 body 的 overflow
 // 什么也不锁 —— 所以这里盯三件事:锁/解锁、多个调用者叠加、卸载时恢复。
 // 手势与布局不在 jsdom 里验(没有布局、没有指针),那部分靠真机。
 
 function mountContainer(overflowY: string): HTMLElement {
-  const el = document.createElement("div");
-  el.setAttribute(SCROLL_RESTORATION_ID_ATTR, APP_SCROLL_ID);
+  document.body.innerHTML = `<div data-scroll-restoration-id="${APP_SCROLL_ID}"></div>`;
+  const el = document.querySelector<HTMLElement>(APP_SCROLL_SELECTOR);
+  if (!el) throw new Error("fixture did not mount");
   // 容器是不是滚动容器由 CSS 说(手机 auto / 桌面 visible);jsdom 里用内联样式立这个事实。
   el.style.overflowY = overflowY;
-  document.body.appendChild(el);
   return el;
 }
 
 afterEach(() => {
-  document.body.replaceChildren();
+  document.body.innerHTML = "";
 });
 
 describe("useScrollLock", () => {

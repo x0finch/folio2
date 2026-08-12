@@ -3,7 +3,8 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
-import { APP_SCROLL_ID } from "../lib/hooks/use-scroll-lock";
+import { APP_SCROLL_ID } from "../lib/app-scroll";
+import { useAppScrollMemory } from "../lib/hooks/use-app-scroll-memory";
 import type { SyncStatusSummary } from "../lib/sync-status";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
@@ -31,6 +32,9 @@ export function AppShell({
   selector?: ReactNode;
   children: ReactNode;
 }) {
+  // 每个 tab 记住自己滚到哪了(切走再回来停在原处、第一次进落顶部)。外壳拥有滚动容器,
+  // 所以这件事挂在这里;为什么不能只靠 router 见 hook 顶部。
+  useAppScrollMemory();
   const t = useTranslations("Nav");
   const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
