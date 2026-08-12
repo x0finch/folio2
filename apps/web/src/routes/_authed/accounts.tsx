@@ -6,8 +6,8 @@ import { AlertTriangle, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
-import { AccountStack } from "../../components/account-stack";
 import { AddAccountModal, type CompleteTarget } from "../../components/add-account-modal";
+import { AvatarStack } from "../../components/avatar-stack";
 import { ConnectorBadge } from "../../components/connector-badge";
 import { HeaderSync } from "../../components/header-sync";
 import { AccountsSkeleton } from "../../components/skeletons";
@@ -16,6 +16,7 @@ import { ValueDelta } from "../../components/value-delta";
 import { buildAccountRows } from "../../lib/account-rows";
 import { accountShare, activeAccountsTotal, shareLabel } from "../../lib/account-share";
 import { sortActiveAccounts } from "../../lib/account-sort";
+import { accountStackItems } from "../../lib/account-stack-items";
 import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-sync-status";
 import { accountIdsInView } from "../../lib/accounts-in-view";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
@@ -285,9 +286,10 @@ function AccountRowContent({
           onComplete={onComplete}
         />
         {/* 叠标位始终预留行高(min-h-6 = 叠标头像高),什么都没有的行(从未同步)也不塌矮,
-            全列表行高一致。三类持仓都进这一排(现货币 / 永续标的 / DeFi 协议,#133)。 */}
+            全列表行高一致。三类持仓都进这一排(现货币 / 永续标的 / DeFi 协议,见 accountStackItems)。
+            一格都没有时 <AvatarStack> 自己什么都不画,外面这个 span 仍占着高度。 */}
         <span className="flex min-h-6 items-center">
-          <AccountStack balances={row.balances} />
+          <AvatarStack items={accountStackItems(row.balances)} max={5} size="md" />
         </span>
       </span>
       <div className="relative shrink-0">
