@@ -23,6 +23,7 @@ import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { isManual } from "../../lib/manual-connector";
 import { accountHoldingsQuery, accountListQuery } from "../../lib/queries/accounts";
+import { connectorCatalogQuery } from "../../lib/queries/connectors";
 import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "../../lib/queries/tags";
 
@@ -31,6 +32,9 @@ export const Route = createFileRoute("/_authed/accounts")({
   // 各自是一条查询、各自的到达时刻不同,拼装得跟着数据走而不是跟着 loader 走。
   loader: async ({ context: { queryClient } }) => {
     await Promise.all([
+      // connector 展示名的目录:**本页每一行都有一个徽标**,不预取的话首帧只能显兜底名(#467)。
+      // 部署内静态、缓存一次,所以这一条实际只在整个会话的第一次加载上花一趟(与其余几条并行)。
+      queryClient.ensureQueryData(connectorCatalogQuery()),
       queryClient.ensureQueryData(accountHoldingsQuery()),
       queryClient.ensureQueryData(accountListQuery()),
       queryClient.ensureQueryData(portfolioMembershipsQuery()),

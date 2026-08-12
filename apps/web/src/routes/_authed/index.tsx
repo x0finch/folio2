@@ -30,6 +30,7 @@ import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { accountListQuery } from "../../lib/queries/accounts";
+import { connectorCatalogQuery } from "../../lib/queries/connectors";
 import { type PinScopeKey, portfolioKeys } from "../../lib/queries/keys";
 import {
   type PortfolioOverview,
@@ -64,6 +65,8 @@ export const Route = createFileRoute("/_authed/")({
   loader: async ({ context: { queryClient } }) => {
     // 与「选中哪个组合」无关的三件事先发出去,不等下面那个 await。
     const unscoped = Promise.all([
+      // connector 展示名/图的目录:pin 标签与账户抽屉都要它,首帧拿不到就只能显兜底名(#467)。
+      queryClient.ensureQueryData(connectorCatalogQuery()),
       queryClient.ensureQueryData(tabPinsQuery()),
       queryClient.ensureQueryData(accountListQuery()),
       queryClient.ensureQueryData(tagListQuery()),
