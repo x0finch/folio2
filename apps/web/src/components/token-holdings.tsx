@@ -2,6 +2,7 @@ import { SharedLayoutBg } from "@folio/ui";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
+import { buildStack } from "../lib/stack-items";
 import { AssetSheet } from "./asset-sheet";
 import { TokenRowContent } from "./token-row";
 
@@ -26,11 +27,18 @@ function RowContent({ h }: { h: Holding }) {
         // 主页这条路的 holding 恒带这个字段(overview 里逐行赋值,算不出是 null),原样透传。
         gain24h: h.gain24h,
       }}
-      sources={h.sources.map((s) => ({
-        logo: s.platform.logo,
-        name: s.platform.name,
-        k: `${s.account.id}|${s.platform.id}`,
-      }))}
+      // 这个币散在哪些来源(账户×平台各占一格 —— 同一平台的两个账户是两格,见 AvatarStack 的
+      // `k` 注释)。经 buildStack 按金额降序(全站叠标同一条规则);**只排不砍**(`dust: 0`):
+      // 来源就是「这个币在哪」,一个小额来源也是来源,而且开了 dust 开关看尘埃币时砍完会一格不剩。
+      sources={buildStack(
+        h.sources.map((s) => ({
+          logo: s.platform.logo,
+          name: s.platform.name,
+          k: `${s.account.id}|${s.platform.id}`,
+          magnitude: s.value,
+        })),
+        0,
+      )}
     />
   );
 }

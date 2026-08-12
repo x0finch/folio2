@@ -1,18 +1,15 @@
 import type { HoldingSource } from "./aggregate";
+import { buildStack, type StackItem } from "./stack-items";
 
 // 详情抽屉「来源」区的两种转置视图(纯逻辑,可单测):
 //   · byPlatform:按平台/链聚合 —— 看这个币散在哪些链/场馆,每条列它涉及几个账户。
 //   · byAccount :按账户聚合 —— 看这个币散在哪些账户,每条列该账户跨了几处平台。
 // 两者对称:一个的主副维度是另一个的副主维度。i18n 留给组件(本层只出 count/single 原料)。
 
-interface SourceGroupAvatar {
-  logo?: string;
-  name: string; // 缺 logo 时回退首字母 + title
-}
-
 export interface SourceGroup {
   key: string;
-  avatars: SourceGroupAvatar[]; // 左侧头像:1 个 = 单 logo,多个 = 叠标
+  // 左侧头像:1 个 = 单 logo,多个 = 叠标。形状即全站叠标那一个(`StackItem`,含稳定 key)。
+  avatars: StackItem[];
   primary: string; // 主行(平台名 / 账户名)
   count: number; // 副维度基数(账户数 / 平台数);=1 时用 single 显具体名
   single: string | null; // count===1 时的具体名(账户名 / 平台名),否则 null
@@ -67,7 +64,8 @@ export function groupByPlatform(sources: readonly HoldingSource[]): SourceGroup[
       const first = byValue[0];
       return {
         key,
-        avatars: [{ logo: g.logo, name: g.name }],
+        // 平台视图恒是**一个**头像(这一行就是那个平台)→ 没有排序问题,不经 buildStack。
+        avatars: [{ logo: g.logo, name: g.name, k: key }],
         primary: g.name,
         count: byValue.length,
         single: byValue.length === 1 ? (first?.label ?? null) : null,
@@ -84,7 +82,9 @@ export function groupByAccount(sources: readonly HoldingSource[]): SourceGroup[]
     string,
     {
       label: string;
-      platforms: Map<string, { name: string; logo?: string }>;
+      // 每个平台在这个账户里占多少 —— **头像按它降序**(与账户行叠标同一条规则,见 `buildStack`)。
+      // 以前只存 name/logo,于是头像是「哪条 source 先来」的顺序,也就是没有顺序。
+      platforms: Map<string, { name: string; logo?: string; value: number }>;
       amount: number;
       value: number;
     }
@@ -97,8 +97,14 @@ export function groupByAccount(sources: readonly HoldingSource[]): SourceGroup[]
     }
     g.amount += s.amount;
     g.value += s.value;
-    if (!g.platforms.has(s.platform.id)) {
-      g.platforms.set(s.platform.id, { name: s.platform.name, logo: s.platform.logo });
+    const p = g.platforms.get(s.platform.id);
+    if (p) p.value += s.value;
+    else {
+      g.platforms.set(s.platform.id, {
+        name: s.platform.name,
+        logo: s.platform.logo,
+        value: s.value,
+      });
     }
   }
   return [...m.entries()]
@@ -106,7 +112,11 @@ export function groupByAccount(sources: readonly HoldingSource[]): SourceGroup[]
       const plats = [...g.platforms.entries()];
       return {
         key,
-        avatars: plats.map(([, p]) => ({ logo: p.logo, name: p.name })),
+        // 只排不砍(`dust: 0`):头像个数必须与下面那句「跨 n 个平台」对得上(见 buildStack 的注释)。
+        avatars: buildStack(
+          plats.map(([id, p]) => ({ k: id, name: p.name, logo: p.logo, magnitude: p.value })),
+          0,
+        ),
         primary: g.label,
         count: plats.length,
         single: plats.length === 1 ? plats[0][1].name : null,

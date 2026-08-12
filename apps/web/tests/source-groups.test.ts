@@ -137,6 +137,10 @@ describe("groupByAccount", () => {
     expect(w1.count).toBe(3); // 三条链
     expect(w1.single).toBeNull();
     expect(w1.avatars).toHaveLength(3);
+    // **头像按组内金额降序**(#133 收尾,与账户行叠标同一条规则)。以前是「哪条 source 先来」的
+    // 顺序,也就是没有顺序。Arbitrum 19 > Base 1 > Polygon 0.07。
+    expect(w1.avatars.map((a) => a.name)).toEqual(["Arbitrum", "Base", "Polygon"]);
+    // 只排不砍:Polygon 那 $0.07 低于展示阈值,但砍掉它头像就只剩 2 个、与上面那句 count=3 对不上。
     const cex = gs[1]!;
     expect(cex.count).toBe(1);
     expect(cex.single).toBe("Arbitrum");
