@@ -90,6 +90,19 @@ export function liqRisk(p: PerpPositionView): LiqRisk | null {
   return { distance, fill, state, mark, liquidationPx: p.liquidationPx };
 }
 
+// 单个永续仓位行的 typed meta(账户行叠标用,#133):要的是币名 + **名义敞口**。
+//
+// **名义值只在 meta 里,行的 `usdValue` 恒为 0** —— 永续仓位不贡献净值(净值由权益行承载,
+// ADR 0010 / #129),所以拿 `usdValue` 去排序或过滤会让每个仓位都变成 $0、被尘埃阈值全部滤掉。
+// (第一版就是这么写的,单测因为 fixture 自己编了个 usdValue 而全绿。)
+//
+// **不复用 `toPerpView`**:那个是「一个账户的全部永续行 → 分区视图」,而叠标是一行一行看过去的
+// (它同时还要看现货与 defi 行),为它先把行按账户攒起来只是为了再拆开。
+export function perpPositionMetaOf(metaJson: string | null): PerpPositionMetaT | undefined {
+  const r = PerpPositionMeta.safeParse(parseJson(metaJson));
+  return r.success ? r.data : undefined;
+}
+
 export function toPerpView(balances: PerpBalance[]): PerpView {
   let equity: PerpEquityView | null = null;
   const positions: PerpPositionView[] = [];
@@ -119,6 +132,19 @@ export function toPerpView(balances: PerpBalance[]): PerpView {
       if (r.success) positions.push({ ...r.data, size: b.amount });
     }
   }
+
+  // **仓位按名义敞口降序**(#133 收尾)。以前不排 —— 于是列表是上游给的顺序,而那个顺序没有任何
+  // 含义(Hyperliquid 给的就是 BTC / ETH / SOL / AVAX… 这么一串),看上去就是「乱的」。
+  //
+  // **为什么按名义敞口而不是占用保证金**:仓位行右侧显示的那个数**就是**名义敞口
+  // (`<ValueDelta value={p.positionValue}>`)。排序键必须是屏幕上那个数,否则用户扫一眼
+  // 看到的是一串没排序的金额 —— 那比不排更糟。同一条规则在别处已经成立:DeFi 的腿按显示的
+  // `|usdValue|` 排、永续账户块按显示的权益排。
+  // (占用保证金更能代表「押了多少钱」,但它不在这行上显示;真要按它排,得先把它显示出来。)
+  //
+  // 排在这里而不是各渲染点:侧边栏与主页永续 tab 是同一个 `PerpView` 的两个消费者,
+  // 排一次两边就一致 —— 而账户行那排叠标用的是同一个口径(`|positionValue|`)。
+  positions.sort((a, b) => Math.abs(b.positionValue) - Math.abs(a.positionValue));
 
   return { equity, positions };
 }

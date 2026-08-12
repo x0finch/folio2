@@ -2,7 +2,8 @@ import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage, cn 
 
 // 叠放的平台/链 logo 小圆(beUI AvatarGroup):缺 logo 回退首字母、title 显名;超 max 以 +N 收尾。
 // AvatarImage 垫 bg-logo-bg 恒亮实底 —— 透明 logo 边角不漏 fallback 字母,且不随主题翻转。
-// 代币行(多源平台叠标)与详情抽屉(账户跨多链)共用。
+// 三处共用:账户行(这个账户里有什么)、代币行(这个币在哪些来源)、详情抽屉(账户跨多链)。
+// 排序/去重/砍尘埃在数据那侧统一(见 lib/stack-items 的 buildStack),这里只管画。
 const SIZES = {
   sm: { avatar: "size-4", text: "text-[8px]" },
   md: { avatar: "size-6", text: "text-[9px]" },
@@ -21,6 +22,9 @@ export function AvatarStack({
   className?: string;
 }) {
   const s = SIZES[size];
+  // 一格都没有 → 什么都不画(而不是画一个空的 AvatarGroup)。调用点因此可以直接把可能为空的
+  // items 交进来,不必各自判一次;要留位置的地方在外面套一个 min-h 就行(见账户页那一行)。
+  if (items.length === 0) return null;
   const shown = items.slice(0, max);
   const extra = items.length - shown.length;
   return (

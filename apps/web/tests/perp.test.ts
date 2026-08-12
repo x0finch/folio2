@@ -58,13 +58,21 @@ describe("toPerpView —— 遗留 kind=perp(靠 meta.role)", () => {
     const view = toPerpView([legacyEquity, legacyLong, legacyShort]);
     expect(view.equity).toMatchObject({ accountValue: 13109.482328, withdrawable: 13104.5 });
     expect(view.positions).toHaveLength(2);
-    expect(view.positions[0]).toMatchObject({ coin: "ETH", size: 0.0335, side: "long" });
-    expect(view.positions[1]).toMatchObject({
+    // 顺序按名义敞口降序(BTC 640 > ETH 100),不是入参顺序 —— 见下面那条专门的用例。
+    expect(view.positions[0]).toMatchObject({
       coin: "BTC",
       size: -0.01,
       side: "short",
       liquidationPx: null,
     });
+    expect(view.positions[1]).toMatchObject({ coin: "ETH", size: 0.0335, side: "long" });
+  });
+
+  // 以前不排:列表就是上游给的顺序(HL 给的是 BTC/ETH/SOL/AVAX… 一串没含义的顺序),看着像乱的。
+  // 键取**名义敞口**是因为那正是仓位行右侧显示的那个数;按看不见的数排会比不排更像坏了。
+  it("仓位按名义敞口降序(空仓取绝对值,不因为负号垫底)", () => {
+    const view = toPerpView([legacyLong, legacyShort]);
+    expect(view.positions.map((p) => p.coin)).toEqual(["BTC", "ETH"]);
   });
 
   it("只有 equity、无持仓的账户", () => {

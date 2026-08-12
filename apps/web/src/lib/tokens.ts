@@ -41,11 +41,24 @@ export function defiTokenId(b: BalanceLike): string | null {
   return b.tokenId ?? null;
 }
 
-// **展示富化的统一门**(同质 ∪ defi)。enrich / refreshStalePrices / warm 三处必须同门:
+// 永续仓位的**展示用**身份(#133):账户行的叠标要显示标的币的图标(在交易 BTC / ETH / …)。
+// 与 defi 那道门同理,独立于 fungibleTokenId —— 永续仓位的价值走 typed meta,进了估值门会被重估。
+//
+// 权益行(`perp_equity`)有意不在内:它是抵押物,不是「持有什么」,叠标不显示它。
+export function perpTokenId(b: BalanceLike): string | null {
+  if (viewKind(b) !== "perp_position") return null;
+  return b.tokenId ?? null;
+}
+
+// **展示富化的统一门**(同质 ∪ defi ∪ 永续仓位)。enrich / refreshStalePrices / warm 三处必须同门:
 // enrich 标了 stale 而 refresh 够不到的行会让 pricesStale 永远清不掉、客户端每次加载空转一次刷新
 // (code review #2)。估值现推(liveValue)不走此门,仍只认 fungibleTokenId 的同质行。
+//
+// **三门同源是靠这一个函数保证的,别在调用点各自加门**:`refreshableTokenIds` 也是按它筛的,
+// 所以这里放进来一类,富化 / 刷价 / 预热三处同时放进来 —— 而永续的图正是靠「刷」那一半取回来的
+// (连接器不报 logo,logo/正名的权威源是上游,见 token-enrich 的 `warmHeldPrices` 注释)。
 export function displayTokenId(b: BalanceLike): string | null {
-  return fungibleTokenId(b) ?? defiTokenId(b);
+  return fungibleTokenId(b) ?? defiTokenId(b) ?? perpTokenId(b);
 }
 
 // 一批余额行 → 去重后的 token_id 列表(喂 enrich 展示 —— 要**全量**,dust 也得出名字/图)。
@@ -71,25 +84,35 @@ export function displayTokenIds(rows: readonly BalanceLike[]): string[] {
 //     绝不会「标了脏却刷不到」。换成 `|Σ v|`:标脏侧只见 +500 → 标脏,刷价侧见 +500−500=0 → 跳过 →
 //     客户端每次进页空转(见 token-enrich 的「三门同源」)。这正是 code-review 抓到的坑。
 //
-// **两类无条件保留(判不了 / 不该判):**
+// **三类无条件保留(判不了 / 不该判):**
 //   ① `usdValue` 缺失 —— 老的只带 BalanceLike 的调用点没这个字段,宁可多刷也不错杀。
 //   ② manual 持仓 —— 它的 usdValue 是拿(可能是冷缓存的)现价现造的,`0` 常常只是「还没定价」
 //      而非「不值钱」(选了币但没填价的手记币恒为 0);且手记是用户手挑、数量少,一律刷。
 //      不豁免的话这种币会被当 dust 永不刷价 → 永远显 $0(比 issue 接受的「滞后一轮」更糟)。
+//   ③ 永续仓位(#133)—— 它的 `usdValue` **恒为 0**:仓位不贡献净值(ADR 0010 / #129),
+//      名义敞口住在 meta 里,而这里只看得见 `BalanceLike`。所以对它「按值判尘埃」这件事本身
+//      没有意义,与①同一条理由(判不了就别错杀)。
+//      **不豁免的后果是这一整类永远没有图**:实测 28 个永续币里只有 6 个有图,而那 6 个都是因为
+//      用户在别的账户里也持有它们的现货 —— 图是蹭来的,不是这条路取的。
 // 只在「确知聚合低于阈值」时才跳过。
 export function refreshableTokenIds(
   rows: readonly BalanceLike[],
   threshold = ZERO_DISPLAY_USD,
 ): string[] {
   const absSum = new Map<string, number>();
-  const keep = new Set<string>(); // 无条件保留(usdValue 缺失 / manual)
+  const keep = new Set<string>(); // 无条件保留(usdValue 缺失 / manual / 永续仓位)
   const order: string[] = [];
   for (const b of rows) {
     const id = displayTokenId(b);
     if (!id) continue;
     if (!absSum.has(id) && !keep.has(id)) order.push(id);
-    if (b.usdValue == null || b.platform === MANUAL_CONNECTOR_ID) keep.add(id);
-    else absSum.set(id, (absSum.get(id) ?? 0) + Math.abs(b.usdValue));
+    if (
+      b.usdValue == null ||
+      b.platform === MANUAL_CONNECTOR_ID ||
+      viewKind(b) === "perp_position"
+    ) {
+      keep.add(id);
+    } else absSum.set(id, (absSum.get(id) ?? 0) + Math.abs(b.usdValue));
   }
   return order.filter((id) => keep.has(id) || (absSum.get(id) ?? 0) >= threshold);
 }
