@@ -153,6 +153,15 @@ describe("refreshableTokenIds(刷前跳过 dust)", () => {
     ).toEqual(["tk-perp"]);
   });
 
+  // 无条件保留③:永续仓位行的 `usdValue` **恒为 0**(仓位不贡献净值,名义值住 meta),
+  // 所以按值判尘埃对它没有意义。不豁免的话这一整类永远刷不到 → **永远没有图**
+  // (实测:28 个永续币只有 6 个有图,而那 6 个是因为用户在别处也持有它们的现货,图是蹭来的)。
+  it("永续仓位 → 无条件保留,哪怕 usdValue 是 0(它结构上就是 0)", () => {
+    expect(
+      refreshableTokenIds([{ kind: "perp_position", tokenId: "tk-perp", usdValue: 0 }]),
+    ).toEqual(["tk-perp"]);
+  });
+
   // 无条件保留①:老调用点只带 BalanceLike、没有 usdValue —— 判不了就别错杀。
   it("usdValue 缺失 → 无条件保留(判不了不错杀)", () => {
     expect(refreshableTokenIds([{ kind: "spot", tokenId: "tk-unknown" }])).toEqual(["tk-unknown"]);
