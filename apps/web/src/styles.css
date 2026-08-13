@@ -36,29 +36,6 @@ input:-webkit-autofill:focus {
   caret-color: var(--foreground);
 }
 
-/* 手机上 toast 从顶部出(片2 / #470)。
-   为什么不是「留在底部、抬到 Dock 之上」:底部那一带已经被悬浮 Dock 占着,而同步一轮会连着堆
-   好几条 toast —— 抬高只是把同一个问题往上推几十像素。顶部本来就是原生横幅的位置。
-
-   为什么用选择器覆盖而不是传个 prop:vendored 的 <Toaster> 把位置写死成 bottom-right,在 app 侧
-   没有入口,而它是 registry 装出来的、一个字都不改。这条盯的是它 portal 到 <body> 的那个
-   `<ol aria-live="polite">` —— 结构一变这条就**静默失效**,所以 tests/toast-position.test.tsx
-   把那个形状钉住了(形状变了测试先红,而不是某天有人发现 toast 又跑回底部)。
-
-   没写在 @layer 里是故意的:Tailwind 的 utilities 都在 cascade layer 中,无层 CSS 一律胜出
-   (不必跟 `bottom-6` 比特异性)。
-   位置压在顶栏那条毛玻璃上,与 iOS 通知横幅同款;`env(safe-area-inset-top)` 保证不压刘海。
-   断点走 `theme(--breakpoint-lg)` 而不是写死 64rem:外壳的手机形态(顶栏/Dock 的 `lg:hidden`)
-   就是这条线,写死两处就会在改断点那天静默错开。 */
-@media (width < theme(--breakpoint-lg)) {
-  body > ol[aria-live="polite"] {
-    top: calc(env(safe-area-inset-top) + 0.75rem);
-    bottom: auto;
-    /* 顶部堆叠 → 最新的在最上面。bottom-right 那套是 column-reverse(最新的贴角落 = 在下面)。 */
-    flex-direction: column;
-  }
-}
-
 * {
   box-sizing: border-box;
 }

@@ -1,4 +1,4 @@
-import { Toaster } from "@folio/ui";
+import { Toaster, useMediaQuery } from "@folio/ui";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import type { QueryClient } from "@tanstack/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
@@ -51,6 +51,26 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   shellComponent: RootDocument,
 });
 
+// toast 的落位:手机顶部(叠安全区)、桌面右下角。
+//
+// **为什么不是「留在底部、抬到 Dock 之上」**:底部那一带被悬浮 Dock 占着,而同步一轮会连着堆
+// 好几条 —— 抬高只是把同一个问题往上推几十像素。顶部本来就是原生横幅的位置。
+//
+// `classNames.root` 里那个 top 覆盖 vendored 位置类自带的 `top-4`(它排在位置类之后,twMerge 生效),
+// 叠上 `env(safe-area-inset-top)` → 刘海/灵动岛下不压内容。
+// 断点与外壳的手机形态(顶栏 / Dock 的 `lg:hidden`)对齐,那条线是 64rem。
+function AppToaster() {
+  const isDesktop = useMediaQuery("(min-width: 64rem)");
+  return isDesktop ? (
+    <Toaster />
+  ) : (
+    <Toaster
+      position="top-right"
+      classNames={{ root: "top-[calc(env(safe-area-inset-top)+0.75rem)]" }}
+    />
+  );
+}
+
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { now } = Route.useLoaderData();
   const { data: locale } = useSuspenseQuery(localePreferenceQuery());
@@ -83,7 +103,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           getMessageFallback={({ key }) => key}
         >
           {children}
-          <Toaster />
+          <AppToaster />
         </IntlProvider>
         <TanStackDevtools
           config={{
