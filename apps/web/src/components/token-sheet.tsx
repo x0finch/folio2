@@ -34,7 +34,7 @@ import { GainExplainer } from "./gain-explainer";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { TrendPanel } from "./trend-panel";
 
-// 资产 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
+// 代币 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
 // 头部背景 = 单币【持仓价值】历史(片 2):折线随涨跌走 --pos/--neg,内容浮其上;可切 7d/30d/1y/全部。
 // 来源区是 Platforms / Accounts 两视图的 tab 切换(互为转置):按平台看散在哪些链/场馆,或按账户看散在哪些账户。
 // 窗口切换(RangeTabs)与账户抽屉共用,抽到 ./range-tabs。
@@ -184,7 +184,7 @@ function SourceView({
   );
 }
 
-function AssetSheetContent({ holding }: { holding: Holding }) {
+function TokenSheetContent({ holding }: { holding: Holding }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
   const { token, totalValue, totalAmount, sources } = holding;
@@ -286,7 +286,7 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
   );
 }
 
-export function AssetSheet({
+export function TokenSheet({
   holding,
   open,
   onOpenChange,
@@ -307,7 +307,7 @@ export function AssetSheet({
         ariaLabel={holding?.token.name}
         className="w-full max-w-md overflow-y-auto p-6"
       >
-        {holding && <AssetSheetContent holding={holding} />}
+        {holding && <TokenSheetContent holding={holding} />}
       </Drawer>
     );
   }
@@ -315,7 +315,7 @@ export function AssetSheet({
   return (
     // title 不传:内容头部已渲染代币名,避免 BottomSheet 自带标题区重复。
     <BottomSheet open={open} onOpenChange={onOpenChange} snapPoints={[0.6, 0.92]}>
-      {holding && <AssetSheetContent holding={holding} />}
+      {holding && <TokenSheetContent holding={holding} />}
     </BottomSheet>
   );
 }

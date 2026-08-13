@@ -105,7 +105,7 @@ describe("buildOverview", () => {
     ]);
 
     // 平台 logo:有图的链平台改写成 folio 代理 URL(key 含 `:` → 编码);manual 无图 → undefined
-    //(asset-sheet 对 manual 走 WalletIcon,不请求)。客户端不直引 CoinGecko。
+    //(token-sheet 对 manual 走 WalletIcon,不请求)。客户端不直引 CoinGecko。
     const platformLogos = view.holdings[0].sources.map((s) => s.platform.logo);
     expect(platformLogos).toContain("/api/logo/platform/evm%3A42161");
     expect(platformLogos).toContain(undefined);

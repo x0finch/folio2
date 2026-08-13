@@ -75,7 +75,7 @@ interface AccountTagView {
   name: string;
 }
 
-// 账户详情抽屉(A2):桌面右滑 Drawer、移动 BottomSheet 承载同一份 <DetailBody>(照 asset-sheet 模式)。
+// 账户详情抽屉(A2):桌面右滑 Drawer、移动 BottomSheet 承载同一份 <DetailBody>(照 token-sheet 模式)。
 // 头部 = 账户价值历史图垫底 + 窗口切换 + ⋯ 菜单(同步/归档/删除);点名字内联重命名。全部持仓复用主页组件。
 export function AccountDetailSheet({
   account,
@@ -267,7 +267,7 @@ function DetailBody({
         <div className="relative min-h-44">
           <TrendPanel series={series} loading={historyQuery.isPending} />
 
-          {/* 窗口切换:右下角独占一带(与 asset-sheet 一致)。 */}
+          {/* 窗口切换:右下角独占一带(与 token-sheet 一致)。 */}
           <div className="absolute right-0 bottom-0 z-10">
             <RangeTabs value={range} onChange={setRange} />
           </div>

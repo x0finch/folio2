@@ -3,8 +3,8 @@ import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { buildStack } from "../lib/stack-items";
-import { AssetSheet } from "./asset-sheet";
 import { TokenRowContent } from "./token-row";
+import { TokenSheet } from "./token-sheet";
 
 // 按代币聚合的持仓列表(v2:LogoAvatar + 名称/symbol / 数量 · 价格 / 市值 · 24h;点击行 → 详情抽屉)。
 // hover 高亮由 beUI SharedLayoutBg 的移动滑块承载(行间无分隔线),小额(< DUST_THRESHOLD)折叠进 footer。
@@ -53,16 +53,15 @@ export function TokenHoldings({
   onSelect,
 }: {
   holdings: Holding[];
-  /** 打开的是哪个币(URL 的 `?asset=`)。由首页那层给 —— 见 index.tsx 的 `useAssetParam`。 */
+  /** 打开的是哪个币(URL 的 `?token=`)。由首页那层给 —— 见 index.tsx 的 `useTokenParam`。 */
   selectedKey?: string;
   onSelect: (key: string | undefined) => void;
 }) {
   const t = useTranslations("Overview");
   const [showDust, setShowDust] = useState(false);
-  // 认不出的值(旧链接指向已清空的币、手写乱码)→ 找不到就是没开。回落在这里做,不在 route 的
-  // `validateSearch` 里:那一层收窄的是类型、不过滤值(实测,见 page-tabs.ts 的说明)。
-  // 也**必须在这里**:本组件的两个实例各拿一份 holdings(主列表 / 自定义 Tab),同一个 key
-  // 在哪份里认得出是各自的事。
+  // 认不出的值(旧链接指向已清空的币、手写乱码)→ 找不到就是没开。回落**必须在这里**,不在 route 的
+  // `validateSearch` 里:本组件的两个实例各拿一份 holdings(主列表 / 自定义 Tab),同一个 key
+  // 在哪份里认得出是各自的事,route 层看不到这个。
   const selected = holdings.find((h) => h.key === selectedKey) ?? null;
   // 少于 MIN_FOLD_COUNT 个持仓 → 全展开、不折叠;否则小额行按阈值收进 toggle。
   const canFold = holdings.length >= MIN_FOLD_COUNT;
@@ -103,7 +102,7 @@ export function TokenHoldings({
             {t("smallHoldings", { n: dust.length })} ▸
           </button>
         ))}
-      <AssetSheet
+      <TokenSheet
         holding={selected}
         open={selected != null}
         onOpenChange={(o) => {

@@ -66,14 +66,14 @@ export const Route = createFileRoute("/_authed/")({
   // **这里只校验形状,不校验值** —— 与 insights 的 `dim` 不同(那边合法值是有限集,回落已收进
   // `validateSearch`):这里的合法值含自定义 Tab 的 pin id,是运行时数据,route 层根本不知道有哪些。
   // 所以认不出的值(pin 被删、手写乱码)只能由组件那套 clamp 回落,见下面的 `shownActive`。
-  // `asset` = 打开的代币详情抽屉(哪个币,值是 Holding 的分组键)。同样只校验形状:那个键是
+  // `token` = 打开的代币详情抽屉(哪个币,值是 Holding 的分组键)。同样只校验形状:那个键是
   // 运行时数据(tokenId / `no-token:…`),认不出的由 TokenHoldings 当作没开,见那里的 `selected`。
-  validateSearch: (search: Record<string, unknown>): { tab?: string; asset?: string } => {
+  validateSearch: (search: Record<string, unknown>): { tab?: string; token?: string } => {
     const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : undefined);
-    return { tab: str(search.tab), asset: str(search.asset) };
+    return { tab: str(search.tab), token: str(search.token) };
   },
   // 默认 tab 不写进 URL:`/` 就是 tokens,只有别的 tab 才挂 `?tab=`。交给官方中间件在建地址时统一剥,
-  // 而不是每个导航调用点自己记得把默认值抹成 undefined。(`asset` 没有默认值,不参与。)
+  // 而不是每个导航调用点自己记得把默认值抹成 undefined。(`token` 没有默认值,不参与。)
   search: { middlewares: [stripSearchParams({ tab: DEFAULT_TAB })] },
   // 本页的读取**已全部迁到 react-query**(ADR 0038):loader 只**预取**、不返回任何数据,
   // 组件按选中的组合 id 从缓存读(本文件已无 `useLoaderData`)。
@@ -99,18 +99,18 @@ export const Route = createFileRoute("/_authed/")({
   component: Overview,
 });
 
-// 代币详情抽屉的开合(URL 的 `?asset=`,ADR 0043)。放在本文件里而不是抽成公共 hook:它要用
+// 代币详情抽屉的开合(URL 的 `?token=`,ADR 0043)。放在本文件里而不是抽成公共 hook:它要用
 // **本 route 的** `Route.useSearch`/`useNavigate` —— 全局的 `useSearch({ from })` 目前用不了
 // (`Register` 在 routeTree.gen.ts 与 router.tsx 里各声明了一遍,合并后 from 的路径联合解析成
 // `never`,那是既存问题,不在这一片里动)。两个调用点(主列表 / 自定义 Tab)各调一次,逻辑只写一遍。
-function useAssetParam() {
-  const { asset } = Route.useSearch();
+function useTokenParam() {
+  const { token } = Route.useSearch();
   const navigate = Route.useNavigate();
   // `replace` + `resetScroll: false` 与主 tab 一致:开合抽屉不进后退栈(否则系统返回键变成
   // 「倒放我刚点过的每一下」),也不该把身后的列表弹回顶部。
   const onSelect = (key: string | undefined) =>
-    navigate({ search: (prev) => ({ ...prev, asset: key }), replace: true, resetScroll: false });
-  return { selectedKey: asset, onSelect };
+    navigate({ search: (prev) => ({ ...prev, token: key }), replace: true, resetScroll: false });
+  return { selectedKey: token, onSelect };
 }
 
 // 现货/永续/DeFi 三段的拆解(从某份数据的 sections 里挑出永续项 + DeFi 分组 + 永续权益小计)。
@@ -174,7 +174,7 @@ function Overview() {
     });
   };
 
-  const assetParam = useAssetParam();
+  const tokenParam = useTokenParam();
 
   const { data: tags } = useSuspenseQuery(tagListQuery());
   const { data: pins } = useSuspenseQuery(tabPinsQuery());
@@ -431,7 +431,7 @@ function Overview() {
           ) : holdings.length === 0 ? (
             <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
           ) : (
-            <TokenHoldings holdings={holdings} {...assetParam} />
+            <TokenHoldings holdings={holdings} {...tokenParam} />
           )}
         </div>
       )}
@@ -455,7 +455,7 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
   const tct = useTranslations("CustomTabs");
   const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId, pin));
   const parts = derive(data.sections);
-  const assetParam = useAssetParam();
+  const tokenParam = useTokenParam();
 
   if (data.holdings.length === 0 && parts.perpItems.length === 0 && parts.defiGroups.length === 0) {
     return <p className="py-12 text-center text-muted-foreground text-sm">{tct("empty")}</p>;
@@ -468,7 +468,7 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
           title: t("tokensTab"),
           subtotal: data.holdingsSubtotal,
           count: data.holdings.length,
-          content: <TokenHoldings holdings={data.holdings} {...assetParam} />,
+          content: <TokenHoldings holdings={data.holdings} {...tokenParam} />,
         },
         {
           key: "perps",
