@@ -5,7 +5,8 @@ import { cn } from "@folio/ui";
 // 公认名)区分。asset-sheet 来源行与 perp 场馆子头共用(H5 评审统一)。
 export function AccountName({ name, className }: { name: string; className?: string }) {
   return (
-    <span className={cn("flex min-w-0 items-center", className)}>
+    // select-text:账户名是内容(长按复制是全站唯一的复制途径),不随所在的行/卡片一起不可选。
+    <span className={cn("flex min-w-0 select-text items-center", className)}>
       <span className="truncate">@{name}</span>
     </span>
   );

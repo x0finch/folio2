@@ -7,6 +7,9 @@ import type { SyncStatusSummary } from "../lib/sync-status";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
 
+// iOS Safari 的 `:active` 需要元素挂着触摸监听才生效。提到模块级:身份稳定,不会每次渲染换一个。
+const NOOP = () => {};
+
 const NAVS = [
   { key: "overview", to: "/", icon: Home },
   { key: "accounts", to: "/accounts", icon: Wallet },
@@ -118,9 +121,22 @@ export function AppShell({
               <Link
                 to={to}
                 aria-label={t(key)}
-                className="flex size-full items-center justify-center"
+                // iOS Safari 只在元素(或祖先)挂了触摸监听时才给 `:active` —— 这个空监听就是那把钥匙,
+                // 是这条路子公认的代价。**别删**:删了 iOS 上按下就完全没反应(桌面照旧有)。
+                onTouchStart={NOOP}
+                className="group flex size-full items-center justify-center"
               >
-                <Icon className="size-5" />
+                {/* 按下反馈(片3):触摸屏没有 hover,按下这一下是唯一的即时回应。
+                    **走 CSS `:active`,不用 motion 的 `whileTap`** —— 后者在这个 App 里量不到任何效果:
+                    按住时元素上既没有 transform 也没有内联样式,CDP 查那个元素连一个手势监听都没挂
+                    (vendored Button 用的是同一种写法,同样量不到)。为什么不挂没继续深挖,那是另一条线;
+                    这里要的是「一定看得见」,所以换成层叠这条确定的路。
+                    缩 + 变淡都作用在这层 span 上:`<Link>` 是 44px 命中区,缩它等于按下瞬间把可点范围
+                    也缩了;外面那个 `<DockItem>` 是 registry 装的,它自带的滑动药丸不能碰。
+                    `motion-reduce:` 只去掉过渡,**保留状态变化** —— 减少动态效果不该等于「没有反馈」。 */}
+                <span className="flex transition-[transform,opacity] duration-100 ease-out group-active:scale-[0.82] group-active:opacity-60 motion-reduce:transition-none">
+                  <Icon className="size-5" />
+                </span>
               </Link>
             </DockItem>
           ))}
