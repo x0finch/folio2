@@ -1,6 +1,5 @@
 import {
   Badge,
-  BottomSheet,
   cn,
   Drawer,
   LogoAvatar,
@@ -31,6 +30,7 @@ import {
 } from "../lib/source-groups";
 import { AccountName } from "./account-name";
 import { AvatarStack } from "./avatar-stack";
+import { BottomSheet } from "./bottom-sheet";
 import { GainExplainer } from "./gain-explainer";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { TrendPanel } from "./trend-panel";
@@ -318,7 +318,7 @@ export function AssetSheet({
 
   return (
     // title 不传:内容头部已渲染代币名,避免 BottomSheet 自带标题区重复。
-    <BottomSheet open={open} onOpenChange={onOpenChange} snapPoints={[0.6, 0.92]}>
+    <BottomSheet open={open} onOpenChange={onOpenChange} ariaLabel={holding?.token.name}>
       {holding && <AssetSheetContent holding={holding} />}
     </BottomSheet>
   );

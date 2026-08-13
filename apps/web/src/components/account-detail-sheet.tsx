@@ -2,7 +2,6 @@ import type { ConnectorId } from "@folio/connectors";
 import type { Note } from "@folio/connectors-basic";
 import type { AccountTagLink, Tag } from "@folio/db";
 import {
-  BottomSheet,
   Button,
   cn,
   Drawer,
@@ -39,6 +38,7 @@ import { removeAccount, updateAccount } from "../lib/server/accounts";
 import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
 import { AccountTagsModal } from "./account-tags-modal";
+import { BottomSheet } from "./bottom-sheet";
 import { ConnectorBadge } from "./connector-badge";
 import { EditableName } from "./editable-name";
 import { GainExplainer } from "./gain-explainer";
@@ -127,7 +127,7 @@ export function AccountDetailSheet({
   }
   // title 不传:内容头部已渲染账户名,避免 BottomSheet 自带标题区重复。
   return (
-    <BottomSheet open={open} onOpenChange={onOpenChange} snapPoints={[0.6, 0.92]}>
+    <BottomSheet open={open} onOpenChange={onOpenChange} ariaLabel={account?.label}>
       {body}
     </BottomSheet>
   );
