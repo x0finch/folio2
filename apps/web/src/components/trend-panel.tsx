@@ -65,6 +65,7 @@ export function TrendPanel({
   topMargin = CHART_TOP_MARGIN,
   fillOpacity = CHART_FILL_OPACITY,
   decorate = false,
+  onActive,
 }: {
   series: readonly HistoryPoint[];
   /** 还在取数 —— 此时什么都不渲染,否则会闪一下空态文案再被图盖掉。 */
@@ -76,6 +77,8 @@ export function TrendPanel({
    * 才允许开**(hero:无持仓且总额 0)。判据留给调用方 —— 那是它的领域知识,不是这一层的。
    */
   decorate?: boolean;
+  /** 划动/悬停读数(片7):把当前点报给调用方,由它顶替上方那个大数字。 */
+  onActive?: (point: HistoryPoint | null) => void;
 }) {
   // 一个点连不成线。门槛只在这里写一次。
   if (series.length >= 2) {
@@ -83,7 +86,12 @@ export function TrendPanel({
     // (账户抽屉左上角那个铅笔角标就吃过这个)。图本身是 absolute inset-0,套一层不改几何。
     return (
       <div className="absolute inset-0 overflow-hidden">
-        <ValueTrendChart series={[...series]} topMargin={topMargin} fillOpacity={fillOpacity} />
+        <ValueTrendChart
+          series={[...series]}
+          topMargin={topMargin}
+          fillOpacity={fillOpacity}
+          onActive={onActive}
+        />
       </div>
     );
   }
