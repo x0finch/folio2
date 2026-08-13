@@ -19,6 +19,13 @@ const en = {
   Sidebar: {
     selfHosted: "Self-hosted",
   },
+  // 下拉刷新(片10):手机端在列表顶部往下拉触发同步。
+  PullToRefresh: {
+    pull: "Pull to sync",
+    release: "Release to sync",
+    refreshing: "Syncing…",
+    region: "Portfolio content, pull down to sync",
+  },
   Insights: {
     allocation: "Allocation",
     byToken: "By token",
@@ -423,6 +430,12 @@ const zh: Messages = {
   },
   Sidebar: {
     selfHosted: "自托管",
+  },
+  PullToRefresh: {
+    pull: "下拉同步",
+    release: "松手同步",
+    refreshing: "同步中…",
+    region: "组合内容,下拉可同步",
   },
   Insights: {
     allocation: "分配",

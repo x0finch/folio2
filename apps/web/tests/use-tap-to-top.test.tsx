@@ -13,7 +13,7 @@ import { useTapToTop } from "../src/lib/hooks/use-tap-to-top";
 
 function mountScroller(overflowY: string) {
   const el = document.createElement("div");
-  el.setAttribute("data-scroll-restoration-id", APP_SCROLL_ID);
+  el.className = APP_SCROLL_ID;
   el.style.overflowY = overflowY;
   document.body.appendChild(el);
   const scrollTo = vi.fn();

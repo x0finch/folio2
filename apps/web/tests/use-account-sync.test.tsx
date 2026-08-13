@@ -240,6 +240,56 @@ describe("useAccountSync", () => {
     );
   });
 
+  // 下拉刷新那个组件会 `await onRefresh()` 再决定什么时候收回指示器(片10)。
+  // 拿即发即忘的 `sync` 喂给它,回调会**立刻** resolve —— 指示器先收回、下一帧因为 refreshing
+  // 变真又弹出来,表现成可见的抖一下。所以那条路必须用「等这一轮真结束」的变体。
+  it("syncAsync 等这一轮真的结束才 resolve(下拉刷新的指示器靠它才不抖)", async () => {
+    let releaseFetch: (() => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await new Promise<void>((resolve) => {
+          releaseFetch = resolve;
+        });
+        return ndjsonResponse([{ accountId: "a1" }, { accountId: "a2" }, { done: true }]);
+      }),
+    );
+    const { result } = setup();
+
+    let settled = false;
+    const pending = result.current.syncAsync().then(() => {
+      settled = true;
+    });
+
+    // 请求还挂着 → 一定还没 resolve。
+    await waitFor(() => expect(result.current.busy).toBe(true));
+    expect(settled).toBe(false);
+
+    releaseFetch?.();
+    await pending;
+    expect(settled).toBe(true);
+    // 这时候「在飞」已经落下去了 —— 指示器可以放心收回。
+    await waitFor(() => expect(result.current.busy).toBe(false));
+  });
+
+  it("syncAsync 在失败时也 resolve(错误已经由 toast 报过,别让调用方再 catch 一遍)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("nope", { status: 500 })),
+    );
+    const { result } = setup();
+    await expect(result.current.syncAsync()).resolves.toBeUndefined();
+    expect(toasts.some((t) => t.level === "error")).toBe(true);
+  });
+
+  it("没有账户 → syncAsync 直接 resolve、不发请求", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { result } = setup([]);
+    await result.current.syncAsync();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("在飞期间 busy 为 true,且重复点不会再发一次", async () => {
     let release: (() => void) | undefined;
     const gate = new Promise<void>((r) => {

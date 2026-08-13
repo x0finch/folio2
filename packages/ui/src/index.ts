@@ -48,6 +48,7 @@ export {
   type PopoverProps,
   PopoverTrigger,
 } from "./components/motion/popover";
+export { PullToRefresh, type PullToRefreshProps } from "./components/motion/pull-to-refresh";
 export {
   Select,
   SelectContent,

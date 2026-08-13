@@ -21,7 +21,7 @@ function fakeRoutes() {
 }
 
 function mountScroller(): HTMLElement {
-  document.body.innerHTML = `<div data-scroll-restoration-id="${APP_SCROLL_ID}"></div>`;
+  document.body.innerHTML = `<div class="${APP_SCROLL_ID}"></div>`;
   const el = document.querySelector<HTMLElement>(APP_SCROLL_SELECTOR);
   if (!el) throw new Error("fixture did not mount");
   return el;
@@ -61,7 +61,7 @@ describe("locationKey", () => {
 // 只写一次会「看起来成功了」而位置差一截。jsdom 不夹,所以这里造一个会夹的容器。
 function clampingScroller(maxScroll: { value: number }) {
   const el = document.createElement("div");
-  el.setAttribute("data-scroll-restoration-id", APP_SCROLL_ID);
+  el.className = APP_SCROLL_ID;
   let top = 0;
   Object.defineProperty(el, "scrollTop", {
     get: () => top,

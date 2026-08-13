@@ -99,5 +99,23 @@ export function useAccountSync(accounts: { id: string; label: string }[]) {
       if (disabled) return;
       mutation.mutate();
     },
+    /**
+     * 同上,但**等这一轮真的结束**才 resolve(片10)。
+     *
+     * 下拉刷新那个组件会 `await onRefresh()` 再决定什么时候收回指示器 —— 拿即发即忘的 `sync`
+     * 喂给它,回调会立刻 resolve,指示器于是先收回、下一帧因为 `refreshing` 变真又弹出来,
+     * 表现成可见的抖一下。
+     *
+     * 失败不往外抛:错误已经由 `onError` 弹了 toast,再抛一次只会让调用方多写一段 catch
+     * 去处理「已经处理过的错误」。
+     */
+    syncAsync: async () => {
+      if (disabled) return;
+      try {
+        await mutation.mutateAsync();
+      } catch {
+        // onError 已经报过了。
+      }
+    },
   };
 }

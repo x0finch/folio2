@@ -1,4 +1,4 @@
-import { cn, Dock, DockItem, SharedLayoutBg } from "@folio/ui";
+import { cn, Dock, DockItem, PullToRefresh, SharedLayoutBg, useMediaQuery } from "@folio/ui";
 import { SPRING_PRESS } from "@folio/ui/lib/ease";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, Settings, Wallet } from "lucide-react";
@@ -6,8 +6,10 @@ import { motion, useMotionValue, useReducedMotion } from "motion/react";
 import { type ReactNode, useRef } from "react";
 import { useTranslations } from "use-intl";
 import { APP_SCROLL_ID } from "../lib/app-scroll";
+import { useAccountSync } from "../lib/hooks/use-account-sync";
 import { useAppScrollMemory } from "../lib/hooks/use-app-scroll-memory";
 import { useBackgroundScale } from "../lib/hooks/use-background-scale";
+import { useIsScrollLocked } from "../lib/hooks/use-scroll-lock";
 import { useTapToTop } from "../lib/hooks/use-tap-to-top";
 import { SheetProgressProvider } from "../lib/sheet-progress";
 import type { SyncStatusSummary } from "../lib/sync-status";
@@ -47,9 +49,18 @@ export function AppShell({
   const shellRef = useRef<HTMLDivElement>(null);
   const sheetProgress = useMotionValue(0);
   useBackgroundScale(shellRef, sheetProgress);
+  // 下拉刷新(片10):滚动容器已经由片1 挪进来了,所以这一片就是「把 registry 那个组件套上」。
+  // 桌面不给(那边滚整页,鼠标也不需要这个手势);抽屉开着时也不给 —— 否则和抽屉自己的下拉手势抢。
+  // 「抽屉开着」取的是**锁**(打开那一刻同步置上),不是抽屉的动画进度:用进度的话,
+  // 开场那几帧进度还是 0,那几帧里下拉仍然是活的。
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const sheetOpen = useIsScrollLocked();
+  // 同步入口与页头那个共用同一份账户清单(syncStatus 已经带着),不另拉一次。
+  const { busy: syncing, disabled: syncDisabled, syncAsync } = useAccountSync(syncStatus.accounts);
   const t = useTranslations("Nav");
   const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
+  const tp = useTranslations("PullToRefresh");
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
   const activeNav = NAVS.find((n) => isActive(n.to)) ?? NAVS[0];
@@ -125,26 +136,38 @@ export function AppShell({
             <span className="font-semibold text-lg tracking-tight">folio</span>
           </header>
 
-          {/* 手机端的滚动容器(ADR 0042)。三件事挂在这一个元素上:
-            ① `data-scroll-restoration-id` —— router 按它存/取滚动位置(切页回来还在原处)。
-               没这个属性它会退化成一条按 DOM 位置算出来的 CSS 路径选择器,渲染结构一变就失配。
-               `useScrollLock` 也用同一个属性找容器,一个属性两用。
-            ② `overscroll-contain` —— 容器内滚到头不把回弹传给整页(body 上的
-               `overscroll-behavior: none` 照旧留着,它挡的是整页那一层)。
-            ③ lg 上 overflow 还回 visible → 桌面滚整页,`useScrollLock` 在那儿自动成空操作。
-            relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
-          <main
-            data-scroll-restoration-id={APP_SCROLL_ID}
-            className="relative mx-auto w-full max-w-5xl flex-1 overflow-y-auto overscroll-contain px-4 pt-6 pb-28 lg:overflow-visible lg:px-8 lg:pb-10"
+          {/* 手机端的滚动容器,现在由 `<PullToRefresh>` 渲染的那个 `<section>` 充当(片10)。
+              它**必须自己是滚动容器**:手势判据是 `root.scrollTop > 0` —— 套在别的滚动容器里面
+              这个值恒为 0,页面任何位置往下拉都会触发。所以片1 那个容器的角色整个交给它,
+              标记类名跟着搬过来(它只收 `className`、不收任意属性,理由写在 lib/app-scroll)。
+              它自带 `overflow-y-auto overscroll-contain`,与片1 要的一致;`lg:overflow-visible`
+              覆盖前者 → 桌面照旧滚整页、`useScrollLock` 在那儿自动成空操作。
+              `bg-transparent` 覆盖它自带的 `bg-background`:外壳自己有底,再铺一层会盖住桌面侧栏那侧的分界。
+              relative:作页面级 <HeaderSync/> 的定位上下文。 */}
+          <PullToRefresh
+            onRefresh={syncAsync}
+            refreshing={syncing}
+            disabled={isDesktop || syncDisabled || sheetOpen}
+            pullingLabel={tp("pull")}
+            releaseLabel={tp("release")}
+            refreshingLabel={tp("refreshing")}
+            ariaLabel={tp("region")}
+            className={cn(
+              APP_SCROLL_ID,
+              "relative mx-auto w-full max-w-5xl flex-1 bg-transparent px-4 pt-6 pb-28 lg:overflow-visible lg:px-8 lg:pb-10",
+            )}
           >
-            {/* Portfolio 选择器 = 标题上方的小 badge(eyebrow);Settings 页不显示。 */}
-            <PageHeader
-              title={pageTitle}
-              subtitle={pageSub}
-              eyebrow={activeNav.key !== "settings" ? selector : null}
-            />
-            {children}
-          </main>
+            {/* <main> 挪到里面:它是「这一页的内容」这个语义,不再兼滚动容器那个角色。 */}
+            <main>
+              {/* Portfolio 选择器 = 标题上方的小 badge(eyebrow);Settings 页不显示。 */}
+              <PageHeader
+                title={pageTitle}
+                subtitle={pageSub}
+                eyebrow={activeNav.key !== "settings" ? selector : null}
+              />
+              {children}
+            </main>
+          </PullToRefresh>
         </div>
 
         {/* 移动底部悬浮 Dock 导航;底部偏移叠加 safe-area-inset-bottom,不被指示条压(定位/居中不变)。 */}
