@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
 import { APP_SCROLL_ID } from "../lib/app-scroll";
 import { useAppScrollMemory } from "../lib/hooks/use-app-scroll-memory";
+import { useTapToTop } from "../lib/hooks/use-tap-to-top";
 import type { SyncStatusSummary } from "../lib/sync-status";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
@@ -37,6 +38,7 @@ export function AppShell({
   // 每个 tab 记住自己滚到哪了(切走再回来停在原处、第一次进落顶部)。外壳拥有滚动容器,
   // 所以这件事挂在这里;为什么不能只靠 router 见 hook 顶部。
   useAppScrollMemory();
+  const tapToTop = useTapToTop();
   const reduce = useReducedMotion() ?? false;
   const t = useTranslations("Nav");
   const th = useTranslations("PageHeader");
@@ -139,6 +141,8 @@ export function AppShell({
               <Link
                 to={to}
                 aria-label={t(key)}
+                // 再点当前 tab → 滚回顶部、不导航(片4)。非当前 tab 照常切页。
+                onClick={tapToTop(isActive(to))}
                 className="flex size-full items-center justify-center"
               >
                 {/* 按下反馈(片3):触摸屏没有 hover,按下这一下是唯一的即时回应。
