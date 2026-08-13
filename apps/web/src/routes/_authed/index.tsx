@@ -22,6 +22,7 @@ import { PortfolioHero } from "../../components/portfolio-hero";
 import { QueryBoundary } from "../../components/query-boundary";
 import { SectionList } from "../../components/section-list";
 import { ListSkeleton, OverviewSkeleton } from "../../components/skeletons";
+import { TabPanel } from "../../components/tab-panel";
 import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-picker";
 import { TokenHoldings } from "../../components/token-holdings";
 import { useConnectorLabels } from "../../hooks/use-connector-labels";
@@ -375,29 +376,32 @@ function Overview() {
             </span>
           </div>
 
-          {/* 内容:自定义 pin → section list(按小计倒序竖排);视角 → 单类列表。 */}
-          {isPinView && pinScope ? (
-            <QueryBoundary
-              key={activePin.id}
-              resetKey={pinBoundaryKey}
-              pending={<ListSkeleton />}
-              failed={
-                <p className="py-12 text-center text-muted-foreground text-sm">
-                  {tct("actionFailed")}
-                </p>
-              }
-            >
-              <PinContent portfolioId={selectedId} pin={pinScope} />
-            </QueryBoundary>
-          ) : activeKind === "perps" ? (
-            <PerpPositionsList items={kind.perpItems} />
-          ) : activeKind === "defi" ? (
-            <DefiPositions groups={kind.defiGroups} hideHeader />
-          ) : holdings.length === 0 ? (
-            <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
-          ) : (
-            <TokenHoldings holdings={holdings} />
-          )}
+          {/* 内容:自定义 pin → section list(按小计倒序竖排);视角 → 单类列表。
+              <TabPanel> 只给这一块做淡入淡出(片6)—— tab 条与外壳都在它外面,不受影响。 */}
+          <TabPanel tabKey={shownActive}>
+            {isPinView && pinScope ? (
+              <QueryBoundary
+                key={activePin.id}
+                resetKey={pinBoundaryKey}
+                pending={<ListSkeleton />}
+                failed={
+                  <p className="py-12 text-center text-muted-foreground text-sm">
+                    {tct("actionFailed")}
+                  </p>
+                }
+              >
+                <PinContent portfolioId={selectedId} pin={pinScope} />
+              </QueryBoundary>
+            ) : activeKind === "perps" ? (
+              <PerpPositionsList items={kind.perpItems} />
+            ) : activeKind === "defi" ? (
+              <DefiPositions groups={kind.defiGroups} hideHeader />
+            ) : holdings.length === 0 ? (
+              <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
+            ) : (
+              <TokenHoldings holdings={holdings} />
+            )}
+          </TabPanel>
         </div>
       )}
     </div>
