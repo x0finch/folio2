@@ -35,6 +35,15 @@ function ActivePointReporter({ onActive }: { onActive: (point: HistoryPoint | nu
   useEffect(() => {
     onActive(point);
   }, [point, onActive]);
+  // 图自己被卸掉时要清一次 —— 否则调用方那个大数字会永远停在一个历史值上。
+  // 真会发生:正划着的时候切时间窗,新窗口点数不够两点 → TrendPanel 换成空态、这张图整个卸载,
+  // 「移出」那一下于是永远不会到来。
+  useEffect(
+    () => () => {
+      onActive(null);
+    },
+    [onActive],
+  );
   return null;
 }
 
