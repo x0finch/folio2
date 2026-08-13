@@ -30,6 +30,7 @@ export { Fab, fabVariants } from "./components/fab";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";
+export type { ToastClassNames, ToastPosition } from "./components/motion/animated-toast-stack";
 export { BottomSheet, type BottomSheetProps } from "./components/motion/bottom-sheet";
 export {
   BouncyAccordion,

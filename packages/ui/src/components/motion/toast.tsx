@@ -5,7 +5,13 @@
 import { AlertCircle, Bell, Check, Info, LoaderCircle, type LucideIcon, X } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { cn } from "@folio/ui/lib/utils";
-import { type AnimatedToast, AnimatedToastStack, type ToastStatus } from "./animated-toast-stack";
+import {
+  type AnimatedToast,
+  AnimatedToastStack,
+  type ToastClassNames,
+  type ToastPosition,
+  type ToastStatus,
+} from "./animated-toast-stack";
 import { getServerSnapshot, getSnapshot, remove, subscribe, toast } from "./toast-store";
 
 export { toast };
@@ -78,14 +84,25 @@ function renderToast(t: AnimatedToast) {
   );
 }
 
-export function Toaster() {
+// 落位由**调用方**决定(#470 片2):手机上 toast 要在顶部,不然跟底部悬浮 Dock 抢地方,
+// 而同步一轮会连着堆好几条。这里只把 vendored stack 的入口透出来,不在这一层判断断点 ——
+// 「这个 App 的 toast 该落哪儿」是应用的排版决定,不是这个出口的。
+export function Toaster({
+  position = "bottom-right",
+  classNames,
+}: {
+  position?: ToastPosition;
+  /** 透给 vendored stack;`root` 排在它自带的位置类之后,所以能覆盖(twMerge)。 */
+  classNames?: ToastClassNames;
+} = {}) {
   const list = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   return (
     <AnimatedToastStack
       toasts={list}
       onDismiss={remove}
-      position="bottom-right"
+      position={position}
       placement="fixed"
+      classNames={classNames}
       renderToast={renderToast}
     />
   );
