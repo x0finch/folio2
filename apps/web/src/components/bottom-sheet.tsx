@@ -17,6 +17,7 @@ import {
 } from "react";
 import { nearestSnap, SHEET_MAX_HEIGHT, snapOffsets } from "../lib/bottom-sheet-snap";
 import { useScrollLock } from "../lib/hooks/use-scroll-lock";
+import { useSheetProgress } from "../lib/sheet-progress";
 import { Portal } from "./portal";
 
 // 移动端底部抽屉(片8 / ADR 0041)。自己写,不引 vaul —— vaul 依赖 @radix-ui/react-dialog,
@@ -67,6 +68,30 @@ export function BottomSheet({
 
   // 打开时锁住背后那个滚动容器(片1 的 hook,锁的是容器不是 body)。
   useScrollLock(open);
+
+  // 上滑进度喂给外壳去缩放(片9)。**同一个 y 驱动三件事** —— 抽屉位置、遮罩透明度、背景缩放,
+  // 所以它们天然同步:松手到位时一起停,不需要各自补一段动画。
+  const progress = useSheetProgress();
+  useEffect(() => {
+    if (!open || maxHeight === 0) {
+      progress.set(0);
+      return;
+    }
+    const push = (value: number) => {
+      // 开场那一下的起点是 `y: "100%"`(百分号,motion 还没换算成 px)—— `Number("100%")` 是 NaN。
+      // 不判这一下就会把 NaN 灌给外壳,`scale(NaN)` 被浏览器整条丢掉:**表现是「缩放没生效」而不报错**。
+      const px = Number(value);
+      if (!Number.isFinite(px)) return;
+      progress.set(1 - Math.min(1, Math.max(0, px / maxHeight)));
+    };
+    push(y.get());
+    const stop = y.on("change", push);
+    return () => {
+      stop();
+      // 关掉/卸载时必须归零:外壳那一层看到 0 才会把 transform **彻底删掉**(而不是留个恒等缩放)。
+      progress.set(0);
+    };
+  }, [open, maxHeight, progress, y]);
 
   // 顶格高度随视口变(键盘弹起 / 旋转)→ 重量一次,各档目标跟着重算。
   useEffect(() => {
