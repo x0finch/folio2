@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { APP_SCROLL_ID, APP_SCROLL_SELECTOR } from "../src/lib/app-scroll";
 import { locationKey, trackAppScroll } from "../src/lib/hooks/use-app-scroll-memory";
 
@@ -53,6 +53,85 @@ describe("locationKey", () => {
     expect(locationKey({ pathname: "/accounts", searchStr: "?q=a" })).toBe(
       locationKey({ pathname: "/accounts", searchStr: "?q=a" }),
     );
+  });
+});
+
+// 容器**此刻不够高**时,浏览器会把 scrollTop 夹小。切页内 tab 那一瞬正是这种状态
+// (旧面板在淡出、新面板还没挂上,片6),列表还在取数时也一样。所以还原要重试几帧 ——
+// 只写一次会「看起来成功了」而位置差一截。jsdom 不夹,所以这里造一个会夹的容器。
+function clampingScroller(maxScroll: { value: number }) {
+  const el = document.createElement("div");
+  el.setAttribute("data-scroll-restoration-id", APP_SCROLL_ID);
+  let top = 0;
+  Object.defineProperty(el, "scrollTop", {
+    get: () => top,
+    set: (v: number) => {
+      top = Math.min(v, maxScroll.value);
+    },
+  });
+  document.body.appendChild(el);
+  return el;
+}
+
+describe("trackAppScroll 的还原重试", () => {
+  it("容器暂时矮 → 下一帧撑起来后仍然还原到位", () => {
+    const max = { value: 1000 };
+    const el = clampingScroller(max);
+    const routes = fakeRoutes();
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => {
+        frames.push(cb);
+        return frames.length;
+      });
+    const stop = trackAppScroll(el, routes.subscribe, "/");
+
+    el.scrollTop = 420;
+    el.dispatchEvent(new Event("scroll"));
+    routes.navigateTo("/other");
+
+    // 换 tab 那一瞬:容器只剩 100 高 → 回来时先被夹到 100。
+    max.value = 100;
+    routes.navigateTo("/");
+    expect(el.scrollTop).toBe(100);
+
+    // 新面板挂上、容器恢复高度 → 重试那一帧把位置补回去。
+    max.value = 1000;
+    frames.shift()?.(0);
+    expect(el.scrollTop).toBe(420);
+
+    stop();
+    raf.mockRestore();
+  });
+
+  it("一直不够高也会停下来,不无限重试", () => {
+    const max = { value: 100 };
+    const el = clampingScroller(max);
+    const routes = fakeRoutes();
+    let scheduled = 0;
+    const raf = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => {
+        scheduled += 1;
+        // 立即跑,模拟「帧一直来,但容器一直矮」。
+        cb(0);
+        return scheduled;
+      });
+    const stop = trackAppScroll(el, routes.subscribe, "/");
+
+    el.scrollTop = 100;
+    el.dispatchEvent(new Event("scroll"));
+    max.value = 1000;
+    el.scrollTop = 900;
+    el.dispatchEvent(new Event("scroll"));
+    routes.navigateTo("/other");
+    max.value = 100; // 永远补不上
+    routes.navigateTo("/");
+
+    expect(scheduled).toBeLessThanOrEqual(3);
+    stop();
+    raf.mockRestore();
   });
 });
 
