@@ -1,14 +1,14 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { APP_SCROLL_ID, APP_SCROLL_SELECTOR } from "../src/lib/app-scroll";
-import { useScrollLock } from "../src/lib/hooks/use-scroll-lock";
+import { useIsScrollLocked, useScrollLock } from "../src/lib/hooks/use-scroll-lock";
 
 // 锁的是**那个容器**,不是 body(ADR 0042)。手机上滚动已经挪进容器,锁 body 的 overflow
 // 什么也不锁 —— 所以这里盯三件事:锁/解锁、多个调用者叠加、卸载时恢复。
 // 手势与布局不在 jsdom 里验(没有布局、没有指针),那部分靠真机。
 
 function mountContainer(overflowY: string): HTMLElement {
-  document.body.innerHTML = `<div data-scroll-restoration-id="${APP_SCROLL_ID}"></div>`;
+  document.body.innerHTML = `<div class="${APP_SCROLL_ID}"></div>`;
   const el = document.querySelector<HTMLElement>(APP_SCROLL_SELECTOR);
   if (!el) throw new Error("fixture did not mount");
   // 容器是不是滚动容器由 CSS 说(手机 auto / 桌面 visible);jsdom 里用内联样式立这个事实。
@@ -73,5 +73,38 @@ describe("useScrollLock", () => {
   it("页面上没有滚动容器(登录页 / 锁屏)→ 不炸", () => {
     const { unmount } = renderHook(() => useScrollLock(true));
     expect(() => unmount()).not.toThrow();
+  });
+});
+
+// 「现在有没有东西锁着」这个布尔要能被别人读到:下拉刷新靠它在抽屉打开时让位(片10)。
+// **判据取锁而不是抽屉的动画进度** —— 锁是打开那一刻同步置上的,不用等任何一帧动画;
+// 用进度的话开场那几帧进度还是 0,那几帧里下拉是活的。
+describe("useIsScrollLocked", () => {
+  it("没人锁 → false;锁上 → true;全松开 → 回到 false", () => {
+    mountContainer("auto");
+    const probe = renderHook(() => useIsScrollLocked());
+    expect(probe.result.current).toBe(false);
+
+    const sheet = renderHook(() => useScrollLock(true));
+    expect(probe.result.current).toBe(true);
+
+    sheet.unmount();
+    expect(probe.result.current).toBe(false);
+    probe.unmount();
+  });
+
+  it("两个锁定者:先松开一个仍然是 true", () => {
+    mountContainer("auto");
+    const probe = renderHook(() => useIsScrollLocked());
+    const first = renderHook(() => useScrollLock(true));
+    const second = renderHook(() => useScrollLock(true));
+    expect(probe.result.current).toBe(true);
+
+    first.unmount();
+    expect(probe.result.current).toBe(true);
+
+    second.unmount();
+    expect(probe.result.current).toBe(false);
+    probe.unmount();
   });
 });
