@@ -40,15 +40,11 @@ export function AppShell({
   // 所以这件事挂在这里;为什么不能只靠 router 见 hook 顶部。
   useAppScrollMemory();
   const tapToTop = useTapToTop();
-<<<<<<< HEAD
-=======
-  const reduce = useReducedMotion() ?? false;
   // 抽屉上滑时整屏往后收一层(片9)。进度由抽屉写、这里订阅 —— 抽屉 portal 到 body,
   // 两边在 React 树里离得远,共享一个 motion value 是唯一不牵动整棵树的传法。
   const shellRef = useRef<HTMLDivElement>(null);
   const sheetProgress = useMotionValue(0);
   useBackgroundScale(shellRef, sheetProgress);
->>>>>>> 58c8104 (feat(web): the background shrinks back as the sheet is pulled up)
   const t = useTranslations("Nav");
   const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
@@ -63,34 +59,17 @@ export function AppShell({
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
 
   return (
-<<<<<<< HEAD
-    // 手机:外壳定高、内容在下面那个框里滚(ADR 0042)—— 顶栏因此是真正不动的一条,而不是靠 sticky
-    // 跟着滚。桌面**故意**还滚整页(侧滑 Drawer 锁背景靠的是 body 的 overflow),所以 lg 上把高度与
-    // overflow 全还回去。两种模型并存是有意的,不是没改完。
-    //
-    // 高度取 **`h-full`(百分比)**,不是 `100svh` 也不是 `fixed inset-0` —— 那两个真机上都错:
-    // iOS 独立窗口(standalone + `viewport-fit=cover`)首帧报的视口偏短(实测 screen 852 而 inH 793),
-    // 照那个数排就会在屏幕底部留一条填不满的空白、悬浮 Dock 贴在那条假底边上方,手指滑一下 iOS 才纠正。
-    // 百分比顺着 `html/body/#app` 的百分比链走,那条链首帧就是整屏 —— main 不出这个毛病也是因为
-    // 它的高度来自这条链。`styles.css` 里把那三层的 `height: 100%` 补齐了。
-    <div className="flex h-full flex-col overflow-hidden lg:h-auto lg:min-h-svh lg:flex-row lg:overflow-visible">
-      {/* 桌面常驻左侧栏 */}
-      <aside className="hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto">
-        <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-5">
-          <Logo className="size-6 shrink-0" />
-          <span className="font-semibold text-lg tracking-tight">folio</span>
-        </div>
-=======
     // Provider 包在外壳**外面**:抽屉 portal 到 body,但在 React 树里是这里的后代 → 它读得到
     // 这个进度值,而外壳自己订阅的是同一个值(直接传参,不经 context —— 它在 Provider 外面)。
     <SheetProgressProvider progress={sheetProgress}>
-      {/* 手机:外壳固定一屏高、内容在下面那个框里滚(ADR 0042)—— 顶栏因此是真正不动的一条,
-          而不是靠 sticky 跟着滚。桌面**故意**还滚整页(侧滑 Drawer 锁背景靠的是 body 的 overflow),
-          所以 lg 上把高度与 overflow 全还回去。两种模型并存是有意的,不是没改完。
+      {/* 手机:外壳定高、内容在下面那个框里滚(ADR 0042)—— 顶栏因此是真正不动的一条,而不是靠
+          sticky 跟着滚。桌面**故意**还滚整页,所以 lg 上把高度与 overflow 全还回去。
+          高度取 `h-full`(百分比链)而不是 `100svh`:iOS 独立窗口首帧报的视口偏短,照那个数排会在
+          屏幕底部留一条填不满的空白(实测 screen 852 而 inH 793),详见 styles.css 那段注释。
           ref:抽屉上滑时缩的就是这一层(片9)—— Dock 在它里面,所以跟着一起收,那是原生的样子。 */}
       <div
         ref={shellRef}
-        className="flex h-svh flex-col overflow-hidden lg:h-auto lg:min-h-svh lg:flex-row lg:overflow-visible"
+        className="flex h-full flex-col overflow-hidden lg:h-auto lg:min-h-svh lg:flex-row lg:overflow-visible"
       >
         {/* 桌面常驻左侧栏 */}
         <aside className="hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto">
@@ -98,7 +77,6 @@ export function AppShell({
             <Logo className="size-6 shrink-0" />
             <span className="font-semibold text-lg tracking-tight">folio</span>
           </div>
->>>>>>> 58c8104 (feat(web): the background shrinks back as the sheet is pulled up)
 
           <nav className="mt-4">
             <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-lg bg-muted">
@@ -168,27 +146,6 @@ export function AppShell({
           </main>
         </div>
 
-<<<<<<< HEAD
-      {/* 移动底部悬浮 Dock 导航;底部偏移叠加 safe-area-inset-bottom,不被指示条压(定位/居中不变)。 */}
-      <nav className="-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden">
-        <Dock>
-          {NAVS.map(({ key, to, icon: Icon }) => (
-            <DockItem key={key} active={isActive(to)}>
-              <Link
-                to={to}
-                aria-label={t(key)}
-                // 再点当前 tab → 滚回顶部、不导航(片4)。非当前 tab 照常切页。
-                onClick={tapToTop(isActive(to))}
-                className="flex size-full items-center justify-center"
-              >
-                <Icon className="size-5" />
-              </Link>
-            </DockItem>
-          ))}
-        </Dock>
-      </nav>
-    </div>
-=======
         {/* 移动底部悬浮 Dock 导航;底部偏移叠加 safe-area-inset-bottom,不被指示条压(定位/居中不变)。 */}
         <nav className="-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden">
           <Dock>
@@ -201,17 +158,7 @@ export function AppShell({
                   onClick={tapToTop(isActive(to))}
                   className="flex size-full items-center justify-center"
                 >
-                  {/* 按下反馈(片3):触摸屏没有 hover,按下这一下是唯一的即时回应。
-                    用 motion 的 whileTap 而不是 CSS `:active` —— iOS Safari 只在元素挂了触摸
-                    监听时才给 `:active`,whileTap 走 pointer 事件,不用那个偏方。
-                    缩的是图标这一层,不碰 <Link> 自己的命中区,也不碰 vendored Dock 的药丸。 */}
-                  <motion.span
-                    whileTap={reduce ? undefined : { scale: 0.86 }}
-                    transition={SPRING_PRESS}
-                    className="flex"
-                  >
-                    <Icon className="size-5" />
-                  </motion.span>
+                  <Icon className="size-5" />
                 </Link>
               </DockItem>
             ))}
@@ -219,6 +166,5 @@ export function AppShell({
         </nav>
       </div>
     </SheetProgressProvider>
->>>>>>> 58c8104 (feat(web): the background shrinks back as the sheet is pulled up)
   );
 }
