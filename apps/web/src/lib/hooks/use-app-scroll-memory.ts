@@ -32,6 +32,10 @@ export function locationKey(location: { pathname: string; searchStr: string }): 
   return location.pathname + location.searchStr;
 }
 
+// 还原最多重试几帧。三帧(约 50ms)够覆盖「面板换手」那一瞬与紧接着的一次布局;再多就会跟
+// 用户自己的滚动抢方向盘。
+const RESTORE_FRAMES = 3;
+
 // 纯机制:容器 + 一个「路由渲染完了」的订阅口 + 当前位置的键。React 那点壳在下面。
 // 记忆挂在这次调用的闭包里(不是模块级)—— 锁屏会把整个 App 卸掉再装回来,那时该重新开始。
 export function trackAppScroll(
@@ -41,19 +45,33 @@ export function trackAppScroll(
 ): () => void {
   const remembered = new Map<string, number>();
   let current = initialKey;
+  let frame: number | null = null;
 
   const onScroll = () => {
     remembered.set(current, el.scrollTop);
   };
   el.addEventListener("scroll", onScroll, { passive: true });
 
+  // 还原**要重试几帧**。写下去没到位只有一个原因:容器此刻不够高,浏览器把值夹小了。
+  // 切页内 tab 时这是常态 —— 旧面板正在淡出、新面板还没挂上(片6 的 `mode="wait"`),
+  // 那一瞬容器矮一截;列表数据还在取时也一样。只写一次的话还原就被那一瞬悄悄吃掉,
+  // 而且它是「看起来成功了、位置只差一截」这种最难发现的失败。
+  const restore = (top: number, framesLeft: number) => {
+    el.scrollTop = top;
+    if (top === 0 || el.scrollTop === top || framesLeft === 0) return;
+    frame = requestAnimationFrame(() => restore(top, framesLeft - 1));
+  };
+
   const unsubscribe = subscribe((key) => {
     if (key === current) return; // loader 重跑、原地重渲染:不是换位置,别把人弹回顶部
     current = key;
-    el.scrollTop = remembered.get(key) ?? 0;
+    if (frame !== null) cancelAnimationFrame(frame);
+    frame = null;
+    restore(remembered.get(key) ?? 0, RESTORE_FRAMES);
   });
 
   return () => {
+    if (frame !== null) cancelAnimationFrame(frame);
     el.removeEventListener("scroll", onScroll);
     unsubscribe();
   };
