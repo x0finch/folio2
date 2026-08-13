@@ -21,6 +21,11 @@ export function useTapToTop(): (active: boolean) => (event: MouseEvent) => void 
   return useCallback(
     (active: boolean) => (event: MouseEvent) => {
       if (!active) return;
+      // 带修饰键 / 非主键的点击是「在新标签打开」那类意图,不是「回到顶部」——
+      // 拦下来会把它吞掉。TanStack 自己也是这么放行的。
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+        return;
+      }
       const el = appScroller();
       if (!el || !isScrolling(el)) return;
       // 已经在顶上时也照样拦:AC 要的是「点当前 tab 不产生导航」,放过去会多一条历史条目,
