@@ -4,6 +4,7 @@ import { NO_VALUE } from "../lib/delta-display";
 import type { Gain } from "../lib/gain-24h";
 import { deriveHeroMetrics, type HoldingLike } from "../lib/hero-stats";
 import { downsampleSeries, type HistoryPoint } from "../lib/history";
+import { useChartScrub } from "../lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { signedUsd } from "../lib/signed-usd";
 import { GainExplainer } from "./gain-explainer";
@@ -15,6 +16,10 @@ const DAY_MS = 86_400_000;
 const HERO_WINDOW_DAYS = 30;
 
 const fmtPct = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}%`;
+
+// 大数字的排版。划动读数时要用平铺文本换掉 NumberTicker(见下),两处必须同一套字号字重,
+// 否则数字一换就跳一下 —— 所以只写一份。
+const HERO_NUMBER_CLASS = "font-mono font-semibold text-4xl tracking-tight sm:text-5xl";
 
 // 净值 hero(H3 #102):趋势图作背景 + 净值/24h/三指标浮于其上(无 Card)。
 // 趋势色随涨跌走 --pos/--neg;三指标 best/worst/稳定币占比派生自纯函数 deriveHeroMetrics(已单测)。
@@ -36,6 +41,8 @@ export function PortfolioHero({
 }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
+  // 划动读数(片7):划到哪个点、那一刻怎么写,都在这个 hook 里。
+  const scrub = useChartScrub();
 
   // 裁到最近 30 天窗口(以最新快照时刻为基准,与 SSR/客户端一致、不用客户端时钟),
   // 再自适应降采样:粒度随实际数据量走(约 1 天 → 小时级、约 30 天 → 日级),日内多次手动
@@ -88,28 +95,46 @@ export function PortfolioHero({
     <div className="relative min-h-60 overflow-hidden pt-1">
       {/* 四态(点数不够 / 还在取数 / 什么都还没有 / 真有数据)全在 TrendPanel 里判。
           hero 的上留白更大(topMargin=92,把折线压到下半区),填充也比抽屉略重 → 覆盖这两个默认值。 */}
-      <TrendPanel series={chartSeries} topMargin={92} fillOpacity={0.16} decorate={nothingYet} />
+      <TrendPanel
+        series={chartSeries}
+        topMargin={92}
+        fillOpacity={0.16}
+        decorate={nothingYet}
+        onActive={scrub.onActive}
+      />
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>
-        <p className="font-medium text-muted-foreground text-xs">{t("totalNetWorth")}</p>
+        {/* 划到某点时,标题换成那个时刻(片7)—— 大数字顶替成该点的值,两者一起才说得清「这是哪一刻的数」。 */}
+        <p className="font-medium text-muted-foreground text-xs tabular-nums">
+          {scrub.label ?? t("totalNetWorth")}
+        </p>
         <div className="mt-2 flex flex-wrap items-baseline gap-3">
           {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。 */}
           <div className="flex select-text items-baseline">
-            <NumberTicker
-              value={totalUsd}
-              format={(n) => usd(n).split(".")[0]}
-              className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
-            />
-            {fracPart && (
-              <span className="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl">
-                .{fracPart}
-              </span>
+            {scrub.point ? (
+              // 划动时用平铺文本而不是 NumberTicker:滚动数字会对每一次移动都补一段动画,
+              // 手指划过去就是一路追不上的抖动。
+              <span className={HERO_NUMBER_CLASS}>{usd(scrub.point.total)}</span>
+            ) : (
+              <>
+                <NumberTicker
+                  value={totalUsd}
+                  format={(n) => usd(n).split(".")[0]}
+                  className={HERO_NUMBER_CLASS}
+                />
+                {fracPart && (
+                  <span className="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl">
+                    .{fracPart}
+                  </span>
+                )}
+              </>
             )}
           </div>
           {/* 算不出(缺 24 小时前的基准)→ `—`,不是留白也不是 0:留白读作「还没加载出来」,
               0 是在断言「今天没涨没跌」。与全站三态口径一致(见 lib/delta-display)。 */}
-          {gain24h == null ? (
+          {/* 划动时不显 24h 药丸:那是「今天涨跌」,摆在一个历史时刻的数值旁边是两件事对不上。 */}
+          {scrub.point ? null : gain24h == null ? (
             <span className={pillClass}>{NO_VALUE}</span>
           ) : (
             // 摊开算式(#445):金额与百分比来自两套计算,你动过仓的那天它们除不通 —— 与其让人

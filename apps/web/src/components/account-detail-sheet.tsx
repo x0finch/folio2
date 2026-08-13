@@ -29,6 +29,7 @@ import { accountShare, shareLabel } from "../lib/account-share";
 import type { OverviewBalance } from "../lib/account-view";
 import { deltaTone, NO_VALUE } from "../lib/delta-display";
 import type { Gain } from "../lib/gain-24h";
+import { useChartScrub } from "../lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
 import { useScrollLock } from "../lib/hooks/use-scroll-lock";
@@ -160,6 +161,8 @@ function DetailBody({
   const tt = useTranslations("Tags");
   const format = useFormatter();
   const usd = useDisplayValue();
+  // 划动读数(片7)。
+  const scrub = useChartScrub();
   const queryClient = useQueryClient();
   // 改名 / 归档 / 删除同时改账户域与组合域(总额、走势)—— 映射表那一条两个前缀都列了。
   const refresh = () => invalidateFor(queryClient, "account.write");
@@ -269,7 +272,7 @@ function DetailBody({
           预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
       <div className="relative">
         <div className="relative min-h-44">
-          <TrendPanel series={series} loading={historyQuery.isPending} />
+          <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
 
           {/* 窗口切换:右下角独占一带(与 asset-sheet 一致)。 */}
           <div className="absolute right-0 bottom-0 z-10">
@@ -298,10 +301,17 @@ function DetailBody({
               {/* Tag(#351):与 connector 徽章同排,muted 纯展示、**不可点** —— 编辑走 ⋯ 菜单里的「标签」。 */}
               <TagBadges tags={account.tags} />
             </EditableName>
-            {/* 市值 + 24h 增量:字号同代币抽屉(值 text-3xl bold、增量 text-sm);缺凭据 → 无增量。 */}
+            {/* 市值 + 24h 增量:字号同代币抽屉(值 text-3xl bold、增量 text-sm);缺凭据 → 无增量。
+                划到图上某点 → 顶替成该点的值,增量那行换成那一刻的时间(片7)。 */}
             <div>
-              <div className="font-bold text-3xl tabular-nums">{usd(account.totalUsd)}</div>
-              {hasDayChange &&
+              <div className="font-bold text-3xl tabular-nums">
+                {usd(scrub.point ? scrub.point.total : account.totalUsd)}
+              </div>
+              {scrub.label ? (
+                <div className="mt-1 text-muted-foreground text-sm tabular-nums">{scrub.label}</div>
+              ) : null}
+              {!scrub.point &&
+                hasDayChange &&
                 (dayChange == null ? (
                   <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
                 ) : (

@@ -19,6 +19,7 @@ import type { Holding } from "../lib/aggregate";
 import { collapseToSlots } from "../lib/collapse-to-slots";
 import { deltaTone, NO_VALUE } from "../lib/delta-display";
 import { formatNumber } from "../lib/format-number";
+import { useChartScrub } from "../lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useScrollLock } from "../lib/hooks/use-scroll-lock";
 import { holdingHistoryQuery } from "../lib/queries/accounts";
@@ -188,6 +189,8 @@ function SourceView({
 function AssetSheetContent({ holding }: { holding: Holding }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
+  // 划动读数(片7)。
+  const scrub = useChartScrub();
   const { token, totalValue, totalAmount, sources } = holding;
   // 24h 盈亏(ADR 0040)—— server 算好的,与主页那一行同一个数。以前是 change24h 倒推的。
   const dayValue = holding.gain24h?.amount ?? null;
@@ -210,7 +213,7 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
           窗口切换叠右下角、独占头部底部一带,与右侧价格徽标错开(name 行用满宽)。
           预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
       <div className="relative min-h-44 overflow-hidden">
-        <TrendPanel series={series} loading={historyQuery.isPending} />
+        <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
         {/* 窗口切换(可交互,独立于 pointer-events-none 内容层):右下角独占一带,避开价格徽标。 */}
         <div className="absolute right-0 bottom-0 z-10">
           <RangeTabs value={range} onChange={setRange} />
@@ -243,10 +246,16 @@ function AssetSheetContent({ holding }: { holding: Holding }) {
           </div>
 
           <div>
-            <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
+            {/* 划到某点 → 顶替成该点的值(片7);下面那行 24h 换成那一刻的时间。 */}
+            <div className="font-bold text-3xl tabular-nums">
+              {usd(scrub.point ? scrub.point.total : totalValue)}
+            </div>
+            {scrub.label ? (
+              <div className="mt-1 text-muted-foreground text-sm tabular-nums">{scrub.label}</div>
+            ) : null}
             {/* 24h 盈亏 + %:共用一个前置符号、同色,与代币行/hero 一致。
                 算不出 → `—`(全站三态口径,见 lib/delta-display)。 */}
-            {holding.gain24h == null ? (
+            {scrub.point ? null : holding.gain24h == null ? (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
             ) : (
               <GainExplainer gain={holding.gain24h} className="block text-left">
