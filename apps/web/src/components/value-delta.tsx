@@ -25,7 +25,11 @@ export function ValueDelta({
 }) {
   const usd = useDisplayValue();
   return (
-    <div className={align === "right" ? "shrink-0 text-right" : "text-left"}>
+    // select-text:金额是内容,长按要能选中复制。行/卡片是按钮,base 层把它们整体设成不可选
+    // (长按不冒蓝色高亮),这里把真正该复制的那两行单独放回来 —— 全站还没有任何复制按钮。
+    <div
+      className={cn("select-text", align === "right" ? "shrink-0 text-right" : "text-left")}
+    >
       <div className={cn("font-medium tabular-nums", value < 0 && "text-neg")}>{usd(value)}</div>
       {delta !== undefined && (
         <div className={cn("text-xs tabular-nums", deltaTone(delta))}>

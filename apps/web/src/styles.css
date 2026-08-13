@@ -36,6 +36,45 @@ input:-webkit-autofill:focus {
   caret-color: var(--foreground);
 }
 
+/* 触摸手感的三条基线(片3 / #470)。全部写在 @layer base 里 —— utilities 层在它之后,
+   所以 `select-text`、`touch-pan-y` 这类工具类能按需盖掉它们(反过来就盖不动了)。 */
+@layer base {
+  /* 长按不弹系统动作面板(链接/按钮那套「打开 / 拷贝链接 / 分享」)。
+     它管的是 callout,不管文字选中 —— 选中是下一条的事。 */
+  a,
+  button,
+  [role="button"],
+  summary {
+    -webkit-touch-callout: none;
+  }
+
+  /* 控件与外壳本身不参与选中:长按 Dock、顶栏、tab、卡片不该冒出蓝色高亮。
+     **内容要单独放回来**:金额、代币名、账户名、备注正文都带 `select-text` —— 全站目前
+     没有任何复制按钮,长按复制是唯一的复制途径,一刀切会把它砍掉。 */
+  header,
+  nav,
+  button,
+  [role="button"],
+  label {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* 输入与可编辑区照旧可选可编辑(凭据表单、手记资产、内联改名)。 */
+  input,
+  textarea,
+  [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* 连点两下不再缩放,顺带去掉那约 300ms 的点击延迟。`manipulation` 只砍双击缩放,
+     滚动与双指缩放都留着 —— 比 `touch-action: none` 温和,不会连带禁掉平移。 */
+  body {
+    touch-action: manipulation;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

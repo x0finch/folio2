@@ -99,7 +99,9 @@ function NoteContent({
 export function NoteView({ note, formatNumber, hideHeader, className }: NoteViewProps) {
   const fmt = formatNumber ?? ((n: number) => String(n));
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
+    // select-text:备注正文是内容(地址、未确认笔数这类,长按复制是唯一途径)。note 常挂在
+    // 卡片/按钮里,base 层把那些整体设成不可选,这里整块放回来。
+    <div className={cn("flex select-text flex-col gap-2", className)}>
       {!hideHeader && (
         <div className="flex items-center gap-1.5">
           <NoteIconGlyph icon={note.icon} />

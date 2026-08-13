@@ -16,7 +16,9 @@ export function PageHeader({
 }) {
   return (
     <div className="mb-6 flex items-start justify-between gap-4">
-      <div className="min-w-0">
+      {/* select-none:页头标题与副标题是外壳,不是内容 —— 长按它们不该出现选中高亮(片3)。
+          它们不是 button/nav,不在 base 层那组里,所以在这里单独标。 */}
+      <div className="min-w-0 select-none">
         {eyebrow ? <div className="mb-2">{eyebrow}</div> : null}
         <h1 className="font-serif font-normal text-3xl leading-tight tracking-tight sm:text-4xl">
           {title}
