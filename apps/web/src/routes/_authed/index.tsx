@@ -14,6 +14,7 @@ import { createFileRoute, Link, stripSearchParams } from "@tanstack/react-router
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
+import { z } from "zod";
 import { HeaderSync } from "../../components/header-sync";
 import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
 import { PinTargetLabel } from "../../components/pin-target-label";
@@ -23,14 +24,14 @@ import { QueryBoundary } from "../../components/query-boundary";
 import { SectionList } from "../../components/section-list";
 import { ListSkeleton, OverviewSkeleton } from "../../components/skeletons";
 import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-picker";
-import { TokenHoldings } from "../../components/token-holdings";
+import { TokenHoldings, type TokenSheetSelection } from "../../components/token-holdings";
 import { useConnectorLabels } from "../../hooks/use-connector-labels";
 import { mergeDefiGroups } from "../../lib/account-view";
+import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/home-tabs";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { useHoldHeight } from "../../lib/hooks/use-hold-height";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
-import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/page-tabs";
 import { accountListQuery } from "../../lib/queries/accounts";
 import { connectorCatalogQuery } from "../../lib/queries/connectors";
 import { type PinScopeKey, portfolioKeys } from "../../lib/queries/keys";
@@ -68,10 +69,13 @@ export const Route = createFileRoute("/_authed/")({
   // 所以认不出的值(pin 被删、手写乱码)只能由组件那套 clamp 回落,见下面的 `shownActive`。
   // `token` = 打开的代币详情抽屉(哪个币,值是 Holding 的分组键)。同样只校验形状:那个键是
   // 运行时数据(tokenId / `no-token:…`),认不出的由 TokenHoldings 当作没开,见那里的 `selected`。
-  validateSearch: (search: Record<string, unknown>): { tab?: string; token?: string } => {
-    const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : undefined);
-    return { tab: str(search.tab), token: str(search.token) };
-  },
+  //
+  // 空串按「没带」处理(`?tab=` 手改出来的),所以是 `.min(1)`;`.catch(undefined)` 让任何不成形的
+  // 值(数组、重复参数)也落到同一处,而不是把校验抛出去变成一个 SearchParamError 页面。
+  validateSearch: z.object({
+    tab: z.string().min(1).optional().catch(undefined),
+    token: z.string().min(1).optional().catch(undefined),
+  }),
   // 默认 tab 不写进 URL:`/` 就是 tokens,只有别的 tab 才挂 `?tab=`。交给官方中间件在建地址时统一剥,
   // 而不是每个导航调用点自己记得把默认值抹成 undefined。(`token` 没有默认值,不参与。)
   search: { middlewares: [stripSearchParams({ tab: DEFAULT_TAB })] },
@@ -103,7 +107,7 @@ export const Route = createFileRoute("/_authed/")({
 // **本 route 的** `Route.useSearch`/`useNavigate` —— 全局的 `useSearch({ from })` 目前用不了
 // (`Register` 在 routeTree.gen.ts 与 router.tsx 里各声明了一遍,合并后 from 的路径联合解析成
 // `never`,那是既存问题,不在这一片里动)。两个调用点(主列表 / 自定义 Tab)各调一次,逻辑只写一遍。
-function useTokenParam() {
+function useTokenParam(): TokenSheetSelection {
   const { token } = Route.useSearch();
   const navigate = Route.useNavigate();
   // `replace` + `resetScroll: false` 与主 tab 一致:开合抽屉不进后退栈(否则系统返回键变成

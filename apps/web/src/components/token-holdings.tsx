@@ -47,16 +47,21 @@ function RowContent({ h }: { h: Holding }) {
 // 故不能包成 <HoldingRow>);onClick 保留,className 会被 cloneElement 合上 "relative"。
 const rowClass = "w-full rounded-xl px-3 py-3 text-left";
 
+// 「开着哪个币的抽屉,怎么换」——首页把 URL 那一侧包成这个形状递进来(见 index.tsx 的
+// `useTokenParam`)。命名成一个类型而不是在两处各写一遍字段:它是两边之间的约定,改一处
+// 另一处编译期就得跟上。
+export interface TokenSheetSelection {
+  /** 打开的是哪个币,值是 `Holding["key"]`;没有就是没开。 */
+  selectedKey?: string;
+  /** 传 key 打开、传 undefined 关闭 —— 落到 URL 上。 */
+  onSelect: (key: string | undefined) => void;
+}
+
 export function TokenHoldings({
   holdings,
   selectedKey,
   onSelect,
-}: {
-  holdings: Holding[];
-  /** 打开的是哪个币(URL 的 `?token=`)。由首页那层给 —— 见 index.tsx 的 `useTokenParam`。 */
-  selectedKey?: string;
-  onSelect: (key: string | undefined) => void;
-}) {
+}: TokenSheetSelection & { holdings: Holding[] }) {
   const t = useTranslations("Overview");
   const [showDust, setShowDust] = useState(false);
   // 认不出的值(旧链接指向已清空的币、手写乱码)→ 找不到就是没开。回落**必须在这里**,不在 route 的

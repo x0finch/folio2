@@ -2,15 +2,21 @@ import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger }
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
+import { z } from "zod";
 import { AllocationPie } from "../../components/allocation-pie";
 import { HeaderSync } from "../../components/header-sync";
 import { PortfolioChart } from "../../components/portfolio-chart";
 import { InsightsSkeleton } from "../../components/skeletons";
-import { type AllocDimension, buildAllocation } from "../../lib/allocation";
+import {
+  ALLOC_DIMENSION,
+  ALLOC_DIMENSIONS,
+  type AllocDimension,
+  buildAllocation,
+  DEFAULT_DIM,
+} from "../../lib/allocation";
 import { toDailySeries } from "../../lib/history";
 import { useHoldHeight } from "../../lib/hooks/use-hold-height";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
-import { ALLOC_DIMENSIONS, DEFAULT_DIM, isDimension } from "../../lib/page-tabs";
 import {
   portfolioHistoryQuery,
   portfolioListQuery,
@@ -29,16 +35,14 @@ const DIM_LABEL: Record<AllocDimension, string> = {
 export const Route = createFileRoute("/_authed/insights")({
   // 分布维度进 URL(ADR 0043):刷新还停在原维度、链接能分享。
   //
-  // **回落就在这一层做完**,所以返回类型是 `AllocDimension` 而不是 `string` —— 组件那侧从此拿到的
-  // 一定是三个合法维度之一,不必再 clamp 一遍。
+  // 校验器就是维度那份 zod schema 本身(`lib/allocation.ts`,zod v4 = Standard Schema,Router
+  // 直接吃,不用 adapter)。`.catch(DEFAULT_DIM)` 把「认不出的值」和「没带这个参数」一并收成默认维度,
+  // 于是组件那侧拿到的**一定**是三个合法维度之一,不必再 clamp 一遍。
   //
-  // 之前这里写的是「validateSearch 只收窄类型、不过滤值」,并据此把回落放到了组件里。**现象是真的,
-  // 归因是错的**:router 把验证结果**合并**进 search 而不是替换掉它 ——
-  // `preMatchSearch = { ...parentSearch, ...strictSearch }`(router-core 的 matchRoutes)。返回 `{}`
-  // 等于一个键都不覆盖,`?dim=bogus` 当然原样留着。让它**显式返回 `dim`**,脏值就在这里被盖掉。
-  validateSearch: (search: Record<string, unknown>): { dim: AllocDimension } => ({
-    dim: isDimension(search.dim) ? search.dim : DEFAULT_DIM,
-  }),
+  // 这里**必须显式产出 `dim`**,不能像早先那样对非法值返回 `{}`:router 把验证结果**合并**进
+  // 已有的 search(`preMatchSearch = { ...parentSearch, ...strictSearch }`),没被覆盖的键原样留着,
+  // `?dim=bogus` 就那么漏进了组件。
+  validateSearch: z.object({ dim: ALLOC_DIMENSION.catch(DEFAULT_DIM) }),
   // 默认维度不写进 URL:`/insights` 就是 token。以前是在每个导航调用点手写
   // `v === DEFAULT_DIM ? undefined : v`,现在交给官方中间件 —— 它在 buildLocation 时统一剥,
   // 漏写一个调用点就多一份冗余参数的可能性没有了。
