@@ -22,9 +22,12 @@ function mountScroller(overflowY: string) {
   return { el, scrollTo };
 }
 
-function fakeClick() {
+function fakeClick(extra: Partial<React.MouseEvent> = {}) {
   const preventDefault = vi.fn();
-  return { event: { preventDefault } as unknown as React.MouseEvent, preventDefault };
+  return {
+    event: { button: 0, preventDefault, ...extra } as unknown as React.MouseEvent,
+    preventDefault,
+  };
 }
 
 afterEach(() => {
@@ -71,6 +74,27 @@ describe("useTapToTop", () => {
     const { event, preventDefault } = fakeClick();
     expect(() => result.current(true)(event)).not.toThrow();
     expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  // 有鼠标的那段宽度(sm ≤ w < lg)仍然是手机外壳 + 内滚容器,所以这条是真会遇到的:
+  // ⌘/ctrl+点 是「在新标签打开」,不是「回到顶部」—— 拦下来会把那个意图吞掉。
+  it("⌘/ctrl/shift+点 或 中键 → 放行,不当成回顶", () => {
+    const { el, scrollTo } = mountScroller("auto");
+    el.scrollTop = 300;
+    const { result } = renderHook(() => useTapToTop());
+
+    for (const extra of [
+      { metaKey: true },
+      { ctrlKey: true },
+      { shiftKey: true },
+      { altKey: true },
+      { button: 1 },
+    ]) {
+      const { event, preventDefault } = fakeClick(extra);
+      result.current(true)(event);
+      expect(preventDefault).not.toHaveBeenCalled();
+    }
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it("已经在顶上也照样拦 —— 放过去会白添一条历史条目", () => {
