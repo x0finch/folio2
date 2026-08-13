@@ -21,7 +21,6 @@ import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-syn
 import { accountIdsInView } from "../../lib/accounts-in-view";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
-import { useUrlSheet } from "../../lib/hooks/use-url-sheet";
 import { isManual } from "../../lib/manual-connector";
 import { accountHoldingsQuery, accountListQuery } from "../../lib/queries/accounts";
 import { connectorCatalogQuery } from "../../lib/queries/connectors";
@@ -94,8 +93,6 @@ function Accounts() {
   // 补录目标(A3):列表/详情点补录 icon → 开加账户 modal 的补录模式(见 AddAccountModal completeFor)。
   const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
-  // 关闭那一下 id 就没了,而退场动画还要内容 —— `shown` 滞后一拍给的就是它。
-  const { open, shown } = useUrlSheet(selected);
   // `replace` + `resetScroll: false` 与主 tab 一致:开合抽屉不进后退栈,也不把身后的列表弹回顶部。
   const setAccount = (id: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, account: id }), replace: true, resetScroll: false });
@@ -145,11 +142,11 @@ function Accounts() {
       )}
 
       <AccountDetailSheet
-        account={shown}
+        account={selected}
         total={total}
         allTags={allTags}
         tagLinks={tagLinks}
-        open={open}
+        open={selected != null}
         onOpenChange={(o) => {
           if (!o) setAccount(undefined);
         }}
