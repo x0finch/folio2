@@ -49,10 +49,16 @@ export function AppShell({
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
 
   return (
-    // 手机:外壳固定一屏高、内容在下面那个框里滚(ADR 0042)—— 顶栏因此是真正不动的一条,
-    // 而不是靠 sticky 跟着滚。桌面**故意**还滚整页(侧滑 Drawer 锁背景靠的是 body 的 overflow),
-    // 所以 lg 上把高度与 overflow 全还回去。两种模型并存是有意的,不是没改完。
-    <div className="flex h-svh flex-col overflow-hidden lg:h-auto lg:min-h-svh lg:flex-row lg:overflow-visible">
+    // 手机:外壳定高、内容在下面那个框里滚(ADR 0042)—— 顶栏因此是真正不动的一条,而不是靠 sticky
+    // 跟着滚。桌面**故意**还滚整页(侧滑 Drawer 锁背景靠的是 body 的 overflow),所以 lg 上把高度与
+    // overflow 全还回去。两种模型并存是有意的,不是没改完。
+    //
+    // 高度取 **`h-full`(百分比)**,不是 `100svh` 也不是 `fixed inset-0` —— 那两个真机上都错:
+    // iOS 独立窗口(standalone + `viewport-fit=cover`)首帧报的视口偏短(实测 screen 852 而 inH 793),
+    // 照那个数排就会在屏幕底部留一条填不满的空白、悬浮 Dock 贴在那条假底边上方,手指滑一下 iOS 才纠正。
+    // 百分比顺着 `html/body/#app` 的百分比链走,那条链首帧就是整屏 —— main 不出这个毛病也是因为
+    // 它的高度来自这条链。`styles.css` 里把那三层的 `height: 100%` 补齐了。
+    <div className="flex h-full flex-col overflow-hidden lg:h-auto lg:min-h-svh lg:flex-row lg:overflow-visible">
       {/* 桌面常驻左侧栏 */}
       <aside className="hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto">
         <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-5">
