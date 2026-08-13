@@ -6,6 +6,7 @@ import { AllocationPie } from "../../components/allocation-pie";
 import { HeaderSync } from "../../components/header-sync";
 import { PortfolioChart } from "../../components/portfolio-chart";
 import { InsightsSkeleton } from "../../components/skeletons";
+import { TabPanel } from "../../components/tab-panel";
 import { type AllocDimension, buildAllocation } from "../../lib/allocation";
 import { toDailySeries } from "../../lib/history";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
@@ -101,7 +102,10 @@ function Insights() {
               ))}
             </TabsList>
           </Tabs>
-          <AllocationPie slices={slices} />
+          {/* 维度切换的转场只包饼图(片6):tab 条自己不参与,卡片高度也不跟着抖。 */}
+          <TabPanel tabKey={dim}>
+            <AllocationPie slices={slices} />
+          </TabPanel>
         </CardContent>
       </Card>
     </div>
