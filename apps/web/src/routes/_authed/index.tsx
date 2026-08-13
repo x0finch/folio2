@@ -12,7 +12,7 @@ import {
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { HeaderSync } from "../../components/header-sync";
 import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
@@ -39,6 +39,7 @@ import {
   portfolioOverviewQuery,
   tabPinsQuery,
 } from "../../lib/queries/portfolio";
+import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/page-tabs";
 import { invalidateFor } from "../../lib/queries/refresh";
 import { tagListQuery } from "../../lib/queries/tags";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../lib/server/tab-pins";
@@ -60,6 +61,14 @@ function revealTab(el: HTMLElement) {
 }
 
 export const Route = createFileRoute("/_authed/")({
+  // 主 tab 进 URL(ADR 0043):刷新还停在原 tab、链接能分享,滚动位置也按 href 分开记(片1)。
+  // **这里只校验形状,不校验值** —— 合法值里有自定义 Tab 的 pin id,是运行时数据,route 层不知道。
+  // 认不出的值(pin 被删、手写乱码)由组件那套 clamp 回落到默认 tab,见下面的 `shownActive`。
+  // 默认 tab 不写进 URL:`/` 就是 tokens,只有非默认才挂 `?tab=`,分享出去的链接不带冗余参数。
+  validateSearch: (search: Record<string, unknown>): { tab?: string } => {
+    const tab = search.tab;
+    return typeof tab === "string" && tab.length > 0 ? { tab } : {};
+  },
   // 本页的读取**已全部迁到 react-query**(ADR 0038):loader 只**预取**、不返回任何数据,
   // 组件按选中的组合 id 从缓存读(本文件已无 `useLoaderData`)。
   loader: async ({ context: { queryClient } }) => {
@@ -117,10 +126,21 @@ function Overview() {
   const connectorLabel = useConnectorLabels();
 
   // 单一 tab 状态:"tokens" / "perps" / "defi"(视角)或 pin id(自定义 Tab)。默认 tokens。
-  const [active, setActive] = useState("tokens");
-  // 切 tab 也要包 startTransition:切到自定义 Tab 会挂起(那份数据按 pin 另拉一遍),
-  // 不包就闪骨架。切组合那一半包在 usePortfolio 的 select 里。
-  const selectTab = (v: string) => startTransition(() => setActive(v));
+  // **住在 URL 里**(ADR 0043):刷新回原 tab、链接可分享,每个 tab 各记自己的滚动位置。
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const active = tab ?? DEFAULT_TAB;
+  // `replace` 而不是 push:iOS/Android 的原生约定都是 tab 切换**不进**后退栈,否则系统返回键
+  // 变成「倒放我刚点过的每一下」。默认 tab 写成 `undefined` → 从 URL 里去掉,不留 `?tab=tokens`。
+  //
+  // 切到自定义 Tab 会挂起(那份数据按 pin 另拉一遍),以前靠 `startTransition` 包着才不闪骨架 ——
+  // 现在不用了:router 的所有导航本来就跑在 React transition 里(`Transitioner` 把
+  // `router.startTransition` 换成了 `React.startTransition`,`Link` 上那个同名 prop 因此被标了废弃)。
+  const selectTab = (v: string) =>
+    navigate({
+      search: (prev) => ({ ...prev, tab: v === DEFAULT_TAB ? undefined : v }),
+      replace: true,
+    });
 
   const { data: tags } = useSuspenseQuery(tagListQuery());
   const { data: pins } = useSuspenseQuery(tabPinsQuery());
@@ -158,15 +178,14 @@ function Overview() {
   // active 可能短暂指向「还没挂上的 pin」—— 建 pin 后即便 await 了 invalidate,它 resolve 的时刻
   // 与新数据在组件里可见之间仍有空窗(实测)。渲染用最后一个仍有效的值,新 tab 挂上自动切过去,
   // 药丸/内容不闪回 Tokens。
+  // tab 进 URL 之后这段**同时**兼了另一件事:`?tab=` 指向一个不存在的 pin(被删了、或手写乱码)时
+  // 回落到默认 tab —— 不空白、不报错。URL 上那个死值**故意不清掉**:清它就得区分「这个 pin 不存在」
+  // 与「这个 pin 还没挂上」,而后者正是上面那段存在的理由。
   const isKnownTab = (v: string) =>
-    v === "tokens" || v === "perps" || v === "defi" || pins.some((p) => p.id === v);
-  const lastKnownActive = useRef("tokens");
+    KIND_TABS.includes(v as KindTab) || pins.some((p) => p.id === v);
+  const lastKnownActive = useRef<string>(DEFAULT_TAB);
   if (isKnownTab(active)) lastKnownActive.current = active;
-  const shownActive = isKnownTab(active)
-    ? active
-    : isKnownTab(lastKnownActive.current)
-      ? lastKnownActive.current
-      : "tokens";
+  const shownActive = pickShownTab(active, lastKnownActive.current, isKnownTab);
 
   // activePin 只看 pins(不依赖具体数据)→ 可在拉取前定 scope。
   const activePin = pins.find((p) => p.id === shownActive) ?? null;
