@@ -11,6 +11,7 @@ import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -57,7 +58,9 @@ export function BottomSheet({
   const contentRef = useRef<HTMLDivElement>(null);
   // 顶格高度得按**像素**知道才能算档位;CSS 那个 calc 只有浏览器算得出 → 量出来。
   const [maxHeight, setMaxHeight] = useState(0);
-  const offsets = snapOffsets(maxHeight);
+  // memo 不是为了省算力,是为了身份稳定:下面那个订阅以 offsets 为依赖,每次渲染换个新数组
+  // 就会每次重订一遍。
+  const offsets = useMemo(() => snapOffsets(maxHeight), [maxHeight]);
   const dismissOffset = offsets[offsets.length - 1] ?? 0;
   // 当前停在哪一档(位移)。默认半档 —— 与被替掉的组件一致。
   const [snap, setSnap] = useState(0);
@@ -79,8 +82,20 @@ export function BottomSheet({
   // 每次打开都从半档开始(而不是上次关掉时那一档)。
   useEffect(() => {
     if (!open || maxHeight === 0) return;
-    setSnap(snapOffsets(maxHeight).at(-2) ?? 0);
-  }, [open, maxHeight]);
+    setSnap(offsets.at(-2) ?? 0);
+  }, [open, maxHeight, offsets]);
+
+  // 落档由 motion 的惯性动画完成时决定,**不在 onDragEnd 里读位置**:松手那一刻 y 还是松手位置,
+  // 不是投影落点,照它设 state 会跟正在跑的惯性动画抢同一个值。`animationComplete` 是 motion value
+  // 自带的事件,等它停稳再读,顺带把「落到 dismiss 就关闭」也接在这里 —— 手势与退场因此是一条动画。
+  useEffect(() => {
+    return y.on("animationComplete", () => {
+      const landed = nearestSnap(y.get(), offsets);
+      setSnap(landed);
+      // 已经在关的过程中(退场动画也会触发这个事件)就别再关一次。
+      if (landed === dismissOffset && open && maxHeight > 0) onOpenChange(false);
+    });
+  }, [y, offsets, dismissOffset, open, onOpenChange, maxHeight]);
 
   // Esc 关闭 —— 旧的 vendored 件没有这个。
   useEffect(() => {
@@ -129,7 +144,11 @@ export function BottomSheet({
               style={{ height: SHEET_MAX_HEIGHT, y }}
               // 位移驱动一切:跟手、落档、退场都是同一个 y。
               initial={reduce ? { opacity: 0 } : { y: "100%" }}
-              animate={reduce ? { opacity: 1, y: snap } : { y: snap }}
+              // 顶格高度还没量出来时先按住 100%(整块在屏外):那一瞬 snap 还是 0(顶档),
+              // 直接 animate 过去会先冲到顶再回落半档 —— 每次打开都看得见那一下多余的过冲。
+              animate={
+                maxHeight === 0 ? { y: "100%" } : reduce ? { opacity: 1, y: snap } : { y: snap }
+              }
               exit={reduce ? { opacity: 0 } : { y: "100%" }}
               transition={reduce ? REDUCED_TRANSITION : OPEN_TRANSITION}
               drag="y"
@@ -141,13 +160,6 @@ export function BottomSheet({
               // 惯性交给 motion,我们只把它算出的落点改成最近的合法档位。
               dragTransition={{
                 modifyTarget: (target) => nearestSnap(target, offsets),
-              }}
-              onDragEnd={() => {
-                // 落点由 modifyTarget 定;这里只把「停在哪一档」同步回 state,
-                // 好让下一次 animate 与内容区能不能滚都对得上。
-                const landed = nearestSnap(y.get(), offsets);
-                setSnap(landed);
-                if (landed === dismissOffset) onOpenChange(false);
               }}
               role="dialog"
               aria-modal="true"
