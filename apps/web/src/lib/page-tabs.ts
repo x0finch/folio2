@@ -32,10 +32,14 @@ export function pickShownTab(
 }
 
 // Insights 的分布维度:合法值是**有限集**(与首页的 pin id 不同),所以能在这里判死。
-// 键的全集只写一次,标签在 insights 里按这个集合配 —— 少配一个编译期就报。
-export const ALLOC_DIMENSIONS = ["token", "chain", "account"] as const satisfies readonly AllocDimension[];
+//
+// 从一张穷尽的 `Record` 派生而不是直接写数组:数组配 `satisfies` 只能保证「写进去的都合法」,
+// **保证不了「合法的都写进去了」** —— `AllocDimension` 将来多一个成员,数组少一项不报错,
+// 那个维度就只是悄悄不出现在 tab 条里。`Record` 少一个键编译期直接红。
+const DIMENSION_SET: Record<AllocDimension, true> = { token: true, chain: true, account: true };
+export const ALLOC_DIMENSIONS = Object.keys(DIMENSION_SET) as AllocDimension[];
 export const DEFAULT_DIM: AllocDimension = "token";
 
 export function isDimension(v: unknown): v is AllocDimension {
-  return ALLOC_DIMENSIONS.includes(v as AllocDimension);
+  return typeof v === "string" && v in DIMENSION_SET;
 }
