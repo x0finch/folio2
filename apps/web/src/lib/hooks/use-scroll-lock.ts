@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { appScroller } from "../app-scroll";
+import { appScroller, isScrolling } from "../app-scroll";
 
 // 锁住应用滚动容器的滚动(抽屉 / 弹层打开时背景不许跟着滚)。
 //
@@ -21,8 +21,7 @@ function lockTarget(): HTMLElement | null {
   // 已经锁着了 → computed 现在是 hidden,再问一遍会把自己判成「不是滚动容器」,
   // 第二个调用者就锁不上、第一个一松手背景又能滚了。
   if (locks.has(el)) return el;
-  const { overflowY } = getComputedStyle(el);
-  return overflowY === "auto" || overflowY === "scroll" ? el : null;
+  return isScrolling(el) ? el : null;
 }
 
 // `overflow-y: hidden` 保留 scrollTop(只是用户滚不动,程序仍可滚),所以关掉抽屉后
