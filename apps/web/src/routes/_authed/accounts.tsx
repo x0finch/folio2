@@ -21,6 +21,7 @@ import { type AccountSyncStatus, accountSyncStatus } from "../../lib/account-syn
 import { accountIdsInView } from "../../lib/accounts-in-view";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
+import { useUrlSheet } from "../../lib/hooks/use-url-sheet";
 import { isManual } from "../../lib/manual-connector";
 import { accountHoldingsQuery, accountListQuery } from "../../lib/queries/accounts";
 import { connectorCatalogQuery } from "../../lib/queries/connectors";
@@ -28,6 +29,13 @@ import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "../../lib/queries/tags";
 
 export const Route = createFileRoute("/_authed/accounts")({
+  // 详情抽屉进 URL(与首页主 tab 同一套,ADR 0043):刷新还停在这个账户、链接能分享。
+  // **只校验形状,不校验值** —— 账户 id 是运行时数据(还可能指向已删/不在当前 Portfolio 的账户),
+  // 认不出的由组件当作没开,见下面的 `selected`。
+  validateSearch: (search: Record<string, unknown>): { account?: string } => {
+    const account = search.account;
+    return typeof account === "string" && account.length > 0 ? { account } : {};
+  },
   // 账户域的读取已迁 react-query(#413):loader 只**预取**,拼行的活挪进组件 —— 四个来源现在
   // 各自是一条查询、各自的到达时刻不同,拼装得跟着数据走而不是跟着 loader 走。
   loader: async ({ context: { queryClient } }) => {
@@ -77,17 +85,21 @@ function Accounts() {
   const archived = rows.filter((r) => r.archivedAt != null);
   const total = activeAccountsTotal(rows); // 抽屉占比分母(顶部不显总额)
 
-  // 详情侧栏:存 id 而非行对象 —— invalidate 后从新 rows 派生,侧栏内容随刷新自动更新(归档态等)。
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  // 详情侧栏**住在 URL 里**(ADR 0043),存 id 而非行对象 —— invalidate 后从新 rows 派生,
+  // 侧栏内容随刷新自动更新(归档态等)。认不出的 id(账户已删、或不在当前 Portfolio 的作用域内,
+  // 上面按 memberIds 筛过)→ 找不到就是没开。
+  const { account: selectedId } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const [addOpen, setAddOpen] = useState(false);
   // 补录目标(A3):列表/详情点补录 icon → 开加账户 modal 的补录模式(见 AddAccountModal completeFor)。
   const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
-  const openRow = (r: AccountRow) => {
-    setSelectedId(r.id);
-    setOpen(true);
-  };
+  // 关闭那一下 id 就没了,而退场动画还要内容 —— `shown` 滞后一拍给的就是它。
+  const { open, shown } = useUrlSheet(selected);
+  // `replace` + `resetScroll: false` 与主 tab 一致:开合抽屉不进后退栈,也不把身后的列表弹回顶部。
+  const setAccount = (id: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, account: id }), replace: true, resetScroll: false });
+  const openRow = (r: AccountRow) => setAccount(r.id);
   const startComplete = (a: AccountRow) =>
     setCompleteTarget({ accountId: a.id, connectorId: a.connectorId, credsSafe: a.credsSafe });
 
@@ -133,12 +145,14 @@ function Accounts() {
       )}
 
       <AccountDetailSheet
-        account={selected}
+        account={shown}
         total={total}
         allTags={allTags}
         tagLinks={tagLinks}
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(o) => {
+          if (!o) setAccount(undefined);
+        }}
         onComplete={startComplete}
       />
     </div>

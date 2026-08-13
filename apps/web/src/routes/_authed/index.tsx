@@ -10,7 +10,7 @@ import {
   useMediaQuery,
 } from "@folio/ui";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, stripSearchParams } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
@@ -27,6 +27,7 @@ import { TokenHoldings } from "../../components/token-holdings";
 import { useConnectorLabels } from "../../hooks/use-connector-labels";
 import { mergeDefiGroups } from "../../lib/account-view";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
+import { useHoldHeight } from "../../lib/hooks/use-hold-height";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/page-tabs";
@@ -62,13 +63,18 @@ function revealTab(el: HTMLElement) {
 
 export const Route = createFileRoute("/_authed/")({
   // 主 tab 进 URL(ADR 0043):刷新还停在原 tab、链接能分享,滚动位置也按 href 分开记(片1)。
-  // **这里只校验形状,不校验值** —— 合法值里有自定义 Tab 的 pin id,是运行时数据,route 层不知道。
-  // 认不出的值(pin 被删、手写乱码)由组件那套 clamp 回落到默认 tab,见下面的 `shownActive`。
-  // 默认 tab 不写进 URL:`/` 就是 tokens,只有非默认才挂 `?tab=`,分享出去的链接不带冗余参数。
-  validateSearch: (search: Record<string, unknown>): { tab?: string } => {
-    const tab = search.tab;
-    return typeof tab === "string" && tab.length > 0 ? { tab } : {};
+  // **这里只校验形状,不校验值** —— 与 insights 的 `dim` 不同(那边合法值是有限集,回落已收进
+  // `validateSearch`):这里的合法值含自定义 Tab 的 pin id,是运行时数据,route 层根本不知道有哪些。
+  // 所以认不出的值(pin 被删、手写乱码)只能由组件那套 clamp 回落,见下面的 `shownActive`。
+  // `asset` = 打开的代币详情抽屉(哪个币,值是 Holding 的分组键)。同样只校验形状:那个键是
+  // 运行时数据(tokenId / `no-token:…`),认不出的由 TokenHoldings 当作没开,见那里的 `selected`。
+  validateSearch: (search: Record<string, unknown>): { tab?: string; asset?: string } => {
+    const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : undefined);
+    return { tab: str(search.tab), asset: str(search.asset) };
   },
+  // 默认 tab 不写进 URL:`/` 就是 tokens,只有别的 tab 才挂 `?tab=`。交给官方中间件在建地址时统一剥,
+  // 而不是每个导航调用点自己记得把默认值抹成 undefined。(`asset` 没有默认值,不参与。)
+  search: { middlewares: [stripSearchParams({ tab: DEFAULT_TAB })] },
   // 本页的读取**已全部迁到 react-query**(ADR 0038):loader 只**预取**、不返回任何数据,
   // 组件按选中的组合 id 从缓存读(本文件已无 `useLoaderData`)。
   loader: async ({ context: { queryClient } }) => {
@@ -92,6 +98,20 @@ export const Route = createFileRoute("/_authed/")({
   pendingComponent: OverviewSkeleton,
   component: Overview,
 });
+
+// 代币详情抽屉的开合(URL 的 `?asset=`,ADR 0043)。放在本文件里而不是抽成公共 hook:它要用
+// **本 route 的** `Route.useSearch`/`useNavigate` —— 全局的 `useSearch({ from })` 目前用不了
+// (`Register` 在 routeTree.gen.ts 与 router.tsx 里各声明了一遍,合并后 from 的路径联合解析成
+// `never`,那是既存问题,不在这一片里动)。两个调用点(主列表 / 自定义 Tab)各调一次,逻辑只写一遍。
+function useAssetParam() {
+  const { asset } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  // `replace` + `resetScroll: false` 与主 tab 一致:开合抽屉不进后退栈(否则系统返回键变成
+  // 「倒放我刚点过的每一下」),也不该把身后的列表弹回顶部。
+  const onSelect = (key: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, asset: key }), replace: true, resetScroll: false });
+  return { selectedKey: asset, onSelect };
+}
 
 // 现货/永续/DeFi 三段的拆解(从某份数据的 sections 里挑出永续项 + DeFi 分组 + 永续权益小计)。
 // 纯函数,提到模块级 —— 自定义 Tab 的内容现在由子组件自己拉数据、自己拆(见 PinContent)。
@@ -136,11 +156,25 @@ function Overview() {
   // 切到自定义 Tab 会挂起(那份数据按 pin 另拉一遍),以前靠 `startTransition` 包着才不闪骨架 ——
   // 现在不用了:router 的所有导航本来就跑在 React transition 里(`Transitioner` 把
   // `router.startTransition` 换成了 `React.startTransition`,`Link` 上那个同名 prop 因此被标了废弃)。
-  const selectTab = (v: string) =>
+  //
+  // `resetScroll: false` 是**必须的**:router 的 scrollRestoration 把 `?tab=` 变化当成一个新地址,
+  // 新地址没有滚动记录 → 主动 `scrollTo({top:0})`(调用点抓到过)。实测滚到 y=600 点一下 tab,画面
+  // 自己弹回顶部,观感就是「整页刷新了一下」;而 tab 条本身在页面中段,弹到顶等于把刚点的东西顶出视野。
+  //
+  // 换内容那一下高度会塌、滚动位置被浏览器夹掉,是**另一件事**(main 上就有)→ `useHoldHeight`。
+  const { ref: contentRef, hold } = useHoldHeight(active);
+  const selectTab = (v: string) => {
+    if (v === active) return; // 值没变就别导航 —— 也别撑高度,那样就没有下一轮渲染去放开它
+    hold();
+    // 默认 tab 不必在这里抹成 undefined —— `stripSearchParams` 中间件在建地址时统一剥掉。
     navigate({
-      search: (prev) => ({ ...prev, tab: v === DEFAULT_TAB ? undefined : v }),
+      search: (prev) => ({ ...prev, tab: v }),
       replace: true,
+      resetScroll: false,
     });
+  };
+
+  const assetParam = useAssetParam();
 
   const { data: tags } = useSuspenseQuery(tagListQuery());
   const { data: pins } = useSuspenseQuery(tabPinsQuery());
@@ -299,7 +333,8 @@ function Overview() {
           .
         </p>
       ) : (
-        <div className="flex flex-col gap-4">
+        // 这个容器就是换 tab 时会塌的那块(tab 条 + 内容)—— 撑住它就够了。
+        <div ref={contentRef} className="flex flex-col gap-4">
           {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
               选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
           <div className="flex items-center gap-4">
@@ -396,7 +431,7 @@ function Overview() {
           ) : holdings.length === 0 ? (
             <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
           ) : (
-            <TokenHoldings holdings={holdings} />
+            <TokenHoldings holdings={holdings} {...assetParam} />
           )}
         </div>
       )}
@@ -420,6 +455,7 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
   const tct = useTranslations("CustomTabs");
   const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId, pin));
   const parts = derive(data.sections);
+  const assetParam = useAssetParam();
 
   if (data.holdings.length === 0 && parts.perpItems.length === 0 && parts.defiGroups.length === 0) {
     return <p className="py-12 text-center text-muted-foreground text-sm">{tct("empty")}</p>;
@@ -432,7 +468,7 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
           title: t("tokensTab"),
           subtotal: data.holdingsSubtotal,
           count: data.holdings.length,
-          content: <TokenHoldings holdings={data.holdings} />,
+          content: <TokenHoldings holdings={data.holdings} {...assetParam} />,
         },
         {
           key: "perps",

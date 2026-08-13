@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { AllocationPie } from "../../components/allocation-pie";
 import { HeaderSync } from "../../components/header-sync";
@@ -8,6 +8,7 @@ import { PortfolioChart } from "../../components/portfolio-chart";
 import { InsightsSkeleton } from "../../components/skeletons";
 import { type AllocDimension, buildAllocation } from "../../lib/allocation";
 import { toDailySeries } from "../../lib/history";
+import { useHoldHeight } from "../../lib/hooks/use-hold-height";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { ALLOC_DIMENSIONS, DEFAULT_DIM, isDimension } from "../../lib/page-tabs";
 import {
@@ -28,14 +29,20 @@ const DIM_LABEL: Record<AllocDimension, string> = {
 export const Route = createFileRoute("/_authed/insights")({
   // 分布维度进 URL(ADR 0043):刷新还停在原维度、链接能分享。
   //
-  // **这里只声明形状,不声明「一定是三个合法维度之一」** —— 实测(`@tanstack/react-router@1.170.16`):
-  // `validateSearch` 收窄的是**类型**,不过滤**值**。让它对 `?dim=bogus` 返回 `{}`,`useSearch()`
-  // 照样给回 `dim: "bogus"`(验证器确实跑了,日志确认过)。所以写成 `dim?: AllocDimension` 是**类型撒谎**:
-  // 编译期保证的东西运行期不成立。真正的回落放在组件里(和首页那套 clamp 同一个位置)。
-  validateSearch: (search: Record<string, unknown>): { dim?: string } => {
-    const dim = search.dim;
-    return typeof dim === "string" && dim.length > 0 ? { dim } : {};
-  },
+  // **回落就在这一层做完**,所以返回类型是 `AllocDimension` 而不是 `string` —— 组件那侧从此拿到的
+  // 一定是三个合法维度之一,不必再 clamp 一遍。
+  //
+  // 之前这里写的是「validateSearch 只收窄类型、不过滤值」,并据此把回落放到了组件里。**现象是真的,
+  // 归因是错的**:router 把验证结果**合并**进 search 而不是替换掉它 ——
+  // `preMatchSearch = { ...parentSearch, ...strictSearch }`(router-core 的 matchRoutes)。返回 `{}`
+  // 等于一个键都不覆盖,`?dim=bogus` 当然原样留着。让它**显式返回 `dim`**,脏值就在这里被盖掉。
+  validateSearch: (search: Record<string, unknown>): { dim: AllocDimension } => ({
+    dim: isDimension(search.dim) ? search.dim : DEFAULT_DIM,
+  }),
+  // 默认维度不写进 URL:`/insights` 就是 token。以前是在每个导航调用点手写
+  // `v === DEFAULT_DIM ? undefined : v`,现在交给官方中间件 —— 它在 buildLocation 时统一剥,
+  // 漏写一个调用点就多一份冗余参数的可能性没有了。
+  search: { middlewares: [stripSearchParams({ dim: DEFAULT_DIM })] },
   // 与首页同款(ADR 0038):loader 只按**默认组合**预取,组件按选中的组合 id 从缓存读。
   loader: async ({ context: { queryClient } }) => {
     const { defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
@@ -56,15 +63,23 @@ function Insights() {
   const { data: history } = useSuspenseQuery(portfolioHistoryQuery(selectedId));
   const t = useTranslations("Insights");
   // 维度住在 URL 里(ADR 0043);`replace` —— tab 切换不进后退栈,否则返回键变成倒放点击史。
-  const { dim: dimParam } = Route.useSearch();
+  // 认不出的值已在 route 的 `validateSearch` 里回落掉了,这里拿到的必是合法维度。
+  const { dim } = Route.useSearch();
   const navigate = Route.useNavigate();
-  // 认不出的值(手写乱码、将来删掉的维度)回落默认维度 —— 回落**必须在这里**,见 Route 上那段。
-  const dim = isDimension(dimParam) ? dimParam : DEFAULT_DIM;
-  const setDim = (v: AllocDimension) =>
+  // `resetScroll: false`:换维度不该动滚动位置。scrollRestoration 认的是地址,`?dim=` 一变就是新地址、
+  // 没有记录 → 归零,观感等于整页刷新一下(首页那处同理,有更细的说明)。
+  // `useHoldHeight` 管的是另一半:换内容那一下高度塌了、滚动位置被浏览器夹掉(与导航无关)。
+  const { ref: contentRef, hold } = useHoldHeight(dim);
+  const setDim = (v: AllocDimension) => {
+    if (v === dim) return;
+    hold();
+    // 默认维度不必在这里抹成 undefined —— `stripSearchParams` 中间件在建地址时统一剥掉。
     navigate({
-      search: (prev) => ({ ...prev, dim: v === DEFAULT_DIM ? undefined : v }),
+      search: (prev) => ({ ...prev, dim: v }),
       replace: true,
+      resetScroll: false,
     });
+  };
   const { holdings } = overview;
   const { series } = history;
   const slices = buildAllocation(holdings, dim);
@@ -91,7 +106,8 @@ function Insights() {
         <CardHeader>
           <CardTitle>{t("allocation")}</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        {/* ref 落在「维度 tab + 饼图」这块:换维度时塌的就是它(图例条目数不同 → 高度不同)。 */}
+        <CardContent ref={contentRef} className="flex flex-col gap-4">
           <Tabs value={dim} onValueChange={(v) => setDim(v as AllocDimension)} variant="underline">
             <TabsList>
               {ALLOC_DIMENSIONS.map((d) => (

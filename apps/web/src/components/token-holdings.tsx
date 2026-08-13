@@ -2,6 +2,7 @@ import { SharedLayoutBg } from "@folio/ui";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
+import { useUrlSheet } from "../lib/hooks/use-url-sheet";
 import { buildStack } from "../lib/stack-items";
 import { AssetSheet } from "./asset-sheet";
 import { TokenRowContent } from "./token-row";
@@ -47,15 +48,25 @@ function RowContent({ h }: { h: Holding }) {
 // 故不能包成 <HoldingRow>);onClick 保留,className 会被 cloneElement 合上 "relative"。
 const rowClass = "w-full rounded-xl px-3 py-3 text-left";
 
-export function TokenHoldings({ holdings }: { holdings: Holding[] }) {
+export function TokenHoldings({
+  holdings,
+  selectedKey,
+  onSelect,
+}: {
+  holdings: Holding[];
+  /** 打开的是哪个币(URL 的 `?asset=`)。由首页那层给 —— 见 index.tsx 的 `useAssetParam`。 */
+  selectedKey?: string;
+  onSelect: (key: string | undefined) => void;
+}) {
   const t = useTranslations("Overview");
   const [showDust, setShowDust] = useState(false);
-  const [selected, setSelected] = useState<Holding | null>(null);
-  const [open, setOpen] = useState(false);
-  const onOpen = (h: Holding) => {
-    setSelected(h);
-    setOpen(true);
-  };
+  // 认不出的值(旧链接指向已清空的币、手写乱码)→ 找不到就是没开。回落在这里做,不在 route 的
+  // `validateSearch` 里:那一层收窄的是类型、不过滤值(实测,见 page-tabs.ts 的说明)。
+  // 也**必须在这里**:本组件的两个实例各拿一份 holdings(主列表 / 自定义 Tab),同一个 key
+  // 在哪份里认得出是各自的事。
+  const selected = holdings.find((h) => h.key === selectedKey) ?? null;
+  // 关闭那一下 `?asset=` 就没了,而退场动画还要内容 —— `shown` 滞后一拍给的就是它。
+  const { open, shown } = useUrlSheet(selected);
   // 少于 MIN_FOLD_COUNT 个持仓 → 全展开、不折叠;否则小额行按阈值收进 toggle。
   const canFold = holdings.length >= MIN_FOLD_COUNT;
   const main = canFold ? holdings.filter((h) => h.totalValue >= DUST_THRESHOLD) : holdings;
@@ -66,7 +77,7 @@ export function TokenHoldings({ holdings }: { holdings: Holding[] }) {
     <>
       <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
         {rows.map((h) => (
-          <button key={h.key} type="button" onClick={() => onOpen(h)} className={rowClass}>
+          <button key={h.key} type="button" onClick={() => onSelect(h.key)} className={rowClass}>
             <RowContent h={h} />
           </button>
         ))}
@@ -95,7 +106,13 @@ export function TokenHoldings({ holdings }: { holdings: Holding[] }) {
             {t("smallHoldings", { n: dust.length })} ▸
           </button>
         ))}
-      <AssetSheet holding={selected} open={open} onOpenChange={setOpen} />
+      <AssetSheet
+        holding={shown}
+        open={open}
+        onOpenChange={(o) => {
+          if (!o) onSelect(undefined);
+        }}
+      />
     </>
   );
 }
