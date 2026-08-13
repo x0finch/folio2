@@ -39,7 +39,8 @@ export function TokenRowContent({
       <div className="min-w-0 flex-1">
         {/* min-w-0 让名称在 flex 里可收缩截断,叠 logo/aside(shrink-0)才不会被挤出框、被价值列盖住。 */}
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate font-medium">{item.name}</span>
+          {/* select-text:代币名是内容,长按要能选中复制(行本身是按钮 → base 层不可选)。 */}
+          <span className="min-w-0 select-text truncate font-medium">{item.name}</span>
           {sources && sources.length > 1 ? <AvatarStack items={sources} /> : null}
           {aside}
         </div>

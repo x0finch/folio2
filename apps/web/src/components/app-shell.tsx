@@ -1,6 +1,8 @@
 import { cn, Dock, DockItem, SharedLayoutBg } from "@folio/ui";
+import { SPRING_PRESS } from "@folio/ui/lib/ease";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, Settings, Wallet } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
 import { APP_SCROLL_ID } from "../lib/app-scroll";
@@ -35,6 +37,7 @@ export function AppShell({
   // 每个 tab 记住自己滚到哪了(切走再回来停在原处、第一次进落顶部)。外壳拥有滚动容器,
   // 所以这件事挂在这里;为什么不能只靠 router 见 hook 顶部。
   useAppScrollMemory();
+  const reduce = useReducedMotion() ?? false;
   const t = useTranslations("Nav");
   const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
@@ -138,7 +141,17 @@ export function AppShell({
                 aria-label={t(key)}
                 className="flex size-full items-center justify-center"
               >
-                <Icon className="size-5" />
+                {/* 按下反馈(片3):触摸屏没有 hover,按下这一下是唯一的即时回应。
+                    用 motion 的 whileTap 而不是 CSS `:active` —— iOS Safari 只在元素挂了触摸
+                    监听时才给 `:active`,whileTap 走 pointer 事件,不用那个偏方。
+                    缩的是图标这一层,不碰 <Link> 自己的命中区,也不碰 vendored Dock 的药丸。 */}
+                <motion.span
+                  whileTap={reduce ? undefined : { scale: 0.86 }}
+                  transition={SPRING_PRESS}
+                  className="flex"
+                >
+                  <Icon className="size-5" />
+                </motion.span>
               </Link>
             </DockItem>
           ))}

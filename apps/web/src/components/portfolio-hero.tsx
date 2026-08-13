@@ -94,7 +94,8 @@ export function PortfolioHero({
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>
         <p className="font-medium text-muted-foreground text-xs">{t("totalNetWorth")}</p>
         <div className="mt-2 flex flex-wrap items-baseline gap-3">
-          <div className="flex items-baseline">
+          {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。 */}
+          <div className="flex select-text items-baseline">
             <NumberTicker
               value={totalUsd}
               format={(n) => usd(n).split(".")[0]}
