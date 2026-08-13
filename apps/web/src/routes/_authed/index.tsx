@@ -29,6 +29,7 @@ import { mergeDefiGroups } from "../../lib/account-view";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
+import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/page-tabs";
 import { accountListQuery } from "../../lib/queries/accounts";
 import { connectorCatalogQuery } from "../../lib/queries/connectors";
 import { type PinScopeKey, portfolioKeys } from "../../lib/queries/keys";
@@ -39,7 +40,6 @@ import {
   portfolioOverviewQuery,
   tabPinsQuery,
 } from "../../lib/queries/portfolio";
-import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/page-tabs";
 import { invalidateFor } from "../../lib/queries/refresh";
 import { tagListQuery } from "../../lib/queries/tags";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../lib/server/tab-pins";

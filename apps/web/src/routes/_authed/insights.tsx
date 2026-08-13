@@ -7,9 +7,9 @@ import { HeaderSync } from "../../components/header-sync";
 import { PortfolioChart } from "../../components/portfolio-chart";
 import { InsightsSkeleton } from "../../components/skeletons";
 import { type AllocDimension, buildAllocation } from "../../lib/allocation";
-import { ALLOC_DIMENSIONS, DEFAULT_DIM, isDimension } from "../../lib/page-tabs";
 import { toDailySeries } from "../../lib/history";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
+import { ALLOC_DIMENSIONS, DEFAULT_DIM, isDimension } from "../../lib/page-tabs";
 import {
   portfolioHistoryQuery,
   portfolioListQuery,
