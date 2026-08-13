@@ -40,23 +40,56 @@ export function snapOffsets(
 }
 
 /**
- * 投影 → 最近的合法档位。
+ * 松手落哪一档:**只看这一下拖了多远、多快**,不看松手时停在哪。
  *
- * `projected` 是 motion 按当前速度算出的「照这个速度会滑到哪」(它的衰减模型,比手拍一个常数
- * 靠谱)。我们只回答「离它最近的档位是哪个」,所以这是个纯 number → number,不用模拟手势就能测。
+ * 上一版是「让 motion 按惯性算出投影落点,我们取离它最近的档位」。真机上那样很难用 ——
+ * 实测两档间距 338px,慢拖时投影≈松手点,于是**得拖过 169px(半个间距)才肯换档**,
+ * 拖 120px 松手会弹回去,读起来像「往上滑不认」。
  *
- * 越界两头都夹住:往上过头 → 顶档(不越界);往下过头 → dismiss(猛甩关闭)。
+ * 改成原生那套判据:朝着拖动方向看**相邻**那一档,
+ *   · 拖过间距的 `COMMIT_FRACTION`,或者
+ *   · 甩得比 `FLICK_VELOCITY` 快
+ * 就换过去;否则回原档。于是「轻轻带一下就换档」和「拖一点点会回弹」同时成立,而且**换档距离
+ * 与间距成比例**,不随视口高度漂。
+ *
+ * 这条与 ADR 0041 里「`dragMomentum` 保持开着、惯性交给 motion」**相反,是被真机推翻的**:
+ * 惯性投影既定不了换档距离(恒等于半个间距),又给 dismiss 拖出一条软塌塌的长尾(松手后还要
+ * 骑着惯性滑五百多像素,观感是「以奇怪的速度滑走」)。vaul 自己也不用惯性 —— 它用一条固定曲线
+ * `cubic-bezier(0.32, 0.72, 0, 1)`,而这仓的 `EASE_DRAWER` 就是那条曲线。
  */
-export function nearestSnap(projected: number, offsets: readonly number[]): number {
-  if (offsets.length === 0) return 0;
-  let best = offsets[0];
-  let bestGap = Math.abs(projected - best);
-  for (const offset of offsets) {
-    const gap = Math.abs(projected - offset);
-    if (gap < bestGap) {
-      best = offset;
-      bestGap = gap;
-    }
-  }
-  return best;
+// 拖过相邻两档间距的这个比例就换档(慢拖也认)。
+const COMMIT_FRACTION = 0.2;
+// 甩得比这个快就换档,不看拖了多远(px/s)。
+const FLICK_VELOCITY = 500;
+
+export function chooseSnap({
+  from,
+  offsets,
+  offset,
+  velocity,
+}: {
+  /** 起手时停在哪一档(位移)。 */
+  from: number;
+  /** 全部合法档位,升序,最后一项是 dismiss。 */
+  offsets: readonly number[];
+  /** 这一下拖了多少(正 = 往下)。 */
+  offset: number;
+  /** 松手瞬时速度(px/s,正 = 往下)。 */
+  velocity: number;
+}): number {
+  if (offsets.length === 0) return from;
+  // 方向以速度为准;慢到几乎没速度时才看位移 —— 手指停住再松,那一下该按「拖到哪」算。
+  const direction = Math.abs(velocity) >= FLICK_VELOCITY ? Math.sign(velocity) : Math.sign(offset);
+  if (direction === 0) return from;
+
+  const neighbour =
+    direction > 0
+      ? offsets.find((o) => o > from) // 往下 → 下一档(最后一档是 dismiss)
+      : [...offsets].reverse().find((o) => o < from); // 往上 → 上一档
+  if (neighbour == null) return from; // 已经在这一头的极限
+
+  const gap = Math.abs(neighbour - from);
+  const committed =
+    Math.abs(offset) >= gap * COMMIT_FRACTION || Math.abs(velocity) >= FLICK_VELOCITY;
+  return committed ? neighbour : from;
 }

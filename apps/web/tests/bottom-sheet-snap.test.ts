@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nearestSnap, SHEET_MAX_HEIGHT, snapOffsets } from "../src/lib/bottom-sheet-snap";
+import { chooseSnap, SHEET_MAX_HEIGHT, snapOffsets } from "../src/lib/bottom-sheet-snap";
 
 // 底部抽屉的**策略**(片8 / ADR 0041)。能测的只有这一层:档位怎么换算成位移、投影落哪一档。
 // 跟手手感、惯性参数、掉不掉帧只有真机能验 —— 别拿这几条绿的当「抽屉做好了」。
@@ -28,35 +28,61 @@ describe("snapOffsets —— 档位换算成位移", () => {
   });
 });
 
-describe("nearestSnap —— 投影落哪一档", () => {
-  const offsets = snapOffsets(MAX); // [0, 320, 800]
+// 松手落哪一档。**上一版是「惯性投影落最近档」,被真机推翻了** —— 那样换档距离恒等于半个间距
+// (实测 338px 的间距要拖过 169px 才认),拖 120px 松手会弹回去,像「往上滑不认」。
+// 现在是原生那套:朝拖动方向看相邻那一档,拖过间距的 20% 或甩得够快就换过去。
+describe("chooseSnap —— 松手落哪一档", () => {
+  const offsets = snapOffsets(MAX); // [0, 320, 800];半档 320,dismiss 800
+  const slow = 0;
 
-  it("两档中间偏上 → 顶格;偏下 → 半档", () => {
-    expect(nearestSnap(150, offsets)).toBe(0);
-    expect(nearestSnap(170, offsets)).toBe(320);
+  it("从半档往上拖过 20%(64px)→ 换到顶格", () => {
+    expect(chooseSnap({ from: 320, offsets, offset: -70, velocity: slow })).toBe(0);
   });
 
-  it("半档与 dismiss 之间偏上 → 半档;偏下 → 关闭", () => {
-    expect(nearestSnap(500, offsets)).toBe(320);
-    expect(nearestSnap(700, offsets)).toBe(800);
+  it("从半档往上只拖一点点(50px)→ 回半档,不误换", () => {
+    expect(chooseSnap({ from: 320, offsets, offset: -50, velocity: slow })).toBe(320);
   });
 
-  it("投影远超顶格(猛甩)→ dismiss", () => {
-    expect(nearestSnap(2000, offsets)).toBe(800);
+  it("**拖 120px 必须换档** —— 这条就是真机上那个「往上滑不认」", () => {
+    expect(chooseSnap({ from: 320, offsets, offset: -120, velocity: slow })).toBe(0);
   });
 
-  it("投影为负(往上过头)→ 顶档,不越界", () => {
-    expect(nearestSnap(-500, offsets)).toBe(0);
+  it("往上轻甩(速度够)→ 换档,不看拖了多远", () => {
+    expect(chooseSnap({ from: 320, offsets, offset: -12, velocity: -900 })).toBe(0);
   });
 
-  it("只有一档 + dismiss 时同样正确", () => {
+  it("从半档往下拖过 20%(96px)→ dismiss", () => {
+    expect(chooseSnap({ from: 320, offsets, offset: 120, velocity: slow })).toBe(800);
+  });
+
+  it("从半档往下拖一点点(60px)→ 回半档,不误关", () => {
+    expect(chooseSnap({ from: 320, offsets, offset: 60, velocity: slow })).toBe(320);
+  });
+
+  it("往下猛甩 → dismiss", () => {
+    expect(chooseSnap({ from: 320, offsets, offset: 20, velocity: 1200 })).toBe(800);
+  });
+
+  it("已经在顶格还往上拖 → 原地不动(没有更上一档)", () => {
+    expect(chooseSnap({ from: 0, offsets, offset: -200, velocity: -1500 })).toBe(0);
+  });
+
+  it("从顶格往下拖过 20% → 落半档,不会一步跳到 dismiss", () => {
+    expect(chooseSnap({ from: 0, offsets, offset: 100, velocity: slow })).toBe(320);
+  });
+
+  it("一动没动就松手 → 原档", () => {
+    expect(chooseSnap({ from: 320, offsets, offset: 0, velocity: 0 })).toBe(320);
+  });
+
+  it("方向以速度为准:往下拖过头又往上甩 → 按甩的方向走", () => {
+    expect(chooseSnap({ from: 320, offsets, offset: 40, velocity: -800 })).toBe(0);
+  });
+
+  it("只有一档 + dismiss 时也对", () => {
     const single = snapOffsets(MAX, [1]); // [0, 800]
-    expect(nearestSnap(100, single)).toBe(0);
-    expect(nearestSnap(600, single)).toBe(800);
-  });
-
-  it("正好落在某一档上 → 就是它", () => {
-    expect(nearestSnap(320, offsets)).toBe(320);
+    expect(chooseSnap({ from: 0, offsets: single, offset: 200, velocity: slow })).toBe(800);
+    expect(chooseSnap({ from: 0, offsets: single, offset: 60, velocity: slow })).toBe(0);
   });
 });
 

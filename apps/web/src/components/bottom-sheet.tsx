@@ -2,6 +2,7 @@ import { cn } from "@folio/ui";
 import { EASE_DRAWER } from "@folio/ui/lib/ease";
 import {
   AnimatePresence,
+  animate,
   motion,
   useDragControls,
   useMotionValue,
@@ -15,7 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { nearestSnap, SHEET_MAX_HEIGHT, snapOffsets } from "../lib/bottom-sheet-snap";
+import { chooseSnap, SHEET_MAX_HEIGHT, snapOffsets } from "../lib/bottom-sheet-snap";
 import { useScrollLock } from "../lib/hooks/use-scroll-lock";
 import { useSheetProgress } from "../lib/sheet-progress";
 import { Portal } from "./portal";
@@ -29,12 +30,16 @@ import { Portal } from "./portal";
 //   · 顶格高度扣掉了 `env(safe-area-inset-top)` → 灵动岛压不到是**结构保证**,不是 92% 这种凑的数;
 //   · Esc 能关(旧的没有)。
 //
-// **动画交给 motion,策略留给自己**:惯性投影用 `dragTransition.modifyTarget`(motion 按自己的
-// 衰减模型算「照这速度会滑到哪」,我们只回答「离它最近的合法档位是哪个」),`dragMomentum` 保持开着 ——
-// 关掉它就等于把惯性收回自己手里,那正是旧组件的做法。动画中途反向拖不僵住因此是白拿的。
+// **拖动是直接的,松手用一条固定曲线**(`EASE_DRAWER` = vaul 那条 `cubic-bezier(0.32, 0.72, 0, 1)`)。
+// 这与 ADR 0041 里「惯性交给 motion 的 `dragTransition.modifyTarget`」**相反,是被真机推翻的**:
+// 惯性投影让换档距离恒等于半个间距(实测 338px 的间距要拖过 169px 才认),而 dismiss 会拖出一条
+// 软塌塌的长尾。判据搬进 `chooseSnap`(位移 / 速度双判据,纯函数、可测),动画则是一条可预期的曲线。
+// 拖动本身仍然完全跟手,动画中途反向拖也照旧 —— motion 一开始拖就会把在跑的动画停掉。
 
 // 开合那一下的时长与曲线:与 vendored Drawer 同款(EASE_DRAWER),两处抽屉手感一致。
 const OPEN_TRANSITION = { duration: 0.42, ease: EASE_DRAWER } as const;
+// 换档比开合短一点:开合是「一个面板进来/出去」,换档只是同一个面板挪个位置。
+const SNAP_TRANSITION = { duration: 0.32, ease: EASE_DRAWER } as const;
 const REDUCED_TRANSITION = { duration: 0.18, ease: EASE_DRAWER } as const;
 // 内容区在非顶档时不滚(整块可拖);到顶档才交回原生滚动。
 const DRAG_FROM_CONTENT_PX = 4;
@@ -65,6 +70,10 @@ export function BottomSheet({
   const dismissOffset = offsets[offsets.length - 1] ?? 0;
   // 当前停在哪一档(位移)。默认半档 —— 与被替掉的组件一致。
   const [snap, setSnap] = useState(0);
+  // 这一下拖了多远/多快(松手时用)。放 ref:每帧都在变,进 state 只会白渲染。
+  const drag = useRef({ offset: 0, velocity: 0 });
+  // 这一次的位移变化是「松手落档」还是「开合」——两者时长不同(见上面两个常量)。
+  const settling = useRef(false);
 
   // 打开时锁住背后那个滚动容器(片1 的 hook,锁的是容器不是 body)。
   useScrollLock(open);
@@ -107,20 +116,9 @@ export function BottomSheet({
   // 每次打开都从半档开始(而不是上次关掉时那一档)。
   useEffect(() => {
     if (!open || maxHeight === 0) return;
+    settling.current = false;
     setSnap(offsets.at(-2) ?? 0);
   }, [open, maxHeight, offsets]);
-
-  // 落档由 motion 的惯性动画完成时决定,**不在 onDragEnd 里读位置**:松手那一刻 y 还是松手位置,
-  // 不是投影落点,照它设 state 会跟正在跑的惯性动画抢同一个值。`animationComplete` 是 motion value
-  // 自带的事件,等它停稳再读,顺带把「落到 dismiss 就关闭」也接在这里 —— 手势与退场因此是一条动画。
-  useEffect(() => {
-    return y.on("animationComplete", () => {
-      const landed = nearestSnap(y.get(), offsets);
-      setSnap(landed);
-      // 已经在关的过程中(退场动画也会触发这个事件)就别再关一次。
-      if (landed === dismissOffset && open && maxHeight > 0) onOpenChange(false);
-    });
-  }, [y, offsets, dismissOffset, open, onOpenChange, maxHeight]);
 
   // Esc 关闭 —— 旧的 vendored 件没有这个。
   useEffect(() => {
@@ -162,7 +160,10 @@ export function BottomSheet({
               exit={{ opacity: 0 }}
               transition={reduce ? REDUCED_TRANSITION : OPEN_TRANSITION}
               onClick={() => onOpenChange(false)}
-              className="pointer-events-auto absolute inset-0 bg-background/40 backdrop-blur-sm"
+              // `bg-black/40` 而不是 `bg-background/40`:后者在浅色主题下是**白盖白**,压根不暗 ——
+              // 而背景缩放会在屏幕四周露出一圈,那一圈就成了纯白的「空白」(真机上第一眼看到的就是它)。
+              // 换成与桌面侧滑 `Drawer` 同一个遮罩色,露出的那一圈立刻读作「垫在后面的深色底」。
+              className="pointer-events-auto absolute inset-0 bg-black/40 backdrop-blur-sm"
             />
             <motion.div
               ref={sheetRef}
@@ -175,16 +176,34 @@ export function BottomSheet({
                 maxHeight === 0 ? { y: "100%" } : reduce ? { opacity: 1, y: snap } : { y: snap }
               }
               exit={reduce ? { opacity: 0 } : { y: "100%" }}
-              transition={reduce ? REDUCED_TRANSITION : OPEN_TRANSITION}
+              transition={
+                reduce ? REDUCED_TRANSITION : settling.current ? SNAP_TRANSITION : OPEN_TRANSITION
+              }
               drag="y"
               dragControls={dragControls}
               dragListener={false}
               // 上不过顶格、下不过完全移出;两头都不给弹性 —— 档位本身已经包含了这两个极限。
               dragConstraints={{ top: offsets[0] ?? 0, bottom: dismissOffset }}
               dragElastic={0}
-              // 惯性交给 motion,我们只把它算出的落点改成最近的合法档位。
-              dragTransition={{
-                modifyTarget: (target) => nearestSnap(target, offsets),
+              // 惯性关掉:落点与速度由 `chooseSnap` 定,动画走固定曲线(理由见顶部那段)。
+              dragMomentum={false}
+              onDrag={(_, info) => {
+                drag.current = { offset: info.offset.y, velocity: info.velocity.y };
+              }}
+              onDragEnd={() => {
+                const target = chooseSnap({ from: snap, offsets, ...drag.current });
+                settling.current = true;
+                // 落到 dismiss 就直接关:退场动画本身就是「滑出屏外」(exit 的 y: "100%" 等于
+                // dismiss 那个位移),于是手势与退场是同一条动画,不用再单独跑一段。
+                if (target === dismissOffset) {
+                  onOpenChange(false);
+                  return;
+                }
+                // **命令式地动过去,不指望 `animate` prop**:拖一点点又松手时目标就是当前这一档,
+                // `setSnap` 写进去的值没变 → prop 不会重跑 → 抽屉就停在手指松开的地方不回弹
+                // (真机上就是这个:往下拖 60px 松手,它卡在 60px 处)。
+                setSnap(target);
+                animate(y, target, reduce ? { duration: 0 } : SNAP_TRANSITION);
               }}
               role="dialog"
               aria-modal="true"
