@@ -1,10 +1,19 @@
 import { SharedLayoutBg } from "@folio/ui";
+import { getRouteApi } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import type { Holding } from "../lib/aggregate";
 import { buildStack } from "../lib/stack-items";
 import { TokenRowContent } from "./token-row";
 import { TokenSheet } from "./token-sheet";
+
+// 抽屉开着哪个币 = 首页的 `?token=`(ADR 0043)。`getRouteApi` 拿的是**那条 route 的**类型化
+// useSearch/useNavigate,不必 `import { Route }`(会与 index.tsx 循环引用),也不必让页面把值
+// 当 props 喂下来 —— 本组件只长在首页,它自己知道该读哪个地址。
+//
+// (全局的 `useSearch({ from })` 在本仓用不了:路由类型会退化成只剩 rootRoute,`from` 的合法
+// 路径集合解析成 never。`getRouteApi` 走的是另一条,实测正常。)
+const home = getRouteApi("/_authed/");
 
 // 按代币聚合的持仓列表(v2:LogoAvatar + 名称/symbol / 数量 · 价格 / 市值 · 24h;点击行 → 详情抽屉)。
 // hover 高亮由 beUI SharedLayoutBg 的移动滑块承载(行间无分隔线),小额(< DUST_THRESHOLD)折叠进 footer。
@@ -47,23 +56,15 @@ function RowContent({ h }: { h: Holding }) {
 // 故不能包成 <HoldingRow>);onClick 保留,className 会被 cloneElement 合上 "relative"。
 const rowClass = "w-full rounded-xl px-3 py-3 text-left";
 
-// 「开着哪个币的抽屉,怎么换」——首页把 URL 那一侧包成这个形状递进来(见 index.tsx 的
-// `useTokenParam`)。命名成一个类型而不是在两处各写一遍字段:它是两边之间的约定,改一处
-// 另一处编译期就得跟上。
-export interface TokenSheetSelection {
-  /** 打开的是哪个币,值是 `Holding["key"]`;没有就是没开。 */
-  selectedKey?: string;
-  /** 传 key 打开、传 undefined 关闭 —— 落到 URL 上。 */
-  onSelect: (key: string | undefined) => void;
-}
-
-export function TokenHoldings({
-  holdings,
-  selectedKey,
-  onSelect,
-}: TokenSheetSelection & { holdings: Holding[] }) {
+export function TokenHoldings({ holdings }: { holdings: Holding[] }) {
   const t = useTranslations("Overview");
   const [showDust, setShowDust] = useState(false);
+  const { token: selectedKey } = home.useSearch();
+  const navigate = home.useNavigate();
+  // `replace` + `resetScroll: false` 与主 tab 一致:开合抽屉不进后退栈(否则系统返回键变成
+  // 「倒放我刚点过的每一下」),也不该把身后的列表弹回顶部。
+  const select = (key: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, token: key }), replace: true, resetScroll: false });
   // 认不出的值(旧链接指向已清空的币、手写乱码)→ 找不到就是没开。回落**必须在这里**,不在 route 的
   // `validateSearch` 里:本组件的两个实例各拿一份 holdings(主列表 / 自定义 Tab),同一个 key
   // 在哪份里认得出是各自的事,route 层看不到这个。
@@ -78,7 +79,7 @@ export function TokenHoldings({
     <>
       <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
         {rows.map((h) => (
-          <button key={h.key} type="button" onClick={() => onSelect(h.key)} className={rowClass}>
+          <button key={h.key} type="button" onClick={() => select(h.key)} className={rowClass}>
             <RowContent h={h} />
           </button>
         ))}
@@ -111,7 +112,7 @@ export function TokenHoldings({
         holding={selected}
         open={selected != null}
         onOpenChange={(o) => {
-          if (!o) onSelect(undefined);
+          if (!o) select(undefined);
         }}
       />
     </>
