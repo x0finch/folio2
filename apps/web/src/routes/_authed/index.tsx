@@ -70,8 +70,12 @@ export const Route = createFileRoute("/_authed/")({
   // `token` = 打开的代币详情抽屉(哪个币,值是 Holding 的分组键)。同样只校验形状:那个键是
   // 运行时数据(tokenId / `no-token:…`),认不出的由 TokenHoldings 当作没开,见那里的 `selected`。
   //
-  // 空串按「没带」处理(`?tab=` 手改出来的),所以是 `.min(1)`;`.catch(undefined)` 让任何不成形的
-  // 值(数组、重复参数)也落到同一处,而不是把校验抛出去变成一个 SearchParamError 页面。
+  // 空串按「没带」处理(`?tab=` 手改出来的),所以是 `.min(1)`。
+  //
+  // `.catch(undefined)` 是必须的:schema 抛错会被 router 当成路由错误,整页变成
+  // 「Something went wrong!」外加一坨 zod 报错 JSON(在 accounts 那条上去掉 `.catch` 实测复现过 ——
+  // 空串 `too_small`,重复参数被解析成数组 `invalid_type`)。地址栏里敲坏一个参数不该把页面打没,
+  // `.catch` 把这些统一收成「没带这个参数」。
   validateSearch: z.object({
     tab: z.string().min(1).optional().catch(undefined),
     token: z.string().min(1).optional().catch(undefined),
