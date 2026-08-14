@@ -5,6 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
+import { z } from "zod";
 import { AccountDetailSheet, type AccountRow } from "../../components/account-detail-sheet";
 import { AddAccountModal, type CompleteTarget } from "../../components/add-account-modal";
 import { AvatarStack } from "../../components/avatar-stack";
@@ -28,6 +29,15 @@ import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "../../lib/queries/tags";
 
 export const Route = createFileRoute("/_authed/accounts")({
+  // 详情抽屉进 URL(与首页主 tab 同一套,ADR 0043):刷新还停在这个账户、链接能分享。
+  // **只校验形状,不校验值** —— 账户 id 是运行时数据(还可能指向已删/不在当前 Portfolio 的账户),
+  // 认不出的由组件当作没开,见下面的 `selected`。
+  //
+  // `.catch(undefined)` 不是装饰:schema 一旦抛错,router 就把它当路由错误,整页变成
+  // 「Something went wrong!」外加一坨 zod 报错 JSON。实测(去掉 `.catch` 复现):`?account=`
+  // 空串触发 `too_small`,`?account=a&account=b` 被解析成数组触发 `invalid_type` —— 两个都只是
+  // 地址栏里敲坏了一个参数,不该把页面打没。`.catch` 把它们收成「没带这个参数」。
+  validateSearch: z.object({ account: z.string().min(1).optional().catch(undefined) }),
   // 账户域的读取已迁 react-query(#413):loader 只**预取**,拼行的活挪进组件 —— 四个来源现在
   // 各自是一条查询、各自的到达时刻不同,拼装得跟着数据走而不是跟着 loader 走。
   loader: async ({ context: { queryClient } }) => {
@@ -77,17 +87,19 @@ function Accounts() {
   const archived = rows.filter((r) => r.archivedAt != null);
   const total = activeAccountsTotal(rows); // 抽屉占比分母(顶部不显总额)
 
-  // 详情侧栏:存 id 而非行对象 —— invalidate 后从新 rows 派生,侧栏内容随刷新自动更新(归档态等)。
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  // 详情侧栏**住在 URL 里**(ADR 0043),存 id 而非行对象 —— invalidate 后从新 rows 派生,
+  // 侧栏内容随刷新自动更新(归档态等)。认不出的 id(账户已删、或不在当前 Portfolio 的作用域内,
+  // 上面按 memberIds 筛过)→ 找不到就是没开。
+  const { account: selectedId } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const [addOpen, setAddOpen] = useState(false);
   // 补录目标(A3):列表/详情点补录 icon → 开加账户 modal 的补录模式(见 AddAccountModal completeFor)。
   const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
-  const openRow = (r: AccountRow) => {
-    setSelectedId(r.id);
-    setOpen(true);
-  };
+  // `replace` + `resetScroll: false` 与主 tab 一致:开合抽屉不进后退栈,也不把身后的列表弹回顶部。
+  const setAccount = (id: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, account: id }), replace: true, resetScroll: false });
+  const openRow = (r: AccountRow) => setAccount(r.id);
   const startComplete = (a: AccountRow) =>
     setCompleteTarget({ accountId: a.id, connectorId: a.connectorId, credsSafe: a.credsSafe });
 
@@ -137,8 +149,10 @@ function Accounts() {
         total={total}
         allTags={allTags}
         tagLinks={tagLinks}
-        open={open}
-        onOpenChange={setOpen}
+        open={selected != null}
+        onOpenChange={(o) => {
+          if (!o) setAccount(undefined);
+        }}
         onComplete={startComplete}
       />
     </div>

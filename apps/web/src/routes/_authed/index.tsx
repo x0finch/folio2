@@ -10,10 +10,11 @@ import {
   useMediaQuery,
 } from "@folio/ui";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, stripSearchParams } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
+import { z } from "zod";
 import { HeaderSync } from "../../components/header-sync";
 import { DefiPositions, PerpPositionsList } from "../../components/holdings-sections";
 import { PinTargetLabel } from "../../components/pin-target-label";
@@ -26,6 +27,7 @@ import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-pic
 import { TokenHoldings } from "../../components/token-holdings";
 import { useConnectorLabels } from "../../hooks/use-connector-labels";
 import { mergeDefiGroups } from "../../lib/account-view";
+import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/home-tabs";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
@@ -60,6 +62,26 @@ function revealTab(el: HTMLElement) {
 }
 
 export const Route = createFileRoute("/_authed/")({
+  // 主 tab 进 URL(ADR 0043):刷新还停在原 tab、链接能分享,滚动位置也按 href 分开记(片1)。
+  // **这里只校验形状,不校验值** —— 与 insights 的 `dim` 不同(那边合法值是有限集,回落已收进
+  // `validateSearch`):这里的合法值含自定义 Tab 的 pin id,是运行时数据,route 层根本不知道有哪些。
+  // 所以认不出的值(pin 被删、手写乱码)只能由组件那套 clamp 回落,见下面的 `shownActive`。
+  // `token` = 打开的代币详情抽屉(哪个币,值是 Holding 的分组键)。同样只校验形状:那个键是
+  // 运行时数据(tokenId / `no-token:…`),认不出的由 TokenHoldings 当作没开,见那里的 `selected`。
+  //
+  // 空串按「没带」处理(`?tab=` 手改出来的),所以是 `.min(1)`。
+  //
+  // `.catch(undefined)` 是必须的:schema 抛错会被 router 当成路由错误,整页变成
+  // 「Something went wrong!」外加一坨 zod 报错 JSON(在 accounts 那条上去掉 `.catch` 实测复现过 ——
+  // 空串 `too_small`,重复参数被解析成数组 `invalid_type`)。地址栏里敲坏一个参数不该把页面打没,
+  // `.catch` 把这些统一收成「没带这个参数」。
+  validateSearch: z.object({
+    tab: z.string().min(1).optional().catch(undefined),
+    token: z.string().min(1).optional().catch(undefined),
+  }),
+  // 默认 tab 不写进 URL:`/` 就是 tokens,只有别的 tab 才挂 `?tab=`。交给官方中间件在建地址时统一剥,
+  // 而不是每个导航调用点自己记得把默认值抹成 undefined。(`token` 没有默认值,不参与。)
+  search: { middlewares: [stripSearchParams({ tab: DEFAULT_TAB })] },
   // 本页的读取**已全部迁到 react-query**(ADR 0038):loader 只**预取**、不返回任何数据,
   // 组件按选中的组合 id 从缓存读(本文件已无 `useLoaderData`)。
   loader: async ({ context: { queryClient } }) => {
@@ -117,10 +139,33 @@ function Overview() {
   const connectorLabel = useConnectorLabels();
 
   // 单一 tab 状态:"tokens" / "perps" / "defi"(视角)或 pin id(自定义 Tab)。默认 tokens。
-  const [active, setActive] = useState("tokens");
-  // 切 tab 也要包 startTransition:切到自定义 Tab 会挂起(那份数据按 pin 另拉一遍),
-  // 不包就闪骨架。切组合那一半包在 usePortfolio 的 select 里。
-  const selectTab = (v: string) => startTransition(() => setActive(v));
+  // **住在 URL 里**(ADR 0043):刷新回原 tab、链接可分享,每个 tab 各记自己的滚动位置。
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const active = tab ?? DEFAULT_TAB;
+  // `replace` 而不是 push:iOS/Android 的原生约定都是 tab 切换**不进**后退栈,否则系统返回键
+  // 变成「倒放我刚点过的每一下」。默认 tab 写成 `undefined` → 从 URL 里去掉,不留 `?tab=tokens`。
+  //
+  // 切到自定义 Tab 会挂起(那份数据按 pin 另拉一遍),以前靠 `startTransition` 包着才不闪骨架 ——
+  // 现在不用了:router 的所有导航本来就跑在 React transition 里(`Transitioner` 把
+  // `router.startTransition` 换成了 `React.startTransition`,`Link` 上那个同名 prop 因此被标了废弃)。
+  //
+  // `resetScroll: false` 是**必须的**:router 的 scrollRestoration 把 `?tab=` 变化当成一个新地址,
+  // 新地址没有滚动记录 → 主动 `scrollTo({top:0})`(调用点抓到过)。实测滚到 y=600 点一下 tab,画面
+  // 自己弹回顶部,观感就是「整页刷新了一下」;而 tab 条本身在页面中段,弹到顶等于把刚点的东西顶出视野。
+  //
+  // 换内容那一下**高度还是会塌**、滚动位置被浏览器夹掉,是**另一件事**(main 上就有,与 tab 进不进
+  // URL 无关)。成因是「panel 被卸载 + 所有 tab 共用一个滚动区」,原生 tab 两条都不是这样 —— 治法
+  // (panel 常驻 `<Activity>` + 每个 tab 自己的滚动容器)见 #483,不在这一片里凑合。
+  const selectTab = (v: string) => {
+    if (v === active) return; // 值没变就别导航
+    // 默认 tab 不必在这里抹成 undefined —— `stripSearchParams` 中间件在建地址时统一剥掉。
+    navigate({
+      search: (prev) => ({ ...prev, tab: v }),
+      replace: true,
+      resetScroll: false,
+    });
+  };
 
   const { data: tags } = useSuspenseQuery(tagListQuery());
   const { data: pins } = useSuspenseQuery(tabPinsQuery());
@@ -158,15 +203,14 @@ function Overview() {
   // active 可能短暂指向「还没挂上的 pin」—— 建 pin 后即便 await 了 invalidate,它 resolve 的时刻
   // 与新数据在组件里可见之间仍有空窗(实测)。渲染用最后一个仍有效的值,新 tab 挂上自动切过去,
   // 药丸/内容不闪回 Tokens。
+  // tab 进 URL 之后这段**同时**兼了另一件事:`?tab=` 指向一个不存在的 pin(被删了、或手写乱码)时
+  // 回落到默认 tab —— 不空白、不报错。URL 上那个死值**故意不清掉**:清它就得区分「这个 pin 不存在」
+  // 与「这个 pin 还没挂上」,而后者正是上面那段存在的理由。
   const isKnownTab = (v: string) =>
-    v === "tokens" || v === "perps" || v === "defi" || pins.some((p) => p.id === v);
-  const lastKnownActive = useRef("tokens");
+    KIND_TABS.includes(v as KindTab) || pins.some((p) => p.id === v);
+  const lastKnownActive = useRef<string>(DEFAULT_TAB);
   if (isKnownTab(active)) lastKnownActive.current = active;
-  const shownActive = isKnownTab(active)
-    ? active
-    : isKnownTab(lastKnownActive.current)
-      ? lastKnownActive.current
-      : "tokens";
+  const shownActive = pickShownTab(active, lastKnownActive.current, isKnownTab);
 
   // activePin 只看 pins(不依赖具体数据)→ 可在拉取前定 scope。
   const activePin = pins.find((p) => p.id === shownActive) ?? null;

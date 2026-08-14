@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Holding } from "./aggregate";
 
 // 分配 rollup(Insights):把 Holdings 按维度切成饼图切片。三维都从 holdings/sources 派生,
@@ -6,7 +7,14 @@ import type { Holding } from "./aggregate";
 //   chain   —— 各 HoldingSource 的 platform(链/交易所/perp/manual,即"在哪")
 //   account —— 各 HoldingSource 的账户
 // 超过 topN 的尾部合并成一条 key="__others__"(UI 渲染为"其他")。纯函数、可测。
-export type AllocDimension = "token" | "chain" | "account";
+// 维度的合法值**只在这里写一次**,类型由它派生(`z.infer`)—— 不是类型和数组各写一遍再想办法
+// 让两者对上。这也是 Insights 那个 `?dim=` 的校验器本体:route 直接把它交给 `validateSearch`
+// (zod v4 是 Standard Schema,Router 不需要 adapter),`.catch()` 就是「认不出的值回落默认」。
+export const ALLOC_DIMENSION = z.enum(["token", "chain", "account"]);
+export type AllocDimension = z.infer<typeof ALLOC_DIMENSION>;
+// tab 条按这个顺序渲染。`.options` 直接来自上面那份声明 —— 将来多一个维度,tab 条不可能漏掉它。
+export const ALLOC_DIMENSIONS = ALLOC_DIMENSION.options;
+export const DEFAULT_DIM: AllocDimension = "token";
 export interface AllocSlice {
   key: string;
   label: string;
