@@ -134,6 +134,16 @@ test.describe("锁屏", () => {
     await page.reload();
     await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
 
+    // 登出前先把认证器里的凭据清空。**这不是剧情,是夹具的坑**:登录页一挂载就静默发一次
+    // conditional-UI 的 passkey autofill(login.tsx 里的 `signIn.passkey({ autoFill: true })`)。
+    // 真浏览器里那个请求只是把已注册的 passkey 摆进邮箱框的建议里、等用户挑一条,不挑就一直不响应;
+    // 而虚拟认证器带着 `automaticPresenceSimulation`,会**自己**替用户应答掉 —— 于是刚登出就在
+    // /login 上又登了回来,URL 弹回 `/`,下面这句断言只剩几十毫秒的窗口可抓。
+    //
+    // 本地探针量过这一串:sign-out → 129ms 后到 /login → 141ms 时请求 options → 195ms 时
+    // verify-authentication,然后弹回 `/`;`toHaveURL` 每 ~440ms 才轮一次,抓不抓得到全看运气
+    // (CI 上就漏过一次,run 31831289251)。清掉凭据之后同一段只剩一个 sign-out 请求,URL 稳在 /login。
+    await authenticator.clearCredentials();
     await page.getByRole("button", { name: /sign out/i }).click();
     await expect(page).toHaveURL(/\/login/);
     // 「已锁」标记必须被清掉,否则下一次登录直接又落在锁屏。
@@ -197,6 +207,10 @@ test.describe("锁屏", () => {
     await page.reload();
     await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
 
+    // 同上一条用例:不清的话,虚拟认证器会自动应答登录页的 passkey autofill,把人当场又登回去。
+    // 这里还多一层顺理成章 —— 这条用例的前提本来就是「本机没有可用凭据」,上面那句
+    // `deviceCredential: null` 清的只是 localStorage 里的记录,认证器里那把钥匙还在。
+    await authenticator.clearCredentials();
     await page.getByRole("button", { name: /sign out/i }).click();
     await expect(page).toHaveURL(/\/login/);
     // 锁屏的登出是客户端跳转(signOut → navigate),落地后表单还会再重挂一次 —— 直接填会撞上

@@ -35,9 +35,13 @@ const HYDRATION_PROBE = {
 } as const;
 
 export async function gotoHydrated(page: Page, path: keyof typeof HYDRATION_PROBE) {
-  const probe = page.waitForResponse((r) => r.url().includes(HYDRATION_PROBE[path]));
-  await page.goto(path);
-  await probe;
+  // `waitUntil: "commit"` 一落地就返回(新文档已开始加载,JS 还没跑),**监听必须挂在这之后**:
+  // 挂在 goto 之前的话,上一页刚发出的同一个请求会把 `waitForResponse` 立刻喂饱 —— 「客户端活了」
+  // 于是是假的,填进表单的值会被随后 hydrate 出来的受控 state 冲成空(实测 4 次中 2 次:填完
+  // 200ms 后邮箱框自己清空,回车提交被 `required` 拦下,人停在 /login)。
+  // 反过来「等 load 完再挂」也不行:那时客户端可能已经发过请求了,监听会一直等到超时。
+  await page.goto(path, { waitUntil: "commit" });
+  await page.waitForResponse((r) => r.url().includes(HYDRATION_PROBE[path]));
 }
 
 /**
