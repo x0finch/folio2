@@ -19,6 +19,15 @@ export interface VirtualAuthenticator {
   credentials(): Promise<
     Array<{ credentialId: string; rpId: string; isResidentCredential: boolean }>
   >;
+  /**
+   * 把凭据清空,认证器本身留着 —— 「这台设备上一把 passkey 也没有」。
+   *
+   * **别改成 `remove()`**:整个认证器拆掉会让 `isConditionalMediationAvailable()` 翻假,登录页那段
+   * autofill 连 options 都不再请求,而 `gotoHydrated("/login")` 正是拿那个请求当「客户端活了」的
+   * 信号(见 fixtures/app.ts 的 HYDRATION_PROBE)—— 于是等到超时。留着认证器、只清凭据,
+   * 两件事就都对了:autofill 照常发起,但没有任何凭据可应答。
+   */
+  clearCredentials(): Promise<void>;
   remove(): Promise<void>;
 }
 
@@ -76,6 +85,9 @@ export async function addAuthenticator(
         rpId: c.rpId ?? "",
         isResidentCredential: c.isResidentCredential,
       }));
+    },
+    async clearCredentials() {
+      await cdp.send("WebAuthn.clearCredentials", { authenticatorId });
     },
     async remove() {
       await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
