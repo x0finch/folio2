@@ -5,10 +5,12 @@
 # 官方文档写明:存在 `.dev.vars.<env>` 时 `.dev.vars` 完全不加载 —— 所以日常开发不受影响,
 # 真凭据也不会被 e2e 读到。
 #
-# BETTER_AUTH_URL 必须与 Playwright 驱动的 origin 一致:passkey 的 rpID 从它派生,不一致则每次
-# ceremony 都失败,且没有有用的报错。
+# BETTER_AUTH_URL 必须与 Playwright 驱动的 origin **逐字**一致:passkey 校验的 expectedOrigin 是
+# 完整 origin(带 scheme),不一致则每次 ceremony 都失败,且没有有用的报错。**https 不是笔误** ——
+# vite 的 server/preview 都配了自签名证书(见 vite.config.ts:要的是 HTTP/2),所以本地和 CI 上
+# 那个 server 都只听 https。
 BETTER_AUTH_SECRET=e2e-fake-auth-secret-000000000000
-BETTER_AUTH_URL=http://localhost:3000
+BETTER_AUTH_URL=https://localhost:3100
 # 必须是 **32 字节的 base64**(见 connectors/basic/src/crypto.ts 的 importKey)—— 少一个字节就
 # CryptoError,而加账户要用它加密 API secret。这串解出来正好是 "e2e-fake-secrets-key-32-bytes!!!"。
 SECRETS_KEY=ZTJlLWZha2Utc2VjcmV0cy1rZXktMzItYnl0ZXMhISE=

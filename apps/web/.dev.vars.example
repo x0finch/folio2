@@ -1,5 +1,7 @@
 BETTER_AUTH_SECRET=replace-with-openssl-rand-hex-32
-BETTER_AUTH_URL=http://localhost:3000
+# https —— 本地 dev / preview 都配了自签名证书(vite.config.ts,为的是 HTTP/2)。这里的 scheme 必须
+# 和实际访问的 origin 逐字一致,否则 passkey 的 expectedOrigin 对不上,每个 ceremony 都失败。
+BETTER_AUTH_URL=https://localhost:3000
 # base64 of 32 random bytes — `openssl rand -base64 32` (AES-GCM key for encrypting credentials)
 SECRETS_KEY=replace-with-openssl-rand-base64-32
 # Zerion API key (OPTIONAL — EVM defaults to Rabby, which needs no key; Zerion is kept as an
