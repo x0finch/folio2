@@ -15,7 +15,6 @@ import {
   DEFAULT_DIM,
 } from "../../lib/allocation";
 import { toDailySeries } from "../../lib/history";
-import { useHoldHeight } from "../../lib/hooks/use-hold-height";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import {
   portfolioHistoryQuery,
@@ -23,7 +22,7 @@ import {
   portfolioOverviewQuery,
 } from "../../lib/queries/portfolio";
 
-// 维度的标签。键的全集在 `lib/page-tabs`(那边还管回落判据),这里只配文案 ——
+// 维度的标签。键的全集在 `lib/allocation.ts`(那份 schema 既是合法值也是回落判据),这里只配文案 ——
 // `Record` 少配一个维度编译期就报,不会出现「新维度悄悄没标签」。
 const DIM_LABEL: Record<AllocDimension, string> = {
   token: "byToken",
@@ -72,11 +71,11 @@ function Insights() {
   const navigate = Route.useNavigate();
   // `resetScroll: false`:换维度不该动滚动位置。scrollRestoration 认的是地址,`?dim=` 一变就是新地址、
   // 没有记录 → 归零,观感等于整页刷新一下(首页那处同理,有更细的说明)。
-  // `useHoldHeight` 管的是另一半:换内容那一下高度塌了、滚动位置被浏览器夹掉(与导航无关)。
-  const { ref: contentRef, hold } = useHoldHeight(dim);
+  //
+  // 换内容那一下**高度还是会塌**、滚动位置被浏览器夹掉 —— 那是另一件事(main 上就有,与本页
+  // tab 进不进 URL 无关),成因是「panel 被卸载 + 所有 tab 共用一个滚动区」,治法见 #483。
   const setDim = (v: AllocDimension) => {
     if (v === dim) return;
-    hold();
     // 默认维度不必在这里抹成 undefined —— `stripSearchParams` 中间件在建地址时统一剥掉。
     navigate({
       search: (prev) => ({ ...prev, dim: v }),
@@ -110,8 +109,7 @@ function Insights() {
         <CardHeader>
           <CardTitle>{t("allocation")}</CardTitle>
         </CardHeader>
-        {/* ref 落在「维度 tab + 饼图」这块:换维度时塌的就是它(图例条目数不同 → 高度不同)。 */}
-        <CardContent ref={contentRef} className="flex flex-col gap-4">
+        <CardContent className="flex flex-col gap-4">
           <Tabs value={dim} onValueChange={(v) => setDim(v as AllocDimension)} variant="underline">
             <TabsList>
               {ALLOC_DIMENSIONS.map((d) => (

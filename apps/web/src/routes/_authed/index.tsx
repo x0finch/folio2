@@ -29,7 +29,6 @@ import { useConnectorLabels } from "../../hooks/use-connector-labels";
 import { mergeDefiGroups } from "../../lib/account-view";
 import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/home-tabs";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
-import { useHoldHeight } from "../../lib/hooks/use-hold-height";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
 import { accountListQuery } from "../../lib/queries/accounts";
@@ -169,11 +168,11 @@ function Overview() {
   // 新地址没有滚动记录 → 主动 `scrollTo({top:0})`(调用点抓到过)。实测滚到 y=600 点一下 tab,画面
   // 自己弹回顶部,观感就是「整页刷新了一下」;而 tab 条本身在页面中段,弹到顶等于把刚点的东西顶出视野。
   //
-  // 换内容那一下高度会塌、滚动位置被浏览器夹掉,是**另一件事**(main 上就有)→ `useHoldHeight`。
-  const { ref: contentRef, hold } = useHoldHeight(active);
+  // 换内容那一下**高度还是会塌**、滚动位置被浏览器夹掉,是**另一件事**(main 上就有,与 tab 进不进
+  // URL 无关)。成因是「panel 被卸载 + 所有 tab 共用一个滚动区」,原生 tab 两条都不是这样 —— 治法
+  // (panel 常驻 `<Activity>` + 每个 tab 自己的滚动容器)见 #483,不在这一片里凑合。
   const selectTab = (v: string) => {
-    if (v === active) return; // 值没变就别导航 —— 也别撑高度,那样就没有下一轮渲染去放开它
-    hold();
+    if (v === active) return; // 值没变就别导航
     // 默认 tab 不必在这里抹成 undefined —— `stripSearchParams` 中间件在建地址时统一剥掉。
     navigate({
       search: (prev) => ({ ...prev, tab: v }),
@@ -341,8 +340,7 @@ function Overview() {
           .
         </p>
       ) : (
-        // 这个容器就是换 tab 时会塌的那块(tab 条 + 内容)—— 撑住它就够了。
-        <div ref={contentRef} className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4">
           {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
               选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
           <div className="flex items-center gap-4">
