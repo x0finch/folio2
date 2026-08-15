@@ -20,4 +20,20 @@ describe("首页 loader 不再等待慢查询", () => {
     expect(src).not.toMatch(/await queryClient\.ensureQueryData\(portfolioOverviewQuery/);
     expect(src).not.toMatch(/await queryClient\.ensureQueryData\(portfolioHistoryQuery/);
   });
+
+  // #488 票 4:tab 条有自己的轻请求。发出不等;目录 / 账户 / 标签不再走首屏。
+  it("发出 tab 条轻请求,但不 await", () => {
+    const src = stripComments(readFileSync(SRC, "utf8"));
+    expect(src).toContain("homeTabStripQuery(");
+    expect(src).not.toMatch(/await queryClient\.ensureQueryData\(homeTabStripQuery/);
+  });
+
+  it("连接器目录、账户清单、标签清单、裸 pin 清单不进 loader", () => {
+    const src = stripComments(readFileSync(SRC, "utf8"));
+    const loader = src.slice(src.indexOf("loader:"), src.indexOf("component:"));
+    expect(loader).not.toContain("connectorCatalogQuery");
+    expect(loader).not.toContain("accountListQuery");
+    expect(loader).not.toContain("tagListQuery");
+    expect(loader).not.toContain("tabPinsQuery");
+  });
 });

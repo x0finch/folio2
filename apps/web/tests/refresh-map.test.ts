@@ -154,13 +154,13 @@ describe("刷新映射表", () => {
 
   // 刻意的窄口径:增删一个自定义 Tab 不改任何余额,把昂贵的总览连带拉一遍是白花钱。
   // 这条钉住那个决定 —— 有人把它并进 `portfolio.write` 时会红。
-  it("portfolio.pin.write 只刷 Tab 清单,不碰总览", async () => {
-    seed(portfolioKeys.pins());
+  it("portfolio.pin.write 只刷 tab 条,不碰总览", async () => {
+    seed(portfolioKeys.tabStrip("pf-1"));
     seed(portfolioKeys.overview("pf-1"));
 
     await invalidateFor(queryClient, "portfolio.pin.write");
 
-    expect(isInvalidated(portfolioKeys.pins())).toBe(true);
+    expect(isInvalidated(portfolioKeys.tabStrip("pf-1"))).toBe(true);
     expect(isInvalidated(portfolioKeys.overview("pf-1"))).toBe(false);
   });
 

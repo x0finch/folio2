@@ -1,3 +1,5 @@
+import { type DefiGroup, mergeDefiGroups } from "./account-view";
+
 // 首页主 tab 的合法值与回落规则(片5 / ADR 0043)。
 //
 // **为什么单独一个文件**:`pickShownTab` 要被单测钉住,而从 route 文件 import 任何东西都会连带
@@ -30,4 +32,53 @@ export function pickShownTab(
   if (isKnown(requested)) return requested;
   if (isKnown(lastKnown)) return lastKnown;
   return DEFAULT_TAB;
+}
+
+// 三个视角 tab 谁出现:Tokens 恒在,永续 / DeFi 有货才挂。顺序固定,和今天画面上的一样。
+// 首页 tab 条用轻请求给的两个布尔值来算,不再等总览拆完 sections —— 列表后到时 tab 不能再增删。
+export function kindTabsOf(hasPerps: boolean, hasDefi: boolean): KindTab[] {
+  const tabs: KindTab[] = ["tokens"];
+  if (hasPerps) tabs.push("perps");
+  if (hasDefi) tabs.push("defi");
+  return tabs;
+}
+
+// 和总览画面同一套「算不算有永续 / DeFi」:有仓位或权益才出永续 tab;DeFi 跨账户合并后还有组才出。
+// 入参就是 `toAccountSections` 的出口,轻请求和列表共用,tab 条才不会在数据到齐后跳一下。
+type KindSection = {
+  perp: { positions: readonly unknown[]; equity: unknown } | null;
+  defi: DefiGroup[];
+};
+
+export function kindPresence(sections: KindSection[]): {
+  hasPerps: boolean;
+  hasDefi: boolean;
+} {
+  return {
+    hasPerps: sections.some(
+      (s) => s.perp != null && (s.perp.positions.length > 0 || s.perp.equity != null),
+    ),
+    hasDefi: mergeDefiGroups(sections).length > 0,
+  };
+}
+
+// 自定义 Tab 的显示名(+ connector 的图):服务端解析好再下发,客户端不再为了渲染 tab 名去拉目录。
+// `#` / `@` 不进这里 —— 那是展示前缀,渲染时按 kind 加上。
+export function resolvePinLabel(
+  pin: {
+    kind: "connector" | "tag" | "account";
+    connectorId?: string | null;
+    tagId?: string | null;
+    accountId?: string | null;
+  },
+  lookup: {
+    tagName: (id: string) => string | undefined;
+    accountName: (id: string) => string | undefined;
+    connector: (id: string) => { name: string; logo?: string };
+  },
+): { name: string; logo?: string } {
+  if (pin.kind === "tag") return { name: lookup.tagName(pin.tagId ?? "") ?? "" };
+  if (pin.kind === "account") return { name: lookup.accountName(pin.accountId ?? "") ?? "" };
+  const c = lookup.connector(pin.connectorId ?? "");
+  return c.logo ? { name: c.name, logo: c.logo } : { name: c.name };
 }

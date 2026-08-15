@@ -24,18 +24,21 @@ export function HeroSkeleton() {
   return <Skeleton className="h-56 w-full rounded-xl" />;
 }
 
+export function TabStripSkeleton() {
+  return (
+    <div className="flex items-center justify-between">
+      <Skeleton className="h-9 w-64 rounded-full" />
+      <Skeleton className="h-4 w-24" />
+    </div>
+  );
+}
+
 export function HoldingsSkeleton() {
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <Skeleton className="h-9 w-64 rounded-full" />
-        <Skeleton className="h-4 w-24" />
-      </div>
-      <div className="flex flex-col gap-4">
-        {ROWS_5.map((k) => (
-          <Row key={k} />
-        ))}
-      </div>
+      {ROWS_5.map((k) => (
+        <Row key={k} />
+      ))}
     </div>
   );
 }

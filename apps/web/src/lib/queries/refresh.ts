@@ -76,10 +76,10 @@ export const REFRESH_MAP = {
   "portfolio.write": [portfolioKeys.all, tagKeys.all],
 
   /**
-   * 自定义 Tab 的新建 / 改目标 / 删除。**只刷 Tab 清单,不刷总览** ——
+   * 自定义 Tab 的新建 / 改目标 / 删除。**只刷 tab 条,不刷总览** ——
    * 增删一个 Tab 不改任何余额,连带把昂贵的总览拉一遍是白花钱。
    */
-  "portfolio.pin.write": [portfolioKeys.pins()],
+  "portfolio.pin.write": [portfolioKeys.tabs()],
 
   /** 切展示币种:写完 cookie 刷这一条,汇率与格式跟着换。总览数据是 USD 计价的,不受影响。 */
   "preference.currency": [preferenceKeys.currency()],
