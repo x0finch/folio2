@@ -1,8 +1,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
-import { deltaTone, NO_VALUE } from "../src/routes/_authed/-home/holdings/delta-display";
-import { ValueDelta } from "../src/routes/_authed/-home/holdings/value-delta";
+import { deltaTone, NO_VALUE, ValueDelta } from "../src/routes/_authed/-home/holdings/value-delta";
 
 afterEach(cleanup);
 

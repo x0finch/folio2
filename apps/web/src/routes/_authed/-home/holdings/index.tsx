@@ -14,9 +14,10 @@ import {
 } from "../../../../lib/queries/portfolio";
 import { useHomeTabSelection } from "../tab/selection";
 import { attachDefiGains, attachHoldingGains } from "./attach-gains";
+import { DefiPositions } from "./defi";
+import { PerpPositionsList } from "./perp";
 import { SectionList } from "./section-list";
-import { DefiPositions, PerpPositionsList } from "./sections";
-import { TokenHoldings } from "./token-holdings";
+import { TokenHoldings } from "./tokens";
 import { GainSkeleton } from "./value-delta";
 
 const ROWS_3 = ["r1", "r2", "r3"];

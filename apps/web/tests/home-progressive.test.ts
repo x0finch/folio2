@@ -23,7 +23,7 @@ describe("骨架与真内容同形", () => {
 
   it("持仓行骨架贴合真实行的 padding 与头像尺寸", () => {
     const skel = src("routes/_authed/-home/index.tsx");
-    expect(src("routes/_authed/-home/holdings/token-holdings.tsx")).toContain("px-3 py-3");
+    expect(src("routes/_authed/-home/holdings/tokens/index.tsx")).toContain("px-3 py-3");
     expect(skel).toContain("px-3 py-3");
     expect(skel).toContain("size-8");
   });

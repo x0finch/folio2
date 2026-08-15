@@ -3,7 +3,7 @@ import type { HoldingSource } from "../src/lib/aggregate";
 import {
   groupByAccount,
   groupByPlatform,
-} from "../src/routes/_authed/-home/holdings/source-groups";
+} from "../src/routes/_authed/-home/holdings/tokens/source-groups";
 
 const src = (p: {
   platformId: string;

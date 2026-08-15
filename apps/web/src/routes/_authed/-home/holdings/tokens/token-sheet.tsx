@@ -15,18 +15,18 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
-import type { Holding } from "../../../../lib/aggregate";
-import { collapseToSlots } from "../../../../lib/collapse-to-slots";
-import { formatNumber } from "../../../../lib/format-number";
-import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
-import { holdingHistoryQuery } from "../../../../lib/queries/accounts";
-import { signedUsd } from "../../../../lib/signed-usd";
-import { GainExplainer } from "../hero/gain-explainer";
-import { type Range, RangeTabs, rangeSince } from "../hero/range-tabs";
-import { TrendPanel } from "../hero/trend-panel";
-import { AccountName } from "./account-name";
-import { AvatarStack } from "./avatar-stack";
-import { deltaTone, NO_VALUE } from "./delta-display";
+import { AccountName } from "../../../../../components/account-name";
+import { AvatarStack } from "../../../../../components/avatar-stack";
+import type { Holding } from "../../../../../lib/aggregate";
+import { collapseToSlots } from "../../../../../lib/collapse-to-slots";
+import { formatNumber } from "../../../../../lib/format-number";
+import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
+import { holdingHistoryQuery } from "../../../../../lib/queries/accounts";
+import { signedUsd } from "../../../../../lib/signed-usd";
+import { GainExplainer } from "../../hero/gain-explainer";
+import { type Range, RangeTabs, rangeSince } from "../../hero/range-tabs";
+import { TrendPanel } from "../../hero/trend-panel";
+import { deltaTone, NO_VALUE } from "../value-delta";
 import { ACCOUNT_SLOTS, groupByAccount, groupByPlatform, type SourceGroup } from "./source-groups";
 
 // 代币 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
@@ -239,7 +239,7 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
           <div>
             <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
             {/* 24h 盈亏 + %:共用一个前置符号、同色,与代币行/hero 一致。
-                算不出 → `—`(全站三态口径,见 ./delta-display)。 */}
+                算不出 → `—`(全站三态口径,见 ../value-delta)。 */}
             {holding.gain24h == null ? (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
             ) : (

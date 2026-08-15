@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // `<TokenRowContent>` 有**三条**渲染路径,而 24h 盈亏(ADR 0040)是靠调用方逐个传进去的:
-//   · token-holdings —— 首页 Tokens 视图
+//   · holdings/tokens —— 首页 Tokens 视图
 //   · holdings-cards —— 账户抽屉里非 manual 账户的现货区
 //   · manual-tokens-panel —— 账户抽屉里 **manual 账户**的 Tokens tab(单独一条路,最容易漏)
 //
@@ -25,7 +25,7 @@ function filesRendering(tag: string): { file: string; text: string }[] {
     for (const rel of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
       if (!rel.endsWith(".tsx")) continue;
       const text = stripLineComments(readFileSync(join(dir, rel), "utf8"));
-      if (text.includes(`<${tag}`)) out.push({ file: basename(rel), text });
+      if (text.includes(`<${tag}`)) out.push({ file: rel.replaceAll("\\", "/"), text });
     }
   }
   return out;
@@ -62,8 +62,8 @@ describe("每条 <TokenRowContent> 渲染路径都得把 24h 盈亏传进去", (
   it("三条路径都在(少了说明改动漏了这条测试的前提)", () => {
     expect(users.map((u) => u.file).sort()).toEqual([
       "holdings-cards.tsx",
+      "holdings/tokens/index.tsx",
       "manual-tokens-panel.tsx",
-      "token-holdings.tsx",
     ]);
   });
 

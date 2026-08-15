@@ -1,7 +1,22 @@
 import { cn, Skeleton } from "@folio/ui";
 import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
 import { signedUsd } from "../../../../lib/signed-usd";
-import { deltaTone, NO_VALUE } from "./delta-display";
+
+// 「没有这个数」的占位。em dash 而不是空白 —— 空白会被读成「还没加载出来」,而这里是
+// 「问过了,答不上来」。与 hero 各个 Stat 格子的空态同形。
+export const NO_VALUE = "—";
+
+// 增量小字的三态与配色(ADR 0040)。`<ValueDelta>`(行内小字)与账户/代币抽屉头(大字)共用 ——
+// 两处字号、布局都不同,但「什么时候显示 `—`、0 涂什么颜色」必须是同一套。
+//   · `undefined` —— 这个位置本来就不该有增量(归档行:数字冻在封存那一刻)。调用方整行省略,不进这里。
+//   · `null` —— 该有,但算不出(缺 24 小时前的基准 / 最近的基准太旧)。
+//   · `0` —— 算出来确实没涨没跌,是一条真实结论。
+// null 与 0 都**不带方向**,走中性色 —— 给 0 涂上涨/下跌的颜色是在暗示一个不存在的方向,
+// 而给「不知道」涂颜色更糟。
+export function deltaTone(delta: number | null): string {
+  if (delta == null || delta === 0) return "text-muted-foreground";
+  return delta > 0 ? "text-pos" : "text-neg";
+}
 
 /** 24h 盈亏位的小骨架 —— 行内 / hero 药丸 / best-worst 三处同形。宽度锁在典型一行增量。 */
 export function GainSkeleton() {
@@ -13,7 +28,7 @@ export function GainSkeleton() {
 // 语义不同、形状统一。pct 缺 → 只显 Δ。价值为负(DeFi 净负债)→ --neg。
 // align:行右侧列用 "right"(默认,shrink 防挤压);抽屉头等左对齐场景用 "left"。
 //
-// **`delta` 是三态,不是「有没有」**(ADR 0040,口径见 ./delta-display):
+// **`delta` 是三态,不是「有没有」**(ADR 0040):
 //   · `undefined` → 整行省略;· `null` → `—`;· `0` → 显示 `0`,中性色。
 // 以前 `null` 和 `0` 都走「不渲染」,于是「不知道」和「没变」在界面上长得一模一样 —— 前者是缺数据、
 // 后者是一条真实结论,挤成一种表现之后谁也读不出来。

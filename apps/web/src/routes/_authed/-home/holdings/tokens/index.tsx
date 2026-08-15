@@ -2,8 +2,8 @@ import { SharedLayoutBg } from "@folio/ui";
 import { getRouteApi } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import type { Holding } from "../../../../lib/aggregate";
-import { buildStack } from "../../../../lib/stack-items";
+import type { Holding } from "../../../../../lib/aggregate";
+import { buildStack } from "../../../../../lib/stack-items";
 import { TokenRowContent } from "./token-row";
 import { TokenSheet } from "./token-sheet";
 

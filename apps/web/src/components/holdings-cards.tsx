@@ -17,8 +17,9 @@ import {
   toAccountSections,
 } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
-import { DefiPositions, PerpPositions } from "../routes/_authed/-home/holdings/sections";
-import { TokenRowContent } from "../routes/_authed/-home/holdings/token-row";
+import { DefiPositions } from "../routes/_authed/-home/holdings/defi";
+import { PerpPositions } from "../routes/_authed/-home/holdings/perp";
+import { TokenRowContent } from "../routes/_authed/-home/holdings/tokens/token-row";
 import { NoteIconGlyph, NoteIndicator, NoteView } from "./notes";
 
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 -home/holdings 那套。
@@ -45,7 +46,7 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
               amount: b.amount,
               value: b.usdValue,
               // **不写 `?? null`** —— 归档账户的现货行拿到的是 `undefined`(封存了,这个位置不该有
-              // 这个数),`?? null` 会把它压成「算不出」而画出 `—`。三态得原样透传(见 -home/holdings/delta-display)。
+              // 这个数),`?? null` 会把它压成「算不出」而画出 `—`。三态得原样透传(见 -home/holdings/value-delta)。
               gain24h: b.gain24h,
             }}
             aside={b.note ? <NoteIndicator note={b.note} formatNumber={fmtNote} /> : undefined}

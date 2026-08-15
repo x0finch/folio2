@@ -39,7 +39,7 @@ import { signedUsd } from "../lib/signed-usd";
 import { GainExplainer } from "../routes/_authed/-home/hero/gain-explainer";
 import { type Range, RangeTabs, rangeSince } from "../routes/_authed/-home/hero/range-tabs";
 import { TrendPanel } from "../routes/_authed/-home/hero/trend-panel";
-import { deltaTone, NO_VALUE } from "../routes/_authed/-home/holdings/delta-display";
+import { deltaTone, NO_VALUE } from "../routes/_authed/-home/holdings/value-delta";
 import { AccountTagsModal } from "./account-tags-modal";
 import { ConnectorBadge } from "./connector-badge";
 import { EditableName } from "./editable-name";
@@ -167,7 +167,7 @@ function DetailBody({
   // 一个停着一个在动,说的不是同一件事;占比的分母是活跃账户总计,归档不在里面,显示了会让
   // 各行的百分比加起来超过 100%。缺凭据不显增量是同一个道理。
   // 这两种是「**不该有**这个数」→ 整块省略;而「该有却**算不出**」是另一回事 → `—`。三态口径见
-  // -home/holdings/delta-display,与行内 <ValueDelta> 共用 —— 这里字号不同(大字),故手搓而非复用组件。
+  // -home/holdings/value-delta,与行内 <ValueDelta> 共用 —— 这里字号不同(大字),故手搓而非复用组件。
   // 数由 server 算好(ADR 0040),与账户行同源 —— 抽屉头和列表行显示同一个数,不再各算各的。
   const hasDayChange = !(account.needsCredentials || archived) && account.gain24h !== undefined;
   const dayChange = hasDayChange ? account.gain24h : undefined;

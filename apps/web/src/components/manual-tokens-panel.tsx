@@ -38,7 +38,7 @@ import {
 import { removeManualToken } from "../lib/server/manual-tokens";
 import type { TokenOption } from "../lib/token-option";
 import { buildOwnedOptions } from "../lib/token-search";
-import { TokenRowContent } from "../routes/_authed/-home/holdings/token-row";
+import { TokenRowContent } from "../routes/_authed/-home/holdings/tokens/token-row";
 import { HoverDetail } from "./hover-detail";
 import {
   type ActivityPatch,
