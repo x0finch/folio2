@@ -28,8 +28,7 @@ import { EditableName } from "../../components/editable-name";
 import { IconButton } from "../../components/icon-button";
 import { useMountedTheme } from "../../hooks/use-theme";
 import { type AccountUser, accountIdentity } from "../../lib/account-identity";
-import { authClient, signIn, signOut } from "../../lib/auth-client";
-import { clearIdleLockState } from "../../lib/hooks/use-idle-lock";
+import { authClient, signIn } from "../../lib/auth-client";
 import { useIdleTimeout } from "../../lib/hooks/use-idle-timeout";
 import { useLockDevice } from "../../lib/hooks/use-lock-device";
 import { usePasskeySupport } from "../../lib/hooks/use-passkey-support";
@@ -46,6 +45,7 @@ import {
 import { registerPasskey } from "../../lib/register-passkey";
 import { setLocalePreference } from "../../lib/server/preferences";
 import { updateValuationSettings } from "../../lib/server/settings";
+import { signOutEverywhere } from "../../lib/sign-out";
 import type { Theme } from "../../lib/theme";
 
 const authedApi = getRouteApi("/_authed");
@@ -107,14 +107,15 @@ function AccountCard({ user }: { user: AccountUser }) {
   const ts = useTranslations("Sidebar");
   const tc = useTranslations("Common");
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const id = accountIdentity(user);
   const secondary = id.secondary.kind === "email" ? id.secondary.value : ts("selfHosted");
 
   async function doSignOut() {
-    // 与锁屏登出同理:不清闲置锁状态,重新登录会因旧 lastActive 已过期而当场被锁(#353)。
-    clearIdleLockState();
-    await signOut();
+    // 掐在飞的查询 + 清缓存 + 清闲置锁状态,三件事一处做完(见 lib/sign-out —— 少做任何一件
+    // 都会以「偶发」的样子表现出来)。
+    await signOutEverywhere(queryClient);
     navigate({ to: "/login" });
   }
 

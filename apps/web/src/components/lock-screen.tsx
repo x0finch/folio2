@@ -1,12 +1,14 @@
 import { Button } from "@folio/ui";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fingerprint, LogOut } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import { signIn, signOut } from "../lib/auth-client";
-import { clearIdleLockState, useIdleLock } from "../lib/hooks/use-idle-lock";
+import { signIn } from "../lib/auth-client";
+import { useIdleLock } from "../lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "../lib/hooks/use-idle-timeout";
 import { useLockDevice } from "../lib/hooks/use-lock-device";
+import { signOutEverywhere } from "../lib/sign-out";
 import { AuthShell } from "./auth-shell";
 
 // 应用层闲置锁屏(ADR 0029 / #291）。父组件包裹 —— 锁定时**卸载 children**(不只是遮罩盖住):
@@ -42,6 +44,7 @@ function ActiveLockScreen({ timeoutMs, children }: { timeoutMs: number; children
 }
 
 function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
+  const queryClient = useQueryClient();
   const t = useTranslations("Lock");
   const tc = useTranslations("Common");
   const navigate = useNavigate();
@@ -86,12 +89,13 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
   // 就没有任何出路 —— 得留一条「放我走」。**不加二次确认**:这里的登出是「我进不去了」的
   // 兜底,再挡一道反而添堵;误点的代价只是重登一次(只读看板,无破坏性操作)。settings
   // 那个登出加确认是因为它在日常界面里、误点概率高,语境不同。
-  // clearIdleLockState 必不可少 —— 不清就「登出→登录→又锁上」成环,理由见 use-idle-lock.ts。
+  // 登出的三件事(清闲置锁状态、掐在飞的查询、清缓存)都在 `signOutEverywhere` 里 —— 少做任何
+  // 一件都会以「偶发」的样子表现出来,理由写在那个文件里。
   async function onSignOut() {
     setBusy(true);
-    clearIdleLockState();
     try {
-      await signOut();
+      // 与设置页登出走同一条路(见 lib/sign-out)。
+      await signOutEverywhere(queryClient);
     } finally {
       navigate({ to: "/login" });
     }
