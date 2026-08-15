@@ -15,7 +15,7 @@ import {
   portfolioOverviewQuery,
 } from "../../../lib/queries/portfolio";
 import { ListSkeleton } from "./skeletons";
-import { pinScopeOf, useHomeTabSelection } from "./tab/selection";
+import { pinScopeOf, useHomeTabSelection } from "./tab-selection";
 import { TokenHoldings } from "./token-holdings";
 
 // 现货/永续/DeFi 三段的拆解(从某份数据的 sections 里挑出永续项 + DeFi 分组 + 永续权益小计)。

@@ -1,8 +1,8 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { useRef } from "react";
-import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../../../lib/home-tabs";
-import type { PinScopeKey } from "../../../../lib/queries/keys";
-import type { HomeTabStrip } from "../../../../lib/queries/portfolio";
+import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../../lib/home-tabs";
+import type { PinScopeKey } from "../../../lib/queries/keys";
+import type { HomeTabStrip } from "../../../lib/queries/portfolio";
 
 const home = getRouteApi("/_authed/");
 

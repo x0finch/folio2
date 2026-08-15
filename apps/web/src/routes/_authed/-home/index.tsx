@@ -9,7 +9,7 @@ import { homeTabStripQuery } from "../../../lib/queries/portfolio";
 import { HeroIsland } from "./hero";
 import { HoldingsIsland } from "./holdings";
 import { HeroSkeleton, HoldingsSkeleton, TabStripSkeleton } from "./skeletons";
-import { TabStripIsland } from "./tab";
+import { TabStripIsland } from "./tab-strip";
 
 export function Overview() {
   const { selectedId } = usePortfolio();

@@ -17,10 +17,10 @@ import {
 import { invalidateFor } from "../../../../lib/queries/refresh";
 import { tagListQuery } from "../../../../lib/queries/tags";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../../../lib/server/tab-pins";
+import { useHomeTabSelection } from "../tab-selection";
 import { type PinTargetChoice, TabPinPicker } from "./pin-picker";
 import { PinPanel } from "./pin-portal-popover";
 import { PinTargetMark } from "./pin-target-mark";
-import { useHomeTabSelection } from "./selection";
 
 const MAX_PINS = 3;
 

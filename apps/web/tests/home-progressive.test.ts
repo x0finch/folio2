@@ -31,14 +31,14 @@ describe("骨架与真内容同形", () => {
   });
 
   it("tab 条骨架与真条同一套横向排布", () => {
-    expect(src("routes/_authed/-home/tab/index.tsx")).toContain("flex items-center gap-4");
+    expect(src("routes/_authed/-home/tab-strip.tsx")).toContain("flex items-center gap-4");
     expect(src("routes/_authed/-home/skeletons.tsx")).toMatch(
       /function TabStripSkeleton[\s\S]*flex items-center gap-4/,
     );
   });
 
   it("tab 条合计位有下限宽度,等待走骨架而不是破折号", () => {
-    const strip = src("routes/_authed/-home/tab/index.tsx");
+    const strip = src("routes/_authed/-home/tab-strip.tsx");
     expect(strip).toContain("min-w-24");
     expect(strip).toContain("<TabTotalSkeleton");
     expect(strip).not.toContain('pending="—"');
