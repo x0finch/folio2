@@ -23,10 +23,11 @@ import { portfolioMembershipsQuery } from "../../../lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "../../../lib/queries/tags";
 import { HeaderSync } from "../-home/header-sync";
 import { GainSkeleton, ValueDelta } from "../-home/holdings/value-delta";
-import { AccountDetailSheet, type AccountRow } from "./account-detail-sheet";
+import { AccountDetailSheet } from "./account-detail-sheet";
 import { AddAccountModal, type CompleteTarget } from "./add-account-modal";
 import { attachAccountGains } from "./list-attach-gains";
 import {
+  type AccountRow,
   type AccountSyncStatus,
   accountShare,
   accountSyncStatus,

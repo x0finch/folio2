@@ -1,6 +1,32 @@
+import type { Note } from "@folio/connectors-basic";
 import type { AccountTagLink, PortfolioMembership } from "@folio/db";
+import type { OverviewBalance } from "../../../lib/account-view";
+import type { Gain } from "../../../lib/gain-24h";
 import type { AccountHoldings, AccountListItem } from "../../../lib/queries/accounts";
-import type { AccountRow } from "./account-detail-sheet";
+
+interface AccountTagView {
+  id: string;
+  name: string;
+}
+
+export interface AccountRow {
+  id: string;
+  label: string;
+  connectorId: AccountListItem["connectorId"];
+  archivedAt: number | null;
+  /** 金额查询到了才为 true。未到时 totalUsd 是占位 0,UI 必须走骨架,不能当真 0。 */
+  valuesReady: boolean;
+  totalUsd: number;
+  takenAt: number | null;
+  balances: OverviewBalance[];
+  /** 24h 盈亏。`undefined` = 不该有(归档);`null` = 该有但算不出。 */
+  gain24h?: Gain | null;
+  note?: Note[];
+  needsCredentials: boolean;
+  credsSafe: Record<string, string>;
+  portfolioId: string;
+  tags: AccountTagView[];
+}
 
 // 账户页那一行的合并口径:**四个来源拼成一行**。
 //   · listAccounts —— 全部账户(含归档)+ 凭据投影
