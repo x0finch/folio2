@@ -9,7 +9,7 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, stripSearchParams } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +22,12 @@ import { Portal } from "../../components/portal";
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { QueryBoundary } from "../../components/query-boundary";
 import { SectionList } from "../../components/section-list";
-import { ListSkeleton, OverviewSkeleton } from "../../components/skeletons";
+import {
+  HeroSkeleton,
+  HoldingsSkeleton,
+  ListSkeleton,
+  OverviewSkeleton,
+} from "../../components/skeletons";
 import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-picker";
 import { TokenHoldings } from "../../components/token-holdings";
 import { useConnectorLabels } from "../../hooks/use-connector-labels";
@@ -84,23 +89,32 @@ export const Route = createFileRoute("/_authed/")({
   search: { middlewares: [stripSearchParams({ tab: DEFAULT_TAB })] },
   // 本页的读取**已全部迁到 react-query**(ADR 0038):loader 只**预取**、不返回任何数据,
   // 组件按选中的组合 id 从缓存读(本文件已无 `useLoaderData`)。
-  loader: async ({ context: { queryClient } }) => {
-    // 与「选中哪个组合」无关的三件事先发出去,不等下面那个 await。
-    const unscoped = Promise.all([
-      // connector 展示名/图的目录:pin 标签与账户抽屉都要它,首帧拿不到就只能显兜底名(#467)。
-      queryClient.ensureQueryData(connectorCatalogQuery()),
-      queryClient.ensureQueryData(tabPinsQuery()),
-      queryClient.ensureQueryData(accountListQuery()),
-      queryClient.ensureQueryData(tagListQuery()),
-    ]);
-    // 首屏口径 = 默认组合。**必须拿到真实的 defaultId**:组件是按 selectedId 读缓存的,
-    // 预取时用「缺省 = 服务端自己定默认」的空参数,key 就与组件那份对不上,首屏等于白拉一遍。
-    const { defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
-    await Promise.all([
-      unscoped,
-      queryClient.ensureQueryData(portfolioOverviewQuery(defaultId)),
-      queryClient.ensureQueryData(portfolioHistoryQuery(defaultId)),
-    ]);
+  //
+  // **发出即返回,只等一件事**(#488):以前这里 `await` 了全部七个查询,于是整页的首帧由最慢的
+  // 那个决定 —— 而最慢的那个要 1.8 秒。现在只等 `portfolioListQuery`(要它的 `defaultId` 才能对上
+  // 组件读缓存用的 key,且布局层已预取、这里恒命中缓存),其余发出就走,谁先 resolve 谁先渲染。
+  //
+  // 未 await 的查询**不会丢**:SSR 集成把它们以挂起态随首屏 dehydrate 下去,resolve 后经 query
+  // 流补齐(router-ssr-query-core 订阅 query cache、逐个 enqueue;客户端 hydrate 时边读边灌)。
+  // 所以硬刷新也是「先出骨架、后填数据」,不是白屏等着。
+  //
+  // `.catch` 把未被观察的 rejection 吞掉 —— 错误的正主是组件侧 `useSuspenseQuery` 抛进
+  // `QueryBoundary` 的那一份,这里再抛一次只会把整页打成路由错误页,正好抵消掉分块容错。
+  loader: ({ context: { queryClient } }) => {
+    const kickOff = (p: Promise<unknown>) => {
+      p.catch(() => {});
+    };
+    kickOff(
+      queryClient.ensureQueryData(portfolioListQuery()).then(({ defaultId }) => {
+        kickOff(queryClient.ensureQueryData(portfolioOverviewQuery(defaultId)));
+        kickOff(queryClient.ensureQueryData(portfolioHistoryQuery(defaultId)));
+      }),
+    );
+    // connector 展示名/图的目录:pin 标签与账户抽屉都要它,首帧拿不到就只能显兜底名(#467)。
+    kickOff(queryClient.ensureQueryData(connectorCatalogQuery()));
+    kickOff(queryClient.ensureQueryData(tabPinsQuery()));
+    kickOff(queryClient.ensureQueryData(accountListQuery()));
+    kickOff(queryClient.ensureQueryData(tagListQuery()));
   },
   pendingComponent: OverviewSkeleton,
   component: Overview,
@@ -129,8 +143,51 @@ function derive(secs: PortfolioOverview["sections"]) {
   return { defiGroups, perpItems, perpEquitySubtotal };
 }
 
+// 首页的壳:自己不读任何数据,所以**壳与骨架在第一帧就出现**,不等任何请求。
+// 下面两块各自挂起、各自兜错 —— 一块拉挂只塌那一格,壳与另一块照常可用。
 function Overview() {
   const { selectedId } = usePortfolio();
+  const t = useTranslations("Overview");
+  // 「这一格在看什么」:两块读的都是这条 overview 查询,所以复位依据是同一个 —— 换组合时
+  // 失败态跟着复位(见 components/query-boundary)。
+  const boundaryKey = JSON.stringify(portfolioKeys.overview(selectedId));
+  const failed = (
+    <p className="py-12 text-center text-muted-foreground text-sm">{t("loadFailed")}</p>
+  );
+  return (
+    <div className="flex flex-col gap-6">
+      <HeaderSync />
+      <QueryBoundary resetKey={boundaryKey} pending={<HeroSkeleton />} failed={failed}>
+        <HeroIsland portfolioId={selectedId} />
+      </QueryBoundary>
+      <QueryBoundary resetKey={boundaryKey} pending={<HoldingsSkeleton />} failed={failed}>
+        <HoldingsIsland portfolioId={selectedId} />
+      </QueryBoundary>
+    </div>
+  );
+}
+
+// hero 岛:净值 / 24h 盈亏 / 三指标来自总览;曲线**另走一条非挂起的读**。
+// 曲线与数字分开等,是因为它们是两个请求、两种成本 —— 让曲线把已经算得出来的数字按住,
+// 等于把最慢的那条路重新变成全页的节奏。
+function HeroIsland({ portfolioId }: { portfolioId: string }) {
+  const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId));
+  const history = useQuery(portfolioHistoryQuery(portfolioId));
+  return (
+    <PortfolioHero
+      series={history.data?.series ?? []}
+      seriesPending={history.isPending}
+      totalUsd={data.totalUsd}
+      gain24h={data.gain24h ?? null}
+      holdings={data.holdings}
+    />
+  );
+}
+
+// 持仓岛:tab 条(视角 + 自定义)与其内容。tab 的**选中态住在 URL 里**(ADR 0043),但「有哪些
+// tab」要看数据,所以整套 tab 逻辑住在这里而不是壳里 —— 壳一旦读数据就又变回「整页一起等」。
+function HoldingsIsland({ portfolioId }: { portfolioId: string }) {
+  const selectedId = portfolioId;
   const queryClient = useQueryClient();
   const t = useTranslations("Overview");
   const tc = useTranslations("Common");
@@ -232,7 +289,6 @@ function Overview() {
   // 默认与非默认走**同一个查询工厂**,只是 portfolioId 不同 —— 以前默认那份来自 loader、非默认那份是另一个
   // useQuery,两边 key 不同族,于是整页刷新只能碰到前者(停在非默认组合上做任何写操作画面都不动)。
   const { data: portfolioData } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
-  const { data: history } = useSuspenseQuery(portfolioHistoryQuery(selectedId));
   useStalePriceRefresh(portfolioData.pricesStale);
 
   // 自定义 Tab 备选:tag 按选中 Portfolio 过滤(账户只匹配同 Portfolio 的 Tag);connector 全量。
@@ -260,9 +316,6 @@ function Overview() {
     onSuccess: () => invalidateFor(queryClient, "portfolio.pin.write"),
     onError: failPin,
   });
-
-  const { totalUsd: heroTotal } = portfolioData;
-  const series = history.series;
 
   // 视角 tab(现货/永续/DeFi)恒按**选中 Portfolio**口径,与 pin 无关 —— 选 pin 不改这三个 tab 的存在/内容
   //(用户明确:自定义 tab 不影响原来的 tokens/perp/defi tab)。
@@ -306,15 +359,7 @@ function Overview() {
         : holdingsSubtotal;
 
   return (
-    <div className="flex flex-col gap-6">
-      <HeaderSync />
-      <PortfolioHero
-        series={series}
-        totalUsd={heroTotal}
-        gain24h={portfolioData.gain24h ?? null}
-        holdings={portfolioData.holdings}
-      />
-
+    <>
       {accountTotals.length === 0 ? (
         <p className="text-muted-foreground">
           {tc("noAccountsYet")}{" "}
@@ -425,7 +470,7 @@ function Overview() {
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }
 

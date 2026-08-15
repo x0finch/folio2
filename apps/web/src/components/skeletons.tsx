@@ -20,23 +20,36 @@ function Row() {
   );
 }
 
+// 首页两块各自的骨架。**分开导出是有用途的,不是拆着好看**:首页的 hero 与持仓列表是两个独立
+// 挂起的区块(各自 QueryBoundary),谁先拿到数据谁先亮 —— 各自的 Suspense fallback 就是这两个。
+// 路由级 `OverviewSkeleton` 由它俩拼成,于是**路由 pending 态与分区态严格同形**,过渡只有淡入没有位移。
+// hero 骨架高度对着 PortfolioHero 的 min-h-60(h-56 + 外层 gap)—— 改那边的高度记得回来改这里。
+export function HeroSkeleton() {
+  return <Skeleton className="h-56 w-full rounded-xl" />;
+}
+
+// 持仓:pill tabs(左)+ 该视角合计(右)+ 行(无 Card)
+export function HoldingsSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-9 w-64 rounded-full" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+      <div className="flex flex-col gap-4">
+        {ROWS_5.map((k) => (
+          <Row key={k} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function OverviewSkeleton() {
   return (
     <div className="flex flex-col gap-6">
-      {/* hero:趋势背景 + 净值/24h/三指标浮于其上 → 单块高占位 */}
-      <Skeleton className="h-56 w-full rounded-xl" />
-      {/* 持仓:pill tabs(左)+ 该视角合计(右)+ 行(无 Card) */}
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <Skeleton className="h-9 w-64 rounded-full" />
-          <Skeleton className="h-4 w-24" />
-        </div>
-        <div className="flex flex-col gap-4">
-          {ROWS_5.map((k) => (
-            <Row key={k} />
-          ))}
-        </div>
-      </div>
+      <HeroSkeleton />
+      <HoldingsSkeleton />
     </div>
   );
 }

@@ -23,6 +23,7 @@ export function PortfolioHero({
   totalUsd,
   gain24h,
   holdings,
+  seriesPending = false,
   contentClassName,
 }: {
   series: HistoryPoint[];
@@ -31,6 +32,10 @@ export function PortfolioHero({
   // 曲线画的是净值(含充提),这个数剔除了充提,两者本来就不该是同一个;`null` = 算不出。
   gain24h: Gain | null;
   holdings: readonly HoldingLike[];
+  // 曲线那份数据**还在路上**(#488 的第四拍)。首页的曲线是非挂起读的 —— 数字先亮、曲线后补,
+  // 而这段空窗里必须什么都不画:留白会闪一下「趋势还没准备好」那句空态文案,再被真曲线盖掉,
+  // 读起来像出过错。判据在调用方(它才知道那条查询的状态),这里只负责透传。
+  seriesPending?: boolean;
   // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
   contentClassName?: string;
 }) {
@@ -88,7 +93,13 @@ export function PortfolioHero({
     <div className="relative min-h-60 overflow-hidden pt-1">
       {/* 四态(点数不够 / 还在取数 / 什么都还没有 / 真有数据)全在 TrendPanel 里判。
           hero 的上留白更大(topMargin=92,把折线压到下半区),填充也比抽屉略重 → 覆盖这两个默认值。 */}
-      <TrendPanel series={chartSeries} topMargin={92} fillOpacity={0.16} decorate={nothingYet} />
+      <TrendPanel
+        series={chartSeries}
+        loading={seriesPending}
+        topMargin={92}
+        fillOpacity={0.16}
+        decorate={nothingYet}
+      />
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>

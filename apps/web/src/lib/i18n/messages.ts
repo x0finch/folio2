@@ -99,6 +99,8 @@ const en = {
     stableShare: "Stablecoin",
     portfolioValue: "Portfolio value",
     noSnapshot: "No snapshot yet — sync from the Accounts page.",
+    // 一块自己拉挂时说的话。页面其余部分仍然好着,所以别用整页错误那套口气。
+    loadFailed: "This part didn't load. Refresh to try again.",
     onlyDustHoldings: "Only zero-value holdings.",
     entry: "Entry",
     upnl: "uPnL",
@@ -503,6 +505,7 @@ const zh: Messages = {
     stableShare: "稳定币占比",
     portfolioValue: "组合净值",
     noSnapshot: "暂无快照 —— 去账户页同步。",
+    loadFailed: "这一块没加载出来,刷新重试。",
     onlyDustHoldings: "仅零值持仓。",
     entry: "开仓价",
     upnl: "未实现盈亏",
