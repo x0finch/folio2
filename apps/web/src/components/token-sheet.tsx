@@ -32,6 +32,7 @@ import { AccountName } from "./account-name";
 import { AvatarStack } from "./avatar-stack";
 import { GainExplainer } from "./gain-explainer";
 import { type Range, RangeTabs, rangeSince } from "./range-tabs";
+import { GainSkeleton } from "./skeletons";
 import { TrendPanel } from "./trend-panel";
 
 // 代币 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
@@ -184,7 +185,13 @@ function SourceView({
   );
 }
 
-function TokenSheetContent({ holding }: { holding: Holding }) {
+function TokenSheetContent({
+  holding,
+  gainsPending,
+}: {
+  holding: Holding;
+  gainsPending?: boolean;
+}) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
   const { token, totalValue, totalAmount, sources } = holding;
@@ -244,8 +251,13 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
           <div>
             <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
             {/* 24h 盈亏 + %:共用一个前置符号、同色,与代币行/hero 一致。
-                算不出 → `—`(全站三态口径,见 lib/delta-display)。 */}
-            {holding.gain24h == null ? (
+                还在算 → 骨架;算不出 → `—`(全站三态口径,见 lib/delta-display)。
+                两者顺序不能反 —— 还在算的时候 `gain24h` 也是空的,先判 `== null` 就永远画不到骨架。 */}
+            {gainsPending ? (
+              <div className="mt-1 flex h-5 items-center">
+                <GainSkeleton className="w-28" />
+              </div>
+            ) : holding.gain24h == null ? (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
             ) : (
               <GainExplainer gain={holding.gain24h} className="block text-left">
@@ -288,10 +300,17 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
 
 export function TokenSheet({
   holding,
+  gainsPending,
   open,
   onOpenChange,
 }: {
   holding: Holding | null;
+  /**
+   * 24h 盈亏那条读还没回来(#488)。**必须一路传到这里** —— 抽屉里的盈亏与它身后那一行是
+   * 同一笔数,行上画骨架、抽屉里画 `—`,就是同一个数字在两处给出两种说法,而 `—` 是在替
+   * 服务端断言「算不出」(见 lib/delta-display 的三态)。
+   */
+  gainsPending?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -307,7 +326,7 @@ export function TokenSheet({
         ariaLabel={holding?.token.name}
         className="w-full max-w-md overflow-y-auto p-6"
       >
-        {holding && <TokenSheetContent holding={holding} />}
+        {holding && <TokenSheetContent holding={holding} gainsPending={gainsPending} />}
       </Drawer>
     );
   }

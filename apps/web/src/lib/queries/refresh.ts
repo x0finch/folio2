@@ -76,13 +76,16 @@ export const REFRESH_MAP = {
   "portfolio.write": [portfolioKeys.all, tagKeys.all],
 
   /**
-   * 自定义 Tab 的新建 / 改目标 / 删除。**只刷 Tab 清单与 tab 条元信息,不刷总览** ——
+   * 自定义 Tab 的新建 / 改目标 / 删除。**只刷 tab 条那份元信息,不刷总览** ——
    * 增删一个 Tab 不改任何余额,连带把昂贵的总览拉一遍是白花钱。
    *
-   * **tab 条那份必须列上**:它带着每个 pin 的显示标签(在服务端解析好的),漏了它就会出现
+   * 它带着每个 pin 的显示标签(在服务端解析好的),所以改了 pin 的目标必须刷到它,否则会出现
    * 「pin 已经改指到别的标签、tab 上还写着旧名字」——不报错,只是显示的是上一次的答案。
+   *
+   * (曾经这里还列着 `portfolioKeys.pins()`。#488 把 pin 清单并进了 tab 条那条轻请求,
+   * 那个前缀下**再没有任何查询注册** —— 留着就是刷一个空 key,而测试还煞有介事地钉着它。)
    */
-  "portfolio.pin.write": [portfolioKeys.pins(), portfolioKeys.tabMetaAll()],
+  "portfolio.pin.write": [portfolioKeys.tabMetaAll()],
 
   /** 切展示币种:写完 cookie 刷这一条,汇率与格式跟着换。总览数据是 USD 计价的,不受影响。 */
   "preference.currency": [preferenceKeys.currency()],

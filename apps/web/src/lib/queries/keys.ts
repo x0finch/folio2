@@ -33,11 +33,6 @@ export const portfolioKeys = {
   /** 账户 → 所属组合。 */
   memberships: () => [...portfolioKeys.all, "memberships"] as const,
   /**
-   * 自定义 Tab 清单。**单独一层,不跟 overview 混**:增删一个 Tab 不该让昂贵的总览重拉一遍,
-   * 而映射表要指得动「只刷 Tab 清单」就得有这么一个前缀。
-   */
-  pins: () => [...portfolioKeys.all, "pins"] as const,
-  /**
    * 组合总览。**portfolioId 必须是真实 id,不能用「缺省 = 默认」的 undefined** ——
    * loader 预取的那份与组件按 selectedId 读的那份,key 对不上就等于首屏白拉一遍。
    */
@@ -59,6 +54,14 @@ export const portfolioKeys = {
    */
   tabMetaAll: () => [...portfolioKeys.all, "tabMeta"] as const,
   tabMeta: (portfolioId: string) => [...portfolioKeys.tabMetaAll(), portfolioId] as const,
+  /**
+   * 自定义 Tab 选择器的备选(connector / tag / account 三段清单)。**与 tabMeta 分开一层** ——
+   * 两者的刷新时机一样,但拉取时机不同:tab 条是首屏必需,备选是点开选择器才要。
+   * 合成一个 key 就等于把「点开才要的东西」重新钉回首屏(#488 票 4)。
+   */
+  pickerOptionsAll: () => [...portfolioKeys.all, "pickerOptions"] as const,
+  pickerOptions: (portfolioId: string) =>
+    [...portfolioKeys.pickerOptionsAll(), portfolioId] as const,
 };
 
 export const accountKeys = {

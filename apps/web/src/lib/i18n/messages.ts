@@ -101,6 +101,9 @@ const en = {
     noSnapshot: "No snapshot yet — sync from the Accounts page.",
     // 一块自己拉挂时说的话。页面其余部分仍然好着,所以别用整页错误那套口气。
     loadFailed: "This part didn't load. Refresh to try again.",
+    // 只有 24h 盈亏那条读挂了(#488)。市值、净值、列表都还是对的 —— 说清楚坏的是哪一样,
+    // 否则用户会以为屏幕上每个数字都不可信。
+    gainsFailed: "Couldn't load today's gain. The values themselves are current.",
     onlyDustHoldings: "Only zero-value holdings.",
     entry: "Entry",
     upnl: "uPnL",
@@ -506,6 +509,7 @@ const zh: Messages = {
     portfolioValue: "组合净值",
     noSnapshot: "暂无快照 —— 去账户页同步。",
     loadFailed: "这一块没加载出来,刷新重试。",
+    gainsFailed: "今日盈亏没取到,市值本身是新的。",
     onlyDustHoldings: "仅零值持仓。",
     entry: "开仓价",
     upnl: "未实现盈亏",

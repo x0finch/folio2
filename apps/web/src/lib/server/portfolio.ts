@@ -8,7 +8,7 @@ import {
 } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 import { z } from "zod";
 import {
   accountIdsInView,
@@ -93,13 +93,10 @@ const loadOverviewView = (
     const settingsStore = yield* SettingsStore;
     const tagStore = yield* TagStore;
 
-    const tTotal = performance.now();
     const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
-    const scopeMs = performance.now() - tTotal;
     // 「当下」取一次,整条链共用 —— 分段的末点、容差判定、取历史的下界都按同一刻算,
     // 各自现取 `Date.now()` 会在毫秒级上错开(测试里更是直接不可复现)。
     const now = Date.now();
-    const tReads = performance.now();
     const [allAccounts, snapshots, settings, memberships, gainHistory] = yield* Effect.all(
       [
         accountStore.list(),
@@ -115,7 +112,6 @@ const loadOverviewView = (
       ],
       { concurrency: 5 },
     );
-    const readsMs = performance.now() - tReads;
     // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
     // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
     const pin = toTabPin(data.pin);
@@ -126,26 +122,20 @@ const loadOverviewView = (
       tagLinks,
     );
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-    const tInject = performance.now();
     // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
     yield* injectManualSnapshots(accounts, byAccount);
-    const injectMs = performance.now() - tInject;
-    const tFiat = performance.now();
     // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
     //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
     const fiatRefs = yield* manualFiatRefs(accounts);
-    const fiatMs = performance.now() - tFiat;
     // 盈亏只按视图内的账户算 —— 历史是全量读的(一次查询比按账户分批便宜),这里收窄到
     // 当前 Portfolio / Tab 的账户,否则一个不在视图里的账户会把它的涨跌算进这一屏。
     const inView = new Set(accounts.map((a) => a.id));
     // manual 从不写快照(ADR 0018)→ 它的原料不在上面那次查询里,按账本另算(#447 第 3 片)。
     // 窗口起点直接产点(账本能算任意时刻),所以这里传的是 `now - GAIN_WINDOW_MS` 本身,
     // 而不是上面那个带容差的下界 —— 容差是给稀疏快照留的,账本不需要。
-    const tManualGain = performance.now();
     const manualGain = withGains
       ? yield* loadManualGainHistory(accounts, now, now - GAIN_WINDOW_MS)
       : [];
-    const manualGainMs = performance.now() - tManualGain;
     return yield* buildOverview(accounts, byAccount, {
       connectorMeta: connectorPlatformMeta,
       mode: settings.valuationMode,
@@ -155,26 +145,18 @@ const loadOverviewView = (
         ? [...gainHistory.filter((r) => inView.has(r.accountId)), ...manualGain]
         : undefined,
       now,
-      // `totalMs` 少算了收尾那几步(装饰 + 汇总),但那几步是纯内存的,少算的量正是噪声本身。
-      onTimings: ({ enrichMs, gainMs, aggMs, platformMs, sectionsMs, holdings }) =>
-        readLog.info(withGains ? "gains timings" : "overview timings", {
-          totalMs: Math.round(performance.now() - tTotal),
-          scopeMs: Math.round(scopeMs),
-          readsMs: Math.round(readsMs),
-          injectMs: Math.round(injectMs),
-          fiatMs: Math.round(fiatMs),
-          manualGainMs: Math.round(manualGainMs),
-          enrichMs: Math.round(enrichMs),
-          aggMs: Math.round(aggMs),
-          gainMs: Math.round(gainMs),
-          platformMs: Math.round(platformMs),
-          sectionsMs: Math.round(sectionsMs),
-          accounts: accounts.length,
-          holdings,
-          gainRows: gainHistory.length,
-        }),
     });
   });
+
+// 读路径的耗时,**一次读一行**(#488 票 2)。
+//
+// 分段打点已经撤掉:它当初是为了回答「首页到底慢在哪」,答案拿到了(账本取价占 83%,时间加权
+// 只占 1ms,见 #488 的评论),而把七个探针长期焊在装配逻辑里,换来的是每次改那段代码都要绕开它们。
+// 留下的是这一行 —— 回答「这条读现在多久」,那是个会一直有人问的问题。
+const timed = <A, E, R>(label: string, eff: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.tap(Effect.timed(eff), ([duration]) =>
+    Effect.sync(() => readLog.info(label, { ms: Math.round(Duration.toMillis(duration)) })),
+  ).pipe(Effect.map(([, a]) => a));
 
 // 总览(P2:按代币聚合)。**不含 24h 盈亏** —— 那部分另走 `getPortfolioGains`(#488),
 // 于是这条读不必碰账本与快照历史,列表与总净值不等它。
@@ -186,7 +168,7 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
     runAtEdge(
       withRequest(
         context.userId,
-        Effect.map(loadOverviewView(data, false), (view) => {
+        Effect.map(timed("overview read", loadOverviewView(data, false)), (view) => {
           // 盈亏字段**从线上摘掉**,不是留着一片 null。留着的话读到这份数据的人会以为
           // 「算不出」,而真相是「这条读压根不负责它」—— 两件事在界面上长得完全不一样。
           const { gain24h: _portfolioGain, ...rest } = view;
@@ -215,7 +197,7 @@ export const getPortfolioGains = createServerFn({ method: "GET" })
     runAtEdge(
       withRequest(
         context.userId,
-        Effect.map(loadOverviewView(data, true), (view) => ({
+        Effect.map(timed("gains read", loadOverviewView(data, true)), (view) => ({
           portfolio: view.gain24h,
           // 按持仓键索引 —— 与 `aggregate.groupKey` 同一把键,客户端按 `holding.key` 直接查得到。
           byKey: Object.fromEntries(view.holdings.map((h) => [h.key, h.gain24h ?? null])),
@@ -257,6 +239,9 @@ export const getHomeTabMeta = createServerFn({ method: "GET" })
           ],
           { concurrency: 5 },
         );
+        // 账户与标签清单在这里只用来把 pin 的显示名解析出来 —— **不再顺带回传选择器的备选**。
+        // 备选归 `getTabPinPickerOptions`,点开选择器时才拉(#488 票 4)。混在这条里的话,
+        // 「tab 条那条最轻的读」就永远背着两份用不上的全量清单。
         // 视角 tab 的存在性按**选中 Portfolio** 的账户判(与列表同口径,ADR 0033)。
         const inView = accountIdsInView(
           allAccounts.map((a) => a.id),
@@ -269,22 +254,6 @@ export const getHomeTabMeta = createServerFn({ method: "GET" })
         const accountName = new Map(allAccounts.map((a) => [a.id, a.label]));
         const tagName = new Map(tags.map((t) => [t.id, t.name]));
         return {
-          // pin 选择器的备选。**一并放在这里**,是为了让 tab 条真的只等这一个请求 ——
-          // 备选留在客户端就还得拉连接器目录 + 账户清单 + 标签清单,tab 条又变回等四份数据。
-          // 三个口径与拆分前逐字对齐:connector 取全量账户去重(pin 跨 Portfolio),
-          // tag 按**选中** Portfolio 过滤(账户只匹配同 Portfolio 的标签),account 取视图内。
-          pickerOptions: {
-            connectors: [...new Set(allAccounts.map((a) => a.connectorId))].map((id) => ({
-              id,
-              label: connectorPlatformMeta(id)?.name ?? id,
-            })),
-            tags: tags
-              .filter((tg) => tg.portfolioId === selectedId)
-              .map((tg) => ({ id: tg.id, name: tg.name })),
-            accounts: allAccounts
-              .filter((a) => inView.has(a.id))
-              .map((a) => ({ id: a.id, label: a.label })),
-          },
           hasPerps: kindsInView.some((k) => k.kind === "perp_position" || k.kind === "perp_equity"),
           hasDefi: kindsInView.some((k) => k.kind === "defi"),
           pins: pins.map((p) => ({
@@ -293,14 +262,18 @@ export const getHomeTabMeta = createServerFn({ method: "GET" })
             connectorId: p.connectorId ?? undefined,
             tagId: p.tagId ?? undefined,
             accountId: p.accountId ?? undefined,
-            // connector 的显示名走连接器 manifest(类型名,不是账户自定义名);认不出就留空,
+            // connector 的显示名走连接器 manifest(类型名,不是账户自定义名);认不出就**不给**,
             // 由客户端那层照旧回退 —— 这里不编一个名字出来。
+            //
+            // **认不出必须是 `undefined`,不能是 `""`。** 客户端那边写的是 `name ?? 回退(...)`,
+            // 而空串不是 nullish —— `??` 不会触发,标签就渲染成一个空 tab。指向已删标签的 pin、
+            // manifest 认不出的 connector 都会撞上这条,而且不报错。
             text:
               p.kind === "tag"
-                ? (tagName.get(p.tagId ?? "") ?? "")
+                ? tagName.get(p.tagId ?? "")
                 : p.kind === "account"
-                  ? (accountName.get(p.accountId ?? "") ?? "")
-                  : (connectorPlatformMeta(p.connectorId ?? "")?.name ?? ""),
+                  ? accountName.get(p.accountId ?? "")
+                  : connectorPlatformMeta(p.connectorId ?? "")?.name,
             logo:
               p.kind === "connector"
                 ? platformLogoUrl(
@@ -309,6 +282,49 @@ export const getHomeTabMeta = createServerFn({ method: "GET" })
                   )
                 : undefined,
           })),
+        };
+      }),
+    ),
+  );
+
+// 自定义 Tab 选择器的备选(connector / tag / account 三段)。**点开选择器才拉**(#488 票 4)——
+// 多数人不会去点它,而这三份都是全量清单,挂在首屏那条轻请求上是每次进首页都白付一遍。
+//
+// 三个口径与拆分前逐字对齐:connector 取全量账户去重(pin 是 per-user 的,跨 Portfolio),
+// tag 按**选中** Portfolio 过滤(账户只匹配同 Portfolio 的标签),account 取视图内。
+export const getTabPinPickerOptions = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(PortfolioSelectInput)
+  .handler(({ data, context }) =>
+    runRequest(
+      context.userId,
+      Effect.gen(function* () {
+        const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
+        const [allAccounts, memberships, tags] = yield* Effect.all(
+          [
+            Effect.flatMap(AccountStore, (s) => s.list()),
+            Effect.flatMap(PortfolioStore, (s) => s.listMemberships()),
+            Effect.flatMap(TagStore, (s) => s.list()),
+          ],
+          { concurrency: 3 },
+        );
+        const inView = accountIdsInView(
+          allAccounts.map((a) => a.id),
+          memberships,
+          selectedId,
+          defaultId,
+        );
+        return {
+          connectors: [...new Set(allAccounts.map((a) => a.connectorId))].map((id) => ({
+            id,
+            label: connectorPlatformMeta(id)?.name ?? id,
+          })),
+          tags: tags
+            .filter((tg) => tg.portfolioId === selectedId)
+            .map((tg) => ({ id: tg.id, name: tg.name })),
+          accounts: allAccounts
+            .filter((a) => inView.has(a.id))
+            .map((a) => ({ id: a.id, label: a.label })),
         };
       }),
     ),
@@ -331,84 +347,72 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) =>
     runRequest(
       context.userId,
-      Effect.gen(function* () {
-        const tTotal = performance.now();
-        const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
-        const tReads = performance.now();
-        const [rows, allAccounts, snapshots, settings, memberships] = yield* Effect.all(
-          [
-            Effect.flatMap(SnapshotStore, (s) => s.listTotals()),
-            Effect.flatMap(AccountStore, (s) => s.list()),
-            Effect.flatMap(SnapshotStore, (s) => s.latest()),
-            Effect.flatMap(SettingsStore, (s) => s.get()),
-            Effect.flatMap(PortfolioStore, (s) => s.listMemberships()),
-          ],
-          { concurrency: 5 },
-        );
-        const readsMs = performance.now() - tReads;
-        // 曲线追溯性地只算选中 Portfolio 的当前成员(ADR 0033):
-        //  · memberSet = 归属选中的账户(**含已归档**)→ 过去点按它 scope,保留归档成员的历史贡献;
-        //  · accounts  = 其中未归档的 → 曲线当下点(live 覆写)只算活跃成员。
-        // 把账户移进/移出 Portfolio,这条曲线整条重算(直觉:这钱在这个视图里从来算/不算)。
-        // 自定义 Tab(ADR 0034 UI 微调):曲线**不按 pin 收窄** —— pin 只过滤该 Tab 的列表内容,
-        // hero 总额/曲线保持选中 Portfolio 口径(用户明确:自定义 Tab 不改 hero)。故历史入参不带 pin(PortfolioSelectInput)。
-        const memberSet = accountIdsInView(
-          allAccounts.map((a) => a.id),
-          memberships,
-          selectedId,
-          defaultId,
-        );
-        const memberAccounts = allAccounts.filter((a) => memberSet.has(a.id));
-        const accounts = accountsInView(allAccounts, memberships, selectedId, defaultId);
+      timed(
+        "history read",
+        Effect.gen(function* () {
+          const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
+          const [rows, allAccounts, snapshots, settings, memberships] = yield* Effect.all(
+            [
+              Effect.flatMap(SnapshotStore, (s) => s.listTotals()),
+              Effect.flatMap(AccountStore, (s) => s.list()),
+              Effect.flatMap(SnapshotStore, (s) => s.latest()),
+              Effect.flatMap(SettingsStore, (s) => s.get()),
+              Effect.flatMap(PortfolioStore, (s) => s.listMemberships()),
+            ],
+            { concurrency: 5 },
+          );
+          // 曲线追溯性地只算选中 Portfolio 的当前成员(ADR 0033):
+          //  · memberSet = 归属选中的账户(**含已归档**)→ 过去点按它 scope,保留归档成员的历史贡献;
+          //  · accounts  = 其中未归档的 → 曲线当下点(live 覆写)只算活跃成员。
+          // 把账户移进/移出 Portfolio,这条曲线整条重算(直觉:这钱在这个视图里从来算/不算)。
+          // 自定义 Tab(ADR 0034 UI 微调):曲线**不按 pin 收窄** —— pin 只过滤该 Tab 的列表内容,
+          // hero 总额/曲线保持选中 Portfolio 口径(用户明确:自定义 Tab 不改 hero)。故历史入参不带 pin(PortfolioSelectInput)。
+          const memberSet = accountIdsInView(
+            allAccounts.map((a) => a.id),
+            memberships,
+            selectedId,
+            defaultId,
+          );
+          const memberAccounts = allAccounts.filter((a) => memberSet.has(a.id));
+          const accounts = accountsInView(allAccounts, memberships, selectedId, defaultId);
 
-        // manual 历史改由账本 compute-on-read 供货(ADR 0018):防御式排除任何遗留 manual snapshot 行(正常为空),
-        // 再拼上账本现算的 manual (takenAt, totalUsd) 行 → 同喂 buildPortfolioHistory,不双算、无需特殊合并。
-        const now = Date.now();
-        const manualIds = new Set(
-          memberAccounts.filter((a) => isManual(a.connectorId)).map((a) => a.id),
-        );
-        const snapRows = rows.filter(
-          (r) => !manualIds.has(r.accountId) && memberSet.has(r.accountId),
-        );
-        // manual 走日网格 compute-on-read(ADR 0019),末点 τ=now → 与下方 live 覆写同刻对齐。
-        const manualRows = yield* loadManualHistoryRows(memberAccounts, now);
-        // 归档成员的历史贡献保留到归档那一刻为止(ADR 0039)—— 不传这张表的话,它冻住的值会
-        // 一路保持到今天,而下面的当下点只算活跃账户,曲线就会「一路平着、到头凭空掉一截」。
-        const archivedAt = new Map(
-          memberAccounts.flatMap((a) =>
-            a.archivedAt == null ? [] : [[a.id, a.archivedAt] as const],
-          ),
-        );
-        const series = buildPortfolioHistory([...snapRows, ...manualRows], archivedAt);
-        // 空序列直接返回 —— 打一行再走,免得「没数据」这条最快的路在日志里缺席、拉偏分布。
-        const logHistory = () =>
-          readLog.info("history timings", {
-            totalMs: Math.round(performance.now() - tTotal),
-            readsMs: Math.round(readsMs),
-            snapRows: snapRows.length,
-            manualRows: manualRows.length,
-            points: series.length,
-          });
-        if (series.length === 0) {
-          logHistory();
+          // manual 历史改由账本 compute-on-read 供货(ADR 0018):防御式排除任何遗留 manual snapshot 行(正常为空),
+          // 再拼上账本现算的 manual (takenAt, totalUsd) 行 → 同喂 buildPortfolioHistory,不双算、无需特殊合并。
+          const now = Date.now();
+          const manualIds = new Set(
+            memberAccounts.filter((a) => isManual(a.connectorId)).map((a) => a.id),
+          );
+          const snapRows = rows.filter(
+            (r) => !manualIds.has(r.accountId) && memberSet.has(r.accountId),
+          );
+          // manual 走日网格 compute-on-read(ADR 0019),末点 τ=now → 与下方 live 覆写同刻对齐。
+          const manualRows = yield* loadManualHistoryRows(memberAccounts, now);
+          // 归档成员的历史贡献保留到归档那一刻为止(ADR 0039)—— 不传这张表的话,它冻住的值会
+          // 一路保持到今天,而下面的当下点只算活跃账户,曲线就会「一路平着、到头凭空掉一截」。
+          const archivedAt = new Map(
+            memberAccounts.flatMap((a) =>
+              a.archivedAt == null ? [] : [[a.id, a.archivedAt] as const],
+            ),
+          );
+          const series = buildPortfolioHistory([...snapRows, ...manualRows], archivedAt);
+          // 空序列直接返回 —— 没有当下点可覆写。耗时由外层 `timed` 统一打,这条最快的路也照样进日志。
+          if (series.length === 0) return { series };
+
+          // 当下点 = 与主页同源同算的实时总价(活跃账户,与 getPortfolioOverview 一致的账户集 + 同一 mode)。
+          const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+          // manual 不写快照(ADR 0018):当下点的 manual 净值由 creds 现造注入(过去点仍来自真实快照 totals)。
+          yield* injectManualSnapshots(accounts, byAccount);
+          const liveTotals = yield* deriveLiveAccountTotals(
+            accounts,
+            byAccount,
+            settings.valuationMode,
+          );
+          let grand = 0;
+          for (const v of liveTotals.values()) grand += v;
+          series[series.length - 1] = { ...series[series.length - 1], total: grand };
           return { series };
-        }
-
-        // 当下点 = 与主页同源同算的实时总价(活跃账户,与 getPortfolioOverview 一致的账户集 + 同一 mode)。
-        const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-        // manual 不写快照(ADR 0018):当下点的 manual 净值由 creds 现造注入(过去点仍来自真实快照 totals)。
-        yield* injectManualSnapshots(accounts, byAccount);
-        const liveTotals = yield* deriveLiveAccountTotals(
-          accounts,
-          byAccount,
-          settings.valuationMode,
-        );
-        let grand = 0;
-        for (const v of liveTotals.values()) grand += v;
-        series[series.length - 1] = { ...series[series.length - 1], total: grand };
-        logHistory();
-        return { series };
-      }),
+        }),
+      ),
     ),
   );
 

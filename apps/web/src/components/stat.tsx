@@ -1,4 +1,5 @@
 import { cn } from "@folio/ui";
+import { GainSkeleton } from "./skeletons";
 
 // 统计小件:muted xs label + mono 加粗值。hero 三指标与 perp 权益条共用
 // (code review:此前两处 byte-for-byte 重复,排版调整会漏一处)。
@@ -23,7 +24,7 @@ export function Stat({
       {/* 骨架与真值同高(text-sm 的行高),填充那一下不推挤下方内容。 */}
       {pending ? (
         <div className="flex h-5 items-center">
-          <span className="block h-2.5 w-24 animate-pulse rounded bg-muted" />
+          <GainSkeleton className="w-24" />
         </div>
       ) : (
         <div className={cn("font-mono font-semibold text-sm tabular-nums", className)}>{value}</div>

@@ -4,6 +4,7 @@ import {
   getPortfolioGains,
   getPortfolioHistory,
   getPortfolioOverview,
+  getTabPinPickerOptions,
   listPortfolioMemberships,
   listPortfolios,
 } from "../server/portfolio";
@@ -64,5 +65,15 @@ export const homeTabMetaQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: portfolioKeys.tabMeta(portfolioId),
     queryFn: () => getHomeTabMeta({ data: { portfolioId } }),
+    staleTime: STALE_TIME.live,
+  });
+
+// 自定义 Tab 选择器的备选。**首屏不拉** —— 由选择器打开时挂载的组件去读(#488 票 4)。
+// 与 tab 条那份分开一层 key:它俩的刷新时机相同(增删账户/标签都会变),但**拉取时机**不同,
+// 合成一个 key 就等于把「点开才要的东西」重新钉回首屏。
+export const tabPinPickerOptionsQuery = (portfolioId: string) =>
+  queryOptions({
+    queryKey: portfolioKeys.pickerOptions(portfolioId),
+    queryFn: () => getTabPinPickerOptions({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
   });

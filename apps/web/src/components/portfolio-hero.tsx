@@ -7,6 +7,7 @@ import { downsampleSeries, type HistoryPoint } from "../lib/history";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { signedUsd } from "../lib/signed-usd";
 import { GainExplainer } from "./gain-explainer";
+import { GainSkeleton } from "./skeletons";
 import { Stat } from "./stat";
 import { TrendPanel } from "./trend-panel";
 
@@ -128,7 +129,7 @@ export function PortfolioHero({
           {gainsPending ? (
             // 与药丸同高同宽量级,填充那一下不推挤旁边的净值。
             <span className={cn(pillClass, "bg-muted text-transparent")}>
-              <span className="block h-2.5 w-28 animate-pulse rounded bg-muted-foreground/20" />
+              <GainSkeleton className="w-28" tone="onMuted" />
             </span>
           ) : gain24h == null ? (
             <span className={pillClass}>{NO_VALUE}</span>

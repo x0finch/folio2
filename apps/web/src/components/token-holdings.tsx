@@ -118,6 +118,10 @@ export function TokenHoldings({
         ))}
       <TokenSheet
         holding={selected}
+        // 抽屉里的盈亏与它身后那一行是同一笔数,所以「还在算」这件事也要一起传进去 ——
+        // 不传的话行上画骨架、抽屉里画破折号,同一个数字两种说法,而破折号是在替服务端
+        // 断言「算不出」(见 lib/delta-display 的三态)。
+        gainsPending={gainsPending}
         open={selected != null}
         onOpenChange={(o) => {
           if (!o) select(undefined);

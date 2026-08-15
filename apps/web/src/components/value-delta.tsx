@@ -2,6 +2,7 @@ import { cn } from "@folio/ui";
 import { deltaTone, NO_VALUE } from "../lib/delta-display";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { signedUsd } from "../lib/signed-usd";
+import { GainSkeleton } from "./skeletons";
 
 // 全站统一的「价值 + 单符号增量」块(H5 #120):上市值,下 `{±}$Δ P%` 单前置符号、
 // 同色 --pos/--neg。代币行(24h)/ 永续仓位(uPnL)/ DeFi 协议行(24h 聚合)/ 账户行 / 账户抽屉头共用 ——
@@ -40,7 +41,7 @@ export function ValueDelta({
         (pending ? (
           // 宽度按 `−$0,000.00 0.00%` 的量级定死 —— 骨架与真值不同宽就会在填充那一下推挤整行。
           <div className="flex h-4 items-center justify-end">
-            <span className="block h-2.5 w-24 animate-pulse rounded bg-muted" />
+            <GainSkeleton className="w-24" />
           </div>
         ) : (
           <div className={cn("text-xs tabular-nums", deltaTone(delta))}>

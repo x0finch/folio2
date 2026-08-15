@@ -154,13 +154,13 @@ describe("刷新映射表", () => {
 
   // 刻意的窄口径:增删一个自定义 Tab 不改任何余额,把昂贵的总览连带拉一遍是白花钱。
   // 这条钉住那个决定 —— 有人把它并进 `portfolio.write` 时会红。
-  it("portfolio.pin.write 只刷 Tab 清单,不碰总览", async () => {
-    seed(portfolioKeys.pins());
+  it("portfolio.pin.write 只刷 tab 条那份,不碰总览", async () => {
+    seed(portfolioKeys.tabMeta("pf-1"));
     seed(portfolioKeys.overview("pf-1"));
 
     await invalidateFor(queryClient, "portfolio.pin.write");
 
-    expect(isInvalidated(portfolioKeys.pins())).toBe(true);
+    expect(isInvalidated(portfolioKeys.tabMeta("pf-1"))).toBe(true);
     expect(isInvalidated(portfolioKeys.overview("pf-1"))).toBe(false);
   });
 
@@ -185,6 +185,45 @@ describe("刷新映射表", () => {
     await invalidateFor(queryClient, "sync.round");
 
     expect(isInvalidated(portfolioKeys.tabMeta("pf-1"))).toBe(true);
+  });
+
+  // 24h 盈亏拆成独立的一条读之后(#488),它是**一个新的 queryKey**,而映射表里没有任何一条
+  // 提到过它 —— 靠的是组合域那条前缀盖住。这类事漏了不报错:同步跑完总净值更新了、盈亏还是旧的,
+  // 而两个数就并排显示着。三条写路径各钉一次。
+  it.each([
+    ["sync.round", "同步跑完:余额变了,盈亏跟着变"],
+    ["prices.refreshed", "刷价跑完:市值变了,盈亏的末点也跟着变"],
+    ["settings.valuation", "改估值口径:读时重估,盈亏是按现推的值算的"],
+  ] as const)("%s 刷到 24h 盈亏那条读(%s)", async (event, _why) => {
+    seed(portfolioKeys.gains("pf-1"));
+
+    await invalidateFor(queryClient, event);
+
+    expect(isInvalidated(portfolioKeys.gains("pf-1"))).toBe(true);
+  });
+
+  // pin 视图的盈亏是**另一个 key**(带 pin),前缀同样要盖得住 —— 停在自定义 Tab 上同步完,
+  // 那一格的盈亏也该更新。
+  it("同步刷得到按 pin 收窄的那份盈亏", async () => {
+    const pinned = portfolioKeys.gains("pf-1", { kind: "tag", tagId: "t-1" });
+    seed(pinned);
+
+    await invalidateFor(queryClient, "sync.round");
+
+    expect(isInvalidated(pinned)).toBe(true);
+  });
+
+  // 选择器的备选(账户 / 标签清单)改由点开时才拉(#488 票 4),于是它也成了一个新 key。
+  // 账户与标签的增删都会改它的内容 —— 组合域那条前缀盖得住,这条钉住「盖得住」。
+  it.each([
+    ["account.write", "加/删账户 → connector 与 account 两段都变"],
+    ["tag.write", "加/删标签 → tag 那段变"],
+  ] as const)("%s 刷到选择器备选(%s)", async (event, _why) => {
+    seed(portfolioKeys.pickerOptions("pf-1"));
+
+    await invalidateFor(queryClient, event);
+
+    expect(isInvalidated(portfolioKeys.pickerOptions("pf-1"))).toBe(true);
   });
 
   // 这一条是整张表里唯一的**跨域推断**:法币选项的名字由服务端按请求 locale 本地化,
