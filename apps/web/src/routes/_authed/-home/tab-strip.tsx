@@ -1,6 +1,6 @@
 import { Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "../../../components/query-boundary";
 import { type KindTab, kindTabsOf } from "../../../lib/home-tabs";
@@ -17,7 +17,7 @@ export function TabStripIsland() {
   const { selectedId } = usePortfolio();
   const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
   const { pins } = strip;
-  const { active, selectTab, shownActive } = useHomeTabSelection(pins);
+  const { selectTab, shownActive } = useHomeTabSelection(pins);
   const kindTabs = kindTabsOf(strip.hasPerps, strip.hasDefi);
   const isPinView = pins.some((p) => p.id === shownActive);
   const activeKind: KindTab = kindTabs.includes(shownActive as KindTab)
@@ -28,21 +28,22 @@ export function TabStripIsland() {
   // 手机端 tab 条横向滚动:选中在可视区外/半露的 tab 要滚进可视区,两侧留余量(不贴裁剪缘/合计)。
   // 手写横向校正而非 scrollIntoView:后者会连带滚 overflow-hidden 祖先和页面纵向;且选中 pin 后合计
   // 宽度变化(「—」→ 金额)会把 strip 压窄、刚滚好的 tab 又被裁掉(实测)→ ResizeObserver 盯住
-  // strip 尺寸,变了就再校正一次。pins.length 也作触发 —— 新建 pin 的 tab 等 loader 刷新才挂上。
+  // strip 尺寸,变了就再校正一次。选中的 trigger 自己握 ref,不靠满条去搜 aria-selected。
   const stripRef = useRef<HTMLDivElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖是「何时滚」的信号(选中变化/pin 增删),不是回调里读的值。
-  useEffect(() => {
+  const selectedRef = useRef<HTMLSpanElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: activeValue 是「何时滚」的信号(选中变了,ref 已经挪到新 trigger 上),回调里读的是 ref 不是这个值。
+  useLayoutEffect(() => {
     const elStrip = stripRef.current;
     if (!elStrip) return;
     const reveal = () => {
-      const el = elStrip.querySelector('[aria-selected="true"]');
-      if (el instanceof HTMLElement) revealTab(el);
+      const el = selectedRef.current;
+      if (el) revealTab(el);
     };
     reveal();
     const ro = new ResizeObserver(reveal);
     ro.observe(elStrip);
     return () => ro.disconnect();
-  }, [active, pins.length]);
+  }, [activeValue]);
 
   return (
     <div className="flex items-center gap-4">
@@ -59,11 +60,23 @@ export function TabStripIsland() {
                     ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。
                     pr-4:滚动区末端留内边距,滚到底时最后一个 tab/＋ 不贴着右侧合计。 */}
           <TabsList className="bg-transparent p-0 pr-4">
-            <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
-            {strip.hasPerps && <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>}
-            {strip.hasDefi && <TabsTrigger value="defi">{t("defiTab")}</TabsTrigger>}
+            <SelectedSlot on={activeValue === "tokens"} selectedRef={selectedRef}>
+              <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
+            </SelectedSlot>
+            {strip.hasPerps && (
+              <SelectedSlot on={activeValue === "perps"} selectedRef={selectedRef}>
+                <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>
+              </SelectedSlot>
+            )}
+            {strip.hasDefi && (
+              <SelectedSlot on={activeValue === "defi"} selectedRef={selectedRef}>
+                <TabsTrigger value="defi">{t("defiTab")}</TabsTrigger>
+              </SelectedSlot>
+            )}
             {pins.map((p) => (
-              <PinTab key={p.id} pin={p} />
+              <SelectedSlot key={p.id} on={activeValue === p.id} selectedRef={selectedRef}>
+                <PinTab pin={p} />
+              </SelectedSlot>
             ))}
             <AddPinButton />
           </TabsList>
@@ -71,6 +84,22 @@ export function TabStripIsland() {
       </div>
       <TabTotal />
     </div>
+  );
+}
+
+function SelectedSlot({
+  on,
+  selectedRef,
+  children,
+}: {
+  on: boolean;
+  selectedRef: RefObject<HTMLSpanElement | null>;
+  children: ReactNode;
+}) {
+  return (
+    <span ref={on ? selectedRef : undefined} className="inline-flex">
+      {children}
+    </span>
   );
 }
 
