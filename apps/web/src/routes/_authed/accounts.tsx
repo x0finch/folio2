@@ -10,10 +10,8 @@ import { AccountDetailSheet, type AccountRow } from "../../components/account-de
 import { AddAccountModal, type CompleteTarget } from "../../components/add-account-modal";
 import { AvatarStack } from "../../components/avatar-stack";
 import { ConnectorBadge } from "../../components/connector-badge";
-import { HeaderSync } from "../../components/header-sync";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { TagBadges } from "../../components/tag-badges";
-import { ValueDelta } from "../../components/value-delta";
 import { buildAccountRows } from "../../lib/account-rows";
 import { accountShare, activeAccountsTotal, shareLabel } from "../../lib/account-share";
 import { sortActiveAccounts } from "../../lib/account-sort";
@@ -27,6 +25,8 @@ import { accountHoldingsQuery, accountListQuery } from "../../lib/queries/accoun
 import { connectorCatalogQuery } from "../../lib/queries/connectors";
 import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "../../lib/queries/tags";
+import { HeaderSync } from "./-home/header-sync";
+import { ValueDelta } from "./-home/holdings/value-delta";
 
 export const Route = createFileRoute("/_authed/accounts")({
   // 详情抽屉进 URL(与首页主 tab 同一套,ADR 0043):刷新还停在这个账户、链接能分享。

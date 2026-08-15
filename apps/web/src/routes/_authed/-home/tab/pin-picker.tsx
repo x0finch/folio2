@@ -1,7 +1,10 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
+import { useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { PinTargetLabel } from "./pin-target-label";
+import { connectorLabelFallback } from "../../../../lib/connector-label";
+import { connectorCatalogQuery } from "../../../../lib/queries/connectors";
+import { PinTargetMark } from "./pin-target-mark";
 
 // 自定义 Tab 的添加/改指向选择器(ADR 0034):**裸内容**,面板 chrome 由承载它的 beUI hover Popover 提供
 //(＋按钮 / pin 药丸 hover 弹出)。分三段 —— Tag / Connector / Account。选中即回调 onPick;空显空态。
@@ -16,6 +19,36 @@ export interface PinTargetChoice {
 
 const headerClass = "px-2 py-1 text-muted-foreground text-xs uppercase tracking-widest";
 const rowClass = "rounded-md px-2 py-1.5 text-left text-sm";
+
+// 选择器用:仍走连接器目录(打开选择器才拉)。tab 条不要用它 —— 一挂就打目录。
+function PinTargetLabel({
+  target,
+  name,
+  onPrimary,
+  className,
+}: {
+  target: PinTargetChoice;
+  name?: string; // tag / account 的名字(connector 走 registry 类型名,不用它)
+  onPrimary?: boolean; // 落在激活药丸(bg-primary 浅底)上 → logo 底盘随之改色
+  className?: string;
+}) {
+  const { data: catalog } = useQuery(connectorCatalogQuery());
+  const id = target.connectorId ?? "";
+  const resolvedName =
+    target.kind === "connector"
+      ? (catalog?.[id]?.label ?? connectorLabelFallback(id))
+      : (name ?? "");
+  const logo = target.kind === "connector" ? catalog?.[id]?.logo : undefined;
+  return (
+    <PinTargetMark
+      kind={target.kind}
+      name={resolvedName}
+      logo={logo}
+      onPrimary={onPrimary}
+      className={className}
+    />
+  );
+}
 
 function PickerSection({
   header,

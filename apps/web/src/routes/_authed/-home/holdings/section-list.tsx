@@ -1,5 +1,12 @@
 import type { ReactNode } from "react";
-import { SectionHeader } from "./holdings-sections";
+
+function SectionHeader({ title }: { title: string }) {
+  return (
+    <div className="flex items-center gap-2.5 px-3">
+      <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
+    </div>
+  );
+}
 
 // 按小计倒序的分区列表(section list,ADR 0034)—— 自定义 Tab 视图的展示骨架。
 // 现货 / 永续 / DeFi 各一段竖排,**哪段小计大哪段在上**;空段(count=0)剔除。generic:调用方(④)把

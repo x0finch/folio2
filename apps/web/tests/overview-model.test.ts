@@ -481,8 +481,17 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0040)", () => {
   });
 
   it("没有历史(缺基准)→ null,由界面渲染 `—`,不是 0", async () => {
-    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { now: NOW }));
+    const view = await runWithOracle(
+      stub,
+      buildOverview(accounts, byAccount, { now: NOW, gainHistory: [] }),
+    );
     expect(view.holdings[0].gain24h).toBeNull();
+  });
+
+  it("不传入历史 → 不算盈亏(字段缺席)。首页总览走这条", async () => {
+    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { now: NOW }));
+    expect(view.holdings[0].gain24h).toBeUndefined();
+    expect(view.gain24h).toBeUndefined();
   });
 
   it("各行金额相加 = 把所有线一起算 —— 「加得起来」是结构上成立的", async () => {
@@ -530,7 +539,10 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0040)", () => {
   });
 
   it("一条线都算不出 → 组合层也是 null,由 hero 渲染 `—`", async () => {
-    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { now: NOW }));
+    const view = await runWithOracle(
+      stub,
+      buildOverview(accounts, byAccount, { now: NOW, gainHistory: [] }),
+    );
     expect(view.gain24h).toBeNull();
   });
 });
@@ -595,7 +607,10 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0040 的已知�
   });
 
   it("没有历史 → null,由界面渲染 `—`", async () => {
-    const view = await runWithOracle(stub, buildOverview(accounts, byAccount, { now: NOW }));
+    const view = await runWithOracle(
+      stub,
+      buildOverview(accounts, byAccount, { now: NOW, gainHistory: [] }),
+    );
     expect(view.sections[0].defi[0].gain24h).toBeNull();
   });
 });

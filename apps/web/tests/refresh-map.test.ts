@@ -59,6 +59,31 @@ describe("刷新映射表", () => {
     ]);
   });
 
+  // #488 票 5:24h 盈亏从总览拆出去之后,漏刷不会报错,只表现为「同步完了盈亏停在旧数」。
+  // 键落在组合域前缀下,三种视图都要被 sync.round / prices.refreshed 盖住。
+  it("sync.round 与 prices.refreshed 盖住默认 / 非默认 / 自定义 Tab 的 24h 盈亏", async () => {
+    const def = portfolioKeys.gain24h("pf-default");
+    const other = portfolioKeys.gain24h("pf-other");
+    const pinned = portfolioKeys.gain24h("pf-other", { kind: "tag", tagId: "tg1" });
+    for (const k of [def, other, pinned]) seed(k);
+
+    await invalidateFor(queryClient, "sync.round");
+    expect([isInvalidated(def), isInvalidated(other), isInvalidated(pinned)]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+
+    queryClient = new QueryClient();
+    for (const k of [def, other, pinned]) seed(k);
+    await invalidateFor(queryClient, "prices.refreshed");
+    expect([isInvalidated(def), isInvalidated(other), isInvalidated(pinned)]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+  });
+
   // 跨域那条:加一个账户不只是账户列表多一行,首页总额 / 走势 / 按代币的聚合全跟着变。
   // 只刷账户域会让总览停在旧数字,而且不报错 —— 所以这条单独钉住。
   it("account.write 同时刷账户域与组合域", async () => {
@@ -154,13 +179,13 @@ describe("刷新映射表", () => {
 
   // 刻意的窄口径:增删一个自定义 Tab 不改任何余额,把昂贵的总览连带拉一遍是白花钱。
   // 这条钉住那个决定 —— 有人把它并进 `portfolio.write` 时会红。
-  it("portfolio.pin.write 只刷 Tab 清单,不碰总览", async () => {
-    seed(portfolioKeys.pins());
+  it("portfolio.pin.write 只刷 tab 条,不碰总览", async () => {
+    seed(portfolioKeys.tabStrip("pf-1"));
     seed(portfolioKeys.overview("pf-1"));
 
     await invalidateFor(queryClient, "portfolio.pin.write");
 
-    expect(isInvalidated(portfolioKeys.pins())).toBe(true);
+    expect(isInvalidated(portfolioKeys.tabStrip("pf-1"))).toBe(true);
     expect(isInvalidated(portfolioKeys.overview("pf-1"))).toBe(false);
   });
 

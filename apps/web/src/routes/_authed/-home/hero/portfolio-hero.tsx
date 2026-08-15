@@ -1,20 +1,65 @@
 import { cn, NumberTicker } from "@folio/ui";
 import { useTranslations } from "use-intl";
-import { NO_VALUE } from "../lib/delta-display";
-import type { Gain } from "../lib/gain-24h";
-import { deriveHeroMetrics, type HoldingLike } from "../lib/hero-stats";
-import { downsampleSeries, type HistoryPoint } from "../lib/history";
-import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { signedUsd } from "../lib/signed-usd";
-import { GainExplainer } from "./gain-explainer";
+import type { Gain } from "../../../../lib/gain-24h";
+import { downsampleSeries, type HistoryPoint } from "../../../../lib/history";
+import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
+import { signedUsd } from "../../../../lib/signed-usd";
+import { GainSkeleton, NO_VALUE } from "../holdings/value-delta";
+import { deriveHeroMetrics, type HoldingLike } from "./hero-stats";
 import { Stat } from "./stat";
 import { TrendPanel } from "./trend-panel";
 
 const DAY_MS = 86_400_000;
 // hero 趋势最多展示最近 30 天;更长跨度 + 区间切换属于 Insights(不改共享的 getPortfolioHistory)。
 const HERO_WINDOW_DAYS = 30;
+const GAIN_BADGE =
+  "inline-flex items-center rounded-full px-2 py-0.5 font-mono font-semibold text-xs tabular-nums";
+const GAIN_TONE = {
+  flat: "bg-muted text-muted-foreground",
+  pos: "bg-pos-bg text-pos",
+  neg: "bg-neg-bg text-neg",
+} as const;
 
-const fmtPct = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}%`;
+function gainTone(amount: number) {
+  if (amount > 0) return GAIN_TONE.pos;
+  if (amount < 0) return GAIN_TONE.neg;
+  return GAIN_TONE.flat;
+}
+
+// 24h 盈亏药丸:贴在净值数字右上角。文案与代币行同形(`{±}$Δ P%`),底色走涨跌 token。
+function GainBadge({
+  gain,
+  pending,
+  failed,
+}: {
+  gain: Gain | null;
+  pending: boolean;
+  failed: boolean;
+}) {
+  const t = useTranslations("Overview");
+  const usd = useDisplayValue();
+
+  switch (true) {
+    case pending:
+      return <GainSkeleton />;
+    case failed:
+      return (
+        <div>
+          <span className={cn(GAIN_BADGE, GAIN_TONE.flat)}>{NO_VALUE}</span>
+          <p className="mt-1 text-muted-foreground text-xs">{t("gainLoadFailed")}</p>
+        </div>
+      );
+    case gain == null:
+      return <span className={cn(GAIN_BADGE, GAIN_TONE.flat)}>{NO_VALUE}</span>;
+    default:
+      return (
+        <span className={cn(GAIN_BADGE, gainTone(gain.amount))}>
+          {signedUsd(usd, gain.amount)}
+          {gain.pct != null && ` ${Math.abs(gain.pct).toFixed(2)}%`}
+        </span>
+      );
+  }
+}
 
 // 净值 hero(H3 #102):趋势图作背景 + 净值/24h/三指标浮于其上(无 Card)。
 // 趋势色随涨跌走 --pos/--neg;三指标 best/worst/稳定币占比派生自纯函数 deriveHeroMetrics(已单测)。
@@ -23,14 +68,23 @@ export function PortfolioHero({
   totalUsd,
   gain24h,
   holdings,
+  loading = false,
+  gainPending = false,
+  gainFailed = false,
   contentClassName,
 }: {
   series: HistoryPoint[];
   totalUsd: number;
-  // 组合层 24h 盈亏(ADR 0040),由 server 算好 —— **不在这里从曲线上量**。
+  // 组合层 24h 盈亏(ADR 0040),由独立读取算好 —— **不在这里从曲线上量**。
   // 曲线画的是净值(含充提),这个数剔除了充提,两者本来就不该是同一个;`null` = 算不出。
   gain24h: Gain | null;
   holdings: readonly HoldingLike[];
+  /** 净值曲线还在取 —— 数字照常渲染,曲线走 TrendPanel 的「还在取数」态。 */
+  loading?: boolean;
+  /** 24h 盈亏还在取 —— 增量 / best-worst 走小骨架,不跟「算不出」的破折号混。 */
+  gainPending?: boolean;
+  /** 盈亏读取失败 —— 破折号旁边一处提示。行内不再各说一遍。 */
+  gainFailed?: boolean;
   // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
   contentClassName?: string;
 }) {
@@ -56,23 +110,7 @@ export function PortfolioHero({
   // 总额」,那是净值差:你充值 10 万,它就显示赚了 10 万。现在剔除了充提与买卖。
   //
   // **这个数与脚下那条曲线不再对得上,那是预期的。** 曲线画的是净值,充值那天它会跳一格而这个数
-  // 不动。两个要求没法同时满足(金额要是真赚的钱 / 要剔除资金进出),摊开解释见 #445。
-  const dayAbs = gain24h?.amount ?? null;
-  const dayPct = gain24h?.pct ?? null;
-  // 方向:正/负/持平(0 → 中性,不当作上涨);算不出也走中性。
-  const dir = dayAbs == null ? 0 : dayAbs > 0 ? 1 : dayAbs < 0 ? -1 : 0;
-  const toneClass =
-    dir > 0
-      ? "bg-pos-bg text-pos"
-      : dir < 0
-        ? "bg-neg-bg text-neg"
-        : "bg-muted text-muted-foreground";
-  const arrow = dir > 0 ? "▲" : dir < 0 ? "▼" : null;
-  const pillClass = cn(
-    "inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 font-mono font-semibold text-xs",
-    toneClass,
-  );
-
+  // 不动。两个要求没法同时满足(金额要是真赚的钱 / 要剔除资金进出)。
   const metrics = deriveHeroMetrics(holdings, totalUsd);
   const spanDays = hasHistory
     ? Math.round((chartSeries[chartSeries.length - 1].t - chartSeries[0].t) / DAY_MS)
@@ -88,16 +126,26 @@ export function PortfolioHero({
     <div className="relative min-h-60 overflow-hidden pt-1">
       {/* 四态(点数不够 / 还在取数 / 什么都还没有 / 真有数据)全在 TrendPanel 里判。
           hero 的上留白更大(topMargin=92,把折线压到下半区),填充也比抽屉略重 → 覆盖这两个默认值。 */}
-      <TrendPanel series={chartSeries} topMargin={92} fillOpacity={0.16} decorate={nothingYet} />
+      <TrendPanel
+        series={chartSeries}
+        loading={loading}
+        topMargin={92}
+        fillOpacity={0.16}
+        decorate={nothingYet}
+      />
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>
         <p className="font-medium text-muted-foreground text-xs">{t("totalNetWorth")}</p>
-        <div className="mt-2 flex flex-wrap items-baseline gap-3">
-          {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。 */}
+        {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。
+            inline-flex + items-start:24h 增量贴在金额盒子的右上角,不跟数字基线居中。 */}
+        <div className="mt-2 inline-flex items-start gap-3">
           <div className="flex select-text items-baseline">
+            {/* startOnView={false}:数据一到就滚一次。默认要等进视口,流式补数 / hydration
+                时数字已经在屏上,再等会从 0 重滚一遍。 */}
             <NumberTicker
               value={totalUsd}
+              startOnView={false}
               format={(n) => usd(n).split(".")[0]}
               className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
             />
@@ -107,21 +155,7 @@ export function PortfolioHero({
               </span>
             )}
           </div>
-          {/* 算不出(缺 24 小时前的基准)→ `—`,不是留白也不是 0:留白读作「还没加载出来」,
-              0 是在断言「今天没涨没跌」。与全站三态口径一致(见 lib/delta-display)。 */}
-          {gain24h == null ? (
-            <span className={pillClass}>{NO_VALUE}</span>
-          ) : (
-            // 摊开算式(#445):金额与百分比来自两套计算,你动过仓的那天它们除不通 —— 与其让人
-            // 纳闷,不如 hover(手机上点一下)给出各段。这里的 pill 不在可点击行内,包成按钮无冲突。
-            <GainExplainer gain={gain24h}>
-              <span className={pillClass}>
-                {arrow ? `${arrow} ` : ""}
-                {dayPct != null ? `${fmtPct(dayPct)} · ` : ""}
-                {signedUsd(usd, dayAbs ?? 0)}
-              </span>
-            </GainExplainer>
-          )}
+          <GainBadge gain={gain24h} pending={gainPending} failed={gainFailed} />
         </div>
 
         <div className="mt-6 flex flex-wrap gap-8">
@@ -130,17 +164,25 @@ export function PortfolioHero({
           <Stat
             label={t("bestToday")}
             value={
-              metrics.best
-                ? `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
-                : NO_VALUE
+              gainPending ? (
+                <GainSkeleton />
+              ) : metrics.best ? (
+                `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
+              ) : (
+                NO_VALUE
+              )
             }
           />
           <Stat
             label={t("worstToday")}
             value={
-              metrics.worst
-                ? `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`
-                : NO_VALUE
+              gainPending ? (
+                <GainSkeleton />
+              ) : metrics.worst ? (
+                `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`
+              ) : (
+                NO_VALUE
+              )
             }
           />
           <Stat

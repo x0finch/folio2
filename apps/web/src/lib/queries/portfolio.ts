@@ -1,15 +1,16 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
+  getHomeTabStrip,
+  getPortfolioGain24h,
   getPortfolioHistory,
   getPortfolioOverview,
   listPortfolioMemberships,
   listPortfolios,
 } from "../server/portfolio";
-import { listTabPins } from "../server/tab-pins";
 import { STALE_TIME } from "./constants";
 import { type PinScopeKey, portfolioKeys } from "./keys";
 
-// 组合域的读取入口 —— 与 `lib/server/portfolio.ts` / `lib/server/tab-pins.ts` 的读取型 server fn 对应。
+// 组合域的读取入口 —— 与 `lib/server/portfolio.ts` 的读取型 server fn 对应。
 //
 // **`staleTime` 在 #412 打开**:这个域的写路径已经全部改成定向刷新,开缓存不会让任何一条
 // 「改了东西画面要跟着动」的路径失灵。收益是页间来回切与 hover 预热不再重复打服务器 ——
@@ -32,10 +33,13 @@ export const portfolioMembershipsQuery = () =>
     staleTime: STALE_TIME.live,
   });
 
-export const tabPinsQuery = () =>
+/** 首页 tab 条:有没有永续 / DeFi + 自定义 Tab 的已解析标签。 */
+export type HomeTabStrip = Awaited<ReturnType<typeof getHomeTabStrip>>;
+
+export const homeTabStripQuery = (portfolioId: string) =>
   queryOptions({
-    queryKey: portfolioKeys.pins(),
-    queryFn: () => listTabPins(),
+    queryKey: portfolioKeys.tabStrip(portfolioId),
+    queryFn: () => getHomeTabStrip({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
   });
 
@@ -52,5 +56,13 @@ export const portfolioHistoryQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: portfolioKeys.history(portfolioId),
     queryFn: () => getPortfolioHistory({ data: { portfolioId } }),
+    staleTime: STALE_TIME.live,
+  });
+
+/** 24h 盈亏:组合级 + 按持仓 / DeFi 协议分组。自定义 Tab 把 pin 传进来。 */
+export const portfolioGain24hQuery = (portfolioId: string, pin?: PinScopeKey) =>
+  queryOptions({
+    queryKey: portfolioKeys.gain24h(portfolioId, pin),
+    queryFn: () => getPortfolioGain24h({ data: { portfolioId, pin } }),
     staleTime: STALE_TIME.live,
   });

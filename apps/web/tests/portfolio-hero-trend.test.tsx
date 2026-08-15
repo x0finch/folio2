@@ -1,10 +1,10 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
-import { PortfolioHero } from "../src/components/portfolio-hero";
-import type { HoldingLike } from "../src/lib/hero-stats";
 import type { HistoryPoint } from "../src/lib/history";
 import { messages } from "../src/lib/i18n/messages";
+import type { HoldingLike } from "../src/routes/_authed/-home/hero/hero-stats";
+import { PortfolioHero } from "../src/routes/_authed/-home/hero/portfolio-hero";
 
 afterEach(cleanup);
 
@@ -89,6 +89,31 @@ describe("hero 趋势区的三态", () => {
     renderHero([], 0, [{ token: { symbol: "BTC" }, totalValue: 0, gain24h: null }]);
 
     expect(emptyText()).toBeTruthy();
+  });
+
+  it("走势还在取数 → 净值照常渲染,不闪空态那句话", () => {
+    // #488 票 3:曲线是非挂起读取,没到不该拖住数字,也不该先闪一句「数据不够」。
+    render(
+      <IntlProvider locale="en" messages={messages.en} timeZone="UTC" now={new Date(T0)}>
+        <PortfolioHero series={[]} totalUsd={110} gain24h={null} holdings={holdings} loading />
+      </IntlProvider>,
+    );
+
+    expect(screen.getByText(/total net worth/i)).toBeTruthy();
+    expect(emptyText()).toBeNull();
+    expect(spanBadge()).toBeNull();
+  });
+
+  it("24h 盈亏还在取 → 增量走骨架,不先闪破折号", () => {
+    const { container } = render(
+      <IntlProvider locale="en" messages={messages.en} timeZone="UTC" now={new Date(T0)}>
+        <PortfolioHero series={[]} totalUsd={110} gain24h={null} holdings={holdings} gainPending />
+      </IntlProvider>,
+    );
+
+    expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
+    // 破折号仍可能出现在稳定币占比(T2,不跟盈亏等);增量/best/worst 不该是 `—`。
+    expect(container.querySelector("[data-slot=skeleton]")?.textContent).not.toBe("—");
   });
 
   it("两个点但落在同一个钟点 → 被降采样并成一个,于是仍是空态", () => {

@@ -1,8 +1,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
-import { ValueDelta } from "../src/components/value-delta";
-import { deltaTone, NO_VALUE } from "../src/lib/delta-display";
+import { deltaTone, NO_VALUE, ValueDelta } from "../src/routes/_authed/-home/holdings/value-delta";
 
 afterEach(cleanup);
 
@@ -43,6 +42,12 @@ describe("<ValueDelta> 的三态", () => {
     expect(line?.textContent).not.toBe(NO_VALUE);
     // signedUsd 对 0 不带符号 —— 断言渲染出了一个 0 金额,而不是空。
     expect(line?.textContent).toMatch(/0/);
+  });
+
+  it("还在取 —— 小骨架,不是破折号", () => {
+    const { container } = renderDelta({ delta: null, loading: true });
+    expect(deltaLine(container)?.textContent).not.toBe(NO_VALUE);
+    expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
   });
 
   it("null 与 0 在界面上不是同一个东西", () => {

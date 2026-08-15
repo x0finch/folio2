@@ -1,9 +1,25 @@
 import { cn, Popover, PopoverContent, PopoverTrigger, Separator } from "@folio/ui";
 import { useTranslations } from "use-intl";
-import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { useHoverPopover } from "../lib/hooks/use-hover-popover";
-import type { LiqRisk, LiqRiskState, PerpPositionView } from "../lib/perp";
-import { DetailRow } from "./detail-row";
+import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
+import { useHoverPopover } from "../../../../../lib/hooks/use-hover-popover";
+import type { LiqRisk, LiqRiskState, PerpPositionView } from "../../../../../lib/perp";
+
+function DetailRow({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn("tabular-nums", className)}>{value}</span>
+    </div>
+  );
+}
 
 // 强平风险环(H5 #120,概念稿定稿:温度计→血条→环):~20px SVG 圆环把「距强平多远」
 // 压缩成 占比(安全余量 clamp 到满环)+ 三态色:安全 --pos、警告 --warn、危险 --neg,无发光。

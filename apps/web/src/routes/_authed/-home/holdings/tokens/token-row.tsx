@@ -1,8 +1,8 @@
 import { LogoAvatar } from "@folio/ui";
 import type { ReactNode } from "react";
-import { formatNumber } from "../lib/format-number";
-import { AvatarStack } from "./avatar-stack";
-import { ValueDelta } from "./value-delta";
+import { AvatarStack } from "../../../../../components/avatar-stack";
+import { formatNumber } from "../../../../../lib/format-number";
+import { ValueDelta } from "../value-delta";
 
 // 全站统一的「代币持仓行」内容(主页 Tokens 视图 + 账户详情抽屉现货区共用)。
 // 单个 flex 容器 —— SharedLayoutBg 会把子元素塞进非 flex 的 z-10 div,故 flex 放这层内层。
@@ -22,12 +22,15 @@ export function TokenRowContent({
   item,
   sources,
   aside,
+  gainPending = false,
 }: {
   item: TokenRowItem;
   // 多源(主页跨链/多账户汇总)→ 名称右侧叠放各来源 logo;单账户抽屉不传。
   sources?: { logo?: string; name: string; k: string }[];
   // 行内附加物(如账户抽屉的 balance 级 note 指示器);无则省略。
   aside?: ReactNode;
+  /** 24h 盈亏还在取 —— 市值照常,增量位走小骨架。 */
+  gainPending?: boolean;
 }) {
   // 24h 盈亏(ADR 0040)由 server 算好 —— 过渡期那条「没接上就回落到市场涨跌幅倒推」的路已经拆了,
   // 主页与账户抽屉两条路都接上了(#447 第 2 / 5 片)。`null` = 算不出 → `—`。
@@ -50,7 +53,7 @@ export function TokenRowContent({
           </span>
         )}
       </div>
-      <ValueDelta value={item.value} delta={dayValue} pct={dayPct} />
+      <ValueDelta value={item.value} delta={dayValue} pct={dayPct} loading={gainPending} />
     </div>
   );
 }

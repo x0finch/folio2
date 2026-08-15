@@ -1,9 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrendPanel } from "../src/components/trend-panel";
 import type { HistoryPoint } from "../src/lib/history";
 import { messages } from "../src/lib/i18n/messages";
+import { TrendPanel } from "../src/routes/_authed/-home/hero/trend-panel";
 
 afterEach(cleanup);
 
@@ -51,6 +51,13 @@ describe("四态", () => {
   it("还在取数 → 什么都不渲染(否则闪一下文案再被图盖掉)", () => {
     const c = renderPanel({ loading: true });
     expect(note()).toBeNull();
+    expect(c.firstChild).toBeNull();
+  });
+
+  it("还在取数时 decorate 也让位 —— 先别画装饰线", () => {
+    const c = renderPanel({ loading: true, decorate: true });
+    expect(note()).toBeNull();
+    expect(decoration(c)).toBeNull();
     expect(c.firstChild).toBeNull();
   });
 

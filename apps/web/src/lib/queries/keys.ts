@@ -33,10 +33,13 @@ export const portfolioKeys = {
   /** 账户 → 所属组合。 */
   memberships: () => [...portfolioKeys.all, "memberships"] as const,
   /**
-   * 自定义 Tab 清单。**单独一层,不跟 overview 混**:增删一个 Tab 不该让昂贵的总览重拉一遍,
-   * 而映射表要指得动「只刷 Tab 清单」就得有这么一个前缀。
+   * 首页 tab 条(#488 票 4:有没有永续 / DeFi + 自定义 Tab 的已解析标签)。
+   * **单独一层,不跟 overview 混**:增删一个 Tab 不该让昂贵的总览重拉一遍,
+   * 而映射表要指得动「只刷 tab 条」就得有这么一个前缀。
    */
-  pins: () => [...portfolioKeys.all, "pins"] as const,
+  tabs: () => [...portfolioKeys.all, "tabs"] as const,
+  /** 某一个组合口径的 tab 条。永续 / DeFi 是否出现按这个组合的账户集算。 */
+  tabStrip: (portfolioId: string) => [...portfolioKeys.tabs(), portfolioId] as const,
   /**
    * 组合总览。**portfolioId 必须是真实 id,不能用「缺省 = 默认」的 undefined** ——
    * loader 预取的那份与组件按 selectedId 读的那份,key 对不上就等于首屏白拉一遍。
@@ -45,6 +48,13 @@ export const portfolioKeys = {
     [...portfolioKeys.all, "overview", portfolioId, pin ?? null] as const,
   /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
   history: (portfolioId: string) => [...portfolioKeys.all, "history", portfolioId] as const,
+  /**
+   * 24h 盈亏(#488 票 5)。**跟总览同一套 pin 收窄**,所以 pin 进 key ——
+   * 不进就会自定义 Tab 跟默认视图共用一份盈亏,切过去看到的是上一份。
+   * 落在组合域前缀下:同步 / 刷价 / 切组合已经刷 `portfolioKeys.all`,不用另开一条事件。
+   */
+  gain24h: (portfolioId: string, pin?: PinScopeKey) =>
+    [...portfolioKeys.all, "gain24h", portfolioId, pin ?? null] as const,
 };
 
 export const accountKeys = {

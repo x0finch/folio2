@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orderSections } from "../src/components/section-list";
+import { orderSections } from "../src/routes/_authed/-home/holdings/section-list";
 
 // section list(ADR 0034):按小计倒序、剔除空段、平手按 key 稳定。
 const s = (key: string, subtotal: number, count: number) => ({ key, subtotal, count });
