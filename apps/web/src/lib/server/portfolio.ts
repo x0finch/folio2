@@ -1,4 +1,11 @@
-import { AccountStore, PortfolioStore, SettingsStore, SnapshotStore, TagStore } from "@folio/db";
+import {
+  AccountStore,
+  PortfolioStore,
+  SettingsStore,
+  SnapshotStore,
+  TabPinStore,
+  TagStore,
+} from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
@@ -11,6 +18,7 @@ import {
 } from "../accounts-in-view";
 import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "../gain-24h";
 import { buildPortfolioHistory } from "../history";
+import { platformLogoUrl } from "../logo";
 import { isManual } from "../manual-connector";
 import { loadAccountHoldings } from "./internal/account-holdings";
 import { connectorPlatformMeta } from "./internal/connector-platform";
@@ -158,6 +166,89 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
           });
         }),
       ),
+    ),
+  );
+
+// 首页 tab 条要的**全部**东西,一个轻请求答完:有没有永续 tab、有没有 DeFi tab、自定义 tab 各显示成什么。
+//
+// **为什么值得单开一条**:tab 条本该比列表先出现,但「有哪些 tab」以前只有总览那个大包裹知道
+// (视角 tab 从 sections 推、pin 标签要靠 connector 目录 + 账户清单 + 标签清单在客户端拼)。于是
+// 一条 tab 名要等四份数据。这里一条 SQL 问出 kind、顺手把 pin 标签在服务端解析好,tab 条就只等它自己。
+//
+// **标签在服务端解析**还解决了 #467 那个形状:客户端拼标签时,目录没到就只能先显兜底名,
+// 到了再跳一下。服务端解析完再下发,不存在「先错后对」的中间态。
+export const getHomeTabMeta = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(PortfolioSelectInput)
+  .handler(({ data, context }) =>
+    runRequest(
+      context.userId,
+      Effect.gen(function* () {
+        const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
+        const [allAccounts, memberships, kinds, pins, tags] = yield* Effect.all(
+          [
+            Effect.flatMap(AccountStore, (s) => s.list()),
+            Effect.flatMap(PortfolioStore, (s) => s.listMemberships()),
+            Effect.flatMap(SnapshotStore, (s) => s.latestKinds()),
+            Effect.flatMap(TabPinStore, (s) => s.list()),
+            Effect.flatMap(TagStore, (s) => s.list()),
+          ],
+          { concurrency: 5 },
+        );
+        // 视角 tab 的存在性按**选中 Portfolio** 的账户判(与列表同口径,ADR 0033)。
+        const inView = accountIdsInView(
+          allAccounts.map((a) => a.id),
+          memberships,
+          selectedId,
+          defaultId,
+        );
+        const kindsInView = kinds.filter((k) => inView.has(k.accountId));
+        // pin 标签**跨 Portfolio 显示**(pin 是 per-user 的),所以按全量账户/标签解析,不收窄到视图内。
+        const accountName = new Map(allAccounts.map((a) => [a.id, a.label]));
+        const tagName = new Map(tags.map((t) => [t.id, t.name]));
+        return {
+          // pin 选择器的备选。**一并放在这里**,是为了让 tab 条真的只等这一个请求 ——
+          // 备选留在客户端就还得拉连接器目录 + 账户清单 + 标签清单,tab 条又变回等四份数据。
+          // 三个口径与拆分前逐字对齐:connector 取全量账户去重(pin 跨 Portfolio),
+          // tag 按**选中** Portfolio 过滤(账户只匹配同 Portfolio 的标签),account 取视图内。
+          pickerOptions: {
+            connectors: [...new Set(allAccounts.map((a) => a.connectorId))].map((id) => ({
+              id,
+              label: connectorPlatformMeta(id)?.name ?? id,
+            })),
+            tags: tags
+              .filter((tg) => tg.portfolioId === selectedId)
+              .map((tg) => ({ id: tg.id, name: tg.name })),
+            accounts: allAccounts
+              .filter((a) => inView.has(a.id))
+              .map((a) => ({ id: a.id, label: a.label })),
+          },
+          hasPerps: kindsInView.some((k) => k.kind === "perp_position" || k.kind === "perp_equity"),
+          hasDefi: kindsInView.some((k) => k.kind === "defi"),
+          pins: pins.map((p) => ({
+            id: p.id,
+            kind: p.kind,
+            connectorId: p.connectorId ?? undefined,
+            tagId: p.tagId ?? undefined,
+            accountId: p.accountId ?? undefined,
+            // connector 的显示名走连接器 manifest(类型名,不是账户自定义名);认不出就留空,
+            // 由客户端那层照旧回退 —— 这里不编一个名字出来。
+            text:
+              p.kind === "tag"
+                ? (tagName.get(p.tagId ?? "") ?? "")
+                : p.kind === "account"
+                  ? (accountName.get(p.accountId ?? "") ?? "")
+                  : (connectorPlatformMeta(p.connectorId ?? "")?.name ?? ""),
+            logo:
+              p.kind === "connector"
+                ? platformLogoUrl(
+                    p.connectorId ?? "",
+                    connectorPlatformMeta(p.connectorId ?? "")?.logo,
+                  )
+                : undefined,
+          })),
+        };
+      }),
     ),
   );
 

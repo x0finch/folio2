@@ -1,11 +1,11 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
+  getHomeTabMeta,
   getPortfolioHistory,
   getPortfolioOverview,
   listPortfolioMemberships,
   listPortfolios,
 } from "../server/portfolio";
-import { listTabPins } from "../server/tab-pins";
 import { STALE_TIME } from "./constants";
 import { type PinScopeKey, portfolioKeys } from "./keys";
 
@@ -32,13 +32,6 @@ export const portfolioMembershipsQuery = () =>
     staleTime: STALE_TIME.live,
   });
 
-export const tabPinsQuery = () =>
-  queryOptions({
-    queryKey: portfolioKeys.pins(),
-    queryFn: () => listTabPins(),
-    staleTime: STALE_TIME.live,
-  });
-
 // 一份总览 = 一个组合口径(+ 可选的自定义 Tab 收窄)。默认视图与非默认视图、Tab 视图走的是
 // **同一个工厂**,只是参数不同 —— 这正是「一句前缀刷新盖住三种视图」的前提。
 export const portfolioOverviewQuery = (portfolioId: string, pin?: PinScopeKey) =>
@@ -52,5 +45,14 @@ export const portfolioHistoryQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: portfolioKeys.history(portfolioId),
     queryFn: () => getPortfolioHistory({ data: { portfolioId } }),
+    staleTime: STALE_TIME.live,
+  });
+
+// 首页 tab 条要的一切,一条轻请求答完。**和总览分开**是为了让 tab 条能先出现 ——
+// 合进总览就又变成「等最慢的那个」,那正是四拍要拆开的东西。
+export const homeTabMetaQuery = (portfolioId: string) =>
+  queryOptions({
+    queryKey: portfolioKeys.tabMeta(portfolioId),
+    queryFn: () => getHomeTabMeta({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
   });

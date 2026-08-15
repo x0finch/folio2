@@ -12,7 +12,7 @@ import {
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, stripSearchParams } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { z } from "zod";
 import { HeaderSync } from "../../components/header-sync";
@@ -30,24 +30,21 @@ import {
 } from "../../components/skeletons";
 import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-picker";
 import { TokenHoldings } from "../../components/token-holdings";
-import { useConnectorLabels } from "../../hooks/use-connector-labels";
 import { mergeDefiGroups } from "../../lib/account-view";
 import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/home-tabs";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
+import { useHydrated } from "../../lib/hooks/use-hydrated";
 import { usePortfolio } from "../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../lib/hooks/use-stale-price-refresh";
-import { accountListQuery } from "../../lib/queries/accounts";
-import { connectorCatalogQuery } from "../../lib/queries/connectors";
 import { type PinScopeKey, portfolioKeys } from "../../lib/queries/keys";
 import {
+  homeTabMetaQuery,
   type PortfolioOverview,
   portfolioHistoryQuery,
   portfolioListQuery,
   portfolioOverviewQuery,
-  tabPinsQuery,
 } from "../../lib/queries/portfolio";
 import { invalidateFor } from "../../lib/queries/refresh";
-import { tagListQuery } from "../../lib/queries/tags";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../lib/server/tab-pins";
 
 const MAX_PINS = 3;
@@ -106,15 +103,12 @@ export const Route = createFileRoute("/_authed/")({
     };
     kickOff(
       queryClient.ensureQueryData(portfolioListQuery()).then(({ defaultId }) => {
+        // tab 条那份最轻、也最先要 —— 排在前面发。
+        kickOff(queryClient.ensureQueryData(homeTabMetaQuery(defaultId)));
         kickOff(queryClient.ensureQueryData(portfolioOverviewQuery(defaultId)));
         kickOff(queryClient.ensureQueryData(portfolioHistoryQuery(defaultId)));
       }),
     );
-    // connector 展示名/图的目录:pin 标签与账户抽屉都要它,首帧拿不到就只能显兜底名(#467)。
-    kickOff(queryClient.ensureQueryData(connectorCatalogQuery()));
-    kickOff(queryClient.ensureQueryData(tabPinsQuery()));
-    kickOff(queryClient.ensureQueryData(accountListQuery()));
-    kickOff(queryClient.ensureQueryData(tagListQuery()));
   },
   pendingComponent: OverviewSkeleton,
   component: Overview,
@@ -173,10 +167,14 @@ function Overview() {
 function HeroIsland({ portfolioId }: { portfolioId: string }) {
   const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId));
   const history = useQuery(portfolioHistoryQuery(portfolioId));
+  // 曲线**推迟到 hydration 之后**再画。非挂起读在服务端不等数据,SSR 那一帧画的是「还在取数」;
+  // 而曲线的数据会经 query 流补下来,客户端第一帧就已经有了 —— 两帧画出的 DOM 不同,React 会判
+  // hydration mismatch 并把整块重画一遍。先与 SSR 对齐一帧,下一帧再上真曲线,观感上没有差别。
+  const seriesReady = useHydrated() && !history.isPending;
   return (
     <PortfolioHero
-      series={history.data?.series ?? []}
-      seriesPending={history.isPending}
+      series={seriesReady ? (history.data?.series ?? []) : []}
+      seriesPending={!seriesReady}
       totalUsd={data.totalUsd}
       gain24h={data.gain24h ?? null}
       holdings={data.holdings}
@@ -190,10 +188,7 @@ function HoldingsIsland({ portfolioId }: { portfolioId: string }) {
   const selectedId = portfolioId;
   const queryClient = useQueryClient();
   const t = useTranslations("Overview");
-  const tc = useTranslations("Common");
   const tct = useTranslations("CustomTabs");
-  const usd = useDisplayValue();
-  const connectorLabel = useConnectorLabels();
 
   // 单一 tab 状态:"tokens" / "perps" / "defi"(视角)或 pin id(自定义 Tab)。默认 tokens。
   // **住在 URL 里**(ADR 0043):刷新回原 tab、链接可分享,每个 tab 各记自己的滚动位置。
@@ -224,20 +219,10 @@ function HoldingsIsland({ portfolioId }: { portfolioId: string }) {
     });
   };
 
-  const { data: tags } = useSuspenseQuery(tagListQuery());
-  const { data: pins } = useSuspenseQuery(tabPinsQuery());
-  // 自定义 Tab 选择器备选:按 Connector = 用户拥有的去重 connectorId。allAccounts 是**全量**账户(id+名),
-  // 只用于 pin 标签解析(pin 是 per-user、跨 Portfolio 显示 → 标签得全量才解得出);picker 的账户选项在下面
-  // 按选中 Portfolio 收窄(见 accountOptions)。按 Tag = 再往下(按选中 Portfolio 过滤)。
-  const { data: allAccountRows } = useSuspenseQuery(accountListQuery());
-  const connectorIds = useMemo(
-    () => [...new Set(allAccountRows.map((a) => a.connectorId))],
-    [allAccountRows],
-  );
-  const allAccounts = useMemo(
-    () => allAccountRows.map((a) => ({ id: a.id, label: a.label })),
-    [allAccountRows],
-  );
+  // tab 条要的一切来自**一个轻请求**:有没有永续 / DeFi、自定义 tab 各叫什么(标签已在服务端
+  // 解析好)、以及 pin 选择器的备选。所以这一层只等它,不等总览 —— 那正是 tab 名比列表先出现的原因。
+  const { data: tabMeta } = useSuspenseQuery(homeTabMetaQuery(selectedId));
+  const pins = tabMeta.pins;
 
   // 手机端 tab 条横向滚动:选中在可视区外/半露的 tab 要滚进可视区,两侧留余量(不贴裁剪缘/合计)。
   // 手写横向校正而非 scrollIntoView:后者会连带滚 overflow-hidden 祖先和页面纵向;且选中 pin 后合计
@@ -284,18 +269,16 @@ function HoldingsIsland({ portfolioId }: { portfolioId: string }) {
   const pinBoundaryKey = pinScope
     ? JSON.stringify(portfolioKeys.overview(selectedId, pinScope))
     : "";
+  // 视角 tab 那一格看的是不带 pin 的总览。两把钥匙分开写,是因为「这一格在看什么」正是复位的判据。
+  const contentBoundaryKey = JSON.stringify(portfolioKeys.overview(selectedId));
 
-  // hero(总额 + 曲线)始终是「选中 Portfolio」口径,**不受 pin 影响**(ADR 0034 UI 微调:自定义 Tab 不改 hero)。
-  // 默认与非默认走**同一个查询工厂**,只是 portfolioId 不同 —— 以前默认那份来自 loader、非默认那份是另一个
-  // useQuery,两边 key 不同族,于是整页刷新只能碰到前者(停在非默认组合上做任何写操作画面都不动)。
-  const { data: portfolioData } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
-  useStalePriceRefresh(portfolioData.pricesStale);
-
-  // 自定义 Tab 备选:tag 按选中 Portfolio 过滤(账户只匹配同 Portfolio 的 Tag);connector 全量。
-  const connectorOptions = connectorIds.map((id) => ({ id, label: connectorLabel(id) }));
-  const tagOptions = tags
-    .filter((tg) => tg.portfolioId === selectedId)
-    .map((tg) => ({ id: tg.id, name: tg.name }));
+  // 自定义 Tab 的选择器备选 —— 三个口径都在服务端算好(见 getHomeTabMeta),客户端不再为了
+  // 画一个标签去拉连接器目录 / 账户清单 / 标签清单。
+  const {
+    connectors: connectorOptions,
+    tags: tagOptions,
+    accounts: accountOptions,
+  } = tabMeta.pickerOptions;
 
   // 自定义 Tab 的三处写。三个都只做「刷 Tab 清单 + 失败弹一句」,所以 onSuccess/onError 长得像;
   // 分成三个 mutation 而不是一个,是为了各自有独立的 isPending —— 见 ＋ 钮与「取消固定」的 disabled。
@@ -317,20 +300,13 @@ function HoldingsIsland({ portfolioId }: { portfolioId: string }) {
     onError: failPin,
   });
 
-  // 视角 tab(现货/永续/DeFi)恒按**选中 Portfolio**口径,与 pin 无关 —— 选 pin 不改这三个 tab 的存在/内容
-  //(用户明确:自定义 tab 不影响原来的 tokens/perp/defi tab)。
-  const { holdings, accountTotals, holdingsSubtotal, defiSubtotal } = portfolioData;
-  const kind = derive(portfolioData.sections);
-
-  // picker 的「账户」选项 = **选中 Portfolio 内**的账户(accountTotals 已是 in-view 口径)—— 与 tagOptions 同样按
-  // Portfolio 收窄,避免固定到别的 Portfolio 的账户后得到一个永远空的 tab。标签解析仍走全量 allAccounts。
-  const accountOptions = accountTotals.map((r) => ({ id: r.account.id, label: r.account.label }));
-
   // 视角 tab 的存在性 + 当前视角(非 pin 视图时用):选中的视角消失 → clamp 回代币。
+  // **存在性来自那条轻请求**(一条 SQL 看最新快照里有没有 perp / defi 行),不再从总览的分区里推 ——
+  // 从总览推就意味着 tab 名要等整份总览,而 tab 条本该先出现。
   const kindTabs = [
     "tokens",
-    ...(kind.perpItems.length > 0 ? ["perps"] : []),
-    ...(kind.defiGroups.length > 0 ? ["defi"] : []),
+    ...(tabMeta.hasPerps ? ["perps"] : []),
+    ...(tabMeta.hasDefi ? ["defi"] : []),
   ];
   const activeKind = isPinView ? null : kindTabs.includes(shownActive) ? shownActive : "tokens";
   // beUI Tabs 的受控值:视角 tab 与自定义 pin 共用**同一个** Tabs(共享滑动药丸);pin 激活时值 = pin id。
@@ -351,139 +327,154 @@ function HoldingsIsland({ portfolioId }: { portfolioId: string }) {
     }
     unpinMut.mutate(pinId);
   };
-  const viewSubtotal =
-    activeKind === "perps"
-      ? kind.perpEquitySubtotal
-      : activeKind === "defi"
-        ? defiSubtotal
-        : holdingsSubtotal;
 
   return (
-    <>
-      {accountTotals.length === 0 ? (
-        <p className="text-muted-foreground">
-          {tc("noAccountsYet")}{" "}
-          <Link to="/accounts" className="underline">
-            {tc("addOne")}
-          </Link>
-          .
-        </p>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
-              选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
-          <div className="flex items-center gap-4">
-            {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。
-                pin 面板不受此容器裁剪 —— 它整个经 Portal 浮出(见 PinPortalPopover)。 */}
-            <div
-              ref={stripRef}
-              className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            >
-              <Tabs value={activeValue} onValueChange={selectTab} variant="pill">
-                {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
-                    ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。
-                    pr-4:滚动区末端留内边距,滚到底时最后一个 tab/＋ 不贴着右侧合计。 */}
-                <TabsList className="bg-transparent p-0 pr-4">
-                  <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
-                  {kind.perpItems.length > 0 && (
-                    <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>
-                  )}
-                  {kind.defiGroups.length > 0 && (
-                    <TabsTrigger value="defi">{t("defiTab")}</TabsTrigger>
-                  )}
-                  {pins.map((p) => (
-                    <PinTab
-                      key={p.id}
-                      value={p.id}
-                      isActive={shownActive === p.id}
-                      // connector 的展示名由 PinTargetLabel 走 registry 取(类型名),这里只喂 tag/account 的名字。
-                      label={
-                        p.kind === "tag"
-                          ? tagNameOf(tags, p.tagId)
-                          : p.kind === "account"
-                            ? accountNameOf(allAccounts, p.accountId)
-                            : ""
-                      }
-                      selected={{
-                        kind: p.kind,
-                        connectorId: p.connectorId ?? undefined,
-                        tagId: p.tagId ?? undefined,
-                        accountId: p.accountId ?? undefined,
-                      }}
-                      connectorOptions={connectorOptions}
-                      tagOptions={tagOptions}
-                      accountOptions={accountOptions}
-                      onRepoint={(choice) => repointPinMut.mutate({ pinId: p.id, choice })}
-                      onUnpin={() => onUnpin(p.id)}
-                      unpinning={unpinMut.isPending && unpinMut.variables === p.id}
-                    />
-                  ))}
-                  {pins.length < MAX_PINS && (
-                    <AddPinButton
-                      connectorOptions={connectorOptions}
-                      tagOptions={tagOptions}
-                      accountOptions={accountOptions}
-                      onPick={(choice) => addPinMut.mutate(choice)}
-                      adding={addPinMut.isPending}
-                    />
-                  )}
-                </TabsList>
-              </Tabs>
-            </div>
-            <span className="shrink-0 text-muted-foreground text-sm tabular-nums">
-              {/* pin 视图:过滤后数据到位才显其总额;未到位显 "—",别显未收窄的全量总额。
-                  数据由子组件自己拉 —— `useSuspenseQuery` 没有条件启用,所以「只在 pin 视图下才要的查询」
-                  只能靠「不在 pin 视图时这个组件压根不挂」来表达(ADR 0038)。总额与列表是两个子组件、
-                  同一个 queryKey,react-query 自然合成一次请求。 */}
-              {isPinView && pinScope ? (
-                <QueryBoundary key={activePin.id} resetKey={pinBoundaryKey} pending="—" failed="—">
-                  <PinTotal portfolioId={selectedId} pin={pinScope} />
-                </QueryBoundary>
-              ) : (
-                usd(viewSubtotal)
+    <div className="flex flex-col gap-4">
+      {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
+          选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
+      <div className="flex items-center gap-4">
+        {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。
+            pin 面板不受此容器裁剪 —— 它整个经 Portal 浮出(见 PinPortalPopover)。 */}
+        <div
+          ref={stripRef}
+          className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <Tabs value={activeValue} onValueChange={selectTab} variant="pill">
+            {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
+                ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。
+                pr-4:滚动区末端留内边距,滚到底时最后一个 tab/＋ 不贴着右侧合计。 */}
+            <TabsList className="bg-transparent p-0 pr-4">
+              <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
+              {tabMeta.hasPerps && <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>}
+              {tabMeta.hasDefi && <TabsTrigger value="defi">{t("defiTab")}</TabsTrigger>}
+              {pins.map((p) => (
+                <PinTab
+                  key={p.id}
+                  value={p.id}
+                  isActive={shownActive === p.id}
+                  // 标签在服务端解析好(见 getHomeTabMeta)—— 客户端不再为了一个名字去拉三份清单,
+                  // 也就没有了「目录没到先显兜底名、到了再跳一下」那个中间态(#467)。
+                  label={p.text}
+                  logo={p.logo}
+                  selected={{
+                    kind: p.kind,
+                    connectorId: p.connectorId,
+                    tagId: p.tagId,
+                    accountId: p.accountId,
+                  }}
+                  connectorOptions={connectorOptions}
+                  tagOptions={tagOptions}
+                  accountOptions={accountOptions}
+                  onRepoint={(choice) => repointPinMut.mutate({ pinId: p.id, choice })}
+                  onUnpin={() => onUnpin(p.id)}
+                  unpinning={unpinMut.isPending && unpinMut.variables === p.id}
+                />
+              ))}
+              {pins.length < MAX_PINS && (
+                <AddPinButton
+                  connectorOptions={connectorOptions}
+                  tagOptions={tagOptions}
+                  accountOptions={accountOptions}
+                  onPick={(choice) => addPinMut.mutate(choice)}
+                  adding={addPinMut.isPending}
+                />
               )}
-            </span>
-          </div>
-
-          {/* 内容:自定义 pin → section list(按小计倒序竖排);视角 → 单类列表。 */}
-          {isPinView && pinScope ? (
-            <QueryBoundary
-              key={activePin.id}
-              resetKey={pinBoundaryKey}
-              pending={<ListSkeleton />}
-              failed={
-                <p className="py-12 text-center text-muted-foreground text-sm">
-                  {tct("actionFailed")}
-                </p>
-              }
-            >
-              <PinContent portfolioId={selectedId} pin={pinScope} />
-            </QueryBoundary>
-          ) : activeKind === "perps" ? (
-            <PerpPositionsList items={kind.perpItems} />
-          ) : activeKind === "defi" ? (
-            <DefiPositions groups={kind.defiGroups} hideHeader />
-          ) : holdings.length === 0 ? (
-            <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
-          ) : (
-            <TokenHoldings holdings={holdings} />
-          )}
+            </TabsList>
+          </Tabs>
         </div>
+        <span className="shrink-0 text-muted-foreground text-sm tabular-nums">
+          {/* 合计与列表都来自总览,而 tab 条不等它 —— 所以这里也是一格独立的挂起,未到位显 "—"。
+              pin 视图同理:过滤后的数据到位才显其总额,别显未收窄的全量总额。 */}
+          <QueryBoundary
+            key={activePin?.id ?? "kind"}
+            resetKey={isPinView ? pinBoundaryKey : contentBoundaryKey}
+            pending="—"
+            failed="—"
+          >
+            <ViewSubtotal portfolioId={selectedId} pin={pinScope} kind={activeKind} />
+          </QueryBoundary>
+        </span>
+      </div>
+
+      {/* 内容:自定义 pin → section list(按小计倒序竖排);视角 → 单类列表。
+          两条都自己挂起 —— tab 条已经画出来了,换 tab 时只有这一块转。 */}
+      <QueryBoundary
+        key={activePin?.id ?? "kind"}
+        resetKey={isPinView ? pinBoundaryKey : contentBoundaryKey}
+        pending={<ListSkeleton />}
+        failed={
+          <p className="py-12 text-center text-muted-foreground text-sm">{tct("actionFailed")}</p>
+        }
+      >
+        {isPinView && pinScope ? (
+          <PinContent portfolioId={selectedId} pin={pinScope} />
+        ) : (
+          <KindContent portfolioId={selectedId} kind={activeKind} />
+        )}
+      </QueryBoundary>
+    </div>
+  );
+}
+
+// 右上角那个合计。pin 视图看收窄后的总额,视角看该视角的小计 —— 两者同一份总览、同一个 queryKey,
+// react-query 自然与下面的列表合成一次请求。
+function ViewSubtotal({
+  portfolioId,
+  pin,
+  kind,
+}: {
+  portfolioId: string;
+  pin?: PinScopeKey;
+  kind: string | null;
+}) {
+  const usd = useDisplayValue();
+  const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId, pin));
+  if (pin) return <>{usd(data.totalUsd)}</>;
+  const parts = derive(data.sections);
+  return (
+    <>
+      {usd(
+        kind === "perps"
+          ? parts.perpEquitySubtotal
+          : kind === "defi"
+            ? data.defiSubtotal
+            : data.holdingsSubtotal,
       )}
     </>
   );
+}
+
+// 视角 tab 的内容(现货 / 永续 / DeFi)。它读总览,而 tab 条不读 —— 这就是 tab 名先出现的地方。
+function KindContent({ portfolioId, kind }: { portfolioId: string; kind: string | null }) {
+  const t = useTranslations("Overview");
+  const tc = useTranslations("Common");
+  const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId));
+  useStalePriceRefresh(data.pricesStale);
+  const parts = derive(data.sections);
+
+  if (data.accountTotals.length === 0) {
+    return (
+      <p className="text-muted-foreground">
+        {tc("noAccountsYet")}{" "}
+        <Link to="/accounts" className="underline">
+          {tc("addOne")}
+        </Link>
+        .
+      </p>
+    );
+  }
+  if (kind === "perps") return <PerpPositionsList items={parts.perpItems} />;
+  if (kind === "defi") return <DefiPositions groups={parts.defiGroups} hideHeader />;
+  if (data.holdings.length === 0) {
+    return <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>;
+  }
+  return <TokenHoldings holdings={data.holdings} />;
 }
 
 // 自定义 Tab 的两块内容 —— 右上角合计与下方列表。**同一个 queryKey,两个组件**:
 // 它们在 DOM 里隔得远,没法由一个组件同时渲染;而共用一个 key 意味着 react-query 只发一次请求,
 // 两边同时到位。`useSuspenseQuery` 的 data 恒非 undefined —— 「拉到没拉到」不再是渲染分支,
 // 而是由外面那层 QueryBoundary 表达。
-
-function PinTotal({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKey }) {
-  const usd = useDisplayValue();
-  const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId, pin));
-  return <>{usd(data.totalUsd)}</>;
-}
 
 function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKey }) {
   const t = useTranslations("Overview");
@@ -521,17 +512,6 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
       ]}
     />
   );
-}
-
-function tagNameOf(tags: { id: string; name: string }[], tagId: string | null): string {
-  return tags.find((tg) => tg.id === tagId)?.name ?? "";
-}
-
-function accountNameOf(
-  accounts: { id: string; label: string }[],
-  accountId: string | null,
-): string {
-  return accounts.find((a) => a.id === accountId)?.label ?? "";
 }
 
 const PIN_PANEL_W = 240; // w-56 + p-2
@@ -700,6 +680,7 @@ function usePinPanel(canHover: boolean, gateOpen: () => boolean) {
 function PinTab({
   value,
   label,
+  logo,
   isActive,
   selected,
   connectorOptions,
@@ -711,6 +692,8 @@ function PinTab({
 }: {
   value: string;
   label: string;
+  /** connector pin 的图(服务端解析好的)—— 首页不再拉连接器目录,不给它就只能回退首字母。 */
+  logo?: string;
   isActive: boolean;
   selected: PinTargetChoice;
   connectorOptions: { id: string; label: string }[];
@@ -740,7 +723,7 @@ function PinTab({
       <TabsTrigger value={value}>
         {/* 类型标记(#351 ②):tag `#名` / account `@名` / connector `logo + 类型名`。
             激活时药丸是浅底 → onPrimary 让 logo 的底盘随之改色,不叠成两块白。 */}
-        <PinTargetLabel target={selected} name={label} onPrimary={isActive} />
+        <PinTargetLabel target={selected} name={label} logo={logo} onPrimary={isActive} />
       </TabsTrigger>
       <PinPortalPopover
         open={p.open}
@@ -753,7 +736,7 @@ function PinTab({
               isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground",
             )}
           >
-            <PinTargetLabel target={selected} name={label} onPrimary={isActive} />
+            <PinTargetLabel target={selected} name={label} logo={logo} onPrimary={isActive} />
           </span>
         }
         onRequestClose={p.close}

@@ -13,12 +13,20 @@ import type { PinTargetChoice } from "./tab-pin-picker";
 // manual 是透明线稿)→ 一圈发丝边把它与药丸分开。**只有描边对任意 logo 都成立** —— 改 logo 底盘的
 // 颜色管不了图片自己烧进去的底色(实测:manual 好了,OKX 照旧白叠白)。深色药丸上不需要,logo 自带的
 // 亮底盘已经把它与底面分开了。
-function ConnectorMark({ connectorId, onPrimary }: { connectorId: string; onPrimary?: boolean }) {
+function ConnectorMark({
+  connectorId,
+  logo,
+  onPrimary,
+}: {
+  connectorId: string;
+  logo?: string;
+  onPrimary?: boolean;
+}) {
   const logoOf = useConnectorLogos();
   const labelOf = useConnectorLabels();
   return (
     <LogoAvatar
-      src={logoOf(connectorId)}
+      src={logo ?? logoOf(connectorId)}
       fallback={labelOf(connectorId)}
       size="sm"
       className={cn("mr-1 size-3.5", onPrimary && "ring-1 ring-primary-foreground/40")}
@@ -29,23 +37,28 @@ function ConnectorMark({ connectorId, onPrimary }: { connectorId: string; onPrim
 export function PinTargetLabel({
   target,
   name,
+  logo,
   onPrimary,
   className,
 }: {
   target: PinTargetChoice;
-  name?: string; // tag / account 的名字(connector 走 registry 类型名,不用它)
+  // 显示名。tag / account 一向走这里;**connector 也可以走**——首页 tab 条的标签是服务端解析好的
+  // (见 getHomeTabMeta),传进来就不必再去客户端那份连接器目录里查。不传则照旧查目录(选择器那两处)。
+  name?: string;
+  // connector 的图,同样可由调用方直接给。首页把连接器目录移出了首屏,不给它就只能回退首字母。
+  logo?: string;
   onPrimary?: boolean; // 落在激活药丸(bg-primary 浅底)上 → logo 底盘随之改色,见 ConnectorMark
   className?: string;
 }) {
   const labelOf = useConnectorLabels();
-  const text = target.kind === "connector" ? labelOf(target.connectorId ?? "") : (name ?? "");
+  const text = name ?? (target.kind === "connector" ? labelOf(target.connectorId ?? "") : "");
   return (
     <span className={cn("flex min-w-0 items-center", className)}>
       {/* aria-hidden:标记是纯装饰,名字紧跟其后。不隐则 Avatar 的首字母 fallback 会混进
           可访问名,tab 读作 "MManual"(实测)。 */}
       {target.kind === "connector" && (
         <span aria-hidden className="flex">
-          <ConnectorMark connectorId={target.connectorId ?? ""} onPrimary={onPrimary} />
+          <ConnectorMark connectorId={target.connectorId ?? ""} logo={logo} onPrimary={onPrimary} />
         </span>
       )}
       {/* `#`/`@` 紧贴名字(同 TagBadges 的 `#name`),logo 才用 gap 隔开 —— 符号是名字的一部分,图不是。 */}

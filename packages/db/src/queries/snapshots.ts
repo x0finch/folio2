@@ -136,6 +136,12 @@ export interface SnapshotStore {
   readonly listBalanceHistory: (since?: number) => Effect.Effect<SnapshotBalanceHistoryRow[]>;
   /** 每个账户的最新快照 + 其余额(总览数据源)。 */
   readonly latest: () => Effect.Effect<SnapshotWithBalances[]>;
+  /**
+   * 每个账户最新快照里**出现过哪些 kind**(去重)。首页 tab 条要的就这一件事:有没有永续、
+   * 有没有 DeFi。`latest()` 能回答,但它要把全部余额行连同 note 一起取回来再解析 —— 为了两个
+   * 布尔值付整份总览的价钱,而 tab 条本该比列表先出现。
+   */
+  readonly latestKinds: () => Effect.Effect<{ accountId: string; kind: BalanceKind }[]>;
   /** 导出用:分页取全部快照(按 takenAt,id 稳定排序)。 */
   readonly listPage: (limit: number, offset: number) => Effect.Effect<Snapshot[]>;
   /**
@@ -355,6 +361,38 @@ const make = (userId: string) =>
             note: parseAccountNote(snapshot.note),
             balances: bySnapshot.get(snapshot.id) ?? [],
           }));
+        }),
+
+      // 一条 SQL 直接问出「每账户最新快照里有哪些 kind」。与 `latest()` 同一个「每账户最新那张」
+      // 子查询,但不取余额行、不解析 note —— 首页 tab 条只需要这个,不该为它付整份总览的价钱。
+      // 同毫秒并列(两张快照同 takenAt)在这里**不必去重**:调用方只问「出现过没有」,多一条同 kind
+      // 的行不改答案。
+      latestKinds: () =>
+        database.query((db) => {
+          const latestPerAccount = db
+            .select({
+              accountId: snapshots.accountId,
+              maxTakenAt: max(snapshots.takenAt).as("max_taken_at"),
+            })
+            .from(snapshots)
+            .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+            .where(eq(accounts.userId, userId))
+            .groupBy(snapshots.accountId)
+            .as("latest_per_account");
+          return db
+            .selectDistinct({
+              accountId: snapshots.accountId,
+              kind: snapshotBalances.kind,
+            })
+            .from(snapshots)
+            .innerJoin(
+              latestPerAccount,
+              and(
+                eq(snapshots.accountId, latestPerAccount.accountId),
+                eq(snapshots.takenAt, latestPerAccount.maxTakenAt),
+              ),
+            )
+            .innerJoin(snapshotBalances, eq(snapshotBalances.snapshotId, snapshots.id));
         }),
 
       // 配合 `balancesFor` 一页页流式读出,内存恒定;每页配 inArray(≤ 页大小)取余额,

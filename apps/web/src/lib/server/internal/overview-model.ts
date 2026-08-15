@@ -53,7 +53,7 @@ export interface OverviewDeps {
 // 读路径的耗时分段。切法对着「哪一段值得拆出去单独走」这个问题:
 // `enrichMs` 是问价(cache-only 批量读),`gainMs` 是 24h 盈亏(装配持仓线 + 时间加权,含 DeFi 那半)。
 // 行数一并带出来 —— 脱离规模的耗时读不出结论,而调用方在回调触发的那一刻还拿不到返回值。
-export interface OverviewTimings {
+interface OverviewTimings {
   enrichMs: number;
   aggMs: number;
   gainMs: number;

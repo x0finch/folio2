@@ -7,10 +7,6 @@ import { requireAuth } from "./internal/require-auth";
 
 // 首页自定义 Tab(pin,ADR 0034)的 server fn:auth 薄壳 → per-user 的 `TabPinStore`(ADR 0037)。每 user ≤3 的上限、tag 归属校验都在 db 层。
 
-export const listTabPins = createServerFn({ method: "GET" })
-  .middleware([requireAuth])
-  .handler(({ context }) => runStore(context.userId, TabPinStore, (s) => s.list()));
-
 // pin 目标:connector pin 带 connectorId,tag pin 带 tagId,account pin 带 accountId(db 层再校验互斥非空 + 归属)。
 const PinTarget = z.object({
   kind: z.enum(["connector", "tag", "account"]),

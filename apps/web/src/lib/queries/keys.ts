@@ -45,6 +45,13 @@ export const portfolioKeys = {
     [...portfolioKeys.all, "overview", portfolioId, pin ?? null] as const,
   /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
   history: (portfolioId: string) => [...portfolioKeys.all, "history", portfolioId] as const,
+  /**
+   * 首页 tab 条的元信息:有没有永续 / DeFi tab、自定义 tab 各显示成什么。
+   * **与 overview 分开一层**,因为 tab 条要比列表先出现 —— 混在一个 key 里就又成了「等最慢的那个」。
+   * 内容受同步(有没有永续 / DeFi 行会变)与增删 pin 影响,两条刷新路径都要指到它,见 queries/refresh。
+   */
+  tabMetaAll: () => [...portfolioKeys.all, "tabMeta"] as const,
+  tabMeta: (portfolioId: string) => [...portfolioKeys.tabMetaAll(), portfolioId] as const,
 };
 
 export const accountKeys = {
