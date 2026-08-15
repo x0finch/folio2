@@ -112,8 +112,11 @@ export function PortfolioHero({
         <div className="mt-2 flex flex-wrap items-baseline gap-3">
           {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。 */}
           <div className="flex select-text items-baseline">
+            {/* startOnView={false}:数据一到就滚一次。默认要等进视口,流式补数 / hydration
+                时数字已经在屏上,再等会从 0 重滚一遍。 */}
             <NumberTicker
               value={totalUsd}
+              startOnView={false}
               format={(n) => usd(n).split(".")[0]}
               className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
             />

@@ -1,0 +1,74 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+
+// #488 票 6:四拍之间只该淡入,不该把后面的块顶来顶去。骨架跟真内容漂了,
+// 没有运行时报错,只有「数字出来的时候整页顿一下」。
+
+const ROOT = join(import.meta.dirname, "../src");
+
+function src(rel: string): string {
+  return readFileSync(join(ROOT, rel), "utf8");
+}
+
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+describe("骨架与真内容同形", () => {
+  it("hero 骨架与 PortfolioHero 外框同高", () => {
+    expect(src("components/portfolio-hero.tsx")).toContain("min-h-60");
+    expect(src("components/skeletons.tsx")).toMatch(/function HeroSkeleton[\s\S]*min-h-60/);
+  });
+
+  it("持仓行骨架贴合真实行的 padding 与头像尺寸", () => {
+    const skel = src("components/skeletons.tsx");
+    expect(src("components/token-holdings.tsx")).toContain("px-3 py-3");
+    expect(skel).toContain("px-3 py-3");
+    expect(skel).toContain("size-8");
+  });
+
+  it("tab 条骨架与真条同一套横向排布", () => {
+    expect(src("routes/_authed/index.tsx")).toContain("flex items-center gap-4");
+    expect(src("components/skeletons.tsx")).toMatch(
+      /function TabStripSkeleton[\s\S]*flex items-center gap-4/,
+    );
+  });
+});
+
+describe("盈亏骨架三处复用同一元件", () => {
+  it("行内 / 药丸 / best-worst 都走 <GainSkeleton>", () => {
+    expect(src("components/value-delta.tsx")).toContain("<GainSkeleton");
+    const hero = src("components/portfolio-hero.tsx");
+    expect(hero.match(/<GainSkeleton/g)?.length).toBe(3);
+  });
+
+  it("宽度锁死在一处", () => {
+    expect(src("components/skeletons.tsx")).toMatch(
+      /function GainSkeleton[\s\S]*inline-block h-4 w-28/,
+    );
+  });
+});
+
+describe("回访不闪骨架、数字只滚一次", () => {
+  it("盈亏加载态看 isPending,不看 isFetching —— 缓存命中后台刷新不该再出骨架", () => {
+    const home = stripComments(src("routes/_authed/index.tsx"));
+    expect(home).toContain("gainQuery.isPending");
+    expect(home).not.toContain("gainQuery.isFetching");
+  });
+
+  it("路由没有 pendingComponent,冷启动骨架是岛上那套,不是另一张整页骨架", () => {
+    const home = stripComments(src("routes/_authed/index.tsx"));
+    const route = home.slice(home.indexOf("createFileRoute"), home.indexOf("function derive"));
+    expect(route).not.toContain("pendingComponent");
+  });
+
+  it("没有自造 hydration 开关来躲骨架", () => {
+    const home = src("routes/_authed/index.tsx");
+    expect(home).not.toMatch(/useHydrated|use-hydrated|isHydrated/);
+  });
+
+  it("净值 ticker 数据一到就滚,不等进视口(避免 hydration 后再从 0 滚一遍)", () => {
+    expect(src("components/portfolio-hero.tsx")).toContain("startOnView={false}");
+  });
+});
