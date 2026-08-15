@@ -9,7 +9,7 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, stripSearchParams } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +22,7 @@ import { Portal } from "../../components/portal";
 import { PortfolioHero } from "../../components/portfolio-hero";
 import { QueryBoundary } from "../../components/query-boundary";
 import { SectionList } from "../../components/section-list";
-import { ListSkeleton, OverviewSkeleton } from "../../components/skeletons";
+import { HeroSkeleton, HoldingsSkeleton, ListSkeleton } from "../../components/skeletons";
 import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-picker";
 import { TokenHoldings } from "../../components/token-holdings";
 import { useConnectorLabels } from "../../hooks/use-connector-labels";
@@ -84,25 +84,18 @@ export const Route = createFileRoute("/_authed/")({
   search: { middlewares: [stripSearchParams({ tab: DEFAULT_TAB })] },
   // 本页的读取**已全部迁到 react-query**(ADR 0038):loader 只**预取**、不返回任何数据,
   // 组件按选中的组合 id 从缓存读(本文件已无 `useLoaderData`)。
+  //
+  // #488 票 3:只等「默认组合 id」(预取 key 必须对上),其余发出即返回。谁先回来谁先画,
+  // 壳立刻出现;hero 与列表各有自己的边界,不再整页干等最慢的那个。
   loader: async ({ context: { queryClient } }) => {
-    // 与「选中哪个组合」无关的三件事先发出去,不等下面那个 await。
-    const unscoped = Promise.all([
-      // connector 展示名/图的目录:pin 标签与账户抽屉都要它,首帧拿不到就只能显兜底名(#467)。
-      queryClient.ensureQueryData(connectorCatalogQuery()),
-      queryClient.ensureQueryData(tabPinsQuery()),
-      queryClient.ensureQueryData(accountListQuery()),
-      queryClient.ensureQueryData(tagListQuery()),
-    ]);
-    // 首屏口径 = 默认组合。**必须拿到真实的 defaultId**:组件是按 selectedId 读缓存的,
-    // 预取时用「缺省 = 服务端自己定默认」的空参数,key 就与组件那份对不上,首屏等于白拉一遍。
+    queryClient.ensureQueryData(connectorCatalogQuery());
+    queryClient.ensureQueryData(tabPinsQuery());
+    queryClient.ensureQueryData(accountListQuery());
+    queryClient.ensureQueryData(tagListQuery());
     const { defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
-    await Promise.all([
-      unscoped,
-      queryClient.ensureQueryData(portfolioOverviewQuery(defaultId)),
-      queryClient.ensureQueryData(portfolioHistoryQuery(defaultId)),
-    ]);
+    queryClient.ensureQueryData(portfolioOverviewQuery(defaultId));
+    queryClient.ensureQueryData(portfolioHistoryQuery(defaultId));
   },
-  pendingComponent: OverviewSkeleton,
   component: Overview,
 });
 
@@ -130,6 +123,53 @@ function derive(secs: PortfolioOverview["sections"]) {
 }
 
 function Overview() {
+  const { selectedId } = usePortfolio();
+  // 两岛共用总览这份数据,所以会一起亮;失败则只塌那一格,壳(HeaderSync)不受影响。
+  const overviewKey = JSON.stringify(portfolioKeys.overview(selectedId));
+  return (
+    <div className="flex flex-col gap-6">
+      <HeaderSync />
+      <QueryBoundary
+        resetKey={`hero:${overviewKey}`}
+        pending={<HeroSkeleton />}
+        failed={<IslandFailed />}
+      >
+        <HeroIsland />
+      </QueryBoundary>
+      <QueryBoundary
+        resetKey={`holdings:${overviewKey}`}
+        pending={<HoldingsSkeleton />}
+        failed={<IslandFailed />}
+      >
+        <HoldingsIsland />
+      </QueryBoundary>
+    </div>
+  );
+}
+
+function IslandFailed() {
+  const t = useTranslations("Overview");
+  return <p className="py-12 text-center text-muted-foreground text-sm">{t("loadFailed")}</p>;
+}
+
+function HeroIsland() {
+  const { selectedId } = usePortfolio();
+  const { data } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
+  // 曲线非挂起:没到不拖住 hero 的数字,区域走既有「还在取数」态。
+  const historyQuery = useQuery(portfolioHistoryQuery(selectedId));
+  useStalePriceRefresh(data.pricesStale);
+  return (
+    <PortfolioHero
+      series={historyQuery.data?.series ?? []}
+      loading={historyQuery.isPending}
+      totalUsd={data.totalUsd}
+      gain24h={data.gain24h ?? null}
+      holdings={data.holdings}
+    />
+  );
+}
+
+function HoldingsIsland() {
   const { selectedId } = usePortfolio();
   const queryClient = useQueryClient();
   const t = useTranslations("Overview");
@@ -228,12 +268,9 @@ function Overview() {
     ? JSON.stringify(portfolioKeys.overview(selectedId, pinScope))
     : "";
 
-  // hero(总额 + 曲线)始终是「选中 Portfolio」口径,**不受 pin 影响**(ADR 0034 UI 微调:自定义 Tab 不改 hero)。
   // 默认与非默认走**同一个查询工厂**,只是 portfolioId 不同 —— 以前默认那份来自 loader、非默认那份是另一个
   // useQuery,两边 key 不同族,于是整页刷新只能碰到前者(停在非默认组合上做任何写操作画面都不动)。
   const { data: portfolioData } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
-  const { data: history } = useSuspenseQuery(portfolioHistoryQuery(selectedId));
-  useStalePriceRefresh(portfolioData.pricesStale);
 
   // 自定义 Tab 备选:tag 按选中 Portfolio 过滤(账户只匹配同 Portfolio 的 Tag);connector 全量。
   const connectorOptions = connectorIds.map((id) => ({ id, label: connectorLabel(id) }));
@@ -260,9 +297,6 @@ function Overview() {
     onSuccess: () => invalidateFor(queryClient, "portfolio.pin.write"),
     onError: failPin,
   });
-
-  const { totalUsd: heroTotal } = portfolioData;
-  const series = history.series;
 
   // 视角 tab(现货/永续/DeFi)恒按**选中 Portfolio**口径,与 pin 无关 —— 选 pin 不改这三个 tab 的存在/内容
   //(用户明确:自定义 tab 不影响原来的 tokens/perp/defi tab)。
@@ -305,125 +339,109 @@ function Overview() {
         ? defiSubtotal
         : holdingsSubtotal;
 
-  return (
-    <div className="flex flex-col gap-6">
-      <HeaderSync />
-      <PortfolioHero
-        series={series}
-        totalUsd={heroTotal}
-        gain24h={portfolioData.gain24h ?? null}
-        holdings={portfolioData.holdings}
-      />
-
-      {accountTotals.length === 0 ? (
-        <p className="text-muted-foreground">
-          {tc("noAccountsYet")}{" "}
-          <Link to="/accounts" className="underline">
-            {tc("addOne")}
-          </Link>
-          .
-        </p>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
+  return accountTotals.length === 0 ? (
+    <p className="text-muted-foreground">
+      {tc("noAccountsYet")}{" "}
+      <Link to="/accounts" className="underline">
+        {tc("addOne")}
+      </Link>
+      .
+    </p>
+  ) : (
+    <div className="flex flex-col gap-4">
+      {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
               选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
-          <div className="flex items-center gap-4">
-            {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。
+      <div className="flex items-center gap-4">
+        {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。
                 pin 面板不受此容器裁剪 —— 它整个经 Portal 浮出(见 PinPortalPopover)。 */}
-            <div
-              ref={stripRef}
-              className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            >
-              <Tabs value={activeValue} onValueChange={selectTab} variant="pill">
-                {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
+        <div
+          ref={stripRef}
+          className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <Tabs value={activeValue} onValueChange={selectTab} variant="pill">
+            {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
                     ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。
                     pr-4:滚动区末端留内边距,滚到底时最后一个 tab/＋ 不贴着右侧合计。 */}
-                <TabsList className="bg-transparent p-0 pr-4">
-                  <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
-                  {kind.perpItems.length > 0 && (
-                    <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>
-                  )}
-                  {kind.defiGroups.length > 0 && (
-                    <TabsTrigger value="defi">{t("defiTab")}</TabsTrigger>
-                  )}
-                  {pins.map((p) => (
-                    <PinTab
-                      key={p.id}
-                      value={p.id}
-                      isActive={shownActive === p.id}
-                      // connector 的展示名由 PinTargetLabel 走 registry 取(类型名),这里只喂 tag/account 的名字。
-                      label={
-                        p.kind === "tag"
-                          ? tagNameOf(tags, p.tagId)
-                          : p.kind === "account"
-                            ? accountNameOf(allAccounts, p.accountId)
-                            : ""
-                      }
-                      selected={{
-                        kind: p.kind,
-                        connectorId: p.connectorId ?? undefined,
-                        tagId: p.tagId ?? undefined,
-                        accountId: p.accountId ?? undefined,
-                      }}
-                      connectorOptions={connectorOptions}
-                      tagOptions={tagOptions}
-                      accountOptions={accountOptions}
-                      onRepoint={(choice) => repointPinMut.mutate({ pinId: p.id, choice })}
-                      onUnpin={() => onUnpin(p.id)}
-                      unpinning={unpinMut.isPending && unpinMut.variables === p.id}
-                    />
-                  ))}
-                  {pins.length < MAX_PINS && (
-                    <AddPinButton
-                      connectorOptions={connectorOptions}
-                      tagOptions={tagOptions}
-                      accountOptions={accountOptions}
-                      onPick={(choice) => addPinMut.mutate(choice)}
-                      adding={addPinMut.isPending}
-                    />
-                  )}
-                </TabsList>
-              </Tabs>
-            </div>
-            <span className="shrink-0 text-muted-foreground text-sm tabular-nums">
-              {/* pin 视图:过滤后数据到位才显其总额;未到位显 "—",别显未收窄的全量总额。
+            <TabsList className="bg-transparent p-0 pr-4">
+              <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
+              {kind.perpItems.length > 0 && (
+                <TabsTrigger value="perps">{t("perpsTab")}</TabsTrigger>
+              )}
+              {kind.defiGroups.length > 0 && <TabsTrigger value="defi">{t("defiTab")}</TabsTrigger>}
+              {pins.map((p) => (
+                <PinTab
+                  key={p.id}
+                  value={p.id}
+                  isActive={shownActive === p.id}
+                  // connector 的展示名由 PinTargetLabel 走 registry 取(类型名),这里只喂 tag/account 的名字。
+                  label={
+                    p.kind === "tag"
+                      ? tagNameOf(tags, p.tagId)
+                      : p.kind === "account"
+                        ? accountNameOf(allAccounts, p.accountId)
+                        : ""
+                  }
+                  selected={{
+                    kind: p.kind,
+                    connectorId: p.connectorId ?? undefined,
+                    tagId: p.tagId ?? undefined,
+                    accountId: p.accountId ?? undefined,
+                  }}
+                  connectorOptions={connectorOptions}
+                  tagOptions={tagOptions}
+                  accountOptions={accountOptions}
+                  onRepoint={(choice) => repointPinMut.mutate({ pinId: p.id, choice })}
+                  onUnpin={() => onUnpin(p.id)}
+                  unpinning={unpinMut.isPending && unpinMut.variables === p.id}
+                />
+              ))}
+              {pins.length < MAX_PINS && (
+                <AddPinButton
+                  connectorOptions={connectorOptions}
+                  tagOptions={tagOptions}
+                  accountOptions={accountOptions}
+                  onPick={(choice) => addPinMut.mutate(choice)}
+                  adding={addPinMut.isPending}
+                />
+              )}
+            </TabsList>
+          </Tabs>
+        </div>
+        <span className="shrink-0 text-muted-foreground text-sm tabular-nums">
+          {/* pin 视图:过滤后数据到位才显其总额;未到位显 "—",别显未收窄的全量总额。
                   数据由子组件自己拉 —— `useSuspenseQuery` 没有条件启用,所以「只在 pin 视图下才要的查询」
                   只能靠「不在 pin 视图时这个组件压根不挂」来表达(ADR 0038)。总额与列表是两个子组件、
                   同一个 queryKey,react-query 自然合成一次请求。 */}
-              {isPinView && pinScope ? (
-                <QueryBoundary key={activePin.id} resetKey={pinBoundaryKey} pending="—" failed="—">
-                  <PinTotal portfolioId={selectedId} pin={pinScope} />
-                </QueryBoundary>
-              ) : (
-                usd(viewSubtotal)
-              )}
-            </span>
-          </div>
-
-          {/* 内容:自定义 pin → section list(按小计倒序竖排);视角 → 单类列表。 */}
           {isPinView && pinScope ? (
-            <QueryBoundary
-              key={activePin.id}
-              resetKey={pinBoundaryKey}
-              pending={<ListSkeleton />}
-              failed={
-                <p className="py-12 text-center text-muted-foreground text-sm">
-                  {tct("actionFailed")}
-                </p>
-              }
-            >
-              <PinContent portfolioId={selectedId} pin={pinScope} />
+            <QueryBoundary key={activePin.id} resetKey={pinBoundaryKey} pending="—" failed="—">
+              <PinTotal portfolioId={selectedId} pin={pinScope} />
             </QueryBoundary>
-          ) : activeKind === "perps" ? (
-            <PerpPositionsList items={kind.perpItems} />
-          ) : activeKind === "defi" ? (
-            <DefiPositions groups={kind.defiGroups} hideHeader />
-          ) : holdings.length === 0 ? (
-            <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
           ) : (
-            <TokenHoldings holdings={holdings} />
+            usd(viewSubtotal)
           )}
-        </div>
+        </span>
+      </div>
+
+      {/* 内容:自定义 pin → section list(按小计倒序竖排);视角 → 单类列表。 */}
+      {isPinView && pinScope ? (
+        <QueryBoundary
+          key={activePin.id}
+          resetKey={pinBoundaryKey}
+          pending={<ListSkeleton />}
+          failed={
+            <p className="py-12 text-center text-muted-foreground text-sm">{tct("actionFailed")}</p>
+          }
+        >
+          <PinContent portfolioId={selectedId} pin={pinScope} />
+        </QueryBoundary>
+      ) : activeKind === "perps" ? (
+        <PerpPositionsList items={kind.perpItems} />
+      ) : activeKind === "defi" ? (
+        <DefiPositions groups={kind.defiGroups} hideHeader />
+      ) : holdings.length === 0 ? (
+        <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
+      ) : (
+        <TokenHoldings holdings={holdings} />
       )}
     </div>
   );

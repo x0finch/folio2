@@ -23,6 +23,7 @@ export function PortfolioHero({
   totalUsd,
   gain24h,
   holdings,
+  loading = false,
   contentClassName,
 }: {
   series: HistoryPoint[];
@@ -31,6 +32,8 @@ export function PortfolioHero({
   // 曲线画的是净值(含充提),这个数剔除了充提,两者本来就不该是同一个;`null` = 算不出。
   gain24h: Gain | null;
   holdings: readonly HoldingLike[];
+  /** 净值曲线还在取 —— 数字照常渲染,曲线走 TrendPanel 的「还在取数」态。 */
+  loading?: boolean;
   // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
   contentClassName?: string;
 }) {
@@ -88,7 +91,13 @@ export function PortfolioHero({
     <div className="relative min-h-60 overflow-hidden pt-1">
       {/* 四态(点数不够 / 还在取数 / 什么都还没有 / 真有数据)全在 TrendPanel 里判。
           hero 的上留白更大(topMargin=92,把折线压到下半区),填充也比抽屉略重 → 覆盖这两个默认值。 */}
-      <TrendPanel series={chartSeries} topMargin={92} fillOpacity={0.16} decorate={nothingYet} />
+      <TrendPanel
+        series={chartSeries}
+        loading={loading}
+        topMargin={92}
+        fillOpacity={0.16}
+        decorate={nothingYet}
+      />
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>

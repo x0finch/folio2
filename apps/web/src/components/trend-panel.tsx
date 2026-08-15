@@ -77,6 +77,8 @@ export function TrendPanel({
    */
   decorate?: boolean;
 }) {
+  // 还在取数时什么都不画:不能先闪装饰线/空态文案,再被真图盖掉。
+  if (loading) return <TrendEmpty loading />;
   // 一个点连不成线。门槛只在这里写一次。
   if (series.length >= 2) {
     // 图单独一层裁溢出:调用方的容器往往还浮着名称/金额层,不能被 overflow-hidden 切掉

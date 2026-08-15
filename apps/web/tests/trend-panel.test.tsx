@@ -54,6 +54,13 @@ describe("四态", () => {
     expect(c.firstChild).toBeNull();
   });
 
+  it("还在取数时 decorate 也让位 —— 先别画装饰线", () => {
+    const c = renderPanel({ loading: true, decorate: true });
+    expect(note()).toBeNull();
+    expect(decoration(c)).toBeNull();
+    expect(c.firstChild).toBeNull();
+  });
+
   it("decorate → 画装饰纹样,不摆文案", () => {
     const c = renderPanel({ decorate: true });
     expect(note()).toBeNull();

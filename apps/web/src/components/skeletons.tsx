@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, Skeleton } from "@folio/ui";
 
-// 路由 pendingComponent 用的骨架态:形状贴合各页真实布局,避免加载时空白跳动。
+// 各页/各岛的骨架态:形状贴合真实布局,避免加载时空白跳动。
 // 稳定 key(避免 index key lint):占位行数固定,用字符串数组当 key。
 const ROWS_5 = ["r1", "r2", "r3", "r4", "r5"];
 const ROWS_4 = ["r1", "r2", "r3", "r4"];
@@ -20,22 +20,21 @@ function Row() {
   );
 }
 
-export function OverviewSkeleton() {
+export function HeroSkeleton() {
+  return <Skeleton className="h-56 w-full rounded-xl" />;
+}
+
+export function HoldingsSkeleton() {
   return (
-    <div className="flex flex-col gap-6">
-      {/* hero:趋势背景 + 净值/24h/三指标浮于其上 → 单块高占位 */}
-      <Skeleton className="h-56 w-full rounded-xl" />
-      {/* 持仓:pill tabs(左)+ 该视角合计(右)+ 行(无 Card) */}
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-9 w-64 rounded-full" />
+        <Skeleton className="h-4 w-24" />
+      </div>
       <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <Skeleton className="h-9 w-64 rounded-full" />
-          <Skeleton className="h-4 w-24" />
-        </div>
-        <div className="flex flex-col gap-4">
-          {ROWS_5.map((k) => (
-            <Row key={k} />
-          ))}
-        </div>
+        {ROWS_5.map((k) => (
+          <Row key={k} />
+        ))}
       </div>
     </div>
   );

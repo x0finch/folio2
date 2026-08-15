@@ -91,6 +91,19 @@ describe("hero 趋势区的三态", () => {
     expect(emptyText()).toBeTruthy();
   });
 
+  it("走势还在取数 → 净值照常渲染,不闪空态那句话", () => {
+    // #488 票 3:曲线是非挂起读取,没到不该拖住数字,也不该先闪一句「数据不够」。
+    render(
+      <IntlProvider locale="en" messages={messages.en} timeZone="UTC" now={new Date(T0)}>
+        <PortfolioHero series={[]} totalUsd={110} gain24h={null} holdings={holdings} loading />
+      </IntlProvider>,
+    );
+
+    expect(screen.getByText(/total net worth/i)).toBeTruthy();
+    expect(emptyText()).toBeNull();
+    expect(spanBadge()).toBeNull();
+  });
+
   it("两个点但落在同一个钟点 → 被降采样并成一个,于是仍是空态", () => {
     // **这是个如实记录当前行为的用例,不是在为它背书**:降采样最细的桶是 1 小时、按绝对钟点切
     // (见 lib/history.ts),所以同一钟点内的两次同步只留最后一个点 → 画不出线。
