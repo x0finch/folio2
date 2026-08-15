@@ -1,18 +1,19 @@
 import type { ConnectorId } from "@folio/connectors";
 import { LogoAvatar, SharedLayoutBg } from "@folio/ui";
-import { useConnectorLabels, useConnectorLogos } from "../hooks/use-connector-labels";
+import { useQuery } from "@tanstack/react-query";
+import { connectorLabelFallback } from "../lib/connector-label";
 import { CONNECTOR_OPTIONS } from "../lib/connectors";
+import { connectorCatalogQuery } from "../lib/queries/connectors";
 
 // 「添加账户」第一步:连接器网格(纯展示)。分组来自 CONNECTOR_OPTIONS,展示名 + logo 来自 registry 目录
-// (useConnectorLabels/useConnectorLogos)—— 图标即各 connector manifest 自带的 logo(经 folio logo 代理),
+// —— 图标即各 connector manifest 自带的 logo(经 folio logo 代理),
 // 加载失败/无图由 LogoAvatar 回退首字母。恒显全部 Connector(创建无唯一性约束 → 同一 connector 可多开)。
 //
 // 无 card 边框:hover 高亮交给**单个** SharedLayoutBg 的移动 pill —— 全部类型共享一个 layoutId,pill 在整张网格
 // (跨组)连续 morph。组标题作 col-span-full 的非交互子元素(pointer-events-none → 不触发 pill、不占格),
 // tiles 作格子(inset=0 → pill 恰覆盖单格)。与账户列表/持仓同款交互。纯 onSelect 回调,不含表单/创建逻辑。
 export function ConnectorGrid({ onSelect }: { onSelect: (connectorId: ConnectorId) => void }) {
-  const labelOf = useConnectorLabels();
-  const logoOf = useConnectorLogos();
+  const { data: catalog } = useQuery(connectorCatalogQuery());
   return (
     <SharedLayoutBg
       className="grid grid-cols-2 gap-2 sm:grid-cols-3"
@@ -28,7 +29,7 @@ export function ConnectorGrid({ onSelect }: { onSelect: (connectorId: ConnectorI
           {group.group}
         </div>,
         ...group.options.map((id) => {
-          const label = labelOf(id);
+          const label = catalog?.[id]?.label ?? connectorLabelFallback(id);
           return (
             <button
               key={id}
@@ -38,7 +39,7 @@ export function ConnectorGrid({ onSelect }: { onSelect: (connectorId: ConnectorI
             >
               {/* 内容单容器(padding 在此,按钮本身不裁剪 pill);图标 + 名称竖排。 */}
               <div className="flex flex-col items-start gap-2 rounded-xl p-3">
-                <LogoAvatar src={logoOf(id)} fallback={label} size="sm" alt="" />
+                <LogoAvatar src={catalog?.[id]?.logo} fallback={label} size="sm" alt="" />
                 <span className="font-medium text-sm">{label}</span>
               </div>
             </button>

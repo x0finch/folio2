@@ -1,4 +1,6 @@
-import { useConnectorLabels, useConnectorLogos } from "../../../../hooks/use-connector-labels";
+import { useQuery } from "@tanstack/react-query";
+import { connectorLabelFallback } from "../../../../lib/connector-label";
+import { connectorCatalogQuery } from "../../../../lib/queries/connectors";
 import type { PinTargetChoice } from "./pin-picker";
 import { PinTargetMark } from "./pin-target-mark";
 
@@ -14,11 +16,13 @@ export function PinTargetLabel({
   onPrimary?: boolean; // 落在激活药丸(bg-primary 浅底)上 → logo 底盘随之改色
   className?: string;
 }) {
-  const labelOf = useConnectorLabels();
-  const logoOf = useConnectorLogos();
+  const { data: catalog } = useQuery(connectorCatalogQuery());
+  const id = target.connectorId ?? "";
   const resolvedName =
-    target.kind === "connector" ? labelOf(target.connectorId ?? "") : (name ?? "");
-  const logo = target.kind === "connector" ? logoOf(target.connectorId ?? "") : undefined;
+    target.kind === "connector"
+      ? (catalog?.[id]?.label ?? connectorLabelFallback(id))
+      : (name ?? "");
+  const logo = target.kind === "connector" ? catalog?.[id]?.logo : undefined;
   return (
     <PinTargetMark
       kind={target.kind}

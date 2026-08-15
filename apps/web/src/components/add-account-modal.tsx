@@ -4,8 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, X } from "lucide-react";
 import { cloneElement, type ReactElement, type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import { useConnectorLabels } from "../hooks/use-connector-labels";
-import { connectorCredentialSpecsQuery } from "../lib/queries/connectors";
+import { connectorLabelFallback } from "../lib/connector-label";
+import { connectorCatalogQuery, connectorCredentialSpecsQuery } from "../lib/queries/connectors";
 import { invalidateFor } from "../lib/queries/refresh";
 import { syncAccount } from "../lib/server/sync";
 import { AccountForm } from "./account-fields";
@@ -88,7 +88,7 @@ export function AddAccountModal({
   // 加账户 / 补录凭据同时改账户域与组合域 —— 映射表那一条已经把两个前缀都列上了。
   const refresh = () => invalidateFor(queryClient, "account.write");
   const refreshAfterSync = () => invalidateFor(queryClient, "account.sync");
-  const labelOf = useConnectorLabels();
+  const { data: catalog } = useQuery(connectorCatalogQuery());
   const isDesktop = useMediaQuery("(min-width: 640px)");
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = openProp !== undefined;
@@ -156,7 +156,10 @@ export function AddAccountModal({
         {completing && completeFor ? (
           <ViewShell>
             <ModalHeader
-              title={labelOf(completeFor.connectorId)}
+              title={
+                catalog?.[completeFor.connectorId]?.label ??
+                connectorLabelFallback(completeFor.connectorId)
+              }
               subtitle={t("completeAccountHint")}
               onClose={() => onCompleteClose?.()}
             />
@@ -172,7 +175,7 @@ export function AddAccountModal({
         ) : step === "form" && connectorId ? (
           <ViewShell>
             <ModalHeader
-              title={labelOf(connectorId)}
+              title={catalog?.[connectorId]?.label ?? connectorLabelFallback(connectorId)}
               subtitle={t("addAccountHint")}
               onBack={back}
               onClose={close}
