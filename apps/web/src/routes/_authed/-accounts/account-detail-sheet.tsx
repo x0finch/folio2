@@ -10,6 +10,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Skeleton,
   toast,
   useMediaQuery,
 } from "@folio/ui";
@@ -46,7 +47,7 @@ import { removeAccount, updateAccount } from "../../../lib/server/accounts";
 import { syncAccount } from "../../../lib/server/sync";
 import { signedUsd } from "../../../lib/signed-usd";
 import { TrendPanel } from "../-home/hero/trend-panel";
-import { deltaTone, NO_VALUE } from "../-home/holdings/value-delta";
+import { deltaTone, GainSkeleton, NO_VALUE } from "../-home/holdings/value-delta";
 import { accountShare, shareLabel } from "./share";
 
 // 账户页列表行的合并形状(listAccountHoldings ∪ listAccounts,见 accounts.tsx loader)。
@@ -55,6 +56,8 @@ export interface AccountRow {
   label: string;
   connectorId: ConnectorId;
   archivedAt: number | null;
+  /** 持仓查询还没到(或失败还在重试)。金额/同步时间走骨架,不是 0 / 「从未同步」。 */
+  valuesReady: boolean;
   totalUsd: number;
   takenAt: number | null;
   balances: OverviewBalance[]; // 各持仓自带 balance 级 note(note 重设计)
@@ -293,18 +296,30 @@ function DetailBody({
               {/* Tag(#351):与 connector 徽章同排,muted 纯展示、**不可点** —— 编辑走 ⋯ 菜单里的「标签」。 */}
               <TagBadges tags={account.tags} />
             </EditableName>
-            {/* 市值 + 24h 增量:字号同代币抽屉(值 text-3xl bold、增量 text-sm);缺凭据 → 无增量。 */}
+            {/* 市值 + 24h 增量:字号同代币抽屉(值 text-3xl bold、增量 text-sm);缺凭据 → 无增量。
+                金额没到也能点开抽屉(#493):头上的数字和下面持仓走骨架,不先画 0。 */}
             <div>
-              <div className="font-bold text-3xl tabular-nums">{usd(account.totalUsd)}</div>
-              {hasDayChange &&
-                (dayChange == null ? (
-                  <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
-                ) : (
-                  <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange.amount))}>
-                    {signedUsd(usd, dayChange.amount)}
-                    {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
-                  </div>
-                ))}
+              {account.valuesReady ? (
+                <>
+                  <div className="font-bold text-3xl tabular-nums">{usd(account.totalUsd)}</div>
+                  {hasDayChange &&
+                    (dayChange == null ? (
+                      <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>
+                        {NO_VALUE}
+                      </div>
+                    ) : (
+                      <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange.amount))}>
+                        {signedUsd(usd, dayChange.amount)}
+                        {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
+                      </div>
+                    ))}
+                </>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <Skeleton className="h-9 w-36" />
+                  <GainSkeleton />
+                </div>
+              )}
             </div>
             {/* 缺凭据告警行:⚠ + 可点击"补填凭据以同步"提示(文案即入口 → 开加账户 modal 的补录模式,A3)。 */}
             {account.needsCredentials && (
@@ -382,10 +397,21 @@ function DetailBody({
         </div>
       </div>
 
-      {/* 占比 + 同步时间:移到图下方,更小字体 + 更淡(次要信息,弱化)。 */}
+      {/* 占比 + 同步时间:移到图下方,更小字体 + 更淡(次要信息,弱化)。金额没到时同步时间走骨架,
+          缺凭据 / 归档 / manual 名单里已经能确定,照常写。 */}
       <p className="mt-2 text-muted-foreground/30 text-xs">
-        {!archived && sharePct > 0 && `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
-        {lastSynced}
+        {account.valuesReady &&
+          !archived &&
+          sharePct > 0 &&
+          `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
+        {account.valuesReady ||
+        account.needsCredentials ||
+        archived ||
+        isManual(account.connectorId) ? (
+          lastSynced
+        ) : (
+          <Skeleton className="inline-block h-3 w-24" />
+        )}
       </p>
 
       {/* 删除是破坏性操作 → 阻断式 modal 二次确认(取代原侧栏内联块,#165)。**必须 Portal 到 body**:
@@ -444,14 +470,22 @@ function DetailBody({
       />
 
       {/* manual 账户:多 token 面板(Tokens tab 已含持仓,故不再叠加上方持仓卡)。
-          非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。 */}
-      {isManual(account.connectorId) ? (
-        <div className="mt-6">
-          <ManualTokensPanel accountId={account.id} balances={account.balances} />
-        </div>
+          非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。
+          金额没到 → 骨架,不把空数组画成「没有持仓」。 */}
+      {account.valuesReady ? (
+        isManual(account.connectorId) ? (
+          <div className="mt-6">
+            <ManualTokensPanel accountId={account.id} balances={account.balances} />
+          </div>
+        ) : (
+          <div className="mt-6">
+            <AccountHoldingsCards balances={account.balances} accountNote={account.note} />
+          </div>
+        )
       ) : (
-        <div className="mt-6">
-          <AccountHoldingsCards balances={account.balances} accountNote={account.note} />
+        <div className="mt-6 flex flex-col gap-3">
+          <Skeleton className="h-16 w-full rounded-xl" />
+          <Skeleton className="h-16 w-full rounded-xl" />
         </div>
       )}
     </>

@@ -22,12 +22,14 @@ interface TagRef {
 
 export function buildAccountRows(sources: {
   accounts: readonly AccountListItem[];
-  holdings: AccountHoldings;
+  /** 没到 → 名单仍能拼出来,金额位走骨架,不把市值写成 0。 */
+  holdings?: AccountHoldings;
   memberships: readonly PortfolioMembership[];
   allTags: readonly TagRef[];
   tagLinks: readonly AccountTagLink[];
 }): AccountRow[] {
-  const byId = new Map(sources.holdings.rows.map((r) => [r.account.id, r]));
+  const valuesReady = sources.holdings != null;
+  const byId = new Map((sources.holdings?.rows ?? []).map((r) => [r.account.id, r]));
   const portfolioOf = new Map(sources.memberships.map((m) => [m.accountId, m.portfolioId]));
   const tagsById = new Map(sources.allTags.map((tg) => [tg.id, tg]));
   // 每账户已打的 Tag(展示投影:id + 名字)。
@@ -46,6 +48,7 @@ export function buildAccountRows(sources: {
       label: a.label,
       connectorId: a.connectorId,
       archivedAt: a.archivedAt,
+      valuesReady,
       totalUsd: ov?.totalUsd ?? 0,
       takenAt: ov?.takenAt ?? null,
       balances: ov?.balances ?? [],

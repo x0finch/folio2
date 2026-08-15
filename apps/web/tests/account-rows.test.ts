@@ -28,10 +28,16 @@ const build = (over: Partial<Parameters<typeof buildAccountRows>[0]> = {}) =>
   });
 
 describe("buildAccountRows", () => {
+  it("持仓查询还没到 → valuesReady 为 false,市值不充当真实 0", () => {
+    const [row] = build({ holdings: undefined });
+    expect(row.valuesReady).toBe(false);
+  });
+
   it("持仓那一源里没有这个账户 → 市值/上次同步/持仓退成空,而不是整行消失", () => {
     // 退化路径:没有任何快照的账户(刚加、还没同步过)。
     // **归档账户不再走这条** —— 归档 = 封存(ADR 0039),它在持仓那一源里有封存值,见下一条。
     const [row] = build({ accounts: [account({ archivedAt: 1700000000000 })] });
+    expect(row.valuesReady).toBe(true);
     expect(row.totalUsd).toBe(0);
     expect(row.takenAt).toBeNull();
     expect(row.balances).toEqual([]);
@@ -50,6 +56,7 @@ describe("buildAccountRows", () => {
       } as any,
     });
     expect(row.archivedAt).toBe(1700000000000);
+    expect(row.valuesReady).toBe(true);
     expect(row.totalUsd).toBe(999);
     expect(row.takenAt).toBe(1690000000000);
     expect(row.balances).toHaveLength(1);
