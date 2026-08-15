@@ -114,36 +114,38 @@ export const loadAccountHoldings = (withGain = false) =>
     );
 
     return {
-      rows: rows.map((r): WithOptionalGain<(typeof rows)[number]> => ({
-        ...r,
-        gain24h: gainByAccount.get(r.account.id),
-        // **每一支都带上 `gain24h` 这个键**(哪怕是 undefined)—— 只在部分分支加字段的话,
-        // 推断出来的是个联合类型,调用方(和测试)读 `.gain24h` 会在「没有这个属性」的那一支上编译不过。
-        balances: r.balances.map((b): typeof b & { gain24h?: Gain | null } => {
-          // 归档 = 封存:这个位置不该有这个数(ADR 0039)→ undefined,界面整行省略而不是画 `—`。
-          if (b.tokenId == null || r.archivedAt != null) return { ...b, gain24h: undefined };
-          const k = `${r.account.id} ${b.tokenId}`;
-          const gain = computeGain24h(perToken.get(k) ?? [], now);
-          if (gain == null) return { ...b, gain24h: null };
-          // 一个币散在多条链 = 抽屉里的多行,而线是按 (账户 × 币) 的一条。按各行市值占比摊分,
-          // 于是逐行显示加起来仍等于这个币真正赚的;百分比是整条线的(同币同段的收益率本就一样)。
-          const total = tokenTotals.get(k) ?? 0;
-          const share = total === 0 ? 0 : b.usdValue / total;
-          // 段也跟着摊:金额按占比缩,百分比不动(同一个币同一段的收益率与它分在几条链无关)。
-          return {
-            ...b,
-            gain24h: {
-              amount: gain.amount * share,
-              pct: gain.pct,
-              segments: gain.segments.map((seg) => ({
-                ...seg,
-                openValue: seg.openValue * share,
-                gain: seg.gain * share,
-              })),
-            },
-          };
+      rows: rows.map(
+        (r): WithOptionalGain<(typeof rows)[number]> => ({
+          ...r,
+          gain24h: gainByAccount.get(r.account.id),
+          // **每一支都带上 `gain24h` 这个键**(哪怕是 undefined)—— 只在部分分支加字段的话,
+          // 推断出来的是个联合类型,调用方(和测试)读 `.gain24h` 会在「没有这个属性」的那一支上编译不过。
+          balances: r.balances.map((b): typeof b & { gain24h?: Gain | null } => {
+            // 归档 = 封存:这个位置不该有这个数(ADR 0039)→ undefined,界面整行省略而不是画 `—`。
+            if (b.tokenId == null || r.archivedAt != null) return { ...b, gain24h: undefined };
+            const k = `${r.account.id} ${b.tokenId}`;
+            const gain = computeGain24h(perToken.get(k) ?? [], now);
+            if (gain == null) return { ...b, gain24h: null };
+            // 一个币散在多条链 = 抽屉里的多行,而线是按 (账户 × 币) 的一条。按各行市值占比摊分,
+            // 于是逐行显示加起来仍等于这个币真正赚的;百分比是整条线的(同币同段的收益率本就一样)。
+            const total = tokenTotals.get(k) ?? 0;
+            const share = total === 0 ? 0 : b.usdValue / total;
+            // 段也跟着摊:金额按占比缩,百分比不动(同一个币同一段的收益率与它分在几条链无关)。
+            return {
+              ...b,
+              gain24h: {
+                amount: gain.amount * share,
+                pct: gain.pct,
+                segments: gain.segments.map((seg) => ({
+                  ...seg,
+                  openValue: seg.openValue * share,
+                  gain: seg.gain * share,
+                })),
+              },
+            };
+          }),
         }),
-      })),
+      ),
       pricesStale,
     };
   });
