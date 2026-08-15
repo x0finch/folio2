@@ -51,7 +51,7 @@ export function TabStripIsland() {
       {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
               选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
       {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。
-                pin 面板不受此容器裁剪 —— 它整个经 Portal 浮出(见 PinPortalPopover)。 */}
+                pin 面板不受此容器裁剪 —— 它整个经 Portal 浮出(见 PinPanel)。 */}
       <div
         ref={stripRef}
         className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
