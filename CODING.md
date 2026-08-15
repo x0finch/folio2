@@ -174,6 +174,16 @@ query 和全部请求头**写进属性,而它的默认脱敏名单(`["authorizat
   支持 vitest 4 的 `4.0.0-beta.x` 要求 `effect ^4.0.0-beta`(本仓 3.22)。硬装能跑(验过),
   但要写一条「忽略 peer 冲突」并一直挂着。**别再重新评估,除非 Effect 4 稳定了。**
 
+## File placement
+
+页面相关的放一块,真通用的底座才进公共目录。别人要用业务件,来这里 import,不要因为「别处也用」就升格。这个区块没用到的,别塞进来。
+
+相关的收进文件夹,入口只导出这一块,别当中转站。骨架、空态、失败态写在用到的文件里。只包一层、自己没做决定的文件删掉。独立文件要有自己的逻辑,并且不止一处在用。
+
+动画和业务分开;为了好读可以在同文件抽小组件,别为此新建文件。不同的事不要揉进一个 hook,能拆就拆,可以放同一个文件,组件只负责拼起来。客户端会用的跟页面走,只有服务端用的进服务端目录(`lib` 三层见 [Implementation shape](#implementation-shape))。
+
+画不出来就别画;后到的内容先占位,别把布局顶开。点不到的交互直接删。同一类东西各处长得要一样。
+
 ## UI
 
 - **beUI (Framer Motion) motion layer + a few hand-rolled primitives — never Radix, never Base UI** (ADR 0004). `@base-ui/react` and `radix-ui` are not dependencies and must not be reintroduced. Colors/spacing/radius via design tokens (`bg-background`, `text-foreground`, …), motion via the `lib/ease.ts` spring/easing tokens — no hardcoded colors, no arbitrary values (`bg-[#…]`, `p-[13px]`), no editing component internals.
