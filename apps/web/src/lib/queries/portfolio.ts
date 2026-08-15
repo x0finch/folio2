@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
   getHomeTabStrip,
+  getPortfolioGain24h,
   getPortfolioHistory,
   getPortfolioOverview,
   listPortfolioMemberships,
@@ -55,5 +56,13 @@ export const portfolioHistoryQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: portfolioKeys.history(portfolioId),
     queryFn: () => getPortfolioHistory({ data: { portfolioId } }),
+    staleTime: STALE_TIME.live,
+  });
+
+/** 24h 盈亏:组合级 + 按持仓 / DeFi 协议分组。自定义 Tab 把 pin 传进来。 */
+export const portfolioGain24hQuery = (portfolioId: string, pin?: PinScopeKey) =>
+  queryOptions({
+    queryKey: portfolioKeys.gain24h(portfolioId, pin),
+    queryFn: () => getPortfolioGain24h({ data: { portfolioId, pin } }),
     staleTime: STALE_TIME.live,
   });

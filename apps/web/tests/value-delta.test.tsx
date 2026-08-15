@@ -45,6 +45,12 @@ describe("<ValueDelta> 的三态", () => {
     expect(line?.textContent).toMatch(/0/);
   });
 
+  it("还在取 —— 小骨架,不是破折号", () => {
+    const { container } = renderDelta({ delta: null, loading: true });
+    expect(deltaLine(container)?.textContent).not.toBe(NO_VALUE);
+    expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
+  });
+
   it("null 与 0 在界面上不是同一个东西", () => {
     const a = renderDelta({ delta: null });
     const b = renderDelta({ delta: 0 });

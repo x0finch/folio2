@@ -33,6 +33,11 @@ export function TabStripSkeleton() {
   );
 }
 
+/** 24h 盈亏位的小骨架 —— 行内 / hero 药丸 / best-worst 三处同形(#488 票 5 / 票 6)。 */
+export function GainSkeleton() {
+  return <Skeleton className="inline-block h-4 w-16 rounded-full" />;
+}
+
 export function HoldingsSkeleton() {
   return (
     <div className="flex flex-col gap-4">

@@ -17,7 +17,7 @@ import {
   toTabPin,
 } from "../accounts-in-view";
 import { connectorLabelFallback } from "../connector-label";
-import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "../gain-24h";
+import { defiGainKey, GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "../gain-24h";
 import { buildPortfolioHistory } from "../history";
 import { kindPresence, resolvePinLabel } from "../home-tabs";
 import { platformLogoUrl } from "../logo";
@@ -32,7 +32,7 @@ import {
   manualFiatRefs,
 } from "./internal/manual";
 import { runAtEdge, runRequest, runStore, withRequest } from "./internal/oracle";
-import { buildOverview } from "./internal/overview-model";
+import { buildOverview, type OverviewDeps } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
@@ -68,72 +68,88 @@ const resolveScope = (
     return { selectedId, defaultId: defaultPf.id };
   });
 
-// 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做
-// 鉴权 + 加载(accounts / 最新快照)+ 注入依赖(tokens / platforms)+ 调用。
-// scope 到「选中 Portfolio」(ADR 0033):活跃 && 归属选中的账户;缺省选中 = 默认。
+// 总览装配:账户集 + 当下快照 + 手记注入 + 可选的 24h 盈亏原料。
+// `withGain` 是票 5 的切法 —— 总览不再读窗口历史;盈亏读取走同一条装配、把历史带上,
+// 于是「各行相加 = hero 那个数」仍是同一个 `computeGain24h` 喂出来的,不是两处各算。
+const buildScopedOverview = (data: z.infer<typeof PortfolioScopeInput>, withGain: boolean) =>
+  Effect.gen(function* () {
+    const accountStore = yield* AccountStore;
+    const portfolioStore = yield* PortfolioStore;
+    const snapshotStore = yield* SnapshotStore;
+    const settingsStore = yield* SettingsStore;
+    const tagStore = yield* TagStore;
+
+    const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
+    const now = Date.now();
+    const [allAccounts, snapshots, settings, memberships] = yield* Effect.all(
+      [
+        accountStore.list(),
+        snapshotStore.latest(),
+        settingsStore.get(),
+        portfolioStore.listMemberships(),
+      ],
+      { concurrency: 4 },
+    );
+    const pin = toTabPin(data.pin);
+    const tagLinks = pin?.kind === "tag" ? yield* tagStore.listAccountLinks() : [];
+    const accounts = accountsMatchingPin(
+      accountsInView(allAccounts, memberships, selectedId, defaultId),
+      pin,
+      tagLinks,
+    );
+    const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+    yield* injectManualSnapshots(accounts, byAccount);
+    const fiatRefs = yield* manualFiatRefs(accounts);
+    let gainHistory: OverviewDeps["gainHistory"];
+    if (withGain) {
+      const inView = new Set(accounts.map((a) => a.id));
+      const [snapGain, manualGain] = yield* Effect.all(
+        [
+          snapshotStore.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
+          loadManualGainHistory(accounts, now, now - GAIN_WINDOW_MS),
+        ],
+        { concurrency: 2 },
+      );
+      gainHistory = [...snapGain.filter((r) => inView.has(r.accountId)), ...manualGain];
+    }
+    return yield* buildOverview(accounts, byAccount, {
+      connectorMeta: connectorPlatformMeta,
+      mode: settings.valuationMode,
+      fiatRefs,
+      gainHistory,
+      now,
+    });
+  });
+
 export const getPortfolioOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
-  // **整条链一个 effect,一次装配**(#394 T4)。以前这里切两次 Effect 边界、建两套 store:
-  // `injectManualSnapshots` 内部 `runRequest` 一次,末尾 `buildOverview` 又一次。现在读账户、
-  // 读快照、读设置、读归属、注入手记、问价走的是同一份 context —— Effect 官方那句
-  // 「`run*` 尽量放在程序的边缘」,在 server fn 这条路上边缘就是 handler 本身。
+  .handler(({ data, context }) =>
+    runAtEdge(withRequest(context.userId, buildScopedOverview(data, false))),
+  );
+
+// #488 票 5:24h 盈亏独立读取。同一条 `buildScopedOverview(..., true)`,只把盈亏字段带出来。
+export const getPortfolioGain24h = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(PortfolioScopeInput)
   .handler(({ data, context }) =>
     runAtEdge(
       withRequest(
         context.userId,
         Effect.gen(function* () {
-          const accountStore = yield* AccountStore;
-          const portfolioStore = yield* PortfolioStore;
-          const snapshotStore = yield* SnapshotStore;
-          const settingsStore = yield* SettingsStore;
-          const tagStore = yield* TagStore;
-
-          const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
-          // 「当下」取一次,整条链共用 —— 分段的末点、容差判定、取历史的下界都按同一刻算,
-          // 各自现取 `Date.now()` 会在毫秒级上错开(测试里更是直接不可复现)。
-          const now = Date.now();
-          const [allAccounts, snapshots, settings, memberships, gainHistory] = yield* Effect.all(
-            [
-              accountStore.list(),
-              snapshotStore.latest(),
-              settingsStore.get(),
-              portfolioStore.listMemberships(),
-              // 24h 盈亏的原料(ADR 0040):窗口起点还要往前留一个容差,否则基准快照恰好落在
-              // 窗口外时整条线判「算不出」—— 而它明明就在那儿。
-              snapshotStore.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
-            ],
-            { concurrency: 5 },
-          );
-          // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
-          // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
-          const pin = toTabPin(data.pin);
-          const tagLinks = pin?.kind === "tag" ? yield* tagStore.listAccountLinks() : [];
-          const accounts = accountsMatchingPin(
-            accountsInView(allAccounts, memberships, selectedId, defaultId),
-            pin,
-            tagLinks,
-          );
-          const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-          // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
-          yield* injectManualSnapshots(accounts, byAccount);
-          // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
-          //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
-          const fiatRefs = yield* manualFiatRefs(accounts);
-          // 盈亏只按视图内的账户算 —— 历史是全量读的(一次查询比按账户分批便宜),这里收窄到
-          // 当前 Portfolio / Tab 的账户,否则一个不在视图里的账户会把它的涨跌算进这一屏。
-          const inView = new Set(accounts.map((a) => a.id));
-          // manual 从不写快照(ADR 0018)→ 它的原料不在上面那次查询里,按账本另算(#447 第 3 片)。
-          // 窗口起点直接产点(账本能算任意时刻),所以这里传的是 `now - GAIN_WINDOW_MS` 本身,
-          // 而不是上面那个带容差的下界 —— 容差是给稀疏快照留的,账本不需要。
-          const manualGain = yield* loadManualGainHistory(accounts, now, now - GAIN_WINDOW_MS);
-          return yield* buildOverview(accounts, byAccount, {
-            connectorMeta: connectorPlatformMeta,
-            mode: settings.valuationMode,
-            fiatRefs,
-            gainHistory: [...gainHistory.filter((r) => inView.has(r.accountId)), ...manualGain],
-            now,
-          });
+          const view = yield* buildScopedOverview(data, true);
+          const holdings: Record<string, (typeof view.holdings)[number]["gain24h"]> = {};
+          for (const h of view.holdings) holdings[h.key] = h.gain24h ?? null;
+          const defi: Record<
+            string,
+            NonNullable<(typeof view.sections)[number]["defi"][number]["gain24h"]> | null
+          > = {};
+          for (const s of view.sections) {
+            for (const g of s.defi) {
+              defi[defiGainKey(s.account.id, g.protocol)] = g.gain24h ?? null;
+            }
+          }
+          return { portfolio: view.gain24h ?? null, holdings, defi };
         }),
       ),
     ),

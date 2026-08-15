@@ -28,6 +28,17 @@ describe("首页 loader 不再等待慢查询", () => {
     expect(src).not.toMatch(/await queryClient\.ensureQueryData\(homeTabStripQuery/);
   });
 
+  it("发出 24h 盈亏,但不 await", () => {
+    const src = stripComments(readFileSync(SRC, "utf8"));
+    expect(src).toContain("portfolioGain24hQuery(");
+    expect(src).not.toMatch(/await queryClient\.ensureQueryData\(portfolioGain24hQuery/);
+  });
+
+  it("首页不从总览读 24h 盈亏", () => {
+    const src = stripComments(readFileSync(SRC, "utf8"));
+    expect(src).not.toMatch(/data\.gain24h/);
+  });
+
   it("连接器目录、账户清单、标签清单、裸 pin 清单不进 loader", () => {
     const src = stripComments(readFileSync(SRC, "utf8"));
     const loader = src.slice(src.indexOf("loader:"), src.indexOf("component:"));

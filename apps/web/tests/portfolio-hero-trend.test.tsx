@@ -104,6 +104,19 @@ describe("hero 趋势区的三态", () => {
     expect(spanBadge()).toBeNull();
   });
 
+  it("24h 盈亏还在取 → 药丸走骨架,不先闪破折号", () => {
+    const { container } = render(
+      <IntlProvider locale="en" messages={messages.en} timeZone="UTC" now={new Date(T0)}>
+        <PortfolioHero series={[]} totalUsd={110} gain24h={null} holdings={holdings} gainPending />
+      </IntlProvider>,
+    );
+
+    expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
+    // 破折号仍可能出现在稳定币占比(T2,不跟盈亏等);药丸/best/worst 不该是 `—`。
+    const pill = container.querySelector(".rounded-full");
+    expect(pill?.textContent).not.toBe("—");
+  });
+
   it("两个点但落在同一个钟点 → 被降采样并成一个,于是仍是空态", () => {
     // **这是个如实记录当前行为的用例,不是在为它背书**:降采样最细的桶是 1 小时、按绝对钟点切
     // (见 lib/history.ts),所以同一钟点内的两次同步只留最后一个点 → 画不出线。

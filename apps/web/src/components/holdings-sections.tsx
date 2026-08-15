@@ -406,7 +406,13 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
 
 // DeFi 协议行:上行 logo+名 与右侧 <ValueDelta>;下方一条构成条(角色分段 + hover 全量明细)。
 // hover 触发器只在构成条上(不再是整行左簇)—— 扫列表不再连炸弹层(H5 定稿)。
-function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
+function DefiProtocolRowContent({
+  group,
+  gainPending,
+}: {
+  group: DefiGroup;
+  gainPending: boolean;
+}) {
   const subtotal = group.rows.reduce((s, r) => s + r.usdValue, 0);
   // 24h 盈亏(ADR 0040):server 算好的。DeFi 这类没有「几个币」可依,只能拿两张照片的价值相减 ——
   // 已知妥协,你动仓那天不准。百分比的分母是**总敞口**(不是净值),对冲仓才不会给出荒唐的数。
@@ -424,8 +430,14 @@ function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium">{group.protocol}</div>
         </div>
-        {/* 右:协议净小计 + 24h 聚合增量。整协议一行都算不出 → `—`(不是留白:协议行本来就该有这个数)。 */}
-        <ValueDelta value={subtotal} delta={change?.amount ?? null} pct={change?.pct} />
+        {/* 右:协议净小计 + 24h 聚合增量。整协议一行都算不出 → `—`(不是留白:协议行本来就该有这个数)。
+            还在取 → 小骨架,不跟破折号混。 */}
+        <ValueDelta
+          value={subtotal}
+          delta={change?.amount ?? null}
+          pct={change?.pct}
+          loading={gainPending}
+        />
       </div>
       <CompositionBar segs={segs} label={group.protocol} />
     </div>
@@ -437,9 +449,12 @@ function DefiProtocolRowContent({ group }: { group: DefiGroup }) {
 export function DefiPositions({
   groups,
   hideHeader,
+  gainPending = false,
 }: {
   groups: DefiGroup[];
   hideHeader?: boolean;
+  /** 24h 盈亏还在取 —— 市值照常,增量位走小骨架。账户抽屉不传。 */
+  gainPending?: boolean;
 }) {
   const t = useTranslations("Overview");
   return (
@@ -452,7 +467,7 @@ export function DefiPositions({
             key={g.protocol}
             className="group rounded-xl px-3 py-1.5 has-[[data-state=open]]:z-20"
           >
-            <DefiProtocolRowContent group={g} />
+            <DefiProtocolRowContent group={g} gainPending={gainPending} />
           </div>
         ))}
       </SharedLayoutBg>

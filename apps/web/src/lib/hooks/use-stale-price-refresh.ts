@@ -11,11 +11,12 @@ import { refreshStalePrices } from "../server/prices";
 // mutation 的三样好处在这儿一样都用不上 —— 没有用户点的按钮所以 `isPending` 没地方显示;
 // 失败本来就该静默,`onError` 接过去也只能空着;单飞由 `fired` ref 表达,比 mutation 状态更直白。
 // 这不是「还没轮到它」,是它本来就不是一次用户发起的写。
-export function useStalePriceRefresh(pricesStale: boolean | undefined): void {
+export function useStalePriceRefresh(pricesStale: boolean | undefined, ready = true): void {
   const queryClient = useQueryClient();
   const fired = useRef(false);
   useEffect(() => {
-    if (!pricesStale || fired.current) return;
+    // 总览和盈亏都 settle 后再踢(#488 票 5):夹在两次读中间刷价,第二次读会拿到半新半旧。
+    if (!ready || !pricesStale || fired.current) return;
     fired.current = true;
     refreshStalePrices()
       .then(({ refreshed }) => {
@@ -24,5 +25,5 @@ export function useStalePriceRefresh(pricesStale: boolean | undefined): void {
       .catch(() => {
         // 静默:限流/网络失败不打扰,展示继续用旧价
       });
-  }, [pricesStale, queryClient]);
+  }, [pricesStale, ready, queryClient]);
 }

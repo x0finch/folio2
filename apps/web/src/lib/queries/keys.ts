@@ -48,6 +48,13 @@ export const portfolioKeys = {
     [...portfolioKeys.all, "overview", portfolioId, pin ?? null] as const,
   /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
   history: (portfolioId: string) => [...portfolioKeys.all, "history", portfolioId] as const,
+  /**
+   * 24h 盈亏(#488 票 5)。**跟总览同一套 pin 收窄**,所以 pin 进 key ——
+   * 不进就会自定义 Tab 跟默认视图共用一份盈亏,切过去看到的是上一份。
+   * 落在组合域前缀下:同步 / 刷价 / 切组合已经刷 `portfolioKeys.all`,不用另开一条事件。
+   */
+  gain24h: (portfolioId: string, pin?: PinScopeKey) =>
+    [...portfolioKeys.all, "gain24h", portfolioId, pin ?? null] as const,
 };
 
 export const accountKeys = {

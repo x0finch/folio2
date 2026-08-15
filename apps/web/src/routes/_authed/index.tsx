@@ -33,6 +33,7 @@ import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-pic
 import { TokenHoldings } from "../../components/token-holdings";
 import { mergeDefiGroups } from "../../lib/account-view";
 import { accountsInView } from "../../lib/accounts-in-view";
+import { attachDefiGains, attachHoldingGains } from "../../lib/attach-gains";
 import { connectorLabelFallback } from "../../lib/connector-label";
 import {
   DEFAULT_TAB,
@@ -51,6 +52,7 @@ import {
   type HomeTabStrip,
   homeTabStripQuery,
   type PortfolioOverview,
+  portfolioGain24hQuery,
   portfolioHistoryQuery,
   portfolioListQuery,
   portfolioMembershipsQuery,
@@ -106,6 +108,7 @@ export const Route = createFileRoute("/_authed/")({
     const { defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
     queryClient.ensureQueryData(homeTabStripQuery(defaultId));
     queryClient.ensureQueryData(portfolioOverviewQuery(defaultId));
+    queryClient.ensureQueryData(portfolioGain24hQuery(defaultId));
     queryClient.ensureQueryData(portfolioHistoryQuery(defaultId));
   },
   component: Overview,
@@ -179,14 +182,19 @@ function HeroIsland() {
   const { data } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
   // 曲线非挂起:没到不拖住 hero 的数字,区域走既有「还在取数」态。
   const historyQuery = useQuery(portfolioHistoryQuery(selectedId));
-  useStalePriceRefresh(data.pricesStale);
+  // 盈亏非挂起:总净值先亮,药丸 / best-worst 走小骨架。
+  const gainQuery = useQuery(portfolioGain24hQuery(selectedId));
+  useStalePriceRefresh(data.pricesStale, !gainQuery.isPending);
+  const holdings = attachHoldingGains(data.holdings, gainQuery.data, gainQuery.isError);
   return (
     <PortfolioHero
       series={historyQuery.data?.series ?? []}
       loading={historyQuery.isPending}
       totalUsd={data.totalUsd}
-      gain24h={data.gain24h ?? null}
-      holdings={data.holdings}
+      gain24h={gainQuery.isError ? null : (gainQuery.data?.portfolio ?? null)}
+      gainPending={gainQuery.isPending}
+      gainFailed={gainQuery.isError}
+      holdings={holdings}
     />
   );
 }
@@ -413,6 +421,7 @@ function HoldingsIsland() {
   const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
   const { shownActive } = useHomeTabSelection(strip.pins);
   const { data: portfolioData } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
+  const gainQuery = useQuery(portfolioGain24hQuery(selectedId));
   if (!strip.hasAccounts) return null;
 
   const activePin = strip.pins.find((p) => p.id === shownActive) ?? null;
@@ -427,8 +436,8 @@ function HoldingsIsland() {
     : kindTabs.includes(shownActive as KindTab)
       ? (shownActive as KindTab)
       : "tokens";
-  const { holdings } = portfolioData;
-  const kind = derive(portfolioData.sections);
+  const holdings = attachHoldingGains(portfolioData.holdings, gainQuery.data, gainQuery.isError);
+  const kind = derive(attachDefiGains(portfolioData.sections, gainQuery.data, gainQuery.isError));
 
   return isPinView && pinScope ? (
     <QueryBoundary
@@ -444,11 +453,11 @@ function HoldingsIsland() {
   ) : activeKind === "perps" ? (
     <PerpPositionsList items={kind.perpItems} />
   ) : activeKind === "defi" ? (
-    <DefiPositions groups={kind.defiGroups} hideHeader />
+    <DefiPositions groups={kind.defiGroups} hideHeader gainPending={gainQuery.isPending} />
   ) : holdings.length === 0 ? (
     <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>
   ) : (
-    <TokenHoldings holdings={holdings} />
+    <TokenHoldings holdings={holdings} gainPending={gainQuery.isPending} />
   );
 }
 
@@ -467,7 +476,9 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
   const t = useTranslations("Overview");
   const tct = useTranslations("CustomTabs");
   const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId, pin));
-  const parts = derive(data.sections);
+  const gainQuery = useQuery(portfolioGain24hQuery(portfolioId, pin));
+  const holdings = attachHoldingGains(data.holdings, gainQuery.data, gainQuery.isError);
+  const parts = derive(attachDefiGains(data.sections, gainQuery.data, gainQuery.isError));
 
   if (data.holdings.length === 0 && parts.perpItems.length === 0 && parts.defiGroups.length === 0) {
     return <p className="py-12 text-center text-muted-foreground text-sm">{tct("empty")}</p>;
@@ -480,7 +491,7 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
           title: t("tokensTab"),
           subtotal: data.holdingsSubtotal,
           count: data.holdings.length,
-          content: <TokenHoldings holdings={data.holdings} />,
+          content: <TokenHoldings holdings={holdings} gainPending={gainQuery.isPending} />,
         },
         {
           key: "perps",
@@ -494,7 +505,9 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
           title: t("defiTab"),
           subtotal: data.defiSubtotal,
           count: parts.defiGroups.length,
-          content: <DefiPositions groups={parts.defiGroups} hideHeader />,
+          content: (
+            <DefiPositions groups={parts.defiGroups} hideHeader gainPending={gainQuery.isPending} />
+          ),
         },
       ]}
     />

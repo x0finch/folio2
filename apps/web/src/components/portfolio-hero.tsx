@@ -7,6 +7,7 @@ import { downsampleSeries, type HistoryPoint } from "../lib/history";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { signedUsd } from "../lib/signed-usd";
 import { GainExplainer } from "./gain-explainer";
+import { GainSkeleton } from "./skeletons";
 import { Stat } from "./stat";
 import { TrendPanel } from "./trend-panel";
 
@@ -24,16 +25,22 @@ export function PortfolioHero({
   gain24h,
   holdings,
   loading = false,
+  gainPending = false,
+  gainFailed = false,
   contentClassName,
 }: {
   series: HistoryPoint[];
   totalUsd: number;
-  // 组合层 24h 盈亏(ADR 0040),由 server 算好 —— **不在这里从曲线上量**。
+  // 组合层 24h 盈亏(ADR 0040),由独立读取算好 —— **不在这里从曲线上量**。
   // 曲线画的是净值(含充提),这个数剔除了充提,两者本来就不该是同一个;`null` = 算不出。
   gain24h: Gain | null;
   holdings: readonly HoldingLike[];
   /** 净值曲线还在取 —— 数字照常渲染,曲线走 TrendPanel 的「还在取数」态。 */
   loading?: boolean;
+  /** 24h 盈亏还在取 —— 药丸 / best-worst 走小骨架,不跟「算不出」的破折号混。 */
+  gainPending?: boolean;
+  /** 盈亏读取失败 —— 破折号旁边一处提示。行内不再各说一遍。 */
+  gainFailed?: boolean;
   // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
   contentClassName?: string;
 }) {
@@ -117,8 +124,13 @@ export function PortfolioHero({
             )}
           </div>
           {/* 算不出(缺 24 小时前的基准)→ `—`,不是留白也不是 0:留白读作「还没加载出来」,
-              0 是在断言「今天没涨没跌」。与全站三态口径一致(见 lib/delta-display)。 */}
-          {gain24h == null ? (
+              0 是在断言「今天没涨没跌」。与全站三态口径一致(见 lib/delta-display)。
+              还在取 → 小骨架,绝不先闪破折号。失败 → 破折号 + 一处提示。 */}
+          {gainPending ? (
+            <span className={pillClass}>
+              <GainSkeleton />
+            </span>
+          ) : gain24h == null ? (
             <span className={pillClass}>{NO_VALUE}</span>
           ) : (
             // 摊开算式(#445):金额与百分比来自两套计算,你动过仓的那天它们除不通 —— 与其让人
@@ -132,6 +144,7 @@ export function PortfolioHero({
             </GainExplainer>
           )}
         </div>
+        {gainFailed && <p className="mt-1 text-muted-foreground text-xs">{t("gainLoadFailed")}</p>}
 
         <div className="mt-6 flex flex-wrap gap-8">
           {/* 「今天赚 / 亏最多的那个仓」—— 按盈亏**金额**取,不按涨跌幅(ADR 0040)。以前只看涨跌幅、
@@ -139,17 +152,25 @@ export function PortfolioHero({
           <Stat
             label={t("bestToday")}
             value={
-              metrics.best
-                ? `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
-                : NO_VALUE
+              gainPending ? (
+                <GainSkeleton />
+              ) : metrics.best ? (
+                `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
+              ) : (
+                NO_VALUE
+              )
             }
           />
           <Stat
             label={t("worstToday")}
             value={
-              metrics.worst
-                ? `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`
-                : NO_VALUE
+              gainPending ? (
+                <GainSkeleton />
+              ) : metrics.worst ? (
+                `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`
+              ) : (
+                NO_VALUE
+              )
             }
           />
           <Stat

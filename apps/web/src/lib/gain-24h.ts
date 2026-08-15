@@ -20,6 +20,11 @@ export const GAIN_WINDOW_MS = 24 * 60 * 60 * 1000;
 // ±2 小时:同步提到每小时之后(#446)这已经很宽;更松就会拿半天前的数冒充 24 小时。
 export const GAIN_BASIS_TOLERANCE_MS = 2 * 60 * 60 * 1000;
 
+// DeFi 协议盈亏在载荷里的键:账户 × 协议。服务端下发、客户端拼回同一条,两边必须同形。
+export function defiGainKey(accountId: string, protocol: string): string {
+  return `${accountId}|${protocol}`;
+}
+
 // 一条持仓线在某时刻的观测。`value` 是那一刻的冻结市值,`amount` 是数量 —— 单价由两者相除得出,
 // 所以不需要单独喂价。
 export interface GainPoint {

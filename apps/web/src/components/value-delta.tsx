@@ -2,6 +2,7 @@ import { cn } from "@folio/ui";
 import { deltaTone, NO_VALUE } from "../lib/delta-display";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { signedUsd } from "../lib/signed-usd";
+import { GainSkeleton } from "./skeletons";
 
 // 全站统一的「价值 + 单符号增量」块(H5 #120):上市值,下 `{±}$Δ P%` 单前置符号、
 // 同色 --pos/--neg。代币行(24h)/ 永续仓位(uPnL)/ DeFi 协议行(24h 聚合)/ 账户行 / 账户抽屉头共用 ——
@@ -17,11 +18,14 @@ export function ValueDelta({
   delta,
   pct,
   align = "right",
+  loading = false,
 }: {
   value: number;
   delta?: number | null;
   pct?: number | null;
   align?: "left" | "right";
+  /** 盈亏还在取 —— 市值照常,增量位走小骨架,不跟「算不出」的破折号混。 */
+  loading?: boolean;
 }) {
   const usd = useDisplayValue();
   return (
@@ -29,17 +33,23 @@ export function ValueDelta({
     // (长按不冒蓝色高亮),这里把真正该复制的那两行单独放回来 —— 全站还没有任何复制按钮。
     <div className={cn("select-text", align === "right" ? "shrink-0 text-right" : "text-left")}>
       <div className={cn("font-medium tabular-nums", value < 0 && "text-neg")}>{usd(value)}</div>
-      {delta !== undefined && (
-        <div className={cn("text-xs tabular-nums", deltaTone(delta))}>
-          {delta === null ? (
-            NO_VALUE
-          ) : (
-            <>
-              {signedUsd(usd, delta)}
-              {pct != null && ` ${Math.abs(pct).toFixed(2)}%`}
-            </>
-          )}
+      {loading ? (
+        <div className={cn("mt-1 flex", align === "right" ? "justify-end" : "justify-start")}>
+          <GainSkeleton />
         </div>
+      ) : (
+        delta !== undefined && (
+          <div className={cn("text-xs tabular-nums", deltaTone(delta))}>
+            {delta === null ? (
+              NO_VALUE
+            ) : (
+              <>
+                {signedUsd(usd, delta)}
+                {pct != null && ` ${Math.abs(pct).toFixed(2)}%`}
+              </>
+            )}
+          </div>
+        )
       )}
     </div>
   );

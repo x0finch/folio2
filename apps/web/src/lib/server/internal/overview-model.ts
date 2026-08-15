@@ -13,6 +13,7 @@ import { isFungible, viewKind } from "../../balance-kind";
 import {
   buildGainLines,
   computeGain24h,
+  defiGainKey,
   type Gain,
   type GainCurrentRow,
   type GainHistoryRow,
@@ -41,7 +42,7 @@ export interface OverviewDeps {
   // 24h 盈亏的原料(ADR 0040):窗口内的余额历史,由调用方按
   // `now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS` 取好传进来。**读 D1 不在这里** —— 这个模块
   // 是纯的(依赖注入、可脱离 server fn 单测),多挂一条 store 依赖会把它拽回 Effect 环境里去。
-  // 缺省 → 各行 `gain24h` 恒 null(界面渲染 `—`),既有测试无需改。
+  // 缺省 → 不算盈亏(字段缺席)。首页总览走这条;独立读取才传入。测试传入则仍走原路径。
   gainHistory?: readonly GainHistoryRow[];
   // 「当下」那一刻。测试注入固定值;生产传 `Date.now()`。分段的末点与容差判定都按它算。
   now?: number;
@@ -70,7 +71,8 @@ export interface OverviewView {
   totalUsd: number;
   // 组合层 24h 盈亏(ADR 0040)。金额恒等于各 holding 金额之和;百分比是**统一时间轴上的连乘**,
   // 不是各行百分比的任何一种平均 —— 收益率加不起来。null = 一条线都算不出。
-  gain24h: Gain | null;
+  // **可选**:首页总览不再算它(#488 票 5),改走独立读取;测试仍可传入 gainHistory 走这条。
+  gain24h?: Gain | null;
   holdingsSubtotal: number;
   defiSubtotal: number;
   pricesStale: boolean;
@@ -149,25 +151,29 @@ export const buildOverview = (
     }));
     const holdings = buildCanonicalHoldings(aggInputs);
 
-    // 24h 盈亏(ADR 0040)。**当下点用现推后的 value**(`aggInputs` 里那个,即首屏显示的市值)——
-    // 不用最新快照的冻结值:一天只同步一次时,最后一张快照就是今天零点那张,拿它当末点等于说
-    // 「今天一分钱没动」。同一个 `computeGain24h` 既算单行也算组合(#447 第 4 片),所以
-    // 「各行相加 = 首页那个数」是结构上成立的,不靠两边各算一遍碰对。
-    const currentRows: GainCurrentRow[] = aggInputs.map((r) => ({
-      accountId: r.account.id,
-      tokenId: r.tokenId ?? null,
-      amount: r.amount,
-      value: r.value,
-    }));
-    const gainLines = buildGainLines(gainHistory ?? [], currentRows, now);
-    for (const h of holdings) {
-      // holding.key ≡ aggregate.groupKey ≡ token_id(无 token_id 的旧行各自成行,查不到线 → null)。
-      h.gain24h = computeGain24h(gainLines.get(h.key) ?? [], now);
+    const withGain = gainHistory != null;
+    let portfolioGain: Gain | null | undefined;
+    if (withGain) {
+      // 24h 盈亏(ADR 0040)。**当下点用现推后的 value**(`aggInputs` 里那个,即首屏显示的市值)——
+      // 不用最新快照的冻结值:一天只同步一次时,最后一张快照就是今天零点那张,拿它当末点等于说
+      // 「今天一分钱没动」。同一个 `computeGain24h` 既算单行也算组合(#447 第 4 片),所以
+      // 「各行相加 = 首页那个数」是结构上成立的,不靠两边各算一遍碰对。
+      const currentRows: GainCurrentRow[] = aggInputs.map((r) => ({
+        accountId: r.account.id,
+        tokenId: r.tokenId ?? null,
+        amount: r.amount,
+        value: r.value,
+      }));
+      const gainLines = buildGainLines(gainHistory, currentRows, now);
+      for (const h of holdings) {
+        // holding.key ≡ aggregate.groupKey ≡ token_id(无 token_id 的旧行各自成行,查不到线 → null)。
+        h.gain24h = computeGain24h(gainLines.get(h.key) ?? [], now);
+      }
+      // 组合层:**同一个函数、喂全部线**。不是把各行的结果再加一遍 —— 金额那样确实等价,但百分比
+      // 不行(收益率加不起来,得在统一时间轴上连乘)。一个函数两用,「各行相加 = 首页那个数」于是
+      // 是结构上成立的,不靠两边碰对。
+      portfolioGain = computeGain24h([...gainLines.values()].flat(), now);
     }
-    // 组合层:**同一个函数、喂全部线**。不是把各行的结果再加一遍 —— 金额那样确实等价,但百分比
-    // 不行(收益率加不起来,得在统一时间轴上连乘)。一个函数两用,「各行相加 = 首页那个数」于是
-    // 是结构上成立的,不靠两边碰对。
-    const portfolioGain = computeGain24h([...gainLines.values()].flat(), now);
 
     // 读路径装饰:每个 platform key 都给一份展示(命中真名+logo,否则兜底名),cache-only 零网络。
     // 场馆键(manual/exchange:/perp:)走连接器自带 name+logo,不进 platforms.resolve;只把链键送去查(#52)。
@@ -211,46 +217,6 @@ export const buildOverview = (
         ...(defiChange.has(b.id) ? { change24h: defiChange.get(b.id) } : {}),
       }));
 
-    // —— DeFi 协议行的 24h 盈亏(ADR 0040 的已知妥协)——
-    //
-    // 这类行没有「几个币」可依,只有一个总价值:两次照片之间价值变了,分不清是市场涨的还是你自己
-    // 往里加了钱。所以把每个 (账户 × 协议) 当成**一条数量恒为 1 的线**喂进去 —— 算法于是自动退化
-    // 成两张照片的价值相减,不需要第二套逻辑。代价写在明处:你动仓那天这个数不准。
-    const defiHistory = (gainHistory ?? []).filter((r) => r.kind === "defi");
-    const defiKey = (accountId: string, protocol: string) => `${accountId}|${protocol}`;
-    // 先把腿聚合掉:同一 (账户, 协议, 时刻) 只留一行、数量恒 1、价值取净小计。
-    const defiSlots = new Map<string, { row: GainHistoryRow; gross: number }>();
-    for (const r of defiHistory) {
-      const protocol = parseDefiMeta(r.metaJson ?? null).protocol ?? DEFI_FALLBACK_PROTOCOL;
-      const k = `${defiKey(r.accountId, protocol)}|${r.takenAt}`;
-      const slot = defiSlots.get(k);
-      if (slot) {
-        slot.row.usdValue += r.usdValue;
-        slot.gross += Math.abs(r.usdValue);
-      } else {
-        defiSlots.set(k, {
-          row: {
-            accountId: r.accountId,
-            takenAt: r.takenAt,
-            tokenId: protocol, // 分组键的位置放协议名(见 buildGainLines 的 groupOf 注释)
-            amount: 1,
-            usdValue: r.usdValue,
-          },
-          gross: Math.abs(r.usdValue),
-        });
-      }
-    }
-    // 百分比的分母:该协议在**最早那个观测时刻**的总敞口(各腿取绝对值再累加)。
-    // **不能用净值**(ADR 0040 明写):存 100 万、借 99 万的对冲仓净值只剩 1 万,拿它当分母会算出
-    // 荒唐的百分比。这条约束早于本次改动(旧的 `aggregateDayChange` 里那个 grossPrev 就是干这个的),
-    // 删旧函数时最容易连着一起丢掉。
-    const defiGross = new Map<string, { t: number; gross: number }>();
-    for (const { row, gross } of defiSlots.values()) {
-      const k = defiKey(row.accountId, row.tokenId as string);
-      const prev = defiGross.get(k);
-      if (!prev || row.takenAt < prev.t) defiGross.set(k, { t: row.takenAt, gross });
-    }
-
     let defiSubtotal = 0;
     const sections = accounts
       .map((account) => {
@@ -282,38 +248,68 @@ export const buildOverview = (
           (s.perp != null && (s.perp.positions.length > 0 || s.perp.equity != null)),
       );
 
-    // 分组结束之后才知道每个账户有哪些协议、当下小计多少 —— 所以 DeFi 的盈亏在这里收尾。
-    const defiCurrent: GainCurrentRow[] = sections.flatMap((s) =>
-      s.defi.map((g) => ({
-        accountId: s.account.id,
-        tokenId: g.protocol,
-        amount: 1,
-        value: g.rows.reduce((sum, r) => sum + r.usdValue, 0),
-      })),
-    );
-    const defiLines = buildGainLines(
-      [...defiSlots.values()].map((x) => x.row),
-      defiCurrent,
-      now,
-      (r) => defiKey(r.accountId, r.tokenId),
-    );
-    for (const s of sections) {
-      for (const g of s.defi) {
-        const k = defiKey(s.account.id, g.protocol);
-        const gain = computeGain24h(defiLines.get(k) ?? [], now);
-        const gross = defiGross.get(k)?.gross ?? 0;
-        // **金额用分段算,百分比换成总敞口分母** —— 见上面 defiGross 的注释。连乘对这类行本来
-        // 也没有意义:它没有「数量固定的段」这回事,整条线就是两张照片相减。
-        g.gain24h =
-          gain == null
-            ? null
-            : {
-                amount: gain.amount,
-                pct: gross > 0 ? (gain.amount / gross) * 100 : null,
-                // 分母**带着走**:总览的 DeFi tab 会跨账户合并协议组,那时要用 Σ金额 ÷ Σ总敞口
-                // 重算百分比。从 pct 反推分母在 pct 为 0 时推不出来,所以只能原样带过去。
-                grossBasis: gross,
-              };
+    if (withGain) {
+      // —— DeFi 协议行的 24h 盈亏(ADR 0040 的已知妥协)——
+      //
+      // 这类行没有「几个币」可依,只有一个总价值:两次照片之间价值变了,分不清是市场涨的还是你自己
+      // 往里加了钱。所以把每个 (账户 × 协议) 当成**一条数量恒为 1 的线**喂进去 —— 算法于是自动退化
+      // 成两张照片的价值相减,不需要第二套逻辑。代价写在明处:你动仓那天这个数不准。
+      const defiHistory = gainHistory.filter((r) => r.kind === "defi");
+      const defiSlots = new Map<string, { row: GainHistoryRow; gross: number }>();
+      for (const r of defiHistory) {
+        const protocol = parseDefiMeta(r.metaJson ?? null).protocol ?? DEFI_FALLBACK_PROTOCOL;
+        const k = `${defiGainKey(r.accountId, protocol)}|${r.takenAt}`;
+        const slot = defiSlots.get(k);
+        if (slot) {
+          slot.row.usdValue += r.usdValue;
+          slot.gross += Math.abs(r.usdValue);
+        } else {
+          defiSlots.set(k, {
+            row: {
+              accountId: r.accountId,
+              takenAt: r.takenAt,
+              tokenId: protocol,
+              amount: 1,
+              usdValue: r.usdValue,
+            },
+            gross: Math.abs(r.usdValue),
+          });
+        }
+      }
+      const defiGross = new Map<string, { t: number; gross: number }>();
+      for (const { row, gross } of defiSlots.values()) {
+        const k = defiGainKey(row.accountId, row.tokenId as string);
+        const prev = defiGross.get(k);
+        if (!prev || row.takenAt < prev.t) defiGross.set(k, { t: row.takenAt, gross });
+      }
+      const defiCurrent: GainCurrentRow[] = sections.flatMap((s) =>
+        s.defi.map((g) => ({
+          accountId: s.account.id,
+          tokenId: g.protocol,
+          amount: 1,
+          value: g.rows.reduce((sum, r) => sum + r.usdValue, 0),
+        })),
+      );
+      const defiLines = buildGainLines(
+        [...defiSlots.values()].map((x) => x.row),
+        defiCurrent,
+        now,
+        (r) => defiGainKey(r.accountId, r.tokenId),
+      );
+      for (const s of sections) {
+        for (const g of s.defi) {
+          const k = defiGainKey(s.account.id, g.protocol);
+          const gain = computeGain24h(defiLines.get(k) ?? [], now);
+          const gross = defiGross.get(k)?.gross ?? 0;
+          g.gain24h =
+            gain == null
+              ? null
+              : {
+                  amount: gain.amount,
+                  pct: gross > 0 ? (gain.amount / gross) * 100 : null,
+                  grossBasis: gross,
+                };
+        }
       }
     }
 
@@ -332,7 +328,7 @@ export const buildOverview = (
       sections,
       accountTotals,
       totalUsd,
-      gain24h: portfolioGain,
+      ...(withGain ? { gain24h: portfolioGain } : {}),
       holdingsSubtotal,
       defiSubtotal,
       pricesStale,
