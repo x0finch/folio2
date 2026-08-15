@@ -27,6 +27,12 @@ describe("账户页 loader 不再等待慢查询", () => {
     expect(src).not.toMatch(/await queryClient\.ensureQueryData\(accountTagLinksQuery/);
   });
 
+  it("发出 24h 盈亏,但不 await", () => {
+    const src = stripComments(readFileSync(SRC, "utf8"));
+    expect(src).toContain("accountGain24hQuery(");
+    expect(src).not.toMatch(/await queryClient\.ensureQueryData\(accountGain24hQuery/);
+  });
+
   it("路由没有 pendingComponent,冷启动骨架是页上那套,不是另一张整页骨架", () => {
     const src = stripComments(readFileSync(SRC, "utf8"));
     expect(src).not.toContain("pendingComponent");

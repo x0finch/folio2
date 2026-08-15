@@ -65,6 +65,11 @@ export const accountKeys = {
   /** 活跃账户的市值 / 上次同步 / 持仓明细。 */
   holdings: () => [...accountKeys.all, "holdings"] as const,
   /**
+   * 24h 盈亏(#493 票 3)。落在账户域前缀下:同步 / 刷价 / 账户写已经刷 `accountKeys.all`,
+   * 不用另开一条会漏刷的路。
+   */
+  gain24h: () => [...accountKeys.all, "gain24h"] as const,
+  /**
    * 单账户价值历史。**key 里是窗口档位(`"30d"`)而不是算出来的起点时间戳** ——
    * 起点由 `Date.now()` 现算,每次渲染都是新数,进了 key 就等于每帧换一个缓存条目、永远拉不停。
    */

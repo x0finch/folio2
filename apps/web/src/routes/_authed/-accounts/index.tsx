@@ -13,7 +13,11 @@ import { accountIdsInView } from "../../../lib/accounts-in-view";
 import { usePortfolio } from "../../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../../lib/hooks/use-stale-price-refresh";
 import { isManual } from "../../../lib/manual-connector";
-import { accountHoldingsQuery, accountListQuery } from "../../../lib/queries/accounts";
+import {
+  accountGain24hQuery,
+  accountHoldingsQuery,
+  accountListQuery,
+} from "../../../lib/queries/accounts";
 import { accountKeys, portfolioKeys } from "../../../lib/queries/keys";
 import { portfolioMembershipsQuery } from "../../../lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "../../../lib/queries/tags";
@@ -21,6 +25,7 @@ import { HeaderSync } from "../-home/header-sync";
 import { GainSkeleton, ValueDelta } from "../-home/holdings/value-delta";
 import { AccountDetailSheet, type AccountRow } from "./account-detail-sheet";
 import { AddAccountModal, type CompleteTarget } from "./add-account-modal";
+import { attachAccountGains } from "./attach-gains";
 import { buildAccountRows } from "./rows";
 import { accountShare, activeAccountsTotal, shareLabel } from "./share";
 import { sortActiveAccounts } from "./sort";
@@ -97,6 +102,7 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
   const { data: accounts } = useSuspenseQuery(accountListQuery());
   const { data: memberships } = useSuspenseQuery(portfolioMembershipsQuery());
   const holdingsQuery = useQuery(accountHoldingsQuery());
+  const gainQuery = useQuery(accountGain24hQuery());
   const { data: allTags = [] } = useQuery(tagListQuery());
   const { data: tagLinks = [] } = useQuery(accountTagLinksQuery());
   const holdings = holdingsQuery.data;
@@ -105,7 +111,7 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
     [accounts, holdings, memberships, allTags, tagLinks],
   );
   const { selectedId: selectedPortfolioId, defaultId } = usePortfolio();
-  useStalePriceRefresh(holdings?.pricesStale);
+  useStalePriceRefresh(holdings?.pricesStale, !gainQuery.isPending);
 
   // 账户页 scope 到选中 Portfolio(ADR 0033):只显归属选中的账户(含其归档成员)。归属过滤在客户端
   // (归档无关的成员集),切 Portfolio 即时重筛、无需重拉。选择器即作用域,账户页不设单独 tab。
@@ -115,7 +121,15 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
     selectedPortfolioId,
     defaultId,
   );
-  const rows = allRows.filter((r) => memberIds.has(r.id));
+  const rows = useMemo(
+    () =>
+      attachAccountGains(
+        allRows.filter((r) => memberIds.has(r.id)),
+        gainQuery.data,
+        gainQuery.isError,
+      ),
+    [allRows, memberIds, gainQuery.data, gainQuery.isError],
+  );
 
   const activeUnsorted = rows.filter((r) => r.archivedAt == null);
   // 金额没到时别按假 0 排 —— 否则数字一到整表重排,看着像名单自己在跳。
@@ -142,7 +156,12 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
         <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
           {active.map((r) => (
             <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
-              <AccountRowContent row={r} total={total} onComplete={() => onComplete(r)} />
+              <AccountRowContent
+                row={r}
+                total={total}
+                gainPending={gainQuery.isPending}
+                onComplete={() => onComplete(r)}
+              />
             </button>
           ))}
         </SharedLayoutBg>
@@ -156,7 +175,7 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
           <SharedLayoutBg className="mt-2" inset={0} pillClassName="rounded-xl bg-muted">
             {archived.map((r) => (
               <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
-                <AccountRowContent row={r} total={total} muted />
+                <AccountRowContent row={r} total={total} gainPending={gainQuery.isPending} muted />
               </button>
             ))}
           </SharedLayoutBg>
@@ -168,6 +187,7 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
         total={total}
         allTags={allTags}
         tagLinks={tagLinks}
+        gainPending={gainQuery.isPending}
         open={selected != null}
         onOpenChange={(o) => {
           if (!o) setAccount(undefined);
@@ -254,17 +274,19 @@ function AccountRowContent({
   row,
   total,
   muted,
+  gainPending,
   onComplete,
 }: {
   row: AccountRow;
   total: number;
   muted?: boolean;
+  gainPending: boolean;
   onComplete?: () => void;
 }) {
   const status = accountSyncStatus(row, Date.now());
   const archived = row.archivedAt != null;
-  const hasDayChange = !(row.needsCredentials || archived) && row.gain24h !== undefined;
-  const dayChange = hasDayChange ? row.gain24h : undefined;
+  const showGain = !(row.needsCredentials || archived);
+  const dayChange = showGain ? row.gain24h : undefined;
   const sharePct = accountShare(row.totalUsd, total) * 100;
   // 缺凭据 / 归档封存日 / manual「实时」名单里已经能确定,立刻写;其余同步时间等持仓到。
   const statusKnown =
@@ -321,8 +343,9 @@ function AccountRowContent({
         ) : (
           <ValueDelta
             value={row.totalUsd}
-            delta={hasDayChange ? (dayChange?.amount ?? null) : undefined}
+            delta={showGain ? (dayChange?.amount ?? null) : undefined}
             pct={dayChange?.pct}
+            loading={showGain && gainPending}
           />
         )}
       </div>

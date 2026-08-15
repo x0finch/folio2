@@ -94,25 +94,3 @@ describe("buildAccountRows", () => {
     );
   });
 });
-
-describe("24h 盈亏要透传到行上(ADR 0040)", () => {
-  // 这一条是浏览器实测抓出来的:合并函数漏了这个字段,于是账户页整列连 `—` 都不显示 ——
-  // 组件那边读到 undefined 就整行省略,看起来像「这个功能压根没做」。
-  // biome-ignore lint/suspicious/noExplicitAny: 测试替身只喂拼装用得到的字段
-  const withGain = (gain24h: unknown) => ({ rows: [{ account: { id: "a1" }, gain24h }] }) as any;
-
-  it("活跃账户:算得出的数原样带上", () => {
-    const rows = build({ holdings: withGain({ amount: 12.5, pct: 1.2 }) });
-    expect(rows[0].gain24h).toEqual({ amount: 12.5, pct: 1.2 });
-  });
-
-  it("算不出的 null 也要带上 —— 界面据此画 `—`,而不是整行省略", () => {
-    const rows = build({ holdings: withGain(null) });
-    expect(rows[0].gain24h).toBeNull();
-  });
-
-  it("归档账户是 undefined —— 不该有这个数,整行省略", () => {
-    const rows = build({ holdings: withGain(undefined) });
-    expect(rows[0].gain24h).toBeUndefined();
-  });
-});

@@ -1,6 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
-import { accountHoldingsQuery, accountListQuery } from "../../lib/queries/accounts";
+import {
+  accountGain24hQuery,
+  accountHoldingsQuery,
+  accountListQuery,
+} from "../../lib/queries/accounts";
 import { connectorCatalogQuery } from "../../lib/queries/connectors";
 import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "../../lib/queries/tags";
@@ -28,6 +32,7 @@ export const Route = createFileRoute("/_authed/accounts")({
     queryClient.ensureQueryData(tagListQuery());
     queryClient.ensureQueryData(accountTagLinksQuery());
     queryClient.ensureQueryData(accountHoldingsQuery());
+    queryClient.ensureQueryData(accountGain24hQuery());
   },
   component: Accounts,
 });

@@ -84,11 +84,23 @@ describe("刷新映射表", () => {
     ]);
   });
 
+  it("sync.round 与 prices.refreshed 盖住账户页的 24h 盈亏", async () => {
+    seed(accountKeys.gain24h());
+    await invalidateFor(queryClient, "sync.round");
+    expect(isInvalidated(accountKeys.gain24h())).toBe(true);
+
+    queryClient = new QueryClient();
+    seed(accountKeys.gain24h());
+    await invalidateFor(queryClient, "prices.refreshed");
+    expect(isInvalidated(accountKeys.gain24h())).toBe(true);
+  });
+
   // 跨域那条:加一个账户不只是账户列表多一行,首页总额 / 走势 / 按代币的聚合全跟着变。
   // 只刷账户域会让总览停在旧数字,而且不报错 —— 所以这条单独钉住。
   it("account.write 同时刷账户域与组合域", async () => {
     seed(accountKeys.list());
     seed(accountKeys.holdings());
+    seed(accountKeys.gain24h());
     seed(accountKeys.manualDetail("a1"));
     seed(portfolioKeys.overview("pf-1"));
 
@@ -98,10 +110,11 @@ describe("刷新映射表", () => {
       [
         accountKeys.list(),
         accountKeys.holdings(),
+        accountKeys.gain24h(),
         accountKeys.manualDetail("a1"),
         portfolioKeys.overview("pf-1"),
       ].map(isInvalidated),
-    ).toEqual([true, true, true, true]);
+    ).toEqual([true, true, true, true, true]);
   });
 
   it("sync.round 也刷账户域(账户行的市值与上次同步跟着变)", async () => {

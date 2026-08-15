@@ -84,6 +84,7 @@ export function AccountDetailSheet({
   total,
   allTags,
   tagLinks,
+  gainPending = false,
   open,
   onOpenChange,
   onComplete,
@@ -92,6 +93,8 @@ export function AccountDetailSheet({
   total: number; // 活跃账户总计 —— 抽屉头占比分母(见 accounts.tsx)
   allTags: Tag[]; // 全部 Tag 定义(打标签弹窗按账户 Portfolio 过滤)
   tagLinks: AccountTagLink[]; // 全部 账户→Tag 关联(算已打 + 每 Tag 账户数)
+  /** 24h 盈亏还在取 —— 抽屉头与现货行走小骨架,跟列表行同一个数。 */
+  gainPending?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onComplete: (account: AccountRow) => void; // 补录:打开加账户 modal 的补录模式(A3)
@@ -105,6 +108,7 @@ export function AccountDetailSheet({
       total={total}
       allTags={allTags}
       tagLinks={tagLinks}
+      gainPending={gainPending}
       onClose={() => onOpenChange(false)}
       onComplete={() => onComplete(account)}
     />
@@ -142,6 +146,7 @@ function DetailBody({
   total,
   allTags,
   tagLinks,
+  gainPending,
   onClose,
   onComplete,
 }: {
@@ -149,6 +154,7 @@ function DetailBody({
   total: number;
   allTags: Tag[];
   tagLinks: AccountTagLink[];
+  gainPending: boolean;
   onClose: () => void;
   onComplete: () => void;
 }) {
@@ -171,7 +177,7 @@ function DetailBody({
   // 这两种是「**不该有**这个数」→ 整块省略;而「该有却**算不出**」是另一回事 → `—`。三态口径见
   // -home/holdings/value-delta,与行内 <ValueDelta> 共用 —— 这里字号不同(大字),故手搓而非复用组件。
   // 数由 server 算好(ADR 0040),与账户行同源 —— 抽屉头和列表行显示同一个数,不再各算各的。
-  const hasDayChange = !(account.needsCredentials || archived) && account.gain24h !== undefined;
+  const hasDayChange = !(account.needsCredentials || archived);
   const dayChange = hasDayChange ? account.gain24h : undefined;
   const sharePct = accountShare(account.totalUsd, total) * 100;
 
@@ -303,7 +309,11 @@ function DetailBody({
                 <>
                   <div className="font-bold text-3xl tabular-nums">{usd(account.totalUsd)}</div>
                   {hasDayChange &&
-                    (dayChange == null ? (
+                    (gainPending ? (
+                      <div className="mt-1">
+                        <GainSkeleton />
+                      </div>
+                    ) : dayChange == null ? (
                       <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>
                         {NO_VALUE}
                       </div>
@@ -475,11 +485,19 @@ function DetailBody({
       {account.valuesReady ? (
         isManual(account.connectorId) ? (
           <div className="mt-6">
-            <ManualTokensPanel accountId={account.id} balances={account.balances} />
+            <ManualTokensPanel
+              accountId={account.id}
+              balances={account.balances}
+              gainPending={gainPending}
+            />
           </div>
         ) : (
           <div className="mt-6">
-            <AccountHoldingsCards balances={account.balances} accountNote={account.note} />
+            <AccountHoldingsCards
+              balances={account.balances}
+              accountNote={account.note}
+              gainPending={gainPending}
+            />
           </div>
         )
       ) : (

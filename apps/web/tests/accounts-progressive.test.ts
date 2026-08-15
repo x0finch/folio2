@@ -57,6 +57,12 @@ describe("回访不闪骨架、金额失败继续骨架", () => {
     expect(page).not.toMatch(/holdingsQuery\.isError[\s\S]{0,80}loadFailed/);
   });
 
+  it("盈亏加载态看 isPending,不看 isFetching —— 缓存命中后台刷新不该再出骨架", () => {
+    const page = stripComments(src("routes/_authed/-accounts/index.tsx"));
+    expect(page).toContain("gainQuery.isPending");
+    expect(page).not.toContain("gainQuery.isFetching");
+  });
+
   it("没有自造 hydration 开关来躲骨架", () => {
     const page = src("routes/_authed/-accounts/index.tsx");
     expect(page).not.toMatch(/useHydrated|use-hydrated|isHydrated/);

@@ -82,9 +82,12 @@ const DETAIL_DATETIME_FMT = { dateStyle: "medium", timeStyle: "medium" } as cons
 export function ManualTokensPanel({
   accountId,
   balances,
+  gainPending = false,
 }: {
   accountId: string;
   balances: OverviewBalance[];
+  /** 24h 盈亏还在取 —— 现货行增量位走小骨架,跟抽屉头同一个数。 */
+  gainPending?: boolean;
 }) {
   const t = useTranslations("Activity");
   const ta = useTranslations("Accounts");
@@ -334,6 +337,7 @@ export function ManualTokensPanel({
             // 收到 undefined,整行静默不渲染增量,看起来像「手记账户没有这个功能」。
             gain24h: bal?.gain24h,
           }}
+          gainPending={gainPending}
         />
       ),
       rightActions,
