@@ -3,6 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "../../../components/query-boundary";
+import { TabTotalSkeleton } from "../../../components/skeletons";
 import { type KindTab, kindTabsOf } from "../../../lib/home-tabs";
 import { useDisplayValue } from "../../../lib/hooks/use-display-value";
 import { usePortfolio } from "../../../lib/hooks/use-portfolio";
@@ -115,8 +116,9 @@ function TabTotal() {
     : "tokens";
 
   return (
-    <span className="shrink-0 text-muted-foreground text-sm tabular-nums">
-      {/* pin 视图:过滤后数据到位才显其总额;未到位显 "—",别显未收窄的全量总额。
+    // min-w-24 与 TabTotalSkeleton 同宽:切 pin 合计从金额变成占位时条子不能变宽,否则裁掉的 tab 会闪出来。
+    <span className="inline-flex min-w-24 shrink-0 justify-end text-muted-foreground text-sm tabular-nums">
+      {/* pin 视图:过滤后数据到位才显其总额;未到位走骨架,别显未收窄的全量总额。
                 数据由子组件自己拉 —— `useSuspenseQuery` 没有条件启用,所以「只在 pin 视图下才要的查询」
                 只能靠「不在 pin 视图时这个组件压根不挂」来表达(ADR 0038)。总额与列表是两个子组件、
                 同一个 queryKey,react-query 自然合成一次请求。 */}
@@ -124,7 +126,7 @@ function TabTotal() {
         <QueryBoundary
           key={activePin.id}
           resetKey={JSON.stringify(portfolioKeys.overview(selectedId, pinScope))}
-          pending="—"
+          pending={<TabTotalSkeleton />}
           failed="—"
         >
           <PinTotal portfolioId={selectedId} pin={pinScope} />
@@ -132,7 +134,7 @@ function TabTotal() {
       ) : (
         <QueryBoundary
           resetKey={JSON.stringify(portfolioKeys.overview(selectedId))}
-          pending="—"
+          pending={<TabTotalSkeleton />}
           failed="—"
         >
           <KindTotal portfolioId={selectedId} kind={activeKind} />

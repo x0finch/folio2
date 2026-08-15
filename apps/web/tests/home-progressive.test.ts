@@ -34,6 +34,16 @@ describe("骨架与真内容同形", () => {
       /function TabStripSkeleton[\s\S]*flex items-center gap-4/,
     );
   });
+
+  it("tab 条合计位有下限宽度,等待走骨架而不是破折号", () => {
+    const strip = src("routes/_authed/-home/tab-strip.tsx");
+    expect(strip).toContain("min-w-24");
+    expect(strip).toContain("<TabTotalSkeleton");
+    expect(strip).not.toContain('pending="—"');
+    expect(src("components/skeletons.tsx")).toMatch(
+      /function TabTotalSkeleton[\s\S]*inline-block h-4 w-24/,
+    );
+  });
 });
 
 describe("盈亏骨架三处复用同一元件", () => {

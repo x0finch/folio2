@@ -38,9 +38,14 @@ export function TabStripSkeleton() {
   return (
     <div className="flex items-center gap-4">
       <Skeleton className="h-8 w-64 rounded-full" />
-      <Skeleton className="h-4 w-24 shrink-0" />
+      <TabTotalSkeleton />
     </div>
   );
+}
+
+/** tab 条右侧合计位。宽度与真条 `min-w-24` 同锁:切 pin 时不能缩,否则条子变宽、裁掉的 tab 闪一下。 */
+export function TabTotalSkeleton() {
+  return <Skeleton className="inline-block h-4 w-24 rounded-full" />;
 }
 
 export function HoldingsSkeleton() {
