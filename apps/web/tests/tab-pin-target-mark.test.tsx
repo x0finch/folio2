@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { PinTargetMark } from "../src/components/pin-target-mark";
+import { PinTargetMark } from "../src/routes/_authed/-home/tab-pin-target-mark";
 
 // #488 票 4:tab 条上的自定义 Tab 标签与今天完全一致 —— 三种目标类型都验过。
 // `#` / `@` 是纯展示前缀;连接器走 logo + 类型名,没有 #/@。

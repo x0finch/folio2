@@ -23,13 +23,13 @@ describe("骨架与真内容同形", () => {
 
   it("持仓行骨架贴合真实行的 padding 与头像尺寸", () => {
     const skel = src("components/skeletons.tsx");
-    expect(src("components/token-holdings.tsx")).toContain("px-3 py-3");
+    expect(src("routes/_authed/-home/token-holdings.tsx")).toContain("px-3 py-3");
     expect(skel).toContain("px-3 py-3");
     expect(skel).toContain("size-8");
   });
 
   it("tab 条骨架与真条同一套横向排布", () => {
-    expect(src("routes/_authed/index.tsx")).toContain("flex items-center gap-4");
+    expect(src("routes/_authed/-home/tab-strip.tsx")).toContain("flex items-center gap-4");
     expect(src("components/skeletons.tsx")).toMatch(
       /function TabStripSkeleton[\s\S]*flex items-center gap-4/,
     );
@@ -52,20 +52,22 @@ describe("盈亏骨架三处复用同一元件", () => {
 
 describe("回访不闪骨架、数字只滚一次", () => {
   it("盈亏加载态看 isPending,不看 isFetching —— 缓存命中后台刷新不该再出骨架", () => {
-    const home = stripComments(src("routes/_authed/index.tsx"));
-    expect(home).toContain("gainQuery.isPending");
-    expect(home).not.toContain("gainQuery.isFetching");
+    const hero = stripComments(src("routes/_authed/-home/hero.tsx"));
+    const holdings = stripComments(src("routes/_authed/-home/holdings.tsx"));
+    expect(hero).toContain("gainQuery.isPending");
+    expect(holdings).toContain("gainQuery.isPending");
+    expect(hero).not.toContain("gainQuery.isFetching");
+    expect(holdings).not.toContain("gainQuery.isFetching");
   });
 
   it("路由没有 pendingComponent,冷启动骨架是岛上那套,不是另一张整页骨架", () => {
     const home = stripComments(src("routes/_authed/index.tsx"));
-    const route = home.slice(home.indexOf("createFileRoute"), home.indexOf("function derive"));
-    expect(route).not.toContain("pendingComponent");
+    expect(home).not.toContain("pendingComponent");
   });
 
   it("没有自造 hydration 开关来躲骨架", () => {
-    const home = src("routes/_authed/index.tsx");
-    expect(home).not.toMatch(/useHydrated|use-hydrated|isHydrated/);
+    const page = src("routes/_authed/-home/index.tsx");
+    expect(page).not.toMatch(/useHydrated|use-hydrated|isHydrated/);
   });
 
   it("净值 ticker 数据一到就滚,不等进视口(避免 hydration 后再从 0 滚一遍)", () => {

@@ -37,6 +37,10 @@ describe("首页 loader 不再等待慢查询", () => {
   it("首页不从总览读 24h 盈亏", () => {
     const src = stripComments(readFileSync(SRC, "utf8"));
     expect(src).not.toMatch(/data\.gain24h/);
+    const hero = stripComments(
+      readFileSync(join(import.meta.dirname, "../src/routes/_authed/-home/hero.tsx"), "utf8"),
+    );
+    expect(hero).not.toMatch(/data\.gain24h/);
   });
 
   it("连接器目录、账户清单、标签清单、裸 pin 清单不进 loader", () => {

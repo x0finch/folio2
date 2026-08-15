@@ -2,10 +2,10 @@ import { SharedLayoutBg } from "@folio/ui";
 import { getRouteApi } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import type { Holding } from "../lib/aggregate";
-import { buildStack } from "../lib/stack-items";
-import { TokenRowContent } from "./token-row";
-import { TokenSheet } from "./token-sheet";
+import { TokenRowContent } from "../../../components/token-row";
+import { TokenSheet } from "../../../components/token-sheet";
+import type { Holding } from "../../../lib/aggregate";
+import { buildStack } from "../../../lib/stack-items";
 
 // 抽屉开着哪个币 = 首页的 `?token=`(ADR 0043)。`getRouteApi` 拿的是**那条 route 的**类型化
 // useSearch/useNavigate,不必 `import { Route }`(会与 index.tsx 循环引用),也不必让页面把值

@@ -17,6 +17,19 @@ import { describe, expect, it } from "vitest";
 // 勾兑:`icon-button-round.test.ts` 是同一种源码扫描形状。
 
 const COMPONENTS = join(import.meta.dirname, "../src/components");
+const HOME = join(import.meta.dirname, "../src/routes/_authed/-home");
+
+function filesRendering(tag: string): { file: string; text: string }[] {
+  const out: { file: string; text: string }[] = [];
+  for (const dir of [COMPONENTS, HOME]) {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".tsx")) continue;
+      const text = stripLineComments(readFileSync(join(dir, name), "utf8"));
+      if (text.includes(`<${tag}`)) out.push({ file: name, text });
+    }
+  }
+  return out;
+}
 
 // 行注释先剥掉 —— 这些文件的注释里也会写 `<TokenRowContent>` 指代那个组件,扫进来就是误报。
 function stripLineComments(text: string): string {
@@ -27,16 +40,6 @@ function stripLineComments(text: string): string {
       return i === -1 ? line : line.slice(0, i);
     })
     .join("\n");
-}
-
-function filesRendering(tag: string): { file: string; text: string }[] {
-  const out: { file: string; text: string }[] = [];
-  for (const name of readdirSync(COMPONENTS)) {
-    if (!name.endsWith(".tsx")) continue;
-    const text = stripLineComments(readFileSync(join(COMPONENTS, name), "utf8"));
-    if (text.includes(`<${tag}`)) out.push({ file: name, text });
-  }
-  return out;
 }
 
 // `<TokenRowContent ... />` 那一段(到匹配的 `/>` 为止,够覆盖 item={{…}} 整块)。

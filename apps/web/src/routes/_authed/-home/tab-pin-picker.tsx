@@ -1,7 +1,7 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
 import { Check } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { PinTargetLabel } from "./pin-target-label";
+import { PinTargetLabel } from "./tab-pin-target-label";
 
 // 自定义 Tab 的添加/改指向选择器(ADR 0034):**裸内容**,面板 chrome 由承载它的 beUI hover Popover 提供
 //(＋按钮 / pin 药丸 hover 弹出)。分三段 —— Tag / Connector / Account。选中即回调 onPick;空显空态。
