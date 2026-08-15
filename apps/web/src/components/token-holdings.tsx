@@ -23,7 +23,7 @@ const MIN_FOLD_COUNT = 10;
 
 // 行内容:统一走 <TokenRowContent>(与账户详情抽屉现货区同组件)。多源(sources > 1)在名称右侧
 // 叠放各来源 logo,一眼看出散在哪几处;数量 = 各源汇总(多链/多源也合计,见 aggregate)。
-function RowContent({ h }: { h: Holding }) {
+function RowContent({ h, gainsPending }: { h: Holding; gainsPending?: boolean }) {
   return (
     <TokenRowContent
       item={{
@@ -36,6 +36,7 @@ function RowContent({ h }: { h: Holding }) {
         // 主页这条路的 holding 恒带这个字段(overview 里逐行赋值,算不出是 null),原样透传。
         gain24h: h.gain24h,
       }}
+      gainsPending={gainsPending}
       // 这个币散在哪些来源(账户×平台各占一格 —— 同一平台的两个账户是两格,见 AvatarStack 的
       // `k` 注释)。经 buildStack 按金额降序(全站叠标同一条规则);**只排不砍**(`dust: 0`):
       // 来源就是「这个币在哪」,一个小额来源也是来源,而且开了 dust 开关看尘埃币时砍完会一格不剩。
@@ -56,7 +57,14 @@ function RowContent({ h }: { h: Holding }) {
 // 故不能包成 <HoldingRow>);onClick 保留,className 会被 cloneElement 合上 "relative"。
 const rowClass = "w-full rounded-xl px-3 py-3 text-left";
 
-export function TokenHoldings({ holdings }: { holdings: Holding[] }) {
+export function TokenHoldings({
+  holdings,
+  gainsPending,
+}: {
+  holdings: Holding[];
+  /** 24h 盈亏那条读还没回来(#488)—— 各行的增量位画骨架。 */
+  gainsPending?: boolean;
+}) {
   const t = useTranslations("Overview");
   const [showDust, setShowDust] = useState(false);
   const { token: selectedKey } = home.useSearch();
@@ -80,7 +88,7 @@ export function TokenHoldings({ holdings }: { holdings: Holding[] }) {
       <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
         {rows.map((h) => (
           <button key={h.key} type="button" onClick={() => select(h.key)} className={rowClass}>
-            <RowContent h={h} />
+            <RowContent h={h} gainsPending={gainsPending} />
           </button>
         ))}
       </SharedLayoutBg>

@@ -22,8 +22,11 @@ export function TokenRowContent({
   item,
   sources,
   aside,
+  gainsPending,
 }: {
   item: TokenRowItem;
+  /** 24h 盈亏那条读还没回来(#488)—— 增量位画骨架,不画 `—`。 */
+  gainsPending?: boolean;
   // 多源(主页跨链/多账户汇总)→ 名称右侧叠放各来源 logo;单账户抽屉不传。
   sources?: { logo?: string; name: string; k: string }[];
   // 行内附加物(如账户抽屉的 balance 级 note 指示器);无则省略。
@@ -50,7 +53,7 @@ export function TokenRowContent({
           </span>
         )}
       </div>
-      <ValueDelta value={item.value} delta={dayValue} pct={dayPct} />
+      <ValueDelta value={item.value} delta={dayValue} pct={dayPct} pending={gainsPending} />
     </div>
   );
 }

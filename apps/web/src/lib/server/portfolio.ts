@@ -17,6 +17,7 @@ import {
   toTabPin,
 } from "../accounts-in-view";
 import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "../gain-24h";
+import { defiGainKey } from "../gain-merge";
 import { buildPortfolioHistory } from "../history";
 import { platformLogoUrl } from "../logo";
 import { isManual } from "../manual-connector";
@@ -54,6 +55,7 @@ const TabPinScope = z
 const PortfolioScopeInput = z
   .object({ portfolioId: z.string().optional(), pin: TabPinScope })
   .default({});
+type TabPinScopeInput = z.infer<typeof TabPinScope>;
 
 // 校验传入的 selectedId 属于该用户,否则退回默认(客户端传入不可信 —— 传别人的 id 只会得到空视图,
 // 不泄露任何数据,但显式回退到默认更符合直觉)。返回选中 id + 默认 Portfolio。
@@ -70,101 +72,161 @@ const resolveScope = (
     return { selectedId, defaultId: defaultPf.id };
   });
 
-// 总览(P2:按代币聚合)。装配逻辑在纯模块 ../overview-model(buildOverview);此处只做
-// 鉴权 + 加载(accounts / 最新快照)+ 注入依赖(tokens / platforms)+ 调用。
+// 一次总览装配 —— **两个 server fn 共用这一步**,只差「读不读 24h 盈亏的原料」。
+//
+// 拆成两条读之后(#488),它们的取数、注入手记、问价、聚合全都一样;抄一份出来只会让两边慢慢
+// 长歪(其中一边改了口径、另一边没改,而屏幕上是同一屏)。差异因此收成一个布尔:
+// `withGains` 决定要不要读账本 / 快照历史那两条 —— 那正是两条读的成本差别所在。
+//
+// **整条链一个 effect,一次装配**(#394 T4)。以前这里切两次 Effect 边界、建两套 store:
+// `injectManualSnapshots` 内部 `runRequest` 一次,末尾 `buildOverview` 又一次。现在读账户、
+// 读快照、读设置、读归属、注入手记、问价走的是同一份 context —— Effect 官方那句
+// 「`run*` 尽量放在程序的边缘」,在 server fn 这条路上边缘就是 handler 本身。
+const loadOverviewView = (
+  data: { portfolioId?: string; pin?: TabPinScopeInput },
+  withGains: boolean,
+) =>
+  Effect.gen(function* () {
+    const accountStore = yield* AccountStore;
+    const portfolioStore = yield* PortfolioStore;
+    const snapshotStore = yield* SnapshotStore;
+    const settingsStore = yield* SettingsStore;
+    const tagStore = yield* TagStore;
+
+    const tTotal = performance.now();
+    const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
+    const scopeMs = performance.now() - tTotal;
+    // 「当下」取一次,整条链共用 —— 分段的末点、容差判定、取历史的下界都按同一刻算,
+    // 各自现取 `Date.now()` 会在毫秒级上错开(测试里更是直接不可复现)。
+    const now = Date.now();
+    const tReads = performance.now();
+    const [allAccounts, snapshots, settings, memberships, gainHistory] = yield* Effect.all(
+      [
+        accountStore.list(),
+        snapshotStore.latest(),
+        settingsStore.get(),
+        portfolioStore.listMemberships(),
+        // 24h 盈亏的原料(ADR 0040):窗口起点还要往前留一个容差,否则基准快照恰好落在
+        // 窗口外时整条线判「算不出」—— 而它明明就在那儿。
+        // **不算盈亏就不读**:这是拆开两条读之后总览省下的那一笔。
+        withGains
+          ? snapshotStore.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS)
+          : Effect.succeed([]),
+      ],
+      { concurrency: 5 },
+    );
+    const readsMs = performance.now() - tReads;
+    // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
+    // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
+    const pin = toTabPin(data.pin);
+    const tagLinks = pin?.kind === "tag" ? yield* tagStore.listAccountLinks() : [];
+    const accounts = accountsMatchingPin(
+      accountsInView(allAccounts, memberships, selectedId, defaultId),
+      pin,
+      tagLinks,
+    );
+    const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+    const tInject = performance.now();
+    // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
+    yield* injectManualSnapshots(accounts, byAccount);
+    const injectMs = performance.now() - tInject;
+    const tFiat = performance.now();
+    // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
+    //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
+    const fiatRefs = yield* manualFiatRefs(accounts);
+    const fiatMs = performance.now() - tFiat;
+    // 盈亏只按视图内的账户算 —— 历史是全量读的(一次查询比按账户分批便宜),这里收窄到
+    // 当前 Portfolio / Tab 的账户,否则一个不在视图里的账户会把它的涨跌算进这一屏。
+    const inView = new Set(accounts.map((a) => a.id));
+    // manual 从不写快照(ADR 0018)→ 它的原料不在上面那次查询里,按账本另算(#447 第 3 片)。
+    // 窗口起点直接产点(账本能算任意时刻),所以这里传的是 `now - GAIN_WINDOW_MS` 本身,
+    // 而不是上面那个带容差的下界 —— 容差是给稀疏快照留的,账本不需要。
+    const tManualGain = performance.now();
+    const manualGain = withGains
+      ? yield* loadManualGainHistory(accounts, now, now - GAIN_WINDOW_MS)
+      : [];
+    const manualGainMs = performance.now() - tManualGain;
+    return yield* buildOverview(accounts, byAccount, {
+      connectorMeta: connectorPlatformMeta,
+      mode: settings.valuationMode,
+      fiatRefs,
+      // 不算盈亏时**一行都不喂**:各行 gain24h 恒 null,由 `getPortfolioGains` 那条读负责。
+      gainHistory: withGains
+        ? [...gainHistory.filter((r) => inView.has(r.accountId)), ...manualGain]
+        : undefined,
+      now,
+      // `totalMs` 少算了收尾那几步(装饰 + 汇总),但那几步是纯内存的,少算的量正是噪声本身。
+      onTimings: ({ enrichMs, gainMs, aggMs, platformMs, sectionsMs, holdings }) =>
+        readLog.info(withGains ? "gains timings" : "overview timings", {
+          totalMs: Math.round(performance.now() - tTotal),
+          scopeMs: Math.round(scopeMs),
+          readsMs: Math.round(readsMs),
+          injectMs: Math.round(injectMs),
+          fiatMs: Math.round(fiatMs),
+          manualGainMs: Math.round(manualGainMs),
+          enrichMs: Math.round(enrichMs),
+          aggMs: Math.round(aggMs),
+          gainMs: Math.round(gainMs),
+          platformMs: Math.round(platformMs),
+          sectionsMs: Math.round(sectionsMs),
+          accounts: accounts.length,
+          holdings,
+          gainRows: gainHistory.length,
+        }),
+    });
+  });
+
+// 总览(P2:按代币聚合)。**不含 24h 盈亏** —— 那部分另走 `getPortfolioGains`(#488),
+// 于是这条读不必碰账本与快照历史,列表与总净值不等它。
 // scope 到「选中 Portfolio」(ADR 0033):活跃 && 归属选中的账户;缺省选中 = 默认。
 export const getPortfolioOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
-  // **整条链一个 effect,一次装配**(#394 T4)。以前这里切两次 Effect 边界、建两套 store:
-  // `injectManualSnapshots` 内部 `runRequest` 一次,末尾 `buildOverview` 又一次。现在读账户、
-  // 读快照、读设置、读归属、注入手记、问价走的是同一份 context —— Effect 官方那句
-  // 「`run*` 尽量放在程序的边缘」,在 server fn 这条路上边缘就是 handler 本身。
   .handler(({ data, context }) =>
     runAtEdge(
       withRequest(
         context.userId,
-        Effect.gen(function* () {
-          const accountStore = yield* AccountStore;
-          const portfolioStore = yield* PortfolioStore;
-          const snapshotStore = yield* SnapshotStore;
-          const settingsStore = yield* SettingsStore;
-          const tagStore = yield* TagStore;
-
-          const tTotal = performance.now();
-          const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
-          const scopeMs = performance.now() - tTotal;
-          // 「当下」取一次,整条链共用 —— 分段的末点、容差判定、取历史的下界都按同一刻算,
-          // 各自现取 `Date.now()` 会在毫秒级上错开(测试里更是直接不可复现)。
-          const now = Date.now();
-          const tReads = performance.now();
-          const [allAccounts, snapshots, settings, memberships, gainHistory] = yield* Effect.all(
-            [
-              accountStore.list(),
-              snapshotStore.latest(),
-              settingsStore.get(),
-              portfolioStore.listMemberships(),
-              // 24h 盈亏的原料(ADR 0040):窗口起点还要往前留一个容差,否则基准快照恰好落在
-              // 窗口外时整条线判「算不出」—— 而它明明就在那儿。
-              snapshotStore.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
-            ],
-            { concurrency: 5 },
-          );
-          const readsMs = performance.now() - tReads;
-          // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
-          // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
-          const pin = toTabPin(data.pin);
-          const tagLinks = pin?.kind === "tag" ? yield* tagStore.listAccountLinks() : [];
-          const accounts = accountsMatchingPin(
-            accountsInView(allAccounts, memberships, selectedId, defaultId),
-            pin,
-            tagLinks,
-          );
-          const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-          const tInject = performance.now();
-          // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
-          yield* injectManualSnapshots(accounts, byAccount);
-          const injectMs = performance.now() - tInject;
-          const tFiat = performance.now();
-          // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
-          //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
-          const fiatRefs = yield* manualFiatRefs(accounts);
-          const fiatMs = performance.now() - tFiat;
-          // 盈亏只按视图内的账户算 —— 历史是全量读的(一次查询比按账户分批便宜),这里收窄到
-          // 当前 Portfolio / Tab 的账户,否则一个不在视图里的账户会把它的涨跌算进这一屏。
-          const inView = new Set(accounts.map((a) => a.id));
-          // manual 从不写快照(ADR 0018)→ 它的原料不在上面那次查询里,按账本另算(#447 第 3 片)。
-          // 窗口起点直接产点(账本能算任意时刻),所以这里传的是 `now - GAIN_WINDOW_MS` 本身,
-          // 而不是上面那个带容差的下界 —— 容差是给稀疏快照留的,账本不需要。
-          const tManualGain = performance.now();
-          const manualGain = yield* loadManualGainHistory(accounts, now, now - GAIN_WINDOW_MS);
-          const manualGainMs = performance.now() - tManualGain;
-          return yield* buildOverview(accounts, byAccount, {
-            connectorMeta: connectorPlatformMeta,
-            mode: settings.valuationMode,
-            fiatRefs,
-            gainHistory: [...gainHistory.filter((r) => inView.has(r.accountId)), ...manualGain],
-            now,
-            // `totalMs` 少算了收尾那几步(装饰 + 汇总),但那几步是纯内存的,少算的量正是噪声本身。
-            onTimings: ({ enrichMs, gainMs, aggMs, platformMs, sectionsMs, holdings }) =>
-              readLog.info("overview timings", {
-                totalMs: Math.round(performance.now() - tTotal),
-                scopeMs: Math.round(scopeMs),
-                readsMs: Math.round(readsMs),
-                injectMs: Math.round(injectMs),
-                fiatMs: Math.round(fiatMs),
-                manualGainMs: Math.round(manualGainMs),
-                enrichMs: Math.round(enrichMs),
-                aggMs: Math.round(aggMs),
-                gainMs: Math.round(gainMs),
-                platformMs: Math.round(platformMs),
-                sectionsMs: Math.round(sectionsMs),
-                accounts: accounts.length,
-                holdings,
-                gainRows: gainHistory.length,
-              }),
-          });
+        Effect.map(loadOverviewView(data, false), (view) => {
+          // 盈亏字段**从线上摘掉**,不是留着一片 null。留着的话读到这份数据的人会以为
+          // 「算不出」,而真相是「这条读压根不负责它」—— 两件事在界面上长得完全不一样。
+          const { gain24h: _portfolioGain, ...rest } = view;
+          return {
+            ...rest,
+            holdings: view.holdings.map(({ gain24h: _g, ...h }) => h),
+            sections: view.sections.map((s) => ({
+              ...s,
+              defi: s.defi.map(({ gain24h: _d, ...g }) => g),
+            })),
+          };
         }),
+      ),
+    ),
+  );
+
+// 24h 盈亏(ADR 0040),**单独一条读**。慢的是它:窗口内的快照历史 + 手记账本的现算。
+// 列表与总净值因此不必等它 —— 它回来之前,那些位置显示的是骨架而不是破折号(见 delta-display 的三态)。
+//
+// 口径与总览严格同源:同一个装配、同一批持仓线、同一个 `computeGain24h`,所以
+// **「各行相加 = hero 那个数」仍然是结构上成立的**,不是两边各算一遍碰对。
+export const getPortfolioGains = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(PortfolioScopeInput)
+  .handler(({ data, context }) =>
+    runAtEdge(
+      withRequest(
+        context.userId,
+        Effect.map(loadOverviewView(data, true), (view) => ({
+          portfolio: view.gain24h,
+          // 按持仓键索引 —— 与 `aggregate.groupKey` 同一把键,客户端按 `holding.key` 直接查得到。
+          byKey: Object.fromEntries(view.holdings.map((h) => [h.key, h.gain24h ?? null])),
+          // DeFi 协议行按 (账户 × 协议) 索引。它带着自己的分母(grossBasis)——跨账户合并协议组时
+          // 要用 Σ金额 ÷ Σ总敞口 重算百分比,从 pct 反推分母在 pct 为 0 时推不出来。
+          defiByKey: Object.fromEntries(
+            view.sections.flatMap((s) =>
+              s.defi.map((g) => [defiGainKey(s.account.id, g.protocol), g.gain24h ?? null]),
+            ),
+          ),
+        })),
       ),
     ),
   );

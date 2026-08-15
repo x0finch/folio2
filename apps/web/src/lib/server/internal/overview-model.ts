@@ -17,6 +17,7 @@ import {
   type GainCurrentRow,
   type GainHistoryRow,
 } from "../../gain-24h";
+import { defiGainKey } from "../../gain-merge";
 import { platformLogoUrl, tokenLogoUrl } from "../../logo";
 import { defiTokenId, refreshableTokenIds } from "../../tokens";
 import { deriveLiveAccountTotals, liveValue } from "./live-value";
@@ -250,7 +251,8 @@ export const buildOverview = (
     // 往里加了钱。所以把每个 (账户 × 协议) 当成**一条数量恒为 1 的线**喂进去 —— 算法于是自动退化
     // 成两张照片的价值相减,不需要第二套逻辑。代价写在明处:你动仓那天这个数不准。
     const defiHistory = (gainHistory ?? []).filter((r) => r.kind === "defi");
-    const defiKey = (accountId: string, protocol: string) => `${accountId}|${protocol}`;
+    // 键的定义只有一处(lib/gain-merge)—— 盈亏另走一条读之后,客户端要按同一把键贴回来。
+    const defiKey = defiGainKey;
     // 先把腿聚合掉:同一 (账户, 协议, 时刻) 只留一行、数量恒 1、价值取净小计。
     const defiSlots = new Map<string, { row: GainHistoryRow; gross: number }>();
     for (const r of defiHistory) {

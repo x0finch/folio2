@@ -31,6 +31,7 @@ import {
 import { type PinTargetChoice, TabPinPicker } from "../../components/tab-pin-picker";
 import { TokenHoldings } from "../../components/token-holdings";
 import { mergeDefiGroups } from "../../lib/account-view";
+import { attachHoldingGains, attachSectionGains } from "../../lib/gain-merge";
 import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../lib/home-tabs";
 import { useDisplayValue } from "../../lib/hooks/use-display-value";
 import { useHydrated } from "../../lib/hooks/use-hydrated";
@@ -40,6 +41,7 @@ import { type PinScopeKey, portfolioKeys } from "../../lib/queries/keys";
 import {
   homeTabMetaQuery,
   type PortfolioOverview,
+  portfolioGainsQuery,
   portfolioHistoryQuery,
   portfolioListQuery,
   portfolioOverviewQuery,
@@ -106,6 +108,8 @@ export const Route = createFileRoute("/_authed/")({
         // tab 条那份最轻、也最先要 —— 排在前面发。
         kickOff(queryClient.ensureQueryData(homeTabMetaQuery(defaultId)));
         kickOff(queryClient.ensureQueryData(portfolioOverviewQuery(defaultId)));
+        // 盈亏与曲线是四拍里的最后一拍 —— 同样第一时间发出,只是回来得晚。
+        kickOff(queryClient.ensureQueryData(portfolioGainsQuery(defaultId)));
         kickOff(queryClient.ensureQueryData(portfolioHistoryQuery(defaultId)));
       }),
     );
@@ -167,6 +171,9 @@ function Overview() {
 function HeroIsland({ portfolioId }: { portfolioId: string }) {
   const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId));
   const history = useQuery(portfolioHistoryQuery(portfolioId));
+  // 24h 盈亏**另走一条非挂起读**(#488):总净值与稳定币占比来自总览、先亮;盈亏药丸与
+  // best/worst 等这条,没到之前显示骨架而不是破折号 —— 「还在算」和「算不出」必须长得不一样。
+  const gains = useQuery(portfolioGainsQuery(portfolioId));
   // 曲线**推迟到 hydration 之后**再画。非挂起读在服务端不等数据,SSR 那一帧画的是「还在取数」;
   // 而曲线的数据会经 query 流补下来,客户端第一帧就已经有了 —— 两帧画出的 DOM 不同,React 会判
   // hydration mismatch 并把整块重画一遍。先与 SSR 对齐一帧,下一帧再上真曲线,观感上没有差别。
@@ -176,8 +183,9 @@ function HeroIsland({ portfolioId }: { portfolioId: string }) {
       series={seriesReady ? (history.data?.series ?? []) : []}
       seriesPending={!seriesReady}
       totalUsd={data.totalUsd}
-      gain24h={data.gain24h ?? null}
-      holdings={data.holdings}
+      gain24h={gains.data?.portfolio ?? null}
+      gainsPending={gains.isPending}
+      holdings={attachHoldingGains(data.holdings, gains.data)}
     />
   );
 }
@@ -449,8 +457,11 @@ function KindContent({ portfolioId, kind }: { portfolioId: string; kind: string 
   const t = useTranslations("Overview");
   const tc = useTranslations("Common");
   const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId));
+  // 盈亏后补:列表先按总览画出来,这条回来了再把各行的数贴上去(见 lib/gain-merge)。
+  const gains = useQuery(portfolioGainsQuery(portfolioId));
   useStalePriceRefresh(data.pricesStale);
-  const parts = derive(data.sections);
+  const parts = derive(attachSectionGains(data.sections, gains.data));
+  const holdings = attachHoldingGains(data.holdings, gains.data);
 
   if (data.accountTotals.length === 0) {
     return (
@@ -465,10 +476,10 @@ function KindContent({ portfolioId, kind }: { portfolioId: string; kind: string 
   }
   if (kind === "perps") return <PerpPositionsList items={parts.perpItems} />;
   if (kind === "defi") return <DefiPositions groups={parts.defiGroups} hideHeader />;
-  if (data.holdings.length === 0) {
+  if (holdings.length === 0) {
     return <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>;
   }
-  return <TokenHoldings holdings={data.holdings} />;
+  return <TokenHoldings holdings={holdings} gainsPending={gains.isPending} />;
 }
 
 // 自定义 Tab 的两块内容 —— 右上角合计与下方列表。**同一个 queryKey,两个组件**:
@@ -480,7 +491,9 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
   const t = useTranslations("Overview");
   const tct = useTranslations("CustomTabs");
   const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId, pin));
-  const parts = derive(data.sections);
+  const gains = useQuery(portfolioGainsQuery(portfolioId, pin));
+  const parts = derive(attachSectionGains(data.sections, gains.data));
+  const holdings = attachHoldingGains(data.holdings, gains.data);
 
   if (data.holdings.length === 0 && parts.perpItems.length === 0 && parts.defiGroups.length === 0) {
     return <p className="py-12 text-center text-muted-foreground text-sm">{tct("empty")}</p>;
@@ -493,7 +506,7 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
           title: t("tokensTab"),
           subtotal: data.holdingsSubtotal,
           count: data.holdings.length,
-          content: <TokenHoldings holdings={data.holdings} />,
+          content: <TokenHoldings holdings={holdings} gainsPending={gains.isPending} />,
         },
         {
           key: "perps",

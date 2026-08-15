@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
   getHomeTabMeta,
+  getPortfolioGains,
   getPortfolioHistory,
   getPortfolioOverview,
   listPortfolioMemberships,
@@ -38,6 +39,15 @@ export const portfolioOverviewQuery = (portfolioId: string, pin?: PinScopeKey) =
   queryOptions({
     queryKey: portfolioKeys.overview(portfolioId, pin),
     queryFn: () => getPortfolioOverview({ data: { portfolioId, pin } }),
+    staleTime: STALE_TIME.live,
+  });
+
+// 24h 盈亏,**与总览分开的一条读**(#488)。慢的是它(快照历史 + 手记账本现算),
+// 所以列表与总净值不等它 —— 它回来之前那些位置是骨架,回来了再贴上去(见 lib/gain-merge)。
+export const portfolioGainsQuery = (portfolioId: string, pin?: PinScopeKey) =>
+  queryOptions({
+    queryKey: portfolioKeys.gains(portfolioId, pin),
+    queryFn: () => getPortfolioGains({ data: { portfolioId, pin } }),
     staleTime: STALE_TIME.live,
   });
 

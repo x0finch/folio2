@@ -43,6 +43,13 @@ export const portfolioKeys = {
    */
   overview: (portfolioId: string, pin?: PinScopeKey) =>
     [...portfolioKeys.all, "overview", portfolioId, pin ?? null] as const,
+  /**
+   * 24h 盈亏(#488:与总览分开的一条读)。**与 overview 同族但另起一层** —— 组合域那条前缀
+   * (`portfolioKeys.all`)照旧盖得住它,所以同步、改设置、切组合这些写路径不用逐条改。
+   * pin 参数与 overview 同形:自定义 Tab 的合计也要盈亏。
+   */
+  gains: (portfolioId: string, pin?: PinScopeKey) =>
+    [...portfolioKeys.all, "gains", portfolioId, pin ?? null] as const,
   /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
   history: (portfolioId: string) => [...portfolioKeys.all, "history", portfolioId] as const,
   /**

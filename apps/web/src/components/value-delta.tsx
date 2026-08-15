@@ -16,11 +16,18 @@ export function ValueDelta({
   value,
   delta,
   pct,
+  pending = false,
   align = "right",
 }: {
   value: number;
   delta?: number | null;
   pct?: number | null;
+  /**
+   * 增量**还在路上**(24h 盈亏另走一条读,#488)。此时画一条骨架,而不是 `—`。
+   * 这是第四种视觉状态,**不进上面那个三态语义**:`—` 说的是「问过了,答不上来」,
+   * 而这里是「还没问完」。混成一种,页面就会先断言算不出、几百毫秒后又冒出一个数。
+   */
+  pending?: boolean;
   align?: "left" | "right";
 }) {
   const usd = useDisplayValue();
@@ -29,18 +36,24 @@ export function ValueDelta({
     // (长按不冒蓝色高亮),这里把真正该复制的那两行单独放回来 —— 全站还没有任何复制按钮。
     <div className={cn("select-text", align === "right" ? "shrink-0 text-right" : "text-left")}>
       <div className={cn("font-medium tabular-nums", value < 0 && "text-neg")}>{usd(value)}</div>
-      {delta !== undefined && (
-        <div className={cn("text-xs tabular-nums", deltaTone(delta))}>
-          {delta === null ? (
-            NO_VALUE
-          ) : (
-            <>
-              {signedUsd(usd, delta)}
-              {pct != null && ` ${Math.abs(pct).toFixed(2)}%`}
-            </>
-          )}
-        </div>
-      )}
+      {delta !== undefined &&
+        (pending ? (
+          // 宽度按 `−$0,000.00 0.00%` 的量级定死 —— 骨架与真值不同宽就会在填充那一下推挤整行。
+          <div className="flex h-4 items-center justify-end">
+            <span className="block h-2.5 w-24 animate-pulse rounded bg-muted" />
+          </div>
+        ) : (
+          <div className={cn("text-xs tabular-nums", deltaTone(delta))}>
+            {delta === null ? (
+              NO_VALUE
+            ) : (
+              <>
+                {signedUsd(usd, delta)}
+                {pct != null && ` ${Math.abs(pct).toFixed(2)}%`}
+              </>
+            )}
+          </div>
+        ))}
     </div>
   );
 }

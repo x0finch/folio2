@@ -24,6 +24,7 @@ export function PortfolioHero({
   gain24h,
   holdings,
   seriesPending = false,
+  gainsPending = false,
   contentClassName,
 }: {
   series: HistoryPoint[];
@@ -36,6 +37,10 @@ export function PortfolioHero({
   // 而这段空窗里必须什么都不画:留白会闪一下「趋势还没准备好」那句空态文案,再被真曲线盖掉,
   // 读起来像出过错。判据在调用方(它才知道那条查询的状态),这里只负责透传。
   seriesPending?: boolean;
+  // 24h 盈亏那条读**还在路上**(#488)。盈亏药丸与 best/worst 此时画骨架 —— 不是 `—`:
+  // 破折号说的是「问过了,算不出」,而这会儿是「还没问完」。两者混掉,页面就会先断言算不出、
+  // 几百毫秒后又冒出一个数,读起来像刚才那次是错的。
+  gainsPending?: boolean;
   // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
   contentClassName?: string;
 }) {
@@ -120,7 +125,12 @@ export function PortfolioHero({
           </div>
           {/* 算不出(缺 24 小时前的基准)→ `—`,不是留白也不是 0:留白读作「还没加载出来」,
               0 是在断言「今天没涨没跌」。与全站三态口径一致(见 lib/delta-display)。 */}
-          {gain24h == null ? (
+          {gainsPending ? (
+            // 与药丸同高同宽量级,填充那一下不推挤旁边的净值。
+            <span className={cn(pillClass, "bg-muted text-transparent")}>
+              <span className="block h-2.5 w-28 animate-pulse rounded bg-muted-foreground/20" />
+            </span>
+          ) : gain24h == null ? (
             <span className={pillClass}>{NO_VALUE}</span>
           ) : (
             // 摊开算式(#445):金额与百分比来自两套计算,你动过仓的那天它们除不通 —— 与其让人
@@ -140,6 +150,7 @@ export function PortfolioHero({
               不看持有多少,于是这两格永远被小仓位的暴涨币占据。金额走 usd() → 跟随展示币种。 */}
           <Stat
             label={t("bestToday")}
+            pending={gainsPending}
             value={
               metrics.best
                 ? `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
@@ -148,6 +159,7 @@ export function PortfolioHero({
           />
           <Stat
             label={t("worstToday")}
+            pending={gainsPending}
             value={
               metrics.worst
                 ? `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`

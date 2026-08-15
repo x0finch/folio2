@@ -5,16 +5,29 @@ import { cn } from "@folio/ui";
 export function Stat({
   label,
   value,
+  pending = false,
   className,
 }: {
   label: string;
   value: string;
+  /**
+   * 值**还在路上**。画一条骨架而不是占位符 —— `—` 在全站是「问过了,答不上来」的意思
+   * (见 lib/delta-display 的三态),拿它当加载态用,就等于先给出一个结论再推翻它。
+   */
+  pending?: boolean;
   className?: string;
 }) {
   return (
     <div>
       <div className="mb-0.5 text-muted-foreground text-xs">{label}</div>
-      <div className={cn("font-mono font-semibold text-sm tabular-nums", className)}>{value}</div>
+      {/* 骨架与真值同高(text-sm 的行高),填充那一下不推挤下方内容。 */}
+      {pending ? (
+        <div className="flex h-5 items-center">
+          <span className="block h-2.5 w-24 animate-pulse rounded bg-muted" />
+        </div>
+      ) : (
+        <div className={cn("font-mono font-semibold text-sm tabular-nums", className)}>{value}</div>
+      )}
     </div>
   );
 }
