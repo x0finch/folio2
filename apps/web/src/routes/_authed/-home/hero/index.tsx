@@ -9,12 +9,6 @@ import {
 import { attachHoldingGains } from "../holdings/attach-gains";
 import { PortfolioHero } from "./portfolio-hero";
 
-export { GainExplainer } from "./gain-explainer";
-export type { HoldingLike } from "./hero-stats";
-export { PortfolioHero } from "./portfolio-hero";
-export { type Range, RangeTabs, rangeSince } from "./range-tabs";
-export { TrendPanel } from "./trend-panel";
-
 export function HeroIsland() {
   const { selectedId } = usePortfolio();
   const { data } = useSuspenseQuery(portfolioOverviewQuery(selectedId));

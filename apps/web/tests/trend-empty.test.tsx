@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
 import { messages } from "../src/lib/i18n/messages";
-import { TrendEmpty } from "../src/routes/_authed/-home/hero/trend-empty";
+import { TrendEmpty } from "../src/routes/_authed/-home/hero/trend-panel";
 
 afterEach(cleanup);
 

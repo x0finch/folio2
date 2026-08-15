@@ -17,7 +17,8 @@ import {
   toAccountSections,
 } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
-import { DefiPositions, PerpPositions, TokenRowContent } from "../routes/_authed/-home/holdings";
+import { DefiPositions, PerpPositions } from "../routes/_authed/-home/holdings/sections";
+import { TokenRowContent } from "../routes/_authed/-home/holdings/token-row";
 import { NoteIconGlyph, NoteIndicator, NoteView } from "./notes";
 
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 -home/holdings 那套。

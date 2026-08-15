@@ -152,9 +152,3 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
     />
   );
 }
-
-export { AvatarStack } from "./avatar-stack";
-export { deltaTone, NO_VALUE } from "./delta-display";
-export { DefiPositions, PerpPositions } from "./sections";
-export { TokenRowContent } from "./token-row";
-export { ValueDelta } from "./value-delta";

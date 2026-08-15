@@ -36,14 +36,10 @@ import { invalidateFor } from "../lib/queries/refresh";
 import { removeAccount, updateAccount } from "../lib/server/accounts";
 import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
-import {
-  GainExplainer,
-  type Range,
-  RangeTabs,
-  rangeSince,
-  TrendPanel,
-} from "../routes/_authed/-home/hero";
-import { deltaTone, NO_VALUE } from "../routes/_authed/-home/holdings";
+import { GainExplainer } from "../routes/_authed/-home/hero/gain-explainer";
+import { type Range, RangeTabs, rangeSince } from "../routes/_authed/-home/hero/range-tabs";
+import { TrendPanel } from "../routes/_authed/-home/hero/trend-panel";
+import { deltaTone, NO_VALUE } from "../routes/_authed/-home/holdings/delta-display";
 import { AccountTagsModal } from "./account-tags-modal";
 import { ConnectorBadge } from "./connector-badge";
 import { EditableName } from "./editable-name";

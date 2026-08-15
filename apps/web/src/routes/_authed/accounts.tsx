@@ -25,7 +25,8 @@ import { accountHoldingsQuery, accountListQuery } from "../../lib/queries/accoun
 import { connectorCatalogQuery } from "../../lib/queries/connectors";
 import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "../../lib/queries/tags";
-import { AvatarStack, ValueDelta } from "./-home/holdings";
+import { AvatarStack } from "./-home/holdings/avatar-stack";
+import { ValueDelta } from "./-home/holdings/value-delta";
 
 export const Route = createFileRoute("/_authed/accounts")({
   // 详情抽屉进 URL(与首页主 tab 同一套,ADR 0043):刷新还停在这个账户、链接能分享。

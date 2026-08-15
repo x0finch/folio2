@@ -14,7 +14,8 @@ import {
   shouldPromptForPasskey,
 } from "../lib/passkey-prompt";
 import { registerPasskey } from "../lib/register-passkey";
-import { type HoldingLike, PortfolioHero } from "./_authed/-home/hero";
+import type { HoldingLike } from "./_authed/-home/hero/hero-stats";
+import { PortfolioHero } from "./_authed/-home/hero/portfolio-hero";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
 
