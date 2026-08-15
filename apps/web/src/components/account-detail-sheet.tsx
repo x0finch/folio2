@@ -27,7 +27,6 @@ import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { accountShare, shareLabel } from "../lib/account-share";
 import type { OverviewBalance } from "../lib/account-view";
-import { deltaTone, NO_VALUE } from "../lib/delta-display";
 import type { Gain } from "../lib/gain-24h";
 import { useDisplayValue } from "../lib/hooks/use-display-value";
 import { useHoverPopover } from "../lib/hooks/use-hover-popover";
@@ -37,18 +36,23 @@ import { invalidateFor } from "../lib/queries/refresh";
 import { removeAccount, updateAccount } from "../lib/server/accounts";
 import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
+import {
+  GainExplainer,
+  type Range,
+  RangeTabs,
+  rangeSince,
+  TrendPanel,
+} from "../routes/_authed/-home/hero";
+import { deltaTone, NO_VALUE } from "../routes/_authed/-home/holdings";
 import { AccountTagsModal } from "./account-tags-modal";
 import { ConnectorBadge } from "./connector-badge";
 import { EditableName } from "./editable-name";
-import { GainExplainer } from "./gain-explainer";
 import { AccountHoldingsCards } from "./holdings-cards";
 import { IconButton } from "./icon-button";
 import { ManualTokensPanel } from "./manual-tokens-panel";
 import { Portal } from "./portal";
 import { PortfolioPickerModal } from "./portfolio-picker-modal";
-import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { TagBadges } from "./tag-badges";
-import { TrendPanel } from "./trend-panel";
 
 // 账户页列表行的合并形状(listAccountHoldings ∪ listAccounts,见 accounts.tsx loader)。
 export interface AccountRow {
@@ -167,7 +171,7 @@ function DetailBody({
   // 一个停着一个在动,说的不是同一件事;占比的分母是活跃账户总计,归档不在里面,显示了会让
   // 各行的百分比加起来超过 100%。缺凭据不显增量是同一个道理。
   // 这两种是「**不该有**这个数」→ 整块省略;而「该有却**算不出**」是另一回事 → `—`。三态口径见
-  // lib/delta-display,与行内 <ValueDelta> 共用 —— 这里字号不同(大字),故手搓而非复用组件。
+  // -home/holdings/delta-display,与行内 <ValueDelta> 共用 —— 这里字号不同(大字),故手搓而非复用组件。
   // 数由 server 算好(ADR 0040),与账户行同源 —— 抽屉头和列表行显示同一个数,不再各算各的。
   const hasDayChange = !(account.needsCredentials || archived) && account.gain24h !== undefined;
   const dayChange = hasDayChange ? account.gain24h : undefined;

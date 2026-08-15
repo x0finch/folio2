@@ -1,4 +1,5 @@
 import { type DefiGroup, mergeDefiGroups } from "./account-view";
+import type { PinScopeKey } from "./queries/keys";
 
 // 首页主 tab 的合法值与回落规则(片5 / ADR 0043)。
 //
@@ -92,4 +93,15 @@ export function resolvePinLabel(
   if (pin.kind === "account") return { name: lookup.accountName(pin.accountId ?? "") ?? "" };
   const c = lookup.connector(pin.connectorId ?? "");
   return c.logo ? { name: c.name, logo: c.logo } : { name: c.name };
+}
+
+export function pinScopeOf(pin: {
+  kind: "connector" | "tag" | "account";
+  connectorId?: string | null;
+  tagId?: string | null;
+  accountId?: string | null;
+}): PinScopeKey {
+  if (pin.kind === "tag") return { kind: "tag", tagId: pin.tagId ?? undefined };
+  if (pin.kind === "account") return { kind: "account", accountId: pin.accountId ?? undefined };
+  return { kind: "connector", connectorId: pin.connectorId ?? undefined };
 }

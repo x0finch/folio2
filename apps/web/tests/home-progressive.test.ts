@@ -17,46 +17,42 @@ function stripComments(source: string): string {
 
 describe("骨架与真内容同形", () => {
   it("hero 骨架与 PortfolioHero 外框同高", () => {
-    expect(src("components/portfolio-hero.tsx")).toContain("min-h-60");
-    expect(src("routes/_authed/-home/skeletons.tsx")).toMatch(
-      /function HeroSkeleton[\s\S]*min-h-60/,
-    );
+    expect(src("routes/_authed/-home/hero/portfolio-hero.tsx")).toContain("min-h-60");
+    expect(src("routes/_authed/-home/index.tsx")).toMatch(/function HeroSkeleton[\s\S]*min-h-60/);
   });
 
   it("持仓行骨架贴合真实行的 padding 与头像尺寸", () => {
-    const skel = src("routes/_authed/-home/skeletons.tsx");
-    expect(src("routes/_authed/-home/token-holdings.tsx")).toContain("px-3 py-3");
+    const skel = src("routes/_authed/-home/index.tsx");
+    expect(src("routes/_authed/-home/holdings/token-holdings.tsx")).toContain("px-3 py-3");
     expect(skel).toContain("px-3 py-3");
     expect(skel).toContain("size-8");
   });
 
   it("tab 条骨架与真条同一套横向排布", () => {
-    expect(src("routes/_authed/-home/tab-strip.tsx")).toContain("flex items-center gap-4");
-    expect(src("routes/_authed/-home/skeletons.tsx")).toMatch(
+    expect(src("routes/_authed/-home/tab/index.tsx")).toContain("flex items-center gap-4");
+    expect(src("routes/_authed/-home/index.tsx")).toMatch(
       /function TabStripSkeleton[\s\S]*flex items-center gap-4/,
     );
   });
 
   it("tab 条合计位有下限宽度,等待走骨架而不是破折号", () => {
-    const strip = src("routes/_authed/-home/tab-strip.tsx");
+    const strip = src("routes/_authed/-home/tab/index.tsx");
     expect(strip).toContain("min-w-24");
     expect(strip).toContain("<TabTotalSkeleton");
     expect(strip).not.toContain('pending="—"');
-    expect(src("routes/_authed/-home/skeletons.tsx")).toMatch(
-      /function TabTotalSkeleton[\s\S]*inline-block h-4 w-24/,
-    );
+    expect(strip).toMatch(/function TabTotalSkeleton[\s\S]*inline-block h-4 w-24/);
   });
 });
 
 describe("盈亏骨架三处复用同一元件", () => {
   it("行内 / 药丸 / best-worst 都走 <GainSkeleton>", () => {
-    expect(src("components/value-delta.tsx")).toContain("<GainSkeleton");
-    const hero = src("components/portfolio-hero.tsx");
+    expect(src("routes/_authed/-home/holdings/value-delta.tsx")).toContain("<GainSkeleton");
+    const hero = src("routes/_authed/-home/hero/portfolio-hero.tsx");
     expect(hero.match(/<GainSkeleton/g)?.length).toBe(3);
   });
 
   it("宽度锁死在一处", () => {
-    expect(src("components/skeletons.tsx")).toMatch(
+    expect(src("routes/_authed/-home/holdings/value-delta.tsx")).toMatch(
       /function GainSkeleton[\s\S]*inline-block h-4 w-28/,
     );
   });
@@ -64,8 +60,8 @@ describe("盈亏骨架三处复用同一元件", () => {
 
 describe("回访不闪骨架、数字只滚一次", () => {
   it("盈亏加载态看 isPending,不看 isFetching —— 缓存命中后台刷新不该再出骨架", () => {
-    const hero = stripComments(src("routes/_authed/-home/hero.tsx"));
-    const holdings = stripComments(src("routes/_authed/-home/holdings.tsx"));
+    const hero = stripComments(src("routes/_authed/-home/hero/index.tsx"));
+    const holdings = stripComments(src("routes/_authed/-home/holdings/index.tsx"));
     expect(hero).toContain("gainQuery.isPending");
     expect(holdings).toContain("gainQuery.isPending");
     expect(hero).not.toContain("gainQuery.isFetching");
@@ -83,6 +79,6 @@ describe("回访不闪骨架、数字只滚一次", () => {
   });
 
   it("净值 ticker 数据一到就滚,不等进视口(避免 hydration 后再从 0 滚一遍)", () => {
-    expect(src("components/portfolio-hero.tsx")).toContain("startOnView={false}");
+    expect(src("routes/_authed/-home/hero/portfolio-hero.tsx")).toContain("startOnView={false}");
   });
 });

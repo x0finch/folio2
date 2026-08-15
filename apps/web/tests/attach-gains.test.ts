@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { DefiGroup } from "../src/lib/account-view";
-import { attachDefiGains, attachHoldingGains } from "../src/lib/attach-gains";
 import { defiGainKey } from "../src/lib/gain-24h";
+import {
+  attachDefiGains,
+  attachHoldingGains,
+} from "../src/routes/_authed/-home/holdings/attach-gains";
 
 // #488 票 5:盈亏是另一包数据,客户端按 key 拼回总览行。拼错的后果是静默的
 // (行上破折号 / hero 那个数对不上),所以钉子钉在拼法上,不钉数字怎么算。

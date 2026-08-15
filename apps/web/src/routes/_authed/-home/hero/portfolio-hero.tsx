@@ -1,13 +1,13 @@
 import { cn, NumberTicker } from "@folio/ui";
 import { useTranslations } from "use-intl";
-import { NO_VALUE } from "../lib/delta-display";
-import type { Gain } from "../lib/gain-24h";
-import { deriveHeroMetrics, type HoldingLike } from "../lib/hero-stats";
-import { downsampleSeries, type HistoryPoint } from "../lib/history";
-import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { signedUsd } from "../lib/signed-usd";
+import type { Gain } from "../../../../lib/gain-24h";
+import { downsampleSeries, type HistoryPoint } from "../../../../lib/history";
+import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
+import { signedUsd } from "../../../../lib/signed-usd";
+import { NO_VALUE } from "../holdings/delta-display";
+import { GainSkeleton } from "../holdings/value-delta";
 import { GainExplainer } from "./gain-explainer";
-import { GainSkeleton } from "./skeletons";
+import { deriveHeroMetrics, type HoldingLike } from "./hero-stats";
 import { Stat } from "./stat";
 import { TrendPanel } from "./trend-panel";
 
@@ -127,7 +127,7 @@ export function PortfolioHero({
             )}
           </div>
           {/* 算不出(缺 24 小时前的基准)→ `—`,不是留白也不是 0:留白读作「还没加载出来」,
-              0 是在断言「今天没涨没跌」。与全站三态口径一致(见 lib/delta-display)。
+              0 是在断言「今天没涨没跌」。与全站三态口径一致(见 holdings/delta-display)。
               还在取 → 小骨架,绝不先闪破折号。失败 → 破折号 + 一处提示。 */}
           {gainPending ? (
             <span className={pillClass}>

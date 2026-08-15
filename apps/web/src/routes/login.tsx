@@ -4,10 +4,8 @@ import { Fingerprint } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AuthShell } from "../components/auth-shell";
-import { PortfolioHero } from "../components/portfolio-hero";
 import { authClient, signIn, signUp } from "../lib/auth-client";
 import { deriveDefaultName } from "../lib/derive-default-name";
-import type { HoldingLike } from "../lib/hero-stats";
 import type { HistoryPoint } from "../lib/history";
 import { useLockDevice } from "../lib/hooks/use-lock-device";
 import {
@@ -16,6 +14,7 @@ import {
   shouldPromptForPasskey,
 } from "../lib/passkey-prompt";
 import { registerPasskey } from "../lib/register-passkey";
+import { type HoldingLike, PortfolioHero } from "./_authed/-home/hero";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
 

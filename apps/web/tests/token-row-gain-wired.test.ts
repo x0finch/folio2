@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // `<TokenRowContent>` 有**三条**渲染路径,而 24h 盈亏(ADR 0040)是靠调用方逐个传进去的:
@@ -22,10 +22,10 @@ const HOME = join(import.meta.dirname, "../src/routes/_authed/-home");
 function filesRendering(tag: string): { file: string; text: string }[] {
   const out: { file: string; text: string }[] = [];
   for (const dir of [COMPONENTS, HOME]) {
-    for (const name of readdirSync(dir)) {
-      if (!name.endsWith(".tsx")) continue;
-      const text = stripLineComments(readFileSync(join(dir, name), "utf8"));
-      if (text.includes(`<${tag}`)) out.push({ file: name, text });
+    for (const rel of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
+      if (!rel.endsWith(".tsx")) continue;
+      const text = stripLineComments(readFileSync(join(dir, rel), "utf8"));
+      if (text.includes(`<${tag}`)) out.push({ file: basename(rel), text });
     }
   }
   return out;

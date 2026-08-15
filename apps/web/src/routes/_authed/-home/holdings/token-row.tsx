@@ -1,6 +1,6 @@
 import { LogoAvatar } from "@folio/ui";
 import type { ReactNode } from "react";
-import { formatNumber } from "../lib/format-number";
+import { formatNumber } from "../../../../lib/format-number";
 import { AvatarStack } from "./avatar-stack";
 import { ValueDelta } from "./value-delta";
 

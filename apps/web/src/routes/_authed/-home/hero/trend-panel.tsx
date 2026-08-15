@@ -1,7 +1,7 @@
 import { type ChartConfig, ChartContainer } from "@folio/ui";
 import { Area, AreaChart, YAxis } from "recharts";
 import { useTranslations } from "use-intl";
-import type { HistoryPoint } from "../lib/history";
+import type { HistoryPoint } from "../../../../lib/history";
 import { TrendEmpty } from "./trend-empty";
 import { ValueTrendChart } from "./value-trend-chart";
 

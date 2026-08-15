@@ -1,9 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
-import { GainExplainer } from "../src/components/gain-explainer";
 import type { Gain } from "../src/lib/gain-24h";
 import { messages } from "../src/lib/i18n/messages";
+import { GainExplainer } from "../src/routes/_authed/-home/hero/gain-explainer";
 
 afterEach(cleanup);
 

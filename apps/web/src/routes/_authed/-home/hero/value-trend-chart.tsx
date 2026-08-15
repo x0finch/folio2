@@ -2,8 +2,8 @@ import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } f
 import { useId } from "react";
 import { Area, AreaChart, XAxis, YAxis } from "recharts";
 import { useFormatter } from "use-intl";
-import type { HistoryPoint } from "../lib/history";
-import { useDisplayValue } from "../lib/hooks/use-display-value";
+import type { HistoryPoint } from "../../../../lib/history";
+import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
 
 // 价值趋势面积图(主页净值 hero + 资产抽屉单币价值共用):折线随涨跌走 --pos/--neg,渐变填充,轴全隐,
 // hover 出 tooltip(时间 + 价值)。绝对定位垫底用(inset-0),调用方套 relative + overflow-hidden 容器。

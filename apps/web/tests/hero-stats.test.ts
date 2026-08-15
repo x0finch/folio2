@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { deriveHeroMetrics, type HoldingLike, isStablecoin } from "../src/lib/hero-stats";
+import {
+  deriveHeroMetrics,
+  type HoldingLike,
+  isStablecoin,
+} from "../src/routes/_authed/-home/hero/hero-stats";
 
 // gain:该持仓今天赚 / 亏的**金额**(ADR 0040)。省略 → 算不出,不参与 best/worst 择取。
 const h = (symbol: string, totalValue: number, gain?: number, pct?: number): HoldingLike => ({

@@ -1,7 +1,7 @@
 import { Popover, PopoverContent, PopoverTrigger, useMediaQuery } from "@folio/ui";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { Portal } from "../../../../components/portal";
-import { revealTab } from "../tab-selection";
+import { revealTab } from "./selection";
 
 const PIN_PANEL_W = 240; // w-56 + p-2
 const PIN_PANEL_H = 340; // 面板大致高度,够不够放得下决定朝上还是朝下

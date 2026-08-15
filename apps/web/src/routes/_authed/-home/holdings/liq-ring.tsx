@@ -1,8 +1,8 @@
 import { cn, Popover, PopoverContent, PopoverTrigger, Separator } from "@folio/ui";
 import { useTranslations } from "use-intl";
-import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { useHoverPopover } from "../lib/hooks/use-hover-popover";
-import type { LiqRisk, LiqRiskState, PerpPositionView } from "../lib/perp";
+import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
+import { useHoverPopover } from "../../../../lib/hooks/use-hover-popover";
+import type { LiqRisk, LiqRiskState, PerpPositionView } from "../../../../lib/perp";
 import { DetailRow } from "./detail-row";
 
 // 强平风险环(H5 #120,概念稿定稿:温度计→血条→环):~20px SVG 圆环把「距强平多远」

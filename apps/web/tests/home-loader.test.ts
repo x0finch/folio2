@@ -38,7 +38,7 @@ describe("首页 loader 不再等待慢查询", () => {
     const src = stripComments(readFileSync(SRC, "utf8"));
     expect(src).not.toMatch(/data\.gain24h/);
     const hero = stripComments(
-      readFileSync(join(import.meta.dirname, "../src/routes/_authed/-home/hero.tsx"), "utf8"),
+      readFileSync(join(import.meta.dirname, "../src/routes/_authed/-home/hero/index.tsx"), "utf8"),
     );
     expect(hero).not.toMatch(/data\.gain24h/);
   });

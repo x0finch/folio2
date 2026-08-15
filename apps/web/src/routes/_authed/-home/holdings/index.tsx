@@ -1,22 +1,45 @@
+import { Skeleton } from "@folio/ui";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { DefiPositions, PerpPositionsList } from "../../../components/holdings-sections";
-import { QueryBoundary } from "../../../components/query-boundary";
-import { SectionList } from "../../../components/section-list";
-import { mergeDefiGroups } from "../../../lib/account-view";
-import { attachDefiGains, attachHoldingGains } from "../../../lib/attach-gains";
-import { type KindTab, kindTabsOf } from "../../../lib/home-tabs";
-import { usePortfolio } from "../../../lib/hooks/use-portfolio";
-import { type PinScopeKey, portfolioKeys } from "../../../lib/queries/keys";
+import { QueryBoundary } from "../../../../components/query-boundary";
+import { mergeDefiGroups } from "../../../../lib/account-view";
+import { type KindTab, kindTabsOf, pinScopeOf } from "../../../../lib/home-tabs";
+import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
+import { type PinScopeKey, portfolioKeys } from "../../../../lib/queries/keys";
 import {
   homeTabStripQuery,
   type PortfolioOverview,
   portfolioGain24hQuery,
   portfolioOverviewQuery,
-} from "../../../lib/queries/portfolio";
-import { ListSkeleton } from "./skeletons";
-import { pinScopeOf, useHomeTabSelection } from "./tab-selection";
+} from "../../../../lib/queries/portfolio";
+import { useHomeTabSelection } from "../tab/selection";
+import { attachDefiGains, attachHoldingGains } from "./attach-gains";
+import { SectionList } from "./section-list";
+import { DefiPositions, PerpPositionsList } from "./sections";
 import { TokenHoldings } from "./token-holdings";
+import { GainSkeleton } from "./value-delta";
+
+const ROWS_3 = ["r1", "r2", "r3"];
+
+function ListSkeleton() {
+  return (
+    <div className="flex flex-col">
+      {ROWS_3.map((k) => (
+        <div key={k} className="flex items-center gap-3 px-3 py-3">
+          <Skeleton className="size-8 shrink-0 rounded-full" />
+          <div className="flex flex-1 flex-col gap-1.5">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-3 w-16" />
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <Skeleton className="h-4 w-20" />
+            <GainSkeleton />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // 现货/永续/DeFi 三段的拆解(从某份数据的 sections 里挑出永续项 + DeFi 分组 + 永续权益小计)。
 // 纯函数 —— 自定义 Tab 的内容由子组件自己拉数据、自己拆(见 PinContent);tab 条右侧合计也用它。
@@ -129,3 +152,9 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
     />
   );
 }
+
+export { AvatarStack } from "./avatar-stack";
+export { deltaTone, NO_VALUE } from "./delta-display";
+export { DefiPositions, PerpPositions } from "./sections";
+export { TokenRowContent } from "./token-row";
+export { ValueDelta } from "./value-delta";

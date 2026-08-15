@@ -9,17 +9,17 @@ import {
 } from "@folio/ui";
 import { useEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
-import type { DefiGroup, DefiRow } from "../lib/account-view";
-import { defiMeaningfulLegs, groupLegsByRole } from "../lib/account-view";
-import { formatNumber } from "../lib/format-number";
-import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { useHoverPopover } from "../lib/hooks/use-hover-popover";
-import { defiLogoUrl } from "../lib/logo";
-import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../lib/perp";
-import { signedUsd } from "../lib/signed-usd";
+import type { DefiGroup, DefiRow } from "../../../../lib/account-view";
+import { defiMeaningfulLegs, groupLegsByRole } from "../../../../lib/account-view";
+import { formatNumber } from "../../../../lib/format-number";
+import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
+import { useHoverPopover } from "../../../../lib/hooks/use-hover-popover";
+import { defiLogoUrl } from "../../../../lib/logo";
+import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../../../../lib/perp";
+import { signedUsd } from "../../../../lib/signed-usd";
+import { Stat } from "../hero/stat";
 import { AccountName } from "./account-name";
 import { LiqRing } from "./liq-ring";
-import { Stat } from "./stat";
 import { ValueDelta } from "./value-delta";
 
 // 永续 / DeFi 持仓明细 v2(H5 #120):总览「DeFi & Perps」tab 与账户详情抽屉共用。

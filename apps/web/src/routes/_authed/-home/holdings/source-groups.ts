@@ -1,5 +1,5 @@
-import type { HoldingSource } from "./aggregate";
-import { buildStack, type StackItem } from "./stack-items";
+import type { HoldingSource } from "../../../../lib/aggregate";
+import { buildStack, type StackItem } from "../../../../lib/stack-items";
 
 // 详情抽屉「来源」区的两种转置视图(纯逻辑,可单测):
 //   · byPlatform:按平台/链聚合 —— 看这个币散在哪些链/场馆,每条列它涉及几个账户。

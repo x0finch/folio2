@@ -1,18 +1,10 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { useRef } from "react";
-import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../../lib/home-tabs";
-import type { PinScopeKey } from "../../../lib/queries/keys";
-import type { HomeTabStrip } from "../../../lib/queries/portfolio";
+import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../../../lib/home-tabs";
 
 const home = getRouteApi("/_authed/");
 
 const TAB_SCROLL_MARGIN = 16; // 选中 tab 滚进可视区时两侧留的余量(px)
-
-export function pinScopeOf(pin: HomeTabStrip["pins"][number]): PinScopeKey {
-  if (pin.kind === "tag") return { kind: "tag", tagId: pin.tagId };
-  if (pin.kind === "account") return { kind: "account", accountId: pin.accountId };
-  return { kind: "connector", connectorId: pin.connectorId };
-}
 
 // 把 tab(或 ＋)在横向滚动的 tab 条里滚到完全可见(两侧留余量)。手写而非 scrollIntoView:
 // 后者会连带滚 overflow-hidden 祖先和页面纵向(实测踩坑)。

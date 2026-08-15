@@ -17,11 +17,10 @@ import {
   toAccountSections,
 } from "../lib/account-view";
 import { formatNumber } from "../lib/format-number";
-import { DefiPositions, PerpPositions } from "./holdings-sections";
+import { DefiPositions, PerpPositions, TokenRowContent } from "../routes/_authed/-home/holdings";
 import { NoteIconGlyph, NoteIndicator, NoteView } from "./notes";
-import { TokenRowContent } from "./token-row";
 
-// 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 holdings-sections 的表格。
+// 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 -home/holdings 那套。
 // provider 展示 note(note 重设计,两级):
 //   · account 级 note(Note[],整钱包)→ 持仓区顶部一个 BouncyAccordion,一段一个 item(BTC 未确认/收款/分布);
 //   · balance 级 note(单个 Note,该币锁仓/冻结)→ 现货行标题右侧一个小 icon <NoteIndicator>(hover 开 popover)。
@@ -45,7 +44,7 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
               amount: b.amount,
               value: b.usdValue,
               // **不写 `?? null`** —— 归档账户的现货行拿到的是 `undefined`(封存了,这个位置不该有
-              // 这个数),`?? null` 会把它压成「算不出」而画出 `—`。三态得原样透传(见 lib/delta-display)。
+              // 这个数),`?? null` 会把它压成「算不出」而画出 `—`。三态得原样透传(见 -home/holdings/delta-display)。
               gain24h: b.gain24h,
             }}
             aside={b.note ? <NoteIndicator note={b.note} formatNumber={fmtNote} /> : undefined}

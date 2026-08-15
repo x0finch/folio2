@@ -1,10 +1,10 @@
 import { cn, Popover, PopoverContent, PopoverTrigger } from "@folio/ui";
 import type { ReactNode } from "react";
 import { useFormatter, useTranslations } from "use-intl";
-import type { Gain } from "../lib/gain-24h";
-import { useDisplayValue } from "../lib/hooks/use-display-value";
-import { useHoverPopover } from "../lib/hooks/use-hover-popover";
-import { signedUsd } from "../lib/signed-usd";
+import type { Gain } from "../../../../lib/gain-24h";
+import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
+import { useHoverPopover } from "../../../../lib/hooks/use-hover-popover";
+import { signedUsd } from "../../../../lib/signed-usd";
 
 // 24h 盈亏的解释弹层(#445)。
 //

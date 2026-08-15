@@ -1,13 +1,19 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { PortfolioHero } from "../../../components/portfolio-hero";
-import { attachHoldingGains } from "../../../lib/attach-gains";
-import { usePortfolio } from "../../../lib/hooks/use-portfolio";
-import { useStalePriceRefresh } from "../../../lib/hooks/use-stale-price-refresh";
+import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
+import { useStalePriceRefresh } from "../../../../lib/hooks/use-stale-price-refresh";
 import {
   portfolioGain24hQuery,
   portfolioHistoryQuery,
   portfolioOverviewQuery,
-} from "../../../lib/queries/portfolio";
+} from "../../../../lib/queries/portfolio";
+import { attachHoldingGains } from "../holdings/attach-gains";
+import { PortfolioHero } from "./portfolio-hero";
+
+export { GainExplainer } from "./gain-explainer";
+export type { HoldingLike } from "./hero-stats";
+export { PortfolioHero } from "./portfolio-hero";
+export { type Range, RangeTabs, rangeSince } from "./range-tabs";
+export { TrendPanel } from "./trend-panel";
 
 export function HeroIsland() {
   const { selectedId } = usePortfolio();

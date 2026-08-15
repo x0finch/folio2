@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { SectionHeader } from "./holdings-sections";
+import { SectionHeader } from "./sections";
 
 // 按小计倒序的分区列表(section list,ADR 0034)—— 自定义 Tab 视图的展示骨架。
 // 现货 / 永续 / DeFi 各一段竖排,**哪段小计大哪段在上**;空段(count=0)剔除。generic:调用方(④)把

@@ -1,15 +1,8 @@
 import { Card, CardContent, CardHeader, Skeleton } from "@folio/ui";
 
-// 跨页共用 / 非首页的骨架。首页各岛的骨架在 `routes/_authed/-home/skeletons.tsx`。
-// 稳定 key(避免 index key lint):占位行数固定,用字符串数组当 key。
+// 跨页共用 / 非首页的骨架。
 const ROWS_4 = ["r1", "r2", "r3", "r4"];
 const CARDS_2 = ["c1", "c2"];
-
-/** 24h 盈亏位的小骨架 —— 行内 / hero 药丸 / best-worst 三处同形(#488 票 6)。
- *  宽度锁在典型一行增量(「+$1,234 2.10%」量级),到位不撑开。 */
-export function GainSkeleton() {
-  return <Skeleton className="inline-block h-4 w-28 rounded-full" />;
-}
 
 // 账户行骨架:贴合 v2 行(无前导头像)—— 左 名称/状态/代币叠标,右 市值/增量;无 Card,与真实列表同 padding。
 function AccountRow() {

@@ -1,17 +1,20 @@
-import { Tabs, TabsList, TabsTrigger } from "@folio/ui";
+import { Skeleton, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
-import { QueryBoundary } from "../../../components/query-boundary";
-import { type KindTab, kindTabsOf } from "../../../lib/home-tabs";
-import { useDisplayValue } from "../../../lib/hooks/use-display-value";
-import { usePortfolio } from "../../../lib/hooks/use-portfolio";
-import { type PinScopeKey, portfolioKeys } from "../../../lib/queries/keys";
-import { homeTabStripQuery, portfolioOverviewQuery } from "../../../lib/queries/portfolio";
-import { derive } from "./holdings";
-import { TabTotalSkeleton } from "./skeletons";
-import { AddPinButton, PinTab } from "./tab-pin";
-import { pinScopeOf, revealTab, useHomeTabSelection } from "./tab-selection";
+import { QueryBoundary } from "../../../../components/query-boundary";
+import { type KindTab, kindTabsOf, pinScopeOf } from "../../../../lib/home-tabs";
+import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
+import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
+import { type PinScopeKey, portfolioKeys } from "../../../../lib/queries/keys";
+import { homeTabStripQuery, portfolioOverviewQuery } from "../../../../lib/queries/portfolio";
+import { derive } from "../holdings";
+import { AddPinButton, PinTab } from "./pin";
+import { revealTab, useHomeTabSelection } from "./selection";
+
+function TabTotalSkeleton() {
+  return <Skeleton className="inline-block h-4 w-24 rounded-full" />;
+}
 
 export function TabStripIsland() {
   const t = useTranslations("Overview");

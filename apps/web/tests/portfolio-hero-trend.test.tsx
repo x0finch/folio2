@@ -1,10 +1,10 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
-import { PortfolioHero } from "../src/components/portfolio-hero";
-import type { HoldingLike } from "../src/lib/hero-stats";
 import type { HistoryPoint } from "../src/lib/history";
 import { messages } from "../src/lib/i18n/messages";
+import type { HoldingLike } from "../src/routes/_authed/-home/hero/hero-stats";
+import { PortfolioHero } from "../src/routes/_authed/-home/hero/portfolio-hero";
 
 afterEach(cleanup);
 
