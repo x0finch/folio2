@@ -18,7 +18,7 @@ export function deltaTone(delta: number | null): string {
   return delta > 0 ? "text-pos" : "text-neg";
 }
 
-/** 24h 盈亏位的小骨架 —— 行内 / hero 药丸 / best-worst 三处同形。宽度锁在典型一行增量。 */
+/** 24h 盈亏位的小骨架 —— 行内 / hero 增量 / best-worst 三处同形。宽度锁在典型一行增量。 */
 export function GainSkeleton() {
   return <Skeleton className="inline-block h-4 w-28 rounded-full" />;
 }

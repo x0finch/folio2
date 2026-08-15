@@ -1,11 +1,47 @@
 import { Popover, PopoverContent, PopoverTrigger, useMediaQuery } from "@folio/ui";
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { Portal } from "../../../../components/portal";
 import { revealTab } from "./selection";
 
 const PIN_PANEL_W = 240; // w-56 + p-2
 const PIN_PANEL_H = 340; // 面板大致高度,够不够放得下决定朝上还是朝下
+const VIEW_INSET = 8;
 const GOO_COLLAPSE_MS = 400; // beUI goo 收拢 spring 视觉时长 ~0.32s,放完再卸载浮层
+const HIDE_SOON_MS = 140;
+
+// 挂载/翻开分两拍,卸载等收拢放完:
+// ① beUI Popover **首帧就带 open=true 挂载**会踩内部竞态(量尺寸的 re-render 与开场 spring 抢跑,
+//    裁剪停在 p=0、面板隐形,实测)→ 先挂载(关)、下一拍再翻开,恒走页面上其它 popover 的健康路径。
+// ② 关闭后 goo 底色在触发器位置留一块药丸 —— 原生 beUI 里它垫在触发器**底下**,portal 后整层浮在
+//    tab **上面**,不卸载就永久盖住 tab(实测)→ 收拢动画放完整个卸载。
+function useDeferredOpen(open: boolean) {
+  const [mounted, setMounted] = useState(false);
+  const [openDeferred, setOpenDeferred] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      return;
+    }
+    setOpenDeferred(false);
+    const t = setTimeout(() => setMounted(false), GOO_COLLAPSE_MS);
+    return () => clearTimeout(t);
+  }, [open]);
+  useEffect(() => {
+    if (open && mounted) setOpenDeferred(true);
+  }, [open, mounted]);
+  return { mounted, openDeferred };
+}
+
+// 横向:右边放得下就左对齐触发器,否则右对齐;竖向:下方放得下就朝下,否则朝上。按视口算(浮层已 fixed)。
+function placePanel(
+  rect: DOMRect,
+  view: { width: number; height: number },
+): { align: "start" | "end"; side: "top" | "bottom" } {
+  return {
+    align: rect.left + PIN_PANEL_W <= view.width - VIEW_INSET ? "start" : "end",
+    side: view.height - rect.bottom > PIN_PANEL_H || rect.top < PIN_PANEL_H ? "bottom" : "top",
+  };
+}
 
 // pin/＋ 的管理面板:**整个 beUI Popover 连带渲染进 Portal**(goo 动效原样保留),fixed 覆在触发器位置、
 // z 高于 hero —— 既不被横向滚动容器裁(overflow-x:auto 会连带裁纵向),也不被 hero 盖住,更不会撑出页面
@@ -30,30 +66,12 @@ function PinPortalPopover({
   onMouseLeave?: () => void;
   children: ReactNode;
 }) {
-  // 挂载/翻开分两拍走,卸载等收拢放完:
-  // ① beUI Popover **首帧就带 open=true 挂载**会踩内部竞态(量尺寸的 re-render 与开场 spring 抢跑,
-  //    裁剪停在 p=0、面板隐形,实测)→ 先挂载(关)、下一拍再翻开,恒走页面上其它 popover 的健康路径。
-  // ② 关闭后 goo 底色在触发器位置留一块药丸 —— 原生 beUI 里它垫在触发器**底下**,portal 后整层浮在
-  //    tab **上面**,不卸载就永久盖住 tab(实测)→ 收拢动画放完(GOO_COLLAPSE_MS)整个卸载。
-  const [mounted, setMounted] = useState(false);
-  const [openDeferred, setOpenDeferred] = useState(false);
-  useEffect(() => {
-    if (open) {
-      setMounted(true);
-      return;
-    }
-    setOpenDeferred(false);
-    const t = setTimeout(() => setMounted(false), GOO_COLLAPSE_MS);
-    return () => clearTimeout(t);
-  }, [open]);
-  useEffect(() => {
-    if (open && mounted) setOpenDeferred(true);
-  }, [open, mounted]);
+  const { mounted, openDeferred } = useDeferredOpen(open);
   if (!rect || !mounted) return null;
-  // 横向:右边放得下就左对齐触发器,否则右对齐;竖向:下方放得下就朝下,否则朝上。皆按**视口**算(已 fixed)。
-  const align: "start" | "end" = rect.left + PIN_PANEL_W <= window.innerWidth - 8 ? "start" : "end";
-  const side: "top" | "bottom" =
-    window.innerHeight - rect.bottom > PIN_PANEL_H || rect.top < PIN_PANEL_H ? "bottom" : "top";
+  const { align, side } = placePanel(rect, {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
   return (
     <Portal>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: 纯浮层容器;可交互项在面板内,tab 本身可键盘达。 */}
@@ -95,23 +113,67 @@ function PinPortalPopover({
   );
 }
 
+function useHoverDelay(onHide: () => void) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onHideRef = useRef(onHide);
+  onHideRef.current = onHide;
+  const clear = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  useEffect(() => () => clear(), [clear]);
+  const hideSoon = useCallback(() => {
+    clear();
+    timer.current = setTimeout(() => onHideRef.current(), HIDE_SOON_MS);
+  }, [clear]);
+  return { clear, hideSoon };
+}
+
+// 浮层是 fixed 的:触发器一移位就与面板脱节 → 关掉。两道过滤,只关「真脱节」:
+// ① 滚动的容器不包含触发器(= 面板内部滚动,选择器 overflow-y-auto)→ 不关;
+// ② 触发器量出来没动(show() 里 revealTab 自滚的 scroll 事件是异步到的,不算脱节)→ 不关。
+// resize 一律关。
+function useCloseOnDetach(
+  open: boolean,
+  rect: DOMRect | null,
+  anchorRef: RefObject<HTMLElement | null>,
+  close: () => void,
+) {
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = (e: Event) => {
+      const t = e.target;
+      if (t instanceof Node && anchorRef.current && !t.contains(anchorRef.current)) return;
+      const r = anchorRef.current?.getBoundingClientRect();
+      if (r && rect && Math.abs(r.left - rect.left) < 1 && Math.abs(r.top - rect.top) < 1) return;
+      closeRef.current();
+    };
+    const onResize = () => closeRef.current();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open, rect, anchorRef]);
+}
+
 // 开合行为(需求 9:桌面/手机一致):gateOpen 不过就**绝不开** —— pin 必须先选中(首点只选中,
 // 再点已选中的才开);＋ 无「选中」一说,首次触发即开。桌面额外有 hover:已选中的 pin 移上去即开、
-// 移开延迟一点再关(便于从 tab 挪进面板);未选中的 hover 不开。滚动/缩放即关,避免 fixed 浮层与触发器脱节。
+// 移开延迟一点再关(便于从 tab 挪进面板);未选中的 hover 不开。
 function usePinPanel(canHover: boolean, gateOpen: () => boolean) {
   const anchorRef = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clear = () => {
-    if (timer.current) clearTimeout(timer.current);
-  };
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+  const close = useCallback(() => setOpen(false), []);
+  const { clear, hideSoon } = useHoverDelay(close);
+  const closeNow = useCallback(() => {
+    clear();
+    close();
+  }, [clear, close]);
+  useCloseOnDetach(open, rect, anchorRef, closeNow);
+
   const show = () => {
     clear();
     const a = anchorRef.current;
@@ -120,35 +182,6 @@ function usePinPanel(canHover: boolean, gateOpen: () => boolean) {
     if (r) setRect(r);
     setOpen(true);
   };
-  const close = () => {
-    clear();
-    setOpen(false);
-  };
-  const hideSoon = () => {
-    clear();
-    timer.current = setTimeout(() => setOpen(false), 140);
-  };
-  // 浮层是 fixed 的:触发器一移位就与面板脱节 → 关掉。两道过滤,只关「真脱节」:
-  // ① 滚动的容器不包含触发器(= 面板内部滚动,选择器 overflow-y-auto)→ 不关;
-  // ② 触发器量出来没动(show() 里 revealTab 自滚的 scroll 事件是异步到的,不算脱节)→ 不关。
-  // resize 一律关。
-  useEffect(() => {
-    if (!open) return;
-    const onScroll = (e: Event) => {
-      const t = e.target;
-      if (t instanceof Node && anchorRef.current && !t.contains(anchorRef.current)) return;
-      const r = anchorRef.current?.getBoundingClientRect();
-      if (r && rect && Math.abs(r.left - rect.left) < 1 && Math.abs(r.top - rect.top) < 1) return;
-      setOpen(false);
-    };
-    const onResize = () => setOpen(false);
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onResize);
-    };
-  }, [open, rect]);
   const hoverProps = canHover
     ? {
         onMouseEnter: () => {
@@ -158,10 +191,10 @@ function usePinPanel(canHover: boolean, gateOpen: () => boolean) {
       }
     : {};
   const onClick = () => {
-    if (open) close();
+    if (open) closeNow();
     else if (gateOpen()) show(); // 首点选中时 isActive 还是旧值 false → 只选中不开;再点才开
   };
-  return { anchorRef, open, rect, show, close, hideSoon, clear, hoverProps, onClick };
+  return { anchorRef, open, rect, close: closeNow, hideSoon, clear, hoverProps, onClick };
 }
 
 // 对外唯一入口:包住触发器,自己管锚点 / hover / 开合 / ghost / 浮层。

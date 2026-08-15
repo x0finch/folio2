@@ -17,14 +17,13 @@ import { type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AccountName } from "../../../../../components/account-name";
 import { AvatarStack } from "../../../../../components/avatar-stack";
+import { type Range, RangeTabs, rangeSince } from "../../../../../components/range-tabs";
 import type { Holding } from "../../../../../lib/aggregate";
 import { collapseToSlots } from "../../../../../lib/collapse-to-slots";
 import { formatNumber } from "../../../../../lib/format-number";
 import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
 import { holdingHistoryQuery } from "../../../../../lib/queries/accounts";
 import { signedUsd } from "../../../../../lib/signed-usd";
-import { GainExplainer } from "../../hero/gain-explainer";
-import { type Range, RangeTabs, rangeSince } from "../../hero/range-tabs";
 import { TrendPanel } from "../../hero/trend-panel";
 import { deltaTone, NO_VALUE } from "../value-delta";
 import { ACCOUNT_SLOTS, groupByAccount, groupByPlatform, type SourceGroup } from "./source-groups";
@@ -32,7 +31,7 @@ import { ACCOUNT_SLOTS, groupByAccount, groupByPlatform, type SourceGroup } from
 // 代币 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
 // 头部背景 = 单币【持仓价值】历史(片 2):折线随涨跌走 --pos/--neg,内容浮其上;可切 7d/30d/1y/全部。
 // 来源区是 Platforms / Accounts 两视图的 tab 切换(互为转置):按平台看散在哪些链/场馆,或按账户看散在哪些账户。
-// 窗口切换(RangeTabs)与账户抽屉共用,抽到 ./range-tabs。
+// 窗口切换(RangeTabs)与账户抽屉共用,抽到 components/range-tabs。
 
 // 组头像:单 avatar → 单 logo;多 avatar(账户跨多链)→ 叠标 + N(共享 AvatarStack)。
 // manual 亦有内置 logo(NotebookPen),走普通 LogoAvatar,不再特判。
@@ -243,12 +242,10 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
             {holding.gain24h == null ? (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
             ) : (
-              <GainExplainer gain={holding.gain24h} className="block text-left">
-                <span className={cn("mt-1 block text-sm tabular-nums", deltaTone(dayValue))}>
-                  {signedUsd(usd, dayValue ?? 0)}
-                  {dayPct != null ? ` ${Math.abs(dayPct).toFixed(2)}%` : ""}
-                </span>
-              </GainExplainer>
+              <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayValue))}>
+                {signedUsd(usd, dayValue ?? 0)}
+                {dayPct != null ? ` ${Math.abs(dayPct).toFixed(2)}%` : ""}
+              </div>
             )}
           </div>
         </div>

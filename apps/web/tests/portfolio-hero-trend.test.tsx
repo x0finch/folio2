@@ -104,7 +104,7 @@ describe("hero 趋势区的三态", () => {
     expect(spanBadge()).toBeNull();
   });
 
-  it("24h 盈亏还在取 → 药丸走骨架,不先闪破折号", () => {
+  it("24h 盈亏还在取 → 增量走骨架,不先闪破折号", () => {
     const { container } = render(
       <IntlProvider locale="en" messages={messages.en} timeZone="UTC" now={new Date(T0)}>
         <PortfolioHero series={[]} totalUsd={110} gain24h={null} holdings={holdings} gainPending />
@@ -112,9 +112,8 @@ describe("hero 趋势区的三态", () => {
     );
 
     expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
-    // 破折号仍可能出现在稳定币占比(T2,不跟盈亏等);药丸/best/worst 不该是 `—`。
-    const pill = container.querySelector(".rounded-full");
-    expect(pill?.textContent).not.toBe("—");
+    // 破折号仍可能出现在稳定币占比(T2,不跟盈亏等);增量/best/worst 不该是 `—`。
+    expect(container.querySelector("[data-slot=skeleton]")?.textContent).not.toBe("—");
   });
 
   it("两个点但落在同一个钟点 → 被降采样并成一个,于是仍是空态", () => {

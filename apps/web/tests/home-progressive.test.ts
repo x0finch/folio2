@@ -45,7 +45,7 @@ describe("骨架与真内容同形", () => {
 });
 
 describe("盈亏骨架三处复用同一元件", () => {
-  it("行内 / 药丸 / best-worst 都走 <GainSkeleton>", () => {
+  it("行内 / hero 增量 / best-worst 都走 <GainSkeleton>", () => {
     expect(src("routes/_authed/-home/holdings/value-delta.tsx")).toContain("<GainSkeleton");
     const hero = src("routes/_authed/-home/hero/portfolio-hero.tsx");
     expect(hero.match(/<GainSkeleton/g)?.length).toBe(3);

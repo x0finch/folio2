@@ -4,7 +4,6 @@ import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { z } from "zod";
 import { AllocationPie } from "../../components/allocation-pie";
-import { HeaderSync } from "../../components/header-sync";
 import { PortfolioChart } from "../../components/portfolio-chart";
 import { InsightsSkeleton } from "../../components/skeletons";
 import {
@@ -21,6 +20,7 @@ import {
   portfolioListQuery,
   portfolioOverviewQuery,
 } from "../../lib/queries/portfolio";
+import { HeaderSync } from "./-home/header-sync";
 
 // 维度的标签。键的全集在 `lib/allocation.ts`(那份 schema 既是合法值也是回落判据),这里只配文案 ——
 // `Record` 少配一个维度编译期就报,不会出现「新维度悄悄没标签」。

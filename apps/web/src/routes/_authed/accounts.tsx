@@ -10,7 +10,6 @@ import { AccountDetailSheet, type AccountRow } from "../../components/account-de
 import { AddAccountModal, type CompleteTarget } from "../../components/add-account-modal";
 import { AvatarStack } from "../../components/avatar-stack";
 import { ConnectorBadge } from "../../components/connector-badge";
-import { HeaderSync } from "../../components/header-sync";
 import { AccountsSkeleton } from "../../components/skeletons";
 import { TagBadges } from "../../components/tag-badges";
 import { buildAccountRows } from "../../lib/account-rows";
@@ -26,6 +25,7 @@ import { accountHoldingsQuery, accountListQuery } from "../../lib/queries/accoun
 import { connectorCatalogQuery } from "../../lib/queries/connectors";
 import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "../../lib/queries/tags";
+import { HeaderSync } from "./-home/header-sync";
 import { ValueDelta } from "./-home/holdings/value-delta";
 
 export const Route = createFileRoute("/_authed/accounts")({

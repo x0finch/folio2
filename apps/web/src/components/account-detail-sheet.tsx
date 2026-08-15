@@ -36,8 +36,6 @@ import { invalidateFor } from "../lib/queries/refresh";
 import { removeAccount, updateAccount } from "../lib/server/accounts";
 import { syncAccount } from "../lib/server/sync";
 import { signedUsd } from "../lib/signed-usd";
-import { GainExplainer } from "../routes/_authed/-home/hero/gain-explainer";
-import { type Range, RangeTabs, rangeSince } from "../routes/_authed/-home/hero/range-tabs";
 import { TrendPanel } from "../routes/_authed/-home/hero/trend-panel";
 import { deltaTone, NO_VALUE } from "../routes/_authed/-home/holdings/value-delta";
 import { AccountTagsModal } from "./account-tags-modal";
@@ -48,6 +46,7 @@ import { IconButton } from "./icon-button";
 import { ManualTokensPanel } from "./manual-tokens-panel";
 import { Portal } from "./portal";
 import { PortfolioPickerModal } from "./portfolio-picker-modal";
+import { type Range, RangeTabs, rangeSince } from "./range-tabs";
 import { TagBadges } from "./tag-badges";
 
 // 账户页列表行的合并形状(listAccountHoldings ∪ listAccounts,见 accounts.tsx loader)。
@@ -301,14 +300,10 @@ function DetailBody({
                 (dayChange == null ? (
                   <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
                 ) : (
-                  <GainExplainer gain={dayChange} className="block text-left">
-                    <span
-                      className={cn("mt-1 block text-sm tabular-nums", deltaTone(dayChange.amount))}
-                    >
-                      {signedUsd(usd, dayChange.amount)}
-                      {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
-                    </span>
-                  </GainExplainer>
+                  <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange.amount))}>
+                    {signedUsd(usd, dayChange.amount)}
+                    {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
+                  </div>
                 ))}
             </div>
             {/* 缺凭据告警行:⚠ + 可点击"补填凭据以同步"提示(文案即入口 → 开加账户 modal 的补录模式,A3)。 */}
