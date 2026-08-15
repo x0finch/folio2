@@ -163,7 +163,6 @@ function DetailBody({
   const tp = useTranslations("Portfolio");
   const tt = useTranslations("Tags");
   const format = useFormatter();
-  const usd = useDisplayValue();
   const queryClient = useQueryClient();
   // 改名 / 归档 / 删除同时改账户域与组合域(总额、走势)—— 映射表那一条两个前缀都列了。
   const refresh = () => invalidateFor(queryClient, "account.write");
@@ -305,31 +304,13 @@ function DetailBody({
             {/* 市值 + 24h 增量:字号同代币抽屉(值 text-3xl bold、增量 text-sm);缺凭据 → 无增量。
                 金额没到也能点开抽屉(#493):头上的数字和下面持仓走骨架,不先画 0。 */}
             <div>
-              {account.valuesReady ? (
-                <>
-                  <div className="font-bold text-3xl tabular-nums">{usd(account.totalUsd)}</div>
-                  {hasDayChange &&
-                    (gainPending ? (
-                      <div className="mt-1">
-                        <GainSkeleton />
-                      </div>
-                    ) : dayChange == null ? (
-                      <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>
-                        {NO_VALUE}
-                      </div>
-                    ) : (
-                      <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange.amount))}>
-                        {signedUsd(usd, dayChange.amount)}
-                        {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
-                      </div>
-                    ))}
-                </>
-              ) : (
-                <div className="flex flex-col gap-1">
-                  <Skeleton className="h-9 w-36" />
-                  <GainSkeleton />
-                </div>
-              )}
+              <SheetHeaderValue
+                valuesReady={account.valuesReady}
+                totalUsd={account.totalUsd}
+                hasDayChange={hasDayChange}
+                gainPending={gainPending}
+                dayChange={dayChange}
+              />
             </div>
             {/* 缺凭据告警行:⚠ + 可点击"补填凭据以同步"提示(文案即入口 → 开加账户 modal 的补录模式,A3)。 */}
             {account.needsCredentials && (
@@ -479,33 +460,98 @@ function DetailBody({
         onClose={() => setTagsOpen(false)}
       />
 
-      {/* manual 账户:多 token 面板(Tokens tab 已含持仓,故不再叠加上方持仓卡)。
-          非-manual:持仓卡片列表 + provider 明细手风琴(缺凭据带导入快照 → 渲染陈旧持仓;无快照 → 内部空态)。
-          金额没到 → 骨架,不把空数组画成「没有持仓」。 */}
-      {account.valuesReady ? (
-        isManual(account.connectorId) ? (
-          <div className="mt-6">
-            <ManualTokensPanel
-              accountId={account.id}
-              balances={account.balances}
-              gainPending={gainPending}
-            />
-          </div>
-        ) : (
-          <div className="mt-6">
-            <AccountHoldingsCards
-              balances={account.balances}
-              accountNote={account.note}
-              gainPending={gainPending}
-            />
-          </div>
-        )
-      ) : (
-        <div className="mt-6 flex flex-col gap-3">
-          <Skeleton className="h-16 w-full rounded-xl" />
-          <Skeleton className="h-16 w-full rounded-xl" />
-        </div>
+      <SheetHoldings account={account} gainPending={gainPending} />
+    </>
+  );
+}
+
+function SheetHeaderValue({
+  valuesReady,
+  totalUsd,
+  hasDayChange,
+  gainPending,
+  dayChange,
+}: {
+  valuesReady: boolean;
+  totalUsd: number;
+  hasDayChange: boolean;
+  gainPending: boolean;
+  dayChange: Gain | null | undefined;
+}) {
+  const usd = useDisplayValue();
+  if (!valuesReady) {
+    return (
+      <div className="flex flex-col gap-1">
+        <Skeleton className="h-9 w-36" />
+        <GainSkeleton />
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="font-bold text-3xl tabular-nums">{usd(totalUsd)}</div>
+      {hasDayChange && (
+        <SheetHeaderGain gainPending={gainPending} dayChange={dayChange} usd={usd} />
       )}
     </>
+  );
+}
+
+function SheetHeaderGain({
+  gainPending,
+  dayChange,
+  usd,
+}: {
+  gainPending: boolean;
+  dayChange: Gain | null | undefined;
+  usd: (n: number) => string;
+}) {
+  if (gainPending) {
+    return (
+      <div className="mt-1">
+        <GainSkeleton />
+      </div>
+    );
+  }
+  if (dayChange == null) {
+    return <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>;
+  }
+  return (
+    <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange.amount))}>
+      {signedUsd(usd, dayChange.amount)}
+      {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
+    </div>
+  );
+}
+
+function SheetHoldings({ account, gainPending }: { account: AccountRow; gainPending: boolean }) {
+  // manual:Tokens tab 已含持仓,不再叠卡片。非-manual:持仓卡 + note。金额没到 → 骨架,不把空数组画成「没有持仓」。
+  if (!account.valuesReady) {
+    return (
+      <div className="mt-6 flex flex-col gap-3">
+        <Skeleton className="h-16 w-full rounded-xl" />
+        <Skeleton className="h-16 w-full rounded-xl" />
+      </div>
+    );
+  }
+  if (isManual(account.connectorId)) {
+    return (
+      <div className="mt-6">
+        <ManualTokensPanel
+          accountId={account.id}
+          balances={account.balances}
+          gainPending={gainPending}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="mt-6">
+      <AccountHoldingsCards
+        balances={account.balances}
+        accountNote={account.note}
+        gainPending={gainPending}
+      />
+    </div>
   );
 }
