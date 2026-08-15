@@ -3,7 +3,6 @@ import { useTranslations } from "use-intl";
 import { DefiPositions, PerpPositionsList } from "../../../components/holdings-sections";
 import { QueryBoundary } from "../../../components/query-boundary";
 import { SectionList } from "../../../components/section-list";
-import { ListSkeleton } from "../../../components/skeletons";
 import { mergeDefiGroups } from "../../../lib/account-view";
 import { attachDefiGains, attachHoldingGains } from "../../../lib/attach-gains";
 import { type KindTab, kindTabsOf } from "../../../lib/home-tabs";
@@ -15,7 +14,8 @@ import {
   portfolioGain24hQuery,
   portfolioOverviewQuery,
 } from "../../../lib/queries/portfolio";
-import { pinScopeOf, useHomeTabSelection } from "./tab-selection";
+import { ListSkeleton } from "./skeletons";
+import { pinScopeOf, useHomeTabSelection } from "./tab/selection";
 import { TokenHoldings } from "./token-holdings";
 
 // 现货/永续/DeFi 三段的拆解(从某份数据的 sections 里挑出永续项 + DeFi 分组 + 永续权益小计)。

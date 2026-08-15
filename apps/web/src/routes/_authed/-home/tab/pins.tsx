@@ -12,25 +12,25 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { Plus } from "lucide-react";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { Portal } from "../../../components/portal";
-import { QueryBoundary } from "../../../components/query-boundary";
-import { accountsInView } from "../../../lib/accounts-in-view";
-import { connectorLabelFallback } from "../../../lib/connector-label";
-import { kindTabsOf, tabAfterUnpin } from "../../../lib/home-tabs";
-import { usePortfolio } from "../../../lib/hooks/use-portfolio";
-import { accountListQuery } from "../../../lib/queries/accounts";
-import { connectorCatalogQuery } from "../../../lib/queries/connectors";
+import { Portal } from "../../../../components/portal";
+import { QueryBoundary } from "../../../../components/query-boundary";
+import { accountsInView } from "../../../../lib/accounts-in-view";
+import { connectorLabelFallback } from "../../../../lib/connector-label";
+import { kindTabsOf, tabAfterUnpin } from "../../../../lib/home-tabs";
+import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
+import { accountListQuery } from "../../../../lib/queries/accounts";
+import { connectorCatalogQuery } from "../../../../lib/queries/connectors";
 import {
   type HomeTabStrip,
   homeTabStripQuery,
   portfolioMembershipsQuery,
-} from "../../../lib/queries/portfolio";
-import { invalidateFor } from "../../../lib/queries/refresh";
-import { tagListQuery } from "../../../lib/queries/tags";
-import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../../lib/server/tab-pins";
-import { type PinTargetChoice, TabPinPicker } from "./tab-pin-picker";
-import { PinTargetMark } from "./tab-pin-target-mark";
-import { revealTab, useHomeTabSelection } from "./tab-selection";
+} from "../../../../lib/queries/portfolio";
+import { invalidateFor } from "../../../../lib/queries/refresh";
+import { tagListQuery } from "../../../../lib/queries/tags";
+import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../../../lib/server/tab-pins";
+import { type PinTargetChoice, TabPinPicker } from "./pin-picker";
+import { PinTargetMark } from "./pin-target-mark";
+import { revealTab, useHomeTabSelection } from "./selection";
 
 const MAX_PINS = 3;
 

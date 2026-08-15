@@ -3,13 +3,13 @@ import { Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { HeaderSync } from "../../../components/header-sync";
 import { QueryBoundary } from "../../../components/query-boundary";
-import { HeroSkeleton, HoldingsSkeleton, TabStripSkeleton } from "../../../components/skeletons";
 import { usePortfolio } from "../../../lib/hooks/use-portfolio";
 import { portfolioKeys } from "../../../lib/queries/keys";
 import { homeTabStripQuery } from "../../../lib/queries/portfolio";
 import { HeroIsland } from "./hero";
 import { HoldingsIsland } from "./holdings";
-import { TabStripIsland } from "./tab-strip";
+import { HeroSkeleton, HoldingsSkeleton, TabStripSkeleton } from "./skeletons";
+import { TabStripIsland } from "./tab";
 
 export function Overview() {
   const { selectedId } = usePortfolio();

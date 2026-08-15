@@ -18,29 +18,31 @@ function stripComments(source: string): string {
 describe("骨架与真内容同形", () => {
   it("hero 骨架与 PortfolioHero 外框同高", () => {
     expect(src("components/portfolio-hero.tsx")).toContain("min-h-60");
-    expect(src("components/skeletons.tsx")).toMatch(/function HeroSkeleton[\s\S]*min-h-60/);
+    expect(src("routes/_authed/-home/skeletons.tsx")).toMatch(
+      /function HeroSkeleton[\s\S]*min-h-60/,
+    );
   });
 
   it("持仓行骨架贴合真实行的 padding 与头像尺寸", () => {
-    const skel = src("components/skeletons.tsx");
+    const skel = src("routes/_authed/-home/skeletons.tsx");
     expect(src("routes/_authed/-home/token-holdings.tsx")).toContain("px-3 py-3");
     expect(skel).toContain("px-3 py-3");
     expect(skel).toContain("size-8");
   });
 
   it("tab 条骨架与真条同一套横向排布", () => {
-    expect(src("routes/_authed/-home/tab-strip.tsx")).toContain("flex items-center gap-4");
-    expect(src("components/skeletons.tsx")).toMatch(
+    expect(src("routes/_authed/-home/tab/index.tsx")).toContain("flex items-center gap-4");
+    expect(src("routes/_authed/-home/skeletons.tsx")).toMatch(
       /function TabStripSkeleton[\s\S]*flex items-center gap-4/,
     );
   });
 
   it("tab 条合计位有下限宽度,等待走骨架而不是破折号", () => {
-    const strip = src("routes/_authed/-home/tab-strip.tsx");
+    const strip = src("routes/_authed/-home/tab/index.tsx");
     expect(strip).toContain("min-w-24");
     expect(strip).toContain("<TabTotalSkeleton");
     expect(strip).not.toContain('pending="—"');
-    expect(src("components/skeletons.tsx")).toMatch(
+    expect(src("routes/_authed/-home/skeletons.tsx")).toMatch(
       /function TabTotalSkeleton[\s\S]*inline-block h-4 w-24/,
     );
   });

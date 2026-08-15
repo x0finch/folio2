@@ -1,6 +1,6 @@
-import { useConnectorLabels, useConnectorLogos } from "../../../hooks/use-connector-labels";
-import type { PinTargetChoice } from "./tab-pin-picker";
-import { PinTargetMark } from "./tab-pin-target-mark";
+import { useConnectorLabels, useConnectorLogos } from "../../../../hooks/use-connector-labels";
+import type { PinTargetChoice } from "./pin-picker";
+import { PinTargetMark } from "./pin-target-mark";
 
 // 选择器用:仍走连接器目录(打开选择器才拉)。tab 条不要用它 —— 一挂就打目录。
 export function PinTargetLabel({
