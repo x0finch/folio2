@@ -1,4 +1,5 @@
 import { AccountStore, PortfolioStore, SettingsStore, SnapshotStore, TagStore } from "@folio/db";
+import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
@@ -23,6 +24,10 @@ import {
 import { runAtEdge, runRequest, runStore, withRequest } from "./internal/oracle";
 import { buildOverview } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
+
+// 读路径耗时打点(#488)。**一次请求一行**,字段固定 → Workers Logs 里能直接按字段聚合。
+// 存在的理由不是「日志越多越好」:首页要按数据成本分拍渐进渲染,而「哪一段贵」不能靠读代码猜。
+const readLog = getLogger(["folio", "web", "read-path"]);
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
 // 仅按选中 Portfolio scope(曲线 / 列表默认口径);不带 pin。
@@ -78,10 +83,13 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
           const settingsStore = yield* SettingsStore;
           const tagStore = yield* TagStore;
 
+          const tTotal = performance.now();
           const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
+          const scopeMs = performance.now() - tTotal;
           // 「当下」取一次,整条链共用 —— 分段的末点、容差判定、取历史的下界都按同一刻算,
           // 各自现取 `Date.now()` 会在毫秒级上错开(测试里更是直接不可复现)。
           const now = Date.now();
+          const tReads = performance.now();
           const [allAccounts, snapshots, settings, memberships, gainHistory] = yield* Effect.all(
             [
               accountStore.list(),
@@ -94,6 +102,7 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
             ],
             { concurrency: 5 },
           );
+          const readsMs = performance.now() - tReads;
           // 聚合边界(ADR 0033):活跃 && 归属选中 Portfolio(未归属账户兜底进默认视图)。
           // 自定义 Tab(ADR 0034):再按 pin(connector/tag)在选中 Portfolio 内收窄;pin=null → 不收窄。
           const pin = toTabPin(data.pin);
@@ -104,24 +113,48 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
             tagLinks,
           );
           const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
+          const tInject = performance.now();
           // manual 不写快照(ADR 0018):为 manual 账户注入从 creds.tokens 现造的合成当下项。
           yield* injectManualSnapshots(accounts, byAccount);
+          const injectMs = performance.now() - tInject;
+          const tFiat = performance.now();
           // 法币身份(#271):按 token_id 取各法币持仓的 fiat 命名者 ref → overview 经 fiatCodeOf 算 isFiat
           //(计入净值本就由 spot 聚合负责,这里只补「哪些行是法币」用于稳定占比)。
           const fiatRefs = yield* manualFiatRefs(accounts);
+          const fiatMs = performance.now() - tFiat;
           // 盈亏只按视图内的账户算 —— 历史是全量读的(一次查询比按账户分批便宜),这里收窄到
           // 当前 Portfolio / Tab 的账户,否则一个不在视图里的账户会把它的涨跌算进这一屏。
           const inView = new Set(accounts.map((a) => a.id));
           // manual 从不写快照(ADR 0018)→ 它的原料不在上面那次查询里,按账本另算(#447 第 3 片)。
           // 窗口起点直接产点(账本能算任意时刻),所以这里传的是 `now - GAIN_WINDOW_MS` 本身,
           // 而不是上面那个带容差的下界 —— 容差是给稀疏快照留的,账本不需要。
+          const tManualGain = performance.now();
           const manualGain = yield* loadManualGainHistory(accounts, now, now - GAIN_WINDOW_MS);
+          const manualGainMs = performance.now() - tManualGain;
           return yield* buildOverview(accounts, byAccount, {
             connectorMeta: connectorPlatformMeta,
             mode: settings.valuationMode,
             fiatRefs,
             gainHistory: [...gainHistory.filter((r) => inView.has(r.accountId)), ...manualGain],
             now,
+            // `totalMs` 少算了收尾那几步(装饰 + 汇总),但那几步是纯内存的,少算的量正是噪声本身。
+            onTimings: ({ enrichMs, gainMs, aggMs, platformMs, sectionsMs, holdings }) =>
+              readLog.info("overview timings", {
+                totalMs: Math.round(performance.now() - tTotal),
+                scopeMs: Math.round(scopeMs),
+                readsMs: Math.round(readsMs),
+                injectMs: Math.round(injectMs),
+                fiatMs: Math.round(fiatMs),
+                manualGainMs: Math.round(manualGainMs),
+                enrichMs: Math.round(enrichMs),
+                aggMs: Math.round(aggMs),
+                gainMs: Math.round(gainMs),
+                platformMs: Math.round(platformMs),
+                sectionsMs: Math.round(sectionsMs),
+                accounts: accounts.length,
+                holdings,
+                gainRows: gainHistory.length,
+              }),
           });
         }),
       ),
@@ -146,7 +179,9 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
     runRequest(
       context.userId,
       Effect.gen(function* () {
+        const tTotal = performance.now();
         const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
+        const tReads = performance.now();
         const [rows, allAccounts, snapshots, settings, memberships] = yield* Effect.all(
           [
             Effect.flatMap(SnapshotStore, (s) => s.listTotals()),
@@ -157,6 +192,7 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
           ],
           { concurrency: 5 },
         );
+        const readsMs = performance.now() - tReads;
         // 曲线追溯性地只算选中 Portfolio 的当前成员(ADR 0033):
         //  · memberSet = 归属选中的账户(**含已归档**)→ 过去点按它 scope,保留归档成员的历史贡献;
         //  · accounts  = 其中未归档的 → 曲线当下点(live 覆写)只算活跃成员。
@@ -191,7 +227,19 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
           ),
         );
         const series = buildPortfolioHistory([...snapRows, ...manualRows], archivedAt);
-        if (series.length === 0) return { series };
+        // 空序列直接返回 —— 打一行再走,免得「没数据」这条最快的路在日志里缺席、拉偏分布。
+        const logHistory = () =>
+          readLog.info("history timings", {
+            totalMs: Math.round(performance.now() - tTotal),
+            readsMs: Math.round(readsMs),
+            snapRows: snapRows.length,
+            manualRows: manualRows.length,
+            points: series.length,
+          });
+        if (series.length === 0) {
+          logHistory();
+          return { series };
+        }
 
         // 当下点 = 与主页同源同算的实时总价(活跃账户,与 getPortfolioOverview 一致的账户集 + 同一 mode)。
         const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
@@ -205,6 +253,7 @@ export const getPortfolioHistory = createServerFn({ method: "GET" })
         let grand = 0;
         for (const v of liveTotals.values()) grand += v;
         series[series.length - 1] = { ...series[series.length - 1], total: grand };
+        logHistory();
         return { series };
       }),
     ),
