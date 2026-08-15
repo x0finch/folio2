@@ -397,6 +397,12 @@ const accountFiatRefs = (
 const buildHistoricalPriceAt = (
   tokens: HistoryToken[],
   now: number,
+  // 要哪一段的历史价。缺省:该币第一笔活动 → `now`(抽屉那条曲线要完整一段)。
+  //
+  // **上界比下界重要得多。** `priceSeries` 对**今日**那一格恒回源(今日价可变、不缓存),所以
+  // 只要上界落在今天,每个币每次读都要走一趟 CoinGecko —— 实测那就是首页读路径 83% 的耗时
+  // (两个手记账户各一个币,各约 800ms)。过去日则是不可变的:取过一次就落库,之后零网络。
+  range?: { from: number; to: number },
 ): Effect.Effect<HistoricalPriceAt, never, TokenService | FxService> =>
   Effect.gen(function* () {
     const byIdentifier = new Map<string, Map<number, number>>();
@@ -406,16 +412,18 @@ const buildHistoricalPriceAt = (
         Effect.gen(function* () {
           // 上游没认出来的币不问历史价(问了也没有)。
           if (!tk.recognized || tk.activities.length === 0 || byIdentifier.has(tk.id)) return;
-          const from = Math.min(...tk.activities.map((a) => a.occurredAt));
+          const firstActivity = Math.min(...tk.activities.map((a) => a.occurredAt));
+          const from = range ? Math.max(firstActivity, range.from) : firstActivity;
+          const to = range?.to ?? now;
           const daily = new Map<number, number>();
           // 法币:历史价 = **当天汇率**(ADR 0026),从 fx-history 取而不是币价历史(法币无币价)。
           // 其余:按 token_id 取币价历史(#203,priceSeries 收内部 id)。两条都灌进同一个 priceAt 闭包,
           // 纯层 tokenPriceAt 的第 ① 档对法币照常生效(它只看 recognized,不认识 fiat)。
           const series = tk.fiatCode
             ? yield* Effect.flatMap(FxService, (fx) =>
-                fx.rateSeries(tk.fiatCode as string, from, now),
+                fx.rateSeries(tk.fiatCode as string, from, to),
               )
-            : yield* Effect.flatMap(TokenService, (t) => t.priceSeries(tk.id, from, now));
+            : yield* Effect.flatMap(TokenService, (t) => t.priceSeries(tk.id, from, to));
           for (const pt of series) daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
           byIdentifier.set(tk.id, daily);
         }),
@@ -620,7 +628,13 @@ export const loadManualGainHistory = (
         Effect.gen(function* () {
           const tokens = yield* loadHistoryTokens(account.id);
           if (tokens.length === 0) return;
-          const priceAt = yield* buildHistoricalPriceAt(tokens, now);
+          // **只要窗口起点那一天的价**,不是「到现在为止」。三种时刻各有各的来源:
+          //  · 窗口起点 → 这里取的历史价(恒落在昨天 → 不可变 → 取过一次就落库 → 之后零网络);
+          //  · 窗口内的活动 → 那笔活动自己记的价(降级链第 ② 档),比日收盘价更贴切;
+          //  · 「当下」→ 压根不在这里产,末点由 overview 的实时值供给(见 buildGainLines)。
+          // 以前这里要到 `now`,于是每次都撞上 `priceSeries` 的「今日桶恒回源」—— 读一次首页
+          // 就得为每个手记币走一趟 CoinGecko,实测占整个读路径的 83%。
+          const priceAt = yield* buildHistoricalPriceAt(tokens, now, { from: since, to: since });
           // 观测时刻取**账户级**并集(见上面 ②):窗口起点 + 窗口内每一笔活动的时刻。
           const times = new Set<number>([since]);
           for (const tk of tokens) {
