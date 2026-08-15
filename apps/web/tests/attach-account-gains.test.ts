@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachAccountGains } from "../src/routes/_authed/-accounts/attach-gains";
+import { attachAccountGains } from "../src/routes/_authed/-accounts/list-attach-gains";
 
 // #493 票 3:盈亏是另一包数据,客户端按账户 id / 余额行 id 拼回。拼错的后果是静默的
 // (行上没有增量),所以钉子钉在拼法上,不钉数字怎么算。

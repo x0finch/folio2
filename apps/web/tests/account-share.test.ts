@@ -3,7 +3,7 @@ import {
   accountShare,
   activeAccountsTotal,
   shareLabel,
-} from "../src/routes/_authed/-accounts/share";
+} from "../src/routes/_authed/-accounts/list-rows";
 
 // 归档 = 封存(ADR 0039)之后,归档行**有**市值了 —— 而分母仍然只能是活跃账户。
 // 这条以前是靠「归档行的市值恒为 0」侥幸成立的,那个前提已经没了,所以显式钉一条。

@@ -60,3 +60,35 @@ export function buildAccountRows(sources: {
     };
   });
 }
+
+export function sortActiveAccounts<T extends { totalUsd: number }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => b.totalUsd - a.totalUsd);
+}
+
+// 分母只计活跃账户。归档有市值也不进(ADR 0039)。总计 ≤ 0 → 占比 0。
+export function activeAccountsTotal(
+  rows: { totalUsd: number; archivedAt: number | null }[],
+): number {
+  return rows.reduce((s, r) => (r.archivedAt == null ? s + r.totalUsd : s), 0);
+}
+
+export function accountShare(value: number, total: number): number {
+  return total > 0 ? value / total : 0;
+}
+
+export function shareLabel(pct: number): string {
+  return pct > 0 && pct < 1 ? "<1.0" : pct.toFixed(1);
+}
+
+export const STALE_SYNC_MS = 24 * 60 * 60 * 1000;
+
+export type AccountSyncStatus = "needsCreds" | "never" | "stale" | "fresh";
+
+export function accountSyncStatus(
+  account: { needsCredentials: boolean; takenAt: number | null },
+  nowMs: number,
+): AccountSyncStatus {
+  if (account.needsCredentials) return "needsCreds";
+  if (account.takenAt == null) return "never";
+  return nowMs - account.takenAt > STALE_SYNC_MS ? "stale" : "fresh";
+}

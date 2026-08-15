@@ -48,7 +48,7 @@ import { syncAccount } from "../../../lib/server/sync";
 import { signedUsd } from "../../../lib/signed-usd";
 import { TrendPanel } from "../-home/hero/trend-panel";
 import { deltaTone, GainSkeleton, NO_VALUE } from "../-home/holdings/value-delta";
-import { accountShare, shareLabel } from "./share";
+import { accountShare, shareLabel } from "./list-rows";
 
 // 账户页列表行的合并形状(listAccountHoldings ∪ listAccounts,见 accounts.tsx loader)。
 export interface AccountRow {

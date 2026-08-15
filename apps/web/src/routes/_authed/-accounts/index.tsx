@@ -25,12 +25,17 @@ import { HeaderSync } from "../-home/header-sync";
 import { GainSkeleton, ValueDelta } from "../-home/holdings/value-delta";
 import { AccountDetailSheet, type AccountRow } from "./account-detail-sheet";
 import { AddAccountModal, type CompleteTarget } from "./add-account-modal";
-import { attachAccountGains } from "./attach-gains";
-import { buildAccountRows } from "./rows";
-import { accountShare, activeAccountsTotal, shareLabel } from "./share";
-import { sortActiveAccounts } from "./sort";
-import { accountStackItems } from "./stack-items";
-import { type AccountSyncStatus, accountSyncStatus } from "./sync-status";
+import { attachAccountGains } from "./list-attach-gains";
+import {
+  type AccountSyncStatus,
+  accountShare,
+  accountSyncStatus,
+  activeAccountsTotal,
+  buildAccountRows,
+  shareLabel,
+  sortActiveAccounts,
+} from "./list-rows";
+import { accountStackItems } from "./list-stack-items";
 
 const accountsRoute = getRouteApi("/_authed/accounts");
 
