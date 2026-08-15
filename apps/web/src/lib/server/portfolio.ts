@@ -228,6 +228,32 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(({ context }) => runRequest(context.userId, loadAccountHoldings()));
 
+// #493 票 3:账户页 24h 盈亏独立读取。同一条 `loadAccountHoldings(true)`,只把盈亏字段带出来。
+export const getAccountGain24h = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(({ context }) =>
+    runRequest(
+      context.userId,
+      Effect.gen(function* () {
+        const view = yield* loadAccountHoldings(true);
+        const accounts: Record<string, NonNullable<(typeof view.rows)[number]["gain24h"]> | null> =
+          {};
+        const balances: Record<
+          string,
+          NonNullable<(typeof view.rows)[number]["balances"][number]["gain24h"]> | null
+        > = {};
+        for (const r of view.rows) {
+          if (r.archivedAt == null) accounts[r.account.id] = r.gain24h ?? null;
+          for (const b of r.balances) {
+            if (r.archivedAt != null || b.tokenId == null) continue;
+            balances[b.id] = b.gain24h ?? null;
+          }
+        }
+        return { accounts, balances };
+      }),
+    ),
+  );
+
 // 组合净值历史:全部快照总额 → 阶梯式重建为时间序列(纯函数,可序列化输出)。
 // 「当下点」(最新点)不用快照冻结总额,而是与主页同款**现推实时总价**(deriveLiveAccountTotals,
 // self-first 下盯市行取实时源价)→ 主页总价 ≡ 曲线当下点(#81);更早点仍用冻结 usd_value。

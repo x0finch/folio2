@@ -2,7 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { getAccountHistory, listAccounts } from "../server/accounts";
 import { getHoldingHistory } from "../server/holdings";
 import { getManualAccount } from "../server/manual-tokens";
-import { listAccountHoldings } from "../server/portfolio";
+import { getAccountGain24h, listAccountHoldings } from "../server/portfolio";
 import { STALE_TIME } from "./constants";
 import { accountKeys } from "./keys";
 
@@ -27,6 +27,13 @@ export const accountHoldingsQuery = () =>
   queryOptions({
     queryKey: accountKeys.holdings(),
     queryFn: () => listAccountHoldings(),
+    staleTime: STALE_TIME.live,
+  });
+
+export const accountGain24hQuery = () =>
+  queryOptions({
+    queryKey: accountKeys.gain24h(),
+    queryFn: () => getAccountGain24h(),
     staleTime: STALE_TIME.live,
   });
 

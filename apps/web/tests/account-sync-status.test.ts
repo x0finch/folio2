@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountSyncStatus, STALE_SYNC_MS } from "../src/lib/account-sync-status";
+import { accountSyncStatus, STALE_SYNC_MS } from "../src/routes/_authed/-accounts/list-rows";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = 1_700_000_000_000;

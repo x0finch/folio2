@@ -1,6 +1,32 @@
+import type { Note } from "@folio/connectors-basic";
 import type { AccountTagLink, PortfolioMembership } from "@folio/db";
-import type { AccountRow } from "../components/account-detail-sheet";
-import type { AccountHoldings, AccountListItem } from "./queries/accounts";
+import type { OverviewBalance } from "../../../lib/account-view";
+import type { Gain } from "../../../lib/gain-24h";
+import type { AccountHoldings, AccountListItem } from "../../../lib/queries/accounts";
+
+interface AccountTagView {
+  id: string;
+  name: string;
+}
+
+export interface AccountRow {
+  id: string;
+  label: string;
+  connectorId: AccountListItem["connectorId"];
+  archivedAt: number | null;
+  /** 金额查询到了才为 true。未到时 totalUsd 是占位 0,UI 必须走骨架,不能当真 0。 */
+  valuesReady: boolean;
+  totalUsd: number;
+  takenAt: number | null;
+  balances: OverviewBalance[];
+  /** 24h 盈亏。`undefined` = 不该有(归档);`null` = 该有但算不出。 */
+  gain24h?: Gain | null;
+  note?: Note[];
+  needsCredentials: boolean;
+  credsSafe: Record<string, string>;
+  portfolioId: string;
+  tags: AccountTagView[];
+}
 
 // 账户页那一行的合并口径:**四个来源拼成一行**。
 //   · listAccounts —— 全部账户(含归档)+ 凭据投影
@@ -22,12 +48,14 @@ interface TagRef {
 
 export function buildAccountRows(sources: {
   accounts: readonly AccountListItem[];
-  holdings: AccountHoldings;
+  /** 没到 → 名单仍能拼出来,金额位走骨架,不把市值写成 0。 */
+  holdings?: AccountHoldings;
   memberships: readonly PortfolioMembership[];
   allTags: readonly TagRef[];
   tagLinks: readonly AccountTagLink[];
 }): AccountRow[] {
-  const byId = new Map(sources.holdings.rows.map((r) => [r.account.id, r]));
+  const valuesReady = sources.holdings != null;
+  const byId = new Map((sources.holdings?.rows ?? []).map((r) => [r.account.id, r]));
   const portfolioOf = new Map(sources.memberships.map((m) => [m.accountId, m.portfolioId]));
   const tagsById = new Map(sources.allTags.map((tg) => [tg.id, tg]));
   // 每账户已打的 Tag(展示投影:id + 名字)。
@@ -46,12 +74,10 @@ export function buildAccountRows(sources: {
       label: a.label,
       connectorId: a.connectorId,
       archivedAt: a.archivedAt,
+      valuesReady,
       totalUsd: ov?.totalUsd ?? 0,
       takenAt: ov?.takenAt ?? null,
       balances: ov?.balances ?? [],
-      // 24h 盈亏(ADR 0040)。**三态原样透传,别 `?? null`** —— server 给归档账户的就是 `undefined`
-      // (封存了,这个位置不该有这个数),压成 `null` 会让界面画出一个 `—`。
-      gain24h: ov?.gain24h,
       note: ov?.note,
       needsCredentials: a.needsCredentials,
       credsSafe: a.credsSafe,
@@ -59,4 +85,36 @@ export function buildAccountRows(sources: {
       tags: tagsOfAccount.get(a.id) ?? [],
     };
   });
+}
+
+export function sortActiveAccounts<T extends { totalUsd: number }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => b.totalUsd - a.totalUsd);
+}
+
+// 分母只计活跃账户。归档有市值也不进(ADR 0039)。总计 ≤ 0 → 占比 0。
+export function activeAccountsTotal(
+  rows: { totalUsd: number; archivedAt: number | null }[],
+): number {
+  return rows.reduce((s, r) => (r.archivedAt == null ? s + r.totalUsd : s), 0);
+}
+
+export function accountShare(value: number, total: number): number {
+  return total > 0 ? value / total : 0;
+}
+
+export function shareLabel(pct: number): string {
+  return pct > 0 && pct < 1 ? "<1.0" : pct.toFixed(1);
+}
+
+export const STALE_SYNC_MS = 24 * 60 * 60 * 1000;
+
+export type AccountSyncStatus = "needsCreds" | "never" | "stale" | "fresh";
+
+export function accountSyncStatus(
+  account: { needsCredentials: boolean; takenAt: number | null },
+  nowMs: number,
+): AccountSyncStatus {
+  if (account.needsCredentials) return "needsCreds";
+  if (account.takenAt == null) return "never";
+  return nowMs - account.takenAt > STALE_SYNC_MS ? "stale" : "fresh";
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { accountStackItems } from "../src/lib/account-stack-items";
 import type { OverviewBalance } from "../src/lib/account-view";
+import { accountStackItems } from "../src/routes/_authed/-accounts/list-stack-items";
 
 const b = (
   p: Partial<OverviewBalance> & { symbol: string; usdValue: number },

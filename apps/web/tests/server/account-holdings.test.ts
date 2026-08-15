@@ -41,8 +41,8 @@ const evmAccount = (label: string, address: string) =>
     creds: JSON.stringify({ address }),
   });
 
-const rowsByLabel = async () => {
-  const view = await runRequest(USER, loadAccountHoldings());
+const rowsByLabel = async (withGain = false) => {
+  const view = await runRequest(USER, loadAccountHoldings(withGain));
   return {
     view,
     of: (label: string) => view.rows.find((r) => r.account.label === label),
@@ -162,16 +162,23 @@ describe("账户行的 24h 盈亏(ADR 0040)", () => {
     return acc;
   };
 
-  it("有基准 → 行上带真实盈亏", async () => {
+  it("默认路径不算 24h 盈亏 —— 金额先亮,盈亏另包", async () => {
     await withHistory("Live", "0xa", 100, 110);
     const { of } = await rowsByLabel();
+    expect(of("Live")).not.toHaveProperty("gain24h");
+    expect(of("Live")?.balances[0]).not.toHaveProperty("gain24h");
+  });
+
+  it("有基准 → 行上带真实盈亏", async () => {
+    await withHistory("Live", "0xa", 100, 110);
+    const { of } = await rowsByLabel(true);
     expect(of("Live")?.gain24h?.amount).toBeCloseTo(10, 4);
   });
 
   it("归档账户拿到 undefined —— 「不该有这个数」,不是「算不出」", async () => {
     const acc = await withHistory("Sealed", "0xb", 100, 110);
     await dbFor(USER).accounts.setArchived(acc.id, true);
-    const { of } = await rowsByLabel();
+    const { of } = await rowsByLabel(true);
     const row = of("Sealed");
     expect(row).toBeDefined(); // 归档账户仍在列表里(ADR 0039)
     expect(row?.gain24h).toBeUndefined();
@@ -188,13 +195,13 @@ describe("账户行的 24h 盈亏(ADR 0040)", () => {
       totalUsd: 50,
       balances: [{ amount: 1, usdValue: 50, kind: "spot", platform: "evm:1", tokenId: btc }],
     });
-    const { of } = await rowsByLabel();
+    const { of } = await rowsByLabel(true);
     expect(of("Fresh")?.gain24h).toBeNull();
   });
 
   it("整条路径不出网", async () => {
     await withHistory("Quiet", "0xd", 100, 110);
-    await rowsByLabel();
+    await rowsByLabel(true);
     expect(outbound).toEqual([]);
   });
 });
@@ -229,7 +236,7 @@ describe("抽屉现货行的逐币盈亏(ADR 0040)", () => {
       balances: legs(66, 44),
     });
 
-    const { of } = await rowsByLabel();
+    const { of } = await rowsByLabel(true);
     const rows = of("Multi")?.balances ?? [];
     expect(rows).toHaveLength(2);
     const amounts = rows.map((b) => b.gain24h?.amount ?? 0);
@@ -243,7 +250,7 @@ describe("抽屉现货行的逐币盈亏(ADR 0040)", () => {
   it("归档账户的现货行不带这个数", async () => {
     const acc = await withHistoryAccount("Sealed2", "0xz");
     await dbFor(USER).accounts.setArchived(acc.id, true);
-    const { of } = await rowsByLabel();
+    const { of } = await rowsByLabel(true);
     expect(of("Sealed2")?.balances[0]?.gain24h).toBeUndefined();
   });
 });
@@ -288,7 +295,7 @@ describe("manual 账户的抽屉现货行", () => {
       { token: localBtc, kind: "add", amount: 2, occurredAt: Date.now() - 3 * DAY, price: 100 },
     ]);
 
-    const { of } = await rowsByLabel();
+    const { of } = await rowsByLabel(true);
     const row = of("M1");
     expect(row?.gain24h).not.toBeUndefined();
     expect(row?.gain24h).not.toBeNull(); // 账户头算得出
@@ -312,7 +319,7 @@ describe("manual 账户的抽屉现货行", () => {
     await mk("MA");
     await mk("MB");
 
-    const { of } = await rowsByLabel();
+    const { of } = await rowsByLabel(true);
     for (const label of ["MA", "MB"]) {
       expect(of(label)?.balances[0]?.gain24h, label).not.toBeNull();
     }
@@ -361,7 +368,7 @@ describe("复刻真实数据的形状:manual 与同步账户混在一起", () =>
       manuals.push(label);
     }
 
-    const { of } = await rowsByLabel();
+    const { of } = await rowsByLabel(true);
 
     // 同步账户:基准落在容差外 → 算不出(这部分是 #455 记的口径问题,不是 bug)
     expect(of("Synced")?.gain24h).toBeNull();
@@ -398,7 +405,7 @@ describe("复刻真实数据的形状:manual 与同步账户混在一起", () =>
       { token: localBtc, kind: "add", amount: 2, occurredAt: now - 128 * HOUR, price: 63921 },
     ]);
 
-    const { of } = await rowsByLabel();
+    const { of } = await rowsByLabel(true);
     // 同步账户那条有真基准(正好 24h)→ 算得出;manual 那条走账本 → 也算得出。互不影响。
     expect(of("S2")?.balances[0]?.gain24h).not.toBeNull();
     expect(of("M9")?.balances[0]?.gain24h).not.toBeNull();

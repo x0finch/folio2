@@ -30,7 +30,7 @@ import { NoteIconGlyph, NoteIndicator, NoteView } from "./notes";
 // 现货区:与主页 Tokens 视图同一 <TokenRowContent>(logo + 名称/note · 数量·symbol · 右侧 ValueDelta),
 // 承在 SharedLayoutBg 行式列表里(无边框卡,与 DeFi/perp 区一致)。按美元值降序。单账户上下文无多源叠标;
 // balance 级 note 作为名称右侧 aside 指示器透传。名称优先富化 name,缺则大写 symbol。
-function SpotCards({ rows }: { rows: SpotRow[] }) {
+function SpotCards({ rows, gainPending }: { rows: SpotRow[]; gainPending: boolean }) {
   const fmtNote = useNoteFormatNumber();
   const sorted = [...rows].sort((a, b) => b.usdValue - a.usdValue);
   return (
@@ -50,6 +50,7 @@ function SpotCards({ rows }: { rows: SpotRow[] }) {
               gain24h: b.gain24h,
             }}
             aside={b.note ? <NoteIndicator note={b.note} formatNumber={fmtNote} /> : undefined}
+            gainPending={gainPending}
           />
         </div>
       ))}
@@ -125,14 +126,16 @@ function HoldingSection({
   tab,
   sections,
   spot,
+  gainPending,
 }: {
   tab: HoldingTab;
   sections: AccountSections;
   spot: SpotWalletGroups;
+  gainPending: boolean;
 }) {
-  if (tab === "tokens") return <SpotCards rows={spot.spot} />;
-  if (tab === "funding") return <SpotCards rows={spot.funding} />;
-  if (tab === "earn") return <SpotCards rows={spot.earn} />;
+  if (tab === "tokens") return <SpotCards rows={spot.spot} gainPending={gainPending} />;
+  if (tab === "funding") return <SpotCards rows={spot.funding} gainPending={gainPending} />;
+  if (tab === "earn") return <SpotCards rows={spot.earn} gainPending={gainPending} />;
   // 单账户上下文:不传 accountLabel、DeFi 直接用本账户分组(不经 mergeDefiGroups)。
   if (tab === "defi") return <DefiPositions groups={sections.defi} hideHeader />;
   return sections.perp ? <PerpPositions view={sections.perp} hideHeader /> : null;
@@ -143,10 +146,12 @@ function HoldingTabs({
   tabs,
   sections,
   spot,
+  gainPending,
 }: {
   tabs: HoldingTab[];
   sections: AccountSections;
   spot: SpotWalletGroups;
+  gainPending: boolean;
 }) {
   const t = useTranslations("Overview");
   const [tab, setTab] = useState<string>(tabs[0]);
@@ -171,7 +176,7 @@ function HoldingTabs({
       </TabsList>
       {tabs.map((k) => (
         <TabsContent key={k} value={k}>
-          <HoldingSection tab={k} sections={sections} spot={spot} />
+          <HoldingSection tab={k} sections={sections} spot={spot} gainPending={gainPending} />
         </TabsContent>
       ))}
     </Tabs>
@@ -183,9 +188,12 @@ function HoldingTabs({
 export function AccountHoldingsCards({
   balances,
   accountNote,
+  gainPending = false,
 }: {
   balances: OverviewBalance[];
   accountNote?: Note[];
+  /** 24h 盈亏还在取 —— 现货行增量位走小骨架,跟列表行同一个数。 */
+  gainPending?: boolean;
 }) {
   const t = useTranslations("Overview");
   const sections = toAccountSections(balances); // defi 空组 / 零值现货已在此出口滤除
@@ -205,8 +213,12 @@ export function AccountHoldingsCards({
     <div className="flex flex-col gap-6">
       {/* account 级 note(整钱包:BTC 未确认/收款/派生分布)→ 顶部手风琴。无则不渲染。 */}
       {accountNote && accountNote.length > 0 && <AccountNoteAccordion notes={accountNote} />}
-      {tabs.length === 1 && <HoldingSection tab={tabs[0]} sections={sections} spot={spot} />}
-      {tabs.length > 1 && <HoldingTabs tabs={tabs} sections={sections} spot={spot} />}
+      {tabs.length === 1 && (
+        <HoldingSection tab={tabs[0]} sections={sections} spot={spot} gainPending={gainPending} />
+      )}
+      {tabs.length > 1 && (
+        <HoldingTabs tabs={tabs} sections={sections} spot={spot} gainPending={gainPending} />
+      )}
     </div>
   );
 }
