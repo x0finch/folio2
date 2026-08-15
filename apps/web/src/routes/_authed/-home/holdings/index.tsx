@@ -3,7 +3,6 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "../../../../components/query-boundary";
 import { mergeDefiGroups } from "../../../../lib/account-view";
-import { type KindTab, kindTabsOf, pinScopeOf } from "../../../../lib/home-tabs";
 import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
 import { type PinScopeKey, portfolioKeys } from "../../../../lib/queries/keys";
 import {
@@ -12,6 +11,7 @@ import {
   portfolioGain24hQuery,
   portfolioOverviewQuery,
 } from "../../../../lib/queries/portfolio";
+import { type KindTab, kindTabsOf, pinScopeOf } from "../home-tabs";
 import { useHomeTabSelection } from "../tab/selection";
 import { attachDefiGains, attachHoldingGains } from "./attach-gains";
 import { DefiPositions } from "./defi";

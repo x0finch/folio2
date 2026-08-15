@@ -1,6 +1,5 @@
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { z } from "zod";
-import { DEFAULT_TAB } from "../../lib/home-tabs";
 import {
   homeTabStripQuery,
   portfolioGain24hQuery,
@@ -9,6 +8,7 @@ import {
   portfolioOverviewQuery,
 } from "../../lib/queries/portfolio";
 import { Overview } from "./-home";
+import { DEFAULT_TAB } from "./-home/home-tabs";
 
 export const Route = createFileRoute("/_authed/")({
   // 主 tab 进 URL(ADR 0043):刷新还停在原 tab、链接可分享,滚动位置也按 href 分开记(片1)。

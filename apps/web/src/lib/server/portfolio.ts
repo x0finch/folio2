@@ -19,7 +19,6 @@ import {
 import { connectorLabelFallback } from "../connector-label";
 import { defiGainKey, GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "../gain-24h";
 import { buildPortfolioHistory } from "../history";
-import { kindPresence, resolvePinLabel } from "../home-tabs";
 import { platformLogoUrl } from "../logo";
 import { isManual } from "../manual-connector";
 import { loadAccountHoldings } from "./internal/account-holdings";
@@ -34,6 +33,7 @@ import {
 import { runAtEdge, runRequest, runStore, withRequest } from "./internal/oracle";
 import { buildOverview, type OverviewDeps } from "./internal/overview-model";
 import { requireAuth } from "./internal/require-auth";
+import { kindPresence, resolvePinLabel } from "./internal/tab-strip";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
 // 仅按选中 Portfolio scope(曲线 / 列表默认口径);不带 pin。

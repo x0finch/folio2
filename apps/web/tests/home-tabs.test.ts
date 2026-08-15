@@ -1,19 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ALLOC_DIMENSION, DEFAULT_DIM } from "../src/lib/allocation";
-import {
-  kindPresence,
-  kindTabsOf,
-  pickShownTab,
-  resolvePinLabel,
-  tabAfterUnpin,
-} from "../src/lib/home-tabs";
+import { kindPresence, resolvePinLabel } from "../src/lib/server/internal/tab-strip";
+import { kindTabsOf, pickShownTab, tabAfterUnpin } from "../src/routes/_authed/-home/home-tabs";
 
 // 页内 tab 进 URL(片5 / ADR 0043)。URL 是外面来的,所以「认不出的值怎么办」是这一片的正经逻辑,
 // 不是边角情况:pin 被删之后旧链接就指向一个不存在的 tab。
 
 describe("pickShownTab —— 首页主 tab 的回落", () => {
   // 首页的合法值含运行时的 pin id,route 的 `validateSearch` 判不了,所以回落在组件侧,由这个
-  // 纯函数承担 —— 它也是这个文件唯一的存在理由(从 route 文件 import 会拉进 cloudflare:workers)。
+  // 纯函数承担 —— 不能从 `tab/selection.ts` import(那会拉进 getRouteApi / cloudflare:workers)。
   const known = (v: string) => ["tokens", "perps", "defi", "pin_a"].includes(v);
 
   it("认得出 → 就用它", () => {

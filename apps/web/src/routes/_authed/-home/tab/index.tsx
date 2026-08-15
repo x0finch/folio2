@@ -3,12 +3,12 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "../../../../components/query-boundary";
-import { type KindTab, kindTabsOf, pinScopeOf } from "../../../../lib/home-tabs";
 import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
 import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
 import { type PinScopeKey, portfolioKeys } from "../../../../lib/queries/keys";
 import { homeTabStripQuery, portfolioOverviewQuery } from "../../../../lib/queries/portfolio";
 import { derive } from "../holdings";
+import { type KindTab, kindTabsOf, pinScopeOf } from "../home-tabs";
 import { AddPinButton, PinTab } from "./pin";
 import { revealTab, useHomeTabSelection } from "./selection";
 

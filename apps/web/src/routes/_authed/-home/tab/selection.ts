@@ -1,6 +1,6 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { useRef } from "react";
-import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../../../../lib/home-tabs";
+import { DEFAULT_TAB, KIND_TABS, type KindTab, pickShownTab } from "../home-tabs";
 
 const home = getRouteApi("/_authed/");
 

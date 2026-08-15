@@ -1,13 +1,12 @@
-import { type DefiGroup, mergeDefiGroups } from "./account-view";
-import type { PinScopeKey } from "./queries/keys";
+import type { PinScopeKey } from "../../../lib/queries/keys";
 
 // 首页主 tab 的合法值与回落规则(片5 / ADR 0043)。
 //
-// **为什么单独一个文件**:`pickShownTab` 要被单测钉住,而从 route 文件 import 任何东西都会连带
-// 拉进服务端模块(`cloudflare:workers`),在单测的 logic 环境里直接炸。
+// 纯文件,不引 route API:`pickShownTab` 要被单测钉住,而 `tab/selection.ts` 会拉进
+// `getRouteApi`,在单测的 logic 环境里直接炸。
 //
-// 只装首页的东西。Insights 那个 `?dim=` 曾经也堆在这儿,但它围着 `AllocDimension` 转,已经回到
-// `lib/allocation.ts` —— 那是那个类型的老家,而且它的校验器就是那份 zod schema 本身。
+// 只装页面侧的东西。轻请求用的「算不算有永续 / DeFi」和 pin 显示名在
+// `lib/server/internal/tab-strip` —— 只有服务端用,客户端拿的是算好的结果。
 
 // 首页三个「视角」tab 的名字全集。**不是当下有的那几个** —— 页面按数据有无收窄显示,
 // 而这里回答的是「这是不是一个视角名」。自定义 Tab 的 pin id 是运行时数据,不在此列。
@@ -53,46 +52,6 @@ export function tabAfterUnpin(
 ): string {
   const idx = pins.findIndex((p) => p.id === pinId);
   return idx > 0 ? pins[idx - 1].id : kindTabs[kindTabs.length - 1];
-}
-
-// 和总览画面同一套「算不算有永续 / DeFi」:有仓位或权益才出永续 tab;DeFi 跨账户合并后还有组才出。
-// 入参就是 `toAccountSections` 的出口,轻请求和列表共用,tab 条才不会在数据到齐后跳一下。
-type KindSection = {
-  perp: { positions: readonly unknown[]; equity: unknown } | null;
-  defi: DefiGroup[];
-};
-
-export function kindPresence(sections: KindSection[]): {
-  hasPerps: boolean;
-  hasDefi: boolean;
-} {
-  return {
-    hasPerps: sections.some(
-      (s) => s.perp != null && (s.perp.positions.length > 0 || s.perp.equity != null),
-    ),
-    hasDefi: mergeDefiGroups(sections).length > 0,
-  };
-}
-
-// 自定义 Tab 的显示名(+ connector 的图):服务端解析好再下发,客户端不再为了渲染 tab 名去拉目录。
-// `#` / `@` 不进这里 —— 那是展示前缀,渲染时按 kind 加上。
-export function resolvePinLabel(
-  pin: {
-    kind: "connector" | "tag" | "account";
-    connectorId?: string | null;
-    tagId?: string | null;
-    accountId?: string | null;
-  },
-  lookup: {
-    tagName: (id: string) => string | undefined;
-    accountName: (id: string) => string | undefined;
-    connector: (id: string) => { name: string; logo?: string };
-  },
-): { name: string; logo?: string } {
-  if (pin.kind === "tag") return { name: lookup.tagName(pin.tagId ?? "") ?? "" };
-  if (pin.kind === "account") return { name: lookup.accountName(pin.accountId ?? "") ?? "" };
-  const c = lookup.connector(pin.connectorId ?? "");
-  return c.logo ? { name: c.name, logo: c.logo } : { name: c.name };
 }
 
 export function pinScopeOf(pin: {
