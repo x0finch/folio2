@@ -164,6 +164,29 @@ describe("刷新映射表", () => {
     expect(isInvalidated(portfolioKeys.overview("pf-1"))).toBe(false);
   });
 
+  // tab 条的标签是**服务端解析好**再下发的(见 getHomeTabMeta),所以改了 pin 的目标之后
+  // 不刷这一份,就会出现「已经指到别的标签、tab 上还写着旧名字」—— 不报错,只是显示上一次的答案。
+  // 它偏偏最容易漏:上面那条的注释写着「只刷 Tab 清单,不刷总览」,读起来像是「刷一个就够了」。
+  it("portfolio.pin.write 连 tab 条那份元信息一起刷", async () => {
+    seed(portfolioKeys.tabMeta("pf-1"));
+    seed(portfolioKeys.overview("pf-1"));
+
+    await invalidateFor(queryClient, "portfolio.pin.write");
+
+    expect(isInvalidated(portfolioKeys.tabMeta("pf-1"))).toBe(true);
+    expect(isInvalidated(portfolioKeys.overview("pf-1"))).toBe(false);
+  });
+
+  // 一轮同步可能让永续 / DeFi 行出现或消失,而 tab 条的存在性就是按最新快照里有没有那些 kind 判的。
+  // 组合域那条前缀本来就盖得住它 —— 这条钉住「盖得住」,免得日后有人收窄前缀时把它漏在外面。
+  it("sync.round 刷到 tab 条那份元信息", async () => {
+    seed(portfolioKeys.tabMeta("pf-1"));
+
+    await invalidateFor(queryClient, "sync.round");
+
+    expect(isInvalidated(portfolioKeys.tabMeta("pf-1"))).toBe(true);
+  });
+
   // 这一条是整张表里唯一的**跨域推断**:法币选项的名字由服务端按请求 locale 本地化,
   // 所以切语言必须连代币域一起刷,否则切完那几行还是旧语种。此前没有测试钉住它。
   it("preference.locale 连法币选项一起刷,但不碰组合域", async () => {
