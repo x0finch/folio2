@@ -5,9 +5,10 @@ import {
   PopoverTrigger,
   Skeleton,
   TabsTrigger,
+  toast,
   useMediaQuery,
 } from "@folio/ui";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
@@ -15,14 +16,23 @@ import { Portal } from "../../../components/portal";
 import { QueryBoundary } from "../../../components/query-boundary";
 import { accountsInView } from "../../../lib/accounts-in-view";
 import { connectorLabelFallback } from "../../../lib/connector-label";
+import { kindTabsOf, tabAfterUnpin } from "../../../lib/home-tabs";
 import { usePortfolio } from "../../../lib/hooks/use-portfolio";
 import { accountListQuery } from "../../../lib/queries/accounts";
 import { connectorCatalogQuery } from "../../../lib/queries/connectors";
-import { portfolioMembershipsQuery } from "../../../lib/queries/portfolio";
+import {
+  type HomeTabStrip,
+  homeTabStripQuery,
+  portfolioMembershipsQuery,
+} from "../../../lib/queries/portfolio";
+import { invalidateFor } from "../../../lib/queries/refresh";
 import { tagListQuery } from "../../../lib/queries/tags";
+import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../../lib/server/tab-pins";
 import { type PinTargetChoice, TabPinPicker } from "./tab-pin-picker";
 import { PinTargetMark } from "./tab-pin-target-mark";
-import { revealTab } from "./tab-selection";
+import { revealTab, useHomeTabSelection } from "./tab-selection";
+
+const MAX_PINS = 3;
 
 const PIN_PANEL_W = 240; // w-56 + p-2
 const PIN_PANEL_H = 340; // 面板大致高度,够不够放得下决定朝上还是朝下
@@ -186,30 +196,39 @@ function usePinPanel(canHover: boolean, gateOpen: () => boolean) {
 }
 
 // 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);
-// 管理面板经 PinPortalPopover 浮出(改指向选择器 / 取消固定)。
-export function PinTab({
-  value,
-  name,
-  logo,
-  isActive,
-  selected,
-  onRepoint,
-  onUnpin,
-  unpinning,
-}: {
-  value: string;
-  name: string;
-  logo?: string;
-  isActive: boolean;
-  selected: PinTargetChoice;
-  onRepoint: (choice: PinTargetChoice) => void;
-  onUnpin: () => void;
-  /** **这一个 pin** 的删除在飞 —— 禁掉它的「取消固定」,免得连点两次发两个 delete。
-   *  必须按 pin 收窄(`variables === value`):`unpinMut` 是整页共用的一条,直接传 `isPending`
-   *  会把**所有** pin 的这颗钮一起禁掉,而其中只有一个真的在删。 */
-  unpinning: boolean;
-}) {
+// 管理面板经 PinPortalPopover 浮出(改指向选择器 / 取消固定)。写(改指向 / 取消固定)自包含。
+export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
+  const { selectedId } = usePortfolio();
+  const queryClient = useQueryClient();
+  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const { shownActive, selectTab } = useHomeTabSelection(strip.pins);
+  const isActive = shownActive === pin.id;
+  const selected: PinTargetChoice = {
+    kind: pin.kind,
+    connectorId: pin.connectorId,
+    tagId: pin.tagId,
+    accountId: pin.accountId,
+  };
   const tct = useTranslations("CustomTabs");
+  const failPin = () => toast.error(tct("actionFailed"));
+  const repointMut = useMutation({
+    mutationFn: (choice: PinTargetChoice) =>
+      updateTabPinTarget({ data: { pinId: pin.id, ...choice } }),
+    onSuccess: () => invalidateFor(queryClient, "portfolio.pin.write"),
+    onError: failPin,
+  });
+  const unpinMut = useMutation({
+    mutationFn: () => deleteTabPin({ data: { pinId: pin.id } }),
+    onSuccess: () => invalidateFor(queryClient, "portfolio.pin.write"),
+    onError: failPin,
+  });
+  const onUnpin = () => {
+    if (shownActive === pin.id) {
+      // 取消当前激活的 → 回**左邻**:前一个 pin,没有则最后一个视角 tab(别一路滑回第一个)。
+      selectTab(tabAfterUnpin(pin.id, strip.pins, kindTabsOf(strip.hasPerps, strip.hasDefi)));
+    }
+    unpinMut.mutate();
+  };
   const canHover = useMediaQuery("(hover: hover)");
   // 桌面/触屏一致(需求 9):必须先选中才可开面板 —— 首点选中(此刻 isActive 仍是旧值 false)不开,
   // 再点已选中的才开;桌面上已选中的 hover 也开。
@@ -223,10 +242,10 @@ export function PinTab({
       onClick={p.onClick}
       {...p.hoverProps}
     >
-      <TabsTrigger value={value}>
+      <TabsTrigger value={pin.id}>
         {/* 类型标记(#351 ②):tag `#名` / account `@名` / connector `logo + 类型名`。
             激活时药丸是浅底 → onPrimary 让 logo 的底盘随之改色,不叠成两块白。 */}
-        <PinTargetMark kind={selected.kind} name={name} logo={logo} onPrimary={isActive} />
+        <PinTargetMark kind={selected.kind} name={pin.name} logo={pin.logo} onPrimary={isActive} />
       </TabsTrigger>
       <PinPortalPopover
         open={p.open}
@@ -239,7 +258,12 @@ export function PinTab({
               isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground",
             )}
           >
-            <PinTargetMark kind={selected.kind} name={name} logo={logo} onPrimary={isActive} />
+            <PinTargetMark
+              kind={selected.kind}
+              name={pin.name}
+              logo={pin.logo}
+              onPrimary={isActive}
+            />
           </span>
         }
         onRequestClose={p.close}
@@ -250,7 +274,7 @@ export function PinTab({
           <LazyPinPicker
             selected={selected}
             onPick={(choice) => {
-              onRepoint(choice);
+              repointMut.mutate(choice);
               p.close();
             }}
           />
@@ -259,7 +283,7 @@ export function PinTab({
           <button
             type="button"
             onClick={onUnpin}
-            disabled={unpinning}
+            disabled={unpinMut.isPending}
             className="rounded-md px-2 py-1.5 text-left text-destructive text-sm transition-colors hover:bg-destructive/10 disabled:opacity-50"
           >
             {tct("unpin")}
@@ -270,31 +294,40 @@ export function PinTab({
   );
 }
 
-// ＋固定:ghost 加钮(hover 无边框,A1);面板同样浮出 —— 桌面 hover、触屏首点即开。
-export function AddPinButton({
-  onPick,
-  adding,
-}: {
-  onPick: (choice: PinTargetChoice) => void;
-  /** 建 pin 在飞 —— 禁掉 ＋。`pins.length < MAX_PINS` 这道闸是拿**刷新前**的清单算的,所以在飞
-   *  期间 ＋ 还在,不禁的话手快能再挑一个。**真正兜住上限的是数据库那道**
-   *  (`packages/db/src/queries/tab-pins.ts` 的 `MAX_TAB_PINS_PER_USER`,超了直接拒),这里挡的
-   *  只是「让用户白挑一次、再吃一个报错」。
-   *
-   *  `disabled` 就够,不用再去 gate `usePinPanel`:hover 开面板的监听虽然挂在外层 `<span>` 上,
-   *  但 Chrome 不会从 disabled 的表单控件派发鼠标事件,那个 mouseover 压根到不了 React(实测)。 */
-  adding: boolean;
-}) {
+// ＋固定:ghost 加钮(hover 无边框,A1);面板同样浮出 —— 桌面 hover、触屏首点即开。写自包含。
+export function AddPinButton() {
+  const { selectedId } = usePortfolio();
+  const queryClient = useQueryClient();
+  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const { selectTab } = useHomeTabSelection(strip.pins);
   const tct = useTranslations("CustomTabs");
+  const addMut = useMutation({
+    mutationFn: (choice: PinTargetChoice) => createTabPin({ data: choice }),
+    onSuccess: async (pin) => {
+      // 先等 tab 条刷新、新 tab 挂上再选中 —— 提前选中会让 active 短暂指向不存在的 tab,
+      // 被 clamp 回 tokens,药丸先滑到第一个再滑回来(实测)。
+      await invalidateFor(queryClient, "portfolio.pin.write");
+      selectTab(pin.id);
+    },
+    onError: () => toast.error(tct("actionFailed")),
+  });
   const canHover = useMediaQuery("(hover: hover)");
   const p = usePinPanel(canHover, () => true); // ＋ 只有「开面板」一个动作
+  // 满员不渲染。`pins.length` 是刷新前的清单,所以在飞期间 ＋ 还在;
+  // 不禁的话手快能再挑一个。**真正兜住上限的是数据库那道**
+  // (`packages/db/src/queries/tab-pins.ts` 的 `MAX_TAB_PINS_PER_USER`,超了直接拒),这里挡的
+  // 只是「让用户白挑一次、再吃一个报错」。
+  //
+  // `disabled` 就够,不用再去 gate `usePinPanel`:hover 开面板的监听虽然挂在外层 `<span>` 上,
+  // 但 Chrome 不会从 disabled 的表单控件派发鼠标事件,那个 mouseover 压根到不了 React(实测)。
+  if (strip.pins.length >= MAX_PINS) return null;
   return (
     <span ref={p.anchorRef as RefObject<HTMLSpanElement>} className="inline-flex" {...p.hoverProps}>
       <button
         type="button"
         aria-label={tct("add")}
         onClick={p.onClick}
-        disabled={adding}
+        disabled={addMut.isPending}
         className="flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
       >
         <Plus className="size-4" />
@@ -310,7 +343,7 @@ export function AddPinButton({
         <div className="w-56">
           <LazyPinPicker
             onPick={(choice) => {
-              onPick(choice);
+              addMut.mutate(choice);
               p.close();
             }}
           />

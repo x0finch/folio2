@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { ALLOC_DIMENSION, DEFAULT_DIM } from "../src/lib/allocation";
-import { kindPresence, kindTabsOf, pickShownTab, resolvePinLabel } from "../src/lib/home-tabs";
+import {
+  kindPresence,
+  kindTabsOf,
+  pickShownTab,
+  resolvePinLabel,
+  tabAfterUnpin,
+} from "../src/lib/home-tabs";
 
 // 页内 tab 进 URL(片5 / ADR 0043)。URL 是外面来的,所以「认不出的值怎么办」是这一片的正经逻辑,
 // 不是边角情况:pin 被删之后旧链接就指向一个不存在的 tab。
@@ -46,6 +52,24 @@ describe("kindTabsOf —— 三个视角 tab 谁出现", () => {
 
   it("两个都有 → Tokens / Perps / DeFi", () => {
     expect(kindTabsOf(true, true)).toEqual(["tokens", "perps", "defi"]);
+  });
+});
+
+describe("tabAfterUnpin —— 取消当前 pin 回左邻,不滑回 Tokens", () => {
+  const pins = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const kinds = kindTabsOf(true, false); // tokens, perps
+
+  it("中间 / 末尾 → 前一个 pin", () => {
+    expect(tabAfterUnpin("b", pins, kinds)).toBe("a");
+    expect(tabAfterUnpin("c", pins, kinds)).toBe("b");
+  });
+
+  it("第一个 pin → 最后一个视角 tab,不是 Tokens", () => {
+    expect(tabAfterUnpin("a", pins, kinds)).toBe("perps");
+  });
+
+  it("只有 Tokens 视角时,第一个 pin 才回 Tokens", () => {
+    expect(tabAfterUnpin("a", [{ id: "a" }], kindTabsOf(false, false))).toBe("tokens");
   });
 });
 

@@ -43,6 +43,17 @@ export function kindTabsOf(hasPerps: boolean, hasDefi: boolean): KindTab[] {
   return tabs;
 }
 
+// 取消当前 pin 之后药丸停在哪。不能靠 URL 回落(`pickShownTab` 会滑回 Tokens);要回**左邻**:
+// 前一个 pin,没有则最后一个视角 tab。
+export function tabAfterUnpin(
+  pinId: string,
+  pins: readonly { id: string }[],
+  kindTabs: readonly KindTab[],
+): string {
+  const idx = pins.findIndex((p) => p.id === pinId);
+  return idx > 0 ? pins[idx - 1].id : kindTabs[kindTabs.length - 1];
+}
+
 // 和总览画面同一套「算不算有永续 / DeFi」:有仓位或权益才出永续 tab;DeFi 跨账户合并后还有组才出。
 // 入参就是 `toAccountSections` 的出口,轻请求和列表共用,tab 条才不会在数据到齐后跳一下。
 type KindSection = {

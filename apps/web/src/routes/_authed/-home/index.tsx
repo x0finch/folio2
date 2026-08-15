@@ -1,9 +1,12 @@
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { HeaderSync } from "../../../components/header-sync";
 import { QueryBoundary } from "../../../components/query-boundary";
 import { HeroSkeleton, HoldingsSkeleton, TabStripSkeleton } from "../../../components/skeletons";
 import { usePortfolio } from "../../../lib/hooks/use-portfolio";
 import { portfolioKeys } from "../../../lib/queries/keys";
+import { homeTabStripQuery } from "../../../lib/queries/portfolio";
 import { HeroIsland } from "./hero";
 import { HoldingsIsland } from "./holdings";
 import { TabStripIsland } from "./tab-strip";
@@ -29,7 +32,7 @@ export function Overview() {
           pending={<TabStripSkeleton />}
           failed={<IslandFailed />}
         >
-          <TabStripIsland />
+          <TabStripSlot />
         </QueryBoundary>
         <QueryBoundary
           resetKey={`holdings:${overviewKey}`}
@@ -41,6 +44,25 @@ export function Overview() {
       </div>
     </div>
   );
+}
+
+// 没账户是这一页下半截的空态,不是 tab 条自己的事 —— 条只在有账户时才挂。
+function TabStripSlot() {
+  const { selectedId } = usePortfolio();
+  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const tc = useTranslations("Common");
+  if (!strip.hasAccounts) {
+    return (
+      <p className="text-muted-foreground">
+        {tc("noAccountsYet")}{" "}
+        <Link to="/accounts" className="underline">
+          {tc("addOne")}
+        </Link>
+        .
+      </p>
+    );
+  }
+  return <TabStripIsland />;
 }
 
 function IslandFailed() {
