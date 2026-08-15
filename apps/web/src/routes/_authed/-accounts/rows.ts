@@ -1,6 +1,6 @@
 import type { AccountTagLink, PortfolioMembership } from "@folio/db";
-import type { AccountRow } from "../components/account-detail-sheet";
-import type { AccountHoldings, AccountListItem } from "./queries/accounts";
+import type { AccountHoldings, AccountListItem } from "../../../lib/queries/accounts";
+import type { AccountRow } from "./account-detail-sheet";
 
 // 账户页那一行的合并口径:**四个来源拼成一行**。
 //   · listAccounts —— 全部账户(含归档)+ 凭据投影

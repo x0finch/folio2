@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sortActiveAccounts } from "../src/lib/account-sort";
+import { sortActiveAccounts } from "../src/routes/_authed/-accounts/sort";
 
 describe("sortActiveAccounts", () => {
   it("按市值倒序(无特殊分档)", () => {

@@ -4,14 +4,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, X } from "lucide-react";
 import { cloneElement, type ReactElement, type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import { connectorLabelFallback } from "../lib/connector-label";
-import { connectorCatalogQuery, connectorCredentialSpecsQuery } from "../lib/queries/connectors";
-import { invalidateFor } from "../lib/queries/refresh";
-import { syncAccount } from "../lib/server/sync";
-import { AccountForm } from "./account-fields";
-import { ConnectorGrid } from "./connector-grid";
-import { CredentialForm } from "./credential-form";
-import { IconButton } from "./icon-button";
+import { AccountForm } from "../../../components/account-fields";
+import { ConnectorGrid } from "../../../components/connector-grid";
+import { CredentialForm } from "../../../components/credential-form";
+import { IconButton } from "../../../components/icon-button";
+import { connectorLabelFallback } from "../../../lib/connector-label";
+import {
+  connectorCatalogQuery,
+  connectorCredentialSpecsQuery,
+} from "../../../lib/queries/connectors";
+import { invalidateFor } from "../../../lib/queries/refresh";
+import { syncAccount } from "../../../lib/server/sync";
 
 // 补录目标(A3):缺凭据账户点补录 icon 时传入,modal 直接进补录视图(跳过网格,锁定 connector)。
 export interface CompleteTarget {
