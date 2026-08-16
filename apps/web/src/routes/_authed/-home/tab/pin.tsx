@@ -3,8 +3,8 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { Plus } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "../../../../components/query-boundary";
-import { accountsInView } from "../../../../lib/accounts-in-view";
-import { connectorLabelFallback } from "../../../../lib/connector-label";
+import { accountsInView } from "../../../../lib/core/accounts-in-view";
+import { connectorLabelFallback } from "../../../../lib/core/logo";
 import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
 import { accountListQuery } from "../../../../lib/queries/accounts";
 import { connectorCatalogQuery } from "../../../../lib/queries/connectors";

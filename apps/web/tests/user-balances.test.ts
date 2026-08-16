@@ -1,7 +1,7 @@
 import type { SnapshotWithBalances } from "@folio/db";
 import { describe, expect, it } from "vitest";
-import type { BalanceLike } from "../src/lib/tokens";
-import { userDisplayBalances } from "../src/lib/user-balances";
+import type { BalanceLike } from "../src/lib/core/tokens";
+import { userDisplayBalances } from "../src/lib/core/tokens";
 
 // 身份走 token_id(#243:symbol / tokenRef 不再落快照,显示名住 Token 那一行)。
 const snap = (accountId: string, tokenIds: string[]): SnapshotWithBalances =>

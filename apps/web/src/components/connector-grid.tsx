@@ -1,7 +1,7 @@
 import type { ConnectorId } from "@folio/connectors";
 import { LogoAvatar, SharedLayoutBg } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
-import { connectorLabelFallback } from "../lib/connector-label";
+import { connectorLabelFallback } from "../lib/core/logo";
 import { connectorCatalogQuery } from "../lib/queries/connectors";
 
 // add-account 下拉的固定分组列表 —— 直接写死(group 展示名 + 该组 connector)。account.connectorId 的

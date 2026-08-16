@@ -9,8 +9,8 @@ import {
 } from "@folio/connectors";
 import { type ConnectorError, isRetryable, retryAfterOf } from "@folio/connectors-basic";
 import { Duration, Effect, Schedule } from "effect";
-import type { InputSpec } from "../../creds";
-import { platformLogoUrl } from "../../logo";
+import type { InputSpec } from "../../core/creds";
+import { platformLogoUrl } from "../../core/logo";
 
 // 探活重试参数(原则 #8)。**刻意比 sync 的 3 次 / 5s 紧得多**:那条路是后台同步,没人在等;
 // 这条路用户正盯着表单提交。1 次重试只为躲瞬时抖动;单次最多等 1.5s —— 再久就不如让他自己再点

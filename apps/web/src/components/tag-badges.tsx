@@ -1,5 +1,5 @@
 import { cn } from "@folio/ui";
-import { collapseToSlots } from "../lib/collapse-to-slots";
+import { collapseToSlots } from "../lib/core/collapse-to-slots";
 
 // Tag 展示徽章(ADR 0034 / #351):**就是一串小字 `#name`**(muted)—— 无描边、无底色,hover 也不出底,
 // 纯附注,不抢账户名的注意力。`#` 是纯展示前缀,永不入库(存的一直是纯名字)。

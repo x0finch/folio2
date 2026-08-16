@@ -4,9 +4,9 @@ import { Fingerprint } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AuthShell } from "../components/auth-shell";
-import { authClient, signIn, signUp } from "../lib/auth-client";
+import { authClient, signIn, signUp } from "../lib/core/auth-client";
+import type { HistoryPoint } from "../lib/core/history";
 import { deriveDefaultName } from "../lib/derive-default-name";
-import type { HistoryPoint } from "../lib/history";
 import { useLockDevice } from "../lib/hooks/use-lock-device";
 import {
   dismissPasskeyPrompt,

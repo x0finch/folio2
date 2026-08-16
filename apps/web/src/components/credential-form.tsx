@@ -3,7 +3,7 @@ import { Button } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { type InputSpec, incompleteSpecs } from "../lib/creds";
+import { type InputSpec, incompleteSpecs } from "../lib/core/creds";
 import { replaceAccountCredentials } from "../lib/server/accounts";
 import { GenericFields } from "./account-fields";
 

@@ -4,7 +4,7 @@ import {
   deriveAmount,
   fallbackUnitPrice,
   projectToken,
-} from "../src/lib/manual-activity";
+} from "../src/lib/core/manual";
 
 const a = (
   kind: DerivableActivity["kind"],

@@ -2,7 +2,7 @@ import { cn, SharedLayoutBg } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { connectorLabelFallback } from "../../../../lib/connector-label";
+import { connectorLabelFallback } from "../../../../lib/core/logo";
 import { connectorCatalogQuery } from "../../../../lib/queries/connectors";
 import { PinTargetMark } from "./pin-target-mark";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { platformLogoUrl, tokenLogoUrl } from "../src/lib/logo";
+import { platformLogoUrl, tokenLogoUrl } from "../src/lib/core/logo";
 
 describe("tokenLogoUrl", () => {
   it("有内部 id + canonical logo → 代理 URL(客户端不引用第三方 CDN)", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toPerpView } from "../src/lib/perp";
+import { toPerpView } from "../src/lib/core/perp";
 
 // toPerpView 并存期同时吃两种形态(viewKind 归一):
 //   · 遗留:kind="perp" + meta.role 判 equity/position(旧 provider 落库的历史行)
@@ -155,7 +155,7 @@ describe("toPerpView —— 新 kind=perp_equity/perp_position(meta 无 role)", 
 // —— v2 展示推导(H5 #120):标记价 / 盈亏% / 强平风险 ——
 // 全部纯推导自 PerpPositionView 既有字段,除零/缺失一律返回 null(UI 降级)。
 
-import { liqRisk, markPx, pnlPct } from "../src/lib/perp";
+import { liqRisk, markPx, pnlPct } from "../src/lib/core/perp";
 
 const pos = (over: Partial<Parameters<typeof markPx>[0]>): Parameters<typeof markPx>[0] => ({
   coin: "ETH",

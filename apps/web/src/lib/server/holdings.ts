@@ -2,7 +2,7 @@ import { SnapshotStore } from "@folio/db";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
-import { isFungible, viewKind } from "../balance-kind";
+import { isFungible, viewKind } from "../core/balance-kind";
 import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 import { buildTokenValueHistory, type TokenHistRow } from "./internal/token-history";

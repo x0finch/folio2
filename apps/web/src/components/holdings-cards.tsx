@@ -15,7 +15,7 @@ import {
   type OverviewBalance,
   type SpotRow,
   toAccountSections,
-} from "../lib/account-view";
+} from "../lib/core/account-view";
 import { formatNumber } from "../lib/i18n/format-number";
 import { DefiPositions } from "../routes/_authed/-home/holdings/defi";
 import { PerpPositions } from "../routes/_authed/-home/holdings/perp";

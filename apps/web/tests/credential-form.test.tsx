@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { InputSpec } from "../src/lib/creds";
+import type { InputSpec } from "../src/lib/core/creds";
 import { messages } from "../src/lib/i18n/messages";
 
 // 补录凭据表单(#428 片 1)。原先它自己存 `busy` + `error`,现在两者都由 mutation 持有。

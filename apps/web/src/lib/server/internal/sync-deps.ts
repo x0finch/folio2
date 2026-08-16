@@ -38,9 +38,9 @@ import {
 } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { Cause, Effect, Exit, Layer, Stream } from "effect";
-import type { InputSpec } from "../../creds";
-import { isComplete, openCreds } from "../../creds";
-import { userDisplayBalances } from "../../user-balances";
+import type { InputSpec } from "../../core/creds";
+import { isComplete, openCreds } from "../../core/creds";
+import { userDisplayBalances } from "../../core/tokens";
 import { recordDefiLogosOf } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
 import { type DbStores, requestLayer, runAtEdge, withRequest } from "./oracle";

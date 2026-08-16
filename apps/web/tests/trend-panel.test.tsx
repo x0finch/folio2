@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
-import type { HistoryPoint } from "../src/lib/history";
+import type { HistoryPoint } from "../src/lib/core/history";
 import { messages } from "../src/lib/i18n/messages";
 import { TrendPanel } from "../src/routes/_authed/-home/hero/trend-panel";
 

@@ -7,9 +7,9 @@ import {
   type OverviewBalance,
   parseDefiMeta,
   toAccountSections,
-} from "../../account-view";
-import { type AggInput, buildCanonicalHoldings } from "../../aggregate";
-import { isFungible, viewKind } from "../../balance-kind";
+} from "../../core/account-view";
+import { type AggInput, buildCanonicalHoldings } from "../../core/aggregate";
+import { isFungible, viewKind } from "../../core/balance-kind";
 import {
   buildGainLines,
   computeGain24h,
@@ -17,9 +17,9 @@ import {
   type Gain,
   type GainCurrentRow,
   type GainHistoryRow,
-} from "../../gain-24h";
-import { platformLogoUrl, tokenLogoUrl } from "../../logo";
-import { defiTokenId, refreshableTokenIds } from "../../tokens";
+} from "../../core/gain-24h";
+import { platformLogoUrl, tokenLogoUrl } from "../../core/logo";
+import { defiTokenId, refreshableTokenIds } from "../../core/tokens";
 import { deriveLiveAccountTotals, liveValue } from "./live-value";
 
 // 总览读模型(纯 —— 依赖注入,无 cloudflare env,可脱离 server fn 单测)。

@@ -1,7 +1,7 @@
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@folio/ui";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
-import type { HistoryPoint } from "../../../lib/history";
+import type { HistoryPoint } from "../../../lib/core/history";
 import { usePreferCurrency } from "../../../lib/hooks/use-prefer-currency";
 import { formatMoney } from "../../../lib/i18n/format-number";
 

@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import type { ConnectorId } from "@folio/connectors";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildPortfolioHistory } from "../../src/lib/history";
+import { buildPortfolioHistory } from "../../src/lib/core/history";
 import {
   accountRecord,
   manualActivityRecord,

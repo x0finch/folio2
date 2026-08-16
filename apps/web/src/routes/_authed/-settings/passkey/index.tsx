@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { EditableName } from "../../../../components/editable-name";
 import { IconButton } from "../../../../components/icon-button";
-import { authClient, signIn } from "../../../../lib/auth-client";
+import { authClient, signIn } from "../../../../lib/core/auth-client";
 import { useLockDevice } from "../../../../lib/hooks/use-lock-device";
 import {
   getAuthenticatorName,

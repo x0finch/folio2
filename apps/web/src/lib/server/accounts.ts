@@ -4,7 +4,7 @@ import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
-import { isComplete, safeView } from "../creds";
+import { isComplete, safeView } from "../core/creds";
 import { loadAccountHistory } from "./internal/account-history";
 import { credentialSpecs, validateAccountCreds } from "./internal/connector-registry";
 import { createAccountFor, raw2sealed } from "./internal/create-account";

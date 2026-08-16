@@ -9,13 +9,13 @@ const KEY = "theme";
 // 内联进 <head> 的初始化脚本(在 React 之前执行,避免深色闪白)。
 export const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('${KEY}');var m=window.matchMedia('(prefers-color-scheme: dark)').matches;var d=t==='dark'||((t===null||t==='system')&&m);document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
 
-export function getStoredTheme(): Theme {
+function getStoredTheme(): Theme {
   if (typeof localStorage === "undefined") return "system";
   const v = localStorage.getItem(KEY);
   return v === "light" || v === "dark" || v === "system" ? v : "system";
 }
 
-export function setStoredTheme(theme: Theme): void {
+function setStoredTheme(theme: Theme): void {
   localStorage.setItem(KEY, theme);
 }
 
@@ -23,7 +23,7 @@ function systemPrefersDark(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
-export function applyTheme(theme: Theme): void {
+function applyTheme(theme: Theme): void {
   const dark = theme === "dark" || (theme === "system" && systemPrefersDark());
   document.documentElement.classList.toggle("dark", dark);
 }

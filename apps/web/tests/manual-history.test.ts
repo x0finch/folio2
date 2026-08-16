@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SnapshotTotalRow } from "../src/lib/history";
+import type { SnapshotTotalRow } from "../src/lib/core/history";
 import {
   accountTotalAt,
   buildManualAccountSeries,
@@ -7,7 +7,7 @@ import {
   isReduceOversold,
   tokenPriceAt,
   tokenQuantityAt,
-} from "../src/lib/manual-history";
+} from "../src/lib/core/manual";
 
 // manual 价值历史 compute-on-read(ADR 0018 / T5,#157):账本为真,value@T = quantity@T × price@T。
 // 折叠数量、price@T 降级链、回溯编辑整条重算(无 stale)。纯逻辑,与 deriveAmount 同 fold 语义。

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildStack, type StackEntry } from "../src/components/avatar-stack";
-import { ZERO_DISPLAY_USD } from "../src/lib/account-view";
+import { ZERO_DISPLAY_USD } from "../src/lib/core/account-view";
 
 // 三处叠标共用的那一段(#133 收尾):同键累加 → 砍尘埃 → 按量级降序。
 // 各调用方自己把「一行」变成 entry(那部分三处不可能一样),排序规则只住这里。

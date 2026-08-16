@@ -4,7 +4,7 @@ import {
   downsampleSeries,
   type HistoryPoint,
   toDailySeries,
-} from "../src/lib/history";
+} from "../src/lib/core/history";
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;

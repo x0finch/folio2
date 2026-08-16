@@ -6,7 +6,7 @@ import {
   TransferStore,
 } from "@folio/db";
 import { Effect, Option, Stream } from "effect";
-import { safeView } from "../../creds";
+import { safeView } from "../../core/creds";
 import { credentialSpecs } from "./connector-registry";
 import {
   accountRecord,

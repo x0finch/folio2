@@ -2,8 +2,8 @@ import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { TokenRecord } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import type { OverviewBalance } from "../src/lib/account-view";
-import { GAIN_WINDOW_MS } from "../src/lib/gain-24h";
+import type { OverviewBalance } from "../src/lib/core/account-view";
+import { GAIN_WINDOW_MS } from "../src/lib/core/gain-24h";
 import { buildOverview } from "../src/lib/server/internal/overview-model";
 import { type OracleStub, runWithOracle } from "./oracle-stub";
 

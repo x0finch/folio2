@@ -2,7 +2,7 @@ import { Skeleton } from "@folio/ui";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "../../../../components/query-boundary";
-import { mergeDefiGroups } from "../../../../lib/account-view";
+import { mergeDefiGroups } from "../../../../lib/core/account-view";
 import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
 import { type PinScopeKey, portfolioKeys } from "../../../../lib/queries/keys";
 import {

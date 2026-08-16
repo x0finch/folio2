@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DerivableActivity } from "../src/lib/manual-activity";
+import type { DerivableActivity } from "../src/lib/core/manual";
 import {
   findToken,
   planManualBatch,

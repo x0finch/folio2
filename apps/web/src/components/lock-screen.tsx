@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Fingerprint, LogOut } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import { signIn, signOut } from "../lib/auth-client";
+import { signIn, signOut } from "../lib/core/auth-client";
 import { clearIdleLockState, useIdleLock } from "../lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "../lib/hooks/use-idle-timeout";
 import { useLockDevice } from "../lib/hooks/use-lock-device";

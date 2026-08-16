@@ -1,7 +1,7 @@
 import { cn, NumberTicker } from "@folio/ui";
 import { useTranslations } from "use-intl";
-import type { Gain } from "../../../../lib/gain-24h";
-import { downsampleSeries, type HistoryPoint } from "../../../../lib/history";
+import type { Gain } from "../../../../lib/core/gain-24h";
+import { downsampleSeries, type HistoryPoint } from "../../../../lib/core/history";
 import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
 import { signedUsd } from "../../../../lib/i18n/format-number";
 import { GainSkeleton, NO_VALUE } from "../holdings/value-delta";

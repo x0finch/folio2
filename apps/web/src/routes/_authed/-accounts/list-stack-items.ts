@@ -3,10 +3,10 @@ import {
   DEFI_FALLBACK_PROTOCOL,
   type OverviewBalance,
   parseDefiMeta,
-} from "../../../lib/account-view";
-import { viewKind } from "../../../lib/balance-kind";
-import { defiLogoUrl } from "../../../lib/logo";
-import { perpPositionMetaOf } from "../../../lib/perp";
+} from "../../../lib/core/account-view";
+import { viewKind } from "../../../lib/core/balance-kind";
+import { defiLogoUrl } from "../../../lib/core/logo";
+import { perpPositionMetaOf } from "../../../lib/core/perp";
 
 // 账户行那一排小圆头像 → items(纯逻辑,可单测)。**三种持仓都进来**(#133):
 //   · 现货 → 币的图标

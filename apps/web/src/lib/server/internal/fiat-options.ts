@@ -1,6 +1,6 @@
 import { FIAT_NAMER, SUPPORTED_CURRENCIES, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import type { TokenOption } from "../../token-option";
+import type { TokenOption } from "../../core/tokens";
 
 // 选币下拉「法币」组的数据(#272)。范围锁 `SUPPORTED_CURRENCIES` 里 `kind === "fiat"` 的那几种
 // (与展示币种同一集合,扩展 = 往那个常量加一处)。每项:

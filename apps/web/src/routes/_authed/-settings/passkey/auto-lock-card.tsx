@@ -13,7 +13,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import { authClient, signIn } from "../../../../lib/auth-client";
+import { authClient, signIn } from "../../../../lib/core/auth-client";
 import { IDLE_TIMEOUT_MINUTES } from "../../../../lib/hooks/idle-lock";
 import { useIdleTimeout } from "../../../../lib/hooks/use-idle-timeout";
 import { useLockDevice } from "../../../../lib/hooks/use-lock-device";
