@@ -13,15 +13,13 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import { authClient, signIn } from "../../../lib/auth-client";
-import { useIdleTimeout } from "../../../lib/hooks/use-idle-timeout";
-import { useLockDevice } from "../../../lib/hooks/use-lock-device";
-import { usePlatformAuthenticator } from "../../../lib/hooks/use-platform-authenticator";
-import { IDLE_TIMEOUT_MINUTES } from "../../../lib/idle-lock";
-import { registerPasskey } from "../../../lib/register-passkey";
-import type { PasskeyRow } from "./passkey-row";
-import { errorCode, SESSION_NOT_FRESH } from "./passkey-session";
-import { SettingRow } from "./setting-row";
+import { authClient, signIn } from "../../../../lib/auth-client";
+import { useIdleTimeout } from "../../../../lib/hooks/use-idle-timeout";
+import { useLockDevice } from "../../../../lib/hooks/use-lock-device";
+import { IDLE_TIMEOUT_MINUTES } from "../../../../lib/idle-lock";
+import { registerPasskey } from "../../../../lib/register-passkey";
+import { SettingRow } from "../setting-row";
+import { errorCode, type PasskeyRow, SESSION_NOT_FRESH } from "./passkey";
 
 // 自动锁定卡(#292，ADR 0029)：闲置多久后遮住持仓。偏好每设备独立(localStorage)、改动即时生效。
 export function AutoLockCard() {
@@ -193,4 +191,33 @@ export function AutoLockCard() {
       </CardContent>
     </Card>
   );
+}
+
+// 这台机器有没有可做用户验证的平台认证器(Touch ID / Face ID / Windows Hello)。
+// 闲置锁注册限定 platform；没有时浏览器会停在「用其他设备」不报错(#354)。
+// null = 还没问出来；用 false 兜底会让开关挂载瞬间先禁用再启用。
+function usePlatformAuthenticator(): boolean | null {
+  const [available, setAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const pkc = typeof window === "undefined" ? undefined : window.PublicKeyCredential;
+    if (!pkc || typeof pkc.isUserVerifyingPlatformAuthenticatorAvailable !== "function") {
+      setAvailable(false);
+      return;
+    }
+    let cancelled = false;
+    pkc
+      .isUserVerifyingPlatformAuthenticatorAvailable()
+      .then((ok) => {
+        if (!cancelled) setAvailable(ok);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return available;
 }

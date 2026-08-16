@@ -112,7 +112,7 @@ export const Route = createFileRoute("/api/import")({
         }
         if (outcome.kind === "failed") {
           log.error("import failed", { userId, error: outcome.message });
-          // 内情不回给客户端(它会被 import-data.ts 原样显示给用户);日志里有。
+          // 内情不回给客户端(设置页导入会原样显示服务端纯文本);日志里有。
           return new Response("import failed", { status: 500 });
         }
         log.info("import complete", { userId, ...outcome.counts });

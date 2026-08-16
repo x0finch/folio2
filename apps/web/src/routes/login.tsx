@@ -184,7 +184,7 @@ function AuthPanel() {
     setError(null);
     setBusy(true);
     try {
-      // Name 未填时兜底取 email 的 @ 前本地部分(grill Q7),衔接 S1 accountIdentity 身份行。
+      // Name 未填时兜底取 email 的 @ 前本地部分(grill Q7),衔接 S1 userIdentity 身份行。
       const res = isSignup
         ? await signUp.email({ email, password, name: name.trim() || deriveDefaultName(email) })
         : await signIn.email({ email, password });

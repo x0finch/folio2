@@ -11,21 +11,19 @@ import {
 } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
-import { EditableName } from "../../../components/editable-name";
-import { IconButton } from "../../../components/icon-button";
-import { authClient, signIn } from "../../../lib/auth-client";
-import { useLockDevice } from "../../../lib/hooks/use-lock-device";
-import { usePasskeySupport } from "../../../lib/hooks/use-passkey-support";
+import { EditableName } from "../../../../components/editable-name";
+import { IconButton } from "../../../../components/icon-button";
+import { authClient, signIn } from "../../../../lib/auth-client";
+import { useLockDevice } from "../../../../lib/hooks/use-lock-device";
 import {
   getAuthenticatorName,
   type PasskeyKind,
   passkeyKind,
-} from "../../../lib/passkey-authenticators";
-import { registerPasskey } from "../../../lib/register-passkey";
-import type { PasskeyRow } from "./passkey-row";
-import { errorCode, SESSION_NOT_FRESH } from "./passkey-session";
+} from "../../../../lib/passkey-authenticators";
+import { registerPasskey } from "../../../../lib/register-passkey";
+import { errorCode, type PasskeyRow, SESSION_NOT_FRESH } from "./passkey";
 
 const KIND_COPY = {
   synced: "passkeyKindSynced",
@@ -285,4 +283,13 @@ function RemovePasskeyModal({
       </div>
     </MorphingModal>
   );
+}
+
+// 浏览器是否支持 WebAuthn。SSR / hydration：render 期恒 false，挂载后才可能置真。
+function usePasskeySupport(): boolean {
+  const [supported, setSupported] = useState(false);
+  useEffect(() => {
+    setSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
+  }, []);
+  return supported;
 }

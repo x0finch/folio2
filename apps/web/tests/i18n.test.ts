@@ -42,10 +42,10 @@ describe("messages (via createTranslator)", () => {
     expect(t("Overview.smallHoldings", { n: 4 })).toBe("4 项小额");
   });
 
-  // S1 Settings(#112):外观 / 账户 / 主题选项 / 登出确认新键,中英双语都产出串(非回退 key)。
+  // S1 Settings(#112):外观 / 用户 / 主题选项 / 登出确认新键,中英双语都产出串(非回退 key)。
   it("English: new Settings keys resolve", () => {
     const t = createTranslator({ locale: "en", messages: messages.en });
-    expect(t("Settings.account")).toBe("Account");
+    expect(t("Settings.user")).toBe("User");
     expect(t("Settings.appearance")).toBe("Appearance");
     expect(t("Settings.themeSystem")).toBe("System");
     expect(t("Settings.data")).toBe("Data");
@@ -53,7 +53,7 @@ describe("messages (via createTranslator)", () => {
   });
   it("Chinese: new Settings keys resolve", () => {
     const t = createTranslator({ locale: "zh", messages: messages.zh });
-    expect(t("Settings.account")).toBe("账户");
+    expect(t("Settings.user")).toBe("用户");
     expect(t("Settings.appearance")).toBe("外观");
     expect(t("Settings.themeSystem")).toBe("跟随系统");
     expect(t("Settings.data")).toBe("数据");

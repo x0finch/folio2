@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger }
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../../components/currency-switcher";
-import { useMountedTheme } from "../../../hooks/use-theme";
+import { useMountedTheme } from "../../../lib/hooks/use-theme";
 import { invalidateFor } from "../../../lib/queries/refresh";
 import { setLocalePreference } from "../../../lib/server/preferences";
 import type { Theme } from "../../../lib/theme";

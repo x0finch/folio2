@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { applyTheme, getStoredTheme, setStoredTheme, type Theme } from "../lib/theme";
+import { applyTheme, getStoredTheme, setStoredTheme, type Theme } from "../theme";
 
 // SSR 安全的主题选中态。theme 存于 localStorage → SSR 只得 "system",若首帧直接用 useTheme().theme
 // 会与 SSR 不一致而触发 hydration mismatch。挂载前统一按 "system" 渲染(与 SSR 齐),挂载后再显真实值。

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { deriveDefaultName } from "../src/lib/derive-default-name";
 
 // 注册默认 name(grill Q7):取 email 的 @ 前本地部分,作 Name 输入框 placeholder / 兜底。
-// 与 S1 accountIdentity 衔接 —— 用户不填名字时身份行显 `ada` 而非整串 `ada@folio.dev`。
+// 与 S1 userIdentity 衔接 —— 用户不填名字时身份行显 `ada` 而非整串 `ada@folio.dev`。
 describe("deriveDefaultName", () => {
   it("取 @ 前的本地部分", () => {
     expect(deriveDefaultName("ada@folio.dev")).toBe("ada");

@@ -1,4 +1,5 @@
 import { Button } from "@folio/ui";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fingerprint, LogOut } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
@@ -45,6 +46,7 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
   const t = useTranslations("Lock");
   const tc = useTranslations("Common");
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   // 本机没有凭据记录时先说一句,别让人对着「解锁」按钮反复按。
@@ -86,10 +88,11 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
   // 就没有任何出路 —— 得留一条「放我走」。**不加二次确认**:这里的登出是「我进不去了」的
   // 兜底,再挡一道反而添堵;误点的代价只是重登一次(只读看板,无破坏性操作)。settings
   // 那个登出加确认是因为它在日常界面里、误点概率高,语境不同。
-  // clearIdleLockState 必不可少 —— 不清就「登出→登录→又锁上」成环,理由见 use-idle-lock.ts。
+  // 不清锁就「登出→登录→又锁上」成环;不清查询缓存,下一登录会看到上一份组合。
   async function onSignOut() {
     setBusy(true);
     clearIdleLockState();
+    queryClient.clear();
     try {
       await signOut();
     } finally {

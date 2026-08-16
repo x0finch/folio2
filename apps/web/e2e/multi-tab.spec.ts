@@ -79,7 +79,7 @@ test.describe("多个标签页", () => {
     const other = await page.context().newPage();
     await other.goto("/settings");
     // 另一个标签此刻也是锁屏(上一条测过)。**先等锁屏真的出现**再点登出:设置页自己也有一个同名的
-    // 登出按钮(账户卡里那个),服务端就渲染出来了 —— 不等的话可能点在那一个上,而它要弹二次确认。
+    // 登出按钮(用户卡里那个),服务端就渲染出来了 —— 不等的话可能点在那一个上,而它要弹二次确认。
     await expect(other.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
     await other.getByRole("button", { name: /sign out/i }).click();
     await expect(other).toHaveURL(/\/login/);

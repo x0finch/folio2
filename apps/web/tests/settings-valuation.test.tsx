@@ -24,7 +24,6 @@ vi.mock("../src/lib/server/settings", () => ({
   getValuationSettings,
   updateValuationSettings,
 }));
-vi.mock("../src/lib/import-data", () => ({ importData: vi.fn() }));
 vi.mock("../src/lib/server/preferences", () => ({
   getCurrencyPreference: vi.fn(),
   getLocalePreference: vi.fn(),

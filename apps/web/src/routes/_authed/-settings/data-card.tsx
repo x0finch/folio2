@@ -11,7 +11,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { importData } from "../../../lib/import-data";
+import type { ImportCounts } from "../../../lib/import";
 import { invalidateFor } from "../../../lib/queries/refresh";
 import { dataStatsQuery } from "../../../lib/queries/settings";
 
@@ -35,7 +35,6 @@ export function DataCard() {
   // 导入是「选了文件才发生一次的写」——用 useMutation 而非手搓 msg/error/busy 三个 state:
   // isPending 是单一事实源(直接接到 input/按钮的 disabled 上),连点两次也只跑一个;
   // 成功/失败各自的文案直接读 data/error,后回来的请求不会覆写前一条的状态(#241)。
-  // 传输层抽在 lib/import-data(与仓里其它 mutation 一样调具名函数,不把 fetch 铺在组件里)。
   const importMutation = useMutation({
     mutationFn: importData,
     // 导入什么都可能变(账户 / 快照 / 标签 / 组合),所以刷的是最宽的那一条。
@@ -135,4 +134,12 @@ export function DataCard() {
       </MorphingModal>
     </Card>
   );
+}
+
+// 走 `/api/import` 而不是 server function:传的是文件本体,二进制塞进 server fn 得先 base64。
+// 失败把服务端纯文本错误原样抛出,不在这里重试。
+async function importData(file: File): Promise<{ imported: ImportCounts }> {
+  const res = await fetch("/api/import", { method: "POST", body: file });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ imported: ImportCounts }>;
 }
