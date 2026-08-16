@@ -4,7 +4,7 @@ import { type AccountSafe, AccountStore, type ManualStore } from "@folio/db";
 import type { TokenService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
-import { isManual } from "../../core/manual-connector";
+import { isManual } from "../../core/manual";
 import { credentialSpecs, validateAccountCreds } from "./connector-registry";
 import { sealCreds } from "./creds";
 import { createManualAccount } from "./manual";

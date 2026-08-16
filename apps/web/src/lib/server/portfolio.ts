@@ -17,7 +17,7 @@ import {
   toTabPin,
 } from "../core/accounts-in-view";
 import { connectorLabelFallback, platformLogoUrl } from "../core/logo";
-import { isManual } from "../core/manual-connector";
+import { isManual } from "../core/manual";
 import { loadAccountHoldings } from "./internal/account-holdings";
 import { connectorPlatformMeta } from "./internal/connector-platform";
 import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./internal/gain-24h";

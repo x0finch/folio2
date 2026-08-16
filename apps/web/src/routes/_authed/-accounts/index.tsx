@@ -10,7 +10,7 @@ import { ConnectorBadge } from "../../../components/connector-badge";
 import { QueryBoundary } from "../../../components/query-boundary";
 import { TagBadges } from "../../../components/tag-badges";
 import { accountIdsInView } from "../../../lib/core/accounts-in-view";
-import { isManual } from "../../../lib/core/manual-connector";
+import { isManual } from "../../../lib/core/manual";
 import { usePortfolio } from "../../../lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "../../../lib/hooks/use-stale-price-refresh";
 import {

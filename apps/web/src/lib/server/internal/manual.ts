@@ -20,11 +20,12 @@ import {
   fallbackUnitPrice,
   type HistoricalPriceAt,
   type HistoryToken,
+  isManual,
+  MANUAL_CONNECTOR_ID,
   projectToken,
   tokenPriceAt,
   tokenQuantityAt,
 } from "../../core/manual";
-import { isManual, MANUAL_CONNECTOR_ID } from "../../core/manual-connector";
 import type { GainHistoryRow } from "./gain-24h";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "./manual-batch";
 import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";

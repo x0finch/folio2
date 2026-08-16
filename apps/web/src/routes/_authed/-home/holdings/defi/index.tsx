@@ -3,10 +3,10 @@ import { useEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import type { DefiGroup, DefiRow } from "../../../../../lib/core/account-view";
 import { defiMeaningfulLegs, groupLegsByRole } from "../../../../../lib/core/account-view";
+import { formatNumber } from "../../../../../lib/core/format-number";
 import { defiLogoUrl } from "../../../../../lib/core/logo";
 import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
 import { useHoverPopover } from "../../../../../lib/hooks/use-hover-popover";
-import { formatNumber } from "../../../../../lib/i18n/format-number";
 import { ValueDelta } from "../value-delta";
 
 // DeFi 持仓明细 v2(H5 #120):总览「DeFi」tab 与账户详情抽屉共用。

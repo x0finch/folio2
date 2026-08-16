@@ -1,6 +1,6 @@
 import { AccountStore, SnapshotStore } from "@folio/db";
 import { Effect } from "effect";
-import { MANUAL_CONNECTOR_ID } from "../../core/manual-connector";
+import { MANUAL_CONNECTOR_ID } from "../../core/manual";
 import { buildAccountValueHistory } from "./history";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "./manual";
 

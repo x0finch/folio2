@@ -4,7 +4,7 @@ import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
-import { isManual } from "../core/manual-connector";
+import { isManual } from "../core/manual";
 import { credentialSpecs } from "./internal/connector-registry";
 import { isComplete } from "./internal/creds";
 import { logCategory } from "./internal/effect-log";

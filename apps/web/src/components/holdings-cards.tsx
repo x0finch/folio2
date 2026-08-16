@@ -16,7 +16,7 @@ import {
   type SpotRow,
   toAccountSections,
 } from "../lib/core/account-view";
-import { formatNumber } from "../lib/i18n/format-number";
+import { formatNumber } from "../lib/core/format-number";
 import { DefiPositions } from "../routes/_authed/-home/holdings/defi";
 import { PerpPositions } from "../routes/_authed/-home/holdings/perp";
 import { TokenRowContent } from "../routes/_authed/-home/holdings/tokens/token-row";

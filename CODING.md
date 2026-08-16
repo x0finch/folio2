@@ -46,8 +46,14 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
   - `lib/server/internal/*.ts` —— 只有服务端能跑的实现层:env/单例装配、领域核心、warmer、route helper,**以及任何 `import { Effect }` 的东西**。
   判据要按「能不能」而不是「碰不碰 env」,是因为按后者判会把一批 DI 写法的纯模块留在共用层 —— 它们不碰 env,却要 oracle 服务,客户端一辈子供不上。留在那儿只有打包时的摇树在拦,而摇树是优化不是保证。
 
-- **`lib/` 顶层不放文件 —— 一个模块要么住进上面某个目录,要么住进它唯一的使用者。** 曾经的顶层是个 47 文件的杂物层:一多半只有一个 route 或一个 server fn 在用,却因为「像是个工具」被摆在全站可见的位置。**准入 `lib/core/` 的门槛是「≥3 处共用且跨 route/跨端」**(`formatNumber`、`creds`、`gain-24h` 那一类);只有一个使用者的,搬到使用者身边去。
-  - **例外只有一条,且是测试架构逼出来的**:纯逻辑不能内联进一个会拉起 `cloudflare:workers` 的模块 —— 它的 node 环境单测会跟着被拖进 worker 依赖链(见 `vitest.config.ts` 的 logic/dom 分项)。这种就在使用者**旁边**单开一个 `.ts`(如 `components/manual-tokens.ts`),而不是塞进使用者文件里。
+- **`lib/` 顶层不放文件 —— 一个模块要么住进上面某个目录,要么住进它唯一的使用者。** 曾经的顶层是个 47 文件的杂物层:一多半只有一个 route 或一个 server fn 在用,却因为「像是个工具」被摆在全站可见的位置。只有一个使用者的,搬到使用者身边去。
+
+- **准入 `lib/core/` 的判据是「有没有第二侧在**调它的代码**」——`import type` 不算。** 类型引用在编译后完全消失,不会把任何服务端代码带进 client bundle(要防的一直是 value-import,见上一条)。所以「逻辑全在服务端、页面只要个数据形状」的模块**不是共用件**,它该跟着逻辑住 `lib/server/internal/`,页面照常 `import type` 拿形状。
+  这条是踩出来的:第一版按「有人引就算共用」摆了 15 个进 core,其中 `tokens` / `aggregate` / `creds` / `sync-status` 四个的**全部函数调用点都在服务端**,页面一行都没调 —— 它们是被自己的类型绑在共用层的。
+  - **拆一个混合模块时,缝在职责上,不在 client/server 上。** `history` 看着像「服务端建曲线 / 客户端画曲线」,但 `downsampleSeries` 两边都调 —— 真正的缝是**采样**(共用)与**从快照重建**(只服务端)。按 client/server 硬切会切出一份要被复制的原语。
+  - **搬走一个符号前先数它的使用者。** `toPerpView` 在 core 之外零使用者(只有 `account-view` 调),`downsampleSeries`/`toDailySeries` 各只有一个 —— 这种不需要共用层,直接并进那个唯一的使用者。
+
+- **纯逻辑不能内联进一个会拉起 `cloudflare:workers` 的模块** —— 它的 node 环境单测会跟着被拖进 worker 依赖链(见 `vitest.config.ts` 的 logic/dom 分项)。这种就在使用者**旁边**单开一个 `.ts`(如 `components/manual-tokens.ts`、`components/incomplete-specs.ts`),而不是塞进使用者文件里。
 
 - **一个包只要导出 `Context.GenericTag`,它的主入口就是服务端入口** —— 不要在同一个入口再转发客户端要的契约。客户端为了拿契约 import 它,`effect` 就跟进 bundle(+75 KB gzip),而且这事只在有人第一次那么写的时候才发生,平时看不出来。`@folio/oracle-basic` 用 `./ports` 子入口分开;`@folio/oracle` 整包只有服务端碰,所以它干脆不转发 basic。
 
