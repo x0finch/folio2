@@ -3,7 +3,7 @@ import type { TokenRecord } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/core/account-view";
-import { GAIN_WINDOW_MS } from "../src/lib/core/gain-24h";
+import { GAIN_WINDOW_MS } from "../src/lib/server/internal/gain-24h";
 import { buildOverview } from "../src/lib/server/internal/overview-model";
 import { type OracleStub, runWithOracle } from "./oracle-stub";
 

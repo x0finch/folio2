@@ -4,7 +4,7 @@ import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildAccountValueHistory } from "../../src/lib/core/history";
+import { buildAccountValueHistory } from "../../src/lib/server/internal/history";
 import { NAMER } from "../../src/lib/server/internal/oracle";
 import { dbFor, withStore } from "./db-effect";
 import {

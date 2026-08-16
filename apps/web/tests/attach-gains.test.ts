@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DefiGroup } from "../src/lib/core/account-view";
-import { defiGainKey } from "../src/lib/core/gain-24h";
+import { defiGainKey } from "../src/lib/core/account-view";
 import {
   attachDefiGains,
   attachHoldingGains,

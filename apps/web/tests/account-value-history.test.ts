@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAccountValueHistory } from "../src/lib/core/history";
+import { buildAccountValueHistory } from "../src/lib/server/internal/history";
 
 // 单账户价值历史(A2 抽屉头部 chart):该账户各快照 (takenAt, totalUsd) → 升序 HistoryPoint[]。
 // 复用组合净值的阶梯重建(单账户 = 每 takenAt 一点),since 裁窗口,末点 = 最新快照冻结总额

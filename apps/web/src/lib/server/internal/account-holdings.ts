@@ -7,7 +7,7 @@ import {
   GAIN_WINDOW_MS,
   type Gain,
   type GainCurrentRow,
-} from "../../core/gain-24h";
+} from "./gain-24h";
 import { injectManualSnapshots, loadManualGainHistory } from "./manual";
 import { enrichBalances } from "./token-enrich";
 

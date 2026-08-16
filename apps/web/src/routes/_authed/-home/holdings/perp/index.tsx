@@ -1,17 +1,13 @@
 import { LogoAvatar, Separator, SharedLayoutBg } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import { AccountName } from "../../../../../components/account-name";
-import {
-  liqRisk,
-  type PerpPositionView,
-  type PerpView,
-  pnlPct,
-} from "../../../../../lib/core/perp";
+import type { PerpPositionView, PerpView } from "../../../../../lib/core/account-view";
 import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
 import { formatNumber, signedUsd } from "../../../../../lib/i18n/format-number";
 import { Stat } from "../../hero/stat";
 import { ValueDelta } from "../value-delta";
 import { LiqRing } from "./liq-ring";
+import { liqRisk, pnlPct } from "./liq-risk";
 
 // 永续持仓明细 v2(H5 #120):总览「永续」tab 与账户详情抽屉共用。
 // 与代币行同语言 —— 行式(零表格/表头)、左「标识+标题」右 <ValueDelta>;

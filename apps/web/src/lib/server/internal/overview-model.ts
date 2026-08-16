@@ -4,21 +4,21 @@ import { fiatCodeOf, type TokenRecord, type ValuationMode } from "@folio/oracle-
 import { Effect } from "effect";
 import {
   DEFI_FALLBACK_PROTOCOL,
+  defiGainKey,
   type OverviewBalance,
   parseDefiMeta,
   toAccountSections,
 } from "../../core/account-view";
 import { isFungible, viewKind } from "../../core/balance-kind";
+import { platformLogoUrl, tokenLogoUrl } from "../../core/logo";
+import { type AggInput, buildCanonicalHoldings } from "./aggregate";
 import {
   buildGainLines,
   computeGain24h,
-  defiGainKey,
   type Gain,
   type GainCurrentRow,
   type GainHistoryRow,
-} from "../../core/gain-24h";
-import { platformLogoUrl, tokenLogoUrl } from "../../core/logo";
-import { type AggInput, buildCanonicalHoldings } from "./aggregate";
+} from "./gain-24h";
 import { deriveLiveAccountTotals, liveValue } from "./live-value";
 import { defiTokenId, refreshableTokenIds } from "./tokens";
 

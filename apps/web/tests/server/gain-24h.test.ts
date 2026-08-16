@@ -5,7 +5,7 @@ import {
   computeGain24h,
   GAIN_BASIS_TOLERANCE_MS,
   GAIN_WINDOW_MS,
-} from "../../src/lib/core/gain-24h";
+} from "../../src/lib/server/internal/gain-24h";
 import { dbFor } from "./db-effect";
 
 // 24h 盈亏的**取数**那一半(ADR 0040)。算法本身在 `tests/gain-24h.test.ts` 里穷尽过了;这里打真 D1,

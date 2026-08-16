@@ -1,4 +1,4 @@
-import type { Gain } from "../../core/gain-24h";
+import type { Gain } from "./gain-24h";
 
 // symbol 归一(与 tokens 层同口径:trim + 大写)—— 只用在还没有 token_id 的行上(见 groupKey)。
 const norm = (s: string): string => s.trim().toUpperCase();

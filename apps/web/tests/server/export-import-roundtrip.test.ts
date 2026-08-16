@@ -2,7 +2,6 @@ import { env } from "cloudflare:test";
 import type { ConnectorId } from "@folio/connectors";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildPortfolioHistory } from "../../src/lib/core/history";
 import {
   accountRecord,
   manualActivityRecord,
@@ -11,6 +10,7 @@ import {
   snapshotRecord,
   tokenRecord,
 } from "../../src/lib/server/internal/export";
+import { buildPortfolioHistory } from "../../src/lib/server/internal/history";
 import {
   createImporter,
   type ImportDeps,

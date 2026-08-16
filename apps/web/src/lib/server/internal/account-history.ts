@@ -1,7 +1,7 @@
 import { AccountStore, SnapshotStore } from "@folio/db";
 import { Effect } from "effect";
-import { buildAccountValueHistory } from "../../core/history";
 import { MANUAL_CONNECTOR_ID } from "../../core/manual-connector";
+import { buildAccountValueHistory } from "./history";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "./manual";
 
 // 单账户价值历史(抽屉头部那条小曲线)。
