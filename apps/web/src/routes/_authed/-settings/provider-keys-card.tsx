@@ -14,29 +14,26 @@ export function ProviderKeysCard() {
   const t = useTranslations("Settings");
   const statusQuery = useQuery({ ...providerKeyStatusQuery(), ...KEEP_TRYING });
   const status = statusQuery.data;
-  const rows =
-    status == null
-      ? PROVIDER_KEYS.map((k) => (
-          <li key={k.env} className="flex items-center justify-between">
-            <span>{k.label}</span>
-            <Skeleton className="h-5 w-16" />
-          </li>
-        ))
-      : PROVIDER_KEYS.map((k) => (
-          <li key={k.env} className="flex items-center justify-between">
-            <span>{k.label}</span>
-            <span className={status[k.env] ? "text-foreground" : "text-muted-foreground"}>
-              {status[k.env] ? t("configured") : t("notConfigured")}
-            </span>
-          </li>
-        ));
   return (
     <Card>
       <CardHeader>
         <CardTitle>{t("providerKeys")}</CardTitle>
       </CardHeader>
       <CardContent>
-        <ul className="flex flex-col gap-2">{rows}</ul>
+        <ul className="flex flex-col gap-2">
+          {PROVIDER_KEYS.map((k) => (
+            <li key={k.env} className="flex items-center justify-between">
+              <span>{k.label}</span>
+              {status == null ? (
+                <Skeleton className="h-5 w-16" />
+              ) : (
+                <span className={status[k.env] ? "text-foreground" : "text-muted-foreground"}>
+                  {status[k.env] ? t("configured") : t("notConfigured")}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
       </CardContent>
     </Card>
   );
