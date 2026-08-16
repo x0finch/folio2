@@ -3,6 +3,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "../src/lib/i18n/messages";
+import { settingsKeys } from "../src/lib/queries/keys";
 
 // 估值口径开关(#428 片 1)。这张卡以前自己存一份 `sourceFirst` + `busy`,失败时手动写回;
 // 现在显示值是从 mutation 推出来的:在飞时看这次点的 `variables`,落地后看服务端那份 `mode`。
@@ -12,12 +13,15 @@ import { messages } from "../src/lib/i18n/messages";
 //
 // 路由模块在**模块加载期**跑 createFileRoute + import server fn(`cloudflare:workers` 在 jsdom 下
 // 解析不了),故先 mock 掉 server 那层再 import 组件 —— 与 settings-passkey-lock.test.tsx 同一套。
-const { updateValuationSettings } = vi.hoisted(() => ({ updateValuationSettings: vi.fn() }));
+const { updateValuationSettings, getValuationSettings } = vi.hoisted(() => ({
+  updateValuationSettings: vi.fn(),
+  getValuationSettings: vi.fn(),
+}));
 
 vi.mock("../src/lib/server/settings", () => ({
   getDataStats: vi.fn(),
   getProviderKeyStatus: vi.fn(),
-  getValuationSettings: vi.fn(),
+  getValuationSettings,
   updateValuationSettings,
 }));
 vi.mock("../src/lib/import-data", () => ({ importData: vi.fn() }));
@@ -36,11 +40,13 @@ vi.mock("../src/lib/auth-client", () => ({
 const { ValuationCard } = await import("../src/routes/_authed/-settings/valuation-card");
 
 function mount(mode: "self-first" | "source-first") {
+  getValuationSettings.mockResolvedValue({ valuationMode: mode });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(settingsKeys.valuation(), { valuationMode: mode });
   const utils = render(
     <QueryClientProvider client={client}>
       <IntlProvider locale="en" messages={messages.en} timeZone="UTC" now={new Date(0)}>
-        <ValuationCard mode={mode} />
+        <ValuationCard />
       </IntlProvider>
     </QueryClientProvider>,
   );

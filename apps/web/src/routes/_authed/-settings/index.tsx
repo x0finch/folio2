@@ -1,10 +1,4 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import {
-  dataStatsQuery,
-  providerKeyStatusQuery,
-  valuationSettingsQuery,
-} from "../../../lib/queries/settings";
 import { AccountCard } from "./account-card";
 import { AppearanceCard } from "./appearance-card";
 import { AutoLockCard } from "./auto-lock-card";
@@ -17,9 +11,6 @@ const authedApi = getRouteApi("/_authed");
 
 // 设置页(S1,#112)。卡片顺序:账户 → 外观 → 自动锁 → Passkey → Provider key → 估值 → 数据。
 export function Settings() {
-  const { data: status } = useSuspenseQuery(providerKeyStatusQuery());
-  const { data: valuation } = useSuspenseQuery(valuationSettingsQuery());
-  const { data: dataStats } = useSuspenseQuery(dataStatsQuery());
   const { user } = authedApi.useRouteContext();
   return (
     <div className="flex flex-col gap-6">
@@ -28,9 +19,9 @@ export function Settings() {
       {/* 自动锁定在 passkeys 之前:passkey 现在只从这里添加(开关首次打开时注册一个本机凭据)。 */}
       <AutoLockCard />
       <PasskeysCard />
-      <ProviderKeysCard status={status} />
-      <ValuationCard mode={valuation.valuationMode} />
-      <DataCard hasData={dataStats.hasData} />
+      <ProviderKeysCard />
+      <ValuationCard />
+      <DataCard />
     </div>
   );
 }

@@ -8,21 +8,24 @@ import {
   MorphingModal,
   Separator,
 } from "@folio/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { importData } from "../../../lib/import-data";
 import { invalidateFor } from "../../../lib/queries/refresh";
+import { dataStatsQuery } from "../../../lib/queries/settings";
 
 // 数据卡(合一):导出段 + 分隔线 + 导入段。复用现有 /api/export、/api/import 路由。
 // 导入文案沿用 Accounts 命名空间的 import* 键(与账户页导入同源)。
-export function DataCard({ hasData }: { hasData: boolean }) {
+export function DataCard() {
   const queryClient = useQueryClient();
   const t = useTranslations("Settings");
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
   const inputRef = useRef<HTMLInputElement>(null);
+  const statsQuery = useQuery(dataStatsQuery());
   // 非空库导入是合并式(幂等,不翻倍),但先弹一道确认 —— 让用户明确知道是「并进已有数据」。
+  // 统计还没到或失败:按「库可能非空」多问一次,不要在未知时直接写入。
   const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   function clearInput() {
@@ -43,11 +46,11 @@ export function DataCard({ hasData }: { hasData: boolean }) {
   function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (hasData) {
-      setPendingFile(file); // 非空 → 先确认(见 MorphingModal),不立即导
+    if (statsQuery.data?.hasData === false) {
+      importMutation.mutate(file);
       return;
     }
-    importMutation.mutate(file); // 空库 → 直接导
+    setPendingFile(file);
   }
 
   function confirmImport() {
