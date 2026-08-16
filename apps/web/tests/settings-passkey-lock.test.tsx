@@ -27,7 +27,6 @@ vi.mock("../src/lib/server/settings", () => ({
   getValuationSettings: vi.fn(),
   updateValuationSettings: vi.fn(),
 }));
-vi.mock("../src/lib/import-data", () => ({ importData: vi.fn() }));
 vi.mock("../src/lib/server/preferences", () => ({
   getCurrencyPreference: vi.fn(),
   getLocalePreference: vi.fn(),
@@ -45,7 +44,8 @@ vi.mock("@folio/ui", async (orig) => ({
   toast: { error: toastError, success: vi.fn() },
 }));
 
-const { AutoLockCard, PasskeysCard } = await import("../src/routes/_authed/settings");
+const { AutoLockCard } = await import("../src/routes/_authed/-settings/passkey/auto-lock-card");
+const { PasskeysCard } = await import("../src/routes/_authed/-settings/passkey");
 
 const DEVICE_KEY = "folio_lock_device_passkey";
 const TIMEOUT_KEY = "folio_lock_timeout";

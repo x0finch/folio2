@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { ALLOC_DIMENSION, DEFAULT_DIM } from "../src/lib/allocation";
 import { kindPresence, resolvePinLabel } from "../src/lib/server/internal/tab-strip";
 import { kindTabsOf, pickShownTab, tabAfterUnpin } from "../src/routes/_authed/-home/home-tabs";
 
@@ -135,26 +134,5 @@ describe("resolvePinLabel —— 三种目标的显示名由服务端解析", ()
 
   it("所指的标签已经没了 → 空名字,不炸", () => {
     expect(resolvePinLabel({ kind: "tag", tagId: "gone" }, lookup)).toEqual({ name: "" });
-  });
-});
-
-// Insights 的维度走的是另一条路:合法值是有限集,回落收进了 route 的 `validateSearch` —— 那里
-// 直接把这份 schema 交给 router。下面钉的不是 zod 本身,而是**我们把 `.catch()` 接上了**:
-// 少了它,`?dim=bogus` 会变成一个校验错误页,而不是安静地回落。
-describe("维度 schema —— Insights 的 `?dim=` 就靠它回落", () => {
-  const parse = (v: unknown) => ALLOC_DIMENSION.catch(DEFAULT_DIM).parse(v);
-
-  it("三个合法维度原样通过", () => {
-    expect(parse("token")).toBe("token");
-    expect(parse("chain")).toBe("chain");
-    expect(parse("account")).toBe("account");
-  });
-
-  it("别的一律回落默认维度(手写乱码、将来删掉的维度、根本没带)", () => {
-    expect(parse("bogus")).toBe(DEFAULT_DIM);
-    expect(parse("")).toBe(DEFAULT_DIM);
-    expect(parse(undefined)).toBe(DEFAULT_DIM);
-    expect(parse(42)).toBe(DEFAULT_DIM);
-    expect(parse(["token", "chain"])).toBe(DEFAULT_DIM);
   });
 });

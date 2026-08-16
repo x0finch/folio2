@@ -1,5 +1,5 @@
 import { Monitor, Moon, Sun } from "lucide-react";
-import { useMountedTheme } from "../hooks/use-theme";
+import { useMountedTheme } from "../lib/hooks/use-theme";
 import type { Theme } from "../lib/theme";
 
 // 主题切换：单 icon 循环 light → dark → system(icon 反映当前态)。选中态用 useMountedTheme(SSR 安全)。

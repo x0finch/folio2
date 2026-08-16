@@ -1,6 +1,6 @@
 // 深色模式:切 <html> 的 .dark 类(@folio/ui 已备明暗 token)。三态:light / dark / system。
 // 无闪烁:首屏由 __root <head> 的内联脚本(THEME_INIT_SCRIPT)在 hydration 前就设好类。
-// 运行时切换 / 持久化 / system 跟随的 hook 见 hooks/use-theme;本模块只放脚本 + localStorage/DOM 副作用原语。
+// 运行时切换 / 持久化 / system 跟随的 hook 见 lib/hooks/use-theme;本模块只放脚本 + localStorage/DOM 副作用原语。
 export type Theme = "light" | "dark" | "system";
 const KEY = "theme";
 

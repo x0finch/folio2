@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Holding } from "./aggregate";
+import type { Holding } from "../../../lib/aggregate";
 
 // 分配 rollup(Insights):把 Holdings 按维度切成饼图切片。三维都从 holdings/sources 派生,
 // 故都汇总到 holdings 小计(彼此一致):

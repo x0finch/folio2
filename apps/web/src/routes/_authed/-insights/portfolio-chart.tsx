@@ -1,11 +1,13 @@
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@folio/ui";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
-import { formatMoney } from "../lib/format-number";
-import type { HistoryPoint } from "../lib/history";
-import { usePreferCurrency } from "../lib/hooks/use-prefer-currency";
+import { formatMoney } from "../../../lib/format-number";
+import type { HistoryPoint } from "../../../lib/history";
+import { usePreferCurrency } from "../../../lib/hooks/use-prefer-currency";
 
 const DAY_MS = 86_400_000;
+/** 图框高度。骨架必须同值,后到的图才不会把下面顶开。 */
+export const CHART_FRAME = "h-[220px] w-full";
 
 export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
   const t = useTranslations("Overview");
@@ -38,7 +40,7 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
       : format.dateTime(new Date(ms), { month: "short", day: "numeric" });
 
   return (
-    <ChartContainer config={chartConfig} className="h-[220px] w-full">
+    <ChartContainer config={chartConfig} className={CHART_FRAME}>
       <AreaChart data={series} margin={{ left: 12, right: 16, top: 8, bottom: 4 }}>
         <CartesianGrid vertical={false} />
         <XAxis

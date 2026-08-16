@@ -257,10 +257,11 @@ const en = {
   },
   Settings: {
     title: "Settings",
-    account: "Account",
+    user: "User",
     signOut: "Sign out",
     signOutConfirmTitle: "Sign out?",
     signOutConfirmBody: "You'll need to sign in again to see your portfolio.",
+    signOutFailed: "Couldn't sign out. Try again.",
     importMergeTitle: "Import into existing data?",
     importMergeBody:
       "Your library already has data. Importing merges the file in — re-importing the same file won't create duplicates, and different files are combined. Continue?",
@@ -647,10 +648,11 @@ const zh: Messages = {
   },
   Settings: {
     title: "设置",
-    account: "账户",
+    user: "用户",
     signOut: "退出登录",
     signOutConfirmTitle: "退出登录?",
     signOutConfirmBody: "你需要重新登录才能查看你的组合。",
+    signOutFailed: "退出登录没成功,再试一次。",
     importMergeTitle: "导入到已有数据?",
     importMergeBody:
       "你的库里已有数据。导入会把文件合并进来——同一文件再导一遍不会产生重复,不同文件会合并。继续?",
