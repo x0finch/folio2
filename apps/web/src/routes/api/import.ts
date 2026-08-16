@@ -4,10 +4,15 @@ import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { categorizeFields } from "@/lib/creds";
-import { createImporter, type ImportDeps, parseImportLine } from "@/lib/import";
 import { getAuth } from "@/lib/server/internal/auth";
 import { resolveAuth } from "@/lib/server/internal/auth-session";
 import { credentialSpecs } from "@/lib/server/internal/connector-registry";
+import {
+  createImporter,
+  type ImportCounts,
+  type ImportDeps,
+  parseImportLine,
+} from "@/lib/server/internal/import";
 import { runRequest } from "@/lib/server/internal/oracle";
 
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。鉴权同其它 server fn。
@@ -121,3 +126,7 @@ export const Route = createFileRoute("/api/import")({
     },
   },
 });
+
+// 导入结果计数由这条路由回给 UI(见 -settings/data-card)。形状的事实源在 server internal,
+// 但客户端只该认「这条 API 返回什么」,所以从这里转出,不让 UI 直接引 server 内部模块。
+export type { ImportCounts };

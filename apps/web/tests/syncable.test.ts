@@ -1,6 +1,6 @@
 import type { AccountSafe } from "@folio/db";
 import { describe, expect, it } from "vitest";
-import { isSyncableAccount } from "../src/lib/syncable";
+import { isSyncableAccount } from "../src/lib/server/internal/syncable";
 
 type A = Pick<AccountSafe, "archivedAt" | "connectorId">;
 const a = (over: Partial<A>): A => ({ archivedAt: null, connectorId: "bitcoin", ...over });

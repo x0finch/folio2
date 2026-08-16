@@ -1,5 +1,5 @@
 import type { ManualActivityKind } from "@folio/db";
-import type { DerivableActivity } from "./manual-activity";
+import type { DerivableActivity } from "../../manual-activity";
 
 // 服务端**批量写路径**的纯逻辑(无 server-only import → workers-pool 外可单测,与 injector/预热同源那套解耦)。
 // 输入既有 token + 一批草稿,输出「写计划」(要新建的 token + 要插入的活动)或整批拒因(超支的 symbol)。

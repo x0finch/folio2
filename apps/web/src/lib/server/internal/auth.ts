@@ -3,7 +3,7 @@ import { passkey } from "@better-auth/passkey";
 import { createAuthAdapter } from "@folio/db";
 import { betterAuth } from "better-auth";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
-import { derivePasskeyRp } from "../../passkey-rp";
+import { derivePasskeyRp } from "./passkey-rp";
 
 // 密码哈希:better-auth 1.6 + nodejs_compat 默认走原生 node:crypto scrypt(坑 ① 已默认修复)。
 function createAuth() {

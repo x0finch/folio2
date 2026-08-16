@@ -40,13 +40,13 @@ import { getLogger } from "@logtape/logtape";
 import { Cause, Effect, Exit, Layer, Stream } from "effect";
 import type { InputSpec } from "../../creds";
 import { isComplete, openCreds } from "../../creds";
-import { isSyncableAccount } from "../../syncable";
 import { userDisplayBalances } from "../../user-balances";
 import { recordDefiLogosOf } from "./defi-logos";
 import { manualBalancesForWarm } from "./manual";
 import { type DbStores, requestLayer, runAtEdge, withRequest } from "./oracle";
 import { warmPlatforms } from "./platforms";
 import { revalue } from "./revalue";
+import { isSyncableAccount } from "./syncable";
 import { warmHeldPrices } from "./token-enrich";
 
 // server-only 编排装配(引 cloudflare:workers)。独立于 sync.ts —— triggerSync(server fn,被客户端 import)

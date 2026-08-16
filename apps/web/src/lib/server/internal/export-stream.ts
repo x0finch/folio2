@@ -7,6 +7,7 @@ import {
 } from "@folio/db";
 import { Effect, Option, Stream } from "effect";
 import { safeView } from "../../creds";
+import { credentialSpecs } from "./connector-registry";
 import {
   accountRecord,
   manualActivityRecord,
@@ -14,8 +15,7 @@ import {
   ndjsonLine,
   snapshotRecord,
   tokenRecord,
-} from "../../export";
-import { credentialSpecs } from "./connector-registry";
+} from "./export";
 import type { DbStores } from "./oracle";
 
 // 导出那条 NDJSON 流。**路由只剩鉴权 + 跑一次**,流本身住在这里 —— 与 `/api/sync` 的

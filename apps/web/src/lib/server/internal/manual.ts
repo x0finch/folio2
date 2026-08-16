@@ -16,7 +16,6 @@ import type { GainHistoryRow } from "../../gain-24h";
 import type { SnapshotTotalRow } from "../../history";
 import type { CredsToken } from "../../manual-activity";
 import { deriveAmount, fallbackUnitPrice, projectToken } from "../../manual-activity";
-import { type BatchDraft, planManualBatch, runningOk, type Token } from "../../manual-batch";
 import { isManual, MANUAL_CONNECTOR_ID } from "../../manual-connector";
 import {
   buildManualAccountSeries,
@@ -26,6 +25,7 @@ import {
   tokenQuantityAt,
 } from "../../manual-history";
 import type { BalanceLike } from "../../tokens";
+import { type BatchDraft, planManualBatch, runningOk, type Token } from "./manual-batch";
 import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";
 import { NAMER } from "./oracle";
 
