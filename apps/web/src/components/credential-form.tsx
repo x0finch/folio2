@@ -3,9 +3,10 @@ import { Button } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { type InputSpec, incompleteSpecs } from "../lib/core/creds";
 import { replaceAccountCredentials } from "../lib/server/accounts";
+import type { InputSpec } from "../lib/server/internal/creds";
 import { GenericFields } from "./account-fields";
+import { incompleteSpecs } from "./incomplete-specs";
 
 // 动态补录表单(P6.6 → A3 v2):字段复用加账户的 GenericFields(带 new-password 安全 + 统一样式),
 // 只渲染非 public 字段(incompleteSpecs);semi 字段若有 credHint 打码片段,展示"记录的 X:abc…xyz"供识别。

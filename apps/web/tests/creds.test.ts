@@ -8,7 +8,7 @@ import {
   SEMI_PREFIX,
   safeView,
   sealCreds,
-} from "../src/lib/core/creds";
+} from "../src/lib/server/internal/creds";
 
 const key = generateSecret();
 

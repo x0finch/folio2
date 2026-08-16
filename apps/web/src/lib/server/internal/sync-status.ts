@@ -1,13 +1,3 @@
-// 同步状态读模型(纯 —— 无 cloudflare env,可脱离 server fn 单测)。
-// PageHeader 的共享同步面板消费此摘要:ok/总数 + 上次更新 + 未同步来源(带原因)。
-// 归档账户不计入(与 overview / sync-deps 的过滤一致)。
-//
-// **ok 数的是「真的同步过」,不是「配置齐全」。** 这两者曾被当成一回事:`ok` 只看
-// `complete`,`takenAt` 收进来却只喂给 `lastSyncedAt`。于是一个刚加进来、凭据齐全、
-// 一次都没拉过数据的账户被算进 ok,面板显示「All synced 2 / 2」,而账户行上明明写着
-// 「Never synced」——「我们还没去问」和「问过了,是这个数」在摘要里长得一样。
-// 面板的字面是 "Sources synced",所以口径必须是同步过。
-
 // 一个来源没能同步的原因。缺凭据是根因,从未同步是「配置齐全但还没跑过」。
 // 不导出:消费方(sync-status.tsx)按字面量比,不需要这个名字。
 type SyncFailureReason = "missing-credentials" | "never-synced";

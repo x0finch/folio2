@@ -4,14 +4,24 @@ import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
-import { isComplete } from "../core/creds";
 import { isManual } from "../core/manual-connector";
-import { type SyncStatusSummary, summarizeSync } from "../core/sync-status";
 import { credentialSpecs } from "./internal/connector-registry";
+import { isComplete } from "./internal/creds";
 import { logCategory } from "./internal/effect-log";
 import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 import { syncServicesLayer, warmTokens } from "./internal/sync-deps";
+import { type SyncStatusSummary, summarizeSync } from "./internal/sync-status";
+
+// 同步状态读模型(纯 —— 无 cloudflare env,可脱离 server fn 单测)。
+// PageHeader 的共享同步面板消费此摘要:ok/总数 + 上次更新 + 未同步来源(带原因)。
+// 归档账户不计入(与 overview / sync-deps 的过滤一致)。
+//
+// **ok 数的是「真的同步过」,不是「配置齐全」。** 这两者曾被当成一回事:`ok` 只看
+// `complete`,`takenAt` 收进来却只喂给 `lastSyncedAt`。于是一个刚加进来、凭据齐全、
+// 一次都没拉过数据的账户被算进 ok,面板显示「All synced 2 / 2」,而账户行上明明写着
+// 「Never synced」——「我们还没去问」和「问过了,是这个数」在摘要里长得一样。
+// 面板的字面是 "Sources synced",所以口径必须是同步过。
 
 const syncLog = getLogger(["folio", "web", "sync"]);
 

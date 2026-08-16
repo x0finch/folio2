@@ -12,12 +12,12 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import type { InputSpec } from "../lib/core/creds";
 import { isManual } from "../lib/core/manual-connector";
-import type { TokenOption } from "../lib/core/tokens";
 import { usePortfolio } from "../lib/hooks/use-portfolio";
 import { useTokenPrice } from "../lib/hooks/use-token-price";
 import { createAccount } from "../lib/server/accounts";
+import type { InputSpec } from "../lib/server/internal/creds";
+import type { TokenOption } from "../lib/server/internal/tokens";
 import { manualTokensJson } from "./manual-tokens";
 import { TokenCombobox } from "./token-combobox";
 

@@ -3,7 +3,7 @@ import { getRouteApi } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { buildStack } from "../../../../../components/avatar-stack";
-import type { Holding } from "../../../../../lib/core/aggregate";
+import type { Holding } from "../../../../../lib/server/internal/aggregate";
 import { TokenRowContent } from "./token-row";
 import { TokenSheet } from "./token-sheet";
 

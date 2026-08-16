@@ -8,7 +8,6 @@ import {
   parseDefiMeta,
   toAccountSections,
 } from "../../core/account-view";
-import { type AggInput, buildCanonicalHoldings } from "../../core/aggregate";
 import { isFungible, viewKind } from "../../core/balance-kind";
 import {
   buildGainLines,
@@ -19,8 +18,9 @@ import {
   type GainHistoryRow,
 } from "../../core/gain-24h";
 import { platformLogoUrl, tokenLogoUrl } from "../../core/logo";
-import { defiTokenId, refreshableTokenIds } from "../../core/tokens";
+import { type AggInput, buildCanonicalHoldings } from "./aggregate";
 import { deriveLiveAccountTotals, liveValue } from "./live-value";
+import { defiTokenId, refreshableTokenIds } from "./tokens";
 
 // 总览读模型(纯 —— 依赖注入,无 cloudflare env,可脱离 server fn 单测)。
 // 持仓区 = 跨账户按 canonical 代币聚合(**只认现货** spot/manual/CEX);DeFi 仓位、perp 权益 + 敞口

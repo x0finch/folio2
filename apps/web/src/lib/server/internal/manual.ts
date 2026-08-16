@@ -26,10 +26,10 @@ import {
   tokenQuantityAt,
 } from "../../core/manual";
 import { isManual, MANUAL_CONNECTOR_ID } from "../../core/manual-connector";
-import type { BalanceLike } from "../../core/tokens";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "./manual-batch";
 import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";
 import { NAMER } from "./oracle";
+import type { BalanceLike } from "./tokens";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;

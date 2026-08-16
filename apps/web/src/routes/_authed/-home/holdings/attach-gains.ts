@@ -1,6 +1,6 @@
 import type { DefiGroup } from "../../../../lib/core/account-view";
-import type { Holding } from "../../../../lib/core/aggregate";
 import { defiGainKey } from "../../../../lib/core/gain-24h";
+import type { Holding } from "../../../../lib/server/internal/aggregate";
 
 /** 独立盈亏载荷里用来拼回总览的那两张表(组合级 `portfolio` 不在这里,hero 直接读)。 */
 type GainMaps = {

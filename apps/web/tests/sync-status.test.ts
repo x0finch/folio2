@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type SyncAccountInput, summarizeSync } from "../src/lib/core/sync-status";
+import { type SyncAccountInput, summarizeSync } from "../src/lib/server/internal/sync-status";
 
 // 夹具默认「已同步过」(takenAt 有值)——「从未同步」必须由用例显式写出来,
 // 否则整张表会默默漂进那一档,而那正是本文件上一版把 bug 固化住的方式:

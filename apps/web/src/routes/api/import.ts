@@ -3,10 +3,10 @@ import { type SnapshotBalanceInput, TransferStore } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { categorizeFields } from "@/lib/core/creds";
 import { getAuth } from "@/lib/server/internal/auth";
 import { resolveAuth } from "@/lib/server/internal/auth-session";
 import { credentialSpecs } from "@/lib/server/internal/connector-registry";
+import { categorizeFields } from "@/lib/server/internal/creds";
 import {
   createImporter,
   type ImportCounts,

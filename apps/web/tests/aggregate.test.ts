@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { type AggInput, buildCanonicalHoldings, type Holding } from "../src/lib/core/aggregate";
+import {
+  type AggInput,
+  buildCanonicalHoldings,
+  type Holding,
+} from "../src/lib/server/internal/aggregate";
 
 // 聚合的归并键 = `token_id`(ADR 0021 / #201)。认定在写快照时由 mint 定死,读端不再解析 ——
 // 所以这些用例直接给 token_id,不再造 `tokenRef` / `ref` 让聚合自己猜。

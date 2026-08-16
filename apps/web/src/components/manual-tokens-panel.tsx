@@ -25,11 +25,11 @@ import {
   type HistoryToken,
   isReduceOversold,
 } from "../lib/core/manual";
-import type { TokenOption } from "../lib/core/tokens";
 import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
 import { formatNumber } from "../lib/i18n/format-number";
 import { manualAccountQuery } from "../lib/queries/accounts";
 import { invalidateFor } from "../lib/queries/refresh";
+import type { TokenOption } from "../lib/server/internal/tokens";
 import {
   createManualActivities,
   removeManualActivity,

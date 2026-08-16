@@ -1,9 +1,9 @@
 import type { SnapshotWithBalances } from "@folio/db";
 import type { TokenRecord } from "@folio/oracle-basic";
-import { ZERO_DISPLAY_USD } from "./account-view";
-import { isFungible, viewKind } from "./balance-kind";
-import { tokenLogoUrl } from "./logo";
-import { MANUAL_CONNECTOR_ID } from "./manual-connector";
+import { ZERO_DISPLAY_USD } from "../../core/account-view";
+import { isFungible, viewKind } from "../../core/balance-kind";
+import { tokenLogoUrl } from "../../core/logo";
+import { MANUAL_CONNECTOR_ID } from "../../core/manual-connector";
 
 // 纯逻辑(无 server-only import → 可单测)。把一笔余额(快照行形状)桥接到代币参考层。
 //
