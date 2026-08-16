@@ -138,7 +138,7 @@ const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
 - 聚合纯函数:`apps/web/src/lib/aggregate.ts` `buildCanonicalHoldings`(详见 [02](./02-canonical-aggregation.md))
 - 富化助手:`apps/web/src/lib/server/internal/token-enrich.ts` `enrichBalances`
 - 现推净值:`apps/web/src/lib/server/internal/live-value.ts` `deriveLiveAccountTotals`(主页总价 ≡ 曲线当下点)
-- 派生:`apps/web/src/lib/allocation.ts`(饼图)· `apps/web/src/lib/day-change.ts`(头部价值差)
+- 派生:`apps/web/src/routes/_authed/-insights/allocation.ts`(饼图)· `apps/web/src/lib/day-change.ts`(头部价值差)
 - 渲染:`apps/web/src/routes/_authed/index.tsx`(总览)· `apps/web/src/components/token-holdings.tsx`
 
 > **枢纽**:D1 快照。聚合规则一改,刷新即重算(读时聚合);**新增 provider 只要产出正确的

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Holding, HoldingSource } from "../src/lib/aggregate";
-import { buildAllocation, OTHERS_KEY } from "../src/lib/allocation";
+import {
+  ALLOC_DIMENSION,
+  buildAllocation,
+  DEFAULT_DIM,
+  OTHERS_KEY,
+} from "../src/routes/_authed/-insights/allocation";
 
 const src = (
   platformId: string,
@@ -64,5 +69,23 @@ describe("buildAllocation", () => {
 
   it("empty holdings → empty", () => {
     expect(buildAllocation([], "token")).toEqual([]);
+  });
+});
+
+describe("维度 schema —— Insights 的 `?dim=` 就靠它回落", () => {
+  const parse = (v: unknown) => ALLOC_DIMENSION.catch(DEFAULT_DIM).parse(v);
+
+  it("三个合法维度原样通过", () => {
+    expect(parse("token")).toBe("token");
+    expect(parse("chain")).toBe("chain");
+    expect(parse("account")).toBe("account");
+  });
+
+  it("别的一律回落默认维度", () => {
+    expect(parse("bogus")).toBe(DEFAULT_DIM);
+    expect(parse("")).toBe(DEFAULT_DIM);
+    expect(parse(undefined)).toBe(DEFAULT_DIM);
+    expect(parse(42)).toBe(DEFAULT_DIM);
+    expect(parse(["token", "chain"])).toBe(DEFAULT_DIM);
   });
 });

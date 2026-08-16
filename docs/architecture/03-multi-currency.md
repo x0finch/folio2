@@ -133,5 +133,5 @@ USD: 恒 1
 | ⑤ 读出 | `apps/web/src/lib/server/currency.ts`(`getDisplayCurrency`)→ `packages/fx/src/service.ts`(`resolve`,软过期)|
 | ⑥ 下发 | `apps/web/src/routes/_authed.tsx`(`CurrencyProvider`)· `apps/web/src/lib/hooks/use-prefer-currency.ts` |
 | ⑦ 换算+排版 | `apps/web/src/lib/hooks/use-display-value.ts` → `apps/web/src/lib/format-number.ts`(`formatMoney` / `formatTinyCurrency`)|
-| ⑧ 渲染 | `token-holdings.tsx` · `asset-sheet.tsx` · `value-change.tsx` · `portfolio-chart.tsx` · `allocation-pie.tsx`(均经 `useDisplayValue`)|
+| ⑧ 渲染 | `token-holdings.tsx` · `asset-sheet.tsx` · `value-change.tsx` · `-insights/portfolio-chart.tsx` · `-insights/allocation-pie.tsx`(均经 `useDisplayValue`)|
 | 契约/币种表 | `packages/fx/src/types.ts`(`Currency` · `SUPPORTED_CURRENCIES`)|
