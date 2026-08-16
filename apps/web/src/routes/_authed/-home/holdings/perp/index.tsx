@@ -1,10 +1,9 @@
 import { LogoAvatar, Separator, SharedLayoutBg } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import { AccountName } from "../../../../../components/account-name";
-import { formatNumber } from "../../../../../lib/format-number";
 import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
+import { formatNumber, signedUsd } from "../../../../../lib/i18n/format-number";
 import { liqRisk, type PerpPositionView, type PerpView, pnlPct } from "../../../../../lib/perp";
-import { signedUsd } from "../../../../../lib/signed-usd";
 import { Stat } from "../../hero/stat";
 import { ValueDelta } from "../value-delta";
 import { LiqRing } from "./liq-ring";

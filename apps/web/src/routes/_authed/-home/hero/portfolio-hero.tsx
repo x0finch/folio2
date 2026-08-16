@@ -3,7 +3,7 @@ import { useTranslations } from "use-intl";
 import type { Gain } from "../../../../lib/gain-24h";
 import { downsampleSeries, type HistoryPoint } from "../../../../lib/history";
 import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
-import { signedUsd } from "../../../../lib/signed-usd";
+import { signedUsd } from "../../../../lib/i18n/format-number";
 import { GainSkeleton, NO_VALUE } from "../holdings/value-delta";
 import { deriveHeroMetrics, type HoldingLike } from "./hero-stats";
 import { Stat } from "./stat";

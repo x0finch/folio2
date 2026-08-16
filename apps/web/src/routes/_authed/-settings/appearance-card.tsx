@@ -2,10 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger }
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "../../../components/currency-switcher";
-import { useMountedTheme } from "../../../lib/hooks/use-theme";
+import { type Theme, useMountedTheme } from "../../../lib/hooks/use-theme";
 import { invalidateFor } from "../../../lib/queries/refresh";
 import { setLocalePreference } from "../../../lib/server/preferences";
-import type { Theme } from "../../../lib/theme";
 import { SettingRow } from "./setting-row";
 
 // 外观卡:主题(三态 segmented)· 语言(中/EN segmented)· 币种(Select)。

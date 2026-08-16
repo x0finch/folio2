@@ -1,9 +1,9 @@
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@folio/ui";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
-import { formatMoney } from "../../../lib/format-number";
 import type { HistoryPoint } from "../../../lib/history";
 import { usePreferCurrency } from "../../../lib/hooks/use-prefer-currency";
+import { formatMoney } from "../../../lib/i18n/format-number";
 
 const DAY_MS = 86_400_000;
 /** 图框高度。骨架必须同值,后到的图才不会把下面顶开。 */

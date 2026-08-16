@@ -1,7 +1,7 @@
 import { LogoAvatar } from "@folio/ui";
 import type { ReactNode } from "react";
 import { AvatarStack } from "../../../../../components/avatar-stack";
-import { formatNumber } from "../../../../../lib/format-number";
+import { formatNumber } from "../../../../../lib/i18n/format-number";
 import { ValueDelta } from "../value-delta";
 
 // 全站统一的「代币持仓行」内容(主页 Tokens 视图 + 账户详情抽屉现货区共用)。

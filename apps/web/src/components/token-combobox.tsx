@@ -5,8 +5,8 @@ import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } fro
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { formatNumber } from "../lib/format-number";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
+import { formatNumber } from "../lib/i18n/format-number";
 import { fiatOptionsQuery, tokenCatalogueQuery, tokenSearchQuery } from "../lib/queries/tokens";
 import { refreshTokenPrices } from "../lib/server/tokens";
 import type { TokenOption } from "../lib/token-option";

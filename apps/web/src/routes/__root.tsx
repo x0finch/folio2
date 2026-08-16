@@ -6,12 +6,11 @@ import { createRootRouteWithContext, HeadContent, Scripts } from "@tanstack/reac
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { useEffect } from "react";
 import { IntlProvider } from "use-intl";
-
+import { applyStoredTheme, THEME_INIT_SCRIPT } from "../lib/hooks/use-theme";
 import { messages } from "../lib/i18n/messages";
 import { PWA_LINKS, PWA_META, THEME_COLORS, VIEWPORT } from "../lib/pwa-head";
 import { localePreferenceQuery } from "../lib/queries/preferences";
 import { registerServiceWorker } from "../lib/register-sw";
-import { applyStoredTheme, THEME_INIT_SCRIPT } from "../lib/theme";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -75,7 +74,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   const { now } = Route.useLoaderData();
   const { data: locale } = useSuspenseQuery(localePreferenceQuery());
   // 挂载后重放主题:<head> 脚本负责首帧无闪,但 hydration recovery / 重渲染可能把它设的 .dark 冲掉
-  // 且全站再无人恢复(useTheme 仅设置页挂载)→ 此处兜底,让 React 生命周期在每次(重)挂载后自愈。见 lib/theme。
+  // 且全站再无人恢复(useTheme 仅设置页挂载)→ 此处兜底,让 React 生命周期在每次(重)挂载后自愈。见 lib/hooks/use-theme。
   useEffect(() => {
     applyStoredTheme();
     // 生产注册 Service Worker(可安装外壳 + 离线兜底);dev 内部直接 return。
@@ -89,7 +88,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         {THEME_COLORS.map((tc) => (
           <meta key={tc.media} name="theme-color" media={tc.media} content={tc.content} />
         ))}
-        {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/theme)。 */}
+        {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/hooks/use-theme)。 */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>

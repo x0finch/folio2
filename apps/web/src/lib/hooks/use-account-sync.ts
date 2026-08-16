@@ -3,8 +3,165 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { useTranslations } from "use-intl";
 import { invalidateFor } from "../queries/refresh";
-import { createRefreshThrottle, type RefreshThrottle } from "../refresh-throttle";
-import { readSyncStream } from "../sync-stream";
+
+// 「跑完一个账户就刷一次」的节流器。纯逻辑:不引 React、不引 server-only 模块,可直接单测。
+//
+// 为什么需要它:服务端早就是**先完成先报**(有界并发 6、无序产出),前端也早就逐行收到了完成事件,
+// 只是把刷新压在了整轮结束。挪到逐账户之后,刷新会一秒钟连发好几次 —— 并发 6 意味着扎堆完成很常见。
+//
+// **leading + trailing**,而不是单纯的防抖:第一个账户完成要**立刻**看到动静(防抖会让最快的那个也等一拍),
+// 之后一个窗口内的连发合并成一次尾随。窗口 400ms 是照着并发 6 定的:一批 6 个几乎同时回来,
+// 合成一次;下一批再来时窗口早过了,又是一次 leading。
+export const REFRESH_WINDOW_MS = 400;
+
+export interface RefreshThrottle {
+  /** 收到一个账户完成。 */
+  bump(): void;
+  /** 一轮结束:取消挂起的尾随,并保证「这一轮至少刷过一次、且最后一次一定落地」。 */
+  flush(): void;
+}
+
+export function createRefreshThrottle(
+  run: () => void,
+  windowMs: number = REFRESH_WINDOW_MS,
+): RefreshThrottle {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  // 窗口内又来了 bump —— 欠一次尾随。
+  let pending = false;
+  // 这一轮到底刷过没有。**用户级失败时一个 bump 都不会来**(整轮没跑起来),
+  // 而那时候更要刷:服务端可能已经落了部分快照(waitUntil)。
+  let ran = false;
+  // flush 之后这一轮就结束了。晚到的 bump(比如流已经收工、toast 回调还在排队)不该再触发。
+  let closed = false;
+
+  const fire = () => {
+    ran = true;
+    run();
+  };
+
+  const openWindow = () => {
+    timer = setTimeout(() => {
+      timer = null;
+      if (!pending) return;
+      pending = false;
+      fire();
+      // 尾随也算一次「刚刷过」→ 重新开窗,否则紧接着的下一个账户会立刻再刷一次。
+      openWindow();
+    }, windowMs);
+  };
+
+  return {
+    bump() {
+      if (closed) return;
+      if (timer === null) {
+        fire();
+        openWindow();
+      } else {
+        pending = true;
+      }
+    },
+    flush() {
+      if (closed) return;
+      closed = true;
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      // 有欠着的尾随 → 立刻补上(最后一个账户的结果一定落地)。
+      // 一次都没刷过 → 也补一次(用户级失败那条路)。
+      // 两者都不是 → **什么都不做**,否则「只有一个账户的一轮」会刷两次。
+      if (pending || !ran) {
+        pending = false;
+        fire();
+      }
+    },
+  };
+}
+
+// 读 /api/sync 的 NDJSON 流。纯逻辑(无 React / server-only import → 可单测)。
+//
+// 服务端把「跑」和「看」拆开了(见 routes/api/sync.ts):这里断开只是不看了,
+// 同步在后台照跑完。所以中途放弃 ≠ 取消同步。
+
+export interface SyncStreamProgress {
+  total: number | null; // 服务端逐个吐,开跑时不知道总数 —— 调用方自己知道就传进来
+  done: number;
+  lastLabel: string | null;
+  failures: { accountId: string; error: string }[];
+}
+
+// 服务端每行吐一个 AccountSyncResult;用户级失败吐 { fatal }。
+interface Line {
+  accountId?: string;
+  ok?: boolean;
+  skipped?: boolean;
+  error?: string;
+  fatal?: string;
+}
+
+// 把字节流切成一行行 JSON。分片可能落在任意位置,所以要留 buffer。
+export async function* ndjson(body: ReadableStream<Uint8Array>): AsyncGenerator<Line> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl = buf.indexOf("\n");
+      while (nl >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line) yield JSON.parse(line) as Line;
+        nl = buf.indexOf("\n");
+      }
+    }
+    const rest = buf.trim();
+    if (rest) yield JSON.parse(rest) as Line;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export class SyncStreamError extends Error {}
+
+// 读完整条流,每收到一个账户结果就回调一次。
+// labelOf:结果里只有 accountId,展示要的名字由调用方给。
+export async function readSyncStream(
+  response: Response,
+  opts: {
+    total: number | null;
+    labelOf: (accountId: string) => string;
+    onProgress: (p: SyncStreamProgress) => void;
+  },
+): Promise<SyncStreamProgress> {
+  if (!response.ok || !response.body) {
+    throw new SyncStreamError(`sync failed: ${response.status}`);
+  }
+  const progress: SyncStreamProgress = {
+    total: opts.total,
+    done: 0,
+    lastLabel: null,
+    failures: [],
+  };
+  for await (const line of ndjson(response.body)) {
+    // 用户级失败:整轮没跑起来(取账户/取凭据挂了)。
+    if (line.fatal) throw new SyncStreamError(line.fatal);
+    if (!line.accountId) continue;
+    progress.done += 1;
+    progress.lastLabel = opts.labelOf(line.accountId);
+    // 缺凭据(skipped)不算失败 —— 用户还没填 API key 而已。
+    if (!line.ok && !line.skipped) {
+      progress.failures.push({
+        accountId: line.accountId,
+        error: line.error ?? "sync failed",
+      });
+    }
+    opts.onProgress({ ...progress, failures: [...progress.failures] });
+  }
+  return progress;
+}
 
 // 账户同步的共享逻辑(PageHeader SyncStatus 复用):**一个请求**打到 /api/sync,服务端逐账户回结果,
 // 这里边收边更新 toast 进度,**并且每完成一个账户就刷一次面板**(#417)。

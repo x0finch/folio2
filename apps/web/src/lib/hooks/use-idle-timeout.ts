@@ -4,7 +4,7 @@ import {
   IDLE_LOCK_ENABLED_KEY,
   IDLE_TIMEOUT_STORAGE_KEY,
   parseIdleTimeout,
-} from "../idle-lock";
+} from "./idle-lock";
 
 // 同标签内偏好变更广播：storage 事件只在「别的标签」改动时触发，本标签改动收不到，
 // 故设置页改完自派发一个自定义事件，让同标签的锁屏即时拿到新值。

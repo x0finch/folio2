@@ -19,8 +19,8 @@ import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { OverviewBalance } from "../lib/account-view";
-import { formatNumber } from "../lib/format-number";
 import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
+import { formatNumber } from "../lib/i18n/format-number";
 import {
   accountTotalAt,
   type HistoryActivity,

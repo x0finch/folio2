@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { LOCK_DEVICE_PASSKEY_KEY } from "../idle-lock";
+import { LOCK_DEVICE_PASSKEY_KEY } from "./idle-lock";
 
 // 同标签内广播:storage 事件只在「别的标签」改动时触发,本标签改动收不到 —— 设置页标记就绪后
 // 自派发一个事件,让同标签的 LockScreen 即时拿到新值。与 use-idle-timeout 同款。

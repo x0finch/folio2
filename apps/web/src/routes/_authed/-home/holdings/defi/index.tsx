@@ -3,9 +3,9 @@ import { useEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import type { DefiGroup, DefiRow } from "../../../../../lib/account-view";
 import { defiMeaningfulLegs, groupLegsByRole } from "../../../../../lib/account-view";
-import { formatNumber } from "../../../../../lib/format-number";
 import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
 import { useHoverPopover } from "../../../../../lib/hooks/use-hover-popover";
+import { formatNumber } from "../../../../../lib/i18n/format-number";
 import { defiLogoUrl } from "../../../../../lib/logo";
 import { ValueDelta } from "../value-delta";
 
