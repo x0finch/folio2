@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { manualTokensJson } from "../src/lib/manual-tokens";
+import { manualTokensJson } from "../src/components/manual-tokens";
 
 // manual 加账户表单首 token 标量 → 单元素 creds.tokens JSON(ADR 0017)。
 // 数字保持字符串(交给 provider 的 manualToken validator coerce);ticket 空则省略键。

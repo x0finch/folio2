@@ -2,8 +2,18 @@ import type { ConnectorId } from "@folio/connectors";
 import { LogoAvatar, SharedLayoutBg } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
 import { connectorLabelFallback } from "../lib/connector-label";
-import { CONNECTOR_OPTIONS } from "../lib/connectors";
 import { connectorCatalogQuery } from "../lib/queries/connectors";
+
+// add-account 下拉的固定分组列表 —— 直接写死(group 展示名 + 该组 connector)。account.connectorId 的
+// 取值域即 @folio/connectors 的 ConnectorId(registry 派生的单一事实源,#37d);客户端只 type-only 引
+// ConnectorId(不把 registry 运行时打进 client bundle,见 CODING #客户端打包)。
+// group 仅是下拉的分区标题(纯展示),不参与任何逻辑;随 connector 增多在对应组加一项。
+const CONNECTOR_OPTIONS: { group: string; options: ConnectorId[] }[] = [
+  { group: "Manual", options: ["manual"] },
+  { group: "On-chain", options: ["evm", "bitcoin", "solana", "sui", "cosmos"] },
+  { group: "Exchange", options: ["binance", "okx", "bybit"] },
+  { group: "Perp DEX", options: ["hyperliquid"] },
+];
 
 // 「添加账户」第一步:连接器网格(纯展示)。分组来自 CONNECTOR_OPTIONS,展示名 + logo 来自 registry 目录
 // —— 图标即各 connector manifest 自带的 logo(经 folio logo 代理),

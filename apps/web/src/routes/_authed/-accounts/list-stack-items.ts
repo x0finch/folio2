@@ -1,3 +1,4 @@
+import { buildStack, type StackEntry, type StackItem } from "../../../components/avatar-stack";
 import {
   DEFI_FALLBACK_PROTOCOL,
   type OverviewBalance,
@@ -6,7 +7,6 @@ import {
 import { viewKind } from "../../../lib/balance-kind";
 import { defiLogoUrl } from "../../../lib/logo";
 import { perpPositionMetaOf } from "../../../lib/perp";
-import { buildStack, type StackEntry, type StackItem } from "../../../lib/stack-items";
 
 // 账户行那一排小圆头像 → items(纯逻辑,可单测)。**三种持仓都进来**(#133):
 //   · 现货 → 币的图标

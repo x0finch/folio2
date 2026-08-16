@@ -27,7 +27,6 @@ import {
   type HistoryToken,
   isReduceOversold,
 } from "../lib/manual-history";
-import type { ActivityDraft, PickedToken } from "../lib/manual-types";
 import { manualAccountQuery } from "../lib/queries/accounts";
 import { invalidateFor } from "../lib/queries/refresh";
 import {
@@ -37,9 +36,9 @@ import {
 } from "../lib/server/manual-activities";
 import { removeManualToken } from "../lib/server/manual-tokens";
 import type { TokenOption } from "../lib/token-option";
-import { buildOwnedOptions } from "../lib/token-search";
 import { TokenRowContent } from "../routes/_authed/-home/holdings/tokens/token-row";
 import { HoverDetail } from "./hover-detail";
+import type { ActivityDraft, PickedToken } from "./manual-activity-modal";
 import {
   type ActivityPatch,
   type EditActivityInput,
@@ -47,6 +46,7 @@ import {
   type SubmitResult,
 } from "./manual-activity-modal";
 import { Portal } from "./portal";
+import { buildOwnedOptions } from "./token-search";
 
 // manual 账户详情抽屉的多 token 面板(A5 F → T4:接服务端)。Tokens|Activity 双 tab(全圆 pill,默认 Tokens)+
 // tab 行右 ghost plus(一律开 Add activity)。两个 SwipeableList 去卡片(surface = 抽屉底色平铺 + hover:bg-muted,

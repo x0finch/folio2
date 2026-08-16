@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildOwnedOptions } from "../../src/lib/token-search";
+import { buildOwnedOptions } from "../../src/components/token-search";
 import { dbFor } from "./db-effect";
 import {
   addManualActivities,
