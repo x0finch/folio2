@@ -33,7 +33,7 @@ vi.mock("../src/lib/auth-client", () => ({
   signIn: { passkey: vi.fn(), email: vi.fn() },
 }));
 
-const { ValuationCard } = await import("../src/routes/_authed/settings");
+const { ValuationCard } = await import("../src/routes/_authed/-settings/valuation-card");
 
 function mount(mode: "self-first" | "source-first") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

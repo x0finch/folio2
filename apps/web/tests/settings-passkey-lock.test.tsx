@@ -45,7 +45,8 @@ vi.mock("@folio/ui", async (orig) => ({
   toast: { error: toastError, success: vi.fn() },
 }));
 
-const { AutoLockCard, PasskeysCard } = await import("../src/routes/_authed/settings");
+const { AutoLockCard } = await import("../src/routes/_authed/-settings/auto-lock-card");
+const { PasskeysCard } = await import("../src/routes/_authed/-settings/passkeys-card");
 
 const DEVICE_KEY = "folio_lock_device_passkey";
 const TIMEOUT_KEY = "folio_lock_timeout";
