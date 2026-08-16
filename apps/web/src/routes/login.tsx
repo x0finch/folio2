@@ -6,16 +6,16 @@ import { useTranslations } from "use-intl";
 import { AuthShell } from "../components/auth-shell";
 import { authClient, signIn, signUp } from "../lib/core/auth-client";
 import type { HistoryPoint } from "../lib/core/history";
-import { deriveDefaultName } from "../lib/derive-default-name";
 import { useLockDevice } from "../lib/hooks/use-lock-device";
+import type { HoldingLike } from "./_authed/-home/hero/hero-stats";
+import { PortfolioHero } from "./_authed/-home/hero/portfolio-hero";
+import { registerPasskey } from "./_authed/-settings/passkey/register-passkey";
+import { deriveDefaultName } from "./-login/derive-default-name";
 import {
   dismissPasskeyPrompt,
   isPasskeyPromptDismissed,
   shouldPromptForPasskey,
-} from "../lib/passkey-prompt";
-import { registerPasskey } from "../lib/register-passkey";
-import type { HoldingLike } from "./_authed/-home/hero/hero-stats";
-import { PortfolioHero } from "./_authed/-home/hero/portfolio-hero";
+} from "./-login/passkey-prompt";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
 

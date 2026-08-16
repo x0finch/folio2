@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { PWA_LINKS, PWA_META, THEME_COLORS, VIEWPORT } from "../src/lib/pwa-head";
+import { PWA_LINKS, PWA_META, THEME_COLORS, VIEWPORT } from "../src/routes/-root/pwa-head";
 
 // 测试缝②③(见 ADR 0027):PWA 只有 manifest 形状 + head 标签能便宜地自动化;
 // installability / 安全区 / 更新流靠 Lighthouse + 真机 + 目视。

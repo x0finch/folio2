@@ -17,13 +17,9 @@ import { EditableName } from "../../../../components/editable-name";
 import { IconButton } from "../../../../components/icon-button";
 import { authClient, signIn } from "../../../../lib/core/auth-client";
 import { useLockDevice } from "../../../../lib/hooks/use-lock-device";
-import {
-  getAuthenticatorName,
-  type PasskeyKind,
-  passkeyKind,
-} from "../../../../lib/passkey-authenticators";
-import { registerPasskey } from "../../../../lib/register-passkey";
 import { errorCode, type PasskeyRow, SESSION_NOT_FRESH } from "./passkey";
+import { getAuthenticatorName, type PasskeyKind, passkeyKind } from "./passkey-authenticators";
+import { registerPasskey } from "./register-passkey";
 
 const KIND_COPY = {
   synced: "passkeyKindSynced",

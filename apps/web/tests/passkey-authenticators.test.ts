@@ -3,7 +3,7 @@ import {
   detectDeviceLabel,
   getAuthenticatorName,
   passkeyKind,
-} from "../src/lib/passkey-authenticators";
+} from "../src/routes/_authed/-settings/passkey/passkey-authenticators";
 
 // passkey 列表展示辅助(ADR 0028):aaguid→友好名 + 类型/同步判定,纯函数,核心测试缝。
 describe("getAuthenticatorName", () => {
