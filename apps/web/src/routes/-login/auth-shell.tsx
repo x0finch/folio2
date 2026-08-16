@@ -1,7 +1,7 @@
 import { cn } from "@folio/ui";
 import type { ReactNode } from "react";
+import { Logo } from "../../components/logo";
 import { LocaleSwitcher } from "./locale-switcher";
-import { Logo } from "./logo";
 import { ThemeToggle } from "./theme-toggle";
 
 // 未进入 App 主体的全屏认证外壳,登录页与锁屏共用:背景层 + 左上品牌 + 右上语言/主题 + 居中内容。

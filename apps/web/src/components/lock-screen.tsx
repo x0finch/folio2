@@ -8,7 +8,7 @@ import { signIn, signOut } from "../lib/core/auth-client";
 import { clearIdleLockState, useIdleLock } from "../lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "../lib/hooks/use-idle-timeout";
 import { useLockDevice } from "../lib/hooks/use-lock-device";
-import { AuthShell } from "./auth-shell";
+import { AuthShell } from "../routes/-login/auth-shell";
 
 // 应用层闲置锁屏(ADR 0029 / #291）。父组件包裹 —— 锁定时**卸载 children**(不只是遮罩盖住):
 // DOM 里不留内容,懂开发的人删掉遮罩也看不到底下数据。代价 = 组件本地态(滚动 / 展开 / 半填表单)丢失;
