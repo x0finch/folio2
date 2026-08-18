@@ -2,10 +2,10 @@ import { SnapshotStore } from "@folio/db";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
-import { isFungible, viewKind } from "../balance-kind";
-import { buildTokenValueHistory, type TokenHistRow } from "../token-history";
+import { isFungible, viewKind } from "../core/balance-kind";
 import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
+import { buildTokenValueHistory, type TokenHistRow } from "./internal/token-history";
 
 // 单币持仓价值历史(H6 片2):某持仓(按 Holding key = token_id)的价值随时间。
 // 全历史余额 → 按 eligibility 过滤(与 overview-model 同口径:**只认现货**,perp 权益不进 —— #129)

@@ -1,4 +1,4 @@
-import { type DefiGroup, mergeDefiGroups } from "../../account-view";
+import { type DefiGroup, mergeDefiGroups } from "../../core/account-view";
 
 // 首页 tab 条轻请求的两份纯推导:有没有永续/DeFi、pin 显示成什么。
 // 放 internal:只有 `getHomeTabStrip` 用,客户端拿的是算好的结果。

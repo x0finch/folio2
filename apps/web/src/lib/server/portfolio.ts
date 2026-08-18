@@ -9,20 +9,19 @@ import {
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
-import { toAccountSections } from "../account-view";
+import { defiGainKey, toAccountSections } from "../core/account-view";
 import {
   accountIdsInView,
   accountsInView,
   accountsMatchingPin,
   toTabPin,
-} from "../accounts-in-view";
-import { connectorLabelFallback } from "../connector-label";
-import { defiGainKey, GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "../gain-24h";
-import { buildPortfolioHistory } from "../history";
-import { platformLogoUrl } from "../logo";
-import { isManual } from "../manual-connector";
+} from "../core/accounts-in-view";
+import { connectorLabelFallback, platformLogoUrl } from "../core/logo";
+import { isManual } from "../core/manual";
 import { loadAccountHoldings } from "./internal/account-holdings";
 import { connectorPlatformMeta } from "./internal/connector-platform";
+import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./internal/gain-24h";
+import { buildPortfolioHistory } from "./internal/history";
 import { deriveLiveAccountTotals } from "./internal/live-value";
 import {
   injectManualSnapshots,

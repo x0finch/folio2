@@ -33,7 +33,7 @@ vi.mock("../src/lib/server/preferences", () => ({
   setCurrencyPreference: vi.fn(),
   setLocalePreference: vi.fn(),
 }));
-vi.mock("../src/lib/auth-client", () => ({
+vi.mock("../src/lib/core/auth-client", () => ({
   authClient: { passkey: { addPasskey, deletePasskey, listUserPasskeys, updatePasskey } },
   signOut: vi.fn(),
   signIn: { passkey: signInPasskey, email: vi.fn() },

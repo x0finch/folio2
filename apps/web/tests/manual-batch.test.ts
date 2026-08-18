@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { DerivableActivity } from "../src/lib/manual-activity";
+import type { DerivableActivity } from "../src/lib/core/manual";
 import {
   findToken,
   planManualBatch,
   type ResolvedDraft,
   runningOk,
   type Token,
-} from "../src/lib/manual-batch";
+} from "../src/lib/server/internal/manual-batch";
 
 const act = (o: Partial<DerivableActivity>): DerivableActivity => ({
   kind: "add",

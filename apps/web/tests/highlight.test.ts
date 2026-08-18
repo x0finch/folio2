@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchSegments } from "../src/lib/highlight";
+import { matchSegments } from "../src/components/token-search";
 
 describe("matchSegments", () => {
   it("empty query → whole text unmatched", () => {

@@ -1,6 +1,13 @@
-import { DefiMeta, type DefiMeta as DefiMetaT, type Note } from "@folio/connectors-basic";
+import {
+  DefiMeta,
+  type DefiMeta as DefiMetaT,
+  type Note,
+  PerpEquityMeta,
+  type PerpEquityMeta as PerpEquityMetaT,
+  PerpPositionMeta,
+  type PerpPositionMeta as PerpPositionMetaT,
+} from "@folio/connectors-basic";
 import { viewKind } from "./balance-kind";
-import { type PerpView, toPerpView } from "./perp";
 
 // 纯逻辑(无 server-only import → 可单测)。把一个账户的余额行按 kind 拆成展示分区:
 // 现货/UTXO → 一张表;DeFi → 按 protocol 分组;永续 → 复用 toPerpView。
@@ -234,4 +241,87 @@ export function groupLegsByRole(legs: DefiRow[]): { role?: string; legs: DefiRow
     }
   }
   return order.map((key) => ({ role: key || undefined, legs: byRole.get(key) as DefiRow[] }));
+}
+
+// —— 永续:一个账户的永续行 → 分区视图(equity + positions)。
+// 与上面的现货/DeFi 分区同属 toAccountSections 的产物,故同住一个文件。
+// metaJson(落库 JSON)在此 safeParse 到各自 meta;坏/缺 meta 的行被忽略,不抛。
+
+interface PerpEquityView extends PerpEquityMetaT {
+  accountValue: number; // = equity 行的 usdValue
+}
+export interface PerpPositionView extends PerpPositionMetaT {
+  // coin 由 PerpPositionMetaT 提供(#243:住 meta)。
+  size: number; // 带符号:正=多、负=空(side 同时给出)
+}
+export interface PerpView {
+  equity: PerpEquityView | null;
+  positions: PerpPositionView[];
+}
+
+interface PerpBalance {
+  amount: number;
+  usdValue: number;
+  kind: string;
+  metaJson: string | null;
+}
+
+function parseJson(metaJson: string | null): unknown {
+  if (!metaJson) return null;
+  try {
+    return JSON.parse(metaJson);
+  } catch {
+    return null;
+  }
+}
+
+export function toPerpView(balances: PerpBalance[]): PerpView {
+  let equity: PerpEquityView | null = null;
+  const positions: PerpPositionView[] = [];
+
+  for (const b of balances) {
+    const vk = viewKind(b);
+    const raw = parseJson(b.metaJson);
+    if (vk === "perp_equity") {
+      const r = PerpEquityMeta.safeParse(raw);
+      // 多个权益行(如 Binance 的 U 本位 + 币本位两个合约钱包)→ **累加合并**成一个账户权益视图,
+      // 而非互相覆盖只留最后一个。净值本就各自计入 buildCanonicalHoldings;这里只修「权益条只显一个
+      // 钱包」的展示缺陷。单权益的 provider(hyperliquid)行为不变。
+      if (r.success) {
+        const v = { ...r.data, accountValue: b.usdValue };
+        equity = equity
+          ? {
+              accountValue: equity.accountValue + v.accountValue,
+              withdrawable: equity.withdrawable + v.withdrawable,
+              totalMarginUsed: equity.totalMarginUsed + v.totalMarginUsed,
+              totalNtlPos: equity.totalNtlPos + v.totalNtlPos,
+            }
+          : v;
+      }
+    } else if (vk === "perp_position") {
+      const r = PerpPositionMeta.safeParse(raw);
+      // coin 从 meta 取(#243:不再依赖快照 symbol 列)。PerpPositionView 的 coin 即 meta.coin。
+      if (r.success) positions.push({ ...r.data, size: b.amount });
+    }
+  }
+
+  // **仓位按名义敞口降序**(#133 收尾)。以前不排 —— 于是列表是上游给的顺序,而那个顺序没有任何
+  // 含义(Hyperliquid 给的就是 BTC / ETH / SOL / AVAX… 这么一串),看上去就是「乱的」。
+  //
+  // **为什么按名义敞口而不是占用保证金**:仓位行右侧显示的那个数**就是**名义敞口
+  // (`<ValueDelta value={p.positionValue}>`)。排序键必须是屏幕上那个数,否则用户扫一眼
+  // 看到的是一串没排序的金额 —— 那比不排更糟。同一条规则在别处已经成立:DeFi 的腿按显示的
+  // `|usdValue|` 排、永续账户块按显示的权益排。
+  // (占用保证金更能代表「押了多少钱」,但它不在这行上显示;真要按它排,得先把它显示出来。)
+  //
+  // 排在这里而不是各渲染点:侧边栏与主页永续 tab 是同一个 `PerpView` 的两个消费者,
+  // 排一次两边就一致 —— 而账户行那排叠标用的是同一个口径(`|positionValue|`)。
+  positions.sort((a, b) => Math.abs(b.positionValue) - Math.abs(a.positionValue));
+
+  return { equity, positions };
+}
+
+// DeFi 协议盈亏在载荷里的键:账户 × 协议。服务端下发、客户端拼回同一条,两边必须同形。
+export function defiGainKey(accountId: string, protocol: string): string {
+  return `${accountId}|${protocol}`;
 }

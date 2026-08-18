@@ -2,7 +2,7 @@ import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } f
 import { useId } from "react";
 import { Area, AreaChart, XAxis, YAxis } from "recharts";
 import { useFormatter, useTranslations } from "use-intl";
-import type { HistoryPoint } from "../../../../lib/history";
+import type { HistoryPoint } from "../../../../lib/core/history";
 import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
 
 // 价值趋势区的**状态机**:一个点数不够 / 还在取数 / 什么都还没有 / 真有数据,四种情况在这里一次

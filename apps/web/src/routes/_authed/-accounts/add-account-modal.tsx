@@ -8,7 +8,7 @@ import { AccountForm } from "../../../components/account-fields";
 import { ConnectorGrid } from "../../../components/connector-grid";
 import { CredentialForm } from "../../../components/credential-form";
 import { IconButton } from "../../../components/icon-button";
-import { connectorLabelFallback } from "../../../lib/connector-label";
+import { connectorLabelFallback } from "../../../lib/core/logo";
 import {
   connectorCatalogQuery,
   connectorCredentialSpecsQuery,

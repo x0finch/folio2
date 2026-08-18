@@ -1,5 +1,5 @@
 import { useLocale } from "use-intl";
-import { formatMoney } from "../format-number";
+import { formatMoney } from "../core/format-number";
 import { usePreferCurrency } from "./use-prefer-currency";
 
 // 货币展示的单一入口。返回 (value: number) => string:按偏好币种换算 + fiat/crypto 格式化(见 formatMoney)。

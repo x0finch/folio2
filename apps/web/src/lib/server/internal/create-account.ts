@@ -4,9 +4,9 @@ import { type AccountSafe, AccountStore, type ManualStore } from "@folio/db";
 import type { TokenService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
-import { sealCreds } from "../../creds";
-import { isManual } from "../../manual-connector";
+import { isManual } from "../../core/manual";
 import { credentialSpecs, validateAccountCreds } from "./connector-registry";
+import { sealCreds } from "./creds";
 import { createManualAccount } from "./manual";
 
 // 账户创建的分派逻辑(server fn 之外的纯 async → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。

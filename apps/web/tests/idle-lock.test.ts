@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseIdleTimeout, shouldLock } from "../src/lib/idle-lock";
+import { parseIdleTimeout, shouldLock } from "../src/lib/hooks/idle-lock";
 
 // 闲置锁判定(ADR 0029 / #291)：到点该不该锁。纯函数是核心测试缝；
 // 活动监听 / 定时器 / localStorage 是薄壳，靠浏览器手测。

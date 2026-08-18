@@ -1,8 +1,8 @@
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@folio/ui";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
-import { formatMoney } from "../../../lib/format-number";
-import type { HistoryPoint } from "../../../lib/history";
+import { formatMoney } from "../../../lib/core/format-number";
+import type { HistoryPoint } from "../../../lib/core/history";
 import { usePreferCurrency } from "../../../lib/hooks/use-prefer-currency";
 
 const DAY_MS = 86_400_000;

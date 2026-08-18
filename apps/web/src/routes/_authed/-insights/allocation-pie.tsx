@@ -1,6 +1,6 @@
 import { Cell, Pie, PieChart } from "recharts";
 import { useLocale, useTranslations } from "use-intl";
-import { formatMoney } from "../../../lib/format-number";
+import { formatMoney } from "../../../lib/core/format-number";
 import { usePreferCurrency } from "../../../lib/hooks/use-prefer-currency";
 import { type AllocSlice, OTHERS_KEY } from "./allocation";
 

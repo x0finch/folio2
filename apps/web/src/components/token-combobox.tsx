@@ -5,20 +5,20 @@ import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } fro
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { formatNumber } from "../lib/format-number";
-import { matchSegments } from "../lib/highlight";
+import { formatNumber } from "../lib/core/format-number";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
 import { fiatOptionsQuery, tokenCatalogueQuery, tokenSearchQuery } from "../lib/queries/tokens";
+import type { TokenOption } from "../lib/server/internal/tokens";
 import { refreshTokenPrices } from "../lib/server/tokens";
-import type { TokenOption } from "../lib/token-option";
 import {
   buildTokenSections,
   type LivePrice,
+  matchSegments,
   needsRemoteSearch,
   searchCatalogue,
   staleTickets,
   type TokenSectionKey,
-} from "../lib/token-search";
+} from "./token-search";
 
 // manual 选币的内联 Combobox(A4,替代 TokenPicker 的全屏 CommandPalette 浮层):点触发器**就地下推**展开
 // 搜索框 + 结果列表(在文档流内、把下方字段推下去,不叠第二层遮罩)。接口与 TokenPicker 对齐(value/onChange/
@@ -27,7 +27,7 @@ import {
 // 键盘:↑↓ 移高亮、Enter 选中/转手动、Esc 收起;点组件外亦收起(均保留当前值,不改选)。
 //
 // **搜索先在本地目录里做。** 组件一挂载(= 记账/加账户模态框打开)就预取整份目录(市值前 1000,
-// 约 35KB),默认列取它的前 N 条,敲字则就地筛(见 lib/token-search.ts)—— 零往返、无防抖、
+// 约 35KB),默认列取它的前 N 条,敲字则就地筛(见 ./token-search.ts)—— 零往返、无防抖、
 // 一个字符就出结果。只有本地凑不够(用户在找长尾币)才防抖打一次上游 /search,回来合并进本地那几条。
 // 搜不到可转手动录入。
 

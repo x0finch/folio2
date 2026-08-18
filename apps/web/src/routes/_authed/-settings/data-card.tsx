@@ -11,9 +11,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import type { ImportCounts } from "../../../lib/import";
 import { invalidateFor } from "../../../lib/queries/refresh";
 import { dataStatsQuery } from "../../../lib/queries/settings";
+import type { ImportCounts } from "../../api/import";
 
 // 数据卡(合一):导出段 + 分隔线 + 导入段。复用现有 /api/export、/api/import 路由。
 // 导入文案沿用 Accounts 命名空间的 import* 键(与账户页导入同源)。

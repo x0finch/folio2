@@ -12,20 +12,38 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import {
-  BTC_SCRIPT_OPTIONS,
-  isBareXpub,
-  isExtendedPubkey,
-  recommendedScript,
-} from "../lib/bitcoin-scripts";
-import type { InputSpec } from "../lib/creds";
+import { isManual } from "../lib/core/manual";
 import { usePortfolio } from "../lib/hooks/use-portfolio";
 import { useTokenPrice } from "../lib/hooks/use-token-price";
-import { isManual } from "../lib/manual-connector";
-import { manualTokensJson } from "../lib/manual-tokens";
 import { createAccount } from "../lib/server/accounts";
-import type { TokenOption } from "../lib/token-option";
+import type { InputSpec } from "../lib/server/internal/creds";
+import type { TokenOption } from "../lib/server/internal/tokens";
+import { manualTokensJson } from "./manual-tokens";
 import { TokenCombobox } from "./token-combobox";
+
+// Bitcoin add-account 的脚本类型 UI 辅助(客户端安全:纯字符串,不引 @scure 派生库)。
+// ScriptType 本地定义(与 @folio/bitcoin-derive 的 provider 侧同口径;那份含 @scure 派生库,不能进客户端 bundle)。
+type ScriptType = "native" | "nested" | "taproot" | "legacy";
+
+// 下拉选项(推荐项排前);label 走 Inputs i18n,addressPrefix 提示该类型派生地址的开头(语言无关,直接展示)。
+const BTC_SCRIPT_OPTIONS: { value: ScriptType; label: string; addressPrefix: string }[] = [
+  { value: "native", label: "Native SegWit", addressPrefix: "bc1q…" },
+  { value: "nested", label: "Nested SegWit", addressPrefix: "3…" },
+  { value: "taproot", label: "Taproot", addressPrefix: "bc1p…" },
+  { value: "legacy", label: "Legacy", addressPrefix: "1…" },
+];
+
+const EXT_PUBKEY_RE = /^(xpub|ypub|zpub)/;
+
+// 是否扩展公钥(xpub/ypub/zpub)。
+const isExtendedPubkey = (id: string): boolean => EXT_PUBKEY_RE.test(id.trim());
+// 是否裸 xpub —— 只有它脚本类型才歧义、需用户选;ypub/zpub 前缀已定,展示为只读。
+const isBareXpub = (id: string): boolean => id.trim().startsWith("xpub");
+
+// 前缀预选/识别:ypub→Nested、zpub→Native、裸 xpub→Native(与 provider recommendedScript 一致)。
+function recommendedScript(id: string): ScriptType {
+  return id.trim().startsWith("ypub") ? "nested" : "native";
+}
 
 // 添加账户的录入字段与提交(A4 从 add-account-sheet 抽出,供 AddAccountModal 复用)。connector-driven 创建(#55):
 // 字段组件按 connector.account.creds 的 key 写入 values,原样透传给统一 createAccount(校验/加密/落库全在服务端

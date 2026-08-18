@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PickedToken } from "../src/components/manual-activity-modal";
 import { messages } from "../src/lib/i18n/messages";
-import type { PickedToken } from "../src/lib/manual-types";
 
 // 手记活动弹窗的新接口(#428 片 3)。
 //

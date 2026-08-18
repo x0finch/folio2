@@ -12,22 +12,25 @@ import { FxService, TokenService } from "@folio/oracle";
 import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
-import type { GainHistoryRow } from "../../gain-24h";
-import type { SnapshotTotalRow } from "../../history";
-import type { CredsToken } from "../../manual-activity";
-import { deriveAmount, fallbackUnitPrice, projectToken } from "../../manual-activity";
-import { type BatchDraft, planManualBatch, runningOk, type Token } from "../../manual-batch";
-import { isManual, MANUAL_CONNECTOR_ID } from "../../manual-connector";
+import type { SnapshotTotalRow } from "../../core/history";
+import type { CredsToken } from "../../core/manual";
 import {
   buildManualAccountSeries,
+  deriveAmount,
+  fallbackUnitPrice,
   type HistoricalPriceAt,
   type HistoryToken,
+  isManual,
+  MANUAL_CONNECTOR_ID,
+  projectToken,
   tokenPriceAt,
   tokenQuantityAt,
-} from "../../manual-history";
-import type { BalanceLike } from "../../tokens";
+} from "../../core/manual";
+import type { GainHistoryRow } from "./gain-24h";
+import { type BatchDraft, planManualBatch, runningOk, type Token } from "./manual-batch";
 import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";
 import { NAMER } from "./oracle";
+import type { BalanceLike } from "./tokens";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。
 const AMOUNT_EPS = 1e-9;

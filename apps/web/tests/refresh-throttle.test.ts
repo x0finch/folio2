@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRefreshThrottle, REFRESH_WINDOW_MS } from "../src/lib/refresh-throttle";
+import { createRefreshThrottle, REFRESH_WINDOW_MS } from "../src/lib/hooks/use-account-sync";
 
 // 假时钟推进,**只断言调用次数与顺序,不断言墙钟时间**(CODING.md:限频/时序测试别断言墙钟)。
 

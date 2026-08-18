@@ -1,4 +1,4 @@
-import { authClient } from "./auth-client";
+import { authClient } from "../../../../lib/core/auth-client";
 import { detectDeviceLabel } from "./passkey-authenticators";
 
 /**

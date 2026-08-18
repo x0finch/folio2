@@ -1,7 +1,7 @@
 import type { ConnectorId } from "@folio/connectors";
 import { cn } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
-import { connectorLabelFallback } from "../lib/connector-label";
+import { connectorLabelFallback } from "../lib/core/logo";
 import { connectorCatalogQuery } from "../lib/queries/connectors";
 
 // connector 徽章:统一的 muted 小标(仅 shadcn 设计 token,不用任意色值)。列表行与详情头共用。

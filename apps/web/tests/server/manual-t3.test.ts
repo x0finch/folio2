@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { deriveAmount } from "../../src/lib/manual-activity";
+import { deriveAmount } from "../../src/lib/core/manual";
 import { NAMER } from "../../src/lib/server/internal/oracle";
 import { dbFor } from "./db-effect";
 import {

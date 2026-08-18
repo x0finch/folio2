@@ -13,13 +13,13 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
-import { authClient, signIn } from "../../../../lib/auth-client";
+import { authClient, signIn } from "../../../../lib/core/auth-client";
+import { IDLE_TIMEOUT_MINUTES } from "../../../../lib/hooks/idle-lock";
 import { useIdleTimeout } from "../../../../lib/hooks/use-idle-timeout";
 import { useLockDevice } from "../../../../lib/hooks/use-lock-device";
-import { IDLE_TIMEOUT_MINUTES } from "../../../../lib/idle-lock";
-import { registerPasskey } from "../../../../lib/register-passkey";
 import { SettingRow } from "../setting-row";
 import { errorCode, type PasskeyRow, SESSION_NOT_FRESH } from "./passkey";
+import { registerPasskey } from "./register-passkey";
 
 // 自动锁定卡(#292，ADR 0029)：闲置多久后遮住持仓。偏好每设备独立(localStorage)、改动即时生效。
 export function AutoLockCard() {

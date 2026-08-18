@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { shouldLock } from "../idle-lock";
+import { shouldLock } from "./idle-lock";
 
 // 闲置锁的客户端机制(ADR 0029 / #291）。逻辑收进 hook，LockScreen 组件只管样子。
 // 三件事：活动监听刷新「最后活跃时间戳」；主动定时器(前台到点当场锁)；重入比对

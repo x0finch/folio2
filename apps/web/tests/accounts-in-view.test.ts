@@ -5,7 +5,7 @@ import {
   accountsMatchingPin,
   type TabPin,
   toTabPin,
-} from "../src/lib/accounts-in-view";
+} from "../src/lib/core/accounts-in-view";
 
 // accountsInView(ADR 0033):活跃 && 归属选中 Portfolio;未归属的账户兜底进默认视图。
 

@@ -11,7 +11,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
-import { type HistoryPoint, toDailySeries } from "../../../lib/history";
+import { type HistoryPoint, toDailySeries } from "../../../lib/core/history";
 import { usePortfolio } from "../../../lib/hooks/use-portfolio";
 import { portfolioHistoryQuery, portfolioOverviewQuery } from "../../../lib/queries/portfolio";
 import { HeaderSync } from "../-home/header-sync";

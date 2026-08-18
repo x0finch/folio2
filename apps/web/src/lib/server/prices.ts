@@ -3,11 +3,10 @@ import { TokenService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
-import { refreshableTokenIds } from "../tokens";
-import { userDisplayBalances } from "../user-balances";
 import { manualBalancesForWarm } from "./internal/manual";
 import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
+import { refreshableTokenIds, userDisplayBalances } from "./internal/tokens";
 
 const priceLog = getLogger(["folio", "web", "prices"]);
 
