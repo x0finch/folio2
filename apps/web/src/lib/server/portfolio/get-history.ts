@@ -56,13 +56,17 @@ export function handleGetPortfolioHistory({
       const manualIds = new Set(
         memberAccounts.filter((a) => isManual(a.connectorId)).map((a) => a.id),
       );
-      const snapRows = rows.filter((r) => !manualIds.has(r.accountId) && memberSet.has(r.accountId));
+      const snapRows = rows.filter(
+        (r) => !manualIds.has(r.accountId) && memberSet.has(r.accountId),
+      );
       // manual 走日网格 compute-on-read(ADR 0019),末点 τ=now → 与下方 live 覆写同刻对齐。
       const manualRows = yield* loadManualHistoryRows(memberAccounts, now);
       // 归档成员的历史贡献保留到归档那一刻为止(ADR 0039)—— 不传这张表的话,它冻住的值会
       // 一路保持到今天,而下面的当下点只算活跃账户,曲线就会「一路平着、到头凭空掉一截」。
       const archivedAt = new Map(
-        memberAccounts.flatMap((a) => (a.archivedAt == null ? [] : [[a.id, a.archivedAt] as const])),
+        memberAccounts.flatMap((a) =>
+          a.archivedAt == null ? [] : [[a.id, a.archivedAt] as const],
+        ),
       );
       const series = buildPortfolioHistory([...snapRows, ...manualRows], archivedAt);
       if (series.length === 0) return { series };
@@ -71,7 +75,11 @@ export function handleGetPortfolioHistory({
       const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
       // manual 不写快照(ADR 0018):当下点的 manual 净值由 creds 现造注入(过去点仍来自真实快照 totals)。
       yield* injectManualSnapshots(accounts, byAccount);
-      const liveTotals = yield* deriveLiveAccountTotals(accounts, byAccount, settings.valuationMode);
+      const liveTotals = yield* deriveLiveAccountTotals(
+        accounts,
+        byAccount,
+        settings.valuationMode,
+      );
       let grand = 0;
       for (const v of liveTotals.values()) grand += v;
       series[series.length - 1] = { ...series[series.length - 1], total: grand };

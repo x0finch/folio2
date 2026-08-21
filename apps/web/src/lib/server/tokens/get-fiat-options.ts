@@ -16,7 +16,10 @@ export function handleListFiatOptions({
   context: { userId: string };
 }): Promise<TokenOption[]> {
   const headers = getRequestHeaders();
-  const locale = pickLocale(readLocaleCookie(headers.get("cookie")), headers.get("accept-language"));
+  const locale = pickLocale(
+    readLocaleCookie(headers.get("cookie")),
+    headers.get("accept-language"),
+  );
   const base = buildFiatOptions(locale);
   // 法币的「价」= FX 汇率(USD 恒 1),直接填进下拉项 —— 否则价格列显 "—"(法币在代币价格源没有价)。
   // warm 一次(冷则一把拉全所有支持币种;通常 _authed loader / 切币种时已暖过 → no-op)。
