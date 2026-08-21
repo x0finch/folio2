@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { deleteToken, loadManualAccountDetail } from "./internal/manual";
+import { deleteToken, loadManualAccountDetail } from "./manual/store";
 import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
 

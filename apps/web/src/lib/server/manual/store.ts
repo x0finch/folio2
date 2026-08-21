@@ -27,9 +27,9 @@ import {
   tokenQuantityAt,
 } from "../../core/manual";
 import type { GainHistoryRow } from "../portfolio/gain-24h";
-import { type BatchDraft, planManualBatch, runningOk, type Token } from "./manual-batch";
-import { buildManualSnapshot, manualUnitPrices } from "./manual-snapshot";
-import { NAMER } from "./oracle";
+import { type BatchDraft, planManualBatch, runningOk, type Token } from "./batch";
+import { buildManualSnapshot, manualUnitPrices } from "./snapshot";
+import { NAMER } from "../internal/oracle";
 import type { BalanceLike } from "../tokens/model";
 
 // 折叠数量的浮点容差(与 manual-batch 一致):目标 amount 与当前 derived 差在此内视为相等。

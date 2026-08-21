@@ -1,7 +1,7 @@
 import { TokenService } from "@folio/oracle";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect, Option } from "effect";
-import { serveLogo } from "@/lib/server/internal/logo";
+import { serveLogo } from "@/lib/server/logos/serve";
 import { runRequest } from "@/lib/server/internal/oracle";
 import { userIdOf } from "@/lib/server/internal/route-auth";
 

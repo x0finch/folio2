@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Option } from "effect";
-import { readDefiLogo } from "@/lib/server/internal/defi-logo-store";
-import { serveLogo } from "@/lib/server/internal/logo";
+import { readDefiLogo } from "@/lib/server/logos/store";
+import { serveLogo } from "@/lib/server/logos/serve";
 import { runRequest } from "@/lib/server/internal/oracle";
 import { userIdOf } from "@/lib/server/internal/route-auth";
 

@@ -12,7 +12,7 @@ import {
   type ImportCounts,
   type ImportDeps,
   parseImportLine,
-} from "@/lib/server/internal/import";
+} from "@/lib/server/io/import";
 import { runRequest } from "@/lib/server/internal/oracle";
 
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。鉴权同其它 server fn。

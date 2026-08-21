@@ -1,6 +1,6 @@
 import { Effect, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
-import { pruneNotesAllUsers } from "../../src/lib/server/internal/note-retention";
+import { pruneNotesAllUsers } from "../../src/lib/server/entry/note-retention";
 
 // 逐用户剪 note 的那层编排(#456)。db 那侧的 op 由 `packages/db/tests/prune-notes.test.ts` 用真 D1 盯;
 // 这组只盯**编排**:窗口是怎么算出来的、一个用户失败会不会拖累其余。

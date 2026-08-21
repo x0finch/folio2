@@ -2,7 +2,7 @@ import type { CacheEntry } from "@folio/oracle-basic";
 import { CacheStore } from "@folio/oracle-basic/ports";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
-import { readDefiLogo, recordDefiLogos } from "../src/lib/server/internal/defi-logo-store";
+import { readDefiLogo, recordDefiLogos } from "../src/lib/server/logos/store";
 
 // DeFi 协议图这一小片**搬回 app 了**(#390 review 第 4 条):它没有上游、不出网 —— 同步时把余额
 // meta 里现成的 URL 记进 per-user 缓存,图片端点再读出来。所以它不属于参考层,但键没变

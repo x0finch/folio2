@@ -8,7 +8,7 @@ import { loadAccountHistory } from "./history";
 import { credentialSpecs, validateAccountCreds } from "../connectors/registry";
 import { createAccountFor, raw2sealed } from "./create-account";
 import { isComplete, safeView } from "../internal/creds";
-import { sealManualAccount } from "../internal/manual";
+import { sealManualAccount } from "../manual/store";
 import { runRequest, runStore } from "../internal/oracle";
 import { requireAuth } from "../internal/require-auth";
 

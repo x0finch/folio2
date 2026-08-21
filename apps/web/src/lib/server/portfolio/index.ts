@@ -28,7 +28,7 @@ import {
   loadManualGainHistory,
   loadManualHistoryRows,
   manualFiatRefs,
-} from "../internal/manual";
+} from "../manual/store";
 import { runAtEdge, runRequest, runStore, withRequest } from "../internal/oracle";
 import { buildOverview, type OverviewDeps } from "./overview-model";
 import { requireAuth } from "../internal/require-auth";

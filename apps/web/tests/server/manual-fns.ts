@@ -1,6 +1,6 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import { createAccountFor as createAccountForE } from "../../src/lib/server/accounts/create-account";
-import * as M from "../../src/lib/server/internal/manual";
+import * as M from "../../src/lib/server/manual/store";
 import { runRequest } from "../../src/lib/server/internal/oracle";
 
 // **手记那一摞函数的 Promise 把手**(#394 T6)。它们本体现在都是 Effect(userId 由装配层吃掉,

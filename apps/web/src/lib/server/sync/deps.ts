@@ -41,7 +41,7 @@ import { Cause, Effect, Exit, Layer, Stream } from "effect";
 import type { InputSpec } from "../internal/creds";
 import { isComplete, openCreds } from "../internal/creds";
 import { recordDefiLogosOf } from "./defi-logos";
-import { manualBalancesForWarm } from "../internal/manual";
+import { manualBalancesForWarm } from "../manual/store";
 import { type DbStores, requestLayer, runAtEdge, withRequest } from "../internal/oracle";
 import { warmPlatforms } from "./platforms";
 import { revalue } from "./revalue";

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { exportStream } from "../../src/lib/server/internal/export-stream";
+import { exportStream } from "../../src/lib/server/io/export-stream";
 import { runAtEdge, withRequest } from "../../src/lib/server/internal/oracle";
 
 // 导出那条流的**分页边界**(#394 T7)。

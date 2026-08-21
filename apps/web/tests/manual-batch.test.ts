@@ -6,7 +6,7 @@ import {
   type ResolvedDraft,
   runningOk,
   type Token,
-} from "../src/lib/server/internal/manual-batch";
+} from "../src/lib/server/manual/batch";
 
 const act = (o: Partial<DerivableActivity>): DerivableActivity => ({
   kind: "add",
