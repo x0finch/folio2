@@ -1,0 +1,21 @@
+// 纯 auth 逻辑,无任何 server-only import(故可被单测直接导入,也不会把
+// cloudflare:workers / server headers 拖进客户端包)。取 session 由 require-auth.ts
+// 的 requireAuth 中间件在 .server() 内完成,再把结果喂给这里校验。
+
+export interface SessionResult {
+  user: { id: string; [k: string]: unknown };
+  session: { id: string; [k: string]: unknown };
+}
+
+// 把已取到的 session 结果转成 auth context;无 session → 抛 401 Response。
+// 关键:userId 只来自已验证 session,绝不来自客户端入参。
+export function resolveAuth(result: SessionResult | null) {
+  if (!result) {
+    throw new Response("Unauthorized", { status: 401 });
+  }
+  return { userId: result.user.id, user: result.user, session: result.session };
+}
+
+// requireAuth 注入下游 handler 的 context 形状 —— 从注入函数本身推导,
+// handler 不各自复述一份 `{ userId: string }`(形状变了只改 resolveAuth 一处)。
+export type AuthContext = ReturnType<typeof resolveAuth>;

@@ -1,10 +1,10 @@
 import { PlatformService } from "@folio/oracle";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { connectorPlatformMeta } from "@/lib/server/internal/connector-platform";
-import { serveLogo } from "@/lib/server/internal/logo";
-import { runRequest } from "@/lib/server/internal/oracle";
-import { userIdOf } from "@/lib/server/internal/route-auth";
+import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
+import { serveLogo } from "@/lib/server/logos/serve";
+import { runRequest } from "@/lib/server/oracle";
+import { userIdOf } from "@/lib/server/session/route-auth";
 
 // 平台 logo 代理:platform key(如 evm:1,含 `:` → URL 编码为一段)→ 上游图 → 透传 + 缓存头。
 // 见 ADR 0008 / #20。场馆键(manual/exchange:/perp:)的图取连接器自带 logo,不查 CoinGecko(#52);

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getAuth } from "@/lib/server/internal/auth";
+import { getAuth } from "@/lib/server/session/auth";
 
 // better-auth 的 handler 挂在 /api/auth/*(splat)。GET/POST 均转交。
 export const Route = createFileRoute("/api/auth/$")({

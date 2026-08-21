@@ -1,6 +1,6 @@
 // 曲线的**采样**原语(纯逻辑,可单测)。两侧都在用:服务端重建完曲线后降采样,
 // 首页 hero 与洞察页拿到序列后自己再采一次。从快照重建曲线那半只有服务端用,
-// 住 lib/server/internal/history.ts。
+// 住 lib/server/portfolio/history.ts。
 
 // 一条账户快照的总额行(重建组合曲线的输入;manual 账户现算的序列也产这个形状)。
 export interface SnapshotTotalRow {

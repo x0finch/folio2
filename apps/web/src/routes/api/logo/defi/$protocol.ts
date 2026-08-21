@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Option } from "effect";
-import { readDefiLogo } from "@/lib/server/internal/defi-logo-store";
-import { serveLogo } from "@/lib/server/internal/logo";
-import { runRequest } from "@/lib/server/internal/oracle";
-import { userIdOf } from "@/lib/server/internal/route-auth";
+import { serveLogo } from "@/lib/server/logos/serve";
+import { readDefiLogo } from "@/lib/server/logos/store";
+import { runRequest } from "@/lib/server/oracle";
+import { userIdOf } from "@/lib/server/session/route-auth";
 
 // DeFi 协议 logo 代理:协议名(路由段,含空格等已 URL 编码)→ 该用户缓存里那条协议图 URL(同步时
 // 由余额 meta 落入,见 warmDefiLogosForUser)→ 透传 + 缓存头。O(1) 读,见 ADR 0008 / #126。

@@ -1,7 +1,7 @@
 import { configure, type LogRecord } from "@logtape/logtape";
 import { Effect } from "effect";
 import { beforeAll, describe, expect, it } from "vitest";
-import { logCategory, logTapeLogger } from "../src/lib/server/internal/effect-log";
+import { logCategory, logTapeLogger } from "../src/lib/server/effect-log";
 
 // 参考层的降级与告警走 Effect 自己的日志系统,而「落到哪」由这个转发器决定(见 effect-log.ts)。
 // 它跑在**错误路径**上 —— 降级时才被调到 —— 所以它自己坏掉最难发现:上游挂了本该记一行,

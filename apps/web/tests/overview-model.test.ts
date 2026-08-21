@@ -3,8 +3,8 @@ import type { TokenRecord } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "../src/lib/core/account-view";
-import { GAIN_WINDOW_MS } from "../src/lib/server/internal/gain-24h";
-import { buildOverview } from "../src/lib/server/internal/overview-model";
+import { GAIN_WINDOW_MS } from "../src/lib/server/portfolio/gain-24h";
+import { buildOverview } from "../src/lib/server/portfolio/overview-model";
 import { type OracleStub, runWithOracle } from "./oracle-stub";
 
 // 纯 buildOverview 可脱离 server fn 测(依赖注入)—— 这是 #3 抽读模型的收益。

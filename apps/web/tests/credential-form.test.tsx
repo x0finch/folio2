@@ -3,7 +3,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "../src/lib/i18n/messages";
-import type { InputSpec } from "../src/lib/server/internal/creds";
+import type { InputSpec } from "../src/lib/server/creds";
 
 // 补录凭据表单(#428 片 1)。原先它自己存 `busy` + `error`,现在两者都由 mutation 持有。
 //

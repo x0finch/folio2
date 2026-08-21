@@ -5,7 +5,7 @@ import {
   GAIN_WINDOW_MS,
   type GainLine,
   type GainPoint,
-} from "../src/lib/server/internal/gain-24h";
+} from "../src/lib/server/portfolio/gain-24h";
 
 // 24h 盈亏的口径(ADR 0040)。这组测试锁的是「剔除资金进出」这件事 —— 你买入卖出、充值提现
 // 都不该被算成赚钱,而价格涨跌该被完整算到。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withDefaultNoStore } from "../src/lib/server/internal/cache-headers";
+import { withDefaultNoStore } from "../src/lib/server/entry/cache-headers";
 
 // 回归护栏:生产上账号 B 看到了账号 A 的页面,根因是 CF 边缘按 URL(不含 Cookie)缓存了
 // 不带 cache-control 的 SSR 响应。这些断言钉住「默认不可缓存,可缓存必须显式声明」。

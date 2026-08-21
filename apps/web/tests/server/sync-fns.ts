@@ -2,8 +2,8 @@ import type { Balance, ConnectorError } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import { Account, type AccountSyncResult, BalanceSource } from "@folio/sync";
 import { Effect, Layer } from "effect";
-import { runRequest } from "../../src/lib/server/internal/oracle";
-import { syncServicesLayer } from "../../src/lib/server/internal/sync-deps";
+import { runRequest } from "../../src/lib/server/oracle";
+import { syncServicesLayer } from "../../src/lib/server/sync/deps";
 
 // 同步的测试把手(#403 片 3)。`SyncDeps` 与 `buildSyncDeps` 没了 —— 编排现在从 `SyncServices`
 // 取能力,所以测试要换掉的不再是「deps 对象上的一个字段」,而是**一层**。

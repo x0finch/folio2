@@ -10,7 +10,7 @@ import {
   searchCatalogue,
   staleTickets,
 } from "../src/components/token-search";
-import type { TokenOption } from "../src/lib/server/internal/tokens";
+import type { TokenOption } from "../src/lib/server/tokens/model";
 
 // 选币搜索的本地那一档:在整份下发的目录里就地筛,只有凑不够才轮到上游。
 // 这些用例钉的是**排序意图**和**什么时候才出网** —— 前者决定用户敲 BTC 第一行是不是比特币,

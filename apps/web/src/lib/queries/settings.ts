@@ -3,7 +3,7 @@ import { getDataStats, getProviderKeyStatus, getValuationSettings } from "../ser
 import { STALE_TIME } from "./constants";
 import { settingsKeys } from "./keys";
 
-// 设置域的读取入口 —— 与 `lib/server/settings.ts` 的三个读取型 server fn 对应。
+// 设置域的读取入口 —— 与 `lib/server/settings` 的三个读取型 server fn 对应。
 
 export const providerKeyStatusQuery = () =>
   queryOptions({

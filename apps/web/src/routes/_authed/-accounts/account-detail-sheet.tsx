@@ -41,7 +41,7 @@ import { useHoverPopover } from "../../../lib/hooks/use-hover-popover";
 import { accountHistoryQuery } from "../../../lib/queries/accounts";
 import { invalidateFor } from "../../../lib/queries/refresh";
 import { removeAccount, updateAccount } from "../../../lib/server/accounts";
-import type { Gain } from "../../../lib/server/internal/gain-24h";
+import type { Gain } from "../../../lib/server/portfolio/gain-24h";
 import { syncAccount } from "../../../lib/server/sync";
 import { TrendPanel } from "../-home/hero/trend-panel";
 import { deltaTone, GainSkeleton, NO_VALUE } from "../-home/holdings/value-delta";
