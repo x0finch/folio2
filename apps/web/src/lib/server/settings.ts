@@ -2,8 +2,8 @@ import { env } from "cloudflare:workers";
 import { AccountStore, SettingsStore } from "@folio/db";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { runStore } from "./internal/oracle";
-import { requireAuth } from "./internal/require-auth";
+import { runStore } from "./oracle";
+import { requireAuth } from "./session/require-auth";
 
 // 全局 provider key 是否已配置(只回布尔,绝不回值)。自托管者据此自检 env。
 // CEX 用每账户密钥、非全局 key,故不在此列。

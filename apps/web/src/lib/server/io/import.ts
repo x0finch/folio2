@@ -1,6 +1,6 @@
 import type { BalanceKind, Note } from "@folio/connectors-basic";
 import { Effect } from "effect";
-import { SEMI_PREFIX } from "../internal/creds";
+import { SEMI_PREFIX } from "../creds";
 import { EXPORT_VERSION } from "./export";
 
 // 纯导入逻辑(无 server-only import → 可单测,DB 经 deps 注入)。

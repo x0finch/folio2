@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { incompleteSpecs } from "../src/components/incomplete-specs";
-import type { InputSpec } from "../src/lib/server/internal/creds";
+import type { InputSpec } from "../src/lib/server/creds";
 
 // 补录只问"能被 isComplete gate 的字段" = 非 public(semi + secret)。public 已知/导入带真值,不重问。
 const SPECS: InputSpec[] = [

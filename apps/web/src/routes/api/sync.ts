@@ -1,9 +1,9 @@
 import { waitUntil } from "cloudflare:workers";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
-import { getAuth } from "@/lib/server/internal/auth";
-import { resolveAuth } from "@/lib/server/internal/auth-session";
-import { runAtEdge } from "@/lib/server/internal/oracle";
+import { getAuth } from "@/lib/server/session/auth";
+import { resolveAuth } from "@/lib/server/session/auth-session";
+import { runAtEdge } from "@/lib/server/oracle";
 import { syncStreamFor, warmTokensForUser } from "@/lib/server/sync/deps";
 import { ndjsonRound } from "@/lib/server/sync/ndjson";
 

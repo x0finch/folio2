@@ -1,8 +1,8 @@
 import { TagStore } from "@folio/db";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { runStore } from "./internal/oracle";
-import { requireAuth } from "./internal/require-auth";
+import { runStore } from "./oracle";
+import { requireAuth } from "./session/require-auth";
 
 // Tag(Portfolio 内软标签,ADR 0034)的 server fn:auth 薄壳 → per-user 的 `TagStore`(ADR 0037)。
 // userId 只出现在 `runStore` 那一处 —— 服务的方法签名里没有它,拿错用户在编译期就发生不了。

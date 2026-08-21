@@ -6,7 +6,7 @@ import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { isManual } from "../../core/manual";
 import { credentialSpecs, validateAccountCreds } from "../connectors/registry";
-import { sealCreds } from "../internal/creds";
+import { sealCreds } from "../creds";
 import { createManualAccount } from "../manual/store";
 
 // 账户创建的分派逻辑(server fn 之外的纯 async → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。

@@ -2,8 +2,8 @@ import { TokenService } from "@folio/oracle";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect, Option } from "effect";
 import { serveLogo } from "@/lib/server/logos/serve";
-import { runRequest } from "@/lib/server/internal/oracle";
-import { userIdOf } from "@/lib/server/internal/route-auth";
+import { runRequest } from "@/lib/server/oracle";
+import { userIdOf } from "@/lib/server/session/route-auth";
 
 // 代币 logo 代理:内部代币行 id → 经该用户的参考层拿上游图 → 透传 + 缓存头。见 ADR 0008 / PRD #18。
 //

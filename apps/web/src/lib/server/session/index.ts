@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
-import { getAuth } from "./internal/auth";
+import { getAuth } from "./auth";
 
 // 公开 server fn(非 authed):返回当前 user 或 null,不抛。
 // 仅供路由守卫(_authed.tsx beforeLoad)做 UX 级重定向;真正的数据安全边界是

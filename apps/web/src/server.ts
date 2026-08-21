@@ -6,7 +6,7 @@ import { Cause, Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/entry/cache-headers";
 import { configureLogging } from "./lib/server/entry/log";
 import { pruneNotesAllUsers } from "./lib/server/entry/note-retention";
-import { runAtEdge, withDatabase, withOracleWarm } from "./lib/server/internal/oracle";
+import { runAtEdge, withDatabase, withOracleWarm } from "./lib/server/oracle";
 import { syncAllUsers, warmAllUsers } from "./lib/server/sync/deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),

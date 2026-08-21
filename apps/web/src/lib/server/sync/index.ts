@@ -6,10 +6,10 @@ import { Effect } from "effect";
 import { z } from "zod";
 import { isManual } from "../../core/manual";
 import { credentialSpecs } from "../connectors/registry";
-import { isComplete } from "../internal/creds";
-import { logCategory } from "../internal/effect-log";
-import { runRequest } from "../internal/oracle";
-import { requireAuth } from "../internal/require-auth";
+import { isComplete } from "../creds";
+import { logCategory } from "../effect-log";
+import { runRequest } from "../oracle";
+import { requireAuth } from "../session/require-auth";
 import { syncServicesLayer, warmTokens } from "./deps";
 import { type SyncStatusSummary, summarizeSync } from "./status";
 

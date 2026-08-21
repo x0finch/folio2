@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { addManualActivities, deleteManualActivity, editManualActivity } from "./manual/store";
-import { runRequest } from "./internal/oracle";
-import { requireAuth } from "./internal/require-auth";
+import { runRequest } from "./oracle";
+import { requireAuth } from "./session/require-auth";
 
 // manual 活动账本资源(账户级)。薄壳:auth + 校验入参 + 调 ./manual 纯 async(决策/物化都在那层)。
 const ActivityKind = z.enum(["add", "reduce", "set"]);

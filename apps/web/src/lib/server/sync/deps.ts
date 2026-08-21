@@ -38,11 +38,11 @@ import {
 } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { Cause, Effect, Exit, Layer, Stream } from "effect";
-import type { InputSpec } from "../internal/creds";
-import { isComplete, openCreds } from "../internal/creds";
+import type { InputSpec } from "../creds";
+import { isComplete, openCreds } from "../creds";
 import { recordDefiLogosOf } from "./defi-logos";
 import { manualBalancesForWarm } from "../manual/store";
-import { type DbStores, requestLayer, runAtEdge, withRequest } from "../internal/oracle";
+import { type DbStores, requestLayer, runAtEdge, withRequest } from "../oracle";
 import { warmPlatforms } from "./platforms";
 import { revalue } from "./revalue";
 import { isSyncableAccount } from "./syncable";

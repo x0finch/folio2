@@ -7,7 +7,7 @@ import {
 } from "@folio/db";
 import { Effect, Option, Stream } from "effect";
 import { credentialSpecs } from "../connectors/registry";
-import { safeView } from "../internal/creds";
+import { safeView } from "../creds";
 import {
   accountRecord,
   manualActivityRecord,
@@ -16,7 +16,7 @@ import {
   snapshotRecord,
   tokenRecord,
 } from "./export";
-import type { DbStores } from "../internal/oracle";
+import type { DbStores } from "../oracle";
 
 // 导出那条 NDJSON 流。**路由只剩鉴权 + 跑一次**,流本身住在这里 —— 与 `/api/sync` 的
 // `sync-ndjson.ts` 同一个形状,理由也一样:handler 里的东西测不到,这里的测得到

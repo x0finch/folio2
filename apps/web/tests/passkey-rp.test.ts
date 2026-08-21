@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { derivePasskeyRp, RP_NAME } from "../src/lib/server/internal/passkey-rp";
+import { derivePasskeyRp, RP_NAME } from "../src/lib/server/session/passkey-rp";
 
 // WebAuthn RP 派生(ADR 0028):rpID = host(无端口/协议),origin = 完整 origin(含端口)。
 // 自托管跟着各自 BETTER_AUTH_URL 走 —— 这是本特性能便宜自动化的核心测试缝。

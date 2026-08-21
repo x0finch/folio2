@@ -5,7 +5,7 @@ import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "../../src/lib/server/portfolio/history";
-import { NAMER } from "../../src/lib/server/internal/oracle";
+import { NAMER } from "../../src/lib/server/oracle";
 import { dbFor, withStore } from "./db-effect";
 import {
   addManualActivities,

@@ -2,8 +2,8 @@ import type { ConnectorId } from "@folio/connectors";
 import { TabPinStore } from "@folio/db";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { runStore } from "./internal/oracle";
-import { requireAuth } from "./internal/require-auth";
+import { runStore } from "./oracle";
+import { requireAuth } from "./session/require-auth";
 
 // 首页自定义 Tab(pin,ADR 0034)的 server fn:auth 薄壳 → per-user 的 `TabPinStore`(ADR 0037)。每 user ≤3 的上限、tag 归属校验都在 db 层。
 // 清单读取已并进 `getHomeTabStrip`(标签服务端解析好),这里只留三处写。

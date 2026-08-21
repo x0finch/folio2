@@ -6,7 +6,7 @@ import { CacheStore, GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports"
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectorPlatformMeta } from "../../src/lib/server/connectors/platform";
-import { NAMER, runRequest } from "../../src/lib/server/internal/oracle";
+import { NAMER, runRequest } from "../../src/lib/server/oracle";
 import { buildOverview } from "../../src/lib/server/portfolio/overview-model";
 import { dbFor, withStore } from "./db-effect";
 import {

@@ -4,8 +4,8 @@ import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { manualBalancesForWarm } from "./manual/store";
-import { runRequest } from "./internal/oracle";
-import { requireAuth } from "./internal/require-auth";
+import { runRequest } from "./oracle";
+import { requireAuth } from "./session/require-auth";
 import { refreshableTokenIds, userDisplayBalances } from "./tokens/model";
 
 const priceLog = getLogger(["folio", "web", "prices"]);

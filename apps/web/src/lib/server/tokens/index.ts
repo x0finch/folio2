@@ -7,8 +7,8 @@ import { Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { pickLocale, readLocaleCookie } from "../../i18n/detect";
 import { buildFiatOptions } from "./fiat-options";
-import { NAMER, runRequest } from "../internal/oracle";
-import { requireAuth } from "../internal/require-auth";
+import { NAMER, runRequest } from "../oracle";
+import { requireAuth } from "../session/require-auth";
 import { priceTickets } from "./pricing";
 import type { TokenOption } from "./model";
 

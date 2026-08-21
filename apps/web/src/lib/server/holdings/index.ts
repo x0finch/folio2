@@ -3,8 +3,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
 import { isFungible, viewKind } from "../../core/balance-kind";
-import { runRequest } from "../internal/oracle";
-import { requireAuth } from "../internal/require-auth";
+import { runRequest } from "../oracle";
+import { requireAuth } from "../session/require-auth";
 import { buildTokenValueHistory, type TokenHistRow } from "./token-history";
 
 // 单币持仓价值历史(H6 片2):某持仓(按 Holding key = token_id)的价值随时间。

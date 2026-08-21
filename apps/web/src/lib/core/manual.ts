@@ -10,7 +10,7 @@ import type { SnapshotTotalRow } from "./history";
 // 所以它拖进来的依赖会跟着进客户端的依赖图。原来这里还住着 `manualTokenRef`,于是每个 import
 // `isManual` 的组件都顺带依赖了 tokenRef 文法包 —— tree-shaking 当时摘掉了它,但那是打包器的结果、
 // 不是不变量:这文件哪天多一行副作用,文法就悄悄跟着出去了。造 ref 是写路径的活,
-// 已挪到它唯一的调用者旁边(`server/internal/manual.ts`)。
+// 已挪到它唯一的调用者旁边(`server/manual/store.ts`)。
 export const MANUAL_CONNECTOR_ID = "manual" satisfies ConnectorId;
 
 export function isManual(connectorId: ConnectorId): boolean {

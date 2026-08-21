@@ -29,9 +29,9 @@ import {
   loadManualHistoryRows,
   manualFiatRefs,
 } from "../manual/store";
-import { runAtEdge, runRequest, runStore, withRequest } from "../internal/oracle";
+import { runAtEdge, runRequest, runStore, withRequest } from "../oracle";
 import { buildOverview, type OverviewDeps } from "./overview-model";
-import { requireAuth } from "../internal/require-auth";
+import { requireAuth } from "../session/require-auth";
 import { kindPresence, resolvePinLabel } from "./tab-strip";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。

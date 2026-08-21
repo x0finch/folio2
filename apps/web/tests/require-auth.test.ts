@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveAuth } from "../src/lib/server/internal/auth-session";
+import { resolveAuth } from "../src/lib/server/session/auth-session";
 
 // resolveAuth 现是纯校验函数(取 session 由 requireAuth 的 .server() 完成)。
 // 测两条安全属性:无 session → 401;userId 只来自已验证 session。

@@ -1,6 +1,6 @@
 import { tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { NAMER } from "../../src/lib/server/internal/oracle";
+import { NAMER } from "../../src/lib/server/oracle";
 
 // 选币下拉发给前端的那张票 = base64url 编过的 tokenRef。**测试里现编,与生产同一个编码器** ——
 // 手写 base64 字面量的话,编码规则一改测试就静默失配。
