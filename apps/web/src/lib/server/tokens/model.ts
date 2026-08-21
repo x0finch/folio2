@@ -1,5 +1,5 @@
 import type { SnapshotWithBalances } from "@folio/db";
-import type { TokenRecord } from "@folio/oracle-basic";
+import { type TokenRecord, tokenTicket, type UpstreamToken } from "@folio/oracle-basic";
 import { ZERO_DISPLAY_USD } from "../../core/account-view";
 import { isFungible, viewKind } from "../../core/balance-kind";
 import { tokenLogoUrl } from "../../core/logo";
@@ -169,3 +169,21 @@ export function userDisplayBalances(
 ): BalanceLike[] {
   return [...snapshots.flatMap((s) => s.balances), ...manualBalances];
 }
+
+// 上游结果 → 下拉项。**logo 是上游直链,不走 folio 代理**:代理端点按内部代币行 id 读库
+// (`/api/logo/token/$id`),而这些币还没有行。ADR 0008 早就把搜索这一档记成已接受的尾巴,
+// 这里只是让默认列跟它一致 —— 而默认列恰好是最无所谓的那一档:市值前 N 名人人都一样,
+// 浏览器去 CoinGecko 取这几张图不泄露任何人持有什么。
+// rank 两个家:markets 端点放在 `price.marketCapRank`(warm 重建的行只有这半),`/search` 无价
+// 放在顶层 `marketCapRank` —— 取任一非空的那个。price/change/asOf 只有 markets 那侧带,搜索来的
+// 行留空,由下拉 SWR 刷价补(见 refreshTokenPrices)。
+export const toOption = (t: UpstreamToken): TokenOption => ({
+  ticket: tokenTicket.encode(t.ref),
+  symbol: t.symbol,
+  name: t.name,
+  logo: t.logo,
+  rank: t.price?.marketCapRank ?? t.marketCapRank,
+  price: t.price?.unitPrice,
+  change24h: t.price?.change24h,
+  asOf: t.price?.asOf,
+});
