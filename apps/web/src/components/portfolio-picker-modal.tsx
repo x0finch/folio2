@@ -24,7 +24,7 @@ import {
   moveAccountToPortfolio,
   renamePortfolio,
   setDefaultPortfolio,
-} from "../lib/server/portfolio";
+} from "../lib/server/portfolios";
 import { EditableName } from "./editable-name";
 import { Portal } from "./portal";
 

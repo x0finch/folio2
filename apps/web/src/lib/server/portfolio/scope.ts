@@ -9,7 +9,7 @@ import { buildOverview, type OverviewDeps } from "./overview-model";
 // 选中 Portfolio 入参(客户端选择器传的临时选中 id,可空 → 用默认)与其上叠的自定义 Tab pin
 // (ADR 0034,按 connector/tag/account 在选中 Portfolio 内再收窄)。zod 校验在 index 装配层,
 // 这里只收窄后的普通形状 —— handler 文件不依赖 zod。
-export interface TabPinScopeInput {
+interface TabPinScopeInput {
   kind: "connector" | "tag" | "account";
   connectorId?: string;
   tagId?: string;

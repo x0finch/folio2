@@ -4,13 +4,12 @@ import {
   getPortfolioGain24h,
   getPortfolioHistory,
   getPortfolioOverview,
-  listPortfolioMemberships,
-  listPortfolios,
 } from "../server/portfolio";
+import { listPortfolioMemberships, listPortfolios } from "../server/portfolios";
 import { STALE_TIME } from "./constants";
 import { type PinScopeKey, portfolioKeys } from "./keys";
 
-// 组合域的读取入口 —— 与 `lib/server/portfolio` 的读取型 server fn 对应。
+// 组合域的读取入口 —— 与 `lib/server/portfolio`(读模型)+ `lib/server/portfolios`(实体)的读取型 server fn 对应。
 //
 // **`staleTime` 在 #412 打开**:这个域的写路径已经全部改成定向刷新,开缓存不会让任何一条
 // 「改了东西画面要跟着动」的路径失灵。收益是页间来回切与 hover 预热不再重复打服务器 ——
