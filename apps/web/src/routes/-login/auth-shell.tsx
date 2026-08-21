@@ -1,6 +1,6 @@
 import { cn } from "@folio/ui";
 import type { ReactNode } from "react";
-import { Logo } from "../../components/logo";
+import { Logo } from "@/components/logo";
 import { LocaleSwitcher } from "./locale-switcher";
 import { ThemeToggle } from "./theme-toggle";
 

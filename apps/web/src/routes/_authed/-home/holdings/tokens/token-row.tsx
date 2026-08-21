@@ -1,8 +1,8 @@
 import { LogoAvatar } from "@folio/ui";
 import type { ReactNode } from "react";
-import { AvatarStack } from "../../../../../components/avatar-stack";
-import { formatNumber } from "../../../../../lib/core/format-number";
-import { ValueDelta } from "../value-delta";
+import { AvatarStack } from "@/components/avatar-stack";
+import { formatNumber } from "@/lib/core/format-number";
+import { ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 
 // 全站统一的「代币持仓行」内容(主页 Tokens 视图 + 账户详情抽屉现货区共用)。
 // 单个 flex 容器 —— SharedLayoutBg 会把子元素塞进非 flex 的 z-10 div,故 flex 放这层内层。

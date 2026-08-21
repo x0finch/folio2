@@ -1,11 +1,11 @@
 import { LogoAvatar, Separator, SharedLayoutBg } from "@folio/ui";
 import { useTranslations } from "use-intl";
-import { AccountName } from "../../../../../components/account-name";
-import type { PerpPositionView, PerpView } from "../../../../../lib/core/account-view";
-import { formatNumber, signedUsd } from "../../../../../lib/core/format-number";
-import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
-import { Stat } from "../../hero/stat";
-import { ValueDelta } from "../value-delta";
+import { AccountName } from "@/components/account-name";
+import type { PerpPositionView, PerpView } from "@/lib/core/account-view";
+import { formatNumber, signedUsd } from "@/lib/core/format-number";
+import { useDisplayValue } from "@/lib/hooks/use-display-value";
+import { Stat } from "@/routes/_authed/-home/hero/stat";
+import { ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 import { LiqRing } from "./liq-ring";
 import { liqRisk, pnlPct } from "./liq-risk";
 

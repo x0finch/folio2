@@ -1,6 +1,6 @@
 import type { Currency } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
-import { formatMoney, formatNumber } from "../src/lib/core/format-number";
+import { formatMoney, formatNumber } from "@/lib/core/format-number";
 
 // logo 与格式化无关,这里给空串占位(真实描述符的 logo 在 SUPPORTED_CURRENCIES 里)。
 const USD: Currency = { code: "USD", kind: "fiat", logo: "" };

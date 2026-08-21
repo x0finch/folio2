@@ -3,12 +3,12 @@ import { useNavigate } from "@tanstack/react-router";
 import { Fingerprint } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { authClient, signIn, signUp } from "../../lib/core/auth-client";
-import type { HistoryPoint } from "../../lib/core/history";
-import { useLockDevice } from "../../lib/hooks/use-lock-device";
-import type { HoldingLike } from "../_authed/-home/hero/hero-stats";
-import { PortfolioHero } from "../_authed/-home/hero/portfolio-hero";
-import { registerPasskey } from "../_authed/-settings/passkey/register-passkey";
+import { authClient, signIn, signUp } from "@/lib/core/auth-client";
+import type { HistoryPoint } from "@/lib/core/history";
+import { useLockDevice } from "@/lib/hooks/use-lock-device";
+import type { HoldingLike } from "@/routes/_authed/-home/hero/hero-stats";
+import { PortfolioHero } from "@/routes/_authed/-home/hero/portfolio-hero";
+import { registerPasskey } from "@/routes/_authed/-settings/passkey/register-passkey";
 import { AuthShell } from "./auth-shell";
 import { deriveDefaultName } from "./derive-default-name";
 import {

@@ -1,9 +1,9 @@
 import type { ConnectorId } from "@folio/connectors";
 import { TabPinStore } from "@folio/db";
 import { z } from "zod";
-import type { TabPinScope } from "../../core/accounts-in-view";
-import { runStore } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import type { TabPinScope } from "@/lib/core/accounts-in-view";
+import { runStore } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 
 // pin 目标形状家在 core/accounts-in-view 的 `TabPinScope`(每 user ≤3 的上限、tag 归属校验都在 db 层)。
 // schema 住这儿,update-target 跨借做 extend;与 TabPinScope 的一致性由 .handler() 处的赋值检查看着。

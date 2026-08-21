@@ -1,10 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  buildGainLines,
-  computeGain24h,
-  GAIN_WINDOW_MS,
-} from "../../src/lib/server/portfolio/gain-24h";
+import { buildGainLines, computeGain24h, GAIN_WINDOW_MS } from "@/lib/server/portfolio/gain-24h";
 import { dbFor } from "./db-effect";
 import { addManualActivities, loadManualGainHistory } from "./manual-fns";
 

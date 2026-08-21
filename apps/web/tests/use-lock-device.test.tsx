@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { useLockDevice } from "../src/lib/hooks/use-lock-device";
+import { useLockDevice } from "@/lib/hooks/use-lock-device";
 
 // 「这台设备上那条 passkey 的 id」(#353)。它是闲置锁的第二道门:没有它 → LockScreen 不挂锁。
 // 存 id 而不是布尔,是为了让设置页能标出「哪条是这台设备的」、并在删除时精确判断 —— 判据与理由见

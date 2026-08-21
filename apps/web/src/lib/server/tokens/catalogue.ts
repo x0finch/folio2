@@ -2,8 +2,8 @@ import { TokenService } from "@folio/oracle";
 import { DEFAULT_TOP_N } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { CATALOGUE_CACHE_TTL_S, edgeCached } from "./edge-cache";
 import { type TokenOption, toOption } from "./model";
 

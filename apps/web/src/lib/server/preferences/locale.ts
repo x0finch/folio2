@@ -1,7 +1,7 @@
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { z } from "zod";
-import { LOCALE_COOKIE, pickLocale, readLocaleCookie } from "../../i18n/detect";
-import type { Locale } from "../../i18n/messages";
+import { LOCALE_COOKIE, pickLocale, readLocaleCookie } from "@/lib/i18n/detect";
+import type { Locale } from "@/lib/i18n/messages";
 import { writePreferenceCookie } from "./cookie";
 
 // 服务端定 locale:读 folio_locale cookie + Accept-Language(纯逻辑在 detect.ts)。

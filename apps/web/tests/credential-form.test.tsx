@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { messages } from "../src/lib/i18n/messages";
-import type { InputSpec } from "../src/lib/server/creds";
+import { messages } from "@/lib/i18n/messages";
+import type { InputSpec } from "@/lib/server/creds";
 
 // 补录凭据表单(#428 片 1)。原先它自己存 `busy` + `error`,现在两者都由 mutation 持有。
 //
@@ -16,13 +16,13 @@ import type { InputSpec } from "../src/lib/server/creds";
 // (本仓没装 jest-dom,断言一律走原生 DOM —— `toBeDisabled` 之类在这里是 Invalid Chai property。)
 const { replaceAccountCredentials } = vi.hoisted(() => ({ replaceAccountCredentials: vi.fn() }));
 
-vi.mock("../src/lib/server/accounts", () => ({
+vi.mock("@/lib/server/accounts", () => ({
   replaceAccountCredentials,
   createAccount: vi.fn(),
 }));
-vi.mock("../src/lib/server/tokens", () => ({ getTokenPrice: vi.fn() }));
+vi.mock("@/lib/server/tokens", () => ({ getTokenPrice: vi.fn() }));
 
-const { CredentialForm } = await import("../src/components/credential-form");
+const { CredentialForm } = await import("@/components/credential-form");
 
 const SPECS: InputSpec[] = [
   { key: "apiKey", type: "semi", label: "API key" },

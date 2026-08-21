@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildTokenValueHistory,
-  type TokenHistRow,
-} from "../src/lib/server/holdings/token-history";
+import { buildTokenValueHistory, type TokenHistRow } from "@/lib/server/holdings/token-history";
 
 const USDC = "tok-usdc"; // 归并键**就是** token_id 本身(ADR 0021 / #201:三级键塌成一级)
 

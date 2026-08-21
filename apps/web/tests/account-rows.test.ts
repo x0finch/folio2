@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAccountRows } from "../src/routes/_authed/-accounts/list-rows";
+import { buildAccountRows } from "@/routes/_authed/-accounts/list-rows";
 
 // 账户页那一行是四个来源拼出来的,拼装规则从路由 loader 里搬到了纯模块(#413)。
 // 钉的是**拼装规则**,不是搬家这件事:哪些字段在某个来源缺席时该退成什么。

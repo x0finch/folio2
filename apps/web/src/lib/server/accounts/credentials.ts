@@ -1,9 +1,9 @@
 import { AccountStore } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { z } from "zod";
-import { validateAccountCreds } from "../connectors/registry";
-import { runStore } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { validateAccountCreds } from "@/lib/server/connectors/registry";
+import { runStore } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { raw2sealed } from "./create";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);只记 connectorId/accountId 等安全字段(红线:不打 creds)。

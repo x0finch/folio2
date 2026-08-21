@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../session/require-auth";
+import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListAccountHoldings } from "./account-holdings";
 import { handleGetAccountGain24h, handleGetPortfolioGain24h } from "./gain";
 import { handleGetPortfolioHistory } from "./get-history";

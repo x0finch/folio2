@@ -9,6 +9,9 @@ export default defineConfig(async () => {
   const migrationsDir = fileURLToPath(new URL("../../packages/db/drizzle", import.meta.url));
   const migrations = await readD1Migrations(migrationsDir);
   return {
+    // `@/*` → `src/*`(#497):workers pool 也要自己开,`cloudflareTest` 不带 tsconfig paths
+    // (探针实测:不写这行,workerd 里的 import 直接报 "Cannot find package '@/…'")。
+    resolve: { tsconfigPaths: true },
     plugins: [
       cloudflareTest({
         wrangler: { configPath: "./tests/server/wrangler.test.jsonc" }, // 仅 DB 绑定,不加载 app worker

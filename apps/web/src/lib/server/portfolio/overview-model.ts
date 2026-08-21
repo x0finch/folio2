@@ -8,10 +8,10 @@ import {
   type OverviewBalance,
   parseDefiMeta,
   toAccountSections,
-} from "../../core/account-view";
-import { isFungible, viewKind } from "../../core/balance-kind";
-import { platformLogoUrl, tokenLogoUrl } from "../../core/logo";
-import { defiTokenId, refreshableTokenIds } from "../tokens/model";
+} from "@/lib/core/account-view";
+import { isFungible, viewKind } from "@/lib/core/balance-kind";
+import { platformLogoUrl, tokenLogoUrl } from "@/lib/core/logo";
+import { defiTokenId, refreshableTokenIds } from "@/lib/server/tokens/model";
 import { type AggInput, buildCanonicalHoldings } from "./aggregate";
 import {
   buildGainLines,

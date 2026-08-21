@@ -1,13 +1,13 @@
 import { cn, LogoAvatar, Popover, PopoverContent, PopoverTrigger, SharedLayoutBg } from "@folio/ui";
 import { useEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
-import type { DefiGroup, DefiRow } from "../../../../../lib/core/account-view";
-import { defiMeaningfulLegs, groupLegsByRole } from "../../../../../lib/core/account-view";
-import { formatNumber } from "../../../../../lib/core/format-number";
-import { defiLogoUrl } from "../../../../../lib/core/logo";
-import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
-import { useHoverPopover } from "../../../../../lib/hooks/use-hover-popover";
-import { ValueDelta } from "../value-delta";
+import type { DefiGroup, DefiRow } from "@/lib/core/account-view";
+import { defiMeaningfulLegs, groupLegsByRole } from "@/lib/core/account-view";
+import { formatNumber } from "@/lib/core/format-number";
+import { defiLogoUrl } from "@/lib/core/logo";
+import { useDisplayValue } from "@/lib/hooks/use-display-value";
+import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
+import { ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 
 // DeFi 持仓明细 v2(H5 #120):总览「DeFi」tab 与账户详情抽屉共用。
 // 与代币行同语言 —— 行式(零表格/表头)、左「标识+标题」右 <ValueDelta>;

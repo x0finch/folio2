@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../session/require-auth";
+import { requireAuth } from "@/lib/server/session/require-auth";
 import { CreateAccountInput, handleCreateAccount } from "./create";
 import { handleReplaceAccountCredentials, ReplaceCredentialsInput } from "./credentials";
 import { AccountHistoryInput, handleGetAccountHistory } from "./history";

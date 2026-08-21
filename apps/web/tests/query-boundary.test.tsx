@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QueryBoundary } from "../src/components/query-boundary";
+import { QueryBoundary } from "@/components/query-boundary";
 
 // `QueryBoundary` 的钉子。它是首页自定义 Tab 那两格的兜底,而**兜底自己出问题是最难发现的一类**:
 // 画面上就是一句「拉取失败」,看不出到底是这次真的拉失败了,还是上一次失败之后再也没复位过。

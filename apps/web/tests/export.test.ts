@@ -7,7 +7,7 @@ import {
   ndjsonLine,
   snapshotRecord,
   tokenRecord,
-} from "../src/lib/server/io/export";
+} from "@/lib/server/io/export";
 
 // 注:脱敏(secret 剥 / semi 打码 / public 留)逻辑是 lib/creds.ts safeView(在 creds.test 覆盖);
 // 这里只测 v3 记录映射形状。route 把 safeView 的结果传给 accountRecord。

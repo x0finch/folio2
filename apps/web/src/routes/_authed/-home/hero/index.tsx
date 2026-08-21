@@ -1,12 +1,12 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
-import { useStalePriceRefresh } from "../../../../lib/hooks/use-stale-price-refresh";
+import { usePortfolio } from "@/lib/hooks/use-portfolio";
+import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
 import {
   portfolioGain24hQuery,
   portfolioHistoryQuery,
   portfolioOverviewQuery,
-} from "../../../../lib/queries/portfolio";
-import { attachHoldingGains } from "../holdings/attach-gains";
+} from "@/lib/queries/portfolio";
+import { attachHoldingGains } from "@/routes/_authed/-home/holdings/attach-gains";
 import { PortfolioHero } from "./portfolio-hero";
 
 export function HeroIsland() {

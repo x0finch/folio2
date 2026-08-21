@@ -4,8 +4,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { LogOut } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { signOut } from "../../../lib/core/auth-client";
-import { clearIdleLockState } from "../../../lib/hooks/use-idle-lock";
+import { signOut } from "@/lib/core/auth-client";
+import { clearIdleLockState } from "@/lib/hooks/use-idle-lock";
 
 export function UserCard({ user }: { user: { name?: string | null; email?: string | null } }) {
   const t = useTranslations("Settings");

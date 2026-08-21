@@ -6,9 +6,9 @@ import {
   TransferStore,
 } from "@folio/db";
 import { Effect, Option, Stream } from "effect";
-import { credentialSpecs } from "../connectors/registry";
-import { safeView } from "../creds";
-import type { DbStores } from "../oracle";
+import { credentialSpecs } from "@/lib/server/connectors/registry";
+import { safeView } from "@/lib/server/creds";
+import type { DbStores } from "@/lib/server/oracle";
 import {
   accountRecord,
   manualActivityRecord,

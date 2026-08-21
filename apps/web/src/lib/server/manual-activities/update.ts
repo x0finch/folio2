@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { editManualActivity } from "../manual/store";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { editManualActivity } from "@/lib/server/manual/store";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { ActivityKind } from "./create";
 
 export const UpdateActivityInput = z.object({

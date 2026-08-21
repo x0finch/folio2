@@ -5,24 +5,24 @@ import { getRouteApi } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
-import { AvatarStack } from "../../../components/avatar-stack";
-import { ConnectorBadge } from "../../../components/connector-badge";
-import { QueryBoundary } from "../../../components/query-boundary";
-import { TagBadges } from "../../../components/tag-badges";
-import { accountIdsInView } from "../../../lib/core/accounts-in-view";
-import { isManual } from "../../../lib/core/manual";
-import { usePortfolio } from "../../../lib/hooks/use-portfolio";
-import { useStalePriceRefresh } from "../../../lib/hooks/use-stale-price-refresh";
+import { AvatarStack } from "@/components/avatar-stack";
+import { ConnectorBadge } from "@/components/connector-badge";
+import { QueryBoundary } from "@/components/query-boundary";
+import { TagBadges } from "@/components/tag-badges";
+import { accountIdsInView } from "@/lib/core/accounts-in-view";
+import { isManual } from "@/lib/core/manual";
+import { usePortfolio } from "@/lib/hooks/use-portfolio";
+import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
 import {
   accountGain24hQuery,
   accountHoldingsQuery,
   accountListQuery,
-} from "../../../lib/queries/accounts";
-import { accountKeys, portfolioKeys } from "../../../lib/queries/keys";
-import { portfolioMembershipsQuery } from "../../../lib/queries/portfolio";
-import { accountTagLinksQuery, tagListQuery } from "../../../lib/queries/tags";
-import { HeaderSync } from "../-home/header-sync";
-import { GainSkeleton, ValueDelta } from "../-home/holdings/value-delta";
+} from "@/lib/queries/accounts";
+import { accountKeys, portfolioKeys } from "@/lib/queries/keys";
+import { portfolioMembershipsQuery } from "@/lib/queries/portfolio";
+import { accountTagLinksQuery, tagListQuery } from "@/lib/queries/tags";
+import { HeaderSync } from "@/routes/_authed/-home/header-sync";
+import { GainSkeleton, ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 import { AccountDetailSheet } from "./account-detail-sheet";
 import { AddAccountModal, type CompleteTarget } from "./add-account-modal";
 import { attachAccountGains } from "./list-attach-gains";

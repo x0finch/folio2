@@ -1,7 +1,7 @@
 import { PortfolioStore } from "@folio/db";
 import { z } from "zod";
-import { runStore } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { runStore } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 
 // 删除(默认不可删):成员退回默认后删该行。
 export const DeletePortfolioInput = z.object({ portfolioId: z.string().min(1) });

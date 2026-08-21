@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { listFiatOptions, listTokenCatalogue, listTokens } from "../server/tokens";
+import { listFiatOptions, listTokenCatalogue, listTokens } from "@/lib/server/tokens";
 import { STALE_TIME } from "./constants";
 import { tokenKeys } from "./keys";
 

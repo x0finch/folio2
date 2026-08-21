@@ -1,9 +1,9 @@
 import { AccountStore, SnapshotStore } from "@folio/db";
 import { Effect } from "effect";
-import { injectManualSnapshots, loadManualGainHistory } from "../manual/store";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
-import { enrichBalances } from "../tokens/enrich";
+import { injectManualSnapshots, loadManualGainHistory } from "@/lib/server/manual/store";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
+import { enrichBalances } from "@/lib/server/tokens/enrich";
 import {
   buildGainLines,
   computeGain24h,

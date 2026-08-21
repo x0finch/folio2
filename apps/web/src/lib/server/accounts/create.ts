@@ -5,12 +5,12 @@ import type { TokenService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
-import { isManual } from "../../core/manual";
-import { credentialSpecs, validateAccountCreds } from "../connectors/registry";
-import { sealCreds } from "../creds";
-import { createManualAccount } from "../manual/store";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { isManual } from "@/lib/core/manual";
+import { credentialSpecs, validateAccountCreds } from "@/lib/server/connectors/registry";
+import { sealCreds } from "@/lib/server/creds";
+import { createManualAccount } from "@/lib/server/manual/store";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 
 // 账户创建的分派逻辑(handler 之外的纯 Effect → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。
 // createAccount server fn(见 ./index)只做装配;auth 薄壳即 handleCreateAccount。SECRETS_KEY 只在此 app 层见,不进 connectors。

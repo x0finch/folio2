@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { SectionList } from "../src/routes/_authed/-home/holdings/section-list";
+import { SectionList } from "@/routes/_authed/-home/holdings/section-list";
 
 // SectionList(ADR 0034):按小计倒序渲染各段 content;空段剔除;全空 → 不渲染。
 // 首段(最大)省略 eyebrow 节头(UI 微调);后续段保留节头。

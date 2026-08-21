@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectorLabelFallback } from "../src/lib/core/logo";
+import { connectorLabelFallback } from "@/lib/core/logo";
 
 // 目录还没到位那一帧显什么(#467)。原来显的是裸 id —— `hyperliquid` / `okx` 印在界面上,
 // 十行一起闪一下,像数据坏了。

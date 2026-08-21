@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { listAccountTags, listTags } from "../server/tags";
+import { listAccountTags, listTags } from "@/lib/server/tags";
 import { STALE_TIME } from "./constants";
 import { tagKeys } from "./keys";
 

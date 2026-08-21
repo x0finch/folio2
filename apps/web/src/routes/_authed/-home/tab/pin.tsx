@@ -2,21 +2,21 @@ import { cn, Skeleton, TabsTrigger, toast } from "@folio/ui";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { QueryBoundary } from "../../../../components/query-boundary";
-import { accountsInView } from "../../../../lib/core/accounts-in-view";
-import { connectorLabelFallback } from "../../../../lib/core/logo";
-import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
-import { accountListQuery } from "../../../../lib/queries/accounts";
-import { connectorCatalogQuery } from "../../../../lib/queries/connectors";
+import { QueryBoundary } from "@/components/query-boundary";
+import { accountsInView } from "@/lib/core/accounts-in-view";
+import { connectorLabelFallback } from "@/lib/core/logo";
+import { usePortfolio } from "@/lib/hooks/use-portfolio";
+import { accountListQuery } from "@/lib/queries/accounts";
+import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import {
   type HomeTabStrip,
   homeTabStripQuery,
   portfolioMembershipsQuery,
-} from "../../../../lib/queries/portfolio";
-import { invalidateFor } from "../../../../lib/queries/refresh";
-import { tagListQuery } from "../../../../lib/queries/tags";
-import { createTabPin, deleteTabPin, updateTabPinTarget } from "../../../../lib/server/tab-pins";
-import { kindTabsOf, tabAfterUnpin } from "../home-tabs";
+} from "@/lib/queries/portfolio";
+import { invalidateFor } from "@/lib/queries/refresh";
+import { tagListQuery } from "@/lib/queries/tags";
+import { createTabPin, deleteTabPin, updateTabPinTarget } from "@/lib/server/tab-pins";
+import { kindTabsOf, tabAfterUnpin } from "@/routes/_authed/-home/home-tabs";
 import { type PinTargetChoice, TabPinPicker } from "./pin-picker";
 import { PinPanel } from "./pin-portal-popover";
 import { PinTargetMark } from "./pin-target-mark";

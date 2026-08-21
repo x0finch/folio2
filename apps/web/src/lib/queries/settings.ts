@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getDataStats, getProviderKeyStatus, getValuationSettings } from "../server/settings";
+import { getDataStats, getProviderKeyStatus, getValuationSettings } from "@/lib/server/settings";
 import { STALE_TIME } from "./constants";
 import { settingsKeys } from "./keys";
 

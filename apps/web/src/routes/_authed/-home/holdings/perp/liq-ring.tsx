@@ -1,8 +1,8 @@
 import { cn, Popover, PopoverContent, PopoverTrigger, Separator } from "@folio/ui";
 import { useTranslations } from "use-intl";
-import type { PerpPositionView } from "../../../../../lib/core/account-view";
-import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
-import { useHoverPopover } from "../../../../../lib/hooks/use-hover-popover";
+import type { PerpPositionView } from "@/lib/core/account-view";
+import { useDisplayValue } from "@/lib/hooks/use-display-value";
+import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
 import type { LiqRisk, LiqRiskState } from "./liq-risk";
 
 function DetailRow({

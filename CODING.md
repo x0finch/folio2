@@ -5,7 +5,8 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 
 ## General
 
-- **Relative imports, no extensions** — `import './foo'` (never `./foo.js` / `./foo.ts`). `moduleResolution: bundler`.
+- **恒无扩展名;`apps/web` 内跨树用 `@/`、同目录用 `./`** — 永不写 `./foo.js` / `./foo.ts`(`moduleResolution: bundler`)。`apps/web` 里凡是 `../` 起步的跨目录引用一律 `@/lib/core/…` / `@/components/…`(`@/*` → `apps/web/src/*`),同目录邻居保留 `./token-search` 那个「就在旁边」的信号(#497)。**只有这一个别名**(等价的 `#/*` 已删)。落在 `src/` 外的目标(如 `../public/sw.js`)别名表达不了 → 照旧相对。`packages/*` 没有别名,全相对。
+  - 别名要在**每一处解析器**各开一次:`vite.config.ts`、`vitest.config.ts` 的**每个 project**(顶层 `resolve` 不下传)、`vitest.workers.config.ts`,都写 `resolve: { tsconfigPaths: true }` —— 三条链互不继承,少一处的症状是 `Cannot find package '@/…'`(#497 探针实测)。
 - **kebab-case filenames** (`token-combobox.tsx`); exports keep their own case: components `PascalCase`, funcs/vars `camelCase`, types `PascalCase`, constants `UPPER_SNAKE`.
 - **No hardcoding** — chain IDs, API bases, timeouts, TTLs, limits → `constants.ts` or env. Name every magic number; volatile/env-specific → env, stable domain → `constants.ts`.
 - **Prefer mature, vetted libraries** over hand-rolling (signing, BIP32, crypto, dates, decimals). A new lib must pass 4 gates: ① runs on CF Workers, ② maintained/no severe CVEs, ③ complexity matches payoff, ④ no conflicting deps. Record the choice.

@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PickedToken } from "../src/components/manual-activity-modal";
-import { messages } from "../src/lib/i18n/messages";
+import type { PickedToken } from "@/components/manual-activity-modal";
+import { messages } from "@/lib/i18n/messages";
 
 // 手记活动弹窗的新接口(#428 片 3)。
 //
@@ -13,9 +13,9 @@ import { messages } from "../src/lib/i18n/messages";
 // **画面上什么都不说**。现在提交只是「发起」,在飞与结果都由父级的 mutation 经 props 回来。
 //
 // 这份测的就是新接口的三条:发起、在飞禁用、两种失败文案不同。
-vi.mock("../src/lib/server/tokens", () => ({ getTokenPrice: vi.fn() }));
+vi.mock("@/lib/server/tokens", () => ({ getTokenPrice: vi.fn() }));
 
-const { ManualActivityModal } = await import("../src/components/manual-activity-modal");
+const { ManualActivityModal } = await import("@/components/manual-activity-modal");
 
 const TOKEN: PickedToken = { symbol: "BTC", unitPrice: 65000, logo: undefined, ticket: undefined };
 

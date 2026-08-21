@@ -8,8 +8,8 @@ import {
   syncKeys,
   tagKeys,
   tokenKeys,
-} from "../src/lib/queries/keys";
-import { invalidateFor, REFRESH_MAP } from "../src/lib/queries/refresh";
+} from "@/lib/queries/keys";
+import { invalidateFor, REFRESH_MAP } from "@/lib/queries/refresh";
 
 // 刷新映射表的钉子。**这里钉的不是「表里写了什么」**(那是把代码抄一遍),而是
 // 「表里那条前缀,真的能匹配上各查询实际在用的 key 吗」—— 定向刷新唯一会静默失败的地方。

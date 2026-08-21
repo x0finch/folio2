@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { messages } from "../src/lib/i18n/messages";
-import { settingsKeys } from "../src/lib/queries/keys";
+import { messages } from "@/lib/i18n/messages";
+import { settingsKeys } from "@/lib/queries/keys";
 
 // 估值口径开关(#428 片 1)。这张卡以前自己存一份 `sourceFirst` + `busy`,失败时手动写回;
 // 现在显示值是从 mutation 推出来的:在飞时看这次点的 `variables`,落地后看服务端那份 `mode`。
@@ -18,25 +18,25 @@ const { updateValuationSettings, getValuationSettings } = vi.hoisted(() => ({
   getValuationSettings: vi.fn(),
 }));
 
-vi.mock("../src/lib/server/settings", () => ({
+vi.mock("@/lib/server/settings", () => ({
   getDataStats: vi.fn(),
   getProviderKeyStatus: vi.fn(),
   getValuationSettings,
   updateValuationSettings,
 }));
-vi.mock("../src/lib/server/preferences", () => ({
+vi.mock("@/lib/server/preferences", () => ({
   getCurrencyPreference: vi.fn(),
   getLocalePreference: vi.fn(),
   setCurrencyPreference: vi.fn(),
   setLocalePreference: vi.fn(),
 }));
-vi.mock("../src/lib/core/auth-client", () => ({
+vi.mock("@/lib/core/auth-client", () => ({
   authClient: { passkey: {} },
   signOut: vi.fn(),
   signIn: { passkey: vi.fn(), email: vi.fn() },
 }));
 
-const { ValuationCard } = await import("../src/routes/_authed/-settings/valuation-card");
+const { ValuationCard } = await import("@/routes/_authed/-settings/valuation-card");
 
 function mount(mode: "self-first" | "source-first") {
   getValuationSettings.mockResolvedValue({ valuationMode: mode });

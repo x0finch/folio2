@@ -3,8 +3,8 @@ import { Button } from "@folio/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { replaceAccountCredentials } from "../lib/server/accounts";
-import type { InputSpec } from "../lib/server/creds";
+import { replaceAccountCredentials } from "@/lib/server/accounts";
+import type { InputSpec } from "@/lib/server/creds";
 import { GenericFields } from "./account-fields";
 import { incompleteSpecs } from "./incomplete-specs";
 

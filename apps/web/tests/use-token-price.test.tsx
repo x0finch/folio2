@@ -8,9 +8,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // ② `cancel()` 之后,还在飞的那次回来同样不能填(转去手填 symbol / 清空选择走这条);
 // ③ `busy` 只由「最后一次」收尾 —— 被作废的那次收 busy 会把新一轮的转圈提前关掉。
 const { getTokenPrice } = vi.hoisted(() => ({ getTokenPrice: vi.fn() }));
-vi.mock("../src/lib/server/tokens", () => ({ getTokenPrice }));
+vi.mock("@/lib/server/tokens", () => ({ getTokenPrice }));
 
-const { useTokenPrice } = await import("../src/lib/hooks/use-token-price");
+const { useTokenPrice } = await import("@/lib/hooks/use-token-price");
 
 type Api = ReturnType<typeof useTokenPrice>;
 

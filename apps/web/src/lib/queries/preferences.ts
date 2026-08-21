@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getCurrencyPreference, getLocalePreference } from "../server/preferences";
+import { getCurrencyPreference, getLocalePreference } from "@/lib/server/preferences";
 import { STALE_TIME } from "./constants";
 import { preferenceKeys } from "./keys";
 

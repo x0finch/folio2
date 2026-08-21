@@ -1,7 +1,7 @@
 import { SnapshotStore } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Exit } from "effect";
-import { withRequest } from "../oracle";
+import { withRequest } from "@/lib/server/oracle";
 
 // 展示 note 的保留期(#456)。
 //

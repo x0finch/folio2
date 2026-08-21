@@ -1,9 +1,9 @@
 import { FxService } from "@folio/oracle";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { Clock, Effect, Option } from "effect";
-import { pickLocale, readLocaleCookie } from "../../i18n/detect";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { pickLocale, readLocaleCookie } from "@/lib/i18n/detect";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { buildFiatOptions } from "./fiat-options";
 import type { TokenOption } from "./model";
 

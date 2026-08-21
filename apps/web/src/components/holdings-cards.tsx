@@ -15,11 +15,11 @@ import {
   type OverviewBalance,
   type SpotRow,
   toAccountSections,
-} from "../lib/core/account-view";
-import { formatNumber } from "../lib/core/format-number";
-import { DefiPositions } from "../routes/_authed/-home/holdings/defi";
-import { PerpPositions } from "../routes/_authed/-home/holdings/perp";
-import { TokenRowContent } from "../routes/_authed/-home/holdings/tokens/token-row";
+} from "@/lib/core/account-view";
+import { formatNumber } from "@/lib/core/format-number";
+import { DefiPositions } from "@/routes/_authed/-home/holdings/defi";
+import { PerpPositions } from "@/routes/_authed/-home/holdings/perp";
+import { TokenRowContent } from "@/routes/_authed/-home/holdings/tokens/token-row";
 import { NoteIconGlyph, NoteIndicator, NoteView } from "./notes";
 
 // 账户详情侧栏专用的持仓「卡片列表」渲染(窄容器友好,取代表格)。总览页仍用 -home/holdings 那套。

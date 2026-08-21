@@ -1,4 +1,4 @@
-import type { PinScopeKey } from "../../../lib/queries/keys";
+import type { PinScopeKey } from "@/lib/queries/keys";
 
 // 首页主 tab 的合法值与回落规则(片5 / ADR 0043)。
 //

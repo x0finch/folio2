@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getConnectorCredentialSpecs, listConnectors } from "../server/connectors";
+import { getConnectorCredentialSpecs, listConnectors } from "@/lib/server/connectors";
 import { STALE_TIME } from "./constants";
 import { connectorKeys } from "./keys";
 

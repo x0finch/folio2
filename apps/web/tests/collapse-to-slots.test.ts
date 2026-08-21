@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collapseToSlots } from "../src/components/tag-badges";
+import { collapseToSlots } from "@/components/tag-badges";
 
 // 账户行的 tag(#a #b +2)与代币抽屉平台行的账户(@a @b +2)共用这一条规则(#351):
 // max = 最多占几格,**计数尾巴自己算一格**。边界(恰好 = max)最容易写错,重点锁它。

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { validateAccountCreds } from "../../src/lib/server/connectors/registry";
+import { validateAccountCreds } from "@/lib/server/connectors/registry";
 
 // 添加账户的探活。走 workers-pool 是因为 connector-registry 引 `cloudflare:workers` 的 env
 // (PC 注入要读它)。打桩打在**全局 fetch** 上,测的是真实那条路(表单 → validateAccountCreds

@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocale } from "use-intl";
-import type { Locale } from "../../lib/i18n/messages";
-import { invalidateFor } from "../../lib/queries/refresh";
-import { setLocalePreference } from "../../lib/server/preferences";
+import type { Locale } from "@/lib/i18n/messages";
+import { invalidateFor } from "@/lib/queries/refresh";
+import { setLocalePreference } from "@/lib/server/preferences";
 
 const OPTIONS: { value: Locale; label: string }[] = [
   { value: "en", label: "EN" },

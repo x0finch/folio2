@@ -30,8 +30,8 @@ vi.mock("use-intl", () => ({
     `${key}(${JSON.stringify(params ?? {})})`,
 }));
 
-const { useAccountSync } = await import("../src/lib/hooks/use-account-sync");
-const { syncKeys } = await import("../src/lib/queries/keys");
+const { useAccountSync } = await import("@/lib/hooks/use-account-sync");
+const { syncKeys } = await import("@/lib/queries/keys");
 
 // NDJSON 响应体:每个对象一行。分片位置故意不落在行边界上 —— 解析器该自己攒 buffer。
 function ndjsonResponse(lines: unknown[], { ok = true }: { ok?: boolean } = {}): Response {

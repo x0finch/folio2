@@ -11,10 +11,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
-import { type HistoryPoint, toDailySeries } from "../../../lib/core/history";
-import { usePortfolio } from "../../../lib/hooks/use-portfolio";
-import { portfolioHistoryQuery, portfolioOverviewQuery } from "../../../lib/queries/portfolio";
-import { HeaderSync } from "../-home/header-sync";
+import { type HistoryPoint, toDailySeries } from "@/lib/core/history";
+import { usePortfolio } from "@/lib/hooks/use-portfolio";
+import { portfolioHistoryQuery, portfolioOverviewQuery } from "@/lib/queries/portfolio";
+import { HeaderSync } from "@/routes/_authed/-home/header-sync";
 import { ALLOC_DIMENSIONS, type AllocDimension, buildAllocation } from "./allocation";
 import { AllocationPie } from "./allocation-pie";
 import { CHART_FRAME, PortfolioChart } from "./portfolio-chart";

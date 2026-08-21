@@ -3,7 +3,7 @@ import {
   dataStatsQuery,
   providerKeyStatusQuery,
   valuationSettingsQuery,
-} from "../../lib/queries/settings";
+} from "@/lib/queries/settings";
 import { Settings } from "./-settings";
 
 export const Route = createFileRoute("/_authed/settings")({

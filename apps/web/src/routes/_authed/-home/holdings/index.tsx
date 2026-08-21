@@ -1,18 +1,18 @@
 import { Skeleton } from "@folio/ui";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { QueryBoundary } from "../../../../components/query-boundary";
-import { mergeDefiGroups } from "../../../../lib/core/account-view";
-import { usePortfolio } from "../../../../lib/hooks/use-portfolio";
-import { type PinScopeKey, portfolioKeys } from "../../../../lib/queries/keys";
+import { QueryBoundary } from "@/components/query-boundary";
+import { mergeDefiGroups } from "@/lib/core/account-view";
+import { usePortfolio } from "@/lib/hooks/use-portfolio";
+import { type PinScopeKey, portfolioKeys } from "@/lib/queries/keys";
 import {
   homeTabStripQuery,
   type PortfolioOverview,
   portfolioGain24hQuery,
   portfolioOverviewQuery,
-} from "../../../../lib/queries/portfolio";
-import { type KindTab, kindTabsOf, pinScopeOf } from "../home-tabs";
-import { useHomeTabSelection } from "../tab/selection";
+} from "@/lib/queries/portfolio";
+import { type KindTab, kindTabsOf, pinScopeOf } from "@/routes/_authed/-home/home-tabs";
+import { useHomeTabSelection } from "@/routes/_authed/-home/tab/selection";
 import { attachDefiGains, attachHoldingGains } from "./attach-gains";
 import { DefiPositions } from "./defi";
 import { PerpPositionsList } from "./perp";

@@ -4,8 +4,8 @@ import {
   getPortfolioGain24h,
   getPortfolioHistory,
   getPortfolioOverview,
-} from "../server/portfolio";
-import { listPortfolioMemberships, listPortfolios } from "../server/portfolios";
+} from "@/lib/server/portfolio";
+import { listPortfolioMemberships, listPortfolios } from "@/lib/server/portfolios";
 import { STALE_TIME } from "./constants";
 import { type PinScopeKey, portfolioKeys } from "./keys";
 

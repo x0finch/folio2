@@ -2,7 +2,7 @@ import { toast } from "@folio/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { useTranslations } from "use-intl";
-import { invalidateFor } from "../queries/refresh";
+import { invalidateFor } from "@/lib/queries/refresh";
 
 // 「跑完一个账户就刷一次」的节流器。纯逻辑:不引 React、不引 server-only 模块,可直接单测。
 //

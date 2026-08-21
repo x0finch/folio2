@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { getTokenPrice } from "../server/tokens";
+import { getTokenPrice } from "@/lib/server/tokens";
 
 // 选币后自动取市价的共享行为(竞态守卫)。加账户表单与活动录入弹窗共用这一份。
 //

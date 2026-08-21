@@ -3,8 +3,8 @@ import { MorphingModal, toast, useMediaQuery } from "@folio/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
-import { invalidateFor } from "../lib/queries/refresh";
-import { attachTag, createTag, deleteTag, detachTag, renameTag } from "../lib/server/tags";
+import { invalidateFor } from "@/lib/queries/refresh";
+import { attachTag, createTag, deleteTag, detachTag, renameTag } from "@/lib/server/tags";
 import { Portal } from "./portal";
 import { TagInput } from "./tag-input";
 

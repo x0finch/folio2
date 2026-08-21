@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldPromptForPasskey } from "../src/routes/-login/passkey-prompt";
+import { shouldPromptForPasskey } from "@/routes/-login/passkey-prompt";
 
 // 登录后引导判定(ADR 0028 / #285):支持 + 未 dismiss + 无 passkey 三者齐才引导。
 // localStorage 读写是薄 IO wrapper,不单测(靠浏览器/真机);纯判定是核心测试缝。

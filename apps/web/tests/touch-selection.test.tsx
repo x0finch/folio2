@@ -1,10 +1,10 @@
 import { cleanup, render } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
-import { AccountName } from "../src/components/account-name";
-import { NoteView } from "../src/components/notes";
-import { PageHeader } from "../src/components/page-header";
-import { ValueDelta } from "../src/routes/_authed/-home/holdings/value-delta";
+import { AccountName } from "@/components/account-name";
+import { NoteView } from "@/components/notes";
+import { PageHeader } from "@/components/page-header";
+import { ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 
 afterEach(cleanup);
 

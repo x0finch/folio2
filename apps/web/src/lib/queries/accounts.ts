@@ -1,8 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getAccountHistory, listAccounts } from "../server/accounts";
-import { getHoldingHistory } from "../server/holdings";
-import { getManualAccount } from "../server/manual-tokens";
-import { getAccountGain24h, listAccountHoldings } from "../server/portfolio";
+import { getAccountHistory, listAccounts } from "@/lib/server/accounts";
+import { getHoldingHistory } from "@/lib/server/holdings";
+import { getManualAccount } from "@/lib/server/manual-tokens";
+import { getAccountGain24h, listAccountHoldings } from "@/lib/server/portfolio";
 import { STALE_TIME } from "./constants";
 import { accountKeys } from "./keys";
 
