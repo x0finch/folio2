@@ -1,5 +1,5 @@
-import { runAtEdge, withRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { runAtEdge, withRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { buildScopedOverview, type PortfolioScope } from "./scope";
 
 export function handleGetPortfolioOverview({

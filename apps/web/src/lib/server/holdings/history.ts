@@ -1,9 +1,9 @@
 import { SnapshotStore } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
-import { isFungible, viewKind } from "../../core/balance-kind";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { isFungible, viewKind } from "@/lib/core/balance-kind";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { buildTokenValueHistory, type TokenHistRow } from "./token-history";
 
 export const HoldingHistoryInput = z.object({

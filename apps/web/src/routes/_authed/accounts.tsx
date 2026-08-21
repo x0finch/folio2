@@ -4,10 +4,10 @@ import {
   accountGain24hQuery,
   accountHoldingsQuery,
   accountListQuery,
-} from "../../lib/queries/accounts";
-import { connectorCatalogQuery } from "../../lib/queries/connectors";
-import { portfolioMembershipsQuery } from "../../lib/queries/portfolio";
-import { accountTagLinksQuery, tagListQuery } from "../../lib/queries/tags";
+} from "@/lib/queries/accounts";
+import { connectorCatalogQuery } from "@/lib/queries/connectors";
+import { portfolioMembershipsQuery } from "@/lib/queries/portfolio";
+import { accountTagLinksQuery, tagListQuery } from "@/lib/queries/tags";
 import { Accounts } from "./-accounts";
 
 export const Route = createFileRoute("/_authed/accounts")({

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { HoldingSource } from "../src/lib/server/portfolio/aggregate";
+import type { HoldingSource } from "@/lib/server/portfolio/aggregate";
 import {
   groupByAccount,
   groupByPlatform,
-} from "../src/routes/_authed/-home/holdings/tokens/source-groups";
+} from "@/routes/_authed/-home/holdings/tokens/source-groups";
 
 const src = (p: {
   platformId: string;

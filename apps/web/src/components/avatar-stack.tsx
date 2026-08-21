@@ -1,5 +1,5 @@
 import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage, cn } from "@folio/ui";
-import { ZERO_DISPLAY_USD } from "../lib/core/account-view";
+import { ZERO_DISPLAY_USD } from "@/lib/core/account-view";
 
 // 叠放的平台/链 logo 小圆(beUI AvatarGroup):缺 logo 回退首字母、title 显名;超 max 以 +N 收尾。
 // AvatarImage 垫 bg-logo-bg 恒亮实底 —— 透明 logo 边角不漏 fallback 字母,且不随主题翻转。

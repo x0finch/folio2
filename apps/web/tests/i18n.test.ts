@@ -1,7 +1,7 @@
 import { createTranslator } from "use-intl/core";
 import { describe, expect, it } from "vitest";
-import { pickLocale, readLocaleCookie } from "../src/lib/i18n/detect";
-import { messages } from "../src/lib/i18n/messages";
+import { pickLocale, readLocaleCookie } from "@/lib/i18n/detect";
+import { messages } from "@/lib/i18n/messages";
 
 describe("readLocaleCookie", () => {
   it("extracts folio_locale from a Cookie header", () => {

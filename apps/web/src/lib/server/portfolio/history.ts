@@ -1,4 +1,4 @@
-import { downsampleSeries, type HistoryPoint, type SnapshotTotalRow } from "../../core/history";
+import { downsampleSeries, type HistoryPoint, type SnapshotTotalRow } from "@/lib/core/history";
 
 // 把「每账户、各自时刻」的快照总额拼成【组合净值随时间】的序列 —— 只有服务端做这件事。
 //

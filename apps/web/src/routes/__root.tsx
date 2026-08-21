@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext } from "@tanstack/react-router";
-import { localePreferenceQuery } from "../lib/queries/preferences";
-import appCss from "../styles.css?url";
+import { localePreferenceQuery } from "@/lib/queries/preferences";
+import appCss from "@/styles.css?url";
 import { PWA_LINKS, PWA_META, VIEWPORT } from "./-root/pwa-head";
 import { RootDocument } from "./-root/root-document";
 

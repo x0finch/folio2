@@ -2,9 +2,9 @@ import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { LogoAvatar, Select, SelectContent, SelectItem, SelectTrigger } from "@folio/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { usePreferCurrency } from "../lib/hooks/use-prefer-currency";
-import { invalidateFor } from "../lib/queries/refresh";
-import { setCurrencyPreference } from "../lib/server/preferences";
+import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
+import { invalidateFor } from "@/lib/queries/refresh";
+import { setCurrencyPreference } from "@/lib/server/preferences";
 
 // 一项/触发器共用的行内容:logo + 本地化标签(如 "USD 美元" / "USD Dollar",crypto 附符号)。
 // logo 是 base64 data URI,内嵌在 SUPPORTED_CURRENCIES(法币 CMC / crypto CoinGecko)。

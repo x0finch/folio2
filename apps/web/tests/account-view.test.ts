@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type OverviewBalance, toAccountSections } from "../src/lib/core/account-view";
+import { type OverviewBalance, toAccountSections } from "@/lib/core/account-view";
 
 const b = (over: Partial<OverviewBalance>): OverviewBalance => ({
   id: "x",
@@ -188,7 +188,7 @@ describe("toAccountSections", () => {
 
 // —— H5 #120:DeFi 行 change24h 透传 + 跨账户协议合并 + 协议级 24h 聚合 ——
 
-import { type DefiRow, defiMeaningfulLegs, mergeDefiGroups } from "../src/lib/core/account-view";
+import { type DefiRow, defiMeaningfulLegs, mergeDefiGroups } from "@/lib/core/account-view";
 
 describe("DefiRow change24h 透传(富化字段,缺则 undefined)", () => {
   it("带 change24h 的 defi 行透传到 DefiRow", () => {
@@ -252,7 +252,7 @@ describe("defiMeaningfulLegs", () => {
 
 // —— H5 评审:摘要腿按角色分组(每条腿对应哪个角色) ——
 
-import { groupLegsByRole } from "../src/lib/core/account-view";
+import { groupLegsByRole } from "@/lib/core/account-view";
 
 describe("groupLegsByRole", () => {
   const r = (id: string, positionType?: string): DefiRow => ({
@@ -276,7 +276,7 @@ describe("groupLegsByRole", () => {
 
 // —— 空仓协议丢弃(整组毛敞口 < 半分钱 → 不展示,避免「协议 $0.00」噪音行) ——
 
-import { dropEmptyDefiGroups } from "../src/lib/core/account-view";
+import { dropEmptyDefiGroups } from "@/lib/core/account-view";
 
 describe("dropEmptyDefiGroups", () => {
   const leg = (usdValue: number): DefiRow => ({ id: "x", symbol: "X", amount: usdValue, usdValue });

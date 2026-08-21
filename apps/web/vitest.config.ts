@@ -24,6 +24,11 @@ const shared = {
   exclude: [...configDefaults.exclude, "tests/server/**"],
 };
 
+// `@/*` → `src/*`(#497)。**必须逐 project 写,写在顶层不生效** —— 每个 project 是一份独立的
+// vite 配置,顶层的 `resolve` 不下传(探针实测:顶层版本仍报 "Cannot find package '@/…'")。
+// 这份配置也不加载 `vite.config.ts`(那条链是给构建产物的),所以那边的同名设置在这里不算数。
+const resolve = { tsconfigPaths: true };
+
 export default defineConfig({
   test: {
     passWithNoTests: true,
@@ -31,11 +36,13 @@ export default defineConfig({
       {
         // Pure logic: formatting, aggregation, snapshot shaping. No DOM, no cost.
         plugins: [viteReact()],
+        resolve,
         test: { ...shared, name: "logic", environment: "node", include: ["tests/**/*.test.ts"] },
       },
       {
         // Component tests — these actually render, so they get the fake browser.
         plugins: [viteReact()],
+        resolve,
         test: { ...shared, name: "dom", environment: "jsdom", include: ["tests/**/*.test.tsx"] },
       },
     ],

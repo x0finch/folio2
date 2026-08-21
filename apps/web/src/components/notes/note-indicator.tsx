@@ -2,7 +2,7 @@
 
 import type { Note } from "@folio/connectors-basic";
 import { cn, Popover, PopoverContent, PopoverTrigger } from "@folio/ui";
-import { useHoverPopover } from "../../lib/hooks/use-hover-popover";
+import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
 import { NoteIconGlyph, NoteView } from "./note-view";
 
 export interface NoteIndicatorProps {

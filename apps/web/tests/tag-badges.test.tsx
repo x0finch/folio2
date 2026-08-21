@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { TagBadges } from "../src/components/tag-badges";
+import { TagBadges } from "@/components/tag-badges";
 
 // TagBadges 折叠规则(#351):max = 这一行最多占几格,**计数尾巴自己算一格** ——
 // 装得下就全平铺,装不下才 `#a #b +3`。边界(恰好 = max)最容易写错,重点锁它。

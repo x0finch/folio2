@@ -1,7 +1,7 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import { createAccountFor as createAccountForE } from "../../src/lib/server/accounts/create";
-import * as M from "../../src/lib/server/manual/store";
-import { runRequest } from "../../src/lib/server/oracle";
+import { createAccountFor as createAccountForE } from "@/lib/server/accounts/create";
+import * as M from "@/lib/server/manual/store";
+import { runRequest } from "@/lib/server/oracle";
 
 // **手记那一摞函数的 Promise 把手**(#394 T6)。它们本体现在都是 Effect(userId 由装配层吃掉,
 // ADR 0037),而这些用例测的是**数据落库对不对** —— 真 D1、活动折叠、超支拒收、跨账户隔离,

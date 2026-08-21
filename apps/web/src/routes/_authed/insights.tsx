@@ -4,7 +4,7 @@ import {
   portfolioHistoryQuery,
   portfolioListQuery,
   portfolioOverviewQuery,
-} from "../../lib/queries/portfolio";
+} from "@/lib/queries/portfolio";
 import { Insights } from "./-insights";
 import { ALLOC_DIMENSION, DEFAULT_DIM } from "./-insights/allocation";
 

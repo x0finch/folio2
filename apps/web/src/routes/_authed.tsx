@@ -1,14 +1,14 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { AppShell } from "../components/app-shell";
-import { LockScreen } from "../components/lock-screen";
-import { PortfolioSelector } from "../components/portfolio-selector";
-import { PortfolioProvider } from "../lib/hooks/use-portfolio";
-import { CurrencyProvider } from "../lib/hooks/use-prefer-currency";
-import { portfolioListQuery } from "../lib/queries/portfolio";
-import { currencyPreferenceQuery } from "../lib/queries/preferences";
-import { syncStatusQuery } from "../lib/queries/sync";
-import { getSession } from "../lib/server/session";
+import { AppShell } from "@/components/app-shell";
+import { LockScreen } from "@/components/lock-screen";
+import { PortfolioSelector } from "@/components/portfolio-selector";
+import { PortfolioProvider } from "@/lib/hooks/use-portfolio";
+import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
+import { portfolioListQuery } from "@/lib/queries/portfolio";
+import { currencyPreferenceQuery } from "@/lib/queries/preferences";
+import { syncStatusQuery } from "@/lib/queries/sync";
+import { getSession } from "@/lib/server/session";
 
 // 受保护布局:无 session 则重定向到 /login(仅 UX;数据安全靠各 authedServerFn)。
 // loader 定展示币种 + 汇率(cookie + FX cache-only),并**预取**全局同步状态

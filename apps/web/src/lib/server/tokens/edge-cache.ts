@@ -1,6 +1,6 @@
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
-import { NAMER } from "../oracle";
+import { NAMER } from "@/lib/server/oracle";
 import type { TokenOption } from "./model";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { userIdentity } from "../src/routes/_authed/-settings/user-card";
+import { userIdentity } from "@/routes/_authed/-settings/user-card";
 
 // 登录用户身份派生(grill Q4):有 name → 主行 name、副行 email;无 name → 主行 email、
 // 副行「自托管」标记;皆缺 → 兜底占位。secondary 用 kind 判别,「自托管」文案留给 UI 本地化。

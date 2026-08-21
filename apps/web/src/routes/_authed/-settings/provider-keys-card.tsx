@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle, Skeleton } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { providerKeyStatusQuery } from "../../../lib/queries/settings";
+import { providerKeyStatusQuery } from "@/lib/queries/settings";
 
 const PROVIDER_KEYS = [
   { env: "ZERION_API_KEY", label: "Zerion (EVM 备源,可不配)" },

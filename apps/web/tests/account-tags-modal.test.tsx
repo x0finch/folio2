@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { messages } from "../src/lib/i18n/messages";
+import { messages } from "@/lib/i18n/messages";
 
 // 打标签弹窗的乐观层(#428 片 4)。四条写从 `.then().catch()` 换成了 mutation,而这套
 // 「点即生效不闪」的 overlay 是 #415 里逐帧调出来的 —— 换发起方式时最容易被悄悄改坏的就是它。
@@ -23,7 +23,7 @@ const { attachTag, detachTag, createTag, renameTag, deleteTag, toastError } = vi
   toastError: vi.fn(),
 }));
 
-vi.mock("../src/lib/server/tags", () => ({
+vi.mock("@/lib/server/tags", () => ({
   attachTag,
   detachTag,
   createTag,
@@ -35,7 +35,7 @@ vi.mock("@folio/ui", async (orig) => ({
   toast: { error: toastError, success: vi.fn() },
 }));
 
-const { AccountTagsModal } = await import("../src/components/account-tags-modal");
+const { AccountTagsModal } = await import("@/components/account-tags-modal");
 
 const tag = (id: string, name: string): Tag =>
   ({ id, name, portfolioId: "p1", createdAt: 0 }) as unknown as Tag;

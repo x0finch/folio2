@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../session/require-auth";
+import { requireAuth } from "@/lib/server/session/require-auth";
 import { connectorCatalog, credentialSpecs } from "./registry";
 
 // connector 资源面。两个 handler 都是零逻辑转发(不收 data/context、不做任何绑定),按

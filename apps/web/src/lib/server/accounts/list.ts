@@ -1,9 +1,9 @@
 import { AccountStore } from "@folio/db";
 import { Effect } from "effect";
-import { credentialSpecs } from "../connectors/registry";
-import { isComplete, safeView } from "../creds";
-import { runStore } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { credentialSpecs } from "@/lib/server/connectors/registry";
+import { isComplete, safeView } from "@/lib/server/creds";
+import { runStore } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 
 // 富化:把每账户的 raw creds 投影成 needsCredentials + credsSafe(public 原样、semi 打码、secret 丢弃);
 // raw creds(含 secret 密文)绝不出网,只出投影。

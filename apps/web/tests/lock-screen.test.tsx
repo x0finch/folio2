@@ -3,8 +3,8 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { IntlProvider } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LockScreen } from "../src/components/lock-screen";
-import { messages } from "../src/lib/i18n/messages";
+import { LockScreen } from "@/components/lock-screen";
+import { messages } from "@/lib/i18n/messages";
 
 // 登出路径要断言「调了 signOut」「跳了 /login」,两者都不该真发生 → mock 掉。
 // router 只替换 useNavigate,其余保留原样(AuthShell 里的 LocaleSwitcher 等仍可能用到)。
@@ -12,13 +12,13 @@ const { signOutSpy, navigateSpy } = vi.hoisted(() => ({
   signOutSpy: vi.fn(),
   navigateSpy: vi.fn(),
 }));
-vi.mock("../src/lib/server/preferences", () => ({
+vi.mock("@/lib/server/preferences", () => ({
   getCurrencyPreference: vi.fn(),
   getLocalePreference: vi.fn(),
   setCurrencyPreference: vi.fn(),
   setLocalePreference: vi.fn(),
 }));
-vi.mock("../src/lib/core/auth-client", () => ({
+vi.mock("@/lib/core/auth-client", () => ({
   signIn: { passkey: vi.fn(), email: vi.fn() },
   signOut: signOutSpy,
 }));

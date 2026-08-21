@@ -1,8 +1,8 @@
 import { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { z } from "zod";
-import type { PreferCurrency } from "../../hooks/use-prefer-currency";
-import type { AuthContext } from "../session/auth-session";
+import type { PreferCurrency } from "@/lib/hooks/use-prefer-currency";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { writePreferenceCookie } from "./cookie";
 import { displayRate } from "./fx";
 

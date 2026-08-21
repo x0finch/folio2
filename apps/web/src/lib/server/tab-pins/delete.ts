@@ -1,7 +1,7 @@
 import { TabPinStore } from "@folio/db";
 import { z } from "zod";
-import { runStore } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { runStore } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 
 export const DeleteTabPinInput = z.object({ pinId: z.string().min(1) });
 

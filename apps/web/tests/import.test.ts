@@ -1,12 +1,12 @@
 import { Cause, Effect, Exit } from "effect";
 import { describe, expect, it } from "vitest";
-import { EXPORT_VERSION } from "../src/lib/server/io/export";
+import { EXPORT_VERSION } from "@/lib/server/io/export";
 import {
   createImporter,
   type ImportDeps,
   ImportError,
   parseImportLine,
-} from "../src/lib/server/io/import";
+} from "@/lib/server/io/import";
 
 // `apply` 现在是 Effect(#394 T7:整条导入一个 effect)。用例测的是**单遍重映射的逻辑** ——
 // 哪些记录建了什么、id 怎么对上、版本闸拦不拦 —— 跟时序无关,所以照 CODING.md 那条判据保持

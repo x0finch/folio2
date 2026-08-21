@@ -2,8 +2,8 @@ import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { TokenRecord } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import type { OverviewBalance } from "../src/lib/core/account-view";
-import { deriveLiveAccountTotals, liveValue } from "../src/lib/server/portfolio/live-value";
+import type { OverviewBalance } from "@/lib/core/account-view";
+import { deriveLiveAccountTotals, liveValue } from "@/lib/server/portfolio/live-value";
 import { runWithOracle } from "./oracle-stub";
 
 const bal = (over: Partial<OverviewBalance>): OverviewBalance => {

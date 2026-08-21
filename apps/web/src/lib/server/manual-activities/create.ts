@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { addManualActivities } from "../manual/store";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { addManualActivities } from "@/lib/server/manual/store";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 
 export const ActivityKind = z.enum(["add", "reduce", "set"]);
 

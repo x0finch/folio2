@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getSyncStatus } from "../server/sync";
+import { getSyncStatus } from "@/lib/server/sync";
 import { STALE_TIME } from "./constants";
 import { syncKeys } from "./keys";
 

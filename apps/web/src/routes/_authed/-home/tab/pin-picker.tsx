@@ -2,8 +2,8 @@ import { cn, SharedLayoutBg } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { connectorLabelFallback } from "../../../../lib/core/logo";
-import { connectorCatalogQuery } from "../../../../lib/queries/connectors";
+import { connectorLabelFallback } from "@/lib/core/logo";
+import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import { PinTargetMark } from "./pin-target-mark";
 
 // 自定义 Tab 的添加/改指向选择器(ADR 0034):**裸内容**,面板 chrome 由承载它的 beUI hover Popover 提供

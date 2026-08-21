@@ -15,16 +15,16 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
-import { AccountName } from "../../../../../components/account-name";
-import { AvatarStack } from "../../../../../components/avatar-stack";
-import { type Range, RangeTabs, rangeSince } from "../../../../../components/range-tabs";
-import { collapseToSlots } from "../../../../../components/tag-badges";
-import { formatNumber, signedUsd } from "../../../../../lib/core/format-number";
-import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
-import { holdingHistoryQuery } from "../../../../../lib/queries/accounts";
-import type { Holding } from "../../../../../lib/server/portfolio/aggregate";
-import { TrendPanel } from "../../hero/trend-panel";
-import { deltaTone, NO_VALUE } from "../value-delta";
+import { AccountName } from "@/components/account-name";
+import { AvatarStack } from "@/components/avatar-stack";
+import { type Range, RangeTabs, rangeSince } from "@/components/range-tabs";
+import { collapseToSlots } from "@/components/tag-badges";
+import { formatNumber, signedUsd } from "@/lib/core/format-number";
+import { useDisplayValue } from "@/lib/hooks/use-display-value";
+import { holdingHistoryQuery } from "@/lib/queries/accounts";
+import type { Holding } from "@/lib/server/portfolio/aggregate";
+import { TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
+import { deltaTone, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
 import { ACCOUNT_SLOTS, groupByAccount, groupByPlatform, type SourceGroup } from "./source-groups";
 
 // 代币 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。

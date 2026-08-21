@@ -2,9 +2,9 @@ import { AccountStore } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
-import { sealManualAccount } from "../manual/store";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { sealManualAccount } from "@/lib/server/manual/store";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 
 const log = getLogger(["folio", "web", "accounts"]);
 

@@ -3,7 +3,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { messages } from "../src/lib/i18n/messages";
+import { messages } from "@/lib/i18n/messages";
 
 // 闲置锁与 passkey 的联动(#353)。这里覆盖**不需要真 WebAuthn** 的那一半:调用参数对不对、
 // 成功/失败各写了什么、删对了才关锁。真 ceremony 能不能过、userVerification: "required" 是否
@@ -21,19 +21,19 @@ const { addPasskey, deletePasskey, listUserPasskeys, updatePasskey, signInPasske
     toastError: vi.fn(),
   }));
 
-vi.mock("../src/lib/server/settings", () => ({
+vi.mock("@/lib/server/settings", () => ({
   getDataStats: vi.fn(),
   getProviderKeyStatus: vi.fn(),
   getValuationSettings: vi.fn(),
   updateValuationSettings: vi.fn(),
 }));
-vi.mock("../src/lib/server/preferences", () => ({
+vi.mock("@/lib/server/preferences", () => ({
   getCurrencyPreference: vi.fn(),
   getLocalePreference: vi.fn(),
   setCurrencyPreference: vi.fn(),
   setLocalePreference: vi.fn(),
 }));
-vi.mock("../src/lib/core/auth-client", () => ({
+vi.mock("@/lib/core/auth-client", () => ({
   authClient: { passkey: { addPasskey, deletePasskey, listUserPasskeys, updatePasskey } },
   signOut: vi.fn(),
   signIn: { passkey: signInPasskey, email: vi.fn() },
@@ -44,8 +44,8 @@ vi.mock("@folio/ui", async (orig) => ({
   toast: { error: toastError, success: vi.fn() },
 }));
 
-const { AutoLockCard } = await import("../src/routes/_authed/-settings/passkey/auto-lock-card");
-const { PasskeysCard } = await import("../src/routes/_authed/-settings/passkey");
+const { AutoLockCard } = await import("@/routes/_authed/-settings/passkey/auto-lock-card");
+const { PasskeysCard } = await import("@/routes/_authed/-settings/passkey");
 
 const DEVICE_KEY = "folio_lock_device_passkey";
 const TIMEOUT_KEY = "folio_lock_timeout";

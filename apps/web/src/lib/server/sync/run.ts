@@ -3,10 +3,10 @@ import { Account as SyncKernel } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
-import { isManual } from "../../core/manual";
-import { logCategory } from "../effect-log";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { isManual } from "@/lib/core/manual";
+import { logCategory } from "@/lib/server/effect-log";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { syncServicesLayer, warmTokens } from "./deps";
 
 const syncLog = getLogger(["folio", "web", "sync"]);

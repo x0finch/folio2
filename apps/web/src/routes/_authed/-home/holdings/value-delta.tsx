@@ -1,6 +1,6 @@
 import { cn, Skeleton } from "@folio/ui";
-import { signedUsd } from "../../../../lib/core/format-number";
-import { useDisplayValue } from "../../../../lib/hooks/use-display-value";
+import { signedUsd } from "@/lib/core/format-number";
+import { useDisplayValue } from "@/lib/hooks/use-display-value";
 
 // 「没有这个数」的占位。em dash 而不是空白 —— 空白会被读成「还没加载出来」,而这里是
 // 「问过了,答不上来」。与 hero 各个 Stat 格子的空态同形。

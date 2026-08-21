@@ -1,8 +1,8 @@
 import { fireEvent, render } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { describe, expect, it, vi } from "vitest";
-import { TagInput } from "../src/components/tag-input";
-import { messages } from "../src/lib/i18n/messages";
+import { TagInput } from "@/components/tag-input";
+import { messages } from "@/lib/i18n/messages";
 
 // TagInput(#351):`#` 是**纯展示前缀,永不入库** —— 界面到处显 `#name`,用户顺手多敲的 `#` 在
 // commit / rename 时被吞掉,回调拿到的始终是纯名字。这层约定是这组测试要锁住的东西。

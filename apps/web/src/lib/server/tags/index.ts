@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../session/require-auth";
+import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListAccountTags } from "./account-tags";
 import { AccountTagInput, handleAttachTag } from "./attach";
 import { CreateTagInput, handleCreateTag } from "./create";

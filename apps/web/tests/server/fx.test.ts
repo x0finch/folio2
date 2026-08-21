@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { displayRate } from "../../src/lib/server/preferences/fx";
+import { displayRate } from "@/lib/server/preferences/fx";
 
 // 展示币种汇率的应用层接线(#202b)。走**真 D1**(Miniflare)—— 这一段的风险全在
 // 「per-user 缓存真的写进去了、下次真的读得到」上,内存假实现测不到这个。

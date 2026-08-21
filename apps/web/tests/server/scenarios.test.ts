@@ -5,9 +5,9 @@ import { TokenService } from "@folio/oracle";
 import { CacheStore, GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { connectorPlatformMeta } from "../../src/lib/server/connectors/platform";
-import { NAMER, runRequest } from "../../src/lib/server/oracle";
-import { buildOverview } from "../../src/lib/server/portfolio/overview-model";
+import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
+import { NAMER, runRequest } from "@/lib/server/oracle";
+import { buildOverview } from "@/lib/server/portfolio/overview-model";
 import { dbFor, withStore } from "./db-effect";
 import {
   addManualActivities,

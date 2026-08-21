@@ -1,9 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle, Checkbox, Label, Skeleton } from "@folio/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { invalidateFor } from "../../../lib/queries/refresh";
-import { valuationSettingsQuery } from "../../../lib/queries/settings";
-import { updateValuationSettings } from "../../../lib/server/settings";
+import { invalidateFor } from "@/lib/queries/refresh";
+import { valuationSettingsQuery } from "@/lib/queries/settings";
+import { updateValuationSettings } from "@/lib/server/settings";
 
 const KEEP_TRYING = { retry: true as const };
 

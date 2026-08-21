@@ -2,8 +2,8 @@ import { cn, MorphingModal, Popover, PopoverContent, PopoverTrigger } from "@fol
 import { RefreshCw } from "lucide-react";
 import { forwardRef, type ReactNode, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
-import { useAccountSync } from "../lib/hooks/use-account-sync";
-import type { SyncStatusSummary } from "../lib/server/sync/status";
+import { useAccountSync } from "@/lib/hooks/use-account-sync";
+import type { SyncStatusSummary } from "@/lib/server/sync/status";
 import { IconButton } from "./icon-button";
 
 // 共享同步状态入口(PageHeader actions):桌面 hover Popover、移动 tap MorphingModal,

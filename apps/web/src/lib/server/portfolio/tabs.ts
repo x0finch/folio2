@@ -1,11 +1,11 @@
 import { AccountStore, PortfolioStore, SnapshotStore, TabPinStore, TagStore } from "@folio/db";
 import { Effect } from "effect";
-import { toAccountSections } from "../../core/account-view";
-import { accountsInView } from "../../core/accounts-in-view";
-import { connectorLabelFallback, platformLogoUrl } from "../../core/logo";
-import { connectorPlatformMeta } from "../connectors/platform";
-import { runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { toAccountSections } from "@/lib/core/account-view";
+import { accountsInView } from "@/lib/core/accounts-in-view";
+import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
+import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
+import { runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { resolveScope } from "./scope";
 import { kindPresence, resolvePinLabel } from "./tab-strip";
 

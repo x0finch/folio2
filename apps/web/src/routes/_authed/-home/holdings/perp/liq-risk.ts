@@ -1,4 +1,4 @@
-import type { PerpPositionView } from "../../../../../lib/core/account-view";
+import type { PerpPositionView } from "@/lib/core/account-view";
 
 // 永续仓位的风险/盈亏推导 —— 只有本页在用(仓位列表 + LiqRing),故与它们同目录。
 

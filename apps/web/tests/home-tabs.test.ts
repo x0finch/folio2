@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { kindPresence, resolvePinLabel } from "../src/lib/server/portfolio/tab-strip";
-import { kindTabsOf, pickShownTab, tabAfterUnpin } from "../src/routes/_authed/-home/home-tabs";
+import { kindPresence, resolvePinLabel } from "@/lib/server/portfolio/tab-strip";
+import { kindTabsOf, pickShownTab, tabAfterUnpin } from "@/routes/_authed/-home/home-tabs";
 
 // 页内 tab 进 URL(片5 / ADR 0043)。URL 是外面来的,所以「认不出的值怎么办」是这一片的正经逻辑,
 // 不是边角情况:pin 被删之后旧链接就指向一个不存在的 tab。

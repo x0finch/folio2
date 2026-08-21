@@ -1,8 +1,8 @@
 import type { Note } from "@folio/connectors-basic";
 import type { AccountTagLink, PortfolioMembership } from "@folio/db";
-import type { OverviewBalance } from "../../../lib/core/account-view";
-import type { AccountHoldings, AccountListItem } from "../../../lib/queries/accounts";
-import type { Gain } from "../../../lib/server/portfolio/gain-24h";
+import type { OverviewBalance } from "@/lib/core/account-view";
+import type { AccountHoldings, AccountListItem } from "@/lib/queries/accounts";
+import type { Gain } from "@/lib/server/portfolio/gain-24h";
 
 interface AccountTagView {
   id: string;

@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { type SyncAction, SyncStatus } from "../../../components/sync-status";
-import { syncStatusQuery } from "../../../lib/queries/sync";
+import { type SyncAction, SyncStatus } from "@/components/sync-status";
+import { syncStatusQuery } from "@/lib/queries/sync";
 
 // 页头右上角同步入口:绝对定位落到 PageHeader actions 原位(<main> 是定位上下文,top/right 对齐其内距)。
 // 同步摘要读自 react-query 缓存(_authed loader 已预取,不额外请求)。需要它的页面自行渲染 <HeaderSync/>

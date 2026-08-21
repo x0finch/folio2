@@ -1,7 +1,7 @@
 import { PortfolioStore } from "@folio/db";
 import { z } from "zod";
-import { runStore } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { runStore } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 
 // 改名(含默认)。
 export const RenamePortfolioInput = z.object({

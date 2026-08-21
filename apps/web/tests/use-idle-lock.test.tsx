@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useIdleLock } from "../src/lib/hooks/use-idle-lock";
-import { useIdleTimeout } from "../src/lib/hooks/use-idle-timeout";
+import { useIdleLock } from "@/lib/hooks/use-idle-lock";
+import { useIdleTimeout } from "@/lib/hooks/use-idle-timeout";
 
 // useIdleLock 的主动定时器随超时改档重置(ADR 0029 / #291,回归)。纯判定在 idle-lock.test.ts,
 // 这里盯的是 hook 的定时器壳 —— 手测漏过的那条:选「永不」却仍在旧档到点被锁。

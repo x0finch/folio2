@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../session/require-auth";
+import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleRefreshStalePrices } from "./refresh-stale";
 
 export const refreshStalePrices = createServerFn({ method: "POST" })

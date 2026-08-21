@@ -9,8 +9,8 @@ import {
 import { Check, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { useHoverPopover } from "../lib/hooks/use-hover-popover";
-import { usePortfolio } from "../lib/hooks/use-portfolio";
+import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
+import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { PortfolioPickerModal } from "./portfolio-picker-modal";
 
 const rowClass =

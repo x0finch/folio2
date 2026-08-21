@@ -1,6 +1,6 @@
 import { Popover, PopoverContent, PopoverTrigger, useMediaQuery } from "@folio/ui";
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
-import { Portal } from "../../../../components/portal";
+import { Portal } from "@/components/portal";
 import { revealTab } from "./selection";
 
 const PIN_PANEL_W = 240; // w-56 + p-2

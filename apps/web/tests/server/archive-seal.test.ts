@@ -1,8 +1,8 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadAccountHistory } from "../../src/lib/server/accounts/history";
-import { runRequest } from "../../src/lib/server/oracle";
-import { loadAccountHoldings } from "../../src/lib/server/portfolio/account-holdings";
+import { loadAccountHistory } from "@/lib/server/accounts/history";
+import { runRequest } from "@/lib/server/oracle";
+import { loadAccountHoldings } from "@/lib/server/portfolio/account-holdings";
 import { dbFor } from "./db-effect";
 import { createManualAccount, sealManualAccount } from "./manual-fns";
 import { ticketOf } from "./ticket";

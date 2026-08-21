@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { defiGainKey } from "../../core/account-view";
-import { runAtEdge, runRequest, withRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { defiGainKey } from "@/lib/core/account-view";
+import { runAtEdge, runRequest, withRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { loadAccountHoldings } from "./account-holdings";
 import { buildScopedOverview, type PortfolioScope } from "./scope";
 

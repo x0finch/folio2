@@ -15,16 +15,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Pin, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { type PortfolioSummary, usePortfolio } from "../lib/hooks/use-portfolio";
-import { portfolioMembershipsQuery } from "../lib/queries/portfolio";
-import { invalidateFor } from "../lib/queries/refresh";
+import { type PortfolioSummary, usePortfolio } from "@/lib/hooks/use-portfolio";
+import { portfolioMembershipsQuery } from "@/lib/queries/portfolio";
+import { invalidateFor } from "@/lib/queries/refresh";
 import {
   createPortfolio,
   deletePortfolio,
   moveAccountToPortfolio,
   renamePortfolio,
   setDefaultPortfolio,
-} from "../lib/server/portfolios";
+} from "@/lib/server/portfolios";
 import { EditableName } from "./editable-name";
 import { Portal } from "./portal";
 

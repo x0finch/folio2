@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { Holding, HoldingSource } from "../src/lib/server/portfolio/aggregate";
+import type { Holding, HoldingSource } from "@/lib/server/portfolio/aggregate";
 import {
   ALLOC_DIMENSION,
   buildAllocation,
   DEFAULT_DIM,
   OTHERS_KEY,
-} from "../src/routes/_authed/-insights/allocation";
+} from "@/routes/_authed/-insights/allocation";
 
 const src = (
   platformId: string,

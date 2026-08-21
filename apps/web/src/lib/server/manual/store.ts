@@ -12,8 +12,8 @@ import { FxService, TokenService } from "@folio/oracle";
 import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
-import type { SnapshotTotalRow } from "../../core/history";
-import type { CredsToken } from "../../core/manual";
+import type { SnapshotTotalRow } from "@/lib/core/history";
+import type { CredsToken } from "@/lib/core/manual";
 import {
   buildManualAccountSeries,
   deriveAmount,
@@ -25,10 +25,10 @@ import {
   projectToken,
   tokenPriceAt,
   tokenQuantityAt,
-} from "../../core/manual";
-import { NAMER } from "../oracle";
-import type { GainHistoryRow } from "../portfolio/gain-24h";
-import type { BalanceLike } from "../tokens/model";
+} from "@/lib/core/manual";
+import { NAMER } from "@/lib/server/oracle";
+import type { GainHistoryRow } from "@/lib/server/portfolio/gain-24h";
+import type { BalanceLike } from "@/lib/server/tokens/model";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "./batch";
 import { buildManualSnapshot, manualUnitPrices } from "./snapshot";
 

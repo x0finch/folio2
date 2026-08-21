@@ -1,6 +1,6 @@
 import { FxService } from "@folio/oracle";
 import { Effect, Option } from "effect";
-import { runRequest } from "../oracle";
+import { runRequest } from "@/lib/server/oracle";
 
 // 展示币种的汇率:1 单位该币种值多少美元。**唯一的读入口**,`preferences.ts` 那个 server fn
 // 只负责读 cookie、定币种、把结果套成 `PreferCurrency`。

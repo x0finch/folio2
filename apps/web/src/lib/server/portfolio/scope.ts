@@ -6,9 +6,13 @@ import {
   accountsMatchingPin,
   type TabPinScope,
   toTabPin,
-} from "../../core/accounts-in-view";
-import { connectorPlatformMeta } from "../connectors/platform";
-import { injectManualSnapshots, loadManualGainHistory, manualFiatRefs } from "../manual/store";
+} from "@/lib/core/accounts-in-view";
+import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
+import {
+  injectManualSnapshots,
+  loadManualGainHistory,
+  manualFiatRefs,
+} from "@/lib/server/manual/store";
 import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./gain-24h";
 import { buildOverview, type OverviewDeps } from "./overview-model";
 

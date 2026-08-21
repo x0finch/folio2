@@ -1,8 +1,8 @@
 import { FIAT_NAMER } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
 import { z } from "zod";
-import { NAMER, runRequest } from "../oracle";
-import type { AuthContext } from "../session/auth-session";
+import { NAMER, runRequest } from "@/lib/server/oracle";
+import type { AuthContext } from "@/lib/server/session/auth-session";
 import { priceTickets } from "./pricing";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);

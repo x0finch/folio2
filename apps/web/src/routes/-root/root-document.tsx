@@ -5,9 +5,9 @@ import { getRouteApi, HeadContent, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { useEffect } from "react";
 import { IntlProvider } from "use-intl";
-import { applyStoredTheme, THEME_INIT_SCRIPT } from "../../lib/hooks/use-theme";
-import { messages } from "../../lib/i18n/messages";
-import { localePreferenceQuery } from "../../lib/queries/preferences";
+import { applyStoredTheme, THEME_INIT_SCRIPT } from "@/lib/hooks/use-theme";
+import { messages } from "@/lib/i18n/messages";
+import { localePreferenceQuery } from "@/lib/queries/preferences";
 import { THEME_COLORS } from "./pwa-head";
 
 // 从 __root 的 loader 读 now(getRouteApi 免于反向 import Route 造成环)。

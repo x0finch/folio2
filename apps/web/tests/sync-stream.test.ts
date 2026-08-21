@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ndjson, readSyncStream, SyncStreamError } from "../src/lib/hooks/use-account-sync";
+import { ndjson, readSyncStream, SyncStreamError } from "@/lib/hooks/use-account-sync";
 
 // 把若干块字节喂成一个 ReadableStream —— 分片边界故意切在行中间,模拟真实网络。
 function streamOf(chunks: string[]): ReadableStream<Uint8Array> {

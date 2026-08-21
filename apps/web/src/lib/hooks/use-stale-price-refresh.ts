@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { invalidateFor } from "../queries/refresh";
-import { refreshStalePrices } from "../server/prices";
+import { invalidateFor } from "@/lib/queries/refresh";
+import { refreshStalePrices } from "@/lib/server/prices";
 
 // 价格 SWR 的客户端半边:loader 已用旧价渲染(pricesStale=true 时),这里触发一次服务端批量
 // 刷价,成功且确有刷新 → 定向刷新余额相关的读路径,二次展示新价。单飞(每次挂载至多一次),

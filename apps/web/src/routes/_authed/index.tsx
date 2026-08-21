@@ -6,7 +6,7 @@ import {
   portfolioHistoryQuery,
   portfolioListQuery,
   portfolioOverviewQuery,
-} from "../../lib/queries/portfolio";
+} from "@/lib/queries/portfolio";
 import { Overview } from "./-home";
 import { DEFAULT_TAB } from "./-home/home-tabs";
 
