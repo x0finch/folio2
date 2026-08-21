@@ -2,6 +2,7 @@ import { AccountStore } from "@folio/db";
 import { Account as SyncKernel } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
+import { z } from "zod";
 import { isManual } from "../../core/manual";
 import { logCategory } from "../effect-log";
 import { runRequest } from "../oracle";
@@ -21,11 +22,13 @@ const syncLog = getLogger(["folio", "web", "sync"]);
 // `SyncServices` 由 `syncServicesLayer` 供上,而它要的 db / 参考层服务就是外面这次
 // `runRequest(userId, …)` 已经装好的那些。以前这里是 `Effect.promise(() => syncAccountCore(…))`——
 // 一道 Promise 边界,而且内核里的 mint / revalue 各自还要再装一次参考层。
+export const SyncAccountInput = z.object({ accountId: z.string().min(1) });
+
 export async function handleSyncAccount({
   data,
   context,
 }: {
-  data: { accountId: string };
+  data: z.infer<typeof SyncAccountInput>;
   context: { userId: string };
 }) {
   const userId = context.userId;

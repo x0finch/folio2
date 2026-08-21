@@ -1,5 +1,6 @@
 import { AccountStore, SnapshotStore } from "@folio/db";
 import { Effect } from "effect";
+import { z } from "zod";
 import { MANUAL_CONNECTOR_ID } from "../../core/manual";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "../manual/store";
 import { runRequest } from "../oracle";
@@ -54,11 +55,17 @@ export const loadAccountHistory = (input: {
   });
 
 // getAccountHistory 的 handler:auth 薄壳,读路径分流全在上面的 loadAccountHistory。
+export const AccountHistoryInput = z.object({
+  accountId: z.string().min(1),
+  since: z.number().int().nonnegative().optional(),
+  connectorId: z.string().optional(),
+});
+
 export function handleGetAccountHistory({
   data,
   context,
 }: {
-  data: { accountId: string; since?: number; connectorId?: string };
+  data: z.infer<typeof AccountHistoryInput>;
   context: { userId: string };
 }) {
   return runRequest(context.userId, loadAccountHistory(data));

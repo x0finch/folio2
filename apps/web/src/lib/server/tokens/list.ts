@@ -1,6 +1,7 @@
 import { TokenService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
+import { z } from "zod";
 import { runRequest } from "../oracle";
 import { edgeCached, SEARCH_CACHE_TTL_S } from "./edge-cache";
 import { type TokenOption, toOption } from "./model";
@@ -9,11 +10,13 @@ const tokenLog = getLogger(["folio", "web", "tokens"]);
 
 // 选币 autocomplete:按关键词问上游。**只在浏览器本地目录凑不够时才被调到**(见 token-search.ts)——
 // 所以到这儿的词基本都是长尾币,一次 /search 花得值。
+export const ListTokensInput = z.object({ query: z.string() });
+
 export async function handleListTokens({
   data,
   context,
 }: {
-  data: { query: string };
+  data: z.infer<typeof ListTokensInput>;
   context: { userId: string };
 }): Promise<TokenOption[]> {
   const q = data.query.trim();

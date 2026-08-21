@@ -1,5 +1,6 @@
 import { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { getRequestHeaders } from "@tanstack/react-start/server";
+import { z } from "zod";
 import type { PreferCurrency } from "../../hooks/use-prefer-currency";
 import { writePreferenceCookie } from "./cookie";
 import { displayRate } from "./fx";
@@ -46,7 +47,9 @@ export async function handleGetCurrencyPreference({
 
 // 写完不回传新值:调用点照旧走 `invalidateFor`,由那张映射表决定刷哪些读(ADR 0038)。
 // 代价是这一次切换会多一个请求(写一次 + 读一次),换来的是失效语义仍然只有一个出处。
-export function handleSetCurrencyPreference({ data }: { data: { code: string } }) {
+export const SetCurrencyInput = z.object({ code: z.string() });
+
+export function handleSetCurrencyPreference({ data }: { data: z.infer<typeof SetCurrencyInput> }) {
   // 落库前先过一遍 SUPPORTED:cookie 是用户可改的输入,别把垃圾写进去让读侧天天兜底。
   writePreferenceCookie(CURRENCY_COOKIE, resolveCurrency(data.code).code);
 }

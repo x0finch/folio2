@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireAuth } from "../session/require-auth";
-import { handleGetHoldingHistory, HoldingHistoryInput } from "./history";
+import { HoldingHistoryInput, handleGetHoldingHistory } from "./history";
 
 export const getHoldingHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])

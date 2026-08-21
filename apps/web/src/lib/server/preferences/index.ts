@@ -1,8 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
-import { z } from "zod";
 import { requireAuth } from "../session/require-auth";
-import { handleGetCurrencyPreference, handleSetCurrencyPreference } from "./currency";
-import { handleGetLocalePreference, handleSetLocalePreference } from "./locale";
+import {
+  handleGetCurrencyPreference,
+  handleSetCurrencyPreference,
+  SetCurrencyInput,
+} from "./currency";
+import { handleGetLocalePreference, handleSetLocalePreference, SetLocaleInput } from "./locale";
 
 // 展示偏好(币种 / 语言)—— 浏览器级偏好,存 cookie + 请求头,非账户数据。只做装配。
 // **鉴权按调用点分,不按「它敏不敏感」分**:语言切换器在登录页就要能用,所以 locale 两个公开;
@@ -19,9 +22,9 @@ export const getLocalePreference = createServerFn({ method: "GET" }).handler(
 
 export const setCurrencyPreference = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(z.object({ code: z.string() }))
+  .validator(SetCurrencyInput)
   .handler(handleSetCurrencyPreference);
 
 export const setLocalePreference = createServerFn({ method: "POST" })
-  .validator(z.object({ locale: z.string() }))
+  .validator(SetLocaleInput)
   .handler(handleSetLocalePreference);

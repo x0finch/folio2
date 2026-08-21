@@ -1,9 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
-import { z } from "zod";
 import { requireAuth } from "../session/require-auth";
 import { handleGetDataStats } from "./data-stats";
 import { handleGetProviderKeyStatus } from "./provider-keys";
-import { handleGetValuationSettings, handleUpdateValuationSettings } from "./valuation";
+import {
+  handleGetValuationSettings,
+  handleUpdateValuationSettings,
+  ValuationInput,
+} from "./valuation";
 
 export const getProviderKeyStatus = createServerFn({ method: "GET" })
   .middleware([requireAuth])
@@ -19,5 +22,5 @@ export const getValuationSettings = createServerFn({ method: "GET" })
 
 export const updateValuationSettings = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(z.object({ mode: z.enum(["self-first", "source-first"]) }))
+  .validator(ValuationInput)
   .handler(handleUpdateValuationSettings);

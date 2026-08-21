@@ -1,5 +1,6 @@
 import { FIAT_NAMER } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
+import { z } from "zod";
 import { NAMER, runRequest } from "../oracle";
 import { priceTickets } from "./pricing";
 
@@ -9,11 +10,15 @@ const tokenLog = getLogger(["folio", "web", "tokens"]);
 // `/simple/price` 回填。**POST 不是 GET**:一批票可到几十条、每条几十字符,塞进 GET 的 query
 // 会把 URL 撑爆(正是 #245 那类 414);而且这是用户触发的实时刷,不该走边缘缓存。
 // **不建行、不写缓存**(pricesByRefs 语义)—— 用户还在划,行只在提交时由 mint 建。
+export const RefreshTokenPricesInput = z.object({
+  tickets: z.array(z.string().min(1)).max(200),
+});
+
 export async function handleRefreshTokenPrices({
   data,
   context,
 }: {
-  data: { tickets: string[] };
+  data: z.infer<typeof RefreshTokenPricesInput>;
   context: { userId: string };
 }) {
   // 票携带当前上游(加密币)或 `fiat`(法币)命名者,两者都放行(同 getTokenPrice / mintHolding)——

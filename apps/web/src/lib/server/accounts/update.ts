@@ -1,6 +1,7 @@
 import { AccountStore } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
+import { z } from "zod";
 import { sealManualAccount } from "../manual/store";
 import { runRequest } from "../oracle";
 
@@ -20,11 +21,17 @@ const log = getLogger(["folio", "web", "accounts"]);
 // 为此**不**在 `@folio/db` 里开跨两张表的合并 op:为一个低频动作在契约层捅个口子,不划算。
 //
 // 封存那一步要用参考层(取现价),所以整段从 `runStore` 换成 `runRequest`。
+export const UpdateAccountInput = z.object({
+  accountId: z.string().min(1),
+  label: z.string().trim().min(1, "label is required").optional(),
+  archived: z.boolean().optional(),
+});
+
 export async function handleUpdateAccount({
   data,
   context,
 }: {
-  data: { accountId: string; label?: string; archived?: boolean };
+  data: z.infer<typeof UpdateAccountInput>;
   context: { userId: string };
 }) {
   const sealed = await runRequest(

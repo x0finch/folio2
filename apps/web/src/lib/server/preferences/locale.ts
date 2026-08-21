@@ -1,4 +1,5 @@
 import { getRequestHeaders } from "@tanstack/react-start/server";
+import { z } from "zod";
 import { LOCALE_COOKIE, pickLocale, readLocaleCookie } from "../../i18n/detect";
 import type { Locale } from "../../i18n/messages";
 import { writePreferenceCookie } from "./cookie";
@@ -11,7 +12,9 @@ export function handleGetLocalePreference(): Locale {
 }
 
 // 语言切换器在登录页就要能用,所以写侧也是公开的(鉴权按调用点分,不按「它敏不敏感」分)。
-export function handleSetLocalePreference({ data }: { data: { locale: string } }) {
+export const SetLocaleInput = z.object({ locale: z.string() });
+
+export function handleSetLocalePreference({ data }: { data: z.infer<typeof SetLocaleInput> }) {
   // `pickLocale` 认不出来就落默认,写进去的一定是合法 locale。
   writePreferenceCookie(LOCALE_COOKIE, pickLocale(data.locale, null));
 }

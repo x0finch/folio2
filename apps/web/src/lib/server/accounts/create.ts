@@ -4,6 +4,7 @@ import { type AccountSafe, AccountStore, type ManualStore, PortfolioStore } from
 import type { TokenService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
+import { z } from "zod";
 import { isManual } from "../../core/manual";
 import { credentialSpecs, validateAccountCreds } from "../connectors/registry";
 import { sealCreds } from "../creds";
@@ -52,16 +53,20 @@ export const createAccountFor = (
 
 // 统一创建入口(connector-driven,#55/#52):校验/分派在上面的 createAccountFor;这里把
 // 「建账户 → 归属到选中的 Portfolio」拼进同一次装配(#394 T6),userId 只在这一处出现。
+// values:表单原始输入(键 = connector.account.creds 的 key);trim 后落库。
+// portfolioId:落在当前选中的 Portfolio(ADR 0033);缺省 → 服务端本就落默认 Portfolio。
+export const CreateAccountInput = z.object({
+  connectorId: z.string().min(1),
+  label: z.string().trim().min(1, "label is required"),
+  values: z.record(z.string(), z.string().trim()),
+  portfolioId: z.string().min(1).optional(),
+});
+
 export async function handleCreateAccount({
   data,
   context,
 }: {
-  data: {
-    connectorId: string;
-    label: string;
-    values: Record<string, string>;
-    portfolioId?: string;
-  };
+  data: z.infer<typeof CreateAccountInput>;
   context: { userId: string };
 }) {
   return runRequest(

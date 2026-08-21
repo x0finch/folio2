@@ -1,13 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
-import { z } from "zod";
 import { requireAuth } from "../session/require-auth";
 import { handleListTokenCatalogue } from "./catalogue";
-import { handleListTokens } from "./list";
+import { handleListTokens, ListTokensInput } from "./list";
 import { handleListFiatOptions } from "./list-fiat-options";
-import { handleGetTokenPrice } from "./price";
-import { handleRefreshTokenPrices } from "./refresh-prices";
+import { handleGetTokenPrice, TokenPriceInput } from "./price";
+import { handleRefreshTokenPrices, RefreshTokenPricesInput } from "./refresh-prices";
 
-// 选币的 server fn 资源面(#202b:整条搬到新参考层)。只做装配,实现在同目录 RESTful 文件里。
+// 选币的 server fn 资源面(#202b:整条搬到新参考层)。只做装配,实现与入参 schema 在同目录 RESTful 文件里。
 //
 // **点中不建行。** 读端点都只是读:发目录、搜长尾、取价。代币行是提交表单时由 mint 建的 —— 用户在
 // 下拉里划过十个币不该在库里留十行垃圾。因此这里给出去的不是内部 id(那时还没有),
@@ -24,15 +23,15 @@ export const listFiatOptions = createServerFn({ method: "GET" })
 
 export const listTokens = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .validator(z.object({ query: z.string() }))
+  .validator(ListTokensInput)
   .handler(handleListTokens);
 
 export const getTokenPrice = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .validator(z.object({ ticket: z.string().min(1) }))
+  .validator(TokenPriceInput)
   .handler(handleGetTokenPrice);
 
 export const refreshTokenPrices = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(z.object({ tickets: z.array(z.string().min(1)).max(200) }))
+  .validator(RefreshTokenPricesInput)
   .handler(handleRefreshTokenPrices);

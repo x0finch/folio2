@@ -1,5 +1,6 @@
 import { AccountStore, PortfolioStore, SettingsStore, SnapshotStore, TagStore } from "@folio/db";
 import { Effect } from "effect";
+import { z } from "zod";
 import {
   accountsInView,
   accountsMatchingPin,
@@ -11,9 +12,27 @@ import { injectManualSnapshots, loadManualGainHistory, manualFiatRefs } from "..
 import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./gain-24h";
 import { buildOverview, type OverviewDeps } from "./overview-model";
 
-// 选中 Portfolio 入参(客户端选择器传的临时选中 id,可空 → 用默认)与其上叠的自定义 Tab pin
-// (ADR 0034,按 connector/tag/account 在选中 Portfolio 内再收窄)。zod 校验在 index 装配层,
-// 这里只收窄后的普通形状 —— pin 的形状家在 core/accounts-in-view 的 `TabPinScope`,不另造一份。
+// 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
+// 仅按选中 Portfolio scope(曲线 / 列表默认口径);不带 pin。
+export const PortfolioSelectInput = z.object({ portfolioId: z.string().optional() }).default({});
+
+// overview 入参:在选中 Portfolio 之上再叠一个自定义 Tab 的 pin(ADR 0034)—— 按 connector/tag/account
+// 在选中 Portfolio 内再收窄;缺省 = 默认视图(不收窄)。pin 只收窄 overview 的列表,不进曲线(见 get-history)。
+// pin 的 TS 形状家在 core/accounts-in-view 的 `TabPinScope`,不另造一份 —— 一致性由 .handler() 处的赋值检查看着。
+export const PortfolioScopeInput = z
+  .object({
+    portfolioId: z.string().optional(),
+    pin: z
+      .object({
+        kind: z.enum(["connector", "tag", "account"]),
+        connectorId: z.string().optional(),
+        tagId: z.string().optional(),
+        accountId: z.string().optional(),
+      })
+      .optional(),
+  })
+  .default({});
+
 export interface PortfolioScope {
   portfolioId?: string;
   pin?: NonNullable<TabPinScope>;
