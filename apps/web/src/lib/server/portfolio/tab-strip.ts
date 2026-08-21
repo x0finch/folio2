@@ -1,7 +1,7 @@
 import { type DefiGroup, mergeDefiGroups } from "../../core/account-view";
 
 // 首页 tab 条轻请求的两份纯推导:有没有永续/DeFi、pin 显示成什么。
-// 放 internal:只有 `getHomeTabStrip` 用,客户端拿的是算好的结果。
+// 放 portfolio/ 私有:只有 `getHomeTabStrip` 用,客户端拿的是算好的结果。
 // 页面侧的 tab 回落见 `routes/_authed/-home/home-tabs`。
 
 // 和总览画面同一套「算不算有永续 / DeFi」:有仓位或权益才出永续 tab;DeFi 跨账户合并后还有组才出。

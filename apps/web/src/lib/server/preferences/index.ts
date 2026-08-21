@@ -33,7 +33,7 @@ function readCurrencyCookie(cookieHeader: string | null | undefined): string | u
 // 语言那个仍是公开的;**币种那个改成了 authed**,理由见下。
 
 // 服务端定展示币种:读 folio_currency cookie → SUPPORTED 校验 → 取该币种汇率。
-// 取汇率的三档判断(USD / 缓存 / 冷缓存按需拉一次)在 ./internal/fx 的 `displayRate` 里,
+// 取汇率的三档判断(USD / 缓存 / 冷缓存按需拉一次)在 ./fx 的 `displayRate` 里,
 // 本 handler 只做壳:定币种 → 问汇率 → 套形状。**取不到就整体回退 USD** ——
 // 币种是 EUR 而汇率却按 1 算会显示成错的数字,那比显示美元糟得多。
 //

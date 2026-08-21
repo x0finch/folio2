@@ -6,7 +6,7 @@ import { getAccountGain24h, listAccountHoldings } from "../server/portfolio";
 import { STALE_TIME } from "./constants";
 import { accountKeys } from "./keys";
 
-// 账户域的读取入口 —— 与 `lib/server/accounts.ts` / `holdings.ts` / `manual-tokens.ts` 及
+// 账户域的读取入口 —— 与 `lib/server/accounts` / `holdings` / `manual-tokens.ts` 及
 // `portfolio.ts` 里那个按账户的读取 server fn 对应。
 //
 // **列表与持仓的 `staleTime` 在 #414 打开**:账户与手记资产的写路径已经全部改成定向刷新。

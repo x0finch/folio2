@@ -98,7 +98,7 @@ const warmPorts = () =>
   );
 
 // `provideMerge` 而不是 `provide`:端口也透出去。app 自己有一小片直接用 `CacheStore`
-// (DeFi 协议图 —— 没有上游、不属于参考层,见 `defi-logo-store.ts`),而这些端口本来就是
+// (DeFi 协议图 —— 没有上游、不属于参考层,见 `logos/store.ts`),而这些端口本来就是
 // 这个文件建的,没必要为了用它们再包一个服务。
 const oracleFor = (userId: string, database: Layer.Layer<Database> = databaseLayer(env)) =>
   Layer.provideMerge(oracleLayer, Layer.merge(portsFor(userId, database), upstreams()));

@@ -53,7 +53,7 @@ USD: 恒 1
 
 ## ③ 缓存 —— 写进 `fx_rates`,sync 后顺手预热
 
-📍 **地点**:`apps/web/src/lib/server/internal/fx.ts`(`warmFx`)接在 `sync-deps` 的 `warmTokensForUser` 里 → `@folio/oracle` 的 fx 服务 `warm` → `@folio/db` `createFxStore` → `fx_rates` 表
+📍 **地点**:`apps/web/src/lib/server/preferences/fx.ts`(`warmFx`)接在 `sync/deps.ts` 的 `warmTokensForUser` 里 → `@folio/oracle` 的 fx 服务 `warm` → `@folio/db` `createFxStore` → `fx_rates` 表
 
 🔧 **做了什么**:同步后台顺手刷新(任一币种缺失/过期才拉),把 usd_per_unit 连同 `expires_at`(TTL ~6h)写入 D1。**`expires_at` 只闸 warm;读时软过期**——宁可返回略旧汇率,也不掉回 USD。
 

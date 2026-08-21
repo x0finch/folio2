@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { configure, getConsoleSink, getJsonLinesFormatter } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
-import { LOG_LEVELS, resolveLogLevel } from "../log-level";
+import { LOG_LEVELS, resolveLogLevel } from "./log-level";
 
 // LogTape 一次性配置(worker 入口在处理 fetch/scheduled 前调用,幂等)。server-only(读 env)。
 // getLogger/withContext 各处直接从 "@logtape/logtape" 引入(纯,无 cloudflare:workers,不污染客户端包)。

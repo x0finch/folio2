@@ -19,7 +19,7 @@ import {
 } from "./export";
 
 // 导出那条 NDJSON 流。**路由只剩鉴权 + 跑一次**,流本身住在这里 —— 与 `/api/sync` 的
-// `sync-ndjson.ts` 同一个形状,理由也一样:handler 里的东西测不到,这里的测得到
+// `sync/ndjson.ts` 同一个形状,理由也一样:handler 里的东西测不到,这里的测得到
 // (见 tests/server/export-stream.test.ts 钉的分页边界)。
 
 // 每页快照数:配 inArray(≤ 50 ids) 取余额,远低于 D1 100 绑定参数上限。

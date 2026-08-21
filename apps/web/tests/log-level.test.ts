@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LOG_LEVELS, resolveLogLevel } from "../src/lib/server/log-level";
+import { LOG_LEVELS, resolveLogLevel } from "../src/lib/server/entry/log-level";
 
 // LOG_LEVEL 是自托管者手写的,拼错很正常。以前非法值会被强转塞给 LogTape,导致每个 server function
 // 都抛「Invalid log level」——站点整体 500,而原因只躺在日志里。这几条钉住「配错不该搞挂站点」。

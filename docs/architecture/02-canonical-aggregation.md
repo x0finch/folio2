@@ -51,7 +51,7 @@ flowchart TD
 ## ② 认币(mint)—— 在落库之前定下「它是哪个币」
 
 📍 **地点**:`packages/oracle/entry/src/tokens/mint.ts`,由 app 编排在写快照之前
-(`apps/web/src/lib/server/internal/sync-deps.ts`)
+(`apps/web/src/lib/server/sync/deps.ts`)
 
 🔧 **做了什么**:一批 `tokenRef` 换出各自的 `token_id`。**全程不碰网络** —— 类型上没给它
 upstream(`MintDeps` 里没有那个字段),判定顺序从便宜到贵:
@@ -88,7 +88,7 @@ symbol 是它们**唯一**的一条路;场馆代号是交易所替我们审过�
 
 ## ③ 入库 —— 写进一份快照
 
-📍 **地点**:`apps/web/src/lib/server/sync.ts` → `@folio/sync` `syncAccount` → `@folio/db` `writeSnapshot`
+📍 **地点**:`apps/web/src/lib/server/sync/index.ts` → `@folio/sync` `syncAccount` → `@folio/db` `writeSnapshot`
 
 🔧 **做了什么**:把这次抓到的**所有** Balance(含这条 USDC)连同各自的 `token_id` 打包写成一条
 快照。**失败即失败、不落库**(保证快照是「完整的一次」)。
@@ -100,7 +100,7 @@ D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两
 
 ## ④ 预热 —— 顺手把价和平台名图取好
 
-📍 **地点**:`apps/web/src/lib/server/internal/sync-deps.ts` `warmTokensForUser`
+📍 **地点**:`apps/web/src/lib/server/sync/deps.ts` `warmTokensForUser`
 
 🔧 **做了什么**:同步后台顺手刷该用户持仓币的价、汇率、链与场馆的名图,写进 per-user 缓存。
 **这一步让后面的「读」可以零网络富化。**
@@ -114,7 +114,7 @@ D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两
 
 ## ⑤ 读出 —— 用户打开总览
 
-📍 **地点**:`apps/web/src/lib/server/portfolio.ts` `getPortfolioOverview` → `@folio/db`
+📍 **地点**:`apps/web/src/lib/server/portfolio/index.ts` `getPortfolioOverview` → `@folio/db`
 `getLatestSnapshotByUser`
 
 🔧 **做了什么**:取该用户每个账户的**最新**快照 —— 我们这条 Arbitrum USDC 重新出现,**这次它
@@ -122,7 +122,7 @@ D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两
 
 ## ⑥ 富化 —— 按 id 查出名字 / 图 / 价
 
-📍 **地点**:`apps/web/src/lib/server/internal/overview-model.ts` → `tokens.enrich(ids)`(cache-only)
+📍 **地点**:`apps/web/src/lib/server/portfolio/overview-model.ts` → `tokens.enrich(ids)`(cache-only)
 
 🔧 **做了什么**:用 ④ 缓存的结果(零网络)按 `token_id` 查出整行:`name` / `logo` /
 `unitPrice` / `change24h` / `marketCapRank`。返回的是 **`Map<token_id, TokenRecord>`**,调用方查表 ——
@@ -132,7 +132,7 @@ D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两
 
 ## ⑦ 组装 `AggInput`
 
-📍 **地点**:`apps/web/src/lib/server/internal/overview-model.ts`
+📍 **地点**:`apps/web/src/lib/server/portfolio/overview-model.ts`
 
 ```jsonc
 { symbol:"USDC", amount:100, value:100, kind:"spot",
@@ -206,12 +206,12 @@ Holding {
 | 站 | 地点 |
 |---|---|
 | ① 产生 | `packages/connectors/providers/zerion/src/index.ts`(文法 `packages/oracle/ref/src/token-ref.ts`) |
-| ② 认币 | `packages/oracle/entry/src/tokens/mint.ts` · 编排 `apps/web/src/lib/server/internal/sync-deps.ts` |
-| ③ 入库 | `apps/web/src/lib/server/sync.ts` → `packages/db/src/queries/snapshots.ts` `writeSnapshot` |
-| ④ 预热 | `apps/web/src/lib/server/internal/sync-deps.ts` `warmTokensForUser` |
-| ⑤ 读出 | `apps/web/src/lib/server/portfolio.ts` → `packages/db/src/queries/snapshots.ts` `getLatestSnapshotByUser` |
-| ⑥ 富化 | `apps/web/src/lib/server/internal/overview-model.ts` · `packages/oracle/entry/src/tokens/price.ts` `enrich` |
-| ⑦ 组装 | `apps/web/src/lib/server/internal/overview-model.ts` |
+| ② 认币 | `packages/oracle/entry/src/tokens/mint.ts` · 编排 `apps/web/src/lib/server/sync/deps.ts` |
+| ③ 入库 | `apps/web/src/lib/server/sync/index.ts` → `packages/db/src/queries/snapshots.ts` `writeSnapshot` |
+| ④ 预热 | `apps/web/src/lib/server/sync/deps.ts` `warmTokensForUser` |
+| ⑤ 读出 | `apps/web/src/lib/server/portfolio/index.ts` → `packages/db/src/queries/snapshots.ts` `getLatestSnapshotByUser` |
+| ⑥ 富化 | `apps/web/src/lib/server/portfolio/overview-model.ts` · `packages/oracle/entry/src/tokens/price.ts` `enrich` |
+| ⑦ 组装 | `apps/web/src/lib/server/portfolio/overview-model.ts` |
 | ⑧ 聚合 | `apps/web/src/lib/aggregate.ts` `buildCanonicalHoldings`(分组键 `groupKey` / 门槛 `isEligible`) |
 | ⑨ 渲染 | `apps/web/src/routes/_authed/index.tsx` · `components/token-holdings.tsx` · `components/asset-sheet.tsx` |
 

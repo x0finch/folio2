@@ -15,7 +15,7 @@ import { type SyncStatusSummary, summarizeSync } from "./status";
 
 // 同步状态读模型(纯 —— 无 cloudflare env,可脱离 server fn 单测)。
 // PageHeader 的共享同步面板消费此摘要:ok/总数 + 上次更新 + 未同步来源(带原因)。
-// 归档账户不计入(与 overview / sync-deps 的过滤一致)。
+// 归档账户不计入(与 overview / ./deps 的过滤一致)。
 //
 // **ok 数的是「真的同步过」,不是「配置齐全」。** 这两者曾被当成一回事:`ok` 只看
 // `complete`,`takenAt` 收进来却只喂给 `lastSyncedAt`。于是一个刚加进来、凭据齐全、
@@ -25,7 +25,7 @@ import { type SyncStatusSummary, summarizeSync } from "./status";
 
 const syncLog = getLogger(["folio", "web", "sync"]);
 
-// 编排装配在 ./sync-deps(server-only)—— 本文件不引 cloudflare:workers,故这些 server fn 可安全被客户端 import。
+// 编排装配在 ./deps(server-only)—— 本文件不引 cloudflare:workers,故这些 server fn 可安全被客户端 import。
 // 全量同步走 /api/sync 流式端点(服务端 waitUntil 兜底);这里只留单账户同步(账户抽屉「单独同步」)+ 状态。
 
 // 只同步单个账户(详情侧栏「单独同步」):取该账户 + 其 raw creds → syncAccountCore 隔离写快照。

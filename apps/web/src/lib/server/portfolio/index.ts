@@ -222,7 +222,7 @@ export const getHomeTabStrip = createServerFn({ method: "GET" })
   );
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓,**含已归档账户**(ADR 0039)。
-// 取数整条抽去了 `internal/account-holdings.ts` —— 这里只留 auth 薄壳,那边才测得到(workers 池要驱动真 D1)。
+// 取数整条抽去了 `./account-holdings.ts` —— 这里只留 auth 薄壳,那边才测得到(workers 池要驱动真 D1)。
 export const listAccountHoldings = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(({ context }) => runRequest(context.userId, loadAccountHoldings()));

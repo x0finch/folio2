@@ -48,7 +48,7 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 
 - **`lib/` 顶层不放文件 —— 一个模块要么住进上面某个目录,要么住进它唯一的使用者。** 曾经的顶层是个 47 文件的杂物层:一多半只有一个 route 或一个 server fn 在用,却因为「像是个工具」被摆在全站可见的位置。只有一个使用者的,搬到使用者身边去。
 
-- **准入 `lib/core/` 的判据是「有没有第二侧在**调它的代码**」——`import type` 不算。** 类型引用在编译后完全消失,不会把任何服务端代码带进 client bundle(要防的一直是 value-import,见上一条)。所以「逻辑全在服务端、页面只要个数据形状」的模块**不是共用件**,它该跟着逻辑住 `lib/server` 的对应资源目录,页面照常 `import type` 拿形状。
+- **准入 `lib/core/` 的判据是「有没有第二侧在**调它的代码**」——`import type` 不算。** 类型引用在编译后完全消失,不会把任何服务端代码带进 client bundle(要防的一直是 value-import,见上一条)。所以「逻辑全在服务端、页面只要个数据形状」的模块**不是共用件**,它该跟着逻辑住 `lib/server`(对应资源目录,或顶层基座件如 `creds.ts`),页面照常 `import type` 拿形状。
   这条是踩出来的:第一版按「有人引就算共用」摆了 15 个进 core,其中 `tokens` / `aggregate` / `creds` / `sync-status` 四个的**全部函数调用点都在服务端**,页面一行都没调 —— 它们是被自己的类型绑在共用层的。
   - **拆一个混合模块时,缝在职责上,不在 client/server 上。** `history` 看着像「服务端建曲线 / 客户端画曲线」,但 `downsampleSeries` 两边都调 —— 真正的缝是**采样**(共用)与**从快照重建**(只服务端)。按 client/server 硬切会切出一份要被复制的原语。
   - **搬走一个符号前先数它的使用者。** `toPerpView` 在 core 之外零使用者(只有 `account-view` 调),`downsampleSeries`/`toDailySeries` 各只有一个 —— 这种不需要共用层,直接并进那个唯一的使用者。
