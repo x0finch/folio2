@@ -1,7 +1,7 @@
 import { DefiMeta } from "@folio/connectors-basic";
 import type { CacheStore } from "@folio/oracle-basic/ports";
 import type { Effect } from "effect";
-import { recordDefiLogos } from "./defi-logo-store";
+import { recordDefiLogos } from "../internal/defi-logo-store";
 
 // DeFi 协议 logo 的同步记账(#126)。协议→图 URL 采集时就随余额 meta 落进了快照,这里把它收集出来、
 // 写进 per-user 缓存(`defi-logo:<协议>`)—— 图片端点 `/api/logo/defi` 由此 O(1) 读,不再取全部

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { downsampleSeries, type HistoryPoint, toDailySeries } from "../src/lib/core/history";
-import { buildPortfolioHistory } from "../src/lib/server/internal/history";
+import { buildPortfolioHistory } from "../src/lib/server/portfolio/history";
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;

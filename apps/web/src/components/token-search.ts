@@ -1,4 +1,4 @@
-import type { TokenOption } from "../lib/server/internal/tokens";
+import type { TokenOption } from "../lib/server/tokens/model";
 
 // 选币搜索的**本地那一档**:在服务端整份下发的目录(市值前 1000)里就地筛。
 //

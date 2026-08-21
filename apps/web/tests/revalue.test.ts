@@ -1,7 +1,7 @@
 import type { Balance } from "@folio/connectors-basic";
 import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
-import { revalue } from "../src/lib/server/internal/revalue";
+import { revalue } from "../src/lib/server/sync/revalue";
 import { runWithOracle } from "./oracle-stub";
 
 // **本文件只测估值,不测认币。** #202 之前 revalue 自己调 `tokens.resolve` 解析身份,所以这里曾经

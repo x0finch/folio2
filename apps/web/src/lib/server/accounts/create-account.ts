@@ -5,9 +5,9 @@ import type { TokenService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { isManual } from "../../core/manual";
-import { credentialSpecs, validateAccountCreds } from "./connector-registry";
-import { sealCreds } from "./creds";
-import { createManualAccount } from "./manual";
+import { credentialSpecs, validateAccountCreds } from "../connectors/registry";
+import { sealCreds } from "../internal/creds";
+import { createManualAccount } from "../internal/manual";
 
 // 账户创建的分派逻辑(server fn 之外的纯 async → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。
 // createAccount server fn(见 accounts.ts)只做 auth 薄壳后调本函数。SECRETS_KEY 只在此 app 层见,不进 connectors。

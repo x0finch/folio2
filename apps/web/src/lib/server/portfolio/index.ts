@@ -9,30 +9,30 @@ import {
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
-import { defiGainKey, toAccountSections } from "../core/account-view";
+import { defiGainKey, toAccountSections } from "../../core/account-view";
 import {
   accountIdsInView,
   accountsInView,
   accountsMatchingPin,
   toTabPin,
-} from "../core/accounts-in-view";
-import { connectorLabelFallback, platformLogoUrl } from "../core/logo";
-import { isManual } from "../core/manual";
-import { loadAccountHoldings } from "./internal/account-holdings";
-import { connectorPlatformMeta } from "./internal/connector-platform";
-import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./internal/gain-24h";
-import { buildPortfolioHistory } from "./internal/history";
-import { deriveLiveAccountTotals } from "./internal/live-value";
+} from "../../core/accounts-in-view";
+import { connectorLabelFallback, platformLogoUrl } from "../../core/logo";
+import { isManual } from "../../core/manual";
+import { loadAccountHoldings } from "./account-holdings";
+import { connectorPlatformMeta } from "../connectors/platform";
+import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./gain-24h";
+import { buildPortfolioHistory } from "./history";
+import { deriveLiveAccountTotals } from "./live-value";
 import {
   injectManualSnapshots,
   loadManualGainHistory,
   loadManualHistoryRows,
   manualFiatRefs,
-} from "./internal/manual";
-import { runAtEdge, runRequest, runStore, withRequest } from "./internal/oracle";
-import { buildOverview, type OverviewDeps } from "./internal/overview-model";
-import { requireAuth } from "./internal/require-auth";
-import { kindPresence, resolvePinLabel } from "./internal/tab-strip";
+} from "../internal/manual";
+import { runAtEdge, runRequest, runStore, withRequest } from "../internal/oracle";
+import { buildOverview, type OverviewDeps } from "./overview-model";
+import { requireAuth } from "../internal/require-auth";
+import { kindPresence, resolvePinLabel } from "./tab-strip";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
 // 仅按选中 Portfolio scope(曲线 / 列表默认口径);不带 pin。

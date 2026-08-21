@@ -8,8 +8,8 @@ import {
   type Gain,
   type GainCurrentRow,
 } from "./gain-24h";
-import { injectManualSnapshots, loadManualGainHistory } from "./manual";
-import { enrichBalances } from "./token-enrich";
+import { injectManualSnapshots, loadManualGainHistory } from "../internal/manual";
+import { enrichBalances } from "../tokens/enrich";
 
 type WithOptionalGain<R extends { balances: readonly unknown[] }> = Omit<R, "balances"> & {
   gain24h?: Gain | null;

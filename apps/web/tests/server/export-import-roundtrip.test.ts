@@ -10,7 +10,7 @@ import {
   snapshotRecord,
   tokenRecord,
 } from "../../src/lib/server/internal/export";
-import { buildPortfolioHistory } from "../../src/lib/server/internal/history";
+import { buildPortfolioHistory } from "../../src/lib/server/portfolio/history";
 import {
   createImporter,
   type ImportDeps,

@@ -4,8 +4,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getAuth } from "@/lib/server/internal/auth";
 import { resolveAuth } from "@/lib/server/internal/auth-session";
 import { runAtEdge } from "@/lib/server/internal/oracle";
-import { syncStreamFor, warmTokensForUser } from "@/lib/server/internal/sync-deps";
-import { ndjsonRound } from "@/lib/server/internal/sync-ndjson";
+import { syncStreamFor, warmTokensForUser } from "@/lib/server/sync/deps";
+import { ndjsonRound } from "@/lib/server/sync/ndjson";
 
 // POST /api/sync —— 同步当前用户的全部账户,**逐账户以 NDJSON 流回进度**。
 //

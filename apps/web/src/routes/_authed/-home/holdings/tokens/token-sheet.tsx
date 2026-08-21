@@ -22,7 +22,7 @@ import { collapseToSlots } from "../../../../../components/tag-badges";
 import { formatNumber, signedUsd } from "../../../../../lib/core/format-number";
 import { useDisplayValue } from "../../../../../lib/hooks/use-display-value";
 import { holdingHistoryQuery } from "../../../../../lib/queries/accounts";
-import type { Holding } from "../../../../../lib/server/internal/aggregate";
+import type { Holding } from "../../../../../lib/server/portfolio/aggregate";
 import { TrendPanel } from "../../hero/trend-panel";
 import { deltaTone, NO_VALUE } from "../value-delta";
 import { ACCOUNT_SLOTS, groupByAccount, groupByPlatform, type SourceGroup } from "./source-groups";

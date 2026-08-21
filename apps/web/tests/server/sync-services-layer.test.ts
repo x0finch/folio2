@@ -5,7 +5,7 @@ import { Account, BalanceSource, AccountStore as SyncAccountStore } from "@folio
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runRequest } from "../../src/lib/server/internal/oracle";
-import { syncServicesLayer } from "../../src/lib/server/internal/sync-deps";
+import { syncServicesLayer } from "../../src/lib/server/sync/deps";
 import { dbFor } from "./db-effect";
 
 // `syncServicesLayer` —— app 侧对 `@folio/sync` 那四个能力的接线(#403 片 2)。

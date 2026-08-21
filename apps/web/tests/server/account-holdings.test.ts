@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadAccountHoldings } from "../../src/lib/server/internal/account-holdings";
+import { loadAccountHoldings } from "../../src/lib/server/portfolio/account-holdings";
 import { runRequest } from "../../src/lib/server/internal/oracle";
 import { dbFor } from "./db-effect";
 import { addManualActivities } from "./manual-fns";

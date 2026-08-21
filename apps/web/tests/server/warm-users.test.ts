@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { syncAllUsers, warmAllUsers } from "../../src/lib/server/internal/sync-deps";
+import { syncAllUsers, warmAllUsers } from "../../src/lib/server/sync/deps";
 
 // #375 第 2 步 · 纵深防御:sweep 收尾逐用户预热,一个用户失败不该拖垮其余、也不该把整次 cron
 // 拖成异常收尾。`warmAllUsers` 收一个可注入的 `warmOne` 正是为了在这里让指定用户失败 ——

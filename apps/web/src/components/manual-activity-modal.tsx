@@ -18,7 +18,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
 import { useTokenPrice } from "../lib/hooks/use-token-price";
-import type { TokenOption } from "../lib/server/internal/tokens";
+import type { TokenOption } from "../lib/server/tokens/model";
 import { DateTimeWheel } from "./date-time-wheel";
 import { IconButton } from "./icon-button";
 import { Portal } from "./portal";

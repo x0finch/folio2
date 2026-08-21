@@ -3,7 +3,7 @@ import { TokenService } from "@folio/oracle";
 import { type ValuationMode, valuate } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import type { OverviewBalance } from "../../core/account-view";
-import { fungibleTokenId } from "./tokens";
+import { fungibleTokenId } from "../tokens/model";
 
 // 读时现推(Phase 3,#81):不落库,按当前 mode + 实时源价重算 value。
 // 关键:存储的 `selfPrice` 已编码盯市决策 —— null = 盯市类型(manual/bitcoin,无权威自带价,恒用源);

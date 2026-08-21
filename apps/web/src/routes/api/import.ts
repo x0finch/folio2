@@ -5,7 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { getAuth } from "@/lib/server/internal/auth";
 import { resolveAuth } from "@/lib/server/internal/auth-session";
-import { credentialSpecs } from "@/lib/server/internal/connector-registry";
+import { credentialSpecs } from "@/lib/server/connectors/registry";
 import { categorizeFields } from "@/lib/server/internal/creds";
 import {
   createImporter,

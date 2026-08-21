@@ -9,7 +9,7 @@ import {
   perpTokenId,
   refreshableTokenIds,
   toEnrichment,
-} from "../src/lib/server/internal/tokens";
+} from "../src/lib/server/tokens/model";
 
 // 读端那几道门:回答「这一行参不参与」,答案就是它的 token_id 或 null。
 // 认定在写快照时由 mint 定死(ADR 0021 / #201),所以这里不再造 `AssetRef` 让参考层现场解析。

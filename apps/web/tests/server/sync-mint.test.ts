@@ -4,7 +4,7 @@ import { globalTokenRefIndexStoreLayer, userCacheStoreLayer, userTokenStoreLayer
 import { CacheStore, GlobalTokenRefIndexStore, TokenStore } from "@folio/oracle-basic/ports";
 import { Effect, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { warmTokensForUser } from "../../src/lib/server/internal/sync-deps";
+import { warmTokensForUser } from "../../src/lib/server/sync/deps";
 import { dbFor, withStore } from "./db-effect";
 import { syncOne, syncRound } from "./sync-fns";
 

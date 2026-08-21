@@ -1,5 +1,5 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import { createAccountFor as createAccountForE } from "../../src/lib/server/internal/create-account";
+import { createAccountFor as createAccountForE } from "../../src/lib/server/accounts/create-account";
 import * as M from "../../src/lib/server/internal/manual";
 import { runRequest } from "../../src/lib/server/internal/oracle";
 

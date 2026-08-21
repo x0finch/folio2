@@ -4,13 +4,13 @@ import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
-import { loadAccountHistory } from "./internal/account-history";
-import { credentialSpecs, validateAccountCreds } from "./internal/connector-registry";
-import { createAccountFor, raw2sealed } from "./internal/create-account";
-import { isComplete, safeView } from "./internal/creds";
-import { sealManualAccount } from "./internal/manual";
-import { runRequest, runStore } from "./internal/oracle";
-import { requireAuth } from "./internal/require-auth";
+import { loadAccountHistory } from "./history";
+import { credentialSpecs, validateAccountCreds } from "../connectors/registry";
+import { createAccountFor, raw2sealed } from "./create-account";
+import { isComplete, safeView } from "../internal/creds";
+import { sealManualAccount } from "../internal/manual";
+import { runRequest, runStore } from "../internal/oracle";
+import { requireAuth } from "../internal/require-auth";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);各处只记 connectorId/accountId 等安全字段(红线:不打 creds)。
 const log = getLogger(["folio", "web", "accounts"]);

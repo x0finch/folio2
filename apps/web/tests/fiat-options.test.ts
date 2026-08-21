@@ -1,6 +1,6 @@
 import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
-import { buildFiatOptions } from "../src/lib/server/internal/fiat-options";
+import { buildFiatOptions } from "../src/lib/server/tokens/fiat-options";
 
 // 选币下拉「法币」组的数据构建(#272)。纯函数,不出网、无 per-user —— 只验形状 + 关键校验点:
 // 每张票能解回 `fiat/issued:<CODE>`(mintHolding 就靠这条建 canonical 法币行)。

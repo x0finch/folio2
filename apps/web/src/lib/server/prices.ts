@@ -6,7 +6,7 @@ import { Effect } from "effect";
 import { manualBalancesForWarm } from "./internal/manual";
 import { runRequest } from "./internal/oracle";
 import { requireAuth } from "./internal/require-auth";
-import { refreshableTokenIds, userDisplayBalances } from "./internal/tokens";
+import { refreshableTokenIds, userDisplayBalances } from "./tokens/model";
 
 const priceLog = getLogger(["folio", "web", "prices"]);
 

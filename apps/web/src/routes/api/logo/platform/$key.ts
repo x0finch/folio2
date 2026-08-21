@@ -1,7 +1,7 @@
 import { PlatformService } from "@folio/oracle";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { connectorPlatformMeta } from "@/lib/server/internal/connector-platform";
+import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import { serveLogo } from "@/lib/server/internal/logo";
 import { runRequest } from "@/lib/server/internal/oracle";
 import { userIdOf } from "@/lib/server/internal/route-auth";

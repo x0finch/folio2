@@ -3,7 +3,7 @@ import type { TokenRecord } from "@folio/oracle-basic";
 import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import type { CredsToken } from "../src/lib/core/manual";
-import { deriveLiveAccountTotals } from "../src/lib/server/internal/live-value";
+import { deriveLiveAccountTotals } from "../src/lib/server/portfolio/live-value";
 import { buildManualSnapshot, manualUnitPrices } from "../src/lib/server/internal/manual-snapshot";
 import { runWithOracle } from "./oracle-stub";
 

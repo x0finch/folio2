@@ -4,14 +4,14 @@ import { getLogger } from "@logtape/logtape";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { z } from "zod";
-import { isManual } from "../core/manual";
-import { credentialSpecs } from "./internal/connector-registry";
-import { isComplete } from "./internal/creds";
-import { logCategory } from "./internal/effect-log";
-import { runRequest } from "./internal/oracle";
-import { requireAuth } from "./internal/require-auth";
-import { syncServicesLayer, warmTokens } from "./internal/sync-deps";
-import { type SyncStatusSummary, summarizeSync } from "./internal/sync-status";
+import { isManual } from "../../core/manual";
+import { credentialSpecs } from "../connectors/registry";
+import { isComplete } from "../internal/creds";
+import { logCategory } from "../internal/effect-log";
+import { runRequest } from "../internal/oracle";
+import { requireAuth } from "../internal/require-auth";
+import { syncServicesLayer, warmTokens } from "./deps";
+import { type SyncStatusSummary, summarizeSync } from "./status";
 
 // 同步状态读模型(纯 —— 无 cloudflare env,可脱离 server fn 单测)。
 // PageHeader 的共享同步面板消费此摘要:ok/总数 + 上次更新 + 未同步来源(带原因)。

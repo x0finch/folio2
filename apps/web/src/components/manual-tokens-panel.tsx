@@ -29,7 +29,7 @@ import {
 import { useLocalDateFormat } from "../lib/hooks/use-local-date-format";
 import { manualAccountQuery } from "../lib/queries/accounts";
 import { invalidateFor } from "../lib/queries/refresh";
-import type { TokenOption } from "../lib/server/internal/tokens";
+import type { TokenOption } from "../lib/server/tokens/model";
 import {
   createManualActivities,
   removeManualActivity,

@@ -3,7 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
-import type { SyncStatusSummary } from "../lib/server/internal/sync-status";
+import type { SyncStatusSummary } from "../lib/server/sync/status";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
 

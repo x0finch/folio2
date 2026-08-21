@@ -9,8 +9,8 @@
 // (身份可变、金额不变),所以曲线不会在合并那一刻断成两段。
 
 import type { HistoryPoint, SnapshotTotalRow } from "../../core/history";
-import { type AggInput, groupKey, isEligible } from "./aggregate";
-import { buildPortfolioHistory } from "./history";
+import { type AggInput, groupKey, isEligible } from "../portfolio/aggregate";
+import { buildPortfolioHistory } from "../portfolio/history";
 
 export interface TokenHistRow extends AggInput {
   takenAt: number; // 该行所属快照时刻(账户 = account.id)
