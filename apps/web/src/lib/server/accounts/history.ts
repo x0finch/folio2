@@ -2,6 +2,7 @@ import { AccountStore, SnapshotStore } from "@folio/db";
 import { Effect } from "effect";
 import { MANUAL_CONNECTOR_ID } from "../../core/manual";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "../manual/store";
+import { runRequest } from "../oracle";
 import { buildAccountValueHistory } from "../portfolio/history";
 
 // 单账户价值历史(抽屉头部那条小曲线)。
@@ -51,3 +52,14 @@ export const loadAccountHistory = (input: {
     }
     return { series };
   });
+
+// getAccountHistory 的 handler:auth 薄壳,读路径分流全在上面的 loadAccountHistory。
+export function handleGetAccountHistory({
+  data,
+  context,
+}: {
+  data: { accountId: string; since?: number; connectorId?: string };
+  context: { userId: string };
+}) {
+  return runRequest(context.userId, loadAccountHistory(data));
+}

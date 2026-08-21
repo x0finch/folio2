@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
-import { type AccountSafe, AccountStore, type ManualStore } from "@folio/db";
+import { type AccountSafe, AccountStore, type ManualStore, PortfolioStore } from "@folio/db";
 import type { TokenService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
@@ -8,9 +8,10 @@ import { isManual } from "../../core/manual";
 import { credentialSpecs, validateAccountCreds } from "../connectors/registry";
 import { sealCreds } from "../creds";
 import { createManualAccount } from "../manual/store";
+import { runRequest } from "../oracle";
 
-// 账户创建的分派逻辑(server fn 之外的纯 async → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。
-// createAccount server fn(见 accounts.ts)只做 auth 薄壳后调本函数。SECRETS_KEY 只在此 app 层见,不进 connectors。
+// 账户创建的分派逻辑(handler 之外的纯 Effect → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。
+// createAccount server fn(见 ./index)只做装配;auth 薄壳即 handleCreateAccount。SECRETS_KEY 只在此 app 层见,不进 connectors。
 const log = getLogger(["folio", "web", "accounts"]);
 
 // connectors 层校验/规格 → 业务层按字段 type seal(只有 secret 加密,public/semi 明文)。
@@ -48,3 +49,36 @@ export const createAccountFor = (
     log.info("account created", { connectorId, accountId: account.id });
     return account;
   });
+
+// 统一创建入口(connector-driven,#55/#52):校验/分派在上面的 createAccountFor;这里把
+// 「建账户 → 归属到选中的 Portfolio」拼进同一次装配(#394 T6),userId 只在这一处出现。
+export async function handleCreateAccount({
+  data,
+  context,
+}: {
+  data: {
+    connectorId: string;
+    label: string;
+    values: Record<string, string>;
+    portfolioId?: string;
+  };
+  context: { userId: string };
+}) {
+  return runRequest(
+    context.userId,
+    Effect.gen(function* () {
+      const account = yield* createAccountFor(
+        data.connectorId as ConnectorId,
+        data.label,
+        data.values,
+      );
+      // createAccountFor 已把账户落进默认 Portfolio;若指定了非默认的选中,改归属过去。
+      if (data.portfolioId) {
+        yield* Effect.flatMap(PortfolioStore, (s) =>
+          s.assignAccount(account.id, data.portfolioId as string),
+        );
+      }
+      return account;
+    }),
+  );
+}
