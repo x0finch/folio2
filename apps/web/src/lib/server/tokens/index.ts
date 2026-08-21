@@ -2,8 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireAuth } from "../session/require-auth";
 import { handleListTokenCatalogue } from "./catalogue";
-import { handleListFiatOptions } from "./list-fiat-options";
 import { handleListTokens } from "./list";
+import { handleListFiatOptions } from "./list-fiat-options";
 import { handleGetTokenPrice } from "./price";
 import { handleRefreshTokenPrices } from "./refresh-prices";
 
