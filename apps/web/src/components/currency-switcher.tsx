@@ -35,7 +35,7 @@ export function CurrencySwitcher() {
   const t = useTranslations("Currency");
   const { currency } = usePreferCurrency();
 
-  // cookie 由服务端写(见 lib/server/preferences.ts):客户端设不上 HttpOnly/SameSite/Secure。
+  // cookie 由服务端写(见 lib/server/preferences):客户端设不上 HttpOnly/SameSite/Secure。
   const setCurrency = useMutation({
     mutationFn: (code: string) => setCurrencyPreference({ data: { code } }),
     onSuccess: () => invalidateFor(queryClient, "preference.currency"),

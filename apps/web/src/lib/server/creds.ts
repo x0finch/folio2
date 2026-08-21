@@ -1,7 +1,7 @@
 import { decrypt, encrypt, maskCredential } from "@folio/connectors-basic";
 
 // provider 的 CredField 的可序列化投影(剥掉不可序列化的 validator,前端/塑形只需 key+type+label)。
-// 由 lib/server/connectors.ts 的 credentialSpecs() 从 connector manifest 的 account.creds 派生。
+// 由 lib/server/connectors/registry.ts 的 credentialSpecs() 从 connector manifest 的 account.creds 派生。
 export interface InputSpec {
   key: string;
   type: "public" | "semi" | "secret";

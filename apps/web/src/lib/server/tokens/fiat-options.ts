@@ -9,7 +9,7 @@ import type { TokenOption } from "./model";
 //   · `symbol = CODE`(USD/EUR…),`logo` 取 `SUPPORTED_CURRENCIES` 的内嵌 base64(单一来源,#268)。
 //   · **不带 `price`** —— 法币没有上游市价;选中后由 getTokenPrice 走 FX 预填(USD=1,其余当前汇率)。
 //
-// **纯函数,只由服务端消费**(`server/tokens.ts` 的 `listFiatOptions`)—— 造票是 oracle 的服务、
+// **纯函数,只由服务端消费**(`server/tokens/get-fiat-options.ts`)—— 造票是 oracle 的服务、
 // 归服务端做,前端拿到的是不透明串(与目录/已有/搜索一致;前端绝不构造 tokenRef/票,见 token-option.ts
 // 红线)。放在这里 import `tokenTicket`/`tokenRef` 不进客户端 bundle,只要没有客户端模块 import 它。
 //
