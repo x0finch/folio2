@@ -42,13 +42,13 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 - **`apps/web/src/lib` 分层,判据是「客户端能不能用它」,不是「它碰不碰 env」**(#179 立的规矩,这里补上判据):
   - `lib/core/*.ts` —— 客户端**真的可以** import 的纯件(纯推导、视图形状、跨端共用的领域计算)。
   - `lib/hooks/*.ts`、`lib/i18n/*.ts`、`lib/queries/*.ts` —— 客户端专用的那几类,按用途分目录。
-  - `lib/server/*.ts` —— `createServerFn` 本身,资源面。
-  - `lib/server/internal/*.ts` —— 只有服务端能跑的实现层:env/单例装配、领域核心、warmer、route helper,**以及任何 `import { Effect }` 的东西**。
+  - `lib/server/<资源>/index.ts`(或无私有 helper 的瘦资源单文件 `lib/server/<资源>.ts`)—— `createServerFn` 资源面。**客户端只准 import 这一层**(外加任何位置的 `import type`,见下条)。
+  - `lib/server/` 其余一切 —— 只有服务端能跑的实现层:资源目录里的私有 helper、无 index 的域库目录(`manual/`、`logos/`、`io/`、`entry/`)、顶层基座散件(`oracle.ts`/`creds.ts`/`effect-log.ts`),装的是 env/单例装配、领域核心、warmer、route helper,**以及任何 `import { Effect }` 的东西**。(#499 撤掉了曾经的 `internal/` 目录:「客户端不能碰」这道墙由“资源面即 index”来当,不再靠一层名叫 internal 的文件夹。)
   判据要按「能不能」而不是「碰不碰 env」,是因为按后者判会把一批 DI 写法的纯模块留在共用层 —— 它们不碰 env,却要 oracle 服务,客户端一辈子供不上。留在那儿只有打包时的摇树在拦,而摇树是优化不是保证。
 
 - **`lib/` 顶层不放文件 —— 一个模块要么住进上面某个目录,要么住进它唯一的使用者。** 曾经的顶层是个 47 文件的杂物层:一多半只有一个 route 或一个 server fn 在用,却因为「像是个工具」被摆在全站可见的位置。只有一个使用者的,搬到使用者身边去。
 
-- **准入 `lib/core/` 的判据是「有没有第二侧在**调它的代码**」——`import type` 不算。** 类型引用在编译后完全消失,不会把任何服务端代码带进 client bundle(要防的一直是 value-import,见上一条)。所以「逻辑全在服务端、页面只要个数据形状」的模块**不是共用件**,它该跟着逻辑住 `lib/server/internal/`,页面照常 `import type` 拿形状。
+- **准入 `lib/core/` 的判据是「有没有第二侧在**调它的代码**」——`import type` 不算。** 类型引用在编译后完全消失,不会把任何服务端代码带进 client bundle(要防的一直是 value-import,见上一条)。所以「逻辑全在服务端、页面只要个数据形状」的模块**不是共用件**,它该跟着逻辑住 `lib/server` 的对应资源目录,页面照常 `import type` 拿形状。
   这条是踩出来的:第一版按「有人引就算共用」摆了 15 个进 core,其中 `tokens` / `aggregate` / `creds` / `sync-status` 四个的**全部函数调用点都在服务端**,页面一行都没调 —— 它们是被自己的类型绑在共用层的。
   - **拆一个混合模块时,缝在职责上,不在 client/server 上。** `history` 看着像「服务端建曲线 / 客户端画曲线」,但 `downsampleSeries` 两边都调 —— 真正的缝是**采样**(共用)与**从快照重建**(只服务端)。按 client/server 硬切会切出一份要被复制的原语。
   - **搬走一个符号前先数它的使用者。** `toPerpView` 在 core 之外零使用者(只有 `account-view` 调),`downsampleSeries`/`toDailySeries` 各只有一个 —— 这种不需要共用层,直接并进那个唯一的使用者。
