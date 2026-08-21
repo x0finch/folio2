@@ -8,8 +8,8 @@ import { useTranslations } from "use-intl";
 import { formatNumber } from "../lib/core/format-number";
 import { useDebouncedValue } from "../lib/hooks/use-debounced-value";
 import { fiatOptionsQuery, tokenCatalogueQuery, tokenSearchQuery } from "../lib/queries/tokens";
-import type { TokenOption } from "../lib/server/tokens/model";
 import { refreshTokenPrices } from "../lib/server/tokens";
+import type { TokenOption } from "../lib/server/tokens/model";
 import {
   buildTokenSections,
   type LivePrice,

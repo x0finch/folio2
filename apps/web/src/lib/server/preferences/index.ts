@@ -5,8 +5,8 @@ import { z } from "zod";
 import type { PreferCurrency } from "../../hooks/use-prefer-currency";
 import { LOCALE_COOKIE, pickLocale, readLocaleCookie } from "../../i18n/detect";
 import type { Locale } from "../../i18n/messages";
-import { displayRate } from "./fx";
 import { requireAuth } from "../session/require-auth";
+import { displayRate } from "./fx";
 
 // 展示币种偏好(每浏览器,仿 locale)。纯逻辑:cookie 解析 + 按 SUPPORTED 校验。
 const CURRENCY_COOKIE = "folio_currency";

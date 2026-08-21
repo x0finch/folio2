@@ -18,11 +18,7 @@ import {
 } from "../../core/accounts-in-view";
 import { connectorLabelFallback, platformLogoUrl } from "../../core/logo";
 import { isManual } from "../../core/manual";
-import { loadAccountHoldings } from "./account-holdings";
 import { connectorPlatformMeta } from "../connectors/platform";
-import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./gain-24h";
-import { buildPortfolioHistory } from "./history";
-import { deriveLiveAccountTotals } from "./live-value";
 import {
   injectManualSnapshots,
   loadManualGainHistory,
@@ -30,8 +26,12 @@ import {
   manualFiatRefs,
 } from "../manual/store";
 import { runAtEdge, runRequest, runStore, withRequest } from "../oracle";
-import { buildOverview, type OverviewDeps } from "./overview-model";
 import { requireAuth } from "../session/require-auth";
+import { loadAccountHoldings } from "./account-holdings";
+import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./gain-24h";
+import { buildPortfolioHistory } from "./history";
+import { deriveLiveAccountTotals } from "./live-value";
+import { buildOverview, type OverviewDeps } from "./overview-model";
 import { kindPresence, resolvePinLabel } from "./tab-strip";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。

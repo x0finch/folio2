@@ -1,5 +1,7 @@
 import { AccountStore, SnapshotStore } from "@folio/db";
 import { Effect } from "effect";
+import { injectManualSnapshots, loadManualGainHistory } from "../manual/store";
+import { enrichBalances } from "../tokens/enrich";
 import {
   buildGainLines,
   computeGain24h,
@@ -8,8 +10,6 @@ import {
   type Gain,
   type GainCurrentRow,
 } from "./gain-24h";
-import { injectManualSnapshots, loadManualGainHistory } from "../manual/store";
-import { enrichBalances } from "../tokens/enrich";
 
 type WithOptionalGain<R extends { balances: readonly unknown[] }> = Omit<R, "balances"> & {
   gain24h?: Gain | null;

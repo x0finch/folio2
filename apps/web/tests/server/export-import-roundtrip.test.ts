@@ -10,12 +10,8 @@ import {
   snapshotRecord,
   tokenRecord,
 } from "../../src/lib/server/io/export";
+import { createImporter, type ImportDeps, parseImportLine } from "../../src/lib/server/io/import";
 import { buildPortfolioHistory } from "../../src/lib/server/portfolio/history";
-import {
-  createImporter,
-  type ImportDeps,
-  parseImportLine,
-} from "../../src/lib/server/io/import";
 import { dbFor } from "./db-effect";
 
 // #204 的核心验收:**导出的文件能单独导进一个空库,总资产与历史曲线跟原库一致**。
