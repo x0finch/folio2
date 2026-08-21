@@ -4,6 +4,7 @@ import { accountIdsInView, accountsInView } from "../../core/accounts-in-view";
 import { isManual } from "../../core/manual";
 import { injectManualSnapshots, loadManualHistoryRows } from "../manual/store";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { buildPortfolioHistory } from "./history";
 import { deriveLiveAccountTotals } from "./live-value";
 import { resolveScope } from "./scope";
@@ -19,7 +20,7 @@ export function handleGetPortfolioHistory({
   context,
 }: {
   data: { portfolioId?: string };
-  context: { userId: string };
+  context: AuthContext;
 }) {
   return runRequest(
     context.userId,

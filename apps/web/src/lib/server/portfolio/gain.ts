@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { defiGainKey } from "../../core/account-view";
 import { runAtEdge, runRequest, withRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { loadAccountHoldings } from "./account-holdings";
 import { buildScopedOverview, type PortfolioScope } from "./scope";
 
@@ -10,7 +11,7 @@ export function handleGetPortfolioGain24h({
   context,
 }: {
   data: PortfolioScope;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   return runAtEdge(
     withRequest(
@@ -35,7 +36,7 @@ export function handleGetPortfolioGain24h({
 }
 
 // #493 票 3:账户页 24h 盈亏独立读取。同一条 `loadAccountHoldings(true)`,只把盈亏字段带出来。
-export function handleGetAccountGain24h({ context }: { context: { userId: string } }) {
+export function handleGetAccountGain24h({ context }: { context: AuthContext }) {
   return runRequest(
     context.userId,
     Effect.gen(function* () {

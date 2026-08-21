@@ -2,6 +2,7 @@ import { PortfolioStore } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
 import { runStore } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 
 // 把账户移到某 Portfolio:传 portfolioId 移到既有,或传 newName 一步「新建命名 Portfolio + 归属」
 // (抽屉「移到 → 新建…」)。至少给其一(refine 把关)。返回归属到的 portfolioId(客户端据此可切换选中)。
@@ -20,7 +21,7 @@ export async function handleMoveAccountToPortfolio({
   context,
 }: {
   data: z.infer<typeof MoveAccountInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   // 建 Portfolio + 归属**一次装配**:它们本来就是一步操作的两半。
   const targetId = await runStore(context.userId, PortfolioStore, (s) =>

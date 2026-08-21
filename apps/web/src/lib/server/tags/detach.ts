@@ -1,6 +1,7 @@
 import { TagStore } from "@folio/db";
 import type { z } from "zod";
 import { runStore } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import type { AccountTagInput } from "./attach";
 
 export function handleDetachTag({
@@ -8,7 +9,7 @@ export function handleDetachTag({
   context,
 }: {
   data: z.infer<typeof AccountTagInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   return runStore(context.userId, TagStore, (s) => s.detach(data.accountId, data.tagId));
 }

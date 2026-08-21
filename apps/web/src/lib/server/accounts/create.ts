@@ -10,6 +10,7 @@ import { credentialSpecs, validateAccountCreds } from "../connectors/registry";
 import { sealCreds } from "../creds";
 import { createManualAccount } from "../manual/store";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 
 // 账户创建的分派逻辑(handler 之外的纯 Effect → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。
 // createAccount server fn(见 ./index)只做装配;auth 薄壳即 handleCreateAccount。SECRETS_KEY 只在此 app 层见,不进 connectors。
@@ -67,7 +68,7 @@ export async function handleCreateAccount({
   context,
 }: {
   data: z.infer<typeof CreateAccountInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   return runRequest(
     context.userId,

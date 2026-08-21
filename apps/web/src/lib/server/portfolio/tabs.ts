@@ -5,6 +5,7 @@ import { accountsInView } from "../../core/accounts-in-view";
 import { connectorLabelFallback, platformLogoUrl } from "../../core/logo";
 import { connectorPlatformMeta } from "../connectors/platform";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { resolveScope } from "./scope";
 import { kindPresence, resolvePinLabel } from "./tab-strip";
 
@@ -16,7 +17,7 @@ export function handleGetHomeTabStrip({
   context,
 }: {
   data: { portfolioId?: string };
-  context: { userId: string };
+  context: AuthContext;
 }) {
   return runRequest(
     context.userId,

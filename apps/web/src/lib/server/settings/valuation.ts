@@ -1,9 +1,10 @@
 import { SettingsStore } from "@folio/db";
 import { z } from "zod";
 import { runStore } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 
 // per-user 估值设置(Phase 3,#82)。读带缺省(无行 → coingecko / self-first)。
-export function handleGetValuationSettings({ context }: { context: { userId: string } }) {
+export function handleGetValuationSettings({ context }: { context: AuthContext }) {
   return runStore(context.userId, SettingsStore, (s) => s.get());
 }
 
@@ -15,7 +16,7 @@ export async function handleUpdateValuationSettings({
   context,
 }: {
   data: z.infer<typeof ValuationInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   await runStore(context.userId, SettingsStore, (s) => s.update({ valuationMode: data.mode }));
   return { ok: true };

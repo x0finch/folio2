@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import { isFungible, viewKind } from "../../core/balance-kind";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { buildTokenValueHistory, type TokenHistRow } from "./token-history";
 
 export const HoldingHistoryInput = z.object({
@@ -21,7 +22,7 @@ export async function handleGetHoldingHistory({
   context,
 }: {
   data: z.infer<typeof HoldingHistoryInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   // 一次 db 读,所以这里的「一次装配」谈不上省了几次边界 —— 它是**为了让门面能被删掉**
   // (#394 T8):`db.` 那层过渡门面每次调用各建一次 layer + 各跑一次 runPromise,方向与

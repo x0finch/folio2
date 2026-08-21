@@ -4,6 +4,7 @@ import { isManual } from "../../core/manual";
 import { credentialSpecs } from "../connectors/registry";
 import { isComplete } from "../creds";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { type SyncStatusSummary, summarizeSync } from "./status";
 
 // 全局同步状态摘要(PageHeader 共享同步面板;每个认证页 loader 消费)。
@@ -19,7 +20,7 @@ import { type SyncStatusSummary, summarizeSync } from "./status";
 export function handleGetSyncStatus({
   context,
 }: {
-  context: { userId: string };
+  context: AuthContext;
 }): Promise<SyncStatusSummary> {
   return runRequest(
     context.userId,

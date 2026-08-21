@@ -1,6 +1,7 @@
 import { PortfolioStore } from "@folio/db";
 import { z } from "zod";
 import { runStore } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 
 // 改名(含默认)。
 export const RenamePortfolioInput = z.object({
@@ -13,7 +14,7 @@ export async function handleRenamePortfolio({
   context,
 }: {
   data: z.infer<typeof RenamePortfolioInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   await runStore(context.userId, PortfolioStore, (s) => s.rename(data.portfolioId, data.name));
   return { ok: true as const };

@@ -2,6 +2,7 @@ import { FIAT_NAMER } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
 import { z } from "zod";
 import { NAMER, runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { priceTickets } from "./pricing";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
@@ -15,7 +16,7 @@ export async function handleGetTokenPrice({
   context,
 }: {
   data: z.infer<typeof TokenPriceInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   // 与批量刷价同一段分流(priceTickets):法币走 FX、其余走代币源。这里一次只一张票,取首条 → 无价回 null,
   // 让用户自己填(别过度设计)。**不 warm** —— 预填这一下靠 loader / listFiatOptions 已暖的缓存,别再拉一趟。

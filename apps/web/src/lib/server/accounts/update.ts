@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import { sealManualAccount } from "../manual/store";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 
 const log = getLogger(["folio", "web", "accounts"]);
 
@@ -32,7 +33,7 @@ export async function handleUpdateAccount({
   context,
 }: {
   data: z.infer<typeof UpdateAccountInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   const sealed = await runRequest(
     context.userId,

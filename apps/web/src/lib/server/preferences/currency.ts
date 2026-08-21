@@ -2,6 +2,7 @@ import { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "@folio/or
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { z } from "zod";
 import type { PreferCurrency } from "../../hooks/use-prefer-currency";
+import type { AuthContext } from "../session/auth-session";
 import { writePreferenceCookie } from "./cookie";
 import { displayRate } from "./fx";
 
@@ -37,7 +38,7 @@ function readCurrencyCookie(cookieHeader: string | null | undefined): string | u
 export async function handleGetCurrencyPreference({
   context,
 }: {
-  context: { userId: string };
+  context: AuthContext;
 }): Promise<PreferCurrency> {
   const headers = getRequestHeaders();
   const currency = resolveCurrency(readCurrencyCookie(headers.get("cookie")));

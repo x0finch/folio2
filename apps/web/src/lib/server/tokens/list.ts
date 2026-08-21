@@ -3,6 +3,7 @@ import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { edgeCached, SEARCH_CACHE_TTL_S } from "./edge-cache";
 import { type TokenOption, toOption } from "./model";
 
@@ -17,7 +18,7 @@ export async function handleListTokens({
   context,
 }: {
   data: z.infer<typeof ListTokensInput>;
-  context: { userId: string };
+  context: AuthContext;
 }): Promise<TokenOption[]> {
   const q = data.query.trim();
   tokenLog.debug("searchTokens: enter", { query: q });

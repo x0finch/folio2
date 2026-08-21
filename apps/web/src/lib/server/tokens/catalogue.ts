@@ -3,6 +3,7 @@ import { DEFAULT_TOP_N } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { CATALOGUE_CACHE_TTL_S, edgeCached } from "./edge-cache";
 import { type TokenOption, toOption } from "./model";
 
@@ -17,7 +18,7 @@ const tokenLog = getLogger(["folio", "web", "tokens"]);
 export async function handleListTokenCatalogue({
   context,
 }: {
-  context: { userId: string };
+  context: AuthContext;
 }): Promise<TokenOption[]> {
   tokenLog.debug("catalogue: enter");
   const out = await runRequest(

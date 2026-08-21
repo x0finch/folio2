@@ -15,3 +15,7 @@ export function resolveAuth(result: SessionResult | null) {
   }
   return { userId: result.user.id, user: result.user, session: result.session };
 }
+
+// requireAuth 注入下游 handler 的 context 形状 —— 从注入函数本身推导,
+// handler 不各自复述一份 `{ userId: string }`(形状变了只改 resolveAuth 一处)。
+export type AuthContext = ReturnType<typeof resolveAuth>;

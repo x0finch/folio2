@@ -2,6 +2,7 @@ import { FIAT_NAMER } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
 import { z } from "zod";
 import { NAMER, runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { priceTickets } from "./pricing";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
@@ -19,7 +20,7 @@ export async function handleRefreshTokenPrices({
   context,
 }: {
   data: z.infer<typeof RefreshTokenPricesInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   // 票携带当前上游(加密币)或 `fiat`(法币)命名者,两者都放行(同 getTokenPrice / mintHolding)——
   // 只收 NAMER 的话「已有代币」组里的法币持仓会被丢掉、价格列恒显 "—"(法币无代币市价,得走 FX)。

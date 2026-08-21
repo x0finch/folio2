@@ -3,6 +3,7 @@ import { getLogger } from "@logtape/logtape";
 import { z } from "zod";
 import { validateAccountCreds } from "../connectors/registry";
 import { runStore } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { raw2sealed } from "./create";
 
 // userId 经 requireAuth 的 withContext 自动带入(ALS);只记 connectorId/accountId 等安全字段(红线:不打 creds)。
@@ -19,7 +20,7 @@ export async function handleReplaceAccountCredentials({
   context,
 }: {
   data: z.infer<typeof ReplaceCredentialsInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   const account = await runStore(context.userId, AccountStore, (s) => s.getById(data.accountId));
   if (!account) throw new Error("account not found");

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { isManual } from "../../core/manual";
 import { logCategory } from "../effect-log";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { syncServicesLayer, warmTokens } from "./deps";
 
 const syncLog = getLogger(["folio", "web", "sync"]);
@@ -29,7 +30,7 @@ export async function handleSyncAccount({
   context,
 }: {
   data: z.infer<typeof SyncAccountInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   const userId = context.userId;
   // 「没这个账户」在**边缘**抛,不在 effect 里 `die` —— 后者会被 `runPromise` 包成 FiberFailure,

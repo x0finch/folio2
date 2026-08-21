@@ -5,6 +5,7 @@ import { MANUAL_CONNECTOR_ID } from "../../core/manual";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "../manual/store";
 import { runRequest } from "../oracle";
 import { buildAccountValueHistory } from "../portfolio/history";
+import type { AuthContext } from "../session/auth-session";
 
 // 单账户价值历史(抽屉头部那条小曲线)。
 //
@@ -66,7 +67,7 @@ export function handleGetAccountHistory({
   context,
 }: {
   data: z.infer<typeof AccountHistoryInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   return runRequest(context.userId, loadAccountHistory(data));
 }

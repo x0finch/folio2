@@ -4,13 +4,14 @@ import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { manualBalancesForWarm } from "../manual/store";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { refreshableTokenIds, userDisplayBalances } from "../tokens/model";
 
 const priceLog = getLogger(["folio", "web", "prices"]);
 
 // SWR 刷价(客户端在看到 pricesStale 后调用):对该用户最新快照的全部持仓,凡解析出 ref 且价
 // stale/缺失者一次批量回源写回。服务端自算 stale 集(不信客户端入参);失败静默(下次再试)。
-export async function handleRefreshStalePrices({ context }: { context: { userId: string } }) {
+export async function handleRefreshStalePrices({ context }: { context: AuthContext }) {
   // **整个 handler 一个 effect、一次装配**(#394 T5)。以前是「两次 db 读 → 一次 manual 合成
   // (它自己又读一遍 db)→ 一次 runOracle」,四趟各切一次边界;现在读快照、读账户、合 manual、
   // 回源刷价共一份 context。

@@ -2,6 +2,7 @@ import { AccountStore, SnapshotStore } from "@folio/db";
 import { Effect } from "effect";
 import { injectManualSnapshots, loadManualGainHistory } from "../manual/store";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { enrichBalances } from "../tokens/enrich";
 import {
   buildGainLines,
@@ -153,6 +154,6 @@ export const loadAccountHoldings = (withGain = false) =>
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓,**含已归档账户**(ADR 0039)。
 // handler 只是 auth 薄壳 —— 取数在上面的 loadAccountHoldings,这边才测得到(workers 池要驱动真 D1)。
-export function handleListAccountHoldings({ context }: { context: { userId: string } }) {
+export function handleListAccountHoldings({ context }: { context: AuthContext }) {
   return runRequest(context.userId, loadAccountHoldings());
 }

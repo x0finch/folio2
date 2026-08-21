@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { addManualActivities } from "../manual/store";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 
 export const ActivityKind = z.enum(["add", "reduce", "set"]);
 
@@ -32,7 +33,7 @@ export function handleCreateManualActivities({
   context,
 }: {
   data: { accountId: string; drafts: Parameters<typeof addManualActivities>[1] };
-  context: { userId: string };
+  context: AuthContext;
 }) {
   return runRequest(context.userId, addManualActivities(data.accountId, data.drafts));
 }

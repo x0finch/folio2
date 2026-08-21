@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { editManualActivity } from "../manual/store";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { ActivityKind } from "./create";
 
 export const UpdateActivityInput = z.object({
@@ -20,7 +21,7 @@ export function handleUpdateManualActivity({
   context,
 }: {
   data: { activityId: string; patch: Parameters<typeof editManualActivity>[1] };
-  context: { userId: string };
+  context: AuthContext;
 }) {
   return runRequest(context.userId, editManualActivity(data.activityId, data.patch));
 }

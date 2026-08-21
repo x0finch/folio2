@@ -1,6 +1,7 @@
 import { TagStore } from "@folio/db";
 import { z } from "zod";
 import { runStore } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 
 export const CreateTagInput = z.object({
   portfolioId: z.string().min(1),
@@ -12,7 +13,7 @@ export function handleCreateTag({
   context,
 }: {
   data: z.infer<typeof CreateTagInput>;
-  context: { userId: string };
+  context: AuthContext;
 }) {
   return runStore(context.userId, TagStore, (s) =>
     s.create({ portfolioId: data.portfolioId, name: data.name }),

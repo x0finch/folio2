@@ -3,6 +3,7 @@ import { getRequestHeaders } from "@tanstack/react-start/server";
 import { Clock, Effect, Option } from "effect";
 import { pickLocale, readLocaleCookie } from "../../i18n/detect";
 import { runRequest } from "../oracle";
+import type { AuthContext } from "../session/auth-session";
 import { buildFiatOptions } from "./fiat-options";
 import type { TokenOption } from "./model";
 
@@ -13,7 +14,7 @@ import type { TokenOption } from "./model";
 export function handleListFiatOptions({
   context,
 }: {
-  context: { userId: string };
+  context: AuthContext;
 }): Promise<TokenOption[]> {
   const headers = getRequestHeaders();
   const locale = pickLocale(
