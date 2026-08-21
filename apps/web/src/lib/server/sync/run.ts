@@ -9,9 +9,9 @@ import { syncServicesLayer, warmTokens } from "./deps";
 
 const syncLog = getLogger(["folio", "web", "sync"]);
 
-// 只同步单个账户(详情侧栏「单独同步」):取该账户 + 其 raw creds → syncAccountCore 隔离写快照。
-// 归档账户理论上侧栏会禁用此项;即便调用,syncAccountCore 仍按现有逻辑处理(缺凭据→skipped)。
-// 全量同步走 /api/sync 流式端点(服务端 waitUntil 兜底);这里只留单账户同步 + 状态。
+// 只同步单个账户(详情侧栏「单独同步」):取该账户 + 其 raw creds → `@folio/sync` 内核隔离写快照。
+// 归档账户理论上侧栏会禁用此项;即便调用,内核仍按现有逻辑处理(缺凭据→skipped)。
+// 全量同步走 /api/sync 流式端点(服务端 waitUntil 兜底);这里只管单账户同步(状态在 ./get-status)。
 //
 // **一次装配跑完整条链**(#394 T5):读账户 → 读凭据 → 同步 → 预热,四步共一份 context。以前是
 // 两次 `db.`(各自建一次 layer、各跑一次 runPromise)+ 一次 `warmTokensForUser`(再建一套),

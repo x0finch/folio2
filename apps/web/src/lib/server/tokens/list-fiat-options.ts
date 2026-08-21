@@ -7,7 +7,7 @@ import { buildFiatOptions } from "./fiat-options";
 import type { TokenOption } from "./model";
 
 // 选币下拉「法币」组:SUPPORTED_CURRENCIES 的 10 法币。**票在服务端造**(前端拿不透明串,与目录/
-// 已有/搜索一致;前端绝不构造 tokenRef/票 —— 见 token-option.ts 红线)。货币名按请求 locale 本地化。
+// 已有/搜索一致;前端绝不构造 tokenRef/票 —— 红线见 ./model 的 `TokenOption`)。货币名按请求 locale 本地化。
 // 静态数据、无网络、无 per-user —— 不走边缘缓存、不建行。构造逻辑在纯函数 `buildFiatOptions`
 // (server-only 消费,故文法不进客户端 bundle)。
 export function handleListFiatOptions({

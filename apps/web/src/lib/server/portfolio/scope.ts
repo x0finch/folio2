@@ -1,6 +1,11 @@
 import { AccountStore, PortfolioStore, SettingsStore, SnapshotStore, TagStore } from "@folio/db";
 import { Effect } from "effect";
-import { accountsInView, accountsMatchingPin, toTabPin } from "../../core/accounts-in-view";
+import {
+  accountsInView,
+  accountsMatchingPin,
+  type TabPinScope,
+  toTabPin,
+} from "../../core/accounts-in-view";
 import { connectorPlatformMeta } from "../connectors/platform";
 import { injectManualSnapshots, loadManualGainHistory, manualFiatRefs } from "../manual/store";
 import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./gain-24h";
@@ -8,16 +13,10 @@ import { buildOverview, type OverviewDeps } from "./overview-model";
 
 // 选中 Portfolio 入参(客户端选择器传的临时选中 id,可空 → 用默认)与其上叠的自定义 Tab pin
 // (ADR 0034,按 connector/tag/account 在选中 Portfolio 内再收窄)。zod 校验在 index 装配层,
-// 这里只收窄后的普通形状 —— handler 文件不依赖 zod。
-interface TabPinScopeInput {
-  kind: "connector" | "tag" | "account";
-  connectorId?: string;
-  tagId?: string;
-  accountId?: string;
-}
+// 这里只收窄后的普通形状 —— pin 的形状家在 core/accounts-in-view 的 `TabPinScope`,不另造一份。
 export interface PortfolioScope {
   portfolioId?: string;
-  pin?: TabPinScopeInput;
+  pin?: NonNullable<TabPinScope>;
 }
 
 // 校验传入的 selectedId 属于该用户,否则退回默认(客户端传入不可信 —— 传别人的 id 只会得到空视图,

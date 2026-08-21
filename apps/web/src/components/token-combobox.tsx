@@ -177,7 +177,7 @@ export function TokenCombobox({
   const remoteQuery = useQuery({ ...tokenSearchQuery(search), enabled: open && wantRemote });
 
   // 法币组(#272):SUPPORTED_CURRENCIES 的 10 法币。**票在服务端造**(与目录/已有一致,前端只拿不透明串,
-  // 不构造 tokenRef/票 —— 见 token-option.ts),名字按请求 locale 已本地化。静态数据,挂载即预取。
+  // 不构造 tokenRef/票 —— 红线见 lib/server/tokens/model.ts 的 `TokenOption`),名字按请求 locale 已本地化。静态数据,挂载即预取。
   const fiatQuery = useQuery(fiatOptionsQuery());
   const fiat = useMemo(() => fiatQuery.data ?? [], [fiatQuery.data]);
 

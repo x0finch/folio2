@@ -80,7 +80,7 @@ export function displayTokenIds(rows: readonly BalanceLike[]): string[] {
 //   · 语义:同一个 token 可能既有现货(+)又有 defi 借款腿(−,rabby 负债腿 amount 取负 → value 为负,
 //     且 ref 与现货同源 → 同 tokenId)。对冲/循环贷仓位净值可能≈0,但两条腿都**需要**这个价,
 //     绝不能因净值抵消就当它不值钱、不刷。
-//   · 无 spin:标脏侧(overview 只喂 eligible,不含 defi)喂的是刷价侧(prices.ts 喂全量)的**子集**。
+//   · 无 spin:标脏侧(overview 只喂 eligible,不含 defi)喂的是刷价侧(prices/refresh-stale.ts 喂全量)的**子集**。
 //     `Σ|v|` 对「加行」单调不减 → 子集和 ≤ 全集和 → 标脏(子集越阈值)必蕴含刷价侧也越阈值 →
 //     绝不会「标了脏却刷不到」。换成 `|Σ v|`:标脏侧只见 +500 → 标脏,刷价侧见 +500−500=0 → 跳过 →
 //     客户端每次进页空转(见 token-enrich 的「三门同源」)。这正是 code-review 抓到的坑。

@@ -202,7 +202,7 @@ export const injectManualSnapshots = (
 // 再抄一遍就等于给「manual 此刻值多少」开第二个答案。
 //
 // 传进来的账户必须**还没被打上归档标记** —— 注入那条路按 `archivedAt == null` 过滤(见
-// `manualTokensByAccount`),打完标记再来这里会一无所获。调用点的顺序因此不是风格问题,见 accounts.ts。
+// `manualTokensByAccount`),打完标记再来这里会一无所获。调用点的顺序因此不是风格问题,见 accounts/update.ts。
 //
 // 返回是否真的落了一张:非 manual 账户不落(它们本来就有快照,再补一张没有新信息)。
 export const sealManualAccount = (
@@ -243,7 +243,7 @@ export const manualBalancesForWarm = (
   );
 
 // —— T3 写路径(#155):token CRUD + 批量活动(原子)+ 删/改活动 ——
-// server fn(manual-mutations.ts)只做 auth 薄壳后调这些纯 async(可在 workers-pool 集成测,不引 createServerFn)。
+// server fn(manual-activities/ 与 manual-tokens/ 的 handler)只做 auth 薄壳后调这些纯 async(可在 workers-pool 集成测,不引 createServerFn)。
 // **不再有物化那一步**(#203):持仓一律 compute-on-read,写路径只落事实(声明 + 活动)。
 // 决策逻辑(解析/收养/超支校验)下沉纯模块 manual-batch;这里只做加载 + 调用 + 物化(ADR 0017)。
 
