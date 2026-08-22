@@ -2,7 +2,7 @@ import { formatTokenRef, type TokenRef } from "@folio/oracle-ref";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { manualActivity, tokenRefs, tokens } from "../schema";
-import type { Database } from "../stores/service";
+import type { DbClient } from "../stores/service";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 
 // 手记持仓 —— 「这个手记账户持有哪些币」,由账本折叠出来(ADR 0017;#203 起并入 tokens)。
@@ -33,7 +33,7 @@ export interface ManualHolding {
 }
 
 // 持仓这半的方法(绑好 `database` 与 userId 之后)。
-export const holdingOps = (database: Database, userId: string) => ({
+export const holdingOps = (database: DbClient, userId: string) => ({
   // `namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传(同 userTokenStoreLayer),db 层不预设任何厂商。
   // 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
   listHoldings: (accountId: string, namer: string): Effect.Effect<ManualHolding[]> =>

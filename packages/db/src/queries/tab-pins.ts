@@ -4,7 +4,7 @@ import { Context, Effect, Layer } from "effect";
 import type { Drizzle } from "../connect";
 import { tabPins } from "../schema";
 import type { TabPin } from "../schema/types";
-import { Database } from "../stores/service";
+import { DbClient } from "../stores/service";
 import { assertAccountOwned, assertTagOwned } from "./ownership";
 
 // 自定义 Tab(pin,ADR 0034):把某个 tag / 账户 / connector 钉成导航上的一栏。
@@ -71,7 +71,7 @@ export const TabPinStore = Context.GenericTag<TabPinStore>("db/TabPinStore");
 
 const make = (userId: string) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     const store: TabPinStore = {
       create: (input) =>
@@ -124,7 +124,7 @@ const make = (userId: string) =>
           );
         }),
 
-      // 空列表 → `Database.batch` 自己是 no-op(见 stores/service.ts),不必再包一层
+      // 空列表 → `DbClient.batch` 自己是 no-op(见 stores/service.ts),不必再包一层
       // ——`batchWrite` 那个包装因此在本片退场。
       reorder: (orderedIds) =>
         database.batch((db) =>
@@ -147,5 +147,5 @@ const make = (userId: string) =>
     return store;
   });
 
-export const tabPinStoreLayer = (userId: string): Layer.Layer<TabPinStore, never, Database> =>
+export const tabPinStoreLayer = (userId: string): Layer.Layer<TabPinStore, never, DbClient> =>
   Layer.effect(TabPinStore, make(userId));

@@ -6,7 +6,7 @@ import { Cause, Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/entry/cache-headers";
 import { configureLogging } from "./lib/server/entry/log";
 import { pruneNotesAllUsers } from "./lib/server/entry/note-retention";
-import { runAtEdge, withDatabase, withOracleWarm } from "./lib/server/oracle";
+import { runAtEdge, withDbClient, withOracleWarm } from "./lib/server/oracle";
 import { syncAllUsers, warmAllUsers } from "./lib/server/sync/deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
@@ -56,7 +56,7 @@ const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
 // `catchAll` 接不住(同 warmAllUsers 的注释)。
 const pruneNotesSweep = (cron: string): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const userIds = yield* withDatabase(listUserIdsWithAccounts);
+    const userIds = yield* withDbClient(listUserIdsWithAccounts);
     const pruned = yield* pruneNotesAllUsers(userIds);
     cronLog.info("prune notes done", { cron, ...pruned });
   }).pipe(
@@ -72,7 +72,7 @@ const pruneNotesSweep = (cron: string): Effect.Effect<void> =>
 // sweep 本身不兜 —— 它失败了就该上抛、就该可见。
 const sweepAllUsers = (cron: string): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
-    const userIds = yield* withDatabase(listUserIdsWithAccounts);
+    const userIds = yield* withDbClient(listUserIdsWithAccounts);
     cronLog.info("cron sweep start", { cron, users: userIds.length });
     const result = yield* syncAllUsers(userIds);
     cronLog.info("cron sweep done", {

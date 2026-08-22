@@ -17,7 +17,7 @@ import { Context, Effect, Layer } from "effect";
 import type { Drizzle } from "../connect";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
-import { Database } from "../stores/service";
+import { DbClient } from "../stores/service";
 import { assertAccountOwned } from "./ownership";
 
 // 快照 —— 一次同步落下的余额切片,以及总额 / 历史 / 分页那几条读路。
@@ -167,7 +167,7 @@ export const SnapshotStore = Context.GenericTag<SnapshotStore>("db/SnapshotStore
 
 const make = (userId: string) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     const store: SnapshotStore = {
       write: (accountId, input, opts) =>
@@ -447,5 +447,5 @@ const make = (userId: string) =>
     return store;
   });
 
-export const snapshotStoreLayer = (userId: string): Layer.Layer<SnapshotStore, never, Database> =>
+export const snapshotStoreLayer = (userId: string): Layer.Layer<SnapshotStore, never, DbClient> =>
   Layer.effect(SnapshotStore, make(userId));

@@ -3,7 +3,7 @@
 //
 // 这半的对外面是各领域的 per-user 服务(ADR 0037),由包出口 `src/index.ts` 逐个转出;
 // 本壳只收拢类型与包内共用的东西。
-// `ownership.ts` 是内件,同样不转出(`batch.ts` 已随 #394 T3 退场 —— `Database.batch` 自带空列表 no-op)。
+// `ownership.ts` 是内件,同样不转出(`batch.ts` 已随 #394 T3 退场 —— `DbClient.batch` 自带空列表 no-op)。
 
 export * from "./accounts";
 export * from "./export-import";

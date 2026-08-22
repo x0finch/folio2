@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import type { Context } from "effect";
 import { Effect, type Layer, TestClock, TestContext } from "effect";
-import { type Database, databaseLayer } from "../src/stores/service";
+import { type DbClient, dbClientLayer } from "../src/stores/service";
 
 // 这几个 store 的测试共用的装配(#362 第 5 站)。**跑的是生产那条路**:layer → Tag,
 // 底下是真 D1(Miniflare),只有时钟是假的。
@@ -11,11 +11,11 @@ import { type Database, databaseLayer } from "../src/stores/service";
 // (CODING.md「别断言墙上时钟」)。
 export const NOW = 1000;
 
-// 跑一个只依赖 `Database` 的 effect(不带 userId 的系统级查询用,如 `listUserIdsWithAccounts`)。
-export const runDb = <A>(effect: Effect.Effect<A, never, Database>, nowMs = NOW): Promise<A> =>
+// 跑一个只依赖 `DbClient` 的 effect(不带 userId 的系统级查询用,如 `listUserIdsWithAccounts`)。
+export const runDb = <A>(effect: Effect.Effect<A, never, DbClient>, nowMs = NOW): Promise<A> =>
   Effect.runPromise(
     Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(
-      Effect.provide(databaseLayer(env)),
+      Effect.provide(dbClientLayer(env)),
       Effect.provide(TestContext.TestContext),
     ),
   );
@@ -39,14 +39,14 @@ type Promisified<S> = {
 export const forUser =
   <I, S extends object>(
     tag: Context.Tag<I, S>,
-    layerOf: (userId: string) => Layer.Layer<I, never, Database>,
+    layerOf: (userId: string) => Layer.Layer<I, never, DbClient>,
   ) =>
   (userId: string, nowMs = NOW): Promisified<S> =>
     promisified(tag, layerOf(userId), nowMs);
 
 export const promisified = <I, S extends object>(
   tag: Context.Tag<I, S>,
-  layer: Layer.Layer<I, never, Database>,
+  layer: Layer.Layer<I, never, DbClient>,
   nowMs = NOW,
 ): Promisified<S> =>
   new Proxy({} as Promisified<S>, {

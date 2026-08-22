@@ -2,7 +2,7 @@ import { and, asc, eq, getTableColumns, type InferSelectModel, inArray } from "d
 import { Context, Effect, Layer } from "effect";
 import type { Drizzle } from "../connect";
 import { accounts, manualActivity, tokens } from "../schema";
-import { Database } from "../stores/service";
+import { DbClient } from "../stores/service";
 import { holdingOps, type ManualHolding } from "./manual-holdings";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 
@@ -109,7 +109,7 @@ export const ManualStore = Context.GenericTag<ManualStore>("db/ManualStore");
 
 const make = (userId: string) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     const store: ManualStore = {
       ...holdingOps(database, userId),
@@ -263,5 +263,5 @@ const make = (userId: string) =>
     return store;
   });
 
-export const manualStoreLayer = (userId: string): Layer.Layer<ManualStore, never, Database> =>
+export const manualStoreLayer = (userId: string): Layer.Layer<ManualStore, never, DbClient> =>
   Layer.effect(ManualStore, make(userId));

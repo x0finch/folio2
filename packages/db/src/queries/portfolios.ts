@@ -2,7 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
 import type { Portfolio } from "../schema/types";
-import { Database } from "../stores/service";
+import { DbClient } from "../stores/service";
 import { assertAccountOwned, assertPortfolioOwned } from "./ownership";
 
 // Portfolio —— 命名账户集(ADR 0033)。每个账户恰属一个,新用户首次落地建默认那个。
@@ -39,7 +39,7 @@ export interface PortfolioStore {
 
 export const PortfolioStore = Context.GenericTag<PortfolioStore>("db/PortfolioStore");
 
-const selectDefault = (database: Database, userId: string): Effect.Effect<Portfolio | undefined> =>
+const selectDefault = (database: DbClient, userId: string): Effect.Effect<Portfolio | undefined> =>
   database.query((db) =>
     db
       .select()
@@ -53,7 +53,7 @@ const selectDefault = (database: Database, userId: string): Effect.Effect<Portfo
 // 依赖 `PortfolioStore` 只是为了调一个函数 —— 那会把两个 store 的装配顺序绑死,换不来任何东西。
 // 服务方法 `ensureDefault` 就是它绑上 userId 之后的样子。
 // onConflictDoNothing + 事后重查:并发下两个实例都「查不到→插」时,唯一索引让其一失败、两者都拿回同一行。
-export const ensureDefault = (database: Database, userId: string): Effect.Effect<Portfolio> =>
+export const ensureDefault = (database: DbClient, userId: string): Effect.Effect<Portfolio> =>
   Effect.gen(function* () {
     const found = yield* selectDefault(database, userId);
     if (found) return found;
@@ -82,7 +82,7 @@ export const ensureDefault = (database: Database, userId: string): Effect.Effect
 
 const make = (userId: string) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     const store: PortfolioStore = {
       ensureDefault: () => ensureDefault(database, userId),
@@ -135,7 +135,7 @@ const make = (userId: string) =>
         Effect.gen(function* () {
           // `ownership.ts` 仍是 Promise 形状(它被五个领域共用,三个还没迁)。**不为此新增桥** ——
           // `database.query` 收的就是「拿 drizzle 句柄做点事」的回调,把它套进去即可,
-          // 全包仍只有 `Database` 那一处 `Effect.promise`(CODING.md「桥只留一处」)。
+          // 全包仍只有 `DbClient` 那一处 `Effect.promise`(CODING.md「桥只留一处」)。
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           yield* database.query((db) => assertPortfolioOwned(db, userId, portfolioId));
           // 已在目标 Portfolio → 真 no-op。否则下面的「清空该账户 Tag」会在没真搬家时也误删标签
@@ -213,5 +213,5 @@ const make = (userId: string) =>
     return store;
   });
 
-export const portfolioStoreLayer = (userId: string): Layer.Layer<PortfolioStore, never, Database> =>
+export const portfolioStoreLayer = (userId: string): Layer.Layer<PortfolioStore, never, DbClient> =>
   Layer.effect(PortfolioStore, make(userId));

@@ -34,7 +34,7 @@ export type {
   UserSettingsView,
   WriteSnapshotInput,
 } from "./queries";
-// per-user 的领域服务(ADR 0037)。**Tag + layer 都出** —— 与 `Database` 不同:那个的 `query`
+// per-user 的领域服务(ADR 0037)。**Tag + layer 都出** —— 与 `DbClient` 不同:那个的 `query`
 // 回调参数就是 drizzle 句柄,出包等于把包装层作废;这些服务的方法本来就是包装过的 op,
 // 出包正是让 app 能把一次请求的全部数据访问装进同一个 context(#394 T4 起)。
 export {
@@ -59,11 +59,11 @@ export type {
   UserSettings,
   ValuationMode,
 } from "./schema/types";
-// `Database` **只出类型不出值**:它的 `query((db) => …)` 回调参数就是 drizzle 句柄,Tag 一旦
-// 出包,包外 `yield* Database` 就能绕过全部包装层拼任意查询。装配点只需要 `databaseLayer`。
+// `DbClient` **只出类型不出值**:它的 `query((db) => …)` 回调参数就是 drizzle 句柄,Tag 一旦
+// 出包,包外 `yield* DbClient` 就能绕过全部包装层拼任意查询。装配点只需要 `dbClientLayer`。
 export {
-  type Database,
-  databaseLayer,
+  type DbClient,
+  dbClientLayer,
   globalTokenRefIndexStoreLayer,
   type UserCacheStoreOpts,
   type UserTokenPriceStoreOpts,

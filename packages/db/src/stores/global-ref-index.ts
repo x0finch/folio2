@@ -4,7 +4,7 @@ import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { Effect, Layer, Option } from "effect";
 import { globalTokenRefIndex } from "../schema";
-import { chunk, Database } from "./service";
+import { chunk, DbClient } from "./service";
 
 // `GlobalTokenRefIndexStore` 的 D1 实现(ADR 0022,#199)。
 //
@@ -34,7 +34,7 @@ const STATEMENTS_PER_BATCH = 50;
 // 不碰 `Clock`(另外三个 store 都要):本 store 没有一处需要「现在几点」——
 // `putAll` 的时刻由调用方给(契约如此,cron 记的是那一轮的时刻),读侧无 TTL 门控。
 const make = Effect.gen(function* () {
-  const database = yield* Database;
+  const database = yield* DbClient;
 
   const store: GlobalTokenRefIndexStore = {
     // 正查一批:上游 `upstream` 对这些链上 ref 的**整条**叫法。miss 的键不出现。
@@ -139,5 +139,5 @@ const make = Effect.gen(function* () {
   return store;
 });
 
-export const globalTokenRefIndexStoreLayer: Layer.Layer<GlobalTokenRefIndexStore, never, Database> =
+export const globalTokenRefIndexStoreLayer: Layer.Layer<GlobalTokenRefIndexStore, never, DbClient> =
   Layer.effect(GlobalTokenRefIndexStore, make);

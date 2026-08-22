@@ -8,7 +8,7 @@ import {
   tokenRefs,
   tokens,
 } from "../schema";
-import { Database } from "../stores/service";
+import { DbClient } from "../stores/service";
 import type { CreateAccountInput } from "./accounts";
 import { type ManualActivityInput, ManualStore } from "./manual-activity";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
@@ -84,7 +84,7 @@ export const TransferStore = Context.GenericTag<TransferStore>("db/TransferStore
 // 全程用**新 id**(不碰全局 id 主键,多用户安全);去重靠 per-user 自然键。原样再导一遍 = 命中既有、不新建。
 const make = (userId: string) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
     const snapshotStore = yield* SnapshotStore;
     const manualStore = yield* ManualStore;
 
@@ -293,5 +293,5 @@ const make = (userId: string) =>
 // **layer 依赖另外两个 store**(不是方法的 `R`):导快照/导活动就是「查重之后调那一个写」。
 export const transferStoreLayer = (
   userId: string,
-): Layer.Layer<TransferStore, never, Database | SnapshotStore | ManualStore> =>
+): Layer.Layer<TransferStore, never, DbClient | SnapshotStore | ManualStore> =>
   Layer.effect(TransferStore, make(userId));

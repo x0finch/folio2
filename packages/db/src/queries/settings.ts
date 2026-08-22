@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { userSettings } from "../schema";
 import type { UserSettings, ValuationMode } from "../schema/types";
-import { Database } from "../stores/service";
+import { DbClient } from "../stores/service";
 
 // 用户设置(Phase 3,#82)。
 
@@ -25,7 +25,7 @@ export const SettingsStore = Context.GenericTag<SettingsStore>("db/SettingsStore
 
 const make = (userId: string) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     const store: SettingsStore = {
       get: () =>
@@ -62,5 +62,5 @@ const make = (userId: string) =>
     return store;
   });
 
-export const settingsStoreLayer = (userId: string): Layer.Layer<SettingsStore, never, Database> =>
+export const settingsStoreLayer = (userId: string): Layer.Layer<SettingsStore, never, DbClient> =>
   Layer.effect(SettingsStore, make(userId));
