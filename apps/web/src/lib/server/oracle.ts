@@ -24,8 +24,7 @@ import {
   userTokenStoreLayer,
 } from "@folio/db";
 import {
-  type GlobalRefIndexService,
-  globalRefIndexServiceLayer,
+  GlobalRefIndexService,
   type OraclePorts,
   type OracleServices,
   oracleLayer,
@@ -135,7 +134,7 @@ export const withOracleWarm = <A>(
   effect: Effect.Effect<A, UpstreamError, GlobalRefIndexService>,
 ): Effect.Effect<A, Error> =>
   effect.pipe(
-    Effect.provide(Layer.provide(globalRefIndexServiceLayer, warmPorts())),
+    Effect.provide(Layer.provide(GlobalRefIndexService.Default, warmPorts())),
     Effect.mapError(toError),
   );
 

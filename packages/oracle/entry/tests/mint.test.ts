@@ -6,7 +6,7 @@ import {
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { type MintInput, TokenService } from "../src";
-import type { CandidateSource } from "../src/tokens/candidates";
+import { CandidateSource } from "../src/tokens/candidates";
 import { harness } from "./fakes";
 
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
@@ -28,14 +28,18 @@ interface RecordingCandidates extends CandidateSource {
 }
 const candidatesOf = (map: Record<string, TokenCandidate[]>): RecordingCandidates => {
   const asked: string[] = [];
-  return {
-    asked,
-    bySymbol: (symbol) =>
-      Effect.sync(() => {
-        asked.push(symbol);
-        return map[symbol] ?? [];
-      }),
-  };
+  // `new CandidateSource(…)` 而不是裸对象:服务是 `Effect.Service` class(#501),
+  // 假实现走它自己的构造器,和生产那条路建出来的是同一种东西。
+  return Object.assign(
+    new CandidateSource({
+      bySymbol: (symbol) =>
+        Effect.sync(() => {
+          asked.push(symbol);
+          return map[symbol] ?? [];
+        }),
+    }),
+    { asked },
+  );
 };
 
 // mint 走 Tag → Layer(生产那条路):它是 `TokenService.mint`,而顶掉候选源靠换 `CandidateSource`

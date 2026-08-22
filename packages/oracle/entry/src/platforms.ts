@@ -1,7 +1,7 @@
 import type { PlatformMeta } from "@folio/oracle-basic";
 import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
 import { CacheStore, PlatformUpstream } from "@folio/oracle-basic/ports";
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { degradeTo } from "./tokens/swr";
 
 // 平台(链 ∪ 场馆)的名与图。与汇率同款两个动词、同款判据:`resolve` 读(零网络、软过期),
@@ -12,15 +12,6 @@ import { degradeTo } from "./tokens/swr";
 //
 // 读写都走缓存的**批量**那两个口:一个用户的链就那么几条,但展示时每条都要,逐键点查等于
 // 把总览的一次 D1 往返变成 N 次(见 `CacheStore` 的注释)。
-export interface PlatformService {
-  // 每个 key 都给一份展示。命中真名就用真名,否则按 key 推一个兜底名。**不出网、一次读。**
-  resolve(keys: readonly string[]): Effect.Effect<Map<string, PlatformMeta>>;
-  // 同步后预热:这些 key 里有缺的或过期的 → 拉一次整张链表 → **一个批次写回这几个 key**。
-  warm(keys: readonly string[]): Effect.Effect<void>;
-}
-
-export const PlatformService = Context.GenericTag<PlatformService>("oracle/PlatformService");
-
 const cap = (s: string): string => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 // 未收录 / 未预热的平台的兜底展示名(纯由 key 推)。
@@ -81,8 +72,9 @@ const make = Effect.gen(function* () {
   const cache = yield* CacheStore;
   const upstream = yield* PlatformUpstream;
 
-  const service: PlatformService = {
-    resolve: (keys) =>
+  return {
+    // 每个 key 都给一份展示。命中真名就用真名,否则按 key 推一个兜底名。**不出网、一次读。**
+    resolve: (keys: readonly string[]): Effect.Effect<Map<string, PlatformMeta>> =>
       Effect.gen(function* () {
         const unique = [...new Set(keys)];
         const out = new Map<string, PlatformMeta>();
@@ -102,7 +94,8 @@ const make = Effect.gen(function* () {
         return out;
       }),
 
-    warm: (keys) =>
+    // 同步后预热:这些 key 里有缺的或过期的 → 拉一次整张链表 → **一个批次写回这几个 key**。
+    warm: (keys: readonly string[]): Effect.Effect<void> =>
       Effect.gen(function* () {
         const unique = [...new Set(keys)];
         if (unique.length === 0) return;
@@ -140,12 +133,10 @@ const make = Effect.gen(function* () {
         );
       }),
   };
-
-  return service;
 });
 
-export const platformServiceLayer: Layer.Layer<
-  PlatformService,
-  never,
-  CacheStore | PlatformUpstream
-> = Layer.effect(PlatformService, make);
+// 服务的形状从 `make` 的返回值推导,`.Default` 就是它的 layer —— 不再手写 interface + Tag +
+// layer 三件套(#501)。
+export class PlatformService extends Effect.Service<PlatformService>()("oracle/PlatformService", {
+  effect: make,
+}) {}
