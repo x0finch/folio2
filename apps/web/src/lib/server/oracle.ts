@@ -3,6 +3,7 @@ import type { UpstreamError } from "@folio/client-core";
 import {
   type AccountStore,
   accountStoreLayer,
+  Database,
   type DbClient,
   dbClientLayer,
   globalTokenRefIndexStoreLayer,
@@ -14,10 +15,8 @@ import {
   type SnapshotStore,
   settingsStoreLayer,
   snapshotStoreLayer,
-  type TabPinStore,
   type TagStore,
   type TransferStore,
-  tabPinStoreLayer,
   tagStoreLayer,
   transferStoreLayer,
   userCacheStoreLayer,
@@ -149,15 +148,15 @@ export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
 // `DbClient`** —— 一次请求一个 drizzle 句柄,不是每个 store 一个,也不是每半边一个。
 //
 // 「共用」有两个条件,缺一不可:
-//   ① 两边收到的是**同一个 layer 引用**(所以 `database` 是参数,不是各自现建)
+//   ① 三边收到的是**同一个 layer 引用**(所以 `dbClient` 是参数,不是各自现建)
 //   ② 它们在**同一次 `Effect.provide`** 里被建起来 —— Layer memoisation 的作用域是一次构建,
-//      分两次 provide 就是两份,哪怕引用相同。见下面 `withRequest`。
+//      分两次 provide 就是两份,哪怕引用相同。见下面 `requestLayer`。
 //
 // `TransferStore` 的 layer 还要另外两个 store(导快照/导活动调它们的写口),所以先合出 base
 // 再把它 provide 上去。
 const dbStoresFor = (
   userId: string,
-  database: Layer.Layer<DbClient> = dbClientLayer(env),
+  dbClient: Layer.Layer<DbClient> = dbClientLayer(env),
 ): Layer.Layer<DbStores> => {
   const base = Layer.mergeAll(
     accountStoreLayer(userId),
@@ -166,15 +165,20 @@ const dbStoresFor = (
     snapshotStoreLayer(userId),
     manualStoreLayer(userId),
     tagStoreLayer(userId),
-    tabPinStoreLayer(userId),
   );
   return Layer.provide(
     Layer.merge(base, Layer.provide(transferStoreLayer(userId), base)),
-    database,
+    dbClient,
   );
 };
 
-/** app 数据那半的全部服务 —— server fn 的 `R` 里出现的就是这些。 */
+/**
+ * app 数据那半**还没挂进聚合 `Database`** 的领域服务 —— server fn 的 `R` 里出现的就是这些。
+ *
+ * **这个联合只会变短**:每次一个领域挂进聚合(#504 T7–T12),它就从这里少一个;最后一个搬完
+ * 这个类型和 `dbStoresFor` 一起删掉,`requestLayer` 里 db 那半只剩 `Database`。
+ * tab-pins 已经这样退场了(T1 打样)。
+ */
 export type DbStores =
   | AccountStore
   | PortfolioStore
@@ -182,7 +186,6 @@ export type DbStores =
   | SnapshotStore
   | ManualStore
   | TagStore
-  | TabPinStore
   | TransferStore;
 
 /**
@@ -208,20 +211,28 @@ export type DbStores =
  * `withRequest` 是它加上错误映射的便利包装;**流**那条路(`/api/sync` 把同步的流交给
  * `Stream.provideLayer`)拿不到 effect 形状的包装,只能要 layer 本身。
  */
-export const requestLayer = (
-  userId: string,
-): Layer.Layer<OracleServices | OraclePorts | DbStores> => {
-  // **一次 provide,不是两次。** 两半各 provide 一次的话,同一个 `database` 引用也会被建两遍
-  // (memoisation 的作用域是一次构建),于是一个请求握着两个 drizzle 句柄 —— 今天只是浪费,
+export const requestLayer = (userId: string): Layer.Layer<RequestServices> => {
+  // **一次 provide,不是三次。** 三边各 provide 一次的话,同一个 `dbClient` 引用也会被建三遍
+  // (memoisation 的作用域是一次构建),于是一个请求握着三个 drizzle 句柄 —— 今天只是浪费,
   // 但 `DbClient` 一旦长出状态(span、慢查询计数,`stores/service.ts` 已记着要加),
-  // 那就是悄悄劈成两半的状态。
-  const database = dbClientLayer(env);
-  return Layer.merge(dbStoresFor(userId, database), oracleFor(userId, database));
+  // 那就是悄悄劈成几半的状态。
+  //
+  // 聚合 `Database` 自己**不开连接**(它的 `R` 通道声明 `DbClient`),正是为了能在这里跟另外
+  // 两边共用同一个引用 —— 那条红线是结构性保证的,不是靠记得。
+  const dbClient = dbClientLayer(env);
+  return Layer.mergeAll(
+    Layer.provide(Database.layer(userId), dbClient),
+    dbStoresFor(userId, dbClient),
+    oracleFor(userId, dbClient),
+  );
 };
+
+/** 一次请求装好的全部服务 —— handler 的 `R` 只能落在这个范围里。 */
+export type RequestServices = Database | DbStores | OracleServices | OraclePorts;
 
 export const withRequest = <A, E extends UpstreamError | Error>(
   userId: string,
-  effect: Effect.Effect<A, E, OracleServices | OraclePorts | DbStores>,
+  effect: Effect.Effect<A, E, RequestServices>,
 ): Effect.Effect<A, Error> => {
   return effect.pipe(Effect.provide(requestLayer(userId)), Effect.mapError(toError));
 };
@@ -232,8 +243,33 @@ export const withRequest = <A, E extends UpstreamError | Error>(
  */
 export const runRequest = <A, E extends UpstreamError | Error>(
   userId: string,
-  effect: Effect.Effect<A, E, OracleServices | OraclePorts | DbStores>,
+  effect: Effect.Effect<A, E, RequestServices>,
 ): Promise<A> => runAtEdge(withRequest(userId, effect));
+
+/**
+ * **server fn 的「发动」点 —— handler 只描述,这里负责跑。**
+ *
+ * handler 拿到的只有 `data`,返回一个 Effect;要什么服务写在它的 `R` 通道里(`yield* Database`)。
+ * 「哪个用户」「怎么装配」「错误怎么映射」「什么时候变成 Promise」全部在这一行之内发生,
+ * handler 一个字都不必知道 —— 它连 `context` 都收不到,所以也不可能自己去读 userId 拼查询。
+ *
+ * 用法(装配点):`.handler(runEffect(handleCreateTabPin))`。
+ *
+ * 与它替掉的 `runStore` / `runRequest` 的区别不是少打几个字,是**方向**:那两个由 handler 自己
+ * 调,于是每个 handler 都是「一半业务 + 一半运行时」;这个由装配点调,handler 那半干净了,
+ * review 一个 handler 不再需要顺手检查它的发动、注入、错误映射写没写对。
+ *
+ * `runStore`/`runRequest` 全都退场之后(#504 T13),这里的 `runRequest(…)` 就展开成
+ * 「provide → mapError → runAtEdge」三步本身,`runPromise` 仍然只在本文件出现。
+ */
+export const runEffect =
+  <D, A, E extends UpstreamError | Error>(
+    handler: (data: D) => Effect.Effect<A, E, RequestServices>,
+  ) =>
+  // `context` 只声明用得着的那个字段:`requireAuth` 注入的是整个 `AuthContext`(还带 user /
+  // session),而这里唯一该碰的就是 userId。少声明一个字段 = 少一条能悄悄用起来的路。
+  ({ data, context }: { data: D; context: { userId: string } }): Promise<A> =>
+    runRequest(context.userId, handler(data));
 
 /**
  * 「一次 store 调用就完事」的 server fn 用它 —— `runRequest(u, Effect.flatMap(Tag, f))` 的短写。

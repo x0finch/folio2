@@ -11,6 +11,9 @@
 // 「一次请求一次装配」旁边永远并排站着一条「每次调用各装一次」的路。
 
 export { createAuthAdapter, type DbEnv } from "./connect"; // adapter 不泄露 db 句柄/schema
+// **对外的那一张门票**(#504 T1 起):聚合 `Database`,按领域挂包装好的 op。
+// 现在只挂了 `tabPins` —— 其余八个领域还走下面那排各自的 Tag,按域一片片挂进来。
+export { Database } from "./database";
 export type {
   AccountRawCreds,
   AccountTagLink,
@@ -37,6 +40,9 @@ export type {
 // per-user 的领域服务(ADR 0037)。**Tag + layer 都出** —— 与 `DbClient` 不同:那个的 `query`
 // 回调参数就是 drizzle 句柄,出包等于把包装层作废;这些服务的方法本来就是包装过的 op,
 // 出包正是让 app 能把一次请求的全部数据访问装进同一个 context(#394 T4 起)。
+//
+// **这排 Tag 是过渡形状,只会变少**:某个领域挂进聚合 `Database` 之后,它的 Tag 就没有消费者了,
+// 同片删除(tab-pins 已经这样退场)。
 export {
   AccountStore,
   accountStoreLayer,
@@ -47,7 +53,6 @@ export { ManualStore, manualStoreLayer } from "./queries/manual-activity";
 export { PortfolioStore, portfolioStoreLayer } from "./queries/portfolios";
 export { SettingsStore, settingsStoreLayer } from "./queries/settings";
 export { SnapshotStore, snapshotStoreLayer } from "./queries/snapshots";
-export { TabPinStore, tabPinStoreLayer } from "./queries/tab-pins";
 export { TagStore, tagStoreLayer } from "./queries/tags";
 export type {
   Account,

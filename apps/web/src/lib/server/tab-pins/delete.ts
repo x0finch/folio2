@@ -1,17 +1,13 @@
-import { TabPinStore } from "@folio/db";
+import { Database } from "@folio/db";
+import { Effect } from "effect";
 import { z } from "zod";
-import { runStore } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 
 export const DeleteTabPinInput = z.object({ pinId: z.string().min(1) });
 
-export async function handleDeleteTabPin({
-  data,
-  context,
-}: {
-  data: z.infer<typeof DeleteTabPinInput>;
-  context: AuthContext;
-}) {
-  await runStore(context.userId, TabPinStore, (s) => s.remove(data.pinId));
-  return { ok: true as const };
+export function handleDeleteTabPin(data: z.infer<typeof DeleteTabPinInput>) {
+  return Effect.gen(function* () {
+    const db = yield* Database;
+    yield* db.tabPins.remove(data.pinId);
+    return { ok: true as const };
+  });
 }

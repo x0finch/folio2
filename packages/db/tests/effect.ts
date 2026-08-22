@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import type { Context } from "effect";
 import { Effect, type Layer, TestClock, TestContext } from "effect";
+import { Database } from "../src/database";
 import { type DbClient, dbClientLayer } from "../src/stores/service";
 
 // 这几个 store 的测试共用的装配(#362 第 5 站)。**跑的是生产那条路**:layer → Tag,
@@ -44,9 +45,23 @@ export const forUser =
   (userId: string, nowMs = NOW): Promisified<S> =>
     promisified(tag, layerOf(userId), nowMs);
 
+// 已经挂进聚合 `Database` 的领域用这个:`forDomain((db) => db.tabPins)`。
+// 与 `forUser` 的唯一差别是**怎么拿到服务** —— 那边是「provide 领域自己的 layer 再 yield 它的 Tag」,
+// 这边是「provide 聚合的 layer 再取那个字段」。断言侧看不出区别,这正是搬家要保住的性质。
+export const forDomain =
+  <S extends object>(pick: (db: Context.Tag.Service<Database>) => S) =>
+  (userId: string, nowMs = NOW): Promisified<S> =>
+    promisifiedFrom(Effect.provide(Effect.map(Database, pick), Database.layer(userId)), nowMs);
+
 export const promisified = <I, S extends object>(
   tag: Context.Tag<I, S>,
   layer: Layer.Layer<I, never, DbClient>,
+  nowMs = NOW,
+): Promisified<S> => promisifiedFrom(Effect.provide(tag, layer), nowMs);
+
+// 「怎么拿到这个服务」是一个 effect(只差一个 `DbClient`),把手只管把它的方法一个个跑成 Promise。
+const promisifiedFrom = <S extends object>(
+  service: Effect.Effect<S, never, DbClient>,
   nowMs = NOW,
 ): Promisified<S> =>
   new Proxy({} as Promisified<S>, {
@@ -54,13 +69,13 @@ export const promisified = <I, S extends object>(
       (_target, key) =>
       (...args: unknown[]) =>
         runDb(
-          Effect.flatMap(tag, (service) => {
-            const method = (service as Record<string | symbol, unknown>)[key];
+          Effect.flatMap(service, (resolved) => {
+            const method = (resolved as Record<string | symbol, unknown>)[key];
             if (typeof method !== "function") {
               throw new TypeError(`not a method on the service: ${String(key)}`);
             }
-            return (method as (...a: unknown[]) => Effect.Effect<unknown>).apply(service, args);
-          }).pipe(Effect.provide(layer)),
+            return (method as (...a: unknown[]) => Effect.Effect<unknown>).apply(resolved, args);
+          }),
           nowMs,
         ),
   });
