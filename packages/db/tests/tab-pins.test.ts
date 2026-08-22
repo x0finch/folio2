@@ -7,15 +7,14 @@ import {
   accountStoreLayer,
   PortfolioStore,
   portfolioStoreLayer,
-  TabPinStore,
   TagStore,
-  tabPinStoreLayer,
   tagStoreLayer,
 } from "../src/queries";
 import { user } from "../src/schema/auth";
-import { forUser } from "./effect";
+import { forDomain, forUser } from "./effect";
 
-const tabPinsOf = forUser(TabPinStore, tabPinStoreLayer);
+// tab-pins 已经挂进聚合 `Database`(#504 T1),所以把手从聚合取字段;**断言一行没动**。
+const tabPinsOf = forDomain((db) => db.tabPins);
 const tagsOf = forUser(TagStore, tagStoreLayer);
 
 const accounts = forUser(AccountStore, accountStoreLayer);

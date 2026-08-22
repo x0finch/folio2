@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { accounts, portfolioAccounts } from "../schema";
 import type { AccountSafe } from "../schema/types";
-import { Database } from "../stores/service";
+import { DbClient } from "../stores/service";
 import { ensureDefault } from "./portfolios";
 
 // 账户:建 / 列 / 改名 / 归档 / 删,外加 creds 的原样存取(db 不解释 creds 的内容)。
@@ -60,10 +60,10 @@ export const AccountStore = Context.GenericTag<AccountStore>("db/AccountStore");
 //
 // **不做成服务**(ADR 0037):它没有 userId,塞不进 per-user 的 layer;而单独给它造一个 Tag 也不对 ——
 // Tag 的意义是「可以被换掉」,这一条只有一个实现、从不被顶替(#392 把 `RefIndexWarmer` 去 Tag 化
-// 同理)。所以它就是一个裸 Effect,依赖留在 `R` 上,由调用方 provide `databaseLayer`。
-export const listUserIdsWithAccounts: Effect.Effect<string[], never, Database> = Effect.gen(
+// 同理)。所以它就是一个裸 Effect,依赖留在 `R` 上,由调用方 provide `dbClientLayer`。
+export const listUserIdsWithAccounts: Effect.Effect<string[], never, DbClient> = Effect.gen(
   function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
     const rows = yield* database.query((db) =>
       db.selectDistinct({ userId: accounts.userId }).from(accounts),
     );
@@ -73,7 +73,7 @@ export const listUserIdsWithAccounts: Effect.Effect<string[], never, Database> =
 
 const make = (userId: string) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     const store: AccountStore = {
       // 不变量(ADR 0033):每个账户恰一行归属。新账户落进用户的默认 Portfolio —— 建账户与建归属
@@ -183,5 +183,5 @@ const make = (userId: string) =>
     return store;
   });
 
-export const accountStoreLayer = (userId: string): Layer.Layer<AccountStore, never, Database> =>
+export const accountStoreLayer = (userId: string): Layer.Layer<AccountStore, never, DbClient> =>
   Layer.effect(AccountStore, make(userId));

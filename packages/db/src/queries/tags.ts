@@ -3,7 +3,7 @@ import { Context, Effect, Layer } from "effect";
 import type { Drizzle } from "../connect";
 import { accounts, accountTags, portfolioAccounts, tags } from "../schema";
 import type { Tag } from "../schema/types";
-import { Database } from "../stores/service";
+import { DbClient } from "../stores/service";
 import { assertAccountOwned, assertPortfolioOwned, assertTagOwned } from "./ownership";
 
 // Tag —— Portfolio 内的软标签(ADR 0034)。一个账户可挂多个,但只能挂同 Portfolio 的 tag。
@@ -77,7 +77,7 @@ export const TagStore = Context.GenericTag<TagStore>("db/TagStore");
 
 const make = (userId: string) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     const store: TagStore = {
       create: (input) =>
@@ -176,5 +176,5 @@ const make = (userId: string) =>
     return store;
   });
 
-export const tagStoreLayer = (userId: string): Layer.Layer<TagStore, never, Database> =>
+export const tagStoreLayer = (userId: string): Layer.Layer<TagStore, never, DbClient> =>
   Layer.effect(TagStore, make(userId));

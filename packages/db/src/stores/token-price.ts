@@ -4,7 +4,7 @@ import { formatTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
 import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
-import { chunk, Database } from "./service";
+import { chunk, DbClient } from "./service";
 
 // `TokenPriceStore` 的 D1 实现(ADR 0021/0023,#199)。**每个用户一份** —— userId 由 layer 吃掉。
 //
@@ -20,7 +20,7 @@ export interface UserTokenPriceStoreOpts {
 
 const make = ({ userId, namer }: UserTokenPriceStoreOpts) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     // tokenId → 它在当前上游那里的 tokenRef(历史日价的键)。没有那一档的 ref 行 → `none`。
     const upstreamRefOf = (tokenId: string): Effect.Effect<Option.Option<string>> =>
@@ -180,4 +180,4 @@ const make = ({ userId, namer }: UserTokenPriceStoreOpts) =>
 
 export const userTokenPriceStoreLayer = (
   opts: UserTokenPriceStoreOpts,
-): Layer.Layer<TokenPriceStore, never, Database> => Layer.effect(TokenPriceStore, make(opts));
+): Layer.Layer<TokenPriceStore, never, DbClient> => Layer.effect(TokenPriceStore, make(opts));

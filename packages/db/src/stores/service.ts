@@ -16,13 +16,13 @@ import { type DbEnv, type Drizzle, getDb } from "../connect";
 // 而不是另起一个叫 `chunk.ts` / `utils.ts` 的文件让人猜它为什么在。
 //
 // **`env` 不再出现在任何 store 的签名里。** 以前每个工厂第一个参数是 `env`、各自 `getDb(env)`;
-// 现在 env 只在装配点被读一次(`databaseLayer(env)`),store 要的是这个服务。
+// 现在 env 只在装配点被读一次(`dbClientLayer(env)`),store 要的是这个服务。
 // 「Bind ambient env once, at a single call site」那条(CODING.md)在 Effect 里的形状就是 Layer。
 //
 // **错误通道是 `never`**:D1 挂了这一层没人救得了它 —— 今天也没有任何调用点 catch 它,行为就是
 // 整个请求 500。所以它走 defect(`Effect.promise` 的拒绝),一路冒到 `runPromise`。
 // `E` 里只放有人会处理的东西(CODING.md「错误」一节),而这里没有。
-export interface Database {
+export interface DbClient {
   readonly query: <A>(build: (db: Drizzle) => PromiseLike<A>) => Effect.Effect<A>;
   // 一批语句。**同样收一个 builder** —— 语句得拿 `db` 才造得出来,而调用方不该为了造语句先
   // 从服务里把 `db` 掏出来(掏出来它就又能绕过这一层了)。drizzle 的 batch 要求非空
@@ -32,9 +32,9 @@ export interface Database {
 
 type Stmt = Parameters<Drizzle["batch"]>[0][number]; // drizzle BatchItem
 
-export const Database = Context.GenericTag<Database>("db/Database");
+export const DbClient = Context.GenericTag<DbClient>("db/DbClient");
 
-const make = (db: Drizzle): Database => ({
+const make = (db: Drizzle): DbClient => ({
   query: (build) => Effect.promise(() => build(db)),
   batch: (build) =>
     Effect.suspend(() => {
@@ -46,8 +46,8 @@ const make = (db: Drizzle): Database => ({
 // **`Layer.sync` 而不是 `Layer.succeed`**:`drizzle(env.DB)` 要到 layer 真被建的那一刻才发生
 // (模块加载期一次都不碰 —— Workers 的启动 CPU 限制)。它本身很轻(见 connect.ts),
 // 所以一次请求建一份没有代价。
-export const databaseLayer = (env: DbEnv): Layer.Layer<Database> =>
-  Layer.sync(Database, () => make(getDb(env)));
+export const dbClientLayer = (env: DbEnv): Layer.Layer<DbClient> =>
+  Layer.sync(DbClient, () => make(getDb(env)));
 
 // —— D1 的第二条限制:一条语句约 100 个绑定参数 ——
 //

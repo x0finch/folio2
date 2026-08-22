@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
 import type { Drizzle } from "../connect";
 import { userCache } from "../schema";
-import { chunk, Database } from "./service";
+import { chunk, DbClient } from "./service";
 
 // `CacheStore` 的 D1 实现(#199)。per-user 的 KV,只三种键(`warm` / `fx:<币种>` / `platform:<键>`,
 // 键的形状归 oracle 的 cache.ts,本文件不解释键;`defi-logo:<协议>` 那种是 app 自己的一片)。
@@ -20,7 +20,7 @@ import { chunk, Database } from "./service";
 // 留 userId 的理由:per-user 缓存只装这个用户实际碰到的(他选的币种、他有持仓的那几条链),
 // 全局一份就得装所有人的并集。#202 起它取代 fx_rates + platforms 两张全局表。
 //
-// **时间走 `Clock`**(以前是 `opts.now` —— 一个只有测试会传的字段);出网口是 `Database`
+// **时间走 `Clock`**(以前是 `opts.now` —— 一个只有测试会传的字段);出网口是 `DbClient`
 // 那一个服务,`env` 不再出现在签名里。
 
 export interface UserCacheStoreOpts {
@@ -39,7 +39,7 @@ const upsert = (db: Drizzle, userId: string, w: CacheWrite, now: number) => {
 
 const make = ({ userId }: UserCacheStoreOpts) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     // 存进去的一定是 JSON.stringify 的产物;真读到坏值就当没有这条 ——
     // 下次访问会照常回源覆盖,不该让一条脏缓存把整个页面弄崩。
@@ -109,4 +109,4 @@ const make = ({ userId }: UserCacheStoreOpts) =>
 
 export const userCacheStoreLayer = (
   opts: UserCacheStoreOpts,
-): Layer.Layer<CacheStore, never, Database> => Layer.effect(CacheStore, make(opts));
+): Layer.Layer<CacheStore, never, DbClient> => Layer.effect(CacheStore, make(opts));

@@ -12,7 +12,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
 import type { Drizzle } from "../connect";
 import { snapshotBalances, tokenRefs, tokens } from "../schema";
-import { chunk, Database } from "./service";
+import { chunk, DbClient } from "./service";
 
 // `TokenStore` 的 D1 实现(ADR 0021 / 0023,#199)。**每个用户一份** —— userId 由 layer 吃掉,
 // 下面所有方法签名里都没有它,拿错用户在编译期就发生不了。
@@ -23,7 +23,7 @@ import { chunk, Database } from "./service";
 // `namer` = 当前上游的 id。它只用来回答一件事:「这个 Token 被上游认出来了吗」——
 // 即有没有一条 namer 那一档的 ref 行(`TokenInfo.ref`)。本 store 不知道那是哪家。
 //
-// **出网口只有 `Database` 一个服务**(见 ./service.ts):`env` 不在签名里,`Effect.promise` 不在
+// **出网口只有 `DbClient` 一个服务**(见 ./service.ts):`env` 不在签名里,`Effect.promise` 不在
 // 这个文件里,时间走 `Clock`(以前是 `opts.now` —— 只有测试会传的字段)。
 
 export interface UserTokenStoreOpts {
@@ -60,7 +60,7 @@ type InfoRow = {
 
 const make = ({ userId, namer }: UserTokenStoreOpts) =>
   Effect.gen(function* () {
-    const database = yield* Database;
+    const database = yield* DbClient;
 
     // 一批 ref 的 where:(namer=? AND local_name=?) OR … 。全部同属本用户,故 user_id 一次即可。
     const whereRefs = (pairs: { namer: string; localName: string }[]) =>
@@ -440,4 +440,4 @@ const make = ({ userId, namer }: UserTokenStoreOpts) =>
 
 export const userTokenStoreLayer = (
   opts: UserTokenStoreOpts,
-): Layer.Layer<TokenStore, never, Database> => Layer.effect(TokenStore, make(opts));
+): Layer.Layer<TokenStore, never, DbClient> => Layer.effect(TokenStore, make(opts));

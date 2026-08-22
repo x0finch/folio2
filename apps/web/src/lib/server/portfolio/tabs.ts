@@ -1,4 +1,4 @@
-import { AccountStore, PortfolioStore, SnapshotStore, TabPinStore, TagStore } from "@folio/db";
+import { AccountStore, Database, PortfolioStore, SnapshotStore, TagStore } from "@folio/db";
 import { Effect } from "effect";
 import { toAccountSections } from "@/lib/core/account-view";
 import { accountsInView } from "@/lib/core/accounts-in-view";
@@ -28,7 +28,7 @@ export function handleGetHomeTabStrip({
           Effect.flatMap(AccountStore, (s) => s.list()),
           Effect.flatMap(SnapshotStore, (s) => s.latest()),
           Effect.flatMap(PortfolioStore, (s) => s.listMemberships()),
-          Effect.flatMap(TabPinStore, (s) => s.list()),
+          Effect.flatMap(Database, (db) => db.tabPins.list()),
           Effect.flatMap(TagStore, (s) => s.list()),
         ],
         { concurrency: 5 },
