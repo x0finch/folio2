@@ -1,5 +1,5 @@
 import { and, asc, eq, getTableColumns, type InferSelectModel, inArray } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import type { Drizzle } from "../connect";
 import { accounts, manualActivity, tokens } from "../schema";
 import { DbClient } from "../stores/service";
@@ -12,7 +12,7 @@ import { assertAccountOwned, assertTokenOwned } from "./ownership";
 //
 // **`ManualStore` 是手记这个领域的**唯一**服务** —— 持仓与账本是同一件事的两面(持仓正是账本
 // 折叠出来的),按能力切成两个服务会重蹈 #392 拆掉的那种分法。所以这里把两半合成一个。
-// 方法签名里没有 userId(ADR 0037):由 `manualStoreLayer(userId)` 在装配那一刻吃掉。
+// 方法签名里没有 userId(ADR 0037):由 `ManualStore.Default(userId)` 在装配那一刻吃掉。
 
 export type ManualActivityKind = "add" | "reduce" | "set";
 export interface ManualActivityInput {
@@ -70,11 +70,6 @@ async function assertActivityOwned(
   if (!row?.tokenId) throw new Error(`manual activity not found: ${activityId}`);
   return { tokenId: row.tokenId, accountId: row.accountId };
 }
-
-/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
-export type ManualStore = Effect.Effect.Success<ReturnType<typeof make>>;
-
-export const ManualStore = Context.GenericTag<ManualStore>("db/ManualStore");
 
 const make = (userId: string) =>
   Effect.gen(function* () {
@@ -246,5 +241,6 @@ const make = (userId: string) =>
     };
   });
 
-export const manualStoreLayer = (userId: string): Layer.Layer<ManualStore, never, DbClient> =>
-  Layer.effect(ManualStore, make(userId));
+export class ManualStore extends Effect.Service<ManualStore>()("db/ManualStore", {
+  effect: make,
+}) {}

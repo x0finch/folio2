@@ -1,21 +1,14 @@
 import { env } from "cloudflare:test";
 import {
   AccountStore,
-  accountStoreLayer,
   type DbClient,
   dbClientLayer,
   ManualStore,
-  manualStoreLayer,
   PortfolioStore,
-  portfolioStoreLayer,
   SettingsStore,
   SnapshotStore,
-  settingsStoreLayer,
-  snapshotStoreLayer,
   TagStore,
   TransferStore,
-  tagStoreLayer,
-  transferStoreLayer,
 } from "@folio/db";
 import type { Context } from "effect";
 import { Effect, Layer } from "effect";
@@ -78,18 +71,18 @@ const promisified = <I, S extends object>(
 
 /** 一个用户的全部 store 把手:`dbFor(USER).accounts.list()`。 */
 export const dbFor = (userId: string) => ({
-  accounts: promisified(AccountStore, accountStoreLayer(userId)),
-  portfolios: promisified(PortfolioStore, portfolioStoreLayer(userId)),
-  settings: promisified(SettingsStore, settingsStoreLayer(userId)),
-  snapshots: promisified(SnapshotStore, snapshotStoreLayer(userId)),
-  manual: promisified(ManualStore, manualStoreLayer(userId)),
-  tags: promisified(TagStore, tagStoreLayer(userId)),
-  // 导入那三个写口要另外两个 store(见 `transferStoreLayer` 的依赖声明)。
+  accounts: promisified(AccountStore, AccountStore.Default(userId)),
+  portfolios: promisified(PortfolioStore, PortfolioStore.Default(userId)),
+  settings: promisified(SettingsStore, SettingsStore.Default(userId)),
+  snapshots: promisified(SnapshotStore, SnapshotStore.Default(userId)),
+  manual: promisified(ManualStore, ManualStore.Default(userId)),
+  tags: promisified(TagStore, TagStore.Default(userId)),
+  // 导入那三个写口要另外两个 store(见 `TransferStore.Default` 的依赖声明)。
   transfer: promisified(
     TransferStore,
     Layer.provide(
-      transferStoreLayer(userId),
-      Layer.merge(snapshotStoreLayer(userId), manualStoreLayer(userId)),
+      TransferStore.Default(userId),
+      Layer.merge(SnapshotStore.Default(userId), ManualStore.Default(userId)),
     ),
   ),
 });

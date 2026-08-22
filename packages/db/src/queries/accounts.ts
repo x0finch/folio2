@@ -1,6 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import { and, eq } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { accounts, portfolioAccounts } from "../schema";
 import type { AccountSafe } from "../schema/types";
 import { DbClient } from "../stores/service";
@@ -8,7 +8,7 @@ import { ensureDefault } from "./portfolios";
 
 // 账户:建 / 列 / 改名 / 归档 / 删,外加 creds 的原样存取(db 不解释 creds 的内容)。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):它由 `accountStoreLayer(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):它由 `AccountStore.Default(userId)` 在装配那一刻吃掉。
 // 方法名也不再带领域前缀(`createAccount` → `create`)—— 服务本身就是领域。
 
 // 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
@@ -35,11 +35,6 @@ export interface AccountRawCreds {
   id: string;
   creds: string | null;
 }
-
-/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
-export type AccountStore = Effect.Effect.Success<ReturnType<typeof make>>;
-
-export const AccountStore = Context.GenericTag<AccountStore>("db/AccountStore");
 
 // ⚠️ 系统级查询 —— 原则 #6(全部按 userId 作用域)的【唯一、受控例外】,仅供定时同步调度器(P6.3)
 // 跨用户枚举。不接受/不返回任何用户数据,只回有账户的去重 userId 列表供逐个 syncUser。
@@ -172,5 +167,6 @@ const make = (userId: string) =>
     };
   });
 
-export const accountStoreLayer = (userId: string): Layer.Layer<AccountStore, never, DbClient> =>
-  Layer.effect(AccountStore, make(userId));
+export class AccountStore extends Effect.Service<AccountStore>()("db/AccountStore", {
+  effect: make,
+}) {}

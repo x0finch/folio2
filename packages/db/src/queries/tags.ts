@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import type { Drizzle } from "../connect";
 import { accounts, accountTags, portfolioAccounts, tags } from "../schema";
 import type { Tag } from "../schema/types";
@@ -8,7 +8,7 @@ import { assertAccountOwned, assertPortfolioOwned, assertTagOwned } from "./owne
 
 // Tag —— Portfolio 内的软标签(ADR 0034)。一个账户可挂多个,但只能挂同 Portfolio 的 tag。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):由 `tagStoreLayer(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):由 `TagStore.Default(userId)` 在装配那一刻吃掉。
 
 // 某账户当前归属的 Portfolio(1:1,恰一行;无行 = 账户不存在 / 越权,返回 undefined)。
 async function accountPortfolioId(db: Drizzle, accountId: string): Promise<string | undefined> {
@@ -53,11 +53,6 @@ export interface AccountTagLink {
   accountId: string;
   tagId: string;
 }
-
-/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
-export type TagStore = Effect.Effect.Success<ReturnType<typeof make>>;
-
-export const TagStore = Context.GenericTag<TagStore>("db/TagStore");
 
 const make = (userId: string) =>
   Effect.gen(function* () {
@@ -166,5 +161,6 @@ const make = (userId: string) =>
     };
   });
 
-export const tagStoreLayer = (userId: string): Layer.Layer<TagStore, never, DbClient> =>
-  Layer.effect(TagStore, make(userId));
+export class TagStore extends Effect.Service<TagStore>()("db/TagStore", {
+  effect: make,
+}) {}

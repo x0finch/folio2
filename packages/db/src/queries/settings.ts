@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { userSettings } from "../schema";
 import type { UserSettings, ValuationMode } from "../schema/types";
 import { DbClient } from "../stores/service";
@@ -13,11 +13,6 @@ const DEFAULT_VALUATION_MODE: ValuationMode = "self-first";
 export interface UserSettingsView {
   valuationMode: ValuationMode;
 }
-
-/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
-export type SettingsStore = Effect.Effect.Success<ReturnType<typeof make>>;
-
-export const SettingsStore = Context.GenericTag<SettingsStore>("db/SettingsStore");
 
 const make = (userId: string) =>
   Effect.gen(function* () {
@@ -58,5 +53,6 @@ const make = (userId: string) =>
     };
   });
 
-export const settingsStoreLayer = (userId: string): Layer.Layer<SettingsStore, never, DbClient> =>
-  Layer.effect(SettingsStore, make(userId));
+export class SettingsStore extends Effect.Service<SettingsStore>()("db/SettingsStore", {
+  effect: make,
+}) {}

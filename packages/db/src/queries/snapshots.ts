@@ -13,7 +13,7 @@ import {
   max,
   sql,
 } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import type { Drizzle } from "../connect";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
@@ -22,7 +22,7 @@ import { assertAccountOwned } from "./ownership";
 
 // 快照 —— 一次同步落下的余额切片,以及总额 / 历史 / 分页那几条读路。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):由 `snapshotStoreLayer(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):由 `SnapshotStore.Default(userId)` 在装配那一刻吃掉。
 
 // D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 现在每行 10 列 → 每块 8 行(80 个,限内)。
 // **加列必须回来改这个数**:列数 × 块行数不得超 100,否则 "too many SQL variables",只在持仓多的账户上炸。
@@ -103,11 +103,6 @@ export interface SnapshotBalanceHistoryRow {
   platform: string | null;
   metaJson: string | null;
 }
-
-/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
-export type SnapshotStore = Effect.Effect.Success<ReturnType<typeof make>>;
-
-export const SnapshotStore = Context.GenericTag<SnapshotStore>("db/SnapshotStore");
 
 const make = (userId: string) =>
   Effect.gen(function* () {
@@ -434,5 +429,6 @@ const make = (userId: string) =>
     };
   });
 
-export const snapshotStoreLayer = (userId: string): Layer.Layer<SnapshotStore, never, DbClient> =>
-  Layer.effect(SnapshotStore, make(userId));
+export class SnapshotStore extends Effect.Service<SnapshotStore>()("db/SnapshotStore", {
+  effect: make,
+}) {}

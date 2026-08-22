@@ -37,23 +37,20 @@ export type {
   UserSettingsView,
   WriteSnapshotInput,
 } from "./queries";
-// per-user 的领域服务(ADR 0037)。**Tag + layer 都出** —— 与 `DbClient` 不同:那个的 `query`
-// 回调参数就是 drizzle 句柄,出包等于把包装层作废;这些服务的方法本来就是包装过的 op,
-// 出包正是让 app 能把一次请求的全部数据访问装进同一个 context(#394 T4 起)。
+// per-user 的领域服务(ADR 0037)。每个名字同时是**类型**、**Tag** 和**它的 layer**
+// (`Effect.Service`:带 userId 的 `.Default(userId)` 就是 layer,#501)—— 与 `DbClient` 不同:
+// 那个的 `query` 回调参数就是 drizzle 句柄,出包等于把包装层作废;这些服务的方法本来就是包装过
+// 的 op,出包正是让 app 能把一次请求的全部数据访问装进同一个 context(#394 T4 起)。
 //
 // **这排 Tag 是过渡形状,只会变少**:某个领域挂进聚合 `Database` 之后,它的 Tag 就没有消费者了,
 // 同片删除(tab-pins 已经这样退场)。
-export {
-  AccountStore,
-  accountStoreLayer,
-  listUserIdsWithAccounts,
-} from "./queries/accounts";
-export { TransferStore, transferStoreLayer } from "./queries/export-import";
-export { ManualStore, manualStoreLayer } from "./queries/manual-activity";
-export { PortfolioStore, portfolioStoreLayer } from "./queries/portfolios";
-export { SettingsStore, settingsStoreLayer } from "./queries/settings";
-export { SnapshotStore, snapshotStoreLayer } from "./queries/snapshots";
-export { TagStore, tagStoreLayer } from "./queries/tags";
+export { AccountStore, listUserIdsWithAccounts } from "./queries/accounts";
+export { TransferStore } from "./queries/export-import";
+export { ManualStore } from "./queries/manual-activity";
+export { PortfolioStore } from "./queries/portfolios";
+export { SettingsStore } from "./queries/settings";
+export { SnapshotStore } from "./queries/snapshots";
+export { TagStore } from "./queries/tags";
 export type {
   Account,
   AccountSafe,

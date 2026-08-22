@@ -1,5 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
 import type { Portfolio } from "../schema/types";
 import { DbClient } from "../stores/service";
@@ -7,7 +7,7 @@ import { assertAccountOwned, assertPortfolioOwned } from "./ownership";
 
 // Portfolio —— 命名账户集(ADR 0033)。每个账户恰属一个,新用户首次落地建默认那个。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):它由 `portfolioStoreLayer(userId)` 在装配那一刻
+// **服务的方法签名里没有 userId**(ADR 0037):它由 `PortfolioStore.Default(userId)` 在装配那一刻
 // 吃掉,拿错用户在编译期就发生不了。方法名也不再带领域前缀(`createPortfolio` → `create`)——
 // 服务本身就是领域,名字里再带一遍是平铺函数时代的遗留。
 
@@ -24,11 +24,6 @@ export interface PortfolioMembership {
   accountId: string;
   portfolioId: string;
 }
-
-/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
-export type PortfolioStore = Effect.Effect.Success<ReturnType<typeof make>>;
-
-export const PortfolioStore = Context.GenericTag<PortfolioStore>("db/PortfolioStore");
 
 const selectDefault = (database: DbClient, userId: string): Effect.Effect<Portfolio | undefined> =>
   database.query((db) =>
@@ -203,5 +198,6 @@ const make = (userId: string) =>
     };
   });
 
-export const portfolioStoreLayer = (userId: string): Layer.Layer<PortfolioStore, never, DbClient> =>
-  Layer.effect(PortfolioStore, make(userId));
+export class PortfolioStore extends Effect.Service<PortfolioStore>()("db/PortfolioStore", {
+  effect: make,
+}) {}

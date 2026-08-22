@@ -33,7 +33,7 @@ type Promisified<S> = {
 };
 
 // per-user 服务的把手(#394 ADR 0037):userId 现在由 layer 吃掉,所以每个用户各建一份。
-// 用法:`const accounts = forUser(AccountStore, accountStoreLayer)` 之后 `accounts(USER_A).create(…)`。
+// 用法:`const accounts = forUser(AccountStore, AccountStore.Default)` 之后 `accounts(USER_A).create(…)`。
 //
 // 测试**保持 Promise 形状**是有判据的(CODING.md / #391):这些用例测的是「数据落库对不对」——
 // 真 D1、主键冲突、跨用户隔离,跟时序无关。测编排行为的那种才翻 Effect + TestClock。
