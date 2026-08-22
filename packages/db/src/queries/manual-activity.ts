@@ -3,7 +3,7 @@ import { Context, Effect, Layer } from "effect";
 import type { Drizzle } from "../connect";
 import { accounts, manualActivity, tokens } from "../schema";
 import { DbClient } from "../stores/service";
-import { holdingOps, type ManualHolding } from "./manual-holdings";
+import { holdingOps } from "./manual-holdings";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 
 // 手记账本 —— 活动行(add / reduce / set)的写、读、改、删,以及「一次提交一批」。
@@ -71,39 +71,8 @@ async function assertActivityOwned(
   return { tokenId: row.tokenId, accountId: row.accountId };
 }
 
-export interface ManualStore {
-  // —— 持仓(账本折叠出来的那一面,实现在 manual-holdings.ts)——
-  readonly listHoldings: (accountId: string, namer: string) => Effect.Effect<ManualHolding[]>;
-  readonly setHoldingDef: (tokenId: string, input: { symbol?: string }) => Effect.Effect<void>;
-  readonly detachHolding: (accountId: string, tokenId: string) => Effect.Effect<void>;
-  // —— 账本 ——
-  /** 活动挂 (账户, token)。两道归属校验各自挡:账户属本人、token 属本人。 */
-  readonly recordActivity: (
-    accountId: string,
-    tokenId: string,
-    input: ManualActivityInput,
-  ) => Effect.Effect<void>;
-  /** 某账户对某个币的账本。**必须带 accountId** —— 同一 token 可被多个手记账户持有。 */
-  readonly listActivityByToken: (
-    accountId: string,
-    tokenId: string,
-  ) => Effect.Effect<ManualActivity[]>;
-  readonly listActivityByAccount: (accountId: string) => Effect.Effect<ManualActivity[]>;
-  /** 导出用:全部手记活动(跨账户,扁平)。 */
-  readonly listAllActivity: () => Effect.Effect<ManualActivity[]>;
-  readonly removeActivity: (accountId: string, id: string) => Effect.Effect<void>;
-  /** 活动 → {tokenId, accountId}(公开读,归属校验)。编辑前用它取所属 token 校验超支。 */
-  readonly activityOwner: (
-    activityId: string,
-  ) => Effect.Effect<{ tokenId: string; accountId: string }>;
-  /** 编辑一笔既有活动(保留 id/tokenId/accountId/createdAt;只覆盖给定字段)。 */
-  readonly updateActivity: (
-    activityId: string,
-    patch: ManualActivityPatch,
-  ) => Effect.Effect<{ tokenId: string; accountId: string }>;
-  /** 批量提交写计划(app 层 planManualBatch 产出):落持仓声明 + 插入活动,**整批原子**。 */
-  readonly commitBatch: (plan: ManualBatchPlan) => Effect.Effect<void>;
-}
+/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
+export type ManualStore = Effect.Effect.Success<ReturnType<typeof make>>;
 
 export const ManualStore = Context.GenericTag<ManualStore>("db/ManualStore");
 
@@ -111,13 +80,21 @@ const make = (userId: string) =>
   Effect.gen(function* () {
     const database = yield* DbClient;
 
-    const store: ManualStore = {
+    return {
+      // —— 持仓(账本折叠出来的那一面,实现在 manual-holdings.ts)——
       ...holdingOps(database, userId),
 
+      // —— 账本 ——
+
+      /** 活动挂 (账户, token)。两道归属校验各自挡:账户属本人、token 属本人。 */
       // #203 起 **accountId 由调用方显式给** —— token 不再自带账户(`tokens` 是 per-user 的,
       // 一个币可以被多个手记账户持有),没法再从它反查。
       // 越权面靠两道归属校验各自挡。缺一道就能把活动挂到别人的东西上。
-      recordActivity: (accountId, tokenId, input) =>
+      recordActivity: (
+        accountId: string,
+        tokenId: string,
+        input: ManualActivityInput,
+      ): Effect.Effect<void> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           yield* database.query((db) => assertTokenOwned(db, userId, tokenId));
@@ -137,9 +114,10 @@ const make = (userId: string) =>
           );
         }),
 
+      /** 某账户对某个币的账本。**必须带 accountId** —— 同一 token 可被多个手记账户持有。 */
       // 按 occurred_at→created_at 升序(deriveAmount 据此定序)。只按 tokenId 取会把别的账户的
       // 活动一起折进来,数量直接算错 —— 所以 accountId 是必填。
-      listActivityByToken: (accountId, tokenId) =>
+      listActivityByToken: (accountId: string, tokenId: string): Effect.Effect<ManualActivity[]> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           return yield* database.query((db) =>
@@ -154,7 +132,7 @@ const make = (userId: string) =>
         }),
 
       // userId-scoped(经 account ⨝ user 归属);按 occurred_at→created_at 升序。
-      listActivityByAccount: (accountId) =>
+      listActivityByAccount: (accountId: string): Effect.Effect<ManualActivity[]> =>
         database.query((db) =>
           db
             .select(getTableColumns(manualActivity))
@@ -164,8 +142,9 @@ const make = (userId: string) =>
             .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt)),
         ),
 
+      /** 导出用:全部手记活动(跨账户,扁平)。 */
       // accountId / tokenId 都是导出侧的旧 id,导入时按各自的重映射改指。
-      listAllActivity: () =>
+      listAllActivity: (): Effect.Effect<ManualActivity[]> =>
         database.query((db) =>
           db
             .select(getTableColumns(manualActivity))
@@ -175,7 +154,7 @@ const make = (userId: string) =>
             .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt)),
         ),
 
-      removeActivity: (accountId, id) =>
+      removeActivity: (accountId: string, id: string): Effect.Effect<void> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           yield* database.query((db) =>
@@ -185,11 +164,16 @@ const make = (userId: string) =>
           );
         }),
 
-      activityOwner: (activityId) =>
+      /** 活动 → {tokenId, accountId}(公开读,归属校验)。编辑前用它取所属 token 校验超支。 */
+      activityOwner: (activityId: string): Effect.Effect<{ tokenId: string; accountId: string }> =>
         database.query((db) => assertActivityOwned(db, userId, activityId)),
 
+      /** 编辑一笔既有活动(保留 id/tokenId/accountId/createdAt;只覆盖给定字段)。 */
       // 归属经 assertActivityOwned;超支校验在 app 层(改前折叠受影响 token 时间线)。
-      updateActivity: (activityId, patch) =>
+      updateActivity: (
+        activityId: string,
+        patch: ManualActivityPatch,
+      ): Effect.Effect<{ tokenId: string; accountId: string }> =>
         Effect.gen(function* () {
           const owner = yield* database.query((db) => assertActivityOwned(db, userId, activityId));
           const set: Partial<InferSelectModel<typeof manualActivity>> = {};
@@ -208,12 +192,13 @@ const make = (userId: string) =>
           return owner;
         }),
 
+      /** 批量提交写计划(app 层 planManualBatch 产出):落持仓声明 + 插入活动,**整批原子**。 */
       // 归属:assertAccountOwned + 校验每条活动的 tokenId **属于本人**。
       // 注意闸口从「∈ 该账户既有 token」改成了「∈ 本人的 token」—— 账户与币的关系现在**由活动本身承载**,
       // 拿它当前置条件会循环:一个刚声明的持仓在本批插入之前一条活动都没有。
       // 用户维度的闸仍然严格:拿别人的 tokenId 来照样抛。
       // 活动 createdAt = now + i 保提交序(同 occurredAt 处新活动恒排在既有之后,与 planManualBatch 定序一致)。
-      commitBatch: (plan) =>
+      commitBatch: (plan: ManualBatchPlan): Effect.Effect<void> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, plan.accountId));
           const ids = [
@@ -259,8 +244,6 @@ const make = (userId: string) =>
           ]);
         }),
     };
-
-    return store;
   });
 
 export const manualStoreLayer = (userId: string): Layer.Layer<ManualStore, never, DbClient> =>

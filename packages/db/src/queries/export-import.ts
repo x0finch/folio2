@@ -44,39 +44,8 @@ export interface ImportTokenInput {
   marketCapRank?: number | null;
 }
 
-export interface TransferStore {
-  readonly listTokensForExport: () => Effect.Effect<ExportToken[]>;
-  /**
-   * 导入一个 Token:**find-or-create**。它的任一 ref 已在本地映射到某 Token → 复用那行(把缺的 ref
-   * 补挂过去);否则新建一行(新 id,不跟本地已有撞)+ 挂上全部 ref。返回最终 token_id,供调用方建
-   * old→new 映射。空库导入是最常见路径:恒无命中 → 每个 Token 各建新行。
-   *
-   * **已知限制(仅非空库的分叉场景)**:若这批 ref 分别命中本地**不同**的 Token(源库把多链归并成一行、
-   * 目标库却各自建了行),这里按第一条命中复用、其余 ref 撞约束被静默跳过 → 文件里那个 Token 的身份被
-   * 部分并到一行上。**这条经导入路径根本走不到** —— 导入有空库闸(见 apps/web import.ts),只往空库导,
-   * 恒无命中、每个 Token 各建新行。留这条注释是因为本 op 也被别处直接调用;跨实例分叉合并归「改绑」那张票。
-   */
-  readonly importToken: (
-    t: ImportTokenInput,
-    refs: readonly { namer: string; localName: string }[],
-    now?: () => number,
-  ) => Effect.Effect<string>;
-  /** 账户自然键 = (connectorId, platform, label, creds) 全同即同一个。归档态是可变属性、不进键。 */
-  readonly importAccount: (
-    input: CreateAccountInput & { archivedAt?: number | null },
-  ) => Effect.Effect<{ id: string; created: boolean }>;
-  /** 快照自然键 = (accountId, takenAt) —— 一个账户一个时刻一份。已存在则整份跳过。 */
-  readonly importSnapshot: (
-    accountId: string,
-    input: WriteSnapshotInput,
-  ) => Effect.Effect<{ created: boolean }>;
-  /** 手记活动自然键 = 整条内容。**createdAt 必须进键**,见实现处注释。 */
-  readonly importManualActivity: (
-    accountId: string,
-    tokenId: string,
-    input: ManualActivityInput,
-  ) => Effect.Effect<{ created: boolean }>;
-}
+/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
+export type TransferStore = Effect.Effect.Success<ReturnType<typeof make>>;
 
 export const TransferStore = Context.GenericTag<TransferStore>("db/TransferStore");
 
@@ -88,8 +57,8 @@ const make = (userId: string) =>
     const snapshotStore = yield* SnapshotStore;
     const manualStore = yield* ManualStore;
 
-    const store: TransferStore = {
-      listTokensForExport: () =>
+    return {
+      listTokensForExport: (): Effect.Effect<ExportToken[]> =>
         Effect.gen(function* () {
           const rows = yield* database.query((db) =>
             db
@@ -126,8 +95,22 @@ const make = (userId: string) =>
           return rows.map((t) => ({ ...t, refs: byToken.get(t.id) ?? [] }));
         }),
 
+      /**
+       * 导入一个 Token:**find-or-create**。它的任一 ref 已在本地映射到某 Token → 复用那行(把缺的 ref
+       * 补挂过去);否则新建一行(新 id,不跟本地已有撞)+ 挂上全部 ref。返回最终 token_id,供调用方建
+       * old→new 映射。空库导入是最常见路径:恒无命中 → 每个 Token 各建新行。
+       *
+       * **已知限制(仅非空库的分叉场景)**:若这批 ref 分别命中本地**不同**的 Token(源库把多链归并成一行、
+       * 目标库却各自建了行),这里按第一条命中复用、其余 ref 撞约束被静默跳过 → 文件里那个 Token 的身份被
+       * 部分并到一行上。**这条经导入路径根本走不到** —— 导入有空库闸(见 apps/web import.ts),只往空库导,
+       * 恒无命中、每个 Token 各建新行。留这条注释是因为本 op 也被别处直接调用;跨实例分叉合并归「改绑」那张票。
+       */
       // ref 插入用无目标 onConflict:PK(user_id,namer,local_name)与唯一索引(user_id,token_id,namer)任一撞了都静默。
-      importToken: (t, refs, now = Date.now) =>
+      importToken: (
+        t: ImportTokenInput,
+        refs: readonly { namer: string; localName: string }[],
+        now: () => number = Date.now,
+      ): Effect.Effect<string> =>
         Effect.gen(function* () {
           if (refs.length > 0) {
             const hit = yield* database.query((db) =>
@@ -183,8 +166,11 @@ const make = (userId: string) =>
           return id;
         }),
 
+      /** 账户自然键 = (connectorId, platform, label, creds) 全同即同一个。归档态是可变属性、不进键。 */
       // 命中时若文件说归档而现有未归档,则对齐成归档。
-      importAccount: (input) =>
+      importAccount: (
+        input: CreateAccountInput & { archivedAt?: number | null },
+      ): Effect.Effect<{ id: string; created: boolean }> =>
         Effect.gen(function* () {
           const platform = input.platform ?? null;
           const creds = input.creds ?? null;
@@ -235,7 +221,11 @@ const make = (userId: string) =>
           return { id, created: true };
         }),
 
-      importSnapshot: (accountId, input) =>
+      /** 快照自然键 = (accountId, takenAt) —— 一个账户一个时刻一份。已存在则整份跳过。 */
+      importSnapshot: (
+        accountId: string,
+        input: WriteSnapshotInput,
+      ): Effect.Effect<{ created: boolean }> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           const existing = yield* database.query((db) =>
@@ -250,10 +240,15 @@ const make = (userId: string) =>
           return { created: true };
         }),
 
+      /** 手记活动自然键 = 整条内容。**createdAt 必须进键**,理由见下。 */
       // **createdAt 必须进键**:系统允许同一 occurredAt 有多笔、靠 createdAt 排序折叠(deriveAmount);
       // 两笔除 createdAt 外全同是合法的不同事件,漏掉它会把它们折成一笔、丢数量(连首次恢复都出错)。
       // v3 导出恒带 createdAt,故加进键后再导仍命中(幂等)。createdAt 缺席(非导入路径)才退回内容键。
-      importManualActivity: (accountId, tokenId, input) =>
+      importManualActivity: (
+        accountId: string,
+        tokenId: string,
+        input: ManualActivityInput,
+      ): Effect.Effect<{ created: boolean }> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           yield* database.query((db) => assertTokenOwned(db, userId, tokenId));
@@ -286,8 +281,6 @@ const make = (userId: string) =>
           return { created: true };
         }),
     };
-
-    return store;
   });
 
 // **layer 依赖另外两个 store**(不是方法的 `R`):导快照/导活动就是「查重之后调那一个写」。

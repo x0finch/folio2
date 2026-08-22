@@ -36,21 +36,8 @@ export interface AccountRawCreds {
   creds: string | null;
 }
 
-export interface AccountStore {
-  readonly create: (input: CreateAccountInput) => Effect.Effect<AccountSafe>;
-  readonly list: () => Effect.Effect<AccountSafe[]>;
-  readonly getById: (id: string) => Effect.Effect<AccountSafe | null>;
-  /** 补录/再水合:整张 creds map 覆盖写入(占位被真值替换,见 P6.6.1 provideCredentials)。 */
-  readonly setCredentials: (id: string, creds: string) => Effect.Effect<void>;
-  /** 取原始 creds map(JSON 字符串,含 secret 密文)供 sync 解密 / 服务端投影用(内部接口,绝不裸出网)。 */
-  readonly getRawCreds: (id: string) => Effect.Effect<string | null>;
-  readonly listRawCreds: () => Effect.Effect<AccountRawCreds[]>;
-  readonly rename: (id: string, label: string) => Effect.Effect<void>;
-  /** 归档/取消归档:archived=true 写当前时刻,false 置 null。可逆,不删数据。 */
-  readonly setArchived: (id: string, archived: boolean) => Effect.Effect<void>;
-  /** 删账户:其 snapshots / portfolio_accounts / manual_activity 经 ON DELETE CASCADE 级联删除。 */
-  readonly remove: (id: string) => Effect.Effect<void>;
-}
+/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
+export type AccountStore = Effect.Effect.Success<ReturnType<typeof make>>;
 
 export const AccountStore = Context.GenericTag<AccountStore>("db/AccountStore");
 
@@ -75,10 +62,10 @@ const make = (userId: string) =>
   Effect.gen(function* () {
     const database = yield* DbClient;
 
-    const store: AccountStore = {
+    return {
       // 不变量(ADR 0033):每个账户恰一行归属。新账户落进用户的默认 Portfolio —— 建账户与建归属
       // 一个 batch 原子写,杜绝「有账户没归属」的空窗(否则该账户会从 accountsInView 里消失)。
-      create: (input) =>
+      create: (input: CreateAccountInput): Effect.Effect<AccountSafe> =>
         Effect.gen(function* () {
           const pf = yield* ensureDefault(database, userId);
           const id = crypto.randomUUID();
@@ -107,12 +94,12 @@ const make = (userId: string) =>
           };
         }),
 
-      list: () =>
+      list: (): Effect.Effect<AccountSafe[]> =>
         database.query((db) =>
           db.select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId)),
         ),
 
-      getById: (id) =>
+      getById: (id: string): Effect.Effect<AccountSafe | null> =>
         Effect.map(
           database.query((db) =>
             db
@@ -123,7 +110,8 @@ const make = (userId: string) =>
           (rows) => rows[0] ?? null,
         ),
 
-      setCredentials: (id, creds) =>
+      /** 补录/再水合:整张 creds map 覆盖写入(占位被真值替换,见 P6.6.1 provideCredentials)。 */
+      setCredentials: (id: string, creds: string): Effect.Effect<void> =>
         Effect.asVoid(
           database.query((db) =>
             db
@@ -133,7 +121,8 @@ const make = (userId: string) =>
           ),
         ),
 
-      getRawCreds: (id) =>
+      /** 取原始 creds map(JSON 字符串,含 secret 密文)供 sync 解密 / 服务端投影用(内部接口,绝不裸出网)。 */
+      getRawCreds: (id: string): Effect.Effect<string | null> =>
         Effect.map(
           database.query((db) =>
             db
@@ -144,7 +133,7 @@ const make = (userId: string) =>
           (rows) => rows[0]?.creds ?? null,
         ),
 
-      listRawCreds: () =>
+      listRawCreds: (): Effect.Effect<AccountRawCreds[]> =>
         database.query((db) =>
           db
             .select({ id: accounts.id, creds: accounts.creds })
@@ -152,7 +141,7 @@ const make = (userId: string) =>
             .where(eq(accounts.userId, userId)),
         ),
 
-      rename: (id, label) =>
+      rename: (id: string, label: string): Effect.Effect<void> =>
         Effect.asVoid(
           database.query((db) =>
             db
@@ -162,7 +151,8 @@ const make = (userId: string) =>
           ),
         ),
 
-      setArchived: (id, archived) =>
+      /** 归档/取消归档:archived=true 写当前时刻,false 置 null。可逆,不删数据。 */
+      setArchived: (id: string, archived: boolean): Effect.Effect<void> =>
         Effect.asVoid(
           database.query((db) =>
             db
@@ -172,15 +162,14 @@ const make = (userId: string) =>
           ),
         ),
 
-      remove: (id) =>
+      /** 删账户:其 snapshots / portfolio_accounts / manual_activity 经 ON DELETE CASCADE 级联删除。 */
+      remove: (id: string): Effect.Effect<void> =>
         Effect.asVoid(
           database.query((db) =>
             db.delete(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
           ),
         ),
     };
-
-    return store;
   });
 
 export const accountStoreLayer = (userId: string): Layer.Layer<AccountStore, never, DbClient> =>

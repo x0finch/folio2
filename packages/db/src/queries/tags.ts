@@ -54,24 +54,8 @@ export interface AccountTagLink {
   tagId: string;
 }
 
-export interface TagStore {
-  /** 建一个 Tag(归属指定 Portfolio)。名字 trim 后落库、同 Portfolio 内忽略大小写唯一。 */
-  readonly create: (input: CreateTagInput) => Effect.Effect<Tag>;
-  /** 全部 Tag(展示富化用:一次拿到 id→{name,portfolioId} 供账户行/抽屉渲染)。 */
-  readonly list: () => Effect.Effect<Tag[]>;
-  /** 某 Portfolio 内的 Tag(打标签弹窗:平铺当前 Portfolio 的可选 Tag)。 */
-  readonly listByPortfolio: (portfolioId: string) => Effect.Effect<Tag[]>;
-  /** 改 Tag 名(同 Portfolio 内唯一校验,排除自身)。越权即 tag not found。 */
-  readonly rename: (tagId: string, name: string) => Effect.Effect<void>;
-  /** 删 Tag(Portfolio 级破坏性):其 account_tags 与 tab_pins(#343 后)经 FK cascade 一并清。 */
-  readonly remove: (tagId: string) => Effect.Effect<void>;
-  /** 给账户打上一个 Tag(幂等)。校验账户与 Tag 同 Portfolio(ADR 0034 不变量)。 */
-  readonly attach: (accountId: string, tagId: string) => Effect.Effect<void>;
-  /** 从账户取消一个 Tag(幂等)。两个资源都做 owner 断言。 */
-  readonly detach: (accountId: string, tagId: string) => Effect.Effect<void>;
-  /** 全部 账户→Tag 关联(展示富化原料)。一次查询(account_tags ⨝ accounts 限 user)。 */
-  readonly listAccountLinks: () => Effect.Effect<AccountTagLink[]>;
-}
+/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
+export type TagStore = Effect.Effect.Success<ReturnType<typeof make>>;
 
 export const TagStore = Context.GenericTag<TagStore>("db/TagStore");
 
@@ -79,8 +63,9 @@ const make = (userId: string) =>
   Effect.gen(function* () {
     const database = yield* DbClient;
 
-    const store: TagStore = {
-      create: (input) =>
+    return {
+      /** 建一个 Tag(归属指定 Portfolio)。名字 trim 后落库、同 Portfolio 内忽略大小写唯一。 */
+      create: (input: CreateTagInput): Effect.Effect<Tag> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertPortfolioOwned(db, userId, input.portfolioId));
           const name = input.name.trim();
@@ -98,7 +83,8 @@ const make = (userId: string) =>
           return row;
         }),
 
-      list: () =>
+      /** 全部 Tag(展示富化用:一次拿到 id→{name,portfolioId} 供账户行/抽屉渲染)。 */
+      list: (): Effect.Effect<Tag[]> =>
         database.query((db) =>
           db
             .select()
@@ -107,7 +93,8 @@ const make = (userId: string) =>
             .orderBy(asc(tags.sortOrder), asc(tags.createdAt), asc(tags.id)),
         ),
 
-      listByPortfolio: (portfolioId) =>
+      /** 某 Portfolio 内的 Tag(打标签弹窗:平铺当前 Portfolio 的可选 Tag)。 */
+      listByPortfolio: (portfolioId: string): Effect.Effect<Tag[]> =>
         database.query((db) =>
           db
             .select()
@@ -116,7 +103,8 @@ const make = (userId: string) =>
             .orderBy(asc(tags.sortOrder), asc(tags.createdAt), asc(tags.id)),
         ),
 
-      rename: (tagId, name) =>
+      /** 改 Tag 名(同 Portfolio 内唯一校验,排除自身)。越权即 tag not found。 */
+      rename: (tagId: string, name: string): Effect.Effect<void> =>
         Effect.gen(function* () {
           const { portfolioId } = yield* database.query((db) => assertTagOwned(db, userId, tagId));
           const next = name.trim();
@@ -130,14 +118,16 @@ const make = (userId: string) =>
           );
         }),
 
-      remove: (tagId) =>
+      /** 删 Tag(Portfolio 级破坏性):其 account_tags 与 tab_pins(#343 后)经 FK cascade 一并清。 */
+      remove: (tagId: string): Effect.Effect<void> =>
         Effect.asVoid(
           database.query((db) =>
             db.delete(tags).where(and(eq(tags.id, tagId), eq(tags.userId, userId))),
           ),
         ),
 
-      attach: (accountId, tagId) =>
+      /** 给账户打上一个 Tag(幂等)。校验账户与 Tag 同 Portfolio(ADR 0034 不变量)。 */
+      attach: (accountId: string, tagId: string): Effect.Effect<void> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           const { portfolioId: tagPortfolio } = yield* database.query((db) =>
@@ -152,7 +142,8 @@ const make = (userId: string) =>
           );
         }),
 
-      detach: (accountId, tagId) =>
+      /** 从账户取消一个 Tag(幂等)。两个资源都做 owner 断言。 */
+      detach: (accountId: string, tagId: string): Effect.Effect<void> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           yield* database.query((db) => assertTagOwned(db, userId, tagId));
@@ -163,7 +154,8 @@ const make = (userId: string) =>
           );
         }),
 
-      listAccountLinks: () =>
+      /** 全部 账户→Tag 关联(展示富化原料)。一次查询(account_tags ⨝ accounts 限 user)。 */
+      listAccountLinks: (): Effect.Effect<AccountTagLink[]> =>
         database.query((db) =>
           db
             .select({ accountId: accountTags.accountId, tagId: accountTags.tagId })
@@ -172,8 +164,6 @@ const make = (userId: string) =>
             .where(eq(accounts.userId, userId)),
         ),
     };
-
-    return store;
   });
 
 export const tagStoreLayer = (userId: string): Layer.Layer<TagStore, never, DbClient> =>

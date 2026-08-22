@@ -14,12 +14,8 @@ export interface UserSettingsView {
   valuationMode: ValuationMode;
 }
 
-export interface SettingsStore {
-  /** 读带缺省:无行返默认(不为每个用户强制建行)。 */
-  readonly get: () => Effect.Effect<UserSettingsView>;
-  /** upsert:只覆盖给定字段(缺省字段首次建行用默认值,后续保持原值)。 */
-  readonly update: (patch: { valuationMode?: ValuationMode }) => Effect.Effect<void>;
-}
+/** 服务的形状 —— 从 `make` 的返回值推导,不再手写一份复述(#501)。 */
+export type SettingsStore = Effect.Effect.Success<ReturnType<typeof make>>;
 
 export const SettingsStore = Context.GenericTag<SettingsStore>("db/SettingsStore");
 
@@ -27,8 +23,9 @@ const make = (userId: string) =>
   Effect.gen(function* () {
     const database = yield* DbClient;
 
-    const store: SettingsStore = {
-      get: () =>
+    return {
+      /** 读带缺省:无行返默认(不为每个用户强制建行)。 */
+      get: (): Effect.Effect<UserSettingsView> =>
         Effect.map(
           database.query((db) =>
             db.select().from(userSettings).where(eq(userSettings.userId, userId)),
@@ -39,7 +36,8 @@ const make = (userId: string) =>
           },
         ),
 
-      update: (patch) =>
+      /** upsert:只覆盖给定字段(缺省字段首次建行用默认值,后续保持原值)。 */
+      update: (patch: { valuationMode?: ValuationMode }): Effect.Effect<void> =>
         Effect.gen(function* () {
           const now = Date.now();
           const set: Partial<{ valuationMode: ValuationMode; updatedAt: number }> = {
@@ -58,8 +56,6 @@ const make = (userId: string) =>
           );
         }),
     };
-
-    return store;
   });
 
 export const settingsStoreLayer = (userId: string): Layer.Layer<SettingsStore, never, DbClient> =>
