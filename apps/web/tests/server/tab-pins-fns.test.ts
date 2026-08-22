@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { Database, dbClientLayer } from "@folio/db";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { runEffect } from "@/lib/server/oracle";
+import { runEffect } from "@/lib/server/runtime";
 import { handleCreateTabPin } from "@/lib/server/tab-pins/create";
 import { handleDeleteTabPin } from "@/lib/server/tab-pins/delete";
 import { handleUpdateTabPinTarget } from "@/lib/server/tab-pins/update-target";

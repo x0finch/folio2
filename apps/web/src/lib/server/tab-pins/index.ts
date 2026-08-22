@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { runEffect } from "@/lib/server/oracle";
+import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleCreateTabPin, PinTargetInput } from "./create";
 import { DeleteTabPinInput, handleDeleteTabPin } from "./delete";

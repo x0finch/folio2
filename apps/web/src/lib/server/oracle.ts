@@ -105,7 +105,7 @@ const oracleFor = (userId: string, database: Layer.Layer<DbClient> = dbClientLay
 // 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
 // 而 `Data.TaggedError` 的那四类没有 `message` 字段,于是上层日志里只剩一个空消息 + 一坨 Cause。
 // 消息里只有 tag、pathname 和状态码 —— `where` 本来就刻意不带 query(原则 #5 红线)。
-const toError = (error: UpstreamError | Error): Error =>
+export const toError = (error: UpstreamError | Error): Error =>
   isUpstream(error)
     ? new Error(
         `${error.upstream} ${error._tag} on ${error.where}${
@@ -245,31 +245,6 @@ export const runRequest = <A, E extends UpstreamError | Error>(
   userId: string,
   effect: Effect.Effect<A, E, RequestServices>,
 ): Promise<A> => runAtEdge(withRequest(userId, effect));
-
-/**
- * **server fn 的「发动」点 —— handler 只描述,这里负责跑。**
- *
- * handler 拿到的只有 `data`,返回一个 Effect;要什么服务写在它的 `R` 通道里(`yield* Database`)。
- * 「哪个用户」「怎么装配」「错误怎么映射」「什么时候变成 Promise」全部在这一行之内发生,
- * handler 一个字都不必知道 —— 它连 `context` 都收不到,所以也不可能自己去读 userId 拼查询。
- *
- * 用法(装配点):`.handler(runEffect(handleCreateTabPin))`。
- *
- * 与它替掉的 `runStore` / `runRequest` 的区别不是少打几个字,是**方向**:那两个由 handler 自己
- * 调,于是每个 handler 都是「一半业务 + 一半运行时」;这个由装配点调,handler 那半干净了,
- * review 一个 handler 不再需要顺手检查它的发动、注入、错误映射写没写对。
- *
- * `runStore`/`runRequest` 全都退场之后(#504 T13),这里的 `runRequest(…)` 就展开成
- * 「provide → mapError → runAtEdge」三步本身,`runPromise` 仍然只在本文件出现。
- */
-export const runEffect =
-  <D, A, E extends UpstreamError | Error>(
-    handler: (data: D) => Effect.Effect<A, E, RequestServices>,
-  ) =>
-  // `context` 只声明用得着的那个字段:`requireAuth` 注入的是整个 `AuthContext`(还带 user /
-  // session),而这里唯一该碰的就是 userId。少声明一个字段 = 少一条能悄悄用起来的路。
-  ({ data, context }: { data: D; context: { userId: string } }): Promise<A> =>
-    runRequest(context.userId, handler(data));
 
 /**
  * 「一次 store 调用就完事」的 server fn 用它 —— `runRequest(u, Effect.flatMap(Tag, f))` 的短写。
