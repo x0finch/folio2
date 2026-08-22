@@ -40,8 +40,8 @@
 // 代价说清楚:SWR + 降级(`tokens/swr`)领域中立,却住在 `tokens/` 里,于是 `fx.ts` /
 // `platforms.ts` 要 `import from "./tokens/swr"`。哪天第四个领域也要 SWR,该提回一个共用位置。
 //
-// 每个服务名同时是**类型**和**Tag**(`Context.GenericTag`,与 `@effect/platform` 的
-// `FileSystem` / `HttpClient` 同款),所以一行 `export { TokenService }` 两个含义都带出去。
+// 每个服务名同时是**类型**、**Tag** 和**它自己的 layer**(`Effect.Service`:`.Default` 就是
+// layer),所以一行 `export { TokenService }` 三个含义都带出去 —— 不再有并排的 `xxxServiceLayer`。
 //
 // **本包整个只有服务端会碰,所以它不转发 `@folio/oracle-basic`。**
 //
@@ -55,10 +55,7 @@
 // (下面这串按字母序 —— Biome 排的,别照着它读结构;结构见上面那张图。)
 
 export { FxService } from "./fx";
-export {
-  GlobalRefIndexService,
-  globalRefIndexServiceLayer,
-} from "./global-ref-index";
+export { GlobalRefIndexService } from "./global-ref-index";
 export { type OraclePorts, type OracleServices, oracleLayer } from "./oracle";
 export { PlatformService } from "./platforms";
 export { type MintInput, type RefreshStaleReport, TokenService } from "./tokens";

@@ -1,31 +1,23 @@
 import { env } from "cloudflare:workers";
 import type { UpstreamError } from "@folio/client-core";
 import {
-  type AccountStore,
-  accountStoreLayer,
+  AccountStore,
   Database,
   type DbClient,
   dbClientLayer,
   globalTokenRefIndexStoreLayer,
-  type ManualStore,
-  manualStoreLayer,
-  type PortfolioStore,
-  portfolioStoreLayer,
-  type SettingsStore,
-  type SnapshotStore,
-  settingsStoreLayer,
-  snapshotStoreLayer,
-  type TagStore,
-  type TransferStore,
-  tagStoreLayer,
-  transferStoreLayer,
+  ManualStore,
+  PortfolioStore,
+  SettingsStore,
+  SnapshotStore,
+  TagStore,
+  TransferStore,
   userCacheStoreLayer,
   userTokenPriceStoreLayer,
   userTokenStoreLayer,
 } from "@folio/db";
 import {
-  type GlobalRefIndexService,
-  globalRefIndexServiceLayer,
+  GlobalRefIndexService,
   type OraclePorts,
   type OracleServices,
   oracleLayer,
@@ -135,7 +127,7 @@ export const withOracleWarm = <A>(
   effect: Effect.Effect<A, UpstreamError, GlobalRefIndexService>,
 ): Effect.Effect<A, Error> =>
   effect.pipe(
-    Effect.provide(Layer.provide(globalRefIndexServiceLayer, warmPorts())),
+    Effect.provide(Layer.provide(GlobalRefIndexService.Default, warmPorts())),
     Effect.mapError(toError),
   );
 
@@ -165,15 +157,15 @@ const dbStoresFor = (
   dbClient: Layer.Layer<DbClient> = dbClientLayer(env),
 ): Layer.Layer<DbStores> => {
   const base = Layer.mergeAll(
-    accountStoreLayer(userId),
-    portfolioStoreLayer(userId),
-    settingsStoreLayer(userId),
-    snapshotStoreLayer(userId),
-    manualStoreLayer(userId),
-    tagStoreLayer(userId),
+    AccountStore.Default(userId),
+    PortfolioStore.Default(userId),
+    SettingsStore.Default(userId),
+    SnapshotStore.Default(userId),
+    ManualStore.Default(userId),
+    TagStore.Default(userId),
   );
   return Layer.provide(
-    Layer.merge(base, Layer.provide(transferStoreLayer(userId), base)),
+    Layer.merge(base, Layer.provide(TransferStore.Default(userId), base)),
     dbClient,
   );
 };

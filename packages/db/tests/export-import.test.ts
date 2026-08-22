@@ -3,31 +3,22 @@ import { eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import {
-  AccountStore,
-  accountStoreLayer,
-  ManualStore,
-  manualStoreLayer,
-  SnapshotStore,
-  snapshotStoreLayer,
-  TransferStore,
-  transferStoreLayer,
-} from "../src/queries";
+import { AccountStore, ManualStore, SnapshotStore, TransferStore } from "../src/queries";
 import { tokenRefs, tokens } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
 
 const transferOf = forUser(TransferStore, (uid: string) =>
   Layer.provide(
-    transferStoreLayer(uid),
-    Layer.merge(snapshotStoreLayer(uid), manualStoreLayer(uid)),
+    TransferStore.Default(uid),
+    Layer.merge(SnapshotStore.Default(uid), ManualStore.Default(uid)),
   ),
 );
 
-const manualOf = forUser(ManualStore, manualStoreLayer);
-const snapshotsOf = forUser(SnapshotStore, snapshotStoreLayer);
+const manualOf = forUser(ManualStore, ManualStore.Default);
+const snapshotsOf = forUser(SnapshotStore, SnapshotStore.Default);
 
-const accounts = forUser(AccountStore, accountStoreLayer);
+const accounts = forUser(AccountStore, AccountStore.Default);
 
 // 导出/导入 v3 的 db 支持(#204):listTokensForExport(带 ref)、listManualActivityByUser(扁平跨账户),
 // 以及 A 方案的 find-or-create 一族(importToken/importAccount/importSnapshot/

@@ -1,6 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import { and, eq } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { accounts, portfolioAccounts } from "../schema";
 import type { AccountSafe } from "../schema/types";
 import { DbClient } from "../stores/service";
@@ -8,7 +8,7 @@ import { ensureDefault } from "./portfolios";
 
 // 账户:建 / 列 / 改名 / 归档 / 删,外加 creds 的原样存取(db 不解释 creds 的内容)。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):它由 `accountStoreLayer(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):它由 `AccountStore.Default(userId)` 在装配那一刻吃掉。
 // 方法名也不再带领域前缀(`createAccount` → `create`)—— 服务本身就是领域。
 
 // 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
@@ -36,24 +36,6 @@ export interface AccountRawCreds {
   creds: string | null;
 }
 
-export interface AccountStore {
-  readonly create: (input: CreateAccountInput) => Effect.Effect<AccountSafe>;
-  readonly list: () => Effect.Effect<AccountSafe[]>;
-  readonly getById: (id: string) => Effect.Effect<AccountSafe | null>;
-  /** 补录/再水合:整张 creds map 覆盖写入(占位被真值替换,见 P6.6.1 provideCredentials)。 */
-  readonly setCredentials: (id: string, creds: string) => Effect.Effect<void>;
-  /** 取原始 creds map(JSON 字符串,含 secret 密文)供 sync 解密 / 服务端投影用(内部接口,绝不裸出网)。 */
-  readonly getRawCreds: (id: string) => Effect.Effect<string | null>;
-  readonly listRawCreds: () => Effect.Effect<AccountRawCreds[]>;
-  readonly rename: (id: string, label: string) => Effect.Effect<void>;
-  /** 归档/取消归档:archived=true 写当前时刻,false 置 null。可逆,不删数据。 */
-  readonly setArchived: (id: string, archived: boolean) => Effect.Effect<void>;
-  /** 删账户:其 snapshots / portfolio_accounts / manual_activity 经 ON DELETE CASCADE 级联删除。 */
-  readonly remove: (id: string) => Effect.Effect<void>;
-}
-
-export const AccountStore = Context.GenericTag<AccountStore>("db/AccountStore");
-
 // ⚠️ 系统级查询 —— 原则 #6(全部按 userId 作用域)的【唯一、受控例外】,仅供定时同步调度器(P6.3)
 // 跨用户枚举。不接受/不返回任何用户数据,只回有账户的去重 userId 列表供逐个 syncUser。
 // 不要在请求处理(server fn)里调用它。
@@ -75,10 +57,10 @@ const make = (userId: string) =>
   Effect.gen(function* () {
     const database = yield* DbClient;
 
-    const store: AccountStore = {
+    return {
       // 不变量(ADR 0033):每个账户恰一行归属。新账户落进用户的默认 Portfolio —— 建账户与建归属
       // 一个 batch 原子写,杜绝「有账户没归属」的空窗(否则该账户会从 accountsInView 里消失)。
-      create: (input) =>
+      create: (input: CreateAccountInput): Effect.Effect<AccountSafe> =>
         Effect.gen(function* () {
           const pf = yield* ensureDefault(database, userId);
           const id = crypto.randomUUID();
@@ -107,12 +89,12 @@ const make = (userId: string) =>
           };
         }),
 
-      list: () =>
+      list: (): Effect.Effect<AccountSafe[]> =>
         database.query((db) =>
           db.select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId)),
         ),
 
-      getById: (id) =>
+      getById: (id: string): Effect.Effect<AccountSafe | null> =>
         Effect.map(
           database.query((db) =>
             db
@@ -123,7 +105,8 @@ const make = (userId: string) =>
           (rows) => rows[0] ?? null,
         ),
 
-      setCredentials: (id, creds) =>
+      /** 补录/再水合:整张 creds map 覆盖写入(占位被真值替换,见 P6.6.1 provideCredentials)。 */
+      setCredentials: (id: string, creds: string): Effect.Effect<void> =>
         Effect.asVoid(
           database.query((db) =>
             db
@@ -133,7 +116,8 @@ const make = (userId: string) =>
           ),
         ),
 
-      getRawCreds: (id) =>
+      /** 取原始 creds map(JSON 字符串,含 secret 密文)供 sync 解密 / 服务端投影用(内部接口,绝不裸出网)。 */
+      getRawCreds: (id: string): Effect.Effect<string | null> =>
         Effect.map(
           database.query((db) =>
             db
@@ -144,7 +128,7 @@ const make = (userId: string) =>
           (rows) => rows[0]?.creds ?? null,
         ),
 
-      listRawCreds: () =>
+      listRawCreds: (): Effect.Effect<AccountRawCreds[]> =>
         database.query((db) =>
           db
             .select({ id: accounts.id, creds: accounts.creds })
@@ -152,7 +136,7 @@ const make = (userId: string) =>
             .where(eq(accounts.userId, userId)),
         ),
 
-      rename: (id, label) =>
+      rename: (id: string, label: string): Effect.Effect<void> =>
         Effect.asVoid(
           database.query((db) =>
             db
@@ -162,7 +146,8 @@ const make = (userId: string) =>
           ),
         ),
 
-      setArchived: (id, archived) =>
+      /** 归档/取消归档:archived=true 写当前时刻,false 置 null。可逆,不删数据。 */
+      setArchived: (id: string, archived: boolean): Effect.Effect<void> =>
         Effect.asVoid(
           database.query((db) =>
             db
@@ -172,16 +157,16 @@ const make = (userId: string) =>
           ),
         ),
 
-      remove: (id) =>
+      /** 删账户:其 snapshots / portfolio_accounts / manual_activity 经 ON DELETE CASCADE 级联删除。 */
+      remove: (id: string): Effect.Effect<void> =>
         Effect.asVoid(
           database.query((db) =>
             db.delete(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
           ),
         ),
     };
-
-    return store;
   });
 
-export const accountStoreLayer = (userId: string): Layer.Layer<AccountStore, never, DbClient> =>
-  Layer.effect(AccountStore, make(userId));
+export class AccountStore extends Effect.Service<AccountStore>()("db/AccountStore", {
+  effect: make,
+}) {}

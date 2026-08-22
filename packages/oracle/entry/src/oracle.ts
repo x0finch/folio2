@@ -9,10 +9,10 @@ import type {
   TokenUpstream,
 } from "@folio/oracle-basic/ports";
 import { Layer } from "effect";
-import { type FxService, fxServiceLayer } from "./fx";
-import { type PlatformService, platformServiceLayer } from "./platforms";
-import { type TokenService, tokenServiceLayer } from "./tokens";
-import { candidateSourceLayer } from "./tokens/candidates";
+import { FxService } from "./fx";
+import { PlatformService } from "./platforms";
+import { TokenService } from "./tokens";
+import { CandidateSource } from "./tokens/candidates";
 
 // 装配。**`createOracleFor(cfg)` 没了** —— 那个 config 对象上挂着 7 个 `createXxx(userId)` 工厂
 // 回调,正是 CODING.md 反复改掉的那个模式:能替换的东西该是**服务**(Layer),不是配置字段。
@@ -65,7 +65,7 @@ export type OraclePorts =
 // `CandidateSource` 在这里被吃掉 —— 它是 mint 的内部依赖(#216 把它从读路径的网络面上摘下来的
 // 那个),包内 Tag,不该出现在装配点的 `R` 里。
 export const oracleLayer: Layer.Layer<OracleServices, never, OraclePorts> = Layer.mergeAll(
-  Layer.provide(tokenServiceLayer, candidateSourceLayer),
-  fxServiceLayer,
-  platformServiceLayer,
+  Layer.provide(TokenService.Default, CandidateSource.Default),
+  FxService.Default,
+  PlatformService.Default,
 );

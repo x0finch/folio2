@@ -9,7 +9,7 @@ import {
 } from "@folio/oracle-basic";
 import { CacheStore, FxUpstream, TokenPriceStore, TokenUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
-import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
+import { Clock, Effect, Option, Schema } from "effect";
 import { degradeTo } from "./tokens/swr";
 
 // 汇率这个领域的门面 —— **现在的汇率与历史的汇率在同一个服务上**。
@@ -36,20 +36,6 @@ import { degradeTo } from "./tokens/swr";
 //   `fx`   汇率本身 —— `FxUpstream` / `FX_TTL_MS` / `fx:<币种>` 键 / 本服务
 //   `fiat` 把法币当成一种「币」的那套 —— `FIAT_NAMER` / `fiat/issued:<CODE>` / `fiatSeed`
 // 服务名按**它给什么**取,存储那侧按**它存成什么**取(法币 token 行 → `FIAT_NAMER`)。
-export interface FxService {
-  // 1 单位该币种值多少美元。USD 恒 1(不查缓存);缓存里没有 → `none`(调用方回退 USD)。
-  resolve(currency: string): Effect.Effect<Option.Option<number>>;
-  // 预热(同步之后 / 用户第一次切币种时)。缺省预热全部支持币种。
-  warm(currencies?: readonly string[]): Effect.Effect<void>;
-  // 某法币在区间内逐日的 usd_per_unit,口径同 `resolve` 但按**当天**汇率(ADR 0026 / #274)。
-  // SWR 照 `priceSeries`:命中缓存的过去日直接用、缺的从 BTC 反算并永久落 `token_daily_prices`、
-  // 今日桶恒现取;上游失败 → 退回仅缓存。USD 恒 1(不出网)。
-  // 缓存/派生对齐到 UTC 日桶(`atMs = 日桶 × 一日毫秒`)。
-  rateSeries(code: string, fromMs: number, toMs: number): Effect.Effect<readonly TokenPricePoint[]>;
-}
-
-export const FxService = Context.GenericTag<FxService>("oracle/FxService");
-
 const ALL_CODES = SUPPORTED_CURRENCIES.map((c) => c.code);
 
 // 币种 code 的归一口径。**造键、判「是不是 USD」、反查法币 ref 共用这一个函数** ——
@@ -152,11 +138,13 @@ const make = Effect.gen(function* () {
   // 留在 `FxUpstream` 上是对的,不为了消掉这条依赖去挪它。
   const { btcRef } = upstream;
 
-  const service: FxService = {
-    resolve: (currency) =>
+  return {
+    // 1 单位该币种值多少美元。USD 恒 1(不查缓存);缓存里没有 → `none`(调用方回退 USD)。
+    resolve: (currency: string): Effect.Effect<Option.Option<number>> =>
       norm(currency) === "USD" ? Effect.succeed(Option.some(1)) : readFx(cache, currency),
 
-    warm: (currencies = ALL_CODES) =>
+    // 预热(同步之后 / 用户第一次切币种时)。缺省预热全部支持币种。
+    warm: (currencies: readonly string[] = ALL_CODES): Effect.Effect<void> =>
       Effect.gen(function* () {
         // USD 不进目标:它恒为 1、不存缓存,算进去会让「全都新鲜」永远判不成立。
         const targets = [...new Set(currencies.map(norm))].filter((c) => c !== "USD");
@@ -184,7 +172,15 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    rateSeries: (code, fromMs, toMs) =>
+    // 某法币在区间内逐日的 usd_per_unit,口径同 `resolve` 但按**当天**汇率(ADR 0026 / #274)。
+    // SWR 照 `priceSeries`:命中缓存的过去日直接用、缺的从 BTC 反算并永久落 `token_daily_prices`、
+    // 今日桶恒现取;上游失败 → 退回仅缓存。USD 恒 1(不出网)。
+    // 缓存/派生对齐到 UTC 日桶(`atMs = 日桶 × 一日毫秒`)。
+    rateSeries: (
+      code: string,
+      fromMs: number,
+      toMs: number,
+    ): Effect.Effect<readonly TokenPricePoint[]> =>
       Effect.gen(function* () {
         if (fromMs > toMs) return [];
         const CODE = norm(code);
@@ -243,12 +239,10 @@ const make = Effect.gen(function* () {
         return out;
       }),
   };
-
-  return service;
 });
 
-export const fxServiceLayer: Layer.Layer<
-  FxService,
-  never,
-  CacheStore | FxUpstream | TokenPriceStore | TokenUpstream
-> = Layer.effect(FxService, make);
+// 服务的形状从 `make` 的返回值推导,`.Default` 就是它的 layer —— 不再手写 interface + Tag +
+// layer 三件套(#501)。
+export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
+  effect: make,
+}) {}

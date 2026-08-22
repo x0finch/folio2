@@ -12,8 +12,11 @@ import { Effect, Layer, Option, TestClock, TestContext } from "effect";
 // 空桩:那两半现在是同一个 `emptyFx` 的两个字段。
 //
 // 各方法的缺省实现是**空**(空 Map / `none` / 0):用例只写它关心的那几个,别的动了就该红。
+//
+// 三个桩都走服务自己的构造器(`new TokenService(…)`)—— 它们是 `Effect.Service` class(#501),
+// 裸对象少一个 `_tag`,而且从构造器建出来的和生产那条路建出来的是同一种东西。
 
-const emptyTokens: TokenService = {
+const emptyTokens = new TokenService({
   mint: () => Effect.succeed(new Map()),
   enrich: () => Effect.succeed(new Map()),
   logoUrlById: () => Effect.succeed(Option.none()),
@@ -26,18 +29,18 @@ const emptyTokens: TokenService = {
   topTokens: () => Effect.succeed([]),
   search: () => Effect.succeed([]),
   refreshCatalogue: () => Effect.succeed(0),
-};
+});
 
-const emptyFx: FxService = {
+const emptyFx = new FxService({
   resolve: () => Effect.succeed(Option.none()),
   warm: () => Effect.void,
   rateSeries: () => Effect.succeed([]),
-};
+});
 
-const emptyPlatforms: PlatformService = {
+const emptyPlatforms = new PlatformService({
   resolve: (keys) => Effect.succeed(new Map([...keys].map((key) => [key, { key, name: key }]))),
   warm: () => Effect.void,
-};
+});
 
 export interface OracleStub {
   tokens?: Partial<TokenService>;
@@ -47,9 +50,9 @@ export interface OracleStub {
 
 const oracleStubLayer = (stub: OracleStub = {}) =>
   Layer.mergeAll(
-    Layer.succeed(TokenService, { ...emptyTokens, ...stub.tokens }),
-    Layer.succeed(FxService, { ...emptyFx, ...stub.fx }),
-    Layer.succeed(PlatformService, { ...emptyPlatforms, ...stub.platforms }),
+    Layer.succeed(TokenService, new TokenService({ ...emptyTokens, ...stub.tokens })),
+    Layer.succeed(FxService, new FxService({ ...emptyFx, ...stub.fx })),
+    Layer.succeed(PlatformService, new PlatformService({ ...emptyPlatforms, ...stub.platforms })),
   );
 
 // 跑一个用了参考层的 effect —— 拿 Promise,用例照旧 `await`。
