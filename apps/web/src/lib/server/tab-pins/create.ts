@@ -15,14 +15,16 @@ export const PinTargetInput = z.object({
 
 // **handler 只描述,不发动**:返回一个 Effect,「哪个用户 / 怎么装配 / 什么时候变成 Promise」
 // 全在装配点的 `runEffect` 里(见 ./index.ts)。所以这里没有 `context` 参数、没有 `await`。
-export function handleCreateTabPin(data: NonNullable<TabPinScope>) {
-  return Effect.gen(function* () {
-    const db = yield* Database;
-    return yield* db.tabPins.create({
-      kind: data.kind,
-      connectorId: data.connectorId as ConnectorId | undefined,
-      tagId: data.tagId,
-      accountId: data.accountId,
-    });
+//
+// 包一层 `Effect.fn(名字)`:这个名字是 handler 在 span 与错误堆栈里的身份。
+export const handleCreateTabPin = Effect.fn("createTabPin")(function* (
+  data: NonNullable<TabPinScope>,
+) {
+  const db = yield* Database;
+  return yield* db.tabPins.create({
+    kind: data.kind,
+    connectorId: data.connectorId as ConnectorId | undefined,
+    tagId: data.tagId,
+    accountId: data.accountId,
   });
-}
+});

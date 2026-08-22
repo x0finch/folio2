@@ -7,15 +7,15 @@ import { PinTargetInput } from "./create";
 
 export const UpdateTabPinInput = PinTargetInput.extend({ pinId: z.string().min(1) });
 
-export function handleUpdateTabPinTarget(data: NonNullable<TabPinScope> & { pinId: string }) {
-  return Effect.gen(function* () {
-    const db = yield* Database;
-    yield* db.tabPins.updateTarget(data.pinId, {
-      kind: data.kind,
-      connectorId: data.connectorId as ConnectorId | undefined,
-      tagId: data.tagId,
-      accountId: data.accountId,
-    });
-    return { ok: true as const };
+export const handleUpdateTabPinTarget = Effect.fn("updateTabPinTarget")(function* (
+  data: NonNullable<TabPinScope> & { pinId: string },
+) {
+  const db = yield* Database;
+  yield* db.tabPins.updateTarget(data.pinId, {
+    kind: data.kind,
+    connectorId: data.connectorId as ConnectorId | undefined,
+    tagId: data.tagId,
+    accountId: data.accountId,
   });
-}
+  return { ok: true as const };
+});
