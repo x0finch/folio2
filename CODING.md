@@ -105,6 +105,21 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
   删掉了一份推导出来的镜像类型 + 70 行适配层);没有消费者的那一半迁了只会把 `await` 改成
   `yield*`,那就是 epic 里说的「包层壳」,而判据写在那儿:**收益小的包可以永远不迁**。
   两种形状暂时共存不是罪 —— 底下是同一个连接,只有出口形状不同。
+- **服务的形状从实现推导,不在旁边再手写一份 `interface`**(#501)。手写那份会赢下每一次
+  cmd+click —— 读的人落在一排签名上,而判据、边界、为什么这么写全在实现里;两份还迟早对不上。
+  按**这个服务要不要参数**分两种写法:
+  - **无参** → `class FxService extends Effect.Service<FxService>()("oracle/FxService", { effect: make }) {}`。
+    类型、Tag、layer(`.Default`)一次拿全,并排的那个 `xxxServiceLayer` 随之退场。
+    **测试的假实现走它自己的构造器**(`new FxService({ … })`):实例带 `_tag`,裸对象编译期就被拦,
+    而且假的与真的是同一条构造路。
+  - **带参**(userId / env)→ 同一个写法,`effect` 字段收**函数**:
+    `class AccountStore extends Effect.Service<AccountStore>()("db/AccountStore", { effect: make }) {}`
+    其中 `make = (userId: string) => Effect.gen(…)`,于是 `.Default` 变成 `AccountStore.Default(userId)`
+    —— userId 仍然在装配那一刻被吃掉(ADR 0037),服务的方法签名里一个 user 参数都没有。
+    **一个差别记着**:带参的 `.Default` 每次调用返回**新 layer**(无参那种才有引用缓存),所以
+    「一次请求只建一次」靠的是同一个 layer 引用只进一次 `Layer.mergeAll`,和以前手写工厂时一样。
+  两种都**逐方法显式标注返回类型** —— 契约精度不靠推断,推断只用来省掉那份复述。
+  **一契约多实现的端口不在此列**:那边 interface 必须独立存在(见下一条),没有模板可省。
 - **端口的 Tag 与 interface 同名**(`Context.GenericTag`,`@effect/platform` 的 `FileSystem` /
   `HttpClient` 同款):契约名本身就是全仓的词表,不值得为了挂一个 `static layer` 把它们改名成 `*Api`。
   `packages/clients/*` 那边的 `class XxxClient extends Context.Tag(...)<XxxClient, XxxClientApi>()`
