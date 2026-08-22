@@ -41,7 +41,7 @@ import { Cause, Effect, Exit, Layer, Stream } from "effect";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
 import { manualBalancesForWarm } from "@/lib/server/manual/store";
-import { type DbStores, requestLayer, runAtEdge, withRequest } from "@/lib/server/oracle";
+import { type DbStores, legacyRequestLayer, runAtEdge, withRequest } from "@/lib/server/oracle";
 import { warmHeldPrices } from "@/lib/server/tokens/enrich";
 import { userDisplayBalances } from "@/lib/server/tokens/model";
 import { recordDefiLogosOf } from "./defi-logos";
@@ -368,7 +368,7 @@ export const syncServicesLayer: Layer.Layer<
 );
 
 // 一个用户的一轮同步,**装配好了但还没跑**。流式端点与 cron 各取所需。
-const syncFor = (userId: string) => Layer.provide(syncServicesLayer, requestLayer(userId));
+const syncFor = (userId: string) => Layer.provide(syncServicesLayer, legacyRequestLayer(userId));
 
 // `/api/sync` 的流:逐账户产出结果,交给 ndjson 那半。装配在这里做完,所以流的 `R` 是 `never`
 // —— `Stream.provideLayer` 之后调用方拿到的是一条能直接消费的流。

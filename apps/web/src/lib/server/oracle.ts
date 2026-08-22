@@ -99,7 +99,7 @@ const warmPorts = () =>
 // `provideMerge` 而不是 `provide`:端口也透出去。app 自己有一小片直接用 `CacheStore`
 // (DeFi 协议图 —— 没有上游、不属于参考层,见 `logos/store.ts`),而这些端口本来就是
 // 这个文件建的,没必要为了用它们再包一个服务。
-const oracleFor = (userId: string, database: Layer.Layer<DbClient> = dbClientLayer(env)) =>
+export const oracleFor = (userId: string, database: Layer.Layer<DbClient> = dbClientLayer(env)) =>
   Layer.provideMerge(oracleLayer, Layer.merge(portsFor(userId, database), upstreams()));
 
 // 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
@@ -206,19 +206,21 @@ export type DbStores =
  * 换掉的是一个每次都要现想的选择。
  */
 /**
- * 一次请求要的**全部服务**,作为一个 Layer。
+ * **过渡期的装配** —— 目标形状那份是 `runtime.ts` 的 `userLayer`,这份多带一样东西:
+ * 那批**还没挂进聚合 `Database`** 的旧领域 Tag。
  *
- * `withRequest` 是它加上错误映射的便利包装;**流**那条路(`/api/sync` 把同步的流交给
- * `Stream.provideLayer`)拿不到 effect 形状的包装,只能要 layer 本身。
+ * 还留着是因为它还有真消费者:`withRequest`(四处没迁的 handler)与 sync 的 `syncFor`。
+ * 每迁完一批(#504 T7–T12)`DbStores` 就短一截,最后一批迁完这个函数、`dbStoresFor`、
+ * `withRequest`/`runRequest`/`runStore` 一起删(T13),只剩 `userLayer`。
+ *
+ * **流**那条路(`/api/sync` 把同步的流交给 `Stream.provideLayer`)拿不到 effect 形状的包装,
+ * 只能要 layer 本身,所以这里出的是 layer 不是 effect。
  */
-export const requestLayer = (userId: string): Layer.Layer<RequestServices> => {
+export const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices> => {
   // **一次 provide,不是三次。** 三边各 provide 一次的话,同一个 `dbClient` 引用也会被建三遍
   // (memoisation 的作用域是一次构建),于是一个请求握着三个 drizzle 句柄 —— 今天只是浪费,
   // 但 `DbClient` 一旦长出状态(span、慢查询计数,`stores/service.ts` 已记着要加),
   // 那就是悄悄劈成几半的状态。
-  //
-  // 聚合 `Database` 自己**不开连接**(它的 `R` 通道声明 `DbClient`),正是为了能在这里跟另外
-  // 两边共用同一个引用 —— 那条红线是结构性保证的,不是靠记得。
   const dbClient = dbClientLayer(env);
   return Layer.mergeAll(
     Layer.provide(Database.layer(userId), dbClient),
@@ -227,14 +229,14 @@ export const requestLayer = (userId: string): Layer.Layer<RequestServices> => {
   );
 };
 
-/** 一次请求装好的全部服务 —— handler 的 `R` 只能落在这个范围里。 */
+/** 过渡期的服务面 —— 比 `UserServices` 多一个 `DbStores`,那部分只会变少。 */
 export type RequestServices = Database | DbStores | OracleServices | OraclePorts;
 
 export const withRequest = <A, E extends UpstreamError | Error>(
   userId: string,
   effect: Effect.Effect<A, E, RequestServices>,
 ): Effect.Effect<A, Error> => {
-  return effect.pipe(Effect.provide(requestLayer(userId)), Effect.mapError(toError));
+  return effect.pipe(Effect.provide(legacyRequestLayer(userId)), Effect.mapError(toError));
 };
 
 /**

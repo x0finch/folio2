@@ -1,12 +1,38 @@
+import { env } from "cloudflare:workers";
 import type { UpstreamError } from "@folio/client-core";
-import { Effect } from "effect";
-import { type RequestServices, requestLayer, runAtEdge, toError } from "./oracle";
+import { Database, type DbClient, dbClientLayer } from "@folio/db";
+import type { OraclePorts, OracleServices } from "@folio/oracle";
+import { Effect, Layer } from "effect";
+import { logTapeLogger } from "./effect-log";
+import { oracleFor, toError } from "./oracle";
 
-// **server fn 的运行时**:一次请求怎么从「一段描述」变成「一个 Promise」。全仓只有这一份。
+// **server fn 的运行时**:一次请求要的服务在这里装配,也在这里跑起来。全仓只有这一份。
 //
 // 它不住 `oracle.ts` —— 那个文件是**参考层的装配点**(全仓唯一同时认识 D1 store 与 CoinGecko
-// adapter 的地方),跟「server fn 怎么跑起来」是两件事。混在一起的话,以后想读懂发动这条路,
-// 得先翻过三个上游 adapter 的接线。
+// adapter 的地方),跟「server fn 怎么跑起来」是两件事。
+
+/**
+ * 一次请求要的**全部服务**,作为一个 Layer。**暂不导出** —— 今天唯一的消费者是下面的
+ * `runEffect`;等 sync 那条流迁过来(#504 T12)再导出,别为了「将来会用」先开口子。
+ *
+ * **只有目标形状那些**:聚合 `Database` + 参考层。那批还没挂进聚合的旧领域 Tag **不在这里**
+ * —— 它们住 `oracle.ts` 的 `legacyRequestLayer`,和 `runStore`/`runRequest` 一起在 T13 退场。
+ * 新写的 handler 拿不到它们,也就不会有人「顺手」再用一个即将消失的 Tag。
+ *
+ * **一次请求只有一个 `DbClient`(红线)**:聚合与参考层的四个端口都**不自己开连接**(各自的
+ * `R` 通道声明 `DbClient`),这里建一次、一个引用分给两边,Effect 的 layer memoisation 保证
+ * 只建一次。分两次 provide 就是两份,哪怕引用相同 —— 所以两边必须在同一个 `Layer.mergeAll` 里。
+ */
+const userLayer = (userId: string): Layer.Layer<UserServices> => {
+  const dbClient: Layer.Layer<DbClient> = dbClientLayer(env);
+  return Layer.mergeAll(
+    Layer.provide(Database.layer(userId), dbClient),
+    oracleFor(userId, dbClient),
+  );
+};
+
+/** 一个用户的全部服务 —— handler 的 `R` 只能落在这个范围里。 */
+export type UserServices = Database | OracleServices | OraclePorts;
 
 /**
  * **发动点 —— handler 只描述,这里负责跑。**
@@ -17,10 +43,10 @@ import { type RequestServices, requestLayer, runAtEdge, toError } from "./oracle
  *
  * 用法(装配点):`.handler(runEffect(handleCreateTabPin))`。
  *
- * **三步是写在这里的,不是转发给别人的。** `runRequest` / `runStore` 长得像能省这几行,但那两个
- * 是**给还没迁的 handler 用的过渡路**,迁完就删(#504 T13);把唯一的发动点建在一个即将消失的
- * 东西上,等于给自己排了一次返工。而且转发一层之后,「注入到底发生在哪一行」就得多跳一次才看得见
- * —— 那正是这个文件唯一要说清楚的事。
+ * **四步是写在这里的,不转发给谁。** `runRequest` / `runAtEdge` 长得像能省这几行,但转发一层
+ * 之后「注入到底发生在哪一行」就得多跳一次才看得见 —— 而那正是这个函数唯一要说清楚的事。
+ * (`runRequest` 还另有一层理由:它是给没迁的 handler 的过渡路,T13 就删,把唯一的永久入口
+ * 建在它上面等于给自己排一次返工。)
  *
  * 与 `runStore` / `runRequest` 的真正区别不是少打几个字,是**方向**:那两个由 handler 自己调,
  * 于是每个 handler 都是「一半业务 + 一半运行时」;这个由装配点调,handler 那半干净了,
@@ -28,13 +54,14 @@ import { type RequestServices, requestLayer, runAtEdge, toError } from "./oracle
  */
 export const runEffect =
   <D, A, E extends UpstreamError | Error>(
-    handler: (data: D) => Effect.Effect<A, E, RequestServices>,
+    handler: (data: D) => Effect.Effect<A, E, UserServices>,
   ) =>
   // `context` 只声明用得着的那个字段:`requireAuth` 注入的是整个 `AuthContext`(还带 user /
   // session),而这里唯一该碰的就是 userId。少声明一个字段 = 少一条能悄悄用起来的路。
   ({ data, context }: { data: D; context: { userId: string } }): Promise<A> =>
     handler(data).pipe(
-      Effect.provide(requestLayer(context.userId)), // ← 注入发生在这一行
+      Effect.provide(userLayer(context.userId)), // ← 注入发生在这一行
       Effect.mapError(toError),
-      runAtEdge,
+      Effect.provide(logTapeLogger),
+      Effect.runPromise,
     );
