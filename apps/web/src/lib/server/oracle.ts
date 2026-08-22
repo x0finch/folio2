@@ -47,10 +47,13 @@ import { logTapeLogger } from "./effect-log";
 // 少掉的东西:七个 `createXxx(userId)` 字段、`overrides` 的转手(adapter 的 layer 自己给
 // `Namer`)、`onWarn` 回调(改 Effect 日志 + 下面那个转发器)、`now`(改 `Clock`)。
 //
-// **`runPromise` 只在这里出现**:调用方拿到的是「装配」(`withRequest`/`withOracleWarm`)与
-// 「跑」(`runAtEdge`)两半,或者两者合一的 `runRequest`。以前是每个方法调用各自 await 一个
-// Promise,层与层之间没有共同的上下文;现在一次请求一次装配,超时与中断能一路传到最底层那发 fetch。
-// cron 更进一步:整趟(sweep + 逐用户预热)拼成一个 effect,只在 `waitUntil` 那儿跑一次。
+// **一次请求一次装配,不是一次调用一次。** 调用方拿到的是「装配」(`withRequest`/`withOracleWarm`)
+// 与「跑」(`runAtEdge`)两半。以前是每个方法调用各自 await 一个 Promise,层与层之间没有共同的
+// 上下文;现在超时与中断能一路传到最底层那发 fetch。cron 更进一步:整趟(sweep + 逐用户预热)
+// 拼成一个 effect,只在 `waitUntil` 那儿跑一次。
+//
+// (`runPromise` 现在有两处:这里的 `runAtEdge`,和 `runtime.ts` 的 `runEffect` —— 后者是
+// server fn 那条路的唯一发动点。没迁的 handler 还走这里,#504 T13 之后就只剩那一处。)
 
 // CoinGecko client 的公共配置(三个上游共用一份)。限速层的报告不在这里 —— 见 log.ts 的
 // setLimitLogger:那件事是运行时的属性,设一次管所有闸,不该逐个上游透传。
@@ -99,8 +102,11 @@ const warmPorts = () =>
 // `provideMerge` 而不是 `provide`:端口也透出去。app 自己有一小片直接用 `CacheStore`
 // (DeFi 协议图 —— 没有上游、不属于参考层,见 `logos/store.ts`),而这些端口本来就是
 // 这个文件建的,没必要为了用它们再包一个服务。
-export const oracleFor = (userId: string, database: Layer.Layer<DbClient> = dbClientLayer(env)) =>
-  Layer.provideMerge(oracleLayer, Layer.merge(portsFor(userId, database), upstreams()));
+// **`dbClient` 是必填,没有默认值。** 它出包给 `runtime.ts` 用之后,一个 `= dbClientLayer(env)`
+// 的默认值就等于「不传也能跑」—— 而不传正好就是多开一条连接那种写法。红线要靠签名挡住,
+// 不能靠调用点记得。
+export const oracleFor = (userId: string, dbClient: Layer.Layer<DbClient>) =>
+  Layer.provideMerge(oracleLayer, Layer.merge(portsFor(userId, dbClient), upstreams()));
 
 // 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
 // 而 `Data.TaggedError` 的那四类没有 `message` 字段,于是上层日志里只剩一个空消息 + 一坨 Cause。
@@ -188,23 +194,6 @@ export type DbStores =
   | TagStore
   | TransferStore;
 
-/**
- * **一次请求一次装配** —— 参考层 + app 数据两边一起装,**但不跑**。
- *
- * 这是 #394 要达成的形状:一个 server fn 里连着读账户、问价、读快照、写活动,走的是同一份
- * context;以前是每问一次各 `runPromise` 一次(一个总览请求切两次 Effect 边界、建两套 store)。
- * Effect 官方那句「`run*` 尽量放在程序的边缘」在 server fn 这条路上就是这个形状:
- * 边缘是 handler 本身,再往里一次都不切。
- *
- * 参考层装的是**用户私有**数据(他认识哪些币、他的币叫什么名),db 那半更是 —— 拿错用户就是
- * 数据泄露。所以 userId 是必填参数,而两边服务的方法签名里一个 user 参数都没有:拿错在编译期
- * 就发生不了(ADR 0037)。cron 没有 auth 上下文,得逐用户各装一次,那正是本签名想让它显而易见的事。
- *
- * **只有这一条装配路**(T5 把原来的 `withOracle` 并了进来):以前「只要参考层」与「两边都要」
- * 各有一条,同一个文件里两种写法并存,而选哪条得先知道这段代码碰没碰 db —— 那是读完才看得出来
- * 的事,类型帮不上忙。合成一条之后多建的是几个闭包(`connect.ts` 自己写着「drizzle(env.DB) 很轻」),
- * 换掉的是一个每次都要现想的选择。
- */
 /**
  * **过渡期的装配** —— 目标形状那份是 `runtime.ts` 的 `userLayer`,这份多带一样东西:
  * 那批**还没挂进聚合 `Database`** 的旧领域 Tag。

@@ -95,9 +95,10 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
   摇不摇得掉全看打包器 —— 所以 Tag 走 `@folio/oracle-basic/ports`(只有服务端会碰)。
   同理:客户端组件别从 entry 包 value-import 常量(`TOP_TOKENS_LIMIT` 那一处已改成从 basic 取)。
 - **包一个 promise 库时,桥只留一处。** drizzle / fetch 这类库的边界必须有 `Effect.promise`,
-  问题只是它出现几次。`@folio/db` 那一站的答案是一个 `Database` 服务(`query(build)` /
+  问题只是它出现几次。`@folio/db` 那一站的答案是一个 `DbClient` 服务(`query(build)` /
   `batch(build)`),四个 store 里一个 `Effect.promise` 都没有 —— 撒在几十个方法体里的话,
   将来想加一个 span、一行慢查询日志、或者换个客户端就要改几十处。
+  (它以前叫 `Database`;那个名字让给了包对外的聚合门面,桥本身**仍然不出包**。)
   **收 builder 而不是收造好的语句**:语句得拿库的句柄才造得出来,而让调用方先把句柄掏出来
   就等于又能绕过这一层(原则 #6 在包内的形状)。
 - **迁一个包之前先问「谁在消费」。** 有 Effect 消费者的那一半迁了会**删东西**(oracle 那一站
