@@ -41,18 +41,20 @@ export interface AccountRawCreds {
 // 跨用户枚举。不接受/不返回任何用户数据,只回有账户的去重 userId 列表供逐个 syncUser。
 // 不要在请求处理(server fn)里调用它。
 //
-// **不做成服务**(ADR 0037):它没有 userId,塞不进 per-user 的 layer;而单独给它造一个 Tag 也不对 ——
-// Tag 的意义是「可以被换掉」,这一条只有一个实现、从不被顶替(#392 把 `RefIndexWarmer` 去 Tag 化
-// 同理)。所以它就是一个裸 Effect,依赖留在 `R` 上,由调用方 provide `dbClientLayer`。
-export const listUserIdsWithAccounts: Effect.Effect<string[], never, DbClient> = Effect.gen(
-  function* () {
-    const client = yield* DbClient;
-    const rows = yield* client.query((db) =>
-      db.selectDistinct({ userId: accounts.userId }).from(accounts),
-    );
-    return rows.map((r) => r.userId);
-  },
-);
+// **它住 `GlobalDatabase` 而不是 `Database`**:后者是 per-user 的,建它就得先有一个 userId ——
+// 而这一条问的正是「有哪些用户」。判据与 `global-ref-index.ts` 那张表同一条:**「有没有『谁的』
+// 这回事」**,没有 → 不隔离,也不该从 per-user 的那张门票上拿。
+export const makeGlobalAccountStore = Effect.gen(function* () {
+  const client = yield* DbClient;
+
+  return {
+    listUserIds: (): Effect.Effect<string[]> =>
+      Effect.map(
+        client.query((db) => db.selectDistinct({ userId: accounts.userId }).from(accounts)),
+        (rows) => rows.map((r) => r.userId),
+      ),
+  };
+});
 
 export const makeAccountStore = Effect.gen(function* () {
   const client = yield* DbClient;

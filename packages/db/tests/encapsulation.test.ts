@@ -40,18 +40,25 @@ describe("@folio/db encapsulation", () => {
     // 八个领域一张门票,`.Default` 的 `R` 只差 `DbClient | CurrentUser`(装配点给)。
     expect(typeof db.Database).toBe("function");
     expect(typeof db.Database.Default).toBe("object");
+    // 第二张门票:**没有「谁的」这回事**的那些 op(全局映射表 + cron 扫用户)。
+    // 它的 `R` 只差 `DbClient` —— 拿不到 `CurrentUser`,所以这一半够不到任何用户数据。
+    expect(typeof db.GlobalDatabase).toBe("function");
+    expect(typeof db.GlobalDatabase.Default).toBe("object");
     // **`DbClient` 只出类型不出值**(原则 #6):它的 `query` 回调参数就是 drizzle 句柄,
     // class 一旦出包,包外 `yield* DbClient` 就能绕过全部包装层拼任意查询。
     expect(surface.DbClient).toBeUndefined();
     expect(typeof db.dbClientLayer).toBe("function");
-    // 参考层四个端口一张 layer;全局那张表单独可拿(cron 无 userId)。
-    expect(typeof db.oraclePortsLayer).toBe("function");
-    expect(typeof db.globalTokenRefIndexStoreLayer).toBe("object");
+    // 参考层那几片:第三张门票,**只给 `@folio/oracle`**。`.Default` 收 namer(db 不预设厂商)。
+    expect(typeof db.DatabaseForOracle).toBe("function");
+    expect(typeof db.DatabaseForOracle.Default("coingecko")).toBe("object");
+    // 那层「别人定接口、db 顶上去实现」的 layer 出口没了 —— 契约就是实现本身。
+    expect(surface.oraclePortsLayer).toBeUndefined();
     expect(surface.userTokenStoreLayer).toBeUndefined();
     expect(surface.userCacheStoreLayer).toBeUndefined();
-    // 系统级(无 userId)的那一个查询保持独立出口。它自己就是个 effect(不是工厂)——
-    // 没有「谁的」这回事,所以也没有要吃的参数。
-    expect(typeof db.listUserIdsWithAccounts).toBe("object");
+    // 那两条不带 userId 的路**没有自己的出口** —— 它们在 `GlobalDatabase` 上。以前一个是
+    // 独立 layer、一个是裸 effect,判据同一条却两种形状。
+    expect(surface.globalTokenRefIndexStoreLayer).toBeUndefined();
+    expect(surface.listUserIdsWithAccounts).toBeUndefined();
     // 类型化失败。
     expect(typeof db.NotFound).toBe("function");
     expect(new db.NotFound({ entity: "account", id: "a1" }).message).toBe("account not found: a1");

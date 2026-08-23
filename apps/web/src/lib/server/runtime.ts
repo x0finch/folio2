@@ -1,6 +1,5 @@
 import { Database } from "@folio/db";
 import type { OracleServices } from "@folio/oracle";
-import type { CacheStore } from "@folio/oracle-basic/ports";
 import { Effect, Layer } from "effect";
 import { ConnectorRegistry } from "./connectors/registry";
 import { logTapeLogger } from "./effect-log";
@@ -39,18 +38,19 @@ export const userLayer = (userId: string): Layer.Layer<UserServices> => {
 };
 
 /**
- * 一个用户的全部服务 —— handler 的 `R` 只能落在这个范围里。
+ * 一个用户的全部服务 —— handler 的 `R` 只能落在这个范围里。**三张门票,没有散装的端口。**
  *
- * **参考层的端口里只透一个 `CacheStore`**(#504 T17):app 真正直接用端口的只有一处 ——
- * DeFi 协议图(`logos/store.ts`),那份数据来自用户自己同步下来的余额 meta,没有上游、不出网,
- * 不属于参考层,但要一个 per-user 的键值缓存。另外三个(`TokenStore` / `TokenPriceStore` /
- * `GlobalTokenRefIndexStore`)app 一处都没直接碰,却曾经一样露在外面 —— 那等于给任何 handler
- * 留了一条绕过参考层直接改代币行和价格行的路。
+ * 参考层的那几片(代币行 / 价格行)**不在这里**,这是刻意的收窄(#504 T17):它们只在
+ * `DatabaseForOracle` 上,而那张票只喂给 `@folio/oracle`。露出去等于给任何 handler 留一条
+ * 绕过参考层直接改代币行和价格行的路。`user-services-surface.test.ts` 在类型层钉着这条。
  *
- * `ConnectorRegistry` 是第三张门票(#504 T14):它答的是「这个部署支持哪些上游、字段长什么样、
+ * app 真的要直接用的那一片是 per-user 的 KV 缓存(DeFi 协议图,`logos/store.ts` —— 没有上游、
+ * 不出网,不属于参考层)。它现在是 `Database` 的一个字段,不再是从参考层漏出来的一个端口。
+ *
+ * `ConnectorRegistry` 是第三张(#504 T14):它答的是「这个部署支持哪些上游、字段长什么样、
  * 这份凭据活不活」,与 userId 无关,但取用方式与另外两张一致。
  */
-export type UserServices = Database | OracleServices | CacheStore | ConnectorRegistry;
+export type UserServices = Database | OracleServices | ConnectorRegistry;
 
 /**
  * **一个用户的活儿,装配好了但还没跑。**

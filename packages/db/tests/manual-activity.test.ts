@@ -1,16 +1,15 @@
 import { env } from "cloudflare:test";
-import { TokenStore } from "@folio/oracle-basic/ports";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { oraclePortsLayer } from "../src";
 import { getDb } from "../src/connect";
 import { manualActivity } from "../src/schema";
 import { user } from "../src/schema/auth";
-import { forDomain, promisified } from "./effect";
+import { forDomain, forOracle } from "./effect";
 
 const manualOf = forDomain((db) => db.manual);
 
 const accounts = forDomain((db) => db.accounts);
+const tokensOf = forOracle((db) => db.tokens);
 
 const USER_A = "user-a";
 const USER_B = "user-b";
@@ -36,11 +35,7 @@ beforeEach(async () => {
 // 活动挂 (账户, token)。#203 起 token 就是 `tokens` 里的一行(生产路径是 mint;这里直接用 store)。
 async function manualAccount(userId: string) {
   const acc = await accounts(userId).create({ connectorId: "manual", label: "M", creds: "{}" });
-  const tokenId = await promisified(
-    TokenStore,
-    oraclePortsLayer({ namer: "coingecko" }),
-    userId,
-  ).create({ symbol: "BTC" }, []);
+  const tokenId = await tokensOf(userId, "coingecko").create({ symbol: "BTC" }, []);
   return { id: acc.id, tokenId };
 }
 

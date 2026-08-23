@@ -1,5 +1,4 @@
-import type { CacheEntry } from "@folio/oracle-basic";
-import { CacheStore } from "@folio/oracle-basic/ports";
+import { type CacheEntry, type CacheStore, Database } from "@folio/db";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { readDefiLogo, recordDefiLogos } from "@/lib/server/logos/store";
@@ -11,21 +10,21 @@ import { readDefiLogo, recordDefiLogos } from "@/lib/server/logos/store";
 const fakeCache = () => {
   const entries = new Map<string, unknown>();
   const store: CacheStore = {
-    get: (key) =>
+    get: (key: string) =>
       Effect.sync(() =>
         entries.has(key)
           ? Option.some<CacheEntry>({ value: entries.get(key), stale: false })
           : Option.none(),
       ),
-    getMany: (keys) =>
+    getMany: (keys: readonly string[]) =>
       Effect.sync(() => {
         const out = new Map<string, CacheEntry>();
         for (const k of keys)
           if (entries.has(k)) out.set(k, { value: entries.get(k), stale: false });
         return out;
       }),
-    put: (key, value) => Effect.sync(() => void entries.set(key, value)),
-    putMany: (writes) =>
+    put: (key: string, value: unknown) => Effect.sync(() => void entries.set(key, value)),
+    putMany: (writes: readonly { key: string; value: unknown }[]) =>
       Effect.sync(() => {
         for (const w of writes) entries.set(w.key, w.value);
       }),
@@ -33,8 +32,12 @@ const fakeCache = () => {
   return { store, entries };
 };
 
-const run = <A>(cache: CacheStore, effect: Effect.Effect<A, never, CacheStore>) =>
-  Effect.runPromise(Effect.provide(effect, Layer.succeed(CacheStore, cache)));
+// 那片缓存现在是 `Database` 的一个字段(不再是从参考层漏出来的端口),所以假的也从那张票给。
+// 只填 `cache` 一个字段:被测代码碰不到别的,填全反而会掩盖「它到底用了什么」。
+const run = <A>(cache: CacheStore, effect: Effect.Effect<A, never, Database>) =>
+  Effect.runPromise(
+    Effect.provide(effect, Layer.succeed(Database, { cache } as unknown as Database)),
+  );
 
 describe("DeFi 协议图的名址", () => {
   it("记一批 → 按协议读回;键是 `defi-logo:<协议>`", async () => {

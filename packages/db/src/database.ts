@@ -1,11 +1,15 @@
 import { Effect } from "effect";
-import { makeAccountStore } from "./domains/accounts";
+import { makeAccountStore, makeGlobalAccountStore } from "./domains/accounts";
+import { makeUserCacheStore } from "./domains/cache";
+import { makeGlobalRefIndexStore } from "./domains/global-ref-index";
 import { makeManualStore } from "./domains/manual";
 import { makePortfolioStore } from "./domains/portfolios";
 import { makeSettingsStore } from "./domains/settings";
 import { makeSnapshotStore } from "./domains/snapshots";
 import { makeTabPinStore } from "./domains/tab-pins";
 import { makeTagStore } from "./domains/tags";
+import { makeUserTokenPriceStore } from "./domains/token-prices";
+import { makeUserTokenStore } from "./domains/tokens";
 import { makeTransferStore } from "./domains/transfer";
 
 type EffectMethod = (...args: never[]) => Effect.Effect<unknown, unknown, unknown>;
@@ -71,6 +75,61 @@ export class Database extends Effect.Service<Database>()("db/Database", {
       tabPins: yield* makeTabPinStore,
       tags: yield* makeTagStore,
       transfer: yield* makeTransferStore,
+      // **per-user 的 KV 缓存也在这张票上。** 它不是「领域」,是一片存储 —— 但取用方式与领域
+      // 一样,而 app 真的有一处直接用它:DeFi 协议图(`logos/store.ts`)那份数据来自用户
+      // 自己同步下来的余额 meta,没有上游、不出网,不属于参考层。以前它只能从参考层的装配里
+      // 漏一个 `CacheStore` 端口出来给 app,那是「借道」;现在它就在 db 的门票上。
+      cache: yield* makeUserCacheStore,
     });
   }),
+}) {}
+
+// **第二张门票:没有「谁的」这回事的那些 op。**
+//
+// 判据就是 CLAUDE.md 原则 #6 那一条 —— **表里有没有「谁的」这回事**。两个成员各自都不是新东西,
+// 它们只是终于住到了一起:
+//   · `refIndex`  —— `global_token_ref_index`(ADR 0022):上游的公开知识,可整表重建
+//   · `accounts`  —— cron 扫「有哪些用户」那一条(它问的正是「有哪些用户」,所以不可能 per-user)
+//
+// **为什么不并进 `Database`**:那张是 per-user 的,建它得先有一个 userId。cron 两条路都没有 ——
+// 逼它编一个假的,就等于把「没有 userId 就构造不出 per-user 的东西」这条保证拆了。
+//
+// **为什么不各自裸着出去**:它们以前就是裸着的,而且是两种形状 —— 一张 layer 和一个裸 Effect,
+// 于是 app 那边还得配一个 `withDbClient` 专门喂后者。判据同一条,出口却各长各的;
+// 收成一张之后,下一个不带 user 的 op 不必再决定一次它长什么样。
+//
+// `R` 里只有 `DbClient`,**没有 `CurrentUser`** —— 这就是它与 `Database` 的全部区别,
+// 也是类型上「这里够不到任何用户数据」的写法。
+export class GlobalDatabase extends Effect.Service<GlobalDatabase>()("db/GlobalDatabase", {
+  effect: Effect.gen(function* () {
+    return tracedStores({
+      refIndex: yield* makeGlobalRefIndexStore,
+      accounts: yield* makeGlobalAccountStore,
+    });
+  }),
+}) {}
+
+// **第三张门票:参考层要的那几片。**
+//
+// 为什么不并进 `Database` —— 那是 handler 拿的票。`tokens` / `tokenPrices` 一挂上去,任何
+// handler 就都能直接改代币行和价格行,绕过参考层的 mint 与 SWR 编排(#504 T17 收窄的就是这个,
+// `user-services-surface.test.ts` 钉着)。所以它们只在这张票上,而这张票只给 `@folio/oracle`。
+//
+// **`namer` 是参数,不是从服务里 yield 的。** 凡是要按命名者点查 `token_refs` 的读、以及历史
+// 日价那条全局键,都要当前上游的 id;db 层不预设任何厂商(表名列名零 vendor 字样,#199)。
+// 从参考层的 `Namer` 端口里 yield 会让 db 反过来消费 oracle 的一个服务 —— 而装配点手里
+// 本来就握着这个常量。
+//
+// `cache` 在这里和 `Database` 上各有一份。**那不是状态被劈成两半** —— 这个 store 是无状态的
+// (只是几个闭包 + 同一个 `DbClient`),两份对象读写的是同一张表、同一批行。以前靠
+// `provideMerge` 把参考层内部那一个透出去给 app 共用,反倒是更绕的写法。
+export class DatabaseForOracle extends Effect.Service<DatabaseForOracle>()("db/DatabaseForOracle", {
+  effect: (namer: string) =>
+    Effect.gen(function* () {
+      return tracedStores({
+        tokens: yield* makeUserTokenStore(namer),
+        tokenPrices: yield* makeUserTokenPriceStore(namer),
+        cache: yield* makeUserCacheStore,
+      });
+    }),
 }) {}

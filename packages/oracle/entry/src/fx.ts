@@ -1,5 +1,7 @@
 import type { UpstreamError } from "@folio/client-core";
-import type { CacheEntry, TokenPricePoint, TokenRef } from "@folio/oracle-basic";
+import type { CacheEntry, CacheStore, TokenPriceStore } from "@folio/db";
+import { DatabaseForOracle } from "@folio/db";
+import type { TokenPricePoint, TokenRef } from "@folio/oracle-basic";
 import {
   dayBucketOf,
   FIAT_NAMER,
@@ -7,7 +9,7 @@ import {
   MS_PER_DAY,
   SUPPORTED_CURRENCIES,
 } from "@folio/oracle-basic";
-import { CacheStore, FxUpstream, TokenPriceStore, TokenUpstream } from "@folio/oracle-basic/ports";
+import { FxUpstream, TokenUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { Clock, Effect, Option, Schema } from "effect";
 import { degradeTo } from "./tokens/swr";
@@ -129,11 +131,10 @@ export function deriveFiatDaily(
 // interface + Tag + layer 三件套(#501)。
 export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
   effect: Effect.gen(function* () {
-    const cache = yield* CacheStore;
+    const { cache, tokenPrices: prices } = yield* DatabaseForOracle;
     const upstream = yield* FxUpstream;
     // —— 只有 `rateSeries` 用得到的两个端口 ——
     // 历史日汇率读写 `token_daily_prices`(按 ref 直存,见 `getDailyByRef`)。
-    const prices = yield* TokenPriceStore;
     // BTC 反算两条腿走 `fetchPriceSeries(btcRef, …, vsCurrency)`(ADR 0026:复用现成取数口,
     // 不给 `FxUpstream` 加取数方法)。BTC 反算是全仓价格骨架的一部分,所以历史这半搭在代币上游上。
     const priceUpstream = yield* TokenUpstream;

@@ -17,7 +17,6 @@ import {
 import { type AccountSafe, Database, type NotFound, type WriteSnapshotInput } from "@folio/db";
 import { Oracle, type OracleServices } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
-import type { CacheStore } from "@folio/oracle-basic/ports";
 import {
   type AccountSyncResult,
   BalanceSource,
@@ -62,9 +61,9 @@ import { isSyncableAccount } from "./syncable";
 export const warmTokens: Effect.Effect<
   void,
   UpstreamError | NotFound,
-  // = `UserServices`。写开是为了别让这个签名读起来像「预热要整个 handler 面」——
-  // 它要的就是这三样:自己的数据、参考层、那份 DeFi 协议图缓存(#504 T17)。
-  Database | OracleServices | CacheStore
+  // = `UserServices` 去掉 connector 那张。写开是为了别让这个签名读起来像「预热要整个
+  // handler 面」—— 它要的就是这两样:自己的数据(含那片 DeFi 协议图缓存)、参考层。
+  Database | OracleServices
 > = Effect.gen(function* () {
   const syncLog = getLogger(["folio", "web", "sync"]);
   const db = yield* Database;

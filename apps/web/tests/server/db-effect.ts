@@ -1,24 +1,22 @@
 import { env } from "cloudflare:test";
-import { CurrentUser, Database, type DbClient, dbClientLayer } from "@folio/db";
-import type { Context } from "effect";
+import {
+  CurrentUser,
+  Database,
+  DatabaseForOracle,
+  type DbClient,
+  dbClientLayer,
+  GlobalDatabase,
+} from "@folio/db";
+import { UPSTREAM_ID } from "@folio/oracle-upstream-coingecko";
 import { Effect, Layer } from "effect";
 
-// **workers 池里的测试要直接摸 D1 那些 store 时用这个。**
+// **workers 池里的测试要往 D1 里塞行 / 读回来看看时用这几个把手。**
 //
-// 三个词各指一样东西,别混:
-//   · `port`    —— 端口的 **Tag**(要哪个 store:`CacheStore` / `TokenStore` / …)
-//   · `layer`   —— 那个端口的 D1 实现(`userCacheStoreLayer` 这种,自己还差 `DbClient`
-//                  与 `CurrentUser` 才建得起来)
-//   · `use(…)`  —— 拿到的是建好的**服务**本身,方法直接调
-//
-// 这里补最后两环:`dbClientLayer(env)`(底下是真 D1,Miniflare)与 `CurrentUser`(ADR 0044)。
+// 底下补的是两环:`dbClientLayer(env)`(真 D1,Miniflare)与 `CurrentUser`(ADR 0044)。
 // (`runForUser` 那条是给**被测代码**用的;夹具要的是「往库里塞一行」,不必经参考层。)
-export const withStore = <I, S, A>(
-  port: Context.Tag<I, S>,
-  layer: Layer.Layer<I, never, DbClient | CurrentUser>,
-  userId: string,
-  use: (service: S) => Effect.Effect<A>,
-): Promise<A> => runWith(layer, userId, Effect.flatMap(port, use));
+//
+// 以前这里还有一个 `withStore(port, layer, userId, use)` —— 参考层那几个端口的通用取法。
+// 端口没了(契约就是 db 里的实现),取法也就统一成了下面这三个门票把手。
 
 const runWith = <I, A>(
   layer: Layer.Layer<I, never, DbClient | CurrentUser>,
@@ -48,17 +46,17 @@ type Promisified<S> = {
     : S[K];
 };
 
-const promisifiedFrom = <S extends object>(
-  service: Effect.Effect<S, never, Database>,
-  userId: string,
+// 「怎么拿到这个服务」与「怎么跑」分开传:per-user 那半跑 `runWith`(要 userId),
+// 全局那半跑 `runGlobal`(没有 userId 可给 —— 见下)。
+const promisifiedFrom = <S extends object, R>(
+  service: Effect.Effect<S, never, R>,
+  run: <A>(effect: Effect.Effect<A, never, R>) => Promise<A>,
 ): Promisified<S> =>
   new Proxy({} as Promisified<S>, {
     get:
       (_target, key) =>
       (...args: unknown[]) =>
-        runWith(
-          Layer.empty,
-          userId,
+        run(
           Effect.flatMap(service, (resolved) => {
             const method = (resolved as Record<string | symbol, unknown>)[key];
             if (typeof method !== "function") {
@@ -78,7 +76,7 @@ const promisifiedFrom = <S extends object>(
  */
 export const dbFor = (userId: string) => {
   const of = <S extends object>(pick: (db: Database) => S) =>
-    promisifiedFrom(Effect.map(Database, pick), userId);
+    promisifiedFrom(Effect.map(Database, pick), (effect) => runWith(Layer.empty, userId, effect));
   return {
     accounts: of((db) => db.accounts),
     portfolios: of((db) => db.portfolios),
@@ -88,5 +86,55 @@ export const dbFor = (userId: string) => {
     tags: of((db) => db.tags),
     tabPins: of((db) => db.tabPins),
     transfer: of((db) => db.transfer),
+    cache: of((db) => db.cache),
   };
+};
+
+/**
+ * 参考层那张门票的夹具把手:`oracleDbFor(USER).tokens.create(…)`。
+ *
+ * 夹具要往代币行 / 价格行里塞数据(生产路径是 mint,那些用例不测认币),而这几片**故意不在**
+ * `Database` 上 —— handler 拿不到它们(#504 T17)。夹具经这张票拿,和参考层自己走同一条路。
+ *
+ * `namer` 用当前上游那个常量:db 层不预设厂商(#199),而这些夹具种的就是「当前上游认出来的
+ * 那条 ref」。
+ */
+export const oracleDbFor = (userId: string) => {
+  const of = <S extends object>(pick: (db: DatabaseForOracle) => S) =>
+    promisifiedFrom(
+      Effect.provide(
+        Effect.map(DatabaseForOracle, pick),
+        Layer.provide(DatabaseForOracle.Default(UPSTREAM_ID), Layer.succeed(CurrentUser, userId)),
+      ),
+      (effect) => runWith(Layer.empty, userId, effect),
+    );
+  return {
+    tokens: of((db) => db.tokens),
+    tokenPrices: of((db) => db.tokenPrices),
+  };
+};
+
+// 跑一个只要 `GlobalDatabase` 的 effect。**这里没有 `CurrentUser` 可 provide** —— 那张门票上的
+// op 本来就没有「谁的」这回事,而这正是它与上面那半在类型上的全部区别。
+const runGlobal = <A>(effect: Effect.Effect<A, never, GlobalDatabase>): Promise<A> =>
+  Effect.runPromise(
+    effect.pipe(Effect.provide(GlobalDatabase.Default), Effect.provide(dbClientLayer(env))),
+  );
+
+/**
+ * 不带 userId 的那张门票的夹具把手:`globalDb.refIndex.putAll(…)`。
+ *
+ * 以前这里写的是 `withStore(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, USER, …)`
+ * —— 那个 `USER` 是喂给 `runWith` 的占位,全局表根本不看它。占位没了,是因为那条路上
+ * 现在真的没有用户这个概念。
+ */
+export const globalDb = {
+  refIndex: promisifiedFrom(
+    Effect.map(GlobalDatabase, (db) => db.refIndex),
+    runGlobal,
+  ),
+  accounts: promisifiedFrom(
+    Effect.map(GlobalDatabase, (db) => db.accounts),
+    runGlobal,
+  ),
 };

@@ -1,5 +1,4 @@
-import type { TokenPriceWrite, TokenRecordPrice } from "@folio/oracle-basic";
-import type { TokenPriceStore } from "@folio/oracle-basic/ports";
+import type { TokenPriceWrite, TokenRecordPrice, TokenRef } from "@folio/oracle-basic";
 import { formatTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
@@ -7,12 +6,19 @@ import { chunk, DbClient } from "../client";
 import { CurrentUser } from "../current-user";
 import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
 
-// `TokenPriceStore` 的 D1 实现(ADR 0021/0023,#199)。**每个用户一份** —— userId 由 layer 吃掉。
+// 代币的**价** facet(ADR 0021/0023,#199)。**每个用户一份** —— userId 由 layer 吃掉。
+//
+// **契约就是下面这段实现。** 以前它顶的是 `@folio/oracle-basic` 的 `TokenPriceStore` 接口 ——
+// 那套倒置换不来第二个实现(唯一的第二实现是 oracle 测试里的内存假货,照形状写即可),
+// 只换来两份会各自漂移的 doc。方法上的注释因此都搬到了实现这边。
 //
 // 两半:**现价**在代币行自己那几列上(per-user,过期不删、读出带 stale);**历史日价**在
 // `token_daily_prices`(全局键 = tokenRef,过去日不可变 → 永久存、无 TTL,#199/ADR 0022 的受控例外)。
 //
-// **时间走 `Clock`**(以前是 `opts.now`);`env` 不再出现在签名里(见 ./service.ts)。
+// **时间走 `Clock`**(以前是 `opts.now`);`env` 不再出现在签名里(见 ../client.ts)。
+
+/** 这一层的契约 —— 从实现推导。`@folio/oracle` 的几片把它当参数传下去,要一个能写在签名里的名字。 */
+export type TokenPriceStore = Effect.Effect.Success<ReturnType<typeof makeUserTokenPriceStore>>;
 
 export const makeUserTokenPriceStore = (namer: string) =>
   Effect.gen(function* () {
@@ -85,9 +91,9 @@ export const makeUserTokenPriceStore = (namer: string) =>
         ),
       );
 
-    const store: TokenPriceStore = {
-      // 过期不删,读出带 stale(SWR)。
-      getByIds: (ids) =>
+    return {
+      // 过期不删,读出带 stale(SWR)。尚无价的行不出现在结果里。
+      getByIds: (ids: readonly string[]): Effect.Effect<Map<string, TokenRecordPrice>> =>
         Effect.gen(function* () {
           const out = new Map<string, TokenRecordPrice>();
           if (ids.length === 0) return out;
@@ -123,7 +129,7 @@ export const makeUserTokenPriceStore = (namer: string) =>
           return out;
         }),
 
-      put: (prices: readonly TokenPriceWrite[], ttlMs) =>
+      put: (prices: readonly TokenPriceWrite[], ttlMs: number): Effect.Effect<void> =>
         Effect.gen(function* () {
           if (prices.length === 0) return;
           const priceExpiresAt = (yield* Clock.currentTimeMillis) + ttlMs;
@@ -145,8 +151,11 @@ export const makeUserTokenPriceStore = (namer: string) =>
           );
         }),
 
-      // 历史日价:过去某 UTC 日的价不可变 → 永久存,无 TTL。
-      getDaily: (tokenId, dayBuckets) =>
+      // 历史日价(时序、按范围查 → 真表):过去某 UTC 日的价不可变 → 永久存,无 TTL。
+      getDaily: (
+        tokenId: string,
+        dayBuckets: readonly number[],
+      ): Effect.Effect<Map<number, number>> =>
         Effect.gen(function* () {
           if (dayBuckets.length === 0) return new Map<number, number>();
           const ref = yield* upstreamRefOf(tokenId);
@@ -156,7 +165,10 @@ export const makeUserTokenPriceStore = (namer: string) =>
             : yield* dailyByRef(ref.value, dayBuckets);
         }),
 
-      putDaily: (tokenId, prices) =>
+      putDaily: (
+        tokenId: string,
+        prices: readonly { dayBucket: number; unitPrice: number }[],
+      ): Effect.Effect<void> =>
         Effect.gen(function* () {
           if (prices.length === 0) return;
           const ref = yield* upstreamRefOf(tokenId);
@@ -167,10 +179,14 @@ export const makeUserTokenPriceStore = (namer: string) =>
       // 按 ref 直读/直写(法币历史汇率,ADR 0026):跳过 tokenId→ref 翻译。法币 ref
       // (`fiat/issued:CODE`)与 BTC 反算腿(`coingecko/issued:bitcoin`)在 per-user `token_refs`
       // 里未必有行 → 必须按 ref 直接落这张全局表。ref 就是主键的一列,无 user 参与。
-      getDailyByRef: dailyByRef,
+      getDailyByRef: (
+        ref: TokenRef,
+        dayBuckets: readonly number[],
+      ): Effect.Effect<Map<number, number>> => dailyByRef(ref, dayBuckets),
 
-      putDailyByRef: (ref, prices) => (prices.length === 0 ? Effect.void : writeDaily(ref, prices)),
+      putDailyByRef: (
+        ref: TokenRef,
+        prices: readonly { dayBucket: number; unitPrice: number }[],
+      ): Effect.Effect<void> => (prices.length === 0 ? Effect.void : writeDaily(ref, prices)),
     };
-
-    return store;
   });

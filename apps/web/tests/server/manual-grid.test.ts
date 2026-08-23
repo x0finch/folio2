@@ -1,12 +1,10 @@
 import { env } from "cloudflare:test";
-import { oraclePortsLayer } from "@folio/db";
 import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
-import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
 import { NAMER } from "@/lib/server/oracle";
 import { buildAccountValueHistory } from "@/lib/server/portfolio/history";
-import { dbFor, withStore } from "./db-effect";
+import { dbFor, oracleDbFor } from "./db-effect";
 import {
   addManualActivities,
   deleteManualActivity,
@@ -46,9 +44,7 @@ async function seedFiatDaily(
   code: string,
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
-  await withStore(TokenPriceStore, oraclePortsLayer({ namer: NAMER }), USER, (s) =>
-    s.putDailyByRef(tokenRef.issued(FIAT_NAMER, code), rows),
-  );
+  await oracleDbFor(USER).tokenPrices.putDailyByRef(tokenRef.issued(FIAT_NAMER, code), rows);
 }
 // #203:历史价按 **token_id** 取(新参考层的 priceSeries 收内部 id),不再按厂商 ref 拼键。
 // 所以要先让持仓落库、拿到 mint 出来的 id,再往那个 id 上种价。
@@ -57,9 +53,7 @@ async function seedDaily(
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
   const [h] = await dbFor(USER).manual.listHoldings(accountId, NAMER);
-  await withStore(TokenPriceStore, oraclePortsLayer({ namer: NAMER }), USER, (s) =>
-    s.putDaily(h.id, rows),
-  );
+  await oracleDbFor(USER).tokenPrices.putDaily(h.id, rows);
 }
 
 async function resetUser(): Promise<void> {

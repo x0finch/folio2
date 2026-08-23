@@ -1,6 +1,7 @@
+import type { TokenPriceStore, TokenStore } from "@folio/db";
 import type { TokenPricePoint } from "@folio/oracle-basic";
 import { dayBucketOf, MS_PER_DAY } from "@folio/oracle-basic";
-import type { TokenPriceStore, TokenStore, TokenUpstream } from "@folio/oracle-basic/ports";
+import type { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Effect, Option } from "effect";
 import { degradeTo } from "./swr";
 

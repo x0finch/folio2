@@ -1,9 +1,17 @@
 import { Context } from "effect";
-import type * as Stores from "./stores";
 import type * as Upstreams from "./upstream";
 
-// 七个端口的 **Tag**(Effect 的服务标识)。契约的**类型**在 `stores.ts` / `upstream.ts`,
-// 这里只把它们提升成可 provide 的服务。
+// **出网那几个端口的 Tag**(Effect 的服务标识)。契约的类型在 `upstream.ts`,这里只把它们
+// 提升成可 provide 的服务。
+//
+// **本地持久化那几片不在这里了。** 它们曾经也是端口(`TokenStore` / `TokenPriceStore` /
+// `CacheStore` / `GlobalTokenRefIndexStore`),由本包定接口、`@folio/db` 顶上去实现。那层倒置
+// 换不来第二个实现 —— 唯一的第二实现是本包测试里的内存假货,照形状写即可 —— 只换来两份
+// 会各自漂移的 doc。现在契约就是 db 里那几份实现,取用走它的三张门票
+// (`Database` / `DatabaseForOracle` / `GlobalDatabase`)。
+//
+// 剩下的这几个**是真端口**:出网这件事今天落在 CoinGecko 上,那是装配点的一行选择,
+// 服务层不该知道(ADR 0023)—— 换一家就是换一个 layer。
 //
 // **为什么单开一个入口(`@folio/oracle-basic/ports`)而不是并进 index**:`Context.GenericTag(...)`
 // 是**运行时值**,而本包的主入口被客户端组件 value-import(`SUPPORTED_CURRENCIES` /
@@ -11,24 +19,10 @@ import type * as Upstreams from "./upstream";
 // 能不能摇掉全看打包器 —— 而这条依赖本来就只有服务端需要。分入口是结构上的保证,不是指望摇树。
 //
 // **命名与 `@effect/platform` 同款**(`FileSystem` / `HttpClient` / `Path`):interface 与 Tag
-// 同名同字,`yield* TokenStore` 拿到的就是 `TokenStore`。`packages/clients/*` 那边用的是
+// 同名同字,`yield* TokenUpstream` 拿到的就是 `TokenUpstream`。`packages/clients/*` 那边用的是
 // `class XxxClient extends Context.Tag(...)<XxxClient, XxxClientApi>()` —— 那是「SDK 式出口」
-// 的形状(一个包一个 client);端口这边契约名(`TokenStore`)本身就是全仓的词表,
+// 的形状(一个包一个 client);端口这边契约名(`TokenUpstream`)本身就是全仓的词表,
 // 不值得为了挂一个 `static layer` 把它们全改名成 `*Api`。
-
-export type TokenStore = Stores.TokenStore;
-export const TokenStore = Context.GenericTag<TokenStore>("oracle/TokenStore");
-
-export type TokenPriceStore = Stores.TokenPriceStore;
-export const TokenPriceStore = Context.GenericTag<TokenPriceStore>("oracle/TokenPriceStore");
-
-export type CacheStore = Stores.CacheStore;
-export const CacheStore = Context.GenericTag<CacheStore>("oracle/CacheStore");
-
-export type GlobalTokenRefIndexStore = Stores.GlobalTokenRefIndexStore;
-export const GlobalTokenRefIndexStore = Context.GenericTag<GlobalTokenRefIndexStore>(
-  "oracle/GlobalTokenRefIndexStore",
-);
 
 // 代币上游三面之交。**一个 Tag,不是三个** —— 三面恒由同一家实现(它们要共用同一份币目录
 // 与同一套 id),分成三个 Tag 只会让装配点写三遍同一个 layer。

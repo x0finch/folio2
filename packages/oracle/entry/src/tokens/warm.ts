@@ -1,4 +1,5 @@
-import type { CacheStore, TokenMetaUpstream } from "@folio/oracle-basic";
+import type { CacheStore } from "@folio/db";
+import type { TokenMetaUpstream } from "@folio/oracle-basic";
 import { WARM_TTL_MS } from "@folio/oracle-basic";
 import { Clock, Effect, Option, Schema } from "effect";
 import { swr } from "./swr";

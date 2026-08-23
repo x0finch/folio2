@@ -1,3 +1,4 @@
+import type { GlobalRefIndexStore, TokenStore } from "@folio/db";
 import type { ProviderTokenSeed, TokenCandidate, TokenRef, TokenRefHit } from "@folio/oracle-basic";
 import {
   FIAT_NAMER,
@@ -6,7 +7,7 @@ import {
   RESOLUTION_DOMINANCE,
   RESOLUTION_TOP_RANK,
 } from "@folio/oracle-basic";
-import type { GlobalTokenRefIndexStore, Namer, TokenStore } from "@folio/oracle-basic/ports";
+import type { Namer } from "@folio/oracle-basic/ports";
 import {
   tokenRef as buildRef,
   hasTrustedSymbol,
@@ -47,7 +48,8 @@ export interface MintInput {
 // mint 那半要的全部东西。**一个上游都没有** —— 见上面的红线。
 export interface MintDeps {
   readonly store: TokenStore;
-  readonly globalRefIndex: GlobalTokenRefIndexStore;
+  // 契约就是 `@folio/db` 里那份实现(它从实现推导),没有第二份签名可抄错。
+  readonly globalRefIndex: GlobalRefIndexStore;
   readonly candidates: CandidateSource;
   // 当前源的标识 —— 它同时是 ref 的 namer 与全局映射表的 `namer` 列;`overrides` 是它那张
   // symbol → 上游 id 的策展小表(见 `Namer`)。

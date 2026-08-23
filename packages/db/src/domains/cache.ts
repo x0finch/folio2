@@ -1,5 +1,3 @@
-import type { CacheEntry, CacheWrite } from "@folio/oracle-basic";
-import type { CacheStore } from "@folio/oracle-basic/ports";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
 import { chunk, DbClient } from "../client";
@@ -7,7 +5,7 @@ import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
 import { userCache } from "../schema";
 
-// `CacheStore` 的 D1 实现(#199)。per-user 的 KV,只三种键(`warm` / `fx:<币种>` / `platform:<键>`,
+// per-user 的 KV 缓存(#199),只三种键(`warm` / `fx:<币种>` / `platform:<键>`,
 // 键的形状归 oracle 的 cache.ts,本文件不解释键;`defi-logo:<协议>` 那种是 app 自己的一片)。
 // 值是 JSON,db 当不透明 blob。
 //
@@ -16,13 +14,29 @@ import { userCache } from "../schema";
 //
 // **批量那两个是主路径**:展示一次要这个用户的全部平台键、预热一次写十来个币种的汇率。
 // 逐键往返会把 1 次 D1 变成 N 次,而读那 N 次就落在总览的关键路径上。
-// 分块见 ./service.ts 末尾(`IN` 列表受 D1 绑定参数上限约束;这里每块还要多带一个 user_id)。
+// 分块见 ../client.ts 末尾(`IN` 列表受 D1 绑定参数上限约束;这里每块还要多带一个 user_id)。
 //
 // 留 userId 的理由:per-user 缓存只装这个用户实际碰到的(他选的币种、他有持仓的那几条链),
 // 全局一份就得装所有人的并集。#202 起它取代 fx_rates + platforms 两张全局表。
 //
 // **时间走 `Clock`**(以前是 `opts.now` —— 一个只有测试会传的字段);出网口是 `DbClient`
 // 那一个服务,`env` 不再出现在签名里。
+
+/** 一次写:键 + 值 + 各自的 TTL。 */
+export interface CacheWrite {
+  key: string;
+  value: unknown;
+  ttlMs: number;
+}
+
+/** 过期不删、读出带 stale —— 与价的 SWR 同一套语义,由调用方决定要不要用旧值。 */
+export interface CacheEntry {
+  value: unknown;
+  stale: boolean;
+}
+
+/** 这一层的契约 —— 从实现推导,不另抄一份签名。 */
+export type CacheStore = Effect.Effect.Success<typeof makeUserCacheStore>;
 
 // 一条 upsert 语句。`put` 与 `putMany` 共用同一份键/值口径 —— 两个动词写出来的行必须一样。
 const upsert = (db: Drizzle, userId: string, w: CacheWrite, now: number) => {
@@ -48,8 +62,9 @@ export const makeUserCacheStore = Effect.gen(function* () {
     }
   };
 
-  const store: CacheStore = {
-    get: (key) =>
+  return {
+    /** 单键。miss 与坏值同待遇 → `none`。 */
+    get: (key: string): Effect.Effect<Option.Option<CacheEntry>> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         const rows = yield* client.query((db) =>
@@ -62,7 +77,8 @@ export const makeUserCacheStore = Effect.gen(function* () {
         return Option.fromNullable(row ? decode(row, now) : undefined);
       }),
 
-    getMany: (keys) =>
+    /** 批量。**miss 的键不出现在结果里**(同 `findByRefs` 的口径)。 */
+    getMany: (keys: readonly string[]): Effect.Effect<Map<string, CacheEntry>> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         const out = new Map<string, CacheEntry>();
@@ -87,19 +103,17 @@ export const makeUserCacheStore = Effect.gen(function* () {
         return out;
       }),
 
-    put: (key, value, ttlMs) =>
+    put: (key: string, value: unknown, ttlMs: number): Effect.Effect<void> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         yield* client.query((db) => upsert(db, userId, { key, value, ttlMs }, now));
       }),
 
-    // 一个批次发出去(D1 没有交互式事务,batch 是它的原子多写)。
-    putMany: (writes) =>
+    // 一次写多个键,各带自己的 TTL,**一个批次发出去**(D1 没有交互式事务,batch 是它的原子多写)。
+    putMany: (writes: readonly CacheWrite[]): Effect.Effect<void> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         yield* client.batch((db) => writes.map((w) => upsert(db, userId, w, now)));
       }),
   };
-
-  return store;
 });

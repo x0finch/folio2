@@ -564,6 +564,9 @@ importers:
       '@folio/client-core':
         specifier: workspace:*
         version: link:../../clients/core
+      '@folio/db':
+        specifier: workspace:*
+        version: link:../../db
       '@folio/oracle-basic':
         specifier: workspace:*
         version: link:../basic
@@ -574,6 +577,9 @@ importers:
         specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 4.20260626.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

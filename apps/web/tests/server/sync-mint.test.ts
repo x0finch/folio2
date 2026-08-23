@@ -1,10 +1,8 @@
 import { env } from "cloudflare:test";
 import { type Balance, ConnectorFailure } from "@folio/connectors-basic";
-import { globalTokenRefIndexStoreLayer, oraclePortsLayer } from "@folio/db";
-import { CacheStore, GlobalTokenRefIndexStore, TokenStore } from "@folio/oracle-basic/ports";
-import { Effect, Option } from "effect";
+import { Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dbFor, withStore } from "./db-effect";
+import { dbFor, globalDb, oracleDbFor } from "./db-effect";
 import { syncOne, syncRound, warmTokensForUser } from "./sync-fns";
 
 // 写路径切到 mint 的端到端测试(#200):喂 provider 余额 → 落库 → 快照行带正确的 token_id。
@@ -52,35 +50,29 @@ async function seedWarm(
   rows: { id: string; symbol: string; rank: number }[],
   asOf = Date.now(),
 ): Promise<void> {
-  await withStore(CacheStore, oraclePortsLayer({ namer: NAMER }), USER, (s) =>
-    s.put(
-      "warm",
-      {
-        asOf,
-        rows: rows.map((r) => ({
-          info: { ref: `${NAMER}/issued:${r.id}`, symbol: r.symbol, name: r.symbol },
-          price: { unitPrice: 1, marketCapRank: r.rank, asOf: Date.now() },
-        })),
-      },
-      60 * 60 * 1000,
-    ),
+  await dbFor(USER).cache.put(
+    "warm",
+    {
+      asOf,
+      rows: rows.map((r) => ({
+        info: { ref: `${NAMER}/issued:${r.id}`, symbol: r.symbol, name: r.symbol },
+        price: { unitPrice: 1, marketCapRank: r.rank, asOf: Date.now() },
+      })),
+    },
+    60 * 60 * 1000,
   );
 }
 
 // 那个 Token 被上游认出来了没 —— 读 `token_refs` 里当前命名者那一行(端口回 `Option`,
 // 用例只关心里面那一行,所以在这儿摘掉包装)。
-const tokenInfo = (tokenId: string) =>
-  withStore(TokenStore, oraclePortsLayer({ namer: NAMER }), USER, (s) =>
-    Effect.map(s.getById(tokenId), Option.getOrUndefined),
-  );
+const tokenInfo = async (tokenId: string) =>
+  Option.getOrUndefined(await oracleDbFor(USER).tokens.getById(tokenId));
 
 async function seedRefIndex(rows: { ref: string; localName: string }[]): Promise<void> {
   // chainRef → 整条 upstream ref(#228:表存整条,不是裸 id)。
-  await withStore(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, USER, (s) =>
-    s.putAll(
-      rows.map((r) => ({ chainRef: r.ref, upstreamRef: `${NAMER}/issued:${r.localName}` })),
-      Date.now(),
-    ),
+  await globalDb.refIndex.putAll(
+    rows.map((r) => ({ chainRef: r.ref, upstreamRef: `${NAMER}/issued:${r.localName}` })),
+    Date.now(),
   );
 }
 
@@ -362,9 +354,7 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
 // `warmTokensForUser` 里还有旧参考层的预热也在打 `/coins/markets`,按 URL 数数分不清是谁打的。
 describe("同步后的预热把目录刷上(#216)", () => {
   const blobAsOf = async (): Promise<number | undefined> => {
-    const hit = await withStore(CacheStore, oraclePortsLayer({ namer: NAMER }), USER, (s) =>
-      s.get("warm"),
-    );
+    const hit = await dbFor(USER).cache.get("warm");
     return (Option.getOrUndefined(hit)?.value as { asOf: number } | undefined)?.asOf;
   };
 

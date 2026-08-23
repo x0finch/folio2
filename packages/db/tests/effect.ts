@@ -1,9 +1,8 @@
 import { env } from "cloudflare:test";
-import type { Context } from "effect";
 import { Effect, Layer, TestClock, TestContext } from "effect";
 import { type DbClient, dbClientLayer } from "../src/client";
 import { CurrentUser } from "../src/current-user";
-import { Database } from "../src/database";
+import { Database, DatabaseForOracle, GlobalDatabase } from "../src/database";
 
 // 这几个 store 的测试共用的装配(#362 第 5 站)。**跑的是生产那条路**:layer → Tag,
 // 底下是真 D1(Miniflare),只有时钟是假的。
@@ -13,8 +12,9 @@ import { Database } from "../src/database";
 // (CODING.md「别断言墙上时钟」)。
 export const NOW = 1000;
 
-// 跑一个只依赖 `DbClient` 的 effect(不带 userId 的系统级查询用,如 `listUserIdsWithAccounts`)。
-export const runDb = <A>(effect: Effect.Effect<A, never, DbClient>, nowMs = NOW): Promise<A> =>
+// 跑一个只依赖 `DbClient` 的 effect —— 下面两个把手底下都是它。
+// **不出文件**:用例经 `forDomain` / `forGlobal` 取服务,没有第二条构造路。
+const runDb = <A>(effect: Effect.Effect<A, never, DbClient>, nowMs = NOW): Promise<A> =>
   Effect.runPromise(
     Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(
       Effect.provide(dbClientLayer(env)),
@@ -51,12 +51,29 @@ export const forDomain =
       nowMs,
     );
 
-export const promisified = <I, S extends object>(
-  tag: Context.Tag<I, S>,
-  layer: Layer.Layer<I, never, DbClient | CurrentUser>,
-  userId: string,
-  nowMs = NOW,
-): Promisified<S> => promisifiedFrom(Effect.provide(tag, asUser(layer, userId)), nowMs);
+// `GlobalDatabase` 的把手 —— 与 `forDomain` 同款,少一个 userId 参数,因为那张门票上的 op
+// 本来就没有「谁的」这回事(全局映射表 / cron 扫用户)。**它拿不到 `CurrentUser`,这不是省事**:
+// 那正是这一半在类型上与 per-user 那半的全部区别。
+export const forGlobal =
+  <S extends object>(pick: (db: GlobalDatabase) => S) =>
+  (nowMs = NOW): Promisified<S> =>
+    promisifiedFrom(
+      Effect.provide(Effect.map(GlobalDatabase, pick), GlobalDatabase.Default),
+      nowMs,
+    );
+
+// 参考层那张门票的把手。`namer` 是它的构造参数(db 层不预设厂商,#199),所以这里也得给 ——
+// 多数用例用默认的那个,只有测「按命名者点查」的才换。
+export const forOracle =
+  <S extends object>(pick: (db: DatabaseForOracle) => S) =>
+  (userId: string, namer: string, nowMs = NOW): Promisified<S> =>
+    promisifiedFrom(
+      Effect.provide(
+        Effect.map(DatabaseForOracle, pick),
+        asUser(DatabaseForOracle.Default(namer), userId),
+      ),
+      nowMs,
+    );
 
 // 「这一层按谁跑」—— 把 `CurrentUser` 喂进去,剩下的只差 `DbClient`(由 `runDb` provide)。
 const asUser = <I>(

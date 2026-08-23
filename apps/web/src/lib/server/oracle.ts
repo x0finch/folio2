@@ -2,13 +2,12 @@ import { env } from "cloudflare:workers";
 import type { UpstreamError } from "@folio/client-core";
 import {
   CurrentUser,
+  DatabaseForOracle,
   type DbClient,
   dbClientLayer,
-  globalTokenRefIndexStoreLayer,
-  oraclePortsLayer,
+  GlobalDatabase,
 } from "@folio/db";
 import { GlobalRefIndexService, type OracleServices, oracleLayer } from "@folio/oracle";
-import type { CacheStore } from "@folio/oracle-basic/ports";
 import {
   coinGeckoFxUpstreamLayer,
   coinGeckoNamerLayer,
@@ -68,39 +67,42 @@ const upstreams = () =>
 export const perRequestLayer = (userId: string): Layer.Layer<DbClient | CurrentUser> =>
   Layer.merge(dbClientLayer(env), Layer.succeed(CurrentUser, userId));
 
-// per-user 的三张 store + 那张全局表,都由 `@folio/db` 直接给 Layer(#362 第 5 站)——
-// 以前这里还有一层 30 行的 `Effect.promise` 适配(`oracle-ports.ts`),因为 db 那边是 Promise 形状;
-// 现在四个 store 自己就是 Effect,那个文件删了,`env` 也只在 `dbClientLayer(env)` 一处被读。
+// 参考层要的本地那几片 —— **两张 db 门票**,不是一排端口(#504 T5 之后又收了一次:
+// `oracle-ports/` 那个目录整个没了,契约就是 db 里的实现)。
+//   · `DatabaseForOracle` 代币行 / 价格行 / 缓存,per-user
+//   · `GlobalDatabase`    mint 要正查的那张全局映射表,没有 userId
 //
-// 惰性到「只建被用到的那一个」这件事**不做**:`packages/db/src/connect.ts` 自己写着
-// 「drizzle(env.DB) 很轻,每次创建即可」,而现在四个 store 共用同一个 `DbClient`——
-// 建它们只是几个闭包。迁移前那套 getter + `??=` 的手写惰性,省下的是不存在的代价。
+// **`namer` 在这里传进去**:db 层不预设任何厂商(表名列名零 vendor 字样,#199),而凡是要按
+// 命名者点查 `token_refs` 的读、以及历史日价那条全局键都要它。取 adapter 导出的常量,
+// 不从 `Namer` 服务里 yield —— 那会让 db 反过来消费参考层的一个服务。
 //
-// 四个端口现在是 db 出的**一张** layer(#504 T5)。这里只剩「按谁跑」这一件事要补 ——
-// 端口有几个、叫什么名字,装配点不必知道。
-const portsFor = (perRequest: Layer.Layer<DbClient | CurrentUser>) =>
-  Layer.provide(oraclePortsLayer({ namer: UPSTREAM_ID }), perRequest);
-
-// cron 刷全局映射表只要这两个端口 —— 没有 userId,也不建 per-user 那三张。
-const warmPorts = () =>
+// **两张都喂 `perRequest`,不另开 `dbClientLayer(env)`** —— 一次请求一个 drizzle 句柄是红线。
+// `GlobalDatabase` 不带 userId,不代表它可以自己再开一条连接;多给它一个 `CurrentUser` 无害
+// (它根本不读)。
+const dbForOracle = (perRequest: Layer.Layer<DbClient | CurrentUser>) =>
   Layer.merge(
-    Layer.provide(globalTokenRefIndexStoreLayer, dbClientLayer(env)),
-    coinGeckoTokenUpstreamLayer(cgConfig()),
+    Layer.provide(DatabaseForOracle.Default(UPSTREAM_ID), perRequest),
+    Layer.provide(GlobalDatabase.Default, perRequest),
   );
 
 /**
- * 参考层 + **它的端口里唯一该露在外面的那一个**(#504 T17)。
+ * **不带 userId 的那张 db 门票**(`GlobalDatabase`)。
  *
- * `provideMerge` 而不是 `provide`:app 自己有一小片直接用 `CacheStore` —— DeFi 协议图
- *(`logos/store.ts`)。那份数据来自用户自己同步下来的余额 meta,没有上游、不出网,不属于参考层,
- * 但要一个 per-user 的键值缓存;而这个缓存本来就是这个文件建的,没必要为它再包一个服务。
+ * 全局映射表与「有哪些用户」这两条都住它上面 —— 判据是「表里有没有『谁的』这回事」,没有。
+ * 它只要 `DbClient`,所以这里一行装配就够,不必先假造一个用户去建 per-user 的那一堆。
+ */
+const globalDbLayer = () => Layer.provide(GlobalDatabase.Default, dbClientLayer(env));
+
+// cron 刷全局映射表要的两样 —— 那张门票 + 代币上游。
+const warmDeps = () => Layer.merge(globalDbLayer(), coinGeckoTokenUpstreamLayer(cgConfig()));
+
+/**
+ * 参考层,装好、封住 —— 出去的只有它那三个域服务。
  *
- * **返回类型只写 `OracleServices | CacheStore`,这不是偷懒是收窄。** 运行时这张 layer 里八个端口
- * 都在(`provideMerge` 把它们一并透出),但类型上只认得出两样 —— 于是
- * `TokenStore` / `TokenPriceStore` / `GlobalTokenRefIndexStore` 在 handler 那边**取不出来**,
- * 谁都没法绕过参考层直接改代币行和价格行。收窄靠类型而不是靠再建一层,是因为再建一层就会有
- * 第二个 `CacheStore` 实例:两个对象,同一张表,而 `provideMerge` 出去的那个必须与参考层
- * 内部用的是同一个。
+ * **`provide` 而不是 `provideMerge`(#504 T17 那道收窄,现在是结构性的)**:代币行与价格行
+ * 现在住 `DatabaseForOracle`,这张 layer 把它喂进参考层之后就**不再往外透**。以前这里必须靠
+ * 「返回类型写窄一点」来挡 handler,运行时那几个端口其实都还在 context 上;现在挡它的是装配
+ * 本身。app 要的那片 KV 缓存不再从这儿漏 —— 它在 `Database` 上(`db.cache`)。
  *
  * **`perRequest` 是必填,没有默认值。** 它出包给 `runtime.ts` 用之后,一个 `= dbClientLayer(env)`
  * 的默认值就等于「不传也能跑」—— 而不传正好就是多开一条连接那种写法。红线要靠签名挡住,
@@ -108,19 +110,19 @@ const warmPorts = () =>
  */
 export const oracleFor = (
   perRequest: Layer.Layer<DbClient | CurrentUser>,
-): Layer.Layer<OracleServices | CacheStore> =>
-  Layer.provideMerge(oracleLayer, Layer.merge(portsFor(perRequest), upstreams()));
+): Layer.Layer<OracleServices> =>
+  Layer.provide(oracleLayer, Layer.merge(dbForOracle(perRequest), upstreams()));
 
 /**
  * 全局维护任务(刷 `global_token_ref_index`)的装配。**不带 userId** —— 这张表跟任何用户无关
- * (ADR 0022),所以 per-user 的那三张 store 压根不建;只装 `GlobalRefIndexService` + 它要的
- * 两个端口。
+ * (ADR 0022),所以 per-user 的那三张 store 压根不建;只装 `GlobalRefIndexService` +
+ * 它要的那张门票与那个上游。
  */
 export const withOracleWarm = <A>(
   effect: Effect.Effect<A, UpstreamError, GlobalRefIndexService>,
 ): Effect.Effect<A, Error> =>
   effect.pipe(
-    Effect.provide(Layer.provide(GlobalRefIndexService.Default, warmPorts())),
+    Effect.provide(Layer.provide(GlobalRefIndexService.Default, warmDeps())),
     Effect.mapError(toError),
   );
 
@@ -135,5 +137,6 @@ export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.provide(logTapeLogger), Effect.provide(spanTracer)));
 
 /** 系统级(无 userId)的 db 查询 —— cron 枚举用户那一条。原则 #6 的受控例外。 */
-export const withDbClient = <A>(effect: Effect.Effect<A, never, DbClient>): Effect.Effect<A> =>
-  Effect.provide(effect, dbClientLayer(env));
+export const withGlobalDb = <A>(
+  effect: Effect.Effect<A, never, GlobalDatabase>,
+): Effect.Effect<A> => Effect.provide(effect, globalDbLayer());

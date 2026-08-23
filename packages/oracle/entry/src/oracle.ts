@@ -1,13 +1,5 @@
-import type {
-  CacheStore,
-  FxUpstream,
-  GlobalTokenRefIndexStore,
-  Namer,
-  PlatformUpstream,
-  TokenPriceStore,
-  TokenStore,
-  TokenUpstream,
-} from "@folio/oracle-basic/ports";
+import type { DatabaseForOracle, GlobalDatabase } from "@folio/db";
+import type { FxUpstream, Namer, PlatformUpstream, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect, Layer } from "effect";
 import { FxService } from "./fx";
 import { PlatformService } from "./platforms";
@@ -23,8 +15,8 @@ import { CandidateSource } from "./tokens/candidates";
 //   · `namer` / `overrides` 不再由装配点从 adapter 搬到服务层 —— adapter 的 layer 直接给 `Namer`
 //   · `now?: () => number` 五个字段全删,时间走 `Clock`(测试 `TestClock`)
 //
-// **userId 仍然在类型上防错**:per-user 的三个 store layer 由 app 侧按 userId 现建
-// (`oracleLayerFor(userId)`),服务层的方法签名里一个 user 参数都没有 —— 拿错用户在编译期
+// **userId 仍然在类型上防错**:`DatabaseForOracle` 由 app 侧按 userId 现建(装配点 provide 一个
+// `CurrentUser`,ADR 0044),服务层的方法签名里一个 user 参数都没有 —— 拿错用户在编译期
 // 就发生不了,而这一层压根不知道有 userId 这回事。
 //
 // 一个用户的参考层由**三个**服务组成,按**领域**分(ADR 0012 的口径),不按能力切碎:
@@ -46,7 +38,7 @@ import { CandidateSource } from "./tokens/candidates";
 // 没有上游、不出网 —— 它的 `R` 里一个上游都没有,那本身就是「它不属于参考层」的类型级写法。
 // 现在它是 app 的 `defi-logo-store.ts`,同样落 `defi-logo:<协议>` 那个键。
 //
-// 「info 数据 vs 价格数据」的分离落在**端口**上(`TokenStore` / `TokenPriceStore`),
+// 「info 数据 vs 价格数据」的分离落在 db 那几片上(`tokens` / `tokenPrices`),
 // 不在服务上再切一遍(ADR 0023)。
 /**
  * **对外的那一张门票** —— 一个 `yield* Oracle` 拿到整个参考层,按领域取用:
@@ -77,14 +69,10 @@ export type OracleServices = Oracle | TokenService | FxService | PlatformService
 // 三个服务要的全部端口。app 侧提供这些,就拿到整个参考层。**一个端口都没少** ——
 // 服务合并动的是 Tag 的数量,不是这一层要什么。
 export type OraclePorts =
-  | TokenStore
-  | TokenPriceStore
-  | CacheStore
-  | GlobalTokenRefIndexStore
-  | TokenUpstream
-  | FxUpstream
-  | PlatformUpstream
-  | Namer;
+  // 本地那几片来自 `@folio/db` 的两张门票,**不是端口** —— 契约就是它那几份实现。
+  // `DatabaseForOracle` 是代币行 / 价格行 / 缓存(只给参考层,handler 拿不到);
+  // `GlobalDatabase` 是 mint 要正查的那张全局映射表(它没有 userId)。
+  DatabaseForOracle | GlobalDatabase | TokenUpstream | FxUpstream | PlatformUpstream | Namer;
 
 // `CandidateSource` 在这里被吃掉 —— 它是 mint 的内部依赖(#216 把它从读路径的网络面上摘下来的
 // 那个),包内 Tag,不该出现在装配点的 `R` 里。

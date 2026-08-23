@@ -1,7 +1,8 @@
 import type { UpstreamError } from "@folio/client-core";
+import type { CacheStore } from "@folio/db";
 import type { TokenMetaUpstream, UpstreamToken } from "@folio/oracle-basic";
 import { DEFAULT_TOP_N, PRICE_TTL_MS, WARM_TTL_MS } from "@folio/oracle-basic";
-import type { CacheStore, TokenUpstream } from "@folio/oracle-basic/ports";
+import type { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
 import { type WarmRow, warmBlob } from "./warm";
 
