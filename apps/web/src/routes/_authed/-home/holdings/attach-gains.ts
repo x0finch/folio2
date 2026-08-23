@@ -3,7 +3,7 @@ import { defiGainKey } from "@/lib/core/account-view";
 import type { Holding } from "@/lib/server/portfolio/aggregate";
 
 /** 独立盈亏载荷里用来拼回总览的那两张表(组合级 `portfolio` 不在这里,hero 直接读)。 */
-type GainMaps = {
+export type GainMaps = {
   holdings: Record<string, Holding["gain24h"]>;
   defi: Record<string, DefiGroup["gain24h"]>;
 };

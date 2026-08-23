@@ -1,6 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
 import { cn, SharedLayoutBg, Skeleton } from "@folio/ui";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -20,8 +20,12 @@ import {
 } from "@/lib/queries/accounts";
 import { accountKeys, portfolioKeys } from "@/lib/queries/keys";
 import { portfolioMembershipsQuery } from "@/lib/queries/portfolio";
-import { accountTagLinksQuery, tagListQuery } from "@/lib/queries/tags";
-import { useIslandQuery } from "@/lib/queries/use-island-query";
+import {
+  type AccountTagLinks,
+  accountTagLinksQuery,
+  type TagList,
+  tagListQuery,
+} from "@/lib/queries/tags";
 import { HeaderSync } from "@/routes/_authed/-home/header-sync";
 import { GainSkeleton, ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 import { AccountDetailSheet } from "./account-detail-sheet";
@@ -103,22 +107,105 @@ function ListSkeleton() {
   );
 }
 
+// 账户名单。**账户行本身 + 归属**由外层边界等过;后到的是余额、24h 盈亏、标签这三样。
+//
+// 后三样走**挂起 + 自己的边界**,不是 `useQuery` + `isPending`(原来的写法)。理由见
+// `../-home/hero/index.tsx` 开头那段:那种写法在 SSR 上服务端有数据、客户端补水那一帧没有,
+// 两边画的不是同一份 HTML,React 把整棵子树丢掉重渲。
+//
+// `pending` 的兜底就是「同一份名单,金额与增量位是骨架」—— 也就是上一版挂起态逐字渲的东西。
+// 所以粒度没丢:账户名与连接器徽章照旧立刻出现,只有数字在等。
 function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
-  const t = useTranslations("Accounts");
-  const tc = useTranslations("Common");
   const { data: accounts } = useSuspenseQuery(accountListQuery());
   const { data: memberships } = useSuspenseQuery(portfolioMembershipsQuery());
-  const holdingsQuery = useIslandQuery(useQuery(accountHoldingsQuery()));
-  const gainQuery = useIslandQuery(useQuery(accountGain24hQuery()));
-  const { data: allTags = [] } = useIslandQuery(useQuery(tagListQuery()));
-  const { data: tagLinks = [] } = useIslandQuery(useQuery(accountTagLinksQuery()));
-  const holdings = holdingsQuery.data;
+  return (
+    <QueryBoundary
+      resetKey={`list-values:${JSON.stringify(accountKeys.gain24h())}`}
+      pending={
+        <AccountsListBody
+          accounts={accounts}
+          memberships={memberships}
+          onComplete={onComplete}
+          gainPending
+        />
+      }
+      failed={
+        <AccountsListBody
+          accounts={accounts}
+          memberships={memberships}
+          onComplete={onComplete}
+          gainFailed
+        />
+      }
+    >
+      <AccountsListReady accounts={accounts} memberships={memberships} onComplete={onComplete} />
+    </QueryBoundary>
+  );
+}
+
+// 挂起点在这儿:余额 / 盈亏 / 标签三样都到了才渲染。
+function AccountsListReady({
+  accounts,
+  memberships,
+  onComplete,
+}: {
+  accounts: RowSources["accounts"];
+  memberships: RowSources["memberships"];
+  onComplete: (a: AccountRow) => void;
+}) {
+  const { data: holdings } = useSuspenseQuery(accountHoldingsQuery());
+  const { data: gain } = useSuspenseQuery(accountGain24hQuery());
+  const { data: allTags } = useSuspenseQuery(tagListQuery());
+  const { data: tagLinks } = useSuspenseQuery(accountTagLinksQuery());
+  return (
+    <AccountsListBody
+      accounts={accounts}
+      memberships={memberships}
+      onComplete={onComplete}
+      holdings={holdings}
+      gain={gain}
+      allTags={allTags}
+      tagLinks={tagLinks}
+    />
+  );
+}
+
+// 这几个类型**从被调用方推出来**,不另抄一份:名单的形状归 `buildAccountRows`,
+// 增量的形状归 `attachAccountGains`。抄一份的话它们迟早跟真的对不上。
+type RowSources = Parameters<typeof buildAccountRows>[0];
+type AccountGainData = NonNullable<Parameters<typeof attachAccountGains>[1]>;
+
+function AccountsListBody({
+  accounts,
+  memberships,
+  onComplete,
+  holdings,
+  gain,
+  allTags = [],
+  tagLinks = [],
+  gainPending = false,
+  gainFailed = false,
+}: {
+  accounts: RowSources["accounts"];
+  memberships: RowSources["memberships"];
+  onComplete: (a: AccountRow) => void;
+  holdings?: RowSources["holdings"];
+  gain?: AccountGainData;
+  // 这两样不取 `RowSources` 的:名单只要 id + 名字那一小片投影,而抽屉要的是整行。
+  allTags?: TagList;
+  tagLinks?: AccountTagLinks;
+  gainPending?: boolean;
+  gainFailed?: boolean;
+}) {
+  const t = useTranslations("Accounts");
+  const tc = useTranslations("Common");
   const allRows = useMemo(
     () => buildAccountRows({ accounts, holdings, memberships, allTags, tagLinks }),
     [accounts, holdings, memberships, allTags, tagLinks],
   );
   const { selectedId: selectedPortfolioId, defaultId } = usePortfolio();
-  useStalePriceRefresh(holdings?.pricesStale, !gainQuery.isPending);
+  // 只在盈亏真的到了之后才允许触发刷价 —— 与上一版 `!gainQuery.isPending` 同一个条件。
+  useStalePriceRefresh(holdings?.pricesStale, !gainPending);
 
   // 账户页 scope 到选中 Portfolio(ADR 0033):只显归属选中的账户(含其归档成员)。归属过滤在客户端
   // (归档无关的成员集),切 Portfolio 即时重筛、无需重拉。选择器即作用域,账户页不设单独 tab。
@@ -132,10 +219,10 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
     () =>
       attachAccountGains(
         allRows.filter((r) => memberIds.has(r.id)),
-        gainQuery.data,
-        gainQuery.isError,
+        gain,
+        gainFailed,
       ),
-    [allRows, memberIds, gainQuery.data, gainQuery.isError],
+    [allRows, memberIds, gain, gainFailed],
   );
 
   const activeUnsorted = rows.filter((r) => r.archivedAt == null);
@@ -166,7 +253,7 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
               <AccountRowContent
                 row={r}
                 total={total}
-                gainPending={gainQuery.isPending}
+                gainPending={gainPending}
                 onComplete={() => onComplete(r)}
               />
             </button>
@@ -182,7 +269,7 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
           <SharedLayoutBg className="mt-2" inset={0} pillClassName="rounded-xl bg-muted">
             {archived.map((r) => (
               <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
-                <AccountRowContent row={r} total={total} gainPending={gainQuery.isPending} muted />
+                <AccountRowContent row={r} total={total} gainPending={gainPending} muted />
               </button>
             ))}
           </SharedLayoutBg>
@@ -194,7 +281,7 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
         total={total}
         allTags={allTags}
         tagLinks={tagLinks}
-        gainPending={gainQuery.isPending}
+        gainPending={gainPending}
         open={selected != null}
         onOpenChange={(o) => {
           if (!o) setAccount(undefined);
