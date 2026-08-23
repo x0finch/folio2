@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListAccountHoldings } from "./account-holdings";
 import { handleGetAccountGain24h, handleGetPortfolioGain24h } from "./gain";
@@ -12,27 +13,27 @@ import { handleGetHomeTabStrip } from "./tabs";
 export const getPortfolioOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
-  .handler(handleGetPortfolioOverview);
+  .handler(runEffect(handleGetPortfolioOverview));
 
 export const getPortfolioGain24h = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
-  .handler(handleGetPortfolioGain24h);
+  .handler(runEffect(handleGetPortfolioGain24h));
 
 export const getHomeTabStrip = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioSelectInput)
-  .handler(handleGetHomeTabStrip);
+  .handler(runEffect(handleGetHomeTabStrip));
 
 export const listAccountHoldings = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(handleListAccountHoldings);
+  .handler(runEffect(handleListAccountHoldings));
 
 export const getAccountGain24h = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(handleGetAccountGain24h);
+  .handler(runEffect(handleGetAccountGain24h));
 
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioSelectInput)
-  .handler(handleGetPortfolioHistory);
+  .handler(runEffect(handleGetPortfolioHistory));

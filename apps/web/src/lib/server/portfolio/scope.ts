@@ -1,4 +1,4 @@
-import { AccountStore, PortfolioStore, SettingsStore, SnapshotStore, TagStore } from "@folio/db";
+import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
 import {
@@ -46,9 +46,9 @@ export interface PortfolioScope {
 // 不泄露任何数据,但显式回退到默认更符合直觉)。返回选中 id + 默认 Portfolio。
 export const resolveScope = (
   requested: string | undefined,
-): Effect.Effect<{ selectedId: string; defaultId: string }, never, PortfolioStore> =>
+): Effect.Effect<{ selectedId: string; defaultId: string }, never, Database> =>
   Effect.gen(function* () {
-    const store = yield* PortfolioStore;
+    const store = (yield* Database).portfolios;
     const [portfolios, defaultPf] = yield* Effect.all([store.list(), store.ensureDefault()], {
       concurrency: 2,
     });
@@ -62,11 +62,13 @@ export const resolveScope = (
 // 于是「各行相加 = hero 那个数」仍是同一个 `computeGain24h` 喂出来的,不是两处各算。
 export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
   Effect.gen(function* () {
-    const accountStore = yield* AccountStore;
-    const portfolioStore = yield* PortfolioStore;
-    const snapshotStore = yield* SnapshotStore;
-    const settingsStore = yield* SettingsStore;
-    const tagStore = yield* TagStore;
+    const {
+      accounts: accountStore,
+      portfolios: portfolioStore,
+      snapshots: snapshotStore,
+      settings: settingsStore,
+      tags: tagStore,
+    } = yield* Database;
 
     const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
     const now = Date.now();

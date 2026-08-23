@@ -1,5 +1,5 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
-import { TokenService } from "@folio/oracle";
+import { Oracle } from "@folio/oracle";
 import { type ValuationMode, valuate } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import type { OverviewBalance } from "@/lib/core/account-view";
@@ -25,14 +25,14 @@ export function liveValue(
 }
 
 // 按账户现推净值:对每账户最新快照的**全部**余额取 cache-only 源价(一次批量 enrich),liveValue 求和。
-// 代币能力不再当参数传,而是 `R` 通道上的 `TokenService` —— 调用方(server fn)一次 `runRequest` 全供上。
+// 代币能力不再当参数传,而是 `R` 通道上的聚合 `Oracle` —— 调用方那一次装配全供上。
 // self-first(默认)下 enrich-not-reprice 行 value≡冻结、盯市行取实时源价 → 与主页总价同源同算。
 // 主页(buildOverview)与资产曲线当下点(history)共用本函数,保证「主页总价 ≡ 曲线当下点」。
 export const deriveLiveAccountTotals = (
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
   mode: ValuationMode,
-): Effect.Effect<Map<string, number>, never, TokenService> =>
+): Effect.Effect<Map<string, number>, never, Oracle> =>
   Effect.gen(function* () {
     const balancesOf = (id: string) => (byAccount.get(id)?.balances ?? []) as OverviewBalance[];
     // 一次性摊平 + 按 token_id 批量读价(cache-only,零网络);非同质行没有 id → 源价 undefined。
@@ -41,7 +41,7 @@ export const deriveLiveAccountTotals = (
     const ids = [
       ...new Set(flat.flatMap((b) => (fungibleTokenId(b) ? [fungibleTokenId(b) as string] : []))),
     ];
-    const enriched = yield* Effect.flatMap(TokenService, (t) => t.enrich(ids));
+    const enriched = yield* Effect.flatMap(Oracle, (o) => o.tokens.enrich(ids));
     const priceOf = (b: OverviewBalance): number | undefined => {
       const id = fungibleTokenId(b);
       return id ? enriched.get(id)?.price?.unitPrice : undefined;

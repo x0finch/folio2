@@ -1,13 +1,8 @@
-import { runAtEdge, withRequest } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
+import { Effect } from "effect";
 import { buildScopedOverview, type PortfolioScope } from "./scope";
 
-export function handleGetPortfolioOverview({
-  data,
-  context,
-}: {
-  data: PortfolioScope;
-  context: AuthContext;
-}) {
-  return runAtEdge(withRequest(context.userId, buildScopedOverview(data, false)));
-}
+export const handleGetPortfolioOverview = Effect.fn("getPortfolioOverview")(function* (
+  data: PortfolioScope,
+) {
+  return yield* buildScopedOverview(data, false);
+});
