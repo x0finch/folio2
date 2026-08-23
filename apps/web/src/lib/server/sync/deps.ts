@@ -15,8 +15,9 @@ import {
   type ProviderNeeds,
 } from "@folio/connectors-basic";
 import { type AccountSafe, Database, type NotFound, type WriteSnapshotInput } from "@folio/db";
-import { Oracle, type OraclePorts, type OracleServices } from "@folio/oracle";
+import { Oracle, type OracleServices } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
+import type { CacheStore } from "@folio/oracle-basic/ports";
 import {
   type AccountSyncResult,
   BalanceSource,
@@ -61,7 +62,9 @@ import { isSyncableAccount } from "./syncable";
 export const warmTokens: Effect.Effect<
   void,
   UpstreamError | NotFound,
-  Database | OracleServices | OraclePorts
+  // = `UserServices`。写开是为了别让这个签名读起来像「预热要整个 handler 面」——
+  // 它要的就是这三样:自己的数据、参考层、那份 DeFi 协议图缓存(#504 T17)。
+  Database | OracleServices | CacheStore
 > = Effect.gen(function* () {
   const syncLog = getLogger(["folio", "web", "sync"]);
   const db = yield* Database;
@@ -248,7 +251,8 @@ const asDep =
 export const syncServicesLayer: Layer.Layer<
   SyncServices,
   never,
-  Database | OracleServices | OraclePorts
+  // 端口那八个不在这里(#504 T17):`mint` / `revalue` 自 T12 起都经聚合 `Oracle`。
+  Database | OracleServices
 > = Layer.unwrapEffect(
   Effect.sync(() => {
     // 一轮 sync 共一份 seed 收集器:取余额那头收,写快照那头取(见 SeedCollector 的定义)。
@@ -308,7 +312,9 @@ export const syncServicesLayer: Layer.Layer<
           const settings = (yield* Database).settings;
           // 参考层那几个服务已经在外面那次装配里装好了 —— 抓住 context,别让它们
           // 漏进本服务的 `R`(CODING.md:服务对外的 `R` 恒是 `never`)。
-          const oracle = yield* Effect.context<OracleServices | OraclePorts>();
+          // **抓的是服务不是端口**(#504 T17):`mint` / `revalue` 现在都经聚合 `Oracle`,
+          // 端口那八个本来就不该出现在这一层。
+          const oracle = yield* Effect.context<OracleServices>();
           // 估值模式一轮读一次,**惰性**:纯链上的一轮同步压根不重估,不该为此白发一次 D1 查询。
           // 以前得按 userId 分桶缓存(一份 deps 跨多用户),现在一个用户一层,一个闭包变量就够。
           let mode: ValuationMode | undefined;
