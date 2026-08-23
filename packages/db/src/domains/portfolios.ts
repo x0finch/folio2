@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { DbClient } from "../client";
 import { CurrentUser } from "../current-user";
+import type { NotFound } from "../errors";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
 import type { Portfolio } from "../schema/types";
 import { assertAccountOwned, assertPortfolioOwned } from "./ownership";
@@ -119,13 +120,13 @@ export const makePortfolioStore = Effect.gen(function* () {
     // 两个资源都做 owner 断言,杜绝越权。
     // **同 batch 清空该账户的全部 Tag**(ADR 0034):Tag 属于原 Portfolio,搬家后对新家是外来的,
     // 带过去会破坏「账户只有其所在 Portfolio 的 Tag」这条不变量 —— 故随归属变更一并清掉,新家里重新打。
-    assignAccount: (accountId: string, portfolioId: string): Effect.Effect<void> =>
+    assignAccount: (accountId: string, portfolioId: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
         // `ownership.ts` 仍是 Promise 形状(它被五个领域共用,三个还没迁)。**不为此新增桥** ——
         // `client.query` 收的就是「拿 drizzle 句柄做点事」的回调,把它套进去即可,
         // 全包仍只有 `DbClient` 那一处 `Effect.promise`(CODING.md「桥只留一处」)。
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-        yield* client.query((db) => assertPortfolioOwned(db, userId, portfolioId));
+        yield* assertAccountOwned(client, userId, accountId);
+        yield* assertPortfolioOwned(client, userId, portfolioId);
         // 已在目标 Portfolio → 真 no-op。否则下面的「清空该账户 Tag」会在没真搬家时也误删标签
         // (重新指到当前 Portfolio 本应无副作用)。
         const current = yield* client.query((db) =>
@@ -155,9 +156,9 @@ export const makePortfolioStore = Effect.gen(function* () {
 
     // 设为默认:先清掉该用户当前默认(→ 无默认),再把目标置默认(→ 恰一个)。两步一个 batch 原子换,
     // 中途不出现「两个默认」违反部分唯一索引。
-    setDefault: (portfolioId: string): Effect.Effect<void> =>
+    setDefault: (portfolioId: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertPortfolioOwned(db, userId, portfolioId));
+        yield* assertPortfolioOwned(client, userId, portfolioId);
         yield* client.batch((db) => [
           db
             .update(portfolios)

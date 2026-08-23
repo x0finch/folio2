@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { DbClient } from "../client";
 import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
+import type { NotFound } from "../errors";
 import { accounts, accountTags, portfolioAccounts, tags } from "../schema";
 import type { Tag } from "../schema/types";
 import { assertAccountOwned, assertPortfolioOwned, assertTagOwned } from "./ownership";
@@ -61,9 +62,9 @@ export const makeTagStore = Effect.gen(function* () {
 
   return {
     /** 建一个 Tag(归属指定 Portfolio)。名字 trim 后落库、同 Portfolio 内忽略大小写唯一。 */
-    create: (input: CreateTagInput): Effect.Effect<Tag> =>
+    create: (input: CreateTagInput): Effect.Effect<Tag, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertPortfolioOwned(db, userId, input.portfolioId));
+        yield* assertPortfolioOwned(client, userId, input.portfolioId);
         const name = input.name.trim();
         if (!name) return yield* Effect.die(new Error("tag name must not be empty"));
         yield* client.query((db) => assertTagNameFree(db, userId, input.portfolioId, name));
@@ -100,9 +101,9 @@ export const makeTagStore = Effect.gen(function* () {
       ),
 
     /** 改 Tag 名(同 Portfolio 内唯一校验,排除自身)。越权即 tag not found。 */
-    rename: (tagId: string, name: string): Effect.Effect<void> =>
+    rename: (tagId: string, name: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        const { portfolioId } = yield* client.query((db) => assertTagOwned(db, userId, tagId));
+        const { portfolioId } = yield* assertTagOwned(client, userId, tagId);
         const next = name.trim();
         if (!next) return yield* Effect.die(new Error("tag name must not be empty"));
         yield* client.query((db) => assertTagNameFree(db, userId, portfolioId, next, tagId));
@@ -123,12 +124,10 @@ export const makeTagStore = Effect.gen(function* () {
       ),
 
     /** 给账户打上一个 Tag(幂等)。校验账户与 Tag 同 Portfolio(ADR 0034 不变量)。 */
-    attach: (accountId: string, tagId: string): Effect.Effect<void> =>
+    attach: (accountId: string, tagId: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-        const { portfolioId: tagPortfolio } = yield* client.query((db) =>
-          assertTagOwned(db, userId, tagId),
-        );
+        yield* assertAccountOwned(client, userId, accountId);
+        const { portfolioId: tagPortfolio } = yield* assertTagOwned(client, userId, tagId);
         const accPortfolio = yield* client.query((db) => accountPortfolioId(db, accountId));
         if (accPortfolio !== tagPortfolio) {
           return yield* Effect.die(new Error("tag and account belong to different portfolios"));
@@ -139,10 +138,10 @@ export const makeTagStore = Effect.gen(function* () {
       }),
 
     /** 从账户取消一个 Tag(幂等)。两个资源都做 owner 断言。 */
-    detach: (accountId: string, tagId: string): Effect.Effect<void> =>
+    detach: (accountId: string, tagId: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-        yield* client.query((db) => assertTagOwned(db, userId, tagId));
+        yield* assertAccountOwned(client, userId, accountId);
+        yield* assertTagOwned(client, userId, tagId);
         yield* client.query((db) =>
           db
             .delete(accountTags)

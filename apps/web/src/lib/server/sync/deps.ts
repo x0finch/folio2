@@ -17,6 +17,7 @@ import {
 import {
   type AccountSafe,
   AccountStore,
+  type NotFound,
   SettingsStore,
   SnapshotStore,
   type WriteSnapshotInput,
@@ -65,7 +66,7 @@ import { isSyncableAccount } from "./syncable";
 // 而不是在同一个请求里再建一套 store。cron 与流式同步各自在自己的边缘装(见下面两个出口)。
 export const warmTokens: Effect.Effect<
   void,
-  UpstreamError,
+  UpstreamError | NotFound,
   OracleServices | OraclePorts | DbStores
 > = Effect.gen(function* () {
   const syncLog = getLogger(["folio", "web", "sync"]);
@@ -289,10 +290,13 @@ export const syncServicesLayer: Layer.Layer<
           // 同步写的是「此刻的状态」,而读侧的趋势图本来就只画每个钟点的最后一个点 —— 同钟点里
           // 更早的那些份存了也看不到。开关默认是关的(默认追加),导入那条路要的正是默认值:
           // 它恢复的是历史事实,不能折叠。判据与理由见 `SnapshotStore.write` 的文档注释。
+          // `orDie` 在 `asDep` 之前:`write` 会 fail `NotFound`(账户归属断言),而这条路的
+          // accountId 来自本用户自己的账户列表 —— 到这一步还找不到就是 bug。`orDie` 把它变回
+          // defect,`asDep` 再照旧收成 `SyncDepError`,与改造前逐字一致。
           write: (accountId: string, input: WriteSnapshotInput) =>
             snapshots
               .write(accountId, input, { collapseSameHour: true })
-              .pipe(asDep("writeSnapshot")),
+              .pipe(Effect.orDie, asDep("writeSnapshot")),
         })),
       ),
       Layer.succeed(BalanceSource, {

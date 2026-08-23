@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { Effect } from "effect";
 import { DbClient } from "../client";
 import { CurrentUser } from "../current-user";
+import type { NotFound } from "../errors";
 import {
   accounts,
   manualActivity,
@@ -223,9 +224,9 @@ export const makeTransferStore = Effect.gen(function* () {
     importSnapshot: (
       accountId: string,
       input: WriteSnapshotInput,
-    ): Effect.Effect<{ created: boolean }> =>
+    ): Effect.Effect<{ created: boolean }, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* assertAccountOwned(client, userId, accountId);
         const existing = yield* client.query((db) =>
           db
             .select({ id: snapshots.id })
@@ -246,10 +247,10 @@ export const makeTransferStore = Effect.gen(function* () {
       accountId: string,
       tokenId: string,
       input: ManualActivityInput,
-    ): Effect.Effect<{ created: boolean }> =>
+    ): Effect.Effect<{ created: boolean }, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-        yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
+        yield* assertAccountOwned(client, userId, accountId);
+        yield* assertTokenOwned(client, userId, tokenId);
         const price = input.price ?? null;
         const fee = input.fee ?? null;
         const memo = input.memo ?? null;

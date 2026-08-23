@@ -2,8 +2,8 @@ import type { ConnectorId } from "@folio/connectors";
 import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { DbClient } from "../client";
-import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
+import { NotFound } from "../errors";
 import { tabPins } from "../schema";
 import type { TabPin } from "../schema/types";
 import { assertAccountOwned, assertTagOwned } from "./ownership";
@@ -22,13 +22,23 @@ import { assertAccountOwned, assertTagOwned } from "./ownership";
 // 每 user 至多固定 3 个自定义 Tab(域规则,co-located 同 BALANCE_INSERT_CHUNK 的做法)。
 const MAX_TAB_PINS_PER_USER = 3;
 
-async function assertTabPinOwned(db: Drizzle, userId: string, pinId: string): Promise<void> {
-  const rows = await db
-    .select({ id: tabPins.id })
-    .from(tabPins)
-    .where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId)));
-  if (!rows[0]) throw new Error(`tab pin not found: ${pinId}`);
-}
+const assertTabPinOwned = (
+  client: DbClient,
+  userId: string,
+  pinId: string,
+): Effect.Effect<void, NotFound> =>
+  client
+    .query((db) =>
+      db
+        .select({ id: tabPins.id })
+        .from(tabPins)
+        .where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId))),
+    )
+    .pipe(
+      Effect.flatMap((rows) =>
+        rows[0] ? Effect.void : Effect.fail(new NotFound({ entity: "tab pin", id: pinId })),
+      ),
+    );
 
 export interface TabPinInput {
   kind: "connector" | "tag" | "account";
@@ -40,24 +50,32 @@ export interface TabPinInput {
 
 // pin 的目标校验:tag pin 带本人 tagId;account pin 带本人 accountId;connector pin 带 connectorId
 //(无 FK,不校验存在)。返回规范化后的三列(按 kind 互斥非空)。
-async function resolvePinTarget(
-  db: Drizzle,
+// 「缺字段」仍走 `Effect.die` —— 那是调用方拼错了参数,不是「东西不在」;它在 #504 T6 变成
+// `InvalidInput`,和 `NotFound` 各归各的。
+const resolvePinTarget = (
+  client: DbClient,
   userId: string,
   input: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
-): Promise<{ tagId: string | null; accountId: string | null; connectorId: ConnectorId | null }> {
-  if (input.kind === "tag") {
-    if (!input.tagId) throw new Error("tag pin requires tagId");
-    await assertTagOwned(db, userId, input.tagId);
-    return { tagId: input.tagId, accountId: null, connectorId: null };
-  }
-  if (input.kind === "account") {
-    if (!input.accountId) throw new Error("account pin requires accountId");
-    await assertAccountOwned(db, userId, input.accountId);
-    return { tagId: null, accountId: input.accountId, connectorId: null };
-  }
-  if (!input.connectorId) throw new Error("connector pin requires connectorId");
-  return { tagId: null, accountId: null, connectorId: input.connectorId };
-}
+): Effect.Effect<
+  { tagId: string | null; accountId: string | null; connectorId: ConnectorId | null },
+  NotFound
+> =>
+  Effect.gen(function* () {
+    if (input.kind === "tag") {
+      if (!input.tagId) return yield* Effect.die(new Error("tag pin requires tagId"));
+      yield* assertTagOwned(client, userId, input.tagId);
+      return { tagId: input.tagId, accountId: null, connectorId: null };
+    }
+    if (input.kind === "account") {
+      if (!input.accountId) return yield* Effect.die(new Error("account pin requires accountId"));
+      yield* assertAccountOwned(client, userId, input.accountId);
+      return { tagId: null, accountId: input.accountId, connectorId: null };
+    }
+    if (!input.connectorId) {
+      return yield* Effect.die(new Error("connector pin requires connectorId"));
+    }
+    return { tagId: null, accountId: null, connectorId: input.connectorId };
+  });
 
 export const makeTabPinStore = Effect.gen(function* () {
   const client = yield* DbClient;
@@ -65,7 +83,7 @@ export const makeTabPinStore = Effect.gen(function* () {
 
   return {
     /** 固定一个自定义 Tab。每 user ≤3(超出抛)。tag pin 校验 Tag 归属本人。 */
-    create: (input: TabPinInput): Effect.Effect<TabPin> =>
+    create: (input: TabPinInput): Effect.Effect<TabPin, NotFound> =>
       Effect.gen(function* () {
         const existing = yield* client.query((db) =>
           db.select({ id: tabPins.id }).from(tabPins).where(eq(tabPins.userId, userId)),
@@ -75,7 +93,7 @@ export const makeTabPinStore = Effect.gen(function* () {
             new Error(`cannot pin more than ${MAX_TAB_PINS_PER_USER} custom tabs`),
           );
         }
-        const target = yield* client.query((db) => resolvePinTarget(db, userId, input));
+        const target = yield* resolvePinTarget(client, userId, input);
         const row = {
           id: crypto.randomUUID(),
           userId,
@@ -103,10 +121,10 @@ export const makeTabPinStore = Effect.gen(function* () {
     updateTarget: (
       pinId: string,
       patch: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
-    ): Effect.Effect<void> =>
+    ): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertTabPinOwned(db, userId, pinId));
-        const target = yield* client.query((db) => resolvePinTarget(db, userId, patch));
+        yield* assertTabPinOwned(client, userId, pinId);
+        const target = yield* resolvePinTarget(client, userId, patch);
         yield* client.query((db) =>
           db
             .update(tabPins)

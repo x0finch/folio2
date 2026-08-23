@@ -17,6 +17,7 @@ import { Effect } from "effect";
 import { DbClient } from "../client";
 import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
+import type { NotFound } from "../errors";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
 import { assertAccountOwned } from "./ownership";
@@ -133,9 +134,9 @@ export const makeSnapshotStore = Effect.gen(function* () {
       accountId: string,
       input: WriteSnapshotInput,
       opts?: { collapseSameHour?: boolean },
-    ): Effect.Effect<string> =>
+    ): Effect.Effect<string, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* assertAccountOwned(client, userId, accountId);
         const snapshotId = crypto.randomUUID();
         const balanceRows = input.balances.map((b) => ({
           id: crypto.randomUUID(),
@@ -198,9 +199,9 @@ export const makeSnapshotStore = Effect.gen(function* () {
         return snapshotId;
       }),
 
-    listByAccount: (accountId: string): Effect.Effect<Snapshot[]> =>
+    listByAccount: (accountId: string): Effect.Effect<Snapshot[], NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* assertAccountOwned(client, userId, accountId);
         return yield* client.query((db) =>
           db
             .select()

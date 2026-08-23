@@ -236,10 +236,10 @@ export const runRequest = <A, E extends UpstreamError | Error>(
  * 噪音收成一处:`runStore(userId, TagStore, (s) => s.list())` 与它替掉的 `db.listTagsByUser(userId)`
  * 一样长,而这一句里 userId 只出现在装配那一处 —— 那正是 ADR 0037 要的。
  */
-export const runStore = <I extends DbStores, S, A>(
+export const runStore = <I extends DbStores, S, A, E extends UpstreamError | Error>(
   userId: string,
   tag: Context.Tag<I, S>,
-  use: (service: S) => Effect.Effect<A>,
+  use: (service: S) => Effect.Effect<A, E>,
 ): Promise<A> => runRequest(userId, Effect.flatMap(tag, use));
 
 /** 系统级(无 userId)的 db 查询 —— cron 枚举用户那一条。原则 #6 的受控例外。 */

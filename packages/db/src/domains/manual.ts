@@ -2,8 +2,8 @@ import { formatTokenRef, type TokenRef } from "@folio/oracle-ref";
 import { and, asc, eq, getTableColumns, type InferSelectModel, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { DbClient } from "../client";
-import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
+import { NotFound } from "../errors";
 import { accounts, manualActivity, tokenRefs, tokens } from "../schema";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 
@@ -81,22 +81,32 @@ export interface ManualBatchPlan {
   }[];
 }
 
-// 活动 → {tokenId, accountId}(经 activity ⨝ account ⨝ user 归属校验;活动可能无 tokenId 的遗留行 → 抛)。
-// 编辑活动前用它定位所属 token(取时间线校验)+ 账户(重跑物化)。
-async function assertActivityOwned(
-  db: Drizzle,
+// 活动 → {tokenId, accountId}(经 activity ⨝ account ⨝ user 归属校验)。编辑活动前用它定位
+// 所属 token(取时间线校验)+ 账户(重跑物化)。
+//
+// 活动可能是没有 tokenId 的遗留行 —— 与「不是本人的」同样 fail `NotFound`:对调用方来说
+// 「这条活动我改不了」是同一件事,分开报没有第二种处置。
+const assertActivityOwned = (
+  client: DbClient,
   userId: string,
   activityId: string,
-): Promise<{ tokenId: string; accountId: string }> {
-  const rows = await db
-    .select({ tokenId: manualActivity.tokenId, accountId: manualActivity.accountId })
-    .from(manualActivity)
-    .innerJoin(accounts, eq(manualActivity.accountId, accounts.id))
-    .where(and(eq(manualActivity.id, activityId), eq(accounts.userId, userId)));
-  const row = rows[0];
-  if (!row?.tokenId) throw new Error(`manual activity not found: ${activityId}`);
-  return { tokenId: row.tokenId, accountId: row.accountId };
-}
+): Effect.Effect<{ tokenId: string; accountId: string }, NotFound> =>
+  client
+    .query((db) =>
+      db
+        .select({ tokenId: manualActivity.tokenId, accountId: manualActivity.accountId })
+        .from(manualActivity)
+        .innerJoin(accounts, eq(manualActivity.accountId, accounts.id))
+        .where(and(eq(manualActivity.id, activityId), eq(accounts.userId, userId))),
+    )
+    .pipe(
+      Effect.flatMap((rows) => {
+        const row = rows[0];
+        return row?.tokenId
+          ? Effect.succeed({ tokenId: row.tokenId, accountId: row.accountId })
+          : Effect.fail(new NotFound({ entity: "manual activity", id: activityId }));
+      }),
+    );
 
 export const makeManualStore = Effect.gen(function* () {
   const client = yield* DbClient;
@@ -106,9 +116,9 @@ export const makeManualStore = Effect.gen(function* () {
     // —— 持仓(账本折叠出来的那一面)——
     // `namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传(同 userTokenStoreLayer),db 层不预设任何厂商。
     // 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
-    listHoldings: (accountId: string, namer: string): Effect.Effect<ManualHolding[]> =>
+    listHoldings: (accountId: string, namer: string): Effect.Effect<ManualHolding[], NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* assertAccountOwned(client, userId, accountId);
         const rows = yield* client.query((db) =>
           db
             .select({
@@ -143,9 +153,9 @@ export const makeManualStore = Effect.gen(function* () {
     // 归参考层,手记不覆盖它们。
     // 单价不在这里 —— 「这个币值多少」只有账本一个来源(每笔活动的 price),
     // 而 `tokens.self_price` 从此没有写者(迁移 0016 把存量搬进账本并清空了它)。
-    setHoldingDef: (tokenId: string, input: { symbol?: string }): Effect.Effect<void> =>
+    setHoldingDef: (tokenId: string, input: { symbol?: string }): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
+        yield* assertTokenOwned(client, userId, tokenId);
         const set: Record<string, unknown> = {};
         if (input.symbol !== undefined) set.symbol = input.symbol;
         if (Object.keys(set).length === 0) return;
@@ -159,10 +169,10 @@ export const makeManualStore = Effect.gen(function* () {
 
     // 该账户不再持有这个币:删它对该币的全部活动。**`tokens` 那行不删** —— 参考层数据,
     // 别的账户可能还在用,而且它带着上游 ref / 历史日价,删了就得重新认一遍。
-    detachHolding: (accountId: string, tokenId: string): Effect.Effect<void> =>
+    detachHolding: (accountId: string, tokenId: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-        yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
+        yield* assertAccountOwned(client, userId, accountId);
+        yield* assertTokenOwned(client, userId, tokenId);
         yield* client.query((db) =>
           db
             .delete(manualActivity)
@@ -182,10 +192,10 @@ export const makeManualStore = Effect.gen(function* () {
       accountId: string,
       tokenId: string,
       input: ManualActivityInput,
-    ): Effect.Effect<void> =>
+    ): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-        yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
+        yield* assertAccountOwned(client, userId, accountId);
+        yield* assertTokenOwned(client, userId, tokenId);
         yield* client.query((db) =>
           db.insert(manualActivity).values({
             id: crypto.randomUUID(),
@@ -205,9 +215,12 @@ export const makeManualStore = Effect.gen(function* () {
     /** 某账户对某个币的账本。**必须带 accountId** —— 同一 token 可被多个手记账户持有。 */
     // 按 occurred_at→created_at 升序(deriveAmount 据此定序)。只按 tokenId 取会把别的账户的
     // 活动一起折进来,数量直接算错 —— 所以 accountId 是必填。
-    listActivityByToken: (accountId: string, tokenId: string): Effect.Effect<ManualActivity[]> =>
+    listActivityByToken: (
+      accountId: string,
+      tokenId: string,
+    ): Effect.Effect<ManualActivity[], NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* assertAccountOwned(client, userId, accountId);
         return yield* client.query((db) =>
           db
             .select(getTableColumns(manualActivity))
@@ -242,9 +255,9 @@ export const makeManualStore = Effect.gen(function* () {
           .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt)),
       ),
 
-    removeActivity: (accountId: string, id: string): Effect.Effect<void> =>
+    removeActivity: (accountId: string, id: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* assertAccountOwned(client, userId, accountId);
         yield* client.query((db) =>
           db
             .delete(manualActivity)
@@ -253,17 +266,19 @@ export const makeManualStore = Effect.gen(function* () {
       }),
 
     /** 活动 → {tokenId, accountId}(公开读,归属校验)。编辑前用它取所属 token 校验超支。 */
-    activityOwner: (activityId: string): Effect.Effect<{ tokenId: string; accountId: string }> =>
-      client.query((db) => assertActivityOwned(db, userId, activityId)),
+    activityOwner: (
+      activityId: string,
+    ): Effect.Effect<{ tokenId: string; accountId: string }, NotFound> =>
+      assertActivityOwned(client, userId, activityId),
 
     /** 编辑一笔既有活动(保留 id/tokenId/accountId/createdAt;只覆盖给定字段)。 */
     // 归属经 assertActivityOwned;超支校验在 app 层(改前折叠受影响 token 时间线)。
     updateActivity: (
       activityId: string,
       patch: ManualActivityPatch,
-    ): Effect.Effect<{ tokenId: string; accountId: string }> =>
+    ): Effect.Effect<{ tokenId: string; accountId: string }, NotFound> =>
       Effect.gen(function* () {
-        const owner = yield* client.query((db) => assertActivityOwned(db, userId, activityId));
+        const owner = yield* assertActivityOwned(client, userId, activityId);
         const set: Partial<InferSelectModel<typeof manualActivity>> = {};
         if (patch.kind !== undefined) set.kind = patch.kind;
         if (patch.amount !== undefined) set.amount = patch.amount;
@@ -286,9 +301,9 @@ export const makeManualStore = Effect.gen(function* () {
     // 拿它当前置条件会循环:一个刚声明的持仓在本批插入之前一条活动都没有。
     // 用户维度的闸仍然严格:拿别人的 tokenId 来照样抛。
     // 活动 createdAt = now + i 保提交序(同 occurredAt 处新活动恒排在既有之后,与 planManualBatch 定序一致)。
-    commitBatch: (plan: ManualBatchPlan): Effect.Effect<void> =>
+    commitBatch: (plan: ManualBatchPlan): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        yield* client.query((db) => assertAccountOwned(db, userId, plan.accountId));
+        yield* assertAccountOwned(client, userId, plan.accountId);
         const ids = [
           ...new Set([...plan.declare.map((t) => t.id), ...plan.activities.map((a) => a.tokenId)]),
         ];
