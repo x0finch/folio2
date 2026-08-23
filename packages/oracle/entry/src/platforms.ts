@@ -1,6 +1,8 @@
+import type { CacheStore } from "@folio/db";
+import { DatabaseForOracle } from "@folio/db";
 import type { PlatformMeta } from "@folio/oracle-basic";
 import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
-import { CacheStore, PlatformUpstream } from "@folio/oracle-basic/ports";
+import { PlatformUpstream } from "@folio/oracle-basic/ports";
 import { Effect, Option, Schema } from "effect";
 import { degradeTo } from "./tokens/swr";
 
@@ -72,7 +74,7 @@ export const writePlatforms = (
 // interface + Tag + layer 三件套(#501)。
 export class PlatformService extends Effect.Service<PlatformService>()("oracle/PlatformService", {
   effect: Effect.gen(function* () {
-    const cache = yield* CacheStore;
+    const { cache } = yield* DatabaseForOracle;
     const upstream = yield* PlatformUpstream;
 
     return {

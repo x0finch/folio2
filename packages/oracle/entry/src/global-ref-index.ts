@@ -1,5 +1,6 @@
 import type { UpstreamError } from "@folio/client-core";
-import { GlobalTokenRefIndexStore, TokenUpstream } from "@folio/oracle-basic/ports";
+import { GlobalDatabase } from "@folio/db";
+import { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Effect, type Option } from "effect";
 
 // 全局映射表的维护门面(cron)。**不进 `oracleLayer`** —— 刷这张表跟 userId 毫无关系
@@ -20,7 +21,10 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
   "oracle/GlobalRefIndexService",
   {
     effect: Effect.gen(function* () {
-      const store = yield* GlobalTokenRefIndexStore;
+      // 这张表的 op 住 `@folio/db` 的 `GlobalDatabase`(没有「谁的」这回事的那张门票)——
+      // 以前它是 `@folio/oracle-basic` 定的一个端口、db 顶上去实现,那层倒置换不来第二个实现,
+      // 只换来一份会飘的重复 doc。
+      const { refIndex } = yield* GlobalDatabase;
       const upstream = yield* TokenUpstream;
 
       return {
@@ -45,7 +49,7 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
                 }),
               );
             }
-            yield* store.putAll(result.rows, yield* Clock.currentTimeMillis);
+            yield* refIndex.putAll(result.rows, yield* Clock.currentTimeMillis);
             return {
               rows: result.rows.length,
               unmatchedPlatforms: result.unmatchedPlatforms,
@@ -54,7 +58,7 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
           }),
 
         // 某个源最近一次成功刷新的时刻;从未刷过 → `none`(首次部署要手动触发一次)。
-        refreshedAt: (): Effect.Effect<Option.Option<number>> => store.refreshedAt(upstream.id),
+        refreshedAt: (): Effect.Effect<Option.Option<number>> => refIndex.refreshedAt(upstream.id),
       };
     }),
   },

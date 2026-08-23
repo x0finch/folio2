@@ -1,6 +1,8 @@
+import type { CacheStore } from "@folio/db";
+import { DatabaseForOracle } from "@folio/db";
 import type { TokenCandidate, TokenMetaUpstream } from "@folio/oracle-basic";
 import { DEFAULT_TOP_N, normalizeSymbol } from "@folio/oracle-basic";
-import { CacheStore, TokenUpstream } from "@folio/oracle-basic/ports";
+import { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
 import { type WarmRow, warmBlob } from "./warm";
 
@@ -52,7 +54,7 @@ export function candidatesBySymbol(rows: readonly WarmRow[], symbol: string): To
 // 仍然是同一条构造路。
 export class CandidateSource extends Effect.Service<CandidateSource>()("oracle/CandidateSource", {
   effect: Effect.gen(function* () {
-    const cache = yield* CacheStore;
+    const { cache } = yield* DatabaseForOracle;
     // **唯一的出网口**,且只在缓存完全为空时被调用(见 `warmCatalogue`)。
     const coldStart = yield* TokenUpstream;
     return {

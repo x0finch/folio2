@@ -1,10 +1,8 @@
 import { env } from "cloudflare:test";
 import type { TokenInfo } from "@folio/oracle-basic";
-import { CacheStore, TokenPriceStore, TokenStore } from "@folio/oracle-basic/ports";
 import { eq } from "drizzle-orm";
 import { Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { oraclePortsLayer } from "../src";
 import { getDb } from "../src/connect";
 import {
   accounts,
@@ -16,7 +14,7 @@ import {
   tokens,
 } from "../src/schema";
 import { user } from "../src/schema/auth";
-import { NOW, promisified } from "./effect";
+import { forDomain, forOracle, NOW } from "./effect";
 
 // 新参考层三个 per-user store 的真 D1 测试(#199)。
 //
@@ -52,14 +50,16 @@ beforeEach(async () => {
   await db.batch([db.delete(globalTokenRefIndex), db.delete(tokenDailyPrices)]);
 });
 
-// store 经 layer → Tag 拿(生产那条路);`promisified` 只是让用例照旧 `await store.xxx(…)`。
-// 时钟固定在 `NOW`,要看「过了很久之后」的用例自己传第三个参数。
-const storeFor = (userId: string, namer = NAMER, nowMs = NOW) =>
-  promisified(TokenStore, oraclePortsLayer({ namer }), userId, nowMs);
+// store 经门票拿(生产那条路);把手只是让用例照旧 `await store.xxx(…)`。
+// 时钟固定在 `NOW`,要看「过了很久之后」的用例自己传最后那个参数。
+const tokensOf = forOracle((db) => db.tokens);
+const pricesOf = forOracle((db) => db.tokenPrices);
+const cacheOf = forDomain((db) => db.cache);
+
+const storeFor = (userId: string, namer = NAMER, nowMs = NOW) => tokensOf(userId, namer, nowMs);
 const priceStoreFor = (userId: string, namer = NAMER, nowMs = NOW) =>
-  promisified(TokenPriceStore, oraclePortsLayer({ namer }), userId, nowMs);
-const cacheFor = (userId: string, nowMs = NOW) =>
-  promisified(CacheStore, oraclePortsLayer({ namer: NAMER }), userId, nowMs);
+  pricesOf(userId, namer, nowMs);
+const cacheFor = (userId: string, nowMs = NOW) => cacheOf(userId, nowMs);
 
 // `getById` 现在回 `Option`(端口如此:「没有这一行」是调用方必须分支的一档)。
 // 用例关心的是那一行的内容,所以这里摘掉包装 —— 「没有」时给 undefined,断言照旧。

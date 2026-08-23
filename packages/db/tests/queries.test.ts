@@ -2,14 +2,15 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { listUserIdsWithAccounts } from "../src/domains/accounts";
 // 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
 import { user } from "../src/schema/auth";
-import { forDomain, runDb } from "./effect"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
+import { forDomain, forGlobal } from "./effect"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
 
 const snapshotsOf = forDomain((db) => db.snapshots);
 
 const accounts = forDomain((db) => db.accounts);
+// cron 那条:没有 userId,所以它在 `GlobalDatabase` 上。
+const globalAccounts = forGlobal((db) => db.accounts);
 const settings = forDomain((db) => db.settings);
 
 const USER_A = "user-a";
@@ -66,12 +67,12 @@ describe("accounts", () => {
     expect(await accounts(USER_A).getRawCreds(acc.id)).toBe('{"apiKey":"K","secret":"<enc>"}');
   });
 
-  it("listUserIdsWithAccounts returns distinct user ids that own accounts (cron sweep)", async () => {
-    expect(await runDb(listUserIdsWithAccounts)).toEqual([]); // 无账户
+  it("listUserIds returns distinct user ids that own accounts (cron sweep)", async () => {
+    expect(await globalAccounts().listUserIds()).toEqual([]); // 无账户
     await accounts(USER_A).create({ connectorId: "manual", label: "A1", creds: "x" });
     await accounts(USER_A).create({ connectorId: "manual", label: "A2", creds: "x" }); // 同用户两账户 → 去重
     await accounts(USER_B).create({ connectorId: "manual", label: "B1", creds: "x" });
-    const ids = await runDb(listUserIdsWithAccounts);
+    const ids = await globalAccounts().listUserIds();
     expect([...ids].sort()).toEqual([USER_A, USER_B].sort());
   });
 

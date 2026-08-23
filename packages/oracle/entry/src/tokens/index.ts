@@ -1,11 +1,5 @@
-import {
-  CacheStore,
-  GlobalTokenRefIndexStore,
-  Namer,
-  TokenPriceStore,
-  TokenStore,
-  TokenUpstream,
-} from "@folio/oracle-basic/ports";
+import { DatabaseForOracle, GlobalDatabase } from "@folio/db";
+import { Namer, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
 import { CandidateSource } from "./candidates";
 import { makeCatalogue, type TokenCatalogue } from "./catalogue";
@@ -69,14 +63,14 @@ export type { MintInput, RefreshStaleReport };
 // (与 `./warm` 同款),服务的方法签名不会把自己的依赖漏给调用方。
 export class TokenService extends Effect.Service<TokenService>()("oracle/TokenService", {
   effect: Effect.gen(function* () {
-    const store = yield* TokenStore;
-    const prices = yield* TokenPriceStore;
-    const cache = yield* CacheStore;
+    // 代币行 / 价格行 / 缓存三片来自 db 的那张**只给参考层**的门票。它们不是端口 ——
+    // 契约就是 db 里那几份实现(见 `@folio/oracle-basic/ports` 开头那段)。
+    const { tokens: store, tokenPrices: prices, cache } = yield* DatabaseForOracle;
     const upstream = yield* TokenUpstream;
 
     // mint 那三个额外依赖。**这里是它们唯一一次与上游同处一个作用域** —— 再往下就交给
     // `makeMinting`,而它的 `MintDeps` 里一个上游都没有(`./mint` 的红线)。
-    const globalRefIndex = yield* GlobalTokenRefIndexStore;
+    const { refIndex: globalRefIndex } = yield* GlobalDatabase;
     const candidates = yield* CandidateSource;
     const namer = yield* Namer;
 

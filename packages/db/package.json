@@ -13,6 +13,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@cloudflare/workers-types": "catalog:",
     "@folio/connectors": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
@@ -22,7 +23,6 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
-    "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
     "drizzle-kit": "^0.31.10",
     "effect": "catalog:",

@@ -3,10 +3,10 @@ import type {
   TokenCandidate,
   TokenInfo,
   TokenInfoPatch,
+  TokenInfoWrite,
   TokenRef,
   TokenRefHit,
 } from "@folio/oracle-basic";
-import type { TokenStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
@@ -15,8 +15,12 @@ import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
 import { snapshotBalances, tokenRefs, tokens } from "../schema";
 
-// `TokenStore` 的 D1 实现(ADR 0021 / 0023,#199)。**每个用户一份** —— userId 由 layer 吃掉,
-// 下面所有方法签名里都没有它,拿错用户在编译期就发生不了。
+// 代币的 **info** facet + ref 行(ADR 0021 / 0023,#199)。**每个用户一份** —— userId 由 layer
+// 吃掉,下面所有方法签名里都没有它,拿错用户在编译期就发生不了。
+//
+// **契约就是下面这段实现。** 以前它顶的是 `@folio/oracle-basic` 的 `TokenStore` 接口 ——
+// 那层倒置换不来第二个实现(唯一的第二实现是 oracle 测试里的内存假货),只换来两份会漂移的
+// doc。每个方法的判据因此都写在实现这边。
 //
 // 落两张表:`tokens`(info facet,含 user_id)+ `token_refs`(该用户对各命名者叫法的映射)。
 // 价 facet 在 `./token-price`(同一行的另外几列 + 另一张日价表)。
@@ -24,7 +28,7 @@ import { snapshotBalances, tokenRefs, tokens } from "../schema";
 // `namer` = 当前上游的 id。它只用来回答一件事:「这个 Token 被上游认出来了吗」——
 // 即有没有一条 namer 那一档的 ref 行(`TokenInfo.ref`)。本 store 不知道那是哪家。
 //
-// **出网口只有 `DbClient` 一个服务**(见 ./service.ts):`env` 不在签名里,`Effect.promise` 不在
+// **出网口只有 `DbClient` 一个服务**(见 ../client.ts):`env` 不在签名里,`Effect.promise` 不在
 // 这个文件里,时间走 `Clock`(以前是 `opts.now` —— 只有测试会传的字段)。
 
 // D1 一条语句 ~100 个绑定参数上限。一条 ref 行按 (namer, local_name) 两段查 → 每条占 2 个参数,
@@ -53,6 +57,9 @@ type InfoRow = {
   providerLogo: string | null;
   infoExpiresAt: number;
 };
+
+/** 这一层的契约 —— 从实现推导。`@folio/oracle` 的五片把它当参数传下去,要一个能写在签名里的名字。 */
+export type TokenStore = Effect.Effect.Success<ReturnType<typeof makeUserTokenStore>>;
 
 export const makeUserTokenStore = (namer: string) =>
   Effect.gen(function* () {
@@ -172,8 +179,9 @@ export const makeUserTokenStore = (namer: string) =>
         return out;
       });
 
-    const store: TokenStore = {
-      findByRefs: (input) =>
+    return {
+      // mint 第一步:一批 tokenRef 里,哪些已经有 Token 了。绝大多数同步都停在这里。
+      findByRefs: (input: readonly TokenRef[]): Effect.Effect<Map<TokenRef, TokenRefHit>> =>
         Effect.gen(function* () {
           const out = new Map<TokenRef, TokenRefHit>();
           if (input.length === 0) return out;
@@ -209,7 +217,9 @@ export const makeUserTokenStore = (namer: string) =>
 
       // **幂等**:账户并发跑,同一条 ref 会被同时 mint。先插 ref 行(冲突不动)再读回 ——
       // 谁先插谁的 token_id 生效,后来者读到的就是那一个,自己刚建的 tokens 行没人引用、无害。
-      create: (seed: ProviderTokenSeed, newRefs) =>
+      // 建一个新 Token 并挂上这些 ref。**幂等**:账户是并发跑的,同一条 ref 会被同时 mint →
+      // upsert-then-read,返回**最终生效**的那个 id(可能不是本次新建的那个)。
+      create: (seed: ProviderTokenSeed, newRefs: readonly TokenRef[]): Effect.Effect<string> =>
         Effect.gen(function* () {
           const pairs = [...new Set(newRefs)].flatMap((ref) => {
             const p = partsOf(ref);
@@ -250,7 +260,12 @@ export const makeUserTokenStore = (namer: string) =>
           return winner;
         }),
 
-      linkRef: (tokenId, ref) =>
+      // 给已有 Token 加一条 ref(多链归一走这里)。已存在则不动;同样返回该 ref 最终指向的 id。
+      // **真加上了一条就把 info 标成该刷**:这一刻我们拿到了「这个币的叫法变了」的证据
+      // (CoinGecko 把 MATIC 改成 POL、交易所随后也改,两边时间还不一致)。光等 TTL(30d)
+      // 到期的话,收敛之后那一行最长 30 天都显示旧名。不比较新旧 symbol —— 比较要多读一次行,
+      // 而标脏的代价只是下次批量刷多带一个 id(那次请求本来就要发)。
+      linkRef: (tokenId: string, ref: TokenRef): Effect.Effect<string> =>
         Effect.gen(function* () {
           const p = partsOf(ref);
           if (!p) return tokenId;
@@ -296,7 +311,10 @@ export const makeUserTokenStore = (namer: string) =>
       //
       // `from` 的价随 tokens 行一起消失(价 facet 就在那一行上);**历史日价不用管** ——
       // 它按 tokenRef 全局存,与 token_id 无关,赢家读的就是同一批行,曲线一格都不缺。
-      merge: (from, into) =>
+      // 合并:`from` 并进 `into` —— ref 改指、**历史快照的 token_id 一并改指**、旧行删除。
+      // 身份可变、金额不变:不改历史行的话曲线会在合并那一刻断成两段。赢家的 info 一并标该刷
+      // (两行会合并,正说明至少有一边的名字与上游当前叫法不一致)。
+      merge: (from: string, into: string): Effect.Effect<void> =>
         Effect.gen(function* () {
           if (from === into) return;
           // ref 行改指:`into` 已有同一 (namer, local_name) 的话主键会撞 → 先删掉 `from` 那边的重复项。
@@ -359,9 +377,14 @@ export const makeUserTokenStore = (namer: string) =>
       // **不门控 info TTL** —— 只要行在就给。门控了会渲染出 logo 代理 URL 却在端点上 404。
       getByIds: readInfos,
 
-      getById: (id) => Effect.map(readInfos([id]), (m) => Option.fromNullable(m.get(id))),
+      // 单读回 `Option` 而不是 `A | undefined`:「没有这一行」是调用方必须分支的一档
+      // (`priceSeries` / `logoUrlById` 都靠它早退),用 Option 就不会有人忘了那个分支。
+      getById: (id: string): Effect.Effect<Option.Option<TokenInfo>> =>
+        Effect.map(readInfos([id]), (m) => Option.fromNullable(m.get(id))),
 
-      fillInfo: (tokenId, patch: TokenInfoPatch) =>
+      // 只填空槽:undefined 的字段不动,已有值的字段也不动。用在「归一到已有 Token」那一步 ——
+      // 那一行的元信息可能来自上游,连接器报的不该盖掉它。
+      fillInfo: (tokenId: string, patch: TokenInfoPatch): Effect.Effect<void> =>
         Effect.suspend(() => {
           // 只填空槽:undefined 的字段不动,**已有值的字段也不动**(那可能是上游的好数据)。
           const set: Record<string, unknown> = {};
@@ -384,7 +407,10 @@ export const makeUserTokenStore = (namer: string) =>
       // **覆盖**上游那三个字段 + 续 info TTL(与 fillInfo 的填空槽相反,见 `@folio/oracle-basic` 的 stores.ts 契约注释)。
       // `providerLogo` 不动 —— 那是连接器自带的备用图,上游无权覆盖。
       // 逐行一条 UPDATE(每条 5 个参数,远在 D1 的每语句 100 个绑定参数上限内),一批打包发。
-      putInfo: (rows, ttlMs) =>
+      // **覆盖**上游那三个字段 + 续 info TTL。与 `fillInfo` 的填空槽相反,这里上游说了算:
+      // 链上合约的 symbol 是部署者写的、可能与上游实际叫法不一致(MATIC→POL),不覆盖的话
+      // 同一个币在链上侧与交易所侧会显示成两个名字。只对**已认出来**的行调(ref 非空)。
+      putInfo: (rows: readonly TokenInfoWrite[], ttlMs: number): Effect.Effect<void> =>
         Effect.gen(function* () {
           if (rows.length === 0) return;
           const expiresAt = (yield* Clock.currentTimeMillis) + ttlMs;
@@ -412,7 +438,7 @@ export const makeUserTokenStore = (namer: string) =>
 
       // 「本地已认识的同名币」。服务层的 symbol 消歧主路走 warm blob 筛(见 oracle 的 cache.ts),
       // 这里只是另一条路:本用户已有的、且已被上游认出的同 symbol 币。
-      candidatesBySymbol: (symbol) =>
+      candidatesBySymbol: (symbol: string): Effect.Effect<TokenCandidate[]> =>
         Effect.map(
           client.query((db) =>
             db
@@ -431,6 +457,4 @@ export const makeUserTokenStore = (namer: string) =>
             })),
         ),
     };
-
-    return store;
   });

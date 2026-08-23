@@ -496,6 +496,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 4.20260626.1
       '@folio/connectors':
         specifier: workspace:*
         version: link:../connectors/entry
@@ -518,9 +521,6 @@ importers:
       '@cloudflare/vitest-pool-workers':
         specifier: 'catalog:'
         version: 0.16.20(@cloudflare/workers-types@4.20260626.1)(@vitest/runner@4.1.9)(@vitest/snapshot@4.1.9)(vitest@4.1.9(@types/node@22.20.0)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))
-      '@cloudflare/workers-types':
-        specifier: 'catalog:'
-        version: 4.20260626.1
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.0
@@ -564,6 +564,9 @@ importers:
       '@folio/client-core':
         specifier: workspace:*
         version: link:../../clients/core
+      '@folio/db':
+        specifier: workspace:*
+        version: link:../../db
       '@folio/oracle-basic':
         specifier: workspace:*
         version: link:../basic
@@ -633,9 +636,6 @@ importers:
         specifier: 'catalog:'
         version: 3.22.1
     devDependencies:
-      '@cloudflare/workers-types':
-        specifier: 'catalog:'
-        version: 4.20260626.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

@@ -1,8 +1,6 @@
 import { env } from "cloudflare:test";
 import type { SnapshotWithBalances } from "@folio/db";
-import { globalTokenRefIndexStoreLayer, oraclePortsLayer } from "@folio/db";
 import { Oracle } from "@folio/oracle";
-import { CacheStore, GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
@@ -10,7 +8,7 @@ import type { AppError } from "@/lib/server/errors";
 import { NAMER } from "@/lib/server/oracle";
 import { buildOverview } from "@/lib/server/portfolio/overview-model";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
-import { dbFor, withStore } from "./db-effect";
+import { dbFor, globalDb } from "./db-effect";
 import {
   addManualActivities,
   createManualAccount,
@@ -407,24 +405,23 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
 
   async function syncOnchain(): Promise<string> {
     // 全局映射表收录了这个合约 → mint 按**地址**认出来(不靠 symbol)。
-    await withStore(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, USER, (s) =>
-      s.putAll([{ chainRef: USDC_ETH, upstreamRef: USDC_UPSTREAM }], Date.now()),
+    await globalDb.refIndex.putAll(
+      [{ chainRef: USDC_ETH, upstreamRef: USDC_UPSTREAM }],
+      Date.now(),
     );
     // warm 集给 symbol 那一档留个本地候选,免得它想回源(本情景不该出网)。
-    await withStore(CacheStore, oraclePortsLayer({ namer: NAMER }), USER, (s) =>
-      s.put(
-        "warm",
-        {
-          asOf: Date.now(),
-          rows: [
-            {
-              info: { ref: USDC_UPSTREAM, symbol: "USDC", name: "USDC" },
-              price: { unitPrice: MARKET_PRICE, marketCapRank: 5, asOf: Date.now() },
-            },
-          ],
-        },
-        60 * 60 * 1000,
-      ),
+    await dbFor(USER).cache.put(
+      "warm",
+      {
+        asOf: Date.now(),
+        rows: [
+          {
+            info: { ref: USDC_UPSTREAM, symbol: "USDC", name: "USDC" },
+            price: { unitPrice: MARKET_PRICE, marketCapRank: 5, asOf: Date.now() },
+          },
+        ],
+      },
+      60 * 60 * 1000,
     );
     const account = await dbFor(USER).accounts.create({
       connectorId: "evm",

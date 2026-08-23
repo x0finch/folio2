@@ -1,12 +1,10 @@
 import { env } from "cloudflare:test";
-import { GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { globalTokenRefIndexStoreLayer } from "../src";
 import { getDb } from "../src/connect";
 import { globalTokenRefIndex } from "../src/schema";
-import { promisified } from "./effect";
+import { forGlobal } from "./effect";
 
 // `global_token_ref_index` 的真 D1 测试(ADR 0022,#199 / #228)。
 // 这张表**没有 userId** —— 里面一条用户数据都没有,全是上游的公开知识(原则 #6 的受控例外)。
@@ -25,9 +23,10 @@ beforeEach(async () => {
   await getDb(env).delete(globalTokenRefIndex);
 });
 
-// 生产那条路(layer → Tag);`promisified` 只是让用例照旧 `await s.xxx(…)`。
-// 全局表不按用户隔离(ADR 0022),`CurrentUser` 对它没有意义 —— 把手仍要一个,给个占位。
-const store = () => promisified(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, "n/a");
+// 生产那条路(`GlobalDatabase` → 这个字段);把手只是让用例照旧 `await s.xxx(…)`。
+// 全局表不按用户隔离(ADR 0022),所以这条路上**根本没有** `CurrentUser` 可给 ——
+// 以前这里要塞一个 `"n/a"` 占位,那个占位就是「门票分错了」的痕迹。
+const store = forGlobal((db) => db.refIndex);
 
 describe("整份灌 + 正查", () => {
   it("灌进去,按 (upstream, chainRef) 点查得回**整条** upstream ref;miss 的键不出现", async () => {

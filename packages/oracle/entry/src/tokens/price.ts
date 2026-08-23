@@ -1,6 +1,7 @@
+import type { TokenPriceStore, TokenStore } from "@folio/db";
 import type { TokenPrice, TokenRecord, TokenRecordPrice, TokenRef } from "@folio/oracle-basic";
 import { PRICE_TTL_MS } from "@folio/oracle-basic";
-import type { TokenPriceStore, TokenStore, TokenUpstream } from "@folio/oracle-basic/ports";
+import type { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect, Option } from "effect";
 import { degradeTo, swr } from "./swr";
 

@@ -1,5 +1,5 @@
 import { DefiMeta } from "@folio/connectors-basic";
-import type { CacheStore } from "@folio/oracle-basic/ports";
+import type { Database } from "@folio/db";
 import type { Effect } from "effect";
 import { recordDefiLogos } from "@/lib/server/logos/store";
 
@@ -36,4 +36,4 @@ function collectDefiLogos(
 // userId 也不再收 —— per-user 的那层由调用方装配时给,这里只管「把收集到的图写进缓存」。
 export const recordDefiLogosOf = (
   snapshots: readonly SnapshotLike[],
-): Effect.Effect<void, never, CacheStore> => recordDefiLogos(collectDefiLogos(snapshots));
+): Effect.Effect<void, never, Database> => recordDefiLogos(collectDefiLogos(snapshots));

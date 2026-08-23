@@ -1,12 +1,16 @@
 import type { TokenRef, TokenRefIndexRow } from "@folio/oracle-basic";
-import type { GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { chunk, DbClient } from "../client";
 import { globalTokenRefIndex } from "../schema";
 
-// `GlobalTokenRefIndexStore` 的 D1 实现(ADR 0022,#199)。
+// `global_token_ref_index`:链上地址 → 上游对同一个币的叫法(ADR 0022,#199)。
+//
+// **契约就是下面这段实现**,不再由 `@folio/oracle-basic` 定一个 `GlobalTokenRefIndexStore`
+// 接口、这里顶上去。那套倒置是给「同一份契约会有第二种实现」准备的,而这张表只可能落 D1 ——
+// 唯一的第二实现是 oracle 自己测试里的内存假货,它照着这个形状写就行。少一层之后,
+// 「这个方法要什么、返回什么」只有一处可读,doc 也只有一份(以前实现与接口各一份,已经开始飘)。
 //
 // **这是全仓唯一没有 userId 的数据访问**(另一处是历史日价表,同一类理由):表里一条用户数据
 // 都没有 —— 全是上游的公开知识、可整表重建、删空只是下一轮慢一点。CLAUDE.md 原则 #6 的受控例外。
@@ -33,12 +37,24 @@ const STATEMENTS_PER_BATCH = 50;
 
 // 不碰 `Clock`(另外三个 store 都要):本 store 没有一处需要「现在几点」——
 // `putAll` 的时刻由调用方给(契约如此,cron 记的是那一轮的时刻),读侧无 TTL 门控。
-export const makeGlobalTokenRefIndexStore = Effect.gen(function* () {
+/**
+ * 这张表的契约 —— **从实现推出来的,不是另抄一份签名**。
+ *
+ * 出包是给 `@folio/oracle` 用的:它的 mint 那一片把这个 store 当参数传下去
+ * (`MintDeps.globalRefIndex`),要一个能写在签名里的名字。
+ */
+export type GlobalRefIndexStore = Effect.Effect.Success<typeof makeGlobalRefIndexStore>;
+
+export const makeGlobalRefIndexStore = Effect.gen(function* () {
   const client = yield* DbClient;
 
-  const store: GlobalTokenRefIndexStore = {
-    // 正查一批:上游 `upstream` 对这些链上 ref 的**整条**叫法。miss 的键不出现。
-    lookup: (upstream, chainRefs) =>
+  return {
+    // 正查一批:上游 `upstream` 对这些链上 ref 的**整条**叫法(`coingecko/issued:bitcoin`,
+    // 不是半截 —— 调用方拿来直接用,不再拼装,#228)。miss 的键不出现在结果里。
+    lookup: (
+      upstream: string,
+      chainRefs: readonly TokenRef[],
+    ): Effect.Effect<Map<TokenRef, TokenRef>> =>
       Effect.gen(function* () {
         const out = new Map<TokenRef, TokenRef>();
         if (chainRefs.length === 0) return out;
@@ -88,7 +104,7 @@ export const makeGlobalTokenRefIndexStore = Effect.gen(function* () {
     // 整份刷新。**不删行**:下架币的旧映射留着无害,`updated_at` 用来看哪些行这轮没被刷到。
     // 落表时把整条 `upstreamRef` 拆成 (upstream, upstream_local_name) 两列 —— 与 ./token 同构。
     // 读不懂的 upstreamRef(理论上不会,adapter 恒产规范形)直接跳过。两级分批见上面的常量。
-    putAll: (rows: readonly TokenRefIndexRow[], updatedAt) =>
+    putAll: (rows: readonly TokenRefIndexRow[], updatedAt: number): Effect.Effect<void> =>
       Effect.suspend(() => {
         const split = rows.flatMap((r) => {
           const parts = parseTokenRef(r.upstreamRef);
@@ -124,7 +140,7 @@ export const makeGlobalTokenRefIndexStore = Effect.gen(function* () {
 
     // 上游最近一次成功刷新的时刻。从未刷过 → `none`(首次部署要手动触发一次)。
     // 取该上游所有行里最大的 updated_at —— 不另存标记行,少一处可能与真实数据不一致的状态。
-    refreshedAt: (upstream) =>
+    refreshedAt: (upstream: string): Effect.Effect<Option.Option<number>> =>
       Effect.map(
         client.query((db) =>
           db
@@ -135,6 +151,4 @@ export const makeGlobalTokenRefIndexStore = Effect.gen(function* () {
         (rows) => Option.fromNullable(rows[0]?.latest),
       ),
   };
-
-  return store;
 });

@@ -27,14 +27,6 @@ export { FIAT_NAMER, fiatCodeOf, fiatSeed } from "./fiat";
 export { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "./fx";
 // 平台(链 ∪ 场馆)的名与图。
 export type { PlatformMeta } from "./platform";
-export type {
-  CacheEntry,
-  CacheStore,
-  CacheWrite,
-  GlobalTokenRefIndexStore,
-  TokenPriceStore,
-  TokenStore,
-} from "./stores";
 // tokenRef 交给浏览器时的不透明形(选币用)。
 export { tokenTicket } from "./ticket";
 export type {

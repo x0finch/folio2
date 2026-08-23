@@ -3,8 +3,13 @@ import { UpstreamUnavailableError } from "@folio/client-core";
 import type {
   CacheEntry,
   CacheStore,
+  GlobalRefIndexStore,
+  TokenPriceStore,
+  TokenStore,
+} from "@folio/db";
+import { DatabaseForOracle, GlobalDatabase } from "@folio/db";
+import type {
   FxUpstream,
-  GlobalTokenRefIndexStore,
   PlatformMeta,
   PlatformUpstream,
   ProviderTokenSeed,
@@ -14,13 +19,11 @@ import type {
   TokenInfoWrite,
   TokenPrice,
   TokenPricePoint,
-  TokenPriceStore,
   TokenPriceWrite,
   TokenRecordPrice,
   TokenRef,
   TokenRefHit,
   TokenRefIndexRow,
-  TokenStore,
   TokenUpstream,
   UpstreamToken,
 } from "@folio/oracle-basic";
@@ -267,7 +270,9 @@ export function fakeTokenPriceStore(): FakeTokenPriceStore {
 }
 
 // —— 全局映射表 ——
-export interface FakeGlobalRefIndexStore extends GlobalTokenRefIndexStore {
+// 契约来自 `@folio/db` 的那张门票(它没有「谁的」这回事,所以不是参考层的端口)——
+// 取字段类型而不是另抄一份签名。
+export interface FakeGlobalRefIndexStore extends GlobalRefIndexStore {
   // 测试用它直接塞一条映射(模拟 cron 刷完表)。**不暴露内部键格式** ——
   // 让测试自己拼键的话,键格式一改测试就静默失配(踩过一次)。
   // chainRef → 整条 upstreamRef(#228:值是整条,不是裸 id)。
@@ -579,10 +584,17 @@ export function harness(opts: HarnessOpts = {}): Harness {
   );
 
   const ports = Layer.mergeAll(
-    Layer.succeed(Ports.TokenStore, store),
-    Layer.succeed(Ports.TokenPriceStore, prices),
-    Layer.succeed(Ports.CacheStore, cache),
-    Layer.succeed(Ports.GlobalTokenRefIndexStore, globalRefIndex),
+    // **本地那几片是 db 的门票,不是端口**(契约就是 db 里那几份实现)。假实现只需覆盖被测
+    // 代码真会碰的字段 —— `GlobalDatabase.accounts` 是 cron 扫用户那条,参考层一处都不碰它。
+    Layer.succeed(DatabaseForOracle, {
+      tokens: store,
+      tokenPrices: prices,
+      cache,
+    } as unknown as DatabaseForOracle),
+    Layer.succeed(GlobalDatabase, {
+      refIndex: globalRefIndex,
+      accounts: { listUserIds: () => Effect.succeed([]) },
+    } as unknown as GlobalDatabase),
     Layer.succeed(Ports.TokenUpstream, upstream),
     Layer.succeed(Ports.FxUpstream, fxUpstream),
     Layer.succeed(Ports.PlatformUpstream, platformUpstream),

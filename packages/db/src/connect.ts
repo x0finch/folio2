@@ -1,11 +1,19 @@
+import type { D1Database } from "@cloudflare/workers-types";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { drizzle } from "drizzle-orm/d1";
 import { account, passkey, session, user, verification } from "./schema/auth";
 
-// **怎么摸到 D1** —— 包内两半(`domains/` 与 `oracle-ports/`)唯一共用的东西。
+// **怎么摸到 D1** —— 包内唯一一处。
 //
-// 底下还有一个 `createAuthAdapter`:它不属于任何一半(better-auth 不走 userId 作用域的包装
-// 层),但它是除那两半之外**唯一**需要 db 句柄的地方,所以住在句柄旁边。
+// `D1Database` 是 **显式 `import type`,不靠 ambient 全局**。它本来是全局的
+// (`@cloudflare/workers-types` 装进 tsconfig 的 `types` 就有),而那样写的代价是**每个消费者的
+// tsconfig 都得自己 opt-in** —— 本包的 `exports` 指向源码(内部包无构建步骤),所以 `DbEnv`
+// 一出包,消费者的 tsc 就要编译本文件。`@folio/sync` 早就为此在自己的 tsconfig 里加了那一行;
+// `@folio/oracle` 开始依赖本包时本来会是第三个。显式 import 之后这条依赖跟着文件走,
+// 消费者什么都不用配(实测:去掉 oracle 那行 `types`,两边都照过)。
+//
+// 底下还有一个 `createAuthAdapter`:它不走 userId 作用域的包装层(better-auth 自己管),
+// 但它是除 `domains/` 之外**唯一**需要 db 句柄的地方,所以住在句柄旁边。
 
 // db 实例所需的最小 env 形状(只用到 D1 绑定)。
 export interface DbEnv {

@@ -1,16 +1,15 @@
 import { env } from "cloudflare:test";
-import { TokenStore } from "@folio/oracle-basic/ports";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { oraclePortsLayer } from "../src";
 import { getDb } from "../src/connect";
 import { manualActivity, tokens as tokensTable } from "../src/schema";
 import { user } from "../src/schema/auth";
-import { forDomain, promisified } from "./effect";
+import { forDomain, forOracle } from "./effect";
 
 const manualOf = forDomain((db) => db.manual);
 
 const accounts = forDomain((db) => db.accounts);
+const tokensOf = forOracle((db) => db.tokens);
 
 // #203 起手记的币**就是 `tokens` 里的一行** —— 没有 manual_token 那张表了。
 // 于是「这个账户持有哪些币」由它账本里出现过的 token 决定,而不是另存一份账户↔币的关系。
@@ -45,8 +44,7 @@ async function manualAccount(userId: string) {
 // 建一个该用户的代币行(生产路径是 mint;这里直接用 store,本文件不测认币)。
 // `coinId` 给了就顺带挂上那条 ref —— 持仓的 `ref` 就是从 `token_refs` 里当前命名者那行读出来的。
 async function mintToken(userId: string, symbol: string, coinId?: string): Promise<string> {
-  const store = promisified(TokenStore, oraclePortsLayer({ namer: NAMER }), userId);
-  return store.create({ symbol }, coinId ? [`${NAMER}/issued:${coinId}`] : []);
+  return tokensOf(userId, NAMER).create({ symbol }, coinId ? [`${NAMER}/issued:${coinId}`] : []);
 }
 
 // 同上,但那条 ref 的 localName 由调用方整段给(用来喂非 `issued` 的形状)。
@@ -55,8 +53,7 @@ async function mintTokenWithRef(
   symbol: string,
   localName: string,
 ): Promise<string> {
-  const store = promisified(TokenStore, oraclePortsLayer({ namer: NAMER }), userId);
-  return store.create({ symbol }, [`${NAMER}/${localName}`]);
+  return tokensOf(userId, NAMER).create({ symbol }, [`${NAMER}/${localName}`]);
 }
 
 describe("手记持仓(= tokens 行 + 账本)", () => {

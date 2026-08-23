@@ -1,4 +1,4 @@
-import { listUserIdsWithAccounts } from "@folio/db";
+import { GlobalDatabase } from "@folio/db";
 import { GlobalRefIndexService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
@@ -6,7 +6,7 @@ import { Cause, Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/entry/cache-headers";
 import { configureLogging } from "./lib/server/entry/log";
 import { pruneNotesAllUsers } from "./lib/server/entry/note-retention";
-import { runAtEdge, withDbClient, withOracleWarm } from "./lib/server/oracle";
+import { runAtEdge, withGlobalDb, withOracleWarm } from "./lib/server/oracle";
 import { syncAllUsers, warmAllUsers } from "./lib/server/sync/deps";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
@@ -42,6 +42,10 @@ const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
     }),
   );
 
+// cron 扫「有哪些用户」那一条。**没有 userId**(它问的正是这个),所以它来自 `GlobalDatabase`
+// —— db 那张「表里没有『谁的』这回事」的门票,不是 per-user 的 `Database`。
+const listUserIds = withGlobalDb(Effect.flatMap(GlobalDatabase, (db) => db.accounts.listUserIds()));
+
 // 每天那趟顺带剪掉保留期外的展示 note(#456)。
 //
 // **搭在这个 trigger 上而不是新开一个**:它要的就是「每天一次」,而另一个 trigger 是每小时
@@ -52,11 +56,11 @@ const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
 // 自己兜住则保证反方向也不会发生:剪 note 出问题不会挡住刷表(新币认不出来是更重的后果),
 // 也不会把整趟 cron 拖成异常收尾。两个方向都不再互相牵连。
 //
-// 兜的是 `Cause` 不是类型化失败:`listUserIdsWithAccounts` 那步抛的是 defect(db 挂了),
+// 兜的是 `Cause` 不是类型化失败:`listUserIds` 那步抛的是 defect(db 挂了),
 // `catchAll` 接不住(同 warmAllUsers 的注释)。
 const pruneNotesSweep = (cron: string): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const userIds = yield* withDbClient(listUserIdsWithAccounts);
+    const userIds = yield* listUserIds;
     const pruned = yield* pruneNotesAllUsers(userIds);
     cronLog.info("prune notes done", { cron, ...pruned });
   }).pipe(
@@ -72,7 +76,7 @@ const pruneNotesSweep = (cron: string): Effect.Effect<void> =>
 // sweep 本身不兜 —— 它失败了就该上抛、就该可见。
 const sweepAllUsers = (cron: string): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
-    const userIds = yield* withDbClient(listUserIdsWithAccounts);
+    const userIds = yield* listUserIds;
     cronLog.info("cron sweep start", { cron, users: userIds.length });
     const result = yield* syncAllUsers(userIds);
     cronLog.info("cron sweep done", {
