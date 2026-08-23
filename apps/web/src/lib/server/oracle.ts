@@ -8,14 +8,12 @@ import {
   dbClientLayer,
   globalTokenRefIndexStoreLayer,
   ManualStore,
+  oraclePortsLayer,
   PortfolioStore,
   SettingsStore,
   SnapshotStore,
   TagStore,
   TransferStore,
-  userCacheStoreLayer,
-  userTokenPriceStoreLayer,
-  userTokenStoreLayer,
 } from "@folio/db";
 import {
   GlobalRefIndexService,
@@ -86,16 +84,11 @@ export const perRequestLayer = (userId: string): Layer.Layer<DbClient | CurrentU
 // 惰性到「只建被用到的那一个」这件事**不做**:`packages/db/src/connect.ts` 自己写着
 // 「drizzle(env.DB) 很轻,每次创建即可」,而现在四个 store 共用同一个 `DbClient`——
 // 建它们只是几个闭包。迁移前那套 getter + `??=` 的手写惰性,省下的是不存在的代价。
+//
+// 四个端口现在是 db 出的**一张** layer(#504 T5)。这里只剩「按谁跑」这一件事要补 ——
+// 端口有几个、叫什么名字,装配点不必知道。
 const portsFor = (perRequest: Layer.Layer<DbClient | CurrentUser>) =>
-  Layer.provide(
-    Layer.mergeAll(
-      userTokenStoreLayer({ namer: UPSTREAM_ID }),
-      userTokenPriceStoreLayer({ namer: UPSTREAM_ID }),
-      userCacheStoreLayer,
-      globalTokenRefIndexStoreLayer,
-    ),
-    perRequest,
-  );
+  Layer.provide(oraclePortsLayer({ namer: UPSTREAM_ID }), perRequest);
 
 // cron 刷全局映射表只要这两个端口 —— 没有 userId,也不建 per-user 那三张。
 const warmPorts = () =>

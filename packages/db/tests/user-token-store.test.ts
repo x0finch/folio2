@@ -4,7 +4,7 @@ import { CacheStore, TokenPriceStore, TokenStore } from "@folio/oracle-basic/por
 import { eq } from "drizzle-orm";
 import { Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { userCacheStoreLayer, userTokenPriceStoreLayer, userTokenStoreLayer } from "../src";
+import { oraclePortsLayer } from "../src";
 import { getDb } from "../src/connect";
 import {
   accounts,
@@ -55,11 +55,11 @@ beforeEach(async () => {
 // store 经 layer → Tag 拿(生产那条路);`promisified` 只是让用例照旧 `await store.xxx(…)`。
 // 时钟固定在 `NOW`,要看「过了很久之后」的用例自己传第三个参数。
 const storeFor = (userId: string, namer = NAMER, nowMs = NOW) =>
-  promisified(TokenStore, userTokenStoreLayer({ namer }), userId, nowMs);
+  promisified(TokenStore, oraclePortsLayer({ namer }), userId, nowMs);
 const priceStoreFor = (userId: string, namer = NAMER, nowMs = NOW) =>
-  promisified(TokenPriceStore, userTokenPriceStoreLayer({ namer }), userId, nowMs);
+  promisified(TokenPriceStore, oraclePortsLayer({ namer }), userId, nowMs);
 const cacheFor = (userId: string, nowMs = NOW) =>
-  promisified(CacheStore, userCacheStoreLayer, userId, nowMs);
+  promisified(CacheStore, oraclePortsLayer({ namer: NAMER }), userId, nowMs);
 
 // `getById` 现在回 `Option`(端口如此:「没有这一行」是调用方必须分支的一档)。
 // 用例关心的是那一行的内容,所以这里摘掉包装 —— 「没有」时给 undefined,断言照旧。

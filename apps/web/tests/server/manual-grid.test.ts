@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { userTokenPriceStoreLayer } from "@folio/db";
+import { oraclePortsLayer } from "@folio/db";
 import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
@@ -46,7 +46,7 @@ async function seedFiatDaily(
   code: string,
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
-  await withStore(TokenPriceStore, userTokenPriceStoreLayer({ namer: NAMER }), USER, (s) =>
+  await withStore(TokenPriceStore, oraclePortsLayer({ namer: NAMER }), USER, (s) =>
     s.putDailyByRef(tokenRef.issued(FIAT_NAMER, code), rows),
   );
 }
@@ -57,7 +57,7 @@ async function seedDaily(
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
   const [h] = await dbFor(USER).manual.listHoldings(accountId, NAMER);
-  await withStore(TokenPriceStore, userTokenPriceStoreLayer({ namer: NAMER }), USER, (s) =>
+  await withStore(TokenPriceStore, oraclePortsLayer({ namer: NAMER }), USER, (s) =>
     s.putDaily(h.id, rows),
   );
 }

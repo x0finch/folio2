@@ -1,8 +1,8 @@
 import type { TokenRef, TokenRefIndexRow } from "@folio/oracle-basic";
-import { GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
+import type { GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Option } from "effect";
 import { chunk, DbClient } from "../client";
 import { globalTokenRefIndex } from "../schema";
 
@@ -33,7 +33,7 @@ const STATEMENTS_PER_BATCH = 50;
 
 // 不碰 `Clock`(另外三个 store 都要):本 store 没有一处需要「现在几点」——
 // `putAll` 的时刻由调用方给(契约如此,cron 记的是那一轮的时刻),读侧无 TTL 门控。
-const make = Effect.gen(function* () {
+export const makeGlobalTokenRefIndexStore = Effect.gen(function* () {
   const client = yield* DbClient;
 
   const store: GlobalTokenRefIndexStore = {
@@ -138,6 +138,3 @@ const make = Effect.gen(function* () {
 
   return store;
 });
-
-export const globalTokenRefIndexStoreLayer: Layer.Layer<GlobalTokenRefIndexStore, never, DbClient> =
-  Layer.effect(GlobalTokenRefIndexStore, make);

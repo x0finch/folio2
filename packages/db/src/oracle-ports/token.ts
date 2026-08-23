@@ -6,10 +6,10 @@ import type {
   TokenRef,
   TokenRefHit,
 } from "@folio/oracle-basic";
-import { TokenStore } from "@folio/oracle-basic/ports";
+import type { TokenStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
-import { Clock, Effect, Layer, Option } from "effect";
+import { Clock, Effect, Option } from "effect";
 import { chunk, DbClient } from "../client";
 import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
@@ -26,10 +26,6 @@ import { snapshotBalances, tokenRefs, tokens } from "../schema";
 //
 // **出网口只有 `DbClient` 一个服务**(见 ./service.ts):`env` 不在签名里,`Effect.promise` 不在
 // 这个文件里,时间走 `Clock`(以前是 `opts.now` —— 只有测试会传的字段)。
-
-export interface UserTokenStoreOpts {
-  namer: string; // 当前上游自报的 id(TokenUpstream.id);判 linked / 造 TokenInfo.ref 用
-}
 
 // D1 一条语句 ~100 个绑定参数上限。一条 ref 行按 (namer, local_name) 两段查 → 每条占 2 个参数,
 // 外加 user_id 一个固定参数,故 40 条一批(81 个)稳在限内。
@@ -58,7 +54,7 @@ type InfoRow = {
   infoExpiresAt: number;
 };
 
-const make = ({ namer }: UserTokenStoreOpts) =>
+export const makeUserTokenStore = (namer: string) =>
   Effect.gen(function* () {
     const client = yield* DbClient;
     const userId = yield* CurrentUser;
@@ -438,7 +434,3 @@ const make = ({ namer }: UserTokenStoreOpts) =>
 
     return store;
   });
-
-export const userTokenStoreLayer = (
-  opts: UserTokenStoreOpts,
-): Layer.Layer<TokenStore, never, DbClient | CurrentUser> => Layer.effect(TokenStore, make(opts));

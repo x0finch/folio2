@@ -1,7 +1,7 @@
 import type { CacheEntry, CacheWrite } from "@folio/oracle-basic";
-import { CacheStore } from "@folio/oracle-basic/ports";
+import type { CacheStore } from "@folio/oracle-basic/ports";
 import { and, eq, inArray } from "drizzle-orm";
-import { Clock, Effect, Layer, Option } from "effect";
+import { Clock, Effect, Option } from "effect";
 import { chunk, DbClient } from "../client";
 import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
@@ -34,7 +34,7 @@ const upsert = (db: Drizzle, userId: string, w: CacheWrite, now: number) => {
     .onConflictDoUpdate({ target: [userCache.userId, userCache.k], set: { v, expiresAt } });
 };
 
-const make = Effect.gen(function* () {
+export const makeUserCacheStore = Effect.gen(function* () {
   const client = yield* DbClient;
   const userId = yield* CurrentUser;
 
@@ -103,6 +103,3 @@ const make = Effect.gen(function* () {
 
   return store;
 });
-
-export const userCacheStoreLayer: Layer.Layer<CacheStore, never, DbClient | CurrentUser> =
-  Layer.effect(CacheStore, make);

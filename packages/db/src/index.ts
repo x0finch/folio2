@@ -61,13 +61,13 @@ export { SettingsStore } from "./domains/settings";
 export { SnapshotStore } from "./domains/snapshots";
 export { TagStore } from "./domains/tags";
 export { TransferStore } from "./domains/transfer";
+// 参考层那半:**一张 layer 给全四个端口**(#504 T5)。以前是四个 layer(两个还是带 opts 的
+// 工厂)各自露出去,装配点逐个列举。`globalTokenRefIndexStoreLayer` 仍单独可拿 —— cron 刷全局
+// 映射表没有 userId,不该为了它把 per-user 那三张也建出来。
 export {
   globalTokenRefIndexStoreLayer,
-  type UserTokenPriceStoreOpts,
-  type UserTokenStoreOpts,
-  userCacheStoreLayer,
-  userTokenPriceStoreLayer,
-  userTokenStoreLayer,
+  type OraclePortsOpts,
+  oraclePortsLayer,
 } from "./oracle-ports";
 export type {
   Account,

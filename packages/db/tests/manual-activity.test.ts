@@ -2,10 +2,10 @@ import { env } from "cloudflare:test";
 import { TokenStore } from "@folio/oracle-basic/ports";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
+import { oraclePortsLayer } from "../src";
 import { getDb } from "../src/connect";
 // 包内测试白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
 import { AccountStore, ManualStore } from "../src/domains";
-import { userTokenStoreLayer } from "../src/oracle-ports/token";
 import { manualActivity } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { forUser, promisified } from "./effect";
@@ -40,7 +40,7 @@ async function manualAccount(userId: string) {
   const acc = await accounts(userId).create({ connectorId: "manual", label: "M", creds: "{}" });
   const tokenId = await promisified(
     TokenStore,
-    userTokenStoreLayer({ namer: "coingecko" }),
+    oraclePortsLayer({ namer: "coingecko" }),
     userId,
   ).create({ symbol: "BTC" }, []);
   return { id: acc.id, tokenId };
