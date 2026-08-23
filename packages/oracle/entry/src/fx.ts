@@ -125,124 +125,122 @@ export function deriveFiatDaily(
   return out;
 }
 
-const make = Effect.gen(function* () {
-  const cache = yield* CacheStore;
-  const upstream = yield* FxUpstream;
-  // —— 只有 `rateSeries` 用得到的两个端口 ——
-  // 历史日汇率读写 `token_daily_prices`(按 ref 直存,见 `getDailyByRef`)。
-  const prices = yield* TokenPriceStore;
-  // BTC 反算两条腿走 `fetchPriceSeries(btcRef, …, vsCurrency)`(ADR 0026:复用现成取数口,
-  // 不给 `FxUpstream` 加取数方法)。BTC 反算是全仓价格骨架的一部分,所以历史这半搭在代币上游上。
-  const priceUpstream = yield* TokenUpstream;
-  // 从 `FxUpstream` 只要 `btcRef` 一个字段 —— 那是 fx 与代币两个世界的桥(BTC 反算的基),
-  // 留在 `FxUpstream` 上是对的,不为了消掉这条依赖去挪它。
-  const { btcRef } = upstream;
+// 服务的形状从下面这段 `effect` 的返回值推导,`.Default` 就是它的 layer —— 不再手写
+// interface + Tag + layer 三件套(#501)。
+export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
+  effect: Effect.gen(function* () {
+    const cache = yield* CacheStore;
+    const upstream = yield* FxUpstream;
+    // —— 只有 `rateSeries` 用得到的两个端口 ——
+    // 历史日汇率读写 `token_daily_prices`(按 ref 直存,见 `getDailyByRef`)。
+    const prices = yield* TokenPriceStore;
+    // BTC 反算两条腿走 `fetchPriceSeries(btcRef, …, vsCurrency)`(ADR 0026:复用现成取数口,
+    // 不给 `FxUpstream` 加取数方法)。BTC 反算是全仓价格骨架的一部分,所以历史这半搭在代币上游上。
+    const priceUpstream = yield* TokenUpstream;
+    // 从 `FxUpstream` 只要 `btcRef` 一个字段 —— 那是 fx 与代币两个世界的桥(BTC 反算的基),
+    // 留在 `FxUpstream` 上是对的,不为了消掉这条依赖去挪它。
+    const { btcRef } = upstream;
 
-  return {
-    // 1 单位该币种值多少美元。USD 恒 1(不查缓存);缓存里没有 → `none`(调用方回退 USD)。
-    resolve: (currency: string): Effect.Effect<Option.Option<number>> =>
-      norm(currency) === "USD" ? Effect.succeed(Option.some(1)) : readFx(cache, currency),
+    return {
+      // 1 单位该币种值多少美元。USD 恒 1(不查缓存);缓存里没有 → `none`(调用方回退 USD)。
+      resolve: (currency: string): Effect.Effect<Option.Option<number>> =>
+        norm(currency) === "USD" ? Effect.succeed(Option.some(1)) : readFx(cache, currency),
 
-    // 预热(同步之后 / 用户第一次切币种时)。缺省预热全部支持币种。
-    warm: (currencies: readonly string[] = ALL_CODES): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        // USD 不进目标:它恒为 1、不存缓存,算进去会让「全都新鲜」永远判不成立。
-        const targets = [...new Set(currencies.map(norm))].filter((c) => c !== "USD");
-        if (targets.length === 0) return;
+      // 预热(同步之后 / 用户第一次切币种时)。缺省预热全部支持币种。
+      warm: (currencies: readonly string[] = ALL_CODES): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          // USD 不进目标:它恒为 1、不存缓存,算进去会让「全都新鲜」永远判不成立。
+          const targets = [...new Set(currencies.map(norm))].filter((c) => c !== "USD");
+          if (targets.length === 0) return;
 
-        // 一次批量读:目标全都在且新鲜 → 什么都不做。
-        const hits = yield* readFxFreshness(cache, targets);
-        if (targets.every((c) => hits.get(fxKey(c))?.stale === false)) return;
+          // 一次批量读:目标全都在且新鲜 → 什么都不做。
+          const hits = yield* readFxFreshness(cache, targets);
+          if (targets.every((c) => hits.get(fxKey(c))?.stale === false)) return;
 
-        // 一次拉全 → **一个批次**把其余支持币种也写上(反正都在同一份响应里),
-        // 下次别人切过去就是热的。逐个写会把一次 D1 批次变成十来次往返。
-        // 上游挂了 → 记一行、什么都不写(读那一侧软过期,拿得到旧值就用旧的)。
-        const fresh = yield* upstream
-          .fetchRates()
-          .pipe(
-            Effect.map(Option.some<ReadonlyMap<string, number>>),
-            degradeTo("fx.warm", Option.none<ReadonlyMap<string, number>>()),
-          );
-        if (Option.isNone(fresh)) return;
-        yield* writeFx(
-          cache,
-          [...fresh.value]
-            .filter(([code]) => norm(code) !== "USD")
-            .map(([currency, usdPerUnit]) => ({ currency, usdPerUnit })),
-        );
-      }),
-
-    // 某法币在区间内逐日的 usd_per_unit,口径同 `resolve` 但按**当天**汇率(ADR 0026 / #274)。
-    // SWR 照 `priceSeries`:命中缓存的过去日直接用、缺的从 BTC 反算并永久落 `token_daily_prices`、
-    // 今日桶恒现取;上游失败 → 退回仅缓存。USD 恒 1(不出网)。
-    // 缓存/派生对齐到 UTC 日桶(`atMs = 日桶 × 一日毫秒`)。
-    rateSeries: (
-      code: string,
-      fromMs: number,
-      toMs: number,
-    ): Effect.Effect<readonly TokenPricePoint[]> =>
-      Effect.gen(function* () {
-        if (fromMs > toMs) return [];
-        const CODE = norm(code);
-        const fromB = dayBucketOf(fromMs);
-        const toB = dayBucketOf(toMs);
-        const buckets: number[] = [];
-        for (let b = fromB; b <= toB; b++) buckets.push(b);
-
-        // USD 恒 1 —— 不出网、不查表、不反算它自己。
-        if (CODE === "USD") return buckets.map((b) => ({ atMs: b * MS_PER_DAY, unitPrice: 1 }));
-
-        const fiatRef = tokenRef.issued(FIAT_NAMER, CODE);
-        const todayB = dayBucketOf(yield* Clock.currentTimeMillis);
-        const cached = yield* prices.getDailyByRef(fiatRef, buckets);
-        const missingPast = buckets.filter((b) => b < todayB && !cached.has(b));
-        const needsToday = toB >= todayB;
-
-        const derived = new Map<number, number>();
-        if (missingPast.length > 0 || needsToday) {
-          // 两条腿都走 `fetchPriceSeries(btcRef)`:BTC 该币(vsCurrency=CODE,现取不落)+
-          // BTC 美元(优先缓存)。反算 = 后者 ÷ 前者。
-          // **两条腿并发** —— 它们互不依赖,而这条路是用户在等历史曲线(串起来白赔一次往返)。
-          // 任一腿挂 → 整块降级到仅缓存(记一行)。
-          const legs = Effect.gen(function* () {
-            const [series, btcUsd] = yield* Effect.all(
-              [
-                priceUpstream.fetchPriceSeries(btcRef, fromMs, toMs, CODE),
-                btcUsdDaily(prices, priceUpstream, btcRef, buckets, todayB),
-              ],
-              { concurrency: 2 },
+          // 一次拉全 → **一个批次**把其余支持币种也写上(反正都在同一份响应里),
+          // 下次别人切过去就是热的。逐个写会把一次 D1 批次变成十来次往返。
+          // 上游挂了 → 记一行、什么都不写(读那一侧软过期,拿得到旧值就用旧的)。
+          const fresh = yield* upstream
+            .fetchRates()
+            .pipe(
+              Effect.map(Option.some<ReadonlyMap<string, number>>),
+              degradeTo("fx.warm", Option.none<ReadonlyMap<string, number>>()),
             );
-            const btcCode = new Map<number, number>();
-            for (const pt of series) {
-              if (pt.unitPrice > 0) btcCode.set(dayBucketOf(pt.atMs), pt.unitPrice);
-            }
-            return deriveFiatDaily(btcUsd, btcCode, buckets);
-          });
+          if (Option.isNone(fresh)) return;
+          yield* writeFx(
+            cache,
+            [...fresh.value]
+              .filter(([code]) => norm(code) !== "USD")
+              .map(([currency, usdPerUnit]) => ({ currency, usdPerUnit })),
+          );
+        }),
 
-          for (const [b, v] of yield* legs.pipe(
-            degradeTo("fx.rateSeries", new Map<number, number>()),
-          )) {
-            derived.set(b, v);
+      // 某法币在区间内逐日的 usd_per_unit,口径同 `resolve` 但按**当天**汇率(ADR 0026 / #274)。
+      // SWR 照 `priceSeries`:命中缓存的过去日直接用、缺的从 BTC 反算并永久落 `token_daily_prices`、
+      // 今日桶恒现取;上游失败 → 退回仅缓存。USD 恒 1(不出网)。
+      // 缓存/派生对齐到 UTC 日桶(`atMs = 日桶 × 一日毫秒`)。
+      rateSeries: (
+        code: string,
+        fromMs: number,
+        toMs: number,
+      ): Effect.Effect<readonly TokenPricePoint[]> =>
+        Effect.gen(function* () {
+          if (fromMs > toMs) return [];
+          const CODE = norm(code);
+          const fromB = dayBucketOf(fromMs);
+          const toB = dayBucketOf(toMs);
+          const buckets: number[] = [];
+          for (let b = fromB; b <= toB; b++) buckets.push(b);
+
+          // USD 恒 1 —— 不出网、不查表、不反算它自己。
+          if (CODE === "USD") return buckets.map((b) => ({ atMs: b * MS_PER_DAY, unitPrice: 1 }));
+
+          const fiatRef = tokenRef.issued(FIAT_NAMER, CODE);
+          const todayB = dayBucketOf(yield* Clock.currentTimeMillis);
+          const cached = yield* prices.getDailyByRef(fiatRef, buckets);
+          const missingPast = buckets.filter((b) => b < todayB && !cached.has(b));
+          const needsToday = toB >= todayB;
+
+          const derived = new Map<number, number>();
+          if (missingPast.length > 0 || needsToday) {
+            // 两条腿都走 `fetchPriceSeries(btcRef)`:BTC 该币(vsCurrency=CODE,现取不落)+
+            // BTC 美元(优先缓存)。反算 = 后者 ÷ 前者。
+            // **两条腿并发** —— 它们互不依赖,而这条路是用户在等历史曲线(串起来白赔一次往返)。
+            // 任一腿挂 → 整块降级到仅缓存(记一行)。
+            const legs = Effect.gen(function* () {
+              const [series, btcUsd] = yield* Effect.all(
+                [
+                  priceUpstream.fetchPriceSeries(btcRef, fromMs, toMs, CODE),
+                  btcUsdDaily(prices, priceUpstream, btcRef, buckets, todayB),
+                ],
+                { concurrency: 2 },
+              );
+              const btcCode = new Map<number, number>();
+              for (const pt of series) {
+                if (pt.unitPrice > 0) btcCode.set(dayBucketOf(pt.atMs), pt.unitPrice);
+              }
+              return deriveFiatDaily(btcUsd, btcCode, buckets);
+            });
+
+            for (const [b, v] of yield* legs.pipe(
+              degradeTo("fx.rateSeries", new Map<number, number>()),
+            )) {
+              derived.set(b, v);
+            }
+
+            const toPersist = [...derived.entries()]
+              .filter(([b]) => b < todayB && !cached.has(b)) // 只落不可变的过去日
+              .map(([dayBucket, unitPrice]) => ({ dayBucket, unitPrice }));
+            if (toPersist.length > 0) yield* prices.putDailyByRef(fiatRef, toPersist);
           }
 
-          const toPersist = [...derived.entries()]
-            .filter(([b]) => b < todayB && !cached.has(b)) // 只落不可变的过去日
-            .map(([dayBucket, unitPrice]) => ({ dayBucket, unitPrice }));
-          if (toPersist.length > 0) yield* prices.putDailyByRef(fiatRef, toPersist);
-        }
-
-        const out: TokenPricePoint[] = [];
-        for (const b of buckets) {
-          const rate = cached.get(b) ?? derived.get(b);
-          if (typeof rate === "number") out.push({ atMs: b * MS_PER_DAY, unitPrice: rate });
-        }
-        return out;
-      }),
-  };
-});
-
-// 服务的形状从 `make` 的返回值推导,`.Default` 就是它的 layer —— 不再手写 interface + Tag +
-// layer 三件套(#501)。
-export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
-  effect: make,
+          const out: TokenPricePoint[] = [];
+          for (const b of buckets) {
+            const rate = cached.get(b) ?? derived.get(b);
+            if (typeof rate === "number") out.push({ atMs: b * MS_PER_DAY, unitPrice: rate });
+          }
+          return out;
+        }),
+    };
+  }),
 }) {}

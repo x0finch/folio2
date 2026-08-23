@@ -68,75 +68,73 @@ export const writePlatforms = (
     })),
   );
 
-const make = Effect.gen(function* () {
-  const cache = yield* CacheStore;
-  const upstream = yield* PlatformUpstream;
-
-  return {
-    // 每个 key 都给一份展示。命中真名就用真名,否则按 key 推一个兜底名。**不出网、一次读。**
-    resolve: (keys: readonly string[]): Effect.Effect<Map<string, PlatformMeta>> =>
-      Effect.gen(function* () {
-        const unique = [...new Set(keys)];
-        const out = new Map<string, PlatformMeta>();
-        if (unique.length === 0) return out;
-
-        const hits = yield* readPlatforms(cache, unique); // 一次读
-        for (const key of unique) {
-          const entry = hits.get(key)?.entry;
-          // `name === null`(否定缓存)与没缓存走同一条兜底路 —— 对展示来说是同一件事。
-          out.set(
-            key,
-            entry?.name != null
-              ? { key, name: entry.name, logo: entry.logo }
-              : { key, name: fallbackName(key) },
-          );
-        }
-        return out;
-      }),
-
-    // 同步后预热:这些 key 里有缺的或过期的 → 拉一次整张链表 → **一个批次写回这几个 key**。
-    warm: (keys: readonly string[]): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const unique = [...new Set(keys)];
-        if (unique.length === 0) return;
-
-        const hits = yield* readPlatforms(cache, unique);
-        const missing = unique.filter((k) => {
-          const hit = hits.get(k);
-          return hit === undefined || hit.stale;
-        });
-        if (missing.length === 0) return;
-
-        // 一次拉全 —— 上游那个端点本来就是整张表,按 key 单查这回事在它那儿不存在。
-        //
-        // 降级到 **`none` 而不是空表**:这两件事在这里不一样 —— 「上游说它没有这条链」要写否定
-        // 缓存(短 TTL,免得每次预热都重拉整张表),而「上游挂了」**绝不能**写:那会把一条真实
-        // 存在的链按「不存在」记上一天。给 `[]` 就把两者抹平了。
-        const chains = yield* upstream
-          .fetchChains()
-          .pipe(
-            Effect.map(Option.some<readonly PlatformMeta[]>),
-            degradeTo("platforms.warm", Option.none<readonly PlatformMeta[]>()),
-          );
-        if (Option.isNone(chains)) return;
-        const byKey = new Map(chains.value.map((c) => [c.key, c]));
-
-        // **只写我们被问到的那几个键**,不是整张两百行的表:这张缓存是 per-user 的,
-        // 把所有链都塞进每个用户的缓存里毫无意义 —— 他持仓就在那么几条链上。
-        // 表里没有的写否定缓存(短 TTL),否则这个键会让此后每一次预热都重拉整张表。
-        yield* writePlatforms(
-          cache,
-          missing.map((key) => {
-            const hit = byKey.get(key);
-            return { key, entry: hit ? { name: hit.name, logo: hit.logo } : { name: null } };
-          }),
-        );
-      }),
-  };
-});
-
-// 服务的形状从 `make` 的返回值推导,`.Default` 就是它的 layer —— 不再手写 interface + Tag +
-// layer 三件套(#501)。
+// 服务的形状从下面这段 `effect` 的返回值推导,`.Default` 就是它的 layer —— 不再手写
+// interface + Tag + layer 三件套(#501)。
 export class PlatformService extends Effect.Service<PlatformService>()("oracle/PlatformService", {
-  effect: make,
+  effect: Effect.gen(function* () {
+    const cache = yield* CacheStore;
+    const upstream = yield* PlatformUpstream;
+
+    return {
+      // 每个 key 都给一份展示。命中真名就用真名,否则按 key 推一个兜底名。**不出网、一次读。**
+      resolve: (keys: readonly string[]): Effect.Effect<Map<string, PlatformMeta>> =>
+        Effect.gen(function* () {
+          const unique = [...new Set(keys)];
+          const out = new Map<string, PlatformMeta>();
+          if (unique.length === 0) return out;
+
+          const hits = yield* readPlatforms(cache, unique); // 一次读
+          for (const key of unique) {
+            const entry = hits.get(key)?.entry;
+            // `name === null`(否定缓存)与没缓存走同一条兜底路 —— 对展示来说是同一件事。
+            out.set(
+              key,
+              entry?.name != null
+                ? { key, name: entry.name, logo: entry.logo }
+                : { key, name: fallbackName(key) },
+            );
+          }
+          return out;
+        }),
+
+      // 同步后预热:这些 key 里有缺的或过期的 → 拉一次整张链表 → **一个批次写回这几个 key**。
+      warm: (keys: readonly string[]): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const unique = [...new Set(keys)];
+          if (unique.length === 0) return;
+
+          const hits = yield* readPlatforms(cache, unique);
+          const missing = unique.filter((k) => {
+            const hit = hits.get(k);
+            return hit === undefined || hit.stale;
+          });
+          if (missing.length === 0) return;
+
+          // 一次拉全 —— 上游那个端点本来就是整张表,按 key 单查这回事在它那儿不存在。
+          //
+          // 降级到 **`none` 而不是空表**:这两件事在这里不一样 —— 「上游说它没有这条链」要写否定
+          // 缓存(短 TTL,免得每次预热都重拉整张表),而「上游挂了」**绝不能**写:那会把一条真实
+          // 存在的链按「不存在」记上一天。给 `[]` 就把两者抹平了。
+          const chains = yield* upstream
+            .fetchChains()
+            .pipe(
+              Effect.map(Option.some<readonly PlatformMeta[]>),
+              degradeTo("platforms.warm", Option.none<readonly PlatformMeta[]>()),
+            );
+          if (Option.isNone(chains)) return;
+          const byKey = new Map(chains.value.map((c) => [c.key, c]));
+
+          // **只写我们被问到的那几个键**,不是整张两百行的表:这张缓存是 per-user 的,
+          // 把所有链都塞进每个用户的缓存里毫无意义 —— 他持仓就在那么几条链上。
+          // 表里没有的写否定缓存(短 TTL),否则这个键会让此后每一次预热都重拉整张表。
+          yield* writePlatforms(
+            cache,
+            missing.map((key) => {
+              const hit = byKey.get(key);
+              return { key, entry: hit ? { name: hit.name, logo: hit.logo } : { name: null } };
+            }),
+          );
+        }),
+    };
+  }),
 }) {}

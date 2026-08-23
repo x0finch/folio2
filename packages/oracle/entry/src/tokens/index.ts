@@ -40,7 +40,7 @@ import { makeStaleRefresh, type RefreshStaleReport, type TokenStaleRefresh } fro
 //
 // **形状用 `extends` 拼**而不是在这里重抄一遍签名:每个方法的文档跟着它的实现走,
 // 改实现的人一定看得见它,而抄一遍的那份迟早与实现对不上。服务本身是个 class
-// (`Effect.Service`,#501),它的类型由下面 `make` 的返回值定 —— `TokenServiceShape` 只是给
+// (`Effect.Service`,#501),它的类型由下面那段 `effect` 的返回值定 —— `TokenServiceShape` 只是给
 // 那个返回值一个可校验的名字,不出这个文件,也不是第二份签名复述。
 interface TokenServiceShape
   extends TokenMinting,
@@ -59,37 +59,35 @@ export type { MintInput, RefreshStaleReport };
 // 「没有 userId 就构造不出 per-user 的东西」正是那条隔离保证的实现方式(原则 #6 / ADR 0022)。
 // 文件名里的 `global-` 就是在说这件事:它跟「谁的」无关,所以它不住在按用户切的这一边。
 
+// `CandidateSource` 留在 `TokenService.Default` 的 `R` 上,由 `../oracle` 在装配时喂进来并
+// **吃掉** —— 于是装配点的 `R` 里看不到它(它是包内 Tag,从不出包),而顶掉它仍然只需换一个
+// layer,不必另开一条构造路(见 `./candidates` 里那段「注入缝」)。
 // **`now` 那个 config 字段没了** —— 时间从 `Clock` 取,测试用 `TestClock` 推。
 // 判据是 CODING.md 那条:只有测试会传的字段,就不该是字段(它当初有 5 个默认值散在各处)。
 //
 // 从 Tag 取服务**只发生在这里**:五片工厂全都收已解析好的端口对象,所以它们的 `R` 是 `never`
 // (与 `./warm` 同款),服务的方法签名不会把自己的依赖漏给调用方。
-const make = Effect.gen(function* () {
-  const store = yield* TokenStore;
-  const prices = yield* TokenPriceStore;
-  const cache = yield* CacheStore;
-  const upstream = yield* TokenUpstream;
-
-  // mint 那三个额外依赖。**这里是它们唯一一次与上游同处一个作用域** —— 再往下就交给
-  // `makeMinting`,而它的 `MintDeps` 里一个上游都没有(`./mint` 的红线)。
-  const globalRefIndex = yield* GlobalTokenRefIndexStore;
-  const candidates = yield* CandidateSource;
-  const namer = yield* Namer;
-
-  // 每片只拿它真正要的端口 —— 这一行就是那张依赖表:`price` 的富化不碰上游、`catalogue` 不碰 store。
-  return {
-    ...makeMinting({ store, globalRefIndex, candidates, namer }),
-    ...makeReading(store, prices),
-    ...makePricing(store, prices, upstream),
-    ...makeHistory(store, prices, upstream),
-    ...makeStaleRefresh(store, prices, upstream),
-    ...makeCatalogue(cache, upstream),
-  } satisfies TokenServiceShape;
-});
-
-// `CandidateSource` 留在 `TokenService.Default` 的 `R` 上,由 `../oracle` 在装配时喂进来并
-// **吃掉** —— 于是装配点的 `R` 里看不到它(它是包内 Tag,从不出包),而顶掉它仍然只需换一个
-// layer,不必另开一条构造路(见 `./candidates` 里那段「注入缝」)。
 export class TokenService extends Effect.Service<TokenService>()("oracle/TokenService", {
-  effect: make,
+  effect: Effect.gen(function* () {
+    const store = yield* TokenStore;
+    const prices = yield* TokenPriceStore;
+    const cache = yield* CacheStore;
+    const upstream = yield* TokenUpstream;
+
+    // mint 那三个额外依赖。**这里是它们唯一一次与上游同处一个作用域** —— 再往下就交给
+    // `makeMinting`,而它的 `MintDeps` 里一个上游都没有(`./mint` 的红线)。
+    const globalRefIndex = yield* GlobalTokenRefIndexStore;
+    const candidates = yield* CandidateSource;
+    const namer = yield* Namer;
+
+    // 每片只拿它真正要的端口 —— 这一行就是那张依赖表:`price` 的富化不碰上游、`catalogue` 不碰 store。
+    return {
+      ...makeMinting({ store, globalRefIndex, candidates, namer }),
+      ...makeReading(store, prices),
+      ...makePricing(store, prices, upstream),
+      ...makeHistory(store, prices, upstream),
+      ...makeStaleRefresh(store, prices, upstream),
+      ...makeCatalogue(cache, upstream),
+    } satisfies TokenServiceShape;
+  }),
 }) {}
