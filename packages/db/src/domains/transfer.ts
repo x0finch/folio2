@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { Effect } from "effect";
 import { DbClient } from "../client";
 import { CurrentUser } from "../current-user";
+import type { NotFound } from "../errors";
 import {
   accounts,
   manualActivity,
@@ -11,19 +12,20 @@ import {
   tokens,
 } from "../schema";
 import type { CreateAccountInput } from "./accounts";
-import { type ManualActivityInput, ManualStore } from "./manual";
+import { type ManualActivityInput, makeManualStore } from "./manual";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 import { ensureDefault } from "./portfolios";
-import { SnapshotStore, type WriteSnapshotInput } from "./snapshots";
+import { makeSnapshotStore, type WriteSnapshotInput } from "./snapshots";
 
 // 导出 / 导入 v3(#204):Token 行 + 它的 ref 随文件走。
 //
 // **服务的方法签名里没有 userId**(ADR 0037):由 `TransferStore.Default(userId)` 在装配那一刻吃掉。
 //
-// **它依赖 `SnapshotStore` 与 `ManualStore`** —— 导快照/导活动本来就是「查重之后调那一个写」,
-// 而两个写口连同它们的归属校验都已经在那两个服务里。layer 因此声明这两个依赖(不是方法的 `R`:
-// 服务对外的 `R` 仍是 `never`,两个依赖在建服务那一刻就解析好进了闭包)。
-// T2 留在本模块的那个 `runFor` 过渡桥随之删掉。
+// **它要用快照与手记那两个 store** —— 导快照/导活动本来就是「查重之后调那一个写」,而两个写口
+// 连同它们的归属校验都已经在那两个服务里。所以这里直接 `yield*` 它们的 make,而不是 `yield*` 它们的
+// Tag:后者会把这两个依赖顶到 `TransferStore.Default` 的 `R` 上,装配点为此得先合出一个 base
+// 再把它 provide 上去(#504 T4 之前的 `dbStoresFor` 就是那个形状)。两边都只是几个闭包,
+// 建两次不比传引用贵,却省掉装配点那一层拼装。
 
 // 导出一个用户的 Token(ref 嵌在里头)。**价 facet 与 TTL 不导** —— 市场数据可重取;
 // `self_price` 也不导 —— 迁移 0016 后它已无写者(手记声明价在账本的 `price` 列,随活动导)。
@@ -48,236 +50,238 @@ export interface ImportTokenInput {
 // **layer 依赖另外两个 store**(不是方法的 `R`):导快照/导活动就是「查重之后调那一个写」。
 // —— 合并式导入(#204,A 方案):按内容自然键 find-or-create,让「反复导入 / 合并不同文件」幂等。 ——
 // 全程用**新 id**(不碰全局 id 主键,多用户安全);去重靠 per-user 自然键。原样再导一遍 = 命中既有、不新建。
-export class TransferStore extends Effect.Service<TransferStore>()("db/TransferStore", {
-  effect: Effect.gen(function* () {
-    const client = yield* DbClient;
-    const userId = yield* CurrentUser;
-    const snapshotStore = yield* SnapshotStore;
-    const manualStore = yield* ManualStore;
+export const makeTransferStore = Effect.gen(function* () {
+  const client = yield* DbClient;
+  const userId = yield* CurrentUser;
+  const snapshotStore = yield* makeSnapshotStore;
+  const manualStore = yield* makeManualStore;
 
-    return {
-      listTokensForExport: (): Effect.Effect<ExportToken[]> =>
-        Effect.gen(function* () {
-          const rows = yield* client.query((db) =>
+  return {
+    listTokensForExport: (): Effect.Effect<ExportToken[]> =>
+      Effect.gen(function* () {
+        const rows = yield* client.query((db) =>
+          db
+            .select({
+              id: tokens.id,
+              symbol: tokens.symbol,
+              name: tokens.name,
+              logo: tokens.logo,
+              providerLogo: tokens.providerLogo,
+              marketCapRank: tokens.marketCapRank,
+            })
+            .from(tokens)
+            .where(eq(tokens.userId, userId))
+            .orderBy(asc(tokens.id)),
+        );
+        if (rows.length === 0) return [];
+        const refRows = yield* client.query((db) =>
+          db
+            .select({
+              tokenId: tokenRefs.tokenId,
+              namer: tokenRefs.namer,
+              localName: tokenRefs.localName,
+            })
+            .from(tokenRefs)
+            .where(eq(tokenRefs.userId, userId)),
+        );
+        const byToken = new Map<string, { namer: string; localName: string }[]>();
+        for (const r of refRows) {
+          const ref = { namer: r.namer, localName: r.localName };
+          const arr = byToken.get(r.tokenId);
+          if (arr) arr.push(ref);
+          else byToken.set(r.tokenId, [ref]);
+        }
+        return rows.map((t) => ({ ...t, refs: byToken.get(t.id) ?? [] }));
+      }),
+
+    /**
+     * 导入一个 Token:**find-or-create**。它的任一 ref 已在本地映射到某 Token → 复用那行(把缺的 ref
+     * 补挂过去);否则新建一行(新 id,不跟本地已有撞)+ 挂上全部 ref。返回最终 token_id,供调用方建
+     * old→new 映射。空库导入是最常见路径:恒无命中 → 每个 Token 各建新行。
+     *
+     * **已知限制(仅非空库的分叉场景)**:若这批 ref 分别命中本地**不同**的 Token(源库把多链归并成一行、
+     * 目标库却各自建了行),这里按第一条命中复用、其余 ref 撞约束被静默跳过 → 文件里那个 Token 的身份被
+     * 部分并到一行上。**这条经导入路径根本走不到** —— 导入有空库闸(见 apps/web import.ts),只往空库导,
+     * 恒无命中、每个 Token 各建新行。留这条注释是因为本 op 也被别处直接调用;跨实例分叉合并归「改绑」那张票。
+     */
+    // ref 插入用无目标 onConflict:PK(user_id,namer,local_name)与唯一索引(user_id,token_id,namer)任一撞了都静默。
+    importToken: (
+      t: ImportTokenInput,
+      refs: readonly { namer: string; localName: string }[],
+      now: () => number = Date.now,
+    ): Effect.Effect<string> =>
+      Effect.gen(function* () {
+        if (refs.length > 0) {
+          const hit = yield* client.query((db) =>
             db
-              .select({
-                id: tokens.id,
-                symbol: tokens.symbol,
-                name: tokens.name,
-                logo: tokens.logo,
-                providerLogo: tokens.providerLogo,
-                marketCapRank: tokens.marketCapRank,
-              })
-              .from(tokens)
-              .where(eq(tokens.userId, userId))
-              .orderBy(asc(tokens.id)),
-          );
-          if (rows.length === 0) return [];
-          const refRows = yield* client.query((db) =>
-            db
-              .select({
-                tokenId: tokenRefs.tokenId,
-                namer: tokenRefs.namer,
-                localName: tokenRefs.localName,
-              })
+              .select({ tokenId: tokenRefs.tokenId })
               .from(tokenRefs)
-              .where(eq(tokenRefs.userId, userId)),
-          );
-          const byToken = new Map<string, { namer: string; localName: string }[]>();
-          for (const r of refRows) {
-            const ref = { namer: r.namer, localName: r.localName };
-            const arr = byToken.get(r.tokenId);
-            if (arr) arr.push(ref);
-            else byToken.set(r.tokenId, [ref]);
-          }
-          return rows.map((t) => ({ ...t, refs: byToken.get(t.id) ?? [] }));
-        }),
-
-      /**
-       * 导入一个 Token:**find-or-create**。它的任一 ref 已在本地映射到某 Token → 复用那行(把缺的 ref
-       * 补挂过去);否则新建一行(新 id,不跟本地已有撞)+ 挂上全部 ref。返回最终 token_id,供调用方建
-       * old→new 映射。空库导入是最常见路径:恒无命中 → 每个 Token 各建新行。
-       *
-       * **已知限制(仅非空库的分叉场景)**:若这批 ref 分别命中本地**不同**的 Token(源库把多链归并成一行、
-       * 目标库却各自建了行),这里按第一条命中复用、其余 ref 撞约束被静默跳过 → 文件里那个 Token 的身份被
-       * 部分并到一行上。**这条经导入路径根本走不到** —— 导入有空库闸(见 apps/web import.ts),只往空库导,
-       * 恒无命中、每个 Token 各建新行。留这条注释是因为本 op 也被别处直接调用;跨实例分叉合并归「改绑」那张票。
-       */
-      // ref 插入用无目标 onConflict:PK(user_id,namer,local_name)与唯一索引(user_id,token_id,namer)任一撞了都静默。
-      importToken: (
-        t: ImportTokenInput,
-        refs: readonly { namer: string; localName: string }[],
-        now: () => number = Date.now,
-      ): Effect.Effect<string> =>
-        Effect.gen(function* () {
-          if (refs.length > 0) {
-            const hit = yield* client.query((db) =>
-              db
-                .select({ tokenId: tokenRefs.tokenId })
-                .from(tokenRefs)
-                .where(
-                  and(
-                    eq(tokenRefs.userId, userId),
-                    or(
-                      ...refs.map((r) =>
-                        and(eq(tokenRefs.namer, r.namer), eq(tokenRefs.localName, r.localName)),
-                      ),
+              .where(
+                and(
+                  eq(tokenRefs.userId, userId),
+                  or(
+                    ...refs.map((r) =>
+                      and(eq(tokenRefs.namer, r.namer), eq(tokenRefs.localName, r.localName)),
                     ),
                   ),
-                )
-                .limit(1),
-            );
-            const target = hit[0]?.tokenId;
-            if (target) {
-              // 复用已有 Token:把它还没有的 ref 补挂过去(撞约束的静默跳过)。
-              yield* client.batch((db) =>
-                refs.map((r) =>
-                  db
-                    .insert(tokenRefs)
-                    .values({ userId, namer: r.namer, localName: r.localName, tokenId: target })
-                    .onConflictDoNothing(),
-                ),
-              );
-              return target;
-            }
-          }
-
-          const id = crypto.randomUUID();
-          yield* client.batch((db) => [
-            db.insert(tokens).values({
-              id,
-              userId,
-              symbol: t.symbol,
-              name: t.name,
-              logo: t.logo ?? null,
-              providerLogo: t.providerLogo ?? null,
-              marketCapRank: t.marketCapRank ?? null,
-              infoExpiresAt: now(), // 建行即 stale → 下次刷价/刷图补齐 name/logo/价
-            }),
-            ...refs.map((r) =>
-              db
-                .insert(tokenRefs)
-                .values({ userId, namer: r.namer, localName: r.localName, tokenId: id })
-                .onConflictDoNothing(),
-            ),
-          ]);
-          return id;
-        }),
-
-      /** 账户自然键 = (connectorId, platform, label, creds) 全同即同一个。归档态是可变属性、不进键。 */
-      // 命中时若文件说归档而现有未归档,则对齐成归档。
-      importAccount: (
-        input: CreateAccountInput & { archivedAt?: number | null },
-      ): Effect.Effect<{ id: string; created: boolean }> =>
-        Effect.gen(function* () {
-          const platform = input.platform ?? null;
-          const creds = input.creds ?? null;
-          const existing = yield* client.query((db) =>
-            db
-              .select({ id: accounts.id, archivedAt: accounts.archivedAt })
-              .from(accounts)
-              .where(
-                and(
-                  eq(accounts.userId, userId),
-                  eq(accounts.connectorId, input.connectorId),
-                  platform === null ? isNull(accounts.platform) : eq(accounts.platform, platform),
-                  eq(accounts.label, input.label),
-                  creds === null ? isNull(accounts.creds) : eq(accounts.creds, creds),
                 ),
               )
               .limit(1),
           );
-          const hit = existing[0];
-          if (hit) {
-            if (input.archivedAt != null && hit.archivedAt == null) {
-              yield* client.query((db) =>
+          const target = hit[0]?.tokenId;
+          if (target) {
+            // 复用已有 Token:把它还没有的 ref 补挂过去(撞约束的静默跳过)。
+            yield* client.batch((db) =>
+              refs.map((r) =>
                 db
-                  .update(accounts)
-                  .set({ archivedAt: input.archivedAt })
-                  .where(and(eq(accounts.id, hit.id), eq(accounts.userId, userId))),
-              );
-            }
-            return { id: hit.id, created: false };
+                  .insert(tokenRefs)
+                  .values({ userId, namer: r.namer, localName: r.localName, tokenId: target })
+                  .onConflictDoNothing(),
+              ),
+            );
+            return target;
           }
-          // 新账户:同 AccountStore.create,建账户 + 归属默认 Portfolio 原子写
-          //(维持「每账户恰一行归属」不变量)。
-          const pf = yield* ensureDefault(client, userId);
-          const id = crypto.randomUUID();
-          yield* client.batch((db) => [
-            db.insert(accounts).values({
-              id,
-              userId,
-              connectorId: input.connectorId,
-              platform,
-              label: input.label,
-              creds,
-              createdAt: Date.now(),
-              archivedAt: input.archivedAt ?? null,
-            }),
-            db.insert(portfolioAccounts).values({ portfolioId: pf.id, accountId: id }),
-          ]);
-          return { id, created: true };
-        }),
+        }
 
-      /** 快照自然键 = (accountId, takenAt) —— 一个账户一个时刻一份。已存在则整份跳过。 */
-      importSnapshot: (
-        accountId: string,
-        input: WriteSnapshotInput,
-      ): Effect.Effect<{ created: boolean }> =>
-        Effect.gen(function* () {
-          yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-          const existing = yield* client.query((db) =>
+        const id = crypto.randomUUID();
+        yield* client.batch((db) => [
+          db.insert(tokens).values({
+            id,
+            userId,
+            symbol: t.symbol,
+            name: t.name,
+            logo: t.logo ?? null,
+            providerLogo: t.providerLogo ?? null,
+            marketCapRank: t.marketCapRank ?? null,
+            infoExpiresAt: now(), // 建行即 stale → 下次刷价/刷图补齐 name/logo/价
+          }),
+          ...refs.map((r) =>
             db
-              .select({ id: snapshots.id })
-              .from(snapshots)
-              .where(and(eq(snapshots.accountId, accountId), eq(snapshots.takenAt, input.takenAt)))
-              .limit(1),
-          );
-          if (existing[0]) return { created: false };
-          yield* snapshotStore.write(accountId, input);
-          return { created: true };
-        }),
+              .insert(tokenRefs)
+              .values({ userId, namer: r.namer, localName: r.localName, tokenId: id })
+              .onConflictDoNothing(),
+          ),
+        ]);
+        return id;
+      }),
 
-      /** 手记活动自然键 = 整条内容。**createdAt 必须进键**,理由见下。 */
-      // **createdAt 必须进键**:系统允许同一 occurredAt 有多笔、靠 createdAt 排序折叠(deriveAmount);
-      // 两笔除 createdAt 外全同是合法的不同事件,漏掉它会把它们折成一笔、丢数量(连首次恢复都出错)。
-      // v3 导出恒带 createdAt,故加进键后再导仍命中(幂等)。createdAt 缺席(非导入路径)才退回内容键。
-      importManualActivity: (
-        accountId: string,
-        tokenId: string,
-        input: ManualActivityInput,
-      ): Effect.Effect<{ created: boolean }> =>
-        Effect.gen(function* () {
-          yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-          yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
-          const price = input.price ?? null;
-          const fee = input.fee ?? null;
-          const memo = input.memo ?? null;
-          const existing = yield* client.query((db) =>
-            db
-              .select({ id: manualActivity.id })
-              .from(manualActivity)
-              .where(
-                and(
-                  eq(manualActivity.accountId, accountId),
-                  eq(manualActivity.tokenId, tokenId),
-                  eq(manualActivity.kind, input.kind),
-                  eq(manualActivity.amount, input.amount),
-                  price === null ? isNull(manualActivity.price) : eq(manualActivity.price, price),
-                  fee === null ? isNull(manualActivity.fee) : eq(manualActivity.fee, fee),
-                  eq(manualActivity.occurredAt, input.occurredAt),
-                  memo === null ? isNull(manualActivity.memo) : eq(manualActivity.memo, memo),
-                  input.createdAt != null
-                    ? eq(manualActivity.createdAt, input.createdAt)
-                    : undefined,
-                ),
-              )
-              .limit(1),
-          );
-          if (existing[0]) return { created: false };
-          yield* manualStore.recordActivity(accountId, tokenId, input);
-          return { created: true };
-        }),
-    };
-  }),
+    /** 账户自然键 = (connectorId, platform, label, creds) 全同即同一个。归档态是可变属性、不进键。 */
+    // 命中时若文件说归档而现有未归档,则对齐成归档。
+    importAccount: (
+      input: CreateAccountInput & { archivedAt?: number | null },
+    ): Effect.Effect<{ id: string; created: boolean }> =>
+      Effect.gen(function* () {
+        const platform = input.platform ?? null;
+        const creds = input.creds ?? null;
+        const existing = yield* client.query((db) =>
+          db
+            .select({ id: accounts.id, archivedAt: accounts.archivedAt })
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.userId, userId),
+                eq(accounts.connectorId, input.connectorId),
+                platform === null ? isNull(accounts.platform) : eq(accounts.platform, platform),
+                eq(accounts.label, input.label),
+                creds === null ? isNull(accounts.creds) : eq(accounts.creds, creds),
+              ),
+            )
+            .limit(1),
+        );
+        const hit = existing[0];
+        if (hit) {
+          if (input.archivedAt != null && hit.archivedAt == null) {
+            yield* client.query((db) =>
+              db
+                .update(accounts)
+                .set({ archivedAt: input.archivedAt })
+                .where(and(eq(accounts.id, hit.id), eq(accounts.userId, userId))),
+            );
+          }
+          return { id: hit.id, created: false };
+        }
+        // 新账户:同 AccountStore.create,建账户 + 归属默认 Portfolio 原子写
+        //(维持「每账户恰一行归属」不变量)。
+        const pf = yield* ensureDefault(client, userId);
+        const id = crypto.randomUUID();
+        yield* client.batch((db) => [
+          db.insert(accounts).values({
+            id,
+            userId,
+            connectorId: input.connectorId,
+            platform,
+            label: input.label,
+            creds,
+            createdAt: Date.now(),
+            archivedAt: input.archivedAt ?? null,
+          }),
+          db.insert(portfolioAccounts).values({ portfolioId: pf.id, accountId: id }),
+        ]);
+        return { id, created: true };
+      }),
+
+    /** 快照自然键 = (accountId, takenAt) —— 一个账户一个时刻一份。已存在则整份跳过。 */
+    importSnapshot: (
+      accountId: string,
+      input: WriteSnapshotInput,
+    ): Effect.Effect<{ created: boolean }, NotFound> =>
+      Effect.gen(function* () {
+        yield* assertAccountOwned(client, userId, accountId);
+        const existing = yield* client.query((db) =>
+          db
+            .select({ id: snapshots.id })
+            .from(snapshots)
+            .where(and(eq(snapshots.accountId, accountId), eq(snapshots.takenAt, input.takenAt)))
+            .limit(1),
+        );
+        if (existing[0]) return { created: false };
+        yield* snapshotStore.write(accountId, input);
+        return { created: true };
+      }),
+
+    /** 手记活动自然键 = 整条内容。**createdAt 必须进键**,理由见下。 */
+    // **createdAt 必须进键**:系统允许同一 occurredAt 有多笔、靠 createdAt 排序折叠(deriveAmount);
+    // 两笔除 createdAt 外全同是合法的不同事件,漏掉它会把它们折成一笔、丢数量(连首次恢复都出错)。
+    // v3 导出恒带 createdAt,故加进键后再导仍命中(幂等)。createdAt 缺席(非导入路径)才退回内容键。
+    importManualActivity: (
+      accountId: string,
+      tokenId: string,
+      input: ManualActivityInput,
+    ): Effect.Effect<{ created: boolean }, NotFound> =>
+      Effect.gen(function* () {
+        yield* assertAccountOwned(client, userId, accountId);
+        yield* assertTokenOwned(client, userId, tokenId);
+        const price = input.price ?? null;
+        const fee = input.fee ?? null;
+        const memo = input.memo ?? null;
+        const existing = yield* client.query((db) =>
+          db
+            .select({ id: manualActivity.id })
+            .from(manualActivity)
+            .where(
+              and(
+                eq(manualActivity.accountId, accountId),
+                eq(manualActivity.tokenId, tokenId),
+                eq(manualActivity.kind, input.kind),
+                eq(manualActivity.amount, input.amount),
+                price === null ? isNull(manualActivity.price) : eq(manualActivity.price, price),
+                fee === null ? isNull(manualActivity.fee) : eq(manualActivity.fee, fee),
+                eq(manualActivity.occurredAt, input.occurredAt),
+                memo === null ? isNull(manualActivity.memo) : eq(manualActivity.memo, memo),
+                input.createdAt != null ? eq(manualActivity.createdAt, input.createdAt) : undefined,
+              ),
+            )
+            .limit(1),
+        );
+        if (existing[0]) return { created: false };
+        yield* manualStore.recordActivity(accountId, tokenId, input);
+        return { created: true };
+      }),
+  };
+});
+
+// 过渡壳。app 里还有调用点写着 `yield* TransferStore`,挂进聚合 `Database` 之后(#504 T7–T12)
+// 它们会一处不剩,这个 class 随之删除 —— 留下的就是上面那个 make,tab-pins 今天的形状。
+export class TransferStore extends Effect.Service<TransferStore>()("db/TransferStore", {
+  effect: makeTransferStore,
 }) {}

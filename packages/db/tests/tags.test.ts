@@ -2,14 +2,13 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { AccountStore, PortfolioStore, TagStore } from "../src/domains";
 import { user } from "../src/schema/auth";
-import { forUser } from "./effect";
+import { forDomain } from "./effect";
 
-const tagsOf = forUser(TagStore, TagStore.Default);
+const tagsOf = forDomain((db) => db.tags);
 
-const accounts = forUser(AccountStore, AccountStore.Default);
-const portfolios = forUser(PortfolioStore, PortfolioStore.Default);
+const accounts = forDomain((db) => db.accounts);
+const portfolios = forDomain((db) => db.portfolios);
 
 // Tag 数据地基(ADR 0034)对着真 D1 跑:表达式唯一索引 / cascade / 同 batch 清 tag 都真生效。
 // 不隔离每测存储 → beforeEach 重置用户(级联清 portfolios/tags/account_tags)。

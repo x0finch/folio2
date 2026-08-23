@@ -8,14 +8,12 @@ import {
   dbClientLayer,
   globalTokenRefIndexStoreLayer,
   ManualStore,
+  oraclePortsLayer,
   PortfolioStore,
   SettingsStore,
   SnapshotStore,
   TagStore,
   TransferStore,
-  userCacheStoreLayer,
-  userTokenPriceStoreLayer,
-  userTokenStoreLayer,
 } from "@folio/db";
 import {
   GlobalRefIndexService,
@@ -86,16 +84,11 @@ export const perRequestLayer = (userId: string): Layer.Layer<DbClient | CurrentU
 // 惰性到「只建被用到的那一个」这件事**不做**:`packages/db/src/connect.ts` 自己写着
 // 「drizzle(env.DB) 很轻,每次创建即可」,而现在四个 store 共用同一个 `DbClient`——
 // 建它们只是几个闭包。迁移前那套 getter + `??=` 的手写惰性,省下的是不存在的代价。
+//
+// 四个端口现在是 db 出的**一张** layer(#504 T5)。这里只剩「按谁跑」这一件事要补 ——
+// 端口有几个、叫什么名字,装配点不必知道。
 const portsFor = (perRequest: Layer.Layer<DbClient | CurrentUser>) =>
-  Layer.provide(
-    Layer.mergeAll(
-      userTokenStoreLayer({ namer: UPSTREAM_ID }),
-      userTokenPriceStoreLayer({ namer: UPSTREAM_ID }),
-      userCacheStoreLayer,
-      globalTokenRefIndexStoreLayer,
-    ),
-    perRequest,
-  );
+  Layer.provide(oraclePortsLayer({ namer: UPSTREAM_ID }), perRequest);
 
 // cron 刷全局映射表只要这两个端口 —— 没有 userId,也不建 per-user 那三张。
 const warmPorts = () =>
@@ -163,19 +156,19 @@ export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
 //   ② 它们在**同一次 `Effect.provide`** 里被建起来 —— Layer memoisation 的作用域是一次构建,
 //      分两次 provide 就是两份,哪怕引用相同。见下面 `requestLayer`。
 //
-// `TransferStore` 的 layer 还要另外两个 store(导快照/导活动调它们的写口),所以先合出 base
-// 再把它 provide 上去。
-const dbStoresFor = (perRequest: Layer.Layer<DbClient | CurrentUser>): Layer.Layer<DbStores> => {
-  const base = Layer.mergeAll(
-    AccountStore.Default,
-    PortfolioStore.Default,
-    SettingsStore.Default,
-    SnapshotStore.Default,
-    ManualStore.Default,
-    TagStore.Default,
+const dbStoresFor = (perRequest: Layer.Layer<DbClient | CurrentUser>): Layer.Layer<DbStores> =>
+  Layer.provide(
+    Layer.mergeAll(
+      AccountStore.Default,
+      PortfolioStore.Default,
+      SettingsStore.Default,
+      SnapshotStore.Default,
+      ManualStore.Default,
+      TagStore.Default,
+      TransferStore.Default,
+    ),
+    perRequest,
   );
-  return Layer.provide(Layer.merge(base, Layer.provide(TransferStore.Default, base)), perRequest);
-};
 
 /**
  * app 数据那半**还没挂进聚合 `Database`** 的领域服务 —— server fn 的 `R` 里出现的就是这些。
@@ -243,10 +236,10 @@ export const runRequest = <A, E extends UpstreamError | Error>(
  * 噪音收成一处:`runStore(userId, TagStore, (s) => s.list())` 与它替掉的 `db.listTagsByUser(userId)`
  * 一样长,而这一句里 userId 只出现在装配那一处 —— 那正是 ADR 0037 要的。
  */
-export const runStore = <I extends DbStores, S, A>(
+export const runStore = <I extends DbStores, S, A, E extends UpstreamError | Error>(
   userId: string,
   tag: Context.Tag<I, S>,
-  use: (service: S) => Effect.Effect<A>,
+  use: (service: S) => Effect.Effect<A, E>,
 ): Promise<A> => runRequest(userId, Effect.flatMap(tag, use));
 
 /** 系统级(无 userId)的 db 查询 —— cron 枚举用户那一条。原则 #6 的受控例外。 */

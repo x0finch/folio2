@@ -5,6 +5,7 @@ import {
   type ManualActivityPatch,
   type ManualHolding,
   ManualStore,
+  type NotFound,
   SnapshotStore,
   type SnapshotWithBalances,
 } from "@folio/db";
@@ -89,7 +90,7 @@ const mintHolding = (picked: {
 export const createManualAccount = (
   label: string,
   tokens: string,
-): Effect.Effect<AccountSafe, never, AccountStore | ManualStore | TokenService> =>
+): Effect.Effect<AccountSafe, NotFound, AccountStore | ManualStore | TokenService> =>
   Effect.gen(function* () {
     const [first] = JSON.parse(tokens) as Array<{
       symbol: string;
@@ -131,7 +132,7 @@ export const createManualAccount = (
 // 现在全部调用方都在 effect 里了,重复的那半删掉。
 const manualTokensByAccount = (
   accounts: AccountSafe[],
-): Effect.Effect<{ id: string; tokens: CredsToken[] }[], never, ManualStore> => {
+): Effect.Effect<{ id: string; tokens: CredsToken[] }[], NotFound, ManualStore> => {
   const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
   if (manual.length === 0) return Effect.succeed([]);
   return Effect.forEach(
@@ -150,7 +151,7 @@ const manualTokensByAccount = (
 // 上游(CGK)那一档、法币恒 null(且 ADR 0021 把它定义成「上游认没认出」),所以身份单独按 FIAT_NAMER 取。
 export const manualFiatRefs = (
   accounts: AccountSafe[],
-): Effect.Effect<Map<string, string>, never, ManualStore> =>
+): Effect.Effect<Map<string, string>, NotFound, ManualStore> =>
   Effect.gen(function* () {
     const store = yield* ManualStore;
     const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
@@ -179,7 +180,7 @@ export const injectManualSnapshots = (
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
   takenAt: number = Date.now(),
-): Effect.Effect<void, never, ManualStore | TokenService | FxService> =>
+): Effect.Effect<void, NotFound, ManualStore | TokenService | FxService> =>
   Effect.gen(function* () {
     const list = yield* manualTokensByAccount(accounts);
     if (list.length === 0) return;
@@ -208,7 +209,7 @@ export const injectManualSnapshots = (
 export const sealManualAccount = (
   account: AccountSafe,
   takenAt: number = Date.now(),
-): Effect.Effect<boolean, never, ManualStore | SnapshotStore | TokenService | FxService> =>
+): Effect.Effect<boolean, NotFound, ManualStore | SnapshotStore | TokenService | FxService> =>
   Effect.gen(function* () {
     if (!isManual(account.connectorId)) return false;
     const byAccount = new Map<string, SnapshotWithBalances>();
@@ -237,7 +238,7 @@ export const sealManualAccount = (
 // 故预热不能只从快照收集币 —— 否则纯 manual 用户的币永远暖不到、拿不到实时价(ADR 0018 T2 实施细化)。
 export const manualBalancesForWarm = (
   accounts: AccountSafe[],
-): Effect.Effect<BalanceLike[], never, ManualStore> =>
+): Effect.Effect<BalanceLike[], NotFound, ManualStore> =>
   Effect.map(manualTokensByAccount(accounts), (list) =>
     list.flatMap(({ id, tokens }) => buildManualSnapshot(id, tokens, [], 0).balances),
   );
@@ -268,7 +269,7 @@ export type ManualWriteResult = { ok: true } | { ok: false; reason: "overdraw"; 
 // 各自再投影成所需形状。DB 层 token_id 可空(迁移遗留)→ 防御式跳过。
 const loadTokensWithActivities = (
   accountId: string,
-): Effect.Effect<{ token: ManualHolding; activities: ManualActivity[] }[], never, ManualStore> =>
+): Effect.Effect<{ token: ManualHolding; activities: ManualActivity[] }[], NotFound, ManualStore> =>
   Effect.gen(function* () {
     const store = yield* ManualStore;
     const [tokens, activities] = yield* Effect.all(
@@ -294,7 +295,7 @@ function foldActivitiesByToken(
 }
 
 // manual-batch 的 Token[](写路径超支校验用)。ManualActivity 结构含 DerivableActivity。
-const loadTokens = (accountId: string): Effect.Effect<Token[], never, ManualStore> =>
+const loadTokens = (accountId: string): Effect.Effect<Token[], NotFound, ManualStore> =>
   Effect.map(loadTokensWithActivities(accountId), (rows) =>
     rows.map(({ token, activities }) => ({
       id: token.id,
@@ -324,7 +325,7 @@ export interface ManualAccountDetail {
 }
 export const loadManualAccountDetail = (
   accountId: string,
-): Effect.Effect<ManualAccountDetail, never, ManualStore> =>
+): Effect.Effect<ManualAccountDetail, NotFound, ManualStore> =>
   Effect.gen(function* () {
     const [perToken, fiatRefById] = yield* Effect.all(
       [loadTokensWithActivities(accountId), accountFiatRefs(accountId)],
@@ -356,7 +357,9 @@ export const loadManualAccountDetail = (
 // manual 账户不写 snapshot → 其历史由账本现算。共用 loadTokensWithActivities(消 N+1),投影成 HistoryToken[]
 // 喂 buildManualAccountSeries 折出 (takenAt, totalUsd) 阶梯序列。ManualActivity 结构含 HistoryActivity
 // (price 参与 price@T 降级链②,见 manual-history)。
-const loadHistoryTokens = (accountId: string): Effect.Effect<HistoryToken[], never, ManualStore> =>
+const loadHistoryTokens = (
+  accountId: string,
+): Effect.Effect<HistoryToken[], NotFound, ManualStore> =>
   Effect.gen(function* () {
     const [perToken, fiatRefById] = yield* Effect.all(
       [loadTokensWithActivities(accountId), accountFiatRefs(accountId)],
@@ -384,7 +387,7 @@ const loadHistoryTokens = (accountId: string): Effect.Effect<HistoryToken[], nev
 // listManualHoldingsByAccount 拿到它(#271)。历史曲线要它派生 CODE、明细要它编票(见 loadManualAccountDetail)。
 const accountFiatRefs = (
   accountId: string,
-): Effect.Effect<Map<string, string>, never, ManualStore> =>
+): Effect.Effect<Map<string, string>, NotFound, ManualStore> =>
   Effect.gen(function* () {
     const store = yield* ManualStore;
     const out = new Map<string, string>();
@@ -435,7 +438,7 @@ const buildHistoricalPriceAt = (
 export const loadManualAccountSeries = (
   accountId: string,
   now: number = Date.now(),
-): Effect.Effect<SnapshotTotalRow[], never, ManualStore | TokenService | FxService> =>
+): Effect.Effect<SnapshotTotalRow[], NotFound, ManualStore | TokenService | FxService> =>
   Effect.gen(function* () {
     const tokens = yield* loadHistoryTokens(accountId);
     const priceAt = yield* buildHistoricalPriceAt(tokens, now);
@@ -447,7 +450,7 @@ export const loadManualAccountSeries = (
 // unitPrice)。账户不存在/非本人 → null(getAccountById 已 userId-scoped)。
 export const loadManualAccountLiveTotal = (
   accountId: string,
-): Effect.Effect<number | null, never, AccountStore | ManualStore | TokenService | FxService> =>
+): Effect.Effect<number | null, NotFound, AccountStore | ManualStore | TokenService | FxService> =>
   Effect.gen(function* () {
     const account = yield* Effect.flatMap(AccountStore, (s) => s.getById(accountId));
     if (!account) return null;
@@ -463,7 +466,7 @@ export const loadManualAccountLiveTotal = (
 export const loadManualHistoryRows = (
   accounts: AccountSafe[],
   now: number = Date.now(),
-): Effect.Effect<SnapshotTotalRow[], never, ManualStore | TokenService | FxService> =>
+): Effect.Effect<SnapshotTotalRow[], NotFound, ManualStore | TokenService | FxService> =>
   Effect.map(
     Effect.forEach(
       accounts.filter((a) => isManual(a.connectorId)),
@@ -485,7 +488,7 @@ export const loadManualHistoryRows = (
 // set 语义又重置基线,所以「再加一次」等于「把数量改成这个」。
 export const createToken = (
   input: CreateTokenInput,
-): Effect.Effect<{ id: string }, never, ManualStore | TokenService> =>
+): Effect.Effect<{ id: string }, NotFound, ManualStore | TokenService> =>
   Effect.gen(function* () {
     const store = yield* ManualStore;
     const tokenId = yield* mintHolding(input);
@@ -503,7 +506,7 @@ export const createToken = (
 // 改 token 定义;若目标 amount 与当前 derived 不同 → 追加一条 set 活动对齐(播 set 语义,grill Q13)→ 物化。
 // **accountId 由调用方带** —— token 不再自带账户(一个币可以被多个手记账户持有)。
 // 改「这其实是哪个币」(那条上游 ref)不在这里:那是改绑,与自动补链的合并同一条路径,另开一票。
-export const updateToken = (input: UpdateTokenInput): Effect.Effect<void, never, ManualStore> =>
+export const updateToken = (input: UpdateTokenInput): Effect.Effect<void, NotFound, ManualStore> =>
   Effect.gen(function* () {
     const store = yield* ManualStore;
     yield* store.setHoldingDef(input.tokenId, { symbol: input.symbol.trim().toUpperCase() });
@@ -525,14 +528,14 @@ export const updateToken = (input: UpdateTokenInput): Effect.Effect<void, never,
 export const deleteToken = (
   accountId: string,
   tokenId: string,
-): Effect.Effect<void, never, ManualStore> =>
+): Effect.Effect<void, NotFound, ManualStore> =>
   Effect.flatMap(ManualStore, (s) => s.detachHolding(accountId, tokenId));
 
 // 批量加活动:载既有 token → 纯逻辑解析+校验(整批拒因超支)→ 原子提交(新建 token + 插活动)→ 物化。
 export const addManualActivities = (
   accountId: string,
   drafts: BatchDraft[],
-): Effect.Effect<ManualWriteResult, never, ManualStore | TokenService> =>
+): Effect.Effect<ManualWriteResult, NotFound, ManualStore | TokenService> =>
   Effect.gen(function* () {
     const store = yield* ManualStore;
     const existing = yield* loadTokens(accountId);
@@ -557,14 +560,14 @@ export const addManualActivities = (
 export const deleteManualActivity = (
   accountId: string,
   activityId: string,
-): Effect.Effect<void, never, ManualStore> =>
+): Effect.Effect<void, NotFound, ManualStore> =>
   Effect.flatMap(ManualStore, (s) => s.removeActivity(accountId, activityId));
 
 // 编辑一笔既有活动:取所属 token 时间线、套 patch 折叠校验(改 amount/kind/日期可能致超支)→ 合法才写 → 物化。
 export const editManualActivity = (
   activityId: string,
   patch: ManualActivityPatch,
-): Effect.Effect<ManualWriteResult, never, ManualStore> =>
+): Effect.Effect<ManualWriteResult, NotFound, ManualStore> =>
   Effect.gen(function* () {
     const store = yield* ManualStore;
     const { tokenId, accountId } = yield* store.activityOwner(activityId);
@@ -612,7 +615,7 @@ export const loadManualGainHistory = (
   accounts: AccountSafe[],
   now: number,
   since: number,
-): Effect.Effect<GainHistoryRow[], never, ManualStore | TokenService | FxService> =>
+): Effect.Effect<GainHistoryRow[], NotFound, ManualStore | TokenService | FxService> =>
   Effect.gen(function* () {
     // 归档账户不参与(ADR 0039:封存之后不再产生 24h 盈亏)。
     const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);

@@ -1,25 +1,14 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
-import { Layer } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import {
-  AccountStore,
-  ManualStore,
-  PortfolioStore,
-  SnapshotStore,
-  TransferStore,
-} from "../src/domains";
 import { user } from "../src/schema/auth";
-import { forUser } from "./effect";
+import { forDomain } from "./effect";
 
-const transferOf = forUser(
-  TransferStore,
-  Layer.provide(TransferStore.Default, Layer.merge(SnapshotStore.Default, ManualStore.Default)),
-);
+const transferOf = forDomain((db) => db.transfer);
 
-const accounts = forUser(AccountStore, AccountStore.Default);
-const portfolios = forUser(PortfolioStore, PortfolioStore.Default);
+const accounts = forDomain((db) => db.accounts);
+const portfolios = forDomain((db) => db.portfolios);
 
 // Portfolio 地基(ADR 0033)对着真 D1 跑:唯一约束 / 部分索引 / cascade / batch 都真生效。
 // 不隔离每测存储 → beforeEach 重置用户(级联清 portfolios/portfolio_accounts)。

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import type { SnapshotWithBalances } from "@folio/db";
-import { globalTokenRefIndexStoreLayer, userCacheStoreLayer } from "@folio/db";
+import { globalTokenRefIndexStoreLayer, oraclePortsLayer } from "@folio/db";
 import { TokenService } from "@folio/oracle";
 import { CacheStore, GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
@@ -403,7 +403,7 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
       s.putAll([{ chainRef: USDC_ETH, upstreamRef: USDC_UPSTREAM }], Date.now()),
     );
     // warm 集给 symbol 那一档留个本地候选,免得它想回源(本情景不该出网)。
-    await withStore(CacheStore, userCacheStoreLayer, USER, (s) =>
+    await withStore(CacheStore, oraclePortsLayer({ namer: NAMER }), USER, (s) =>
       s.put(
         "warm",
         {

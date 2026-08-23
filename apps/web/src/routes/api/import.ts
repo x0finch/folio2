@@ -31,20 +31,25 @@ const depsFrom = (transfer: TransferStore): ImportDeps => ({
   importToken: (t, refs) => Effect.map(transfer.importToken(t, refs), (id) => ({ id })),
   importAccount: (input) =>
     transfer.importAccount({ ...input, connectorId: input.connectorId as ConnectorId }),
+  // **`orDie` 是刻意的**:这两个写口会 fail `NotFound`(归属断言),但这里的 accountId /
+  // tokenId 都是**这一趟自己刚建出来的**,拿不到就只能是代码错了 —— 那是 defect,不是调用方
+  // 该处理的失败。这也正是改造前的行为(断言 `throw` 在 promise 里 = defect),没有变。
   importSnapshot: (accountId, input) =>
     // 边界透传:db 的 SnapshotBalanceInput.kind 仍是旧 4 值 BalanceKind(#37c 前),
     // 而导入文件的 kind 是 connectors 的 5-kind;运行期只作 text 存储,按契约断言透传(同 @folio/sync)。
     Effect.asVoid(
-      transfer.importSnapshot(accountId, {
-        ...input,
-        balances: input.balances.map((b) => ({
-          ...b,
-          kind: b.kind as SnapshotBalanceInput["kind"],
-        })),
-      }),
+      transfer
+        .importSnapshot(accountId, {
+          ...input,
+          balances: input.balances.map((b) => ({
+            ...b,
+            kind: b.kind as SnapshotBalanceInput["kind"],
+          })),
+        })
+        .pipe(Effect.orDie),
     ),
   importManualActivity: (accountId, tokenId, input) =>
-    Effect.asVoid(transfer.importManualActivity(accountId, tokenId, input)),
+    Effect.asVoid(transfer.importManualActivity(accountId, tokenId, input).pipe(Effect.orDie)),
 });
 
 export const Route = createFileRoute("/api/import")({

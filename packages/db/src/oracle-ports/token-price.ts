@@ -1,8 +1,8 @@
 import type { TokenPriceWrite, TokenRecordPrice } from "@folio/oracle-basic";
-import { TokenPriceStore } from "@folio/oracle-basic/ports";
+import type { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray } from "drizzle-orm";
-import { Clock, Effect, Layer, Option } from "effect";
+import { Clock, Effect, Option } from "effect";
 import { chunk, DbClient } from "../client";
 import { CurrentUser } from "../current-user";
 import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
@@ -14,11 +14,7 @@ import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
 //
 // **时间走 `Clock`**(以前是 `opts.now`);`env` 不再出现在签名里(见 ./service.ts)。
 
-export interface UserTokenPriceStoreOpts {
-  namer: string; // 当前上游的 id —— 历史日价的全局键要用它拼整条 tokenRef
-}
-
-const make = ({ namer }: UserTokenPriceStoreOpts) =>
+export const makeUserTokenPriceStore = (namer: string) =>
   Effect.gen(function* () {
     const client = yield* DbClient;
     const userId = yield* CurrentUser;
@@ -178,8 +174,3 @@ const make = ({ namer }: UserTokenPriceStoreOpts) =>
 
     return store;
   });
-
-export const userTokenPriceStoreLayer = (
-  opts: UserTokenPriceStoreOpts,
-): Layer.Layer<TokenPriceStore, never, DbClient | CurrentUser> =>
-  Layer.effect(TokenPriceStore, make(opts));

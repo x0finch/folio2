@@ -2,17 +2,16 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { AccountStore, SnapshotStore } from "../src/domains";
 import { user } from "../src/schema/auth";
-import { forUser } from "./effect";
+import { forDomain } from "./effect";
 
 // 同步落的快照按钟点折叠(#461):同账户、同一个钟点里只留最后一份。理由见
 // `SnapshotStore.write` 的文档注释。
 //
 // **为什么这组非真 D1 不可**:折叠靠的是「一个 batch 里先删后插」+ 外键的 ON DELETE CASCADE ——
 // 前者的原子性、后者会不会真的连余额行一起带走,都只有真库答得了。假 db 上这两条永远是绿的。
-const snapshotsOf = forUser(SnapshotStore, SnapshotStore.Default);
-const accountsOf = forUser(AccountStore, AccountStore.Default);
+const snapshotsOf = forDomain((db) => db.snapshots);
+const accountsOf = forDomain((db) => db.accounts);
 
 const USER = "user-collapse";
 const OTHER = "user-collapse-other";

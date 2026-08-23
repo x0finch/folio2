@@ -2,20 +2,15 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import {
-  AccountStore,
-  listUserIdsWithAccounts,
-  SettingsStore,
-  SnapshotStore,
-} from "../src/domains";
+import { listUserIdsWithAccounts } from "../src/domains";
 // 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
 import { user } from "../src/schema/auth";
-import { forUser, runDb } from "./effect"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
+import { forDomain, runDb } from "./effect"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
 
-const snapshotsOf = forUser(SnapshotStore, SnapshotStore.Default);
+const snapshotsOf = forDomain((db) => db.snapshots);
 
-const accounts = forUser(AccountStore, AccountStore.Default);
-const settings = forUser(SettingsStore, SettingsStore.Default);
+const accounts = forDomain((db) => db.accounts);
+const settings = forDomain((db) => db.settings);
 
 const USER_A = "user-a";
 const USER_B = "user-b";

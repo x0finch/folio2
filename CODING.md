@@ -146,6 +146,12 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
   今天没有一个调用点 catch 它,行为是整个请求 500,做成 typed error 只会迫使每个调用点写一遍
   `catchAll` 再扔回去。出网那一侧相反 —— 它**有人处理**(降级到本地旧值),所以 `E` 是那四类
   `UpstreamError`。
+- **同一条判据的另一面:`NotFound` 是有人处理的,所以它在 `E` 里。** `@folio/db` 的归属断言
+  (`domains/ownership.ts`)fail `NotFound` 而不是 `throw` —— 「这不是你的账户」调用方有话可回
+  (一句人话,由 `runEffect` 一处映射),而「代码写错了」没有,后者继续当 defect 炸。
+  **「不属于本人」与「不存在」共用一个错误是刻意的**:分开报等于给出一个探测别人 id 的接口。
+  **id 谁给的决定放哪一边**:调用方传进来的 id → 留在 `E`;这段代码自己刚建出来的 id
+  (导入那条路、同步写快照)→ 在边界 `Effect.orDie`,它找不到只能是 bug。
 - **降级要按类型接,而且要留痕。** `try { … } catch { /* 降级 */ }` 有两个毛病:连自己的 bug
   一起吞(parse 写错了抛 TypeError,和一次 429 长得一样),以及一行痕迹都不留(上游整晚限流,
   日志里什么都没有)。改成 `catchAll`(只接 typed 的上游错误)+ 一条 `logWarning`。
