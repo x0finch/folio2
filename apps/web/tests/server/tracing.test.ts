@@ -37,24 +37,33 @@ describe("span 树", () => {
         Effect.orDie,
       ),
     );
-    expect(tree).toMatch(/^createTabPin \d+\.\d+ms$/);
+    expect(tree.split("\n")[0]).toMatch(/^createTabPin \d+\.\d+ms$/);
   });
 
-  // **handler 级 span 够不够?** 把答案写进代码,而不是留在某个人的印象里。
+  // **两层就够了,这是量出来的**(#504 T16 那张票要的那次实测)。
   //
-  // 树里**只有一行**:handler 自己。它答得了「这个请求花了多久」,答不了「里头三次 D1 查询
-  // 各占多少」—— 因为 db 那七十个方法没有名字(有意的,判据见 #504 T16 那张票:桥不撒在每个
-  // 方法里,要加可观测性该动 `DbClient.query` 那一处收口点)。
+  // 只有 handler 一层时,`getPortfolioOverview` 的树就一行 `20.0ms` —— 答得了「哪个端点慢」,
+  // 答不了「慢在哪」。给 `DbClient` 那一处收口点加上 span 之后,同一棵树是:
   //
-  // 这条**故意断言「只有一行」**:哪天有人给 db 那层加了 span,它会红,而那正是该重读那张票的时候。
-  it("树里只有 handler 一层 —— db 那几次查询各花多久看不见", async () => {
+  //     getPortfolioOverview 20.0ms
+  //       db.query 13.0ms   ← 两条并发的重读,那 20ms 里的大头
+  //       db.query 13.0ms
+  //       db.query 1.0ms    ← 其余七条各 1–2ms
+  //       …
+  //
+  // 问题就此答完,而**代价是零个方法被改**:七十个 op 全在那条桥上过。要再细就得给它们各起
+  // 名字,判据(见那张票)是不值。
+  //
+  // 这条钉的是**两层都在**:handler 名 + 底下那次 `db.query`。
+  it("树有两层:handler 名 + 底下那次 D1", async () => {
     const tree = await treeOf(
       forUser(
         USER,
         Effect.flatMap(Database, (db) => db.tabPins.list()),
       ).pipe(Effect.orDie, Effect.withSpan("listTabPins")),
     );
-    expect(tree.split("\n")).toHaveLength(1);
-    expect(tree).toContain("listTabPins");
+    const lines = tree.split("\n");
+    expect(lines[0]).toMatch(/^listTabPins \d/);
+    expect(lines.slice(1)).toEqual([expect.stringMatching(/^ {2}db\.query \d/)]);
   });
 });
