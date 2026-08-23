@@ -1,5 +1,6 @@
 import { Database } from "@folio/db";
-import type { OraclePorts, OracleServices } from "@folio/oracle";
+import type { OracleServices } from "@folio/oracle";
+import type { CacheStore } from "@folio/oracle-basic/ports";
 import { Effect, Layer } from "effect";
 import { logTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
@@ -30,8 +31,16 @@ export const userLayer = (userId: string): Layer.Layer<UserServices> => {
   return Layer.mergeAll(Layer.provide(Database.Default, perRequest), oracleFor(perRequest));
 };
 
-/** 一个用户的全部服务 —— handler 的 `R` 只能落在这个范围里。 */
-export type UserServices = Database | OracleServices | OraclePorts;
+/**
+ * 一个用户的全部服务 —— handler 的 `R` 只能落在这个范围里。
+ *
+ * **参考层的端口里只透一个 `CacheStore`**(#504 T17):app 真正直接用端口的只有一处 ——
+ * DeFi 协议图(`logos/store.ts`),那份数据来自用户自己同步下来的余额 meta,没有上游、不出网,
+ * 不属于参考层,但要一个 per-user 的键值缓存。另外三个(`TokenStore` / `TokenPriceStore` /
+ * `GlobalTokenRefIndexStore`)app 一处都没直接碰,却曾经一样露在外面 —— 那等于给任何 handler
+ * 留了一条绕过参考层直接改代币行和价格行的路。
+ */
+export type UserServices = Database | OracleServices | CacheStore;
 
 /**
  * **一个用户的活儿,装配好了但还没跑。**

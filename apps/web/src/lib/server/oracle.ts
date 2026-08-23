@@ -15,12 +15,8 @@ import {
   TagStore,
   TransferStore,
 } from "@folio/db";
-import {
-  GlobalRefIndexService,
-  type OraclePorts,
-  type OracleServices,
-  oracleLayer,
-} from "@folio/oracle";
+import { GlobalRefIndexService, type OracleServices, oracleLayer } from "@folio/oracle";
+import type { CacheStore } from "@folio/oracle-basic/ports";
 import {
   coinGeckoFxUpstreamLayer,
   coinGeckoNamerLayer,
@@ -98,13 +94,27 @@ const warmPorts = () =>
     coinGeckoTokenUpstreamLayer(cgConfig()),
   );
 
-// `provideMerge` 而不是 `provide`:端口也透出去。app 自己有一小片直接用 `CacheStore`
-// (DeFi 协议图 —— 没有上游、不属于参考层,见 `logos/store.ts`),而这些端口本来就是
-// 这个文件建的,没必要为了用它们再包一个服务。
-// **`dbClient` 是必填,没有默认值。** 它出包给 `runtime.ts` 用之后,一个 `= dbClientLayer(env)`
-// 的默认值就等于「不传也能跑」—— 而不传正好就是多开一条连接那种写法。红线要靠签名挡住,
-// 不能靠调用点记得。
-export const oracleFor = (perRequest: Layer.Layer<DbClient | CurrentUser>) =>
+/**
+ * 参考层 + **它的端口里唯一该露在外面的那一个**(#504 T17)。
+ *
+ * `provideMerge` 而不是 `provide`:app 自己有一小片直接用 `CacheStore` —— DeFi 协议图
+ *(`logos/store.ts`)。那份数据来自用户自己同步下来的余额 meta,没有上游、不出网,不属于参考层,
+ * 但要一个 per-user 的键值缓存;而这个缓存本来就是这个文件建的,没必要为它再包一个服务。
+ *
+ * **返回类型只写 `OracleServices | CacheStore`,这不是偷懒是收窄。** 运行时这张 layer 里八个端口
+ * 都在(`provideMerge` 把它们一并透出),但类型上只认得出两样 —— 于是
+ * `TokenStore` / `TokenPriceStore` / `GlobalTokenRefIndexStore` 在 handler 那边**取不出来**,
+ * 谁都没法绕过参考层直接改代币行和价格行。收窄靠类型而不是靠再建一层,是因为再建一层就会有
+ * 第二个 `CacheStore` 实例:两个对象,同一张表,而 `provideMerge` 出去的那个必须与参考层
+ * 内部用的是同一个。
+ *
+ * **`perRequest` 是必填,没有默认值。** 它出包给 `runtime.ts` 用之后,一个 `= dbClientLayer(env)`
+ * 的默认值就等于「不传也能跑」—— 而不传正好就是多开一条连接那种写法。红线要靠签名挡住,
+ * 不能靠调用点记得。
+ */
+export const oracleFor = (
+  perRequest: Layer.Layer<DbClient | CurrentUser>,
+): Layer.Layer<OracleServices | CacheStore> =>
   Layer.provideMerge(oracleLayer, Layer.merge(portsFor(perRequest), upstreams()));
 
 /**
@@ -194,7 +204,7 @@ const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices> => {
 };
 
 /** 过渡期的服务面 —— 比 `UserServices` 多一个 `DbStores`,那部分只会变少。 */
-type RequestServices = Database | DbStores | OracleServices | OraclePorts;
+type RequestServices = Database | DbStores | OracleServices | CacheStore;
 
 export const withRequest = <A, E extends AppError>(
   userId: string,
