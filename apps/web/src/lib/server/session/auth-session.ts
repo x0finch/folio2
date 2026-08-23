@@ -16,6 +16,6 @@ export function resolveAuth(result: SessionResult | null) {
   return { userId: result.user.id, user: result.user, session: result.session };
 }
 
-// requireAuth 注入下游 handler 的 context 形状 —— 从注入函数本身推导,
-// handler 不各自复述一份 `{ userId: string }`(形状变了只改 resolveAuth 一处)。
-export type AuthContext = ReturnType<typeof resolveAuth>;
+// **`AuthContext` 这个类型没了**(#504 T12):它存在的唯一理由是给 handler 的
+// `{ data, context }` 签名用,而现在没有 handler 收 context —— userId 由装配点
+// (`runEffect` / `runForUser`)吃掉。要 context 形状的地方直接用 `ReturnType<typeof resolveAuth>`。

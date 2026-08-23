@@ -1,7 +1,7 @@
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { exportStream } from "@/lib/server/io/export-stream";
-import { runAtEdge, withRequest } from "@/lib/server/oracle";
+import { runForUser } from "@/lib/server/runtime";
 import { getAuth } from "@/lib/server/session/auth";
 import { resolveAuth } from "@/lib/server/session/auth-session";
 
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/api/export")({
         }
         getLogger(["folio", "web", "export"]).info("export started", { userId });
 
-        const body = await runAtEdge(withRequest(userId, exportStream()));
+        const body = await runForUser("exportData", userId, exportStream());
         return new Response(body, {
           headers: {
             "content-type": "application/x-ndjson; charset=utf-8",

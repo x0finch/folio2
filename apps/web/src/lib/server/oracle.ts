@@ -160,7 +160,7 @@ const dbStoresFor = (perRequest: Layer.Layer<DbClient | CurrentUser>): Layer.Lay
  * 这个类型和 `dbStoresFor` 一起删掉,`requestLayer` 里 db 那半只剩 `Database`。
  * tab-pins 已经这样退场了(T1 打样)。
  */
-export type DbStores =
+type DbStores =
   | AccountStore
   | PortfolioStore
   | SettingsStore
@@ -180,7 +180,7 @@ export type DbStores =
  * **流**那条路(`/api/sync` 把同步的流交给 `Stream.provideLayer`)拿不到 effect 形状的包装,
  * 只能要 layer 本身,所以这里出的是 layer 不是 effect。
  */
-export const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices> => {
+const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices> => {
   // **一次 provide,不是三次。** 三边各 provide 一次的话,同一个 `dbClient` 引用也会被建三遍
   // (memoisation 的作用域是一次构建),于是一个请求握着三个 drizzle 句柄 —— 今天只是浪费,
   // 但 `DbClient` 一旦长出状态(span、慢查询计数,`@folio/db` 的 `client.ts` 已记着要加),
@@ -194,7 +194,7 @@ export const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices>
 };
 
 /** 过渡期的服务面 —— 比 `UserServices` 多一个 `DbStores`,那部分只会变少。 */
-export type RequestServices = Database | DbStores | OracleServices | OraclePorts;
+type RequestServices = Database | DbStores | OracleServices | OraclePorts;
 
 export const withRequest = <A, E extends AppError>(
   userId: string,

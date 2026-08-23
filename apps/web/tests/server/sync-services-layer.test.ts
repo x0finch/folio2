@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import type { Balance } from "@folio/connectors-basic";
-import { AccountStore as DbAccountStore } from "@folio/db";
+import { Database } from "@folio/db";
 import { Account, BalanceSource, AccountStore as SyncAccountStore } from "@folio/sync";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -131,10 +131,11 @@ describe("syncServicesLayer 的接线", () => {
       USER,
       Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(
         Effect.provide(syncServicesLayer),
-        // 打一个会 die 的 db store 进去(真 D1 挂不了,所以直接换掉那一层)。
+        // 打一个会 die 的 db 聚合进去(真 D1 挂不了,所以直接换掉那一层)。
+        // 只有 `accounts.list` 会被这条用例走到,其余字段不必造。
         Effect.provide(
-          Layer.succeed(DbAccountStore, {
-            list: () => Effect.die(new Error("d1 down")),
+          Layer.succeed(Database, {
+            accounts: { list: () => Effect.die(new Error("d1 down")) },
           } as never),
         ),
         Effect.exit,
