@@ -3,6 +3,7 @@ import { CacheStore } from "@folio/oracle-basic/ports";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
 import type { Drizzle } from "../connect";
+import { CurrentUser } from "../current-user";
 import { userCache } from "../schema";
 import { chunk, DbClient } from "./service";
 
@@ -23,10 +24,6 @@ import { chunk, DbClient } from "./service";
 // **时间走 `Clock`**(以前是 `opts.now` —— 一个只有测试会传的字段);出网口是 `DbClient`
 // 那一个服务,`env` 不再出现在签名里。
 
-export interface UserCacheStoreOpts {
-  userId: string;
-}
-
 // 一条 upsert 语句。`put` 与 `putMany` 共用同一份键/值口径 —— 两个动词写出来的行必须一样。
 const upsert = (db: Drizzle, userId: string, w: CacheWrite, now: number) => {
   const v = JSON.stringify(w.value);
@@ -37,76 +34,75 @@ const upsert = (db: Drizzle, userId: string, w: CacheWrite, now: number) => {
     .onConflictDoUpdate({ target: [userCache.userId, userCache.k], set: { v, expiresAt } });
 };
 
-const make = ({ userId }: UserCacheStoreOpts) =>
-  Effect.gen(function* () {
-    const database = yield* DbClient;
+const make = Effect.gen(function* () {
+  const database = yield* DbClient;
+  const userId = yield* CurrentUser;
 
-    // 存进去的一定是 JSON.stringify 的产物;真读到坏值就当没有这条 ——
-    // 下次访问会照常回源覆盖,不该让一条脏缓存把整个页面弄崩。
-    const decode = (row: { v: string; expiresAt: number }, now: number): CacheEntry | undefined => {
-      try {
-        return { value: JSON.parse(row.v), stale: row.expiresAt <= now };
-      } catch {
-        return undefined;
-      }
-    };
+  // 存进去的一定是 JSON.stringify 的产物;真读到坏值就当没有这条 ——
+  // 下次访问会照常回源覆盖,不该让一条脏缓存把整个页面弄崩。
+  const decode = (row: { v: string; expiresAt: number }, now: number): CacheEntry | undefined => {
+    try {
+      return { value: JSON.parse(row.v), stale: row.expiresAt <= now };
+    } catch {
+      return undefined;
+    }
+  };
 
-    const store: CacheStore = {
-      get: (key) =>
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis;
-          const rows = yield* database.query((db) =>
+  const store: CacheStore = {
+    get: (key) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const rows = yield* database.query((db) =>
+          db
+            .select({ v: userCache.v, expiresAt: userCache.expiresAt })
+            .from(userCache)
+            .where(and(eq(userCache.userId, userId), eq(userCache.k, key))),
+        );
+        const row = rows[0];
+        return Option.fromNullable(row ? decode(row, now) : undefined);
+      }),
+
+    getMany: (keys) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const out = new Map<string, CacheEntry>();
+        // 去重后分块:一块一条 `WHERE user_id = ? AND k IN (…)`,走 (user_id, k) 主键。
+        // **顺序跑**(`Effect.forEach` 的默认档)—— 与迁移前逐字一致:一片装 90 个键,
+        // 多片本来就少见,要并发得先量一次真实批量。区别只是现在这句话写在代码里。
+        const parts = chunk([...new Set(keys)]).filter((p) => p.length > 0);
+        const batches = yield* Effect.forEach(parts, (part) =>
+          database.query((db) =>
             db
-              .select({ v: userCache.v, expiresAt: userCache.expiresAt })
+              .select({ k: userCache.k, v: userCache.v, expiresAt: userCache.expiresAt })
               .from(userCache)
-              .where(and(eq(userCache.userId, userId), eq(userCache.k, key))),
-          );
-          const row = rows[0];
-          return Option.fromNullable(row ? decode(row, now) : undefined);
-        }),
-
-      getMany: (keys) =>
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis;
-          const out = new Map<string, CacheEntry>();
-          // 去重后分块:一块一条 `WHERE user_id = ? AND k IN (…)`,走 (user_id, k) 主键。
-          // **顺序跑**(`Effect.forEach` 的默认档)—— 与迁移前逐字一致:一片装 90 个键,
-          // 多片本来就少见,要并发得先量一次真实批量。区别只是现在这句话写在代码里。
-          const parts = chunk([...new Set(keys)]).filter((p) => p.length > 0);
-          const batches = yield* Effect.forEach(parts, (part) =>
-            database.query((db) =>
-              db
-                .select({ k: userCache.k, v: userCache.v, expiresAt: userCache.expiresAt })
-                .from(userCache)
-                .where(and(eq(userCache.userId, userId), inArray(userCache.k, part))),
-            ),
-          );
-          for (const rows of batches) {
-            for (const row of rows) {
-              const entry = decode(row, now);
-              if (entry) out.set(row.k, entry); // 坏值与 miss 同待遇:不出现在结果里
-            }
+              .where(and(eq(userCache.userId, userId), inArray(userCache.k, part))),
+          ),
+        );
+        for (const rows of batches) {
+          for (const row of rows) {
+            const entry = decode(row, now);
+            if (entry) out.set(row.k, entry); // 坏值与 miss 同待遇:不出现在结果里
           }
-          return out;
-        }),
+        }
+        return out;
+      }),
 
-      put: (key, value, ttlMs) =>
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis;
-          yield* database.query((db) => upsert(db, userId, { key, value, ttlMs }, now));
-        }),
+    put: (key, value, ttlMs) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        yield* database.query((db) => upsert(db, userId, { key, value, ttlMs }, now));
+      }),
 
-      // 一个批次发出去(D1 没有交互式事务,batch 是它的原子多写)。
-      putMany: (writes) =>
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis;
-          yield* database.batch((db) => writes.map((w) => upsert(db, userId, w, now)));
-        }),
-    };
+    // 一个批次发出去(D1 没有交互式事务,batch 是它的原子多写)。
+    putMany: (writes) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        yield* database.batch((db) => writes.map((w) => upsert(db, userId, w, now)));
+      }),
+  };
 
-    return store;
-  });
+  return store;
+});
 
-export const userCacheStoreLayer = (
-  opts: UserCacheStoreOpts,
-): Layer.Layer<CacheStore, never, DbClient> => Layer.effect(CacheStore, make(opts));
+export const userCacheStoreLayer: Layer.Layer<CacheStore, never, DbClient | CurrentUser> =
+  Layer.effect(CacheStore, make);

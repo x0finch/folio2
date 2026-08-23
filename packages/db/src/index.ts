@@ -11,6 +11,9 @@
 // 「一次请求一次装配」旁边永远并排站着一条「每次调用各装一次」的路。
 
 export { createAuthAdapter, type DbEnv } from "./connect"; // adapter 不泄露 db 句柄/schema
+// **「这次请求是谁的」**(ADR 0044):装配点 provide 一次,包内每个 per-user 服务在建自己那一刻
+// 读一次。没有默认值 —— 忘了 provide 是编译错误,不是静默按默认用户去查。
+export { CurrentUser } from "./current-user";
 // **对外的那一张门票**(#504 T1 起):聚合 `Database`,按领域挂包装好的 op。
 // 现在只挂了 `tabPins` —— 其余八个领域还走下面那排各自的 Tag,按域一片片挂进来。
 export { Database } from "./database";
@@ -67,7 +70,6 @@ export {
   type DbClient,
   dbClientLayer,
   globalTokenRefIndexStoreLayer,
-  type UserCacheStoreOpts,
   type UserTokenPriceStoreOpts,
   type UserTokenStoreOpts,
   userCacheStoreLayer,

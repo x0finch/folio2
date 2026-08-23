@@ -47,7 +47,7 @@ async function manualAccount(userId: string) {
 // 建一个该用户的代币行(生产路径是 mint;这里直接用 store,本文件不测认币)。
 // `coinId` 给了就顺带挂上那条 ref —— 持仓的 `ref` 就是从 `token_refs` 里当前命名者那行读出来的。
 async function mintToken(userId: string, symbol: string, coinId?: string): Promise<string> {
-  const store = promisified(TokenStore, userTokenStoreLayer({ userId, namer: NAMER }));
+  const store = promisified(TokenStore, userTokenStoreLayer({ namer: NAMER }), userId);
   return store.create({ symbol }, coinId ? [`${NAMER}/issued:${coinId}`] : []);
 }
 
@@ -57,7 +57,7 @@ async function mintTokenWithRef(
   symbol: string,
   localName: string,
 ): Promise<string> {
-  const store = promisified(TokenStore, userTokenStoreLayer({ userId, namer: NAMER }));
+  const store = promisified(TokenStore, userTokenStoreLayer({ namer: NAMER }), userId);
   return store.create({ symbol }, [`${NAMER}/${localName}`]);
 }
 

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import type { Context } from "effect";
-import { Effect, type Layer, TestClock, TestContext } from "effect";
+import { Effect, Layer, TestClock, TestContext } from "effect";
+import { CurrentUser } from "../src/current-user";
 import { Database } from "../src/database";
 import { type DbClient, dbClientLayer } from "../src/stores/service";
 
@@ -32,7 +33,8 @@ type Promisified<S> = {
     : S[K];
 };
 
-// per-user 服务的把手(#394 ADR 0037):userId 现在由 layer 吃掉,所以每个用户各建一份。
+// per-user 服务的把手(ADR 0037 / 0044):layer 不再按用户各建一份 —— 一份 layer,
+// userId 由 `CurrentUser` 在建服务那一刻给进去。
 // 用法:`const accounts = forUser(AccountStore, AccountStore.Default)` 之后 `accounts(USER_A).create(…)`。
 //
 // 测试**保持 Promise 形状**是有判据的(CODING.md / #391):这些用例测的是「数据落库对不对」——
@@ -40,24 +42,35 @@ type Promisified<S> = {
 export const forUser =
   <I, S extends object>(
     tag: Context.Tag<I, S>,
-    layerOf: (userId: string) => Layer.Layer<I, never, DbClient>,
+    layer: Layer.Layer<I, never, DbClient | CurrentUser>,
   ) =>
   (userId: string, nowMs = NOW): Promisified<S> =>
-    promisified(tag, layerOf(userId), nowMs);
+    promisified(tag, layer, userId, nowMs);
 
 // 已经挂进聚合 `Database` 的领域用这个:`forDomain((db) => db.tabPins)`。
 // 与 `forUser` 的唯一差别是**怎么拿到服务** —— 那边是「provide 领域自己的 layer 再 yield 它的 Tag」,
 // 这边是「provide 聚合的 layer 再取那个字段」。断言侧看不出区别,这正是搬家要保住的性质。
 export const forDomain =
-  <S extends object>(pick: (db: Context.Tag.Service<Database>) => S) =>
+  <S extends object>(pick: (db: Database) => S) =>
   (userId: string, nowMs = NOW): Promisified<S> =>
-    promisifiedFrom(Effect.provide(Effect.map(Database, pick), Database.layer(userId)), nowMs);
+    promisifiedFrom(
+      Effect.provide(Effect.map(Database, pick), asUser(Database.Default, userId)),
+      nowMs,
+    );
 
 export const promisified = <I, S extends object>(
   tag: Context.Tag<I, S>,
-  layer: Layer.Layer<I, never, DbClient>,
+  layer: Layer.Layer<I, never, DbClient | CurrentUser>,
+  userId: string,
   nowMs = NOW,
-): Promisified<S> => promisifiedFrom(Effect.provide(tag, layer), nowMs);
+): Promisified<S> => promisifiedFrom(Effect.provide(tag, asUser(layer, userId)), nowMs);
+
+// 「这一层按谁跑」—— 把 `CurrentUser` 喂进去,剩下的只差 `DbClient`(由 `runDb` provide)。
+const asUser = <I>(
+  layer: Layer.Layer<I, never, DbClient | CurrentUser>,
+  userId: string,
+): Layer.Layer<I, never, DbClient> =>
+  Layer.provide(layer, Layer.merge(Layer.succeed(CurrentUser, userId), Layer.context<DbClient>()));
 
 // 「怎么拿到这个服务」是一个 effect(只差一个 `DbClient`),把手只管把它的方法一个个跑成 Promise。
 const promisifiedFrom = <S extends object>(

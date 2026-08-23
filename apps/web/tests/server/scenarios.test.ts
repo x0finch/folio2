@@ -399,11 +399,11 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
 
   async function syncOnchain(): Promise<string> {
     // 全局映射表收录了这个合约 → mint 按**地址**认出来(不靠 symbol)。
-    await withStore(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, (s) =>
+    await withStore(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, USER, (s) =>
       s.putAll([{ chainRef: USDC_ETH, upstreamRef: USDC_UPSTREAM }], Date.now()),
     );
     // warm 集给 symbol 那一档留个本地候选,免得它想回源(本情景不该出网)。
-    await withStore(CacheStore, userCacheStoreLayer({ userId: USER }), (s) =>
+    await withStore(CacheStore, userCacheStoreLayer, USER, (s) =>
       s.put(
         "warm",
         {

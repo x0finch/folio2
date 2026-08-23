@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { Database, dbClientLayer } from "@folio/db";
+import { CurrentUser, Database, dbClientLayer } from "@folio/db";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { runEffect } from "@/lib/server/runtime";
@@ -33,8 +33,9 @@ const ctx = { context: { userId: USER } };
 const listPins = () =>
   Effect.runPromise(
     Effect.flatMap(Database, (db) => db.tabPins.list()).pipe(
-      Effect.provide(Database.layer(USER)),
+      Effect.provide(Database.Default),
       Effect.provide(dbClientLayer(env)),
+      Effect.provideService(CurrentUser, USER),
     ),
   );
 

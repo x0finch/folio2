@@ -46,7 +46,7 @@ async function seedFiatDaily(
   code: string,
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
-  await withStore(TokenPriceStore, userTokenPriceStoreLayer({ userId: USER, namer: NAMER }), (s) =>
+  await withStore(TokenPriceStore, userTokenPriceStoreLayer({ namer: NAMER }), USER, (s) =>
     s.putDailyByRef(tokenRef.issued(FIAT_NAMER, code), rows),
   );
 }
@@ -57,7 +57,7 @@ async function seedDaily(
   rows: { dayBucket: number; unitPrice: number }[],
 ): Promise<void> {
   const [h] = await dbFor(USER).manual.listHoldings(accountId, NAMER);
-  await withStore(TokenPriceStore, userTokenPriceStoreLayer({ userId: USER, namer: NAMER }), (s) =>
+  await withStore(TokenPriceStore, userTokenPriceStoreLayer({ namer: NAMER }), USER, (s) =>
     s.putDaily(h.id, rows),
   );
 }

@@ -13,11 +13,9 @@ import {
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
 
-const transferOf = forUser(TransferStore, (uid: string) =>
-  Layer.provide(
-    TransferStore.Default(uid),
-    Layer.merge(SnapshotStore.Default(uid), ManualStore.Default(uid)),
-  ),
+const transferOf = forUser(
+  TransferStore,
+  Layer.provide(TransferStore.Default, Layer.merge(SnapshotStore.Default, ManualStore.Default)),
 );
 
 const accounts = forUser(AccountStore, AccountStore.Default);

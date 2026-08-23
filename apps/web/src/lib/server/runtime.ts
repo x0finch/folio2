@@ -1,10 +1,9 @@
-import { env } from "cloudflare:workers";
 import type { UpstreamError } from "@folio/client-core";
-import { Database, type DbClient, dbClientLayer } from "@folio/db";
+import { Database } from "@folio/db";
 import type { OraclePorts, OracleServices } from "@folio/oracle";
 import { Effect, Layer } from "effect";
 import { logTapeLogger } from "./effect-log";
-import { oracleFor, toError } from "./oracle";
+import { oracleFor, perRequestLayer, toError } from "./oracle";
 
 // **server fn 的运行时**:一次请求要的服务在这里装配,也在这里跑起来。全仓只有这一份。
 //
@@ -19,16 +18,14 @@ import { oracleFor, toError } from "./oracle";
  * —— 它们住 `oracle.ts` 的 `legacyRequestLayer`,和 `runStore`/`runRequest` 一起在 T13 退场。
  * 新写的 handler 拿不到它们,也就不会有人「顺手」再用一个即将消失的 Tag。
  *
- * **一次请求只有一个 `DbClient`(红线)**:聚合与参考层的四个端口都**不自己开连接**(各自的
- * `R` 通道声明 `DbClient`),这里建一次、一个引用分给两边,Effect 的 layer memoisation 保证
- * 只建一次。分两次 provide 就是两份,哪怕引用相同 —— 所以两边必须在同一个 `Layer.mergeAll` 里。
+ * **一次请求只有一个 `DbClient`(红线)**:聚合与参考层的四个端口都**不自己开连接**、也都不自己
+ * 收 userId —— 它们的 `R` 声明 `DbClient | CurrentUser`,由 `perRequestLayer(userId)` 一次给上
+ * (ADR 0044)。那一份建一次、一个引用分给两边,Effect 的 layer memoisation 保证只建一次;
+ * 分两次 provide 就是两份,哪怕引用相同 —— 所以两边必须在同一个 `Layer.mergeAll` 里。
  */
 const userLayer = (userId: string): Layer.Layer<UserServices> => {
-  const dbClient: Layer.Layer<DbClient> = dbClientLayer(env);
-  return Layer.mergeAll(
-    Layer.provide(Database.layer(userId), dbClient),
-    oracleFor(userId, dbClient),
-  );
+  const perRequest = perRequestLayer(userId);
+  return Layer.mergeAll(Layer.provide(Database.Default, perRequest), oracleFor(perRequest));
 };
 
 /** 一个用户的全部服务 —— handler 的 `R` 只能落在这个范围里。 */
