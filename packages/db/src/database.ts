@@ -1,6 +1,5 @@
-import { Context, Effect, Layer } from "effect";
-import { makeTabPinStore, type TabPinOps } from "./queries/tab-pins";
-import type { DbClient } from "./stores/service";
+import { Effect } from "effect";
+import { makeTabPinStore } from "./queries/tab-pins";
 
 // **`@folio/db` 对外的那一张门票。** app 侧一次 `yield* Database` 拿到全部领域操作,
 // 按领域取用:`db.tabPins.list()`。以前是每个领域一个 Tag + 一个 layer 散装导出(九对),
@@ -18,24 +17,15 @@ import type { DbClient } from "./stores/service";
 // 装配点(app 的 `lib/server/oracle.ts`)建一次 `dbClientLayer(env)`,一个 `Layer.provide`
 // 分给所有人,Effect 的 layer memoisation 保证只建一次。
 //
-// **userId 在装配那一刻被吃掉**(ADR 0037):下面每个字段的方法签名里一个 user 参数都没有,
-// 拿错用户在编译期就发生不了。
+// **userId 在装配那一刻被吃掉**(ADR 0037):各领域建自己那一刻从 `CurrentUser` 读一次
+// (ADR 0044),下面每个字段的方法签名里一个 user 参数都没有,拿错用户在编译期就发生不了。
 //
 // 现在只有 `tabPins` 一个字段 —— P0 打样只搬了这一个领域。其余八个领域仍走各自的 Tag,
 // 按域一片一片挂进来(见 #504 的 T7–T12),挂完那些 Tag 就没有消费者了,随之删除。
-export class Database extends Context.Tag("db/Database")<
-  Database,
-  {
-    readonly tabPins: TabPinOps;
-  }
->() {
-  static layer = (userId: string): Layer.Layer<Database, never, DbClient> =>
-    Layer.effect(
-      this,
-      Effect.gen(function* () {
-        return {
-          tabPins: yield* makeTabPinStore(userId),
-        };
-      }),
-    );
-}
+export class Database extends Effect.Service<Database>()("db/Database", {
+  effect: Effect.gen(function* () {
+    return {
+      tabPins: yield* makeTabPinStore,
+    };
+  }),
+}) {}

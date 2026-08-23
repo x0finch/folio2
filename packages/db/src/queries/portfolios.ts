@@ -1,5 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { CurrentUser } from "../current-user";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
 import type { Portfolio } from "../schema/types";
 import { DbClient } from "../stores/service";
@@ -66,137 +67,137 @@ export const ensureDefault = (database: DbClient, userId: string): Effect.Effect
     return after;
   });
 
-const make = (userId: string) =>
-  Effect.gen(function* () {
-    const database = yield* DbClient;
+const make = Effect.gen(function* () {
+  const database = yield* DbClient;
+  const userId = yield* CurrentUser;
 
-    return {
-      /** 拿默认 Portfolio,没有就建一个(find-or-create,幂等)。 */
-      ensureDefault: (): Effect.Effect<Portfolio> => ensureDefault(database, userId),
+  return {
+    /** 拿默认 Portfolio,没有就建一个(find-or-create,幂等)。 */
+    ensureDefault: (): Effect.Effect<Portfolio> => ensureDefault(database, userId),
 
-      // 该用户的全部 Portfolio,按**创建时间**稳定排序(不把默认置顶 —— 切换默认时列表不重排;ADR 0033)。
-      // id 作最终 tiebreaker,避免同毫秒 createdAt 的顺序不确定。
-      list: (): Effect.Effect<Portfolio[]> =>
-        database.query((db) =>
+    // 该用户的全部 Portfolio,按**创建时间**稳定排序(不把默认置顶 —— 切换默认时列表不重排;ADR 0033)。
+    // id 作最终 tiebreaker,避免同毫秒 createdAt 的顺序不确定。
+    list: (): Effect.Effect<Portfolio[]> =>
+      database.query((db) =>
+        db
+          .select()
+          .from(portfolios)
+          .where(eq(portfolios.userId, userId))
+          .orderBy(asc(portfolios.sortOrder), asc(portfolios.createdAt), asc(portfolios.id)),
+      ),
+
+    // 该用户全部 账户→Portfolio 归属(accountsInView 的过滤原料)。一次查询(portfolio_accounts ⨝ accounts 限 user)。
+    listMemberships: (): Effect.Effect<PortfolioMembership[]> =>
+      database.query((db) =>
+        db
+          .select({
+            accountId: portfolioAccounts.accountId,
+            portfolioId: portfolioAccounts.portfolioId,
+          })
+          .from(portfolioAccounts)
+          .innerJoin(accounts, eq(accounts.id, portfolioAccounts.accountId))
+          .where(eq(accounts.userId, userId)),
+      ),
+
+    // 建一个**命名(非默认)** Portfolio(选择器「新建…」/「移到→新建」用)。默认 Portfolio 只由
+    // ensureDefault 造,这里永不建默认(is_default=false),故不碰部分唯一索引。
+    create: (input: { name: string; sortOrder?: number }): Effect.Effect<Portfolio> =>
+      Effect.gen(function* () {
+        const row = {
+          id: crypto.randomUUID(),
+          userId,
+          name: input.name,
+          isDefault: false,
+          sortOrder: input.sortOrder ?? 0,
+          createdAt: Date.now(),
+        };
+        yield* database.query((db) => db.insert(portfolios).values(row));
+        return row;
+      }),
+
+    // 把账户归属到某 Portfolio(一对一:先删该账户现有归属行,再插新的,一个 batch 原子换)。
+    // 两个资源都做 owner 断言,杜绝越权。
+    // **同 batch 清空该账户的全部 Tag**(ADR 0034):Tag 属于原 Portfolio,搬家后对新家是外来的,
+    // 带过去会破坏「账户只有其所在 Portfolio 的 Tag」这条不变量 —— 故随归属变更一并清掉,新家里重新打。
+    assignAccount: (accountId: string, portfolioId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        // `ownership.ts` 仍是 Promise 形状(它被五个领域共用,三个还没迁)。**不为此新增桥** ——
+        // `database.query` 收的就是「拿 drizzle 句柄做点事」的回调,把它套进去即可,
+        // 全包仍只有 `DbClient` 那一处 `Effect.promise`(CODING.md「桥只留一处」)。
+        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* database.query((db) => assertPortfolioOwned(db, userId, portfolioId));
+        // 已在目标 Portfolio → 真 no-op。否则下面的「清空该账户 Tag」会在没真搬家时也误删标签
+        // (重新指到当前 Portfolio 本应无副作用)。
+        const current = yield* database.query((db) =>
           db
-            .select()
-            .from(portfolios)
-            .where(eq(portfolios.userId, userId))
-            .orderBy(asc(portfolios.sortOrder), asc(portfolios.createdAt), asc(portfolios.id)),
-        ),
-
-      // 该用户全部 账户→Portfolio 归属(accountsInView 的过滤原料)。一次查询(portfolio_accounts ⨝ accounts 限 user)。
-      listMemberships: (): Effect.Effect<PortfolioMembership[]> =>
-        database.query((db) =>
-          db
-            .select({
-              accountId: portfolioAccounts.accountId,
-              portfolioId: portfolioAccounts.portfolioId,
-            })
+            .select({ portfolioId: portfolioAccounts.portfolioId })
             .from(portfolioAccounts)
-            .innerJoin(accounts, eq(accounts.id, portfolioAccounts.accountId))
-            .where(eq(accounts.userId, userId)),
+            .where(eq(portfolioAccounts.accountId, accountId)),
+        );
+        if (current[0]?.portfolioId === portfolioId) return;
+        yield* database.batch((db) => [
+          db.delete(portfolioAccounts).where(eq(portfolioAccounts.accountId, accountId)),
+          db.insert(portfolioAccounts).values({ portfolioId, accountId }),
+          db.delete(accountTags).where(eq(accountTags.accountId, accountId)),
+        ]);
+      }),
+
+    // 改 Portfolio 名(含默认,因它是真行)。userId 作用域,越权即影响 0 行。
+    rename: (portfolioId: string, name: string): Effect.Effect<void> =>
+      Effect.asVoid(
+        database.query((db) =>
+          db
+            .update(portfolios)
+            .set({ name })
+            .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
         ),
+      ),
 
-      // 建一个**命名(非默认)** Portfolio(选择器「新建…」/「移到→新建」用)。默认 Portfolio 只由
-      // ensureDefault 造,这里永不建默认(is_default=false),故不碰部分唯一索引。
-      create: (input: { name: string; sortOrder?: number }): Effect.Effect<Portfolio> =>
-        Effect.gen(function* () {
-          const row = {
-            id: crypto.randomUUID(),
-            userId,
-            name: input.name,
-            isDefault: false,
-            sortOrder: input.sortOrder ?? 0,
-            createdAt: Date.now(),
-          };
-          yield* database.query((db) => db.insert(portfolios).values(row));
-          return row;
-        }),
+    // 设为默认:先清掉该用户当前默认(→ 无默认),再把目标置默认(→ 恰一个)。两步一个 batch 原子换,
+    // 中途不出现「两个默认」违反部分唯一索引。
+    setDefault: (portfolioId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        yield* database.query((db) => assertPortfolioOwned(db, userId, portfolioId));
+        yield* database.batch((db) => [
+          db
+            .update(portfolios)
+            .set({ isDefault: false })
+            .where(and(eq(portfolios.userId, userId), eq(portfolios.isDefault, true))),
+          db
+            .update(portfolios)
+            .set({ isDefault: true })
+            .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
+        ]);
+      }),
 
-      // 把账户归属到某 Portfolio(一对一:先删该账户现有归属行,再插新的,一个 batch 原子换)。
-      // 两个资源都做 owner 断言,杜绝越权。
-      // **同 batch 清空该账户的全部 Tag**(ADR 0034):Tag 属于原 Portfolio,搬家后对新家是外来的,
-      // 带过去会破坏「账户只有其所在 Portfolio 的 Tag」这条不变量 —— 故随归属变更一并清掉,新家里重新打。
-      assignAccount: (accountId: string, portfolioId: string): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          // `ownership.ts` 仍是 Promise 形状(它被五个领域共用,三个还没迁)。**不为此新增桥** ——
-          // `database.query` 收的就是「拿 drizzle 句柄做点事」的回调,把它套进去即可,
-          // 全包仍只有 `DbClient` 那一处 `Effect.promise`(CODING.md「桥只留一处」)。
-          yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-          yield* database.query((db) => assertPortfolioOwned(db, userId, portfolioId));
-          // 已在目标 Portfolio → 真 no-op。否则下面的「清空该账户 Tag」会在没真搬家时也误删标签
-          // (重新指到当前 Portfolio 本应无副作用)。
-          const current = yield* database.query((db) =>
-            db
-              .select({ portfolioId: portfolioAccounts.portfolioId })
-              .from(portfolioAccounts)
-              .where(eq(portfolioAccounts.accountId, accountId)),
-          );
-          if (current[0]?.portfolioId === portfolioId) return;
-          yield* database.batch((db) => [
-            db.delete(portfolioAccounts).where(eq(portfolioAccounts.accountId, accountId)),
-            db.insert(portfolioAccounts).values({ portfolioId, accountId }),
-            db.delete(accountTags).where(eq(accountTags.accountId, accountId)),
-          ]);
-        }),
-
-      // 改 Portfolio 名(含默认,因它是真行)。userId 作用域,越权即影响 0 行。
-      rename: (portfolioId: string, name: string): Effect.Effect<void> =>
-        Effect.asVoid(
-          database.query((db) =>
-            db
-              .update(portfolios)
-              .set({ name })
-              .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
-          ),
-        ),
-
-      // 设为默认:先清掉该用户当前默认(→ 无默认),再把目标置默认(→ 恰一个)。两步一个 batch 原子换,
-      // 中途不出现「两个默认」违反部分唯一索引。
-      setDefault: (portfolioId: string): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          yield* database.query((db) => assertPortfolioOwned(db, userId, portfolioId));
-          yield* database.batch((db) => [
-            db
-              .update(portfolios)
-              .set({ isDefault: false })
-              .where(and(eq(portfolios.userId, userId), eq(portfolios.isDefault, true))),
-            db
-              .update(portfolios)
-              .set({ isDefault: true })
-              .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
-          ]);
-        }),
-
-      // 删 Portfolio:默认不可删(抛)。否则先把成员退回默认 Portfolio,再删该行(成员账户不动、不孤儿)。
-      remove: (portfolioId: string): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          const rows = yield* database.query((db) =>
-            db
-              .select({ isDefault: portfolios.isDefault })
-              .from(portfolios)
-              .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
-          );
-          const target = rows[0];
-          if (!target) return yield* Effect.die(new Error(`portfolio not found: ${portfolioId}`));
-          if (target.isDefault) {
-            return yield* Effect.die(new Error("cannot delete the default portfolio"));
-          }
-          const def = yield* ensureDefault(database, userId);
-          yield* database.batch((db) => [
-            // 成员退回默认(1:1 不冲突:成员在 target,不在 default → 改指 default 无碰撞)。
-            db
-              .update(portfolioAccounts)
-              .set({ portfolioId: def.id })
-              .where(eq(portfolioAccounts.portfolioId, portfolioId)),
-            db
-              .delete(portfolios)
-              .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
-          ]);
-        }),
-    };
-  });
+    // 删 Portfolio:默认不可删(抛)。否则先把成员退回默认 Portfolio,再删该行(成员账户不动、不孤儿)。
+    remove: (portfolioId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const rows = yield* database.query((db) =>
+          db
+            .select({ isDefault: portfolios.isDefault })
+            .from(portfolios)
+            .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
+        );
+        const target = rows[0];
+        if (!target) return yield* Effect.die(new Error(`portfolio not found: ${portfolioId}`));
+        if (target.isDefault) {
+          return yield* Effect.die(new Error("cannot delete the default portfolio"));
+        }
+        const def = yield* ensureDefault(database, userId);
+        yield* database.batch((db) => [
+          // 成员退回默认(1:1 不冲突:成员在 target,不在 default → 改指 default 无碰撞)。
+          db
+            .update(portfolioAccounts)
+            .set({ portfolioId: def.id })
+            .where(eq(portfolioAccounts.portfolioId, portfolioId)),
+          db
+            .delete(portfolios)
+            .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
+        ]);
+      }),
+  };
+});
 
 export class PortfolioStore extends Effect.Service<PortfolioStore>()("db/PortfolioStore", {
   effect: make,

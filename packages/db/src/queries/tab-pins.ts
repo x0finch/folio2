@@ -2,6 +2,7 @@ import type { ConnectorId } from "@folio/connectors";
 import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Drizzle } from "../connect";
+import { CurrentUser } from "../current-user";
 import { tabPins } from "../schema";
 import type { TabPin } from "../schema/types";
 import { DbClient } from "../stores/service";
@@ -9,7 +10,7 @@ import { assertAccountOwned, assertTagOwned } from "./ownership";
 
 // 自定义 Tab(pin,ADR 0034):把某个 tag / 账户 / connector 钉成导航上的一栏。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):由聚合 `Database.layer(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):建服务那一刻从 `CurrentUser` 读一次(ADR 0044)。
 //
 // **这个领域没有自己的 Tag**(P0 打样先到达的形状):出口只有 `makeTabPinStore(userId)` 这个
 // 「怎么造」的 Effect,由 `../database.ts` 的聚合 `Database` 挂到 `tabPins` 字段上。
@@ -58,89 +59,86 @@ async function resolvePinTarget(
   return { tagId: null, accountId: null, connectorId: input.connectorId };
 }
 
-export const makeTabPinStore = (userId: string) =>
-  Effect.gen(function* () {
-    const dbClient = yield* DbClient;
+export const makeTabPinStore = Effect.gen(function* () {
+  const dbClient = yield* DbClient;
+  const userId = yield* CurrentUser;
 
-    return {
-      /** 固定一个自定义 Tab。每 user ≤3(超出抛)。tag pin 校验 Tag 归属本人。 */
-      create: (input: TabPinInput): Effect.Effect<TabPin> =>
-        Effect.gen(function* () {
-          const existing = yield* dbClient.query((db) =>
-            db.select({ id: tabPins.id }).from(tabPins).where(eq(tabPins.userId, userId)),
+  return {
+    /** 固定一个自定义 Tab。每 user ≤3(超出抛)。tag pin 校验 Tag 归属本人。 */
+    create: (input: TabPinInput): Effect.Effect<TabPin> =>
+      Effect.gen(function* () {
+        const existing = yield* dbClient.query((db) =>
+          db.select({ id: tabPins.id }).from(tabPins).where(eq(tabPins.userId, userId)),
+        );
+        if (existing.length >= MAX_TAB_PINS_PER_USER) {
+          return yield* Effect.die(
+            new Error(`cannot pin more than ${MAX_TAB_PINS_PER_USER} custom tabs`),
           );
-          if (existing.length >= MAX_TAB_PINS_PER_USER) {
-            return yield* Effect.die(
-              new Error(`cannot pin more than ${MAX_TAB_PINS_PER_USER} custom tabs`),
-            );
-          }
-          const target = yield* dbClient.query((db) => resolvePinTarget(db, userId, input));
-          const row = {
-            id: crypto.randomUUID(),
-            userId,
-            kind: input.kind,
-            tagId: target.tagId,
-            accountId: target.accountId,
-            connectorId: target.connectorId,
-            sortOrder: input.sortOrder ?? existing.length,
-          };
-          yield* dbClient.query((db) => db.insert(tabPins).values(row));
-          return row;
-        }),
+        }
+        const target = yield* dbClient.query((db) => resolvePinTarget(db, userId, input));
+        const row = {
+          id: crypto.randomUUID(),
+          userId,
+          kind: input.kind,
+          tagId: target.tagId,
+          accountId: target.accountId,
+          connectorId: target.connectorId,
+          sortOrder: input.sortOrder ?? existing.length,
+        };
+        yield* dbClient.query((db) => db.insert(tabPins).values(row));
+        return row;
+      }),
 
-      /** 全部 pin,按 sortOrder 稳定排序(id 作 tiebreaker)。 */
-      list: (): Effect.Effect<TabPin[]> =>
-        dbClient.query((db) =>
+    /** 全部 pin,按 sortOrder 稳定排序(id 作 tiebreaker)。 */
+    list: (): Effect.Effect<TabPin[]> =>
+      dbClient.query((db) =>
+        db
+          .select()
+          .from(tabPins)
+          .where(eq(tabPins.userId, userId))
+          .orderBy(asc(tabPins.sortOrder), asc(tabPins.id)),
+      ),
+
+    /** 改一个 pin 指向的目标(hover「改指向」用):换 connector/tag。owner 断言 + 目标校验。 */
+    updateTarget: (
+      pinId: string,
+      patch: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
+    ): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        yield* dbClient.query((db) => assertTabPinOwned(db, userId, pinId));
+        const target = yield* dbClient.query((db) => resolvePinTarget(db, userId, patch));
+        yield* dbClient.query((db) =>
           db
-            .select()
-            .from(tabPins)
-            .where(eq(tabPins.userId, userId))
-            .orderBy(asc(tabPins.sortOrder), asc(tabPins.id)),
+            .update(tabPins)
+            .set({
+              kind: patch.kind,
+              tagId: target.tagId,
+              accountId: target.accountId,
+              connectorId: target.connectorId,
+            })
+            .where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId))),
+        );
+      }),
+
+    // 空列表 → `DbClient.batch` 自己是 no-op(见 stores/service.ts),不必再包一层
+    // ——`batchWrite` 那个包装因此在本片退场。
+    /** 重排 pin(按给定 id 顺序写 sortOrder)。不在列表里的 pin 不动;空列表 no-op。 */
+    reorder: (orderedIds: string[]): Effect.Effect<void> =>
+      dbClient.batch((db) =>
+        orderedIds.map((id, i) =>
+          db
+            .update(tabPins)
+            .set({ sortOrder: i })
+            .where(and(eq(tabPins.id, id), eq(tabPins.userId, userId))),
         ),
+      ),
 
-      /** 改一个 pin 指向的目标(hover「改指向」用):换 connector/tag。owner 断言 + 目标校验。 */
-      updateTarget: (
-        pinId: string,
-        patch: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
-      ): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          yield* dbClient.query((db) => assertTabPinOwned(db, userId, pinId));
-          const target = yield* dbClient.query((db) => resolvePinTarget(db, userId, patch));
-          yield* dbClient.query((db) =>
-            db
-              .update(tabPins)
-              .set({
-                kind: patch.kind,
-                tagId: target.tagId,
-                accountId: target.accountId,
-                connectorId: target.connectorId,
-              })
-              .where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId))),
-          );
-        }),
-
-      // 空列表 → `DbClient.batch` 自己是 no-op(见 stores/service.ts),不必再包一层
-      // ——`batchWrite` 那个包装因此在本片退场。
-      /** 重排 pin(按给定 id 顺序写 sortOrder)。不在列表里的 pin 不动;空列表 no-op。 */
-      reorder: (orderedIds: string[]): Effect.Effect<void> =>
-        dbClient.batch((db) =>
-          orderedIds.map((id, i) =>
-            db
-              .update(tabPins)
-              .set({ sortOrder: i })
-              .where(and(eq(tabPins.id, id), eq(tabPins.userId, userId))),
-          ),
+    /** 取消固定(删 pin)。不碰任何数据(纯删指针),故调用侧无需二次确认(ADR 0034)。 */
+    remove: (pinId: string): Effect.Effect<void> =>
+      Effect.asVoid(
+        dbClient.query((db) =>
+          db.delete(tabPins).where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId))),
         ),
-
-      /** 取消固定(删 pin)。不碰任何数据(纯删指针),故调用侧无需二次确认(ADR 0034)。 */
-      remove: (pinId: string): Effect.Effect<void> =>
-        Effect.asVoid(
-          dbClient.query((db) =>
-            db.delete(tabPins).where(and(eq(tabPins.id, pinId), eq(tabPins.userId, userId))),
-          ),
-        ),
-    };
-  });
-
-/** 聚合 `Database` 的 `tabPins` 字段类型 —— 从上面的实现推导,不再手写一份复述。 */
-export type TabPinOps = Effect.Effect.Success<ReturnType<typeof makeTabPinStore>>;
+      ),
+  };
+});

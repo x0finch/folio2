@@ -53,7 +53,7 @@ async function seedWarm(
   rows: { id: string; symbol: string; rank: number }[],
   asOf = Date.now(),
 ): Promise<void> {
-  await withStore(CacheStore, userCacheStoreLayer({ userId: USER }), (s) =>
+  await withStore(CacheStore, userCacheStoreLayer, USER, (s) =>
     s.put(
       "warm",
       {
@@ -71,13 +71,13 @@ async function seedWarm(
 // 那个 Token 被上游认出来了没 —— 读 `token_refs` 里当前命名者那一行(端口回 `Option`,
 // 用例只关心里面那一行,所以在这儿摘掉包装)。
 const tokenInfo = (tokenId: string) =>
-  withStore(TokenStore, userTokenStoreLayer({ userId: USER, namer: NAMER }), (s) =>
+  withStore(TokenStore, userTokenStoreLayer({ namer: NAMER }), USER, (s) =>
     Effect.map(s.getById(tokenId), Option.getOrUndefined),
   );
 
 async function seedRefIndex(rows: { ref: string; localName: string }[]): Promise<void> {
   // chainRef → 整条 upstream ref(#228:表存整条,不是裸 id)。
-  await withStore(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, (s) =>
+  await withStore(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, USER, (s) =>
     s.putAll(
       rows.map((r) => ({ chainRef: r.ref, upstreamRef: `${NAMER}/issued:${r.localName}` })),
       Date.now(),
@@ -363,9 +363,7 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
 // `warmTokensForUser` 里还有旧参考层的预热也在打 `/coins/markets`,按 URL 数数分不清是谁打的。
 describe("同步后的预热把目录刷上(#216)", () => {
   const blobAsOf = async (): Promise<number | undefined> => {
-    const hit = await withStore(CacheStore, userCacheStoreLayer({ userId: USER }), (s) =>
-      s.get("warm"),
-    );
+    const hit = await withStore(CacheStore, userCacheStoreLayer, USER, (s) => s.get("warm"));
     return (Option.getOrUndefined(hit)?.value as { asOf: number } | undefined)?.asOf;
   };
 

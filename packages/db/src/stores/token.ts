@@ -11,6 +11,7 @@ import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
 import type { Drizzle } from "../connect";
+import { CurrentUser } from "../current-user";
 import { snapshotBalances, tokenRefs, tokens } from "../schema";
 import { chunk, DbClient } from "./service";
 
@@ -27,7 +28,6 @@ import { chunk, DbClient } from "./service";
 // 这个文件里,时间走 `Clock`(以前是 `opts.now` —— 只有测试会传的字段)。
 
 export interface UserTokenStoreOpts {
-  userId: string;
   namer: string; // 当前上游自报的 id(TokenUpstream.id);判 linked / 造 TokenInfo.ref 用
 }
 
@@ -58,9 +58,10 @@ type InfoRow = {
   infoExpiresAt: number;
 };
 
-const make = ({ userId, namer }: UserTokenStoreOpts) =>
+const make = ({ namer }: UserTokenStoreOpts) =>
   Effect.gen(function* () {
     const database = yield* DbClient;
+    const userId = yield* CurrentUser;
 
     // 一批 ref 的 where:(namer=? AND local_name=?) OR … 。全部同属本用户,故 user_id 一次即可。
     const whereRefs = (pairs: { namer: string; localName: string }[]) =>
@@ -440,4 +441,4 @@ const make = ({ userId, namer }: UserTokenStoreOpts) =>
 
 export const userTokenStoreLayer = (
   opts: UserTokenStoreOpts,
-): Layer.Layer<TokenStore, never, DbClient> => Layer.effect(TokenStore, make(opts));
+): Layer.Layer<TokenStore, never, DbClient | CurrentUser> => Layer.effect(TokenStore, make(opts));

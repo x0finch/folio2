@@ -3,6 +3,7 @@ import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
+import { CurrentUser } from "../current-user";
 import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
 import { chunk, DbClient } from "./service";
 
@@ -14,13 +15,13 @@ import { chunk, DbClient } from "./service";
 // **时间走 `Clock`**(以前是 `opts.now`);`env` 不再出现在签名里(见 ./service.ts)。
 
 export interface UserTokenPriceStoreOpts {
-  userId: string;
   namer: string; // 当前上游的 id —— 历史日价的全局键要用它拼整条 tokenRef
 }
 
-const make = ({ userId, namer }: UserTokenPriceStoreOpts) =>
+const make = ({ namer }: UserTokenPriceStoreOpts) =>
   Effect.gen(function* () {
     const database = yield* DbClient;
+    const userId = yield* CurrentUser;
 
     // tokenId → 它在当前上游那里的 tokenRef(历史日价的键)。没有那一档的 ref 行 → `none`。
     const upstreamRefOf = (tokenId: string): Effect.Effect<Option.Option<string>> =>
@@ -180,4 +181,5 @@ const make = ({ userId, namer }: UserTokenPriceStoreOpts) =>
 
 export const userTokenPriceStoreLayer = (
   opts: UserTokenPriceStoreOpts,
-): Layer.Layer<TokenPriceStore, never, DbClient> => Layer.effect(TokenPriceStore, make(opts));
+): Layer.Layer<TokenPriceStore, never, DbClient | CurrentUser> =>
+  Layer.effect(TokenPriceStore, make(opts));

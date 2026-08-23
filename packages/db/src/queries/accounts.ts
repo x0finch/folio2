@@ -1,6 +1,7 @@
 import type { ConnectorId } from "@folio/connectors";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { CurrentUser } from "../current-user";
 import { accounts, portfolioAccounts } from "../schema";
 import type { AccountSafe } from "../schema/types";
 import { DbClient } from "../stores/service";
@@ -53,119 +54,119 @@ export const listUserIdsWithAccounts: Effect.Effect<string[], never, DbClient> =
   },
 );
 
-const make = (userId: string) =>
-  Effect.gen(function* () {
-    const database = yield* DbClient;
+const make = Effect.gen(function* () {
+  const database = yield* DbClient;
+  const userId = yield* CurrentUser;
 
-    return {
-      // 不变量(ADR 0033):每个账户恰一行归属。新账户落进用户的默认 Portfolio —— 建账户与建归属
-      // 一个 batch 原子写,杜绝「有账户没归属」的空窗(否则该账户会从 accountsInView 里消失)。
-      create: (input: CreateAccountInput): Effect.Effect<AccountSafe> =>
-        Effect.gen(function* () {
-          const pf = yield* ensureDefault(database, userId);
-          const id = crypto.randomUUID();
-          const createdAt = Date.now();
-          const platform = input.platform ?? null;
-          yield* database.batch((db) => [
-            db.insert(accounts).values({
-              id,
-              userId,
-              connectorId: input.connectorId,
-              platform,
-              label: input.label,
-              creds: input.creds,
-              createdAt,
-            }),
-            db.insert(portfolioAccounts).values({ portfolioId: pf.id, accountId: id }),
-          ]);
-          return {
+  return {
+    // 不变量(ADR 0033):每个账户恰一行归属。新账户落进用户的默认 Portfolio —— 建账户与建归属
+    // 一个 batch 原子写,杜绝「有账户没归属」的空窗(否则该账户会从 accountsInView 里消失)。
+    create: (input: CreateAccountInput): Effect.Effect<AccountSafe> =>
+      Effect.gen(function* () {
+        const pf = yield* ensureDefault(database, userId);
+        const id = crypto.randomUUID();
+        const createdAt = Date.now();
+        const platform = input.platform ?? null;
+        yield* database.batch((db) => [
+          db.insert(accounts).values({
             id,
             userId,
             connectorId: input.connectorId,
             platform,
             label: input.label,
+            creds: input.creds,
             createdAt,
-            archivedAt: null,
-          };
-        }),
+          }),
+          db.insert(portfolioAccounts).values({ portfolioId: pf.id, accountId: id }),
+        ]);
+        return {
+          id,
+          userId,
+          connectorId: input.connectorId,
+          platform,
+          label: input.label,
+          createdAt,
+          archivedAt: null,
+        };
+      }),
 
-      list: (): Effect.Effect<AccountSafe[]> =>
-        database.query((db) =>
-          db.select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId)),
-        ),
+    list: (): Effect.Effect<AccountSafe[]> =>
+      database.query((db) =>
+        db.select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId)),
+      ),
 
-      getById: (id: string): Effect.Effect<AccountSafe | null> =>
-        Effect.map(
-          database.query((db) =>
-            db
-              .select(accountSafeColumns)
-              .from(accounts)
-              .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
-          ),
-          (rows) => rows[0] ?? null,
-        ),
-
-      /** 补录/再水合:整张 creds map 覆盖写入(占位被真值替换,见 P6.6.1 provideCredentials)。 */
-      setCredentials: (id: string, creds: string): Effect.Effect<void> =>
-        Effect.asVoid(
-          database.query((db) =>
-            db
-              .update(accounts)
-              .set({ creds })
-              .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
-          ),
-        ),
-
-      /** 取原始 creds map(JSON 字符串,含 secret 密文)供 sync 解密 / 服务端投影用(内部接口,绝不裸出网)。 */
-      getRawCreds: (id: string): Effect.Effect<string | null> =>
-        Effect.map(
-          database.query((db) =>
-            db
-              .select({ creds: accounts.creds })
-              .from(accounts)
-              .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
-          ),
-          (rows) => rows[0]?.creds ?? null,
-        ),
-
-      listRawCreds: (): Effect.Effect<AccountRawCreds[]> =>
+    getById: (id: string): Effect.Effect<AccountSafe | null> =>
+      Effect.map(
         database.query((db) =>
           db
-            .select({ id: accounts.id, creds: accounts.creds })
+            .select(accountSafeColumns)
             .from(accounts)
-            .where(eq(accounts.userId, userId)),
+            .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
         ),
+        (rows) => rows[0] ?? null,
+      ),
 
-      rename: (id: string, label: string): Effect.Effect<void> =>
-        Effect.asVoid(
-          database.query((db) =>
-            db
-              .update(accounts)
-              .set({ label })
-              .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
-          ),
+    /** 补录/再水合:整张 creds map 覆盖写入(占位被真值替换,见 P6.6.1 provideCredentials)。 */
+    setCredentials: (id: string, creds: string): Effect.Effect<void> =>
+      Effect.asVoid(
+        database.query((db) =>
+          db
+            .update(accounts)
+            .set({ creds })
+            .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
         ),
+      ),
 
-      /** 归档/取消归档:archived=true 写当前时刻,false 置 null。可逆,不删数据。 */
-      setArchived: (id: string, archived: boolean): Effect.Effect<void> =>
-        Effect.asVoid(
-          database.query((db) =>
-            db
-              .update(accounts)
-              .set({ archivedAt: archived ? Date.now() : null })
-              .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
-          ),
+    /** 取原始 creds map(JSON 字符串,含 secret 密文)供 sync 解密 / 服务端投影用(内部接口,绝不裸出网)。 */
+    getRawCreds: (id: string): Effect.Effect<string | null> =>
+      Effect.map(
+        database.query((db) =>
+          db
+            .select({ creds: accounts.creds })
+            .from(accounts)
+            .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
         ),
+        (rows) => rows[0]?.creds ?? null,
+      ),
 
-      /** 删账户:其 snapshots / portfolio_accounts / manual_activity 经 ON DELETE CASCADE 级联删除。 */
-      remove: (id: string): Effect.Effect<void> =>
-        Effect.asVoid(
-          database.query((db) =>
-            db.delete(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
-          ),
+    listRawCreds: (): Effect.Effect<AccountRawCreds[]> =>
+      database.query((db) =>
+        db
+          .select({ id: accounts.id, creds: accounts.creds })
+          .from(accounts)
+          .where(eq(accounts.userId, userId)),
+      ),
+
+    rename: (id: string, label: string): Effect.Effect<void> =>
+      Effect.asVoid(
+        database.query((db) =>
+          db
+            .update(accounts)
+            .set({ label })
+            .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
         ),
-    };
-  });
+      ),
+
+    /** 归档/取消归档:archived=true 写当前时刻,false 置 null。可逆,不删数据。 */
+    setArchived: (id: string, archived: boolean): Effect.Effect<void> =>
+      Effect.asVoid(
+        database.query((db) =>
+          db
+            .update(accounts)
+            .set({ archivedAt: archived ? Date.now() : null })
+            .where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
+        ),
+      ),
+
+    /** 删账户:其 snapshots / portfolio_accounts / manual_activity 经 ON DELETE CASCADE 级联删除。 */
+    remove: (id: string): Effect.Effect<void> =>
+      Effect.asVoid(
+        database.query((db) =>
+          db.delete(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
+        ),
+      ),
+  };
+});
 
 export class AccountStore extends Effect.Service<AccountStore>()("db/AccountStore", {
   effect: make,

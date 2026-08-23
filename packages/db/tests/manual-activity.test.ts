@@ -40,7 +40,8 @@ async function manualAccount(userId: string) {
   const acc = await accounts(userId).create({ connectorId: "manual", label: "M", creds: "{}" });
   const tokenId = await promisified(
     TokenStore,
-    userTokenStoreLayer({ userId, namer: "coingecko" }),
+    userTokenStoreLayer({ namer: "coingecko" }),
+    userId,
   ).create({ symbol: "BTC" }, []);
   return { id: acc.id, tokenId };
 }

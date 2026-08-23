@@ -55,11 +55,11 @@ beforeEach(async () => {
 // store 经 layer → Tag 拿(生产那条路);`promisified` 只是让用例照旧 `await store.xxx(…)`。
 // 时钟固定在 `NOW`,要看「过了很久之后」的用例自己传第三个参数。
 const storeFor = (userId: string, namer = NAMER, nowMs = NOW) =>
-  promisified(TokenStore, userTokenStoreLayer({ userId, namer }), nowMs);
+  promisified(TokenStore, userTokenStoreLayer({ namer }), userId, nowMs);
 const priceStoreFor = (userId: string, namer = NAMER, nowMs = NOW) =>
-  promisified(TokenPriceStore, userTokenPriceStoreLayer({ userId, namer }), nowMs);
+  promisified(TokenPriceStore, userTokenPriceStoreLayer({ namer }), userId, nowMs);
 const cacheFor = (userId: string, nowMs = NOW) =>
-  promisified(CacheStore, userCacheStoreLayer({ userId }), nowMs);
+  promisified(CacheStore, userCacheStoreLayer, userId, nowMs);
 
 // `getById` 现在回 `Option`(端口如此:「没有这一行」是调用方必须分支的一档)。
 // 用例关心的是那一行的内容,所以这里摘掉包装 —— 「没有」时给 undefined,断言照旧。

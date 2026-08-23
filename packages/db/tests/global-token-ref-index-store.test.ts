@@ -26,7 +26,8 @@ beforeEach(async () => {
 });
 
 // 生产那条路(layer → Tag);`promisified` 只是让用例照旧 `await s.xxx(…)`。
-const store = () => promisified(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer);
+// 全局表不按用户隔离(ADR 0022),`CurrentUser` 对它没有意义 —— 把手仍要一个,给个占位。
+const store = () => promisified(GlobalTokenRefIndexStore, globalTokenRefIndexStoreLayer, "n/a");
 
 describe("整份灌 + 正查", () => {
   it("灌进去,按 (upstream, chainRef) 点查得回**整条** upstream ref;miss 的键不出现", async () => {

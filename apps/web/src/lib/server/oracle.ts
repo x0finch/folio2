@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import type { UpstreamError } from "@folio/client-core";
 import {
   AccountStore,
+  CurrentUser,
   Database,
   type DbClient,
   dbClientLayer,
@@ -66,6 +67,18 @@ const upstreams = () =>
     coinGeckoNamerLayer,
   );
 
+/**
+ * **一次请求的两样底料**:那一个 drizzle 句柄,和「这次请求是谁的」(ADR 0044)。
+ *
+ * 底下每一个 per-user 服务(db 的八个领域 + 参考层的三张 store)都不自己开连接、也不自己收
+ * userId —— 它们的 `R` 声明 `DbClient | CurrentUser`,建自己那一刻各读一次。
+ *
+ * **一次请求只有一个 `DbClient`(红线)**:这里建一次,一个引用分给所有人,Effect 的 layer
+ * memoisation 保证只建一次。分两次 provide 就是两份,哪怕引用相同。
+ */
+export const perRequestLayer = (userId: string): Layer.Layer<DbClient | CurrentUser> =>
+  Layer.merge(dbClientLayer(env), Layer.succeed(CurrentUser, userId));
+
 // per-user 的三张 store + 那张全局表,都由 `@folio/db` 直接给 Layer(#362 第 5 站)——
 // 以前这里还有一层 30 行的 `Effect.promise` 适配(`oracle-ports.ts`),因为 db 那边是 Promise 形状;
 // 现在四个 store 自己就是 Effect,那个文件删了,`env` 也只在 `dbClientLayer(env)` 一处被读。
@@ -73,15 +86,15 @@ const upstreams = () =>
 // 惰性到「只建被用到的那一个」这件事**不做**:`packages/db/src/connect.ts` 自己写着
 // 「drizzle(env.DB) 很轻,每次创建即可」,而现在四个 store 共用同一个 `DbClient`——
 // 建它们只是几个闭包。迁移前那套 getter + `??=` 的手写惰性,省下的是不存在的代价。
-const portsFor = (userId: string, database: Layer.Layer<DbClient>) =>
+const portsFor = (perRequest: Layer.Layer<DbClient | CurrentUser>) =>
   Layer.provide(
     Layer.mergeAll(
-      userTokenStoreLayer({ userId, namer: UPSTREAM_ID }),
-      userTokenPriceStoreLayer({ userId, namer: UPSTREAM_ID }),
-      userCacheStoreLayer({ userId }),
+      userTokenStoreLayer({ namer: UPSTREAM_ID }),
+      userTokenPriceStoreLayer({ namer: UPSTREAM_ID }),
+      userCacheStoreLayer,
       globalTokenRefIndexStoreLayer,
     ),
-    database,
+    perRequest,
   );
 
 // cron 刷全局映射表只要这两个端口 —— 没有 userId,也不建 per-user 那三张。
@@ -97,8 +110,8 @@ const warmPorts = () =>
 // **`dbClient` 是必填,没有默认值。** 它出包给 `runtime.ts` 用之后,一个 `= dbClientLayer(env)`
 // 的默认值就等于「不传也能跑」—— 而不传正好就是多开一条连接那种写法。红线要靠签名挡住,
 // 不能靠调用点记得。
-export const oracleFor = (userId: string, dbClient: Layer.Layer<DbClient>) =>
-  Layer.provideMerge(oracleLayer, Layer.merge(portsFor(userId, dbClient), upstreams()));
+export const oracleFor = (perRequest: Layer.Layer<DbClient | CurrentUser>) =>
+  Layer.provideMerge(oracleLayer, Layer.merge(portsFor(perRequest), upstreams()));
 
 // 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
 // 而 `Data.TaggedError` 的那四类没有 `message` 字段,于是上层日志里只剩一个空消息 + 一坨 Cause。
@@ -152,22 +165,16 @@ export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
 //
 // `TransferStore` 的 layer 还要另外两个 store(导快照/导活动调它们的写口),所以先合出 base
 // 再把它 provide 上去。
-const dbStoresFor = (
-  userId: string,
-  dbClient: Layer.Layer<DbClient> = dbClientLayer(env),
-): Layer.Layer<DbStores> => {
+const dbStoresFor = (perRequest: Layer.Layer<DbClient | CurrentUser>): Layer.Layer<DbStores> => {
   const base = Layer.mergeAll(
-    AccountStore.Default(userId),
-    PortfolioStore.Default(userId),
-    SettingsStore.Default(userId),
-    SnapshotStore.Default(userId),
-    ManualStore.Default(userId),
-    TagStore.Default(userId),
+    AccountStore.Default,
+    PortfolioStore.Default,
+    SettingsStore.Default,
+    SnapshotStore.Default,
+    ManualStore.Default,
+    TagStore.Default,
   );
-  return Layer.provide(
-    Layer.merge(base, Layer.provide(TransferStore.Default(userId), base)),
-    dbClient,
-  );
+  return Layer.provide(Layer.merge(base, Layer.provide(TransferStore.Default, base)), perRequest);
 };
 
 /**
@@ -202,11 +209,11 @@ export const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices>
   // (memoisation 的作用域是一次构建),于是一个请求握着三个 drizzle 句柄 —— 今天只是浪费,
   // 但 `DbClient` 一旦长出状态(span、慢查询计数,`stores/service.ts` 已记着要加),
   // 那就是悄悄劈成几半的状态。
-  const dbClient = dbClientLayer(env);
+  const perRequest = perRequestLayer(userId);
   return Layer.mergeAll(
-    Layer.provide(Database.layer(userId), dbClient),
-    dbStoresFor(userId, dbClient),
-    oracleFor(userId, dbClient),
+    Layer.provide(Database.Default, perRequest),
+    dbStoresFor(perRequest),
+    oracleFor(perRequest),
   );
 };
 

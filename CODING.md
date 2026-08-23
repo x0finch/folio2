@@ -112,12 +112,12 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
     类型、Tag、layer(`.Default`)一次拿全,并排的那个 `xxxServiceLayer` 随之退场。
     **测试的假实现走它自己的构造器**(`new FxService({ … })`):实例带 `_tag`,裸对象编译期就被拦,
     而且假的与真的是同一条构造路。
-  - **带参**(userId / env)→ 同一个写法,`effect` 字段收**函数**:
-    `class AccountStore extends Effect.Service<AccountStore>()("db/AccountStore", { effect: make }) {}`
-    其中 `make = (userId: string) => Effect.gen(…)`,于是 `.Default` 变成 `AccountStore.Default(userId)`
-    —— userId 仍然在装配那一刻被吃掉(ADR 0037),服务的方法签名里一个 user 参数都没有。
-    **一个差别记着**:带参的 `.Default` 每次调用返回**新 layer**(无参那种才有引用缓存),所以
-    「一次请求只建一次」靠的是同一个 layer 引用只进一次 `Layer.mergeAll`,和以前手写工厂时一样。
+  - **要 userId 的服务也不带参数**(ADR 0044):`make` 里 `const userId = yield* CurrentUser` 读一次,
+    于是 `.Default` 仍是一个普通 layer,`R` 里多一个 `CurrentUser`。装配点一次请求 provide 一次
+    (`perRequestLayer(userId)`),不再每个领域一个 `xxxStoreLayer(userId)` 工厂。
+    **在建服务那一刻读,不在每次调用时读** —— 后者会把 `CurrentUser` 漏进每个方法的 `R`,
+    也就等于允许「同一个实例在一次请求里对不同用户各跑一遍」,那才是真的动了 ADR 0037。
+    `effect` 字段**也**能收函数(`.Default(userId)`),但本仓不用它:userId 有更该待的地方。
   两种都**逐方法显式标注返回类型** —— 契约精度不靠推断,推断只用来省掉那份复述。
   **一契约多实现的端口不在此列**:那边 interface 必须独立存在(见下一条),没有模板可省。
 - **端口的 Tag 与 interface 同名**(`Context.GenericTag`,`@effect/platform` 的 `FileSystem` /
