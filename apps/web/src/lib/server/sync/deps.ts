@@ -31,12 +31,11 @@ import {
   TokenOracle,
 } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
-import { Cause, Effect, Exit, Layer, Stream } from "effect";
+import { Cause, Effect, Exit, Layer, type Stream } from "effect";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
 import { manualBalancesForWarm } from "@/lib/server/manual/store";
-import { runAtEdge } from "@/lib/server/oracle";
-import { forUser, userLayer } from "@/lib/server/runtime";
+import { forUser, type UserServices, userLayer } from "@/lib/server/runtime";
 import { warmHeldPrices } from "@/lib/server/tokens/enrich";
 import { userDisplayBalances } from "@/lib/server/tokens/model";
 import { recordDefiLogosOf } from "./defi-logos";
@@ -105,11 +104,6 @@ export const warmTokens: Effect.Effect<
 
 // 一个用户的预热,**装配好了但还没跑**。cron 用它(把 N 个用户拼进自己那一个 effect)。
 const warmTokensFor = (userId: string): Effect.Effect<void, Error> => forUser(userId, warmTokens);
-
-// 流式同步收尾(`/api/sync` 的 afterRound)的边缘出口:那条路一次就预热一个用户,收尾本身即边缘。
-// 单账户同步不走这里 —— 它把预热拼进自己那一次装配(见 sync.ts)。
-export const warmTokensForUser = (userId: string): Promise<void> =>
-  runAtEdge(warmTokensFor(userId));
 
 // sweep 收尾用:逐用户预热,**各自兜住**(#375 第 2 步 · 纵深防御)。预热是尽力而为(供次日总览
 // cache-only 富化),一个用户失败绝不该让后面的用户排不上队,更不该把整次 cron 拖成异常收尾。
@@ -365,12 +359,34 @@ export const syncServicesLayer: Layer.Layer<
 );
 
 // 一个用户的一轮同步,**装配好了但还没跑**。流式端点与 cron 各取所需。
-const syncFor = (userId: string) => Layer.provide(syncServicesLayer, userLayer(userId));
+//
+// `provideMerge` 而不是 `provide`:底下那层(`Database` + 参考层)也透出去 —— 流式那条路的
+// 收尾(`warmTokens`)要的正是它,而它必须与同步内核用**同一次构建**出来的那一份
+//(否则一个请求两个 `DbClient`)。cron 那条路只用到 `SyncServices`,多透出来不花什么。
+const syncFor = (userId: string): Layer.Layer<SyncServices | UserServices> =>
+  Layer.provideMerge(syncServicesLayer, userLayer(userId));
 
-// `/api/sync` 的流:逐账户产出结果,交给 ndjson 那半。装配在这里做完,所以流的 `R` 是 `never`
-// —— `Stream.provideLayer` 之后调用方拿到的是一条能直接消费的流。
-export const syncStreamFor = (userId: string): Stream.Stream<AccountSyncResult, SyncDepError> =>
-  Sweep.syncUserStream(userId).pipe(Stream.provideLayer(syncFor(userId)));
+/**
+ * `/api/sync` 的一轮:**流、收尾,和它们共用的那一次装配** —— 三件一起出去,不在这里 provide。
+ *
+ * 以前这里出的是「已经 provide 好的流」,而收尾(`warmTokensForUser`)自己在另一个 `runAtEdge`
+ * 里再装一次 —— 同一个请求两个 `DbClient`。**Layer memoisation 的作用域是一次构建**,所以光传
+ * 同一个 layer 引用没用,必须是同一次 provide;要做到这一点,provide 那一下就得挪到「同时看得见
+ * 两半」的地方,也就是 `ndjsonRound` 里(#504 T12)。
+ *
+ * `syncFor` 因此改用 `provideMerge`:同步内核要的 `SyncServices` 与收尾要的 `UserServices`
+ * 都得在场,而且必须是同一次构建出来的那一份。
+ */
+export const syncRoundFor = (userId: string) => ({
+  results: Sweep.syncUserStream(userId) as Stream.Stream<
+    AccountSyncResult,
+    SyncDepError,
+    SyncServices | UserServices
+  >,
+  // 同步完预热代币缓存(best-effort),让下次总览能 cache-only 富化新价。
+  afterRound: warmTokens,
+  layer: syncFor(userId),
+});
 
 // cron 的全量 sweep:**逐用户各装一次**,再把小计加起来。
 //

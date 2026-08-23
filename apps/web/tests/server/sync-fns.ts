@@ -3,7 +3,8 @@ import type { AccountSafe } from "@folio/db";
 import { Account, type AccountSyncResult, BalanceSource } from "@folio/sync";
 import { Effect, Layer } from "effect";
 import { runRequest } from "@/lib/server/oracle";
-import { syncServicesLayer } from "@/lib/server/sync/deps";
+import { runForUser } from "@/lib/server/runtime";
+import { syncServicesLayer, warmTokens } from "@/lib/server/sync/deps";
 
 // 同步的测试把手(#403 片 3)。`SyncDeps` 与 `buildSyncDeps` 没了 —— 编排现在从 `SyncServices`
 // 取能力,所以测试要换掉的不再是「deps 对象上的一个字段」,而是**一层**。
@@ -56,3 +57,13 @@ export const syncOne = async (userId: string, job: SyncJob): Promise<AccountSync
   const [result] = await syncRound(userId, [job]);
   return result;
 };
+
+/**
+ * 一个用户的预热,跑成 Promise。
+ *
+ * 生产里没有这个形状了(#504 T12):流式那条路把预热当**收尾 effect** 交给 `ndjsonRound`,
+ * 与同步流共用同一次装配 —— 单独出一个「自己装一次再跑」的出口,正是那条路上曾经多建一个
+ * `DbClient` 的原因。用例要的只是「跑一次预热看结果」,所以把手留在测试这边。
+ */
+export const warmTokensForUser = (userId: string): Promise<void> =>
+  runForUser("warmTokens", userId, warmTokens);

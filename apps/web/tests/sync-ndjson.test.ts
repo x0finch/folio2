@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { ndjsonRound } from "@/lib/server/sync/ndjson";
 
@@ -15,8 +15,16 @@ const readLines = async (body: ReadableStream<Uint8Array>): Promise<string[]> =>
 
 // `ndjsonRound` 现在返回 Effect(#394 T5:建队列本来就是个 effect,由调用方在自己的边缘跑)。
 // 测试的边缘就在每个用例这一行。
-const round = <A>(...args: Parameters<typeof ndjsonRound<A>>) =>
-  Effect.runPromise(ndjsonRound(...args));
+//
+// `layer` 是生产那条路用来「流与收尾共用一次装配」的口子(#504 T12)。这些用例的流和收尾
+// 都不要任何服务,所以喂 `Layer.empty` —— 它们测的是编排顺序,不是装配。
+const round = <A>(
+  results: Stream.Stream<A, { readonly message: string }>,
+  opts: {
+    afterRound?: Effect.Effect<unknown, unknown>;
+    onFatal?: (message: string) => void;
+  } = {},
+) => Effect.runPromise(ndjsonRound(results, { layer: Layer.empty, ...opts }));
 
 const fail = (message: string) => Stream.fail({ message });
 
@@ -61,10 +69,12 @@ describe("ndjsonRound", () => {
         Stream.tap(() => Effect.sync(() => order.push("result"))),
       ),
       {
-        afterRound: async () => {
+        // `Effect.sync` 里 throw = defect。改造前那句 `afterRound().catch(() => {})` 连 defect
+        // 一起吞(`runPromise` 对 defect 也是 reject),所以这条钉的宽度没变。
+        afterRound: Effect.sync(() => {
           order.push("afterRound");
           throw new Error("warm failed");
-        },
+        }),
       },
     );
     await expect(run).resolves.toBeUndefined(); // 抛错被吞掉,run 正常结束
@@ -82,10 +92,10 @@ describe("ndjsonRound", () => {
     });
     let warmed = false;
     const { body, run } = await round(Stream.fromIterable([{ accountId: "a1", ok: true }]), {
-      afterRound: async () => {
+      afterRound: Effect.promise(async () => {
         await held;
         warmed = true;
-      },
+      }),
     });
 
     // 读到 EOF 了(readLines 要读满整条流),而 afterRound 还被卡着。

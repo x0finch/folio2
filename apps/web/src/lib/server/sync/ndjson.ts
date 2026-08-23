@@ -1,4 +1,4 @@
-import { Effect, Option, Queue, Stream } from "effect";
+import { Effect, type Layer, Option, Queue, Stream } from "effect";
 
 // 把「逐条产出的结果流」变成「NDJSON 字节流 + 一个后台任务」。纯逻辑:不引 cloudflare:workers、
 // 不碰 auth、不认识 @folio/sync —— 所以能单测(见 tests/sync-ndjson.test.ts)。
@@ -33,14 +33,19 @@ export interface NdjsonRound {
 // **`run` 仍是 Promise,而且仍由本模块 `runPromise`。** 它不是「中途转了一次」——
 // `waitUntil` 收的就是 Promise,而这个后台任务与响应那半**是两个程序**:响应流结束之后它照跑。
 // 一个程序一个边缘,这里恰好有两个。
-export const ndjsonRound = <A>(
-  results: Stream.Stream<A, { readonly message: string }>,
+export const ndjsonRound = <A, R>(
+  results: Stream.Stream<A, { readonly message: string }, R>,
   opts: {
+    // 流与收尾**共用的那一次装配**(#504 T12)。收 layer 而不是收两个装好的东西,是这条路
+    // 「一个请求一个 `DbClient`」的实现方式:下面只 provide 一次,memoisation 的作用域就是那一次。
+    // 以前流那半自己 `Stream.provideLayer` 装一次,收尾那半在自己的 `runAtEdge` 里再装一次 ——
+    // 同一个请求两个 drizzle 句柄,今天只是浪费,而 `DbClient` 一旦长出状态就是悄悄劈成两半。
+    layer: Layer.Layer<R>;
     // 一轮跑完之后的收尾(预热缓存之类)。**best-effort**:它失败不该影响这一轮的结果。
-    afterRound?: () => Promise<void>;
+    afterRound?: Effect.Effect<unknown, unknown, R>;
     // 用户级失败(整轮没跑起来)时记一笔 —— 日志由调用方给,本模块不认识 logger。
     onFatal?: (message: string) => void;
-  } = {},
+  },
 ): Effect.Effect<NdjsonRound> =>
   Effect.gen(function* () {
     const queue = yield* Queue.unbounded<Option.Option<string>>();
@@ -65,10 +70,13 @@ export const ndjsonRound = <A>(
         // 送达(toast 停在「Syncing 2/2」),而成功 toast 迟迟不出,因为 warmTokensForUser 在打
         // 一圈拿不到的上游。结果都出去了就该让前端收工;剩下的收尾归 waitUntil,与连接无关。
         Effect.ensuring(Queue.offer(queue, END)),
-        Effect.tap(() =>
-          afterRound ? Effect.promise(() => afterRound().catch(() => {})) : Effect.void,
-        ),
+        // **兜的是 `Exit` 不是类型化失败**:收尾是尽力而为,它自己的 bug(defect)也不该
+        // 把这一轮变成异常收尾。改造前那句 `afterRound().catch(() => {})` 兜的正是两类
+        //(`runPromise` 对 defect 也是 reject),这里保持同一个宽度。
+        Effect.tap(() => (afterRound ? Effect.asVoid(Effect.exit(afterRound)) : Effect.void)),
         Effect.asVoid,
+        // **一次 provide,流与收尾共用。** 放在最外面 —— 放进去任何一半,另一半就得自己再装一次。
+        Effect.provide(opts.layer),
       ),
     );
 

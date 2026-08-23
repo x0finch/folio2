@@ -4,7 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { runAtEdge } from "@/lib/server/oracle";
 import { getAuth } from "@/lib/server/session/auth";
 import { resolveAuth } from "@/lib/server/session/auth-session";
-import { syncStreamFor, warmTokensForUser } from "@/lib/server/sync/deps";
+import { syncRoundFor } from "@/lib/server/sync/deps";
 import { ndjsonRound } from "@/lib/server/sync/ndjson";
 
 // POST /api/sync —— 同步当前用户的全部账户,**逐账户以 NDJSON 流回进度**。
@@ -37,10 +37,13 @@ export const Route = createFileRoute("/api/sync")({
           return err instanceof Response ? err : new Response("Unauthorized", { status: 401 });
         }
 
+        // 流、收尾、装配三件一起拿 —— **provide 那一下在 `ndjsonRound` 里发生,只发生一次**,
+        // 所以这一个请求只建一个 `DbClient`(#504 T12)。
+        const round = syncRoundFor(userId);
         const { body, run } = await runAtEdge(
-          ndjsonRound(syncStreamFor(userId), {
-            // 同步完预热代币缓存(best-effort),让下次总览能 cache-only 富化新价。
-            afterRound: () => warmTokensForUser(userId),
+          ndjsonRound(round.results, {
+            layer: round.layer,
+            afterRound: round.afterRound,
             onFatal: (error) => log.error("sync stream failed", { userId, error }),
           }),
         );

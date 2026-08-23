@@ -4,9 +4,8 @@ import { globalTokenRefIndexStoreLayer, oraclePortsLayer } from "@folio/db";
 import { CacheStore, GlobalTokenRefIndexStore, TokenStore } from "@folio/oracle-basic/ports";
 import { Effect, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { warmTokensForUser } from "@/lib/server/sync/deps";
 import { dbFor, withStore } from "./db-effect";
-import { syncOne, syncRound } from "./sync-fns";
+import { syncOne, syncRound, warmTokensForUser } from "./sync-fns";
 
 // 写路径切到 mint 的端到端测试(#200):喂 provider 余额 → 落库 → 快照行带正确的 token_id。
 //
