@@ -87,7 +87,7 @@ export function accountsMatchingPin<A extends { id: string; connectorId: string 
 // 曲线追溯性地只算当前成员(含已归档成员的过去贡献),移进/移出 Portfolio 整条曲线重算(ADR 0033)。
 export function accountIdsInView(
   accountIds: string[],
-  memberships: PortfolioMembership[],
+  memberships: readonly PortfolioMembership[],
   selectedPortfolioId: string,
   defaultPortfolioId: string,
 ): Set<string> {

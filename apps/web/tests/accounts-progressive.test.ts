@@ -30,10 +30,19 @@ describe("骨架与真内容同形", () => {
 });
 
 describe("回访不闪骨架、金额失败继续骨架", () => {
-  it("持仓加载态看 data / isPending,不看 isFetching —— 缓存命中后台刷新不该再出骨架", () => {
+  // 机制换过一次:后到的那三样(余额 / 盈亏 / 标签)原来是 `useQuery` + `isPending`,
+  // 现在是挂起 + `QueryBoundary`。换的理由是 SSR —— 服务端渲染那一遍它们往往已经回来了,
+  // 而客户端补水那一帧没有,两边画的不是同一份 HTML,React 把整棵子树丢掉重渲。
+  //
+  // **要钉的性质一条没变**,下面几条就是那些性质:名单先出、金额后到、回访不闪骨架、
+  // 金额失败不写「拉取失败」。
+  it("回访不闪骨架:后到的三样走挂起,没人退回去看 isFetching", () => {
     const page = stripComments(src("routes/_authed/-accounts/index.tsx"));
-    expect(page).toContain("holdingsQuery");
-    expect(page).not.toContain("holdingsQuery.isFetching");
+    // `useSuspenseQuery` 命中缓存时直接给旧值、后台刷新、**不挂起** —— 回访不会再出骨架。
+    // 会破坏这条的写法是回去看 `isFetching`(那会把后台刷新也画成骨架)。
+    expect(page).not.toContain("isFetching");
+    expect(page).toMatch(/useSuspenseQuery\(accountHoldingsQuery/);
+    expect(page).toMatch(/useSuspenseQuery\(accountGain24hQuery/);
   });
 
   it("名单等归属到了再画,避免先画出别的组合的账户", () => {
@@ -42,27 +51,43 @@ describe("回访不闪骨架、金额失败继续骨架", () => {
     expect(page).toMatch(/useSuspenseQuery\(portfolioMembershipsQuery/);
   });
 
-  it("标签走 useQuery,不挡名单的 suspense", () => {
+  // 标签不该挡住**名单**。它现在也走挂起,但挂在**里层**那个边界上 —— 而里层的兜底
+  // (`pending`)渲的是同一个 `AccountsListBody`,账户名与徽章照旧在里头。所以名单不等标签。
+  it("标签不挡名单:挂起点在里层,兜底仍然是那份名单", () => {
     const page = stripComments(src("routes/_authed/-accounts/index.tsx"));
-    expect(page).toMatch(/useQuery\(tagListQuery/);
-    expect(page).toMatch(/useQuery\(accountTagLinksQuery/);
-    expect(page).not.toMatch(/useSuspenseQuery\(tagListQuery/);
-    expect(page).not.toMatch(/useSuspenseQuery\(accountTagLinksQuery/);
+    // 名单本身(账户行 + 归属)仍然是外层的挂起 —— 这两条不能变成非挂起,否则会先画出
+    // 别的组合的账户。
+    expect(page).toMatch(/useSuspenseQuery\(accountListQuery/);
+    expect(page).toMatch(/useSuspenseQuery\(portfolioMembershipsQuery/);
+    // 标签在里层那个边界之后取。
+    expect(page).toMatch(/AccountsListReady[\s\S]*useSuspenseQuery\(tagListQuery/);
+    // 里层的兜底不是整块骨架,是同一份名单。
+    expect(page).toMatch(/pending=\{[\s\S]{0,200}<AccountsListBody/);
+    expect(page).toMatch(/allTags = \[\]/);
   });
 
-  it("持仓走 useQuery,失败不写拉取失败", () => {
+  // 金额那三样拉失败,**不该把名单换成「拉取失败」** —— 名单本身是好的。
+  // 所以里层边界的 `failed` 也是同一个 body(带 gainFailed),不是 `ListFailed`。
+  it("金额失败不写拉取失败,名单照旧", () => {
     const page = stripComments(src("routes/_authed/-accounts/index.tsx"));
-    expect(page).toMatch(/useQuery\(accountHoldingsQuery/);
-    expect(page).not.toMatch(/useSuspenseQuery\(accountHoldingsQuery/);
-    expect(page).not.toMatch(/holdingsQuery\.isError[\s\S]{0,80}loadFailed/);
+    expect(page).toMatch(/failed=\{[\s\S]{0,200}<AccountsListBody/);
+    expect(page).not.toMatch(/failed=\{<ListFailed[\s\S]{0,200}<AccountsListReady/);
+    // 外层那个边界(名单本身塌了)仍然用 ListFailed —— 那才是该显示失败句的一层。
+    expect(page).toMatch(/failed=\{<ListFailed \/>\}/);
   });
 
-  it("盈亏加载态看 isPending,不看 isFetching —— 缓存命中后台刷新不该再出骨架", () => {
+  it("增量位的三态由一个 flag 决定,行组件只认它", () => {
     const page = stripComments(src("routes/_authed/-accounts/index.tsx"));
-    expect(page).toContain("gainQuery.isPending");
-    expect(page).not.toContain("gainQuery.isFetching");
+    // pending / failed / ready 三态共用同一个 body,差别只在这两个 flag 上 ——
+    // 抄三遍那一大坨 props 是这个文件最容易腐烂的地方。
+    expect(page).toMatch(/gainPending\?: boolean;/);
+    expect(page).toMatch(/gainFailed\?: boolean;/);
+    expect(page).toContain("gainPending={gainPending}");
   });
 
+  // **别用「补水完成了没」这种开关去躲骨架。** 那样两边确实一致了,代价是服务端也只渲骨架 ——
+  // SSR 出去的 HTML 里那些数字就没了,JS 跑起来之前谁都看不到。真要一致,该让两边挂在同一个
+  // 挂起点上(现在的做法),不是把服务端那半也蒙掉。**试过一次,就是因为这条被挡回来的。**
   it("没有自造 hydration 开关来躲骨架", () => {
     const page = src("routes/_authed/-accounts/index.tsx");
     expect(page).not.toMatch(/useHydrated|use-hydrated|isHydrated/);
