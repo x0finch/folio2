@@ -34,7 +34,7 @@ const STATEMENTS_PER_BATCH = 50;
 // 不碰 `Clock`(另外三个 store 都要):本 store 没有一处需要「现在几点」——
 // `putAll` 的时刻由调用方给(契约如此,cron 记的是那一轮的时刻),读侧无 TTL 门控。
 const make = Effect.gen(function* () {
-  const database = yield* DbClient;
+  const client = yield* DbClient;
 
   const store: GlobalTokenRefIndexStore = {
     // 正查一批:上游 `upstream` 对这些链上 ref 的**整条**叫法。miss 的键不出现。
@@ -57,7 +57,7 @@ const make = Effect.gen(function* () {
         // 顺序跑:与迁移前逐字一致,要并发得先量一次真实批量。
         const parts = chunk([...canonical.keys()]).filter((p) => p.length > 0);
         const batches = yield* Effect.forEach(parts, (part) =>
-          database.query((db) =>
+          client.query((db) =>
             db
               .select({
                 chainRef: globalTokenRefIndex.chainRef,
@@ -103,7 +103,7 @@ const make = Effect.gen(function* () {
         return Effect.forEach(
           chunk(statementRows, STATEMENTS_PER_BATCH),
           (batch) =>
-            database.batch((db) =>
+            client.batch((db) =>
               batch.map((part) =>
                 db
                   .insert(globalTokenRefIndex)
@@ -126,7 +126,7 @@ const make = Effect.gen(function* () {
     // 取该上游所有行里最大的 updated_at —— 不另存标记行,少一处可能与真实数据不一致的状态。
     refreshedAt: (upstream) =>
       Effect.map(
-        database.query((db) =>
+        client.query((db) =>
           db
             .select({ latest: max(globalTokenRefIndex.updatedAt) })
             .from(globalTokenRefIndex)

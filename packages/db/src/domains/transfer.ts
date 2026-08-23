@@ -48,7 +48,7 @@ export interface ImportTokenInput {
 // —— 合并式导入(#204,A 方案):按内容自然键 find-or-create,让「反复导入 / 合并不同文件」幂等。 ——
 // 全程用**新 id**(不碰全局 id 主键,多用户安全);去重靠 per-user 自然键。原样再导一遍 = 命中既有、不新建。
 const make = Effect.gen(function* () {
-  const database = yield* DbClient;
+  const client = yield* DbClient;
   const userId = yield* CurrentUser;
   const snapshotStore = yield* SnapshotStore;
   const manualStore = yield* ManualStore;
@@ -56,7 +56,7 @@ const make = Effect.gen(function* () {
   return {
     listTokensForExport: (): Effect.Effect<ExportToken[]> =>
       Effect.gen(function* () {
-        const rows = yield* database.query((db) =>
+        const rows = yield* client.query((db) =>
           db
             .select({
               id: tokens.id,
@@ -71,7 +71,7 @@ const make = Effect.gen(function* () {
             .orderBy(asc(tokens.id)),
         );
         if (rows.length === 0) return [];
-        const refRows = yield* database.query((db) =>
+        const refRows = yield* client.query((db) =>
           db
             .select({
               tokenId: tokenRefs.tokenId,
@@ -109,7 +109,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<string> =>
       Effect.gen(function* () {
         if (refs.length > 0) {
-          const hit = yield* database.query((db) =>
+          const hit = yield* client.query((db) =>
             db
               .select({ tokenId: tokenRefs.tokenId })
               .from(tokenRefs)
@@ -128,7 +128,7 @@ const make = Effect.gen(function* () {
           const target = hit[0]?.tokenId;
           if (target) {
             // 复用已有 Token:把它还没有的 ref 补挂过去(撞约束的静默跳过)。
-            yield* database.batch((db) =>
+            yield* client.batch((db) =>
               refs.map((r) =>
                 db
                   .insert(tokenRefs)
@@ -141,7 +141,7 @@ const make = Effect.gen(function* () {
         }
 
         const id = crypto.randomUUID();
-        yield* database.batch((db) => [
+        yield* client.batch((db) => [
           db.insert(tokens).values({
             id,
             userId,
@@ -170,7 +170,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const platform = input.platform ?? null;
         const creds = input.creds ?? null;
-        const existing = yield* database.query((db) =>
+        const existing = yield* client.query((db) =>
           db
             .select({ id: accounts.id, archivedAt: accounts.archivedAt })
             .from(accounts)
@@ -188,7 +188,7 @@ const make = Effect.gen(function* () {
         const hit = existing[0];
         if (hit) {
           if (input.archivedAt != null && hit.archivedAt == null) {
-            yield* database.query((db) =>
+            yield* client.query((db) =>
               db
                 .update(accounts)
                 .set({ archivedAt: input.archivedAt })
@@ -199,9 +199,9 @@ const make = Effect.gen(function* () {
         }
         // 新账户:同 AccountStore.create,建账户 + 归属默认 Portfolio 原子写
         //(维持「每账户恰一行归属」不变量)。
-        const pf = yield* ensureDefault(database, userId);
+        const pf = yield* ensureDefault(client, userId);
         const id = crypto.randomUUID();
-        yield* database.batch((db) => [
+        yield* client.batch((db) => [
           db.insert(accounts).values({
             id,
             userId,
@@ -223,8 +223,8 @@ const make = Effect.gen(function* () {
       input: WriteSnapshotInput,
     ): Effect.Effect<{ created: boolean }> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-        const existing = yield* database.query((db) =>
+        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        const existing = yield* client.query((db) =>
           db
             .select({ id: snapshots.id })
             .from(snapshots)
@@ -246,12 +246,12 @@ const make = Effect.gen(function* () {
       input: ManualActivityInput,
     ): Effect.Effect<{ created: boolean }> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-        yield* database.query((db) => assertTokenOwned(db, userId, tokenId));
+        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
         const price = input.price ?? null;
         const fee = input.fee ?? null;
         const memo = input.memo ?? null;
-        const existing = yield* database.query((db) =>
+        const existing = yield* client.query((db) =>
           db
             .select({ id: manualActivity.id })
             .from(manualActivity)

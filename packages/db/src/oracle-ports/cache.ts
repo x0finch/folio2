@@ -35,7 +35,7 @@ const upsert = (db: Drizzle, userId: string, w: CacheWrite, now: number) => {
 };
 
 const make = Effect.gen(function* () {
-  const database = yield* DbClient;
+  const client = yield* DbClient;
   const userId = yield* CurrentUser;
 
   // 存进去的一定是 JSON.stringify 的产物;真读到坏值就当没有这条 ——
@@ -52,7 +52,7 @@ const make = Effect.gen(function* () {
     get: (key) =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
-        const rows = yield* database.query((db) =>
+        const rows = yield* client.query((db) =>
           db
             .select({ v: userCache.v, expiresAt: userCache.expiresAt })
             .from(userCache)
@@ -71,7 +71,7 @@ const make = Effect.gen(function* () {
         // 多片本来就少见,要并发得先量一次真实批量。区别只是现在这句话写在代码里。
         const parts = chunk([...new Set(keys)]).filter((p) => p.length > 0);
         const batches = yield* Effect.forEach(parts, (part) =>
-          database.query((db) =>
+          client.query((db) =>
             db
               .select({ k: userCache.k, v: userCache.v, expiresAt: userCache.expiresAt })
               .from(userCache)
@@ -90,14 +90,14 @@ const make = Effect.gen(function* () {
     put: (key, value, ttlMs) =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
-        yield* database.query((db) => upsert(db, userId, { key, value, ttlMs }, now));
+        yield* client.query((db) => upsert(db, userId, { key, value, ttlMs }, now));
       }),
 
     // 一个批次发出去(D1 没有交互式事务,batch 是它的原子多写)。
     putMany: (writes) =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
-        yield* database.batch((db) => writes.map((w) => upsert(db, userId, w, now)));
+        yield* client.batch((db) => writes.map((w) => upsert(db, userId, w, now)));
       }),
   };
 

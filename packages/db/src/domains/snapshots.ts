@@ -106,7 +106,7 @@ export interface SnapshotBalanceHistoryRow {
 }
 
 const make = Effect.gen(function* () {
-  const database = yield* DbClient;
+  const client = yield* DbClient;
   const userId = yield* CurrentUser;
 
   return {
@@ -135,7 +135,7 @@ const make = Effect.gen(function* () {
       opts?: { collapseSameHour?: boolean },
     ): Effect.Effect<string> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
         const snapshotId = crypto.randomUUID();
         const balanceRows = input.balances.map((b) => ({
           id: crypto.randomUUID(),
@@ -157,7 +157,7 @@ const make = Effect.gen(function* () {
         // D1 限制每条 SQL 最多 100 个绑定参数 → 分块,每块 ≤ BALANCE_INSERT_CHUNK 行(见其定义)。
         // 一次性大 INSERT 会触发 "too many SQL variables"(地址持仓多时,如链上钱包几十上百条)。
         const hourStart = Math.floor(input.takenAt / HOUR_MS) * HOUR_MS;
-        yield* database.batch((db) => {
+        yield* client.batch((db) => {
           const balanceInserts = [];
           for (let i = 0; i < balanceRows.length; i += BALANCE_INSERT_CHUNK) {
             balanceInserts.push(
@@ -200,8 +200,8 @@ const make = Effect.gen(function* () {
 
     listByAccount: (accountId: string): Effect.Effect<Snapshot[]> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-        return yield* database.query((db) =>
+        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        return yield* client.query((db) =>
           db
             .select()
             .from(snapshots)
@@ -214,7 +214,7 @@ const make = Effect.gen(function* () {
     // 只取这三列、不取 balances(比 `latest` 轻);组合净值时间序列在纯函数里
     // 阶梯式重建(见 apps/web buildPortfolioHistory)。
     listTotals: (): Effect.Effect<SnapshotTotal[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db
           .select({
             accountId: snapshots.accountId,
@@ -232,7 +232,7 @@ const make = Effect.gen(function* () {
     // accountId/takenAt + 该余额的冻结口径列。snapshot_balances 仅按 snapshotId 建索引 → 跨快照全扫;
     // 自托管单用户量级可接受(见 #121 备注),量大再议加 (account_id, taken_at) 复合索引。
     listBalanceHistory: (since?: number): Effect.Effect<SnapshotBalanceHistoryRow[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db
           .select({
             accountId: snapshots.accountId,
@@ -261,7 +261,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         // ① 取每账户最新快照整行(1 查询);无快照的账户自然不出现。
         // 子查询:该用户每个账户的最新 takenAt(经 snapshots ⨝ accounts 用 userId 限定)。
-        const latestSnapshots = yield* database.query((db) => {
+        const latestSnapshots = yield* client.query((db) => {
           const latestPerAccount = db
             .select({
               accountId: snapshots.accountId,
@@ -294,7 +294,7 @@ const make = Effect.gen(function* () {
         if (snaps.length === 0) return [];
 
         // ② 取这些快照的全部余额(1 查询)。
-        const balanceRows = yield* database.query((db) =>
+        const balanceRows = yield* client.query((db) =>
           db
             .select()
             .from(snapshotBalances)
@@ -327,7 +327,7 @@ const make = Effect.gen(function* () {
     // 配合 `balancesFor` 一页页流式读出,内存恒定;每页配 inArray(≤ 页大小)取余额,
     // 避开 D1 100 绑定参数上限。
     listPage: (limit: number, offset: number): Effect.Effect<Snapshot[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db
           .select(getTableColumns(snapshots))
           .from(snapshots)
@@ -349,7 +349,7 @@ const make = Effect.gen(function* () {
     balancesFor: (snapshotIds: string[]): Effect.Effect<SnapshotBalance[]> =>
       snapshotIds.length === 0
         ? Effect.succeed([])
-        : database.query((db) =>
+        : client.query((db) =>
             db
               .select()
               .from(snapshotBalances)
@@ -392,13 +392,13 @@ const make = Effect.gen(function* () {
         //
         // 计数与改动之间不是原子的(D1 无交互式事务)—— 并发写会让日志里的数差一两条。日志容得下,
         // 而两条 UPDATE 各自幂等(`note IS NOT NULL` 门着),重跑不会重复扣。
-        const [snapCount] = yield* database.query((db) =>
+        const [snapCount] = yield* client.query((db) =>
           db
             .select({ n: count() })
             .from(snapshots)
             .where(and(isNotNull(snapshots.note), inArray(snapshots.id, stale(db)))),
         );
-        const [balCount] = yield* database.query((db) =>
+        const [balCount] = yield* client.query((db) =>
           db
             .select({ n: count() })
             .from(snapshotBalances)
@@ -410,7 +410,7 @@ const make = Effect.gen(function* () {
             ),
         );
 
-        yield* database.batch((db) => [
+        yield* client.batch((db) => [
           db
             .update(snapshots)
             .set({ note: null })

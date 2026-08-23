@@ -56,17 +56,17 @@ export interface AccountTagLink {
 }
 
 const make = Effect.gen(function* () {
-  const database = yield* DbClient;
+  const client = yield* DbClient;
   const userId = yield* CurrentUser;
 
   return {
     /** 建一个 Tag(归属指定 Portfolio)。名字 trim 后落库、同 Portfolio 内忽略大小写唯一。 */
     create: (input: CreateTagInput): Effect.Effect<Tag> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertPortfolioOwned(db, userId, input.portfolioId));
+        yield* client.query((db) => assertPortfolioOwned(db, userId, input.portfolioId));
         const name = input.name.trim();
         if (!name) return yield* Effect.die(new Error("tag name must not be empty"));
-        yield* database.query((db) => assertTagNameFree(db, userId, input.portfolioId, name));
+        yield* client.query((db) => assertTagNameFree(db, userId, input.portfolioId, name));
         const row = {
           id: crypto.randomUUID(),
           userId,
@@ -75,13 +75,13 @@ const make = Effect.gen(function* () {
           sortOrder: input.sortOrder ?? 0,
           createdAt: Date.now(),
         };
-        yield* database.query((db) => db.insert(tags).values(row));
+        yield* client.query((db) => db.insert(tags).values(row));
         return row;
       }),
 
     /** 全部 Tag(展示富化用:一次拿到 id→{name,portfolioId} 供账户行/抽屉渲染)。 */
     list: (): Effect.Effect<Tag[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db
           .select()
           .from(tags)
@@ -91,7 +91,7 @@ const make = Effect.gen(function* () {
 
     /** 某 Portfolio 内的 Tag(打标签弹窗:平铺当前 Portfolio 的可选 Tag)。 */
     listByPortfolio: (portfolioId: string): Effect.Effect<Tag[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db
           .select()
           .from(tags)
@@ -102,11 +102,11 @@ const make = Effect.gen(function* () {
     /** 改 Tag 名(同 Portfolio 内唯一校验,排除自身)。越权即 tag not found。 */
     rename: (tagId: string, name: string): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const { portfolioId } = yield* database.query((db) => assertTagOwned(db, userId, tagId));
+        const { portfolioId } = yield* client.query((db) => assertTagOwned(db, userId, tagId));
         const next = name.trim();
         if (!next) return yield* Effect.die(new Error("tag name must not be empty"));
-        yield* database.query((db) => assertTagNameFree(db, userId, portfolioId, next, tagId));
-        yield* database.query((db) =>
+        yield* client.query((db) => assertTagNameFree(db, userId, portfolioId, next, tagId));
+        yield* client.query((db) =>
           db
             .update(tags)
             .set({ name: next })
@@ -117,7 +117,7 @@ const make = Effect.gen(function* () {
     /** 删 Tag(Portfolio 级破坏性):其 account_tags 与 tab_pins(#343 后)经 FK cascade 一并清。 */
     remove: (tagId: string): Effect.Effect<void> =>
       Effect.asVoid(
-        database.query((db) =>
+        client.query((db) =>
           db.delete(tags).where(and(eq(tags.id, tagId), eq(tags.userId, userId))),
         ),
       ),
@@ -125,15 +125,15 @@ const make = Effect.gen(function* () {
     /** 给账户打上一个 Tag(幂等)。校验账户与 Tag 同 Portfolio(ADR 0034 不变量)。 */
     attach: (accountId: string, tagId: string): Effect.Effect<void> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-        const { portfolioId: tagPortfolio } = yield* database.query((db) =>
+        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        const { portfolioId: tagPortfolio } = yield* client.query((db) =>
           assertTagOwned(db, userId, tagId),
         );
-        const accPortfolio = yield* database.query((db) => accountPortfolioId(db, accountId));
+        const accPortfolio = yield* client.query((db) => accountPortfolioId(db, accountId));
         if (accPortfolio !== tagPortfolio) {
           return yield* Effect.die(new Error("tag and account belong to different portfolios"));
         }
-        yield* database.query((db) =>
+        yield* client.query((db) =>
           db.insert(accountTags).values({ tagId, accountId }).onConflictDoNothing(),
         );
       }),
@@ -141,9 +141,9 @@ const make = Effect.gen(function* () {
     /** 从账户取消一个 Tag(幂等)。两个资源都做 owner 断言。 */
     detach: (accountId: string, tagId: string): Effect.Effect<void> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-        yield* database.query((db) => assertTagOwned(db, userId, tagId));
-        yield* database.query((db) =>
+        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* client.query((db) => assertTagOwned(db, userId, tagId));
+        yield* client.query((db) =>
           db
             .delete(accountTags)
             .where(and(eq(accountTags.tagId, tagId), eq(accountTags.accountId, accountId))),
@@ -152,7 +152,7 @@ const make = Effect.gen(function* () {
 
     /** 全部 账户→Tag 关联(展示富化原料)。一次查询(account_tags ⨝ accounts 限 user)。 */
     listAccountLinks: (): Effect.Effect<AccountTagLink[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db
           .select({ accountId: accountTags.accountId, tagId: accountTags.tagId })
           .from(accountTags)

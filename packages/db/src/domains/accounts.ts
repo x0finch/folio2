@@ -46,8 +46,8 @@ export interface AccountRawCreds {
 // 同理)。所以它就是一个裸 Effect,依赖留在 `R` 上,由调用方 provide `dbClientLayer`。
 export const listUserIdsWithAccounts: Effect.Effect<string[], never, DbClient> = Effect.gen(
   function* () {
-    const database = yield* DbClient;
-    const rows = yield* database.query((db) =>
+    const client = yield* DbClient;
+    const rows = yield* client.query((db) =>
       db.selectDistinct({ userId: accounts.userId }).from(accounts),
     );
     return rows.map((r) => r.userId);
@@ -55,7 +55,7 @@ export const listUserIdsWithAccounts: Effect.Effect<string[], never, DbClient> =
 );
 
 const make = Effect.gen(function* () {
-  const database = yield* DbClient;
+  const client = yield* DbClient;
   const userId = yield* CurrentUser;
 
   return {
@@ -63,11 +63,11 @@ const make = Effect.gen(function* () {
     // 一个 batch 原子写,杜绝「有账户没归属」的空窗(否则该账户会从 accountsInView 里消失)。
     create: (input: CreateAccountInput): Effect.Effect<AccountSafe> =>
       Effect.gen(function* () {
-        const pf = yield* ensureDefault(database, userId);
+        const pf = yield* ensureDefault(client, userId);
         const id = crypto.randomUUID();
         const createdAt = Date.now();
         const platform = input.platform ?? null;
-        yield* database.batch((db) => [
+        yield* client.batch((db) => [
           db.insert(accounts).values({
             id,
             userId,
@@ -91,13 +91,13 @@ const make = Effect.gen(function* () {
       }),
 
     list: (): Effect.Effect<AccountSafe[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db.select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId)),
       ),
 
     getById: (id: string): Effect.Effect<AccountSafe | null> =>
       Effect.map(
-        database.query((db) =>
+        client.query((db) =>
           db
             .select(accountSafeColumns)
             .from(accounts)
@@ -109,7 +109,7 @@ const make = Effect.gen(function* () {
     /** 补录/再水合:整张 creds map 覆盖写入(占位被真值替换,见 P6.6.1 provideCredentials)。 */
     setCredentials: (id: string, creds: string): Effect.Effect<void> =>
       Effect.asVoid(
-        database.query((db) =>
+        client.query((db) =>
           db
             .update(accounts)
             .set({ creds })
@@ -120,7 +120,7 @@ const make = Effect.gen(function* () {
     /** 取原始 creds map(JSON 字符串,含 secret 密文)供 sync 解密 / 服务端投影用(内部接口,绝不裸出网)。 */
     getRawCreds: (id: string): Effect.Effect<string | null> =>
       Effect.map(
-        database.query((db) =>
+        client.query((db) =>
           db
             .select({ creds: accounts.creds })
             .from(accounts)
@@ -130,7 +130,7 @@ const make = Effect.gen(function* () {
       ),
 
     listRawCreds: (): Effect.Effect<AccountRawCreds[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db
           .select({ id: accounts.id, creds: accounts.creds })
           .from(accounts)
@@ -139,7 +139,7 @@ const make = Effect.gen(function* () {
 
     rename: (id: string, label: string): Effect.Effect<void> =>
       Effect.asVoid(
-        database.query((db) =>
+        client.query((db) =>
           db
             .update(accounts)
             .set({ label })
@@ -150,7 +150,7 @@ const make = Effect.gen(function* () {
     /** 归档/取消归档:archived=true 写当前时刻,false 置 null。可逆,不删数据。 */
     setArchived: (id: string, archived: boolean): Effect.Effect<void> =>
       Effect.asVoid(
-        database.query((db) =>
+        client.query((db) =>
           db
             .update(accounts)
             .set({ archivedAt: archived ? Date.now() : null })
@@ -161,7 +161,7 @@ const make = Effect.gen(function* () {
     /** 删账户:其 snapshots / portfolio_accounts / manual_activity 经 ON DELETE CASCADE 级联删除。 */
     remove: (id: string): Effect.Effect<void> =>
       Effect.asVoid(
-        database.query((db) =>
+        client.query((db) =>
           db.delete(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))),
         ),
       ),

@@ -33,14 +33,14 @@ export interface ManualHolding {
   ref: TokenRef | null;
 }
 
-// 持仓这半的方法(绑好 `database` 与 userId 之后)。
-const holdingOps = (database: DbClient, userId: string) => ({
+// 持仓这半的方法(绑好 `client` 与 userId 之后)。
+const holdingOps = (client: DbClient, userId: string) => ({
   // `namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传(同 userTokenStoreLayer),db 层不预设任何厂商。
   // 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
   listHoldings: (accountId: string, namer: string): Effect.Effect<ManualHolding[]> =>
     Effect.gen(function* () {
-      yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-      const rows = yield* database.query((db) =>
+      yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+      const rows = yield* client.query((db) =>
         db
           .select({
             id: tokens.id,
@@ -76,11 +76,11 @@ const holdingOps = (database: DbClient, userId: string) => ({
   // 而 `tokens.self_price` 从此没有写者(迁移 0016 把存量搬进账本并清空了它)。
   setHoldingDef: (tokenId: string, input: { symbol?: string }): Effect.Effect<void> =>
     Effect.gen(function* () {
-      yield* database.query((db) => assertTokenOwned(db, userId, tokenId));
+      yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
       const set: Record<string, unknown> = {};
       if (input.symbol !== undefined) set.symbol = input.symbol;
       if (Object.keys(set).length === 0) return;
-      yield* database.query((db) =>
+      yield* client.query((db) =>
         db
           .update(tokens)
           .set(set)
@@ -92,9 +92,9 @@ const holdingOps = (database: DbClient, userId: string) => ({
   // 别的账户可能还在用,而且它带着上游 ref / 历史日价,删了就得重新认一遍。
   detachHolding: (accountId: string, tokenId: string): Effect.Effect<void> =>
     Effect.gen(function* () {
-      yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-      yield* database.query((db) => assertTokenOwned(db, userId, tokenId));
-      yield* database.query((db) =>
+      yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+      yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
+      yield* client.query((db) =>
         db
           .delete(manualActivity)
           .where(and(eq(manualActivity.accountId, accountId), eq(manualActivity.tokenId, tokenId))),
@@ -168,12 +168,12 @@ async function assertActivityOwned(
 }
 
 const make = Effect.gen(function* () {
-  const database = yield* DbClient;
+  const client = yield* DbClient;
   const userId = yield* CurrentUser;
 
   return {
     // —— 持仓(账本折叠出来的那一面,实现在本文件上半)——
-    ...holdingOps(database, userId),
+    ...holdingOps(client, userId),
 
     // —— 账本 ——
 
@@ -187,9 +187,9 @@ const make = Effect.gen(function* () {
       input: ManualActivityInput,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-        yield* database.query((db) => assertTokenOwned(db, userId, tokenId));
-        yield* database.query((db) =>
+        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
+        yield* client.query((db) =>
           db.insert(manualActivity).values({
             id: crypto.randomUUID(),
             accountId,
@@ -210,8 +210,8 @@ const make = Effect.gen(function* () {
     // 活动一起折进来,数量直接算错 —— 所以 accountId 是必填。
     listActivityByToken: (accountId: string, tokenId: string): Effect.Effect<ManualActivity[]> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-        return yield* database.query((db) =>
+        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        return yield* client.query((db) =>
           db
             .select(getTableColumns(manualActivity))
             .from(manualActivity)
@@ -224,7 +224,7 @@ const make = Effect.gen(function* () {
 
     // userId-scoped(经 account ⨝ user 归属);按 occurred_at→created_at 升序。
     listActivityByAccount: (accountId: string): Effect.Effect<ManualActivity[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db
           .select(getTableColumns(manualActivity))
           .from(manualActivity)
@@ -236,7 +236,7 @@ const make = Effect.gen(function* () {
     /** 导出用:全部手记活动(跨账户,扁平)。 */
     // accountId / tokenId 都是导出侧的旧 id,导入时按各自的重映射改指。
     listAllActivity: (): Effect.Effect<ManualActivity[]> =>
-      database.query((db) =>
+      client.query((db) =>
         db
           .select(getTableColumns(manualActivity))
           .from(manualActivity)
@@ -247,8 +247,8 @@ const make = Effect.gen(function* () {
 
     removeActivity: (accountId: string, id: string): Effect.Effect<void> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, accountId));
-        yield* database.query((db) =>
+        yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+        yield* client.query((db) =>
           db
             .delete(manualActivity)
             .where(and(eq(manualActivity.id, id), eq(manualActivity.accountId, accountId))),
@@ -257,7 +257,7 @@ const make = Effect.gen(function* () {
 
     /** 活动 → {tokenId, accountId}(公开读,归属校验)。编辑前用它取所属 token 校验超支。 */
     activityOwner: (activityId: string): Effect.Effect<{ tokenId: string; accountId: string }> =>
-      database.query((db) => assertActivityOwned(db, userId, activityId)),
+      client.query((db) => assertActivityOwned(db, userId, activityId)),
 
     /** 编辑一笔既有活动(保留 id/tokenId/accountId/createdAt;只覆盖给定字段)。 */
     // 归属经 assertActivityOwned;超支校验在 app 层(改前折叠受影响 token 时间线)。
@@ -266,7 +266,7 @@ const make = Effect.gen(function* () {
       patch: ManualActivityPatch,
     ): Effect.Effect<{ tokenId: string; accountId: string }> =>
       Effect.gen(function* () {
-        const owner = yield* database.query((db) => assertActivityOwned(db, userId, activityId));
+        const owner = yield* client.query((db) => assertActivityOwned(db, userId, activityId));
         const set: Partial<InferSelectModel<typeof manualActivity>> = {};
         if (patch.kind !== undefined) set.kind = patch.kind;
         if (patch.amount !== undefined) set.amount = patch.amount;
@@ -276,7 +276,7 @@ const make = Effect.gen(function* () {
         if (patch.memo !== undefined) set.memo = patch.memo;
         // 空 patch → 无字段可写。drizzle 对空 set 会抛 "No values to set" → 直接短路(归属已校验)。
         if (Object.keys(set).length > 0) {
-          yield* database.query((db) =>
+          yield* client.query((db) =>
             db.update(manualActivity).set(set).where(eq(manualActivity.id, activityId)),
           );
         }
@@ -291,12 +291,12 @@ const make = Effect.gen(function* () {
     // 活动 createdAt = now + i 保提交序(同 occurredAt 处新活动恒排在既有之后,与 planManualBatch 定序一致)。
     commitBatch: (plan: ManualBatchPlan): Effect.Effect<void> =>
       Effect.gen(function* () {
-        yield* database.query((db) => assertAccountOwned(db, userId, plan.accountId));
+        yield* client.query((db) => assertAccountOwned(db, userId, plan.accountId));
         const ids = [
           ...new Set([...plan.declare.map((t) => t.id), ...plan.activities.map((a) => a.tokenId)]),
         ];
         if (ids.length > 0) {
-          const owned = yield* database.query((db) =>
+          const owned = yield* client.query((db) =>
             db
               .select({ id: tokens.id })
               .from(tokens)
@@ -308,7 +308,7 @@ const make = Effect.gen(function* () {
           }
         }
         const now = Date.now();
-        yield* database.batch((db) => [
+        yield* client.batch((db) => [
           ...plan.declare.map((t) =>
             db
               .update(tokens)

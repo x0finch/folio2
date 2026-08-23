@@ -60,7 +60,7 @@ type InfoRow = {
 
 const make = ({ namer }: UserTokenStoreOpts) =>
   Effect.gen(function* () {
-    const database = yield* DbClient;
+    const client = yield* DbClient;
     const userId = yield* CurrentUser;
 
     // 一批 ref 的 where:(namer=? AND local_name=?) OR … 。全部同属本用户,故 user_id 一次即可。
@@ -79,7 +79,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
       Effect.gen(function* () {
         const parts = chunk([...new Set(tokenIds)]).filter((p) => p.length > 0);
         const batches = yield* Effect.forEach(parts, (part) =>
-          database.query((db) =>
+          client.query((db) =>
             db
               .select({ tokenId: tokenRefs.tokenId })
               .from(tokenRefs)
@@ -102,7 +102,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
       Effect.gen(function* () {
         const parts = chunk([...new Set(tokenIds)]).filter((p) => p.length > 0);
         const batches = yield* Effect.forEach(parts, (part) =>
-          database.query((db) =>
+          client.query((db) =>
             db
               .select({ tokenId: tokenRefs.tokenId, localName: tokenRefs.localName })
               .from(tokenRefs)
@@ -151,7 +151,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
         if (ids.length === 0) return out;
         const parts = chunk([...new Set(ids)]).filter((p) => p.length > 0);
         const batches = yield* Effect.forEach(parts, (part) =>
-          database.query(
+          client.query(
             (db): PromiseLike<InfoRow[]> =>
               db
                 .select({
@@ -191,7 +191,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
 
           const parts = chunk(pairs, REF_PAIR_CHUNK).filter((p) => p.length > 0);
           const batches = yield* Effect.forEach(parts, (part) =>
-            database.query((db) =>
+            client.query((db) =>
               db
                 .select({
                   namer: tokenRefs.namer,
@@ -221,7 +221,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
           });
           const id = crypto.randomUUID();
           const now = yield* Clock.currentTimeMillis;
-          yield* database.batch((db) => [
+          yield* client.batch((db) => [
             db.insert(tokens).values({
               id,
               userId,
@@ -243,13 +243,13 @@ const make = ({ namer }: UserTokenStoreOpts) =>
           ]);
           if (pairs.length === 0) return id;
           // upsert-then-read:读回这些 ref 最终指向谁。
-          const rows = yield* database.query((db) =>
+          const rows = yield* client.query((db) =>
             db.select({ tokenId: tokenRefs.tokenId }).from(tokenRefs).where(whereRefs(pairs)),
           );
           const winner = rows[0]?.tokenId ?? id;
           // 自己没抢到 → 把刚建的孤行删掉,别在表里留垃圾。
           if (winner !== id) {
-            yield* database.query((db) => db.delete(tokens).where(eq(tokens.id, id)));
+            yield* client.query((db) => db.delete(tokens).where(eq(tokens.id, id)));
           }
           return winner;
         }),
@@ -261,7 +261,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
           // 「一个 Token 在一个命名者下最多一条 ref」由唯一索引 `(user_id, token_id, namer)` 在 DB 层
           // 兜底(见 schema.ts);这里先在应用层挡一道 —— 已经有那一档了就什么都不做,给个确定的返回值,
           // 不必等约束抛错。约束存在的意义是并发:两个实例同时走到这、都读到「还没有」时,谁插进去谁生效。
-          const existing = yield* database.query((db) =>
+          const existing = yield* client.query((db) =>
             db
               .select({ tokenId: tokenRefs.tokenId, localName: tokenRefs.localName })
               .from(tokenRefs)
@@ -282,7 +282,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
           if (existing.length > 0) return tokenId;
           // 真加了一条 ref → **info 标成该刷**(契约见 `@folio/oracle-basic` 的 stores.ts):某个来源开始用新名字称呼一个
           // 我们已经认识的币,这就是改名的证据。同一批发,省一次往返。
-          yield* database.batch((db) => [
+          yield* client.batch((db) => [
             // 无目标 onConflict:两道约束(PK 与 `(user_id, token_id, namer)` 唯一索引)任一撞了都静默。
             // 并发时另一个实例可能已给同一 Token 在同命名者下插了条**不同 local_name** 的 ref —— 那撞的是
             // 唯一索引而非 PK,只认 PK 会抛。输家在此 no-op、返回原 tokenId,收敛到先到者那条。
@@ -305,7 +305,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
           if (from === into) return;
           // ref 行改指:`into` 已有同一 (namer, local_name) 的话主键会撞 → 先删掉 `from` 那边的重复项。
           const refsOf = (tokenId: string) =>
-            database.query((db) =>
+            client.query((db) =>
               db
                 .select({ namer: tokenRefs.namer, localName: tokenRefs.localName })
                 .from(tokenRefs)
@@ -323,7 +323,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
           const taken = new Set(intoRefs.map((r) => r.namer));
           const dupes = fromRefs.filter((r) => taken.has(r.namer));
 
-          yield* database.batch((db) => [
+          yield* client.batch((db) => [
             ...dupes.map((d) =>
               db
                 .delete(tokenRefs)
@@ -377,7 +377,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
             set.providerLogo = sql`coalesce(${tokens.providerLogo}, ${patch.providerLogo})`;
           }
           if (Object.keys(set).length === 0) return Effect.void;
-          return database.query((db) =>
+          return client.query((db) =>
             db
               .update(tokens)
               .set(set)
@@ -396,7 +396,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
           yield* Effect.forEach(
             chunk([...rows], INFO_WRITES_PER_BATCH).filter((p) => p.length > 0),
             (part) =>
-              database.batch((db) =>
+              client.batch((db) =>
                 part.map((r) =>
                   db
                     .update(tokens)
@@ -418,7 +418,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
       // 这里只是另一条路:本用户已有的、且已被上游认出的同 symbol 币。
       candidatesBySymbol: (symbol) =>
         Effect.map(
-          database.query((db) =>
+          client.query((db) =>
             db
               .select({ localName: tokenRefs.localName, marketCapRank: tokens.marketCapRank })
               .from(tokens)

@@ -16,16 +16,14 @@ export interface UserSettingsView {
 }
 
 const make = Effect.gen(function* () {
-  const database = yield* DbClient;
+  const client = yield* DbClient;
   const userId = yield* CurrentUser;
 
   return {
     /** 读带缺省:无行返默认(不为每个用户强制建行)。 */
     get: (): Effect.Effect<UserSettingsView> =>
       Effect.map(
-        database.query((db) =>
-          db.select().from(userSettings).where(eq(userSettings.userId, userId)),
-        ),
+        client.query((db) => db.select().from(userSettings).where(eq(userSettings.userId, userId))),
         (rows) => {
           const r = rows[0] as UserSettings | undefined;
           return { valuationMode: r?.valuationMode ?? DEFAULT_VALUATION_MODE };
@@ -40,7 +38,7 @@ const make = Effect.gen(function* () {
           updatedAt: now,
         };
         if (patch.valuationMode !== undefined) set.valuationMode = patch.valuationMode;
-        yield* database.query((db) =>
+        yield* client.query((db) =>
           db
             .insert(userSettings)
             .values({
