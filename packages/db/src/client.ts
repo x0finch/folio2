@@ -33,10 +33,11 @@ export class DbClient extends Effect.Service<DbClient>()("db/DbClient", {
     Effect.sync(() => {
       const db = getDb(env);
       return {
-        // **span 就加在这一处**(#504 T16)。上面那段说的「将来想加 span 只改一处」就是这个。
-        // 全部查询同名(`db.query`)—— 那是这个收口点的代价,换来的是**一个方法都不用改**:
-        // 七十个 op 全在这条桥上过。要分得更细得给那七十个各起名字,而判据(见 T16 那张票)
-        // 是不值:handler 名 + 「这里有几次查询、一共多久」已经答得了「慢在哪」。
+        // **span 加在这一处**(#504 T16)。上面那段说的「将来想加 span 只改一处」就是这个。
+        // 这一层的名字只有一个(`db.query`),所以它答的是「这一次查询多久」,答不了「哪个 op」。
+        // 后者不必给七十个方法各起名字:`database.ts` 的 `tracedStores` 在聚合出口一并包上
+        // (键名 + 方法名 = `accounts.create`),同样是一处、零个方法被改。两处合起来是三层树。
+        // 参考层那几个 store 不过聚合、直接用这个服务,所以它们的查询只到这一层。
         query: Effect.fn("db.query")(function* <A>(build: (d: Drizzle) => PromiseLike<A>) {
           return yield* Effect.promise(() => build(db));
         }),

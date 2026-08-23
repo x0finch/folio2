@@ -42,22 +42,30 @@ describe("span 树", () => {
     expect(tree.split("\n")[0]).toMatch(/^createTabPin \d+\.\d+ms userId=user-tracing$/);
   });
 
-  // **两层就够了,这是量出来的**(#504 T16 那张票要的那次实测)。
+  // **三层:handler → domain op → D1**(#504 T16)。
   //
-  // 只有 handler 一层时,`getPortfolioOverview` 的树就一行 `20.0ms` —— 答得了「哪个端点慢」,
-  // 答不了「慢在哪」。给 `DbClient` 那一处收口点加上 span 之后,同一棵树是:
+  // 只有 handler 一层时,`getPortfolioOverview` 的树就一行 —— 答得了「哪个端点慢」,答不了
+  // 「慢在哪」。`DbClient` 那一处收口点给出最里那层,`Database` 聚合出口的 `tracedStores`
+  // 给出中间那层「哪个 domain 方法」。同一次请求实测(测试库、数据少,毫秒数只看相对):
   //
-  //     getPortfolioOverview 20.0ms
-  //       db.query 13.0ms   ← 两条并发的重读,那 20ms 里的大头
-  //       db.query 13.0ms
-  //       db.query 1.0ms    ← 其余七条各 1–2ms
+  //     getPortfolioOverview 36.0ms userId=user-probe
+  //       portfolios.list 11.0ms
+  //         db.query 11.0ms
+  //       portfolios.ensureDefault 11.0ms
+  //         db.query 11.0ms
+  //       accounts.list 4.0ms
+  //         db.query 4.0ms
   //       …
+  //       manual.listActivityByAccount 2.0ms
+  //         db.query 2.0ms
+  //         db.query 1.0ms   ← 一个 domain 方法发两条查询,只有中间那层看得出来
+  //       db.query 2.0ms     ← 没有 domain 名字的那几条是参考层的 store:它们不过 `Database`
+  //       db.query 3.0ms        聚合、直接用 `DbClient`,所以只到桥这一层
   //
-  // 问题就此答完,而**代价是零个方法被改**:七十个 op 全在那条桥上过。要再细就得给它们各起
-  // 名字,判据(见那张票)是不值。
+  // **代价是零个方法被改**:七十个 op 在聚合出口一并包上,桥那头一并包上。
   //
-  // 这条钉的是**两层都在**:handler 名 + 底下那次 `db.query`。
-  it("树有两层:handler 名 + 底下那次 D1", async () => {
+  // 这条钉的是三层都在:handler 名 → `tabPins.list` → `db.query`。
+  it("树有三层:handler 名 → domain op → D1", async () => {
     const tree = await treeOf(
       forUser(
         USER,
@@ -66,6 +74,9 @@ describe("span 树", () => {
     );
     const lines = tree.split("\n");
     expect(lines[0]).toMatch(/^listTabPins \d/);
-    expect(lines.slice(1)).toEqual([expect.stringMatching(/^ {2}db\.query \d/)]);
+    expect(lines.slice(1)).toEqual([
+      expect.stringMatching(/^ {2}tabPins\.list \d/),
+      expect.stringMatching(/^ {4}db\.query \d/),
+    ]);
   });
 });
