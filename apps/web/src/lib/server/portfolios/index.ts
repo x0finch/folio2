@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { CreatePortfolioInput, handleCreatePortfolio } from "./create";
 import { DeletePortfolioInput, handleDeletePortfolio } from "./delete";
@@ -13,33 +14,33 @@ import { handleSetDefaultPortfolio, SetDefaultPortfolioInput } from "./set-defau
 
 export const listPortfolios = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(handleListPortfolios);
+  .handler(runEffect(handleListPortfolios));
 
 export const moveAccountToPortfolio = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(MoveAccountInput)
-  .handler(handleMoveAccountToPortfolio);
+  .handler(runEffect(handleMoveAccountToPortfolio));
 
 export const createPortfolio = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreatePortfolioInput)
-  .handler(handleCreatePortfolio);
+  .handler(runEffect(handleCreatePortfolio));
 
 export const listPortfolioMemberships = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(handleListPortfolioMemberships);
+  .handler(runEffect(handleListPortfolioMemberships));
 
 export const renamePortfolio = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(RenamePortfolioInput)
-  .handler(handleRenamePortfolio);
+  .handler(runEffect(handleRenamePortfolio));
 
 export const setDefaultPortfolio = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(SetDefaultPortfolioInput)
-  .handler(handleSetDefaultPortfolio);
+  .handler(runEffect(handleSetDefaultPortfolio));
 
 export const deletePortfolio = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(DeletePortfolioInput)
-  .handler(handleDeletePortfolio);
+  .handler(runEffect(handleDeletePortfolio));
