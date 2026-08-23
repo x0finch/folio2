@@ -279,9 +279,3 @@ export const makeTransferStore = Effect.gen(function* () {
       }),
   };
 });
-
-// 过渡壳。app 里还有调用点写着 `yield* TransferStore`,挂进聚合 `Database` 之后(#504 T7–T12)
-// 它们会一处不剩,这个 class 随之删除 —— 留下的就是上面那个 make,tab-pins 今天的形状。
-export class TransferStore extends Effect.Service<TransferStore>()("db/TransferStore", {
-  effect: makeTransferStore,
-}) {}
