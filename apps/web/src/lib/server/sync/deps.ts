@@ -14,16 +14,8 @@ import {
   fromProviderError,
   type ProviderNeeds,
 } from "@folio/connectors-basic";
-import {
-  type AccountSafe,
-  AccountStore,
-  type Database,
-  type NotFound,
-  SettingsStore,
-  SnapshotStore,
-  type WriteSnapshotInput,
-} from "@folio/db";
-import { FxService, type OraclePorts, type OracleServices, TokenService } from "@folio/oracle";
+import { type AccountSafe, Database, type NotFound, type WriteSnapshotInput } from "@folio/db";
+import { Oracle, type OraclePorts, type OracleServices } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
 import {
   type AccountSyncResult,
@@ -43,7 +35,8 @@ import { Cause, Effect, Exit, Layer, Stream } from "effect";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
 import { manualBalancesForWarm } from "@/lib/server/manual/store";
-import { type DbStores, legacyRequestLayer, runAtEdge, withRequest } from "@/lib/server/oracle";
+import { runAtEdge } from "@/lib/server/oracle";
+import { forUser, userLayer } from "@/lib/server/runtime";
 import { warmHeldPrices } from "@/lib/server/tokens/enrich";
 import { userDisplayBalances } from "@/lib/server/tokens/model";
 import { recordDefiLogosOf } from "./defi-logos";
@@ -68,13 +61,11 @@ import { isSyncableAccount } from "./syncable";
 export const warmTokens: Effect.Effect<
   void,
   UpstreamError | NotFound,
-  // `Database` 是 `manualBalancesForWarm` 带进来的 —— manual 那层已经改用两张聚合门票
-  //(#504 T9),这条路自己的写法留到 T12 一起换。
-  OracleServices | OraclePorts | DbStores | Database
+  Database | OracleServices | OraclePorts
 > = Effect.gen(function* () {
   const syncLog = getLogger(["folio", "web", "sync"]);
-  const [snapshotStore, accountStore] = [yield* SnapshotStore, yield* AccountStore];
-  const [snapshots, accounts] = yield* Effect.all([snapshotStore.latest(), accountStore.list()], {
+  const db = yield* Database;
+  const [snapshots, accounts] = yield* Effect.all([db.snapshots.latest(), db.accounts.list()], {
     concurrency: 2,
   });
   // manual 已退出快照(ADR 0018)→ 预热额外从 manual 的 creds 收集合成余额,否则纯 manual 用户的币暖不到实时价。
@@ -103,18 +94,17 @@ export const warmTokens: Effect.Effect<
   );
   // 汇率:`warm` 现在自己降级(上游挂了记一行、什么都不写),所以这里不再包一层 catch ——
   // 那层 catch 连自己的 bug 一起吞,而参考层已经把「上游的锅」与「我们的锅」分开了。
-  yield* Effect.flatMap(FxService, (fx) => fx.warm());
+  yield* Effect.flatMap(Oracle, (o) => o.fx.warm());
   // 新参考层的目录(市值前 N 名):**唯一主动让它跟上的那条路**(#216)。
   // 写路径(mint)按设计永不刷 —— 它只要「哪个币叫 POL」,不该为此让用户等;选币下拉只在
   // 用户打开时才刷 —— 从不开下拉的用户目录会冻住,此后新进前 1000 的币永远认不出来。
   // 内部按一周的 TTL 门控,所以绝大多数同步在这里零请求。放这里正因为这是 best-effort 的位置。
-  const rows = yield* Effect.flatMap(TokenService, (t) => t.refreshCatalogue());
+  const rows = yield* Effect.flatMap(Oracle, (o) => o.tokens.refreshCatalogue());
   syncLog.debug("catalogue warmed", { rows });
 });
 
 // 一个用户的预热,**装配好了但还没跑**。cron 用它(把 N 个用户拼进自己那一个 effect)。
-const warmTokensFor = (userId: string): Effect.Effect<void, Error> =>
-  withRequest(userId, warmTokens);
+const warmTokensFor = (userId: string): Effect.Effect<void, Error> => forUser(userId, warmTokens);
 
 // 流式同步收尾(`/api/sync` 的 afterRound)的边缘出口:那条路一次就预热一个用户,收尾本身即边缘。
 // 单账户同步不走这里 —— 它把预热拼进自己那一次装配(见 sync.ts)。
@@ -244,7 +234,7 @@ function createSeedCollector(): SeedCollector {
 // —— `SyncServices` 的 app 侧实现(#403 片 2)——
 //
 // **一次装配 = 一个用户的一轮同步。** 四个能力的方法签名里没有 userId —— 它由外面那次
-// `withRequest(userId, …)` 供上的 db / 参考层服务吃掉了(ADR 0037)。
+// 装配点那一次(`userLayer(userId)`)供上的 db / 参考层服务吃掉了(ADR 0037)。
 //
 // `seeds` 与估值模式都建在**这一层**:它们的存活范围恰好是「一轮同步」,与 layer 的生命周期同长。
 // 以前那个 Promise 形状的 deps 得按 userId 分桶缓存估值模式(一份 deps 跨多用户),现在一个用户一层,
@@ -263,7 +253,7 @@ const asDep =
 export const syncServicesLayer: Layer.Layer<
   SyncServices,
   never,
-  DbStores | OracleServices | OraclePorts
+  Database | OracleServices | OraclePorts
 > = Layer.unwrapEffect(
   Effect.sync(() => {
     // 一轮 sync 共一份 seed 收集器:取余额那头收,写快照那头取(见 SeedCollector 的定义)。
@@ -275,7 +265,7 @@ export const syncServicesLayer: Layer.Layer<
       FolioHttpClient,
       Layer.effect(
         SyncAccountStore,
-        Effect.map(AccountStore, (accounts) => ({
+        Effect.map(Database, ({ accounts }) => ({
           // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,
           // 不写快照)→ 一并过滤。编排只见活跃的可同步账户(判别走纯 isSyncableAccount)。
           list: () =>
@@ -288,7 +278,7 @@ export const syncServicesLayer: Layer.Layer<
       ),
       Layer.effect(
         SyncSnapshotStore,
-        Effect.map(SnapshotStore, (snapshots) => ({
+        Effect.map(Database, ({ snapshots }) => ({
           // **同步落的快照按钟点折叠**(#461):同账户、同一个钟点里已有的那份被这次覆盖。
           // 同步写的是「此刻的状态」,而读侧的趋势图本来就只画每个钟点的最后一个点 —— 同钟点里
           // 更早的那些份存了也看不到。开关默认是关的(默认追加),导入那条路要的正是默认值:
@@ -320,8 +310,8 @@ export const syncServicesLayer: Layer.Layer<
       Layer.effect(
         TokenOracle,
         Effect.gen(function* () {
-          const settings = yield* SettingsStore;
-          // 参考层那几个服务已经在外面那次 `withRequest` 里装好了 —— 抓住 context,别让它们
+          const settings = (yield* Database).settings;
+          // 参考层那几个服务已经在外面那次装配里装好了 —— 抓住 context,别让它们
           // 漏进本服务的 `R`(CODING.md:服务对外的 `R` 恒是 `never`)。
           const oracle = yield* Effect.context<OracleServices | OraclePorts>();
           // 估值模式一轮读一次,**惰性**:纯链上的一轮同步压根不重估,不该为此白发一次 D1 查询。
@@ -346,7 +336,7 @@ export const syncServicesLayer: Layer.Layer<
               if (refs.length === 0) {
                 return Effect.succeed(new Map<string, string>() as ReadonlyMap<string, string>);
               }
-              return Effect.flatMap(TokenService, (t) => t.mint(refs)).pipe(
+              return Effect.flatMap(Oracle, (o) => o.tokens.mint(refs)).pipe(
                 Effect.provide(oracle),
                 Effect.mapError((e) => depError("mint", e)),
                 asDep("mint"),
@@ -375,7 +365,7 @@ export const syncServicesLayer: Layer.Layer<
 );
 
 // 一个用户的一轮同步,**装配好了但还没跑**。流式端点与 cron 各取所需。
-const syncFor = (userId: string) => Layer.provide(syncServicesLayer, legacyRequestLayer(userId));
+const syncFor = (userId: string) => Layer.provide(syncServicesLayer, userLayer(userId));
 
 // `/api/sync` 的流:逐账户产出结果,交给 ndjson 那半。装配在这里做完,所以流的 `R` 是 `never`
 // —— `Stream.provideLayer` 之后调用方拿到的是一条能直接消费的流。

@@ -10,7 +10,7 @@ import type { InvalidInput, NotFound } from "@folio/db";
 //
 // **映射只写在这一处**(#504 T6)。以前它住 `oracle.ts` 的 `toError`,只认上游那四类;
 // 现在三类都从这里过(其中两类的答案是「原样透传」,理由见 `toError` 上面那段),
-// `runtime.ts` 的 `runEffect` 与过渡路的 `withRequest` 共用同一份 ——
+// `runtime.ts` 那三个出口与过渡路的 `withRequest` 共用同一份 ——
 // 「同一个失败在两条路上被说成两句话」这件事从此没有地方发生。
 //
 // 单测钉着它(`apps/web/tests/to-error.test.ts`):纯函数,不碰 TanStack、不碰 D1。

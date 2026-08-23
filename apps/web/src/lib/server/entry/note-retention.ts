@@ -1,7 +1,7 @@
-import { SnapshotStore } from "@folio/db";
+import { Database } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Exit } from "effect";
-import { withRequest } from "@/lib/server/oracle";
+import { forUser } from "@/lib/server/runtime";
 
 // 展示 note 的保留期(#456)。
 //
@@ -31,9 +31,9 @@ const pruneNotesFor = (
   userId: string,
   olderThan: number,
 ): Effect.Effect<{ snapshots: number; balances: number }, Error> =>
-  withRequest(
+  forUser(
     userId,
-    Effect.flatMap(SnapshotStore, (s) => s.pruneNotes(olderThan)),
+    Effect.flatMap(Database, (db) => db.snapshots.pruneNotes(olderThan)),
   );
 
 /**
