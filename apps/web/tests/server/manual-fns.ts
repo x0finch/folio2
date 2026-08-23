@@ -15,7 +15,7 @@ import { runForUser, type UserServices } from "@/lib/server/runtime";
 const runRequest = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
-): Promise<A> => runForUser("manual-fns", userId, effect);
+): Promise<A> => runForUser(userId, effect);
 
 export const createManualAccount = (userId: string, label: string, tokens: string) =>
   runRequest(userId, M.createManualAccount(label, tokens));

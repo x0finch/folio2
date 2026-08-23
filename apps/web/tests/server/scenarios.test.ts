@@ -69,7 +69,7 @@ afterEach(() => vi.restoreAllMocks());
 const runRequest = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
-): Promise<A> => runForUser("scenarios", userId, effect);
+): Promise<A> => runForUser(userId, effect);
 
 async function overview() {
   const [allAccounts, snapshots, settings] = await Promise.all([

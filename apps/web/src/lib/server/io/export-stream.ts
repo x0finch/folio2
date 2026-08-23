@@ -91,3 +91,8 @@ export const exportStream = (): Effect.Effect<
     );
     return Stream.toReadableStream(bytes);
   });
+
+// GET /api/export 的业务 effect —— 路由只认人 + 跑 `runForUser`。
+export const exportData = Effect.fn("exportData")(function* () {
+  return yield* exportStream();
+});
