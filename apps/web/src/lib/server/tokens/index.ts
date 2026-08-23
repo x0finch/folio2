@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListTokenCatalogue } from "./catalogue";
 import { handleListTokens, ListTokensInput } from "./list";
@@ -14,24 +15,24 @@ import { handleRefreshTokenPrices, RefreshTokenPricesInput } from "./refresh-pri
 
 export const listTokenCatalogue = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(handleListTokenCatalogue);
+  .handler(runEffect(handleListTokenCatalogue));
 
 // requireAuth 与其余选币端点一致(只在 authed 加账户模态里调)。
 export const listFiatOptions = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(handleListFiatOptions);
+  .handler(runEffect(handleListFiatOptions));
 
 export const listTokens = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(ListTokensInput)
-  .handler(handleListTokens);
+  .handler(runEffect(handleListTokens));
 
 export const getTokenPrice = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(TokenPriceInput)
-  .handler(handleGetTokenPrice);
+  .handler(runEffect(handleGetTokenPrice));
 
 export const refreshTokenPrices = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(RefreshTokenPricesInput)
-  .handler(handleRefreshTokenPrices);
+  .handler(runEffect(handleRefreshTokenPrices));

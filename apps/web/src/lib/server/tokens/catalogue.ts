@@ -1,11 +1,9 @@
-import { TokenService } from "@folio/oracle";
+import { Oracle } from "@folio/oracle";
 import { DEFAULT_TOP_N } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
-import { runRequest } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 import { CATALOGUE_CACHE_TTL_S, edgeCached } from "./edge-cache";
-import { type TokenOption, toOption } from "./model";
+import { toOption } from "./model";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
 
@@ -15,24 +13,17 @@ const tokenLog = getLogger(["folio", "web", "tokens"]);
 // 只有几十条、觉得不够就会动手敲字 —— 那是完全正常的操作,不该每次都换来一趟往返 + 一次 CGK
 // 的 /search。整份约 35KB(brotli),换来的是「敲一个字就出结果」,而且第 51–1000 名的币
 // 本地也搜得到 —— 以前它们只有问上游才找得着。
-export async function handleListTokenCatalogue({
-  context,
-}: {
-  context: AuthContext;
-}): Promise<TokenOption[]> {
+export const handleListTokenCatalogue = Effect.fn("listTokenCatalogue")(function* () {
   tokenLog.debug("catalogue: enter");
-  const out = await runRequest(
-    context.userId,
-    edgeCached(
-      "token-catalogue",
-      CATALOGUE_CACHE_TTL_S,
-      // 已按市值排好序 —— **顺序即排名**,不额外发一列 rank 给浏览器。
-      Effect.map(
-        Effect.flatMap(TokenService, (t) => t.topTokens(DEFAULT_TOP_N)),
-        (rows) => rows.map(toOption),
-      ),
+  const out = yield* edgeCached(
+    "token-catalogue",
+    CATALOGUE_CACHE_TTL_S,
+    // 已按市值排好序 —— **顺序即排名**,不额外发一列 rank 给浏览器。
+    Effect.map(
+      Effect.flatMap(Oracle, (o) => o.tokens.topTokens(DEFAULT_TOP_N)),
+      (rows) => rows.map(toOption),
     ),
   );
   tokenLog.debug("catalogue: ok", { count: out.length });
   return out;
-}
+});
