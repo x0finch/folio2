@@ -19,6 +19,7 @@ import {
 import { Effect, Layer } from "effect";
 import { logTapeLogger } from "./effect-log";
 import { toError } from "./errors";
+import { spanTracer } from "./tracing";
 
 // 参考层的装配点(ADR 0023,#199/#200)。**这是全仓唯一同时认识两边的文件** ——
 // 一边是 D1 store,一边是 CoinGecko adapter;`@folio/oracle` 自己两边都不认识。
@@ -130,7 +131,8 @@ export const withOracleWarm = <A>(
  * 各取所需,但都不会自己拿到 `Effect.runPromise`。
  */
 export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(logTapeLogger)));
+  // span 树也在这儿装(#504 T16):cron 一次调用就是一趟,那棵树该按整趟算。
+  Effect.runPromise(effect.pipe(Effect.provide(logTapeLogger), Effect.provide(spanTracer)));
 
 /** 系统级(无 userId)的 db 查询 —— cron 枚举用户那一条。原则 #6 的受控例外。 */
 export const withDbClient = <A>(effect: Effect.Effect<A, never, DbClient>): Effect.Effect<A> =>
