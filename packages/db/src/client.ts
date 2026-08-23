@@ -34,20 +34,23 @@ type Stmt = Parameters<Drizzle["batch"]>[0][number]; // drizzle BatchItem
 
 export const DbClient = Context.GenericTag<DbClient>("db/DbClient");
 
-const make = (db: Drizzle): DbClient => ({
-  query: (build) => Effect.promise(() => build(db)),
-  batch: (build) =>
-    Effect.suspend(() => {
-      const [first, ...rest] = build(db);
-      return first ? Effect.asVoid(Effect.promise(() => db.batch([first, ...rest]))) : Effect.void;
-    }),
-});
-
 // **`Layer.sync` 而不是 `Layer.succeed`**:`drizzle(env.DB)` 要到 layer 真被建的那一刻才发生
 // (模块加载期一次都不碰 —— Workers 的启动 CPU 限制)。它本身很轻(见 connect.ts),
 // 所以一次请求建一份没有代价。
 export const dbClientLayer = (env: DbEnv): Layer.Layer<DbClient> =>
-  Layer.sync(DbClient, () => make(getDb(env)));
+  Layer.sync(DbClient, () => {
+    const db = getDb(env);
+    return {
+      query: (build) => Effect.promise(() => build(db)),
+      batch: (build) =>
+        Effect.suspend(() => {
+          const [first, ...rest] = build(db);
+          return first
+            ? Effect.asVoid(Effect.promise(() => db.batch([first, ...rest])))
+            : Effect.void;
+        }),
+    };
+  });
 
 // —— D1 的第二条限制:一条语句约 100 个绑定参数 ——
 //
