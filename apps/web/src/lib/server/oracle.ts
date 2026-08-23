@@ -30,6 +30,7 @@ import {
 } from "@folio/oracle-upstream-coingecko";
 import { type Context, Effect, Layer } from "effect";
 import { logTapeLogger } from "./effect-log";
+import { type AppError, toError } from "./errors";
 
 // 参考层的装配点(ADR 0023,#199/#200)。**这是全仓唯一同时认识两边的文件** ——
 // 一边是 D1 store,一边是 CoinGecko adapter;`@folio/oracle` 自己两边都不认识。
@@ -105,24 +106,6 @@ const warmPorts = () =>
 // 不能靠调用点记得。
 export const oracleFor = (perRequest: Layer.Layer<DbClient | CurrentUser>) =>
   Layer.provideMerge(oracleLayer, Layer.merge(portsFor(perRequest), upstreams()));
-
-// 类型化的失败 → 普通 `Error`。**不让 `FiberFailure` 漏给调用方**:`runPromise` 默认抛的是它,
-// 而 `Data.TaggedError` 的那四类没有 `message` 字段,于是上层日志里只剩一个空消息 + 一坨 Cause。
-// 消息里只有 tag、pathname 和状态码 —— `where` 本来就刻意不带 query(原则 #5 红线)。
-export const toError = (error: UpstreamError | Error): Error =>
-  isUpstream(error)
-    ? new Error(
-        `${error.upstream} ${error._tag} on ${error.where}${
-          error.status !== undefined ? ` (${error.status})` : ""
-        }`,
-        { cause: error },
-      )
-    : error;
-
-// **不能用 `instanceof Error` 区分** —— `Data.TaggedError` 造出来的类自己就 extends Error,
-// 两边都是 true。按 `upstream` 这个字段判:四类上游错误都有它,普通 `Error` 没有。
-// (判 `_tag` 那条约定说的是「同类之间怎么分」;这里分的是「是不是这一类」。)
-const isUpstream = (error: UpstreamError | Error): error is UpstreamError => "upstream" in error;
 
 /**
  * 全局维护任务(刷 `global_token_ref_index`)的装配。**不带 userId** —— 这张表跟任何用户无关
@@ -213,7 +196,7 @@ export const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices>
 /** 过渡期的服务面 —— 比 `UserServices` 多一个 `DbStores`,那部分只会变少。 */
 export type RequestServices = Database | DbStores | OracleServices | OraclePorts;
 
-export const withRequest = <A, E extends UpstreamError | Error>(
+export const withRequest = <A, E extends AppError>(
   userId: string,
   effect: Effect.Effect<A, E, RequestServices>,
 ): Effect.Effect<A, Error> => {
@@ -224,7 +207,7 @@ export const withRequest = <A, E extends UpstreamError | Error>(
  * 一步式:装配 + 立刻跑。server fn / route handler 那种「一次请求就问一次」的路径用它 ——
  * 请求本身就是边缘,没有可拼的下一步。要把多步拼成一个再跑的(cron),用 `withRequest` + `runAtEdge`。
  */
-export const runRequest = <A, E extends UpstreamError | Error>(
+export const runRequest = <A, E extends AppError>(
   userId: string,
   effect: Effect.Effect<A, E, RequestServices>,
 ): Promise<A> => runAtEdge(withRequest(userId, effect));
@@ -236,7 +219,7 @@ export const runRequest = <A, E extends UpstreamError | Error>(
  * 噪音收成一处:`runStore(userId, TagStore, (s) => s.list())` 与它替掉的 `db.listTagsByUser(userId)`
  * 一样长,而这一句里 userId 只出现在装配那一处 —— 那正是 ADR 0037 要的。
  */
-export const runStore = <I extends DbStores, S, A, E extends UpstreamError | Error>(
+export const runStore = <I extends DbStores, S, A, E extends AppError>(
   userId: string,
   tag: Context.Tag<I, S>,
   use: (service: S) => Effect.Effect<A, E>,
