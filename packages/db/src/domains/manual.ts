@@ -33,78 +33,9 @@ export interface ManualHolding {
   ref: TokenRef | null;
 }
 
-// 持仓这半的方法(绑好 `client` 与 userId 之后)。
-const holdingOps = (client: DbClient, userId: string) => ({
-  // `namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传(同 userTokenStoreLayer),db 层不预设任何厂商。
-  // 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
-  listHoldings: (accountId: string, namer: string): Effect.Effect<ManualHolding[]> =>
-    Effect.gen(function* () {
-      yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-      const rows = yield* client.query((db) =>
-        db
-          .select({
-            id: tokens.id,
-            symbol: tokens.symbol,
-            localName: tokenRefs.localName,
-            since: sql<number>`min(${manualActivity.occurredAt})`,
-          })
-          .from(manualActivity)
-          .innerJoin(tokens, eq(manualActivity.tokenId, tokens.id))
-          .leftJoin(
-            tokenRefs,
-            and(
-              eq(tokenRefs.tokenId, tokens.id),
-              eq(tokenRefs.userId, userId),
-              eq(tokenRefs.namer, namer),
-            ),
-          )
-          .where(and(eq(manualActivity.accountId, accountId), eq(tokens.userId, userId)))
-          .groupBy(tokens.id, tokens.symbol, tokens.selfPrice, tokenRefs.localName)
-          .orderBy(asc(sql`min(${manualActivity.occurredAt})`)),
-      );
-      return rows.map((r) => ({
-        id: r.id,
-        symbol: r.symbol,
-        // 两列 → 整条串,拼法归文法(`token_refs` 按两列存正是为了这个,见 ADR 0022)。
-        ref: r.localName === null ? null : formatTokenRef({ namer, localName: r.localName }),
-      }));
-    }),
-
-  // 用户对某个币的声明:symbol(他自己的叫法)。**只动这一列** —— 名字 / 图 / 上游 ref
-  // 归参考层,手记不覆盖它们。
-  // 单价不在这里 —— 「这个币值多少」只有账本一个来源(每笔活动的 price),
-  // 而 `tokens.self_price` 从此没有写者(迁移 0016 把存量搬进账本并清空了它)。
-  setHoldingDef: (tokenId: string, input: { symbol?: string }): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
-      const set: Record<string, unknown> = {};
-      if (input.symbol !== undefined) set.symbol = input.symbol;
-      if (Object.keys(set).length === 0) return;
-      yield* client.query((db) =>
-        db
-          .update(tokens)
-          .set(set)
-          .where(and(eq(tokens.id, tokenId), eq(tokens.userId, userId))),
-      );
-    }),
-
-  // 该账户不再持有这个币:删它对该币的全部活动。**`tokens` 那行不删** —— 参考层数据,
-  // 别的账户可能还在用,而且它带着上游 ref / 历史日价,删了就得重新认一遍。
-  detachHolding: (accountId: string, tokenId: string): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      yield* client.query((db) => assertAccountOwned(db, userId, accountId));
-      yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
-      yield* client.query((db) =>
-        db
-          .delete(manualActivity)
-          .where(and(eq(manualActivity.accountId, accountId), eq(manualActivity.tokenId, tokenId))),
-      );
-    }),
-});
-
 // 手记账本 —— 活动行(add / reduce / set)的写、读、改、删,以及「一次提交一批」。
 //
-// 数量不存,由账本折叠算出;折叠出来的持仓那半就在上面。
+// 数量不存,由账本折叠算出;折叠出来的持仓那半是同一个服务的另外三个方法(`listHoldings` 那组)。
 //
 // **`ManualStore` 是手记这个领域的**唯一**服务** —— 持仓与账本是同一件事的两面(持仓正是账本
 // 折叠出来的),按能力切成两个服务会重蹈 #392 拆掉的那种分法。所以这里把两半合成一个。
@@ -173,8 +104,74 @@ export class ManualStore extends Effect.Service<ManualStore>()("db/ManualStore",
     const userId = yield* CurrentUser;
 
     return {
-      // —— 持仓(账本折叠出来的那一面,实现在本文件上半)——
-      ...holdingOps(client, userId),
+      // —— 持仓(账本折叠出来的那一面)——
+      // `namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传(同 userTokenStoreLayer),db 层不预设任何厂商。
+      // 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
+      listHoldings: (accountId: string, namer: string): Effect.Effect<ManualHolding[]> =>
+        Effect.gen(function* () {
+          yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+          const rows = yield* client.query((db) =>
+            db
+              .select({
+                id: tokens.id,
+                symbol: tokens.symbol,
+                localName: tokenRefs.localName,
+                since: sql<number>`min(${manualActivity.occurredAt})`,
+              })
+              .from(manualActivity)
+              .innerJoin(tokens, eq(manualActivity.tokenId, tokens.id))
+              .leftJoin(
+                tokenRefs,
+                and(
+                  eq(tokenRefs.tokenId, tokens.id),
+                  eq(tokenRefs.userId, userId),
+                  eq(tokenRefs.namer, namer),
+                ),
+              )
+              .where(and(eq(manualActivity.accountId, accountId), eq(tokens.userId, userId)))
+              .groupBy(tokens.id, tokens.symbol, tokens.selfPrice, tokenRefs.localName)
+              .orderBy(asc(sql`min(${manualActivity.occurredAt})`)),
+          );
+          return rows.map((r) => ({
+            id: r.id,
+            symbol: r.symbol,
+            // 两列 → 整条串,拼法归文法(`token_refs` 按两列存正是为了这个,见 ADR 0022)。
+            ref: r.localName === null ? null : formatTokenRef({ namer, localName: r.localName }),
+          }));
+        }),
+
+      // 用户对某个币的声明:symbol(他自己的叫法)。**只动这一列** —— 名字 / 图 / 上游 ref
+      // 归参考层,手记不覆盖它们。
+      // 单价不在这里 —— 「这个币值多少」只有账本一个来源(每笔活动的 price),
+      // 而 `tokens.self_price` 从此没有写者(迁移 0016 把存量搬进账本并清空了它)。
+      setHoldingDef: (tokenId: string, input: { symbol?: string }): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
+          const set: Record<string, unknown> = {};
+          if (input.symbol !== undefined) set.symbol = input.symbol;
+          if (Object.keys(set).length === 0) return;
+          yield* client.query((db) =>
+            db
+              .update(tokens)
+              .set(set)
+              .where(and(eq(tokens.id, tokenId), eq(tokens.userId, userId))),
+          );
+        }),
+
+      // 该账户不再持有这个币:删它对该币的全部活动。**`tokens` 那行不删** —— 参考层数据,
+      // 别的账户可能还在用,而且它带着上游 ref / 历史日价,删了就得重新认一遍。
+      detachHolding: (accountId: string, tokenId: string): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          yield* client.query((db) => assertAccountOwned(db, userId, accountId));
+          yield* client.query((db) => assertTokenOwned(db, userId, tokenId));
+          yield* client.query((db) =>
+            db
+              .delete(manualActivity)
+              .where(
+                and(eq(manualActivity.accountId, accountId), eq(manualActivity.tokenId, tokenId)),
+              ),
+          );
+        }),
 
       // —— 账本 ——
 
