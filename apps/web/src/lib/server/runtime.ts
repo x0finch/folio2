@@ -6,6 +6,7 @@ import { ConnectorRegistry } from "./connectors/registry";
 import { logTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
 import { oracleFor, perRequestLayer } from "./oracle";
+import { spanTracer } from "./tracing";
 
 // **server fn 的运行时**:一次请求要的服务在这里装配,也在这里跑起来。全仓只有这一份。
 //
@@ -89,6 +90,9 @@ const runFor = <A, E extends AppError>(
   forUser(userId, effect).pipe(
     Effect.annotateLogs({ handler }),
     Effect.provide(logTapeLogger),
+    // 一次请求一棵 span 树(#504 T16)。装在这儿而不是 `forUser` 里:cron 那条路把 N 个用户
+    // 拼成**一个** effect,树该按那一整趟算,由它自己的边缘装(见 server.ts)。
+    Effect.provide(spanTracer),
     Effect.runPromise,
   );
 

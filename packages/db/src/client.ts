@@ -5,7 +5,8 @@ import { type DbEnv, type Drizzle, getDb } from "./connect";
 //
 // #362 第 5 站:参考层的四个 store 出口是 Effect 形状(端口如此),而 drizzle 是 promise 的。
 // 桥不能撒在每个方法里(那就是「逐个方法翻译成 Effect」——四个文件几十处 `Effect.promise`,
-// 而且将来想在这一层加一个 span 或一行慢查询日志就得改几十处)。所以它只有一处:这个服务。
+// 而且想在这一层加一个 span 或一行慢查询日志就得改几十处)。所以它只有一处:这个服务。
+// **这笔账已经兑现过一次**:#504 T16 给全部 D1 调用加 span,改的就是下面那两行。
 //
 // 两个方法就够了,因为 D1 只有两种动作:
 //   · `query` —— 跑一个 drizzle 查询构造器(读或单条写)
@@ -32,19 +33,23 @@ export class DbClient extends Effect.Service<DbClient>()("db/DbClient", {
     Effect.sync(() => {
       const db = getDb(env);
       return {
-        query: <A>(build: (d: Drizzle) => PromiseLike<A>): Effect.Effect<A> =>
-          Effect.promise(() => build(db)),
+        // **span 加在这一处**(#504 T16)。上面那段说的「将来想加 span 只改一处」就是这个。
+        // 这一层的名字只有一个(`db.query`),所以它答的是「这一次查询多久」,答不了「哪个 op」。
+        // 后者不必给七十个方法各起名字:`database.ts` 的 `tracedStores` 在聚合出口一并包上
+        // (键名 + 方法名 = `accounts.create`),同样是一处、零个方法被改。两处合起来是三层树。
+        // 参考层那几个 store 不过聚合、直接用这个服务,所以它们的查询只到这一层。
+        query: Effect.fn("db.query")(function* <A>(build: (d: Drizzle) => PromiseLike<A>) {
+          return yield* Effect.promise(() => build(db));
+        }),
 
         // 一批语句。**同样收一个 builder** —— 语句得拿 `db` 才造得出来,而调用方不该为了造语句先
         // 从服务里把 `db` 掏出来(掏出来它就又能绕过这一层了)。drizzle 的 batch 要求非空
         // `[Stmt, ...Stmt[]]`;空 → no-op。
-        batch: (build: (d: Drizzle) => readonly Stmt[]): Effect.Effect<void> =>
-          Effect.suspend(() => {
-            const [first, ...rest] = build(db);
-            return first
-              ? Effect.asVoid(Effect.promise(() => db.batch([first, ...rest])))
-              : Effect.void;
-          }),
+        // `build(db)` 写在生成器体里就够了 —— 体是惰性的,不必再包一层 `Effect.suspend`。
+        batch: Effect.fn("db.batch")(function* (build: (d: Drizzle) => readonly Stmt[]) {
+          const [first, ...rest] = build(db);
+          if (first) yield* Effect.promise(() => db.batch([first, ...rest]));
+        }),
       };
     }),
 }) {}
