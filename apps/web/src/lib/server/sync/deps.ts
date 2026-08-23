@@ -34,6 +34,7 @@ import { getLogger } from "@logtape/logtape";
 import { Cause, Effect, Exit, Layer, type Stream } from "effect";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
+import { logTapeLogger } from "@/lib/server/effect-log";
 import { manualBalancesForWarm } from "@/lib/server/manual/store";
 import { forUser, type UserServices, userLayer } from "@/lib/server/runtime";
 import { warmHeldPrices } from "@/lib/server/tokens/enrich";
@@ -376,6 +377,15 @@ const syncFor = (userId: string): Layer.Layer<SyncServices | UserServices> =>
  *
  * `syncFor` 因此改用 `provideMerge`:同步内核要的 `SyncServices` 与收尾要的 `UserServices`
  * 都得在场,而且必须是同一次构建出来的那一份。
+ *
+ * **日志层也在这张 layer 里,这条是有来由的**:`ndjsonRound` 里那个 `run` 是**另起的一条根
+ * fiber**(`Effect.runPromise`),而根 fiber **不继承外层的 `Effect.provide`**(实测:外层换掉
+ * defaultLogger,内层那条 `logInfo` 照样落在 Effect 自带的 console logger 上)。所以这一整趟
+ * 同步 + 预热的 `Effect.log*` 想进 LogTape,只能由**它自己这次 provide** 带上。
+ *
+ * **只能挂在这里,不能挂进 `syncFor`**:cron 那条路是在外层 `runAtEdge` 里跑的,那儿已经有一个
+ * `logTapeLogger` —— 再叠一层不会顶掉它,只会两个转发器同时在集合里、每条日志写两遍
+ *(effect-log.ts 记着这个坑,实测过)。而 `syncRoundFor` 只有 `/api/sync` 用。
  */
 export const syncRoundFor = (userId: string) => ({
   results: Sweep.syncUserStream(userId) as Stream.Stream<
@@ -385,7 +395,7 @@ export const syncRoundFor = (userId: string) => ({
   >,
   // 同步完预热代币缓存(best-effort),让下次总览能 cache-only 富化新价。
   afterRound: warmTokens,
-  layer: syncFor(userId),
+  layer: Layer.merge(syncFor(userId), logTapeLogger),
 });
 
 // cron 的全量 sweep:**逐用户各装一次**,再把小计加起来。
