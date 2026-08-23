@@ -1,5 +1,5 @@
 import type { ConnectorId } from "@folio/connectors";
-import { type SnapshotBalanceInput, TransferStore } from "@folio/db";
+import { Database, type SnapshotBalanceInput } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
@@ -11,7 +11,7 @@ import {
   type ImportDeps,
   parseImportLine,
 } from "@/lib/server/io/import";
-import { runRequest } from "@/lib/server/oracle";
+import { runForUser } from "@/lib/server/runtime";
 import { getAuth } from "@/lib/server/session/auth";
 import { resolveAuth } from "@/lib/server/session/auth-session";
 
@@ -21,8 +21,8 @@ import { resolveAuth } from "@/lib/server/session/auth-session";
 // **整条导入一个 effect,一次装配**(#394 T7):读流、解析、写库共一份 context。以前四个写口各自
 // 经过渡门面调用,而门面每次都建一次 layer + 跑一次 `runPromise` —— 一个几万行的文件就是几万次。
 
-// `TransferStore` → `ImportDeps`。写口全在服务上,这里只做「文件里的形状 → 库里的形状」那一层翻译。
-const depsFrom = (transfer: TransferStore): ImportDeps => ({
+// `Database.transfer` → `ImportDeps`。写口全在服务上,这里只做「文件里的形状 → 库里的形状」那一层翻译。
+const depsFrom = (transfer: Database["transfer"]): ImportDeps => ({
   categorize: (connectorId) => {
     // 从公开字段规格按暴露级别分桶(import 重建 creds 用);不碰 provider 内部。
     const f = categorizeFields(credentialSpecs()[connectorId as ConnectorId] ?? []);
@@ -78,10 +78,11 @@ export const Route = createFileRoute("/api/import")({
         // 三条都记一行带 userId 的日志。迁移前那圈 `catch` 是把两类失败一起收成 400 + 一句
         // 「import failed」;分开之后 400 那半更准了,但**日志不能跟着丢** —— 只接类型化失败的话,
         // defect 会一路穿到框架的 500,这个端点就再没有自己的错误记录了。
-        const outcome = await runRequest(
+        const outcome = await runForUser(
+          "importData",
           userId,
           Effect.gen(function* () {
-            const importer = createImporter(depsFrom(yield* TransferStore));
+            const importer = createImporter(depsFrom((yield* Database).transfer));
             const decoder = new TextDecoder();
             let buffer = "";
             for (;;) {
