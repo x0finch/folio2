@@ -1,11 +1,19 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { displayRate } from "@/lib/server/preferences/fx";
+import { displayRate as rateOf } from "@/lib/server/preferences/fx";
+import { runEffect } from "@/lib/server/runtime";
 
 // 展示币种汇率的应用层接线(#202b)。走**真 D1**(Miniflare)—— 这一段的风险全在
 // 「per-user 缓存真的写进去了、下次真的读得到」上,内存假实现测不到这个。
 //
+// `displayRate` 自己只是一段 effect 了(#504 T7),所以这里补上生产那条发动路
+// (`runEffect` = server fn 的唯一入口)。**十六条断言一行没动** —— 它们本来测的就是
+// 「这个用户问这个币种拿到什么」,那件事没变。
+//
 // 上游一律打桩:既记账(断言看的是「出了几次网」)又能按用例换返回值。
+
+const displayRate = (userId: string, code: string) =>
+  runEffect(() => rateOf(code))({ data: undefined, context: { userId } });
 
 const USER = "user-fx";
 const OTHER = "user-fx-other";

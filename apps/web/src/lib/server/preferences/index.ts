@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import {
   handleGetCurrencyPreference,
@@ -12,9 +13,10 @@ import { handleGetLocalePreference, handleSetLocalePreference, SetLocaleInput } 
 // 币种读侧要 userId 取汇率(per-user 缓存),写侧就没理由敞着 —— 敞着等于凭空多一个
 // 无凭据就能改别人显示状态的跨站 POST 目标。
 
+// 只有读侧经 `runEffect` —— 它要参考层的汇率;另外三个只读/写 cookie,一个服务都不要。
 export const getCurrencyPreference = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(handleGetCurrencyPreference);
+  .handler(runEffect(handleGetCurrencyPreference));
 
 export const getLocalePreference = createServerFn({ method: "GET" }).handler(
   handleGetLocalePreference,

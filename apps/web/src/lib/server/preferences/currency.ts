@@ -1,8 +1,8 @@
 import { type Currency, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { getRequestHeaders } from "@tanstack/react-start/server";
+import { Effect } from "effect";
 import { z } from "zod";
 import type { PreferCurrency } from "@/lib/hooks/use-prefer-currency";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 import { writePreferenceCookie } from "./cookie";
 import { displayRate } from "./fx";
 
@@ -35,16 +35,17 @@ function readCurrencyCookie(cookieHeader: string | null | undefined): string | u
 // **requireAuth 在 index 装配**(#202b):汇率搬进 per-user 缓存之后取汇率需要 userId。它本来也只被
 // `_authed` 的 loader 调用(那里已经 beforeLoad 挡过没登录的),所以对外行为不变 ——
 // 「币种偏好不敏感」这个判断仍然成立,只是拿汇率这件事现在需要知道是谁。
-export async function handleGetCurrencyPreference({
-  context,
-}: {
-  context: AuthContext;
-}): Promise<PreferCurrency> {
+//
+// **请求头在 effect 里读没问题**:TanStack 用 `AsyncLocalStorage` 存它,而 ALS 跟着异步续体走,
+// Effect 自己的调度也不例外(实测过)。仍旧写成第一句 —— 同步那一刻一定还在,不必依赖这条。
+export const handleGetCurrencyPreference = Effect.fn("getCurrencyPreference")(function* () {
   const headers = getRequestHeaders();
   const currency = resolveCurrency(readCurrencyCookie(headers.get("cookie")));
-  const rate = await displayRate(context.userId, currency.code);
-  return rate == null ? { currency: resolveCurrency("USD"), rate: 1 } : { currency, rate };
-}
+  const rate = yield* displayRate(currency.code);
+  const preference: PreferCurrency =
+    rate == null ? { currency: resolveCurrency("USD"), rate: 1 } : { currency, rate };
+  return preference;
+});
 
 // 写完不回传新值:调用点照旧走 `invalidateFor`,由那张映射表决定刷哪些读(ADR 0038)。
 // 代价是这一次切换会多一个请求(写一次 + 读一次),换来的是失效语义仍然只有一个出处。
