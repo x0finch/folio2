@@ -1,4 +1,5 @@
 import { getAuth } from "./auth";
+import { resolveAuth } from "./auth-session";
 
 // 路由 handler(非 server function)里取当前用户。
 //
@@ -11,4 +12,14 @@ import { getAuth } from "./auth";
 export async function userIdOf(request: Request): Promise<string | undefined> {
   const result = await getAuth().api.getSession({ headers: request.headers });
   return result?.user.id;
+}
+
+// export / import / sync 等必须登录的端点:无 session → 401 Response(与 resolveAuth 同形)。
+export async function requireUserId(request: Request): Promise<string | Response> {
+  const session = await getAuth().api.getSession({ headers: request.headers });
+  try {
+    return resolveAuth(session).userId;
+  } catch (err) {
+    return err instanceof Response ? err : new Response("Unauthorized", { status: 401 });
+  }
 }
