@@ -8,7 +8,7 @@ import type {
   TokenStore,
   TokenUpstream,
 } from "@folio/oracle-basic/ports";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { FxService } from "./fx";
 import { PlatformService } from "./platforms";
 import { TokenService } from "./tokens";
@@ -48,7 +48,31 @@ import { CandidateSource } from "./tokens/candidates";
 //
 // 「info 数据 vs 价格数据」的分离落在**端口**上(`TokenStore` / `TokenPriceStore`),
 // 不在服务上再切一遍(ADR 0023)。
-export type OracleServices = TokenService | FxService | PlatformService;
+/**
+ * **对外的那一张门票** —— 一个 `yield* Oracle` 拿到整个参考层,按领域取用:
+ * `(yield* Oracle).fx.resolve("EUR")`。与 `@folio/db` 的聚合 `Database` 对称(#504 T15)。
+ *
+ * 换掉的是「handler 得知道自己要的是哪三张 Tag 里的哪一张」:一段既要现价又要汇率的代码
+ * 以前 `yield* TokenService` 一次、`yield* FxService` 一次,而这两句除了取服务什么也没做。
+ * 三个域服务本身**一个都没动** —— 这一层只是把它们挂到三个字段上,`tokens.mint` 还是
+ * `TokenService.mint` 本尊(单测钉着这条)。
+ *
+ * 三个域服务随迁移转为包内细节,出口在 #504 T13 收割;`GlobalRefIndexService` 照旧独立
+ *(cron 用,没有 userId,不该为它建 per-user 的三张 store)。
+ */
+export class Oracle extends Effect.Service<Oracle>()("oracle/Oracle", {
+  effect: Effect.gen(function* () {
+    return {
+      tokens: yield* TokenService,
+      fx: yield* FxService,
+      platforms: yield* PlatformService,
+    };
+  }),
+}) {}
+
+// 聚合也在里面 —— 装配点 provide `oracleLayer` 之后 `yield* Oracle` 直接可用,
+// 而三个域服务仍然各自可拿(过渡期还有调用点在用,T7–T12 逐批换掉)。
+export type OracleServices = Oracle | TokenService | FxService | PlatformService;
 
 // 三个服务要的全部端口。app 侧提供这些,就拿到整个参考层。**一个端口都没少** ——
 // 服务合并动的是 Tag 的数量,不是这一层要什么。
@@ -64,8 +88,16 @@ export type OraclePorts =
 
 // `CandidateSource` 在这里被吃掉 —— 它是 mint 的内部依赖(#216 把它从读路径的网络面上摘下来的
 // 那个),包内 Tag,不该出现在装配点的 `R` 里。
-export const oracleLayer: Layer.Layer<OracleServices, never, OraclePorts> = Layer.mergeAll(
+const domains = Layer.mergeAll(
   Layer.provide(TokenService.Default, CandidateSource.Default),
   FxService.Default,
   PlatformService.Default,
+);
+
+// `provideMerge` 而不是 `provide`:聚合要的三个服务喂给它,同时**也留在外面** ——
+// 过渡期的调用点还在 `yield* FxService`,而两条路拿到的必须是同一个实例
+//(memoisation 的作用域是一次构建,这里就是那一次)。
+export const oracleLayer: Layer.Layer<OracleServices, never, OraclePorts> = Layer.provideMerge(
+  Oracle.Default,
+  domains,
 );

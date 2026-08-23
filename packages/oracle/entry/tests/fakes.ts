@@ -28,7 +28,7 @@ import * as Ports from "@folio/oracle-basic/ports";
 import { parseTokenRef } from "@folio/oracle-ref";
 import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
 import type { OraclePorts, OracleServices } from "../src";
-import { GlobalRefIndexService, oracleLayer } from "../src";
+import { GlobalRefIndexService, Oracle, oracleLayer } from "../src";
 import { FxService } from "../src/fx";
 import { PlatformService } from "../src/platforms";
 import { TokenService } from "../src/tokens";
@@ -597,9 +597,16 @@ export function harness(opts: HarnessOpts = {}): Harness {
   // 不该看见它),从外面 merge 一个同 Tag 的 layer 谁赢是含糊的,所以这一档明写。
   const services = opts.candidates
     ? Layer.mergeAll(
-        Layer.provide(TokenService.Default, Layer.succeed(CandidateSource, opts.candidates)),
-        FxService.Default,
-        PlatformService.Default,
+        // 聚合 `Oracle` 也要在场(#504 T15):它挂的就是这三个服务本尊,顶掉候选源之后
+        // 仍然必须是同一份 —— 所以 `provideMerge` 这三个,而不是让它自己再建一套。
+        Layer.provideMerge(
+          Oracle.Default,
+          Layer.mergeAll(
+            Layer.provide(TokenService.Default, Layer.succeed(CandidateSource, opts.candidates)),
+            FxService.Default,
+            PlatformService.Default,
+          ),
+        ),
         GlobalRefIndexService.Default,
         Layer.succeed(CandidateSource, opts.candidates),
       )

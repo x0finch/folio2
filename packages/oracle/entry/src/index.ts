@@ -56,6 +56,6 @@
 
 export { FxService } from "./fx";
 export { GlobalRefIndexService } from "./global-ref-index";
-export { type OraclePorts, type OracleServices, oracleLayer } from "./oracle";
+export { Oracle, type OraclePorts, type OracleServices, oracleLayer } from "./oracle";
 export { PlatformService } from "./platforms";
 export { type MintInput, type RefreshStaleReport, TokenService } from "./tokens";
