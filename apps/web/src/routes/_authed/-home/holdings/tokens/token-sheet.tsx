@@ -16,10 +16,12 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AccountName } from "@/components/account-name";
+import { AmountTicker } from "@/components/amount-ticker";
 import { AvatarStack } from "@/components/avatar-stack";
 import { type Range, RangeTabs, rangeSince } from "@/components/range-tabs";
 import { collapseToSlots } from "@/components/tag-badges";
 import { formatNumber, signedUsd } from "@/lib/core/format-number";
+import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { holdingHistoryQuery } from "@/lib/queries/accounts";
 import type { Holding } from "@/lib/server/portfolio/aggregate";
@@ -180,6 +182,8 @@ function SourceView({
 function TokenSheetContent({ holding }: { holding: Holding }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
+  // 划动读数(#470 片7)。
+  const scrub = useChartScrub();
   const { token, totalValue, totalAmount, sources } = holding;
   // 24h 盈亏(ADR 0040)—— server 算好的,与主页那一行同一个数。以前是 change24h 倒推的。
   const dayValue = holding.gain24h?.amount ?? null;
@@ -202,7 +206,7 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
           窗口切换叠右下角、独占头部底部一带,与右侧价格徽标错开(name 行用满宽)。
           预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
       <div className="relative min-h-44 overflow-hidden">
-        <TrendPanel series={series} loading={historyQuery.isPending} />
+        <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
         {/* 窗口切换(可交互,独立于 pointer-events-none 内容层):右下角独占一带,避开价格徽标。 */}
         <div className="absolute right-0 bottom-0 z-10">
           <RangeTabs value={range} onChange={setRange} />
@@ -235,10 +239,20 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
           </div>
 
           <div>
-            <div className="font-bold text-3xl tabular-nums">{usd(totalValue)}</div>
+            {/* 划到某点 → 顶替成该点的值(#470 片7);下面那行 24h 换成那一刻的时间。
+                滚动与「整数/小数怎么拆」走 AmountTicker(hero、账户抽屉同一份);字号是这一处的事。 */}
+            <AmountTicker
+              value={scrub.point ? scrub.point.total : totalValue}
+              scrubbing={scrub.point != null}
+              className="font-bold text-3xl"
+              fractionClassName="font-bold text-muted-foreground text-xl tabular-nums"
+            />
+            {scrub.label ? (
+              <div className="mt-1 text-muted-foreground text-sm tabular-nums">{scrub.label}</div>
+            ) : null}
             {/* 24h 盈亏 + %:共用一个前置符号、同色,与代币行/hero 一致。
                 算不出 → `—`(全站三态口径,见 ../value-delta)。 */}
-            {holding.gain24h == null ? (
+            {scrub.point ? null : holding.gain24h == null ? (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
             ) : (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayValue))}>

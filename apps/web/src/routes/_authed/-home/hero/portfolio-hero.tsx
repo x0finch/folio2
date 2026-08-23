@@ -1,7 +1,9 @@
-import { cn, NumberTicker } from "@folio/ui";
+import { cn } from "@folio/ui";
 import { useTranslations } from "use-intl";
+import { AmountTicker } from "@/components/amount-ticker";
 import { signedUsd } from "@/lib/core/format-number";
 import { downsampleSeries, type HistoryPoint } from "@/lib/core/history";
+import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import type { Gain } from "@/lib/server/portfolio/gain-24h";
 import { GainSkeleton, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
@@ -90,6 +92,8 @@ export function PortfolioHero({
 }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
+  // 划动读数(#470 片7):划到哪个点、那一刻怎么写,都在这个 hook 里。
+  const scrub = useChartScrub();
 
   // 裁到最近 30 天窗口(以最新快照时刻为基准,与 SSR/客户端一致、不用客户端时钟),
   // 再自适应降采样:粒度随实际数据量走(约 1 天 → 小时级、约 30 天 → 日级),日内多次手动
@@ -116,11 +120,8 @@ export function PortfolioHero({
     ? Math.round((chartSeries[chartSeries.length - 1].t - chartSeries[0].t) / DAY_MS)
     : 0;
 
-  // 拆整数/小数:NumberTicker 内部 Math.round(value) → 若直接 format 整个金额,分位恒为 .00 且整数被进位;
-  // 故整数走 ticker(format 取小数点前),小数单独渲染。
-  const totalStr = usd(totalUsd);
-  const dot = totalStr.lastIndexOf(".");
-  const fracPart = dot >= 0 ? totalStr.slice(dot + 1) : null;
+  // 大数字显示的是**划到的那个点,或者实时值** —— 同一个位置、同一套元素(#470 片7)。
+  const shownUsd = scrub.point ? scrub.point.total : totalUsd;
 
   return (
     <div className="relative min-h-60 overflow-hidden pt-1">
@@ -132,30 +133,33 @@ export function PortfolioHero({
         topMargin={92}
         fillOpacity={0.16}
         decorate={nothingYet}
+        onActive={scrub.onActive}
       />
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>
-        <p className="font-medium text-muted-foreground text-xs">{t("totalNetWorth")}</p>
+        {/* 划到某点时,标题换成那个时刻(#470 片7)—— 大数字顶替成该点的值,两者一起才说得清
+            「这是哪一刻的数」。 */}
+        <p className="font-medium text-muted-foreground text-xs tabular-nums">
+          {scrub.label ?? t("totalNetWorth")}
+        </p>
         {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。
             inline-flex + items-start:24h 增量贴在金额盒子的右上角,不跟数字基线居中。 */}
         <div className="mt-2 inline-flex items-start gap-3">
+          {/* select-text:总净值是最该能复制的那个数。滚动与「整数/小数怎么拆」走 AmountTicker
+              (两个抽屉同一份);hero 的字号在这里给 —— 它比抽屉大两档。 */}
           <div className="flex select-text items-baseline">
-            {/* startOnView={false}:数据一到就滚一次。默认要等进视口,流式补数 / hydration
-                时数字已经在屏上,再等会从 0 重滚一遍。 */}
-            <NumberTicker
-              value={totalUsd}
-              startOnView={false}
-              format={(n) => usd(n).split(".")[0]}
+            <AmountTicker
+              value={shownUsd}
+              scrubbing={scrub.point != null}
               className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
+              fractionClassName="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl"
             />
-            {fracPart && (
-              <span className="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl">
-                .{fracPart}
-              </span>
-            )}
           </div>
-          <GainBadge gain={gain24h} pending={gainPending} failed={gainFailed} />
+          {/* 划动时不显 24h 药丸:那是「今天涨跌」,摆在一个历史时刻的数值旁边是两件事对不上。 */}
+          {scrub.point ? null : (
+            <GainBadge gain={gain24h} pending={gainPending} failed={gainFailed} />
+          )}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-8">
