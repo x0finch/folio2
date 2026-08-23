@@ -6,6 +6,14 @@ import { accounts, portfolios, tags, tokens } from "../schema";
 
 // 归属校验 —— 这半数据访问的越权防线,四个领域共用。
 //
+// **`ownership.ts` 是内件,不转出。** 这半按**一域一文件**摆(#504 T4:原来是一个 1568 行的
+// `queries.ts`),而这四个断言没有跟着拆到各领域去 —— 它们是**跨领域**被用的(账户那道被
+// portfolio / tag / tab pin / 快照 / 手记五处调),拆下去会让 accounts 与 portfolios 互相
+// import:为了少一个文件换一个循环依赖,不划算。
+//
+//(这段话原来在 `domains/index.ts` 的头上。那个桶在 #504 T13 删了 —— 它只转出类型、
+// 领域服务反倒逐文件转,同一个目录两套写法;现在 `src/index.ts` 一律逐文件转。)
+//
 // 每个都是同一句话:这东西属不属于这个 userId?不属于就 fail `NotFound`。单独放一处是因为
 // 它们跨领域被用 —— 账户那道被 portfolio / tag / tab pin / 快照 / 手记五处调,token 那道被
 // 手记与导入两处调。

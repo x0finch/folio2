@@ -1,8 +1,7 @@
 import { FX_TTL_MS, MS_PER_DAY, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { FxService } from "../src";
-import { btcUsdDaily, deriveFiatDaily, fxKey, readFx, writeFx } from "../src/fx";
+import { btcUsdDaily, deriveFiatDaily, FxService, fxKey, readFx, writeFx } from "../src/fx";
 import { harness, now0, upstreamDown } from "./fakes";
 
 // 汇率服务的三个方法,两种判据:

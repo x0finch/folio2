@@ -1,8 +1,10 @@
 import { env } from "cloudflare:test";
+import type { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAccountHistory } from "@/lib/server/accounts/history";
-import { runRequest } from "@/lib/server/oracle";
+import type { AppError } from "@/lib/server/errors";
 import { loadAccountHoldings } from "@/lib/server/portfolio/account-holdings";
+import { runForUser, type UserServices } from "@/lib/server/runtime";
 import { dbFor } from "./db-effect";
 import { createManualAccount, sealManualAccount } from "./manual-fns";
 import { ticketOf } from "./ticket";
@@ -13,6 +15,12 @@ import { ticketOf } from "./ticket";
 // 这些用例都打真 D1:封存跨了账本、参考层、快照三处,而「有没有真落一行」只有在库里看得出来。
 // 出网一律打桩成抛错 —— 封存按设计不出网(价取自本地参考层缓存,取不到回退用户自填价)。
 const USER = "user-archive-seal";
+
+// 生产那条路的把手(#504 T13:`runRequest` 退场之后,测试也走 `runForUser`)。
+const runRequest = <A, E extends AppError, R extends UserServices>(
+  userId: string,
+  effect: Effect.Effect<A, E, R>,
+): Promise<A> => runForUser("archive-seal", userId, effect);
 
 let outbound: string[] = [];
 

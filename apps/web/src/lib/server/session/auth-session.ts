@@ -9,11 +9,16 @@ export interface SessionResult {
 
 // 把已取到的 session 结果转成 auth context;无 session → 抛 401 Response。
 // 关键:userId 只来自已验证 session,绝不来自客户端入参。
-export function resolveAuth(result: SessionResult | null) {
+//
+// **只出 userId**(#504 T13)。以前它还带着 `user` 与 `session` 整份 —— 那是给 handler 的
+// `{ data, context }` 签名准备的,而现在没有 handler 收 context:装配点(`runEffect` /
+// `runForUser`)只读 userId,别的一个字段都不该在这条路上流动。要 user 详情的地方另有出口
+//(`session/get.ts` 的 `getSession`,那是公开的、给路由守卫做 UX 判断用的)。
+export function resolveAuth(result: SessionResult | null): { userId: string } {
   if (!result) {
     throw new Response("Unauthorized", { status: 401 });
   }
-  return { userId: result.user.id, user: result.user, session: result.session };
+  return { userId: result.user.id };
 }
 
 // **`AuthContext` 这个类型没了**(#504 T12):它存在的唯一理由是给 handler 的

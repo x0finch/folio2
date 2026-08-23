@@ -19,8 +19,13 @@ describe("@folio/db encapsulation", () => {
     expect(surface.createDb).toBeUndefined();
     // `Effect.Service` 出来的是个 class(所以 typeof 是 function),`.Default` 是它的 layer
     // ——**不带参数**:userId 走 `CurrentUser`(ADR 0044),装配点 provide 一次。
-    expect(typeof db.AccountStore).toBe("function");
-    expect(typeof db.AccountStore.Default).toBe("object");
+    expect(typeof db.Database).toBe("function");
+    expect(typeof db.Database.Default).toBe("object");
+    // 那排 per-domain 的 Tag **不再出包**(#504 T13):领域只经聚合取,
+    // 「同一个领域两条拿法」这件事没有地方发生。
+    expect(surface.AccountStore).toBeUndefined();
+    expect(surface.SnapshotStore).toBeUndefined();
+    expect(surface.TransferStore).toBeUndefined();
     expect(typeof db.CurrentUser).toBe("function"); // Context.Tag class
     // 非 userId 作用域的全局 infra:独立导出。
     expect(typeof db.createAuthAdapter).toBe("function");

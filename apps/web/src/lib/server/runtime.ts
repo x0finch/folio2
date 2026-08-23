@@ -18,9 +18,8 @@ import { oracleFor, perRequestLayer } from "./oracle";
  * **出口是因为流那条路要它**(#504 T12):`/api/sync` 把同步交给 `Stream.provideLayer`,
  * 拿不到 effect 形状的包装,只能要 layer 本身。别的调用点一律走下面两个发动点。
  *
- * **只有目标形状那些**:聚合 `Database` + 参考层。那批还没挂进聚合的旧领域 Tag **不在这里**
- * —— 它们住 `oracle.ts` 的 `legacyRequestLayer`,和 `runRequest` 一起在 T13 退场。
- * 新写的 handler 拿不到它们,也就不会有人「顺手」再用一个即将消失的 Tag。
+ * **全仓只有这一份 per-user 装配**(#504 T13):过渡期那层 `legacyRequestLayer` /
+ * `withRequest` / `runRequest`,连同它们那排旧领域 Tag,已经一起退场。
  *
  * **一次请求只有一个 `DbClient`(红线)**:聚合与参考层的四个端口都**不自己开连接**、也都不自己
  * 收 userId —— 它们的 `R` 声明 `DbClient | CurrentUser`,由 `perRequestLayer(userId)` 一次给上

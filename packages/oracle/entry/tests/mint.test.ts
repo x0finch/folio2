@@ -5,7 +5,8 @@ import {
 } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { type MintInput, TokenService } from "../src";
+import type { MintInput } from "../src";
+import { TokenService } from "../src/tokens";
 import { CandidateSource } from "../src/tokens/candidates";
 import { harness } from "./fakes";
 

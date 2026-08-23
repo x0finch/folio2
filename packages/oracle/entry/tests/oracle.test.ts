@@ -1,13 +1,9 @@
 import { Duration, Effect, Layer, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
-import {
-  FxService,
-  GlobalRefIndexService,
-  Oracle,
-  oracleLayer,
-  PlatformService,
-  TokenService,
-} from "../src";
+import { GlobalRefIndexService, Oracle, oracleLayer } from "../src";
+import { FxService } from "../src/fx";
+import { PlatformService } from "../src/platforms";
+import { TokenService } from "../src/tokens";
 import {
   fakeGlobalRefIndexStore,
   fakeTokenPriceStore,

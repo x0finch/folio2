@@ -1,13 +1,15 @@
 import { env } from "cloudflare:test";
 import type { SnapshotWithBalances } from "@folio/db";
 import { globalTokenRefIndexStoreLayer, oraclePortsLayer } from "@folio/db";
-import { TokenService } from "@folio/oracle";
+import { Oracle } from "@folio/oracle";
 import { CacheStore, GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
-import { NAMER, runRequest } from "@/lib/server/oracle";
+import type { AppError } from "@/lib/server/errors";
+import { NAMER } from "@/lib/server/oracle";
 import { buildOverview } from "@/lib/server/portfolio/overview-model";
+import { runForUser, type UserServices } from "@/lib/server/runtime";
 import { dbFor, withStore } from "./db-effect";
 import {
   addManualActivities,
@@ -63,6 +65,12 @@ afterEach(() => vi.restoreAllMocks());
 // —— 查处 ③:屏幕上那一行 ——
 // `getPortfolioOverview` 那个 server fn 的组装照抄一遍(它只有这几行:读账户/快照/设置 →
 // 注入手记合成项 → buildOverview)。**不复刻业务逻辑**,所以顺序或依赖一改,这里会跟着红。
+// 生产那条路的把手(#504 T13:`runRequest` 退场之后,测试也走 `runForUser`)。
+const runRequest = <A, E extends AppError, R extends UserServices>(
+  userId: string,
+  effect: Effect.Effect<A, E, R>,
+): Promise<A> => runForUser("scenarios", userId, effect);
+
 async function overview() {
   const [allAccounts, snapshots, settings] = await Promise.all([
     dbFor(USER).accounts.list(),
@@ -75,7 +83,7 @@ async function overview() {
   );
   await injectManualSnapshots(USER, accounts, byAccount);
   // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与 server fn 逐字同款:
-  // 一次 `runRequest` 供上 `TokenService` / `PlatformService`。
+  // 一次装配供上聚合 `Oracle`。
   return runRequest(
     USER,
     buildOverview(accounts, byAccount, {
@@ -151,7 +159,7 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
   });
   await runRequest(
     USER,
-    Effect.flatMap(TokenService, (tokens) => tokens.refreshStale([tokenId])),
+    Effect.flatMap(Oracle, (o) => o.tokens.refreshStale([tokenId])),
   );
   // 刷完把桩换回「出网就抛」—— 后面的展示断言仍然要求零外呼。
   outbound = [];

@@ -1,16 +1,5 @@
 import { env } from "cloudflare:test";
-import {
-  AccountStore,
-  CurrentUser,
-  type DbClient,
-  dbClientLayer,
-  ManualStore,
-  PortfolioStore,
-  SettingsStore,
-  SnapshotStore,
-  TagStore,
-  TransferStore,
-} from "@folio/db";
+import { CurrentUser, Database, type DbClient, dbClientLayer } from "@folio/db";
 import type { Context } from "effect";
 import { Effect, Layer } from "effect";
 
@@ -23,7 +12,7 @@ import { Effect, Layer } from "effect";
 //   · `use(…)`  —— 拿到的是建好的**服务**本身,方法直接调
 //
 // 这里补最后两环:`dbClientLayer(env)`(底下是真 D1,Miniflare)与 `CurrentUser`(ADR 0044)。
-// (`runRequest` 那条是给**被测代码**用的;夹具要的是「往库里塞一行」,不必经参考层。)
+// (`runForUser` 那条是给**被测代码**用的;夹具要的是「往库里塞一行」,不必经参考层。)
 export const withStore = <I, S, A>(
   port: Context.Tag<I, S>,
   layer: Layer.Layer<I, never, DbClient | CurrentUser>,
@@ -34,11 +23,12 @@ export const withStore = <I, S, A>(
 const runWith = <I, A>(
   layer: Layer.Layer<I, never, DbClient | CurrentUser>,
   userId: string,
-  effect: Effect.Effect<A, never, I>,
+  effect: Effect.Effect<A, never, I | Database | DbClient | CurrentUser>,
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(layer),
+      Effect.provide(Database.Default),
       Effect.provide(dbClientLayer(env)),
       Effect.provideService(CurrentUser, userId),
     ),
@@ -58,9 +48,8 @@ type Promisified<S> = {
     : S[K];
 };
 
-const promisified = <I, S extends object>(
-  tag: Context.Tag<I, S>,
-  layer: Layer.Layer<I, never, DbClient | CurrentUser>,
+const promisifiedFrom = <S extends object>(
+  service: Effect.Effect<S, never, Database>,
   userId: string,
 ): Promisified<S> =>
   new Proxy({} as Promisified<S>, {
@@ -68,30 +57,36 @@ const promisified = <I, S extends object>(
       (_target, key) =>
       (...args: unknown[]) =>
         runWith(
-          layer,
+          Layer.empty,
           userId,
-          Effect.flatMap(tag, (service) => {
-            const method = (service as Record<string | symbol, unknown>)[key];
+          Effect.flatMap(service, (resolved) => {
+            const method = (resolved as Record<string | symbol, unknown>)[key];
             if (typeof method !== "function") {
               throw new TypeError(`not a method on the service: ${String(key)}`);
             }
-            return (method as (...a: unknown[]) => Effect.Effect<unknown>).apply(service, args);
+            return (method as (...a: unknown[]) => Effect.Effect<unknown>).apply(resolved, args);
           }),
         ),
   });
 
-/** 一个用户的全部 store 把手:`dbFor(USER).accounts.list()`。 */
-export const dbFor = (userId: string) => ({
-  accounts: promisified(AccountStore, AccountStore.Default, userId),
-  portfolios: promisified(PortfolioStore, PortfolioStore.Default, userId),
-  settings: promisified(SettingsStore, SettingsStore.Default, userId),
-  snapshots: promisified(SnapshotStore, SnapshotStore.Default, userId),
-  manual: promisified(ManualStore, ManualStore.Default, userId),
-  tags: promisified(TagStore, TagStore.Default, userId),
-  // 导入那三个写口要另外两个 store(见 `TransferStore.Default` 的依赖声明)。
-  transfer: promisified(
-    TransferStore,
-    Layer.provide(TransferStore.Default, Layer.merge(SnapshotStore.Default, ManualStore.Default)),
-    userId,
-  ),
-});
+/**
+ * 一个用户的全部 store 把手:`dbFor(USER).accounts.list()`。
+ *
+ * **只经聚合 `Database` 拿服务**(#504 T13:那排旧域 Tag 已经删了)。原来这里是七行
+ * `promisified(XxxStore, XxxStore.Default, userId)`,其中 transfer 还得手工把它依赖的另外
+ * 两个 store 拼上 —— 那份接线现在住在聚合里,夹具不必再复述一遍。
+ */
+export const dbFor = (userId: string) => {
+  const of = <S extends object>(pick: (db: Database) => S) =>
+    promisifiedFrom(Effect.map(Database, pick), userId);
+  return {
+    accounts: of((db) => db.accounts),
+    portfolios: of((db) => db.portfolios),
+    settings: of((db) => db.settings),
+    snapshots: of((db) => db.snapshots),
+    manual: of((db) => db.manual),
+    tags: of((db) => db.tags),
+    tabPins: of((db) => db.tabPins),
+    transfer: of((db) => db.transfer),
+  };
+};

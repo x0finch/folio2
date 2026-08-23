@@ -1,7 +1,9 @@
 import { env } from "cloudflare:test";
+import type { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runRequest } from "@/lib/server/oracle";
+import type { AppError } from "@/lib/server/errors";
 import { loadAccountHoldings } from "@/lib/server/portfolio/account-holdings";
+import { runForUser, type UserServices } from "@/lib/server/runtime";
 import { dbFor } from "./db-effect";
 import { addManualActivities } from "./manual-fns";
 
@@ -13,6 +15,12 @@ import { addManualActivities } from "./manual-fns";
 //
 // 出网一律打桩成抛错:这条路径按设计不出网(价格取自快照与本地参考层),任何一次外呼都得看得见。
 const USER = "user-account-holdings";
+
+// 生产那条路的把手(#504 T13:`runRequest` 退场之后,测试也走 `runForUser`)。
+const runRequest = <A, E extends AppError, R extends UserServices>(
+  userId: string,
+  effect: Effect.Effect<A, E, R>,
+): Promise<A> => runForUser("account-holdings", userId, effect);
 
 let outbound: string[] = [];
 

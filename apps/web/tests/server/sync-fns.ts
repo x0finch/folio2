@@ -2,7 +2,6 @@ import type { Balance, ConnectorError } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import { Account, type AccountSyncResult, BalanceSource } from "@folio/sync";
 import { Effect, Layer } from "effect";
-import { runRequest } from "@/lib/server/oracle";
 import { runForUser } from "@/lib/server/runtime";
 import { syncServicesLayer, warmTokens } from "@/lib/server/sync/deps";
 
@@ -43,7 +42,8 @@ const sourceFor = (job: SyncJob) =>
  * 两个请求同时进来时的样子)。
  */
 export const syncRound = (userId: string, jobs: SyncJob[]): Promise<AccountSyncResult[]> =>
-  runRequest(
+  runForUser(
+    "syncRound",
     userId,
     Effect.forEach(jobs, (job) =>
       Account.syncAccount(userId, job.account, job.rawCreds ?? null).pipe(

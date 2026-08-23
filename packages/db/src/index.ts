@@ -22,45 +22,33 @@ export { CurrentUser } from "./current-user";
 // **对外的那一张门票**(#504 T1 起,T5 挂满):聚合 `Database`,八个领域全在里头,
 // 按领域取用 —— `(yield* Database).accounts.list()`。
 export { Database } from "./database";
+// 领域的类型**按文件逐个转出**(#504 T13)。以前它们走 `domains/index.ts` 那个桶,而领域服务
+// 反倒逐文件转 —— 同一个目录两套写法,「这个名字是哪个领域的」还得进桶里再找一次。
+export type { AccountRawCreds, CreateAccountInput } from "./domains/accounts";
+// cron 枚举用户那一条 —— **不按用户作用域**(它问的就是「有哪些用户」),所以它不在聚合上,
+// 是一个独立出口。原则 #6 的受控例外,判据见 CLAUDE.md。
+export { listUserIdsWithAccounts } from "./domains/accounts";
 export type {
-  AccountRawCreds,
-  AccountTagLink,
-  CreateAccountInput,
-  CreateTagInput,
-  ExportToken,
-  ImportTokenInput,
   ManualActivity,
   ManualActivityInput,
   ManualActivityKind,
   ManualActivityPatch,
   ManualBatchPlan,
   ManualHolding,
-  PortfolioMembership,
+} from "./domains/manual";
+export type { PortfolioMembership } from "./domains/portfolios";
+export type { UserSettingsView } from "./domains/settings";
+export type {
   SnapshotBalanceHistoryRow,
   SnapshotBalanceInput,
   SnapshotBalanceView,
   SnapshotTotal,
   SnapshotWithBalances,
-  TabPinInput,
-  UserSettingsView,
   WriteSnapshotInput,
-} from "./domains";
-// per-user 的领域服务(ADR 0037)。每个名字同时是**类型**、**Tag** 和**它的 layer**
-// (`Effect.Service`,#501)。**这些出值,`DbClient` 只出类型** —— 差别不在写法(两边都是
-// `Effect.Service`),在**出去之后包外能干什么**:`DbClient.query` 的回调参数是 drizzle 句柄,
-// 拿到它等于把包装层作废;而这些服务的方法本来就是包装过的 op,出包正是让 app 能把一次请求的
-// 全部数据访问装进同一个 context(#394 T4 起)。
-//
-// **这排 Tag 是纯过渡形状,新代码别用**:八个领域已经全部挂进聚合 `Database`(#504 T5),
-// 这里留着只为那批还没改写的 app 调用点;T7–T12 逐批换成 `yield* Database` 之后整排删除
-// (tab-pins 已经这样退场 —— 它没有 class,只有一个 `makeTabPinStore`)。
-export { AccountStore, listUserIdsWithAccounts } from "./domains/accounts";
-export { ManualStore } from "./domains/manual";
-export { PortfolioStore } from "./domains/portfolios";
-export { SettingsStore } from "./domains/settings";
-export { SnapshotStore } from "./domains/snapshots";
-export { TagStore } from "./domains/tags";
-export { TransferStore } from "./domains/transfer";
+} from "./domains/snapshots";
+export type { TabPinInput } from "./domains/tab-pins";
+export type { AccountTagLink, CreateTagInput } from "./domains/tags";
+export type { ExportToken, ImportTokenInput } from "./domains/transfer";
 // 这一层的类型化失败。`NotFound` 出现在带归属校验的那些 op 的 `E` 通道里(#504 T5),
 // `InvalidInput` 出现在有域规则要查库才判得了的那些(#504 T6)—— 两个以前都是 defect。
 export { InvalidInput, NotFound } from "./errors";
