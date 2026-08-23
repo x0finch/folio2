@@ -64,5 +64,4 @@ export const syncOne = async (userId: string, job: SyncJob): Promise<AccountSync
  * 与同步流共用同一次装配 —— 单独出一个「自己装一次再跑」的出口,正是那条路上曾经多建一个
  * `DbClient` 的原因。用例要的只是「跑一次预热看结果」,所以把手留在测试这边。
  */
-export const warmTokensForUser = (userId: string): Promise<void> =>
-  runForUser(userId, warmTokens);
+export const warmTokensForUser = (userId: string): Promise<void> => runForUser(userId, warmTokens);
