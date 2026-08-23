@@ -1,9 +1,9 @@
-import type { UpstreamError } from "@folio/client-core";
 import { Database } from "@folio/db";
 import type { OraclePorts, OracleServices } from "@folio/oracle";
 import { Effect, Layer } from "effect";
 import { logTapeLogger } from "./effect-log";
-import { oracleFor, perRequestLayer, toError } from "./oracle";
+import { type AppError, toError } from "./errors";
+import { oracleFor, perRequestLayer } from "./oracle";
 
 // **server fn 的运行时**:一次请求要的服务在这里装配,也在这里跑起来。全仓只有这一份。
 //
@@ -50,15 +50,29 @@ export type UserServices = Database | OracleServices | OraclePorts;
  * review 一个 handler 不再需要顺手检查它的发动、注入、错误映射写没写对。
  */
 export const runEffect =
-  <D, A, E extends UpstreamError | Error>(
-    handler: (data: D) => Effect.Effect<A, E, UserServices>,
-  ) =>
+  <D, A, E extends AppError>(handler: (data: D) => Effect.Effect<A, E, UserServices>) =>
   // `context` 只声明用得着的那个字段:`requireAuth` 注入的是整个 `AuthContext`(还带 user /
   // session),而这里唯一该碰的就是 userId。少声明一个字段 = 少一条能悄悄用起来的路。
   ({ data, context }: { data: D; context: { userId: string } }): Promise<A> =>
     handler(data).pipe(
       Effect.provide(userLayer(context.userId)), // ← 注入发生在这一行
-      Effect.mapError(toError),
+      Effect.mapError(toError), // ← 失败变成人话的唯一一处(见 ./errors)
+      // **上下文一处挂,51 个 handler 全有。** 顺序是有讲究的:挂在 `provide` **外面**,
+      // 所以连装配本身打的日志也带得上;挂在里面就只覆盖 handler 自己那段。
+      Effect.annotateLogs({ userId: context.userId, handler: handlerName(handler) }),
+      // span 那半今天落在 no-op tracer 上(#504 T16 才装真的),但注解写在这里不多花什么,
+      // 而装上之后「这个请求是谁的」立刻就在 span 树里 —— 不必再回头改 51 个 handler。
+      Effect.annotateSpans({ userId: context.userId }),
       Effect.provide(logTapeLogger),
       Effect.runPromise,
     );
+
+/**
+ * handler 在日志里的名字。**`Effect.fn("createTabPin")` 会把这个名字写进函数的 `name`**
+ * (实测确认),所以这里白拿 —— 装配点不必再手写一遍,也不会跟 span 名字对不上。
+ *
+ * 没包 `Effect.fn` 的(过渡期还剩几个)拿到的是它的声明名 `handleXxx`,一样够用;
+ * 压缩会把那种名字改掉,而 `Effect.fn` 那种是字符串常量,压不动 —— 这也是 T7 起要求
+ * 每个 handler 都包 `Effect.fn` 的理由之一。
+ */
+const handlerName = (handler: (...args: never[]) => unknown): string => handler.name || "anonymous";

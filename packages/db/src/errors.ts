@@ -27,3 +27,28 @@ export class NotFound extends Data.TaggedError("db/NotFound")<{
     return `${this.entity} not found: ${this.id}`;
   }
 }
+
+/**
+ * 给进来的东西**在这个上下文里不合法**。
+ *
+ * 与 `NotFound` 各归各的:那个说「这东西不在(或不是你的)」,这个说「东西都在,但你这么组合
+ * 不成立」—— tag pin 没带 tagId、自定义 Tab 已经钉满。两者都是**调用方能改**的,所以都在
+ * `E` 通道里;改不动的那种(代码写错了)仍旧 `Effect.die`。
+ *
+ * 以前这几处是 `Effect.die(new Error("tag pin requires tagId"))` —— 一个拼错参数的请求
+ * 于是和「D1 挂了」落在同一个通道里,端点只能一律回 500(#504 T6 改)。
+ *
+ * **住在 `@folio/db` 而不是 app**,判据是「谁抛」:今天抛它的是领域服务(下面那些规则要查库
+ * 才知道成不成立),app 侧的 handler 抛同一个类(T7 起)—— 一个概念一个类,而两边都够得着的
+ * 最低那一层就是这里。
+ */
+export class InvalidInput extends Data.TaggedError("db/InvalidInput")<{
+  /** 哪件事不合法(进日志时好归类)—— `tag pin` / `tab pin` / `manual activity` …… */
+  readonly what: string;
+  /** 给人看的那半句。拼出来是 `what: why`,所以别在这里重复 `what`。 */
+  readonly why: string;
+}> {
+  override get message(): string {
+    return `${this.what}: ${this.why}`;
+  }
+}

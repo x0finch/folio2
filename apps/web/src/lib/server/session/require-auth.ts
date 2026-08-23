@@ -1,6 +1,7 @@
 import { getLogger, withContext } from "@logtape/logtape";
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
+import { Cause, Runtime } from "effect";
 import { getAuth } from "./auth";
 import { resolveAuth } from "./auth-session";
 
@@ -20,10 +21,23 @@ export const requireAuth = createMiddleware({ type: "function" }).server(async (
       return await next({ context: auth });
     } catch (err) {
       log.error("server fn threw", {
-        error: err instanceof Error ? err.message : String(err),
+        error: describe(err),
         code: (err as { code?: string })?.code,
       });
       throw err;
     }
   });
 });
+
+// **兜底日志里要能看出「是哪个 handler、失败在哪一层」。**
+//
+// `runEffect` 跑完抛出的是 `FiberFailure`,它的 `message` 只有最外那一句 —— handler 名、调用链、
+// 中断/并行那些结构全在它包着的 `Cause` 里。只打 message 的话,`Effect.fn("createTabPin")` 加的
+// 那个名字一路走到这里正好被丢掉,等于白加(#504 T6)。
+//
+// 所以:是 `FiberFailure` 就打 `Cause.pretty`(带 span 栈:`at createTabPin (…)`),
+// 别的照旧打 message。userId 由外面那层 `withContext` 自动带上,不必在这里拼。
+const describe = (err: unknown): string => {
+  if (Runtime.isFiberFailure(err)) return Cause.pretty(err[Runtime.FiberFailureCauseId]);
+  return err instanceof Error ? err.message : String(err);
+};

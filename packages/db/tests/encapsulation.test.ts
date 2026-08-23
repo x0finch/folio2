@@ -50,5 +50,9 @@ describe("@folio/db encapsulation", () => {
     // 类型化失败。
     expect(typeof db.NotFound).toBe("function");
     expect(new db.NotFound({ entity: "account", id: "a1" }).message).toBe("account not found: a1");
+    expect(typeof db.InvalidInput).toBe("function");
+    expect(new db.InvalidInput({ what: "tab pin", why: "requires tagId" }).message).toBe(
+      "tab pin: requires tagId",
+    );
   });
 });
