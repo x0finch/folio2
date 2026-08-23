@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { makeTabPinStore } from "./queries/tab-pins";
+import { makeTabPinStore } from "./domains/tab-pins";
 
 // **`@folio/db` 对外的那一张门票。** app 侧一次 `yield* Database` 拿到全部领域操作,
 // 按领域取用:`db.tabPins.list()`。以前是每个领域一个 Tag + 一个 layer 散装导出(九对),
 // 装配点为此 import 二十几行,handler 各自记住自己要哪几个 Tag。
 //
-// **它和 `stores/service.ts` 的 `DbClient` 是两件事,别混**:
+// **它和 `client.ts` 的 `DbClient` 是两件事,别混**:
 //   · `DbClient` —— D1 这一层的桥(`query` / `batch`),回调参数就是 drizzle 句柄。
 //     **只在包内流通**(原则 #6):出包了包外就能拼任意查询,绕过全部包装。
 //   · `Database` —— 本文件,包装好的领域 op 的聚合。**出包正是它的用途。**

@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { AccountStore, PortfolioStore, TagStore } from "../src/queries";
+import { AccountStore, PortfolioStore, TagStore } from "../src/domains";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
 

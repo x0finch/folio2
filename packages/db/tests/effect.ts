@@ -1,9 +1,9 @@
 import { env } from "cloudflare:test";
 import type { Context } from "effect";
 import { Effect, Layer, TestClock, TestContext } from "effect";
+import { type DbClient, dbClientLayer } from "../src/client";
 import { CurrentUser } from "../src/current-user";
 import { Database } from "../src/database";
-import { type DbClient, dbClientLayer } from "../src/stores/service";
 
 // 这几个 store 的测试共用的装配(#362 第 5 站)。**跑的是生产那条路**:layer → Tag,
 // 底下是真 D1(Miniflare),只有时钟是假的。

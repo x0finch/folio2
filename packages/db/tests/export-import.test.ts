@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { AccountStore, ManualStore, SnapshotStore, TransferStore } from "../src/queries";
+import { AccountStore, ManualStore, SnapshotStore, TransferStore } from "../src/domains";
 import { tokenRefs, tokens } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";

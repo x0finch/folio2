@@ -9,7 +9,7 @@ import {
   PortfolioStore,
   SnapshotStore,
   TransferStore,
-} from "../src/queries";
+} from "../src/domains";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
 

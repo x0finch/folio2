@@ -3,9 +3,9 @@ import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
+import { chunk, DbClient } from "../client";
 import { CurrentUser } from "../current-user";
 import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
-import { chunk, DbClient } from "./service";
 
 // `TokenPriceStore` 的 D1 实现(ADR 0021/0023,#199)。**每个用户一份** —— userId 由 layer 吃掉。
 //
@@ -20,13 +20,13 @@ export interface UserTokenPriceStoreOpts {
 
 const make = ({ namer }: UserTokenPriceStoreOpts) =>
   Effect.gen(function* () {
-    const database = yield* DbClient;
+    const client = yield* DbClient;
     const userId = yield* CurrentUser;
 
     // tokenId → 它在当前上游那里的 tokenRef(历史日价的键)。没有那一档的 ref 行 → `none`。
     const upstreamRefOf = (tokenId: string): Effect.Effect<Option.Option<string>> =>
       Effect.map(
-        database.query((db) =>
+        client.query((db) =>
           db
             .select({ localName: tokenRefs.localName })
             .from(tokenRefs)
@@ -56,7 +56,7 @@ const make = ({ namer }: UserTokenPriceStoreOpts) =>
         // 固定 1 个绑定(token_ref)+ 每块 ≤90 个日桶,稳在 D1 ~100 参数上限内。
         const parts = chunk([...new Set(dayBuckets)]).filter((p) => p.length > 0);
         const batches = yield* Effect.forEach(parts, (part) =>
-          database.query((db) =>
+          client.query((db) =>
             db
               .select({
                 dayBucket: tokenDailyPrices.dayBucket,
@@ -77,7 +77,7 @@ const make = ({ namer }: UserTokenPriceStoreOpts) =>
       ref: string,
       prices: readonly { dayBucket: number; unitPrice: number }[],
     ): Effect.Effect<void> =>
-      database.batch((db) =>
+      client.batch((db) =>
         prices.map((p) =>
           db
             .insert(tokenDailyPrices)
@@ -98,7 +98,7 @@ const make = ({ namer }: UserTokenPriceStoreOpts) =>
           const t = yield* Clock.currentTimeMillis;
           const parts = chunk([...new Set(ids)]).filter((p) => p.length > 0);
           const batches = yield* Effect.forEach(parts, (part) =>
-            database.query((db) =>
+            client.query((db) =>
               db
                 .select({
                   id: tokens.id,
@@ -131,7 +131,7 @@ const make = ({ namer }: UserTokenPriceStoreOpts) =>
         Effect.gen(function* () {
           if (prices.length === 0) return;
           const priceExpiresAt = (yield* Clock.currentTimeMillis) + ttlMs;
-          yield* database.batch((db) =>
+          yield* client.batch((db) =>
             prices.map((p) =>
               db
                 .update(tokens)

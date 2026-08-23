@@ -4,10 +4,10 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 // 包内测试白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
-import { AccountStore, ManualStore } from "../src/queries";
+import { AccountStore, ManualStore } from "../src/domains";
+import { userTokenStoreLayer } from "../src/oracle-ports/token";
 import { manualActivity } from "../src/schema";
 import { user } from "../src/schema/auth";
-import { userTokenStoreLayer } from "../src/stores/token";
 import { forUser, promisified } from "./effect";
 
 const manualOf = forUser(ManualStore, ManualStore.Default);
