@@ -61,9 +61,9 @@ export { SettingsStore } from "./domains/settings";
 export { SnapshotStore } from "./domains/snapshots";
 export { TagStore } from "./domains/tags";
 export { TransferStore } from "./domains/transfer";
-// 这一层的类型化失败。`NotFound` 现在会出现在带归属校验的那些 op 的 `E` 通道里 ——
-// 以前它是 `throw new Error("… not found")`,落在 promise 里当 defect 炸(#504 T5)。
-export { NotFound } from "./errors";
+// 这一层的类型化失败。`NotFound` 出现在带归属校验的那些 op 的 `E` 通道里(#504 T5),
+// `InvalidInput` 出现在有域规则要查库才判得了的那些(#504 T6)—— 两个以前都是 defect。
+export { InvalidInput, NotFound } from "./errors";
 // 参考层那半:**一张 layer 给全四个端口**(#504 T5)。以前是四个 layer(两个还是带 opts 的
 // 工厂)各自露出去,装配点逐个列举。`globalTokenRefIndexStoreLayer` 仍单独可拿 —— cron 刷全局
 // 映射表没有 userId,不该为了它把 per-user 那三张也建出来。

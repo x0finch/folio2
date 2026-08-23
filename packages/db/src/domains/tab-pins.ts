@@ -3,7 +3,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { DbClient } from "../client";
 import { CurrentUser } from "../current-user";
-import { NotFound } from "../errors";
+import { InvalidInput, NotFound } from "../errors";
 import { tabPins } from "../schema";
 import type { TabPin } from "../schema/types";
 import { assertAccountOwned, assertTagOwned } from "./ownership";
@@ -50,32 +50,35 @@ export interface TabPinInput {
 
 // pin 的目标校验:tag pin 带本人 tagId;account pin 带本人 accountId;connector pin 带 connectorId
 //(无 FK,不校验存在)。返回规范化后的三列(按 kind 互斥非空)。
-// 「缺字段」仍走 `Effect.die` —— 那是调用方拼错了参数,不是「东西不在」;它在 #504 T6 变成
-// `InvalidInput`,和 `NotFound` 各归各的。
+//
+// 「缺字段」是 `InvalidInput`,不是 `NotFound`,也不再是 defect(#504 T6):zod 那道
+// `PinTargetInput` 三个字段全是可选的(一个 schema 供三种 kind 用),所以「kind=tag 却没带
+// tagId」进得来 —— 那是调用方拼错了参数,能改,该收到一句话,不该收到 500。
 const resolvePinTarget = (
   client: DbClient,
   userId: string,
   input: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
 ): Effect.Effect<
   { tagId: string | null; accountId: string | null; connectorId: ConnectorId | null },
-  NotFound
+  NotFound | InvalidInput
 > =>
   Effect.gen(function* () {
     if (input.kind === "tag") {
-      if (!input.tagId) return yield* Effect.die(new Error("tag pin requires tagId"));
+      if (!input.tagId) return yield* missingTarget("tag pin", "tagId");
       yield* assertTagOwned(client, userId, input.tagId);
       return { tagId: input.tagId, accountId: null, connectorId: null };
     }
     if (input.kind === "account") {
-      if (!input.accountId) return yield* Effect.die(new Error("account pin requires accountId"));
+      if (!input.accountId) return yield* missingTarget("account pin", "accountId");
       yield* assertAccountOwned(client, userId, input.accountId);
       return { tagId: null, accountId: input.accountId, connectorId: null };
     }
-    if (!input.connectorId) {
-      return yield* Effect.die(new Error("connector pin requires connectorId"));
-    }
+    if (!input.connectorId) return yield* missingTarget("connector pin", "connectorId");
     return { tagId: null, accountId: null, connectorId: input.connectorId };
   });
+
+const missingTarget = (what: string, field: string): Effect.Effect<never, InvalidInput> =>
+  Effect.fail(new InvalidInput({ what, why: `requires ${field}` }));
 
 export const makeTabPinStore = Effect.gen(function* () {
   const client = yield* DbClient;
@@ -83,14 +86,19 @@ export const makeTabPinStore = Effect.gen(function* () {
 
   return {
     /** 固定一个自定义 Tab。每 user ≤3(超出抛)。tag pin 校验 Tag 归属本人。 */
-    create: (input: TabPinInput): Effect.Effect<TabPin, NotFound> =>
+    create: (input: TabPinInput): Effect.Effect<TabPin, NotFound | InvalidInput> =>
       Effect.gen(function* () {
         const existing = yield* client.query((db) =>
           db.select({ id: tabPins.id }).from(tabPins).where(eq(tabPins.userId, userId)),
         );
+        // 上限也是 `InvalidInput`:UI 会先挡,但一个陈旧的页面照样发得出这个请求,
+        // 而「已经钉满了」是句该说给人听的话,不是 500。
         if (existing.length >= MAX_TAB_PINS_PER_USER) {
-          return yield* Effect.die(
-            new Error(`cannot pin more than ${MAX_TAB_PINS_PER_USER} custom tabs`),
+          return yield* Effect.fail(
+            new InvalidInput({
+              what: "tab pin",
+              why: `cannot pin more than ${MAX_TAB_PINS_PER_USER} custom tabs`,
+            }),
           );
         }
         const target = yield* resolvePinTarget(client, userId, input);
@@ -121,7 +129,7 @@ export const makeTabPinStore = Effect.gen(function* () {
     updateTarget: (
       pinId: string,
       patch: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
-    ): Effect.Effect<void, NotFound> =>
+    ): Effect.Effect<void, NotFound | InvalidInput> =>
       Effect.gen(function* () {
         yield* assertTabPinOwned(client, userId, pinId);
         const target = yield* resolvePinTarget(client, userId, patch);

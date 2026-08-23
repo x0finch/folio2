@@ -1,7 +1,12 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
+import { Cause, Effect, Exit, Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
+import { dbClientLayer } from "../src/client";
 import { getDb } from "../src/connect";
+import { CurrentUser } from "../src/current-user";
+import { Database } from "../src/database";
+import { InvalidInput } from "../src/errors";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
 
@@ -36,6 +41,19 @@ beforeEach(async () => {
   await resetUser(USER_B);
 });
 
+// 跑一次 `create` 但**不把失败抹平成 reject** —— `forDomain` 那个把手出的是 Promise,
+// 到了 `rejects` 那一头 die 和 fail 长得一模一样。要分辨就得拿 `Exit`。
+const createExit = (userId: string, input: Parameters<TabPinCreate>[0]) =>
+  Effect.runPromiseExit(
+    Effect.flatMap(Database, (db) => db.tabPins.create(input)).pipe(
+      Effect.provide(Database.Default),
+      Effect.provide(dbClientLayer(env)),
+      Effect.provideService(CurrentUser, userId),
+    ),
+  );
+
+type TabPinCreate = Database["tabPins"]["create"];
+
 describe("createTabPin", () => {
   it("建 connector pin / tag pin,两列互斥非空", async () => {
     const pf = await portfolios(USER_A).ensureDefault();
@@ -64,9 +82,29 @@ describe("createTabPin", () => {
 
   it("tag pin 缺 tagId / connector pin 缺 connectorId / account pin 缺 accountId → 拒", async () => {
     await portfolios(USER_A).ensureDefault();
-    await expect(tabPinsOf(USER_A).create({ kind: "tag" })).rejects.toThrow();
-    await expect(tabPinsOf(USER_A).create({ kind: "connector" })).rejects.toThrow();
-    await expect(tabPinsOf(USER_A).create({ kind: "account" })).rejects.toThrow();
+    await expect(tabPinsOf(USER_A).create({ kind: "tag" })).rejects.toThrow(
+      "tag pin: requires tagId",
+    );
+    await expect(tabPinsOf(USER_A).create({ kind: "connector" })).rejects.toThrow(
+      "connector pin: requires connectorId",
+    );
+    await expect(tabPinsOf(USER_A).create({ kind: "account" })).rejects.toThrow(
+      "account pin: requires accountId",
+    );
+  });
+
+  // **「拒」有两种,区别要紧**(#504 T6):`Effect.die` 是「代码写错了」,handler 无从下手,
+  // 端点只能一律 500;`Effect.fail(InvalidInput)` 是「你这么组合不成立」,能回一句人话。
+  // `rejects.toThrow()` 两种都过,所以这条直接看 Cause —— 上面那三条盯不住这件事。
+  it("缺字段是类型化失败,不是 defect", async () => {
+    const exit = await createExit(USER_A, { kind: "tag" });
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(Cause.isDie(exit.cause)).toBe(false);
+      expect(Cause.failureOption(exit.cause).pipe(Option.getOrUndefined)).toBeInstanceOf(
+        InvalidInput,
+      );
+    }
   });
 
   it("account pin 指向他人账户 → 拒", async () => {
@@ -89,7 +127,7 @@ describe("createTabPin", () => {
     await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "hyperliquid" });
     await expect(
       tabPinsOf(USER_A).create({ kind: "connector", connectorId: "manual" }),
-    ).rejects.toThrow();
+    ).rejects.toThrow("cannot pin more than 3 custom tabs");
     expect(await tabPinsOf(USER_A).list()).toHaveLength(3);
   });
 });
