@@ -21,7 +21,8 @@ describe("resolveAuth (session guard)", () => {
       session: { id: "s1", userId: "u1" },
     });
     expect(ctx.userId).toBe("u1");
-    expect(ctx.user.id).toBe("u1");
-    expect(ctx.session.id).toBe("s1");
+    // **出口只有 userId**(#504 T13):`user` / `session` 整份不再往下流 —— 没有 handler 收
+    // context 了,装配点也只读这一个字段。多带的字段就是多一条能悄悄用起来的路。
+    expect(Object.keys(ctx)).toEqual(["userId"]);
   });
 });
