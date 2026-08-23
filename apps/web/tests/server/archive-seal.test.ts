@@ -20,7 +20,7 @@ const USER = "user-archive-seal";
 const runRequest = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
-): Promise<A> => runForUser("archive-seal", userId, effect);
+): Promise<A> => runForUser(userId, effect);
 
 let outbound: string[] = [];
 

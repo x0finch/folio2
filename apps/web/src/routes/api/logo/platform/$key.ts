@@ -16,7 +16,7 @@ export const Route = createFileRoute("/api/logo/platform/$key")({
         if (!userId) {
           return serveLogo(async () => undefined, "platform", params.key, { private: true });
         }
-        return runForUser("platformLogo", userId, platformLogo(params.key));
+        return runForUser(userId, platformLogo(params.key));
       },
     },
   },

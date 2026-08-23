@@ -18,7 +18,7 @@ export const Route = createFileRoute("/api/import")({
         const reader = request.body?.getReader();
         if (!reader) return new Response("empty body", { status: 400 });
 
-        const outcome = await runForUser("importData", userId, importData(reader));
+        const outcome = await runForUser(userId, importData(reader));
         if (outcome.kind === "rejected") {
           log.warning("import rejected", { userId, error: outcome.message });
           return new Response(outcome.message, { status: 400 });

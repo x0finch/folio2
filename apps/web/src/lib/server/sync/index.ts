@@ -14,7 +14,7 @@ export const syncAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(SyncAccountInput)
   .handler(({ data, context }) =>
-    runForUser("syncAccount", context.userId, handleSyncAccount(context.userId, data)),
+    runForUser(context.userId, handleSyncAccount(context.userId, data)),
   );
 
 export const getSyncStatus = createServerFn({ method: "GET" })

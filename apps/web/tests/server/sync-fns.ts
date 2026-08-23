@@ -43,7 +43,6 @@ const sourceFor = (job: SyncJob) =>
  */
 export const syncRound = (userId: string, jobs: SyncJob[]): Promise<AccountSyncResult[]> =>
   runForUser(
-    "syncRound",
     userId,
     Effect.forEach(jobs, (job) =>
       Account.syncAccount(userId, job.account, job.rawCreds ?? null).pipe(
@@ -66,4 +65,4 @@ export const syncOne = async (userId: string, job: SyncJob): Promise<AccountSync
  * `DbClient` 的原因。用例要的只是「跑一次预热看结果」,所以把手留在测试这边。
  */
 export const warmTokensForUser = (userId: string): Promise<void> =>
-  runForUser("warmTokens", userId, warmTokens);
+  runForUser(userId, warmTokens);

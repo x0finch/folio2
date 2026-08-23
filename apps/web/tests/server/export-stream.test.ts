@@ -44,7 +44,7 @@ async function seedSnapshots(count: number): Promise<void> {
 }
 
 async function exportLines(): Promise<Record<string, unknown>[]> {
-  const body = await runForUser("exportData", USER, exportStream());
+  const body = await runForUser(USER, exportStream());
   const text = await new Response(body).text();
   return text
     .split("\n")

@@ -25,7 +25,7 @@ const USER = "user-sync-services-layer";
 const runRequest = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
-): Promise<A> => runForUser("sync-services-layer", userId, effect);
+): Promise<A> => runForUser(userId, effect);
 
 async function resetUser(): Promise<void> {
   await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run();

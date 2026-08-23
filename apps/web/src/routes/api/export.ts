@@ -16,7 +16,7 @@ export const Route = createFileRoute("/api/export")({
           return userId;
         }
         log.info("export started", { userId });
-        const body = await runForUser("exportData", userId, exportData());
+        const body = await runForUser(userId, exportData());
         return new Response(body, {
           headers: {
             "content-type": "application/x-ndjson; charset=utf-8",

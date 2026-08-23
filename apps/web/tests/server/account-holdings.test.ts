@@ -20,7 +20,7 @@ const USER = "user-account-holdings";
 const runRequest = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
-): Promise<A> => runForUser("account-holdings", userId, effect);
+): Promise<A> => runForUser(userId, effect);
 
 let outbound: string[] = [];
 

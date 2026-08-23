@@ -76,19 +76,21 @@ export const forUser = <A, E extends AppError>(
   );
 
 /**
- * **发动点的内核** —— 在 `forUser` 之上补两件只有「跑」才需要的:handler 名字、日志层。
+ * **发动点** —— 在 `forUser` 之上补两件只有「跑」才需要的:日志层、span 树。
  *
- * 两个出口共用它:server fn 走 `runEffect`(下面),路由 handler 走 `runForUser`。
+ * 路由 / 测试 / 需要显式 userId 的 server fn 都走这里。server fn 的标准装配另有
+ * `runEffect`,在它之上再挂 `handler` 日志注解。
+ *
  * 两条路唯一的差别是**「谁认的人」** —— server fn 有 `requireAuth` 中间件把 userId 放进
  * context,路由自己调 `resolveAuth`。认完之后要做的事一模一样,所以只能有一份。
+ *
+ * 路由侧的身份看 `Effect.fn` 的 span 名(Cause / 树里都有),不再另传一个字符串进日志。
  */
-const runFor = <A, E extends AppError>(
+export const runForUser = <A, E extends AppError>(
   userId: string,
-  handler: string,
   effect: Effect.Effect<A, E, UserServices>,
 ): Promise<A> =>
   forUser(userId, effect).pipe(
-    Effect.annotateLogs({ handler }),
     Effect.provide(logTapeLogger),
     // 一次请求一棵 span 树(#504 T16)。装在这儿而不是 `forUser` 里:cron 那条路把 N 个用户
     // 拼成**一个** effect,树该按那一整趟算,由它自己的边缘装(见 server.ts)。
@@ -100,7 +102,7 @@ const runFor = <A, E extends AppError>(
  * **server fn 的发动点 —— handler 只描述,这里负责跑。**
  *
  * handler 拿到的只有 `data`,返回一个 Effect;要什么服务写在它的 `R` 通道里(`yield* Database`)。
- * 「哪个用户」「怎么装配」「错误怎么映射」「什么时候变成 Promise」全部发生在 `runFor` 那几行里,
+ * 「哪个用户」「怎么装配」「错误怎么映射」「什么时候变成 Promise」全部发生在 `runForUser` 里,
  * handler 一个字都不必知道 —— 它连 `context` 都收不到,所以也不可能自己去读 userId 拼查询。
  *
  * 用法(装配点):`.handler(runEffect(handleCreateTabPin))`。
@@ -108,36 +110,18 @@ const runFor = <A, E extends AppError>(
  * 与过渡路那个 `runRequest` 的真正区别不是少打几个字,是**方向**:那个由 handler 自己调,
  * 于是每个 handler 都是「一半业务 + 一半运行时」;这个由装配点调,handler 那半干净了,
  * review 一个 handler 不再需要顺手检查它的发动、注入、错误映射写没写对。
+ *
+ * `handler` 日志注解只在这边加:**`Effect.fn("createTabPin")` 会把这个名字写进函数的 `name`**
+ * (实测确认),所以白拿 —— 装配点不必再手写一遍,也不会跟 span 名字对不上。没包 `Effect.fn`
+ * 的拿到的是声明名 `handleXxx`,一样够用;压缩会把那种名字改掉,而 `Effect.fn` 那种是字符串
+ * 常量,压不动 —— 这也是 T7 起要求每个 handler 都包 `Effect.fn` 的理由之一。
  */
 export const runEffect =
   <D, A, E extends AppError>(handler: (data: D) => Effect.Effect<A, E, UserServices>) =>
   // `context` 只声明用得着的那个字段:`requireAuth` 注入的是整个 `AuthContext`(还带 user /
   // session),而这里唯一该碰的就是 userId。少声明一个字段 = 少一条能悄悄用起来的路。
   ({ data, context }: { data: D; context: { userId: string } }): Promise<A> =>
-    runFor(context.userId, handlerName(handler), handler(data));
-
-/**
- * **路由 handler 的发动点** —— 与 server fn 同一个内核,只是人由调用方自己认。
- *
- * 那几条路由(`/api/export`、`/api/logo/*`、`/api/import`)出的是裸 `Response`,而 server fn
- * 的返回值要过序列化,所以它们不能是 server fn(理由见各自文件);但「一次请求怎么装配、
- * 失败怎么变成人话」不该因此有第二个答案。
- *
- * `name` 是这一次的身份(进日志注解)。路由这边没有 `Effect.fn` 那个函数名可白拿 ——
- * 它跑的往往是一段现拼的 effect,所以由调用方写死一个名字。
- */
-export const runForUser = <A, E extends AppError>(
-  name: string,
-  userId: string,
-  effect: Effect.Effect<A, E, UserServices>,
-): Promise<A> => runFor(userId, name, effect);
-
-/**
- * handler 在日志里的名字。**`Effect.fn("createTabPin")` 会把这个名字写进函数的 `name`**
- * (实测确认),所以这里白拿 —— 装配点不必再手写一遍,也不会跟 span 名字对不上。
- *
- * 没包 `Effect.fn` 的(过渡期还剩几个)拿到的是它的声明名 `handleXxx`,一样够用;
- * 压缩会把那种名字改掉,而 `Effect.fn` 那种是字符串常量,压不动 —— 这也是 T7 起要求
- * 每个 handler 都包 `Effect.fn` 的理由之一。
- */
-const handlerName = (handler: (...args: never[]) => unknown): string => handler.name || "anonymous";
+    runForUser(
+      context.userId,
+      handler(data).pipe(Effect.annotateLogs({ handler: handler.name || "anonymous" })),
+    );

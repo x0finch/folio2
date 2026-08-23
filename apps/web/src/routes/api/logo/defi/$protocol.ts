@@ -12,7 +12,7 @@ export const Route = createFileRoute("/api/logo/defi/$protocol")({
         if (!userId) {
           return serveLogo(async () => undefined, "defi", params.protocol, { private: true });
         }
-        return runForUser("defiLogo", userId, defiLogo(params.protocol));
+        return runForUser(userId, defiLogo(params.protocol));
       },
     },
   },

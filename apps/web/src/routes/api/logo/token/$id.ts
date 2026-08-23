@@ -12,7 +12,7 @@ export const Route = createFileRoute("/api/logo/token/$id")({
         if (!userId) {
           return serveLogo(async () => undefined, "token", params.id, { private: true });
         }
-        return runForUser("tokenLogo", userId, tokenLogo(params.id));
+        return runForUser(userId, tokenLogo(params.id));
       },
     },
   },
