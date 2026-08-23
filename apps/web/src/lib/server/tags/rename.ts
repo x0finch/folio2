@@ -1,19 +1,14 @@
-import { TagStore } from "@folio/db";
+import { Database } from "@folio/db";
+import { Effect } from "effect";
 import { z } from "zod";
-import { runStore } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 
 export const RenameTagInput = z.object({
   tagId: z.string().min(1),
   name: z.string().trim().min(1, "tag name is required"),
 });
 
-export function handleRenameTag({
-  data,
-  context,
-}: {
-  data: z.infer<typeof RenameTagInput>;
-  context: AuthContext;
-}) {
-  return runStore(context.userId, TagStore, (s) => s.rename(data.tagId, data.name));
-}
+export const handleRenameTag = Effect.fn("renameTag")(function* (
+  data: z.infer<typeof RenameTagInput>,
+) {
+  return yield* (yield* Database).tags.rename(data.tagId, data.name);
+});

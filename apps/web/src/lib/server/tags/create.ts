@@ -1,21 +1,17 @@
-import { TagStore } from "@folio/db";
+import { Database } from "@folio/db";
+import { Effect } from "effect";
 import { z } from "zod";
-import { runStore } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 
 export const CreateTagInput = z.object({
   portfolioId: z.string().min(1),
   name: z.string().trim().min(1, "tag name is required"),
 });
 
-export function handleCreateTag({
-  data,
-  context,
-}: {
-  data: z.infer<typeof CreateTagInput>;
-  context: AuthContext;
-}) {
-  return runStore(context.userId, TagStore, (s) =>
-    s.create({ portfolioId: data.portfolioId, name: data.name }),
-  );
-}
+export const handleCreateTag = Effect.fn("createTag")(function* (
+  data: z.infer<typeof CreateTagInput>,
+) {
+  return yield* (yield* Database).tags.create({
+    portfolioId: data.portfolioId,
+    name: data.name,
+  });
+});
