@@ -1,5 +1,5 @@
 import type { SnapshotWithBalances } from "@folio/db";
-import { FxService } from "@folio/oracle";
+import { Oracle } from "@folio/oracle";
 import { fiatCodeOf, type TokenRecord } from "@folio/oracle-basic";
 import { Effect, Option } from "effect";
 import type { CredsToken } from "@/lib/core/manual";
@@ -20,16 +20,16 @@ import { MANUAL_CONNECTOR_ID } from "@/lib/core/manual";
 // #270 的法币分支从不触发,展示价一路回退自填价。法币身份得单独按 `fiat` 命名者取(见 `manualFiatRefs`),
 // 经 `fiatRefs`(tokenId → `fiat/issued:<CODE>`)注入进来。
 //
-// 汇率能力在 `R` 通道上(`FxService`),不再由调用方传一个 `fxResolve` 回调进来。
+// 汇率能力在 `R` 通道上(聚合 `Oracle` 的 `fx`),不再由调用方传一个 `fxResolve` 回调进来。
 // **出现过的法币 code 先各解一次**,再逐项查表 —— 迁移前那版是「往 Map 里存 Promise」去重,
 // 换成先解一遍之后连去重的机制都不需要了(`resolve` 是 cache-only、便宜)。
 export const manualUnitPrices = (
   tokens: readonly CredsToken[],
   enriched: ReadonlyMap<string, TokenRecord>,
   fiatRefs: ReadonlyMap<string, string>,
-): Effect.Effect<(number | undefined)[], never, FxService> =>
+): Effect.Effect<(number | undefined)[], never, Oracle> =>
   Effect.gen(function* () {
-    const fx = yield* FxService;
+    const { fx } = yield* Oracle;
     const codeOf = (t: CredsToken): string | undefined => {
       const fiatRef = fiatRefs.get(t.id);
       return fiatRef ? fiatCodeOf(fiatRef) : undefined;

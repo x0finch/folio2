@@ -1,7 +1,6 @@
+import { Effect } from "effect";
 import { z } from "zod";
 import { editManualActivity } from "@/lib/server/manual/store";
-import { runRequest } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 import { ActivityKind } from "./create";
 
 export const UpdateActivityInput = z.object({
@@ -16,12 +15,9 @@ export const UpdateActivityInput = z.object({
   }),
 });
 
-export function handleUpdateManualActivity({
-  data,
-  context,
-}: {
-  data: { activityId: string; patch: Parameters<typeof editManualActivity>[1] };
-  context: AuthContext;
+export const handleUpdateManualActivity = Effect.fn("updateManualActivity")(function* (data: {
+  activityId: string;
+  patch: Parameters<typeof editManualActivity>[1];
 }) {
-  return runRequest(context.userId, editManualActivity(data.activityId, data.patch));
-}
+  return yield* editManualActivity(data.activityId, data.patch);
+});

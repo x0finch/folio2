@@ -17,6 +17,7 @@ import {
 import {
   type AccountSafe,
   AccountStore,
+  type Database,
   type NotFound,
   SettingsStore,
   SnapshotStore,
@@ -67,7 +68,9 @@ import { isSyncableAccount } from "./syncable";
 export const warmTokens: Effect.Effect<
   void,
   UpstreamError | NotFound,
-  OracleServices | OraclePorts | DbStores
+  // `Database` 是 `manualBalancesForWarm` 带进来的 —— manual 那层已经改用两张聚合门票
+  //(#504 T9),这条路自己的写法留到 T12 一起换。
+  OracleServices | OraclePorts | DbStores | Database
 > = Effect.gen(function* () {
   const syncLog = getLogger(["folio", "web", "sync"]);
   const [snapshotStore, accountStore] = [yield* SnapshotStore, yield* AccountStore];
