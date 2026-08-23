@@ -33,23 +33,16 @@ type Promisified<S> = {
     : S[K];
 };
 
-// per-user 服务的把手(ADR 0037 / 0044):layer 不再按用户各建一份 —— 一份 layer,
-// userId 由 `CurrentUser` 在建服务那一刻给进去。
-// 用法:`const accounts = forUser(AccountStore, AccountStore.Default)` 之后 `accounts(USER_A).create(…)`。
+// 一个领域的把手(ADR 0037 / 0044):`forDomain((db) => db.tabPins)` 之后
+// `tabPins(USER_A).create(…)`。layer 不按用户各建一份 —— 一份 `Database.Default`,userId 由
+// `CurrentUser` 在建服务那一刻给进去。
+//
+// 用例**只经聚合 `Database` 拿服务**(#504 T5),不再 provide 某个领域自己的 layer 再 yield 它的
+// Tag:那排 Tag 是过渡形状,测试盯着它就等于给退场排一次返工。断言侧看不出区别 —— 这正是
+// 「挂进聚合」这件事要保住的性质。
 //
 // 测试**保持 Promise 形状**是有判据的(CODING.md / #391):这些用例测的是「数据落库对不对」——
 // 真 D1、主键冲突、跨用户隔离,跟时序无关。测编排行为的那种才翻 Effect + TestClock。
-export const forUser =
-  <I, S extends object>(
-    tag: Context.Tag<I, S>,
-    layer: Layer.Layer<I, never, DbClient | CurrentUser>,
-  ) =>
-  (userId: string, nowMs = NOW): Promisified<S> =>
-    promisified(tag, layer, userId, nowMs);
-
-// 已经挂进聚合 `Database` 的领域用这个:`forDomain((db) => db.tabPins)`。
-// 与 `forUser` 的唯一差别是**怎么拿到服务** —— 那边是「provide 领域自己的 layer 再 yield 它的 Tag」,
-// 这边是「provide 聚合的 layer 再取那个字段」。断言侧看不出区别,这正是搬家要保住的性质。
 export const forDomain =
   <S extends object>(pick: (db: Database) => S) =>
   (userId: string, nowMs = NOW): Promisified<S> =>

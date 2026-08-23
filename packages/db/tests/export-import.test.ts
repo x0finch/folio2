@@ -1,22 +1,17 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
-import { Layer } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { AccountStore, ManualStore, SnapshotStore, TransferStore } from "../src/domains";
 import { tokenRefs, tokens } from "../src/schema";
 import { user } from "../src/schema/auth";
-import { forUser } from "./effect";
+import { forDomain } from "./effect";
 
-const transferOf = forUser(
-  TransferStore,
-  Layer.provide(TransferStore.Default, Layer.merge(SnapshotStore.Default, ManualStore.Default)),
-);
+const transferOf = forDomain((db) => db.transfer);
 
-const manualOf = forUser(ManualStore, ManualStore.Default);
-const snapshotsOf = forUser(SnapshotStore, SnapshotStore.Default);
+const manualOf = forDomain((db) => db.manual);
+const snapshotsOf = forDomain((db) => db.snapshots);
 
-const accounts = forUser(AccountStore, AccountStore.Default);
+const accounts = forDomain((db) => db.accounts);
 
 // 导出/导入 v3 的 db 支持(#204):listTokensForExport(带 ref)、listManualActivityByUser(扁平跨账户),
 // 以及 A 方案的 find-or-create 一族(importToken/importAccount/importSnapshot/
