@@ -19,8 +19,8 @@ export { createAuthAdapter, type DbEnv } from "./connect"; // adapter 不泄露 
 // **「这次请求是谁的」**(ADR 0044):装配点 provide 一次,包内每个 per-user 服务在建自己那一刻
 // 读一次。没有默认值 —— 忘了 provide 是编译错误,不是静默按默认用户去查。
 export { CurrentUser } from "./current-user";
-// **对外的那一张门票**(#504 T1 起):聚合 `Database`,按领域挂包装好的 op。
-// 现在只挂了 `tabPins` —— 其余八个领域还走下面那排各自的 Tag,按域一片片挂进来。
+// **对外的那一张门票**(#504 T1 起,T5 挂满):聚合 `Database`,八个领域全在里头,
+// 按领域取用 —— `(yield* Database).accounts.list()`。
 export { Database } from "./database";
 export type {
   AccountRawCreds,
@@ -51,8 +51,9 @@ export type {
 // 拿到它等于把包装层作废;而这些服务的方法本来就是包装过的 op,出包正是让 app 能把一次请求的
 // 全部数据访问装进同一个 context(#394 T4 起)。
 //
-// **这排 Tag 是过渡形状,只会变少**:某个领域挂进聚合 `Database` 之后,它的 Tag 就没有消费者了,
-// 同片删除(tab-pins 已经这样退场)。
+// **这排 Tag 是纯过渡形状,新代码别用**:八个领域已经全部挂进聚合 `Database`(#504 T5),
+// 这里留着只为那批还没改写的 app 调用点;T7–T12 逐批换成 `yield* Database` 之后整排删除
+// (tab-pins 已经这样退场 —— 它没有 class,只有一个 `makeTabPinStore`)。
 export { AccountStore, listUserIdsWithAccounts } from "./domains/accounts";
 export { ManualStore } from "./domains/manual";
 export { PortfolioStore } from "./domains/portfolios";

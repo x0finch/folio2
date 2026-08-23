@@ -163,19 +163,19 @@ export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
 //   ② 它们在**同一次 `Effect.provide`** 里被建起来 —— Layer memoisation 的作用域是一次构建,
 //      分两次 provide 就是两份,哪怕引用相同。见下面 `requestLayer`。
 //
-// `TransferStore` 的 layer 还要另外两个 store(导快照/导活动调它们的写口),所以先合出 base
-// 再把它 provide 上去。
-const dbStoresFor = (perRequest: Layer.Layer<DbClient | CurrentUser>): Layer.Layer<DbStores> => {
-  const base = Layer.mergeAll(
-    AccountStore.Default,
-    PortfolioStore.Default,
-    SettingsStore.Default,
-    SnapshotStore.Default,
-    ManualStore.Default,
-    TagStore.Default,
+const dbStoresFor = (perRequest: Layer.Layer<DbClient | CurrentUser>): Layer.Layer<DbStores> =>
+  Layer.provide(
+    Layer.mergeAll(
+      AccountStore.Default,
+      PortfolioStore.Default,
+      SettingsStore.Default,
+      SnapshotStore.Default,
+      ManualStore.Default,
+      TagStore.Default,
+      TransferStore.Default,
+    ),
+    perRequest,
   );
-  return Layer.provide(Layer.merge(base, Layer.provide(TransferStore.Default, base)), perRequest);
-};
 
 /**
  * app 数据那半**还没挂进聚合 `Database`** 的领域服务 —— server fn 的 `R` 里出现的就是这些。
