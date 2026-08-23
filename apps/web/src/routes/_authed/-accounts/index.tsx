@@ -21,6 +21,7 @@ import {
 import { accountKeys, portfolioKeys } from "@/lib/queries/keys";
 import { portfolioMembershipsQuery } from "@/lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "@/lib/queries/tags";
+import { useIslandQuery } from "@/lib/queries/use-island-query";
 import { HeaderSync } from "@/routes/_authed/-home/header-sync";
 import { GainSkeleton, ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 import { AccountDetailSheet } from "./account-detail-sheet";
@@ -107,10 +108,10 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
   const tc = useTranslations("Common");
   const { data: accounts } = useSuspenseQuery(accountListQuery());
   const { data: memberships } = useSuspenseQuery(portfolioMembershipsQuery());
-  const holdingsQuery = useQuery(accountHoldingsQuery());
-  const gainQuery = useQuery(accountGain24hQuery());
-  const { data: allTags = [] } = useQuery(tagListQuery());
-  const { data: tagLinks = [] } = useQuery(accountTagLinksQuery());
+  const holdingsQuery = useIslandQuery(useQuery(accountHoldingsQuery()));
+  const gainQuery = useIslandQuery(useQuery(accountGain24hQuery()));
+  const { data: allTags = [] } = useIslandQuery(useQuery(tagListQuery()));
+  const { data: tagLinks = [] } = useIslandQuery(useQuery(accountTagLinksQuery()));
   const holdings = holdingsQuery.data;
   const allRows = useMemo(
     () => buildAccountRows({ accounts, holdings, memberships, allTags, tagLinks }),

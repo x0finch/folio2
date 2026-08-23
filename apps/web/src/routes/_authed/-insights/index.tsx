@@ -14,6 +14,7 @@ import { useTranslations } from "use-intl";
 import { type HistoryPoint, toDailySeries } from "@/lib/core/history";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { portfolioHistoryQuery, portfolioOverviewQuery } from "@/lib/queries/portfolio";
+import { useIslandQuery } from "@/lib/queries/use-island-query";
 import { HeaderSync } from "@/routes/_authed/-home/header-sync";
 import { ALLOC_DIMENSIONS, type AllocDimension, buildAllocation } from "./allocation";
 import { AllocationPie } from "./allocation-pie";
@@ -43,7 +44,9 @@ export function Insights() {
 function TrendCard() {
   const t = useTranslations("Insights");
   const { selectedId } = usePortfolio();
-  const historyQuery = useQuery({ ...portfolioHistoryQuery(selectedId), ...KEEP_TRYING });
+  const historyQuery = useIslandQuery(
+    useQuery({ ...portfolioHistoryQuery(selectedId), ...KEEP_TRYING }),
+  );
   const body =
     historyQuery.data == null ? (
       <Skeleton className={CHART_FRAME} />
@@ -74,7 +77,9 @@ function AllocationCard() {
   const { selectedId } = usePortfolio();
   const { dim } = insightsRoute.useSearch();
   const navigate = insightsRoute.useNavigate();
-  const overviewQuery = useQuery({ ...portfolioOverviewQuery(selectedId), ...KEEP_TRYING });
+  const overviewQuery = useIslandQuery(
+    useQuery({ ...portfolioOverviewQuery(selectedId), ...KEEP_TRYING }),
+  );
   const setDim = (v: AllocDimension) => {
     if (v === dim) return;
     navigate({

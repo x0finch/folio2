@@ -11,6 +11,7 @@ import {
   portfolioGain24hQuery,
   portfolioOverviewQuery,
 } from "@/lib/queries/portfolio";
+import { useIslandQuery } from "@/lib/queries/use-island-query";
 import { type KindTab, kindTabsOf, pinScopeOf } from "@/routes/_authed/-home/home-tabs";
 import { useHomeTabSelection } from "@/routes/_authed/-home/tab/selection";
 import { attachDefiGains, attachHoldingGains } from "./attach-gains";
@@ -72,7 +73,7 @@ export function HoldingsIsland() {
   const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
   const { shownActive } = useHomeTabSelection(strip.pins);
   const { data: portfolioData } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
-  const gainQuery = useQuery(portfolioGain24hQuery(selectedId));
+  const gainQuery = useIslandQuery(useQuery(portfolioGain24hQuery(selectedId)));
   if (!strip.hasAccounts) return null;
 
   const activePin = strip.pins.find((p) => p.id === shownActive) ?? null;
@@ -116,7 +117,7 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
   const t = useTranslations("Overview");
   const tct = useTranslations("CustomTabs");
   const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId, pin));
-  const gainQuery = useQuery(portfolioGain24hQuery(portfolioId, pin));
+  const gainQuery = useIslandQuery(useQuery(portfolioGain24hQuery(portfolioId, pin)));
   const holdings = attachHoldingGains(data.holdings, gainQuery.data, gainQuery.isError);
   const parts = derive(attachDefiGains(data.sections, gainQuery.data, gainQuery.isError));
 
