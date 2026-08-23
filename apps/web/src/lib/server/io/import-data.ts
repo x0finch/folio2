@@ -35,11 +35,6 @@ const depsFrom = (
     Effect.asVoid(transfer.importManualActivity(accountId, tokenId, input).pipe(Effect.orDie)),
 });
 
-export type ImportOutcome =
-  | { kind: "ok"; counts: ImportCounts }
-  | { kind: "rejected"; message: string }
-  | { kind: "failed"; message: string };
-
 export const importData = Effect.fn("importData")(function* (
   reader: ReadableStreamDefaultReader<Uint8Array>,
 ) {
