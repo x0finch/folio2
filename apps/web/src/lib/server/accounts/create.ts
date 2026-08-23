@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
-import { type AccountSafe, AccountStore, type Database, PortfolioStore } from "@folio/db";
+import { type AccountSafe, Database } from "@folio/db";
 import type { Oracle } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
@@ -9,8 +9,6 @@ import { isManual } from "@/lib/core/manual";
 import { credentialSpecs, validateAccountCreds } from "@/lib/server/connectors/registry";
 import { sealCreds } from "@/lib/server/creds";
 import { createManualAccount } from "@/lib/server/manual/store";
-import { runRequest } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 
 // 账户创建的分派逻辑(handler 之外的纯 Effect → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。
 // createAccount server fn(见 ./index)只做装配;auth 薄壳即 handleCreateAccount。SECRETS_KEY 只在此 app 层见,不进 connectors。
@@ -29,9 +27,7 @@ export const createAccountFor = (
   connectorId: ConnectorId,
   label: string,
   rawValues: Record<string, string>,
-  // `Database | Oracle` 是 `createManualAccount` 带进来的(#504 T9 把 manual 那层换了门票);
-  // 这个文件自己那句 `yield* AccountStore` 留到 T8 一起换。
-): Effect.Effect<AccountSafe, Error, AccountStore | Database | Oracle> =>
+): Effect.Effect<AccountSafe, Error, Database | Oracle> =>
   Effect.gen(function* () {
     // 丢掉空串:未填的可选字段缺省即不参与;必填字段留空 → 变 undefined → validateAccountCreds 直接拒。
     const values = Object.fromEntries(Object.entries(rawValues).filter(([, v]) => v !== ""));
@@ -46,9 +42,7 @@ export const createAccountFor = (
       ? createManualAccount(label, values.tokens)
       : Effect.gen(function* () {
           const creds = yield* Effect.promise(() => raw2sealed(connectorId, values));
-          return yield* Effect.flatMap(AccountStore, (s) =>
-            s.create({ connectorId, label, creds }),
-          );
+          return yield* (yield* Database).accounts.create({ connectorId, label, creds });
         });
     log.info("account created", { connectorId, accountId: account.id });
     return account;
@@ -65,28 +59,14 @@ export const CreateAccountInput = z.object({
   portfolioId: z.string().min(1).optional(),
 });
 
-export async function handleCreateAccount({
-  data,
-  context,
-}: {
-  data: z.infer<typeof CreateAccountInput>;
-  context: AuthContext;
-}) {
-  return runRequest(
-    context.userId,
-    Effect.gen(function* () {
-      const account = yield* createAccountFor(
-        data.connectorId as ConnectorId,
-        data.label,
-        data.values,
-      );
-      // createAccountFor 已把账户落进默认 Portfolio;若指定了非默认的选中,改归属过去。
-      if (data.portfolioId) {
-        yield* Effect.flatMap(PortfolioStore, (s) =>
-          s.assignAccount(account.id, data.portfolioId as string),
-        );
-      }
-      return account;
-    }),
-  );
-}
+export const handleCreateAccount = Effect.fn("createAccount")(function* (
+  data: z.infer<typeof CreateAccountInput>,
+) {
+  const account = yield* createAccountFor(data.connectorId as ConnectorId, data.label, data.values);
+  // createAccountFor 已把账户落进默认 Portfolio;若指定了非默认的选中,改归属过去。
+  const portfolioId = data.portfolioId;
+  if (portfolioId) {
+    yield* (yield* Database).portfolios.assignAccount(account.id, portfolioId);
+  }
+  return account;
+});

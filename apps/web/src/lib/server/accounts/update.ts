@@ -1,10 +1,8 @@
-import { AccountStore } from "@folio/db";
+import { Database } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
 import { sealManualAccount } from "@/lib/server/manual/store";
-import { runRequest } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 
 const log = getLogger(["folio", "web", "accounts"]);
 
@@ -21,43 +19,33 @@ const log = getLogger(["folio", "web", "accounts"]);
 //   · 反过来,最坏情况是「已归档但没有照片」—— 正好是这次要消灭的那个状态。
 // 为此**不**在 `@folio/db` 里开跨两张表的合并 op:为一个低频动作在契约层捅个口子,不划算。
 //
-// 封存那一步要用参考层(取现价),所以整段从 `runStore` 换成 `runRequest`。
+// 封存那一步要用参考层(取现价)—— 所以这个 handler 的 `R` 里 `Database` 与 `Oracle` 都在。
 export const UpdateAccountInput = z.object({
   accountId: z.string().min(1),
   label: z.string().trim().min(1, "label is required").optional(),
   archived: z.boolean().optional(),
 });
 
-export async function handleUpdateAccount({
-  data,
-  context,
-}: {
-  data: z.infer<typeof UpdateAccountInput>;
-  context: AuthContext;
-}) {
-  const sealed = await runRequest(
-    context.userId,
-    Effect.gen(function* () {
-      const accounts = yield* AccountStore;
-      if (data.label !== undefined) yield* accounts.rename(data.accountId, data.label);
-      let sealed = false;
-      if (data.archived === true) {
-        // 取的是**还没打标记**的那一行 —— 封存那条路按「未归档」过滤,顺序反了会一无所获。
-        const account = yield* accounts.getById(data.accountId);
-        // **已经归档的不再动它**(review 补):对已归档账户再发一次 `archived: true`,封存那步会
-        // 被「未归档」这道过滤挡掉、什么都不落,而 `setArchived` 却会把 `archivedAt` 重写成当刻 ——
-        // 结果是封存时刻往前跳、数据还停在旧那张:曲线的截断点、抽屉曲线的窗口锚都跟着挪,
-        // 而它们描述的那份数据一点没变。UI 那颗按钮是切换、触发不到这条,但 server fn 收得下。
-        if (account?.archivedAt == null) {
-          if (account) sealed = yield* sealManualAccount(account);
-          yield* accounts.setArchived(data.accountId, true);
-        }
-      } else if (data.archived === false) {
-        yield* accounts.setArchived(data.accountId, false);
-      }
-      return sealed;
-    }),
-  );
+export const handleUpdateAccount = Effect.fn("updateAccount")(function* (
+  data: z.infer<typeof UpdateAccountInput>,
+) {
+  const accounts = (yield* Database).accounts;
+  if (data.label !== undefined) yield* accounts.rename(data.accountId, data.label);
+  let sealed = false;
+  if (data.archived === true) {
+    // 取的是**还没打标记**的那一行 —— 封存那条路按「未归档」过滤,顺序反了会一无所获。
+    const account = yield* accounts.getById(data.accountId);
+    // **已经归档的不再动它**(review 补):对已归档账户再发一次 `archived: true`,封存那步会
+    // 被「未归档」这道过滤挡掉、什么都不落,而 `setArchived` 却会把 `archivedAt` 重写成当刻 ——
+    // 结果是封存时刻往前跳、数据还停在旧那张:曲线的截断点、抽屉曲线的窗口锚都跟着挪,
+    // 而它们描述的那份数据一点没变。UI 那颗按钮是切换、触发不到这条,但 server fn 收得下。
+    if (account?.archivedAt == null) {
+      if (account) sealed = yield* sealManualAccount(account);
+      yield* accounts.setArchived(data.accountId, true);
+    }
+  } else if (data.archived === false) {
+    yield* accounts.setArchived(data.accountId, false);
+  }
   log.info("account updated", {
     accountId: data.accountId,
     renamed: data.label !== undefined,
@@ -65,4 +53,4 @@ export async function handleUpdateAccount({
     sealed,
   });
   return { ok: true as const };
-}
+});

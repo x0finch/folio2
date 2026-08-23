@@ -1,11 +1,9 @@
-import { AccountStore, SnapshotStore } from "@folio/db";
+import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
 import { MANUAL_CONNECTOR_ID } from "@/lib/core/manual";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "@/lib/server/manual/store";
-import { runRequest } from "@/lib/server/oracle";
 import { buildAccountValueHistory } from "@/lib/server/portfolio/history";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 
 // 单账户价值历史(抽屉头部那条小曲线)。
 //
@@ -29,13 +27,12 @@ export const loadAccountHistory = (input: {
   connectorId?: string;
 }) =>
   Effect.gen(function* () {
+    const db = yield* Database;
     if (input.connectorId !== MANUAL_CONNECTOR_ID) {
-      const snapshots = yield* Effect.flatMap(SnapshotStore, (s) =>
-        s.listByAccount(input.accountId),
-      );
+      const snapshots = yield* db.snapshots.listByAccount(input.accountId);
       return { series: buildAccountValueHistory(snapshots, input.since) };
     }
-    const account = yield* Effect.flatMap(AccountStore, (s) => s.getById(input.accountId));
+    const account = yield* db.accounts.getById(input.accountId);
     const archivedAt = account?.archivedAt ?? null;
     const now = archivedAt ?? Date.now();
     // **账本序列与实时末点一次装配**:两者本来就要对齐同一个 now,分两次跑还各建一套 store。
@@ -62,12 +59,8 @@ export const AccountHistoryInput = z.object({
   connectorId: z.string().optional(),
 });
 
-export function handleGetAccountHistory({
-  data,
-  context,
-}: {
-  data: z.infer<typeof AccountHistoryInput>;
-  context: AuthContext;
-}) {
-  return runRequest(context.userId, loadAccountHistory(data));
-}
+export const handleGetAccountHistory = Effect.fn("getAccountHistory")(function* (
+  data: z.infer<typeof AccountHistoryInput>,
+) {
+  return yield* loadAccountHistory(data);
+});
