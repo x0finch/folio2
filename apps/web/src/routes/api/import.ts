@@ -3,7 +3,7 @@ import { Database, type SnapshotBalanceInput } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { credentialSpecs } from "@/lib/server/connectors/registry";
+import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { categorizeFields } from "@/lib/server/creds";
 import {
   createImporter,
@@ -22,10 +22,13 @@ import { resolveAuth } from "@/lib/server/session/auth-session";
 // 经过渡门面调用,而门面每次都建一次 layer + 跑一次 `runPromise` —— 一个几万行的文件就是几万次。
 
 // `Database.transfer` → `ImportDeps`。写口全在服务上,这里只做「文件里的形状 → 库里的形状」那一层翻译。
-const depsFrom = (transfer: Database["transfer"]): ImportDeps => ({
+const depsFrom = (
+  transfer: Database["transfer"],
+  specs: ConnectorRegistry["specs"],
+): ImportDeps => ({
   categorize: (connectorId) => {
     // 从公开字段规格按暴露级别分桶(import 重建 creds 用);不碰 provider 内部。
-    const f = categorizeFields(credentialSpecs()[connectorId as ConnectorId] ?? []);
+    const f = categorizeFields(specs[connectorId as ConnectorId] ?? []);
     return { publicKeys: f.public, semiKeys: f.semi, secretKeys: f.secret };
   },
   importToken: (t, refs) => Effect.map(transfer.importToken(t, refs), (id) => ({ id })),
@@ -82,7 +85,9 @@ export const Route = createFileRoute("/api/import")({
           "importData",
           userId,
           Effect.gen(function* () {
-            const importer = createImporter(depsFrom((yield* Database).transfer));
+            const importer = createImporter(
+              depsFrom((yield* Database).transfer, (yield* ConnectorRegistry).specs),
+            );
             const decoder = new TextDecoder();
             let buffer = "";
             for (;;) {

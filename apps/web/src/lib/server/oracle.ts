@@ -25,6 +25,7 @@ import {
   UPSTREAM_ID,
 } from "@folio/oracle-upstream-coingecko";
 import { Effect, Layer } from "effect";
+import { ConnectorRegistry } from "./connectors/registry";
 import { logTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
 
@@ -200,11 +201,12 @@ const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices> => {
     Layer.provide(Database.Default, perRequest),
     dbStoresFor(perRequest),
     oracleFor(perRequest),
+    ConnectorRegistry.Default,
   );
 };
 
 /** 过渡期的服务面 —— 比 `UserServices` 多一个 `DbStores`,那部分只会变少。 */
-type RequestServices = Database | DbStores | OracleServices | CacheStore;
+type RequestServices = Database | DbStores | OracleServices | CacheStore | ConnectorRegistry;
 
 export const withRequest = <A, E extends AppError>(
   userId: string,

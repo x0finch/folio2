@@ -1,8 +1,9 @@
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { validateAccountCreds } from "@/lib/server/connectors/registry";
+import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 
 // 添加账户的探活。走 workers-pool 是因为 connector-registry 引 `cloudflare:workers` 的 env
-// (PC 注入要读它)。打桩打在**全局 fetch** 上,测的是真实那条路(表单 → validateAccountCreds
+// (PC 注入要读它)。打桩打在**全局 fetch** 上,测的是真实那条路(表单 → ConnectorRegistry.validate
 // → provider → 出网),不是一个假 provider。用 evm connector(默认 provider 是 rabby,不要 key)。
 //
 // **契约已落地(#240):** `validateAccount` 把两类失败分开 —— 凭据被拒(401/403)成功返回 `false`;
@@ -13,6 +14,15 @@ import { validateAccountCreds } from "@/lib/server/connectors/registry";
 // **这几条断言一个字没改** —— 那正是「换实现不换行为」的证据。
 
 const ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+
+// 探活现在是门票上的一个方法(#504 T14),所以这里补一句装配 + 发动。**断言一个字没改** ——
+// 它测的是重试行为,而那件事跟「怎么拿到这个能力」无关。
+const validateAccountCreds = (...args: Parameters<ConnectorRegistry["validate"]>): Promise<void> =>
+  Effect.runPromise(
+    Effect.flatMap(ConnectorRegistry, (r) => r.validate(...args)).pipe(
+      Effect.provide(ConnectorRegistry.Default),
+    ),
+  );
 
 afterEach(() => vi.restoreAllMocks());
 

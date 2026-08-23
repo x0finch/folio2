@@ -2,6 +2,7 @@ import { Database } from "@folio/db";
 import type { OracleServices } from "@folio/oracle";
 import type { CacheStore } from "@folio/oracle-basic/ports";
 import { Effect, Layer } from "effect";
+import { ConnectorRegistry } from "./connectors/registry";
 import { logTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
 import { oracleFor, perRequestLayer } from "./oracle";
@@ -28,7 +29,13 @@ import { oracleFor, perRequestLayer } from "./oracle";
  */
 export const userLayer = (userId: string): Layer.Layer<UserServices> => {
   const perRequest = perRequestLayer(userId);
-  return Layer.mergeAll(Layer.provide(Database.Default, perRequest), oracleFor(perRequest));
+  return Layer.mergeAll(
+    Layer.provide(Database.Default, perRequest),
+    oracleFor(perRequest),
+    // connector 那张门票**不带 userId**(它答的是「这个部署支持哪些上游、字段长什么样」),
+    // 所以它不进 `perRequest`,只是一并挂在这次请求的 context 上(#504 T14)。
+    ConnectorRegistry.Default,
+  );
 };
 
 /**
@@ -39,8 +46,11 @@ export const userLayer = (userId: string): Layer.Layer<UserServices> => {
  * 不属于参考层,但要一个 per-user 的键值缓存。另外三个(`TokenStore` / `TokenPriceStore` /
  * `GlobalTokenRefIndexStore`)app 一处都没直接碰,却曾经一样露在外面 —— 那等于给任何 handler
  * 留了一条绕过参考层直接改代币行和价格行的路。
+ *
+ * `ConnectorRegistry` 是第三张门票(#504 T14):它答的是「这个部署支持哪些上游、字段长什么样、
+ * 这份凭据活不活」,与 userId 无关,但取用方式与另外两张一致。
  */
-export type UserServices = Database | OracleServices | CacheStore;
+export type UserServices = Database | OracleServices | CacheStore | ConnectorRegistry;
 
 /**
  * **一个用户的活儿,装配好了但还没跑。**

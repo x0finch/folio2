@@ -1,6 +1,6 @@
 import { Database, type SnapshotBalance } from "@folio/db";
 import { Effect, Option, Stream } from "effect";
-import { credentialSpecs } from "@/lib/server/connectors/registry";
+import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { safeView } from "@/lib/server/creds";
 import {
   accountRecord,
@@ -29,10 +29,14 @@ const encoder = new TextEncoder();
 //
 // **服务在建流之前就解析好**(闭包里的 `transfer` / `accounts` / …),所以流本身的 `R` 是 `never`,
 // `toReadableStream` 才收得下。这正是 CODING.md 那条「把已解析好的服务对象当参数传给内部函数」。
-export const exportStream = (): Effect.Effect<ReadableStream<Uint8Array>, never, Database> =>
+export const exportStream = (): Effect.Effect<
+  ReadableStream<Uint8Array>,
+  never,
+  ConnectorRegistry | Database
+> =>
   Effect.gen(function* () {
     const { transfer, accounts, snapshots, manual } = yield* Database;
-    const specsByType = credentialSpecs();
+    const specsByType = (yield* ConnectorRegistry).specs;
 
     const meta = Stream.make(metaRecord(Date.now())); // 首行:版本号等
 
