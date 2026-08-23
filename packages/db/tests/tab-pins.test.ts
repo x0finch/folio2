@@ -2,23 +2,16 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import {
-  AccountStore,
-  accountStoreLayer,
-  PortfolioStore,
-  portfolioStoreLayer,
-  TagStore,
-  tagStoreLayer,
-} from "../src/queries";
+import { AccountStore, PortfolioStore, TagStore } from "../src/queries";
 import { user } from "../src/schema/auth";
 import { forDomain, forUser } from "./effect";
 
 // tab-pins 已经挂进聚合 `Database`(#504 T1),所以把手从聚合取字段;**断言一行没动**。
 const tabPinsOf = forDomain((db) => db.tabPins);
-const tagsOf = forUser(TagStore, tagStoreLayer);
+const tagsOf = forUser(TagStore, TagStore.Default);
 
-const accounts = forUser(AccountStore, accountStoreLayer);
-const portfolios = forUser(PortfolioStore, portfolioStoreLayer);
+const accounts = forUser(AccountStore, AccountStore.Default);
+const portfolios = forUser(PortfolioStore, PortfolioStore.Default);
 
 // 自定义 Tab pin 地基(ADR 0034)对着真 D1 跑:≤3 上限 / tag pin FK cascade / connector pin 无 FK 存活 /
 // owner 断言都真生效。不隔离每测存储 → beforeEach 重置用户。

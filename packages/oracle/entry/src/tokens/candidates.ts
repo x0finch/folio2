@@ -1,7 +1,7 @@
 import type { TokenCandidate, TokenMetaUpstream } from "@folio/oracle-basic";
 import { DEFAULT_TOP_N, normalizeSymbol } from "@folio/oracle-basic";
 import { CacheStore, TokenUpstream } from "@folio/oracle-basic/ports";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { type WarmRow, warmBlob } from "./warm";
 
 // mint 的 symbol 那一档要问的候选源(#216)。**包内的一个 Tag** —— 它从不出包:
@@ -17,12 +17,6 @@ import { type WarmRow, warmBlob } from "./warm";
 //
 // **做不到「类型上禁绝出网」** —— 冷缓存那一次躲不掉(候选集为空 = 所有按 symbol 认的币
 // 集体认不出来)。能做到的是把唯一那条出网路径收在这一个服务里,谁 provide 谁看得见。
-export interface CandidateSource {
-  bySymbol(symbol: string): Effect.Effect<TokenCandidate[]>;
-}
-
-export const CandidateSource = Context.GenericTag<CandidateSource>("oracle/CandidateSource");
-
 // —— warm blob 的第三个读者(另两个在 ./catalogue)——
 // 三条判据为什么不同、为什么都落在 blob 自己的 `asOf` 上,见 ./warm 的开头。
 
@@ -53,18 +47,19 @@ export function candidatesBySymbol(rows: readonly WarmRow[], symbol: string): To
   return out;
 }
 
-export const candidateSourceLayer: Layer.Layer<CandidateSource, never, CacheStore | TokenUpstream> =
-  Layer.effect(
-    CandidateSource,
-    Effect.gen(function* () {
-      const cache = yield* CacheStore;
-      // **唯一的出网口**,且只在缓存完全为空时被调用(见 `warmCatalogue`)。
-      const coldStart = yield* TokenUpstream;
-      return {
-        bySymbol: (symbol) =>
-          Effect.map(warmCatalogue(cache, coldStart, DEFAULT_TOP_N), (rows) =>
-            candidatesBySymbol(rows, symbol),
-          ),
-      };
-    }),
-  );
+// 服务的形状从 `effect` 的返回值推导,`.Default` 就是它的 layer —— 不再手写
+// interface + Tag + layer 三件套(#501)。顶掉它靠 `Layer.succeed(CandidateSource, new CandidateSource(…))`,
+// 仍然是同一条构造路。
+export class CandidateSource extends Effect.Service<CandidateSource>()("oracle/CandidateSource", {
+  effect: Effect.gen(function* () {
+    const cache = yield* CacheStore;
+    // **唯一的出网口**,且只在缓存完全为空时被调用(见 `warmCatalogue`)。
+    const coldStart = yield* TokenUpstream;
+    return {
+      bySymbol: (symbol: string): Effect.Effect<TokenCandidate[]> =>
+        Effect.map(warmCatalogue(cache, coldStart, DEFAULT_TOP_N), (rows) =>
+          candidatesBySymbol(rows, symbol),
+        ),
+    };
+  }),
+}) {}

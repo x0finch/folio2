@@ -6,7 +6,7 @@ import {
   TokenStore,
   TokenUpstream,
 } from "@folio/oracle-basic/ports";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { CandidateSource } from "./candidates";
 import { makeCatalogue, type TokenCatalogue } from "./catalogue";
 import { makeHistory, type TokenHistory } from "./history";
@@ -14,7 +14,7 @@ import { type MintInput, makeMinting, type TokenMinting } from "./mint";
 import { makePricing, makeReading, type TokenPricing, type TokenReading } from "./price";
 import { makeStaleRefresh, type RefreshStaleReport, type TokenStaleRefresh } from "./stale";
 
-// 代币这个领域的门面 —— **一个服务,五片实现**。本文件只有三样东西:拼出来的接口、Tag、装配。
+// 代币这个领域的门面 —— **一个服务,五片实现**。本文件只有两样东西:拼出来的形状、服务本身。
 //
 // **为什么是一个服务。** 以前是两个(`TokenReader` / `TokenMinter`),按「读路径 / 写路径」分,
 // 而那条线名不副实:「读」那半自己就在写(刷价与元信息、落历史日价、重写橱窗 blob)。
@@ -38,17 +38,17 @@ import { makeStaleRefresh, type RefreshStaleReport, type TokenStaleRefresh } fro
 // 也在用,于是它们得从代币这个文件夹里 import 一个跟代币无关的东西。曾经独占 `internal/`,
 // 但那个目录里大半只有代币在用。哪天用法开始分化,再提回共用位置。
 //
-// **接口用 `extends` 拼**而不是在这里重抄一遍签名:每个方法的文档跟着它的实现走,
-// 改实现的人一定看得见它,而抄一遍的那份迟早与实现对不上。
-export interface TokenService
+// **形状用 `extends` 拼**而不是在这里重抄一遍签名:每个方法的文档跟着它的实现走,
+// 改实现的人一定看得见它,而抄一遍的那份迟早与实现对不上。服务本身是个 class
+// (`Effect.Service`,#501),它的类型由下面 `make` 的返回值定 —— `TokenServiceShape` 只是给
+// 那个返回值一个可校验的名字,不出这个文件,也不是第二份签名复述。
+interface TokenServiceShape
   extends TokenMinting,
     TokenReading,
     TokenPricing,
     TokenHistory,
     TokenStaleRefresh,
     TokenCatalogue {}
-
-export const TokenService = Context.GenericTag<TokenService>("oracle/TokenService");
 
 export type { MintInput, RefreshStaleReport };
 
@@ -84,20 +84,12 @@ const make = Effect.gen(function* () {
     ...makeHistory(store, prices, upstream),
     ...makeStaleRefresh(store, prices, upstream),
     ...makeCatalogue(cache, upstream),
-  } satisfies TokenService;
+  } satisfies TokenServiceShape;
 });
 
-// `CandidateSource` 留在这条 `R` 上,由 `../oracle` 在装配时喂进来并**吃掉** —— 于是装配点
-// 的 `R` 里看不到它(它是包内 Tag,从不出包),而顶掉它仍然只需换一个 layer,不必另开一条
-// 构造路(见 `./candidates` 里那段「注入缝」)。
-export const tokenServiceLayer: Layer.Layer<
-  TokenService,
-  never,
-  | TokenStore
-  | TokenPriceStore
-  | CacheStore
-  | TokenUpstream
-  | GlobalTokenRefIndexStore
-  | Namer
-  | CandidateSource
-> = Layer.effect(TokenService, make);
+// `CandidateSource` 留在 `TokenService.Default` 的 `R` 上,由 `../oracle` 在装配时喂进来并
+// **吃掉** —— 于是装配点的 `R` 里看不到它(它是包内 Tag,从不出包),而顶掉它仍然只需换一个
+// layer,不必另开一条构造路(见 `./candidates` 里那段「注入缝」)。
+export class TokenService extends Effect.Service<TokenService>()("oracle/TokenService", {
+  effect: make,
+}) {}

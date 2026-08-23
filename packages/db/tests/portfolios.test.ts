@@ -5,26 +5,23 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 import {
   AccountStore,
-  accountStoreLayer,
-  manualStoreLayer,
+  ManualStore,
   PortfolioStore,
-  portfolioStoreLayer,
-  snapshotStoreLayer,
+  SnapshotStore,
   TransferStore,
-  transferStoreLayer,
 } from "../src/queries";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
 
 const transferOf = forUser(TransferStore, (uid: string) =>
   Layer.provide(
-    transferStoreLayer(uid),
-    Layer.merge(snapshotStoreLayer(uid), manualStoreLayer(uid)),
+    TransferStore.Default(uid),
+    Layer.merge(SnapshotStore.Default(uid), ManualStore.Default(uid)),
   ),
 );
 
-const accounts = forUser(AccountStore, accountStoreLayer);
-const portfolios = forUser(PortfolioStore, portfolioStoreLayer);
+const accounts = forUser(AccountStore, AccountStore.Default);
+const portfolios = forUser(PortfolioStore, PortfolioStore.Default);
 
 // Portfolio 地基(ADR 0033)对着真 D1 跑:唯一约束 / 部分索引 / cascade / batch 都真生效。
 // 不隔离每测存储 → beforeEach 重置用户(级联清 portfolios/portfolio_accounts)。

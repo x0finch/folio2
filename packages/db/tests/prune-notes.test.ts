@@ -3,7 +3,7 @@ import type { Note } from "@folio/connectors-basic";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { AccountStore, accountStoreLayer, SnapshotStore, snapshotStoreLayer } from "../src/queries";
+import { AccountStore, SnapshotStore } from "../src/queries";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
 
@@ -14,8 +14,8 @@ import { forUser } from "./effect";
 // 跟「本来就没有 note」长得一模一样。只有直接去数行数才分得清「真剪了」和「白改一场」。
 //
 // 编排那一层(逐用户、窗口怎么算)在 `apps/web/tests/server/prune-notes-all-users.test.ts`。
-const snapshotsOf = forUser(SnapshotStore, snapshotStoreLayer);
-const accountsOf = forUser(AccountStore, accountStoreLayer);
+const snapshotsOf = forUser(SnapshotStore, SnapshotStore.Default);
+const accountsOf = forUser(AccountStore, AccountStore.Default);
 
 const USER = "user-prune";
 const OTHER = "user-prune-other";

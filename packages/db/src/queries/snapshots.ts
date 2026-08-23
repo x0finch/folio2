@@ -13,7 +13,7 @@ import {
   max,
   sql,
 } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import type { Drizzle } from "../connect";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
@@ -22,7 +22,7 @@ import { assertAccountOwned } from "./ownership";
 
 // 快照 —— 一次同步落下的余额切片,以及总额 / 历史 / 分页那几条读路。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):由 `snapshotStoreLayer(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):由 `SnapshotStore.Default(userId)` 在装配那一刻吃掉。
 
 // D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 现在每行 10 列 → 每块 8 行(80 个,限内)。
 // **加列必须回来改这个数**:列数 × 块行数不得超 100,否则 "too many SQL variables",只在持仓多的账户上炸。
@@ -104,73 +104,35 @@ export interface SnapshotBalanceHistoryRow {
   metaJson: string | null;
 }
 
-export interface SnapshotStore {
-  /**
-   * 一次原子写 snapshot + balances(D1 用 db.batch,无交互式事务)。返回 snapshotId。
-   *
-   * `collapseSameHour`(#461):同账户、同一个**钟点**里已经有快照 → 连它的余额行一起删掉再写,
-   * 一个钟点只留最后一份。默认 **false = 照旧追加**。
-   *
-   * **为什么要有这件事**:写入侧对同步频率没有任何限制(手点 20 次就落 20 份 + 20 × 持币数 行),
-   * 而读侧的 `downsampleSeries` 最细的桶就是一小时、每桶只取最后一个点 —— 同钟点内那些份在趋势图上
-   * **一份都看不到**。存了却画不出来。这条给「目前没有上限的事」加上上限:每账户每小时至多一份。
-   * 自动同步已经是每小时一次(#446),对它是空操作。
-   *
-   * **为什么默认关**:这个开关的判据是「这次写的是**此刻的状态**(可以被同钟点更晚的一次取代),
-   * 还是**一份历史事实**(必须原样留着)」。同步是前者;**导入是后者** —— 而导入
-   * (`TransferStore.importSnapshot`)正是转手调的这个方法。默认开就意味着「恢复自己的备份」会
-   * 静默丢掉同一小时里的历史快照。两种默认里,忘了开只是少省点空间,忘了关是丢数据。
-   *
-   * **代价不是零**:24h 盈亏(ADR 0040)不走降采样,它按每个观测点切段做 TWR —— 折叠会让切段变粗。
-   * 小时级仍足够分辨充提与行情,再粗就会动到基准查找的 ±2h 容差(#455)。所以桶宽只到一小时。
-   */
-  readonly write: (
-    accountId: string,
-    input: WriteSnapshotInput,
-    opts?: { collapseSameHour?: boolean },
-  ) => Effect.Effect<string>;
-  readonly listByAccount: (accountId: string) => Effect.Effect<Snapshot[]>;
-  /** 历史曲线数据源:全部快照的 (accountId, takenAt, totalUsd),按 takenAt 升序。 */
-  readonly listTotals: () => Effect.Effect<SnapshotTotal[]>;
-  /** 全历史余额(跨所有快照):单币价值历史用。可选 since(epoch ms)裁窗口。 */
-  readonly listBalanceHistory: (since?: number) => Effect.Effect<SnapshotBalanceHistoryRow[]>;
-  /** 每个账户的最新快照 + 其余额(总览数据源)。 */
-  readonly latest: () => Effect.Effect<SnapshotWithBalances[]>;
-  /** 导出用:分页取全部快照(按 takenAt,id 稳定排序)。 */
-  readonly listPage: (limit: number, offset: number) => Effect.Effect<Snapshot[]>;
-  /**
-   * 取指定快照的余额。调用方须保证 ids 数量 ≤ 分页大小(< D1 100 绑定参数上限)。
-   *
-   * **它不收 userId**(全服务只有这一个这样)。仍然放进 per-user 服务是有判据的(ADR 0037):
-   * 它只在 per-user 上下文里被调(上一步的 `listPage` 已经按 userId 限定过),装进来比今天
-   * 靠调用方口头保证更清楚。
-   */
-  readonly balancesFor: (snapshotIds: string[]) => Effect.Effect<SnapshotBalance[]>;
-  /**
-   * 清掉过旧快照上的展示 note(#456),返回清掉的行数。`olderThan` 是 epoch ms 的下界。
-   *
-   * **为什么只清 note、不清 `meta_json`**:词汇表那条分野就是判据 —— note 是「仅供展示、无共享
-   * 逻辑读」,而 meta 是「共享逻辑会结构化读」的 typed 层(24h 盈亏从它取 DeFi 协议名、
-   * `balance-kind` 从老 perp 行取 role 判 kind)。清 meta 会让历史算错,不只是少显示点东西。
-   *
-   * **每账户最新那张永不清**:界面读的就是它(`latest()`)。窗口通常盖不到最新快照,但停了同步的
-   * 账户(已归档 / 凭据失效)会整个落在窗口外 —— 那时按时间清会把它唯一那份 note 也清掉,抽屉里
-   * 就空了。判据写成「存在更新的同账户快照」,不是「取每账户 max(taken_at) 再排除」。
-   */
-  readonly pruneNotes: (olderThan: number) => Effect.Effect<{
-    snapshots: number;
-    balances: number;
-  }>;
-}
-
-export const SnapshotStore = Context.GenericTag<SnapshotStore>("db/SnapshotStore");
-
 const make = (userId: string) =>
   Effect.gen(function* () {
     const database = yield* DbClient;
 
-    const store: SnapshotStore = {
-      write: (accountId, input, opts) =>
+    return {
+      /**
+       * 一次原子写 snapshot + balances(D1 用 db.batch,无交互式事务)。返回 snapshotId。
+       *
+       * `collapseSameHour`(#461):同账户、同一个**钟点**里已经有快照 → 连它的余额行一起删掉再写,
+       * 一个钟点只留最后一份。默认 **false = 照旧追加**。
+       *
+       * **为什么要有这件事**:写入侧对同步频率没有任何限制(手点 20 次就落 20 份 + 20 × 持币数 行),
+       * 而读侧的 `downsampleSeries` 最细的桶就是一小时、每桶只取最后一个点 —— 同钟点内那些份在趋势图上
+       * **一份都看不到**。存了却画不出来。这条给「目前没有上限的事」加上上限:每账户每小时至多一份。
+       * 自动同步已经是每小时一次(#446),对它是空操作。
+       *
+       * **为什么默认关**:这个开关的判据是「这次写的是**此刻的状态**(可以被同钟点更晚的一次取代),
+       * 还是**一份历史事实**(必须原样留着)」。同步是前者;**导入是后者** —— 而导入
+       * (`TransferStore.importSnapshot`)正是转手调的这个方法。默认开就意味着「恢复自己的备份」会
+       * 静默丢掉同一小时里的历史快照。两种默认里,忘了开只是少省点空间,忘了关是丢数据。
+       *
+       * **代价不是零**:24h 盈亏(ADR 0040)不走降采样,它按每个观测点切段做 TWR —— 折叠会让切段变粗。
+       * 小时级仍足够分辨充提与行情,再粗就会动到基准查找的 ±2h 容差(#455)。所以桶宽只到一小时。
+       */
+      write: (
+        accountId: string,
+        input: WriteSnapshotInput,
+        opts?: { collapseSameHour?: boolean },
+      ): Effect.Effect<string> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           const snapshotId = crypto.randomUUID();
@@ -235,7 +197,7 @@ const make = (userId: string) =>
           return snapshotId;
         }),
 
-      listByAccount: (accountId) =>
+      listByAccount: (accountId: string): Effect.Effect<Snapshot[]> =>
         Effect.gen(function* () {
           yield* database.query((db) => assertAccountOwned(db, userId, accountId));
           return yield* database.query((db) =>
@@ -247,9 +209,10 @@ const make = (userId: string) =>
           );
         }),
 
+      /** 历史曲线数据源:全部快照的 (accountId, takenAt, totalUsd),按 takenAt 升序。 */
       // 只取这三列、不取 balances(比 `latest` 轻);组合净值时间序列在纯函数里
       // 阶梯式重建(见 apps/web buildPortfolioHistory)。
-      listTotals: () =>
+      listTotals: (): Effect.Effect<SnapshotTotal[]> =>
         database.query((db) =>
           db
             .select({
@@ -263,10 +226,11 @@ const make = (userId: string) =>
             .orderBy(asc(snapshots.takenAt)),
         ),
 
+      /** 全历史余额(跨所有快照):单币价值历史用。可选 since(epoch ms)裁窗口。 */
       // app 侧按代币身份归属 + 阶梯式重建(见 apps/web buildTokenValueHistory)。每行带其快照的
       // accountId/takenAt + 该余额的冻结口径列。snapshot_balances 仅按 snapshotId 建索引 → 跨快照全扫;
       // 自托管单用户量级可接受(见 #121 备注),量大再议加 (account_id, taken_at) 复合索引。
-      listBalanceHistory: (since) =>
+      listBalanceHistory: (since?: number): Effect.Effect<SnapshotBalanceHistoryRow[]> =>
         database.query((db) =>
           db
             .select({
@@ -290,8 +254,9 @@ const make = (userId: string) =>
             .orderBy(asc(snapshots.takenAt)),
         ),
 
+      /** 每个账户的最新快照 + 其余额(总览数据源)。 */
       // 常数次查询(与账户数无关):① 每账户最新快照整行 ② 这些快照的全部余额,再 JS 分组。
-      latest: () =>
+      latest: (): Effect.Effect<SnapshotWithBalances[]> =>
         Effect.gen(function* () {
           // ① 取每账户最新快照整行(1 查询);无快照的账户自然不出现。
           // 子查询:该用户每个账户的最新 takenAt(经 snapshots ⨝ accounts 用 userId 限定)。
@@ -357,9 +322,10 @@ const make = (userId: string) =>
           }));
         }),
 
+      /** 导出用:分页取全部快照(按 takenAt,id 稳定排序)。 */
       // 配合 `balancesFor` 一页页流式读出,内存恒定;每页配 inArray(≤ 页大小)取余额,
       // 避开 D1 100 绑定参数上限。
-      listPage: (limit, offset) =>
+      listPage: (limit: number, offset: number): Effect.Effect<Snapshot[]> =>
         database.query((db) =>
           db
             .select(getTableColumns(snapshots))
@@ -371,8 +337,15 @@ const make = (userId: string) =>
             .offset(offset),
         ),
 
+      /**
+       * 取指定快照的余额。调用方须保证 ids 数量 ≤ 分页大小(< D1 100 绑定参数上限)。
+       *
+       * **它不收 userId**(全服务只有这一个这样)。仍然放进 per-user 服务是有判据的(ADR 0037):
+       * 它只在 per-user 上下文里被调(上一步的 `listPage` 已经按 userId 限定过),装进来比今天
+       * 靠调用方口头保证更清楚。
+       */
       // 导出(#204)按 token_id 走(v3),不再需要 symbol,故这里不再 join tokens。
-      balancesFor: (snapshotIds) =>
+      balancesFor: (snapshotIds: string[]): Effect.Effect<SnapshotBalance[]> =>
         snapshotIds.length === 0
           ? Effect.succeed([])
           : database.query((db) =>
@@ -382,7 +355,18 @@ const make = (userId: string) =>
                 .where(inArray(snapshotBalances.snapshotId, snapshotIds)),
             ),
 
-      pruneNotes: (olderThan) =>
+      /**
+       * 清掉过旧快照上的展示 note(#456),返回清掉的行数。`olderThan` 是 epoch ms 的下界。
+       *
+       * **为什么只清 note、不清 `meta_json`**:词汇表那条分野就是判据 —— note 是「仅供展示、无共享
+       * 逻辑读」,而 meta 是「共享逻辑会结构化读」的 typed 层(24h 盈亏从它取 DeFi 协议名、
+       * `balance-kind` 从老 perp 行取 role 判 kind)。清 meta 会让历史算错,不只是少显示点东西。
+       *
+       * **每账户最新那张永不清**:界面读的就是它(`latest()`)。窗口通常盖不到最新快照,但停了同步的
+       * 账户(已归档 / 凭据失效)会整个落在窗口外 —— 那时按时间清会把它唯一那份 note 也清掉,抽屉里
+       * 就空了。判据写成「存在更新的同账户快照」,不是「取每账户 max(taken_at) 再排除」。
+       */
+      pruneNotes: (olderThan: number): Effect.Effect<{ snapshots: number; balances: number }> =>
         Effect.gen(function* () {
           // 「不是本账户最新那张」= 存在同账户、更晚的快照。写成 EXISTS 而不是「先取每账户
           // max(taken_at) 再排除」:后者要么多一趟查询,要么在 UPDATE 里嵌一个 GROUP BY 子查询,
@@ -443,9 +427,8 @@ const make = (userId: string) =>
           return { snapshots: snapCount?.n ?? 0, balances: balCount?.n ?? 0 };
         }),
     };
-
-    return store;
   });
 
-export const snapshotStoreLayer = (userId: string): Layer.Layer<SnapshotStore, never, DbClient> =>
-  Layer.effect(SnapshotStore, make(userId));
+export class SnapshotStore extends Effect.Service<SnapshotStore>()("db/SnapshotStore", {
+  effect: make,
+}) {}

@@ -4,15 +4,15 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 // 包内白盒:query 实现从内部模块直接引(公开面只出 createDb 门面,见 encapsulation.test)。
-import { AccountStore, accountStoreLayer, ManualStore, manualStoreLayer } from "../src/queries";
+import { AccountStore, ManualStore } from "../src/queries";
 import { manualActivity, tokens as tokensTable } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { userTokenStoreLayer } from "../src/stores/token";
 import { forUser, promisified } from "./effect";
 
-const manualOf = forUser(ManualStore, manualStoreLayer);
+const manualOf = forUser(ManualStore, ManualStore.Default);
 
-const accounts = forUser(AccountStore, accountStoreLayer);
+const accounts = forUser(AccountStore, AccountStore.Default);
 
 // #203 起手记的币**就是 `tokens` 里的一行** —— 没有 manual_token 那张表了。
 // 于是「这个账户持有哪些币」由它账本里出现过的 token 决定,而不是另存一份账户↔币的关系。

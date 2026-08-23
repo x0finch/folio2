@@ -27,12 +27,12 @@ import type {
 import * as Ports from "@folio/oracle-basic/ports";
 import { parseTokenRef } from "@folio/oracle-ref";
 import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
-import type { GlobalRefIndexService, OraclePorts, OracleServices } from "../src";
-import { globalRefIndexServiceLayer, oracleLayer } from "../src";
-import { fxServiceLayer } from "../src/fx";
-import { platformServiceLayer } from "../src/platforms";
-import { tokenServiceLayer } from "../src/tokens";
-import { CandidateSource, candidateSourceLayer } from "../src/tokens/candidates";
+import type { OraclePorts, OracleServices } from "../src";
+import { GlobalRefIndexService, oracleLayer } from "../src";
+import { FxService } from "../src/fx";
+import { PlatformService } from "../src/platforms";
+import { TokenService } from "../src/tokens";
+import { CandidateSource } from "../src/tokens/candidates";
 
 // 内存假实现 + **一份共用的测试装配**(下面的 `harness`)—— 各片的测试都注这一套。
 //
@@ -590,20 +590,20 @@ export function harness(opts: HarnessOpts = {}): Harness {
   );
   // `provideMerge` 而不是 `provide`:端口也一并透出去,于是用例既能拿服务、也能直接拿假端口
   // (`readPlatforms(h.cache, …)` 那类内部件的单测就是直接用假端口的)。
-  // `candidateSourceLayer` 也透出来:它在 `oracleLayer` 里已被 `TokenService` 吃掉(装配点看不到
+  // `CandidateSource.Default` 也透出来:它在 `oracleLayer` 里已被 `TokenService` 吃掉(装配点看不到
   // 它),但它自己有一组测试(「写路径到底会不会出网」),那组要能直接拿到这个服务。
   // 默认就用生产那个 `oracleLayer`(整体装配也因此被每个用例覆盖到)。只有当用例要顶掉候选源时
   // 才手工拼一遍三个服务 —— `oracleLayer` 已经把 `CandidateSource` 吃进去了(那是设计:装配点
   // 不该看见它),从外面 merge 一个同 Tag 的 layer 谁赢是含糊的,所以这一档明写。
   const services = opts.candidates
     ? Layer.mergeAll(
-        Layer.provide(tokenServiceLayer, Layer.succeed(CandidateSource, opts.candidates)),
-        fxServiceLayer,
-        platformServiceLayer,
-        globalRefIndexServiceLayer,
+        Layer.provide(TokenService.Default, Layer.succeed(CandidateSource, opts.candidates)),
+        FxService.Default,
+        PlatformService.Default,
+        GlobalRefIndexService.Default,
         Layer.succeed(CandidateSource, opts.candidates),
       )
-    : Layer.mergeAll(oracleLayer, candidateSourceLayer, globalRefIndexServiceLayer);
+    : Layer.mergeAll(oracleLayer, CandidateSource.Default, GlobalRefIndexService.Default);
   const everything = Layer.provideMerge(services, ports);
 
   return {
