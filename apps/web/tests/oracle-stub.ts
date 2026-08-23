@@ -1,22 +1,23 @@
-import { FxService, Oracle, PlatformService, TokenService } from "@folio/oracle";
+import { Oracle } from "@folio/oracle";
 import { Effect, Layer, Option, TestClock, TestContext } from "effect";
 
 // **app 侧服务端逻辑的一份共用测试装配。**
 //
-// 参考层从 #362 第 4 站起是 Effect 服务(`TokenService` / `FxService` / `PlatformService`),
-// 所以「注一个假 tokens 进去」变成了「provide 一个假 layer」。抄一遍 `Effect.provide(...)` 尾巴
-// 的事只做一次(CODING.md:测试装配收成一份共用工具,抄九遍的东西每份都会慢慢长歪)。
+// 参考层是 Effect 服务(#362 第 4 站),所以「注一个假 tokens 进去」变成了「provide 一个假
+// layer」。抄一遍 `Effect.provide(...)` 尾巴的事只做一次(CODING.md:测试装配收成一份共用工具,
+// 抄九遍的东西每份都会慢慢长歪)。
 //
-// **三个桩,不是五个** —— 参考层的服务从五个收成三个(读写合成 `TokenService`、现汇率与历史
-// 汇率合成 `FxService`)。能力一个没少,只是不必再为「只用得到现汇率」的用例喂一份历史汇率的
-// 空桩:那两半现在是同一个 `emptyFx` 的两个字段。
+// **打的是聚合 `Oracle`,不是三个域服务**(#504 T13:那三个 Tag 不再出包)。被测代码只认得
+// 这一张门票,桩自然也只需要造这一张 —— 三个字段就是它的全部面。
 //
 // 各方法的缺省实现是**空**(空 Map / `none` / 0):用例只写它关心的那几个,别的动了就该红。
 //
-// 三个桩都走服务自己的构造器(`new TokenService(…)`)—— 它们是 `Effect.Service` class(#501),
-// 裸对象少一个 `_tag`,而且从构造器建出来的和生产那条路建出来的是同一种东西。
+// **三个空桩各自按真接口标注,只减掉 `_tag`。** 那个字段是 `Effect.Service` 给 Tag 机制用的
+// 品牌,嵌在聚合的字段上时运行时没人读它;而标注留着的那半才是要紧的 —— 桩的每个方法签名
+// 仍然被逐个对着真服务检查(实测:把一个方法的返回类型改错,这里当场红)。
+type StubOf<S> = Omit<S, "_tag">;
 
-const emptyTokens = new TokenService({
+const emptyTokens: StubOf<Oracle["tokens"]> = {
   mint: () => Effect.succeed(new Map()),
   enrich: () => Effect.succeed(new Map()),
   logoUrlById: () => Effect.succeed(Option.none()),
@@ -29,42 +30,41 @@ const emptyTokens = new TokenService({
   topTokens: () => Effect.succeed([]),
   search: () => Effect.succeed([]),
   refreshCatalogue: () => Effect.succeed(0),
-});
+};
 
-const emptyFx = new FxService({
+const emptyFx: StubOf<Oracle["fx"]> = {
   resolve: () => Effect.succeed(Option.none()),
   warm: () => Effect.void,
   rateSeries: () => Effect.succeed([]),
-});
+};
 
-const emptyPlatforms = new PlatformService({
+const emptyPlatforms: StubOf<Oracle["platforms"]> = {
   resolve: (keys) => Effect.succeed(new Map([...keys].map((key) => [key, { key, name: key }]))),
   warm: () => Effect.void,
-});
+};
 
 export interface OracleStub {
-  tokens?: Partial<TokenService>;
-  fx?: Partial<FxService>;
-  platforms?: Partial<PlatformService>;
+  tokens?: Partial<Oracle["tokens"]>;
+  fx?: Partial<Oracle["fx"]>;
+  platforms?: Partial<Oracle["platforms"]>;
 }
 
-// **聚合 `Oracle` 也在里面**(#504 T15):被测代码写 `yield* Oracle` 还是 `yield* FxService`
-// 都拿得到,而且拿到的是同一批桩 —— `provideMerge` 把这三个既喂给聚合、也留在外面。
-// 迁移中两种写法并存,测试装配不该逼着谁先改。
+// 只有这一处 `as`,而且只为补上三个 `_tag`(上面 `StubOf` 减掉的那个)—— 方法签名两边
+// 都已经检查过了:空桩靠标注,用例给的那半靠 `Partial<…>`。
 const oracleStubLayer = (stub: OracleStub = {}) =>
-  Layer.provideMerge(
-    Oracle.Default,
-    Layer.mergeAll(
-      Layer.succeed(TokenService, new TokenService({ ...emptyTokens, ...stub.tokens })),
-      Layer.succeed(FxService, new FxService({ ...emptyFx, ...stub.fx })),
-      Layer.succeed(PlatformService, new PlatformService({ ...emptyPlatforms, ...stub.platforms })),
-    ),
+  Layer.succeed(
+    Oracle,
+    new Oracle({
+      tokens: { ...emptyTokens, ...stub.tokens },
+      fx: { ...emptyFx, ...stub.fx },
+      platforms: { ...emptyPlatforms, ...stub.platforms },
+    } as Oracle),
   );
 
 // 跑一个用了参考层的 effect —— 拿 Promise,用例照旧 `await`。
 export const runWithOracle = <A, E>(
   stub: OracleStub,
-  effect: Effect.Effect<A, E, Oracle | TokenService | FxService | PlatformService>,
+  effect: Effect.Effect<A, E, Oracle>,
 ): Promise<A> => Effect.runPromise(Effect.provide(effect, oracleStubLayer(stub)));
 
 // 同上,但把时钟钉在一个固定时刻 —— 用到 `Clock`(如 `priceTickets` 的 `asOf`)的用例走这个,
@@ -72,7 +72,7 @@ export const runWithOracle = <A, E>(
 export const runWithOracleAt = <A, E>(
   nowMs: number,
   stub: OracleStub,
-  effect: Effect.Effect<A, E, Oracle | TokenService | FxService | PlatformService>,
+  effect: Effect.Effect<A, E, Oracle>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(

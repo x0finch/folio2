@@ -1,7 +1,7 @@
 import { dayBucketOf, MS_PER_DAY, PRICE_TTL_MS, type TokenInfo } from "@folio/oracle-basic";
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { TokenService } from "../src";
+import { TokenService } from "../src/tokens";
 import { harness, now0, upstreamDown } from "./fakes";
 
 const NOW = now0; // 落在某个 UTC 日的中段

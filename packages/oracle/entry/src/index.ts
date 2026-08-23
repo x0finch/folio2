@@ -11,9 +11,12 @@
 // 三包一族:`@folio/oracle-basic`(契约,含 `./ports` 那个只有服务端会碰的 Tag 入口)/
 // `@folio/oracle`(本包,服务)/ `@folio/oracle-upstream-coingecko`(上游 adapter)。
 //
-// **对外三个 per-user 服务** + 一个全局维护门面:
-//   `TokenService` 代币 · `FxService` 汇率 · `PlatformService` 平台
+// **对外一张 per-user 门票** + 一个全局维护门面:
+//   `Oracle` —— 聚合,三个字段 `tokens` / `fx` / `platforms`(#504 T15)
 //   `GlobalRefIndexService` 刷全局映射表(cron;不进 `oracleLayer`)
+//
+// **三个域服务本身不出包了**(#504 T13)。它们仍是这一层的结构(见下面那张图),只是包外
+// 拿不到 Tag —— 一个领域一条拿法,而不是聚合与 Tag 并排两条。
 //
 // **src 的编排判据:一个领域一个位置,没有分类目录。**
 //
@@ -54,8 +57,6 @@
 //
 // (下面这串按字母序 —— Biome 排的,别照着它读结构;结构见上面那张图。)
 
-export { FxService } from "./fx";
 export { GlobalRefIndexService } from "./global-ref-index";
 export { Oracle, type OraclePorts, type OracleServices, oracleLayer } from "./oracle";
-export { PlatformService } from "./platforms";
-export { type MintInput, type RefreshStaleReport, TokenService } from "./tokens";
+export type { MintInput, RefreshStaleReport } from "./tokens";
