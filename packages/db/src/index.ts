@@ -11,8 +11,9 @@
 // 调用点能一片一片搬,而不是一个几千行的单体 PR;搬完最后一处的同一天它就该消失 —— 留着的话
 // 「一次请求一次装配」旁边永远并排站着一条「每次调用各装一次」的路。
 
-// `DbClient` **只出类型不出值**:它的 `query((db) => …)` 回调参数就是 drizzle 句柄,Tag 一旦
-// 出包,包外 `yield* DbClient` 就能绕过全部包装层拼任意查询。装配点只需要 `dbClientLayer`。
+// `DbClient` **只出类型不出值**:它的 `query((db) => …)` 回调参数就是 drizzle 句柄,class 一旦
+// 出包,包外 `yield* DbClient` 就能绕过全部包装层拼任意查询。装配点只需要 `dbClientLayer`
+//(= `DbClient.Default`,在 `client.ts` 里起的别名,好让 class 本身留在包内)。
 export { type DbClient, dbClientLayer } from "./client";
 export { createAuthAdapter, type DbEnv } from "./connect"; // adapter 不泄露 db 句柄/schema
 // **「这次请求是谁的」**(ADR 0044):装配点 provide 一次,包内每个 per-user 服务在建自己那一刻
@@ -45,9 +46,10 @@ export type {
   WriteSnapshotInput,
 } from "./domains";
 // per-user 的领域服务(ADR 0037)。每个名字同时是**类型**、**Tag** 和**它的 layer**
-// (`Effect.Service`:带 userId 的 `.Default(userId)` 就是 layer,#501)—— 与 `DbClient` 不同:
-// 那个的 `query` 回调参数就是 drizzle 句柄,出包等于把包装层作废;这些服务的方法本来就是包装过
-// 的 op,出包正是让 app 能把一次请求的全部数据访问装进同一个 context(#394 T4 起)。
+// (`Effect.Service`,#501)。**这些出值,`DbClient` 只出类型** —— 差别不在写法(两边都是
+// `Effect.Service`),在**出去之后包外能干什么**:`DbClient.query` 的回调参数是 drizzle 句柄,
+// 拿到它等于把包装层作废;而这些服务的方法本来就是包装过的 op,出包正是让 app 能把一次请求的
+// 全部数据访问装进同一个 context(#394 T4 起)。
 //
 // **这排 Tag 是过渡形状,只会变少**:某个领域挂进聚合 `Database` 之后,它的 Tag 就没有消费者了,
 // 同片删除(tab-pins 已经这样退场)。
