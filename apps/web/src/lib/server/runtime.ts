@@ -18,13 +18,16 @@ import { spanTracer } from "./tracing";
  * **出口是因为流那条路要它**(#504 T12):`/api/sync` 把同步交给 `Stream.provideLayer`,
  * 拿不到 effect 形状的包装,只能要 layer 本身。别的调用点一律走下面两个发动点。
  *
- * **全仓只有这一份 per-user 装配**(#504 T13):过渡期那层 `legacyRequestLayer` /
- * `withRequest` / `runRequest`,连同它们那排旧领域 Tag,已经一起退场。
+ * **全仓只有这一份 per-user 装配**(#504 T13)。
  *
  * **一次请求只有一个 `DbClient`(红线)**:聚合与参考层的四个端口都**不自己开连接**、也都不自己
  * 收 userId —— 它们的 `R` 声明 `DbClient | CurrentUser`,由 `perRequestLayer(userId)` 一次给上
- * (ADR 0044)。那一份建一次、一个引用分给两边,Effect 的 layer memoisation 保证只建一次;
- * 分两次 provide 就是两份,哪怕引用相同 —— 所以两边必须在同一个 `Layer.mergeAll` 里。
+ * (ADR 0044)。那一份建一次、一个引用分给两边,Effect 的 layer memoisation 保证只建一次。
+ *
+ * **边界是「一次构建」,不是「一次 `Layer.provide`」**(实测,见 `packages/db/tests/
+ * one-db-client.test.ts`):同一张图里 `Layer.provide` 两次仍然共用一份,memo 表按构建走。
+ * 真会变成两份的是**第二次构建** —— 另一次 `Effect.provide`,或者另起一条根 fiber
+ * (根 fiber 不继承外层的 provide,#504 T12 在日志层上撞的是同一件事)。
  */
 export const userLayer = (userId: string): Layer.Layer<UserServices> => {
   const perRequest = perRequestLayer(userId);
@@ -107,9 +110,9 @@ export const runForUser = <A, E extends AppError>(
  *
  * 用法(装配点):`.handler(runEffect(handleCreateTabPin))`。
  *
- * 与过渡路那个 `runRequest` 的真正区别不是少打几个字,是**方向**:那个由 handler 自己调,
- * 于是每个 handler 都是「一半业务 + 一半运行时」;这个由装配点调,handler 那半干净了,
- * review 一个 handler 不再需要顺手检查它的发动、注入、错误映射写没写对。
+ * **关键是方向。** 迁移中那阵子发动点由 handler 自己调,于是每个 handler 都是「一半业务 +
+ * 一半运行时」;现在由装配点调,handler 那半干净了 —— review 一个 handler 不再需要顺手检查
+ * 它的发动、注入、错误映射写没写对。
  *
  * `handler` 日志注解只在这边加:**`Effect.fn("createTabPin")` 会把这个名字写进函数的 `name`**
  * (实测确认),所以白拿 —— 装配点不必再手写一遍,也不会跟 span 名字对不上。没包 `Effect.fn`

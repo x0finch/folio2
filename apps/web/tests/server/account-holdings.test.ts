@@ -16,8 +16,8 @@ import { addManualActivities } from "./manual-fns";
 // 出网一律打桩成抛错:这条路径按设计不出网(价格取自快照与本地参考层),任何一次外呼都得看得见。
 const USER = "user-account-holdings";
 
-// 生产那条路的把手(#504 T13:`runRequest` 退场之后,测试也走 `runForUser`)。
-const runRequest = <A, E extends AppError, R extends UserServices>(
+// 生产那条路的把手 —— 底下就是 server fn / 路由用的那个内核(#504 T13)。
+const run = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
 ): Promise<A> => runForUser(userId, effect);
@@ -50,7 +50,7 @@ const evmAccount = (label: string, address: string) =>
   });
 
 const rowsByLabel = async (withGain = false) => {
-  const view = await runRequest(USER, loadAccountHoldings(withGain));
+  const view = await run(USER, loadAccountHoldings(withGain));
   return {
     view,
     of: (label: string) => view.rows.find((r) => r.account.label === label),
