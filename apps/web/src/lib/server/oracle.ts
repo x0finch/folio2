@@ -32,9 +32,8 @@ import { spanTracer } from "./tracing";
 // 上下文;现在超时与中断能一路传到最底层那发 fetch。cron 更进一步:整趟(sweep + 逐用户预热)
 // 拼成一个 effect,只在 `waitUntil` 那儿跑一次。
 //
-// **这个文件里已经没有 per-user 的装配了**(#504 T13):`legacyRequestLayer` / `withRequest` /
-// `runRequest` 连同它们那排旧域 Tag 一起退场,那件事整个搬去了 `runtime.ts`。剩下的两样都
-// **与 userId 无关** —— cron 刷全局映射表的装配,和一个只补日志层的边缘。
+// **这个文件里已经没有 per-user 的装配了**(#504 T13):那件事整个搬去了 `runtime.ts`。
+// 剩下的两样都**与 userId 无关** —— cron 刷全局映射表的装配,和一个只补日志层的边缘。
 
 // CoinGecko client 的公共配置(三个上游共用一份)。限速层的报告不在这里 —— 见 log.ts 的
 // setLimitLogger:那件事是运行时的属性,设一次管所有闸,不该逐个上游透传。

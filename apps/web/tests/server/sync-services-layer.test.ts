@@ -21,8 +21,8 @@ import { dbFor } from "./db-effect";
 
 const USER = "user-sync-services-layer";
 
-// 生产那条路的把手(#504 T13:`runRequest` 退场之后,测试也走 `runForUser`)。
-const runRequest = <A, E extends AppError, R extends UserServices>(
+// 生产那条路的把手 —— 底下就是 server fn / 路由用的那个内核(#504 T13)。
+const run = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
 ): Promise<A> => runForUser(userId, effect);
@@ -70,7 +70,7 @@ describe("syncServicesLayer 的接线", () => {
       creds: null,
     });
 
-    const result = await runRequest(
+    const result = await run(
       USER,
       Account.syncAccount(USER, account, null).pipe(
         Effect.provide(
@@ -107,7 +107,7 @@ describe("syncServicesLayer 的接线", () => {
 
     const sync = (at: number, value: number) => {
       now.mockReturnValue(at);
-      return runRequest(
+      return run(
         USER,
         Account.syncAccount(USER, account, null).pipe(
           Effect.provide(
@@ -134,7 +134,7 @@ describe("syncServicesLayer 的接线", () => {
   //
   // 这条以前由包里那层 deps→服务的翻译保证(`tryPromise({ catch: depError })`);那层拆掉之后归这一层。
   it("db 挂了 → 类型化失败,不是 defect(cron 才隔离得住)", async () => {
-    const exit = await runRequest(
+    const exit = await run(
       USER,
       Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(
         Effect.provide(syncServicesLayer),
@@ -167,7 +167,7 @@ describe("syncServicesLayer 的接线", () => {
     await dbFor(USER).accounts.setArchived(archived.id, true);
     await dbFor(USER).accounts.create({ connectorId: "manual", label: "M", creds: null });
 
-    const listed = await runRequest(
+    const listed = await run(
       USER,
       Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(Effect.provide(syncServicesLayer)),
     );

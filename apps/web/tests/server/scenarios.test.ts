@@ -63,8 +63,8 @@ afterEach(() => vi.restoreAllMocks());
 // —— 查处 ③:屏幕上那一行 ——
 // `getPortfolioOverview` 那个 server fn 的组装照抄一遍(它只有这几行:读账户/快照/设置 →
 // 注入手记合成项 → buildOverview)。**不复刻业务逻辑**,所以顺序或依赖一改,这里会跟着红。
-// 生产那条路的把手(#504 T13:`runRequest` 退场之后,测试也走 `runForUser`)。
-const runRequest = <A, E extends AppError, R extends UserServices>(
+// 生产那条路的把手 —— 底下就是 server fn / 路由用的那个内核(#504 T13)。
+const run = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
 ): Promise<A> => runForUser(userId, effect);
@@ -82,7 +82,7 @@ async function overview() {
   await injectManualSnapshots(USER, accounts, byAccount);
   // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与 server fn 逐字同款:
   // 一次装配供上聚合 `Oracle`。
-  return runRequest(
+  return run(
     USER,
     buildOverview(accounts, byAccount, {
       connectorMeta: connectorPlatformMeta,
@@ -155,7 +155,7 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
       headers: { "content-type": "application/json" },
     });
   });
-  await runRequest(
+  await run(
     USER,
     Effect.flatMap(Oracle, (o) => o.tokens.refreshStale([tokenId])),
   );

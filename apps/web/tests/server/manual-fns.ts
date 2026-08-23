@@ -12,69 +12,69 @@ import { runForUser, type UserServices } from "@/lib/server/runtime";
 //
 // 每个把手都走**生产那条路**(`runForUser` → server fn / 路由用的同一个内核),不是第二条
 // 构造路 —— 差别只在「一次调用装一次」而已,而这些用例本来就是那种粒度。
-const runRequest = <A, E extends AppError, R extends UserServices>(
+const run = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
 ): Promise<A> => runForUser(userId, effect);
 
 export const createManualAccount = (userId: string, label: string, tokens: string) =>
-  runRequest(userId, M.createManualAccount(label, tokens));
+  run(userId, M.createManualAccount(label, tokens));
 
 export const createAccountFor = (
   userId: string,
   ...args: Parameters<typeof createAccountForE>
-): Promise<AccountSafe> => runRequest(userId, createAccountForE(...args));
+): Promise<AccountSafe> => run(userId, createAccountForE(...args));
 
 export const loadManualAccountDetail = (userId: string, accountId: string) =>
-  runRequest(userId, M.loadManualAccountDetail(accountId));
+  run(userId, M.loadManualAccountDetail(accountId));
 
 export const loadManualAccountSeries = (userId: string, accountId: string, now?: number) =>
-  runRequest(userId, M.loadManualAccountSeries(accountId, now));
+  run(userId, M.loadManualAccountSeries(accountId, now));
 
 export const loadManualAccountLiveTotal = (userId: string, accountId: string) =>
-  runRequest(userId, M.loadManualAccountLiveTotal(accountId));
+  run(userId, M.loadManualAccountLiveTotal(accountId));
 
 export const loadManualHistoryRows = (userId: string, accounts: AccountSafe[], now?: number) =>
-  runRequest(userId, M.loadManualHistoryRows(accounts, now));
+  run(userId, M.loadManualHistoryRows(accounts, now));
 
 export const injectManualSnapshots = (
   userId: string,
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
   takenAt?: number,
-) => runRequest(userId, M.injectManualSnapshots(accounts, byAccount, takenAt));
+) => run(userId, M.injectManualSnapshots(accounts, byAccount, takenAt));
 
 export const sealManualAccount = (userId: string, account: AccountSafe, takenAt?: number) =>
-  runRequest(userId, M.sealManualAccount(account, takenAt));
+  run(userId, M.sealManualAccount(account, takenAt));
 
 export const manualBalancesForWarm = (userId: string, accounts: AccountSafe[]) =>
-  runRequest(userId, M.manualBalancesForWarm(accounts));
+  run(userId, M.manualBalancesForWarm(accounts));
 
 export const createToken = (userId: string, input: M.CreateTokenInput) =>
-  runRequest(userId, M.createToken(input));
+  run(userId, M.createToken(input));
 
 export const updateToken = (userId: string, input: M.UpdateTokenInput) =>
-  runRequest(userId, M.updateToken(input));
+  run(userId, M.updateToken(input));
 
 export const deleteToken = (userId: string, accountId: string, tokenId: string) =>
-  runRequest(userId, M.deleteToken(accountId, tokenId));
+  run(userId, M.deleteToken(accountId, tokenId));
 
 export const addManualActivities = (
   userId: string,
   ...args: Parameters<typeof M.addManualActivities>
-) => runRequest(userId, M.addManualActivities(...args));
+) => run(userId, M.addManualActivities(...args));
 
 export const deleteManualActivity = (userId: string, accountId: string, activityId: string) =>
-  runRequest(userId, M.deleteManualActivity(accountId, activityId));
+  run(userId, M.deleteManualActivity(accountId, activityId));
 
 export const editManualActivity = (
   userId: string,
   ...args: Parameters<typeof M.editManualActivity>
-) => runRequest(userId, M.editManualActivity(...args));
+) => run(userId, M.editManualActivity(...args));
 
 export const loadManualGainHistory = (
   userId: string,
   accounts: AccountSafe[],
   now: number,
   since: number,
-) => runRequest(userId, M.loadManualGainHistory(accounts, now, since));
+) => run(userId, M.loadManualGainHistory(accounts, now, since));

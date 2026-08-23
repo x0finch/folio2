@@ -16,8 +16,8 @@ import { ticketOf } from "./ticket";
 // 出网一律打桩成抛错 —— 封存按设计不出网(价取自本地参考层缓存,取不到回退用户自填价)。
 const USER = "user-archive-seal";
 
-// 生产那条路的把手(#504 T13:`runRequest` 退场之后,测试也走 `runForUser`)。
-const runRequest = <A, E extends AppError, R extends UserServices>(
+// 生产那条路的把手 —— 底下就是 server fn / 路由用的那个内核(#504 T13)。
+const run = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
 ): Promise<A> => runForUser(userId, effect);
@@ -99,7 +99,7 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     await sealManualAccount(USER, account, 1_700_000_000_000);
     await dbFor(USER).accounts.setArchived(account.id, true);
 
-    const view = await runRequest(USER, loadAccountHoldings());
+    const view = await run(USER, loadAccountHoldings());
     const row = view.rows.find((r) => r.account.id === account.id);
 
     expect(row?.archivedAt).not.toBeNull();
@@ -115,7 +115,7 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     await dbFor(USER).accounts.setArchived(account.id, true);
     await dbFor(USER).accounts.setArchived(account.id, false);
 
-    const view = await runRequest(USER, loadAccountHoldings());
+    const view = await run(USER, loadAccountHoldings());
     const row = view.rows.find((r) => r.account.id === account.id);
 
     expect(row?.archivedAt).toBeNull();
@@ -134,7 +134,7 @@ describe("归档 manual 账户的单账户曲线", () => {
   it("活跃时:末点到「现在」,而且补了实时盯市点", async () => {
     const account = await manualWithBtc();
 
-    const { series } = await runRequest(
+    const { series } = await run(
       USER,
       loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
     );
@@ -152,7 +152,7 @@ describe("归档 manual 账户的单账户曲线", () => {
       .bind(sealedAt, account.id)
       .run();
 
-    const { series } = await runRequest(
+    const { series } = await run(
       USER,
       loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
     );
@@ -166,7 +166,7 @@ describe("归档 manual 账户的单账户曲线", () => {
     const account = await manualWithBtc();
     await dbFor(USER).accounts.setArchived(account.id, true);
 
-    const { series } = await runRequest(
+    const { series } = await run(
       USER,
       loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
     );
