@@ -4,7 +4,8 @@ import { Database } from "@folio/db";
 import { Account, BalanceSource, AccountStore as SyncAccountStore } from "@folio/sync";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { runRequest } from "@/lib/server/oracle";
+import type { AppError } from "@/lib/server/errors";
+import { runForUser, type UserServices } from "@/lib/server/runtime";
 import { syncServicesLayer } from "@/lib/server/sync/deps";
 import { dbFor } from "./db-effect";
 
@@ -19,6 +20,12 @@ import { dbFor } from "./db-effect";
 // 一步,其余都要如实跑,否则测的就不是接线了。
 
 const USER = "user-sync-services-layer";
+
+// 生产那条路的把手(#504 T13:`runRequest` 退场之后,测试也走 `runForUser`)。
+const runRequest = <A, E extends AppError, R extends UserServices>(
+  userId: string,
+  effect: Effect.Effect<A, E, R>,
+): Promise<A> => runForUser("sync-services-layer", userId, effect);
 
 async function resetUser(): Promise<void> {
   await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(USER).run();

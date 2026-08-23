@@ -1,19 +1,11 @@
 import { env } from "cloudflare:workers";
 import type { UpstreamError } from "@folio/client-core";
 import {
-  AccountStore,
   CurrentUser,
-  Database,
   type DbClient,
   dbClientLayer,
   globalTokenRefIndexStoreLayer,
-  ManualStore,
   oraclePortsLayer,
-  PortfolioStore,
-  SettingsStore,
-  SnapshotStore,
-  TagStore,
-  TransferStore,
 } from "@folio/db";
 import { GlobalRefIndexService, type OracleServices, oracleLayer } from "@folio/oracle";
 import type { CacheStore } from "@folio/oracle-basic/ports";
@@ -25,9 +17,8 @@ import {
   UPSTREAM_ID,
 } from "@folio/oracle-upstream-coingecko";
 import { Effect, Layer } from "effect";
-import { ConnectorRegistry } from "./connectors/registry";
 import { logTapeLogger } from "./effect-log";
-import { type AppError, toError } from "./errors";
+import { toError } from "./errors";
 
 // 参考层的装配点(ADR 0023,#199/#200)。**这是全仓唯一同时认识两边的文件** ——
 // 一边是 D1 store,一边是 CoinGecko adapter;`@folio/oracle` 自己两边都不认识。
@@ -36,13 +27,14 @@ import { type AppError, toError } from "./errors";
 // 少掉的东西:七个 `createXxx(userId)` 字段、`overrides` 的转手(adapter 的 layer 自己给
 // `Namer`)、`onWarn` 回调(改 Effect 日志 + 下面那个转发器)、`now`(改 `Clock`)。
 //
-// **一次请求一次装配,不是一次调用一次。** 调用方拿到的是「装配」(`withRequest`/`withOracleWarm`)
-// 与「跑」(`runAtEdge`)两半。以前是每个方法调用各自 await 一个 Promise,层与层之间没有共同的
+// **一次请求一次装配,不是一次调用一次。** 调用方拿到的是「装配」(`withOracleWarm`)与
+// 「跑」(`runAtEdge`)两半。以前是每个方法调用各自 await 一个 Promise,层与层之间没有共同的
 // 上下文;现在超时与中断能一路传到最底层那发 fetch。cron 更进一步:整趟(sweep + 逐用户预热)
 // 拼成一个 effect,只在 `waitUntil` 那儿跑一次。
 //
-// (`runPromise` 现在有两处:这里的 `runAtEdge`,和 `runtime.ts` 的 `runEffect` —— 后者是
-// server fn 那条路的唯一发动点。没迁的 handler 还走这里,#504 T13 之后就只剩那一处。)
+// **这个文件里已经没有 per-user 的装配了**(#504 T13):`legacyRequestLayer` / `withRequest` /
+// `runRequest` 连同它们那排旧域 Tag 一起退场,那件事整个搬去了 `runtime.ts`。剩下的两样都
+// **与 userId 无关** —— cron 刷全局映射表的装配,和一个只补日志层的边缘。
 
 // CoinGecko client 的公共配置(三个上游共用一份)。限速层的报告不在这里 —— 见 log.ts 的
 // setLimitLogger:那件事是运行时的属性,设一次管所有闸,不该逐个上游透传。
@@ -139,90 +131,6 @@ export const withOracleWarm = <A>(
  */
 export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.provide(logTapeLogger)));
-
-// —— 应用数据那半的 per-user 服务(ADR 0037,#394 T4)——
-//
-// 参考层的四张 store 在上面 `portsFor`;这里是 db 的八个领域服务。**两边共用同一份
-// `DbClient`** —— 一次请求一个 drizzle 句柄,不是每个 store 一个,也不是每半边一个。
-//
-// 「共用」有两个条件,缺一不可:
-//   ① 三边收到的是**同一个 layer 引用**(所以 `dbClient` 是参数,不是各自现建)
-//   ② 它们在**同一次 `Effect.provide`** 里被建起来 —— Layer memoisation 的作用域是一次构建,
-//      分两次 provide 就是两份,哪怕引用相同。见下面 `requestLayer`。
-//
-const dbStoresFor = (perRequest: Layer.Layer<DbClient | CurrentUser>): Layer.Layer<DbStores> =>
-  Layer.provide(
-    Layer.mergeAll(
-      AccountStore.Default,
-      PortfolioStore.Default,
-      SettingsStore.Default,
-      SnapshotStore.Default,
-      ManualStore.Default,
-      TagStore.Default,
-      TransferStore.Default,
-    ),
-    perRequest,
-  );
-
-/**
- * app 数据那半**还没挂进聚合 `Database`** 的领域服务 —— server fn 的 `R` 里出现的就是这些。
- *
- * **这个联合只会变短**:每次一个领域挂进聚合(#504 T7–T12),它就从这里少一个;最后一个搬完
- * 这个类型和 `dbStoresFor` 一起删掉,`requestLayer` 里 db 那半只剩 `Database`。
- * tab-pins 已经这样退场了(T1 打样)。
- */
-type DbStores =
-  | AccountStore
-  | PortfolioStore
-  | SettingsStore
-  | SnapshotStore
-  | ManualStore
-  | TagStore
-  | TransferStore;
-
-/**
- * **过渡期的装配** —— 目标形状那份是 `runtime.ts` 的 `userLayer`,这份多带一样东西:
- * 那批**还没挂进聚合 `Database`** 的旧领域 Tag。
- *
- * 还留着是因为它还有真消费者:`withRequest`(四处没迁的 handler)与 sync 的 `syncFor`。
- * 每迁完一批(#504 T7–T12)`DbStores` 就短一截,最后一批迁完这个函数、`dbStoresFor`、
- * `withRequest`/`runRequest` 一起删(T13),只剩 `userLayer`。
- *
- * **流**那条路(`/api/sync` 把同步的流交给 `Stream.provideLayer`)拿不到 effect 形状的包装,
- * 只能要 layer 本身,所以这里出的是 layer 不是 effect。
- */
-const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices> => {
-  // **一次 provide,不是三次。** 三边各 provide 一次的话,同一个 `dbClient` 引用也会被建三遍
-  // (memoisation 的作用域是一次构建),于是一个请求握着三个 drizzle 句柄 —— 今天只是浪费,
-  // 但 `DbClient` 一旦长出状态(span、慢查询计数,`@folio/db` 的 `client.ts` 已记着要加),
-  // 那就是悄悄劈成几半的状态。
-  const perRequest = perRequestLayer(userId);
-  return Layer.mergeAll(
-    Layer.provide(Database.Default, perRequest),
-    dbStoresFor(perRequest),
-    oracleFor(perRequest),
-    ConnectorRegistry.Default,
-  );
-};
-
-/** 过渡期的服务面 —— 比 `UserServices` 多一个 `DbStores`,那部分只会变少。 */
-type RequestServices = Database | DbStores | OracleServices | CacheStore | ConnectorRegistry;
-
-export const withRequest = <A, E extends AppError>(
-  userId: string,
-  effect: Effect.Effect<A, E, RequestServices>,
-): Effect.Effect<A, Error> => {
-  return effect.pipe(Effect.provide(legacyRequestLayer(userId)), Effect.mapError(toError));
-};
-
-/**
- * 一步式:装配 + 立刻跑。server fn / route handler 那种「一次请求就问一次」的路径用它 ——
- * 请求本身就是边缘,没有可拼的下一步。要把多步拼成一个再跑的(cron),用 `withRequest` + `runAtEdge`。
- */
-export const runRequest = <A, E extends AppError>(
-  userId: string,
-  effect: Effect.Effect<A, E, RequestServices>,
-): Promise<A> => runAtEdge(withRequest(userId, effect));
 
 /** 系统级(无 userId)的 db 查询 —— cron 枚举用户那一条。原则 #6 的受控例外。 */
 export const withDbClient = <A>(effect: Effect.Effect<A, never, DbClient>): Effect.Effect<A> =>

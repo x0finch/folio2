@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { exportStream } from "@/lib/server/io/export-stream";
-import { runAtEdge, withRequest } from "@/lib/server/oracle";
+import { runForUser } from "@/lib/server/runtime";
 
 // 导出那条流的**分页边界**(#394 T7)。
 //
@@ -11,7 +11,7 @@ import { runAtEdge, withRequest } from "@/lib/server/oracle";
 // 地方 —— 零覆盖。review 时只能靠在旁边照着语义重跑一遍来确认它对,那正是该有测试的信号。
 //
 // 三个数就够钉住它:0(空库)、恰好一页(50,取完还要再问一次才知道没了)、一页多一条(51)。
-// 走**生产那条装配**(`withRequest` → `runAtEdge`),不是自己拼 layer。
+// 走**生产那条装配**(`runForUser` —— 路由 handler 用的同一个内核),不是自己拼 layer。
 
 const USER = "user-export-stream";
 const SNAPSHOT_PAGE = 50; // 与 routes/api/export.ts 同一个常量(那边不导出,这里照抄一份钉住)
@@ -44,7 +44,7 @@ async function seedSnapshots(count: number): Promise<void> {
 }
 
 async function exportLines(): Promise<Record<string, unknown>[]> {
-  const body = await runAtEdge(withRequest(USER, exportStream()));
+  const body = await runForUser("exportData", USER, exportStream());
   const text = await new Response(body).text();
   return text
     .split("\n")
