@@ -1,7 +1,7 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { isManual } from "@/lib/core/manual";
-import { credentialSpecs } from "@/lib/server/connectors/registry";
+import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { isComplete } from "@/lib/server/creds";
 import { summarizeSync } from "./status";
 
@@ -17,6 +17,7 @@ import { summarizeSync } from "./status";
 // 面板的字面是 "Sources synced",所以口径必须是同步过。
 export const handleGetSyncStatus = Effect.fn("getSyncStatus")(function* () {
   const { accounts: accountStore, snapshots: snapshotStore } = yield* Database;
+  const specsByType = (yield* ConnectorRegistry).specs;
   // 三次读互不依赖 → 并发取(以前是 `Promise.all` 上三个各自装配一次的门面调用)。
   const [accounts, rawList, snapshots] = yield* Effect.all(
     [accountStore.list(), accountStore.listRawCreds(), snapshotStore.latest()],
@@ -24,7 +25,6 @@ export const handleGetSyncStatus = Effect.fn("getSyncStatus")(function* () {
   );
   const rawById = new Map(rawList.map((r) => [r.id, r.creds]));
   const takenAtById = new Map(snapshots.map((s) => [s.snapshot.accountId, s.snapshot.takenAt]));
-  const specsByType = credentialSpecs();
   // manual 不是同步源(ADR 0018)→ 不列入同步面板/「立即同步」集,也不显示为「未同步」。
   const syncable = accounts.filter((a) => !isManual(a.connectorId));
   return summarizeSync(

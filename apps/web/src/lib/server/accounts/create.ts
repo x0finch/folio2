@@ -6,7 +6,7 @@ import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
 import { isManual } from "@/lib/core/manual";
-import { credentialSpecs, validateAccountCreds } from "@/lib/server/connectors/registry";
+import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { sealCreds } from "@/lib/server/creds";
 import { createManualAccount } from "@/lib/server/manual/store";
 
@@ -15,8 +15,13 @@ import { createManualAccount } from "@/lib/server/manual/store";
 const log = getLogger(["folio", "web", "accounts"]);
 
 // connectors 层校验/规格 → 业务层按字段 type seal(只有 secret 加密,public/semi 明文)。
-export const raw2sealed = async (connectorId: ConnectorId, values: Record<string, string>) =>
-  JSON.stringify(await sealCreds(credentialSpecs()[connectorId] ?? [], values, env.SECRETS_KEY));
+// **规格由调用方从门票上取好传进来**(#504 T14)—— 这个函数是 SECRETS_KEY 那一侧的活儿
+//(原则 #5),不该顺手去认识 connector registry。
+export const raw2sealed = async (
+  specs: ConnectorRegistry["specs"],
+  connectorId: ConnectorId,
+  values: Record<string, string>,
+) => JSON.stringify(await sealCreds(specs[connectorId] ?? [], values, env.SECRETS_KEY));
 
 // 统一创建入口(connector-driven):过滤空串 → 对**所有 connector** 统一 validateAccountCreds(形状闸 + 活性探活;
 // manual 跑的即 provider 的 manualToken schema)→ 按 connector 分派创建:manual 走账本(取首 token → 建 token 行
@@ -27,21 +32,21 @@ export const createAccountFor = (
   connectorId: ConnectorId,
   label: string,
   rawValues: Record<string, string>,
-): Effect.Effect<AccountSafe, Error, Database | Oracle> =>
+): Effect.Effect<AccountSafe, Error, ConnectorRegistry | Database | Oracle> =>
   Effect.gen(function* () {
-    // 丢掉空串:未填的可选字段缺省即不参与;必填字段留空 → 变 undefined → validateAccountCreds 直接拒。
+    const connectors = yield* ConnectorRegistry;
+    // 丢掉空串:未填的可选字段缺省即不参与;必填字段留空 → 变 undefined → 校验直接拒。
     const values = Object.fromEntries(Object.entries(rawValues).filter(([, v]) => v !== ""));
     // 校验失败是**用户看得见的那条错**(表单上「地址不对」),所以走类型化失败而不是 defect ——
     // 后者会被 `runPromise` 裹成 FiberFailure,前端只剩一坨 Cause。
-    yield* Effect.tryPromise({
-      try: () => validateAccountCreds(connectorId, values, { liveness: true, label }),
-      catch: (e) => (e instanceof Error ? e : new Error(String(e))),
-    });
+    yield* connectors.validate(connectorId, values, { liveness: true, label });
 
     const account = yield* isManual(connectorId)
       ? createManualAccount(label, values.tokens)
       : Effect.gen(function* () {
-          const creds = yield* Effect.promise(() => raw2sealed(connectorId, values));
+          const creds = yield* Effect.promise(() =>
+            raw2sealed(connectors.specs, connectorId, values),
+          );
           return yield* (yield* Database).accounts.create({ connectorId, label, creds });
         });
     log.info("account created", { connectorId, accountId: account.id });

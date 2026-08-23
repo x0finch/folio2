@@ -67,17 +67,17 @@ export interface ConnectorCatalogEntry {
 // connector 展示目录(connectorId → {label, logo}):遍历 registry(单一事实源),供前端网格/徽章展示。
 // logo 取 manifest 自带图并经 platformLogoUrl 代理(privacy,ADR 0008)—— /api/logo/platform 对场馆/manual
 // 键即按 connectorId 认 manifest(见 connectorPlatformMeta),故这里直接拿 cid 当代理 key。
-export function connectorCatalog(): Record<string, ConnectorCatalogEntry> {
+const buildCatalog = (): Record<string, ConnectorCatalogEntry> => {
   const out: Record<string, ConnectorCatalogEntry> = {};
   for (const [cid, manifest] of connectorRegistry) {
     out[cid] = { label: manifest.label, logo: platformLogoUrl(cid, manifest.logo) };
   }
   return out;
-}
+};
 
 // 各 connectorId 的账户输入规格(可序列化):遍历 connector registry → 取 manifest 的 account.creds(CredField[]),
 // 投影成 {key,type,label,desc}(剥掉不可序列化的 validator)。业务层据 type 做 seal/mask/complete/categorize。
-export function credentialSpecs(): Partial<Record<ConnectorId, InputSpec[]>> {
+const buildSpecs = (): Partial<Record<ConnectorId, InputSpec[]>> => {
   const specs: Partial<Record<ConnectorId, InputSpec[]>> = {};
   for (const [cid, manifest] of connectorRegistry) {
     specs[cid as ConnectorId] = manifest.account.creds.map((f) => ({
@@ -88,60 +88,101 @@ export function credentialSpecs(): Partial<Record<ConnectorId, InputSpec[]>> {
     }));
   }
   return specs;
-}
+};
 
-// 创建/补录时的凭据校验:按 connector 的 account.creds 跑形状闸;opts.liveness 时再 provider.validateAccount 探活。
-// 不过即抛。SECRETS_KEY 不参与(拿到的是表单明文,只校验形状 + 活性)。
-export async function validateAccountCreds(
-  connectorId: string,
-  values: Record<string, string>,
-  opts?: { liveness?: boolean; label?: string },
-): Promise<void> {
-  const manifest = getConnector(connectorRegistry, connectorId);
-  if (!manifest) throw new Error(`no connector for connectorId ${connectorId}`);
+// 上游那边的错误都是 `Data.TaggedError`(自身 extends Error),原样透传即可;别的兜成 Error。
+const asError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
 
-  // 形状闸:逐字段跑 CredField 的 Standard Schema(脏/缺 → 抛 CredentialValidationError)。
-  const validated = await validateCredentials(manifest.account.creds, values);
-  if (!opts?.liveness) return;
+/**
+ * **app 侧的 connector 服务**(#504 T14)。
+ *
+ * 以前这里是三个模块级函数,其中 `validateAccountCreds` 自己读 `env`、自己 `Effect.runPromise` ——
+ * 于是它既不能在装配点被换掉,也在一次请求里另起一条根 fiber。现在它与 `Database` / `Oracle`
+ * 一样是一张门票:handler `yield* ConnectorRegistry` 取用,探活那一步是这次请求的 effect 的一部分
+ *(中断、超时、日志上下文都传得下去)。
+ *
+ * **无参**:`env` 在建服务这一刻读(`Effect.sync` 的回调里),不是模块加载期 ——
+ * Workers 的启动 CPU 限制那条(CLAUDE.md)。
+ *
+ * 目录与字段规格是 registry 的纯投影,建服务时各算一次;它们不碰 `env`,也不碰 SECRETS_KEY
+ *(原则 #5:creds 的塑形在 `lib/server/creds.ts`,这一层只做形状闸 + 活性探活)。
+ */
+export class ConnectorRegistry extends Effect.Service<ConnectorRegistry>()(
+  "web/ConnectorRegistry",
+  {
+    effect: Effect.sync(() => ({
+      catalog: buildCatalog(),
+      specs: buildSpecs(),
 
-  // **没有 provider 的 connector 没有「探活」这回事**(manual:无外部 API,#203 起它连 provider 都没了)。
-  // 形状闸已经过了,直接放行。与「声明了 provider 却选不出来」区分开 —— 那是配置错误,仍要抛。
-  if (manifest.balance.providers.length === 0) return;
-  const provider = selectProvider(manifest);
-  if (!provider) throw new Error(`no provider for connector ${connectorId}`);
-  // PC 注入:从 env 按 provider 声明的 creds key 取默认值(最小权限:只注入声明的 key)——与 sync 的 fetchViaConnector 同形。
-  const providerCreds: Record<string, string> = {};
-  for (const f of provider.creds) {
-    const v = (env as unknown as Record<string, string | undefined>)[f.key];
-    if (v != null) providerCreds[f.key] = v;
-  }
-  const ctx = {
-    account: { id: "new", label: opts.label ?? "", connectorId, creds: validated },
-    creds: providerCreds,
-  };
-  // 探活加一次重试。这条路**不走 @folio/sync 的编排**,所以 sync 那套退避重试完全没覆盖它 ——
-  // 上游一次瞬时 429 / 5xx 就让用户看到「添加失败」,而他填的东西完全没错。
-  //
-  // 参数比 sync 紧得多(见常量注释),而且**不加限速闸**:用户正盯着表单,"提交后转 5 秒圈"
-  // 比"失败请重试"更糟 —— 他不知道还要等多久。探活也是一次性单发,不存在突发。
-  //
-  // 重试只吃「够不到上游」这一类:`validateAccount` 的契约(#240,见 connectors/basic 的 connector.ts)
-  // 是 —— 凭据被拒**成功返回 `false`**、传输故障(429/5xx/网络)走错误通道。于是这里:
-  // 瞬时 429 → 错误通道 + `isRetryable` 为真 → 再打一发;凭据真错 → 返回 false(不是失败)→
-  // 压根进不了重试、直接报「could not verify」。**不**改成「false 也重试」:false 现在只剩
-  // 「这个 key 就是错的」,给它多赔往返还会拿着错凭据再打上游。
-  // tests/server/validate-retry.test.ts 钉住这两条。
-  //
-  // 策略从 `@folio/shared` 的手搓 `withRetry` 换成 Effect 的 `Schedule`(**这是 shared 的第一个
-  // 消费者被摘掉**,它整体退场在 #362 第 3 站)。判据同样是 `_tag`,与 `@folio/sync` 那份用的是
-  // 同一个 `isRetryable` —— 两处重试对「什么值得再打一发」必须给同一个答案,所以那个函数住在
-  // 契约包里而不是各自抄一遍。
-  const alive = await Effect.runPromise(
-    provider
-      .validateAccount(ctx)
-      .pipe(Effect.retry(validateRetryPolicy), Effect.provide(FolioHttpClient)),
-  );
-  if (!alive) {
-    throw new Error("could not verify these credentials — please check them and try again");
-  }
-}
+      // 创建/补录时的凭据校验:按 connector 的 account.creds 跑形状闸;opts.liveness 时再
+      // provider.validateAccount 探活。不过即失败(**类型化**,表单要原样显示这句话)。
+      validate: (
+        connectorId: string,
+        values: Record<string, string>,
+        opts?: { liveness?: boolean; label?: string },
+      ): Effect.Effect<void, Error> =>
+        Effect.gen(function* () {
+          const manifest = getConnector(connectorRegistry, connectorId);
+          if (!manifest) {
+            return yield* Effect.fail(new Error(`no connector for connectorId ${connectorId}`));
+          }
+
+          // 形状闸:逐字段跑 CredField 的 Standard Schema(脏/缺 → CredentialValidationError)。
+          const validated = yield* Effect.tryPromise({
+            try: () => validateCredentials(manifest.account.creds, values),
+            catch: asError,
+          });
+          if (!opts?.liveness) return;
+
+          // **没有 provider 的 connector 没有「探活」这回事**(manual:无外部 API,#203 起它连
+          // provider 都没了)。形状闸已经过了,直接放行。与「声明了 provider 却选不出来」区分开
+          // —— 那是配置错误,仍要失败。
+          if (manifest.balance.providers.length === 0) return;
+          const provider = selectProvider(manifest);
+          if (!provider) {
+            return yield* Effect.fail(new Error(`no provider for connector ${connectorId}`));
+          }
+          // PC 注入:从 env 按 provider 声明的 creds key 取默认值(最小权限:只注入声明的 key)
+          // ——与 sync 的 fetchViaConnector 同形。
+          const providerCreds: Record<string, string> = {};
+          for (const f of provider.creds) {
+            const v = (env as unknown as Record<string, string | undefined>)[f.key];
+            if (v != null) providerCreds[f.key] = v;
+          }
+          const ctx = {
+            account: { id: "new", label: opts.label ?? "", connectorId, creds: validated },
+            creds: providerCreds,
+          };
+          // 探活加一次重试。这条路**不走 @folio/sync 的编排**,所以 sync 那套退避重试完全没覆盖它 ——
+          // 上游一次瞬时 429 / 5xx 就让用户看到「添加失败」,而他填的东西完全没错。
+          //
+          // 参数比 sync 紧得多(见常量注释),而且**不加限速闸**:用户正盯着表单,"提交后转 5 秒圈"
+          // 比"失败请重试"更糟 —— 他不知道还要等多久。探活也是一次性单发,不存在突发。
+          //
+          // 重试只吃「够不到上游」这一类:`validateAccount` 的契约(#240,见 connectors/basic 的 connector.ts)
+          // 是 —— 凭据被拒**成功返回 `false`**、传输故障(429/5xx/网络)走错误通道。于是这里:
+          // 瞬时 429 → 错误通道 + `isRetryable` 为真 → 再打一发;凭据真错 → 返回 false(不是失败)→
+          // 压根进不了重试、直接报「could not verify」。**不**改成「false 也重试」:false 现在只剩
+          // 「这个 key 就是错的」,给它多赔往返还会拿着错凭据再打上游。
+          // tests/server/validate-retry.test.ts 钉住这两条。
+          //
+          // 策略从 `@folio/shared` 的手搓 `withRetry` 换成 Effect 的 `Schedule`(**这是 shared 的第一个
+          // 消费者被摘掉**,它整体退场在 #362 第 3 站)。判据同样是 `_tag`,与 `@folio/sync` 那份用的是
+          // 同一个 `isRetryable` —— 两处重试对「什么值得再打一发」必须给同一个答案,所以那个函数住在
+          // 契约包里而不是各自抄一遍。
+          const alive = yield* provider
+            .validateAccount(ctx)
+            .pipe(
+              Effect.retry(validateRetryPolicy),
+              Effect.provide(FolioHttpClient),
+              Effect.mapError(asError),
+            );
+          if (!alive) {
+            return yield* Effect.fail(
+              new Error("could not verify these credentials — please check them and try again"),
+            );
+          }
+        }),
+    })),
+  },
+) {}
