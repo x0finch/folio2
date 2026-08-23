@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { CreateActivitiesInput, handleCreateManualActivities } from "./create";
 import { handleRemoveManualActivity, RemoveActivityInput } from "./remove";
@@ -10,14 +11,14 @@ import { handleUpdateManualActivity, UpdateActivityInput } from "./update";
 export const createManualActivities = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreateActivitiesInput)
-  .handler(handleCreateManualActivities);
+  .handler(runEffect(handleCreateManualActivities));
 
 export const removeManualActivity = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(RemoveActivityInput)
-  .handler(handleRemoveManualActivity);
+  .handler(runEffect(handleRemoveManualActivity));
 
 export const updateManualActivity = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(UpdateActivityInput)
-  .handler(handleUpdateManualActivity);
+  .handler(runEffect(handleUpdateManualActivity));
