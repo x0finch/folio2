@@ -92,7 +92,9 @@ describe("回访不闪骨架、数字只滚一次", () => {
     }
   });
 
+  // 这个断言跟着 ticker 走:#470 片7 把「大数字长什么样、怎么滚」收进了共用的 AmountTicker
+  // (hero + 两个抽屉同一份),于是这条性质的产地也搬到那儿了。要保的东西没变。
   it("净值 ticker 数据一到就滚,不等进视口(避免 hydration 后再从 0 滚一遍)", () => {
-    expect(src("routes/_authed/-home/hero/portfolio-hero.tsx")).toContain("startOnView={false}");
+    expect(src("components/amount-ticker.tsx")).toContain("startOnView={false}");
   });
 });

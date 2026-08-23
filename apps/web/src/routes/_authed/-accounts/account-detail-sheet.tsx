@@ -25,6 +25,7 @@ import {
 import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountTagsModal } from "@/components/account-tags-modal";
+import { AmountTicker } from "@/components/amount-ticker";
 import { ConnectorBadge } from "@/components/connector-badge";
 import { EditableName } from "@/components/editable-name";
 import { AccountHoldingsCards } from "@/components/holdings-cards";
@@ -35,7 +36,9 @@ import { PortfolioPickerModal } from "@/components/portfolio-picker-modal";
 import { type Range, RangeTabs, rangeSince } from "@/components/range-tabs";
 import { TagBadges } from "@/components/tag-badges";
 import { signedUsd } from "@/lib/core/format-number";
+import type { HistoryPoint } from "@/lib/core/history";
 import { isManual } from "@/lib/core/manual";
+import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
 import { accountHistoryQuery } from "@/lib/queries/accounts";
@@ -130,6 +133,8 @@ function DetailBody({
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
+  // 划动读数(#470 片7)。
+  const scrub = useChartScrub();
   const writes = useAccountSheetWrites(account, onClose);
 
   const sealedAt = account.archivedAt;
@@ -197,7 +202,7 @@ function DetailBody({
           预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
       <div className="relative">
         <div className="relative min-h-44">
-          <TrendPanel series={series} loading={historyQuery.isPending} />
+          <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
 
           <div className="absolute right-0 bottom-0 z-10">
             <RangeTabs value={range} onChange={setRange} />
@@ -232,6 +237,8 @@ function DetailBody({
                 hasDayChange={hasDayChange}
                 gainPending={gainPending}
                 dayChange={dayChange}
+                scrubbed={scrub.point}
+                scrubLabel={scrub.label}
               />
             </div>
             {account.needsCredentials && (
@@ -478,12 +485,17 @@ function SheetHeaderValue({
   hasDayChange,
   gainPending,
   dayChange,
+  scrubbed,
+  scrubLabel,
 }: {
   valuesReady: boolean;
   totalUsd: number;
   hasDayChange: boolean;
   gainPending: boolean;
   dayChange: Gain | null | undefined;
+  /** 正划在图上的那个点(#470 片7);`null` = 没在划,显示实时值。 */
+  scrubbed: HistoryPoint | null;
+  scrubLabel: string | null;
 }) {
   const usd = useDisplayValue();
   if (!valuesReady) {
@@ -494,10 +506,21 @@ function SheetHeaderValue({
       </div>
     );
   }
+  // 划到图上某点 → 顶替成该点的值,24h 那行换成那一刻的时间:「今天涨跌」摆在一个历史时刻的
+  // 数值旁边是两件事对不上。
   return (
     <>
-      <div className="font-bold text-3xl tabular-nums">{usd(totalUsd)}</div>
-      {hasDayChange && (
+      {/* 滚动与「整数/小数怎么拆」走 AmountTicker(hero、代币抽屉同一份);字号是这一处的事。 */}
+      <AmountTicker
+        value={scrubbed ? scrubbed.total : totalUsd}
+        scrubbing={!!scrubbed}
+        className="font-bold text-3xl"
+        fractionClassName="font-bold text-muted-foreground text-xl tabular-nums"
+      />
+      {scrubLabel ? (
+        <div className="mt-1 text-muted-foreground text-sm tabular-nums">{scrubLabel}</div>
+      ) : null}
+      {!scrubbed && hasDayChange && (
         <SheetHeaderGain gainPending={gainPending} dayChange={dayChange} usd={usd} />
       )}
     </>
