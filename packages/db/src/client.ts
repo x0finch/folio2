@@ -33,25 +33,22 @@ export class DbClient extends Effect.Service<DbClient>()("db/DbClient", {
     Effect.sync(() => {
       const db = getDb(env);
       return {
-        query: <A>(build: (d: Drizzle) => PromiseLike<A>): Effect.Effect<A> =>
-          // **span 就加在这一处**(#504 T16)。上面那段说的「将来想加 span 只改一处」就是这个。
-          // 全部查询同名(`db.query`)—— 那是这个收口点的代价,换来的是**一个方法都不用改**:
-          // 七十个 op 全在这条桥上过。要分得更细得给那七十个各起名字,而判据(见 T16 那张票)
-          // 是不值:handler 名 + 「这里有几次查询、一共多久」已经答得了「慢在哪」。
-          Effect.withSpan("db.query")(Effect.promise(() => build(db))),
+        // **span 就加在这一处**(#504 T16)。上面那段说的「将来想加 span 只改一处」就是这个。
+        // 全部查询同名(`db.query`)—— 那是这个收口点的代价,换来的是**一个方法都不用改**:
+        // 七十个 op 全在这条桥上过。要分得更细得给那七十个各起名字,而判据(见 T16 那张票)
+        // 是不值:handler 名 + 「这里有几次查询、一共多久」已经答得了「慢在哪」。
+        query: Effect.fn("db.query")(function* <A>(build: (d: Drizzle) => PromiseLike<A>) {
+          return yield* Effect.promise(() => build(db));
+        }),
 
         // 一批语句。**同样收一个 builder** —— 语句得拿 `db` 才造得出来,而调用方不该为了造语句先
         // 从服务里把 `db` 掏出来(掏出来它就又能绕过这一层了)。drizzle 的 batch 要求非空
         // `[Stmt, ...Stmt[]]`;空 → no-op。
-        batch: (build: (d: Drizzle) => readonly Stmt[]): Effect.Effect<void> =>
-          Effect.withSpan("db.batch")(
-            Effect.suspend(() => {
-              const [first, ...rest] = build(db);
-              return first
-                ? Effect.asVoid(Effect.promise(() => db.batch([first, ...rest])))
-                : Effect.void;
-            }),
-          ),
+        // `build(db)` 写在生成器体里就够了 —— 体是惰性的,不必再包一层 `Effect.suspend`。
+        batch: Effect.fn("db.batch")(function* (build: (d: Drizzle) => readonly Stmt[]) {
+          const [first, ...rest] = build(db);
+          if (first) yield* Effect.promise(() => db.batch([first, ...rest]));
+        }),
       };
     }),
 }) {}
