@@ -31,13 +31,15 @@ const treeOf = async <A>(effect: Effect.Effect<A, never, never>): Promise<string
 };
 
 describe("span 树", () => {
-  it("一次请求一棵树,根是 handler 的名字 + 时长", async () => {
+  it("一次请求一棵树,根是 handler 的名字 + 时长 + 这次是谁", async () => {
     const tree = await treeOf(
       forUser(USER, handleCreateTabPin({ kind: "connector", connectorId: "binance" })).pipe(
         Effect.orDie,
       ),
     );
-    expect(tree.split("\n")[0]).toMatch(/^createTabPin \d+\.\d+ms$/);
+    // `runEffect` / `forUser` 那句 `Effect.annotateSpans({ userId })` 是 T6 就写下的,
+    // 当时落在 no-op tracer 上。这条钉的是它**真的到了树上** —— 不然那句注解是句空话。
+    expect(tree.split("\n")[0]).toMatch(/^createTabPin \d+\.\d+ms userId=user-tracing$/);
   });
 
   // **两层就够了,这是量出来的**(#504 T16 那张票要的那次实测)。

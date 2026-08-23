@@ -26,6 +26,16 @@ import { Effect, Layer, Option, Tracer } from "effect";
 //
 // 真正可能贵的是**打**那一下,所以它是 `debug`:默认级别(`info`)下 LogTape 直接丢掉,
 // 连字符串都不拼。要看树就把 `LOG_LEVEL` 调成 `debug`(见 entry/log-level.ts)。
+//
+// —— **它接不到的那一处** ——
+//
+// `/api/sync` 的后台任务(`ndjsonRound` 里那个 `run`)**另起一条根 fiber**,而根 fiber 不继承
+// 外层的 `Effect.provide`(#504 T12 里为日志层实测过同一件事)。所以那一趟同步不出树。
+// 没顺手补上是有判据的:那条路是流式的、一轮几十秒,「一次请求一棵树」这个形状对它本来就不合适
+// —— 真要看它,该给那条流单独设计一份记法,不是把这份硬塞进去。
+//
+// **不影响 `Cause.pretty` 里的 handler 名**(T6 那半):换掉 tracer 之后错误堆栈里的
+// `at createTabPin` 照旧(实测过 —— 默认 tracer 与这份并排跑,两边输出逐字相同)。
 
 const log = getLogger(["folio", "web", "trace"]);
 
@@ -33,6 +43,8 @@ interface Recorded {
   readonly name: string;
   readonly depth: number;
   readonly startNs: bigint;
+  /** `Effect.annotateSpans` 挂上来的东西(runEffect 挂的是 userId)。只在根那行打。 */
+  readonly attributes: Map<string, unknown>;
   endNs?: bigint;
 }
 
@@ -50,9 +62,15 @@ const makeCollector = (emit: (tree: string) => void) => {
     // 根 span 收工 = 这次请求的树完整了。**按开始顺序**打,缩进即父子。
     emit(
       rows
-        .map(
-          (r) => `${"  ".repeat(r.depth)}${r.name} ${r.endNs ? msOf(r.endNs - r.startNs) : "?"}ms`,
-        )
+        .map((r) => {
+          const took = r.endNs ? msOf(r.endNs - r.startNs) : "?";
+          // 注解只在根那行打:`runEffect` 挂的 userId 是整棵树的属性,每行抄一遍是噪音。
+          const attrs =
+            r.depth === 0 && r.attributes.size > 0
+              ? ` ${[...r.attributes].map(([k, v]) => `${k}=${String(v)}`).join(" ")}`
+              : "";
+          return `${"  ".repeat(r.depth)}${r.name} ${took}ms${attrs}`;
+        })
         .join("\n"),
     );
     rows.length = 0;
@@ -70,7 +88,7 @@ const tracerOf = (c: Collector): Tracer.Tracer =>
         onNone: () => 0,
         onSome: (p) => (c.depthOf.get(p) ?? 0) + 1,
       });
-      const row: Recorded = { name, depth, startNs: startTime };
+      const row: Recorded = { name, depth, startNs: startTime, attributes: new Map() };
       c.rows.push(row);
       const span: Tracer.Span = {
         _tag: "Span",
@@ -80,11 +98,13 @@ const tracerOf = (c: Collector): Tracer.Tracer =>
         parent,
         context,
         status: { _tag: "Started", startTime },
-        attributes: new Map(),
+        attributes: row.attributes,
         links: [...links],
         sampled: true,
         kind,
-        attribute() {},
+        attribute(key, value) {
+          row.attributes.set(key, value);
+        },
         event() {},
         addLinks() {},
         end(endTime) {
