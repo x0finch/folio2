@@ -7,7 +7,7 @@ import {
   listUserIdsWithAccounts,
   SettingsStore,
   SnapshotStore,
-} from "../src/queries";
+} from "../src/domains";
 // 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
 import { user } from "../src/schema/auth";
 import { forUser, runDb } from "./effect"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)

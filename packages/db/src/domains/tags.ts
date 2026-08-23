@@ -1,10 +1,10 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
+import { DbClient } from "../client";
 import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
 import { accounts, accountTags, portfolioAccounts, tags } from "../schema";
 import type { Tag } from "../schema/types";
-import { DbClient } from "../stores/service";
 import { assertAccountOwned, assertPortfolioOwned, assertTagOwned } from "./ownership";
 
 // Tag —— Portfolio 内的软标签(ADR 0034)。一个账户可挂多个,但只能挂同 Portfolio 的 tag。

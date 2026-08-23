@@ -1,9 +1,9 @@
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { DbClient } from "../client";
 import { CurrentUser } from "../current-user";
 import { userSettings } from "../schema";
 import type { UserSettings, ValuationMode } from "../schema/types";
-import { DbClient } from "../stores/service";
 
 // 用户设置(Phase 3,#82)。
 

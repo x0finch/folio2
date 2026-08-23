@@ -10,10 +10,10 @@ import { TokenStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
+import { chunk, DbClient } from "../client";
 import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
 import { snapshotBalances, tokenRefs, tokens } from "../schema";
-import { chunk, DbClient } from "./service";
 
 // `TokenStore` 的 D1 实现(ADR 0021 / 0023,#199)。**每个用户一份** —— userId 由 layer 吃掉,
 // 下面所有方法签名里都没有它,拿错用户在编译期就发生不了。
@@ -280,7 +280,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
           if (owner) return owner.tokenId;
           // 这个 Token 在该命名者下已有别的叫法 → 不加第二条。
           if (existing.length > 0) return tokenId;
-          // 真加了一条 ref → **info 标成该刷**(契约见 stores.ts):某个来源开始用新名字称呼一个
+          // 真加了一条 ref → **info 标成该刷**(契约见 `@folio/oracle-basic` 的 stores.ts):某个来源开始用新名字称呼一个
           // 我们已经认识的币,这就是改名的证据。同一批发,省一次往返。
           yield* database.batch((db) => [
             // 无目标 onConflict:两道约束(PK 与 `(user_id, token_id, namer)` 唯一索引)任一撞了都静默。
@@ -385,7 +385,7 @@ const make = ({ namer }: UserTokenStoreOpts) =>
           );
         }),
 
-      // **覆盖**上游那三个字段 + 续 info TTL(与 fillInfo 的填空槽相反,见 stores.ts 的契约注释)。
+      // **覆盖**上游那三个字段 + 续 info TTL(与 fillInfo 的填空槽相反,见 `@folio/oracle-basic` 的 stores.ts 契约注释)。
       // `providerLogo` 不动 —— 那是连接器自带的备用图,上游无权覆盖。
       // 逐行一条 UPDATE(每条 5 个参数,远在 D1 的每语句 100 个绑定参数上限内),一批打包发。
       putInfo: (rows, ttlMs) =>

@@ -3,9 +3,9 @@ import { TokenPriceStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
+import { chunk, DbClient } from "../client";
 import { CurrentUser } from "../current-user";
 import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
-import { chunk, DbClient } from "./service";
 
 // `TokenPriceStore` 的 D1 实现(ADR 0021/0023,#199)。**每个用户一份** —— userId 由 layer 吃掉。
 //

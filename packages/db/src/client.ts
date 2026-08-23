@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { type DbEnv, type Drizzle, getDb } from "../connect";
+import { type DbEnv, type Drizzle, getDb } from "./connect";
 
 // **D1 这一层的服务面 —— 全包唯一一处 Promise → Effect 的桥。**
 //

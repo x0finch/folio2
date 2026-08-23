@@ -14,11 +14,11 @@ import {
   sql,
 } from "drizzle-orm";
 import { Effect } from "effect";
+import { DbClient } from "../client";
 import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
-import { DbClient } from "../stores/service";
 import { assertAccountOwned } from "./ownership";
 
 // 快照 —— 一次同步落下的余额切片,以及总额 / 历史 / 分页那几条读路。

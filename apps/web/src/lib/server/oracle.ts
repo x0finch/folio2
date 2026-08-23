@@ -207,7 +207,7 @@ export type DbStores =
 export const legacyRequestLayer = (userId: string): Layer.Layer<RequestServices> => {
   // **一次 provide,不是三次。** 三边各 provide 一次的话,同一个 `dbClient` 引用也会被建三遍
   // (memoisation 的作用域是一次构建),于是一个请求握着三个 drizzle 句柄 —— 今天只是浪费,
-  // 但 `DbClient` 一旦长出状态(span、慢查询计数,`stores/service.ts` 已记着要加),
+  // 但 `DbClient` 一旦长出状态(span、慢查询计数,`@folio/db` 的 `client.ts` 已记着要加),
   // 那就是悄悄劈成几半的状态。
   const perRequest = perRequestLayer(userId);
   return Layer.mergeAll(

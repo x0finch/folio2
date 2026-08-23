@@ -1,5 +1,6 @@
 import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { Effect } from "effect";
+import { DbClient } from "../client";
 import { CurrentUser } from "../current-user";
 import {
   accounts,
@@ -9,9 +10,8 @@ import {
   tokenRefs,
   tokens,
 } from "../schema";
-import { DbClient } from "../stores/service";
 import type { CreateAccountInput } from "./accounts";
-import { type ManualActivityInput, ManualStore } from "./manual-activity";
+import { type ManualActivityInput, ManualStore } from "./manual";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 import { ensureDefault } from "./portfolios";
 import { SnapshotStore, type WriteSnapshotInput } from "./snapshots";

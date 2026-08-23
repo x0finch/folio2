@@ -3,7 +3,7 @@ import type { Note } from "@folio/connectors-basic";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { AccountStore, SnapshotStore } from "../src/queries";
+import { AccountStore, SnapshotStore } from "../src/domains";
 import { user } from "../src/schema/auth";
 import { forUser } from "./effect";
 

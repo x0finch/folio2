@@ -1,9 +1,9 @@
 import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { DbClient } from "../client";
 import { CurrentUser } from "../current-user";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
 import type { Portfolio } from "../schema/types";
-import { DbClient } from "../stores/service";
 import { assertAccountOwned, assertPortfolioOwned } from "./ownership";
 
 // Portfolio —— 命名账户集(ADR 0033)。每个账户恰属一个,新用户首次落地建默认那个。

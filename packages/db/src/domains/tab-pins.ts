@@ -1,11 +1,11 @@
 import type { ConnectorId } from "@folio/connectors";
 import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { DbClient } from "../client";
 import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
 import { tabPins } from "../schema";
 import type { TabPin } from "../schema/types";
-import { DbClient } from "../stores/service";
 import { assertAccountOwned, assertTagOwned } from "./ownership";
 
 // 自定义 Tab(pin,ADR 0034):把某个 tag / 账户 / connector 钉成导航上的一栏。
@@ -120,7 +120,7 @@ export const makeTabPinStore = Effect.gen(function* () {
         );
       }),
 
-    // 空列表 → `DbClient.batch` 自己是 no-op(见 stores/service.ts),不必再包一层
+    // 空列表 → `DbClient.batch` 自己是 no-op(见 ../client.ts),不必再包一层
     // ——`batchWrite` 那个包装因此在本片退场。
     /** 重排 pin(按给定 id 顺序写 sortOrder)。不在列表里的 pin 不动;空列表 no-op。 */
     reorder: (orderedIds: string[]): Effect.Effect<void> =>

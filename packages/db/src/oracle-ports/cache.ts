@@ -2,10 +2,10 @@ import type { CacheEntry, CacheWrite } from "@folio/oracle-basic";
 import { CacheStore } from "@folio/oracle-basic/ports";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Layer, Option } from "effect";
+import { chunk, DbClient } from "../client";
 import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
 import { userCache } from "../schema";
-import { chunk, DbClient } from "./service";
 
 // `CacheStore` 的 D1 实现(#199)。per-user 的 KV,只三种键(`warm` / `fx:<币种>` / `platform:<键>`,
 // 键的形状归 oracle 的 cache.ts,本文件不解释键;`defi-logo:<协议>` 那种是 app 自己的一片)。

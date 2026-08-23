@@ -3,8 +3,8 @@ import { GlobalTokenRefIndexStore } from "@folio/oracle-basic/ports";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { Effect, Layer, Option } from "effect";
+import { chunk, DbClient } from "../client";
 import { globalTokenRefIndex } from "../schema";
-import { chunk, DbClient } from "./service";
 
 // `GlobalTokenRefIndexStore` 的 D1 实现(ADR 0022,#199)。
 //

@@ -2,7 +2,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { drizzle } from "drizzle-orm/d1";
 import { account, passkey, session, user, verification } from "./schema/auth";
 
-// **怎么摸到 D1** —— 包内两半(queries/ 与 stores/)唯一共用的东西。
+// **怎么摸到 D1** —— 包内两半(`domains/` 与 `oracle-ports/`)唯一共用的东西。
 //
 // 底下还有一个 `createAuthAdapter`:它不属于任何一半(better-auth 不走 userId 作用域的包装
 // 层),但它是除那两半之外**唯一**需要 db 句柄的地方,所以住在句柄旁边。
@@ -19,7 +19,7 @@ export function getDb(env: DbEnv) {
   return drizzle(env.DB);
 }
 
-// drizzle 句柄的类型。**不叫 `Db`** —— 那个名字归门面(`queries/facade.ts` 的 `createDb`
+// drizzle 句柄的类型。**不叫 `Db`** —— 那个名字归门面(曾经的 `createDb`
 // 返回值),两个都叫 Db 的时候读代码得先猜是哪个。
 export type Drizzle = ReturnType<typeof getDb>;
 
