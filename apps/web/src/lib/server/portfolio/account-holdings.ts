@@ -1,8 +1,6 @@
-import { AccountStore, SnapshotStore } from "@folio/db";
+import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { injectManualSnapshots, loadManualGainHistory } from "@/lib/server/manual/store";
-import { runRequest } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 import { enrichBalances } from "@/lib/server/tokens/enrich";
 import {
   buildGainLines,
@@ -30,11 +28,9 @@ export const loadAccountHoldings = (withGain = false) =>
     // **整条链一个 effect,一次装配**(#394 T6):读账户 + 快照 → 注入 manual 合成项 → 逐账户富化。
     // 「当下」取一次,整条链共用(分段末点 / 容差判定 / 取历史的下界都按同一刻算)。
     const now = Date.now();
+    const db = yield* Database;
     const [allAccounts, snapshots] = yield* Effect.all(
-      [
-        Effect.flatMap(AccountStore, (s) => s.list()),
-        Effect.flatMap(SnapshotStore, (s) => s.latest()),
-      ],
+      [db.accounts.list(), db.snapshots.latest()],
       { concurrency: 2 },
     );
     // **归档账户也在里面**(ADR 0039):归档 = 封存,账户页要显示封存那一刻的持仓,而不是一具空壳。
@@ -78,9 +74,7 @@ export const loadAccountHoldings = (withGain = false) =>
     // 窗口起点再往前留一个容差,否则基准快照恰好落在窗口外时整条线判「算不出」—— 而它明明就在库里。
     const [gainHistory, manualGain] = yield* Effect.all(
       [
-        Effect.flatMap(SnapshotStore, (s) =>
-          s.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
-        ),
+        db.snapshots.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
         loadManualGainHistory(active, now, now - GAIN_WINDOW_MS),
       ],
       { concurrency: 2 },
@@ -154,6 +148,6 @@ export const loadAccountHoldings = (withGain = false) =>
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓,**含已归档账户**(ADR 0039)。
 // handler 只是 auth 薄壳 —— 取数在上面的 loadAccountHoldings,这边才测得到(workers 池要驱动真 D1)。
-export function handleListAccountHoldings({ context }: { context: AuthContext }) {
-  return runRequest(context.userId, loadAccountHoldings());
-}
+export const handleListAccountHoldings = Effect.fn("listAccountHoldings")(function* () {
+  return yield* loadAccountHoldings();
+});
