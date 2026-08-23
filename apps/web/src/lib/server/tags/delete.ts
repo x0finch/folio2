@@ -1,16 +1,11 @@
-import { TagStore } from "@folio/db";
+import { Database } from "@folio/db";
+import { Effect } from "effect";
 import { z } from "zod";
-import { runStore } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 
 export const DeleteTagInput = z.object({ tagId: z.string().min(1) });
 
-export function handleDeleteTag({
-  data,
-  context,
-}: {
-  data: z.infer<typeof DeleteTagInput>;
-  context: AuthContext;
-}) {
-  return runStore(context.userId, TagStore, (s) => s.remove(data.tagId));
-}
+export const handleDeleteTag = Effect.fn("deleteTag")(function* (
+  data: z.infer<typeof DeleteTagInput>,
+) {
+  return yield* (yield* Database).tags.remove(data.tagId);
+});

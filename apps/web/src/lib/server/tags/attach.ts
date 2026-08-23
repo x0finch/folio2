@@ -1,7 +1,6 @@
-import { TagStore } from "@folio/db";
+import { Database } from "@folio/db";
+import { Effect } from "effect";
 import { z } from "zod";
-import { runStore } from "@/lib/server/oracle";
-import type { AuthContext } from "@/lib/server/session/auth-session";
 
 // attach/detach 同一入参形状 —— schema 住这儿,detach 跨借。
 export const AccountTagInput = z.object({
@@ -9,12 +8,8 @@ export const AccountTagInput = z.object({
   tagId: z.string().min(1),
 });
 
-export function handleAttachTag({
-  data,
-  context,
-}: {
-  data: z.infer<typeof AccountTagInput>;
-  context: AuthContext;
-}) {
-  return runStore(context.userId, TagStore, (s) => s.attach(data.accountId, data.tagId));
-}
+export const handleAttachTag = Effect.fn("attachTag")(function* (
+  data: z.infer<typeof AccountTagInput>,
+) {
+  return yield* (yield* Database).tags.attach(data.accountId, data.tagId);
+});

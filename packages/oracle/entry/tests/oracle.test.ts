@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   FxService,
   GlobalRefIndexService,
+  Oracle,
   oracleLayer,
   PlatformService,
   TokenService,
@@ -43,6 +44,21 @@ describe("oracleLayer —— 一次装配拿到三个服务", () => {
         expect(yield* Effect.map(FxService, (f) => typeof f.resolve)).toBe("function");
         expect(yield* Effect.map(FxService, (f) => typeof f.rateSeries)).toBe("function");
         expect(yield* Effect.map(PlatformService, (p) => typeof p.resolve)).toBe("function");
+      }),
+    );
+  });
+
+  // **聚合挂的是本尊,不是同名的另一份。** `Oracle` 只把三个域服务放到三个字段上,所以
+  // `(yield* Oracle).fx` 必须和 `yield* FxService` 是同一个对象 —— 不是的话就意味着装配里
+  // 有人又建了一套,那份的缓存、SWR 状态跟另一份对不上(#504 T15)。
+  it("Oracle 的三个字段就是三个域服务本尊", async () => {
+    const h = harness();
+    await h.run(
+      Effect.gen(function* () {
+        const oracle = yield* Oracle;
+        expect(oracle.tokens).toBe(yield* TokenService);
+        expect(oracle.fx).toBe(yield* FxService);
+        expect(oracle.platforms).toBe(yield* PlatformService);
       }),
     );
   });

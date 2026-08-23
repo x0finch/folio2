@@ -1,8 +1,7 @@
-import { FxService } from "@folio/oracle";
+import { Oracle } from "@folio/oracle";
 import { Effect, Option } from "effect";
-import { runRequest } from "@/lib/server/oracle";
 
-// 展示币种的汇率:1 单位该币种值多少美元。**唯一的读入口**,`preferences.ts` 那个 server fn
+// 展示币种的汇率:1 单位该币种值多少美元。**唯一的读入口**,`currency.ts` 那个 handler
 // 只负责读 cookie、定币种、把结果套成 `PreferCurrency`。
 //
 // 三档,顺序就是代价从小到大:
@@ -13,18 +12,18 @@ import { runRequest } from "@/lib/server/oracle";
 //
 // **拿不到就是 `undefined`**:只该让页面显示美元,不该让整个认证区加载失败。
 // 三种原因(上游没收录这个币种 / 上游挂了 / 缓存冷且拉不到)在这里不区分 —— 调用方处置一样。
-// 上游挂了那一档现在由参考层自己降级并记一行日志(`fx.warm` 里的 `degradeTo`),
-// 所以这里不再需要一个把什么都吞掉的 `try/catch`(那个连自己的 bug 一起吞)。
-export function displayRate(userId: string, code: string): Promise<number | undefined> {
-  if (code === "USD") return Promise.resolve(1);
-  return runRequest(
-    userId,
-    Effect.gen(function* () {
-      const fx = yield* FxService;
-      const cached = yield* fx.resolve(code);
-      if (Option.isSome(cached)) return cached.value;
-      yield* fx.warm([code]); // 冷缓存 → 拉一次(上游那个端点一把全给,顺手把其余币种也写上)
-      return Option.getOrUndefined(yield* fx.resolve(code));
-    }),
-  );
-}
+// 上游挂了那一档由参考层自己降级并记一行日志(`fx.warm` 里的 `degradeTo`),所以这里不需要
+// 一个把什么都吞掉的 `try/catch`(那个连自己的 bug 一起吞)。
+//
+// **不再收 userId、也不再自己发动**(#504 T7):它现在是一段 effect,由调用它的 handler
+// 带着一起交给 `runEffect`。参考层从聚合 `Oracle` 一张门票取(T15),不再点名 `FxService`。
+export const displayRate = (code: string): Effect.Effect<number | undefined, never, Oracle> =>
+  code === "USD"
+    ? Effect.succeed(1)
+    : Effect.gen(function* () {
+        const { fx } = yield* Oracle;
+        const cached = yield* fx.resolve(code);
+        if (Option.isSome(cached)) return cached.value;
+        yield* fx.warm([code]); // 冷缓存 → 拉一次(上游那个端点一把全给,顺手把其余币种也写上)
+        return Option.getOrUndefined(yield* fx.resolve(code));
+      });
