@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
-import { type AccountSafe, AccountStore, type ManualStore, PortfolioStore } from "@folio/db";
-import type { TokenService } from "@folio/oracle";
+import { type AccountSafe, AccountStore, type Database, PortfolioStore } from "@folio/db";
+import type { Oracle } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
@@ -29,7 +29,9 @@ export const createAccountFor = (
   connectorId: ConnectorId,
   label: string,
   rawValues: Record<string, string>,
-): Effect.Effect<AccountSafe, Error, AccountStore | ManualStore | TokenService> =>
+  // `Database | Oracle` 是 `createManualAccount` 带进来的(#504 T9 把 manual 那层换了门票);
+  // 这个文件自己那句 `yield* AccountStore` 留到 T8 一起换。
+): Effect.Effect<AccountSafe, Error, AccountStore | Database | Oracle> =>
   Effect.gen(function* () {
     // 丢掉空串:未填的可选字段缺省即不参与;必填字段留空 → 变 undefined → validateAccountCreds 直接拒。
     const values = Object.fromEntries(Object.entries(rawValues).filter(([, v]) => v !== ""));

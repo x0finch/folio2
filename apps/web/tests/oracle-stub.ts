@@ -1,4 +1,4 @@
-import { FxService, PlatformService, TokenService } from "@folio/oracle";
+import { FxService, Oracle, PlatformService, TokenService } from "@folio/oracle";
 import { Effect, Layer, Option, TestClock, TestContext } from "effect";
 
 // **app 侧服务端逻辑的一份共用测试装配。**
@@ -48,17 +48,23 @@ export interface OracleStub {
   platforms?: Partial<PlatformService>;
 }
 
+// **聚合 `Oracle` 也在里面**(#504 T15):被测代码写 `yield* Oracle` 还是 `yield* FxService`
+// 都拿得到,而且拿到的是同一批桩 —— `provideMerge` 把这三个既喂给聚合、也留在外面。
+// 迁移中两种写法并存,测试装配不该逼着谁先改。
 const oracleStubLayer = (stub: OracleStub = {}) =>
-  Layer.mergeAll(
-    Layer.succeed(TokenService, new TokenService({ ...emptyTokens, ...stub.tokens })),
-    Layer.succeed(FxService, new FxService({ ...emptyFx, ...stub.fx })),
-    Layer.succeed(PlatformService, new PlatformService({ ...emptyPlatforms, ...stub.platforms })),
+  Layer.provideMerge(
+    Oracle.Default,
+    Layer.mergeAll(
+      Layer.succeed(TokenService, new TokenService({ ...emptyTokens, ...stub.tokens })),
+      Layer.succeed(FxService, new FxService({ ...emptyFx, ...stub.fx })),
+      Layer.succeed(PlatformService, new PlatformService({ ...emptyPlatforms, ...stub.platforms })),
+    ),
   );
 
 // 跑一个用了参考层的 effect —— 拿 Promise,用例照旧 `await`。
 export const runWithOracle = <A, E>(
   stub: OracleStub,
-  effect: Effect.Effect<A, E, TokenService | FxService | PlatformService>,
+  effect: Effect.Effect<A, E, Oracle | TokenService | FxService | PlatformService>,
 ): Promise<A> => Effect.runPromise(Effect.provide(effect, oracleStubLayer(stub)));
 
 // 同上,但把时钟钉在一个固定时刻 —— 用到 `Clock`(如 `priceTickets` 的 `asOf`)的用例走这个,
@@ -66,7 +72,7 @@ export const runWithOracle = <A, E>(
 export const runWithOracleAt = <A, E>(
   nowMs: number,
   stub: OracleStub,
-  effect: Effect.Effect<A, E, TokenService | FxService | PlatformService>,
+  effect: Effect.Effect<A, E, Oracle | TokenService | FxService | PlatformService>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(
