@@ -15,7 +15,7 @@ import { oracleFor, perRequestLayer } from "./oracle";
  * `runEffect`;等 sync 那条流迁过来(#504 T12)再导出,别为了「将来会用」先开口子。
  *
  * **只有目标形状那些**:聚合 `Database` + 参考层。那批还没挂进聚合的旧领域 Tag **不在这里**
- * —— 它们住 `oracle.ts` 的 `legacyRequestLayer`,和 `runStore`/`runRequest` 一起在 T13 退场。
+ * —— 它们住 `oracle.ts` 的 `legacyRequestLayer`,和 `runRequest` 一起在 T13 退场。
  * 新写的 handler 拿不到它们,也就不会有人「顺手」再用一个即将消失的 Tag。
  *
  * **一次请求只有一个 `DbClient`(红线)**:聚合与参考层的四个端口都**不自己开连接**、也都不自己
@@ -45,7 +45,7 @@ export type UserServices = Database | OracleServices | OraclePorts;
  * (`runRequest` 还另有一层理由:它是给没迁的 handler 的过渡路,T13 就删,把唯一的永久入口
  * 建在它上面等于给自己排一次返工。)
  *
- * 与 `runStore` / `runRequest` 的真正区别不是少打几个字,是**方向**:那两个由 handler 自己调,
+ * 与过渡路那个 `runRequest` 的真正区别不是少打几个字,是**方向**:那个由 handler 自己调,
  * 于是每个 handler 都是「一半业务 + 一半运行时」;这个由装配点调,handler 那半干净了,
  * review 一个 handler 不再需要顺手检查它的发动、注入、错误映射写没写对。
  */

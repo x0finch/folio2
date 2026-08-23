@@ -28,7 +28,7 @@ import {
   coinGeckoTokenUpstreamLayer,
   UPSTREAM_ID,
 } from "@folio/oracle-upstream-coingecko";
-import { type Context, Effect, Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { logTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
 
@@ -175,7 +175,7 @@ export type DbStores =
  *
  * 还留着是因为它还有真消费者:`withRequest`(四处没迁的 handler)与 sync 的 `syncFor`。
  * 每迁完一批(#504 T7–T12)`DbStores` 就短一截,最后一批迁完这个函数、`dbStoresFor`、
- * `withRequest`/`runRequest`/`runStore` 一起删(T13),只剩 `userLayer`。
+ * `withRequest`/`runRequest` 一起删(T13),只剩 `userLayer`。
  *
  * **流**那条路(`/api/sync` 把同步的流交给 `Stream.provideLayer`)拿不到 effect 形状的包装,
  * 只能要 layer 本身,所以这里出的是 layer 不是 effect。
@@ -211,19 +211,6 @@ export const runRequest = <A, E extends AppError>(
   userId: string,
   effect: Effect.Effect<A, E, RequestServices>,
 ): Promise<A> => runAtEdge(withRequest(userId, effect));
-
-/**
- * 「一次 store 调用就完事」的 server fn 用它 —— `runRequest(u, Effect.flatMap(Tag, f))` 的短写。
- *
- * 不是第二条路(底下就是 `runRequest`),只是**二十多个 CRUD 薄壳**里那句 `Effect.flatMap` 的
- * 噪音收成一处:`runStore(userId, TagStore, (s) => s.list())` 与它替掉的 `db.listTagsByUser(userId)`
- * 一样长,而这一句里 userId 只出现在装配那一处 —— 那正是 ADR 0037 要的。
- */
-export const runStore = <I extends DbStores, S, A, E extends AppError>(
-  userId: string,
-  tag: Context.Tag<I, S>,
-  use: (service: S) => Effect.Effect<A, E>,
-): Promise<A> => runRequest(userId, Effect.flatMap(tag, use));
 
 /** 系统级(无 userId)的 db 查询 —— cron 枚举用户那一条。原则 #6 的受控例外。 */
 export const withDbClient = <A>(effect: Effect.Effect<A, never, DbClient>): Effect.Effect<A> =>
