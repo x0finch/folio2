@@ -1,6 +1,8 @@
 import type { ConnectorId } from "@folio/connectors";
 import type { AccountSafe } from "@folio/db";
+import { createManualAccount } from "@/lib/server/manual/store";
 import { db } from "./db";
+import { call } from "./run";
 
 // **造数据。** 读模型那一片的用例几乎都要「账户 + 快照」这两样,写法散在各文件里会慢慢长歪 ——
 // 而它们一歪,断言的就不是同一个场景了。
@@ -52,3 +54,22 @@ export const seedSnapshot = (
 
 export const DAY = 86_400_000;
 export const HOUR = 3_600_000;
+
+/**
+ * 手记账户:建账户 + 首个 token 声明 + 开仓那一笔。
+ *
+ * 走的是生产那条路(`createManualAccount`),所以它顺带覆盖了「建手记账户」本身 ——
+ * 夹具与被测行为在这里是同一件事,而这正是手记那一片的性质:账本就是事实。
+ */
+export const seedManualAccount = (
+  userId: string,
+  label: string,
+  token: { symbol: string; unitPrice: number; amount: number },
+): Promise<AccountSafe> =>
+  call(
+    userId,
+    createManualAccount(
+      label,
+      JSON.stringify([{ symbol: token.symbol, unitPrice: token.unitPrice, amount: token.amount }]),
+    ),
+  );
