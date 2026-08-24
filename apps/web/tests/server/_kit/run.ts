@@ -1,4 +1,4 @@
-import { Effect, type Exit, Layer } from "effect";
+import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import type { AppError } from "@/lib/server/errors";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
@@ -49,3 +49,13 @@ export const callWithRegistryExit = <A, E extends AppError, R extends UserServic
     userId,
     Effect.exit(Effect.provide(effect, Layer.succeed(ConnectorRegistry, registry))),
   ) as Promise<Exit.Exit<A, E>>;
+
+/**
+ * 从 Exit 里取出那个**类型化错误**。
+ *
+ * 失败面的用例几乎都要它:「拒了」不够,要断言「拒的方式对不对」—— `NotFound` 是资源不存在或
+ * 越权,`InvalidInput` 是调用方拼错了参数、该收到一句人话。`undefined` 表示这次不是类型化失败
+ * (成功,或者是 defect —— 后者用 `Cause.isDie` 单独断言)。
+ */
+export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
+  Exit.isFailure(exit) ? Option.getOrUndefined(Cause.failureOption(exit.cause)) : undefined;
