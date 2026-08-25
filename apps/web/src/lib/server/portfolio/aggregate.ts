@@ -150,7 +150,11 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     // 无美元价值(未定价/垃圾空投)→ 不进组合持仓:对净值无贡献,却会污染值排序、best/worst
     // 24h 择取(deriveHeroMetrics 只看 change24h,不看 value)与列表(挤满小额)。账户详情走
     // toAccountSections 原始余额,仍保留这些行 —— 此处只清「按代币的组合视角」。
-    if (a.totalValue <= 0) continue;
+    //
+    // **判据是「等于 0」,不是「≤ 0」**(#527 发现 2):负合计的行**要留** —— perp 亏穿时那笔
+    // 是真实持仓,而 `totalUsd` 从来都算着它。原来写 `<= 0`,于是屏幕上总额少了一截、列表里
+    // 却没有任何一行能解释它去哪了 ——「总额和明细对不上」是最招人怀疑数据错了的那种不一致。
+    if (a.totalValue === 0) continue;
     const sources = [...a.sources.values()].sort((x, y) => y.value - x.value);
     const token = {
       id: a.first.tokenId ?? undefined,

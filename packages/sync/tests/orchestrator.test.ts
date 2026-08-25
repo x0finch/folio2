@@ -83,6 +83,19 @@ describe("syncUser — 取余额 → 写快照", () => {
     expect(writes[0].input.balances).toHaveLength(1);
   });
 
+  it("上游返回空余额列表(真清仓)→ 照样写一张空快照,总额如实归零", async () => {
+    // 「空」和「失败」必须分得开(#527):失败不写快照(见下面重试用尽那条),而空是**合法答案**
+    // —— 用户真把仓清了,不落这张空快照,总览就会一直挂着上一张的旧总额。
+    const { layer, writes } = makeServices([account()], {
+      fetch: () => Effect.succeed(ok([])),
+    });
+    const { results } = await runSync(layer, "u1");
+    expect(results[0]).toMatchObject({ accountId: "a1", ok: true, totalUsd: 0 });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].input).toMatchObject({ totalUsd: 0 });
+    expect(writes[0].input.balances).toHaveLength(0);
+  });
+
   it("note(note 重设计,两级):balance 级单个 note 随行透传 + account 级 Note[] 落顶层", async () => {
     const note = { title: "Locked", icon: "warning" as const, content: "held" };
     const withNote: Balance = { ...bal("BTC", 1), note };

@@ -14,6 +14,9 @@ import { ticketOf } from "./ticket";
 //
 // 这些用例都打真 D1:封存跨了账本、参考层、快照三处,而「有没有真落一行」只有在库里看得出来。
 // 出网一律打桩成抛错 —— 封存按设计不出网(价取自本地参考层缓存,取不到回退用户自填价)。
+// **#527 后续件 4:三条摘去了新家** —— 「再封存不落第二张」「归档后末点停在封存」「不补实时
+// 盯市末点」现在住 `accounts/update.test.ts` 与 `accounts/history.test.ts`(同层、断言相同)。
+// 留在这里的是那边没有的:封存金额取自账本、非 manual 不落、取消归档后数字回实时。
 const USER = "user-archive-seal";
 
 // 生产那条路的把手 —— 底下就是 server fn / 路由用的那个内核(#504 T13)。
@@ -66,18 +69,6 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     // 2 枚 × 自填价 100(参考层缓存是冷的,现价取不到 → 回退自填价,与注入那条路同门)
     expect(snaps[0].totalUsd).toBe(200);
     expect(outbound).toEqual([]);
-  });
-
-  // 封存那条路复用「合成注入」,而注入按「未归档」过滤 —— 先打标记再封存会一无所获。
-  // 这条把「顺序不是风格问题」钉死。
-  it("已经打上归档标记之后再封存 → 什么都落不下来", async () => {
-    const account = await manualWithBtc();
-    await dbFor(USER).accounts.setArchived(account.id, true);
-
-    const sealed = await sealManualAccount(USER, { ...account, archivedAt: Date.now() });
-
-    expect(sealed).toBe(false);
-    expect(await dbFor(USER).snapshots.listByAccount(account.id)).toEqual([]);
   });
 
   it("非 manual 账户不落 —— 它们本来就有快照,补一张没有新信息", async () => {
@@ -141,39 +132,5 @@ describe("归档 manual 账户的单账户曲线", () => {
 
     expect(series.length).toBeGreaterThan(0);
     expect(Date.now() - series[series.length - 1].t).toBeLessThan(60_000);
-  });
-
-  it("归档后:末点停在封存那一刻,不再长到今天", async () => {
-    const account = await manualWithBtc();
-    await dbFor(USER).accounts.setArchived(account.id, true);
-    // `setArchived` 写的是当刻;这条要的是「很久以前封的」,直接把时间戳往回拨三个月。
-    const sealedAt = Date.now() - 90 * 24 * 3600_000;
-    await env.DB.prepare("UPDATE accounts SET archived_at = ? WHERE id = ?")
-      .bind(sealedAt, account.id)
-      .run();
-
-    const { series } = await run(
-      USER,
-      loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
-    );
-
-    // 账本里的活动都在「现在」,而网格只画到封存那一刻(三个月前)→ 一个点都不该有。
-    // 关键是它**没有**一路画到今天:不截断的话这里会有点,而且末点是现在。
-    for (const p of series) expect(p.t).toBeLessThanOrEqual(sealedAt);
-  });
-
-  it("归档后不补实时盯市末点 —— 那正是「还在动」的那一笔", async () => {
-    const account = await manualWithBtc();
-    await dbFor(USER).accounts.setArchived(account.id, true);
-
-    const { series } = await run(
-      USER,
-      loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
-    );
-
-    // 归档即刻(archivedAt ≈ now):网格照常有点,但末点是网格点本身,不是额外补上去的实时点。
-    // 补了的话末点的 t 会恰好等于 archivedAt 且总额取自 live —— 这里断言序列没有超出网格末点。
-    const archived = await dbFor(USER).accounts.getById(account.id);
-    for (const p of series) expect(p.t).toBeLessThanOrEqual(archived?.archivedAt ?? 0);
   });
 });
