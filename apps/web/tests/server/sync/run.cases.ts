@@ -31,7 +31,7 @@ describe("sync/run", () => {
   });
 
   describe("syncAccount", () => {
-    it("手记账户 → 直接跳过,标成 skipped,一发外呼都不发", async () => {
+    it("手记账户 → 跳过,理由是「没有上游」,一发外呼都不发", async () => {
       const outbound = blockOutbound();
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
@@ -41,7 +41,12 @@ describe("sync/run", () => {
 
       const out = await run(USER, handleSyncAccount(USER, { accountId: acc.id }));
 
-      expect(out).toEqual({ accountId: acc.id, ok: false, skipped: true });
+      expect(out).toEqual({
+        accountId: acc.id,
+        ok: false,
+        skipped: true,
+        skipReason: "manual",
+      });
       expect(outbound.calls).toEqual([]);
     });
 
@@ -68,12 +73,9 @@ describe("sync/run", () => {
       expect(outbound.calls).toEqual([]);
     });
 
-    it("凭据不齐的 CEX 账户 → 返回 skipped,与手记账户同一个形状", async () => {
-      // **实测发现的一处语义合并,已列入待定(#527)。** 我原以为凭据不齐会是一个明确的失败。
-      // 实际返回的是 `{ ok: false, skipped: true }` —— 和手记账户一模一样。
-      //
-      // 于是调用方分不出这两件事:「这个账户没有上游可同步」(手记,永远如此,不必管)
-      // 和「你还没把凭据填完」(可修,而且该提示)。界面上都只能显示成「跳过了」。
+    it("凭据不齐的 CEX 账户 → 跳过,但理由是「凭据没填完」,与手记账户分得开", async () => {
+      // #527 裁定 2:两者都跳过,但只有这一种有下一步动作(去把凭据填完)。以前返回的形状
+      // 一模一样,界面上都只能显示成「跳过了」—— 点了同步什么都不发生,而唯一该做的事没说。
       const acc = await db(USER).accounts.create({
         connectorId: "binance",
         label: "币安",
@@ -82,7 +84,12 @@ describe("sync/run", () => {
 
       const out = await run(USER, handleSyncAccount(USER, { accountId: acc.id }));
 
-      expect(out).toEqual({ accountId: acc.id, ok: false, skipped: true });
+      expect(out).toEqual({
+        accountId: acc.id,
+        ok: false,
+        skipped: true,
+        skipReason: "missing-credentials",
+      });
     });
 
     it("凭据不齐 → 一发上游都不打(#527 发现 3,已修:只有真同步成功才预热)", async () => {

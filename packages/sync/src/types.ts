@@ -28,10 +28,23 @@ export interface SyncLogger {
   error(message: string, properties?: Record<string, unknown>): void;
 }
 
+/**
+ * 为什么跳过 —— 跳过不是失败,是「这轮没事干」,但**没事干的两个原因该分开**(#527 裁定 2)。
+ *
+ * `manual`:这个账户根本没有上游(手记账户,ADR 0018),永远如此,用户不必管。
+ * `missing-credentials`:凭据没填完,填完下次就纳入 —— 该提示他去填。
+ *
+ * 以前两者返回一模一样的 `{ ok: false, skipped: true }`,于是界面上都只能显示成「跳过了」,
+ * 而「跳过了」对第二种情况是一句废话:唯一的下一步动作恰恰没有说出来。
+ */
+export type SyncSkipReason = "manual" | "missing-credentials";
+
 export interface AccountSyncResult {
   accountId: string;
   ok: boolean;
-  skipped?: boolean; // 缺凭据态(导入待补录):跳过、不算失败(见 P6.6)
+  skipped?: boolean; // 跳过、不算失败(见 P6.6)
+  /** 只在 `skipped` 为真时出现。**与 `error` 各归各的**:那个说失败,这个说没事干。 */
+  skipReason?: SyncSkipReason;
   snapshotId?: string;
   totalUsd?: number;
   error?: string;

@@ -140,12 +140,17 @@ describe("syncUser — 取余额 → 写快照", () => {
 });
 
 describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
-  it("needs-credentials → ok:false skipped:true,不写快照", async () => {
+  it("needs-credentials → ok:false skipped:true,带上「凭据没填完」这个理由,不写快照", async () => {
     const { layer, writes } = makeServices([account({ id: "n" })], {
       fetch: () => Effect.succeed({ status: "needs-credentials" } as const),
     });
     const { results } = await runSync(layer, "u1");
-    expect(results[0]).toMatchObject({ accountId: "n", ok: false, skipped: true });
+    expect(results[0]).toMatchObject({
+      accountId: "n",
+      ok: false,
+      skipped: true,
+      skipReason: "missing-credentials",
+    });
     expect(writes).toHaveLength(0);
   });
 
