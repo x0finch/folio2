@@ -89,10 +89,14 @@ describe("accounts/list", () => {
         creds: JSON.stringify({ addressOrXpub: "bc1-x" }),
       });
 
-      // 现在会抛(JSON.parse 没有兜底)—— 这条钉住的是那个事实,不是我们想要的行为。
-      // **待定项(#527):** 坏 JSON 只可能来自迁移或人手改库,概率低;但一行坏数据让整页打不开
-      // 是最难查的那种故障。要不要给 parse 加兜底是你的决定。
-      await expect(listed()).rejects.toThrow();
+      // #527 裁定 1:坏行降级成「没凭据」,列表照出。以前这里 `JSON.parse` 裸奔,一行坏数据
+      // 让整个账户页打不开 —— 而账户页正是唯一能把凭据重填好的地方。
+      const rows = await listed();
+
+      expect(rows.map((r) => r.label).sort()).toEqual(["好的", "坏的"]);
+      const bad = rows.find((r) => r.label === "坏的");
+      expect(bad?.needsCredentials).toBe(true);
+      expect(bad?.credsSafe).toEqual({});
     });
 
     it("creds 是 null(从没填过)→ 算不齐,不抛", async () => {

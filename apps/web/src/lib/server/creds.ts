@@ -15,6 +15,26 @@ export interface InputSpec {
 // 导入待补录账户用 SEMI_PREFIX 占位记录 semi 的打码片段(区分"占位 vs 真值")。
 export const SEMI_PREFIX = "semi_";
 
+// 库里那一列 raw JSON → creds map。**解不开时给 null,不抛**(#527 裁定 1)。
+//
+// 坏 JSON 只可能来自迁移或人手改库,概率低 —— 但三个调用点(账户列表 / 同步状态面板 / 导出流)
+// 全都是「整页」级别的:一行坏数据以前能让账户页、总览的同步面板、整个导出一起打不开,而屏幕上
+// 只有一句 500,连是哪个账户都不说。拿到 null 的调用方按「这个账户没凭据」处理:needsCredentials
+// 亮起,用户重填一次就修好了,同时日志里留下 accountId(**只有 id** —— P6.7 红线)。
+//
+// 非对象的合法 JSON(`"x"` / `123` / `[]`)一并算解不开:它们 parse 得过,但下游 `isComplete` /
+// `safeView` 拿它当 map 用会读出一堆 undefined,那是更难查的一种坏。
+export function readStoredCreds(raw: string | null | undefined): Record<string, string> | null {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, string>;
+  } catch {
+    return null;
+  }
+}
+
 // 原始字符串输入 → 存库 map:secret 加密,public/semi 原样(均 string)。
 export async function sealCreds(
   specs: readonly InputSpec[],

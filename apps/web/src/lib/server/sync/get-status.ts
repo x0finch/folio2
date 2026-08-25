@@ -2,7 +2,7 @@ import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { isManual } from "@/lib/core/manual";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
-import { isComplete } from "@/lib/server/creds";
+import { isComplete, readStoredCreds } from "@/lib/server/creds";
 import { summarizeSync } from "./status";
 
 // 全局同步状态摘要(PageHeader 共享同步面板;每个认证页 loader 消费)。
@@ -29,8 +29,8 @@ export const handleGetSyncStatus = Effect.fn("getSyncStatus")(function* () {
   const syncable = accounts.filter((a) => !isManual(a.connectorId));
   return summarizeSync(
     syncable.map((a) => {
-      const raw = rawById.get(a.id);
-      const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
+      // 解不开的凭据 → 当没填(#527 裁定 1):面板上显示「缺少凭据」,而不是整个总览 500。
+      const stored = readStoredCreds(rawById.get(a.id)) ?? {};
       const specs = specsByType[a.connectorId] ?? [];
       return {
         id: a.id,
