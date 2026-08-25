@@ -49,10 +49,11 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - Package prefix `@folio/*`。上游客户端叫 `@folio/<upstream>-client`(`packages/clients/<upstream>`);`@folio/connectors-provider-<name>` 是**待退场的老形状**,别新建(ADR 0036)。
 
 ## Git & PR 工作流
+- **issue 一律建在 Linear,不在 GitHub**(team `FOL`)。手边有 `gh` 不是理由 —— `gh issue create` / `edit` / `comment` / `close` 已在 [.claude/settings.json](.claude/settings.json) 里 deny 掉。**只有读历史才用 `gh issue view/list`**(仓库里那些 `#N` 引用指向 GitHub)。怎么操作见 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)。
 - **功能开发走技能链**:think → grill-with-docs → ADR(难回退的决策)→ to-spec → to-tickets → 开分支 → implement(内驱 tdd)→ code-review。路由见 `/ask-matt`。
 - **main 只经 PR 收代码**:动代码前从 main 开 `feat/*` 分支;直推 main 被禁。ADR 这类文档基线可先提交 main,代码走 PR。
 - **合并用 Squash**:保留 GitHub 的 Verified 签名;**不要 rebase-merge**(会把提交变 Unverified)。
-- **PR 正文关 issue**:每个都带关键字 + 英文逗号 —— `Closes #2, closes #3, closes #4`;别用中文顿号「、」或裸列表(不会自动关)。
+- **PR 关 issue 靠分支名,不靠正文关键字**:issue 在 Linear,`Closes #N` 只对 GitHub issue 有效。分支名带 `fol-<n>`(如 `feat/fol-21-stablecoin-facet`)让 Linear 认领这条 PR;**Linear 的 GitHub 集成没装之前,合并后手动把 issue 挪到 `Done`**。正文里仍可写 `Closes #N` 关联遗留的 GitHub issue —— 但注意「`close` 这个词出现在正文里就会被当成关闭指令」,别顺口写。
 - **提交已签名(GPG)**:别引入破坏 Verified 的操作。
 - **每片 tracer-bullet 独立可验收**:一片一提交,过四闸(typecheck / test / biome / build)+ code-review 再进下一片。
 
@@ -92,7 +93,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 
 **M1–M6 complete** — foundation → on-chain → CEX → perp → polish, deploy-ready (see [apps/web/DEPLOY.md](apps/web/DEPLOY.md); going live is user-run per safety rules). Shipped-work history lives in git log + [docs/adr/](docs/adr/) — no in-repo phase archive.
 
-**前向路线**:见 **[docs/roadmap.md](docs/roadmap.md)**(叙事 / 范围 / 依赖,并链到 epic 看板 GitHub Project;看板是进度事实源)。规划 epic **不打 `ready-for-agent`**;开工某条时经技能链(grill → to-spec → to-tickets)拆竖切片才给 agent-ready 标签。规划草稿(plans)写本地 **`.scratch/plans/`**(gitignore,一次性、不入库);耐久产出落 ADR + Issues,不留 plan 文件在仓库。
+**前向路线**:见 **[docs/roadmap.md](docs/roadmap.md)**(叙事 / 范围 / 依赖,并链到 epic 看板 —— Linear `FOL` team 的 board 视图;看板是进度事实源)。规划 epic **不打 `ready-for-agent`**;开工某条时经技能链(grill → to-spec → to-tickets)拆竖切片才给 agent-ready 标签。规划草稿(plans)写本地 **`.scratch/plans/`**(gitignore,一次性、不入库);耐久产出落 ADR + Linear issue,不留 plan 文件在仓库。
 
 ---
 
@@ -102,11 +103,11 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 
 ### Issue tracker
 
-GitHub Issues (repo `x0finch/folio2`), via the `gh` CLI. External PRs are **not** a triage surface. See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+**Linear**(workspace `x0finch`,team `Folio` / key `FOL`),经 **GraphQL API 直接 curl**(不用 MCP,理由见文档);认证走个人 API key(`$LINEAR_API_KEY`,不入库)。**PR 仍在 GitHub**,且不是需求入口。见 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)。
 
 ### Triage labels
 
-Five canonical roles, default names: `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix` (created on first use). See [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
+五个角色沿用同名 label:`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`(已在 `FOL` team 建好)。**进度归 workflow state,分诊归 label**,两者别混。见 [docs/agents/triage-labels.md](docs/agents/triage-labels.md)。
 
 ### Domain docs
 

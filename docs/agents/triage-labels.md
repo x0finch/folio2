@@ -1,15 +1,27 @@
-# Triage Labels
+# 分诊 label
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+技能用五个固定角色说话,这张表把角色对到本仓 issue tracker(**Linear**,team `FOL`)里真正的 label 名。
 
-| Canonical role    | Label in our tracker | Meaning                                  |
-| ----------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`    | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`      | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent` | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human` | `ready-for-human`    | Requires human implementation            |
-| `wontfix`         | `wontfix`            | Will not be actioned                     |
+| 角色              | 本仓 label        | 含义                     |
+| ----------------- | ----------------- | ------------------------ |
+| `needs-triage`    | `needs-triage`    | 需要先做决策 / 补信息    |
+| `needs-info`      | `needs-info`      | 等提问的人补充           |
+| `ready-for-agent` | `ready-for-agent` | 已写全,AFK agent 可直接接 |
+| `ready-for-human` | `ready-for-human` | 需要人来实现             |
+| `wontfix`         | `wontfix`         | 不会做                   |
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table. This table is the **vocabulary**, not a snapshot of what exists — labels are created on first use. Currently created: `ready-for-agent`, `wontfix` (the rest will be made when first needed).
+五个**都已在 `FOL` team 建好**,名字和角色同名 —— 技能里提到某个角色时,直接用同名 label。
 
-Edit the right-hand column to match whatever vocabulary you actually use.
+## 跟 workflow state 的分工
+
+Linear 有原生 workflow state,别拿 label 重复表达进度:
+
+- **「先不做」不打 label**,挪到 `Backlog` state。(GitHub 时代的 `backlog` label 没有迁过来。)
+- **「不做了」**挪到 `Canceled` state。`wontfix` label 保留给需要在列表里一眼看出来的场合,两者可以同时用。
+- **`roadmap`** label 标记里程碑级 epic(非竖切片),独立于 state。
+
+## 其他 label
+
+GitHub 上的 `bug` / `enhancement` 迁移时对到了 Linear workspace 自带的 **`Bug`** / **`Improvement`**(注意首字母大写),没有另建小写的。
+
+label **用到再建**,别提前铺。
