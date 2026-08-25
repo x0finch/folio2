@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { z } from "zod";
 import { addManualActivities } from "@/lib/server/manual/store";
+import { OccurredAt } from "./occurred-at";
 
 export const ActivityKind = z.enum(["add", "reduce", "set"]);
 
@@ -14,7 +15,7 @@ const BatchDraftInput = z.object({
   }),
   kind: ActivityKind,
   amount: z.number().nonnegative(),
-  occurredAt: z.number().int(),
+  occurredAt: OccurredAt,
   price: z.number().nonnegative().nullish(),
   fee: z.number().nonnegative().nullish(),
   memo: z.string().trim().nullish(),

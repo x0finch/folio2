@@ -170,19 +170,14 @@ describe("manual-activities/create", () => {
       expect(await amountOf(acc.id, "BTC")).toBe(2);
     });
 
-    it("occurredAt 是未来时间 → 现在照收(schema 没挡)", async () => {
-      // 钉现状。曲线会因此长出一个未来的点。要不要挡在 schema 上是你的决定(#527 待定项)。
-      const acc = await seedManualAccount(USER, "手记", { symbol: "BTC", unitPrice: 1, amount: 0 });
+    it("occurredAt 是未来时间 → schema 拒(#527 裁定 6)", () => {
+      // 曲线按活动累积,一条未来的买入会让右端翘起一块还没发生的资产 —— 而它看起来和真的一样。
+      // 客户端时钟快几秒仍照收(留了缓冲),那半在 tests/occurred-at.test.ts。
+      const future = { ...draft("BTC", "add", 1, 0), occurredAt: Date.now() + 24 * 3600_000 };
 
-      const out = await call(
-        USER,
-        handleCreateManualActivities({
-          accountId: acc.id,
-          drafts: [draft("BTC", "add", 1, at(720))],
-        }),
+      expect(CreateActivitiesInput.safeParse({ accountId: "a", drafts: [future] }).success).toBe(
+        false,
       );
-
-      expect(out).toEqual({ ok: true });
     });
 
     it("drafts 是空数组 / amount 是负数 / symbol 空串 → schema 拒", () => {
