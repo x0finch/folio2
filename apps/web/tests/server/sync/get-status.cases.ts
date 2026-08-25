@@ -46,16 +46,13 @@ describe("sync/get-status", () => {
 
       const out = await status();
 
-      // 汇总的形状是 `{ accounts, total, ok, failed, lastSyncedAt }`,失败**只有两档**:
-      // `missing-credentials` 与 `never-synced`。
-      //
-      // **实测纠正了我的假设:「30 天没同步」不是失败状态。** 它同步过,所以算 ok ——
-      // 新鲜度压根没进这个汇总。这在产品上说得通(界面另有「上次同步于…」那行文案),
-      // 但它意味着「这个账户的数据早就过期了」这件事**没有任何汇总数字反映**。
-      // 要不要加一档 stale 是你的决定(#527 待定项)。
+      // 失败仍然只有两档(`missing-credentials` / `never-synced`),而「30 天没同步」**不是失败**
+      // —— 它同步过,所以照样算 ok。#527 裁定 8 补的是第三个位置:`stale` 单独列出来,于是
+      // 「这个账户的数早就旧了」终于在汇总里有个数字,而不是只能靠用户自己看「上次同步于…」。
       expect(out.total).toBe(3);
       expect(out.failed.map((f) => f.reason)).toEqual(["missing-credentials"]);
       expect(out.ok).toBe(2);
+      expect(out.stale.map((a) => a.label)).toEqual(["很久没同步"]);
       expect(out.lastSyncedAt).toBe(NOW);
     });
 

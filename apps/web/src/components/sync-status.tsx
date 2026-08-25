@@ -95,11 +95,15 @@ function SyncPanel({ summary, busy, attention, onSync }: PanelProps) {
   const t = useTranslations("Sync");
   const format = useFormatter();
   const { badge } = tone(attention);
+  // 三档,不是两档(#527 裁定 8):有数但都旧了,说「全部同步」是在骗人 —— 首页那个总资产
+  // 已经不是今天的数了。缺凭据/从未同步仍然优先报,它们的下一步动作更重。
   const statusLabel = busy
     ? t("syncing")
     : summary.failed.length > 0
       ? t("partial")
-      : t("allSynced");
+      : summary.stale.length > 0
+        ? t("someStale")
+        : t("allSynced");
   const lastUpdated = busy
     ? "—"
     : summary.lastSyncedAt
@@ -140,6 +144,28 @@ function SyncPanel({ summary, busy, attention, onSync }: PanelProps) {
                   <div className="font-medium text-xs">{f.label}</div>
                   <div className="text-warn text-xs leading-snug">
                     {t(f.reason === "never-synced" ? "neverSynced" : "missingCredentials")}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      {summary.stale.length > 0 ? (
+        <>
+          <div className="my-2 border-border border-t" />
+          <div className="mb-1.5 text-muted-foreground text-xs uppercase tracking-wider">
+            {t("staleData")}
+          </div>
+          <ul className="flex flex-col gap-1.5">
+            {summary.stale.map((a) => (
+              <li key={a.id} className="flex items-start gap-2">
+                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-muted-foreground" />
+                <div className="min-w-0">
+                  <div className="font-medium text-xs">{a.label}</div>
+                  <div className="text-muted-foreground text-xs leading-snug">
+                    {format.relativeTime(new Date(a.takenAt))}
                   </div>
                 </div>
               </li>

@@ -1,5 +1,5 @@
 import { Database } from "@folio/db";
-import { Effect } from "effect";
+import { Clock, Effect } from "effect";
 import { isManual } from "@/lib/core/manual";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { isComplete, readStoredCreds } from "@/lib/server/creds";
@@ -27,6 +27,9 @@ export const handleGetSyncStatus = Effect.fn("getSyncStatus")(function* () {
   const takenAtById = new Map(snapshots.map((s) => [s.snapshot.accountId, s.snapshot.takenAt]));
   // manual 不是同步源(ADR 0018)→ 不列入同步面板/「立即同步」集,也不显示为「未同步」。
   const syncable = accounts.filter((a) => !isManual(a.connectorId));
+  // 「多久没同步算旧」要一个当下(#527 裁定 8)。走 Clock 而不是 `Date.now()`:纯派生那层
+  // 收的是显式 `now`,这里就是它的唯一来源。
+  const now = yield* Clock.currentTimeMillis;
   return summarizeSync(
     syncable.map((a) => {
       // 解不开的凭据 → 当没填(#527 裁定 1):面板上显示「缺少凭据」,而不是整个总览 500。
@@ -40,5 +43,6 @@ export const handleGetSyncStatus = Effect.fn("getSyncStatus")(function* () {
         takenAt: takenAtById.get(a.id) ?? null,
       };
     }),
+    now,
   );
 });
