@@ -1,10 +1,10 @@
-import { Cause, Exit } from "effect";
+import { Exit } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleListAccountTags } from "@/lib/server/tags/account-tags";
 import { AccountTagInput, handleAttachTag } from "@/lib/server/tags/attach";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call, callExit } from "../_kit/run";
+import { call, callExit, failureOf } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
 // 合并进 tags/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
@@ -74,11 +74,9 @@ describe("tags/attach", () => {
       expect(await call(otherUser(USER), handleListAccountTags())).toEqual([]);
     });
 
-    it("账户与 tag 不在同一个 Portfolio → 现在是 defect,不是给用户看的拒", async () => {
-      // **这条钉的是现状,而现状本身待定(#527 待定项)。** 这个组合一个普通请求就够得着
-      // (前端只要传一对不同 Portfolio 的 id),但库层走的是 `Effect.die` —— 于是用户拿到的是
-      // 一坨 Cause,不是「这个 tag 不属于该账户所在的 Portfolio」。
-      // 断言 die 是为了让它一旦被改成类型化失败,这条会红、提醒把用例改成断言那句人话。
+    it("账户与 tag 不在同一个 Portfolio → 拒得有话可说,标签一个没挂上", async () => {
+      // #527 裁定 3:这个组合一个普通请求就够得着(前端只要传一对不同 Portfolio 的 id),
+      // 所以它是**类型化失败**而不是 defect —— 以前 die,用户拿到一坨 Cause。
       const { account } = await seed(USER);
       const another = await db(USER).portfolios.create({ name: "另一个" });
       const foreignTag = await db(USER).tags.create({ portfolioId: another.id, name: "别处的" });
@@ -88,8 +86,9 @@ describe("tags/attach", () => {
         handleAttachTag({ accountId: account.id, tagId: foreignTag.id }),
       );
 
-      expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit)) expect(Cause.isDie(exit.cause)).toBe(true);
+      const failure = failureOf(exit);
+      expect(failure?._tag).toBe("db/InvalidInput");
+      expect(failure?.message).toContain("different portfolios");
       expect(await call(USER, handleListAccountTags())).toEqual([]);
     });
 

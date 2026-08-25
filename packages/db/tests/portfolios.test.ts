@@ -193,7 +193,10 @@ describe("管理:rename / setDefault / delete", () => {
 
   it("deletePortfolio 拒删默认", async () => {
     const def = await portfolios(USER_A).ensureDefault();
-    await expect(portfolios(USER_A).remove(def.id)).rejects.toThrow();
+    // 类型化失败,不是 defect(#527 裁定 4):陈旧页面发得出这个请求。
+    await expect(portfolios(USER_A).remove(def.id)).rejects.toThrow(
+      /default portfolio cannot be deleted/,
+    );
   });
 
   it("deletePortfolio 命名组:成员退回默认后删该行(账户不动)", async () => {

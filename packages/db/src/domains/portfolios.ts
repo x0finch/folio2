@@ -2,7 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { DbClient } from "../client";
 import { CurrentUser } from "../current-user";
-import type { NotFound } from "../errors";
+import { InvalidInput, NotFound } from "../errors";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
 import type { Portfolio } from "../schema/types";
 import { assertAccountOwned, assertPortfolioOwned } from "./ownership";
@@ -171,8 +171,11 @@ export const makePortfolioStore = Effect.gen(function* () {
         ]);
       }),
 
-    // 删 Portfolio:默认不可删(抛)。否则先把成员退回默认 Portfolio,再删该行(成员账户不动、不孤儿)。
-    remove: (portfolioId: string): Effect.Effect<void> =>
+    // 删 Portfolio:默认不可删。否则先把成员退回默认 Portfolio,再删该行(成员账户不动、不孤儿)。
+    //
+    // **两种拒绝都是类型化失败**(#527 裁定 4):以前都是 `die` —— 而这两个请求一个陈旧页面就发得出
+    // (另一个标签页刚把它删了 / 刚把它设成默认),用户于是收到一坨 Cause,而不是「默认的那个不能删」。
+    remove: (portfolioId: string): Effect.Effect<void, NotFound | InvalidInput> =>
       Effect.gen(function* () {
         const rows = yield* client.query((db) =>
           db
@@ -181,9 +184,15 @@ export const makePortfolioStore = Effect.gen(function* () {
             .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
         );
         const target = rows[0];
-        if (!target) return yield* Effect.die(new Error(`portfolio not found: ${portfolioId}`));
+        // 「不存在」与「不是你的」共用 NotFound,与全库同一条规矩(见 errors.ts 那段注释:
+        // 分开报等于给出一个探测别人 id 的接口)。
+        if (!target) {
+          return yield* Effect.fail(new NotFound({ entity: "portfolio", id: portfolioId }));
+        }
         if (target.isDefault) {
-          return yield* Effect.die(new Error("cannot delete the default portfolio"));
+          return yield* Effect.fail(
+            new InvalidInput({ what: "portfolio", why: "the default portfolio cannot be deleted" }),
+          );
         }
         const def = yield* ensureDefault(client, userId);
         yield* client.batch((db) => [
