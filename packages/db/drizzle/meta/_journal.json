@@ -50,6 +50,13 @@
       "when": 1785786943775,
       "tag": "0006_nebulous_cannonball",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1787634571097,
+      "tag": "0007_cynical_sunset_bain",
+      "breakpoints": true
     }
   ]
 }

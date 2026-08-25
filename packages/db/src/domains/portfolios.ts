@@ -1,6 +1,7 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { DbClient } from "../client";
+import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
 import { InvalidInput, NotFound } from "../errors";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
@@ -21,6 +22,47 @@ function defaultPortfolioName(userName: string | null | undefined): string {
   const n = (userName ?? "").trim();
   return n ? `${n}${PORTFOLIO_NAME_SUFFIX}` : PORTFOLIO_FALLBACK_NAME;
 }
+
+// 每用户内名字是否已被占(忽略大小写;可排除自身供改名用)。唯一索引
+// `portfolios_user_name_uidx` 才是并发下真正兜底那道;这一步只是先挡住、好给出一句人话
+// (与 tags 里的 `tagNameTaken` 同形 —— 同一道题不该有两种手感)。
+async function nameTaken(
+  db: Drizzle,
+  userId: string,
+  name: string,
+  exceptId?: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: portfolios.id })
+    .from(portfolios)
+    .where(
+      and(
+        eq(portfolios.userId, userId),
+        // 与索引 `portfolios_user_name_uidx` 的表达式逐字一致 —— 两边不一样的话,这一步放过去
+        // 的名字会在插入时撞索引,而那一撞是 defect(用户拿到一坨 Cause)。
+        sql`lower(trim(${portfolios.name})) = lower(trim(${name}))`,
+      ),
+    );
+  return rows.some((r) => r.id !== exceptId);
+}
+
+const NAME_TAKEN = (name: string) =>
+  new InvalidInput({ what: "portfolio", why: `name already used: ${name}` });
+
+// 默认那个的名字**只能让它成**:它不是用户当场输入的,没有「换一个」这一步可走。
+// 若 `<用户名>'s` 已被一个命名 Portfolio 占了(需要「没有默认」+「刚好同名」两件事同时成立,
+// 罕见但不是不可能),补 ` (2)`、` (3)` 直到空闲 —— 否则插入会撞索引,而那一撞会 die 在
+// 「第一次打开应用」这条路上。
+const DEFAULT_NAME_TRIES = 20;
+const freeDefaultName = (client: DbClient, userId: string, base: string): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    for (let n = 1; n <= DEFAULT_NAME_TRIES; n++) {
+      const candidate = n === 1 ? base : `${base} (${n})`;
+      if (!(yield* client.query((db) => nameTaken(db, userId, candidate)))) return candidate;
+    }
+    // 二十个都占着 → 不是数据形状问题,是有人在刷。带上 id 让它可查,别静默换一个随机名。
+    return `${base} (${crypto.randomUUID().slice(0, 8)})`;
+  });
 
 export interface PortfolioMembership {
   accountId: string;
@@ -48,13 +90,14 @@ export const ensureDefault = (client: DbClient, userId: string): Effect.Effect<P
     const named = yield* client.query((db) =>
       db.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1),
     );
+    const name = yield* freeDefaultName(client, userId, defaultPortfolioName(named[0]?.name));
     yield* client.query((db) =>
       db
         .insert(portfolios)
         .values({
           id: crypto.randomUUID(),
           userId,
-          name: defaultPortfolioName(named[0]?.name),
+          name,
           isDefault: true,
           sortOrder: 0,
           createdAt: Date.now(),
@@ -102,12 +145,18 @@ export const makePortfolioStore = Effect.gen(function* () {
 
     // 建一个**命名(非默认)** Portfolio(选择器「新建…」/「移到→新建」用)。默认 Portfolio 只由
     // ensureDefault 造,这里永不建默认(is_default=false),故不碰部分唯一索引。
-    create: (input: { name: string; sortOrder?: number }): Effect.Effect<Portfolio> =>
+    create: (input: { name: string; sortOrder?: number }): Effect.Effect<Portfolio, InvalidInput> =>
       Effect.gen(function* () {
+        // 撞名 → 类型化拒绝(#527 裁定 5)。**双击提交也走这条**:第二下和第一下同名,
+        // 于是被同一句话挡住 —— 不必再为它单独铺一套幂等键。
+        const name = input.name.trim();
+        if (yield* client.query((db) => nameTaken(db, userId, name))) {
+          return yield* Effect.fail(NAME_TAKEN(name));
+        }
         const row = {
           id: crypto.randomUUID(),
           userId,
-          name: input.name,
+          name,
           isDefault: false,
           sortOrder: input.sortOrder ?? 0,
           createdAt: Date.now(),
@@ -144,15 +193,20 @@ export const makePortfolioStore = Effect.gen(function* () {
       }),
 
     // 改 Portfolio 名(含默认,因它是真行)。userId 作用域,越权即影响 0 行。
-    rename: (portfolioId: string, name: string): Effect.Effect<void> =>
-      Effect.asVoid(
-        client.query((db) =>
+    // 撞名同 create 一样类型化拒(#527 裁定 5);改成自己现在的名字(只动大小写/空格)不算撞。
+    rename: (portfolioId: string, name: string): Effect.Effect<void, InvalidInput> =>
+      Effect.gen(function* () {
+        const next = name.trim();
+        if (yield* client.query((db) => nameTaken(db, userId, next, portfolioId))) {
+          return yield* Effect.fail(NAME_TAKEN(next));
+        }
+        yield* client.query((db) =>
           db
             .update(portfolios)
-            .set({ name })
+            .set({ name: next })
             .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
-        ),
-      ),
+        );
+      }),
 
     // 设为默认:先清掉该用户当前默认(→ 无默认),再把目标置默认(→ 恰一个)。两步一个 batch 原子换,
     // 中途不出现「两个默认」违反部分唯一索引。

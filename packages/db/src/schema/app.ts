@@ -66,6 +66,13 @@ export const portfolios = sqliteTable(
     // 每用户恰一个默认 Portfolio。部分唯一索引是**真正防并发双默认**那道:ensureDefaultPortfolio 的
     // find-or-create 在单实例下先挡一次,但 Workers 多实例「先查后插」不原子,靠这条唯一约束兜底。
     uniqueIndex("portfolios_user_default_uidx").on(t.userId).where(sql`${t.isDefault} = 1`),
+    // 每用户内名字唯一(忽略大小写与两头空格)—— 与 tag 同一道题、同一个答案(#527 裁定 5)。
+    // 选择器里两个「长期投资」并排时,谁是谁只有 id 知道,而 id 不在屏幕上;这条索引同时把
+    // 「新建时双击」变成第二下被拒,不必再单独铺一套幂等键。
+    //
+    // **`trim` 不是顺手加的**:只 `lower` 的话,「长线仓」与「长线仓 」是两行不同的名字,而它们
+    // 在屏幕上一模一样 —— 那正是这条索引要挡住的那件事,却从缝里漏过去了。
+    uniqueIndex("portfolios_user_name_uidx").on(t.userId, sql`lower(trim(${t.name}))`),
   ],
 );
 

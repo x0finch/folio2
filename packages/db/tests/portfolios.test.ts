@@ -248,3 +248,43 @@ describe("listPortfolios / memberships 跨用户隔离", () => {
     }
   });
 });
+
+// 名字唯一(#527 裁定 5)—— 与 tag 同一道题。索引本身兜并发,domain 先给出一句人话。
+describe("每用户内名字唯一", () => {
+  it("重名 → 拒;只有大小写/空格不同也算重名", async () => {
+    await portfolios(USER_A).ensureDefault();
+    await portfolios(USER_A).create({ name: "长线仓" });
+    await expect(portfolios(USER_A).create({ name: "长线仓" })).rejects.toThrow(
+      /name already used/,
+    );
+    // 两头空格也算同一个名字 —— 不然「长线仓」和「长线仓 」在屏幕上一模一样却是两行。
+    await expect(portfolios(USER_A).create({ name: "长线仓 " })).rejects.toThrow(
+      /name already used/,
+    );
+    await expect(portfolios(USER_A).create({ name: "Defi" })).resolves.toBeTruthy();
+    await expect(portfolios(USER_A).create({ name: "DEFI" })).rejects.toThrow(/name already used/);
+  });
+
+  it("唯一性是每用户的 —— 别人叫这个名字不挡我", async () => {
+    await portfolios(USER_A).create({ name: "长线仓" });
+    await expect(portfolios(USER_B).create({ name: "长线仓" })).resolves.toBeTruthy();
+  });
+
+  it("改名撞上已有的 → 拒;改成自己现在这个名字(只动空格)→ 允许,落库时 trim", async () => {
+    await portfolios(USER_A).ensureDefault();
+    const a = await portfolios(USER_A).create({ name: "长线仓" });
+    await portfolios(USER_A).create({ name: "短线仓" });
+    await expect(portfolios(USER_A).rename(a.id, "短线仓")).rejects.toThrow(/name already used/);
+    await portfolios(USER_A).rename(a.id, " 长线仓 ");
+    expect((await portfolios(USER_A).list()).map((p) => p.name)).toContain("长线仓");
+  });
+
+  it("默认那个的名字被占了也照样建得出来 —— 首次打开应用不该 die", async () => {
+    // 罕见但够得着:一个命名 Portfolio 恰好叫 `<用户名>'s`,而这个用户还没有默认那行。
+    // 默认名不是用户当场输入的,没有「换一个」可走,所以它自己找一个空闲名。
+    await portfolios(USER_A).create({ name: `${USER_A}'s` });
+    const def = await portfolios(USER_A).ensureDefault();
+    expect(def.isDefault).toBe(true);
+    expect(def.name).toBe(`${USER_A}'s (2)`);
+  });
+});
