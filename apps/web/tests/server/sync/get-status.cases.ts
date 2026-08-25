@@ -15,9 +15,11 @@ describe("sync/get-status", () => {
   const BTC = "token-btc";
 
   let NOW = 0;
-  const status = async () => {
+  // 摘要按选中的 Portfolio 收口(ADR 0033),所以要传一个;默认那个就是首屏选中的那个。
+  const status = async (portfolioId?: string) => {
     const { registry } = await fakeRegistry();
-    return callWithRegistry(USER, registry, handleGetSyncStatus());
+    const pid = portfolioId ?? (await db(USER).portfolios.ensureDefault()).id;
+    return callWithRegistry(USER, registry, handleGetSyncStatus({ portfolioId: pid }));
   };
 
   const cex = (userId: string, label: string, creds: Record<string, string> | null) =>
@@ -65,6 +67,22 @@ describe("sync/get-status", () => {
 
       expect(out.lastSyncedAt).toBeNull();
       expect(out.attention.map((a) => a.kind)).toEqual(["never-synced"]);
+    });
+
+    it("另一个 Portfolio 里的账户不进这份摘要 —— 切组合它就该跟着变", async () => {
+      // 修之前这里读的是该用户**全部**账户:切到只有一个账户的组合,页头仍然报着别处那 8 个,
+      // 而下面的列表里一个都没有。
+      const other = await db(USER).portfolios.create({ name: "Watch" });
+      const mine = await cex(USER, "在默认里", { apiKey: "k", secret: "s" });
+      const theirs = await cex(USER, "在 Watch 里", { apiKey: "k", secret: "s" });
+      await db(USER).portfolios.assignAccount(theirs.id, other.id);
+
+      const inDefault = await status();
+      const inWatch = await status(other.id);
+
+      expect(inDefault.accounts.map((a) => a.id)).toEqual([mine.id]);
+      expect(inWatch.accounts.map((a) => a.id)).toEqual([theirs.id]);
+      expect(inWatch.total).toBe(1);
     });
 
     it("别人的账户不进我的汇总", async () => {

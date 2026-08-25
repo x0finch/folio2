@@ -9,7 +9,11 @@ import {
   tagKeys,
   tokenKeys,
 } from "@/lib/queries/keys";
+
 import { invalidateFor, REFRESH_MAP } from "@/lib/queries/refresh";
+
+// 摘要按 Portfolio 一份(ADR 0033),key 上带着它;刷新映射盖的是域前缀,与具体是哪个无关。
+const PF = "pf-1";
 
 // 刷新映射表的钉子。**这里钉的不是「表里写了什么」**(那是把代码抄一遍),而是
 // 「表里那条前缀,真的能匹配上各查询实际在用的 key 吗」—— 定向刷新唯一会静默失败的地方。
@@ -32,13 +36,13 @@ describe("刷新映射表", () => {
   });
 
   it("sync.round 刷到同步状态,不误伤别的域", async () => {
-    seed(syncKeys.status());
+    seed(syncKeys.status(PF));
     // 一轮同步不改估值口径 —— 误伤的代价是白打一趟服务器。
     seed(settingsKeys.valuation());
 
     await invalidateFor(queryClient, "sync.round");
 
-    expect(isInvalidated(syncKeys.status())).toBe(true);
+    expect(isInvalidated(syncKeys.status(PF))).toBe(true);
     expect(isInvalidated(settingsKeys.valuation())).toBe(false);
   });
 
@@ -127,9 +131,9 @@ describe("刷新映射表", () => {
   // 「未同步」清单、以及「立即同步」到底同步哪些账户,全都来自它。归档 / 删除 / 改名一个账户
   // 之后不刷同步域,面板就停在旧数字,而「立即同步」还会带着已删掉的账户跑 —— 且不报错。
   it("account.write 刷同步域(否则页头面板与「立即同步」的账户集停在旧值)", async () => {
-    seed(syncKeys.status());
+    seed(syncKeys.status(PF));
     await invalidateFor(queryClient, "account.write");
-    expect(isInvalidated(syncKeys.status())).toBe(true);
+    expect(isInvalidated(syncKeys.status(PF))).toBe(true);
   });
 
   // 同一批漏刷的另一处:`dataStats.hasData` 就是「账户数 > 0」,而它决定导入前弹不弹确认框。
@@ -235,7 +239,7 @@ describe("刷新映射表", () => {
     seed(settingsKeys.valuation());
     seed(portfolioKeys.overview("pf-1"));
     seed(accountKeys.holdings());
-    seed(syncKeys.status());
+    seed(syncKeys.status(PF));
 
     await invalidateFor(queryClient, "settings.valuation");
 
@@ -244,14 +248,14 @@ describe("刷新映射表", () => {
         isInvalidated,
       ),
     ).toEqual([true, true, true]);
-    expect(isInvalidated(syncKeys.status())).toBe(false);
+    expect(isInvalidated(syncKeys.status(PF))).toBe(false);
   });
 
   // 导入是唯一一条「什么都可能变」的写 —— 五个域一个都不能少,省一个就是一处「导完了那块不动」。
   it("settings.data 刷全部五个域", async () => {
     const keys = [
       settingsKeys.dataStats(),
-      syncKeys.status(),
+      syncKeys.status(PF),
       portfolioKeys.overview("pf-1"),
       accountKeys.list(),
       tagKeys.list(),
@@ -267,7 +271,7 @@ describe("刷新映射表", () => {
   it("prices.refreshed 只刷组合域与账户域", async () => {
     seed(portfolioKeys.overview("pf-1"));
     seed(accountKeys.holdings());
-    seed(syncKeys.status());
+    seed(syncKeys.status(PF));
     seed(settingsKeys.valuation());
 
     await invalidateFor(queryClient, "prices.refreshed");
@@ -276,7 +280,7 @@ describe("刷新映射表", () => {
       true,
       true,
     ]);
-    expect([syncKeys.status(), settingsKeys.valuation()].map(isInvalidated)).toEqual([
+    expect([syncKeys.status(PF), settingsKeys.valuation()].map(isInvalidated)).toEqual([
       false,
       false,
     ]);

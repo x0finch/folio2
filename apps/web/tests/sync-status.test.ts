@@ -103,7 +103,14 @@ describe("summarizeSync", () => {
 
   it("handles an empty account set", () => {
     const s = summarizeSync([], NOW);
-    expect(s).toEqual({ accounts: [], total: 0, ok: 0, attention: [], lastSyncedAt: null });
+    expect(s).toEqual({
+      accounts: [],
+      total: 0,
+      sourceCount: 0,
+      ok: 0,
+      attention: [],
+      lastSyncedAt: null,
+    });
   });
 
   // 「同步过、但数旧了」这一档(#527 裁定 8)。以前一周没同步的账户在摘要里一切正常,
@@ -161,6 +168,37 @@ describe("summarizeSync", () => {
       const s = summarizeSync([old({ archivedAt: 1, takenAt: now - 10 * STALE_SYNC_MS })], now);
       expect(s.attention).toEqual([]);
       expect(s.total).toBe(0);
+    });
+  });
+
+  // 手记账户:算一个「来源」,不算一个「同步源」(ADR 0018 —— 它没有上游,当下值读的时候现算)。
+  // 页头那句「across N sources」问的是前者,面板里 `N / M` 问的是后者。
+  describe("手记账户", () => {
+    it("只有手记账户 → 同步的那几个数是 0,但来源数不是 0", () => {
+      const s = summarizeSync([acc({ connectorId: "manual", takenAt: null })], NOW);
+      expect(s.sourceCount).toBe(1);
+      expect(s.total).toBe(0);
+      expect(s.accounts).toEqual([]);
+      expect(s.attention).toEqual([]);
+    });
+
+    it("不因「从未同步」被报进清单 —— 它压根不同步", () => {
+      const s = summarizeSync(
+        [acc({ id: "m", connectorId: "manual", takenAt: null }), acc({ id: "c", takenAt: 1000 })],
+        NOW,
+      );
+      expect(s.attention).toEqual([]);
+      expect(s.sourceCount).toBe(2);
+      expect(s.total).toBe(1);
+      expect(s.ok).toBe(1);
+    });
+
+    it("它的 takenAt 不污染「上次更新」", () => {
+      const s = summarizeSync(
+        [acc({ connectorId: "manual", takenAt: 4000 }), acc({ takenAt: 100 })],
+        NOW,
+      );
+      expect(s.lastSyncedAt).toBe(100);
     });
   });
 });

@@ -13,7 +13,7 @@ export const syncKeys = {
   /** 整个同步域的前缀 —— 刷新映射表用它。 */
   all: ["sync"] as const,
   /** 全局同步状态摘要(页头同步面板 + 「立即同步」的账户集)。 */
-  status: () => [...syncKeys.all, "status"] as const,
+  status: (portfolioId: string) => [...syncKeys.all, "status", portfolioId] as const,
 };
 
 // 自定义 Tab 的目标(ADR 0034)。进 key 是因为**同一个总览查询按 pin 收窄之后是另一份数据** ——

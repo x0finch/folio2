@@ -1,4 +1,5 @@
 import type { ConnectorId } from "@folio/connectors";
+import { isManual } from "@/lib/core/manual";
 
 // 「一个账户的同步状态」—— 账户列表那一行(`-accounts/index.tsx`)和页头那块同步面板**共用这一份**。
 //
@@ -47,7 +48,7 @@ export interface SyncAccountInput {
  * 措辞与账户列表那一行逐字相同(`缺少凭据` / `从未同步` / `同步于 X 前`)—— 那套说法本来就在,
  * 面板不必另造一套。
  */
-export type SyncAttentionKind = "missing-credentials" | "never-synced" | "stale";
+type SyncAttentionKind = "missing-credentials" | "never-synced" | "stale";
 
 export interface SyncAttentionSource {
   id: string;
@@ -59,10 +60,19 @@ export interface SyncAttentionSource {
 }
 
 export interface SyncStatusSummary {
-  /** 活跃账户(id + label)——「立即同步」按当前活跃集并发同步。 */
+  /** **可同步的**活跃账户(id + label)——「立即同步」按这一集并发同步。 */
   accounts: { id: string; label: string }[];
-  /** 活跃账户总数。 */
+  /** 可同步的活跃账户数 —— 面板里 `N / M` 的那个 M。 */
   total: number;
+  /**
+   * 这个视图里的活跃账户数,**含手记账户**。
+   *
+   * 与 `total` 各算一件事:手记账户不是同步源(ADR 0018 —— 没有上游,当下值读的时候现算,
+   * 从不写快照),所以它不进上面那几个数;但它**是**一个数据来源,页头那句「across N sources」
+   * 问的正是这个。以前那句用的是 `total`,于是一个只有手记账户的组合被说成「0 sources」,
+   * 而屏幕上明明列着它的钱。
+   */
+  sourceCount: number;
   /**
    * **已同步过**且凭据齐全的活跃账户数。
    *
@@ -94,7 +104,9 @@ const KIND_OF: Record<AccountSyncStatus, SyncAttentionKind | null> = {
 // 而读墙钟的测试是 flaky 的(CODING.md「别断言墙上时钟」)。handler 从 Effect 的 Clock 取。
 export function summarizeSync(accounts: SyncAccountInput[], now: number): SyncStatusSummary {
   const active = accounts.filter((a) => a.archivedAt == null);
-  const attention = active
+  // 手记账户在这里分道:它算一个「来源」,但不算一个「同步源」(理由见 sourceCount 那段)。
+  const syncable = active.filter((a) => !isManual(a.connectorId));
+  const attention = syncable
     .flatMap((a) => {
       // 判据与账户列表那一行同一个函数(@/lib/core/sync-freshness),不是同形的第二份。
       const kind =
@@ -104,14 +116,15 @@ export function summarizeSync(accounts: SyncAccountInput[], now: number): SyncSt
         : [];
     })
     .sort((x, y) => SEVERITY[x.kind] - SEVERITY[y.kind] || (x.takenAt ?? 0) - (y.takenAt ?? 0));
-  const lastSyncedAt = active.reduce<number | null>(
+  const lastSyncedAt = syncable.reduce<number | null>(
     (max, a) => (a.takenAt == null ? max : max == null ? a.takenAt : Math.max(max, a.takenAt)),
     null,
   );
   return {
-    accounts: active.map((a) => ({ id: a.id, label: a.label })),
-    total: active.length,
-    ok: active.length - attention.filter((a) => a.kind !== "stale").length,
+    accounts: syncable.map((a) => ({ id: a.id, label: a.label })),
+    total: syncable.length,
+    sourceCount: active.length,
+    ok: syncable.length - attention.filter((a) => a.kind !== "stale").length,
     attention,
     lastSyncedAt,
   };

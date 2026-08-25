@@ -144,10 +144,12 @@ function SyncPanel({ summary, busy, attention, onSync, onPick }: PanelProps) {
   const { badge } = tone(attention);
   const { data: catalog } = useQuery(connectorCatalogQuery());
   const nameOf = (id: ConnectorId) => catalog?.[id]?.label ?? connectorLabelFallback(id);
+  // 「部分未同步」在这儿会说谎:清单里可能全是「同步过、只是旧了」的,而上面那行明明写着
+  // `8 / 8`。「需要注意」把两种都装得下,而且与 pill 上那句是同一句 —— 同一件事不该有两种说法。
   const statusLabel = busy
     ? t("syncing")
     : summary.attention.length > 0
-      ? t("partial")
+      ? t("needsAttention")
       : t("allSynced");
   const lastUpdated = busy
     ? "—"
@@ -178,9 +180,6 @@ function SyncPanel({ summary, busy, attention, onSync, onPick }: PanelProps) {
       {summary.attention.length > 0 ? (
         <>
           <div className="my-2 border-border border-t" />
-          <div className="mb-1 text-muted-foreground text-xs uppercase tracking-wider">
-            {t("needsAttention")}
-          </div>
           <div className="flex flex-col">
             {summary.attention.map((a) => (
               <AttentionRow
@@ -238,10 +237,12 @@ export function SyncStatus({
 
   const attention = busy || summary.attention.length > 0;
   const { dot } = tone(attention);
+  // pill 上那句刻意更短(「已同步」而不是「全部同步」)—— 它在页头里跟其他段并排,字多了会挤。
+  // 但要注意的那句两处一致:同一件事不该有两种说法。
   const triggerLabel = busy
     ? t("triggerSyncing")
     : summary.attention.length > 0
-      ? t("triggerAttention")
+      ? t("needsAttention")
       : t("triggerSynced");
 
   // 桌面:hover Popover 包同步钮;action 段(+)在 Popover 外右侧并排 → hover + 不开面板。

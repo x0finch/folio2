@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { runEffect, runForUser } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
-import { handleGetSyncStatus } from "./get-status";
+import { GetSyncStatusInput, handleGetSyncStatus } from "./get-status";
 import { handleSyncAccount, SyncAccountInput } from "./run";
 
 // sync 资源面:只做装配(method / 鉴权 / 校验),实现与入参 schema 在 ./run、./get-status。
@@ -17,6 +17,9 @@ export const syncAccount = createServerFn({ method: "POST" })
     runForUser(context.userId, handleSyncAccount(context.userId, data)),
   );
 
+// 收一个 portfolioId:摘要按选中的 Portfolio 收口(ADR 0033),而选中态只在客户端(不持久化),
+// 所以它必须显式传进来 —— 服务端没有第二条路知道你在看哪个。
 export const getSyncStatus = createServerFn({ method: "GET" })
   .middleware([requireAuth])
+  .validator(GetSyncStatusInput)
   .handler(runEffect(handleGetSyncStatus));

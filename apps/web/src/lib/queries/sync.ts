@@ -8,9 +8,11 @@ import { syncKeys } from "./keys";
 
 // 同步域没有独立的写操作:它由「一轮同步」刷新,而那条路径本片就迁好了 ——
 // 所以 staleTime 可以直接开,不用等别的片。
-export const syncStatusQuery = () =>
+// 按 Portfolio 一份:切组合时 key 变 → 重新取一份该视图的摘要(ADR 0033)。前缀仍是
+// `["sync","status"]`,所以刷新映射表那条域前缀照样盖得住全部。
+export const syncStatusQuery = (portfolioId: string) =>
   queryOptions({
-    queryKey: syncKeys.status(),
-    queryFn: () => getSyncStatus(),
+    queryKey: syncKeys.status(portfolioId),
+    queryFn: () => getSyncStatus({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
   });

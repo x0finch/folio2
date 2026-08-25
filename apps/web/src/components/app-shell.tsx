@@ -42,7 +42,7 @@ export function AppShell({
   const pageTitle = t(activeNav.key);
   const pageSub =
     activeNav.key === "overview"
-      ? th("overviewSub", { count: syncStatus.total })
+      ? th("overviewSub", { count: syncStatus.sourceCount })
       : th(`${activeNav.key}Sub` as "accountsSub" | "insightsSub" | "settingsSub");
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
 
