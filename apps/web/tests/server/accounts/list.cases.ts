@@ -93,7 +93,7 @@ describe("accounts/list", () => {
       // 让整个账户页打不开 —— 而账户页正是唯一能把凭据重填好的地方。
       const rows = await listed();
 
-      expect(rows.map((r) => r.label).sort()).toEqual(["好的", "坏的"]);
+      expect(rows.map((r) => r.label).sort()).toEqual(["坏的", "好的"]); // 按码点排,「坏」在前
       const bad = rows.find((r) => r.label === "坏的");
       expect(bad?.needsCredentials).toBe(true);
       expect(bad?.credsSafe).toEqual({});

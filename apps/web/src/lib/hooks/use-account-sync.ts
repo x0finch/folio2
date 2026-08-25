@@ -1,3 +1,4 @@
+import type { SyncSkipReason } from "@folio/sync";
 import { toast } from "@folio/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
@@ -96,7 +97,7 @@ interface Line {
   ok?: boolean;
   skipped?: boolean;
   /** 为什么跳过(#527 裁定 2)—— 只有 `missing-credentials` 那种有下一步动作。 */
-  skipReason?: "manual" | "missing-credentials";
+  skipReason?: SyncSkipReason;
   error?: string;
   fatal?: string;
 }

@@ -37,4 +37,5 @@ export type {
   SweepResult,
   SyncLogger,
   SyncResult,
+  SyncSkipReason,
 } from "./types";
