@@ -5,6 +5,12 @@
   "compatibility_flags": ["nodejs_compat"],
   // 服务端 lib 的 workers-pool 测试专用:仅 DB(Miniflare D1)绑定 —— 故意不含 app 的 main/crons/cache/vars,
   // 不加载整个应用 Worker,只跑被测函数(见 vitest.workers.config.ts)。迁移经 readD1Migrations 注入应用。
+  // 加密塑形那条路要它(`sealCreds` → AES-GCM,base64 的 32 字节)。**这是一把测试用的固定假钥**,
+  // 与任何环境的真钥无关:accounts 那一片要断言「secret 字段确实被加密了、public 的没有」,
+  // 而那件事没有钥就压根测不了 —— 这也是那两个 handler 一直没有测试的原因之一。
+  "vars": {
+    "SECRETS_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+  },
   "d1_databases": [
     {
       "binding": "DB",
