@@ -60,24 +60,27 @@ export interface SyncAttentionSource {
 }
 
 export interface SyncStatusSummary {
-  /** **可同步的**活跃账户(id + label)——「立即同步」按这一集并发同步。 */
+  /**
+   * **可同步的**活跃账户(id + label)——「立即同步」按这一集并发同步。
+   *
+   * 手记账户不在里面:它没有上游可问(ADR 0018 —— 当下值读的时候现算,从不写快照)。
+   */
   accounts: { id: string; label: string }[];
-  /** 可同步的活跃账户数 —— 面板里 `N / M` 的那个 M。 */
+  /**
+   * 这个视图里的活跃账户数 —— 面板里 `N / M` 的那个 M,**含手记账户**。
+   *
+   * **分母就是「一共几个来源」**,与页头那句「across N sources」逐字同一个数。以前它只数可同步的
+   * 那些,于是同一个界面上两个都叫 source 的数字对不上:副标题说 10 个来源,面板说 8 个。
+   */
   total: number;
   /**
-   * 这个视图里的活跃账户数,**含手记账户**。
+   * **有数**的来源数 —— `N / M` 的那个 N。
    *
-   * 与 `total` 各算一件事:手记账户不是同步源(ADR 0018 —— 没有上游,当下值读的时候现算,
-   * 从不写快照),所以它不进上面那几个数;但它**是**一个数据来源,页头那句「across N sources」
-   * 问的正是这个。以前那句用的是 `total`,于是一个只有手记账户的组合被说成「0 sources」,
-   * 而屏幕上明明列着它的钱。
-   */
-  sourceCount: number;
-  /**
-   * **已同步过**且凭据齐全的活跃账户数。
+   * 「有数」= 同步过的,**加上手记账户**:后者的值是读的时候现算的,永远是当下,所以它一直算有数。
+   * 不这么算的话它就永远躺在分母里、永远进不了分子,看起来像两个永久欠同步的来源。
    *
-   * 数旧了的**照样算进来** —— 它有数,只是旧;把它从 `N / M` 里减掉等于说「这个来源没同步过」,
-   * 那不是事实。它的位置在下面那份清单里。
+   * 数旧了的**照样算进来** —— 它有数,只是旧;把它减掉等于说「这个来源没同步过」,那不是事实。
+   * 它的位置在下面那份清单里。
    */
   ok: number;
   /** 需要看一眼的来源,按严重程度排(缺凭据 → 从未同步 → 数旧了,同档内旧的在前)。 */
@@ -104,7 +107,8 @@ const KIND_OF: Record<AccountSyncStatus, SyncAttentionKind | null> = {
 // 而读墙钟的测试是 flaky 的(CODING.md「别断言墙上时钟」)。handler 从 Effect 的 Clock 取。
 export function summarizeSync(accounts: SyncAccountInput[], now: number): SyncStatusSummary {
   const active = accounts.filter((a) => a.archivedAt == null);
-  // 手记账户在这里分道:它算一个「来源」,但不算一个「同步源」(理由见 sourceCount 那段)。
+  // 手记账户在这里分道:它算一个「来源」(进分母、也进分子),但不是一个可同步的东西 ——
+  // 「立即同步」不该去问它,清单里也不该出现它。
   const syncable = active.filter((a) => !isManual(a.connectorId));
   const attention = syncable
     .flatMap((a) => {
@@ -122,9 +126,9 @@ export function summarizeSync(accounts: SyncAccountInput[], now: number): SyncSt
   );
   return {
     accounts: syncable.map((a) => ({ id: a.id, label: a.label })),
-    total: syncable.length,
-    sourceCount: active.length,
-    ok: syncable.length - attention.filter((a) => a.kind !== "stale").length,
+    total: active.length,
+    // 减掉的只有「没有数」那两档(缺凭据 / 从未同步);数旧了的仍然有数,手记账户一直有数。
+    ok: active.length - attention.filter((a) => a.kind !== "stale").length,
     attention,
     lastSyncedAt,
   };

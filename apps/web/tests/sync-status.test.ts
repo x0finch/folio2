@@ -106,7 +106,6 @@ describe("summarizeSync", () => {
     expect(s).toEqual({
       accounts: [],
       total: 0,
-      sourceCount: 0,
       ok: 0,
       attention: [],
       lastSyncedAt: null,
@@ -174,10 +173,11 @@ describe("summarizeSync", () => {
   // 手记账户:算一个「来源」,不算一个「同步源」(ADR 0018 —— 它没有上游,当下值读的时候现算)。
   // 页头那句「across N sources」问的是前者,面板里 `N / M` 问的是后者。
   describe("手记账户", () => {
-    it("只有手记账户 → 同步的那几个数是 0,但来源数不是 0", () => {
+    it("只有手记账户 → 1 / 1(它一直有数),但「立即同步」没有可同步的对象", () => {
       const s = summarizeSync([acc({ connectorId: "manual", takenAt: null })], NOW);
-      expect(s.sourceCount).toBe(1);
-      expect(s.total).toBe(0);
+      expect(s.total).toBe(1);
+      expect(s.ok).toBe(1);
+      // 分子算它、分母算它,但它不进同步集 —— 没有上游可问。
       expect(s.accounts).toEqual([]);
       expect(s.attention).toEqual([]);
     });
@@ -188,9 +188,9 @@ describe("summarizeSync", () => {
         NOW,
       );
       expect(s.attention).toEqual([]);
-      expect(s.sourceCount).toBe(2);
-      expect(s.total).toBe(1);
-      expect(s.ok).toBe(1);
+      expect(s.total).toBe(2);
+      expect(s.ok).toBe(2);
+      expect(s.accounts.map((a) => a.id)).toEqual(["c"]);
     });
 
     it("它的 takenAt 不污染「上次更新」", () => {
