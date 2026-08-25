@@ -1,7 +1,7 @@
 import { Database, type SnapshotBalance } from "@folio/db";
 import { Effect, Option, Stream } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
-import { safeView } from "@/lib/server/creds";
+import { readStoredCreds, safeView } from "@/lib/server/creds";
 import {
   accountRecord,
   manualActivityRecord,
@@ -49,8 +49,10 @@ export const exportStream = (): Effect.Effect<
     // 安全投影(无需解密):public 原样、semi 打码、secret 丢弃 —— 绝不导出完整密钥。
     const accountLines = Stream.fromIterableEffect(accounts.list()).pipe(
       Stream.mapEffect((a) =>
+        // 解不开的凭据 → 导成「没凭据」那一行(#527 裁定 1):一行坏数据不该让整个导出中断,
+        // 那会让「先导出再修库」这条唯一的自救路也走不通。
         Effect.map(accounts.getRawCreds(a.id), (raw) => {
-          const stored: Record<string, string> = raw ? JSON.parse(raw) : {};
+          const stored = readStoredCreds(raw) ?? {};
           return accountRecord(a, safeView(specsByType[a.connectorId] ?? [], stored));
         }),
       ),

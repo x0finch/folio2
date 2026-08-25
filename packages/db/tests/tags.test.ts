@@ -59,17 +59,23 @@ describe("createTag / list", () => {
   });
 });
 
+// 撞名与「挂到别的 Portfolio 的 tag」是**类型化失败**,不是 defect(#527 裁定 3/5)——
+// 故这几条断言那句人话,而不只是「抛了点什么」。
 describe("同 Portfolio 内名字唯一(忽略大小写/空格)", () => {
   it("同名(trim 后)重复 → 拒", async () => {
     const pf = await portfolios(USER_A).ensureDefault();
     await tagsOf(USER_A).create({ portfolioId: pf.id, name: "长线" });
-    await expect(tagsOf(USER_A).create({ portfolioId: pf.id, name: " 长线 " })).rejects.toThrow();
+    await expect(tagsOf(USER_A).create({ portfolioId: pf.id, name: " 长线 " })).rejects.toThrow(
+      /name already used/,
+    );
   });
 
   it("大小写不同也算重复 → 拒", async () => {
     const pf = await portfolios(USER_A).ensureDefault();
     await tagsOf(USER_A).create({ portfolioId: pf.id, name: "Defi" });
-    await expect(tagsOf(USER_A).create({ portfolioId: pf.id, name: "DEFI" })).rejects.toThrow();
+    await expect(tagsOf(USER_A).create({ portfolioId: pf.id, name: "DEFI" })).rejects.toThrow(
+      /name already used/,
+    );
   });
 
   it("跨 Portfolio 同名 → 允许", async () => {
@@ -100,7 +106,7 @@ describe("renameTag", () => {
     await tagsOf(USER_A).create({ portfolioId: pf.id, name: "短线" });
     await tagsOf(USER_A).rename(a.id, "中线");
     expect((await tagsOf(USER_A).list()).map((t) => t.name).sort()).toEqual(["中线", "短线"]);
-    await expect(tagsOf(USER_A).rename(a.id, "短线")).rejects.toThrow();
+    await expect(tagsOf(USER_A).rename(a.id, "短线")).rejects.toThrow(/name already used/);
   });
 
   it("改成自身当前名(仅大小写变化)→ 允许(排除自身)", async () => {
@@ -128,7 +134,7 @@ describe("attach / detach", () => {
     const acc = await makeAccount(USER_A); // 落默认 Portfolio
     const watch = await portfolios(USER_A).create({ name: "Watch" });
     const tag = await tagsOf(USER_A).create({ portfolioId: watch.id, name: "长线" });
-    await expect(tagsOf(USER_A).attach(acc.id, tag.id)).rejects.toThrow();
+    await expect(tagsOf(USER_A).attach(acc.id, tag.id)).rejects.toThrow(/different portfolios/);
   });
 
   it("越权:动他人账户 / 他人 Tag → 拒", async () => {

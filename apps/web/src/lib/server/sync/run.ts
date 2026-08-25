@@ -39,7 +39,9 @@ export const handleSyncAccount = Effect.fn("syncAccount")(function* (
   if (!account) return yield* Effect.fail(new NotFound({ entity: "account", id: data.accountId }));
   // manual 不是同步源(ADR 0018:当下值由 creds 现造,不写快照)。UI 已对 manual 隐藏「同步」;此处防御式跳过。
   if (isManual(account.connectorId)) {
-    return { accountId: account.id, ok: false, skipped: true };
+    // **带上为什么跳过**(#527 裁定 2):手记账户没有上游,和「凭据没填完」都跳过,但只有后者
+    // 有下一步动作。以前两者返回同一个形状,界面分不出该不该提示用户去补凭据。
+    return { accountId: account.id, ok: false, skipped: true, skipReason: "manual" as const };
   }
   const rawCreds = yield* accounts.getRawCreds(data.accountId);
   // `logCategory("sync")`:内核的日志落 `folio.sync`,不跟着请求这一半走 `folio.oracle`。
@@ -54,6 +56,7 @@ export const handleSyncAccount = Effect.fn("syncAccount")(function* (
     connectorId: account.connectorId,
     ok: result.ok,
     skipped: result.skipped,
+    skipReason: result.skipReason,
   });
   // **只有真同步成功才预热**(#527 发现 3):skipped(手记 / 凭据不齐)和失败都没写任何新快照,
   // 预热不会让总览更新鲜 —— 却要白打 4 发上游(exchange_rates ×2 + coins/markets ×2)。

@@ -1,9 +1,14 @@
+import type { ConnectorId } from "@folio/connectors";
 import { cn, MorphingModal, Popover, PopoverContent, PopoverTrigger } from "@folio/ui";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { RefreshCw } from "lucide-react";
 import { forwardRef, type ReactNode, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
+import { connectorLabelFallback } from "@/lib/core/logo";
 import { useAccountSync } from "@/lib/hooks/use-account-sync";
-import type { SyncStatusSummary } from "@/lib/server/sync/status";
+import { connectorCatalogQuery } from "@/lib/queries/connectors";
+import type { SyncAttentionSource, SyncStatusSummary } from "@/lib/server/sync/status";
 import { IconButton } from "./icon-button";
 
 // 共享同步状态入口(PageHeader actions):桌面 hover Popover、移动 tap MorphingModal,
@@ -88,17 +93,63 @@ interface PanelProps {
   busy: boolean;
   attention: boolean;
   onSync: () => void;
+  /** 点某一行 → 去账户页把那一行滚出来(不在当前视图里则开它的详情抽屉)。 */
+  onPick: (accountId: string) => void;
+}
+
+// 一行需要注意的来源:`连接器 @标签` + 那一句状态。
+//
+// **没有 hover 态**(设计定的):这是一份摘要,鼠标扫过去不该有任何东西亮起来;能点是它的附加功能,
+// 不是它的卖点。键盘的 focus 环留着 —— 那不是 hover,少了它 tab 到这儿的人不知道焦点在哪。
+//
+// 名字写成 `Bitget @现货主号`:账户列表那一行是「标签 + 连接器徽标」,这里不放徽标,于是用同样的
+// 两半、纯文字。标签与连接器同名时只出连接器 —— 「Kraken @Kraken」是句废话。
+function AttentionRow({
+  source,
+  connectorLabel,
+  onPick,
+}: {
+  source: SyncAttentionSource;
+  connectorLabel: string;
+  onPick: (accountId: string) => void;
+}) {
+  const t = useTranslations("Sync");
+  const format = useFormatter();
+  const sameName = source.label.trim().toLowerCase() === connectorLabel.trim().toLowerCase();
+  const status =
+    source.kind === "missing-credentials"
+      ? t("missingCredentials")
+      : source.kind === "never-synced"
+        ? t("neverSynced")
+        : t("lastSyncedAt", { when: format.relativeTime(new Date(source.takenAt ?? 0)) });
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(source.id)}
+      className="flex w-full items-baseline justify-between gap-2.5 rounded-sm py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      <span className="min-w-0 truncate text-xs">
+        <span className="font-medium">{connectorLabel}</span>
+        {!sameName && <span className="text-muted-foreground"> @{source.label}</span>}
+      </span>
+      <span className="shrink-0 text-warn text-xs">{status}</span>
+    </button>
+  );
 }
 
 // 共享面板内容(无自身外框/内距 —— 由 Popover/MorphingModal 提供表面)。
-function SyncPanel({ summary, busy, attention, onSync }: PanelProps) {
+function SyncPanel({ summary, busy, attention, onSync, onPick }: PanelProps) {
   const t = useTranslations("Sync");
   const format = useFormatter();
   const { badge } = tone(attention);
+  const { data: catalog } = useQuery(connectorCatalogQuery());
+  const nameOf = (id: ConnectorId) => catalog?.[id]?.label ?? connectorLabelFallback(id);
+  // 「部分未同步」在这儿会说谎:清单里可能全是「同步过、只是旧了」的,而上面那行明明写着
+  // `8 / 8`。「需要注意」把两种都装得下,而且与 pill 上那句是同一句 —— 同一件事不该有两种说法。
   const statusLabel = busy
     ? t("syncing")
-    : summary.failed.length > 0
-      ? t("partial")
+    : summary.attention.length > 0
+      ? t("needsAttention")
       : t("allSynced");
   const lastUpdated = busy
     ? "—"
@@ -126,25 +177,19 @@ function SyncPanel({ summary, busy, attention, onSync }: PanelProps) {
         <span className="font-mono text-foreground">{lastUpdated}</span>
       </div>
 
-      {summary.failed.length > 0 ? (
+      {summary.attention.length > 0 ? (
         <>
           <div className="my-2 border-border border-t" />
-          <div className="mb-1.5 text-muted-foreground text-xs uppercase tracking-wider">
-            {t("notSynced")}
-          </div>
-          <ul className="flex flex-col gap-1.5">
-            {summary.failed.map((f) => (
-              <li key={f.id} className="flex items-start gap-2">
-                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warn" />
-                <div className="min-w-0">
-                  <div className="font-medium text-xs">{f.label}</div>
-                  <div className="text-warn text-xs leading-snug">
-                    {t(f.reason === "never-synced" ? "neverSynced" : "missingCredentials")}
-                  </div>
-                </div>
-              </li>
+          <div className="flex flex-col">
+            {summary.attention.map((a) => (
+              <AttentionRow
+                key={a.id}
+                source={a}
+                connectorLabel={nameOf(a.connectorId)}
+                onPick={onPick}
+              />
             ))}
-          </ul>
+          </div>
         </>
       ) : null}
 
@@ -182,12 +227,22 @@ export function SyncStatus({
   // 闭合时隐藏 goo 背板(aria-hidden 首子元素),免透明状态段透出 bg-popover 块(同 useHoverPopover 的手法)。
   const [popoverOpen, setPopoverOpen] = useState(false);
 
-  const attention = busy || summary.failed.length > 0;
+  const navigate = useNavigate();
+  // 点一行 → 去账户页把那一行滚出来。**跳转带 `focus`,滚动那件事由账户页自己做**(那边才知道
+  // 当前 Portfolio 视图里有哪些行);那一行不在视图里时它会退成开详情抽屉。
+  const pick = (accountId: string) => {
+    setModalOpen(false);
+    navigate({ to: "/accounts", search: { focus: accountId } });
+  };
+
+  const attention = busy || summary.attention.length > 0;
   const { dot } = tone(attention);
+  // pill 上那句刻意更短(「已同步」而不是「全部同步」)—— 它在页头里跟其他段并排,字多了会挤。
+  // 但要注意的那句两处一致:同一件事不该有两种说法。
   const triggerLabel = busy
     ? t("triggerSyncing")
-    : summary.failed.length > 0
-      ? t("triggerAttention")
+    : summary.attention.length > 0
+      ? t("needsAttention")
       : t("triggerSynced");
 
   // 桌面:hover Popover 包同步钮;action 段(+)在 Popover 外右侧并排 → hover + 不开面板。
@@ -213,7 +268,13 @@ export function SyncStatus({
         />
       </PopoverTrigger>
       <PopoverContent>
-        <SyncPanel summary={summary} busy={busy} attention={attention} onSync={sync} />
+        <SyncPanel
+          summary={summary}
+          busy={busy}
+          attention={attention}
+          onSync={sync}
+          onPick={pick}
+        />
       </PopoverContent>
     </Popover>
   );
@@ -238,7 +299,13 @@ export function SyncStatus({
       <div className="lg:hidden">
         {action ? <ActionShell action={action}>{mobileSeg}</ActionShell> : mobileSeg}
         <MorphingModal viewId={modalOpen ? "sync" : null} onClose={() => setModalOpen(false)}>
-          <SyncPanel summary={summary} busy={busy} attention={attention} onSync={sync} />
+          <SyncPanel
+            summary={summary}
+            busy={busy}
+            attention={attention}
+            onSync={sync}
+            onPick={pick}
+          />
         </MorphingModal>
       </div>
     </>

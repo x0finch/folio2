@@ -105,7 +105,12 @@ export const syncAccount = (
     // **是正常返回值、不进错误通道** —— 它不是出事了,是这轮没事干。
     if (outcome.status === "needs-credentials") {
       yield* Effect.logWarning("account sync skipped: needs credentials");
-      return { accountId: account.id, ok: false, skipped: true } satisfies AccountSyncResult;
+      return {
+        accountId: account.id,
+        ok: false,
+        skipped: true,
+        skipReason: "missing-credentials",
+      } satisfies AccountSyncResult;
     }
     return yield* finish(account, outcome);
   }).pipe(

@@ -136,7 +136,7 @@ describe("useAccountSync", () => {
       "fetch",
       vi.fn(async () => ndjsonResponse([{ fatal: "listAccounts blew up" }])),
     );
-    client.setQueryData([...syncKeys.status()], { total: 1 });
+    client.setQueryData([...syncKeys.status("pf-1")], { total: 1 });
     const { result } = setup();
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
@@ -145,7 +145,7 @@ describe("useAccountSync", () => {
     expect(toasts.at(-1)?.text).toContain("listAccounts blew up");
     // 关键:失败路径也要刷新 —— 部分账户的快照可能已经落库了。
     await waitFor(() =>
-      expect(client.getQueryState([...syncKeys.status()])?.isInvalidated).toBe(true),
+      expect(client.getQueryState([...syncKeys.status("pf-1")])?.isInvalidated).toBe(true),
     );
   });
 
@@ -181,14 +181,14 @@ describe("useAccountSync", () => {
       vi.fn(async () => ndjsonResponse([{ accountId: "a1", ok: true }])),
     );
     // 缓存里先有一份「已经拿到过」的同步状态,才谈得上它有没有被标记为旧。
-    client.setQueryData([...syncKeys.status()], { total: 1 });
+    client.setQueryData([...syncKeys.status("pf-1")], { total: 1 });
     const { result } = setup();
 
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
     await waitFor(() =>
-      expect(client.getQueryState([...syncKeys.status()])?.isInvalidated).toBe(true),
+      expect(client.getQueryState([...syncKeys.status("pf-1")])?.isInvalidated).toBe(true),
     );
   });
 
@@ -215,7 +215,7 @@ describe("useAccountSync", () => {
       vi.fn(async () => new Response(body, { status: 200 })),
     );
 
-    client.setQueryData([...syncKeys.status()], { total: 3 });
+    client.setQueryData([...syncKeys.status("pf-1")], { total: 3 });
 
     const { result } = setup([
       { id: "a1", label: "Binance" },
@@ -236,7 +236,7 @@ describe("useAccountSync", () => {
 
     // 最后一个账户的结果一定落地:收工那一下要么是尾随、要么已经由 leading 覆盖。
     await waitFor(() =>
-      expect(client.getQueryState([...syncKeys.status()])?.isInvalidated).toBe(true),
+      expect(client.getQueryState([...syncKeys.status("pf-1")])?.isInvalidated).toBe(true),
     );
   });
 

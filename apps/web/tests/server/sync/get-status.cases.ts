@@ -15,9 +15,11 @@ describe("sync/get-status", () => {
   const BTC = "token-btc";
 
   let NOW = 0;
-  const status = async () => {
+  // 摘要按选中的 Portfolio 收口(ADR 0033),所以要传一个;默认那个就是首屏选中的那个。
+  const status = async (portfolioId?: string) => {
     const { registry } = await fakeRegistry();
-    return callWithRegistry(USER, registry, handleGetSyncStatus());
+    const pid = portfolioId ?? (await db(USER).portfolios.ensureDefault()).id;
+    return callWithRegistry(USER, registry, handleGetSyncStatus({ portfolioId: pid }));
   };
 
   const cex = (userId: string, label: string, creds: Record<string, string> | null) =>
@@ -35,7 +37,7 @@ describe("sync/get-status", () => {
   });
 
   describe("getSyncStatus", () => {
-    it("缺凭据算失败,「很久没同步」不算 —— 只有两档失败原因", async () => {
+    it("缺凭据、数旧了都进「需要注意」;只有前者从 ok 里减掉", async () => {
       const fresh = await cex(USER, "刚同步", { apiKey: "k", secret: "s" });
       await seedSnapshot(USER, fresh.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       const stale = await cex(USER, "很久没同步", { apiKey: "k", secret: "s" });
@@ -46,15 +48,13 @@ describe("sync/get-status", () => {
 
       const out = await status();
 
-      // 汇总的形状是 `{ accounts, total, ok, failed, lastSyncedAt }`,失败**只有两档**:
-      // `missing-credentials` 与 `never-synced`。
-      //
-      // **实测纠正了我的假设:「30 天没同步」不是失败状态。** 它同步过,所以算 ok ——
-      // 新鲜度压根没进这个汇总。这在产品上说得通(界面另有「上次同步于…」那行文案),
-      // 但它意味着「这个账户的数据早就过期了」这件事**没有任何汇总数字反映**。
-      // 要不要加一档 stale 是你的决定(#527 待定项)。
+      // 一份清单装两件事(#527 裁定 8):缺凭据是「没有数」,30 天没同步是「有数但旧了」。
+      // 后者仍然计入 ok —— 它同步过。排序按严重程度,缺凭据在前。
       expect(out.total).toBe(3);
-      expect(out.failed.map((f) => f.reason)).toEqual(["missing-credentials"]);
+      expect(out.attention.map((a) => [a.label, a.kind])).toEqual([
+        ["缺凭据", "missing-credentials"],
+        ["很久没同步", "stale"],
+      ]);
       expect(out.ok).toBe(2);
       expect(out.lastSyncedAt).toBe(NOW);
     });
@@ -66,7 +66,23 @@ describe("sync/get-status", () => {
       const out = await status();
 
       expect(out.lastSyncedAt).toBeNull();
-      expect(out.failed.map((f) => f.reason)).toEqual(["never-synced"]);
+      expect(out.attention.map((a) => a.kind)).toEqual(["never-synced"]);
+    });
+
+    it("另一个 Portfolio 里的账户不进这份摘要 —— 切组合它就该跟着变", async () => {
+      // 修之前这里读的是该用户**全部**账户:切到只有一个账户的组合,页头仍然报着别处那 8 个,
+      // 而下面的列表里一个都没有。
+      const other = await db(USER).portfolios.create({ name: "Watch" });
+      const mine = await cex(USER, "在默认里", { apiKey: "k", secret: "s" });
+      const theirs = await cex(USER, "在 Watch 里", { apiKey: "k", secret: "s" });
+      await db(USER).portfolios.assignAccount(theirs.id, other.id);
+
+      const inDefault = await status();
+      const inWatch = await status(other.id);
+
+      expect(inDefault.accounts.map((a) => a.id)).toEqual([mine.id]);
+      expect(inWatch.accounts.map((a) => a.id)).toEqual([theirs.id]);
+      expect(inWatch.total).toBe(1);
     });
 
     it("别人的账户不进我的汇总", async () => {

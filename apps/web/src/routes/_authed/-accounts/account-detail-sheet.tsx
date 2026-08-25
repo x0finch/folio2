@@ -324,7 +324,11 @@ function useAccountSheetWrites(account: AccountRow, onClose: () => void) {
     mutationFn: () => syncAccount({ data: { accountId: account.id } }),
     onSuccess: async (r) => {
       if (r.ok) toast.success(t("synced", { count: 1 }));
-      else if (!r.skipped) toast.error(r.error ?? t("syncGenericError"));
+      // 缺凭据也是「跳过」,但它是用户能修的那种(#527 裁定 2):以前和手记账户共用一个静默
+      // 分支,点了同步屏幕上什么都不发生 —— 而唯一的下一步恰恰是「把凭据填完」。
+      else if (r.skipped) {
+        if (r.skipReason === "missing-credentials") toast.message(t("syncNeedsCredentials"));
+      } else toast.error(r.error ?? t("syncGenericError"));
       await invalidateFor(queryClient, "account.sync");
     },
     onError: () => toast.error(t("syncGenericError")),

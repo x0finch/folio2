@@ -3,7 +3,7 @@ import { cn, SharedLayoutBg, Skeleton } from "@folio/ui";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AvatarStack } from "@/components/avatar-stack";
 import { ConnectorBadge } from "@/components/connector-badge";
@@ -26,6 +26,7 @@ import {
   type TagList,
   tagListQuery,
 } from "@/lib/queries/tags";
+import { type AccountSyncStatus, accountSyncStatus } from "@/lib/server/sync/status";
 import { HeaderSync } from "@/routes/_authed/-home/header-sync";
 import { GainSkeleton, ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 import { AccountDetailSheet } from "./account-detail-sheet";
@@ -33,9 +34,7 @@ import { AddAccountModal, type CompleteTarget } from "./add-account-modal";
 import { attachAccountGains } from "./list-attach-gains";
 import {
   type AccountRow,
-  type AccountSyncStatus,
   accountShare,
-  accountSyncStatus,
   activeAccountsTotal,
   buildAccountRows,
   shareLabel,
@@ -203,7 +202,7 @@ function AccountsListBody({
     () => buildAccountRows({ accounts, holdings, memberships, allTags, tagLinks }),
     [accounts, holdings, memberships, allTags, tagLinks],
   );
-  const { selectedId: selectedPortfolioId, defaultId } = usePortfolio();
+  const { selectedId: selectedPortfolioId, defaultId, select } = usePortfolio();
   // 只在盈亏真的到了之后才允许触发刷价 —— 与上一版 `!gainQuery.isPending` 同一个条件。
   useStalePriceRefresh(holdings?.pricesStale, !gainPending);
 
@@ -233,12 +232,61 @@ function AccountsListBody({
   const archived = rows.filter((r) => r.archivedAt != null);
   const total = activeAccountsTotal(rows);
 
-  const { account: selectedId } = accountsRoute.useSearch();
+  const { account: selectedId, focus } = accountsRoute.useSearch();
   const navigate = accountsRoute.useNavigate();
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
   const setAccount = (id: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, account: id }), replace: true, resetScroll: false });
   const openRow = (r: AccountRow) => setAccount(r.id);
+
+  // 页头同步面板点了某一行 → 把它滚到视野中间,并短暗高亮一下(不改选中态:那看起来像选中了什么)。
+  //
+  // **那一行可能不在当前视图里** —— 同步面板是全局的(它管的是「你的数据源新不新鲜」,不分
+  // Portfolio),而这个列表 scope 到选中的 Portfolio(ADR 0033)。这时先**切到那个账户所属的
+  // Portfolio**,`focus` 留在地址栏里,重筛之后的那一轮再滚 —— 「带我去看这个账户」这件事
+  // 因此在任何 Portfolio 下都成立。
+  //
+  // 行还没渲染出来(刚从别的页面跳过来、数据在路上)时先不判:`allRows` 空就等下一轮,
+  // 否则会把「还在加载」误当成「不在这个视图里」。
+  const [flashId, setFlashId] = useState<string | null>(null);
+  // 切 Portfolio 只试一次,免得「切了还是找不到」变成来回切的死循环。
+  const switchedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focus || allRows.length === 0) return;
+    const clearFocus = () =>
+      navigate({
+        search: (prev) => ({ ...prev, focus: undefined }),
+        replace: true,
+        resetScroll: false,
+      });
+    const el = document.getElementById(accountRowDomId(focus));
+    if (el) {
+      // 归档那些住在折叠的 <details> 里 —— 没展开就没有布局盒,scrollIntoView 会是个空操作。
+      el.closest("details")?.setAttribute("open", "");
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+      setFlashId(focus);
+      switchedFor.current = null;
+      clearFocus();
+      return;
+    }
+    // 没有归属行的账户按兜底规则算在默认 Portfolio 的视图里(见 accounts-in-view)。
+    const owner = memberships.find((m) => m.accountId === focus)?.portfolioId ?? defaultId;
+    const mine = allRows.some((r) => r.id === focus);
+    if (mine && owner !== selectedPortfolioId && switchedFor.current !== focus) {
+      switchedFor.current = focus;
+      select(owner);
+      return; // focus 留着,切完那一轮再滚
+    }
+    switchedFor.current = null;
+    clearFocus();
+  }, [focus, allRows, memberships, selectedPortfolioId, defaultId, select, navigate]);
+
+  useEffect(() => {
+    if (!flashId) return;
+    const timer = setTimeout(() => setFlashId(null), FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [flashId]);
 
   return (
     <>
@@ -249,7 +297,13 @@ function AccountsListBody({
       ) : (
         <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
           {active.map((r) => (
-            <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
+            <button
+              key={r.id}
+              id={accountRowDomId(r.id)}
+              type="button"
+              onClick={() => openRow(r)}
+              className={cn(ROW_CLASS, flashId === r.id && FLASH_CLASS)}
+            >
               <AccountRowContent
                 row={r}
                 total={total}
@@ -361,6 +415,14 @@ function AccountStatusLine({
 }
 
 const ROW_CLASS = "group w-full rounded-xl text-left";
+
+// 滚到某一行之后那一下高亮。ring 而不是底色 —— SharedLayoutBg 的 hover/选中 pill 用的就是底色,
+// 两者叠在一起分不出「被指出来」和「被选中」。
+const FLASH_CLASS = "ring-2 ring-ring";
+const FLASH_MS = 1200;
+
+// 行的 DOM 锚。只有「从页头面板滚到这一行」用它,所以就近定义,不进公共模块。
+const accountRowDomId = (accountId: string) => `account-row-${accountId}`;
 
 // 必须是单个 flex 容器 —— SharedLayoutBg 会把 <button> 的 children 塞进一个非 flex 的 z-10 div,
 // 故 flex 布局放这层内层,避免竖排。归档行只调暗,不抽市值与叠标(#437)。

@@ -19,7 +19,12 @@ export const Route = createFileRoute("/_authed/accounts")({
   // 「Something went wrong!」外加一坨 zod 报错 JSON。实测(去掉 `.catch` 复现):`?account=`
   // 空串触发 `too_small`,`?account=a&account=b` 被解析成数组触发 `invalid_type` —— 两个都只是
   // 地址栏里敲坏了一个参数,不该把页面打没。`.catch` 把它们收成「没带这个参数」。
-  validateSearch: z.object({ account: z.string().min(1).optional().catch(undefined) }),
+  validateSearch: z.object({
+    account: z.string().min(1).optional().catch(undefined),
+    // 页头同步面板点某一行时带上它:「把这个账户的那一行滚出来」。与 `account` 分开 —— 那个是
+    // 「打开详情抽屉」,这个是「在列表里指给我看」;用完即由列表页清掉,不留在地址栏里。
+    focus: z.string().min(1).optional().catch(undefined),
+  }),
   // 账户域的读取已迁 react-query(#413):loader 只**预取**,拼行的活挪进组件。
   // #493 票 2:所有查询第一时间并行发出,谁先回来谁先画。不等持仓、不等标签 ——
   // 那两样是名单上的后到内容,await 它们顶栏就会跟着白着。

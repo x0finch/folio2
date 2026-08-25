@@ -1,11 +1,10 @@
-import { Cause, Exit } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DeletePortfolioInput, handleDeletePortfolio } from "@/lib/server/portfolios/delete";
 import { handleListPortfolios } from "@/lib/server/portfolios/list";
 import { handleListPortfolioMemberships } from "@/lib/server/portfolios/memberships";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call, callExit } from "../_kit/run";
+import { call, callExit, failureOf } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
 // 合并进 portfolios/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
@@ -48,26 +47,25 @@ describe("portfolios/delete", () => {
       expect(links.find((l) => l.accountId === acc.id)?.portfolioId).toBe(def.id);
     });
 
-    it("删默认那个 → 现在是 defect,不是给用户看的拒", async () => {
-      // **钉现状,现状本身待定(#527 待定项)。** 一个陈旧的页面照样发得出这个请求,而库层走的是
-      // `Effect.die` —— 用户拿到一坨 Cause,不是「默认 Portfolio 不能删」。与 tags 那条跨 Portfolio
-      // 挂标是同一类:够得着的请求被当成了 bug。
+    it("删默认那个 → 拒得有话可说,默认那个还在", async () => {
+      // #527 裁定 4:一个陈旧的页面照样发得出这个请求(另一个标签页刚把它设成默认),
+      // 所以是类型化失败,不是 defect —— 以前用户拿到一坨 Cause。
       const def = await db(USER).portfolios.ensureDefault();
 
       const exit = await callExit(USER, handleDeletePortfolio({ portfolioId: def.id }));
 
-      expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit)) expect(Cause.isDie(exit.cause)).toBe(true);
+      const failure = failureOf(exit);
+      expect(failure?._tag).toBe("db/InvalidInput");
+      expect(failure?.message).toContain("default portfolio cannot be deleted");
       expect((await call(USER, handleListPortfolios())).defaultId).toBe(def.id);
     });
 
-    it("删一个不存在的 id → 同样是 defect(现状)", async () => {
+    it("删一个不存在的 id → NotFound,与「不是你的」同一句话", async () => {
       await db(USER).portfolios.ensureDefault();
 
       const exit = await callExit(USER, handleDeletePortfolio({ portfolioId: "没有这个" }));
 
-      expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit)) expect(Cause.isDie(exit.cause)).toBe(true);
+      expect(failureOf(exit)?._tag).toBe("db/NotFound");
     });
 
     it("删别人的 Portfolio → 对方那个还在", async () => {

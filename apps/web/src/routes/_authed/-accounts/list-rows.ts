@@ -105,16 +105,3 @@ export function accountShare(value: number, total: number): number {
 export function shareLabel(pct: number): string {
   return pct > 0 && pct < 1 ? "<1.0" : pct.toFixed(1);
 }
-
-export const STALE_SYNC_MS = 24 * 60 * 60 * 1000;
-
-export type AccountSyncStatus = "needsCreds" | "never" | "stale" | "fresh";
-
-export function accountSyncStatus(
-  account: { needsCredentials: boolean; takenAt: number | null },
-  nowMs: number,
-): AccountSyncStatus {
-  if (account.needsCredentials) return "needsCreds";
-  if (account.takenAt == null) return "never";
-  return nowMs - account.takenAt > STALE_SYNC_MS ? "stale" : "fresh";
-}
