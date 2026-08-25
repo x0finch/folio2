@@ -1,5 +1,6 @@
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { z } from "zod";
+import { pickSelectedPortfolio } from "@/lib/hooks/use-portfolio";
 import {
   homeTabStripQuery,
   portfolioGain24hQuery,
@@ -31,17 +32,25 @@ export const Route = createFileRoute("/_authed/")({
   // 默认 tab 不写进 URL:`/` 就是 tokens,只有别的 tab 才挂 `?tab=`。交给官方中间件在建地址时统一剥,
   // 而不是每个导航调用点自己记得把默认值抹成 undefined。(`token` 没有默认值,不参与。)
   search: { middlewares: [stripSearchParams({ tab: DEFAULT_TAB })] },
+  // 预取的 key 跟着**地址里的组合**走(ADR 0046)。以前写死 `defaultId` 恰好是对的 —— 那时选中态
+  // 总是从默认开始;URL 能说别的之后不改这里,就是「不改也没人报 bug、只是静默慢一拍」的那种错:
+  // 硬加载一个非默认地址先预取默认那份,组件再各自重拉一遍。
+  //
+  // 参数进 `loaderDeps` 才算真的依赖它:框架模型是 URL → loader → 数据,只读地址而不声明依赖,
+  // 得到的是一个「按它没声明依赖的地址准备数据」的 loader(切组合后不重跑)。
+  loaderDeps: ({ search }) => ({ portfolio: search.portfolio }),
   // 本页的读取**已全部迁到 react-query**(ADR 0038):loader 只**预取**、不返回任何数据,
   // 组件按选中的组合 id 从缓存读(本文件已无 `useLoaderData`)。
   //
-  // #488 票 3:只等「默认组合 id」(预取 key 必须对上),其余发出即返回。谁先回来谁先画,
+  // #488 票 3:只等「是哪个组合」(预取 key 必须对上),其余发出即返回。谁先回来谁先画,
   // 壳立刻出现;hero 与列表各有自己的边界,不再整页干等最慢的那个。
-  loader: async ({ context: { queryClient } }) => {
-    const { defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
-    queryClient.ensureQueryData(homeTabStripQuery(defaultId));
-    queryClient.ensureQueryData(portfolioOverviewQuery(defaultId));
-    queryClient.ensureQueryData(portfolioGain24hQuery(defaultId));
-    queryClient.ensureQueryData(portfolioHistoryQuery(defaultId));
+  loader: async ({ context: { queryClient }, deps }) => {
+    const { portfolios, defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
+    const selectedId = pickSelectedPortfolio(deps.portfolio, portfolios, defaultId);
+    queryClient.ensureQueryData(homeTabStripQuery(selectedId));
+    queryClient.ensureQueryData(portfolioOverviewQuery(selectedId));
+    queryClient.ensureQueryData(portfolioGain24hQuery(selectedId));
+    queryClient.ensureQueryData(portfolioHistoryQuery(selectedId));
   },
   component: Overview,
 });
