@@ -14,6 +14,10 @@ import { addManualActivities } from "./manual-fns";
 // 挡不住跨边界传错值)。
 //
 // 出网一律打桩成抛错:这条路径按设计不出网(价格取自快照与本地参考层),任何一次外呼都得看得见。
+// **#527 后续件 4:五条同层同保真度的用例摘去了新家** —— 「归档在列表里且值停封存」「默认路径
+// 不算盈亏」「归档拿 undefined(账户级与现货行)」「没基准给 null」现在住 `portfolio/
+// account-holdings.test.ts` 与 `portfolio/gain.test.ts`(同一个 runForUser + 真 D1,断言相同)。
+// 留在这里的都是那边没有的:跨链盈亏摊分、manual 与同步账户共用 token_id、刷价信号。
 const USER = "user-account-holdings";
 
 // 生产那条路的把手 —— 底下就是 server fn / 路由用的那个内核(#504 T13)。
@@ -58,37 +62,6 @@ const rowsByLabel = async (withGain = false) => {
 };
 
 describe("按账户明细与归档", () => {
-  it("归档账户在里面,而且带着封存那一刻的市值与持仓", async () => {
-    const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
-      { namer: "coingecko", localName: "issued:bitcoin" },
-    ]);
-    const live = await evmAccount("Live", "0xlive");
-    const gone = await evmAccount("Gone", "0xgone");
-    await dbFor(USER).snapshots.write(live.id, {
-      takenAt: 2000,
-      totalUsd: 100,
-      balances: [{ tokenId: btc, amount: 1, usdValue: 100, kind: "spot", platform: "evm:1" }],
-    });
-    await dbFor(USER).snapshots.write(gone.id, {
-      takenAt: 1000,
-      totalUsd: 42,
-      balances: [{ tokenId: btc, amount: 0.5, usdValue: 42, kind: "spot", platform: "evm:1" }],
-    });
-    await dbFor(USER).accounts.setArchived(gone.id, true);
-
-    const { of } = await rowsByLabel();
-
-    // 这一条就是本片要的行为:归档账户不再是一具空壳。
-    expect(of("Gone")?.totalUsd).toBe(42);
-    expect(of("Gone")?.takenAt).toBe(1000);
-    expect(of("Gone")?.balances).toHaveLength(1);
-    expect(of("Gone")?.archivedAt).not.toBeNull();
-    // 活跃账户不受影响。
-    expect(of("Live")?.totalUsd).toBe(100);
-    expect(of("Live")?.archivedAt).toBeNull();
-    expect(outbound).toEqual([]);
-  });
-
   it("归档账户没有快照(从没同步过就归档了)→ 退成空,但那一行仍在", async () => {
     const never = await evmAccount("NeverSynced", "0xnever");
     await dbFor(USER).accounts.setArchived(never.id, true);
@@ -170,41 +143,10 @@ describe("账户行的 24h 盈亏(ADR 0040)", () => {
     return acc;
   };
 
-  it("默认路径不算 24h 盈亏 —— 金额先亮,盈亏另包", async () => {
-    await withHistory("Live", "0xa", 100, 110);
-    const { of } = await rowsByLabel();
-    expect(of("Live")).not.toHaveProperty("gain24h");
-    expect(of("Live")?.balances[0]).not.toHaveProperty("gain24h");
-  });
-
   it("有基准 → 行上带真实盈亏", async () => {
     await withHistory("Live", "0xa", 100, 110);
     const { of } = await rowsByLabel(true);
     expect(of("Live")?.gain24h?.amount).toBeCloseTo(10, 4);
-  });
-
-  it("归档账户拿到 undefined —— 「不该有这个数」,不是「算不出」", async () => {
-    const acc = await withHistory("Sealed", "0xb", 100, 110);
-    await dbFor(USER).accounts.setArchived(acc.id, true);
-    const { of } = await rowsByLabel(true);
-    const row = of("Sealed");
-    expect(row).toBeDefined(); // 归档账户仍在列表里(ADR 0039)
-    expect(row?.gain24h).toBeUndefined();
-    expect(row?.gain24h).not.toBeNull();
-  });
-
-  it("没有窗口内的基准 → null(界面渲染 `—`)", async () => {
-    const btc = await dbFor(USER).transfer.importToken({ symbol: "ETH", name: "Ether" }, [
-      { namer: "coingecko", localName: "issued:ethereum" },
-    ]);
-    const acc = await evmAccount("Fresh", "0xc");
-    await dbFor(USER).snapshots.write(acc.id, {
-      takenAt: Date.now(),
-      totalUsd: 50,
-      balances: [{ amount: 1, usdValue: 50, kind: "spot", platform: "evm:1", tokenId: btc }],
-    });
-    const { of } = await rowsByLabel(true);
-    expect(of("Fresh")?.gain24h).toBeNull();
   });
 
   it("整条路径不出网", async () => {
@@ -254,38 +196,7 @@ describe("抽屉现货行的逐币盈亏(ADR 0040)", () => {
     // 每行都认领全部的话,两行都会是 10、加起来 20
     expect(Math.max(...amounts)).not.toBeCloseTo(10, 2);
   });
-
-  it("归档账户的现货行不带这个数", async () => {
-    const acc = await withHistoryAccount("Sealed2", "0xz");
-    await dbFor(USER).accounts.setArchived(acc.id, true);
-    const { of } = await rowsByLabel(true);
-    expect(of("Sealed2")?.balances[0]?.gain24h).toBeUndefined();
-  });
 });
-
-async function withHistoryAccount(label: string, address: string) {
-  const DAY = 24 * 60 * 60 * 1000;
-  const tok = await dbFor(USER).transfer.importToken({ symbol: "SOL", name: "Solana" }, [
-    { namer: "coingecko", localName: `issued:${address}` },
-  ]);
-  const acc = await dbFor(USER).accounts.create({
-    connectorId: "evm",
-    platform: "evm:1",
-    label,
-    creds: JSON.stringify({ address }),
-  });
-  for (const [t, v] of [
-    [Date.now() - DAY, 100],
-    [Date.now(), 110],
-  ] as const) {
-    await dbFor(USER).snapshots.write(acc.id, {
-      takenAt: t,
-      totalUsd: v,
-      balances: [{ amount: 1, usdValue: v, kind: "spot", platform: "evm:1", tokenId: tok }],
-    });
-  }
-  return acc;
-}
 
 describe("manual 账户的抽屉现货行", () => {
   // 浏览器实测发现:抽屉头显示 −$1,524.85,而它下面唯一那行 BTC 却是 `—` —— 同一个账户同一个币,

@@ -55,6 +55,10 @@ export const handleSyncAccount = Effect.fn("syncAccount")(function* (
     ok: result.ok,
     skipped: result.skipped,
   });
-  yield* warmTokens; // 让总览能 cache-only 富化新价
+  // **只有真同步成功才预热**(#527 发现 3):skipped(手记 / 凭据不齐)和失败都没写任何新快照,
+  // 预热不会让总览更新鲜 —— 却要白打 4 发上游(exchange_rates ×2 + coins/markets ×2)。
+  // CoinGecko 免费档每分钟 10 发,在设置页对着一个缺凭据的账户连点几下「同步」就能把限额打空,
+  // 而屏幕上什么都没发生。
+  if (result.ok) yield* warmTokens; // 让总览能 cache-only 富化新价
   return result;
 });
