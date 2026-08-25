@@ -38,6 +38,7 @@ export const handleGetSyncStatus = Effect.fn("getSyncStatus")(function* () {
       return {
         id: a.id,
         label: a.label,
+        connectorId: a.connectorId,
         archivedAt: a.archivedAt,
         complete: isComplete(specs, stored),
         takenAt: takenAtById.get(a.id) ?? null,

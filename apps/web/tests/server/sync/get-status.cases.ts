@@ -35,7 +35,7 @@ describe("sync/get-status", () => {
   });
 
   describe("getSyncStatus", () => {
-    it("缺凭据算失败,「很久没同步」不算 —— 只有两档失败原因", async () => {
+    it("缺凭据、数旧了都进「需要注意」;只有前者从 ok 里减掉", async () => {
       const fresh = await cex(USER, "刚同步", { apiKey: "k", secret: "s" });
       await seedSnapshot(USER, fresh.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       const stale = await cex(USER, "很久没同步", { apiKey: "k", secret: "s" });
@@ -46,13 +46,14 @@ describe("sync/get-status", () => {
 
       const out = await status();
 
-      // 失败仍然只有两档(`missing-credentials` / `never-synced`),而「30 天没同步」**不是失败**
-      // —— 它同步过,所以照样算 ok。#527 裁定 8 补的是第三个位置:`stale` 单独列出来,于是
-      // 「这个账户的数早就旧了」终于在汇总里有个数字,而不是只能靠用户自己看「上次同步于…」。
+      // 一份清单装两件事(#527 裁定 8):缺凭据是「没有数」,30 天没同步是「有数但旧了」。
+      // 后者仍然计入 ok —— 它同步过。排序按严重程度,缺凭据在前。
       expect(out.total).toBe(3);
-      expect(out.failed.map((f) => f.reason)).toEqual(["missing-credentials"]);
+      expect(out.attention.map((a) => [a.label, a.kind])).toEqual([
+        ["缺凭据", "missing-credentials"],
+        ["很久没同步", "stale"],
+      ]);
       expect(out.ok).toBe(2);
-      expect(out.stale.map((a) => a.label)).toEqual(["很久没同步"]);
       expect(out.lastSyncedAt).toBe(NOW);
     });
 
@@ -63,7 +64,7 @@ describe("sync/get-status", () => {
       const out = await status();
 
       expect(out.lastSyncedAt).toBeNull();
-      expect(out.failed.map((f) => f.reason)).toEqual(["never-synced"]);
+      expect(out.attention.map((a) => a.kind)).toEqual(["never-synced"]);
     });
 
     it("别人的账户不进我的汇总", async () => {

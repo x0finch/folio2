@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountSyncStatus, STALE_SYNC_MS } from "@/routes/_authed/-accounts/list-rows";
+import { accountSyncStatus, STALE_SYNC_MS } from "@/lib/server/sync/status";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = 1_700_000_000_000;
@@ -31,7 +31,9 @@ describe("accountSyncStatus", () => {
     );
   });
 
-  it("阈值为 24 小时", () => {
-    expect(STALE_SYNC_MS).toBe(24 * HOUR);
+  it("阈值为 3 天 —— 账户行与页头面板共用这一个", () => {
+    // 曾经是 24 小时。改成 3 天有两个理由:同步是手动动作,隔一天不点很正常;而这个阈值现在
+    // 也决定页头徽标变不变琥珀,24 小时会让它几乎天天在提醒。
+    expect(STALE_SYNC_MS).toBe(3 * 24 * HOUR);
   });
 });

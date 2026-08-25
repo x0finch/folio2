@@ -3,7 +3,7 @@ import { cn, SharedLayoutBg, Skeleton } from "@folio/ui";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AvatarStack } from "@/components/avatar-stack";
 import { ConnectorBadge } from "@/components/connector-badge";
@@ -26,6 +26,7 @@ import {
   type TagList,
   tagListQuery,
 } from "@/lib/queries/tags";
+import { type AccountSyncStatus, accountSyncStatus } from "@/lib/server/sync/status";
 import { HeaderSync } from "@/routes/_authed/-home/header-sync";
 import { GainSkeleton, ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 import { AccountDetailSheet } from "./account-detail-sheet";
@@ -33,9 +34,7 @@ import { AddAccountModal, type CompleteTarget } from "./add-account-modal";
 import { attachAccountGains } from "./list-attach-gains";
 import {
   type AccountRow,
-  type AccountSyncStatus,
   accountShare,
-  accountSyncStatus,
   activeAccountsTotal,
   buildAccountRows,
   shareLabel,
@@ -233,12 +232,44 @@ function AccountsListBody({
   const archived = rows.filter((r) => r.archivedAt != null);
   const total = activeAccountsTotal(rows);
 
-  const { account: selectedId } = accountsRoute.useSearch();
+  const { account: selectedId, focus } = accountsRoute.useSearch();
   const navigate = accountsRoute.useNavigate();
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
   const setAccount = (id: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, account: id }), replace: true, resetScroll: false });
   const openRow = (r: AccountRow) => setAccount(r.id);
+
+  // 页头同步面板点了某一行 → 把它滚到视野中间,并短暗高亮一下(不改选中态:那看起来像选中了什么)。
+  //
+  // **滚不到就开详情抽屉。** 那一行可能压根不在 DOM 里 —— 当前 Portfolio 视图把它筛掉了 ——
+  // 那时滚动什么都不发生,而用户点了一下、屏幕毫无反应。抽屉不受视图筛选影响,而缺凭据那种情况
+  // 接下来正要在抽屉里补凭据。
+  //
+  // 行还没渲染出来(刚从别的页面跳过来、数据在路上)时先不判:`rows` 空就等下一轮,
+  // 否则会把「还在加载」误当成「被筛掉了」。
+  const [flashId, setFlashId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focus || rows.length === 0) return;
+    const el = document.getElementById(accountRowDomId(focus));
+    if (el) {
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+      setFlashId(focus);
+    }
+    // 一次 navigate 干两件事:清掉 focus,顺带在滚不到时打开抽屉 —— 两次 navigate 的话
+    // 后一次拿到的 prev 可能还是前一次之前的。
+    navigate({
+      search: (prev) => ({ ...prev, focus: undefined, account: el ? prev.account : focus }),
+      replace: true,
+      resetScroll: false,
+    });
+  }, [focus, rows.length, navigate]);
+
+  useEffect(() => {
+    if (!flashId) return;
+    const timer = setTimeout(() => setFlashId(null), FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [flashId]);
 
   return (
     <>
@@ -249,7 +280,13 @@ function AccountsListBody({
       ) : (
         <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
           {active.map((r) => (
-            <button key={r.id} type="button" onClick={() => openRow(r)} className={ROW_CLASS}>
+            <button
+              key={r.id}
+              id={accountRowDomId(r.id)}
+              type="button"
+              onClick={() => openRow(r)}
+              className={cn(ROW_CLASS, flashId === r.id && FLASH_CLASS)}
+            >
               <AccountRowContent
                 row={r}
                 total={total}
@@ -361,6 +398,14 @@ function AccountStatusLine({
 }
 
 const ROW_CLASS = "group w-full rounded-xl text-left";
+
+// 滚到某一行之后那一下高亮。ring 而不是底色 —— SharedLayoutBg 的 hover/选中 pill 用的就是底色,
+// 两者叠在一起分不出「被指出来」和「被选中」。
+const FLASH_CLASS = "ring-2 ring-ring";
+const FLASH_MS = 1200;
+
+// 行的 DOM 锚。只有「从页头面板滚到这一行」用它,所以就近定义,不进公共模块。
+const accountRowDomId = (accountId: string) => `account-row-${accountId}`;
 
 // 必须是单个 flex 容器 —— SharedLayoutBg 会把 <button> 的 children 塞进一个非 flex 的 z-10 div,
 // 故 flex 布局放这层内层,避免竖排。归档行只调暗,不抽市值与叠标(#437)。
