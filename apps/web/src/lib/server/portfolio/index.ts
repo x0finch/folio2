@@ -25,12 +25,15 @@ export const getHomeTabStrip = createServerFn({ method: "GET" })
   .validator(PortfolioSelectInput)
   .handler(runEffect(handleGetHomeTabStrip));
 
+// 这两条也按组合收口(ADR 0047):账户页的持仓与盈亏只回当前组合那些账户。
 export const listAccountHoldings = createServerFn({ method: "GET" })
   .middleware([requireAuth])
+  .validator(PortfolioSelectInput)
   .handler(runEffect(handleListAccountHoldings));
 
 export const getAccountGain24h = createServerFn({ method: "GET" })
   .middleware([requireAuth])
+  .validator(PortfolioSelectInput)
   .handler(runEffect(handleGetAccountGain24h));
 
 export const getPortfolioHistory = createServerFn({ method: "GET" })

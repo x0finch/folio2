@@ -6,4 +6,5 @@ import "./account-holdings.cases";
 import "./gain.cases";
 import "./get-history.cases";
 import "./overview.cases";
+import "./scope.cases";
 import "./tabs.cases";

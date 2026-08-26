@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   accountsInView,
   accountsMatchingPin,
+  inView,
   type TabPinScope,
   toTabPin,
 } from "@/lib/core/accounts-in-view";
@@ -57,6 +58,35 @@ export const resolveScope = (
     return { selectedId, defaultId: defaultPf.id };
   });
 
+// 当前组合的成员判据(ADR 0047:作用域在服务端定)。账户域那几个读取口共用这一份。
+//
+// **与归档无关** —— 账户页有归档区。用 `accountsInView` 那个口径(它排除归档,喂总览/曲线)会让
+// 归档账户从账户页凭空消失。两个口径别混,判据是「这一页要不要显示归档」。
+export interface ScopedMembership {
+  selectedId: string;
+  defaultId: string;
+  /** 这个账户在不在当前组合的视图里(归档与否不影响)。 */
+  has: (accountId: string) => boolean;
+  /** 这个账户归属哪个组合 —— 没有归属行的按兜底规则算进默认组合(同 `inView`)。 */
+  portfolioIdOf: (accountId: string) => string;
+}
+
+export const scopedMembership = (
+  requested: string | undefined,
+): Effect.Effect<ScopedMembership, never, Database> =>
+  Effect.gen(function* () {
+    const store = (yield* Database).portfolios;
+    const { selectedId, defaultId } = yield* resolveScope(requested);
+    const memberships = yield* store.listMemberships();
+    const portfolioOf = new Map(memberships.map((m) => [m.accountId, m.portfolioId]));
+    return {
+      selectedId,
+      defaultId,
+      has: (accountId) => inView(portfolioOf.get(accountId), selectedId, defaultId),
+      portfolioIdOf: (accountId) => portfolioOf.get(accountId) ?? defaultId,
+    };
+  });
+
 // 总览装配:账户集 + 当下快照 + 手记注入 + 可选的 24h 盈亏原料。
 // `withGain` 是票 5 的切法 —— 总览不再读窗口历史;盈亏读取走同一条装配、把历史带上,
 // 于是「各行相加 = hero 那个数」仍是同一个 `computeGain24h` 喂出来的,不是两处各算。
@@ -93,7 +123,7 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
     const fiatRefs = yield* manualFiatRefs(accounts);
     let gainHistory: OverviewDeps["gainHistory"];
     if (withGain) {
-      const inView = new Set(accounts.map((a) => a.id));
+      const inScope = new Set(accounts.map((a) => a.id));
       const [snapGain, manualGain] = yield* Effect.all(
         [
           snapshotStore.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
@@ -101,7 +131,7 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
         ],
         { concurrency: 2 },
       );
-      gainHistory = [...snapGain.filter((r) => inView.has(r.accountId)), ...manualGain];
+      gainHistory = [...snapGain.filter((r) => inScope.has(r.accountId)), ...manualGain];
     }
     return yield* buildOverview(accounts, byAccount, {
       connectorMeta: connectorPlatformMeta,

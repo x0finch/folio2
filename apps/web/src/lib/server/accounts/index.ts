@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { PortfolioSelectInput } from "@/lib/server/portfolio/scope";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { CreateAccountInput, handleCreateAccount } from "./create";
@@ -12,8 +13,10 @@ import { handleUpdateAccount, UpdateAccountInput } from "./update";
 // RESTful 文件里 —— 它们只描述业务、返回 Effect(#504 T8)。
 // userId 经 requireAuth 的 withContext 自动带入(ALS);红线:不打 creds,只记安全字段。
 
+// 账户列表按组合收口(ADR 0047)—— 缺省 = 默认组合。
 export const listAccounts = createServerFn({ method: "GET" })
   .middleware([requireAuth])
+  .validator(PortfolioSelectInput)
   .handler(runEffect(handleListAccounts));
 
 export const createAccount = createServerFn({ method: "POST" })

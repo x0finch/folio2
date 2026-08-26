@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { PortfolioSelectInput } from "@/lib/server/portfolio/scope";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListAccountTags } from "./account-tags";
@@ -13,12 +14,15 @@ import { handleRenameTag, RenameTagInput } from "./rename";
 // handler 自己只描述业务(返回 Effect,`yield* Database` 取域操作),「哪个用户 / 怎么装配 /
 // 错误怎么映射 / 什么时候变成 Promise」全在 `runEffect` 里(#504 T7)。
 
+// 两条读取都按组合收口(ADR 0047)—— 缺省 = 默认组合。
 export const listTags = createServerFn({ method: "GET" })
   .middleware([requireAuth])
+  .validator(PortfolioSelectInput)
   .handler(runEffect(handleListTags));
 
 export const listAccountTags = createServerFn({ method: "GET" })
   .middleware([requireAuth])
+  .validator(PortfolioSelectInput)
   .handler(runEffect(handleListAccountTags));
 
 export const createTag = createServerFn({ method: "POST" })

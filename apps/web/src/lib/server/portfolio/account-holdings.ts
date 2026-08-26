@@ -10,6 +10,7 @@ import {
   type Gain,
   type GainCurrentRow,
 } from "./gain-24h";
+import { type PortfolioScope, scopedMembership } from "./scope";
 
 type WithOptionalGain<R extends { balances: readonly unknown[] }> = Omit<R, "balances"> & {
   gain24h?: Gain | null;
@@ -23,16 +24,19 @@ type WithOptionalGain<R extends { balances: readonly unknown[] }> = Omit<R, "bal
 // manual 合成注入、富化四层,而「归档账户要不要在里面」正是跨层才看得出来的事(隔壁
 // `scenarios.test.ts` 记着同一个教训:边界两侧各测一遍,挡不住跨边界传错值)。server fn 那层
 // 拿不到测试上下文,抽出来之后 workers 池就能驱动真 D1 走一遍。
-export const loadAccountHoldings = (withGain = false) =>
+export const loadAccountHoldings = (scope: PortfolioScope, withGain = false) =>
   Effect.gen(function* () {
     // **整条链一个 effect,一次装配**(#394 T6):读账户 + 快照 → 注入 manual 合成项 → 逐账户富化。
     // 「当下」取一次,整条链共用(分段末点 / 容差判定 / 取历史的下界都按同一刻算)。
     const now = Date.now();
     const db = yield* Database;
-    const [allAccounts, snapshots] = yield* Effect.all(
-      [db.accounts.list(), db.snapshots.latest()],
-      { concurrency: 2 },
+    const [member, everyAccount, snapshots] = yield* Effect.all(
+      [scopedMembership(scope.portfolioId), db.accounts.list(), db.snapshots.latest()],
+      { concurrency: 3 },
     );
+    // **只当前组合的账户**(ADR 0047):以前整份回、账户页自己筛。判据与列表那条同一个
+    // (归档无关 —— 这一页要显示归档区)。
+    const allAccounts = everyAccount.filter((a) => member.has(a.id));
     // **归档账户也在里面**(ADR 0039):归档 = 封存,账户页要显示封存那一刻的持仓,而不是一具空壳。
     // 「计入总额」与「展示持仓」是两件事 —— 按代币聚合的那条路径仍然只算活跃账户。
     const active = allAccounts.filter((a) => a.archivedAt == null);
@@ -148,6 +152,8 @@ export const loadAccountHoldings = (withGain = false) =>
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓,**含已归档账户**(ADR 0039)。
 // handler 只是 auth 薄壳 —— 取数在上面的 loadAccountHoldings,这边才测得到(workers 池要驱动真 D1)。
-export const handleListAccountHoldings = Effect.fn("listAccountHoldings")(function* () {
-  return yield* loadAccountHoldings();
+export const handleListAccountHoldings = Effect.fn("listAccountHoldings")(function* (
+  data: PortfolioScope = {},
+) {
+  return yield* loadAccountHoldings(data);
 });

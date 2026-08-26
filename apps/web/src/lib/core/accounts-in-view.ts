@@ -8,7 +8,10 @@ import type { AccountTagLink, PortfolioMembership } from "@folio/db";
 // 宁可多显示也不让一个账户因缺一行归属而从净值里凭空消失(钱不能隐形)。
 
 // 某归属是否属于当前视图:命中选中的即是;没有归属行的账户只在「看默认 Portfolio」时兜底计入。
-function inView(
+//
+// **导出的是它,而不是让服务端各自抄一遍那条兜底规则**(ADR 0047:账户域按组合筛在服务端做)——
+// 逐行判时用这个,成集合时用下面的 `accountIdsInView`,两者同一条判据。
+export function inView(
   membershipPortfolioId: string | undefined,
   selectedPortfolioId: string,
   defaultPortfolioId: string,

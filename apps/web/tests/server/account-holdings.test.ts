@@ -54,7 +54,7 @@ const evmAccount = (label: string, address: string) =>
   });
 
 const rowsByLabel = async (withGain = false) => {
-  const view = await run(USER, loadAccountHoldings(withGain));
+  const view = await run(USER, loadAccountHoldings({}, withGain));
   return {
     view,
     of: (label: string) => view.rows.find((r) => r.account.label === label),

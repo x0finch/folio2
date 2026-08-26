@@ -75,7 +75,10 @@ describe("tags/create", () => {
       await call(USER, handleCreateTag({ portfolioId: a.id, name: "长期" }));
       await call(USER, handleCreateTag({ portfolioId: b.id, name: "长期" }));
 
-      expect(await call(USER, handleListTags())).toHaveLength(2);
+      // **一个组合问一次**:`listTags` 按当前组合筛(ADR 0047),不再一把回全部。
+      // 要钉的性质没变 —— 两个组合各有一份同名的,互不打架。
+      expect(await call(USER, handleListTags({ portfolioId: a.id }))).toHaveLength(1);
+      expect(await call(USER, handleListTags({ portfolioId: b.id }))).toHaveLength(1);
     });
 
     it("双击提交两次 → 第二下被重名拒住,不出现两条", async () => {
