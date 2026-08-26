@@ -58,6 +58,10 @@ describe("tab-pins/update-target", () => {
 
     it("改成三个 pin 里中间那个 → 另外两个的顺序不动", async () => {
       const { tag } = await seed(USER);
+      // 每个被 pin 的 connector 都得在这个组合里有账户,否则那个 pin 压根不摆(ADR 0047)。
+      for (const c of ["bitcoin", "binance"] as const) {
+        await db(USER).accounts.create({ connectorId: c, label: c, creds: null });
+      }
       const second = await db(USER).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
       await db(USER).tabPins.create({ kind: "connector", connectorId: "binance" });
       const before = (await call(USER, handleGetHomeTabStrip({}))).pins.map((p) => p.id);

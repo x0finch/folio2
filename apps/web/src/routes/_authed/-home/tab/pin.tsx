@@ -3,6 +3,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { Plus } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
+import { MAX_PINS_PER_PORTFOLIO } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback } from "@/lib/core/logo";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { accountListQuery } from "@/lib/queries/accounts";
@@ -16,8 +17,6 @@ import { type PinTargetChoice, TabPinPicker } from "./pin-picker";
 import { PinPanel } from "./pin-portal-popover";
 import { PinTargetMark } from "./pin-target-mark";
 import { useHomeTabSelection } from "./selection";
-
-const MAX_PINS = 3;
 
 // 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);
 // 管理面板经 PinPanel 浮出。写(改指向 / 取消固定)自包含。
@@ -111,7 +110,9 @@ export function AddPinButton() {
   const { selectTab } = useHomeTabSelection(strip.pins);
   const tct = useTranslations("CustomTabs");
   const addMut = useMutation({
-    mutationFn: (choice: PinTargetChoice) => createTabPin({ data: choice }),
+    // 带上当前组合:上限按组合算,而 pin 行上没有这个字段(ADR 0047)。
+    mutationFn: (choice: PinTargetChoice) =>
+      createTabPin({ data: { ...choice, portfolioId: selectedId } }),
     onSuccess: async (pin) => {
       // 先等 tab 条刷新、新 tab 挂上再选中 —— 提前选中会让 active 短暂指向不存在的 tab,
       // 被 clamp 回 tokens,药丸先滑到第一个再滑回来(实测)。
@@ -124,7 +125,7 @@ export function AddPinButton() {
   // 不禁的话手快能再挑一个。**真正兜住上限的是数据库那道**
   // (`packages/db/src/queries/tab-pins.ts` 的 `MAX_TAB_PINS_PER_USER`,超了直接拒),这里挡的
   // 只是「让用户白挑一次、再吃一个报错」。
-  if (strip.pins.length >= MAX_PINS) return null;
+  if (strip.pins.length >= MAX_PINS_PER_PORTFOLIO) return null;
   return (
     <PinPanel
       disabled={addMut.isPending}

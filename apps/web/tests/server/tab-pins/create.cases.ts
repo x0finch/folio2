@@ -42,21 +42,6 @@ describe("tab-pins/create", () => {
       expect(strip.pins[0].name).not.toBe(tag.id);
     });
 
-    it("已经有三个了再建 → 拒,而且是一句「钉满了」而不是 500", async () => {
-      await seed(USER);
-      for (const c of ["manual", "bitcoin", "binance"]) {
-        await call(USER, handleCreateTabPin({ kind: "connector", connectorId: c }));
-      }
-
-      const exit = await callExit(
-        USER,
-        handleCreateTabPin({ kind: "connector", connectorId: "okx" }),
-      );
-
-      expect(failureOf(exit)).toBeInstanceOf(InvalidInput);
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
-    });
-
     it("指向别人的 tag → 拒,不许建出跨用户的 pin", async () => {
       await seed(USER);
       const theirs = await seed(otherUser(USER));
@@ -75,6 +60,52 @@ describe("tab-pins/create", () => {
       const exit = await callExit(USER, handleCreateTabPin({ kind: "tag" }));
 
       expect(failureOf(exit)).toBeInstanceOf(InvalidInput);
+    });
+
+    // ADR 0047:上限是**每组合** 3 个,而且数的是「这个组合里看得见几个」—— 与 tab 条摆不摆共用同一个
+    // 纯函数。以前是每 user 3 个,于是在默认组合钉满之后,别的组合明明空着也建不了,界面还说「钉满了」。
+    it("这个组合钉满 3 个 → 第 4 个被拒(类型化失败,不是 500)", async () => {
+      const { pf } = await seed(USER);
+      for (const c of ["binance", "okx", "hyperliquid"] as const) {
+        const acc = await db(USER).accounts.create({ connectorId: c, label: c, creds: null });
+        await db(USER).portfolios.assignAccount(acc.id, pf.id);
+        await call(USER, handleCreateTabPin({ kind: "connector", connectorId: c }));
+      }
+
+      const exit = await callExit(
+        USER,
+        handleCreateTabPin({ kind: "connector", connectorId: "manual" }),
+      );
+
+      expect(failureOf(exit)).toBeInstanceOf(InvalidInput);
+      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
+    });
+
+    it("A 组合钉满,B 组合照样能建(名额按组合各算)", async () => {
+      const { pf } = await seed(USER);
+      for (const c of ["binance", "okx", "hyperliquid"] as const) {
+        const acc = await db(USER).accounts.create({ connectorId: c, label: c, creds: null });
+        await db(USER).portfolios.assignAccount(acc.id, pf.id);
+        await call(USER, handleCreateTabPin({ kind: "connector", connectorId: c }));
+      }
+      const watch = await db(USER).portfolios.create({ name: "Watch" });
+      const there = await db(USER).accounts.create({
+        connectorId: "bitcoin",
+        label: "那边的",
+        creds: null,
+      });
+      await db(USER).portfolios.assignAccount(there.id, watch.id);
+
+      await call(
+        USER,
+        handleCreateTabPin({ kind: "connector", connectorId: "bitcoin", portfolioId: watch.id }),
+      );
+
+      // Watch 里只看得见刚建的那一个;默认组合那三个仍是三个。
+      expect(
+        (await call(USER, handleGetHomeTabStrip({ portfolioId: watch.id }))).pins,
+      ).toHaveLength(1);
+      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
     });
 
     it("kind 不在枚举里 → schema 拒", () => {

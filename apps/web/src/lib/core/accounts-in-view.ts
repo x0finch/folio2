@@ -100,6 +100,11 @@ export function accountIdsInView(
   );
 }
 
+// 自定义 Tab **每个组合**最多几个(ADR 0034 定了 3 个;ADR 0047 把「每用户」改成「每组合」——
+// 否则在默认组合里钉满之后,别的组合明明空着也建不了,而界面还告诉你「已经钉满」)。
+// 客户端用它决定还显不显示 ＋,服务端用它拒第 4 个 —— 同一个数字,别各写一份。
+export const MAX_PINS_PER_PORTFOLIO = 3;
+
 // 一个 pin 指向什么。`tab_pins` 行上那三个字段是可空的(哪一类只填哪一个),所以这里也收 null。
 export interface PinTargetRef {
   kind: "connector" | "tag" | "account";
