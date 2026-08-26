@@ -2,8 +2,8 @@ import { expect, type Page, test } from "@playwright/test";
 import { dismissPasskeyPrompt, signUpAndLogin } from "./fixtures/app";
 
 // 选中的 Portfolio 住 URL(ADR 0046)。这一条只测**浏览器里才组合得起来**的那几件:
-// 切组合后地址长出参数、后退键回到上一个组合、刷新后仍在原组合、逛设置往返参数还在、
-// 切组合把属于旧组合的参数丢掉、切回默认参数消失。两条纯规则(读回哪个组合 / 切换后的新查询串)
+// 切组合后地址长出参数、页头的同步摘要跟着换、后退键回到上一个组合、刷新后仍在原组合、
+// 逛设置往返参数还在、切组合把属于旧组合的参数丢掉、切回默认参数消失。两条纯规则(读回哪个组合 / 切换后的新查询串)
 // 已由 `tests/portfolio-selection.test.ts` 钉住,这里不重复。
 //
 // **为什么非 e2e 不可**:每一件都要「地址 + 历史栈 + search 中间件 + 路由 loader」四样同时在场才成立,
@@ -45,6 +45,8 @@ test.describe("URL 里的组合选中态", () => {
     await expect(page).toHaveURL(/\/accounts$/);
     const row = page.getByRole("button").filter({ hasText: ACCOUNT }).first();
     await expect(row).toBeVisible();
+    // 页头摘要的基线:默认组合里那一个手记账户。
+    await expect(syncedSources(page)).toHaveText("1 / 1");
 
     // —— ① 切到非默认组合:地址长出参数,屏幕跟着换 ——
     await switchTo(page, SECOND);
@@ -53,11 +55,14 @@ test.describe("URL 里的组合选中态", () => {
     // 新组合里还没有账户。**按可见性断言**:切换时 React 会把旧列表留在 DOM 里(带 hidden)直到新数据
     // 就绪(那正是「不闪骨架」的机制),按存在性断言会量到那份留影。
     await expect(page.getByText("No accounts yet.")).toBeVisible();
+    // 页头那块同步摘要也换了 —— 它按选中的组合另取一份,不是全局的那一份。
+    await expect(syncedSources(page)).toHaveText("0 / 0");
 
     // —— ② 后退键撤销这一次切换(所以切组合走 `push` 而不是 `replace`)——
     await page.goBack();
     await expect(page).toHaveURL(/\/accounts$/);
     await expect(row).toBeVisible();
+    await expect(syncedSources(page)).toHaveText("1 / 1");
 
     // —— ③ 刷新:仍在这个组合(以前刷一下就回默认了)——
     await switchTo(page, SECOND);
@@ -93,6 +98,17 @@ test.describe("URL 里的组合选中态", () => {
     await expect(page).toHaveURL(/\/insights$/);
   });
 });
+
+/**
+ * 页头同步面板里「已同步来源 N / M」那个数字。
+ *
+ * 这份摘要按选中的组合另取一份(`ShellWithSync` 在 Provider **之内**取),所以这个数字是「页头跟着
+ * 组合走」最直接的证据:谁把那个查询挪回 Provider 外面,它就永远显示默认组合那一份,这里当场红。
+ *
+ * 不先 hover 把面板打开:内容一直在 DOM 里(弹层只是收着),而要验的是数据接对没接对,不是弹层动效。
+ */
+const syncedSources = (page: Page) =>
+  page.getByText("Sources synced").locator("xpath=following-sibling::span[1]");
 
 /**
  * 从页头的选择器切到某个组合。
