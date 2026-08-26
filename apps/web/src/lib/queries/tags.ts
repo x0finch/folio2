@@ -10,12 +10,17 @@ import { tagKeys } from "./keys";
 export type TagList = Awaited<ReturnType<typeof listTags>>;
 export type AccountTagLinks = Awaited<ReturnType<typeof listAccountTags>>;
 
-export const tagListQuery = () =>
-  queryOptions({ queryKey: tagKeys.list(), queryFn: () => listTags(), staleTime: STALE_TIME.live });
-
-export const accountTagLinksQuery = () =>
+// 两条都按组合各一份(ADR 0047):Tag 本来就归属 Portfolio,关联也只回当前组合的账户那些。
+export const tagListQuery = (portfolioId: string) =>
   queryOptions({
-    queryKey: tagKeys.accountLinks(),
-    queryFn: () => listAccountTags(),
+    queryKey: tagKeys.list(portfolioId),
+    queryFn: () => listTags({ data: { portfolioId } }),
+    staleTime: STALE_TIME.live,
+  });
+
+export const accountTagLinksQuery = (portfolioId: string) =>
+  queryOptions({
+    queryKey: tagKeys.accountLinks(portfolioId),
+    queryFn: () => listAccountTags({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
   });

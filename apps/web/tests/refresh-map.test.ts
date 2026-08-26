@@ -89,22 +89,22 @@ describe("刷新映射表", () => {
   });
 
   it("sync.round 与 prices.refreshed 盖住账户页的 24h 盈亏", async () => {
-    seed(accountKeys.gain24h());
+    seed(accountKeys.gain24h("pf-1"));
     await invalidateFor(queryClient, "sync.round");
-    expect(isInvalidated(accountKeys.gain24h())).toBe(true);
+    expect(isInvalidated(accountKeys.gain24h("pf-1"))).toBe(true);
 
     queryClient = new QueryClient();
-    seed(accountKeys.gain24h());
+    seed(accountKeys.gain24h("pf-1"));
     await invalidateFor(queryClient, "prices.refreshed");
-    expect(isInvalidated(accountKeys.gain24h())).toBe(true);
+    expect(isInvalidated(accountKeys.gain24h("pf-1"))).toBe(true);
   });
 
   // 跨域那条:加一个账户不只是账户列表多一行,首页总额 / 走势 / 按代币的聚合全跟着变。
   // 只刷账户域会让总览停在旧数字,而且不报错 —— 所以这条单独钉住。
   it("account.write 同时刷账户域与组合域", async () => {
-    seed(accountKeys.list());
-    seed(accountKeys.holdings());
-    seed(accountKeys.gain24h());
+    seed(accountKeys.list("pf-1"));
+    seed(accountKeys.holdings("pf-1"));
+    seed(accountKeys.gain24h("pf-1"));
     seed(accountKeys.manualDetail("a1"));
     seed(portfolioKeys.overview("pf-1"));
 
@@ -112,9 +112,9 @@ describe("刷新映射表", () => {
 
     expect(
       [
-        accountKeys.list(),
-        accountKeys.holdings(),
-        accountKeys.gain24h(),
+        accountKeys.list("pf-1"),
+        accountKeys.holdings("pf-1"),
+        accountKeys.gain24h("pf-1"),
         accountKeys.manualDetail("a1"),
         portfolioKeys.overview("pf-1"),
       ].map(isInvalidated),
@@ -122,9 +122,9 @@ describe("刷新映射表", () => {
   });
 
   it("sync.round 也刷账户域(账户行的市值与上次同步跟着变)", async () => {
-    seed(accountKeys.holdings());
+    seed(accountKeys.holdings("pf-1"));
     await invalidateFor(queryClient, "sync.round");
-    expect(isInvalidated(accountKeys.holdings())).toBe(true);
+    expect(isInvalidated(accountKeys.holdings("pf-1"))).toBe(true);
   });
 
   // review 抓到的漏刷之一。同步摘要是**按账户集算出来的**(`summarizeSync`):页头面板的 N/M、
@@ -153,16 +153,16 @@ describe("刷新映射表", () => {
 
   // 按标签固定的自定义 Tab 是靠标签关联收窄的 —— 摘一个标签,那个 Tab 里就该少一个账户的持仓。
   it("tag.write 同时刷标签域与组合域", async () => {
-    seed(tagKeys.list());
-    seed(tagKeys.accountLinks());
+    seed(tagKeys.list("pf-1"));
+    seed(tagKeys.accountLinks("pf-1"));
     seed(portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }));
 
     await invalidateFor(queryClient, "tag.write");
 
     expect(
       [
-        tagKeys.list(),
-        tagKeys.accountLinks(),
+        tagKeys.list("pf-1"),
+        tagKeys.accountLinks("pf-1"),
         portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }),
       ].map(isInvalidated),
     ).toEqual([true, true, true]);
@@ -172,18 +172,21 @@ describe("刷新映射表", () => {
   // 移动账户时显式删 accountTags,删组合时 tags 经 cascade 清。只刷组合域会让账户行的徽标
   // 和抽屉里的标签选择器继续显示服务端已经删掉的标签(幽灵标签),而且不报错。
   it("portfolio.write 连标签域一起刷(移动账户 / 删组合会删掉标签关联)", async () => {
-    seed(tagKeys.list());
-    seed(tagKeys.accountLinks());
+    seed(tagKeys.list("pf-1"));
+    seed(tagKeys.accountLinks("pf-1"));
 
     await invalidateFor(queryClient, "portfolio.write");
 
-    expect([tagKeys.list(), tagKeys.accountLinks()].map(isInvalidated)).toEqual([true, true]);
+    expect([tagKeys.list("pf-1"), tagKeys.accountLinks("pf-1")].map(isInvalidated)).toEqual([
+      true,
+      true,
+    ]);
   });
 
   it("portfolio.write 刷整个组合域(清单、归属、总览一起)", async () => {
     const keys = [
       portfolioKeys.list(),
-      portfolioKeys.memberships(),
+      portfolioKeys.list(),
       portfolioKeys.overview("pf-1"),
       portfolioKeys.history("pf-1"),
     ];
@@ -238,13 +241,13 @@ describe("刷新映射表", () => {
   it("settings.valuation 刷总览与账户持仓,不碰同步域", async () => {
     seed(settingsKeys.valuation());
     seed(portfolioKeys.overview("pf-1"));
-    seed(accountKeys.holdings());
+    seed(accountKeys.holdings("pf-1"));
     seed(syncKeys.status(PF));
 
     await invalidateFor(queryClient, "settings.valuation");
 
     expect(
-      [settingsKeys.valuation(), portfolioKeys.overview("pf-1"), accountKeys.holdings()].map(
+      [settingsKeys.valuation(), portfolioKeys.overview("pf-1"), accountKeys.holdings("pf-1")].map(
         isInvalidated,
       ),
     ).toEqual([true, true, true]);
@@ -257,8 +260,8 @@ describe("刷新映射表", () => {
       settingsKeys.dataStats(),
       syncKeys.status(PF),
       portfolioKeys.overview("pf-1"),
-      accountKeys.list(),
-      tagKeys.list(),
+      accountKeys.list("pf-1"),
+      tagKeys.list("pf-1"),
     ];
     for (const k of keys) seed(k);
 
@@ -270,16 +273,15 @@ describe("刷新映射表", () => {
   // 后台刷价只改金额,不改口径、不产生新快照 —— 所以不碰设置域与同步域。
   it("prices.refreshed 只刷组合域与账户域", async () => {
     seed(portfolioKeys.overview("pf-1"));
-    seed(accountKeys.holdings());
+    seed(accountKeys.holdings("pf-1"));
     seed(syncKeys.status(PF));
     seed(settingsKeys.valuation());
 
     await invalidateFor(queryClient, "prices.refreshed");
 
-    expect([portfolioKeys.overview("pf-1"), accountKeys.holdings()].map(isInvalidated)).toEqual([
-      true,
-      true,
-    ]);
+    expect(
+      [portfolioKeys.overview("pf-1"), accountKeys.holdings("pf-1")].map(isInvalidated),
+    ).toEqual([true, true]);
     expect([syncKeys.status(PF), settingsKeys.valuation()].map(isInvalidated)).toEqual([
       false,
       false,

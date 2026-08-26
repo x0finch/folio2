@@ -9,7 +9,6 @@ import { AvatarStack } from "@/components/avatar-stack";
 import { ConnectorBadge } from "@/components/connector-badge";
 import { QueryBoundary } from "@/components/query-boundary";
 import { TagBadges } from "@/components/tag-badges";
-import { accountIdsInView } from "@/lib/core/accounts-in-view";
 import { isManual } from "@/lib/core/manual";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
@@ -18,8 +17,7 @@ import {
   accountHoldingsQuery,
   accountListQuery,
 } from "@/lib/queries/accounts";
-import { accountKeys, portfolioKeys } from "@/lib/queries/keys";
-import { portfolioMembershipsQuery } from "@/lib/queries/portfolio";
+import { accountKeys } from "@/lib/queries/keys";
 import {
   type AccountTagLinks,
   accountTagLinksQuery,
@@ -44,10 +42,12 @@ import { accountStackItems } from "./list-stack-items";
 
 const accountsRoute = getRouteApi("/_authed/accounts");
 
-const LIST_RESET_KEY = JSON.stringify([accountKeys.list(), portfolioKeys.memberships()]);
+// 名单那一层的重试键。归属不再是独立一份数据(随账户行下发,ADR 0047),所以只剩账户列表这一条。
+const LIST_RESET_KEY = (portfolioId: string) => JSON.stringify(accountKeys.list(portfolioId));
 
 export function Accounts() {
   const t = useTranslations("Accounts");
+  const { selectedId } = usePortfolio();
   const [addOpen, setAddOpen] = useState(false);
   const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
   const startComplete = (a: AccountRow) =>
@@ -66,7 +66,7 @@ export function Accounts() {
         onCompleteClose={() => setCompleteTarget(null)}
       />
       <QueryBoundary
-        resetKey={`list:${LIST_RESET_KEY}`}
+        resetKey={`list:${LIST_RESET_KEY(selectedId)}`}
         pending={<ListSkeleton />}
         failed={<ListFailed />}
       >
@@ -115,29 +115,16 @@ function ListSkeleton() {
 // `pending` 的兜底就是「同一份名单,金额与增量位是骨架」—— 也就是上一版挂起态逐字渲的东西。
 // 所以粒度没丢:账户名与连接器徽章照旧立刻出现,只有数字在等。
 function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
-  const { data: accounts } = useSuspenseQuery(accountListQuery());
-  const { data: memberships } = useSuspenseQuery(portfolioMembershipsQuery());
+  // **名单已经是当前组合那份**(ADR 0047:服务端按组合筛)—— 这一页不再拿全量账户 + 归属表自己筛。
+  const { selectedId } = usePortfolio();
+  const { data: accounts } = useSuspenseQuery(accountListQuery(selectedId));
   return (
     <QueryBoundary
-      resetKey={`list-values:${JSON.stringify(accountKeys.gain24h())}`}
-      pending={
-        <AccountsListBody
-          accounts={accounts}
-          memberships={memberships}
-          onComplete={onComplete}
-          gainPending
-        />
-      }
-      failed={
-        <AccountsListBody
-          accounts={accounts}
-          memberships={memberships}
-          onComplete={onComplete}
-          gainFailed
-        />
-      }
+      resetKey={`list-values:${JSON.stringify(accountKeys.gain24h(selectedId))}`}
+      pending={<AccountsListBody accounts={accounts} onComplete={onComplete} gainPending />}
+      failed={<AccountsListBody accounts={accounts} onComplete={onComplete} gainFailed />}
     >
-      <AccountsListReady accounts={accounts} memberships={memberships} onComplete={onComplete} />
+      <AccountsListReady accounts={accounts} onComplete={onComplete} />
     </QueryBoundary>
   );
 }
@@ -145,21 +132,19 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
 // 挂起点在这儿:余额 / 盈亏 / 标签三样都到了才渲染。
 function AccountsListReady({
   accounts,
-  memberships,
   onComplete,
 }: {
   accounts: RowSources["accounts"];
-  memberships: RowSources["memberships"];
   onComplete: (a: AccountRow) => void;
 }) {
-  const { data: holdings } = useSuspenseQuery(accountHoldingsQuery());
-  const { data: gain } = useSuspenseQuery(accountGain24hQuery());
-  const { data: allTags } = useSuspenseQuery(tagListQuery());
-  const { data: tagLinks } = useSuspenseQuery(accountTagLinksQuery());
+  const { selectedId } = usePortfolio();
+  const { data: holdings } = useSuspenseQuery(accountHoldingsQuery(selectedId));
+  const { data: gain } = useSuspenseQuery(accountGain24hQuery(selectedId));
+  const { data: allTags } = useSuspenseQuery(tagListQuery(selectedId));
+  const { data: tagLinks } = useSuspenseQuery(accountTagLinksQuery(selectedId));
   return (
     <AccountsListBody
       accounts={accounts}
-      memberships={memberships}
       onComplete={onComplete}
       holdings={holdings}
       gain={gain}
@@ -176,7 +161,6 @@ type AccountGainData = NonNullable<Parameters<typeof attachAccountGains>[1]>;
 
 function AccountsListBody({
   accounts,
-  memberships,
   onComplete,
   holdings,
   gain,
@@ -186,7 +170,6 @@ function AccountsListBody({
   gainFailed = false,
 }: {
   accounts: RowSources["accounts"];
-  memberships: RowSources["memberships"];
   onComplete: (a: AccountRow) => void;
   holdings?: RowSources["holdings"];
   gain?: AccountGainData;
@@ -199,29 +182,17 @@ function AccountsListBody({
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
   const allRows = useMemo(
-    () => buildAccountRows({ accounts, holdings, memberships, allTags, tagLinks }),
-    [accounts, holdings, memberships, allTags, tagLinks],
+    () => buildAccountRows({ accounts, holdings, allTags, tagLinks }),
+    [accounts, holdings, allTags, tagLinks],
   );
-  const { selectedId: selectedPortfolioId, defaultId } = usePortfolio();
   // 只在盈亏真的到了之后才允许触发刷价 —— 与上一版 `!gainQuery.isPending` 同一个条件。
   useStalePriceRefresh(holdings?.pricesStale, !gainPending);
 
-  // 账户页 scope 到选中 Portfolio(ADR 0033):只显归属选中的账户(含其归档成员)。归属过滤在客户端
-  // (归档无关的成员集),切 Portfolio 即时重筛、无需重拉。选择器即作用域,账户页不设单独 tab。
-  const memberIds = accountIdsInView(
-    allRows.map((r) => r.id),
-    memberships,
-    selectedPortfolioId,
-    defaultId,
-  );
+  // 账户页 scope 到选中 Portfolio(ADR 0033),但**筛在服务端**(ADR 0047):这几份数据本身
+  // 就只有当前组合那些账户,所以这里没有过滤这一步 —— 切组合换的是 query key,重拉一份。
   const rows = useMemo(
-    () =>
-      attachAccountGains(
-        allRows.filter((r) => memberIds.has(r.id)),
-        gain,
-        gainFailed,
-      ),
-    [allRows, memberIds, gain, gainFailed],
+    () => attachAccountGains(allRows, gain, gainFailed),
+    [allRows, gain, gainFailed],
   );
 
   const activeUnsorted = rows.filter((r) => r.archivedAt == null);

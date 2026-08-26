@@ -21,7 +21,6 @@ const build = (over: Partial<Parameters<typeof buildAccountRows>[0]> = {}) =>
     accounts: [account()],
     // biome-ignore lint/suspicious/noExplicitAny: 同上
     holdings: { rows: [], pricesStale: false } as any,
-    memberships: [],
     allTags: [],
     tagLinks: [],
     ...over,
@@ -87,10 +86,9 @@ describe("buildAccountRows", () => {
     expect(row.tags).toEqual([{ id: "t1", name: "longterm" }]);
   });
 
-  it("没有归属记录的账户 portfolioId 退成空串(而不是 undefined)", () => {
-    expect(build()[0].portfolioId).toBe("");
-    expect(build({ memberships: [{ accountId: "a1", portfolioId: "p9" }] })[0].portfolioId).toBe(
-      "p9",
-    );
+  // 归属**随账户行来**(ADR 0047:服务端按组合筛,顺手把归属带上)—— 拼装这一层不再反查归属表,
+  // 所以这条钉的是「原样透传」。
+  it("归属原样从账户行透传", () => {
+    expect(build({ accounts: [account({ portfolioId: "p9" })] })[0].portfolioId).toBe("p9");
   });
 });

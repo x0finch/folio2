@@ -11,12 +11,11 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Pin, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { type PortfolioSummary, usePortfolio } from "@/lib/hooks/use-portfolio";
-import { portfolioMembershipsQuery } from "@/lib/queries/portfolio";
 import { invalidateFor } from "@/lib/queries/refresh";
 import {
   createPortfolio,
@@ -48,11 +47,14 @@ type View = { id: "list" } | { id: "create" } | { id: "delete"; portfolio: Portf
 export function PortfolioPickerModal({
   mode,
   accountId,
+  currentPortfolioId,
   open,
   onClose,
 }: {
   mode: "manage" | "move";
   accountId?: string; // move 模式:被归属的账户
+  /** move 模式:那个账户此刻归属哪个组合(画绿勾用)。由账户行给 —— 归属随行下发,ADR 0047。 */
+  currentPortfolioId?: string;
   open: boolean;
   onClose: () => void;
 }) {
@@ -76,6 +78,7 @@ export function PortfolioPickerModal({
         ) : mode === "move" ? (
           <MoveList
             accountId={accountId}
+            currentPortfolioId={currentPortfolioId}
             onClose={onClose}
             onCreate={() => setView({ id: "create" })}
           />
@@ -192,10 +195,12 @@ function ManageList({
 // move 一层:点选即把账户归属过去;当前所在项右侧绿勾。左下角「新建组合」入口(交给父级切二层新建页)。
 function MoveList({
   accountId,
+  currentPortfolioId,
   onClose,
   onCreate,
 }: {
   accountId?: string;
+  currentPortfolioId?: string;
   onClose: () => void;
   onCreate: () => void;
 }) {
@@ -203,13 +208,6 @@ function MoveList({
   const queryClient = useQueryClient();
   const { portfolios } = usePortfolio();
   const [createHover, setCreateHover] = useState(false);
-
-  // 查账户当前所属 Portfolio(绿勾)。组件仅在 move 一层挂载时存在 → 无需额外 enabled 门。
-  // key 走组合域的分层 key(#411):账户页 loader 预取的就是这一份,两边合成同一条缓存。
-  const membersQuery = useQuery(portfolioMembershipsQuery());
-  const currentPortfolioId = accountId
-    ? membersQuery.data?.find((m) => m.accountId === accountId)?.portfolioId
-    : undefined;
 
   const assignMut = useMutation({
     mutationFn: (portfolioId: string) =>

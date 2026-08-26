@@ -16,28 +16,30 @@ import { accountKeys } from "./keys";
 // 由 `account.write` 刷)。就地写数字会让 `STALE_TIME` 这张表被绕过 —— 它存在的意义就是
 // 「多久算旧」按数据自身性质分档,而不是各查询各写一个数。
 
-export const accountListQuery = () =>
+// 这三条**按组合各一份**(ADR 0047:服务端已按组合筛)。`portfolioId` 必须是真实 id,
+// 不能靠「缺省 = 默认」的 undefined —— loader 预取的那份与组件读的那份 key 对不上,首屏白拉一遍。
+export const accountListQuery = (portfolioId: string) =>
   queryOptions({
-    queryKey: accountKeys.list(),
-    queryFn: () => listAccounts(),
+    queryKey: accountKeys.list(portfolioId),
+    queryFn: () => listAccounts({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
   });
 
-export const accountHoldingsQuery = () =>
+export const accountHoldingsQuery = (portfolioId: string) =>
   queryOptions({
-    queryKey: accountKeys.holdings(),
-    queryFn: () => listAccountHoldings(),
+    queryKey: accountKeys.holdings(portfolioId),
+    queryFn: () => listAccountHoldings({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
   });
 
-export const accountGain24hQuery = () =>
+export const accountGain24hQuery = (portfolioId: string) =>
   queryOptions({
-    queryKey: accountKeys.gain24h(),
-    queryFn: () => getAccountGain24h(),
+    queryKey: accountKeys.gain24h(portfolioId),
+    queryFn: () => getAccountGain24h({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
   });
 
-/** 一份账户列表行的形状(含归档账户与凭据投影)。 */
+/** 一份账户列表行的形状(含该组合的归档账户、归属与凭据投影)。 */
 export type AccountListItem = Awaited<ReturnType<typeof listAccounts>>[number];
 /** 按账户的持仓视图(活跃账户 + 其最新快照的富化持仓)。 */
 export type AccountHoldings = Awaited<ReturnType<typeof listAccountHoldings>>;

@@ -5,7 +5,7 @@ import {
   getPortfolioHistory,
   getPortfolioOverview,
 } from "@/lib/server/portfolio";
-import { listPortfolioMemberships, listPortfolios } from "@/lib/server/portfolios";
+import { listPortfolios } from "@/lib/server/portfolios";
 import { STALE_TIME } from "./constants";
 import { type PinScopeKey, portfolioKeys } from "./keys";
 
@@ -22,13 +22,6 @@ export const portfolioListQuery = () =>
   queryOptions({
     queryKey: portfolioKeys.list(),
     queryFn: () => listPortfolios(),
-    staleTime: STALE_TIME.live,
-  });
-
-export const portfolioMembershipsQuery = () =>
-  queryOptions({
-    queryKey: portfolioKeys.memberships(),
-    queryFn: () => listPortfolioMemberships(),
     staleTime: STALE_TIME.live,
   });
 

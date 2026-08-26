@@ -45,20 +45,23 @@ describe("回访不闪骨架、金额失败继续骨架", () => {
     expect(page).toMatch(/useSuspenseQuery\(accountGain24hQuery/);
   });
 
-  it("名单等归属到了再画,避免先画出别的组合的账户", () => {
+  // 「先画出别的组合的账户」这件事**现在压根不可能**(ADR 0047):名单是服务端按组合筛好的那一份,
+  // 客户端手里没有别的组合的账户可画。原来这条钉的是「名单要等归属那份数据一起到」—— 归属不再是
+  // 独立一份数据了,所以改钉:名单按**组合**取,而且是外层那个挂起点。
+  it("名单按当前组合取,且仍是外层挂起(不会先画一份再改)", () => {
     const page = stripComments(src("routes/_authed/-accounts/index.tsx"));
-    expect(page).toMatch(/useSuspenseQuery\(accountListQuery/);
-    expect(page).toMatch(/useSuspenseQuery\(portfolioMembershipsQuery/);
+    expect(page).toMatch(/useSuspenseQuery\(accountListQuery\(selectedId\)\)/);
+    // 客户端不再有「拿全量 + 按归属筛」这条路。
+    expect(page).not.toContain("portfolioMembershipsQuery");
+    expect(page).not.toContain("accountIdsInView");
   });
 
   // 标签不该挡住**名单**。它现在也走挂起,但挂在**里层**那个边界上 —— 而里层的兜底
   // (`pending`)渲的是同一个 `AccountsListBody`,账户名与徽章照旧在里头。所以名单不等标签。
   it("标签不挡名单:挂起点在里层,兜底仍然是那份名单", () => {
     const page = stripComments(src("routes/_authed/-accounts/index.tsx"));
-    // 名单本身(账户行 + 归属)仍然是外层的挂起 —— 这两条不能变成非挂起,否则会先画出
-    // 别的组合的账户。
+    // 名单本身仍然是外层的挂起 —— 变成非挂起就会先画一份不完整的名单。
     expect(page).toMatch(/useSuspenseQuery\(accountListQuery/);
-    expect(page).toMatch(/useSuspenseQuery\(portfolioMembershipsQuery/);
     // 标签在里层那个边界之后取。
     expect(page).toMatch(/AccountsListReady[\s\S]*useSuspenseQuery\(tagListQuery/);
     // 里层的兜底不是整块骨架,是同一份名单。

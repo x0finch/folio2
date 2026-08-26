@@ -4,7 +4,6 @@ import { CreateAccountInput, handleCreateAccount } from "@/lib/server/accounts/c
 import { handleListAccounts } from "@/lib/server/accounts/list";
 import { openCreds } from "@/lib/server/creds";
 import { handleGetManualAccount } from "@/lib/server/manual-tokens/get-account";
-import { handleListPortfolioMemberships } from "@/lib/server/portfolios/memberships";
 import { countRows, db } from "../_kit/db";
 import { fakeRegistry, validateFails } from "../_kit/fakes";
 import { blockOutbound } from "../_kit/outbound";
@@ -114,7 +113,7 @@ describe("accounts/create", () => {
         }),
       );
 
-      const links = await callWithRegistry(USER, registry, handleListPortfolioMemberships());
+      const links = await db(USER).portfolios.listMemberships();
       const where = links.find((l) => l.accountId === account.id)?.portfolioId;
       expect(where).toBe(target.id);
       expect(where).not.toBe(def.id);
@@ -202,12 +201,7 @@ describe("accounts/create", () => {
       );
 
       expect(exit._tag).toBe("Failure");
-      const theirLinks = await callWithRegistry(
-        otherUser(USER),
-        registry,
-        handleListPortfolioMemberships(),
-      );
-      expect(theirLinks).toEqual([]);
+      expect(await db(otherUser(USER)).portfolios.listMemberships()).toEqual([]);
     });
 
     it("label 空串 / 纯空格、connectorId 空串 → schema 拒", () => {

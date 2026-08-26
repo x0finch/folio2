@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DeletePortfolioInput, handleDeletePortfolio } from "@/lib/server/portfolios/delete";
 import { handleListPortfolios } from "@/lib/server/portfolios/list";
-import { handleListPortfolioMemberships } from "@/lib/server/portfolios/memberships";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { call, callExit, failureOf } from "../_kit/run";
@@ -43,7 +42,7 @@ describe("portfolios/delete", () => {
       await call(USER, handleDeletePortfolio({ portfolioId: pf.id }));
 
       expect((await db(USER).accounts.list()).map((a) => a.id)).toContain(acc.id);
-      const links = await call(USER, handleListPortfolioMemberships());
+      const links = await db(USER).portfolios.listMemberships();
       expect(links.find((l) => l.accountId === acc.id)?.portfolioId).toBe(def.id);
     });
 
