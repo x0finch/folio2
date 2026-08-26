@@ -154,6 +154,20 @@ export const makeTabPinStore = Effect.gen(function* () {
         ),
       ),
 
+    /**
+     * 删掉指向某个账户的 pin(归档账户时的收尾:pin 是「常看的一个视角」,而归档是封存 ——
+     * 一个封存账户的快捷入口没有意义,留着只会在解归档后凭空多出一个名额外的 tab)。
+     * 删账户不需要它:FK cascade 已经带走了。
+     */
+    removeByAccount: (accountId: string): Effect.Effect<void> =>
+      Effect.asVoid(
+        client.query((db) =>
+          db
+            .delete(tabPins)
+            .where(and(eq(tabPins.accountId, accountId), eq(tabPins.userId, userId))),
+        ),
+      ),
+
     /** 取消固定(删 pin)。不碰任何数据(纯删指针),故调用侧无需二次确认(ADR 0034)。 */
     remove: (pinId: string): Effect.Effect<void> =>
       Effect.asVoid(

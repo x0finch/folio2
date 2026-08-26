@@ -42,6 +42,10 @@ export const handleUpdateAccount = Effect.fn("updateAccount")(function* (
     if (account?.archivedAt == null) {
       if (account) sealed = yield* sealManualAccount(account);
       yield* accounts.setArchived(data.accountId, true);
+      // 归档顺手解掉指向它的 pin:pin 是「常看的一个视角」,封存账户的快捷入口没有意义。
+      // 不解的话它只是从 tab 条上消失(pinsInView 按活跃账户筛),但名额还占着,而且解归档时
+      // 会凭空冒回来 —— 可能把那个组合顶到 4 个。**解归档不恢复 pin**(行已删,想看再钉一次)。
+      yield* (yield* Database).tabPins.removeByAccount(data.accountId);
     }
   } else if (data.archived === false) {
     yield* accounts.setArchived(data.accountId, false);

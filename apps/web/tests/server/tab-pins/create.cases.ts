@@ -1,5 +1,6 @@
 import { InvalidInput, NotFound } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
+import { handleUpdateAccount } from "@/lib/server/accounts/update";
 import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
 import { handleCreateTabPin, PinTargetInput } from "@/lib/server/tab-pins/create";
 import { db } from "../_kit/db";
@@ -142,24 +143,25 @@ describe("tab-pins/create", () => {
       expect(failureOf(exit)).toBeInstanceOf(InvalidInput);
     });
 
-    // 上限是**建 / 改指向那一刻**的检查,不是持续维护的不变量:归档一个被 pin 的账户会腾出名额,
-    // 建满之后再解归档,那个组合就显示 4 个 tab。**这是接受的漂移** —— 多一个 tab 无害,＋ 号照样
-    // 藏着;要挡住它得在归档 / 移动账户那些路径上都挂检查,不值。这条钉住的是「4 个也好好摆着,
-    // 不崩、不吞」,免得将来有人把上限当硬不变量,在读路径上加断言。
-    it("上限漂移(归档腾位再解归档 → 4 个)是接受的:tab 条照常摆 4 个", async () => {
-      const { pf, account } = await seed(USER); // seed 的账户是 manual
+    // 归档自动解 pin(用户裁定):pin 是「常看的一个视角」,封存账户的快捷入口没有意义。
+    // 不解的话它只是从 tab 条上消失(pinsInView 按活跃账户筛),名额却还占着,解归档时又凭空
+    // 冒回来 —— 可能把那个组合顶到 4 个。**解归档不恢复 pin**(行已删,想看再钉一次)。
+    it("归档被 pin 的账户 → pin 一并删掉;解归档不恢复", async () => {
+      const { pf, account } = await seed(USER);
       for (const c of ["binance", "okx"] as const) {
         const acc = await db(USER).accounts.create({ connectorId: c, label: c, creds: null });
         await db(USER).portfolios.assignAccount(acc.id, pf.id);
         await call(USER, handleCreateTabPin({ kind: "connector", connectorId: c }));
       }
       await call(USER, handleCreateTabPin({ kind: "account", accountId: account.id }));
-      // 满 3 个。归档被 pin 的账户 → 它的 pin 不摆了,名额空出一个 → 建第 4 个 → 解归档。
-      await db(USER).accounts.setArchived(account.id, true);
+      // 满 3 个。归档被 pin 的账户 → 那个 pin 被删,名额真的空出来 → 能建第 4 个。
+      await call(USER, handleUpdateAccount({ accountId: account.id, archived: true }));
+      expect(await db(USER).tabPins.list()).toHaveLength(2);
       await call(USER, handleCreateTabPin({ kind: "connector", connectorId: "manual" }));
-      await db(USER).accounts.setArchived(account.id, false);
+      // 解归档:账户回来,pin 不回来 —— tab 条还是 3 个,不会顶到 4。
+      await call(USER, handleUpdateAccount({ accountId: account.id, archived: false }));
 
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(4);
+      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
     });
 
     it("kind 不在枚举里 → schema 拒", () => {
