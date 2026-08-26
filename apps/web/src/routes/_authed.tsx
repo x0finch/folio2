@@ -1,10 +1,11 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { createFileRoute, Outlet, redirect, retainSearchParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { z } from "zod";
 import { AppShell } from "@/components/app-shell";
 import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
-import { PortfolioProvider, usePortfolio } from "@/lib/hooks/use-portfolio";
+import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
 import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
@@ -19,19 +20,52 @@ import { getSession } from "@/lib/server/session";
 // loader 里 await 的东西没有 key 可指,只能整页刷;进了缓存才刷得动一个前缀。首屏不变:
 // 预取没 resolve 时路由 pending 照常生效,SSR 把缓存 dehydrate 下去,客户端直接 hydrate。
 export const Route = createFileRoute("/_authed")({
+  // 选中的 Portfolio 进 URL(ADR 0046):`?portfolio=<id>`,默认那个不写。声明在**这一层** ——
+  // 作用域是全站的(总额 / 代币 / 曲线 / Insights,ADR 0033),三页共享同一个参数。
+  //
+  // `.catch(undefined)` 与 home / accounts 那两条同款:地址栏里敲坏一个参数(空串、重复参数)
+  // 不该把页面打没,统一收成「没带这个参数」。认不出的 id 由 `pickSelectedPortfolio` 兜回默认。
+  validateSearch: z.object({
+    portfolio: z.string().min(1).optional().catch(undefined),
+  }),
+  // 跨页保留:链接与程序化导航都不必手动带这个参数,**没有地方可以忘**(这正是选查询参数而非
+  // 路径参数的关键理由之一,见 ADR 0046)。它只在「新 search 里没有这个键」时补旧值,并且尊重
+  // 显式写的 `portfolio: undefined` —— 所以「切回默认 → 参数消失」与这条同时成立。
+  search: { middlewares: [retainSearchParams(["portfolio"])] },
   beforeLoad: async () => {
     const current = await getSession();
     if (!current) throw redirect({ to: "/login" });
     return { user: current.user };
   },
-  loader: async ({ context }) => {
+  // **这里故意不声明 `loaderDeps`**(与 home / insights 相反),尽管 loader 读了地址里的组合参数:
+  // 声明了的话 match id 会跟着参数变 → 每次切组合都是一个**新 match** → `beforeLoad` 跟着重跑,
+  // 也就是每切一下组合多一次 `getSession()` 往返。而这个 loader 读那个参数只为了「首次进入时预取对的
+  // 那份摘要」——切组合那条路径上,页头的摘要由 `ShellWithSync` 自己的 `useSuspenseQuery` 取,
+  // 不需要 loader 再跑一次。
+  loader: async ({ context, location, cause }) => {
     // **同步摘要要先知道是哪个 Portfolio**(ADR 0033),所以这两个不能并发:先拿到 Portfolio 列表
-    // 才知道默认那个的 id。首屏按默认那个预取 —— 选中态初始就是它(见 use-portfolio)。
+    // 才认得出地址里那个 id(以及默认那个)。
     const [, portfolios] = await Promise.all([
       context.queryClient.ensureQueryData(currencyPreferenceQuery()),
       context.queryClient.ensureQueryData(portfolioListQuery()),
     ]);
-    await context.queryClient.ensureQueryData(syncStatusQuery(portfolios.defaultId));
+    // 按**地址里那个**组合预取(ADR 0046)。以前写死 `defaultId` 恰好是对的 —— 那时选中态总是从默认
+    // 开始;URL 能说别的之后,不改这里会静默慢一拍:硬加载一个非默认地址先取默认那份,组件再各自
+    // 重拉一遍。读的是 `location.search`(原始解析结果,可能是空串/数组),兜底交给这个纯函数。
+    //
+    // 那份 search 在 loader 里**没有类型**(它是原始解析结果,不是某条路由校验过的那份),所以就地
+    // 断言成「可能有这个键」,值合不合法交给纯函数判 —— 它收 `unknown` 正是为了这个调用点。
+    const requested = (location.search as { portfolio?: unknown }).portfolio;
+    const selectedId = pickSelectedPortfolio(
+      requested,
+      portfolios.portfolios,
+      portfolios.defaultId,
+    );
+    const summary = context.queryClient.ensureQueryData(syncStatusQuery(selectedId));
+    // 只有**首次进入**才等。这个 `await` 是替页头那块同步摘要挡首屏挂起的(它没有自己的 suspense
+    // 边界),冷加载时不等它会退成整页挂起。站内往返 / invalidate 触发的重跑(`cause === "stay"`)
+    // 不必等:那时旧界面还在,让它自己挂起就好。
+    if (cause === "enter") await summary;
   },
   component: AuthedLayout,
 });
@@ -55,7 +89,7 @@ function AuthedLayout() {
   const { data: portfolios } = useSuspenseQuery(portfolioListQuery());
   return (
     <CurrencyProvider value={preferCurrency}>
-      {/* Portfolio 选中态(ADR 0033):住布局层,三页共享;不持久化(硬刷新回默认由布局重挂实现)。 */}
+      {/* Portfolio 选中态(ADR 0033):住布局层,三页共享;事实源是 URL 上的 `?portfolio=`(ADR 0046)。 */}
       <PortfolioProvider portfolios={portfolios.portfolios} defaultId={portfolios.defaultId}>
         {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
         <LockScreen>

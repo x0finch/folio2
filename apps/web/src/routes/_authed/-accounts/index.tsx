@@ -3,7 +3,7 @@ import { cn, SharedLayoutBg, Skeleton } from "@folio/ui";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AvatarStack } from "@/components/avatar-stack";
 import { ConnectorBadge } from "@/components/connector-badge";
@@ -202,7 +202,7 @@ function AccountsListBody({
     () => buildAccountRows({ accounts, holdings, memberships, allTags, tagLinks }),
     [accounts, holdings, memberships, allTags, tagLinks],
   );
-  const { selectedId: selectedPortfolioId, defaultId, select } = usePortfolio();
+  const { selectedId: selectedPortfolioId, defaultId } = usePortfolio();
   // 只在盈亏真的到了之后才允许触发刷价 —— 与上一版 `!gainQuery.isPending` 同一个条件。
   useStalePriceRefresh(holdings?.pricesStale, !gainPending);
 
@@ -241,16 +241,13 @@ function AccountsListBody({
 
   // 页头同步面板点了某一行 → 把它滚到视野中间,并短暗高亮一下(不改选中态:那看起来像选中了什么)。
   //
-  // **那一行可能不在当前视图里** —— 同步面板是全局的(它管的是「你的数据源新不新鲜」,不分
-  // Portfolio),而这个列表 scope 到选中的 Portfolio(ADR 0033)。这时先**切到那个账户所属的
-  // Portfolio**,`focus` 留在地址栏里,重筛之后的那一轮再滚 —— 「带我去看这个账户」这件事
-  // 因此在任何 Portfolio 下都成立。
+  // 面板的清单**已经按选中的 Portfolio 收口**(#530),所以点进来的账户必然就在这个列表里 ——
+  // 这里不需要「先切到那个账户所属的组合」那一步(那段跨组合切换是它收口之前留下的死代码,
+  // 随组合进 URL 一起删了)。找不到那一行只有一种情况:它归档了、或刚被删。
   //
   // 行还没渲染出来(刚从别的页面跳过来、数据在路上)时先不判:`allRows` 空就等下一轮,
   // 否则会把「还在加载」误当成「不在这个视图里」。
   const [flashId, setFlashId] = useState<string | null>(null);
-  // 切 Portfolio 只试一次,免得「切了还是找不到」变成来回切的死循环。
-  const switchedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!focus || allRows.length === 0) return;
     const clearFocus = () =>
@@ -266,21 +263,9 @@ function AccountsListBody({
       const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       el.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
       setFlashId(focus);
-      switchedFor.current = null;
-      clearFocus();
-      return;
     }
-    // 没有归属行的账户按兜底规则算在默认 Portfolio 的视图里(见 accounts-in-view)。
-    const owner = memberships.find((m) => m.accountId === focus)?.portfolioId ?? defaultId;
-    const mine = allRows.some((r) => r.id === focus);
-    if (mine && owner !== selectedPortfolioId && switchedFor.current !== focus) {
-      switchedFor.current = focus;
-      select(owner);
-      return; // focus 留着,切完那一轮再滚
-    }
-    switchedFor.current = null;
     clearFocus();
-  }, [focus, allRows, memberships, selectedPortfolioId, defaultId, select, navigate]);
+  }, [focus, allRows, navigate]);
 
   useEffect(() => {
     if (!flashId) return;
