@@ -1,4 +1,4 @@
-import { NotFound } from "@folio/db";
+import { InvalidInput, NotFound } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
 import { handleUpdateTabPinTarget, UpdateTabPinInput } from "@/lib/server/tab-pins/update-target";
@@ -69,6 +69,50 @@ describe("tab-pins/update-target", () => {
       await call(USER, handleUpdateTabPinTarget({ pinId: second.id, kind: "tag", tagId: tag.id }));
 
       expect((await call(USER, handleGetHomeTabStrip({}))).pins.map((p) => p.id)).toEqual(before);
+    });
+
+    // review 抓的洞:改指向以前一句校验都没有 —— 把 pin 改指向一个 connector,它会出现在
+    // 别的组合里,把那边顶到 4 个,而那边的 ＋ 因为 >=3 藏着,界面自相矛盾。
+    it("改指向也过上限:新目标会把某个组合顶到 4 个 → 拒,原指向保留", async () => {
+      const { pf } = await seed(USER); // seed 里已有 1 个 manual pin
+      for (const c of ["binance", "okx"] as const) {
+        const acc = await db(USER).accounts.create({ connectorId: c, label: c, creds: null });
+        await db(USER).portfolios.assignAccount(acc.id, pf.id);
+        await db(USER).tabPins.create({ kind: "connector", connectorId: c });
+      }
+      // 默认组合现在满 3 个。另一个组合里有个 pin,把它改指向默认组合里的 connector → 拒。
+      const watch = await db(USER).portfolios.create({ name: "Watch" });
+      const there = await db(USER).accounts.create({
+        connectorId: "bitcoin",
+        label: "那边的",
+        creds: null,
+      });
+      await db(USER).portfolios.assignAccount(there.id, watch.id);
+      const watchPin = await db(USER).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
+
+      const exit = await callExit(
+        USER,
+        handleUpdateTabPinTarget({ pinId: watchPin.id, kind: "connector", connectorId: "okx" }),
+      );
+
+      expect(failureOf(exit)).toBeInstanceOf(InvalidInput);
+      // 原指向保留:Watch 里那个还是 bitcoin。
+      const strip = await call(USER, handleGetHomeTabStrip({ portfolioId: watch.id }));
+      expect(strip.pins.map((p) => p.connectorId)).toEqual(["bitcoin"]);
+    });
+
+    it("改指向不与自己抢名额:满 3 个的组合里改其中一个,照样能改", async () => {
+      const { pf, tag } = await seed(USER);
+      for (const c of ["binance", "okx"] as const) {
+        const acc = await db(USER).accounts.create({ connectorId: c, label: c, creds: null });
+        await db(USER).portfolios.assignAccount(acc.id, pf.id);
+        await db(USER).tabPins.create({ kind: "connector", connectorId: c });
+      }
+      const pins = await db(USER).tabPins.list();
+      // 满 3 个;把其中一个改指向同组合的 tag —— 旧的那次出现不占名额,这一下必须能过。
+      await call(USER, handleUpdateTabPinTarget({ pinId: pins[0].id, kind: "tag", tagId: tag.id }));
+
+      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
     });
 
     it("改成指向别人的 tag → 拒,原指向保留", async () => {

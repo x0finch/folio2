@@ -19,8 +19,6 @@ import { assertAccountOwned, assertTagOwned } from "./ownership";
 // 手写的 `interface TabPinStore` 也删了(#501):类型从这里的返回值推导,cmd+click 直接落实现,
 // 每个方法的返回类型仍显式标注 —— 契约精度不靠推断,推断只用来省一份复述。
 
-// 每 user 至多固定 3 个自定义 Tab(域规则,co-located 同 BALANCE_INSERT_CHUNK 的做法)。
-
 const assertTabPinOwned = (
   client: DbClient,
   userId: string,

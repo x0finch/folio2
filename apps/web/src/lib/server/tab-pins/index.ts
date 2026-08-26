@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
-import { CreateTabPinInput, handleCreateTabPin } from "./create";
+import { handleCreateTabPin, PinTargetInput } from "./create";
 import { DeleteTabPinInput, handleDeleteTabPin } from "./delete";
 import { handleUpdateTabPinTarget, UpdateTabPinInput } from "./update-target";
 
@@ -13,7 +13,7 @@ import { handleUpdateTabPinTarget, UpdateTabPinInput } from "./update-target";
 
 export const createTabPin = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(CreateTabPinInput)
+  .validator(PinTargetInput)
   .handler(runEffect(handleCreateTabPin));
 
 export const updateTabPinTarget = createServerFn({ method: "POST" })

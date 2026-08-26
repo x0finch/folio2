@@ -110,9 +110,7 @@ export function AddPinButton() {
   const { selectTab } = useHomeTabSelection(strip.pins);
   const tct = useTranslations("CustomTabs");
   const addMut = useMutation({
-    // 带上当前组合:上限按组合算,而 pin 行上没有这个字段(ADR 0047)。
-    mutationFn: (choice: PinTargetChoice) =>
-      createTabPin({ data: { ...choice, portfolioId: selectedId } }),
+    mutationFn: (choice: PinTargetChoice) => createTabPin({ data: choice }),
     onSuccess: async (pin) => {
       // 先等 tab 条刷新、新 tab 挂上再选中 —— 提前选中会让 active 短暂指向不存在的 tab,
       // 被 clamp 回 tokens,药丸先滑到第一个再滑回来(实测)。
@@ -122,8 +120,8 @@ export function AddPinButton() {
     onError: () => toast.error(tct("actionFailed")),
   });
   // 满员不渲染。`pins.length` 是刷新前的清单,所以在飞期间 ＋ 还在;
-  // 不禁的话手快能再挑一个。**真正兜住上限的是数据库那道**
-  // (`packages/db/src/queries/tab-pins.ts` 的 `MAX_TAB_PINS_PER_USER`,超了直接拒),这里挡的
+  // 不禁的话手快能再挑一个。**真正兜住上限的是服务端那道**(`lib/server/tab-pins/create.ts` 的
+  // `assertPinCap`:对这个 pin 会出现的每个组合各数一遍,ADR 0047),这里挡的
   // 只是「让用户白挑一次、再吃一个报错」。
   if (strip.pins.length >= MAX_PINS_PER_PORTFOLIO) return null;
   return (

@@ -183,10 +183,28 @@ describe("刷新映射表", () => {
     ]);
   });
 
-  it("portfolio.write 刷整个组合域(清单、归属、总览一起)", async () => {
+  // ADR 0047 之后新欠的账(review 抓的):账户页那几份是服务端按组合筛好的,移动账户 / 删组合
+  // 直接改了「哪个组合里有哪些账户」。改造前靠「刷组合域 → 归属表变 → 客户端重筛」兜着,
+  // 归属表不下发之后那条路没有了 —— 不刷账户域,被移走的账户还留在旧组合的列表里。
+  // 页头同步摘要(它按组合收口更早)同理。
+  it("portfolio.write 连账户域与同步域一起刷(移动账户改的是名单本身)", async () => {
+    seed(accountKeys.list("pf-1"));
+    seed(accountKeys.holdings("pf-1"));
+    seed(syncKeys.status("pf-1"));
+
+    await invalidateFor(queryClient, "portfolio.write");
+
+    expect(
+      [accountKeys.list("pf-1"), accountKeys.holdings("pf-1"), syncKeys.status("pf-1")].map(
+        isInvalidated,
+      ),
+    ).toEqual([true, true, true]);
+  });
+
+  it("portfolio.write 刷整个组合域(清单、tab 条、总览一起)", async () => {
     const keys = [
       portfolioKeys.list(),
-      portfolioKeys.list(),
+      portfolioKeys.tabStrip("pf-1"),
       portfolioKeys.overview("pf-1"),
       portfolioKeys.history("pf-1"),
     ];
