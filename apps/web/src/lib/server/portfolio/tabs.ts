@@ -1,7 +1,7 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { toAccountSections } from "@/lib/core/account-view";
-import { accountsInView } from "@/lib/core/accounts-in-view";
+import { accountsInView, pinsInView } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import { resolveScope } from "./scope";
@@ -41,6 +41,12 @@ export const handleGetHomeTabStrip = Effect.fn("getHomeTabStrip")(function* (dat
       ),
     );
   const { hasPerps, hasDefi } = kindPresence(sections);
+  // **只摆这个组合里说得通的 pin**(ADR 0034 早就这么定了,实现只筛了内容、没筛名单)。
+  // 以前在非默认组合的首页能看到别的组合的自定义 Tab,点进去是空的。
+  const shownPins = pinsInView(pins, {
+    accounts,
+    tagIds: new Set(tags.filter((t) => t.portfolioId === selectedId).map((t) => t.id)),
+  });
   const tagName = (id: string) => tags.find((t) => t.id === id)?.name;
   const accountName = (id: string) => allAccounts.find((a) => a.id === id)?.label;
   const connector = (id: string) => {
@@ -54,7 +60,7 @@ export const handleGetHomeTabStrip = Effect.fn("getHomeTabStrip")(function* (dat
     hasAccounts: accounts.length > 0,
     hasPerps,
     hasDefi,
-    pins: pins.map((p) => {
+    pins: shownPins.map((p) => {
       const label = resolvePinLabel(p, { tagName, accountName, connector });
       return {
         id: p.id,

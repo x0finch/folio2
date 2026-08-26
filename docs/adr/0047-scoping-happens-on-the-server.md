@@ -39,6 +39,8 @@
 
 **显示用的筛法与上限的计数必须是同一个纯函数。** 两处各写一份的话,会出现「这个组合里看着是空的,却告诉你已经钉满 3 个」—— 一句解释不通的错误。
 
+**这条顺带取代 [ADR 0034](0034-tags-soft-labels-and-custom-tab-pins.md) 的一句**:那边写「某 Connector 下账户被删光时该 pin **留着显示空 section**,不自动删」。按组合筛之后,这两件事在实现上是同一个判断 —— 「当前组合里没有这个 connector 的账户」既可能因为它属于别的组合,也可能因为账户都删光了,而不存 `portfolio_id` 就没法区分。取「筛掉」:宁可 pin 在这个组合里不出现(它在还有账户的那个组合里照旧摆着),也不要一个点进去是空的 tab。
+
 ## 关联
 
 [ADR 0033](0033-portfolios-scoped-overview.md)(选中即视图;本 ADR 取代它「过滤在客户端」那一条)、[ADR 0034](0034-tags-soft-labels-and-custom-tab-pins.md)(Tag 与 pin 都在当前组合内生效)、[ADR 0038](0038-web-fetching-via-react-query-loaders-prefetch-only.md)(读走 react-query:按组合入 key 才有「切组合换一份缓存」)、[ADR 0046](0046-portfolio-in-the-url.md)(选中的组合住 URL —— 有了它,这些收口才能在硬加载时就对上)。

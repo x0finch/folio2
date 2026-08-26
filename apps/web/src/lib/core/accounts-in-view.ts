@@ -99,3 +99,41 @@ export function accountIdsInView(
     accountIds.filter((id) => inView(portfolioOf.get(id), selectedPortfolioId, defaultPortfolioId)),
   );
 }
+
+// 一个 pin 指向什么。`tab_pins` 行上那三个字段是可空的(哪一类只填哪一个),所以这里也收 null。
+export interface PinTargetRef {
+  kind: "connector" | "tag" | "account";
+  connectorId?: string | null;
+  tagId?: string | null;
+  accountId?: string | null;
+}
+
+// **这个组合里哪些 pin 说得通**(ADR 0034:pin 在当前选中 Portfolio 内生效)。
+//
+// pin 属于哪个组合是**算出来的,不是存的** —— `tab_pins` 没有 portfolio_id,判据在它指向的东西上:
+//   · tag pin       → 那个 Tag 归属当前组合(Tag 本身就是 Portfolio 内概念)
+//   · 账户 pin      → 那个账户在当前组合的视图里
+//   · connector pin → 视图里有这个 connector 的账户
+//
+// 于是一个 connector pin 会**同时出现在多个组合**,并在每个组合各占一个名额 —— 那是「按类型筛」
+// 的自然结果,不是漏筛。
+//
+// **摆不摆与上限算几个,共用这一个函数。** 两处各写一份就会凑出「这个组合里明明是空的,却说已经
+// 钉满 3 个」—— 一句解释不通的错误。
+export function pinsInView<P extends PinTargetRef>(
+  pins: readonly P[],
+  view: {
+    /** 当前组合视图里的账户(`accountsInView` 的出口 —— 活跃的那些)。 */
+    accounts: readonly { id: string; connectorId: string }[];
+    /** 当前组合的 Tag id 集。 */
+    tagIds: ReadonlySet<string>;
+  },
+): P[] {
+  const accountIds = new Set(view.accounts.map((a) => a.id));
+  const connectorIds = new Set(view.accounts.map((a) => a.connectorId));
+  return pins.filter((p) => {
+    if (p.kind === "tag") return p.tagId != null && view.tagIds.has(p.tagId);
+    if (p.kind === "account") return p.accountId != null && accountIds.has(p.accountId);
+    return p.connectorId != null && connectorIds.has(p.connectorId);
+  });
+}

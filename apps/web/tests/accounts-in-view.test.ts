@@ -3,6 +3,7 @@ import {
   accountIdsInView,
   accountsInView,
   accountsMatchingPin,
+  pinsInView,
   type TabPin,
   toTabPin,
 } from "@/lib/core/accounts-in-view";
@@ -134,5 +135,55 @@ describe("toTabPin", () => {
     expect(toTabPin({ kind: "account" })).toBeNull();
     // kind 与 id 错配(account kind 只带 tagId)→ null,不误当 tag
     expect(toTabPin({ kind: "account", tagId: "t1" })).toBeNull();
+  });
+});
+
+// 「这个组合里哪些自定义 Tab 说得通」(ADR 0034 / 0047)。摆不摆与上限算几个共用这一个函数,
+// 所以它错一次会同时错两处 —— 值得逐类钉住。
+describe("pinsInView", () => {
+  const view = {
+    accounts: [
+      { id: "a1", connectorId: "binance" },
+      { id: "a2", connectorId: "manual" },
+    ],
+    tagIds: new Set(["t1"]),
+  };
+
+  it("tag pin:标签属于这个组合才摆", () => {
+    const pins = [
+      { id: "p1", kind: "tag" as const, tagId: "t1" },
+      { id: "p2", kind: "tag" as const, tagId: "t-other" },
+    ];
+    expect(pinsInView(pins, view).map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("账户 pin:账户在这个视图里才摆", () => {
+    const pins = [
+      { id: "p1", kind: "account" as const, accountId: "a2" },
+      { id: "p2", kind: "account" as const, accountId: "a-elsewhere" },
+    ];
+    expect(pinsInView(pins, view).map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("connector pin:视图里有这个 connector 的账户才摆", () => {
+    const pins = [
+      { id: "p1", kind: "connector" as const, connectorId: "binance" },
+      { id: "p2", kind: "connector" as const, connectorId: "okx" },
+    ];
+    expect(pinsInView(pins, view).map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("目标 id 缺失的 pin 不摆(哪一类都一样)", () => {
+    const pins = [
+      { id: "p1", kind: "tag" as const, tagId: null },
+      { id: "p2", kind: "account" as const, accountId: null },
+      { id: "p3", kind: "connector" as const, connectorId: null },
+    ];
+    expect(pinsInView(pins, view)).toEqual([]);
+  });
+
+  it("空视图(组合里一个账户都没有)→ 一个都不摆", () => {
+    const pins = [{ id: "p1", kind: "connector" as const, connectorId: "binance" }];
+    expect(pinsInView(pins, { accounts: [], tagIds: new Set<string>() })).toEqual([]);
   });
 });

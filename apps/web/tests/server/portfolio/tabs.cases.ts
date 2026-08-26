@@ -35,6 +35,41 @@ describe("portfolio/tabs", () => {
       expect(strip.pins.map((p) => p.name).sort()).toEqual(["我的钱包", "长期"]);
     });
 
+    it("别的组合的 pin 不摆在这个组合的 tab 条里(三类各一个)", async () => {
+      const def = await db(USER).portfolios.ensureDefault();
+      const watch = await db(USER).portfolios.create({ name: "Watch" });
+      const mine = await seedAccount(USER, "自己的", "bitcoin");
+      const watched = await seedAccount(USER, "只看看", "binance");
+      await db(USER).portfolios.assignAccount(mine.id, def.id);
+      await db(USER).portfolios.assignAccount(watched.id, watch.id);
+      const defTag = await db(USER).tags.create({ portfolioId: def.id, name: "长期" });
+      // 三个 pin 全指向默认组合里的东西:标签、账户、以及只有默认组合才有的 connector。
+      await db(USER).tabPins.create({ kind: "tag", tagId: defTag.id });
+      await db(USER).tabPins.create({ kind: "account", accountId: mine.id });
+      await db(USER).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
+
+      expect(
+        (await call(USER, handleGetHomeTabStrip({ portfolioId: def.id }))).pins.map((p) => p.kind)
+          .length,
+      ).toBe(3);
+      // Watch 里这三个一个都不该出现 —— 点进去只会是空视图。
+      expect((await call(USER, handleGetHomeTabStrip({ portfolioId: watch.id }))).pins).toEqual([]);
+    });
+
+    it("connector pin 在**有这个 connector 的每个组合**里都摆(它是个镜头,不归属组合)", async () => {
+      const def = await db(USER).portfolios.ensureDefault();
+      const watch = await db(USER).portfolios.create({ name: "Watch" });
+      const a = await seedAccount(USER, "甲", "binance");
+      const b = await seedAccount(USER, "乙", "binance");
+      await db(USER).portfolios.assignAccount(a.id, def.id);
+      await db(USER).portfolios.assignAccount(b.id, watch.id);
+      await db(USER).tabPins.create({ kind: "connector", connectorId: "binance" });
+
+      for (const pf of [def.id, watch.id]) {
+        expect((await call(USER, handleGetHomeTabStrip({ portfolioId: pf }))).pins).toHaveLength(1);
+      }
+    });
+
     it("没有任何 pin → pins 是空的", async () => {
       await seedAccount(USER, "甲", "bitcoin");
 
