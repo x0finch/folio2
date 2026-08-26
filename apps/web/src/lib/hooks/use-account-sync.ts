@@ -177,7 +177,7 @@ export async function readSyncStream(
 // `enabled: false` + 手动 `refetch()` 才能当命令用,是官方点名的反模式。换成 mutation 之后
 // 「在飞没在飞」交给 `isPending`(不再自己攒 useState)、失败走 `onError`、收尾走 `onSettled`
 // (不再手写 try/finally),和仓里其余写操作(manual token 增删等)同一套。
-export function useAccountSync(accounts: { id: string; label: string }[]) {
+export function useAccountSync(accounts: { id: string; label: string }[], portfolioId: string) {
   const t = useTranslations("Accounts");
   const queryClient = useQueryClient();
   // 这一轮的 toast 句柄与展示名表。放 ref 不放 state:它们是命令式的 UI 把手,变了不该触发渲染,
@@ -200,7 +200,15 @@ export function useAccountSync(accounts: { id: string; label: string }[]) {
       );
     },
     mutationFn: async () => {
-      const response = await fetch("/api/sync", { method: "POST" });
+      // **只递「我在看哪个组合」,不递账户名单**(ADR 0047):这一轮跑哪些账户由服务端按这个组合算。
+      // 于是 `accounts.length` 这个分母就是那一轮的条数 —— 两边用的是同一条判据(当前组合的成员 ∧
+      // 活跃 ∧ 非手记),摘要里的 `N / M` 与进度条说的是同一件事。以前服务端跑全量、这里的分母是
+      // 当前组合那几个,于是在小组合里点同步,进度直接冲过 100%。
+      const response = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ portfolioId }),
+      });
       return readSyncStream(response, {
         total: accounts.length,
         labelOf: (accountId) => labels.current.get(accountId) ?? accountId,

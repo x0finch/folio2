@@ -7,6 +7,7 @@ import { forwardRef, type ReactNode, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { connectorLabelFallback } from "@/lib/core/logo";
 import { useAccountSync } from "@/lib/hooks/use-account-sync";
+import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import type { SyncAttentionSource, SyncStatusSummary } from "@/lib/server/sync/status";
 import { IconButton } from "./icon-button";
@@ -221,7 +222,9 @@ export function SyncStatus({
   action?: SyncAction;
 }) {
   const t = useTranslations("Sync");
-  const { busy, sync } = useAccountSync(summary.accounts);
+  // 同步这一轮按**当前组合**跑(ADR 0047)—— 名单在服务端算,这里只把组合传下去。
+  const { selectedId } = usePortfolio();
+  const { busy, sync } = useAccountSync(summary.accounts, selectedId);
   const [modalOpen, setModalOpen] = useState(false);
   // 桌面 hover popover 打开态抬 z-50(beUI Popover root 是 isolate 层叠上下文,否则被 hero 数值层盖住);
   // 闭合时隐藏 goo 背板(aria-hidden 首子元素),免透明状态段透出 bg-popover 块(同 useHoverPopover 的手法)。

@@ -61,7 +61,10 @@ const ACCOUNTS = [
   { id: "a2", label: "Ledger" },
 ];
 
-const setup = (accounts = ACCOUNTS) => renderHook(() => useAccountSync(accounts), { wrapper });
+const PORTFOLIO = "pf-1";
+
+const setup = (accounts = ACCOUNTS) =>
+  renderHook(() => useAccountSync(accounts, PORTFOLIO), { wrapper });
 
 // 数「刷了几次」而不是「invalidateQueries 被调了几次」:一次刷新会按映射表里的前缀数发好几条,
 // 只认同步域那一条就等于一次刷新。
@@ -163,6 +166,20 @@ describe("useAccountSync", () => {
     expect(new Set(toasts.map((t) => t.id)).size).toBe(1);
     expect(toasts.at(-1)?.level).toBe("error");
     expect(toasts.at(-1)?.text).toContain("network down");
+  });
+
+  it("请求体只带当前组合,不带账户名单(作用域在服务端定)", async () => {
+    const fetchMock = vi.fn(async () => ndjsonResponse([{ accountId: "a1", ok: true }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = setup();
+
+    result.current.sync();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/sync");
+    // 这一轮跑哪些账户由服务端按这个组合算 —— 客户端递名单那条路已经没有了(ADR 0047)。
+    expect(JSON.parse(String(init.body))).toEqual({ portfolioId: PORTFOLIO });
   });
 
   it("没有账户 → disabled,点了也不发请求", async () => {
