@@ -243,8 +243,15 @@ export function SyncPanel({
   // 把它抹掉:正在同步 = 屏幕上的数还是旧的,「旧到什么时候」是此刻唯一有用的信息。
   const lastUpdated = summary.lastSyncedAt ? syncedAt(summary.lastSyncedAt) : t("lastNever");
 
-  // 进行中:`x / N` + 正在同步谁。收官后:三段式那一行。**压根没有轮**(或那一轮三段全为 0)
-  // 就整行省掉 —— 面板不该为了填满而报一个不属于任何一轮的数。
+  // 那一行三态,**同一个位置只说一件事**:
+  //   · 进行中   —— `x / N` + 正在同步谁
+  //   · 有轮可报 —— 三段式
+  //   · 没有轮   —— 这个组合有几个来源
+  //
+  // 最后那一态不是占位:面板叫「同步状态」,「这个组合里有几个来源」是它的本分,而且它天然随组合
+  // 变(切一下组合这个数就该跟着换)。**但它绝不能长成一个 x/y** —— 一旦写成分数,读的人会当成
+  // 「同步上几个」,而无轮态恰恰是「还没跑过」,一个都还没同步。所以有轮时不把来源数塞进三段式:
+  // 那一行是关于某一轮的报告,不是关于组合的统计。
   const roundRows =
     round && busy ? (
       <>
@@ -253,7 +260,9 @@ export function SyncPanel({
       </>
     ) : tally ? (
       <PanelRow label={t("roundResult")} value={tally} />
-    ) : null;
+    ) : (
+      <PanelRow label={t("sources")} value={summary.total} mono />
+    );
 
   // 中断 = 未收官且心跳断了(worker 死了)。它不是某个账户的失败,所以没有清单可列,
   // 只有一句「上一轮没跑完」—— 但它必须出现,否则一轮假同步在面板上与「一切正常」无异。

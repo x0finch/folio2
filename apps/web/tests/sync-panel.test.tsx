@@ -117,14 +117,29 @@ describe("三段式口径", () => {
     expect(text).not.toContain("This round");
   });
 
-  // 断言的是「不报数」,不是「不出现 synced 这个词」—— 徽标那句 All synced 说的是当下状态,
-  // 与某一轮无关,它该留着(没有需要注意的来源时它就是绿的)。
+  // 断言的是「不报某一轮的数」,不是「不出现 synced 这个词」—— 徽标那句 All synced 说的是当下
+  // 状态,与某一轮无关,它该留着(没有需要注意的来源时它就是绿的)。
   it("压根没有轮 → 一个 x/y 或「N synced」都不报", () => {
     const text = mount({ summary: summary(), round: null });
     expect(text).not.toMatch(/\d+\s*(synced|failed|need keys)/);
     expect(text).not.toMatch(/\d+\s*\/\s*\d+/);
     // 该说的还得说:上次更新那一行照旧。
     expect(text).toContain("2 minutes ago");
+  });
+
+  // 无轮态那一行说的是「这个组合有几个来源」——**一个整数,不是分数**。写成分数读的人会当成
+  // 「同步上几个」,而这一态恰恰是「还没跑过」。它天然随组合变,页头摘要跟着选中组合走这件事
+  // 也靠它在 e2e 里当锚点(见 e2e/portfolio-url.spec.ts)。
+  it("压根没有轮 → 报这个组合的来源数(含手记),不是分数", () => {
+    const text = mount({ summary: summary(), round: null });
+    expect(text).toContain("Sources");
+    expect(text).toContain("13");
+  });
+
+  it("有轮时那一行是三段式,不掺来源数", () => {
+    const text = mount({ summary: summary(), round: round() });
+    expect(text).toContain("This round");
+    expect(text).not.toContain("Sources");
   });
 
   it("同步中 → `x / N` 与正在同步谁,不出现收官后那一行", () => {
