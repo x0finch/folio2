@@ -1,5 +1,6 @@
+import type { AccountSafe } from "@folio/db";
 import { describe, expect, it } from "vitest";
-import { accountSyncStatus, STALE_SYNC_MS } from "@/lib/server/sync/status";
+import { accountSyncStatus, isSyncableAccount, STALE_SYNC_MS } from "@/lib/server/sync/status";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = 1_700_000_000_000;
@@ -35,5 +36,23 @@ describe("accountSyncStatus", () => {
     // 曾经是 24 小时。改成 3 天有两个理由:同步是手动动作,隔一天不点很正常;而这个阈值现在
     // 也决定页头徽标变不变琥珀,24 小时会让它几乎天天在提醒。
     expect(STALE_SYNC_MS).toBe(3 * 24 * HOUR);
+  });
+});
+
+type A = Pick<AccountSafe, "archivedAt" | "connectorId">;
+const a = (over: Partial<A>): A => ({ archivedAt: null, connectorId: "bitcoin", ...over });
+
+describe("isSyncableAccount", () => {
+  it("活跃的非-manual 账户可同步", () => {
+    expect(isSyncableAccount(a({ connectorId: "bitcoin" }))).toBe(true);
+    expect(isSyncableAccount(a({ connectorId: "evm" }))).toBe(true);
+  });
+
+  it("manual 不是同步源(ADR 0018)→ 排除", () => {
+    expect(isSyncableAccount(a({ connectorId: "manual" }))).toBe(false);
+  });
+
+  it("归档账户排除(即便非 manual)", () => {
+    expect(isSyncableAccount(a({ connectorId: "bitcoin", archivedAt: 123 }))).toBe(false);
   });
 });

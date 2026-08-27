@@ -43,7 +43,7 @@ import { userDisplayBalances } from "@/lib/server/tokens/model";
 import { recordDefiLogosOf } from "./defi-logos";
 import { warmPlatforms } from "./platforms";
 import { revalue } from "./revalue";
-import { isSyncableAccount } from "./syncable";
+import { isSyncableAccount } from "./status";
 
 // server-only 编排装配(引 cloudflare:workers)。独立于 sync.ts —— triggerSync(server fn,被客户端 import)
 // 只在其 handler 内引用本模块,handler 被剥离后客户端不会拉进 cloudflare:workers。cron(server.ts)直接引本模块。
