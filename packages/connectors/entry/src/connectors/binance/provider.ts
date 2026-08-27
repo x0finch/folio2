@@ -4,17 +4,16 @@ import {
   type BinanceCreds,
   make as makeBinanceClient,
 } from "@folio/binance-client";
-import {
-  type BalanceProvider,
-  type ConnectorError,
-  type CredField,
-  isRetryable,
-  type Note,
-  type ProviderNeeds,
+import type {
+  BalanceProvider,
+  ConnectorError,
+  CredField,
+  Note,
+  ProviderNeeds,
 } from "@folio/connectors-basic";
 import { Effect, Either, Fiber } from "effect";
 import { z } from "zod";
-import { asConnector } from "../../upstream";
+import { asConnector, bestEffortVerdict } from "../../upstream";
 import { PROVIDER_ID } from "./constants";
 import {
   type BinanceRow,
@@ -131,11 +130,16 @@ const earn: Wallet = {
 
 const WALLETS: readonly Wallet[] = [spot, usdmFutures, coinmFutures, funding, earn];
 
-// 账户级失败 Note(ADR 0030):列出没同步上的钱包 + 一句提示。
-const walletFailureNote = (failed: readonly string[]): Note => ({
+// 账户级失败 Note(ADR 0030):列出没同步上的钱包 + 按错因给一句提示(与 okx/bybit 同款)。
+// **只会因「等也没用」的失败出现**(FOL-31):瞬时故障已在 `bestEffortVerdict` 那层升级成
+// 整账户失败、交给重试,到不了这里。剩下两种各给各的话:权限没勾(去交易所改)、
+// 上游变了形状(用户干等没用)—— 后者也劝去查权限是误导。
+const walletFailureNote = (failed: readonly { name: string; auth: boolean }[]): Note => ({
   title: "Wallets not synced",
   icon: "warning",
-  content: `${failed.join(" / ")} — couldn't be read; check the API key's permissions or retry later`,
+  content: `${failed.map((f) => f.name).join(" / ")} — ${
+    failed.some((f) => f.auth) ? "check the API key's permissions" : "couldn't be read this round"
+  }`,
 });
 
 // —— 判决(纯函数)——
@@ -143,12 +147,13 @@ const walletFailureNote = (failed: readonly string[]): Note => ({
 // 五个钱包的成败与价表结果都已收集完,这一步不再有 IO:数据进、Either 出。
 // 抽出来是为了让四条判决路径能直接喂数据单测,不必每条用例都搭一整条 HTTP 桩链。
 //
-// **被价表连坐的失败 → 整账户失败**(FOL-30)。价表不是第六个钱包,是**四个钱包共用的估值
-// 原料**:现货 / 币本位 / 资金 / 理财都要 join 它才算得出 USD,只有 U 本位自带 USD 不 join。
-// 所以价表一挂,那四个会**一起**倒进失败堆,而「尽力而为」看不出这是同一个原因 —— 它照样写出
-// 一份只剩 U 本位的快照,把那四个钱包的真实资产整块盖掉(生产实况:每轮 cron 掉块,note 恒为
-// 那四个的名字)。「拿不到料」该走的是重试,不是降级:交回错误通道 → sync 的退避重试
-// (带 Retry-After)→ 打光则这一轮不写快照,旧值原样保住。
+// 这一层只管 **binance 独有的那条:被价表连坐 → 整账户失败**(FOL-30)。价表不是第六个钱包,
+// 是**四个钱包共用的估值原料**:现货 / 币本位 / 资金 / 理财都要 join 它才算得出 USD,只有
+// U 本位自带 USD 不 join。所以价表一挂,那四个会**一起**倒进失败堆,而「尽力而为」看不出这是
+// 同一个原因 —— 它照样写出一份只剩 U 本位的快照,把那四个钱包的真实资产整块盖掉(生产实况:
+// 每轮 cron 掉块,note 恒为那四个的名字)。「拿不到料」该走的是重试,不是降级:交回错误通道 →
+// sync 的退避重试(带 Retry-After)→ 打光则这一轮不写快照,旧值原样保住。
+// 通用那半(瞬时错升级 / 全军覆没)交给 `bestEffortVerdict`。
 //
 // **判据是「有钱包死在它手上」,不是「价表挂了」** —— 两者不等价,差别正好是个误伤:
 // key 只勾了合约权限时,那四个各自先死在自己的签名请求上(钱包内部 `Effect.all` 默认串行,
@@ -167,35 +172,35 @@ export const verdict = (
   outcomes: readonly WalletOutcome[],
   priceTable: Either.Either<unknown, ConnectorError>,
 ): Either.Either<{ balances: BinanceRow[]; note?: Note[] }, ConnectorError> => {
-  const failed = outcomes.filter((o) => Either.isLeft(o.result));
-
   // 被价表连坐 → 以价表的真实原因失败,而不是被它拖死的某个钱包。
-  // **这条不看可不可重试**:价表就算死于不可重试的错(如响应形状变了),被连坐的四个钱包
+  // **这条 binance 独有**,所以留在这层:另外两家的行情表来自自己某个桶的响应(零额外请求),
+  // 那个桶挂了数量还在、估值交给 oracle 兜底,没有「共用一份原料」这回事。
+  // **也不看可不可重试**:价表就算死于不可重试的错(如响应形状变了),被连坐的四个钱包
   // 也一样没拿到数 —— 该失败保旧值,只是 sync 不会白重试而已。
   if (Either.isLeft(priceTable)) {
-    const collateral = failed.some(
+    const collateral = outcomes.some(
       (o) => Either.isLeft(o.result) && o.result.left === priceTable.left,
     );
     if (collateral) return Either.left(priceTable.left);
   }
 
-  // **失败堆里有「等一等会好」的(限流/超时/5xx)→ 整账户失败进重试。**
-  // 尽力而为只留给「等也没用」的失败(权限没勾):降级写残缺快照,和价表连坐是同一种症状,
-  // 只是范围小 —— 对瞬时错这么干,等于把「下轮就能好」的数据这轮先抹掉。判据用契约里现成的
-  // `isRetryable`,和 sync 重试那层是同一把尺子:这里判「该不该交给重试」,那里判「还试不试」。
-  const transient = failed.find((o) => Either.isLeft(o.result) && isRetryable(o.result.left));
-  if (transient && Either.isLeft(transient.result)) return Either.left(transient.result.left);
-
-  // **全军覆没**(五个钱包全死于权限类 —— 如整把 key 被吊销)→ 也失败,
-  // 别拿一份**空**快照覆盖已有余额。只有**部分**权限失败才走尽力而为。
-  const first = failed[0];
-  if (failed.length === outcomes.length && first && Either.isLeft(first.result)) {
-    return Either.left(first.result.left);
-  }
+  // 其余的成败裁定三家同一把尺子(瞬时错升级 / 全军覆没),住 ../../upstream。
+  const verdicted = bestEffortVerdict(outcomes);
+  if (Either.isLeft(verdicted)) return Either.left(verdicted.left);
+  const failed = verdicted.right;
 
   return Either.right({
     balances: outcomes.flatMap((o) => (Either.isRight(o.result) ? o.result.right : [])),
-    note: failed.length ? [walletFailureNote(failed.map((o) => o.wallet.name))] : undefined,
+    note: failed.length
+      ? [
+          walletFailureNote(
+            failed.map((o) => ({
+              name: o.wallet.name,
+              auth: Either.isLeft(o.result) && o.result.left._tag === "ConnectorAuthError",
+            })),
+          ),
+        ]
+      : undefined,
   });
 };
 

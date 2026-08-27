@@ -15,7 +15,7 @@ import type {
 } from "@folio/connectors-basic";
 import { Effect } from "effect";
 import { z } from "zod";
-import { asConnector } from "../../upstream";
+import { asConnector, bestEffortVerdict } from "../../upstream";
 import { EARN_CATEGORIES, PROVIDER_ID } from "./constants";
 import {
   bucketFailureNote,
@@ -98,12 +98,8 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
           { concurrency: "unbounded" },
         );
 
-        const failed = outcomes.filter((o) => o.result._tag === "Left");
-        // **全军覆没** → 失败,让 sync 重试,别拿一份空快照覆盖已有余额。
-        if (failed.length === BUCKETS.length) {
-          const first = failed[0];
-          if (first?.result._tag === "Left") return yield* Effect.fail(first.result.left);
-        }
+        // 成败裁定三家 CEX 同一把尺子(瞬时错升级 / 全军覆没),住 ../../upstream。
+        const failed = yield* bestEffortVerdict(outcomes);
 
         const bodyOf = <T>(bucket: Bucket): T | undefined => {
           const hit = outcomes.find((o) => o.bucket === bucket);

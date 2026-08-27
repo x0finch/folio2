@@ -5,8 +5,9 @@ import {
   ConnectorFailure,
   ConnectorRateLimitError,
   ConnectorUnavailableError,
+  isRetryable,
 } from "@folio/connectors-basic";
-import { Effect, Match } from "effect";
+import { Effect, Either, Match } from "effect";
 
 // 【请求层的错误 → connector 的错误】——**适配层唯一该做的错误翻译,写一次给九个上游用**。
 //
@@ -59,3 +60,54 @@ const describe = (e: UpstreamError): string =>
 export const asConnector = <A, R>(
   effect: Effect.Effect<A, UpstreamError, R>,
 ): Effect.Effect<A, ConnectorError, R> => Effect.mapError(effect, fromUpstreamError);
+
+// 【多桶尽力而为的成败裁定】——**写一次给三家 CEX 用**(binance / okx / bybit)。
+//
+// 它们都把一个账户拆成几个隔离的桶(钱包 / 账户类型)并发拉,于是都要回答同一个问题:
+// 部分桶失败时,**这轮该交给重试,还是该降级写一份少了几块的快照。**
+//
+// 判据是失败的**种类**,不是数量(FOL-30 / FOL-31):
+//
+// · **「等一等会好」**(限流 / 超时 / 5xx)→ 整体失败,交给 sync 那层的退避重试;打光则不写快照,
+//   旧值原样保住。降级是错的 —— 写出去的残缺快照会盖掉真实资产,而下一轮本来就能拉到。
+//   生产上这正是资产每轮掉块的病灶。
+// · **「等也没用」**(权限没勾 / 上游变了形状)→ 降级:写能拿到的那些 + 一条点名失败桶的 note。
+//   重试变不出权限来,拦着不写等于这个账户永远存不进数据。
+// · **全军覆没**是独立一条:哪怕全是「等也没用」(整把 key 被吊销)也失败 —— 降级写出去的会是
+//   一份**空**快照,把账户的全部资产抹掉。
+//
+// 判据用契约的 `isRetryable`,和 sync 的重试策略是同一把尺子:这里判「该不该交给重试」,
+// 那里判「还试不试」。两处各自照着 `_tag` 判,加一种错误时两边一起编译红。
+//
+// **只裁定,不碰数据**:成功桶的响应形状三家各不相同(有的直接是 rows,有的要按桶取原始响应
+// 再解析),让它们各自处理;这里返回失败桶,供调用方拼各自的 note。
+export const bestEffortVerdict = <
+  T extends { readonly result: Either.Either<A, ConnectorError> },
+  A,
+>(
+  outcomes: readonly T[],
+): Either.Either<readonly T[], ConnectorError> => {
+  const failed = outcomes.filter((o) => Either.isLeft(o.result));
+
+  // 有「等一等会好」的 → 整体失败(混合时以瞬时那个为准:它才是重试的理由)。
+  // 几个瞬时错并存时**优先挑限流错**:它可能带着 Retry-After,sync 的重试会照着等 ——
+  // 挑了别的(如同轮某桶的 504),这个提示就丢了,退避按默认来、可能又撞回限流上。
+  const transient =
+    failed.find(
+      (o) => Either.isLeft(o.result) && o.result.left._tag === "ConnectorRateLimitError",
+    ) ?? failed.find((o) => Either.isLeft(o.result) && isRetryable(o.result.left));
+  if (transient && Either.isLeft(transient.result)) return Either.left(transient.result.left);
+
+  // 全军覆没 → 也失败,别拿一份空快照覆盖已有余额。
+  const first = failed[0];
+  if (
+    outcomes.length > 0 &&
+    failed.length === outcomes.length &&
+    first &&
+    Either.isLeft(first.result)
+  ) {
+    return Either.left(first.result.left);
+  }
+
+  return Either.right(failed);
+};

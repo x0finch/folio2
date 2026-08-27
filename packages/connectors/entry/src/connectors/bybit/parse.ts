@@ -121,11 +121,13 @@ export function parseEarn(positions: BybitEarnPosition[], label: string, hint: P
 const fmtSignedUsd = (n: number): string =>
   `${n < 0 ? "-" : "+"}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 
+// **这条 Note 只会因「等也没用」的失败出现**(FOL-31):瞬时故障已在 `bestEffortVerdict` 那层
+// 升级成整账户失败、交给重试,到不了这里。两句提示分别对应剩下的两种:权限没勾、上游变了形状。
 export function bucketFailureNote(failed: { name: string; auth: boolean }[]): Note {
   const names = failed.map((f) => f.name).join(" / ");
   const tail = failed.some((f) => f.auth)
     ? "check the API key's permissions"
-    : "temporary — it'll sync next time";
+    : "couldn't be read this round";
   return { title: "Buckets not synced", icon: "warning", content: `${names} — ${tail}` };
 }
 

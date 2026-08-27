@@ -230,11 +230,15 @@ function perpFallbackNote(): Note {
   };
 }
 
-// 账户级失败 Note(ADR 0030):列出没同步上的桶 + 按错因给一句提示。有凭据/权限类失败(auth code
-// 50xxx)→ 提示去交易所查权限;否则(超时/瞬时)→ 下次自动补上。
+// 账户级失败 Note(ADR 0030):列出没同步上的桶 + 按错因给一句提示。
+//
+// **这条 Note 只会因「等也没用」的失败出现**(FOL-31):瞬时故障(超时/限流/5xx)已经在
+// `bestEffortVerdict` 那层升级成整账户失败、交给重试了,到不了这里。所以两句提示分别对应
+// 剩下的两种:权限没勾(去交易所改)、上游变了形状(我们这边的事,用户干等没用)。
+// 老那句「temporary — it'll sync next time」现在是错的:能自己好的那类根本不走这条路。
 export function bucketFailureNote(failed: { name: string; auth: boolean }[]): Note {
   const names = failed.map((f) => f.name).join(" / ");
   const anyAuth = failed.some((f) => f.auth);
-  const tail = anyAuth ? "check the API key's permissions" : "temporary — it'll sync next time";
+  const tail = anyAuth ? "check the API key's permissions" : "couldn't be read this round";
   return { title: "Buckets not synced", icon: "warning", content: `${names} — ${tail}` };
 }
