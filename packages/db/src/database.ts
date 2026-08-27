@@ -6,6 +6,7 @@ import { makeManualStore } from "./domains/manual";
 import { makePortfolioStore } from "./domains/portfolios";
 import { makeSettingsStore } from "./domains/settings";
 import { makeSnapshotStore } from "./domains/snapshots";
+import { makeSyncRoundStore } from "./domains/sync-rounds";
 import { makeTabPinStore } from "./domains/tab-pins";
 import { makeTagStore } from "./domains/tags";
 import { makeUserTokenPriceStore } from "./domains/token-prices";
@@ -72,6 +73,9 @@ export class Database extends Effect.Service<Database>()("db/Database", {
       portfolios: yield* makePortfolioStore,
       settings: yield* makeSettingsStore,
       snapshots: yield* makeSnapshotStore,
+      // 同步轮的状态(ADR 0048)。它落在 `user_cache` 上,但**不是**那片 KV 的一个用法 ——
+      // 它的写入是带轮 id 条件的单语句,通用 `put(key, value)` 表达不了,漏网竞态会互相盖。
+      syncRounds: yield* makeSyncRoundStore,
       tabPins: yield* makeTabPinStore,
       tags: yield* makeTagStore,
       transfer: yield* makeTransferStore,

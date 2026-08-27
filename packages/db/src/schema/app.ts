@@ -323,10 +323,14 @@ export const globalTokenRefIndex = sqliteTable(
   (t) => [primaryKey({ columns: [t.chainRef, t.upstream] })],
 );
 
-// per-user KV 缓存:只三种键(`warm` / `fx:<币种>` / `platform:<键>`,见 oracle 的 cache.ts)。
-// 整张删空功能不坏,只是慢一点。留 user_id 的理由:per-user 缓存只装这个用户实际碰到的
-// (他选的币种、他有持仓的那几条链),全局表得装所有人的并集。
-// #202 起取代 fx_rates + platforms 两张全局表。
+// per-user KV 缓存:四种键 —— 参考层那三种(`warm` / `fx:<币种>` / `platform:<键>`,见 oracle 的
+// cache.ts),加上同步轮(`sync-round:<portfolioId>`,ADR 0048)。
+// 整张删空功能不坏,只是慢一点(同步轮那种最多丢一次「上一轮谁失败了」,下一轮照常开)。
+// 留 user_id 的理由:per-user 缓存只装这个用户实际碰到的(他选的币种、他有持仓的那几条链),
+// 全局表得装所有人的并集。#202 起取代 fx_rates + platforms 两张全局表。
+//
+// **`expires_at` 对这四种键的含义不完全一样**:参考层那三种是 SWR 的「该回源了」(过期不删、
+// 读出带 stale);同步轮那种是**心跳**——未收官还过期就等于 worker 死了(见 domains/sync-rounds.ts)。
 export const userCache = sqliteTable(
   "user_cache",
   {

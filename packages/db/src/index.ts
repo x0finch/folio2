@@ -56,6 +56,18 @@ export type {
   SnapshotWithBalances,
   WriteSnapshotInput,
 } from "./domains/snapshots";
+// 同步轮(ADR 0048)。app 侧要这些名字:开轮 / 记结果 / 收官各收一个入参对象,读回来的那份
+// 是面板与 cron 共同的口径。
+export type {
+  FinishSyncRoundInput,
+  OpenSyncRoundInput,
+  SettleSyncRoundInput,
+  SyncRoundAccount,
+  SyncRoundAccountStatus,
+  SyncRoundRecord,
+  SyncRoundStore,
+  SyncRoundTrigger,
+} from "./domains/sync-rounds";
 export type { TabPinInput } from "./domains/tab-pins";
 export type { AccountTagLink, CreateTagInput } from "./domains/tags";
 export type { TokenPriceStore } from "./domains/token-prices";
