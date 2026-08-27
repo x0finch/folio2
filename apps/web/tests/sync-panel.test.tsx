@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SyncRound } from "@/lib/hooks/use-account-sync";
 import { messages } from "@/lib/i18n/messages";
 import type { SyncStatusSummary } from "@/lib/server/sync/status";
@@ -36,10 +36,20 @@ const summary = (over: Partial<SyncStatusSummary> = {}): SyncStatusSummary => ({
 const round = (over: Partial<SyncRound> = {}): SyncRound => ({
   done: 0,
   total: 0,
+  skipped: 0,
   current: null,
   failures: [],
   error: null,
   ...over,
+});
+
+// 相对时间经 useRelativeSyncedAt 走**真实系统时钟**(挂载后立刻对表,见那个 hook 的注释),
+// 所以把系统时钟钉在 NOW —— 不钉的话「2 minutes ago」会随跑测试的日期漂移。
+beforeEach(() => {
+  vi.useFakeTimers({ now: NOW });
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 function mount(props: {
@@ -103,6 +113,20 @@ describe("SyncPanel 的口径", () => {
     const text = mount({ summary: s, round: round({ done: 9, total: 9 }), busy: true });
     expect(text).toContain("12 / 12");
     expect(text).not.toContain("13 / 12");
+  });
+
+  it("有账户被跳过(缺凭据)→ 分子刨掉它,轮尾收口在 11/13,不先冲 13/13 再跳水", () => {
+    // skipped 进 done(处理完)但没产出快照,summary.ok 不计它 —— 计进分子的话轮尾瞬间满格,
+    // 下一次 summary 刷新又跌回来。失败的**不刨**(失败账户往往仍有旧快照,ok 计它)。
+    const s = summary({ ok: 11 });
+    // 轮中:4 打底 + 5 完成 - 2 跳过 = 7。
+    expect(
+      mount({ summary: s, round: round({ done: 5, total: 9, skipped: 2 }), busy: true }),
+    ).toContain("7 / 13");
+    // 轮尾:4 + 9 - 2 = 11,和收口后的 summary.ok 是同一个数 —— 没有先满格再跳水那一下。
+    const tail = mount({ summary: s, round: round({ done: 9, total: 9, skipped: 2 }), busy: true });
+    expect(tail).toContain("11 / 13");
+    expect(tail).not.toContain("13 / 13");
   });
 
   it("同步中 Last updated 仍是上次成功同步的时间,不是 —", () => {

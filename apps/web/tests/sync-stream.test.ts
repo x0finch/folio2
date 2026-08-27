@@ -48,6 +48,8 @@ describe("readSyncStream", () => {
     expect(seen).toEqual([1, 2, 3]); // 三次回调,不是攒到最后一次
     expect(final.done).toBe(3);
     expect(final.failures).toEqual([]);
+    // skipped 单独计数:它进 done(处理完)但没产出快照,面板的合成分子要刨掉它。
+    expect(final.skipped).toBe(1);
   });
 
   it("失败收进 failures,带 accountId", async () => {
@@ -60,6 +62,7 @@ describe("readSyncStream", () => {
     );
     expect(final.failures).toEqual([{ accountId: "a", error: "boom" }]);
     expect(final.done).toBe(2); // 失败的也算「跑过了」
+    expect(final.skipped).toBe(0); // 失败 ≠ 跳过:失败账户往往仍有旧快照,分子不刨它
   });
 
   it("用户级失败(fatal)→ 抛,让调用方走错误分支", async () => {

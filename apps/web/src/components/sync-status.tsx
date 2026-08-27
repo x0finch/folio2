@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { RefreshCw } from "lucide-react";
 import { forwardRef, type ReactNode, useState } from "react";
-import { useFormatter, useNow, useTranslations } from "use-intl";
+import { useTranslations } from "use-intl";
 import { connectorLabelFallback } from "@/lib/core/logo";
 import {
   type SyncRound,
@@ -12,6 +12,7 @@ import {
   useAccountSync,
 } from "@/lib/hooks/use-account-sync";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
+import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import type { SyncAttentionSource, SyncStatusSummary } from "@/lib/server/sync/status";
 import { IconButton } from "./icon-button";
@@ -129,21 +130,15 @@ function AttentionRow({
   onPick: (accountId: string) => void;
 }) {
   const t = useTranslations("Sync");
-  const format = useFormatter();
-  // 相对时间要一个**活的**now:provider 的 now 冻在页面加载那一刻,页面开着不关的话,
-  // 刚同步完的时间戳会比它还新,渲染成「in 2 minutes」这种未来时态(实测抓到)。useNow 初值
-  // 取 provider 那份(SSR/hydration 一致),挂载后每分钟自更新 —— 粒度与展示单位一致。
-  // 调用点仍要把时间戳钳到 now:快照落库到下一跳之间,新时间戳照样比 now 新。
-  const now = useNow({ updateInterval: 60_000 });
+  // 活时钟 + 钳位收在 hook 里(为什么不用裸 useNow 见 use-relative-synced-at)。
+  const syncedAt = useRelativeSyncedAt();
   const sameName = source.label.trim().toLowerCase() === connectorLabel.trim().toLowerCase();
   const status =
     source.kind === "missing-credentials"
       ? t("missingCredentials")
       : source.kind === "never-synced"
         ? t("neverSynced")
-        : t("lastSyncedAt", {
-            when: format.relativeTime(new Date(Math.min(source.takenAt ?? 0, now.getTime())), now),
-          });
+        : t("lastSyncedAt", { when: syncedAt(source.takenAt ?? 0) });
   return (
     <button
       type="button"
@@ -186,12 +181,8 @@ function FailureRow({
 // 路由与 Portfolio 上下文一起搭起来 —— 那测的是装配,不是口径。
 export function SyncPanel({ summary, round, busy, needsAttention, onSync, onPick }: PanelProps) {
   const t = useTranslations("Sync");
-  const format = useFormatter();
-  // 相对时间要一个**活的**now:provider 的 now 冻在页面加载那一刻,页面开着不关的话,
-  // 刚同步完的时间戳会比它还新,渲染成「in 2 minutes」这种未来时态(实测抓到)。useNow 初值
-  // 取 provider 那份(SSR/hydration 一致),挂载后每分钟自更新 —— 粒度与展示单位一致。
-  // 调用点仍要把时间戳钳到 now:快照落库到下一跳之间,新时间戳照样比 now 新。
-  const now = useNow({ updateInterval: 60_000 });
+  // 活时钟 + 钳位收在 hook 里(为什么不用裸 useNow 见 use-relative-synced-at)。
+  const syncedAt = useRelativeSyncedAt();
   const { badge } = tone(busy || needsAttention);
   const { data: catalog } = useQuery(connectorCatalogQuery());
   const nameOf = (id: ConnectorId) => catalog?.[id]?.label ?? connectorLabelFallback(id);
@@ -207,14 +198,18 @@ export function SyncPanel({ summary, round, busy, needsAttention, onSync, onPick
   // 夹在分母上:summary 每完成一个账户就被定向刷新,轮中归档一个**已同步**的账户会让打底 + 已完成
   // 大过缩了水的 total(13 个来源归档 1 个 → total 12,而这一轮照旧回 9 条)—— `13 / 12` 读起来
   // 像多同步出一个来源。
+  //
+  // skipped(缺凭据、被跳过)要从分子里刨掉:它算「处理完」(进 done)但没产出快照,`summary.ok`
+  // 不计它 —— 计进分子的话轮尾先冲到 13/13、下一次 summary 刷新又跳水回 11/13。**失败的不刨**:
+  // 失败账户往往仍有旧快照,`summary.ok` 计它,现口径正好收口一致。
   const notInRound = summary.total - summary.accounts.length;
-  const synced = busy ? Math.min(summary.total, notInRound + round.done) : summary.ok;
+  const synced = busy
+    ? Math.min(summary.total, notInRound + round.done - round.skipped)
+    : summary.ok;
 
   // **busy 时照样是上次成功同步的时间**(裁定 3)。以前这里写死 `—`,恰好在最该看它的那一刻
   // 把它抹掉:正在同步 = 屏幕上的数还是旧的,「旧到什么时候」是此刻唯一有用的信息。
-  const lastUpdated = summary.lastSyncedAt
-    ? format.relativeTime(new Date(Math.min(summary.lastSyncedAt, now.getTime())), now)
-    : t("lastNever");
+  const lastUpdated = summary.lastSyncedAt ? syncedAt(summary.lastSyncedAt) : t("lastNever");
 
   const currentRow = busy ? (
     <div className="flex items-center justify-between gap-2.5 py-1 text-muted-foreground text-xs">

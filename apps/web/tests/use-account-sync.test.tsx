@@ -75,6 +75,7 @@ describe("useAccountSync", () => {
     expect(result.current.round).toEqual({
       done: 0,
       total: 0,
+      skipped: 0,
       current: null,
       failures: [],
       error: null,
@@ -156,6 +157,8 @@ describe("useAccountSync", () => {
     ]);
     // 两个账户都处理完了 —— skipped 也算处理完,只是不算失败。
     expect(result.current.round.done).toBe(2);
+    // 但要单独计数:面板的合成分子得把它刨掉(它没产出快照,summary.ok 不计它)。
+    expect(result.current.round.skipped).toBe(1);
   });
 
   it("用户级失败({ fatal })→ 进 round.error,且照样刷新(服务端可能还在跑)", async () => {
@@ -226,6 +229,7 @@ describe("useAccountSync", () => {
     expect(result.current.round).toEqual({
       done: 0,
       total: 0,
+      skipped: 0,
       current: null,
       failures: [],
       error: null,
@@ -234,6 +238,70 @@ describe("useAccountSync", () => {
     // 「跨轮保留」保留的是**那个组合自己的**上一轮 —— 切回来失败清单还在。
     rerender({ accounts: ACCOUNTS, pf: PORTFOLIO });
     expect(result.current.round.failures).toHaveLength(1);
+  });
+
+  it("两个组合各飞一轮,交错推进 → 各自的 round 互不踩(store 每组合一格)", async () => {
+    // busy 的防重按组合 key 拦,只拦**同组合**:A 轮中切到 B 再点同步是允许的,两条 mutation 并飞。
+    // store 全局单格时它们会互相整格覆盖 —— B 的面板闪 A 的数、后收工者占格,另一组合的失败清单
+    // 静默消失。这条钉住:每组合一格,交错写互不相闻,切到谁读到的都是谁自己的。
+    const pfA = `${PORTFOLIO}-a`;
+    const pfB = `${PORTFOLIO}-b`;
+    const encoder = new TextEncoder();
+    const feeds = new Map<string, { push: (line: unknown) => void; close: () => void }>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const { portfolioId } = JSON.parse(String(init.body)) as { portfolioId: string };
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            feeds.set(portfolioId, {
+              push: (line) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`)),
+              close: () => controller.close(),
+            });
+          },
+        });
+        return new Response(body, { status: 200 });
+      }),
+    );
+
+    const { result, rerender } = setup(ACCOUNTS, pfA);
+    result.current.sync();
+    await waitFor(() => expect(feeds.has(pfA)).toBe(true));
+    feeds.get(pfA)?.push({ accountId: "a1", ok: true });
+    await waitFor(() => expect(result.current.round.done).toBe(1));
+
+    // A 还在飞,切到 B 开第二轮。
+    rerender({ accounts: ACCOUNTS, pf: pfB });
+    expect(result.current.round.done).toBe(0); // B 这格还是空的,不是 A 的 1
+    result.current.sync();
+    await waitFor(() => expect(feeds.has(pfB)).toBe(true));
+
+    // 交错推进:B 先失败一条,A 再完成一条 —— A 的写入不能把 B 的失败抹掉。
+    feeds.get(pfB)?.push({ accountId: "a1", ok: false, error: "b boom" });
+    await waitFor(() => expect(result.current.round.failures).toHaveLength(1));
+    feeds.get(pfA)?.push({ accountId: "a2", ok: true });
+
+    // 看 B:还是 B 自己的(1 done、1 失败),没被 A 的第 2 条冲成 2。
+    await waitFor(() => expect(result.current.round.done).toBe(1));
+    expect(result.current.round.failures).toEqual([
+      { accountId: "a1", label: "Binance", error: "b boom" },
+    ]);
+
+    // 切回 A:A 的累计也没被 B 踩 —— 2 条都在,没有失败。
+    rerender({ accounts: ACCOUNTS, pf: pfA });
+    await waitFor(() => expect(result.current.round.done).toBe(2));
+    expect(result.current.round.failures).toEqual([]);
+
+    // 各自收口,互不影响。
+    feeds.get(pfB)?.push({ accountId: "a2", ok: true });
+    feeds.get(pfA)?.close();
+    feeds.get(pfB)?.close();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.round.done).toBe(2);
+    rerender({ accounts: ACCOUNTS, pf: pfB });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.round.done).toBe(2);
+    expect(result.current.round.failures).toHaveLength(1); // B 的失败清单还在,没被 A 的收工覆盖
   });
 
   it("轮中换页(卸载 → 新实例)进度不丢,busy 也还亮着", async () => {

@@ -6,20 +6,22 @@
     <meta name="theme-color" content="#151515" />
     <title>Folio — Offline</title>
     <style>
-      /* 自包含、无外链:SW 缓存的兜底页,离线时也必须能独立渲染。深色对齐 App。 */
+      /* 自包含、无外链:SW 缓存的兜底页,离线时也必须能独立渲染。深色对齐 App ——
+         这里的色值是 globals.css 暗色 token 的手抄镜像(foreground/muted-foreground/primary),
+         那边改了要跟(镜像清单见 globals.css 头注)。 */
       :root { color-scheme: dark; }
       html, body { height: 100%; margin: 0; }
       body {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         gap: 1rem; padding: env(safe-area-inset-top) 1.5rem env(safe-area-inset-bottom);
-        background: #151515; color: #fafafa; text-align: center;
+        background: #151515; color: #f0f0f0; text-align: center;
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       }
       h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
-      p { margin: 0; max-width: 22rem; color: #a1a1a1; font-size: 0.9rem; line-height: 1.5; }
+      p { margin: 0; max-width: 22rem; color: #868686; font-size: 0.9rem; line-height: 1.5; }
       button {
         margin-top: 0.5rem; padding: 0.6rem 1.4rem; border: 0; border-radius: 0.6rem;
-        background: #fafafa; color: #151515; font: inherit; font-weight: 600; cursor: pointer;
+        background: #f0f0f0; color: #151515; font: inherit; font-weight: 600; cursor: pointer;
       }
     </style>
   </head>

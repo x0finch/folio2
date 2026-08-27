@@ -63,6 +63,10 @@ test.describe("同步一轮", () => {
     await expect(page.getByText("2 / 2")).toBeVisible({ timeout: 30_000 });
     await waitForSnapshot(page, idA, holds(3.25), "Spot A 这一轮的快照没落库");
     await waitForSnapshot(page, idB, holds(3.25), "Spot B 这一轮的快照没落库");
+    // 「2 / 2」在点同步**之前**就为真(上一轮已把两个都同步过)—— 单靠它证不到这一轮的流走通了。
+    // 钉两下:没有失败区块 + 胶囊收口回「Synced」(流回归会走 onError → 琥珀「Needs attention」)。
+    await expect(page.getByText("Failed this round")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Synced$/ })).toBeVisible({ timeout: 30_000 });
   });
 
   // 整个 #372 的理由就是这一条。别的挂了都好说,它挂了说明 #371 的核心承诺是假的。
@@ -228,7 +232,9 @@ test.describe("前端读流", () => {
 
     // 跳过的那条不进失败 —— 用户只是还没填 API key,那不是错误(FOL-32 后看面板不看 toast):
     // 面板里不该出现「Failed this round」,胶囊也不该转琥珀。
-    await expect(page.getByRole("button", { name: "Synced" })).toBeVisible({ timeout: 30_000 });
+    // 锚定整串:Playwright 的字符串 name 是子串匹配,裸 "Synced" 会连账户行的「Synced now」一起
+    // 命中,strict mode 直接炸(本地实跑抓到;CI 绿只是列表渲染慢的竞态)。
+    await expect(page.getByRole("button", { name: /^Synced$/ })).toBeVisible({ timeout: 30_000 });
     await hoverSyncPill(page);
     await expect(page.getByText("Failed this round")).toHaveCount(0);
   });
@@ -248,7 +254,8 @@ test.describe("前端读流", () => {
     await clickSyncPill(page);
 
     // 整轮失败进面板的「Failed this round」区块并把胶囊转琥珀(FOL-32 后没有 toast)。
-    await expect(page.getByRole("button", { name: "Needs attention" })).toBeVisible({
+    // 同样锚定(裸字符串是子串匹配,面板里的清单行也可能长出同样的字)。
+    await expect(page.getByRole("button", { name: /^Needs attention$/ })).toBeVisible({
       timeout: 30_000,
     });
     await hoverSyncPill(page);

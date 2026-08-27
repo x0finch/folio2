@@ -4,13 +4,14 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useFormatter, useNow, useTranslations } from "use-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { AvatarStack } from "@/components/avatar-stack";
 import { ConnectorBadge } from "@/components/connector-badge";
 import { QueryBoundary } from "@/components/query-boundary";
 import { TagBadges } from "@/components/tag-badges";
 import { isManual } from "@/lib/core/manual";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
+import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
 import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
 import {
   accountGain24hQuery,
@@ -319,8 +320,8 @@ function AccountStatusLine({
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
-  // 活的 now:provider 那份冻在页面加载时刻,刚落库的快照会渲染成未来时态(见 sync-status 同款注释)。
-  const now = useNow({ updateInterval: 60_000 });
+  // 活时钟 + 钳位收在 hook 里(为什么不用裸 useNow 见 use-relative-synced-at)。
+  const syncedAt = useRelativeSyncedAt();
   const archived = archivedAt != null;
   const warn = !archived && (status === "needsCreds" || status === "stale");
   const needsCreds = status === "needsCreds";
@@ -364,9 +365,7 @@ function AccountStatusLine({
       ) : isManual(connectorId) ? (
         t("liveValue")
       ) : takenAt != null ? (
-        t("lastSyncedAt", {
-          when: format.relativeTime(new Date(Math.min(takenAt, now.getTime())), now),
-        })
+        t("lastSyncedAt", { when: syncedAt(takenAt) })
       ) : (
         t("neverSynced")
       )}

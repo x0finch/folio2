@@ -1,6 +1,6 @@
 import type { SyncSkipReason } from "@folio/sync";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRef, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { invalidateFor } from "@/lib/queries/refresh";
 
 // 「跑完一个账户就刷一次」的节流器。纯逻辑:不引 React、不引 server-only 模块,可直接单测。
@@ -85,6 +85,8 @@ export function createRefreshThrottle(
 export interface SyncStreamProgress {
   total: number | null; // 服务端逐个吐,开跑时不知道总数 —— 调用方自己知道就传进来
   done: number;
+  /** 其中被跳过的条数(缺凭据)。它们算处理完(进 done),但没产出快照。 */
+  skipped: number;
   lastLabel: string | null;
   failures: { accountId: string; error: string }[];
 }
@@ -143,6 +145,7 @@ export async function readSyncStream(
   const progress: SyncStreamProgress = {
     total: opts.total,
     done: 0,
+    skipped: 0,
     lastLabel: null,
     failures: [],
   };
@@ -152,7 +155,9 @@ export async function readSyncStream(
     if (!line.accountId) continue;
     progress.done += 1;
     progress.lastLabel = opts.labelOf(line.accountId);
-    // 缺凭据(skipped)不算失败 —— 用户还没填 API key 而已。
+    // 缺凭据(skipped)不算失败 —— 用户还没填 API key 而已。但要单独计数:
+    // 它没产出快照,面板的合成分子得把它从 done 里再刨出去(见 SyncPanel 的口径)。
+    if (line.skipped) progress.skipped += 1;
     if (!line.ok && !line.skipped) {
       progress.failures.push({
         accountId: line.accountId,
@@ -180,6 +185,12 @@ export interface SyncRound {
   done: number;
   /** 本轮要跑的账户数 = 可同步账户数。**不是面板那个分母** —— 后者含手记等不参与同步的来源。 */
   total: number;
+  /**
+   * done 里被跳过的条数(缺凭据)。面板的合成分子要把它刨掉:它没产出快照,`summary.ok` 不计它,
+   * 计进分子的话轮尾会先冲到满格、下一次 summary 刷新又跳水回来。**失败的不刨** —— 失败账户往往
+   * 仍有旧快照,`summary.ok` 计它,现口径正好收口一致。
+   */
+  skipped: number;
   /** 最近一个处理完的账户展示名(没开跑 / 还没有结果时 null)。 */
   current: string | null;
   /** 失败的账户,逐条实时追加。缺凭据(skipped)不算失败。 */
@@ -192,6 +203,7 @@ export interface SyncRound {
 const IDLE_ROUND: SyncRound = {
   done: 0,
   total: 0,
+  skipped: 0,
   current: null,
   failures: [],
   error: null,
@@ -202,24 +214,26 @@ const IDLE_ROUND: SyncRound = {
 // 状态住模块级而不是组件 state:每个页面各自 mount 一份 HeaderSync,放组件 state 的话轮中切页
 // 进度就没了(老 toast 是全局的,这算回归)。mutation 在发起它的组件 unmount 后照样跑
 // (react-query 的 mutationCache 持有它),回调写这里,新页面的实例挂上来就能读到。
-// 只有一格:同一时刻至多一轮在跑(busy 时 `sync()` 早退),后开的一轮覆盖前一轮。
 //
-// **带 portfolioId,读的时候不匹配当前组合就当空**:A 组合那轮的失败不该挂在 B 组合的面板上
+// **每组合一格(Map),不是全局一格**:busy 的防重按组合 key 拦(见 syncRoundKey),所以
+// 「A 轮中切到 B 再开一轮」是允许的 —— 两条 mutation 并飞。全局单格时它们会互相整格覆盖:
+// B 的面板闪 A 的数、onError 的 prev 读到空格把累计抹掉、后收工的占格让另一组合的失败清单
+// 静默消失。每组合一格,各写各的,互不相闻;每格引用稳定(只有写它才换引用),满足 getSnapshot。
+// 「同一时刻至多一轮」的真实语义是**每组合**至多一轮。
+//
+// 读的时候按组合取,别的组合的轮天然看不见:A 组合那轮的失败不该挂在 B 组合的面板上
 // (琥珀 pill 会对着 B 说 A 的事,点失败行还会去 focus 一个不在 B 里的账户)。切回 A 时它还在 ——
 // 「跨轮保留」保留的是**那个组合自己的**上一轮。
-let storedRound: { portfolioId: string; round: SyncRound } | null = null;
+const storedRounds = new Map<string, SyncRound>();
 const roundListeners = new Set<() => void>();
 
 // getSnapshot 要求引用稳定:命中回 store 里那份(只有写入才换引用),不命中恒回同一个 IDLE_ROUND。
 function readRound(portfolioId: string): SyncRound {
-  return storedRound?.portfolioId === portfolioId ? storedRound.round : IDLE_ROUND;
+  return storedRounds.get(portfolioId) ?? IDLE_ROUND;
 }
 
 function writeRound(portfolioId: string, next: SyncRound | ((prev: SyncRound) => SyncRound)) {
-  storedRound = {
-    portfolioId,
-    round: typeof next === "function" ? next(readRound(portfolioId)) : next,
-  };
+  storedRounds.set(portfolioId, typeof next === "function" ? next(readRound(portfolioId)) : next);
   for (const notify of roundListeners) notify();
 }
 
@@ -232,6 +246,14 @@ function subscribeRound(listener: () => void) {
 
 // busy 同样要跨实例活着(见下面 useIsMutating 那行)—— 按这个 key 数「在飞的那一条」。
 const syncRoundKey = (portfolioId: string) => ["sync-round", portfolioId] as const;
+
+/** 一轮同步随身携带的把手 —— 经 mutation variables 走,每轮一份(理由见 useMutation 上方注释)。 */
+interface RoundHandles {
+  /** accountId → 展示名(服务端只回 id)。 */
+  labels: Map<string, string>;
+  /** 这一轮的刷新节流器。 */
+  refresh: RefreshThrottle;
+}
 
 // 账户同步的共享逻辑(PageHeader SyncStatus 复用):**一个请求**打到 /api/sync,服务端逐账户回结果,
 // 这里边收边推进 `round` 这份进度 state,**并且每完成一个账户就刷一次面板**(#417)。
@@ -251,12 +273,6 @@ const syncRoundKey = (portfolioId: string) => ["sync-round", portfolioId] as con
 // (不再手写 try/finally),和仓里其余写操作(manual token 增删等)同一套。
 export function useAccountSync(accounts: { id: string; label: string }[], portfolioId: string) {
   const queryClient = useQueryClient();
-  // 这一轮的展示名表。放 ref 不放 state:它是命令式的查表把手,变了不该触发渲染,
-  // 而且 `mutationFn` 与 onError 都要用同一份 —— onMutate 的返回值只到得了后者。
-  const labels = useRef<Map<string, string>>(new Map());
-  // 这一轮的刷新节流器。**每轮一个**:它内部有「这一轮刷过没有 / 已收工」的状态,
-  // 跨轮复用会让第二轮的第一个账户被上一轮的窗口压住。策略与理由见 lib/refresh-throttle。
-  const refresh = useRef<RefreshThrottle | null>(null);
   // 这一轮的进度,读模块级 store(存放的理由见 store 那段)。**跨轮不清空**:上一轮的失败清单在
   // 下一轮开跑前一直留在面板上 —— 一个失败的账户往往仍有旧快照、凭据也齐,摘要那份清单根本不会提它,
   // 面板一收就再没人说过它失败过。已知代价:在账户详情里**单独**同步修好那个账户之后,这条失败仍然
@@ -272,23 +288,24 @@ export function useAccountSync(accounts: { id: string; label: string }[], portfo
   // 按 key 数在飞的那条,哪个实例问都是同一个答案。
   const busy = useIsMutating({ mutationKey: syncRoundKey(portfolioId) }) > 0;
 
+  // 这一轮的把手(展示名表 + 刷新节流器)经 mutation **variables** 随轮走,不放实例级 ref:
+  // 每组合一轮可以并飞(见 store 那段),ref 会被后开的一轮覆盖 —— A 轮的失败开始显 accountId、
+  // A 收工时 flush 的是 B 的节流器(把 B 的窗口提前关死,B 后半程一次刷新都发不出)。
+  // variables 在 mutationFn / onError / onSettled 都拿得到,天然每轮一份。
+  // 节流器**每轮一个**:它内部有「这一轮刷过没有 / 已收工」的状态,策略与理由见 lib/refresh-throttle。
   const mutation = useMutation({
     mutationKey: syncRoundKey(portfolioId),
     onMutate: () => {
-      // 服务端只回 accountId,展示名在这边。
-      labels.current = new Map(accounts.map((a) => [a.id, a.label]));
-      refresh.current = createRefreshThrottle(() => {
-        void invalidateFor(queryClient, "sync.round");
-      });
       writeRound(portfolioId, {
         done: 0,
         total: accounts.length,
+        skipped: 0,
         current: null,
         failures: [],
         error: null,
       });
     },
-    mutationFn: async () => {
+    mutationFn: async ({ labels, refresh }: RoundHandles) => {
       // **只递「我在看哪个组合」,不递账户名单**(ADR 0047):这一轮跑哪些账户由服务端按这个组合算。
       // 于是 `accounts.length` 这个分母就是那一轮的条数 —— 两边用的是同一条判据(当前组合的成员 ∧
       // 活跃 ∧ 非手记),摘要里的 `N / M` 与进度条说的是同一件事。以前服务端跑全量、这里的分母是
@@ -300,24 +317,25 @@ export function useAccountSync(accounts: { id: string; label: string }[], portfo
       });
       return readSyncStream(response, {
         total: accounts.length,
-        labelOf: (accountId) => labels.current.get(accountId) ?? accountId,
+        labelOf: (accountId) => labels.get(accountId) ?? accountId,
         onProgress: (p) => {
           writeRound(portfolioId, (prev) => ({
             ...prev,
             done: p.done,
             total: p.total ?? prev.total,
+            skipped: p.skipped,
             current: p.lastLabel,
             // 失败逐条实时出现(裁定 1)—— 不攒到收工再一次性报。
             failures: p.failures.map((f) => ({
               accountId: f.accountId,
-              label: labels.current.get(f.accountId) ?? f.accountId,
+              label: labels.get(f.accountId) ?? f.accountId,
               error: f.error,
             })),
           }));
           // 这一行到达 = 这个账户**已经处理完**了 —— 成功的那些快照已落库(服务端先写再报),
           // 失败与缺凭据(skipped)的那些没写。所以这一下不保证「有新数据」,只保证「可以去看了」;
           // 多刷一次是幂等的,而漏刷会让先跑完的账户干等整轮结束。
-          refresh.current?.bump();
+          refresh.bump();
         },
       });
     },
@@ -331,7 +349,7 @@ export function useAccountSync(accounts: { id: string; label: string }[], portfo
     // 成功失败都收工:取消挂起的尾随并保证最后一个账户的结果落地。
     // 一个 bump 都没来过(整轮没跑起来)时它也会刷一次 —— **同步本身可能仍在服务端跑**(waitUntil),
     // 部分快照可能已经落库了。
-    onSettled: () => refresh.current?.flush(),
+    onSettled: (_data, _error, { refresh }) => refresh.flush(),
   });
 
   // 用跨实例的 busy 拦重复点:换页后新实例上 `mutation.isPending` 是 false,拦不住第二轮叠上去。
@@ -343,7 +361,13 @@ export function useAccountSync(accounts: { id: string; label: string }[], portfo
     round,
     sync: () => {
       if (disabled) return;
-      mutation.mutate();
+      mutation.mutate({
+        // 服务端只回 accountId,展示名在这边。
+        labels: new Map(accounts.map((a) => [a.id, a.label])),
+        refresh: createRefreshThrottle(() => {
+          void invalidateFor(queryClient, "sync.round");
+        }),
+      });
     },
   };
 }
