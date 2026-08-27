@@ -1,34 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// —— 替身 ——
-// toast:记账,并把 id 回给调用方,这样能断言「同一条 toast 被就地改写」而不是叠了好几条。
-const toasts: { level: string; text: string; id?: string }[] = [];
-let nextToastId = 0;
-const toast = {
-  loading: (text: string, o?: { id?: string }) => {
-    const id = o?.id ?? `t${++nextToastId}`;
-    toasts.push({ level: "loading", text, id });
-    return id;
-  },
-  success: (text: string, o?: { id?: string }) => {
-    toasts.push({ level: "success", text, id: o?.id });
-    return o?.id ?? "";
-  },
-  error: (text: string, o?: { id?: string }) => {
-    toasts.push({ level: "error", text, id: o?.id });
-    return o?.id ?? "";
-  },
-};
-vi.mock("@folio/ui", () => ({ toast }));
-
-// 只要 key + 参数能看出来就够,不引真的 i18n。
-vi.mock("use-intl", () => ({
-  useTranslations: () => (key: string, params?: Record<string, unknown>) =>
-    `${key}(${JSON.stringify(params ?? {})})`,
-}));
+// 全量同步的进度**不再走 toast**(FOL-32 裁定 1),它是一份可订阅的 state,由同步面板渲染。
+// 所以这个文件断言的是 `round`:分子怎么涨、失败什么时候进清单、整轮挂了那句话留不留得住。
+// (toast 只剩账户详情里的单账户同步在用,那一处不经这个 hook。)
 
 const { useAccountSync } = await import("@/lib/hooks/use-account-sync");
 const { syncKeys } = await import("@/lib/queries/keys");
@@ -61,10 +38,16 @@ const ACCOUNTS = [
   { id: "a2", label: "Ledger" },
 ];
 
-const PORTFOLIO = "pf-1";
+// 每个用例一个新的组合 id:round 住在**模块级** store 里(轮中切页不丢那条修法),跨用例不会自己
+// 清空 —— 复用同一个 id 的话,上一条用例的失败清单会漂进下一条的初始断言里。
+let n = 0;
+let PORTFOLIO: string;
 
-const setup = (accounts = ACCOUNTS) =>
-  renderHook(() => useAccountSync(accounts, PORTFOLIO), { wrapper });
+const setup = (accounts = ACCOUNTS, portfolioId?: string) =>
+  renderHook(({ accounts: a, pf }) => useAccountSync(a, pf), {
+    wrapper,
+    initialProps: { accounts, pf: portfolioId ?? PORTFOLIO },
+  });
 
 // 数「刷了几次」而不是「invalidateQueries 被调了几次」:一次刷新会按映射表里的前缀数发好几条,
 // 只认同步域那一条就等于一次刷新。
@@ -79,17 +62,26 @@ const countRefreshes = () => {
 
 describe("useAccountSync", () => {
   beforeEach(() => {
-    toasts.length = 0;
-    nextToastId = 0;
-    // retry: false —— mutation 失败就是失败,别让默认重试把「失败该弹 error」这条测糊了。
+    // retry: false —— mutation 失败就是失败,别让默认重试把「失败该进 round.error」这条测糊了。
     client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     refreshes = 0;
-  });
-  afterEach(() => {
+    PORTFOLIO = `pf-${++n}`;
     vi.unstubAllGlobals();
   });
 
-  it("全部成功 → success,进度 toast 一路复用同一个 id", async () => {
+  it("没在跑 → round 是空的", () => {
+    const { result } = setup();
+    expect(result.current.busy).toBe(false);
+    expect(result.current.round).toEqual({
+      done: 0,
+      total: 0,
+      current: null,
+      failures: [],
+      error: null,
+    });
+  });
+
+  it("全部成功 → done 走到 total,current 是展示名(服务端只回 accountId)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -100,20 +92,52 @@ describe("useAccountSync", () => {
       ),
     );
     const { result } = setup();
-    expect(result.current.busy).toBe(false);
 
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
-    const ids = new Set(toasts.map((t) => t.id));
-    expect(ids.size).toBe(1); // 一条 toast 被反复改写,不是叠了四条
-    expect(toasts.at(-1)?.level).toBe("success");
-    expect(toasts.at(-1)?.text).toContain("synced");
-    // 中间至少有一次进度更新带上了刚完成那个账户的展示名(服务端只回 accountId)。
-    expect(toasts.some((t) => t.level === "loading" && t.text.includes("Binance"))).toBe(true);
+    expect(result.current.round.done).toBe(2);
+    expect(result.current.round.total).toBe(2);
+    expect(result.current.round.current).toBe("Ledger");
+    expect(result.current.round.failures).toEqual([]);
+    expect(result.current.round.error).toBeNull();
   });
 
-  it("有账户失败 → error,详情里是展示名不是 id;缺凭据(skipped)不算失败", async () => {
+  it("开跑那一刻分母就位、分子归零(上一轮的失败一并清掉)", async () => {
+    let push: ((line: unknown) => void) | undefined;
+    let close: (() => void) | undefined;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (line) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+        close = () => controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status: 200 })),
+    );
+
+    const { result } = setup();
+    result.current.sync();
+
+    // 一条结果都还没到:分母已经是这一轮的条数,分子还是 0 —— 面板据此显示「打底 / 全部来源」。
+    await waitFor(() => expect(result.current.busy).toBe(true));
+    expect(result.current.round.total).toBe(2);
+    expect(result.current.round.done).toBe(0);
+
+    push?.({ accountId: "a1", ok: true });
+    // 每完成一个就推进一次,不是收工才一次性报。
+    await waitFor(() => expect(result.current.round.done).toBe(1));
+    expect(result.current.round.current).toBe("Binance");
+
+    push?.({ accountId: "a2", ok: true });
+    close?.();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.round.done).toBe(2);
+  });
+
+  it("失败逐条进清单,带展示名;缺凭据(skipped)不算失败", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -127,32 +151,31 @@ describe("useAccountSync", () => {
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
-    const last = toasts.at(-1);
-    expect(last?.level).toBe("error");
-    expect(last?.text).toContain("Binance: bad key");
-    expect(last?.text).not.toContain("Ledger"); // skipped 不进失败清单
-    expect(last?.text).toContain('"count":1'); // 1 个失败,不是 2
+    expect(result.current.round.failures).toEqual([
+      { accountId: "a1", label: "Binance", error: "bad key" },
+    ]);
+    // 两个账户都处理完了 —— skipped 也算处理完,只是不算失败。
+    expect(result.current.round.done).toBe(2);
   });
 
-  it("用户级失败({ fatal })→ error,且照样刷新(服务端可能还在跑)", async () => {
+  it("用户级失败({ fatal })→ 进 round.error,且照样刷新(服务端可能还在跑)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ndjsonResponse([{ fatal: "listAccounts blew up" }])),
     );
-    client.setQueryData([...syncKeys.status("pf-1")], { total: 1 });
+    client.setQueryData([...syncKeys.status(PORTFOLIO)], { total: 1 });
     const { result } = setup();
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
-    expect(toasts.at(-1)?.level).toBe("error");
-    expect(toasts.at(-1)?.text).toContain("listAccounts blew up");
+    expect(result.current.round.error).toContain("listAccounts blew up");
     // 关键:失败路径也要刷新 —— 部分账户的快照可能已经落库了。
     await waitFor(() =>
-      expect(client.getQueryState([...syncKeys.status("pf-1")])?.isInvalidated).toBe(true),
+      expect(client.getQueryState([...syncKeys.status(PORTFOLIO)])?.isInvalidated).toBe(true),
     );
   });
 
-  it("请求本身挂了 → error 就地改写那条 loading,不另起一条", async () => {
+  it("请求本身挂了 → 那句话留在 round.error 上(busy 落回后它还在)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -163,9 +186,95 @@ describe("useAccountSync", () => {
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
-    expect(new Set(toasts.map((t) => t.id)).size).toBe(1);
-    expect(toasts.at(-1)?.level).toBe("error");
-    expect(toasts.at(-1)?.text).toContain("network down");
+    expect(result.current.round.error).toContain("network down");
+  });
+
+  it("下一轮开跑会把上一轮的失败清掉", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ndjsonResponse([{ accountId: "a1", ok: false, error: "bad key" }])),
+    );
+    const { result } = setup();
+    result.current.sync();
+    await waitFor(() => expect(result.current.round.failures).toHaveLength(1));
+    // 等上一轮真的收工再点:sync() 对在飞的一轮是早退的,不等的话第二下会被自己的防重拦掉。
+    await waitFor(() => expect(result.current.busy).toBe(false));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ndjsonResponse([{ accountId: "a1", ok: true }])),
+    );
+    result.current.sync();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.round.failures).toEqual([]);
+    expect(result.current.round.error).toBeNull();
+  });
+
+  it("切组合 → 上一轮的 round 不跟过去;切回来它还在", async () => {
+    // A 组合那轮的失败挂在 B 组合的面板上是在说谎:琥珀 pill 对着 B 说 A 的事,
+    // 点失败行还会去 focus 一个不在 B 里的账户。
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ndjsonResponse([{ accountId: "a1", ok: false, error: "bad key" }])),
+    );
+    const { result, rerender } = setup();
+    result.current.sync();
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.round.failures).toHaveLength(1);
+
+    rerender({ accounts: ACCOUNTS, pf: `${PORTFOLIO}-other` });
+    expect(result.current.round).toEqual({
+      done: 0,
+      total: 0,
+      current: null,
+      failures: [],
+      error: null,
+    });
+
+    // 「跨轮保留」保留的是**那个组合自己的**上一轮 —— 切回来失败清单还在。
+    rerender({ accounts: ACCOUNTS, pf: PORTFOLIO });
+    expect(result.current.round.failures).toHaveLength(1);
+  });
+
+  it("轮中换页(卸载 → 新实例)进度不丢,busy 也还亮着", async () => {
+    // 老 toast 是全局的,切页进度条还在;round 若住组件 state,这里就是回归。
+    let push: ((line: unknown) => void) | undefined;
+    let close: (() => void) | undefined;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (line) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+        close = () => controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status: 200 })),
+    );
+
+    const first = setup();
+    first.result.current.sync();
+    await waitFor(() => expect(first.result.current.busy).toBe(true));
+    push?.({ accountId: "a1", ok: true });
+    await waitFor(() => expect(first.result.current.round.done).toBe(1));
+
+    // 换页:这个实例卸载,新页面挂一个新实例(同一个 QueryClient —— 应用里它是全局的)。
+    first.unmount();
+    const second = setup();
+    // mutation 由 mutationCache 持有,不随组件走;进度从模块级 store 读回来。
+    expect(second.result.current.busy).toBe(true);
+    expect(second.result.current.round.done).toBe(1);
+    expect(second.result.current.round.current).toBe("Binance");
+
+    // 卸载后到达的结果照样写得进去,新实例看得到。
+    push?.({ accountId: "a2", ok: false, error: "bad key" });
+    await waitFor(() => expect(second.result.current.round.done).toBe(2));
+    expect(second.result.current.round.failures).toEqual([
+      { accountId: "a2", label: "Ledger", error: "bad key" },
+    ]);
+
+    close?.();
+    await waitFor(() => expect(second.result.current.busy).toBe(false));
   });
 
   it("请求体只带当前组合,不带账户名单(作用域在服务端定)", async () => {
@@ -189,7 +298,7 @@ describe("useAccountSync", () => {
     expect(result.current.disabled).toBe(true);
     result.current.sync();
     await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
-    expect(toasts).toHaveLength(0);
+    expect(result.current.round.total).toBe(0);
   });
 
   it("一轮结束后同步状态被定向刷新", async () => {
@@ -198,14 +307,14 @@ describe("useAccountSync", () => {
       vi.fn(async () => ndjsonResponse([{ accountId: "a1", ok: true }])),
     );
     // 缓存里先有一份「已经拿到过」的同步状态,才谈得上它有没有被标记为旧。
-    client.setQueryData([...syncKeys.status("pf-1")], { total: 1 });
+    client.setQueryData([...syncKeys.status(PORTFOLIO)], { total: 1 });
     const { result } = setup();
 
     result.current.sync();
     await waitFor(() => expect(result.current.busy).toBe(false));
 
     await waitFor(() =>
-      expect(client.getQueryState([...syncKeys.status("pf-1")])?.isInvalidated).toBe(true),
+      expect(client.getQueryState([...syncKeys.status(PORTFOLIO)])?.isInvalidated).toBe(true),
     );
   });
 
@@ -232,7 +341,7 @@ describe("useAccountSync", () => {
       vi.fn(async () => new Response(body, { status: 200 })),
     );
 
-    client.setQueryData([...syncKeys.status("pf-1")], { total: 3 });
+    client.setQueryData([...syncKeys.status(PORTFOLIO)], { total: 3 });
 
     const { result } = setup([
       { id: "a1", label: "Binance" },
@@ -253,7 +362,7 @@ describe("useAccountSync", () => {
 
     // 最后一个账户的结果一定落地:收工那一下要么是尾随、要么已经由 leading 覆盖。
     await waitFor(() =>
-      expect(client.getQueryState([...syncKeys.status("pf-1")])?.isInvalidated).toBe(true),
+      expect(client.getQueryState([...syncKeys.status(PORTFOLIO)])?.isInvalidated).toBe(true),
     );
   });
 

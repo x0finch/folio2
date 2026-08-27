@@ -1,23 +1,34 @@
 import type { ConnectorId } from "@folio/connectors";
-import { cn, MorphingModal, Popover, PopoverContent, PopoverTrigger } from "@folio/ui";
+import { cn, Popover, PopoverContent, PopoverTrigger, useHoverCapable } from "@folio/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { RefreshCw } from "lucide-react";
 import { forwardRef, type ReactNode, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { connectorLabelFallback } from "@/lib/core/logo";
-import { useAccountSync } from "@/lib/hooks/use-account-sync";
+import {
+  type SyncRound,
+  type SyncRoundFailure,
+  useAccountSync,
+} from "@/lib/hooks/use-account-sync";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import type { SyncAttentionSource, SyncStatusSummary } from "@/lib/server/sync/status";
 import { IconButton } from "./icon-button";
 
-// 共享同步状态入口(PageHeader actions):桌面 hover Popover、移动 tap MorphingModal,
-// 包裹同一份 <SyncPanel> 内容(状态徽章 + ok/总数 + 上次更新 + 失败来源 + 独立同步按钮)。
-// 逻辑走共享 useAccountSync(并发同步 + toast 进度);失败来源 = 缺凭据账户(见 sync-status 摘要)。
+// 共享同步状态入口(PageHeader actions):**一个 Popover**,有鼠标就 hover 打开、触屏就 tap 打开,
+// 两边包的是同一份 <SyncPanel>(状态徽章 + 已同步/总来源 + 上次更新 + 本轮进度与失败 + 需要注意的来源
+// + 独立同步按钮)。
+//
+// 移动端以前走 MorphingModal(从底部升起的卡片)。换掉它是因为那张卡的底行被悬浮 Dock 压住截断,
+// 而 Dock 是固定的、卡片是居中的 —— 抬高只能是一个魔数在跟另一个魔数赛跑。锚在触发器下方的 popover
+// 根本不到那一带,遮挡这件事随形态统一消失(FOL-32 裁定 2)。
+//
+// 全量同步的进度**长在这张面板里**,不再另发 toast(裁定 1):toast 与面板各有一套分母,同屏对不上。
+// toast 只留给账户详情里的单账户同步 —— 那一处没有面板可长。
 //
 // 分段按钮(beUI 胶囊):可选 action → 状态段右侧接「分隔线 + 自定义 icon 段」(如账户页的 + 添加账户)。
-// 有 action 时状态段**不显旋转刷新图标**(进度走 toast + 面板);无 action 时保持单枚 pill + 刷新图标。
+// 有 action 时状态段**不显旋转刷新图标**(进度走面板);无 action 时保持单枚 pill + 刷新图标。
 
 export interface SyncAction {
   icon: ReactNode;
@@ -41,7 +52,7 @@ interface StatusSegmentProps extends React.ComponentPropsWithoutRef<"button"> {
 
 // 状态段:状态点 + 文案 +(可选)刷新图标。forwardRef + 透传 → 作 PopoverTrigger 的唯一子元素。
 // 恒为一枚完整 beUI 胶囊(rounded-full + 边框 + 不透明 bg-card),尺寸/形状不随 action 变 —— 与 popover goo
-// 半径对齐 → 无多余阴影;bg-card 亦作遮罩盖住其后的 + 段掖进部分。有 action 时仅隐去刷新图标(进度走 toast)。
+// 半径对齐 → 无多余阴影;bg-card 亦作遮罩盖住其后的 + 段掖进部分。有 action 时仅隐去刷新图标(进度走面板)。
 const StatusSegment = forwardRef<HTMLButtonElement, StatusSegmentProps>(function StatusSegment(
   { label, dotClass, busy, showRefresh, className, ...rest },
   ref,
@@ -91,8 +102,11 @@ const SEGMENT_ACTION = "rounded-r-none border-r-0";
 
 interface PanelProps {
   summary: SyncStatusSummary;
+  /** 这一轮的进度(没在跑时是上一轮留下的失败清单)。 */
+  round: SyncRound;
   busy: boolean;
-  attention: boolean;
+  /** 有事要看一眼(摘要里的清单,或上一轮的失败)—— 不含「正在同步」。 */
+  needsAttention: boolean;
   onSync: () => void;
   /** 点某一行 → 去账户页把那一行滚出来(不在当前视图里则开它的详情抽屉)。 */
   onPick: (accountId: string) => void;
@@ -138,25 +152,95 @@ function AttentionRow({
   );
 }
 
-// 共享面板内容(无自身外框/内距 —— 由 Popover/MorphingModal 提供表面)。
-function SyncPanel({ summary, busy, attention, onSync, onPick }: PanelProps) {
+// 本轮失败的一行:账户名 + 上游原话。**不翻译那句错误** —— 它是上游给的,译一遍只会译歪。
+// 与 AttentionRow 同一副骨架但各写各的:那边右侧是四个固定说法之一(短、不换行),这边右侧是
+// 一句任意长的错误(要能被挤窄、要能截断),把两者并成一个组件就得在里面开一个开关。
+function FailureRow({
+  failure,
+  onPick,
+}: {
+  failure: SyncRoundFailure;
+  onPick: (accountId: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(failure.accountId)}
+      className="flex w-full items-baseline justify-between gap-2.5 rounded-sm py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      <span className="min-w-0 truncate font-medium text-xs">{failure.label}</span>
+      <span className="min-w-0 truncate text-neg text-xs">{failure.error}</span>
+    </button>
+  );
+}
+
+// 共享面板内容(无自身外框/内距 —— 由 Popover 提供表面)。
+// 导出只为单测:面板里那几个数是合成出来的(见下面的分子/分母),而经 <SyncStatus> 渲染要先把
+// 路由与 Portfolio 上下文一起搭起来 —— 那测的是装配,不是口径。
+export function SyncPanel({ summary, round, busy, needsAttention, onSync, onPick }: PanelProps) {
   const t = useTranslations("Sync");
   const format = useFormatter();
-  const { badge } = tone(attention);
+  const { badge } = tone(busy || needsAttention);
   const { data: catalog } = useQuery(connectorCatalogQuery());
   const nameOf = (id: ConnectorId) => catalog?.[id]?.label ?? connectorLabelFallback(id);
   // 「部分未同步」在这儿会说谎:清单里可能全是「同步过、只是旧了」的,而上面那行明明写着
   // `8 / 8`。「需要注意」把两种都装得下,而且与 pill 上那句是同一句 —— 同一件事不该有两种说法。
-  const statusLabel = busy
-    ? t("syncing")
-    : summary.attention.length > 0
-      ? t("needsAttention")
-      : t("allSynced");
-  const lastUpdated = busy
-    ? "—"
-    : summary.lastSyncedAt
-      ? format.relativeTime(new Date(summary.lastSyncedAt))
-      : t("lastNever");
+  const statusLabel = busy ? t("syncing") : needsAttention ? t("needsAttention") : t("allSynced");
+
+  // **一个数,一个分母**(裁定 3)。分母恒是「组合内全部来源」(`summary.total`,含手记);
+  // 同步中的分子 = 不参与这一轮的来源打底(手记那些一直有数)+ 本轮已完成数。于是一轮从 `4/13`
+  // 起步涨到 `13/13`,与静态时那个 `ok / total` 是同一个数字、同一个分母。
+  // 以前这里静态写 `13 / 13`、顶上另有一条 toast 写 `7 / 9` —— 两套分母同屏,而且都不假。
+  //
+  // 夹在分母上:summary 每完成一个账户就被定向刷新,轮中归档一个**已同步**的账户会让打底 + 已完成
+  // 大过缩了水的 total(13 个来源归档 1 个 → total 12,而这一轮照旧回 9 条)—— `13 / 12` 读起来
+  // 像多同步出一个来源。
+  const notInRound = summary.total - summary.accounts.length;
+  const synced = busy ? Math.min(summary.total, notInRound + round.done) : summary.ok;
+
+  // **busy 时照样是上次成功同步的时间**(裁定 3)。以前这里写死 `—`,恰好在最该看它的那一刻
+  // 把它抹掉:正在同步 = 屏幕上的数还是旧的,「旧到什么时候」是此刻唯一有用的信息。
+  const lastUpdated = summary.lastSyncedAt
+    ? format.relativeTime(new Date(summary.lastSyncedAt))
+    : t("lastNever");
+
+  const currentRow = busy ? (
+    <div className="flex items-center justify-between gap-2.5 py-1 text-muted-foreground text-xs">
+      <span className="shrink-0">{t("syncingNow")}</span>
+      <span className="min-w-0 truncate text-foreground">{round.current ?? "…"}</span>
+    </div>
+  ) : null;
+
+  const failureBlock =
+    round.failures.length > 0 || round.error ? (
+      <>
+        <div className="my-2 border-border border-t" />
+        <div className="pb-0.5 font-medium text-muted-foreground text-xs">{t("roundFailed")}</div>
+        <div className="flex flex-col">
+          {round.failures.map((f) => (
+            <FailureRow key={f.accountId} failure={f} onPick={onPick} />
+          ))}
+          {round.error ? <p className="py-1 text-neg text-xs">{round.error}</p> : null}
+        </div>
+      </>
+    ) : null;
+
+  const attentionBlock =
+    summary.attention.length > 0 ? (
+      <>
+        <div className="my-2 border-border border-t" />
+        <div className="flex flex-col">
+          {summary.attention.map((a) => (
+            <AttentionRow
+              key={a.id}
+              source={a}
+              connectorLabel={nameOf(a.connectorId)}
+              onPick={onPick}
+            />
+          ))}
+        </div>
+      </>
+    ) : null;
 
   return (
     <div className="w-72 text-left">
@@ -170,28 +254,23 @@ function SyncPanel({ summary, busy, attention, onSync, onPick }: PanelProps) {
       <div className="flex items-center justify-between py-1 text-muted-foreground text-xs">
         <span>{t("sourcesSynced")}</span>
         <span className="font-mono font-semibold text-foreground">
-          {summary.ok} / {summary.total}
+          {synced} / {summary.total}
         </span>
       </div>
       <div className="flex items-center justify-between py-1 text-muted-foreground text-xs">
         <span>{t("lastUpdated")}</span>
         <span className="font-mono text-foreground">{lastUpdated}</span>
       </div>
+      {currentRow}
 
-      {summary.attention.length > 0 ? (
-        <>
-          <div className="my-2 border-border border-t" />
-          <div className="flex flex-col">
-            {summary.attention.map((a) => (
-              <AttentionRow
-                key={a.id}
-                source={a}
-                connectorLabel={nameOf(a.connectorId)}
-                onPick={onPick}
-              />
-            ))}
-          </div>
-        </>
+      {/* 两份清单合用一个封顶的滚动区:面板现在在手机上也是 popover(锚在页头下方),清单一长
+          就会顶到屏幕底下 —— 而这张面板最后一行正是那颗同步按钮,够不着它等于这个入口废了。
+          max-h-64 是「大约十行」,再多就滚。 */}
+      {failureBlock || attentionBlock ? (
+        <div className="max-h-64 overflow-y-auto">
+          {failureBlock}
+          {attentionBlock}
+        </div>
       ) : null}
 
       <div className="my-2 border-border border-t" />
@@ -214,6 +293,13 @@ function SyncPanel({ summary, busy, attention, onSync, onPick }: PanelProps) {
   );
 }
 
+// 「有事要看一眼」= 摘要那份清单 + 本组合上一轮的失败。后者摘要看不见:一个失败的账户往往仍有
+// 旧快照、凭据也齐,于是它不进 attention —— 不把它算进来的话,一轮同步炸了三个,徽标照样绿着说
+// 「已同步」。纯函数导出,单测直接喂数据(经 <SyncStatus> 测它要先搭路由 + Portfolio 上下文)。
+export function hasAttention(summary: SyncStatusSummary, round: SyncRound): boolean {
+  return summary.attention.length > 0 || round.failures.length > 0 || round.error !== null;
+}
+
 export function SyncStatus({
   summary,
   action,
@@ -224,41 +310,46 @@ export function SyncStatus({
   const t = useTranslations("Sync");
   // 同步这一轮按**当前组合**跑(ADR 0047)—— 名单在服务端算,这里只把组合传下去。
   const { selectedId } = usePortfolio();
-  const { busy, sync } = useAccountSync(summary.accounts, selectedId);
-  const [modalOpen, setModalOpen] = useState(false);
-  // 桌面 hover popover 打开态抬 z-50(beUI Popover root 是 isolate 层叠上下文,否则被 hero 数值层盖住);
+  const { busy, sync, round } = useAccountSync(summary.accounts, selectedId);
+  // 打开方式按**指针能力**分,不按视口宽度:触屏上的 hover 是 tap 之后粘住的幽灵态,面板会莫名其妙
+  // 留在屏幕上。宽度不是判据 —— 触屏笔记本也该是 tap。
+  const hoverCapable = useHoverCapable();
+  // 受控:点面板里的某一行会导航走,得先把面板关上;而且下面那两个 className 补丁也要读这个状态。
+  // 打开态抬 z-50(beUI Popover root 是 isolate 层叠上下文,否则被 hero 数值层盖住);
   // 闭合时隐藏 goo 背板(aria-hidden 首子元素),免透明状态段透出 bg-popover 块(同 useHoverPopover 的手法)。
-  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const navigate = useNavigate();
   // 点一行 → 去账户页把那一行滚出来。**跳转带 `focus`,滚动那件事由账户页自己做**(那边才知道
   // 当前 Portfolio 视图里有哪些行);那一行不在视图里时它会退成开详情抽屉。
   const pick = (accountId: string) => {
-    setModalOpen(false);
+    setOpen(false);
     navigate({ to: "/accounts", search: { focus: accountId } });
   };
 
-  const attention = busy || summary.attention.length > 0;
-  const { dot } = tone(attention);
+  const needsAttention = hasAttention(summary, round);
+  const { dot } = tone(busy || needsAttention);
   // pill 上那句刻意更短(「已同步」而不是「全部同步」)—— 它在页头里跟其他段并排,字多了会挤。
   // 但要注意的那句两处一致:同一件事不该有两种说法。
   const triggerLabel = busy
     ? t("triggerSyncing")
-    : summary.attention.length > 0
+    : needsAttention
       ? t("needsAttention")
       : t("triggerSynced");
 
-  // 桌面:hover Popover 包同步钮;action 段(+)在 Popover 外右侧并排 → hover + 不开面板。
-  const desktopPopover = (
+  // 有鼠标:hover 开面板,点 pill 直接同步(点开一个 hover 就有的面板是白点一下)。
+  // 触屏:tap 开面板,同步走面板里那颗按钮 —— 一个手势不能既开面板又开跑。
+  const popover = (
     <Popover
-      trigger="hover"
+      trigger={hoverCapable ? "hover" : "click"}
       side="bottom"
       align="end"
       // 18 = h-9 触发器半高:goo 影子 pill 半径 = min(triggerH/2, panelRadius),须 ≥18 才与 rounded-full 触发器
       // 齐圆,否则更方的影子 pill 四角探出成多余阴影。
       panelRadius={18}
-      onOpenChange={setPopoverOpen}
-      className={cn(popoverOpen ? "z-50" : "[&>[aria-hidden]]:hidden")}
+      open={open}
+      onOpenChange={setOpen}
+      className={cn(open ? "z-50" : "[&>[aria-hidden]]:hidden")}
     >
       <PopoverTrigger>
         <StatusSegment
@@ -267,14 +358,15 @@ export function SyncStatus({
           busy={busy}
           showRefresh={!action}
           className={action ? SEGMENT_ACTION : undefined}
-          onClick={sync}
+          onClick={hoverCapable ? sync : undefined}
         />
       </PopoverTrigger>
       <PopoverContent>
         <SyncPanel
           summary={summary}
+          round={round}
           busy={busy}
-          attention={attention}
+          needsAttention={needsAttention}
           onSync={sync}
           onPick={pick}
         />
@@ -282,35 +374,6 @@ export function SyncStatus({
     </Popover>
   );
 
-  const mobileSeg = (
-    <StatusSegment
-      label={triggerLabel}
-      dotClass={dot}
-      busy={busy}
-      showRefresh={!action}
-      className={action ? SEGMENT_ACTION : undefined}
-      onClick={() => setModalOpen(true)}
-    />
-  );
-
-  return (
-    <>
-      <div className="hidden lg:block">
-        {action ? <ActionShell action={action}>{desktopPopover}</ActionShell> : desktopPopover}
-      </div>
-
-      <div className="lg:hidden">
-        {action ? <ActionShell action={action}>{mobileSeg}</ActionShell> : mobileSeg}
-        <MorphingModal viewId={modalOpen ? "sync" : null} onClose={() => setModalOpen(false)}>
-          <SyncPanel
-            summary={summary}
-            busy={busy}
-            attention={attention}
-            onSync={sync}
-            onPick={pick}
-          />
-        </MorphingModal>
-      </div>
-    </>
-  );
+  // action 段(+)在 Popover 外右侧并排 → hover/tap 它不开面板。
+  return action ? <ActionShell action={action}>{popover}</ActionShell> : popover;
 }
