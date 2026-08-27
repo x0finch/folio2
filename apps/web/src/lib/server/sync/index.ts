@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { runEffect, runForUser } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { GetSyncStatusInput, handleGetSyncStatus } from "./get-status";
+import { GetSyncRoundInput, handleGetSyncRound } from "./round";
 import { handleSyncAccount, SyncAccountInput } from "./run";
 
 // sync 资源面:只做装配(method / 鉴权 / 校验),实现与入参 schema 在 ./run、./get-status。
@@ -23,3 +24,10 @@ export const getSyncStatus = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(GetSyncStatusInput)
   .handler(runEffect(handleGetSyncStatus));
+
+// 这一轮进行到哪(ADR 0048)。**busy 时 1.5s 一发的就是它** —— 所以它只读一个键,
+// 而上面那份摘要保持低频:轮询该盯着唯一在变的东西,不该反复重算只有落库才变的那份。
+export const getSyncRound = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(GetSyncRoundInput)
+  .handler(runEffect(handleGetSyncRound));

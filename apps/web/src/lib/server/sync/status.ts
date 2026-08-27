@@ -1,5 +1,10 @@
 import type { ConnectorId } from "@folio/connectors";
-import type { AccountSafe } from "@folio/db";
+import type {
+  AccountSafe,
+  SyncRoundAccountStatus,
+  SyncRoundRecord,
+  SyncRoundTrigger,
+} from "@folio/db";
 import { isManual } from "@/lib/core/manual";
 
 // 可同步账户判别:活跃(未归档)且**不是 manual** —— manual 不是同步源:当下值实时由 creds.tokens
@@ -139,5 +144,87 @@ export function summarizeSync(accounts: SyncAccountInput[], now: number): SyncSt
     ok: active.length - attention.filter((a) => a.kind !== "stale").length,
     attention,
     lastSyncedAt,
+  };
+}
+
+/** 一轮的下场三选一。**中断不是一种失败** —— 它是「没人再往下跑了」,连结果都没有。 */
+export type SyncRoundState = "running" | "interrupted" | "done";
+
+export interface SyncRoundFailure {
+  accountId: string;
+  /** 开轮那一刻冻下来的展示名(服务端只按 id 记结果)。 */
+  label: string;
+  error: string;
+}
+
+/** 面板读到的那一份。轮询只拉这个 —— 它是这条链路上唯一在变的东西。 */
+export interface SyncRoundView {
+  roundId: string;
+  state: SyncRoundState;
+  trigger: SyncRoundTrigger;
+  startedAt: number;
+  finishedAt: number | null;
+  /** 这一轮的条数 —— 进行中那句 `x / N` 的 N。 */
+  total: number;
+  /** 已经有结果的条数 —— 那句 `x / N` 的 x。 */
+  settled: number;
+  /**
+   * 三段式的第一段(ADR 0048 裁定 7)。**只数这一轮真同步成功的** ——
+   * 面板显示时再加上手记那些不参与同步的来源,两笔各自诚实,不在这一层混。
+   */
+  synced: number;
+  /** 第二段。逐条列出来,面板要点得进去。 */
+  failed: SyncRoundFailure[];
+  /** 第三段:凭据还没填完的。既不算成功也不算失败。 */
+  needsKeys: number;
+  /** 还没轮到的第一个账户 —— 进行中那句「正在同步谁」。 */
+  current: string | null;
+  /** 整轮没跑起来那一句(取账户 / 取凭据挂了)。逐账户的失败不在这里。 */
+  error: string | null;
+}
+
+// 失败但上游一句话都没留下时的兜底。面板那一行右边是空的话,读的人只会以为界面坏了。
+const UNKNOWN_FAILURE = "sync failed";
+
+/**
+ * 把库里那份轮记录念成面板要的形状。
+ *
+ * **活轮判据一句话:未收官且未过期。**过期用 `<=` —— `expiresAt` 是「活到这一刻为止」,
+ * 与开轮那条覆盖条件同一个口径,两处必须一致,否则会出现「开得了新轮但面板还说旧轮在跑」。
+ *
+ * `now` 是显式参数(与 `summarizeSync` 同款理由):这一层要断言精确边界,读墙钟的测试是 flaky 的。
+ */
+export function syncRoundView(round: SyncRoundRecord, now: number): SyncRoundView {
+  const entries = Object.entries(round.accounts);
+  const tally: Record<SyncRoundAccountStatus, number> = {
+    pending: 0,
+    synced: 0,
+    failed: 0,
+    "needs-keys": 0,
+  };
+  const failed: SyncRoundFailure[] = [];
+  let current: string | null = null;
+  for (const [accountId, a] of entries) {
+    tally[a.status] += 1;
+    if (a.status === "pending") current ??= a.label;
+    if (a.status === "failed") {
+      failed.push({ accountId, label: a.label, error: a.error || UNKNOWN_FAILURE });
+    }
+  }
+  const state: SyncRoundState =
+    round.finishedAt != null ? "done" : now >= round.expiresAt ? "interrupted" : "running";
+  return {
+    roundId: round.roundId,
+    state,
+    trigger: round.trigger,
+    startedAt: round.startedAt,
+    finishedAt: round.finishedAt,
+    total: entries.length,
+    settled: entries.length - tally.pending,
+    synced: tally.synced,
+    failed,
+    needsKeys: tally["needs-keys"],
+    current,
+    error: round.error ?? null,
   };
 }
