@@ -109,15 +109,22 @@ describe("三段式口径", () => {
     expect(text).toContain("2 need keys");
   });
 
-  it("从没同步过、也没有不参与同步的来源 → 整行省掉,不写一句空话", () => {
-    const text = mount({
-      summary: summary({
-        accounts: Array.from({ length: 3 }, (_, i) => ({ id: `${i}`, label: "" })),
-        total: 3,
-      }),
-      round: null,
-    });
+  // 读不到轮 = **还没跑过**,不是「跑过了、成绩是这些」。第一版在这种时候拿手记的条数硬凑了一个
+  // 数,于是新账号那一刻面板写着 `This round: 2 synced`、页头写着 across 10 sources —— 读起来
+  // 像「10 个来源只同步上 2 个」,比什么都不说还糟。无轮态只说 `Last updated` 与清单。
+  it("压根没有轮 → 不出现「本轮」那一行", () => {
+    const text = mount({ summary: summary(), round: null });
     expect(text).not.toContain("This round");
+  });
+
+  // 断言的是「不报数」,不是「不出现 synced 这个词」—— 徽标那句 All synced 说的是当下状态,
+  // 与某一轮无关,它该留着(没有需要注意的来源时它就是绿的)。
+  it("压根没有轮 → 一个 x/y 或「N synced」都不报", () => {
+    const text = mount({ summary: summary(), round: null });
+    expect(text).not.toMatch(/\d+\s*(synced|failed|need keys)/);
+    expect(text).not.toMatch(/\d+\s*\/\s*\d+/);
+    // 该说的还得说:上次更新那一行照旧。
+    expect(text).toContain("2 minutes ago");
   });
 
   it("同步中 → `x / N` 与正在同步谁,不出现收官后那一行", () => {

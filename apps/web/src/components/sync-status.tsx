@@ -221,23 +221,30 @@ export function SyncPanel({
   //
   // synced 那段要**加上不参与同步的来源**(手记):它们的值是读的时候现算的,永远是当下,
   // 不算进来就等于说这几个来源没数。
+  //
+  // **没有轮就没有这一行**(实测裁定):「本轮」是关于某一轮的报告,读不到轮说明**还没跑过**,
+  // 不是「跑过了、成绩是这些」。第一版在无轮时拿手记的条数硬凑了一个数,于是新账号那一刻面板写着
+  // `This round: 2 synced`,而页头写着 across 10 sources —— 读起来像「10 个来源只同步上 2 个」,
+  // 比什么都不说还糟。无轮态只说 `Last updated` 与「需要注意」那份清单,一个 x/y 都不出现。
   const notInRound = Math.max(0, summary.total - summary.accounts.length);
-  const synced = (round?.synced ?? 0) + notInRound;
-  const failedCount = round?.failed.length ?? 0;
-  const tally = [
-    synced > 0 ? t("tallySynced", { count: synced }) : null,
-    failedCount > 0 ? t("tallyFailed", { count: failedCount }) : null,
-    round && round.needsKeys > 0 ? t("tallyNeedsKeys", { count: round.needsKeys }) : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const tally = round
+    ? [
+        round.synced + notInRound > 0
+          ? t("tallySynced", { count: round.synced + notInRound })
+          : null,
+        round.failed.length > 0 ? t("tallyFailed", { count: round.failed.length }) : null,
+        round.needsKeys > 0 ? t("tallyNeedsKeys", { count: round.needsKeys }) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
 
   // **busy 时照样是上次成功同步的时间**(裁定 3)。以前这里写死 `—`,恰好在最该看它的那一刻
   // 把它抹掉:正在同步 = 屏幕上的数还是旧的,「旧到什么时候」是此刻唯一有用的信息。
   const lastUpdated = summary.lastSyncedAt ? syncedAt(summary.lastSyncedAt) : t("lastNever");
 
-  // 进行中:`x / N` + 正在同步谁。收官后:三段式那一行。两者都没有(从没同步过、也没有手记)
-  // 就整行省掉 —— 面板不该为了填满而说一句没内容的话。
+  // 进行中:`x / N` + 正在同步谁。收官后:三段式那一行。**压根没有轮**(或那一轮三段全为 0)
+  // 就整行省掉 —— 面板不该为了填满而报一个不属于任何一轮的数。
   const roundRows =
     round && busy ? (
       <>
