@@ -1,4 +1,4 @@
-import { Effect, type Layer, Stream } from "effect";
+import { Cause, Effect, Exit, type Layer, Stream } from "effect";
 
 // 一轮同步在后台跑到底 —— **ADR 0048 之后这条路上只剩「跑」,没有「看」了**。
 //
@@ -7,10 +7,14 @@ import { Effect, type Layer, Stream } from "effect";
 // 每个账户跑完就写进那一轮的记录,前端轮询去读。于是队列、哨兵、分片解析、以及「断开只是不看了」
 // 那一整套解释,统统不必存在:请求早就返回了,这条任务本来就与任何连接无关。
 //
-// 留在这一层的只有编排顺序,而它有三条讲究:
+// 留在这一层的只有编排顺序,而它有四条讲究:
 //   · **逐条落**(`onResult`)—— 不攒到最后一次性写,否则进度条会在最后一刻从 0 跳到满。
-//   · **一定收官**(`onDone`)—— 成功走一遍,整轮没跑起来也走一遍。不收官那一轮会一直显示
-//     「在跑」,直到 120s 后被判成中断,而它其实早就死透了,那 120s 是白等的。
+//   · **账本不撕轮**:settle 走 DbClient,错误通道 never,它真出错是 defect —— 一笔账没记上
+//     不该让剩余账户不跑、收官不写。每条 onResult 各自兜住,记一行 warning 继续。
+//   · **一定收官**(`onDone`),而且是 **Exit 级**的保证 —— 成功、类型化失败、defect 三种下场
+//     都走一遍。不收官那一轮会一直显示「在跑」,直到 120s 后被判成中断,而它其实早就死透了。
+//     收官自己炸了也兜住:这条 Promise 交给 waitUntil,reject 出去就是一条静默的 unhandled
+//     rejection,所以**它永不 reject**。
 //   · **收官排在收尾之前** —— 反过来的话,面板要等一件与它无关的事(预热缓存,可能在打一圈
 //     拿不到的上游)做完,才看得到「这一轮结束了」。e2e 里量到过这个延迟。
 //
@@ -43,21 +47,45 @@ export interface DriveRoundOptions<A, R> {
 export const driveRound = <A, R>(
   results: Stream.Stream<A, { readonly message: string }, R>,
   opts: DriveRoundOptions<A, R>,
-): Promise<void> =>
-  Effect.runPromise(
+): Promise<void> => {
+  // 用户级失败(取账户 / 取凭据挂了)带 message;defect 只能念 Cause —— 两种都得说成人话,
+  // 因为它就是面板上「整轮没跑起来」那一句。
+  const messageOf = (cause: Cause.Cause<{ readonly message: string }>): string => {
+    const failure = Cause.failureOption(cause);
+    return failure._tag === "Some" ? failure.value.message : Cause.pretty(cause);
+  };
+  return Effect.runPromise(
     results.pipe(
-      Stream.runForEach(opts.onResult),
-      Effect.matchEffect({
-        onFailure: (e) =>
-          Effect.sync(() => opts.onFatal?.(e.message)).pipe(
-            Effect.zipRight(opts.onDone(e.message)),
+      Stream.runForEach((result) =>
+        // 账本不撕轮:一笔 settle 落不上(defect —— DbClient 的错误通道是 never),记一行接着跑。
+        opts
+          .onResult(result)
+          .pipe(
+            Effect.catchAllCause((cause) =>
+              Effect.logWarning("sync round settle failed", Cause.pretty(cause)),
+            ),
           ),
-        onSuccess: () => opts.onDone(null),
+      ),
+      // **Exit 级收官**:matchEffect 只接类型化失败,defect 会从它旁边穿过去 —— 那正是
+      // 「一次 D1 瞬时错让整点后面所有用户都不同步」那条事故链的第一环。
+      Effect.exit,
+      Effect.flatMap((exit) => {
+        if (Exit.isSuccess(exit)) return opts.onDone(null);
+        const message = messageOf(exit.cause);
+        return Effect.sync(() => opts.onFatal?.(message)).pipe(
+          Effect.zipRight(opts.onDone(message)),
+        );
       }),
+      // 收官自己也可能炸(finish 也走 DbClient)—— 记一行,别让它变成 waitUntil 里的
+      // unhandled rejection。到这一步真没有更多可做的了:轮会在心跳过期后如实显示成中断。
+      Effect.catchAllCause((cause) =>
+        Effect.logError("sync round finish failed", Cause.pretty(cause)),
+      ),
       // **兜的是 `Exit` 不是类型化失败**:收尾是尽力而为,它自己的 bug(defect)也不该把这一轮
-      // 变成异常收尾 —— 那会变成 `waitUntil` 里一条静默的 unhandled rejection。
+      // 变成异常收尾。
       Effect.zipRight(opts.afterRound ? Effect.asVoid(Effect.exit(opts.afterRound)) : Effect.void),
       // **一次 provide,流、落库与收尾共用。** 放在最外面 —— 放进去任何一半,另一半就得自己再装一次。
       Effect.provide(opts.layer),
     ),
   );
+};

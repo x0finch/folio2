@@ -7,7 +7,7 @@ import {
 } from "@folio/db";
 import { type AccountSyncResult, Sweep, type SweepResult, SYNC_CONCURRENCY } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
-import { Clock, Effect, Option } from "effect";
+import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { resolveScope, scopedMembership } from "@/lib/server/portfolio/scope";
 import { userLayer } from "@/lib/server/runtime";
@@ -221,9 +221,20 @@ export const syncAllUsers = (
   userIds: readonly string[],
   syncOne: (userId: string) => Effect.Effect<Sweep.Tally> = syncUserRounds,
 ): Effect.Effect<SweepResult, never> =>
-  Effect.forEach(userIds, syncOne).pipe(
-    Effect.map((tallies) => Sweep.sumTallies(userIds.length, tallies)),
-  );
+  Effect.forEach(userIds, (userId) =>
+    // **逐用户各自兜住,而且兜的是 Cause**(与 `warmAllUsers` 同一条纵深防御):`syncOne` 的
+    // 失败面全是 defect(db / 装配炸了),`catchAll` 接不住 —— 不兜的话,一个坏用户会让整点
+    // cron 里排在他后面的所有人这一小时都不同步。只记 error 不记 userId(P6.7)。
+    syncOne(userId).pipe(
+      Effect.catchAllCause((cause) =>
+        Effect.sync(() =>
+          getLogger(["folio", "cron"]).warn("user sync failed, user skipped", {
+            error: Cause.pretty(cause),
+          }),
+        ).pipe(Effect.as<Sweep.Tally>({ ok: 0, failed: 1, skipped: 0 })),
+      ),
+    ),
+  ).pipe(Effect.map((tallies) => Sweep.sumTallies(userIds.length, tallies)));
 
 // 收一个 portfolioId 的理由与 `getSyncStatus` 同一条:选中态只在客户端,服务端没有第二条路
 // 知道你在看哪个组合。

@@ -86,4 +86,21 @@ describe("syncAllUsers", () => {
     expect(events).toEqual(["start:u1", "end:u1", "start:u2", "end:u2", "start:u3", "end:u3"]);
     expect(result).toEqual({ users: 3, ok: 3, failed: 0, skipped: 0 });
   });
+
+  // 一个用户炸(defect —— db 挂了那种,不是类型化失败)不拖累后面的用户。没有这层隔离,
+  // 整点 cron 里排在坏用户后面的**所有人**这一小时都不同步 —— 与 warmAllUsers 同一条纵深防御。
+  it("某个用户 defect → 其余照跑,整体不抛,计一个 failed", async () => {
+    const seen: string[] = [];
+    const syncOne = (userId: string) =>
+      Effect.sync(() => {
+        seen.push(userId);
+        if (userId === "b") throw new TypeError("cannot read properties of undefined");
+        return { ok: 1, failed: 0, skipped: 0 };
+      });
+
+    const result = await Effect.runPromise(syncAllUsers(["a", "b", "c"], syncOne));
+
+    expect(seen).toEqual(["a", "b", "c"]);
+    expect(result).toEqual({ users: 3, ok: 2, failed: 1, skipped: 0 });
+  });
 });
