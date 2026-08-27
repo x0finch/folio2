@@ -4,12 +4,13 @@ import {
   type BinanceCreds,
   make as makeBinanceClient,
 } from "@folio/binance-client";
-import type {
-  BalanceProvider,
-  ConnectorError,
-  CredField,
-  Note,
-  ProviderNeeds,
+import {
+  type BalanceProvider,
+  type ConnectorError,
+  type CredField,
+  isRetryable,
+  type Note,
+  type ProviderNeeds,
 } from "@folio/connectors-basic";
 import { Effect, Either, Fiber } from "effect";
 import { z } from "zod";
@@ -62,8 +63,8 @@ const configFrom = (creds: Record<string, unknown>): BinanceConfig => {
 // —— 多钱包骨架(ADR 0030)——
 //
 // 一个 Binance 账户 = 多个隔离**钱包**(现货 / 合约 / 资金 / 理财),同一把 key 并发拉。
-// 尽力而为:某个钱包失败不阻断其余,失败收成一条账户级 Note。凭据类失败(没勾 Futures 权限的
-// -2015)与瞬时故障(超时/5xx)一样降级为「该钱包失败」,不冒泡成整账户失败。
+// 尽力而为**只对凭据类失败**(没勾 Futures 权限的 -2015 那类):该钱包失败不阻断其余,
+// 收成一条账户级 Note。瞬时故障(限流/超时/5xx)会升级成整账户失败进重试 —— 分界在 verdict。
 //
 // **`prices` 是个 Fiber,不是 Promise。** 价表(公开、带闸)与各钱包(签名、无闸)要**并发**发起:
 // 合约根本不需要价表,现货/资金/理财才 join 它。老那版用一个已经跑起来的 Promise 传进来,
@@ -168,7 +169,9 @@ export const verdict = (
 ): Either.Either<{ balances: BinanceRow[]; note?: Note[] }, ConnectorError> => {
   const failed = outcomes.filter((o) => Either.isLeft(o.result));
 
-  // 被价表连坐 → 以价表的真实原因(限流 / 上游不可用)失败,而不是被它拖死的某个钱包。
+  // 被价表连坐 → 以价表的真实原因失败,而不是被它拖死的某个钱包。
+  // **这条不看可不可重试**:价表就算死于不可重试的错(如响应形状变了),被连坐的四个钱包
+  // 也一样没拿到数 —— 该失败保旧值,只是 sync 不会白重试而已。
   if (Either.isLeft(priceTable)) {
     const collateral = failed.some(
       (o) => Either.isLeft(o.result) && o.result.left === priceTable.left,
@@ -176,8 +179,15 @@ export const verdict = (
     if (collateral) return Either.left(priceTable.left);
   }
 
-  // **全军覆没**(无一钱包成功,如 429 打光所有端点)→ 失败,让 sync 重试,
-  // 别拿一份空快照覆盖已有余额。只有**部分**失败才走尽力而为。
+  // **失败堆里有「等一等会好」的(限流/超时/5xx)→ 整账户失败进重试。**
+  // 尽力而为只留给「等也没用」的失败(权限没勾):降级写残缺快照,和价表连坐是同一种症状,
+  // 只是范围小 —— 对瞬时错这么干,等于把「下轮就能好」的数据这轮先抹掉。判据用契约里现成的
+  // `isRetryable`,和 sync 重试那层是同一把尺子:这里判「该不该交给重试」,那里判「还试不试」。
+  const transient = failed.find((o) => Either.isLeft(o.result) && isRetryable(o.result.left));
+  if (transient && Either.isLeft(transient.result)) return Either.left(transient.result.left);
+
+  // **全军覆没**(五个钱包全死于权限类 —— 如整把 key 被吊销)→ 也失败,
+  // 别拿一份**空**快照覆盖已有余额。只有**部分**权限失败才走尽力而为。
   const first = failed[0];
   if (failed.length === outcomes.length && first && Either.isLeft(first.result)) {
     return Either.left(first.result.left);

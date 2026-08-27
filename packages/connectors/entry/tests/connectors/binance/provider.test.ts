@@ -110,17 +110,35 @@ describe("verdict", () => {
     if (Either.isLeft(v)) expect(v.left).toBe(priceErr);
   });
 
-  it("价表挂但没人死在它手上(钱包各自死于自己的错)→ 仍尽力而为", () => {
-    // 引用判据的反面:钱包的 429 和价表的 429 即便 tag 相同,也**不是同一个对象** —— 不算连坐。
+  it("部分挂且是瞬时错(限流/超时/5xx)→ 整体失败进重试,不写残缺快照", () => {
+    // 「等一等会好」的失败不该降级:降级写出去的残缺快照,和价表连坐那次是同一种症状,
+    // 只是范围小。升级成整体失败,sync 那层重试;打光则不写快照,旧值保住。
+    const transient = err("ConnectorUnavailableError");
+    const v = verdict([ok("Spot", ["BTC"]), ko("Funding", transient)], Either.right({}));
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(transient);
+  });
+
+  it("瞬时错混着权限错 → 以瞬时那个整体失败(它才是重试的理由)", () => {
+    const transient = err("ConnectorRateLimitError");
     const v = verdict(
-      [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", err("ConnectorRateLimitError"))],
+      [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorAuthError")), ko("Funding", transient)],
+      Either.right({}),
+    );
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(transient);
+  });
+
+  it("价表挂但没人死在它手上 → 不算连坐;钱包自己的瞬时错照瞬时规则走", () => {
+    // 引用判据:钱包的 429 和价表的 429 即便 tag 相同,也**不是同一个对象** —— 不算连坐。
+    // 失败原因因此是钱包自己那个错,不是价表的。
+    const own = err("ConnectorRateLimitError");
+    const v = verdict(
+      [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", own)],
       Either.left(err("ConnectorRateLimitError")),
     );
-    expect(Either.isRight(v)).toBe(true);
-    if (Either.isRight(v)) {
-      expect(v.right.balances.map((b) => b.symbol)).toEqual(["USDT"]);
-      expect(String(v.right.note?.[0]?.content)).toContain("Spot");
-    }
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(own);
   });
 
   it("全军覆没 → 以第一个钱包的错整体失败", () => {
@@ -230,8 +248,9 @@ describe("fetchBalances", () => {
   it("**Note 点名的是真失败的那个钱包**,不是按下标猜的", async () => {
     // 只让「资金」这一个失败 —— 它在 WALLETS 里排第四。用 `Effect.partition` 写的话成败两个数组
     // 不带下标,名字就得靠推;这条钉住的是「结果和它的 wallet 绑在一起出来」。
+    // 401(权限)而不是 500:瞬时错现在会升级成整账户失败(见 verdict),到不了 Note。
     const stub = upstream({
-      "/sapi/v1/asset/get-funding-asset": () => json({}, { status: 500 }),
+      "/sapi/v1/asset/get-funding-asset": () => json({}, { status: 401 }),
       "/api/v3/account": () => json(account),
     });
     const { note } = await run(stub, binanceProvider.fetchBalances(ctx()));
