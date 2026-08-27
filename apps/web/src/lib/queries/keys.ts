@@ -14,6 +14,11 @@ export const syncKeys = {
   all: ["sync"] as const,
   /** 全局同步状态摘要(页头同步面板 + 「立即同步」的账户集)。 */
   status: (portfolioId: string) => [...syncKeys.all, "status", portfolioId] as const,
+  /**
+   * 这个组合最近一轮同步(ADR 0048)。**在 `all` 前缀之下**,所以「一轮跑完」那条定向刷新
+   * 照样盖得住它。按组合一份:切组合看的就是另一轮。
+   */
+  round: (portfolioId: string) => [...syncKeys.all, "round", portfolioId] as const,
 };
 
 // 自定义 Tab 的目标(ADR 0034)。进 key 是因为**同一个总览查询按 pin 收窄之后是另一份数据** ——

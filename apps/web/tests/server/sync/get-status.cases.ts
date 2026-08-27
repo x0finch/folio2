@@ -37,7 +37,7 @@ describe("sync/get-status", () => {
   });
 
   describe("getSyncStatus", () => {
-    it("缺凭据、数旧了都进「需要注意」;只有前者从 ok 里减掉", async () => {
+    it("缺凭据、数旧了都进「需要注意」", async () => {
       const fresh = await cex(USER, "刚同步", { apiKey: "k", secret: "s" });
       await seedSnapshot(USER, fresh.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       const stale = await cex(USER, "很久没同步", { apiKey: "k", secret: "s" });
@@ -49,13 +49,12 @@ describe("sync/get-status", () => {
       const out = await status();
 
       // 一份清单装两件事(#527 裁定 8):缺凭据是「没有数」,30 天没同步是「有数但旧了」。
-      // 后者仍然计入 ok —— 它同步过。排序按严重程度,缺凭据在前。
+      // 排序按严重程度,缺凭据在前。
       expect(out.total).toBe(3);
       expect(out.attention.map((a) => [a.label, a.kind])).toEqual([
         ["缺凭据", "missing-credentials"],
         ["很久没同步", "stale"],
       ]);
-      expect(out.ok).toBe(2);
       expect(out.lastSyncedAt).toBe(NOW);
     });
 

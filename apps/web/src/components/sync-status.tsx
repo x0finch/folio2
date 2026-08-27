@@ -6,19 +6,20 @@ import { RefreshCw } from "lucide-react";
 import { forwardRef, type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
 import { connectorLabelFallback } from "@/lib/core/logo";
-import {
-  type SyncRound,
-  type SyncRoundFailure,
-  useAccountSync,
-} from "@/lib/hooks/use-account-sync";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
+import { isRoundBusy, useSyncRound } from "@/lib/hooks/use-sync-round";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
-import type { SyncAttentionSource, SyncStatusSummary } from "@/lib/server/sync/status";
+import type {
+  SyncAttentionSource,
+  SyncRoundFailure,
+  SyncRoundView,
+  SyncStatusSummary,
+} from "@/lib/server/sync/status";
 import { IconButton } from "./icon-button";
 
 // 共享同步状态入口(PageHeader actions):**一个 Popover**,有鼠标就 hover 打开、触屏就 tap 打开,
-// 两边包的是同一份 <SyncPanel>(状态徽章 + 已同步/总来源 + 上次更新 + 本轮进度与失败 + 需要注意的来源
+// 两边包的是同一份 <SyncPanel>(状态徽章 + 本轮口径 + 上次更新 + 本轮失败 + 需要注意的来源
 // + 独立同步按钮)。
 //
 // 移动端以前走 MorphingModal(从底部升起的卡片)。换掉它是因为那张卡的底行被悬浮 Dock 压住截断,
@@ -27,6 +28,9 @@ import { IconButton } from "./icon-button";
 //
 // 全量同步的进度**长在这张面板里**,不再另发 toast(裁定 1):toast 与面板各有一套分母,同屏对不上。
 // toast 只留给账户详情里的单账户同步 —— 那一处没有面板可长。
+//
+// **这一轮的一切都来自服务端**(ADR 0048):面板轮询读那一轮,不自己记账。所以 cron 跑的轮
+// 在这里一样看得见,换页 / 换设备看到的也是同一件事。
 //
 // 分段按钮(beUI 胶囊):可选 action → 状态段右侧接「分隔线 + 自定义 icon 段」(如账户页的 + 添加账户)。
 // 有 action 时状态段**不显旋转刷新图标**(进度走面板);无 action 时保持单枚 pill + 刷新图标。
@@ -103,14 +107,25 @@ const SEGMENT_ACTION = "rounded-r-none border-r-0";
 
 interface PanelProps {
   summary: SyncStatusSummary;
-  /** 这一轮的进度(没在跑时是上一轮留下的失败清单)。 */
-  round: SyncRound;
-  busy: boolean;
-  /** 有事要看一眼(摘要里的清单,或上一轮的失败)—— 不含「正在同步」。 */
-  needsAttention: boolean;
+  /** 这个组合最近一轮(服务端事实);从没同步过 → null。 */
+  round: SyncRoundView | null;
+  /** **发起**同步这个请求本身失败了 —— 与「这一轮里某个账户失败了」是两回事。 */
+  startError: string | null;
   onSync: () => void;
   /** 点某一行 → 去账户页把那一行滚出来(不在当前视图里则开它的详情抽屉)。 */
   onPick: (accountId: string) => void;
+  /** 那颗同步按钮点了也没用的时候(在跑 / 请求在飞 / 没有可同步的账户)。 */
+  syncDisabled?: boolean;
+}
+
+// 一行「标签 …… 值」。面板上半部全是这个形状,单独拎出来是为了那三行不必各抄一遍 class。
+function PanelRow({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-2.5 py-1 text-muted-foreground text-xs">
+      <span className="shrink-0">{label}</span>
+      <span className={cn("min-w-0 truncate text-foreground", mono && "font-mono")}>{value}</span>
+    </div>
+  );
 }
 
 // 一行需要注意的来源:`连接器 @标签` + 那一句状态。
@@ -179,10 +194,19 @@ function FailureRow({
 // 共享面板内容(无自身外框/内距 —— 由 Popover 提供表面)。
 // 导出只为单测:面板里那几个数是合成出来的(见下面的分子/分母),而经 <SyncStatus> 渲染要先把
 // 路由与 Portfolio 上下文一起搭起来 —— 那测的是装配,不是口径。
-export function SyncPanel({ summary, round, busy, needsAttention, onSync, onPick }: PanelProps) {
+export function SyncPanel({
+  summary,
+  round,
+  startError,
+  onSync,
+  onPick,
+  syncDisabled,
+}: PanelProps) {
   const t = useTranslations("Sync");
   // 活时钟 + 钳位收在 hook 里(为什么不用裸 useNow 见 use-relative-synced-at)。
   const syncedAt = useRelativeSyncedAt();
+  const busy = isRoundBusy(round);
+  const needsAttention = hasAttention(summary, round, startError);
   const { badge } = tone(busy || needsAttention);
   const { data: catalog } = useQuery(connectorCatalogQuery());
   const nameOf = (id: ConnectorId) => catalog?.[id]?.label ?? connectorLabelFallback(id);
@@ -190,44 +214,56 @@ export function SyncPanel({ summary, round, busy, needsAttention, onSync, onPick
   // `8 / 8`。「需要注意」把两种都装得下,而且与 pill 上那句是同一句 —— 同一件事不该有两种说法。
   const statusLabel = busy ? t("syncing") : needsAttention ? t("needsAttention") : t("allSynced");
 
-  // **一个数,一个分母**(裁定 3)。分母恒是「组合内全部来源」(`summary.total`,含手记);
-  // 同步中的分子 = 不参与这一轮的来源打底(手记那些一直有数)+ 本轮已完成数。于是一轮从 `4/13`
-  // 起步涨到 `13/13`,与静态时那个 `ok / total` 是同一个数字、同一个分母。
-  // 以前这里静态写 `13 / 13`、顶上另有一条 toast 写 `7 / 9` —— 两套分母同屏,而且都不假。
+  // **三段式口径**(ADR 0048 裁定 7):synced · failed · need keys,**每个词各管各的**,
+  // 为 0 的段省略。以前这里是一个合成分子(打底 + 已完成 - 跳过)夹在 `summary.total` 上,
+  // 而那个式子存在的唯一理由是「一个数要同时装下三种不同的事」—— 失败的账户算不算已同步、
+  // 缺凭据的算不算跑过,怎么答都得再补一句注释。三个词一摆,这类问题不再需要答案。
   //
-  // 夹在分母上:summary 每完成一个账户就被定向刷新,轮中归档一个**已同步**的账户会让打底 + 已完成
-  // 大过缩了水的 total(13 个来源归档 1 个 → total 12,而这一轮照旧回 9 条)—— `13 / 12` 读起来
-  // 像多同步出一个来源。
-  //
-  // skipped(缺凭据、被跳过)要从分子里刨掉:它算「处理完」(进 done)但没产出快照,`summary.ok`
-  // 不计它 —— 计进分子的话轮尾先冲到 13/13、下一次 summary 刷新又跳水回 11/13。**失败的不刨**:
-  // 失败账户往往仍有旧快照,`summary.ok` 计它,现口径正好收口一致。
-  const notInRound = summary.total - summary.accounts.length;
-  const synced = busy
-    ? Math.min(summary.total, notInRound + round.done - round.skipped)
-    : summary.ok;
+  // synced 那段要**加上不参与同步的来源**(手记):它们的值是读的时候现算的,永远是当下,
+  // 不算进来就等于说这几个来源没数。
+  const notInRound = Math.max(0, summary.total - summary.accounts.length);
+  const synced = (round?.synced ?? 0) + notInRound;
+  const failedCount = round?.failed.length ?? 0;
+  const tally = [
+    synced > 0 ? t("tallySynced", { count: synced }) : null,
+    failedCount > 0 ? t("tallyFailed", { count: failedCount }) : null,
+    round && round.needsKeys > 0 ? t("tallyNeedsKeys", { count: round.needsKeys }) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   // **busy 时照样是上次成功同步的时间**(裁定 3)。以前这里写死 `—`,恰好在最该看它的那一刻
   // 把它抹掉:正在同步 = 屏幕上的数还是旧的,「旧到什么时候」是此刻唯一有用的信息。
   const lastUpdated = summary.lastSyncedAt ? syncedAt(summary.lastSyncedAt) : t("lastNever");
 
-  const currentRow = busy ? (
-    <div className="flex items-center justify-between gap-2.5 py-1 text-muted-foreground text-xs">
-      <span className="shrink-0">{t("syncingNow")}</span>
-      <span className="min-w-0 truncate text-foreground">{round.current ?? "…"}</span>
-    </div>
-  ) : null;
+  // 进行中:`x / N` + 正在同步谁。收官后:三段式那一行。两者都没有(从没同步过、也没有手记)
+  // 就整行省掉 —— 面板不该为了填满而说一句没内容的话。
+  const roundRows =
+    round && busy ? (
+      <>
+        <PanelRow label={t("roundProgress")} value={`${round.settled} / ${round.total}`} mono />
+        <PanelRow label={t("syncingNow")} value={round.current ?? "…"} />
+      </>
+    ) : tally ? (
+      <PanelRow label={t("roundResult")} value={tally} />
+    ) : null;
 
+  // 中断 = 未收官且心跳断了(worker 死了)。它不是某个账户的失败,所以没有清单可列,
+  // 只有一句「上一轮没跑完」—— 但它必须出现,否则一轮假同步在面板上与「一切正常」无异。
+  const interrupted = round?.state === "interrupted";
+  const fatal = startError ? `${t("startFailed")}: ${startError}` : (round?.error ?? null);
+  const failures = round?.failed ?? [];
   const failureBlock =
-    round.failures.length > 0 || round.error ? (
+    failures.length > 0 || fatal || interrupted ? (
       <>
         <div className="my-2 border-border border-t" />
         <div className="pb-0.5 font-medium text-muted-foreground text-xs">{t("roundFailed")}</div>
         <div className="flex flex-col">
-          {round.failures.map((f) => (
+          {failures.map((f) => (
             <FailureRow key={f.accountId} failure={f} onPick={onPick} />
           ))}
-          {round.error ? <p className="py-1 text-neg text-xs">{round.error}</p> : null}
+          {fatal ? <p className="py-1 text-neg text-xs">{fatal}</p> : null}
+          {interrupted ? <p className="py-1 text-warn text-xs">{t("roundInterrupted")}</p> : null}
         </div>
       </>
     ) : null;
@@ -258,17 +294,8 @@ export function SyncPanel({ summary, round, busy, needsAttention, onSync, onPick
         </span>
       </div>
 
-      <div className="flex items-center justify-between py-1 text-muted-foreground text-xs">
-        <span>{t("sourcesSynced")}</span>
-        <span className="font-mono font-semibold text-foreground">
-          {synced} / {summary.total}
-        </span>
-      </div>
-      <div className="flex items-center justify-between py-1 text-muted-foreground text-xs">
-        <span>{t("lastUpdated")}</span>
-        <span className="font-mono text-foreground">{lastUpdated}</span>
-      </div>
-      {currentRow}
+      {roundRows}
+      <PanelRow label={t("lastUpdated")} value={lastUpdated} mono />
 
       {/* 两份清单合用一个封顶的滚动区:面板现在在手机上也是 popover(锚在页头下方),清单一长
           就会顶到屏幕底下 —— 而这张面板最后一行正是那颗同步按钮,够不着它等于这个入口废了。
@@ -289,7 +316,7 @@ export function SyncPanel({ summary, round, busy, needsAttention, onSync, onPick
           size="sm"
           variant="outline"
           onClick={onSync}
-          disabled={busy || summary.accounts.length === 0}
+          disabled={syncDisabled ?? (busy || summary.accounts.length === 0)}
           aria-label={t("status")}
           className="shrink-0 text-foreground [&_svg]:size-3.5"
         >
@@ -300,11 +327,26 @@ export function SyncPanel({ summary, round, busy, needsAttention, onSync, onPick
   );
 }
 
-// 「有事要看一眼」= 摘要那份清单 + 本组合上一轮的失败。后者摘要看不见:一个失败的账户往往仍有
-// 旧快照、凭据也齐,于是它不进 attention —— 不把它算进来的话,一轮同步炸了三个,徽标照样绿着说
-// 「已同步」。纯函数导出,单测直接喂数据(经 <SyncStatus> 测它要先搭路由 + Portfolio 上下文)。
-export function hasAttention(summary: SyncStatusSummary, round: SyncRound): boolean {
-  return summary.attention.length > 0 || round.failures.length > 0 || round.error !== null;
+/**
+ * 「有事要看一眼」= 摘要那份清单 + 本组合上一轮出的事。
+ *
+ * 后三样摘要都看不见:一个**失败**的账户往往仍有旧快照、凭据也齐,于是它不进 attention;
+ * **整轮没跑起来**根本没到落库那一步;**中断**更是连结果都没有。不把它们算进来的话,
+ * 一轮同步炸了三个,徽标照样绿着说「已同步」。
+ *
+ * 纯函数导出,单测直接喂数据(经 <SyncStatus> 测它要先搭路由 + Portfolio 上下文)。
+ */
+export function hasAttention(
+  summary: SyncStatusSummary,
+  round: SyncRoundView | null,
+  startError: string | null = null,
+): boolean {
+  return (
+    summary.attention.length > 0 ||
+    startError !== null ||
+    (round != null &&
+      (round.failed.length > 0 || round.error !== null || round.state === "interrupted"))
+  );
 }
 
 export function SyncStatus({
@@ -317,7 +359,11 @@ export function SyncStatus({
   const t = useTranslations("Sync");
   // 同步这一轮按**当前组合**跑(ADR 0047)—— 名单在服务端算,这里只把组合传下去。
   const { selectedId } = usePortfolio();
-  const { busy, sync, round } = useAccountSync(summary.accounts, selectedId);
+  // 这一轮的一切从服务端来(ADR 0048):hook 只管发起与读,不再自己记进度。
+  const { round, busy, disabled, startError, sync } = useSyncRound(
+    selectedId,
+    summary.accounts.length,
+  );
   // 打开方式按**指针能力**分,不按视口宽度:触屏上的 hover 是 tap 之后粘住的幽灵态,面板会莫名其妙
   // 留在屏幕上。宽度不是判据 —— 触屏笔记本也该是 tap。
   const hoverCapable = useHoverCapable();
@@ -334,7 +380,7 @@ export function SyncStatus({
     navigate({ to: "/accounts", search: { focus: accountId } });
   };
 
-  const needsAttention = hasAttention(summary, round);
+  const needsAttention = hasAttention(summary, round, startError);
   const { dot } = tone(busy || needsAttention);
   // pill 上那句刻意更短(「已同步」而不是「全部同步」)—— 它在页头里跟其他段并排,字多了会挤。
   // 但要注意的那句两处一致:同一件事不该有两种说法。
@@ -372,10 +418,10 @@ export function SyncStatus({
         <SyncPanel
           summary={summary}
           round={round}
-          busy={busy}
-          needsAttention={needsAttention}
+          startError={startError}
           onSync={sync}
           onPick={pick}
+          syncDisabled={disabled}
         />
       </PopoverContent>
     </Popover>

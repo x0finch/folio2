@@ -20,10 +20,9 @@ const acc = (over: Partial<SyncAccountInput>): SyncAccountInput => ({
 });
 
 describe("summarizeSync", () => {
-  it("counts ok = accounts that have actually synced", () => {
+  it("都同步过 → 清单是空的", () => {
     const s = summarizeSync([acc({ takenAt: 1000 }), acc({ takenAt: 2000 })], NOW);
     expect(s.total).toBe(2);
-    expect(s.ok).toBe(2);
     expect(s.attention).toEqual([]);
   });
 
@@ -38,7 +37,6 @@ describe("summarizeSync", () => {
       NOW,
     );
     expect(s.total).toBe(2);
-    expect(s.ok).toBe(1);
     expect(s.attention).toEqual([
       {
         id: "a",
@@ -56,24 +54,33 @@ describe("summarizeSync", () => {
       NOW,
     );
     expect(s.total).toBe(2);
-    expect(s.ok).toBe(1);
     expect(s.attention.map((a) => [a.id, a.kind])).toEqual([["a", "missing-credentials"]]);
   });
 
   // 两个毛病都有 → 只报一条,报根因:凭据都没配齐,「从未同步」是它的后果而非独立问题。
   it("reports missing creds once, not twice, when it also never synced", () => {
     const s = summarizeSync([acc({ id: "a", complete: false, takenAt: null })], NOW);
-    expect(s.ok).toBe(0);
     expect(s.attention.map((a) => a.kind)).toEqual(["missing-credentials"]);
   });
 
-  it("keeps ok + 「没有数」的条数 === total(数旧了的仍算 ok)", () => {
+  // 三种毛病一次到齐 —— 清单按严重程度排,而分母(来源总数)不受任何一种影响。
+  // 这一条要一个**遥远**的当下,才造得出「数旧了」那一档(文件顶上那个 NOW 紧挨着 takenAt)。
+  it("缺凭据 / 从未同步 / 数旧了三种都进清单,顺序按严重程度", () => {
+    const later = STALE_SYNC_MS + 10_000;
     const s = summarizeSync(
-      [acc({ complete: false }), acc({ takenAt: null }), acc({ takenAt: 4000 })],
-      NOW,
+      [
+        acc({ id: "a", complete: false, takenAt: later - 1000 }),
+        acc({ id: "b", takenAt: null }),
+        acc({ id: "c", takenAt: 4000 }),
+      ],
+      later,
     );
-    expect(s.ok + s.attention.filter((a) => a.kind !== "stale").length).toBe(s.total);
-    expect(s.ok).toBe(1);
+    expect(s.attention.map((x) => x.kind)).toEqual([
+      "missing-credentials",
+      "never-synced",
+      "stale",
+    ]);
+    expect(s.total).toBe(3);
   });
 
   it("excludes archived accounts from every tally", () => {
@@ -106,7 +113,6 @@ describe("summarizeSync", () => {
     expect(s).toEqual({
       accounts: [],
       total: 0,
-      ok: 0,
       attention: [],
       lastSyncedAt: null,
     });
@@ -124,7 +130,6 @@ describe("summarizeSync", () => {
         now,
       );
       expect(s.attention.map((a) => [a.id, a.kind])).toEqual([["a", "stale"]]);
-      expect(s.ok).toBe(1);
     });
 
     it("恰好卡在阈值上 → 还不算旧(边界不含)", () => {
@@ -173,11 +178,10 @@ describe("summarizeSync", () => {
   // 手记账户:算一个「来源」,不算一个「同步源」(ADR 0018 —— 它没有上游,当下值读的时候现算)。
   // 页头那句「across N sources」问的是前者,面板里 `N / M` 问的是后者。
   describe("手记账户", () => {
-    it("只有手记账户 → 1 / 1(它一直有数),但「立即同步」没有可同步的对象", () => {
+    it("只有手记账户 → 算一个来源,但「立即同步」没有可同步的对象", () => {
       const s = summarizeSync([acc({ connectorId: "manual", takenAt: null })], NOW);
       expect(s.total).toBe(1);
-      expect(s.ok).toBe(1);
-      // 分子算它、分母算它,但它不进同步集 —— 没有上游可问。
+      // 它算一个来源(进 total),但不进同步集 —— 没有上游可问。
       expect(s.accounts).toEqual([]);
       expect(s.attention).toEqual([]);
     });
@@ -189,7 +193,6 @@ describe("summarizeSync", () => {
       );
       expect(s.attention).toEqual([]);
       expect(s.total).toBe(2);
-      expect(s.ok).toBe(2);
       expect(s.accounts.map((a) => a.id)).toEqual(["c"]);
     });
 

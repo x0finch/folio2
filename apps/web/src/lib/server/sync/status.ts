@@ -80,22 +80,12 @@ export interface SyncStatusSummary {
    */
   accounts: { id: string; label: string }[];
   /**
-   * 这个视图里的活跃账户数 —— 面板里 `N / M` 的那个 M,**含手记账户**。
+   * 这个视图里的活跃账户数,**含手记账户** —— 与页头那句「across N sources」逐字同一个数。
    *
-   * **分母就是「一共几个来源」**,与页头那句「across N sources」逐字同一个数。以前它只数可同步的
-   * 那些,于是同一个界面上两个都叫 source 的数字对不上:副标题说 10 个来源,面板说 8 个。
+   * 面板拿它减掉可同步的那些,得出「不参与同步的来源」有几个 —— 那几个的值是读的时候现算的,
+   * 永远是当下,所以三段式里的 synced 要把它们加上(ADR 0048 裁定 7)。
    */
   total: number;
-  /**
-   * **有数**的来源数 —— `N / M` 的那个 N。
-   *
-   * 「有数」= 同步过的,**加上手记账户**:后者的值是读的时候现算的,永远是当下,所以它一直算有数。
-   * 不这么算的话它就永远躺在分母里、永远进不了分子,看起来像两个永久欠同步的来源。
-   *
-   * 数旧了的**照样算进来** —— 它有数,只是旧;把它减掉等于说「这个来源没同步过」,那不是事实。
-   * 它的位置在下面那份清单里。
-   */
-  ok: number;
   /** 需要看一眼的来源,按严重程度排(缺凭据 → 从未同步 → 数旧了,同档内旧的在前)。 */
   attention: SyncAttentionSource[];
   /** 全部活跃账户里最新的一次快照时间(null = 全部从未同步)。 */
@@ -140,15 +130,14 @@ export function summarizeSync(accounts: SyncAccountInput[], now: number): SyncSt
   return {
     accounts: syncable.map((a) => ({ id: a.id, label: a.label })),
     total: active.length,
-    // 减掉的只有「没有数」那两档(缺凭据 / 从未同步);数旧了的仍然有数,手记账户一直有数。
-    ok: active.length - attention.filter((a) => a.kind !== "stale").length,
     attention,
     lastSyncedAt,
   };
 }
 
-/** 一轮的下场三选一。**中断不是一种失败** —— 它是「没人再往下跑了」,连结果都没有。 */
-export type SyncRoundState = "running" | "interrupted" | "done";
+// 一轮的下场三选一。**中断不是一种失败** —— 它是「没人再往下跑了」,连结果都没有。
+// 不单独导出:它只作为 `SyncRoundView.state` 出现,而那个接口是导出的。
+type SyncRoundState = "running" | "interrupted" | "done";
 
 export interface SyncRoundFailure {
   accountId: string;
