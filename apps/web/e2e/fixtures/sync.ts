@@ -160,8 +160,15 @@ export async function unblockPostCreateSync(page: Page) {
 // 而 Playwright 的 toBeVisible 这三样一个都不认,等「Sync status 出现」是个恒真的假信号。
 export async function hoverSyncPill(page: Page) {
   const pill = page.getByRole("button", { name: /^(Synced|Needs attention|Syncing…)$/ });
-  await pill.hover();
-  await expect(pill).toHaveAttribute("aria-expanded", "true");
+  await expect(async () => {
+    // **先把光标挪开再 hover。** 这些用例多半是「点完同步再看面板」,而点击之后光标就停在胶囊
+    // 正中 —— 再 `hover()` 一次目标坐标没变,浏览器不会补发 mouseenter,于是 hover 触发的弹层
+    // 永远开不了(实测:点同步之后直接 hover,拿到的稳定是 `aria-expanded="false"`,
+    // 15 秒里重试 33 次一次都没变过)。挪开一步,这一次 hover 才是真的「移进来」。
+    await page.mouse.move(0, 0);
+    await pill.hover();
+    await expect(pill).toHaveAttribute("aria-expanded", "true", { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 export async function clickSyncPill(page: Page) {
