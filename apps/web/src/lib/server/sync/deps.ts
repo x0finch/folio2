@@ -36,7 +36,6 @@ import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
 import { logTapeLogger } from "@/lib/server/effect-log";
 import { manualBalancesForWarm } from "@/lib/server/manual/store";
-import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { forUser, type UserServices, userLayer } from "@/lib/server/runtime";
 import { warmHeldPrices } from "@/lib/server/tokens/enrich";
 import { userDisplayBalances } from "@/lib/server/tokens/model";
@@ -251,12 +250,12 @@ const asDep =
 /**
  * app 侧对 `@folio/sync` 那四个能力的接线。
  *
- * `scope` 给的时候,这一轮**只跑那个组合的账户**(ADR 0047:整轮同步的作用域在服务端定)。
- * 不给 = 不收口 —— cron 的全量 sweep 与抽屉里的单账户同步走的是那一条:同步管的是「数据新不新鲜」,
- * 与谁在看哪个组合无关。
+ * `only` 给的时候,这一轮**只跑名单里那些账户**。名单由开轮那一步算好递进来(ADR 0048)——
+ * 不是在这里再按组合算一遍:那样会有两份名单,而它们之间任何一点漂移都会让面板的 `x / N`
+ * 与真跑的条数对不上。不给 = 不收口(抽屉里的单账户同步走的是那一条)。
  */
 export const makeSyncServicesLayer = (scope?: {
-  portfolioId?: string;
+  only: ReadonlySet<string>;
 }): Layer.Layer<
   SyncServices,
   never,
@@ -276,10 +275,9 @@ export const makeSyncServicesLayer = (scope?: {
           SyncAccountStore,
           Effect.gen(function* () {
             const { accounts } = yield* Database;
-            // **这一轮跑哪些账户,在这里定死。** 收口时先把当前组合的成员集取出来(装配时一次,
-            // 不是每次 `list()` 一次)—— 判据与页头那份摘要同一个(`accountIdsInView` + 下面那个
-            // `isSyncableAccount`),所以面板上的 `N / M` 就是这一轮的条数,进度分母不会对不上。
-            const only = scope ? yield* scopedMembership(scope.portfolioId) : null;
+            // **这一轮跑哪些账户,开轮那一步已经定死了**(ADR 0048):`only` 就是那一轮记录里
+            // 的名单,所以面板上的 `x / N` 与这里真跑的条数是同一份名单,不可能对不上。
+            const only = scope?.only ?? null;
             return {
               // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,
               // 不写快照)→ 一并过滤。编排只见活跃的可同步账户(判别走纯 isSyncableAccount)。
@@ -392,31 +390,32 @@ export const syncServicesLayer = makeSyncServicesLayer();
 
 const syncFor = (
   userId: string,
-  scope?: { portfolioId?: string },
+  only?: ReadonlySet<string>,
 ): Layer.Layer<SyncServices | UserServices> =>
-  Layer.provideMerge(makeSyncServicesLayer(scope), userLayer(userId));
+  Layer.provideMerge(makeSyncServicesLayer(only ? { only } : undefined), userLayer(userId));
 
 /**
- * `/api/sync` 的一轮:**流、收尾,和它们共用的那一次装配** —— 三件一起出去,不在这里 provide。
+ * 一轮同步:**流、收尾,和它们共用的那一次装配** —— 三件一起出去,不在这里 provide。
  *
  * 以前这里出的是「已经 provide 好的流」,而收尾(`warmTokensForUser`)自己在另一个 `runAtEdge`
  * 里再装一次 —— 同一个请求两个 `DbClient`。**Layer memoisation 的作用域是一次构建**,所以光传
  * 同一个 layer 引用没用,必须是同一次 provide;要做到这一点,provide 那一下就得挪到「同时看得见
- * 两半」的地方,也就是 `ndjsonRound` 里(#504 T12)。
+ * 两半」的地方,也就是 `driveRound` 里(#504 T12)。
  *
  * `syncFor` 因此改用 `provideMerge`:同步内核要的 `SyncServices` 与收尾要的 `UserServices`
  * 都得在场,而且必须是同一次构建出来的那一份。
  *
- * **日志层也在这张 layer 里,这条是有来由的**:`ndjsonRound` 里那个 `run` 是**另起的一条根
+ * **日志层也在这张 layer 里,这条是有来由的**:`driveRound` 里那句 `runPromise` 是**另起的一条根
  * fiber**(`Effect.runPromise`),而根 fiber **不继承外层的 `Effect.provide`**(实测:外层换掉
  * defaultLogger,内层那条 `logInfo` 照样落在 Effect 自带的 console logger 上)。所以这一整趟
  * 同步 + 预热的 `Effect.log*` 想进 LogTape,只能由**它自己这次 provide** 带上。
  *
  * **只能挂在这里,不能挂进 `syncFor`**:cron 那条路是在外层 `runAtEdge` 里跑的,那儿已经有一个
  * `logTapeLogger` —— 再叠一层不会顶掉它,只会两个转发器同时在集合里、每条日志写两遍
- *(effect-log.ts 记着这个坑,实测过)。而 `syncRoundFor` 只有 `/api/sync` 用。
+ *(effect-log.ts 记着这个坑,实测过)。而 `syncRoundFor` 的调用方(`./round` 的 `runSyncRound`)
+ * 每一次都是自己起的根 fiber。
  */
-export const syncRoundFor = (userId: string, scope?: { portfolioId?: string }) => ({
+export const syncRoundFor = (userId: string, only?: ReadonlySet<string>) => ({
   results: Sweep.syncUserStream(userId) as Stream.Stream<
     AccountSyncResult,
     SyncDepError,
@@ -424,7 +423,7 @@ export const syncRoundFor = (userId: string, scope?: { portfolioId?: string }) =
   >,
   // 同步完预热代币缓存(best-effort),让下次总览能 cache-only 富化新价。
   afterRound: warmTokens,
-  layer: Layer.merge(syncFor(userId, scope), logTapeLogger),
+  layer: Layer.merge(syncFor(userId, only), logTapeLogger),
 });
 
 // cron 的全量 sweep:**逐用户各装一次**,再把小计加起来。

@@ -175,12 +175,10 @@ describe("syncServicesLayer 的接线", () => {
     expect(listed.map((a) => a.id)).toEqual([live.id]);
   });
 
-  // ADR 0047:**整轮同步按当前组合收口,名单由服务端算。** 落点就是这一层的 `list()` ——
-  // 客户端只说「我在看哪个组合」,不递账户 id 名单。
-  //
-  // 分母那件事也系在这条上:面板的 `N / M` 与这一轮的条数是同一条判据(当前组合的成员 ∧ 活跃 ∧
-  // 非手记)算出来的。以前这里不收口、进度分母却是当前组合那几个,于是在小组合里点同步会冲过 100%。
-  it("给了组合 → `list()` 只交出那个组合的账户", async () => {
+  // ADR 0047 / 0048:**整轮同步的名单由服务端算,而且只算一次。** 开轮那一步按当前组合定下
+  // 名单、写进那一轮的记录,这一层直接照着名单跑 —— 面板的 `x / N` 与这里真跑的条数因此是
+  // 同一份名单,不可能对不上(以前是两处各按组合算一遍,任何漂移都不报错)。
+  it("给了名单 → `list()` 只交出名单里的账户", async () => {
     const def = await dbFor(USER).portfolios.ensureDefault();
     const watch = await dbFor(USER).portfolios.create({ name: "Watch" });
     const mine = await dbFor(USER).accounts.create({
@@ -196,18 +194,17 @@ describe("syncServicesLayer 的接线", () => {
     await dbFor(USER).portfolios.assignAccount(mine.id, def.id);
     await dbFor(USER).portfolios.assignAccount(watched.id, watch.id);
 
-    const listOf = (portfolioId?: string) =>
+    const listOf = (only: ReadonlySet<string>) =>
       run(
         USER,
         Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(
-          Effect.provide(makeSyncServicesLayer({ portfolioId })),
+          Effect.provide(makeSyncServicesLayer({ only })),
         ),
       );
 
-    expect((await listOf(watch.id)).map((a) => a.id)).toEqual([watched.id]);
-    // 缺省 = 默认组合(不是「全部」)。
-    expect((await listOf()).map((a) => a.id)).toEqual([mine.id]);
-    // 不给 scope 的那一份才是全量 —— cron 的 sweep 走它。
+    expect((await listOf(new Set([watched.id]))).map((a) => a.id)).toEqual([watched.id]);
+    expect((await listOf(new Set([mine.id]))).map((a) => a.id)).toEqual([mine.id]);
+    // 不给名单的那一份才是全量 —— 抽屉里的单账户同步走它。
     const all = await run(
       USER,
       Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(Effect.provide(syncServicesLayer)),

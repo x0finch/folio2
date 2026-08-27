@@ -53,6 +53,7 @@ export const db = (userId: string) => ({
   tags: promisify(userId, (d) => d.tags),
   tabPins: promisify(userId, (d) => d.tabPins),
   cache: promisify(userId, (d) => d.cache),
+  syncRounds: promisify(userId, (d) => d.syncRounds),
 });
 
 /** 直接数行数 —— 「一行都不许落库」这类断言要它,经域操作反而看不全。 */

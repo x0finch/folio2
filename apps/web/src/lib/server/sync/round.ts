@@ -1,7 +1,16 @@
-import { Database, type SyncRoundRecord, type SyncRoundTrigger } from "@folio/db";
+import {
+  Database,
+  type SyncRoundAccountStatus,
+  type SyncRoundRecord,
+  type SyncRoundTrigger,
+} from "@folio/db";
+import type { AccountSyncResult } from "@folio/sync";
+import { getLogger } from "@logtape/logtape";
 import { Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { resolveScope, scopedMembership } from "@/lib/server/portfolio/scope";
+import { syncRoundFor } from "./deps";
+import { driveRound } from "./drive";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 
 // 一轮同步的**服务端事实**(ADR 0048):开轮、读进度,前端与 cron 共用这两个方法。
@@ -55,6 +64,55 @@ export const openSyncRound = (input: {
       ttlMs: ROUND_HEARTBEAT_MS,
     });
   });
+
+/**
+ * 一个账户报回来的结果落成三档中的哪一档。
+ *
+ * **`skipped` 在这里只可能是「凭据没填完」**:另一种跳过是手记账户,而手记压根进不了一轮
+ * (开轮的名单已经把它滤掉了)。所以这里不必再分一次 `skipReason` —— 真要有第三种跳过冒出来,
+ * 它会显示成「需要凭据」,那时该改的是这一行,不是在面板上再猜一次。
+ */
+const statusOf = (r: AccountSyncResult): Exclude<SyncRoundAccountStatus, "pending"> =>
+  r.ok ? "synced" : r.skipped ? "needs-keys" : "failed";
+
+/**
+ * 把开好的一轮真跑完 —— **调用方把返回的 Promise 交给 `waitUntil`**,它与任何连接都无关。
+ *
+ * 跑的名单直接取自那一轮记录(`Object.keys(round.accounts)`),不在这里按组合再算一遍:
+ * 两份名单之间任何一点漂移都会让面板的 `x / N` 与真跑的条数对不上,而那种对不上是不报错的。
+ *
+ * 每个账户跑完写一次(顺带续心跳),整轮结束收一次官。**中途没人在看也照样跑完** ——
+ * 这正是把状态搬到服务端换来的:以前「看」断了进度就没了,现在断的只是轮询。
+ */
+export const runSyncRound = (userId: string, round: SyncRoundRecord): Promise<void> => {
+  const syncLog = getLogger(["folio", "web", "sync"]);
+  const { results, afterRound, layer } = syncRoundFor(userId, new Set(Object.keys(round.accounts)));
+  const head = { portfolioId: round.portfolioId, roundId: round.roundId };
+  return driveRound(results, {
+    layer,
+    afterRound,
+    onResult: (r) =>
+      Effect.flatMap(Database, (db) =>
+        db.syncRounds.settle({
+          ...head,
+          accountId: r.accountId,
+          status: statusOf(r),
+          // 上游的原话只在真失败时留 —— 跳过的那些没有错误可言。
+          error: r.ok || r.skipped ? undefined : r.error,
+          ttlMs: ROUND_HEARTBEAT_MS,
+        }),
+      ),
+    onDone: (error) =>
+      Effect.flatMap(Database, (db) =>
+        db.syncRounds.finish({
+          ...head,
+          error: error ?? undefined,
+          retentionMs: ROUND_RETENTION_MS,
+        }),
+      ),
+    onFatal: (error) => syncLog.error("sync round failed", { userId, error }),
+  });
+};
 
 // 收一个 portfolioId 的理由与 `getSyncStatus` 同一条:选中态只在客户端,服务端没有第二条路
 // 知道你在看哪个组合。

@@ -4,6 +4,7 @@ import {
   openSyncRound,
   ROUND_HEARTBEAT_MS,
   ROUND_RETENTION_MS,
+  runSyncRound,
 } from "@/lib/server/sync/round";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
@@ -108,6 +109,56 @@ describe("sync/round", () => {
       const opened = await open("pf-never-existed");
       const view = await read("pf-also-nonsense");
       expect(view?.roundId).toBe(opened.round.roundId);
+    });
+  });
+
+  // 真跑一轮(出网被掐掉,所以有凭据的那个必定失败)。测的是接线本身:结果逐条落进那一轮、
+  // 三档分对、跑完收官 —— 这三件事以前分别住在流的两头,没有一处能一起看见。
+  describe("跑一轮", () => {
+    it("逐个账户落进这一轮,跑完收官", async () => {
+      const willFail = await cex("Binance spot");
+      const noKeys = await db(USER).accounts.create({
+        connectorId: "binance",
+        label: "还没填 key",
+        creds: null,
+      });
+
+      const { round } = await open();
+      await runSyncRound(USER, round);
+
+      const pf = await db(USER).portfolios.ensureDefault();
+      const view = await read(pf.id);
+      expect(view?.state).toBe("done");
+      expect(view?.settled).toBe(2);
+      expect(view?.needsKeys).toBe(1);
+      expect(view?.failed.map((f) => f.accountId)).toEqual([willFail.id]);
+      // 上游的原话原样留着 —— 面板那一行不翻译它。
+      expect(view?.failed[0]?.error).toBeTruthy();
+      expect(view?.synced).toBe(0);
+      // 逐账户的失败不是「整轮没跑起来」,那一句必须还是空的。
+      expect(view?.error).toBeNull();
+      expect(noKeys.id in round.accounts).toBe(true);
+    });
+
+    // 陈旧的 worker 撞上新一轮:它那几笔写落空成 no-op(条件在 db 那一层),这里钉的是
+    // 「整条路真的这么表现」—— 新一轮不会被上一轮的尾巴改花。
+    it("上一轮的尾巴写不进新一轮", async () => {
+      await cex("Binance spot");
+      const stale = await open();
+      await db(USER).syncRounds.finish({
+        portfolioId: stale.round.portfolioId,
+        roundId: stale.round.roundId,
+        retentionMs: 1_000,
+      });
+      const fresh = await open();
+      expect(fresh.opened).toBe(true);
+
+      await runSyncRound(USER, stale.round); // 老轮的 worker 现在才跑完
+
+      const view = await read(fresh.round.portfolioId);
+      expect(view?.roundId).toBe(fresh.round.roundId);
+      expect(view?.settled).toBe(0);
+      expect(view?.state).toBe("running");
     });
   });
 });
