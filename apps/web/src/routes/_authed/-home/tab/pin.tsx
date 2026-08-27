@@ -3,16 +3,12 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { Plus } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
-import { accountsInView } from "@/lib/core/accounts-in-view";
+import { MAX_PINS_PER_PORTFOLIO } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback } from "@/lib/core/logo";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { accountListQuery } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
-import {
-  type HomeTabStrip,
-  homeTabStripQuery,
-  portfolioMembershipsQuery,
-} from "@/lib/queries/portfolio";
+import { type HomeTabStrip, homeTabStripQuery } from "@/lib/queries/portfolio";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { tagListQuery } from "@/lib/queries/tags";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "@/lib/server/tab-pins";
@@ -21,8 +17,6 @@ import { type PinTargetChoice, TabPinPicker } from "./pin-picker";
 import { PinPanel } from "./pin-portal-popover";
 import { PinTargetMark } from "./pin-target-mark";
 import { useHomeTabSelection } from "./selection";
-
-const MAX_PINS = 3;
 
 // 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);
 // 管理面板经 PinPanel 浮出。写(改指向 / 取消固定)自包含。
@@ -126,10 +120,10 @@ export function AddPinButton() {
     onError: () => toast.error(tct("actionFailed")),
   });
   // 满员不渲染。`pins.length` 是刷新前的清单,所以在飞期间 ＋ 还在;
-  // 不禁的话手快能再挑一个。**真正兜住上限的是数据库那道**
-  // (`packages/db/src/queries/tab-pins.ts` 的 `MAX_TAB_PINS_PER_USER`,超了直接拒),这里挡的
+  // 不禁的话手快能再挑一个。**真正兜住上限的是服务端那道**(`lib/server/tab-pins/create.ts` 的
+  // `assertPinCap`:对这个 pin 会出现的每个组合各数一遍,ADR 0047),这里挡的
   // 只是「让用户白挑一次、再吃一个报错」。
-  if (strip.pins.length >= MAX_PINS) return null;
+  if (strip.pins.length >= MAX_PINS_PER_PORTFOLIO) return null;
   return (
     <PinPanel
       disabled={addMut.isPending}
@@ -195,21 +189,21 @@ function PinPickerOptions({
   selected?: PinTargetChoice;
   onPick: (choice: PinTargetChoice) => void;
 }) {
-  const { selectedId, defaultId } = usePortfolio();
+  // **三类选项都只来自当前组合**(ADR 0047):这两份数据由服务端按组合筛过了,所以这里不再有
+  // 「客户端按归属 / 按 portfolioId 再筛一遍」那一步。**connector 那类以前是漏的** ——
+  // 它取的是全量账户的 connector 集合,于是能在一个组合里 pin 一个它压根没有的 connector。
+  const { selectedId } = usePortfolio();
   const { data: catalog } = useSuspenseQuery(connectorCatalogQuery());
-  const { data: allAccounts } = useSuspenseQuery(accountListQuery());
-  const { data: tags } = useSuspenseQuery(tagListQuery());
-  const { data: memberships } = useSuspenseQuery(portfolioMembershipsQuery());
-  const connectorOptions = [...new Set(allAccounts.map((a) => a.connectorId))].map((id) => ({
+  const { data: accounts } = useSuspenseQuery(accountListQuery(selectedId));
+  const { data: tags } = useSuspenseQuery(tagListQuery(selectedId));
+  // 归档账户不给 pin:pin 是「常看的一个视角」,而归档是封存(ADR 0039)。
+  const active = accounts.filter((a) => a.archivedAt == null);
+  const connectorOptions = [...new Set(active.map((a) => a.connectorId))].map((id) => ({
     id,
     label: catalog[id]?.label ?? connectorLabelFallback(id),
   }));
-  const tagOptions = tags
-    .filter((tg) => tg.portfolioId === selectedId)
-    .map((tg) => ({ id: tg.id, name: tg.name }));
-  const accountOptions = accountsInView(allAccounts, memberships, selectedId, defaultId).map(
-    (a) => ({ id: a.id, label: a.label }),
-  );
+  const tagOptions = tags.map((tg) => ({ id: tg.id, name: tg.name }));
+  const accountOptions = active.map((a) => ({ id: a.id, label: a.label }));
   return (
     <TabPinPicker
       connectorOptions={connectorOptions}

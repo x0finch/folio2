@@ -72,8 +72,14 @@ export const REFRESH_MAP = {
    * 移动账户时 `portfolioStore.move` 显式 `delete(accountTags)`(账户不能挂别的组合的 Tag),
    * 删组合时 tags 经外键 cascade 清掉。只刷组合域的话,账户行的徽标和抽屉里的标签选择器
    * 会继续显示服务端**已经删掉**的标签 —— 幽灵标签,而且不报错。
+   *
+   * **账户域与同步域也要刷**(ADR 0047 之后新欠的账):账户页那几份数据现在是**服务端按组合筛好的**,
+   * 移动账户 / 删组合(成员退回默认)直接改了「哪个组合里有哪些账户」—— 不刷的话,被移走的账户
+   * 还留在旧组合的列表里,「移到组合」的绿勾也画在旧组合上。改造前这条靠「刷组合域 → 归属表变 →
+   * 客户端重筛」兜着,归属表不下发之后那条路没有了。页头的同步摘要(`N / M` 与清单)同理 ——
+   * 它在服务端按组合收口更早(#530),这一条其实一直欠着。
    */
-  "portfolio.write": [portfolioKeys.all, tagKeys.all],
+  "portfolio.write": [portfolioKeys.all, tagKeys.all, accountKeys.all, syncKeys.all],
 
   /**
    * 自定义 Tab 的新建 / 改目标 / 删除。**只刷 tab 条,不刷总览** ——

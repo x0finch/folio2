@@ -52,9 +52,11 @@ test.describe("URL 里的组合选中态", () => {
     await switchTo(page, SECOND);
     await expect(page).toHaveURL(/\/accounts\?portfolio=[^&]+$/);
     const watchUrl = page.url();
-    // 新组合里还没有账户。**按可见性断言**:切换时 React 会把旧列表留在 DOM 里(带 hidden)直到新数据
-    // 就绪(那正是「不闪骨架」的机制),按存在性断言会量到那份留影。
-    await expect(page.getByText("No accounts yet.")).toBeVisible();
+    // 新组合里还没有账户。**先按可见性筛,再断言**:这一页在换数据时 DOM 里会同时存在两份名单
+    // (React 把旧的那份留着、加 `hidden`,直到新数据就绪 —— 那正是「不闪骨架」的机制)。
+    // 只写 `toBeVisible()` 挡不住:strict mode 先算「命中几个」,两个就直接报错,而 `getByText`
+    // 是连隐藏的一起认的(CI 上实测,本地跑不出来)。
+    await expect(emptyList(page)).toBeVisible();
     // 页头那块同步摘要也换了 —— 它按选中的组合另取一份,不是全局的那一份。
     await expect(syncedSources(page)).toHaveText("0 / 0");
 
@@ -69,7 +71,7 @@ test.describe("URL 里的组合选中态", () => {
     await expect(page).toHaveURL(watchUrl);
     await page.reload();
     await expect(page).toHaveURL(watchUrl);
-    await expect(page.getByText("No accounts yet.")).toBeVisible();
+    await expect(emptyList(page)).toBeVisible();
 
     // —— ④ 逛一趟设置再回来,参数还在 ——
     // 走侧栏链接(客户端导航)而不是 `goto`:要验的正是「链接身上自动带着这个参数」,而这件事由布局层的
@@ -98,6 +100,9 @@ test.describe("URL 里的组合选中态", () => {
     await expect(page).toHaveURL(/\/insights$/);
   });
 });
+
+/** 「还没有账户」那句 —— 只认**看得见**的那一份(见上面第 ① 步的注释)。 */
+const emptyList = (page: Page) => page.getByText("No accounts yet.").filter({ visible: true });
 
 /**
  * 页头同步面板里「已同步来源 N / M」那个数字。

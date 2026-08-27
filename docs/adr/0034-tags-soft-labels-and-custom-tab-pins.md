@@ -1,5 +1,7 @@
 # Tags(Portfolio 内软标签)+ 首页自定义 Tab(pin)
 
+> **「pin 名单不按组合筛」与「connector 账户删光后留着显示空 section」两条已被取代**:见 [ADR 0047](0047-scoping-happens-on-the-server.md) —— pin 名单按当前组合筛(服务端算),上限也从每用户 3 个改成每组合 3 个。本 ADR 其余部分不变。
+
 用户需要**在一个 Portfolio 内部横切分组**账户:同一批账户,时而想按「长线 / 短线」看,时而想按「链上挖矿 / 稳定币池」看——这些分组**互相重叠、一个账户可同时属于多个**,且随时增删。现有的 [Portfolio](0033-portfolios-scoped-overview.md) 解决不了:它是**硬隔断**(账户 1:1 归属、`UNIQUE(account_id)`),一个账户只能在一个 Portfolio 里,不是拿来做重叠软分组的。早先那套 `groups`(M:N、加法语义)已在 #336 整套删除,且语义(每账户都进总额、组只加小计)与本需求也不同。
 
 **决定:引入 Tag(Portfolio 内的软标签)做重叠分组;首页新增自定义 Tab,作为「指向某 Connector 或某 Tag」的薄 pin(而非可组合的保存视图)。** 两者都在**当前选中 Portfolio 内**生效。

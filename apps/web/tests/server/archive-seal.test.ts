@@ -90,7 +90,7 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     await sealManualAccount(USER, account, 1_700_000_000_000);
     await dbFor(USER).accounts.setArchived(account.id, true);
 
-    const view = await run(USER, loadAccountHoldings());
+    const view = await run(USER, loadAccountHoldings({}));
     const row = view.rows.find((r) => r.account.id === account.id);
 
     expect(row?.archivedAt).not.toBeNull();
@@ -106,7 +106,7 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     await dbFor(USER).accounts.setArchived(account.id, true);
     await dbFor(USER).accounts.setArchived(account.id, false);
 
-    const view = await run(USER, loadAccountHoldings());
+    const view = await run(USER, loadAccountHoldings({}));
     const row = view.rows.find((r) => r.account.id === account.id);
 
     expect(row?.archivedAt).toBeNull();

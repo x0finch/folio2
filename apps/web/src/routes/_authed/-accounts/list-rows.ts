@@ -1,5 +1,5 @@
 import type { Note } from "@folio/connectors-basic";
-import type { AccountTagLink, PortfolioMembership } from "@folio/db";
+import type { AccountTagLink } from "@folio/db";
 import type { OverviewBalance } from "@/lib/core/account-view";
 import type { AccountHoldings, AccountListItem } from "@/lib/queries/accounts";
 import type { Gain } from "@/lib/server/portfolio/gain-24h";
@@ -37,9 +37,9 @@ export interface AccountRow {
 // 从路由 loader 里搬出来的(#413)。搬的原因是四个来源现在各自是一条 react-query 查询、各自的
 // 到达时刻不同,拼装得跟着数据走而不是跟着 loader 走;顺带这段纯逻辑也就能单测了。
 
-// 归属与标签关联的形状**从 `@folio/db` 拿**,别在这儿再定义一份同名的:仓里已经有
-// `PortfolioMembership` / `AccountTagLink`(隔壁 `accounts-in-view.ts` 用的就是它们),
-// 两个同名不同处的类型迟早会漂移。Tag 只取渲染要的三个字段,所以这里保留一个窄形状。
+// 标签关联的形状**从 `@folio/db` 拿**,别在这儿再定义一份同名的:仓里已经有 `AccountTagLink`
+// (隔壁 `accounts-in-view.ts` 用的就是它),两个同名不同处的类型迟早会漂移。
+// Tag 只取渲染要的三个字段,所以这里保留一个窄形状。
 interface TagRef {
   id: string;
   name: string;
@@ -50,13 +50,11 @@ export function buildAccountRows(sources: {
   accounts: readonly AccountListItem[];
   /** 没到 → 名单仍能拼出来,金额位走骨架,不把市值写成 0。 */
   holdings?: AccountHoldings;
-  memberships: readonly PortfolioMembership[];
   allTags: readonly TagRef[];
   tagLinks: readonly AccountTagLink[];
 }): AccountRow[] {
   const valuesReady = sources.holdings != null;
   const byId = new Map((sources.holdings?.rows ?? []).map((r) => [r.account.id, r]));
-  const portfolioOf = new Map(sources.memberships.map((m) => [m.accountId, m.portfolioId]));
   const tagsById = new Map(sources.allTags.map((tg) => [tg.id, tg]));
   // 每账户已打的 Tag(展示投影:id + 名字)。
   const tagsOfAccount = new Map<string, { id: string; name: string }[]>();
@@ -81,7 +79,8 @@ export function buildAccountRows(sources: {
       note: ov?.note,
       needsCredentials: a.needsCredentials,
       credsSafe: a.credsSafe,
-      portfolioId: portfolioOf.get(a.id) ?? "",
+      // 归属由服务端随行给(ADR 0047)—— 以前是客户端拿整张归属表反查。
+      portfolioId: a.portfolioId,
       tags: tagsOfAccount.get(a.id) ?? [],
     };
   });

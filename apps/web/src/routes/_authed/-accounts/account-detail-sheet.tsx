@@ -294,6 +294,7 @@ function DetailBody({
       <PortfolioPickerModal
         mode="move"
         accountId={account.id}
+        currentPortfolioId={account.portfolioId}
         open={moving}
         onClose={() => setMoving(false)}
       />

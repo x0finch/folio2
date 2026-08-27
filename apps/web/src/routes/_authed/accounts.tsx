@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
+import { pickSelectedPortfolio } from "@/lib/hooks/use-portfolio";
 import {
   accountGain24hQuery,
   accountHoldingsQuery,
   accountListQuery,
 } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
-import { portfolioMembershipsQuery } from "@/lib/queries/portfolio";
+import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "@/lib/queries/tags";
 import { Accounts } from "./-accounts";
 
@@ -25,19 +26,24 @@ export const Route = createFileRoute("/_authed/accounts")({
     // 「打开详情抽屉」,这个是「在列表里指给我看」;用完即由列表页清掉,不留在地址栏里。
     focus: z.string().min(1).optional().catch(undefined),
   }),
+  // 预取的 key 跟着地址里的组合走(ADR 0046 / 0047:这几份数据现在按组合各一份)。
+  loaderDeps: ({ search }) => ({ portfolio: search.portfolio }),
   // 账户域的读取已迁 react-query(#413):loader 只**预取**,拼行的活挪进组件。
   // #493 票 2:所有查询第一时间并行发出,谁先回来谁先画。不等持仓、不等标签 ——
   // 那两样是名单上的后到内容,await 它们顶栏就会跟着白着。
-  loader: ({ context: { queryClient } }) => {
+  //
+  // 只等「是哪个组合」(预取 key 必须对上),其余发出即返回 —— 同首页 / Insights 那两条。
+  loader: async ({ context: { queryClient }, deps }) => {
+    const { portfolios, defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
+    const selectedId = pickSelectedPortfolio(deps.portfolio, portfolios, defaultId);
     // connector 展示名的目录:**本页每一行都有一个徽标**,不预取的话首帧只能显兜底名(#467)。
     // 部署内静态、缓存一次,所以这一条实际只在整个会话的第一次加载上花一趟(与其余几条并行)。
     queryClient.ensureQueryData(connectorCatalogQuery());
-    queryClient.ensureQueryData(accountListQuery());
-    queryClient.ensureQueryData(portfolioMembershipsQuery());
-    queryClient.ensureQueryData(tagListQuery());
-    queryClient.ensureQueryData(accountTagLinksQuery());
-    queryClient.ensureQueryData(accountHoldingsQuery());
-    queryClient.ensureQueryData(accountGain24hQuery());
+    queryClient.ensureQueryData(accountListQuery(selectedId));
+    queryClient.ensureQueryData(tagListQuery(selectedId));
+    queryClient.ensureQueryData(accountTagLinksQuery(selectedId));
+    queryClient.ensureQueryData(accountHoldingsQuery(selectedId));
+    queryClient.ensureQueryData(accountGain24hQuery(selectedId));
   },
   component: Accounts,
 });

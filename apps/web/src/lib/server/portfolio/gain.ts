@@ -22,9 +22,11 @@ export const handleGetPortfolioGain24h = Effect.fn("getPortfolioGain24h")(functi
   return { portfolio: view.gain24h ?? null, holdings, defi };
 });
 
-// #493 票 3:账户页 24h 盈亏独立读取。同一条 `loadAccountHoldings(true)`,只把盈亏字段带出来。
-export const handleGetAccountGain24h = Effect.fn("getAccountGain24h")(function* () {
-  const view = yield* loadAccountHoldings(true);
+// #493 票 3:账户页 24h 盈亏独立读取。同一条 `loadAccountHoldings(scope, true)`,只把盈亏字段带出来。
+export const handleGetAccountGain24h = Effect.fn("getAccountGain24h")(function* (
+  data: PortfolioScope = {},
+) {
+  const view = yield* loadAccountHoldings(data, true);
   const accounts: Record<string, NonNullable<(typeof view.rows)[number]["gain24h"]> | null> = {};
   const balances: Record<
     string,

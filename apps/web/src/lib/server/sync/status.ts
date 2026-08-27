@@ -1,5 +1,13 @@
 import type { ConnectorId } from "@folio/connectors";
+import type { AccountSafe } from "@folio/db";
 import { isManual } from "@/lib/core/manual";
+
+// 可同步账户判别:活跃(未归档)且**不是 manual** —— manual 不是同步源:当下值实时由 creds.tokens
+// 现造、不写快照(ADR 0018)。住这儿(而不是单开一个文件):这个模块就是「谁算同步过 / 谁可同步」
+// 的派生层,`summarizeSync` 里那条 `!isManual` 的分道与它是同一个概念的两面。
+export function isSyncableAccount(a: Pick<AccountSafe, "archivedAt" | "connectorId">): boolean {
+  return a.archivedAt == null && !isManual(a.connectorId);
+}
 
 // 「一个账户的同步状态」—— 账户列表那一行(`-accounts/index.tsx`)和页头那块同步面板**共用这一份**。
 //

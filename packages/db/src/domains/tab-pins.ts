@@ -19,9 +19,6 @@ import { assertAccountOwned, assertTagOwned } from "./ownership";
 // 手写的 `interface TabPinStore` 也删了(#501):类型从这里的返回值推导,cmd+click 直接落实现,
 // 每个方法的返回类型仍显式标注 —— 契约精度不靠推断,推断只用来省一份复述。
 
-// 每 user 至多固定 3 个自定义 Tab(域规则,co-located 同 BALANCE_INSERT_CHUNK 的做法)。
-const MAX_TAB_PINS_PER_USER = 3;
-
 const assertTabPinOwned = (
   client: DbClient,
   userId: string,
@@ -85,22 +82,20 @@ export const makeTabPinStore = Effect.gen(function* () {
   const userId = yield* CurrentUser;
 
   return {
-    /** 固定一个自定义 Tab。每 user ≤3(超出抛)。tag pin 校验 Tag 归属本人。 */
+    /**
+     * 固定一个自定义 Tab。tag pin 校验 Tag 归属本人。
+     *
+     * **上限不在这一层**(ADR 0047):它是「每个组合 ≤3」,而一个 pin 属于哪个组合是**算出来的**
+     * (tag 看它的组合、账户看归属、connector 看视图里有没有它的账户)—— 那要 Tag 与账户的归属一起
+     * 参与判断,是应用层的事。这里只管一行 pin 本身合不合法。拦在
+     * `apps/web/src/lib/server/tab-pins/create.ts`,与「摆不摆」共用同一个纯函数。
+     */
     create: (input: TabPinInput): Effect.Effect<TabPin, NotFound | InvalidInput> =>
       Effect.gen(function* () {
+        // 排序位取「已有几个」—— 与上限无关,只是让新 pin 排在末尾。
         const existing = yield* client.query((db) =>
           db.select({ id: tabPins.id }).from(tabPins).where(eq(tabPins.userId, userId)),
         );
-        // 上限也是 `InvalidInput`:UI 会先挡,但一个陈旧的页面照样发得出这个请求,
-        // 而「已经钉满了」是句该说给人听的话,不是 500。
-        if (existing.length >= MAX_TAB_PINS_PER_USER) {
-          return yield* Effect.fail(
-            new InvalidInput({
-              what: "tab pin",
-              why: `cannot pin more than ${MAX_TAB_PINS_PER_USER} custom tabs`,
-            }),
-          );
-        }
         const target = yield* resolvePinTarget(client, userId, input);
         const row = {
           id: crypto.randomUUID(),
@@ -156,6 +151,20 @@ export const makeTabPinStore = Effect.gen(function* () {
             .update(tabPins)
             .set({ sortOrder: i })
             .where(and(eq(tabPins.id, id), eq(tabPins.userId, userId))),
+        ),
+      ),
+
+    /**
+     * 删掉指向某个账户的 pin(归档账户时的收尾:pin 是「常看的一个视角」,而归档是封存 ——
+     * 一个封存账户的快捷入口没有意义,留着只会在解归档后凭空多出一个名额外的 tab)。
+     * 删账户不需要它:FK cascade 已经带走了。
+     */
+    removeByAccount: (accountId: string): Effect.Effect<void> =>
+      Effect.asVoid(
+        client.query((db) =>
+          db
+            .delete(tabPins)
+            .where(and(eq(tabPins.accountId, accountId), eq(tabPins.userId, userId))),
         ),
       ),
 

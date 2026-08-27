@@ -15,6 +15,11 @@ describe("tab-pins/delete", () => {
 
   const pins = (userId: string) => call(userId, handleGetHomeTabStrip({}));
 
+  // 建一个这个 connector 的账户 —— **不然那个 pin 摆不出来**(ADR 0047:视图里没有这个 connector
+  // 的账户,pin 就不该出现)。`accounts.create` 自己会把它归到默认组合。
+  const withAccount = (userId: string, connectorId: "manual" | "bitcoin" | "binance" | "okx") =>
+    db(userId).accounts.create({ connectorId, label: connectorId, creds: null });
+
   beforeEach(async () => {
     blockOutbound();
     await freshUser(USER);
@@ -23,6 +28,7 @@ describe("tab-pins/delete", () => {
 
   describe("deleteTabPin", () => {
     it("删掉一个 → 少一个,其余两个还在", async () => {
+      for (const c of ["manual", "bitcoin", "binance"] as const) await withAccount(USER, c);
       const a = await db(USER).tabPins.create({ kind: "connector", connectorId: "manual" });
       await db(USER).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
       await db(USER).tabPins.create({ kind: "connector", connectorId: "binance" });
@@ -35,6 +41,7 @@ describe("tab-pins/delete", () => {
     });
 
     it("删到零个 → tab 条上一个 pin 都没有", async () => {
+      await withAccount(USER, "manual");
       const a = await db(USER).tabPins.create({ kind: "connector", connectorId: "manual" });
 
       await call(USER, handleDeleteTabPin({ pinId: a.id }));
@@ -45,6 +52,7 @@ describe("tab-pins/delete", () => {
     it("删一个已经删过的 → 静默幂等(与 deleteTag 同一规则),不是 NotFound", async () => {
       // **这条是审计改过的。** 清单初稿写的是「NotFound」,但库层两个 remove 都是裸 DELETE ——
       // 同一种形状不该有两种主张。按现状钉:静默。
+      await withAccount(USER, "manual");
       const a = await db(USER).tabPins.create({ kind: "connector", connectorId: "manual" });
 
       await call(USER, handleDeleteTabPin({ pinId: a.id }));
@@ -54,6 +62,7 @@ describe("tab-pins/delete", () => {
     });
 
     it("删完立刻再建 → 能建,上限计数跟着降了", async () => {
+      for (const c of ["manual", "bitcoin", "binance", "okx"] as const) await withAccount(USER, c);
       const made = [];
       for (const c of ["manual", "bitcoin", "binance"]) {
         made.push(await call(USER, handleCreateTabPin({ kind: "connector", connectorId: c })));
@@ -70,6 +79,7 @@ describe("tab-pins/delete", () => {
     });
 
     it("删别人的 pinId → 对方那个 pin 一点没动", async () => {
+      await withAccount(otherUser(USER), "manual");
       const theirs = await db(otherUser(USER)).tabPins.create({
         kind: "connector",
         connectorId: "manual",

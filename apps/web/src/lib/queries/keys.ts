@@ -30,8 +30,6 @@ export const portfolioKeys = {
   all: ["portfolio"] as const,
   /** 组合清单 + 默认组合 id。 */
   list: () => [...portfolioKeys.all, "list"] as const,
-  /** 账户 → 所属组合。 */
-  memberships: () => [...portfolioKeys.all, "memberships"] as const,
   /**
    * 首页 tab 条(#488 票 4:有没有永续 / DeFi + 自定义 Tab 的已解析标签)。
    * **单独一层,不跟 overview 混**:增删一个 Tab 不该让昂贵的总览重拉一遍,
@@ -60,15 +58,20 @@ export const portfolioKeys = {
 export const accountKeys = {
   /** 整个账户域的前缀。 */
   all: ["accounts"] as const,
-  /** 全部账户(含归档)+ 凭据投影。 */
-  list: () => [...accountKeys.all, "list"] as const,
-  /** 活跃账户的市值 / 上次同步 / 持仓明细。 */
-  holdings: () => [...accountKeys.all, "holdings"] as const,
+  /**
+   * 当前组合的账户(含它的归档成员)+ 凭据投影。
+   *
+   * **portfolioId 进 key**(ADR 0047):这三条都由服务端按组合筛过了,不进 key 就会两个组合共用
+   * 一份缓存 —— 切过去看到的是上一个组合的账户。同 `portfolioKeys.overview` 那条的理由。
+   */
+  list: (portfolioId: string) => [...accountKeys.all, "list", portfolioId] as const,
+  /** 当前组合里各账户的市值 / 上次同步 / 持仓明细。 */
+  holdings: (portfolioId: string) => [...accountKeys.all, "holdings", portfolioId] as const,
   /**
    * 24h 盈亏(#493 票 3)。落在账户域前缀下:同步 / 刷价 / 账户写已经刷 `accountKeys.all`,
    * 不用另开一条会漏刷的路。
    */
-  gain24h: () => [...accountKeys.all, "gain24h"] as const,
+  gain24h: (portfolioId: string) => [...accountKeys.all, "gain24h", portfolioId] as const,
   /**
    * 单账户价值历史。**key 里是窗口档位(`"30d"`)而不是算出来的起点时间戳** ——
    * 起点由 `Date.now()` 现算,每次渲染都是新数,进了 key 就等于每帧换一个缓存条目、永远拉不停。
@@ -85,10 +88,10 @@ export const accountKeys = {
 export const tagKeys = {
   /** 整个标签域的前缀。 */
   all: ["tags"] as const,
-  /** 标签定义(per-Portfolio)。 */
-  list: () => [...tagKeys.all, "list"] as const,
-  /** 账户 → 标签的关联。整份返回,展示富化在客户端按 accountId 组装。 */
-  accountLinks: () => [...tagKeys.all, "account-links"] as const,
+  /** 标签定义(per-Portfolio —— 服务端按组合筛,所以组合进 key)。 */
+  list: (portfolioId: string) => [...tagKeys.all, "list", portfolioId] as const,
+  /** 当前组合的账户 → 标签关联。展示富化仍在客户端按 accountId 组装。 */
+  accountLinks: (portfolioId: string) => [...tagKeys.all, "account-links", portfolioId] as const,
 };
 
 export const settingsKeys = {

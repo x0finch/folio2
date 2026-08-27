@@ -1,7 +1,6 @@
 import { NotFound } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleListPortfolios } from "@/lib/server/portfolios/list";
-import { handleListPortfolioMemberships } from "@/lib/server/portfolios/memberships";
 import {
   handleMoveAccountToPortfolio,
   MoveAccountInput,
@@ -18,7 +17,7 @@ describe("portfolios/move-account", () => {
   const USER = "h-pfs-move";
 
   const whereIs = async (userId: string, accountId: string) =>
-    (await call(userId, handleListPortfolioMemberships())).find((l) => l.accountId === accountId)
+    (await db(userId).portfolios.listMemberships()).find((l) => l.accountId === accountId)
       ?.portfolioId;
 
   const seed = async (userId: string) => {
@@ -72,7 +71,7 @@ describe("portfolios/move-account", () => {
       );
 
       expect(await whereIs(USER, account.id)).toBe(def.id);
-      expect(await call(USER, handleListPortfolioMemberships())).toHaveLength(1);
+      expect(await db(USER).portfolios.listMemberships()).toHaveLength(1);
     });
 
     it("portfolioId 和 newName 都不给 → schema 拒", () => {

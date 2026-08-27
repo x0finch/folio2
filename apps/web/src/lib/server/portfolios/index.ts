@@ -4,7 +4,6 @@ import { requireAuth } from "@/lib/server/session/require-auth";
 import { CreatePortfolioInput, handleCreatePortfolio } from "./create";
 import { DeletePortfolioInput, handleDeletePortfolio } from "./delete";
 import { handleListPortfolios } from "./list";
-import { handleListPortfolioMemberships } from "./memberships";
 import { handleMoveAccountToPortfolio, MoveAccountInput } from "./move-account";
 import { handleRenamePortfolio, RenamePortfolioInput } from "./rename";
 import { handleSetDefaultPortfolio, SetDefaultPortfolioInput } from "./set-default";
@@ -25,10 +24,6 @@ export const createPortfolio = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreatePortfolioInput)
   .handler(runEffect(handleCreatePortfolio));
-
-export const listPortfolioMemberships = createServerFn({ method: "GET" })
-  .middleware([requireAuth])
-  .handler(runEffect(handleListPortfolioMemberships));
 
 export const renamePortfolio = createServerFn({ method: "POST" })
   .middleware([requireAuth])

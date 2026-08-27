@@ -17,7 +17,7 @@ const tagsOf = forDomain((db) => db.tags);
 const accounts = forDomain((db) => db.accounts);
 const portfolios = forDomain((db) => db.portfolios);
 
-// 自定义 Tab pin 地基(ADR 0034)对着真 D1 跑:≤3 上限 / tag pin FK cascade / connector pin 无 FK 存活 /
+// 自定义 Tab pin 地基(ADR 0034)对着真 D1 跑:tag pin FK cascade / connector pin 无 FK 存活 /
 // owner 断言都真生效。不隔离每测存储 → beforeEach 重置用户。
 
 const USER_A = "user-a";
@@ -121,14 +121,15 @@ describe("createTabPin", () => {
     await expect(tabPinsOf(USER_A).create({ kind: "tag", tagId: tagB.id })).rejects.toThrow();
   });
 
-  it("每 user 至多 3 个,第 4 个被拒", async () => {
+  // 上限**不在这一层**(ADR 0047):它是「每个组合 ≤3」,而一个 pin 属于哪个组合要 Tag 与账户的归属
+  // 一起参与判断 —— 那道拦在 app 的 create handler 里,和「摆不摆」共用同一个纯函数。
+  // 这里只钉住「db 自己不拦」:钉第 4 个照样落库。
+  it("db 层不管上限:第 4 个照样落库(上限在应用层按组合算)", async () => {
     await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "binance" });
     await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "okx" });
     await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "hyperliquid" });
-    await expect(
-      tabPinsOf(USER_A).create({ kind: "connector", connectorId: "manual" }),
-    ).rejects.toThrow("cannot pin more than 3 custom tabs");
-    expect(await tabPinsOf(USER_A).list()).toHaveLength(3);
+    await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "manual" });
+    expect(await tabPinsOf(USER_A).list()).toHaveLength(4);
   });
 });
 
