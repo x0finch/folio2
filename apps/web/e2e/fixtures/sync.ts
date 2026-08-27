@@ -152,6 +152,13 @@ export async function unblockPostCreateSync(page: Page) {
  * (量到响应头 6.4s 才到,而那一轮总共就跑了 6.4s),所以「响应头到手」在本地并不等于「刚起跑」,
  * 反而等于「已经跑完」。要判断服务端真的在干活,问假上游收到请求没有(setUpstream hits)。
  */
+// 悬停页头那枚胶囊,开同步面板(FOL-32 后桌面 popover 走 hover)。等到面板标题出现才算开着。
+export async function hoverSyncPill(page: Page) {
+  const pill = page.getByRole("button", { name: /^(Synced|Needs attention|Syncing…)$/ });
+  await pill.hover();
+  await expect(page.getByText("Sync status")).toBeVisible();
+}
+
 export async function clickSyncPill(page: Page) {
   const pill = page.getByRole("button", { name: /^(Synced|Needs attention|Syncing…)$/ });
   await expect(async () => {

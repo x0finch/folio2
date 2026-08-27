@@ -6,6 +6,7 @@ import {
   addBinanceAccount,
   blockPostCreateSync,
   clickSyncPill,
+  hoverSyncPill,
   setUpstream,
   snapshotCount,
   unblockPostCreateSync,
@@ -56,7 +57,10 @@ test.describe("同步一轮", () => {
     await page.reload(); // 让页头那枚胶囊拿到「都同步过了」的摘要
     await clickSyncPill(page);
 
-    await expect(page.getByText("Synced 2 accounts.")).toBeVisible({ timeout: 30_000 });
+    // 完成信号从 toast 换到了面板(FOL-32):悬停胶囊开 popover,等进度爬满 2 / 2。
+    // 分母是「组合内全部来源」—— 这个账号只有这两个,所以满格就是 2 / 2。
+    await hoverSyncPill(page);
+    await expect(page.getByText("2 / 2")).toBeVisible({ timeout: 30_000 });
     await waitForSnapshot(page, idA, holds(3.25), "Spot A 这一轮的快照没落库");
     await waitForSnapshot(page, idB, holds(3.25), "Spot B 这一轮的快照没落库");
   });
@@ -222,8 +226,11 @@ test.describe("前端读流", () => {
     await page.reload();
     await clickSyncPill(page);
 
-    // 两条都记进「已同步」,一条都不进失败 —— 用户只是还没填 API key,那不是错误。
-    await expect(page.getByText("Synced 2 accounts.")).toBeVisible();
+    // 跳过的那条不进失败 —— 用户只是还没填 API key,那不是错误(FOL-32 后看面板不看 toast):
+    // 面板里不该出现「Failed this round」,胶囊也不该转琥珀。
+    await expect(page.getByRole("button", { name: "Synced" })).toBeVisible({ timeout: 30_000 });
+    await hoverSyncPill(page);
+    await expect(page.getByText("Failed this round")).toHaveCount(0);
   });
 
   test("用户级失败(fatal 行)→ 报错,不谎报成功", async ({ page, request }) => {
@@ -240,8 +247,12 @@ test.describe("前端读流", () => {
     await page.reload();
     await clickSyncPill(page);
 
-    // 断言整句而不是 /^Synced/ 这种宽匹配:账户行上写着「Synced now」,宽匹配会把它算进来。
-    await expect(page.getByText("1 failed — account store exploded")).toBeVisible();
-    await expect(page.getByText("Synced 1 account.")).toHaveCount(0);
+    // 整轮失败进面板的「Failed this round」区块并把胶囊转琥珀(FOL-32 后没有 toast)。
+    await expect(page.getByRole("button", { name: "Needs attention" })).toBeVisible({
+      timeout: 30_000,
+    });
+    await hoverSyncPill(page);
+    await expect(page.getByText("Failed this round")).toBeVisible();
+    await expect(page.getByText("account store exploded")).toBeVisible();
   });
 });
