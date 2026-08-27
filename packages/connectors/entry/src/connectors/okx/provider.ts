@@ -15,7 +15,7 @@ import {
 } from "@folio/okx-client";
 import { Effect } from "effect";
 import { z } from "zod";
-import { asConnector } from "../../upstream";
+import { asConnector, bestEffortVerdict } from "../../upstream";
 import { PROVIDER_ID } from "./constants";
 import {
   bucketFailureNote,
@@ -116,13 +116,9 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
           { concurrency: "unbounded" },
         );
 
-        const failed = buckets.filter((b) => b.result._tag === "Left");
-        // **全军覆没**(四个余额桶无一成功,如 429 打光所有端点)→ 失败,让 sync 重试,
-        // 别拿一份空快照覆盖已有余额。只有**部分**失败才走尽力而为。
-        if (failed.length === BUCKETS.length) {
-          const first = failed[0];
-          if (first?.result._tag === "Left") return yield* Effect.fail(first.result.left);
-        }
+        // 成败裁定三家 CEX 同一把尺子(瞬时错升级 / 全军覆没),住 ../../upstream。
+        // 对账锚与合约探测不在此列 —— 它们不产余额,失败只是本轮少两条 Note。
+        const failed = yield* bestEffortVerdict(buckets);
 
         const bodyOf = <T>(bucket: Bucket): T | undefined => {
           const hit = buckets.find((b) => b.bucket === bucket);

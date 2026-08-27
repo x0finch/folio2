@@ -1,5 +1,5 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import type { ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
+import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/connectors-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { bybitProvider } from "../../../src/connectors/bybit/provider";
@@ -71,14 +71,22 @@ describe("fetchBalances", () => {
     expect(headers["x-bapi-timestamp"]).toBeTruthy();
   });
 
-  it("部分桶失败(资金账户超时)→ 其余照返回 + 账户级 Note;整次同步成功", async () => {
+  // —— FOL-31:瞬时部分失败升级 ——
+  it("**部分桶瞬时失败(资金账户 504)→ 整账户失败**进重试,不写残缺快照", async () => {
+    // 以前这里是「其余照返回 + Note」—— 那正是资产掉块的病灶:降级写出去的残缺快照会盖掉
+    // 真实资产,而下一轮本来就能拉到。
     const stub = upstream({ "/query-account-coins-balance": () => json({}, { status: 504 }) });
-    const { balances, note } = await run(stub, bybitProvider.fetchBalances(ctx()));
+    const err = await failing(stub, bybitProvider.fetchBalances(ctx()));
+    expect(isRetryable(err)).toBe(true);
+  });
 
-    expect(balances.some((b) => b.note?.group === "funding")).toBe(false);
-    const failNote = note?.find((n) => n.title === "Buckets not synced");
-    expect(String(failNote?.content)).toContain("Funding");
-    expect(String(failNote?.content)).toContain("next time"); // 瞬时故障 → 「下次补上」
+  it("瞬时错混着权限错 → 仍整账户失败(瞬时那个才是重试的理由)", async () => {
+    const stub = upstream({
+      "/query-account-coins-balance": () => json({ retCode: 10005, retMsg: "permission denied" }),
+      "/earn/position": () => json({}, { status: 429 }),
+    });
+    const err = await failing(stub, bybitProvider.fetchBalances(ctx()));
+    expect(isRetryable(err)).toBe(true);
   });
 
   it("auth 类失败(HTTP 200 + retCode 10005)→ 失败 Note 提示查权限", async () => {

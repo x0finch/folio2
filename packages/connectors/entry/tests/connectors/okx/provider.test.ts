@@ -1,5 +1,5 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import type { ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
+import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/connectors-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { okxProvider } from "../../../src/connectors/okx/provider";
@@ -81,10 +81,12 @@ describe("fetchBalances", () => {
     expect(note).toBeUndefined();
   });
 
-  it("部分桶失败(赚币超时)→ 其余照返回 + 账户级 Note;整次同步成功", async () => {
+  it("部分桶失败(赚币没权限)→ 其余照返回 + 账户级 Note;整次同步成功", async () => {
+    // **401 而不是 504**(FOL-31):瞬时故障现在会升级成整账户失败(见下一条),到不了 Note。
+    // 尽力而为只留给「等也没用」的失败 —— 权限没勾,重试变不出权限来。
     const stub = upstream({
-      "/finance/savings/balance": () => json({}, { status: 504 }),
-      "/finance/staking-defi/orders-active": () => json({}, { status: 504 }),
+      "/finance/savings/balance": () => json({}, { status: 401 }),
+      "/finance/staking-defi/orders-active": () => json({}, { status: 401 }),
       "/asset/asset-valuation": () => json({ code: "0", data: [{ details: { earn: "12000" } }] }),
     });
     const { balances, note } = await run(stub, okxProvider.fetchBalances(ctx()));
@@ -94,9 +96,26 @@ describe("fetchBalances", () => {
     const failNote = note?.find((n) => n.title === "Buckets not synced");
     expect(String(failNote?.content)).toContain("Savings");
     expect(String(failNote?.content)).toContain("Staking");
-    expect(String(failNote?.content)).toContain("next time"); // 瞬时故障 → 「下次补上」
+    expect(String(failNote?.content)).toContain("permissions");
     // earn 桶失败时**不产**未细分合成行:那 $12k 是没拉到、不是未细分,凭空计进净值会虚增。
     expect(balances.some((b) => b.tokenRef === "okx/custom:EARN-UNCATEGORIZED")).toBe(false);
+  });
+
+  // —— FOL-31:瞬时部分失败升级 ——
+  it("**部分桶瞬时失败(交易桶 504)→ 整账户失败**进重试,不写残缺快照", async () => {
+    // 交易桶通常是大头,降级写出去就是「资产掉一块」—— 与 binance 那次生产事故同一种症状。
+    const stub = upstream({ "/account/balance": () => json({}, { status: 504 }) });
+    const err = await failing(stub, okxProvider.fetchBalances(ctx()));
+    expect(isRetryable(err)).toBe(true);
+  });
+
+  it("瞬时错混着权限错 → 仍整账户失败(瞬时那个才是重试的理由)", async () => {
+    const stub = upstream({
+      "/finance/savings/balance": () => json({}, { status: 401 }),
+      "/asset/balances": () => json({}, { status: 429 }),
+    });
+    const err = await failing(stub, okxProvider.fetchBalances(ctx()));
+    expect(isRetryable(err)).toBe(true);
   });
 
   it("auth 类失败(HTTP 200 + 50xxx)→ 失败 Note 提示查权限", async () => {
