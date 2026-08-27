@@ -9,7 +9,7 @@ import { type AccountSyncResult, Sweep, type SweepResult, SYNC_CONCURRENCY } fro
 import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
-import { resolveScope, scopedMembership } from "@/lib/server/portfolio/scope";
+import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { userLayer } from "@/lib/server/runtime";
 import { syncRoundFor } from "./deps";
 import { driveRound } from "./drive";
@@ -176,11 +176,32 @@ const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
   Effect.gen(function* () {
     const cronLog = getLogger(["folio", "cron"]);
     const db = yield* Database;
-    // 没有归属行的账户兜底进默认组合,所以它必须先存在,否则那些账户这一轮谁都不管。
-    yield* db.portfolios.ensureDefault();
-    const portfolios = yield* db.portfolios.list();
+    // **一次快照,一次分区。** 逐组合调 `openSyncRound` 会把成员表 / 账户表读 P 遍(P = 组合数),
+    // 而且循环中途有人移动账户的话,同一个账户可能进两轮或一轮都不进 —— 同一时刻的快照把这个
+    // 窗口一并消掉。归属判据仍是 `inView` 那一条:没有归属行的兜底进默认组合(它必须先存在,
+    // 否则那些账户这一轮谁都不管)。
+    const defaultPf = yield* db.portfolios.ensureDefault();
+    const [portfolios, memberships, accounts] = yield* Effect.all(
+      [db.portfolios.list(), db.portfolios.listMemberships(), db.accounts.list()],
+      { concurrency: 3 },
+    );
+    const portfolioOf = new Map(memberships.map((m) => [m.accountId, m.portfolioId]));
+    const rosters = new Map<string, { id: string; label: string }[]>(
+      portfolios.map((pf) => [pf.id, []]),
+    );
+    for (const a of accounts.filter(isSyncableAccount)) {
+      const home = portfolioOf.get(a.id) ?? defaultPf.id;
+      // 归属行指着一个已删的组合在 FK cascade 下不会发生;真发生了宁可跳过也别把轮开到没人读的键上。
+      rosters.get(home)?.push({ id: a.id, label: a.label });
+    }
     const opened = yield* Effect.forEach(portfolios, (pf) =>
-      openSyncRound({ portfolioId: pf.id, trigger: "cron" }),
+      db.syncRounds.open({
+        portfolioId: pf.id,
+        roundId: crypto.randomUUID(),
+        trigger: "cron",
+        accounts: rosters.get(pf.id) ?? [],
+        ttlMs: ROUND_HEARTBEAT_MS,
+      }),
     );
     const mine = opened.flatMap((o) => (o.opened ? [o.round] : []));
     const gate = Effect.unsafeMakeSemaphore(SYNC_CONCURRENCY);
@@ -264,9 +285,11 @@ export const handleGetSyncRound = Effect.fn("getSyncRound")(function* (
   data: z.infer<typeof GetSyncRoundInput>,
 ) {
   const db = yield* Database;
-  // 与开轮同一条解析:客户端传来的 id 认不出就退回默认组合,两边必须落在同一个键上。
-  const { selectedId } = yield* resolveScope(data.portfolioId);
-  const round = yield* db.syncRounds.get(selectedId);
+  // **不先解析组合归属,直接读键**:这是 busy 期间 1.5s 一发的路,解析要多两条查询,而键本身
+  // 就是 user-scoped 的 —— 一个认不出的 portfolioId 只会读到一个空键,回 none,不泄露任何东西。
+  // 客户端传来的永远是选择器里真实存在的 id(usePortfolio 先校验过);开轮那头对坏 id 退回
+  // 默认组合,是因为**开轮**必须落在一个真组合上,读不需要这个保证。
+  const round = yield* db.syncRounds.get(data.portfolioId);
   const now = yield* Clock.currentTimeMillis;
   return Option.match(round, {
     onNone: () => null,

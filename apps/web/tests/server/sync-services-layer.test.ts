@@ -129,7 +129,7 @@ describe("syncServicesLayer 的接线", () => {
   // **db 的失败必须是类型化的 `SyncDepError`,不能是 defect。**
   //
   // db store 的错误通道是 `never`(ADR:D1 挂了走 defect),而编排的隔离全靠类型化失败:
-  // `Sweep.userTally` 的 `catchAll` 与 `account.ts` 的 `bestEffort` 都只接那一种。少了这道翻译,
+  // `account.ts` 的 `bestEffort` 与 `syncAccount` 末尾的 `catchAll` 都只接那一种。少了这道翻译,
   // 一个用户的 D1 抖动会以 defect 掀掉整轮 cron —— #375 兜的正是这件事。
   //
   // 这条以前由包里那层 deps→服务的翻译保证(`tryPromise({ catch: depError })`);那层拆掉之后归这一层。

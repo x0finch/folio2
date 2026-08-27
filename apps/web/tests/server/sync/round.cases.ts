@@ -107,12 +107,16 @@ describe("sync/round", () => {
       expect(view?.current).toBe("Binance spot");
     });
 
-    // 开轮与读轮必须落在同一个键上,否则一点同步面板就永远读不到那一轮。
-    it("认不出的 portfolioId 两边一致地退回默认组合", async () => {
+    // 开轮对坏 id 退回默认组合(开轮必须落在一个真组合上);读轮**不解析**,直接读键 ——
+    // 这是 1.5s 一发的路,省两条查询,而键本身 user-scoped,坏 id 只会读到空键。
+    // 客户端传来的永远是选择器里真实存在的 id,所以两边在真实流量上落的是同一个键。
+    it("开轮的坏 id 落到默认组合;读轮拿真 id 读得到,拿坏 id 读到空", async () => {
       await cex("Binance spot");
       const opened = await open("pf-never-existed");
-      const view = await read("pf-also-nonsense");
-      expect(view?.roundId).toBe(opened.round.roundId);
+      const def = await db(USER).portfolios.ensureDefault();
+      expect(opened.round.portfolioId).toBe(def.id);
+      expect((await read(def.id))?.roundId).toBe(opened.round.roundId);
+      expect(await read("pf-also-nonsense")).toBeNull();
     });
   });
 

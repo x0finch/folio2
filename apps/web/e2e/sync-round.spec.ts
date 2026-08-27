@@ -1,5 +1,6 @@
 import { SYNC_CONCURRENCY } from "@folio/sync";
 import { type APIRequestContext, expect, test } from "@playwright/test";
+import type { SyncRoundView } from "../src/lib/server/sync/status";
 import { dismissPasskeyPrompt, signUpAndLogin } from "./fixtures/app";
 import {
   accountIdByLabel,
@@ -206,7 +207,9 @@ test.describe("同步一轮", () => {
 // 收官/中断的轮不会再触发轮询(`refetchInterval` 只在「在跑」时开),所以造出来的这一份就是
 // 面板一直读的那一份,不必再去拦 server fn 的地址(那是编译期产物,认不出是哪一个)。
 test.describe("面板读轮", () => {
-  const roundView = (over: Record<string, unknown>) => ({
+  // 有类型标注:面板真按 `SyncRoundView` 的字段读,fixture 走形(字段改名 / 新增必填)要在
+  // 编译期红,不是在浏览器里静默显示成空面板。
+  const roundView = (over: Partial<SyncRoundView>) => ({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({
@@ -221,9 +224,10 @@ test.describe("面板读轮", () => {
       failed: [],
       needsKeys: 0,
       current: null,
+      unresolved: 0,
       error: null,
       ...over,
-    }),
+    } satisfies SyncRoundView),
   });
 
   const withOneAccount = async (

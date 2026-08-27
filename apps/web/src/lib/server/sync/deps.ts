@@ -236,8 +236,8 @@ function createSeedCollector(): SeedCollector {
 // 以前那个 Promise 形状的 deps 得按 userId 分桶缓存估值模式(一份 deps 跨多用户),现在一个用户一层,
 // 读一次存进闭包就够 —— 那个 Map 连同它的分桶逻辑一起没了。
 // db 与参考层的错误通道都是 `never`(ADR:D1 挂了走 defect),而编排靠**类型化**的 `SyncDepError`
-// 做隔离 —— `account.ts` 的 `bestEffort`(认币/重估降级)、`syncAccount` 末尾的 `catchAll`
-// (逐账户隔离)、`Sweep.userTally` 的 `catchAll`(逐用户隔离),三处都只接类型化失败。
+// 做隔离 —— `account.ts` 的 `bestEffort`(认币/重估降级)与 `syncAccount` 末尾的 `catchAll`
+// (逐账户隔离)都只接类型化失败;逐用户隔离在 `round.ts` 的 `syncAllUsers`(那层兜的是 Cause)。
 //
 // 以前这道翻译是**免费**的:每个 dep 都经一次 `runPromise` 边界,defect 变成 promise rejection,
 // 再被 `tryPromise({ catch: depError })` 收成类型化失败。边界一拿掉,它就得显式补上。

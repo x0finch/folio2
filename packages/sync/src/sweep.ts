@@ -44,41 +44,10 @@ export const syncUser = (userId: string): Effect.Effect<SyncResult, SyncDepError
     Effect.map((chunk) => ({ results: Chunk.toArray(chunk) })),
   );
 
-// 一个用户这一轮的账户计数。**逐条折进去**,不在遍历里改外面的计数器 —— 也正好配流:
-// cron 只要计数,没必要把几十个用户的逐账户结果全攒在内存里。
+// 一个用户这一轮的账户计数。cron 的小计从**收官后的轮记录**读回来(ADR 0048 —— 那份记录就是
+// 这一轮的账本),所以这里只剩形状与加法;`userTally`(从流现折计数)随之退场:它是「轮状态
+// 只活在内存里」那个年代的产物,留着就是第二本账。
 export type Tally = { readonly ok: number; readonly failed: number; readonly skipped: number };
-
-const NO_ACCOUNTS: Tally = { ok: 0, failed: 0, skipped: 0 };
-// 用户级失败(取账户 / 取凭据挂了):整个用户这轮没开始,计一个 failed。
-const USER_FAILED: Tally = { ok: 0, failed: 1, skipped: 0 };
-
-const addResult = (t: Tally, r: AccountSyncResult): Tally => ({
-  ok: t.ok + (r.ok ? 1 : 0),
-  // 缺凭据:不算失败。
-  skipped: t.skipped + (!r.ok && r.skipped ? 1 : 0),
-  // 具体错误已在 syncAccount 以 error 级记录。
-  failed: t.failed + (!r.ok && !r.skipped ? 1 : 0),
-});
-
-// **一个用户**这一轮的小计。定时 sweep 按用户逐个跑这个(P6.3)。
-//
-// 用户级失败(取账户 / 取凭据挂了)在这里被兜住、记一笔 —— 一个用户炸不影响其余;
-// 单账户失败在更里面(`syncAccount`)已经隔离过一层。
-//
-// 消费的是流而不是收集好的数组:cron 只要计数,没必要把几十个用户的逐账户结果全攒在内存里。
-//
-// **「所有用户」那一层不在这个包里**(#403 片 1):服务是按用户装配的(见 services.ts),
-// 一份服务服务不了多个用户,所以「逐用户装配 + 累加」天然属于**做装配的那一方**。
-// 本包只交出「给我一个已装配好的用户,我给你这个用户的小计」。
-export const userTally = (userId: string): Effect.Effect<Tally, never, SyncServices> =>
-  Stream.runFold(syncUserStream(userId), NO_ACCOUNTS, addResult).pipe(
-    Effect.catchAll((err) =>
-      Effect.logError("user sweep threw").pipe(
-        Effect.annotateLogs({ userId, error: err.message }),
-        Effect.as(USER_FAILED),
-      ),
-    ),
-  );
 
 // 逐用户的小计加成一份。纯函数 —— 累加规则跟「怎么装配」无关,所以留在包里,
 // 装配那一方(壳,以及片 3 之后的 apps/web)只管把 tallies 递进来。
@@ -90,5 +59,5 @@ export const sumTallies = (users: number, tallies: readonly Tally[]): SweepResul
       failed: acc.failed + t.failed,
       skipped: acc.skipped + t.skipped,
     }),
-    { users, ...NO_ACCOUNTS },
+    { users, ok: 0, failed: 0, skipped: 0 },
   );
