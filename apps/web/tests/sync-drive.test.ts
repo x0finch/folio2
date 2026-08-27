@@ -1,4 +1,4 @@
-import { Effect, Layer, Logger, Stream } from "effect";
+import { Clock, Effect, Layer, Logger, Stream, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import { driveRound } from "@/lib/server/sync/drive";
 
@@ -124,6 +124,46 @@ describe("driveRound", () => {
         afterRound: Effect.die(new Error("warm exploded")),
       }),
     ).resolves.toBeUndefined();
+    expect(done).toEqual([null]);
+  });
+
+  // keepalive:轮活着期间按固定间隔续心跳。**settle 顺带的续期不够**——cron 把全部组合的轮
+  // 开好再共用一把闸跑,后排的轮在队里等的时候一个 settle 都没有,>120s 就被误判成中断、
+  // 被下一次开轮覆盖,同一批账户跑两遍。「活着 = 不过期」必须与排队无关。
+  //
+  // 用 TestClock(layer 供进去,时间只在流里被显式拨动),断言**精确的**触发时刻。
+  it("轮活着期间按间隔续期;轮一结束就停", async () => {
+    const touched: number[] = [];
+    await driveRound(
+      Stream.fromIterable(["a"]).pipe(Stream.tap(() => TestClock.adjust("130 seconds"))),
+      {
+        layer: TestContext.TestContext,
+        onResult: () => Effect.void,
+        onDone: () => Effect.void,
+        keepalive: {
+          intervalMs: 60_000,
+          run: Effect.flatMap(Clock.currentTimeMillis, (now) =>
+            Effect.sync(() => void touched.push(now)),
+          ),
+        },
+        // 收尾里再把钟拨很远:keepalive 若没随轮结束被中断,这里会多出 180s / 240s … 的触发。
+        afterRound: TestClock.adjust("200 seconds"),
+      },
+    );
+    expect(touched).toEqual([60_000, 120_000]);
+  });
+
+  it("keepalive 自己炸了(defect)不撕轮 —— 只是这一拍没续上", async () => {
+    const done: (string | null)[] = [];
+    await driveRound(
+      Stream.fromIterable(["a"]).pipe(Stream.tap(() => TestClock.adjust("70 seconds"))),
+      {
+        layer: TestContext.TestContext,
+        onResult: () => Effect.void,
+        onDone: (error) => Effect.sync(() => void done.push(error)),
+        keepalive: { intervalMs: 60_000, run: Effect.die(new Error("touch exploded")) },
+      },
+    );
     expect(done).toEqual([null]);
   });
 

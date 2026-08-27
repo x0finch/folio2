@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, type Layer, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, type Layer, Stream } from "effect";
 
 // 一轮同步在后台跑到底 —— **ADR 0048 之后这条路上只剩「跑」,没有「看」了**。
 //
@@ -38,6 +38,13 @@ export interface DriveRoundOptions<A, R> {
   afterRound?: Effect.Effect<unknown, unknown, R>;
   /** 整轮没跑起来时记一笔 —— 日志由调用方给,本模块不认识 logger。 */
   onFatal?: (message: string) => void;
+  /**
+   * 轮活着期间的心跳(定时续 `expiresAt`)。**settle 顺带的续期不够**:cron 把全部组合的轮
+   * 开好再共用一把闸跑,后排的轮在队里等的时候一个 settle 都没有 —— 没有这条,「活着」就
+   * 偷偷依赖「每 120s 至少落一笔账」,排队一久轮被误判中断、可被覆盖,同一批账户跑两遍。
+   * 随轮结束中断;它自己炸了只是这一拍没续上(defect 各拍兜住),不撕轮。
+   */
+  keepalive?: { intervalMs: number; run: Effect.Effect<void, never, R> };
 }
 
 /**
@@ -54,21 +61,50 @@ export const driveRound = <A, R>(
     const failure = Cause.failureOption(cause);
     return failure._tag === "Some" ? failure.value.message : Cause.pretty(cause);
   };
-  return Effect.runPromise(
-    results.pipe(
-      Stream.runForEach((result) =>
-        // 账本不撕轮:一笔 settle 落不上(defect —— DbClient 的错误通道是 never),记一行接着跑。
-        opts
-          .onResult(result)
-          .pipe(
+  // 账本不撕轮:一笔 settle 落不上(defect —— DbClient 的错误通道是 never),记一行接着跑。
+  const settleOne = (result: A) =>
+    opts
+      .onResult(result)
+      .pipe(
+        Effect.catchAllCause((cause) =>
+          Effect.logWarning("sync round settle failed", Cause.pretty(cause)),
+        ),
+      );
+  const main = Stream.runForEach(results, settleOne);
+
+  // keepalive 是一条**伴随** fiber:先睡一拍再续(开轮那一下已经写过一次 expiresAt),
+  // 轮一结束(Exit 拿到手)立刻中断它 —— 晚到的一拍会把收官后的保留期改短,虽然 db 那层的
+  // `touch` 也拦(finishedAt 条件),两层各自成立。
+  const keepaliveLoop = opts.keepalive
+    ? Effect.forever(
+        Effect.zipRight(
+          Effect.sleep(opts.keepalive.intervalMs),
+          opts.keepalive.run.pipe(
             Effect.catchAllCause((cause) =>
-              Effect.logWarning("sync round settle failed", Cause.pretty(cause)),
+              Effect.logWarning("sync round keepalive failed", Cause.pretty(cause)),
             ),
           ),
-      ),
+        ),
+      )
+    : null;
+
+  // **普通 `fork`,不进 `acquireUseRelease`**:acquire 在不可中断区里跑,在那里 fork 出的
+  // fiber 会继承不可中断 —— 于是收尾那句 interrupt 永远等不到它死(实测:挂满测试超时)。
+  // fork 完让一拍(`yieldNow`),保证它把第一觉睡上(TestClock 只推得动已经登记的 sleep)。
+  const ran = keepaliveLoop
+    ? Effect.gen(function* () {
+        const fiber = yield* Effect.fork(keepaliveLoop);
+        yield* Effect.yieldNow();
+        const exit = yield* Effect.exit(main);
+        yield* Fiber.interrupt(fiber);
+        return exit;
+      })
+    : Effect.exit(main);
+
+  return Effect.runPromise(
+    ran.pipe(
       // **Exit 级收官**:matchEffect 只接类型化失败,defect 会从它旁边穿过去 —— 那正是
       // 「一次 D1 瞬时错让整点后面所有用户都不同步」那条事故链的第一环。
-      Effect.exit,
       Effect.flatMap((exit) => {
         if (Exit.isSuccess(exit)) return opts.onDone(null);
         const message = messageOf(exit.cause);

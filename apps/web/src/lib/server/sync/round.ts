@@ -22,14 +22,18 @@ import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 /**
  * 心跳时长 —— **超时这件事只有这一个旋钮**。
  *
- * 开轮写 `now + 120s`,每个账户完成顺手续到 `now + 120s`;worker 死了,最后一次心跳 120s 后
- * 那一轮自然过期,于是下一次点同步开得动新轮。
+ * 「活着 = 不过期」,而续期有两条路:跑轮的任务每 `ROUND_KEEPALIVE_MS` 主动续一次(keepalive,
+ * 这是主保证 —— **与排队无关**:cron 的后排轮在闸后面等着时一个 settle 都没有),每个账户完成
+ * 顺手也续。worker 真死了,两条路一起停,120s 后那一轮自然过期,下一次点同步开得动新轮。
  *
- * 120s 是照**单个账户**的最坏情形取的:3 次尝试 × 20s 超时 + 退避 ≈ 70s,圆整上去。
- * **刻意不随名单大小变** —— 一轮几十个账户也只是「一个接一个地续期」,总时长不进这个数;
- * 让它跟名单挂钩就等于每加一个账户都放宽一次「多久算死」。
+ * 120s 取的是「keepalive 间隔的两倍」——容得下丢一拍;它同时也盖得住单账户的最坏情形
+ * (3 次尝试 × 20s 超时 + 退避 ≈ 70s)。**刻意不随名单大小变**:让它跟名单挂钩就等于
+ * 每加一个账户都放宽一次「多久算死」。
  */
 export const ROUND_HEARTBEAT_MS = 120_000;
+
+/** keepalive 间隔 = 心跳的一半:丢一拍还有下一拍兜着,不至于擦着到期线。 */
+const ROUND_KEEPALIVE_MS = ROUND_HEARTBEAT_MS / 2;
 
 /**
  * 收官后的保留期。一轮收官之后它就只是「上一轮的报告」,而**下一轮开轮即覆盖** ——
@@ -116,6 +120,13 @@ export const runSyncRound = (
   return driveRound(results, {
     layer,
     afterRound: opts.warm === false ? undefined : afterRound,
+    // 轮活着期间定时续心跳 —— settle 顺带的续期只在「一直有账在落」时才成立,排队时靠这条。
+    keepalive: {
+      intervalMs: ROUND_KEEPALIVE_MS,
+      run: Effect.flatMap(Database, (db) =>
+        db.syncRounds.touch({ ...head, ttlMs: ROUND_HEARTBEAT_MS }),
+      ),
+    },
     onResult: (r) =>
       Effect.flatMap(Database, (db) =>
         db.syncRounds.settle({
