@@ -205,6 +205,7 @@ const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
         synced: view.synced,
         failed: view.failed.length,
         needsKeys: view.needsKeys,
+        unresolved: view.unresolved,
       });
       tally = {
         ok: tally.ok + view.synced,

@@ -153,7 +153,10 @@ export interface SyncRoundView {
   trigger: SyncRoundTrigger;
   startedAt: number;
   finishedAt: number | null;
-  /** 这一轮的条数 —— 进行中那句 `x / N` 的 N。 */
+  /**
+   * 这一轮的条数 —— 进行中那句 `x / N` 的 N。**收官后不含 `unresolved` 那几条**:
+   * 报告只说真跑过的(轮中被归档的账户,它的结果永远不来)。
+   */
   total: number;
   /** 已经有结果的条数 —— 那句 `x / N` 的 x。 */
   settled: number;
@@ -168,6 +171,8 @@ export interface SyncRoundView {
   needsKeys: number;
   /** 还没轮到的第一个账户 —— 进行中那句「正在同步谁」。 */
   current: string | null;
+  /** 收官时还 pending 的条数(轮中被归档的那些)—— 不进面板,cron 的收官日志念它。 */
+  unresolved: number;
   /** 整轮没跑起来那一句(取账户 / 取凭据挂了)。逐账户的失败不在这里。 */
   error: string | null;
 }
@@ -202,15 +207,21 @@ export function syncRoundView(round: SyncRoundRecord, now: number): SyncRoundVie
   }
   const state: SyncRoundState =
     round.finishedAt != null ? "done" : now >= round.expiresAt ? "interrupted" : "running";
+  // 收官后还 pending 的只有一种来路:轮中被归档 / 删除的账户 —— 内核的名单是跑的那一刻现算的,
+  // 它的 settle 永远不来。**报告只说真跑过的**:留在分母里,`9 synced` 对 `10` 永远差一个,
+  // 读起来像少同步了一个来源,而那个来源已经不存在了。剔掉的条数记进 `unresolved` 供日志。
+  // 在跑 / 中断的轮不剔:那时 pending 是「还没轮到」,分母就该是全名单。
+  const unresolved = state === "done" ? tally.pending : 0;
   return {
     roundId: round.roundId,
     state,
     trigger: round.trigger,
     startedAt: round.startedAt,
     finishedAt: round.finishedAt,
-    total: entries.length,
+    total: entries.length - unresolved,
     settled: entries.length - tally.pending,
     synced: tally.synced,
+    unresolved,
     failed,
     needsKeys: tally["needs-keys"],
     current,

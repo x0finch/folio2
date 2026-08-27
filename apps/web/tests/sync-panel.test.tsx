@@ -50,6 +50,7 @@ const round = (over: Partial<SyncRoundView> = {}): SyncRoundView => ({
   failed: [],
   needsKeys: 0,
   current: null,
+  unresolved: 0,
   error: null,
   ...over,
 });

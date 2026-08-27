@@ -130,6 +130,41 @@ describe("正在同步谁", () => {
     expect(view.current).toBeNull();
   });
 
+  // 轮中被归档的账户:内核的名单是跑的那一刻现算的,归档的不再出现 —— 它的 settle 永远不来,
+  // 收官后仍是 pending。报告只说真跑过的:把它留在分母里,`9 synced` 对 `10` 永远差一个,
+  // 读起来像少同步了一个来源,而那个来源已经不存在了。
+  it("收官的轮:仍 pending 的从分母剔除,记进 unresolved", () => {
+    const view = syncRoundView(
+      record({
+        finishedAt: NOW,
+        accounts: {
+          "acc-1": account("Binance", { status: "synced" }),
+          "acc-2": account("Kraken", { status: "synced" }),
+          "acc-3": account("已归档的"),
+        },
+      }),
+      NOW,
+    );
+    expect(view.total).toBe(2);
+    expect(view.settled).toBe(2);
+    expect(view.synced).toBe(2);
+    expect(view.unresolved).toBe(1);
+  });
+
+  it("在跑的轮:pending 是「还没轮到」,留在分母里,unresolved 是 0", () => {
+    const view = syncRoundView(
+      record({
+        accounts: {
+          "acc-1": account("Binance", { status: "synced" }),
+          "acc-2": account("Kraken"),
+        },
+      }),
+      NOW,
+    );
+    expect(view.total).toBe(2);
+    expect(view.unresolved).toBe(0);
+  });
+
   it("一个账户都没有的一轮 → 分母 0,不炸", () => {
     const view = syncRoundView(record({ accounts: {}, finishedAt: NOW }), NOW);
     expect(view.total).toBe(0);
