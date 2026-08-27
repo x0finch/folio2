@@ -48,7 +48,16 @@ export function useSyncRound(portfolioId: string, syncableCount: number): SyncRo
       return (await response.json()) as SyncRoundView;
     },
     // 服务端刚回的那一份就是此刻的事实 —— 直接落进缓存,面板不必空等第一次轮询(1.5s)。
-    onSuccess: (view) => queryClient.setQueryData(syncKeys.round(portfolioId), view),
+    // **先取消在飞的那发 GET 再落**(react-query 标准手法):它可能在开轮前就出发了,
+    // 读的是旧轮,落地晚于这句 set 的话会把新轮盖回旧的。
+    onSuccess: async (view) => {
+      await queryClient.cancelQueries({ queryKey: syncKeys.round(portfolioId) });
+      queryClient.setQueryData(syncKeys.round(portfolioId), view);
+    },
+    // 响应丢了 ≠ 轮没开:服务端可能已经抢下这一轮、waitUntil 已经在跑,而轮询只在读到
+    // running 时自转 —— 什么都不做,面板就对着旧数据坐到天荒地老。补一发 refetch:
+    // 真开了会读到 running、轮询恢复;真没开也只是多读一次空键。
+    onError: () => queryClient.invalidateQueries({ queryKey: syncKeys.round(portfolioId) }),
   });
 
   // 「上一次看见的样子」:哪个组合、什么 mark。**mark 与组合绑在一起存**,因为两个泄漏同根:

@@ -153,3 +153,51 @@ describe("发起失败那句话不串组合", () => {
     await waitFor(() => expect(api.current.startError).toBeNull());
   });
 });
+
+describe("发起那一下的两条边", () => {
+  // POST 的响应丢了 ≠ 轮没开:服务端可能已经抢下这一轮、waitUntil 已经在跑。什么都不做的话
+  // 面板对着旧数据坐着 —— 轮询没被叫醒(它只在读到 running 时自转)。补一发 refetch:
+  // 真开了轮会读到 running,轮询随之恢复;真没开也只是多读一次空键。
+  it("发起失败 → 补一发轮 query 的 invalidate,别让页面全旧", async () => {
+    getSyncRound.mockResolvedValue(null);
+    global.fetch = vi.fn(async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+
+    const { api, client } = mountHook();
+    await waitFor(() => expect(api.current).not.toBeNull());
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    act(() => api.current.sync());
+    await waitFor(() => expect(api.current.startError).toContain("network down"));
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ["sync", "round", "pf-1"] }),
+      ),
+    );
+  });
+
+  // POST 的回包与一发在飞的 GET 赛跑:GET 先出发(读的是开轮前的旧轮)、后到达 —— 它落地会把
+  // 刚 set 进去的新轮盖回旧的。react-query 的标准手法:set 之前先 cancel 在飞的那发。
+  it("发起成功 → 先取消在飞的轮 query,再落刚回来的那份", async () => {
+    getSyncRound.mockResolvedValue(null);
+    const opened = view({ roundId: "r-new", settled: 0 });
+    global.fetch = vi.fn(
+      async () => new Response(JSON.stringify(opened), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const { api, client } = mountHook();
+    await waitFor(() => expect(api.current).not.toBeNull());
+    const calls: string[] = [];
+    vi.spyOn(client, "cancelQueries").mockImplementation(async () => {
+      calls.push("cancel");
+    });
+    const setData = vi.spyOn(client, "setQueryData").mockImplementation(((...args: unknown[]) => {
+      calls.push("set");
+      return args[1];
+    }) as never);
+
+    act(() => api.current.sync());
+    await waitFor(() => expect(setData).toHaveBeenCalled());
+    expect(calls).toEqual(["cancel", "set"]);
+  });
+});
