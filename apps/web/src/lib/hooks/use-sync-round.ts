@@ -51,23 +51,31 @@ export function useSyncRound(portfolioId: string, syncableCount: number): SyncRo
     onSuccess: (view) => queryClient.setQueryData(syncKeys.round(portfolioId), view),
   });
 
-  // 进度前进一格 → 定向刷新数据域(余额、账户行、摘要)。
-  //
-  // **按「轮 id + 已完成数 + 状态」比,不按对象引用**:react-query 的结构共享确实会在数据没变时
-  // 保留同一个引用,但那是它的实现细节 —— 靠它等于把「多久刷一次首页」交给别处的一个优化。
-  // **首次看见也不刷**:那只是「页面加载时这里有一轮旧记录」,数据本来就是新的。
-  const seen = useRef<string | null>(null);
+  // 「上一次看见的样子」:哪个组合、什么 mark。**mark 与组合绑在一起存**,因为两个泄漏同根:
+  // B 组合的轮当然与 A 的 mark 不同,但那不是「进度前进了」;A 组合发起失败那句话挂到 B 的
+  // 面板上就是对着 B 说 A 的事。
+  const seen = useRef<{ portfolioId: string; mark: string | null }>({ portfolioId, mark: null });
+  const reset = mutation.reset;
   useEffect(() => {
-    if (!round) return;
-    const mark = `${round.roundId}:${round.settled}:${round.state}`;
-    if (seen.current === null) {
-      seen.current = mark;
-      return;
+    // 切组合 = 换一个话题:清 mark(下一眼走首见分支)、清发起失败那句话。
+    if (seen.current.portfolioId !== portfolioId) {
+      seen.current = { portfolioId, mark: null };
+      reset();
     }
-    if (seen.current === mark) return;
-    seen.current = mark;
+    if (!round) return;
+    // 进度前进一格 → 定向刷新数据域(余额、账户行、摘要)。
+    //
+    // **按「轮 id + 已完成数 + 状态」比,不按对象引用**:react-query 的结构共享确实会在数据
+    // 没变时保留同一个引用,但那是它的实现细节 —— 靠它等于把「多久刷一次首页」交给别处的
+    // 一个优化。**首次看见也不刷**:那只是「页面加载时这里有一轮旧记录」,数据本来就是新的 ——
+    // 切组合后的第一眼(刚把 mark 清空)走的也是这条。
+    const mark = `${round.roundId}:${round.settled}:${round.state}`;
+    if (seen.current.mark === mark) return;
+    const first = seen.current.mark === null;
+    seen.current = { portfolioId, mark };
+    if (first) return;
     void invalidateFor(queryClient, "sync.round");
-  }, [round, queryClient]);
+  }, [round, queryClient, portfolioId, reset]);
 
   const disabled = busy || mutation.isPending || syncableCount === 0;
 

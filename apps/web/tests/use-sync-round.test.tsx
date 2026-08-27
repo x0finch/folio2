@@ -31,18 +31,25 @@ const view = (over: Partial<SyncRoundView> = {}): SyncRoundView => ({
   ...over,
 });
 
-function mountHook() {
+function mountHook(portfolioId = "pf-1", syncableCount = 3) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const api = { current: null as Api | null };
-  function Probe() {
-    api.current = useSyncRound("pf-1", 3);
+  function Probe({ pf }: { pf: string }) {
+    api.current = useSyncRound(pf, syncableCount);
     return null;
   }
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  const wrapper = (pf: string): ReactNode => (
+    <QueryClientProvider client={client}>
+      <Probe pf={pf} />
+    </QueryClientProvider>
   );
-  render(wrapper({ children: <Probe /> }));
-  return { api: api as { current: Api }, client };
+  const view = render(wrapper(portfolioId));
+  return {
+    api: api as { current: Api },
+    client,
+    /** 换一个组合再渲染 —— 「切组合」在这个 hook 上的形状。 */
+    switchTo: (pf: string) => view.rerender(wrapper(pf)),
+  };
 }
 
 beforeEach(() => {
@@ -68,17 +75,7 @@ describe("useSyncRound", () => {
 
   it("这个组合没有可同步的账户 → 点不动", async () => {
     getSyncRound.mockResolvedValue(null);
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const api = { current: null as Api | null };
-    function Probe() {
-      api.current = useSyncRound("pf-1", 0);
-      return null;
-    }
-    render(
-      <QueryClientProvider client={client}>
-        <Probe />
-      </QueryClientProvider>,
-    );
+    const { api } = mountHook("pf-1", 0);
     await waitFor(() => expect(api.current).not.toBeNull());
     expect(api.current?.disabled).toBe(true);
   });
@@ -103,6 +100,28 @@ describe("useSyncRound", () => {
       expect(invalidate).not.toHaveBeenCalled();
     });
 
+    // 切组合 = 换一份轮。B 组合那份与 A 的 mark 当然不同,但那不是「进度前进了」——
+    // 按旧 mark 一比就假刷一次全域,切几下组合就白拉几遍首页。切过去的第一眼永远走首见分支。
+    it("切组合看到另一份轮 → 不刷(那不是进度,是换了个话题)", async () => {
+      getSyncRound.mockResolvedValue(view({ roundId: "rA", state: "done", finishedAt: 1 }));
+      const { api, client, switchTo } = mountHook("pf-a");
+      await waitFor(() => expect(api.current.round?.roundId).toBe("rA"));
+
+      const invalidate = vi.spyOn(client, "invalidateQueries");
+      getSyncRound.mockResolvedValue(
+        view({ roundId: "rB", state: "done", finishedAt: 1, settled: 3 }),
+      );
+      switchTo("pf-b");
+      await waitFor(() => expect(api.current.round?.roundId).toBe("rB"));
+      expect(invalidate).not.toHaveBeenCalled();
+
+      // 切回来同理:A 那份还在缓存里,一挂上来就能读到 —— 它也不是进度。
+      getSyncRound.mockResolvedValue(view({ roundId: "rA", state: "done", finishedAt: 1 }));
+      switchTo("pf-a");
+      await waitFor(() => expect(api.current.round?.roundId).toBe("rA"));
+      expect(invalidate).not.toHaveBeenCalled();
+    });
+
     it("进度前进一格 → 刷一次", async () => {
       getSyncRound.mockResolvedValue(view({ settled: 1 }));
       const { api, client } = mountHook();
@@ -114,5 +133,23 @@ describe("useSyncRound", () => {
       });
       await waitFor(() => expect(invalidate).toHaveBeenCalled());
     });
+  });
+});
+
+describe("发起失败那句话不串组合", () => {
+  it("A 组合发起失败,切到 B → startError 清空", async () => {
+    getSyncRound.mockResolvedValue(null);
+    global.fetch = vi.fn(async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+
+    const { api, switchTo } = mountHook("pf-a");
+    await waitFor(() => expect(api.current).not.toBeNull());
+    act(() => api.current.sync());
+    await waitFor(() => expect(api.current.startError).toContain("network down"));
+
+    // 那句话说的是「在 A 组合发起失败了」—— 挂在 B 的面板上就是对着 B 说 A 的事。
+    switchTo("pf-b");
+    await waitFor(() => expect(api.current.startError).toBeNull());
   });
 });
