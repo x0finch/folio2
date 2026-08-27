@@ -199,6 +199,21 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
           { concurrency: "unbounded" },
         );
 
+        // **价表挂了 → 整账户失败**(FOL-30)。
+        //
+        // 它不是第六个钱包,是**四个钱包共用的估值原料**:现货 / 币本位 / 资金 / 理财都要 join 它
+        // 才算得出 USD,只有 U 本位自带 USD 不 join。所以价表一挂,那四个会**一起**倒进失败堆,
+        // 而「尽力而为」看不出这是同一个原因 —— 它照样写出一份只剩 U 本位的快照,把那四个钱包的
+        // 真实资产整块盖掉(生产实况:每轮 cron 掉块,note 恒为那四个的名字)。
+        //
+        // 「拿不到料」该走的是重试,不是降级:交回错误通道 → sync 的退避重试(带 Retry-After)→
+        // 打光则这一轮不写快照,旧值原样保住。**判在钱包成败之前**,这样错误是价表的真实原因
+        // (限流 / 上游不可用),而不是被它连坐的某个钱包。
+        //
+        // fiber 此刻必已完成(那四个钱包已经 join 过它),所以这里的 join 只是取值,不多等一拍。
+        const priceTable = yield* Effect.either(Fiber.join(prices));
+        if (priceTable._tag === "Left") return yield* Effect.fail(priceTable.left);
+
         const failed = outcomes.filter((o) => o.result._tag === "Left");
         const balances = outcomes.flatMap((o) => (o.result._tag === "Right" ? o.result.right : []));
 

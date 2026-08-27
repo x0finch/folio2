@@ -169,6 +169,36 @@ describe("fetchBalances", () => {
     expect(String(note?.[0]?.content)).not.toContain("Earn");
   });
 
+  // —— 价表(FOL-30)——
+  //
+  // 价表是**四个钱包共用的估值原料**(现货 / 币本位 / 资金 / 理财 join 它,U 本位自带 USD 不 join)。
+  // 它挂掉时若继续走「尽力而为」,写出去的就是一份只剩 U 本位的快照,把那四个钱包的真实资产
+  // 整块盖掉 —— 生产上正是这样:note 恒为「Spot / COIN-M / Funding / Earn」,资产每小时掉块。
+  // 所以它不是钱包失败,是**这一轮拿不到料**:整账户失败 → 交给 sync 的退避重试 → 打光则不写快照。
+  it("**价表挂了 → 整账户失败**(可重试),不写一份只剩 U 本位合约的部分快照", async () => {
+    const stub = upstream({
+      "/api/v3/ticker/price": () => json({}, { status: 429 }),
+      "/api/v3/account": () => json(account),
+      "/fapi/v2/account": () => json(futuresAccount),
+      "/dapi/v1/account": () => json(coinmAccount),
+    });
+    const err = await failing(stub, binanceProvider.fetchBalances(ctx()));
+
+    // 限流 → 等一等会好,归可重试;绝不能以「成功但少四个钱包」的形状返回。
+    expect(err._tag).toBe("ConnectorRateLimitError");
+    expect(isRetryable(err)).toBe(true);
+  });
+
+  it("价表挂 + 某个钱包也挂 → 仍是整账户失败,价表优先于尽力而为", async () => {
+    const stub = upstream({
+      "/api/v3/ticker/price": () => json({}, { status: 503 }),
+      "/fapi/v2/account": () => json({}, { status: 401 }),
+      "/api/v3/account": () => json(account),
+    });
+    const err = await failing(stub, binanceProvider.fetchBalances(ctx()));
+    expect(isRetryable(err)).toBe(true);
+  });
+
   it("**全军覆没 → 失败**,不拿一份空快照盖掉已有余额", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     const err = await failing(stub, binanceProvider.fetchBalances(ctx()));
