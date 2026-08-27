@@ -1,8 +1,9 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
 import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/connectors-basic";
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import { describe, expect, it } from "vitest";
-import { binanceProvider } from "../../../src/connectors/binance/provider";
+import type { BinanceRow } from "../../../src/connectors/binance/parse";
+import { binanceProvider, verdict } from "../../../src/connectors/binance/provider";
 import account from "./fixtures/account.json";
 import coinmAccount from "./fixtures/coinm-account.json";
 import earnFlexible from "./fixtures/earn-flexible.json";
@@ -62,6 +63,94 @@ const failing = (
   stub: HttpStub,
   effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
+
+// —— 判决(纯函数)——
+//
+// 四条判决路径直接喂数据测,不搭 HTTP 桩:上面 fetchBalances 那组已经钉住「整条链会把正确的
+// 数据递到判决手里」,这里钉的是判决自己的边界 —— 特别是「同一个错误对象」那条引用判据,
+// 走整条链反而看不清它。
+describe("verdict", () => {
+  const err = (tag: string) => ({ _tag: tag }) as unknown as ConnectorError;
+  const row = (symbol: string): BinanceRow =>
+    ({ symbol, amount: 1, value: 1, kind: "spot" }) as BinanceRow;
+  const ok = (name: string, symbols: string[]) => ({
+    wallet: { name },
+    result: Either.right(symbols.map(row)),
+  });
+  const ko = (name: string, e: ConnectorError) => ({ wallet: { name }, result: Either.left(e) });
+
+  it("全好 → 合并全部余额,无 note", () => {
+    const v = verdict([ok("Spot", ["BTC"]), ok("Funding", ["USDT"])], Either.right({}));
+    expect(Either.isRight(v)).toBe(true);
+    if (Either.isRight(v)) {
+      expect(v.right.balances.map((b) => b.symbol)).toEqual(["BTC", "USDT"]);
+      expect(v.right.note).toBeUndefined();
+    }
+  });
+
+  it("部分挂(钱包自己的错)→ 仍成功,note 点名失败者", () => {
+    const v = verdict(
+      [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorAuthError"))],
+      Either.right({}),
+    );
+    expect(Either.isRight(v)).toBe(true);
+    if (Either.isRight(v)) {
+      expect(v.right.balances.map((b) => b.symbol)).toEqual(["BTC"]);
+      expect(String(v.right.note?.[0]?.content)).toContain("Earn");
+    }
+  });
+
+  it("有钱包死在价表上(同一个错误对象)→ 以价表的错整体失败", () => {
+    const priceErr = err("ConnectorRateLimitError");
+    const v = verdict(
+      [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", priceErr)],
+      Either.left(priceErr),
+    );
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(priceErr);
+  });
+
+  it("部分挂且是瞬时错(限流/超时/5xx)→ 整体失败进重试,不写残缺快照", () => {
+    // 「等一等会好」的失败不该降级:降级写出去的残缺快照,和价表连坐那次是同一种症状,
+    // 只是范围小。升级成整体失败,sync 那层重试;打光则不写快照,旧值保住。
+    const transient = err("ConnectorUnavailableError");
+    const v = verdict([ok("Spot", ["BTC"]), ko("Funding", transient)], Either.right({}));
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(transient);
+  });
+
+  it("瞬时错混着权限错 → 以瞬时那个整体失败(它才是重试的理由)", () => {
+    const transient = err("ConnectorRateLimitError");
+    const v = verdict(
+      [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorAuthError")), ko("Funding", transient)],
+      Either.right({}),
+    );
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(transient);
+  });
+
+  it("价表挂但没人死在它手上 → 不算连坐;钱包自己的瞬时错照瞬时规则走", () => {
+    // 引用判据:钱包的 429 和价表的 429 即便 tag 相同,也**不是同一个对象** —— 不算连坐。
+    // 失败原因因此是钱包自己那个错,不是价表的。
+    const own = err("ConnectorRateLimitError");
+    const v = verdict(
+      [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", own)],
+      Either.left(err("ConnectorRateLimitError")),
+    );
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(own);
+  });
+
+  it("全军覆没 → 以第一个钱包的错整体失败", () => {
+    const first = err("ConnectorUnavailableError");
+    const v = verdict(
+      [ko("Spot", first), ko("Funding", err("ConnectorUnavailableError"))],
+      Either.right({}),
+    );
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(first);
+  });
+});
 
 describe("fetchBalances", () => {
   it("签 /api/v3/account(带 apiKey 头 + signature)、取公开价表,再解析", async () => {
@@ -159,14 +248,68 @@ describe("fetchBalances", () => {
   it("**Note 点名的是真失败的那个钱包**,不是按下标猜的", async () => {
     // 只让「资金」这一个失败 —— 它在 WALLETS 里排第四。用 `Effect.partition` 写的话成败两个数组
     // 不带下标,名字就得靠推;这条钉住的是「结果和它的 wallet 绑在一起出来」。
+    // 401(权限)而不是 500:瞬时错现在会升级成整账户失败(见 verdict),到不了 Note。
     const stub = upstream({
-      "/sapi/v1/asset/get-funding-asset": () => json({}, { status: 500 }),
+      "/sapi/v1/asset/get-funding-asset": () => json({}, { status: 401 }),
       "/api/v3/account": () => json(account),
     });
     const { note } = await run(stub, binanceProvider.fetchBalances(ctx()));
     expect(String(note?.[0]?.content)).toContain("Funding");
     expect(String(note?.[0]?.content)).not.toContain("Spot");
     expect(String(note?.[0]?.content)).not.toContain("Earn");
+  });
+
+  // —— 价表(FOL-30)——
+  //
+  // 价表是**四个钱包共用的估值原料**(现货 / 币本位 / 资金 / 理财 join 它,U 本位自带 USD 不 join)。
+  // 它挂掉时若继续走「尽力而为」,写出去的就是一份只剩 U 本位的快照,把那四个钱包的真实资产
+  // 整块盖掉 —— 生产上正是这样:note 恒为「Spot / COIN-M / Funding / Earn」,资产每小时掉块。
+  // 所以它不是钱包失败,是**这一轮拿不到料**:整账户失败 → 交给 sync 的退避重试 → 打光则不写快照。
+  it("**价表挂了 → 整账户失败**(可重试),不写一份只剩 U 本位合约的部分快照", async () => {
+    const stub = upstream({
+      "/api/v3/ticker/price": () => json({}, { status: 429 }),
+      "/api/v3/account": () => json(account),
+      "/fapi/v2/account": () => json(futuresAccount),
+      "/dapi/v1/account": () => json(coinmAccount),
+    });
+    const err = await failing(stub, binanceProvider.fetchBalances(ctx()));
+
+    // 限流 → 等一等会好,归可重试;绝不能以「成功但少四个钱包」的形状返回。
+    expect(err._tag).toBe("ConnectorRateLimitError");
+    expect(isRetryable(err)).toBe(true);
+  });
+
+  it("价表挂 + 某个钱包也挂 → 仍是整账户失败,价表优先于尽力而为", async () => {
+    // **必须留一个活着的钱包**(U 本位 200):否则五个全挂,老代码的「全军覆没」分支照样失败,
+    // 这条用例就成了空转 —— 把价表那两行删掉它也绿。留一个活的,才逼出「价表优先」这件事。
+    const stub = upstream({
+      "/api/v3/ticker/price": () => json({}, { status: 503 }),
+      "/sapi/v1/asset/get-funding-asset": () => json({}, { status: 401 }),
+      "/api/v3/account": () => json(account),
+      "/fapi/v2/account": () => json(futuresAccount),
+    });
+    const err = await failing(stub, binanceProvider.fetchBalances(ctx()));
+    expect(isRetryable(err)).toBe(true);
+  });
+
+  // **反向那半**:价表挂了,但没有任何钱包是**被它**挂掉的 —— 那四个消费者各自先死在自己的
+  // 签名请求上(`Effect.all` 串行短路,压根没走到 join)。这时价表是不是好的根本不影响结果,
+  // 整账户失败就成了误伤:那些 401 是「key 没勾这些权限」,重试三次也变不出权限来,
+  // 而 U 本位明明拿回了真实余额,却因为一个没人用得上的价表被丢掉、一份快照都不写。
+  it("需价表的钱包各自死于凭据(401)、价表也挂 → 仍尽力而为返回 U 本位,不整账户失败", async () => {
+    const stub = upstream({
+      "/api/v3/ticker/price": () => json({}, { status: 429 }),
+      "/api/v3/account": () => json({}, { status: 401 }),
+      "/sapi/v1/asset/get-funding-asset": () => json({}, { status: 401 }),
+      "/dapi/v1/account": () => json({}, { status: 401 }),
+      "/simple-earn/flexible/position": () => json({}, { status: 401 }),
+      "/simple-earn/locked/position": () => json({}, { status: 401 }),
+      "/fapi/v2/account": () => json(futuresAccount),
+    });
+    const { balances, note } = await run(stub, binanceProvider.fetchBalances(ctx()));
+
+    expect(balances.some((b) => b.kind === "perp_equity")).toBe(true);
+    expect(String(note?.[0]?.content)).toContain("Spot");
   });
 
   it("**全军覆没 → 失败**,不拿一份空快照盖掉已有余额", async () => {
