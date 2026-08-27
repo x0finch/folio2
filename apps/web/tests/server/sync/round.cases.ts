@@ -27,8 +27,12 @@ describe("sync/round", () => {
   const manual = (label: string) =>
     db(USER).accounts.create({ connectorId: "manual", label, creds: null });
 
-  const open = (portfolioId?: string) =>
-    call(USER, openSyncRound({ portfolioId, trigger: "manual" }));
+  // 断言侧把 `round` 掀成非空:这套用例造不出「行在两句之间被删」那一幕,真走到就该炸给人看。
+  const open = async (portfolioId?: string) => {
+    const out = await call(USER, openSyncRound({ portfolioId, trigger: "manual" }));
+    if (out.round == null) throw new Error("open returned no round — the row vanished mid-test?");
+    return { opened: out.opened, round: out.round };
+  };
 
   const read = (portfolioId: string) => call(USER, handleGetSyncRound({ portfolioId }));
 

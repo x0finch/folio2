@@ -51,8 +51,14 @@ export interface SyncRoundRecord {
   expiresAt: number;
 }
 
-/** 这一层的契约 —— 从实现推导,不另抄一份签名。 */
-export type SyncRoundStore = Effect.Effect.Success<typeof makeSyncRoundStore>;
+/**
+ * 开轮的下场。判别在 `opened` 上:抢到了必有轮;没抢到通常是「活轮还在」(把它原样带回来),
+ * 唯一的 null 是「那一行在两句之间被删了」(级联删用户)—— 那时**没有任何轮可报**,
+ * 调用方别拿它当一轮在跑。
+ */
+export type OpenSyncRoundResult =
+  | { opened: true; round: SyncRoundRecord }
+  | { opened: false; round: SyncRoundRecord | null };
 
 export interface OpenSyncRoundInput {
   portfolioId: string;
@@ -69,6 +75,12 @@ export interface SettleSyncRoundInput {
   accountId: string;
   status: Exclude<SyncRoundAccountStatus, "pending">;
   error?: string;
+  ttlMs: number;
+}
+
+export interface TouchSyncRoundInput {
+  portfolioId: string;
+  roundId: string;
   ttlMs: number;
 }
 
@@ -132,7 +144,7 @@ export const makeSyncRoundStore = Effect.gen(function* () {
      * 抢的那一手是**一条**条件 upsert(`ON CONFLICT DO UPDATE … WHERE 已收官或已过期`)+ `RETURNING`:
      * 抢到了才有行回来。抢不到再读一次现场 —— 那一读读到的必是赢家写下的那一轮。
      */
-    open: (input: OpenSyncRoundInput): Effect.Effect<{ round: SyncRoundRecord; opened: boolean }> =>
+    open: (input: OpenSyncRoundInput): Effect.Effect<OpenSyncRoundResult> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         const accounts: Record<string, SyncRoundAccount> = {};
@@ -155,20 +167,25 @@ export const makeSyncRoundStore = Effect.gen(function* () {
             .onConflictDoUpdate({
               target: [userCache.userId, userCache.k],
               set: { v: sql`excluded.v`, expiresAt: sql`excluded.expires_at` },
-              // 覆盖的条件 = 「那一轮已经不活了」:收过官,或者心跳断了。
+              // 覆盖的条件 = 「那一行装的不是活轮」:收过官、心跳断了,或者**压根不是一轮**
+              // (坏 JSON / 没有 roundId 的值 —— `asJson` 把坏值折成 '{}',roundId 就是 null)。
+              // 第三个析取项是文件头那句「坏值等价于这里没有轮」的下半截:少了它,一个没到期的
+              // 坏值会把这个组合的开轮永久卡死。
               // `<=` 而不是 `<` —— `expiresAt` 是「活到这一刻为止」,与 cache 的 stale 判据同款。
-              setWhere: sql`json_extract(${asJson}, '$.finishedAt') is not null or ${userCache.expiresAt} <= ${now}`,
+              setWhere: sql`json_extract(${asJson}, '$.finishedAt') is not null or ${userCache.expiresAt} <= ${now} or json_extract(${asJson}, '$.roundId') is null`,
             })
             .returning({ v: userCache.v, expiresAt: userCache.expiresAt }),
         );
         const mineNow = won[0] ? decode(won[0]) : undefined;
-        if (mineNow) return { round: mineNow, opened: true };
+        if (mineNow) return { round: mineNow, opened: true } as const;
 
         const existing = yield* read(input.portfolioId);
         return Option.match(existing, {
-          // 读不到只可能是那一行在这两句之间被删了(级联删用户)。当作没开成,别谎报一轮在跑。
-          onNone: () => ({ round: { ...fresh, expiresAt }, opened: false }),
-          onSome: (round) => ({ round, opened: false }),
+          // 读不到只可能是那一行在这两句之间被删了(级联删用户)。**如实返回 null**,别把刚才
+          // 没写进去的那份 fresh 递出去 —— 它长得像一轮在跑,而键上根本没有,前端会去轮询一个
+          // 永远读不到的幽灵轮。
+          onNone: () => ({ round: null, opened: false as const }),
+          onSome: (round) => ({ round, opened: false as const }),
         });
       }),
 
@@ -199,6 +216,30 @@ export const makeSyncRoundStore = Effect.gen(function* () {
                 mine(input.portfolioId),
                 sameRound(input.roundId),
                 sql`json_type(${asJson}, ${path}) is not null`,
+              ),
+            ),
+        );
+      }),
+
+    /**
+     * 只续心跳,什么都不改。跑轮的那条任务定时调它(keepalive):后排的轮在并发闸后面排队时
+     * 一个 settle 都没有,「活着」不能只靠 settle 顺带的续期。
+     *
+     * **已收官的轮不续**(`finishedAt is null` 那一句):收官与 keepalive 是两条并发的路,
+     * 晚到的一次 touch 不该把收官写下的 7 天保留期改回 120 秒。
+     */
+    touch: (input: TouchSyncRoundInput): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        yield* client.query((db) =>
+          db
+            .update(userCache)
+            .set({ expiresAt: now + input.ttlMs })
+            .where(
+              and(
+                mine(input.portfolioId),
+                sameRound(input.roundId),
+                sql`json_extract(${asJson}, '$.finishedAt') is null`,
               ),
             ),
         );

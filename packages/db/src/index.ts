@@ -56,16 +56,13 @@ export type {
   SnapshotWithBalances,
   WriteSnapshotInput,
 } from "./domains/snapshots";
-// 同步轮(ADR 0048)。app 侧要这些名字:开轮 / 记结果 / 收官各收一个入参对象,读回来的那份
-// 是面板与 cron 共同的口径。
+// 同步轮(ADR 0048)。**只出 app 真消费的名字**:轮记录及其字段类型、开轮的下场。
+// 那几个 op 的入参对象类型不出包 —— 调用点都写字面量,导出只会让 knip 报孤儿。
 export type {
-  FinishSyncRoundInput,
-  OpenSyncRoundInput,
-  SettleSyncRoundInput,
+  OpenSyncRoundResult,
   SyncRoundAccount,
   SyncRoundAccountStatus,
   SyncRoundRecord,
-  SyncRoundStore,
   SyncRoundTrigger,
 } from "./domains/sync-rounds";
 export type { TabPinInput } from "./domains/tab-pins";

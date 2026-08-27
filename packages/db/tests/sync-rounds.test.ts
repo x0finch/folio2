@@ -19,6 +19,15 @@ const PF = "pf-1";
 const TTL = 120_000;
 const RETENTION = 7 * 24 * 60 * 60 * 1000;
 
+/** 直接往键上塞一个原始值 —— 「坏值卡死开轮」那一类只有绕过 store 才造得出来。 */
+async function seedRawValue(userId: string, v: string, expiresAt: number): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO user_cache (user_id, k, v, expires_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, k) DO UPDATE SET v = excluded.v, expires_at = excluded.expires_at",
+  )
+    .bind(userId, `sync-round:${PF}`, v, expiresAt)
+    .run();
+}
+
 async function resetUser(userId: string): Promise<void> {
   const db = getDb(env);
   await db.delete(user).where(eq(user.id, userId));
@@ -42,19 +51,24 @@ const ACCOUNTS = [
   { id: "acc-2", label: "Kraken" },
 ];
 
-const open = (
+// 断言侧把 `round` 掀成非空:这套用例造不出「行在两句之间被删」那一幕(级联删用户),
+// 所以 open 的 null 分支在这里永远走不到 —— 真走到就该炸给人看。
+const open = async (
   userId: string,
   roundId: string,
   nowMs = NOW,
   over: { portfolioId?: string; trigger?: "manual" | "cron" } = {},
-) =>
-  rounds(userId, nowMs).open({
+) => {
+  const out = await rounds(userId, nowMs).open({
     portfolioId: over.portfolioId ?? PF,
     roundId,
     trigger: over.trigger ?? "manual",
     accounts: ACCOUNTS,
     ttlMs: TTL,
   });
+  if (out.round == null) throw new Error("open returned no round — the row vanished mid-test?");
+  return { opened: out.opened, round: out.round };
+};
 
 const read = async (userId: string, nowMs = NOW, portfolioId = PF): Promise<SyncRoundRecord> => {
   const got = await rounds(userId, nowMs).get(portfolioId);
@@ -146,6 +160,24 @@ describe("读轮", () => {
   it("从没开过 → none", async () => {
     expect(Option.isNone(await rounds(USER_A).get(PF))).toBe(true);
   });
+
+  it("键上是坏 JSON → none,而下一次开轮把它覆盖掉", async () => {
+    await seedRawValue(USER_A, "not-json{{{", NOW + TTL);
+    expect(Option.isNone(await rounds(USER_A).get(PF))).toBe(true);
+
+    // 文件头承诺过「坏值等价于这里没有轮」—— 开轮那条 setWhere 必须认它,
+    // 否则一个坏值(没收官、还没过期)会把这个组合的同步永久卡死。
+    const { opened, round } = await open(USER_A, "r-recover");
+    expect(opened).toBe(true);
+    expect(round.roundId).toBe("r-recover");
+  });
+
+  it("键上是合法 JSON 但不是轮(没有 roundId)→ 同坏值待遇", async () => {
+    await seedRawValue(USER_A, JSON.stringify({ hello: "world" }), NOW + TTL);
+    expect(Option.isNone(await rounds(USER_A).get(PF))).toBe(true);
+    const { opened } = await open(USER_A, "r-recover");
+    expect(opened).toBe(true);
+  });
 });
 
 describe("逐账户结果", () => {
@@ -210,6 +242,35 @@ describe("逐账户结果", () => {
       ttlMs: TTL,
     });
     expect(Object.keys((await read(USER_A)).accounts).sort()).toEqual(["acc-1", "acc-2"]);
+  });
+});
+
+describe("心跳续期(touch)", () => {
+  // 轮活着期间由跑轮的那条任务定时续(keepalive):后排的轮在闸后面排队时一个 settle 都没有,
+  // 没有这条它会被误判成中断、被下一次开轮覆盖 —— 同一批账户被两轮各跑一遍。
+  it("续到 now + ttl", async () => {
+    await open(USER_A, "r1");
+    await rounds(USER_A, NOW + 60_000).touch({ portfolioId: PF, roundId: "r1", ttlMs: TTL });
+    expect((await read(USER_A)).expiresAt).toBe(NOW + 60_000 + TTL);
+  });
+
+  it("轮 id 对不上 → 落空成 no-op", async () => {
+    await open(USER_A, "r1");
+    await rounds(USER_A, NOW + 60_000).touch({ portfolioId: PF, roundId: "STALE", ttlMs: TTL });
+    expect((await read(USER_A)).expiresAt).toBe(NOW + TTL);
+  });
+
+  // keepalive 与收官是两条并发的路:收官先落、晚到的一次 touch 不该把 7 天的保留期改回 120 秒 ——
+  // 那会让「上一轮的报告」两分钟后凭空消失成「从没同步过」。
+  it("已收官的轮不续 —— 保留期不被晚到的心跳改短", async () => {
+    await open(USER_A, "r1");
+    await rounds(USER_A, NOW + 1).finish({
+      portfolioId: PF,
+      roundId: "r1",
+      retentionMs: RETENTION,
+    });
+    await rounds(USER_A, NOW + 2).touch({ portfolioId: PF, roundId: "r1", ttlMs: TTL });
+    expect((await read(USER_A)).expiresAt).toBe(NOW + 1 + RETENTION);
   });
 });
 

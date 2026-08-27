@@ -1,5 +1,6 @@
 import {
   Database,
+  type OpenSyncRoundResult,
   type SyncRoundAccountStatus,
   type SyncRoundRecord,
   type SyncRoundTrigger,
@@ -49,7 +50,7 @@ export const ROUND_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const openSyncRound = (input: {
   portfolioId?: string;
   trigger: SyncRoundTrigger;
-}): Effect.Effect<{ round: SyncRoundRecord; opened: boolean }, never, Database> =>
+}): Effect.Effect<OpenSyncRoundResult, never, Database> =>
   Effect.gen(function* () {
     const db = yield* Database;
     const scope = yield* scopedMembership(input.portfolioId);
@@ -169,7 +170,7 @@ const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
     const opened = yield* Effect.forEach(portfolios, (pf) =>
       openSyncRound({ portfolioId: pf.id, trigger: "cron" }),
     );
-    const mine = opened.filter((o) => o.opened).map((o) => o.round);
+    const mine = opened.flatMap((o) => (o.opened ? [o.round] : []));
     const gate = Effect.unsafeMakeSemaphore(SYNC_CONCURRENCY);
     yield* Effect.forEach(
       mine,

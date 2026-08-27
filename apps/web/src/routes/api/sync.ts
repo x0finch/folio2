@@ -44,14 +44,16 @@ export const Route = createFileRoute("/api/sync")({
         }
 
         const portfolioId = await portfolioOf(request);
-        const { round, opened } = await runForUser(
-          userId,
-          openSyncRound({ portfolioId, trigger: "manual" }),
-        );
-        if (opened) waitUntil(runSyncRound(userId, round));
+        const out = await runForUser(userId, openSyncRound({ portfolioId, trigger: "manual" }));
+        // 没抢到、现场也读不到轮:那一行在两句之间被删了(级联删用户)。**别递一个幽灵轮回去**
+        // 让前端对着一个不存在的键轮询 —— 如实报冲突,面板走「发起失败」那一句。
+        if (out.round == null) {
+          return Response.json(null, { status: 409, headers: { "cache-control": "no-store" } });
+        }
+        if (out.opened) waitUntil(runSyncRound(userId, out.round));
 
         // 回的是这一轮此刻的样子,好让面板立刻有东西可画(等第一次轮询要 1.5 秒)。
-        return Response.json(syncRoundView(round, Date.now()), {
+        return Response.json(syncRoundView(out.round, Date.now()), {
           headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
         });
       },

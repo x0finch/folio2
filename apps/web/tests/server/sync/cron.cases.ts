@@ -72,6 +72,7 @@ describe("sync/cron", () => {
     const def = await db(USER).portfolios.ensureDefault();
     await cex("Binance spot");
     const manualRound = await call(USER, openSyncRound({ trigger: "manual" }));
+    if (manualRound.round == null) throw new Error("manual open returned no round");
 
     await Effect.runPromise(syncAllUsers([USER]));
 
