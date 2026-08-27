@@ -136,6 +136,18 @@ describe("三段式口径", () => {
     expect(text).toContain("13");
   });
 
+  // 轮中归档一个已同步的账户:summary 被定向刷新后 total 缩水(13 → 12、可同步 9 → 8),
+  // 而这一轮照旧回 9 条 —— 打底 4 + 本轮 9 = 13 > 12,读起来像多同步出一个来源。夹在分母上。
+  it("轮中归档 → synced 段夹在来源总数上,不出现 13 synced / 12 来源", () => {
+    const s = summary({
+      accounts: Array.from({ length: 8 }, (_, i) => ({ id: `a${i}`, label: `Acc ${i}` })),
+      total: 12,
+    });
+    const text = mount({ summary: s, round: round({ synced: 9, settled: 9 }) });
+    expect(text).toContain("12 synced");
+    expect(text).not.toContain("13 synced");
+  });
+
   it("有轮时那一行是三段式,不掺来源数", () => {
     const text = mount({ summary: summary(), round: round() });
     expect(text).toContain("This round");

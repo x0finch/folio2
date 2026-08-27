@@ -227,11 +227,12 @@ export function SyncPanel({
   // `This round: 2 synced`,而页头写着 across 10 sources —— 读起来像「10 个来源只同步上 2 个」,
   // 比什么都不说还糟。无轮态只说 `Last updated` 与「需要注意」那份清单,一个 x/y 都不出现。
   const notInRound = Math.max(0, summary.total - summary.accounts.length);
+  // synced 段夹在来源总数上:轮中归档一个已同步的账户会让 summary 缩水(total 13 → 12)而
+  // 这一轮照旧回 9 条 —— 打底 + 本轮 > 总数,读起来像多同步出一个来源。
+  const syncedCount = round ? Math.min(summary.total, round.synced + notInRound) : 0;
   const tally = round
     ? [
-        round.synced + notInRound > 0
-          ? t("tallySynced", { count: round.synced + notInRound })
-          : null,
+        syncedCount > 0 ? t("tallySynced", { count: syncedCount }) : null,
         round.failed.length > 0 ? t("tallyFailed", { count: round.failed.length }) : null,
         round.needsKeys > 0 ? t("tallyNeedsKeys", { count: round.needsKeys }) : null,
       ]
