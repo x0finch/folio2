@@ -74,7 +74,11 @@
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
+  /* 亮色 popover 压一档,别跟 --background 同色:goo popover 无边框无投影,全靠这档色差
+     撑出卡片感。beUI 官方站亮色就是这么配的(popover lab 96.5% vs 背景 98.8%);这里原是
+     shadcn 模板默认的纯白 —— 那套默认给的是自带 border+shadow 的 Radix popover,白对白也能读。
+     暗色两边本就有档差(0.205 vs 0.145),不用动。 */
+  --popover: oklch(0.965 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
