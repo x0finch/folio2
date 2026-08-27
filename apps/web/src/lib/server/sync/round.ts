@@ -83,8 +83,9 @@ const statusOf = (r: AccountSyncResult): Exclude<SyncRoundAccountStatus, "pendin
 
 export interface RunSyncRoundOptions {
   /**
-   * 出网的闸,**同一个用户的多轮共用一把**。cron 按组合分区开轮(ADR 0048),一个用户可能
-   * 同时有好几轮在跑 —— 没有这把闸,「每用户最多 6 发上游」就变成「每轮 6 发」。
+   * 出网的闸 —— cron 一次调用里的多轮共用一把,「每用户最多 6 发上游」才不随组合数翻倍。
+   * **手动那条路不带闸,也带不了**:它和 cron 在不同的 isolate 里,信号量递不过去 ——
+   * 重叠窗口里最坏 2×,为什么收下写在 `deps.ts` 的 `SyncScope.gate` 上。
    */
   gate?: Effect.Semaphore;
   /**
