@@ -146,11 +146,12 @@ export async function unblockPostCreateSync(page: Page) {
  * 返回时 `POST /api/sync` 已经发出。
  *
  * 同样要重试点击:reload 之后头几百毫秒的点击会被吞(见 addBinanceAccount 的注释)。
- * 重复点不会多跑一轮 —— useAccountSync 的 `sync()` 在 isPending 时直接 return。
+ * 重复点不会多跑一轮 —— `useSyncRound` 的 `sync()` 在 disabled 时直接 return,而**开轮本身也是
+ * 幂等的**(ADR 0048):真发出去两次,第二次拿回的是同一轮。
  *
- * **只等请求发出,不等响应头**:实测 vite dev 下这条 NDJSON 响应是**攒完才发**的
- * (量到响应头 6.4s 才到,而那一轮总共就跑了 6.4s),所以「响应头到手」在本地并不等于「刚起跑」,
- * 反而等于「已经跑完」。要判断服务端真的在干活,问假上游收到请求没有(setUpstream hits)。
+ * **只等请求发出,不等响应体**:这条请求现在开轮即返(不再是攒完才发的 NDJSON 流),但「回包
+ * 到手」仍然只说明轮开了,不说明服务端已经在打上游。要判断它真的在干活,问假上游收到请求没有
+ * (setUpstream hits)。
  */
 // 悬停页头那枚胶囊,开同步面板(FOL-32 后桌面 popover 走 hover)。
 //
