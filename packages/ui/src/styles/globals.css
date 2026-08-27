@@ -70,28 +70,30 @@
   --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --motion-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  /* 亮色 popover 压一档,别跟 --background 同色:goo popover 无边框无投影,全靠这档色差
-     撑出卡片感。beUI 官方站亮色就是这么配的(popover lab 96.5% vs 背景 98.8%);这里原是
-     shadcn 模板默认的纯白 —— 那套默认给的是自带 border+shadow 的 Radix popover,白对白也能读。
-     暗色两边本就有档差(0.205 vs 0.145),不用动。 */
-  --popover: oklch(0.965 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* 标准 token 一律取 beUI 官方站的值(2026-08 从 beui.dev 亮/暗两态实测抓取,原样搬),
+     不再用 shadcn 模板默认:beUI 的件(goo popover 等)不带边框投影,卡片感全靠面与面的色差档,
+     而 shadcn 默认(背景=卡面=纯白)是配着自带 border+shadow 的 Radix 件设计的,两套假设不同 ——
+     亮色 popover 曾因此隐形(FOL-32 手机实测抓到)。
+     **唯一例外 --accent**:官方那是 beUI 自己的品牌青,folio 全站拿 accent 当中性 hover 面
+     (shadcn 惯例),照搬会把所有悬停态刷成青色 —— 保持中性灰。 */
+  --background: lab(98.84% 0 0);
+  --foreground: lab(3.04863% 0 0);
+  --card: lab(96.52% 0 0);
+  --card-foreground: lab(3.04863% 0 0);
+  --popover: lab(96.52% 0 0);
+  --popover-foreground: lab(3.04863% 0 0);
+  --primary: lab(3.04863% 0 0);
+  --primary-foreground: lab(98.84% 0 0);
+  --secondary: lab(96.52% 0 0);
+  --secondary-foreground: lab(3.04863% 0 0);
+  --muted: lab(96.52% 0 0);
+  --muted-foreground: lab(42% 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --destructive: lab(53.6853% 69.6775 43.7724);
+  --border: lab(3.04863% 0 0 / 0.06);
+  --input: lab(3.04863% 0 0 / 0.06);
+  --ring: lab(3.04863% 0 0 / 0.12);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -121,24 +123,25 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  /* 同上:标准 token 取 beUI 官方暗色值(accent 例外,理由见亮色块注释)。 */
+  --background: #151515;
+  --foreground: lab(95.36% 0 0);
+  --card: #1c1c1c;
+  --card-foreground: lab(95.36% 0 0);
+  --popover: #1c1c1c;
+  --popover-foreground: lab(95.36% 0 0);
+  --primary: lab(95.36% 0 0);
+  --primary-foreground: #151515;
+  --secondary: #1c1c1c;
+  --secondary-foreground: lab(95.36% 0 0);
+  --muted: #1c1c1c;
+  --muted-foreground: lab(55.92% 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --destructive: lab(53.6853% 69.6775 43.7724);
+  --border: #ffffff0d;
+  --input: #ffffff0d;
+  --ring: #ffffff1a;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
