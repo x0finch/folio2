@@ -88,7 +88,7 @@ describe("verdict", () => {
     }
   });
 
-  it("部分挂(钱包自己的错)→ 仍成功,note 点名失败者", () => {
+  it("部分挂(钱包自己的错)→ 仍成功,note 点名失败者并按错因给话", () => {
     const v = verdict(
       [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorAuthError"))],
       Either.right({}),
@@ -97,6 +97,16 @@ describe("verdict", () => {
     if (Either.isRight(v)) {
       expect(v.right.balances.map((b) => b.symbol)).toEqual(["BTC"]);
       expect(String(v.right.note?.[0]?.content)).toContain("Earn");
+      expect(String(v.right.note?.[0]?.content)).toContain("permissions");
+    }
+  });
+
+  it("部分挂但不是权限错(上游变了形状)→ note 不劝查权限,那是误导", () => {
+    const v = verdict([ok("Spot", ["BTC"]), ko("Earn", err("ConnectorFailure"))], Either.right({}));
+    expect(Either.isRight(v)).toBe(true);
+    if (Either.isRight(v)) {
+      expect(String(v.right.note?.[0]?.content)).toContain("Earn");
+      expect(String(v.right.note?.[0]?.content)).not.toContain("permissions");
     }
   });
 

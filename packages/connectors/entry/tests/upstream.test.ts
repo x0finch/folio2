@@ -49,6 +49,16 @@ describe("bestEffortVerdict", () => {
     if (Either.isLeft(v)) expect(v.left).toBe(transient);
   });
 
+  it("几个瞬时错并存 → 优先以限流错失败(它可能带 Retry-After,给重试当依据)", () => {
+    const limit = err(LIMIT);
+    const v = bestEffortVerdict([
+      ko("Trading", DOWN),
+      { name: "Funding", result: Either.left(limit) },
+    ]);
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(limit);
+  });
+
   it("全军覆没(哪怕全是「等也没用」)→ 整体失败,不写空快照", () => {
     // 整把 key 被吊销:降级的话写出去的是一份**空**快照,把账户的全部资产抹掉。
     const first = err(AUTH);

@@ -90,7 +90,12 @@ export const bestEffortVerdict = <
   const failed = outcomes.filter((o) => Either.isLeft(o.result));
 
   // 有「等一等会好」的 → 整体失败(混合时以瞬时那个为准:它才是重试的理由)。
-  const transient = failed.find((o) => Either.isLeft(o.result) && isRetryable(o.result.left));
+  // 几个瞬时错并存时**优先挑限流错**:它可能带着 Retry-After,sync 的重试会照着等 ——
+  // 挑了别的(如同轮某桶的 504),这个提示就丢了,退避按默认来、可能又撞回限流上。
+  const transient =
+    failed.find(
+      (o) => Either.isLeft(o.result) && o.result.left._tag === "ConnectorRateLimitError",
+    ) ?? failed.find((o) => Either.isLeft(o.result) && isRetryable(o.result.left));
   if (transient && Either.isLeft(transient.result)) return Either.left(transient.result.left);
 
   // 全军覆没 → 也失败,别拿一份空快照覆盖已有余额。

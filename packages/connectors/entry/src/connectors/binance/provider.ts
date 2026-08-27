@@ -130,13 +130,16 @@ const earn: Wallet = {
 
 const WALLETS: readonly Wallet[] = [spot, usdmFutures, coinmFutures, funding, earn];
 
-// 账户级失败 Note(ADR 0030):列出没同步上的钱包 + 一句提示。
+// 账户级失败 Note(ADR 0030):列出没同步上的钱包 + 按错因给一句提示(与 okx/bybit 同款)。
 // **只会因「等也没用」的失败出现**(FOL-31):瞬时故障已在 `bestEffortVerdict` 那层升级成
-// 整账户失败、交给重试,到不了这里 —— 所以不再说「retry later」,那是我们自己会做的事。
-const walletFailureNote = (failed: readonly string[]): Note => ({
+// 整账户失败、交给重试,到不了这里。剩下两种各给各的话:权限没勾(去交易所改)、
+// 上游变了形状(用户干等没用)—— 后者也劝去查权限是误导。
+const walletFailureNote = (failed: readonly { name: string; auth: boolean }[]): Note => ({
   title: "Wallets not synced",
   icon: "warning",
-  content: `${failed.join(" / ")} — couldn't be read; check the API key's permissions`,
+  content: `${failed.map((f) => f.name).join(" / ")} — ${
+    failed.some((f) => f.auth) ? "check the API key's permissions" : "couldn't be read this round"
+  }`,
 });
 
 // —— 判决(纯函数)——
@@ -188,7 +191,16 @@ export const verdict = (
 
   return Either.right({
     balances: outcomes.flatMap((o) => (Either.isRight(o.result) ? o.result.right : [])),
-    note: failed.length ? [walletFailureNote(failed.map((o) => o.wallet.name))] : undefined,
+    note: failed.length
+      ? [
+          walletFailureNote(
+            failed.map((o) => ({
+              name: o.wallet.name,
+              auth: Either.isLeft(o.result) && o.result.left._tag === "ConnectorAuthError",
+            })),
+          ),
+        ]
+      : undefined,
   });
 };
 
