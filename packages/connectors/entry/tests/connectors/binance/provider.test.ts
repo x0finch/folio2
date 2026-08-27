@@ -1,8 +1,9 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
 import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/connectors-basic";
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import { describe, expect, it } from "vitest";
-import { binanceProvider } from "../../../src/connectors/binance/provider";
+import type { BinanceRow } from "../../../src/connectors/binance/parse";
+import { binanceProvider, verdict } from "../../../src/connectors/binance/provider";
 import account from "./fixtures/account.json";
 import coinmAccount from "./fixtures/coinm-account.json";
 import earnFlexible from "./fixtures/earn-flexible.json";
@@ -62,6 +63,76 @@ const failing = (
   stub: HttpStub,
   effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
+
+// —— 判决(纯函数)——
+//
+// 四条判决路径直接喂数据测,不搭 HTTP 桩:上面 fetchBalances 那组已经钉住「整条链会把正确的
+// 数据递到判决手里」,这里钉的是判决自己的边界 —— 特别是「同一个错误对象」那条引用判据,
+// 走整条链反而看不清它。
+describe("verdict", () => {
+  const err = (tag: string) => ({ _tag: tag }) as unknown as ConnectorError;
+  const row = (symbol: string): BinanceRow =>
+    ({ symbol, amount: 1, value: 1, kind: "spot" }) as BinanceRow;
+  const ok = (name: string, symbols: string[]) => ({
+    wallet: { name },
+    result: Either.right(symbols.map(row)),
+  });
+  const ko = (name: string, e: ConnectorError) => ({ wallet: { name }, result: Either.left(e) });
+
+  it("全好 → 合并全部余额,无 note", () => {
+    const v = verdict([ok("Spot", ["BTC"]), ok("Funding", ["USDT"])], Either.right({}));
+    expect(Either.isRight(v)).toBe(true);
+    if (Either.isRight(v)) {
+      expect(v.right.balances.map((b) => b.symbol)).toEqual(["BTC", "USDT"]);
+      expect(v.right.note).toBeUndefined();
+    }
+  });
+
+  it("部分挂(钱包自己的错)→ 仍成功,note 点名失败者", () => {
+    const v = verdict(
+      [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorAuthError"))],
+      Either.right({}),
+    );
+    expect(Either.isRight(v)).toBe(true);
+    if (Either.isRight(v)) {
+      expect(v.right.balances.map((b) => b.symbol)).toEqual(["BTC"]);
+      expect(String(v.right.note?.[0]?.content)).toContain("Earn");
+    }
+  });
+
+  it("有钱包死在价表上(同一个错误对象)→ 以价表的错整体失败", () => {
+    const priceErr = err("ConnectorRateLimitError");
+    const v = verdict(
+      [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", priceErr)],
+      Either.left(priceErr),
+    );
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(priceErr);
+  });
+
+  it("价表挂但没人死在它手上(钱包各自死于自己的错)→ 仍尽力而为", () => {
+    // 引用判据的反面:钱包的 429 和价表的 429 即便 tag 相同,也**不是同一个对象** —— 不算连坐。
+    const v = verdict(
+      [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", err("ConnectorRateLimitError"))],
+      Either.left(err("ConnectorRateLimitError")),
+    );
+    expect(Either.isRight(v)).toBe(true);
+    if (Either.isRight(v)) {
+      expect(v.right.balances.map((b) => b.symbol)).toEqual(["USDT"]);
+      expect(String(v.right.note?.[0]?.content)).toContain("Spot");
+    }
+  });
+
+  it("全军覆没 → 以第一个钱包的错整体失败", () => {
+    const first = err("ConnectorUnavailableError");
+    const v = verdict(
+      [ko("Spot", first), ko("Funding", err("ConnectorUnavailableError"))],
+      Either.right({}),
+    );
+    expect(Either.isLeft(v)).toBe(true);
+    if (Either.isLeft(v)) expect(v.left).toBe(first);
+  });
+});
 
 describe("fetchBalances", () => {
   it("签 /api/v3/account(带 apiKey 头 + signature)、取公开价表,再解析", async () => {

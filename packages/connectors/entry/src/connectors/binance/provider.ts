@@ -11,7 +11,7 @@ import type {
   Note,
   ProviderNeeds,
 } from "@folio/connectors-basic";
-import { Effect, Fiber } from "effect";
+import { Effect, Either, Fiber } from "effect";
 import { z } from "zod";
 import { asConnector } from "../../upstream";
 import { PROVIDER_ID } from "./constants";
@@ -137,6 +137,58 @@ const walletFailureNote = (failed: readonly string[]): Note => ({
   content: `${failed.join(" / ")} — couldn't be read; check the API key's permissions or retry later`,
 });
 
+// —— 判决(纯函数)——
+//
+// 五个钱包的成败与价表结果都已收集完,这一步不再有 IO:数据进、Either 出。
+// 抽出来是为了让四条判决路径能直接喂数据单测,不必每条用例都搭一整条 HTTP 桩链。
+//
+// **被价表连坐的失败 → 整账户失败**(FOL-30)。价表不是第六个钱包,是**四个钱包共用的估值
+// 原料**:现货 / 币本位 / 资金 / 理财都要 join 它才算得出 USD,只有 U 本位自带 USD 不 join。
+// 所以价表一挂,那四个会**一起**倒进失败堆,而「尽力而为」看不出这是同一个原因 —— 它照样写出
+// 一份只剩 U 本位的快照,把那四个钱包的真实资产整块盖掉(生产实况:每轮 cron 掉块,note 恒为
+// 那四个的名字)。「拿不到料」该走的是重试,不是降级:交回错误通道 → sync 的退避重试
+// (带 Retry-After)→ 打光则这一轮不写快照,旧值原样保住。
+//
+// **判据是「有钱包死在它手上」,不是「价表挂了」** —— 两者不等价,差别正好是个误伤:
+// key 只勾了合约权限时,那四个各自先死在自己的签名请求上(钱包内部 `Effect.all` 默认串行,
+// 失败即短路,压根没走到 join),价表挂没挂根本不影响结果。那时若也整账户失败,就是拿一个
+// 没人用得上的价表,把 U 本位真实拿回的余额丢掉、且因为限流可重试而白重试三次 —— 而那些 401
+// 是「没这个权限」,重试变不出权限来,于是这个账户永远写不进快照。
+//
+// 认「同一个错误对象」而不是比对 `_tag`:被连坐的钱包抛出的就是 `Fiber.join` 递上来的那一个,
+// 引用相等即「它就是死在价表上的」。比 tag 会把「钱包自己也撞了 429」误判成连坐。
+export interface WalletOutcome {
+  readonly wallet: { readonly name: string };
+  readonly result: Either.Either<BinanceRow[], ConnectorError>;
+}
+
+export const verdict = (
+  outcomes: readonly WalletOutcome[],
+  priceTable: Either.Either<unknown, ConnectorError>,
+): Either.Either<{ balances: BinanceRow[]; note?: Note[] }, ConnectorError> => {
+  const failed = outcomes.filter((o) => Either.isLeft(o.result));
+
+  // 被价表连坐 → 以价表的真实原因(限流 / 上游不可用)失败,而不是被它拖死的某个钱包。
+  if (Either.isLeft(priceTable)) {
+    const collateral = failed.some(
+      (o) => Either.isLeft(o.result) && o.result.left === priceTable.left,
+    );
+    if (collateral) return Either.left(priceTable.left);
+  }
+
+  // **全军覆没**(无一钱包成功,如 429 打光所有端点)→ 失败,让 sync 重试,
+  // 别拿一份空快照覆盖已有余额。只有**部分**失败才走尽力而为。
+  const first = failed[0];
+  if (failed.length === outcomes.length && first && Either.isLeft(first.result)) {
+    return Either.left(first.result.left);
+  }
+
+  return Either.right({
+    balances: outcomes.flatMap((o) => (Either.isRight(o.result) ? o.result.right : [])),
+    note: failed.length ? [walletFailureNote(failed.map((o) => o.wallet.name))] : undefined,
+  });
+};
+
 // 建这次调用要用的 client。
 //
 // **每次调用现建,不做成共享 Layer** —— 它要 `Scope`(闸的构造绑在 scope 上),而闸的**状态是模块级**
@@ -199,49 +251,13 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
           { concurrency: "unbounded" },
         );
 
-        const failed = outcomes.filter((o) => o.result._tag === "Left");
-
-        // **被价表连坐的失败 → 整账户失败**(FOL-30)。
-        //
-        // 价表不是第六个钱包,是**四个钱包共用的估值原料**:现货 / 币本位 / 资金 / 理财都要 join 它
-        // 才算得出 USD,只有 U 本位自带 USD 不 join。所以价表一挂,那四个会**一起**倒进失败堆,
-        // 而「尽力而为」看不出这是同一个原因 —— 它照样写出一份只剩 U 本位的快照,把那四个钱包的
-        // 真实资产整块盖掉(生产实况:每轮 cron 掉块,note 恒为那四个的名字)。
-        //
-        // 「拿不到料」该走的是重试,不是降级:交回错误通道 → sync 的退避重试(带 Retry-After)→
-        // 打光则这一轮不写快照,旧值原样保住。
-        //
-        // **判据是「有钱包死在它手上」,不是「价表挂了」** —— 两者不等价,差别正好是个误伤:
-        // key 只勾了合约权限时,那四个各自先死在自己的签名请求上(`Effect.all` 默认串行,失败即
-        // 短路,压根没走到 join),价表挂没挂根本不影响结果。那时若也整账户失败,就是拿一个没人
-        // 用得上的价表,把 U 本位真实拿回的余额丢掉、且因为限流可重试而白重试三次 —— 而那些 401
-        // 是「没这个权限」,重试变不出权限来,于是这个账户永远写不进快照。
-        //
-        // 认「同一个错误对象」而不是比对 `_tag`:被连坐的钱包抛出的就是 `Fiber.join` 递上来的
-        // 那一个,引用相等即「它就是死在价表上的」。比 tag 会把「钱包自己也撞了 429」误判成连坐。
-        //
         // 这个 join 只在**有钱包已经 join 过**时才取到值(那时 fiber 早完成);其余情况它可能真等
         // 价表跑完 —— 上界是 sync 那层的单次超时,可接受。
         const priceTable = yield* Effect.either(Fiber.join(prices));
-        if (priceTable._tag === "Left") {
-          const collateral = failed.some(
-            (o) => o.result._tag === "Left" && o.result.left === priceTable.left,
-          );
-          if (collateral) return yield* Effect.fail(priceTable.left);
-        }
-        const balances = outcomes.flatMap((o) => (o.result._tag === "Right" ? o.result.right : []));
 
-        // **全军覆没**(无一钱包成功,如 429 打光所有端点)→ 失败,让 sync 重试,
-        // 别拿一份空快照覆盖已有余额。只有**部分**失败才走尽力而为。
-        if (failed.length === WALLETS.length) {
-          const first = failed[0];
-          if (first?.result._tag === "Left") return yield* Effect.fail(first.result.left);
-        }
-
-        return {
-          balances,
-          note: failed.length ? [walletFailureNote(failed.map((o) => o.wallet.name))] : undefined,
-        };
+        // 谁成谁败都在桌面上了,判决是纯的(FOL-30 的连坐判据也在里面,见 verdict 的注释)。
+        // Either 在 gen 里可直接 yield*:Left 走错误通道,Right 就是返回值。
+        return yield* verdict(outcomes, priceTable);
       }),
     ),
 
