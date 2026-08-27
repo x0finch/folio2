@@ -3,5 +3,6 @@
 // 用例仍按 handler 一个 `.cases.ts` 分文件住,这里只做汇入;各文件的钩子被自己的
 // describe 作用域住,互不串。
 import "./get-status.cases";
+import "./cron.cases";
 import "./round.cases";
 import "./run.cases";

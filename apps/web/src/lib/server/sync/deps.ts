@@ -23,7 +23,6 @@ import {
   depError,
   type FetchOutcome,
   Sweep,
-  type SweepResult,
   AccountStore as SyncAccountStore,
   type SyncDepError,
   type SyncServices,
@@ -254,9 +253,22 @@ const asDep =
  * 不是在这里再按组合算一遍:那样会有两份名单,而它们之间任何一点漂移都会让面板的 `x / N`
  * 与真跑的条数对不上。不给 = 不收口(抽屉里的单账户同步走的是那一条)。
  */
-export const makeSyncServicesLayer = (scope?: {
+export interface SyncScope {
+  /** 这一轮跑哪些账户 —— 开轮那一步定下来的名单。 */
   only: ReadonlySet<string>;
-}): Layer.Layer<
+  /**
+   * 出网的闸,**同一个用户的多轮共用一把**(ADR 0048:cron 按组合分区,一个用户可能同时有
+   * 好几轮在跑)。不给 = 不设闸,那时唯一的上限是流自己那个 `SYNC_CONCURRENCY`。
+   *
+   * **闸在重试的内层**(CODING.md):`@folio/sync` 的重试包的是整次「取一次余额」,而这把闸
+   * 在它里面 —— 于是重跑一次就重新排一次队,语义自动正确,不必让包替调用方保证。
+   */
+  gate?: Effect.Semaphore;
+}
+
+export const makeSyncServicesLayer = (
+  scope?: SyncScope,
+): Layer.Layer<
   SyncServices,
   never,
   // 端口那八个不在这里(#504 T17):`mint` / `revalue` 自 T12 起都经聚合 `Oracle`。
@@ -318,7 +330,11 @@ export const makeSyncServicesLayer = (scope?: {
                 new ConnectorFailure({ message: `no connector for connectorId ${cid}` }),
               );
             }
-            return fetchViaConnector(cid, manifest, account, stored, seeds);
+            const fetched = fetchViaConnector(cid, manifest, account, stored, seeds);
+            // 闸(给了才有):见 `SyncScope.gate` —— 它管的是「这个用户同时在飞几发上游」,
+            // 而流那个 `SYNC_CONCURRENCY` 管的是「这一轮同时跑几个账户」。一个用户一轮时两者
+            // 等价,多轮时只有前者拦得住。
+            return scope?.gate ? scope.gate.withPermits(1)(fetched) : fetched;
           },
         }),
         Layer.effect(
@@ -388,11 +404,8 @@ export const makeSyncServicesLayer = (scope?: {
 /** 不收口的那一份:cron 的全量 sweep 与单账户同步用它。 */
 export const syncServicesLayer = makeSyncServicesLayer();
 
-const syncFor = (
-  userId: string,
-  only?: ReadonlySet<string>,
-): Layer.Layer<SyncServices | UserServices> =>
-  Layer.provideMerge(makeSyncServicesLayer(only ? { only } : undefined), userLayer(userId));
+const syncFor = (userId: string, scope?: SyncScope): Layer.Layer<SyncServices | UserServices> =>
+  Layer.provideMerge(makeSyncServicesLayer(scope), userLayer(userId));
 
 /**
  * 一轮同步:**流、收尾,和它们共用的那一次装配** —— 三件一起出去,不在这里 provide。
@@ -415,7 +428,7 @@ const syncFor = (
  *(effect-log.ts 记着这个坑,实测过)。而 `syncRoundFor` 的调用方(`./round` 的 `runSyncRound`)
  * 每一次都是自己起的根 fiber。
  */
-export const syncRoundFor = (userId: string, only?: ReadonlySet<string>) => ({
+export const syncRoundFor = (userId: string, scope: SyncScope) => ({
   results: Sweep.syncUserStream(userId) as Stream.Stream<
     AccountSyncResult,
     SyncDepError,
@@ -423,27 +436,5 @@ export const syncRoundFor = (userId: string, only?: ReadonlySet<string>) => ({
   >,
   // 同步完预热代币缓存(best-effort),让下次总览能 cache-only 富化新价。
   afterRound: warmTokens,
-  layer: Layer.merge(syncFor(userId, only), logTapeLogger),
+  layer: Layer.merge(syncFor(userId, scope), logTapeLogger),
 });
-
-// cron 的全量 sweep:**逐用户各装一次**,再把小计加起来。
-//
-// 这个循环以前住在 `@folio/sync` 的壳里。服务变成 per-user 之后它就不该在包里了 ——
-// 一份服务服务不了多个用户,「逐用户装配 + 累加」属于做装配的这一方。搬过来之后它与紧挨着的
-// `warmAllUsers` 形状一模一样,cron 的两步收尾读起来是同一件事。
-//
-// **串行不是遗漏,是有意的**:cron 一次调用有 CPU / subrequest 预算,几十个用户并发会顶穿
-// (见 server.ts 里两个 trigger 拆开的理由)。用 `Effect.forEach` 的默认串行语义,
-// **别顺手加 concurrency**。
-//
-// `tallyOne` 可注入,只为单测能观察到「一个跑完才起下一个」—— 与紧邻的 `warmAllUsers` 同款理由。
-// 这个钩子是必要的:循环从 `@folio/sync` 搬过来之后,包里那条串行用例钉的是它自己那份复刻,
-// **在这里加并发它照样绿**。钉子得跟着被钉的东西走。
-export const syncAllUsers = (
-  userIds: readonly string[],
-  tallyOne: (userId: string) => Effect.Effect<Sweep.Tally> = (userId) =>
-    Sweep.userTally(userId).pipe(Effect.provide(syncFor(userId))),
-): Effect.Effect<SweepResult, never> =>
-  Effect.forEach(userIds, tallyOne).pipe(
-    Effect.map((tallies) => Sweep.sumTallies(userIds.length, tallies)),
-  );

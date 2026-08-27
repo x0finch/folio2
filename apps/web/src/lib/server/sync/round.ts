@@ -4,11 +4,12 @@ import {
   type SyncRoundRecord,
   type SyncRoundTrigger,
 } from "@folio/db";
-import type { AccountSyncResult } from "@folio/sync";
+import { type AccountSyncResult, Sweep, type SweepResult, SYNC_CONCURRENCY } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { resolveScope, scopedMembership } from "@/lib/server/portfolio/scope";
+import { userLayer } from "@/lib/server/runtime";
 import { syncRoundFor } from "./deps";
 import { driveRound } from "./drive";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
@@ -75,6 +76,22 @@ export const openSyncRound = (input: {
 const statusOf = (r: AccountSyncResult): Exclude<SyncRoundAccountStatus, "pending"> =>
   r.ok ? "synced" : r.skipped ? "needs-keys" : "failed";
 
+export interface RunSyncRoundOptions {
+  /**
+   * 出网的闸,**同一个用户的多轮共用一把**。cron 按组合分区开轮(ADR 0048),一个用户可能
+   * 同时有好几轮在跑 —— 没有这把闸,「每用户最多 6 发上游」就变成「每轮 6 发」。
+   */
+  gate?: Effect.Semaphore;
+  /**
+   * 跑完顺手预热代币缓存(供下次总览 cache-only 富化新价)。
+   *
+   * **cron 关掉它**:预热是**按用户一次**的事,而 cron 一个用户可能开好几轮 —— 每轮都热一遍
+   * 就是同样几发上游白打好几次(CoinGecko 免费档一分钟只有十发)。cron 的预热在 sweep 收尾
+   * 统一做(`warmAllUsers`)。
+   */
+  warm?: boolean;
+}
+
 /**
  * 把开好的一轮真跑完 —— **调用方把返回的 Promise 交给 `waitUntil`**,它与任何连接都无关。
  *
@@ -84,13 +101,20 @@ const statusOf = (r: AccountSyncResult): Exclude<SyncRoundAccountStatus, "pendin
  * 每个账户跑完写一次(顺带续心跳),整轮结束收一次官。**中途没人在看也照样跑完** ——
  * 这正是把状态搬到服务端换来的:以前「看」断了进度就没了,现在断的只是轮询。
  */
-export const runSyncRound = (userId: string, round: SyncRoundRecord): Promise<void> => {
+export const runSyncRound = (
+  userId: string,
+  round: SyncRoundRecord,
+  opts: RunSyncRoundOptions = {},
+): Promise<void> => {
   const syncLog = getLogger(["folio", "web", "sync"]);
-  const { results, afterRound, layer } = syncRoundFor(userId, new Set(Object.keys(round.accounts)));
+  const { results, afterRound, layer } = syncRoundFor(userId, {
+    only: new Set(Object.keys(round.accounts)),
+    gate: opts.gate,
+  });
   const head = { portfolioId: round.portfolioId, roundId: round.roundId };
   return driveRound(results, {
     layer,
-    afterRound,
+    afterRound: opts.warm === false ? undefined : afterRound,
     onResult: (r) =>
       Effect.flatMap(Database, (db) =>
         db.syncRounds.settle({
@@ -113,6 +137,92 @@ export const runSyncRound = (userId: string, round: SyncRoundRecord): Promise<vo
     onFatal: (error) => syncLog.error("sync round failed", { userId, error }),
   });
 };
+
+const NO_ACCOUNTS: Sweep.Tally = { ok: 0, failed: 0, skipped: 0 };
+
+/**
+ * cron 扫到一个用户时干的事:**按组合分区,一个组合一轮**(ADR 0048)。
+ *
+ * 为什么分区不会造成写放大:每个账户恰属一个组合(归属互斥,没有归属行的兜底进默认组合 ——
+ * 与 `inView` 同一条判据),所以一个账户的完成事件只写它所属组合那一个键。
+ * 键的形状与手动轮完全一致,于是 **cron 的轮从此在面板上可见** —— 以前它对面板永远隐形。
+ *
+ * **只跑「这一轮是我开的」那些**:活轮还在(用户正好在手动同步)就别插一脚,开轮幂等会把
+ * 那一轮原样还回来,`opened` 为假,cron 就跳过它。
+ *
+ * **空组合开的那一轮照样要跑** —— 跑它等于立刻收官(流一条都不产出)。看起来多此一举,
+ * 少了它才是错的:开了轮却不收官,120s 后那个组合的面板会挂着一句「中断」,而它根本没事。
+ *
+ * **一个用户一把闸**:多个组合并发跑,但这个用户同时在飞的上游请求仍是 `SYNC_CONCURRENCY` 个。
+ * 没有它,「每用户最多 6 发」会随组合数翻倍,而 cron 一次调用的 subrequest 预算是有限的。
+ *
+ * 小计**从收官后的轮记录读回来**,不在旁边再攒一份:那份记录就是这一轮的账本,而两份账
+ * (一份攒在内存里、一份写在库里)只会在某天对不上。
+ */
+const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
+  Effect.gen(function* () {
+    const cronLog = getLogger(["folio", "cron"]);
+    const db = yield* Database;
+    // 没有归属行的账户兜底进默认组合,所以它必须先存在,否则那些账户这一轮谁都不管。
+    yield* db.portfolios.ensureDefault();
+    const portfolios = yield* db.portfolios.list();
+    const opened = yield* Effect.forEach(portfolios, (pf) =>
+      openSyncRound({ portfolioId: pf.id, trigger: "cron" }),
+    );
+    const mine = opened.filter((o) => o.opened).map((o) => o.round);
+    const gate = Effect.unsafeMakeSemaphore(SYNC_CONCURRENCY);
+    yield* Effect.forEach(
+      mine,
+      (round) => Effect.promise(() => runSyncRound(userId, round, { gate, warm: false })),
+      { concurrency: "unbounded" },
+    );
+
+    const now = yield* Clock.currentTimeMillis;
+    let tally = NO_ACCOUNTS;
+    for (const round of mine) {
+      const back = yield* db.syncRounds.get(round.portfolioId);
+      // 键上已经不是这一轮了(理论上要 120s 内又开一轮)—— 那份账本不归我念。
+      const settled = Option.filter(back, (r) => r.roundId === round.roundId);
+      if (Option.isNone(settled)) continue;
+      const view = syncRoundView(settled.value, now);
+      cronLog.info("cron round done", {
+        portfolioId: round.portfolioId,
+        state: view.state,
+        total: view.total,
+        synced: view.synced,
+        failed: view.failed.length,
+        needsKeys: view.needsKeys,
+      });
+      tally = {
+        ok: tally.ok + view.synced,
+        failed: tally.failed + view.failed.length,
+        skipped: tally.skipped + view.needsKeys,
+      };
+    }
+    return tally;
+  }).pipe(Effect.provide(userLayer(userId)), Effect.annotateLogs({ userId }));
+
+/**
+ * cron 的全量 sweep:**逐用户串行**,再把小计加起来。
+ *
+ * 这个循环以前住在 `@folio/sync` 的壳里。服务变成 per-user 之后它就不该在包里了 ——
+ * 一份服务服务不了多个用户,「逐用户装配 + 累加」属于做装配的这一方。
+ *
+ * **串行不是遗漏,是有意的**:cron 一次调用有 CPU / subrequest 预算,几十个用户并发会顶穿
+ * (见 server.ts 里两个 trigger 拆开的理由)。用 `Effect.forEach` 的默认串行语义,
+ * **别顺手加 concurrency** —— 一个用户**内部**按组合并发是另一回事,那一层有闸拦着。
+ *
+ * `syncOne` 可注入,只为单测能观察到「一个跑完才起下一个」—— 与 `warmAllUsers` 同款理由。
+ * 这个钩子是必要的:循环从 `@folio/sync` 搬过来之后,包里那条串行用例钉的是它自己那份复刻,
+ * **在这里加并发它照样绿**。钉子得跟着被钉的东西走。
+ */
+export const syncAllUsers = (
+  userIds: readonly string[],
+  syncOne: (userId: string) => Effect.Effect<Sweep.Tally> = syncUserRounds,
+): Effect.Effect<SweepResult, never> =>
+  Effect.forEach(userIds, syncOne).pipe(
+    Effect.map((tallies) => Sweep.sumTallies(userIds.length, tallies)),
+  );
 
 // 收一个 portfolioId 的理由与 `getSyncStatus` 同一条:选中态只在客户端,服务端没有第二条路
 // 知道你在看哪个组合。

@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { syncAllUsers, warmAllUsers } from "@/lib/server/sync/deps";
+import { warmAllUsers } from "@/lib/server/sync/deps";
+import { syncAllUsers } from "@/lib/server/sync/round";
 
 // #375 第 2 步 · 纵深防御:sweep 收尾逐用户预热,一个用户失败不该拖垮其余、也不该把整次 cron
 // 拖成异常收尾。`warmAllUsers` 收一个可注入的 `warmOne` 正是为了在这里让指定用户失败 ——
@@ -67,7 +68,7 @@ describe("syncAllUsers", () => {
     const events: string[] = [];
     let inFlight = 0;
     let maxInFlight = 0;
-    const tallyOne = (userId: string) =>
+    const syncOne = (userId: string) =>
       Effect.promise(async () => {
         inFlight++;
         maxInFlight = Math.max(maxInFlight, inFlight);
@@ -79,7 +80,7 @@ describe("syncAllUsers", () => {
         return { ok: 1, failed: 0, skipped: 0 };
       });
 
-    const result = await Effect.runPromise(syncAllUsers(["u1", "u2", "u3"], tallyOne));
+    const result = await Effect.runPromise(syncAllUsers(["u1", "u2", "u3"], syncOne));
 
     expect(maxInFlight).toBe(1);
     expect(events).toEqual(["start:u1", "end:u1", "start:u2", "end:u2", "start:u3", "end:u3"]);
