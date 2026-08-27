@@ -190,13 +190,36 @@ describe("fetchBalances", () => {
   });
 
   it("价表挂 + 某个钱包也挂 → 仍是整账户失败,价表优先于尽力而为", async () => {
+    // **必须留一个活着的钱包**(U 本位 200):否则五个全挂,老代码的「全军覆没」分支照样失败,
+    // 这条用例就成了空转 —— 把价表那两行删掉它也绿。留一个活的,才逼出「价表优先」这件事。
     const stub = upstream({
       "/api/v3/ticker/price": () => json({}, { status: 503 }),
-      "/fapi/v2/account": () => json({}, { status: 401 }),
+      "/sapi/v1/asset/get-funding-asset": () => json({}, { status: 401 }),
       "/api/v3/account": () => json(account),
+      "/fapi/v2/account": () => json(futuresAccount),
     });
     const err = await failing(stub, binanceProvider.fetchBalances(ctx()));
     expect(isRetryable(err)).toBe(true);
+  });
+
+  // **反向那半**:价表挂了,但没有任何钱包是**被它**挂掉的 —— 那四个消费者各自先死在自己的
+  // 签名请求上(`Effect.all` 串行短路,压根没走到 join)。这时价表是不是好的根本不影响结果,
+  // 整账户失败就成了误伤:那些 401 是「key 没勾这些权限」,重试三次也变不出权限来,
+  // 而 U 本位明明拿回了真实余额,却因为一个没人用得上的价表被丢掉、一份快照都不写。
+  it("需价表的钱包各自死于凭据(401)、价表也挂 → 仍尽力而为返回 U 本位,不整账户失败", async () => {
+    const stub = upstream({
+      "/api/v3/ticker/price": () => json({}, { status: 429 }),
+      "/api/v3/account": () => json({}, { status: 401 }),
+      "/sapi/v1/asset/get-funding-asset": () => json({}, { status: 401 }),
+      "/dapi/v1/account": () => json({}, { status: 401 }),
+      "/simple-earn/flexible/position": () => json({}, { status: 401 }),
+      "/simple-earn/locked/position": () => json({}, { status: 401 }),
+      "/fapi/v2/account": () => json(futuresAccount),
+    });
+    const { balances, note } = await run(stub, binanceProvider.fetchBalances(ctx()));
+
+    expect(balances.some((b) => b.kind === "perp_equity")).toBe(true);
+    expect(String(note?.[0]?.content)).toContain("Spot");
   });
 
   it("**全军覆没 → 失败**,不拿一份空快照盖掉已有余额", async () => {

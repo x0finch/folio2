@@ -199,22 +199,36 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
           { concurrency: "unbounded" },
         );
 
-        // **价表挂了 → 整账户失败**(FOL-30)。
+        const failed = outcomes.filter((o) => o.result._tag === "Left");
+
+        // **被价表连坐的失败 → 整账户失败**(FOL-30)。
         //
-        // 它不是第六个钱包,是**四个钱包共用的估值原料**:现货 / 币本位 / 资金 / 理财都要 join 它
+        // 价表不是第六个钱包,是**四个钱包共用的估值原料**:现货 / 币本位 / 资金 / 理财都要 join 它
         // 才算得出 USD,只有 U 本位自带 USD 不 join。所以价表一挂,那四个会**一起**倒进失败堆,
         // 而「尽力而为」看不出这是同一个原因 —— 它照样写出一份只剩 U 本位的快照,把那四个钱包的
         // 真实资产整块盖掉(生产实况:每轮 cron 掉块,note 恒为那四个的名字)。
         //
         // 「拿不到料」该走的是重试,不是降级:交回错误通道 → sync 的退避重试(带 Retry-After)→
-        // 打光则这一轮不写快照,旧值原样保住。**判在钱包成败之前**,这样错误是价表的真实原因
-        // (限流 / 上游不可用),而不是被它连坐的某个钱包。
+        // 打光则这一轮不写快照,旧值原样保住。
         //
-        // fiber 此刻必已完成(那四个钱包已经 join 过它),所以这里的 join 只是取值,不多等一拍。
+        // **判据是「有钱包死在它手上」,不是「价表挂了」** —— 两者不等价,差别正好是个误伤:
+        // key 只勾了合约权限时,那四个各自先死在自己的签名请求上(`Effect.all` 默认串行,失败即
+        // 短路,压根没走到 join),价表挂没挂根本不影响结果。那时若也整账户失败,就是拿一个没人
+        // 用得上的价表,把 U 本位真实拿回的余额丢掉、且因为限流可重试而白重试三次 —— 而那些 401
+        // 是「没这个权限」,重试变不出权限来,于是这个账户永远写不进快照。
+        //
+        // 认「同一个错误对象」而不是比对 `_tag`:被连坐的钱包抛出的就是 `Fiber.join` 递上来的
+        // 那一个,引用相等即「它就是死在价表上的」。比 tag 会把「钱包自己也撞了 429」误判成连坐。
+        //
+        // 这个 join 只在**有钱包已经 join 过**时才取到值(那时 fiber 早完成);其余情况它可能真等
+        // 价表跑完 —— 上界是 sync 那层的单次超时,可接受。
         const priceTable = yield* Effect.either(Fiber.join(prices));
-        if (priceTable._tag === "Left") return yield* Effect.fail(priceTable.left);
-
-        const failed = outcomes.filter((o) => o.result._tag === "Left");
+        if (priceTable._tag === "Left") {
+          const collateral = failed.some(
+            (o) => o.result._tag === "Left" && o.result.left === priceTable.left,
+          );
+          if (collateral) return yield* Effect.fail(priceTable.left);
+        }
         const balances = outcomes.flatMap((o) => (o.result._tag === "Right" ? o.result.right : []));
 
         // **全军覆没**(无一钱包成功,如 429 打光所有端点)→ 失败,让 sync 重试,
