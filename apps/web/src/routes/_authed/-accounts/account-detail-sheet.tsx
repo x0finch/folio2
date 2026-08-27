@@ -23,7 +23,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useFormatter, useTranslations } from "use-intl";
+import { useFormatter, useNow, useTranslations } from "use-intl";
 import { AccountTagsModal } from "@/components/account-tags-modal";
 import { AmountTicker } from "@/components/amount-ticker";
 import { ConnectorBadge } from "@/components/connector-badge";
@@ -133,6 +133,8 @@ function DetailBody({
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
+  // 活的 now:provider 那份冻在页面加载时刻,刚落库的快照会渲染成未来时态(见 sync-status 同款注释)。
+  const now = useNow({ updateInterval: 60_000 });
   // 划动读数(#470 片7)。
   const scrub = useChartScrub();
   const writes = useAccountSheetWrites(account, onClose);
@@ -193,7 +195,9 @@ function DetailBody({
       : isManual(account.connectorId)
         ? t("liveValue")
         : account.takenAt
-          ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
+          ? t("lastSyncedAt", {
+              when: format.relativeTime(new Date(Math.min(account.takenAt, now.getTime())), now),
+            })
           : t("neverSynced");
 
   return (

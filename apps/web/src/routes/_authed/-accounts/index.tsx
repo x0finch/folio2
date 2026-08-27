@@ -4,7 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { AlertTriangle, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useFormatter, useTranslations } from "use-intl";
+import { useFormatter, useNow, useTranslations } from "use-intl";
 import { AvatarStack } from "@/components/avatar-stack";
 import { ConnectorBadge } from "@/components/connector-badge";
 import { QueryBoundary } from "@/components/query-boundary";
@@ -319,6 +319,8 @@ function AccountStatusLine({
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
+  // 活的 now:provider 那份冻在页面加载时刻,刚落库的快照会渲染成未来时态(见 sync-status 同款注释)。
+  const now = useNow({ updateInterval: 60_000 });
   const archived = archivedAt != null;
   const warn = !archived && (status === "needsCreds" || status === "stale");
   const needsCreds = status === "needsCreds";
@@ -362,7 +364,9 @@ function AccountStatusLine({
       ) : isManual(connectorId) ? (
         t("liveValue")
       ) : takenAt != null ? (
-        t("lastSyncedAt", { when: format.relativeTime(new Date(takenAt)) })
+        t("lastSyncedAt", {
+          when: format.relativeTime(new Date(Math.min(takenAt, now.getTime())), now),
+        })
       ) : (
         t("neverSynced")
       )}

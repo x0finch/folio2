@@ -111,6 +111,18 @@ describe("SyncPanel 的口径", () => {
     expect(text).not.toContain("—");
   });
 
+  it("快照比 now 还新(刚落库、useNow 没 tick 到)→ 钳到 now,绝不渲染未来时态", () => {
+    // 生产实测抓到的形状:provider 的 now 冻在页面加载时刻,同步完 Last updated 写着
+    // 「in 2 minutes」。换 useNow 后仍有 60s 的 tick 间隙,所以调用点把时间戳钳到 now。
+    const text = mount({
+      summary: summary({ lastSyncedAt: NOW + 2 * MINUTE }),
+      round: round(),
+      busy: false,
+    });
+    expect(text).toContain("now");
+    expect(text).not.toContain("in 2 minutes");
+  });
+
   it("从未同步过 → Last updated 说「Never」(busy 与否都一样)", () => {
     const s = summary({ lastSyncedAt: null });
     expect(mount({ summary: s, round: round(), busy: false })).toContain("Never");
