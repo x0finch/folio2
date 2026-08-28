@@ -32,7 +32,10 @@ const SHELL_MAIN = "relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:
 const SHELL_DOCK_WRAP =
   "-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden";
 
-// 品牌行(logo + 字标):侧栏顶、移动顶栏、骨架壳三处同一份。
+// 骨架里的占位槽:三个小指标 + 六行列表(六行刚好铺满手机首屏)。
+const STAT_SLOTS = ["s1", "s2", "s3"];
+const ROW_SLOTS = ["r1", "r2", "r3", "r4", "r5", "r6"];
+
 // Span twin of the ui Skeleton (registry component is a fixed <div>): h1/p accept
 // only phrasing content, and a div inside them makes the browser restructure the
 // server HTML — hydration then fails (React #418, caught by the authed-shell e2e).
@@ -45,6 +48,7 @@ function SkeletonText({ className }: { className?: string }) {
   );
 }
 
+// 品牌行(logo + 字标):侧栏顶、移动顶栏、骨架壳三处同一份。
 function Brand() {
   return (
     <>
@@ -227,19 +231,62 @@ export function AppShellSkeleton() {
         </header>
 
         <main className={SHELL_MAIN}>
+          {/* Every box below is measured against the real Overview at 390px (the landing
+              page): eyebrow row 25, title 38, subtitle 20, content starts at 198, hero
+              240, tab row 32, list rows 72 each. Keep them in step — a box that drifts
+              here is a jump the moment the browser takes over. */}
+          <Skeleton className="absolute top-6 right-4 h-9 w-40 rounded-full lg:right-8" />
           {/* Render the REAL <PageHeader> (hook-free, provider-free — the shell's
-              zero-provider constraint holds) with skeleton bars as title/subtitle: the
-              real h1/p supply the line boxes, so nothing is hand-transcribed to drift.
-              inline-block matters: a block bar would collapse the h1's text line box.
-              No eyebrow: the default state (single portfolio, /settings) has none —
-              the skeleton matches the most common frame. */}
+              zero-provider constraint holds) with skeleton bars in its slots: the real
+              h1/p supply the line boxes, so nothing is hand-transcribed to drift.
+              inline-block matters: a block bar would collapse the h1's text line box. */}
           <PageHeader
+            eyebrow={<SkeletonText className="h-6 w-20 rounded-full" />}
             title={<SkeletonText className="h-8 w-44" />}
             subtitle={<SkeletonText className="h-4 w-60" />}
           />
-          {/* 内容位:一块头图 + 一块列表。各页真内容不同,壳只占面积,不猜形状。 */}
-          <Skeleton className="h-32 w-full rounded-xl" />
-          <Skeleton className="mt-4 h-64 w-full rounded-xl" />
+          <div className="flex flex-col gap-6">
+            {/* 净值块:标题 + 大数字 + 三个小指标,高度锁 min-h-60 与真块一致。 */}
+            <div className="min-h-60 pt-1">
+              <Skeleton className="h-4 w-28" />
+              <div className="mt-2 flex h-13 items-start gap-3">
+                <Skeleton className="h-10 w-56" />
+                <Skeleton className="h-9 w-24 rounded-full" />
+              </div>
+              <div className="mt-6 flex flex-wrap gap-8">
+                {STAT_SLOTS.map((k) => (
+                  <div key={k}>
+                    <Skeleton className="h-4 w-16" />
+                    <Skeleton className="mt-0.5 h-5 w-20" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              {/* 分类标签行 + 右侧合计。 */}
+              <div className="flex items-center gap-4">
+                <Skeleton className="h-8 w-56 rounded-full" />
+                <Skeleton className="ml-auto h-4 w-24" />
+              </div>
+              {/* 列表位:h-18 = 72,与真列表逐行对齐(高度含内边距,别写成内容高)。 */}
+              <div className="flex w-full flex-col">
+                {ROW_SLOTS.map((k) => (
+                  <div key={k} className="flex h-18 items-center gap-3 px-3 py-3">
+                    <Skeleton className="size-10 shrink-0 rounded-full" />
+                    <div className="flex flex-1 flex-col gap-1.5">
+                      <Skeleton className="h-4 w-28" />
+                      <Skeleton className="h-3 w-20" />
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-3 w-16" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </main>
       </div>
 
