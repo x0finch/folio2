@@ -28,7 +28,11 @@ const SHELL_INNER_COL = "flex min-w-0 flex-1 flex-col";
 const SHELL_SIDEBAR_FOOTER = "mt-auto flex items-center gap-2.5 px-1 pt-4";
 const SHELL_TOPBAR =
   "sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden";
-const SHELL_MAIN = "relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10";
+// min-h(手机):内容区永远比屏幕高一截 —— iOS 按「这页能不能滚」决定底部预留多少空间,
+// 而加载态比屏幕短、数据到齐后比屏幕长,一短一长会让底部 Dock 上下跳约 60px(实测)。
+// 两个阶段都能滚,这个翻转就不发生。桌面不需要(lg:min-h-0)。
+const SHELL_MAIN =
+  "relative mx-auto min-h-[calc(100svh_+_4rem)] w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:min-h-0 lg:px-8 lg:pb-10";
 const SHELL_DOCK_WRAP =
   "-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden";
 
