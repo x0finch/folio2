@@ -34,6 +34,9 @@ const en = {
     insights: "Insights",
     settings: "Settings",
   },
+  Shell: {
+    stalled: "Can't reach the server. Retrying…",
+  },
   PageHeader: {
     overviewSub: "Live portfolio across {count, plural, one {# source} other {# sources}}",
     accountsSub: "Manage your data sources",
@@ -440,6 +443,9 @@ const zh: Messages = {
     accounts: "账户",
     insights: "洞察",
     settings: "设置",
+  },
+  Shell: {
+    stalled: "连不上服务器,正在重试…",
   },
   PageHeader: {
     overviewSub: "跨 {count} 个来源的实时组合",

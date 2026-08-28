@@ -1,12 +1,20 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Outlet, redirect, retainSearchParams } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import {
+  createFileRoute,
+  isRedirect,
+  Outlet,
+  redirect,
+  retainSearchParams,
+} from "@tanstack/react-router";
+import { type ReactNode, useEffect, useState } from "react";
+import { useTranslations } from "use-intl";
 import { z } from "zod";
 import { AppShell, AppShellSkeleton } from "@/components/app-shell";
 import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
 import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
 import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
+import { RETRY, withRetry } from "@/lib/queries/constants";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
 import { syncStatusQuery } from "@/lib/queries/sync";
@@ -38,7 +46,7 @@ export const Route = createFileRoute("/_authed")({
   // `<ClientOnly fallback={pendingComponent}>`,所以这里填什么,服务器就发什么。
   // 它同时是客户端接手后 loader 未落地那一段的 Suspense fallback —— 首帧到数据浮现之间
   // 观感连续,不闪两种东西。
-  pendingComponent: AppShellSkeleton,
+  pendingComponent: PendingShell,
   // 选中的 Portfolio 进 URL(ADR 0046):`?portfolio=<id>`,默认那个不写。声明在**这一层** ——
   // 作用域是全站的(总额 / 代币 / 曲线 / Insights,ADR 0033),三页共享同一个参数。
   //
@@ -51,8 +59,11 @@ export const Route = createFileRoute("/_authed")({
   // 路径参数的关键理由之一,见 ADR 0046)。它只在「新 search 里没有这个键」时补旧值,并且尊重
   // 显式写的 `portfolio: undefined` —— 所以「切回默认 → 参数消失」与这条同时成立。
   search: { middlewares: [retainSearchParams(["portfolio"])] },
-  beforeLoad: async () => {
-    const current = await getSession();
+  beforeLoad: async ({ abortController }) => {
+    // 这次调用不走查询缓存,所以 QueryClient 上那份重试默认值管不到它 —— 单独包一层同款退避,
+    // 且**不放弃**(理由见 constants 的 withRetry)。signal 一定要接:导航取消 / 预取被丢弃时
+    // 路由会 abort 它,不接的话每次取消都留一条循环在后台打服务器。
+    const current = await withRetry(getSession, isRedirect, RETRY.forever, abortController.signal);
     if (!current) throw redirect({ to: "/login" });
     return { user: current.user };
   },
@@ -87,7 +98,40 @@ export const Route = createFileRoute("/_authed")({
     if (cause === "enter") await summary;
   },
   component: AuthedLayout,
+  // 最后一道网:退避重试都用尽了(约半分钟),仍旧失败时接住它 —— 否则落到框架自带的那张
+  // 白底「Something went wrong!」上,没有外壳、没有导航、也不会再试,只能自己刷新。
+  // 这里继续每隔一段重跑整条路由:服务器缓过来的下一轮就自己长回来了。
+  errorComponent: StalledShell,
 });
+
+/** 等了这么久还没数据,就把「连不上」这句话摆出来 —— 短于它的等待是正常首屏,不必解释。 */
+const SAY_STALLED_AFTER = 12_000;
+
+// 等待态的壳。**服务端渲染的就是它**(`ssr: false` 下 pendingComponent 即服务器发的 HTML),
+// 那一趟没有计时器、也就没有那句话:首帧永远是干净的骨架。话只在浏览器里等超时后才出现。
+function PendingShell() {
+  const t = useTranslations("Shell");
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setStalled(true), SAY_STALLED_AFTER);
+    return () => clearTimeout(timer);
+  }, []);
+  return <AppShellSkeleton note={stalled ? t("stalled") : null} />;
+}
+
+// 最后一道网,接的是**渲染异常**:复位它有用,因为下一次渲染是全新的一次尝试。
+// 拉取失败落到这里则是另一回事 —— 那时 match 是 error 态,`reset` 清不掉它(见 constants 的
+// withRetry 注释),所以拉取失败那条路是靠「外壳数据与鉴权一直重试、根本不进 error 态」堵住的,
+// 不是靠这里。
+function StalledShell({ reset }: { reset?: () => void }) {
+  const t = useTranslations("Shell");
+  useEffect(() => {
+    if (!reset) return;
+    const timer = setInterval(reset, RETRY.selfHeal);
+    return () => clearInterval(timer);
+  }, [reset]);
+  return <AppShellSkeleton note={t("stalled")} />;
+}
 
 // 外壳那一层要的同步摘要**必须在 Provider 之内取**:它按选中的 Portfolio 而来,而选中态就住
 // Provider 里。以前在 Provider 外面取(那时摘要是全局的,取哪儿都一样)—— 收口之后不行了,
