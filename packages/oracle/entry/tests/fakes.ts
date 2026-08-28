@@ -379,6 +379,15 @@ function fakeCacheStore(): FakeCacheStore {
         store.writes += 1;
         for (const w of batch) entries.set(w.key, { value: w.value, expiresAt: now + w.ttlMs });
       }),
+
+    // 标旧,不删 —— 与真实现同语义:行还在,读那头照样端得出来,只是 `stale`。
+    expire: (prefix) =>
+      Effect.map(Clock.currentTimeMillis, (now) => {
+        store.writes += 1;
+        for (const [key, hit] of entries) {
+          if (key.startsWith(prefix)) entries.set(key, { ...hit, expiresAt: now });
+        }
+      }),
   };
   return store;
 }
