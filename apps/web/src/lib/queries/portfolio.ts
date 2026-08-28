@@ -6,7 +6,7 @@ import {
   getPortfolioOverview,
 } from "@/lib/server/portfolio";
 import { listPortfolios } from "@/lib/server/portfolios";
-import { STALE_TIME } from "./constants";
+import { RETRY, STALE_TIME, shouldRetry } from "./constants";
 import { type PinScopeKey, portfolioKeys } from "./keys";
 
 // 组合域的读取入口 —— 与 `lib/server/portfolio`(读模型)+ `lib/server/portfolios`(实体)的读取型 server fn 对应。
@@ -23,6 +23,9 @@ export const portfolioListQuery = () =>
     queryKey: portfolioKeys.list(),
     queryFn: () => listPortfolios(),
     staleTime: STALE_TIME.live,
+    // 外壳没有它就画不出来(组合徽章 / 选中态),所以**不放弃**:一直停在骨架上重试,
+    // 好过让这条 match 变成 error —— error 态自己好不了(见 constants 的 withRetry)。
+    retry: (failureCount, error) => shouldRetry(failureCount, error, RETRY.forever),
   });
 
 /** 首页 tab 条:有没有永续 / DeFi + 自定义 Tab 的已解析标签。 */

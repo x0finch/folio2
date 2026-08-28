@@ -36,6 +36,8 @@ interface ErrorSlotState {
 class ErrorSlot extends Component<ErrorSlotProps, ErrorSlotState> {
   state: ErrorSlotState = { failed: false, seenKey: this.props.resetKey };
   private healTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 连续失败次数 —— 只用来拉长自愈间隔,成功一次就归零。 */
+  private failures = 0;
 
   static getDerivedStateFromError() {
     return { failed: true };
@@ -57,16 +59,29 @@ class ErrorSlot extends Component<ErrorSlotProps, ErrorSlotState> {
     console.error(`[query-boundary ${this.props.resetKey}] caught:`, error);
   }
 
-  // 塌了就排一次自愈;成功长回来时 `failed` 已是 false,不再排下一次。失败照旧塌回来,
-  // 于是又排一次 —— 天然成了「隔一段试一次」,不必自己数轮次。
+  // 排一次自愈。**挂载与更新都要排**:错误可能发生在这个边界自己首次挂载的那一瞬
+  // (缓存里已经有一个失败的查询,用户切回这个 Tab → 边界全新挂载 → 子树首渲染当场抛),
+  // 那一趟走的是 `componentDidMount`,只挂在 update 上的话这一格永远不会自己好。
+  componentDidMount() {
+    this.scheduleHeal();
+  }
+
+  // 成功长回来时 `failed` 已是 false,不再排下一次。失败照旧塌回来,于是又排一次 ——
+  // 天然成了「隔一段试一次」,不必自己数轮次。间隔随连败次数拉长(15s → 30s → 60s 封顶):
+  // 一直好不了的那种(比如子树渲染本身有毛病)不该每 15 秒闪一下到天荒地老。
   componentDidUpdate() {
-    if (this.state.failed && !this.healTimer) {
-      this.healTimer = setTimeout(() => {
-        this.healTimer = null;
-        this.props.onSelfHeal();
-        this.setState({ failed: false });
-      }, RETRY.selfHeal);
-    }
+    this.scheduleHeal();
+  }
+
+  private scheduleHeal() {
+    if (!this.state.failed || this.healTimer) return;
+    const wait = Math.min(RETRY.selfHeal * 2 ** this.failures, RETRY.selfHealMax);
+    this.failures += 1;
+    this.healTimer = setTimeout(() => {
+      this.healTimer = null;
+      this.props.onSelfHeal();
+      this.setState({ failed: false });
+    }, wait);
   }
 
   componentWillUnmount() {
@@ -74,6 +89,8 @@ class ErrorSlot extends Component<ErrorSlotProps, ErrorSlotState> {
   }
 
   render() {
+    // 长回来了就把连败计数归零:下一次偶发失败照旧从最短间隔开始试。
+    if (!this.state.failed) this.failures = 0;
     return this.state.failed ? this.props.fallback : this.props.children;
   }
 }

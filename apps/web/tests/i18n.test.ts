@@ -60,6 +60,16 @@ describe("messages (via createTranslator)", () => {
     expect(t("Settings.signOutConfirmTitle")).toBe("退出登录?");
   });
 
+  // 外壳等太久那句话(FOL-33):它出现在骨架上,拿不到串就会露出 `stalled` 这个键名。
+  it("English: shell stalled key resolves", () => {
+    const t = createTranslator({ locale: "en", messages: messages.en });
+    expect(t("Shell.stalled")).toBe("Can't reach the server. Retrying…");
+  });
+  it("Chinese: shell stalled key resolves", () => {
+    const t = createTranslator({ locale: "zh", messages: messages.zh });
+    expect(t("Shell.stalled")).toBe("连不上服务器,正在重试…");
+  });
+
   // L1 Login(#113):副标题 + read-only 说明新键,中英双语都产出串(非回退 key)。
   it("English: new Login keys resolve", () => {
     const t = createTranslator({ locale: "en", messages: messages.en });

@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { getSyncRound, getSyncStatus } from "@/lib/server/sync";
-import { POLL_INTERVAL, STALE_TIME } from "./constants";
+import { POLL_INTERVAL, RETRY, STALE_TIME, shouldRetry } from "./constants";
 import { syncKeys } from "./keys";
 
 // 同步域的读取入口 —— 与 `lib/server/sync` 的读取型 server fn 一一对应。
@@ -15,6 +15,8 @@ export const syncStatusQuery = (portfolioId: string) =>
     queryKey: syncKeys.status(portfolioId),
     queryFn: () => getSyncStatus({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
+    // 外壳靠它才画得出来,所以**不放弃**(同 portfolioListQuery 的理由)。
+    retry: (failureCount, error) => shouldRetry(failureCount, error, RETRY.forever),
   });
 
 /**

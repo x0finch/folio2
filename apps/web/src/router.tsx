@@ -1,23 +1,15 @@
 import { QueryCache, QueryClient } from "@tanstack/react-query";
-import {
-  createRouter as createTanStackRouter,
-  isNotFound,
-  isRedirect,
-} from "@tanstack/react-router";
+import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
-import { RETRY } from "./lib/queries/constants";
+import { RETRY, shouldRetry } from "./lib/queries/constants";
 import { routeTree } from "./routeTree.gen";
 
 export function getRouter() {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
-        // 拉失败就退着重试,别一次就判死(理由与档位见 queries/constants 的 RETRY)。
-        // 判据只能看「是不是控制流」:server fn 的失败到了这里是一个没有状态码的通用 Error
-        // (框架抛的 `Invariant failed`),分不出 500 还是 400 —— 所以反过来排除那两种
-        // **重试没有意义**的:跳转(如会话过期要去登录页)与 404,其余一律再试。
-        retry: (failureCount, error) =>
-          !isRedirect(error) && !isNotFound(error) && failureCount < RETRY.attempts,
+        // 拉失败就退着重试,别一次就判死(判据与档位见 queries/constants)。
+        retry: shouldRetry,
         retryDelay: RETRY.delay,
       },
     },

@@ -59,10 +59,11 @@ export const Route = createFileRoute("/_authed")({
   // 路径参数的关键理由之一,见 ADR 0046)。它只在「新 search 里没有这个键」时补旧值,并且尊重
   // 显式写的 `portfolio: undefined` —— 所以「切回默认 → 参数消失」与这条同时成立。
   search: { middlewares: [retainSearchParams(["portfolio"])] },
-  beforeLoad: async () => {
-    // 这次调用不走查询缓存,所以 QueryClient 上那份重试默认值管不到它 —— 单独包一层同款退避。
-    // 它挂了整棵树连外壳都没有,只剩框架自带的那张白底错误页,连导航都点不到。
-    const current = await withRetry(getSession, isRedirect, Number.POSITIVE_INFINITY);
+  beforeLoad: async ({ abortController }) => {
+    // 这次调用不走查询缓存,所以 QueryClient 上那份重试默认值管不到它 —— 单独包一层同款退避,
+    // 且**不放弃**(理由见 constants 的 withRetry)。signal 一定要接:导航取消 / 预取被丢弃时
+    // 路由会 abort 它,不接的话每次取消都留一条循环在后台打服务器。
+    const current = await withRetry(getSession, isRedirect, RETRY.forever, abortController.signal);
     if (!current) throw redirect({ to: "/login" });
     return { user: current.user };
   },
@@ -118,9 +119,10 @@ function PendingShell() {
   return <AppShellSkeleton note={stalled ? t("stalled") : null} />;
 }
 
-// 最后一道网:渲染异常这类**不是拉取失败**的错误落这里。给得到复位句柄就定时复位重试
-// (渲染错误走 CatchBoundary,它给 `reset`);拉取失败那一支框架不给句柄,但那条路已经
-// 走不到这儿了 —— 鉴权会一直重试不放弃,查询有各自的边界自愈。
+// 最后一道网,接的是**渲染异常**:复位它有用,因为下一次渲染是全新的一次尝试。
+// 拉取失败落到这里则是另一回事 —— 那时 match 是 error 态,`reset` 清不掉它(见 constants 的
+// withRetry 注释),所以拉取失败那条路是靠「外壳数据与鉴权一直重试、根本不进 error 态」堵住的,
+// 不是靠这里。
 function StalledShell({ reset }: { reset?: () => void }) {
   const t = useTranslations("Shell");
   useEffect(() => {
