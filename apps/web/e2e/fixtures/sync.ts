@@ -146,12 +146,31 @@ export async function unblockPostCreateSync(page: Page) {
  * 返回时 `POST /api/sync` 已经发出。
  *
  * 同样要重试点击:reload 之后头几百毫秒的点击会被吞(见 addBinanceAccount 的注释)。
- * 重复点不会多跑一轮 —— useAccountSync 的 `sync()` 在 isPending 时直接 return。
+ * 重复点不会多跑一轮 —— `useSyncRound` 的 `sync()` 在 disabled 时直接 return,而**开轮本身也是
+ * 幂等的**(ADR 0048):真发出去两次,第二次拿回的是同一轮。
  *
- * **只等请求发出,不等响应头**:实测 vite dev 下这条 NDJSON 响应是**攒完才发**的
- * (量到响应头 6.4s 才到,而那一轮总共就跑了 6.4s),所以「响应头到手」在本地并不等于「刚起跑」,
- * 反而等于「已经跑完」。要判断服务端真的在干活,问假上游收到请求没有(setUpstream hits)。
+ * **只等请求发出,不等响应体**:这条请求现在开轮即返(不再是攒完才发的 NDJSON 流),但「回包
+ * 到手」仍然只说明轮开了,不说明服务端已经在打上游。要判断它真的在干活,问假上游收到请求没有
+ * (setUpstream hits)。
  */
+// 悬停页头那枚胶囊,开同步面板(FOL-32 后桌面 popover 走 hover)。
+//
+// 「开着」认触发器的 `aria-expanded="true"`(beUI PopoverTrigger 挂的,见 popover.tsx),
+// **不认面板文字可见**:vendored Popover 闭合时内容不卸载 —— clipPath 裁没 + inert,
+// 而 Playwright 的 toBeVisible 这三样一个都不认,等「Sync status 出现」是个恒真的假信号。
+export async function hoverSyncPill(page: Page) {
+  const pill = page.getByRole("button", { name: /^(Synced|Needs attention|Syncing…)$/ });
+  await expect(async () => {
+    // **先把光标挪开再 hover。** 这些用例多半是「点完同步再看面板」,而点击之后光标就停在胶囊
+    // 正中 —— 再 `hover()` 一次目标坐标没变,浏览器不会补发 mouseenter,于是 hover 触发的弹层
+    // 永远开不了(实测:点同步之后直接 hover,拿到的稳定是 `aria-expanded="false"`,
+    // 15 秒里重试 33 次一次都没变过)。挪开一步,这一次 hover 才是真的「移进来」。
+    await page.mouse.move(0, 0);
+    await pill.hover();
+    await expect(pill).toHaveAttribute("aria-expanded", "true", { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+}
+
 export async function clickSyncPill(page: Page) {
   const pill = page.getByRole("button", { name: /^(Synced|Needs attention|Syncing…)$/ });
   await expect(async () => {

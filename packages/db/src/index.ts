@@ -56,6 +56,15 @@ export type {
   SnapshotWithBalances,
   WriteSnapshotInput,
 } from "./domains/snapshots";
+// 同步轮(ADR 0048)。**只出 app 真消费的名字**:轮记录及其字段类型、开轮的下场。
+// 那几个 op 的入参对象类型不出包 —— 调用点都写字面量,导出只会让 knip 报孤儿。
+export type {
+  OpenSyncRoundResult,
+  SyncRoundAccount,
+  SyncRoundAccountStatus,
+  SyncRoundRecord,
+  SyncRoundTrigger,
+} from "./domains/sync-rounds";
 export type { TabPinInput } from "./domains/tab-pins";
 export type { AccountTagLink, CreateTagInput } from "./domains/tags";
 export type { TokenPriceStore } from "./domains/token-prices";

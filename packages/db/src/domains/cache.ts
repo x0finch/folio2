@@ -5,9 +5,11 @@ import type { Drizzle } from "../connect";
 import { CurrentUser } from "../current-user";
 import { userCache } from "../schema";
 
-// per-user 的 KV 缓存(#199),只三种键(`warm` / `fx:<币种>` / `platform:<键>`,
-// 键的形状归 oracle 的 cache.ts,本文件不解释键;`defi-logo:<协议>` 那种是 app 自己的一片)。
-// 值是 JSON,db 当不透明 blob。
+// per-user 的 KV 缓存(#199)。**通用读写这一条路上有三种键**(`warm` / `fx:<币种>` /
+// `platform:<键>`,键的形状归 oracle 的 cache.ts,本文件不解释键;`defi-logo:<协议>` 那种是 app
+// 自己的一片)。同一张表上还住着第四种键 —— 同步轮(`sync-round:<portfolioId>`,ADR 0048),
+// **但它不走这个 store**:它的写入是带轮 id 条件的单语句,`put(key, value)` 表达不了
+// (见 domains/sync-rounds.ts)。值是 JSON,db 当不透明 blob。
 //
 // **过期不删、读出带 stale** —— 与价同一套 SWR 语义:展示先给旧的,调用方决定要不要后台刷。
 // 整张删空功能不坏,只是下次访问慢一点。

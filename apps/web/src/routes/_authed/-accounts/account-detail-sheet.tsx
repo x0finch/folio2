@@ -41,6 +41,7 @@ import { isManual } from "@/lib/core/manual";
 import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
+import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
 import { accountHistoryQuery } from "@/lib/queries/accounts";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { removeAccount, updateAccount } from "@/lib/server/accounts";
@@ -133,6 +134,8 @@ function DetailBody({
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
+  // 活时钟 + 钳位收在 hook 里;抽屉是**晚挂载**的,正是那份注释里「等一跳才自愈」的受害者。
+  const syncedAt = useRelativeSyncedAt();
   // 划动读数(#470 片7)。
   const scrub = useChartScrub();
   const writes = useAccountSheetWrites(account, onClose);
@@ -193,7 +196,7 @@ function DetailBody({
       : isManual(account.connectorId)
         ? t("liveValue")
         : account.takenAt
-          ? t("lastSyncedAt", { when: format.relativeTime(new Date(account.takenAt)) })
+          ? t("lastSyncedAt", { when: syncedAt(account.takenAt) })
           : t("neverSynced");
 
   return (

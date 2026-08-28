@@ -11,7 +11,8 @@
 //
 // **「所有用户」那一层不在这个包里**:服务是按用户装配的(见 services.ts),一份服务服务不了多个
 // 用户,所以「逐用户装配 + 累加」属于做装配的那一方(`apps/web` 的 `syncAllUsers`)。本包只交出
-// `Sweep.userTally`(一个用户的小计)与 `Sweep.sumTallies`(小计怎么加)。
+// `Sweep.sumTallies`(小计怎么加)—— 小计本身从收官后的轮记录读回来(ADR 0048),
+// 从流现折计数的 `userTally` 已随之退场。
 //
 // 内部组织:`types` 公开类型 / `services` 能力与 Layer / `retry` 退避策略 /
 // `account` 单账户 / `sweep` 单用户。业务代码从上下文取能力,不透传 deps。

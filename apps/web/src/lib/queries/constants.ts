@@ -25,3 +25,13 @@ export const STALE_TIME = {
   // 连接器清单:**部署内静态**,同一个进程里问第二次没有意义。
   deployment: Number.POSITIVE_INFINITY,
 } as const;
+
+/**
+ * 轮询间隔。**只在「有东西正在变」时才开**(react-query 的 `refetchInterval` 支持按当前数据决定)。
+ *
+ * 目前只有一处:一轮同步进行中时盯着它的进度(ADR 0048 —— 进度是服务端事实,前端读它)。
+ * 1.5s 是照「一轮几十秒、十几发单键读」定的:再快只是多打库,再慢用户会觉得卡住了。
+ */
+export const POLL_INTERVAL = {
+  syncRound: 1_500,
+} as const;

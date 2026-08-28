@@ -1,9 +1,8 @@
 // PWA 的 head 元素:manifest 链接、apple-touch 图标、明暗两套 theme-color、apple-mobile-web-app-*。
 // 抽成常量供 __root 注入 + 单测断言(测试缝③:守住 issue 点名「当前缺 manifest link」那处)。
-// 颜色取 design token 的 --background:亮 oklch(1 0 0)=#ffffff、暗 oklch(0.145 0 0)≈#0a0a0a
-//(手算 OKLab→sRGB:achromatic 线性值 0.145³≈0.00305,落在线性段 ×12.92 → 约 #0a0a0a)。
-const THEME_COLOR_LIGHT = "#ffffff";
-const THEME_COLOR_DARK = "#0a0a0a";
+// 颜色取 design token 的 --background(beUI 官方值):亮 lab(98.84%)≈#fcfcfc、暗 #151515
+const THEME_COLOR_LIGHT = "#fcfcfc";
+const THEME_COLOR_DARK = "#151515";
 
 // viewport-fit=cover:让布局铺满到刘海/指示条,安全区再靠 env(safe-area-inset-*) 内边距处理
 //(见 app-shell 顶栏/底部导航 + styles.css reset)。

@@ -7,7 +7,8 @@ import { withDefaultNoStore } from "./lib/server/entry/cache-headers";
 import { configureLogging } from "./lib/server/entry/log";
 import { pruneNotesAllUsers } from "./lib/server/entry/note-retention";
 import { runAtEdge, withGlobalDb, withOracleWarm } from "./lib/server/oracle";
-import { syncAllUsers, warmAllUsers } from "./lib/server/sync/deps";
+import { warmAllUsers } from "./lib/server/sync/deps";
+import { syncAllUsers } from "./lib/server/sync/round";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
 // 再补一个 CF scheduled() 处理器跑定时同步(cron 只触发 scheduled,不触发 fetch)。

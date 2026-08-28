@@ -1,11 +1,13 @@
 import { SYNC_CONCURRENCY } from "@folio/sync";
-import { expect, test } from "@playwright/test";
+import { type APIRequestContext, expect, test } from "@playwright/test";
+import type { SyncRoundView } from "../src/lib/server/sync/status";
 import { dismissPasskeyPrompt, signUpAndLogin } from "./fixtures/app";
 import {
   accountIdByLabel,
   addBinanceAccount,
   blockPostCreateSync,
   clickSyncPill,
+  hoverSyncPill,
   setUpstream,
   snapshotCount,
   unblockPostCreateSync,
@@ -23,7 +25,8 @@ import {
 // server 就有了不联网、必定成功、快慢可控的上游,而且走的是生产也在跑的机制,没往生产代码塞测试分支。
 //
 // 要验的核心是 #371 的承诺:**跑和看是分开的 —— 关掉标签页,同步在服务端照样跑完。**
-// 那条之前只有推理(waitUntil 是平台行为、Effect Stream 是拉动式),没跑过一轮真同步。
+// ADR 0048 之后这条承诺更强了:连「看」的那一半都不再是一条流,而是对轮记录的轮询,所以关页
+// 之后剩下的是一个与任何连接都无关的 `waitUntil` 任务。那条之前只有推理,没跑过一轮真同步。
 
 /** 快照里有一条数量恰好是 amount 的余额。断言余额数量而不是 totalUsd:数量直接来自 provider,不经重估。 */
 const holds = (amount: number) => (s: { balances: { amount: number }[] }) =>
@@ -56,16 +59,24 @@ test.describe("同步一轮", () => {
     await page.reload(); // 让页头那枚胶囊拿到「都同步过了」的摘要
     await clickSyncPill(page);
 
-    await expect(page.getByText("Synced 2 accounts.")).toBeVisible({ timeout: 30_000 });
+    // 完成信号在面板里(FOL-32),而这一轮的结果是**服务端事实**(ADR 0048):`POST /api/sync`
+    // 只回一个刚开的轮(0 / 2),「2 已同步」只可能是轮询把收官后的那一轮读回来的 ——
+    // 所以这一条断言本身就是「轮询这条路走通了」的证据。
+    await hoverSyncPill(page);
+    await expect(page.getByText("2 synced")).toBeVisible({ timeout: 30_000 });
     await waitForSnapshot(page, idA, holds(3.25), "Spot A 这一轮的快照没落库");
     await waitForSnapshot(page, idB, holds(3.25), "Spot B 这一轮的快照没落库");
+    // 再钉两下:没有失败区块 + 胶囊收口回「Synced」(这一轮出事会转琥珀「Needs attention」)。
+    await expect(page.getByText("Failed this round")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Synced$/ })).toBeVisible({ timeout: 30_000 });
   });
 
   // 整个 #372 的理由就是这一条。别的挂了都好说,它挂了说明 #371 的核心承诺是假的。
   //
-  // **这条钉住的是「连接被真的掐断,那一轮不受影响」**:客户端 abort 会让 workerd 取消响应体那个
-  // ReadableStream,而取消**不能**顺着传回生产端 —— 那正是 #371 用队列接力换来的性质(队列是无界的、
-  // 推动式的,读的那头没了不回压)。这里跑的是真断连 + 真落库,单测造不出来。
+  // **这条钉住的是「连接没了,那一轮不受影响」**:`POST /api/sync` 早就回完了,这一轮活在
+  // `waitUntil` 里,而每个账户的结果是写进库的,不是推给某个连接的。以前这条钉的是队列接力
+  //(响应体那个 ReadableStream 被取消时不能顺着回压到生产端);现在那条路整个不存在了,
+  // 而要验的性质没变。这里跑的是真断连 + 真落库,单测造不出来。
   //
   // **它钉不住的是 `waitUntil` 那一行本身。** 实测过:把 `waitUntil(run)` 注掉,dev 与 preview 两边
   // 这条照样绿 —— Miniflare 不强制「回了响应 worker 就该退出」,那是真 Workers 才有的约束。
@@ -114,8 +125,8 @@ test.describe("同步一轮", () => {
   //
   // 账户数刻意取 SYNC_CONCURRENCY + 2 —— 一轮同步最多同时拉 6 个账户,所以关页那一刻排在后面的两个
   // **连一个上游请求都还没发出去**。它们事后照样出快照,说明服务端不是「把手上的做完就算」,而是
-  // 真的把整条流拉到底。这一条单测替代不了:它要的是「没人读了,生产端还在往前推」这个性质在真
-  // 断连下成立(队列无界 + 推动式,读的那头没了不回压 —— 见 lib/sync-ndjson.ts)。
+  // 真的把整条流拉到底。这一条单测替代不了:它要的是「浏览器没了,那一轮还在往前推」这个性质
+  // 在真断连下成立。
   //
   // 从 @folio/sync 引常量而不是写死 6:并发上限改了,这条测试跟着改,不会悄悄退化成「8 个全并发」
   // (那就什么都没测到了)。
@@ -190,58 +201,94 @@ test.describe("同步一轮", () => {
   });
 });
 
-// 前端读流的两条分类规则。不依赖假 server —— 直接喂假 NDJSON,因为要造的是**服务端不会轻易造出的**
-// 组合(缺凭据的账户、用户级失败)。
+// 面板怎么念一轮的结果。**直接把 `POST /api/sync` 的回包换掉** —— 服务端不会轻易造出这几种组合
+// (缺凭据的账户、整轮没跑起来、worker 死在半路),而回包就是那一轮此刻的样子,前端拿它直接落缓存。
 //
-// 「进度是逐条更新而不是一次性跳到 100%」不在这里验:route.fulfill 一次性把整个 body 交出去,
-// 造不出分片;那条已由 tests/sync-stream.test.ts(逐行回调)与 tests/use-account-sync.test.tsx
-// (故意切成两片喂)覆盖,在这儿重复一遍只会多一处不稳。
-test.describe("前端读流", () => {
-  const ndjson = (lines: unknown[]) => ({
+// 收官/中断的轮不会再触发轮询(`refetchInterval` 只在「在跑」时开),所以造出来的这一份就是
+// 面板一直读的那一份,不必再去拦 server fn 的地址(那是编译期产物,认不出是哪一个)。
+test.describe("面板读轮", () => {
+  // 有类型标注:面板真按 `SyncRoundView` 的字段读,fixture 走形(字段改名 / 新增必填)要在
+  // 编译期红,不是在浏览器里静默显示成空面板。
+  const roundView = (over: Partial<SyncRoundView>) => ({
     status: 200,
-    contentType: "application/x-ndjson",
-    body: lines.map((l) => `${JSON.stringify(l)}\n`).join(""),
+    contentType: "application/json",
+    body: JSON.stringify({
+      roundId: "e2e-round",
+      state: "done",
+      trigger: "manual",
+      startedAt: Date.now() - 1000,
+      finishedAt: Date.now(),
+      total: 2,
+      settled: 2,
+      synced: 1,
+      failed: [],
+      needsKeys: 0,
+      current: null,
+      unresolved: 0,
+      error: null,
+      ...over,
+    } satisfies SyncRoundView),
   });
 
-  test("缺凭据的账户算跳过,不算失败", async ({ page, request }) => {
+  const withOneAccount = async (
+    page: Parameters<typeof dismissPasskeyPrompt>[0],
+    request: APIRequestContext,
+  ) => {
     await setUpstream(request, { delayMs: 0 });
     await signUpAndLogin(page);
     await dismissPasskeyPrompt(page);
     await page.goto("/accounts");
     await addBinanceAccount(page, "Spot A");
+  };
 
-    await page.route("**/api/sync", (route) =>
-      route.fulfill(
-        ndjson([
-          { accountId: "a", ok: true },
-          { accountId: "b", ok: false, skipped: true },
-        ]),
-      ),
-    );
+  test("缺凭据的账户算「需要凭据」,不算失败", async ({ page, request }) => {
+    await withOneAccount(page, request);
+    await page.route("**/api/sync", (route) => route.fulfill(roundView({ needsKeys: 1 })));
 
     await page.reload();
     await clickSyncPill(page);
 
-    // 两条都记进「已同步」,一条都不进失败 —— 用户只是还没填 API key,那不是错误。
-    await expect(page.getByText("Synced 2 accounts.")).toBeVisible();
+    // 缺凭据是三段里自己的一段 —— 用户只是还没填 API key,那不是错误。
+    // 锚定整串:Playwright 的字符串 name 是子串匹配,裸 "Synced" 会连账户行的「Synced now」
+    // 一起命中,strict mode 直接炸(本地实跑抓到)。
+    await expect(page.getByRole("button", { name: /^Synced$/ })).toBeVisible({ timeout: 30_000 });
+    await hoverSyncPill(page);
+    await expect(page.getByText("1 need keys")).toBeVisible();
+    await expect(page.getByText("Failed this round")).toHaveCount(0);
   });
 
-  test("用户级失败(fatal 行)→ 报错,不谎报成功", async ({ page, request }) => {
-    await setUpstream(request, { delayMs: 0 });
-    await signUpAndLogin(page);
-    await dismissPasskeyPrompt(page);
-    await page.goto("/accounts");
-    await addBinanceAccount(page, "Spot A");
-
+  test("整轮没跑起来 → 报错,不谎报成功", async ({ page, request }) => {
+    await withOneAccount(page, request);
     await page.route("**/api/sync", (route) =>
-      route.fulfill(ndjson([{ accountId: "a", ok: true }, { fatal: "account store exploded" }])),
+      route.fulfill(roundView({ synced: 0, settled: 0, error: "account store exploded" })),
     );
 
     await page.reload();
     await clickSyncPill(page);
 
-    // 断言整句而不是 /^Synced/ 这种宽匹配:账户行上写着「Synced now」,宽匹配会把它算进来。
-    await expect(page.getByText("1 failed — account store exploded")).toBeVisible();
-    await expect(page.getByText("Synced 1 account.")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Needs attention$/ })).toBeVisible({
+      timeout: 30_000,
+    });
+    await hoverSyncPill(page);
+    await expect(page.getByText("Failed this round")).toBeVisible();
+    await expect(page.getByText("account store exploded")).toBeVisible();
+  });
+
+  // 中断 = 未收官且心跳断了(worker 死在半路,ADR 0048)。没有它这一档,一轮假同步在面板上
+  // 与「一切正常」长得一模一样,而屏幕上的数其实是旧的。
+  test("中断的一轮 → 说出来,不装作没事", async ({ page, request }) => {
+    await withOneAccount(page, request);
+    await page.route("**/api/sync", (route) =>
+      route.fulfill(roundView({ state: "interrupted", finishedAt: null, settled: 1, synced: 1 })),
+    );
+
+    await page.reload();
+    await clickSyncPill(page);
+
+    await expect(page.getByRole("button", { name: /^Needs attention$/ })).toBeVisible({
+      timeout: 30_000,
+    });
+    await hoverSyncPill(page);
+    await expect(page.getByText("stopped partway")).toBeVisible();
   });
 });

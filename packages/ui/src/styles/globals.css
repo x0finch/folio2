@@ -70,23 +70,41 @@
   --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --motion-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  /* 标准 token 一律取 beUI 官方站的值(2026-08 从 beui.dev 亮/暗两态实测抓取,原样搬),
+     不再用 shadcn 模板默认:beUI 的件(goo popover 等)不带边框投影,卡片感全靠面与面的色差档,
+     而 shadcn 默认(背景=卡面=纯白)是配着自带 border+shadow 的 Radix 件设计的,两套假设不同 ——
+     亮色 popover 曾因此隐形(FOL-32 手机实测抓到)。
+     **folio 用法偏差**(官方值在 folio 的用法下坏掉的,逐个在行内注明):--accent / --muted /
+     --ring / --border / --input / 暗色 --destructive / 暗色 --muted-foreground。官方站没有这些用法(hover 面、焦点环、
+     弹层内分隔线),它的值不为它们负责 —— 判据是「folio 怎么用」,不是「官方长什么样」。
+     镜像清单:background/foreground 这几个 token 在 **pwa-head.ts(THEME_COLOR_*)/
+     manifest.json(theme_color/background_color)/ offline.html(内联样式)** 各有一份硬编码
+     镜像 —— 改这里记得跟那三处。 */
+  --background: lab(98.84% 0 0);
+  --foreground: lab(3.04863% 0 0);
+  --card: lab(96.52% 0 0);
+  --card-foreground: lab(3.04863% 0 0);
+  --popover: lab(96.52% 0 0);
+  --popover-foreground: lab(3.04863% 0 0);
+  --primary: lab(3.04863% 0 0);
+  --primary-foreground: lab(98.84% 0 0);
+  --secondary: lab(96.52% 0 0);
+  --secondary-foreground: lab(3.04863% 0 0);
+  /* folio 用法偏差:官方 muted == card == accent,`hover:bg-muted`/`hover:bg-accent` 在卡面上
+     全成无操作(FOL-32 二轮 review 抓到,同步胶囊就是受害者)—— 与 card 拉开一档。 */
+  --muted: lab(93% 0 0);
+  --muted-foreground: lab(42% 0 0);
+  /* folio 用法偏差:官方 accent 是 beUI 品牌青,folio 拿它当中性 hover 面(shadcn 惯例),
+     照搬会把悬停态刷成青色;取与 muted 同档的中性灰(hover 面一件事一种灰)。 */
+  --accent: lab(93% 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --destructive: lab(53.6853% 69.6775 43.7724);
+  /* folio 用法偏差:官方 6% 黑在 popover/card 面上近乎隐形,而 folio 的弹层内分隔线、输入框
+     描边全靠它 —— 提到 10%(folio 旧档)。 */
+  --border: lab(3.04863% 0 0 / 0.10);
+  --input: lab(3.04863% 0 0 / 0.10);
+  /* folio 用法偏差:官方 12% 黑对比只有 ~1.3:1,而 folio 拿 ring 当**唯一**焦点指示 +
+     accounts 页 FLASH_CLASS 定位高亮,WCAG 焦点指示底线是 3:1 —— 回 folio 旧值。 */
   --ring: oklch(0.708 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -117,23 +135,32 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
+  /* 同上:标准 token 取 beUI 官方暗色值;folio 用法偏差逐个行内注明(名单见亮色块头注)。 */
+  --background: #151515;
+  --foreground: lab(95.36% 0 0);
+  --card: #1c1c1c;
+  --card-foreground: lab(95.36% 0 0);
+  --popover: #1c1c1c;
+  --popover-foreground: lab(95.36% 0 0);
+  --primary: lab(95.36% 0 0);
+  --primary-foreground: #151515;
+  --secondary: #1c1c1c;
+  --secondary-foreground: lab(95.36% 0 0);
+  /* folio 用法偏差:同亮色 —— 官方 muted == card,hover 归零;与 card 拉开一档(folio 旧值,
+     与暗色 accent 同档)。 */
   --muted: oklch(0.269 0 0);
+  /* folio 用法偏差:--muted 恢复了 folio 的档差(0.269),官方前景(lab 55.92%)在它上面只有
+     4.15:1,低于 AA 正文线 —— 前景跟着配对恢复 folio 旧值,对比回到 ~4.7:1。 */
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
+  /* folio 用法偏差:官方暗色 destructive(53.7% L)当**文字**用不过 AA,而 folio 到处
+     `text-destructive` 写小字报错 —— 回 folio 旧值(亮色保持官方,亮底上它过得了)。 */
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  /* folio 用法偏差:同亮色 border/input —— 5% 白在弹层面上隐形,提到 10%(folio 旧档)。 */
+  --border: #ffffff1a;
+  --input: #ffffff1a;
+  /* folio 用法偏差:同亮色 ring —— 焦点指示底线 3:1,回 folio 旧值。 */
   --ring: oklch(0.556 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);

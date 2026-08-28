@@ -35,6 +35,12 @@ function registerServiceWorker(): void {
 // `classNames.root` 里那个 top 覆盖 vendored 位置类自带的 `top-4`(它排在位置类之后,twMerge 生效),
 // 叠上 `env(safe-area-inset-top)` → 刘海/灵动岛下不压内容。
 // 断点与外壳的手机形态(顶栏 / Dock 的 `lg:hidden`)对齐,那条线是 64rem。
+//
+// **3.75rem = 移动顶栏的高 + 一档间隙**:顶栏(见 app-shell)是 `pt-[0.75rem+safe] + 内容行 +
+// pb-0.75rem + border-b 1px`,内容行由 `text-lg` 的 1.75rem 行高定(比 logo 的 1.5rem 高),
+// 安全区之外合计 3.25rem + 1px;3.75rem 落点在顶栏下缘之下约 0.44rem。以前这里只叠了 0.75rem,
+// 于是 toast 正落在顶栏那条毛玻璃上、压着 folio 的 logo(FOL-32 症状 5)。顶栏改高了这个数要
+// 跟着改 —— 两处都在「移动外壳」这一件事里,没有第三处。
 function AppToaster() {
   const isDesktop = useMediaQuery("(min-width: 64rem)");
   return isDesktop ? (
@@ -42,7 +48,7 @@ function AppToaster() {
   ) : (
     <Toaster
       position="top-right"
-      classNames={{ root: "top-[calc(env(safe-area-inset-top)+0.75rem)]" }}
+      classNames={{ root: "top-[calc(env(safe-area-inset-top)+3.75rem)]" }}
     />
   );
 }

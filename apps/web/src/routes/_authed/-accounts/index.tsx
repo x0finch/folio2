@@ -11,6 +11,7 @@ import { QueryBoundary } from "@/components/query-boundary";
 import { TagBadges } from "@/components/tag-badges";
 import { isManual } from "@/lib/core/manual";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
+import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
 import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
 import {
   accountGain24hQuery,
@@ -319,6 +320,8 @@ function AccountStatusLine({
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
+  // 活时钟 + 钳位收在 hook 里(为什么不用裸 useNow 见 use-relative-synced-at)。
+  const syncedAt = useRelativeSyncedAt();
   const archived = archivedAt != null;
   const warn = !archived && (status === "needsCreds" || status === "stale");
   const needsCreds = status === "needsCreds";
@@ -362,7 +365,7 @@ function AccountStatusLine({
       ) : isManual(connectorId) ? (
         t("liveValue")
       ) : takenAt != null ? (
-        t("lastSyncedAt", { when: format.relativeTime(new Date(takenAt)) })
+        t("lastSyncedAt", { when: syncedAt(takenAt) })
       ) : (
         t("neverSynced")
       )}

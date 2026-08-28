@@ -46,7 +46,7 @@ test.describe("URL 里的组合选中态", () => {
     const row = page.getByRole("button").filter({ hasText: ACCOUNT }).first();
     await expect(row).toBeVisible();
     // 页头摘要的基线:默认组合里那一个手记账户。
-    await expect(syncedSources(page)).toHaveText("1 / 1");
+    await expect(sourceCount(page)).toHaveText("1");
 
     // —— ① 切到非默认组合:地址长出参数,屏幕跟着换 ——
     await switchTo(page, SECOND);
@@ -58,13 +58,13 @@ test.describe("URL 里的组合选中态", () => {
     // 是连隐藏的一起认的(CI 上实测,本地跑不出来)。
     await expect(emptyList(page)).toBeVisible();
     // 页头那块同步摘要也换了 —— 它按选中的组合另取一份,不是全局的那一份。
-    await expect(syncedSources(page)).toHaveText("0 / 0");
+    await expect(sourceCount(page)).toHaveText("0");
 
     // —— ② 后退键撤销这一次切换(所以切组合走 `push` 而不是 `replace`)——
     await page.goBack();
     await expect(page).toHaveURL(/\/accounts$/);
     await expect(row).toBeVisible();
-    await expect(syncedSources(page)).toHaveText("1 / 1");
+    await expect(sourceCount(page)).toHaveText("1");
 
     // —— ③ 刷新:仍在这个组合(以前刷一下就回默认了)——
     await switchTo(page, SECOND);
@@ -105,15 +105,23 @@ test.describe("URL 里的组合选中态", () => {
 const emptyList = (page: Page) => page.getByText("No accounts yet.").filter({ visible: true });
 
 /**
- * 页头同步面板里「已同步来源 N / M」那个数字。
+ * 页头同步面板里「来源 N」那个数字。
  *
  * 这份摘要按选中的组合另取一份(`ShellWithSync` 在 Provider **之内**取),所以这个数字是「页头跟着
  * 组合走」最直接的证据:谁把那个查询挪回 Provider 外面,它就永远显示默认组合那一份,这里当场红。
  *
  * 不先 hover 把面板打开:内容一直在 DOM 里(弹层只是收着),而要验的是数据接对没接对,不是弹层动效。
+ *
+ * **锚点从「Sources synced N / M」换成了这一行**(ADR 0048):同步的口径改成了三段式,而三段式是
+ * 关于**某一轮**的报告 —— 这条 spec 里一轮都没跑过(手记账户不进轮),所以面板走的是无轮态,
+ * 那一行说的正是「这个组合有几个来源」。要的性质没变,而且这个数比原来那个分数更贴题:
+ * 它就是「当前组合里有几个来源」,与同步跑没跑过无关。
+ *
+ * `exact` 不能省:`getByText` 收字符串时是**大小写不敏感的子串**匹配,而页头副标题写着
+ * 「across N sources」—— 不锚死会同时命中它,strict mode 直接报两个元素。
  */
-const syncedSources = (page: Page) =>
-  page.getByText("Sources synced").locator("xpath=following-sibling::span[1]");
+const sourceCount = (page: Page) =>
+  page.getByText("Sources", { exact: true }).locator("xpath=following-sibling::span[1]");
 
 /**
  * 从页头的选择器切到某个组合。

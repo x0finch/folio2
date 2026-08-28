@@ -91,6 +91,18 @@ _Avoid_: 软删除 / soft delete(归档账户在账户页仍可见)、disabled�
 首页上一个**指向单个 [Connector] 或单个 [Tag] 的固定快捷入口**(pin) —— 名字与颜色借用所指对象,不自存;点它把首页作用域收窄到「当前 [Portfolio] 内、属于该 Connector / 该 Tag 的账户」。每 user 至多固定 3 个。展示用**按小计倒序的 section list**(区别于默认 / Portfolio 视图仍用的现货 / 永续 / DeFi 子 Tab)。
 _Avoid_: saved view(它不是可组合多条件的一等视图,只是薄指针)、filter preset
 
+### 同步
+
+**Sync Round(同步轮 / 轮)**:
+一次「把某个 [Portfolio] 的全部可同步账户各问一遍」的服务端执行 —— 手动点同步或 cron 触发,
+形状相同(轮头:发起方/起止 + 逐账户明细)。**状态是服务端事实**(`user_cache` 键
+`sync-round:<portfolioId>`,一组合一键,最近一轮覆盖式保留;ADR 0048),客户端只轮询只读。
+活轮判据:未收官且未过期(心跳续期,120s);未收官且已过期 = **中断**(worker 死了)。
+开轮幂等:活轮存在时再开 = 返回同一轮。逐账户结果三分:**synced / failed / need keys**,
+failed 不混进 synced;manual 账户不参与轮但恒算 synced(值实时现算)。
+_Avoid_: sweep(那是 cron 侧「遍历所有用户」的外层动作,一个 sweep 触发 N 用户 × M 组合的轮)、
+session、job、单账户同步(详情侧栏那个「问一个账户」不是轮)
+
 ### 分析:分布 / 组成 / 维度
 
 **Dimension(分析维度)**:
