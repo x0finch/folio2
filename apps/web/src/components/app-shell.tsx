@@ -23,6 +23,9 @@ const NAVS = [
 const SHELL_ROOT = "min-h-svh lg:flex";
 const SHELL_ASIDE =
   "hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto";
+const SHELL_BRAND_ROW = "flex items-center gap-2.5 px-2 pt-1.5 pb-5";
+const SHELL_INNER_COL = "flex min-w-0 flex-1 flex-col";
+const SHELL_SIDEBAR_FOOTER = "mt-auto flex items-center gap-2.5 px-1 pt-4";
 const SHELL_TOPBAR =
   "sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden";
 const SHELL_MAIN = "relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10";
@@ -72,7 +75,7 @@ export function AppShell({
     <div className={SHELL_ROOT}>
       {/* 桌面常驻左侧栏 */}
       <aside className={SHELL_ASIDE}>
-        <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-5">
+        <div className={SHELL_BRAND_ROW}>
           <Brand />
         </div>
 
@@ -102,7 +105,7 @@ export function AppShell({
         </nav>
 
         {/* footer:纯身份展示(账户/外观入口迁 Settings) */}
-        <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
+        <div className={SHELL_SIDEBAR_FOOTER}>
           <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-foreground text-xs">
             {initial}
           </div>
@@ -113,7 +116,7 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className={SHELL_INNER_COL}>
         {/* 移动顶栏:只剩品牌 logo(控件全迁 Settings);sticky + 毛玻璃锚点。
             顶部内边距叠加 safe-area-inset-top:viewport-fit=cover + 半透状态栏下,内容不被刘海压
             (毛玻璃底延伸到状态栏下,成沉浸观感;bg/blur 不变、不碰 sticky)。 */}
@@ -181,21 +184,23 @@ export function AppShellSkeleton() {
   return (
     <div className={SHELL_ROOT}>
       <aside className={SHELL_ASIDE}>
-        <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-5">
+        <div className={SHELL_BRAND_ROW}>
           <Brand />
         </div>
 
-        {/* 导航:图标是静态的(它们本来就不随数据变),文字位留灰条。 */}
+        {/* 导航:图标是静态的(它们本来就不随数据变),文字位留灰条。
+            Bar is h-5 = the 20px text-sm line box in the real nav rows, so each row
+            lands at the same 36px total height (py-2 + 20px). */}
         <nav className="mt-4 flex flex-col gap-1">
           {NAVS.map(({ key, icon: Icon }) => (
             <div key={key} className="flex items-center gap-3 rounded-lg px-3 py-2">
               <Icon className="size-4 shrink-0 text-muted-foreground/40" />
-              <Skeleton className="h-3.5 w-20" />
+              <Skeleton className="h-5 w-20" />
             </div>
           ))}
         </nav>
 
-        <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
+        <div className={SHELL_SIDEBAR_FOOTER}>
           <Skeleton className="size-7 shrink-0 rounded-full" />
           <div className="min-w-0 flex-1 space-y-1.5">
             <Skeleton className="h-3 w-24" />
@@ -204,22 +209,22 @@ export function AppShellSkeleton() {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className={SHELL_INNER_COL}>
         <header className={SHELL_TOPBAR}>
           <Brand />
         </header>
 
         <main className={SHELL_MAIN}>
-          {/* PageHeader 同形:eyebrow badge / serif 大标题 / 副标题,三条各占各的位。 */}
-          <div className="mb-6 flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="mb-2">
-                <Skeleton className="h-6 w-28 rounded-full" />
-              </div>
-              <Skeleton className="h-9 w-44 sm:h-10" />
-              <Skeleton className="mt-1.5 h-4 w-60" />
-            </div>
-          </div>
+          {/* Render the REAL <PageHeader> (hook-free, provider-free — the shell's
+              zero-provider constraint holds) with skeleton bars as title/subtitle: the
+              real h1/p supply the line boxes, so nothing is hand-transcribed to drift.
+              inline-block matters: a block bar would collapse the h1's text line box.
+              No eyebrow: the default state (single portfolio, /settings) has none —
+              the skeleton matches the most common frame. */}
+          <PageHeader
+            title={<Skeleton className="inline-block h-8 w-44 align-middle" />}
+            subtitle={<Skeleton className="inline-block h-4 w-60 align-middle" />}
+          />
           {/* 内容位:一块头图 + 一块列表。各页真内容不同,壳只占面积,不猜形状。 */}
           <Skeleton className="h-32 w-full rounded-xl" />
           <Skeleton className="mt-4 h-64 w-full rounded-xl" />
