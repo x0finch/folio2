@@ -1,4 +1,4 @@
-import { cn, Dock, DockItem, SharedLayoutBg } from "@folio/ui";
+import { cn, Dock, DockItem, SharedLayoutBg, Skeleton } from "@folio/ui";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
@@ -16,6 +16,28 @@ const NAVS = [
   { key: "insights", to: "/insights", icon: BarChart3 },
   { key: "settings", to: "/settings", icon: Settings },
 ] as const;
+
+// 外壳的骨架(`AppShellSkeleton`)必须和真外壳**同一套盒子**,否则数据到位那一下整页会跳。
+// 所以这几段布局类名抽成常量由两边共用 —— 改一处两边一起动,没有「忘了同步另一半」这回事。
+// 只抽**盒子**,不抽内容:内容正是两边该不同的地方。
+const SHELL_ROOT = "min-h-svh lg:flex";
+const SHELL_ASIDE =
+  "hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto";
+const SHELL_TOPBAR =
+  "sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden";
+const SHELL_MAIN = "relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10";
+const SHELL_DOCK_WRAP =
+  "-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden";
+
+// 品牌行(logo + 字标):侧栏顶、移动顶栏、骨架壳三处同一份。
+function Brand() {
+  return (
+    <>
+      <Logo className="size-6 shrink-0" />
+      <span className="font-semibold text-lg tracking-tight">folio</span>
+    </>
+  );
+}
 
 // 应用外壳(v2,#100 / ADR 0015):桌面常驻左侧栏 + 移动底部 Dock。
 // 外观 / 语言 / 币种 / 登出集中于 Settings(#112)——外壳只做导航 + 身份展示。
@@ -47,12 +69,11 @@ export function AppShell({
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
 
   return (
-    <div className="min-h-svh lg:flex">
+    <div className={SHELL_ROOT}>
       {/* 桌面常驻左侧栏 */}
-      <aside className="hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto">
+      <aside className={SHELL_ASIDE}>
         <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-5">
-          <Logo className="size-6 shrink-0" />
-          <span className="font-semibold text-lg tracking-tight">folio</span>
+          <Brand />
         </div>
 
         <nav className="mt-4">
@@ -96,13 +117,12 @@ export function AppShell({
         {/* 移动顶栏:只剩品牌 logo(控件全迁 Settings);sticky + 毛玻璃锚点。
             顶部内边距叠加 safe-area-inset-top:viewport-fit=cover + 半透状态栏下,内容不被刘海压
             (毛玻璃底延伸到状态栏下,成沉浸观感;bg/blur 不变、不碰 sticky)。 */}
-        <header className="sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden">
-          <Logo className="size-6 shrink-0" />
-          <span className="font-semibold text-lg tracking-tight">folio</span>
+        <header className={SHELL_TOPBAR}>
+          <Brand />
         </header>
 
         {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
-        <main className="relative mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">
+        <main className={SHELL_MAIN}>
           {/* Portfolio 选择器 = 标题上方的小 badge(eyebrow);Settings 页不显示。 */}
           <PageHeader
             title={pageTitle}
@@ -114,7 +134,7 @@ export function AppShell({
       </div>
 
       {/* 移动底部悬浮 Dock 导航;底部偏移叠加 safe-area-inset-bottom,不被指示条压(定位/居中不变)。 */}
-      <nav className="-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden">
+      <nav className={SHELL_DOCK_WRAP}>
         <Dock>
           {NAVS.map(({ key, to, icon: Icon }) => (
             <DockItem key={key} active={isActive(to)}>
@@ -138,6 +158,81 @@ export function AppShell({
                   <Icon className="size-5" />
                 </span>
               </Link>
+            </DockItem>
+          ))}
+        </Dock>
+      </nav>
+    </div>
+  );
+}
+
+// 服务端唯一渲染的东西:一张零数据的骨架壳(ADR 0049 / FOL-34)。
+//
+// 登录后的路由整树 `ssr: false` 之后,服务器不再跑那 26 个查询、也不再渲染任何页面内容;
+// 它出的就是这一张 —— 品牌 logo、导航轮廓、Dock 轮廓、内容灰条。数据由浏览器接手后渐进浮现。
+//
+// **零 props、零 hook、零查询**,这是它存在的全部意义:渲染它的 CPU 可以忽略不计,而
+// 免费档一次请求只给 10 毫秒。所以这里不用 `useTranslations`(导航文字换成灰条)、
+// 不用 `useRouterState`(没有 active 态)、更不碰 `syncStatus` / `userName` ——
+// 后者会把用户身份渲进一份「等同静态资源」的 HTML 里,而这张壳未登录也可能拿得到。
+//
+// 盒子与 `AppShell` 共用同一组 SHELL_* 常量:数据到位那一下换的是内容,不是布局,所以不跳。
+export function AppShellSkeleton() {
+  return (
+    <div className={SHELL_ROOT}>
+      <aside className={SHELL_ASIDE}>
+        <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-5">
+          <Brand />
+        </div>
+
+        {/* 导航:图标是静态的(它们本来就不随数据变),文字位留灰条。 */}
+        <nav className="mt-4 flex flex-col gap-1">
+          {NAVS.map(({ key, icon: Icon }) => (
+            <div key={key} className="flex items-center gap-3 rounded-lg px-3 py-2">
+              <Icon className="size-4 shrink-0 text-muted-foreground/40" />
+              <Skeleton className="h-3.5 w-20" />
+            </div>
+          ))}
+        </nav>
+
+        <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
+          <Skeleton className="size-7 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-16" />
+          </div>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className={SHELL_TOPBAR}>
+          <Brand />
+        </header>
+
+        <main className={SHELL_MAIN}>
+          {/* PageHeader 同形:eyebrow badge / serif 大标题 / 副标题,三条各占各的位。 */}
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="mb-2">
+                <Skeleton className="h-6 w-28 rounded-full" />
+              </div>
+              <Skeleton className="h-9 w-44 sm:h-10" />
+              <Skeleton className="mt-1.5 h-4 w-60" />
+            </div>
+          </div>
+          {/* 内容位:一块头图 + 一块列表。各页真内容不同,壳只占面积,不猜形状。 */}
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <Skeleton className="mt-4 h-64 w-full rounded-xl" />
+        </main>
+      </div>
+
+      <nav className={SHELL_DOCK_WRAP}>
+        <Dock>
+          {NAVS.map(({ key, icon: Icon }) => (
+            <DockItem key={key}>
+              <span className="flex size-full items-center justify-center">
+                <Icon className="size-5 text-muted-foreground/40" />
+              </span>
             </DockItem>
           ))}
         </Dock>
