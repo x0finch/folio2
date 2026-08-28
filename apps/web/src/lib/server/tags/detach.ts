@@ -1,10 +1,13 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import type { z } from "zod";
+import { invalidateGain24h } from "@/lib/server/portfolio/gain";
 import type { AccountTagInput } from "./attach";
 
 export const handleDetachTag = Effect.fn("detachTag")(function* (
   data: z.infer<typeof AccountTagInput>,
 ) {
-  return yield* (yield* Database).tags.detach(data.accountId, data.tagId);
+  const out = yield* (yield* Database).tags.detach(data.accountId, data.tagId);
+  yield* invalidateGain24h(); // 同 attach:改的是 tag pin 那一维的账户集
+  return out;
 });

@@ -37,7 +37,7 @@ export const STALE_TIME = {
 export const POLL_INTERVAL = {
   syncRound: 1_500,
   /**
-   * 24h 盈亏还在后台算(响应带 `pending`)时,隔多久再问一次。
+   * 24h 盈亏还在后台算(响应带 `pending`)时,第一次隔多久再问 —— 之后按 `gainPollDelay` 翻倍。
    *
    * 这份数不在读请求里算(ADR 0049:免费档 10ms CPU),而是同步收官时预计算、缺了由
    * `waitUntil` 补 —— 补算是几百毫秒的事,可 `STALE_TIME.live` 是 30 秒:不问的话,数据
@@ -46,6 +46,26 @@ export const POLL_INTERVAL = {
    */
   gain: 1_000,
 } as const;
+
+/** `pending` 轮询最多问这么多次就收手(见 `gainPollDelay`)。 */
+const GAIN_POLL_ATTEMPTS = 8;
+
+/**
+ * 第 n 次收到 `pending` 之后,隔多久再问一次 —— **有退避,而且会放弃**。
+ *
+ * 定这两条不是保守,是因为不定的话它是台永动机:补算失败(数据本身让计算抛)时键永远填不上 →
+ * 响应恒 `pending` → 每秒一发,而**每一发都在服务端排一趟全量重算**。一个用户开着页面就能
+ * 把一个 isolate 占满,而屏幕上什么都不会发生。服务端那头也有自己的闸(`backfillForUser`
+ * 的连败退避 + 认输),两边各拦一次 —— 前端这条拦的是「一直问」,服务端那条拦的是「一直算」。
+ *
+ * 1s → 2s → 4s → 8s,15s 封顶(同 `RETRY.delay` 的形状),八次之后不再问:正常情况下补算
+ * 几百毫秒就落地,第一发就拿到了;走到第八发只说明它不会好了,那时继续问没有意义。
+ * 放弃之后界面停在手头那份(旧值或空态)—— 服务端已经记了 warning,那才是该看的地方。
+ */
+export function gainPollDelay(pollCount: number): number | false {
+  if (pollCount >= GAIN_POLL_ATTEMPTS) return false;
+  return Math.min(POLL_INTERVAL.gain * 2 ** pollCount, 15_000);
+}
 
 /**
  * 失败重试。**必须显式设**:`ensureQueryData` / `prefetchQuery` 走的是 `fetchQuery`,

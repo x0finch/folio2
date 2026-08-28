@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleRemoveAccount } from "@/lib/server/accounts/remove";
+import { importData } from "@/lib/server/io/import-data";
 import { handleCreateManualActivities } from "@/lib/server/manual-activities/create";
 import {
   computeAccountGain24h,
@@ -7,9 +8,14 @@ import {
   GAIN_PRECOMPUTE_TTL_MS,
   handleGetAccountGain24h,
   handleGetPortfolioGain24h,
+  invalidateGain24h,
   precomputeGain24h,
 } from "@/lib/server/portfolio/gain";
 import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
+import { handleSetDefaultPortfolio } from "@/lib/server/portfolios/set-default";
+import { handleSyncAccount } from "@/lib/server/sync/run";
+import { handleAttachTag } from "@/lib/server/tags/attach";
+import { handleDetachTag } from "@/lib/server/tags/detach";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
@@ -60,6 +66,20 @@ describe("portfolio/gain", () => {
     call(USER, handleGetPortfolioGain24h(USER, data));
   const readAccounts = (data: Parameters<typeof handleGetAccountGain24h>[1] = {}) =>
     call(USER, handleGetAccountGain24h(USER, data));
+
+  // 一个有基准、算得出数的组合,下面好几组共用。
+  const seedTwoDays = async () => {
+    const acc = await seedAccount(USER, "甲", "bitcoin");
+    await seedSnapshot(USER, acc.id, ago(DAY), [
+      { tokenId: BTC, amount: 1, usdValue: 100 },
+      { tokenId: ETH, amount: 2, usdValue: 50 },
+    ]);
+    await seedSnapshot(USER, acc.id, NOW, [
+      { tokenId: BTC, amount: 1, usdValue: 130 },
+      { tokenId: ETH, amount: 2, usdValue: 60 },
+    ]);
+    return acc;
+  };
 
   beforeEach(async () => {
     blockOutbound();
@@ -232,20 +252,6 @@ describe("portfolio/gain", () => {
 
   // —— FOL-35:预计算基建(ADR 0049)——
   describe("预计算", () => {
-    // 一个有基准、算得出数的组合,后面几条共用。
-    const seedTwoDays = async () => {
-      const acc = await seedAccount(USER, "甲", "bitcoin");
-      await seedSnapshot(USER, acc.id, ago(DAY), [
-        { tokenId: BTC, amount: 1, usdValue: 100 },
-        { tokenId: ETH, amount: 2, usdValue: 50 },
-      ]);
-      await seedSnapshot(USER, acc.id, NOW, [
-        { tokenId: BTC, amount: 1, usdValue: 130 },
-        { tokenId: ETH, amount: 2, usdValue: 60 },
-      ]);
-      return acc;
-    };
-
     it("落的键 = 组合 ×(默认 + 每个 pin),外加一份账户级", async () => {
       const acc = await seedTwoDays();
       const tag = await db(USER).tags.create({ name: "长期", portfolioId: (await defaultPf()).id });
@@ -319,7 +325,12 @@ describe("portfolio/gain", () => {
         holdings: {},
         defi: {},
       };
-      await db(USER).cache.put(`gain24h:${pf}`, planted, GAIN_PRECOMPUTE_TTL_MS);
+      // 落库形状是 `{ computedAt, value }` —— `computedAt` 拿「现在」,于是它晚于水位线、算数。
+      await db(USER).cache.put(
+        `gain24h:${pf}`,
+        { computedAt: Date.now(), value: planted },
+        GAIN_PRECOMPUTE_TTL_MS,
+      );
 
       const out = await readPortfolio({ portfolioId: pf });
 
@@ -426,6 +437,111 @@ describe("portfolio/gain", () => {
         (o) => o.pending == null,
       );
       expect(Object.keys(settled.holdings)).toEqual([BTC]);
+    });
+
+    // F3:补算跨在写操作两边 —— 它开工时读到的是旧数据,落库时数据已经改了。
+    // **落的时间戳是开工那一刻**,所以它恒小于写操作抬起来的水位线 → 读那头判它不算数。
+    // 没有这一条,那份「改动前的数」会带着崭新的 90 分钟 TTL 被当成对的端出去。
+    it("补算跨在写操作两边 → 它算出来的那份不算数", async () => {
+      const { doomed } = await twoAccounts();
+      const pf = (await defaultPf()).id;
+      // 手工重演那个交错:先记下「开工时刻」,再改数据,最后拿开工时刻把结果写进去 ——
+      // 这正是一趟真补算的三步,只是把中间那步换成了用户的写。
+      const computedAt = Date.now();
+      const stale = await call(USER, computePortfolioGain24h({ portfolioId: pf }));
+      await call(USER, handleRemoveAccount({ accountId: doomed.id }));
+      await db(USER).cache.put(
+        `gain24h:${pf}`,
+        { computedAt, value: stale },
+        GAIN_PRECOMPUTE_TTL_MS,
+      );
+
+      // TTL 还新鲜,但它是拿删之前的原料算的 —— 必须判成不算数。
+      const out = await readPortfolio({ portfolioId: pf });
+      expect(out.pending).toBe(true);
+
+      const settled = await until(
+        () => readPortfolio({ portfolioId: pf }),
+        (o) => o.pending == null,
+      );
+      expect(Object.keys(settled.holdings)).toEqual([BTC]);
+    });
+
+    // F2:cron 一次 sweep 里各组合的轮是并发跑的,收官各抬各的水位线。抬用户级那条的话,
+    // 先算完的组合会被后收官的组合当场作废 —— 一趟下来除了最后一个,其余全得重算。
+    it("一个组合失效,不牵连另一个组合", async () => {
+      const here = await seedAccount(USER, "默认里的", "bitcoin");
+      await seedSnapshot(USER, here.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
+      await seedSnapshot(USER, here.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 110 }]);
+      const watch = await db(USER).portfolios.create({ name: "看单" });
+      const there = await seedAccount(USER, "看单里的", "binance");
+      await db(USER).portfolios.assignAccount(there.id, watch.id);
+      await seedSnapshot(USER, there.id, ago(DAY), [{ tokenId: ETH, amount: 1, usdValue: 100 }]);
+      await seedSnapshot(USER, there.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 130 }]);
+      const home = (await defaultPf()).id;
+      await precompute(home);
+      await precompute(watch.id);
+
+      // 「看单」那一轮收官 —— 只抬它自己那条水位线。
+      await call(USER, invalidateGain24h(watch.id));
+
+      expect((await readPortfolio({ portfolioId: watch.id })).pending).toBe(true);
+      expect((await readPortfolio({ portfolioId: home })).pending).toBeUndefined();
+    });
+
+    it("改标签(挂 / 摘)→ 当场作废(tag pin 那一维正是按它的账户集算的)", async () => {
+      const acc = await seedTwoDays();
+      const tag = await db(USER).tags.create({ name: "长期", portfolioId: (await defaultPf()).id });
+      await precompute();
+      expect((await readPortfolio()).pending).toBeUndefined();
+
+      await call(USER, handleAttachTag({ accountId: acc.id, tagId: tag.id }));
+      expect((await readPortfolio()).pending).toBe(true);
+
+      await precompute();
+      await call(USER, handleDetachTag({ accountId: acc.id, tagId: tag.id }));
+      expect((await readPortfolio()).pending).toBe(true);
+    });
+
+    it("改默认组合 → 当场作废(inView 的兜底与 resolveScope 的落点一起挪)", async () => {
+      await seedTwoDays();
+      const watch = await db(USER).portfolios.create({ name: "看单" });
+      await precompute();
+      expect((await readPortfolio()).pending).toBeUndefined();
+
+      await call(USER, handleSetDefaultPortfolio({ portfolioId: watch.id }));
+
+      expect((await readPortfolio()).pending).toBe(true);
+    });
+
+    it("单账户同步 → 当场作废", async () => {
+      const acc = await seedAccount(USER, "币安", "binance");
+      await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
+      await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 110 }]);
+      await precompute();
+      expect((await readPortfolio()).pending).toBeUndefined();
+
+      // 出网被掐,这个账户没有凭据 → 内核走 skipped 那一支,不写快照、也就不该抬水位线。
+      await call(USER, handleSyncAccount(USER, { accountId: acc.id }));
+      expect((await readPortfolio()).pending).toBeUndefined();
+    });
+
+    // F6:导入直接走 `transfer.*`,绕过每一个写 handler —— 所以它得自己抬。
+    // 这是 e2e 那个 bug 换一扇门:灌进来一堆新数据,而 24h 盈亏仍以「新鲜」的身份端着导入前
+    // 那份(常常是一片空)。
+    it("导入 → 当场作废(它绕过全部写 handler)", async () => {
+      await seedTwoDays();
+      await precompute();
+      expect((await readPortfolio()).pending).toBeUndefined();
+
+      // 一行合法记录就够 —— 这条钉的是「导入这条路会不会抬水位线」,不是导入本身对不对
+      // (那有 export-import-roundtrip 管)。
+      const ndjson = `${JSON.stringify({ type: "meta", version: 2 })}\n`;
+      const stream = new Response(ndjson).body;
+      if (!stream) throw new Error("no body");
+      await call(USER, importData(stream.getReader()));
+
+      expect((await readPortfolio()).pending).toBe(true);
     });
 
     it("改手记账本(加一笔)→ 同样当场作废", async () => {

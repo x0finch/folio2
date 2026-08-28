@@ -24,8 +24,6 @@ const fakeCache = () => {
         return out;
       }),
     put: (key: string, value: unknown) => Effect.sync(() => void entries.set(key, value)),
-    // 这一片不碰标旧(协议图没有「算旧了」这回事)—— 契约要求它在,给个 no-op。
-    expire: () => Effect.void,
     putMany: (writes: readonly { key: string; value: unknown }[]) =>
       Effect.sync(() => {
         for (const w of writes) entries.set(w.key, w.value);

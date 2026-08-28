@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
 import { chunk, DbClient } from "../client";
 import type { Drizzle } from "../connect";
@@ -11,9 +11,10 @@ import { userCache } from "../schema";
 // **但它不走这个 store**:它的写入是带轮 id 条件的单语句,`put(key, value)` 表达不了
 // (见 domains/sync-rounds.ts)。值是 JSON,db 当不透明 blob。
 //
-// 第五种键是预计算的 24h 盈亏(`gain24h:<组合>[:<pin>]` / `gain24h-accounts:<组合>`,ADR 0049)。
-// 它**走这个 store**:同步收官时一次 `putMany` 把一个组合的全部维度原子换新,读接口一次
-// `get` 直出 —— 那正是这两个动词的形状。键的形状归 app(`server/portfolio/gain.ts`)。
+// 第五种键是预计算的 24h 盈亏(`gain24h:*`,ADR 0049),外加它的失效水位线(`gain24h-mark:*`)。
+// 它们**走这个 store**:同步收官时一次 `putMany` 把一个组合的全部维度原子换新,读接口一次
+// `getMany` 把值和水位线一起取回来 —— 那正是这两个动词的形状。「算的那份还算不算数」由 app
+// 比时间戳判(`server/portfolio/gain.ts`),不是这一层的事;键的形状也归那边。
 //
 // **过期不删、读出带 stale** —— 与价同一套 SWR 语义:展示先给旧的,调用方决定要不要后台刷。
 // 整张删空功能不坏,只是下次访问慢一点。
@@ -113,33 +114,6 @@ export const makeUserCacheStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         yield* client.query((db) => upsert(db, userId, { key, value, ttlMs }, now));
-      }),
-
-    /**
-     * 把一族键**就地标旧**(`expires_at = now`),**不删**。
-     *
-     * 判据是调用方真正想说的那句话:「这些值不再可信」,而不是「这些值消失」。留着旧值,读那头
-     * 就还能按 SWR 先给旧的、顺手让后台补一次 —— 界面上是「数字先旧后新」;删掉的话读到的是
-     * 「没算过」,界面会先空一下再长出来,而那是另一件事(它该留给「真的从没算过」)。
-     *
-     * **前缀比对不用 `LIKE`**:`LIKE 'x%'` 里调用方传来的 `%` / `_` 会变成通配符,得先转义一层;
-     * `substr(k, 1, n) = 前缀` 没有通配符这回事,少一条要记得的规矩。代价是走不了主键的前缀扫描,
-     * 而一个用户的缓存行是几十条量级 —— 这里换的是「不会因为一个没转义的字符多清掉别人的键」。
-     */
-    expire: (prefix: string): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const now = yield* Clock.currentTimeMillis;
-        yield* client.query((db) =>
-          db
-            .update(userCache)
-            .set({ expiresAt: now })
-            .where(
-              and(
-                eq(userCache.userId, userId),
-                sql`substr(${userCache.k}, 1, ${prefix.length}) = ${prefix}`,
-              ),
-            ),
-        );
       }),
 
     // 一次写多个键,各带自己的 TTL,**一个批次发出去**(D1 没有交互式事务,batch 是它的原子多写)。
