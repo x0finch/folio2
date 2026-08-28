@@ -21,6 +21,11 @@ export function resolveAuth(result: SessionResult | null): { userId: string } {
   return { userId: result.user.id };
 }
 
+// The "is the session cookie present" check no longer lives here: the root-route guard
+// (routes/-root/authed-guard.ts) uses better-auth's own `getSessionCookie` (instance-free,
+// handles the `__Secure-` prefix, treats an empty value as absent) — the hand-rolled
+// `hasSessionCookie` was verified equivalent and deleted.
+
 // **`AuthContext` 这个类型没了**(#504 T12):它存在的唯一理由是给 handler 的
 // `{ data, context }` 签名用,而现在没有 handler 收 context —— userId 由装配点
 // (`runEffect` / `runForUser`)吃掉。要 context 形状的地方直接用 `ReturnType<typeof resolveAuth>`。

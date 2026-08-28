@@ -2,7 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect, retainSearchParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { z } from "zod";
-import { AppShell } from "@/components/app-shell";
+import { AppShell, AppShellSkeleton } from "@/components/app-shell";
 import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
 import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
@@ -20,6 +20,25 @@ import { getSession } from "@/lib/server/session";
 // loader 里 await 的东西没有 key 可指,只能整页刷;进了缓存才刷得动一个前缀。首屏不变:
 // 预取没 resolve 时路由 pending 照常生效,SSR 把缓存 dehydrate 下去,客户端直接 hydrate。
 export const Route = createFileRoute("/_authed")({
+  // **登录后的整棵树不做服务端渲染**(ADR 0049)。
+  //
+  // 为什么:生产跑 Cloudflare 免费档,一次请求只给 10 毫秒 CPU;而服务端渲这些页面要串行跑
+  // 26 个数据查询,每个都背着约百毫秒的框架杂务,合计约 3 秒 —— 10 毫秒处被掐,整站白屏。
+  // 业务计算本身不到 10ms(实测:总览 1.1ms、24h 盈亏 6.1ms),被掐死的是「在请求里跑它们」
+  // 这件事本身。所以 loader 与组件全部搬进浏览器,服务器只出下面那张零数据的骨架壳。
+  //
+  // **必须是 `false`,不是 `'data-only'`**:后者只是不渲染 HTML,loader 照样在服务端跑,
+  // 那 3 秒 CPU 一毫秒都没省 —— 它解决的是别的问题。
+  //
+  // 这个设置**整树继承**(router-core 的 `parentMatch?.ssr === false` 分支),所以四个子页面
+  // 不必各写一遍;跟着一起下去的还有 `beforeLoad`,也就是下面那次真鉴权只在浏览器里跑了。
+  // 「没登录 → 307 /login」因此搬去了根路由,判据换成 cookie 存在性,见 routes/-root/authed-guard。
+  ssr: false,
+  // 服务端渲染的**唯一**东西:零数据骨架壳。`ssr: false` 的匹配在服务端会被渲成
+  // `<ClientOnly fallback={pendingComponent}>`,所以这里填什么,服务器就发什么。
+  // 它同时是客户端接手后 loader 未落地那一段的 Suspense fallback —— 首帧到数据浮现之间
+  // 观感连续,不闪两种东西。
+  pendingComponent: AppShellSkeleton,
   // 选中的 Portfolio 进 URL(ADR 0046):`?portfolio=<id>`,默认那个不写。声明在**这一层** ——
   // 作用域是全站的(总额 / 代币 / 曲线 / Insights,ADR 0033),三页共享同一个参数。
   //
