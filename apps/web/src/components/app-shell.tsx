@@ -33,6 +33,18 @@ const SHELL_DOCK_WRAP =
   "-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden";
 
 // 品牌行(logo + 字标):侧栏顶、移动顶栏、骨架壳三处同一份。
+// Span twin of the ui Skeleton (registry component is a fixed <div>): h1/p accept
+// only phrasing content, and a div inside them makes the browser restructure the
+// server HTML — hydration then fails (React #418, caught by the authed-shell e2e).
+function SkeletonText({ className }: { className?: string }) {
+  return (
+    <span
+      data-slot="skeleton"
+      className={cn("inline-block animate-pulse rounded-md bg-muted align-middle", className)}
+    />
+  );
+}
+
 function Brand() {
   return (
     <>
@@ -222,8 +234,8 @@ export function AppShellSkeleton() {
               No eyebrow: the default state (single portfolio, /settings) has none —
               the skeleton matches the most common frame. */}
           <PageHeader
-            title={<Skeleton className="inline-block h-8 w-44 align-middle" />}
-            subtitle={<Skeleton className="inline-block h-4 w-60 align-middle" />}
+            title={<SkeletonText className="h-8 w-44" />}
+            subtitle={<SkeletonText className="h-4 w-60" />}
           />
           {/* 内容位:一块头图 + 一块列表。各页真内容不同,壳只占面积,不猜形状。 */}
           <Skeleton className="h-32 w-full rounded-xl" />
