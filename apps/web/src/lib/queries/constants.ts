@@ -35,3 +35,37 @@ export const STALE_TIME = {
 export const POLL_INTERVAL = {
   syncRound: 1_500,
 } as const;
+
+/**
+ * 失败重试。**必须显式设**:`ensureQueryData` / `prefetchQuery` 走的是 `fetchQuery`,
+ * 而它在 `retry` 没定义时会就地写死 `retry = false`(query-core `queryClient.js`:
+ * `if (defaultedOptions.retry === void 0) defaultedOptions.retry = false`)。页面数据全部由
+ * loader 预取,所以「不设默认」= 一次失败就是终局 —— 实测掐掉八个接口,20 秒内一次重试都没有。
+ * 在 QueryClient 上设了默认,这个值就不是 undefined 了,那行兜底不再生效,loader 那条路一起吃到。
+ *
+ * 退避到 15 秒封顶、五次为止:约半分钟的争取窗口,足够跨过一次上游抖动或 CPU 超限,
+ * 又不至于把一个真坏了的接口打到天荒地老 —— 之后的「持续重试」交给 QueryBoundary 的自愈计时器。
+ */
+export const RETRY = {
+  attempts: 5,
+  delay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 15_000),
+  /** 边界塌了之后每隔多久自己再试一次。 */
+  selfHeal: 15_000,
+} as const;
+
+/**
+ * 给**不走 react-query 的**调用用的同款重试(目前只有一处:受保护布局里那次鉴权)。
+ * 路由的 `beforeLoad` 里那次 `getSession()` 是裸的 server fn 调用 —— 没有查询缓存包着,
+ * 上面那份默认值管不到它,而它恰恰是最不能失败的一个:它一挂,整棵登录后的树连外壳都画不出来。
+ * 跳转(会话过期)必须原样抛出去,不能当失败重试。
+ */
+export async function withRetry<T>(call: () => Promise<T>, isControlFlow: (e: unknown) => boolean) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      if (isControlFlow(error) || attempt >= RETRY.attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, RETRY.delay(attempt)));
+    }
+  }
+}

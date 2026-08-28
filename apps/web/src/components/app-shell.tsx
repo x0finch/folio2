@@ -200,7 +200,7 @@ export function AppShell({
 // 后者会把用户身份渲进一份「等同静态资源」的 HTML 里,而这张壳未登录也可能拿得到。
 //
 // 盒子与 `AppShell` 共用同一组 SHELL_* 常量:数据到位那一下换的是内容,不是布局,所以不跳。
-export function AppShellSkeleton() {
+export function AppShellSkeleton({ note }: { note?: ReactNode }) {
   return (
     <div className={SHELL_ROOT}>
       <aside className={SHELL_ASIDE}>
@@ -293,6 +293,14 @@ export function AppShellSkeleton() {
           </div>
         </main>
       </div>
+
+      {/* 等太久 / 出错时由调用方塞一句话进来(「连不上,正在重试」)。骨架自己不认识 i18n ——
+          它要能在零 provider 下渲染(见 tests/app-shell-skeleton),所以文案从外面给。 */}
+      {note ? (
+        <p className="-translate-x-1/2 pointer-events-none fixed bottom-28 left-1/2 z-30 whitespace-nowrap text-muted-foreground text-sm lg:bottom-8">
+          {note}
+        </p>
+      ) : null}
 
       <nav className={SHELL_DOCK_WRAP}>
         <Dock>
