@@ -9,7 +9,7 @@ import { type AccountSyncResult, Sweep, type SweepResult, SYNC_CONCURRENCY } fro
 import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
-import { precomputeGain24h } from "@/lib/server/portfolio/gain";
+import { invalidateGain24h, precomputeGain24h } from "@/lib/server/portfolio/gain";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { userLayer } from "@/lib/server/runtime";
 import { syncRoundFor } from "./deps";
@@ -122,13 +122,22 @@ export const runSyncRound = (
   // **收官之后顺手把这一组合的 24h 盈亏算好存起来**(ADR 0049 裁定 2:原料大、结果小 → 预计算)。
   // 手动与 cron 都从这里过,所以「算的时刻」全仓只有这一处。
   //
-  // **排在预热前面**:盈亏只吃快照里的 `usdValue`(富化加的是展示字段,不改数),不必等价格暖上来;
-  // 而预热要打一圈上游,排它后面等于让读接口白等一圈拿不到的请求。cron 关掉预热,那条路上
-  // 收尾就只剩预计算 —— 它可不能跟着一起被关掉,cron 的轮同样要留下能直出的结果。
+  // **排在预热后面 —— 这个顺序是必须的,不是偏好。** 24h 盈亏的「当下点」不是快照里那个冻结的
+  // `usdValue`,而是 `overview-model` 现推的 `liveValue(b, enriched.price?.unitPrice, mode)`
+  // (盯市那些行取的是实时源价)。预热正是把那份价刷新的一步。排在它前面,存下来的数就是拿
+  // **上一轮**的价算的 —— 用户同一时刻在首页看到的市值与这个 24h 数字来自两个不同的价,
+  // 每一轮都差一拍,而且没有任何东西会自己纠正。
+  //
+  // **预热失败不许拖累它**(`Effect.exit`):预热是尽力而为(打上游,随时可能空手而归),
+  // 而预计算只吃库里的东西 —— 让它给一件 best-effort 的事陪葬,换来的是整轮没有可直出的结果。
+  //
+  // cron 关掉预热(它按用户统一热),那条路上收尾就只剩预计算 —— **它可不能跟着一起被关掉**,
+  // cron 的轮同样要留下能直出的结果。
   const precompute = precomputeGain24h(round.portfolioId);
   return driveRound(results, {
     layer,
-    afterRound: opts.warm === false ? precompute : Effect.zipRight(precompute, afterRound),
+    afterRound:
+      opts.warm === false ? precompute : Effect.zipRight(Effect.exit(afterRound), precompute),
     // 轮活着期间定时续心跳 —— settle 顺带的续期只在「一直有账在落」时才成立,排队时靠这条。
     keepalive: {
       intervalMs: ROUND_KEEPALIVE_MS,
@@ -147,13 +156,28 @@ export const runSyncRound = (
           ttlMs: ROUND_HEARTBEAT_MS,
         }),
       ),
+    // **收官前把 24h 盈亏的键标旧。**
+    //
+    // 预计算必须排在预热后面(见上),而预热又必须排在收官后面(`drive.ts`:面板不该等一件
+    // 与它无关的事做完才看得到「这一轮结束了」)。两条加起来的必然结果是:**新的盈亏值一定
+    // 晚于「轮结束」这个信号落地**。而前端正是盯着轮状态在刷新(`use-sync-round.ts`),于是它
+    // 会在新值存在之前把旧值取走,然后再也没有第二次刷新 —— 屏幕上就是「刚同步完,24h 没动」。
+    //
+    // 标旧一下(一条 UPDATE,不是重算)就把这个缝补上了:那次早到的刷新读到的是「旧值 +
+    // `pending`」,前端据此短轮询,几百毫秒后预计算落地它自己就换成新的。
+    //
+    // **不改成「先算完再收官」**:那等于把面板上的「结束了」推迟一整轮预热 + 一次全量重算,
+    // 而 e2e 量过那个延迟(drive.ts 的注释记着这笔账)。
     onDone: (error) =>
       Effect.flatMap(Database, (db) =>
-        db.syncRounds.finish({
-          ...head,
-          error: error ?? undefined,
-          retentionMs: ROUND_RETENTION_MS,
-        }),
+        Effect.zipRight(
+          invalidateGain24h(),
+          db.syncRounds.finish({
+            ...head,
+            error: error ?? undefined,
+            retentionMs: ROUND_RETENTION_MS,
+          }),
+        ),
       ),
     onFatal: (error) => syncLog.error("sync round failed", { userId, error }),
   });

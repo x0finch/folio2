@@ -1,6 +1,7 @@
 import { waitUntil } from "cloudflare:workers";
 import { Database } from "@folio/db";
 import type { OracleServices } from "@folio/oracle";
+import { getLogger } from "@logtape/logtape";
 import { Effect, Layer } from "effect";
 import { ConnectorRegistry } from "./connectors/registry";
 import { logTapeLogger } from "./effect-log";
@@ -103,6 +104,16 @@ export const runForUser = <A, E extends AppError>(
   );
 
 /**
+ * 同一把钥匙上正在飞的那一趟,外加一面「它跑的时候又脏了」的旗子。
+ *
+ * **模块级可变状态在 Workers 上是刻意的**(CODING.md):每个请求一次 `runPromise`,Layer 的
+ * memoisation 是 per-run 的,想跨请求活着只能放模块级。作用域因此是**一个 isolate** ——
+ * 两个 isolate 各跑一趟是拦不住的(与 `SyncScope.gate` 那条跨 isolate 递不过去同一回事),
+ * 而要拦的那个形状(一轮同步里几十次刷新 → 几十趟全量重算)恰恰都落在同一个 isolate 上。
+ */
+const inFlight = new Map<string, { done: Promise<void>; again: boolean }>();
+
+/**
  * **后台补算 —— 把一份活儿交给这次请求的 `waitUntil`,请求本体不等它**(ADR 0049 裁定 3)。
  *
  * 为什么必须是 `waitUntil` 而不是 `Effect.fork`:免费档**每次请求只给 10ms CPU**,而
@@ -113,16 +124,52 @@ export const runForUser = <A, E extends AppError>(
  * **另起一次装配**,不复用调用方的 context:补算与响应那半是两个程序(同 `runSyncRound`),
  * 而 layer 的作用域跟着那次 `Effect.provide` 走 —— 借来的服务活到什么时候不该由这里赌。
  *
- * **收的 effect 必须永不失败**(`E = never`,而且自己把 defect 兜掉):它的 Promise 交给
- * `waitUntil` 之后没人再接,reject 出去就是一条静默的 unhandled rejection。
+ * **同一把钥匙同时只有一趟在跑,而且不丢事件**(单飞 + 尾随重跑):跑的时候又有人要,就把
+ * 旗子插上、等这趟结束再跑**一趟**。只跳过不重跑是不行的 —— 用户连改两笔手记,第二笔的重算
+ * 会被第一笔吞掉,数字就停在中间那个版本;只排队不合并也不行 —— 一轮同步里每个账户落定都会
+ * 触发一次刷新,二十个账户就是二十趟全量重算,正好撞在这一片要保护的 CPU / subrequest 预算上。
+ *
+ * **它永不抛、永不 reject。** 三个地方都得堵上,因为它唯一的职责是「安排一件跟这次响应无关的事」,
+ * 而这件事失败绝不该把只是想安排它的那个请求带走:
+ *   ① `waitUntil` 在没有调用上下文时会抛(它在 `Effect.sync` 里就是个 defect);
+ *   ② `runForUser` 在**装配**阶段就可能炸,那一段在 `effect` 自己的 `catchAllCause` 外面;
+ *   ③ 兜不住的一律记一行 —— `waitUntil` 收下的 Promise reject 出去是条静默的 unhandled rejection。
  */
 export const backfillForUser = (
   userId: string,
+  key: string,
   effect: Effect.Effect<void, never, UserServices>,
 ): Effect.Effect<void> =>
   Effect.sync(() => {
-    waitUntil(runForUser(userId, effect));
-  });
+    const slot = `${userId} ${key}`;
+    const running = inFlight.get(slot);
+    if (running) {
+      running.again = true; // 这趟跑完再跑一趟,别把这次的变更吞了
+      return;
+    }
+    const entry = { done: Promise.resolve(), again: false };
+    const runOnce = (): Promise<void> =>
+      runForUser(userId, effect)
+        .catch((error) => {
+          getLogger(["folio", "web", "backfill"]).warn("backfill failed", { key, error });
+        })
+        .then(() => {
+          if (!entry.again) {
+            inFlight.delete(slot);
+            return;
+          }
+          entry.again = false;
+          entry.done = runOnce();
+          return entry.done;
+        });
+    inFlight.set(slot, entry);
+    entry.done = runOnce();
+    waitUntil(entry.done);
+  }).pipe(
+    // `waitUntil` 在调用上下文之外会抛 —— 那在 `Effect.sync` 里是个 defect,不接住就把这次
+    // **读**请求打挂了,而它只是想安排一次后台补算。
+    Effect.catchAllDefect((cause) => Effect.logWarning("backfill could not be scheduled", cause)),
+  );
 
 /**
  * **server fn 的发动点 —— handler 只描述,这里负责跑。**

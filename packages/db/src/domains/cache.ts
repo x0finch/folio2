@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
 import { chunk, DbClient } from "../client";
 import type { Drizzle } from "../connect";
@@ -113,6 +113,33 @@ export const makeUserCacheStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         yield* client.query((db) => upsert(db, userId, { key, value, ttlMs }, now));
+      }),
+
+    /**
+     * 把一族键**就地标旧**(`expires_at = now`),**不删**。
+     *
+     * 判据是调用方真正想说的那句话:「这些值不再可信」,而不是「这些值消失」。留着旧值,读那头
+     * 就还能按 SWR 先给旧的、顺手让后台补一次 —— 界面上是「数字先旧后新」;删掉的话读到的是
+     * 「没算过」,界面会先空一下再长出来,而那是另一件事(它该留给「真的从没算过」)。
+     *
+     * **前缀比对不用 `LIKE`**:`LIKE 'x%'` 里调用方传来的 `%` / `_` 会变成通配符,得先转义一层;
+     * `substr(k, 1, n) = 前缀` 没有通配符这回事,少一条要记得的规矩。代价是走不了主键的前缀扫描,
+     * 而一个用户的缓存行是几十条量级 —— 这里换的是「不会因为一个没转义的字符多清掉别人的键」。
+     */
+    expire: (prefix: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        yield* client.query((db) =>
+          db
+            .update(userCache)
+            .set({ expiresAt: now })
+            .where(
+              and(
+                eq(userCache.userId, userId),
+                sql`substr(${userCache.k}, 1, ${prefix.length}) = ${prefix}`,
+              ),
+            ),
+        );
       }),
 
     // 一次写多个键,各带自己的 TTL,**一个批次发出去**(D1 没有交互式事务,batch 是它的原子多写)。

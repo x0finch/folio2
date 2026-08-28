@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { handleRemoveAccount } from "@/lib/server/accounts/remove";
+import { handleCreateManualActivities } from "@/lib/server/manual-activities/create";
 import {
   computeAccountGain24h,
   computePortfolioGain24h,
@@ -11,7 +13,7 @@ import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
-import { DAY, seedAccount, seedSnapshot } from "../_kit/seed";
+import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
 /**
@@ -331,8 +333,8 @@ describe("portfolio/gain", () => {
 
       const out = await readPortfolio({ portfolioId: pf });
 
-      // 读的那一刻:空态,而且键上确实什么都还没有 —— 这次请求里没有算过。
-      expect(out).toEqual({ portfolio: null, holdings: {}, defi: {} });
+      // 读的那一刻:空态 + 一句「还在算」,而且键上确实什么都还没有 —— 这次请求里没有算过。
+      expect(out).toEqual({ portfolio: null, holdings: {}, defi: {}, pending: true });
       // 后台那一趟(`waitUntil`)跑完之后键才出现。轮询而不是等固定毫秒:断言的是
       // 「它会补上」,不是「它多快补上」。
       const filled = await until(
@@ -360,6 +362,132 @@ describe("portfolio/gain", () => {
         (o) => o._tag === "Some",
       );
       expect((await db(USER).cache.get(`gain24h:${bogus}`))._tag).toBe("None");
+    });
+
+    // 算好了就是终局,一个字都不多说 —— 否则前端会白轮询下去。
+    it("算好了 → 不带 pending", async () => {
+      await seedTwoDays();
+      await precompute();
+
+      expect((await readPortfolio()).pending).toBeUndefined();
+      expect((await readAccounts()).pending).toBeUndefined();
+    });
+
+    // 这个 pin 在这个组合里根本说不通(预计算不会给它落键)→ 空就是它的**终局答案**。
+    // 说成 pending 的话前端会一直轮询一个永远填不上的键,每一轮还安排一趟全量重算 ——
+    // 一句客户端参数换来无界的后台工作。
+    it("组合里说不通的 pin → 空态是终局,不 pending、不安排补算", async () => {
+      await seedTwoDays(); // 只有 bitcoin 账户,没有 binance 的
+      await precompute();
+      const pf = (await defaultPf()).id;
+
+      const out = await readPortfolio({
+        portfolioId: pf,
+        pin: { kind: "connector", connectorId: "binance" },
+      });
+
+      expect(out).toEqual({ portfolio: null, holdings: {}, defi: {} });
+      expect(out.pending).toBeUndefined();
+      // 而且没人去给它建键 —— 等一会儿再看,仍然是空的。
+      await new Promise((r) => setTimeout(r, 100));
+      expect((await db(USER).cache.get(`gain24h:${pf}:connector:binance`))._tag).toBe("None");
+    });
+  });
+
+  // —— 输入变了就得标旧,否则「fresh 但是错的」会挂 90 分钟 ——
+  describe("写操作让预计算失效", () => {
+    const twoAccounts = async () => {
+      const keep = await seedAccount(USER, "留着的", "bitcoin");
+      await seedSnapshot(USER, keep.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
+      await seedSnapshot(USER, keep.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 110 }]);
+      const doomed = await seedAccount(USER, "要删的", "binance");
+      await seedSnapshot(USER, doomed.id, ago(DAY), [{ tokenId: ETH, amount: 1, usdValue: 100 }]);
+      await seedSnapshot(USER, doomed.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 300 }]);
+      return { keep, doomed };
+    };
+
+    // 这条钉的是那个「不报错的错」:账户删了,而 24h 数字里还留着它的贡献,屏幕上没有
+    // 任何东西能解释那笔钱。没有标旧的话它以 `stale === false` 的身份被端上去,最长 90 分钟。
+    it("删掉一个账户 → 存下来的数当场作废,读到的是旧值 + pending,补算后它不见了", async () => {
+      const { doomed } = await twoAccounts();
+      await precompute();
+      expect(Object.keys((await readPortfolio()).holdings).sort()).toEqual([BTC, ETH]);
+
+      await call(USER, handleRemoveAccount({ accountId: doomed.id }));
+
+      // 紧接着那一次读:**旧值照样端出去**(界面不空一下),但如实说一句「还在算」——
+      // 前端据此短轮询,而这一读同时安排了补算。
+      const rightAfter = await readPortfolio();
+      expect(rightAfter.pending).toBe(true);
+
+      // 补算落地之后,被删账户的那一行就不在了,而且不再 pending。
+      const settled = await until(
+        () => readPortfolio(),
+        (o) => o.pending == null,
+      );
+      expect(Object.keys(settled.holdings)).toEqual([BTC]);
+    });
+
+    it("改手记账本(加一笔)→ 同样当场作废", async () => {
+      const acc = await seedManualAccount(USER, "手记", {
+        symbol: "BTC",
+        unitPrice: 50_000,
+        amount: 2,
+      });
+      await precompute();
+      expect((await readAccounts()).pending).toBeUndefined();
+
+      await call(
+        USER,
+        handleCreateManualActivities({
+          accountId: acc.id,
+          drafts: [
+            {
+              token: { symbol: "BTC", unitPrice: 50_000 },
+              kind: "add",
+              amount: 1,
+              occurredAt: NOW,
+            },
+          ],
+        }),
+      );
+
+      expect((await readAccounts()).pending).toBe(true);
+    });
+  });
+
+  // —— 手记账户从不进同步轮(ADR 0018:它不写快照,`isSyncableAccount` 也把它挡在名单外)——
+  //
+  // 于是「同步收官」这个唯一的预计算时机对纯手记用户**永远不发生**。这条钉的是那个缺口:
+  // 建完账户第一次读必须自己把话说清楚(空态 + pending)并把补算安排上,而补完之后那个数
+  // 是 **0**(活动就发生在此刻)—— 不是「算不出」。0 与「没有这个数」在界面上长得不一样,
+  // 而 e2e(`e2e/manual-gain.spec.ts`)数的正是那三个 `$0.00`。
+  describe("纯手记用户(从不跑同步轮)", () => {
+    it("建完手记账户 → 第一次读是空态 + pending,补算之后是 0 而不是「算不出」", async () => {
+      const acc = await seedManualAccount(USER, "E2E Manual", {
+        symbol: "BTC",
+        unitPrice: 50_000,
+        amount: 2,
+      });
+
+      const cold = await readAccounts();
+      expect(cold).toEqual({ accounts: {}, balances: {}, pending: true });
+
+      const warm = await until(
+        () => readAccounts(),
+        (o) => o.pending == null,
+      );
+      // **0,不是 null。** null 是「算不出」,界面画 `—`;0 是「没涨没跌」,界面画 $0.00。
+      expect(warm.accounts[acc.id]?.amount).toBe(0);
+      expect(warm.accounts[acc.id]?.pct).toBe(0);
+      const balance = Object.values(warm.balances)[0];
+      expect(balance?.amount).toBe(0);
+      expect(balance?.pct).toBe(0);
+
+      // 组合级那一份是同一趟补算落下的(补算按组合补全部维度),所以它也已经就位。
+      const portfolio = await readPortfolio();
+      expect(portfolio.pending).toBeUndefined();
+      expect(portfolio.portfolio?.amount).toBe(0);
     });
   });
 });

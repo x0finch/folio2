@@ -36,6 +36,15 @@ export const STALE_TIME = {
  */
 export const POLL_INTERVAL = {
   syncRound: 1_500,
+  /**
+   * 24h 盈亏还在后台算(响应带 `pending`)时,隔多久再问一次。
+   *
+   * 这份数不在读请求里算(ADR 0049:免费档 10ms CPU),而是同步收官时预计算、缺了由
+   * `waitUntil` 补 —— 补算是几百毫秒的事,可 `STALE_TIME.live` 是 30 秒:不问的话,数据
+   * 早就在库里了,屏幕上还空着大半分钟。**只在 `pending` 时开**,算好了就一发都不再打。
+   * 比同步轮那条略快:补算比一轮同步短得多,而这一条盯的就是「它落地没有」。
+   */
+  gain: 1_000,
 } as const;
 
 /**
