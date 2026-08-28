@@ -9,6 +9,7 @@ import { type AccountSyncResult, Sweep, type SweepResult, SYNC_CONCURRENCY } fro
 import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
+import { precomputeGain24h } from "@/lib/server/portfolio/gain";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { userLayer } from "@/lib/server/runtime";
 import { syncRoundFor } from "./deps";
@@ -118,9 +119,16 @@ export const runSyncRound = (
     gate: opts.gate,
   });
   const head = { portfolioId: round.portfolioId, roundId: round.roundId };
+  // **收官之后顺手把这一组合的 24h 盈亏算好存起来**(ADR 0049 裁定 2:原料大、结果小 → 预计算)。
+  // 手动与 cron 都从这里过,所以「算的时刻」全仓只有这一处。
+  //
+  // **排在预热前面**:盈亏只吃快照里的 `usdValue`(富化加的是展示字段,不改数),不必等价格暖上来;
+  // 而预热要打一圈上游,排它后面等于让读接口白等一圈拿不到的请求。cron 关掉预热,那条路上
+  // 收尾就只剩预计算 —— 它可不能跟着一起被关掉,cron 的轮同样要留下能直出的结果。
+  const precompute = precomputeGain24h(round.portfolioId);
   return driveRound(results, {
     layer,
-    afterRound: opts.warm === false ? undefined : afterRound,
+    afterRound: opts.warm === false ? precompute : Effect.zipRight(precompute, afterRound),
     // 轮活着期间定时续心跳 —— settle 顺带的续期只在「一直有账在落」时才成立,排队时靠这条。
     keepalive: {
       intervalMs: ROUND_KEEPALIVE_MS,

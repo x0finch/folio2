@@ -1,3 +1,4 @@
+import { waitUntil } from "cloudflare:workers";
 import { Database } from "@folio/db";
 import type { OracleServices } from "@folio/oracle";
 import { Effect, Layer } from "effect";
@@ -100,6 +101,28 @@ export const runForUser = <A, E extends AppError>(
     Effect.provide(spanTracer),
     Effect.runPromise,
   );
+
+/**
+ * **后台补算 —— 把一份活儿交给这次请求的 `waitUntil`,请求本体不等它**(ADR 0049 裁定 3)。
+ *
+ * 为什么必须是 `waitUntil` 而不是 `Effect.fork`:免费档**每次请求只给 10ms CPU**,而
+ * `waitUntil` 那条路与定时任务同路、CPU 宽松(ADR 0049 有实测)。fork 出来的 fiber 还在
+ * 这次请求的账上,等于把刚搬走的计算又搬回来了;何况 Worker 在响应发走之后就可能被回收,
+ * 没有 `waitUntil` 登记的活儿会被半路掐死。
+ *
+ * **另起一次装配**,不复用调用方的 context:补算与响应那半是两个程序(同 `runSyncRound`),
+ * 而 layer 的作用域跟着那次 `Effect.provide` 走 —— 借来的服务活到什么时候不该由这里赌。
+ *
+ * **收的 effect 必须永不失败**(`E = never`,而且自己把 defect 兜掉):它的 Promise 交给
+ * `waitUntil` 之后没人再接,reject 出去就是一条静默的 unhandled rejection。
+ */
+export const backfillForUser = (
+  userId: string,
+  effect: Effect.Effect<void, never, UserServices>,
+): Effect.Effect<void> =>
+  Effect.sync(() => {
+    waitUntil(runForUser(userId, effect));
+  });
 
 /**
  * **server fn 的发动点 —— handler 只描述,这里负责跑。**

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { handleGetPortfolioGain24h } from "@/lib/server/portfolio/gain";
 import {
   handleGetSyncRound,
   openSyncRound,
@@ -9,6 +10,7 @@ import {
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
+import { DAY, seedSnapshot } from "../_kit/seed";
 import { freshUser } from "../_kit/user";
 
 // 开轮 / 读轮(ADR 0048)。对着真 D1 跑,因为这两件事的正确性都在「哪些账户进这一轮」与
@@ -146,6 +148,47 @@ describe("sync/round", () => {
       // 逐账户的失败不是「整轮没跑起来」,那一句必须还是空的。
       expect(view?.error).toBeNull();
       expect(noKeys.id in round.accounts).toBe(true);
+    });
+
+    // FOL-35 / ADR 0049:收官之后这一组合的 24h 盈亏必须已经算好存下,读接口从此只做「读 + 传」。
+    // 钉在这一层而不是 gain 那边:「算的时刻挂在同步收尾上」是接线,而接线只有整条路跑一遍才看得见
+    //(cron 把预热关掉的那一支尤其 —— 它换的是同一个字段)。
+    it("收官之后,这个组合的 24h 盈亏预计算就位", async () => {
+      const acc = await cex("Binance spot");
+      // 两张快照:24 小时前那张是基准,现在那张是当下 —— 有基准才算得出数,
+      // 否则「就位」会退化成「存了个空壳」,断言等于没写。
+      const now = Date.now();
+      await seedSnapshot(USER, acc.id, now - DAY, [
+        { tokenId: "token-btc", amount: 1, usdValue: 100 },
+      ]);
+      await seedSnapshot(USER, acc.id, now, [{ tokenId: "token-btc", amount: 1, usdValue: 130 }]);
+
+      const { round } = await open();
+      await runSyncRound(USER, round);
+
+      const pf = round.portfolioId;
+      const entry = await db(USER).cache.get(`gain24h:${pf}`);
+      expect(entry._tag).toBe("Some");
+      const served = await call(USER, handleGetPortfolioGain24h(USER, { portfolioId: pf }));
+      expect(served.portfolio?.amount).toBeCloseTo(30, 6);
+      // 账户级那一份也在同一次收尾里落下(维度里它不吃 pin,一个组合一个键)。
+      expect((await db(USER).cache.get(`gain24h-accounts:${pf}`))._tag).toBe("Some");
+    });
+
+    // cron 把预热关掉(它按用户统一预热),**预计算不能跟着一起被关掉** —— cron 的轮同样要
+    // 留下能直出的结果,否则整点跑完的那些组合下次进页仍然是空态 + 现补。
+    it("cron 那一支(不预热)照样落下预计算", async () => {
+      const acc = await cex("Binance spot");
+      const now = Date.now();
+      await seedSnapshot(USER, acc.id, now - DAY, [
+        { tokenId: "token-btc", amount: 1, usdValue: 100 },
+      ]);
+      await seedSnapshot(USER, acc.id, now, [{ tokenId: "token-btc", amount: 1, usdValue: 110 }]);
+
+      const { round } = await open();
+      await runSyncRound(USER, round, { warm: false });
+
+      expect((await db(USER).cache.get(`gain24h:${round.portfolioId}`))._tag).toBe("Some");
     });
 
     // 陈旧的 worker 撞上新一轮:它那几笔写落空成 no-op(条件在 db 那一层),这里钉的是
