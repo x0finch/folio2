@@ -58,13 +58,22 @@ export const RETRY = {
  * 路由的 `beforeLoad` 里那次 `getSession()` 是裸的 server fn 调用 —— 没有查询缓存包着,
  * 上面那份默认值管不到它,而它恰恰是最不能失败的一个:它一挂,整棵登录后的树连外壳都画不出来。
  * 跳转(会话过期)必须原样抛出去,不能当失败重试。
+ *
+ * 鉴权那处传 `Infinity`:**它没有「放弃」这个选项**。放弃了整棵树就只剩框架自带的白底错误页,
+ * 而框架在「loader 失败」这条路上不给重试句柄(react-router `Match.js`:那一支的 `reset` 是
+ * `undefined`),也就是说一旦落进去就只能靠用户自己刷新。停在骨架上每 15 秒试一次要好得多 ——
+ * 服务器缓过来的那一轮页面自己就长出来了。
  */
-export async function withRetry<T>(call: () => Promise<T>, isControlFlow: (e: unknown) => boolean) {
+export async function withRetry<T>(
+  call: () => Promise<T>,
+  isControlFlow: (e: unknown) => boolean,
+  attempts: number = RETRY.attempts,
+) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await call();
     } catch (error) {
-      if (isControlFlow(error) || attempt >= RETRY.attempts) throw error;
+      if (isControlFlow(error) || attempt >= attempts) throw error;
       await new Promise((resolve) => setTimeout(resolve, RETRY.delay(attempt)));
     }
   }

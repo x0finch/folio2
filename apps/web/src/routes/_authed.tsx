@@ -5,7 +5,6 @@ import {
   Outlet,
   redirect,
   retainSearchParams,
-  useRouter,
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
@@ -63,7 +62,7 @@ export const Route = createFileRoute("/_authed")({
   beforeLoad: async () => {
     // 这次调用不走查询缓存,所以 QueryClient 上那份重试默认值管不到它 —— 单独包一层同款退避。
     // 它挂了整棵树连外壳都没有,只剩框架自带的那张白底错误页,连导航都点不到。
-    const current = await withRetry(getSession, isRedirect);
+    const current = await withRetry(getSession, isRedirect, Number.POSITIVE_INFINITY);
     if (!current) throw redirect({ to: "/login" });
     return { user: current.user };
   },
@@ -119,15 +118,16 @@ function PendingShell() {
   return <AppShellSkeleton note={stalled ? t("stalled") : null} />;
 }
 
-// 最后一道网塌下来时:同一张骨架 + 同一句话,再加一个定时重跑整条路由的计时器 ——
-// 服务器缓过来的下一轮就自己长回来,用户不必刷新。
-function StalledShell() {
-  const router = useRouter();
+// 最后一道网:渲染异常这类**不是拉取失败**的错误落这里。给得到复位句柄就定时复位重试
+// (渲染错误走 CatchBoundary,它给 `reset`);拉取失败那一支框架不给句柄,但那条路已经
+// 走不到这儿了 —— 鉴权会一直重试不放弃,查询有各自的边界自愈。
+function StalledShell({ reset }: { reset?: () => void }) {
   const t = useTranslations("Shell");
   useEffect(() => {
-    const timer = setInterval(() => router.invalidate(), RETRY.selfHeal);
+    if (!reset) return;
+    const timer = setInterval(reset, RETRY.selfHeal);
     return () => clearInterval(timer);
-  }, [router]);
+  }, [reset]);
   return <AppShellSkeleton note={t("stalled")} />;
 }
 
