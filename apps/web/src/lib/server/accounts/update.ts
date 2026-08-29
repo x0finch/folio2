@@ -3,6 +3,7 @@ import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
 import { sealManualAccount } from "@/lib/server/manual/store";
+import { invalidateGain24h } from "@/lib/server/portfolio/gain";
 
 const log = getLogger(["folio", "web", "accounts"]);
 
@@ -50,6 +51,8 @@ export const handleUpdateAccount = Effect.fn("updateAccount")(function* (
   } else if (data.archived === false) {
     yield* accounts.setArchived(data.accountId, false);
   }
+  // 组合的值变了 → 预计算的 24h 盈亏不再可信,就地标旧(ADR 0049;为什么标旧不是删,见那边)。
+  yield* invalidateGain24h();
   log.info("account updated", {
     accountId: data.accountId,
     renamed: data.label !== undefined,

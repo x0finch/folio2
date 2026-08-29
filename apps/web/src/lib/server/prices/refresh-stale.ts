@@ -3,6 +3,7 @@ import { Oracle } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { manualBalancesForWarm } from "@/lib/server/manual/store";
+import { invalidateGain24h } from "@/lib/server/portfolio/gain";
 import { refreshableTokenIds, userDisplayBalances } from "@/lib/server/tokens/model";
 
 const priceLog = getLogger(["folio", "web", "prices"]);
@@ -32,6 +33,10 @@ export const handleRefreshStalePrices = Effect.fn("refreshStalePrices")(function
   // 一个方法两半的账:同一批 id 的 store 读只发一次,价与 info 两条分支并发。
   // 各自失败不拖垮对方(内部 `Effect.either` + 记一行),`degraded` 带回来只为进日志。
   const report = yield* Effect.flatMap(Oracle, (o) => o.tokens.refreshStale(ids));
+  // 价变了,24h 盈亏的「当下点」就变了(它取的是现推的 liveValue)→ 抬水位线,下次读顺手补算。
+  // **一条都没刷到就什么都没变**,不必抬 —— 抬了只是让下次读白补算一趟(同 manual 那两处的
+  // `if (result.ok)`)。客户端那个 hook 本来也只在 `refreshed > 0` 时才刷新查询。
+  if (report.prices > 0) yield* invalidateGain24h();
   priceLog.info("stale prices refreshed", { ...report });
   return { refreshed: report.prices };
 });

@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import { isManual } from "@/lib/core/manual";
 import { logCategory } from "@/lib/server/effect-log";
+import { invalidateGain24h } from "@/lib/server/portfolio/gain";
 import { syncServicesLayer, warmTokens } from "./deps";
 
 const syncLog = getLogger(["folio", "web", "sync"]);
@@ -62,6 +63,12 @@ export const handleSyncAccount = Effect.fn("syncAccount")(function* (
   // 预热不会让总览更新鲜 —— 却要白打 4 发上游(exchange_rates ×2 + coins/markets ×2)。
   // CoinGecko 免费档每分钟 10 发,在设置页对着一个缺凭据的账户连点几下「同步」就能把限额打空,
   // 而屏幕上什么都没发生。
-  if (result.ok) yield* warmTokens; // 让总览能 cache-only 富化新价
+  if (result.ok) {
+    yield* warmTokens; // 让总览能 cache-only 富化新价
+    // **抬在预热之后**,与一轮同步收官同一条理由:24h 盈亏的当下点吃的是刚热好的价。
+    // 少了这一句,侧栏「单独同步」会把屏幕上的市值改掉,而它旁边那个 24h 数字仍然以
+    // 「新鲜」的身份端着同步前的值 —— 没有 `pending`、没人补算,最长 90 分钟。
+    yield* invalidateGain24h();
+  }
   return result;
 });

@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { runEffect } from "@/lib/server/runtime";
+import { runEffect, runForUser } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListAccountHoldings } from "./account-holdings";
 import { handleGetAccountGain24h, handleGetPortfolioGain24h } from "./gain";
@@ -15,10 +15,15 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
   .validator(PortfolioScopeInput)
   .handler(runEffect(handleGetPortfolioOverview));
 
+// **这两条不走 `runEffect`**(ADR 0049):它们只读预计算结果,缺 / 旧的时候要把补算交给这次
+// 请求的 `waitUntil` —— 那是另起一次装配,要一个 userId,而 `runEffect` 刻意不把它交给 handler。
+// `runForUser` 是同一个内核,只是人由这里接(同 `syncAccount`)。
 export const getPortfolioGain24h = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
-  .handler(runEffect(handleGetPortfolioGain24h));
+  .handler(({ data, context }) =>
+    runForUser(context.userId, handleGetPortfolioGain24h(context.userId, data)),
+  );
 
 export const getHomeTabStrip = createServerFn({ method: "GET" })
   .middleware([requireAuth])
@@ -34,7 +39,9 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
 export const getAccountGain24h = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioSelectInput)
-  .handler(runEffect(handleGetAccountGain24h));
+  .handler(({ data, context }) =>
+    runForUser(context.userId, handleGetAccountGain24h(context.userId, data)),
+  );
 
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])

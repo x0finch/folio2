@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { z } from "zod";
 import { deleteToken } from "@/lib/server/manual/store";
+import { invalidateGain24h } from "@/lib/server/portfolio/gain";
 
 // 清空一个手记持仓:删该账户对这个币的全部活动。**代币行留着**(参考层数据,别的账户可能还在用)。
 // accountId 必须带 —— #203 起一个币可以被多个手记账户持有,只给 tokenId 说不清清哪个账户的。
@@ -13,5 +14,7 @@ export const handleRemoveManualToken = Effect.fn("removeManualToken")(function* 
   data: z.infer<typeof RemoveManualTokenInput>,
 ) {
   yield* deleteToken(data.accountId, data.tokenId);
+  // 组合的值变了 → 预计算的 24h 盈亏不再可信,就地标旧(ADR 0049;为什么标旧不是删,见那边)。
+  yield* invalidateGain24h();
   return { ok: true as const };
 });

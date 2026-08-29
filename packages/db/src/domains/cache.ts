@@ -11,6 +11,11 @@ import { userCache } from "../schema";
 // **但它不走这个 store**:它的写入是带轮 id 条件的单语句,`put(key, value)` 表达不了
 // (见 domains/sync-rounds.ts)。值是 JSON,db 当不透明 blob。
 //
+// 第五种键是预计算的 24h 盈亏(`gain24h:*`,ADR 0049),外加它的失效水位线(`gain24h-mark:*`)。
+// 它们**走这个 store**:同步收官时一次 `putMany` 把一个组合的全部维度原子换新,读接口一次
+// `getMany` 把值和水位线一起取回来 —— 那正是这两个动词的形状。「算的那份还算不算数」由 app
+// 比时间戳判(`server/portfolio/gain.ts`),不是这一层的事;键的形状也归那边。
+//
 // **过期不删、读出带 stale** —— 与价同一套 SWR 语义:展示先给旧的,调用方决定要不要后台刷。
 // 整张删空功能不坏,只是下次访问慢一点。
 //
