@@ -35,7 +35,7 @@ export interface HoldingLike {
   // (aggregate → overview-model)填好。稳定口径把所有法币都算稳定(现金类、非加密波动)。
   token: { symbol: string; isFiat?: boolean };
   totalValue: number;
-  // 24h 盈亏(ADR 0040),由 server 按快照历史 / 账本分段算好。null = 算不出。
+  // 24h 盈亏(ADR 0050:两端相减),由 server 算好。null = 算不出。
   gain24h?: { amount: number; pct: number | null } | null;
 }
 
@@ -58,7 +58,7 @@ export function deriveHeroMetrics(
   for (const h of holdings) {
     // 稳定 = 法币(身份驱动,USD 与非 USD 法币皆是)‖ 稳定币 symbol 表(#102 临时清单)。
     if (h.token.isFiat || isStablecoin(h.token.symbol)) stableSum += h.totalValue;
-    // **按盈亏金额取,不按涨跌幅**(ADR 0040)。以前这里只看涨跌幅、完全不看持有多少,于是这两个
+    // **按盈亏金额取,不按涨跌幅**(ADR 0050)。以前这里只看涨跌幅、完全不看持有多少,于是这两个
     // 格子永远被小仓位的暴涨币占据 —— 持有 500 块的币涨 30%,就把最大的仓位顶掉了。它回答的是
     // 「哪个币涨得最多」,而人想知道的是「今天谁让我赚得最多」。
     if (h.gain24h == null) continue; // 算不出的行不参与择取

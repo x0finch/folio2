@@ -72,25 +72,12 @@ export const portfolioHistoryQuery = (portfolioId: string) =>
 /**
  * 24h 盈亏:组合级 + 按持仓 / DeFi 协议分组。自定义 Tab 把 pin 传进来。
  *
- * **`pending` → 短轮询**(ADR 0049):这份数是同步收官时预计算的,读接口只做「读 + 传」。
- * 没算过 / 刚失效的时候它如实说一句「还在算」,服务端同时安排一趟后台补算 —— 不盯着的话,
- * 补算几百毫秒就落好了,而这份空响应会按 `staleTime` 在前端揣满 30 秒。
- * 手法与同步轮进度那条一样(ADR 0048):**只在有东西正在变的时候才开**。轮询有退避、会放弃
- * (`pendingPollDelay`)—— 理由写在那儿。
- *
- * **`pending` 期间界面不做任何视觉区分,这是想过之后的决定。** 那一刻屏幕上那个数是上一次
- * 权威计算的结果(通常几分钟前),而正确值一秒内就会顶上来。给它加个「重算中」的样子意味着:
- * 每小时的 cron、每一次同步、每一笔手记改动、每一次刷价,那个数都要闪一下 —— 一个每小时
- * 「不确定」好几次的界面,比一个偶尔慢一分钟的界面更难信。ADR 0049 收下的代价本来就是
- * 「算的时刻 ≠ 看的时刻」,`pending` 是给**取数**用的信号,不是给眼睛的。
- * (真正算不出来的时候界面照旧画 `—`,那条路一个字没动。)
+ * **每次请求现算,没有 `pending`、不轮询**(ADR 0050):两端相减小到装得进一次请求
+ * (两个点查),不再是预计算的那一族。响应就是终局 —— 算不出的位置是 `null`,界面画 `—`。
  */
 export const portfolioGain24hQuery = (portfolioId: string, pin?: PinScopeKey) =>
   queryOptions({
     queryKey: portfolioKeys.gain24h(portfolioId, pin),
     queryFn: () => getPortfolioGain24h({ data: { portfolioId, pin } }),
     staleTime: STALE_TIME.live,
-    // 隔 1s 再问,之后翻倍,八次收手 —— **次数按「这一轮 pending」数**,见 `pendingPollDelay`
-    // (拿这条查询的一辈子成功次数去数,页面开久了轮询会自己永久关掉)。算好了整条就停。
-    refetchInterval: pendingPollDelay,
   });

@@ -28,9 +28,9 @@ const DEMO_SERIES: HistoryPoint[] = Array.from({ length: 28 }, (_, i) => ({
   total: 150_000 + i * 3_600 + Math.max(0, i - 19) ** 2 * 900 + Math.sin(i * 0.9) * 3_500,
 }));
 const DEMO_START_TOTAL = 312_450.42;
-// 24h 盈亏改口径之后(ADR 0040),hero 那个 pill 的数由 server 算好后传进来,不再从曲线上量 ——
+// 24h 盈亏改口径之后(ADR 0050),hero 那个 pill 的数由 server 算好后传进来,不再从曲线上量 ——
 // 所以演示数据也直接给一个正的盈亏,而不是靠「起点高于末值」间接凑出颜色。
-const DEMO_GAIN = { amount: 4_820.15, pct: 1.57, segments: [] };
+const DEMO_GAIN = { amount: 4_820.15, pct: 1.57 };
 const DEMO_HOLDINGS: HoldingLike[] = [
   { token: { symbol: "BTC" }, totalValue: 112_400, gain24h: { amount: 2_310, pct: 2.1 } },
   { token: { symbol: "ETH" }, totalValue: 61_250, gain24h: { amount: 2_012, pct: 3.4 } },

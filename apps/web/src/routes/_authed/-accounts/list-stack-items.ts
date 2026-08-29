@@ -27,7 +27,7 @@ import { defiLogoUrl } from "@/lib/core/logo";
 // 累加 / 砍尘埃 / 降序交给 `buildStack`(三处叠标共用那一段);本文件只负责**每一行的量级取哪个数**:
 //   · 现货 → 行的 `usdValue`(带符号,同一个币的多笔可以互相抵消)
 //   · DeFi → 各腿 `|usdValue|`(借款腿是负的;对冲仓净值≈0 却是个大仓位 —— 同 `dropEmptyDefiGroups`
-//     与 ADR 0040 的毛敞口口径)
+//     的毛敞口口径;这只管「画不画这一格」,与 24h 盈亏的分母无关)
 //   · 永续 → **meta 里的名义敞口**,不是行的 `usdValue`(那个恒为 0,见 `perpPositionMetaOf`)
 export function accountStackItems(balances: OverviewBalance[]): StackItem[] {
   const entries: StackEntry[] = [];

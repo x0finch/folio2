@@ -119,8 +119,8 @@ export const runSyncRound = (
     gate: opts.gate,
   });
   const head = { portfolioId: round.portfolioId, roundId: round.roundId };
-  // **预计算排在预热后面 —— 这个顺序是必须的,不是偏好。** 总览的市值与 24h 盈亏的「当下点」
-  // 都不是快照里那个
+  // **预计算排在预热后面 —— 这个顺序是必须的,不是偏好。** 总览的市值(24h 盈亏的「现在」
+  // 那一端也是从这份总览读的,ADR 0050)不是快照里那个
   // 冻结的 `usdValue`,而是 `overview-model` 现推的 `liveValue(b, enriched.price?.unitPrice, mode)`
   // (盯市那些行取的是实时源价)。预热正是把那份价刷新的一步。排在它前面,存下来的数就是拿
   // **上一轮**的价算的 —— 每一轮都差一拍,而且没有任何东西会自己纠正。

@@ -62,9 +62,9 @@ export interface Holding {
   totalValue: number;
   totalAmount?: number; // 各 source 数量之和(组统一单位,跨链/多源亦可汇总)
   change24h?: number; // 仅单一 Token 组(%,每币 CGK 涨跌)
-  // 24h 盈亏(ADR 0040):由 server 读路径(buildOverview)按快照历史分段算好后附上,**不在这里算** ——
-  // 聚合只负责归并,盈亏要的原料(历史)不在它手上。`null` = 算不出(缺基准),`undefined` = 这条路
-  // 没接盈亏(账户抽屉那条路暂时如此,见 #447 第 5 片)。
+  // 24h 盈亏(ADR 0050:两端相减):独立读取算好、由**客户端**贴回各行(attach-gains),
+  // **不在这里算** —— 聚合只负责归并,盈亏要的起点快照不在它手上。`null` = 算不出(缺 24 小时前
+  // 的观测),`undefined` = 盈亏还没贴上来。
   gain24h?: Gain | null;
   sources: HoldingSource[];
 }
@@ -77,8 +77,13 @@ export interface Holding {
 // 键带**余额行 id** 而非 symbol —— symbol 已不在行上,再拿它当键会让一个账户里所有无 token 的行
 // 塌成一条空名持仓、金额被错误相加(裸 symbol 归并本就是 ADR-0002 的红线)。带账户 id 兼防跨账户混。
 // id 缺席(历史行不带)→ 回落空 symbol,那条恒不匹配任何真 token_id 键,只会被 token-history 排除。
+
+// 无 token_id 兜底键的前缀。24h 盈亏(./gain)要认得它:这种行没有可匹配的币身份,
+// 24 小时前的值对不上号 → 恒「算不出」,不能按「起点 0」把整份存量每天都说成今天赚的。
+export const NO_TOKEN_KEY_PREFIX = "no-token:";
+
 export function groupKey(row: AggInput): string {
-  return row.tokenId ?? `no-token:${row.account.id}:${row.id ?? norm(row.symbol)}`;
+  return row.tokenId ?? `${NO_TOKEN_KEY_PREFIX}${row.account.id}:${row.id ?? norm(row.symbol)}`;
 }
 
 // 导出供 token-history 复用(历史行归属同一口径)。

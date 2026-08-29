@@ -333,7 +333,7 @@ export function ManualTokensPanel({
             symbol: tk.symbol.toUpperCase(),
             amount: tk.amount,
             value,
-            // 24h 盈亏(ADR 0040):与抽屉头 / 首页同源的那个数。**别漏** —— 漏了 `TokenRowContent`
+            // 24h 盈亏(ADR 0050):与抽屉头 / 首页同源的那个数。**别漏** —— 漏了 `TokenRowContent`
             // 收到 undefined,整行静默不渲染增量,看起来像「手记账户没有这个功能」。
             gain24h: bal?.gain24h,
           }}

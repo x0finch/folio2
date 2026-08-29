@@ -1,13 +1,7 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleGetPortfolioGain24h } from "@/lib/server/portfolio/gain";
-import {
-  accountGainKey,
-  overviewKey,
-  portfolioGainKey,
-  precomputeMarkKey,
-  tabStripKey,
-} from "@/lib/server/portfolio/precompute";
+import { overviewKey, precomputeMarkKey, tabStripKey } from "@/lib/server/portfolio/precompute";
 import {
   handleGetSyncRound,
   openSyncRound,
@@ -159,8 +153,9 @@ describe("sync/round", () => {
       expect(noKeys.id in round.accounts).toBe(true);
     });
 
-    // FOL-35 / FOL-36 / ADR 0049:收官之后这一组合的预计算必须已经算好存下,四条读接口
-    // (总览 / tab 条 / 两级盈亏)从此只做「读 + 传」。
+    // FOL-35 / FOL-36 / ADR 0049:收官之后这一组合的预计算必须已经算好存下,总览与 tab 条
+    // 从此只做「读 + 传」;24h 盈亏(ADR 0050)虽是请求内现算,「现在」那一端吃的正是这份
+    // 存量总览 —— 所以它也要在这条接线跑通之后才有数。
     // 钉在这一层而不是 gain 那边:「算的时刻挂在同步收尾上」是接线,而接线只有整条路跑一遍才看得见
     //(cron 把预热关掉的那一支尤其 —— 它换的是同一个字段)。
     it("收官之后,这个组合的预计算就位", async () => {
@@ -178,13 +173,12 @@ describe("sync/round", () => {
 
       const pf = round.portfolioId;
       const at = async (k: string) => (await db(USER).cache.get(k))._tag;
-      expect(await at(portfolioGainKey(pf, null))).toBe("Some");
-      const served = await call(USER, handleGetPortfolioGain24h(USER, { portfolioId: pf }));
-      expect(served.portfolio?.amount).toBeCloseTo(30, 6);
-      // 四族都在同一次收尾里落下(账户级盈亏与 tab 条不吃 pin,一个组合一个键)。
-      expect(await at(accountGainKey(pf, null))).toBe("Some");
+      // 两族都在同一次收尾里落下(tab 条不吃 pin,一个组合一个键)。
       expect(await at(overviewKey(pf, null))).toBe("Some");
       expect(await at(tabStripKey(pf, null))).toBe("Some");
+      // 盈亏借存量总览当「现在」那一端 —— 收官一落,它立刻算得出。
+      const served = await call(USER, handleGetPortfolioGain24h({ portfolioId: pf }));
+      expect(served.portfolio?.amount).toBeCloseTo(30, 6);
     });
 
     // **cron 那一支刻意不在轮里预计算。**
@@ -204,9 +198,6 @@ describe("sync/round", () => {
       const { round } = await open();
       await runSyncRound(USER, round, { warm: false });
 
-      expect((await db(USER).cache.get(portfolioGainKey(round.portfolioId, null)))._tag).toBe(
-        "None",
-      );
       expect((await db(USER).cache.get(overviewKey(round.portfolioId, null)))._tag).toBe("None");
       expect((await db(USER).cache.get(precomputeMarkKey(round.portfolioId)))._tag).toBe("Some");
     });
@@ -226,13 +217,11 @@ describe("sync/round", () => {
       const out = await Effect.runPromise(precomputeAllUsers([USER]));
 
       expect(out.failed).toBe(0);
-      expect((await db(USER).cache.get(portfolioGainKey(home, null)))._tag).toBe("Some");
-      expect((await db(USER).cache.get(portfolioGainKey(watch.id, null)))._tag).toBe("Some");
       expect((await db(USER).cache.get(overviewKey(home, null)))._tag).toBe("Some");
-      // 落的是真数字,不是空壳。
-      const served = await call(USER, handleGetPortfolioGain24h(USER, { portfolioId: home }));
+      expect((await db(USER).cache.get(overviewKey(watch.id, null)))._tag).toBe("Some");
+      // 落的是真数字,不是空壳 —— 盈亏借它当「现在」那一端,立刻算得出。
+      const served = await call(USER, handleGetPortfolioGain24h({ portfolioId: home }));
       expect(served.portfolio?.amount).toBeCloseTo(30, 6);
-      expect(served.pending).toBeUndefined();
     });
 
     // 陈旧的 worker 撞上新一轮:它那几笔写落空成 no-op(条件在 db 那一层),这里钉的是

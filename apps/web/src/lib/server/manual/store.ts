@@ -26,7 +26,7 @@ import {
   tokenQuantityAt,
 } from "@/lib/core/manual";
 import { NAMER } from "@/lib/server/oracle";
-import type { GainHistoryRow } from "@/lib/server/portfolio/gain-24h";
+import type { StartSnapshot } from "@/lib/server/portfolio/gain-24h";
 import type { BalanceLike } from "@/lib/server/tokens/model";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "./batch";
 import { buildManualSnapshot, manualUnitPrices } from "./snapshot";
@@ -588,59 +588,46 @@ export const editManualActivity = (
     return { ok: true };
   });
 
-// manual 账户的 24h 盈亏原料(ADR 0040 / #447 第 3 片)。
+// manual 账户 24h 盈亏的「起点」那一端(ADR 0050:两端相减)。
 //
-// **manual 从不写快照(ADR 0018)**,所以上一片里它的线只有一个当下点 → 一律「算不出」。但它手上
-// 的东西比快照更好:账本记着每笔什么时候买的、多少钱买的。所以不迁就快照网格,**按活动时刻切段**。
+// **manual 从不写快照(ADR 0018)**,所以它没有「24 小时前那张快照」可查。但账本能回答任意时刻
+// 的值:数量按活动折叠(`tokenQuantityAt`),价走 ADR 0019 的降级链(oracle 历史价 → 账本里最近
+// 一条记了价的活动 → unitPrice)。这里按窗口起点那一刻折算一份与快照同形状的观测。
 //
-// 由此 manual 账户比同步账户准。那本来就合理 —— 你实实在在多告诉了系统一些东西;这不是两套方法,
-// 是同一个方法喂了更好的数据,与「同步越勤越准」是同一个道理。
-//
-// 两处必须这样做的地方:
-//
-// ① **窗口起点那一刻直接产点**,时刻就是 `since` 本身。账本能算任意时刻的值,没有「快照落在哪儿」
-//    这回事 —— 于是容差判定必然通过,manual 账户只要有账本就永远算得出。
-//
-// ② **每个币在账户的每个观测时刻都产一行,哪怕它那一刻没有活动。** 装配层(`buildGainLines`)对
-//    「某时刻缺这个币的行」的解读是「数量归零」—— 那条规则是为快照写的(快照是全量的),对账本
-//    这种稀疏点恰好反过来:没有活动只表示没动过。少产一行,持仓就会在别的币交易的那一刻被清零。
-export const loadManualGainHistory = (
+// **没有一笔活动早于起点的账户,没有起点** —— 与「账户不满 24 小时 → 算不出(`—`)」是同一条
+// 规则:账本在那一刻还什么都不知道,把「0」当基准会把开仓本金说成当天赚的,却又躲过了
+// 「充提计入」那条裁定该有的样子(裁定管的是**既有**账户里的进出,不是把新账户的第一笔当盈亏)。
+export const loadManualStartSnapshots = (
   accounts: AccountSafe[],
   now: number,
-  since: number,
-): Effect.Effect<GainHistoryRow[], NotFound, Database | Oracle> =>
+  start: number,
+): Effect.Effect<StartSnapshot[], NotFound, Database | Oracle> =>
   Effect.gen(function* () {
     // 归档账户不参与(ADR 0039:封存之后不再产生 24h 盈亏)。
     const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
-    const out: GainHistoryRow[] = [];
+    const out: StartSnapshot[] = [];
     yield* Effect.forEach(
       manual,
       (account) =>
         Effect.gen(function* () {
           const tokens = yield* loadHistoryTokens(account.id);
-          if (tokens.length === 0) return;
+          // 起点在不在:有没有任何一笔活动发生在窗口起点或更早。
+          if (!tokens.some((tk) => tk.activities.some((a) => a.occurredAt <= start))) return;
           const priceAt = yield* buildHistoricalPriceAt(tokens, now);
-          // 观测时刻取**账户级**并集(见上面 ②):窗口起点 + 窗口内每一笔活动的时刻。
-          const times = new Set<number>([since]);
-          for (const tk of tokens) {
-            for (const a of tk.activities) {
-              if (a.occurredAt > since && a.occurredAt < now) times.add(a.occurredAt);
-            }
-          }
-          const sorted = [...times].sort((a, b) => a - b);
-          for (const tk of tokens) {
-            for (const t of sorted) {
-              const amount = tokenQuantityAt(tk, t);
-              out.push({
-                accountId: account.id,
-                takenAt: t,
-                tokenId: tk.id,
-                amount,
-                // 价走 ADR 0019 的降级链:oracle 历史价 → 账本里最近一条记了价的活动 → unitPrice。
-                usdValue: amount * tokenPriceAt(tk, t, priceAt),
-              });
-            }
-          }
+          const balances = tokens.map((tk) => {
+            const amount = tokenQuantityAt(tk, start);
+            return {
+              tokenId: tk.id,
+              usdValue: amount * tokenPriceAt(tk, start, priceAt),
+              kind: "spot",
+            };
+          });
+          out.push({
+            accountId: account.id,
+            takenAt: start,
+            totalUsd: balances.reduce((sum, b) => sum + b.usdValue, 0),
+            balances,
+          });
         }),
       // 每账户一次取数,顺序跑 —— 与 loadManualHistoryRows 同一个理由(共用限频额度)。
       { concurrency: 1, discard: true },

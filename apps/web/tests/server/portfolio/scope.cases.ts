@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { handleListAccounts } from "@/lib/server/accounts/list";
 import { handleListAccountHoldings } from "@/lib/server/portfolio/account-holdings";
 import { handleGetAccountGain24h } from "@/lib/server/portfolio/gain";
-import { precomputePortfolio } from "@/lib/server/portfolio/precompute";
 import { handleListAccountTags } from "@/lib/server/tags/account-tags";
 import { handleListTags } from "@/lib/server/tags/list";
 import { db } from "../_kit/db";
@@ -70,10 +69,8 @@ describe("portfolio/scope", () => {
       const holdings = await call(USER, handleListAccountHoldings({ portfolioId: WATCH_ID }));
       expect(holdings.rows.map((r) => r.account.label)).toEqual(["只看看"]);
 
-      // 盈亏这条读的是预计算结果(ADR 0049),所以先让那一步跑一遍 —— 收窄发生在**算**的时候,
-      // 这条用例要看的正是那一份里有没有别的组合的账户。
-      await call(USER, precomputePortfolio(WATCH_ID));
-      const gain = await call(USER, handleGetAccountGain24h(USER, { portfolioId: WATCH_ID }));
+      // 盈亏是请求内现算(ADR 0050),收窄发生在取「两端」的名单那一步。
+      const gain = await call(USER, handleGetAccountGain24h({ portfolioId: WATCH_ID }));
       expect(Object.keys(gain.accounts)).toEqual([WATCHED]);
     });
 

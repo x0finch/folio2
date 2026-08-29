@@ -297,15 +297,15 @@ describe("dropEmptyDefiGroups", () => {
   });
 });
 
-describe("mergeDefiGroups —— 24h 盈亏跨账户合并(ADR 0040)", () => {
-  const g = (protocol: string, amount: number, grossBasis: number) => ({
+describe("mergeDefiGroups —— 24h 盈亏跨账户合并(ADR 0050)", () => {
+  const g = (protocol: string, amount: number, basis: number) => ({
     protocol,
     rows: [{ id: "x", symbol: "S", amount: 1, usdValue: 100 }],
-    gain24h: { amount, pct: grossBasis > 0 ? (amount / grossBasis) * 100 : null, grossBasis },
+    gain24h: { amount, pct: basis > 0 ? (amount / basis) * 100 : null, basis },
   });
 
-  it("金额相加,百分比**重算**(Σ金额 ÷ Σ总敞口),不是各账户百分比取平均", () => {
-    // A:赚 10、敞口 100(+10%);B:赚 10、敞口 900(+1.11%)。平均是 5.56%,正确答案是 20/1000 = 2%。
+  it("金额相加,百分比**重算**(Σ金额 ÷ Σ起点),不是各账户百分比取平均", () => {
+    // A:赚 10、起点 100(+10%);B:赚 10、起点 900(+1.11%)。平均是 5.56%,正确答案是 20/1000 = 2%。
     const merged = mergeDefiGroups([
       { defi: [g("Lido", 10, 100)] },
       { defi: [g("Lido", 10, 900)] },
@@ -315,7 +315,7 @@ describe("mergeDefiGroups —— 24h 盈亏跨账户合并(ADR 0040)", () => {
     expect(merged[0].gain24h?.pct).not.toBeCloseTo(5.56, 1);
   });
 
-  it("一个账户算得出就算 —— 与「有基准的线才参与」同一个态度", () => {
+  it("一个账户算得出就算 —— 与「有起点的账户才参与」同一个态度", () => {
     const merged = mergeDefiGroups([
       { defi: [g("Lido", 10, 100)] },
       { defi: [{ protocol: "Lido", rows: [], gain24h: null }] },

@@ -185,7 +185,7 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
   // 划动读数(#470 片7)。
   const scrub = useChartScrub();
   const { token, totalValue, totalAmount, sources } = holding;
-  // 24h 盈亏(ADR 0040)—— server 算好的,与主页那一行同一个数。以前是 change24h 倒推的。
+  // 24h 盈亏(ADR 0050:两端相减)—— server 算好的,与主页那一行同一个数。以前是 change24h 倒推的。
   const dayValue = holding.gain24h?.amount ?? null;
   const dayPct = holding.gain24h?.pct ?? null;
   const platformGroups = groupByPlatform(sources);

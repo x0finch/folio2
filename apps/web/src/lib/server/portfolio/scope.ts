@@ -9,13 +9,8 @@ import {
   toTabPin,
 } from "@/lib/core/accounts-in-view";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
-import {
-  injectManualSnapshots,
-  loadManualGainHistory,
-  manualFiatRefs,
-} from "@/lib/server/manual/store";
-import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./gain-24h";
-import { buildOverview, type OverviewDeps } from "./overview-model";
+import { injectManualSnapshots, manualFiatRefs } from "@/lib/server/manual/store";
+import { buildOverview } from "./overview-model";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
 // 仅按选中 Portfolio scope(曲线 / 列表默认口径);不带 pin。
@@ -87,10 +82,9 @@ export const scopedMembership = (
     };
   });
 
-// 总览装配:账户集 + 当下快照 + 手记注入 + 可选的 24h 盈亏原料。
-// `withGain` 是票 5 的切法 —— 总览不再读窗口历史;盈亏读取走同一条装配、把历史带上,
-// 于是「各行相加 = hero 那个数」仍是同一个 `computeGain24h` 喂出来的,不是两处各算。
-export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
+// 总览装配:账户集 + 当下快照 + 手记注入。24h 盈亏不在这条链上(ADR 0050:盈亏是独立读取,
+// 两端相减,原料是「最新快照 + 24 小时前那张快照」,见 ./gain)。
+export const buildScopedOverview = (data: PortfolioScope) =>
   Effect.gen(function* () {
     const {
       accounts: accountStore,
@@ -101,7 +95,6 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
     } = yield* Database;
 
     const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
-    const now = Date.now();
     const [allAccounts, snapshots, settings, memberships] = yield* Effect.all(
       [
         accountStore.list(),
@@ -121,23 +114,9 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     yield* injectManualSnapshots(accounts, byAccount);
     const fiatRefs = yield* manualFiatRefs(accounts);
-    let gainHistory: OverviewDeps["gainHistory"];
-    if (withGain) {
-      const inScope = new Set(accounts.map((a) => a.id));
-      const [snapGain, manualGain] = yield* Effect.all(
-        [
-          snapshotStore.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
-          loadManualGainHistory(accounts, now, now - GAIN_WINDOW_MS),
-        ],
-        { concurrency: 2 },
-      );
-      gainHistory = [...snapGain.filter((r) => inScope.has(r.accountId)), ...manualGain];
-    }
     return yield* buildOverview(accounts, byAccount, {
       connectorMeta: connectorPlatformMeta,
       mode: settings.valuationMode,
       fiatRefs,
-      gainHistory,
-      now,
     });
   });

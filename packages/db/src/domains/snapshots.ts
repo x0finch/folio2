@@ -10,6 +10,7 @@ import {
   inArray,
   isNotNull,
   lt,
+  lte,
   max,
   sql,
 } from "drizzle-orm";
@@ -110,6 +111,81 @@ export const makeSnapshotStore = Effect.gen(function* () {
   const client = yield* DbClient;
   const userId = yield* CurrentUser;
 
+  /**
+   * 每账户「`takenAt ≤ upTo` 里最新」的快照 + 其余额;`upTo` 缺省 = 不设上界(就是最新那张)。
+   * 常数次查询(与账户数无关):① 每账户命中快照整行 ② 这些快照的全部余额,再 JS 分组。
+   * 没有命中快照的账户自然不出现 —— 「不出现」正是读端「这个账户没有那一刻的观测」的判据。
+   */
+  const latestWithBalances = (upTo?: number): Effect.Effect<SnapshotWithBalances[]> =>
+    Effect.gen(function* () {
+      // ① 取每账户窗口内最新快照整行(1 查询)。
+      // 子查询:该用户每个账户在上界内的最新 takenAt(经 snapshots ⨝ accounts 用 userId 限定)。
+      const latestSnapshots = yield* client.query((db) => {
+        const bound =
+          upTo == null
+            ? eq(accounts.userId, userId)
+            : and(eq(accounts.userId, userId), lte(snapshots.takenAt, upTo));
+        const latestPerAccount = db
+          .select({
+            accountId: snapshots.accountId,
+            maxTakenAt: max(snapshots.takenAt).as("max_taken_at"),
+          })
+          .from(snapshots)
+          .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+          .where(bound)
+          .groupBy(snapshots.accountId)
+          .as("latest_per_account");
+        return db
+          .select(getTableColumns(snapshots))
+          .from(snapshots)
+          .innerJoin(
+            latestPerAccount,
+            and(
+              eq(snapshots.accountId, latestPerAccount.accountId),
+              eq(snapshots.takenAt, latestPerAccount.maxTakenAt),
+            ),
+          );
+      });
+
+      // 同毫秒并列保护:每账户保留一条(id 最大者)。
+      const byAccount = new Map<string, Snapshot>();
+      for (const s of latestSnapshots) {
+        const cur = byAccount.get(s.accountId);
+        if (!cur || s.id > cur.id) byAccount.set(s.accountId, s);
+      }
+      const snaps = [...byAccount.values()];
+      if (snaps.length === 0) return [];
+
+      // ② 取这些快照的全部余额(1 查询)。
+      const balanceRows = yield* client.query((db) =>
+        db
+          .select()
+          .from(snapshotBalances)
+          .where(
+            inArray(
+              snapshotBalances.snapshotId,
+              snaps.map((s) => s.id),
+            ),
+          ),
+      );
+
+      // JS 按 snapshotId 分组;每行的 note 列(JSON)safeParse 成单个 Note(balance 级)。
+      const bySnapshot = new Map<string, SnapshotBalanceView[]>();
+      for (const b of balanceRows) {
+        const { note, ...rest } = b;
+        const view: SnapshotBalanceView = { ...rest, note: parseBalanceNote(note) };
+        const arr = bySnapshot.get(b.snapshotId);
+        if (arr) arr.push(view);
+        else bySnapshot.set(b.snapshotId, [view]);
+      }
+      return snaps.map((snapshot) => ({
+        snapshot,
+        // account 级 note(Note[])从 snapshot.note(JSON)safeParse。
+        note: parseAccountNote(snapshot.note),
+        balances: bySnapshot.get(snapshot.id) ?? [],
+      }));
+    });
+
   return {
     /**
      * 一次原子写 snapshot + balances(D1 用 db.batch,无交互式事务)。返回 snapshotId。
@@ -127,8 +203,8 @@ export const makeSnapshotStore = Effect.gen(function* () {
      * (`TransferStore.importSnapshot`)正是转手调的这个方法。默认开就意味着「恢复自己的备份」会
      * 静默丢掉同一小时里的历史快照。两种默认里,忘了开只是少省点空间,忘了关是丢数据。
      *
-     * **代价不是零**:24h 盈亏(ADR 0040)不走降采样,它按每个观测点切段做 TWR —— 折叠会让切段变粗。
-     * 小时级仍足够分辨充提与行情,再粗就会动到基准查找的 ±2h 容差(#455)。所以桶宽只到一小时。
+     * **代价接近零**:24h 盈亏(ADR 0050)只取两个端点(最新一张 + ≤ 24h 前的最近一张),
+     * 同钟点折叠最多让起点挪动不到一小时 —— 分辨充提与行情绰绰有余。所以桶宽只到一小时。
      */
     write: (
       accountId: string,
@@ -284,72 +360,15 @@ export const makeSnapshotStore = Effect.gen(function* () {
       ),
 
     /** 每个账户的最新快照 + 其余额(总览数据源)。 */
-    // 常数次查询(与账户数无关):① 每账户最新快照整行 ② 这些快照的全部余额,再 JS 分组。
-    latest: (): Effect.Effect<SnapshotWithBalances[]> =>
-      Effect.gen(function* () {
-        // ① 取每账户最新快照整行(1 查询);无快照的账户自然不出现。
-        // 子查询:该用户每个账户的最新 takenAt(经 snapshots ⨝ accounts 用 userId 限定)。
-        const latestSnapshots = yield* client.query((db) => {
-          const latestPerAccount = db
-            .select({
-              accountId: snapshots.accountId,
-              maxTakenAt: max(snapshots.takenAt).as("max_taken_at"),
-            })
-            .from(snapshots)
-            .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
-            .where(eq(accounts.userId, userId))
-            .groupBy(snapshots.accountId)
-            .as("latest_per_account");
-          return db
-            .select(getTableColumns(snapshots))
-            .from(snapshots)
-            .innerJoin(
-              latestPerAccount,
-              and(
-                eq(snapshots.accountId, latestPerAccount.accountId),
-                eq(snapshots.takenAt, latestPerAccount.maxTakenAt),
-              ),
-            );
-        });
+    latest: (): Effect.Effect<SnapshotWithBalances[]> => latestWithBalances(),
 
-        // 同毫秒并列保护:每账户保留一条(id 最大者)。
-        const byAccount = new Map<string, Snapshot>();
-        for (const s of latestSnapshots) {
-          const cur = byAccount.get(s.accountId);
-          if (!cur || s.id > cur.id) byAccount.set(s.accountId, s);
-        }
-        const snaps = [...byAccount.values()];
-        if (snaps.length === 0) return [];
-
-        // ② 取这些快照的全部余额(1 查询)。
-        const balanceRows = yield* client.query((db) =>
-          db
-            .select()
-            .from(snapshotBalances)
-            .where(
-              inArray(
-                snapshotBalances.snapshotId,
-                snaps.map((s) => s.id),
-              ),
-            ),
-        );
-
-        // JS 按 snapshotId 分组;每行的 note 列(JSON)safeParse 成单个 Note(balance 级)。
-        const bySnapshot = new Map<string, SnapshotBalanceView[]>();
-        for (const b of balanceRows) {
-          const { note, ...rest } = b;
-          const view: SnapshotBalanceView = { ...rest, note: parseBalanceNote(note) };
-          const arr = bySnapshot.get(b.snapshotId);
-          if (arr) arr.push(view);
-          else bySnapshot.set(b.snapshotId, [view]);
-        }
-        return snaps.map((snapshot) => ({
-          snapshot,
-          // account 级 note(Note[])从 snapshot.note(JSON)safeParse。
-          note: parseAccountNote(snapshot.note),
-          balances: bySnapshot.get(snapshot.id) ?? [],
-        }));
-      }),
+    /**
+     * 每个账户在 `t` **或更早**的最近一张快照 + 其余额 —— 24h 盈亏「起点」那一端的数据源
+     * (ADR 0050:起点 = 24 小时前那一刻或更早的最近观测)。没有那么早的快照的账户不出现,
+     * 读端据此判「账户不满 24 小时 → 算不出」。**是 ≤ 不是 ≥**:往后找最近一张等于拿几小时前
+     * 的数冒充 24 小时前,窗口被悄悄截短。
+     */
+    asOf: (t: number): Effect.Effect<SnapshotWithBalances[]> => latestWithBalances(t),
 
     /** 导出用:分页取全部快照(按 takenAt,id 稳定排序)。 */
     // 配合 `balancesFor` 一页页流式读出,内存恒定;每页配 inArray(≤ 页大小)取余额,

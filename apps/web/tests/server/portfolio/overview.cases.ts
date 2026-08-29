@@ -179,7 +179,7 @@ describe("portfolio/overview", () => {
       vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
 
       // 现算 = 这条接口在 FOL-36 之前的全部内容。
-      const inline = await call(USER, buildScopedOverview({}, false));
+      const inline = await call(USER, buildScopedOverview({}));
       await precompute(USER);
       const served = await read();
 

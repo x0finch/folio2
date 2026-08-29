@@ -3,7 +3,7 @@ import { getAccountHistory, listAccounts } from "@/lib/server/accounts";
 import { getHoldingHistory } from "@/lib/server/holdings";
 import { getManualAccount } from "@/lib/server/manual-tokens";
 import { getAccountGain24h, listAccountHoldings } from "@/lib/server/portfolio";
-import { pendingPollDelay, STALE_TIME } from "./constants";
+import { STALE_TIME } from "./constants";
 import { accountKeys } from "./keys";
 
 // 账户域的读取入口 —— 与 `lib/server/accounts` / `holdings` / `manual-tokens` 及
@@ -32,13 +32,12 @@ export const accountHoldingsQuery = (portfolioId: string) =>
     staleTime: STALE_TIME.live,
   });
 
-/** 账户级 24h 盈亏。`pending` → 短轮询,理由与 `portfolioGain24hQuery` 那条逐字相同。 */
+/** 账户级 24h 盈亏。每次请求现算、响应即终局(ADR 0050),与组合级那条同一口径。 */
 export const accountGain24hQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: accountKeys.gain24h(portfolioId),
     queryFn: () => getAccountGain24h({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
-    refetchInterval: pendingPollDelay,
   });
 
 /** 一份账户列表行的形状(含该组合的归档账户、归属与凭据投影)。 */

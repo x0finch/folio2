@@ -7,7 +7,7 @@ import { attachDefiGains, attachHoldingGains } from "@/routes/_authed/-home/hold
 // (行上破折号 / hero 那个数对不上),所以钉子钉在拼法上,不钉数字怎么算。
 
 const btcGain = { amount: 10, pct: 1, segments: [] };
-const aaveGain = { amount: 3, pct: 2, grossBasis: 100 };
+const aaveGain = { amount: 3, pct: 2, basis: 100 };
 
 describe("attachHoldingGains", () => {
   const rows: { key: string; gain24h?: typeof btcGain | null }[] = [{ key: "btc" }, { key: "eth" }];

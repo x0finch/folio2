@@ -86,18 +86,15 @@ describe("portfolio/account-holdings", () => {
       expect(view.rows).toEqual([]);
     });
 
-    it("不带 withGain → 每行都没有盈亏字段(那一趟不读窗口历史)", async () => {
-      // 这是 #488 票 5 的切法:总览不再读窗口历史,盈亏由独立那一趟带回来。
-      // 断言「不带就没有」比断言「带了就有」稳 —— 后者还取决于基准点取不取到,
-      // 而那件事已经由 `gain.test.ts` 专门覆盖了。
+    it("持仓明细不带盈亏字段 —— 盈亏是独立读取(ADR 0050),由客户端贴回", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
-      const without = await call(USER, handleListAccountHoldings());
+      const view = await call(USER, handleListAccountHoldings());
 
-      expect(without.rows[0].gain24h).toBeUndefined();
-      for (const b of without.rows[0].balances) expect(b.gain24h).toBeUndefined();
+      expect("gain24h" in view.rows[0]).toBe(false);
+      for (const b of view.rows[0].balances) expect("gain24h" in b).toBe(false);
     });
   });
 });

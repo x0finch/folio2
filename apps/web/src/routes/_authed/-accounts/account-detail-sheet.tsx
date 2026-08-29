@@ -148,7 +148,7 @@ function DetailBody({
   // 各行的百分比加起来超过 100%。缺凭据不显增量是同一个道理。
   // 这两种是「**不该有**这个数」→ 整块省略;而「该有却**算不出**」是另一回事 → `—`。三态口径见
   // -home/holdings/value-delta,与行内 <ValueDelta> 共用 —— 这里字号不同(大字),故手搓而非复用组件。
-  // 数由 server 算好(ADR 0040),与账户行同源 —— 抽屉头和列表行显示同一个数,不再各算各的。
+  // 数由 server 算好(ADR 0050:两端相减),与账户行同源 —— 抽屉头和列表行显示同一个数,不再各算各的。
   const hasDayChange = !(account.needsCredentials || archived);
   const dayChange = hasDayChange ? account.gain24h : undefined;
   const sharePct = accountShare(account.totalUsd, total) * 100;

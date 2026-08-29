@@ -32,7 +32,7 @@ function RowContent({ h, gainPending }: { h: Holding; gainPending: boolean }) {
         symbol: h.token.symbol,
         amount: h.totalAmount,
         value: h.totalValue,
-        // 主页这条路已接 24h 盈亏(ADR 0040)—— 独立读取拼回的分段结果,不再由 change24h 倒推。
+        // 主页这条路已接 24h 盈亏(ADR 0050)—— 独立读取拼回,不再由 change24h 倒推。
         // 主页这条路的 holding 恒带这个字段(拼回后逐行赋值,算不出是 null),原样透传。
         gain24h: h.gain24h,
       }}

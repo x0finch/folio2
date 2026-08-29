@@ -77,8 +77,8 @@ export function PortfolioHero({
 }: {
   series: HistoryPoint[];
   totalUsd: number;
-  // 组合层 24h 盈亏(ADR 0040),由独立读取算好 —— **不在这里从曲线上量**。
-  // 曲线画的是净值(含充提),这个数剔除了充提,两者本来就不该是同一个;`null` = 算不出。
+  // 组合层 24h 盈亏(ADR 0050:两端相减,现在 − 24 小时前),由独立读取算好 ——
+  // **不在这里从曲线上量**(曲线是降采样过的,量出来会差一截);`null` = 算不出(不满 24 小时)。
   gain24h: Gain | null;
   holdings: readonly HoldingLike[];
   /** 净值曲线还在取 —— 数字照常渲染,曲线走 TrendPanel 的「还在取数」态。 */
@@ -110,11 +110,9 @@ export function PortfolioHero({
   // 而持有价值恰好为 0 的灰尘仓位也仍然是「有仓位」—— 那时该说明原因,不该画背景纹样。
   const nothingYet = holdings.length === 0 && totalUsd === 0;
 
-  // 24h 盈亏(ADR 0040):server 按快照历史 / 账本分段算好 —— 以前这里是「现在总额 − 约 24 小时前
-  // 总额」,那是净值差:你充值 10 万,它就显示赚了 10 万。现在剔除了充提与买卖。
-  //
-  // **这个数与脚下那条曲线不再对得上,那是预期的。** 曲线画的是净值,充值那天它会跳一格而这个数
-  // 不动。两个要求没法同时满足(金额要是真赚的钱 / 要剔除资金进出)。
+  // 24h 盈亏(ADR 0050):现在的值 − 24 小时前的值。充值 10 万,今天就显示 +10 万 ——
+  // **充提计入是用户裁定的设计,不是 bug**(0040 那版剔除充提的分段法已废止:太复杂,
+  // 数字与脚下的净值曲线还互相矛盾)。现在这个数与曲线是同一种东西,对得上。
   const metrics = deriveHeroMetrics(holdings, totalUsd);
   const spanDays = hasHistory
     ? Math.round((chartSeries[chartSeries.length - 1].t - chartSeries[0].t) / DAY_MS)
@@ -163,7 +161,7 @@ export function PortfolioHero({
         </div>
 
         <div className="mt-6 flex flex-wrap gap-8">
-          {/* 「今天赚 / 亏最多的那个仓」—— 按盈亏**金额**取,不按涨跌幅(ADR 0040)。以前只看涨跌幅、
+          {/* 「今天赚 / 亏最多的那个仓」—— 按盈亏**金额**取,不按涨跌幅(ADR 0050)。以前只看涨跌幅、
               不看持有多少,于是这两格永远被小仓位的暴涨币占据。金额走 usd() → 跟随展示币种。 */}
           <Stat
             label={t("bestToday")}

@@ -10,7 +10,7 @@ import { handleGetHomeTabStrip } from "./tabs";
 
 // portfolio 资源面(读模型):只做装配,实现在同目录 RESTful 文件里(共享装配与入参 schema 在 ./scope)。
 
-// **这几条读接口都不走 `runEffect`**(ADR 0049):它们只读预计算结果,缺 / 旧的时候要把补算
+// **总览与 tab 条不走 `runEffect`**(ADR 0049):它们只读预计算结果,缺 / 旧的时候要把补算
 // 交给这次请求的 `waitUntil` —— 那是另起一次装配,要一个 userId,而 `runEffect` 刻意不把它
 // 交给 handler。`runForUser` 是同一个内核,只是人由这里接(同 `syncAccount`)。
 export const getPortfolioOverview = createServerFn({ method: "GET" })
@@ -20,12 +20,11 @@ export const getPortfolioOverview = createServerFn({ method: "GET" })
     runForUser(context.userId, handleGetPortfolioOverview(context.userId, data)),
   );
 
+// 24h 盈亏每次请求现算(ADR 0050:两个点查),不排补算 → 不需要 userId,标准装配即可。
 export const getPortfolioGain24h = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
-  .handler(({ data, context }) =>
-    runForUser(context.userId, handleGetPortfolioGain24h(context.userId, data)),
-  );
+  .handler(runEffect(handleGetPortfolioGain24h));
 
 export const getHomeTabStrip = createServerFn({ method: "GET" })
   .middleware([requireAuth])
@@ -43,9 +42,7 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
 export const getAccountGain24h = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioSelectInput)
-  .handler(({ data, context }) =>
-    runForUser(context.userId, handleGetAccountGain24h(context.userId, data)),
-  );
+  .handler(runEffect(handleGetAccountGain24h));
 
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])

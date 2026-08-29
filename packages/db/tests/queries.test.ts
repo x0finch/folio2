@@ -316,6 +316,28 @@ describe("snapshots", () => {
     expect(await snapshotsOf(USER_A).latest()).toEqual([]);
   });
 
+  // asOf(t):每账户「t 或更早」的最近一张(24h 盈亏的起点端,ADR 0050)。
+  it("asOf 取 ≤ t 的最近一张 —— 更晚的不许顶上来,等于 t 的算数,一张都没有的账户不出现", async () => {
+    const a1 = await accounts(USER_A).create({ connectorId: "manual", label: "A1", creds: "x" });
+    const a2 = await accounts(USER_A).create({ connectorId: "manual", label: "A2", creds: "x" });
+    for (const [takenAt, totalUsd] of [
+      [1000, 10],
+      [2000, 20],
+      [3000, 30],
+    ] as const) {
+      await snapshotsOf(USER_A).write(a1.id, { takenAt, totalUsd, balances: [] });
+    }
+    // a2 只有 t 之后的快照 → 「那一刻我们还不知道它」,不该出现。
+    await snapshotsOf(USER_A).write(a2.id, { takenAt: 2500, totalUsd: 99, balances: [] });
+
+    const at2000 = await snapshotsOf(USER_A).asOf(2000);
+    expect(at2000).toHaveLength(1);
+    expect(at2000[0]!.snapshot.accountId).toBe(a1.id);
+    expect(at2000[0]!.snapshot.takenAt).toBe(2000); // 等于 t 的那张算数(at or before)
+    expect((await snapshotsOf(USER_A).asOf(2400))[0]!.snapshot.takenAt).toBe(2000); // 不是 3000
+    expect(await snapshotsOf(USER_A).asOf(500)).toEqual([]);
+  });
+
   it("cascades snapshots when the account is deleted", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "manual",

@@ -1,23 +1,22 @@
 import { type CacheWrite, Database } from "@folio/db";
 import { Cause, Clock, Effect } from "effect";
-import { defiGainKey, toAccountSections } from "@/lib/core/account-view";
+import { toAccountSections } from "@/lib/core/account-view";
 import { accountsInView, pinsInView, type TabPin, toTabPin } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import { backfillForUser } from "@/lib/server/runtime";
-import { loadAccountHoldings } from "./account-holdings";
-import type { AccountGain24h, DefiGain, PortfolioGain24h } from "./gain";
-import type { Gain } from "./gain-24h";
 import type { OverviewView } from "./overview-model";
 import { buildScopedOverview, type PortfolioScope, resolveScope } from "./scope";
 import { kindPresence, resolvePinLabel } from "./tab-strip";
 
-// 首页那几个数 —— 总额、持仓聚合、24h 盈亏、tab 条:**算在同步收官那一刻,读的时候只做
-// 「读 + 传」**(ADR 0049 裁定 2)。这个文件是那台机器;`overview.ts` / `gain.ts` / `tabs.ts`
-// 是它的三个出口,各自只剩「读哪个键、没有的时候端什么」。
+// 首页那几个数 —— 总额、持仓聚合、tab 条:**算在同步收官那一刻,读的时候只做「读 + 传」**
+// (ADR 0049 裁定 2)。这个文件是那台机器;`overview.ts` / `tabs.ts` 是它的两个出口,
+// 各自只剩「读哪个键、没有的时候端什么」。
+// (24h 盈亏曾是这里的另外两族键;ADR 0050 把它改成两端相减之后,它的读小到可以每次请求
+//  现算 —— 两个点查而已 —— 于是那两族退场,读在 `gain.ts`,只借这里的存量总览当「现在」那一端。)
 //
-// 这几条接口都是「原料大、结果小」的样板:窗口内几千行余额历史、每个账户的整张快照进去,
-// 一屏数字出来。原料扔给前端连序列化都超标,而现算合起来远超免费档一次请求的 10ms CPU。
+// 这几条接口都是「原料大、结果小」的样板:每个账户的整张快照进去,一屏数字出来。
+// 原料扔给前端连序列化都超标,而现算合起来远超免费档一次请求的 10ms CPU。
 // 所以算的时刻搬到同步收官(`sync/round.ts` 的 `afterRound`,与定时任务同路、CPU 宽松),
 // 读接口退化成一次 KV 单键读。
 //
@@ -30,11 +29,8 @@ import { kindPresence, resolvePinLabel } from "./tab-strip";
 // **键落 `user_cache`,与同步轮同一套约定**(ADR 0048):一个维度一个键、值是 JSON、
 // `expires_at` 那一列当心跳/新鲜度用。不建新表的理由与那边逐字相同。
 //
-// **一个组合的四族键一趟算完、一批写下去。** 不是四台各转各的机器:
-//   · 总览与 24h 盈亏吃的是**同一次** `buildScopedOverview` —— 分两次算不只是多花一倍后台
-//     CPU,还会让首页那个总额与它旁边的 24h 数字来自两个时刻的价;
-//   · 后台补算按 (用户, 组合) 单飞(`backfillForUser`),一把钥匙上只跑得下**一件**活儿 ——
-//     四条读接口各排各的补算,后三件会被前一件吞掉,那三个键永远填不上。
+// **一个组合的两族键一趟算完、一批写下去** —— 后台补算按 (用户, 组合) 单飞(`backfillForUser`),
+// 一把钥匙上只跑得下**一件**活儿:两条读接口各排各的补算,后一件会被前一件吞掉,那个键永远填不上。
 //
 // —— 「算的时刻 ≠ 看的时刻」这道缝,靠三件事一起收口 ——
 //
@@ -58,12 +54,14 @@ import { kindPresence, resolvePinLabel } from "./tab-strip";
 export const PRECOMPUTE_TTL_MS = 90 * 60 * 1000;
 
 /**
- * 键的**代号**。「什么算数」的判据变了一次(FOL-36:水位线从 24h 盈亏专用改成四族共用,
+ * 键的**代号**。「什么算数」的判据变了一次(FOL-36:水位线从 24h 盈亏专用改成各族共用,
  * 名字也跟着换),而旧代号下存着的值是按旧判据、对着旧水位线存下来的 —— 新水位线在库里
  * 还不存在(读作 0),它们会一律显得「新鲜」,包括那些在部署前就该失效的。
  *
  * 换代号是唯一不依赖「记得手动清一次库」的作废方式:旧行没人再读,90 分钟后过期躺着。
  * 以后再动存法(值的形状、判据)照此加一代,别在原地改语义。
+ * (FOL-43 退掉盈亏两族**不用**换代号:总览与 tab 条的存法一个字没动,退场的键没人再读,
+ *  90 分钟后过期躺着 —— 正是上一段说的那种下场。)
  */
 const KEY_GEN = "pc1";
 
@@ -80,17 +78,17 @@ const pinSuffix = (pin: TabPin | null): string => {
   return `:account:${pin.accountId}`;
 };
 
-/** 一个键的形状:`pc1:<族>:<组合 id>[:<pin>]`。四族共用这一个拼法,免得各拼各的。 */
+/** 一个键的形状:`pc1:<族>:<组合 id>[:<pin>]`。两族共用这一个拼法,免得各拼各的。 */
 export type PrecomputeKey = (portfolioId: string, pin: TabPin | null) => string;
 
-/** 吃 pin 的那两族:一个维度一个键。 */
+/** 吃 pin 的那族:一个维度一个键。 */
 const keyOf =
   (family: string): PrecomputeKey =>
   (portfolioId, pin) =>
     `${KEY_GEN}:${family}:${portfolioId}${pinSuffix(pin)}`;
 
 /**
- * **不吃 pin** 的那两族:一个组合一个键,pin 那个参数**在这里就被丢掉**。
+ * **不吃 pin** 的那族:一个组合一个键,pin 那个参数**在这里就被丢掉**。
  *
  * 账户页没有自定义 Tab(入参是 `PortfolioSelectInput`),tab 条本身就是「有哪些 pin」的答案、
  * 不可能按某个 pin 收窄。签名仍收 pin 只是为了跟 `readByScope` 对得上 —— 而「谁也别传 pin 给
@@ -104,10 +102,6 @@ const plainKeyOf =
 
 /** 组合总览(总额 + 持仓聚合 + 分区 + 小计)—— 吃 pin。 */
 export const overviewKey = keyOf("overview");
-/** 组合级 24h 盈亏 —— 吃 pin。 */
-export const portfolioGainKey = keyOf("gain");
-/** 账户级 24h 盈亏 —— 一个组合一个键。 */
-export const accountGainKey = plainKeyOf("gain-accounts");
 /** 首页 tab 条 —— 一个组合一个键。 */
 export const tabStripKey = plainKeyOf("tabstrip");
 
@@ -134,10 +128,10 @@ const MARK_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 /**
  * **输入变了,已经算好的那份不再算数** —— 抬一次水位线(一行 upsert)。
  *
- * **一条水位线管四族,是刻意的。** 总览、24h 盈亏、账户级盈亏、tab 条吃的原料九成重合
- * (账户、成员、快照、手记、估值口径、价、标签、pin),各立一条的结果必然是「某个写路径
- * 记得抬这条、忘了抬那条」,而症状是一个数对、旁边那个错。代价是标签改个名会顺手让盈亏
- * 也重算一趟 —— 那趟跑在后台,没人在等。
+ * **一条水位线管两族,是刻意的。** 总览与 tab 条吃的原料九成重合(账户、成员、快照、手记、
+ * 估值口径、价、标签、pin),各立一条的结果必然是「某个写路径记得抬这条、忘了抬那条」,
+ * 而症状是一个数对、旁边那个错。代价是标签改个名会顺手让总览也重算一趟 —— 那趟跑在后台,
+ * 没人在等。
  *
  * 给了 `portfolioId` 就只抬那个组合的。**这一条是必须的,不是优化**:cron 一次 sweep 里
  * 各组合的轮是并发跑的,抬整个用户的水位线会让先收官的组合刚算好的那份当场作废 ——
@@ -183,62 +177,6 @@ interface Stored<A> {
 }
 
 // —— 算(只在同步收官与后台补算这两条路上跑)——
-
-/**
- * 总览里那些盈亏字段,摘出来单独存一份。
- *
- * **摘,不是重算** —— 存进 `gain` 键的就是总览那个对象上的同一批数字,所以「首页那个总额」
- * 与「它旁边那个 24h」结构上不可能来自两次不同的计算。
- */
-const portfolioGainOf = (view: OverviewView): PortfolioGain24h => {
-  const holdings: Record<string, Gain | null> = {};
-  for (const h of view.holdings) holdings[h.key] = h.gain24h ?? null;
-  const defi: Record<string, DefiGain | null> = {};
-  for (const s of view.sections) {
-    for (const g of s.defi) defi[defiGainKey(s.account.id, g.protocol)] = g.gain24h ?? null;
-  }
-  return { portfolio: view.gain24h ?? null, holdings, defi };
-};
-
-/**
- * 总览**去掉盈亏字段**的那一份 —— `getPortfolioOverview` 的返回形状一个字没变(#488 票 5
- * 之后它就不带盈亏了,盈亏走自己那条读取)。
- *
- * 之所以是「算一次、摘两份」而不是「按 `withGain` 各算一次」:后者每个维度要把整个窗口的
- * 余额历史再捞一遍、把持仓再聚合一遍,换来的是两份本该相等的数字来自两个时刻。
- */
-const withoutGain = ({ gain24h: _portfolio, ...view }: OverviewView): OverviewView => ({
-  ...view,
-  holdings: view.holdings.map(({ gain24h: _row, ...h }) => h),
-  sections: view.sections.map((s) => ({ ...s, defi: s.defi.map(({ gain24h: _g, ...g }) => g) })),
-});
-
-/** 账户级盈亏的摘取(账户行 + 各余额行)。归档账户两级都不出现(ADR 0039)。 */
-const accountGainOf = (
-  view: Effect.Effect.Success<ReturnType<typeof loadAccountHoldings>>,
-): AccountGain24h => {
-  const accounts: Record<string, Gain | null> = {};
-  const balances: Record<string, Gain | null> = {};
-  for (const r of view.rows) {
-    if (r.archivedAt == null) accounts[r.account.id] = r.gain24h ?? null;
-    for (const b of r.balances) {
-      if (r.archivedAt != null || b.tokenId == null) continue;
-      balances[b.id] = b.gain24h ?? null;
-    }
-  }
-  return { accounts, balances };
-};
-
-/**
- * 组合级 24h 盈亏的**现算**。同一条 `buildScopedOverview(..., true)`,只把盈亏字段带出来。
- * 预计算与**对拍测试**用它;读接口不碰。
- */
-export const computePortfolioGain24h = (data: PortfolioScope) =>
-  Effect.map(buildScopedOverview(data, true), portfolioGainOf);
-
-/** 账户级 24h 盈亏的现算(#493 票 3)。同上,只把盈亏字段带出来。 */
-export const computeAccountGain24h = (data: PortfolioScope) =>
-  Effect.map(loadAccountHoldings(data, true), accountGainOf);
 
 /**
  * 首页 tab 条的**现算**(#488 票 4)。只回答「这个组合里有没有永续 / DeFi、自定义 Tab 叫什么」。
@@ -357,8 +295,8 @@ const pinDimensions = (portfolioId?: string) =>
 /**
  * 把一个组合的全部预计算算好存起来 —— **同步一轮收官时顺手做的那件事**。
  *
- * 维度 = 组合 ×(默认视图 + 每个 pin),每个维度一份总览 + 一份盈亏;外加两份不吃 pin 的
- * (账户级盈亏、tab 条)(ADR 0049 裁定 2)。「这个组合里哪些 pin 说得通」走 `pinsInView` ——
+ * 维度 = 组合 ×(默认视图 + 每个 pin),每个维度一份总览;外加一份不吃 pin 的 tab 条
+ * (ADR 0049 裁定 2)。「这个组合里哪些 pin 说得通」走 `pinsInView` ——
  * 与首页 tab 条同一个纯函数,所以「屏幕上摆着的 tab」与「预计算过的维度」不会各算各的。
  *
  * **一次 `putMany`**:D1 没有交互式事务,batch 就是它的原子多写 —— 要么整组维度一起换新,
@@ -392,25 +330,14 @@ export const precomputePortfolio = (portfolioId: string) =>
     // **逐个维度串行算。** 并发发出去只是把同一批 D1 往返挤在一起,而这段跑在 `waitUntil` /
     // cron 里,没人在等它。
     //
-    // **已知的浪费,刻意留着**:每个维度各自跑一遍 `buildScopedOverview`,而它里面那句
-    // `listBalanceHistory(since)` **不按账户收窄** —— 整个窗口的历史全捞回来,再在 JS 里按
-    // 这一维的账户集过滤。于是 P 个 pin = P+1 次一模一样的全量扫描(还要乘以组合数)。
-    // 真正的修法是把原料读一次、按各维度切,但那要给 `buildScopedOverview` 开一条「收预加载
-    // 原料」的路,而它同时也是**对拍测试的被测对象** —— 把那条缝一起动会让「两条路算得一样吗」
-    // 这件事失去参照。留到单独一票。
+    // **已知的浪费,刻意留着**:每个维度各自跑一遍 `buildScopedOverview` —— 每维一趟同样的
+    // 快照读 + 富化(P 个 pin = P+1 趟,还要乘以组合数)。真正的修法是把原料读一次、按各维度切,
+    // 但那要给 `buildScopedOverview` 开一条「收预加载原料」的路 —— 留到单独一票。
     // 代价的实际大小:pin 数中位是 0(这个循环就一圈)。
     for (const pin of dimensions) {
-      const view = yield* buildScopedOverview(
-        { portfolioId: selectedId, pin: pin ?? undefined },
-        true,
-      );
-      at(overviewKey(selectedId, pin), withoutGain(view));
-      at(portfolioGainKey(selectedId, pin), portfolioGainOf(view));
+      const view = yield* buildScopedOverview({ portfolioId: selectedId, pin: pin ?? undefined });
+      at(overviewKey(selectedId, pin), view);
     }
-    at(
-      accountGainKey(selectedId, null),
-      accountGainOf(yield* loadAccountHoldings({ portfolioId: selectedId }, true)),
-    );
     at(tabStripKey(selectedId, null), yield* computeHomeTabStrip({ portfolioId: selectedId }));
     yield* db.cache.putMany(writes);
     return true;
@@ -469,6 +396,24 @@ const readPrecomputed = <A>(key: string, portfolioId: string) =>
   });
 
 /**
+ * 读一份存下来的总览 —— 24h 盈亏(`gain.ts`)拿它当「现在」那一端。
+ *
+ * **新鲜与否刻意不看**:总览读接口端给用户的正是这一份(旧值也照端 + `pending`,ADR 0049),
+ * 盈亏的「现在」必须与屏幕上那个总额同源,否则「总额 − 24h 数字」得不出用户看得见的任何起点。
+ * 也**不安排补算**:总览自己的读路径每次都会安排,盈亏这边再排一次只是同一把钥匙上排两回。
+ * 从没算过 → undefined,盈亏那头回空态(全 `—`)。这一档几乎只在「有旧数据但缓存整个冷了」
+ * (导入恢复、清库)时出现,总览补算落地后下一次取数它自己就好了 —— 不为它开第二条现算路。
+ */
+export const readStoredOverview = (
+  portfolioId: string,
+  pin: TabPin | null,
+): Effect.Effect<OverviewView | undefined, never, Database> =>
+  Effect.map(
+    readPrecomputed<OverviewView>(overviewKey(portfolioId, pin), portfolioId),
+    (hit) => hit.value,
+  );
+
+/**
  * 客户端给的 portfolioId 与 pin 都未必可信(可能缺省、可能是别人的、可能指着一个已经不在这个
  * 组合里的目标)。这个函数把「读哪个键、补算该写哪个组合、这个键有没有人会来填」一次问清楚,
  * **而且按这三件事各自的必要程度分档收费**:
@@ -525,12 +470,12 @@ const readByScope = <A>(
   });
 
 // 补算把**这个组合的全部预计算**一次算完,而不是只补被读到的那一个:首页一进来就会同时问
-// 总览、tab 条、两条盈亏,各补各的等于把同一批原料读四遍。一次补全,后面几条读到的就是热的。
+// 总览与 tab 条,各补各的等于把同一批原料读两遍。一次补全,后面那条读到的就是热的。
 //
 // 钥匙是 (用户, 组合):`backfillForUser` 据此单飞 + 尾随重跑 + 连败退避,于是一轮同步里
 // 几十次刷新最多换来两趟重算,而一份永远算不出来的数据也不会把补算变成永动机(见那边的注释)。
-// —— 这也正是四族必须由**一个**函数算完的原因:一把钥匙上只跑得下一件活儿,四条读接口各排
-// 各的补算,后来的那三件会被第一件吞掉。
+// —— 这也正是两族必须由**一个**函数算完的原因:一把钥匙上只跑得下一件活儿,两条读接口各排
+// 各的补算,后来的那件会被第一件吞掉。
 const scheduleBackfill = (userId: string, portfolioId: string) =>
   backfillForUser(userId, portfolioId, precomputePortfolio(portfolioId));
 
