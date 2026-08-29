@@ -7,11 +7,10 @@ import { isManual } from "@/lib/core/manual";
 import { injectManualSnapshots, loadManualHistoryRows } from "@/lib/server/manual/store";
 import { handleGetPortfolioHistory } from "@/lib/server/portfolio/get-history";
 import { deriveLiveAccountTotals } from "@/lib/server/portfolio/live-value";
-import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
 import { PortfolioSelectInput, resolveScope } from "@/lib/server/portfolio/scope";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call } from "../_kit/run";
+import { call, readOverview } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -44,7 +43,8 @@ describe("portfolio/get-history", () => {
   /** 页面那两行:曲线接口给原料,总览按账户那张表凑出末点。 */
   const curve = async (data: { portfolioId?: string } = {}) => {
     const raw = await call(USER, handleGetPortfolioHistory(data));
-    const overview = await call(USER, handleGetPortfolioOverview(data));
+    // 两边各自演进后的合流:读走预计算那条(这一支的形状),末点防呆收整份总览(底座那一支的形状)。
+    const overview = await readOverview(USER, data);
     return toPortfolioCurve(raw, overview);
   };
 

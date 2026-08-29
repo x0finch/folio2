@@ -72,7 +72,7 @@ const pruneNotesSweep = (cron: string): Effect.Effect<void> =>
     ),
   );
 
-// 全量 sweep:同步每个用户 → 逐用户预热代币缓存 → 逐用户预计算 24h 盈亏(顺序不可换,见下)。
+// 全量 sweep:同步每个用户 → 逐用户预热代币缓存 → 逐用户预计算(顺序不可换,见下)。
 // 预热那步**逐用户各自兜住**:一个用户失败不拖累其余、也不让这次 cron 以异常收尾(#375)。
 // sweep 本身不兜 —— 它失败了就该上抛、就该可见。
 const sweepAllUsers = (cron: string): Effect.Effect<void, Error> =>
@@ -90,11 +90,11 @@ const sweepAllUsers = (cron: string): Effect.Effect<void, Error> =>
     // sweep 后预热每用户代币缓存(best-effort),供次日总览 cache-only 富化。
     const warm = yield* warmAllUsers(userIds);
     cronLog.info("cron warm done", { cron, ...warm });
-    // **最后才预计算 24h 盈亏,而且必须是最后。** 它的「当下点」是现推的 `liveValue`,吃的
-    // 就是上面这一步刚热好的价 —— 排在 warm 前面(它原来挂在轮的收尾上就是那样)等于每小时
-    // 都拿上一小时的价算一遍,然后让这份数挂满 90 分钟:首页的市值与它旁边的 24h 盈亏来自
-    // 两组不同的价,差一拍,而且没有任何东西会自己纠正。手动同步那条路没有这个问题 ——
-    // 它的预热就在自己那一轮的收尾里,预计算紧跟其后(见 `runSyncRound`)。
+    // **最后才预计算,而且必须是最后。** 这一趟算的是四族:首页总览、tab 条、组合级与账户级
+    // 24h 盈亏。它们的市值都是现推的 `liveValue`,吃的就是上面这一步刚热好的价 —— 排在 warm
+    // 前面(它原来挂在轮的收尾上就是那样)等于每小时都拿上一小时的价算一遍,然后让这份数挂满
+    // 90 分钟,而且没有任何东西会自己纠正。手动同步那条路没有这个问题 —— 它的预热就在自己
+    // 那一轮的收尾里,预计算紧跟其后(见 `runSyncRound`)。
     const precomputed = yield* precomputeAllUsers(userIds);
     cronLog.info("cron precompute done", { cron, ...precomputed });
   });

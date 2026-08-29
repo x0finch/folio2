@@ -2,6 +2,13 @@ import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleGetPortfolioGain24h } from "@/lib/server/portfolio/gain";
 import {
+  accountGainKey,
+  overviewKey,
+  portfolioGainKey,
+  precomputeMarkKey,
+  tabStripKey,
+} from "@/lib/server/portfolio/precompute";
+import {
   handleGetSyncRound,
   openSyncRound,
   precomputeAllUsers,
@@ -152,10 +159,11 @@ describe("sync/round", () => {
       expect(noKeys.id in round.accounts).toBe(true);
     });
 
-    // FOL-35 / ADR 0049:收官之后这一组合的 24h 盈亏必须已经算好存下,读接口从此只做「读 + 传」。
+    // FOL-35 / FOL-36 / ADR 0049:收官之后这一组合的预计算必须已经算好存下,四条读接口
+    // (总览 / tab 条 / 两级盈亏)从此只做「读 + 传」。
     // 钉在这一层而不是 gain 那边:「算的时刻挂在同步收尾上」是接线,而接线只有整条路跑一遍才看得见
     //(cron 把预热关掉的那一支尤其 —— 它换的是同一个字段)。
-    it("收官之后,这个组合的 24h 盈亏预计算就位", async () => {
+    it("收官之后,这个组合的预计算就位", async () => {
       const acc = await cex("Binance spot");
       // 两张快照:24 小时前那张是基准,现在那张是当下 —— 有基准才算得出数,
       // 否则「就位」会退化成「存了个空壳」,断言等于没写。
@@ -169,12 +177,14 @@ describe("sync/round", () => {
       await runSyncRound(USER, round);
 
       const pf = round.portfolioId;
-      const entry = await db(USER).cache.get(`gain24h:${pf}`);
-      expect(entry._tag).toBe("Some");
+      const at = async (k: string) => (await db(USER).cache.get(k))._tag;
+      expect(await at(portfolioGainKey(pf, null))).toBe("Some");
       const served = await call(USER, handleGetPortfolioGain24h(USER, { portfolioId: pf }));
       expect(served.portfolio?.amount).toBeCloseTo(30, 6);
-      // 账户级那一份也在同一次收尾里落下(维度里它不吃 pin,一个组合一个键)。
-      expect((await db(USER).cache.get(`gain24h-accounts:${pf}`))._tag).toBe("Some");
+      // 四族都在同一次收尾里落下(账户级盈亏与 tab 条不吃 pin,一个组合一个键)。
+      expect(await at(accountGainKey(pf, null))).toBe("Some");
+      expect(await at(overviewKey(pf, null))).toBe("Some");
+      expect(await at(tabStripKey(pf, null))).toBe("Some");
     });
 
     // **cron 那一支刻意不在轮里预计算。**
@@ -194,8 +204,11 @@ describe("sync/round", () => {
       const { round } = await open();
       await runSyncRound(USER, round, { warm: false });
 
-      expect((await db(USER).cache.get(`gain24h:${round.portfolioId}`))._tag).toBe("None");
-      expect((await db(USER).cache.get(`gain24h-mark:${round.portfolioId}`))._tag).toBe("Some");
+      expect((await db(USER).cache.get(portfolioGainKey(round.portfolioId, null)))._tag).toBe(
+        "None",
+      );
+      expect((await db(USER).cache.get(overviewKey(round.portfolioId, null)))._tag).toBe("None");
+      expect((await db(USER).cache.get(precomputeMarkKey(round.portfolioId)))._tag).toBe("Some");
     });
 
     // sweep 的第三趟:逐用户、逐组合把值真算出来。cron 的正确性靠「轮抬水位线 + 这一趟落值」
@@ -213,8 +226,9 @@ describe("sync/round", () => {
       const out = await Effect.runPromise(precomputeAllUsers([USER]));
 
       expect(out.failed).toBe(0);
-      expect((await db(USER).cache.get(`gain24h:${home}`))._tag).toBe("Some");
-      expect((await db(USER).cache.get(`gain24h:${watch.id}`))._tag).toBe("Some");
+      expect((await db(USER).cache.get(portfolioGainKey(home, null)))._tag).toBe("Some");
+      expect((await db(USER).cache.get(portfolioGainKey(watch.id, null)))._tag).toBe("Some");
+      expect((await db(USER).cache.get(overviewKey(home, null)))._tag).toBe("Some");
       // 落的是真数字,不是空壳。
       const served = await call(USER, handleGetPortfolioGain24h(USER, { portfolioId: home }));
       expect(served.portfolio?.amount).toBeCloseTo(30, 6);

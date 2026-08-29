@@ -10,14 +10,16 @@ import { handleGetHomeTabStrip } from "./tabs";
 
 // portfolio 资源面(读模型):只做装配,实现在同目录 RESTful 文件里(共享装配与入参 schema 在 ./scope)。
 
+// **这几条读接口都不走 `runEffect`**(ADR 0049):它们只读预计算结果,缺 / 旧的时候要把补算
+// 交给这次请求的 `waitUntil` —— 那是另起一次装配,要一个 userId,而 `runEffect` 刻意不把它
+// 交给 handler。`runForUser` 是同一个内核,只是人由这里接(同 `syncAccount`)。
 export const getPortfolioOverview = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
-  .handler(runEffect(handleGetPortfolioOverview));
+  .handler(({ data, context }) =>
+    runForUser(context.userId, handleGetPortfolioOverview(context.userId, data)),
+  );
 
-// **这两条不走 `runEffect`**(ADR 0049):它们只读预计算结果,缺 / 旧的时候要把补算交给这次
-// 请求的 `waitUntil` —— 那是另起一次装配,要一个 userId,而 `runEffect` 刻意不把它交给 handler。
-// `runForUser` 是同一个内核,只是人由这里接(同 `syncAccount`)。
 export const getPortfolioGain24h = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioScopeInput)
@@ -28,7 +30,9 @@ export const getPortfolioGain24h = createServerFn({ method: "GET" })
 export const getHomeTabStrip = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioSelectInput)
-  .handler(runEffect(handleGetHomeTabStrip));
+  .handler(({ data, context }) =>
+    runForUser(context.userId, handleGetHomeTabStrip(context.userId, data)),
+  );
 
 // 这两条也按组合收口(ADR 0047):账户页的持仓与盈亏只回当前组合那些账户。
 export const listAccountHoldings = createServerFn({ method: "GET" })

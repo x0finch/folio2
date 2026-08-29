@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
 import { handleListAccountTags } from "@/lib/server/tags/account-tags";
 import { DeleteTagInput, handleDeleteTag } from "@/lib/server/tags/delete";
 import { handleListTags } from "@/lib/server/tags/list";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call } from "../_kit/run";
+import { call, readTabStrip } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
 // 合并进 tags/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
@@ -74,7 +73,7 @@ describe("tags/delete", () => {
 
       // pin 行随 tag 级联删除(`tab_pins.tag_id` 是 ON DELETE CASCADE),所以 tab 条上直接没有它 ——
       // 不是「留着一个名字为空的 pin」。这条正是要钉住这个级联。
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toEqual([]);
+      expect((await readTabStrip(USER, {})).pins).toEqual([]);
     });
 
     it("删别人的 tagId → 对方那个 tag 一根毛都没掉", async () => {

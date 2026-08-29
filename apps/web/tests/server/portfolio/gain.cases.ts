@@ -2,38 +2,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleRemoveAccount } from "@/lib/server/accounts/remove";
 import { importData } from "@/lib/server/io/import-data";
 import { handleCreateManualActivities } from "@/lib/server/manual-activities/create";
+import { handleGetAccountGain24h, handleGetPortfolioGain24h } from "@/lib/server/portfolio/gain";
 import {
+  accountGainKey,
   computeAccountGain24h,
   computePortfolioGain24h,
-  GAIN_PRECOMPUTE_TTL_MS,
-  handleGetAccountGain24h,
-  handleGetPortfolioGain24h,
-  invalidateGain24h,
-  precomputeGain24h,
-} from "@/lib/server/portfolio/gain";
-import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
+  invalidatePrecomputed,
+  overviewKey,
+  PRECOMPUTE_TTL_MS,
+  portfolioGainKey,
+  tabStripKey,
+} from "@/lib/server/portfolio/precompute";
 import { handleSetDefaultPortfolio } from "@/lib/server/portfolios/set-default";
 import { handleSyncAccount } from "@/lib/server/sync/run";
 import { handleAttachTag } from "@/lib/server/tags/attach";
 import { handleDetachTag } from "@/lib/server/tags/detach";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call } from "../_kit/run";
+import { call, precompute as precomputeFor, readOverview, until } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
-
-/**
- * 轮询到条件成立(或用完次数)。**不断言墙上时钟** —— 后台补算跑在 `waitUntil` 上,测试
- * 拿不到那条 Promise,而「等固定毫秒再断言」正是 CODING.md 点名的 flaky 写法。
- */
-const until = async <A>(read: () => Promise<A>, ok: (a: A) => boolean, tries = 100): Promise<A> => {
-  let last = await read();
-  for (let i = 0; i < tries && !ok(last); i++) {
-    await new Promise((r) => setTimeout(r, 20));
-    last = await read();
-  }
-  return last;
-};
 
 // 合并进 portfolio/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
 // 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
@@ -56,11 +44,7 @@ describe("portfolio/gain", () => {
   const defaultPf = () => db(USER).portfolios.ensureDefault();
 
   /** 跑一遍预计算(= 同步收官时那一步),之后读接口才有东西可直出。 */
-  const precompute = async (portfolioId?: string) => {
-    const pf = portfolioId ?? (await defaultPf()).id;
-    await call(USER, precomputeGain24h(pf));
-    return pf;
-  };
+  const precompute = (portfolioId?: string) => precomputeFor(USER, portfolioId);
 
   const readPortfolio = (data: Parameters<typeof handleGetPortfolioGain24h>[1] = {}) =>
     call(USER, handleGetPortfolioGain24h(USER, data));
@@ -134,7 +118,7 @@ describe("portfolio/gain", () => {
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: -50 }]);
 
-      const view = await call(USER, handleGetPortfolioOverview({}));
+      const view = await readOverview(USER, {});
 
       expect(view.totalUsd).toBe(-50);
       expect(view.holdings.map((h) => h.key)).toContain(BTC); // 列表里有它,能解释总额
@@ -261,15 +245,23 @@ describe("portfolio/gain", () => {
 
       const pf = await precompute();
 
-      // 键的形状与同步轮同一套约定(ADR 0048):`<族>:<组合>`,pin 维度再缀目标。
-      // 这里写死字面量是刻意的 —— 它钉的就是这份约定,改了键该有人被红一次。
+      // 一个维度一个键:默认视图 + 每个说得通的 pin,外加两族不吃 pin 的(账户级盈亏、tab 条)。
       const at = async (k: string) => (await db(USER).cache.get(k))._tag;
-      expect(await at(`gain24h:${pf}`)).toBe("Some");
-      expect(await at(`gain24h:${pf}:tag:${tag.id}`)).toBe("Some");
-      expect(await at(`gain24h:${pf}:connector:bitcoin`)).toBe("Some");
-      expect(await at(`gain24h-accounts:${pf}`)).toBe("Some");
+      const tagPin = { kind: "tag", tagId: tag.id } as const;
+      expect(await at(portfolioGainKey(pf, null))).toBe("Some");
+      expect(await at(portfolioGainKey(pf, tagPin))).toBe("Some");
+      expect(await at(portfolioGainKey(pf, { kind: "connector", connectorId: "bitcoin" }))).toBe(
+        "Some",
+      );
+      expect(await at(accountGainKey(pf, null))).toBe("Some");
+      // 总览与 tab 条与它们一批落下(FOL-36)—— 四族一趟算完、一次 putMany。
+      expect(await at(overviewKey(pf, null))).toBe("Some");
+      expect(await at(overviewKey(pf, tagPin))).toBe("Some");
+      expect(await at(tabStripKey(pf, null))).toBe("Some");
       // 这个组合里说不通的 pin 不占一个键(判据与首页 tab 条同一个 `pinsInView`)。
-      expect(await at(`gain24h:${pf}:connector:binance`)).toBe("None");
+      expect(await at(portfolioGainKey(pf, { kind: "connector", connectorId: "binance" }))).toBe(
+        "None",
+      );
     });
 
     it("pin 那一份只装被它收窄的那些持仓", async () => {
@@ -327,9 +319,9 @@ describe("portfolio/gain", () => {
       };
       // 落库形状是 `{ computedAt, value }` —— `computedAt` 拿「现在」,于是它晚于水位线、算数。
       await db(USER).cache.put(
-        `gain24h:${pf}`,
+        portfolioGainKey(pf, null),
         { computedAt: Date.now(), value: planted },
-        GAIN_PRECOMPUTE_TTL_MS,
+        PRECOMPUTE_TTL_MS,
       );
 
       const out = await readPortfolio({ portfolioId: pf });
@@ -349,7 +341,7 @@ describe("portfolio/gain", () => {
       // 后台那一趟(`waitUntil`)跑完之后键才出现。轮询而不是等固定毫秒:断言的是
       // 「它会补上」,不是「它多快补上」。
       const filled = await until(
-        () => db(USER).cache.get(`gain24h:${pf}`),
+        () => db(USER).cache.get(portfolioGainKey(pf, null)),
         (o) => o._tag === "Some",
       );
       expect(filled._tag).toBe("Some");
@@ -369,10 +361,10 @@ describe("portfolio/gain", () => {
       // 解析退回默认组合,补算落在默认那个键上;瞎编的那个键一行都不许长出来。
       const pf = (await defaultPf()).id;
       await until(
-        () => db(USER).cache.get(`gain24h:${pf}`),
+        () => db(USER).cache.get(portfolioGainKey(pf, null)),
         (o) => o._tag === "Some",
       );
-      expect((await db(USER).cache.get(`gain24h:${bogus}`))._tag).toBe("None");
+      expect((await db(USER).cache.get(portfolioGainKey(bogus, null)))._tag).toBe("None");
     });
 
     // 算好了就是终局,一个字都不多说 —— 否则前端会白轮询下去。
@@ -401,7 +393,13 @@ describe("portfolio/gain", () => {
       expect(out.pending).toBeUndefined();
       // 而且没人去给它建键 —— 等一会儿再看,仍然是空的。
       await new Promise((r) => setTimeout(r, 100));
-      expect((await db(USER).cache.get(`gain24h:${pf}:connector:binance`))._tag).toBe("None");
+      expect(
+        (
+          await db(USER).cache.get(
+            portfolioGainKey(pf, { kind: "connector", connectorId: "binance" }),
+          )
+        )._tag,
+      ).toBe("None");
     });
   });
 
@@ -451,9 +449,9 @@ describe("portfolio/gain", () => {
       const stale = await call(USER, computePortfolioGain24h({ portfolioId: pf }));
       await call(USER, handleRemoveAccount({ accountId: doomed.id }));
       await db(USER).cache.put(
-        `gain24h:${pf}`,
+        portfolioGainKey(pf, null),
         { computedAt, value: stale },
-        GAIN_PRECOMPUTE_TTL_MS,
+        PRECOMPUTE_TTL_MS,
       );
 
       // TTL 还新鲜,但它是拿删之前的原料算的 —— 必须判成不算数。
@@ -483,7 +481,7 @@ describe("portfolio/gain", () => {
       await precompute(watch.id);
 
       // 「看单」那一轮收官 —— 只抬它自己那条水位线。
-      await call(USER, invalidateGain24h(watch.id));
+      await call(USER, invalidatePrecomputed(watch.id));
 
       expect((await readPortfolio({ portfolioId: watch.id })).pending).toBe(true);
       expect((await readPortfolio({ portfolioId: home })).pending).toBeUndefined();

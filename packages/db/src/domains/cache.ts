@@ -11,10 +11,11 @@ import { userCache } from "../schema";
 // **但它不走这个 store**:它的写入是带轮 id 条件的单语句,`put(key, value)` 表达不了
 // (见 domains/sync-rounds.ts)。值是 JSON,db 当不透明 blob。
 //
-// 第五种键是预计算的 24h 盈亏(`gain24h:*`,ADR 0049),外加它的失效水位线(`gain24h-mark:*`)。
-// 它们**走这个 store**:同步收官时一次 `putMany` 把一个组合的全部维度原子换新,读接口一次
-// `getMany` 把值和水位线一起取回来 —— 那正是这两个动词的形状。「算的那份还算不算数」由 app
-// 比时间戳判(`server/portfolio/gain.ts`),不是这一层的事;键的形状也归那边。
+// 第五种键是预计算(`pc1:*`,ADR 0049):首页总览、tab 条、组合级与账户级 24h 盈亏,外加它们
+// 共用的失效水位线(`pc1:mark*`)。它们**走这个 store**:同步收官时一次 `putMany` 把一个组合的
+// 全部维度换新,读接口一次 `getMany` 把值和水位线一起取回来 —— 那正是这两个动词的形状。
+// 「算的那份还算不算数」由 app 比时间戳判(`server/portfolio/precompute.ts`),不是这一层的事;
+// 键的形状也归那边。**这一族是这张表上唯一的大值**(一份总览几十 KB),`putMany` 因此按字节切批。
 //
 // **过期不删、读出带 stale** —— 与价同一套 SWR 语义:展示先给旧的,调用方决定要不要后台刷。
 // 整张删空功能不坏,只是下次访问慢一点。
@@ -45,14 +46,64 @@ export interface CacheEntry {
 /** 这一层的契约 —— 从实现推导,不另抄一份签名。 */
 export type CacheStore = Effect.Effect.Success<typeof makeUserCacheStore>;
 
+/** 一行待写:值已经序列化过 —— 分批要按字节算,而序列化一次就够了。 */
+interface Row {
+  key: string;
+  v: string;
+  expiresAt: number;
+}
+
+const rowOf = (w: CacheWrite, now: number): Row => ({
+  key: w.key,
+  v: JSON.stringify(w.value),
+  expiresAt: now + w.ttlMs,
+});
+
 // 一条 upsert 语句。`put` 与 `putMany` 共用同一份键/值口径 —— 两个动词写出来的行必须一样。
-const upsert = (db: Drizzle, userId: string, w: CacheWrite, now: number) => {
-  const v = JSON.stringify(w.value);
-  const expiresAt = now + w.ttlMs;
-  return db
+const upsert = (db: Drizzle, userId: string, { key, v, expiresAt }: Row) =>
+  db
     .insert(userCache)
-    .values({ userId, k: w.key, v, expiresAt })
+    .values({ userId, k: key, v, expiresAt })
     .onConflictDoUpdate({ target: [userCache.userId, userCache.k], set: { v, expiresAt } });
+
+/**
+ * 一批最多攒这么多字节。
+ *
+ * **为什么需要这个**:这张表上原本住的都是小东西(汇率、平台展示、预热标记),一批发完从来
+ * 不是问题;预计算搬进来之后,一个键装的是一整份总览 JSON,而一个组合一次要写十来个键 ——
+ * 那就成了唯一一处「一批可能有几 MB」的写。
+ *
+ * **数是拍的,而且是往小里拍。** D1 的真实批量上限本地量不到(Miniflare 不是 D1;实测 4×1MB
+ * 一批照过,这只说明本地那条路没有更低的闸)。所以取一个明显偏保守的预算:典型的一份总览是
+ * 几十 KB 量级,这个数下常见情形仍是一批发完,而真遇上超大账号也不会整趟写失败。
+ * 超了会怎样,是这条判断的全部理由:`precomputePortfolio` 把失败咽下去回 `false`,于是那个
+ * 组合的键永远填不上、页面永远读不到数 —— 一个上限没量准的代价不该是这个。
+ */
+const BATCH_BYTES = 512 * 1024;
+
+/**
+ * 按累计字节切批。**单条超预算的自己一批**(切不动它,交给 D1 自己拒,错误照常上抛)。
+ *
+ * 代价写在明处:切成两批就不再是一次原子多写了 —— 中途失败会留下「一半新一半旧」。
+ * 对这张表可以接受:每个值自带 `computedAt`,读那头逐键比失效水位线,新旧混着也各自成立
+ * (最坏是某个 tab 的数字比默认视图旧一轮,下一趟重算就对齐)。而不切的下场是整趟写不进去。
+ */
+const byBytes = (rows: readonly Row[]): Row[][] => {
+  const parts: Row[][] = [];
+  let part: Row[] = [];
+  let bytes = 0;
+  for (const row of rows) {
+    const size = row.v.length + row.key.length;
+    if (part.length > 0 && bytes + size > BATCH_BYTES) {
+      parts.push(part);
+      part = [];
+      bytes = 0;
+    }
+    part.push(row);
+    bytes += size;
+  }
+  if (part.length > 0) parts.push(part);
+  return parts;
 };
 
 export const makeUserCacheStore = Effect.gen(function* () {
@@ -113,14 +164,22 @@ export const makeUserCacheStore = Effect.gen(function* () {
     put: (key: string, value: unknown, ttlMs: number): Effect.Effect<void> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
-        yield* client.query((db) => upsert(db, userId, { key, value, ttlMs }, now));
+        yield* client.query((db) => upsert(db, userId, rowOf({ key, value, ttlMs }, now)));
       }),
 
-    // 一次写多个键,各带自己的 TTL,**一个批次发出去**(D1 没有交互式事务,batch 是它的原子多写)。
+    /**
+     * 一次写多个键,各带自己的 TTL,**一个批次发出去**(D1 没有交互式事务,batch 是它的原子多写)。
+     *
+     * 超过 `BATCH_BYTES` 才切成多批、**顺序发**(见那边:为什么要切、切了失去什么)。
+     * 这是这个包里唯一一处按字节切的批量写;别处按绑定参数上限切(`chunk`),两者管的不是同一个闸。
+     */
     putMany: (writes: readonly CacheWrite[]): Effect.Effect<void> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
-        yield* client.batch((db) => writes.map((w) => upsert(db, userId, w, now)));
+        const parts = byBytes(writes.map((w) => rowOf(w, now)));
+        yield* Effect.forEach(parts, (part) =>
+          client.batch((db) => part.map((row) => upsert(db, userId, row))),
+        );
       }),
   };
 });

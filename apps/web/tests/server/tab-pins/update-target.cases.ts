@@ -1,10 +1,9 @@
 import { InvalidInput, NotFound } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
-import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
 import { handleUpdateTabPinTarget, UpdateTabPinInput } from "@/lib/server/tab-pins/update-target";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call, callExit, failureOf } from "../_kit/run";
+import { call, callExit, failureOf, readTabStrip } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
 // 合并进 tab-pins/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
@@ -38,7 +37,7 @@ describe("tab-pins/update-target", () => {
 
       await call(USER, handleUpdateTabPinTarget({ pinId: pin.id, kind: "tag", tagId: tag.id }));
 
-      const strip = await call(USER, handleGetHomeTabStrip({}));
+      const strip = await readTabStrip(USER, {});
       expect(strip.pins[0].name).toBe("长期");
       expect(strip.pins[0].kind).toBe("tag");
     });
@@ -51,7 +50,7 @@ describe("tab-pins/update-target", () => {
         handleUpdateTabPinTarget({ pinId: pin.id, kind: "account", accountId: account.id }),
       );
 
-      const strip = await call(USER, handleGetHomeTabStrip({}));
+      const strip = await readTabStrip(USER, {});
       expect(strip.pins).toHaveLength(1);
       expect(strip.pins[0].id).toBe(pin.id);
     });
@@ -64,11 +63,11 @@ describe("tab-pins/update-target", () => {
       }
       const second = await db(USER).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
       await db(USER).tabPins.create({ kind: "connector", connectorId: "binance" });
-      const before = (await call(USER, handleGetHomeTabStrip({}))).pins.map((p) => p.id);
+      const before = (await readTabStrip(USER, {})).pins.map((p) => p.id);
 
       await call(USER, handleUpdateTabPinTarget({ pinId: second.id, kind: "tag", tagId: tag.id }));
 
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins.map((p) => p.id)).toEqual(before);
+      expect((await readTabStrip(USER, {})).pins.map((p) => p.id)).toEqual(before);
     });
 
     // review 抓的洞:改指向以前一句校验都没有 —— 把 pin 改指向一个 connector,它会出现在
@@ -97,7 +96,7 @@ describe("tab-pins/update-target", () => {
 
       expect(failureOf(exit)).toBeInstanceOf(InvalidInput);
       // 原指向保留:Watch 里那个还是 bitcoin。
-      const strip = await call(USER, handleGetHomeTabStrip({ portfolioId: watch.id }));
+      const strip = await readTabStrip(USER, { portfolioId: watch.id });
       expect(strip.pins.map((p) => p.connectorId)).toEqual(["bitcoin"]);
     });
 
@@ -112,7 +111,7 @@ describe("tab-pins/update-target", () => {
       // 满 3 个;把其中一个改指向同组合的 tag —— 旧的那次出现不占名额,这一下必须能过。
       await call(USER, handleUpdateTabPinTarget({ pinId: pins[0].id, kind: "tag", tagId: tag.id }));
 
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
+      expect((await readTabStrip(USER, {})).pins).toHaveLength(3);
     });
 
     it("改成指向别人的 tag → 拒,原指向保留", async () => {
@@ -125,7 +124,7 @@ describe("tab-pins/update-target", () => {
       );
 
       expect(failureOf(exit)).toBeInstanceOf(NotFound);
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins[0].kind).toBe("connector");
+      expect((await readTabStrip(USER, {})).pins[0].kind).toBe("connector");
     });
 
     it("pinId 空串 → schema 拒", () => {

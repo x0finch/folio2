@@ -9,7 +9,7 @@ import { type AccountSyncResult, Sweep, type SweepResult, SYNC_CONCURRENCY } fro
 import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Exit, Option } from "effect";
 import { z } from "zod";
-import { invalidateGain24h, precomputeGain24h } from "@/lib/server/portfolio/gain";
+import { invalidatePrecomputed, precomputePortfolio } from "@/lib/server/portfolio/precompute";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { userLayer } from "@/lib/server/runtime";
 import { syncRoundFor } from "./deps";
@@ -119,11 +119,11 @@ export const runSyncRound = (
     gate: opts.gate,
   });
   const head = { portfolioId: round.portfolioId, roundId: round.roundId };
-  // **预计算排在预热后面 —— 这个顺序是必须的,不是偏好。** 24h 盈亏的「当下点」不是快照里那个
+  // **预计算排在预热后面 —— 这个顺序是必须的,不是偏好。** 总览的市值与 24h 盈亏的「当下点」
+  // 都不是快照里那个
   // 冻结的 `usdValue`,而是 `overview-model` 现推的 `liveValue(b, enriched.price?.unitPrice, mode)`
   // (盯市那些行取的是实时源价)。预热正是把那份价刷新的一步。排在它前面,存下来的数就是拿
-  // **上一轮**的价算的 —— 用户同一时刻在首页看到的市值与这个 24h 数字来自两个不同的价,
-  // 每一轮都差一拍,而且没有任何东西会自己纠正。
+  // **上一轮**的价算的 —— 每一轮都差一拍,而且没有任何东西会自己纠正。
   //
   // **预热失败不许拖累它**(`Effect.exit`):预热是尽力而为(打上游,随时可能空手而归),
   // 而预计算只吃库里的东西 —— 让它给一件 best-effort 的事陪葬,换来的是整轮没有可直出的结果。
@@ -143,7 +143,7 @@ export const runSyncRound = (
     afterRound:
       opts.warm === false
         ? undefined
-        : Effect.zipRight(Effect.exit(afterRound), precomputeGain24h(round.portfolioId)),
+        : Effect.zipRight(Effect.exit(afterRound), precomputePortfolio(round.portfolioId)),
     // 轮活着期间定时续心跳 —— settle 顺带的续期只在「一直有账在落」时才成立,排队时靠这条。
     keepalive: {
       intervalMs: ROUND_KEEPALIVE_MS,
@@ -167,7 +167,7 @@ export const runSyncRound = (
     // 预计算必须排在预热后面(见上),而预热又必须排在收官后面(`drive.ts`:面板不该等一件
     // 与它无关的事做完才看得到「这一轮结束了」)。两条加起来的必然结果是:**新的盈亏值一定
     // 晚于「轮结束」这个信号落地**。而前端正是盯着轮状态在刷新(`use-sync-round.ts`),于是它
-    // 会在新值存在之前把旧值取走,然后再也没有第二次刷新 —— 屏幕上就是「刚同步完,24h 没动」。
+    // 会在新值存在之前把旧值取走,然后再也没有第二次刷新 —— 屏幕上就是「刚同步完,数字没动」。
     //
     // 抬一下水位线(一行 upsert,不是重算)就把这个缝补上了:那次早到的刷新读到的是「旧值 +
     // `pending`」,前端据此短轮询,几百毫秒后预计算落地它自己就换成新的。
@@ -181,7 +181,7 @@ export const runSyncRound = (
     onDone: (error) =>
       Effect.flatMap(Database, (db) =>
         Effect.zipRight(
-          invalidateGain24h(round.portfolioId),
+          invalidatePrecomputed(round.portfolioId),
           db.syncRounds.finish({
             ...head,
             error: error ?? undefined,
@@ -294,13 +294,12 @@ const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
  * **在这里加并发它照样绿**。钉子得跟着被钉的东西走。
  */
 /**
- * **cron 的第三趟:逐用户把 24h 盈亏算好存起来。**
+ * **cron 的第三趟:逐用户把每个组合的预计算(总览 / tab 条 / 两级盈亏)算好存起来。**
  *
  * 为什么它得是独立的一趟,而不是像手动同步那样挂在轮的收尾上:预计算要用**热过的价**
- * (当下点是现推的 `liveValue`,不是快照里的冻结值),而 cron 的预热不在轮里 ——
- * 它按用户统一做,发生在整个同步阶段之后(`server.ts` 的 sweep)。挂在轮上就是每小时
- * 拿上一小时的价算一次,然后让它挂满 90 分钟:首页显示的市值与它旁边那个 24h 数字
- * 来自两组不同的价,而且没有任何东西会自己纠正。
+ * (市值与盈亏的当下点都是现推的 `liveValue`,不是快照里的冻结值),而 cron 的预热
+ * 不在轮里 —— 它按用户统一做,发生在整个同步阶段之后(`server.ts` 的 sweep)。挂在轮上
+ * 就是每小时拿上一小时的价算一次,然后让它挂满 90 分钟,而且没有任何东西会自己纠正。
  *
  * **逐用户串行、各自兜住**(与 `warmAllUsers` 同一形状):cron 一次调用的 CPU / subrequest
  * 预算有限,而一个用户算炸了不该让排在后面的人这一小时都没有数。
@@ -320,7 +319,7 @@ export const precomputeAllUsers = (
           const db = yield* Database;
           const all = yield* db.portfolios.list();
           for (const pf of all) {
-            const ok = yield* precomputeGain24h(pf.id);
+            const ok = yield* precomputePortfolio(pf.id);
             if (ok) portfolios++;
             else failed++;
           }
@@ -328,7 +327,7 @@ export const precomputeAllUsers = (
       );
       if (Exit.isFailure(exit)) {
         failed++;
-        cronLog.warn("gain precompute failed, user skipped", { error: Cause.pretty(exit.cause) });
+        cronLog.warn("precompute failed, user skipped", { error: Cause.pretty(exit.cause) });
       }
     }
     return { portfolios, failed };

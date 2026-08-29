@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
 import { handleCreateTabPin } from "@/lib/server/tab-pins/create";
 import { DeleteTabPinInput, handleDeleteTabPin } from "@/lib/server/tab-pins/delete";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call } from "../_kit/run";
+import { call, readTabStrip } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
 // 合并进 tab-pins/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
@@ -13,7 +12,7 @@ describe("tab-pins/delete", () => {
   // #527 · deleteTabPin
   const USER = "h-pins-delete";
 
-  const pins = (userId: string) => call(userId, handleGetHomeTabStrip({}));
+  const pins = (userId: string) => readTabStrip(userId, {});
 
   // 建一个这个 connector 的账户 —— **不然那个 pin 摆不出来**(ADR 0047:视图里没有这个 connector
   // 的账户,pin 就不该出现)。`accounts.create` 自己会把它归到默认组合。
