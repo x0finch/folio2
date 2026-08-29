@@ -130,7 +130,7 @@ describe("归档 manual 账户的单账户曲线", () => {
       USER,
       loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
     );
-    const series = buildAccountValueHistory(raw.rows, undefined, raw.live);
+    const series = buildAccountValueHistory(raw.rows, raw.live);
 
     expect(series.length).toBeGreaterThan(0);
     expect(Date.now() - series[series.length - 1].t).toBeLessThan(60_000);

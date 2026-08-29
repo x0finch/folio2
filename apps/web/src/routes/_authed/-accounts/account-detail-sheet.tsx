@@ -12,7 +12,7 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
@@ -173,22 +173,23 @@ function DetailBody({
   }, [tagLinks]);
 
   const [range, setRange] = useState<Range>("30d");
-  const historyQuery = useQuery(
-    accountHistoryQuery({ accountId: account.id, connectorId: account.connectorId }),
-  );
+  const historyQuery = useQuery({
+    ...accountHistoryQuery({
+      accountId: account.id,
+      range,
+      // **归档账户的窗口从封存那一刻往回算**(ADR 0039)。用「现在」当锚点的话,一年前归档的账户
+      // 在默认 30 天窗口下一个数据点都没有,图整个不渲染 —— 一个冻住的账户,「最近 30 天」本来
+      // 就没有意义。锚在封存时刻之后,30D 读作「封存前 30 天」,窗口切换照常能用。
+      since: rangeSince(range, sealedAt ?? Date.now()),
+      connectorId: account.connectorId,
+    }),
+    placeholderData: keepPreviousData,
+  });
   const raw = historyQuery.data;
-  // 曲线在浏览器里算(FOL-38):接口发的是原样的快照点,裁窗口 + 降采样都在这儿。
-  // 换时间窗因此不再回服务器 —— 同一份原料重算一次就够了。
-  //
-  // **归档账户的窗口从封存那一刻往回算**(ADR 0039)。用「现在」当锚点的话,一年前归档的账户
-  // 在默认 30 天窗口下一个数据点都没有,图整个不渲染 —— 一个冻住的账户,「最近 30 天」本来
-  // 就没有意义。锚在封存时刻之后,30D 读作「封存前 30 天」,窗口切换照常能用。
+  // 曲线在浏览器里画(FOL-38):接口发窗口内的原样快照点,阶梯重建 + 降采样在这儿。
   const series = useMemo(
-    () =>
-      raw == null
-        ? []
-        : buildAccountValueHistory(raw.rows, rangeSince(range, sealedAt ?? Date.now()), raw.live),
-    [raw, range, sealedAt],
+    () => (raw == null ? [] : buildAccountValueHistory(raw.rows, raw.live)),
+    [raw],
   );
 
   // **先判归档,再判是不是 manual**(ADR 0039):归档 = 封存,数据停在那一刻,所以显示的是

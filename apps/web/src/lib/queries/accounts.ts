@@ -47,19 +47,25 @@ export type AccountListItem = Awaited<ReturnType<typeof listAccounts>>[number];
 export type AccountHoldings = Awaited<ReturnType<typeof listAccountHoldings>>;
 
 /**
- * 一个账户的全部原料点(FOL-38)。**窗口档位不再进 key**:接口发的是原样的快照点,
- * 抽屉里换「30D / 1Y / 全部」是在已经拿到的这份上现裁,不再各拉一趟。
+ * 一个窗口的原料点(FOL-38:接口发点、浏览器画线)。**窗口仍然进 key、仍然回服务器一趟** ——
+ * 它是那条接口的上界:发的是原样的点,不按窗口裁的话「攒了多久就发多大」。
  */
 export const accountHistoryQuery = (args: {
   accountId: string;
+  /** 窗口档位("30d" 等)——**进 key 的是它**,不是下面那个现算的起点。 */
+  range: string;
+  /** 起点(`"all"` 窗口下为 undefined = 不限)。 */
+  since: number | undefined;
   connectorId: AccountListItem["connectorId"];
 }) =>
   queryOptions({
-    queryKey: accountKeys.history(args.accountId),
+    queryKey: accountKeys.history(args.accountId, args.range),
     // connectorId 传给服务端做读路径分流(manual→账本 / 其余→快照),省一次账户反查。
     // 它由 accountId 决定,所以不进 key —— 进了只会让同一账户凭空多出一条永不命中的缓存。
     queryFn: () =>
-      getAccountHistory({ data: { accountId: args.accountId, connectorId: args.connectorId } }),
+      getAccountHistory({
+        data: { accountId: args.accountId, since: args.since, connectorId: args.connectorId },
+      }),
     staleTime: STALE_TIME.history,
   });
 

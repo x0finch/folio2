@@ -103,28 +103,55 @@ export function buildPortfolioHistory(
   return points;
 }
 
-// 组合净值曲线接口发来的那份原料(FOL-38):只有快照点与归档时刻,没有算过的曲线。
-// 归档表用 pair 数组而不是 Map —— 它要过一次 JSON。
+// 组合净值曲线接口发来的那份原料(FOL-38):只有快照点、归档时刻,以及末点该算哪些账户,
+// 没有任何算过的东西。归档表用 pair 数组而不是 Map —— 它要过一次 JSON。
 export interface PortfolioHistoryRaw {
   rows: SnapshotTotalRow[];
   archivedAt: [accountId: string, at: number][];
+  /** 末点该由哪些账户的实时净值加起来(= 选中组合里还活着的成员)。 */
+  liveAccountIds: string[];
 }
 
-// 原料 → 首页/洞察页那条净值曲线:阶梯重建 + 归档截断,**末点换成实时总额**。
+/** 总览里按账户的实时净值那一栏。曲线只要这一栏,所以只声明这一栏。 */
+export interface AccountTotals {
+  accountTotals: readonly { account: { id: string }; totalUsd: number }[];
+}
+
+// 原料 → 首页/洞察页那条净值曲线:阶梯重建 + 归档截断,**末点换成实时净值**。
 //
 // 末点为什么要换:曲线上其它点都是当时冻结的快照值,而最右边那个点说的是「现在」——
-// 它必须与主页那个大数字是同一个数,否则同一屏上两处自相矛盾。`liveTotal` 就是总览接口
-// 那个 `totalUsd`(同一个组合口径、同一批活跃账户、同一次现推),调用方直接把它递进来。
-export function toPortfolioCurve(raw: PortfolioHistoryRaw, liveTotal: number): HistoryPoint[] {
+// 它必须与主页那个大数字是同一个数,否则同一屏上两处自相矛盾。那个数总览接口已经算过一遍,
+// 这里直接用,不为曲线再算一次。
+//
+// **为什么收的是总览那张按账户的表,而不是它那个总额。**
+// 曲线**从不按自定义 Tab 的 pin 收窄**(ADR 0034:pin 只过滤 Tab 里的列表,hero 的总额与曲线
+// 保持选中组合的口径),而总览的 `totalUsd` 是**收窄之后**那几个账户的和 —— 把一份 pin 过的总览
+// 递进来,末点就会凭空矮一截,而且是静悄悄的。收一个数没法分辨它是哪种,收这张表就可以:
+// 逐个对 `liveAccountIds` 取值,**少一个就不换末点**(留住那个冻结值)。于是拿错了顶多是
+// 「末点没跟上实时」,不会是「末点是个错的数」。
+// 顺带也接住了两条查询之间的时间差(中途新建的账户总览里还没有)—— 同样只是这一帧不换。
+export function toPortfolioCurve(
+  raw: PortfolioHistoryRaw,
+  overview: AccountTotals,
+): HistoryPoint[] {
   const series = buildPortfolioHistory(raw.rows, new Map(raw.archivedAt));
   if (series.length === 0) return series;
-  series[series.length - 1] = { t: series[series.length - 1].t, total: liveTotal };
+  const byAccount = new Map(overview.accountTotals.map((a) => [a.account.id, a.totalUsd]));
+  let live = 0;
+  for (const id of raw.liveAccountIds) {
+    const total = byAccount.get(id);
+    if (total == null) return series; // 这份总览不是这条曲线的口径 —— 末点保持冻结值
+    live += total;
+  }
+  series[series.length - 1] = { t: series[series.length - 1].t, total: live };
   return series;
 }
 
 // 单账户价值历史(A2 抽屉头部 chart):该账户快照 (takenAt, totalUsd) → 升序 HistoryPoint[]。
 // 单账户即组合净值阶梯重建的退化情形(每 takenAt 一点),故复用 buildPortfolioHistory + 自适应降采样。
-// since 裁窗口(仅保留 takenAt ≥ since 的快照)。
+//
+// **窗口不在这里裁** —— 接口发来的就是窗口内那一段(见 `lib/server/accounts/history.ts`:
+// 窗口是那条接口的上界,交给前端事后过滤等于没有上界)。
 //
 // `live` = 「当下」那一点,只有手记账户有(账本按当前价现算,与抽屉头 account.totalUsd 同源);
 // 快照那条路末点就是最后一次同步的冻结值,不补。已归档的账户也不补 —— 那正是「还在动」的那一笔
@@ -137,12 +164,13 @@ export interface AccountHistoryRaw {
 
 export function buildAccountValueHistory(
   snapshots: readonly { takenAt: number; totalUsd: number }[],
-  since?: number,
   live?: HistoryPoint | null,
 ): HistoryPoint[] {
-  const rows: SnapshotTotalRow[] = snapshots
-    .filter((s) => since == null || s.takenAt >= since)
-    .map((s) => ({ accountId: "_", takenAt: s.takenAt, totalUsd: s.totalUsd }));
+  const rows: SnapshotTotalRow[] = snapshots.map((s) => ({
+    accountId: "_",
+    takenAt: s.takenAt,
+    totalUsd: s.totalUsd,
+  }));
   const series = downsampleSeries(buildPortfolioHistory(rows));
   if (live == null || series.length === 0) return series;
   const last = series[series.length - 1];

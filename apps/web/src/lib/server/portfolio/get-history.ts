@@ -1,6 +1,6 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
-import { accountIdsInView } from "@/lib/core/accounts-in-view";
+import { accountIdsInView, accountsInView } from "@/lib/core/accounts-in-view";
 import type { PortfolioHistoryRaw } from "@/lib/core/history";
 import { isManual } from "@/lib/core/manual";
 import { loadManualHistoryRows } from "@/lib/server/manual/store";
@@ -13,10 +13,12 @@ import { resolveScope } from "./scope";
 // 一行,实测存量账号 928 行 ≈ 98 KB、gzip 后 16 KB),而算完的曲线点数与原料行数几乎一样多 ——
 // 花 CPU 换不来更小的响应。
 //
-// **「当下点」不在这里算了。** 它是与主页同源的实时总价,而那个数总览接口已经算过一遍
-// (`totalUsd`);为了曲线再算一遍要把每个账户最新快照的全部余额读出来 + 过一遍报价
-// (`snapshots.latest()` + `deriveLiveAccountTotals`),正是这条读接口里最贵的一段。前端拿总览
-// 那个数往末点上一盖即可 —— 同一个数,少算一遍(见 `toPortfolioCurve`)。
+// **「当下点」不在这里算了。** 它是与主页同源的实时总价,而那个数总览接口已经算过一遍;
+// 为了曲线再算一遍要把每个账户最新快照的全部余额读出来 + 过一遍报价(`snapshots.latest()` +
+// `deriveLiveAccountTotals`),正是这条读接口里最贵的一段。这里只说清楚**末点该算哪些账户**
+// (`liveAccountIds`),前端拿总览按账户那张表把它们加起来 —— 同一个数,少算一遍。
+// 发的是账户名单而不是让前端直接用总览那个总额:总览可以是按自定义 Tab 收窄过的,而曲线从不
+// 收窄,名单让前端认得出「这份总览不是这条曲线的口径」(见 `toPortfolioCurve`)。
 //
 // 留在服务端的只有两件事,都不是聚合:① 按选中 Portfolio **筛行**(ADR 0047 作用域在服务端定,
 // 别人组合的行不该出门);② 手记账户的日网格 **compute-on-read**(ADR 0018/0019)—— 它产的
@@ -52,6 +54,14 @@ export const handleGetPortfolioHistory = Effect.fn("getPortfolioHistory")(functi
   const archivedAt = memberAccounts.flatMap((a) =>
     a.archivedAt == null ? [] : [[a.id, a.archivedAt] as [string, number]],
   );
+  // 末点只算活跃成员 —— 与总览那份账户集(`accountsInView`)逐字同源,归档的那些只贡献过去点。
+  const liveAccountIds = accountsInView(allAccounts, memberships, selectedId, defaultId).map(
+    (a) => a.id,
+  );
   // `satisfies`:接口发的原料与前端那个装配函数吃的原料是同一个形状,这一行让接缝在编译期对齐。
-  return { rows: [...snapRows, ...manualRows], archivedAt } satisfies PortfolioHistoryRaw;
+  return {
+    rows: [...snapRows, ...manualRows],
+    archivedAt,
+    liveAccountIds,
+  } satisfies PortfolioHistoryRaw;
 });
