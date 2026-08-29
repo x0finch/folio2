@@ -2,8 +2,8 @@ import { env } from "cloudflare:test";
 import { FIAT_NAMER, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { beforeEach, describe, expect, it } from "vitest";
+import { buildAccountValueHistory } from "@/lib/core/history";
 import { NAMER } from "@/lib/server/oracle";
-import { buildAccountValueHistory } from "@/lib/server/portfolio/history";
 import { dbFor, oracleDbFor } from "./db-effect";
 import {
   addManualActivities,

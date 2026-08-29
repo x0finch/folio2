@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { downsampleSeries, type HistoryPoint, toDailySeries } from "@/lib/core/history";
-import { buildPortfolioHistory } from "@/lib/server/portfolio/history";
+import {
+  buildPortfolioHistory,
+  downsampleSeries,
+  type HistoryPoint,
+  toDailySeries,
+  toPortfolioCurve,
+} from "@/lib/core/history";
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
@@ -192,5 +197,39 @@ describe("toDailySeries", () => {
   it("leaves an already-daily series alone", () => {
     const rows = [p(0, 1), p(DAY, 2), p(2 * DAY, 3)];
     expect(toDailySeries(rows)).toEqual(rows);
+  });
+});
+
+// 接口发的原料 → 首页/洞察页那条曲线(FOL-38)。以前这一段在服务端,现在在浏览器里跑。
+describe("toPortfolioCurve", () => {
+  const rows = [
+    { accountId: "a1", takenAt: 1000, totalUsd: 10 },
+    { accountId: "a2", takenAt: 1500, totalUsd: 5 },
+    { accountId: "a1", takenAt: 2000, totalUsd: 20 },
+  ];
+
+  it("末点换成实时总额,其余点原样", () => {
+    const curve = toPortfolioCurve({ rows, archivedAt: [] }, 999);
+
+    expect(curve).toEqual([
+      { t: 1000, total: 10 },
+      { t: 1500, total: 15 },
+      { t: 2000, total: 999 }, // 冻结值是 25,被主页那个数顶替
+    ]);
+  });
+
+  it("归档时刻表照样管用(过了 JSON 那一趟仍是 pair 数组)", () => {
+    const curve = toPortfolioCurve({ rows, archivedAt: [["a2", 1800]] }, 7);
+
+    expect(curve.map((p) => p.total)).toEqual([10, 15, 7]);
+    // 中间那个点在 a2 归档之前,仍含它的 5;这条钉住 pair 数组真的被读成了归档表 ——
+    // 读丢的话它会变成 15 之后一路带着 a2 的幽灵值。
+    expect(toPortfolioCurve({ rows, archivedAt: [["a2", 1200]] }, 7).map((p) => p.total)).toEqual([
+      10, 10, 7,
+    ]);
+  });
+
+  it("一个点都没有 → 空曲线,不凭空造一个当下点", () => {
+    expect(toPortfolioCurve({ rows: [], archivedAt: [] }, 1234)).toEqual([]);
   });
 });

@@ -78,11 +78,10 @@ export const accountKeys = {
    */
   gain24h: (portfolioId: string) => [...accountKeys.all, "gain24h", portfolioId] as const,
   /**
-   * 单账户价值历史。**key 里是窗口档位(`"30d"`)而不是算出来的起点时间戳** ——
-   * 起点由 `Date.now()` 现算,每次渲染都是新数,进了 key 就等于每帧换一个缓存条目、永远拉不停。
+   * 单账户价值历史。**一个账户一条,不按窗口档位分**(FOL-38):接口发的是原样的快照点,
+   * 换窗口是在这份上现裁,不再各拉一趟。
    */
-  history: (accountId: string, range: string) =>
-    [...accountKeys.all, "history", accountId, range] as const,
+  history: (accountId: string) => [...accountKeys.all, "history", accountId] as const,
   /** 单个持仓的价值历史(跨账户聚合的那一行)。同上,key 里是窗口档位。 */
   holdingHistory: (holdingKey: string, range: string) =>
     [...accountKeys.all, "holding-history", holdingKey, range] as const,

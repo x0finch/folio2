@@ -1,5 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { QueryBoundary } from "@/components/query-boundary";
+import { toPortfolioCurve } from "@/lib/core/history";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
 import { portfolioKeys } from "@/lib/queries/keys";
@@ -88,12 +90,19 @@ function HeroReady({
 }) {
   const history = useSuspenseQuery(portfolioHistoryQuery(portfolioId));
   const gain = useSuspenseQuery(portfolioGain24hQuery(portfolioId));
+  // 曲线在浏览器里算(FOL-38):接口发的是原样的快照点。**末点用总览那个总额** ——
+  // 屏幕上那个大数字与曲线最右端必须是同一个数,而它已经算过一遍了,不该为曲线再算一次。
+  // 记忆化不是为了这一次:hero 里划动读数会一路重渲,重建曲线不该跟着每帧跑一遍。
+  const series = useMemo(
+    () => toPortfolioCurve(history.data, overview.totalUsd),
+    [history.data, overview.totalUsd],
+  );
   // 只在盈亏真的到了之后才允许触发刷价 —— 与上一版 `!gainQuery.isPending` 同一个条件,
   // 只是现在「到了」由挂起保证,不必再问。
   useStalePriceRefresh(overview.pricesStale, true);
   return (
     <PortfolioHero
-      series={history.data.series}
+      series={series}
       totalUsd={overview.totalUsd}
       gain24h={gain.data.portfolio ?? null}
       holdings={attachHoldingGains(overview.holdings, gain.data, false)}

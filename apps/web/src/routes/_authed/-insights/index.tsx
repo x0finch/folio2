@@ -12,7 +12,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
-import { toDailySeries } from "@/lib/core/history";
+import { toDailySeries, toPortfolioCurve } from "@/lib/core/history";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { portfolioKeys } from "@/lib/queries/keys";
 import { portfolioHistoryQuery, portfolioOverviewQuery } from "@/lib/queries/portfolio";
@@ -74,7 +74,11 @@ function TrendCard() {
 function TrendReady({ portfolioId }: { portfolioId: string }) {
   const t = useTranslations("Insights");
   const { data } = useSuspenseQuery({ ...portfolioHistoryQuery(portfolioId), ...KEEP_TRYING });
-  const trend = toDailySeries(data.series);
+  // 曲线在浏览器里算(FOL-38):接口发的是原样的快照点。末点要换成总览那个总额 —— 与首页
+  // 那个大数字同一个数,所以这里也要总览。**不多一趟请求**:这一页的分布图本来就在读它,
+  // loader 也早把它预取了,两处拿的是同一份缓存。
+  const overview = useSuspenseQuery({ ...portfolioOverviewQuery(portfolioId), ...KEEP_TRYING });
+  const trend = toDailySeries(toPortfolioCurve(data, overview.data.totalUsd));
   if (trend.length < 2) {
     return <p className="text-muted-foreground text-sm">{t("noData")}</p>;
   }

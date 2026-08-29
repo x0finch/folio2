@@ -47,22 +47,20 @@ export type AccountListItem = Awaited<ReturnType<typeof listAccounts>>[number];
 /** 按账户的持仓视图(活跃账户 + 其最新快照的富化持仓)。 */
 export type AccountHoldings = Awaited<ReturnType<typeof listAccountHoldings>>;
 
+/**
+ * 一个账户的全部原料点(FOL-38)。**窗口档位不再进 key**:接口发的是原样的快照点,
+ * 抽屉里换「30D / 1Y / 全部」是在已经拿到的这份上现裁,不再各拉一趟。
+ */
 export const accountHistoryQuery = (args: {
   accountId: string;
-  /** 窗口档位("30d" 等)——**进 key 的是它**,不是下面那个现算的起点。 */
-  range: string;
-  /** 起点(`"all"` 窗口下为 undefined = 不限)。 */
-  since: number | undefined;
   connectorId: AccountListItem["connectorId"];
 }) =>
   queryOptions({
-    queryKey: accountKeys.history(args.accountId, args.range),
+    queryKey: accountKeys.history(args.accountId),
     // connectorId 传给服务端做读路径分流(manual→账本 / 其余→快照),省一次账户反查。
     // 它由 accountId 决定,所以不进 key —— 进了只会让同一账户凭空多出一条永不命中的缓存。
     queryFn: () =>
-      getAccountHistory({
-        data: { accountId: args.accountId, since: args.since, connectorId: args.connectorId },
-      }),
+      getAccountHistory({ data: { accountId: args.accountId, connectorId: args.connectorId } }),
     staleTime: STALE_TIME.history,
   });
 

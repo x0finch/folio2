@@ -12,7 +12,7 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
@@ -36,7 +36,7 @@ import { PortfolioPickerModal } from "@/components/portfolio-picker-modal";
 import { type Range, RangeTabs, rangeSince } from "@/components/range-tabs";
 import { TagBadges } from "@/components/tag-badges";
 import { signedUsd } from "@/lib/core/format-number";
-import type { HistoryPoint } from "@/lib/core/history";
+import { buildAccountValueHistory, type HistoryPoint } from "@/lib/core/history";
 import { isManual } from "@/lib/core/manual";
 import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
@@ -173,19 +173,23 @@ function DetailBody({
   }, [tagLinks]);
 
   const [range, setRange] = useState<Range>("30d");
-  const historyQuery = useQuery({
-    ...accountHistoryQuery({
-      accountId: account.id,
-      range,
-      // **归档账户的窗口从封存那一刻往回算**(ADR 0039)。用「现在」当锚点的话,一年前归档的账户
-      // 在默认 30 天窗口下一个数据点都没有,图整个不渲染 —— 一个冻住的账户,「最近 30 天」本来
-      // 就没有意义。锚在封存时刻之后,30D 读作「封存前 30 天」,窗口切换照常能用。
-      since: rangeSince(range, account.archivedAt ?? Date.now()),
-      connectorId: account.connectorId,
-    }),
-    placeholderData: keepPreviousData,
-  });
-  const series = historyQuery.data?.series ?? [];
+  const historyQuery = useQuery(
+    accountHistoryQuery({ accountId: account.id, connectorId: account.connectorId }),
+  );
+  const raw = historyQuery.data;
+  // 曲线在浏览器里算(FOL-38):接口发的是原样的快照点,裁窗口 + 降采样都在这儿。
+  // 换时间窗因此不再回服务器 —— 同一份原料重算一次就够了。
+  //
+  // **归档账户的窗口从封存那一刻往回算**(ADR 0039)。用「现在」当锚点的话,一年前归档的账户
+  // 在默认 30 天窗口下一个数据点都没有,图整个不渲染 —— 一个冻住的账户,「最近 30 天」本来
+  // 就没有意义。锚在封存时刻之后,30D 读作「封存前 30 天」,窗口切换照常能用。
+  const series = useMemo(
+    () =>
+      raw == null
+        ? []
+        : buildAccountValueHistory(raw.rows, rangeSince(range, sealedAt ?? Date.now()), raw.live),
+    [raw, range, sealedAt],
+  );
 
   // **先判归档,再判是不是 manual**(ADR 0039):归档 = 封存,数据停在那一刻,所以显示的是
   // **静态日期**而不是相对时间 —— 相对时间会一天天长下去,看着像同步坏了。manual 那一支原本

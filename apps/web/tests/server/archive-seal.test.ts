@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import type { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildAccountValueHistory } from "@/lib/core/history";
 import { loadAccountHistory } from "@/lib/server/accounts/history";
 import type { AppError } from "@/lib/server/errors";
 import { loadAccountHoldings } from "@/lib/server/portfolio/account-holdings";
@@ -125,10 +126,11 @@ describe("归档 manual 账户的单账户曲线", () => {
   it("活跃时:末点到「现在」,而且补了实时盯市点", async () => {
     const account = await manualWithBtc();
 
-    const { series } = await run(
+    const raw = await run(
       USER,
       loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
     );
+    const series = buildAccountValueHistory(raw.rows, undefined, raw.live);
 
     expect(series.length).toBeGreaterThan(0);
     expect(Date.now() - series[series.length - 1].t).toBeLessThan(60_000);
