@@ -7,11 +7,10 @@ import { isManual } from "@/lib/core/manual";
 import { injectManualSnapshots, loadManualHistoryRows } from "@/lib/server/manual/store";
 import { handleGetPortfolioHistory } from "@/lib/server/portfolio/get-history";
 import { deriveLiveAccountTotals } from "@/lib/server/portfolio/live-value";
-import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
 import { PortfolioSelectInput, resolveScope } from "@/lib/server/portfolio/scope";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call } from "../_kit/run";
+import { call, readOverview } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -44,7 +43,7 @@ describe("portfolio/get-history", () => {
   /** 页面那两行:曲线接口给原料,总览那个总额当末点。 */
   const curve = async (data: { portfolioId?: string } = {}) => {
     const raw = await call(USER, handleGetPortfolioHistory(data));
-    const overview = await call(USER, handleGetPortfolioOverview(data));
+    const overview = await readOverview(USER, data);
     return toPortfolioCurve(raw, overview.totalUsd);
   };
 
@@ -151,7 +150,13 @@ describe("portfolio/get-history", () => {
       await seedSnapshot(USER, b.id, ago(4 * DAY), [{ tokenId: ETH, amount: 1, usdValue: 50 }]);
       await seedSnapshot(USER, gone.id, ago(4 * DAY), [{ tokenId: ETH, amount: 2, usdValue: 70 }]);
       await seedSnapshot(USER, a.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 120 }]);
-      // 归档一个成员 —— 归档截断那一段也在对拍范围里。
+      // 封存之后**不止一个点**,这是刻意的:最右边那个点由实时总额顶替,它一个人证明不了
+      // 截断有没有发生。中间这个点才是。
+      await seedSnapshot(USER, a.id, ago(DAY / 2), [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
+      // **在两天前那一刻归档**,不是现在:归档截断只对「封存之后的点」起作用,而 `setArchived`
+      // 写的是当下。真按当下归档的话这份夹具里一个点都轮不到它,截断那一段就是白测的
+      // (第一版正是这样 —— 把归档时刻发不发给前端改坏,对拍照样绿)。
+      vi.useFakeTimers({ now: ago(2 * DAY), toFake: ["Date"] });
       await db(USER).accounts.setArchived(gone.id, true);
       vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
 
@@ -163,9 +168,16 @@ describe("portfolio/get-history", () => {
       // (它与倒数第二个点的冻结值不同 —— 相等的话这条断言什么都证明不了)。
       expect(served.length).toBeGreaterThan(2);
       expect(served.at(-1)?.total).not.toBe(served.at(-2)?.total);
-      // 归档截断真的在这份夹具里起作用:把那个账户放出来,末点正好多出它那 70。
+      // 归档截断在这份夹具里真的发生了:把那个账户放出来重画一遍,**封存之后的每个点**
+      // 正好多出它那 70,封存之前的点一个字不变。
+      const sealedAt = ago(2 * DAY);
       await db(USER).accounts.setArchived(gone.id, false);
-      expect((await curve()).at(-1)?.total).toBe((served.at(-1)?.total ?? 0) + 70);
+      const unsealed = await curve();
+      expect(unsealed.map((p) => p.t)).toEqual(served.map((p) => p.t));
+      expect(unsealed.filter((p) => p.t >= sealedAt).length).toBeGreaterThan(1);
+      for (const [i, p] of unsealed.entries()) {
+        expect(p.total).toBeCloseTo(served[i].total + (p.t >= sealedAt ? 70 : 0), 6);
+      }
     });
   });
 });
