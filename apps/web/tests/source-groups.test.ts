@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HoldingSource } from "@/lib/server/portfolio/aggregate";
+import type { HoldingSource } from "@/lib/core/portfolio";
 import {
   groupByAccount,
   groupByPlatform,

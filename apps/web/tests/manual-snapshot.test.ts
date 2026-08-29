@@ -3,8 +3,8 @@ import type { TokenRecord } from "@folio/oracle-basic";
 import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import type { CredsToken } from "@/lib/core/manual";
+import { deriveLiveAccountTotals } from "@/lib/core/portfolio";
 import { buildManualSnapshot, manualUnitPrices } from "@/lib/server/manual/snapshot";
-import { deriveLiveAccountTotals } from "@/lib/server/portfolio/live-value";
 import { runWithOracle } from "./oracle-stub";
 
 // 缝③ 纯逻辑:manual 的 creds.tokens(+ 逐 token 现价)→ 合成 SnapshotWithBalances(ADR 0018 做法 1)。
@@ -270,31 +270,27 @@ describe("manualUnitPrices", () => {
 describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
   const account = () =>
     ({ id: "m1", label: "m1", connectorId: "manual", archivedAt: null }) as unknown as AccountSafe;
-  // 假 tokens:BTC 现价 65000,其余无价。
-  // 按 token_id 供价(#201):id 用 `tk-<SYMBOL>`。
-  const fakeReader = (priceById: Record<string, number>) => ({
-    enrich: (ids: readonly string[]) =>
-      Effect.succeed(
-        new Map(
-          ids.map((id) => [
-            id,
-            {
-              id,
-              ref: "src/issued:bitcoin",
-              symbol: id.replace("tk-", ""),
-              name: id,
-              infoStale: false,
-              price:
-                priceById[id] === undefined
-                  ? undefined
-                  : { unitPrice: priceById[id], asOf: 0, stale: false },
-            } as TokenRecord,
-          ]),
-        ),
-      ),
-  });
-  const readerWithBtc = fakeReader({ "tk-BTC": 65000 });
-  const readerNoPrice = fakeReader({});
+  // 富化字典:BTC 现价 65000,其余无价。按 token_id 供价(#201):id 用 `tk-<SYMBOL>`。
+  // deriveLiveAccountTotals 现在是纯函数 —— 字典由调用方备好后传入。
+  const enrichedOf = (priceById: Record<string, number>): Map<string, TokenRecord> =>
+    new Map(
+      ["tk-BTC"].map((id) => [
+        id,
+        {
+          id,
+          ref: "src/issued:bitcoin",
+          symbol: id.replace("tk-", ""),
+          name: id,
+          infoStale: false,
+          price:
+            priceById[id] === undefined
+              ? undefined
+              : { unitPrice: priceById[id], asOf: 0, stale: false },
+        } as TokenRecord,
+      ]),
+    );
+  const enrichedWithBtc = enrichedOf({ "tk-BTC": 65000 });
+  const enrichedNoPrice = enrichedOf({});
 
   // 手记账户:0.5 BTC。现价在 injectManualSnapshots 那一步就烘焙进了 usdValue(它仍走旧参考层),
   // 所以这里模拟两种入库形态。合成行**带 token_id**,所以现推这一侧也能按 id 取到源价 ——
@@ -321,21 +317,20 @@ describe("合成 manual 项经 deriveLiveAccountTotals 盯市", () => {
     ]);
 
   // 净值是实时的:inject 那一步烘焙过一次,现推按 token_id 又能取到同一个价。
-  it("烘焙进的现价即最终净值(0.5×65000)", async () => {
-    const totals = await runWithOracle(
-      { tokens: readerWithBtc },
-      deriveLiveAccountTotals([account()], byAccount(65000), "self-first"),
+  it("烘焙进的现价即最终净值(0.5×65000)", () => {
+    const totals = deriveLiveAccountTotals(
+      [account()],
+      byAccount(65000),
+      enrichedWithBtc,
+      "self-first",
     );
     expect(totals.get("m1")).toBe(32500);
   });
 
   // 取不到源价(上游还没认出这个币)→ 回退到烘焙好的 usdValue,也就是用户自填的单价。
   // 这一条正是自定义币的形状:它永远拿不到源价,所以永远用他填的那个数。
-  it("inject 时也没取到价 → 回退 token 自填单价(0.5×30000)", async () => {
-    const totals = await runWithOracle(
-      { tokens: readerNoPrice },
-      deriveLiveAccountTotals([account()], byAccount(), "self-first"),
-    );
+  it("inject 时也没取到价 → 回退 token 自填单价(0.5×30000)", () => {
+    const totals = deriveLiveAccountTotals([account()], byAccount(), enrichedNoPrice, "self-first");
     expect(totals.get("m1")).toBe(15000);
   });
 });

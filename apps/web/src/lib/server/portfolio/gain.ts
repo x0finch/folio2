@@ -1,6 +1,5 @@
 import { Effect } from "effect";
-import type { Gain } from "./gain-24h";
-import type { OverviewView } from "./overview-model";
+import type { Gain, OverviewView } from "@/lib/core/portfolio";
 import { accountGainKey, type Pending, portfolioGainKey, servePrecomputed } from "./precompute";
 import type { PortfolioScope } from "./scope";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Holding, HoldingSource } from "@/lib/server/portfolio/aggregate";
+import type { Holding, HoldingSource } from "@/lib/core/portfolio";
 import {
   ALLOC_DIMENSION,
   buildAllocation,

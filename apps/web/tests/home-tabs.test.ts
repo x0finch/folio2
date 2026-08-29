@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kindPresence, resolvePinLabel } from "@/lib/server/portfolio/tab-strip";
+import { kindPresence, resolvePinLabel } from "@/lib/core/portfolio";
 import { kindTabsOf, pickShownTab, tabAfterUnpin } from "@/routes/_authed/-home/home-tabs";
 
 // 页内 tab 进 URL(片5 / ADR 0043)。URL 是外面来的,所以「认不出的值怎么办」是这一片的正经逻辑,

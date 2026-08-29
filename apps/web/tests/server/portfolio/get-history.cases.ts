@@ -1,12 +1,13 @@
 import { Database } from "@folio/db";
+import { Oracle } from "@folio/oracle";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountIdsInView, accountsInView } from "@/lib/core/accounts-in-view";
 import { buildPortfolioHistory, toPortfolioCurve } from "@/lib/core/history";
 import { isManual } from "@/lib/core/manual";
+import { deriveLiveAccountTotals, overviewEnrichIds } from "@/lib/core/portfolio";
 import { injectManualSnapshots, loadManualHistoryRows } from "@/lib/server/manual/store";
 import { handleGetPortfolioHistory } from "@/lib/server/portfolio/get-history";
-import { deriveLiveAccountTotals } from "@/lib/server/portfolio/live-value";
 import { PortfolioSelectInput, resolveScope } from "@/lib/server/portfolio/scope";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
@@ -221,7 +222,15 @@ const legacyPortfolioHistory = (data: { portfolioId?: string }) =>
 
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     yield* injectManualSnapshots(accounts, byAccount);
-    const liveTotals = yield* deriveLiveAccountTotals(accounts, byAccount, settings.valuationMode);
+    const enriched = yield* Effect.flatMap(Oracle, (o) =>
+      o.tokens.enrich(overviewEnrichIds(accounts, byAccount)),
+    );
+    const liveTotals = deriveLiveAccountTotals(
+      accounts,
+      byAccount,
+      enriched,
+      settings.valuationMode,
+    );
     let grand = 0;
     for (const v of liveTotals.values()) grand += v;
     series[series.length - 1] = { ...series[series.length - 1], total: grand };

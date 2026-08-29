@@ -1,4 +1,5 @@
 import { Database } from "@folio/db";
+import { Oracle } from "@folio/oracle";
 import { Effect } from "effect";
 import { z } from "zod";
 import {
@@ -8,14 +9,23 @@ import {
   type TabPinScope,
   toTabPin,
 } from "@/lib/core/accounts-in-view";
+import {
+  buildOverview,
+  deriveLiveAccountTotals,
+  GAIN_BASIS_TOLERANCE_MS,
+  GAIN_WINDOW_MS,
+  type GainHistoryRow,
+  overviewChainIds,
+  overviewEligibleBalances,
+  overviewEnrichIds,
+} from "@/lib/core/portfolio";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import {
   injectManualSnapshots,
   loadManualGainHistory,
   manualFiatRefs,
 } from "@/lib/server/manual/store";
-import { GAIN_BASIS_TOLERANCE_MS, GAIN_WINDOW_MS } from "./gain-24h";
-import { buildOverview, type OverviewDeps } from "./overview-model";
+import { refreshableTokenIds } from "@/lib/server/tokens/model";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
 // 仅按选中 Portfolio scope(曲线 / 列表默认口径);不带 pin。
@@ -121,7 +131,7 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
     const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
     yield* injectManualSnapshots(accounts, byAccount);
     const fiatRefs = yield* manualFiatRefs(accounts);
-    let gainHistory: OverviewDeps["gainHistory"];
+    let gainHistory: readonly GainHistoryRow[] | undefined;
     if (withGain) {
       const inScope = new Set(accounts.map((a) => a.id));
       const [snapGain, manualGain] = yield* Effect.all(
@@ -133,7 +143,30 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
       );
       gainHistory = [...snapGain.filter((r) => inScope.has(r.accountId)), ...manualGain];
     }
-    return yield* buildOverview(accounts, byAccount, {
+    // 薄适配层(FOL-45):在 Effect 里备好 buildOverview 要的三份字典 + 刷价集合,再当纯函数调。
+    // 富化一次覆盖聚合行 ∪ defi 行(`overviewEnrichIds`);每账户现推净值复用同一份富化字典。
+    const { tokens, platforms } = yield* Oracle;
+    const [enriched, platformMeta] = yield* Effect.all(
+      [
+        tokens.enrich(overviewEnrichIds(accounts, byAccount)),
+        platforms.resolve(overviewChainIds(accounts, byAccount, connectorPlatformMeta)),
+      ],
+      { concurrency: 2 },
+    );
+    const liveTotals = deriveLiveAccountTotals(
+      accounts,
+      byAccount,
+      enriched,
+      settings.valuationMode,
+    );
+    const refreshableIds = new Set(
+      refreshableTokenIds(overviewEligibleBalances(accounts, byAccount)),
+    );
+    return buildOverview(accounts, byAccount, {
+      enriched,
+      liveTotals,
+      platformMeta,
+      refreshableIds,
       connectorMeta: connectorPlatformMeta,
       mode: settings.valuationMode,
       fiatRefs,

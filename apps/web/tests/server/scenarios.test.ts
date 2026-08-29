@@ -3,11 +3,18 @@ import type { SnapshotWithBalances } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildOverview,
+  deriveLiveAccountTotals,
+  overviewChainIds,
+  overviewEligibleBalances,
+  overviewEnrichIds,
+} from "@/lib/core/portfolio";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import type { AppError } from "@/lib/server/errors";
 import { NAMER } from "@/lib/server/oracle";
-import { buildOverview } from "@/lib/server/portfolio/overview-model";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
+import { refreshableTokenIds } from "@/lib/server/tokens/model";
 import { dbFor, globalDb } from "./db-effect";
 import {
   addManualActivities,
@@ -80,13 +87,33 @@ async function overview() {
     snapshots.map((s) => [s.snapshot.accountId, s]),
   );
   await injectManualSnapshots(USER, accounts, byAccount);
-  // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与 server fn 逐字同款:
-  // 一次装配供上聚合 `Oracle`。
+  // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与 `buildScopedOverview`
+  // 逐字同款:一次装配供上聚合 `Oracle`,备好 buildOverview 要的三份字典 + 刷价集合,再当纯函数调。
   return run(
     USER,
-    buildOverview(accounts, byAccount, {
-      connectorMeta: connectorPlatformMeta,
-      mode: settings.valuationMode,
+    Effect.gen(function* () {
+      const { tokens, platforms } = yield* Oracle;
+      const enriched = yield* tokens.enrich(overviewEnrichIds(accounts, byAccount));
+      const platformMeta = yield* platforms.resolve(
+        overviewChainIds(accounts, byAccount, connectorPlatformMeta),
+      );
+      const liveTotals = deriveLiveAccountTotals(
+        accounts,
+        byAccount,
+        enriched,
+        settings.valuationMode,
+      );
+      const refreshableIds = new Set(
+        refreshableTokenIds(overviewEligibleBalances(accounts, byAccount)),
+      );
+      return buildOverview(accounts, byAccount, {
+        enriched,
+        liveTotals,
+        platformMeta,
+        refreshableIds,
+        connectorMeta: connectorPlatformMeta,
+        mode: settings.valuationMode,
+      });
     }),
   );
 }

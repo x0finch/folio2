@@ -3,14 +3,12 @@ import { Cause, Clock, Effect } from "effect";
 import { defiGainKey, toAccountSections } from "@/lib/core/account-view";
 import { accountsInView, pinsInView, type TabPin, toTabPin } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
+import { type Gain, kindPresence, type OverviewView, resolvePinLabel } from "@/lib/core/portfolio";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import { backfillForUser } from "@/lib/server/runtime";
 import { loadAccountHoldings } from "./account-holdings";
 import type { AccountGain24h, DefiGain, PortfolioGain24h } from "./gain";
-import type { Gain } from "./gain-24h";
-import type { OverviewView } from "./overview-model";
 import { buildScopedOverview, type PortfolioScope, resolveScope } from "./scope";
-import { kindPresence, resolvePinLabel } from "./tab-strip";
 
 // 首页那几个数 —— 总额、持仓聚合、24h 盈亏、tab 条:**算在同步收官那一刻,读的时候只做
 // 「读 + 传」**(ADR 0049 裁定 2)。这个文件是那台机器;`overview.ts` / `gain.ts` / `tabs.ts`
