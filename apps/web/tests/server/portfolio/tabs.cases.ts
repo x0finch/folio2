@@ -246,6 +246,27 @@ describe("portfolio/tabs", () => {
       expect((await until(read, (o) => o.pending == null)).pins[0].name).toBe("新名字");
     });
 
+    // 失效点的**范围**:钉一个属于某个组合的 Tab,只该作废那个组合。
+    //
+    // 抬整个用户那条水位线是能用的,但它把这个用户每个组合的四族预计算全部作废 —— 而钉一个
+    // Tab 一分钱余额都没改。这条钉的就是那个范围;它一旦退回用户级,「别的组合还算数」会红。
+    it("钉一个属于某组合的 Tab → 只作废那个组合,别的组合的数还算数", async () => {
+      const def = await db(USER).portfolios.ensureDefault();
+      const watch = await db(USER).portfolios.create({ name: "看单" });
+      const mine = await seedAccount(USER, "自己的", "bitcoin");
+      await db(USER).portfolios.assignAccount(mine.id, def.id);
+      const there = await seedAccount(USER, "看单里的", "binance");
+      await db(USER).portfolios.assignAccount(there.id, watch.id);
+      await precompute(USER, def.id);
+      await precompute(USER, watch.id);
+
+      // account pin 只出现在这个账户所在的那个组合的条子上。
+      await call(USER, handleCreateTabPin({ kind: "account", accountId: mine.id }));
+
+      expect((await read({ portfolioId: def.id })).pending).toBe(true);
+      expect((await read({ portfolioId: watch.id })).pending).toBeUndefined();
+    });
+
     // 失效点:钉一个 Tab 改的就是这份数据本身(以及多出来的那一维)。
     it("钉一个 Tab → 当场不算数,补算之后条上多一格", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
