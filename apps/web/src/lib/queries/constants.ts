@@ -73,8 +73,43 @@ const FIRST_COMPUTE_WAITS = 4;
  * 放弃之后界面停在手头那份(旧值或空态)—— 服务端已经记了 warning,那才是该看的地方。
  */
 export function precomputePollDelay(pollCount: number): number | false {
-  if (pollCount >= PRECOMPUTE_POLL_ATTEMPTS) return false;
-  return Math.min(POLL_INTERVAL.precompute * 2 ** pollCount, 15_000);
+  return pollCount >= PRECOMPUTE_POLL_ATTEMPTS ? false : backoffMs(pollCount);
+}
+
+/**
+ * 退避的档位本身。**单独抽出来,是为了让「等一等」那两处不必去处理 `false`** ——
+ * 它们的次数上限比 `PRECOMPUTE_POLL_ATTEMPTS` 小,那个分支永远走不到,写一个 `if` 在那儿
+ * 只会看着像有用。1s → 2s → 4s → 8s,15s 封顶(同 `RETRY.delay` 的形状)。
+ */
+const backoffMs = (n: number) => Math.min(POLL_INTERVAL.precompute * 2 ** n, 15_000);
+
+/**
+ * **这一轮 `pending` 已经问了几次** —— 记在一张 `WeakMap` 上,键是 query 实例本身。
+ *
+ * 曾经这里写的是 `query.state.dataUpdateCount - 1`,而那是个 bug,还是这一片最要命的那种:
+ * `dataUpdateCount` 是这条查询**一辈子**的成功计数(query-core `query.js`,只增不减)——
+ * 窗口重新聚焦一次 +1、每次同步失效重拉 +1、每次切组合回来 +1。页面开着不动,九次成功之后
+ * 这个表达式就 ≥ 上限,`precomputePollDelay` 从此恒回 `false`,**这条查询余生不再轮询**。
+ * 症状是:同步跑完,读到旧值 + `pending`,然后再也没有第二次刷新 —— 「刚同步完,数字没动」,
+ * 正是水位线那套机制存在的理由。计数必须按「这一轮 pending」算,不按查询的一辈子算。
+ *
+ * `pending` 一消失就把记录抹掉,下一轮从头数;`WeakMap` 让查询被移出缓存时记录跟着回收。
+ */
+const pollEpisodes = new WeakMap<object, number>();
+
+export function pendingPollDelay(query: {
+  state: { data?: { pending?: true }; dataUpdateCount: number };
+}): number | false {
+  if (!query.state.data?.pending) {
+    pollEpisodes.delete(query);
+    return false;
+  }
+  const startedAt = pollEpisodes.get(query);
+  if (startedAt === undefined) {
+    pollEpisodes.set(query, query.state.dataUpdateCount);
+    return precomputePollDelay(0);
+  }
+  return precomputePollDelay(query.state.dataUpdateCount - startedAt);
 }
 
 /**
@@ -104,23 +139,65 @@ export const awaitFirstCompute = async <A extends { pending?: true }>(
 ): Promise<A> => {
   let out = await fetch();
   for (let n = 0; n < FIRST_COMPUTE_WAITS && out.pending && isEmpty(out); n++) {
-    const wait = precomputePollDelay(n);
-    if (wait === false) break;
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, wait);
-      signal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          reject(signal.reason);
-        },
-        { once: true },
-      );
-    });
+    await sleep(backoffMs(n), signal);
     out = await fetch();
+  }
+  // **等不到就报错,不能把空态当答案交出去。**
+  //
+  // 服务端算不出来的时候(预计算连着失败、批量写超限)端出来的就是这份空态,而它与「这个组合
+  // 真的一分钱都没有」在线上是同一个值:总额 0、持仓零行。首页把那个 0 喂给曲线的当下点,而曲线
+  // **不是**预计算的、是真数据 —— 屏幕上就是一条真实资产曲线在「现在」直坠到零,旁边配一句
+  // 「还没有账户,去添加一个」。那是这一片最坏的一种输出:错得像真的。
+  //
+  // 这一片之前,算不出来是一次查询失败,`QueryBoundary` 画「加载失败」。这里把那条路还回去。
+  // 真·空组合走不到这儿:它的预计算会成功,`pending` 随之消失,空态照常端出去。
+  if (out.pending && isEmpty(out)) {
+    throw new Error("precompute not ready");
   }
   return out;
 };
+
+/**
+ * **等到重取的结果满足条件为止**(有退避、有上限,退避档位与轮询同一套)。
+ *
+ * 用在「写完之后界面要跟着变」的那几处:写路径只抬水位线,重算在 `waitUntil` 上,所以紧跟着
+ * 的那次刷新拿回的往往还是**改动之前**那份。不等的话,新钉的 Tab 选不中、刚改的指向还显示
+ * 老名字 —— 用户看到的是「点了没反应」。
+ *
+ * 等不到也照常返回手上那份:调用方据此继续(URL 仍是权威,轮询落地后界面自己会对齐)。
+ */
+export const refetchUntil = async <A>(
+  refetch: () => Promise<A>,
+  ok: (a: A) => boolean,
+): Promise<A> => {
+  let out = await refetch();
+  for (let n = 0; n < FIRST_COMPUTE_WAITS && !ok(out); n++) {
+    await sleep(backoffMs(n));
+    out = await refetch();
+  }
+  return out;
+};
+
+/** 可取消的等待。**先看 signal 再挂钩子**,并且两条路都把钩子摘掉 —— 见 `awaitFirstCompute`。 */
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    if (!signal) {
+      setTimeout(resolve, ms);
+      return;
+    }
+    // 取消发生在上一发请求飞行期间时,`addEventListener` 已经晚了(abort 事件早就过去了)——
+    // 不先问一句,这一觉照睡,醒来再打一次服务器,正是「取消之后还在后台打服务器」那条。
+    if (signal.aborted) return reject(signal.reason);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 
 /**
  * 失败重试。**必须显式设**:`ensureQueryData` / `prefetchQuery` 走的是 `fetchQuery`,

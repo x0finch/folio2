@@ -80,19 +80,36 @@ const pinSuffix = (pin: TabPin | null): string => {
   return `:account:${pin.accountId}`;
 };
 
-/** 一族键的形状:`pc1:<族>:<组合 id>[:<pin>]`。四族共用这一个拼法,免得各拼各的。 */
-const keyOf = (family: string) => (portfolioId: string, pin: TabPin | null) =>
-  `${KEY_GEN}:${family}:${portfolioId}${pinSuffix(pin)}`;
+/** 一个键的形状:`pc1:<族>:<组合 id>[:<pin>]`。四族共用这一个拼法,免得各拼各的。 */
+export type PrecomputeKey = (portfolioId: string, pin: TabPin | null) => string;
+
+/** 吃 pin 的那两族:一个维度一个键。 */
+const keyOf =
+  (family: string): PrecomputeKey =>
+  (portfolioId, pin) =>
+    `${KEY_GEN}:${family}:${portfolioId}${pinSuffix(pin)}`;
+
+/**
+ * **不吃 pin** 的那两族:一个组合一个键,pin 那个参数**在这里就被丢掉**。
+ *
+ * 账户页没有自定义 Tab(入参是 `PortfolioSelectInput`),tab 条本身就是「有哪些 pin」的答案、
+ * 不可能按某个 pin 收窄。签名仍收 pin 只是为了跟 `readByScope` 对得上 —— 而「谁也别传 pin 给
+ * 它们」这件事**由这里丢掉参数来保证**,不靠每个调用点记得先把 pin 抹掉:少抹一处就是一族键
+ * 按 pin 裂成好几个,写的那头只填其中一个,其余永远 `pending`。
+ */
+const plainKeyOf =
+  (family: string): PrecomputeKey =>
+  (portfolioId) =>
+    `${KEY_GEN}:${family}:${portfolioId}`;
 
 /** 组合总览(总额 + 持仓聚合 + 分区 + 小计)—— 吃 pin。 */
 export const overviewKey = keyOf("overview");
 /** 组合级 24h 盈亏 —— 吃 pin。 */
 export const portfolioGainKey = keyOf("gain");
-// 下面两族**不吃 pin**,一个组合一个键:账户页没有自定义 Tab(入参是 `PortfolioSelectInput`),
-// tab 条本身就是「有哪些 pin」的答案、不可能按某个 pin 收窄。签名仍收 pin 是为了跟 `readByScope`
-// 对得上 —— 它恒收到 null。
-export const accountGainKey = keyOf("gain-accounts");
-export const tabStripKey = keyOf("tabstrip");
+/** 账户级 24h 盈亏 —— 一个组合一个键。 */
+export const accountGainKey = plainKeyOf("gain-accounts");
+/** 首页 tab 条 —— 一个组合一个键。 */
+export const tabStripKey = plainKeyOf("tabstrip");
 
 /**
  * **失效水位线** —— 「这个组合(或这个用户)的预计算结果,在这一刻之后才算数」。
@@ -456,13 +473,13 @@ const readPrecomputed = <A>(key: string, portfolioId: string) =>
  * 组合里的目标)。这个函数把「读哪个键、补算该写哪个组合、这个键有没有人会来填」一次问清楚,
  * **而且按这三件事各自的必要程度分档收费**:
  *
- *   · 传了 id 且键上有东西(新鲜或不新鲜都算)→ **就这一条查询**。命中即证明这个 id 是真的
- *     (这些键只由预计算写,而它写的恒是解析过的 id),而「有过值」也就证明这个维度填得上。
- *     不新鲜要安排补算,但补算的落点就是这个 id,不必再解析一遍。
- *     这一档要紧的地方在于:**轮询最密的时候正是不新鲜的时候**,让它去跑六条查询等于把省下来
- *     的 CPU 换成一串 D1 往返。
- *   · 键上什么都没有 → 解析组合(两条)。默认视图与不吃 pin 的那两族到此为止:它们恒是维度之一。
- *   · 键上什么都没有**而且带着 pin** → 才去枚举维度(再四条),判这个 pin 说不说得通。
+ *   · 传了 id 且键上那份**新鲜** → **就这一条查询**。命中即证明这个 id 是真的(这些键只由
+ *     预计算写,而它写的恒是解析过的 id),新鲜也就证明这个维度还有人在填。这是首屏与轮询
+ *     绝大多数时候走的那一档,不该让它去跑六条查询。
+ *   · 键上有值但**不算数** → 带 pin 的话再跑四条,问一句「这一维还在不在」。它可能是一个目标
+ *     已经被删掉的 pin 留下的旧行:那种键预计算永远不会再覆盖,而 `stale` 恒为真 —— 不问的话
+ *     前端会对着一份永远不会变的数一直轮询。
+ *   · 键上什么都没有 → 解析组合(两条);带 pin 的再加四条判它说不说得通。
  *
  * 解析那一步不能省:少了它,后台补算会把结果写到一个客户端瞎编的键上 —— 那是往 `user_cache`
  * 里灌任意行的一条路。
@@ -470,25 +487,41 @@ const readPrecomputed = <A>(key: string, portfolioId: string) =>
 const readByScope = <A>(
   requested: string | undefined,
   pin: TabPin | null,
-  keyFor: (portfolioId: string, pin: TabPin | null) => string,
+  keyFor: PrecomputeKey,
 ): Effect.Effect<Served<A>, never, Database> =>
   Effect.gen(function* () {
+    // 「这个键还有人会来填吗」。默认视图与不吃 pin 的那两族恒是维度之一,问也是白问;
+    // 带 pin 的才值得为它多跑四条查询。
+    const fillableAt = (portfolioId: string) =>
+      pin == null
+        ? Effect.succeed(true)
+        : Effect.map(pinDimensions(portfolioId), ({ dimensions }) =>
+            dimensions.some((d) => keyFor(portfolioId, d) === keyFor(portfolioId, pin)),
+          );
+
     if (requested) {
       const direct = yield* readPrecomputed<A>(keyFor(requested, pin), requested);
-      if (direct.exists) return { ...direct, portfolioId: requested, fillable: true };
+      // **新鲜**:到此为止,就这一条查询 —— 这是轮询与首屏最常走的那一档。
+      if (direct.exists && !direct.stale) {
+        return { ...direct, portfolioId: requested, fillable: true };
+      }
+      // **有值但不算数**:值在,不代表还有人会来填它。目标被删掉 / 移出这个组合之后,
+      // 那一维就不在 `pinDimensions` 里了,预计算再也不会覆盖这个键 —— 而 `stale` 恒为真。
+      // 不问一句就说 `pending`,前端会对着一份永远不会变的数轮询到放弃为止。
+      if (direct.exists) {
+        return { ...direct, portfolioId: requested, fillable: yield* fillableAt(requested) };
+      }
     }
     const { selectedId } = yield* resolveScope(requested);
     const hit =
       requested === selectedId
         ? { value: undefined, stale: true, exists: false }
         : yield* readPrecomputed<A>(keyFor(selectedId, pin), selectedId);
-    if (hit.exists) return { ...hit, portfolioId: selectedId, fillable: true };
-    // 到这儿才是真的「从没算过」。**只有带 pin 的时候**才值得为「它说不说得通」多跑四条查询:
-    // 默认视图与不吃 pin 的那两族恒在维度里,问也是白问。
-    if (pin == null) return { ...hit, portfolioId: selectedId, fillable: true };
-    const { dimensions } = yield* pinDimensions(selectedId);
-    const fillable = dimensions.some((d) => keyFor(selectedId, d) === keyFor(selectedId, pin));
-    return { ...hit, portfolioId: selectedId, fillable };
+    return {
+      ...hit,
+      portfolioId: selectedId,
+      fillable: hit.exists && !hit.stale ? true : yield* fillableAt(selectedId),
+    };
   });
 
 // 补算把**这个组合的全部预计算**一次算完,而不是只补被读到的那一个:首页一进来就会同时问

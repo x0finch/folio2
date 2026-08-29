@@ -6,13 +6,7 @@ import {
   getPortfolioOverview,
 } from "@/lib/server/portfolio";
 import { listPortfolios } from "@/lib/server/portfolios";
-import {
-  awaitFirstCompute,
-  precomputePollDelay,
-  RETRY,
-  STALE_TIME,
-  shouldRetry,
-} from "./constants";
+import { awaitFirstCompute, pendingPollDelay, RETRY, STALE_TIME, shouldRetry } from "./constants";
 import { type PinScopeKey, portfolioKeys } from "./keys";
 
 // 组合域的读取入口 —— 与 `lib/server/portfolio`(读模型)+ `lib/server/portfolios`(实体)的读取型 server fn 对应。
@@ -48,8 +42,7 @@ export const homeTabStripQuery = (portfolioId: string) =>
         signal,
       ),
     staleTime: STALE_TIME.live,
-    refetchInterval: (query) =>
-      query.state.data?.pending ? precomputePollDelay(query.state.dataUpdateCount - 1) : false,
+    refetchInterval: pendingPollDelay,
   });
 
 // 一份总览 = 一个组合口径(+ 可选的自定义 Tab 收窄)。默认视图与非默认视图、Tab 视图走的是
@@ -66,8 +59,7 @@ export const portfolioOverviewQuery = (portfolioId: string, pin?: PinScopeKey) =
       ),
     staleTime: STALE_TIME.live,
     // 见 `portfolioGain24hQuery` 那段:`pending` 期间短轮询,算好了整条就停。
-    refetchInterval: (query) =>
-      query.state.data?.pending ? precomputePollDelay(query.state.dataUpdateCount - 1) : false,
+    refetchInterval: pendingPollDelay,
   });
 
 export const portfolioHistoryQuery = (portfolioId: string) =>
@@ -84,7 +76,7 @@ export const portfolioHistoryQuery = (portfolioId: string) =>
  * 没算过 / 刚失效的时候它如实说一句「还在算」,服务端同时安排一趟后台补算 —— 不盯着的话,
  * 补算几百毫秒就落好了,而这份空响应会按 `staleTime` 在前端揣满 30 秒。
  * 手法与同步轮进度那条一样(ADR 0048):**只在有东西正在变的时候才开**。轮询有退避、会放弃
- * (`precomputePollDelay`)—— 理由写在那儿。
+ * (`pendingPollDelay`)—— 理由写在那儿。
  *
  * **`pending` 期间界面不做任何视觉区分,这是想过之后的决定。** 那一刻屏幕上那个数是上一次
  * 权威计算的结果(通常几分钟前),而正确值一秒内就会顶上来。给它加个「重算中」的样子意味着:
@@ -98,8 +90,7 @@ export const portfolioGain24hQuery = (portfolioId: string, pin?: PinScopeKey) =>
     queryKey: portfolioKeys.gain24h(portfolioId, pin),
     queryFn: () => getPortfolioGain24h({ data: { portfolioId, pin } }),
     staleTime: STALE_TIME.live,
-    // `dataUpdateCount` = 这条查询成功取回过几次。第一次拿到 pending 时它是 1 → 隔 1s 再问,
-    // 之后翻倍,八次收手(见 `precomputePollDelay`)。算好了 `pending` 消失,整条就停了。
-    refetchInterval: (query) =>
-      query.state.data?.pending ? precomputePollDelay(query.state.dataUpdateCount - 1) : false,
+    // 隔 1s 再问,之后翻倍,八次收手 —— **次数按「这一轮 pending」数**,见 `pendingPollDelay`
+    // (拿这条查询的一辈子成功次数去数,页面开久了轮询会自己永久关掉)。算好了整条就停。
+    refetchInterval: pendingPollDelay,
   });

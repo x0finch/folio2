@@ -110,3 +110,20 @@ git tag v1.2.0 && git push origin v1.2.0   # → CI migrates remote D1, then dep
 - **Local vs remote D1 are separate.** `pnpm dev` uses a local SQLite file; production uses the remote D1. Always `migrations apply … --remote` after a schema change.
 - **Logging:** production emits JSON Lines into **Workers Logs** (Dashboard → Observability, queryable; 7-day retention). `LOG_PRETTY` is intentionally unset in prod (it's local-dev only). Adjust verbosity via the `LOG_LEVEL` var in `wrangler.jsonc`.
 - **Secrets** are encrypted and only exist in the deployed Worker; rotate with another `wrangler secret put <NAME>`. They are never in git.
+- **Rolling back past the precompute rename (FOL-36) needs one manual cleanup.** The home
+  overview, tab strip and both 24h-gain endpoints read values stored under `pc1:*` keys in
+  `user_cache`, and "is this value still valid?" is decided by a watermark key in the same
+  family. The previous release used `gain24h:*` values with a `gain24h-mark*` watermark, and the
+  two generations do not touch each other — which is what makes rolling *forward* safe. Rolling
+  **back** is the direction that bites: the old code resumes reading `gain24h:*` values that are
+  up to 90 minutes old, against a watermark no write has bumped since the upgrade, so every one
+  of them looks fresh. Any account change made while the new version was live is invisible in
+  those numbers until the TTL runs out. Clear them by hand right after rolling back:
+
+  ```sh
+  wrangler d1 execute folio --remote \
+    --command "DELETE FROM user_cache WHERE k LIKE 'gain24h%'"
+  ```
+
+  (Deleting cache rows is always safe — worst case the next page load is a little slower. The
+  `pc1:*` rows can be left alone; they cost a few KB and expire on their own.)

@@ -8,6 +8,7 @@ import { connectorLabelFallback } from "@/lib/core/logo";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { accountListQuery } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
+import { refetchUntil } from "@/lib/queries/constants";
 import { type HomeTabStrip, homeTabStripQuery } from "@/lib/queries/portfolio";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { tagListQuery } from "@/lib/queries/tags";
@@ -17,6 +18,31 @@ import { type PinTargetChoice, TabPinPicker } from "./pin-picker";
 import { PinPanel } from "./pin-portal-popover";
 import { PinTargetMark } from "./pin-target-mark";
 import { useHomeTabSelection } from "./selection";
+
+/** 一个 pin 指着什么 —— 用来判「条子上这一格换过来了没有」。三个目标列按 kind 互斥非空。 */
+const targetOf = (p: PinTargetChoice) => `${p.kind}:${p.connectorId ?? p.tagId ?? p.accountId}`;
+
+/**
+ * **写完之后等 tab 条真的变了再收工。**
+ *
+ * tab 条是预计算出来的(ADR 0049):写路径只抬失效水位线,重算跑在这次请求的 `waitUntil` 上。
+ * 所以紧跟着的那次刷新拿回的往往还是**改动之前**那份条子 —— 新钉的 Tab 还不在里面(于是选不中,
+ * 药丸不动)、刚改的指向还显示老名字。三处写都吃这一口,所以等待也写在一处。
+ *
+ * **不在写请求里现算条子来绕过它**:那正是 ADR 0049 搬走的那笔 CPU,而免费档一次请求只有 10ms;
+ * 而且条子上的名字与 logo 是服务端解析的,前端乐观拼一份出来等于把那套解析复制一遍。
+ *
+ * 等待期间 mutation 仍是 pending → 加钮 / 取消固定按钮保持禁用,顺手挡掉了连点。
+ */
+const awaitStrip = (
+  queryClient: ReturnType<typeof useQueryClient>,
+  portfolioId: string,
+  ok: (strip: HomeTabStrip) => boolean,
+) =>
+  refetchUntil(
+    () => queryClient.fetchQuery({ ...homeTabStripQuery(portfolioId), staleTime: 0 }),
+    ok,
+  );
 
 // 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);
 // 管理面板经 PinPanel 浮出。写(改指向 / 取消固定)自包含。
@@ -37,12 +63,23 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
   const repointMut = useMutation({
     mutationFn: (choice: PinTargetChoice) =>
       updateTabPinTarget({ data: { pinId: pin.id, ...choice } }),
-    onSuccess: () => invalidateFor(queryClient, "portfolio.pin.write"),
+    onSuccess: async (_out, choice) => {
+      await invalidateFor(queryClient, "portfolio.pin.write");
+      // 等到条子上这一格真的指向新目标 —— 不等的话它会挂着老名字、渲染老目标的内容。
+      await awaitStrip(queryClient, selectedId, (strip) =>
+        strip.pins.some((p) => p.id === pin.id && targetOf(p) === targetOf(choice)),
+      );
+    },
     onError: failPin,
   });
   const unpinMut = useMutation({
     mutationFn: () => deleteTabPin({ data: { pinId: pin.id } }),
-    onSuccess: () => invalidateFor(queryClient, "portfolio.pin.write"),
+    onSuccess: async () => {
+      await invalidateFor(queryClient, "portfolio.pin.write");
+      await awaitStrip(queryClient, selectedId, (strip) =>
+        strip.pins.every((p) => p.id !== pin.id),
+      );
+    },
     onError: failPin,
   });
   const onUnpin = () => {
@@ -112,9 +149,10 @@ export function AddPinButton() {
   const addMut = useMutation({
     mutationFn: (choice: PinTargetChoice) => createTabPin({ data: choice }),
     onSuccess: async (pin) => {
-      // 先等 tab 条刷新、新 tab 挂上再选中 —— 提前选中会让 active 短暂指向不存在的 tab,
-      // 被 clamp 回 tokens,药丸先滑到第一个再滑回来(实测)。
+      // 先等 tab 条上真的挂上这个新 tab 再选中 —— 提前选中会让 active 指向条子上还没有的 tab
+      // (药丸不动,看着像「点了没反应」)。刷新那一下拿回的通常还是旧条子,所以要等重算落地。
       await invalidateFor(queryClient, "portfolio.pin.write");
+      await awaitStrip(queryClient, selectedId, (strip) => strip.pins.some((p) => p.id === pin.id));
       selectTab(pin.id);
     },
     onError: () => toast.error(tct("actionFailed")),

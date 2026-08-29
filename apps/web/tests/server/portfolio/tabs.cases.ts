@@ -155,8 +155,17 @@ describe("portfolio/tabs", () => {
 
     // —— FOL-36:tab 条也改成读预计算(ADR 0049)——
 
-    // 验收 ② —— 同一份输入,现算那条路与「预计算 + 读」那条路给的是同一份条子。
-    it("读接口与现算逻辑对拍:同一份输入,两条路一个字都不差", async () => {
+    // **这条不是对拍,别把它当对拍看。**
+    //
+    // 总览那边有真参照:`buildScopedOverview({}, false)` 逐字就是改造前那个 handler 的全部内容,
+    // 而它住在 `scope.ts`、这一片没动过。tab 条没有这种参照 —— 改造前的 handler 体被原样搬进了
+    // `computeHomeTabStrip`,拿它当参照只能证明「读出来的等于写进去的」,证明不了「算得对」。
+    //
+    // 所以这条用例的重量在下半截:**条子的内容对不对,由夹具直接推出来**(种了一个永续账户 →
+    // hasPerps;没种 DeFi → hasDefi 假;钉了一个标签 → 条上恰好一格,叫「长期」)。上半截那句
+    // `toEqual` 留着,它管的是另一件事:读接口真的只是把存下来的那份原样端出来(JSON 存取
+    // 一个来回没把它弄花),而不是在读的时候又算了一遍。
+    it("读出来的就是写进去的那一份,而那一份与这个组合的实际情况对得上", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
       const acc = await seedAccount(USER, "我的钱包", "hyperliquid");
       await db(USER).portfolios.assignAccount(acc.id, pf.id);
@@ -177,11 +186,14 @@ describe("portfolio/tabs", () => {
       await precompute(USER);
       const served = await read();
 
-      expect(served).toEqual(inline);
-      // 夹具没有绕过被测代码:这一份真的有内容,不是两个空条子碰在一起。
-      expect(served.hasAccounts).toBe(true);
-      expect(served.hasPerps).toBe(true);
-      expect(served.pins.map((p) => p.name)).toEqual(["长期"]);
+      expect(served).toEqual(inline); // 存进去的原样端出来
+      // 内容由夹具直接推出来,不看被测代码的脸色:
+      expect(served.hasAccounts).toBe(true); // 种了一个账户,在默认组合里
+      expect(served.hasPerps).toBe(true); // 那个账户有永续权益行(带 meta,否则 toPerpView 不认)
+      expect(served.hasDefi).toBe(false); // 一条 DeFi 行都没种
+      expect(served.pins).toHaveLength(1); // 只钉了一个
+      expect(served.pins[0].kind).toBe("tag");
+      expect(served.pins[0].name).toBe("长期"); // 名字是服务端解析好的标签名
       expect(served.pending).toBeUndefined();
     });
 

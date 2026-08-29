@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleRemoveAccount } from "@/lib/server/accounts/remove";
+import { handleUpdateAccount } from "@/lib/server/accounts/update";
 import { handleGetManualAccount } from "@/lib/server/manual-tokens/get-account";
 import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
 import { overviewKey, PRECOMPUTE_TTL_MS } from "@/lib/server/portfolio/precompute";
@@ -251,14 +251,17 @@ describe("portfolio/overview", () => {
       await precompute(USER);
       expect((await read()).totalUsd).toBe(100);
 
+      // **改动之后那个数必须和改动之前不一样** —— 否则「补算跑了没有」这件事没有任何证据:
+      // 一加一删的话前后都是 100,补算压根没跑这条用例照样绿。
+      // 夹具直接塞一个新账户(不经写 handler,所以水位线没动),再用一次真的写把水位线抬起来。
       const other = await seedAccount(USER, "乙", "binance");
       await seedSnapshot(USER, other.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 900 }]);
-      await call(USER, handleRemoveAccount({ accountId: other.id }));
+      await call(USER, handleUpdateAccount({ accountId: acc.id, label: "甲(改过名)" }));
 
       const stale = await read();
       expect(stale.pending).toBe(true);
       expect(stale.totalUsd).toBe(100); // 旧值照端 —— 界面不会空一下
-      expect((await until(read, (o) => o.pending == null)).totalUsd).toBe(100);
+      expect((await until(read, (o) => o.pending == null)).totalUsd).toBe(1000);
     });
 
     it("入参缺省 → schema 给出默认值,loader 不带参也能调", () => {

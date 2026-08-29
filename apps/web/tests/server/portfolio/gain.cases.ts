@@ -364,7 +364,7 @@ describe("portfolio/gain", () => {
         () => db(USER).cache.get(portfolioGainKey(pf, null)),
         (o) => o._tag === "Some",
       );
-      expect((await db(USER).cache.get(`gain24h:${bogus}`))._tag).toBe("None");
+      expect((await db(USER).cache.get(portfolioGainKey(bogus, null)))._tag).toBe("None");
     });
 
     // 算好了就是终局,一个字都不多说 —— 否则前端会白轮询下去。
@@ -393,7 +393,13 @@ describe("portfolio/gain", () => {
       expect(out.pending).toBeUndefined();
       // 而且没人去给它建键 —— 等一会儿再看,仍然是空的。
       await new Promise((r) => setTimeout(r, 100));
-      expect((await db(USER).cache.get(`gain24h:${pf}:connector:binance`))._tag).toBe("None");
+      expect(
+        (
+          await db(USER).cache.get(
+            portfolioGainKey(pf, { kind: "connector", connectorId: "binance" }),
+          )
+        )._tag,
+      ).toBe("None");
     });
   });
 
