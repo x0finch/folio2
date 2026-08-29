@@ -47,6 +47,10 @@ export type AccountListItem = Awaited<ReturnType<typeof listAccounts>>[number];
 /** 按账户的持仓视图(活跃账户 + 其最新快照的富化持仓)。 */
 export type AccountHoldings = Awaited<ReturnType<typeof listAccountHoldings>>;
 
+/**
+ * 一个窗口的原料点(FOL-38:接口发点、浏览器画线)。**窗口仍然进 key、仍然回服务器一趟** ——
+ * 它是那条接口的上界:发的是原样的点,不按窗口裁的话「攒了多久就发多大」。
+ */
 export const accountHistoryQuery = (args: {
   accountId: string;
   /** 窗口档位("30d" 等)——**进 key 的是它**,不是下面那个现算的起点。 */

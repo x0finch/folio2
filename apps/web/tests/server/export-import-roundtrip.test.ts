@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import type { ConnectorId } from "@folio/connectors";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
+import { buildPortfolioHistory } from "@/lib/core/history";
 import {
   accountRecord,
   manualActivityRecord,
@@ -11,7 +12,6 @@ import {
   tokenRecord,
 } from "@/lib/server/io/export";
 import { createImporter, type ImportDeps, parseImportLine } from "@/lib/server/io/import";
-import { buildPortfolioHistory } from "@/lib/server/portfolio/history";
 import { dbFor } from "./db-effect";
 
 // #204 的核心验收:**导出的文件能单独导进一个空库,总资产与历史曲线跟原库一致**。

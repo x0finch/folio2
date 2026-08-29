@@ -182,6 +182,28 @@ describe("snapshots", () => {
     expect(latest[0]!.balances.find((b) => b.tokenId === "tk-eth")!.selfPrice).toBeNull();
   });
 
+  // 单账户曲线的数据源(FOL-38):两列 + `since` 窗口。窗口是这条读接口的**上界** ——
+  // 它发的是原样的点,不裁的话「攒了多久就发多大」。
+  it("listTotalsByAccount:按 since 裁窗口,升序,只给 (takenAt, totalUsd)", async () => {
+    const acc = await accounts(USER_A).create({ connectorId: "binance", label: "B", creds: "x" });
+    await snapshotsOf(USER_A).write(acc.id, { takenAt: 300, totalUsd: 30, balances: [] });
+    await snapshotsOf(USER_A).write(acc.id, { takenAt: 100, totalUsd: 10, balances: [] });
+    await snapshotsOf(USER_A).write(acc.id, { takenAt: 200, totalUsd: 20, balances: [] });
+
+    const all = await snapshotsOf(USER_A).listTotalsByAccount(acc.id);
+    expect(all).toEqual([
+      { takenAt: 100, totalUsd: 10 },
+      { takenAt: 200, totalUsd: 20 },
+      { takenAt: 300, totalUsd: 30 },
+    ]);
+    // 窗口在 SQL 里,不是查回来再过滤 —— 窗口外那行不出库。
+    expect(await snapshotsOf(USER_A).listTotalsByAccount(acc.id, 200)).toEqual([
+      { takenAt: 200, totalUsd: 20 },
+      { takenAt: 300, totalUsd: 30 },
+    ]);
+    expect(await snapshotsOf(USER_A).listTotalsByAccount(acc.id, 999)).toEqual([]);
+  });
+
   it("persists per-balance note (single Note) + account-level note (Note[]) and safeParses back (note 重设计)", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "bitcoin",
@@ -384,6 +406,7 @@ describe("cross-user isolation", () => {
     expect(await accounts(USER_B).getRawCreds(a.id)).toBeNull();
 
     await expect(snapshotsOf(USER_B).listByAccount(a.id)).rejects.toThrow();
+    await expect(snapshotsOf(USER_B).listTotalsByAccount(a.id)).rejects.toThrow();
     await expect(
       snapshotsOf(USER_B).write(a.id, { takenAt: 2, totalUsd: 2, balances: [] }),
     ).rejects.toThrow();
