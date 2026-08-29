@@ -2,8 +2,8 @@ import { Oracle } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
+import { toOption } from "@/lib/core/token-model";
 import { edgeCached, SEARCH_CACHE_TTL_S } from "./edge-cache";
-import { toOption } from "./model";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
 

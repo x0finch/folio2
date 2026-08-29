@@ -1,9 +1,10 @@
 import { queryOptions } from "@tanstack/react-query";
+import { type OverviewView, overviewFromSnapshotData } from "@/lib/core/portfolio";
 import {
   getHomeTabStrip,
   getPortfolioGain24h,
   getPortfolioHistory,
-  getPortfolioOverview,
+  getPortfolioSnapshotData,
 } from "@/lib/server/portfolio";
 import { listPortfolios } from "@/lib/server/portfolios";
 import { awaitFirstCompute, pendingPollDelay, RETRY, STALE_TIME, shouldRetry } from "./constants";
@@ -15,8 +16,13 @@ import { type PinScopeKey, portfolioKeys } from "./keys";
 // 「改了东西画面要跟着动」的路径失灵。收益是页间来回切与 hover 预热不再重复打服务器 ——
 // 首页 ⇄ 账户页 ⇄ 洞察页共用同一份总览,以前每次导航都真拉一遍。
 
-/** 一份组合总览的形状(按代币聚合的持仓 + 分段 + 小计)。消费方拆解 sections 时用得上。 */
-export type PortfolioOverview = Awaited<ReturnType<typeof getPortfolioOverview>>;
+/**
+ * 一份组合总览的形状(按代币聚合的持仓 + 分段 + 小计)。消费方拆解 sections 时用得上。
+ *
+ * **它是 `select` 的产物**(FOL-48):接口发的是快照原料,总额 / 持仓 / 各小计 / pricesStale
+ * 由 `overviewFromSnapshotData` 在浏览器里算出来 —— 所以类型就是 `buildOverview` 的出参。
+ */
+export type PortfolioOverview = OverviewView;
 
 export const portfolioListQuery = () =>
   queryOptions({
@@ -47,19 +53,19 @@ export const homeTabStripQuery = (portfolioId: string) =>
 
 // 一份总览 = 一个组合口径(+ 可选的自定义 Tab 收窄)。默认视图与非默认视图、Tab 视图走的是
 // **同一个工厂**,只是参数不同 —— 这正是「一句前缀刷新盖住三种视图」的前提。
+//
+// **一份原料一个 queryKey,`select` 现算**(FOL-48):接口发的是当前快照原料,总额 / 持仓 /
+// 各小计 / pricesStale 由 `overviewFromSnapshotData` 在浏览器里算 —— 单币当前价值也从**同一份
+// select 结果**里取一行,不单独请求(FOL-44 定的共用)。`select` 只在原料变化时重跑,SSR 与
+// 补水两遍算的是同一份原料 → 结果一致,不会 hydration mismatch。
+//
+// 不再有 `pending` 短轮询 / `awaitFirstCompute`:总览不走预计算读侧了,读到的就是当下真数据。
 export const portfolioOverviewQuery = (portfolioId: string, pin?: PinScopeKey) =>
   queryOptions({
     queryKey: portfolioKeys.overview(portfolioId, pin),
-    queryFn: ({ signal }) =>
-      awaitFirstCompute(
-        () => getPortfolioOverview({ data: { portfolioId, pin } }),
-        // 「一个账户都没有」= 屏幕上没有任何东西可画,总额那个 0 也就没有依据。
-        (view) => view.accountTotals.length === 0,
-        signal,
-      ),
+    queryFn: () => getPortfolioSnapshotData({ data: { portfolioId, pin } }),
+    select: overviewFromSnapshotData,
     staleTime: STALE_TIME.live,
-    // 见 `portfolioGain24hQuery` 那段:`pending` 期间短轮询,算好了整条就停。
-    refetchInterval: pendingPollDelay,
   });
 
 export const portfolioHistoryQuery = (portfolioId: string) =>

@@ -10,11 +10,11 @@ import {
   overviewEligibleBalances,
   overviewEnrichIds,
 } from "@/lib/core/portfolio";
+import { refreshableTokenIds } from "@/lib/core/token-model";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import type { AppError } from "@/lib/server/errors";
 import { NAMER } from "@/lib/server/oracle";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
-import { refreshableTokenIds } from "@/lib/server/tokens/model";
 import { dbFor, globalDb } from "./db-effect";
 import {
   addManualActivities,

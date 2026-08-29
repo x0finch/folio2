@@ -1,19 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleUpdateAccount } from "@/lib/server/accounts/update";
+import { overviewFromSnapshotData } from "@/lib/core/portfolio";
 import { handleGetManualAccount } from "@/lib/server/manual-tokens/get-account";
-import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
-import { overviewKey, PRECOMPUTE_TTL_MS } from "@/lib/server/portfolio/precompute";
 import { buildScopedOverview, PortfolioScopeInput } from "@/lib/server/portfolio/scope";
+import { handleGetPortfolioSnapshotData } from "@/lib/server/portfolio/snapshot-data";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call, precompute, readOverview, until } from "../_kit/run";
+import { call, readOverview } from "../_kit/run";
 import { seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
 // 合并进 portfolio/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
 // 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
+//
+// **FOL-48:总览改成「接口发快照原料 + 浏览器算」。** 读接口 `getPortfolioSnapshotData` 只取行 +
+// 备料,不聚合;总额 / 持仓 / 各小计 / pricesStale 由 `overviewFromSnapshotData`(= 前端 `select`
+// 那一行)在客户端算。`readOverview` 走的就是这条真链路。
 describe("portfolio/overview", () => {
-  // #527 · getPortfolioOverview
   const USER = "h-pf-overview";
   const BTC = "token-btc";
   const ETH = "token-eth";
@@ -31,10 +33,7 @@ describe("portfolio/overview", () => {
     vi.useRealTimers();
   });
 
-  const read = (data: Parameters<typeof handleGetPortfolioOverview>[1] = {}) =>
-    call(USER, handleGetPortfolioOverview(USER, data));
-
-  describe("getPortfolioOverview", () => {
+  describe("总览(快照原料 + 客户端算)", () => {
     it("三个账户各有仓 → 同一个币合并成一行,金额是各账户之和", async () => {
       for (const [label, value] of [
         ["甲", 100],
@@ -68,8 +67,6 @@ describe("portfolio/overview", () => {
     it("手记账户与链上账户持有同一个币 → 合并成一行,来源两条", async () => {
       // **合并的键是 tokenId,不是 symbol。** 所以这个场景必须让两边指向同一行代币 ——
       // 先建手记账户(它经 mint 建出真代币行),读出那个 id,再拿它去种链上那张快照。
-      // 第一版我图省事用了一个自造的 tokenId 字符串,两边自然合不到一起 —— 那是夹具的错,
-      // 不是产品的错,而这个区别正是这条用例要保护的:哪天合并改回按 symbol,这条会红。
       const manual = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 50,
@@ -104,11 +101,10 @@ describe("portfolio/overview", () => {
       await seedSnapshot(USER, btcAcc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       const cexAcc = await seedAccount(USER, "交易所", "binance");
       await seedSnapshot(USER, cexAcc.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 900 }]);
-      // **这个 pin 得真的钉着**:预计算的维度 = 默认视图 + 每个说得通的 pin(FOL-36),
-      // 没钉过的收窄不落键,读到的就是空态 —— 而界面上点得到的 Tab 恰恰只有钉着的那些。
-      await db(USER).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
 
-      const view = await readOverview(USER, { pin: { kind: "connector", connectorId: "bitcoin" } });
+      const view = await readOverview(USER, {
+        pin: { kind: "connector", connectorId: "bitcoin" },
+      });
 
       expect(view.totalUsd).toBe(100);
     });
@@ -144,16 +140,50 @@ describe("portfolio/overview", () => {
       expect(view.accountTotals).toHaveLength(1);
       expect(view.accountTotals[0].takenAt).toBeNull();
     });
+  });
 
-    // —— FOL-36:总览也改成读预计算(ADR 0049)——
-    //
-    // 下面这一组测的不再是「算得对不对」(上面那些已经在测了,只是路径换成了「预计算 + 读」),
-    // 而是**那道缝**:两条路给的是不是同一份数、读的时候到底有没有在算、没算过会怎样。
+  describe("getPortfolioSnapshotData(原料接口)", () => {
+    it("只发原料:取行 + 备料,不聚合", async () => {
+      const acc = await seedAccount(USER, "甲", "bitcoin");
+      await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
-    // 验收 ② —— 同一份输入,现算那条路与「预计算 + 读」那条路给的是同一组数字。
-    // **时钟冻住再对拍**:两条路各自取一次 `Date.now()`,不冻的话价的新鲜度判定可能落在
-    // 两侧,而那种差别会把「是不是同一份数」这件事淹掉。
-    it("读接口与现算逻辑对拍:同一份输入,两条路一个字都不差", async () => {
+      const raw = await call(USER, handleGetPortfolioSnapshotData({}));
+
+      // 账户 + 原始快照「行」都在,而不是合计。
+      expect(raw.accounts.map((a) => a.label)).toEqual(["甲"]);
+      expect(raw.snapshots).toHaveLength(1);
+      const [[accId, snap]] = raw.snapshots;
+      expect(accId).toBe(acc.id);
+      expect(snap.balances.map((b) => b.tokenId)).toEqual([BTC]);
+      expect(snap.balances[0].usdValue).toBe(100);
+      // 备的是字典 + 口径,没有任何聚合字段(总额 / 持仓 / 小计 都不在原料里)。
+      expect(raw.mode).toBe("self-first");
+      expect(raw).not.toHaveProperty("totalUsd");
+      expect(raw).not.toHaveProperty("holdings");
+      expect(raw).not.toHaveProperty("holdingsSubtotal");
+      expect(raw).not.toHaveProperty("pricesStale");
+    });
+
+    it("按 scope 在原料里就筛好:pin 只发那个上游的账户", async () => {
+      const btcAcc = await seedAccount(USER, "链上", "bitcoin");
+      await seedSnapshot(USER, btcAcc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
+      const cexAcc = await seedAccount(USER, "交易所", "binance");
+      await seedSnapshot(USER, cexAcc.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 900 }]);
+
+      const raw = await call(
+        USER,
+        handleGetPortfolioSnapshotData({ pin: { kind: "connector", connectorId: "bitcoin" } }),
+      );
+
+      expect(raw.accounts.map((a) => a.label)).toEqual(["链上"]);
+      expect(raw.snapshots.map(([id]) => id)).toEqual([btcAcc.id]);
+    });
+
+    // **本片的正确性证明** —— 「新接口原料 + 客户端 `buildOverview`」与旧的服务端现算路径
+    // (`buildScopedOverview(_, false)`)逐值一致。两条路共用同一个 `buildOverview`,这里把
+    // 「同一份输入喂两条路」钉死。时钟冻住:两条路各取一次 `Date.now()`(手记注入 / now),
+    // 不冻的话那点毫秒差会渗进 takenAt,把「是不是同一份数」淹掉。
+    it("对拍:新接口原料 + 客户端算 == 服务端现算,一个字都不差", async () => {
       const chain = await seedAccount(USER, "链上", "bitcoin");
       await seedSnapshot(USER, chain.id, NOW, [
         { tokenId: BTC, amount: 1, usdValue: 100 },
@@ -176,94 +206,25 @@ describe("portfolio/overview", () => {
           meta: { protocol: "aave", protocolName: "Aave" },
         },
       ]);
+      // 手记一并进来,把 fiatRefs / 手记注入那半也拉进对拍。
+      await seedManualAccount(USER, "手记", { symbol: "SOL", unitPrice: 10, amount: 3 });
       vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
 
-      // 现算 = 这条接口在 FOL-36 之前的全部内容。
+      // 服务端现算 = 总览去掉盈亏那一份(`withGain=false`,与本片接口同口径)。
       const inline = await call(USER, buildScopedOverview({}, false));
-      await precompute(USER);
-      const served = await read();
+      // 新路径:接口发原料 → 客户端算(照抄前端 select 那一行)。
+      const client = overviewFromSnapshotData(await call(USER, handleGetPortfolioSnapshotData({})));
 
-      expect(served).toEqual(inline);
+      expect(client).toEqual(inline);
       // 夹具没有绕过被测代码:这一份真的有数,不是两个空对象碰在一起。
-      expect(served.totalUsd).toBe(650); // 现货 150 + 永续权益 300 + DeFi 200
-      expect(served.holdings.map((h) => h.key).sort()).toEqual([BTC, ETH]);
-      expect(served.holdingsSubtotal).toBe(150);
-      expect(served.defiSubtotal).toBe(200);
-      expect(served.sections).toHaveLength(1); // 永续 + DeFi 同一个账户,一段
-      expect(served.sections[0].perp?.equity).toBeTruthy();
-      expect(served.pending).toBeUndefined();
+      expect(client.totalUsd).toBe(680); // 现货 150 + 永续权益 300 + DeFi 200 + 手记 SOL 30
+      expect(client.holdings).toHaveLength(3); // BTC / ETH / 手记 SOL
+      expect(client.holdingsSubtotal).toBe(180); // 100 + 50 + 手记 30
+      expect(client.defiSubtotal).toBe(200);
     });
+  });
 
-    // 验收 ③ 的前半 —— 读接口直出,**不核对、不现算**。
-    // 对抗性夹具:键上摆一个明显不是这份数据算得出来的值,读接口要原样交出来。
-    // 它一旦偷偷现算,这条就会红成真实数字。
-    it("直出键上那份,读请求里没有计算", async () => {
-      const acc = await seedAccount(USER, "甲", "bitcoin");
-      await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
-      const pf = (await db(USER).portfolios.ensureDefault()).id;
-      const planted = {
-        holdings: [],
-        sections: [],
-        accountTotals: [
-          { account: { id: "不存在的账户", label: "凭空" }, totalUsd: -1, takenAt: 7 },
-        ],
-        totalUsd: -424_242,
-        holdingsSubtotal: 0,
-        defiSubtotal: 0,
-        pricesStale: false,
-      };
-      // 落库形状是 `{ computedAt, value }` —— `computedAt` 拿「现在」,于是它晚于水位线、算数。
-      await db(USER).cache.put(
-        overviewKey(pf, null),
-        { computedAt: Date.now(), value: planted },
-        PRECOMPUTE_TTL_MS,
-      );
-
-      expect(await read({ portfolioId: pf })).toEqual(planted);
-    });
-
-    // 验收 ③ 的后半 —— 没算过就回空态,补算走后台;读请求本体不等它。
-    it("没算过 → 空态形状 + 后台补算(补完的数与现算一致)", async () => {
-      const acc = await seedAccount(USER, "甲", "bitcoin");
-      await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
-
-      const cold = await read();
-
-      // 空态 = 全新用户那一支的形状,一个字段都不少。
-      expect(cold).toEqual({
-        holdings: [],
-        sections: [],
-        accountTotals: [],
-        totalUsd: 0,
-        holdingsSubtotal: 0,
-        defiSubtotal: 0,
-        pricesStale: false,
-        pending: true,
-      });
-
-      const settled = await until(read, (o) => o.pending == null);
-      expect(settled.totalUsd).toBe(100);
-    });
-
-    it("输入变了 → 当场不算数(旧值照端 + `pending`),补算之后换成新的", async () => {
-      const acc = await seedAccount(USER, "甲", "bitcoin");
-      await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
-      await precompute(USER);
-      expect((await read()).totalUsd).toBe(100);
-
-      // **改动之后那个数必须和改动之前不一样** —— 否则「补算跑了没有」这件事没有任何证据:
-      // 一加一删的话前后都是 100,补算压根没跑这条用例照样绿。
-      // 夹具直接塞一个新账户(不经写 handler,所以水位线没动),再用一次真的写把水位线抬起来。
-      const other = await seedAccount(USER, "乙", "binance");
-      await seedSnapshot(USER, other.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 900 }]);
-      await call(USER, handleUpdateAccount({ accountId: acc.id, label: "甲(改过名)" }));
-
-      const stale = await read();
-      expect(stale.pending).toBe(true);
-      expect(stale.totalUsd).toBe(100); // 旧值照端 —— 界面不会空一下
-      expect((await until(read, (o) => o.pending == null)).totalUsd).toBe(1000);
-    });
-
+  describe("入参 schema", () => {
     it("入参缺省 → schema 给出默认值,loader 不带参也能调", () => {
       expect(PortfolioScopeInput.parse(undefined)).toEqual({});
     });

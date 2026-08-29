@@ -1,9 +1,10 @@
 import { Cause, Effect, Exit, Layer, Option } from "effect";
+import { overviewFromSnapshotData } from "@/lib/core/portfolio";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import type { AppError } from "@/lib/server/errors";
-import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
 import { precomputePortfolio } from "@/lib/server/portfolio/precompute";
 import type { PortfolioScope } from "@/lib/server/portfolio/scope";
+import { handleGetPortfolioSnapshotData } from "@/lib/server/portfolio/snapshot-data";
 import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
 import { db } from "./db";
@@ -85,11 +86,15 @@ export const precompute = async (userId: string, portfolioId?: string): Promise<
   return pf;
 };
 
-/** 先预计算、再读总览 —— 改完数据之后想看「屏幕上是什么」就用它。 */
-export const readOverview = async (userId: string, data: PortfolioScope = {}) => {
-  await precompute(userId, data.portfolioId);
-  return call(userId, handleGetPortfolioOverview(userId, data));
-};
+/**
+ * 读总览 —— 改完数据之后想看「屏幕上是什么」就用它。
+ *
+ * **走的是首页那条真链路**(FOL-48):接口发快照原料,`overviewFromSnapshotData` 在客户端算成
+ * 总览。照抄前端 `select` 那一行(不复刻业务逻辑),所以总额 / 持仓 / 小计 / pricesStale
+ * 与屏幕上完全同源。总览不再读预计算,故不必先 `precompute`。
+ */
+export const readOverview = async (userId: string, data: PortfolioScope = {}) =>
+  overviewFromSnapshotData(await call(userId, handleGetPortfolioSnapshotData(data)));
 
 /** 同上,tab 条那条。 */
 export const readTabStrip = async (userId: string, data: { portfolioId?: string } = {}) => {

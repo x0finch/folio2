@@ -11,7 +11,7 @@ import { handleRefreshTokenPrices, RefreshTokenPricesInput } from "./refresh-pri
 //
 // **点中不建行。** 读端点都只是读:发目录、搜长尾、取价。代币行是提交表单时由 mint 建的 —— 用户在
 // 下拉里划过十个币不该在库里留十行垃圾。因此这里给出去的不是内部 id(那时还没有),
-// 而是一张**票**:base64url 编过的 tokenRef,前端原样搬运(红线见 tokens/model.ts 的 `TokenOption`)。
+// 而是一张**票**:base64url 编过的 tokenRef,前端原样搬运(红线见 core/token-model.ts 的 `TokenOption`)。
 
 export const listTokenCatalogue = createServerFn({ method: "GET" })
   .middleware([requireAuth])

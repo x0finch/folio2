@@ -22,6 +22,7 @@ import {
   type SnapshotTotalRow,
 } from "@/lib/core/history";
 import { platformLogoUrl, tokenLogoUrl } from "@/lib/core/logo";
+import { refreshableTokenIds } from "@/lib/core/token-model";
 
 // 首页 / 组合的**纯计算层**(FOL-45)。跟 `history.ts` 同目录、同风格:无 Effect、无 Oracle、
 // 无 cloudflare env —— 喂原料(账户 / 快照 / 富化字典 / 价格字典 / 平台元数据字典)→ 出视图形状。
@@ -847,6 +848,51 @@ export function buildOverview(
     defiSubtotal,
     pricesStale,
   };
+}
+
+//  —— 快照原料 → 总览(浏览器里算,FOL-48)——
+
+// 服务端发的一份「当前快照原料」(方案 C:名字 / logo / 库里当前价都内联发下来)。Map 走 entries
+// 过线,客户端在 `select` 里重建 Map 再调 `buildOverview` —— 首页总额 / 持仓 / 各小计 / pricesStale
+// 全部在浏览器里算,读接口只取行 + 备料,不做聚合。
+export interface PortfolioSnapshotData {
+  accounts: AccountSafe[];
+  // byAccount 的 entries(accountId → 最新快照 + 明细,含 manual 注入)。
+  snapshots: [string, SnapshotWithBalances][];
+  // 富化字典 entries(token_id → 整行:名字 / logo / 价格 / change24h)。
+  enriched: [string, TokenRecord][];
+  // 平台(链)展示元数据 entries(场馆键不在内 —— 那些走 connectorMeta)。
+  platformMeta: [string, PlatformMeta][];
+  // 场馆键(connectorId)→ 连接器自带 name + logo 的 entries(链键不在内 → 走 platformMeta)。
+  connectorMeta: [string, { name: string; logo?: string }][];
+  // 法币身份 ref 的 entries(token_id → `fiat/issued:<CODE>`)。
+  fiatRefs: [string, string][];
+  // 估值口径(self-first / source-first)。
+  mode: ValuationMode;
+}
+
+// 客户端把原料算成总览:重建 Map → 纯算 liveTotals / refreshableIds → `buildOverview`。
+// **不传 gainHistory**:总览不带盈亏(#488 票 5),所以这一份与服务端 `buildScopedOverview(_, false)`
+// 逐值一致 —— 两条路共用同一个 `buildOverview`,「两份本该相等的数字」结构上不可能走散。
+export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewView {
+  const byAccount = new Map(raw.snapshots);
+  const enriched = new Map(raw.enriched);
+  const platformMeta = new Map(raw.platformMeta);
+  const connectorMeta = new Map(raw.connectorMeta);
+  const fiatRefs = new Map(raw.fiatRefs);
+  const liveTotals = deriveLiveAccountTotals(raw.accounts, byAccount, enriched, raw.mode);
+  const refreshableIds = new Set(
+    refreshableTokenIds(overviewEligibleBalances(raw.accounts, byAccount)),
+  );
+  return buildOverview(raw.accounts, byAccount, {
+    enriched,
+    liveTotals,
+    platformMeta,
+    refreshableIds,
+    connectorMeta: (key) => connectorMeta.get(key) ?? null,
+    mode: raw.mode,
+    fiatRefs,
+  });
 }
 
 //  —— 账户明细的 24h 盈亏摊分(纯计算部分)

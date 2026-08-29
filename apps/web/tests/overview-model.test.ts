@@ -13,7 +13,7 @@ import {
   overviewEligibleBalances,
   overviewEnrichIds,
 } from "@/lib/core/portfolio";
-import { refreshableTokenIds } from "@/lib/server/tokens/model";
+import { refreshableTokenIds } from "@/lib/core/token-model";
 import { type OracleStub, runWithOracle } from "./oracle-stub";
 
 // 纯 buildOverview 可脱离 server fn 测(依赖注入)—— 这是 #3 抽读模型的收益。

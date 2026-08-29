@@ -1,5 +1,6 @@
-import { Database } from "@folio/db";
+import { type AccountSafe, Database, type SnapshotWithBalances } from "@folio/db";
 import { Oracle } from "@folio/oracle";
+import type { PlatformMeta, TokenRecord, ValuationMode } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { z } from "zod";
 import {
@@ -19,13 +20,13 @@ import {
   overviewEligibleBalances,
   overviewEnrichIds,
 } from "@/lib/core/portfolio";
+import { refreshableTokenIds } from "@/lib/core/token-model";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import {
   injectManualSnapshots,
   loadManualGainHistory,
   manualFiatRefs,
 } from "@/lib/server/manual/store";
-import { refreshableTokenIds } from "@/lib/server/tokens/model";
 
 // 选中 Portfolio 入参:客户端选择器传的临时选中 id(可空 → 用默认)。缺省 {} 让 loader 不带参调用时退回默认视图。
 // 仅按选中 Portfolio scope(曲线 / 列表默认口径);不带 pin。
@@ -97,10 +98,24 @@ export const scopedMembership = (
     };
   });
 
-// 总览装配:账户集 + 当下快照 + 手记注入 + 可选的 24h 盈亏原料。
-// `withGain` 是票 5 的切法 —— 总览不再读窗口历史;盈亏读取走同一条装配、把历史带上,
-// 于是「各行相加 = hero 那个数」仍是同一个 `computeGain24h` 喂出来的,不是两处各算。
-export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
+// 一份「当前快照原料」—— 账户集 + 当下快照(含手记注入)+ buildOverview 要的三份字典 + 口径。
+// **只取行 + 按 scope 筛 + 备料,不聚合**。总览计算(`buildScopedOverview`)与快照原料读接口
+// (`snapshot-data.ts` 的 `handleGetPortfolioSnapshotData`)共用这一份 —— 于是「服务端算」与
+// 「浏览器算」喂进 `buildOverview` 的是同一批原料,两条路逐值一致是结构上成立的。
+export interface ScopedMaterials {
+  accounts: AccountSafe[];
+  byAccount: Map<string, SnapshotWithBalances>;
+  enriched: ReadonlyMap<string, TokenRecord>;
+  platformMeta: ReadonlyMap<string, PlatformMeta>;
+  fiatRefs: Map<string, string>;
+  mode: ValuationMode;
+  // 「当下」那一刻。手记注入 / 盈亏窗口都用它,一份装配里恒是同一个值。
+  now: number;
+  // 解析后的当前组合 id(补算 / 预计算写键要它)。
+  selectedId: string;
+}
+
+export const scopedSnapshotMaterials = (data: PortfolioScope) =>
   Effect.gen(function* () {
     const {
       accounts: accountStore,
@@ -128,11 +143,51 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
       pin,
       tagLinks,
     );
-    const byAccount = new Map(snapshots.map((s) => [s.snapshot.accountId, s]));
-    yield* injectManualSnapshots(accounts, byAccount);
+    // **只留在 scope 内的账户的快照**(ADR 0047:作用域在服务端定)。`buildOverview` 本就只按
+    // `accounts` 取,不筛也算得对;但快照原料要发给浏览器,别把别的组合 / 被 pin 排除的账户的
+    // 明细一起下发。
+    const inScope = new Set(accounts.map((a) => a.id));
+    const byAccount = new Map(
+      snapshots
+        .filter((s) => inScope.has(s.snapshot.accountId))
+        .map((s) => [s.snapshot.accountId, s]),
+    );
+    // 手记退出快照(ADR 0018)→ 其合成余额按 `now` 注入(显式传,让本次装配的时刻一致 / 可对拍)。
+    yield* injectManualSnapshots(accounts, byAccount, now);
     const fiatRefs = yield* manualFiatRefs(accounts);
+    // 薄适配层(FOL-45):在 Effect 里备好 buildOverview 要的两份字典。富化一次覆盖聚合行 ∪ defi 行
+    // (`overviewEnrichIds`);链键去掉连接器自带展示的场馆键(`overviewChainIds`)。
+    const { tokens, platforms } = yield* Oracle;
+    const [enriched, platformMeta] = yield* Effect.all(
+      [
+        tokens.enrich(overviewEnrichIds(accounts, byAccount)),
+        platforms.resolve(overviewChainIds(accounts, byAccount, connectorPlatformMeta)),
+      ],
+      { concurrency: 2 },
+    );
+    return {
+      accounts,
+      byAccount,
+      enriched,
+      platformMeta,
+      fiatRefs,
+      mode: settings.valuationMode,
+      now,
+      selectedId,
+    } satisfies ScopedMaterials;
+  });
+
+// 总览装配:共用原料 + 手记注入 + 可选的 24h 盈亏原料 → `buildOverview`。
+// `withGain` 是票 5 的切法 —— 总览不再读窗口历史;盈亏读取走同一条装配、把历史带上,
+// 于是「各行相加 = hero 那个数」仍是同一个 `computeGain24h` 喂出来的,不是两处各算。
+export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
+  Effect.gen(function* () {
+    const { accounts, byAccount, enriched, platformMeta, fiatRefs, mode, now } =
+      yield* scopedSnapshotMaterials(data);
+
     let gainHistory: readonly GainHistoryRow[] | undefined;
     if (withGain) {
+      const snapshotStore = (yield* Database).snapshots;
       const inScope = new Set(accounts.map((a) => a.id));
       const [snapGain, manualGain] = yield* Effect.all(
         [
@@ -143,22 +198,8 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
       );
       gainHistory = [...snapGain.filter((r) => inScope.has(r.accountId)), ...manualGain];
     }
-    // 薄适配层(FOL-45):在 Effect 里备好 buildOverview 要的三份字典 + 刷价集合,再当纯函数调。
-    // 富化一次覆盖聚合行 ∪ defi 行(`overviewEnrichIds`);每账户现推净值复用同一份富化字典。
-    const { tokens, platforms } = yield* Oracle;
-    const [enriched, platformMeta] = yield* Effect.all(
-      [
-        tokens.enrich(overviewEnrichIds(accounts, byAccount)),
-        platforms.resolve(overviewChainIds(accounts, byAccount, connectorPlatformMeta)),
-      ],
-      { concurrency: 2 },
-    );
-    const liveTotals = deriveLiveAccountTotals(
-      accounts,
-      byAccount,
-      enriched,
-      settings.valuationMode,
-    );
+    // 每账户现推净值复用同一份富化字典;刷价集合喂 pricesStale 判脏。
+    const liveTotals = deriveLiveAccountTotals(accounts, byAccount, enriched, mode);
     const refreshableIds = new Set(
       refreshableTokenIds(overviewEligibleBalances(accounts, byAccount)),
     );
@@ -168,7 +209,7 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
       platformMeta,
       refreshableIds,
       connectorMeta: connectorPlatformMeta,
-      mode: settings.valuationMode,
+      mode,
       fiatRefs,
       gainHistory,
       now,
