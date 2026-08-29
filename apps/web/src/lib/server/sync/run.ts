@@ -5,7 +5,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import { isManual } from "@/lib/core/manual";
 import { logCategory } from "@/lib/server/effect-log";
-import { invalidateGain24h } from "@/lib/server/portfolio/gain";
+import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
 import { syncServicesLayer, warmTokens } from "./deps";
 
 const syncLog = getLogger(["folio", "web", "sync"]);
@@ -68,7 +68,7 @@ export const handleSyncAccount = Effect.fn("syncAccount")(function* (
     // **抬在预热之后**,与一轮同步收官同一条理由:24h 盈亏的当下点吃的是刚热好的价。
     // 少了这一句,侧栏「单独同步」会把屏幕上的市值改掉,而它旁边那个 24h 数字仍然以
     // 「新鲜」的身份端着同步前的值 —— 没有 `pending`、没人补算,最长 90 分钟。
-    yield* invalidateGain24h();
+    yield* invalidatePrecomputed();
   }
   return result;
 });

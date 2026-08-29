@@ -3,7 +3,7 @@ import { Database, type SnapshotBalanceInput } from "@folio/db";
 import { Effect } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { categorizeFields } from "@/lib/server/creds";
-import { invalidateGain24h } from "@/lib/server/portfolio/gain";
+import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
 import { createImporter, type ImportCounts, type ImportDeps, parseImportLine } from "./import";
 
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。
@@ -75,7 +75,7 @@ export const importData = Effect.fn("importData")(function* (
     //
     // **三种下场都抬**(所以挂在两个 catch 之后):导入是流式逐行写的,拒收 / 炸在半路时
     // 库里已经有一半新数据了 —— 那时更需要让那个数作废。
-    Effect.tap(() => invalidateGain24h()),
+    Effect.tap(() => invalidatePrecomputed()),
   );
 });
 

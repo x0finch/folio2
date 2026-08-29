@@ -9,6 +9,7 @@ import {
   pinsInView,
   type TabPinScope,
 } from "@/lib/core/accounts-in-view";
+import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
 
 // pin 目标形状家在 core/accounts-in-view 的 `TabPinScope`(tag 归属校验在 db 层)。
 // schema 住这儿,update-target 跨借做 extend;与 TabPinScope 的一致性由 .handler() 处的赋值检查看着。
@@ -73,10 +74,14 @@ export const handleCreateTabPin = Effect.fn("createTabPin")(function* (
 ) {
   const db = yield* Database;
   yield* assertPinCap(data);
-  return yield* db.tabPins.create({
+  const pin = yield* db.tabPins.create({
     kind: data.kind,
     connectorId: data.connectorId as ConnectorId | undefined,
     tagId: data.tagId,
     accountId: data.accountId,
   });
+  // tab 条是预计算出来的,而这一步正是它的内容 —— 不抬水位线,新钉的 Tab 最长 90 分钟不出现。
+  // **抬整个用户那条**:connector pin 是个镜头、不归属组合,它会同时出现在好几个组合的条上。
+  yield* invalidatePrecomputed();
+  return pin;
 });

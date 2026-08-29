@@ -1,11 +1,10 @@
 import { InvalidInput, NotFound } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleUpdateAccount } from "@/lib/server/accounts/update";
-import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
 import { handleCreateTabPin, PinTargetInput } from "@/lib/server/tab-pins/create";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call, callExit, failureOf } from "../_kit/run";
+import { call, callExit, failureOf, readTabStrip } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
 // 合并进 tab-pins/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
@@ -38,7 +37,7 @@ describe("tab-pins/create", () => {
 
       await call(USER, handleCreateTabPin({ kind: "tag", tagId: tag.id }));
 
-      const strip = await call(USER, handleGetHomeTabStrip({}));
+      const strip = await readTabStrip(USER, {});
       expect(strip.pins[0].name).toBe("长期");
       expect(strip.pins[0].name).not.toBe(tag.id);
     });
@@ -50,7 +49,7 @@ describe("tab-pins/create", () => {
       const exit = await callExit(USER, handleCreateTabPin({ kind: "tag", tagId: theirs.tag.id }));
 
       expect(failureOf(exit)).toBeInstanceOf(NotFound);
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toEqual([]);
+      expect((await readTabStrip(USER, {})).pins).toEqual([]);
     });
 
     it("kind=tag 但没带 tagId → InvalidInput,不是 defect", async () => {
@@ -80,7 +79,7 @@ describe("tab-pins/create", () => {
       );
 
       expect(failureOf(exit)).toBeInstanceOf(InvalidInput);
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
+      expect((await readTabStrip(USER, {})).pins).toHaveLength(3);
     });
 
     it("A 组合钉满,B 组合照样能建(名额按组合各算)", async () => {
@@ -103,10 +102,8 @@ describe("tab-pins/create", () => {
       await call(USER, handleCreateTabPin({ kind: "connector", connectorId: "bitcoin" }));
 
       // Watch 里只看得见刚建的那一个;默认组合那三个仍是三个。
-      expect(
-        (await call(USER, handleGetHomeTabStrip({ portfolioId: watch.id }))).pins,
-      ).toHaveLength(1);
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
+      expect((await readTabStrip(USER, { portfolioId: watch.id })).pins).toHaveLength(1);
+      expect((await readTabStrip(USER, {})).pins).toHaveLength(3);
     });
 
     it("目标属于别的组合也绕不过上限(名额跟着 pin 实际出现的组合走)", async () => {
@@ -127,7 +124,7 @@ describe("tab-pins/create", () => {
       );
 
       expect(failureOf(exit)).toBeInstanceOf(InvalidInput);
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
+      expect((await readTabStrip(USER, {})).pins).toHaveLength(3);
     });
 
     it("tag pin 与 connector pin 同一套名额(满 3 个之后建 tag pin 也被拒)", async () => {
@@ -161,7 +158,7 @@ describe("tab-pins/create", () => {
       // 解归档:账户回来,pin 不回来 —— tab 条还是 3 个,不会顶到 4。
       await call(USER, handleUpdateAccount({ accountId: account.id, archived: false }));
 
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toHaveLength(3);
+      expect((await readTabStrip(USER, {})).pins).toHaveLength(3);
     });
 
     it("kind 不在枚举里 → schema 拒", () => {

@@ -37,18 +37,28 @@ export const STALE_TIME = {
 export const POLL_INTERVAL = {
   syncRound: 1_500,
   /**
-   * 24h 盈亏还在后台算(响应带 `pending`)时,第一次隔多久再问 —— 之后按 `gainPollDelay` 翻倍。
+   * 预计算的结果还在后台重算(响应带 `pending`)时,第一次隔多久再问 —— 之后按
+   * `precomputePollDelay` 翻倍。总览、tab 条、两级 24h 盈亏都走这一条。
    *
-   * 这份数不在读请求里算(ADR 0049:免费档 10ms CPU),而是同步收官时预计算、缺了由
+   * 这些数不在读请求里算(ADR 0049:免费档 10ms CPU),而是同步收官时预计算、缺了由
    * `waitUntil` 补 —— 补算是几百毫秒的事,可 `STALE_TIME.live` 是 30 秒:不问的话,数据
    * 早就在库里了,屏幕上还空着大半分钟。**只在 `pending` 时开**,算好了就一发都不再打。
    * 比同步轮那条略快:补算比一轮同步短得多,而这一条盯的就是「它落地没有」。
    */
-  gain: 1_000,
+  precompute: 1_000,
 } as const;
 
-/** `pending` 轮询最多问这么多次就收手(见 `gainPollDelay`)。 */
-const GAIN_POLL_ATTEMPTS = 8;
+/** `pending` 轮询最多问这么多次就收手(见 `precomputePollDelay`)。 */
+const PRECOMPUTE_POLL_ATTEMPTS = 8;
+
+/**
+ * 「还一次都没算过」的那一下,取数那层最多把交卷推迟几次(见 `awaitFirstCompute`)。
+ *
+ * 四次按 `precomputePollDelay` 退避 = 1+2+4+8 秒:补算正常是几百毫秒,第一次等就够了;
+ * 15 秒还没落地只说明它这次落不了,那时候把空态交出去、让轮询在后台接着盯,好过让页面
+ * 无限挂在骨架上。**这个上限不能去掉** —— 一份永远算不出来的数据配上无限等待就是一张死页面。
+ */
+const FIRST_COMPUTE_WAITS = 4;
 
 /**
  * 第 n 次收到 `pending` 之后,隔多久再问一次 —— **有退避,而且会放弃**。
@@ -62,10 +72,55 @@ const GAIN_POLL_ATTEMPTS = 8;
  * 几百毫秒就落地,第一发就拿到了;走到第八发只说明它不会好了,那时继续问没有意义。
  * 放弃之后界面停在手头那份(旧值或空态)—— 服务端已经记了 warning,那才是该看的地方。
  */
-export function gainPollDelay(pollCount: number): number | false {
-  if (pollCount >= GAIN_POLL_ATTEMPTS) return false;
-  return Math.min(POLL_INTERVAL.gain * 2 ** pollCount, 15_000);
+export function precomputePollDelay(pollCount: number): number | false {
+  if (pollCount >= PRECOMPUTE_POLL_ATTEMPTS) return false;
+  return Math.min(POLL_INTERVAL.precompute * 2 ** pollCount, 15_000);
 }
+
+/**
+ * **手上连旧值都没有的那一下,先在取数里等一等再交卷**(FOL-36)。
+ *
+ * 总览与 tab 条也改成读预计算之后,「还没算过」的响应是一份**空的**总览 / 空的 tab 条 +
+ * `pending`。而空总览与「这个组合真的一分钱都没有」在屏幕上长得一模一样:总额 0、持仓一条
+ * 没有、tab 条那句「还没有账户,去添加一个」。**把「还不知道」画成一个具体的数字,比慢一点
+ * 糟得多** —— 24h 盈亏没有这个问题(它的空态是 `—`,本来就念作「不知道」),总览有。
+ *
+ * 所以这一下不交白卷:后台补算是几百毫秒的事,等它。等待期间组件停在**它自己的骨架**上
+ * (这几条读取都在 `QueryBoundary` 里挂起),不必给七个消费点各写一遍「没就绪长什么样」。
+ *
+ * **有旧值就立刻交卷**(`isEmpty` 为假):那是 ADR 0049 收下的代价 —— 数字可能是几分钟前的,
+ * 但它是真的,`refetchInterval` 那条会把新的换上来。
+ *
+ * **等有上限**,而且退避:补算真算不出来的时候(键永远填不上),不能把页面永远挂在骨架上。
+ * 用完次数就照常交出空态,`pending` 的短轮询继续在后台盯着,落地了自己就换上。
+ *
+ * **必须接 `signal`**:react-query 在查询被取消(切组合、离开页面)时 abort 它 —— 不接的话
+ * 每次取消都留下一条循环在后台继续打服务器,与 `constants.ts` 里 `withRetry` 那条同一个教训。
+ */
+export const awaitFirstCompute = async <A extends { pending?: true }>(
+  fetch: () => Promise<A>,
+  isEmpty: (a: A) => boolean,
+  signal: AbortSignal,
+): Promise<A> => {
+  let out = await fetch();
+  for (let n = 0; n < FIRST_COMPUTE_WAITS && out.pending && isEmpty(out); n++) {
+    const wait = precomputePollDelay(n);
+    if (wait === false) break;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, wait);
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(signal.reason);
+        },
+        { once: true },
+      );
+    });
+    out = await fetch();
+  }
+  return out;
+};
 
 /**
  * 失败重试。**必须显式设**:`ensureQueryData` / `prefetchQuery` 走的是 `fetchQuery`,

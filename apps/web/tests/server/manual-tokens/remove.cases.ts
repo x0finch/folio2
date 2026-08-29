@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleGetManualAccount } from "@/lib/server/manual-tokens/get-account";
 import { handleRemoveManualToken, RemoveManualTokenInput } from "@/lib/server/manual-tokens/remove";
-import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
 import { blockOutbound } from "../_kit/outbound";
-import { call, callExit } from "../_kit/run";
+import { call, callExit, readOverview } from "../_kit/run";
 import { seedManualAccount } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -54,7 +53,7 @@ describe("manual-tokens/remove", () => {
         handleRemoveManualToken({ accountId: acc.id, tokenId: before.tokens[0].id }),
       );
 
-      const overview = await call(USER, handleGetPortfolioOverview({}));
+      const overview = await readOverview(USER, {});
       expect(overview.holdings).toEqual([]);
     });
 

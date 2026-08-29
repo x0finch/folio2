@@ -1,8 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  computeHomeTabStrip,
+  PRECOMPUTE_TTL_MS,
+  tabStripKey,
+} from "@/lib/server/portfolio/precompute";
 import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
+import { handleCreateTabPin } from "@/lib/server/tab-pins/create";
+import { handleRenameTag } from "@/lib/server/tags/rename";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call } from "../_kit/run";
+import { call, precompute, readTabStrip, until } from "../_kit/run";
 import { seedAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -21,6 +28,13 @@ describe("portfolio/tabs", () => {
     NOW = Date.now();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const read = (data: { portfolioId?: string } = {}) =>
+    call(USER, handleGetHomeTabStrip(USER, data));
+
   describe("getHomeTabStrip", () => {
     it("两个 pin → tab 条里出现这两个,标签是解析好的人话", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
@@ -30,7 +44,7 @@ describe("portfolio/tabs", () => {
       await db(USER).tabPins.create({ kind: "tag", tagId: tag.id });
       await db(USER).tabPins.create({ kind: "account", accountId: acc.id });
 
-      const strip = await call(USER, handleGetHomeTabStrip({}));
+      const strip = await readTabStrip(USER, {});
 
       expect(strip.pins.map((p) => p.name).sort()).toEqual(["我的钱包", "长期"]);
     });
@@ -49,11 +63,10 @@ describe("portfolio/tabs", () => {
       await db(USER).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
 
       expect(
-        (await call(USER, handleGetHomeTabStrip({ portfolioId: def.id }))).pins.map((p) => p.kind)
-          .length,
+        (await readTabStrip(USER, { portfolioId: def.id })).pins.map((p) => p.kind).length,
       ).toBe(3);
       // Watch 里这三个一个都不该出现 —— 点进去只会是空视图。
-      expect((await call(USER, handleGetHomeTabStrip({ portfolioId: watch.id }))).pins).toEqual([]);
+      expect((await readTabStrip(USER, { portfolioId: watch.id })).pins).toEqual([]);
     });
 
     it("connector pin 在**有这个 connector 的每个组合**里都摆(它是个镜头,不归属组合)", async () => {
@@ -66,14 +79,14 @@ describe("portfolio/tabs", () => {
       await db(USER).tabPins.create({ kind: "connector", connectorId: "binance" });
 
       for (const pf of [def.id, watch.id]) {
-        expect((await call(USER, handleGetHomeTabStrip({ portfolioId: pf }))).pins).toHaveLength(1);
+        expect((await readTabStrip(USER, { portfolioId: pf })).pins).toHaveLength(1);
       }
     });
 
     it("没有任何 pin → pins 是空的", async () => {
       await seedAccount(USER, "甲", "bitcoin");
 
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toEqual([]);
+      expect((await readTabStrip(USER, {})).pins).toEqual([]);
     });
 
     it("有 perp 仓 → hasPerps 为真;有 DeFi 仓 → hasDefi 为真", async () => {
@@ -98,14 +111,14 @@ describe("portfolio/tabs", () => {
         },
       ]);
 
-      const strip = await call(USER, handleGetHomeTabStrip({}));
+      const strip = await readTabStrip(USER, {});
 
       expect(strip.hasPerps).toBe(true);
       expect(strip.hasDefi).toBe(true);
     });
 
     it("全新用户(零账户零 pin)→ hasAccounts 为假,不报错", async () => {
-      const strip = await call(USER, handleGetHomeTabStrip({}));
+      const strip = await readTabStrip(USER, {});
 
       expect(strip.hasAccounts).toBe(false);
       expect(strip.hasPerps).toBe(false);
@@ -128,7 +141,7 @@ describe("portfolio/tabs", () => {
         },
       ]);
 
-      const strip = await call(USER, handleGetHomeTabStrip({ portfolioId: other.id }));
+      const strip = await readTabStrip(USER, { portfolioId: other.id });
 
       expect(strip.hasAccounts).toBe(false);
       expect(strip.hasPerps).toBe(false);
@@ -137,7 +150,103 @@ describe("portfolio/tabs", () => {
     it("别人的 pin 不出现在我的 tab 条里", async () => {
       await db(otherUser(USER)).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
 
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toEqual([]);
+      expect((await readTabStrip(USER, {})).pins).toEqual([]);
+    });
+
+    // —— FOL-36:tab 条也改成读预计算(ADR 0049)——
+
+    // 验收 ② —— 同一份输入,现算那条路与「预计算 + 读」那条路给的是同一份条子。
+    it("读接口与现算逻辑对拍:同一份输入,两条路一个字都不差", async () => {
+      const pf = await db(USER).portfolios.ensureDefault();
+      const acc = await seedAccount(USER, "我的钱包", "hyperliquid");
+      await db(USER).portfolios.assignAccount(acc.id, pf.id);
+      await seedSnapshot(USER, acc.id, NOW, [
+        {
+          tokenId: "token-perp",
+          amount: 1,
+          usdValue: 100,
+          kind: "perp_equity",
+          meta: { withdrawable: 60, totalMarginUsed: 40, totalNtlPos: 400 },
+        },
+      ]);
+      const tag = await db(USER).tags.create({ portfolioId: pf.id, name: "长期" });
+      await db(USER).tabPins.create({ kind: "tag", tagId: tag.id });
+      vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+
+      const inline = await call(USER, computeHomeTabStrip({}));
+      await precompute(USER);
+      const served = await read();
+
+      expect(served).toEqual(inline);
+      // 夹具没有绕过被测代码:这一份真的有内容,不是两个空条子碰在一起。
+      expect(served.hasAccounts).toBe(true);
+      expect(served.hasPerps).toBe(true);
+      expect(served.pins.map((p) => p.name)).toEqual(["长期"]);
+      expect(served.pending).toBeUndefined();
+    });
+
+    // 验收 ③ 的前半 —— 直出键上那份,读请求里没有计算。
+    it("直出键上那份,读请求里没有计算", async () => {
+      await seedAccount(USER, "甲", "bitcoin");
+      const pf = (await db(USER).portfolios.ensureDefault()).id;
+      const planted = {
+        hasAccounts: true,
+        hasPerps: true,
+        hasDefi: true,
+        pins: [{ id: "凭空", kind: "tag" as const, tagId: "不存在的标签", name: "不可能" }],
+      };
+      await db(USER).cache.put(
+        tabStripKey(pf, null),
+        { computedAt: Date.now(), value: planted },
+        PRECOMPUTE_TTL_MS,
+      );
+
+      expect(await read({ portfolioId: pf })).toEqual(planted);
+    });
+
+    it("没算过 → 空态形状 + 后台补算", async () => {
+      await seedAccount(USER, "甲", "bitcoin");
+
+      expect(await read()).toEqual({
+        hasAccounts: false,
+        hasPerps: false,
+        hasDefi: false,
+        pins: [],
+        pending: true,
+      });
+
+      expect((await until(read, (o) => o.pending == null)).hasAccounts).toBe(true);
+    });
+
+    // 失效点:标签名就摆在 tab 条上,而条子是算好存下来的 —— 改名不抬水位线就一直是旧名字。
+    it("标签改名 → 当场不算数,补算之后条上换成新名字", async () => {
+      const pf = await db(USER).portfolios.ensureDefault();
+      const acc = await seedAccount(USER, "甲", "bitcoin");
+      const tag = await db(USER).tags.create({ portfolioId: pf.id, name: "旧名字" });
+      await db(USER).tags.attach(acc.id, tag.id);
+      await db(USER).tabPins.create({ kind: "tag", tagId: tag.id });
+      await precompute(USER);
+      expect((await read()).pins[0].name).toBe("旧名字");
+
+      await call(USER, handleRenameTag({ tagId: tag.id, name: "新名字" }));
+
+      expect((await read()).pending).toBe(true);
+      expect((await until(read, (o) => o.pending == null)).pins[0].name).toBe("新名字");
+    });
+
+    // 失效点:钉一个 Tab 改的就是这份数据本身(以及多出来的那一维)。
+    it("钉一个 Tab → 当场不算数,补算之后条上多一格", async () => {
+      const pf = await db(USER).portfolios.ensureDefault();
+      const acc = await seedAccount(USER, "甲", "bitcoin");
+      await db(USER).portfolios.assignAccount(acc.id, pf.id);
+      await precompute(USER);
+      expect((await read()).pins).toEqual([]);
+
+      await db(USER).tabPins.create({ kind: "account", accountId: acc.id });
+      await call(USER, handleCreateTabPin({ kind: "connector", connectorId: "bitcoin" }));
+
+      expect((await read()).pending).toBe(true);
+      expect((await until(read, (o) => o.pending == null)).pins).toHaveLength(2);
     });
   });
 });

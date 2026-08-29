@@ -1,7 +1,7 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
-import { invalidateGain24h } from "@/lib/server/portfolio/gain";
+import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
 
 // 把账户移到某 Portfolio:传 portfolioId 移到既有,或传 newName 一步「新建命名 Portfolio + 归属」
 // (抽屉「移到 → 新建…」)。至少给其一(refine 把关)。返回归属到的 portfolioId(客户端据此可切换选中)。
@@ -25,6 +25,6 @@ export const handleMoveAccountToPortfolio = Effect.fn("moveAccountToPortfolio")(
       data.portfolioId!;
   yield* store.assignAccount(data.accountId, targetId);
   // 组合的值变了 → 预计算的 24h 盈亏不再可信,就地标旧(ADR 0049;为什么标旧不是删,见那边)。
-  yield* invalidateGain24h();
+  yield* invalidatePrecomputed();
   return { portfolioId: targetId };
 });

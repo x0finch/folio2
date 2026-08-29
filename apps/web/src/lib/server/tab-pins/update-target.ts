@@ -3,6 +3,7 @@ import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
 import type { TabPinScope } from "@/lib/core/accounts-in-view";
+import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
 import { assertPinCap, PinTargetInput } from "./create";
 
 export const UpdateTabPinInput = PinTargetInput.extend({ pinId: z.string().min(1) });
@@ -20,5 +21,7 @@ export const handleUpdateTabPinTarget = Effect.fn("updateTabPinTarget")(function
     tagId: data.tagId,
     accountId: data.accountId,
   });
+  // 同 create:tab 条上那一格的名字与它收窄出来的那一维一起换了人。
+  yield* invalidatePrecomputed();
   return { ok: true as const };
 });

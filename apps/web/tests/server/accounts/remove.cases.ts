@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleRemoveAccount, RemoveAccountInput } from "@/lib/server/accounts/remove";
-import { handleGetPortfolioOverview } from "@/lib/server/portfolio/overview";
-import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
 import { handleListAccountTags } from "@/lib/server/tags/account-tags";
 import { handleListTags } from "@/lib/server/tags/list";
 import { countRows, db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call } from "../_kit/run";
+import { call, readOverview, readTabStrip } from "../_kit/run";
 import { seedAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -43,7 +41,7 @@ describe("accounts/remove", () => {
 
       await call(USER, handleRemoveAccount({ accountId: acc.id }));
 
-      expect((await call(USER, handleGetHomeTabStrip({}))).pins).toEqual([]);
+      expect((await readTabStrip(USER, {})).pins).toEqual([]);
     });
 
     it("删掉某 Portfolio 的唯一成员 → Portfolio 还在,只是空了", async () => {
@@ -64,7 +62,7 @@ describe("accounts/remove", () => {
 
       await call(USER, handleRemoveAccount({ accountId: gone.id }));
 
-      expect((await call(USER, handleGetPortfolioOverview({}))).totalUsd).toBe(100);
+      expect((await readOverview(USER, {})).totalUsd).toBe(100);
     });
 
     it("删一个不存在的 id → 静默幂等(与其他删除同一规则)", async () => {
