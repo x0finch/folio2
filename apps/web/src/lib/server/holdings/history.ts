@@ -2,7 +2,7 @@ import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
 import { isFungible, viewKind } from "@/lib/core/balance-kind";
-import { buildTokenValueHistory, type TokenHistRow } from "./token-history";
+import { buildTokenValueHistory, type TokenHistRow } from "@/lib/core/portfolio";
 
 export const HoldingHistoryInput = z.object({
   key: z.string().min(1),

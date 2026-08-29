@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { OverviewView } from "./overview-model";
+import type { OverviewView } from "@/lib/core/portfolio";
 import { overviewKey, type Pending, servePrecomputed } from "./precompute";
 import type { PortfolioScope } from "./scope";
 

@@ -1,10 +1,8 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import type { TokenRecord } from "@folio/oracle-basic";
-import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { OverviewBalance } from "@/lib/core/account-view";
-import { deriveLiveAccountTotals, liveValue } from "@/lib/server/portfolio/live-value";
-import { runWithOracle } from "./oracle-stub";
+import { deriveLiveAccountTotals, liveValue } from "@/lib/core/portfolio";
 
 const bal = (over: Partial<OverviewBalance>): OverviewBalance => {
   const symbol = over.symbol ?? "BTC";
@@ -14,7 +12,7 @@ const bal = (over: Partial<OverviewBalance>): OverviewBalance => {
     amount: 0,
     usdValue: 0,
     kind: "spot",
-    // 认定在写快照时定死(#201);测试里 id 用 `tk-<SYMBOL>`,好让假 tokens 按它供价。
+    // 认定在写快照时定死(#201);测试里 id 用 `tk-<SYMBOL>`,好让富化字典按它供价。
     tokenId: `tk-${symbol}`,
     metaJson: null,
     ...over,
@@ -61,30 +59,28 @@ describe("liveValue", () => {
 });
 
 describe("deriveLiveAccountTotals", () => {
-  // 假 tokens:BTC 现价 65000、USDC 1;其余无价(undefined)。按 symbol 供源价(cache-only)。
-  // 按 token_id 供价(#201):测试里 id 直接用 `tk-<SYMBOL>`。
+  // 富化字典:BTC 现价 65000、USDC 1;其余无价(undefined)。按 token_id 供价(#201,cache-only)。
+  // 现在是纯函数 —— 字典由调用方备好后传入,不再走 Effect / Oracle 桩。
   const priceById: Record<string, number> = { "tk-BTC": 65000, "tk-USDC": 1 };
-  const enrichStub = (ids: readonly string[]) =>
-    Effect.succeed(
-      new Map(
-        ids.map((id) => [
+  const enrichedOf = (ids: readonly string[]): Map<string, TokenRecord> =>
+    new Map(
+      ids.map((id) => [
+        id,
+        {
           id,
-          {
-            id,
-            ref: "coingecko/issued:x",
-            symbol: id.replace("tk-", ""),
-            name: id,
-            infoStale: false,
-            price:
-              priceById[id] === undefined
-                ? undefined
-                : { unitPrice: priceById[id], asOf: 0, stale: false },
-          } as TokenRecord,
-        ]),
-      ),
+          ref: "coingecko/issued:x",
+          symbol: id.replace("tk-", ""),
+          name: id,
+          infoStale: false,
+          price:
+            priceById[id] === undefined
+              ? undefined
+              : { unitPrice: priceById[id], asOf: 0, stale: false },
+        } as TokenRecord,
+      ]),
     );
 
-  it("self-first:enrich-not-reprice ≡ 冻结,盯市取实时源价", async () => {
+  it("self-first:enrich-not-reprice ≡ 冻结,盯市取实时源价", () => {
     const accounts = [account("cex"), account("wallet")];
     const byAccount = new Map<string, SnapshotWithBalances>([
       // CEX:自带价权威(selfPrice=60000)→ 现推 = 冻结 120000。
@@ -95,9 +91,11 @@ describe("deriveLiveAccountTotals", () => {
         snap("wallet", [bal({ symbol: "BTC", amount: 0.5, usdValue: 30000, selfPrice: null })]),
       ],
     ]);
-    const totals = await runWithOracle(
-      { tokens: { enrich: enrichStub } },
-      deriveLiveAccountTotals(accounts, byAccount, "self-first"),
+    const totals = deriveLiveAccountTotals(
+      accounts,
+      byAccount,
+      enrichedOf(["tk-BTC", "tk-USDC"]),
+      "self-first",
     );
     expect(totals.get("cex")).toBe(120000);
     expect(totals.get("wallet")).toBe(32500);
@@ -105,20 +103,20 @@ describe("deriveLiveAccountTotals", () => {
     expect(grand).toBe(152500);
   });
 
-  it("非同质行(balanceToAssetRef→null)不取源价 → self-first 用自带价 ≡ 冻结", async () => {
+  it("非同质行(fungibleId→null)不取源价 → self-first 用自带价 ≡ 冻结", () => {
     const accounts = [account("defi")];
     const byAccount = new Map<string, SnapshotWithBalances>([
-      // defi_position:enrich 返 undefined(源价无);selfPrice=10 → 5×10=50 ≡ 冻结。
+      // defi 行:fungibleId 返回 null(不取源价);selfPrice=10 → 5×10=50 ≡ 冻结。
       [
         "defi",
-        snap("defi", [
-          bal({ symbol: "LP", kind: "defi_position", amount: 5, usdValue: 50, selfPrice: 10 }),
-        ]),
+        snap("defi", [bal({ symbol: "LP", kind: "defi", amount: 5, usdValue: 50, selfPrice: 10 })]),
       ],
     ]);
-    const totals = await runWithOracle(
-      { tokens: { enrich: enrichStub } },
-      deriveLiveAccountTotals(accounts, byAccount, "self-first"),
+    const totals = deriveLiveAccountTotals(
+      accounts,
+      byAccount,
+      enrichedOf(["tk-BTC", "tk-USDC"]),
+      "self-first",
     );
     expect(totals.get("defi")).toBe(50);
   });
