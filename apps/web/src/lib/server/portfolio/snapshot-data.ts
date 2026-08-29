@@ -1,6 +1,6 @@
 import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
 import { Effect } from "effect";
-import type { PortfolioSnapshotData } from "@/lib/core/portfolio";
+import { type PortfolioSnapshotData, toSnapshotView } from "@/lib/core/portfolio";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import { type PortfolioScope, type ScopedMaterials, scopedSnapshotMaterials } from "./scope";
 
@@ -9,7 +9,8 @@ import { type PortfolioScope, type ScopedMaterials, scopedSnapshotMaterials } fr
 // 预计算总览(`servePrecomputed(overviewKey)`);那条读路径退场,换成这条。
 //
 // **只取行 + 按 scope 在 SQL 里筛 + 备料,不做聚合**(生产实测目标 <10ms CPU):账户集、当下快照、
-// 富化字典(名字 / logo / 库里当前价,方案 C)、平台元数据、法币身份、估值口径。`liveTotals` /
+// 富化字典(名字 / 库里当前价 / 有没有图,logo URL 不下发 —— 见 `TokenView`)、平台元数据、法币
+// 身份、估值口径。`liveTotals` /
 // `refreshableIds` 是纯函数能从 enriched + 快照算出来的,交给客户端算(见 `overviewFromSnapshotData`)。
 //
 // 用的是 `buildScopedOverview` 那条装配(`scopedSnapshotMaterials`),**去掉聚合那步** —— 它只备料。
@@ -39,7 +40,7 @@ const connectorMetaEntries = (
 
 const toSnapshotData = (m: ScopedMaterials): PortfolioSnapshotData => ({
   accounts: m.accounts,
-  snapshots: [...m.byAccount],
+  snapshots: [...m.byAccount].map(([id, s]) => [id, toSnapshotView(s)] as const),
   enriched: [...m.enriched],
   platformMeta: [...m.platformMeta],
   connectorMeta: connectorMetaEntries(m.accounts, m.byAccount),

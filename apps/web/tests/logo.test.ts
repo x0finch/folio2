@@ -1,36 +1,53 @@
 import { describe, expect, it } from "vitest";
-import { platformLogoUrl, tokenLogoUrl } from "@/lib/core/logo";
+import { platformLogoUrl, tokenLogoUrl, toLogoSource } from "@/lib/core/logo";
 
 describe("tokenLogoUrl", () => {
-  it("有内部 id + canonical logo → 代理 URL(客户端不引用第三方 CDN)", () => {
-    expect(tokenLogoUrl({ id: "uuid-1", logo: "https://cgk/usdc.png" })).toBe(
-      "/api/logo/token/uuid-1",
-    );
-  });
-
-  it("有内部 id + 仅 providerLogo(孤儿)→ 也代理(不再泄露给 provider CDN)", () => {
-    expect(tokenLogoUrl({ id: "uuid-2", providerLogo: "https://zerion/x.png" })).toBe(
-      "/api/logo/token/uuid-2",
-    );
+  it("有内部 id + 有图 → 代理 URL(客户端不引用第三方 CDN;URL 由 id 派生,不进 payload)", () => {
+    expect(tokenLogoUrl({ id: "uuid-1", hasLogo: true })).toBe("/api/logo/token/uuid-1");
   });
 
   it("内部 id 特殊字符被编码", () => {
-    expect(tokenLogoUrl({ id: "a/b c", logo: "https://cgk/x.png" })).toBe(
-      "/api/logo/token/a%2Fb%20c",
-    );
+    expect(tokenLogoUrl({ id: "a/b c", hasLogo: true })).toBe("/api/logo/token/a%2Fb%20c");
   });
 
-  it("无内部 id(如 live search 结果)但有 logo → 原样返回上游 URL(降级)", () => {
-    expect(tokenLogoUrl({ logo: "https://cgk/x.png" })).toBe("https://cgk/x.png");
-    expect(tokenLogoUrl({ providerLogo: "https://p/f.png" })).toBe("https://p/f.png");
+  it("有内部 id 但无图 → undefined(不代理空图)", () => {
+    expect(tokenLogoUrl({ id: "uuid-3", hasLogo: false })).toBeUndefined();
   });
 
-  it("有内部 id 但无任何 logo → undefined(不代理空图)", () => {
-    expect(tokenLogoUrl({ id: "uuid-3" })).toBeUndefined();
+  it("有图但无内部 id → undefined(URL 不再进 payload,无 id 无从派生)", () => {
+    expect(tokenLogoUrl({ hasLogo: true })).toBeUndefined();
   });
 
-  it("完全无 logo → undefined(客户端首字母,不发请求)", () => {
+  it("完全无图 → undefined(客户端首字母,不发请求)", () => {
     expect(tokenLogoUrl({})).toBeUndefined();
+  });
+});
+
+describe("toLogoSource(上游 URL → 有没有图)", () => {
+  it("有 canonical / provider http 图 → hasLogo true", () => {
+    expect(toLogoSource({ id: "x", logo: "https://cgk/usdc.png" })).toEqual({
+      id: "x",
+      hasLogo: true,
+    });
+    expect(toLogoSource({ id: "x", providerLogo: "https://zerion/x.png" })).toEqual({
+      id: "x",
+      hasLogo: true,
+    });
+  });
+
+  it("data: 内嵌图也算「有图」→ hasLogo true(由 id 经代理拿,不再进 payload)", () => {
+    expect(toLogoSource({ id: "x", providerLogo: "data:image/png;base64,AA" })).toEqual({
+      id: "x",
+      hasLogo: true,
+    });
+    expect(toLogoSource({ id: "x", logo: "data:image/svg+xml;base64,AA" })).toEqual({
+      id: "x",
+      hasLogo: true,
+    });
+  });
+
+  it("一张图都没有 → hasLogo false", () => {
+    expect(toLogoSource({ id: "x" })).toEqual({ id: "x", hasLogo: false });
   });
 });
 

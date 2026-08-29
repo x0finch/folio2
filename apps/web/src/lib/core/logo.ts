@@ -2,26 +2,29 @@
 // 读模型在产 `logo` 时用它把上游 URL 改写成 folio 自己的 `/api/logo/...`,使客户端零引用任何
 // 第三方图片 CDN(隐私:不向 CGK / provider CDN 泄露持仓)。见 ADR 0008。
 
-// enrich / TokenInfo 结果的最小形状(见 @folio/oracle EnrichedAsset / TokenInfo)。
+// 代理所需的最小形状(FOL-48):**不带上游 URL** —— 有内部 id 就能拼 `/api/logo/token/{id}`,
+// 上游 URL 是纯冗余(实测让富化字典白白膨胀几 KB)。只留「有没有图」的布尔。**内嵌 data: 图也走
+// 代理**(FOL-48:`/api/logo` 端点已能解码 data-URI 返回,见 `logos/serve.ts`)—— 于是 logo 100%
+// 由 token id 派生,payload 不带任何 URL。
 interface LogoSource {
   id?: string; // 内部代币行 id(在 store 才有;logo 代理的稳定 key)
-  logo?: string; // canonical(CGK)
-  providerLogo?: string; // provider 备用(孤儿主图 / CGK 缺图兜底)
+  hasLogo?: boolean; // 上游有任一图(http 或 data: 内嵌)—— 都能由 id 经代理拿
 }
 
-// 有内部 id 且有任一 logo → 代理为 `/api/logo/token/<id>`(source 无关:CGK canonical 与孤儿
-// providerLogo 都走代理,客户端零第三方 CDN 引用)。
-// 无内部 id(如 live search 结果不在 store)→ 原样返回上游 URL(降级,可能引用第三方 CDN);
-// 都没有 → undefined(客户端 AvatarFallback 首字母,不发请求)。
+// 有内部 id + 有图 → 代理为 `/api/logo/token/<id>`(客户端零第三方 CDN 引用;http 与 data: 内嵌图都
+// 由代理端点返回);都没有 → undefined(客户端 AvatarFallback 首字母,不发请求)。
 export function tokenLogoUrl(e: LogoSource): string | undefined {
-  // 内嵌静态图(data-URI,如 OKX 未细分赚币合成行的品牌标)直挂:无隐私顾虑,且 /api/logo 代理只
-  // fetch http 栅格图、拿 data: 会失败(同 platformLogoUrl 的既有处理)。
-  if (e.providerLogo?.startsWith("data:")) return e.providerLogo;
-  if (e.logo?.startsWith("data:")) return e.logo;
-  if (e.id && (e.logo || e.providerLogo)) {
-    return `/api/logo/token/${encodeURIComponent(e.id)}`;
-  }
-  return e.logo ?? e.providerLogo;
+  if (e.id && e.hasLogo) return `/api/logo/token/${encodeURIComponent(e.id)}`;
+  return undefined;
+}
+
+// 从上游 logo 字段(canonical / provider,可能是 http URL 或 data: 内嵌图)派生代理所需的最小信息:
+// 有没有图。富化下发到浏览器 / 喂 buildOverview 前一律经此收窄,把上游 URL 挡在 payload 之外。
+export function toLogoSource(e: { id?: string; logo?: string; providerLogo?: string }): {
+  id?: string;
+  hasLogo: boolean;
+} {
+  return { id: e.id, hasLogo: !!(e.logo || e.providerLogo) };
 }
 
 // DeFi 协议 logo:协议名(可能含空格,如 "Opyn V2")即稳定 key。有上游图 → 代理为

@@ -1,6 +1,6 @@
 import { type AccountSafe, Database, type SnapshotWithBalances } from "@folio/db";
 import { Oracle } from "@folio/oracle";
-import type { PlatformMeta, TokenRecord, ValuationMode } from "@folio/oracle-basic";
+import type { PlatformMeta, ValuationMode } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { z } from "zod";
 import {
@@ -19,6 +19,8 @@ import {
   overviewChainIds,
   overviewEligibleBalances,
   overviewEnrichIds,
+  type TokenView,
+  toTokenView,
 } from "@/lib/core/portfolio";
 import { refreshableTokenIds } from "@/lib/core/token-model";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
@@ -105,7 +107,7 @@ export const scopedMembership = (
 export interface ScopedMaterials {
   accounts: AccountSafe[];
   byAccount: Map<string, SnapshotWithBalances>;
-  enriched: ReadonlyMap<string, TokenRecord>;
+  enriched: ReadonlyMap<string, TokenView>;
   platformMeta: ReadonlyMap<string, PlatformMeta>;
   fiatRefs: Map<string, string>;
   mode: ValuationMode;
@@ -158,13 +160,16 @@ export const scopedSnapshotMaterials = (data: PortfolioScope) =>
     // 薄适配层(FOL-45):在 Effect 里备好 buildOverview 要的两份字典。富化一次覆盖聚合行 ∪ defi 行
     // (`overviewEnrichIds`);链键去掉连接器自带展示的场馆键(`overviewChainIds`)。
     const { tokens, platforms } = yield* Oracle;
-    const [enriched, platformMeta] = yield* Effect.all(
+    const [enrichedRecords, platformMeta] = yield* Effect.all(
       [
         tokens.enrich(overviewEnrichIds(accounts, byAccount)),
         platforms.resolve(overviewChainIds(accounts, byAccount, connectorPlatformMeta)),
       ],
       { concurrency: 2 },
     );
+    // 上游 URL 挡在这里:参考层读出的完整行 → 瘦身 `TokenView`(logo 只留「有没有图」布尔)。
+    // 现算路径与下发浏览器的原料共用它,两条路喂 buildOverview 的富化逐值一致。
+    const enriched = new Map([...enrichedRecords].map(([id, r]) => [id, toTokenView(r)] as const));
     return {
       accounts,
       byAccount,

@@ -12,6 +12,7 @@ import {
   overviewChainIds,
   overviewEligibleBalances,
   overviewEnrichIds,
+  toTokenView,
 } from "@/lib/core/portfolio";
 import { refreshableTokenIds } from "@/lib/core/token-model";
 import { type OracleStub, runWithOracle } from "./oracle-stub";
@@ -33,7 +34,9 @@ const overviewEffect = (
 ) =>
   Effect.gen(function* () {
     const { tokens, platforms } = yield* Oracle;
-    const enriched = yield* tokens.enrich(overviewEnrichIds(accounts, byAccount));
+    // 与生产 `scopedSnapshotMaterials` 同款:参考层读出的完整行经 `toTokenView` 收窄再喂 buildOverview。
+    const enrichedRecords = yield* tokens.enrich(overviewEnrichIds(accounts, byAccount));
+    const enriched = new Map([...enrichedRecords].map(([id, r]) => [id, toTokenView(r)] as const));
     const platformMeta = yield* platforms.resolve(
       overviewChainIds(accounts, byAccount, deps.connectorMeta),
     );
