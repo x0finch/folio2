@@ -211,6 +211,33 @@ export const makeSnapshotStore = Effect.gen(function* () {
         );
       }),
 
+    /**
+     * 单账户曲线的数据源:该账户快照的 (takenAt, totalUsd),按 takenAt 升序,`since` 裁窗口。
+     *
+     * **与 `listByAccount` 分开是有理由的**:那个是 `select()` 全列(含 `note` / `meta_json`
+     * 这些整块 JSON)、也没有窗口,给的是「一张完整的快照」;曲线只要两个数,而这份要出门
+     * (读接口把点原样发给浏览器算,FOL-38)。窗口是 WHERE,不是计算 —— 发多少行由它定死,
+     * 免得一个同步了一年的账户把整段历史都塞进一次响应。
+     */
+    listTotalsByAccount: (
+      accountId: string,
+      since?: number,
+    ): Effect.Effect<{ takenAt: number; totalUsd: number }[], NotFound> =>
+      Effect.gen(function* () {
+        yield* assertAccountOwned(client, userId, accountId);
+        return yield* client.query((db) =>
+          db
+            .select({ takenAt: snapshots.takenAt, totalUsd: snapshots.totalUsd })
+            .from(snapshots)
+            .where(
+              since == null
+                ? eq(snapshots.accountId, accountId)
+                : and(eq(snapshots.accountId, accountId), gte(snapshots.takenAt, since)),
+            )
+            .orderBy(asc(snapshots.takenAt)),
+        );
+      }),
+
     /** 历史曲线数据源:全部快照的 (accountId, takenAt, totalUsd),按 takenAt 升序。 */
     // 只取这三列、不取 balances(比 `latest` 轻);组合净值时间序列在纯函数里
     // 阶梯式重建(见 apps/web buildPortfolioHistory)。

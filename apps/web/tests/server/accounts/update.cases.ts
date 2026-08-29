@@ -102,7 +102,7 @@ describe("accounts/update", () => {
 
       // 曲线在浏览器里装(FOL-38);「不再补实时点」在原料里就看得见:`live` 是 null。
       expect(raw.live).toBeNull();
-      const series = buildAccountValueHistory(raw.rows, undefined, raw.live);
+      const series = buildAccountValueHistory(raw.rows, raw.live);
       expect(series.length).toBeGreaterThan(0);
       expect(series.at(-1)?.t).toBeLessThanOrEqual(archivedAt ?? 0);
     });

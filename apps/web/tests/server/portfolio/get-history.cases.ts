@@ -41,11 +41,11 @@ describe("portfolio/get-history", () => {
     vi.useRealTimers();
   });
 
-  /** 页面那两行:曲线接口给原料,总览那个总额当末点。 */
+  /** 页面那两行:曲线接口给原料,总览按账户那张表凑出末点。 */
   const curve = async (data: { portfolioId?: string } = {}) => {
     const raw = await call(USER, handleGetPortfolioHistory(data));
     const overview = await call(USER, handleGetPortfolioOverview(data));
-    return toPortfolioCurve(raw, overview.totalUsd);
+    return toPortfolioCurve(raw, overview);
   };
 
   describe("getPortfolioHistory", () => {
@@ -132,7 +132,7 @@ describe("portfolio/get-history", () => {
 
       const raw = await call(USER, handleGetPortfolioHistory({}));
 
-      expect(Object.keys(raw).sort()).toEqual(["archivedAt", "rows"]);
+      expect(Object.keys(raw).sort()).toEqual(["archivedAt", "liveAccountIds", "rows"]);
       // 同一时刻的两个账户各占一行(曲线会把它们并成一个点)—— 这就是「没聚合」。
       expect(raw.rows).toHaveLength(2);
       expect(raw.rows.map((r) => r.accountId).sort()).toEqual([a.id, b.id].sort());

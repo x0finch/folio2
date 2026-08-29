@@ -29,10 +29,10 @@ describe("accounts/history", () => {
     NOW = Date.now();
   });
 
-  /** 抽屉里那两行:接口给原料,浏览器裁窗口 + 降采样。 */
-  const curve = async (input: { accountId: string; connectorId?: string }, since?: number) => {
+  /** 抽屉里那两行:接口给窗口内的原料点,浏览器阶梯重建 + 降采样。 */
+  const curve = async (input: { accountId: string; since?: number; connectorId?: string }) => {
     const raw = await call(USER, handleGetAccountHistory(input));
-    return buildAccountValueHistory(raw.rows, since, raw.live);
+    return buildAccountValueHistory(raw.rows, raw.live);
   };
 
   describe("getAccountHistory", () => {
@@ -65,7 +65,7 @@ describe("accounts/history", () => {
 
       // 「当下」那一笔正是「还在动」的那一笔(ADR 0039)—— 封存之后接口连它都不发。
       expect(raw.live).toBeNull();
-      const series = buildAccountValueHistory(raw.rows, undefined, raw.live);
+      const series = buildAccountValueHistory(raw.rows, raw.live);
       expect(series.at(-1)?.t).toBeLessThanOrEqual(archivedAt);
     });
 
@@ -93,21 +93,54 @@ describe("accounts/history", () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
-      expect(await curve({ accountId: acc.id }, NOW + 30 * DAY)).toEqual([]);
+      expect(await curve({ accountId: acc.id, since: NOW + 30 * DAY })).toEqual([]);
     });
 
-    // FOL-38 验收 ① —— 响应里只有原料点。换时间窗因此不再回服务器:同一份原料裁两次。
-    it("接口只发原料点,一份原料喂得动任何一个时间窗", async () => {
+    // FOL-38 验收 ① —— 响应里只有原料点,**而且只有窗口里那些**。
+    //
+    // 后半条是这条接口的上界:发的是原样的点、不再降采样,所以「出门多少行」只能由窗口定死。
+    // 把 `since` 当成前端的事(接口发全历史、浏览器自己裁)就等于没有上界 —— 一个同步了一年的
+    // 账户会把整段历史塞进一次响应。
+    it("接口只发窗口内的原料点,窗口外的一行都不出门", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(40 * DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 120 }]);
 
-      const raw = await call(USER, handleGetAccountHistory({ accountId: acc.id }));
+      const all = await call(USER, handleGetAccountHistory({ accountId: acc.id }));
+      const month = await call(
+        USER,
+        handleGetAccountHistory({ accountId: acc.id, since: NOW - 30 * DAY }),
+      );
 
-      expect(Object.keys(raw).sort()).toEqual(["live", "rows"]);
-      expect(raw.rows).toHaveLength(2); // 两次同步两行,没有被降采样合并
-      expect(buildAccountValueHistory(raw.rows, undefined, raw.live)).toHaveLength(2); // 全部
-      expect(buildAccountValueHistory(raw.rows, NOW - 30 * DAY, raw.live)).toHaveLength(1); // 30 天
+      expect(Object.keys(all).sort()).toEqual(["live", "rows"]);
+      expect(all.rows).toHaveLength(2); // 两次同步两行,没有被降采样合并
+      expect(month.rows).toHaveLength(1); // 40 天前那行**没有出门**
+      expect(month.rows[0]?.totalUsd).toBe(120);
+    });
+
+    // 手记账户的日网格必须整条现算(要从首笔活动折下来),窗口管的是**出门的那一段**。
+    it("手记账户:网格整条算,但只发窗口内那一段", async () => {
+      const acc = await seedManualAccount(USER, "手记", {
+        symbol: "BTC",
+        unitPrice: 100,
+        amount: 2,
+      });
+
+      const all = await call(
+        USER,
+        handleGetAccountHistory({ accountId: acc.id, connectorId: "manual" }),
+      );
+      const future = await call(
+        USER,
+        handleGetAccountHistory({
+          accountId: acc.id,
+          since: NOW + 30 * DAY,
+          connectorId: "manual",
+        }),
+      );
+
+      expect(all.rows.length).toBeGreaterThan(0);
+      expect(future.rows).toEqual([]);
     });
 
     it("别人的账户 → 拒", async () => {
@@ -121,8 +154,9 @@ describe("accounts/history", () => {
       expect(exit._tag).toBe("Failure");
     });
 
-    it("accountId 空串 → schema 拒", () => {
+    it("accountId 空串 / since 是负数 → schema 拒", () => {
       expect(AccountHistoryInput.safeParse({ accountId: "" }).success).toBe(false);
+      expect(AccountHistoryInput.safeParse({ accountId: "a", since: -1 }).success).toBe(false);
       expect(AccountHistoryInput.safeParse({ accountId: "a" }).success).toBe(true);
     });
   });
