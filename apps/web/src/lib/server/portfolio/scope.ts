@@ -18,7 +18,9 @@ import {
   overviewChainIds,
   overviewEligibleBalances,
   overviewEnrichIds,
+  type PortfolioSnapshotData,
   type TokenView,
+  toSnapshotView,
   toTokenView,
 } from "@/lib/core/portfolio";
 import { refreshableTokenIds } from "@/lib/core/token-model";
@@ -100,9 +102,8 @@ export const scopedMembership = (
   });
 
 // 一份「当前快照原料」—— 账户集 + 当下快照(含手记注入)+ buildOverview 要的三份字典 + 口径。
-// **只取行 + 按 scope 筛 + 备料,不聚合**。总览计算(`buildScopedOverview`)与快照原料读接口
-// (`snapshot-data.ts` 的 `handleGetPortfolioSnapshotData`)共用这一份 —— 于是「服务端算」与
-// 「浏览器算」喂进 `buildOverview` 的是同一批原料,两条路逐值一致是结构上成立的。
+// **只取行 + 按 scope 筛 + 备料,不聚合**。总览计算(`buildScopedOverview`)与浏览器原子 query
+// 合并路径共用这一份 —— 于是「服务端算」与「浏览器算」喂进 `buildOverview` 的是同一批原料。
 export interface ScopedMaterials {
   accounts: AccountSafe[];
   byAccount: Map<string, SnapshotWithBalances>;
@@ -195,6 +196,39 @@ export const scopedSnapshotMaterials = (data: PortfolioScope) =>
       selectedId,
     } satisfies ScopedMaterials;
   });
+
+const connectorMetaEntries = (
+  accounts: AccountSafe[],
+  byAccount: Map<string, SnapshotWithBalances>,
+): [string, { name: string; logo?: string }][] => {
+  const keys = new Set<string>();
+  for (const account of accounts) {
+    keys.add(account.connectorId);
+    for (const b of byAccount.get(account.id)?.balances ?? []) {
+      keys.add(b.platform ?? account.connectorId);
+    }
+  }
+  const out: [string, { name: string; logo?: string }][] = [];
+  for (const key of keys) {
+    const meta = connectorPlatformMeta(key);
+    if (meta)
+      out.push([key, meta.logo ? { name: meta.name, logo: meta.logo } : { name: meta.name }]);
+  }
+  return out;
+};
+
+/** `scopedSnapshotMaterials` → 浏览器 `overviewFromSnapshotData` 吃的原料形状。 */
+export const toPortfolioSnapshotData = (m: ScopedMaterials): PortfolioSnapshotData => ({
+  accounts: m.accounts,
+  snapshots: [...m.byAccount].map(([id, s]) => [id, toSnapshotView(s)] as const),
+  prevSnapshots: [...m.prevByAccount].map(([id, s]) => [id, toSnapshotView(s)] as const),
+  enriched: [...m.enriched],
+  platformMeta: [...m.platformMeta],
+  connectorMeta: connectorMetaEntries(m.accounts, m.byAccount),
+  fiatRefs: [...m.fiatRefs],
+  mode: m.mode,
+  now: m.now,
+});
 
 // 总览装配(服务端现算):共用原料 → `buildOverview`,**与浏览器 `overviewFromSnapshotData` 逐值
 // 一致**(含 24h 盈亏,两端相减)——同一份原料、同一个纯函数。
