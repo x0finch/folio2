@@ -12,6 +12,25 @@ const accounts = forDomain((db) => db.accounts);
 const USER = "user-minmax";
 const DAY = 86_400_000;
 
+function buildPortfolioTimeline(
+  rows: { accountId: string; takenAt: number; totalUsd: number }[],
+): { t: number; total: number }[] {
+  const sorted = [...rows].sort((a, b) => a.takenAt - b.takenAt);
+  const latestByAccount = new Map<string, number>();
+  const points: { t: number; total: number }[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const row = sorted[i];
+    latestByAccount.set(row.accountId, row.totalUsd);
+    const isLastAtThisTime =
+      i + 1 === sorted.length || sorted[i + 1].takenAt !== row.takenAt;
+    if (!isLastAtThisTime) continue;
+    let total = 0;
+    for (const v of latestByAccount.values()) total += v;
+    points.push({ t: row.takenAt, total });
+  }
+  return points;
+}
+
 async function resetUser(userId: string): Promise<void> {
   const db = getDb(env);
   await db.delete(user).where(eq(user.id, userId));
@@ -81,18 +100,23 @@ describe("history min-max (FOL-46)", () => {
     expect(Math.abs(second.length - first.length)).toBeLessThanOrEqual(4);
   }, 30_000);
 
-  it("listTotalsMinMax:按账户各自降采样,只含指定账户", async () => {
-    const a1 = await accounts(USER).create({ connectorId: "manual", label: "A1", creds: "x" });
-    const a2 = await accounts(USER).create({ connectorId: "manual", label: "A2", creds: "x" });
-    const other = await accounts(USER).create({ connectorId: "manual", label: "X", creds: "x" });
-    await seedManySnapshots(a1.id, 100, 3_000_000, DAY, (i) => 10 + i);
-    await seedManySnapshots(a2.id, 100, 3_000_000, DAY, (i) => 20 + i);
-    await seedManySnapshots(other.id, 100, 3_000_000, DAY, () => 999);
+  it("listTotalsMinMax:按组合净值时间线降采样,保留组合级极值", async () => {
+    const a1 = await accounts(USER).create({ connectorId: "binance", label: "A1", creds: "x" });
+    const a2 = await accounts(USER).create({ connectorId: "binance", label: "A2", creds: "x" });
+    const other = await accounts(USER).create({ connectorId: "binance", label: "X", creds: "x" });
+    const start = 3_000_000;
+    // a1 全程 10;a2 前 50 天缺席,第 50 天起 +90 → 组合在 a2 入场时出现尖峰 100。
+    await seedManySnapshots(a1.id, 100, start, DAY, () => 10);
+    await seedManySnapshots(a2.id, 50, start + 50 * DAY, DAY, () => 90);
+    await seedManySnapshots(other.id, 100, start, DAY, () => 999);
 
     const rows = await snapshotsOf(USER).listTotalsMinMax([a1.id, a2.id]);
     expect(rows.every((r) => r.accountId === a1.id || r.accountId === a2.id)).toBe(true);
     expect(rows.length).toBeLessThanOrEqual(HISTORY_MINMAX_BUCKETS * 2 * 2);
     expect(rows.length).toBeGreaterThan(4);
+
+    const portfolioSeries = buildPortfolioTimeline(rows);
+    expect(Math.max(...portfolioSeries.map((p) => p.total))).toBe(100);
   }, 40_000);
 
   it("listTotalsByAccount:短窗仍返回原始点(行为不变)", async () => {

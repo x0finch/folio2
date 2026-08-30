@@ -113,8 +113,8 @@ describe("accounts/history", () => {
       );
 
       expect(Object.keys(all).sort()).toEqual(["live", "rows", "sampled"]);
-      expect(all.sampled).toBe(false);
-      expect(all.rows).toHaveLength(2); // 两次同步两行,没有被降采样合并
+      expect(all.sampled).toBe(true);
+      expect(all.rows).toHaveLength(2); // 仅两点,min-max 路径仍原样返回
       expect(month.rows).toHaveLength(1); // 40 天前那行**没有出门**
       expect(month.rows[0]?.totalUsd).toBe(120);
     });

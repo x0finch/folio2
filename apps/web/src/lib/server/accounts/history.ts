@@ -2,10 +2,21 @@ import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
 import type { AccountHistoryRaw } from "@/lib/core/history";
-import { isLongHistoryRange, minMaxDownsampleHistory } from "@/lib/core/history";
 import type { HistoryRange } from "@/lib/core/history-range";
+import { shouldSampleHistory } from "@/lib/core/history-range";
 import { MANUAL_CONNECTOR_ID } from "@/lib/core/manual";
+import { minMaxDownsampleHistory } from "@/lib/server/history/minmax";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "@/lib/server/manual/store";
+
+function downsampleManualRows(
+  rows: readonly { takenAt: number; totalUsd: number }[],
+  buckets?: number,
+): { takenAt: number; totalUsd: number }[] {
+  return minMaxDownsampleHistory(
+    rows.map((r) => ({ t: r.takenAt, total: r.totalUsd })),
+    buckets,
+  ).map((p) => ({ takenAt: p.t, totalUsd: p.total }));
+}
 
 export const loadAccountHistory = (input: {
   accountId: string;
@@ -15,7 +26,7 @@ export const loadAccountHistory = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Database;
-    const longWindow = input.range != null && isLongHistoryRange(input.range);
+    const longWindow = shouldSampleHistory({ range: input.range, since: input.since });
     if (input.connectorId !== MANUAL_CONNECTOR_ID) {
       const rows = longWindow
         ? yield* db.snapshots.listTotalsByAccountMinMax(input.accountId, input.since)
@@ -29,12 +40,7 @@ export const loadAccountHistory = (input: {
     const clipped = series
       .filter((r) => input.since == null || r.takenAt >= input.since)
       .map((r) => ({ takenAt: r.takenAt, totalUsd: r.totalUsd }));
-    const rows =
-      longWindow && clipped.length > 0
-        ? minMaxDownsampleHistory(clipped.map((r) => ({ t: r.takenAt, total: r.totalUsd }))).map(
-            (p) => ({ takenAt: p.t, totalUsd: p.total }),
-          )
-        : clipped;
+    const rows = longWindow && clipped.length > 0 ? downsampleManualRows(clipped) : clipped;
     const liveTotal =
       archivedAt != null ? null : yield* loadManualAccountLiveTotal(input.accountId);
     return {

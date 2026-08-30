@@ -12,7 +12,7 @@ import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
 import type { SnapshotTotalRow } from "@/lib/core/history";
-import { minMaxDownsampleHistory } from "@/lib/core/history";
+import { minMaxDownsampleHistory } from "@/lib/server/history/minmax";
 import type { CredsToken } from "@/lib/core/manual";
 import {
   buildManualAccountSeries,

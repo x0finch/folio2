@@ -16,3 +16,15 @@ export function rangeSince(range: HistoryRange, nowMs: number): number | undefin
 /** 长窗(1年/全部)走 SQL min-max;短窗(7/30 天)照旧发原始点(FOL-46)。 */
 export const isLongHistoryRange = (range: HistoryRange): boolean =>
   range === "1y" || range === "all";
+
+/** 是否走 min-max 降采样:显式长窗,或省略 range 时窗口跨度 ≥ 1 年 / 不限(since 缺省)。 */
+export function shouldSampleHistory(opts: {
+  range?: HistoryRange;
+  since?: number;
+  nowMs?: number;
+}): boolean {
+  if (opts.range != null) return isLongHistoryRange(opts.range);
+  if (opts.since == null) return true;
+  const now = opts.nowMs ?? Date.now();
+  return now - opts.since >= RANGE_DAYS["1y"] * DAY_MS;
+}
