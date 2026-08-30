@@ -197,11 +197,11 @@ export const scopedSnapshotMaterials = (data: PortfolioScope) =>
   });
 
 // 总览装配(服务端现算):共用原料 → `buildOverview`,**与浏览器 `overviewFromSnapshotData` 逐值
-// 一致**(含 24h 盈亏,两端相减)——同一份原料、同一个纯函数、同一个 `now`。预计算路径写的
-// `overviewKey` 就是这一份(盈亏字段一并带着,但那个键 FOL-51 起无读者,留给 FOL-52 收编)。
+// 一致**(含 24h 盈亏,两端相减)——同一份原料、同一个纯函数。预计算路径写的 `overviewKey` 就是这一份
+//(盈亏字段一并带着,但那个键 FOL-51 起无读者,留给 FOL-52 收编)。
 export const buildScopedOverview = (data: PortfolioScope) =>
   Effect.gen(function* () {
-    const { accounts, byAccount, prevByAccount, enriched, platformMeta, fiatRefs, mode, now } =
+    const { accounts, byAccount, prevByAccount, enriched, platformMeta, fiatRefs, mode } =
       yield* scopedSnapshotMaterials(data);
     // 每账户现推净值复用同一份富化字典;刷价集合喂 pricesStale 判脏。
     const liveTotals = deriveLiveAccountTotals(accounts, byAccount, enriched, mode);
@@ -217,6 +217,5 @@ export const buildScopedOverview = (data: PortfolioScope) =>
       mode,
       fiatRefs,
       prevByAccount,
-      now,
     });
   });

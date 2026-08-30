@@ -37,7 +37,8 @@ describe("portfolio/endpoint-gain", () => {
     expect(btc?.gain24h?.pct).toBeCloseTo(30, 6);
   });
 
-  it("整个组合都不满 24 小时(只有一张当下快照)→ 组合与持仓都 —(null)", async () => {
+  it("整个组合都今天新建(无 24h 前基准)→ 组合与持仓都 —(null),不硬算", async () => {
+    // 最终两档:无基准一律 `—`,新建 / 断线一视同仁(不再区分 new/stale、不再「起点 0 全额算涨」)。
     const acc = await seedAccount(USER, "新号", "bitcoin");
     await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
@@ -46,19 +47,32 @@ describe("portfolio/endpoint-gain", () => {
     expect(view.holdings[0]?.gain24h).toBeNull();
   });
 
-  it("新账户(不满 24h)与老账户混在一起 → 新账户全算进组合(视同充值)", async () => {
+  it("整个组合都断线超 7 天(无 24h 前基准)→ 同样是「无基准」→ 组合与持仓都 —(null)", async () => {
+    const acc = await seedAccount(USER, "断线", "bitcoin");
+    await seedSnapshot(USER, acc.id, NOW - 8 * DAY, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
+
+    const view = await readOverview(USER);
+    expect(view.gain24h).toBeNull();
+    expect(view.holdings[0]?.gain24h).toBeNull();
+  });
+
+  it("新账户(无基准)与老账户(有基准)混在一起 → 只算有基准的,新账户不进盈亏", async () => {
     const old = await seedAccount(USER, "老号", "bitcoin");
     await seedSnapshot(USER, old.id, NOW - DAY, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
     await seedSnapshot(USER, old.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
-    // 今天新建的账户:只有当下快照。
+    // 今天新建的账户:只有当下快照 → 无基准。
     const fresh = await seedAccount(USER, "新号", "binance");
     await seedSnapshot(USER, fresh.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 50 }]);
 
     const view = await readOverview(USER);
-    // 起点 = 老号 100;现值 = 老号 130 + 新号 50 = 180 → +80。新号那 50 整份算成今天赚的。
-    expect(view.gain24h?.amount).toBeCloseTo(80, 6);
-    // ETH 是今天新买的 → 起点 0 → 整份算成今天赚的。
-    expect(view.holdings.find((h) => h.key === ETH)?.gain24h?.amount).toBeCloseTo(50, 6);
+    // 组合盈亏只来自有基准的老号:130 − 100 = +30。新号那 50 不当起点、也不当现值(无基准 → 不进)。
+    expect(view.gain24h?.amount).toBeCloseTo(30, 6);
+    expect(view.gain24h?.pct).toBeCloseTo(30, 6);
+    // BTC 有基准 → +30;ETH 只在无基准的新账户里 → 没有可比起点 → `—`(null)。
+    expect(view.holdings.find((h) => h.key === BTC)?.gain24h?.amount).toBeCloseTo(30, 6);
+    expect(view.holdings.find((h) => h.key === ETH)?.gain24h).toBeNull();
+    // 但两个账户的市值都在总额里(总额口径不变,FOL-48)。
+    expect(view.totalUsd).toBeCloseTo(130 + 50, 6);
   });
 
   it("断线超 7 天(窗口内无起点)→ 该账户涨跌当 0,不虚增组合", async () => {

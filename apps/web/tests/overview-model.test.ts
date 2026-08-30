@@ -496,7 +496,6 @@ describe("buildOverview —— equity-only perp 账户不被过滤", () => {
 });
 
 describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
-  const NOW = 1_700_000_000_000;
   const accounts = [account("a1", "Arb")];
   // 当下:1 个 USDC,现推市值 110(默认桩不给价 → liveValue 退回冻结的 usdValue,所以直接写 110)。
   const byAccount = new Map([["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])]]);
@@ -508,7 +507,6 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, {
-        now: NOW,
         prevByAccount: prev("a1", bal({ amount: 1, usdValue: 100 })),
       }),
     );
@@ -520,7 +518,6 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, {
-        now: NOW,
         // 24 小时前账户里是另一个币 → USDC 起点 0(bought today)。
         prevByAccount: prev(
           "a1",
@@ -533,11 +530,14 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     expect(g?.pct).toBeNull(); // 分母 0 → 百分比 null
   });
 
-  it("没有起点(空起点组)→ null,由界面渲染 `—`,不是 0", async () => {
+  // 最终两档口径:**无基准(空起点组)一律 `—`** —— 新账户 / 新建 / 断线都一样,不硬算、不区分
+  // new/stale。(账户在不在起点组里就是全部判据。)
+  it("无基准(空起点组)→ 组合与持仓都 null,由界面渲染 `—`,不是 0", async () => {
     const view = await runWithOracle(
       stub,
-      overviewEffect(accounts, byAccount, { now: NOW, prevByAccount: new Map() }),
+      overviewEffect(accounts, byAccount, { prevByAccount: new Map() }),
     );
+    expect(view.gain24h).toBeNull();
     expect(view.holdings[0].gain24h).toBeNull();
   });
 
@@ -550,8 +550,7 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, noTokenNow, {
-        now: NOW,
-        // a1 有起点(hasAnyStart=true),但那张里也没有 token_id → start.token 空。
+        // a1 有起点(有 eligible 账户),但那张里也没有 token_id → start.token 空。
         prevByAccount: prev("a1", bal({ tokenId: null, amount: 1, usdValue: 100 })),
       }),
     );
@@ -561,7 +560,7 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
   });
 
   it("不传起点组 → 不算盈亏(字段缺席)", async () => {
-    const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, { now: NOW }));
+    const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, {}));
     expect(view.holdings[0].gain24h).toBeUndefined();
     expect(view.gain24h).toBeUndefined();
   });
@@ -576,10 +575,7 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
       ["a1", snap("a1", 0, [bal({ amount: 1, usdValue: 100 })])],
       ["a2", snap("a2", 0, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 60 })])],
     ]);
-    const view = await runWithOracle(
-      stub,
-      overviewEffect(two, snaps, { now: NOW, prevByAccount: prevMap }),
-    );
+    const view = await runWithOracle(stub, overviewEffect(two, snaps, { prevByAccount: prevMap }));
     const sum = view.holdings.reduce((s, h) => s + (h.gain24h?.amount ?? 0), 0);
     expect(sum).toBeCloseTo(12, 6); // +10(USDC)+2(ETH)
     expect(view.gain24h?.amount).toBeCloseTo(sum, 6);
@@ -595,27 +591,15 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
       ["a1", snap("a1", 0, [bal({ amount: 1, usdValue: 100 })])],
       ["a2", snap("a2", 0, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 60 })])],
     ]);
-    const view = await runWithOracle(
-      stub,
-      overviewEffect(two, snaps, { now: NOW, prevByAccount: prevMap }),
-    );
+    const view = await runWithOracle(stub, overviewEffect(two, snaps, { prevByAccount: prevMap }));
     // 各行:+10%(100→110)与 +3.33%(60→62);组合起点 160 → 12/160 = 7.5%,不是平均 6.67%
     const avg = view.holdings.reduce((s, h) => s + (h.gain24h?.pct ?? 0), 0) / view.holdings.length;
     expect(view.gain24h?.pct).toBeCloseTo(7.5, 4);
     expect(view.gain24h?.pct).not.toBeCloseTo(avg, 2);
   });
-
-  it("空起点组 → 组合层也是 null,由 hero 渲染 `—`", async () => {
-    const view = await runWithOracle(
-      stub,
-      overviewEffect(accounts, byAccount, { now: NOW, prevByAccount: new Map() }),
-    );
-    expect(view.gain24h).toBeNull();
-  });
 });
 
 describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相减)", () => {
-  const NOW = 1_700_000_000_000;
   const lidoMeta = JSON.stringify({ protocol: "Lido", positionType: "staked" });
   const accounts = [account("w", "Wallet")];
   const byAccount = new Map([
@@ -632,7 +616,6 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相�
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, {
-        now: NOW,
         prevByAccount: defiPrev(
           bal({ kind: "defi", amount: 1, usdValue: 100, tokenId: "tk-staked", metaJson: lidoMeta }),
         ),
@@ -655,7 +638,6 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相�
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, hedged, {
-        now: NOW,
         prevByAccount: defiPrev(
           bal({ kind: "defi", amount: 1, usdValue: 1_000_000, tokenId: "sup", metaJson: lidoMeta }),
           bal({ kind: "defi", amount: 1, usdValue: -990_000, tokenId: "bor", metaJson: lidoMeta }),
@@ -671,7 +653,7 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相�
   it("空起点组 → null,由界面渲染 `—`", async () => {
     const view = await runWithOracle(
       stub,
-      overviewEffect(accounts, byAccount, { now: NOW, prevByAccount: new Map() }),
+      overviewEffect(accounts, byAccount, { prevByAccount: new Map() }),
     );
     expect(view.sections[0].defi[0].gain24h).toBeNull();
   });

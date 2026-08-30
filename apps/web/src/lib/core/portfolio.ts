@@ -182,30 +182,12 @@ const startAggregates = (prevByAccount: ReadonlyMap<string, PrevSlice>): StartAg
   return { accountTotal, token, tokenByAccount, defi };
 };
 
-// 账户在 24h 盈亏里的分档(ADR 0050 / FOL-51 用户裁定,推翻 FOL-43 原「账户不满 24h 显 —」):
-//   · `prev`  —— 窗口内有起点快照 → 两端相减。
-//   · `new`   —— 起点空,但当下快照落在 24 小时内(今天新建 / 充值)→ 起点 0,现值全算进(视同充值)。
-//   · `stale` —— 起点空,当下快照也早于 24 小时(断线超 7 天)→ 该账户涨跌当 0,两端都不计,不虚增。
-// **组合级(`buildOverview`)与账户级(`attachAccountHoldingGains`)共用这一个判据**,用同一个 `now`,
-// 别各写一份 —— 少一处对齐就会出现「首页把它算进、账户页显 —」这种两边打架。
-type GainClass = "prev" | "new" | "stale";
-
-const classifyGain = (hasPrev: boolean, currentTakenAt: number | null, now: number): GainClass => {
-  if (hasPrev) return "prev";
-  return currentTakenAt != null && currentTakenAt >= now - GAIN_WINDOW_MS ? "new" : "stale";
-};
-
-const classifyAccount = (
-  accountId: string,
-  start: StartAggregates,
-  byAccount: ReadonlyMap<string, SnapshotSlice>,
-  now: number,
-): GainClass =>
-  classifyGain(
-    start.accountTotal.has(accountId),
-    byAccount.get(accountId)?.snapshot.takenAt ?? null,
-    now,
-  );
+// 24h 盈亏是**最简两档**(ADR 0050 / FOL-51 最终口径,取代 FOL-43 那套 new/stale 分档):
+//   · **有 24 小时前基准**(`prev`:窗口内有起点快照 / manual 由账本折算得出)→ **两端相减**
+//     (差值含这天充/提的值,与净值曲线一致)。
+//   · **没有基准**(起点空 —— 新账户 / 新建 manual 不满 24 小时,**或**断线超 7 天)→ **一律 `—`**,不硬算。
+// 判据就是一个 `hasPrev`(账户在不在起点组里),账户级 / 组合级 / 持仓级 / DeFi 级**全部**用它,
+// 零特例、零组合专属闸。所以不再有 `classifyGain`/new/stale —— 一个 `prevByAccount.has(id)` 就够。
 
 //  —— 跨账户聚合(按 canonical 代币成 Holding 树)
 
@@ -438,10 +420,9 @@ export interface OverviewInput {
   // tokenId → 该 token 在 fiat 命名者下的 ref(`fiat/issued:<CODE>`);缺省空 → 无法币。
   fiatRefs?: ReadonlyMap<string, string>;
   // 24h 盈亏的原料(ADR 0050):「24 小时前」那一组快照(`snapshots.asOf` + manual 折算)。
-  // 缺省 → 不算盈亏(字段缺席)。当前组是 `byAccount`,两组相减就是盈亏。
+  // 缺省 → 不算盈亏(字段缺席)。当前组是 `byAccount`,两组相减就是盈亏。判据只是「账户在不在这组里」
+  // (有基准两端相减 / 无基准 `—`),**不看当下时刻**,所以这一层不再需要 `now`。
   prevByAccount?: ReadonlyMap<string, PrevSlice>;
-  // 「当下」那一刻。测试注入固定值;生产传 `Date.now()`。
-  now?: number;
 }
 
 interface Elig {
@@ -527,7 +508,6 @@ export function buildOverview(
     mode = "self-first",
     fiatRefs,
     prevByAccount,
-    now = Date.now(),
   }: OverviewInput,
 ): OverviewView {
   // 法币身份:该 token 有 fiat 命名者的 ref、且经 fiatCodeOf 落在白名单内 → 是法币(身份驱动,不看 symbol)。
@@ -579,48 +559,50 @@ export function buildOverview(
 
   const withGain = prevByAccount != null;
   let portfolioGain: Gain | null | undefined;
-  // 起点各表 + eligible 账户集,组合 / 持仓 / DeFi 三块共用(DeFi 那块在 sections 建好之后)。
+  // 起点各表 + 有基准的账户集,组合 / 持仓 / DeFi 三块共用(DeFi 那块在 sections 建好之后)。
   let start: StartAggregates | undefined;
-  let eligibleAccounts: Set<string> | undefined;
-  let hasAnyStart = false;
+  // **有 24h 前基准的账户集**(= 起点组里的账户)。没有基准的账户(新建 / 断线)两端都不计 → `—`。
+  let prevAccounts: Set<string> | undefined;
+  let hasPrevAny = false;
   if (withGain && prevByAccount) {
     const startAgg = startAggregates(prevByAccount);
     start = startAgg;
-    hasAnyStart = startAgg.accountTotal.size > 0;
-    const classOf = new Map(
-      accounts.map((a) => [a.id, classifyAccount(a.id, startAgg, byAccount, now)]),
+    // 最简两档:账户在不在起点组里(`start.accountTotal` 的键就是有基准的账户)。
+    const prevAccountIds = new Set(
+      accounts.filter((a) => startAgg.accountTotal.has(a.id)).map((a) => a.id),
     );
-    const eligibleAccountIds = new Set(
-      [...classOf].filter(([, c]) => c !== "stale").map(([id]) => id),
-    );
-    eligibleAccounts = eligibleAccountIds;
-    // 组合层(ADR 0050):起点 = 有起点账户的总额之和;现值 = eligible(prev ∪ new)账户的现推
-    // 净值之和 —— stale 账户两端都不计,涨跌当 0、不虚增。一个起点都没有 → null(界面 `—`)。
+    prevAccounts = prevAccountIds;
+    hasPrevAny = prevAccountIds.size > 0;
+    // 组合层(ADR 0050 最终口径):只数**有基准**的账户,两端相减 —— 起点 = 各基准总额之和,现值 =
+    // 同一批账户的现推净值之和。没有基准的账户(新建 / 断线)整个不计(它的市值仍在 totalUsd 里,
+    // 但不进涨跌)。一个有基准的账户都没有 → null(界面 `—`)。
     let startSum = 0;
     let curSum = 0;
     for (const account of accounts) {
-      const cls = classOf.get(account.id);
-      if (cls === "stale") continue;
-      if (cls === "prev") startSum += startAgg.accountTotal.get(account.id) ?? 0;
+      if (!prevAccountIds.has(account.id)) continue;
+      startSum += startAgg.accountTotal.get(account.id) ?? 0;
       curSum += liveTotals.get(account.id) ?? 0;
     }
-    portfolioGain = hasAnyStart ? endpointGain(startSum, curSum) : null;
-    // 持仓层:按 token_id 两端相减。**现值侧与起点侧同口径**(`startAggregates.token` 只收
-    // isFungible 现货、且有 token_id 的行;DeFi 走各自那套)—— 少了这个过滤,同一 token_id 又有
-    // 现货又有 DeFi/非同质行时现值会多算、盈亏虚高。现值只数 eligible 账户的行(与组合同口径),
-    // 起点缺 → 0(今天新买的整份算成今天赚的,「充提计入」的另一面)。
+    portfolioGain = hasPrevAny ? endpointGain(startSum, curSum) : null;
+    // 持仓层:按 token_id 两端相减。**现值侧与起点侧同口径**(`startAggregates.token` 只收 isFungible
+    // 现货、且有 token_id 的行;DeFi 走各自那套)—— 少了这个过滤,同一 token_id 又有现货又有 DeFi/
+    // 非同质行时现值会多算、盈亏虚高。现值只数**有基准**账户的行(与组合同口径),起点缺这个币 → 0
+    // (基准账户 24h 前没这个币 / 今天在基准账户里新买的那一份)。
     const curByToken = new Map<string, number>();
     for (const r of aggInputs) {
-      if (!eligibleAccountIds.has(r.account.id)) continue;
+      if (!prevAccountIds.has(r.account.id)) continue;
       if (r.tokenId == null || !isFungible(r.kind as ViewKind)) continue;
       curByToken.set(r.tokenId, (curByToken.get(r.tokenId) ?? 0) + r.value);
     }
     for (const h of holdings) {
-      // **无 token_id 的持仓算不出**(没有起点可比,`start.token` 按 token_id 建键)→ null(界面
-      // `—`),绝不拿 `endpointGain(0, current)` 冒充「今天全额涨」。
+      const id = h.token.id;
+      // 这个币**有没有基准**:被某个有基准的账户现在持有(`curByToken`)或 24 小时前持有过
+      // (`start.token`)。都没有(比如它只存在于一个今天新建 / 断线的账户里)→ 没有可比的起点 → `—`,
+      // 与账户级「无基准 → `—`」一致,不拿 `endpointGain(0,0)` 冒充「$0」。无 token_id 的持仓同理算不出。
+      const hasBase = id != null && (curByToken.has(id) || startAgg.token.has(id));
       h.gain24h =
-        hasAnyStart && h.token.id != null
-          ? endpointGain(startAgg.token.get(h.token.id) ?? 0, curByToken.get(h.token.id) ?? 0)
+        hasBase && id != null
+          ? endpointGain(startAgg.token.get(id) ?? 0, curByToken.get(id) ?? 0)
           : null;
     }
   }
@@ -691,16 +673,16 @@ export function buildOverview(
     // 与全站同一口径(旧的「按总敞口分母」废止)。`start`(24 小时前那张的协议净值)一路带着,
     // 好让 `mergeDefiGroups` 跨账户合并时按「合并后的收益 ÷ 合并后的起点」重算百分比。
     for (const s of sections) {
-      const eligibleAcc = eligibleAccounts?.has(s.account.id) ?? false;
+      const hasPrevAcc = prevAccounts?.has(s.account.id) ?? false;
       for (const g of s.defi) {
-        if (!hasAnyStart) {
+        if (!hasPrevAny) {
           g.gain24h = null;
           continue;
         }
         const key = defiGainKey(s.account.id, g.protocol);
-        // stale 账户(断线超 7 天)两端都不计 → 涨跌当 0。
-        const startVal = eligibleAcc ? (start.defi.get(key) ?? 0) : 0;
-        const current = eligibleAcc ? g.rows.reduce((sum, r) => sum + r.usdValue, 0) : 0;
+        // 无基准账户(新建 / 断线超 7 天)两端都不计 → 涨跌当 0。
+        const startVal = hasPrevAcc ? (start.defi.get(key) ?? 0) : 0;
+        const current = hasPrevAcc ? g.rows.reduce((sum, r) => sum + r.usdValue, 0) : 0;
         const eg = endpointGain(startVal, current);
         g.gain24h = eg == null ? null : { amount: eg.amount, pct: eg.pct, start: startVal };
       }
@@ -826,7 +808,6 @@ export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewVi
     mode: raw.mode,
     fiatRefs,
     prevByAccount,
-    now: raw.now,
   });
 }
 
@@ -858,9 +839,6 @@ export interface AccountGainRow {
   archivedAt: number | null;
   // 该账户当下净值(冻结口径:最新快照 totalUsd)—— 账户级两端相减的「现值」那一端。
   totalUsd: number;
-  // 当下快照时刻(manual 是注入的 `now` 占位)—— 分档要它:起点空时,当下快照落在 24h 内就是
-  // `new`(今天新建 / 充值),更旧就是 `stale`(断线超 7 天)。无快照 → null。
-  takenAt: number | null;
   // `kind`/`metaJson` 是逐币盈亏两端同口径要用的:现值侧只聚合 isFungible 现货行(与起点侧一致),
   // 否则同一 token_id 又有现货又有 DeFi/perp 行时现值会多算、盈亏虚高。
   balances: readonly {
@@ -878,16 +856,19 @@ export type WithAccountHoldingGain<R extends AccountGainRow> = Omit<R, "balances
   balances: Array<R["balances"][number] & { gain24h?: Gain | null }>;
 };
 
-// `prevByAccount` = 「24 小时前」那一组(`snapshots.asOf` + manual 折算)。**分档与组合级同一套**
-//(`classifyGain`,同一个 `now`):`prev` 两端相减;`new`(今天新建/充值)起点 0 → 现值全算进
-//(视同充值,FOL-51 用户裁定推翻 FOL-43 原「账户不满 24h 显 —」);`stale`(断线超 7 天)→ `null`(`—`)。
-// 归档账户两级都 `undefined`(ADR 0039:界面据此整行省略)。
+// `prevByAccount` = 「24 小时前」那一组(`snapshots.asOf` + manual 折算)。**最简两档**(与组合级同一套):
+//   · 有基准(`prev != null`)→ 两端相减(账户级 + 逐现货行按市值占比摊分)。
+//   · 无基准(新账户 / 新建 manual 不满 24h,或断线超 7 天)→ 一律 `null`(`—`),不硬算。
+// 归档账户两级都 `undefined`(ADR 0039:界面据此整行省略)。非同质行(defi/perp)逐行盈亏也 `undefined`
+//(各自分区给)。
 export function attachAccountHoldingGains<R extends AccountGainRow>(
   rows: readonly R[],
   prevByAccount: ReadonlyMap<string, PrevSlice>,
-  now: number,
 ): WithAccountHoldingGain<R>[] {
   return rows.map((r): WithAccountHoldingGain<R> => {
+    // 逐行盈亏只对 isFungible 现货行有意义(DeFi/perp 行的盈亏由各自的分区给);非同质行 → undefined。
+    const spotOf = (b: R["balances"][number]): boolean =>
+      b.tokenId != null && isFungible(viewKind(b));
     if (r.archivedAt != null) {
       return {
         ...r,
@@ -895,23 +876,19 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
         balances: r.balances.map((b) => ({ ...b, gain24h: undefined })),
       };
     }
-    // 逐行盈亏只对 isFungible 现货行有意义(DeFi/perp 行的盈亏由各自的分区给);非同质行 → undefined。
-    const spotOf = (b: R["balances"][number]): boolean =>
-      b.tokenId != null && isFungible(viewKind(b));
     const prev = prevByAccount.get(r.account.id);
-    const cls = classifyGain(prev != null, r.takenAt, now);
-    // `stale`(起点空且当下也 ≥24h 旧)→ 该账户涨跌当 0:账户级与逐现货行都 `null`(`—`),不虚增。
-    if (cls === "stale") {
+    // 无基准 → 一律 `—`:账户级 null,现货行 null,非现货行 undefined。
+    if (prev == null) {
       return {
         ...r,
         gain24h: null,
         balances: r.balances.map((b) => ({ ...b, gain24h: spotOf(b) ? null : undefined })),
       };
     }
-    // 起点各表:`prev` 从那张起点快照汇;`new` 起点恒 0(startTotal 0 / startToken 空)→ 现值全算进。
+    // 有基准:起点各表(账户总额 + 逐现货代币值)从那张起点快照汇。
     let startTotal = 0;
     const startToken = new Map<string, number>();
-    for (const b of prev?.balances ?? []) {
+    for (const b of prev.balances) {
       startTotal += b.usdValue;
       if (b.tokenId != null && isFungible(viewKind(b))) {
         startToken.set(b.tokenId, (startToken.get(b.tokenId) ?? 0) + b.usdValue);
