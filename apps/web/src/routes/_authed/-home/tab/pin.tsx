@@ -5,13 +5,16 @@ import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { MAX_PINS_PER_PORTFOLIO } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback } from "@/lib/core/logo";
+import { computeHomeTabStrip } from "@/lib/core/portfolio";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { accountListQuery } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import { refetchUntil } from "@/lib/queries/constants";
+import { portfolioKeys } from "@/lib/queries/keys";
 import { type HomeTabStrip, homeTabStripQuery } from "@/lib/queries/portfolio";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { tagListQuery } from "@/lib/queries/tags";
+import { getPortfolioRoster } from "@/lib/server/portfolio";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "@/lib/server/tab-pins";
 import { kindTabsOf, tabAfterUnpin } from "@/routes/_authed/-home/home-tabs";
 import { type PinTargetChoice, TabPinPicker } from "./pin-picker";
@@ -25,14 +28,8 @@ const targetOf = (p: PinTargetChoice) => `${p.kind}:${p.connectorId ?? p.tagId ?
 /**
  * **写完之后等 tab 条真的变了再收工。**
  *
- * tab 条是预计算出来的(ADR 0049):写路径只抬失效水位线,重算跑在这次请求的 `waitUntil` 上。
- * 所以紧跟着的那次刷新拿回的往往还是**改动之前**那份条子 —— 新钉的 Tab 还不在里面(于是选不中,
- * 药丸不动)、刚改的指向还显示老名字。三处写都吃这一口,所以等待也写在一处。
- *
- * **不在写请求里现算条子来绕过它**:那正是 ADR 0049 搬走的那笔 CPU,而免费档一次请求只有 10ms;
- * 而且条子上的名字与 logo 是服务端解析的,前端乐观拼一份出来等于把那套解析复制一遍。
- *
- * 等待期间 mutation 仍是 pending → 加钮 / 取消固定按钮保持禁用,顺手挡掉了连点。
+ * invalidate 之后紧跟着的那次刷新可能还是旧条子 —— 新钉的 Tab 还不在里面、刚改的指向还显示老名字。
+ * 三处写都吃这一口,所以等待也写在一处。
  */
 const awaitStrip = (
   queryClient: ReturnType<typeof useQueryClient>,
@@ -40,7 +37,14 @@ const awaitStrip = (
   ok: (strip: HomeTabStrip) => boolean,
 ) =>
   refetchUntil(
-    () => queryClient.fetchQuery({ ...homeTabStripQuery(portfolioId), staleTime: 0 }),
+    () =>
+      queryClient
+        .fetchQuery({
+          queryKey: portfolioKeys.tabStrip(portfolioId),
+          queryFn: () => getPortfolioRoster({ data: { portfolioId } }),
+          staleTime: 0,
+        })
+        .then(computeHomeTabStrip),
     ok,
   );
 

@@ -1,24 +1,20 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
+  computeHomeTabStrip,
+  type HomeTabStripView,
   isFirstSyncPending,
   type OverviewView,
   overviewFromSnapshotData,
+  type PortfolioRosterData,
   type PortfolioSnapshotData,
 } from "@/lib/core/portfolio";
 import {
-  getHomeTabStrip,
   getPortfolioHistory,
+  getPortfolioRoster,
   getPortfolioSnapshotData,
 } from "@/lib/server/portfolio";
 import { listPortfolios } from "@/lib/server/portfolios";
-import {
-  awaitFirstCompute,
-  pendingPollDelay,
-  pollWhilePending,
-  RETRY,
-  STALE_TIME,
-  shouldRetry,
-} from "./constants";
+import { pollWhilePending, RETRY, STALE_TIME, shouldRetry } from "./constants";
 import { type PinScopeKey, portfolioKeys } from "./keys";
 
 // 组合域的读取入口 —— 与 `lib/server/portfolio`(读模型)+ `lib/server/portfolios`(实体)的读取型 server fn 对应。
@@ -48,20 +44,16 @@ export const portfolioListQuery = () =>
   });
 
 /** 首页 tab 条:有没有永续 / DeFi + 自定义 Tab 的已解析标签。 */
-export type HomeTabStrip = Awaited<ReturnType<typeof getHomeTabStrip>>;
+export type HomeTabStrip = HomeTabStripView;
+
+const selectTabStrip = (raw: PortfolioRosterData): HomeTabStrip => computeHomeTabStrip(raw);
 
 export const homeTabStripQuery = (portfolioId: string) =>
-  queryOptions({
+  queryOptions<PortfolioRosterData, Error, HomeTabStrip>({
     queryKey: portfolioKeys.tabStrip(portfolioId),
-    queryFn: ({ signal }) =>
-      awaitFirstCompute(
-        () => getHomeTabStrip({ data: { portfolioId } }),
-        // 「零账户」就是这条数据的空态 —— 而它同时是那句「还没有账户」的判据。
-        (strip) => !strip.hasAccounts,
-        signal,
-      ),
+    queryFn: () => getPortfolioRoster({ data: { portfolioId } }),
+    select: selectTabStrip,
     staleTime: STALE_TIME.live,
-    refetchInterval: pendingPollDelay,
   });
 
 // 一份总览 = 一个组合口径(+ 可选的自定义 Tab 收窄)。默认视图与非默认视图、Tab 视图走的是

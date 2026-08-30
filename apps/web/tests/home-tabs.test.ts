@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kindPresence, resolvePinLabel } from "@/lib/core/portfolio";
+import { computeHomeTabStrip, kindPresence, resolvePinLabel } from "@/lib/core/portfolio";
 import { kindTabsOf, pickShownTab, tabAfterUnpin } from "@/routes/_authed/-home/home-tabs";
 
 // 页内 tab 进 URL(片5 / ADR 0043)。URL 是外面来的,所以「认不出的值怎么办」是这一片的正经逻辑,
@@ -105,6 +105,22 @@ describe("kindPresence —— 和总览同一套「算不算有永续 / DeFi」"
   });
 });
 
+describe("computeHomeTabStrip —— 从名单原料算 tab 条", () => {
+  it("零账户 → hasAccounts 假,两个视角 tab 都不出", () => {
+    expect(
+      computeHomeTabStrip({
+        selectedPortfolioId: "pf1",
+        defaultPortfolioId: "pf1",
+        accounts: [],
+        memberships: [],
+        pins: [],
+        tags: [],
+        snapshots: [],
+        connectorMeta: [],
+      }),
+    ).toEqual({ hasAccounts: false, hasPerps: false, hasDefi: false, pins: [] });
+  });
+});
 describe("resolvePinLabel —— 三种目标的显示名由服务端解析", () => {
   const lookup = {
     tagName: (id: string) => (id === "tg1" ? "DeFi" : undefined),

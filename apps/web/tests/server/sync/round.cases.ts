@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { overviewKey, precomputeMarkKey, tabStripKey } from "@/lib/server/portfolio/precompute";
+import { overviewKey, precomputeMarkKey } from "@/lib/server/portfolio/precompute";
 import {
   handleGetSyncRound,
   openSyncRound,
@@ -152,8 +152,8 @@ describe("sync/round", () => {
       expect(noKeys.id in round.accounts).toBe(true);
     });
 
-    // FOL-35 / FOL-36 / ADR 0049:收官之后这一组合的预计算(总览 + tab 条)必须已经算好存下。
-    // **24h 盈亏预计算 FOL-51 退场**:盈亏改浏览器两端相减,不再落键 —— 这里只钉剩下的两族。
+    // FOL-35 / FOL-36 / ADR 0049:收官之后这一组合的预计算(总览)必须已经算好存下。
+    // **24h 盈亏预计算 FOL-51 退场**;**tab 条预计算 FOL-49 退场** —— 都改浏览器现算。
     // 钉在这一层而不是别处:「算的时刻挂在同步收尾上」是接线,而接线只有整条路跑一遍才看得见。
     it("收官之后,这个组合的预计算就位", async () => {
       const acc = await cex("Binance spot");
@@ -166,7 +166,6 @@ describe("sync/round", () => {
       const pf = round.portfolioId;
       const at = async (k: string) => (await db(USER).cache.get(k))._tag;
       expect(await at(overviewKey(pf, null))).toBe("Some");
-      expect(await at(tabStripKey(pf, null))).toBe("Some");
     });
 
     // **cron 那一支刻意不在轮里预计算。**

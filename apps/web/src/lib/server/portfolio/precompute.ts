@@ -1,19 +1,18 @@
 import { type CacheWrite, Database } from "@folio/db";
 import { Cause, Clock, Effect } from "effect";
-import { toAccountSections } from "@/lib/core/account-view";
 import { accountsInView, pinsInView, type TabPin, toTabPin } from "@/lib/core/accounts-in-view";
-import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
-import { kindPresence, resolvePinLabel } from "@/lib/core/portfolio";
-import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import { backfillForUser } from "@/lib/server/runtime";
 import { buildScopedOverview, type PortfolioScope, resolveScope } from "./scope";
 
-// 首页那几个数 —— 总额、持仓聚合、tab 条:**算在同步收官那一刻,读的时候只做「读 + 传」**
-//(ADR 0049 裁定 2)。这个文件是那台机器;`tabs.ts` 是仍走它的读出口。
+// 首页那几个数 —— 总额、持仓聚合:**算在同步收官那一刻,读的时候只做「读 + 传」**
+//(ADR 0049 裁定 2)。这个文件是那台机器。
 //
 // **24h 盈亏已退场(FOL-51 / ADR 0050)**:改成浏览器从快照原料两端相减(`snapshot-data` 一次带
 // 当前 + 24 小时前两组),不再预计算、不再有 gain 键 / gain 读接口 / pending 轮询。总览本身也已
-// 改走原料接口(`snapshot-data`);这里的 `overviewKey` 目前无读者,与 tab 条一起留给 FOL-52 收编。
+// 改走原料接口(`snapshot-data`);这里的 `overviewKey` 目前无读者,留给 FOL-52 收编。
+//
+// **tab 条已退场(FOL-49)**:改成浏览器从名单原料(`roster-data`)用 `computeHomeTabStrip` 现算,
+// 不再预计算、不再有 tabstrip 键 / `getHomeTabStrip` / pending 轮询。
 //
 // 这几条接口都是「原料大、结果小」的样板:窗口内几千行余额历史、每个账户的整张快照进去,
 // 一屏数字出来。原料扔给前端连序列化都超标,而现算合起来远超免费档一次请求的 10ms CPU。
@@ -82,29 +81,14 @@ const pinSuffix = (pin: TabPin | null): string => {
 /** 一个键的形状:`pc1:<族>:<组合 id>[:<pin>]`。四族共用这一个拼法,免得各拼各的。 */
 export type PrecomputeKey = (portfolioId: string, pin: TabPin | null) => string;
 
-/** 吃 pin 的那两族:一个维度一个键。 */
+/** 吃 pin 的那一族:一个维度一个键。 */
 const keyOf =
   (family: string): PrecomputeKey =>
   (portfolioId, pin) =>
     `${KEY_GEN}:${family}:${portfolioId}${pinSuffix(pin)}`;
 
-/**
- * **不吃 pin** 的那两族:一个组合一个键,pin 那个参数**在这里就被丢掉**。
- *
- * 账户页没有自定义 Tab(入参是 `PortfolioSelectInput`),tab 条本身就是「有哪些 pin」的答案、
- * 不可能按某个 pin 收窄。签名仍收 pin 只是为了跟 `readByScope` 对得上 —— 而「谁也别传 pin 给
- * 它们」这件事**由这里丢掉参数来保证**,不靠每个调用点记得先把 pin 抹掉:少抹一处就是一族键
- * 按 pin 裂成好几个,写的那头只填其中一个,其余永远 `pending`。
- */
-const plainKeyOf =
-  (family: string): PrecomputeKey =>
-  (portfolioId) =>
-    `${KEY_GEN}:${family}:${portfolioId}`;
-
 /** 组合总览(总额 + 持仓聚合 + 分区 + 小计)—— 吃 pin。 */
 export const overviewKey = keyOf("overview");
-/** 首页 tab 条 —— 一个组合一个键。 */
-export const tabStripKey = plainKeyOf("tabstrip");
 
 /**
  * **失效水位线** —— 「这个组合(或这个用户)的预计算结果,在这一刻之后才算数」。
@@ -178,81 +162,6 @@ interface Stored<A> {
 }
 
 // —— 算(只在同步收官与后台补算这两条路上跑)——
-
-/**
- * 首页 tab 条的**现算**(#488 票 4)。只回答「这个组合里有没有永续 / DeFi、自定义 Tab 叫什么」。
- * 不富化价格、不算盈亏、不接手记现造 —— 手记只注入现货,不影响这两个 tab 的有无。
- * 标签在服务端解析好(连接器走 registry 的类型名 + 已代理 logo),客户端不再为渲染 tab 名拉目录。
- *
- * **住在这儿而不是 `tabs.ts`**:那边现在只是读接口,而读接口不许再引到这条计算链上来
- * (引了就迟早有人「顺手」在读的时候调它)。
- */
-export const computeHomeTabStrip = (data: { portfolioId?: string }) =>
-  Effect.gen(function* () {
-    const db = yield* Database;
-    const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
-    const [allAccounts, snapshots, memberships, pins, tags] = yield* Effect.all(
-      [
-        db.accounts.list(),
-        db.snapshots.latest(),
-        db.portfolios.listMemberships(),
-        db.tabPins.list(),
-        db.tags.list(),
-      ],
-      { concurrency: 5 },
-    );
-    const accounts = accountsInView(allAccounts, memberships, selectedId, defaultId);
-    const inView = new Set(accounts.map((a) => a.id));
-    const sections = snapshots
-      .filter((s) => inView.has(s.snapshot.accountId))
-      .map((s) =>
-        toAccountSections(
-          s.balances.map((b) => ({
-            id: b.id,
-            amount: b.amount,
-            usdValue: b.usdValue,
-            kind: b.kind,
-            metaJson: b.metaJson,
-          })),
-        ),
-      );
-    const { hasPerps, hasDefi } = kindPresence(sections);
-    // **只摆这个组合里说得通的 pin**(ADR 0034 早就这么定了,实现只筛了内容、没筛名单)。
-    // 以前在非默认组合的首页能看到别的组合的自定义 Tab,点进去是空的。
-    const shownPins = pinsInView(pins, {
-      accounts,
-      tagIds: new Set(tags.filter((t) => t.portfolioId === selectedId).map((t) => t.id)),
-    });
-    const tagName = (id: string) => tags.find((t) => t.id === id)?.name;
-    const accountName = (id: string) => allAccounts.find((a) => a.id === id)?.label;
-    const connector = (id: string) => {
-      const meta = connectorPlatformMeta(id);
-      return {
-        name: meta?.name ?? connectorLabelFallback(id),
-        logo: platformLogoUrl(id, meta?.logo),
-      };
-    };
-    return {
-      hasAccounts: accounts.length > 0,
-      hasPerps,
-      hasDefi,
-      pins: shownPins.map((p) => {
-        const label = resolvePinLabel(p, { tagName, accountName, connector });
-        return {
-          id: p.id,
-          kind: p.kind,
-          connectorId: p.connectorId ?? undefined,
-          tagId: p.tagId ?? undefined,
-          accountId: p.accountId ?? undefined,
-          name: label.name,
-          logo: label.logo,
-        };
-      }),
-    };
-  });
-
-/** tab 条那份数据的形状 —— 从算它的那个函数推导,不在旁边再手写一份。 */
-export type TabStripView = Effect.Effect.Success<ReturnType<typeof computeHomeTabStrip>>;
 
 // —— 维度 ——
 
@@ -331,14 +240,12 @@ export const precomputePortfolio = (portfolioId: string) =>
     // **逐个维度串行算。** 并发发出去只是把同一批 D1 往返挤在一起,而这段跑在 `waitUntil` /
     // cron 里,没人在等它。
     //
-    // **只剩总览 + tab 条两族**(FOL-51):24h 盈亏改成浏览器从快照原料两端相减,预计算不再算它。
-    // 首页总览其实读的是 `snapshot-data`(原料接口),这个 `overviewKey` 目前无读者、留给 FOL-52
-    // 收编;tab 条仍走预计算读。代价:pin 数中位是 0(这个循环就一圈)。
+    // **只剩总览一族**(FOL-51 / FOL-49):24h 盈亏与 tab 条都改浏览器现算;首页总览读的是
+    // `snapshot-data`(原料接口),这个 `overviewKey` 目前无读者、留给 FOL-52 收编。
     for (const pin of dimensions) {
       const view = yield* buildScopedOverview({ portfolioId: selectedId, pin: pin ?? undefined });
       at(overviewKey(selectedId, pin), view);
     }
-    at(tabStripKey(selectedId, null), yield* computeHomeTabStrip({ portfolioId: selectedId }));
     yield* db.cache.putMany(writes);
     return true;
   }).pipe(

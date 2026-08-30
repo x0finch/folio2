@@ -1,4 +1,10 @@
-import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
+import type {
+  AccountSafe,
+  PortfolioMembership,
+  SnapshotWithBalances,
+  TabPin,
+  Tag,
+} from "@folio/db";
 import {
   fiatCodeOf,
   type PlatformMeta,
@@ -16,13 +22,19 @@ import {
   parseDefiMeta,
   toAccountSections,
 } from "@/lib/core/account-view";
+import { accountsInView, pinsInView } from "@/lib/core/accounts-in-view";
 import { isFungible, type ViewKind, viewKind } from "@/lib/core/balance-kind";
 import {
   buildPortfolioHistory,
   type HistoryPoint,
   type SnapshotTotalRow,
 } from "@/lib/core/history";
-import { platformLogoUrl, tokenLogoUrl, toLogoSource } from "@/lib/core/logo";
+import {
+  connectorLabelFallback,
+  platformLogoUrl,
+  tokenLogoUrl,
+  toLogoSource,
+} from "@/lib/core/logo";
 import { refreshableTokenIds } from "@/lib/core/token-model";
 
 // 首页 / 组合的**纯计算层**(FOL-45)。跟 `history.ts` 同目录、同风格:无 Effect、无 Oracle、
@@ -395,6 +407,102 @@ export function resolvePinLabel(
   if (pin.kind === "account") return { name: lookup.accountName(pin.accountId ?? "") ?? "" };
   const c = lookup.connector(pin.connectorId ?? "");
   return c.logo ? { name: c.name, logo: c.logo } : { name: c.name };
+}
+
+// tab 条原料里的余额行 —— 只留 `toAccountSections` / `kindPresence` 读得到的列。
+interface RosterBalanceView {
+  id: string;
+  amount: number;
+  usdValue: number;
+  kind: string;
+  metaJson: string | null;
+}
+
+// 每账户最新快照的瘦身形状(只要余额行,不要 takenAt / totalUsd)。
+export interface RosterSnapshotView {
+  balances: RosterBalanceView[];
+}
+
+// 名单原料(FOL-49):账户 / 归属 / 标签 / pin / 最新快照(kind+meta) / connector 展示元数据。
+// 服务端只取行,永续 / DeFi 有无与 pin 标签在浏览器用 `computeHomeTabStrip` 现算。
+export interface PortfolioRosterData {
+  selectedPortfolioId: string;
+  defaultPortfolioId: string;
+  accounts: AccountSafe[];
+  memberships: PortfolioMembership[];
+  pins: TabPin[];
+  tags: Tag[];
+  snapshots: [string, RosterSnapshotView][];
+  connectorMeta: [string, { name: string; logo?: string }][];
+}
+
+// 首页 tab 条视图 —— `computeHomeTabStrip` 的出参。
+export interface HomeTabStripView {
+  hasAccounts: boolean;
+  hasPerps: boolean;
+  hasDefi: boolean;
+  pins: {
+    id: string;
+    kind: "connector" | "tag" | "account";
+    connectorId?: string;
+    tagId?: string;
+    accountId?: string;
+    name: string;
+    logo?: string;
+  }[];
+}
+
+/** 从名单原料算出首页 tab 条(永续 / DeFi 有无 + 已解析 pin 标签)。 */
+export function computeHomeTabStrip(raw: PortfolioRosterData): HomeTabStripView {
+  const accounts = accountsInView(
+    raw.accounts,
+    raw.memberships,
+    raw.selectedPortfolioId,
+    raw.defaultPortfolioId,
+  );
+  const inView = new Set(accounts.map((a) => a.id));
+  const snapshotMap = new Map(raw.snapshots);
+  const sections = [...inView]
+    .map((id) => snapshotMap.get(id))
+    .filter((s): s is RosterSnapshotView => s != null)
+    .map((s) =>
+      toAccountSections(
+        s.balances.map((b) => ({
+          id: b.id,
+          amount: b.amount,
+          usdValue: b.usdValue,
+          kind: b.kind,
+          metaJson: b.metaJson,
+        })),
+      ),
+    );
+  const { hasPerps, hasDefi } = kindPresence(sections);
+  const tagIds = new Set(
+    raw.tags.filter((t) => t.portfolioId === raw.selectedPortfolioId).map((t) => t.id),
+  );
+  const shownPins = pinsInView(raw.pins, { accounts, tagIds });
+  const tagName = (id: string) => raw.tags.find((t) => t.id === id)?.name;
+  const accountName = (id: string) => raw.accounts.find((a) => a.id === id)?.label;
+  const connectorMeta = new Map(raw.connectorMeta);
+  const connector = (id: string) => connectorMeta.get(id) ?? { name: connectorLabelFallback(id) };
+
+  return {
+    hasAccounts: accounts.length > 0,
+    hasPerps,
+    hasDefi,
+    pins: shownPins.map((p) => {
+      const label = resolvePinLabel(p, { tagName, accountName, connector });
+      return {
+        id: p.id,
+        kind: p.kind,
+        connectorId: p.connectorId ?? undefined,
+        tagId: p.tagId ?? undefined,
+        accountId: p.accountId ?? undefined,
+        name: label.name,
+        logo: label.logo,
+      };
+    }),
+  };
 }
 
 //  —— 组合总览
