@@ -6,7 +6,7 @@ import { type PortfolioScope, type ScopedMaterials, scopedSnapshotMaterials } fr
 
 // 快照原料读接口(FOL-48 / ADR 0049 的方向调整)—— **发一份「当前快照原料」,浏览器用
 // `buildOverview` 自己算**总额 / 持仓 / 各小计 / pricesStale。以前首页读的是同步收官那一刻算好的
-// 预计算总览(`servePrecomputed(overviewKey)`);那条读路径退场,换成这条。
+// 以前首页读的是同步收官那一刻算好的预计算总览;那条读路径退场,换成这条。
 //
 // **只取行 + 按 scope 在 SQL 里筛 + 备料,不做聚合**(生产实测目标 <10ms CPU):账户集、当下快照、
 // 富化字典(名字 / 库里当前价 / 有没有图,logo URL 不下发 —— 见 `TokenView`)、平台元数据、法币

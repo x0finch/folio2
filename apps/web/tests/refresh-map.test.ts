@@ -117,21 +117,19 @@ describe("刷新映射表", () => {
     expect(isInvalidated(settingsKeys.providerKeys())).toBe(false);
   });
 
-  // 按标签固定的自定义 Tab 是靠标签关联收窄的 —— 摘一个标签,那个 Tab 里就该少一个账户的持仓。
-  it("tag.write 同时刷标签域与组合域", async () => {
+  // 刻意的窄口径:改标签只动名单,不重拉余额快照。
+  it("tag.write 只刷标签域,不碰总览", async () => {
     seed(tagKeys.list("pf-1"));
     seed(tagKeys.accountLinks("pf-1"));
     seed(portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }));
 
     await invalidateFor(queryClient, "tag.write");
 
-    expect(
-      [
-        tagKeys.list("pf-1"),
-        tagKeys.accountLinks("pf-1"),
-        portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }),
-      ].map(isInvalidated),
-    ).toEqual([true, true, true]);
+    expect([tagKeys.list("pf-1"), tagKeys.accountLinks("pf-1")].map(isInvalidated)).toEqual([
+      true,
+      true,
+    ]);
+    expect(isInvalidated(portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }))).toBe(false);
   });
 
   // review 抓到的漏刷之二:Tag 归属 Portfolio,所以组合域的写会**连带删掉标签关联** ——

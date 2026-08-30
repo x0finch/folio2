@@ -3,7 +3,6 @@ import { Database, type SnapshotBalanceInput } from "@folio/db";
 import { Effect } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { categorizeFields } from "@/lib/server/creds";
-import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
 import { createImporter, type ImportCounts, type ImportDeps, parseImportLine } from "./import";
 
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。
@@ -69,13 +68,6 @@ export const importData = Effect.fn("importData")(function* (
         message: d instanceof Error ? d.message : String(d),
       } as const),
     ),
-    // 导入直接走 `transfer.*`,绕过每一个写 handler —— 所以 24h 盈亏的失效水位线得在这儿
-    // 自己抬一次。少了它就是 e2e 那个 bug 换一扇门:导入把几年的账本灌进来,而那个数仍以
-    // 「新鲜」的身份端着导入前那份(常常是一片空),没有 `pending`、没人补算,最长 90 分钟。
-    //
-    // **三种下场都抬**(所以挂在两个 catch 之后):导入是流式逐行写的,拒收 / 炸在半路时
-    // 库里已经有一半新数据了 —— 那时更需要让那个数作废。
-    Effect.tap(() => invalidatePrecomputed()),
   );
 });
 

@@ -1,7 +1,6 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
-import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
 
 // per-user 估值设置(Phase 3,#82)。读带缺省(无行 → coingecko / self-first)。
 export const handleGetValuationSettings = Effect.fn("getValuationSettings")(function* () {
@@ -15,7 +14,5 @@ export const handleUpdateValuationSettings = Effect.fn("updateValuationSettings"
   data: z.infer<typeof ValuationInput>,
 ) {
   yield* (yield* Database).settings.update({ valuationMode: data.mode });
-  // 组合的值变了 → 预计算的 24h 盈亏不再可信,就地标旧(ADR 0049;为什么标旧不是删,见那边)。
-  yield* invalidatePrecomputed();
   return { ok: true };
 });

@@ -1,10 +1,7 @@
-import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { overviewKey, precomputeMarkKey } from "@/lib/server/portfolio/precompute";
 import {
   handleGetSyncRound,
   openSyncRound,
-  precomputeAllUsers,
   ROUND_HEARTBEAT_MS,
   ROUND_RETENTION_MS,
   runSyncRound,
@@ -12,7 +9,6 @@ import {
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
-import { seedSnapshot } from "../_kit/seed";
 import { freshUser } from "../_kit/user";
 
 // 开轮 / 读轮(ADR 0048)。对着真 D1 跑,因为这两件事的正确性都在「哪些账户进这一轮」与
@@ -150,57 +146,6 @@ describe("sync/round", () => {
       // 逐账户的失败不是「整轮没跑起来」,那一句必须还是空的。
       expect(view?.error).toBeNull();
       expect(noKeys.id in round.accounts).toBe(true);
-    });
-
-    // FOL-35 / FOL-36 / ADR 0049:收官之后这一组合的预计算(总览)必须已经算好存下。
-    // **24h 盈亏预计算 FOL-51 退场**;**tab 条预计算 FOL-49 退场** —— 都改浏览器现算。
-    // 钉在这一层而不是别处:「算的时刻挂在同步收尾上」是接线,而接线只有整条路跑一遍才看得见。
-    it("收官之后,这个组合的预计算就位", async () => {
-      const acc = await cex("Binance spot");
-      const now = Date.now();
-      await seedSnapshot(USER, acc.id, now, [{ tokenId: "token-btc", amount: 1, usdValue: 130 }]);
-
-      const { round } = await open();
-      await runSyncRound(USER, round);
-
-      const pf = round.portfolioId;
-      const at = async (k: string) => (await db(USER).cache.get(k))._tag;
-      expect(await at(overviewKey(pf, null))).toBe("Some");
-    });
-
-    // **cron 那一支刻意不在轮里预计算。**
-    //
-    // 预计算的「当下点」吃的是热过的价(现推的 `liveValue`),而 cron 的预热不在轮里 ——
-    // 它按用户统一做,发生在整个同步阶段之后。在轮里算就是每小时拿上一小时的价算一遍,
-    // 然后让它挂满 90 分钟。所以 cron 的预计算挪到了 `precomputeAllUsers`(sweep 的第三趟,
-    // 排在 warm 后面)。这条钉住那次搬家:轮里**只**抬水位线,不落值。
-    it("cron 那一支不在轮里预计算,只抬水位线(它的预热还没发生)", async () => {
-      const acc = await cex("Binance spot");
-      const now = Date.now();
-      await seedSnapshot(USER, acc.id, now, [{ tokenId: "token-btc", amount: 1, usdValue: 110 }]);
-
-      const { round } = await open();
-      await runSyncRound(USER, round, { warm: false });
-
-      expect((await db(USER).cache.get(overviewKey(round.portfolioId, null)))._tag).toBe("None");
-      expect((await db(USER).cache.get(precomputeMarkKey(round.portfolioId)))._tag).toBe("Some");
-    });
-
-    // sweep 的第三趟:逐用户、逐组合把值真算出来。cron 的正确性靠「轮抬水位线 + 这一趟落值」
-    // 两半合起来,所以两半都得有钉子。
-    it("precomputeAllUsers 给这个用户每个组合都落下值", async () => {
-      const acc = await cex("Binance spot");
-      const now = Date.now();
-      await seedSnapshot(USER, acc.id, now, [{ tokenId: "token-btc", amount: 1, usdValue: 130 }]);
-      const watch = await db(USER).portfolios.create({ name: "看单" });
-      const home = (await db(USER).portfolios.ensureDefault()).id;
-
-      const out = await Effect.runPromise(precomputeAllUsers([USER]));
-
-      expect(out.failed).toBe(0);
-      // 总览预计算逐组合落下(盈亏 FOL-51 起不再预计算)。
-      expect((await db(USER).cache.get(overviewKey(home, null)))._tag).toBe("Some");
-      expect((await db(USER).cache.get(overviewKey(watch.id, null)))._tag).toBe("Some");
     });
 
     // 陈旧的 worker 撞上新一轮:它那几笔写落空成 no-op(条件在 db 那一层),这里钉的是
