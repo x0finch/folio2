@@ -1148,23 +1148,6 @@ const enrichBalanceRows = (
     return tv ? { ...b, ...enrichmentFromView(tv) } : b;
   });
 
-const pricesStaleForRows = (
-  rows: readonly { archivedAt: number | null; balances: BalanceView[] }[],
-  enriched: ReadonlyMap<string, TokenEnrichmentView>,
-): boolean => {
-  const refreshable = new Set(refreshableTokenIds(rows.flatMap((r) => r.balances)));
-  for (const row of rows) {
-    if (row.archivedAt != null) continue;
-    for (const b of row.balances) {
-      const id = displayTokenId(b);
-      if (!id || !refreshable.has(id)) continue;
-      const tv = enriched.get(id);
-      if (tv?.hasRef && tv.price?.stale !== false) return true;
-    }
-  }
-  return false;
-};
-
 /** 单行是否有过期价(含归档行 —— 汇总那步再收窄,行本身照实)。 */
 const rowPricesStale = (
   balances: BalanceView[],
@@ -1176,6 +1159,17 @@ const rowPricesStale = (
     if (!id || !refreshable.has(id)) continue;
     const tv = enriched.get(id);
     if (tv?.hasRef && tv.price?.stale !== false) return true;
+  }
+  return false;
+};
+
+const pricesStaleForRows = (
+  rows: readonly { archivedAt: number | null; balances: BalanceView[] }[],
+  enriched: ReadonlyMap<string, TokenEnrichmentView>,
+): boolean => {
+  for (const row of rows) {
+    if (row.archivedAt != null) continue;
+    if (rowPricesStale(row.balances, enriched)) return true;
   }
   return false;
 };

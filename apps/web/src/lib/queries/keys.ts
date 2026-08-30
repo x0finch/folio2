@@ -63,6 +63,8 @@ export const portfolioKeys = {
     [...portfolioKeys.all, "snapshots", portfolioId, at, after ?? null] as const,
   /** 手记法币身份 ref(tokenId → fiat 命名者),按组合一份。 */
   fiatRefs: (portfolioId: string) => [...portfolioKeys.all, "fiat-refs", portfolioId] as const,
+  /** fiatRefs 域前缀 —— 手记代币变更后刷新映射表用它。 */
+  fiatRefsPrefix: () => [...portfolioKeys.all, "fiat-refs"] as const,
   /** 链平台展示元数据;键集由客户端从快照原料算好再传入。 */
   platformMeta: (chainIds: readonly string[]) =>
     [...portfolioKeys.all, "platform-meta", ...chainIds] as const,

@@ -52,9 +52,15 @@ export const REFRESH_MAP = {
   /**
    * 账户与手记资产的增删改:新建 / 更新 / 归档 / 删除账户、替换凭据,以及手记代币与手记活动的增删改。
    *
-   * 账户行本身 + 同步轮次(页头摘要) + dataStats。快照要等下一轮同步才变,这里不刷。
+   * 账户行本身 + 同步轮次(页头摘要) + dataStats + 手记法币身份。快照要等下一轮同步才变,这里不刷。
    */
-  "account.write": [accountKeys.all, syncKeys.all, settingsKeys.dataStats()],
+  "account.write": [
+    accountKeys.all,
+    syncKeys.all,
+    settingsKeys.dataStats(),
+    portfolioKeys.fiatRefsPrefix(),
+    tokenKeys.enrichment(),
+  ],
 
   /**
    * 标签的新建 / 改名 / 删除,以及给账户打标签 / 摘标签。

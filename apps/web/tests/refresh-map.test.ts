@@ -65,6 +65,8 @@ describe("刷新映射表", () => {
     seed(accountKeys.manualDetail("a1"));
     seed(syncKeys.round("pf-1"));
     seed(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT));
+    seed(portfolioKeys.fiatRefs("pf-1"));
+    seed(tokenKeys.enrichment());
 
     await invalidateFor(queryClient, "account.write");
 
@@ -74,6 +76,8 @@ describe("刷新映射表", () => {
       ),
     ).toEqual([true, true, true]);
     expect(isInvalidated(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT))).toBe(false);
+    expect(isInvalidated(portfolioKeys.fiatRefs("pf-1"))).toBe(true);
+    expect(isInvalidated(tokenKeys.enrichment())).toBe(true);
   });
 
   it("account.write 刷 dataStats,但不碰估值口径与 provider key", async () => {

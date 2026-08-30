@@ -10,6 +10,7 @@ import { ConnectorBadge } from "@/components/connector-badge";
 import { QueryBoundary } from "@/components/query-boundary";
 import { TagBadges } from "@/components/tag-badges";
 import { isManual } from "@/lib/core/manual";
+import { type AccountSyncStatus, accountSyncStatus } from "@/lib/core/sync-status";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
 import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
@@ -23,7 +24,6 @@ import {
   type TagList,
   tagListQuery,
 } from "@/lib/queries/tags";
-import { type AccountSyncStatus, accountSyncStatus } from "@/lib/server/sync/status";
 import { HeaderSync } from "@/routes/_authed/-home/header-sync";
 import { GainSkeleton, ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 import { AccountDetailSheet } from "./account-detail-sheet";
