@@ -25,7 +25,6 @@ import {
   tokenPriceAt,
   tokenQuantityAt,
 } from "@/lib/core/manual";
-import type { GainHistoryRow } from "@/lib/core/portfolio";
 import type { BalanceLike } from "@/lib/core/token-model";
 import { NAMER } from "@/lib/server/oracle";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "./batch";
@@ -588,62 +587,58 @@ export const editManualActivity = (
     return { ok: true };
   });
 
-// manual 账户的 24h 盈亏原料(ADR 0040 / #447 第 3 片)。
+// manual 账户「24 小时前」那一端的起点快照(ADR 0050,两端相减)。
 //
-// **manual 从不写快照(ADR 0018)**,所以上一片里它的线只有一个当下点 → 一律「算不出」。但它手上
-// 的东西比快照更好:账本记着每笔什么时候买的、多少钱买的。所以不迁就快照网格,**按活动时刻切段**。
+// **manual 从不写快照(ADR 0018)**,所以它没有一张 `snapshots.asOf` 查得到的起点快照。但账本能算
+// **任意时刻**的值 —— 于是按 `start`(= 24 小时前那一刻)现算一张合成起点快照,注入 `prevByAccount`,
+// 之后与同步账户走同一条两端相减。
 //
-// 由此 manual 账户比同步账户准。那本来就合理 —— 你实实在在多告诉了系统一些东西;这不是两套方法,
-// 是同一个方法喂了更好的数据,与「同步越勤越准」是同一个道理。
-//
-// 两处必须这样做的地方:
-//
-// ① **窗口起点那一刻直接产点**,时刻就是 `since` 本身。账本能算任意时刻的值,没有「快照落在哪儿」
-//    这回事 —— 于是容差判定必然通过,manual 账户只要有账本就永远算得出。
-//
-// ② **每个币在账户的每个观测时刻都产一行,哪怕它那一刻没有活动。** 装配层(`buildGainLines`)对
-//    「某时刻缺这个币的行」的解读是「数量归零」—— 那条规则是为快照写的(快照是全量的),对账本
-//    这种稀疏点恰好反过来:没有活动只表示没动过。少产一行,持仓就会在别的币交易的那一刻被清零。
-export const loadManualGainHistory = (
+// **起点在不在** = 有没有任何一笔活动发生在 `start` 或更早:今天才建的 manual 账户不满 24 小时,
+// 没有起点 → 不注入(该账户 24h 盈亏 `—` / 当天充值全算进组合,由分档规则处理)。
+export const injectManualPrevSnapshots = (
   accounts: AccountSafe[],
+  prevByAccount: Map<string, SnapshotWithBalances>,
+  start: number,
   now: number,
-  since: number,
-): Effect.Effect<GainHistoryRow[], NotFound, Database | Oracle> =>
+): Effect.Effect<void, NotFound, Database | Oracle> =>
   Effect.gen(function* () {
     // 归档账户不参与(ADR 0039:封存之后不再产生 24h 盈亏)。
     const manual = accounts.filter((a) => isManual(a.connectorId) && a.archivedAt == null);
-    const out: GainHistoryRow[] = [];
     yield* Effect.forEach(
       manual,
       (account) =>
         Effect.gen(function* () {
           const tokens = yield* loadHistoryTokens(account.id);
-          if (tokens.length === 0) return;
+          if (!tokens.some((tk) => tk.activities.some((a) => a.occurredAt <= start))) return;
           const priceAt = yield* buildHistoricalPriceAt(tokens, now);
-          // 观测时刻取**账户级**并集(见上面 ②):窗口起点 + 窗口内每一笔活动的时刻。
-          const times = new Set<number>([since]);
-          for (const tk of tokens) {
-            for (const a of tk.activities) {
-              if (a.occurredAt > since && a.occurredAt < now) times.add(a.occurredAt);
-            }
-          }
-          const sorted = [...times].sort((a, b) => a - b);
-          for (const tk of tokens) {
-            for (const t of sorted) {
-              const amount = tokenQuantityAt(tk, t);
-              out.push({
-                accountId: account.id,
-                takenAt: t,
-                tokenId: tk.id,
-                amount,
-                // 价走 ADR 0019 的降级链:oracle 历史价 → 账本里最近一条记了价的活动 → unitPrice。
-                usdValue: amount * tokenPriceAt(tk, t, priceAt),
-              });
-            }
-          }
+          const balances = tokens.map((tk, i) => {
+            const amount = tokenQuantityAt(tk, start);
+            return {
+              id: `manual:${account.id}:${i}`,
+              snapshotId: `manual:${account.id}`,
+              amount,
+              // 价走 ADR 0019 的降级链:oracle 历史价 → 账本里最近一条记了价的活动 → unitPrice。
+              usdValue: amount * tokenPriceAt(tk, start, priceAt),
+              kind: "spot" as const,
+              platform: MANUAL_CONNECTOR_ID,
+              selfPrice: null,
+              tokenId: tk.id,
+              metaJson: null,
+            };
+          });
+          const totalUsd = balances.reduce((sum, b) => sum + b.usdValue, 0);
+          prevByAccount.set(account.id, {
+            snapshot: {
+              id: `manual:${account.id}`,
+              accountId: account.id,
+              takenAt: start,
+              totalUsd,
+              note: null,
+            },
+            balances,
+          });
         }),
       // 每账户一次取数,顺序跑 —— 与 loadManualHistoryRows 同一个理由(共用限频额度)。
       { concurrency: 1, discard: true },
     );
-    return out;
   });

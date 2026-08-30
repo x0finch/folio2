@@ -1,18 +1,19 @@
 import { type CacheWrite, Database } from "@folio/db";
 import { Cause, Clock, Effect } from "effect";
-import { defiGainKey, toAccountSections } from "@/lib/core/account-view";
+import { toAccountSections } from "@/lib/core/account-view";
 import { accountsInView, pinsInView, type TabPin, toTabPin } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
-import { type Gain, kindPresence, type OverviewView, resolvePinLabel } from "@/lib/core/portfolio";
+import { kindPresence, resolvePinLabel } from "@/lib/core/portfolio";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import { backfillForUser } from "@/lib/server/runtime";
-import { loadAccountHoldings } from "./account-holdings";
-import type { AccountGain24h, DefiGain, PortfolioGain24h } from "./gain";
 import { buildScopedOverview, type PortfolioScope, resolveScope } from "./scope";
 
-// 首页那几个数 —— 总额、持仓聚合、24h 盈亏、tab 条:**算在同步收官那一刻,读的时候只做
-// 「读 + 传」**(ADR 0049 裁定 2)。这个文件是那台机器;`overview.ts` / `gain.ts` / `tabs.ts`
-// 是它的三个出口,各自只剩「读哪个键、没有的时候端什么」。
+// 首页那几个数 —— 总额、持仓聚合、tab 条:**算在同步收官那一刻,读的时候只做「读 + 传」**
+//(ADR 0049 裁定 2)。这个文件是那台机器;`tabs.ts` 是仍走它的读出口。
+//
+// **24h 盈亏已退场(FOL-51 / ADR 0050)**:改成浏览器从快照原料两端相减(`snapshot-data` 一次带
+// 当前 + 24 小时前两组),不再预计算、不再有 gain 键 / gain 读接口 / pending 轮询。总览本身也已
+// 改走原料接口(`snapshot-data`);这里的 `overviewKey` 目前无读者,与 tab 条一起留给 FOL-52 收编。
 //
 // 这几条接口都是「原料大、结果小」的样板:窗口内几千行余额历史、每个账户的整张快照进去,
 // 一屏数字出来。原料扔给前端连序列化都超标,而现算合起来远超免费档一次请求的 10ms CPU。
@@ -102,10 +103,6 @@ const plainKeyOf =
 
 /** 组合总览(总额 + 持仓聚合 + 分区 + 小计)—— 吃 pin。 */
 export const overviewKey = keyOf("overview");
-/** 组合级 24h 盈亏 —— 吃 pin。 */
-export const portfolioGainKey = keyOf("gain");
-/** 账户级 24h 盈亏 —— 一个组合一个键。 */
-export const accountGainKey = plainKeyOf("gain-accounts");
 /** 首页 tab 条 —— 一个组合一个键。 */
 export const tabStripKey = plainKeyOf("tabstrip");
 
@@ -181,62 +178,6 @@ interface Stored<A> {
 }
 
 // —— 算(只在同步收官与后台补算这两条路上跑)——
-
-/**
- * 总览里那些盈亏字段,摘出来单独存一份。
- *
- * **摘,不是重算** —— 存进 `gain` 键的就是总览那个对象上的同一批数字,所以「首页那个总额」
- * 与「它旁边那个 24h」结构上不可能来自两次不同的计算。
- */
-const portfolioGainOf = (view: OverviewView): PortfolioGain24h => {
-  const holdings: Record<string, Gain | null> = {};
-  for (const h of view.holdings) holdings[h.key] = h.gain24h ?? null;
-  const defi: Record<string, DefiGain | null> = {};
-  for (const s of view.sections) {
-    for (const g of s.defi) defi[defiGainKey(s.account.id, g.protocol)] = g.gain24h ?? null;
-  }
-  return { portfolio: view.gain24h ?? null, holdings, defi };
-};
-
-/**
- * 总览**去掉盈亏字段**的那一份 —— `getPortfolioOverview` 的返回形状一个字没变(#488 票 5
- * 之后它就不带盈亏了,盈亏走自己那条读取)。
- *
- * 之所以是「算一次、摘两份」而不是「按 `withGain` 各算一次」:后者每个维度要把整个窗口的
- * 余额历史再捞一遍、把持仓再聚合一遍,换来的是两份本该相等的数字来自两个时刻。
- */
-const withoutGain = ({ gain24h: _portfolio, ...view }: OverviewView): OverviewView => ({
-  ...view,
-  holdings: view.holdings.map(({ gain24h: _row, ...h }) => h),
-  sections: view.sections.map((s) => ({ ...s, defi: s.defi.map(({ gain24h: _g, ...g }) => g) })),
-});
-
-/** 账户级盈亏的摘取(账户行 + 各余额行)。归档账户两级都不出现(ADR 0039)。 */
-const accountGainOf = (
-  view: Effect.Effect.Success<ReturnType<typeof loadAccountHoldings>>,
-): AccountGain24h => {
-  const accounts: Record<string, Gain | null> = {};
-  const balances: Record<string, Gain | null> = {};
-  for (const r of view.rows) {
-    if (r.archivedAt == null) accounts[r.account.id] = r.gain24h ?? null;
-    for (const b of r.balances) {
-      if (r.archivedAt != null || b.tokenId == null) continue;
-      balances[b.id] = b.gain24h ?? null;
-    }
-  }
-  return { accounts, balances };
-};
-
-/**
- * 组合级 24h 盈亏的**现算**。同一条 `buildScopedOverview(..., true)`,只把盈亏字段带出来。
- * 预计算与**对拍测试**用它;读接口不碰。
- */
-export const computePortfolioGain24h = (data: PortfolioScope) =>
-  Effect.map(buildScopedOverview(data, true), portfolioGainOf);
-
-/** 账户级 24h 盈亏的现算(#493 票 3)。同上,只把盈亏字段带出来。 */
-export const computeAccountGain24h = (data: PortfolioScope) =>
-  Effect.map(loadAccountHoldings(data, true), accountGainOf);
 
 /**
  * 首页 tab 条的**现算**(#488 票 4)。只回答「这个组合里有没有永续 / DeFi、自定义 Tab 叫什么」。
@@ -390,25 +331,13 @@ export const precomputePortfolio = (portfolioId: string) =>
     // **逐个维度串行算。** 并发发出去只是把同一批 D1 往返挤在一起,而这段跑在 `waitUntil` /
     // cron 里,没人在等它。
     //
-    // **已知的浪费,刻意留着**:每个维度各自跑一遍 `buildScopedOverview`,而它里面那句
-    // `listBalanceHistory(since)` **不按账户收窄** —— 整个窗口的历史全捞回来,再在 JS 里按
-    // 这一维的账户集过滤。于是 P 个 pin = P+1 次一模一样的全量扫描(还要乘以组合数)。
-    // 真正的修法是把原料读一次、按各维度切,但那要给 `buildScopedOverview` 开一条「收预加载
-    // 原料」的路,而它同时也是**对拍测试的被测对象** —— 把那条缝一起动会让「两条路算得一样吗」
-    // 这件事失去参照。留到单独一票。
-    // 代价的实际大小:pin 数中位是 0(这个循环就一圈)。
+    // **只剩总览 + tab 条两族**(FOL-51):24h 盈亏改成浏览器从快照原料两端相减,预计算不再算它。
+    // 首页总览其实读的是 `snapshot-data`(原料接口),这个 `overviewKey` 目前无读者、留给 FOL-52
+    // 收编;tab 条仍走预计算读。代价:pin 数中位是 0(这个循环就一圈)。
     for (const pin of dimensions) {
-      const view = yield* buildScopedOverview(
-        { portfolioId: selectedId, pin: pin ?? undefined },
-        true,
-      );
-      at(overviewKey(selectedId, pin), withoutGain(view));
-      at(portfolioGainKey(selectedId, pin), portfolioGainOf(view));
+      const view = yield* buildScopedOverview({ portfolioId: selectedId, pin: pin ?? undefined });
+      at(overviewKey(selectedId, pin), view);
     }
-    at(
-      accountGainKey(selectedId, null),
-      accountGainOf(yield* loadAccountHoldings({ portfolioId: selectedId }, true)),
-    );
     at(tabStripKey(selectedId, null), yield* computeHomeTabStrip({ portfolioId: selectedId }));
     yield* db.cache.putMany(writes);
     return true;

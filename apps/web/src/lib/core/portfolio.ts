@@ -16,7 +16,7 @@ import {
   parseDefiMeta,
   toAccountSections,
 } from "@/lib/core/account-view";
-import { isFungible, viewKind } from "@/lib/core/balance-kind";
+import { isFungible, type ViewKind, viewKind } from "@/lib/core/balance-kind";
 import {
   buildPortfolioHistory,
   type HistoryPoint,
@@ -113,244 +113,81 @@ export const deriveLiveAccountTotals = (
   return totals;
 };
 
-//  —— 24h 盈亏(ADR 0040,TWR 分段)
+//  —— 24h 盈亏(ADR 0050,两端相减)——
 
-// 24h 盈亏(ADR 0040)——「过去 24 小时里**因为价格涨跌**赚了多少」,买卖与充提一律剔除。
-//
-// **算法是时间加权分段(TWR)**,做组合绩效计量的行业标准。在每个能观测到的时刻把窗口切开,
-// 每一小段里数量是不变的,只算价格带来的变化,再把各段合起来 —— 买卖和充提全都落在切口上,
-// 自然被剔除,**不需要知道成交价**。切口 = 每一次同步的快照,所以同步越勤越准。
-//
-// **金额与百分比是两套计算,除不通是对的**:金额是各段价值变动之和,百分比是各段收益率**连乘**。
+// 24h 盈亏(ADR 0050,取代 ADR 0040)——「**现在的值 − 24 小时前的值**」,全站一个口径
+//(百分比基数 = 24 小时前的值)。分段 TWR 弃用(太复杂、解释成本高过它剔掉的那点误差):
+// **明确接受充值 / 提现体现在当天盈亏里,这是设计,不是 bug** —— 你充进 10 万,今天就 +10 万,
+// 数字与脚下那条净值曲线从此对得上。起点取法见 `snapshots.asOf`:每账户 [now-7d, now-24h] 窗口内
+// 最近一张;窗口内无快照 → 起点空(账户不满 24 小时 / 断线超 7 天)。
 
-// 窗口:滚动 24 小时,不是自然日(ADR 0040)。
+// 窗口:滚动 24 小时,不是自然日(沿用 ADR 0040 的权衡 —— 币市不休市、零点在哪个时区说不清)。
 export const GAIN_WINDOW_MS = 24 * 60 * 60 * 1000;
-// 基准点允许偏离窗口起点多远。快照稀疏,不会正好落在 24 小时前那一刻。±2 小时。
-export const GAIN_BASIS_TOLERANCE_MS = 2 * 60 * 60 * 1000;
-
-// 一条持仓线在某时刻的观测。`value` 是那一刻的冻结市值,`amount` 是数量 —— 单价由两者相除得出。
-export interface GainPoint {
-  t: number;
-  amount: number;
-  value: number;
-}
-
-// 一条持仓线 = 某账户持有的某个币在窗口内的观测序列(升序)。
-// **`points[0]` 必须是基准点**(窗口起点那一刻的观测),由取数层负责。
-export interface GainLine {
-  points: readonly GainPoint[];
-}
+// 起点回看下界:24 小时前那一刻往前最多再找 7 天(`snapshots.asOf` 的 floor)。断线超 7 天 →
+// 窗口内无起点 → 该账户涨跌当 0,不拿极旧的值虚增(ADR 0050 / FOL-43)。
+export const GAIN_START_FLOOR_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface Gain {
   amount: number;
   pct: number | null;
-  // 摊开给用户看的分段(#445)。**已经合并过**:相邻的、你没动过手的段合成一段。
-  segments: GainSegment[];
-}
-
-// 只在本模块与 `Gain.segments` 里出现,不单独导出(knip:没有外部消费者就别开 export)。
-interface GainSegment {
-  from: number;
-  to: number;
-  openValue: number; // 段初持仓价值(各线之和)—— 这一段的收益率就是拿它当分母
-  gain: number;
-  pct: number | null;
-  // 这一段的起点是不是一个「你动过手」的切口(相对上一段,持有数量变了)。首段恒 false。
-  openedByChange: boolean;
-}
-
-// 阶梯取值:≤ t 的最后一个观测(与 buildPortfolioHistory 的重建语义一致 —— 快照之间保持不变)。
-function at(points: readonly GainPoint[], t: number): GainPoint | undefined {
-  let found: GainPoint | undefined;
-  for (const p of points) {
-    if (p.t > t) break;
-    found = p;
-  }
-  return found;
-}
-
-function priceOfPoint(p: GainPoint, fallback: number): number {
-  // 数量为 0 时单价无从得出(卖光的那一笔)。沿用上一段的价,于是这一段收益记 0 —— 保守。
-  return p.amount !== 0 ? p.value / p.amount : fallback;
 }
 
 /**
- * 一组持仓线的 24h 盈亏。传单个 Holding 的各持有点 → 该行的数;传全部线 → 组合层的数。
- * 同一个函数两用,所以「各行相加 = 首页那个数」是结构上成立的,不是靠两边各算一遍碰对。
- *
- * 算不出(没有一条线有合格的基准点)→ `null`,由界面渲染 `—`。
- * 算得出但确实没涨没跌 → `{ amount: 0, pct: 0 }`,界面显示 0。这两件事必须分得开。
+ * 两端相减。`start == null` = 没有 24 小时前的观测 → `null`,界面渲染 `—`;与 `{ amount: 0 }`
+ * (算得出、确实没涨没跌)必须分得开。分母 ≤ 0(空仓起步 / DeFi 净负债)→ 百分比无从谈起,
+ * `pct` 给 `null`,金额照给。
  */
-export function computeGain24h(lines: readonly GainLine[], now: number): Gain | null {
-  const from = now - GAIN_WINDOW_MS;
-  // 合格 = 首点(基准点)落在窗口起点的容差内。太旧的基准会把「三天前到现在」冒充成 24 小时。
-  const valid = lines.filter(
-    (l) => l.points.length > 0 && Math.abs(l.points[0].t - from) <= GAIN_BASIS_TOLERANCE_MS,
-  );
-  if (valid.length === 0) return null;
+export function endpointGain(start: number | null | undefined, current: number): Gain | null {
+  if (start == null) return null;
+  const amount = current - start;
+  return { amount, pct: start > 0 ? (amount / start) * 100 : null };
+}
 
-  // 统一时间轴:所有合格线的观测时刻并集 + 当下。对齐到同一根轴之后,组合层才能按段汇总。
-  const axis = [...new Set([...valid.flatMap((l) => l.points.map((p) => p.t)), now])]
-    .filter((t) => t <= now)
-    .sort((a, b) => a - b);
+// 「24 小时前」那一组快照原料复用当前组同一个瘦身形状(`snapshots.asOf` 的一张,或 manual 由账本
+// 折算)—— 浏览器一次重建两组(当前 + 24 小时前),两端相减就是盈亏。
+export type PrevSlice = SnapshotSlice;
 
-  let amount = 0;
-  let factor = 1;
-  let compounded = false;
-  const atoms: GainSegment[] = [];
+// 起点账户的几张汇总表:每账户总额 / 每现货代币(跨账户与逐账户)/ 每 DeFi 协议净值。
+interface StartAggregates {
+  accountTotal: Map<string, number>;
+  token: Map<string, number>;
+  tokenByAccount: Map<string, number>;
+  defi: Map<string, number>;
+}
 
-  for (let i = 0; i + 1 < axis.length; i++) {
-    const tA = axis[i];
-    const tB = axis[i + 1];
-    let segGain = 0;
-    let segBase = 0;
-    // 这一段的起点相对上一段,持有数量变没变 —— 变了就是「你在这儿动过手」,是个不能合并的切口。
-    let changed = false;
-    for (const line of valid) {
-      const a = at(line.points, tA);
-      if (!a) continue; // 这条线在这一段还没开始(它的基准点更晚)
-      const b = at(line.points, tB) ?? a;
-      const pA = priceOfPoint(a, 0);
-      const pB = priceOfPoint(b, pA);
-      // **段内数量固定为段初数量** —— 段中途的买卖被剔除的地方就是这里。
-      segGain += a.amount * (pB - pA);
-      segBase += a.value;
-      if (i > 0) {
-        const prev = at(line.points, axis[i - 1]);
-        if (prev && prev.amount !== a.amount) changed = true;
+const startAggregates = (prevByAccount: ReadonlyMap<string, PrevSlice>): StartAggregates => {
+  const accountTotal = new Map<string, number>();
+  const token = new Map<string, number>();
+  const tokenByAccount = new Map<string, number>();
+  const defi = new Map<string, number>();
+  for (const [accountId, slice] of prevByAccount) {
+    let total = 0;
+    for (const b of slice.balances) {
+      total += b.usdValue;
+      const vk = viewKind(b);
+      if (vk === "defi") {
+        const protocol = parseDefiMeta(b.metaJson ?? null).protocol ?? DEFI_FALLBACK_PROTOCOL;
+        const key = defiGainKey(accountId, protocol);
+        defi.set(key, (defi.get(key) ?? 0) + b.usdValue);
+        continue;
       }
+      // 现货合计与总览聚合同一个口径(`isFungible`):perp 权益不进代币行,两端才对得上。
+      if (b.tokenId == null || !isFungible(vk)) continue;
+      token.set(b.tokenId, (token.get(b.tokenId) ?? 0) + b.usdValue);
+      const line = `${accountId} ${b.tokenId}`;
+      tokenByAccount.set(line, (tokenByAccount.get(line) ?? 0) + b.usdValue);
     }
-    amount += segGain;
-    // 分母 ≤ 0 的段不进连乘:空仓段没有收益率可言,而 DeFi 净负债段的「收益率」是个反向的数。
-    if (segBase > 0) {
-      factor *= 1 + segGain / segBase;
-      compounded = true;
-    }
-    atoms.push({
-      from: tA,
-      to: tB,
-      openValue: segBase,
-      gain: segGain,
-      pct: segBase > 0 ? (segGain / segBase) * 100 : null,
-      openedByChange: changed,
-    });
+    accountTotal.set(accountId, total);
   }
+  return { accountTotal, token, tokenByAccount, defi };
+};
 
-  return { amount, pct: compounded ? (factor - 1) * 100 : null, segments: mergeSegments(atoms) };
-}
-
-// 相邻的、没动过手的段合成一段(#445)。合并后 `gain` 相加、`openValue` 取头一段的、`pct` 按
-// 「合并后的收益 ÷ 合并后的期初」重算 —— **不是把各段百分比加起来**。
-function mergeSegments(atoms: readonly GainSegment[]): GainSegment[] {
-  const out: GainSegment[] = [];
-  for (const seg of atoms) {
-    const last = out[out.length - 1];
-    if (last && !seg.openedByChange) {
-      last.to = seg.to;
-      last.gain += seg.gain;
-      last.pct = last.openValue > 0 ? (last.gain / last.openValue) * 100 : null;
-      continue;
-    }
-    out.push({ ...seg });
-  }
-  return out;
-}
-
-// —— 从快照历史装配持仓线 ——
-
-// 余额历史里的一行(`SnapshotStore.listBalanceHistory` 的投影)。
-export interface GainHistoryRow {
-  accountId: string;
-  takenAt: number;
-  tokenId: string | null;
-  amount: number;
-  usdValue: number;
-  // DeFi 分流用。代币聚合那条路不看它们;协议行靠 `kind === "defi"` 挑腿、再从 `metaJson` 读协议名。
-  kind?: string;
-  metaJson?: string | null;
-}
-
-// 当下持仓(overview 的实时现推值,与首屏显示的市值同源)。
-export interface GainCurrentRow {
-  accountId: string;
-  tokenId: string | null;
-  amount: number;
-  value: number;
-}
-
-const pairKey = (accountId: string, tokenId: string) => `${accountId} ${tokenId}`;
-
-/**
- * 把余额历史 + 当下持仓装配成按 `token_id` 分组的持仓线。分组键与 `groupKey` 对齐,
- * 所以 overview 那边直接按 `holding.key` 查得到。
- *
- * ① **同一账户同一个币可能有多行**(EVM 多链、CEX 多 Wallet)—— 先按 (账户, 币, 时刻) 合并。
- * ② **该账户每个快照时刻都要产一个点,哪怕那张快照里没有这个币** —— 补 `(t, 0, 0)`。
- * ③ **末点补当下**,用 overview 的实时值 —— 与首屏那个市值同源。
- */
-export function buildGainLines(
-  history: readonly GainHistoryRow[],
-  current: readonly GainCurrentRow[],
-  now: number,
-  // 线归到哪个组。**线本身恒是 (账户 × 币)**,变的只是怎么把它们攒成一行。
-  groupOf: (row: { accountId: string; tokenId: string }) => string = (row) => row.tokenId,
-): Map<string, GainLine[]> {
-  const byPair = new Map<string, Map<number, { amount: number; value: number }>>();
-  const snapTimes = new Map<string, Set<number>>();
-  for (const r of history) {
-    if (r.tokenId == null) continue; // 无 token_id 的旧行归不了组(见 groupKey)→ 算不出
-    let times = snapTimes.get(r.accountId);
-    if (!times) {
-      times = new Set();
-      snapTimes.set(r.accountId, times);
-    }
-    times.add(r.takenAt);
-    const key = pairKey(r.accountId, r.tokenId);
-    let slots = byPair.get(key);
-    if (!slots) {
-      slots = new Map();
-      byPair.set(key, slots);
-    }
-    const prev = slots.get(r.takenAt);
-    slots.set(r.takenAt, {
-      amount: (prev?.amount ?? 0) + r.amount,
-      value: (prev?.value ?? 0) + r.usdValue,
-    });
-  }
-
-  const nowByPair = new Map<string, { amount: number; value: number }>();
-  for (const c of current) {
-    if (c.tokenId == null) continue;
-    const key = pairKey(c.accountId, c.tokenId);
-    const prev = nowByPair.get(key);
-    nowByPair.set(key, {
-      amount: (prev?.amount ?? 0) + c.amount,
-      value: (prev?.value ?? 0) + c.value,
-    });
-  }
-
-  const out = new Map<string, GainLine[]>();
-  for (const key of new Set([...byPair.keys(), ...nowByPair.keys()])) {
-    const sep = key.indexOf(" ");
-    const accountId = key.slice(0, sep);
-    const tokenId = key.slice(sep + 1);
-    const slots = byPair.get(key);
-    const times = [...(snapTimes.get(accountId) ?? [])].sort((a, b) => a - b);
-    const points: GainPoint[] = [];
-    for (const t of times) {
-      if (t >= now) continue; // 末点统一由下面那个当下点承担,避免同一时刻两个点
-      const slot = slots?.get(t);
-      points.push({ t, amount: slot?.amount ?? 0, value: slot?.value ?? 0 });
-    }
-    const live = nowByPair.get(key);
-    points.push({ t: now, amount: live?.amount ?? 0, value: live?.value ?? 0 });
-    const group = groupOf({ accountId, tokenId });
-    const lines = out.get(group);
-    if (lines) lines.push({ points });
-    else out.set(group, [{ points }]);
-  }
-  return out;
-}
+// 24h 盈亏是**最简两档**(ADR 0050 / FOL-51 最终口径,取代 FOL-43 那套 new/stale 分档):
+//   · **有 24 小时前基准**(`prev`:窗口内有起点快照 / manual 由账本折算得出)→ **两端相减**
+//     (差值含这天充/提的值,与净值曲线一致)。
+//   · **没有基准**(起点空 —— 新账户 / 新建 manual 不满 24 小时,**或**断线超 7 天)→ **一律 `—`**,不硬算。
+// 判据就是一个 `hasPrev`(账户在不在起点组里),账户级 / 组合级 / 持仓级 / DeFi 级**全部**用它,
+// 零特例、零组合专属闸。所以不再有 `classifyGain`/new/stale —— 一个 `prevByAccount.has(id)` 就够。
 
 //  —— 跨账户聚合(按 canonical 代币成 Holding 树)
 
@@ -582,10 +419,10 @@ export interface OverviewInput {
   mode?: ValuationMode;
   // tokenId → 该 token 在 fiat 命名者下的 ref(`fiat/issued:<CODE>`);缺省空 → 无法币。
   fiatRefs?: ReadonlyMap<string, string>;
-  // 24h 盈亏的原料(ADR 0040):窗口内的余额历史。缺省 → 不算盈亏(字段缺席)。
-  gainHistory?: readonly GainHistoryRow[];
-  // 「当下」那一刻。测试注入固定值;生产传 `Date.now()`。
-  now?: number;
+  // 24h 盈亏的原料(ADR 0050):「24 小时前」那一组快照(`snapshots.asOf` + manual 折算)。
+  // 缺省 → 不算盈亏(字段缺席)。当前组是 `byAccount`,两组相减就是盈亏。判据只是「账户在不在这组里」
+  // (有基准两端相减 / 无基准 `—`),**不看当下时刻**,所以这一层不再需要 `now`。
+  prevByAccount?: ReadonlyMap<string, PrevSlice>;
 }
 
 interface Elig {
@@ -606,7 +443,7 @@ export interface OverviewView {
     takenAt: number | null;
   }[];
   totalUsd: number;
-  // 组合层 24h 盈亏(ADR 0040)。**可选**:首页总览不再算它(#488 票 5),改走独立读取;测试仍可传入 gainHistory 走这条。
+  // 组合层 24h 盈亏(ADR 0050,两端相减)。**可选**:传了 `prevByAccount` 才算,字段才出现。
   gain24h?: Gain | null;
   holdingsSubtotal: number;
   defiSubtotal: number;
@@ -670,8 +507,7 @@ export function buildOverview(
     connectorMeta,
     mode = "self-first",
     fiatRefs,
-    gainHistory,
-    now = Date.now(),
+    prevByAccount,
   }: OverviewInput,
 ): OverviewView {
   // 法币身份:该 token 有 fiat 命名者的 ref、且经 fiatCodeOf 落在白名单内 → 是法币(身份驱动,不看 symbol)。
@@ -721,22 +557,54 @@ export function buildOverview(
   }));
   const holdings = buildCanonicalHoldings(aggInputs);
 
-  const withGain = gainHistory != null;
+  const withGain = prevByAccount != null;
   let portfolioGain: Gain | null | undefined;
-  if (withGain) {
-    // 24h 盈亏(ADR 0040)。**当下点用现推后的 value**(`aggInputs` 里那个,即首屏显示的市值)。
-    const currentRows: GainCurrentRow[] = aggInputs.map((r) => ({
-      accountId: r.account.id,
-      tokenId: r.tokenId ?? null,
-      amount: r.amount,
-      value: r.value,
-    }));
-    const gainLines = buildGainLines(gainHistory, currentRows, now);
-    for (const h of holdings) {
-      h.gain24h = computeGain24h(gainLines.get(h.key) ?? [], now);
+  // 起点各表 + 有基准的账户集,组合 / 持仓 / DeFi 三块共用(DeFi 那块在 sections 建好之后)。
+  let start: StartAggregates | undefined;
+  // **有 24h 前基准的账户集**(= 起点组里的账户)。没有基准的账户(新建 / 断线)两端都不计 → `—`。
+  let prevAccounts: Set<string> | undefined;
+  let hasPrevAny = false;
+  if (withGain && prevByAccount) {
+    const startAgg = startAggregates(prevByAccount);
+    start = startAgg;
+    // 最简两档:账户在不在起点组里(`start.accountTotal` 的键就是有基准的账户)。
+    const prevAccountIds = new Set(
+      accounts.filter((a) => startAgg.accountTotal.has(a.id)).map((a) => a.id),
+    );
+    prevAccounts = prevAccountIds;
+    hasPrevAny = prevAccountIds.size > 0;
+    // 组合层(ADR 0050 最终口径):只数**有基准**的账户,两端相减 —— 起点 = 各基准总额之和,现值 =
+    // 同一批账户的现推净值之和。没有基准的账户(新建 / 断线)整个不计(它的市值仍在 totalUsd 里,
+    // 但不进涨跌)。一个有基准的账户都没有 → null(界面 `—`)。
+    let startSum = 0;
+    let curSum = 0;
+    for (const account of accounts) {
+      if (!prevAccountIds.has(account.id)) continue;
+      startSum += startAgg.accountTotal.get(account.id) ?? 0;
+      curSum += liveTotals.get(account.id) ?? 0;
     }
-    // 组合层:**同一个函数、喂全部线**。「各行相加 = 首页那个数」于是是结构上成立的。
-    portfolioGain = computeGain24h([...gainLines.values()].flat(), now);
+    portfolioGain = hasPrevAny ? endpointGain(startSum, curSum) : null;
+    // 持仓层:按 token_id 两端相减。**现值侧与起点侧同口径**(`startAggregates.token` 只收 isFungible
+    // 现货、且有 token_id 的行;DeFi 走各自那套)—— 少了这个过滤,同一 token_id 又有现货又有 DeFi/
+    // 非同质行时现值会多算、盈亏虚高。现值只数**有基准**账户的行(与组合同口径),起点缺这个币 → 0
+    // (基准账户 24h 前没这个币 / 今天在基准账户里新买的那一份)。
+    const curByToken = new Map<string, number>();
+    for (const r of aggInputs) {
+      if (!prevAccountIds.has(r.account.id)) continue;
+      if (r.tokenId == null || !isFungible(r.kind as ViewKind)) continue;
+      curByToken.set(r.tokenId, (curByToken.get(r.tokenId) ?? 0) + r.value);
+    }
+    for (const h of holdings) {
+      const id = h.token.id;
+      // 这个币**有没有基准**:被某个有基准的账户现在持有(`curByToken`)或 24 小时前持有过
+      // (`start.token`)。都没有(比如它只存在于一个今天新建 / 断线的账户里)→ 没有可比的起点 → `—`,
+      // 与账户级「无基准 → `—`」一致,不拿 `endpointGain(0,0)` 冒充「$0」。无 token_id 的持仓同理算不出。
+      const hasBase = id != null && (curByToken.has(id) || startAgg.token.has(id));
+      h.gain24h =
+        hasBase && id != null
+          ? endpointGain(startAgg.token.get(id) ?? 0, curByToken.get(id) ?? 0)
+          : null;
+    }
   }
 
   // 读路径装饰:每个 platform key 都给一份展示(命中真名+logo,否则兜底名),cache-only 零网络。
@@ -800,63 +668,23 @@ export function buildOverview(
         (s.perp != null && (s.perp.positions.length > 0 || s.perp.equity != null)),
     );
 
-  if (withGain && gainHistory) {
-    // —— DeFi 协议行的 24h 盈亏(ADR 0040 的已知妥协)—— 每个 (账户 × 协议) 当成一条数量恒为 1 的线。
-    const defiHistory = gainHistory.filter((r) => r.kind === "defi");
-    const defiSlots = new Map<string, { row: GainHistoryRow; gross: number }>();
-    for (const r of defiHistory) {
-      const protocol = parseDefiMeta(r.metaJson ?? null).protocol ?? DEFI_FALLBACK_PROTOCOL;
-      const k = `${defiGainKey(r.accountId, protocol)}|${r.takenAt}`;
-      const slot = defiSlots.get(k);
-      if (slot) {
-        slot.row.usdValue += r.usdValue;
-        slot.gross += Math.abs(r.usdValue);
-      } else {
-        defiSlots.set(k, {
-          row: {
-            accountId: r.accountId,
-            takenAt: r.takenAt,
-            tokenId: protocol,
-            amount: 1,
-            usdValue: r.usdValue,
-          },
-          gross: Math.abs(r.usdValue),
-        });
-      }
-    }
-    const defiGross = new Map<string, { t: number; gross: number }>();
-    for (const { row, gross } of defiSlots.values()) {
-      const k = defiGainKey(row.accountId, row.tokenId as string);
-      const prev = defiGross.get(k);
-      if (!prev || row.takenAt < prev.t) defiGross.set(k, { t: row.takenAt, gross });
-    }
-    const defiCurrent: GainCurrentRow[] = sections.flatMap((s) =>
-      s.defi.map((g) => ({
-        accountId: s.account.id,
-        tokenId: g.protocol,
-        amount: 1,
-        value: g.rows.reduce((sum, r) => sum + r.usdValue, 0),
-      })),
-    );
-    const defiLines = buildGainLines(
-      [...defiSlots.values()].map((x) => x.row),
-      defiCurrent,
-      now,
-      (r) => defiGainKey(r.accountId, r.tokenId),
-    );
+  if (withGain && start) {
+    // —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相减)—— 该协议现在的净值 − 24 小时前的净值,
+    // 与全站同一口径(旧的「按总敞口分母」废止)。`start`(24 小时前那张的协议净值)一路带着,
+    // 好让 `mergeDefiGroups` 跨账户合并时按「合并后的收益 ÷ 合并后的起点」重算百分比。
     for (const s of sections) {
+      const hasPrevAcc = prevAccounts?.has(s.account.id) ?? false;
       for (const g of s.defi) {
-        const k = defiGainKey(s.account.id, g.protocol);
-        const gain = computeGain24h(defiLines.get(k) ?? [], now);
-        const gross = defiGross.get(k)?.gross ?? 0;
-        g.gain24h =
-          gain == null
-            ? null
-            : {
-                amount: gain.amount,
-                pct: gross > 0 ? (gain.amount / gross) * 100 : null,
-                grossBasis: gross,
-              };
+        if (!hasPrevAny) {
+          g.gain24h = null;
+          continue;
+        }
+        const key = defiGainKey(s.account.id, g.protocol);
+        // 无基准账户(新建 / 断线超 7 天)两端都不计 → 涨跌当 0。
+        const startVal = hasPrevAcc ? (start.defi.get(key) ?? 0) : 0;
+        const current = hasPrevAcc ? g.rows.reduce((sum, r) => sum + r.usdValue, 0) : 0;
+        const eg = endpointGain(startVal, current);
+        g.gain24h = eg == null ? null : { amount: eg.amount, pct: eg.pct, start: startVal };
       }
     }
   }
@@ -932,6 +760,9 @@ export interface PortfolioSnapshotData {
   accounts: AccountSafe[];
   // byAccount 的 entries(accountId → 瘦身快照:takenAt + 瘦身余额行,含 manual 注入)。见 `SnapshotView`。
   snapshots: [string, SnapshotView][];
+  // 「24 小时前」那一组(`snapshots.asOf` + manual 折算),与当前组并列发下来 —— 浏览器一次
+  // 重建两组、两端相减算 24h 盈亏(ADR 0050)。窗口内没起点快照的账户不在内(涨跌当 0 / `—`)。
+  prevSnapshots: [string, SnapshotView][];
   // 富化字典 entries(token_id → 瘦身行:名字 / 价格 / change24h / 有没有图)。**不含上游 logo URL**
   // (FOL-48:有 id 就能拼 `/api/logo/token/{id}`)。
   enriched: [string, TokenView][];
@@ -943,19 +774,23 @@ export interface PortfolioSnapshotData {
   fiatRefs: [string, string][];
   // 估值口径(self-first / source-first)。
   mode: ValuationMode;
+  // 服务端装配那一刻(`Date.now()`)。**下发而不是 select 里现取**:24h 盈亏要用它分「新账户 /
+  // 断线」,SSR 与补水两遍读同一个固定值才不会 hydration mismatch。
+  now: number;
 }
 
-// 客户端把原料算成总览:重建 Map → 纯算 liveTotals / refreshableIds → `buildOverview`。
-// **不传 gainHistory**:总览不带盈亏(#488 票 5),所以这一份与服务端 `buildScopedOverview(_, false)`
-// 逐值一致 —— 两条路共用同一个 `buildOverview`,「两份本该相等的数字」结构上不可能走散。
-export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewView {
-  // 瘦身包裹 → buildOverview 要的最小切片(takenAt 挪回 `snapshot.takenAt` 的位置)。
-  const byAccount = new Map<string, SnapshotSlice>(
-    raw.snapshots.map(([id, s]) => [
-      id,
-      { snapshot: { takenAt: s.takenAt }, balances: s.balances },
-    ]),
+// 瘦身快照包裹 entries → buildOverview 要的最小切片(takenAt 挪回 `snapshot.takenAt` 的位置)。
+const sliceMap = (entries: [string, SnapshotView][]): Map<string, SnapshotSlice> =>
+  new Map(
+    entries.map(([id, s]) => [id, { snapshot: { takenAt: s.takenAt }, balances: s.balances }]),
   );
+
+// 客户端把原料算成总览:重建两组快照(当前 + 24 小时前)→ 纯算 liveTotals / refreshableIds →
+// `buildOverview`。总额 / 持仓 / 各小计 / pricesStale 与服务端 `buildScopedOverview` 逐值一致
+// (共用同一个 `buildOverview`);24h 盈亏(ADR 0050)由两组快照两端相减,浏览器里算。
+export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewView {
+  const byAccount = sliceMap(raw.snapshots);
+  const prevByAccount = sliceMap(raw.prevSnapshots);
   const enriched = new Map(raw.enriched);
   const platformMeta = new Map(raw.platformMeta);
   const connectorMeta = new Map(raw.connectorMeta);
@@ -972,28 +807,48 @@ export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewVi
     connectorMeta: (key) => connectorMeta.get(key) ?? null,
     mode: raw.mode,
     fiatRefs,
+    prevByAccount,
   });
 }
 
-// **首次同步中**:组合里有账户,但一张快照都还没有(没有任何账户同步落地 —— 含手记注入的合成
-// 快照也算)。这一刻 `overviewFromSnapshotData` 会算出总额 0 / 空持仓,与「真的空组合(零账户)」在
-// 屏幕上一模一样 —— 首页据此显加载态而不是把「还不知道」画成 $0。
+// 「刚加账户、首次同步还没落地」的时间窗。**这个窗是为了把「短暂的首次同步中」与「从没同步成功」
+// 分开**(见 `isFirstSyncPending`):同步轮几秒到一分钟内就会写下第一张快照,给足 10 分钟余量。
+export const FIRST_SYNC_WINDOW_MS = 10 * 60 * 1000;
+
+// **首次同步中**:组合里有**刚建的**账户,但一张快照都还没有(没有任何账户同步落地 —— 含手记注入
+// 的合成快照也算)。这一刻 `overviewFromSnapshotData` 会算出总额 0 / 空持仓,与「真的空组合(零账户)」
+// 在屏幕上一模一样 —— 首页据此显加载态而不是把「还不知道」画成 $0。
 //
-// 判据从快照原料直接读:`accounts` 非空而 `snapshots`(byAccount entries,已含手记注入)全空。
-// 这与旧 `awaitFirstCompute` 的空态判据同源(`accountTotals.length === 0` 那一支),只是新语义是
-// 「等首次同步写快照」,不是旧的「等后台预计算落地」—— 预计算读侧已删。
+// **「刚建的」这一档是必须的,不是优化**(FOL-51 code-review 修的回归):光判「有账户 + 无快照」对
+// 「从没同步成功过」的账户(坏凭据 / 从没同步成)**永真** → hero 永久卡加载骨架,轮询用尽也不解除。
+// 加账户几秒内同步就会落第一张快照;超过 `FIRST_SYNC_WINDOW_MS` 还没有,那不是「还在同步」,是
+// 「同步不成」—— 该显 $0 / 空态(账户在,值是 0),让用户去查凭据,而不是盯着一片加载。
+// 判据全从快照原料读:`accounts` 里有一个 `createdAt` 落在窗口内、且 `snapshots` 全空。
 export function isFirstSyncPending(raw: PortfolioSnapshotData | undefined): boolean {
-  return !!raw && raw.accounts.length > 0 && raw.snapshots.length === 0;
+  if (!raw || raw.accounts.length === 0 || raw.snapshots.length > 0) return false;
+  return raw.accounts.some((a) => raw.now - a.createdAt < FIRST_SYNC_WINDOW_MS);
 }
 
-//  —— 账户明细的 24h 盈亏摊分(纯计算部分)
+//  —— 账户明细的 24h 盈亏(两端相减,纯计算部分)
 
-// `loadAccountHoldings` 的纯计算部分(ADR 0040 / ADR 0039)。取数(账户 / 快照 / 富化 / 窗口历史)
-// 是调用点的 Effect 适配层;这里只做「有了富化行 + 窗口历史 → 每账户 / 每现货行的 24h 盈亏」。
+// `loadAccountHoldings` 的纯计算部分(ADR 0050 / ADR 0039)。取数(账户 / 当下快照 / 富化 /
+// 「24 小时前」那一组)是调用点的 Effect 适配层;这里只做「有了富化行 + 起点组 → 每账户 /
+// 每现货行的 24h 盈亏」,两端相减(现值 − 24 小时前值)。
 export interface AccountGainRow {
   account: { id: string };
   archivedAt: number | null;
-  balances: readonly { id: string; tokenId?: string | null; amount: number; usdValue: number }[];
+  // 该账户当下净值(冻结口径:最新快照 totalUsd)—— 账户级两端相减的「现值」那一端。
+  totalUsd: number;
+  // `kind`/`metaJson` 是逐币盈亏两端同口径要用的:现值侧只聚合 isFungible 现货行(与起点侧一致),
+  // 否则同一 token_id 又有现货又有 DeFi/perp 行时现值会多算、盈亏虚高。
+  balances: readonly {
+    id: string;
+    tokenId?: string | null;
+    amount: number;
+    usdValue: number;
+    kind: string;
+    metaJson?: string | null;
+  }[];
 }
 
 export type WithAccountHoldingGain<R extends AccountGainRow> = Omit<R, "balances"> & {
@@ -1001,61 +856,66 @@ export type WithAccountHoldingGain<R extends AccountGainRow> = Omit<R, "balances
   balances: Array<R["balances"][number] & { gain24h?: Gain | null }>;
 };
 
+// `prevByAccount` = 「24 小时前」那一组(`snapshots.asOf` + manual 折算)。**最简两档**(与组合级同一套):
+//   · 有基准(`prev != null`)→ 两端相减(账户级 + 逐现货行按市值占比摊分)。
+//   · 无基准(新账户 / 新建 manual 不满 24h,或断线超 7 天)→ 一律 `null`(`—`),不硬算。
+// 归档账户两级都 `undefined`(ADR 0039:界面据此整行省略)。非同质行(defi/perp)逐行盈亏也 `undefined`
+//(各自分区给)。
 export function attachAccountHoldingGains<R extends AccountGainRow>(
   rows: readonly R[],
-  history: readonly GainHistoryRow[],
-  now: number,
+  prevByAccount: ReadonlyMap<string, PrevSlice>,
 ): WithAccountHoldingGain<R>[] {
-  // 账户行的 24h 盈亏:**线按账户攒**;抽屉里的现货行按 (账户 × 币) 攒一次。
-  const current: GainCurrentRow[] = rows.flatMap((r) =>
-    r.balances.map((b) => ({
-      accountId: r.account.id,
-      tokenId: b.tokenId ?? null,
-      amount: b.amount,
-      value: b.usdValue,
-    })),
-  );
-  const gainLines = buildGainLines(history, current, now, (r) => r.accountId);
-  const perToken = buildGainLines(history, current, now, (r) => `${r.accountId} ${r.tokenId}`);
-  const tokenTotals = new Map<string, number>();
-  for (const c of current) {
-    if (c.tokenId == null) continue;
-    const k = `${c.accountId} ${c.tokenId}`;
-    tokenTotals.set(k, (tokenTotals.get(k) ?? 0) + c.value);
-  }
-  const gainByAccount = new Map(
-    rows.map((r) => [
-      r.account.id,
-      // **归档账户不给这个数**(ADR 0039):界面据此整行省略,而不是画 `—`。
-      r.archivedAt != null ? undefined : computeGain24h(gainLines.get(r.account.id) ?? [], now),
-    ]),
-  );
-
-  return rows.map(
-    (r): WithAccountHoldingGain<R> => ({
+  return rows.map((r): WithAccountHoldingGain<R> => {
+    // 逐行盈亏只对 isFungible 现货行有意义(DeFi/perp 行的盈亏由各自的分区给);非同质行 → undefined。
+    const spotOf = (b: R["balances"][number]): boolean =>
+      b.tokenId != null && isFungible(viewKind(b));
+    if (r.archivedAt != null) {
+      return {
+        ...r,
+        gain24h: undefined,
+        balances: r.balances.map((b) => ({ ...b, gain24h: undefined })),
+      };
+    }
+    const prev = prevByAccount.get(r.account.id);
+    // 无基准 → 一律 `—`:账户级 null,现货行 null,非现货行 undefined。
+    if (prev == null) {
+      return {
+        ...r,
+        gain24h: null,
+        balances: r.balances.map((b) => ({ ...b, gain24h: spotOf(b) ? null : undefined })),
+      };
+    }
+    // 有基准:起点各表(账户总额 + 逐现货代币值)从那张起点快照汇。
+    let startTotal = 0;
+    const startToken = new Map<string, number>();
+    for (const b of prev.balances) {
+      startTotal += b.usdValue;
+      if (b.tokenId != null && isFungible(viewKind(b))) {
+        startToken.set(b.tokenId, (startToken.get(b.tokenId) ?? 0) + b.usdValue);
+      }
+    }
+    // 现值:逐 (账户 × 币) 现货合计 —— **与起点侧同口径**(只 isFungible 现货、有 token_id 的行),
+    // 一个币散在多条链 = 抽屉里多行,而两端相减是按币一条。
+    const curToken = new Map<string, number>();
+    for (const b of r.balances) {
+      if (!spotOf(b)) continue;
+      const id = b.tokenId as string;
+      curToken.set(id, (curToken.get(id) ?? 0) + b.usdValue);
+    }
+    return {
       ...r,
-      gain24h: gainByAccount.get(r.account.id),
+      gain24h: endpointGain(startTotal, r.totalUsd),
       balances: r.balances.map((b): R["balances"][number] & { gain24h?: Gain | null } => {
-        if (b.tokenId == null || r.archivedAt != null) return { ...b, gain24h: undefined };
-        const k = `${r.account.id} ${b.tokenId}`;
-        const gain = computeGain24h(perToken.get(k) ?? [], now);
+        if (!spotOf(b)) return { ...b, gain24h: undefined };
+        const id = b.tokenId as string;
+        const total = curToken.get(id) ?? 0;
+        // 起点缺这个币 → 0(今天新买,整份算成今天赚的);两端相减。
+        const gain = endpointGain(startToken.get(id) ?? 0, total);
         if (gain == null) return { ...b, gain24h: null };
-        // 一个币散在多条链 = 抽屉里的多行,而线是按 (账户 × 币) 的一条。按各行市值占比摊分。
-        const total = tokenTotals.get(k) ?? 0;
+        // 按各行市值占比把那一条币的盈亏摊回具体这一行(pct 是币级的,不摊)。
         const share = total === 0 ? 0 : b.usdValue / total;
-        return {
-          ...b,
-          gain24h: {
-            amount: gain.amount * share,
-            pct: gain.pct,
-            segments: gain.segments.map((seg) => ({
-              ...seg,
-              openValue: seg.openValue * share,
-              gain: seg.gain * share,
-            })),
-          },
-        };
+        return { ...b, gain24h: { amount: gain.amount * share, pct: gain.pct } };
       }),
-    }),
-  );
+    };
+  });
 }

@@ -63,48 +63,15 @@ describe("刷新映射表", () => {
     ]);
   });
 
-  // #488 票 5:24h 盈亏从总览拆出去之后,漏刷不会报错,只表现为「同步完了盈亏停在旧数」。
-  // 键落在组合域前缀下,三种视图都要被 sync.round / prices.refreshed 盖住。
-  it("sync.round 与 prices.refreshed 盖住默认 / 非默认 / 自定义 Tab 的 24h 盈亏", async () => {
-    const def = portfolioKeys.gain24h("pf-default");
-    const other = portfolioKeys.gain24h("pf-other");
-    const pinned = portfolioKeys.gain24h("pf-other", { kind: "tag", tagId: "tg1" });
-    for (const k of [def, other, pinned]) seed(k);
-
-    await invalidateFor(queryClient, "sync.round");
-    expect([isInvalidated(def), isInvalidated(other), isInvalidated(pinned)]).toEqual([
-      true,
-      true,
-      true,
-    ]);
-
-    queryClient = new QueryClient();
-    for (const k of [def, other, pinned]) seed(k);
-    await invalidateFor(queryClient, "prices.refreshed");
-    expect([isInvalidated(def), isInvalidated(other), isInvalidated(pinned)]).toEqual([
-      true,
-      true,
-      true,
-    ]);
-  });
-
-  it("sync.round 与 prices.refreshed 盖住账户页的 24h 盈亏", async () => {
-    seed(accountKeys.gain24h("pf-1"));
-    await invalidateFor(queryClient, "sync.round");
-    expect(isInvalidated(accountKeys.gain24h("pf-1"))).toBe(true);
-
-    queryClient = new QueryClient();
-    seed(accountKeys.gain24h("pf-1"));
-    await invalidateFor(queryClient, "prices.refreshed");
-    expect(isInvalidated(accountKeys.gain24h("pf-1"))).toBe(true);
-  });
+  // FOL-51:24h 盈亏改成随总览原料(`portfolioKeys.overview`)/ 持仓(`accountKeys.holdings`)
+  // 一起回,不再有独立的 gain24h 键。所以「盈亏被盖住」这件事由那两个键的失效自然保证,
+  // 无需单独钉一条 —— 下面几条已经盖了 overview / holdings。
 
   // 跨域那条:加一个账户不只是账户列表多一行,首页总额 / 走势 / 按代币的聚合全跟着变。
   // 只刷账户域会让总览停在旧数字,而且不报错 —— 所以这条单独钉住。
   it("account.write 同时刷账户域与组合域", async () => {
     seed(accountKeys.list("pf-1"));
     seed(accountKeys.holdings("pf-1"));
-    seed(accountKeys.gain24h("pf-1"));
     seed(accountKeys.manualDetail("a1"));
     seed(portfolioKeys.overview("pf-1"));
 
@@ -114,11 +81,10 @@ describe("刷新映射表", () => {
       [
         accountKeys.list("pf-1"),
         accountKeys.holdings("pf-1"),
-        accountKeys.gain24h("pf-1"),
         accountKeys.manualDetail("a1"),
         portfolioKeys.overview("pf-1"),
       ].map(isInvalidated),
-    ).toEqual([true, true, true, true, true]);
+    ).toEqual([true, true, true, true]);
   });
 
   it("sync.round 也刷账户域(账户行的市值与上次同步跟着变)", async () => {

@@ -210,8 +210,8 @@ describe("portfolio/overview", () => {
       await seedManualAccount(USER, "手记", { symbol: "SOL", unitPrice: 10, amount: 3 });
       vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
 
-      // 服务端现算 = 总览去掉盈亏那一份(`withGain=false`,与本片接口同口径)。
-      const inline = await call(USER, buildScopedOverview({}, false));
+      // 服务端现算 = 总览那一份(FOL-51 起含 24h 盈亏,与接口发的原料两端相减逐值一致)。
+      const inline = await call(USER, buildScopedOverview({}));
       // 新路径:接口发原料 → 客户端算(照抄前端 select 那一行)。
       const client = overviewFromSnapshotData(await call(USER, handleGetPortfolioSnapshotData({})));
 

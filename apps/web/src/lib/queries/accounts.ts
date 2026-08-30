@@ -2,8 +2,8 @@ import { queryOptions } from "@tanstack/react-query";
 import { getAccountHistory, listAccounts } from "@/lib/server/accounts";
 import { getHoldingHistory } from "@/lib/server/holdings";
 import { getManualAccount } from "@/lib/server/manual-tokens";
-import { getAccountGain24h, listAccountHoldings } from "@/lib/server/portfolio";
-import { pendingPollDelay, STALE_TIME } from "./constants";
+import { listAccountHoldings } from "@/lib/server/portfolio";
+import { STALE_TIME } from "./constants";
 import { accountKeys } from "./keys";
 
 // 账户域的读取入口 —— 与 `lib/server/accounts` / `holdings` / `manual-tokens` 及
@@ -28,17 +28,10 @@ export const accountListQuery = (portfolioId: string) =>
 export const accountHoldingsQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: accountKeys.holdings(portfolioId),
+    // 24h 盈亏(ADR 0050,两端相减)随持仓一起回 —— 服务端一次点查 `asOf` 起点、现算,不再单独一条
+    // 预计算读接口 + 轮询(FOL-51)。
     queryFn: () => listAccountHoldings({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
-  });
-
-/** 账户级 24h 盈亏。`pending` → 短轮询,理由与 `portfolioGain24hQuery` 那条逐字相同。 */
-export const accountGain24hQuery = (portfolioId: string) =>
-  queryOptions({
-    queryKey: accountKeys.gain24h(portfolioId),
-    queryFn: () => getAccountGain24h({ data: { portfolioId } }),
-    staleTime: STALE_TIME.live,
-    refetchInterval: pendingPollDelay,
   });
 
 /** 一份账户列表行的形状(含该组合的归档账户、归属与凭据投影)。 */

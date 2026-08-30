@@ -13,9 +13,8 @@ import {
 import {
   buildOverview,
   deriveLiveAccountTotals,
-  GAIN_BASIS_TOLERANCE_MS,
+  GAIN_START_FLOOR_MS,
   GAIN_WINDOW_MS,
-  type GainHistoryRow,
   overviewChainIds,
   overviewEligibleBalances,
   overviewEnrichIds,
@@ -25,8 +24,8 @@ import {
 import { refreshableTokenIds } from "@/lib/core/token-model";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import {
+  injectManualPrevSnapshots,
   injectManualSnapshots,
-  loadManualGainHistory,
   manualFiatRefs,
 } from "@/lib/server/manual/store";
 
@@ -107,6 +106,9 @@ export const scopedMembership = (
 export interface ScopedMaterials {
   accounts: AccountSafe[];
   byAccount: Map<string, SnapshotWithBalances>;
+  // 「24 小时前」那一组(`snapshots.asOf` 起点 + manual 折算)—— 24h 盈亏两端相减的起点端
+  //(ADR 0050)。窗口 [now-7d, now-24h] 内没起点快照的账户不在内(涨跌当 0 / `—`)。
+  prevByAccount: Map<string, SnapshotWithBalances>;
   enriched: ReadonlyMap<string, TokenView>;
   platformMeta: ReadonlyMap<string, PlatformMeta>;
   fiatRefs: Map<string, string>;
@@ -154,8 +156,19 @@ export const scopedSnapshotMaterials = (data: PortfolioScope) =>
         .filter((s) => inScope.has(s.snapshot.accountId))
         .map((s) => [s.snapshot.accountId, s]),
     );
-    // 手记退出快照(ADR 0018)→ 其合成余额按 `now` 注入(显式传,让本次装配的时刻一致 / 可对拍)。
+    // 「24 小时前」那一端(ADR 0050):每账户 [now-7d, now-24h] 窗口内最近一张(`asOf`)+ manual
+    // 折算注入。当前组与它两端相减就是 24h 盈亏,浏览器 / 服务端共用这份原料。
+    const start = now - GAIN_WINDOW_MS;
+    const prevSnapshots = yield* snapshotStore.asOf(start, now - GAIN_START_FLOOR_MS);
+    const prevByAccount = new Map(
+      prevSnapshots
+        .filter((s) => inScope.has(s.snapshot.accountId))
+        .map((s) => [s.snapshot.accountId, s]),
+    );
+    // 手记退出快照(ADR 0018)→ 当下合成余额按 `now` 注入;起点端按 `start` 现算注入(显式传,
+    // 让本次装配的时刻一致 / 可对拍)。
     yield* injectManualSnapshots(accounts, byAccount, now);
+    yield* injectManualPrevSnapshots(accounts, prevByAccount, start, now);
     const fiatRefs = yield* manualFiatRefs(accounts);
     // 薄适配层(FOL-45):在 Effect 里备好 buildOverview 要的两份字典。富化一次覆盖聚合行 ∪ defi 行
     // (`overviewEnrichIds`);链键去掉连接器自带展示的场馆键(`overviewChainIds`)。
@@ -173,6 +186,7 @@ export const scopedSnapshotMaterials = (data: PortfolioScope) =>
     return {
       accounts,
       byAccount,
+      prevByAccount,
       enriched,
       platformMeta,
       fiatRefs,
@@ -182,27 +196,13 @@ export const scopedSnapshotMaterials = (data: PortfolioScope) =>
     } satisfies ScopedMaterials;
   });
 
-// 总览装配:共用原料 + 手记注入 + 可选的 24h 盈亏原料 → `buildOverview`。
-// `withGain` 是票 5 的切法 —— 总览不再读窗口历史;盈亏读取走同一条装配、把历史带上,
-// 于是「各行相加 = hero 那个数」仍是同一个 `computeGain24h` 喂出来的,不是两处各算。
-export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
+// 总览装配(服务端现算):共用原料 → `buildOverview`,**与浏览器 `overviewFromSnapshotData` 逐值
+// 一致**(含 24h 盈亏,两端相减)——同一份原料、同一个纯函数。预计算路径写的 `overviewKey` 就是这一份
+//(盈亏字段一并带着,但那个键 FOL-51 起无读者,留给 FOL-52 收编)。
+export const buildScopedOverview = (data: PortfolioScope) =>
   Effect.gen(function* () {
-    const { accounts, byAccount, enriched, platformMeta, fiatRefs, mode, now } =
+    const { accounts, byAccount, prevByAccount, enriched, platformMeta, fiatRefs, mode } =
       yield* scopedSnapshotMaterials(data);
-
-    let gainHistory: readonly GainHistoryRow[] | undefined;
-    if (withGain) {
-      const snapshotStore = (yield* Database).snapshots;
-      const inScope = new Set(accounts.map((a) => a.id));
-      const [snapGain, manualGain] = yield* Effect.all(
-        [
-          snapshotStore.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
-          loadManualGainHistory(accounts, now, now - GAIN_WINDOW_MS),
-        ],
-        { concurrency: 2 },
-      );
-      gainHistory = [...snapGain.filter((r) => inScope.has(r.accountId)), ...manualGain];
-    }
     // 每账户现推净值复用同一份富化字典;刷价集合喂 pricesStale 判脏。
     const liveTotals = deriveLiveAccountTotals(accounts, byAccount, enriched, mode);
     const refreshableIds = new Set(
@@ -216,7 +216,6 @@ export const buildScopedOverview = (data: PortfolioScope, withGain: boolean) =>
       connectorMeta: connectorPlatformMeta,
       mode,
       fiatRefs,
-      gainHistory,
-      now,
+      prevByAccount,
     });
   });

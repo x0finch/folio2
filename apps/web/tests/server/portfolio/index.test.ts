@@ -3,7 +3,7 @@
 // 用例仍按 handler 一个 `.cases.ts` 分文件住,这里只做汇入;各文件的钩子被自己的
 // describe 作用域住,互不串。
 import "./account-holdings.cases";
-import "./gain.cases";
+import "./endpoint-gain.cases";
 import "./get-history.cases";
 import "./overview.cases";
 import "./scope.cases";

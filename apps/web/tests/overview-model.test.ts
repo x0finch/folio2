@@ -7,7 +7,7 @@ import type { OverviewBalance } from "@/lib/core/account-view";
 import {
   buildOverview,
   deriveLiveAccountTotals,
-  GAIN_WINDOW_MS,
+  FIRST_SYNC_WINDOW_MS,
   isFirstSyncPending,
   type OverviewInput,
   overviewChainIds,
@@ -495,111 +495,111 @@ describe("buildOverview —— equity-only perp 账户不被过滤", () => {
   });
 });
 
-describe("buildOverview —— 24h 盈亏接线(ADR 0040)", () => {
-  const NOW = 1_700_000_000_000;
-  const FROM = NOW - GAIN_WINDOW_MS;
+describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
   const accounts = [account("a1", "Arb")];
   // 当下:1 个 USDC,现推市值 110(默认桩不给价 → liveValue 退回冻结的 usdValue,所以直接写 110)。
   const byAccount = new Map([["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])]]);
+  // 「24 小时前」那一组,与当前组同一个瘦身形状(snap)。
+  const prev = (id: string, ...balances: OverviewBalance[]) =>
+    new Map([[id, snap(id, 0, balances)]]);
 
-  it("有历史 → 行上带真实盈亏,而不是市场涨跌幅倒推的数", async () => {
+  it("有起点 → 行上带真实盈亏(现值 − 24 小时前值)", async () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, {
-        now: NOW,
-        gainHistory: [
-          { accountId: "a1", takenAt: FROM, tokenId: "usdc", amount: 1, usdValue: 100 },
-        ],
+        prevByAccount: prev("a1", bal({ amount: 1, usdValue: 100 })),
       }),
     );
     expect(view.holdings[0].gain24h?.amount).toBeCloseTo(10, 6);
     expect(view.holdings[0].gain24h?.pct).toBeCloseTo(10, 6);
   });
 
-  it("当天新建的仓 —— 账户那时有快照但没这个币 → 盈亏 0,不是一整天的涨幅", async () => {
+  it("当天新买的币 —— 起点账户没这个币 → 起点 0,整份市值算成今天赚的(充提计入)", async () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, {
-        now: NOW,
-        // 那一刻账户里是另一个币 → USDC 的基准点是 (FROM, 0, 0)
-        gainHistory: [
-          { accountId: "a1", takenAt: FROM, tokenId: "eth", amount: 1, usdValue: 3000 },
-        ],
+        // 24 小时前账户里是另一个币 → USDC 起点 0(bought today)。
+        prevByAccount: prev(
+          "a1",
+          bal({ tokenId: "eth", symbol: "ETH", amount: 1, usdValue: 3000 }),
+        ),
       }),
     );
-    expect(view.holdings.find((h) => h.key === "usdc")?.gain24h?.amount).toBe(0);
+    const g = view.holdings.find((h) => h.key === "usdc")?.gain24h;
+    expect(g?.amount).toBeCloseTo(110, 6); // 起点 0 → 现值全算进
+    expect(g?.pct).toBeNull(); // 分母 0 → 百分比 null
   });
 
-  it("没有历史(缺基准)→ null,由界面渲染 `—`,不是 0", async () => {
+  // 最终两档口径:**无基准(空起点组)一律 `—`** —— 新账户 / 新建 / 断线都一样,不硬算、不区分
+  // new/stale。(账户在不在起点组里就是全部判据。)
+  it("无基准(空起点组)→ 组合与持仓都 null,由界面渲染 `—`,不是 0", async () => {
     const view = await runWithOracle(
       stub,
-      overviewEffect(accounts, byAccount, { now: NOW, gainHistory: [] }),
+      overviewEffect(accounts, byAccount, { prevByAccount: new Map() }),
     );
+    expect(view.gain24h).toBeNull();
     expect(view.holdings[0].gain24h).toBeNull();
   });
 
-  it("不传入历史 → 不算盈亏(字段缺席)。首页总览走这条", async () => {
-    const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, { now: NOW }));
+  // 回归(code-review 修 #1):无 token_id 的持仓没有起点可比(`start.token` 按 token_id 建键)——
+  // 该行盈亏应为 `null`(`—`),**绝不**是 `endpointGain(0, current)` 冒充的「今天全额涨」。
+  it("无 token_id 的持仓 → gain null,不是全额涨", async () => {
+    const noTokenNow = new Map([
+      ["a1", snap("a1", 110, [bal({ tokenId: null, amount: 1, usdValue: 110 })])],
+    ]);
+    const view = await runWithOracle(
+      stub,
+      overviewEffect(accounts, noTokenNow, {
+        // a1 有起点(有 eligible 账户),但那张里也没有 token_id → start.token 空。
+        prevByAccount: prev("a1", bal({ tokenId: null, amount: 1, usdValue: 100 })),
+      }),
+    );
+    const h = view.holdings.find((x) => x.token.id == null);
+    expect(h).toBeDefined();
+    expect(h?.gain24h).toBeNull();
+  });
+
+  it("不传起点组 → 不算盈亏(字段缺席)", async () => {
+    const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, {}));
     expect(view.holdings[0].gain24h).toBeUndefined();
     expect(view.gain24h).toBeUndefined();
   });
 
-  it("各行金额相加 = 把所有线一起算 —— 「加得起来」是结构上成立的", async () => {
+  it("各行金额相加 = 组合层那个数 —— 两端相减天然可加", async () => {
     const two = [account("a1", "Arb"), account("a2", "Cold", "manual")];
     const snaps = new Map([
       ["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])],
       ["a2", snap("a2", 62, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 62 })])],
     ]);
-    const view = await runWithOracle(
-      stub,
-      overviewEffect(two, snaps, {
-        now: NOW,
-        gainHistory: [
-          { accountId: "a1", takenAt: FROM, tokenId: "usdc", amount: 1, usdValue: 100 },
-          { accountId: "a2", takenAt: FROM, tokenId: "eth", amount: 2, usdValue: 60 },
-        ],
-      }),
-    );
+    const prevMap = new Map([
+      ["a1", snap("a1", 0, [bal({ amount: 1, usdValue: 100 })])],
+      ["a2", snap("a2", 0, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 60 })])],
+    ]);
+    const view = await runWithOracle(stub, overviewEffect(two, snaps, { prevByAccount: prevMap }));
     const sum = view.holdings.reduce((s, h) => s + (h.gain24h?.amount ?? 0), 0);
     expect(sum).toBeCloseTo(12, 6); // +10(USDC)+2(ETH)
-    // **这条是第 4 片的验收核心**:hero 那个数就是各行之和,而这是现在做不到的事。
     expect(view.gain24h?.amount).toBeCloseTo(sum, 6);
   });
 
-  it("组合百分比是统一时间轴上的连乘,不是各行百分比取平均", async () => {
+  it("组合百分比 = Σ金额 ÷ Σ起点,不是各行百分比取平均", async () => {
     const two = [account("a1", "Arb"), account("a2", "Cold", "manual")];
     const snaps = new Map([
       ["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])],
       ["a2", snap("a2", 62, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 62 })])],
     ]);
-    const view = await runWithOracle(
-      stub,
-      overviewEffect(two, snaps, {
-        now: NOW,
-        gainHistory: [
-          { accountId: "a1", takenAt: FROM, tokenId: "usdc", amount: 1, usdValue: 100 },
-          { accountId: "a2", takenAt: FROM, tokenId: "eth", amount: 2, usdValue: 60 },
-        ],
-      }),
-    );
-    // 各行:+10%(100→110)与 +3.33%(60→62);组合基数 160 → 12/160 = 7.5%,不是两者的平均 6.67%
+    const prevMap = new Map([
+      ["a1", snap("a1", 0, [bal({ amount: 1, usdValue: 100 })])],
+      ["a2", snap("a2", 0, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 60 })])],
+    ]);
+    const view = await runWithOracle(stub, overviewEffect(two, snaps, { prevByAccount: prevMap }));
+    // 各行:+10%(100→110)与 +3.33%(60→62);组合起点 160 → 12/160 = 7.5%,不是平均 6.67%
     const avg = view.holdings.reduce((s, h) => s + (h.gain24h?.pct ?? 0), 0) / view.holdings.length;
     expect(view.gain24h?.pct).toBeCloseTo(7.5, 4);
     expect(view.gain24h?.pct).not.toBeCloseTo(avg, 2);
   });
-
-  it("一条线都算不出 → 组合层也是 null,由 hero 渲染 `—`", async () => {
-    const view = await runWithOracle(
-      stub,
-      overviewEffect(accounts, byAccount, { now: NOW, gainHistory: [] }),
-    );
-    expect(view.gain24h).toBeNull();
-  });
 });
 
-describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0040 的已知妥协)", () => {
-  const NOW = 1_700_000_000_000;
-  const FROM = NOW - GAIN_WINDOW_MS;
+describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相减)", () => {
   const lidoMeta = JSON.stringify({ protocol: "Lido", positionType: "staked" });
   const accounts = [account("w", "Wallet")];
   const byAccount = new Map([
@@ -610,26 +610,22 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0040 的已知�
       ]),
     ],
   ]);
-  const defiHist = (usdValue: number, meta = lidoMeta) => ({
-    accountId: "w",
-    takenAt: FROM,
-    tokenId: "tk-staked",
-    amount: 1,
-    usdValue,
-    kind: "defi",
-    metaJson: meta,
-  });
+  const defiPrev = (...balances: OverviewBalance[]) => new Map([["w", snap("w", 0, balances)]]);
 
-  it("拿两张照片的价值相减 —— 没有「几个币」可依,只能这样", async () => {
+  it("该协议现在的净值 − 24 小时前的净值", async () => {
     const view = await runWithOracle(
       stub,
-      overviewEffect(accounts, byAccount, { now: NOW, gainHistory: [defiHist(100)] }),
+      overviewEffect(accounts, byAccount, {
+        prevByAccount: defiPrev(
+          bal({ kind: "defi", amount: 1, usdValue: 100, tokenId: "tk-staked", metaJson: lidoMeta }),
+        ),
+      }),
     );
     expect(view.sections[0].defi[0].gain24h?.amount).toBeCloseTo(10, 6);
   });
 
-  it("百分比分母是**总敞口**,不是净值 —— 对冲仓才不会给出荒唐的数", async () => {
-    // 存 100 万 / 借 99 万:净值只剩 1 万。拿净值当分母,涨 1 万会算成 +100%。
+  it("分母 = 起点净值(总敞口分母已废止)—— 对冲仓拿净值当分母,涨 1 万算成 +100%", async () => {
+    // 存 101 万 / 借 99 万:净值 2 万。起点净值 1 万 → +1 万即 +100%(FOL-51 接受这个口径)。
     const hedged = new Map([
       [
         "w",
@@ -642,81 +638,60 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0040 的已知�
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, hedged, {
-        now: NOW,
-        gainHistory: [
-          { ...defiHist(1_000_000), tokenId: "sup" },
-          { ...defiHist(-990_000), tokenId: "bor" },
-        ],
+        prevByAccount: defiPrev(
+          bal({ kind: "defi", amount: 1, usdValue: 1_000_000, tokenId: "sup", metaJson: lidoMeta }),
+          bal({ kind: "defi", amount: 1, usdValue: -990_000, tokenId: "bor", metaJson: lidoMeta }),
+        ),
       }),
     );
-    const gain = view.sections[0].defi[0];
-    expect(gain.gain24h?.amount).toBeCloseTo(10_000, 6);
-    // 总敞口 199 万 → 约 +0.50%;净值当分母会给出 +100%
-    expect(gain.gain24h?.pct).toBeCloseTo(0.5, 2);
-    expect(gain.gain24h?.pct).not.toBeCloseTo(100, 0);
+    const gain = view.sections[0].defi[0].gain24h;
+    expect(gain?.amount).toBeCloseTo(10_000, 6); // 净值 2 万 − 1 万
+    expect(gain?.pct).toBeCloseTo(100, 4); // 分母 = 起点净值 1 万
+    expect(gain?.start).toBeCloseTo(10_000, 6); // 起点净值带着走(合并那一侧要用)
   });
 
-  it("没有历史 → null,由界面渲染 `—`", async () => {
+  it("空起点组 → null,由界面渲染 `—`", async () => {
     const view = await runWithOracle(
       stub,
-      overviewEffect(accounts, byAccount, { now: NOW, gainHistory: [] }),
+      overviewEffect(accounts, byAccount, { prevByAccount: new Map() }),
     );
     expect(view.sections[0].defi[0].gain24h).toBeNull();
-  });
-});
-
-describe("buildOverview —— DeFi 盈亏的分母要带着走", () => {
-  // 总览的 DeFi tab 跨账户合并协议组时,要用 Σ金额 ÷ Σ总敞口 重算百分比。分母没带过去的话,
-  // 合并后的百分比会恒为 null —— 而单账户视图里它是对的,所以这个洞只在合并那一侧才看得见。
-  it("gain24h 带 grossBasis(合并那一侧要用)", async () => {
-    const NOW = 1_700_000_000_000;
-    const meta = JSON.stringify({ protocol: "Lido", positionType: "staked" });
-    const view = await runWithOracle(
-      stub,
-      overviewEffect(
-        [account("w", "Wallet")],
-        new Map([
-          ["w", snap("w", 110, [bal({ kind: "defi", amount: 1, usdValue: 110, metaJson: meta })])],
-        ]),
-        {
-          now: NOW,
-          gainHistory: [
-            {
-              accountId: "w",
-              takenAt: NOW - GAIN_WINDOW_MS,
-              tokenId: "usdc",
-              amount: 1,
-              usdValue: 100,
-              kind: "defi",
-              metaJson: meta,
-            },
-          ],
-        },
-      ),
-    );
-    expect(view.sections[0].defi[0].gain24h?.grossBasis).toBeCloseTo(100, 6);
   });
 });
 
 // 首次同步中的判据(FOL-48 回归修复):有账户、还没有任何快照 = 显加载态,不是把 $0 当答案。
 // 只读 `accounts` / `snapshots` 两片,构造最小原料即可。
 describe("isFirstSyncPending", () => {
-  const raw = (accounts: number, snapshots: number): PortfolioSnapshotData =>
+  const NOW_T = 1_700_000_000_000;
+  // 各账户的「年龄」(距 now 的毫秒);快照条数。
+  const raw = (accountAges: number[], snapshots: number): PortfolioSnapshotData =>
     ({
-      accounts: Array.from({ length: accounts }, (_, i) => ({ id: `a${i}` })),
+      now: NOW_T,
+      accounts: accountAges.map((age, i) => ({ id: `a${i}`, createdAt: NOW_T - age })),
       snapshots: Array.from({ length: snapshots }, (_, i) => [`a${i}`, {}]),
     }) as unknown as PortfolioSnapshotData;
 
-  it("有账户、零快照 → 首次同步中", () => {
-    expect(isFirstSyncPending(raw(2, 0))).toBe(true);
+  it("刚建账户、零快照 → 首次同步中", () => {
+    expect(isFirstSyncPending(raw([0, 0], 0))).toBe(true);
   });
 
   it("零账户(真的空组合)→ 不是 pending,照常画空态", () => {
-    expect(isFirstSyncPending(raw(0, 0))).toBe(false);
+    expect(isFirstSyncPending(raw([], 0))).toBe(false);
   });
 
   it("至少一张快照落地 → 不再 pending", () => {
-    expect(isFirstSyncPending(raw(2, 1))).toBe(false);
+    expect(isFirstSyncPending(raw([0, 0], 1))).toBe(false);
+  });
+
+  // **回归(code-review 修 #1)**:账户建了很久、却一张快照都没有(坏凭据 / 从没同步成功)——
+  // **不能永久 pending**,否则 hero 永远卡加载骨架。超过首次同步窗 → 显 $0 / 空态,让用户去查凭据。
+  it("账户都过了首次同步窗、仍零快照 → 不是 pending(显 $0,不永久卡加载)", () => {
+    const old = FIRST_SYNC_WINDOW_MS + 60_000;
+    expect(isFirstSyncPending(raw([old, old], 0))).toBe(false);
+  });
+
+  it("混合:一个老账户 + 一个刚建的、零快照 → 仍 pending(刚建那个还在首次同步)", () => {
+    expect(isFirstSyncPending(raw([FIRST_SYNC_WINDOW_MS + 60_000, 0], 0))).toBe(true);
   });
 
   it("原料还没到(undefined)→ 不是 pending", () => {

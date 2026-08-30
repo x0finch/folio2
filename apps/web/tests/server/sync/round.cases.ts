@@ -1,13 +1,6 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { handleGetPortfolioGain24h } from "@/lib/server/portfolio/gain";
-import {
-  accountGainKey,
-  overviewKey,
-  portfolioGainKey,
-  precomputeMarkKey,
-  tabStripKey,
-} from "@/lib/server/portfolio/precompute";
+import { overviewKey, precomputeMarkKey, tabStripKey } from "@/lib/server/portfolio/precompute";
 import {
   handleGetSyncRound,
   openSyncRound,
@@ -19,7 +12,7 @@ import {
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
-import { DAY, seedSnapshot } from "../_kit/seed";
+import { seedSnapshot } from "../_kit/seed";
 import { freshUser } from "../_kit/user";
 
 // 开轮 / 读轮(ADR 0048)。对着真 D1 跑,因为这两件事的正确性都在「哪些账户进这一轮」与
@@ -159,18 +152,12 @@ describe("sync/round", () => {
       expect(noKeys.id in round.accounts).toBe(true);
     });
 
-    // FOL-35 / FOL-36 / ADR 0049:收官之后这一组合的预计算必须已经算好存下,四条读接口
-    // (总览 / tab 条 / 两级盈亏)从此只做「读 + 传」。
-    // 钉在这一层而不是 gain 那边:「算的时刻挂在同步收尾上」是接线,而接线只有整条路跑一遍才看得见
-    //(cron 把预热关掉的那一支尤其 —— 它换的是同一个字段)。
+    // FOL-35 / FOL-36 / ADR 0049:收官之后这一组合的预计算(总览 + tab 条)必须已经算好存下。
+    // **24h 盈亏预计算 FOL-51 退场**:盈亏改浏览器两端相减,不再落键 —— 这里只钉剩下的两族。
+    // 钉在这一层而不是别处:「算的时刻挂在同步收尾上」是接线,而接线只有整条路跑一遍才看得见。
     it("收官之后,这个组合的预计算就位", async () => {
       const acc = await cex("Binance spot");
-      // 两张快照:24 小时前那张是基准,现在那张是当下 —— 有基准才算得出数,
-      // 否则「就位」会退化成「存了个空壳」,断言等于没写。
       const now = Date.now();
-      await seedSnapshot(USER, acc.id, now - DAY, [
-        { tokenId: "token-btc", amount: 1, usdValue: 100 },
-      ]);
       await seedSnapshot(USER, acc.id, now, [{ tokenId: "token-btc", amount: 1, usdValue: 130 }]);
 
       const { round } = await open();
@@ -178,11 +165,6 @@ describe("sync/round", () => {
 
       const pf = round.portfolioId;
       const at = async (k: string) => (await db(USER).cache.get(k))._tag;
-      expect(await at(portfolioGainKey(pf, null))).toBe("Some");
-      const served = await call(USER, handleGetPortfolioGain24h(USER, { portfolioId: pf }));
-      expect(served.portfolio?.amount).toBeCloseTo(30, 6);
-      // 四族都在同一次收尾里落下(账户级盈亏与 tab 条不吃 pin,一个组合一个键)。
-      expect(await at(accountGainKey(pf, null))).toBe("Some");
       expect(await at(overviewKey(pf, null))).toBe("Some");
       expect(await at(tabStripKey(pf, null))).toBe("Some");
     });
@@ -196,17 +178,11 @@ describe("sync/round", () => {
     it("cron 那一支不在轮里预计算,只抬水位线(它的预热还没发生)", async () => {
       const acc = await cex("Binance spot");
       const now = Date.now();
-      await seedSnapshot(USER, acc.id, now - DAY, [
-        { tokenId: "token-btc", amount: 1, usdValue: 100 },
-      ]);
       await seedSnapshot(USER, acc.id, now, [{ tokenId: "token-btc", amount: 1, usdValue: 110 }]);
 
       const { round } = await open();
       await runSyncRound(USER, round, { warm: false });
 
-      expect((await db(USER).cache.get(portfolioGainKey(round.portfolioId, null)))._tag).toBe(
-        "None",
-      );
       expect((await db(USER).cache.get(overviewKey(round.portfolioId, null)))._tag).toBe("None");
       expect((await db(USER).cache.get(precomputeMarkKey(round.portfolioId)))._tag).toBe("Some");
     });
@@ -216,9 +192,6 @@ describe("sync/round", () => {
     it("precomputeAllUsers 给这个用户每个组合都落下值", async () => {
       const acc = await cex("Binance spot");
       const now = Date.now();
-      await seedSnapshot(USER, acc.id, now - DAY, [
-        { tokenId: "token-btc", amount: 1, usdValue: 100 },
-      ]);
       await seedSnapshot(USER, acc.id, now, [{ tokenId: "token-btc", amount: 1, usdValue: 130 }]);
       const watch = await db(USER).portfolios.create({ name: "看单" });
       const home = (await db(USER).portfolios.ensureDefault()).id;
@@ -226,13 +199,9 @@ describe("sync/round", () => {
       const out = await Effect.runPromise(precomputeAllUsers([USER]));
 
       expect(out.failed).toBe(0);
-      expect((await db(USER).cache.get(portfolioGainKey(home, null)))._tag).toBe("Some");
-      expect((await db(USER).cache.get(portfolioGainKey(watch.id, null)))._tag).toBe("Some");
+      // 总览预计算逐组合落下(盈亏 FOL-51 起不再预计算)。
       expect((await db(USER).cache.get(overviewKey(home, null)))._tag).toBe("Some");
-      // 落的是真数字,不是空壳。
-      const served = await call(USER, handleGetPortfolioGain24h(USER, { portfolioId: home }));
-      expect(served.portfolio?.amount).toBeCloseTo(30, 6);
-      expect(served.pending).toBeUndefined();
+      expect((await db(USER).cache.get(overviewKey(watch.id, null)))._tag).toBe("Some");
     });
 
     // 陈旧的 worker 撞上新一轮:它那几笔写落空成 no-op(条件在 db 那一层),这里钉的是

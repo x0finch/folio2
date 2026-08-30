@@ -41,11 +41,14 @@ const connectorMetaEntries = (
 const toSnapshotData = (m: ScopedMaterials): PortfolioSnapshotData => ({
   accounts: m.accounts,
   snapshots: [...m.byAccount].map(([id, s]) => [id, toSnapshotView(s)] as const),
+  // 「24 小时前」那一组(ADR 0050)——浏览器与当前组两端相减算 24h 盈亏。
+  prevSnapshots: [...m.prevByAccount].map(([id, s]) => [id, toSnapshotView(s)] as const),
   enriched: [...m.enriched],
   platformMeta: [...m.platformMeta],
   connectorMeta: connectorMetaEntries(m.accounts, m.byAccount),
   fiatRefs: [...m.fiatRefs],
   mode: m.mode,
+  now: m.now,
 });
 
 export const handleGetPortfolioSnapshotData = Effect.fn("getPortfolioSnapshotData")(function* (

@@ -45,10 +45,12 @@ describe("骨架与真内容同形", () => {
 });
 
 describe("盈亏骨架三处复用同一元件", () => {
-  it("行内 / hero 增量 / best-worst 都走 <GainSkeleton>", () => {
+  // GainSkeleton 是「市值 + 增量位一起加载」的共用元件(行内 ValueDelta 的 loading、列表 / 抽屉的
+  // 值未到骨架)。FOL-51 后 hero 的盈亏随总览一起到、没有独立的「盈亏还在取」态,所以 hero 不再
+  // 用它 —— 元件定义仍在一处(value-delta),别被这条误导成「hero 也该有」。
+  it("增量位骨架元件定义在一处(value-delta),hero 不再单独用它", () => {
     expect(src("routes/_authed/-home/holdings/value-delta.tsx")).toContain("<GainSkeleton");
-    const hero = src("routes/_authed/-home/hero/portfolio-hero.tsx");
-    expect(hero.match(/<GainSkeleton/g)?.length).toBe(3);
+    expect(src("routes/_authed/-home/hero/portfolio-hero.tsx")).not.toContain("<GainSkeleton");
   });
 
   it("宽度锁死在一处", () => {
@@ -63,15 +65,18 @@ describe("回访不闪骨架、数字只滚一次", () => {
   // 现在盈亏走挂起,而 `useSuspenseQuery` 命中缓存时直接给旧值、后台刷新、**不挂起** ——
   // 同一个性质由 react-query 自己保证。所以这条改成钉两件事:没人退回去看 isFetching,
   // 以及**兜底不是整块骨架**(hero 的兜底里总净值已经在了,列表的兜底里市值已经在了)。
-  it("回访不闪骨架:盈亏走挂起,兜底是同一份内容而不是整块骨架", () => {
+  it("回访不闪骨架:盈亏随总览一起到,兜底是同一份内容而不是整块骨架", () => {
     const hero = stripComments(src("routes/_authed/-home/hero/index.tsx"));
     const holdings = stripComments(src("routes/_authed/-home/holdings/index.tsx"));
     expect(hero).not.toContain("isFetching");
     expect(holdings).not.toContain("isFetching");
-    expect(hero).toMatch(/useSuspenseQuery\(portfolioGain24hQuery/);
-    expect(holdings).toMatch(/useSuspenseQuery\(portfolioGain24hQuery/);
-    expect(hero).toMatch(/pending=\{<HeroShell[\s\S]{0,120}gainPending/);
-    expect(holdings).toMatch(/pending=\{<KindBody[\s\S]{0,120}gainPending/);
+    // FOL-51:盈亏改成随总览原料两端相减算好,不再是后到的一条 —— 没有独立的盈亏查询 / 边界。
+    expect(hero).not.toContain("portfolioGain24hQuery");
+    expect(holdings).not.toContain("portfolioGain24hQuery");
+    // 盈亏直接从总览读(hero 与列表都是)。
+    expect(hero).toMatch(/overview\.gain24h/);
+    // hero 仅剩曲线是后到的一样:它的边界兜底仍是同一份内容(总净值 / 盈亏已经在了)。
+    expect(hero).toMatch(/pending=\{<HeroShell overview=\{data\} loading/);
   });
 
   it("路由没有 pendingComponent,冷启动骨架是岛上那套,不是另一张整页骨架", () => {

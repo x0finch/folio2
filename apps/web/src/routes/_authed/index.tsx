@@ -3,7 +3,6 @@ import { z } from "zod";
 import { pickSelectedPortfolio } from "@/lib/hooks/use-portfolio";
 import {
   homeTabStripQuery,
-  portfolioGain24hQuery,
   portfolioHistoryQuery,
   portfolioListQuery,
   portfolioOverviewQuery,
@@ -48,8 +47,8 @@ export const Route = createFileRoute("/_authed/")({
     const { portfolios, defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
     const selectedId = pickSelectedPortfolio(deps.portfolio, portfolios, defaultId);
     queryClient.ensureQueryData(homeTabStripQuery(selectedId));
+    // 总览原料带 24h 盈亏(两端相减,浏览器算,FOL-51)—— 不再单独预取一条盈亏。
     queryClient.ensureQueryData(portfolioOverviewQuery(selectedId));
-    queryClient.ensureQueryData(portfolioGain24hQuery(selectedId));
     queryClient.ensureQueryData(portfolioHistoryQuery(selectedId));
   },
   component: Overview,

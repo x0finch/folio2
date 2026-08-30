@@ -104,17 +104,8 @@ describe("hero 趋势区的三态", () => {
     expect(spanBadge()).toBeNull();
   });
 
-  it("24h 盈亏还在取 → 增量走骨架,不先闪破折号", () => {
-    const { container } = render(
-      <IntlProvider locale="en" messages={messages.en} timeZone="UTC" now={new Date(T0)}>
-        <PortfolioHero series={[]} totalUsd={110} gain24h={null} holdings={holdings} gainPending />
-      </IntlProvider>,
-    );
-
-    expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
-    // 破折号仍可能出现在稳定币占比(T2,不跟盈亏等);增量/best/worst 不该是 `—`。
-    expect(container.querySelector("[data-slot=skeleton]")?.textContent).not.toBe("—");
-  });
+  // (删)「24h 盈亏还在取 → 增量走骨架」:FOL-51 后盈亏随总览一起到,hero 没有独立的「盈亏还在取」
+  // 态,`gainPending` 属性已删。这条用例连同那个属性一起退场。
 
   it("两个点但落在同一个钟点 → 被降采样并成一个,于是仍是空态", () => {
     // **这是个如实记录当前行为的用例,不是在为它背书**:降采样最细的桶是 1 小时、按绝对钟点切
