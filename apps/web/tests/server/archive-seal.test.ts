@@ -2,11 +2,10 @@ import { env } from "cloudflare:test";
 import type { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildAccountValueHistory } from "@/lib/core/history";
-import { accountRowsFromRaw } from "@/lib/core/portfolio";
 import { loadAccountHistory } from "@/lib/server/accounts/history";
 import type { AppError } from "@/lib/server/errors";
-import { loadAccountHoldings } from "@/lib/server/portfolio/account-holdings";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
+import { readAccountHoldingsView } from "./_kit/run";
 import { dbFor } from "./db-effect";
 import { createManualAccount, sealManualAccount } from "./manual-fns";
 import { ticketOf } from "./ticket";
@@ -92,7 +91,7 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     await sealManualAccount(USER, account, 1_700_000_000_000);
     await dbFor(USER).accounts.setArchived(account.id, true);
 
-    const view = accountRowsFromRaw(await run(USER, loadAccountHoldings({})));
+    const view = await readAccountHoldingsView(USER);
     const row = view.rows.find((r) => r.account.id === account.id);
 
     expect(row?.archivedAt).not.toBeNull();
@@ -108,7 +107,7 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     await dbFor(USER).accounts.setArchived(account.id, true);
     await dbFor(USER).accounts.setArchived(account.id, false);
 
-    const view = accountRowsFromRaw(await run(USER, loadAccountHoldings({})));
+    const view = await readAccountHoldingsView(USER);
     const row = view.rows.find((r) => r.account.id === account.id);
 
     expect(row?.archivedAt).toBeNull();

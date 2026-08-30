@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { overviewFromSnapshotData } from "@/lib/core/portfolio";
 import { handleGetManualAccount } from "@/lib/server/manual-tokens/get-account";
 import { buildScopedOverview, PortfolioScopeInput } from "@/lib/server/portfolio/scope";
-import { handleGetPortfolioSnapshotData } from "@/lib/server/portfolio/snapshot-data";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call, readOverview } from "../_kit/run";
+import { call, readOverview, readSnapshotData } from "../_kit/run";
 import { seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -142,12 +141,12 @@ describe("portfolio/overview", () => {
     });
   });
 
-  describe("getPortfolioSnapshotData(原料接口)", () => {
+  describe("快照原料(scopedSnapshotMaterials)", () => {
     it("只发原料:取行 + 备料,不聚合", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
-      const raw = await call(USER, handleGetPortfolioSnapshotData({}));
+      const raw = await readSnapshotData(USER, {});
 
       // 账户 + 原始快照「行」都在,而不是合计。
       expect(raw.accounts.map((a) => a.label)).toEqual(["甲"]);
@@ -170,10 +169,9 @@ describe("portfolio/overview", () => {
       const cexAcc = await seedAccount(USER, "交易所", "binance");
       await seedSnapshot(USER, cexAcc.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 900 }]);
 
-      const raw = await call(
-        USER,
-        handleGetPortfolioSnapshotData({ pin: { kind: "connector", connectorId: "bitcoin" } }),
-      );
+      const raw = await readSnapshotData(USER, {
+        pin: { kind: "connector", connectorId: "bitcoin" },
+      });
 
       expect(raw.accounts.map((a) => a.label)).toEqual(["链上"]);
       expect(raw.snapshots.map(([id]) => id)).toEqual([btcAcc.id]);
@@ -213,7 +211,7 @@ describe("portfolio/overview", () => {
       // 服务端现算 = 总览那一份(FOL-51 起含 24h 盈亏,与接口发的原料两端相减逐值一致)。
       const inline = await call(USER, buildScopedOverview({}));
       // 新路径:接口发原料 → 客户端算(照抄前端 select 那一行)。
-      const client = overviewFromSnapshotData(await call(USER, handleGetPortfolioSnapshotData({})));
+      const client = overviewFromSnapshotData(await readSnapshotData(USER, {}));
 
       expect(client).toEqual(inline);
       // 夹具没有绕过被测代码:这一份真的有数,不是两个空对象碰在一起。

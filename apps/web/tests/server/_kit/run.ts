@@ -1,12 +1,27 @@
 import { Cause, Effect, Exit, Layer, Option } from "effect";
-import { computeHomeTabStrip, overviewFromSnapshotData } from "@/lib/core/portfolio";
+import {
+  accountRowsFromRaw,
+  assembleAccountHoldingsData,
+  computeHomeTabStrip,
+  floorToHour,
+  GAIN_START_FLOOR_MS,
+  GAIN_WINDOW_MS,
+  overviewFromSnapshotData,
+} from "@/lib/core/portfolio";
+import { handleListAccounts } from "@/lib/server/accounts/list";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import type { AppError } from "@/lib/server/errors";
-import type { PortfolioScope } from "@/lib/server/portfolio/scope";
-import { handleGetPortfolioSnapshotData } from "@/lib/server/portfolio/snapshot-data";
+import {
+  type PortfolioScope,
+  scopedSnapshotMaterials,
+  toPortfolioSnapshotData,
+} from "@/lib/server/portfolio/scope";
+import { handleGetSnapshots } from "@/lib/server/portfolio/snapshots";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
+import { handleGetValuationSettings } from "@/lib/server/settings/valuation";
 import { handleGetPortfolioTabPins } from "@/lib/server/tab-pins/read";
 import { handleListTags } from "@/lib/server/tags/list";
+import { handleGetTokenEnrichment } from "@/lib/server/tokens/enrichment";
 
 // **被测的是 handler,发动走生产那个内核。**
 //
@@ -65,22 +80,57 @@ export const callWithRegistryExit = <A, E extends AppError, R extends UserServic
 export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.failureOption(exit.cause)) : undefined;
 
-// —— 读模型捷径(照抄前端 select,不复刻业务逻辑)——
+// —— 读模型捷径(照抄前端 select / compose,不复刻业务逻辑)——
+
+/** 快照原料 —— `scopedSnapshotMaterials` + `toPortfolioSnapshotData`,与浏览器原子合并同源。 */
+export const readSnapshotData = async (userId: string, data: PortfolioScope = {}) =>
+  toPortfolioSnapshotData(await call(userId, scopedSnapshotMaterials(data)));
 
 /**
  * 读总览 —— 改完数据之后想看「屏幕上是什么」就用它。
  *
- * **走的是首页那条真链路**(FOL-48):接口发快照原料,`overviewFromSnapshotData` 在客户端算成
- * 总览。照抄前端 `select` 那一行(不复刻业务逻辑),所以总额 / 持仓 / 小计 / pricesStale
- * 与屏幕上完全同源。总览不再读预计算,故不必先 `precompute`。
+ * **走的是首页那条真链路**(FOL-54):原子原料在浏览器算成总览;测试侧用 `overviewFromSnapshotData`
+ * 照抄前端合并那一行(不复刻业务逻辑),所以总额 / 持仓 / 小计 / pricesStale 与屏幕上完全同源。
  */
 export const readOverview = async (userId: string, data: PortfolioScope = {}) =>
-  overviewFromSnapshotData(await call(userId, handleGetPortfolioSnapshotData(data)));
+  overviewFromSnapshotData(await readSnapshotData(userId, data));
 
-/** 同上,tab 条那条 —— 快照原料 + tabPins + 标签,浏览器现算(FOL-49)。 */
+const readAccountHoldingsRaw = async (userId: string, data: { portfolioId?: string } = {}) => {
+  const now = floorToHour(Date.now());
+  const [accounts, snapshotsNow, snapshotsPrev, settings, enrichment] = await Promise.all([
+    call(userId, handleListAccounts({ portfolioId: data.portfolioId })),
+    call(userId, handleGetSnapshots({ portfolioId: data.portfolioId, at: now, now: Date.now() })),
+    call(
+      userId,
+      handleGetSnapshots({
+        portfolioId: data.portfolioId,
+        at: now - GAIN_WINDOW_MS,
+        after: now - GAIN_START_FLOOR_MS,
+        now,
+      }),
+    ),
+    call(userId, handleGetValuationSettings()),
+    call(userId, handleGetTokenEnrichment()),
+  ]);
+  return assembleAccountHoldingsData({
+    accounts: accounts.map((a) => ({ id: a.id, label: a.label, archivedAt: a.archivedAt })),
+    snapshotsNow,
+    snapshotsPrev,
+    mode: settings.valuationMode,
+    enriched: new Map(enrichment.enriched),
+  });
+};
+
+/** 按账户持仓视图 —— 原子 snapshots + enrichment 合并,与 `useAccountHoldingsView` 同源。 */
+export const readAccountHoldingsView = async (
+  userId: string,
+  data: { portfolioId?: string } = {},
+) => accountRowsFromRaw(await readAccountHoldingsRaw(userId, data));
+
+/** tab 条 —— 快照原料 + tabPins + 标签,浏览器现算(FOL-49)。 */
 export const readTabStrip = async (userId: string, data: { portfolioId?: string } = {}) => {
   const [snapshot, tabPins, tags] = await Promise.all([
-    call(userId, handleGetPortfolioSnapshotData({ portfolioId: data.portfolioId })),
+    readSnapshotData(userId, { portfolioId: data.portfolioId }),
     call(userId, handleGetPortfolioTabPins()),
     call(userId, handleListTags({ portfolioId: data.portfolioId })),
   ]);

@@ -7,21 +7,18 @@ import {
   GAIN_START_FLOOR_MS,
   GAIN_WINDOW_MS,
   overviewChainIds,
-  overviewFromSnapshotData,
   portfolioOverviewFromAtoms,
 } from "@/lib/core/portfolio";
 import { handleListAccounts } from "@/lib/server/accounts/list";
-import { handleListAccountHoldings } from "@/lib/server/portfolio/account-holdings";
 import { handleGetFiatRefs } from "@/lib/server/portfolio/fiat-refs";
 import { handleResolvePlatformMeta } from "@/lib/server/portfolio/platform-meta";
-import { handleGetPortfolioSnapshotData } from "@/lib/server/portfolio/snapshot-data";
 import { handleGetSnapshots } from "@/lib/server/portfolio/snapshots";
 import { handleGetValuationSettings } from "@/lib/server/settings/valuation";
 import { handleGetTokenEnrichment } from "@/lib/server/tokens/enrichment";
 import { db } from "../_kit/db";
 import { realRegistry } from "../_kit/fakes";
 import { blockOutbound } from "../_kit/outbound";
-import { call } from "../_kit/run";
+import { call, readAccountHoldingsView, readOverview } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -132,12 +129,12 @@ describe("portfolio/account-holdings-compose", () => {
     NOW = Date.now();
   });
 
-  it("原子资源合并后与 listAccountHoldings 逐值一致", async () => {
+  it("原子资源合并后算出持仓与 24h 盈亏", async () => {
     const acc = await seedAccount(USER, "甲", "bitcoin");
     const now = floorToHour(NOW);
     await seedSnapshot(USER, acc.id, now - DAY, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
     await seedSnapshot(USER, acc.id, now, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
-    const [snapshotsNow, snapshotsPrev, settings, enrichment, accounts, fat] = await Promise.all([
+    const [snapshotsNow, snapshotsPrev, settings, enrichment, accounts] = await Promise.all([
       call(USER, handleGetSnapshots({ at: now, now: NOW })),
       call(
         USER,
@@ -146,7 +143,6 @@ describe("portfolio/account-holdings-compose", () => {
       call(USER, handleGetValuationSettings()),
       call(USER, handleGetTokenEnrichment()),
       call(USER, handleListAccounts({})),
-      call(USER, handleListAccountHoldings({})),
     ]);
 
     const composed = accountRowsFromRaw(
@@ -158,10 +154,13 @@ describe("portfolio/account-holdings-compose", () => {
         enriched: new Map(enrichment.enriched),
       }),
     );
-    const legacy = accountRowsFromRaw(fat);
-    expect(composed.rows[0]?.totalUsd).toBeCloseTo(legacy.rows[0]?.totalUsd ?? 0, 6);
-    expect(composed.rows[0]?.gain24h?.amount).toBeCloseTo(legacy.rows[0]?.gain24h?.amount ?? 0, 6);
-    expect(composed.pricesStale).toBe(legacy.pricesStale);
+    const viaHelper = await readAccountHoldingsView(USER);
+    expect(composed.rows[0]?.totalUsd).toBeCloseTo(viaHelper.rows[0]?.totalUsd ?? 0, 6);
+    expect(composed.rows[0]?.gain24h?.amount).toBeCloseTo(
+      viaHelper.rows[0]?.gain24h?.amount ?? 0,
+      6,
+    );
+    expect(composed.pricesStale).toBe(viaHelper.pricesStale);
   });
 });
 
@@ -182,7 +181,7 @@ describe("portfolio/overview-compose", () => {
     vi.useRealTimers();
   });
 
-  it("原子资源合并后与 getPortfolioSnapshotData + overviewFromSnapshotData 逐值一致", async () => {
+  it("原子资源合并后与 readOverview 逐值一致", async () => {
     const chain = await seedAccount(USER, "链上", "bitcoin");
     await seedSnapshot(USER, chain.id, NOW, [
       { tokenId: BTC, amount: 1, usdValue: 100 },
@@ -192,32 +191,23 @@ describe("portfolio/overview-compose", () => {
     vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
 
     const now = floorToHour(NOW);
-    const [
-      accounts,
-      snapshotsNow,
-      snapshotsPrev,
-      settings,
-      enrichment,
-      fiatRefsData,
-      legacyRaw,
-      registry,
-    ] = await Promise.all([
-      call(USER, handleListAccounts({})),
-      call(USER, handleGetSnapshots({ at: now, now: NOW })),
-      call(
-        USER,
-        handleGetSnapshots({
-          at: now - GAIN_WINDOW_MS,
-          after: now - GAIN_START_FLOOR_MS,
-          now,
-        }),
-      ),
-      call(USER, handleGetValuationSettings()),
-      call(USER, handleGetTokenEnrichment()),
-      call(USER, handleGetFiatRefs({})),
-      call(USER, handleGetPortfolioSnapshotData({})),
-      realRegistry(),
-    ]);
+    const [accounts, snapshotsNow, snapshotsPrev, settings, enrichment, fiatRefsData, registry] =
+      await Promise.all([
+        call(USER, handleListAccounts({})),
+        call(USER, handleGetSnapshots({ at: now, now: NOW })),
+        call(
+          USER,
+          handleGetSnapshots({
+            at: now - GAIN_WINDOW_MS,
+            after: now - GAIN_START_FLOOR_MS,
+            now,
+          }),
+        ),
+        call(USER, handleGetValuationSettings()),
+        call(USER, handleGetTokenEnrichment()),
+        call(USER, handleGetFiatRefs({})),
+        realRegistry(),
+      ]);
     const activeAccounts = accounts.filter((a) => a.archivedAt == null);
     const connectorMeta = connectorMetaForOverview(activeAccounts, snapshotsNow, registry.catalog);
     const connectorLookup = (key: string) => {
@@ -244,8 +234,8 @@ describe("portfolio/overview-compose", () => {
       fiatRefs: fiatRefsData.fiatRefs,
       now,
     });
-    const legacy = overviewFromSnapshotData(legacyRaw);
-    expect(composed).toEqual({ ...legacy, pending: false });
+    const viaHelper = await readOverview(USER, {});
+    expect(composed).toEqual({ ...viaHelper, pending: false });
     expect(composed.totalUsd).toBe(180);
   });
 });

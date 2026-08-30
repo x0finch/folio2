@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { AccountListItem } from "@/lib/queries/accounts";
 import { deriveSyncStatus } from "@/lib/core/sync-summary";
+import type { AccountListItem } from "@/lib/queries/accounts";
 import type { AccountSnapshot } from "@/lib/server/portfolio/snapshots";
 
 const DAY = 24 * 60 * 60 * 1000;
