@@ -55,9 +55,6 @@ export interface PortfolioScope {
   pin?: NonNullable<TabPinScope>;
 }
 
-/** 只选组合、不收窄 pin —— 与 `PortfolioSelectInput` 同形。 */
-export type PortfolioSelect = Pick<PortfolioScope, "portfolioId">;
-
 // 校验传入的 selectedId 属于该用户,否则退回默认(客户端传入不可信 —— 传别人的 id 只会得到空视图,
 // 不泄露任何数据,但显式回退到默认更符合直觉)。返回选中 id + 默认 Portfolio。
 export const resolveScope = (

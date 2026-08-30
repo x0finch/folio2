@@ -5,11 +5,12 @@ import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { MAX_PINS_PER_PORTFOLIO } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback } from "@/lib/core/logo";
+import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { accountListQuery } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import { refetchUntil } from "@/lib/queries/constants";
-import { fetchHomeTabStrip, type HomeTabStrip, homeTabStripQuery } from "@/lib/queries/portfolio";
+import { fetchHomeTabStrip, type HomeTabStrip } from "@/lib/queries/portfolio";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { tagListQuery } from "@/lib/queries/tags";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "@/lib/server/tab-pins";
@@ -39,7 +40,7 @@ const awaitStrip = (
 export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
   const { selectedId } = usePortfolio();
   const queryClient = useQueryClient();
-  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const strip = useHomeTabStrip(selectedId);
   const { shownActive, selectTab } = useHomeTabSelection(strip.pins);
   const isActive = shownActive === pin.id;
   const selected: PinTargetChoice = {
@@ -133,7 +134,7 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
 export function AddPinButton() {
   const { selectedId } = usePortfolio();
   const queryClient = useQueryClient();
-  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const strip = useHomeTabStrip(selectedId);
   const { selectTab } = useHomeTabSelection(strip.pins);
   const tct = useTranslations("CustomTabs");
   const addMut = useMutation({

@@ -2,10 +2,11 @@ import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { computeHomeTabStrip, overviewFromSnapshotData } from "@/lib/core/portfolio";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import type { AppError } from "@/lib/server/errors";
-import { handleGetPortfolioRoster } from "@/lib/server/portfolio/roster-data";
 import type { PortfolioScope } from "@/lib/server/portfolio/scope";
 import { handleGetPortfolioSnapshotData } from "@/lib/server/portfolio/snapshot-data";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
+import { handleGetPortfolioTabPins } from "@/lib/server/tab-pins/read";
+import { handleListTags } from "@/lib/server/tags/list";
 
 // **被测的是 handler,发动走生产那个内核。**
 //
@@ -76,6 +77,12 @@ export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
 export const readOverview = async (userId: string, data: PortfolioScope = {}) =>
   overviewFromSnapshotData(await call(userId, handleGetPortfolioSnapshotData(data)));
 
-/** 同上,tab 条那条 —— 名单原料 + 浏览器现算(FOL-49)。 */
-export const readTabStrip = async (userId: string, data: { portfolioId?: string } = {}) =>
-  computeHomeTabStrip(await call(userId, handleGetPortfolioRoster(data)));
+/** 同上,tab 条那条 —— 快照原料 + tabPins + 标签,浏览器现算(FOL-49)。 */
+export const readTabStrip = async (userId: string, data: { portfolioId?: string } = {}) => {
+  const [snapshot, tabPins, tags] = await Promise.all([
+    call(userId, handleGetPortfolioSnapshotData({ portfolioId: data.portfolioId })),
+    call(userId, handleGetPortfolioTabPins()),
+    call(userId, handleListTags({ portfolioId: data.portfolioId })),
+  ]);
+  return computeHomeTabStrip(snapshot, tabPins, tags);
+};

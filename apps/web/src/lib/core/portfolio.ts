@@ -1,10 +1,4 @@
-import type {
-  AccountSafe,
-  PortfolioMembership,
-  SnapshotWithBalances,
-  TabPin,
-  Tag,
-} from "@folio/db";
+import type { AccountSafe, SnapshotWithBalances, TabPin, Tag } from "@folio/db";
 import {
   fiatCodeOf,
   type PlatformMeta,
@@ -22,7 +16,7 @@ import {
   parseDefiMeta,
   toAccountSections,
 } from "@/lib/core/account-view";
-import { accountsInView, pinsInView } from "@/lib/core/accounts-in-view";
+import { pinsInView } from "@/lib/core/accounts-in-view";
 import { isFungible, type ViewKind, viewKind } from "@/lib/core/balance-kind";
 import {
   buildPortfolioHistory,
@@ -409,30 +403,9 @@ export function resolvePinLabel(
   return c.logo ? { name: c.name, logo: c.logo } : { name: c.name };
 }
 
-// tab 条原料里的余额行 —— 只留 `toAccountSections` / `kindPresence` 读得到的列。
-interface RosterBalanceView {
-  id: string;
-  amount: number;
-  usdValue: number;
-  kind: string;
-  metaJson: string | null;
-}
-
-// 每账户最新快照的瘦身形状(只要余额行,不要 takenAt / totalUsd)。
-export interface RosterSnapshotView {
-  balances: RosterBalanceView[];
-}
-
-// 名单原料(FOL-49):账户 / 归属 / 标签 / pin / 最新快照(kind+meta) / connector 展示元数据。
-// 服务端只取行,永续 / DeFi 有无与 pin 标签在浏览器用 `computeHomeTabStrip` 现算。
-export interface PortfolioRosterData {
-  selectedPortfolioId: string;
-  defaultPortfolioId: string;
-  accounts: AccountSafe[];
-  memberships: PortfolioMembership[];
+// 首页 tab 条 pin 原料 —— 只含 pin 行 + connector 展示元数据;账户/快照走 overview 缓存,标签走 tagListQuery。
+export interface PortfolioTabPinsData {
   pins: TabPin[];
-  tags: Tag[];
-  snapshots: [string, RosterSnapshotView][];
   connectorMeta: [string, { name: string; logo?: string }][];
 }
 
@@ -452,19 +425,18 @@ export interface HomeTabStripView {
   }[];
 }
 
-/** 从名单原料算出首页 tab 条(永续 / DeFi 有无 + 已解析 pin 标签)。 */
-export function computeHomeTabStrip(raw: PortfolioRosterData): HomeTabStripView {
-  const accounts = accountsInView(
-    raw.accounts,
-    raw.memberships,
-    raw.selectedPortfolioId,
-    raw.defaultPortfolioId,
-  );
+/** 从快照原料 + pin 原料 + 标签列表算出首页 tab 条。 */
+export function computeHomeTabStrip(
+  snapshot: PortfolioSnapshotData,
+  tabPins: PortfolioTabPinsData,
+  tags: readonly Tag[],
+): HomeTabStripView {
+  const accounts = snapshot.accounts;
   const inView = new Set(accounts.map((a) => a.id));
-  const snapshotMap = new Map(raw.snapshots);
+  const snapshotMap = new Map(snapshot.snapshots);
   const sections = [...inView]
     .map((id) => snapshotMap.get(id))
-    .filter((s): s is RosterSnapshotView => s != null)
+    .filter((s): s is SnapshotView => s != null)
     .map((s) =>
       toAccountSections(
         s.balances.map((b) => ({
@@ -477,13 +449,11 @@ export function computeHomeTabStrip(raw: PortfolioRosterData): HomeTabStripView 
       ),
     );
   const { hasPerps, hasDefi } = kindPresence(sections);
-  const tagIds = new Set(
-    raw.tags.filter((t) => t.portfolioId === raw.selectedPortfolioId).map((t) => t.id),
-  );
-  const shownPins = pinsInView(raw.pins, { accounts, tagIds });
-  const tagName = (id: string) => raw.tags.find((t) => t.id === id)?.name;
-  const accountName = (id: string) => raw.accounts.find((a) => a.id === id)?.label;
-  const connectorMeta = new Map(raw.connectorMeta);
+  const tagIds = new Set(tags.map((t) => t.id));
+  const shownPins = pinsInView(tabPins.pins, { accounts, tagIds });
+  const tagName = (id: string) => tags.find((t) => t.id === id)?.name;
+  const accountName = (id: string) => accounts.find((a) => a.id === id)?.label;
+  const connectorMeta = new Map(tabPins.connectorMeta);
   const connector = (id: string) => connectorMeta.get(id) ?? { name: connectorLabelFallback(id) };
 
   return {

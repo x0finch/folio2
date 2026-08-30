@@ -1,11 +1,6 @@
-import type { AccountSafe } from "@folio/db";
 import { describe, expect, it } from "vitest";
-import {
-  computeHomeTabStrip,
-  kindPresence,
-  type PortfolioRosterData,
-  resolvePinLabel,
-} from "@/lib/core/portfolio";
+import type { PortfolioSnapshotData, PortfolioTabPinsData } from "@/lib/core/portfolio";
+import { computeHomeTabStrip, kindPresence, resolvePinLabel } from "@/lib/core/portfolio";
 import { kindTabsOf, pickShownTab, tabAfterUnpin } from "@/routes/_authed/-home/home-tabs";
 
 // 页内 tab 进 URL(片5 / ADR 0043)。URL 是外面来的,所以「认不出的值怎么办」是这一片的正经逻辑,
@@ -111,20 +106,23 @@ describe("kindPresence —— 和总览同一套「算不算有永续 / DeFi」"
   });
 });
 
-describe("computeHomeTabStrip —— 从名单原料算 tab 条", () => {
-  const emptyRoster = {
-    selectedPortfolioId: "pf1",
-    defaultPortfolioId: "pf1",
+describe("computeHomeTabStrip —— 从快照 + tabPins + 标签算 tab 条", () => {
+  const emptySnapshot = {
     accounts: [],
-    memberships: [],
-    pins: [],
-    tags: [],
     snapshots: [],
+    prevSnapshots: [],
+    enriched: [],
+    platformMeta: [],
     connectorMeta: [],
-  } satisfies PortfolioRosterData;
+    fiatRefs: [],
+    mode: "self-first" as const,
+    now: 0,
+  } satisfies PortfolioSnapshotData;
+
+  const emptyTabPins = { pins: [], connectorMeta: [] } satisfies PortfolioTabPinsData;
 
   it("零账户 → hasAccounts 假,两个视角 tab 都不出", () => {
-    expect(computeHomeTabStrip(emptyRoster)).toEqual({
+    expect(computeHomeTabStrip(emptySnapshot, emptyTabPins, [])).toEqual({
       hasAccounts: false,
       hasPerps: false,
       hasDefi: false,
@@ -138,31 +136,36 @@ describe("computeHomeTabStrip —— 从名单原料算 tab 条", () => {
       label: "永续",
       connectorId: "hyperliquid",
       archivedAt: null,
-    } as AccountSafe;
-    const strip = computeHomeTabStrip({
-      ...emptyRoster,
-      accounts: [account],
-      snapshots: [
-        [
-          "acc1",
-          {
-            balances: [
-              {
-                id: "b1",
-                amount: 1,
-                usdValue: 100,
-                kind: "perp_equity",
-                metaJson: JSON.stringify({
-                  withdrawable: 60,
-                  totalMarginUsed: 40,
-                  totalNtlPos: 400,
-                }),
-              },
-            ],
-          },
+    } as PortfolioSnapshotData["accounts"][number];
+    const strip = computeHomeTabStrip(
+      {
+        ...emptySnapshot,
+        accounts: [account],
+        snapshots: [
+          [
+            "acc1",
+            {
+              takenAt: 0,
+              balances: [
+                {
+                  id: "b1",
+                  amount: 1,
+                  usdValue: 100,
+                  kind: "perp_equity",
+                  metaJson: JSON.stringify({
+                    withdrawable: 60,
+                    totalMarginUsed: 40,
+                    totalNtlPos: 400,
+                  }),
+                },
+              ],
+            },
+          ],
         ],
-      ],
-    });
+      },
+      emptyTabPins,
+      [],
+    );
     expect(strip.hasAccounts).toBe(true);
     expect(strip.hasPerps).toBe(true);
     expect(strip.hasDefi).toBe(false);
@@ -174,36 +177,34 @@ describe("computeHomeTabStrip —— 从名单原料算 tab 条", () => {
       label: "我的钱包",
       connectorId: "bitcoin",
       archivedAt: null,
-    } as AccountSafe;
-    const strip = computeHomeTabStrip({
-      ...emptyRoster,
-      accounts: [account],
-      memberships: [{ accountId: "acc1", portfolioId: "pf1" }],
-      tags: [
-        { id: "tg1", portfolioId: "pf1", name: "长期", sortOrder: 0, userId: "u1", createdAt: 0 },
-      ],
-      pins: [
-        {
-          id: "p1",
-          kind: "tag",
-          tagId: "tg1",
-          connectorId: null,
-          accountId: null,
-          sortOrder: 0,
-          userId: "u1",
-        },
-        {
-          id: "p2",
-          kind: "account",
-          accountId: "acc1",
-          connectorId: null,
-          tagId: null,
-          sortOrder: 1,
-          userId: "u1",
-        },
-      ],
-      connectorMeta: [],
-    });
+    } as PortfolioSnapshotData["accounts"][number];
+    const strip = computeHomeTabStrip(
+      { ...emptySnapshot, accounts: [account], snapshots: [] },
+      {
+        pins: [
+          {
+            id: "p1",
+            kind: "tag",
+            tagId: "tg1",
+            connectorId: null,
+            accountId: null,
+            sortOrder: 0,
+            userId: "u1",
+          },
+          {
+            id: "p2",
+            kind: "account",
+            accountId: "acc1",
+            connectorId: null,
+            tagId: null,
+            sortOrder: 1,
+            userId: "u1",
+          },
+        ],
+        connectorMeta: [],
+      },
+      [{ id: "tg1", portfolioId: "pf1", name: "长期", sortOrder: 0, userId: "u1", createdAt: 0 }],
+    );
     expect(strip.pins.map((p) => p.name).sort()).toEqual(["我的钱包", "长期"]);
   });
 });

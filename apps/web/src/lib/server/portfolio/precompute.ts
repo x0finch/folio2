@@ -10,8 +10,8 @@ import { buildScopedOverview, resolveScope } from "./scope";
 // 当前 + 24 小时前两组),不再预计算、不再有 gain 键 / gain 读接口 / pending 轮询。总览本身也已
 // 改走原料接口(`snapshot-data`);这里的 `overviewKey` 目前无读者,留给 FOL-52 收编。
 //
-// **tab 条已退场(FOL-49)**:改成浏览器从名单原料(`roster-data`)用 `computeHomeTabStrip` 现算,
-// 不再预计算、不再有 tabstrip 键 / `getHomeTabStrip` / pending 轮询。
+// **tab 条已退场(FOL-49)**:浏览器从 overview 快照缓存 + `getPortfolioTabPins` + 标签列表
+// 用 `computeHomeTabStrip` 现算,不再预计算、不再有 tabstrip 键 / pending 轮询。
 //
 // 这几条接口都是「原料大、结果小」的样板:窗口内几千行余额历史、每个账户的整张快照进去,
 // 一屏数字出来。原料扔给前端连序列化都超标,而现算合起来远超免费档一次请求的 10ms CPU。

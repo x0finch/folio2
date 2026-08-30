@@ -36,15 +36,12 @@ export const portfolioKeys = {
   /** 组合清单 + 默认组合 id。 */
   list: () => [...portfolioKeys.all, "list"] as const,
   /**
-   * 名单域前缀(FOL-49)—— 刷新映射表用它;`roster` 查询挂在这层下面。
-   * 改 pin / 标签不必重拉快照原料。
+   * tab 域前缀 —— 刷新映射表用它;`tabPins` 查询挂在这层下面。
+   * 改 pin 不必重拉快照原料(overview 走缓存)。
    */
   tabs: () => [...portfolioKeys.all, "tabs"] as const,
-  /**
-   * 名单原料(账户 / 归属 / 标签 / pin,FOL-49)—— 与快照原料分 key,改 pin 不必重拉余额。
-   * tab 条是这份原料的 `select` 产物(`computeHomeTabStrip`)。
-   */
-  roster: (portfolioId: string) => [...portfolioKeys.tabs(), "roster", portfolioId] as const,
+  /** 首页 tab 条 pin 原料 —— 与 overview 分 key;改 pin 只刷这层。 */
+  tabPins: (portfolioId: string) => [...portfolioKeys.tabs(), "pins", portfolioId] as const,
   /**
    * 组合总览。**portfolioId 必须是真实 id,不能用「缺省 = 默认」的 undefined** ——
    * loader 预取的那份与组件按 selectedId 读的那份,key 对不上就等于首屏白拉一遍。

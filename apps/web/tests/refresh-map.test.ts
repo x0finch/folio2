@@ -170,7 +170,7 @@ describe("刷新映射表", () => {
   it("portfolio.write 刷整个组合域(清单、tab 条、总览一起)", async () => {
     const keys = [
       portfolioKeys.list(),
-      portfolioKeys.roster("pf-1"),
+      portfolioKeys.tabPins("pf-1"),
       portfolioKeys.overview("pf-1"),
       portfolioKeys.history("pf-1"),
     ];
@@ -184,12 +184,12 @@ describe("刷新映射表", () => {
   // 刻意的窄口径:增删一个自定义 Tab 不改任何余额,把昂贵的总览连带拉一遍是白花钱。
   // 这条钉住那个决定 —— 有人把它并进 `portfolio.write` 时会红。
   it("portfolio.pin.write 只刷 tab 条,不碰总览", async () => {
-    seed(portfolioKeys.roster("pf-1"));
+    seed(portfolioKeys.tabPins("pf-1"));
     seed(portfolioKeys.overview("pf-1"));
 
     await invalidateFor(queryClient, "portfolio.pin.write");
 
-    expect(isInvalidated(portfolioKeys.roster("pf-1"))).toBe(true);
+    expect(isInvalidated(portfolioKeys.tabPins("pf-1"))).toBe(true);
     expect(isInvalidated(portfolioKeys.overview("pf-1"))).toBe(false);
   });
 

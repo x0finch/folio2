@@ -1,15 +1,19 @@
 import { createServerFn } from "@tanstack/react-start";
+import { PortfolioSelectInput } from "@/lib/server/portfolio/scope";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleCreateTabPin, PinTargetInput } from "./create";
 import { DeleteTabPinInput, handleDeleteTabPin } from "./delete";
+import { handleGetPortfolioTabPins } from "./read";
 import { handleUpdateTabPinTarget, UpdateTabPinInput } from "./update-target";
 
-// 首页自定义 Tab(pin,ADR 0034)资源面:只做装配。
-// 自定义 Tab 的写路径。清单读取已并进 `getPortfolioRoster`(标签在浏览器用 `computeHomeTabStrip` 解析),这里只留三处写。
-//
-// **四行里三件事**:`requireAuth` 认人并把 userId 放进 context、`validator` 校入参、
-// `runEffect` 建 per-user 环境把 handler 跑成 Promise。handler 自己只剩「描述业务」那一件。
+// 首页自定义 Tab(pin,ADR 0034)资源面:读 + 写装配。
+// 读:`getPortfolioTabPins` 只发 pin 行;tab 条其余原料来自 overview / 标签 query 缓存。
+
+export const getPortfolioTabPins = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(PortfolioSelectInput)
+  .handler(runEffect(handleGetPortfolioTabPins));
 
 export const createTabPin = createServerFn({ method: "POST" })
   .middleware([requireAuth])

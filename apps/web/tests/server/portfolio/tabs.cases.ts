@@ -10,7 +10,7 @@ import { freshUser, otherUser } from "../_kit/user";
 // 合并进 portfolio/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
 // 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("portfolio/tabs", () => {
-  // FOL-49 · getPortfolioRoster + computeHomeTabStrip
+  // FOL-49 · getPortfolioTabPins + overview + computeHomeTabStrip
   const USER = "h-pf-tabs";
 
   let NOW = 0;

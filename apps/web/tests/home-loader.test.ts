@@ -21,11 +21,13 @@ describe("首页 loader 不再等待慢查询", () => {
     expect(src).not.toMatch(/await queryClient\.ensureQueryData\(portfolioHistoryQuery/);
   });
 
-  // #488 票 4:tab 条有自己的轻请求。发出不等;目录 / 账户 / 标签不再走首屏。
-  it("发出 tab 条轻请求,但不 await", () => {
+  // tab 条:pin 轻请求 + 标签(发出不等);永续/DeFi 从 overview 缓存借。
+  it("发出 tabPins 与标签,但不 await", () => {
     const src = stripComments(readFileSync(SRC, "utf8"));
-    expect(src).toContain("homeTabStripQuery(");
-    expect(src).not.toMatch(/await queryClient\.ensureQueryData\(homeTabStripQuery/);
+    expect(src).toContain("portfolioTabPinsQuery(");
+    expect(src).toContain("tagListQuery(");
+    expect(src).not.toMatch(/await queryClient\.ensureQueryData\(portfolioTabPinsQuery/);
+    expect(src).not.toMatch(/await queryClient\.ensureQueryData\(tagListQuery/);
   });
 
   // FOL-51:24h 盈亏改成随总览原料(两端相减、浏览器算)一起回,不再有独立的盈亏预取。
@@ -42,12 +44,12 @@ describe("首页 loader 不再等待慢查询", () => {
     expect(hero).not.toContain("portfolioGain24hQuery");
   });
 
-  it("连接器目录、账户清单、标签清单、裸 pin 清单不进 loader", () => {
+  it("连接器目录、账户清单不进 loader;标签与 tabPins 发出但不 await", () => {
     const src = stripComments(readFileSync(SRC, "utf8"));
     const loader = src.slice(src.indexOf("loader:"), src.indexOf("component:"));
     expect(loader).not.toContain("connectorCatalogQuery");
     expect(loader).not.toContain("accountListQuery");
-    expect(loader).not.toContain("tagListQuery");
-    expect(loader).not.toContain("tabPinsQuery");
+    expect(loader).toContain("tagListQuery");
+    expect(loader).toContain("portfolioTabPinsQuery");
   });
 });
