@@ -182,22 +182,30 @@ const startAggregates = (prevByAccount: ReadonlyMap<string, PrevSlice>): StartAg
   return { accountTotal, token, tokenByAccount, defi };
 };
 
-// 账户在 24h 盈亏里的分档(ADR 0050 / FOL-43):
+// 账户在 24h 盈亏里的分档(ADR 0050 / FOL-51 用户裁定,推翻 FOL-43 原「账户不满 24h 显 —」):
 //   · `prev`  —— 窗口内有起点快照 → 两端相减。
-//   · `new`   —— 起点空,但当下快照落在 24 小时内(今天新建 / 充值)→ 起点 0,现值全算进组合。
+//   · `new`   —— 起点空,但当下快照落在 24 小时内(今天新建 / 充值)→ 起点 0,现值全算进(视同充值)。
 //   · `stale` —— 起点空,当下快照也早于 24 小时(断线超 7 天)→ 该账户涨跌当 0,两端都不计,不虚增。
+// **组合级(`buildOverview`)与账户级(`attachAccountHoldingGains`)共用这一个判据**,用同一个 `now`,
+// 别各写一份 —— 少一处对齐就会出现「首页把它算进、账户页显 —」这种两边打架。
 type GainClass = "prev" | "new" | "stale";
+
+const classifyGain = (hasPrev: boolean, currentTakenAt: number | null, now: number): GainClass => {
+  if (hasPrev) return "prev";
+  return currentTakenAt != null && currentTakenAt >= now - GAIN_WINDOW_MS ? "new" : "stale";
+};
 
 const classifyAccount = (
   accountId: string,
   start: StartAggregates,
   byAccount: ReadonlyMap<string, SnapshotSlice>,
   now: number,
-): GainClass => {
-  if (start.accountTotal.has(accountId)) return "prev";
-  const latest = byAccount.get(accountId);
-  return latest != null && latest.snapshot.takenAt >= now - GAIN_WINDOW_MS ? "new" : "stale";
-};
+): GainClass =>
+  classifyGain(
+    start.accountTotal.has(accountId),
+    byAccount.get(accountId)?.snapshot.takenAt ?? null,
+    now,
+  );
 
 //  —— 跨账户聚合(按 canonical 代币成 Holding 树)
 
@@ -850,6 +858,9 @@ export interface AccountGainRow {
   archivedAt: number | null;
   // 该账户当下净值(冻结口径:最新快照 totalUsd)—— 账户级两端相减的「现值」那一端。
   totalUsd: number;
+  // 当下快照时刻(manual 是注入的 `now` 占位)—— 分档要它:起点空时,当下快照落在 24h 内就是
+  // `new`(今天新建 / 充值),更旧就是 `stale`(断线超 7 天)。无快照 → null。
+  takenAt: number | null;
   // `kind`/`metaJson` 是逐币盈亏两端同口径要用的:现值侧只聚合 isFungible 现货行(与起点侧一致),
   // 否则同一 token_id 又有现货又有 DeFi/perp 行时现值会多算、盈亏虚高。
   balances: readonly {
@@ -867,12 +878,14 @@ export type WithAccountHoldingGain<R extends AccountGainRow> = Omit<R, "balances
   balances: Array<R["balances"][number] & { gain24h?: Gain | null }>;
 };
 
-// `prevByAccount` = 「24 小时前」那一组(`snapshots.asOf` + manual 折算)。起点缺(账户不满
-// 24 小时 / 断线超 7 天)→ 账户级与逐行都 `null`(界面 `—`)。归档账户两级都 `undefined`(ADR 0039:
-// 界面据此整行省略)。
+// `prevByAccount` = 「24 小时前」那一组(`snapshots.asOf` + manual 折算)。**分档与组合级同一套**
+//(`classifyGain`,同一个 `now`):`prev` 两端相减;`new`(今天新建/充值)起点 0 → 现值全算进
+//(视同充值,FOL-51 用户裁定推翻 FOL-43 原「账户不满 24h 显 —」);`stale`(断线超 7 天)→ `null`(`—`)。
+// 归档账户两级都 `undefined`(ADR 0039:界面据此整行省略)。
 export function attachAccountHoldingGains<R extends AccountGainRow>(
   rows: readonly R[],
   prevByAccount: ReadonlyMap<string, PrevSlice>,
+  now: number,
 ): WithAccountHoldingGain<R>[] {
   return rows.map((r): WithAccountHoldingGain<R> => {
     if (r.archivedAt != null) {
@@ -886,17 +899,19 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
     const spotOf = (b: R["balances"][number]): boolean =>
       b.tokenId != null && isFungible(viewKind(b));
     const prev = prevByAccount.get(r.account.id);
-    if (prev == null) {
+    const cls = classifyGain(prev != null, r.takenAt, now);
+    // `stale`(起点空且当下也 ≥24h 旧)→ 该账户涨跌当 0:账户级与逐现货行都 `null`(`—`),不虚增。
+    if (cls === "stale") {
       return {
         ...r,
         gain24h: null,
         balances: r.balances.map((b) => ({ ...b, gain24h: spotOf(b) ? null : undefined })),
       };
     }
-    // 起点各表:账户总额(全部余额)+ 逐现货代币值。
+    // 起点各表:`prev` 从那张起点快照汇;`new` 起点恒 0(startTotal 0 / startToken 空)→ 现值全算进。
     let startTotal = 0;
     const startToken = new Map<string, number>();
-    for (const b of prev.balances) {
+    for (const b of prev?.balances ?? []) {
       startTotal += b.usdValue;
       if (b.tokenId != null && isFungible(viewKind(b))) {
         startToken.set(b.tokenId, (startToken.get(b.tokenId) ?? 0) + b.usdValue);

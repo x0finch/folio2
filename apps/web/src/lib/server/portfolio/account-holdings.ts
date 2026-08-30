@@ -73,7 +73,7 @@ export const loadAccountHoldings = (scope: PortfolioScope) =>
         .map((s) => [s.snapshot.accountId, s]),
     );
     yield* injectManualPrevSnapshots(active, prevByAccount, start, now);
-    return { rows: attachAccountHoldingGains(rows, prevByAccount), pricesStale };
+    return { rows: attachAccountHoldingGains(rows, prevByAccount, now), pricesStale };
   });
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓,**含已归档账户**(ADR 0039)。
