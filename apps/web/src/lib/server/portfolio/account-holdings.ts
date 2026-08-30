@@ -1,9 +1,10 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import {
-  attachAccountHoldingGains,
+  type AccountHoldingsData,
   GAIN_START_FLOOR_MS,
   GAIN_WINDOW_MS,
+  toSnapshotView,
 } from "@/lib/core/portfolio";
 import { injectManualPrevSnapshots, injectManualSnapshots } from "@/lib/server/manual/store";
 import { enrichBalances } from "@/lib/server/tokens/enrich";
@@ -11,6 +12,12 @@ import { type PortfolioScope, scopedMembership } from "./scope";
 
 // 按账户视图的取数(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓。
 // 与 `buildOverview`(按代币聚合)分开 —— 账户页是「按账户」的 home,需要每账户明细。
+//
+// **只发原料,不聚合、不重算、不算盈亏**(FOL-44 方向,与首页 `getPortfolioSnapshotData` 同路):
+// 账户级现价重算 + 24h 盈亏都搬进浏览器 `accountRowsFromRaw`(query 的 `select`)。服务端这层只做
+// 拿不到浏览器里去的事 —— 读行、注入 manual 合成项、cache-only 富化(带上现价 `unitPrice`)、备好
+// 「24 小时前」那组起点料。以前这里在服务端取快照冻结 totalUsd/usdValue,于是账户页显示上次同步的
+// 旧价、24h 恒 $0(现值=冻结=起点),与首页/单币的实时值打架 —— 换成发料 + 浏览器算就对齐了。
 //
 // **从 `listAccountHoldings` 里抽出来的,不是新逻辑。** 抽的理由是测试:这条链跨了账户、快照、
 // manual 合成注入、富化四层,而「归档账户要不要在里面」正是跨层才看得出来的事(隔壁
@@ -22,10 +29,17 @@ export const loadAccountHoldings = (scope: PortfolioScope) =>
     // 「当下」取一次,整条链共用(分段末点 / 容差判定 / 取历史的下界都按同一刻算)。
     const now = Date.now();
     const db = yield* Database;
-    const [member, everyAccount, snapshots] = yield* Effect.all(
-      [scopedMembership(scope.portfolioId), db.accounts.list(), db.snapshots.latest()],
-      { concurrency: 3 },
+    const [member, everyAccount, snapshots, settings] = yield* Effect.all(
+      [
+        scopedMembership(scope.portfolioId),
+        db.accounts.list(),
+        db.snapshots.latest(),
+        db.settings.get(),
+      ],
+      { concurrency: 4 },
     );
+    // 估值口径(self-first 默认):现价重算复用它,与首页 `deriveLiveAccountTotals` 同一个 mode。
+    const mode = settings.valuationMode;
     // **只当前组合的账户**(ADR 0047):以前整份回、账户页自己筛。判据与列表那条同一个
     // (归档无关 —— 这一页要显示归档区)。
     const allAccounts = everyAccount.filter((a) => member.has(a.id));
@@ -45,12 +59,15 @@ export const loadAccountHoldings = (scope: PortfolioScope) =>
         return {
           account: { id: account.id, label: account.label },
           archivedAt: account.archivedAt,
+          // 冻结快照总额,原样发下去 —— 活跃行的现价重算在浏览器 `accountRowsFromRaw` 里做
+          //(归档行封存,浏览器原样用这个值,ADR 0039)。
           totalUsd: latest?.snapshot.totalUsd ?? 0,
           takenAt: latest?.snapshot.takenAt ?? null,
           // note 重设计(两级):① balance 级单个 note 随各 balance 透传(db 已把 snapshot_balances.note
           // safeParse 成 Note),现货行副行渲染 <NoteBadge>;② account 级 note(Note[],整钱包,BTC 未确认/
           // 收款/派生分布)是每账户一份,db 已 safeParse 成 Note[],这里随 row.note 带出 → 持仓区手风琴。
           note: latest?.note,
+          // 富化行带着现价 `unitPrice`(cache-only),浏览器据此逐行 `liveValue` 重算 —— 原料齐了。
           balances: enriched.rows,
           pricesStale: enriched.pricesStale,
         };
@@ -61,19 +78,24 @@ export const loadAccountHoldings = (scope: PortfolioScope) =>
     // 它的显示值(封存值取自快照,不现推)。既浪费,又和「停更」是反的。
     const pricesStale = rows.some((r) => r.archivedAt == null && r.pricesStale);
 
-    // 账户行的 24h 盈亏(ADR 0050,两端相减):起点端 = 每账户 [now-7d, now-24h] 窗口内最近一张
-    //(`asOf`)+ manual 折算注入。两端相减 / 逐行摊分算法在 `attachAccountHoldingGains`。
-    // 起点端只是一次点查(不再捞整个窗口的余额历史),便宜到可以随持仓一起出。
+    // 「24 小时前」那一组起点料(ADR 0050,两端相减):每账户 [now-7d, now-24h] 窗口内最近一张
+    //(`asOf`)+ manual 折算注入。**这里只备料、不相减** —— 两端相减 / 逐行摊分在浏览器
+    // `accountRowsFromRaw` → `attachAccountHoldingGains` 里,与首页同路。起点端只是一次点查
+    //(不捞整个窗口的余额历史),便宜到随持仓一起发。
     const start = now - GAIN_WINDOW_MS;
-    const prevSnapshots = yield* db.snapshots.asOf(start, now - GAIN_START_FLOOR_MS);
+    const prevRaw = yield* db.snapshots.asOf(start, now - GAIN_START_FLOOR_MS);
     const memberSet = new Set(allAccounts.map((a) => a.id));
     const prevByAccount = new Map(
-      prevSnapshots
+      prevRaw
         .filter((s) => memberSet.has(s.snapshot.accountId))
         .map((s) => [s.snapshot.accountId, s]),
     );
     yield* injectManualPrevSnapshots(active, prevByAccount, start, now);
-    return { rows: attachAccountHoldingGains(rows, prevByAccount), pricesStale };
+    // Map → entries 过线,浏览器 `accountRowsFromRaw` 里重建(与首页 `PortfolioSnapshotData` 同法)。
+    const prevSnapshots = [...prevByAccount].map(
+      ([id, s]): [string, ReturnType<typeof toSnapshotView>] => [id, toSnapshotView(s)],
+    );
+    return { rows, prevSnapshots, mode, pricesStale } satisfies AccountHoldingsData;
   });
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓,**含已归档账户**(ADR 0039)。

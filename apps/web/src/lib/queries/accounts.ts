@@ -1,5 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { HistoryRange } from "@/lib/core/history-range";
+import { type AccountHoldingsView, accountRowsFromRaw } from "@/lib/core/portfolio";
 import { getAccountHistory, listAccounts } from "@/lib/server/accounts";
 import { getTokenValueHistory } from "@/lib/server/holdings";
 import { getManualAccount } from "@/lib/server/manual-tokens";
@@ -29,16 +30,18 @@ export const accountListQuery = (portfolioId: string) =>
 export const accountHoldingsQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: accountKeys.holdings(portfolioId),
-    // 24h 盈亏(ADR 0050,两端相减)随持仓一起回 —— 服务端一次点查 `asOf` 起点、现算,不再单独一条
-    // 预计算读接口 + 轮询(FOL-51)。
+    // 服务端只发原料(每账户冻结快照 + 富化现价 + 「24 小时前」那组起点)。**活跃账户的现价重算
+    // 与 24h 盈亏在浏览器 `select` 里算**(与首页 `overviewFromSnapshotData` 同路,FOL-44):
+    // 账户页因此和首页/单币同口径 —— 显实时价、涨跌两端相减,不再是上次同步的冻结值 + 恒 $0。
     queryFn: () => listAccountHoldings({ data: { portfolioId } }),
+    select: accountRowsFromRaw,
     staleTime: STALE_TIME.live,
   });
 
 /** 一份账户列表行的形状(含该组合的归档账户、归属与凭据投影)。 */
 export type AccountListItem = Awaited<ReturnType<typeof listAccounts>>[number];
-/** 按账户的持仓视图(活跃账户 + 其最新快照的富化持仓)。 */
-export type AccountHoldings = Awaited<ReturnType<typeof listAccountHoldings>>;
+/** 按账户的持仓视图(浏览器 `select` 算完:现价重算的总额/持仓 + 两端相减的 24h 盈亏)。 */
+export type AccountHoldings = AccountHoldingsView;
 
 /**
  * 一个窗口的原料点(FOL-38:接口发点、浏览器画线)。**窗口仍然进 key、仍然回服务器一趟** ——

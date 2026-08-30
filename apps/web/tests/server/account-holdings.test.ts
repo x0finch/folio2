@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import type { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { accountRowsFromRaw } from "@/lib/core/portfolio";
 import type { AppError } from "@/lib/server/errors";
 import { loadAccountHoldings } from "@/lib/server/portfolio/account-holdings";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
@@ -53,9 +54,11 @@ const evmAccount = (label: string, address: string) =>
     creds: JSON.stringify({ address }),
   });
 
-// 盈亏(两端相减,ADR 0050)FOL-51 起随持仓一起回,不再有 `withGain` 开关。
+// 盈亏(两端相减,ADR 0050)+ 现价重算(FOL-44)现在都在浏览器 `accountRowsFromRaw` 里做,
+// 服务端 `loadAccountHoldings` 只发原料。这里把两段接起来跑,断言的是「服务端发料 + 浏览器算」
+// 走完的最终视图 —— 与生产读路径(server fn → query 的 `select`)逐值一致。
 const rowsByLabel = async () => {
-  const view = await run(USER, loadAccountHoldings({}));
+  const view = accountRowsFromRaw(await run(USER, loadAccountHoldings({})));
   return {
     view,
     of: (label: string) => view.rows.find((r) => r.account.label === label),
@@ -110,6 +113,75 @@ describe("按账户明细与归档", () => {
     const { view } = await rowsByLabel();
 
     expect(view.pricesStale).toBe(true);
+  });
+});
+
+describe("现价重算:账户页与首页同一口径(FOL-44)", () => {
+  // 浏览器实测发现的口径 bug:账户页(列表 + 抽屉)以前直接取快照冻结的 totalUsd / usdValue,
+  // 于是显示的是上次同步那一刻的旧价、24h 涨跌恒 $0 —— 与首页 / 单币那边的实时值打架。
+  // 修法:活跃账户逐行走 `liveValue`(与首页 `deriveLiveAccountTotals` 同口径),盯市行取参考层现价。
+  const seedPrice = (tokenId: string, unitPrice: number) =>
+    env.DB.prepare("UPDATE tokens SET unit_price = ?, price_as_of = ? WHERE id = ?")
+      .bind(unitPrice, Date.now(), tokenId)
+      .run();
+
+  it("活跃账户按参考层现价重算,不再显示上次同步的冻结值", async () => {
+    const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
+      { namer: "coingecko", localName: "issued:bitcoin" },
+    ]);
+    const acc = await evmAccount("Repriced", "0xreprice");
+    // 快照冻结在 $100(1 BTC × 同步那刻的价);盯市行不写 selfPrice → 读时恒用源价。
+    await dbFor(USER).snapshots.write(acc.id, {
+      takenAt: Date.now(),
+      totalUsd: 100,
+      balances: [{ amount: 1, usdValue: 100, kind: "spot", platform: "evm:1", tokenId: btc }],
+    });
+    await seedPrice(btc, 150); // 参考层现价涨到 $150
+
+    const { of } = await rowsByLabel();
+    const row = of("Repriced");
+    // 旧代码:100(取快照冻结 totalUsd)。修好后按现价 $150 重算 —— 账户级与那行都是。
+    expect(row?.totalUsd).toBeCloseTo(150, 4);
+    expect(row?.balances[0]?.usdValue).toBeCloseTo(150, 4);
+  });
+
+  it("归档账户不现推,仍显示封存那一刻的冻结值(ADR 0039)", async () => {
+    const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
+      { namer: "coingecko", localName: "issued:bitcoin-sealed" },
+    ]);
+    const acc = await evmAccount("Sealed", "0xsealed");
+    await dbFor(USER).snapshots.write(acc.id, {
+      takenAt: Date.now(),
+      totalUsd: 100,
+      balances: [{ amount: 1, usdValue: 100, kind: "spot", platform: "evm:1", tokenId: btc }],
+    });
+    await seedPrice(btc, 150);
+    await dbFor(USER).accounts.setArchived(acc.id, true);
+
+    const { of } = await rowsByLabel();
+    // 现价 150 摆着也不动它:封存 = 显示快照那一刻的数,不现推。
+    expect(of("Sealed")?.totalUsd).toBeCloseTo(100, 4);
+    expect(of("Sealed")?.balances[0]?.usdValue).toBeCloseTo(100, 4);
+  });
+
+  it("24h 涨跌当前端用现价(不再是冻结值 = 起点 → 恒 $0)", async () => {
+    const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
+      { namer: "coingecko", localName: "issued:bitcoin-gain" },
+    ]);
+    const acc = await evmAccount("LiveGain", "0xlivegain");
+    const DAY = 24 * 60 * 60 * 1000;
+    // 24h 前与当下**两张快照冻结值相同**($100)—— 旧代码两端相减恒得 $0。
+    for (const t of [Date.now() - DAY, Date.now()]) {
+      await dbFor(USER).snapshots.write(acc.id, {
+        takenAt: t,
+        totalUsd: 100,
+        balances: [{ amount: 1, usdValue: 100, kind: "spot", platform: "evm:1", tokenId: btc }],
+      });
+    }
+    await seedPrice(btc, 150); // 现价 $150 → 现值 150 − 起点 100 = +50
+
+    const { of } = await rowsByLabel();
+    expect(of("LiveGain")?.gain24h?.amount).toBeCloseTo(50, 4);
   });
 });
 

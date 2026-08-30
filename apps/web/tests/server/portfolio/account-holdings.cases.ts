@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { accountRowsFromRaw } from "@/lib/core/portfolio";
 import { handleListAccountHoldings } from "@/lib/server/portfolio/account-holdings";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
@@ -38,7 +39,7 @@ describe("portfolio/account-holdings", () => {
         ]);
       }
 
-      const view = await call(USER, handleListAccountHoldings());
+      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
 
       expect(view.rows).toHaveLength(3);
       for (const row of view.rows) {
@@ -50,7 +51,7 @@ describe("portfolio/account-holdings", () => {
     it("手记账户 → 有行、有持仓,来自账本合成", async () => {
       await seedManualAccount(USER, "手记", { symbol: "BTC", unitPrice: 100, amount: 3 });
 
-      const view = await call(USER, handleListAccountHoldings());
+      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
 
       expect(view.rows).toHaveLength(1);
       expect(view.rows[0].balances.length).toBeGreaterThan(0);
@@ -62,7 +63,7 @@ describe("portfolio/account-holdings", () => {
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 777 }]);
       await db(USER).accounts.setArchived(acc.id, true);
 
-      const view = await call(USER, handleListAccountHoldings());
+      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
 
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row).toBeDefined();
@@ -73,7 +74,7 @@ describe("portfolio/account-holdings", () => {
     it("从没同步过的账户 → 出现在列表里,余额是空的", async () => {
       const acc = await seedAccount(USER, "没同步过", "bitcoin");
 
-      const view = await call(USER, handleListAccountHoldings());
+      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
 
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row).toBeDefined();
@@ -81,7 +82,7 @@ describe("portfolio/account-holdings", () => {
     });
 
     it("全新用户 → 空列表,不是报错", async () => {
-      const view = await call(USER, handleListAccountHoldings());
+      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
 
       expect(view.rows).toEqual([]);
     });
@@ -93,7 +94,7 @@ describe("portfolio/account-holdings", () => {
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
-      const view = await call(USER, handleListAccountHoldings());
+      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row?.gain24h?.amount).toBeCloseTo(30, 6);
       expect(row?.gain24h?.pct).toBeCloseTo(30, 6);
@@ -106,7 +107,7 @@ describe("portfolio/account-holdings", () => {
       const acc = await seedAccount(USER, "新号", "bitcoin");
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
-      const view = await call(USER, handleListAccountHoldings());
+      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row?.gain24h).toBeNull();
       expect(row?.balances.find((b) => b.tokenId === BTC)?.gain24h).toBeNull();
@@ -117,7 +118,7 @@ describe("portfolio/account-holdings", () => {
       // 唯一那张快照在 8 天前(> 7 天窗口)→ 起点空。
       await seedSnapshot(USER, acc.id, ago(8 * DAY), [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
-      const view = await call(USER, handleListAccountHoldings());
+      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row?.gain24h).toBeNull();
     });
@@ -128,7 +129,7 @@ describe("portfolio/account-holdings", () => {
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
       await db(USER).accounts.setArchived(acc.id, true);
 
-      const view = await call(USER, handleListAccountHoldings());
+      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row?.gain24h).toBeUndefined();
     });
