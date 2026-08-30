@@ -51,13 +51,7 @@ export const portfolioKeys = {
     [...portfolioKeys.all, "overview", portfolioId, pin ?? null] as const,
   /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
   history: (portfolioId: string) => [...portfolioKeys.all, "history", portfolioId] as const,
-  /**
-   * 24h 盈亏(#488 票 5)。**跟总览同一套 pin 收窄**,所以 pin 进 key ——
-   * 不进就会自定义 Tab 跟默认视图共用一份盈亏,切过去看到的是上一份。
-   * 落在组合域前缀下:同步 / 刷价 / 切组合已经刷 `portfolioKeys.all`,不用另开一条事件。
-   */
-  gain24h: (portfolioId: string, pin?: PinScopeKey) =>
-    [...portfolioKeys.all, "gain24h", portfolioId, pin ?? null] as const,
+  // 24h 盈亏无独立 key(FOL-51):它随总览原料(`overview`)一起回,浏览器两端相减算出来。
 };
 
 export const accountKeys = {
@@ -70,13 +64,8 @@ export const accountKeys = {
    * 一份缓存 —— 切过去看到的是上一个组合的账户。同 `portfolioKeys.overview` 那条的理由。
    */
   list: (portfolioId: string) => [...accountKeys.all, "list", portfolioId] as const,
-  /** 当前组合里各账户的市值 / 上次同步 / 持仓明细。 */
+  /** 当前组合里各账户的市值 / 上次同步 / 持仓明细(含 24h 盈亏,两端相减随持仓回,FOL-51)。 */
   holdings: (portfolioId: string) => [...accountKeys.all, "holdings", portfolioId] as const,
-  /**
-   * 24h 盈亏(#493 票 3)。落在账户域前缀下:同步 / 刷价 / 账户写已经刷 `accountKeys.all`,
-   * 不用另开一条会漏刷的路。
-   */
-  gain24h: (portfolioId: string) => [...accountKeys.all, "gain24h", portfolioId] as const,
   /**
    * 单账户价值历史。**key 里是窗口档位(`"30d"`)而不是算出来的起点时间戳** ——
    * 起点由 `Date.now()` 现算,每次渲染都是新数,进了 key 就等于每帧换一个缓存条目、永远拉不停。

@@ -2,11 +2,10 @@ import { Database } from "@folio/db";
 import { Effect } from "effect";
 import {
   attachAccountHoldingGains,
-  GAIN_BASIS_TOLERANCE_MS,
+  GAIN_START_FLOOR_MS,
   GAIN_WINDOW_MS,
-  type WithAccountHoldingGain,
 } from "@/lib/core/portfolio";
-import { injectManualSnapshots, loadManualGainHistory } from "@/lib/server/manual/store";
+import { injectManualPrevSnapshots, injectManualSnapshots } from "@/lib/server/manual/store";
 import { enrichBalances } from "@/lib/server/tokens/enrich";
 import { type PortfolioScope, scopedMembership } from "./scope";
 
@@ -17,7 +16,7 @@ import { type PortfolioScope, scopedMembership } from "./scope";
 // manual 合成注入、富化四层,而「归档账户要不要在里面」正是跨层才看得出来的事(隔壁
 // `scenarios.test.ts` 记着同一个教训:边界两侧各测一遍,挡不住跨边界传错值)。server fn 那层
 // 拿不到测试上下文,抽出来之后 workers 池就能驱动真 D1 走一遍。
-export const loadAccountHoldings = (scope: PortfolioScope, withGain = false) =>
+export const loadAccountHoldings = (scope: PortfolioScope) =>
   Effect.gen(function* () {
     // **整条链一个 effect,一次装配**(#394 T6):读账户 + 快照 → 注入 manual 合成项 → 逐账户富化。
     // 「当下」取一次,整条链共用(分段末点 / 容差判定 / 取历史的下界都按同一刻算)。
@@ -61,25 +60,20 @@ export const loadAccountHoldings = (scope: PortfolioScope, withGain = false) =>
     // 归档行纳进来之后不收窄的话:只有归档账户还持有的币会让每次进页白发一次请求 —— 而且刷完也不改
     // 它的显示值(封存值取自快照,不现推)。既浪费,又和「停更」是反的。
     const pricesStale = rows.some((r) => r.archivedAt == null && r.pricesStale);
-    // #493 票 3:金额先亮,盈亏另包。默认这条路不算 24h —— 历史窗口那一读比富化当下贵。
-    if (!withGain) {
-      return { rows: rows as WithAccountHoldingGain<(typeof rows)[number]>[], pricesStale };
-    }
 
-    // 账户行的 24h 盈亏(ADR 0040):取数在这里(线按账户 / 按币的摊分算法在 `attachAccountHoldingGains`)。
-    // manual 不写快照,原料另走账本(#447 第 3 片)。
-    // 窗口起点再往前留一个容差,否则基准快照恰好落在窗口外时整条线判「算不出」—— 而它明明就在库里。
-    const [gainHistory, manualGain] = yield* Effect.all(
-      [
-        db.snapshots.listBalanceHistory(now - GAIN_WINDOW_MS - GAIN_BASIS_TOLERANCE_MS),
-        loadManualGainHistory(active, now, now - GAIN_WINDOW_MS),
-      ],
-      { concurrency: 2 },
+    // 账户行的 24h 盈亏(ADR 0050,两端相减):起点端 = 每账户 [now-7d, now-24h] 窗口内最近一张
+    //(`asOf`)+ manual 折算注入。两端相减 / 逐行摊分算法在 `attachAccountHoldingGains`。
+    // 起点端只是一次点查(不再捞整个窗口的余额历史),便宜到可以随持仓一起出。
+    const start = now - GAIN_WINDOW_MS;
+    const prevSnapshots = yield* db.snapshots.asOf(start, now - GAIN_START_FLOOR_MS);
+    const memberSet = new Set(allAccounts.map((a) => a.id));
+    const prevByAccount = new Map(
+      prevSnapshots
+        .filter((s) => memberSet.has(s.snapshot.accountId))
+        .map((s) => [s.snapshot.accountId, s]),
     );
-    return {
-      rows: attachAccountHoldingGains(rows, [...gainHistory, ...manualGain], now),
-      pricesStale,
-    };
+    yield* injectManualPrevSnapshots(active, prevByAccount, start, now);
+    return { rows: attachAccountHoldingGains(rows, prevByAccount), pricesStale };
   });
 
 // 按账户视图(账户页浏览器 + 详情侧栏用):每个账户 + 其最新快照的富化持仓,**含已归档账户**(ADR 0039)。

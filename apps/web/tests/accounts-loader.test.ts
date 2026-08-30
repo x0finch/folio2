@@ -27,10 +27,10 @@ describe("账户页 loader 不再等待慢查询", () => {
     expect(src).not.toMatch(/await queryClient\.ensureQueryData\(accountTagLinksQuery/);
   });
 
-  it("发出 24h 盈亏,但不 await", () => {
+  // FOL-51:24h 盈亏改成随持仓(`accountHoldingsQuery`,两端相减服务端现算)一起回,不再单独预取。
+  it("不再单独预取 24h 盈亏(它随持仓一起回)", () => {
     const src = stripComments(readFileSync(SRC, "utf8"));
-    expect(src).toContain("accountGain24hQuery(");
-    expect(src).not.toMatch(/await queryClient\.ensureQueryData\(accountGain24hQuery/);
+    expect(src).not.toContain("accountGain24hQuery");
   });
 
   it("路由没有 pendingComponent,冷启动骨架是页上那套,不是另一张整页骨架", () => {

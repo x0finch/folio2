@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleListAccounts } from "@/lib/server/accounts/list";
 import { handleListAccountHoldings } from "@/lib/server/portfolio/account-holdings";
-import { handleGetAccountGain24h } from "@/lib/server/portfolio/gain";
-import { precomputePortfolio } from "@/lib/server/portfolio/precompute";
 import { handleListAccountTags } from "@/lib/server/tags/account-tags";
 import { handleListTags } from "@/lib/server/tags/list";
 import { db } from "../_kit/db";
@@ -66,15 +64,12 @@ describe("portfolio/scope", () => {
       expect((await listed()).map((a) => a.label)).toEqual(["自己的"]);
     });
 
-    it("按账户的持仓与 24h 盈亏一样只回这个组合的", async () => {
+    it("按账户的持仓(含 24h 盈亏)只回这个组合的", async () => {
+      // 盈亏 FOL-51 起随持仓一行行回(两端相减),同一份响应里 —— 收窄由服务端在算的时候完成,
+      // 所以「响应里只有这个组合的账户」这一条同时盖住了持仓与盈亏。
       const holdings = await call(USER, handleListAccountHoldings({ portfolioId: WATCH_ID }));
       expect(holdings.rows.map((r) => r.account.label)).toEqual(["只看看"]);
-
-      // 盈亏这条读的是预计算结果(ADR 0049),所以先让那一步跑一遍 —— 收窄发生在**算**的时候,
-      // 这条用例要看的正是那一份里有没有别的组合的账户。
-      await call(USER, precomputePortfolio(WATCH_ID));
-      const gain = await call(USER, handleGetAccountGain24h(USER, { portfolioId: WATCH_ID }));
-      expect(Object.keys(gain.accounts)).toEqual([WATCHED]);
+      expect(holdings.rows.map((r) => r.account.id)).toEqual([WATCHED]);
     });
 
     it("标签定义与账户→标签关联也跟着收口", async () => {

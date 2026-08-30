@@ -8,12 +8,10 @@ import { type PinScopeKey, portfolioKeys } from "@/lib/queries/keys";
 import {
   homeTabStripQuery,
   type PortfolioOverview,
-  portfolioGain24hQuery,
   portfolioOverviewQuery,
 } from "@/lib/queries/portfolio";
 import { type KindTab, kindTabsOf, pinScopeOf } from "@/routes/_authed/-home/home-tabs";
 import { useHomeTabSelection } from "@/routes/_authed/-home/tab/selection";
-import { attachDefiGains, attachHoldingGains, type GainMaps } from "./attach-gains";
 import { DefiPositions } from "./defi";
 import { PerpPositionsList } from "./perp";
 import { SectionList } from "./section-list";
@@ -65,14 +63,9 @@ export function derive(secs: PortfolioOverview["sections"]) {
   return { defiGroups, perpItems, perpEquitySubtotal };
 }
 
-// 持仓列表。**总览已经由外层边界等过**;后到的是 24h 盈亏,它只决定每行 delta 那一格。
-//
-// 盈亏走**挂起 + 自己的边界**,不是 `useQuery` + `isPending`(#488 原来的写法)。理由见
-// `../hero/index.tsx` 开头那段:那种写法在 SSR 上服务端有数据、客户端补水那一帧没有,
-// 两边画的不是同一份 HTML,React 把整棵子树丢掉重渲。
-//
-// 这里的边界有个好处:**`pending` 的兜底就是「同一个列表,delta 位是骨架」** —— 也就是上一版
-// 挂起态逐字渲的东西。所以粒度一点没丢:市值那一列照旧立刻出现,只有增量在等。
+// 持仓列表。**总览已经由外层边界等过**,而 24h 盈亏(FOL-51 起两端相减、随总览原料一起算好)
+// 就挂在 `overview.holdings[].gain24h` / `overview.sections` 上 —— 不再是后到的一条,不需要自己的
+// 挂起边界。自定义 Tab(pin)是另一份总览查询,仍走它的边界(等的是那份原料,不是盈亏)。
 export function HoldingsIsland() {
   const { selectedId } = usePortfolio();
   const tct = useTranslations("CustomTabs");
@@ -108,56 +101,27 @@ export function HoldingsIsland() {
       </QueryBoundary>
     );
   }
-  return (
-    <QueryBoundary
-      resetKey={`holdings-gain:${JSON.stringify(portfolioKeys.gain24h(selectedId))}`}
-      pending={<KindBody overview={portfolioData} activeKind={activeKind} gainPending />}
-      failed={<KindBody overview={portfolioData} activeKind={activeKind} gainFailed />}
-    >
-      <KindReady overview={portfolioData} portfolioId={selectedId} activeKind={activeKind} />
-    </QueryBoundary>
-  );
+  return <KindBody overview={portfolioData} activeKind={activeKind} />;
 }
 
-// 三种状态共用的那一份渲染:`gain` 有就用真值,没有就按 `gainPending` / `gainFailed` 走占位。
+// 一份渲染:盈亏已挂在 `overview.holdings` / `overview.sections` 上,直接读。
 function KindBody({
   overview,
   activeKind,
-  gain,
-  gainPending = false,
-  gainFailed = false,
 }: {
   overview: PortfolioOverview;
   activeKind: KindTab | null;
-  gain?: GainMaps;
-  gainPending?: boolean;
-  gainFailed?: boolean;
 }) {
   const t = useTranslations("Overview");
-  const holdings = attachHoldingGains(overview.holdings, gain, gainFailed);
-  const kind = derive(attachDefiGains(overview.sections, gain, gainFailed));
+  const kind = derive(overview.sections);
   if (activeKind === "perps") return <PerpPositionsList items={kind.perpItems} />;
   if (activeKind === "defi") {
-    return <DefiPositions groups={kind.defiGroups} hideHeader gainPending={gainPending} />;
+    return <DefiPositions groups={kind.defiGroups} hideHeader />;
   }
-  if (holdings.length === 0) {
+  if (overview.holdings.length === 0) {
     return <p className="py-12 text-center text-muted-foreground text-sm">{t("noSnapshot")}</p>;
   }
-  return <TokenHoldings holdings={holdings} gainPending={gainPending} />;
-}
-
-// 挂起点在这儿。
-function KindReady({
-  overview,
-  portfolioId,
-  activeKind,
-}: {
-  overview: PortfolioOverview;
-  portfolioId: string;
-  activeKind: KindTab | null;
-}) {
-  const { data } = useSuspenseQuery(portfolioGain24hQuery(portfolioId));
-  return <KindBody overview={overview} activeKind={activeKind} gain={data} />;
+  return <TokenHoldings holdings={overview.holdings} />;
 }
 
 function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKey }) {
@@ -166,31 +130,12 @@ function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKe
   if (data.holdings.length === 0 && data.sections.length === 0) {
     return <p className="py-12 text-center text-muted-foreground text-sm">{tct("empty")}</p>;
   }
-  return (
-    <QueryBoundary
-      resetKey={`pin-gain:${JSON.stringify(portfolioKeys.gain24h(portfolioId, pin))}`}
-      pending={<PinBody overview={data} gainPending />}
-      failed={<PinBody overview={data} gainFailed />}
-    >
-      <PinReady overview={data} portfolioId={portfolioId} pin={pin} />
-    </QueryBoundary>
-  );
+  return <PinBody overview={data} />;
 }
 
-function PinBody({
-  overview,
-  gain,
-  gainPending = false,
-  gainFailed = false,
-}: {
-  overview: PortfolioOverview;
-  gain?: GainMaps;
-  gainPending?: boolean;
-  gainFailed?: boolean;
-}) {
+function PinBody({ overview }: { overview: PortfolioOverview }) {
   const t = useTranslations("Overview");
-  const holdings = attachHoldingGains(overview.holdings, gain, gainFailed);
-  const parts = derive(attachDefiGains(overview.sections, gain, gainFailed));
+  const parts = derive(overview.sections);
   return (
     <SectionList
       sections={[
@@ -199,7 +144,7 @@ function PinBody({
           title: t("tokensTab"),
           subtotal: overview.holdingsSubtotal,
           count: overview.holdings.length,
-          content: <TokenHoldings holdings={holdings} gainPending={gainPending} />,
+          content: <TokenHoldings holdings={overview.holdings} />,
         },
         {
           key: "perps",
@@ -213,23 +158,9 @@ function PinBody({
           title: t("defiTab"),
           subtotal: overview.defiSubtotal,
           count: parts.defiGroups.length,
-          content: <DefiPositions groups={parts.defiGroups} hideHeader gainPending={gainPending} />,
+          content: <DefiPositions groups={parts.defiGroups} hideHeader />,
         },
       ]}
     />
   );
-}
-
-// 挂起点在这儿。
-function PinReady({
-  overview,
-  portfolioId,
-  pin,
-}: {
-  overview: PortfolioOverview;
-  portfolioId: string;
-  pin: PinScopeKey;
-}) {
-  const { data } = useSuspenseQuery(portfolioGain24hQuery(portfolioId, pin));
-  return <PinBody overview={overview} gain={data} />;
 }

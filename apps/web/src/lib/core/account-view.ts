@@ -65,14 +65,12 @@ export interface DefiGroup {
   protocol: string;
   rows: DefiRow[];
   protocolLogo?: string; // 协议 logo 上游 URL(有则行渲染经 /api/logo/defi 代理;#126)
-  // 24h 盈亏(ADR 0040):由 server 读路径按快照历史算好后附上。**这一类是已知妥协** ——
-  // DeFi 仓位没有「几个币」可依,只有一个总价值,所以拿两张照片的价值相减;你往里加钱那天会
-  // 虚高、提出来那天会虚低。`null` = 算不出;`undefined` = 这条路没接(账户抽屉那边)。
+  // 24h 盈亏(ADR 0050,两端相减):该协议现在的净值 − 24 小时前的净值,与全站同一口径。
+  // `null` = 算不出(缺 24 小时前的观测);`undefined` = 这条路没接(账户抽屉那边)。
   //
-  // `grossBasis` = 百分比的分母(该协议在窗口起点的**总敞口**:各腿取绝对值再累加)。带着它是为了
-  // 跨账户合并时还能算出正确的百分比 —— 净值当分母会在对冲仓上给出荒唐的数,而从 pct 反推分母
-  // 在 pct 为 0 时又推不出来。
-  gain24h?: { amount: number; pct: number | null; grossBasis?: number } | null;
+  // `start` = 24 小时前那一刻该协议的净值(百分比的分母)。带着它是为了跨账户合并时能按
+  // 「合并后的收益 ÷ 合并后的起点」重算百分比 —— 从 pct 反推分母在 pct 为 0 / null 时推不出来。
+  gain24h?: { amount: number; pct: number | null; start?: number } | null;
 }
 export interface AccountSections {
   spot: SpotRow[];
@@ -165,7 +163,7 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
 export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] {
   const byProtocol = new Map<string, DefiRow[]>();
   const logoByProtocol = new Map<string, string>(); // 跨账户:首个带图的组定 logo
-  const gainByProtocol = new Map<string, { amount: number; grossBasis: number }>();
+  const gainByProtocol = new Map<string, { amount: number; start: number }>();
   for (const s of sections) {
     for (const g of s.defi) {
       if (g.protocolLogo && !logoByProtocol.has(g.protocol)) {
@@ -174,13 +172,13 @@ export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] 
       const rows = byProtocol.get(g.protocol);
       if (rows) rows.push(...g.rows);
       else byProtocol.set(g.protocol, [...g.rows]);
-      // 盈亏跨账户合并:金额直接相加;百分比**重算**(Σ金额 ÷ Σ总敞口),不是各账户百分比取平均。
-      // 有一个账户算得出就算 —— 与「有基准的线才参与」同一个态度。
+      // 盈亏跨账户合并(ADR 0050,两端相减):金额直接相加;百分比**重算**(Σ金额 ÷ Σ起点净值),
+      // 不是各账户百分比取平均。有一个账户算得出就算 —— 与「有起点才参与」同一个态度。
       if (g.gain24h) {
-        const prev = gainByProtocol.get(g.protocol) ?? { amount: 0, grossBasis: 0 };
+        const prev = gainByProtocol.get(g.protocol) ?? { amount: 0, start: 0 };
         gainByProtocol.set(g.protocol, {
           amount: prev.amount + g.gain24h.amount,
-          grossBasis: prev.grossBasis + (g.gain24h.grossBasis ?? 0),
+          start: prev.start + (g.gain24h.start ?? 0),
         });
       }
     }
@@ -192,11 +190,7 @@ export function mergeDefiGroups(sections: { defi: DefiGroup[] }[]): DefiGroup[] 
       rows,
       protocolLogo: logoByProtocol.get(protocol),
       gain24h: g
-        ? {
-            amount: g.amount,
-            pct: g.grossBasis > 0 ? (g.amount / g.grossBasis) * 100 : null,
-            grossBasis: g.grossBasis,
-          }
+        ? { amount: g.amount, pct: g.start > 0 ? (g.amount / g.start) * 100 : null, start: g.start }
         : null,
     };
   });

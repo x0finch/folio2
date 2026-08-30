@@ -86,18 +86,40 @@ describe("portfolio/account-holdings", () => {
       expect(view.rows).toEqual([]);
     });
 
-    it("不带 withGain → 每行都没有盈亏字段(那一趟不读窗口历史)", async () => {
-      // 这是 #488 票 5 的切法:总览不再读窗口历史,盈亏由独立那一趟带回来。
-      // 断言「不带就没有」比断言「带了就有」稳 —— 后者还取决于基准点取不取到,
-      // 而那件事已经由 `gain.test.ts` 专门覆盖了。
+    it("24h 盈亏随持仓一起回:两端相减(现值 − 24 小时前值)", async () => {
+      // FOL-51:盈亏改成两端相减,起点 = 24 小时前那一刻或更早的最近一张(`asOf`)。
+      // 24 小时前那张 100 → 现在 130,账户级与逐行都该是 +30 / +30%。
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
-      const without = await call(USER, handleListAccountHoldings());
+      const view = await call(USER, handleListAccountHoldings());
+      const row = view.rows.find((r) => r.account.id === acc.id);
+      expect(row?.gain24h?.amount).toBeCloseTo(30, 6);
+      expect(row?.gain24h?.pct).toBeCloseTo(30, 6);
+      const btc = row?.balances.find((b) => b.tokenId === BTC);
+      expect(btc?.gain24h?.amount).toBeCloseTo(30, 6);
+    });
 
-      expect(without.rows[0].gain24h).toBeUndefined();
-      for (const b of without.rows[0].balances) expect(b.gain24h).toBeUndefined();
+    it("账户不满 24 小时(窗口内没有起点快照)→ 盈亏 —(null)", async () => {
+      const acc = await seedAccount(USER, "新号", "bitcoin");
+      // 只有一张当下快照,没有 24 小时前那张 → 起点空。
+      await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
+
+      const view = await call(USER, handleListAccountHoldings());
+      const row = view.rows.find((r) => r.account.id === acc.id);
+      expect(row?.gain24h).toBeNull();
+    });
+
+    it("归档账户 → 盈亏字段整个省略(undefined)", async () => {
+      const acc = await seedAccount(USER, "归档", "bitcoin");
+      await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
+      await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
+      await db(USER).accounts.setArchived(acc.id, true);
+
+      const view = await call(USER, handleListAccountHoldings());
+      const row = view.rows.find((r) => r.account.id === acc.id);
+      expect(row?.gain24h).toBeUndefined();
     });
   });
 });

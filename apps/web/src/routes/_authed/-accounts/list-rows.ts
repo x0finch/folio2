@@ -76,6 +76,9 @@ export function buildAccountRows(sources: {
       totalUsd: ov?.totalUsd ?? 0,
       takenAt: ov?.takenAt ?? null,
       balances: ov?.balances ?? [],
+      // 24h 盈亏(ADR 0050,两端相减)随持仓一起回(FOL-51),逐行现成 —— 不再另拉一条盈亏后贴回。
+      // 缺凭据账户的账户头不显 delta(与旧口径一致):它的持仓行仍在抽屉里带着各自的盈亏。
+      gain24h: a.needsCredentials ? undefined : ov?.gain24h,
       note: ov?.note,
       needsCredentials: a.needsCredentials,
       credsSafe: a.credsSafe,

@@ -1,11 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { pickSelectedPortfolio } from "@/lib/hooks/use-portfolio";
-import {
-  accountGain24hQuery,
-  accountHoldingsQuery,
-  accountListQuery,
-} from "@/lib/queries/accounts";
+import { accountHoldingsQuery, accountListQuery } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { accountTagLinksQuery, tagListQuery } from "@/lib/queries/tags";
@@ -42,8 +38,8 @@ export const Route = createFileRoute("/_authed/accounts")({
     queryClient.ensureQueryData(accountListQuery(selectedId));
     queryClient.ensureQueryData(tagListQuery(selectedId));
     queryClient.ensureQueryData(accountTagLinksQuery(selectedId));
+    // 持仓带 24h 盈亏(两端相减现算,FOL-51)—— 不再单独预取一条盈亏。
     queryClient.ensureQueryData(accountHoldingsQuery(selectedId));
-    queryClient.ensureQueryData(accountGain24hQuery(selectedId));
   },
   component: Accounts,
 });

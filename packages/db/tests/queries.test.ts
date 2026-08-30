@@ -182,6 +182,34 @@ describe("snapshots", () => {
     expect(latest[0]!.balances.find((b) => b.tokenId === "tk-eth")!.selfPrice).toBeNull();
   });
 
+  // 24h 盈亏的「起点」端(ADR 0050):每账户 `[floor, t]` 窗口内**最近**一张 + 其余额。
+  //   · **≤ t,不是 ≥ t**:往后找最近一张等于拿几小时前的数冒充 24 小时前;
+  //   · `floor`(7 天断线线):窗口内一张都没有的账户不出现(该账户起点空 → 涨跌当 0)。
+  it("asOf:取 [floor, t] 窗口内最近一张 —— 更晚的不顶上、窗口外的不出现", async () => {
+    const acc = await accounts(USER_A).create({ connectorId: "binance", label: "B", creds: "x" });
+    await snapshotsOf(USER_A).write(acc.id, {
+      takenAt: 1000,
+      totalUsd: 10,
+      balances: [{ amount: 1, usdValue: 10, kind: "spot", tokenId: "tk-btc" }],
+    });
+    await snapshotsOf(USER_A).write(acc.id, { takenAt: 2000, totalUsd: 20, balances: [] });
+    await snapshotsOf(USER_A).write(acc.id, { takenAt: 3000, totalUsd: 30, balances: [] });
+
+    // t=2500, floor=0 → ≤ 2500 里最近那张是 2000(3000 不许顶上来)。
+    const at2500 = await snapshotsOf(USER_A).asOf(2500, 0);
+    expect(at2500).toHaveLength(1);
+    expect(at2500[0]!.snapshot.takenAt).toBe(2000);
+
+    // 等于 t 的算数(≤)。
+    expect((await snapshotsOf(USER_A).asOf(1000, 0))[0]!.snapshot.takenAt).toBe(1000);
+    expect((await snapshotsOf(USER_A).asOf(1000, 0))[0]!.balances).toHaveLength(1);
+
+    // floor 把窗口下界卡住:t=2500 但 floor=2100 → 窗口 [2100,2500] 内一张都没有 → 不出现。
+    expect(await snapshotsOf(USER_A).asOf(2500, 2100)).toEqual([]);
+    // 比最早那张还早 → 空。
+    expect(await snapshotsOf(USER_A).asOf(500, 0)).toEqual([]);
+  });
+
   // 单账户曲线的数据源(FOL-38):两列 + `since` 窗口。窗口是这条读接口的**上界** ——
   // 它发的是原样的点,不裁的话「攒了多久就发多大」。
   it("listTotalsByAccount:按 since 裁窗口,升序,只给 (takenAt, totalUsd)", async () => {

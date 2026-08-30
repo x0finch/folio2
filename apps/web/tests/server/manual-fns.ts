@@ -71,10 +71,3 @@ export const editManualActivity = (
   userId: string,
   ...args: Parameters<typeof M.editManualActivity>
 ) => run(userId, M.editManualActivity(...args));
-
-export const loadManualGainHistory = (
-  userId: string,
-  accounts: AccountSafe[],
-  now: number,
-  since: number,
-) => run(userId, M.loadManualGainHistory(accounts, now, since));

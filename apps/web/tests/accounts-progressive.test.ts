@@ -36,13 +36,14 @@ describe("回访不闪骨架、金额失败继续骨架", () => {
   //
   // **要钉的性质一条没变**,下面几条就是那些性质:名单先出、金额后到、回访不闪骨架、
   // 金额失败不写「拉取失败」。
-  it("回访不闪骨架:后到的三样走挂起,没人退回去看 isFetching", () => {
+  it("回访不闪骨架:后到的两样走挂起,没人退回去看 isFetching", () => {
     const page = stripComments(src("routes/_authed/-accounts/index.tsx"));
     // `useSuspenseQuery` 命中缓存时直接给旧值、后台刷新、**不挂起** —— 回访不会再出骨架。
     // 会破坏这条的写法是回去看 `isFetching`(那会把后台刷新也画成骨架)。
     expect(page).not.toContain("isFetching");
+    // FOL-51:后到的是余额(含 24h 盈亏,两端相减随持仓回)与标签,不再有独立的盈亏查询。
     expect(page).toMatch(/useSuspenseQuery\(accountHoldingsQuery/);
-    expect(page).toMatch(/useSuspenseQuery\(accountGain24hQuery/);
+    expect(page).not.toContain("accountGain24hQuery");
   });
 
   // 「先画出别的组合的账户」这件事**现在压根不可能**(ADR 0047):名单是服务端按组合筛好的那一份,
@@ -79,13 +80,12 @@ describe("回访不闪骨架、金额失败继续骨架", () => {
     expect(page).toMatch(/failed=\{<ListFailed \/>\}/);
   });
 
-  it("增量位的三态由一个 flag 决定,行组件只认它", () => {
+  it("增量直接取自行上的 gain24h(随持仓一起回,FOL-51)", () => {
     const page = stripComments(src("routes/_authed/-accounts/index.tsx"));
-    // pending / failed / ready 三态共用同一个 body,差别只在这两个 flag 上 ——
-    // 抄三遍那一大坨 props 是这个文件最容易腐烂的地方。
-    expect(page).toMatch(/gainPending\?: boolean;/);
-    expect(page).toMatch(/gainFailed\?: boolean;/);
-    expect(page).toContain("gainPending={gainPending}");
+    // 盈亏不再是后到的一包、按 flag 决定占位 —— 它就在 `AccountRow.gain24h` 上,行组件直接读。
+    expect(page).not.toContain("gainPending");
+    expect(page).not.toContain("gainFailed");
+    expect(page).toMatch(/dayChange\?\.amount/);
   });
 
   // **别用「补水完成了没」这种开关去躲骨架。** 那样两边确实一致了,代价是服务端也只渲骨架 ——
