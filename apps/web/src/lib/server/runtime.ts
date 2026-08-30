@@ -2,10 +2,37 @@ import { Database } from "@folio/db";
 import type { OracleServices } from "@folio/oracle";
 import { Effect, Layer } from "effect";
 import { ConnectorRegistry } from "./connectors/registry";
-import { logTapeLogger } from "./effect-log";
+import { logCategory, logTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
 import { oracleFor, perRequestLayer } from "./oracle";
 import { spanTracer } from "./tracing";
+
+/** 给 server fn 补一行 info 级的 handler + 耗时 —— TanStack 路径在 Workers 日志里是 REDACTED,靠这个排快慢。 */
+const withServerFnTiming =
+  <A, E extends AppError>(handler: string) =>
+  (effect: Effect.Effect<A, E, UserServices>): Effect.Effect<A, E, UserServices> =>
+    // **两处 `Effect.suspend` 都是必须的,别拆**:`.pipe(...)` 与 `Effect.ensuring(finalizer)` 的
+    // 参数在**描述构建期**就同步求值 —— 若把 `startedAt` 和 `durationMs` 直接写在外面,两次
+    // `performance.now()` 只差几微秒(都在构建那一瞬),`durationMs` 恒为 ~0,整个耗时日志失效。
+    // 外层 suspend 把构建推迟到**执行期**,`startedAt` 落在真正的执行起点;finalizer 里再 suspend
+    // 一次,`durationMs` 落在 finalizer 真正运行(handler 跑完)那一刻。两者之差才是真实耗时。
+    Effect.suspend(() => {
+      const startedAt = performance.now();
+      return effect.pipe(
+        Effect.annotateLogs({ handler }),
+        Effect.ensuring(
+          Effect.suspend(() =>
+            Effect.logInfo("server fn").pipe(
+              logCategory("server-fn"),
+              Effect.annotateLogs({
+                handler,
+                durationMs: Number((performance.now() - startedAt).toFixed(1)),
+              }),
+            ),
+          ),
+        ),
+      );
+    });
 
 // **server fn 的运行时**:一次请求要的服务在这里装配,也在这里跑起来。全仓只有这一份。
 //
@@ -101,6 +128,13 @@ export const runForUser = <A, E extends AppError>(
     Effect.runPromise,
   );
 
+/** `runEffect` 的 timing 壳,给必须走 `runForUser` 的 server fn(如 syncAccount)复用。 */
+export const runTimedForUser = <A, E extends AppError>(
+  userId: string,
+  handler: string,
+  effect: Effect.Effect<A, E, UserServices>,
+): Promise<A> => runForUser(userId, withServerFnTiming<A, E>(handler)(effect));
+
 /**
  * **server fn 的发动点 —— handler 只描述,这里负责跑。**
  *
@@ -123,8 +157,8 @@ export const runEffect =
   <D, A, E extends AppError>(handler: (data: D) => Effect.Effect<A, E, UserServices>) =>
   // `context` 只声明用得着的那个字段:`requireAuth` 注入的是整个 `AuthContext`(还带 user /
   // session),而这里唯一该碰的就是 userId。少声明一个字段 = 少一条能悄悄用起来的路。
-  ({ data, context }: { data: D; context: { userId: string } }): Promise<A> =>
-    runForUser(
-      context.userId,
-      handler(data).pipe(Effect.annotateLogs({ handler: handler.name || "anonymous" })),
-    );
+  ({ data, context }: { data: D; context: { userId: string } }): Promise<A> => {
+    const name = handler.name || "anonymous";
+    const effect = withServerFnTiming<A, E>(name)(handler(data));
+    return runForUser(context.userId, effect);
+  };

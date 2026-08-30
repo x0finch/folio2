@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { runEffect, runForUser } from "@/lib/server/runtime";
+import { runEffect, runTimedForUser } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { GetSyncStatusInput, handleGetSyncStatus } from "./get-status";
 import { GetSyncRoundInput, handleGetSyncRound } from "./round";
@@ -15,7 +15,7 @@ export const syncAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(SyncAccountInput)
   .handler(({ data, context }) =>
-    runForUser(context.userId, handleSyncAccount(context.userId, data)),
+    runTimedForUser(context.userId, "syncAccount", handleSyncAccount(context.userId, data)),
   );
 
 // 收一个 portfolioId:摘要按选中的 Portfolio 收口(ADR 0033),而选中态只在客户端(不持久化),
