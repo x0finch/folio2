@@ -45,10 +45,12 @@ describe("骨架与真内容同形", () => {
 });
 
 describe("盈亏骨架三处复用同一元件", () => {
-  it("行内 / hero 增量 / best-worst 都走 <GainSkeleton>", () => {
+  // GainSkeleton 是「市值 + 增量位一起加载」的共用元件(行内 ValueDelta 的 loading、列表 / 抽屉的
+  // 值未到骨架)。FOL-51 后 hero 的盈亏随总览一起到、没有独立的「盈亏还在取」态,所以 hero 不再
+  // 用它 —— 元件定义仍在一处(value-delta),别被这条误导成「hero 也该有」。
+  it("增量位骨架元件定义在一处(value-delta),hero 不再单独用它", () => {
     expect(src("routes/_authed/-home/holdings/value-delta.tsx")).toContain("<GainSkeleton");
-    const hero = src("routes/_authed/-home/hero/portfolio-hero.tsx");
-    expect(hero.match(/<GainSkeleton/g)?.length).toBe(3);
+    expect(src("routes/_authed/-home/hero/portfolio-hero.tsx")).not.toContain("<GainSkeleton");
   });
 
   it("宽度锁死在一处", () => {

@@ -7,6 +7,7 @@ import type { OverviewBalance } from "@/lib/core/account-view";
 import {
   buildOverview,
   deriveLiveAccountTotals,
+  FIRST_SYNC_WINDOW_MS,
   isFirstSyncPending,
   type OverviewInput,
   overviewChainIds,
@@ -679,22 +680,36 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相�
 // 首次同步中的判据(FOL-48 回归修复):有账户、还没有任何快照 = 显加载态,不是把 $0 当答案。
 // 只读 `accounts` / `snapshots` 两片,构造最小原料即可。
 describe("isFirstSyncPending", () => {
-  const raw = (accounts: number, snapshots: number): PortfolioSnapshotData =>
+  const NOW_T = 1_700_000_000_000;
+  // 各账户的「年龄」(距 now 的毫秒);快照条数。
+  const raw = (accountAges: number[], snapshots: number): PortfolioSnapshotData =>
     ({
-      accounts: Array.from({ length: accounts }, (_, i) => ({ id: `a${i}` })),
+      now: NOW_T,
+      accounts: accountAges.map((age, i) => ({ id: `a${i}`, createdAt: NOW_T - age })),
       snapshots: Array.from({ length: snapshots }, (_, i) => [`a${i}`, {}]),
     }) as unknown as PortfolioSnapshotData;
 
-  it("有账户、零快照 → 首次同步中", () => {
-    expect(isFirstSyncPending(raw(2, 0))).toBe(true);
+  it("刚建账户、零快照 → 首次同步中", () => {
+    expect(isFirstSyncPending(raw([0, 0], 0))).toBe(true);
   });
 
   it("零账户(真的空组合)→ 不是 pending,照常画空态", () => {
-    expect(isFirstSyncPending(raw(0, 0))).toBe(false);
+    expect(isFirstSyncPending(raw([], 0))).toBe(false);
   });
 
   it("至少一张快照落地 → 不再 pending", () => {
-    expect(isFirstSyncPending(raw(2, 1))).toBe(false);
+    expect(isFirstSyncPending(raw([0, 0], 1))).toBe(false);
+  });
+
+  // **回归(code-review 修 #1)**:账户建了很久、却一张快照都没有(坏凭据 / 从没同步成功)——
+  // **不能永久 pending**,否则 hero 永远卡加载骨架。超过首次同步窗 → 显 $0 / 空态,让用户去查凭据。
+  it("账户都过了首次同步窗、仍零快照 → 不是 pending(显 $0,不永久卡加载)", () => {
+    const old = FIRST_SYNC_WINDOW_MS + 60_000;
+    expect(isFirstSyncPending(raw([old, old], 0))).toBe(false);
+  });
+
+  it("混合:一个老账户 + 一个刚建的、零快照 → 仍 pending(刚建那个还在首次同步)", () => {
+    expect(isFirstSyncPending(raw([FIRST_SYNC_WINDOW_MS + 60_000, 0], 0))).toBe(true);
   });
 
   it("原料还没到(undefined)→ 不是 pending", () => {

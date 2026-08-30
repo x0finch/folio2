@@ -582,8 +582,10 @@ export function buildOverview(
     const classOf = new Map(
       accounts.map((a) => [a.id, classifyAccount(a.id, startAgg, byAccount, now)]),
     );
-    const eligible = new Set([...classOf].filter(([, c]) => c !== "stale").map(([id]) => id));
-    eligibleAccounts = eligible;
+    const eligibleAccountIds = new Set(
+      [...classOf].filter(([, c]) => c !== "stale").map(([id]) => id),
+    );
+    eligibleAccounts = eligibleAccountIds;
     // 组合层(ADR 0050):起点 = 有起点账户的总额之和;现值 = eligible(prev ∪ new)账户的现推
     // 净值之和 —— stale 账户两端都不计,涨跌当 0、不虚增。一个起点都没有 → null(界面 `—`)。
     let startSum = 0;
@@ -601,7 +603,7 @@ export function buildOverview(
     // 起点缺 → 0(今天新买的整份算成今天赚的,「充提计入」的另一面)。
     const curByToken = new Map<string, number>();
     for (const r of aggInputs) {
-      if (!eligible.has(r.account.id)) continue;
+      if (!eligibleAccountIds.has(r.account.id)) continue;
       if (r.tokenId == null || !isFungible(r.kind as ViewKind)) continue;
       curByToken.set(r.tokenId, (curByToken.get(r.tokenId) ?? 0) + r.value);
     }
@@ -820,15 +822,22 @@ export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewVi
   });
 }
 
-// **首次同步中**:组合里有账户,但一张快照都还没有(没有任何账户同步落地 —— 含手记注入的合成
-// 快照也算)。这一刻 `overviewFromSnapshotData` 会算出总额 0 / 空持仓,与「真的空组合(零账户)」在
-// 屏幕上一模一样 —— 首页据此显加载态而不是把「还不知道」画成 $0。
+// 「刚加账户、首次同步还没落地」的时间窗。**这个窗是为了把「短暂的首次同步中」与「从没同步成功」
+// 分开**(见 `isFirstSyncPending`):同步轮几秒到一分钟内就会写下第一张快照,给足 10 分钟余量。
+export const FIRST_SYNC_WINDOW_MS = 10 * 60 * 1000;
+
+// **首次同步中**:组合里有**刚建的**账户,但一张快照都还没有(没有任何账户同步落地 —— 含手记注入
+// 的合成快照也算)。这一刻 `overviewFromSnapshotData` 会算出总额 0 / 空持仓,与「真的空组合(零账户)」
+// 在屏幕上一模一样 —— 首页据此显加载态而不是把「还不知道」画成 $0。
 //
-// 判据从快照原料直接读:`accounts` 非空而 `snapshots`(byAccount entries,已含手记注入)全空。
-// 这与旧 `awaitFirstCompute` 的空态判据同源(`accountTotals.length === 0` 那一支),只是新语义是
-// 「等首次同步写快照」,不是旧的「等后台预计算落地」—— 预计算读侧已删。
+// **「刚建的」这一档是必须的,不是优化**(FOL-51 code-review 修的回归):光判「有账户 + 无快照」对
+// 「从没同步成功过」的账户(坏凭据 / 从没同步成)**永真** → hero 永久卡加载骨架,轮询用尽也不解除。
+// 加账户几秒内同步就会落第一张快照;超过 `FIRST_SYNC_WINDOW_MS` 还没有,那不是「还在同步」,是
+// 「同步不成」—— 该显 $0 / 空态(账户在,值是 0),让用户去查凭据,而不是盯着一片加载。
+// 判据全从快照原料读:`accounts` 里有一个 `createdAt` 落在窗口内、且 `snapshots` 全空。
 export function isFirstSyncPending(raw: PortfolioSnapshotData | undefined): boolean {
-  return !!raw && raw.accounts.length > 0 && raw.snapshots.length === 0;
+  if (!raw || raw.accounts.length === 0 || raw.snapshots.length > 0) return false;
+  return raw.accounts.some((a) => raw.now - a.createdAt < FIRST_SYNC_WINDOW_MS);
 }
 
 //  —— 账户明细的 24h 盈亏(两端相减,纯计算部分)

@@ -3,6 +3,7 @@ import {
   isFirstSyncPending,
   type OverviewView,
   overviewFromSnapshotData,
+  type PortfolioSnapshotData,
 } from "@/lib/core/portfolio";
 import {
   getHomeTabStrip,
@@ -76,14 +77,22 @@ export const homeTabStripQuery = (portfolioId: string) =>
 // 首次同步写第一张快照」。所以配一条**短轮询**:pending 期间隔 1s 起退避地重取原料,拿到第一张
 // 快照(`pending` 转 false)就停,与总额盈亏 / tab 条共用同一套退避机(`pollWhilePending`)。
 // refetchInterval 拿的是 `query.state.data`(select 之前的原料),所以在这里直接对原料判 pending。
+//
+// **`select` 必须是稳定引用**(FOL-51 code-review 修的效率回归):写成 inline 箭头的话,每次
+// render 都新建一个闭包,react-query 只在「data 未变**且** select 引用未变」时才复用上一次的
+// select 结果 —— 新闭包让 `overviewFromSnapshotData`(重建 5 个 Map + 全量聚合)每 render 重跑一遍,
+// 正好打脸「select 只在原料变化时重跑」那句话。提到模块级(它只读 `raw`、不闭包任何东西)就恢复了
+// memoisation。
+const selectOverview = (raw: PortfolioSnapshotData): PortfolioOverview => ({
+  ...overviewFromSnapshotData(raw),
+  pending: isFirstSyncPending(raw),
+});
+
 export const portfolioOverviewQuery = (portfolioId: string, pin?: PinScopeKey) =>
   queryOptions({
     queryKey: portfolioKeys.overview(portfolioId, pin),
     queryFn: () => getPortfolioSnapshotData({ data: { portfolioId, pin } }),
-    select: (raw): PortfolioOverview => ({
-      ...overviewFromSnapshotData(raw),
-      pending: isFirstSyncPending(raw),
-    }),
+    select: selectOverview,
     staleTime: STALE_TIME.live,
     refetchInterval: (query) => pollWhilePending(query, isFirstSyncPending(query.state.data)),
   });

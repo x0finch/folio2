@@ -6,7 +6,7 @@ import { downsampleSeries, type HistoryPoint } from "@/lib/core/history";
 import type { Gain } from "@/lib/core/portfolio";
 import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
-import { GainSkeleton, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
+import { NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
 import { deriveHeroMetrics, type HoldingLike } from "./hero-stats";
 import { Stat } from "./stat";
 import { TrendPanel } from "./trend-panel";
@@ -29,38 +29,16 @@ function gainTone(amount: number) {
 }
 
 // 24h 盈亏药丸:贴在净值数字右上角。文案与代币行同形(`{±}$Δ P%`),底色走涨跌 token。
-function GainBadge({
-  gain,
-  pending,
-  failed,
-}: {
-  gain: Gain | null;
-  pending: boolean;
-  failed: boolean;
-}) {
-  const t = useTranslations("Overview");
+// **盈亏 FOL-51 起随总览一起到,没有「还在取」的态** —— 只剩两态:算得出(数)/ 算不出(`—`)。
+function GainBadge({ gain }: { gain: Gain | null }) {
   const usd = useDisplayValue();
-
-  switch (true) {
-    case pending:
-      return <GainSkeleton />;
-    case failed:
-      return (
-        <div>
-          <span className={cn(GAIN_BADGE, GAIN_TONE.flat)}>{NO_VALUE}</span>
-          <p className="mt-1 text-muted-foreground text-xs">{t("gainLoadFailed")}</p>
-        </div>
-      );
-    case gain == null:
-      return <span className={cn(GAIN_BADGE, GAIN_TONE.flat)}>{NO_VALUE}</span>;
-    default:
-      return (
-        <span className={cn(GAIN_BADGE, gainTone(gain.amount))}>
-          {signedUsd(usd, gain.amount)}
-          {gain.pct != null && ` ${Math.abs(gain.pct).toFixed(2)}%`}
-        </span>
-      );
-  }
+  if (gain == null) return <span className={cn(GAIN_BADGE, GAIN_TONE.flat)}>{NO_VALUE}</span>;
+  return (
+    <span className={cn(GAIN_BADGE, gainTone(gain.amount))}>
+      {signedUsd(usd, gain.amount)}
+      {gain.pct != null && ` ${Math.abs(gain.pct).toFixed(2)}%`}
+    </span>
+  );
 }
 
 // 净值 hero(H3 #102):趋势图作背景 + 净值/24h/三指标浮于其上(无 Card)。
@@ -71,23 +49,17 @@ export function PortfolioHero({
   gain24h,
   holdings,
   loading = false,
-  gainPending = false,
-  gainFailed = false,
   syncing = false,
   contentClassName,
 }: {
   series: HistoryPoint[];
   totalUsd: number;
-  // 组合层 24h 盈亏(ADR 0040),由独立读取算好 —— **不在这里从曲线上量**。
-  // 曲线画的是净值(含充提),这个数剔除了充提,两者本来就不该是同一个;`null` = 算不出。
+  // 组合层 24h 盈亏(ADR 0050,两端相减),随总览原料一起到 —— **不在这里从曲线上量**。
+  // 曲线画的是净值(含充提),这个数是「现值 − 24 小时前值」,两者本来就不该是同一个;`null` = 算不出。
   gain24h: Gain | null;
   holdings: readonly HoldingLike[];
   /** 净值曲线还在取 —— 数字照常渲染,曲线走 TrendPanel 的「还在取数」态。 */
   loading?: boolean;
-  /** 24h 盈亏还在取 —— 增量 / best-worst 走小骨架,不跟「算不出」的破折号混。 */
-  gainPending?: boolean;
-  /** 盈亏读取失败 —— 破折号旁边一处提示。行内不再各说一遍。 */
-  gainFailed?: boolean;
   /** 首次同步中(有账户、还没有任何快照)—— 大数字走骨架、标题换「同步中」,不把 $0 当答案画。 */
   syncing?: boolean;
   // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
@@ -113,11 +85,9 @@ export function PortfolioHero({
   // 而持有价值恰好为 0 的灰尘仓位也仍然是「有仓位」—— 那时该说明原因,不该画背景纹样。
   const nothingYet = holdings.length === 0 && totalUsd === 0;
 
-  // 24h 盈亏(ADR 0040):server 按快照历史 / 账本分段算好 —— 以前这里是「现在总额 − 约 24 小时前
-  // 总额」,那是净值差:你充值 10 万,它就显示赚了 10 万。现在剔除了充提与买卖。
-  //
-  // **这个数与脚下那条曲线不再对得上,那是预期的。** 曲线画的是净值,充值那天它会跳一格而这个数
-  // 不动。两个要求没法同时满足(金额要是真赚的钱 / 要剔除资金进出)。
+  // 24h 盈亏(ADR 0050,两端相减):现值 − 24 小时前值,随总览一起到。best/worst 按盈亏金额挑,
+  // 所以要这份 metrics。充提计入当天盈亏(设计),曲线画的是净值(含充提),两者一致 —— 充值那天
+  // 曲线跳一格、这个数也跟着 +10 万,不再互相矛盾。
   const metrics = deriveHeroMetrics(holdings, totalUsd);
   const spanDays = hasHistory
     ? Math.round((chartSeries[chartSeries.length - 1].t - chartSeries[0].t) / DAY_MS)
@@ -165,36 +135,27 @@ export function PortfolioHero({
             )}
           </div>
           {/* 划动时不显 24h 药丸:那是「今天涨跌」,摆在一个历史时刻的数值旁边是两件事对不上。 */}
-          {scrub.point ? null : (
-            <GainBadge gain={gain24h} pending={gainPending} failed={gainFailed} />
-          )}
+          {scrub.point ? null : <GainBadge gain={gain24h} />}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-8">
-          {/* 「今天赚 / 亏最多的那个仓」—— 按盈亏**金额**取,不按涨跌幅(ADR 0040)。以前只看涨跌幅、
-              不看持有多少,于是这两格永远被小仓位的暴涨币占据。金额走 usd() → 跟随展示币种。 */}
+          {/* 「今天赚 / 亏最多的那个仓」—— 按盈亏**金额**取,不按涨跌幅(ADR 0050)。以前只看涨跌幅、
+              不看持有多少,于是这两格永远被小仓位的暴涨币占据。金额走 usd() → 跟随展示币种。
+              盈亏随总览一起到,没有「还在取」的态 —— best/worst 直接算得出或 `—`。 */}
           <Stat
             label={t("bestToday")}
             value={
-              gainPending ? (
-                <GainSkeleton />
-              ) : metrics.best ? (
-                `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
-              ) : (
-                NO_VALUE
-              )
+              metrics.best
+                ? `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
+                : NO_VALUE
             }
           />
           <Stat
             label={t("worstToday")}
             value={
-              gainPending ? (
-                <GainSkeleton />
-              ) : metrics.worst ? (
-                `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`
-              ) : (
-                NO_VALUE
-              )
+              metrics.worst
+                ? `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`
+                : NO_VALUE
             }
           />
           <Stat
