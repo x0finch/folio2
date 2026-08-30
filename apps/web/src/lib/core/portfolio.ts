@@ -20,6 +20,7 @@ import { pinsInView } from "@/lib/core/accounts-in-view";
 import { isFungible, type ViewKind, viewKind } from "@/lib/core/balance-kind";
 import {
   buildPortfolioHistory,
+  downsampleSeries,
   type HistoryPoint,
   type SnapshotTotalRow,
 } from "@/lib/core/history";
@@ -363,22 +364,29 @@ export function buildTokenValueHistory(rows: readonly TokenHistRow[], key: strin
   return buildPortfolioHistory([...bySnap.values()]);
 }
 
-/** 单币价值历史接口下发的原料(FOL-50):窗口内的原样余额行,浏览器里喂 buildTokenValueHistory。 */
+// 单币价值历史接口下发的原料(FOL-50 + FOL-46):
+//   · 短窗:`rows` = 窗口内该币的原样余额行,浏览器 `buildTokenValueHistory` 重建 + 自适应降采样。
+//   · 长窗(1y/all):服务端已重建 + min-max 降采样 → `points`(与总览/账户曲线同一套降采样,
+//     payload 随窗口封顶不随历史膨胀);此时 `rows` 为空、`sampled` 为 true。
+export interface TokenValueHistoryRow {
+  accountId: string;
+  takenAt: number;
+  amount: number;
+  usdValue: number;
+  kind: string;
+  tokenId: string | null;
+  metaJson: string | null;
+}
 export interface TokenValueHistoryRaw {
-  rows: {
-    accountId: string;
-    takenAt: number;
-    amount: number;
-    usdValue: number;
-    kind: string;
-    tokenId: string | null;
-    metaJson: string | null;
-  }[];
+  rows: TokenValueHistoryRow[];
+  points?: HistoryPoint[];
+  sampled?: boolean;
 }
 
-/** 原料 → 单币价值曲线:与旧版服务端聚合路径逐值一致。 */
-export function tokenValueHistoryFromRaw(raw: TokenValueHistoryRaw, key: string): HistoryPoint[] {
-  const histRows: TokenHistRow[] = raw.rows.map((r) => ({
+// 原样余额行 → buildTokenValueHistory 吃的 TokenHistRow(symbol/label/connectorId 不参与单币曲线,置空)。
+// 服务端(长窗重建)与浏览器(短窗重建)共用这一个映射。
+export function tokenHistRowsFromRaw(rows: readonly TokenValueHistoryRow[]): TokenHistRow[] {
+  return rows.map((r) => ({
     symbol: "",
     amount: r.amount,
     value: r.usdValue,
@@ -387,7 +395,13 @@ export function tokenValueHistoryFromRaw(raw: TokenValueHistoryRaw, key: string)
     tokenId: r.tokenId,
     takenAt: r.takenAt,
   }));
-  return buildTokenValueHistory(histRows, key);
+}
+
+// 原料 → 单币价值曲线。长窗直接用服务端降采样好的 `points`;短窗浏览器重建 + 自适应降采样
+// (与 buildAccountValueHistory 的 `sampled ? base : downsampleSeries(base)` 同一口径)。
+export function tokenValueHistoryFromRaw(raw: TokenValueHistoryRaw, key: string): HistoryPoint[] {
+  if (raw.sampled && raw.points) return raw.points;
+  return downsampleSeries(buildTokenValueHistory(tokenHistRowsFromRaw(raw.rows), key));
 }
 
 //  —— 首页 tab 条(纯推导)

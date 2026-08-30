@@ -75,7 +75,10 @@ export const holdingHistoryQuery = (args: {
 }) =>
   queryOptions({
     queryKey: accountKeys.holdingHistory(args.holdingKey, args.range),
-    queryFn: () => getTokenValueHistory({ data: { key: args.holdingKey, since: args.since } }),
+    queryFn: () =>
+      getTokenValueHistory({
+        data: { key: args.holdingKey, since: args.since, range: args.range },
+      }),
     staleTime: STALE_TIME.history,
   });
 

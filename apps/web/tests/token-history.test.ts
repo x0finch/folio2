@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { downsampleSeries } from "@/lib/core/history";
 import {
   buildTokenValueHistory,
   type TokenHistRow,
@@ -77,7 +78,7 @@ describe("buildTokenValueHistory", () => {
 });
 
 describe("tokenValueHistoryFromRaw", () => {
-  it("原料行 → 与 buildTokenValueHistory 逐值一致", () => {
+  it("短窗:原料行 → 重建 + 自适应降采样(与账户/总览短窗同口径)", () => {
     const raw = {
       rows: [
         {
@@ -99,15 +100,28 @@ describe("tokenValueHistoryFromRaw", () => {
           metaJson: null,
         },
       ],
+      sampled: false,
     };
     expect(tokenValueHistoryFromRaw(raw, USDC)).toEqual(
-      buildTokenValueHistory(
-        [
-          r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }),
-          r({ acct: "B", takenAt: 200, value: 5, tokenId: USDC }),
-        ],
-        USDC,
+      downsampleSeries(
+        buildTokenValueHistory(
+          [
+            r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }),
+            r({ acct: "B", takenAt: 200, value: 5, tokenId: USDC }),
+          ],
+          USDC,
+        ),
       ),
     );
+  });
+
+  it("长窗:直接用服务端已降采样的 points,不再在浏览器重建", () => {
+    const points = [
+      { t: 1000, total: 10 },
+      { t: 2000, total: 30 },
+      { t: 3000, total: 20 },
+    ];
+    // rows 为空、sampled=true → 原样返回 points(服务端已 min-max)。
+    expect(tokenValueHistoryFromRaw({ rows: [], points, sampled: true }, USDC)).toEqual(points);
   });
 });

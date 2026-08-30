@@ -75,17 +75,40 @@ describe("getTokenValueHistory", () => {
     expect(series.at(-1)?.total).toBe(100);
   });
 
-  it("只下发该 token 在窗口内的行", async () => {
+  it("短窗:只下发该 token 在窗口内的行", async () => {
     const acc = await seedAccount(USER, "甲");
     await seedSnapshot(USER, acc.id, NOW, [
       { tokenId: BTC, amount: 1, usdValue: 100 },
       { tokenId: "token-eth", amount: 1, usdValue: 50 },
     ]);
 
-    const raw = await call(USER, handleGetTokenValueHistory({ key: BTC }));
+    // 短窗(30d)走原样行路径,断言 DB 查询只捞该 token。
+    const raw = await call(USER, handleGetTokenValueHistory({ key: BTC, range: "30d" }));
 
+    expect(raw.sampled).toBe(false);
     expect(raw.rows).toHaveLength(1);
     expect(raw.rows[0]?.tokenId).toBe(BTC);
+  });
+
+  it("长窗(all):服务端就地重建 + min-max,发点不发行(payload 随窗口封顶)", async () => {
+    const acc = await seedAccount(USER, "甲");
+    // 60 天、每天一张 → 若原样下发是 60 行;min-max 后点数与历史长度脱钩。
+    for (let i = 0; i < 60; i++) {
+      await seedSnapshot(USER, acc.id, NOW - i * DAY, [
+        { tokenId: BTC, amount: 1, usdValue: 100 + (i % 7) * 10 },
+      ]);
+    }
+
+    const raw = await call(USER, handleGetTokenValueHistory({ key: BTC, range: "all" }));
+
+    expect(raw.sampled).toBe(true);
+    expect(raw.rows).toHaveLength(0); // 长窗不发原样行
+    expect(raw.points?.length ?? 0).toBeGreaterThan(0);
+    expect(raw.points?.length ?? 0).toBeLessThanOrEqual(60); // 点数封顶,远小于原始行数上界
+    // 曲线极值原样保住(min-max):该币价值在 [100, 160] 之间。
+    const totals = (raw.points ?? []).map((p) => p.total);
+    expect(Math.max(...totals)).toBe(160);
+    expect(Math.min(...totals)).toBe(100);
   });
 
   it("key 空串 / since 是负数 → schema 拒", () => {
