@@ -117,8 +117,10 @@ describe("刷新映射表", () => {
     expect(isInvalidated(settingsKeys.providerKeys())).toBe(false);
   });
 
-  // 刻意的窄口径:改标签只动名单,不重拉余额快照。
-  it("tag.write 只刷标签域,不碰总览", async () => {
+  // review 抓的漏刷:被选中的 tag 标签页内容走 `portfolioKeys.overview(pf,{kind:"tag"})` 的一份
+  // **服务端按标签关联窄化**的总览查询。给账户加 / 摘标签改了它的账户集,所以 tag.write 必须连
+  // 组合域一起刷 —— 否则用户正盯着的 tag 页停在旧账户集,加标签在屏幕上没反应。
+  it("tag.write 刷标签域 + 组合域(tag 标签页内容是服务端按标签窄化的)", async () => {
     seed(tagKeys.list("pf-1"));
     seed(tagKeys.accountLinks("pf-1"));
     seed(portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }));
@@ -129,7 +131,7 @@ describe("刷新映射表", () => {
       true,
       true,
     ]);
-    expect(isInvalidated(portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }))).toBe(false);
+    expect(isInvalidated(portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }))).toBe(true);
   });
 
   // review 抓到的漏刷之二:Tag 归属 Portfolio,所以组合域的写会**连带删掉标签关联** ——
