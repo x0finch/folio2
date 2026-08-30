@@ -21,6 +21,12 @@ import { CurrentUser } from "../current-user";
 import type { NotFound } from "../errors";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
+import {
+  HISTORY_MINMAX_BUCKETS,
+  queryCarryInTotals,
+  queryMinMaxTotalsByAccount,
+  queryMinMaxTotalsInScope,
+} from "./history-minmax";
 import { assertAccountOwned } from "./ownership";
 
 // 快照 —— 一次同步落下的余额切片,以及总额 / 历史 / 分页那几条读路。
@@ -319,12 +325,31 @@ export const makeSnapshotStore = Effect.gen(function* () {
         );
       }),
 
+    listTotalsByAccountMinMax: (
+      accountId: string,
+      since?: number,
+      buckets = HISTORY_MINMAX_BUCKETS,
+    ): Effect.Effect<{ takenAt: number; totalUsd: number }[], NotFound> =>
+      Effect.gen(function* () {
+        yield* assertAccountOwned(client, userId, accountId);
+        return yield* client.query((db) =>
+          queryMinMaxTotalsByAccount(db, accountId, since, buckets),
+        );
+      }),
+
+    listTotalsMinMax: (
+      accountIds: readonly string[],
+      since?: number,
+      buckets = HISTORY_MINMAX_BUCKETS,
+    ): Effect.Effect<SnapshotTotal[]> =>
+      client.query((db) => queryMinMaxTotalsInScope(db, userId, accountIds, since, buckets)),
+
     /** 历史曲线数据源:全部快照的 (accountId, takenAt, totalUsd),按 takenAt 升序。 */
     // 只取这三列、不取 balances(比 `latest` 轻);组合净值时间序列在纯函数里
     // 阶梯式重建(见 apps/web buildPortfolioHistory)。
-    listTotals: (): Effect.Effect<SnapshotTotal[]> =>
-      client.query((db) =>
-        db
+    listTotals: (since?: number): Effect.Effect<SnapshotTotal[]> =>
+      client.query(async (db) => {
+        const windowRows = await db
           .select({
             accountId: snapshots.accountId,
             takenAt: snapshots.takenAt,
@@ -332,9 +357,20 @@ export const makeSnapshotStore = Effect.gen(function* () {
           })
           .from(snapshots)
           .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
-          .where(eq(accounts.userId, userId))
-          .orderBy(asc(snapshots.takenAt)),
-      ),
+          .where(
+            since == null
+              ? eq(accounts.userId, userId)
+              : and(eq(accounts.userId, userId), gte(snapshots.takenAt, since)),
+          )
+          .orderBy(asc(snapshots.takenAt));
+        // 裁了窗口(短窗曲线)就补 carry-in:窗口前每账户的起点值(stamped 到 since),否则停更
+        // 账户在窗口内一行都没有 → 曲线偏低、末端跳变(见 queryCarryInTotals)。全历史不裁,不补。
+        // **carry-in 必须排在 windowRows 之前**:某账户在 since 既有 carry-in 又有恰好落在 since 的
+        // 真实行时,浏览器 buildPortfolioHistory 的稳定排序让后写的真实行覆盖 carry-in,真实值胜出。
+        if (since == null) return windowRows;
+        const carryIn = await queryCarryInTotals(db, userId, null, since);
+        return [...carryIn, ...windowRows];
+      }),
 
     /** 全历史余额(跨所有快照):单币价值历史用。可选 since(epoch ms)裁窗口。 */
     // app 侧按代币身份归属 + 阶梯式重建(见 apps/web buildTokenValueHistory)。每行带其快照的

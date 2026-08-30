@@ -26,6 +26,7 @@ import {
   tokenQuantityAt,
 } from "@/lib/core/manual";
 import type { BalanceLike } from "@/lib/core/token-model";
+import { minMaxDownsampleHistory } from "@/lib/server/history/minmax";
 import { NAMER } from "@/lib/server/oracle";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "./batch";
 import { buildManualSnapshot, manualUnitPrices } from "./snapshot";
@@ -458,21 +459,37 @@ export const loadManualAccountLiveTotal = (
 export const loadManualHistoryRows = (
   accounts: AccountSafe[],
   now: number = Date.now(),
+  opts?: { since?: number; sampled?: boolean },
 ): Effect.Effect<SnapshotTotalRow[], NotFound, Database | Oracle> =>
   Effect.map(
     Effect.forEach(
       accounts.filter((a) => isManual(a.connectorId)),
-      // **归档账户的网格只画到封存那一刻**(ADR 0039)。它归档前的历史照常保留 —— 所以是截断 τ,
-      // 不是把这个账户整个剔掉(剔掉会把它归档前的贡献一起抹了,与「归档看的是过去」相反)。
-      // 不截断的话:一年前归档的手记账户,每次开首页都要为它从账本重建 365 个日格点(还带历史价查询),
-      // 而这些点在求和时全被排除 —— 白算一遍,还往曲线里插一批「什么都没发生」的时间点。
-      // `Math.min`:只**截短**,不延长 —— 调用方给的 `now` 是这条曲线的右端,
-      // 归档时刻晚于它(比如刚归档、而调用方在算一段历史)时不该把网格往后拉。
       (a) =>
         loadManualAccountSeries(a.id, a.archivedAt == null ? now : Math.min(a.archivedAt, now)),
       { concurrency: "unbounded" },
     ),
-    (perAccount) => perAccount.flat(),
+    (perAccount) =>
+      perAccount.flatMap((rows) => {
+        const since = opts?.since;
+        let clipped = rows;
+        if (since != null) {
+          const inWindow = rows.filter((r) => r.takenAt >= since);
+          // carry-in:窗口前最后一个点 stamped 到 since,让 manual 账户从窗口起点就在场 —— 与 snapshot
+          // 的 carry-in 对齐(见 db queryCarryInTotals)。否则混合组合里它的首点落在 ≥since 的第一个
+          // 日末,组合曲线左端会缺它一小格(review 抓的 <1 天凹口)。rows 升序 → 取窗口前最后一个。
+          const lastBefore = rows.filter((r) => r.takenAt < since).at(-1);
+          clipped =
+            lastBefore != null && inWindow[0]?.takenAt !== since
+              ? [{ ...lastBefore, takenAt: since }, ...inWindow]
+              : inWindow;
+        }
+        if (!opts?.sampled || clipped.length === 0) return clipped;
+        const accountId = clipped[0]?.accountId;
+        if (accountId == null) return clipped;
+        return minMaxDownsampleHistory(
+          clipped.map((r) => ({ t: r.takenAt, total: r.totalUsd })),
+        ).map((p) => ({ accountId, takenAt: p.t, totalUsd: p.total }));
+      }),
   );
 
 // 加一个持仓:认币(mint)→ 落用户自己的两个字段 → 一条 occurredAt=now 的开仓 set 活动

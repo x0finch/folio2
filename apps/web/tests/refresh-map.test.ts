@@ -172,7 +172,7 @@ describe("刷新映射表", () => {
       portfolioKeys.list(),
       portfolioKeys.tabPins("pf-1"),
       portfolioKeys.overview("pf-1"),
-      portfolioKeys.history("pf-1"),
+      portfolioKeys.history("pf-1", "30d"),
     ];
     for (const k of keys) seed(k);
 

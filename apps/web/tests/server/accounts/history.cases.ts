@@ -32,7 +32,7 @@ describe("accounts/history", () => {
   /** 抽屉里那两行:接口给窗口内的原料点,浏览器阶梯重建 + 降采样。 */
   const curve = async (input: { accountId: string; since?: number; connectorId?: string }) => {
     const raw = await call(USER, handleGetAccountHistory(input));
-    return buildAccountValueHistory(raw.rows, raw.live);
+    return buildAccountValueHistory(raw.rows, raw.live, { sampled: raw.sampled });
   };
 
   describe("getAccountHistory", () => {
@@ -65,7 +65,7 @@ describe("accounts/history", () => {
 
       // 「当下」那一笔正是「还在动」的那一笔(ADR 0039)—— 封存之后接口连它都不发。
       expect(raw.live).toBeNull();
-      const series = buildAccountValueHistory(raw.rows, raw.live);
+      const series = buildAccountValueHistory(raw.rows, raw.live, { sampled: raw.sampled });
       expect(series.at(-1)?.t).toBeLessThanOrEqual(archivedAt);
     });
 
@@ -109,11 +109,12 @@ describe("accounts/history", () => {
       const all = await call(USER, handleGetAccountHistory({ accountId: acc.id }));
       const month = await call(
         USER,
-        handleGetAccountHistory({ accountId: acc.id, since: NOW - 30 * DAY }),
+        handleGetAccountHistory({ accountId: acc.id, since: NOW - 30 * DAY, range: "30d" }),
       );
 
-      expect(Object.keys(all).sort()).toEqual(["live", "rows"]);
-      expect(all.rows).toHaveLength(2); // 两次同步两行,没有被降采样合并
+      expect(Object.keys(all).sort()).toEqual(["live", "rows", "sampled"]);
+      expect(all.sampled).toBe(true);
+      expect(all.rows).toHaveLength(2); // 仅两点,min-max 路径仍原样返回
       expect(month.rows).toHaveLength(1); // 40 天前那行**没有出门**
       expect(month.rows[0]?.totalUsd).toBe(120);
     });

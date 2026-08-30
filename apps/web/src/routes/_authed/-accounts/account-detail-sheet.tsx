@@ -188,7 +188,8 @@ function DetailBody({
   const raw = historyQuery.data;
   // 曲线在浏览器里画(FOL-38):接口发窗口内的原样快照点,阶梯重建 + 降采样在这儿。
   const series = useMemo(
-    () => (raw == null ? [] : buildAccountValueHistory(raw.rows, raw.live)),
+    () =>
+      raw == null ? [] : buildAccountValueHistory(raw.rows, raw.live, { sampled: raw.sampled }),
     [raw],
   );
 

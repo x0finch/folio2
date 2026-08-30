@@ -1,4 +1,5 @@
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
+import type { HistoryRange } from "@/lib/core/history-range";
 import {
   computeHomeTabStrip,
   type HomeTabStripView,
@@ -91,9 +92,9 @@ export const portfolioOverviewQuery = (portfolioId: string, pin?: PinScopeKey) =
     refetchInterval: (query) => pollWhilePending(query, isFirstSyncPending(query.state.data)),
   });
 
-export const portfolioHistoryQuery = (portfolioId: string) =>
+export const portfolioHistoryQuery = (portfolioId: string, range: HistoryRange = "30d") =>
   queryOptions({
-    queryKey: portfolioKeys.history(portfolioId),
-    queryFn: () => getPortfolioHistory({ data: { portfolioId } }),
+    queryKey: portfolioKeys.history(portfolioId, range),
+    queryFn: () => getPortfolioHistory({ data: { portfolioId, range } }),
     staleTime: STALE_TIME.live,
   });

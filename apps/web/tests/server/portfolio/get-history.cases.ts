@@ -131,9 +131,10 @@ describe("portfolio/get-history", () => {
       await seedSnapshot(USER, a.id, ago(2 * DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       await seedSnapshot(USER, b.id, ago(2 * DAY), [{ tokenId: ETH, amount: 1, usdValue: 50 }]);
 
-      const raw = await call(USER, handleGetPortfolioHistory({}));
+      const raw = await call(USER, handleGetPortfolioHistory({ range: "30d" }));
 
-      expect(Object.keys(raw).sort()).toEqual(["archivedAt", "liveAccountIds", "rows"]);
+      expect(Object.keys(raw).sort()).toEqual(["archivedAt", "liveAccountIds", "rows", "sampled"]);
+      expect(raw.sampled).toBe(false);
       // 同一时刻的两个账户各占一行(曲线会把它们并成一个点)—— 这就是「没聚合」。
       expect(raw.rows).toHaveLength(2);
       expect(raw.rows.map((r) => r.accountId).sort()).toEqual([a.id, b.id].sort());
@@ -143,6 +144,22 @@ describe("portfolio/get-history", () => {
     //
     // **时钟冻住再对拍**:两条路各自取一次 `Date.now()`(手记账户的日网格右端就是它),
     // 不冻的话末点会差几毫秒,而那种差别会把「算法是不是同一个」这件事淹掉。
+    it("长窗 all → sampled 且行数与历史长度脱钩", async () => {
+      const acc = await seedAccount(USER, "甲", "bitcoin");
+      const start = NOW - 120 * DAY;
+      for (let i = 0; i < 120; i++) {
+        await seedSnapshot(USER, acc.id, start + i * DAY, [
+          { tokenId: BTC, amount: 1, usdValue: 100 + Math.sin(i / 3) * 50 },
+        ]);
+      }
+
+      const raw = await call(USER, handleGetPortfolioHistory({ range: "all" }));
+
+      expect(raw.sampled).toBe(true);
+      expect(raw.rows.length).toBeLessThanOrEqual(80);
+      expect(raw.rows.length).toBeGreaterThan(10);
+    }, 30_000);
+
     it("与老那条服务端算法对拍:同一份数据,曲线一个点都不差", async () => {
       const a = await seedAccount(USER, "甲", "bitcoin");
       const b = await seedAccount(USER, "乙", "binance");
@@ -162,7 +179,7 @@ describe("portfolio/get-history", () => {
       await db(USER).accounts.setArchived(gone.id, true);
       vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
 
-      const legacy = await call(USER, legacyPortfolioHistory({}));
+      const legacy = await call(USER, legacyPortfolioHistory({ range: "30d" }));
       const served = await curve();
 
       expect(served).toEqual(legacy.series);
@@ -186,7 +203,10 @@ describe("portfolio/get-history", () => {
 
 // FOL-38 之前服务端跑的那几行,原样搬进测试当参照物 —— 只有对拍那条用例用它。
 // 生产代码里已经没有这条路了(所以它住在这儿,不是留一份 dead code 在 src 里)。
-const legacyPortfolioHistory = (data: { portfolioId?: string }) =>
+const legacyPortfolioHistory = (data: {
+  portfolioId?: string;
+  range?: "7d" | "30d" | "1y" | "all";
+}) =>
   Effect.gen(function* () {
     const store = yield* Database;
     const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);

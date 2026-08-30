@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListAccountHoldings } from "./account-holdings";
-import { handleGetPortfolioHistory } from "./get-history";
+import { handleGetPortfolioHistory, PortfolioHistoryInput } from "./get-history";
 import { PortfolioScopeInput, PortfolioSelectInput } from "./scope";
 import { handleGetPortfolioSnapshotData } from "./snapshot-data";
 
@@ -24,5 +24,5 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
 
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .validator(PortfolioSelectInput)
+  .validator(PortfolioHistoryInput)
   .handler(runEffect(handleGetPortfolioHistory));
