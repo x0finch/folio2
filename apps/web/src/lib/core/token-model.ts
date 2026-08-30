@@ -124,7 +124,7 @@ export function toEnrichment(e: TokenRecord): TokenEnrichment {
   return {
     symbol: e.symbol,
     name: e.name,
-    logo: tokenLogoUrl(toLogoSource(e)), // 上游 URL → folio 代理(隐私;见 ADR 0008)
+    logo: tokenLogoUrl(toLogoSource(e)), // 有图→拼自家代理 /api/logo/token/{id}(不再发上游 URL),无图→undefined 显首字母;隐私 ADR 0008
     unitPrice: e.price?.unitPrice,
     change24h: e.price?.change24h,
     marketCapRank: e.price?.marketCapRank,
