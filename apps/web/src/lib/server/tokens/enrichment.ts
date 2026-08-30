@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { type TokenEnrichmentView, toTokenEnrichmentView } from "@/lib/core/portfolio";
 
 // 用户全部已知代币的展示富化(FOL-54):**不按组合、不按快照** —— 账户页 / 总览客户端合并用。
-export interface TokenEnrichmentData {
+interface TokenEnrichmentData {
   enriched: [string, TokenEnrichmentView][];
 }
 

@@ -1165,6 +1165,21 @@ const pricesStaleForRows = (
   return false;
 };
 
+/** 单行是否有过期价(含归档行 —— 汇总那步再收窄,行本身照实)。 */
+const rowPricesStale = (
+  balances: BalanceView[],
+  enriched: ReadonlyMap<string, TokenEnrichmentView>,
+): boolean => {
+  const refreshable = new Set(refreshableTokenIds(balances));
+  for (const b of balances) {
+    const id = displayTokenId(b);
+    if (!id || !refreshable.has(id)) continue;
+    const tv = enriched.get(id);
+    if (tv?.hasRef && tv.price?.stale !== false) return true;
+  }
+  return false;
+};
+
 // 账户页原子资源在浏览器合并 → `AccountHoldingsData` → `accountRowsFromRaw`(FOL-54 / FOL-55)。
 export function assembleAccountHoldingsData(args: {
   accounts: readonly { id: string; label: string; archivedAt: number | null }[];
@@ -1184,7 +1199,7 @@ export function assembleAccountHoldingsData(args: {
       takenAt: latest?.takenAt ?? null,
       note: latest?.note,
       balances,
-      pricesStale: false,
+      pricesStale: rowPricesStale(balances, args.enriched),
     };
   });
   const prevSnapshots = args.snapshotsPrev.map((s): [string, SnapshotView] => [

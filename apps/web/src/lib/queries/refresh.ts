@@ -24,35 +24,37 @@ import {
 // 账户写归账户域,却把同步摘要和 `dataStats` 一起改了;移动账户归组合域,却顺手删了标签关联。
 // 判断方法是往下追一层到 `lib/server/*` 与 `packages/db` 的写实现,看它到底动了哪些表 /
 // 哪些读会因此变 —— 光看调用点的名字看不出来。
+//
+// FOL-59:前缀对齐原子资源键 —— 快照(`portfolio.snapshots`)、富化(`tokens.enrichment`)等,
+// 不再刷已删除的胖读键(`overview` / `holdings`)。
 export const REFRESH_MAP = {
   /**
    * 一轮同步跑完。**失败也算**:同步本身可能仍在服务端跑(waitUntil),
    * 而且部分账户的快照可能已经落库了。
    *
-   * 一轮同步改的是余额 → 组合域(总额、持仓、走势)与账户域(账户行的市值、上次同步)都跟着变,
-   * 所以三个前缀都要刷。
-   * **这一条顺带修掉一个既有 bug**:整页刷新只重跑 loader,而 loader 只预取「默认组合」那份 ——
-   * 停在非默认组合、或停在自定义 Tab 上时,同步跑完画面根本不动。前缀刷新盖住整个域,三种视图一起更新。
+   * 刷:同步轮次、快照原料、账户列表(页头摘要与「立即同步」账户集)、富化现价。
    */
-  "sync.round": [syncKeys.all, portfolioKeys.all, accountKeys.all],
+  "sync.round": [
+    syncKeys.all,
+    portfolioKeys.snapshotsPrefix(),
+    accountKeys.all,
+    tokenKeys.enrichment(),
+  ],
 
   /** 抽屉里的「单独同步」。改的东西和一轮同步一样,只是范围小 —— 前缀是同一批。 */
-  "account.sync": [syncKeys.all, portfolioKeys.all, accountKeys.all],
+  "account.sync": [
+    syncKeys.all,
+    portfolioKeys.snapshotsPrefix(),
+    accountKeys.all,
+    tokenKeys.enrichment(),
+  ],
 
   /**
    * 账户与手记资产的增删改:新建 / 更新 / 归档 / 删除账户、替换凭据,以及手记代币与手记活动的增删改。
    *
-   * **一次账户写会改四个域,四个前缀一个都不能少。** 这是整张表里跨域最宽的一条:
-   * · 账户域 —— 账户行本身。手记明细那条查询在同一前缀之下,不用单列。
-   * · 组合域 —— 加一个账户不只是列表多一行,首页总额、走势、按代币的聚合全跟着变。
-   * · 同步域 —— 轮次查询(`sync.round`);页头摘要由 accounts + snapshots 在浏览器派生(FOL-58)。
-   * · 设置域的 `dataStats` —— 它就是「账户数 > 0」,而它决定导入前弹不弹那道确认。不刷的话:
-   *   空库时进过一次设置页,再去加账户,回来导入就**跳过了确认弹窗**。只列这一条 key,
-   *   不列 `settingsKeys.all` —— 估值口径和 provider key 与账户无关。
-   *
-   * 四条都不报错,只表现为「改了东西那一块不动」—— 所以宁可多列一个前缀,也别省。
+   * 账户行本身 + 同步轮次(页头摘要) + dataStats。快照要等下一轮同步才变,这里不刷。
    */
-  "account.write": [accountKeys.all, portfolioKeys.all, syncKeys.all, settingsKeys.dataStats()],
+  "account.write": [accountKeys.all, syncKeys.all, settingsKeys.dataStats()],
 
   /**
    * 标签的新建 / 改名 / 删除,以及给账户打标签 / 摘标签。
@@ -60,7 +62,7 @@ export const REFRESH_MAP = {
    * **标签域要刷**:标签定义与账户关联变了,徽标、标签选择器、tab 条的每档小计(客户端按
    * 标签关联 + 缓存的总览现算)都跟着变。
    *
-   * **首页总览已改原子 query(FOL-56)**:tag pin 内容在浏览器按 `accountTagLinks` 收窄账户,
+   * 首页总览已改原子 query(FOL-56):tag pin 内容在浏览器按 `accountTagLinks` 收窄账户,
    * 不必 invalidate 快照键 —— 只刷标签域即可。
    */
   "tag.write": [tagKeys.all],
@@ -98,15 +100,14 @@ export const REFRESH_MAP = {
 
   /**
    * 改估值口径(self-first / source-first)。它是**读时重估**,所以历史不用重算,
-   * 但总览、走势、账户持仓的现值全部按新口径重来。
+   * 但总览、走势、账户持仓的现值全部按新口径重来 —— 口径本身在 settings query 里,
+   * 富化字典与快照原料不变,但浏览器合并会重算。
    */
-  "settings.valuation": [settingsKeys.all, portfolioKeys.all, accountKeys.all],
+  "settings.valuation": [settingsKeys.valuation()],
 
   /**
    * 导入数据。这是唯一一条**什么都可能变**的写:账户、快照、标签、组合全在里面,
    * 所以老老实实把每个域都列上 —— 这里省一个前缀就是一处「导完了某一块画面不动」。
-   *
-   * (设置页只有导出与导入两条路,没有「清理数据」—— 之前这里写着「导入 / 清理」,是描述多写了一项。)
    */
   "settings.data": [
     settingsKeys.all,
@@ -114,10 +115,11 @@ export const REFRESH_MAP = {
     portfolioKeys.all,
     accountKeys.all,
     tagKeys.all,
+    tokenKeys.enrichment(),
   ],
 
-  /** 过期价格后台刷完(SWR 的第二拍):金额跟着变,口径没变。 */
-  "prices.refreshed": [portfolioKeys.all, accountKeys.all],
+  /** 过期价格后台刷完(SWR 的第二拍):富化字典里的现价变了,浏览器合并后金额跟着变。 */
+  "prices.refreshed": [tokenKeys.enrichment()],
 } satisfies Record<string, readonly QueryKey[]>;
 
 export type RefreshEvent = keyof typeof REFRESH_MAP;

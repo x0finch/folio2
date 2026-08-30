@@ -6,12 +6,7 @@ import { portfolioKeys } from "./keys";
 
 // 组合快照原子读(FOL-54):`at`/`after` 由调用方 hour-floor 后传入,保证 queryKey 稳定。
 
-export const portfolioSnapshotsQuery = (
-  portfolioId: string,
-  at: number,
-  after?: number,
-  now?: number,
-) =>
+const portfolioSnapshotsQuery = (portfolioId: string, at: number, after?: number, now?: number) =>
   queryOptions({
     queryKey: portfolioKeys.snapshots(portfolioId, at, after),
     // `at` 进 key(hour-floor);当下快照的 SQL 上界用真实 `now`,避免整点内新同步被截掉。

@@ -3,16 +3,13 @@ import type { HistoryRange } from "@/lib/core/history-range";
 import {
   computeHomeTabStrip,
   type HomeTabStripView,
-  isFirstSyncPending,
   type OverviewView,
-  overviewFromSnapshotData,
-  type PortfolioSnapshotData,
 } from "@/lib/core/portfolio";
-import { getPortfolioHistory, getPortfolioSnapshotData } from "@/lib/server/portfolio";
+import { getPortfolioHistory } from "@/lib/server/portfolio";
 import { listPortfolios } from "@/lib/server/portfolios";
 import { getPortfolioTabPins } from "@/lib/server/tab-pins";
-import { pollWhilePending, RETRY, STALE_TIME, shouldRetry } from "./constants";
-import { type PinScopeKey, portfolioKeys } from "./keys";
+import { RETRY, STALE_TIME, shouldRetry } from "./constants";
+import { portfolioKeys } from "./keys";
 
 // 组合域的读取入口 —— 与 `lib/server/portfolio`(读模型)+ `lib/server/portfolios`(实体)的读取型 server fn 对应。
 //
@@ -23,10 +20,8 @@ import { type PinScopeKey, portfolioKeys } from "./keys";
 /**
  * 一份组合总览的形状(按代币聚合的持仓 + 分段 + 小计)。消费方拆解 sections 时用得上。
  *
- * **它是 `select` 的产物**(FOL-48 / FOL-51):接口发的是当前 + 24 小时前两组快照原料,总额 /
- * 持仓 / 各小计 / 24h 盈亏 / pricesStale 由 `overviewFromSnapshotData` 在浏览器里算出来 —— 所以类型
- * 就是 `buildOverview` 的出参(含各级 `gain24h`),外加一个 `pending`:**首次同步中**(有账户、还没有
- * 任何快照)。它是 `select` 从原料判出来的、不进 `overviewFromSnapshotData`,首页据此显加载态而非 $0。
+ * **它是原子 query 在浏览器合并的产物**(FOL-54 / FOL-56):接口发快照原料 + 富化 + 口径,
+ * 总额 / 持仓 / 各小计 / 24h 盈亏 / pricesStale 由 `portfolioOverviewFromAtoms` 算出来。
  */
 export type PortfolioOverview = OverviewView & { pending: boolean };
 
@@ -61,21 +56,6 @@ export const fetchHomeTabStrip = async (
   ]);
   return computeHomeTabStrip(snapshot, tabPins, tags);
 };
-
-// 洞察页等仍走这条(FOL-59 前保留)。首页已改原子 query + `usePortfolioOverview`。
-const selectOverview = (raw: PortfolioSnapshotData): PortfolioOverview => ({
-  ...overviewFromSnapshotData(raw),
-  pending: isFirstSyncPending(raw),
-});
-
-export const portfolioOverviewQuery = (portfolioId: string, pin?: PinScopeKey) =>
-  queryOptions({
-    queryKey: portfolioKeys.overview(portfolioId, pin),
-    queryFn: () => getPortfolioSnapshotData({ data: { portfolioId, pin } }),
-    select: selectOverview,
-    staleTime: STALE_TIME.live,
-    refetchInterval: (query) => pollWhilePending(query, isFirstSyncPending(query.state.data)),
-  });
 
 export const portfolioHistoryQuery = (portfolioId: string, range: HistoryRange = "30d") =>
   queryOptions({

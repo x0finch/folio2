@@ -128,7 +128,7 @@ function TabTotal() {
       {activePin && pinScope ? (
         <QueryBoundary
           key={activePin.id}
-          resetKey={JSON.stringify(portfolioKeys.overview(selectedId, pinScope))}
+          resetKey={JSON.stringify(portfolioKeys.overviewCompose(selectedId, pinScope))}
           pending={<TabTotalSkeleton />}
           failed="—"
         >
@@ -136,7 +136,7 @@ function TabTotal() {
         </QueryBoundary>
       ) : (
         <QueryBoundary
-          resetKey={JSON.stringify(portfolioKeys.overview(selectedId))}
+          resetKey={JSON.stringify(portfolioKeys.overviewCompose(selectedId))}
           pending={<TabTotalSkeleton />}
           failed="—"
         >

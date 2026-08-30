@@ -43,14 +43,18 @@ export const portfolioKeys = {
   /** 首页 tab 条 pin 原料 —— 与 overview 分 key;改 pin 只刷这层。 */
   tabPins: (portfolioId: string) => [...portfolioKeys.tabs(), "pins", portfolioId] as const,
   /**
-   * 组合总览。**portfolioId 必须是真实 id,不能用「缺省 = 默认」的 undefined** ——
-   * loader 预取的那份与组件按 selectedId 读的那份,key 对不上就等于首屏白拉一遍。
+   * QueryBoundary resetKey:总览由原子 query 在浏览器合并,pin 进 key 区分不同收窄。
+   * **不是 react-query 缓存键** —— 各原子资源有自己的 key。
    */
-  overview: (portfolioId: string, pin?: PinScopeKey) =>
-    [...portfolioKeys.all, "overview", portfolioId, pin ?? null] as const,
+  overviewCompose: (portfolioId: string, pin?: PinScopeKey) =>
+    [...portfolioKeys.all, "overview-compose", portfolioId, pin ?? null] as const,
   /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
   history: (portfolioId: string, range: string) =>
     [...portfolioKeys.all, "history", portfolioId, range] as const,
+  /**
+   * 快照域前缀 —— 刷新映射表用它;各 `at`/`after` 的快照查询都挂在这层下面。
+   */
+  snapshotsPrefix: () => [...portfolioKeys.all, "snapshots"] as const,
   /**
    * 组合内各账户在 `[after, at]` 窗口内最新快照(FOL-54)。`at`/`after` 由客户端 hour-floor,
    * 进 key 保证缓存稳定、SSR 与补水一致。
@@ -72,11 +76,9 @@ export const accountKeys = {
    * 当前组合的账户(含它的归档成员)+ 凭据投影。
    *
    * **portfolioId 进 key**(ADR 0047):这三条都由服务端按组合筛过了,不进 key 就会两个组合共用
-   * 一份缓存 —— 切过去看到的是上一个组合的账户。同 `portfolioKeys.overview` 那条的理由。
+   * 一份缓存 —— 切过去看到的是上一个组合的账户。
    */
   list: (portfolioId: string) => [...accountKeys.all, "list", portfolioId] as const,
-  /** 当前组合里各账户的市值 / 上次同步 / 持仓明细(含 24h 盈亏,两端相减随持仓回,FOL-51)。 */
-  holdings: (portfolioId: string) => [...accountKeys.all, "holdings", portfolioId] as const,
   /**
    * 单账户价值历史。**key 里是窗口档位(`"30d"`)而不是算出来的起点时间戳** ——
    * 起点由 `Date.now()` 现算,每次渲染都是新数,进了 key 就等于每帧换一个缓存条目、永远拉不停。

@@ -75,7 +75,7 @@ export function HoldingsIsland() {
   const isPinView = activePin != null;
   const pinScope = activePin ? pinScopeOf(activePin) : undefined;
   const pinBoundaryKey = pinScope
-    ? JSON.stringify(portfolioKeys.overview(selectedId, pinScope))
+    ? JSON.stringify(portfolioKeys.overviewCompose(selectedId, pinScope))
     : "";
   const kindTabs = kindTabsOf(strip.hasPerps, strip.hasDefi);
   const activeKind: KindTab | null = isPinView

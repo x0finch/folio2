@@ -1,5 +1,5 @@
-import type { QueryClient } from "@tanstack/react-query";
 import {
+  type QueryClient,
   queryOptions,
   useQueryClient,
   useSuspenseQueries,
@@ -13,8 +13,8 @@ import {
   floorToHour,
   isFirstSyncPending,
   overviewChainIds,
-  portfolioOverviewFromAtoms,
   type PortfolioSnapshotData,
+  portfolioOverviewFromAtoms,
 } from "@/lib/core/portfolio";
 import { accountListQuery } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
@@ -38,7 +38,7 @@ export const fiatRefsQuery = (portfolioId: string) =>
     staleTime: STALE_TIME.live,
   });
 
-export const platformMetaQuery = (chainIds: readonly string[]) =>
+const platformMetaQuery = (chainIds: readonly string[]) =>
   queryOptions({
     queryKey: portfolioKeys.platformMeta(chainIds),
     queryFn: () => resolvePlatformMeta({ data: { chainIds: [...chainIds] } }),
