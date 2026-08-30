@@ -248,6 +248,9 @@ export async function queryMinMaxTotalsInScope(
 
   // carry-in:窗口前每账户的起点值(stamped 到 since),让停更账户不从曲线消失。全历史(since 缺省)
   // 不裁窗口,无需补。
+  // **carry-in 必须排在 windowRows 之前**(隐性契约):某账户在 since 既有 carry-in(旧值)又有
+  // 恰好落在 since 的真实行时,`buildPortfolioTimeline` 的稳定排序会让后写的真实行覆盖 carry-in,
+  // 真实值胜出。顺序反过来则 since 处会渲染成过期的 carry-in 值。
   const carryIn = since != null ? await queryCarryInTotals(db, userId, accountIds, since) : [];
   const allRows = [...carryIn, ...windowRows];
   if (allRows.length === 0) return [];

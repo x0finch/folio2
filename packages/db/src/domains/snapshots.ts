@@ -365,6 +365,8 @@ export const makeSnapshotStore = Effect.gen(function* () {
           .orderBy(asc(snapshots.takenAt));
         // 裁了窗口(短窗曲线)就补 carry-in:窗口前每账户的起点值(stamped 到 since),否则停更
         // 账户在窗口内一行都没有 → 曲线偏低、末端跳变(见 queryCarryInTotals)。全历史不裁,不补。
+        // **carry-in 必须排在 windowRows 之前**:某账户在 since 既有 carry-in 又有恰好落在 since 的
+        // 真实行时,浏览器 buildPortfolioHistory 的稳定排序让后写的真实行覆盖 carry-in,真实值胜出。
         if (since == null) return windowRows;
         const carryIn = await queryCarryInTotals(db, userId, null, since);
         return [...carryIn, ...windowRows];

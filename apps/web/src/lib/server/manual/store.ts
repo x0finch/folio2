@@ -471,7 +471,18 @@ export const loadManualHistoryRows = (
     (perAccount) =>
       perAccount.flatMap((rows) => {
         const since = opts?.since;
-        const clipped = since != null ? rows.filter((r) => r.takenAt >= since) : rows;
+        let clipped = rows;
+        if (since != null) {
+          const inWindow = rows.filter((r) => r.takenAt >= since);
+          // carry-in:窗口前最后一个点 stamped 到 since,让 manual 账户从窗口起点就在场 —— 与 snapshot
+          // 的 carry-in 对齐(见 db queryCarryInTotals)。否则混合组合里它的首点落在 ≥since 的第一个
+          // 日末,组合曲线左端会缺它一小格(review 抓的 <1 天凹口)。rows 升序 → 取窗口前最后一个。
+          const lastBefore = rows.filter((r) => r.takenAt < since).at(-1);
+          clipped =
+            lastBefore != null && inWindow[0]?.takenAt !== since
+              ? [{ ...lastBefore, takenAt: since }, ...inWindow]
+              : inWindow;
+        }
         if (!opts?.sampled || clipped.length === 0) return clipped;
         const accountId = clipped[0]?.accountId;
         if (accountId == null) return clipped;
