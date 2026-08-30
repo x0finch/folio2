@@ -73,7 +73,7 @@ export const accountKeys = {
     [...accountKeys.all, "history", accountId, range] as const,
   /** 单个持仓的价值历史(跨账户聚合的那一行)。同上,key 里是窗口档位。 */
   holdingHistory: (holdingKey: string, range: string) =>
-    [...accountKeys.all, "holding-history", holdingKey, range] as const,
+    [...accountKeys.all, "token-value-history", holdingKey, range] as const,
   /** 手记账户明细(代币 + 活动账本)。 */
   manualDetail: (accountId: string) => [...accountKeys.all, "manual-detail", accountId] as const,
 };

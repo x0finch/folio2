@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildTokenValueHistory, type TokenHistRow } from "@/lib/core/portfolio";
+import {
+  buildTokenValueHistory,
+  type TokenHistRow,
+  tokenValueHistoryFromRaw,
+} from "@/lib/core/portfolio";
 
 const USDC = "tok-usdc"; // 归并键**就是** token_id 本身(ADR 0021 / #201:三级键塌成一级)
 
@@ -69,5 +73,41 @@ describe("buildTokenValueHistory", () => {
     );
     expect(equity).toEqual([]); // 权益不 eligible → 单币历史里也没有它
     expect(buildTokenValueHistory([], USDC)).toEqual([]);
+  });
+});
+
+describe("tokenValueHistoryFromRaw", () => {
+  it("原料行 → 与 buildTokenValueHistory 逐值一致", () => {
+    const raw = {
+      rows: [
+        {
+          accountId: "A",
+          takenAt: 100,
+          amount: 10,
+          usdValue: 10,
+          kind: "spot",
+          tokenId: USDC,
+          metaJson: null,
+        },
+        {
+          accountId: "B",
+          takenAt: 200,
+          amount: 5,
+          usdValue: 5,
+          kind: "spot",
+          tokenId: USDC,
+          metaJson: null,
+        },
+      ],
+    };
+    expect(tokenValueHistoryFromRaw(raw, USDC)).toEqual(
+      buildTokenValueHistory(
+        [
+          r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }),
+          r({ acct: "B", takenAt: 200, value: 5, tokenId: USDC }),
+        ],
+        USDC,
+      ),
+    );
   });
 });

@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
-import { HoldingHistoryInput, handleGetHoldingHistory } from "./history";
+import { handleGetTokenValueHistory, TokenValueHistoryInput } from "./history";
 
-export const getHoldingHistory = createServerFn({ method: "GET" })
+export const getTokenValueHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .validator(HoldingHistoryInput)
-  .handler(runEffect(handleGetHoldingHistory));
+  .validator(TokenValueHistoryInput)
+  .handler(runEffect(handleGetTokenValueHistory));

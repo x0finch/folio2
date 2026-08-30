@@ -363,6 +363,33 @@ export function buildTokenValueHistory(rows: readonly TokenHistRow[], key: strin
   return buildPortfolioHistory([...bySnap.values()]);
 }
 
+/** 单币价值历史接口下发的原料(FOL-50):窗口内的原样余额行,浏览器里喂 buildTokenValueHistory。 */
+export interface TokenValueHistoryRaw {
+  rows: {
+    accountId: string;
+    takenAt: number;
+    amount: number;
+    usdValue: number;
+    kind: string;
+    tokenId: string | null;
+    metaJson: string | null;
+  }[];
+}
+
+/** 原料 → 单币价值曲线:与旧版服务端聚合路径逐值一致。 */
+export function tokenValueHistoryFromRaw(raw: TokenValueHistoryRaw, key: string): HistoryPoint[] {
+  const histRows: TokenHistRow[] = raw.rows.map((r) => ({
+    symbol: "",
+    amount: r.amount,
+    value: r.usdValue,
+    kind: viewKind(r),
+    account: { id: r.accountId, label: "", connectorId: "" },
+    tokenId: r.tokenId,
+    takenAt: r.takenAt,
+  }));
+  return buildTokenValueHistory(histRows, key);
+}
+
 //  —— 首页 tab 条(纯推导)
 
 // 有没有永续 / DeFi:入参就是 `toAccountSections` 的出口,轻请求和列表共用。

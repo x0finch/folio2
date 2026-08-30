@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { HoldingHistoryInput, handleGetHoldingHistory } from "@/lib/server/holdings/history";
+import { tokenValueHistoryFromRaw } from "@/lib/core/portfolio";
+import { handleGetTokenValueHistory, TokenValueHistoryInput } from "@/lib/server/holdings/history";
 import { blockOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
 import { DAY, seedAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// #527 · getHoldingHistory
+// #527 · getTokenValueHistory (FOL-50)
 //
 // 这条曲线的归属键就是 tokenId(`groupKey` = `row.tokenId ?? …`),入选口径是 `kind === "spot"`。
 const USER = "h-holdings-history";
@@ -18,7 +19,12 @@ beforeEach(async () => {
   await freshUser(otherUser(USER));
 });
 
-describe("getHoldingHistory", () => {
+const curve = async (input: { key: string; since?: number }) => {
+  const raw = await call(USER, handleGetTokenValueHistory(input));
+  return tokenValueHistoryFromRaw(raw, input.key);
+};
+
+describe("getTokenValueHistory", () => {
   it("同一个币分散在三个账户 → 每个时刻是三个账户之和", async () => {
     const a = await seedAccount(USER, "甲");
     const b = await seedAccount(USER, "乙");
@@ -31,7 +37,7 @@ describe("getHoldingHistory", () => {
       await seedSnapshot(USER, acc.id, NOW - DAY, [{ tokenId: BTC, amount: 1, usdValue: value }]);
     }
 
-    const { series } = await call(USER, handleGetHoldingHistory({ key: BTC }));
+    const series = await curve({ key: BTC });
 
     expect(series).toHaveLength(1);
     expect(series[0].total).toBe(600);
@@ -42,10 +48,7 @@ describe("getHoldingHistory", () => {
     await seedSnapshot(USER, acc.id, NOW - 10 * DAY, [{ tokenId: BTC, amount: 1, usdValue: 10 }]);
     await seedSnapshot(USER, acc.id, NOW - DAY, [{ tokenId: BTC, amount: 1, usdValue: 20 }]);
 
-    const { series } = await call(
-      USER,
-      handleGetHoldingHistory({ key: BTC, since: NOW - 2 * DAY }),
-    );
+    const series = await curve({ key: BTC, since: NOW - 2 * DAY });
 
     expect(series.map((p) => p.total)).toEqual([20]);
   });
@@ -54,7 +57,7 @@ describe("getHoldingHistory", () => {
     const acc = await seedAccount(USER, "甲");
     await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
-    const { series } = await call(USER, handleGetHoldingHistory({ key: "token-doge" }));
+    const series = await curve({ key: "token-doge" });
 
     expect(series).toEqual([]);
   });
@@ -67,13 +70,26 @@ describe("getHoldingHistory", () => {
     const mine = await seedAccount(USER, "甲");
     await seedSnapshot(USER, mine.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
-    const { series } = await call(USER, handleGetHoldingHistory({ key: BTC }));
+    const series = await curve({ key: BTC });
 
     expect(series.at(-1)?.total).toBe(100);
   });
 
+  it("只下发该 token 在窗口内的行", async () => {
+    const acc = await seedAccount(USER, "甲");
+    await seedSnapshot(USER, acc.id, NOW, [
+      { tokenId: BTC, amount: 1, usdValue: 100 },
+      { tokenId: "token-eth", amount: 1, usdValue: 50 },
+    ]);
+
+    const raw = await call(USER, handleGetTokenValueHistory({ key: BTC }));
+
+    expect(raw.rows).toHaveLength(1);
+    expect(raw.rows[0]?.tokenId).toBe(BTC);
+  });
+
   it("key 空串 / since 是负数 → schema 拒", () => {
-    expect(HoldingHistoryInput.safeParse({ key: "" }).success).toBe(false);
-    expect(HoldingHistoryInput.safeParse({ key: "t", since: -1 }).success).toBe(false);
+    expect(TokenValueHistoryInput.safeParse({ key: "" }).success).toBe(false);
+    expect(TokenValueHistoryInput.safeParse({ key: "t", since: -1 }).success).toBe(false);
   });
 });

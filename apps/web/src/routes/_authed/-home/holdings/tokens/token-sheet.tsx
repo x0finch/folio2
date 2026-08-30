@@ -13,7 +13,7 @@ import {
 } from "@folio/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AccountName } from "@/components/account-name";
 import { AmountTicker } from "@/components/amount-ticker";
@@ -22,6 +22,7 @@ import { type Range, RangeTabs, rangeSince } from "@/components/range-tabs";
 import { collapseToSlots } from "@/components/tag-badges";
 import { formatNumber, signedUsd } from "@/lib/core/format-number";
 import type { Holding } from "@/lib/core/portfolio";
+import { tokenValueHistoryFromRaw } from "@/lib/core/portfolio";
 import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { holdingHistoryQuery } from "@/lib/queries/accounts";
@@ -198,7 +199,12 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
     ...holdingHistoryQuery({ holdingKey: holding.key, range, since }),
     placeholderData: keepPreviousData,
   });
-  const series = historyQuery.data?.series ?? [];
+  // 曲线在浏览器里画(FOL-50):接口发窗口内该币的原样余额行,阶梯重建在这儿。
+  const series = useMemo(
+    () =>
+      historyQuery.data == null ? [] : tokenValueHistoryFromRaw(historyQuery.data, holding.key),
+    [historyQuery.data, holding.key],
+  );
 
   return (
     <div className="flex flex-col gap-6">

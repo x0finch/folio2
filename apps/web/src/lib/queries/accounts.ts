@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { getAccountHistory, listAccounts } from "@/lib/server/accounts";
-import { getHoldingHistory } from "@/lib/server/holdings";
+import { getTokenValueHistory } from "@/lib/server/holdings";
 import { getManualAccount } from "@/lib/server/manual-tokens";
 import { listAccountHoldings } from "@/lib/server/portfolio";
 import { STALE_TIME } from "./constants";
@@ -69,7 +69,7 @@ export const holdingHistoryQuery = (args: {
 }) =>
   queryOptions({
     queryKey: accountKeys.holdingHistory(args.holdingKey, args.range),
-    queryFn: () => getHoldingHistory({ data: { key: args.holdingKey, since: args.since } }),
+    queryFn: () => getTokenValueHistory({ data: { key: args.holdingKey, since: args.since } }),
     staleTime: STALE_TIME.history,
   });
 

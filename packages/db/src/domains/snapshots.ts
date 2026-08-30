@@ -364,6 +364,41 @@ export const makeSnapshotStore = Effect.gen(function* () {
           .orderBy(asc(snapshots.takenAt)),
       ),
 
+    /**
+     * 单币价值历史的原料(FOL-50):只取某一 token_id 在窗口内的余额行,升序。
+     * 窗口是 WHERE,不是计算 —— 浏览器拿原样行喂 buildTokenValueHistory。
+     */
+    listBalanceHistoryForToken: (
+      tokenId: string,
+      since?: number,
+    ): Effect.Effect<SnapshotBalanceHistoryRow[]> =>
+      client.query((db) =>
+        db
+          .select({
+            accountId: snapshots.accountId,
+            takenAt: snapshots.takenAt,
+            amount: snapshotBalances.amount,
+            usdValue: snapshotBalances.usdValue,
+            kind: snapshotBalances.kind,
+            tokenId: snapshotBalances.tokenId,
+            platform: snapshotBalances.platform,
+            metaJson: snapshotBalances.metaJson,
+          })
+          .from(snapshotBalances)
+          .innerJoin(snapshots, eq(snapshots.id, snapshotBalances.snapshotId))
+          .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+          .where(
+            since != null
+              ? and(
+                  eq(accounts.userId, userId),
+                  eq(snapshotBalances.tokenId, tokenId),
+                  gte(snapshots.takenAt, since),
+                )
+              : and(eq(accounts.userId, userId), eq(snapshotBalances.tokenId, tokenId)),
+          )
+          .orderBy(asc(snapshots.takenAt)),
+      ),
+
     /** 每个账户的最新快照 + 其余额(总览数据源)。 */
     latest: (): Effect.Effect<SnapshotWithBalances[]> => latestWithBalances(),
 
