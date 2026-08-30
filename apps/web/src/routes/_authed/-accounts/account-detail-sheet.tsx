@@ -329,6 +329,7 @@ function useAccountSheetWrites(account: AccountRow, onClose: () => void) {
   const queryClient = useQueryClient();
   const archived = account.archivedAt != null;
   const refresh = () => invalidateFor(queryClient, "account.write");
+  const refreshArchive = () => invalidateFor(queryClient, "account.archive");
 
   const syncMut = useMutation({
     mutationFn: () => syncAccount({ data: { accountId: account.id } }),
@@ -345,7 +346,7 @@ function useAccountSheetWrites(account: AccountRow, onClose: () => void) {
   });
   const archiveMut = useMutation({
     mutationFn: () => archiveAccount({ data: { accountId: account.id, archived: !archived } }),
-    onSuccess: refresh,
+    onSuccess: refreshArchive,
     onError: () => toast.error(t("actionFailed")),
   });
   const deleteMut = useMutation({

@@ -5,7 +5,6 @@ export {
   isSyncableAccount,
   STALE_SYNC_MS,
   type SyncAccountInput,
-  type SyncAttentionSource,
   type SyncStatusSummary,
   summarizeSync,
 } from "@/lib/core/sync-status";

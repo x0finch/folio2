@@ -17,6 +17,10 @@ export function useAccountHoldingsView(
   accounts: readonly { id: string; label: string; archivedAt: number | null }[],
 ): AccountHoldingsView {
   const now = floorToHour(Date.now());
+  const { now: snapshotsNowQuery, prev: snapshotsPrevQuery } = accountHoldingsSnapshotQueries(
+    portfolioId,
+    now,
+  );
   const [
     { data: snapshotsNow },
     { data: snapshotsPrev },
@@ -24,8 +28,8 @@ export function useAccountHoldingsView(
     { data: enrichment },
   ] = useSuspenseQueries({
     queries: [
-      accountHoldingsSnapshotQueries(portfolioId, now).now,
-      accountHoldingsSnapshotQueries(portfolioId, now).prev,
+      snapshotsNowQuery,
+      snapshotsPrevQuery,
       valuationSettingsQuery(),
       tokenEnrichmentQuery(),
     ],

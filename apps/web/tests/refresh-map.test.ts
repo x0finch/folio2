@@ -92,6 +92,18 @@ describe("刷新映射表", () => {
     expect(isInvalidated(settingsKeys.providerKeys())).toBe(false);
   });
 
+  it("account.archive 额外刷快照与 tab 条", async () => {
+    seed(accountKeys.list("pf-1"));
+    seed(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT));
+    seed(portfolioKeys.tabPins("pf-1"));
+
+    await invalidateFor(queryClient, "account.archive");
+
+    expect(isInvalidated(accountKeys.list("pf-1"))).toBe(true);
+    expect(isInvalidated(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT))).toBe(true);
+    expect(isInvalidated(portfolioKeys.tabPins("pf-1"))).toBe(true);
+  });
+
   it("tag.write 只刷标签域,不碰快照键", async () => {
     seed(tagKeys.list("pf-1"));
     seed(tagKeys.accountLinks("pf-1"));

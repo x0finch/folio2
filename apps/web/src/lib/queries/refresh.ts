@@ -63,6 +63,19 @@ export const REFRESH_MAP = {
   ],
 
   /**
+   * 归档 / 解归档:封存快照(manual) + 解 pin —— 除 `account.write` 外还要刷快照与 tab 条。
+   */
+  "account.archive": [
+    accountKeys.all,
+    syncKeys.all,
+    settingsKeys.dataStats(),
+    portfolioKeys.fiatRefsPrefix(),
+    tokenKeys.enrichment(),
+    portfolioKeys.snapshotsPrefix(),
+    portfolioKeys.tabs(),
+  ],
+
+  /**
    * 标签的新建 / 改名 / 删除,以及给账户打标签 / 摘标签。
    *
    * **标签域要刷**:标签定义与账户关联变了,徽标、标签选择器、tab 条的每档小计(客户端按
