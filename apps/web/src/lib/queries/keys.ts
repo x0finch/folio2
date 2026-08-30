@@ -57,6 +57,11 @@ export const portfolioKeys = {
    */
   snapshots: (portfolioId: string, at: number, after?: number) =>
     [...portfolioKeys.all, "snapshots", portfolioId, at, after ?? null] as const,
+  /** 手记法币身份 ref(tokenId → fiat 命名者),按组合一份。 */
+  fiatRefs: (portfolioId: string) => [...portfolioKeys.all, "fiat-refs", portfolioId] as const,
+  /** 链平台展示元数据;键集由客户端从快照原料算好再传入。 */
+  platformMeta: (chainIds: readonly string[]) =>
+    [...portfolioKeys.all, "platform-meta", ...chainIds] as const,
   // 24h 盈亏无独立 key(FOL-51):它随总览原料(`overview`)一起回,浏览器两端相减算出来。
 };
 

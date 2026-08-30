@@ -2,7 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListAccountHoldings } from "./account-holdings";
+import { handleGetFiatRefs } from "./fiat-refs";
 import { handleGetPortfolioHistory, PortfolioHistoryInput } from "./get-history";
+import { handleResolvePlatformMeta, PlatformMetaInput } from "./platform-meta";
 import { PortfolioScopeInput, PortfolioSelectInput } from "./scope";
 import { handleGetPortfolioSnapshotData } from "./snapshot-data";
 import { handleGetSnapshots, SnapshotsInput } from "./snapshots";
@@ -27,6 +29,16 @@ export const getSnapshots = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(SnapshotsInput)
   .handler(runEffect(handleGetSnapshots));
+
+export const getFiatRefs = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(PortfolioSelectInput)
+  .handler(runEffect(handleGetFiatRefs));
+
+export const resolvePlatformMeta = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(PlatformMetaInput)
+  .handler(runEffect(handleResolvePlatformMeta));
 
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])

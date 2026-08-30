@@ -620,7 +620,7 @@ export function overviewEligibleBalances(
 // 该送去 platforms.resolve 的链键:eligible 行的平台键去重,减去连接器自带展示的场馆键(#52)。
 export function overviewChainIds(
   accounts: AccountSafe[],
-  byAccount: Map<string, SnapshotWithBalances>,
+  byAccount: ReadonlyMap<string, SnapshotSlice>,
   connectorMeta?: (key: string) => { name: string; logo?: string } | null,
 ): string[] {
   const platformIds = new Set<string>();
@@ -1058,6 +1058,75 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
 
 // 客户端 hour-floor 锚点(FOL-54):快照 / 盈亏窗口 key 用同一刻度,避免 SSR 与补水各算各的 now。
 export const floorToHour = (ms: number) => Math.floor(ms / 3_600_000) * 3_600_000;
+
+//  —— 原子资源 → 快照原料(浏览器合并,FOL-54 / FOL-56)——
+
+type ConnectorCatalogEntry = { label: string; logo?: string };
+
+/** 总览 connector 展示元数据:场馆键走目录,链键落空 → `platformMeta`。 */
+export const connectorMetaForOverview = (
+  accounts: readonly { id: string; connectorId: string }[],
+  snapshotsNow: readonly { accountId: string; balances: BalanceView[] }[],
+  catalog: Readonly<Record<string, ConnectorCatalogEntry>>,
+): [string, { name: string; logo?: string }][] => {
+  const keys = new Set<string>();
+  const byAccount = new Map(snapshotsNow.map((s) => [s.accountId, s] as const));
+  for (const account of accounts) {
+    keys.add(account.connectorId);
+    for (const b of byAccount.get(account.id)?.balances ?? []) {
+      keys.add(b.platform ?? account.connectorId);
+    }
+  }
+  const out: [string, { name: string; logo?: string }][] = [];
+  for (const key of keys) {
+    const entry = catalog[key];
+    if (entry) out.push([key, { name: entry.label, logo: entry.logo }]);
+  }
+  return out;
+};
+
+/** 原子资源在浏览器合并 → `PortfolioSnapshotData` → `overviewFromSnapshotData`。 */
+export function assemblePortfolioSnapshotData(args: {
+  accounts: readonly AccountSafe[];
+  snapshotsNow: readonly { accountId: string; takenAt: number; balances: BalanceView[] }[];
+  snapshotsPrev: readonly { accountId: string; takenAt: number; balances: BalanceView[] }[];
+  enriched: ReadonlyMap<string, TokenEnrichmentView>;
+  mode: ValuationMode;
+  platformMeta: readonly [string, PlatformMeta][];
+  connectorMeta: readonly [string, { name: string; logo?: string }][];
+  fiatRefs: readonly [string, string][];
+  now: number;
+}): PortfolioSnapshotData {
+  return {
+    accounts: [...args.accounts],
+    snapshots: args.snapshotsNow.map(
+      (s) => [s.accountId, { takenAt: s.takenAt, balances: s.balances }] as const,
+    ),
+    prevSnapshots: args.snapshotsPrev.map(
+      (s) => [s.accountId, { takenAt: s.takenAt, balances: s.balances }] as const,
+    ),
+    enriched: [...args.enriched].map(
+      ([id, tv]) =>
+        [
+          id,
+          { id: tv.id, symbol: tv.symbol, name: tv.name, price: tv.price, hasLogo: tv.hasLogo },
+        ] as const,
+    ),
+    platformMeta: [...args.platformMeta],
+    connectorMeta: [...args.connectorMeta],
+    fiatRefs: [...args.fiatRefs],
+    mode: args.mode,
+    now: args.now,
+  };
+}
+
+/** 纯函数:原子原料 → 总览(与首页 `usePortfolioOverview` 的 `select` 同口径)。 */
+export function portfolioOverviewFromAtoms(
+  args: Parameters<typeof assemblePortfolioSnapshotData>[0],
+): OverviewView & { pending: boolean } {
+  const raw = assemblePortfolioSnapshotData(args);
+  return { ...overviewFromSnapshotData(raw), pending: isFirstSyncPending(raw) };
+}
 
 //  —— 账户明细:发原料 + 浏览器算(与首页 `overviewFromSnapshotData` 同路,FOL-44 收尾)
 
