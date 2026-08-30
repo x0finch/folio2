@@ -59,6 +59,12 @@ function minMaxDownsampleHistory(
       if (max.t !== min.t || max.total !== min.total) out.push(max);
     }
   }
+  // **端点强制保留**:首桶 / 末桶的极值不一定落在真正的首 / 末点上,而组合曲线是把多条各自
+  // 降采样的序列拼起来再逐 takenAt 求和的(见 rowsForKeptPortfolioTimes / manual store)—— 某账户
+  // 若从窗口起点起就缺第一个点,别的账户在那个更早的时刻求和时它会被整个漏掉,画出真实历史里
+  // 没有的凹口。锚住首末点让每条序列从窗口起点覆盖到末点,合并求和处处不缺人。
+  if (!out.some((p) => p.t === first.t)) out.push(first);
+  if (!out.some((p) => p.t === last.t)) out.push(last);
   return out.sort((a, b) => a.t - b.t);
 }
 
@@ -71,8 +77,7 @@ function buildPortfolioTimeline(rows: readonly HistoryMinMaxAccountRow[]): MinMa
   for (let i = 0; i < sorted.length; i++) {
     const row = sorted[i];
     latestByAccount.set(row.accountId, row.totalUsd);
-    const isLastAtThisTime =
-      i + 1 === sorted.length || sorted[i + 1].takenAt !== row.takenAt;
+    const isLastAtThisTime = i + 1 === sorted.length || sorted[i + 1].takenAt !== row.takenAt;
     if (!isLastAtThisTime) continue;
     let total = 0;
     for (const v of latestByAccount.values()) total += v;
@@ -81,7 +86,14 @@ function buildPortfolioTimeline(rows: readonly HistoryMinMaxAccountRow[]): MinMa
   return points;
 }
 
-/** 为保留的组合 min-max 时刻,选出能重建该时刻净值的各账户快照行。 */
+// 为保留的组合 min-max 时刻,发出各账户在该时刻的净值分解,**takenAt 重盖成保留时刻 T**。
+//
+// **为什么重盖 takenAt(这是修 review 抓的凹口/尖峰的关键)**:浏览器 `buildPortfolioHistory`
+// 会在**每一个出现过的 takenAt** 产一个点、按「各账户 ≤ 该 takenAt 的最近行」求和。若直接发各账户
+// 的原始行,它们的 takenAt 五花八门,某账户的控制行时刻会成为一个渲染点,而在那个时刻别的账户
+// 「真正 ≤ 它的最近行」可能没被任何保留时刻选中 → 求和时那个账户用了更旧的值甚至缺席 → 画出
+// 真实历史里没有的凹口/尖峰。把每个保留时刻 T 的各账户行 takenAt 一律重盖成 T,浏览器就**只在
+// 保留时刻产点**,且每点求和恰好等于组合序列在 T 的真值(min/max 极值因此原样保住)。
 function rowsForKeptPortfolioTimes(
   allRows: readonly HistoryMinMaxAccountRow[],
   keptTimes: readonly number[],
@@ -94,18 +106,19 @@ function rowsForKeptPortfolioTimes(
     byAccount.set(r.accountId, arr);
   }
 
-  const result = new Map<string, HistoryMinMaxAccountRow>();
+  const result: HistoryMinMaxAccountRow[] = [];
   for (const T of keptTimes) {
-    for (const rows of byAccount.values()) {
+    for (const [accountId, rows] of byAccount) {
       let latest: HistoryMinMaxAccountRow | undefined;
       for (const r of rows) {
         if (r.takenAt <= T) latest = r;
         else break;
       }
-      if (latest != null) result.set(`${latest.accountId}:${latest.takenAt}`, latest);
+      // 该账户在 T 尚无任何观测(建号晚于 T)→ 这一点它本就不该贡献,跳过。
+      if (latest != null) result.push({ accountId, takenAt: T, totalUsd: latest.totalUsd });
     }
   }
-  return [...result.values()].sort((a, b) => a.takenAt - b.takenAt);
+  return result.sort((a, b) => a.takenAt - b.takenAt);
 }
 
 const minMaxTotalsSql = (buckets: number, scopeSql: ReturnType<typeof sql>, since?: number) => sql`
@@ -152,6 +165,43 @@ const minMaxTotalsSql = (buckets: number, scopeSql: ReturnType<typeof sql>, sinc
 `;
 
 type RawPoint = { taken_at: number; total_usd: number };
+type RawAccountPoint = { account_id: string; total_usd: number };
+
+// **carry-in(窗口左界的起点值)**:每个账户在 `since` 之前的最近一张快照,重盖 takenAt 到 `since`。
+//
+// 为什么非它不可(review 抓的「曲线偏低 + 末端跳一截」):组合曲线在浏览器按「各账户 ≤ 该时刻
+// 最近行之和」逐点重建。窗口按 `taken_at >= since` 裁掉起点前的行之后,一个停了同步的账户
+//(冷钱包 / 凭据失效,最近一张早于 `since`)在整个窗口内一行都没有 → 曲线全程不含它,而末点
+// 又被实时净值(含它)覆写 → 整条偏低、最右端凭空跳一截。给每个「窗口前有观测」的账户补一行
+// 起点值,曲线从窗口起点起就把它算进去。stamped 到 `since` 而非真实时刻,免得在窗口左界之外冒点。
+export async function queryCarryInTotals(
+  db: Drizzle,
+  userId: string,
+  accountIds: readonly string[] | null,
+  since: number,
+): Promise<HistoryMinMaxAccountRow[]> {
+  if (accountIds != null && accountIds.length === 0) return [];
+  const accountFilter =
+    accountIds == null
+      ? sql``
+      : sql`AND s.account_id IN (${sql.join(
+          accountIds.map((id) => sql`${id}`),
+          sql`, `,
+        )})`;
+  const rows = await db.all<RawAccountPoint>(sql`
+    WITH ranked AS (
+      SELECT
+        s.account_id AS account_id,
+        s.total_usd AS total_usd,
+        ROW_NUMBER() OVER (PARTITION BY s.account_id ORDER BY s.taken_at DESC) AS rn
+      FROM ${snapshots} s
+      INNER JOIN ${accounts} a ON a.id = s.account_id
+      WHERE a.user_id = ${userId} AND s.taken_at < ${since} ${accountFilter}
+    )
+    SELECT account_id, total_usd FROM ranked WHERE rn = 1
+  `);
+  return rows.map((r) => ({ accountId: r.account_id, takenAt: since, totalUsd: r.total_usd }));
+}
 
 export async function queryMinMaxTotalsByAccount(
   db: Drizzle,
@@ -177,7 +227,7 @@ export async function queryMinMaxTotalsInScope(
     accountIds.map((id) => sql`${id}`),
     sql`, `,
   );
-  const allRows = await db
+  const windowRows = await db
     .select({
       accountId: snapshots.accountId,
       takenAt: snapshots.takenAt,
@@ -196,10 +246,17 @@ export async function queryMinMaxTotalsInScope(
     )
     .orderBy(asc(snapshots.takenAt));
 
+  // carry-in:窗口前每账户的起点值(stamped 到 since),让停更账户不从曲线消失。全历史(since 缺省)
+  // 不裁窗口,无需补。
+  const carryIn = since != null ? await queryCarryInTotals(db, userId, accountIds, since) : [];
+  const allRows = [...carryIn, ...windowRows];
   if (allRows.length === 0) return [];
 
   const portfolioSeries = buildPortfolioTimeline(allRows);
   const kept = minMaxDownsampleHistory(portfolioSeries, buckets);
   if (kept.length === 0) return [];
-  return rowsForKeptPortfolioTimes(allRows, kept.map((p) => p.t));
+  return rowsForKeptPortfolioTimes(
+    allRows,
+    kept.map((p) => p.t),
+  );
 }

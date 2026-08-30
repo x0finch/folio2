@@ -23,6 +23,7 @@ import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
 import {
   HISTORY_MINMAX_BUCKETS,
+  queryCarryInTotals,
   queryMinMaxTotalsByAccount,
   queryMinMaxTotalsInScope,
 } from "./history-minmax";
@@ -347,8 +348,8 @@ export const makeSnapshotStore = Effect.gen(function* () {
     // 只取这三列、不取 balances(比 `latest` 轻);组合净值时间序列在纯函数里
     // 阶梯式重建(见 apps/web buildPortfolioHistory)。
     listTotals: (since?: number): Effect.Effect<SnapshotTotal[]> =>
-      client.query((db) =>
-        db
+      client.query(async (db) => {
+        const windowRows = await db
           .select({
             accountId: snapshots.accountId,
             takenAt: snapshots.takenAt,
@@ -361,8 +362,13 @@ export const makeSnapshotStore = Effect.gen(function* () {
               ? eq(accounts.userId, userId)
               : and(eq(accounts.userId, userId), gte(snapshots.takenAt, since)),
           )
-          .orderBy(asc(snapshots.takenAt)),
-      ),
+          .orderBy(asc(snapshots.takenAt));
+        // 裁了窗口(短窗曲线)就补 carry-in:窗口前每账户的起点值(stamped 到 since),否则停更
+        // 账户在窗口内一行都没有 → 曲线偏低、末端跳变(见 queryCarryInTotals)。全历史不裁,不补。
+        if (since == null) return windowRows;
+        const carryIn = await queryCarryInTotals(db, userId, null, since);
+        return [...carryIn, ...windowRows];
+      }),
 
     /** 全历史余额(跨所有快照):单币价值历史用。可选 since(epoch ms)裁窗口。 */
     // app 侧按代币身份归属 + 阶梯式重建(见 apps/web buildTokenValueHistory)。每行带其快照的

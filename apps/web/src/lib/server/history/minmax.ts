@@ -47,5 +47,10 @@ export function minMaxDownsampleHistory(
       if (max.t !== min.t || max.total !== min.total) out.push(max);
     }
   }
+  // **端点强制保留**(与 packages/db 的 history-minmax.ts 同款):各 manual 账户各自降采样后要和
+  // 别账户的行拼起来逐 takenAt 求和,某账户若从窗口起点起缺第一个点,别人在更早时刻求和时它会被
+  // 整个漏掉,画出假凹口。锚住首末点让每条序列覆盖到窗口两端,合并处处不缺人。
+  if (!out.some((p) => p.t === first.t)) out.push(first);
+  if (!out.some((p) => p.t === last.t)) out.push(last);
   return out.sort((a, b) => a.t - b.t);
 }

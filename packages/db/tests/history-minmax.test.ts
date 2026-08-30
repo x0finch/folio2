@@ -21,14 +21,27 @@ function buildPortfolioTimeline(
   for (let i = 0; i < sorted.length; i++) {
     const row = sorted[i];
     latestByAccount.set(row.accountId, row.totalUsd);
-    const isLastAtThisTime =
-      i + 1 === sorted.length || sorted[i + 1].takenAt !== row.takenAt;
+    const isLastAtThisTime = i + 1 === sorted.length || sorted[i + 1].takenAt !== row.takenAt;
     if (!isLastAtThisTime) continue;
     let total = 0;
     for (const v of latestByAccount.values()) total += v;
     points.push({ t: row.takenAt, total });
   }
   return points;
+}
+
+// 真实组合净值 @ t = 各账户 ≤ t 最近一行之和(用全量原始行算,给闭合断言当参照系)。
+function trueValueAt(
+  allRows: { accountId: string; takenAt: number; totalUsd: number }[],
+  t: number,
+): number {
+  const latest = new Map<string, number>();
+  for (const r of [...allRows].sort((a, b) => a.takenAt - b.takenAt)) {
+    if (r.takenAt <= t) latest.set(r.accountId, r.totalUsd);
+  }
+  let sum = 0;
+  for (const v of latest.values()) sum += v;
+  return sum;
 }
 
 async function resetUser(userId: string): Promise<void> {
@@ -118,6 +131,59 @@ describe("history min-max (FOL-46)", () => {
     const portfolioSeries = buildPortfolioTimeline(rows);
     expect(Math.max(...portfolioSeries.map((p) => p.total))).toBe(100);
   }, 40_000);
+
+  it("listTotalsMinMax:重建后每个点都等于真实组合净值(交错时间戳不产生假凹口/尖峰)", async () => {
+    const a1 = await accounts(USER).create({ connectorId: "binance", label: "A1", creds: "x" });
+    const a2 = await accounts(USER).create({ connectorId: "binance", label: "A2", creds: "x" });
+    const start = 5_000_000;
+    // 两账户都在变、且 takenAt 交错半步 —— 正是 review 抓的场景:某账户的控制行时刻会成渲染点,
+    // 旧实现在那个时刻会把另一账户求和成更旧的值/漏掉。重盖到 kept 时刻后,每点必等于真值。
+    await seedManySnapshots(a1.id, 60, start, DAY, (i) => 100 + Math.sin(i / 2) * 40);
+    await seedManySnapshots(a2.id, 60, start + DAY / 2, DAY, (i) => 200 + Math.cos(i / 3) * 80);
+
+    const raw = await snapshotsOf(USER).listTotals(); // 全量原始行(仅 a1/a2,beforeEach 已清)
+    const sampled = await snapshotsOf(USER).listTotalsMinMax([a1.id, a2.id]);
+    const series = buildPortfolioTimeline(sampled);
+
+    expect(series.length).toBeGreaterThan(4);
+    for (const p of series) {
+      expect(p.total).toBeCloseTo(trueValueAt(raw, p.t), 6);
+    }
+  }, 40_000);
+
+  it("listTotals:裁窗口时补 carry-in(停更账户不从曲线消失)", async () => {
+    const a = await accounts(USER).create({ connectorId: "binance", label: "A", creds: "x" });
+    const cold = await accounts(USER).create({ connectorId: "binance", label: "C", creds: "x" });
+    await snapshotsOf(USER).write(a.id, { takenAt: 100, totalUsd: 500, balances: [] });
+    await snapshotsOf(USER).write(a.id, { takenAt: 1000, totalUsd: 500, balances: [] });
+    // cold 最近一张在窗口起点之前 → 没有 carry-in 的话它整条消失。
+    await snapshotsOf(USER).write(cold.id, { takenAt: 50, totalUsd: 200, balances: [] });
+
+    const rows = await snapshotsOf(USER).listTotals(500);
+    // cold 的起点值被补进来,stamped 到 since=500。
+    expect(rows).toContainEqual({ accountId: cold.id, takenAt: 500, totalUsd: 200 });
+    // a:窗口前的 100 补成 500,窗口内的 1000 保留。
+    expect(
+      rows
+        .filter((r) => r.accountId === a.id)
+        .map((r) => r.takenAt)
+        .sort((x, y) => x - y),
+    ).toEqual([500, 1000]);
+  });
+
+  it("listTotalsMinMax:裁窗口时补 carry-in(停更账户不从曲线消失)", async () => {
+    const a = await accounts(USER).create({ connectorId: "binance", label: "A", creds: "x" });
+    const cold = await accounts(USER).create({ connectorId: "binance", label: "C", creds: "x" });
+    await snapshotsOf(USER).write(a.id, { takenAt: 100, totalUsd: 500, balances: [] });
+    await snapshotsOf(USER).write(a.id, { takenAt: 1000, totalUsd: 500, balances: [] });
+    await snapshotsOf(USER).write(cold.id, { takenAt: 50, totalUsd: 200, balances: [] });
+
+    const rows = await snapshotsOf(USER).listTotalsMinMax([a.id, cold.id], 500);
+    expect(rows.some((r) => r.accountId === cold.id)).toBe(true);
+    // 组合净值全程含 cold 的 200(不再偏低)。
+    const series = buildPortfolioTimeline(rows);
+    expect(series.every((p) => p.total === 700)).toBe(true);
+  });
 
   it("listTotalsByAccount:短窗仍返回原始点(行为不变)", async () => {
     const acc = await accounts(USER).create({ connectorId: "binance", label: "B", creds: "x" });
