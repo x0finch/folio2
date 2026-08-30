@@ -2,11 +2,12 @@ import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { z } from "zod";
 import { pickSelectedPortfolio } from "@/lib/hooks/use-portfolio";
 import {
-  homeTabStripQuery,
   portfolioHistoryQuery,
   portfolioListQuery,
   portfolioOverviewQuery,
+  portfolioTabPinsQuery,
 } from "@/lib/queries/portfolio";
+import { tagListQuery } from "@/lib/queries/tags";
 import { Overview } from "./-home";
 import { DEFAULT_TAB } from "./-home/home-tabs";
 
@@ -46,8 +47,8 @@ export const Route = createFileRoute("/_authed/")({
   loader: async ({ context: { queryClient }, deps }) => {
     const { portfolios, defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
     const selectedId = pickSelectedPortfolio(deps.portfolio, portfolios, defaultId);
-    queryClient.ensureQueryData(homeTabStripQuery(selectedId));
-    // 总览原料带 24h 盈亏(两端相减,浏览器算,FOL-51)—— 不再单独预取一条盈亏。
+    queryClient.ensureQueryData(portfolioTabPinsQuery(selectedId));
+    queryClient.ensureQueryData(tagListQuery(selectedId));
     queryClient.ensureQueryData(portfolioOverviewQuery(selectedId));
     queryClient.ensureQueryData(portfolioHistoryQuery(selectedId));
   },

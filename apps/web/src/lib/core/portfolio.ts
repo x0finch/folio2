@@ -1,4 +1,4 @@
-import type { AccountSafe, SnapshotWithBalances } from "@folio/db";
+import type { AccountSafe, SnapshotWithBalances, TabPin, Tag } from "@folio/db";
 import {
   fiatCodeOf,
   type PlatformMeta,
@@ -16,13 +16,19 @@ import {
   parseDefiMeta,
   toAccountSections,
 } from "@/lib/core/account-view";
+import { pinsInView } from "@/lib/core/accounts-in-view";
 import { isFungible, type ViewKind, viewKind } from "@/lib/core/balance-kind";
 import {
   buildPortfolioHistory,
   type HistoryPoint,
   type SnapshotTotalRow,
 } from "@/lib/core/history";
-import { platformLogoUrl, tokenLogoUrl, toLogoSource } from "@/lib/core/logo";
+import {
+  connectorLabelFallback,
+  platformLogoUrl,
+  tokenLogoUrl,
+  toLogoSource,
+} from "@/lib/core/logo";
 import { refreshableTokenIds } from "@/lib/core/token-model";
 
 // 首页 / 组合的**纯计算层**(FOL-45)。跟 `history.ts` 同目录、同风格:无 Effect、无 Oracle、
@@ -395,6 +401,78 @@ export function resolvePinLabel(
   if (pin.kind === "account") return { name: lookup.accountName(pin.accountId ?? "") ?? "" };
   const c = lookup.connector(pin.connectorId ?? "");
   return c.logo ? { name: c.name, logo: c.logo } : { name: c.name };
+}
+
+// 首页 tab 条 pin 原料 —— 只含 pin 行 + connector 展示元数据;账户/快照走 overview 缓存,标签走 tagListQuery。
+export interface PortfolioTabPinsData {
+  pins: TabPin[];
+  connectorMeta: [string, { name: string; logo?: string }][];
+}
+
+// 首页 tab 条视图 —— `computeHomeTabStrip` 的出参。
+export interface HomeTabStripView {
+  hasAccounts: boolean;
+  hasPerps: boolean;
+  hasDefi: boolean;
+  pins: {
+    id: string;
+    kind: "connector" | "tag" | "account";
+    connectorId?: string;
+    tagId?: string;
+    accountId?: string;
+    name: string;
+    logo?: string;
+  }[];
+}
+
+/** 从快照原料 + pin 原料 + 标签列表算出首页 tab 条。 */
+export function computeHomeTabStrip(
+  snapshot: PortfolioSnapshotData,
+  tabPins: PortfolioTabPinsData,
+  tags: readonly Tag[],
+): HomeTabStripView {
+  const accounts = snapshot.accounts;
+  const inView = new Set(accounts.map((a) => a.id));
+  const snapshotMap = new Map(snapshot.snapshots);
+  const sections = [...inView]
+    .map((id) => snapshotMap.get(id))
+    .filter((s): s is SnapshotView => s != null)
+    .map((s) =>
+      toAccountSections(
+        s.balances.map((b) => ({
+          id: b.id,
+          amount: b.amount,
+          usdValue: b.usdValue,
+          kind: b.kind,
+          metaJson: b.metaJson,
+        })),
+      ),
+    );
+  const { hasPerps, hasDefi } = kindPresence(sections);
+  const tagIds = new Set(tags.map((t) => t.id));
+  const shownPins = pinsInView(tabPins.pins, { accounts, tagIds });
+  const tagName = (id: string) => tags.find((t) => t.id === id)?.name;
+  const accountName = (id: string) => accounts.find((a) => a.id === id)?.label;
+  const connectorMeta = new Map(tabPins.connectorMeta);
+  const connector = (id: string) => connectorMeta.get(id) ?? { name: connectorLabelFallback(id) };
+
+  return {
+    hasAccounts: accounts.length > 0,
+    hasPerps,
+    hasDefi,
+    pins: shownPins.map((p) => {
+      const label = resolvePinLabel(p, { tagName, accountName, connector });
+      return {
+        id: p.id,
+        kind: p.kind,
+        connectorId: p.connectorId ?? undefined,
+        tagId: p.tagId ?? undefined,
+        accountId: p.accountId ?? undefined,
+        name: label.name,
+        logo: label.logo,
+      };
+    }),
+  };
 }
 
 //  —— 组合总览

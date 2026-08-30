@@ -6,7 +6,7 @@ import type { PinScopeKey } from "@/lib/queries/keys";
 // `getRouteApi`,在单测的 logic 环境里直接炸。
 //
 // 只装页面侧的东西。轻请求用的「算不算有永续 / DeFi」和 pin 显示名在
-// `lib/core/portfolio`(kindPresence / resolvePinLabel)—— 服务端算,客户端拿算好的结果。
+// `lib/core/portfolio`(`kindPresence` / `resolvePinLabel` / `computeHomeTabStrip`)—— 浏览器从名单原料现算。
 
 // 首页三个「视角」tab 的名字全集。**不是当下有的那几个** —— 页面按数据有无收窄显示,
 // 而这里回答的是「这是不是一个视角名」。自定义 Tab 的 pin id 是运行时数据,不在此列。

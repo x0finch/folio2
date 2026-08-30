@@ -5,11 +5,12 @@ import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { MAX_PINS_PER_PORTFOLIO } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback } from "@/lib/core/logo";
+import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { accountListQuery } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import { refetchUntil } from "@/lib/queries/constants";
-import { type HomeTabStrip, homeTabStripQuery } from "@/lib/queries/portfolio";
+import { fetchHomeTabStrip, type HomeTabStrip } from "@/lib/queries/portfolio";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { tagListQuery } from "@/lib/queries/tags";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "@/lib/server/tab-pins";
@@ -25,31 +26,21 @@ const targetOf = (p: PinTargetChoice) => `${p.kind}:${p.connectorId ?? p.tagId ?
 /**
  * **写完之后等 tab 条真的变了再收工。**
  *
- * tab 条是预计算出来的(ADR 0049):写路径只抬失效水位线,重算跑在这次请求的 `waitUntil` 上。
- * 所以紧跟着的那次刷新拿回的往往还是**改动之前**那份条子 —— 新钉的 Tab 还不在里面(于是选不中,
- * 药丸不动)、刚改的指向还显示老名字。三处写都吃这一口,所以等待也写在一处。
- *
- * **不在写请求里现算条子来绕过它**:那正是 ADR 0049 搬走的那笔 CPU,而免费档一次请求只有 10ms;
- * 而且条子上的名字与 logo 是服务端解析的,前端乐观拼一份出来等于把那套解析复制一遍。
- *
- * 等待期间 mutation 仍是 pending → 加钮 / 取消固定按钮保持禁用,顺手挡掉了连点。
+ * invalidate 之后紧跟着的那次刷新可能还是旧条子 —— 新钉的 Tab 还不在里面、刚改的指向还显示老名字。
+ * 三处写都吃这一口,所以等待也写在一处。
  */
 const awaitStrip = (
   queryClient: ReturnType<typeof useQueryClient>,
   portfolioId: string,
   ok: (strip: HomeTabStrip) => boolean,
-) =>
-  refetchUntil(
-    () => queryClient.fetchQuery({ ...homeTabStripQuery(portfolioId), staleTime: 0 }),
-    ok,
-  );
+) => refetchUntil(() => fetchHomeTabStrip(queryClient, portfolioId), ok);
 
 // 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);
 // 管理面板经 PinPanel 浮出。写(改指向 / 取消固定)自包含。
 export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
   const { selectedId } = usePortfolio();
   const queryClient = useQueryClient();
-  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const strip = useHomeTabStrip(selectedId);
   const { shownActive, selectTab } = useHomeTabSelection(strip.pins);
   const isActive = shownActive === pin.id;
   const selected: PinTargetChoice = {
@@ -143,7 +134,7 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
 export function AddPinButton() {
   const { selectedId } = usePortfolio();
   const queryClient = useQueryClient();
-  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const strip = useHomeTabStrip(selectedId);
   const { selectTab } = useHomeTabSelection(strip.pins);
   const tct = useTranslations("CustomTabs");
   const addMut = useMutation({

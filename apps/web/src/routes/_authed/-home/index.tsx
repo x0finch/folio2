@@ -1,11 +1,10 @@
 import { Skeleton } from "@folio/ui";
-import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
+import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { portfolioKeys } from "@/lib/queries/keys";
-import { homeTabStripQuery } from "@/lib/queries/portfolio";
 import { HeaderSync } from "./header-sync";
 import { HeroIsland } from "./hero";
 import { HoldingsIsland } from "./holdings";
@@ -16,7 +15,7 @@ export function Overview() {
   const { selectedId } = usePortfolio();
   // 两岛共用总览这份数据,所以会一起亮;失败则只塌那一格,壳(HeaderSync)不受影响。
   const overviewKey = JSON.stringify(portfolioKeys.overview(selectedId));
-  const tabsKey = JSON.stringify(portfolioKeys.tabStrip(selectedId));
+  const tabsKey = JSON.stringify(portfolioKeys.tabPins(selectedId));
   return (
     <div className="flex flex-col gap-6">
       <HeaderSync />
@@ -50,7 +49,7 @@ export function Overview() {
 // 没账户是这一页下半截的空态,不是 tab 条自己的事 —— 条只在有账户时才挂。
 function TabStripSlot() {
   const { selectedId } = usePortfolio();
-  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const strip = useHomeTabStrip(selectedId);
   const tc = useTranslations("Common");
   if (!strip.hasAccounts) {
     return (

@@ -3,13 +3,10 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { mergeDefiGroups } from "@/lib/core/account-view";
+import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { type PinScopeKey, portfolioKeys } from "@/lib/queries/keys";
-import {
-  homeTabStripQuery,
-  type PortfolioOverview,
-  portfolioOverviewQuery,
-} from "@/lib/queries/portfolio";
+import { type PortfolioOverview, portfolioOverviewQuery } from "@/lib/queries/portfolio";
 import { type KindTab, kindTabsOf, pinScopeOf } from "@/routes/_authed/-home/home-tabs";
 import { useHomeTabSelection } from "@/routes/_authed/-home/tab/selection";
 import { DefiPositions } from "./defi";
@@ -69,7 +66,7 @@ export function derive(secs: PortfolioOverview["sections"]) {
 export function HoldingsIsland() {
   const { selectedId } = usePortfolio();
   const tct = useTranslations("CustomTabs");
-  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const strip = useHomeTabStrip(selectedId);
   const { shownActive } = useHomeTabSelection(strip.pins);
   const { data: portfolioData } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
   if (!strip.hasAccounts) return null;

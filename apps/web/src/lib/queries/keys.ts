@@ -36,13 +36,12 @@ export const portfolioKeys = {
   /** 组合清单 + 默认组合 id。 */
   list: () => [...portfolioKeys.all, "list"] as const,
   /**
-   * 首页 tab 条(#488 票 4:有没有永续 / DeFi + 自定义 Tab 的已解析标签)。
-   * **单独一层,不跟 overview 混**:增删一个 Tab 不该让昂贵的总览重拉一遍,
-   * 而映射表要指得动「只刷 tab 条」就得有这么一个前缀。
+   * tab 域前缀 —— 刷新映射表用它;`tabPins` 查询挂在这层下面。
+   * 改 pin 不必重拉快照原料(overview 走缓存)。
    */
   tabs: () => [...portfolioKeys.all, "tabs"] as const,
-  /** 某一个组合口径的 tab 条。永续 / DeFi 是否出现按这个组合的账户集算。 */
-  tabStrip: (portfolioId: string) => [...portfolioKeys.tabs(), portfolioId] as const,
+  /** 首页 tab 条 pin 原料 —— 与 overview 分 key;改 pin 只刷这层。 */
+  tabPins: (portfolioId: string) => [...portfolioKeys.tabs(), "pins", portfolioId] as const,
   /**
    * 组合总览。**portfolioId 必须是真实 id,不能用「缺省 = 默认」的 undefined** ——
    * loader 预取的那份与组件按 selectedId 读的那份,key 对不上就等于首屏白拉一遍。

@@ -1,25 +1,18 @@
-import { queryOptions } from "@tanstack/react-query";
+import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import {
+  computeHomeTabStrip,
+  type HomeTabStripView,
   isFirstSyncPending,
   type OverviewView,
   overviewFromSnapshotData,
   type PortfolioSnapshotData,
 } from "@/lib/core/portfolio";
-import {
-  getHomeTabStrip,
-  getPortfolioHistory,
-  getPortfolioSnapshotData,
-} from "@/lib/server/portfolio";
+import { getPortfolioHistory, getPortfolioSnapshotData } from "@/lib/server/portfolio";
 import { listPortfolios } from "@/lib/server/portfolios";
-import {
-  awaitFirstCompute,
-  pendingPollDelay,
-  pollWhilePending,
-  RETRY,
-  STALE_TIME,
-  shouldRetry,
-} from "./constants";
-import { type PinScopeKey, portfolioKeys } from "./keys";
+import { getPortfolioTabPins } from "@/lib/server/tab-pins";
+import { pollWhilePending, RETRY, STALE_TIME, shouldRetry } from "./constants";
+import { type PinScopeKey, portfolioKeys, tagKeys } from "./keys";
+import type { TagList } from "./tags";
 
 // 组合域的读取入口 —— 与 `lib/server/portfolio`(读模型)+ `lib/server/portfolios`(实体)的读取型 server fn 对应。
 //
@@ -42,27 +35,37 @@ export const portfolioListQuery = () =>
     queryKey: portfolioKeys.list(),
     queryFn: () => listPortfolios(),
     staleTime: STALE_TIME.live,
-    // 外壳没有它就画不出来(组合徽章 / 选中态),所以**不放弃**:一直停在骨架上重试,
-    // 好过让这条 match 变成 error —— error 态自己好不了(见 constants 的 withRetry)。
     retry: (failureCount, error) => shouldRetry(failureCount, error, RETRY.forever),
   });
 
-/** 首页 tab 条:有没有永续 / DeFi + 自定义 Tab 的已解析标签。 */
-export type HomeTabStrip = Awaited<ReturnType<typeof getHomeTabStrip>>;
-
-export const homeTabStripQuery = (portfolioId: string) =>
+/** 首页 tab 条 pin 原料 —— 只含 pin 行;账户/快照走 overview 缓存,标签走 tagListQuery。 */
+export const portfolioTabPinsQuery = (portfolioId: string) =>
   queryOptions({
-    queryKey: portfolioKeys.tabStrip(portfolioId),
-    queryFn: ({ signal }) =>
-      awaitFirstCompute(
-        () => getHomeTabStrip({ data: { portfolioId } }),
-        // 「零账户」就是这条数据的空态 —— 而它同时是那句「还没有账户」的判据。
-        (strip) => !strip.hasAccounts,
-        signal,
-      ),
+    queryKey: portfolioKeys.tabPins(portfolioId),
+    queryFn: () => getPortfolioTabPins({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
-    refetchInterval: pendingPollDelay,
   });
+
+export type HomeTabStrip = HomeTabStripView;
+
+/** pin 写路径等「等条子真的变了」时用 —— 只重拉 tabPins,其余从 query 缓存合并。 */
+export const fetchHomeTabStrip = async (
+  queryClient: QueryClient,
+  portfolioId: string,
+): Promise<HomeTabStrip> => {
+  const tabPins = await queryClient.fetchQuery({
+    ...portfolioTabPinsQuery(portfolioId),
+    staleTime: 0,
+  });
+  const snapshot = queryClient.getQueryData<PortfolioSnapshotData>(
+    portfolioKeys.overview(portfolioId),
+  );
+  const tags = queryClient.getQueryData<TagList>(tagKeys.list(portfolioId));
+  if (!snapshot || !tags) {
+    throw new Error("fetchHomeTabStrip: overview or tags missing from query cache");
+  }
+  return computeHomeTabStrip(snapshot, tabPins, tags);
+};
 
 // 一份总览 = 一个组合口径(+ 可选的自定义 Tab 收窄)。默认视图与非默认视图、Tab 视图走的是
 // **同一个工厂**,只是参数不同 —— 这正是「一句前缀刷新盖住三种视图」的前提。
@@ -72,17 +75,8 @@ export const homeTabStripQuery = (portfolioId: string) =>
 // select 结果**里取一行,不单独请求(FOL-44 定的共用)。`select` 只在原料变化时重跑,SSR 与
 // 补水两遍算的是同一份原料 → 结果一致,不会 hydration mismatch。
 //
-// **首次同步中的加载态**(有账户、还没有任何快照):`select` 从原料判出 `pending`,首页 hero 据此
-// 显加载态而不是把「还不知道」画成 $0。这不是旧的「等后台预计算」——预计算读侧已删;新语义是「等
-// 首次同步写第一张快照」。所以配一条**短轮询**:pending 期间隔 1s 起退避地重取原料,拿到第一张
-// 快照(`pending` 转 false)就停,与总额盈亏 / tab 条共用同一套退避机(`pollWhilePending`)。
-// refetchInterval 拿的是 `query.state.data`(select 之前的原料),所以在这里直接对原料判 pending。
-//
-// **`select` 必须是稳定引用**(FOL-51 code-review 修的效率回归):写成 inline 箭头的话,每次
-// render 都新建一个闭包,react-query 只在「data 未变**且** select 引用未变」时才复用上一次的
-// select 结果 —— 新闭包让 `overviewFromSnapshotData`(重建 5 个 Map + 全量聚合)每 render 重跑一遍,
-// 正好打脸「select 只在原料变化时重跑」那句话。提到模块级(它只读 `raw`、不闭包任何东西)就恢复了
-// memoisation。
+// 首次同步中的加载态:有账户、还没有任何快照时 `select` 判出 `pending`,首页 hero 显加载态
+// 而不是把「还不知道」画成 $0;拿到第一张快照(`pending` 转 false)就停(`pollWhilePending`)。
 const selectOverview = (raw: PortfolioSnapshotData): PortfolioOverview => ({
   ...overviewFromSnapshotData(raw),
   pending: isFirstSyncPending(raw),

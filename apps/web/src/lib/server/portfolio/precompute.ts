@@ -1,19 +1,17 @@
 import { type CacheWrite, Database } from "@folio/db";
 import { Cause, Clock, Effect } from "effect";
-import { toAccountSections } from "@/lib/core/account-view";
 import { accountsInView, pinsInView, type TabPin, toTabPin } from "@/lib/core/accounts-in-view";
-import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
-import { kindPresence, resolvePinLabel } from "@/lib/core/portfolio";
-import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
-import { backfillForUser } from "@/lib/server/runtime";
-import { buildScopedOverview, type PortfolioScope, resolveScope } from "./scope";
+import { buildScopedOverview, resolveScope } from "./scope";
 
-// 首页那几个数 —— 总额、持仓聚合、tab 条:**算在同步收官那一刻,读的时候只做「读 + 传」**
-//(ADR 0049 裁定 2)。这个文件是那台机器;`tabs.ts` 是仍走它的读出口。
+// 首页那几个数 —— 总额、持仓聚合:**算在同步收官那一刻,读的时候只做「读 + 传」**
+//(ADR 0049 裁定 2)。这个文件是那台机器。
 //
 // **24h 盈亏已退场(FOL-51 / ADR 0050)**:改成浏览器从快照原料两端相减(`snapshot-data` 一次带
 // 当前 + 24 小时前两组),不再预计算、不再有 gain 键 / gain 读接口 / pending 轮询。总览本身也已
-// 改走原料接口(`snapshot-data`);这里的 `overviewKey` 目前无读者,与 tab 条一起留给 FOL-52 收编。
+// 改走原料接口(`snapshot-data`);这里的 `overviewKey` 目前无读者,留给 FOL-52 收编。
+//
+// **tab 条已退场(FOL-49)**:浏览器从 overview 快照缓存 + `getPortfolioTabPins` + 标签列表
+// 用 `computeHomeTabStrip` 现算,不再预计算、不再有 tabstrip 键 / pending 轮询。
 //
 // 这几条接口都是「原料大、结果小」的样板:窗口内几千行余额历史、每个账户的整张快照进去,
 // 一屏数字出来。原料扔给前端连序列化都超标,而现算合起来远超免费档一次请求的 10ms CPU。
@@ -54,7 +52,7 @@ import { buildScopedOverview, type PortfolioScope, resolveScope } from "./scope"
  * 真过期只说明「这个组合好久没同步过」(纯手记用户、上游一直挂着),那时读接口照样直出旧值,
  * 顺手让后台补一次 —— **过期不删、读出带 stale**,与这张表上别的键同一套 SWR 语义。
  */
-export const PRECOMPUTE_TTL_MS = 90 * 60 * 1000;
+const PRECOMPUTE_TTL_MS = 90 * 60 * 1000;
 
 /**
  * 键的**代号**。「什么算数」的判据变了一次(FOL-36:水位线从 24h 盈亏专用改成四族共用,
@@ -82,29 +80,14 @@ const pinSuffix = (pin: TabPin | null): string => {
 /** 一个键的形状:`pc1:<族>:<组合 id>[:<pin>]`。四族共用这一个拼法,免得各拼各的。 */
 export type PrecomputeKey = (portfolioId: string, pin: TabPin | null) => string;
 
-/** 吃 pin 的那两族:一个维度一个键。 */
+/** 吃 pin 的那一族:一个维度一个键。 */
 const keyOf =
   (family: string): PrecomputeKey =>
   (portfolioId, pin) =>
     `${KEY_GEN}:${family}:${portfolioId}${pinSuffix(pin)}`;
 
-/**
- * **不吃 pin** 的那两族:一个组合一个键,pin 那个参数**在这里就被丢掉**。
- *
- * 账户页没有自定义 Tab(入参是 `PortfolioSelectInput`),tab 条本身就是「有哪些 pin」的答案、
- * 不可能按某个 pin 收窄。签名仍收 pin 只是为了跟 `readByScope` 对得上 —— 而「谁也别传 pin 给
- * 它们」这件事**由这里丢掉参数来保证**,不靠每个调用点记得先把 pin 抹掉:少抹一处就是一族键
- * 按 pin 裂成好几个,写的那头只填其中一个,其余永远 `pending`。
- */
-const plainKeyOf =
-  (family: string): PrecomputeKey =>
-  (portfolioId) =>
-    `${KEY_GEN}:${family}:${portfolioId}`;
-
 /** 组合总览(总额 + 持仓聚合 + 分区 + 小计)—— 吃 pin。 */
 export const overviewKey = keyOf("overview");
-/** 首页 tab 条 —— 一个组合一个键。 */
-export const tabStripKey = plainKeyOf("tabstrip");
 
 /**
  * **失效水位线** —— 「这个组合(或这个用户)的预计算结果,在这一刻之后才算数」。
@@ -152,20 +135,6 @@ export const invalidatePrecomputed = (portfolioId?: string): Effect.Effect<void,
   });
 
 /**
- * 「这份数还在后台重算,待会儿再问一次」。
- *
- * **可选字段,既有字段的含义一个都没动** —— 有值就是有值。它只回答另一个问题:你手上这份
- * 是不是终局。缺 / 旧的时候为真,前端据此短轮询(见 `lib/queries/portfolio.ts`);算得好好的
- * 时候整个字段不出现,老的调用方一无所觉。
- *
- * 没有它的后果是实打实的:全新用户、TTL 过期、刚同步完那几秒,读到的都是空态或旧值,
- * 而 react-query 会把它按 `STALE_TIME.live` 揣 30 秒 —— 补算其实几百毫秒就落好了。
- */
-export interface Pending {
-  pending?: true;
-}
-
-/**
  * 落库的形状 —— 结果本身,外加**开工那一刻**的时间戳。
  *
  * `computedAt` 不是给人看的元数据,它是判据:读那头拿它跟失效水位线比,小于就是「拿过期原料
@@ -178,81 +147,6 @@ interface Stored<A> {
 }
 
 // —— 算(只在同步收官与后台补算这两条路上跑)——
-
-/**
- * 首页 tab 条的**现算**(#488 票 4)。只回答「这个组合里有没有永续 / DeFi、自定义 Tab 叫什么」。
- * 不富化价格、不算盈亏、不接手记现造 —— 手记只注入现货,不影响这两个 tab 的有无。
- * 标签在服务端解析好(连接器走 registry 的类型名 + 已代理 logo),客户端不再为渲染 tab 名拉目录。
- *
- * **住在这儿而不是 `tabs.ts`**:那边现在只是读接口,而读接口不许再引到这条计算链上来
- * (引了就迟早有人「顺手」在读的时候调它)。
- */
-export const computeHomeTabStrip = (data: { portfolioId?: string }) =>
-  Effect.gen(function* () {
-    const db = yield* Database;
-    const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
-    const [allAccounts, snapshots, memberships, pins, tags] = yield* Effect.all(
-      [
-        db.accounts.list(),
-        db.snapshots.latest(),
-        db.portfolios.listMemberships(),
-        db.tabPins.list(),
-        db.tags.list(),
-      ],
-      { concurrency: 5 },
-    );
-    const accounts = accountsInView(allAccounts, memberships, selectedId, defaultId);
-    const inView = new Set(accounts.map((a) => a.id));
-    const sections = snapshots
-      .filter((s) => inView.has(s.snapshot.accountId))
-      .map((s) =>
-        toAccountSections(
-          s.balances.map((b) => ({
-            id: b.id,
-            amount: b.amount,
-            usdValue: b.usdValue,
-            kind: b.kind,
-            metaJson: b.metaJson,
-          })),
-        ),
-      );
-    const { hasPerps, hasDefi } = kindPresence(sections);
-    // **只摆这个组合里说得通的 pin**(ADR 0034 早就这么定了,实现只筛了内容、没筛名单)。
-    // 以前在非默认组合的首页能看到别的组合的自定义 Tab,点进去是空的。
-    const shownPins = pinsInView(pins, {
-      accounts,
-      tagIds: new Set(tags.filter((t) => t.portfolioId === selectedId).map((t) => t.id)),
-    });
-    const tagName = (id: string) => tags.find((t) => t.id === id)?.name;
-    const accountName = (id: string) => allAccounts.find((a) => a.id === id)?.label;
-    const connector = (id: string) => {
-      const meta = connectorPlatformMeta(id);
-      return {
-        name: meta?.name ?? connectorLabelFallback(id),
-        logo: platformLogoUrl(id, meta?.logo),
-      };
-    };
-    return {
-      hasAccounts: accounts.length > 0,
-      hasPerps,
-      hasDefi,
-      pins: shownPins.map((p) => {
-        const label = resolvePinLabel(p, { tagName, accountName, connector });
-        return {
-          id: p.id,
-          kind: p.kind,
-          connectorId: p.connectorId ?? undefined,
-          tagId: p.tagId ?? undefined,
-          accountId: p.accountId ?? undefined,
-          name: label.name,
-          logo: label.logo,
-        };
-      }),
-    };
-  });
-
-/** tab 条那份数据的形状 —— 从算它的那个函数推导,不在旁边再手写一份。 */
-export type TabStripView = Effect.Effect.Success<ReturnType<typeof computeHomeTabStrip>>;
 
 // —— 维度 ——
 
@@ -331,14 +225,12 @@ export const precomputePortfolio = (portfolioId: string) =>
     // **逐个维度串行算。** 并发发出去只是把同一批 D1 往返挤在一起,而这段跑在 `waitUntil` /
     // cron 里,没人在等它。
     //
-    // **只剩总览 + tab 条两族**(FOL-51):24h 盈亏改成浏览器从快照原料两端相减,预计算不再算它。
-    // 首页总览其实读的是 `snapshot-data`(原料接口),这个 `overviewKey` 目前无读者、留给 FOL-52
-    // 收编;tab 条仍走预计算读。代价:pin 数中位是 0(这个循环就一圈)。
+    // **只剩总览一族**(FOL-51 / FOL-49):24h 盈亏与 tab 条都改浏览器现算;首页总览读的是
+    // `snapshot-data`(原料接口),这个 `overviewKey` 目前无读者、留给 FOL-52 收编。
     for (const pin of dimensions) {
       const view = yield* buildScopedOverview({ portfolioId: selectedId, pin: pin ?? undefined });
       at(overviewKey(selectedId, pin), view);
     }
-    at(tabStripKey(selectedId, null), yield* computeHomeTabStrip({ portfolioId: selectedId }));
     yield* db.cache.putMany(writes);
     return true;
   }).pipe(
@@ -346,151 +238,3 @@ export const precomputePortfolio = (portfolioId: string) =>
       Effect.as(Effect.logWarning("precompute failed", Cause.pretty(cause)), false),
     ),
   );
-
-// —— 读(读接口只走这一段:取值 + 水位线,一次查询,零计算)——
-
-/**
- * 一次读的下场。`portfolioId` 是**补算该写去哪儿**的那个;`fillable` 为假表示「这个键根本
- * 不会被预计算写出来」—— 那时既不该说 `pending`,也不该安排补算。
- */
-interface Served<A> {
-  value: A | undefined;
-  /** 「这份不算数」:没有、坏了、TTL 过期,或者算它的时候用的是已经被改掉的原料。 */
-  stale: boolean;
-  portfolioId: string;
-  fillable: boolean;
-}
-
-/**
- * 读一个维度的结果,**连它的两条水位线一起取**(`getMany` 一条查询,不是三条)。
- *
- * 「算数」要同时满足两件事:TTL 没过(那一列),而且**算它的时候没人在改数据**
- * (`computedAt` ≥ 两条水位线)。少了后一半,一次跨越写操作的补算会把改动前的数字带着
- * 崭新的 TTL 存进去,此后 90 分钟每次读都命中「新鲜的错」。
- */
-const readPrecomputed = <A>(key: string, portfolioId: string) =>
-  Effect.gen(function* () {
-    const marks = [USER_MARK_KEY, precomputeMarkKey(portfolioId)];
-    const rows = yield* (yield* Database).cache.getMany([key, ...marks]);
-    const markOf = (k: string) => {
-      const v = rows.get(k)?.value;
-      return typeof v === "number" ? v : 0;
-    };
-    const mark = Math.max(...marks.map(markOf));
-    const row = rows.get(key);
-    // 存进去的一定是上面那个 `Stored`;真读到不认识的东西就当没算过 —— 下一轮预计算会照常
-    // 覆盖它,不该让一条脏缓存把页面弄崩(同 cache store 的坏值口径)。
-    const stored = row?.value as Stored<A> | undefined;
-    const ok =
-      stored != null &&
-      typeof stored === "object" &&
-      typeof stored.computedAt === "number" &&
-      stored.value != null &&
-      typeof stored.value === "object";
-    if (!ok) return { value: undefined, stale: true, exists: false };
-    return {
-      value: stored.value,
-      stale: row?.stale === true || stored.computedAt < mark,
-      exists: true,
-    };
-  });
-
-/**
- * 客户端给的 portfolioId 与 pin 都未必可信(可能缺省、可能是别人的、可能指着一个已经不在这个
- * 组合里的目标)。这个函数把「读哪个键、补算该写哪个组合、这个键有没有人会来填」一次问清楚,
- * **而且按这三件事各自的必要程度分档收费**:
- *
- *   · 传了 id 且键上那份**新鲜** → **就这一条查询**。命中即证明这个 id 是真的(这些键只由
- *     预计算写,而它写的恒是解析过的 id),新鲜也就证明这个维度还有人在填。这是首屏与轮询
- *     绝大多数时候走的那一档,不该让它去跑六条查询。
- *   · 键上有值但**不算数** → 带 pin 的话再跑四条,问一句「这一维还在不在」。它可能是一个目标
- *     已经被删掉的 pin 留下的旧行:那种键预计算永远不会再覆盖,而 `stale` 恒为真 —— 不问的话
- *     前端会对着一份永远不会变的数一直轮询。
- *   · 键上什么都没有 → 解析组合(两条);带 pin 的再加四条判它说不说得通。
- *
- * 解析那一步不能省:少了它,后台补算会把结果写到一个客户端瞎编的键上 —— 那是往 `user_cache`
- * 里灌任意行的一条路。
- */
-const readByScope = <A>(
-  requested: string | undefined,
-  pin: TabPin | null,
-  keyFor: PrecomputeKey,
-): Effect.Effect<Served<A>, never, Database> =>
-  Effect.gen(function* () {
-    // 「这个键还有人会来填吗」。默认视图与不吃 pin 的那两族恒是维度之一,问也是白问;
-    // 带 pin 的才值得为它多跑四条查询。
-    const fillableAt = (portfolioId: string) =>
-      pin == null
-        ? Effect.succeed(true)
-        : Effect.map(pinDimensions(portfolioId), ({ dimensions }) =>
-            dimensions.some((d) => keyFor(portfolioId, d) === keyFor(portfolioId, pin)),
-          );
-
-    if (requested) {
-      const direct = yield* readPrecomputed<A>(keyFor(requested, pin), requested);
-      // **新鲜**:到此为止,就这一条查询 —— 这是轮询与首屏最常走的那一档。
-      if (direct.exists && !direct.stale) {
-        return { ...direct, portfolioId: requested, fillable: true };
-      }
-      // **有值但不算数**:值在,不代表还有人会来填它。目标被删掉 / 移出这个组合之后,
-      // 那一维就不在 `pinDimensions` 里了,预计算再也不会覆盖这个键 —— 而 `stale` 恒为真。
-      // 不问一句就说 `pending`,前端会对着一份永远不会变的数轮询到放弃为止。
-      if (direct.exists) {
-        return { ...direct, portfolioId: requested, fillable: yield* fillableAt(requested) };
-      }
-    }
-    const { selectedId } = yield* resolveScope(requested);
-    const hit =
-      requested === selectedId
-        ? { value: undefined, stale: true, exists: false }
-        : yield* readPrecomputed<A>(keyFor(selectedId, pin), selectedId);
-    return {
-      ...hit,
-      portfolioId: selectedId,
-      fillable: hit.exists && !hit.stale ? true : yield* fillableAt(selectedId),
-    };
-  });
-
-// 补算把**这个组合的全部预计算**一次算完,而不是只补被读到的那一个:首页一进来就会同时问
-// 总览、tab 条、两条盈亏,各补各的等于把同一批原料读四遍。一次补全,后面几条读到的就是热的。
-//
-// 钥匙是 (用户, 组合):`backfillForUser` 据此单飞 + 尾随重跑 + 连败退避,于是一轮同步里
-// 几十次刷新最多换来两趟重算,而一份永远算不出来的数据也不会把补算变成永动机(见那边的注释)。
-// —— 这也正是四族必须由**一个**函数算完的原因:一把钥匙上只跑得下一件活儿,四条读接口各排
-// 各的补算,后来的那三件会被第一件吞掉。
-const scheduleBackfill = (userId: string, portfolioId: string) =>
-  backfillForUser(userId, portfolioId, precomputePortfolio(portfolioId));
-
-/**
- * 缺 / 不算数 → 端出手头有的(旧值优先,没有才空态)+ 标上 `pending`,并安排一趟后台补算。
- * **请求本体不等它。** 填不上的键(pin 不在这个组合里)是终局,不标 `pending`、不安排补算。
- */
-const serve = <A extends Pending>(
-  userId: string,
-  hit: Served<A>,
-  empty: () => A,
-): Effect.Effect<A> =>
-  Effect.gen(function* () {
-    const settled = hit.value != null && !hit.stale;
-    if (!settled && hit.fillable) yield* scheduleBackfill(userId, hit.portfolioId);
-    const body = hit.value ?? empty();
-    return settled || !hit.fillable ? body : { ...body, pending: true as const };
-  });
-
-/**
- * 一条读接口的全部内容:**读 + 传**(ADR 0049 裁定 1)。
- *
- * `userId` 显式收一次,理由与 `syncAccount` 那条同一个:补算要**另起一次装配**跑在
- * `waitUntil` 上(与这次请求的响应无关的另一个程序),而 `runEffect` 刻意不把 userId
- * 交给 handler。装配点因此走 `runForUser`(见 ./index)。
- */
-export const servePrecomputed = <A extends Pending>(
-  userId: string,
-  data: PortfolioScope,
-  keyFor: (portfolioId: string, pin: TabPin | null) => string,
-  empty: () => A,
-): Effect.Effect<A, never, Database> =>
-  Effect.gen(function* () {
-    const hit = yield* readByScope<A>(data.portfolioId, toTabPin(data.pin), keyFor);
-    return yield* serve(userId, hit, empty);
-  });

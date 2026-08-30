@@ -4,9 +4,10 @@ import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
+import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { type PinScopeKey, portfolioKeys } from "@/lib/queries/keys";
-import { homeTabStripQuery, portfolioOverviewQuery } from "@/lib/queries/portfolio";
+import { portfolioOverviewQuery } from "@/lib/queries/portfolio";
 import { derive } from "@/routes/_authed/-home/holdings";
 import { type KindTab, kindTabsOf, pinScopeOf } from "@/routes/_authed/-home/home-tabs";
 import { AddPinButton, PinTab } from "./pin";
@@ -19,7 +20,7 @@ function TabTotalSkeleton() {
 export function TabStripIsland() {
   const t = useTranslations("Overview");
   const { selectedId } = usePortfolio();
-  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const strip = useHomeTabStrip(selectedId);
   const { pins } = strip;
   const { selectTab, shownActive } = useHomeTabSelection(pins);
   const kindTabs = kindTabsOf(strip.hasPerps, strip.hasDefi);
@@ -109,7 +110,7 @@ function SelectedSlot({
 
 function TabTotal() {
   const { selectedId } = usePortfolio();
-  const { data: strip } = useSuspenseQuery(homeTabStripQuery(selectedId));
+  const strip = useHomeTabStrip(selectedId);
   const { shownActive } = useHomeTabSelection(strip.pins);
   const kindTabs = kindTabsOf(strip.hasPerps, strip.hasDefi);
   const activePin = strip.pins.find((p) => p.id === shownActive) ?? null;

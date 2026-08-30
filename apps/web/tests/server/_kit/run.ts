@@ -1,13 +1,12 @@
 import { Cause, Effect, Exit, Layer, Option } from "effect";
-import { overviewFromSnapshotData } from "@/lib/core/portfolio";
+import { computeHomeTabStrip, overviewFromSnapshotData } from "@/lib/core/portfolio";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import type { AppError } from "@/lib/server/errors";
-import { precomputePortfolio } from "@/lib/server/portfolio/precompute";
 import type { PortfolioScope } from "@/lib/server/portfolio/scope";
 import { handleGetPortfolioSnapshotData } from "@/lib/server/portfolio/snapshot-data";
-import { handleGetHomeTabStrip } from "@/lib/server/portfolio/tabs";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
-import { db } from "./db";
+import { handleGetPortfolioTabPins } from "@/lib/server/tab-pins/read";
+import { handleListTags } from "@/lib/server/tags/list";
 
 // **被测的是 handler,发动走生产那个内核。**
 //
@@ -66,25 +65,7 @@ export const callWithRegistryExit = <A, E extends AppError, R extends UserServic
 export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.failureOption(exit.cause)) : undefined;
 
-// —— 预计算过的读取(ADR 0049)——
-//
-// 总览与 tab 条这两条读接口只做「读 + 传」:数字是同步收官那一刻算好的。所以任何要断言
-// **数字**的用例都得先让预计算跑一遍,否则读到的是空态 —— 而那正是「缺预计算」那一组
-// 单独在测的东西。生产上这两步一个在同步收官、一个在请求里,测试里按同样的顺序自己走一遍。
-//
-// **住在这儿而不是各文件各写一份**:十来个用例文件用它,抄十遍的东西每份都会慢慢长歪。
-
-/** 跑一遍预计算(= 同步收官时那一步)。缺省组合 = 默认组合。 */
-export const precompute = async (userId: string, portfolioId?: string): Promise<string> => {
-  const pf = portfolioId ?? (await db(userId).portfolios.ensureDefault()).id;
-  // `precomputePortfolio` 把失败咽下去回 `false`(它挂在同步收尾上,不该让那一轮异常收尾)。
-  // 测试里那等于「读到的全是空态」,而空态会把断言的失败指向一个错误的地方 —— 所以在这儿炸,
-  // 真正的原因由它记的那行 warning 带着 Cause 打出来。
-  if (!(await call(userId, precomputePortfolio(pf)))) {
-    throw new Error(`precompute failed for ${pf} — 见上面那行 "precompute failed" warning`);
-  }
-  return pf;
-};
+// —— 读模型捷径(照抄前端 select,不复刻业务逻辑)——
 
 /**
  * 读总览 —— 改完数据之后想看「屏幕上是什么」就用它。
@@ -96,25 +77,12 @@ export const precompute = async (userId: string, portfolioId?: string): Promise<
 export const readOverview = async (userId: string, data: PortfolioScope = {}) =>
   overviewFromSnapshotData(await call(userId, handleGetPortfolioSnapshotData(data)));
 
-/** 同上,tab 条那条。 */
+/** 同上,tab 条那条 —— 快照原料 + tabPins + 标签,浏览器现算(FOL-49)。 */
 export const readTabStrip = async (userId: string, data: { portfolioId?: string } = {}) => {
-  await precompute(userId, data.portfolioId);
-  return call(userId, handleGetHomeTabStrip(userId, data));
-};
-
-/**
- * 轮询到条件成立(或用完次数)。**不断言墙上时钟** —— 后台补算跑在 `waitUntil` 上,测试
- * 拿不到那条 Promise,而「等固定毫秒再断言」正是 CODING.md 点名的 flaky 写法。
- */
-export const until = async <A>(
-  read: () => Promise<A>,
-  ok: (a: A) => boolean,
-  tries = 100,
-): Promise<A> => {
-  let last = await read();
-  for (let i = 0; i < tries && !ok(last); i++) {
-    await new Promise((r) => setTimeout(r, 20));
-    last = await read();
-  }
-  return last;
+  const [snapshot, tabPins, tags] = await Promise.all([
+    call(userId, handleGetPortfolioSnapshotData({ portfolioId: data.portfolioId })),
+    call(userId, handleGetPortfolioTabPins()),
+    call(userId, handleListTags({ portfolioId: data.portfolioId })),
+  ]);
+  return computeHomeTabStrip(snapshot, tabPins, tags);
 };
