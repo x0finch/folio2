@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "@/lib/core/history";
+import { handleArchiveAccount } from "@/lib/server/accounts/archive";
 import { AccountHistoryInput, handleGetAccountHistory } from "@/lib/server/accounts/history";
-import { handleUpdateAccount } from "@/lib/server/accounts/update";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { call, callExit } from "../_kit/run";
@@ -55,7 +55,7 @@ describe("accounts/history", () => {
         unitPrice: 100,
         amount: 2,
       });
-      await call(USER, handleUpdateAccount({ accountId: acc.id, archived: true }));
+      await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
       const archivedAt = (await db(USER).accounts.getById(acc.id))?.archivedAt ?? 0;
 
       const raw = await call(

@@ -1,20 +1,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "@/lib/core/history";
+import { handleArchiveAccount } from "@/lib/server/accounts/archive";
 import { handleGetAccountHistory } from "@/lib/server/accounts/history";
 import { handleListAccounts } from "@/lib/server/accounts/list";
-import { handleUpdateAccount, UpdateAccountInput } from "@/lib/server/accounts/update";
+import { handleRenameAccount } from "@/lib/server/accounts/rename";
 import { db } from "../_kit/db";
 import { fakeRegistry } from "../_kit/fakes";
 import { blockOutbound } from "../_kit/outbound";
-import { call, callExit, callWithRegistry } from "../_kit/run";
+import { call, callWithRegistry } from "../_kit/run";
 import { seedAccount, seedManualAccount } from "../_kit/seed";
-import { freshUser, otherUser } from "../_kit/user";
+import { freshUser } from "../_kit/user";
 
-// 合并进 accounts/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
-describe("accounts/update", () => {
-  // #527 · updateAccount(改名 / 归档 / 取消归档;归档手记账户先落一张封存快照)
-  const USER = "h-acc-update";
+describe("accounts/archive", () => {
+  // #527 · archiveAccount(归档 / 取消归档;归档手记账户先落一张封存快照)
+  const USER = "h-acc-archive";
 
   const labels = async () => {
     const { registry } = await fakeRegistry();
@@ -28,18 +27,9 @@ describe("accounts/update", () => {
   beforeEach(async () => {
     blockOutbound();
     await freshUser(USER);
-    await freshUser(otherUser(USER));
   });
 
-  describe("updateAccount", () => {
-    it("改名 → 列表里是新名字", async () => {
-      const acc = await seedAccount(USER, "旧名", "bitcoin");
-
-      await call(USER, handleUpdateAccount({ accountId: acc.id, label: "新名" }));
-
-      expect(await labels()).toEqual(["新名"]);
-    });
-
+  describe("archiveAccount", () => {
     it("归档手记账户 → 落了一张封存快照", async () => {
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
@@ -48,24 +38,25 @@ describe("accounts/update", () => {
       });
       expect(await snapshotCount(acc.id)).toBe(0); // 手记平时不写快照(ADR 0018)
 
-      await call(USER, handleUpdateAccount({ accountId: acc.id, archived: true }));
+      await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
 
       expect(await snapshotCount(acc.id)).toBe(1);
     });
 
     it("取消归档 → 回到活跃,archivedAt 清空", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
-      await call(USER, handleUpdateAccount({ accountId: acc.id, archived: true }));
+      await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
 
-      await call(USER, handleUpdateAccount({ accountId: acc.id, archived: false }));
+      await call(USER, handleArchiveAccount({ accountId: acc.id, archived: false }));
 
       expect((await db(USER).accounts.getById(acc.id))?.archivedAt).toBeNull();
     });
 
-    it("同时传新名字和归档 → 两件事都生效", async () => {
+    it("先改名再归档 → 两件事都生效", async () => {
       const acc = await seedAccount(USER, "旧名", "bitcoin");
 
-      await call(USER, handleUpdateAccount({ accountId: acc.id, label: "新名", archived: true }));
+      await call(USER, handleRenameAccount({ accountId: acc.id, label: "新名" }));
+      await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
 
       expect(await labels()).toEqual(["新名"]);
       expect((await db(USER).accounts.getById(acc.id))?.archivedAt).not.toBeNull();
@@ -78,10 +69,10 @@ describe("accounts/update", () => {
         unitPrice: 100,
         amount: 2,
       });
-      await call(USER, handleUpdateAccount({ accountId: acc.id, archived: true }));
+      await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
       expect(await snapshotCount(acc.id)).toBe(1);
 
-      await call(USER, handleUpdateAccount({ accountId: acc.id, archived: true }));
+      await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
 
       expect(await snapshotCount(acc.id)).toBe(1);
     });
@@ -92,7 +83,7 @@ describe("accounts/update", () => {
         unitPrice: 100,
         amount: 2,
       });
-      await call(USER, handleUpdateAccount({ accountId: acc.id, archived: true }));
+      await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
       const archivedAt = (await db(USER).accounts.getById(acc.id))?.archivedAt;
 
       const raw = await call(
@@ -105,27 +96,6 @@ describe("accounts/update", () => {
       const series = buildAccountValueHistory(raw.rows, raw.live);
       expect(series.length).toBeGreaterThan(0);
       expect(series.at(-1)?.t).toBeLessThanOrEqual(archivedAt ?? 0);
-    });
-
-    it("改别人的账户 → 对方那个名字没变", async () => {
-      const theirs = await seedAccount(otherUser(USER), "他们的", "bitcoin");
-
-      await callExit(USER, handleUpdateAccount({ accountId: theirs.id, label: "被我改了" }));
-
-      expect((await db(otherUser(USER)).accounts.getById(theirs.id))?.label).toBe("他们的");
-    });
-
-    it("名字改成空串 / 纯空格 → schema 拒", () => {
-      expect(UpdateAccountInput.safeParse({ accountId: "a", label: "" }).success).toBe(false);
-      expect(UpdateAccountInput.safeParse({ accountId: "a", label: "  " }).success).toBe(false);
-    });
-
-    it("什么都不传(只有 accountId)→ schema 放行,handler 什么都不做", async () => {
-      const acc = await seedAccount(USER, "甲", "bitcoin");
-
-      await call(USER, handleUpdateAccount({ accountId: acc.id }));
-
-      expect(await labels()).toEqual(["甲"]);
     });
   });
 });

@@ -17,7 +17,7 @@ import { ticketOf } from "./ticket";
 // 这些用例都打真 D1:封存跨了账本、参考层、快照三处,而「有没有真落一行」只有在库里看得出来。
 // 出网一律打桩成抛错 —— 封存按设计不出网(价取自本地参考层缓存,取不到回退用户自填价)。
 // **#527 后续件 4:三条摘去了新家** —— 「再封存不落第二张」「归档后末点停在封存」「不补实时
-// 盯市末点」现在住 `accounts/update.test.ts` 与 `accounts/history.test.ts`(同层、断言相同)。
+// 盯市末点」现在住 `accounts/archive.cases.ts` 与 `accounts/history.cases.ts`(同层、断言相同)。
 // 留在这里的是那边没有的:封存金额取自账本、非 manual 不落、取消归档后数字回实时。
 const USER = "user-archive-seal";
 
