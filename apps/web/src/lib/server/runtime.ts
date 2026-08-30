@@ -1,7 +1,5 @@
-import { waitUntil } from "cloudflare:workers";
 import { Database } from "@folio/db";
 import type { OracleServices } from "@folio/oracle";
-import { getLogger } from "@logtape/logtape";
 import { Effect, Layer } from "effect";
 import { ConnectorRegistry } from "./connectors/registry";
 import { logTapeLogger } from "./effect-log";
@@ -102,118 +100,6 @@ export const runForUser = <A, E extends AppError>(
     Effect.provide(spanTracer),
     Effect.runPromise,
   );
-
-/**
- * 一把钥匙上的补算状态:正在飞的那一趟、「它跑的时候又脏了」的旗子,以及连败计数。
- *
- * **模块级可变状态在 Workers 上是刻意的**(CODING.md):每个请求一次 `runPromise`,Layer 的
- * memoisation 是 per-run 的,想跨请求活着只能放模块级。作用域因此是**一个 isolate** ——
- * 两个 isolate 各跑一趟是拦不住的(与 `SyncScope.gate` 那条跨 isolate 递不过去同一回事),
- * 而要拦的那个形状(一轮同步里几十次刷新 → 几十趟全量重算)恰恰都落在同一个 isolate 上。
- */
-interface Slot {
-  again: boolean;
-  /** 连着失败几次了。成功一次清零。 */
-  failures: number;
-  /** 在这一刻之前不再开工(连败退避)。 */
-  quietUntil: number;
-}
-
-const slots = new Map<string, Slot>();
-
-/** 连败几次之后彻底不再试。**必须有上限**:见 `backfillForUser` 里那台永动机。 */
-const BACKFILL_MAX_FAILURES = 5;
-/** 连败退避:1s、2s、4s、8s…… 15s 封顶(与 `queries/constants.ts` 的 `RETRY.delay` 同款)。 */
-const backoffMs = (failures: number) => Math.min(1_000 * 2 ** failures, 15_000);
-
-/**
- * **后台补算 —— 把一份活儿交给这次请求的 `waitUntil`,请求本体不等它**(ADR 0049 裁定 3)。
- *
- * 为什么必须是 `waitUntil` 而不是 `Effect.fork`:免费档**每次请求只给 10ms CPU**,而
- * `waitUntil` 那条路与定时任务同路、CPU 宽松(ADR 0049 有实测)。fork 出来的 fiber 还在
- * 这次请求的账上,等于把刚搬走的计算又搬回来了;何况 Worker 在响应发走之后就可能被回收,
- * 没有 `waitUntil` 登记的活儿会被半路掐死。
- *
- * **另起一次装配**,不复用调用方的 context:补算与响应那半是两个程序(同 `runSyncRound`),
- * 而 layer 的作用域跟着那次 `Effect.provide` 走 —— 借来的服务活到什么时候不该由这里赌。
- *
- * **`job` 回 `false` = 这一趟没成事。** 调度器靠它认出「这份活儿算不出来」:连败就退避、
- * 到 `BACKFILL_MAX_FAILURES` 就彻底不再试。没有这个上限的话,一份永远失败的补算配上
- * 「读到空就说 `pending`、前端见 `pending` 就每秒问一次」就是一台永动机 —— 每一次轮询排一趟
- * 全量重算,单飞把它们首尾相接地串起来,一个用户就能把这个 isolate 占满。
- *
- * **同一把钥匙同时只有一趟在跑,而且不丢事件**(单飞 + 尾随重跑):跑的时候又有人要,就把
- * 旗子插上、等这趟结束再跑**一趟**。只跳过不重跑是不行的 —— 用户连改两笔手记,第二笔的重算
- * 会被第一笔吞掉,数字就停在中间那个版本;只排队不合并也不行 —— 一轮同步里每个账户落定都会
- * 触发一次刷新,二十个账户就是二十趟全量重算,正好撞在这一片要保护的 CPU / subrequest 预算上。
- *
- * **它永不抛、永不 reject。** 三个地方都得堵上,因为它唯一的职责是「安排一件跟这次响应无关的事」,
- * 而这件事失败绝不该把只是想安排它的那个请求带走:
- *   ① `waitUntil` 在没有调用上下文时会抛(它在 `Effect.sync` 里就是个 defect);
- *   ② `runForUser` 在**装配**阶段就可能同步抛,那一段在 `job` 自己的 `catchAllCause` 外面 ——
- *      而且它抛在 `runOnce()` 里,`.catch` 根本接不到,**位子会一直占着**,此后这把钥匙上的
- *      补算全部静默消失。所以 `runOnce` 整个包在 try/catch 里,catch 负责把位子腾出来;
- *   ③ 兜不住的一律记一行 —— `waitUntil` 收下的 Promise reject 出去是条静默的 unhandled rejection。
- */
-export const backfillForUser = (
-  userId: string,
-  key: string,
-  job: Effect.Effect<boolean, never, UserServices>,
-): Effect.Effect<void> =>
-  Effect.sync(() => {
-    const log = getLogger(["folio", "web", "backfill"]);
-    const id = `${userId} ${key}`;
-    const slot = slots.get(id);
-    if (slot) {
-      slot.again = true; // 这趟跑完再跑一趟,别把这次的变更吞了
-      return;
-    }
-    const fresh: Slot = { again: false, failures: 0, quietUntil: 0 };
-    const previous = quiet.get(id);
-    if (previous) {
-      if (previous.failures >= BACKFILL_MAX_FAILURES) return; // 认输了,不再试
-      if (Date.now() < previous.quietUntil) return; // 还在退避里
-      fresh.failures = previous.failures;
-    }
-
-    const settle = (ok: boolean): Promise<void> | undefined => {
-      fresh.failures = ok ? 0 : fresh.failures + 1;
-      fresh.quietUntil = ok ? 0 : Date.now() + backoffMs(fresh.failures);
-      if (!ok && fresh.failures >= BACKFILL_MAX_FAILURES) {
-        log.error("backfill gave up after repeated failures", { key, failures: fresh.failures });
-      }
-      // 退避 / 认输期间的「再跑一趟」不当场兑现 —— 兑现了就等于没有退避。
-      if (!fresh.again || !ok) {
-        slots.delete(id);
-        quiet.set(id, fresh);
-        return undefined;
-      }
-      fresh.again = false;
-      return start();
-    };
-    const start = (): Promise<void> =>
-      runForUser(userId, job)
-        .catch((error) => {
-          log.warn("backfill failed", { key, error });
-          return false;
-        })
-        .then(settle);
-
-    slots.set(id, fresh);
-    try {
-      waitUntil(start());
-    } catch (error) {
-      // 装配阶段同步抛 / `waitUntil` 没有调用上下文 —— **先把位子腾出来**,否则这把钥匙上的
-      // 补算就永久静默了(F12:占着位子的那一趟其实从来没开始过)。
-      slots.delete(id);
-      log.warn("backfill could not be scheduled", { key, error });
-    }
-  });
-
-// 退避 / 认输的记账与「正在飞」分开存:前者要在那一趟结束之后**继续**活着,而 `slots` 里的
-// 条目一结束就得删掉(它的含义是「有一趟在飞」)。合成一张表的话,「在不在飞」与「还能不能再试」
-// 会互相顶掉。
-const quiet = new Map<string, Slot>();
 
 /**
  * **server fn 的发动点 —— handler 只描述,这里负责跑。**

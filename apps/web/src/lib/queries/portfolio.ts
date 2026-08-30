@@ -46,7 +46,7 @@ export const portfolioListQuery = () =>
 /** 首页 tab 条:有没有永续 / DeFi + 自定义 Tab 的已解析标签。 */
 export type HomeTabStrip = HomeTabStripView;
 
-const selectTabStrip = (raw: PortfolioRosterData): HomeTabStrip => computeHomeTabStrip(raw);
+const selectTabStrip = computeHomeTabStrip;
 
 export const homeTabStripQuery = (portfolioId: string) =>
   queryOptions<PortfolioRosterData, Error, HomeTabStrip>({
@@ -71,11 +71,8 @@ export const fetchHomeTabStrip = (
 // select 结果**里取一行,不单独请求(FOL-44 定的共用)。`select` 只在原料变化时重跑,SSR 与
 // 补水两遍算的是同一份原料 → 结果一致,不会 hydration mismatch。
 //
-// **首次同步中的加载态**(有账户、还没有任何快照):`select` 从原料判出 `pending`,首页 hero 据此
-// 显加载态而不是把「还不知道」画成 $0。这不是旧的「等后台预计算」——预计算读侧已删;新语义是「等
-// 首次同步写第一张快照」。所以配一条**短轮询**:pending 期间隔 1s 起退避地重取原料,拿到第一张
-// 快照(`pending` 转 false)就停,与总额盈亏 / tab 条共用同一套退避机(`pollWhilePending`)。
-// refetchInterval 拿的是 `query.state.data`(select 之前的原料),所以在这里直接对原料判 pending。
+// 首次同步中的加载态:有账户、还没有任何快照时 `select` 判出 `pending`,首页 hero 显加载态
+// 而不是把「还不知道」画成 $0;拿到第一张快照(`pending` 转 false)就停(`pollWhilePending`)。
 //
 // **`select` 必须是稳定引用**(FOL-51 code-review 修的效率回归):写成 inline 箭头的话,每次
 // render 都新建一个闭包,react-query 只在「data 未变**且** select 引用未变」时才复用上一次的

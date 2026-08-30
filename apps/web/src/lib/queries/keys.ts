@@ -36,9 +36,8 @@ export const portfolioKeys = {
   /** 组合清单 + 默认组合 id。 */
   list: () => [...portfolioKeys.all, "list"] as const,
   /**
-   * 首页 tab 条(#488 票 4:有没有永续 / DeFi + 自定义 Tab 的已解析标签)。
-   * **单独一层,不跟 overview 混**:增删一个 Tab 不该让昂贵的总览重拉一遍,
-   * 而映射表要指得动「只刷 tab 条」就得有这么一个前缀。
+   * 名单域前缀(FOL-49)—— 刷新映射表用它;`roster` 查询挂在这层下面。
+   * 改 pin / 标签不必重拉快照原料。
    */
   tabs: () => [...portfolioKeys.all, "tabs"] as const,
   /**
