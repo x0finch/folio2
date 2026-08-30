@@ -42,7 +42,9 @@ describe("回访不闪骨架、金额失败继续骨架", () => {
     // 会破坏这条的写法是回去看 `isFetching`(那会把后台刷新也画成骨架)。
     expect(page).not.toContain("isFetching");
     // FOL-51:后到的是余额(含 24h 盈亏,两端相减随持仓回)与标签,不再有独立的盈亏查询。
-    expect(page).toMatch(/useSuspenseQuery\(accountHoldingsQuery/);
+    expect(page).toMatch(/useAccountHoldingsView\(/);
+    expect(page).not.toContain("accountHoldingsQuery");
+    expect(page).not.toContain("listAccountHoldings");
     expect(page).not.toContain("accountGain24hQuery");
   });
 

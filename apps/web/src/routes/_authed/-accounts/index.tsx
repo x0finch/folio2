@@ -13,8 +13,10 @@ import { isManual } from "@/lib/core/manual";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
 import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
-import { accountHoldingsQuery, accountListQuery } from "@/lib/queries/accounts";
-import { accountKeys } from "@/lib/queries/keys";
+import { useAccountHoldingsView } from "@/lib/queries/account-holdings-compose";
+import { accountListQuery } from "@/lib/queries/accounts";
+import { accountKeys, portfolioKeys } from "@/lib/queries/keys";
+import { accountHoldingsSnapshotTimes } from "@/lib/queries/snapshots";
 import {
   type AccountTagLinks,
   accountTagLinksQuery,
@@ -114,9 +116,10 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
   // **名单已经是当前组合那份**(ADR 0047:服务端按组合筛)—— 这一页不再拿全量账户 + 归属表自己筛。
   const { selectedId } = usePortfolio();
   const { data: accounts } = useSuspenseQuery(accountListQuery(selectedId));
+  const { now } = accountHoldingsSnapshotTimes();
   return (
     <QueryBoundary
-      resetKey={`list-values:${JSON.stringify(accountKeys.holdings(selectedId))}`}
+      resetKey={`list-values:${JSON.stringify([accountKeys.list(selectedId), portfolioKeys.snapshots(selectedId, now)])}`}
       pending={<AccountsListBody accounts={accounts} onComplete={onComplete} />}
       failed={<AccountsListBody accounts={accounts} onComplete={onComplete} />}
     >
@@ -134,7 +137,10 @@ function AccountsListReady({
   onComplete: (a: AccountRow) => void;
 }) {
   const { selectedId } = usePortfolio();
-  const { data: holdings } = useSuspenseQuery(accountHoldingsQuery(selectedId));
+  const holdings = useAccountHoldingsView(
+    selectedId,
+    accounts.map((a) => ({ id: a.id, label: a.label, archivedAt: a.archivedAt })),
+  );
   const { data: allTags } = useSuspenseQuery(tagListQuery(selectedId));
   const { data: tagLinks } = useSuspenseQuery(accountTagLinksQuery(selectedId));
   return (

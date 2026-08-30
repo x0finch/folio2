@@ -1,0 +1,46 @@
+import { useSuspenseQueries } from "@tanstack/react-query";
+import { useMemo } from "react";
+import {
+  type AccountHoldingsView,
+  accountRowsFromRaw,
+  assembleAccountHoldingsData,
+  floorToHour,
+} from "@/lib/core/portfolio";
+import { valuationSettingsQuery } from "@/lib/queries/settings";
+import { tokenEnrichmentQuery } from "@/lib/queries/tokens";
+import { accountHoldingsSnapshotQueries } from "./snapshots";
+
+// 账户页持仓:原子资源在浏览器合并(FOL-54 / FOL-55)。`at` hour-floor 在客户端算,SSR 与补水一致。
+
+export function useAccountHoldingsView(
+  portfolioId: string,
+  accounts: readonly { id: string; label: string; archivedAt: number | null }[],
+): AccountHoldingsView {
+  const now = floorToHour(Date.now());
+  const [
+    { data: snapshotsNow },
+    { data: snapshotsPrev },
+    { data: settings },
+    { data: enrichment },
+  ] = useSuspenseQueries({
+    queries: [
+      accountHoldingsSnapshotQueries(portfolioId, now).now,
+      accountHoldingsSnapshotQueries(portfolioId, now).prev,
+      valuationSettingsQuery(),
+      tokenEnrichmentQuery(),
+    ],
+  });
+  return useMemo(
+    () =>
+      accountRowsFromRaw(
+        assembleAccountHoldingsData({
+          accounts,
+          snapshotsNow,
+          snapshotsPrev,
+          mode: settings.valuationMode,
+          enriched: new Map(enrichment.enriched),
+        }),
+      ),
+    [accounts, snapshotsNow, snapshotsPrev, settings.valuationMode, enrichment.enriched],
+  );
+}

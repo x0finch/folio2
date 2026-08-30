@@ -12,11 +12,14 @@ function stripComments(source: string): string {
 }
 
 describe("账户页 loader 不再等待慢查询", () => {
-  it("发出持仓,但不 await", () => {
+  it("发出原子持仓资源,但不 await", () => {
     const src = stripComments(readFileSync(SRC, "utf8"));
-    expect(src).toContain("accountHoldingsQuery(");
-    expect(src).not.toMatch(/await Promise\.all\([\s\S]*accountHoldingsQuery/);
-    expect(src).not.toMatch(/await queryClient\.ensureQueryData\(accountHoldingsQuery/);
+    expect(src).toContain("accountHoldingsSnapshotQueries(");
+    expect(src).toContain("tokenEnrichmentQuery(");
+    expect(src).not.toMatch(/await Promise\.all\([\s\S]*accountHoldingsSnapshotQueries/);
+    expect(src).not.toMatch(/await queryClient\.ensureQueryData\(accountHoldingsSnapshotQueries/);
+    expect(src).not.toContain("accountHoldingsQuery(");
+    expect(src).not.toContain("listAccountHoldings");
   });
 
   it("发出标签,但不 await —— 标签不挡名单", () => {

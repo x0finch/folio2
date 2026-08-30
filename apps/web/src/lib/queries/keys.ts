@@ -51,6 +51,12 @@ export const portfolioKeys = {
   /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
   history: (portfolioId: string, range: string) =>
     [...portfolioKeys.all, "history", portfolioId, range] as const,
+  /**
+   * 组合内各账户在 `[after, at]` 窗口内最新快照(FOL-54)。`at`/`after` 由客户端 hour-floor,
+   * 进 key 保证缓存稳定、SSR 与补水一致。
+   */
+  snapshots: (portfolioId: string, at: number, after?: number) =>
+    [...portfolioKeys.all, "snapshots", portfolioId, at, after ?? null] as const,
   // 24h 盈亏无独立 key(FOL-51):它随总览原料(`overview`)一起回,浏览器两端相减算出来。
 };
 
@@ -126,4 +132,6 @@ export const tokenKeys = {
   fiatOptions: () => [...tokenKeys.all, "fiat-options"] as const,
   /** 上游代币搜索(本地目录凑不够时才问)。 */
   search: (query: string) => [...tokenKeys.all, "search", query] as const,
+  /** 用户全部已知代币的展示富化(name/price/logo/change24h,FOL-54)。 */
+  enrichment: () => [...tokenKeys.all, "enrichment"] as const,
 };
