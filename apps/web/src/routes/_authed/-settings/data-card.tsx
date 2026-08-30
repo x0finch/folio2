@@ -37,9 +37,11 @@ export function DataCard() {
   // 成功/失败各自的文案直接读 data/error,后回来的请求不会覆写前一条的状态(#241)。
   const importMutation = useMutation({
     mutationFn: importData,
-    // 导入什么都可能变(账户 / 快照 / 标签 / 组合),所以刷的是最宽的那一条。
-    onSuccess: () => invalidateFor(queryClient, "settings.data"),
-    onSettled: clearInput, // 成败都清:让同一个文件能再选一次
+    // 导入什么都可能变(账户 / 快照 / 标签 / 组合);流式写入中途失败也可能已落部分行,成败都刷。
+    onSettled: () => {
+      clearInput();
+      invalidateFor(queryClient, "settings.data");
+    },
   });
 
   function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {

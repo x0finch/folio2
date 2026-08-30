@@ -1,7 +1,6 @@
 import { Effect } from "effect";
 import { z } from "zod";
 import { addManualActivities } from "@/lib/server/manual/store";
-import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
 import { OccurredAt } from "./occurred-at";
 
 export const ActivityKind = z.enum(["add", "reduce", "set"]);
@@ -34,8 +33,5 @@ export const handleCreateManualActivities = Effect.fn("createManualActivities")(
   drafts: Parameters<typeof addManualActivities>[1];
 }) {
   const result = yield* addManualActivities(data.accountId, data.drafts);
-  // 组合的值变了 → 预计算的 24h 盈亏不再可信,就地标旧(ADR 0049;为什么标旧不是删,见那边)。
-  // **整批拒的那一支一行都没落库**,不必标 —— 标了只是让下次读白补算一趟。
-  if (result.ok) yield* invalidatePrecomputed();
   return result;
 });

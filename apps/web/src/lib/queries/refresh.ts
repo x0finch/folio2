@@ -60,8 +60,14 @@ export const REFRESH_MAP = {
   /**
    * 标签的新建 / 改名 / 删除,以及给账户打标签 / 摘标签。
    *
-   * **要连组合域一起刷。** 按标签固定的自定义 Tab 是靠标签关联收窄的 —— 摘掉一个标签,
-   * 那个 Tab 里就该少一个账户的持仓;只刷标签域会让那个视图停在旧内容。
+   * **标签域要刷**:标签定义与账户关联变了,徽标、标签选择器、tab 条的每档小计(客户端按
+   * 标签关联 + 缓存的总览现算)都跟着变。
+   *
+   * **组合域也要刷** —— 被选中的自定义 Tab 内容不是客户端现算,而是走 `portfolioKeys.overview
+   * (portfolioId, {kind:"tag"})` 的一份**服务端按标签关联窄化**的总览查询(`scopedSnapshotMaterials`
+   * 对 tag pin 会读 `listAccountLinks` 再 `accountsMatchingPin`)。给账户加 / 摘标签直接改了这份
+   * 数据的账户集,不刷 `portfolioKeys.all` 的话,用户正盯着的那个 tag 标签页会停在旧账户集 ——
+   * 加标签在屏幕上没有任何反应。tab 条那半靠 `tagKeys` 现算够了,标签页内容这半靠这条兜住。
    */
   "tag.write": [tagKeys.all, portfolioKeys.all],
 

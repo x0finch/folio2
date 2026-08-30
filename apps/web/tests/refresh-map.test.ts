@@ -117,21 +117,21 @@ describe("刷新映射表", () => {
     expect(isInvalidated(settingsKeys.providerKeys())).toBe(false);
   });
 
-  // 按标签固定的自定义 Tab 是靠标签关联收窄的 —— 摘一个标签,那个 Tab 里就该少一个账户的持仓。
-  it("tag.write 同时刷标签域与组合域", async () => {
+  // review 抓的漏刷:被选中的 tag 标签页内容走 `portfolioKeys.overview(pf,{kind:"tag"})` 的一份
+  // **服务端按标签关联窄化**的总览查询。给账户加 / 摘标签改了它的账户集,所以 tag.write 必须连
+  // 组合域一起刷 —— 否则用户正盯着的 tag 页停在旧账户集,加标签在屏幕上没反应。
+  it("tag.write 刷标签域 + 组合域(tag 标签页内容是服务端按标签窄化的)", async () => {
     seed(tagKeys.list("pf-1"));
     seed(tagKeys.accountLinks("pf-1"));
     seed(portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }));
 
     await invalidateFor(queryClient, "tag.write");
 
-    expect(
-      [
-        tagKeys.list("pf-1"),
-        tagKeys.accountLinks("pf-1"),
-        portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }),
-      ].map(isInvalidated),
-    ).toEqual([true, true, true]);
+    expect([tagKeys.list("pf-1"), tagKeys.accountLinks("pf-1")].map(isInvalidated)).toEqual([
+      true,
+      true,
+    ]);
+    expect(isInvalidated(portfolioKeys.overview("pf-1", { kind: "tag", tagId: "t1" }))).toBe(true);
   });
 
   // review 抓到的漏刷之二:Tag 归属 Portfolio,所以组合域的写会**连带删掉标签关联** ——

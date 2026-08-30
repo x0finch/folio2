@@ -9,8 +9,6 @@ import {
   pinsInView,
   type TabPinScope,
 } from "@/lib/core/accounts-in-view";
-import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
-import { scopedMembership } from "@/lib/server/portfolio/scope";
 
 // pin 目标形状家在 core/accounts-in-view 的 `TabPinScope`(tag 归属校验在 db 层)。
 // schema 住这儿,update-target 跨借做 extend;与 TabPinScope 的一致性由 .handler() 处的赋值检查看着。
@@ -66,34 +64,6 @@ export const assertPinCap = (candidate: PinTargetRef, excludePinId?: string) =>
     }
   });
 
-/**
- * 钉 / 取消 / 改指向之后,**抬哪一条失效水位线**。
- *
- * 抬整个用户那条是能用的,但代价不小:这个用户**每个组合**的四族预计算全部作废,而
- * `refresh.ts` 那句话说得很清楚 —— 钉一个 Tab 一分钱余额都没改,把昂贵的总览拖着一起重算是浪费。
- * tag pin 与 account pin 都只属于一个组合,按那一个抬就够。
- *
- * **connector pin 只能抬用户级**:它是个镜头、不归属组合,有这家账户的每个组合的条子上都摆着它。
- *
- * **不知道它指着谁就退回用户级**(行已经不在了、标签刚被删):宁可多算一趟,也不能漏掉一个组合
- * —— 漏掉的症状是屏幕上挂着一个已经不存在的 Tab,而没有任何东西会自己纠正。
- */
-export const invalidateForPin = (
-  target: Pick<PinTargetRef, "kind" | "connectorId" | "tagId" | "accountId"> | undefined,
-): Effect.Effect<void, never, Database> =>
-  Effect.gen(function* () {
-    if (!target || target.kind === "connector") return yield* invalidatePrecomputed();
-    if (target.kind === "tag") {
-      const tag = (yield* (yield* Database).tags.list()).find((t) => t.id === target.tagId);
-      return yield* invalidatePrecomputed(tag?.portfolioId);
-    }
-    // 没有归属行的账户按兜底规则算进默认组合(与 `pinsInView` 摆它的那个组合同一个判据)。
-    const member = yield* scopedMembership(undefined);
-    return yield* invalidatePrecomputed(
-      target.accountId ? member.portfolioIdOf(target.accountId) : undefined,
-    );
-  });
-
 // **handler 只描述,不发动**:返回一个 Effect,「哪个用户 / 怎么装配 / 什么时候变成 Promise」
 // 全在装配点的 `runEffect` 里(见 ./index.ts)。所以这里没有 `context` 参数、没有 `await`。
 //
@@ -109,7 +79,5 @@ export const handleCreateTabPin = Effect.fn("createTabPin")(function* (
     tagId: data.tagId,
     accountId: data.accountId,
   });
-  // tab 条是预计算出来的,而这一步正是它的内容 —— 不抬水位线,新钉的 Tab 最长 90 分钟不出现。
-  yield* invalidateForPin(data);
   return pin;
 });

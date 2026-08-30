@@ -9,7 +9,6 @@ import { isManual } from "@/lib/core/manual";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { sealCreds } from "@/lib/server/creds";
 import { createManualAccount } from "@/lib/server/manual/store";
-import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
 
 // 账户创建的分派逻辑(handler 之外的纯 Effect → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。
 // createAccount server fn(见 ./index)只做装配;auth 薄壳即 handleCreateAccount。SECRETS_KEY 只在此 app 层见,不进 connectors。
@@ -74,7 +73,5 @@ export const handleCreateAccount = Effect.fn("createAccount")(function* (
   if (portfolioId) {
     yield* (yield* Database).portfolios.assignAccount(account.id, portfolioId);
   }
-  // 组合的值变了 → 预计算的 24h 盈亏不再可信,就地标旧(ADR 0049;为什么标旧不是删,见那边)。
-  yield* invalidatePrecomputed();
   return account;
 });
