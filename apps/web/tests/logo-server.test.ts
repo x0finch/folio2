@@ -124,6 +124,13 @@ describe("serveLogo", () => {
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2]));
   });
 
+  it("data: 无 base64 的高位字节(非法 UTF-8 百分号)→ 404 fallback,不吐坏字节", async () => {
+    // 非 base64 的二进制图在现实中不存在(图 data-URI 一律 base64)。真遇到 %89 这类非法 UTF-8
+    // 百分号序列,decodeURIComponent 抛错 → 当没图返回 404(首字母 fallback,不是坏图)。
+    const res = await serveLogo(resolving("data:image/png,%89PNG"), "token", "hi");
+    expect(res.status).toBe(404);
+  });
+
   it("畸形 data-URI(无逗号)→ 404 负缓存", async () => {
     const res = await serveLogo(resolving("data:image/png;base64"), "token", "z");
     expect(res.status).toBe(404);

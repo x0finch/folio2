@@ -51,9 +51,10 @@ function serveDataUri(
   const payload = uri.slice(comma + 1);
   let bytes: Uint8Array<ArrayBuffer>;
   try {
-    bytes = base64
-      ? Uint8Array.from(atob(payload), (c) => c.charCodeAt(0))
-      : new TextEncoder().encode(decodeURIComponent(payload));
+    // 两个分支都按「binary string → 逐字节」取:base64 先 atob,percent-encoded 先 decodeURIComponent。
+    // **不能用 TextEncoder**:它会把 >127 的码点(如 PNG 头 0x89)重编码成多字节 UTF-8,损坏二进制图。
+    const binary = base64 ? atob(payload) : decodeURIComponent(payload);
+    bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
   } catch {
     return negative(); // 解码失败(坏 base64 / 坏百分号转义)当没图
   }
