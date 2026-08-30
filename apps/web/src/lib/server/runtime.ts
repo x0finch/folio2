@@ -120,6 +120,13 @@ export const runForUser = <A, E extends AppError>(
     Effect.runPromise,
   );
 
+/** `runEffect` 的 timing 壳,给必须走 `runForUser` 的 server fn(如 syncAccount)复用。 */
+export const runTimedForUser = <A, E extends AppError>(
+  userId: string,
+  handler: string,
+  effect: Effect.Effect<A, E, UserServices>,
+): Promise<A> => runForUser(userId, withServerFnTiming(handler)(effect));
+
 /**
  * **server fn 的发动点 —— handler 只描述,这里负责跑。**
  *
