@@ -239,8 +239,9 @@ function DefiProtocolRowContent({
   gainPending: boolean;
 }) {
   const subtotal = group.rows.reduce((s, r) => s + r.usdValue, 0);
-  // 24h 盈亏(ADR 0040):server 算好的。DeFi 这类没有「几个币」可依,只能拿两张照片的价值相减 ——
-  // 已知妥协,你动仓那天不准。百分比的分母是**总敞口**(不是净值),对冲仓才不会给出荒唐的数。
+  // 24h 盈亏(ADR 0050,两端相减):该协议现在的净值 − 24 小时前的净值,与全站同一口径。
+  // 百分比的分母是**起点净值**(`gain24h.start`);跨账户合并按 Σ金额 ÷ Σ起点净值 重算(见
+  // `mergeDefiGroups`)。动仓那天(充提)会体现在这个数里,是设计不是 bug。
   const change = group.gain24h;
   const segs = toRoleSegs(group.rows);
   return (

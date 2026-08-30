@@ -540,6 +540,25 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     expect(view.holdings[0].gain24h).toBeNull();
   });
 
+  // 回归(code-review 修 #1):无 token_id 的持仓没有起点可比(`start.token` 按 token_id 建键)——
+  // 该行盈亏应为 `null`(`—`),**绝不**是 `endpointGain(0, current)` 冒充的「今天全额涨」。
+  it("无 token_id 的持仓 → gain null,不是全额涨", async () => {
+    const noTokenNow = new Map([
+      ["a1", snap("a1", 110, [bal({ tokenId: null, amount: 1, usdValue: 110 })])],
+    ]);
+    const view = await runWithOracle(
+      stub,
+      overviewEffect(accounts, noTokenNow, {
+        now: NOW,
+        // a1 有起点(hasAnyStart=true),但那张里也没有 token_id → start.token 空。
+        prevByAccount: prev("a1", bal({ tokenId: null, amount: 1, usdValue: 100 })),
+      }),
+    );
+    const h = view.holdings.find((x) => x.token.id == null);
+    expect(h).toBeDefined();
+    expect(h?.gain24h).toBeNull();
+  });
+
   it("不传起点组 → 不算盈亏(字段缺席)", async () => {
     const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, { now: NOW }));
     expect(view.holdings[0].gain24h).toBeUndefined();

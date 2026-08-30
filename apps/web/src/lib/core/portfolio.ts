@@ -16,7 +16,7 @@ import {
   parseDefiMeta,
   toAccountSections,
 } from "@/lib/core/account-view";
-import { isFungible, viewKind } from "@/lib/core/balance-kind";
+import { isFungible, type ViewKind, viewKind } from "@/lib/core/balance-kind";
 import {
   buildPortfolioHistory,
   type HistoryPoint,
@@ -595,18 +595,23 @@ export function buildOverview(
       curSum += liveTotals.get(account.id) ?? 0;
     }
     portfolioGain = hasAnyStart ? endpointGain(startSum, curSum) : null;
-    // 持仓层:按 holding.key(= token_id)两端相减。现值只数 eligible 账户的行(与组合同口径),
+    // 持仓层:按 token_id 两端相减。**现值侧与起点侧同口径**(`startAggregates.token` 只收
+    // isFungible 现货、且有 token_id 的行;DeFi 走各自那套)—— 少了这个过滤,同一 token_id 又有
+    // 现货又有 DeFi/非同质行时现值会多算、盈亏虚高。现值只数 eligible 账户的行(与组合同口径),
     // 起点缺 → 0(今天新买的整份算成今天赚的,「充提计入」的另一面)。
-    const curByKey = new Map<string, number>();
+    const curByToken = new Map<string, number>();
     for (const r of aggInputs) {
       if (!eligible.has(r.account.id)) continue;
-      const k = groupKey(r);
-      curByKey.set(k, (curByKey.get(k) ?? 0) + r.value);
+      if (r.tokenId == null || !isFungible(r.kind as ViewKind)) continue;
+      curByToken.set(r.tokenId, (curByToken.get(r.tokenId) ?? 0) + r.value);
     }
     for (const h of holdings) {
-      h.gain24h = hasAnyStart
-        ? endpointGain(startAgg.token.get(h.key) ?? 0, curByKey.get(h.key) ?? 0)
-        : null;
+      // **无 token_id 的持仓算不出**(没有起点可比,`start.token` 按 token_id 建键)→ null(界面
+      // `—`),绝不拿 `endpointGain(0, current)` 冒充「今天全额涨」。
+      h.gain24h =
+        hasAnyStart && h.token.id != null
+          ? endpointGain(startAgg.token.get(h.token.id) ?? 0, curByToken.get(h.token.id) ?? 0)
+          : null;
     }
   }
 
@@ -836,7 +841,16 @@ export interface AccountGainRow {
   archivedAt: number | null;
   // 该账户当下净值(冻结口径:最新快照 totalUsd)—— 账户级两端相减的「现值」那一端。
   totalUsd: number;
-  balances: readonly { id: string; tokenId?: string | null; amount: number; usdValue: number }[];
+  // `kind`/`metaJson` 是逐币盈亏两端同口径要用的:现值侧只聚合 isFungible 现货行(与起点侧一致),
+  // 否则同一 token_id 又有现货又有 DeFi/perp 行时现值会多算、盈亏虚高。
+  balances: readonly {
+    id: string;
+    tokenId?: string | null;
+    amount: number;
+    usdValue: number;
+    kind: string;
+    metaJson?: string | null;
+  }[];
 }
 
 export type WithAccountHoldingGain<R extends AccountGainRow> = Omit<R, "balances"> & {
@@ -859,12 +873,15 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
         balances: r.balances.map((b) => ({ ...b, gain24h: undefined })),
       };
     }
+    // 逐行盈亏只对 isFungible 现货行有意义(DeFi/perp 行的盈亏由各自的分区给);非同质行 → undefined。
+    const spotOf = (b: R["balances"][number]): boolean =>
+      b.tokenId != null && isFungible(viewKind(b));
     const prev = prevByAccount.get(r.account.id);
     if (prev == null) {
       return {
         ...r,
         gain24h: null,
-        balances: r.balances.map((b) => ({ ...b, gain24h: b.tokenId == null ? undefined : null })),
+        balances: r.balances.map((b) => ({ ...b, gain24h: spotOf(b) ? null : undefined })),
       };
     }
     // 起点各表:账户总额(全部余额)+ 逐现货代币值。
@@ -876,20 +893,23 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
         startToken.set(b.tokenId, (startToken.get(b.tokenId) ?? 0) + b.usdValue);
       }
     }
-    // 现值:逐 (账户 × 币) 现货合计 —— 一个币散在多条链 = 抽屉里多行,而两端相减是按币一条。
+    // 现值:逐 (账户 × 币) 现货合计 —— **与起点侧同口径**(只 isFungible 现货、有 token_id 的行),
+    // 一个币散在多条链 = 抽屉里多行,而两端相减是按币一条。
     const curToken = new Map<string, number>();
     for (const b of r.balances) {
-      if (b.tokenId == null) continue;
-      curToken.set(b.tokenId, (curToken.get(b.tokenId) ?? 0) + b.usdValue);
+      if (!spotOf(b)) continue;
+      const id = b.tokenId as string;
+      curToken.set(id, (curToken.get(id) ?? 0) + b.usdValue);
     }
     return {
       ...r,
       gain24h: endpointGain(startTotal, r.totalUsd),
       balances: r.balances.map((b): R["balances"][number] & { gain24h?: Gain | null } => {
-        if (b.tokenId == null) return { ...b, gain24h: undefined };
-        const total = curToken.get(b.tokenId) ?? 0;
+        if (!spotOf(b)) return { ...b, gain24h: undefined };
+        const id = b.tokenId as string;
+        const total = curToken.get(id) ?? 0;
         // 起点缺这个币 → 0(今天新买,整份算成今天赚的);两端相减。
-        const gain = endpointGain(startToken.get(b.tokenId) ?? 0, total);
+        const gain = endpointGain(startToken.get(id) ?? 0, total);
         if (gain == null) return { ...b, gain24h: null };
         // 按各行市值占比把那一条币的盈亏摊回具体这一行(pct 是币级的,不摊)。
         const share = total === 0 ? 0 : b.usdValue / total;
