@@ -21,6 +21,11 @@ import { CurrentUser } from "../current-user";
 import type { NotFound } from "../errors";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
+import {
+  HISTORY_MINMAX_BUCKETS,
+  queryMinMaxTotalsByAccount,
+  queryMinMaxTotalsInScope,
+} from "./history-minmax";
 import { assertAccountOwned } from "./ownership";
 
 // 快照 —— 一次同步落下的余额切片,以及总额 / 历史 / 分页那几条读路。
@@ -319,10 +324,29 @@ export const makeSnapshotStore = Effect.gen(function* () {
         );
       }),
 
+    listTotalsByAccountMinMax: (
+      accountId: string,
+      since?: number,
+      buckets = HISTORY_MINMAX_BUCKETS,
+    ): Effect.Effect<{ takenAt: number; totalUsd: number }[], NotFound> =>
+      Effect.gen(function* () {
+        yield* assertAccountOwned(client, userId, accountId);
+        return yield* client.query((db) =>
+          queryMinMaxTotalsByAccount(db, accountId, since, buckets),
+        );
+      }),
+
+    listTotalsMinMax: (
+      accountIds: readonly string[],
+      since?: number,
+      buckets = HISTORY_MINMAX_BUCKETS,
+    ): Effect.Effect<SnapshotTotal[]> =>
+      client.query((db) => queryMinMaxTotalsInScope(db, userId, accountIds, since, buckets)),
+
     /** 历史曲线数据源:全部快照的 (accountId, takenAt, totalUsd),按 takenAt 升序。 */
     // 只取这三列、不取 balances(比 `latest` 轻);组合净值时间序列在纯函数里
     // 阶梯式重建(见 apps/web buildPortfolioHistory)。
-    listTotals: (): Effect.Effect<SnapshotTotal[]> =>
+    listTotals: (since?: number): Effect.Effect<SnapshotTotal[]> =>
       client.query((db) =>
         db
           .select({
@@ -332,7 +356,11 @@ export const makeSnapshotStore = Effect.gen(function* () {
           })
           .from(snapshots)
           .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
-          .where(eq(accounts.userId, userId))
+          .where(
+            since == null
+              ? eq(accounts.userId, userId)
+              : and(eq(accounts.userId, userId), gte(snapshots.takenAt, since)),
+          )
           .orderBy(asc(snapshots.takenAt)),
       ),
 

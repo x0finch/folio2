@@ -28,7 +28,7 @@ export function HeroIsland() {
   if (data.pending) return <HeroShell overview={data} loading syncing />;
   return (
     <QueryBoundary
-      resetKey={`hero-curve:${JSON.stringify(portfolioKeys.history(selectedId))}`}
+      resetKey={`hero-curve:${JSON.stringify(portfolioKeys.history(selectedId, "30d"))}`}
       // 还在取:总净值 / 盈亏照常渲染(它们已经有了),曲线走「还在取数」态。
       pending={<HeroShell overview={data} loading />}
       // 塌了:总净值 / 盈亏仍然在,曲线区退成空(不整块塌)。
@@ -72,7 +72,7 @@ function HeroReady({
   overview: PortfolioOverview;
   portfolioId: string;
 }) {
-  const history = useSuspenseQuery(portfolioHistoryQuery(portfolioId));
+  const history = useSuspenseQuery(portfolioHistoryQuery(portfolioId, "30d"));
   // 曲线在浏览器里算(FOL-38):接口发的是原样的快照点。**末点用总览按账户那张表加出来** ——
   // 屏幕上那个大数字与曲线最右端必须是同一个数,而它已经算过一遍了,不该为曲线再算一次。
   // 记忆化不是为了这一次:hero 里划动读数会一路重渲,重建曲线不该跟着每帧跑一遍。

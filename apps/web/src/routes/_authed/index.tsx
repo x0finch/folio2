@@ -50,7 +50,7 @@ export const Route = createFileRoute("/_authed/")({
     queryClient.ensureQueryData(portfolioTabPinsQuery(selectedId));
     queryClient.ensureQueryData(tagListQuery(selectedId));
     queryClient.ensureQueryData(portfolioOverviewQuery(selectedId));
-    queryClient.ensureQueryData(portfolioHistoryQuery(selectedId));
+    queryClient.ensureQueryData(portfolioHistoryQuery(selectedId, "30d"));
   },
   component: Overview,
 });

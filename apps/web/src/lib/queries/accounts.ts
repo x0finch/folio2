@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import type { HistoryRange } from "@/lib/core/history-range";
 import { getAccountHistory, listAccounts } from "@/lib/server/accounts";
 import { getTokenValueHistory } from "@/lib/server/holdings";
 import { getManualAccount } from "@/lib/server/manual-tokens";
@@ -46,7 +47,7 @@ export type AccountHoldings = Awaited<ReturnType<typeof listAccountHoldings>>;
 export const accountHistoryQuery = (args: {
   accountId: string;
   /** 窗口档位("30d" 等)——**进 key 的是它**,不是下面那个现算的起点。 */
-  range: string;
+  range: HistoryRange;
   /** 起点(`"all"` 窗口下为 undefined = 不限)。 */
   since: number | undefined;
   connectorId: AccountListItem["connectorId"];
@@ -57,14 +58,19 @@ export const accountHistoryQuery = (args: {
     // 它由 accountId 决定,所以不进 key —— 进了只会让同一账户凭空多出一条永不命中的缓存。
     queryFn: () =>
       getAccountHistory({
-        data: { accountId: args.accountId, since: args.since, connectorId: args.connectorId },
+        data: {
+          accountId: args.accountId,
+          since: args.since,
+          connectorId: args.connectorId,
+          range: args.range,
+        },
       }),
     staleTime: STALE_TIME.history,
   });
 
 export const holdingHistoryQuery = (args: {
   holdingKey: string;
-  range: string;
+  range: HistoryRange;
   since: number | undefined;
 }) =>
   queryOptions({

@@ -49,7 +49,8 @@ export const portfolioKeys = {
   overview: (portfolioId: string, pin?: PinScopeKey) =>
     [...portfolioKeys.all, "overview", portfolioId, pin ?? null] as const,
   /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
-  history: (portfolioId: string) => [...portfolioKeys.all, "history", portfolioId] as const,
+  history: (portfolioId: string, range: string) =>
+    [...portfolioKeys.all, "history", portfolioId, range] as const,
   // 24h 盈亏无独立 key(FOL-51):它随总览原料(`overview`)一起回,浏览器两端相减算出来。
 };
 

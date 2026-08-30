@@ -34,6 +34,52 @@ const BUCKET_LADDER = [
 ];
 const TARGET_MAX_POINTS = 40;
 
+export type { HistoryRange } from "./history-range";
+export { isLongHistoryRange, rangeSince } from "./history-range";
+
+export function minMaxDownsampleHistory(
+  points: readonly HistoryPoint[],
+  buckets = TARGET_MAX_POINTS,
+): HistoryPoint[] {
+  if (points.length <= 1) return [...points];
+  const sorted = [...points].sort((a, b) => a.t - b.t);
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  if (first == null || last == null) return [...points];
+  const tMin = first.t;
+  const tMax = last.t;
+  if (tMax === tMin) return [first];
+
+  const byBucket = new Map<number, HistoryPoint[]>();
+  for (const p of sorted) {
+    const bucket = Math.min(
+      Math.floor(((p.t - tMin) * (buckets - 1)) / (tMax - tMin)),
+      buckets - 1,
+    );
+    const arr = byBucket.get(bucket) ?? [];
+    arr.push(p);
+    byBucket.set(bucket, arr);
+  }
+
+  const out: HistoryPoint[] = [];
+  for (const pts of byBucket.values()) {
+    const head = pts[0];
+    if (head == null) continue;
+    let min = head;
+    let max = head;
+    for (const p of pts) {
+      if (p.total < min.total || (p.total === min.total && p.t < min.t)) min = p;
+      if (p.total > max.total || (p.total === max.total && p.t < max.t)) max = p;
+    }
+    if (min.t === max.t && min.total === max.total) out.push(min);
+    else {
+      out.push(min);
+      if (max.t !== min.t || max.total !== min.total) out.push(max);
+    }
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
 // 自适应降采样:按数据【实际跨度】选桶,每桶保留最后一个点(该桶收盘值),压掉"日内手动多次
 // 同步"造成的密集簇,同时让粒度随数据量自适应 —— 约 1 天数据 → 小时级点,约 30 天 → 日级点。
 // 快照是事件驱动的(每次同步一个点),直接画会随刷新频率抖动。末点(今日 live 覆写点)天然保留
@@ -108,8 +154,8 @@ export function buildPortfolioHistory(
 export interface PortfolioHistoryRaw {
   rows: SnapshotTotalRow[];
   archivedAt: [accountId: string, at: number][];
-  /** 末点该由哪些账户的实时净值加起来(= 选中组合里还活着的成员)。 */
   liveAccountIds: string[];
+  sampled?: boolean;
 }
 
 /** 总览里按账户的实时净值那一栏。曲线只要这一栏,所以只声明这一栏。 */
@@ -158,20 +204,22 @@ export function toPortfolioCurve(
 // (ADR 0039)。空账户不凭空造点。
 export interface AccountHistoryRaw {
   rows: { takenAt: number; totalUsd: number }[];
-  /** 「当下」那一点(只有未归档的手记账户有);其余为 `null`。 */
   live: HistoryPoint | null;
+  sampled?: boolean;
 }
 
 export function buildAccountValueHistory(
   snapshots: readonly { takenAt: number; totalUsd: number }[],
   live?: HistoryPoint | null,
+  opts?: { sampled?: boolean },
 ): HistoryPoint[] {
   const rows: SnapshotTotalRow[] = snapshots.map((s) => ({
     accountId: "_",
     takenAt: s.takenAt,
     totalUsd: s.totalUsd,
   }));
-  const series = downsampleSeries(buildPortfolioHistory(rows));
+  const base = buildPortfolioHistory(rows);
+  const series = opts?.sampled ? base : downsampleSeries(base);
   if (live == null || series.length === 0) return series;
   const last = series[series.length - 1];
   if (last.t >= live.t) series[series.length - 1] = { t: last.t, total: live.total };

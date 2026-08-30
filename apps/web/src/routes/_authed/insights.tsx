@@ -26,7 +26,7 @@ export const Route = createFileRoute("/_authed/insights")({
     const { portfolios, defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
     const selectedId = pickSelectedPortfolio(deps.portfolio, portfolios, defaultId);
     queryClient.ensureQueryData(portfolioOverviewQuery(selectedId));
-    queryClient.ensureQueryData(portfolioHistoryQuery(selectedId));
+    queryClient.ensureQueryData(portfolioHistoryQuery(selectedId, "all"));
   },
   component: Insights,
 });
