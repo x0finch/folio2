@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { syncKeys } from "@/lib/queries/keys";
 import { invalidateFor } from "@/lib/queries/refresh";
-import { syncRoundQuery } from "@/lib/queries/sync";
+import { syncRoundQuery } from "@/lib/queries/sync-round";
 import type { SyncRoundView } from "@/lib/server/sync/status";
 
 // 一轮同步在前端这一侧只剩两件事:**发起它**,和**读它**(ADR 0048)。

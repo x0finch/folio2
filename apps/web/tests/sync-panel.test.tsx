@@ -20,7 +20,6 @@ vi.mock("@/lib/server/connectors", () => ({
 // 同理:面板经 `use-sync-round` 拉进同步域的 server fn,而那条 import 链一路通到
 // `cloudflare:workers`(生产里由 Start 编译器从客户端 bundle 剥离,vitest 不会)。
 vi.mock("@/lib/server/sync", () => ({
-  getSyncStatus: vi.fn(),
   getSyncRound: vi.fn(),
 }));
 

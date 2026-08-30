@@ -9,7 +9,7 @@ import type { SyncRoundView } from "@/lib/server/sync/status";
 //   · 按对象身份刷 → 轮询每 1.5s 回一个新对象,于是每 1.5s 无条件重拉一遍首页;
 //   · 首次看见就刷 → 每次挂载(每次换页)都白刷一遍,而那时数据本来就是新的。
 const { getSyncRound } = vi.hoisted(() => ({ getSyncRound: vi.fn() }));
-vi.mock("@/lib/server/sync", () => ({ getSyncRound, getSyncStatus: vi.fn() }));
+vi.mock("@/lib/server/sync", () => ({ getSyncRound }));
 
 const { useSyncRound } = await import("@/lib/hooks/use-sync-round");
 

@@ -17,7 +17,7 @@ import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
 import { RETRY, withRetry } from "@/lib/queries/constants";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
-import { syncStatusQuery } from "@/lib/queries/sync";
+import { prefetchSyncStatusAtoms, useSyncStatus } from "@/lib/queries/sync";
 import { getSession } from "@/lib/server/session";
 
 // 受保护布局:无 session 则重定向到 /login(仅 UX;数据安全靠各 authedServerFn)。
@@ -91,11 +91,11 @@ export const Route = createFileRoute("/_authed")({
       portfolios.portfolios,
       portfolios.defaultId,
     );
-    const summary = context.queryClient.ensureQueryData(syncStatusQuery(selectedId));
+    const summaryAtoms = prefetchSyncStatusAtoms(context.queryClient, selectedId);
     // 只有**首次进入**才等。这个 `await` 是替页头那块同步摘要挡首屏挂起的(它没有自己的 suspense
     // 边界),冷加载时不等它会退成整页挂起。站内往返 / invalidate 触发的重跑(`cause === "stay"`)
     // 不必等:那时旧界面还在,让它自己挂起就好。
-    if (cause === "enter") await summary;
+    if (cause === "enter") await summaryAtoms;
   },
   component: AuthedLayout,
   // 最后一道网:退避重试都用尽了(约半分钟),仍旧失败时接住它 —— 否则落到框架自带的那张
@@ -138,7 +138,7 @@ function StalledShell({ reset }: { reset?: () => void }) {
 // 在外面取到的永远是默认那个,切了组合外壳上的来源数不会动。
 function ShellWithSync({ userName, children }: { userName: string; children: ReactNode }) {
   const { selectedId } = usePortfolio();
-  const { data: syncStatus } = useSuspenseQuery(syncStatusQuery(selectedId));
+  const syncStatus = useSyncStatus(selectedId);
   return (
     <AppShell userName={userName} syncStatus={syncStatus} selector={<PortfolioSelector />}>
       {children}

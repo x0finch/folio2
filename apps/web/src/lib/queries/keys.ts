@@ -10,13 +10,13 @@
 // 前缀,是否真能匹配上各查询实际用的 key」这件事可以被单测钉住,而那正是整套定向刷新最容易
 // 出错、又最不会报错的地方。
 export const syncKeys = {
-  /** 整个同步域的前缀 —— 刷新映射表用它。 */
+  /** 整个同步域的前缀 —— 刷新映射表用它(目前只有 round 查询)。 */
   all: ["sync"] as const,
-  /** 全局同步状态摘要(页头同步面板 + 「立即同步」的账户集)。 */
-  status: (portfolioId: string) => [...syncKeys.all, "status", portfolioId] as const,
   /**
    * 这个组合最近一轮同步(ADR 0048)。**在 `all` 前缀之下**,所以「一轮跑完」那条定向刷新
    * 照样盖得住它。按组合一份:切组合看的就是另一轮。
+   *
+   * 页头同步摘要(FOL-58)不再单独占 key —— 由 accounts + snapshots 在浏览器派生。
    */
   round: (portfolioId: string) => [...syncKeys.all, "round", portfolioId] as const,
 };
