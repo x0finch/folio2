@@ -1,5 +1,9 @@
 import { queryOptions } from "@tanstack/react-query";
-import { type OverviewView, overviewFromSnapshotData } from "@/lib/core/portfolio";
+import {
+  isFirstSyncPending,
+  type OverviewView,
+  overviewFromSnapshotData,
+} from "@/lib/core/portfolio";
 import {
   getHomeTabStrip,
   getPortfolioGain24h,
@@ -7,7 +11,14 @@ import {
   getPortfolioSnapshotData,
 } from "@/lib/server/portfolio";
 import { listPortfolios } from "@/lib/server/portfolios";
-import { awaitFirstCompute, pendingPollDelay, RETRY, STALE_TIME, shouldRetry } from "./constants";
+import {
+  awaitFirstCompute,
+  pendingPollDelay,
+  pollWhilePending,
+  RETRY,
+  STALE_TIME,
+  shouldRetry,
+} from "./constants";
 import { type PinScopeKey, portfolioKeys } from "./keys";
 
 // 组合域的读取入口 —— 与 `lib/server/portfolio`(读模型)+ `lib/server/portfolios`(实体)的读取型 server fn 对应。
@@ -20,9 +31,11 @@ import { type PinScopeKey, portfolioKeys } from "./keys";
  * 一份组合总览的形状(按代币聚合的持仓 + 分段 + 小计)。消费方拆解 sections 时用得上。
  *
  * **它是 `select` 的产物**(FOL-48):接口发的是快照原料,总额 / 持仓 / 各小计 / pricesStale
- * 由 `overviewFromSnapshotData` 在浏览器里算出来 —— 所以类型就是 `buildOverview` 的出参。
+ * 由 `overviewFromSnapshotData` 在浏览器里算出来 —— 所以类型就是 `buildOverview` 的出参,
+ * 外加一个 `pending`:**首次同步中**(有账户、还没有任何快照)。它是 `select` 从原料判出来的、
+ * 不进 `overviewFromSnapshotData`(那份要与服务端现算逐值对拍),首页据此显加载态而非 $0。
  */
-export type PortfolioOverview = OverviewView;
+export type PortfolioOverview = OverviewView & { pending: boolean };
 
 export const portfolioListQuery = () =>
   queryOptions({
@@ -59,13 +72,21 @@ export const homeTabStripQuery = (portfolioId: string) =>
 // select 结果**里取一行,不单独请求(FOL-44 定的共用)。`select` 只在原料变化时重跑,SSR 与
 // 补水两遍算的是同一份原料 → 结果一致,不会 hydration mismatch。
 //
-// 不再有 `pending` 短轮询 / `awaitFirstCompute`:总览不走预计算读侧了,读到的就是当下真数据。
+// **首次同步中的加载态**(有账户、还没有任何快照):`select` 从原料判出 `pending`,首页 hero 据此
+// 显加载态而不是把「还不知道」画成 $0。这不是旧的「等后台预计算」——预计算读侧已删;新语义是「等
+// 首次同步写第一张快照」。所以配一条**短轮询**:pending 期间隔 1s 起退避地重取原料,拿到第一张
+// 快照(`pending` 转 false)就停,与总额盈亏 / tab 条共用同一套退避机(`pollWhilePending`)。
+// refetchInterval 拿的是 `query.state.data`(select 之前的原料),所以在这里直接对原料判 pending。
 export const portfolioOverviewQuery = (portfolioId: string, pin?: PinScopeKey) =>
   queryOptions({
     queryKey: portfolioKeys.overview(portfolioId, pin),
     queryFn: () => getPortfolioSnapshotData({ data: { portfolioId, pin } }),
-    select: overviewFromSnapshotData,
+    select: (raw): PortfolioOverview => ({
+      ...overviewFromSnapshotData(raw),
+      pending: isFirstSyncPending(raw),
+    }),
     staleTime: STALE_TIME.live,
+    refetchInterval: (query) => pollWhilePending(query, isFirstSyncPending(query.state.data)),
   });
 
 export const portfolioHistoryQuery = (portfolioId: string) =>

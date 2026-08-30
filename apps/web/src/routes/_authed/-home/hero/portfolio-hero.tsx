@@ -1,4 +1,4 @@
-import { cn } from "@folio/ui";
+import { cn, Skeleton } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import { AmountTicker } from "@/components/amount-ticker";
 import { signedUsd } from "@/lib/core/format-number";
@@ -73,6 +73,7 @@ export function PortfolioHero({
   loading = false,
   gainPending = false,
   gainFailed = false,
+  syncing = false,
   contentClassName,
 }: {
   series: HistoryPoint[];
@@ -87,6 +88,8 @@ export function PortfolioHero({
   gainPending?: boolean;
   /** 盈亏读取失败 —— 破折号旁边一处提示。行内不再各说一遍。 */
   gainFailed?: boolean;
+  /** 首次同步中(有账户、还没有任何快照)—— 大数字走骨架、标题换「同步中」,不把 $0 当答案画。 */
+  syncing?: boolean;
   // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
   contentClassName?: string;
 }) {
@@ -141,7 +144,7 @@ export function PortfolioHero({
         {/* 划到某点时,标题换成那个时刻(#470 片7)—— 大数字顶替成该点的值,两者一起才说得清
             「这是哪一刻的数」。 */}
         <p className="font-medium text-muted-foreground text-xs tabular-nums">
-          {scrub.label ?? t("totalNetWorth")}
+          {scrub.label ?? (syncing ? t("firstSyncing") : t("totalNetWorth"))}
         </p>
         {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。
             inline-flex + items-start:24h 增量贴在金额盒子的右上角,不跟数字基线居中。 */}
@@ -149,12 +152,17 @@ export function PortfolioHero({
           {/* select-text:总净值是最该能复制的那个数。滚动与「整数/小数怎么拆」走 AmountTicker
               (两个抽屉同一份);hero 的字号在这里给 —— 它比抽屉大两档。 */}
           <div className="flex select-text items-baseline">
-            <AmountTicker
-              value={shownUsd}
-              scrubbing={scrub.point != null}
-              className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
-              fractionClassName="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl"
-            />
+            {syncing ? (
+              // 首次同步中:大数字位摆骨架,别把「还不知道」画成 $0(见 index.tsx 的 pending 判据)。
+              <Skeleton className="h-11 w-52 rounded-lg sm:h-14 sm:w-64" />
+            ) : (
+              <AmountTicker
+                value={shownUsd}
+                scrubbing={scrub.point != null}
+                className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
+                fractionClassName="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl"
+              />
+            )}
           </div>
           {/* 划动时不显 24h 药丸:那是「今天涨跌」,摆在一个历史时刻的数值旁边是两件事对不上。 */}
           {scrub.point ? null : (

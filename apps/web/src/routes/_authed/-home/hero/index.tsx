@@ -31,6 +31,10 @@ import { PortfolioHero } from "./portfolio-hero";
 export function HeroIsland() {
   const { selectedId } = usePortfolio();
   const { data } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
+  // 首次同步中(有账户、还没有任何快照):别把「还不知道」画成 $0 —— 整块 hero 走加载态。
+  // 总览查询会短轮询,拿到第一张快照后 `pending` 转 false,这里自动换成真数据。曲线 / 24h 盈亏
+  // 此刻也无从谈起,一并走加载占位,不必再进下面那个后到数据的边界。
+  if (data.pending) return <HeroShell overview={data} loading gainPending syncing />;
   const extrasKey = JSON.stringify([
     portfolioKeys.history(selectedId),
     portfolioKeys.gain24h(selectedId),
@@ -57,6 +61,7 @@ function HeroShell({
   loading = false,
   gainPending = false,
   gainFailed = false,
+  syncing = false,
 }: {
   overview: PortfolioOverview;
   series?: React.ComponentProps<typeof PortfolioHero>["series"];
@@ -64,6 +69,7 @@ function HeroShell({
   loading?: boolean;
   gainPending?: boolean;
   gainFailed?: boolean;
+  syncing?: boolean;
 }) {
   // 增量没到 / 塌了的时候,持仓行照旧渲染,只是它们的 delta 位由 `gainPending` 决定显示什么。
   const holdings = attachHoldingGains(overview.holdings, undefined, gainFailed);
@@ -75,6 +81,7 @@ function HeroShell({
       gain24h={gain24h}
       gainPending={gainPending}
       gainFailed={gainFailed}
+      syncing={syncing}
       holdings={holdings}
     />
   );

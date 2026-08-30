@@ -8,10 +8,12 @@ import {
   buildOverview,
   deriveLiveAccountTotals,
   GAIN_WINDOW_MS,
+  isFirstSyncPending,
   type OverviewInput,
   overviewChainIds,
   overviewEligibleBalances,
   overviewEnrichIds,
+  type PortfolioSnapshotData,
   toTokenView,
 } from "@/lib/core/portfolio";
 import { refreshableTokenIds } from "@/lib/core/token-model";
@@ -693,5 +695,31 @@ describe("buildOverview —— DeFi 盈亏的分母要带着走", () => {
       ),
     );
     expect(view.sections[0].defi[0].gain24h?.grossBasis).toBeCloseTo(100, 6);
+  });
+});
+
+// 首次同步中的判据(FOL-48 回归修复):有账户、还没有任何快照 = 显加载态,不是把 $0 当答案。
+// 只读 `accounts` / `snapshots` 两片,构造最小原料即可。
+describe("isFirstSyncPending", () => {
+  const raw = (accounts: number, snapshots: number): PortfolioSnapshotData =>
+    ({
+      accounts: Array.from({ length: accounts }, (_, i) => ({ id: `a${i}` })),
+      snapshots: Array.from({ length: snapshots }, (_, i) => [`a${i}`, {}]),
+    }) as unknown as PortfolioSnapshotData;
+
+  it("有账户、零快照 → 首次同步中", () => {
+    expect(isFirstSyncPending(raw(2, 0))).toBe(true);
+  });
+
+  it("零账户(真的空组合)→ 不是 pending,照常画空态", () => {
+    expect(isFirstSyncPending(raw(0, 0))).toBe(false);
+  });
+
+  it("至少一张快照落地 → 不再 pending", () => {
+    expect(isFirstSyncPending(raw(2, 1))).toBe(false);
+  });
+
+  it("原料还没到(undefined)→ 不是 pending", () => {
+    expect(isFirstSyncPending(undefined)).toBe(false);
   });
 });

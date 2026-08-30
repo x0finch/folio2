@@ -97,10 +97,15 @@ const backoffMs = (n: number) => Math.min(POLL_INTERVAL.precompute * 2 ** n, 15_
  */
 const pollEpisodes = new WeakMap<object, number>();
 
-export function pendingPollDelay(query: {
-  state: { data?: { pending?: true }; dataUpdateCount: number };
-}): number | false {
-  if (!query.state.data?.pending) {
+// 「这一轮 pending 已问了几次」的核心机 —— pending 一消失就清记录、下轮从头数(见上面 `pollEpisodes`
+// 的说明)。**两条读路径共用它**:响应体自带 `pending` 的那几条(总额盈亏 / tab 条,走 `pendingPollDelay`)
+// 与快照原料那条(「有账户还没有任何快照」= 首次同步中,由调用方算好布尔传进来)。`pending` 由调用方
+// 判、不由这里揣,是因为「什么算 pending」是各查询自己的性质(响应字段 vs 原料形状),不该塞进这台通用机。
+export function pollWhilePending(
+  query: { state: { dataUpdateCount: number } },
+  pending: boolean,
+): number | false {
+  if (!pending) {
     pollEpisodes.delete(query);
     return false;
   }
@@ -110,6 +115,12 @@ export function pendingPollDelay(query: {
     return precomputePollDelay(0);
   }
   return precomputePollDelay(query.state.dataUpdateCount - startedAt);
+}
+
+export function pendingPollDelay(query: {
+  state: { data?: { pending?: true }; dataUpdateCount: number };
+}): number | false {
+  return pollWhilePending(query, !!query.state.data?.pending);
 }
 
 /**

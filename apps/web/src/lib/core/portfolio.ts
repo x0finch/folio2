@@ -975,6 +975,17 @@ export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewVi
   });
 }
 
+// **首次同步中**:组合里有账户,但一张快照都还没有(没有任何账户同步落地 —— 含手记注入的合成
+// 快照也算)。这一刻 `overviewFromSnapshotData` 会算出总额 0 / 空持仓,与「真的空组合(零账户)」在
+// 屏幕上一模一样 —— 首页据此显加载态而不是把「还不知道」画成 $0。
+//
+// 判据从快照原料直接读:`accounts` 非空而 `snapshots`(byAccount entries,已含手记注入)全空。
+// 这与旧 `awaitFirstCompute` 的空态判据同源(`accountTotals.length === 0` 那一支),只是新语义是
+// 「等首次同步写快照」,不是旧的「等后台预计算落地」—— 预计算读侧已删。
+export function isFirstSyncPending(raw: PortfolioSnapshotData | undefined): boolean {
+  return !!raw && raw.accounts.length > 0 && raw.snapshots.length === 0;
+}
+
 //  —— 账户明细的 24h 盈亏摊分(纯计算部分)
 
 // `loadAccountHoldings` 的纯计算部分(ADR 0040 / ADR 0039)。取数(账户 / 快照 / 富化 / 窗口历史)
