@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
 import type { PortfolioRosterData, RosterSnapshotView } from "@/lib/core/portfolio";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
-import { resolveScope } from "./scope";
+import { type PortfolioSelect, resolveScope } from "./scope";
 
 // 名单原料读接口(FOL-49)—— 发账户 / 归属 / 标签 / pin / 最新快照(kind+meta) / connector 展示元数据,
 // 浏览器用 `computeHomeTabStrip` 自己算 tab 条。**只取行 + 备料,不做聚合**。
@@ -39,9 +39,9 @@ const connectorMetaEntries = (
   return out;
 };
 
-export const handleGetPortfolioRoster = Effect.fn("getPortfolioRoster")(function* (data: {
-  portfolioId?: string;
-}) {
+export const handleGetPortfolioRoster = Effect.fn("getPortfolioRoster")(function* (
+  data: PortfolioSelect,
+) {
   const db = yield* Database;
   const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
   const [allAccounts, snapshots, memberships, pins, tags] = yield* Effect.all(

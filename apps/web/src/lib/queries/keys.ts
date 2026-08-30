@@ -41,8 +41,11 @@ export const portfolioKeys = {
    * 而映射表要指得动「只刷 tab 条」就得有这么一个前缀。
    */
   tabs: () => [...portfolioKeys.all, "tabs"] as const,
-  /** 某一个组合口径的 tab 条。永续 / DeFi 是否出现按这个组合的账户集算。 */
-  tabStrip: (portfolioId: string) => [...portfolioKeys.tabs(), portfolioId] as const,
+  /**
+   * 名单原料(账户 / 归属 / 标签 / pin,FOL-49)—— 与快照原料分 key,改 pin 不必重拉余额。
+   * tab 条是这份原料的 `select` 产物(`computeHomeTabStrip`)。
+   */
+  roster: (portfolioId: string) => [...portfolioKeys.tabs(), "roster", portfolioId] as const,
   /**
    * 组合总览。**portfolioId 必须是真实 id,不能用「缺省 = 默认」的 undefined** ——
    * loader 预取的那份与组件按 selectedId 读的那份,key 对不上就等于首屏白拉一遍。

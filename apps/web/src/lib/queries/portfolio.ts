@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import {
   computeHomeTabStrip,
   type HomeTabStripView,
@@ -50,11 +50,18 @@ const selectTabStrip = (raw: PortfolioRosterData): HomeTabStrip => computeHomeTa
 
 export const homeTabStripQuery = (portfolioId: string) =>
   queryOptions<PortfolioRosterData, Error, HomeTabStrip>({
-    queryKey: portfolioKeys.tabStrip(portfolioId),
+    queryKey: portfolioKeys.roster(portfolioId),
     queryFn: () => getPortfolioRoster({ data: { portfolioId } }),
     select: selectTabStrip,
     staleTime: STALE_TIME.live,
   });
+
+/** pin 写路径等「等条子真的变了」时用 —— 复用 `homeTabStripQuery` 的 select,别手写第二份接线。 */
+export const fetchHomeTabStrip = (
+  queryClient: QueryClient,
+  portfolioId: string,
+): Promise<HomeTabStrip> =>
+  queryClient.fetchQuery({ ...homeTabStripQuery(portfolioId), staleTime: 0 }).then(selectTabStrip);
 
 // 一份总览 = 一个组合口径(+ 可选的自定义 Tab 收窄)。默认视图与非默认视图、Tab 视图走的是
 // **同一个工厂**,只是参数不同 —— 这正是「一句前缀刷新盖住三种视图」的前提。

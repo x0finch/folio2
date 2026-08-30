@@ -5,16 +5,13 @@ import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { MAX_PINS_PER_PORTFOLIO } from "@/lib/core/accounts-in-view";
 import { connectorLabelFallback } from "@/lib/core/logo";
-import { computeHomeTabStrip } from "@/lib/core/portfolio";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { accountListQuery } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import { refetchUntil } from "@/lib/queries/constants";
-import { portfolioKeys } from "@/lib/queries/keys";
-import { type HomeTabStrip, homeTabStripQuery } from "@/lib/queries/portfolio";
+import { fetchHomeTabStrip, type HomeTabStrip, homeTabStripQuery } from "@/lib/queries/portfolio";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { tagListQuery } from "@/lib/queries/tags";
-import { getPortfolioRoster } from "@/lib/server/portfolio";
 import { createTabPin, deleteTabPin, updateTabPinTarget } from "@/lib/server/tab-pins";
 import { kindTabsOf, tabAfterUnpin } from "@/routes/_authed/-home/home-tabs";
 import { type PinTargetChoice, TabPinPicker } from "./pin-picker";
@@ -35,18 +32,7 @@ const awaitStrip = (
   queryClient: ReturnType<typeof useQueryClient>,
   portfolioId: string,
   ok: (strip: HomeTabStrip) => boolean,
-) =>
-  refetchUntil(
-    () =>
-      queryClient
-        .fetchQuery({
-          queryKey: portfolioKeys.tabStrip(portfolioId),
-          queryFn: () => getPortfolioRoster({ data: { portfolioId } }),
-          staleTime: 0,
-        })
-        .then(computeHomeTabStrip),
-    ok,
-  );
+) => refetchUntil(() => fetchHomeTabStrip(queryClient, portfolioId), ok);
 
 // 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);
 // 管理面板经 PinPanel 浮出。写(改指向 / 取消固定)自包含。

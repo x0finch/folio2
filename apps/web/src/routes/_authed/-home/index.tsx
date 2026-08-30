@@ -16,7 +16,7 @@ export function Overview() {
   const { selectedId } = usePortfolio();
   // 两岛共用总览这份数据,所以会一起亮;失败则只塌那一格,壳(HeaderSync)不受影响。
   const overviewKey = JSON.stringify(portfolioKeys.overview(selectedId));
-  const tabsKey = JSON.stringify(portfolioKeys.tabStrip(selectedId));
+  const tabsKey = JSON.stringify(portfolioKeys.roster(selectedId));
   return (
     <div className="flex flex-col gap-6">
       <HeaderSync />
