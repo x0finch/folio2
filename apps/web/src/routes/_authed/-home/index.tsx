@@ -2,6 +2,7 @@ import { Skeleton } from "@folio/ui";
 import { Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
+import { floorToHour } from "@/lib/core/portfolio";
 import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { portfolioKeys } from "@/lib/queries/keys";
@@ -13,14 +14,15 @@ import { TabStripIsland } from "./tab";
 
 export function Overview() {
   const { selectedId } = usePortfolio();
-  // 两岛共用总览这份数据,所以会一起亮;失败则只塌那一格,壳(HeaderSync)不受影响。
-  const overviewKey = JSON.stringify(portfolioKeys.overview(selectedId));
+  const now = floorToHour(Date.now());
+  // 两岛共用原子快照这份数据,所以会一起亮;失败则只塌那一格,壳(HeaderSync)不受影响。
+  const snapshotsKey = JSON.stringify(portfolioKeys.snapshots(selectedId, now));
   const tabsKey = JSON.stringify(portfolioKeys.tabPins(selectedId));
   return (
     <div className="flex flex-col gap-6">
       <HeaderSync />
       <QueryBoundary
-        resetKey={`hero:${overviewKey}`}
+        resetKey={`hero:${snapshotsKey}`}
         pending={<HeroSkeleton />}
         failed={<IslandFailed />}
       >
@@ -35,7 +37,7 @@ export function Overview() {
           <TabStripSlot />
         </QueryBoundary>
         <QueryBoundary
-          resetKey={`holdings:${overviewKey}`}
+          resetKey={`holdings:${snapshotsKey}`}
           pending={<HoldingsSkeleton />}
           failed={<IslandFailed />}
         >

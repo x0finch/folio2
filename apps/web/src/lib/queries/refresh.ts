@@ -63,13 +63,10 @@ export const REFRESH_MAP = {
    * **标签域要刷**:标签定义与账户关联变了,徽标、标签选择器、tab 条的每档小计(客户端按
    * 标签关联 + 缓存的总览现算)都跟着变。
    *
-   * **组合域也要刷** —— 被选中的自定义 Tab 内容不是客户端现算,而是走 `portfolioKeys.overview
-   * (portfolioId, {kind:"tag"})` 的一份**服务端按标签关联窄化**的总览查询(`scopedSnapshotMaterials`
-   * 对 tag pin 会读 `listAccountLinks` 再 `accountsMatchingPin`)。给账户加 / 摘标签直接改了这份
-   * 数据的账户集,不刷 `portfolioKeys.all` 的话,用户正盯着的那个 tag 标签页会停在旧账户集 ——
-   * 加标签在屏幕上没有任何反应。tab 条那半靠 `tagKeys` 现算够了,标签页内容这半靠这条兜住。
+   * **首页总览已改原子 query(FOL-56)**:tag pin 内容在浏览器按 `accountTagLinks` 收窄账户,
+   * 不必 invalidate 快照键 —— 只刷标签域即可。
    */
-  "tag.write": [tagKeys.all, portfolioKeys.all],
+  "tag.write": [tagKeys.all],
 
   /**
    * 新建 / 改名 / 删除组合、设默认组合、把账户移到别的组合 —— 清单、归属、两边的总览与走势都可能变。

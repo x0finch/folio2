@@ -12,8 +12,7 @@ import { getPortfolioHistory, getPortfolioSnapshotData } from "@/lib/server/port
 import { listPortfolios } from "@/lib/server/portfolios";
 import { getPortfolioTabPins } from "@/lib/server/tab-pins";
 import { pollWhilePending, RETRY, STALE_TIME, shouldRetry } from "./constants";
-import { type PinScopeKey, portfolioKeys, tagKeys } from "./keys";
-import type { TagList } from "./tags";
+import { type PinScopeKey, portfolioKeys } from "./keys";
 
 // 组合域的读取入口 —— 与 `lib/server/portfolio`(读模型)+ `lib/server/portfolios`(实体)的读取型 server fn 对应。
 //
@@ -39,7 +38,7 @@ export const portfolioListQuery = () =>
     retry: (failureCount, error) => shouldRetry(failureCount, error, RETRY.forever),
   });
 
-/** 首页 tab 条 pin 原料 —— 只含 pin 行;账户/快照走 overview 缓存,标签走 tagListQuery。 */
+/** 首页 tab 条 pin 原料 —— 只含 pin 行;账户/快照走原子 query 缓存,标签走 tagListQuery。 */
 export const portfolioTabPinsQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: portfolioKeys.tabPins(portfolioId),
@@ -54,30 +53,16 @@ export const fetchHomeTabStrip = async (
   queryClient: QueryClient,
   portfolioId: string,
 ): Promise<HomeTabStrip> => {
-  const tabPins = await queryClient.fetchQuery({
-    ...portfolioTabPinsQuery(portfolioId),
-    staleTime: 0,
-  });
-  const snapshot = queryClient.getQueryData<PortfolioSnapshotData>(
-    portfolioKeys.overview(portfolioId),
-  );
-  const tags = queryClient.getQueryData<TagList>(tagKeys.list(portfolioId));
-  if (!snapshot || !tags) {
-    throw new Error("fetchHomeTabStrip: overview or tags missing from query cache");
-  }
+  const { fetchPortfolioSnapshotAtoms } = await import("./portfolio-overview-compose");
+  const [tabPins, snapshot, tags] = await Promise.all([
+    queryClient.fetchQuery({ ...portfolioTabPinsQuery(portfolioId), staleTime: 0 }),
+    fetchPortfolioSnapshotAtoms(queryClient, portfolioId),
+    queryClient.fetchQuery({ ...(await import("./tags")).tagListQuery(portfolioId), staleTime: 0 }),
+  ]);
   return computeHomeTabStrip(snapshot, tabPins, tags);
 };
 
-// 一份总览 = 一个组合口径(+ 可选的自定义 Tab 收窄)。默认视图与非默认视图、Tab 视图走的是
-// **同一个工厂**,只是参数不同 —— 这正是「一句前缀刷新盖住三种视图」的前提。
-//
-// **一份原料一个 queryKey,`select` 现算**(FOL-48):接口发的是当前快照原料,总额 / 持仓 /
-// 各小计 / pricesStale 由 `overviewFromSnapshotData` 在浏览器里算 —— 单币当前价值也从**同一份
-// select 结果**里取一行,不单独请求(FOL-44 定的共用)。`select` 只在原料变化时重跑,SSR 与
-// 补水两遍算的是同一份原料 → 结果一致,不会 hydration mismatch。
-//
-// 首次同步中的加载态:有账户、还没有任何快照时 `select` 判出 `pending`,首页 hero 显加载态
-// 而不是把「还不知道」画成 $0;拿到第一张快照(`pending` 转 false)就停(`pollWhilePending`)。
+// 洞察页等仍走这条(FOL-59 前保留)。首页已改原子 query + `usePortfolioOverview`。
 const selectOverview = (raw: PortfolioSnapshotData): PortfolioOverview => ({
   ...overviewFromSnapshotData(raw),
   pending: isFirstSyncPending(raw),

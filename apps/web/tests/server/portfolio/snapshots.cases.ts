@@ -1,17 +1,25 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   accountRowsFromRaw,
   assembleAccountHoldingsData,
+  connectorMetaForOverview,
   floorToHour,
   GAIN_START_FLOOR_MS,
   GAIN_WINDOW_MS,
+  overviewChainIds,
+  overviewFromSnapshotData,
+  portfolioOverviewFromAtoms,
 } from "@/lib/core/portfolio";
 import { handleListAccounts } from "@/lib/server/accounts/list";
 import { handleListAccountHoldings } from "@/lib/server/portfolio/account-holdings";
+import { handleGetFiatRefs } from "@/lib/server/portfolio/fiat-refs";
+import { handleResolvePlatformMeta } from "@/lib/server/portfolio/platform-meta";
+import { handleGetPortfolioSnapshotData } from "@/lib/server/portfolio/snapshot-data";
 import { handleGetSnapshots } from "@/lib/server/portfolio/snapshots";
 import { handleGetValuationSettings } from "@/lib/server/settings/valuation";
 import { handleGetTokenEnrichment } from "@/lib/server/tokens/enrichment";
 import { db } from "../_kit/db";
+import { realRegistry } from "../_kit/fakes";
 import { blockOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
@@ -154,5 +162,90 @@ describe("portfolio/account-holdings-compose", () => {
     expect(composed.rows[0]?.totalUsd).toBeCloseTo(legacy.rows[0]?.totalUsd ?? 0, 6);
     expect(composed.rows[0]?.gain24h?.amount).toBeCloseTo(legacy.rows[0]?.gain24h?.amount ?? 0, 6);
     expect(composed.pricesStale).toBe(legacy.pricesStale);
+  });
+});
+
+describe("portfolio/overview-compose", () => {
+  const USER = "h-pf-overview-compose";
+  const BTC = "token-btc";
+  const ETH = "token-eth";
+
+  let NOW = 0;
+
+  beforeEach(async () => {
+    blockOutbound();
+    await freshUser(USER);
+    NOW = Date.now();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("原子资源合并后与 getPortfolioSnapshotData + overviewFromSnapshotData 逐值一致", async () => {
+    const chain = await seedAccount(USER, "链上", "bitcoin");
+    await seedSnapshot(USER, chain.id, NOW, [
+      { tokenId: BTC, amount: 1, usdValue: 100 },
+      { tokenId: ETH, amount: 2, usdValue: 50 },
+    ]);
+    await seedManualAccount(USER, "手记", { symbol: "SOL", unitPrice: 10, amount: 3 });
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+
+    const now = floorToHour(NOW);
+    const [
+      accounts,
+      snapshotsNow,
+      snapshotsPrev,
+      settings,
+      enrichment,
+      fiatRefsData,
+      legacyRaw,
+      registry,
+    ] = await Promise.all([
+      call(USER, handleListAccounts({})),
+      call(USER, handleGetSnapshots({ at: now, now: NOW })),
+      call(
+        USER,
+        handleGetSnapshots({
+          at: now - GAIN_WINDOW_MS,
+          after: now - GAIN_START_FLOOR_MS,
+          now,
+        }),
+      ),
+      call(USER, handleGetValuationSettings()),
+      call(USER, handleGetTokenEnrichment()),
+      call(USER, handleGetFiatRefs({})),
+      call(USER, handleGetPortfolioSnapshotData({})),
+      realRegistry(),
+    ]);
+    const activeAccounts = accounts.filter((a) => a.archivedAt == null);
+    const connectorMeta = connectorMetaForOverview(activeAccounts, snapshotsNow, registry.catalog);
+    const connectorLookup = (key: string) => {
+      const entry = registry.catalog[key];
+      return entry ? { name: entry.label, logo: entry.logo } : null;
+    };
+    const byAccount = new Map(
+      snapshotsNow.map((s) => [
+        s.accountId,
+        { snapshot: { takenAt: s.takenAt }, balances: s.balances },
+      ]),
+    );
+    const chainIds = overviewChainIds(activeAccounts, byAccount, connectorLookup);
+    const { platformMeta } = await call(USER, handleResolvePlatformMeta({ chainIds }));
+
+    const composed = portfolioOverviewFromAtoms({
+      accounts: activeAccounts,
+      snapshotsNow,
+      snapshotsPrev,
+      enriched: new Map(enrichment.enriched),
+      mode: settings.valuationMode,
+      platformMeta,
+      connectorMeta,
+      fiatRefs: fiatRefsData.fiatRefs,
+      now,
+    });
+    const legacy = overviewFromSnapshotData(legacyRaw);
+    expect(composed).toEqual({ ...legacy, pending: false });
+    expect(composed.totalUsd).toBe(180);
   });
 });
