@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// #495 票 1:洞察 loader 只等默认组合 id,总览和历史发出即返回。
+// #495 票 1:洞察 loader 只等默认组合 id,原子快照和历史发出即返回。
+// FOL-57:总览改原子 query,不再预取 `portfolioOverviewQuery`。
 // 谁把它们重新 await 回去,硬刷新的白屏就回来,而且没有任何运行时报错。
 
 const ROOT = join(import.meta.dirname, "../src");
@@ -16,13 +17,14 @@ function stripComments(source: string): string {
 }
 
 describe("洞察 loader 不再等待慢查询", () => {
-  it("发出总览和历史,但不 await", () => {
+  it("发出原子快照和历史,但不 await", () => {
     const route = stripComments(src("routes/_authed/insights.tsx"));
-    expect(route).toContain("portfolioOverviewQuery(");
+    expect(route).toContain("accountHoldingsSnapshotQueries(");
     expect(route).toContain("portfolioHistoryQuery(");
-    expect(route).not.toMatch(/await Promise\.all\([\s\S]*portfolioOverviewQuery/);
-    expect(route).not.toMatch(/await queryClient\.ensureQueryData\(portfolioOverviewQuery/);
+    expect(route).not.toMatch(/await Promise\.all\([\s\S]*accountHoldingsSnapshotQueries/);
     expect(route).not.toMatch(/await queryClient\.ensureQueryData\(portfolioHistoryQuery/);
+    expect(route).not.toContain("portfolioOverviewQuery");
+    expect(route).not.toContain("getPortfolioSnapshotData");
   });
 
   it("路由没有 pendingComponent", () => {
@@ -56,5 +58,12 @@ describe("洞察两图各自加载", () => {
     // tab 先渲、饼图那块在后面 —— 挂起点在 `AllocationReady` 里,挂不住 tab。
     expect(page).toMatch(/<Tabs[\s\S]*\{pie\}/);
     expect(page).toMatch(/pie = \([\s\S]*<AllocationReady/);
+  });
+
+  it("两图从原子总览合并读持仓与曲线末点(FOL-57)", () => {
+    const page = stripComments(src("routes/_authed/-insights/index.tsx"));
+    expect(page).toMatch(/usePortfolioOverview\(/);
+    expect(page).not.toContain("portfolioOverviewQuery");
+    expect(page).not.toContain("getPortfolioSnapshotData");
   });
 });

@@ -1,11 +1,15 @@
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { z } from "zod";
+import { floorToHour } from "@/lib/core/portfolio";
 import { pickSelectedPortfolio } from "@/lib/hooks/use-portfolio";
-import {
-  portfolioHistoryQuery,
-  portfolioListQuery,
-  portfolioOverviewQuery,
-} from "@/lib/queries/portfolio";
+import { accountListQuery } from "@/lib/queries/accounts";
+import { connectorCatalogQuery } from "@/lib/queries/connectors";
+import { portfolioHistoryQuery, portfolioListQuery } from "@/lib/queries/portfolio";
+import { fiatRefsQuery } from "@/lib/queries/portfolio-overview-compose";
+import { valuationSettingsQuery } from "@/lib/queries/settings";
+import { accountHoldingsSnapshotQueries } from "@/lib/queries/snapshots";
+import { accountTagLinksQuery } from "@/lib/queries/tags";
+import { tokenEnrichmentQuery } from "@/lib/queries/tokens";
 import { Insights } from "./-insights";
 import { ALLOC_DIMENSION, DEFAULT_DIM } from "./-insights/allocation";
 
@@ -21,11 +25,20 @@ export const Route = createFileRoute("/_authed/insights")({
   search: { middlewares: [stripSearchParams({ dim: DEFAULT_DIM })] },
   // 预取的 key 跟着地址里的组合走(ADR 0046,理由见首页那条);参数进 `loaderDeps` 才算真的依赖它。
   loaderDeps: ({ search }) => ({ portfolio: search.portfolio }),
-  // 与首页同款:loader 只等「是哪个组合」(预取 key 必须对上),总览和历史发出即返回。
+  // 与首页同款:loader 只等「是哪个组合」(预取 key 必须对上),原子快照与历史发出即返回。
   loader: async ({ context: { queryClient }, deps }) => {
     const { portfolios, defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
     const selectedId = pickSelectedPortfolio(deps.portfolio, portfolios, defaultId);
-    queryClient.ensureQueryData(portfolioOverviewQuery(selectedId));
+    const now = floorToHour(Date.now());
+    const snapshotQueries = accountHoldingsSnapshotQueries(selectedId, now);
+    queryClient.ensureQueryData(accountListQuery(selectedId));
+    queryClient.ensureQueryData(accountTagLinksQuery(selectedId));
+    queryClient.ensureQueryData(snapshotQueries.now);
+    queryClient.ensureQueryData(snapshotQueries.prev);
+    queryClient.ensureQueryData(valuationSettingsQuery());
+    queryClient.ensureQueryData(tokenEnrichmentQuery());
+    queryClient.ensureQueryData(connectorCatalogQuery());
+    queryClient.ensureQueryData(fiatRefsQuery(selectedId));
     queryClient.ensureQueryData(portfolioHistoryQuery(selectedId, "all"));
   },
   component: Insights,
