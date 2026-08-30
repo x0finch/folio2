@@ -1,3 +1,4 @@
+import type { Note } from "@folio/connectors-basic";
 import type { AccountSafe, SnapshotWithBalances, TabPin, Tag } from "@folio/db";
 import {
   fiatCodeOf,
@@ -1037,4 +1038,53 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
       }),
     };
   });
+}
+
+//  —— 账户明细:发原料 + 浏览器算(与首页 `overviewFromSnapshotData` 同路,FOL-44 收尾)
+
+// 账户明细「一行」的原料:冻结快照值 + 富化(含 `unitPrice`)。**活跃行的现价重算 + 24h 盈亏
+// 不在这里做,在浏览器 `accountRowsFromRaw` 里做** —— 服务端只发料,和首页那条读接口一个方向。
+interface AccountHoldingRow {
+  account: { id: string; label: string };
+  archivedAt: number | null;
+  // 冻结快照总额:归档行原样用(封存,ADR 0039);活跃行浏览器按 `liveValue` 重算后覆盖。
+  totalUsd: number;
+  takenAt: number | null;
+  note?: Note[];
+  balances: OverviewBalance[];
+  pricesStale: boolean;
+}
+
+// 账户明细读接口的原料(`getAccountHoldings` 的出参)。**只发料,不聚合、不重算、不算盈亏** ——
+// 那三步全在浏览器 `accountRowsFromRaw` 里(与首页 `getPortfolioSnapshotData` 同一个方向)。
+export interface AccountHoldingsData {
+  rows: AccountHoldingRow[];
+  // 「24 小时前」那一组(`snapshots.asOf` + manual 折算),浏览器与当前组两端相减算 24h 盈亏。
+  prevSnapshots: [string, SnapshotView][];
+  // 估值口径(self-first / source-first)—— 现价重算用它,与首页同一个 mode。
+  mode: ValuationMode;
+  pricesStale: boolean;
+}
+
+// 账户明细在浏览器算完的视图:每账户带现价重算的总额/持仓 + 两端相减的 24h 盈亏。
+export interface AccountHoldingsView {
+  rows: WithAccountHoldingGain<AccountHoldingRow>[];
+  pricesStale: boolean;
+}
+
+// 浏览器把账户明细原料算成行:活跃账户逐行 `liveValue` 现价重算(与首页 `deriveLiveAccountTotals`
+// 同口径:盯市行取实时源价、CEX 自带价行 self-first 下≡冻结、非同质/无价回退冻结),账户总额 =
+// 重算后各行之和;归档账户不现推(封存值取自快照,ADR 0039)。随后两端相减贴上 24h 盈亏
+// (`attachAccountHoldingGains`:当前端 = 重算后的现值,起点端 = 24 小时前那张冻结快照)。
+export function accountRowsFromRaw(raw: AccountHoldingsData): AccountHoldingsView {
+  const prevByAccount = sliceMap(raw.prevSnapshots);
+  const priced = raw.rows.map((r): AccountHoldingRow => {
+    if (r.archivedAt != null) return r;
+    const balances = r.balances.map((b) => ({
+      ...b,
+      usdValue: liveValue(b, isFungible(viewKind(b)) ? b.unitPrice : undefined, raw.mode),
+    }));
+    return { ...r, balances, totalUsd: balances.reduce((sum, b) => sum + b.usdValue, 0) };
+  });
+  return { rows: attachAccountHoldingGains(priced, prevByAccount), pricesStale: raw.pricesStale };
 }
