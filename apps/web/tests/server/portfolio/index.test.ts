@@ -7,4 +7,5 @@ import "./endpoint-gain.cases";
 import "./get-history.cases";
 import "./overview.cases";
 import "./scope.cases";
+import "./snapshots.cases";
 import "./tabs.cases";

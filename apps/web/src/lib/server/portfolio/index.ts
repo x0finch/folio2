@@ -5,6 +5,7 @@ import { handleListAccountHoldings } from "./account-holdings";
 import { handleGetPortfolioHistory, PortfolioHistoryInput } from "./get-history";
 import { PortfolioScopeInput, PortfolioSelectInput } from "./scope";
 import { handleGetPortfolioSnapshotData } from "./snapshot-data";
+import { handleGetSnapshots, SnapshotsInput } from "./snapshots";
 
 // portfolio 资源面(读模型):只做装配,实现在同目录 RESTful 文件里(共享装配与入参 schema 在 ./scope)。
 
@@ -21,6 +22,11 @@ export const listAccountHoldings = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioSelectInput)
   .handler(runEffect(handleListAccountHoldings));
+
+export const getSnapshots = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .validator(SnapshotsInput)
+  .handler(runEffect(handleGetSnapshots));
 
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])

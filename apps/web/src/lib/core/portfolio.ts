@@ -31,7 +31,7 @@ import {
   tokenLogoUrl,
   toLogoSource,
 } from "@/lib/core/logo";
-import { refreshableTokenIds } from "@/lib/core/token-model";
+import { displayTokenId, refreshableTokenIds, type TokenEnrichment } from "@/lib/core/token-model";
 
 // 首页 / 组合的**纯计算层**(FOL-45)。跟 `history.ts` 同目录、同风格:无 Effect、无 Oracle、
 // 无 cloudflare env —— 喂原料(账户 / 快照 / 富化字典 / 价格字典 / 平台元数据字典)→ 出视图形状。
@@ -71,6 +71,22 @@ export function toTokenView(r: TokenRecord): TokenView {
   const { hasLogo } = toLogoSource(r);
   return { id: r.id, symbol: r.symbol, name: r.name, price: r.price, hasLogo };
 }
+
+// `tokenEnrichment` 原子资源的瘦身形状:在 `TokenView` 上多带 `hasRef`(刷价门与 enrich 同源)。
+export type TokenEnrichmentView = TokenView & { hasRef: boolean };
+
+export function toTokenEnrichmentView(r: TokenRecord): TokenEnrichmentView {
+  return { ...toTokenView(r), hasRef: r.ref != null };
+}
+
+const enrichmentFromView = (tv: TokenEnrichmentView): TokenEnrichment => ({
+  symbol: tv.symbol,
+  name: tv.name,
+  logo: tokenLogoUrl(tv),
+  unitPrice: tv.price?.unitPrice,
+  change24h: tv.price?.change24h,
+  marketCapRank: tv.price?.marketCapRank,
+});
 
 //  —— 现价(读时现推)
 
@@ -836,7 +852,7 @@ export function buildOverview(
 // (balance 级展示 note 只在账户抽屉那条路渲染,首页总览不显 —— 见 `toAccountSections` 的 spot 分区被
 // buildOverview 丢弃)。`metaJson` 留着:defi/perp 的 `parseDefiMeta` / `PerpEquityMeta` / `viewKind`
 // 全靠它。实测把快照那一段 raw 砍掉约一半。
-interface BalanceView {
+export interface BalanceView {
   id: string; // 无 token_id 的行的分组键;defiChange 按它挂 change24h;DefiRow.id —— 必须留
   amount: number;
   usdValue: number;
@@ -1040,7 +1056,79 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
   });
 }
 
+// 客户端 hour-floor 锚点(FOL-54):快照 / 盈亏窗口 key 用同一刻度,避免 SSR 与补水各算各的 now。
+export const floorToHour = (ms: number) => Math.floor(ms / 3_600_000) * 3_600_000;
+
 //  —— 账户明细:发原料 + 浏览器算(与首页 `overviewFromSnapshotData` 同路,FOL-44 收尾)
+
+export interface AccountSnapshotEntry {
+  accountId: string;
+  takenAt: number;
+  totalUsd: number;
+  note?: Note[];
+  balances: BalanceView[];
+}
+
+const enrichBalanceRows = (
+  balances: BalanceView[],
+  enriched: ReadonlyMap<string, TokenEnrichmentView>,
+): OverviewBalance[] =>
+  balances.map((b) => {
+    const id = displayTokenId(b);
+    const tv = id ? enriched.get(id) : undefined;
+    return tv ? { ...b, ...enrichmentFromView(tv) } : b;
+  });
+
+const pricesStaleForRows = (
+  rows: readonly { archivedAt: number | null; balances: BalanceView[] }[],
+  enriched: ReadonlyMap<string, TokenEnrichmentView>,
+): boolean => {
+  const refreshable = new Set(refreshableTokenIds(rows.flatMap((r) => r.balances)));
+  for (const row of rows) {
+    if (row.archivedAt != null) continue;
+    for (const b of row.balances) {
+      const id = displayTokenId(b);
+      if (!id || !refreshable.has(id)) continue;
+      const tv = enriched.get(id);
+      if (tv?.hasRef && tv.price?.stale !== false) return true;
+    }
+  }
+  return false;
+};
+
+// 账户页原子资源在浏览器合并 → `AccountHoldingsData` → `accountRowsFromRaw`(FOL-54 / FOL-55)。
+export function assembleAccountHoldingsData(args: {
+  accounts: readonly { id: string; label: string; archivedAt: number | null }[];
+  snapshotsNow: readonly AccountSnapshotEntry[];
+  snapshotsPrev: readonly AccountSnapshotEntry[];
+  mode: ValuationMode;
+  enriched: ReadonlyMap<string, TokenEnrichmentView>;
+}): AccountHoldingsData {
+  const nowByAccount = new Map(args.snapshotsNow.map((s) => [s.accountId, s]));
+  const rows = args.accounts.map((account) => {
+    const latest = nowByAccount.get(account.id);
+    const balances = enrichBalanceRows(latest?.balances ?? [], args.enriched);
+    return {
+      account: { id: account.id, label: account.label },
+      archivedAt: account.archivedAt,
+      totalUsd: latest?.totalUsd ?? 0,
+      takenAt: latest?.takenAt ?? null,
+      note: latest?.note,
+      balances,
+      pricesStale: false,
+    };
+  });
+  const prevSnapshots = args.snapshotsPrev.map((s): [string, SnapshotView] => [
+    s.accountId,
+    { takenAt: s.takenAt, balances: s.balances },
+  ]);
+  return {
+    rows,
+    prevSnapshots,
+    mode: args.mode,
+    pricesStale: pricesStaleForRows(rows, args.enriched),
+  };
+}
 
 // 账户明细「一行」的原料:冻结快照值 + 富化(含 `unitPrice`)。**活跃行的现价重算 + 24h 盈亏
 // 不在这里做,在浏览器 `accountRowsFromRaw` 里做** —— 服务端只发料,和首页那条读接口一个方向。
