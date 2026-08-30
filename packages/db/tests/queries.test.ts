@@ -232,6 +232,32 @@ describe("snapshots", () => {
     expect(await snapshotsOf(USER_A).listTotalsByAccount(acc.id, 999)).toEqual([]);
   });
 
+  it("listBalanceHistoryForToken:只取该 token 在窗口内的余额行,升序", async () => {
+    const acc = await accounts(USER_A).create({ connectorId: "binance", label: "B", creds: "x" });
+    await snapshotsOf(USER_A).write(acc.id, {
+      takenAt: 100,
+      totalUsd: 30,
+      balances: [
+        { tokenId: "tk-btc", amount: 1, usdValue: 10, kind: "spot", platform: "binance" },
+        { tokenId: "tk-eth", amount: 1, usdValue: 20, kind: "spot", platform: "binance" },
+      ],
+    });
+    await snapshotsOf(USER_A).write(acc.id, {
+      takenAt: 300,
+      totalUsd: 40,
+      balances: [{ tokenId: "tk-btc", amount: 1, usdValue: 30, kind: "spot", platform: "binance" }],
+    });
+
+    expect(await snapshotsOf(USER_A).listBalanceHistoryForToken("tk-btc")).toEqual([
+      expect.objectContaining({ takenAt: 100, usdValue: 10, tokenId: "tk-btc" }),
+      expect.objectContaining({ takenAt: 300, usdValue: 30, tokenId: "tk-btc" }),
+    ]);
+    expect(await snapshotsOf(USER_A).listBalanceHistoryForToken("tk-btc", 200)).toEqual([
+      expect.objectContaining({ takenAt: 300, usdValue: 30 }),
+    ]);
+    expect(await snapshotsOf(USER_A).listBalanceHistoryForToken("tk-doge")).toEqual([]);
+  });
+
   it("persists per-balance note (single Note) + account-level note (Note[]) and safeParses back (note 重设计)", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "bitcoin",
