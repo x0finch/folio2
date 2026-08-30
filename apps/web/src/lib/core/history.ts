@@ -35,7 +35,7 @@ const BUCKET_LADDER = [
 const TARGET_MAX_POINTS = 40;
 
 export type { HistoryRange } from "./history-range";
-export { isLongHistoryRange, rangeSince, shouldSampleHistory } from "./history-range";
+export { isLongHistoryRange, rangeSince } from "./history-range";
 
 // 自适应降采样:按数据【实际跨度】选桶,每桶保留最后一个点(该桶收盘值),压掉"日内手动多次
 // 同步"造成的密集簇,同时让粒度随数据量自适应 —— 约 1 天数据 → 小时级点,约 30 天 → 日级点。
