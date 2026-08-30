@@ -16,7 +16,8 @@ export const TokenValueHistoryInput = z.object({
 export const handleGetTokenValueHistory = Effect.fn("getTokenValueHistory")(function* (
   data: z.infer<typeof TokenValueHistoryInput>,
 ) {
-  const rows = yield* (yield* Database).snapshots.listBalanceHistoryForToken(data.key, data.since);
+  const db = yield* Database;
+  const rows = yield* db.snapshots.listBalanceHistoryForToken(data.key, data.since);
   return {
     rows: rows.map((r) => ({
       accountId: r.accountId,
