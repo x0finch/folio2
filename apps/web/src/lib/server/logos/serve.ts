@@ -20,6 +20,47 @@ const negative = (): Response =>
 const transient = (): Response =>
   new Response(null, { status: 502, headers: { "cache-control": NO_STORE } });
 
+// 200 图响应的公共头(http 透传与 data: 内嵌图共用):content-type 一律过 `safeContentType`
+// 白名单(svg/html 降级),配 nosniff + 缓存头 + Cache-Tag。
+const okHeaders = (
+  ct: string | null,
+  kind: "token" | "platform" | "defi",
+  id: string,
+  opts?: { private?: boolean },
+): HeadersInit => ({
+  "content-type": safeContentType(ct),
+  "x-content-type-options": "nosniff",
+  "cache-control": opts?.private ? CACHE_HIT_PRIVATE : CACHE_HIT,
+  "cache-tag": `logo:${kind}:${id}`,
+});
+
+// data-URI(如 OKX 合成行品牌标 / 法币内嵌图)→ 解出 mime + 字节直接构造 200,不 fetch。
+// 走与 http 图**同一条安全过滤**(`okHeaders` → `safeContentType`):data: 里可能藏 svg+xml/html,
+// 必须降级为 octet-stream + nosniff,不能让它以可执行类型在本域渲染。畸形/解码失败 → 负缓存。
+function serveDataUri(
+  uri: string,
+  kind: "token" | "platform" | "defi",
+  id: string,
+  opts?: { private?: boolean },
+): Response {
+  const comma = uri.indexOf(",");
+  if (comma === -1) return negative(); // 无逗号 → 不是合法 data-URI
+  const meta = uri.slice("data:".length, comma); // 如 "image/png;base64" / "image/svg+xml"
+  const base64 = /;base64$/i.test(meta);
+  const mime = meta.replace(/;base64$/i, "").split(";")[0] || null; // 去参数(charset 等)只留 mime
+  const payload = uri.slice(comma + 1);
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    // 两个分支都按「binary string → 逐字节」取:base64 先 atob,percent-encoded 先 decodeURIComponent。
+    // **不能用 TextEncoder**:它会把 >127 的码点(如 PNG 头 0x89)重编码成多字节 UTF-8,损坏二进制图。
+    const binary = base64 ? atob(payload) : decodeURIComponent(payload);
+    bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  } catch {
+    return negative(); // 解码失败(坏 base64 / 坏百分号转义)当没图
+  }
+  return new Response(bytes, { status: 200, headers: okHeaders(mime, kind, id, opts) });
+}
+
 // resolveUpstream:cache-only 读出上游 logo URL(缺则 undefined)。kind/id 仅用于 Cache-Tag 命名。
 export async function serveLogo(
   resolveUpstream: () => Promise<string | undefined>,
@@ -36,6 +77,9 @@ export async function serveLogo(
   }
   if (!upstream) return negative();
 
+  // 内嵌 data-URI 图(无法由 http 拿):就地解码,不 fetch。走同一套安全过滤 + 缓存头。
+  if (upstream.startsWith("data:")) return serveDataUri(upstream, kind, id, opts);
+
   let res: Response;
   try {
     // await 只等响应头(不等 body):要据 status/content-type 分支。body 不落内存。
@@ -49,11 +93,6 @@ export async function serveLogo(
   // res.body 是 ReadableStream,按引用交出去 → 字节流式透传,worker 不缓冲整张图。
   return new Response(res.body, {
     status: 200,
-    headers: {
-      "content-type": safeContentType(res.headers.get("content-type")),
-      "x-content-type-options": "nosniff",
-      "cache-control": opts?.private ? CACHE_HIT_PRIVATE : CACHE_HIT,
-      "cache-tag": `logo:${kind}:${id}`,
-    },
+    headers: okHeaders(res.headers.get("content-type"), kind, id, opts),
   });
 }

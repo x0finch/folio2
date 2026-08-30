@@ -3,6 +3,7 @@ import {
   fiatCodeOf,
   type PlatformMeta,
   type TokenRecord,
+  type TokenRecordPrice,
   type ValuationMode,
   valuate,
 } from "@folio/oracle-basic";
@@ -21,7 +22,8 @@ import {
   type HistoryPoint,
   type SnapshotTotalRow,
 } from "@/lib/core/history";
-import { platformLogoUrl, tokenLogoUrl } from "@/lib/core/logo";
+import { platformLogoUrl, tokenLogoUrl, toLogoSource } from "@/lib/core/logo";
+import { refreshableTokenIds } from "@/lib/core/token-model";
 
 // 首页 / 组合的**纯计算层**(FOL-45)。跟 `history.ts` 同目录、同风格:无 Effect、无 Oracle、
 // 无 cloudflare env —— 喂原料(账户 / 快照 / 富化字典 / 价格字典 / 平台元数据字典)→ 出视图形状。
@@ -31,8 +33,36 @@ import { platformLogoUrl, tokenLogoUrl } from "@/lib/core/logo";
 // 的 `buildScopedOverview`、`portfolio/account-holdings.ts` 等):它们在 Effect 里备好字典,再把
 // 这些纯函数当普通函数调。这样这一层既能脱离 server fn 单测,也能在同步收官那一刻被直接算。
 
-const balancesOf = (byAccount: Map<string, SnapshotWithBalances>, id: string): OverviewBalance[] =>
-  (byAccount.get(id)?.balances ?? []) as OverviewBalance[];
+// `buildOverview` 真正要的最小快照切片:`takenAt`(账户 totalUsd 那一刻)+ 余额行。快照原料下发
+// 浏览器时只发这些(见 `SnapshotView` / `BalanceView`),整包因此瘦一大截。服务端的完整
+// `SnapshotWithBalances` 结构上也满足它(`ReadonlyMap` 对值协变),两条路照旧共用同一批算术。
+export interface SnapshotSlice {
+  snapshot: { takenAt: number };
+  balances: OverviewBalance[];
+}
+
+const balancesOf = (byAccount: ReadonlyMap<string, SnapshotSlice>, id: string): OverviewBalance[] =>
+  byAccount.get(id)?.balances ?? [];
+
+// 富化字典喂 `buildOverview` / 下发到浏览器的**瘦身形状**(FOL-48 优化):只留 buildOverview 真正
+// 用到的字段。**logo 上游 URL 不进来** —— 只带「有没有图」的布尔;`tokenLogoUrl` 由 token id 拼
+// `/api/logo/token/{id}`,http 与 data: 内嵌图都经代理端点返回(见 `logos/serve.ts`),payload 不带
+// 任何 URL。实测把富化字典 raw 砍掉约四分之一。
+export interface TokenView {
+  id: string;
+  symbol: string;
+  name: string;
+  price?: TokenRecordPrice;
+  hasLogo: boolean;
+}
+
+// 完整 `TokenRecord`(参考层读出、带上游 URL)→ 瘦身 `TokenView`。服务端两条路(`buildScopedOverview`
+// 现算 / 快照原料接口下发)都在装配点经此收窄,于是「浏览器算」与「服务端算」喂进 buildOverview 的
+// 是逐值相同的原料。
+export function toTokenView(r: TokenRecord): TokenView {
+  const { hasLogo } = toLogoSource(r);
+  return { id: r.id, symbol: r.symbol, name: r.name, price: r.price, hasLogo };
+}
 
 //  —— 现价(读时现推)
 
@@ -65,8 +95,9 @@ const fungibleId = (b: OverviewBalance): string | null =>
 // 主页(buildOverview)与资产曲线当下点(history)共用本函数,保证「主页总价 ≡ 曲线当下点」。
 export const deriveLiveAccountTotals = (
   accounts: AccountSafe[],
-  byAccount: Map<string, SnapshotWithBalances>,
-  enriched: ReadonlyMap<string, TokenRecord>,
+  byAccount: ReadonlyMap<string, SnapshotSlice>,
+  // 只读现价 —— 结构型入参,`TokenView` 与完整 `TokenRecord` 都喂得进(免得调用点被迫先收窄)。
+  enriched: ReadonlyMap<string, { price?: TokenRecordPrice }>,
   mode: ValuationMode,
 ): Map<string, number> => {
   const priceOf = (b: OverviewBalance): number | undefined => {
@@ -536,8 +567,9 @@ export function resolvePinLabel(
 // 走每账户次级分区(不进聚合)。总额 = 各账户最新快照 totalUsd 之和。
 
 export interface OverviewInput {
-  // 代币富化(按 token_id 查表取回整行)。**由调用方那一次装配供上**(`tokens.enrich(overviewEnrichIds(...))`)。
-  enriched: ReadonlyMap<string, TokenRecord>;
+  // 代币富化(按 token_id 查表取回瘦身行)。**由调用方那一次装配供上**(`tokens.enrich(...)` 经
+  // `toTokenView` 收窄)—— 服务端现算与浏览器算喂的是同一批 `TokenView`。
+  enriched: ReadonlyMap<string, TokenView>;
   // 每账户现推净值(`deriveLiveAccountTotals`)—— 与主页总价、曲线当下点同源。
   liveTotals: ReadonlyMap<string, number>;
   // 平台(链 ∪ 场馆)展示元数据(`platforms.resolve(overviewChainIds(...))`)。
@@ -601,7 +633,7 @@ export function overviewEnrichIds(
 // 进聚合的现货余额(喂 refreshableTokenIds 判 pricesStale)。
 export function overviewEligibleBalances(
   accounts: AccountSafe[],
-  byAccount: Map<string, SnapshotWithBalances>,
+  byAccount: ReadonlyMap<string, SnapshotSlice>,
 ): OverviewBalance[] {
   const out: OverviewBalance[] = [];
   for (const account of accounts) {
@@ -629,7 +661,7 @@ export function overviewChainIds(
 
 export function buildOverview(
   accounts: AccountSafe[],
-  byAccount: Map<string, SnapshotWithBalances>,
+  byAccount: ReadonlyMap<string, SnapshotSlice>,
   {
     enriched,
     liveTotals,
@@ -662,7 +694,7 @@ export function buildOverview(
       viewKind(b) === "defi" && b.tokenId ? [{ b, id: b.tokenId }] : [],
     ),
   );
-  const recordOf = (b: { tokenId?: string | null }): TokenRecord | undefined =>
+  const recordOf = (b: { tokenId?: string | null }): TokenView | undefined =>
     b.tokenId ? enriched.get(b.tokenId) : undefined;
   const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
   const aggInputs: AggInput[] = rows.map(({ account, b, e }) => ({
@@ -682,7 +714,7 @@ export function buildOverview(
     tokenId: b.tokenId,
     isFiat: isFiatToken(b.tokenId),
     name: e?.name,
-    logo: e ? tokenLogoUrl(e) : undefined, // 上游 URL → folio 代理(隐私;见 ADR 0008)
+    logo: e ? tokenLogoUrl(e) : undefined, // 有图→拼自家代理 /api/logo/token/{id}(FOL-48 起不再发上游 URL),无图→undefined 显首字母;隐私 ADR 0008
     change24h: e?.price?.change24h,
     unitPrice: e?.price?.unitPrice,
     marketCapRank: e?.price?.marketCapRank,
@@ -847,6 +879,111 @@ export function buildOverview(
     defiSubtotal,
     pricesStale,
   };
+}
+
+//  —— 快照原料 → 总览(浏览器里算,FOL-48)——
+
+// 余额行下发到浏览器的**瘦身形状**(FOL-48 优化):只留 `buildOverview` / `deriveLiveAccountTotals`
+// 真正读到的列。**砍掉两列**:`snapshotId`(payload 已按 account 分组,前端不做关联)与 `note`
+// (balance 级展示 note 只在账户抽屉那条路渲染,首页总览不显 —— 见 `toAccountSections` 的 spot 分区被
+// buildOverview 丢弃)。`metaJson` 留着:defi/perp 的 `parseDefiMeta` / `PerpEquityMeta` / `viewKind`
+// 全靠它。实测把快照那一段 raw 砍掉约一半。
+interface BalanceView {
+  id: string; // 无 token_id 的行的分组键;defiChange 按它挂 change24h;DefiRow.id —— 必须留
+  amount: number;
+  usdValue: number;
+  kind: string;
+  selfPrice?: number | null; // 读时现推的原料(liveValue)
+  platform?: string | null; // 聚合来源单元 / refreshableTokenIds 判 dust
+  tokenId?: string | null; // 富化查表 / 聚合身份 / 法币身份 / pricesStale
+  metaJson: string | null; // defi/perp meta 解析
+}
+
+// 快照下发的**瘦身包裹**:只发 `takenAt`(账户 totalUsd 那一刻;`accountTotals` 用)+ 余额行。
+// 完整包裹里的 snapshot id/accountId/totalUsd/note/noteHash + 账户级 note[] 前端一概不读。
+export interface SnapshotView {
+  takenAt: number;
+  balances: BalanceView[];
+}
+
+// 完整 `SnapshotWithBalances`(服务端读出)→ 瘦身 `SnapshotView`。装配点投影,把前端用不到的列挡在
+// payload 外。`SnapshotBalanceView` 结构上满足 `OverviewBalance`,逐行只挑用到的列。
+export function toSnapshotView(s: SnapshotWithBalances): SnapshotView {
+  return {
+    takenAt: s.snapshot.takenAt,
+    balances: s.balances.map((b) => ({
+      id: b.id,
+      amount: b.amount,
+      usdValue: b.usdValue,
+      kind: b.kind,
+      selfPrice: b.selfPrice,
+      platform: b.platform,
+      tokenId: b.tokenId,
+      metaJson: b.metaJson,
+    })),
+  };
+}
+
+// 服务端发的一份「当前快照原料」(方案 C:名字 / 库里当前价内联发下来;logo 只发「有没有图」布尔,
+// URL 由 token id 在浏览器里拼,见 `TokenView`)。Map 走 entries
+// 过线,客户端在 `select` 里重建 Map 再调 `buildOverview` —— 首页总额 / 持仓 / 各小计 / pricesStale
+// 全部在浏览器里算,读接口只取行 + 备料,不做聚合。
+export interface PortfolioSnapshotData {
+  accounts: AccountSafe[];
+  // byAccount 的 entries(accountId → 瘦身快照:takenAt + 瘦身余额行,含 manual 注入)。见 `SnapshotView`。
+  snapshots: [string, SnapshotView][];
+  // 富化字典 entries(token_id → 瘦身行:名字 / 价格 / change24h / 有没有图)。**不含上游 logo URL**
+  // (FOL-48:有 id 就能拼 `/api/logo/token/{id}`)。
+  enriched: [string, TokenView][];
+  // 平台(链)展示元数据 entries(场馆键不在内 —— 那些走 connectorMeta)。
+  platformMeta: [string, PlatformMeta][];
+  // 场馆键(connectorId)→ 连接器自带 name + logo 的 entries(链键不在内 → 走 platformMeta)。
+  connectorMeta: [string, { name: string; logo?: string }][];
+  // 法币身份 ref 的 entries(token_id → `fiat/issued:<CODE>`)。
+  fiatRefs: [string, string][];
+  // 估值口径(self-first / source-first)。
+  mode: ValuationMode;
+}
+
+// 客户端把原料算成总览:重建 Map → 纯算 liveTotals / refreshableIds → `buildOverview`。
+// **不传 gainHistory**:总览不带盈亏(#488 票 5),所以这一份与服务端 `buildScopedOverview(_, false)`
+// 逐值一致 —— 两条路共用同一个 `buildOverview`,「两份本该相等的数字」结构上不可能走散。
+export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewView {
+  // 瘦身包裹 → buildOverview 要的最小切片(takenAt 挪回 `snapshot.takenAt` 的位置)。
+  const byAccount = new Map<string, SnapshotSlice>(
+    raw.snapshots.map(([id, s]) => [
+      id,
+      { snapshot: { takenAt: s.takenAt }, balances: s.balances },
+    ]),
+  );
+  const enriched = new Map(raw.enriched);
+  const platformMeta = new Map(raw.platformMeta);
+  const connectorMeta = new Map(raw.connectorMeta);
+  const fiatRefs = new Map(raw.fiatRefs);
+  const liveTotals = deriveLiveAccountTotals(raw.accounts, byAccount, enriched, raw.mode);
+  const refreshableIds = new Set(
+    refreshableTokenIds(overviewEligibleBalances(raw.accounts, byAccount)),
+  );
+  return buildOverview(raw.accounts, byAccount, {
+    enriched,
+    liveTotals,
+    platformMeta,
+    refreshableIds,
+    connectorMeta: (key) => connectorMeta.get(key) ?? null,
+    mode: raw.mode,
+    fiatRefs,
+  });
+}
+
+// **首次同步中**:组合里有账户,但一张快照都还没有(没有任何账户同步落地 —— 含手记注入的合成
+// 快照也算)。这一刻 `overviewFromSnapshotData` 会算出总额 0 / 空持仓,与「真的空组合(零账户)」在
+// 屏幕上一模一样 —— 首页据此显加载态而不是把「还不知道」画成 $0。
+//
+// 判据从快照原料直接读:`accounts` 非空而 `snapshots`(byAccount entries,已含手记注入)全空。
+// 这与旧 `awaitFirstCompute` 的空态判据同源(`accountTotals.length === 0` 那一支),只是新语义是
+// 「等首次同步写快照」,不是旧的「等后台预计算落地」—— 预计算读侧已删。
+export function isFirstSyncPending(raw: PortfolioSnapshotData | undefined): boolean {
+  return !!raw && raw.accounts.length > 0 && raw.snapshots.length === 0;
 }
 
 //  —— 账户明细的 24h 盈亏摊分(纯计算部分)

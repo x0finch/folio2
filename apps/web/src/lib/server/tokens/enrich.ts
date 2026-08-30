@@ -7,7 +7,7 @@ import {
   refreshableTokenIds,
   type TokenEnrichment,
   toEnrichment,
-} from "./model";
+} from "@/lib/core/token-model";
 
 // 代币展示富化 / 预热助手(非 server fn,server-only)。被 portfolio / sync-deps 复用。
 

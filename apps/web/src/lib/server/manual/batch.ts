@@ -33,7 +33,7 @@ export interface Token {
 }
 
 // 草稿指向的**选中币** —— 这是 server fn 的入参形状(客户端给什么就是什么)。
-// `ticket` 是选币下拉发的那串不透明票(红线见 tokens/model.ts 的 `TokenOption`);本模块不解释它,只搬运。
+// `ticket` 是选币下拉发的那串不透明票(红线见 core/token-model.ts 的 `TokenOption`);本模块不解释它,只搬运。
 interface PickedTokenInput {
   symbol: string;
   unitPrice: number;

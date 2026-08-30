@@ -26,8 +26,8 @@ import {
   tokenQuantityAt,
 } from "@/lib/core/manual";
 import type { GainHistoryRow } from "@/lib/core/portfolio";
+import type { BalanceLike } from "@/lib/core/token-model";
 import { NAMER } from "@/lib/server/oracle";
-import type { BalanceLike } from "@/lib/server/tokens/model";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "./batch";
 import { buildManualSnapshot, manualUnitPrices } from "./snapshot";
 

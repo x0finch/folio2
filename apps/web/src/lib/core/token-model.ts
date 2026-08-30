@@ -2,7 +2,7 @@ import type { SnapshotWithBalances } from "@folio/db";
 import { type TokenRecord, tokenTicket, type UpstreamToken } from "@folio/oracle-basic";
 import { ZERO_DISPLAY_USD } from "@/lib/core/account-view";
 import { isFungible, viewKind } from "@/lib/core/balance-kind";
-import { tokenLogoUrl } from "@/lib/core/logo";
+import { tokenLogoUrl, toLogoSource } from "@/lib/core/logo";
 import { MANUAL_CONNECTOR_ID } from "@/lib/core/manual";
 
 // 纯逻辑(无 server-only import → 可单测)。把一笔余额(快照行形状)桥接到代币参考层。
@@ -124,7 +124,7 @@ export function toEnrichment(e: TokenRecord): TokenEnrichment {
   return {
     symbol: e.symbol,
     name: e.name,
-    logo: tokenLogoUrl(e), // 上游 URL → folio 代理(隐私;见 ADR 0008)
+    logo: tokenLogoUrl(toLogoSource(e)), // 有图→拼自家代理 /api/logo/token/{id}(不再发上游 URL),无图→undefined 显首字母;隐私 ADR 0008
     unitPrice: e.price?.unitPrice,
     change24h: e.price?.change24h,
     marketCapRank: e.price?.marketCapRank,

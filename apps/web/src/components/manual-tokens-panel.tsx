@@ -26,6 +26,7 @@ import {
   type HistoryToken,
   isReduceOversold,
 } from "@/lib/core/manual";
+import type { TokenOption } from "@/lib/core/token-model";
 import { useLocalDateFormat } from "@/lib/hooks/use-local-date-format";
 import { manualAccountQuery } from "@/lib/queries/accounts";
 import { invalidateFor } from "@/lib/queries/refresh";
@@ -35,7 +36,6 @@ import {
   updateManualActivity,
 } from "@/lib/server/manual-activities";
 import { removeManualToken } from "@/lib/server/manual-tokens";
-import type { TokenOption } from "@/lib/server/tokens/model";
 import { TokenRowContent } from "@/routes/_authed/-home/holdings/tokens/token-row";
 import { HoverDetail } from "./hover-detail";
 import type { ActivityDraft, PickedToken } from "./manual-activity-modal";

@@ -2,9 +2,9 @@ import { Database } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
+import { refreshableTokenIds, userDisplayBalances } from "@/lib/core/token-model";
 import { manualBalancesForWarm } from "@/lib/server/manual/store";
 import { invalidatePrecomputed } from "@/lib/server/portfolio/precompute";
-import { refreshableTokenIds, userDisplayBalances } from "@/lib/server/tokens/model";
 
 const priceLog = getLogger(["folio", "web", "prices"]);
 

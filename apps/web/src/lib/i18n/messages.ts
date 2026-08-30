@@ -96,6 +96,7 @@ const en = {
   Overview: {
     totalValue: "Total value",
     totalNetWorth: "Total net worth",
+    firstSyncing: "Syncing…",
     trendNeedsSecondSync: "The trend will appear once it's ready",
     bestToday: "Top today",
     worstToday: "Worst today",
@@ -505,6 +506,7 @@ const zh: Messages = {
   Overview: {
     totalValue: "总价值",
     totalNetWorth: "总净值",
+    firstSyncing: "同步中…",
     trendNeedsSecondSync: "还需要更多数据才能画出趋势图",
     bestToday: "今日最佳",
     worstToday: "今日最差",

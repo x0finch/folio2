@@ -31,13 +31,13 @@ import {
 } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
 import { Cause, Effect, Exit, Layer, type Stream } from "effect";
+import { userDisplayBalances } from "@/lib/core/token-model";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
 import { logTapeLogger } from "@/lib/server/effect-log";
 import { manualBalancesForWarm } from "@/lib/server/manual/store";
 import { forUser, type UserServices, userLayer } from "@/lib/server/runtime";
 import { warmHeldPrices } from "@/lib/server/tokens/enrich";
-import { userDisplayBalances } from "@/lib/server/tokens/model";
 import { recordDefiLogosOf } from "./defi-logos";
 import { warmPlatforms } from "./platforms";
 import { revalue } from "./revalue";
