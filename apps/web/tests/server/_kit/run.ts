@@ -1,27 +1,32 @@
+import type { AccountTagLink } from "@folio/db";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
+import { accountsMatchingPin, toTabPin } from "@/lib/core/accounts-in-view";
 import {
   accountRowsFromRaw,
   assembleAccountHoldingsData,
+  assemblePortfolioSnapshotData,
   computeHomeTabStrip,
+  connectorMetaForOverview,
   floorToHour,
   GAIN_START_FLOOR_MS,
   GAIN_WINDOW_MS,
+  overviewChainIds,
   overviewFromSnapshotData,
 } from "@/lib/core/portfolio";
 import { handleListAccounts } from "@/lib/server/accounts/list";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import type { AppError } from "@/lib/server/errors";
-import {
-  type PortfolioScope,
-  scopedSnapshotMaterials,
-  toPortfolioSnapshotData,
-} from "@/lib/server/portfolio/scope";
+import { handleGetFiatRefs } from "@/lib/server/portfolio/fiat-refs";
+import { handleResolvePlatformMeta } from "@/lib/server/portfolio/platform-meta";
+import type { PortfolioScope } from "@/lib/server/portfolio/scope";
 import { handleGetSnapshots } from "@/lib/server/portfolio/snapshots";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
 import { handleGetValuationSettings } from "@/lib/server/settings/valuation";
 import { handleGetPortfolioTabPins } from "@/lib/server/tab-pins/read";
+import { handleListAccountTags } from "@/lib/server/tags/account-tags";
 import { handleListTags } from "@/lib/server/tags/list";
 import { handleGetTokenEnrichment } from "@/lib/server/tokens/enrichment";
+import { realRegistry } from "./fakes";
 
 // **被测的是 handler,发动走生产那个内核。**
 //
@@ -82,9 +87,80 @@ export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
 
 // —— 读模型捷径(照抄前端 select / compose,不复刻业务逻辑)——
 
-/** 快照原料 —— `scopedSnapshotMaterials` + `toPortfolioSnapshotData`,与浏览器原子合并同源。 */
-export const readSnapshotData = async (userId: string, data: PortfolioScope = {}) =>
-  toPortfolioSnapshotData(await call(userId, scopedSnapshotMaterials(data)));
+/** 快照原料 —— 原子读 + `assemblePortfolioSnapshotData`,与首页 `usePortfolioOverview` 同源。 */
+export const readSnapshotData = async (userId: string, data: PortfolioScope = {}) => {
+  const now = floorToHour(Date.now());
+  const wallNow = Date.now();
+  const portfolioId = data.portfolioId;
+  const tabPin = toTabPin(data.pin);
+  const needsTagLinks = tabPin?.kind === "tag";
+
+  const [
+    accounts,
+    snapshotsNow,
+    snapshotsPrev,
+    settings,
+    enrichment,
+    fiatRefsData,
+    registry,
+    tagLinks,
+  ] = await Promise.all([
+    call(userId, handleListAccounts({ portfolioId })),
+    call(userId, handleGetSnapshots({ portfolioId, at: now, now: wallNow })),
+    call(
+      userId,
+      handleGetSnapshots({
+        portfolioId,
+        at: now - GAIN_WINDOW_MS,
+        after: now - GAIN_START_FLOOR_MS,
+        now,
+      }),
+    ),
+    call(userId, handleGetValuationSettings()),
+    call(userId, handleGetTokenEnrichment()),
+    call(userId, handleGetFiatRefs({ portfolioId })),
+    realRegistry(),
+    needsTagLinks
+      ? call(userId, handleListAccountTags({ portfolioId }))
+      : Promise.resolve([] as AccountTagLink[]),
+  ]);
+
+  const active = accounts.filter((a) => a.archivedAt == null);
+  const scopedAccounts = tabPin ? accountsMatchingPin(active, tabPin, tagLinks) : active;
+  const scopedIds = new Set(scopedAccounts.map((a) => a.id));
+  const scopedSnapshotsNow = snapshotsNow.filter((s) => scopedIds.has(s.accountId));
+  const scopedSnapshotsPrev = snapshotsPrev.filter((s) => scopedIds.has(s.accountId));
+
+  const connectorMeta = connectorMetaForOverview(
+    scopedAccounts,
+    scopedSnapshotsNow,
+    registry.catalog,
+  );
+  const connectorLookup = (key: string) => {
+    const entry = registry.catalog[key];
+    return entry ? { name: entry.label, logo: entry.logo } : null;
+  };
+  const byAccount = new Map(
+    scopedSnapshotsNow.map((s) => [
+      s.accountId,
+      { snapshot: { takenAt: s.takenAt }, balances: s.balances },
+    ]),
+  );
+  const chainIds = overviewChainIds(scopedAccounts, byAccount, connectorLookup);
+  const { platformMeta } = await call(userId, handleResolvePlatformMeta({ chainIds }));
+
+  return assemblePortfolioSnapshotData({
+    accounts: scopedAccounts,
+    snapshotsNow: scopedSnapshotsNow,
+    snapshotsPrev: scopedSnapshotsPrev,
+    enriched: new Map(enrichment.enriched),
+    mode: settings.valuationMode,
+    platformMeta,
+    connectorMeta,
+    fiatRefs: fiatRefsData.fiatRefs,
+    now,
+  });
+};
 
 /**
  * 读总览 —— 改完数据之后想看「屏幕上是什么」就用它。

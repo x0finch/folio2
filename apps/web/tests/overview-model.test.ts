@@ -23,7 +23,7 @@ import { type OracleStub, runWithOracle } from "./oracle-stub";
 // 用假 tokens/platforms + 最小 fixture,覆盖:eligible 过滤 → enrich 附回 → 聚合 → 平台装饰 → 总额。
 //
 // FOL-45 起 buildOverview 是**纯函数**:富化 / 现推净值 / 平台元数据 / 刷价集合都由调用点在
-// Effect 里备好再传进去。这个 `overviewEffect` 就是那层薄适配(与 `buildScopedOverview` 逐字同款),
+// Effect 里备好再传进去。这个 `overviewEffect` 就是那层薄适配(与生产总览装配逐字同款),
 // 让每条用例仍旧 `runWithOracle(stub, …)`,只是被测的算术已从 Effect 里拆出来了。
 type OverviewDeps = Omit<
   OverviewInput,
@@ -36,7 +36,7 @@ const overviewEffect = (
 ) =>
   Effect.gen(function* () {
     const { tokens, platforms } = yield* Oracle;
-    // 与生产 `scopedSnapshotMaterials` 同款:参考层读出的完整行经 `toTokenView` 收窄再喂 buildOverview。
+    // 与生产总览装配同款:参考层读出的完整行经 `toTokenView` 收窄再喂 buildOverview。
     const enrichedRecords = yield* tokens.enrich(overviewEnrichIds(accounts, byAccount));
     const enriched = new Map([...enrichedRecords].map(([id, r]) => [id, toTokenView(r)] as const));
     const platformMeta = yield* platforms.resolve(

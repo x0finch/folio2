@@ -88,13 +88,13 @@ async function overview() {
     snapshots.map((s) => [s.snapshot.accountId, s]),
   );
   await injectManualSnapshots(USER, accounts, byAccount);
-  // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与 `buildScopedOverview`
-  // 逐字同款:一次装配供上聚合 `Oracle`,备好 buildOverview 要的三份字典 + 刷价集合,再当纯函数调。
+  // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与原子总览装配同路:
+  // 一次装配供上聚合 `Oracle`,备好 buildOverview 要的三份字典 + 刷价集合,再当纯函数调。
   return run(
     USER,
     Effect.gen(function* () {
       const { tokens, platforms } = yield* Oracle;
-      // 与生产 `scopedSnapshotMaterials` 同款:完整行经 `toTokenView` 收窄再喂 buildOverview。
+      // 与生产总览装配同款:完整行经 `toTokenView` 收窄再喂 buildOverview。
       const enrichedRecords = yield* tokens.enrich(overviewEnrichIds(accounts, byAccount));
       const enriched = new Map(
         [...enrichedRecords].map(([id, r]) => [id, toTokenView(r)] as const),

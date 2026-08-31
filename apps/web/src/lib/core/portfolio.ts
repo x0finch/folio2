@@ -37,9 +37,7 @@ import { displayTokenId, refreshableTokenIds, type TokenEnrichment } from "@/lib
 // 无 cloudflare env —— 喂原料(账户 / 快照 / 富化字典 / 价格字典 / 平台元数据字典)→ 出视图形状。
 // 口径只在这一处定义,读接口、同步收官、后台补算都调这里。
 //
-// 「怎么取原料」(读 Oracle 富化、读 D1 历史)是**调用点的薄适配层**的事(`portfolio/scope.ts`
-// 的 `buildScopedOverview`、`portfolio/account-holdings.ts` 等):它们在 Effect 里备好字典,再把
-// 这些纯函数当普通函数调。这样这一层既能脱离 server fn 单测,也能在同步收官那一刻被直接算。
+// 调用点侧的薄适配层(FOL-45):在 Effect 里备好字典,再把纯函数当普通函数调。
 
 // `buildOverview` 真正要的最小快照切片:`takenAt`(账户 totalUsd 那一刻)+ 余额行。快照原料下发
 // 浏览器时只发这些(见 `SnapshotView` / `BalanceView`),整包因此瘦一大截。服务端的完整
@@ -64,9 +62,8 @@ export interface TokenView {
   hasLogo: boolean;
 }
 
-// 完整 `TokenRecord`(参考层读出、带上游 URL)→ 瘦身 `TokenView`。服务端两条路(`buildScopedOverview`
-// 现算 / 快照原料接口下发)都在装配点经此收窄,于是「浏览器算」与「服务端算」喂进 buildOverview 的
-// 是逐值相同的原料。
+// 完整 `TokenRecord`(参考层读出、带上游 URL)→ 瘦身 `TokenView`。服务端现算路径与下发浏览器的
+// 原料都在装配点经此收窄,于是「浏览器算」与「服务端算」喂进 buildOverview 的是逐值相同的原料。
 export function toTokenView(r: TokenRecord): TokenView {
   const { hasLogo } = toLogoSource(r);
   return { id: r.id, symbol: r.symbol, name: r.name, price: r.price, hasLogo };
@@ -865,27 +862,9 @@ export interface BalanceView {
 
 // 快照下发的**瘦身包裹**:只发 `takenAt`(账户 totalUsd 那一刻;`accountTotals` 用)+ 余额行。
 // 完整包裹里的 snapshot id/accountId/totalUsd/note/noteHash + 账户级 note[] 前端一概不读。
-export interface SnapshotView {
+interface SnapshotView {
   takenAt: number;
   balances: BalanceView[];
-}
-
-// 完整 `SnapshotWithBalances`(服务端读出)→ 瘦身 `SnapshotView`。装配点投影,把前端用不到的列挡在
-// payload 外。`SnapshotBalanceView` 结构上满足 `OverviewBalance`,逐行只挑用到的列。
-export function toSnapshotView(s: SnapshotWithBalances): SnapshotView {
-  return {
-    takenAt: s.snapshot.takenAt,
-    balances: s.balances.map((b) => ({
-      id: b.id,
-      amount: b.amount,
-      usdValue: b.usdValue,
-      kind: b.kind,
-      selfPrice: b.selfPrice,
-      platform: b.platform,
-      tokenId: b.tokenId,
-      metaJson: b.metaJson,
-    })),
-  };
 }
 
 // 服务端发的一份「当前快照原料」(方案 C:名字 / 库里当前价内联发下来;logo 只发「有没有图」布尔,
@@ -922,7 +901,8 @@ const sliceMap = (entries: [string, SnapshotView][]): Map<string, SnapshotSlice>
   );
 
 // 客户端把原料算成总览:重建两组快照(当前 + 24 小时前)→ 纯算 liveTotals / refreshableIds →
-// `buildOverview`。总额 / 持仓 / 各小计 / pricesStale 与服务端 `buildScopedOverview` 逐值一致
+// 浏览器把快照原料算成总览视图(FOL-48 / FOL-54)。原料由原子读在客户端 `assemblePortfolioSnapshotData`
+// 拼好;总额 / 持仓 / 各小计 / pricesStale 与 `buildOverview` 逐值一致。
 // (共用同一个 `buildOverview`);24h 盈亏(ADR 0050)由两组快照两端相减,浏览器里算。
 export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewView {
   const byAccount = sliceMap(raw.snapshots);

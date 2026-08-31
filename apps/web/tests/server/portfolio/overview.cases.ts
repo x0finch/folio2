@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { overviewFromSnapshotData } from "@/lib/core/portfolio";
 import { handleGetManualAccount } from "@/lib/server/manual-tokens/get-account";
-import { buildScopedOverview, PortfolioScopeInput } from "@/lib/server/portfolio/scope";
+import { PortfolioScopeInput } from "@/lib/server/portfolio/scope";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { call, readOverview, readSnapshotData } from "../_kit/run";
@@ -11,9 +10,8 @@ import { freshUser, otherUser } from "../_kit/user";
 // 合并进 portfolio/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
 // 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 //
-// **FOL-48:总览改成「接口发快照原料 + 浏览器算」。** 读接口 `getPortfolioSnapshotData` 只取行 +
-// 备料,不聚合;总额 / 持仓 / 各小计 / pricesStale 由 `overviewFromSnapshotData`(= 前端 `select`
-// 那一行)在客户端算。`readOverview` 走的就是这条真链路。
+// **FOL-48 / FOL-54:总览改成「原子读 + 浏览器算」。** `readOverview` 走原子原料 +
+// `overviewFromSnapshotData`(= 前端 `select` 那一行),不复刻业务逻辑。
 describe("portfolio/overview", () => {
   const USER = "h-pf-overview";
   const BTC = "token-btc";
@@ -141,7 +139,7 @@ describe("portfolio/overview", () => {
     });
   });
 
-  describe("快照原料(scopedSnapshotMaterials)", () => {
+  describe("快照原料(原子装配)", () => {
     it("只发原料:取行 + 备料,不聚合", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
@@ -175,50 +173,6 @@ describe("portfolio/overview", () => {
 
       expect(raw.accounts.map((a) => a.label)).toEqual(["链上"]);
       expect(raw.snapshots.map(([id]) => id)).toEqual([btcAcc.id]);
-    });
-
-    // **本片的正确性证明** —— 「新接口原料 + 客户端 `buildOverview`」与旧的服务端现算路径
-    // (`buildScopedOverview(_, false)`)逐值一致。两条路共用同一个 `buildOverview`,这里把
-    // 「同一份输入喂两条路」钉死。时钟冻住:两条路各取一次 `Date.now()`(手记注入 / now),
-    // 不冻的话那点毫秒差会渗进 takenAt,把「是不是同一份数」淹掉。
-    it("对拍:新接口原料 + 客户端算 == 服务端现算,一个字都不差", async () => {
-      const chain = await seedAccount(USER, "链上", "bitcoin");
-      await seedSnapshot(USER, chain.id, NOW, [
-        { tokenId: BTC, amount: 1, usdValue: 100 },
-        { tokenId: ETH, amount: 2, usdValue: 50 },
-      ]);
-      const perp = await seedAccount(USER, "永续", "hyperliquid");
-      await seedSnapshot(USER, perp.id, NOW, [
-        {
-          tokenId: "token-perp",
-          amount: 1,
-          usdValue: 300,
-          kind: "perp_equity",
-          meta: { withdrawable: 200, totalMarginUsed: 100, totalNtlPos: 900 },
-        },
-        {
-          tokenId: "token-defi",
-          amount: 1,
-          usdValue: 200,
-          kind: "defi",
-          meta: { protocol: "aave", protocolName: "Aave" },
-        },
-      ]);
-      // 手记一并进来,把 fiatRefs / 手记注入那半也拉进对拍。
-      await seedManualAccount(USER, "手记", { symbol: "SOL", unitPrice: 10, amount: 3 });
-      vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
-
-      // 服务端现算 = 总览那一份(FOL-51 起含 24h 盈亏,与接口发的原料两端相减逐值一致)。
-      const inline = await call(USER, buildScopedOverview({}));
-      // 新路径:接口发原料 → 客户端算(照抄前端 select 那一行)。
-      const client = overviewFromSnapshotData(await readSnapshotData(USER, {}));
-
-      expect(client).toEqual(inline);
-      // 夹具没有绕过被测代码:这一份真的有数,不是两个空对象碰在一起。
-      expect(client.totalUsd).toBe(680); // 现货 150 + 永续权益 300 + DeFi 200 + 手记 SOL 30
-      expect(client.holdings).toHaveLength(3); // BTC / ETH / 手记 SOL
-      expect(client.holdingsSubtotal).toBe(180); // 100 + 50 + 手记 30
-      expect(client.defiSubtotal).toBe(200);
     });
   });
 
