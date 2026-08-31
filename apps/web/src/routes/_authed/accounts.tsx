@@ -45,8 +45,8 @@ export const Route = createFileRoute("/_authed/accounts")({
     queryClient.ensureQueryData(tagListQuery(selectedId));
     queryClient.ensureQueryData(accountTagLinksQuery(selectedId));
     // 持仓由原子资源在浏览器合并(FOL-55):快照(当下 + 24h 前)、估值口径、代币富化。
-    const { now } = accountHoldingsSnapshotTimes();
-    const snapshots = accountHoldingsSnapshotQueries(selectedId, now);
+    const { anchor } = accountHoldingsSnapshotTimes();
+    const snapshots = accountHoldingsSnapshotQueries(selectedId, anchor);
     queryClient.ensureQueryData(snapshots.now);
     queryClient.ensureQueryData(snapshots.prev);
     queryClient.ensureQueryData(valuationSettingsQuery());

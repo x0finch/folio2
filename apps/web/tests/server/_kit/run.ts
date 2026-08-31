@@ -89,8 +89,7 @@ export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
 
 /** 快照原料 —— 原子读 + `assemblePortfolioSnapshotData`,与首页 `usePortfolioOverview` 同源。 */
 export const readSnapshotData = async (userId: string, data: PortfolioScope = {}) => {
-  const now = floorToHour(Date.now());
-  const wallNow = Date.now();
+  const anchor = floorToHour(Date.now());
   const portfolioId = data.portfolioId;
   const tabPin = toTabPin(data.pin);
   const needsTagLinks = tabPin?.kind === "tag";
@@ -106,14 +105,13 @@ export const readSnapshotData = async (userId: string, data: PortfolioScope = {}
     tagLinks,
   ] = await Promise.all([
     call(userId, handleListAccounts({ portfolioId })),
-    call(userId, handleGetSnapshots({ portfolioId, at: now, now: wallNow })),
+    call(userId, handleGetSnapshots({ portfolioId, at: Date.now() })),
     call(
       userId,
       handleGetSnapshots({
         portfolioId,
-        at: now - GAIN_WINDOW_MS,
-        after: now - GAIN_START_FLOOR_MS,
-        now,
+        at: anchor - GAIN_WINDOW_MS,
+        after: anchor - GAIN_START_FLOOR_MS,
       }),
     ),
     call(userId, handleGetValuationSettings()),
@@ -158,7 +156,7 @@ export const readSnapshotData = async (userId: string, data: PortfolioScope = {}
     platformMeta,
     connectorMeta,
     fiatRefs: fiatRefsData.fiatRefs,
-    now,
+    now: anchor,
   });
 };
 
@@ -172,17 +170,16 @@ export const readOverview = async (userId: string, data: PortfolioScope = {}) =>
   overviewFromSnapshotData(await readSnapshotData(userId, data));
 
 const readAccountHoldingsRaw = async (userId: string, data: { portfolioId?: string } = {}) => {
-  const now = floorToHour(Date.now());
+  const anchor = floorToHour(Date.now());
   const [accounts, snapshotsNow, snapshotsPrev, settings, enrichment] = await Promise.all([
     call(userId, handleListAccounts({ portfolioId: data.portfolioId })),
-    call(userId, handleGetSnapshots({ portfolioId: data.portfolioId, at: now, now: Date.now() })),
+    call(userId, handleGetSnapshots({ portfolioId: data.portfolioId, at: Date.now() })),
     call(
       userId,
       handleGetSnapshots({
         portfolioId: data.portfolioId,
-        at: now - GAIN_WINDOW_MS,
-        after: now - GAIN_START_FLOOR_MS,
-        now,
+        at: anchor - GAIN_WINDOW_MS,
+        after: anchor - GAIN_START_FLOOR_MS,
       }),
     ),
     call(userId, handleGetValuationSettings()),

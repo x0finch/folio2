@@ -29,7 +29,7 @@ import { getFiatRefs, resolvePlatformMeta } from "@/lib/server/portfolio";
 import type { AccountSnapshot } from "@/lib/server/portfolio/snapshots";
 import { accountHoldingsSnapshotQueries } from "./snapshots";
 
-// 首页总览:原子资源在浏览器合并(FOL-54 / FOL-56)。`at` hour-floor 在客户端算,SSR 与补水一致。
+// 首页总览:原子资源在浏览器合并(FOL-54 / FOL-56)。key 用 hour-floor 锚;当下快照 `at` 用墙钟。
 
 export const fiatRefsQuery = (portfolioId: string) =>
   queryOptions({

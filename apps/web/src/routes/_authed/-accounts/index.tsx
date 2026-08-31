@@ -116,10 +116,10 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
   // **名单已经是当前组合那份**(ADR 0047:服务端按组合筛)—— 这一页不再拿全量账户 + 归属表自己筛。
   const { selectedId } = usePortfolio();
   const { data: accounts } = useSuspenseQuery(accountListQuery(selectedId));
-  const { now } = accountHoldingsSnapshotTimes();
+  const { anchor } = accountHoldingsSnapshotTimes();
   return (
     <QueryBoundary
-      resetKey={`list-values:${JSON.stringify([accountKeys.list(selectedId), portfolioKeys.snapshots(selectedId, now)])}`}
+      resetKey={`list-values:${JSON.stringify([accountKeys.list(selectedId), portfolioKeys.snapshots(selectedId, anchor)])}`}
       pending={<AccountsListBody accounts={accounts} onComplete={onComplete} />}
       failed={<AccountsListBody accounts={accounts} onComplete={onComplete} />}
     >

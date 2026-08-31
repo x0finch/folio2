@@ -56,8 +56,8 @@ export const portfolioKeys = {
    */
   snapshotsPrefix: () => [...portfolioKeys.all, "snapshots"] as const,
   /**
-   * 组合内各账户在 `[after, at]` 窗口内最新快照(FOL-54)。`at`/`after` 由客户端 hour-floor,
-   * 进 key 保证缓存稳定、SSR 与补水一致。
+   * 组合内各账户在 `[after, at]` 窗口内最新快照(FOL-54)。key 用 hour-floor 锚;
+   * 请求体的 `at` 是真实查库上界(当下快照 = 墙钟)。
    */
   snapshots: (portfolioId: string, at: number, after?: number) =>
     [...portfolioKeys.all, "snapshots", portfolioId, at, after ?? null] as const,

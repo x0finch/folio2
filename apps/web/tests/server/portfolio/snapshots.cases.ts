@@ -45,7 +45,7 @@ describe("portfolio/snapshots", () => {
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
       const at = ago(DAY + HOUR);
-      const rows = await call(USER, handleGetSnapshots({ at, now: at }));
+      const rows = await call(USER, handleGetSnapshots({ at }));
       expect(rows).toHaveLength(1);
       expect(rows[0]?.accountId).toBe(acc.id);
       expect(rows[0]?.totalUsd).toBe(50);
@@ -57,7 +57,7 @@ describe("portfolio/snapshots", () => {
 
       const at = ago(DAY);
       const after = ago(7 * DAY);
-      const rows = await call(USER, handleGetSnapshots({ at, after, now: NOW }));
+      const rows = await call(USER, handleGetSnapshots({ at, after }));
       expect(rows).toEqual([]);
     });
 
@@ -68,8 +68,7 @@ describe("portfolio/snapshots", () => {
         amount: 2,
       });
 
-      const at = floorToHour(NOW);
-      const rows = await call(USER, handleGetSnapshots({ at, now: NOW }));
+      const rows = await call(USER, handleGetSnapshots({ at: NOW }));
       const row = rows.find((r) => r.accountId === acc.id);
       expect(row?.balances.length).toBeGreaterThan(0);
       expect(row?.balances[0]?.amount).toBe(2);
@@ -89,7 +88,7 @@ describe("portfolio/snapshots", () => {
 
       const rows = await call(
         USER,
-        handleGetSnapshots({ portfolioId: watch.id, at: NOW, now: NOW }),
+        handleGetSnapshots({ portfolioId: watch.id, at: NOW }),
       );
       expect(rows.map((r) => r.accountId)).toEqual([watched.id]);
     });
@@ -135,10 +134,10 @@ describe("portfolio/account-holdings-compose", () => {
     await seedSnapshot(USER, acc.id, now - DAY, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
     await seedSnapshot(USER, acc.id, now, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
     const [snapshotsNow, snapshotsPrev, settings, enrichment, accounts] = await Promise.all([
-      call(USER, handleGetSnapshots({ at: now, now: NOW })),
+      call(USER, handleGetSnapshots({ at: NOW })),
       call(
         USER,
-        handleGetSnapshots({ at: now - GAIN_WINDOW_MS, after: now - GAIN_START_FLOOR_MS, now }),
+        handleGetSnapshots({ at: now - GAIN_WINDOW_MS, after: now - GAIN_START_FLOOR_MS }),
       ),
       call(USER, handleGetValuationSettings()),
       call(USER, handleGetTokenEnrichment()),
@@ -194,13 +193,12 @@ describe("portfolio/overview-compose", () => {
     const [accounts, snapshotsNow, snapshotsPrev, settings, enrichment, fiatRefsData, registry] =
       await Promise.all([
         call(USER, handleListAccounts({})),
-        call(USER, handleGetSnapshots({ at: now, now: NOW })),
+        call(USER, handleGetSnapshots({ at: NOW })),
         call(
           USER,
           handleGetSnapshots({
             at: now - GAIN_WINDOW_MS,
             after: now - GAIN_START_FLOOR_MS,
-            now,
           }),
         ),
         call(USER, handleGetValuationSettings()),
