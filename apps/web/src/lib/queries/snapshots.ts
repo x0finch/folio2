@@ -6,12 +6,7 @@ import { portfolioKeys } from "./keys";
 
 // 组合快照原子读(FOL-54):queryKey 用 hour-floor 锚;请求体的 `at` 是真实查库上界(当下 = 墙钟)。
 
-const portfolioSnapshotsQuery = (
-  portfolioId: string,
-  keyAt: number,
-  at: number,
-  after?: number,
-) =>
+const portfolioSnapshotsQuery = (portfolioId: string, keyAt: number, at: number, after?: number) =>
   queryOptions({
     queryKey: portfolioKeys.snapshots(portfolioId, keyAt, after),
     queryFn: () => getSnapshots({ data: { portfolioId, at, after } }),
