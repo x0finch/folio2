@@ -2,7 +2,7 @@ import type { Note } from "@folio/connectors-basic";
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
-import { GAIN_WINDOW_MS, type BalanceView } from "@/lib/core/portfolio";
+import { type BalanceView, GAIN_WINDOW_MS } from "@/lib/core/portfolio";
 import { injectManualPrevSnapshots, injectManualSnapshots } from "@/lib/server/manual/store";
 import { scopedMembership } from "./scope";
 
@@ -64,7 +64,13 @@ export const handleGetSnapshots = Effect.fn("getSnapshots")(function* (
   const member = yield* scopedMembership(data.portfolioId);
   const allAccounts = (yield* db.accounts.list()).filter((a) => member.has(a.id));
   const active = allAccounts.filter((a) => a.archivedAt == null);
-  const raw = yield* db.snapshots.asOf(data.at, data.after ?? 0);
+  // 当下读(无 after)= 真·每账户最新,不设上界:同步刚落库、`takenAt` 因服务端时钟略超读取方
+  // 墙钟的快照不该被 `at` 截掉,而 `collapseSameHour` 已把同小时旧值删掉、没有回退行(e2e sync-round
+  // 曾因此把刚同步的账户显示成「从未同步」)。历史读(带 after)才按 [after, at] 窗口 asOf。
+  const raw =
+    data.after != null
+      ? yield* db.snapshots.asOf(data.at, data.after)
+      : yield* db.snapshots.latest();
   const memberSet = new Set(allAccounts.map((a) => a.id));
   const byAccount = new Map(
     raw

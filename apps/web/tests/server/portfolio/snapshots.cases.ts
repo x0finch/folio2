@@ -39,16 +39,29 @@ describe("portfolio/snapshots", () => {
   });
 
   describe("getSnapshots", () => {
-    it("at 上界:只取 takenAt ≤ at 的最近一张", async () => {
+    it("历史读(带 after)at 上界:只取 takenAt ≤ at 的最近一张", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(2 * DAY), [{ tokenId: BTC, amount: 1, usdValue: 50 }]);
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
       const at = ago(DAY + HOUR);
-      const rows = await call(USER, handleGetSnapshots({ at }));
+      const after = ago(3 * DAY);
+      const rows = await call(USER, handleGetSnapshots({ at, after }));
       expect(rows).toHaveLength(1);
       expect(rows[0]?.accountId).toBe(acc.id);
       expect(rows[0]?.totalUsd).toBe(50);
+    });
+
+    it("当下读(无 after)= 真最新:takenAt 略晚于 at 也回 —— 同步刚写不被截掉", async () => {
+      // 回归:同步刚落库的快照 takenAt(服务端时钟)可能略超读取方传入的 at(墙钟)。
+      // 当下读若按 at 截,会把刚同步的账户显示成「从未同步」(e2e sync-round)。
+      const acc = await seedAccount(USER, "甲", "bitcoin");
+      await seedSnapshot(USER, acc.id, NOW + HOUR, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
+
+      const rows = await call(USER, handleGetSnapshots({ at: NOW }));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.accountId).toBe(acc.id);
+      expect(rows[0]?.totalUsd).toBe(100);
     });
 
     it("after 下界:窗口内无快照 → 不回", async () => {
@@ -86,10 +99,7 @@ describe("portfolio/snapshots", () => {
         { tokenId: "token-eth", amount: 1, usdValue: 50 },
       ]);
 
-      const rows = await call(
-        USER,
-        handleGetSnapshots({ portfolioId: watch.id, at: NOW }),
-      );
+      const rows = await call(USER, handleGetSnapshots({ portfolioId: watch.id, at: NOW }));
       expect(rows.map((r) => r.accountId)).toEqual([watched.id]);
     });
   });
