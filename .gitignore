@@ -12,6 +12,9 @@ dist/
 
 .agents/
 skills-lock.json
+# mattpocock skills 的 agent 落地目录(各人本地 `npx skills add` 装,不随仓库分发,同 .agents/)
+.claude/skills/
+agent/
 
 .scratch/
 # Playwright(E2E)—— 报告与失败时的 trace,不入库
