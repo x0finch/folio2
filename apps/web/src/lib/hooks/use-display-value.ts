@@ -8,5 +8,12 @@ export function useDisplayValue(): (value: number, opts?: { compact?: boolean })
   const { currency, rate } = usePreferCurrency();
   const locale = useLocale();
   return (value: number, opts?: { compact?: boolean }) =>
-    formatMoney(value, { rate, locale, currency, compact: opts?.compact });
+    formatMoney(value, {
+      rate,
+      locale,
+      currency,
+      compact: opts?.compact,
+      // hero 缩写求最短:紧凑时砍掉小数位($45M / ¥3亿 / US$4477万)。
+      compactFractionDigits: opts?.compact ? 0 : undefined,
+    });
 }
