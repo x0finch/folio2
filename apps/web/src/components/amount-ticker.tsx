@@ -13,18 +13,35 @@ const SCRUB_ROLL_SECONDS = 0.15;
 export function AmountTicker({
   value,
   scrubbing = false,
+  compact = false,
   className,
   fractionClassName,
 }: {
   value: number;
   /** 正在划动读数 —— 滚动时长收短到跟得上指针(#470 片7)。 */
   scrubbing?: boolean;
+  /** 紧凑模式:整串(如 `$43.69M`)喂 ticker,数字位照样逐位滚、`$`/`.`/`M` 静态。
+      紧凑记法自带舍入,不会有 `$999.60 → $1000` 的进位问题,所以**不拆小数**(拆了 `.69M`
+      会连着单位一起掉进小数段)。 */
+  compact?: boolean;
   /** 整数段的排版。 */
   className?: string;
   /** 小数段的排版(通常比整数小一号、muted)。 */
   fractionClassName?: string;
 }) {
   const usd = useDisplayValue();
+  if (compact) {
+    return (
+      <NumberTicker
+        value={value}
+        startOnView={false}
+        duration={scrubbing ? SCRUB_ROLL_SECONDS : undefined}
+        stagger={scrubbing ? 0 : undefined}
+        format={(n) => usd(n, { compact: true })}
+        className={className}
+      />
+    );
+  }
   const formatted = usd(value);
   const dot = formatted.lastIndexOf(".");
   const fraction = dot >= 0 ? formatted.slice(dot + 1) : null;
