@@ -385,59 +385,6 @@ describe("buildOverview —— 法币身份 isFiat", () => {
   });
 });
 
-// —— H5 #120:sections 的 defi 行读时富化 change24h(协议行 24h 聚合的数据源) ——
-// defi 不进聚合,故单独一批 enrich;按 tokenRef 命中的行带 change24h,未命中 undefined。
-describe("buildOverview —— defi 行 change24h 富化", () => {
-  it("defi 行经 enrich 附回 change24h 进 sections", async () => {
-    // 只有 tk-staked 有价 → 只有那一行拿到 change24h;另一行(LP 份额)没有身份,不该被瞎猜。
-    const defiTokens = {
-      enrich: (ids: readonly string[]) =>
-        Effect.succeed(
-          new Map(
-            ids
-              .filter((id) => id === "tk-staked")
-              .map((id) => [
-                id,
-                { ...record(id), price: { unitPrice: 1, change24h: 2.5, asOf: 0, stale: false } },
-              ]),
-          ),
-        ),
-    };
-    const accounts = [account("w", "Wallet")];
-    const byAccount = new Map([
-      [
-        "w",
-        snap("w", 100, [
-          bal({
-            kind: "defi",
-            symbol: "stETH",
-            amount: 1,
-            usdValue: 100,
-            tokenId: "tk-staked",
-            metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
-          }),
-          bal({
-            kind: "defi",
-            symbol: "LP",
-            amount: 1,
-            usdValue: 50,
-            tokenId: null, // LP 份额没有代币身份
-            metaJson: JSON.stringify({ protocol: "Uniswap", positionType: "liquidity" }),
-          }),
-        ]),
-      ],
-    ]);
-    const view = await runWithOracle(
-      { ...stub, tokens: defiTokens },
-      overviewEffect(accounts, byAccount, {}),
-    );
-    // 按协议组定位(#243:展示 symbol 现从 Token 取,不再是余额那份 stETH/LP)。
-    const defi = view.sections[0].defi;
-    expect(defi.find((g) => g.protocol === "Lido")?.rows[0].change24h).toBe(2.5);
-    expect(defi.find((g) => g.protocol === "Uniswap")?.rows[0].change24h).toBeUndefined();
-  });
-});
-
 // —— H5 评审:sections.account 带平台展示(永续节头体现场馆) ——
 describe("buildOverview —— sections.account.platform", () => {
   it("connectorMeta 命中 → name + 代理 logo;未注入 → undefined", async () => {

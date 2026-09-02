@@ -186,25 +186,9 @@ describe("toAccountSections", () => {
   });
 });
 
-// —— H5 #120:DeFi 行 change24h 透传 + 跨账户协议合并 + 协议级 24h 聚合 ——
+// —— H5 #120:跨账户协议合并 + 协议级 24h 聚合 ——
 
 import { type DefiRow, defiMeaningfulLegs, mergeDefiGroups } from "@/lib/core/account-view";
-
-describe("DefiRow change24h 透传(富化字段,缺则 undefined)", () => {
-  it("带 change24h 的 defi 行透传到 DefiRow", () => {
-    const s = toAccountSections([
-      b({
-        id: "1",
-        symbol: "stETH",
-        kind: "defi",
-        usdValue: 27040,
-        change24h: 2.1,
-        metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
-      }),
-    ]);
-    expect(s.defi[0].rows[0].change24h).toBe(2.1);
-  });
-});
 
 describe("mergeDefiGroups —— 跨账户按协议保序合并", () => {
   const g = (protocol: string, id: string, usdValue = 1) => ({

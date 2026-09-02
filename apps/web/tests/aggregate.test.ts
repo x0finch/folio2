@@ -224,23 +224,6 @@ describe("buildCanonicalHoldings", () => {
     expect(h.token.marketCapRank).toBe(6);
   });
 
-  // 一组恒是一个 Token,所以行内涨跌无条件给 —— 以前那个「组内是否单一身份」的判断
-  // 在键塌成一级之后恒为真,已随三级键一并删除。
-  it("行内 24h 涨跌无条件给", () => {
-    const hs = buildCanonicalHoldings([
-      row({
-        symbol: "BTC",
-        amount: 1,
-        value: 60,
-        account: binance,
-        tokenId: "tk-btc",
-        change24h: 3,
-      }),
-      row({ symbol: "BTC", amount: 1, value: 60, account: hyper, tokenId: "tk-btc" }),
-    ]);
-    expect(hs[0]!.change24h).toBe(3);
-  });
-
   it("平台单元 = provider 报的 platform(不从代币身份反推)", () => {
     const btc = { id: "x1", label: "BTC wallet", connectorId: "bitcoin" };
     const hs = buildCanonicalHoldings([

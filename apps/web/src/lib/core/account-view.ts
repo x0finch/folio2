@@ -36,7 +36,6 @@ export interface OverviewBalance {
   name?: string;
   logo?: string;
   unitPrice?: number;
-  change24h?: number;
   // 24h 盈亏(ADR 0040),server 读路径按快照历史 / 账本算好后附上。抽屉的现货行按它显示。
   gain24h?: { amount: number; pct: number | null } | null;
 }
@@ -49,7 +48,6 @@ export interface SpotRow {
   name?: string;
   logo?: string;
   unitPrice?: number;
-  change24h?: number;
   gain24h?: { amount: number; pct: number | null } | null;
   note?: Note; // balance 级展示 note(有则该行标题右侧渲染 <NoteIndicator>)
 }
@@ -59,7 +57,6 @@ export interface DefiRow {
   amount: number;
   usdValue: number;
   positionType?: string;
-  change24h?: number; // 富化字段透传(协议行 24h 聚合用;缺 → 该行不计入聚合)
 }
 export interface DefiGroup {
   protocol: string;
@@ -119,7 +116,6 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
         amount: b.amount,
         usdValue: b.usdValue,
         positionType: meta.positionType,
-        change24h: b.change24h,
       };
       const group = defiByProtocol.get(protocol);
       if (group) group.push(row);
@@ -136,7 +132,6 @@ export function toAccountSections(balances: OverviewBalance[]): AccountSections 
         name: b.name,
         logo: b.logo,
         unitPrice: b.unitPrice,
-        change24h: b.change24h,
         gain24h: b.gain24h,
         note: b.note,
       });

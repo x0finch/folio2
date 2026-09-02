@@ -81,7 +81,6 @@ const enrichmentFromView = (tv: TokenEnrichmentView): TokenEnrichment => ({
   name: tv.name,
   logo: tokenLogoUrl(tv),
   unitPrice: tv.price?.unitPrice,
-  change24h: tv.price?.change24h,
   marketCapRank: tv.price?.marketCapRank,
 });
 
@@ -230,7 +229,6 @@ export interface AggInput {
   logo?: string; // 已按回退链取好(CGK→provider)
   // 法币身份(ADR 0025 / #271):由该 token 在 fiat 命名者下的 ref 经 fiatCodeOf 推出。
   isFiat?: boolean;
-  change24h?: number; // 每币 24h 涨跌(%);仅单 Token 组用于行内 ValueChange
   unitPrice?: number; // 单价(USD;展示用,详情头部)
   marketCapRank?: number; // 市值排名(展示用,详情头部)
 }
@@ -255,7 +253,6 @@ export interface Holding {
   };
   totalValue: number;
   totalAmount?: number; // 各 source 数量之和(组统一单位,跨链/多源亦可汇总)
-  change24h?: number; // 仅单一 Token 组(%,每币 CGK 涨跌)
   // 24h 盈亏(ADR 0040):由 server 读路径按快照历史分段算好后附上,**不在这里算**。
   gain24h?: Gain | null;
   sources: HoldingSource[];
@@ -349,7 +346,6 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
       },
       totalValue: a.totalValue,
       totalAmount: a.totalAmount,
-      change24h: a.first.change24h,
       sources,
     });
   }
@@ -657,12 +653,7 @@ export function buildOverview(
     }
   }
 
-  // 2) 富化(附回)→ 组装 AggInput → 聚合。defi 行(展示富化)按行 id 记 change24h。
-  const defiFlat = accounts.flatMap((a) =>
-    balancesOf(byAccount, a.id).flatMap((b) =>
-      viewKind(b) === "defi" && b.tokenId ? [{ b, id: b.tokenId }] : [],
-    ),
-  );
+  // 2) 富化(附回)→ 组装 AggInput → 聚合。
   const recordOf = (b: { tokenId?: string | null }): TokenView | undefined =>
     b.tokenId ? enriched.get(b.tokenId) : undefined;
   const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
@@ -684,7 +675,6 @@ export function buildOverview(
     isFiat: isFiatToken(b.tokenId),
     name: e?.name,
     logo: e ? tokenLogoUrl(e) : undefined, // 有图→拼自家代理 /api/logo/token/{id}(FOL-48 起不再发上游 URL),无图→undefined 显首字母;隐私 ADR 0008
-    change24h: e?.price?.change24h,
     unitPrice: e?.price?.unitPrice,
     marketCapRank: e?.price?.marketCapRank,
   }));
@@ -765,12 +755,10 @@ export function buildOverview(
   );
 
   // 3) 次级分区(每账户 defi 分组 + perp 权益/敞口)。perp 权益不进 Holdings(#129)。
-  const defiChange = new Map(defiFlat.map((x) => [x.b.id, enriched.get(x.id)?.price?.change24h]));
   const decorate = (bs: OverviewBalance[]): OverviewBalance[] =>
     bs.map((b) => ({
       ...b,
       symbol: recordOf(b)?.symbol ?? b.symbol,
-      ...(defiChange.has(b.id) ? { change24h: defiChange.get(b.id) } : {}),
     }));
 
   let defiSubtotal = 0;
@@ -850,7 +838,7 @@ export function buildOverview(
 // buildOverview 丢弃)。`metaJson` 留着:defi/perp 的 `parseDefiMeta` / `PerpEquityMeta` / `viewKind`
 // 全靠它。实测把快照那一段 raw 砍掉约一半。
 export interface BalanceView {
-  id: string; // 无 token_id 的行的分组键;defiChange 按它挂 change24h;DefiRow.id —— 必须留
+  id: string; // 无 token_id 的行的分组键;DefiRow.id —— 必须留
   amount: number;
   usdValue: number;
   kind: string;
@@ -878,7 +866,7 @@ export interface PortfolioSnapshotData {
   // 「24 小时前」那一组(`snapshots.asOf` + manual 折算),与当前组并列发下来 —— 浏览器一次
   // 重建两组、两端相减算 24h 盈亏(ADR 0050)。窗口内没起点快照的账户不在内(涨跌当 0 / `—`)。
   prevSnapshots: [string, SnapshotView][];
-  // 富化字典 entries(token_id → 瘦身行:名字 / 价格 / change24h / 有没有图)。**不含上游 logo URL**
+  // 富化字典 entries(token_id → 瘦身行:名字 / 价格 / 有没有图)。**不含上游 logo URL**
   // (FOL-48:有 id 就能拼 `/api/logo/token/{id}`)。
   enriched: [string, TokenView][];
   // 平台(链)展示元数据 entries(场馆键不在内 —— 那些走 connectorMeta)。
