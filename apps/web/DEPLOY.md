@@ -118,12 +118,19 @@ from the PR's Labels box.)
 
 **How it's shaped (chosen deliberately):**
 
-- **One shared preview Worker + one shared preview D1 (`folio-preview`).** All labeled PRs deploy to
-  the same Worker; the last push wins (the workflow serializes deploys via `concurrency`). The URL is
-  therefore **fixed** — a custom domain bound to the Worker in the CF dashboard and hard-coded in
-  `pr-preview.yml` (e.g. `https://preview.folio.009003.xyz`), deliberately kept out of wrangler config.
-  `BETTER_AUTH_URL` must match it so better-auth stays same-origin; the workers.dev URL will 401/CSRF on
-  login because the origin differs.
+- **One shared preview Worker + one shared preview D1 (`folio-preview`), but a per-PR URL.** Each
+  labeled PR runs `wrangler versions upload --env preview --preview-alias pr-<N>` (not `deploy`), so it
+  uploads a **version** with a stable per-PR preview URL `https://pr-<N>-folio-preview.<subdomain>.workers.dev`
+  and never promotes to the fixed domain — **multiple PRs can be previewed at once without clobbering**.
+  All versions share the one Worker (same secrets) and the one `folio-preview` D1. Deploys are still
+  serialized via `concurrency` (so shared-D1 migrations don't race).
+- **Login on the per-PR URLs uses email/password.** better-auth cookies are host-only by default, so
+  they stick to whatever preview host served them; `env.preview` sets `PREVIEW_TRUSTED_ORIGINS`
+  (`https://*-folio-preview.*.workers.dev`) which better-auth adds to `trustedOrigins`, so the
+  Origin/CSRF check passes on the alias hosts. **Production never sets this var** → strict there.
+  Passkey still binds its rpID to the fixed `BETTER_AUTH_URL` host, so passkey won't work across the
+  alias domains — sign in with password on a preview. (Tighten the middle `*` to your account
+  subdomain in `wrangler.jsonc` if you want to scope trust to your own workers.dev subdomain.)
 - **The preview DB is not reset on every deploy** — it keeps its data/login across PRs (so you can
   sign up a test user once and keep using it). Migrations **accumulate** onto it, applied before each
   deploy with the same fail-stop order as production.
