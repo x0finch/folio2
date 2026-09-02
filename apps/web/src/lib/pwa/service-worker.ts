@@ -57,13 +57,32 @@ export function applyUpdate(): void {
   waitingWorker.postMessage({ type: "SKIP_WAITING" });
 }
 
-/** 手动检查更新(设置页「已是最新」时点一下):真有新版会走 updatefound 亮起「有新版」信号。 */
-export async function checkForUpdate(): Promise<void> {
-  if (!registration) return;
+/**
+ * 手动检查更新(设置页那颗刷新)。等新 worker 装完再回答,好让调用点据此 toast「有新版本」还是
+ * 「已是最新」。真有新版会同时走 updatefound → 亮「有新版」信号(设置页不依赖它,直接看返回值)。
+ * @returns 检查后是否有 waiting 的新版本可换。
+ */
+export async function checkForUpdate(): Promise<boolean> {
+  if (!registration) return false;
   try {
     await registration.update();
+    // update() resolve 时新 worker 可能还在 installing → 等它落定,waiting 才准。
+    const installing = registration.installing;
+    if (installing) {
+      await new Promise<void>((resolve) => {
+        const onState = () => {
+          if (installing.state === "installed" || installing.state === "redundant") {
+            installing.removeEventListener("statechange", onState);
+            resolve();
+          }
+        };
+        installing.addEventListener("statechange", onState);
+      });
+    }
+    return registration.waiting != null;
   } catch {
     // 静默:网络问题不该冒泡到 UI。
+    return false;
   }
 }
 
@@ -142,18 +161,6 @@ export function useSplashUpdating(): boolean {
       return () => updatingListeners.delete(cb);
     },
     () => updating,
-    () => false,
-  );
-}
-
-/** 设置页订阅:当前是否有可换的新版本。 */
-export function useUpdateAvailable(): boolean {
-  return useSyncExternalStore(
-    (cb) => {
-      availableListeners.add(cb);
-      return () => availableListeners.delete(cb);
-    },
-    () => availableWorker != null,
     () => false,
   );
 }

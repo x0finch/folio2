@@ -43,12 +43,9 @@ const en = {
     updating: "Updating…",
   },
   Update: {
-    cardTitle: "App version",
     available: "Update available",
     upToDate: "Up to date",
     update: "Update",
-    check: "Check for updates",
-    checking: "Checking…",
   },
   PageHeader: {
     overviewSub: "Live portfolio across {count, plural, one {# source} other {# sources}}",
@@ -281,6 +278,8 @@ const en = {
   Settings: {
     title: "Settings",
     user: "User",
+    version: "Version",
+    checkUpdate: "Check for updates",
     signOut: "Sign out",
     signOutConfirmTitle: "Sign out?",
     signOutConfirmBody: "You'll need to sign in again to see your portfolio.",
@@ -466,12 +465,9 @@ const zh: Messages = {
     updating: "更新中…",
   },
   Update: {
-    cardTitle: "应用版本",
     available: "有新版本",
     upToDate: "已是最新",
     update: "更新",
-    check: "检查更新",
-    checking: "检查中…",
   },
   PageHeader: {
     overviewSub: "跨 {count} 个来源的实时组合",
@@ -695,6 +691,8 @@ const zh: Messages = {
   Settings: {
     title: "设置",
     user: "用户",
+    version: "版本",
+    checkUpdate: "检查更新",
     signOut: "退出登录",
     signOutConfirmTitle: "退出登录?",
     signOutConfirmBody: "你需要重新登录才能查看你的组合。",

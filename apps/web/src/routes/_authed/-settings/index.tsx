@@ -4,7 +4,6 @@ import { DataCard } from "./data-card";
 import { PasskeysCard } from "./passkey";
 import { AutoLockCard } from "./passkey/auto-lock-card";
 import { ProviderKeysCard } from "./provider-keys-card";
-import { UpdateCard } from "./update-card";
 import { UserCard } from "./user-card";
 import { ValuationCard } from "./valuation-card";
 
@@ -23,13 +22,6 @@ export function Settings() {
       <ProviderKeysCard />
       <ValuationCard />
       <DataCard />
-      <UpdateCard />
-      <p className="pt-2 text-center font-mono text-muted-foreground text-xs">
-        {/* 有 tag 时 __APP_VERSION__ 是版本号、与 commit 不同则一起显示;CI 浅克隆无 tag 时两者
-            相同,只显示 commit,避免 `hash · hash` 的重复。 */}
-        {__APP_VERSION__ !== __COMMIT_HASH__ ? `${__APP_VERSION__} · ` : ""}
-        {__COMMIT_HASH__} · {__BUILD_TIME__.slice(0, 10)}
-      </p>
     </div>
   );
 }

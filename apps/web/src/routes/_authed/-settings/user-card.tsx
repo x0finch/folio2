@@ -1,19 +1,62 @@
-import { Button, Card, CardContent, CardHeader, CardTitle, MorphingModal, toast } from "@folio/ui";
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  cn,
+  MorphingModal,
+  toast,
+} from "@folio/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { LogOut } from "lucide-react";
+import { LogOut, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
+import { IconButton } from "@/components/icon-button";
 import { signOut } from "@/lib/core/auth-client";
 import { clearIdleLockState } from "@/lib/hooks/use-idle-lock";
+import { applyUpdate, checkForUpdate } from "@/lib/pwa/service-worker";
+import { SettingRow } from "./setting-row";
+
+// 展示版本(构建期 git describe 注入,见 vite.config)。去掉 `-g<hash>` 后缀,只留 `v0.14.0-21`
+// 这样的形状;CI 浅克隆无 tag 时它就是短 hash,原样显示。
+// `typeof` 守卫:vitest 不套 vite 的 define,`__APP_VERSION__` 在测试里未定义(本文件的 userIdentity
+// 被 user-identity.test 引),裸引会 ReferenceError —— 退到 "dev"。
+const APP_VERSION = (typeof __APP_VERSION__ === "undefined" ? "dev" : __APP_VERSION__).replace(
+  /-g[0-9a-f]+$/i,
+  "",
+);
 
 export function UserCard({ user }: { user: { name?: string | null; email?: string | null } }) {
   const t = useTranslations("Settings");
   const ts = useTranslations("Sidebar");
   const tc = useTranslations("Common");
+  const tu = useTranslations("Update");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [checking, setChecking] = useState(false);
+
+  // 手动查更新:图标转一圈(带最短时长,别一闪),查完**无论有没有新版都 toast**。有则「有新版本·更新」
+  // (点走 applyUpdate),无则「已是最新」;共用 id `sw-update`,和运行中自动提示的那条 toast 收敛成一条、不叠。
+  async function onCheckUpdate() {
+    if (checking) return;
+    setChecking(true);
+    const start = Date.now();
+    const found = await checkForUpdate();
+    const rest = 700 - (Date.now() - start);
+    if (rest > 0) await new Promise((r) => setTimeout(r, rest));
+    setChecking(false);
+    if (found) {
+      toast.message(tu("available"), {
+        id: "sw-update",
+        action: { label: tu("update"), onClick: () => applyUpdate() },
+      });
+    } else {
+      toast.success(tu("upToDate"), { id: "sw-update" });
+    }
+  }
   const id = userIdentity(user);
   const secondary = id.secondary.kind === "email" ? id.secondary.value : ts("selfHosted");
 
@@ -37,7 +80,7 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
       <CardHeader>
         <CardTitle>{t("user")}</CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-foreground text-sm">
@@ -52,6 +95,23 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
             <LogOut className="size-4" />
             {t("signOut")}
           </Button>
+        </div>
+
+        {/* 版本行:左「版本」,右版本号 + ghost 刷新(点击转一圈 + 总是 toast)。 */}
+        <div className="border-border border-t pt-4">
+          <SettingRow label={t("version")}>
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-muted-foreground text-sm">{APP_VERSION}</span>
+              <IconButton
+                aria-label={t("checkUpdate")}
+                size="sm"
+                disabled={checking}
+                onClick={onCheckUpdate}
+              >
+                <RefreshCw className={cn("size-4", checking && "animate-spin")} />
+              </IconButton>
+            </div>
+          </SettingRow>
         </div>
       </CardContent>
 
