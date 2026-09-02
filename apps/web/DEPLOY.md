@@ -155,13 +155,20 @@ cd apps/web
 #    wrangler.jsonc → env.preview.d1_databases[0].database_id (replacing the REPLACE_WITH_… placeholder)
 pnpm exec wrangler d1 create folio-preview
 
-# 2. Set the preview Worker's secrets (its own set — independent from production; generate fresh).
-#    BETTER_AUTH_URL must be the fixed preview URL so better-auth stays same-origin.
-pnpm exec wrangler secret put SECRETS_KEY        --env preview   # openssl rand -base64 32
-pnpm exec wrangler secret put BETTER_AUTH_SECRET --env preview   # openssl rand -hex 32
-pnpm exec wrangler secret put BETTER_AUTH_URL    --env preview   # https://folio-preview.<your-subdomain>.workers.dev
-pnpm exec wrangler secret put COINSTATS_API_KEY  --env preview   # set if you want on-chain sync to work in previews
-# COINGECKO_API_KEY optional (works keyless on the free tier)
+# 2. Set the preview Worker's secrets. Use `--name folio-preview`, NOT `--env preview`:
+#    env.preview now sets its own `name`, so `--env preview` resolves to a non-existent
+#    `folio-preview-preview` (the legacy env suffix stacks on top of the name).
+#    Mirror the FULL production secret set — a partial set fails silently at sync time
+#    (e.g. binance 403s from CF IPs unless the *_BASE proxy endpoints are present).
+pnpm exec wrangler secret put SECRETS_KEY        --name folio-preview   # openssl rand -base64 32
+pnpm exec wrangler secret put BETTER_AUTH_SECRET --name folio-preview   # openssl rand -hex 32
+pnpm exec wrangler secret put BETTER_AUTH_URL    --name folio-preview   # the fixed custom domain, e.g. https://preview.folio.009003.xyz
+pnpm exec wrangler secret put COINSTATS_API_KEY  --name folio-preview
+pnpm exec wrangler secret put COINGECKO_API_KEY  --name folio-preview
+pnpm exec wrangler secret put ZERION_API_KEY     --name folio-preview
+pnpm exec wrangler secret put BINANCE_API_BASE   --name folio-preview   # proxy base — binance 403s from CF IPs without these three
+pnpm exec wrangler secret put BINANCE_FAPI_BASE  --name folio-preview
+pnpm exec wrangler secret put BINANCE_DAPI_BASE  --name folio-preview
 ```
 
 You get the exact `<your-subdomain>` from the first deploy's printed URL (or the tag deploy's).
