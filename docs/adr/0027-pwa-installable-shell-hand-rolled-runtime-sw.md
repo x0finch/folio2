@@ -2,6 +2,8 @@
 
 Status: accepted。见 [#262](https://github.com/x0finch/folio2/issues/262)。
 
+> **更新流一节已被 [ADR 0051](0051-pwa-splash-and-update-flow.md) 取代**(FOL-61):「静默 skipWaiting、不弹更新提示」改为「闪屏静默换版 + 运行中弹 toast + 设置页入口 + 定时探更新」,并加冷启动闪屏与 iOS 启动图。本 ADR 其余部分(手搓 runtime SW、`swRoute` 缓存策略、可安装外壳、安全区)不变。
+
 Folio 主要在移动端使用,要 PWA 化:能「添加到主屏幕」、独立窗口(无地址栏)启动、有原生 App 观感,刘海机型安全区正确。**定位是「可安装的移动外壳」,不做离线优先**:Folio 是带鉴权的**实时**资产看板,把缓存里昨天的余额当实时数据显示,比诚实地报「你离线了」更糟、更危险。
 
 据此定下 SW 策略:**只缓存 App 外壳 + 带 hash 的静态资源;所有数据/鉴权请求(`/api/*`、server functions)一律 network-only、永不进缓存**;导航请求 **network-first**(发版即拿新前端,不卡旧缓存页);离线时回退已缓存外壳、给诚实的「离线」占位,而不是伪造旧数据。
