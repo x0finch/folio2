@@ -124,6 +124,11 @@ from the PR's Labels box.)
   and never promotes to the fixed domain — **multiple PRs can be previewed at once without clobbering**.
   All versions share the one Worker (same secrets) and the one `folio-preview` D1. Deploys are still
   serialized via `concurrency` (so shared-D1 migrations don't race).
+- **The fixed domain `preview.folio.009003.xyz` tracks `main` (staging).** `preview-main.yml` deploys
+  (promotes) `main` to the Worker's **active deployment** on every push to main — so the custom domain
+  always shows the latest merged code, while per-PR previews live on their version aliases. This is the
+  Cloudflare "deployments vs versions" split: active deployment = staging/main, versions = PR previews.
+  `preview-main.yml` shares the `pr-preview` concurrency group so a main deploy and PR uploads serialize.
 - **Login on the per-PR URLs uses email/password.** better-auth cookies are host-only by default, so
   they stick to whatever preview host served them; `env.preview` sets `PREVIEW_TRUSTED_ORIGINS`
   (`https://*-folio-preview.*.workers.dev`) which better-auth adds to `trustedOrigins`, so the

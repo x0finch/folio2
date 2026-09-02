@@ -1,0 +1,39 @@
+name: Preview (main)
+
+# 让固定预览域 `preview.folio.009003.xyz` 始终 = 最新 main(staging 预览):每次合并到 main 就把 main
+# 部署(promote)到 preview Worker 的**活动部署**。这是「部署 vs 版本」模型里「活动部署」那一半——
+# 另一半「版本别名」是 pr-preview.yml 给每个打标签 PR 的 `pr-<N>-folio-preview.<子域>.workers.dev`。
+# 两者共用同一个 folio-preview Worker + D1;promote main 不影响已上传的 PR 版本(版本是独立快照)。
+#
+# 生产 Worker `folio` 完全不受影响(那条走 tag → deploy.yml)。复用生产那把 CLOUDFLARE_API_TOKEN。
+on:
+  push:
+    branches: [main]
+
+# 与 pr-preview 共用同一个并发组:main 的 deploy 与各 PR 的 version 上传全局串行,避免共享 D1 的迁移
+# 并发、以及同一 Worker 同时写。cancel-in-progress: false —— 部署/迁移进行中不打断,免留半迁移的库。
+concurrency:
+  group: pr-preview
+  cancel-in-progress: false
+
+jobs:
+  preview-main:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # 先迁移 preview 远程库(同 pr-preview / 生产的 fail-stop 顺序:迁移失败 → 不部署)。
+      - name: Apply D1 migrations (preview)
+        run: pnpm --filter @folio/web run db:migrate:preview
+
+      # vite build + wrangler deploy --env preview:promote 到活动部署 → 固定域 preview.folio 更新到 main。
+      - name: Build & deploy preview (main)
+        run: pnpm --filter @folio/web run deploy:preview
