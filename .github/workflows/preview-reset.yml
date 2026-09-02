@@ -36,24 +36,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: .
 
-      # 1) 查出所有业务表(排除 sqlite_ 内部表和 D1 的 _cf_ 表);d1_migrations 也一并 drop,
-      #    这样下一步全量迁移会从零重跑。
+      # 1) drop 所有业务表 + d1_migrations(动态逻辑在 scripts/reset-preview-db.mjs)。
+      #    走 package.json script 而非 inline wrangler —— 和 ci.yml/deploy.yml 一致,knip 才认。
       - name: Drop all tables in preview DB
-        run: |
-          set -o pipefail
-          raw=$(pnpm exec wrangler d1 execute folio-preview --remote --env preview --json \
-            --command "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'")
-          echo "$raw"
-          tables=$(printf '%s' "$raw" | jq -r '.[0].results[].name')
-          if [ -z "$tables" ]; then
-            echo "no tables to drop — preview DB already empty"; exit 0
-          fi
-          # 一个 execute 里关掉 FK 再逐个 drop,避开父子表删除顺序问题。
-          { echo "PRAGMA foreign_keys=OFF;";
-            for t in $tables; do echo "DROP TABLE IF EXISTS \"$t\";"; done;
-          } > /tmp/reset.sql
-          cat /tmp/reset.sql
-          pnpm exec wrangler d1 execute folio-preview --remote --env preview --file /tmp/reset.sql
+        run: pnpm run db:reset:preview
 
       # 2) 全量重新迁移(空库 → 按 drizzle/ 建全部表)。
       - name: Re-apply all migrations

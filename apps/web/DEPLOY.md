@@ -158,9 +158,9 @@ Set `BETTER_AUTH_URL` **before** the first preview sign-up (WebAuthn RP is deriv
 confirm). It **wipes all data in `folio-preview`** (drops every table + clears `d1_migrations`), then
 re-applies all migrations from scratch. It only ever touches `folio-preview`, never production.
 
-> ⚠️ The reset's drop-all SQL/jq has **not yet been verified against a real D1**. On the first run,
-> watch the logs: confirm the drop step doesn't error on FK/PRAGMA behavior, and that
-> `wrangler … --json` output parsed cleanly. **Manual fallback if it fails:**
+> ⚠️ The reset's drop-all (`scripts/reset-preview-db.mjs`) has **not yet been verified against a real
+> D1**. On the first run, watch the logs: confirm the drop step doesn't error on FK/PRAGMA behavior,
+> and that `wrangler … --json` output parsed cleanly. **Manual fallback if it fails:**
 > `pnpm exec wrangler d1 delete folio-preview` then `d1 create folio-preview`, paste the **new**
 > `database_id` into `wrangler.jsonc` env.preview, and `pnpm run db:migrate:preview`.
 
