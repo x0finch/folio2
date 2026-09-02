@@ -25,6 +25,6 @@ echo "session-start: pnpm install…"
 if command -v corepack >/dev/null 2>&1; then
   corepack enable >/dev/null 2>&1 || true
 fi
-pnpm install --frozen-lockfile || pnpm install
+pnpm install
 
 echo "session-start: done"
