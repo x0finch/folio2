@@ -53,8 +53,8 @@ export const THEME_COLORS: { media: string; content: string }[] = [
 // 时长与 splash-lifecycle 的 SPLASH_EXIT_MS(520ms)对齐。
 // 缓动值即 lib/ease 的 EASE_OUT_CSS(cubic-bezier(0.16,1,0.3,1))—— 内联关键样式导不了 JS token,
 // 故照抄其值(与全站一致)。**logo 用 grid 钉在真屏幕中心**(不是「logo+文案整组居中」),这样它的
-// 位置与 iOS 启动图里精确居中的 logo 一致 —— 静态→呼吸无缝交接(ADR 0051 的核心目标);文案改为
-// 绝对定位挂在中心之下,不影响 logo 的居中。文案切换是 key 重挂后的淡入+上移(非重叠 crossfade,
+// 位置与 iOS 启动图里精确居中的 logo 一致 —— 静态→呼吸无缝交接(ADR 0051 的核心目标);文案**绝对
+// 定位挂在靠底部**(离底 14vh + 安全区,不贴边),不影响 logo 的居中。文案切换是 key 重挂后的淡入+上移(非重叠 crossfade,
 // 一行短提示不值得为重叠多铺一层)。
 export const SPLASH_STYLE = `
 #app-splash{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;
@@ -64,7 +64,7 @@ font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 #folio-splash-logo{width:${SPLASH_LOGO_SIZE}px;height:${SPLASH_LOGO_SIZE}px;color:currentColor;
 transform-origin:center;will-change:transform,opacity;
 animation:folio-breathe 1.8s ease-in-out infinite}
-#folio-splash-msg{position:absolute;left:0;right:0;top:calc(50% + 3.25rem);margin:0;padding:0 1.5rem;
+#folio-splash-msg{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 14vh);margin:0;padding:0 1.5rem;
 text-align:center;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLASH_MUTED};
 animation:folio-splash-msg-in .3s cubic-bezier(0.16,1,0.3,1)}
 #app-splash[data-exit="true"]{animation:folio-splash-out ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
