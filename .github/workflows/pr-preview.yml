@@ -5,9 +5,12 @@ name: PR Preview
 # (需要仓库里存在一个名为 `preview` 的 label —— 在 PR 的 Labels 里现建一个即可。)
 #
 # 部署到一个**独立的** Worker `folio-preview`(见 apps/web/wrangler.jsonc 的 env.preview)——
-# 生产 Worker `folio` 完全不受影响。所有打标签的 PR **共用**这一个 preview Worker + 一个
-# `folio-preview` 远程 D1(方案 B:常驻累积),后 push 的覆盖前一个。库平时不清、保留数据;
-# destructive 迁移把某个 preview 弄崩时,手动跑 preview-reset.yml 重建一次。
+# 生产 Worker `folio` 完全不受影响。每个打标签的 PR 经 `wrangler versions upload --preview-alias pr-<N>`
+# 拿到一个**独立的** workers.dev 预览 URL(`pr-<N>-folio-preview.<子域>.workers.dev`),**多个 PR 互不
+# 覆盖、可同时在线**;它们**共用**这一个 preview Worker + 一个 `folio-preview` 远程 D1(方案 B:常驻累积)。
+# 库平时不清、保留数据;destructive 迁移把某个 preview 弄崩时,手动跑 preview-reset.yml 重建一次。
+# 登录:auth 在 preview 放行了这些别名域(env.preview 的 PREVIEW_TRUSTED_ORIGINS),用邮箱/密码登录;
+# passkey 绑固定域、换别名域不通(预览用密码即可)。
 #
 # 正确性四闸由 ci.yml 在同一个 commit 上并行跑;这里不重复,只管「把它跑起来给人看」。
 # 复用生产那把 `CLOUDFLARE_API_TOKEN`(Workers Scripts:Edit + D1:Edit),无需新 token。
@@ -55,12 +58,18 @@ jobs:
       # dashboard 绑到 folio-preview Worker(刻意不进 wrangler 配置),这里直接固定用它、不从 wrangler
       # 输出 grep:workers.dev 那个不是登录用的地址(BETTER_AUTH_URL 指向自定义域名,从 workers.dev
       # 进会 origin 不匹配、登录失败)。域名变了改这一行。
-      - name: Build & deploy preview
+      # 上传一个**版本**并挂 per-PR 预览别名 `pr-<N>`(不 promote 到固定域 → 不覆盖别的 PR)。
+      # 从 wrangler 输出里抓那条别名预览 URL。
+      - name: Build & upload preview version
         id: deploy
+        env:
+          PREVIEW_ALIAS: pr-${{ github.event.pull_request.number }}
         run: |
           set -o pipefail
-          pnpm --filter @folio/web run deploy:preview 2>&1 | tee /dev/stderr
-          echo "url=https://preview.folio.009003.xyz" >> "$GITHUB_OUTPUT"
+          pnpm --filter @folio/web run upload:preview 2>&1 | tee /tmp/wrangler.log
+          url="$(grep -oiE 'https://pr-[0-9]+-folio-preview[a-z0-9.-]*\.workers\.dev' /tmp/wrangler.log | head -1)"
+          if [ -z "$url" ]; then echo "::error::could not parse preview URL from wrangler output"; exit 1; fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
       # 单条「粘性」评论:每次 push 更新同一条,不刷屏。用第一方 github-script,不引第三方 action。
       - name: Upsert preview URL comment
@@ -70,8 +79,9 @@ jobs:
             const url = "${{ steps.deploy.outputs.url }}";
             const marker = "<!-- pr-preview-url -->";
             const body = `${marker}\n🚀 **Preview 已部署**: ${url}\n\n` +
-              `- 独立 Worker \`folio-preview\`,不影响生产。\n` +
-              `- 所有 PR 共用一个 preview 库,数据保留、不每次清;详见 DEPLOY.md「PR preview」。\n` +
+              `- 本 PR 专属预览 URL(\`pr-<N>\` 别名),不覆盖其它 PR,可同时在线。\n` +
+              `- 独立 Worker \`folio-preview\`,不影响生产;所有 PR 共用一个 preview 库,数据保留、不每次清。\n` +
+              `- 登录用**邮箱/密码**(passkey 换别名域不通);详见 DEPLOY.md「PR preview」。\n` +
               `- commit \`${context.sha.slice(0, 7)}\``;
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;

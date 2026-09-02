@@ -8,5 +8,9 @@ declare namespace Cloudflare {
   interface Env {
     BETTER_AUTH_SECRET: string;
     BETTER_AUTH_URL: string;
+    // 仅 preview env 设置(wrangler.jsonc env.preview.vars);生产不设 → undefined。
+    // 逗号分隔的额外可信 origin(含通配),喂 better-auth trustedOrigins,让 workers.dev 预览别名域
+    // 也能登录。见 auth.ts。
+    PREVIEW_TRUSTED_ORIGINS?: string;
   }
 }
