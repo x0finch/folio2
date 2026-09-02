@@ -89,6 +89,9 @@
     // `wrangler secret put --env preview` 一次性设在 `folio-preview` Worker 上(见 DEPLOY.md),
     // CI 不碰。BETTER_AUTH_URL 设成上面那个固定 preview URL,better-auth 因而同源、无需改动。
     "preview": {
+      // 独立 Worker 名 —— **必须显式写**。wrangler v4 已移除 service environments:env 不给 name
+      // 就沿用顶层 `folio`,`deploy --env preview` 会直接覆盖生产 Worker(踩过一次,见 DEPLOY.md)。
+      "name": "folio-preview",
       "vars": { "LOG_LEVEL": "info" },
       "cache": { "enabled": true },
       "d1_databases": [

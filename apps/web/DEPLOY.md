@@ -129,6 +129,21 @@ from the PR's Labels box.)
   then a PR that doesn't have that migration renders against a DB that lost it → that preview breaks,
   and D1 has no down-migration to roll back. When that happens, run the manual reset below.
 
+**Critical config (learned the hard way — a preview deploy once clobbered production):**
+
+- **`env.preview` must set `"name": "folio-preview"`.** Wrangler v4 removed service environments; an
+  env without its own `name` falls back to the top-level `folio`, so `wrangler deploy --env preview`
+  overwrites the **production** Worker instead of a separate one.
+- **`deploy:preview` must build with `CLOUDFLARE_ENV=preview`.** With `@cloudflare/vite-plugin`,
+  `wrangler deploy` ships the *build artifact's* config — `--env` at deploy time is a no-op. The env is
+  picked at **build** time via `CLOUDFLARE_ENV` (same mechanism as e2e's `CLOUDFLARE_ENV=test`). Verify:
+  after `CLOUDFLARE_ENV=preview pnpm build`, `dist/server/wrangler.json` should show `name`/`d1` as
+  `folio-preview`.
+- **`CLOUDFLARE_API_TOKEN` must be a repo-level secret**, not only the `production` environment secret
+  the tag deploy uses — `pr-preview.yml` declares no `environment:`, so it reads the repo-level one.
+- `wrangler secret put --env preview` **does** target `folio-preview` correctly even without the `name`
+  above (secret put keeps the legacy `-preview` suffix); only `deploy` needed the two fixes.
+
 **One-time setup:**
 
 ```sh
