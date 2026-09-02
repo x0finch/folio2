@@ -92,9 +92,6 @@
       // 独立 Worker 名 —— **必须显式写**。wrangler v4 已移除 service environments:env 不给 name
       // 就沿用顶层 `folio`,`deploy --env preview` 会直接覆盖生产 Worker(踩过一次,见 DEPLOY.md)。
       "name": "folio-preview",
-      // 自定义域名(声明式绑定,别只靠 dashboard 手动)。custom_domain:true → wrangler 负责建/接管。
-      // preview 是固定共享 URL,BETTER_AUTH_URL 指向它,pr-preview.yml 评论也直接用它。
-      "routes": [{ "pattern": "preview.folio.009003.xyz", "custom_domain": true }],
       "vars": { "LOG_LEVEL": "info" },
       "cache": { "enabled": true },
       "d1_databases": [

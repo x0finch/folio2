@@ -51,9 +51,10 @@ jobs:
       - name: Apply D1 migrations (preview)
         run: pnpm --filter @folio/web run db:migrate:preview
 
-      # vite build + wrangler deploy --env preview。preview 是**固定**共享 URL —— 自定义域名,配在
-      # wrangler.jsonc 的 env.preview.routes。评论直接用它,不从 wrangler 输出 grep:workers.dev 那个
-      # 不是登录用的地址(BETTER_AUTH_URL 指向自定义域名,从 workers.dev 进会 origin 不匹配、登录失败)。
+      # vite build + wrangler deploy --env preview。preview 是**固定**共享 URL —— 自定义域名在 CF
+      # dashboard 绑到 folio-preview Worker(刻意不进 wrangler 配置),这里直接固定用它、不从 wrangler
+      # 输出 grep:workers.dev 那个不是登录用的地址(BETTER_AUTH_URL 指向自定义域名,从 workers.dev
+      # 进会 origin 不匹配、登录失败)。域名变了改这一行。
       - name: Build & deploy preview
         id: deploy
         run: |

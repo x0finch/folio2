@@ -120,9 +120,10 @@ from the PR's Labels box.)
 
 - **One shared preview Worker + one shared preview D1 (`folio-preview`).** All labeled PRs deploy to
   the same Worker; the last push wins (the workflow serializes deploys via `concurrency`). The URL is
-  therefore **fixed** — a custom domain bound declaratively via `env.preview.routes`
-  (`custom_domain: true`), e.g. `https://preview.folio.009003.xyz`. `BETTER_AUTH_URL` must match it so
-  better-auth stays same-origin; the workers.dev URL will 401/CSRF on login because the origin differs.
+  therefore **fixed** — a custom domain bound to the Worker in the CF dashboard and hard-coded in
+  `pr-preview.yml` (e.g. `https://preview.folio.009003.xyz`), deliberately kept out of wrangler config.
+  `BETTER_AUTH_URL` must match it so better-auth stays same-origin; the workers.dev URL will 401/CSRF on
+  login because the origin differs.
 - **The preview DB is not reset on every deploy** — it keeps its data/login across PRs (so you can
   sign up a test user once and keep using it). Migrations **accumulate** onto it, applied before each
   deploy with the same fail-stop order as production.
