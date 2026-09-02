@@ -1,6 +1,5 @@
 import { Button, cn, Input, Label, MorphingModal, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { WebAuthnAbortService } from "@simplewebauthn/browser";
-import { useNavigate } from "@tanstack/react-router";
 import { Fingerprint } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
@@ -86,7 +85,6 @@ function HeroBackdrop() {
 }
 
 function AuthPanel() {
-  const navigate = useNavigate();
   const t = useTranslations("Login");
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
@@ -113,7 +111,7 @@ function AuthPanel() {
         return;
       }
     }
-    navigate({ to: "/" });
+    window.location.href = "/";
   }
 
   // 引导里「添加」:走注册 ceremony;成败都进主页(引导是加分项,不该卡住登录)。
@@ -130,14 +128,14 @@ function AuthPanel() {
     // 传 name 见那个函数的注释。
     const res = await registerPasskey("platform").catch(() => null);
     if (res?.data) markReady(res.data.credentialID);
-    navigate({ to: "/" });
+    window.location.href = "/";
   }
 
   // 引导里「别再问我」:本设备记下,直接进主页。
   function onDismissPrompt() {
     dismissPasskeyPrompt();
     setPromptOpen(false);
-    navigate({ to: "/" });
+    window.location.href = "/";
   }
 
   // 支持检测 + conditional-UI autofill:页面加载即静默发起 passkey autofill(浏览器把已注册的
@@ -153,7 +151,7 @@ function AuthPanel() {
       .then((ok) => {
         if (!ok || cancelled) return;
         return signIn.passkey({ autoFill: true }).then((res) => {
-          if (!cancelled && res && !res.error) navigate({ to: "/" });
+          if (!cancelled && res && !res.error) window.location.href = "/";
         });
       })
       .catch(() => {}); // autofill 失败/用户取消是常态,静默即可
@@ -165,7 +163,7 @@ function AuthPanel() {
       // WebAuthn 标准做法:导航/卸载时 abort 掉这个 ceremony(web.dev / Chrome 均如此)。
       WebAuthnAbortService.cancelCeremony();
     };
-  }, [navigate]);
+  }, []);
 
   async function onPasskey() {
     setError(null);
@@ -176,7 +174,7 @@ function AuthPanel() {
         setError(res.error.message ?? t("authFailed"));
         return;
       }
-      navigate({ to: "/" });
+      window.location.href = "/";
     } catch {
       setError(t("authFailed"));
     } finally {
@@ -325,7 +323,7 @@ function AuthPanel() {
         viewId={promptOpen ? "passkey-prompt" : null}
         onClose={() => {
           setPromptOpen(false);
-          navigate({ to: "/" });
+          window.location.href = "/";
         }}
       >
         <div className="text-left">
