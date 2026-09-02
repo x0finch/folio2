@@ -15,7 +15,7 @@ const DAY_MS = 86_400_000;
 // hero 趋势最多展示最近 30 天;更长跨度 + 区间切换属于 Insights(不改共享的 getPortfolioHistory)。
 const HERO_WINDOW_DAYS = 30;
 const GAIN_BADGE =
-  "inline-flex items-center rounded-full px-2 py-0.5 font-mono font-semibold text-xs tabular-nums";
+  "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 font-mono font-semibold text-xs tabular-nums";
 const GAIN_TONE = {
   flat: "bg-muted text-muted-foreground",
   pos: "bg-pos-bg text-pos",
@@ -118,7 +118,7 @@ export function PortfolioHero({
         </p>
         {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。
             inline-flex + items-start:24h 增量贴在金额盒子的右上角,不跟数字基线居中。 */}
-        <div className="mt-2 inline-flex items-start gap-3">
+        <div className="mt-2 inline-flex flex-wrap items-start gap-3">
           {/* select-text:总净值是最该能复制的那个数。滚动与「整数/小数怎么拆」走 AmountTicker
               (两个抽屉同一份);hero 的字号在这里给 —— 它比抽屉大两档。 */}
           <div className="flex select-text items-baseline">

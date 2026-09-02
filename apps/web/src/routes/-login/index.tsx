@@ -1,4 +1,5 @@
 import { Button, cn, Input, Label, MorphingModal, Tabs, TabsList, TabsTrigger } from "@folio/ui";
+import { WebAuthnAbortService } from "@simplewebauthn/browser";
 import { useNavigate } from "@tanstack/react-router";
 import { Fingerprint } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -158,6 +159,11 @@ function AuthPanel() {
       .catch(() => {}); // autofill 失败/用户取消是常态,静默即可
     return () => {
       cancelled = true;
+      // 中止仍挂起的 conditional-UI autofill 请求。signIn.passkey({autoFill}) 底层是 @simplewebauthn 的
+      // startAuthentication,其 promise 一直 pending 到用户从填充条里选 passkey;若改用邮箱/密码登录后
+      // SPA 跳到 Overview,这个请求会泄漏过去 —— iOS 便持续吊着「Passwords」填充条 + 唤起键盘。
+      // WebAuthn 标准做法:导航/卸载时 abort 掉这个 ceremony(web.dev / Chrome 均如此)。
+      WebAuthnAbortService.cancelCeremony();
     };
   }, [navigate]);
 
