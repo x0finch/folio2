@@ -10,7 +10,7 @@ import { messages } from "@/lib/i18n/messages";
 import { registerServiceWorker } from "@/lib/pwa/service-worker";
 import { localePreferenceQuery } from "@/lib/queries/preferences";
 import appCss from "@/styles.css?url";
-import { appCssLoaderScript, SPLASH_STYLE, THEME_COLORS } from "./pwa-head";
+import { appCssLoaderScript, SPLASH_STYLE, STARTUP_IMAGES, THEME_COLORS } from "./pwa-head";
 import { SplashScreen } from "./splash";
 
 // 从 __root 的 loader 读 now(getRouteApi 免于反向 import Route 造成环)。
@@ -60,6 +60,11 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
         {/* theme-color 明暗两套:静态直渲(不进 head() 的 meta 数组,避开 TanStack 按 name 去重)。 */}
         {THEME_COLORS.map((tc) => (
           <meta key={tc.media} name="theme-color" media={tc.media} content={tc.content} />
+        ))}
+        {/* iOS 主屏启动图(ADR 0051):每种 iPhone 竖屏尺寸一条,media 匹配机型。静态直渲(带 media,
+            不走 head() 的 links 以免 TanStack 处理差异)。 */}
+        {STARTUP_IMAGES.map((s) => (
+          <link key={s.href} rel="apple-touch-startup-image" media={s.media} href={s.href} />
         ))}
         {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/hooks/use-theme)。 */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}

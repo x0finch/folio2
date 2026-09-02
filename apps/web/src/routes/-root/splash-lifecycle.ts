@@ -1,6 +1,8 @@
 // 冷启动闪屏的生命周期判定(纯函数,测试缝 —— 照 sw-route 的做法)。
 // React 组件只负责喂输入(hydrated / 路由是否 settle / 计时器)和渲染,时序决策全在这里,可穷举单测。
 
+import splashConfig from "./splash-config.json";
+
 export type SplashPhase = "preparing" | "loading" | "updating" | "exit";
 
 export interface SplashInput {
@@ -33,10 +35,11 @@ export function splashPhase(i: SplashInput): SplashPhase {
 }
 
 /**
- * splash 静止 logo 的边长(px)。**iOS 启动图(FOL-65)同读这个常量**,让静态启动图里的 logo
+ * splash 静止 logo 的边长(px)。**单一来源在 splash-config.json**:iOS 启动图生成脚本
+ * (gen-splash.mjs,纯 node 读不了 TS)与覆盖层样式(SPLASH_STYLE)同读它,让静态启动图里的 logo
  * 与随后呼吸 logo 的静止态(scale 1)大小一致 —— 静态→呼吸无缝交接。
  */
-export const SPLASH_LOGO_SIZE = 88;
+export const SPLASH_LOGO_SIZE: number = splashConfig.logoSize;
 
 /** 每条阶段文案的最小可见时长(ms);放行至少等它。 */
 export const SPLASH_MIN_MS = 700;

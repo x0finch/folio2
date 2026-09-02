@@ -1,13 +1,15 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   appCssLoaderScript,
   PWA_LINKS,
   PWA_META,
   SPLASH_STYLE,
+  STARTUP_IMAGES,
   THEME_COLORS,
   VIEWPORT,
 } from "@/routes/-root/pwa-head";
+import splashConfig from "@/routes/-root/splash-config.json";
 import { SPLASH_LOGO_SIZE } from "@/routes/-root/splash-lifecycle";
 
 // 测试缝②③(见 ADR 0027):PWA 只有 manifest 形状 + head 标签能便宜地自动化;
@@ -89,5 +91,32 @@ describe("冷启动闪屏 head 机制", () => {
 
   it("PWA_LINKS 不再把 app 样式表当阻塞 stylesheet 挂着", () => {
     expect(PWA_LINKS.every((l) => l.rel !== "stylesheet")).toBe(true);
+  });
+});
+
+// iOS 启动图 head 结构(ADR 0051 / FOL-65)。真机显示靠目视,这里守住:清单单一来源、media 合法、
+// 每条都指向真实存在的产物。
+describe("iOS 主屏启动图", () => {
+  it("清单单一来源:每个 iPhone 竖屏尺寸恰好一条 startup-image", () => {
+    expect(STARTUP_IMAGES).toHaveLength(splashConfig.iosDevices.length);
+    expect(STARTUP_IMAGES.length).toBeGreaterThan(0);
+    // logo 尺寸也来自同一份 config(与覆盖层静止 logo 共享)
+    expect(SPLASH_LOGO_SIZE).toBe(splashConfig.logoSize);
+  });
+
+  it("每条 media 带机型尺寸 + dpr + 竖屏", () => {
+    for (const s of STARTUP_IMAGES) {
+      expect(s.media).toContain("device-width");
+      expect(s.media).toContain("device-height");
+      expect(s.media).toContain("-webkit-device-pixel-ratio");
+      expect(s.media).toContain("orientation: portrait");
+    }
+  });
+
+  it("每条 href 指向真实存在的 PNG(文件名 = 设备像素)", () => {
+    for (const s of STARTUP_IMAGES) {
+      expect(s.href).toMatch(/^\/splash\/apple-splash-\d+x\d+\.png$/);
+      expect(existsSync(new URL(`../public${s.href}`, import.meta.url))).toBe(true);
+    }
   });
 });

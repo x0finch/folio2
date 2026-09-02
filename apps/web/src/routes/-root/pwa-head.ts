@@ -1,6 +1,7 @@
 // PWA 的 head 元素:manifest 链接、apple-touch 图标、明暗两套 theme-color、apple-mobile-web-app-*。
 // 抽成常量供 __root 注入 + 单测断言(测试缝③:守住 issue 点名「当前缺 manifest link」那处)。
 // 颜色取 design token 的 --background(beUI 官方值):亮 lab(98.84%)≈#fcfcfc、暗 #151515
+import splashConfig from "./splash-config.json";
 import { SPLASH_EXIT_MS, SPLASH_LOGO_SIZE } from "./splash-lifecycle";
 
 const THEME_COLOR_LIGHT = "#fcfcfc";
@@ -70,6 +71,18 @@ animation:folio-splash-msg-in .3s cubic-bezier(0.16,1,0.3,1)}
 #folio-splash-msg{animation:none}
 #app-splash[data-exit="true"]{animation:folio-splash-out 160ms linear forwards}}
 `;
+
+// iOS 主屏启动图(ADR 0051)。iOS 不认 manifest 的 background_color,加到主屏的 PWA 启动那一瞬
+// 若无启动图就露空白 —— 这组 `apple-touch-startup-image` 垫一张「logo 居中在 #151515 深色底」。
+// **尺寸清单单一来源在 splash-config.json**(生成脚本 gen-splash.mjs 同读):iOS 靠 media 里的机型
+// 尺寸匹配启动图,尺寸对不上的机型会忽略、自动降级成「纯深色 + logo」(接缝同底色看不出)。
+// 文件名按设备像素(logical × dpr)—— 与 gen-splash.mjs 的产出对齐。
+export const STARTUP_IMAGES: { media: string; href: string }[] = splashConfig.iosDevices.map(
+  ({ w, h, dpr }) => ({
+    media: `(device-width: ${w}px) and (device-height: ${h}px) and (-webkit-device-pixel-ratio: ${dpr}) and (orientation: portrait)`,
+    href: `/splash/apple-splash-${w * dpr}x${h * dpr}.png`,
+  }),
+);
 
 // 让 app 样式表**非渲染阻塞**(ADR 0051)。用「脚本注入 link」而非 <link>:脚本注入的样式表
 // 不阻塞解析/首帧,于是内联的 SPLASH_STYLE 能先画、appCss 落地后再套用。无 JS 时走 <noscript>
