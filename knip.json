@@ -4,7 +4,7 @@
     "apps/web": {
       "ignoreDependencies": ["cloudflare", "tailwindcss", "@tailwindcss/typography"],
       "ignoreBinaries": ["cloudflared"],
-      "entry": ["e2e/fixtures/binance-server.mjs"]
+      "entry": ["e2e/fixtures/binance-server.mjs", "scripts/gen-icons.mjs"]
     },
     "packages/ui": {
       "ignoreDependencies": ["tailwindcss"]
