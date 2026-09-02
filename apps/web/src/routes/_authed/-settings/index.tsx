@@ -4,6 +4,7 @@ import { DataCard } from "./data-card";
 import { PasskeysCard } from "./passkey";
 import { AutoLockCard } from "./passkey/auto-lock-card";
 import { ProviderKeysCard } from "./provider-keys-card";
+import { UpdateCard } from "./update-card";
 import { UserCard } from "./user-card";
 import { ValuationCard } from "./valuation-card";
 
@@ -22,6 +23,7 @@ export function Settings() {
       <ProviderKeysCard />
       <ValuationCard />
       <DataCard />
+      <UpdateCard />
     </div>
   );
 }
