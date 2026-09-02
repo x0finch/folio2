@@ -9,6 +9,12 @@
 //   随后 controllerchange 触发页面 reload(客户端逻辑见 src/lib/pwa/service-worker.ts)。
 // 纯路由决策 swRoute 导出供单测;vitest(node)里 self 无 skipWaiting → 只导出、不挂事件。
 
+// **构建版本戳**:占位 `__SW_BUILD__` 由 vite 插件(见 vite.config 的 stampSwVersion)在打包时换成
+// git describe 版本号。作用是让**每次发版 sw.js 的内容都不同** —— 浏览器逐字节比对 sw.js 才认得出
+// 「有新版」,而 app 改代码只换 /assets 的 hash、不动 sw.js;没有这行,更新检测(waiting worker)对
+// 普通发版永远不触发。纯注释、不影响行为。dev 下保持占位原文(不构建、不注册 SW)。
+// @sw-build __SW_BUILD__
+
 // v2:v1 里存过没哈希的 URL(见 swRoute 里那条注释),换桶名让 activate 顺手清掉。
 const CACHE = "folio-shell-v2";
 const OFFLINE_URL = "/offline.html";

@@ -1,12 +1,13 @@
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { devtools } from "@tanstack/devtools-vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import viteReact from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 // vite 的 host 校验(防 DNS rebinding)默认只放 localhost,从别的域名访问本地 server 会被
 // "This host is not allowed" 挡掉。要额外放通哪个域名由启动脚本注入(`pnpm dev:tunnel` 用它传隧道
@@ -58,6 +59,30 @@ function buildInfo() {
 }
 const build = buildInfo();
 
+// 把构建版本戳进产物 sw.js(替换 public/sw.js 里的 `__SW_BUILD__` 占位)。理由:浏览器逐字节比对
+// sw.js 才认得出「有新版」,而普通发版只换 /assets 的 hash、不动 sw.js —— 不戳版本,更新检测永不触发。
+// public/ 资源不进 rollup bundle(直接拷贝),所以在 writeBundle 里就地改产物文件;只有 client 那次
+// 构建的输出目录里有 sw.js,其余构建找不到、静默跳过。
+function stampSwVersion(version: string): Plugin {
+  return {
+    name: "stamp-sw-version",
+    apply: "build",
+    writeBundle(options) {
+      if (!options.dir) return;
+      const swPath = join(options.dir, "sw.js");
+      let src: string;
+      try {
+        src = readFileSync(swPath, "utf8");
+      } catch {
+        return; // 这次构建输出里没有 sw.js
+      }
+      if (src.includes("__SW_BUILD__")) {
+        writeFileSync(swPath, src.replaceAll("__SW_BUILD__", version));
+      }
+    },
+  };
+}
+
 const config = defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(build.version),
@@ -78,6 +103,7 @@ const config = defineConfig({
     // 「继续前往」之后地址栏会一直挂着 Not Secure —— 只是提示,`isSecureContext` 仍为真,WebAuthn
     // 照常。dev 和 preview 都配上:e2e 在 CI 上跑的正是 preview。
     localHttps() && basicSsl(),
+    stampSwVersion(build.version),
     devtools(),
     cloudflare({ viteEnvironment: { name: "ssr" } }),
     tailwindcss(),
