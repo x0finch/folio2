@@ -45,7 +45,9 @@ function localHttps() {
 function buildInfo() {
   const sh = (cmd: string) => {
     try {
-      return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+      return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] })
+        .toString()
+        .trim();
     } catch {
       return "";
     }
