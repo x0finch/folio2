@@ -199,7 +199,6 @@ describe("toEnrichment(logo 一律走代理,不直引第三方 CDN)", () => {
       name: "Bitcoin",
       logo: "/api/logo/token/tk-btc",
       unitPrice: 65000,
-      change24h: 1.5,
       marketCapRank: 1,
     });
   });
@@ -210,7 +209,6 @@ describe("toEnrichment(logo 一律走代理,不直引第三方 CDN)", () => {
       name: "Bitcoin",
       logo: "/api/logo/token/tk-orphan",
       unitPrice: undefined,
-      change24h: undefined,
       marketCapRank: undefined,
     });
   });
@@ -221,7 +219,6 @@ describe("toEnrichment(logo 一律走代理,不直引第三方 CDN)", () => {
       name: "Bitcoin",
       logo: undefined,
       unitPrice: undefined,
-      change24h: undefined,
       marketCapRank: undefined,
     });
   });
@@ -229,7 +226,6 @@ describe("toEnrichment(logo 一律走代理,不直引第三方 CDN)", () => {
   it("没有价 → 价那几项一律 undefined,不当成 0", () => {
     const e = toEnrichment(rec({ logo: "L" }));
     expect(e.unitPrice).toBeUndefined();
-    expect(e.change24h).toBeUndefined();
     expect(e.marketCapRank).toBeUndefined();
   });
 });

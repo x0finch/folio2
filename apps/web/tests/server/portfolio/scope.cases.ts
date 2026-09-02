@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleListAccounts } from "@/lib/server/accounts/list";
-import { handleListAccountHoldings } from "@/lib/server/portfolio/account-holdings";
 import { handleListAccountTags } from "@/lib/server/tags/account-tags";
 import { handleListTags } from "@/lib/server/tags/list";
 import { db } from "../_kit/db";
 import { fakeRegistry } from "../_kit/fakes";
 import { blockOutbound } from "../_kit/outbound";
-import { call, callWithRegistry } from "../_kit/run";
+import { call, callWithRegistry, readAccountHoldingsView } from "../_kit/run";
 import { seedAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -67,7 +66,7 @@ describe("portfolio/scope", () => {
     it("按账户的持仓(含 24h 盈亏)只回这个组合的", async () => {
       // 盈亏 FOL-51 起随持仓一行行回(两端相减),同一份响应里 —— 收窄由服务端在算的时候完成,
       // 所以「响应里只有这个组合的账户」这一条同时盖住了持仓与盈亏。
-      const holdings = await call(USER, handleListAccountHoldings({ portfolioId: WATCH_ID }));
+      const holdings = await readAccountHoldingsView(USER, { portfolioId: WATCH_ID });
       expect(holdings.rows.map((r) => r.account.label)).toEqual(["只看看"]);
       expect(holdings.rows.map((r) => r.account.id)).toEqual([WATCHED]);
     });
@@ -89,7 +88,7 @@ describe("portfolio/scope", () => {
       await db(USER).accounts.setArchived(WATCHED, true);
 
       expect((await listed(WATCH_ID)).map((a) => a.label)).toEqual(["只看看"]);
-      const holdings = await call(USER, handleListAccountHoldings({ portfolioId: WATCH_ID }));
+      const holdings = await readAccountHoldingsView(USER, { portfolioId: WATCH_ID });
       expect(holdings.rows.map((r) => r.account.label)).toEqual(["只看看"]);
     });
 

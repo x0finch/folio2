@@ -31,15 +31,13 @@ import {
   tokenLogoUrl,
   toLogoSource,
 } from "@/lib/core/logo";
-import { refreshableTokenIds } from "@/lib/core/token-model";
+import { displayTokenId, refreshableTokenIds, type TokenEnrichment } from "@/lib/core/token-model";
 
 // 首页 / 组合的**纯计算层**(FOL-45)。跟 `history.ts` 同目录、同风格:无 Effect、无 Oracle、
 // 无 cloudflare env —— 喂原料(账户 / 快照 / 富化字典 / 价格字典 / 平台元数据字典)→ 出视图形状。
 // 口径只在这一处定义,读接口、同步收官、后台补算都调这里。
 //
-// 「怎么取原料」(读 Oracle 富化、读 D1 历史)是**调用点的薄适配层**的事(`portfolio/scope.ts`
-// 的 `buildScopedOverview`、`portfolio/account-holdings.ts` 等):它们在 Effect 里备好字典,再把
-// 这些纯函数当普通函数调。这样这一层既能脱离 server fn 单测,也能在同步收官那一刻被直接算。
+// 调用点侧的薄适配层(FOL-45):在 Effect 里备好字典,再把纯函数当普通函数调。
 
 // `buildOverview` 真正要的最小快照切片:`takenAt`(账户 totalUsd 那一刻)+ 余额行。快照原料下发
 // 浏览器时只发这些(见 `SnapshotView` / `BalanceView`),整包因此瘦一大截。服务端的完整
@@ -64,13 +62,27 @@ export interface TokenView {
   hasLogo: boolean;
 }
 
-// 完整 `TokenRecord`(参考层读出、带上游 URL)→ 瘦身 `TokenView`。服务端两条路(`buildScopedOverview`
-// 现算 / 快照原料接口下发)都在装配点经此收窄,于是「浏览器算」与「服务端算」喂进 buildOverview 的
-// 是逐值相同的原料。
+// 完整 `TokenRecord`(参考层读出、带上游 URL)→ 瘦身 `TokenView`。服务端现算路径与下发浏览器的
+// 原料都在装配点经此收窄,于是「浏览器算」与「服务端算」喂进 buildOverview 的是逐值相同的原料。
 export function toTokenView(r: TokenRecord): TokenView {
   const { hasLogo } = toLogoSource(r);
   return { id: r.id, symbol: r.symbol, name: r.name, price: r.price, hasLogo };
 }
+
+// `tokenEnrichment` 原子资源的瘦身形状:在 `TokenView` 上多带 `hasRef`(刷价门与 enrich 同源)。
+export type TokenEnrichmentView = TokenView & { hasRef: boolean };
+
+export function toTokenEnrichmentView(r: TokenRecord): TokenEnrichmentView {
+  return { ...toTokenView(r), hasRef: r.ref != null };
+}
+
+const enrichmentFromView = (tv: TokenEnrichmentView): TokenEnrichment => ({
+  symbol: tv.symbol,
+  name: tv.name,
+  logo: tokenLogoUrl(tv),
+  unitPrice: tv.price?.unitPrice,
+  marketCapRank: tv.price?.marketCapRank,
+});
 
 //  —— 现价(读时现推)
 
@@ -217,7 +229,6 @@ export interface AggInput {
   logo?: string; // 已按回退链取好(CGK→provider)
   // 法币身份(ADR 0025 / #271):由该 token 在 fiat 命名者下的 ref 经 fiatCodeOf 推出。
   isFiat?: boolean;
-  change24h?: number; // 每币 24h 涨跌(%);仅单 Token 组用于行内 ValueChange
   unitPrice?: number; // 单价(USD;展示用,详情头部)
   marketCapRank?: number; // 市值排名(展示用,详情头部)
 }
@@ -242,7 +253,6 @@ export interface Holding {
   };
   totalValue: number;
   totalAmount?: number; // 各 source 数量之和(组统一单位,跨链/多源亦可汇总)
-  change24h?: number; // 仅单一 Token 组(%,每币 CGK 涨跌)
   // 24h 盈亏(ADR 0040):由 server 读路径按快照历史分段算好后附上,**不在这里算**。
   gain24h?: Gain | null;
   sources: HoldingSource[];
@@ -336,7 +346,6 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
       },
       totalValue: a.totalValue,
       totalAmount: a.totalAmount,
-      change24h: a.first.change24h,
       sources,
     });
   }
@@ -604,7 +613,7 @@ export function overviewEligibleBalances(
 // 该送去 platforms.resolve 的链键:eligible 行的平台键去重,减去连接器自带展示的场馆键(#52)。
 export function overviewChainIds(
   accounts: AccountSafe[],
-  byAccount: Map<string, SnapshotWithBalances>,
+  byAccount: ReadonlyMap<string, SnapshotSlice>,
   connectorMeta?: (key: string) => { name: string; logo?: string } | null,
 ): string[] {
   const platformIds = new Set<string>();
@@ -644,12 +653,7 @@ export function buildOverview(
     }
   }
 
-  // 2) 富化(附回)→ 组装 AggInput → 聚合。defi 行(展示富化)按行 id 记 change24h。
-  const defiFlat = accounts.flatMap((a) =>
-    balancesOf(byAccount, a.id).flatMap((b) =>
-      viewKind(b) === "defi" && b.tokenId ? [{ b, id: b.tokenId }] : [],
-    ),
-  );
+  // 2) 富化(附回)→ 组装 AggInput → 聚合。
   const recordOf = (b: { tokenId?: string | null }): TokenView | undefined =>
     b.tokenId ? enriched.get(b.tokenId) : undefined;
   const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
@@ -671,7 +675,6 @@ export function buildOverview(
     isFiat: isFiatToken(b.tokenId),
     name: e?.name,
     logo: e ? tokenLogoUrl(e) : undefined, // 有图→拼自家代理 /api/logo/token/{id}(FOL-48 起不再发上游 URL),无图→undefined 显首字母;隐私 ADR 0008
-    change24h: e?.price?.change24h,
     unitPrice: e?.price?.unitPrice,
     marketCapRank: e?.price?.marketCapRank,
   }));
@@ -752,12 +755,10 @@ export function buildOverview(
   );
 
   // 3) 次级分区(每账户 defi 分组 + perp 权益/敞口)。perp 权益不进 Holdings(#129)。
-  const defiChange = new Map(defiFlat.map((x) => [x.b.id, enriched.get(x.id)?.price?.change24h]));
   const decorate = (bs: OverviewBalance[]): OverviewBalance[] =>
     bs.map((b) => ({
       ...b,
       symbol: recordOf(b)?.symbol ?? b.symbol,
-      ...(defiChange.has(b.id) ? { change24h: defiChange.get(b.id) } : {}),
     }));
 
   let defiSubtotal = 0;
@@ -836,8 +837,8 @@ export function buildOverview(
 // (balance 级展示 note 只在账户抽屉那条路渲染,首页总览不显 —— 见 `toAccountSections` 的 spot 分区被
 // buildOverview 丢弃)。`metaJson` 留着:defi/perp 的 `parseDefiMeta` / `PerpEquityMeta` / `viewKind`
 // 全靠它。实测把快照那一段 raw 砍掉约一半。
-interface BalanceView {
-  id: string; // 无 token_id 的行的分组键;defiChange 按它挂 change24h;DefiRow.id —— 必须留
+export interface BalanceView {
+  id: string; // 无 token_id 的行的分组键;DefiRow.id —— 必须留
   amount: number;
   usdValue: number;
   kind: string;
@@ -849,27 +850,9 @@ interface BalanceView {
 
 // 快照下发的**瘦身包裹**:只发 `takenAt`(账户 totalUsd 那一刻;`accountTotals` 用)+ 余额行。
 // 完整包裹里的 snapshot id/accountId/totalUsd/note/noteHash + 账户级 note[] 前端一概不读。
-export interface SnapshotView {
+interface SnapshotView {
   takenAt: number;
   balances: BalanceView[];
-}
-
-// 完整 `SnapshotWithBalances`(服务端读出)→ 瘦身 `SnapshotView`。装配点投影,把前端用不到的列挡在
-// payload 外。`SnapshotBalanceView` 结构上满足 `OverviewBalance`,逐行只挑用到的列。
-export function toSnapshotView(s: SnapshotWithBalances): SnapshotView {
-  return {
-    takenAt: s.snapshot.takenAt,
-    balances: s.balances.map((b) => ({
-      id: b.id,
-      amount: b.amount,
-      usdValue: b.usdValue,
-      kind: b.kind,
-      selfPrice: b.selfPrice,
-      platform: b.platform,
-      tokenId: b.tokenId,
-      metaJson: b.metaJson,
-    })),
-  };
 }
 
 // 服务端发的一份「当前快照原料」(方案 C:名字 / 库里当前价内联发下来;logo 只发「有没有图」布尔,
@@ -883,7 +866,7 @@ export interface PortfolioSnapshotData {
   // 「24 小时前」那一组(`snapshots.asOf` + manual 折算),与当前组并列发下来 —— 浏览器一次
   // 重建两组、两端相减算 24h 盈亏(ADR 0050)。窗口内没起点快照的账户不在内(涨跌当 0 / `—`)。
   prevSnapshots: [string, SnapshotView][];
-  // 富化字典 entries(token_id → 瘦身行:名字 / 价格 / change24h / 有没有图)。**不含上游 logo URL**
+  // 富化字典 entries(token_id → 瘦身行:名字 / 价格 / 有没有图)。**不含上游 logo URL**
   // (FOL-48:有 id 就能拼 `/api/logo/token/{id}`)。
   enriched: [string, TokenView][];
   // 平台(链)展示元数据 entries(场馆键不在内 —— 那些走 connectorMeta)。
@@ -894,8 +877,10 @@ export interface PortfolioSnapshotData {
   fiatRefs: [string, string][];
   // 估值口径(self-first / source-first)。
   mode: ValuationMode;
-  // 服务端装配那一刻(`Date.now()`)。**下发而不是 select 里现取**:24h 盈亏要用它分「新账户 /
-  // 断线」,SSR 与补水两遍读同一个固定值才不会 hydration mismatch。
+  // 装配这份原料的时刻。**只当 `isFirstSyncPending` 的兜底时钟用**(总额 / 持仓 / 24h 盈亏都两端
+  // 相减,不看当下时刻,所以 `overviewFromSnapshotData` 根本不读它)。首页那条路会给
+  // `isFirstSyncPending` 显式传真 `Date.now()`,不走这个字段 —— 因为快照 key 的锚点是 hour-floor 的
+  // (SSR / 补水同刻度),把那个 floored 值当「已过多久」的基准会低估最多 ~1 小时。
   now: number;
 }
 
@@ -906,7 +891,8 @@ const sliceMap = (entries: [string, SnapshotView][]): Map<string, SnapshotSlice>
   );
 
 // 客户端把原料算成总览:重建两组快照(当前 + 24 小时前)→ 纯算 liveTotals / refreshableIds →
-// `buildOverview`。总额 / 持仓 / 各小计 / pricesStale 与服务端 `buildScopedOverview` 逐值一致
+// 浏览器把快照原料算成总览视图(FOL-48 / FOL-54)。原料由原子读在客户端 `assemblePortfolioSnapshotData`
+// 拼好;总额 / 持仓 / 各小计 / pricesStale 与 `buildOverview` 逐值一致。
 // (共用同一个 `buildOverview`);24h 盈亏(ADR 0050)由两组快照两端相减,浏览器里算。
 export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewView {
   const byAccount = sliceMap(raw.snapshots);
@@ -944,9 +930,17 @@ export const FIRST_SYNC_WINDOW_MS = 10 * 60 * 1000;
 // 加账户几秒内同步就会落第一张快照;超过 `FIRST_SYNC_WINDOW_MS` 还没有,那不是「还在同步」,是
 // 「同步不成」—— 该显 $0 / 空态(账户在,值是 0),让用户去查凭据,而不是盯着一片加载。
 // 判据全从快照原料读:`accounts` 里有一个 `createdAt` 落在窗口内、且 `snapshots` 全空。
-export function isFirstSyncPending(raw: PortfolioSnapshotData | undefined): boolean {
+//
+// **`now` 必须是真墙钟,不能是快照 key 那个 hour-floor 锚点**:整点向下取整会把「账户建了多久」
+// 低估最多 ~1 小时,让坏凭据、始终落不下快照的账户 hero 卡加载骨架最长约 57 分钟(而不是过了
+// 10 分钟窗就转 $0 / 空态)—— 正是当初加这个窗口要避免的「永久骨架」回归。默认回落到 `raw.now`
+// 只为让不传时钟的调用点(测试)有个确定值;首页那条路显式传 `Date.now()`。
+export function isFirstSyncPending(
+  raw: PortfolioSnapshotData | undefined,
+  now: number = raw?.now ?? Date.now(),
+): boolean {
   if (!raw || raw.accounts.length === 0 || raw.snapshots.length > 0) return false;
-  return raw.accounts.some((a) => raw.now - a.createdAt < FIRST_SYNC_WINDOW_MS);
+  return raw.accounts.some((a) => now - a.createdAt < FIRST_SYNC_WINDOW_MS);
 }
 
 //  —— 账户明细的 24h 盈亏(两端相减,纯计算部分)
@@ -1040,7 +1034,190 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
   });
 }
 
+// 客户端 hour-floor 锚点(FOL-54):快照 / 盈亏窗口 key 用同一刻度,避免 SSR 与补水各算各的 now。
+export const floorToHour = (ms: number) => Math.floor(ms / 3_600_000) * 3_600_000;
+
+//  —— 原子资源 → 快照原料(浏览器合并,FOL-54 / FOL-56)——
+
+type ConnectorCatalogEntry = { label: string; logo?: string };
+
+/** 总览 connector 展示元数据:场馆键走目录,链键落空 → `platformMeta`。 */
+export const connectorMetaForOverview = (
+  accounts: readonly { id: string; connectorId: string }[],
+  snapshotsNow: readonly { accountId: string; balances: BalanceView[] }[],
+  catalog: Readonly<Record<string, ConnectorCatalogEntry>>,
+): [string, { name: string; logo?: string }][] => {
+  const keys = new Set<string>();
+  const byAccount = new Map(snapshotsNow.map((s) => [s.accountId, s] as const));
+  for (const account of accounts) {
+    keys.add(account.connectorId);
+    for (const b of byAccount.get(account.id)?.balances ?? []) {
+      keys.add(b.platform ?? account.connectorId);
+    }
+  }
+  const out: [string, { name: string; logo?: string }][] = [];
+  for (const key of keys) {
+    const entry = catalog[key];
+    if (entry) out.push([key, { name: entry.label, logo: entry.logo }]);
+  }
+  return out;
+};
+
+/**
+ * 三处组装(首页总览 `usePortfolioOverview`、tab 条原料 `usePortfolioSnapshotAtoms`、SSR 预取
+ * `fetchPortfolioSnapshotAtoms`)的公共前半段:accounts + 当下快照 + 连接器目录 → connectorMeta
+ * (entries)+ 该拉 `platforms.resolve` 的 chainIds。抽成一处,免得改一处漏两处 —— 尤其 SSR
+ * 预取那条最容易和两个 hook 悄悄分叉。`platformMeta` 的实际拉取仍留各调用点:它是一条 query,
+ * hook(`useSuspenseQuery`)与非 hook(`fetchQuery`)取法不同。
+ */
+export function overviewConnectorInputs(
+  accounts: readonly AccountSafe[],
+  snapshotsNow: readonly { accountId: string; takenAt: number; balances: BalanceView[] }[],
+  catalog: Readonly<Record<string, ConnectorCatalogEntry>>,
+): { connectorMeta: [string, { name: string; logo?: string }][]; chainIds: string[] } {
+  const connectorMeta = connectorMetaForOverview(accounts, snapshotsNow, catalog);
+  const connectorLookup = (key: string) => {
+    const entry = catalog[key];
+    return entry ? { name: entry.label, logo: entry.logo } : null;
+  };
+  const byAccount: ReadonlyMap<string, SnapshotSlice> = new Map(
+    snapshotsNow.map((s) => [
+      s.accountId,
+      { snapshot: { takenAt: s.takenAt }, balances: s.balances },
+    ]),
+  );
+  const chainIds = overviewChainIds([...accounts], byAccount, connectorLookup);
+  return { connectorMeta, chainIds };
+}
+
+/** 原子资源在浏览器合并 → `PortfolioSnapshotData` → `overviewFromSnapshotData`。 */
+export function assemblePortfolioSnapshotData(args: {
+  accounts: readonly AccountSafe[];
+  snapshotsNow: readonly { accountId: string; takenAt: number; balances: BalanceView[] }[];
+  snapshotsPrev: readonly { accountId: string; takenAt: number; balances: BalanceView[] }[];
+  enriched: ReadonlyMap<string, TokenEnrichmentView>;
+  mode: ValuationMode;
+  platformMeta: readonly [string, PlatformMeta][];
+  connectorMeta: readonly [string, { name: string; logo?: string }][];
+  fiatRefs: readonly [string, string][];
+  now: number;
+}): PortfolioSnapshotData {
+  return {
+    accounts: [...args.accounts],
+    snapshots: args.snapshotsNow.map(
+      (s) => [s.accountId, { takenAt: s.takenAt, balances: s.balances }] as const,
+    ),
+    prevSnapshots: args.snapshotsPrev.map(
+      (s) => [s.accountId, { takenAt: s.takenAt, balances: s.balances }] as const,
+    ),
+    enriched: [...args.enriched].map(
+      ([id, tv]) =>
+        [
+          id,
+          { id: tv.id, symbol: tv.symbol, name: tv.name, price: tv.price, hasLogo: tv.hasLogo },
+        ] as const,
+    ),
+    platformMeta: [...args.platformMeta],
+    connectorMeta: [...args.connectorMeta],
+    fiatRefs: [...args.fiatRefs],
+    mode: args.mode,
+    now: args.now,
+  };
+}
+
+/**
+ * 纯函数:原子原料 → 总览(与首页 `usePortfolioOverview` 的 `select` 同口径)。
+ *
+ * `now` 是 `isFirstSyncPending` 的判定时钟,**必须是真墙钟**,与 `args.now`(快照 key 的 hour-floor
+ * 锚点)分开传 —— 用锚点会把首次同步窗撑大最多 ~1 小时。默认 `Date.now()` 给不关心 pending 的调用点。
+ */
+export function portfolioOverviewFromAtoms(
+  args: Parameters<typeof assemblePortfolioSnapshotData>[0],
+  now: number = Date.now(),
+): OverviewView & { pending: boolean } {
+  const raw = assemblePortfolioSnapshotData(args);
+  return { ...overviewFromSnapshotData(raw), pending: isFirstSyncPending(raw, now) };
+}
+
 //  —— 账户明细:发原料 + 浏览器算(与首页 `overviewFromSnapshotData` 同路,FOL-44 收尾)
+
+export interface AccountSnapshotEntry {
+  accountId: string;
+  takenAt: number;
+  totalUsd: number;
+  note?: Note[];
+  balances: BalanceView[];
+}
+
+const enrichBalanceRows = (
+  balances: BalanceView[],
+  enriched: ReadonlyMap<string, TokenEnrichmentView>,
+): OverviewBalance[] =>
+  balances.map((b) => {
+    const id = displayTokenId(b);
+    const tv = id ? enriched.get(id) : undefined;
+    return tv ? { ...b, ...enrichmentFromView(tv) } : b;
+  });
+
+/** 单行是否有过期价(含归档行 —— 汇总那步再收窄,行本身照实)。 */
+const rowPricesStale = (
+  balances: BalanceView[],
+  enriched: ReadonlyMap<string, TokenEnrichmentView>,
+): boolean => {
+  const refreshable = new Set(refreshableTokenIds(balances));
+  for (const b of balances) {
+    const id = displayTokenId(b);
+    if (!id || !refreshable.has(id)) continue;
+    const tv = enriched.get(id);
+    if (tv?.hasRef && tv.price?.stale !== false) return true;
+  }
+  return false;
+};
+
+const pricesStaleForRows = (
+  rows: readonly { archivedAt: number | null; balances: BalanceView[] }[],
+  enriched: ReadonlyMap<string, TokenEnrichmentView>,
+): boolean => {
+  for (const row of rows) {
+    if (row.archivedAt != null) continue;
+    if (rowPricesStale(row.balances, enriched)) return true;
+  }
+  return false;
+};
+
+// 账户页原子资源在浏览器合并 → `AccountHoldingsData` → `accountRowsFromRaw`(FOL-54 / FOL-55)。
+export function assembleAccountHoldingsData(args: {
+  accounts: readonly { id: string; label: string; archivedAt: number | null }[];
+  snapshotsNow: readonly AccountSnapshotEntry[];
+  snapshotsPrev: readonly AccountSnapshotEntry[];
+  mode: ValuationMode;
+  enriched: ReadonlyMap<string, TokenEnrichmentView>;
+}): AccountHoldingsData {
+  const nowByAccount = new Map(args.snapshotsNow.map((s) => [s.accountId, s]));
+  const rows = args.accounts.map((account) => {
+    const latest = nowByAccount.get(account.id);
+    const balances = enrichBalanceRows(latest?.balances ?? [], args.enriched);
+    return {
+      account: { id: account.id, label: account.label },
+      archivedAt: account.archivedAt,
+      totalUsd: latest?.totalUsd ?? 0,
+      takenAt: latest?.takenAt ?? null,
+      note: latest?.note,
+      balances,
+      pricesStale: rowPricesStale(balances, args.enriched),
+    };
+  });
+  const prevSnapshots = args.snapshotsPrev.map((s): [string, SnapshotView] => [
+    s.accountId,
+    { takenAt: s.takenAt, balances: s.balances },
+  ]);
+  return {
+    rows,
+    prevSnapshots,
+    mode: args.mode,
+    pricesStale: pricesStaleForRows(rows, args.enriched),
+  };
+}
 
 // 账户明细「一行」的原料:冻结快照值 + 富化(含 `unitPrice`)。**活跃行的现价重算 + 24h 盈亏
 // 不在这里做,在浏览器 `accountRowsFromRaw` 里做** —— 服务端只发料,和首页那条读接口一个方向。

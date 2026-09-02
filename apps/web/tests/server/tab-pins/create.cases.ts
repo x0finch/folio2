@@ -1,6 +1,6 @@
 import { InvalidInput, NotFound } from "@folio/db";
 import { beforeEach, describe, expect, it } from "vitest";
-import { handleUpdateAccount } from "@/lib/server/accounts/update";
+import { handleArchiveAccount } from "@/lib/server/accounts/archive";
 import { handleCreateTabPin, PinTargetInput } from "@/lib/server/tab-pins/create";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
@@ -152,11 +152,11 @@ describe("tab-pins/create", () => {
       }
       await call(USER, handleCreateTabPin({ kind: "account", accountId: account.id }));
       // 满 3 个。归档被 pin 的账户 → 那个 pin 被删,名额真的空出来 → 能建第 4 个。
-      await call(USER, handleUpdateAccount({ accountId: account.id, archived: true }));
+      await call(USER, handleArchiveAccount({ accountId: account.id, archived: true }));
       expect(await db(USER).tabPins.list()).toHaveLength(2);
       await call(USER, handleCreateTabPin({ kind: "connector", connectorId: "manual" }));
       // 解归档:账户回来,pin 不回来 —— tab 条还是 3 个,不会顶到 4。
-      await call(USER, handleUpdateAccount({ accountId: account.id, archived: false }));
+      await call(USER, handleArchiveAccount({ accountId: account.id, archived: false }));
 
       expect((await readTabStrip(USER, {})).pins).toHaveLength(3);
     });

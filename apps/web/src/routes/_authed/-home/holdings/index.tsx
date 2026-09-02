@@ -1,12 +1,12 @@
 import { Skeleton } from "@folio/ui";
-import { useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { mergeDefiGroups } from "@/lib/core/account-view";
 import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { type PinScopeKey, portfolioKeys } from "@/lib/queries/keys";
-import { type PortfolioOverview, portfolioOverviewQuery } from "@/lib/queries/portfolio";
+import type { PortfolioOverview } from "@/lib/queries/portfolio";
+import { usePortfolioOverview } from "@/lib/queries/portfolio-overview-compose";
 import { type KindTab, kindTabsOf, pinScopeOf } from "@/routes/_authed/-home/home-tabs";
 import { useHomeTabSelection } from "@/routes/_authed/-home/tab/selection";
 import { DefiPositions } from "./defi";
@@ -68,14 +68,14 @@ export function HoldingsIsland() {
   const tct = useTranslations("CustomTabs");
   const strip = useHomeTabStrip(selectedId);
   const { shownActive } = useHomeTabSelection(strip.pins);
-  const { data: portfolioData } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
+  const portfolioData = usePortfolioOverview(selectedId);
   if (!strip.hasAccounts) return null;
 
   const activePin = strip.pins.find((p) => p.id === shownActive) ?? null;
   const isPinView = activePin != null;
   const pinScope = activePin ? pinScopeOf(activePin) : undefined;
   const pinBoundaryKey = pinScope
-    ? JSON.stringify(portfolioKeys.overview(selectedId, pinScope))
+    ? JSON.stringify(portfolioKeys.overviewCompose(selectedId, pinScope))
     : "";
   const kindTabs = kindTabsOf(strip.hasPerps, strip.hasDefi);
   const activeKind: KindTab | null = isPinView
@@ -123,7 +123,7 @@ function KindBody({
 
 function PinContent({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKey }) {
   const tct = useTranslations("CustomTabs");
-  const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId, pin));
+  const data = usePortfolioOverview(portfolioId, pin);
   if (data.holdings.length === 0 && data.sections.length === 0) {
     return <p className="py-12 text-center text-muted-foreground text-sm">{tct("empty")}</p>;
   }

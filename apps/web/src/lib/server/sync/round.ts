@@ -270,16 +270,15 @@ export const syncAllUsers = (
     ),
   ).pipe(Effect.map((tallies) => Sweep.sumTallies(userIds.length, tallies)));
 
-// 收一个 portfolioId 的理由与 `getSyncStatus` 同一条:选中态只在客户端,服务端没有第二条路
-// 知道你在看哪个组合。
+// 收一个 portfolioId:选中态只在客户端,服务端没有第二条路知道你在看哪个组合。
 export const GetSyncRoundInput = z.object({ portfolioId: z.string().min(1) });
 
 /**
  * 读这个组合最近一轮。**没有过 → `null`**,不是一个空轮 ——「从没同步过」与「刚开了一轮、
  * 一个账户都还没跑完」在面板上要说的话完全不同。
  *
- * 这是 busy 期间 1.5s 一发的那一条,所以它只读一个键:摘要(`getSyncStatus`)照旧低频,
- * 轮询盯的是唯一在变的东西,不反复重算只有落库才变的那份。
+ * 这是 busy 期间 1.5s 一发的那一条 —— 轮询盯的是唯一在变的东西;页头摘要改在浏览器由
+ * accounts + snapshots 派生(FOL-58),不反复重算只有落库才变的那份。
  */
 export const handleGetSyncRound = Effect.fn("getSyncRound")(function* (
   data: z.infer<typeof GetSyncRoundInput>,

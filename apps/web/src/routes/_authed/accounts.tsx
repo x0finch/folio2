@@ -1,10 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { pickSelectedPortfolio } from "@/lib/hooks/use-portfolio";
-import { accountHoldingsQuery, accountListQuery } from "@/lib/queries/accounts";
+import { accountListQuery } from "@/lib/queries/accounts";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
+import { valuationSettingsQuery } from "@/lib/queries/settings";
+import {
+  accountHoldingsSnapshotQueries,
+  accountHoldingsSnapshotTimes,
+} from "@/lib/queries/snapshots";
 import { accountTagLinksQuery, tagListQuery } from "@/lib/queries/tags";
+import { tokenEnrichmentQuery } from "@/lib/queries/tokens";
 import { Accounts } from "./-accounts";
 
 export const Route = createFileRoute("/_authed/accounts")({
@@ -38,8 +44,13 @@ export const Route = createFileRoute("/_authed/accounts")({
     queryClient.ensureQueryData(accountListQuery(selectedId));
     queryClient.ensureQueryData(tagListQuery(selectedId));
     queryClient.ensureQueryData(accountTagLinksQuery(selectedId));
-    // 持仓带 24h 盈亏(两端相减现算,FOL-51)—— 不再单独预取一条盈亏。
-    queryClient.ensureQueryData(accountHoldingsQuery(selectedId));
+    // 持仓由原子资源在浏览器合并(FOL-55):快照(当下 + 24h 前)、估值口径、代币富化。
+    const { anchor } = accountHoldingsSnapshotTimes();
+    const snapshots = accountHoldingsSnapshotQueries(selectedId, anchor);
+    queryClient.ensureQueryData(snapshots.now);
+    queryClient.ensureQueryData(snapshots.prev);
+    queryClient.ensureQueryData(valuationSettingsQuery());
+    queryClient.ensureQueryData(tokenEnrichmentQuery());
   },
   component: Accounts,
 });

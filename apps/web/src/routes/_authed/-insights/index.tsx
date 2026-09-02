@@ -14,9 +14,11 @@ import { useMemo } from "react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { toDailySeries, toPortfolioCurve } from "@/lib/core/history";
+import { floorToHour } from "@/lib/core/portfolio";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { portfolioKeys } from "@/lib/queries/keys";
-import { portfolioHistoryQuery, portfolioOverviewQuery } from "@/lib/queries/portfolio";
+import { portfolioHistoryQuery } from "@/lib/queries/portfolio";
+import { usePortfolioOverview } from "@/lib/queries/portfolio-overview-compose";
 import { HeaderSync } from "@/routes/_authed/-home/header-sync";
 import { ALLOC_DIMENSIONS, type AllocDimension, buildAllocation } from "./allocation";
 import { AllocationPie } from "./allocation-pie";
@@ -79,14 +81,13 @@ function TrendReady({ portfolioId }: { portfolioId: string }) {
     ...KEEP_TRYING,
   });
   // 曲线在浏览器里算(FOL-38):接口发的是原样的快照点。末点要换成总览按账户那张表加出来的数
-  // —— 与首页那个大数字同源,所以这里也要总览。**不多一趟请求**:这一页的分布图本来就在读它,
-  // loader 也早把它预取了,两处拿的是同一份缓存。
+  // —— 与首页那个大数字同源,所以这里也要总览(FOL-57:原子 query 在浏览器合并)。
   // 记忆化的理由与 hero 那处相同:这棵子树会因别的状态重渲,重建曲线不该跟着跑。
-  const overview = useSuspenseQuery({ ...portfolioOverviewQuery(portfolioId), ...KEEP_TRYING });
+  const overview = usePortfolioOverview(portfolioId);
   const trend = useMemo(() => {
-    const curve = toPortfolioCurve(data, overview.data);
+    const curve = toPortfolioCurve(data, overview);
     return data.sampled ? curve : toDailySeries(curve);
-  }, [data, overview.data]);
+  }, [data, overview]);
   if (trend.length < 2) {
     return <p className="text-muted-foreground text-sm">{t("noData")}</p>;
   }
@@ -95,13 +96,14 @@ function TrendReady({ portfolioId }: { portfolioId: string }) {
 
 // 同 TrendReady:挂起点在这儿。
 function AllocationReady({ portfolioId, dim }: { portfolioId: string; dim: AllocDimension }) {
-  const { data } = useSuspenseQuery({ ...portfolioOverviewQuery(portfolioId), ...KEEP_TRYING });
-  return <AllocationPie slices={buildAllocation(data.holdings, dim)} />;
+  const overview = usePortfolioOverview(portfolioId);
+  return <AllocationPie slices={buildAllocation(overview.holdings, dim)} />;
 }
 
 function AllocationCard() {
   const t = useTranslations("Insights");
   const { selectedId } = usePortfolio();
+  const now = floorToHour(Date.now());
   const { dim } = insightsRoute.useSearch();
   const navigate = insightsRoute.useNavigate();
 
@@ -116,7 +118,7 @@ function AllocationCard() {
   // 同 TrendCard:挂起 + 自己的边界(理由见那边)。
   const pie = (
     <QueryBoundary
-      resetKey={`insights-alloc:${JSON.stringify(portfolioKeys.overview(selectedId))}`}
+      resetKey={`insights-alloc:${JSON.stringify(portfolioKeys.snapshots(selectedId, now))}`}
       pending={<Skeleton className={CHART_FRAME} />}
       failed={<Skeleton className={CHART_FRAME} />}
     >

@@ -6,7 +6,7 @@ import { sealManualAccount } from "@/lib/server/manual/store";
 
 const log = getLogger(["folio", "web", "accounts"]);
 
-// 部分更新:重命名 和/或 归档切换(按传入字段各自生效)。归档可逆、数据保留;归档后不计总额、不参与同步。
+// 归档切换:跨 accounts / snapshots / tab_pins 的编排。归档可逆、数据保留;归档后不计总额、不参与同步。
 // db 层按 (id, userId) 作用域,天然杜绝越权;不存在则影响 0 行(静默),不额外抛。
 //
 // **归档 = 封存(ADR 0039),对 manual 账户它是一次写。** manual 从不写快照(ADR 0018),归档之后
@@ -20,19 +20,17 @@ const log = getLogger(["folio", "web", "accounts"]);
 // 为此**不**在 `@folio/db` 里开跨两张表的合并 op:为一个低频动作在契约层捅个口子,不划算。
 //
 // 封存那一步要用参考层(取现价)—— 所以这个 handler 的 `R` 里 `Database` 与 `Oracle` 都在。
-export const UpdateAccountInput = z.object({
+export const ArchiveAccountInput = z.object({
   accountId: z.string().min(1),
-  label: z.string().trim().min(1, "label is required").optional(),
-  archived: z.boolean().optional(),
+  archived: z.boolean(),
 });
 
-export const handleUpdateAccount = Effect.fn("updateAccount")(function* (
-  data: z.infer<typeof UpdateAccountInput>,
+export const handleArchiveAccount = Effect.fn("archiveAccount")(function* (
+  data: z.infer<typeof ArchiveAccountInput>,
 ) {
   const accounts = (yield* Database).accounts;
-  if (data.label !== undefined) yield* accounts.rename(data.accountId, data.label);
   let sealed = false;
-  if (data.archived === true) {
+  if (data.archived) {
     // 取的是**还没打标记**的那一行 —— 封存那条路按「未归档」过滤,顺序反了会一无所获。
     const account = yield* accounts.getById(data.accountId);
     // **已经归档的不再动它**(review 补):对已归档账户再发一次 `archived: true`,封存那步会
@@ -47,12 +45,11 @@ export const handleUpdateAccount = Effect.fn("updateAccount")(function* (
       // 会凭空冒回来 —— 可能把那个组合顶到 4 个。**解归档不恢复 pin**(行已删,想看再钉一次)。
       yield* (yield* Database).tabPins.removeByAccount(data.accountId);
     }
-  } else if (data.archived === false) {
+  } else {
     yield* accounts.setArchived(data.accountId, false);
   }
-  log.info("account updated", {
+  log.info("account archived", {
     accountId: data.accountId,
-    renamed: data.label !== undefined,
     archived: data.archived,
     sealed,
   });

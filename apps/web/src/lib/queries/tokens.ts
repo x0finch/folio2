@@ -1,5 +1,10 @@
 import { queryOptions } from "@tanstack/react-query";
-import { listFiatOptions, listTokenCatalogue, listTokens } from "@/lib/server/tokens";
+import {
+  getTokenEnrichment,
+  listFiatOptions,
+  listTokenCatalogue,
+  listTokens,
+} from "@/lib/server/tokens";
 import { STALE_TIME } from "./constants";
 import { tokenKeys } from "./keys";
 
@@ -29,4 +34,11 @@ export const tokenSearchQuery = (query: string) =>
     queryKey: tokenKeys.search(query),
     queryFn: () => listTokens({ data: { query } }),
     staleTime: STALE_TIME.search,
+  });
+
+export const tokenEnrichmentQuery = () =>
+  queryOptions({
+    queryKey: tokenKeys.enrichment(),
+    queryFn: () => getTokenEnrichment(),
+    staleTime: STALE_TIME.live,
   });

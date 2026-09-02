@@ -1,10 +1,7 @@
 import { env } from "cloudflare:test";
-import type { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { accountRowsFromRaw } from "@/lib/core/portfolio";
-import type { AppError } from "@/lib/server/errors";
-import { loadAccountHoldings } from "@/lib/server/portfolio/account-holdings";
-import { runForUser, type UserServices } from "@/lib/server/runtime";
+import { floorToHour } from "@/lib/core/portfolio";
+import { readAccountHoldingsView } from "./_kit/run";
 import { dbFor } from "./db-effect";
 import { addManualActivities } from "./manual-fns";
 
@@ -20,12 +17,6 @@ import { addManualActivities } from "./manual-fns";
 // account-holdings.test.ts` 与 `portfolio/gain.test.ts`(同一个 runForUser + 真 D1,断言相同)。
 // 留在这里的都是那边没有的:跨链盈亏摊分、manual 与同步账户共用 token_id、刷价信号。
 const USER = "user-account-holdings";
-
-// 生产那条路的把手 —— 底下就是 server fn / 路由用的那个内核(#504 T13)。
-const run = <A, E extends AppError, R extends UserServices>(
-  userId: string,
-  effect: Effect.Effect<A, E, R>,
-): Promise<A> => runForUser(userId, effect);
 
 let outbound: string[] = [];
 
@@ -55,10 +46,10 @@ const evmAccount = (label: string, address: string) =>
   });
 
 // 盈亏(两端相减,ADR 0050)+ 现价重算(FOL-44)现在都在浏览器 `accountRowsFromRaw` 里做,
-// 服务端 `loadAccountHoldings` 只发原料。这里把两段接起来跑,断言的是「服务端发料 + 浏览器算」
-// 走完的最终视图 —— 与生产读路径(server fn → query 的 `select`)逐值一致。
+// 服务端只发原子原料。这里走 `readAccountHoldingsView` 把两段接起来跑,断言的是「原子发料 + 浏览器算」
+// 走完的最终视图 —— 与生产读路径(`useAccountHoldingsView`)逐值一致。
 const rowsByLabel = async () => {
-  const view = accountRowsFromRaw(await run(USER, loadAccountHoldings({})));
+  const view = await readAccountHoldingsView(USER);
   return {
     view,
     of: (label: string) => view.rows.find((r) => r.account.label === label),
@@ -170,8 +161,9 @@ describe("现价重算:账户页与首页同一口径(FOL-44)", () => {
     ]);
     const acc = await evmAccount("LiveGain", "0xlivegain");
     const DAY = 24 * 60 * 60 * 1000;
+    const now = floorToHour(Date.now());
     // 24h 前与当下**两张快照冻结值相同**($100)—— 旧代码两端相减恒得 $0。
-    for (const t of [Date.now() - DAY, Date.now()]) {
+    for (const t of [now - DAY, now] as const) {
       await dbFor(USER).snapshots.write(acc.id, {
         takenAt: t,
         totalUsd: 100,
@@ -189,7 +181,6 @@ describe("账户行的 24h 盈亏(ADR 0040)", () => {
   // 与代币行同一套装配,只是**线按账户攒**而不是按币。这组打真 D1 是因为跨了账户、快照历史、
   // 富化三层 —— 尤其「归档账户拿到的是 undefined(不该有)而不是 null(算不出)」这个区分,
   // 只有走完整条链才看得出来。
-  const DAY = 24 * 60 * 60 * 1000;
 
   const withHistory = async (label: string, address: string, then: number, nowValue: number) => {
     const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
@@ -201,15 +192,17 @@ describe("账户行的 24h 盈亏(ADR 0040)", () => {
       label,
       creds: JSON.stringify({ address }),
     });
+    const now = floorToHour(Date.now());
+    const DAY = 24 * 60 * 60 * 1000;
     // 24 小时前那张(基准)
     await dbFor(USER).snapshots.write(acc.id, {
-      takenAt: Date.now() - DAY,
+      takenAt: now - DAY,
       totalUsd: then,
       balances: [{ amount: 1, usdValue: then, kind: "spot", platform: "evm:1", tokenId: btc }],
     });
     // 最新那张(当下)
     await dbFor(USER).snapshots.write(acc.id, {
-      takenAt: Date.now(),
+      takenAt: now,
       totalUsd: nowValue,
       balances: [{ amount: 1, usdValue: nowValue, kind: "spot", platform: "evm:1", tokenId: btc }],
     });
@@ -248,13 +241,14 @@ describe("抽屉现货行的逐币盈亏(ADR 0040)", () => {
       { amount: 60, usdValue: a, kind: "spot" as const, platform: "evm:1", tokenId: usdc },
       { amount: 40, usdValue: b, kind: "spot" as const, platform: "evm:8453", tokenId: usdc },
     ];
+    const now = floorToHour(Date.now());
     await dbFor(USER).snapshots.write(acc.id, {
-      takenAt: Date.now() - DAY,
+      takenAt: now - DAY,
       totalUsd: 100,
       balances: legs(60, 40),
     });
     await dbFor(USER).snapshots.write(acc.id, {
-      takenAt: Date.now(),
+      takenAt: now,
       totalUsd: 110,
       balances: legs(66, 44),
     });
@@ -379,7 +373,7 @@ describe("复刻真实数据的形状:manual 与同步账户混在一起", () =>
   });
 
   it("manual 与同步账户持有同一个 token_id —— 两边的线不串", async () => {
-    const now = Date.now();
+    const now = floorToHour(Date.now());
     const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
       { namer: "coingecko", localName: "issued:bitcoin" },
     ]);
@@ -388,6 +382,11 @@ describe("复刻真实数据的形状:manual 与同步账户混在一起", () =>
       takenAt: now - DAY,
       totalUsd: 100,
       balances: [{ amount: 1, usdValue: 100, kind: "spot", platform: "evm:1", tokenId: btc }],
+    });
+    await dbFor(USER).snapshots.write(synced.id, {
+      takenAt: now,
+      totalUsd: 110,
+      balances: [{ amount: 1, usdValue: 110, kind: "spot", platform: "evm:1", tokenId: btc }],
     });
     const m = await dbFor(USER).accounts.create({
       connectorId: "manual",

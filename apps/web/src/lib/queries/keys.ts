@@ -10,13 +10,13 @@
 // 前缀,是否真能匹配上各查询实际用的 key」这件事可以被单测钉住,而那正是整套定向刷新最容易
 // 出错、又最不会报错的地方。
 export const syncKeys = {
-  /** 整个同步域的前缀 —— 刷新映射表用它。 */
+  /** 整个同步域的前缀 —— 刷新映射表用它(目前只有 round 查询)。 */
   all: ["sync"] as const,
-  /** 全局同步状态摘要(页头同步面板 + 「立即同步」的账户集)。 */
-  status: (portfolioId: string) => [...syncKeys.all, "status", portfolioId] as const,
   /**
    * 这个组合最近一轮同步(ADR 0048)。**在 `all` 前缀之下**,所以「一轮跑完」那条定向刷新
    * 照样盖得住它。按组合一份:切组合看的就是另一轮。
+   *
+   * 页头同步摘要(FOL-58)不再单独占 key —— 由 accounts + snapshots 在浏览器派生。
    */
   round: (portfolioId: string) => [...syncKeys.all, "round", portfolioId] as const,
 };
@@ -43,14 +43,31 @@ export const portfolioKeys = {
   /** 首页 tab 条 pin 原料 —— 与 overview 分 key;改 pin 只刷这层。 */
   tabPins: (portfolioId: string) => [...portfolioKeys.tabs(), "pins", portfolioId] as const,
   /**
-   * 组合总览。**portfolioId 必须是真实 id,不能用「缺省 = 默认」的 undefined** ——
-   * loader 预取的那份与组件按 selectedId 读的那份,key 对不上就等于首屏白拉一遍。
+   * QueryBoundary resetKey:总览由原子 query 在浏览器合并,pin 进 key 区分不同收窄。
+   * **不是 react-query 缓存键** —— 各原子资源有自己的 key。
    */
-  overview: (portfolioId: string, pin?: PinScopeKey) =>
-    [...portfolioKeys.all, "overview", portfolioId, pin ?? null] as const,
+  overviewCompose: (portfolioId: string, pin?: PinScopeKey) =>
+    [...portfolioKeys.all, "overview-compose", portfolioId, pin ?? null] as const,
   /** 组合走势(**不受 pin 影响** —— 自定义 Tab 只收窄列表,不进曲线)。 */
   history: (portfolioId: string, range: string) =>
     [...portfolioKeys.all, "history", portfolioId, range] as const,
+  /**
+   * 快照域前缀 —— 刷新映射表用它;各 `at`/`after` 的快照查询都挂在这层下面。
+   */
+  snapshotsPrefix: () => [...portfolioKeys.all, "snapshots"] as const,
+  /**
+   * 组合内各账户在 `[after, at]` 窗口内最新快照(FOL-54)。key 用 hour-floor 锚;
+   * 请求体的 `at` 是真实查库上界(当下快照 = 墙钟)。
+   */
+  snapshots: (portfolioId: string, at: number, after?: number) =>
+    [...portfolioKeys.all, "snapshots", portfolioId, at, after ?? null] as const,
+  /** 手记法币身份 ref(tokenId → fiat 命名者),按组合一份。 */
+  fiatRefs: (portfolioId: string) => [...portfolioKeys.all, "fiat-refs", portfolioId] as const,
+  /** fiatRefs 域前缀 —— 手记代币变更后刷新映射表用它。 */
+  fiatRefsPrefix: () => [...portfolioKeys.all, "fiat-refs"] as const,
+  /** 链平台展示元数据;键集由客户端从快照原料算好再传入。 */
+  platformMeta: (chainIds: readonly string[]) =>
+    [...portfolioKeys.all, "platform-meta", ...chainIds] as const,
   // 24h 盈亏无独立 key(FOL-51):它随总览原料(`overview`)一起回,浏览器两端相减算出来。
 };
 
@@ -61,11 +78,9 @@ export const accountKeys = {
    * 当前组合的账户(含它的归档成员)+ 凭据投影。
    *
    * **portfolioId 进 key**(ADR 0047):这三条都由服务端按组合筛过了,不进 key 就会两个组合共用
-   * 一份缓存 —— 切过去看到的是上一个组合的账户。同 `portfolioKeys.overview` 那条的理由。
+   * 一份缓存 —— 切过去看到的是上一个组合的账户。
    */
   list: (portfolioId: string) => [...accountKeys.all, "list", portfolioId] as const,
-  /** 当前组合里各账户的市值 / 上次同步 / 持仓明细(含 24h 盈亏,两端相减随持仓回,FOL-51)。 */
-  holdings: (portfolioId: string) => [...accountKeys.all, "holdings", portfolioId] as const,
   /**
    * 单账户价值历史。**key 里是窗口档位(`"30d"`)而不是算出来的起点时间戳** ——
    * 起点由 `Date.now()` 现算,每次渲染都是新数,进了 key 就等于每帧换一个缓存条目、永远拉不停。
@@ -126,4 +141,6 @@ export const tokenKeys = {
   fiatOptions: () => [...tokenKeys.all, "fiat-options"] as const,
   /** 上游代币搜索(本地目录凑不够时才问)。 */
   search: (query: string) => [...tokenKeys.all, "search", query] as const,
+  /** 用户全部已知代币的展示富化(name/price/logo/change24h,FOL-54)。 */
+  enrichment: () => [...tokenKeys.all, "enrichment"] as const,
 };

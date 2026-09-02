@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { accountRowsFromRaw } from "@/lib/core/portfolio";
-import { handleListAccountHoldings } from "@/lib/server/portfolio/account-holdings";
+import { floorToHour } from "@/lib/core/portfolio";
 import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
-import { call } from "../_kit/run";
+import { readAccountHoldingsView } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -25,7 +24,7 @@ describe("portfolio/account-holdings", () => {
     NOW = Date.now();
   });
 
-  describe("listAccountHoldings", () => {
+  describe("按账户持仓(原子合并)", () => {
     it("三个账户 → 三行,每行的市值等于它自己那些余额之和", async () => {
       for (const [label, a, b] of [
         ["甲", 100, 20],
@@ -39,7 +38,7 @@ describe("portfolio/account-holdings", () => {
         ]);
       }
 
-      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
+      const view = await readAccountHoldingsView(USER);
 
       expect(view.rows).toHaveLength(3);
       for (const row of view.rows) {
@@ -51,7 +50,7 @@ describe("portfolio/account-holdings", () => {
     it("手记账户 → 有行、有持仓,来自账本合成", async () => {
       await seedManualAccount(USER, "手记", { symbol: "BTC", unitPrice: 100, amount: 3 });
 
-      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
+      const view = await readAccountHoldingsView(USER);
 
       expect(view.rows).toHaveLength(1);
       expect(view.rows[0].balances.length).toBeGreaterThan(0);
@@ -63,7 +62,7 @@ describe("portfolio/account-holdings", () => {
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 777 }]);
       await db(USER).accounts.setArchived(acc.id, true);
 
-      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
+      const view = await readAccountHoldingsView(USER);
 
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row).toBeDefined();
@@ -74,7 +73,7 @@ describe("portfolio/account-holdings", () => {
     it("从没同步过的账户 → 出现在列表里,余额是空的", async () => {
       const acc = await seedAccount(USER, "没同步过", "bitcoin");
 
-      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
+      const view = await readAccountHoldingsView(USER);
 
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row).toBeDefined();
@@ -82,7 +81,7 @@ describe("portfolio/account-holdings", () => {
     });
 
     it("全新用户 → 空列表,不是报错", async () => {
-      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
+      const view = await readAccountHoldingsView(USER);
 
       expect(view.rows).toEqual([]);
     });
@@ -90,11 +89,12 @@ describe("portfolio/account-holdings", () => {
     it("24h 盈亏随持仓一起回:两端相减(现值 − 24 小时前值)", async () => {
       // FOL-51:盈亏改成两端相减,起点 = 24 小时前那一刻或更早的最近一张(`asOf`)。
       // 24 小时前那张 100 → 现在 130,账户级与逐行都该是 +30 / +30%。
+      const now = floorToHour(NOW);
       const acc = await seedAccount(USER, "甲", "bitcoin");
-      await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
-      await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
+      await seedSnapshot(USER, acc.id, now - DAY, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
+      await seedSnapshot(USER, acc.id, now, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
-      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
+      const view = await readAccountHoldingsView(USER);
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row?.gain24h?.amount).toBeCloseTo(30, 6);
       expect(row?.gain24h?.pct).toBeCloseTo(30, 6);
@@ -107,7 +107,7 @@ describe("portfolio/account-holdings", () => {
       const acc = await seedAccount(USER, "新号", "bitcoin");
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
-      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
+      const view = await readAccountHoldingsView(USER);
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row?.gain24h).toBeNull();
       expect(row?.balances.find((b) => b.tokenId === BTC)?.gain24h).toBeNull();
@@ -118,18 +118,19 @@ describe("portfolio/account-holdings", () => {
       // 唯一那张快照在 8 天前(> 7 天窗口)→ 起点空。
       await seedSnapshot(USER, acc.id, ago(8 * DAY), [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
-      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
+      const view = await readAccountHoldingsView(USER);
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row?.gain24h).toBeNull();
     });
 
     it("归档账户 → 盈亏字段整个省略(undefined)", async () => {
+      const now = floorToHour(NOW);
       const acc = await seedAccount(USER, "归档", "bitcoin");
-      await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
-      await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
+      await seedSnapshot(USER, acc.id, now - DAY, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
+      await seedSnapshot(USER, acc.id, now, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
       await db(USER).accounts.setArchived(acc.id, true);
 
-      const view = accountRowsFromRaw(await call(USER, handleListAccountHoldings()));
+      const view = await readAccountHoldingsView(USER);
       const row = view.rows.find((r) => r.account.id === acc.id);
       expect(row?.gain24h).toBeUndefined();
     });

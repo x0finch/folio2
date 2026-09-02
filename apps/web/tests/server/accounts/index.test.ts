@@ -6,5 +6,6 @@ import "./create.cases";
 import "./credentials.cases";
 import "./history.cases";
 import "./list.cases";
+import "./archive.cases";
 import "./remove.cases";
-import "./update.cases";
+import "./rename.cases";

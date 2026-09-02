@@ -24,7 +24,6 @@ export interface TokenEnrichment {
   name?: string;
   logo?: string;
   unitPrice?: number; // USD
-  change24h?: number; // 百分比
   marketCapRank?: number; // 市值排名(展示用)
 }
 
@@ -35,7 +34,7 @@ export function fungibleTokenId(b: BalanceLike): string | null {
   return b.tokenId ?? null;
 }
 
-// defi 行的**展示用**身份(H5 #120:协议行 24h 聚合需要 change24h)。独立于 fungibleTokenId ——
+// defi 行的**展示用**身份(H5 #120:协议行的 name/logo 富化按它挂)。独立于 fungibleTokenId ——
 // 那个门喂估值现推(liveValue),defi 行进去会被重估;这个只喂展示富化。
 export function defiTokenId(b: BalanceLike): string | null {
   if (viewKind(b) !== "defi") return null;
@@ -126,7 +125,6 @@ export function toEnrichment(e: TokenRecord): TokenEnrichment {
     name: e.name,
     logo: tokenLogoUrl(toLogoSource(e)), // 有图→拼自家代理 /api/logo/token/{id}(不再发上游 URL),无图→undefined 显首字母;隐私 ADR 0008
     unitPrice: e.price?.unitPrice,
-    change24h: e.price?.change24h,
     marketCapRank: e.price?.marketCapRank,
   };
 }

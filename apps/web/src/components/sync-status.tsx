@@ -6,16 +6,12 @@ import { RefreshCw } from "lucide-react";
 import { forwardRef, type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
 import { connectorLabelFallback } from "@/lib/core/logo";
+import type { SyncAttentionSource, SyncStatusSummary } from "@/lib/core/sync-status";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
 import { isRoundBusy, useSyncRound } from "@/lib/hooks/use-sync-round";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
-import type {
-  SyncAttentionSource,
-  SyncRoundFailure,
-  SyncRoundView,
-  SyncStatusSummary,
-} from "@/lib/server/sync/status";
+import type { SyncRoundFailure, SyncRoundView } from "@/lib/server/sync/status";
 import { IconButton } from "./icon-button";
 
 // 共享同步状态入口(PageHeader actions):**一个 Popover**,有鼠标就 hover 打开、触屏就 tap 打开,

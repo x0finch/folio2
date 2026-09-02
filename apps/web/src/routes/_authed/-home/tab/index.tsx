@@ -1,5 +1,4 @@
 import { Skeleton, Tabs, TabsList, TabsTrigger } from "@folio/ui";
-import { useSuspenseQuery } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
@@ -7,7 +6,7 @@ import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { type PinScopeKey, portfolioKeys } from "@/lib/queries/keys";
-import { portfolioOverviewQuery } from "@/lib/queries/portfolio";
+import { usePortfolioOverview } from "@/lib/queries/portfolio-overview-compose";
 import { derive } from "@/routes/_authed/-home/holdings";
 import { type KindTab, kindTabsOf, pinScopeOf } from "@/routes/_authed/-home/home-tabs";
 import { AddPinButton, PinTab } from "./pin";
@@ -129,7 +128,7 @@ function TabTotal() {
       {activePin && pinScope ? (
         <QueryBoundary
           key={activePin.id}
-          resetKey={JSON.stringify(portfolioKeys.overview(selectedId, pinScope))}
+          resetKey={JSON.stringify(portfolioKeys.overviewCompose(selectedId, pinScope))}
           pending={<TabTotalSkeleton />}
           failed="—"
         >
@@ -137,7 +136,7 @@ function TabTotal() {
         </QueryBoundary>
       ) : (
         <QueryBoundary
-          resetKey={JSON.stringify(portfolioKeys.overview(selectedId))}
+          resetKey={JSON.stringify(portfolioKeys.overviewCompose(selectedId))}
           pending={<TabTotalSkeleton />}
           failed="—"
         >
@@ -150,7 +149,7 @@ function TabTotal() {
 
 function KindTotal({ portfolioId, kind }: { portfolioId: string; kind: KindTab }) {
   const usd = useDisplayValue();
-  const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId));
+  const data = usePortfolioOverview(portfolioId);
   const parts = derive(data.sections);
   const viewSubtotal =
     kind === "perps"
@@ -164,6 +163,6 @@ function KindTotal({ portfolioId, kind }: { portfolioId: string; kind: KindTab }
 // 自定义 Tab 的右上角合计。与下方列表**同一个 queryKey**,react-query 只发一次请求。
 function PinTotal({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKey }) {
   const usd = useDisplayValue();
-  const { data } = useSuspenseQuery(portfolioOverviewQuery(portfolioId, pin));
+  const data = usePortfolioOverview(portfolioId, pin);
   return <>{usd(data.totalUsd)}</>;
 }

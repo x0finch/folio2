@@ -199,7 +199,7 @@ export const injectManualSnapshots = (
 // 再抄一遍就等于给「manual 此刻值多少」开第二个答案。
 //
 // 传进来的账户必须**还没被打上归档标记** —— 注入那条路按 `archivedAt == null` 过滤(见
-// `manualTokensByAccount`),打完标记再来这里会一无所获。调用点的顺序因此不是风格问题,见 accounts/update.ts。
+// `manualTokensByAccount`),打完标记再来这里会一无所获。调用点的顺序因此不是风格问题,见 accounts/archive.ts。
 //
 // 返回是否真的落了一张:非 manual 账户不落(它们本来就有快照,再补一张没有新信息)。
 export const sealManualAccount = (

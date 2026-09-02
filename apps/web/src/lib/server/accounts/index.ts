@@ -2,12 +2,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { PortfolioSelectInput } from "@/lib/server/portfolio/scope";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
+import { ArchiveAccountInput, handleArchiveAccount } from "./archive";
 import { CreateAccountInput, handleCreateAccount } from "./create";
 import { handleReplaceAccountCredentials, ReplaceCredentialsInput } from "./credentials";
 import { AccountHistoryInput, handleGetAccountHistory } from "./history";
 import { handleListAccounts } from "./list";
 import { handleRemoveAccount, RemoveAccountInput } from "./remove";
-import { handleUpdateAccount, UpdateAccountInput } from "./update";
+import { handleRenameAccount, RenameAccountInput } from "./rename";
 
 // accounts 资源面:只做装配(method / 鉴权 / 校验 / `runEffect`),实现与入参 schema 都在同目录的
 // RESTful 文件里 —— 它们只描述业务、返回 Effect(#504 T8)。
@@ -29,10 +30,15 @@ export const replaceAccountCredentials = createServerFn({ method: "POST" })
   .validator(ReplaceCredentialsInput)
   .handler(runEffect(handleReplaceAccountCredentials));
 
-export const updateAccount = createServerFn({ method: "POST" })
+export const renameAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
-  .validator(UpdateAccountInput)
-  .handler(runEffect(handleUpdateAccount));
+  .validator(RenameAccountInput)
+  .handler(runEffect(handleRenameAccount));
+
+export const archiveAccount = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(ArchiveAccountInput)
+  .handler(runEffect(handleArchiveAccount));
 
 export const removeAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])

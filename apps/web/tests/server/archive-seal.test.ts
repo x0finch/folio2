@@ -2,11 +2,10 @@ import { env } from "cloudflare:test";
 import type { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildAccountValueHistory } from "@/lib/core/history";
-import { accountRowsFromRaw } from "@/lib/core/portfolio";
 import { loadAccountHistory } from "@/lib/server/accounts/history";
 import type { AppError } from "@/lib/server/errors";
-import { loadAccountHoldings } from "@/lib/server/portfolio/account-holdings";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
+import { readAccountHoldingsView } from "./_kit/run";
 import { dbFor } from "./db-effect";
 import { createManualAccount, sealManualAccount } from "./manual-fns";
 import { ticketOf } from "./ticket";
@@ -17,7 +16,7 @@ import { ticketOf } from "./ticket";
 // 这些用例都打真 D1:封存跨了账本、参考层、快照三处,而「有没有真落一行」只有在库里看得出来。
 // 出网一律打桩成抛错 —— 封存按设计不出网(价取自本地参考层缓存,取不到回退用户自填价)。
 // **#527 后续件 4:三条摘去了新家** —— 「再封存不落第二张」「归档后末点停在封存」「不补实时
-// 盯市末点」现在住 `accounts/update.test.ts` 与 `accounts/history.test.ts`(同层、断言相同)。
+// 盯市末点」现在住 `accounts/archive.cases.ts` 与 `accounts/history.cases.ts`(同层、断言相同)。
 // 留在这里的是那边没有的:封存金额取自账本、非 manual 不落、取消归档后数字回实时。
 const USER = "user-archive-seal";
 
@@ -92,7 +91,7 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     await sealManualAccount(USER, account, 1_700_000_000_000);
     await dbFor(USER).accounts.setArchived(account.id, true);
 
-    const view = accountRowsFromRaw(await run(USER, loadAccountHoldings({})));
+    const view = await readAccountHoldingsView(USER);
     const row = view.rows.find((r) => r.account.id === account.id);
 
     expect(row?.archivedAt).not.toBeNull();
@@ -108,7 +107,7 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     await dbFor(USER).accounts.setArchived(account.id, true);
     await dbFor(USER).accounts.setArchived(account.id, false);
 
-    const view = accountRowsFromRaw(await run(USER, loadAccountHoldings({})));
+    const view = await readAccountHoldingsView(USER);
     const row = view.rows.find((r) => r.account.id === account.id);
 
     expect(row?.archivedAt).toBeNull();

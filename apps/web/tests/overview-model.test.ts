@@ -23,7 +23,7 @@ import { type OracleStub, runWithOracle } from "./oracle-stub";
 // 用假 tokens/platforms + 最小 fixture,覆盖:eligible 过滤 → enrich 附回 → 聚合 → 平台装饰 → 总额。
 //
 // FOL-45 起 buildOverview 是**纯函数**:富化 / 现推净值 / 平台元数据 / 刷价集合都由调用点在
-// Effect 里备好再传进去。这个 `overviewEffect` 就是那层薄适配(与 `buildScopedOverview` 逐字同款),
+// Effect 里备好再传进去。这个 `overviewEffect` 就是那层薄适配(与生产总览装配逐字同款),
 // 让每条用例仍旧 `runWithOracle(stub, …)`,只是被测的算术已从 Effect 里拆出来了。
 type OverviewDeps = Omit<
   OverviewInput,
@@ -36,7 +36,7 @@ const overviewEffect = (
 ) =>
   Effect.gen(function* () {
     const { tokens, platforms } = yield* Oracle;
-    // 与生产 `scopedSnapshotMaterials` 同款:参考层读出的完整行经 `toTokenView` 收窄再喂 buildOverview。
+    // 与生产总览装配同款:参考层读出的完整行经 `toTokenView` 收窄再喂 buildOverview。
     const enrichedRecords = yield* tokens.enrich(overviewEnrichIds(accounts, byAccount));
     const enriched = new Map([...enrichedRecords].map(([id, r]) => [id, toTokenView(r)] as const));
     const platformMeta = yield* platforms.resolve(
@@ -382,59 +382,6 @@ describe("buildOverview —— 法币身份 isFiat", () => {
     ]);
     const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, {}));
     expect(view.holdings[0].token.isFiat).toBe(false);
-  });
-});
-
-// —— H5 #120:sections 的 defi 行读时富化 change24h(协议行 24h 聚合的数据源) ——
-// defi 不进聚合,故单独一批 enrich;按 tokenRef 命中的行带 change24h,未命中 undefined。
-describe("buildOverview —— defi 行 change24h 富化", () => {
-  it("defi 行经 enrich 附回 change24h 进 sections", async () => {
-    // 只有 tk-staked 有价 → 只有那一行拿到 change24h;另一行(LP 份额)没有身份,不该被瞎猜。
-    const defiTokens = {
-      enrich: (ids: readonly string[]) =>
-        Effect.succeed(
-          new Map(
-            ids
-              .filter((id) => id === "tk-staked")
-              .map((id) => [
-                id,
-                { ...record(id), price: { unitPrice: 1, change24h: 2.5, asOf: 0, stale: false } },
-              ]),
-          ),
-        ),
-    };
-    const accounts = [account("w", "Wallet")];
-    const byAccount = new Map([
-      [
-        "w",
-        snap("w", 100, [
-          bal({
-            kind: "defi",
-            symbol: "stETH",
-            amount: 1,
-            usdValue: 100,
-            tokenId: "tk-staked",
-            metaJson: JSON.stringify({ protocol: "Lido", positionType: "staked" }),
-          }),
-          bal({
-            kind: "defi",
-            symbol: "LP",
-            amount: 1,
-            usdValue: 50,
-            tokenId: null, // LP 份额没有代币身份
-            metaJson: JSON.stringify({ protocol: "Uniswap", positionType: "liquidity" }),
-          }),
-        ]),
-      ],
-    ]);
-    const view = await runWithOracle(
-      { ...stub, tokens: defiTokens },
-      overviewEffect(accounts, byAccount, {}),
-    );
-    // 按协议组定位(#243:展示 symbol 现从 Token 取,不再是余额那份 stETH/LP)。
-    const defi = view.sections[0].defi;
-    expect(defi.find((g) => g.protocol === "Lido")?.rows[0].change24h).toBe(2.5);
-    expect(defi.find((g) => g.protocol === "Uniswap")?.rows[0].change24h).toBeUndefined();
   });
 });
 

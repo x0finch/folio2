@@ -5,11 +5,8 @@ import { toPortfolioCurve } from "@/lib/core/history";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
 import { portfolioKeys } from "@/lib/queries/keys";
-import {
-  type PortfolioOverview,
-  portfolioHistoryQuery,
-  portfolioOverviewQuery,
-} from "@/lib/queries/portfolio";
+import { type PortfolioOverview, portfolioHistoryQuery } from "@/lib/queries/portfolio";
+import { usePortfolioOverview } from "@/lib/queries/portfolio-overview-compose";
 import { PortfolioHero } from "./portfolio-hero";
 
 // hero 的两截:**总净值 + 24h 盈亏**来自总览(外层边界已经等过它;盈亏 FOL-51 起随总览原料两端
@@ -21,7 +18,7 @@ import { PortfolioHero } from "./portfolio-hero";
 // React 把整棵子树丢掉重渲(首屏一条 hydration mismatch)。挂起 + 边界让两边一致。
 export function HeroIsland() {
   const { selectedId } = usePortfolio();
-  const { data } = useSuspenseQuery(portfolioOverviewQuery(selectedId));
+  const data = usePortfolioOverview(selectedId);
   // 首次同步中(有账户、还没有任何快照):别把「还不知道」画成 $0 —— 整块 hero 走加载态。
   // 总览查询会短轮询,拿到第一张快照后 `pending` 转 false,这里自动换成真数据。曲线此刻也无从
   // 谈起,一并走加载占位,不必再进下面那个后到数据的边界。

@@ -45,7 +45,7 @@ import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
 import { accountHistoryQuery } from "@/lib/queries/accounts";
 import { invalidateFor } from "@/lib/queries/refresh";
-import { removeAccount, updateAccount } from "@/lib/server/accounts";
+import { archiveAccount, removeAccount, renameAccount } from "@/lib/server/accounts";
 import { syncAccount } from "@/lib/server/sync";
 import { TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
 import { deltaTone, GainSkeleton, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
@@ -329,6 +329,7 @@ function useAccountSheetWrites(account: AccountRow, onClose: () => void) {
   const queryClient = useQueryClient();
   const archived = account.archivedAt != null;
   const refresh = () => invalidateFor(queryClient, "account.write");
+  const refreshArchive = () => invalidateFor(queryClient, "account.archive");
 
   const syncMut = useMutation({
     mutationFn: () => syncAccount({ data: { accountId: account.id } }),
@@ -344,8 +345,8 @@ function useAccountSheetWrites(account: AccountRow, onClose: () => void) {
     onError: () => toast.error(t("syncGenericError")),
   });
   const archiveMut = useMutation({
-    mutationFn: () => updateAccount({ data: { accountId: account.id, archived: !archived } }),
-    onSuccess: refresh,
+    mutationFn: () => archiveAccount({ data: { accountId: account.id, archived: !archived } }),
+    onSuccess: refreshArchive,
     onError: () => toast.error(t("actionFailed")),
   });
   const deleteMut = useMutation({
@@ -359,7 +360,7 @@ function useAccountSheetWrites(account: AccountRow, onClose: () => void) {
   // 改名走 mutateAsync:EditableName 靠 onSave 抛不抛来决定保不保住编辑态,
   // 而 mutateAsync 失败时会 reject —— 失败仍停在输入框里,用户接着改就行。
   const renameMut = useMutation({
-    mutationFn: (label: string) => updateAccount({ data: { accountId: account.id, label } }),
+    mutationFn: (label: string) => renameAccount({ data: { accountId: account.id, label } }),
     onSuccess: refresh,
     onError: () => toast.error(t("actionFailed")),
   });
