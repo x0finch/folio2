@@ -50,12 +50,19 @@ export function SplashScreen() {
 
   // 放行:初始冷启动 phase 说 exit → 播放大扩散 + 淡出,动画结束后标记 released(隐藏,不销毁)。
   // updating 时 phase 恒为「更新中」,不会走到这里,所以换版态不会被退场动画抢走。
+  //
+  // **依赖只放 `phase`,退场用 ref 守一次**:早先依赖里带了 `exiting`,`setExiting(true)` 一改它,
+  // effect 依赖变化 → 上一轮 cleanup 把「520ms 后 released」的定时器提前清掉,重跑又因 exiting 为真
+  // early-return、不再重设 → released 永不为 true → 覆盖层淡到透明却留在 DOM 最上层、吃掉所有点击
+  // (登录页点不动输入框/按钮就是这个)。
+  const exitStarted = useRef(false);
   useEffect(() => {
-    if (phase !== "exit" || exiting) return;
+    if (phase !== "exit" || exitStarted.current) return;
+    exitStarted.current = true;
     setExiting(true);
     const timer = setTimeout(() => setReleased(true), SPLASH_EXIT_MS);
     return () => clearTimeout(timer);
-  }, [phase, exiting]);
+  }, [phase]);
 
   // 退场时冻结文案(exit 不是文案阶段):记住最后一条非退场文案。
   const lastMsg = useRef<"preparing" | "loading" | "updating">("preparing");
