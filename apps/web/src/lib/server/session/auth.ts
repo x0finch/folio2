@@ -13,9 +13,18 @@ function createAuth() {
   // authenticatorSelection 的取值理由见下面 passkey() 那处(#353 把 userVerification 从
   // "preferred" 改成了 "required",residentKey 仍是 "preferred")。
   const rp = derivePasskeyRp(env.BETTER_AUTH_URL);
+  // 额外可信 origin —— **只有 preview env 会设** PREVIEW_TRUSTED_ORIGINS(见 wrangler.jsonc),生产为空。
+  // 让 per-PR 的 workers.dev 预览别名域通过 Origin/CSRF 校验(cookie 默认 host-only,跟着访问域走,
+  // 所以密码登录跨域可用;passkey rpID 仍绑 BETTER_AUTH_URL 的固定域、换域名不通 —— 预览用密码登录)。
+  // better-auth 支持通配(wildcard-match);baseURL 的 origin 自动可信,无需在此重复。
+  const previewTrustedOrigins = (env.PREVIEW_TRUSTED_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
+    trustedOrigins: previewTrustedOrigins,
     database: createAuthAdapter(env),
     emailAndPassword: {
       enabled: true,

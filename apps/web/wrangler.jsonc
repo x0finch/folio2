@@ -92,7 +92,18 @@
       // 独立 Worker 名 —— **必须显式写**。wrangler v4 已移除 service environments:env 不给 name
       // 就沿用顶层 `folio`,`deploy --env preview` 会直接覆盖生产 Worker(踩过一次,见 DEPLOY.md)。
       "name": "folio-preview",
-      "vars": { "LOG_LEVEL": "info" },
+      // per-PR 预览:每个打了 `preview` 标签的 PR 经 `wrangler versions upload --preview-alias pr-<N>`
+      // 得到一个独立的 workers.dev 预览 URL(`pr-<N>-folio-preview.<子域>.workers.dev`),**共用**这一个
+      // Worker + 共用 folio-preview D1,互不覆盖。preview_urls 打开版本预览 URL。
+      "preview_urls": true,
+      "vars": {
+        "LOG_LEVEL": "info",
+        // 只在 preview 放行的额外可信 origin(better-auth trustedOrigins)。让上面那些 workers.dev
+        // 预览别名域也能通过 CSRF/Origin 校验、用密码登录(cookie 默认 host-only,跟着访问域走;
+        // passkey rpID 仍绑固定域、换域名不通,预览用密码登录即可)。**生产不设此项 → 严格不放行**。
+        // 中间那个 `*` 覆盖账户子域;要更严可改成你自己的 `<子域>`(见 DEPLOY.md 的 PR preview 一节)。
+        "PREVIEW_TRUSTED_ORIGINS": "https://*-folio-preview.*.workers.dev"
+      },
       "cache": { "enabled": true },
       "d1_databases": [
         {
