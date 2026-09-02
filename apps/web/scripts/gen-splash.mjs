@@ -19,8 +19,10 @@ const config = JSON.parse(
   readFileSync(join(HERE, "..", "src", "routes", "-root", "splash-config.json"), "utf8"),
 );
 
-const BG = "#151515"; // 暗色 --background(与覆盖层、offline.html 一致)
-const FG = "#f0f0f0"; // 暗色 --foreground(覆盖层里 logo 走 currentColor 即此色)
+// 底色 / logo 色取 splash-config.json 的单一来源(与覆盖层暗色态一致):启动图恒暗底,logo 用亮色。
+// 与覆盖层的 `:root.dark #app-splash{background:colorDark;color:colorLight}` 同源 —— 静态→呼吸交接不差色。
+const BG = config.colorDark;
+const FG = config.colorLight;
 const LOGO_BOX = 42; // icon.svg / logo.tsx 的 viewBox 边长
 // folio 折页标(单路径,取自 logo.tsx 的 currentColor path)。
 const FOLIO_PATH =

@@ -4,8 +4,11 @@
 import splashConfig from "./splash-config.json";
 import { SPLASH_EXIT_MS, SPLASH_LOGO_SIZE } from "./splash-lifecycle";
 
-const THEME_COLOR_LIGHT = "#fcfcfc";
-const THEME_COLOR_DARK = "#151515";
+// 品牌明暗底色的**单一来源在 splash-config.json**:theme-color meta、闪屏覆盖层、iOS 启动图生成
+// 脚本(gen-splash.mjs,读同一份 JSON)全都用它 —— 免得散在多处、改一处漏一处(曾让 iOS 启动图
+// 的 logo 与覆盖层差一档灰)。offline.html 仍是独立无 JS 文件、单独镜像(见其头注)。
+const THEME_COLOR_LIGHT = splashConfig.colorLight;
+const THEME_COLOR_DARK = splashConfig.colorDark;
 // muted-foreground 的镜像(offline.html 同款):阶段小字用它,明暗都够读。
 const SPLASH_MUTED = "#868686";
 
@@ -48,17 +51,21 @@ export const THEME_COLORS: { media: string; content: string }[] = [
 // (由 THEME_INIT_SCRIPT 在 hydration 前就设好,见 root-document)。放行由 `data-exit` 触发
 // 放大扩散 + 淡出。呼吸从 scale(1)/opacity(1) 起步 —— 即 iOS 启动图里 logo 的静止态,静态→呼吸无缝。
 // 时长与 splash-lifecycle 的 SPLASH_EXIT_MS(520ms)对齐。
+// 缓动值即 lib/ease 的 EASE_OUT_CSS(cubic-bezier(0.16,1,0.3,1))—— 内联关键样式导不了 JS token,
+// 故照抄其值(与全站一致)。**logo 用 grid 钉在真屏幕中心**(不是「logo+文案整组居中」),这样它的
+// 位置与 iOS 启动图里精确居中的 logo 一致 —— 静态→呼吸无缝交接(ADR 0051 的核心目标);文案改为
+// 绝对定位挂在中心之下,不影响 logo 的居中。文案切换是 key 重挂后的淡入+上移(非重叠 crossfade,
+// 一行短提示不值得为重叠多铺一层)。
 export const SPLASH_STYLE = `
-#app-splash{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;
-align-items:center;justify-content:center;gap:1.25rem;
-padding:env(safe-area-inset-top) 1.5rem env(safe-area-inset-bottom);
+#app-splash{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;
 background:${THEME_COLOR_LIGHT};color:${THEME_COLOR_DARK};
 font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 :root.dark #app-splash{background:${THEME_COLOR_DARK};color:${THEME_COLOR_LIGHT}}
 #folio-splash-logo{width:${SPLASH_LOGO_SIZE}px;height:${SPLASH_LOGO_SIZE}px;color:currentColor;
 transform-origin:center;will-change:transform,opacity;
 animation:folio-breathe 1.8s ease-in-out infinite}
-#folio-splash-msg{margin:0;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLASH_MUTED};
+#folio-splash-msg{position:absolute;left:0;right:0;top:calc(50% + 3.25rem);margin:0;padding:0 1.5rem;
+text-align:center;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLASH_MUTED};
 animation:folio-splash-msg-in .3s cubic-bezier(0.16,1,0.3,1)}
 #app-splash[data-exit="true"]{animation:folio-splash-out ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
 #app-splash[data-exit="true"] #folio-splash-logo{animation:folio-splash-burst ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
