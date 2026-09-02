@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import { IntlProvider } from "use-intl";
 import { applyStoredTheme, THEME_INIT_SCRIPT } from "@/lib/hooks/use-theme";
 import { messages } from "@/lib/i18n/messages";
-import { registerServiceWorker } from "@/lib/pwa/service-worker";
+import { registerServiceWorker, useUpdateToast } from "@/lib/pwa/service-worker";
 import { localePreferenceQuery } from "@/lib/queries/preferences";
 import appCss from "@/styles.css?url";
 import { appCssLoaderScript, SPLASH_STYLE, STARTUP_IMAGES, THEME_COLORS } from "./pwa-head";
@@ -40,6 +40,13 @@ function AppToaster() {
       classNames={{ root: "top-[calc(env(safe-area-inset-top)+3.75rem)]" }}
     />
   );
+}
+
+// 运行中更新 toast 的挂载点:useUpdateToast 用 useTranslations,必须在 IntlProvider 之内(RootDocument
+// 本身在 Provider 之外),故抽成一个渲染 null 的子组件。
+function UpdateWatcher() {
+  useUpdateToast();
+  return null;
 }
 
 export function RootDocument({ children }: { children: React.ReactNode }) {
@@ -93,6 +100,8 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
           <AppToaster />
           {/* 冷启动闪屏(ADR 0051):住 IntlProvider 内取阶段文案;fixed 覆盖层盖住一切,就绪后自卸载。 */}
           <SplashScreen />
+          {/* 运行中更新提示:探到新版弹「有新版本 · 更新」toast(住 IntlProvider 内取文案)。 */}
+          <UpdateWatcher />
         </IntlProvider>
         <TanStackDevtools
           config={{

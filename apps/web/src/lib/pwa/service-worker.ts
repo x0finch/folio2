@@ -1,5 +1,13 @@
-import { useSyncExternalStore } from "react";
+import { toast } from "@folio/ui";
+import { useEffect, useSyncExternalStore } from "react";
+import { useTranslations } from "use-intl";
 import { updateAction } from "./update-action";
+
+// 运行中定时探更新的节奏(ADR 0051):30 分钟一次 + 页面重新可见时各一次。浏览器默认不主动重查
+// sw.js,不探的话长会话里永远发现不了新版(要等下次冷启动 splash 静默换)。
+const UPDATE_POLL_MS = 30 * 60 * 1000;
+// 更新 toast 固定 id:多来源只留一条,不叠。
+const UPDATE_TOAST_ID = "sw-update";
 
 // Service Worker 注册 + 版本更新流的客户端侧(ADR 0051,取代 0027 的「全程静默」)。
 //
@@ -24,6 +32,8 @@ const availableListeners = new Set<() => void>();
 let registration: ServiceWorkerRegistration | null = null;
 let waitingWorker: ServiceWorker | null = null;
 let reloading = false;
+// 已为哪个 waiting worker 弹过 toast:同一个版本只弹一次,换了更新的版本(新 worker)才再弹。
+let lastPromptedWorker: ServiceWorker | null = null;
 
 function beginUpdating(): void {
   if (updating) return;
@@ -89,6 +99,14 @@ export function registerServiceWorker(): () => void {
   };
   navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
 
+  // 运行中定时探更新:30 分钟一次 + 页面重新可见时各一次。checkForUpdate 在 registration 落地前
+  // 是 no-op,所以同步起这两个也安全。
+  const poll = setInterval(() => void checkForUpdate(), UPDATE_POLL_MS);
+  const onVisible = () => {
+    if (document.visibilityState === "visible") void checkForUpdate();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+
   // updateViaCache:none —— 更新检查不吃 HTTP 缓存,发新版即拿到新 sw.js。
   navigator.serviceWorker
     .register("/sw.js", { type: "module", updateViaCache: "none" })
@@ -109,7 +127,11 @@ export function registerServiceWorker(): () => void {
       // 静默:注册失败不该冒泡到 UI。
     });
 
-  return () => navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+  return () => {
+    navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+    clearInterval(poll);
+    document.removeEventListener("visibilitychange", onVisible);
+  };
 }
 
 /** SplashScreen 订阅:是否正在应用新版本(显示「更新中」)。 */
@@ -134,4 +156,28 @@ export function useUpdateAvailable(): boolean {
     () => availableWorker != null,
     () => false,
   );
+}
+
+/**
+ * 运行中弹「有新版本 · 更新」toast(会自动消失、可忽略)。**同一个 waiting 版本只弹一次**
+ * (按 worker 身份去重),后续定时探到同版本不重复弹;换了更新的版本(新 worker)才再弹。忽略/关掉
+ * toast 后设置页那行仍显示「有新版本」,是随时能回去更新的固定入口。挂一次(在 RootDocument 内)。
+ */
+export function useUpdateToast(): void {
+  const t = useTranslations("Update");
+  useEffect(() => {
+    const maybePrompt = () => {
+      if (!availableWorker || availableWorker === lastPromptedWorker) return;
+      lastPromptedWorker = availableWorker;
+      toast.message(t("available"), {
+        id: UPDATE_TOAST_ID,
+        action: { label: t("update"), onClick: () => applyUpdate() },
+      });
+    };
+    availableListeners.add(maybePrompt);
+    maybePrompt(); // 订阅前若已检测到新版,补弹一次
+    return () => {
+      availableListeners.delete(maybePrompt);
+    };
+  }, [t]);
 }
