@@ -12,8 +12,9 @@ dist/
 
 .agents/
 skills-lock.json
-# mattpocock skills 的 agent 落地目录(各人本地 `npx skills add` 装,不随仓库分发,同 .agents/)
+# skills CLI symlinks generated into the Claude Code agent dir (point into .agents/)
 .claude/skills/
+# the Eve agent dir the skills CLI also creates (points into .agents/ too)
 agent/
 
 .scratch/
