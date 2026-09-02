@@ -96,7 +96,7 @@
           "binding": "DB",
           "database_name": "folio-preview",
           // `wrangler d1 create folio-preview` 得到的真实 id,粘到这里(见 DEPLOY.md)。
-          "database_id": "REPLACE_WITH_folio-preview_DATABASE_ID",
+          "database_id": "3564a2e0-d932-4368-bb3a-40c272ae047f",
           "migrations_dir": "../../packages/db/drizzle"
         }
       ],
