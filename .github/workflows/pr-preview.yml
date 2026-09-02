@@ -42,6 +42,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 拉全历史 + tag,让 vite 的 git describe 得到真实版本号(设置页页脚)
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -54,10 +56,6 @@ jobs:
       - name: Apply D1 migrations (preview)
         run: pnpm --filter @folio/web run db:migrate:preview
 
-      # vite build + wrangler deploy --env preview。preview 是**固定**共享 URL —— 自定义域名在 CF
-      # dashboard 绑到 folio-preview Worker(刻意不进 wrangler 配置),这里直接固定用它、不从 wrangler
-      # 输出 grep:workers.dev 那个不是登录用的地址(BETTER_AUTH_URL 指向自定义域名,从 workers.dev
-      # 进会 origin 不匹配、登录失败)。域名变了改这一行。
       # 上传一个**版本**并挂 per-PR 预览别名 `pr-<N>`(不 promote 到固定域 → 不覆盖别的 PR)。
       # 从 wrangler 输出里抓那条别名预览 URL。
       - name: Build & upload preview version

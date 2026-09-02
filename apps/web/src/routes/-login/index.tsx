@@ -1,7 +1,8 @@
 import { Button, cn, Input, Label, MorphingModal, Tabs, TabsList, TabsTrigger } from "@folio/ui";
+import { WebAuthnAbortService } from "@simplewebauthn/browser";
 import { useNavigate } from "@tanstack/react-router";
 import { Fingerprint } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { authClient, signIn, signUp } from "@/lib/core/auth-client";
 import type { HistoryPoint } from "@/lib/core/history";
@@ -84,6 +85,18 @@ function HeroBackdrop() {
   );
 }
 
+// 中止仍挂起的 conditional-UI autofill 请求。signIn.passkey({autoFill}) 底层是 @simplewebauthn 的
+// startAuthentication(navigator.credentials.get({mediation:"conditional"})),其 promise 一直 pending 到
+// 用户从填充条里选 passkey。**这个请求活在 WebKit 的 WebPageProxy 上,不跟着 document 走**:导航
+// (SPA 切换、整页刷新都算)不会取消它,之后每次窗口重新激活(PWA 切回前台 / 解锁)WebKit 都会把它重新
+// 交给系统(WebPageProxy::activityStateDidChange → makeActiveConditionalAssertion),iOS 26 便在 Overview
+// 上弹出「Sign in to … with your password / Fill Password」那张 autofill sheet。唯一能杀掉它的是 JS 侧
+// 的 AbortSignal(WebAuthenticatorCoordinatorProxy::cancel;iOS 26 起 abort 才真正生效),所以离开登录页
+// 之前**必须**先 abort,再导航。cancelCeremony 是 @simplewebauthn 的标准取消 API(better-auth 底层同一份)。
+function abortAutofill() {
+  WebAuthnAbortService.cancelCeremony();
+}
+
 function AuthPanel() {
   const navigate = useNavigate();
   const t = useTranslations("Login");
@@ -100,6 +113,14 @@ function AuthPanel() {
   // 引导里加的 passkey 也要记进「本机凭据」,否则设置页的 auto-lock 会重复注册并被拒(见 onAddFromPrompt)。
   const { markReady } = useLockDevice();
 
+  // 登录/引导结束后进主页:**先 abort 再 SPA 导航**。abort 掐掉那条挂起的 conditional-UI autofill
+  // 请求(否则它会泄漏到 Overview,iOS 上持续吊着填充条 + 键盘);navigate 而不整页刷新 —— 整页硬跳转
+  // 会在别的路径(如 autofill 成功回调)触发时把正在交互的登录表单直接卸载。navigate 稳定,入依赖不重跑。
+  const leaveToHome = useCallback(() => {
+    abortAutofill();
+    navigate({ to: "/" });
+  }, [navigate]);
+
   const isSignup = mode === "signup";
 
   // 邮箱认证成功后的落点:够条件则弹 passkey 引导(留在登录页等决定),否则直接进主页。
@@ -112,7 +133,7 @@ function AuthPanel() {
         return;
       }
     }
-    navigate({ to: "/" });
+    leaveToHome();
   }
 
   // 引导里「添加」:走注册 ceremony;成败都进主页(引导是加分项,不该卡住登录)。
@@ -129,14 +150,14 @@ function AuthPanel() {
     // 传 name 见那个函数的注释。
     const res = await registerPasskey("platform").catch(() => null);
     if (res?.data) markReady(res.data.credentialID);
-    navigate({ to: "/" });
+    leaveToHome();
   }
 
   // 引导里「别再问我」:本设备记下,直接进主页。
   function onDismissPrompt() {
     dismissPasskeyPrompt();
     setPromptOpen(false);
-    navigate({ to: "/" });
+    leaveToHome();
   }
 
   // 支持检测 + conditional-UI autofill:页面加载即静默发起 passkey autofill(浏览器把已注册的
@@ -152,14 +173,19 @@ function AuthPanel() {
       .then((ok) => {
         if (!ok || cancelled) return;
         return signIn.passkey({ autoFill: true }).then((res) => {
-          if (!cancelled && res && !res.error) navigate({ to: "/" });
+          if (!cancelled && res && !res.error) leaveToHome();
         });
       })
       .catch(() => {}); // autofill 失败/用户取消是常态,静默即可
+    // 无论怎么离开登录页都要 abort(理由见 leaveToHome):卸载(SPA 跳转)、pagehide(整页导航 /
+    // 关页 / PWA 切后台被杀)各挂一道 —— 整页导航时 React 不会跑 effect cleanup,只靠 cleanup 兜不住。
+    window.addEventListener("pagehide", abortAutofill);
     return () => {
       cancelled = true;
+      window.removeEventListener("pagehide", abortAutofill);
+      abortAutofill();
     };
-  }, [navigate]);
+  }, [leaveToHome]);
 
   async function onPasskey() {
     setError(null);
@@ -170,7 +196,7 @@ function AuthPanel() {
         setError(res.error.message ?? t("authFailed"));
         return;
       }
-      navigate({ to: "/" });
+      leaveToHome();
     } catch {
       setError(t("authFailed"));
     } finally {
@@ -319,7 +345,7 @@ function AuthPanel() {
         viewId={promptOpen ? "passkey-prompt" : null}
         onClose={() => {
           setPromptOpen(false);
-          navigate({ to: "/" });
+          leaveToHome();
         }}
       >
         <div className="text-left">
