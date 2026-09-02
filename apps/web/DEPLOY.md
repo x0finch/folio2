@@ -105,6 +105,90 @@ git tag v1.2.0 && git push origin v1.2.0   # → CI migrates remote D1, then dep
 > add **required reviewers** to the `production` environment (repo Settings → Environments) —
 > the workflow already targets it and will then wait for an approval before migrating/deploying.
 
+## PR preview (CI, on demand via label)
+
+`.github/workflows/pr-preview.yml` deploys a **preview** of a PR to a separate Worker `folio-preview`
+(a different Worker from production `folio` — production is never touched), and posts the URL back as
+a sticky PR comment. It reuses the same `CLOUDFLARE_API_TOKEN` as the tag deploy; no new token needed.
+
+**Opt-in per PR:** it only runs when the PR carries the **`preview`** label — nothing deploys
+automatically on open. Add the label = "I want a preview of this PR"; while it's labeled, every push
+updates the preview; remove the label and it stops. (Create a `preview` label the first time straight
+from the PR's Labels box.)
+
+**How it's shaped (chosen deliberately):**
+
+- **One shared preview Worker + one shared preview D1 (`folio-preview`).** All labeled PRs deploy to
+  the same Worker; the last push wins (the workflow serializes deploys via `concurrency`). The URL is
+  therefore **fixed** — a custom domain bound to the Worker in the CF dashboard and hard-coded in
+  `pr-preview.yml` (e.g. `https://preview.folio.009003.xyz`), deliberately kept out of wrangler config.
+  `BETTER_AUTH_URL` must match it so better-auth stays same-origin; the workers.dev URL will 401/CSRF on
+  login because the origin differs.
+- **The preview DB is not reset on every deploy** — it keeps its data/login across PRs (so you can
+  sign up a test user once and keep using it). Migrations **accumulate** onto it, applied before each
+  deploy with the same fail-stop order as production.
+- **Additive migrations** (new table/column) accumulate harmlessly. **Destructive migrations**
+  (drop/rename a column) are the one hazard of a shared DB: a migration from PR-A drops a column,
+  then a PR that doesn't have that migration renders against a DB that lost it → that preview breaks,
+  and D1 has no down-migration to roll back. When that happens, run the manual reset below.
+
+**Critical config (learned the hard way — a preview deploy once clobbered production):**
+
+- **`env.preview` must set `"name": "folio-preview"`.** Wrangler v4 removed service environments; an
+  env without its own `name` falls back to the top-level `folio`, so `wrangler deploy --env preview`
+  overwrites the **production** Worker instead of a separate one.
+- **`deploy:preview` must build with `CLOUDFLARE_ENV=preview`.** With `@cloudflare/vite-plugin`,
+  `wrangler deploy` ships the *build artifact's* config — `--env` at deploy time is a no-op. The env is
+  picked at **build** time via `CLOUDFLARE_ENV` (same mechanism as e2e's `CLOUDFLARE_ENV=test`). Verify:
+  after `CLOUDFLARE_ENV=preview pnpm build`, `dist/server/wrangler.json` should show `name`/`d1` as
+  `folio-preview`.
+- **`CLOUDFLARE_API_TOKEN` must be a repo-level secret**, not only the `production` environment secret
+  the tag deploy uses — `pr-preview.yml` declares no `environment:`, so it reads the repo-level one.
+- `wrangler secret put --env preview` **does** target `folio-preview` correctly even without the `name`
+  above (secret put keeps the legacy `-preview` suffix); only `deploy` needed the two fixes.
+
+**One-time setup:**
+
+```sh
+cd apps/web
+# 1. Create the preview D1, then paste the printed database_id into
+#    wrangler.jsonc → env.preview.d1_databases[0].database_id (replacing the REPLACE_WITH_… placeholder)
+pnpm exec wrangler d1 create folio-preview
+
+# 2. Set the preview Worker's secrets. Use `--name folio-preview`, NOT `--env preview`:
+#    env.preview now sets its own `name`, so `--env preview` resolves to a non-existent
+#    `folio-preview-preview` (the legacy env suffix stacks on top of the name).
+#    Mirror the FULL production secret set — a partial set fails silently at sync time
+#    (e.g. binance 403s from CF IPs unless the *_BASE proxy endpoints are present).
+pnpm exec wrangler secret put SECRETS_KEY        --name folio-preview   # openssl rand -base64 32
+pnpm exec wrangler secret put BETTER_AUTH_SECRET --name folio-preview   # openssl rand -hex 32
+pnpm exec wrangler secret put BETTER_AUTH_URL    --name folio-preview   # the fixed custom domain, e.g. https://preview.folio.009003.xyz
+pnpm exec wrangler secret put COINSTATS_API_KEY  --name folio-preview
+pnpm exec wrangler secret put COINGECKO_API_KEY  --name folio-preview
+pnpm exec wrangler secret put ZERION_API_KEY     --name folio-preview
+pnpm exec wrangler secret put BINANCE_API_BASE   --name folio-preview   # proxy base — binance 403s from CF IPs without these three
+pnpm exec wrangler secret put BINANCE_FAPI_BASE  --name folio-preview
+pnpm exec wrangler secret put BINANCE_DAPI_BASE  --name folio-preview
+```
+
+You get the exact `<your-subdomain>` from the first deploy's printed URL (or the tag deploy's).
+Set `BETTER_AUTH_URL` **before** the first preview sign-up (WebAuthn RP is derived from it). No
+`production` environment / approval gate applies to previews — they deploy on every PR push.
+
+> On `*.workers.dev` the Cache API is a silent no-op (same as the workers.dev note above), so
+> logo/token caching doesn't take effect in previews — functionally fine, just extra upstream calls.
+
+**Manual reset (rare — only when a destructive migration broke a preview):**
+`.github/workflows/preview-reset.yml`, run from the Actions tab (`workflow_dispatch`, type `RESET` to
+confirm). It **wipes all data in `folio-preview`** (drops every table + clears `d1_migrations`), then
+re-applies all migrations from scratch. It only ever touches `folio-preview`, never production.
+
+> ⚠️ The reset's drop-all (`scripts/reset-preview-db.mjs`) has **not yet been verified against a real
+> D1**. On the first run, watch the logs: confirm the drop step doesn't error on FK/PRAGMA behavior,
+> and that `wrangler … --json` output parsed cleanly. **Manual fallback if it fails:**
+> `pnpm exec wrangler d1 delete folio-preview` then `d1 create folio-preview`, paste the **new**
+> `database_id` into `wrangler.jsonc` env.preview, and `pnpm run db:migrate:preview`.
+
 ## Notes
 
 - **Local vs remote D1 are separate.** `pnpm dev` uses a local SQLite file; production uses the remote D1. Always `migrations apply … --remote` after a schema change.

@@ -15,9 +15,12 @@
     "db:migrate:local": "wrangler d1 migrations apply folio --local",
     "db:migrate:e2e": "wrangler d1 migrations apply folio-e2e --local --env test",
     "db:migrate:remote": "wrangler d1 migrations apply folio --remote",
+    "db:migrate:preview": "wrangler d1 migrations apply folio-preview --remote --env preview",
+    "db:reset:preview": "node scripts/reset-preview-db.mjs",
     "sync:ref:local": "curl -sS \"http://localhost:3000/cdn-cgi/handler/scheduled?cron=0%2023%20*%20*%20*\"",
     "sync:balances:local": "curl -sS \"http://localhost:3000/cdn-cgi/handler/scheduled?cron=0%200%20*%20*%20*\"",
     "deploy": "pnpm run build && wrangler deploy",
+    "deploy:preview": "CLOUDFLARE_ENV=preview pnpm run build && wrangler deploy --env preview",
     "gen:icons": "node scripts/gen-icons.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"

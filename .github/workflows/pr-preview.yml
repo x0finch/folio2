@@ -1,0 +1,84 @@
+name: PR Preview
+
+# **按需**部署 preview:只有打了 `preview` 标签的 PR 才部署,URL 贴回 PR 评论。
+# 打标签 = 「我要这个 PR 的 preview」;标上之后该 PR 每次 push 自动更新;撕掉标签就不再部署。
+# (需要仓库里存在一个名为 `preview` 的 label —— 在 PR 的 Labels 里现建一个即可。)
+#
+# 部署到一个**独立的** Worker `folio-preview`(见 apps/web/wrangler.jsonc 的 env.preview)——
+# 生产 Worker `folio` 完全不受影响。所有打标签的 PR **共用**这一个 preview Worker + 一个
+# `folio-preview` 远程 D1(方案 B:常驻累积),后 push 的覆盖前一个。库平时不清、保留数据;
+# destructive 迁移把某个 preview 弄崩时,手动跑 preview-reset.yml 重建一次。
+#
+# 正确性四闸由 ci.yml 在同一个 commit 上并行跑;这里不重复,只管「把它跑起来给人看」。
+# 复用生产那把 `CLOUDFLARE_API_TOKEN`(Workers Scripts:Edit + D1:Edit),无需新 token。
+#
+# 触发事件:labeled(标上那刻)/ synchronize(带标签的 PR 后续 push)/ reopened(带标签重开)。
+# 刻意没有 opened —— 开 PR 不自动部署,得你显式打标签。
+on:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+# 所有 PR 共用同一个 preview Worker + 库,并发部署会互相踩 → 全局串行。
+# cancel-in-progress: false —— 部署/迁移进行中不打断,免得留下半迁移的库。
+concurrency:
+  group: pr-preview
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    # 只部署带 `preview` 标签的 PR(synchronize/reopened 时若标签已撕掉 → 跳过)。
+    # fork 来的 PR 拿不到仓库 secret(且不该拿)→ 一并跳过,否则必然在缺 token 处红。
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'preview')
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # 贴/更新 preview URL 评论
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # 先迁移 preview 远程库(和生产同样的 fail-stop 顺序:迁移失败 → 不部署 → 不会「代码上了
+      # 但 schema 没迁」)。这里的迁移是**累积**打到共享库上的,不重置 —— 见 workflow 顶部说明。
+      - name: Apply D1 migrations (preview)
+        run: pnpm --filter @folio/web run db:migrate:preview
+
+      # vite build + wrangler deploy --env preview。preview 是**固定**共享 URL —— 自定义域名在 CF
+      # dashboard 绑到 folio-preview Worker(刻意不进 wrangler 配置),这里直接固定用它、不从 wrangler
+      # 输出 grep:workers.dev 那个不是登录用的地址(BETTER_AUTH_URL 指向自定义域名,从 workers.dev
+      # 进会 origin 不匹配、登录失败)。域名变了改这一行。
+      - name: Build & deploy preview
+        id: deploy
+        run: |
+          set -o pipefail
+          pnpm --filter @folio/web run deploy:preview 2>&1 | tee /dev/stderr
+          echo "url=https://preview.folio.009003.xyz" >> "$GITHUB_OUTPUT"
+
+      # 单条「粘性」评论:每次 push 更新同一条,不刷屏。用第一方 github-script,不引第三方 action。
+      - name: Upsert preview URL comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = "${{ steps.deploy.outputs.url }}";
+            const marker = "<!-- pr-preview-url -->";
+            const body = `${marker}\n🚀 **Preview 已部署**: ${url}\n\n` +
+              `- 独立 Worker \`folio-preview\`,不影响生产。\n` +
+              `- 所有 PR 共用一个 preview 库,数据保留、不每次清;详见 DEPLOY.md「PR preview」。\n` +
+              `- commit \`${context.sha.slice(0, 7)}\``;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.data.find((c) => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
