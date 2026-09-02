@@ -1,7 +1,8 @@
 import { Button, cn, Input, Label, MorphingModal, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { WebAuthnAbortService } from "@simplewebauthn/browser";
+import { useNavigate } from "@tanstack/react-router";
 import { Fingerprint } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { authClient, signIn, signUp } from "@/lib/core/auth-client";
 import type { HistoryPoint } from "@/lib/core/history";
@@ -86,8 +87,8 @@ function HeroBackdrop() {
 
 // 中止仍挂起的 conditional-UI autofill 请求。signIn.passkey({autoFill}) 底层是 @simplewebauthn 的
 // startAuthentication(navigator.credentials.get({mediation:"conditional"})),其 promise 一直 pending 到
-// 用户从填充条里选 passkey。**这个请求活在 WebKit 的 WebPageProxy 上,不跟着 document 走**:整页导航
-// (window.location.href)不会取消它,之后每次窗口重新激活(PWA 切回前台 / 解锁)WebKit 都会把它重新
+// 用户从填充条里选 passkey。**这个请求活在 WebKit 的 WebPageProxy 上,不跟着 document 走**:导航
+// (SPA 切换、整页刷新都算)不会取消它,之后每次窗口重新激活(PWA 切回前台 / 解锁)WebKit 都会把它重新
 // 交给系统(WebPageProxy::activityStateDidChange → makeActiveConditionalAssertion),iOS 26 便在 Overview
 // 上弹出「Sign in to … with your password / Fill Password」那张 autofill sheet。唯一能杀掉它的是 JS 侧
 // 的 AbortSignal(WebAuthenticatorCoordinatorProxy::cancel;iOS 26 起 abort 才真正生效),所以离开登录页
@@ -96,14 +97,8 @@ function abortAutofill() {
   WebAuthnAbortService.cancelCeremony();
 }
 
-// 登录成功后进主页。先 abort 再整页跳转 —— 顺序不能反:整页导航不跑 React 的 effect cleanup,
-// 靠 cleanup 里那次 abort 在这条路上永远不会执行。
-function leaveToHome() {
-  abortAutofill();
-  window.location.href = "/";
-}
-
 function AuthPanel() {
+  const navigate = useNavigate();
   const t = useTranslations("Login");
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
@@ -117,6 +112,14 @@ function AuthPanel() {
   const [promptOpen, setPromptOpen] = useState(false);
   // 引导里加的 passkey 也要记进「本机凭据」,否则设置页的 auto-lock 会重复注册并被拒(见 onAddFromPrompt)。
   const { markReady } = useLockDevice();
+
+  // 登录/引导结束后进主页:**先 abort 再 SPA 导航**。abort 掐掉那条挂起的 conditional-UI autofill
+  // 请求(否则它会泄漏到 Overview,iOS 上持续吊着填充条 + 键盘);navigate 而不整页刷新 —— 整页硬跳转
+  // 会在别的路径(如 autofill 成功回调)触发时把正在交互的登录表单直接卸载。navigate 稳定,入依赖不重跑。
+  const leaveToHome = useCallback(() => {
+    abortAutofill();
+    navigate({ to: "/" });
+  }, [navigate]);
 
   const isSignup = mode === "signup";
 
@@ -182,7 +185,7 @@ function AuthPanel() {
       window.removeEventListener("pagehide", abortAutofill);
       abortAutofill();
     };
-  }, []);
+  }, [leaveToHome]);
 
   async function onPasskey() {
     setError(null);
