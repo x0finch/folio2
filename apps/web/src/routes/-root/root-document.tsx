@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { IntlProvider } from "use-intl";
 import { applyStoredTheme, THEME_INIT_SCRIPT } from "@/lib/hooks/use-theme";
 import { messages } from "@/lib/i18n/messages";
+import { registerServiceWorker } from "@/lib/pwa/service-worker";
 import { localePreferenceQuery } from "@/lib/queries/preferences";
 import appCss from "@/styles.css?url";
 import { appCssLoaderScript, SPLASH_STYLE, THEME_COLORS } from "./pwa-head";
@@ -14,20 +15,6 @@ import { SplashScreen } from "./splash";
 
 // 从 __root 的 loader 读 now(getRouteApi 免于反向 import Route 造成环)。
 const rootRoute = getRouteApi("__root__");
-
-// 生产环境注册 Service Worker(ADR 0027)。dev 不注册 —— 免本地被 SW 缓存坑;
-// 在 app 挂载后调用(非模块加载期)。失败静默降级:SW 只是增强(离线外壳 + Android 可安装),
-// 不支持 module worker 的旧浏览器仍作已装 App 用,不影响主功能。
-function registerServiceWorker(): void {
-  if (!import.meta.env.PROD) return;
-  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
-  // updateViaCache:none —— 更新检查不吃 HTTP 缓存,发新版即拿到新 sw.js。
-  navigator.serviceWorker
-    .register("/sw.js", { type: "module", updateViaCache: "none" })
-    .catch(() => {
-      // 静默:注册失败不该冒泡到 UI。
-    });
-}
 
 // toast 的落位:手机顶部(叠安全区)、桌面右下角。
 //
@@ -62,8 +49,9 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
   // 且全站再无人恢复(useTheme 仅设置页挂载)→ 此处兜底,让 React 生命周期在每次(重)挂载后自愈。见 lib/hooks/use-theme。
   useEffect(() => {
     applyStoredTheme();
-    // 生产注册 Service Worker(可安装外壳 + 离线兜底);dev 内部直接 return。
-    registerServiceWorker();
+    // 生产注册 Service Worker(可安装外壳 + 离线兜底 + 更新流,ADR 0051);dev 内部直接 return。
+    // 返回其清理函数,移除 controllerchange 监听。
+    return registerServiceWorker();
   }, []);
   return (
     <html lang={locale} suppressHydrationWarning>
