@@ -889,8 +889,10 @@ export interface PortfolioSnapshotData {
   fiatRefs: [string, string][];
   // 估值口径(self-first / source-first)。
   mode: ValuationMode;
-  // 服务端装配那一刻(`Date.now()`)。**下发而不是 select 里现取**:24h 盈亏要用它分「新账户 /
-  // 断线」,SSR 与补水两遍读同一个固定值才不会 hydration mismatch。
+  // 装配这份原料的时刻。**只当 `isFirstSyncPending` 的兜底时钟用**(总额 / 持仓 / 24h 盈亏都两端
+  // 相减,不看当下时刻,所以 `overviewFromSnapshotData` 根本不读它)。首页那条路会给
+  // `isFirstSyncPending` 显式传真 `Date.now()`,不走这个字段 —— 因为快照 key 的锚点是 hour-floor 的
+  // (SSR / 补水同刻度),把那个 floored 值当「已过多久」的基准会低估最多 ~1 小时。
   now: number;
 }
 
@@ -940,9 +942,17 @@ export const FIRST_SYNC_WINDOW_MS = 10 * 60 * 1000;
 // 加账户几秒内同步就会落第一张快照;超过 `FIRST_SYNC_WINDOW_MS` 还没有,那不是「还在同步」,是
 // 「同步不成」—— 该显 $0 / 空态(账户在,值是 0),让用户去查凭据,而不是盯着一片加载。
 // 判据全从快照原料读:`accounts` 里有一个 `createdAt` 落在窗口内、且 `snapshots` 全空。
-export function isFirstSyncPending(raw: PortfolioSnapshotData | undefined): boolean {
+//
+// **`now` 必须是真墙钟,不能是快照 key 那个 hour-floor 锚点**:整点向下取整会把「账户建了多久」
+// 低估最多 ~1 小时,让坏凭据、始终落不下快照的账户 hero 卡加载骨架最长约 57 分钟(而不是过了
+// 10 分钟窗就转 $0 / 空态)—— 正是当初加这个窗口要避免的「永久骨架」回归。默认回落到 `raw.now`
+// 只为让不传时钟的调用点(测试)有个确定值;首页那条路显式传 `Date.now()`。
+export function isFirstSyncPending(
+  raw: PortfolioSnapshotData | undefined,
+  now: number = raw?.now ?? Date.now(),
+): boolean {
   if (!raw || raw.accounts.length === 0 || raw.snapshots.length > 0) return false;
-  return raw.accounts.some((a) => raw.now - a.createdAt < FIRST_SYNC_WINDOW_MS);
+  return raw.accounts.some((a) => now - a.createdAt < FIRST_SYNC_WINDOW_MS);
 }
 
 //  —— 账户明细的 24h 盈亏(两端相减,纯计算部分)
@@ -1065,6 +1075,33 @@ export const connectorMetaForOverview = (
   return out;
 };
 
+/**
+ * 三处组装(首页总览 `usePortfolioOverview`、tab 条原料 `usePortfolioSnapshotAtoms`、SSR 预取
+ * `fetchPortfolioSnapshotAtoms`)的公共前半段:accounts + 当下快照 + 连接器目录 → connectorMeta
+ * (entries)+ 该拉 `platforms.resolve` 的 chainIds。抽成一处,免得改一处漏两处 —— 尤其 SSR
+ * 预取那条最容易和两个 hook 悄悄分叉。`platformMeta` 的实际拉取仍留各调用点:它是一条 query,
+ * hook(`useSuspenseQuery`)与非 hook(`fetchQuery`)取法不同。
+ */
+export function overviewConnectorInputs(
+  accounts: readonly AccountSafe[],
+  snapshotsNow: readonly { accountId: string; takenAt: number; balances: BalanceView[] }[],
+  catalog: Readonly<Record<string, ConnectorCatalogEntry>>,
+): { connectorMeta: [string, { name: string; logo?: string }][]; chainIds: string[] } {
+  const connectorMeta = connectorMetaForOverview(accounts, snapshotsNow, catalog);
+  const connectorLookup = (key: string) => {
+    const entry = catalog[key];
+    return entry ? { name: entry.label, logo: entry.logo } : null;
+  };
+  const byAccount: ReadonlyMap<string, SnapshotSlice> = new Map(
+    snapshotsNow.map((s) => [
+      s.accountId,
+      { snapshot: { takenAt: s.takenAt }, balances: s.balances },
+    ]),
+  );
+  const chainIds = overviewChainIds([...accounts], byAccount, connectorLookup);
+  return { connectorMeta, chainIds };
+}
+
 /** 原子资源在浏览器合并 → `PortfolioSnapshotData` → `overviewFromSnapshotData`。 */
 export function assemblePortfolioSnapshotData(args: {
   accounts: readonly AccountSafe[];
@@ -1100,12 +1137,18 @@ export function assemblePortfolioSnapshotData(args: {
   };
 }
 
-/** 纯函数:原子原料 → 总览(与首页 `usePortfolioOverview` 的 `select` 同口径)。 */
+/**
+ * 纯函数:原子原料 → 总览(与首页 `usePortfolioOverview` 的 `select` 同口径)。
+ *
+ * `now` 是 `isFirstSyncPending` 的判定时钟,**必须是真墙钟**,与 `args.now`(快照 key 的 hour-floor
+ * 锚点)分开传 —— 用锚点会把首次同步窗撑大最多 ~1 小时。默认 `Date.now()` 给不关心 pending 的调用点。
+ */
 export function portfolioOverviewFromAtoms(
   args: Parameters<typeof assemblePortfolioSnapshotData>[0],
+  now: number = Date.now(),
 ): OverviewView & { pending: boolean } {
   const raw = assemblePortfolioSnapshotData(args);
-  return { ...overviewFromSnapshotData(raw), pending: isFirstSyncPending(raw) };
+  return { ...overviewFromSnapshotData(raw), pending: isFirstSyncPending(raw, now) };
 }
 
 //  —— 账户明细:发原料 + 浏览器算(与首页 `overviewFromSnapshotData` 同路,FOL-44 收尾)

@@ -60,7 +60,7 @@ describe("刷新映射表", () => {
     expect([isInvalidated(def), isInvalidated(other)]).toEqual([true, true]);
   });
 
-  it("account.write 刷账户域与同步域,但不刷快照", async () => {
+  it("account.write 刷账户域、同步域与快照(手记读时现算,ADR 0018)", async () => {
     seed(accountKeys.list("pf-1"));
     seed(accountKeys.manualDetail("a1"));
     seed(syncKeys.round("pf-1"));
@@ -75,7 +75,8 @@ describe("刷新映射表", () => {
         isInvalidated,
       ),
     ).toEqual([true, true, true]);
-    expect(isInvalidated(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT))).toBe(false);
+    // 手记持仓改动后总额/分布必须跟着变 —— 手记从不同步,余额是读时合成的,不刷快照就停在旧数。
+    expect(isInvalidated(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT))).toBe(true);
     expect(isInvalidated(portfolioKeys.fiatRefs("pf-1"))).toBe(true);
     expect(isInvalidated(tokenKeys.enrichment())).toBe(true);
   });

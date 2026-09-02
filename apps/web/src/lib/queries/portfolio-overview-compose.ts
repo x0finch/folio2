@@ -9,10 +9,9 @@ import { useMemo } from "react";
 import { accountsMatchingPin, toTabPin } from "@/lib/core/accounts-in-view";
 import {
   assemblePortfolioSnapshotData,
-  connectorMetaForOverview,
   floorToHour,
   isFirstSyncPending,
-  overviewChainIds,
+  overviewConnectorInputs,
   type PortfolioSnapshotData,
   portfolioOverviewFromAtoms,
 } from "@/lib/core/portfolio";
@@ -74,20 +73,24 @@ export function usePortfolioOverview(portfolioId: string, pin?: PinScopeKey): Po
           const mode =
             queryClient.getQueryData(valuationSettingsQuery().queryKey)?.valuationMode ??
             "self-first";
-          const pending = isFirstSyncPending({
-            accounts: active,
-            snapshots: (query.state.data ?? []).map(
-              (s: AccountSnapshot) =>
-                [s.accountId, { takenAt: s.takenAt, balances: s.balances }] as const,
-            ),
-            prevSnapshots: [],
-            enriched: [],
-            platformMeta: [],
-            connectorMeta: [],
-            fiatRefs: [],
-            mode,
-            now,
-          });
+          const pending = isFirstSyncPending(
+            {
+              accounts: active,
+              snapshots: (query.state.data ?? []).map(
+                (s: AccountSnapshot) =>
+                  [s.accountId, { takenAt: s.takenAt, balances: s.balances }] as const,
+              ),
+              prevSnapshots: [],
+              enriched: [],
+              platformMeta: [],
+              connectorMeta: [],
+              fiatRefs: [],
+              mode,
+              now,
+            },
+            // 真墙钟,不是 floored 锚点 `now` —— 否则首次同步窗被撑大最多 ~1 小时,轮询会多空转。
+            Date.now(),
+          );
           return pollWhilePending(query, pending);
         },
       },
@@ -114,50 +117,31 @@ export function usePortfolioOverview(portfolioId: string, pin?: PinScopeKey): Po
     [snapshotsPrev, scopedAccounts],
   );
 
-  const connectorMeta = useMemo(
-    () => connectorMetaForOverview(scopedAccounts, scopedSnapshotsNow, catalog),
+  const { connectorMeta, chainIds } = useMemo(
+    () => overviewConnectorInputs(scopedAccounts, scopedSnapshotsNow, catalog),
     [scopedAccounts, scopedSnapshotsNow, catalog],
-  );
-
-  const connectorLookup = useMemo(
-    () => (key: string) => {
-      const entry = catalog[key];
-      return entry ? { name: entry.label, logo: entry.logo } : null;
-    },
-    [catalog],
-  );
-
-  const byAccount = useMemo(
-    () =>
-      new Map(
-        scopedSnapshotsNow.map((s) => [
-          s.accountId,
-          { snapshot: { takenAt: s.takenAt }, balances: s.balances },
-        ]),
-      ),
-    [scopedSnapshotsNow],
-  );
-
-  const chainIds = useMemo(
-    () => overviewChainIds(scopedAccounts, byAccount, connectorLookup),
-    [scopedAccounts, byAccount, connectorLookup],
   );
 
   const { data: platformMetaData } = useSuspenseQuery(platformMetaQuery(chainIds));
 
   return useMemo(
     () =>
-      portfolioOverviewFromAtoms({
-        accounts: scopedAccounts,
-        snapshotsNow: scopedSnapshotsNow,
-        snapshotsPrev: scopedSnapshotsPrev,
-        enriched: new Map(enrichment.enriched),
-        mode: settings.valuationMode,
-        platformMeta: platformMetaData.platformMeta,
-        connectorMeta,
-        fiatRefs: fiatRefsData.fiatRefs,
-        now,
-      }),
+      portfolioOverviewFromAtoms(
+        {
+          accounts: scopedAccounts,
+          snapshotsNow: scopedSnapshotsNow,
+          snapshotsPrev: scopedSnapshotsPrev,
+          enriched: new Map(enrichment.enriched),
+          mode: settings.valuationMode,
+          platformMeta: platformMetaData.platformMeta,
+          connectorMeta,
+          fiatRefs: fiatRefsData.fiatRefs,
+          now,
+        },
+        // pending 判定用真墙钟;`now`(floored 锚点)只喂快照 key。每次 memo 重算取新的 Date.now(),
+        // 阈值就不会被 hour-floor 低估最多 ~1 小时(见 isFirstSyncPending)。
+        Date.now(),
+      ),
     [
       scopedAccounts,
       scopedSnapshotsNow,
@@ -199,33 +183,9 @@ export function usePortfolioSnapshotAtoms(portfolioId: string) {
 
   const activeAccounts = useMemo(() => accounts.filter((a) => a.archivedAt == null), [accounts]);
 
-  const connectorMeta = useMemo(
-    () => connectorMetaForOverview(activeAccounts, snapshotsNow, catalog),
+  const { connectorMeta, chainIds } = useMemo(
+    () => overviewConnectorInputs(activeAccounts, snapshotsNow, catalog),
     [activeAccounts, snapshotsNow, catalog],
-  );
-
-  const connectorLookup = useMemo(
-    () => (key: string) => {
-      const entry = catalog[key];
-      return entry ? { name: entry.label, logo: entry.logo } : null;
-    },
-    [catalog],
-  );
-
-  const byAccount = useMemo(
-    () =>
-      new Map(
-        snapshotsNow.map((s) => [
-          s.accountId,
-          { snapshot: { takenAt: s.takenAt }, balances: s.balances },
-        ]),
-      ),
-    [snapshotsNow],
-  );
-
-  const chainIds = useMemo(
-    () => overviewChainIds(activeAccounts, byAccount, connectorLookup),
-    [activeAccounts, byAccount, connectorLookup],
   );
 
   const { data: platformMetaData } = useSuspenseQuery(platformMetaQuery(chainIds));
@@ -275,18 +235,11 @@ export async function fetchPortfolioSnapshotAtoms(
       queryClient.fetchQuery(fiatRefsQuery(portfolioId)),
     ]);
   const activeAccounts = accounts.filter((a) => a.archivedAt == null);
-  const connectorMeta = connectorMetaForOverview(activeAccounts, snapshotsNow, catalog);
-  const connectorLookup = (key: string) => {
-    const entry = catalog[key];
-    return entry ? { name: entry.label, logo: entry.logo } : null;
-  };
-  const byAccount = new Map(
-    snapshotsNow.map((s) => [
-      s.accountId,
-      { snapshot: { takenAt: s.takenAt }, balances: s.balances },
-    ]),
+  const { connectorMeta, chainIds } = overviewConnectorInputs(
+    activeAccounts,
+    snapshotsNow,
+    catalog,
   );
-  const chainIds = overviewChainIds(activeAccounts, byAccount, connectorLookup);
   const platformMetaData = await queryClient.fetchQuery(platformMetaQuery(chainIds));
   return assemblePortfolioSnapshotData({
     accounts: activeAccounts,

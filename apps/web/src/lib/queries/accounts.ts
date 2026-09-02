@@ -4,7 +4,7 @@ import type { AccountHoldingsView } from "@/lib/core/portfolio";
 import { getAccountHistory, listAccounts } from "@/lib/server/accounts";
 import { getTokenValueHistory } from "@/lib/server/holdings";
 import { getManualAccount } from "@/lib/server/manual-tokens";
-import { STALE_TIME } from "./constants";
+import { RETRY, STALE_TIME, shouldRetry } from "./constants";
 import { accountKeys } from "./keys";
 
 // 账户域的读取入口 —— 与 `lib/server/accounts` / `holdings` / `manual-tokens` 对应。
@@ -24,6 +24,11 @@ export const accountListQuery = (portfolioId: string) =>
     queryKey: accountKeys.list(portfolioId),
     queryFn: () => listAccounts({ data: { portfolioId } }),
     staleTime: STALE_TIME.live,
+    // **外壳赖以存在的读,永不认命重试**(FOL-58 回归修复):页头同步胶囊 `useSyncStatus` 在
+    // `ShellWithSync`——任何 island 边界之外——suspend 在这条(+ 快照 `now`)上。默认 5 次失败后
+    // react-query 会抛,整个 authed 壳掀进 `StalledShell`,而那里的 `reset` 救不回来(见
+    // constants.ts `RETRY.forever` 说明)。老 `syncStatusQuery` 就是靠 forever 兜的,收口后这条得接上。
+    retry: (failureCount, error) => shouldRetry(failureCount, error, RETRY.forever),
   });
 
 /** 一份账户列表行的形状(含该组合的归档账户、归属与凭据投影)。 */

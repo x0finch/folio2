@@ -52,7 +52,12 @@ export const REFRESH_MAP = {
   /**
    * 账户与手记资产的增删改:新建 / 更新 / 归档 / 删除账户、替换凭据,以及手记代币与手记活动的增删改。
    *
-   * 账户行本身 + 同步轮次(页头摘要) + dataStats + 手记法币身份。快照要等下一轮同步才变,这里不刷。
+   * 账户行本身 + 同步轮次(页头摘要) + dataStats + 手记法币身份。
+   *
+   * **快照也要刷**:手记账户从不同步(ADR 0018),它的余额是 `getSnapshots` 读时经
+   * `injectManualSnapshots` 现算的 —— 不像链上/CEX 账户要等下一轮同步才落库。所以在
+   * manual-tokens-panel 改/加/删手记持仓(走的正是 `account.write`)后不刷快照的话,首页总额、
+   * 账户页那一行、insights 分布图都会停在旧数,纯手记组合更是永远没有可同步账户来带一把。
    */
   "account.write": [
     accountKeys.all,
@@ -60,10 +65,11 @@ export const REFRESH_MAP = {
     settingsKeys.dataStats(),
     portfolioKeys.fiatRefsPrefix(),
     tokenKeys.enrichment(),
+    portfolioKeys.snapshotsPrefix(),
   ],
 
   /**
-   * 归档 / 解归档:封存快照(manual) + 解 pin —— 除 `account.write` 外还要刷快照与 tab 条。
+   * 归档 / 解归档:封存快照(manual) + 解 pin —— 在 `account.write` 那批之上再多刷一条 tab 条。
    */
   "account.archive": [
     accountKeys.all,
