@@ -1,4 +1,5 @@
 import { cn, Skeleton } from "@folio/ui";
+import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AmountTicker } from "@/components/amount-ticker";
 import { signedUsd } from "@/lib/core/format-number";
@@ -14,8 +15,10 @@ import { TrendPanel } from "./trend-panel";
 const DAY_MS = 86_400_000;
 // hero 趋势最多展示最近 30 天;更长跨度 + 区间切换属于 Insights(不改共享的 getPortfolioHistory)。
 const HERO_WINDOW_DAYS = 30;
+// hero 净值 ≥ 此额才启用缩写(小于则本来就放得下、缩写没意义)。
+const HERO_COMPACT_MIN = 1_000_000;
 const GAIN_BADGE =
-  "inline-flex items-center rounded-full px-2 py-0.5 font-mono font-semibold text-xs tabular-nums";
+  "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 font-mono font-semibold text-xs tabular-nums";
 const GAIN_TONE = {
   flat: "bg-muted text-muted-foreground",
   pos: "bg-pos-bg text-pos",
@@ -28,14 +31,28 @@ function gainTone(amount: number) {
   return GAIN_TONE.flat;
 }
 
+// 窄屏(< sm=640):hero 默认用紧凑金额,给「缩写 + 涨跌幅同行」腾地方;桌面默认完整。
+// 只决定**默认**态,用户点击总额后由 compactOverride 接管。
+function useIsNarrow() {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return narrow;
+}
+
 // 24h 盈亏药丸:贴在净值数字右上角。文案与代币行同形(`{±}$Δ P%`),底色走涨跌 token。
 // **盈亏 FOL-51 起随总览一起到,没有「还在取」的态** —— 只剩两态:算得出(数)/ 算不出(`—`)。
-function GainBadge({ gain }: { gain: Gain | null }) {
+function GainBadge({ gain, compact = false }: { gain: Gain | null; compact?: boolean }) {
   const usd = useDisplayValue();
   if (gain == null) return <span className={cn(GAIN_BADGE, GAIN_TONE.flat)}>{NO_VALUE}</span>;
   return (
     <span className={cn(GAIN_BADGE, gainTone(gain.amount))}>
-      {signedUsd(usd, gain.amount)}
+      {signedUsd((n) => usd(n, { compact }), gain.amount)}
       {gain.pct != null && ` ${Math.abs(gain.pct).toFixed(2)}%`}
     </span>
   );
@@ -96,6 +113,12 @@ export function PortfolioHero({
   // 大数字显示的是**划到的那个点,或者实时值** —— 同一个位置、同一套元素(#470 片7)。
   const shownUsd = scrub.point ? scrub.point.total : totalUsd;
 
+  // 紧凑金额:窄屏默认开(给「缩写 + 涨跌幅同行」腾地)、桌面默认关;点击总额后由 override 接管。
+  // 只在净值 ≥ HERO_COMPACT_MIN 时才真正缩写 —— 小额放得下、缩写没意义。总额与 badge 共用它。
+  const isNarrow = useIsNarrow();
+  const [compactOverride, setCompactOverride] = useState<boolean | null>(null);
+  const showCompact = (compactOverride ?? isNarrow) && shownUsd >= HERO_COMPACT_MIN;
+
   return (
     <div className="relative min-h-60 overflow-hidden pt-1">
       {/* 四态(点数不够 / 还在取数 / 什么都还没有 / 真有数据)全在 TrendPanel 里判。
@@ -118,10 +141,17 @@ export function PortfolioHero({
         </p>
         {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。
             inline-flex + items-start:24h 增量贴在金额盒子的右上角,不跟数字基线居中。 */}
-        <div className="mt-2 inline-flex items-start gap-3">
+        <div className="mt-2 inline-flex flex-wrap items-start gap-3">
           {/* select-text:总净值是最该能复制的那个数。滚动与「整数/小数怎么拆」走 AmountTicker
               (两个抽屉同一份);hero 的字号在这里给 —— 它比抽屉大两档。 */}
-          <div className="flex select-text items-baseline">
+          {/* 点击总额切换缩写↔完整(pointer-events-auto 覆盖数字层的 none):金额 ≥ $1M 时缩写省地、
+              涨跌幅同行,再点回完整。数字区在图上半、非划动区,吃指针不影响趋势 scrub。 */}
+          <button
+            type="button"
+            onClick={() => setCompactOverride((v) => !(v ?? isNarrow))}
+            aria-label={showCompact ? "显示完整金额" : "显示缩写金额"}
+            className="pointer-events-auto flex w-fit cursor-pointer select-text items-baseline text-left"
+          >
             {syncing ? (
               // 首次同步中:大数字位摆骨架,别把「还不知道」画成 $0(见 index.tsx 的 pending 判据)。
               <Skeleton className="h-11 w-52 rounded-lg sm:h-14 sm:w-64" />
@@ -129,13 +159,14 @@ export function PortfolioHero({
               <AmountTicker
                 value={shownUsd}
                 scrubbing={scrub.point != null}
+                compact={showCompact}
                 className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
                 fractionClassName="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl"
               />
             )}
-          </div>
+          </button>
           {/* 划动时不显 24h 药丸:那是「今天涨跌」,摆在一个历史时刻的数值旁边是两件事对不上。 */}
-          {scrub.point ? null : <GainBadge gain={gain24h} />}
+          {scrub.point ? null : <GainBadge gain={gain24h} compact={showCompact} />}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-8">

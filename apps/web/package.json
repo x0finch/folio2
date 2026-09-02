@@ -44,6 +44,7 @@
     "@fontsource-variable/newsreader": "^5.2.10",
     "@logtape/logtape": "^2.2.1",
     "@logtape/pretty": "^2.2.1",
+    "@simplewebauthn/browser": "^13.3.0",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-query": "^5.101.1",
