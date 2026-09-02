@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
@@ -39,7 +40,28 @@ function localHttps() {
   }
 }
 
+// 构建期注入版本信息(设置页底部展示,便于比对线上跑的是哪份代码)。git 不可用时退回 GITHUB_SHA / 占位;
+// CI 的浅克隆可能没有 tag,git describe 会自然退回 commit(--always)。
+function buildInfo() {
+  const sh = (cmd: string) => {
+    try {
+      return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    } catch {
+      return "";
+    }
+  };
+  const commit = (process.env.GITHUB_SHA || sh("git rev-parse HEAD")).slice(0, 7) || "unknown";
+  const version = sh("git describe --tags --always --dirty") || commit;
+  return { commit, version, builtAt: new Date().toISOString() };
+}
+const build = buildInfo();
+
 const config = defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(build.version),
+    __COMMIT_HASH__: JSON.stringify(build.commit),
+    __BUILD_TIME__: JSON.stringify(build.builtAt),
+  },
   resolve: { tsconfigPaths: true },
   server: { allowedHosts },
   // preview 也要:`dev:tunnel --preview` 跑的是构建产物。

@@ -22,6 +22,9 @@ export function Settings() {
       <ProviderKeysCard />
       <ValuationCard />
       <DataCard />
+      <p className="pt-2 text-center font-mono text-muted-foreground text-xs">
+        {__APP_VERSION__} · {__COMMIT_HASH__} · {__BUILD_TIME__.slice(0, 10)}
+      </p>
     </div>
   );
 }
