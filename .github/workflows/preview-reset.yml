@@ -1,0 +1,60 @@
+name: Preview DB Reset
+
+# 手动重建共享的 preview 库(方案 B 的兜底)。平时不用 —— 只有当某个 destructive 迁移
+# (删列/改列)把 preview 弄崩、schema 漂移到回不去时,手动跑一次。会**清空 preview 库的所有
+# 数据**(账户/快照/登录态全没),然后按当前 main 的 drizzle/ 全量重新迁移。
+#
+# ⚠️ 只碰 `folio-preview`(env.preview),**永远不碰生产 `folio`**。
+#
+# ⚠️ 首次运行前请留意:下面 drop-all 的 SQL/jq 尚未在真 D1 上验证过(见 DEPLOY.md「PR preview」)。
+#    第一次跑请盯着日志确认 drop 段没报错(FK / PRAGMA 行为);若 wrangler --json 输出被 banner
+#    污染导致 jq 解析失败,按 DEPLOY.md 的手动兜底(delete + create)处理。
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: '输入 RESET 确认要清空 preview 库'
+        required: true
+        default: ''
+
+jobs:
+  reset:
+    if: github.event.inputs.confirm == 'RESET'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      # 1) 查出所有业务表(排除 sqlite_ 内部表和 D1 的 _cf_ 表);d1_migrations 也一并 drop,
+      #    这样下一步全量迁移会从零重跑。
+      - name: Drop all tables in preview DB
+        run: |
+          set -o pipefail
+          raw=$(pnpm exec wrangler d1 execute folio-preview --remote --env preview --json \
+            --command "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'")
+          echo "$raw"
+          tables=$(printf '%s' "$raw" | jq -r '.[0].results[].name')
+          if [ -z "$tables" ]; then
+            echo "no tables to drop — preview DB already empty"; exit 0
+          fi
+          # 一个 execute 里关掉 FK 再逐个 drop,避开父子表删除顺序问题。
+          { echo "PRAGMA foreign_keys=OFF;";
+            for t in $tables; do echo "DROP TABLE IF EXISTS \"$t\";"; done;
+          } > /tmp/reset.sql
+          cat /tmp/reset.sql
+          pnpm exec wrangler d1 execute folio-preview --remote --env preview --file /tmp/reset.sql
+
+      # 2) 全量重新迁移(空库 → 按 drizzle/ 建全部表)。
+      - name: Re-apply all migrations
+        run: pnpm run db:migrate:preview

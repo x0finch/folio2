@@ -71,6 +71,36 @@
         }
       ],
       "observability": { "enabled": true, "head_sampling_rate": 1 }
+    },
+
+    // PR preview 环境(见 .github/workflows/pr-preview.yml + DEPLOY.md「PR preview」一节)。
+    // 用 `--env preview` 部署到一个**独立的** Worker `folio-preview`(name 继承顶层 `folio` +
+    // env 后缀),URL 固定为 https://folio-preview.<你的子域>.workers.dev —— **生产 Worker
+    // `folio` 完全不受影响**,不是它的一个 version,是另一个 Worker。
+    //
+    // 所有 PR **共用**这一个 preview Worker + 下面这个 `folio-preview` 远程库(方案 B:常驻累积)。
+    // 后 push 的 PR 覆盖前一个的活跃版本;pr-preview.yml 用 concurrency 串行化兜底。
+    // 库平时不清、保留数据/登录态;只有极少数 destructive 迁移把某个 preview 弄崩时,手动跑
+    // preview-reset.yml 重建一次(那次数据丢)。
+    //
+    // ⚠️ **不带 triggers** —— preview 不需要 cron(不跑定时刷表/同步,免得偷打上游)。
+    // 顶层配置在 env 里不继承,所以绑定/vars 要原样重列。
+    // BETTER_AUTH_URL / SECRETS_KEY / BETTER_AUTH_SECRET / COINSTATS_API_KEY 这些密钥由
+    // `wrangler secret put --env preview` 一次性设在 `folio-preview` Worker 上(见 DEPLOY.md),
+    // CI 不碰。BETTER_AUTH_URL 设成上面那个固定 preview URL,better-auth 因而同源、无需改动。
+    "preview": {
+      "vars": { "LOG_LEVEL": "info" },
+      "cache": { "enabled": true },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "folio-preview",
+          // `wrangler d1 create folio-preview` 得到的真实 id,粘到这里(见 DEPLOY.md)。
+          "database_id": "REPLACE_WITH_folio-preview_DATABASE_ID",
+          "migrations_dir": "../../packages/db/drizzle"
+        }
+      ],
+      "observability": { "enabled": true, "head_sampling_rate": 1 }
     }
   }
 }
