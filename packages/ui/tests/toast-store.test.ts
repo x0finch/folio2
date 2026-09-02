@@ -36,6 +36,33 @@ describe("toast store", () => {
     expect(__toastStore.snapshot()).toHaveLength(3);
   });
 
+  it("透传 action / description(带按钮的 toast)", () => {
+    const onClick = () => {};
+    const id = toast.message("有新版本", {
+      id: "sw-update",
+      description: "点更新加载最新版",
+      action: { label: "更新", onClick },
+    });
+    const snap = __toastStore.snapshot();
+    expect(id).toBe("sw-update");
+    expect(snap).toHaveLength(1);
+    expect(snap[0]).toMatchObject({ title: "有新版本", description: "点更新加载最新版" });
+    expect(snap[0].action?.label).toBe("更新");
+    expect(snap[0].action?.onClick).toBe(onClick);
+  });
+
+  it("透传 duration(0 = 常驻,覆盖终态默认时长)", () => {
+    toast.message("常驻", { id: "keep", duration: 0 });
+    expect(__toastStore.snapshot()[0].duration).toBe(0);
+  });
+
+  it("不传 action/description 时字段为 undefined(现有调用点零改动)", () => {
+    toast.success("ok");
+    const t = __toastStore.snapshot()[0];
+    expect(t.action).toBeUndefined();
+    expect(t.description).toBeUndefined();
+  });
+
   it("dismiss(id) 移除该条", () => {
     const id = toast.loading("a");
     toast.success("b");

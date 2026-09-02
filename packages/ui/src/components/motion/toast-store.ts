@@ -3,7 +3,7 @@
 // state 存 module 级 external store,故可在任意事件处理里命令式调用。
 
 import type { ReactNode } from "react";
-import type { AnimatedToast, ToastStatus } from "./animated-toast-stack";
+import type { AnimatedToast, AnimatedToastAction, ToastStatus } from "./animated-toast-stack";
 
 const DEFAULT_DURATION = 4200;
 
@@ -45,22 +45,40 @@ export function remove(id: string) {
   }
 }
 
-type ToastOpts = { id?: string };
+// 渲染层(renderToast / AnimatedToastStack)一直支持 action / description / 自定时长 / 不可关,
+// 只是这个命令式出口先前没把它们透传 —— 于是「带按钮的 toast」根本发不出来。补齐:
+//   · action —— 行内按钮({label,onClick}),给「有新版本 → 更新」这类需要一步操作的 toast。
+//   · duration —— 覆盖按状态定的默认时长;传 0 = 常驻(不自动消失,直到用户关或代码 dismiss)。
+//   · dismissible —— 默认 true;显式 false 去掉关闭按钮(接管态才该用,慎用)。
+type ToastOpts = {
+  id?: string;
+  description?: ReactNode;
+  action?: AnimatedToastAction;
+  /** 覆盖默认时长(毫秒);`0` = 常驻,不自动消失。 */
+  duration?: number;
+  dismissible?: boolean;
+};
 
 // loading 持久(duration 0,直到被更新为终态);success/error/neutral 走默认时长自动消失。
+// opts.duration 若给出则覆盖上面这条默认(含传 0 让终态 toast 也常驻)。
 function upsert(status: ToastStatus, title: ReactNode, opts?: ToastOpts): string {
-  const duration = status === "loading" ? 0 : DEFAULT_DURATION;
-  const givenId = opts?.id;
+  const duration = opts?.duration ?? (status === "loading" ? 0 : DEFAULT_DURATION);
+  const { id: givenId, description, action, dismissible = true } = opts ?? {};
 
   if (givenId && toasts.some((t) => t.id === givenId)) {
-    toasts = toasts.map((t) => (t.id === givenId ? { ...t, status, title, duration } : t));
+    toasts = toasts.map((t) =>
+      t.id === givenId ? { ...t, status, title, duration, description, action, dismissible } : t,
+    );
     schedule(givenId, duration);
     emit();
     return givenId;
   }
 
   const id = givenId ?? `toast-${Date.now()}-${seq++}`;
-  toasts = [...toasts, { id, title, status, duration, dismissible: true, createdAt: Date.now() }];
+  toasts = [
+    ...toasts,
+    { id, title, status, duration, description, action, dismissible, createdAt: Date.now() },
+  ];
   schedule(id, duration);
   emit();
   return id;
