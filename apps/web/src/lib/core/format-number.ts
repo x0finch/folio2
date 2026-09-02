@@ -104,20 +104,15 @@ const currencyFormatter = (
   locale: string,
   currency: string,
   compact: boolean,
-  compactFractionDigits = 2,
 ): Intl.NumberFormat => {
-  const key = `${locale}|${currency}|${compact ? `c${compactFractionDigits}` : "s"}`;
+  const key = `${locale}|${currency}|${compact ? "c" : "s"}`;
   let f = currencyFormatters.get(key);
   if (!f) {
     f = new Intl.NumberFormat(locale, {
       style: "currency",
       currency,
       ...(compact
-        ? {
-            notation: "compact",
-            compactDisplay: "short",
-            maximumFractionDigits: compactFractionDigits,
-          }
+        ? { notation: "compact", compactDisplay: "short", maximumFractionDigits: 2 }
         : {}),
     });
     currencyFormatters.set(key, f);
@@ -162,15 +157,7 @@ export const formatMoney = (
     locale = "en-US",
     currency,
     compact,
-    compactFractionDigits,
-  }: {
-    rate?: number;
-    locale?: string;
-    currency: Currency;
-    compact?: boolean;
-    // 紧凑记法的小数位。默认 2(如 `$44.77M`);hero 缩写传 0 求最短(`$45M`/`¥3亿`/`US$4477万`)。
-    compactFractionDigits?: number;
-  },
+  }: { rate?: number; locale?: string; currency: Currency; compact?: boolean },
 ): string => {
   const converted = value / rate;
 
@@ -186,9 +173,7 @@ export const formatMoney = (
   if (isTiny(converted)) return formatTinyCurrency(converted, { locale, currency: currency.code });
   // compact 未显式给时,≥1e8 自动紧凑;图表轴可显式传 true 缩短标签。
   const useCompact = compact ?? Math.abs(converted) >= COMPACT_THRESHOLD;
-  return currencyFormatter(locale, currency.code, useCompact, compactFractionDigits).format(
-    converted,
-  );
+  return currencyFormatter(locale, currency.code, useCompact).format(converted);
 };
 
 // 单前置符号金额:`{+|−}usd(|v|)`(真负号 U+2212),零值无符号。
