@@ -8,7 +8,9 @@ import { IntlProvider } from "use-intl";
 import { applyStoredTheme, THEME_INIT_SCRIPT } from "@/lib/hooks/use-theme";
 import { messages } from "@/lib/i18n/messages";
 import { localePreferenceQuery } from "@/lib/queries/preferences";
-import { THEME_COLORS } from "./pwa-head";
+import appCss from "@/styles.css?url";
+import { appCssLoaderScript, SPLASH_STYLE, THEME_COLORS } from "./pwa-head";
+import { SplashScreen } from "./splash";
 
 // 从 __root 的 loader 读 now(getRouteApi 免于反向 import Route 造成环)。
 const rootRoute = getRouteApi("__root__");
@@ -74,6 +76,16 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
         {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/hooks/use-theme)。 */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* 冷启动闪屏的关键样式(ADR 0051):内联,不依赖 app 样式表,首帧即可画覆盖层。 */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量样式,无用户输入 */}
+        <style dangerouslySetInnerHTML={{ __html: SPLASH_STYLE }} />
+        {/* app 样式表**非渲染阻塞**:脚本注入 link(不阻塞首帧),让内联的 splash 样式先画。 */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,href 来自构建期资产 URL */}
+        <script dangerouslySetInnerHTML={{ __html: appCssLoaderScript(appCss) }} />
+        {/* 无 JS 兜底:照常阻塞加载 app 样式表。 */}
+        <noscript>
+          <link rel="stylesheet" href={appCss} />
+        </noscript>
       </head>
       <body>
         <IntlProvider
@@ -86,6 +98,8 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
         >
           {children}
           <AppToaster />
+          {/* 冷启动闪屏(ADR 0051):住 IntlProvider 内取阶段文案;fixed 覆盖层盖住一切,就绪后自卸载。 */}
+          <SplashScreen />
         </IntlProvider>
         <TanStackDevtools
           config={{

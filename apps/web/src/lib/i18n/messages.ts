@@ -37,6 +37,11 @@ const en = {
   Shell: {
     stalled: "Can't reach the server. Retrying…",
   },
+  Splash: {
+    preparing: "Preparing…",
+    loading: "Loading…",
+    updating: "Updating…",
+  },
   PageHeader: {
     overviewSub: "Live portfolio across {count, plural, one {# source} other {# sources}}",
     accountsSub: "Manage your data sources",
@@ -446,6 +451,11 @@ const zh: Messages = {
   },
   Shell: {
     stalled: "连不上服务器,正在重试…",
+  },
+  Splash: {
+    preparing: "准备中…",
+    loading: "加载中…",
+    updating: "更新中…",
   },
   PageHeader: {
     overviewSub: "跨 {count} 个来源的实时组合",
