@@ -75,6 +75,31 @@ input:-webkit-autofill:focus {
   }
 }
 
+/* Tab 切换的转场:浏览器原生 View Transitions 的交叉淡入(触发在外壳里那四个 tab 链接的
+   `viewTransition` 上,见 app-shell.tsx)。**只让内容区 <main> 参与**:给它一个 view-transition-name,
+   浏览器就把它从根快照里拎出来单独成组、交叉淡入;根(侧栏/顶栏/Dock)瞬切不淡 —— 它们各 tab 相同,
+   淡它没意义,还会跟 Dock 的滑动药丸抢。为什么用原生而非 motion:TanStack 的 <Outlet/> 恒渲染当前路由,
+   motion 留不住旧页,只能「新页淡入」而必有一帧空内容区(真机上就是「闪一下」);View Transitions 给旧 DOM
+   拍快照再交叉淡入,没有空帧。不支持的浏览器(旧 Firefox 等)自动降级为瞬切,无动画、不报错。 */
+main {
+  view-transition-name: page-main;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-old(page-main),
+::view-transition-new(page-main) {
+  animation-duration: 180ms;
+  animation-timing-function: var(--motion-ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(page-main),
+  ::view-transition-new(page-main) {
+    animation-duration: 1ms;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

@@ -105,6 +105,9 @@ export function AppShell({
               <Link
                 key={key}
                 to={to}
+                // Tab 切换用浏览器原生 View Transitions 交叉淡入内容区(样式见 styles.css)。
+                // 只挂在这四个 tab 链接上 —— tab 内深层导航、`?portfolio=` 变化不该转场。
+                viewTransition
                 aria-current={isActive(to) ? "page" : undefined}
                 className={cn(
                   "block rounded-lg px-3 py-2 font-medium text-sm transition-colors",
@@ -164,6 +167,8 @@ export function AppShell({
               <Link
                 to={to}
                 aria-label={t(key)}
+                // Tab 切换的交叉淡入(与侧栏同款,见 styles.css)。
+                viewTransition
                 // iOS Safari 只在元素(或祖先)挂了触摸监听时才给 `:active` —— 这个空监听就是那把钥匙,
                 // 是这条路子公认的代价。**别删**:删了 iOS 上按下就完全没反应(桌面照旧有)。
                 onTouchStart={NOOP}

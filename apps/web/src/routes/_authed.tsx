@@ -1,4 +1,3 @@
-import { EASE_OUT } from "@folio/ui/lib/ease";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
@@ -6,9 +5,7 @@ import {
   Outlet,
   redirect,
   retainSearchParams,
-  useRouterState,
 } from "@tanstack/react-router";
-import { motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { z } from "zod";
@@ -149,34 +146,6 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
   );
 }
 
-// 四个 tab 切换的转场:换 tab 时内容区**淡入**,外壳(顶栏/Dock)不动。
-//
-// **enter-only(只做进入、不做退场)**:换 tab 时旧页直接卸载、新页从透明淡入 —— 靠 `key` 变化让
-// React 重挂载 motion.div,`initial → animate` 每次挂载都重放,不需要 `AnimatePresence`。
-// 为什么不做退场:TanStack 的 `<Outlet/>` 永远渲染当前路由,`AnimatePresence` 的退场拷贝拿到的是
-// **新页**而非旧页,「退场」根本不是旧页那份;再叠 `mode="wait"`(先把这份假退场演完才进新页)会和
-// 「_authed 整树 ssr:false + 每页 Suspense」的挂载时序打架 —— **iOS Safari 上实测表现为「旧页闪一下、
-// 瞬间切到新页」,淡入整个丢失**。去掉退场与 wait,只留入场淡入,时序最简、跨引擎一致。
-//
-// 按**顶层 tab** 做 key:只有换 tab 才重放;tab 内深层导航、`?portfolio=` 变化不触发(pathname 首段不变)。
-// **只做 opacity、不做位移**:位移要靠 `transform`,而带 transform 的元素会成为其 absolute 后代的包含块 ——
-// 页面内的同步入口 `<HeaderSync/>` 是 absolute 定位的,基准一换就「同步栏跳动」(Chromium 实测 24px)。
-// `prefers-reduced-motion` 只是更快。
-function PageTransition({ children }: { children: ReactNode }) {
-  const tab = useRouterState({ select: (s) => s.location.pathname.split("/")[1] ?? "" });
-  const reduce = useReducedMotion();
-  return (
-    <motion.div
-      key={tab}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: reduce ? 0.12 : 0.18, ease: EASE_OUT }}
-    >
-      {children}
-    </motion.div>
-  );
-}
-
 function AuthedLayout() {
   const { user } = Route.useRouteContext();
   const { data: preferCurrency } = useSuspenseQuery(currencyPreferenceQuery());
@@ -188,9 +157,13 @@ function AuthedLayout() {
         {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
         <LockScreen>
           <ShellWithSync userName={user.name || user.email || ""}>
-            <PageTransition>
-              <Outlet />
-            </PageTransition>
+            {/* Tab 切换的转场交给浏览器原生 View Transitions(交叉淡入):触发在导航侧 ——
+                外壳里那四个 tab 链接带 `viewTransition`;淡入的样式与范围在 styles.css 的
+                `::view-transition-*(page-main)`。为什么不在这里用 motion 包一层:TanStack 的
+                `<Outlet/>` 永远渲染当前路由,motion 留不住旧页那一份,只能做「新页淡入」——
+                而那必有一帧内容区是空的(旧页已卸载、新页还透明),真机上就是「闪一下」。
+                View Transitions 由浏览器给旧 DOM 拍快照再交叉淡入,没有空帧。 */}
+            <Outlet />
           </ShellWithSync>
         </LockScreen>
       </PortfolioProvider>
