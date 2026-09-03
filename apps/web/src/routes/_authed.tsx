@@ -8,7 +8,7 @@ import {
   retainSearchParams,
   useRouterState,
 } from "@tanstack/react-router";
-import { motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { z } from "zod";
@@ -154,23 +154,29 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
 //
 // **enter-only(不做退场)**:TanStack 的 `<Outlet/>` 永远渲染当前路由,想做真交叉溶解得冻结旧 match、
 // 得不偿失;新页淡入上抬已够顺,且不和「_authed 整树 ssr:false + 每页 Suspense」打架(无双挂载)。
-// **纯淡入、不做位移**:曾试过「淡入 + 微上抬」,但位移要靠 `transform`,而带 transform 的元素会成为其
-// absolute/fixed 后代的**包含块** —— 页面里的同步入口 `<HeaderSync/>` 是 absolute 定位到外壳的,转场那下
-// 它的定位基准被换、位置偏移,动画结束又换回去 → 「同步栏跳动」(Chromium 实测跳 24px)。opacity 不产生
-// transform,没有这个副作用,同步栏稳稳不动。`prefers-reduced-motion` 也一样只淡入(opacity 不触前庭),
-// 只是更快一点。
+// 换 tab 时内容区转场,用 motion 的 `AnimatePresence`(与仓库其它动效一致)。按顶层 tab 做 key —
+// 只有换 tab 才触发;tab 内深层导航、`?portfolio=` 变化不动(pathname 首段不变)。
+//
+// **只做 opacity、不做位移**:位移要靠 `transform`,而带 transform 的元素会成为其 absolute/fixed 后代的
+// 包含块 —— 页面里的同步入口 `<HeaderSync/>` 是 absolute 定位到外壳的,转场那下定位基准被换 →「同步栏跳动」
+// (Chromium 实测 24px)。opacity 无 transform,同步栏稳住。`mode="wait"` 让旧页先退场再进新页(TanStack 的
+// `<Outlet/>` 恒渲染当前路由,退场拷贝拿到的是新页 → 只能「淡出再淡入」,不是真交叉溶解);`initial={false}`
+// 免首次加载也淡一下。`prefers-reduced-motion` 只是更快。
 function PageTransition({ children }: { children: ReactNode }) {
   const tab = useRouterState({ select: (s) => s.location.pathname.split("/")[1] ?? "" });
   const reduce = useReducedMotion();
   return (
-    <motion.div
-      key={tab}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: reduce ? 0.15 : 0.28, ease: EASE_OUT }}
-    >
-      {children}
-    </motion.div>
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={tab}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: reduce ? 0.12 : 0.18, ease: EASE_OUT }}
+      >
+        {children}
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
