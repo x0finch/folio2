@@ -16,8 +16,11 @@ import { useTranslations } from "use-intl";
 import { IconButton } from "@/components/icon-button";
 import { signOut } from "@/lib/core/auth-client";
 import { clearIdleLockState } from "@/lib/hooks/use-idle-lock";
-import { applyUpdate, checkForUpdate } from "@/lib/pwa/service-worker";
+import { checkForUpdate, showUpdateToast, UPDATE_TOAST_ID } from "@/lib/pwa/service-worker";
 import { SettingRow } from "./setting-row";
+
+// 刷新图标最短旋转时长(ms):让它转一圈,别检查太快时一闪而过。
+const MIN_SPIN_MS = 700;
 
 // 展示版本(构建期 git describe 注入,见 vite.config)。去掉 `-g<hash>` 后缀,只留 `v0.14.0-21`
 // 这样的形状;CI 浅克隆无 tag 时它就是短 hash,原样显示。
@@ -45,17 +48,12 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
     setChecking(true);
     const start = Date.now();
     const found = await checkForUpdate();
-    const rest = 700 - (Date.now() - start);
+    const rest = MIN_SPIN_MS - (Date.now() - start);
     if (rest > 0) await new Promise((r) => setTimeout(r, rest));
     setChecking(false);
-    if (found) {
-      toast.message(tu("available"), {
-        id: "sw-update",
-        action: { label: tu("update"), onClick: () => applyUpdate() },
-      });
-    } else {
-      toast.success(tu("upToDate"), { id: "sw-update" });
-    }
+    // 共用 service-worker 的那处 toast(同 id、同去重),无则「已是最新」。
+    if (found) showUpdateToast({ available: tu("available"), update: tu("update") });
+    else toast.success(tu("upToDate"), { id: UPDATE_TOAST_ID });
   }
   const id = userIdentity(user);
   const secondary = id.secondary.kind === "email" ? id.secondary.value : ts("selfHosted");

@@ -7,7 +7,7 @@ import { updateAction } from "./update-action";
 // sw.js,不探的话长会话里永远发现不了新版(要等下次冷启动 splash 静默换)。
 const UPDATE_POLL_MS = 30 * 60 * 1000;
 // 更新 toast 固定 id:多来源只留一条,不叠。
-const UPDATE_TOAST_ID = "sw-update";
+export const UPDATE_TOAST_ID = "sw-update";
 
 // Service Worker 注册 + 版本更新流的客户端侧(ADR 0051,取代 0027 的「全程静默」)。
 //
@@ -51,7 +51,7 @@ function setAvailable(worker: ServiceWorker | null): void {
  * 点亮 splash「更新中」并让 waiting 新版接管:postMessage SKIP_WAITING → SW skipWaiting →
  * controllerchange → 本页 reload 到新版。设置页 / toast 的「更新」按钮都走这里。
  */
-export function applyUpdate(): void {
+function applyUpdate(): void {
   if (!waitingWorker) return;
   beginUpdating();
   waitingWorker.postMessage({ type: "SKIP_WAITING" });
@@ -166,20 +166,30 @@ export function useSplashUpdating(): boolean {
 }
 
 /**
- * 运行中弹「有新版本 · 更新」toast(会自动消失、可忽略)。**同一个 waiting 版本只弹一次**
- * (按 worker 身份去重),后续定时探到同版本不重复弹;换了更新的版本(新 worker)才再弹。忽略/关掉
- * toast 后设置页那行仍显示「有新版本」,是随时能回去更新的固定入口。挂一次(在 RootDocument 内)。
+ * 弹「有新版本 · 更新」toast —— 运行中自动提示与设置页手动检查**共用这一处**(去重契约「多来源只留
+ * 一条」靠固定 id `UPDATE_TOAST_ID` + 单一构造,不靠两处对齐字符串)。顺手记下已为当前 worker 提示过
+ * (`lastPromptedWorker`),这样手动弹过之后自动路径不会对同一版本再补一发。文案由调用点从 use-intl 取
+ * 好传进来(本模块非 React,不便调 hook)。
+ */
+export function showUpdateToast(labels: { available: string; update: string }): void {
+  lastPromptedWorker = availableWorker;
+  toast.message(labels.available, {
+    id: UPDATE_TOAST_ID,
+    action: { label: labels.update, onClick: () => applyUpdate() },
+  });
+}
+
+/**
+ * 运行中弹「有新版本」toast(会自动消失、可忽略)。**同一个 waiting 版本只弹一次**(按 worker 身份
+ * 去重),后续定时探到同版本不重复弹;换了更新的版本(新 worker)才再弹。忽略/关掉 toast 后设置页那行
+ * 仍能回去更新。挂一次(在 RootDocument 内)。
  */
 export function useUpdateToast(): void {
   const t = useTranslations("Update");
   useEffect(() => {
     const maybePrompt = () => {
       if (!availableWorker || availableWorker === lastPromptedWorker) return;
-      lastPromptedWorker = availableWorker;
-      toast.message(t("available"), {
-        id: UPDATE_TOAST_ID,
-        action: { label: t("update"), onClick: () => applyUpdate() },
-      });
+      showUpdateToast({ available: t("available"), update: t("update") });
     };
     availableListeners.add(maybePrompt);
     maybePrompt(); // 订阅前若已检测到新版,补弹一次
