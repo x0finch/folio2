@@ -46,6 +46,19 @@ export interface RefIndexRow {
   upstreamLocalName: string;
 }
 
+// 复合主键 (chainRef, upstream) —— delete / 游标只认这两列,单独起个名,免得它裸着到处走。
+interface RefKey {
+  chainRef: string;
+  upstream: string;
+}
+
+// 一轮差量写的账:改 / 增 / 删 各几行。`putAll` 返回它,`warm` 与 cron 日志共用同一形状。
+export interface RefIndexDiffCounts {
+  updated: number;
+  inserted: number;
+  deleted: number;
+}
+
 // 复合主键 (chainRef, upstream) 的内存键。upstream 在前 + `|` 作分隔:upstream 是裸命名者、不含 `|`,
 // 第一个 `|` 永远干净地分开两段,拼接零歧义。导出仅供单测构造 `expected`(测试自己拼键会在格式一改时静默失配)。
 // **不用 NUL 字符**:混进源码会让 git/grep 把整个文件当二进制。
@@ -68,9 +81,9 @@ export const refKey = (chainRef: string, upstream: string): string => `${upstrea
 export function diffRefIndexPage(
   expected: Map<string, RefIndexRow>,
   page: readonly RefIndexRow[],
-): { updates: RefIndexRow[]; deletes: { chainRef: string; upstream: string }[] } {
+): { updates: RefIndexRow[]; deletes: RefKey[] } {
   const updates: RefIndexRow[] = [];
-  const deletes: { chainRef: string; upstream: string }[] = [];
+  const deletes: RefKey[] = [];
   for (const row of page) {
     const key = refKey(row.chainRef, row.upstream);
     const want = expected.get(key);
@@ -126,9 +139,7 @@ export const makeGlobalRefIndexStore = Effect.gen(function* () {
   };
 
   // 删一批下架行:每条 `WHERE chain_ref=? AND upstream=?`(2 绑定),按 STATEMENTS_PER_BATCH 成批。
-  const deleteRefRows = (
-    keys: readonly { chainRef: string; upstream: string }[],
-  ): Effect.Effect<void> =>
+  const deleteRefRows = (keys: readonly RefKey[]): Effect.Effect<void> =>
     Effect.forEach(
       chunk(keys, STATEMENTS_PER_BATCH),
       (batch) =>
@@ -218,7 +229,7 @@ export const makeGlobalRefIndexStore = Effect.gen(function* () {
     putAll: (
       rows: readonly TokenRefIndexRow[],
       updatedAt: number,
-    ): Effect.Effect<{ updated: number; inserted: number; deleted: number }> =>
+    ): Effect.Effect<RefIndexDiffCounts> =>
       Effect.gen(function* () {
         const expected = new Map<string, RefIndexRow>();
         for (const r of rows) {
@@ -235,10 +246,10 @@ export const makeGlobalRefIndexStore = Effect.gen(function* () {
 
         const upstreams = [...new Set([...expected.values()].map((r) => r.upstream))];
         const updates: RefIndexRow[] = [];
-        const deletes: { chainRef: string; upstream: string }[] = [];
+        const deletes: RefKey[] = [];
 
         // keyset 分页扫这些 upstream 的现有行(按主键序),逐页 diff。游标是上一页末行的 (chainRef, upstream)。
-        let cursor: { chainRef: string; upstream: string } | null = null;
+        let cursor: RefKey | null = null;
         for (;;) {
           const after = cursor;
           const page: RefIndexRow[] = yield* client.query((db) =>

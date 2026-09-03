@@ -1,5 +1,5 @@
 import type { UpstreamError } from "@folio/client-core";
-import { GlobalDatabase } from "@folio/db";
+import { GlobalDatabase, type RefIndexDiffCounts } from "@folio/db";
 import { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Effect, type Option } from "effect";
 
@@ -30,14 +30,12 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
       return {
         // 拉 → 转换(在 adapter 里)→ 一次整份灌。返回这轮的账,供调用方记日志。
         warm: (): Effect.Effect<
+          // 上游账(rows/失配/跳过)+ 落库差量账(改/增/删,与 store 的 putAll 同一形状)。
           {
             rows: number;
             unmatchedPlatforms: readonly string[];
             skipped: number;
-            updated: number;
-            inserted: number;
-            deleted: number;
-          },
+          } & RefIndexDiffCounts,
           UpstreamError
         > =>
           Effect.gen(function* () {
@@ -63,9 +61,7 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
               rows: result.rows.length,
               unmatchedPlatforms: result.unmatchedPlatforms,
               skipped: result.skipped,
-              updated: counts.updated,
-              inserted: counts.inserted,
-              deleted: counts.deleted,
+              ...counts,
             };
           }),
 
