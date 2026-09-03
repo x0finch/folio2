@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
@@ -23,6 +24,11 @@ import { Route as ApiLogoTokenIdRouteImport } from './routes/api/logo/token/$id'
 import { Route as ApiLogoPlatformKeyRouteImport } from './routes/api/logo/platform/$key'
 import { Route as ApiLogoDefiProtocolRouteImport } from './routes/api/logo/defi/$protocol'
 
+const SpikeRoute = SpikeRouteImport.update({
+  id: '/spike',
+  path: '/spike',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -91,6 +97,7 @@ const ApiLogoDefiProtocolRoute = ApiLogoDefiProtocolRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/login': typeof LoginRoute
+  '/spike': typeof SpikeRoute
   '/accounts': typeof AuthedAccountsRoute
   '/insights': typeof AuthedInsightsRoute
   '/settings': typeof AuthedSettingsRoute
@@ -104,6 +111,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/spike': typeof SpikeRoute
   '/accounts': typeof AuthedAccountsRoute
   '/insights': typeof AuthedInsightsRoute
   '/settings': typeof AuthedSettingsRoute
@@ -120,6 +128,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authed': typeof AuthedRouteWithChildren
   '/login': typeof LoginRoute
+  '/spike': typeof SpikeRoute
   '/_authed/accounts': typeof AuthedAccountsRoute
   '/_authed/insights': typeof AuthedInsightsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
@@ -137,6 +146,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/spike'
     | '/accounts'
     | '/insights'
     | '/settings'
@@ -150,6 +160,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/spike'
     | '/accounts'
     | '/insights'
     | '/settings'
@@ -165,6 +176,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authed'
     | '/login'
+    | '/spike'
     | '/_authed/accounts'
     | '/_authed/insights'
     | '/_authed/settings'
@@ -181,6 +193,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
   LoginRoute: typeof LoginRoute
+  SpikeRoute: typeof SpikeRoute
   ApiExportRoute: typeof ApiExportRoute
   ApiImportRoute: typeof ApiImportRoute
   ApiSyncRoute: typeof ApiSyncRoute
@@ -192,6 +205,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/spike': {
+      id: '/spike'
+      path: '/spike'
+      fullPath: '/spike'
+      preLoaderRoute: typeof SpikeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -306,6 +326,7 @@ const AuthedRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
   LoginRoute: LoginRoute,
+  SpikeRoute: SpikeRoute,
   ApiExportRoute: ApiExportRoute,
   ApiImportRoute: ApiImportRoute,
   ApiSyncRoute: ApiSyncRoute,
