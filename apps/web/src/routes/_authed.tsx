@@ -1,3 +1,4 @@
+import { EASE_OUT } from "@folio/ui/lib/ease";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
@@ -5,8 +6,10 @@ import {
   Outlet,
   redirect,
   retainSearchParams,
+  useRouterState,
 } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { z } from "zod";
 import { AppShell, AppShellSkeleton } from "@/components/app-shell";
@@ -146,6 +149,34 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
   );
 }
 
+// 四个 tab 切换的转场:内容区**轻淡入 + 微上抬**,外壳(顶栏/Dock)不动。按**顶层 tab** 做 key —
+// 只有换 tab 才重放;tab 内深层导航、`?portfolio=` 变化不动(pathname 首段不变)。
+//
+// **enter-only(不做退场)**:TanStack 的 `<Outlet/>` 永远渲染当前路由,想做真交叉溶解得冻结旧 match、
+// 得不偿失;新页淡入上抬已够顺,且不和「_authed 整树 ssr:false + 每页 Suspense」打架(无双挂载)。
+// 动画结束**清掉 inline transform** — 否则 `translateY(0)` 也会成为 fixed 后代的包含块,困住页面里的
+// fixed 弹层(MorphingModal `fixed inset-0` 等)。`prefers-reduced-motion` 直接原样渲染、不动。
+function PageTransition({ children }: { children: ReactNode }) {
+  const tab = useRouterState({ select: (s) => s.location.pathname.split("/")[1] ?? "" });
+  const reduce = useReducedMotion();
+  const ref = useRef<HTMLDivElement>(null);
+  if (reduce) return <>{children}</>;
+  return (
+    <motion.div
+      key={tab}
+      ref={ref}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.22, ease: EASE_OUT }}
+      onAnimationComplete={() => {
+        if (ref.current) ref.current.style.transform = "none";
+      }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 function AuthedLayout() {
   const { user } = Route.useRouteContext();
   const { data: preferCurrency } = useSuspenseQuery(currencyPreferenceQuery());
@@ -157,7 +188,9 @@ function AuthedLayout() {
         {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
         <LockScreen>
           <ShellWithSync userName={user.name || user.email || ""}>
-            <Outlet />
+            <PageTransition>
+              <Outlet />
+            </PageTransition>
           </ShellWithSync>
         </LockScreen>
       </PortfolioProvider>
